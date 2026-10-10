@@ -258,6 +258,8 @@ do $$ declare r record; v_err text; begin
     ('exclusions not an array',     format('update tour_catalog_tours set exclusions = ''null'' where id = %L', 'aaaaaaaa-0000-0000-0000-000000000001')),
     ('tour_cities not an array',    format('update tour_catalog_tours set tour_cities = ''true'' where id = %L', 'aaaaaaaa-0000-0000-0000-000000000001')),
     ('itinerary too large',         format('update tour_catalog_tours set itinerary = (select jsonb_agg(md5(g::text) || md5((g * 7)::text)) from generate_series(1, 20000) g) where id = %L', 'aaaaaaaa-0000-0000-0000-000000000001')),
+    ('itinerary large but highly compressible (400 KB of one letter)', format('update tour_catalog_tours set itinerary = jsonb_build_array(repeat(''x'', 400000)) where id = %L', 'aaaaaaaa-0000-0000-0000-000000000001')),
+    ('itinerary one byte over (300001 bytes of text)', format('update tour_catalog_tours set itinerary = jsonb_build_array(repeat(''x'', 299997)) where id = %L', 'aaaaaaaa-0000-0000-0000-000000000001')),
     ('departure price 101',         format('update tour_catalog_departures set price_text_override = repeat(''x'', 101) where id = %L', 'aaaaaaaa-0000-0000-0000-0000000000d1'))
   ) as t(label, stmt) loop
     begin execute r.stmt; v_err := 'no error'; exception when check_violation then v_err := 'check_violation'; when others then v_err := sqlerrm; end;
@@ -280,6 +282,19 @@ do $$ declare r record; v_err text; begin
     select tour_catalog_update_tour('00000000-0000-0000-0000-0000000000a1','aaaaaaaa-0000-0000-0000-000000000001',
       (select updated_at from tour_catalog_tours where id='aaaaaaaa-0000-0000-0000-000000000001'),
       jsonb_build_object('title', repeat('x', 300), 'duration_text', repeat('x', 60), 'single_supplement', repeat('x', 100)), 'a@x')) s;
+end $$;
+
+-- A13e the itinerary limit is on the JSON text: exactly 300000 bytes is accepted, stored compressed or not.
+do $$ declare v_err text := 'no error'; v_len integer; begin
+  begin
+    update tour_catalog_tours set itinerary = jsonb_build_array(repeat('x', 299996)) where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+  exception when others then v_err := sqlerrm; end;
+  select octet_length(itinerary::text) into v_len from tour_catalog_tours where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+  insert into aresults values ('A13e itinerary of exactly 300000 bytes of text is accepted', v_err = 'no error' and v_len = 300000, format('%s len=%s', v_err, v_len));
+  update tour_catalog_tours set itinerary = '[]' where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+  insert into aresults select 'A13f the constraint measures octet_length of the text, not pg_column_size',
+    pg_get_constraintdef(oid) like '%octet_length%' and pg_get_constraintdef(oid) not like '%pg_column_size%', pg_get_constraintdef(oid)
+    from pg_constraint where conname = 'tour_catalog_tours_jsonb_arrays';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -310,6 +325,64 @@ do $$ declare r record; v_err text; begin
     values ('00000000-0000-0000-0000-0000000000a1', 'https://example.com/logo.png', '#B61E2E', '#d6a756', 'admin@x');
   insert into aresults select 'A14b valid member and settings rows accepted',
     (select count(*) from tour_catalog_members) = 1 and (select channels_connected = false from tour_catalog_settings), '';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- A14c–A14k publish requests: one open request per client, guaranteed by the database
+-- ---------------------------------------------------------------------------
+do $$ declare v_first jsonb; v_second jsonb; v_third jsonb; v_err text; v_b text := pg_temp.b_state(); r record; begin
+  v_first := tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', 'one@example.com', 3, 'first');
+  v_second := tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', '  two@example.com ', 5, 'second');
+  insert into aresults select 'A14c two requests in a row leave exactly one row for the client', count(*) = 1, count(*)::text
+    from tour_catalog_publish_requests where client_id = '00000000-0000-0000-0000-0000000000a1';
+  insert into aresults select 'A14d the surviving row carries the second request (who, draft, note), still open',
+    requested_by = 'two@example.com' and draft_version = 5 and note = 'second' and handled_at is null,
+    format('%s/%s/%s', requested_by, draft_version, note)
+    from tour_catalog_publish_requests where client_id = '00000000-0000-0000-0000-0000000000a1';
+  insert into aresults values ('A14e the function returns the open row, same id both times',
+    v_first->>'id' = v_second->>'id' and v_second->>'requested_by' = 'two@example.com' and (v_second->>'draft_version')::bigint = 5
+      and v_second->>'note' = 'second' and v_second ? 'created_at', v_second::text);
+
+  begin
+    insert into tour_catalog_publish_requests(client_id, requested_by, draft_version) values ('00000000-0000-0000-0000-0000000000a1', 'three@example.com', 6);
+    v_err := 'no error';
+  exception when unique_violation then v_err := 'unique_violation'; when others then v_err := sqlerrm; end;
+  insert into aresults values ('A14f a direct insert of a second open row is refused by the unique index', v_err = 'unique_violation', v_err);
+
+  -- Another client has its own open request.
+  perform tour_catalog_request_publish('00000000-0000-0000-0000-0000000000b2', 'b@example.com', 1, '');
+  insert into aresults select 'A14g another client gets its own open row', count(*) = 2, count(*)::text
+    from tour_catalog_publish_requests where handled_at is null;
+  delete from tour_catalog_publish_requests where client_id = '00000000-0000-0000-0000-0000000000b2';
+
+  -- Once handled, a new request is a new row; the handled one is kept as it was.
+  update tour_catalog_publish_requests set handled_at = now(), handled_version = 1
+   where client_id = '00000000-0000-0000-0000-0000000000a1' and handled_at is null;
+  v_third := tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', 'three@example.com', 7, null);
+  insert into aresults select 'A14h after the open request is handled a new one can be made (2 rows: 1 handled, 1 open)',
+    count(*) = 2 and count(*) filter (where handled_at is null) = 1
+      and bool_or(handled_at is not null and requested_by = 'two@example.com' and note = 'second'), count(*)::text
+    from tour_catalog_publish_requests where client_id = '00000000-0000-0000-0000-0000000000a1';
+  insert into aresults values ('A14i the new request is a different row and a null note is stored as empty',
+    v_third->>'id' <> v_second->>'id' and v_third->>'note' = '', v_third::text);
+
+  for r in select * from (values
+    ('null actor',   $q$select tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', null, 1, '')$q$, 'invalid_actor'),
+    ('empty actor',  $q$select tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', '', 1, '')$q$, 'invalid_actor'),
+    ('blank actor',  $q$select tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', '   ', 1, '')$q$, 'invalid_actor'),
+    ('note 501',     $q$select tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', 'x@example.com', 1, repeat('x', 501))$q$, 'invalid_note'),
+    ('null draft',   $q$select tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', 'x@example.com', null, '')$q$, 'invalid_request'),
+    ('null client',  $q$select tour_catalog_request_publish(null, 'x@example.com', 1, '')$q$, 'invalid_request')
+  ) as t(label, stmt, expected) loop
+    begin execute r.stmt; v_err := 'no error'; exception when others then v_err := sqlerrm; end;
+    insert into aresults values ('A14j request_publish refuses ' || r.label, v_err = r.expected, v_err);
+  end loop;
+  insert into aresults select 'A14k refused requests changed nothing (still three@, draft 7) and a 500-char note is accepted',
+    (select requested_by = 'three@example.com' and draft_version = 7 from tour_catalog_publish_requests
+      where client_id = '00000000-0000-0000-0000-0000000000a1' and handled_at is null)
+    and (tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1', 'three@example.com', 7, repeat('n', 500))->>'note') = repeat('n', 500)
+    and pg_temp.b_state() = v_b, '';
+  delete from tour_catalog_publish_requests where client_id = '00000000-0000-0000-0000-0000000000a1';
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -384,6 +457,7 @@ select pg_temp.denied('A16 anon cannot read tour_catalog_publish_requests', 'sel
 select pg_temp.denied('A16 anon cannot read tour_catalog_assistant_usage', 'select count(*) from tour_catalog_assistant_usage');
 select pg_temp.denied('A16 anon cannot call assistant_reserve', $q$select tour_catalog_assistant_reserve('00000000-0000-0000-0000-0000000000a1','2028-02-01','x@y.zz',1,1,1)$q$);
 select pg_temp.denied('A16 anon cannot call assistant_record_cost', $q$select tour_catalog_assistant_record_cost('00000000-0000-0000-0000-0000000000a1','2028-02-01','x@y.zz',1)$q$);
+select pg_temp.denied('A16 anon cannot call request_publish', $q$select tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1','x@y.zz',1,'')$q$);
 select pg_temp.denied('A16 anon cannot call change_log_append_only', 'select tour_catalog_change_log_append_only()');
 select pg_temp.denied('A16 anon cannot call update_tour (after create or replace)', $q$select tour_catalog_update_tour('00000000-0000-0000-0000-0000000000a1','aaaaaaaa-0000-0000-0000-000000000001',now(),'{}','x')$q$);
 select pg_temp.denied('A16 anon cannot call save_departure (after create or replace)', $q$select tour_catalog_save_departure('00000000-0000-0000-0000-0000000000a1','aaaaaaaa-0000-0000-0000-000000000001',null,null,'{}','x')$q$);
@@ -399,6 +473,7 @@ select pg_temp.denied('A17 authenticated cannot read tour_catalog_publish_reques
 select pg_temp.denied('A17 authenticated cannot read tour_catalog_assistant_usage', 'select count(*) from tour_catalog_assistant_usage');
 select pg_temp.denied('A17 authenticated cannot call assistant_reserve', $q$select tour_catalog_assistant_reserve('00000000-0000-0000-0000-0000000000a1','2028-02-01','x@y.zz',1,1,1)$q$);
 select pg_temp.denied('A17 authenticated cannot call assistant_record_cost', $q$select tour_catalog_assistant_record_cost('00000000-0000-0000-0000-0000000000a1','2028-02-01','x@y.zz',1)$q$);
+select pg_temp.denied('A17 authenticated cannot call request_publish', $q$select tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1','x@y.zz',1,'')$q$);
 select pg_temp.denied('A17 authenticated cannot call change_log_append_only', 'select tour_catalog_change_log_append_only()');
 select pg_temp.denied('A17 authenticated cannot call update_tour (after create or replace)', $q$select tour_catalog_update_tour('00000000-0000-0000-0000-0000000000a1','aaaaaaaa-0000-0000-0000-000000000001',now(),'{}','x')$q$);
 reset role;
@@ -411,6 +486,8 @@ do $$ declare v_err text := ''; begin
     perform count(*) from tour_catalog_assistant_usage;
     perform tour_catalog_assistant_reserve('00000000-0000-0000-0000-0000000000a1','2028-02-02','svc@example.com',1,1,1);
     perform tour_catalog_assistant_record_cost('00000000-0000-0000-0000-0000000000a1','2028-02-02','svc@example.com',0.01);
+    perform tour_catalog_request_publish('00000000-0000-0000-0000-0000000000a1','svc@example.com',1,'');
+    delete from tour_catalog_publish_requests where client_id = '00000000-0000-0000-0000-0000000000a1';
   exception when others then v_err := sqlerrm; end;
   insert into aresults values ('A18 service_role can use the new tables and functions', v_err = '', v_err);
 end $$;
@@ -423,7 +500,7 @@ insert into aresults
     from pg_proc p
     cross join (values ('anon'), ('authenticated')) as r(rolname)
    where p.pronamespace = 'public'::regnamespace
-     and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost',
+     and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost', 'tour_catalog_request_publish',
                        'tour_catalog_change_log_append_only', 'tour_catalog_update_tour',
                        'tour_catalog_save_departure', 'tour_catalog_apply_batch', 'tour_catalog_rollback_batch');
 insert into aresults
@@ -431,19 +508,19 @@ insert into aresults
          not exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.grantee = 0 and a.privilege_type = 'EXECUTE'), ''
     from pg_proc p
    where p.pronamespace = 'public'::regnamespace
-     and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost',
+     and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost', 'tour_catalog_request_publish',
                        'tour_catalog_change_log_append_only', 'tour_catalog_update_tour',
                        'tour_catalog_save_departure', 'tour_catalog_apply_batch', 'tour_catalog_rollback_batch');
-insert into aresults select 'A20c all seven functions were found by the grant checks', count(*) = 7, count(*)::text
+insert into aresults select 'A20c all eight functions were found by the grant checks', count(*) = 8, count(*)::text
   from pg_proc p where p.pronamespace = 'public'::regnamespace
-   and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost',
+   and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost', 'tour_catalog_request_publish',
                      'tour_catalog_change_log_append_only', 'tour_catalog_update_tour',
                      'tour_catalog_save_departure', 'tour_catalog_apply_batch', 'tour_catalog_rollback_batch');
 insert into aresults
   select format('A20d service_role has EXECUTE on %s', p.oid::regprocedure), has_function_privilege('service_role', p.oid, 'execute'), ''
     from pg_proc p
    where p.pronamespace = 'public'::regnamespace
-     and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost',
+     and p.proname in ('tour_catalog_assistant_reserve', 'tour_catalog_assistant_record_cost', 'tour_catalog_request_publish',
                        'tour_catalog_update_tour', 'tour_catalog_save_departure', 'tour_catalog_apply_batch', 'tour_catalog_rollback_batch');
 insert into aresults
   select format('A21 %s has no %s on %s', r.rolname, pr.priv, t.tbl),

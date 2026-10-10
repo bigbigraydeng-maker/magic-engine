@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { tierForAccessType } from '@/lib/auth/access-types'
 import { asRecord, asString, rowsOf } from './store'
 import type { CatalogMemberView, CatalogSettings, PublishRequestView } from './catalog-contract'
 
@@ -47,14 +48,21 @@ export async function listMembers(db: SupabaseClient, clientId: string): Promise
     throw new Error(res.error.message)
   }
 
-  const loginRes = await db.from('client_portal_users').select('email').eq('client_id', clientId)
-  let loginEmails = new Set<string>()
+  // "Can sign in to the back office" = a membership row for this client whose access type maps to
+  // the paid tier. portal-only and self-serve rows exist but never get past the catalog gate.
+  const loginRes = await db
+    .from('client_portal_users')
+    .select('email, access_type')
+    .eq('client_id', clientId)
+  const loginEmails = new Set<string>()
   if (loginRes.error) {
     console.error('tour_catalog_members_login_lookup_failed', loginRes.error.message)
   } else {
-    loginEmails = new Set<string>()
     for (const row of rowsOf(loginRes.data)) {
-      loginEmails.add(normalizeEmail(asRecord(row).email))
+      const record = asRecord(row)
+      if (tierForAccessType(asString(record.access_type)) === 'paid_client') {
+        loginEmails.add(normalizeEmail(record.email))
+      }
     }
   }
 
@@ -175,6 +183,11 @@ export async function getPendingPublishRequest(
   return mapPublishRequestRow(asRecord(rows[0]))
 }
 
+/**
+ * Ask for a publish. One database call does it all: the client's single open request is created
+ * or, when one is already open, replaced by this one. "One open request per client" is enforced by
+ * a unique index, so two people asking at the same moment cannot leave two rows behind.
+ */
 export async function upsertPublishRequest(
   db: SupabaseClient,
   clientId: string,
@@ -182,36 +195,17 @@ export async function upsertPublishRequest(
   draftVersion: number,
   note: string,
 ): Promise<PublishRequestView> {
-  const pending = await getPendingPublishRequest(db, clientId)
-  if (pending !== null) {
-    const res = await db
-      .from('tour_catalog_publish_requests')
-      .update({
-        requested_by: requestedBy,
-        draft_version: draftVersion,
-        note,
-        created_at: new Date().toISOString(),
-      })
-      .eq('id', pending.id)
-      .eq('client_id', clientId)
-      .is('handled_at', null)
-    if (res.error) {
-      throw new Error(res.error.message)
-    }
-  } else {
-    const res = await db.from('tour_catalog_publish_requests').insert({
-      client_id: clientId,
-      requested_by: requestedBy,
-      draft_version: draftVersion,
-      note,
-    })
-    if (res.error) {
-      throw new Error(res.error.message)
-    }
+  const res = await db.rpc('tour_catalog_request_publish', {
+    p_client_id: clientId,
+    p_requested_by: requestedBy,
+    p_draft_version: draftVersion,
+    p_note: note,
+  })
+  if (res.error) {
+    throw new Error(res.error.message)
   }
-
-  const saved = await getPendingPublishRequest(db, clientId)
-  if (saved === null) {
+  const saved = mapPublishRequestRow(asRecord(res.data))
+  if (saved.id === '') {
     throw new Error('publish_request_not_saved')
   }
   return saved

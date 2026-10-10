@@ -209,7 +209,7 @@ function SaveFeedback(props: { error: string | null; saved: boolean }) {
         </p>
       ) : null}
       {props.saved ? (
-        <p role="status" className="mt-3 text-sm font-semibold text-[#5C8A4A]">
+        <p role="status" className="mt-3 text-sm font-semibold text-[#456F35]">
           {SETTINGS_SAVED_TEXT}
         </p>
       ) : null}

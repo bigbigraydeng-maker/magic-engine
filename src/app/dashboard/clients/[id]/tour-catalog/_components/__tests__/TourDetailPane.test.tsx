@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { screen, fireEvent, within } from '@testing-library/react'
+import { renderConnected as render } from './render-connected'
 import { TourDetailPane } from '../TourDetailPane'
 import type { CatalogDepartureView, CatalogTourView } from '../types'
 import type { PublishChange } from '@/lib/tour-catalog/publish-contract'
@@ -223,5 +224,53 @@ describe('TourDetailPane wording by context', () => {
     expect(screen.queryByText('去上架')).toBeNull()
     fireEvent.click(screen.getByText('请 Magic Engine 上架'))
     expect(onOpenPublish).toHaveBeenCalled()
+  })
+})
+
+describe('TourDetailPane saved notice goes away once published', () => {
+  function pane(extra: { inSync: boolean; draftVersion: number; changes?: PublishChange[] }) {
+    return (
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <TourDetailPane
+          clientId="c1"
+          tour={TOUR}
+          departures={DEPARTURES}
+          changes={extra.changes ?? []}
+          onChanged={vi.fn()}
+          onDirtyChange={vi.fn()}
+          onBack={vi.fn()}
+          onOpenPublish={vi.fn()}
+          inSync={extra.inSync}
+          draftVersion={extra.draftVersion}
+        />
+      </CatalogUiProvider>
+    )
+  }
+
+  it('shows after a save, disappears when the draft equals what is published, and stays gone', () => {
+    const { rerender } = render(pane({ inSync: false, draftVersion: 9 }))
+    fireEvent.click(screen.getByText('mock-dep-save'))
+    expect(screen.getByText('已存为草稿，还没上架')).toBeInTheDocument()
+    // published: the status now says draft and published are the same
+    rerender(pane({ inSync: true, draftVersion: 9 }))
+    expect(screen.queryByText('已存为草稿，还没上架')).toBeNull()
+    expect(screen.queryByText('去上架')).toBeNull()
+    // somebody edits another tour later: this tour was not saved again, so no notice comes back
+    rerender(pane({ inSync: false, draftVersion: 10 }))
+    expect(screen.queryByText('已存为草稿，还没上架')).toBeNull()
+  })
+
+  it('a save made right after a publish shows the notice once the status has caught up', () => {
+    const { rerender } = render(pane({ inSync: true, draftVersion: 9 }))
+    fireEvent.click(screen.getByText('mock-dep-save'))
+    rerender(pane({ inSync: false, draftVersion: 10 }))
+    expect(screen.getByText('已存为草稿，还没上架')).toBeInTheDocument()
+  })
+
+  it('channels not connected: the pending box says 已上架, never 对外', () => {
+    render(pane({ inSync: false, draftVersion: 9, changes: CHANGES }))
+    const box = screen.getByTestId('unpublished-box')
+    expect(box.textContent).toContain('已上架 ')
+    expect(box.textContent).not.toMatch(/对外|客人/)
   })
 })

@@ -132,10 +132,14 @@ export function changeLine(change: PublishChange): string {
   return `${prefix}${change.fieldLabel}：${valueText(change.before)} → ${valueText(change.after)}`
 }
 
-/** For the per-tour box: "展示价：对外现在 X → 草稿 Y" (same departOn prefix rule). */
-export function draftChangeLine(change: PublishChange): string {
+/**
+ * For the per-tour box: "展示价：对外现在 X → 草稿 Y" (same departOn prefix rule).
+ * While no channel reads the catalog it says "已上架 X" instead: nothing is outward yet.
+ */
+export function draftChangeLine(change: PublishChange, channelsConnected: boolean): string {
   const prefix = change.departOn ? `${change.departOn} ` : ''
-  return `${prefix}${change.fieldLabel}：对外现在 ${valueText(change.before)} → 草稿 ${valueText(change.after)}`
+  const live = channelsConnected ? '对外现在' : '已上架'
+  return `${prefix}${change.fieldLabel}：${live} ${valueText(change.before)} → 草稿 ${valueText(change.after)}`
 }
 
 /** High-risk changes first, otherwise keep the original order (stable). */

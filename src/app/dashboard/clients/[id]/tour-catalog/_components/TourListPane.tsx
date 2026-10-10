@@ -15,6 +15,9 @@ import {
   type TourGroup,
 } from './tour-list-helpers'
 
+export const NO_MATCH_TEXT = '没有符合条件的团'
+export const NEVER_PUBLISHED_EMPTY_TEXT = '还没上架过，所有团都还没上架。'
+
 interface ListToolbarProps {
   query: string
   filter: TourFilter
@@ -163,12 +166,15 @@ interface GroupListProps {
   departures: CatalogDepartureView[]
   today: string
   selectedId: string | null
+  /** What to say when nothing matches. */
+  emptyText: string
   onToggle: (key: string) => void
   onSelect: (tourId: string) => void
 }
 
 function GroupList({
   groups,
+  emptyText,
   collapsed,
   changedTourIds,
   departures,
@@ -178,7 +184,7 @@ function GroupList({
   onSelect,
 }: GroupListProps) {
   if (groups.length === 0) {
-    return <p className="p-4 text-sm font-semibold text-me-charcoal/55">没有符合条件的团</p>
+    return <p className="p-4 text-sm font-semibold text-me-charcoal/55">{emptyText}</p>
   }
   return (
     <>
@@ -231,9 +237,13 @@ export function TourListPane(props: {
   changedTourIds: string[]
   selectedId: string | null
   onSelect: (tourId: string) => void
+  /** Nothing has ever been published: "changed since publish" has no meaning yet. */
+  neverPublished?: boolean
 }) {
   const { tours, departures, changedTourIds, selectedId, onSelect } = props
   const { query, filter, collapsed, setQuery, setFilter, toggle } = useTourListState()
+  const emptyText =
+    props.neverPublished === true && filter === 'changed' ? NEVER_PUBLISHED_EMPTY_TEXT : NO_MATCH_TEXT
 
   const today = todayIso()
   const groups = useMemo(
@@ -257,6 +267,7 @@ export function TourListPane(props: {
           departures={departures}
           today={today}
           selectedId={selectedId}
+          emptyText={emptyText}
           onToggle={toggle}
           onSelect={onSelect}
         />

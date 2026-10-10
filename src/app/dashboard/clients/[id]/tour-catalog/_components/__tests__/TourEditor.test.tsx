@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
+import { renderConnected as render } from './render-connected'
 import { TourEditor } from '../TourEditor'
 import type { CatalogTourView } from '../types'
 import { CatalogUiProvider } from '../catalog-context'
@@ -352,5 +353,83 @@ describe('TourEditor', () => {
     fireEvent.change(name, { target: { value: '南岛经典 3' } })
     unmount()
     expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+})
+
+describe('TourEditor when a save is refused', () => {
+  const scrollIntoView = vi.fn()
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    scrollIntoView.mockClear()
+    Element.prototype.scrollIntoView = scrollIntoView
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  async function saveBadPrice(fields: Array<{ field: string; code: string }>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(400, { error: 'invalid_fields', fields })),
+    )
+    render(<TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />)
+    const price = screen.getByDisplayValue('From NZD $4,999 per person')
+    fireEvent.change(price, { target: { value: '1199' } })
+    fireEvent.click(screen.getByText('保存'))
+    await screen.findByRole('alert')
+    return price
+  }
+
+  it('jumps to the first red field, focuses it, and says so next to the save button', async () => {
+    const price = await saveBadPrice([{ field: 'displayPriceText', code: 'invalid_price_format' }])
+    const alert = screen.getByRole('alert')
+    expect(alert.textContent).toBe('有 1 项填得不对，已跳到第一处')
+    // in the sticky bar, right beside 保存
+    expect(alert.parentElement).toBe(screen.getByText('保存').parentElement)
+    expect(alert.parentElement?.className).toContain('sticky')
+    await waitFor(() => expect(document.activeElement).toBe(price))
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView.mock.instances[0]).toBe(price)
+  })
+
+  it('counts every refused field and goes to the one highest on the page', async () => {
+    await saveBadPrice([
+      { field: 'maxGroupSize', code: 'invalid_number' },
+      { field: 'displayPriceText', code: 'invalid_price_format' },
+    ])
+    expect(screen.getByRole('alert').textContent).toBe('有 2 项填得不对，已跳到第一处')
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByDisplayValue('1199')),
+    )
+  })
+
+  it('jumps again when the same mistake is saved a second time', async () => {
+    await saveBadPrice([{ field: 'displayPriceText', code: 'invalid_price_format' }])
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2))
+  })
+
+  it('other failures stay a plain line in the save bar, no jump', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(409, { error: 'conflict' })))
+    render(<TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />)
+    fireEvent.change(screen.getByDisplayValue('南岛经典'), { target: { value: 'X' } })
+    fireEvent.click(screen.getByText('保存'))
+    const line = await screen.findByText('这个团刚被别人改过，请刷新页面后再改')
+    expect(line.parentElement?.className).toContain('sticky')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+})
+
+describe('TourEditor price writing hint', () => {
+  it('always shows how to write a price under 展示价 and 单人房差', () => {
+    render(<TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />)
+    const hints = screen.getAllByText('写法例：From NZD $4,999 per person；还没定写 TBC')
+    expect(hints).toHaveLength(2)
+    expect(hints[0].previousElementSibling).toBe(screen.getByDisplayValue('From NZD $4,999 per person'))
+    expect(hints[1].previousElementSibling).toBe(screen.getByDisplayValue('NZD 800'))
   })
 })

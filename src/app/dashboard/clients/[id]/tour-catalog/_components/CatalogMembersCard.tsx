@@ -80,8 +80,8 @@ function MemberRow(props: { member: CatalogMemberView; onRemove: (email: string)
           由 {member.grantedBy} 加入 · {formatDateTimeWithYear(member.createdAt)}
         </p>
         {member.hasLogin === false ? (
-          <span className="mt-1 inline-block rounded-full border border-[#B45309]/30 bg-[#B45309]/10 px-2 py-0.5 text-xs font-black text-[#B45309]">
-            还没有登录账号
+          <span className="mt-1 inline-block rounded-lg border border-[#B45309]/30 bg-[#B45309]/10 px-2 py-0.5 text-xs font-black text-[#B45309]">
+            还没有这个客户的登录账号——先在客户主页「设置 → 用户权限」里给他开通，再让他登录
           </span>
         ) : null}
       </div>
@@ -212,10 +212,12 @@ function AddMemberForm(props: {
   onEmail: (value: string) => void
   onSubmit: () => void
   busy: boolean
+  /** Why the last "add" did not go through; shown right under the input it is about. */
+  error: string | null
 }) {
   const inputId = useId()
   return (
-    <div className="mt-5 flex flex-wrap items-end gap-3">
+    <div className="mt-5 flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <label htmlFor={inputId} className="block text-sm font-semibold text-me-charcoal">
           邮箱
@@ -233,10 +235,15 @@ function AddMemberForm(props: {
             }
           }}
         />
+        {props.error ? (
+          <p role="alert" className="mt-1 text-sm font-semibold text-[#C2453A]">
+            {props.error}
+          </p>
+        ) : null}
       </div>
       <button
         type="button"
-        className={PRIMARY_BUTTON_CLASS}
+        className={`mt-6 ${PRIMARY_BUTTON_CLASS}`}
         disabled={props.busy}
         onClick={props.onSubmit}
       >
@@ -251,7 +258,7 @@ export function CatalogMembersCard(props: { clientId: string }): JSX.Element {
   const { members, setMembers, loadFailed, load } = useMembers(clientId)
   const add = useAddMember(clientId, setMembers, load)
   const remove = useRemoveMember(clientId, setMembers, load)
-  const error = add.error ?? remove.error
+  const error = remove.error
   const busy = add.busy || remove.busy
 
   return (
@@ -280,6 +287,7 @@ export function CatalogMembersCard(props: { clientId: string }): JSX.Element {
         onEmail={add.setEmail}
         onSubmit={() => void add.submit()}
         busy={busy}
+        error={add.error}
       />
     </section>
   )

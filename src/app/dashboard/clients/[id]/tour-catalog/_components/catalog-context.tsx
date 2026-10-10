@@ -10,14 +10,14 @@ import { createContext, useContext } from 'react'
  * - canPublish: false for people who can only ask Magic Engine to publish.
  *
  * The workspace always provides real values. The default (used only by components rendered on
- * their own, e.g. in unit tests) keeps the original wording.
+ * their own) is the most careful one: promise nothing about channels, offer no publishing.
  */
 export interface CatalogUi {
   channelsConnected: boolean
   canPublish: boolean
 }
 
-const DEFAULT_UI: CatalogUi = { channelsConnected: true, canPublish: true }
+const DEFAULT_UI: CatalogUi = { channelsConnected: false, canPublish: false }
 
 const CatalogUiContext = createContext<CatalogUi>(DEFAULT_UI)
 

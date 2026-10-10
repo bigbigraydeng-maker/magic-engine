@@ -5,12 +5,13 @@
 import { useState } from 'react'
 import type { CatalogBatchView } from './types'
 import { BATCH_STATUS_LABELS, errorLabel, formatBatchTime } from './catalog-format'
+import { useChannelsConnected } from './catalog-context'
 
 /** Rollback confirm text, using row counts when they are numbers. */
-function rollbackConfirmText(batch: CatalogBatchView): string {
+function rollbackConfirmText(batch: CatalogBatchView, connected: boolean): string {
   const adds = typeof batch.rowCounts.adds === 'number' ? batch.rowCounts.adds : '若干'
   const updates = typeof batch.rowCounts.updates === 'number' ? batch.rowCounts.updates : '若干'
-  return `确定撤销这次导入吗？撤销改的是草稿：这次新增的 ${adds} 个班期会被删除，改过的 ${updates} 个会恢复原样。如果这次导入之后有人手工改过其中的班期，系统会拒绝撤销，以免覆盖后来的修改。已经上架的内容不会跟着变，要让客人看到还得再上架一次。`
+  return `确定撤销这次导入吗？撤销改的是草稿：这次新增的 ${adds} 个班期会被删除，改过的 ${updates} 个会恢复原样。如果这次导入之后有人手工改过其中的班期，系统会拒绝撤销，以免覆盖后来的修改。已经上架的内容不会跟着变，${connected ? '要让客人看到' : '要让它跟着变'}还得再上架一次。`
 }
 
 /** 撤销冲突时服务器返回的细节。 */
@@ -36,12 +37,15 @@ export function BatchHistory({
   batches: CatalogBatchView[]
   onChanged: () => void
 }) {
+  const connected = useChannelsConnected()
   if (batches.length === 0) return null
   return (
     <div className="space-y-3 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
       <h2 className="font-display font-black text-me-charcoal">导入记录</h2>
       <p className="text-sm font-semibold text-me-charcoal/55">
-        导入和撤销改的都是草稿，客人看不到；要对外生效还得点页面上方的「查看并上架」。
+        {connected
+          ? '导入和撤销改的都是草稿，客人看不到；要对外生效还得点页面上方的「查看并上架」。'
+          : '导入和撤销改的都是草稿，还没上架；之后还要点页面上方的「查看并上架」。'}
       </p>
       <ul className="space-y-2">
         {batches.map(b => (
@@ -63,9 +67,10 @@ function BatchRow({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const connected = useChannelsConnected()
 
   const handleRollback = async () => {
-    if (!window.confirm(rollbackConfirmText(batch))) return
+    if (!window.confirm(rollbackConfirmText(batch, connected))) return
     setBusy(true)
     setError(null)
     try {

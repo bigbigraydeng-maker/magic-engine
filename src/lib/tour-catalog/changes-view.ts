@@ -12,7 +12,7 @@ import type {
 } from './catalog-contract'
 import { TOUR_FIELD_SPECS, renderField, type FieldSpec } from './publish'
 import { STATUS_LABELS } from './departures-csv'
-import type { DepartureStatus } from './types'
+import type { CatalogDeparture, DepartureStatus } from './types'
 
 export const ME_TEAM_LABEL = 'Magic Engine 团队'
 export const SYSTEM_LABEL = '系统'
@@ -183,6 +183,18 @@ function redactRow(row: Record<string, unknown> | null): Record<string, unknown>
     copy[key] = row[key]
   }
   return copy
+}
+
+/**
+ * The one place a departure row is trimmed for whoever is looking: operational `internal` facts
+ * (airline, seat capacity, routes) reach Magic Engine admins only. Every response that carries a
+ * departure — the catalog read and both save endpoints — goes through this.
+ */
+export function trimDepartureForViewer(role: CatalogRole, departure: CatalogDeparture): CatalogDeparture {
+  if (role === 'me_admin') {
+    return departure
+  }
+  return { ...departure, internal: {} }
 }
 
 /** Return a new entry with hidden keys removed and the actor masked. */
@@ -500,6 +512,84 @@ function buildSingleView(entry: ChangeLogEntry, ctx: ChangeViewContext): Catalog
   }
 }
 
+// ---------------------------------------------------------------------------
+// System runs (e.g. reading the website in: dozens of rows within a few seconds)
+// ---------------------------------------------------------------------------
+
+/** Neighbouring system rows at most this far apart belong to the same run. */
+export const SYSTEM_RUN_GAP_MS = 120_000
+
+function isSystemEntry(entry: ChangeLogEntry): boolean {
+  return parseActor(entry.actor).source === 'system'
+}
+
+/** True when two neighbouring rows are close enough in time to be one run. Unreadable times never join. */
+function withinRunGap(a: ChangeLogEntry, b: ChangeLogEntry): boolean {
+  const first = Date.parse(a.createdAt)
+  const second = Date.parse(b.createdAt)
+  if (Number.isNaN(first) || Number.isNaN(second)) {
+    return false
+  }
+  return Math.abs(first - second) <= SYSTEM_RUN_GAP_MS
+}
+
+/** Length of the run of system rows starting at `start` (1 when the row stands alone). */
+function systemRunLength(entries: readonly ChangeLogEntry[], start: number): number {
+  let end = start + 1
+  while (end < entries.length && isSystemEntry(entries[end]) && withinRunGap(entries[end - 1], entries[end])) {
+    end += 1
+  }
+  return end - start
+}
+
+const SYSTEM_RUN_PARTS: ReadonlyArray<{
+  action: ChangeLogEntry['action']
+  entity: ChangeLogEntry['entity']
+  verb: string
+  noun: string
+}> = [
+  { action: 'insert', entity: 'tour', verb: '新增', noun: '团' },
+  { action: 'insert', entity: 'departure', verb: '新增', noun: '班期' },
+  { action: 'update', entity: 'tour', verb: '更新', noun: '团' },
+  { action: 'update', entity: 'departure', verb: '更新', noun: '班期' },
+  { action: 'delete', entity: 'tour', verb: '删除', noun: '团' },
+  { action: 'delete', entity: 'departure', verb: '删除', noun: '班期' },
+]
+
+/** 「系统：新增 33 个团、21 个班期」 — counts per action and entity, zero items left out. */
+function summariseSystemRun(group: readonly ChangeLogEntry[]): string {
+  const parts: string[] = []
+  let lastVerb = ''
+  for (const part of SYSTEM_RUN_PARTS) {
+    const count = group.filter((e) => e.action === part.action && e.entity === part.entity).length
+    if (count === 0) {
+      continue
+    }
+    parts.push(`${part.verb === lastVerb ? '' : `${part.verb} `}${count} 个${part.noun}`)
+    lastVerb = part.verb
+  }
+  return cutSummary(`${SYSTEM_LABEL}：${parts.join('、')}`)
+}
+
+/** One view for a whole system run; the time shown is the newest row's. */
+function buildSystemRunView(group: readonly ChangeLogEntry[], ctx: ChangeViewContext): CatalogChangeView {
+  let newest = group[0]
+  for (const entry of group) {
+    if (Date.parse(entry.createdAt) > Date.parse(newest.createdAt)) {
+      newest = entry
+    }
+  }
+  return {
+    id: newest.id,
+    createdAt: newest.createdAt,
+    actorLabel: ctx.label(null),
+    source: 'system',
+    tourId: null,
+    tourName: '',
+    summary: summariseSystemRun(group),
+  }
+}
+
 /** Group key for a collapsible entry, or null when it stands alone. */
 function groupKeyOf(entry: ChangeLogEntry): string | null {
   const parsed = parseActor(entry.actor)
@@ -509,7 +599,7 @@ function groupKeyOf(entry: ChangeLogEntry): string | null {
   return `${parsed.source}:${parsed.batchId}`
 }
 
-/** Turn raw change-log rows into display-ready views, collapsing imports and rollbacks. */
+/** Turn raw change-log rows into display-ready views, collapsing imports, rollbacks and system runs. */
 export function buildChangeViews(
   entries: readonly ChangeLogEntry[],
   ctx: ChangeViewContext,
@@ -530,10 +620,18 @@ export function buildChangeViews(
 
   const views: CatalogChangeView[] = []
   const emitted = new Set<string>()
-  for (const entry of entries) {
-    if (views.length >= MAX_CHANGE_VIEWS) {
-      break
+  let index = 0
+  while (index < entries.length && views.length < MAX_CHANGE_VIEWS) {
+    const entry = entries[index]
+    if (isSystemEntry(entry)) {
+      const runLength = systemRunLength(entries, index)
+      if (runLength > 1) {
+        views.push(buildSystemRunView(entries.slice(index, index + runLength), ctx))
+        index += runLength
+        continue
+      }
     }
+    index += 1
     const key = groupKeyOf(entry)
     if (key === null) {
       views.push(buildSingleView(entry, ctx))

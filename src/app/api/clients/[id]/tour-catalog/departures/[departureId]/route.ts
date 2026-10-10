@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { validateDeparturePatch, departurePatchToDb } from '@/lib/tour-catalog/edit-validation'
 import { saveDeparture } from '@/lib/tour-catalog/store-edit'
+import { trimDepartureForViewer } from '@/lib/tour-catalog/changes-view'
 import { asPlainObject, invalidIdResponse, isUuid, readJsonBody } from '@/lib/tour-catalog/http'
 import type { DepartureSavedResponse } from '@/lib/tour-catalog/api-contract'
 
@@ -60,7 +61,11 @@ export async function PATCH(req: NextRequest, { params }: RouteContext) {
   )
 
   if (result.ok) {
-    return NextResponse.json<DepartureSavedResponse>({ departure: result.value }, { status: 200 })
+    // Operational `internal` facts never go back to a client editor (same trim as the catalog read).
+    return NextResponse.json<DepartureSavedResponse>(
+      { departure: trimDepartureForViewer(access.viewer.role, result.value) },
+      { status: 200 },
+    )
   }
 
   switch (result.code) {

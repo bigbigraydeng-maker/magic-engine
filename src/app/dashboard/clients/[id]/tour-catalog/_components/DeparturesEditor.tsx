@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import type { CatalogDepartureView } from './types'
-import { departureAddedText } from './catalog-format'
+import { PRICE_HINT_TEXT, departureAddedText } from './catalog-format'
 import { useChannelsConnected } from './catalog-context'
 import { BRAND_BUTTON_CLASS } from './catalog-brand'
+import { errorSummaryText, useJumpToFirstError } from './useErrorJump'
 
 const STATUS_LABELS: Record<CatalogDepartureView['status'], string> = {
   open: '可订',
@@ -73,6 +74,30 @@ function errorFor(fieldErrors: FieldError[], field: string): string | null {
   return found ? fieldErrorMessage(found.code) : null
 }
 
+/** Next to the save button: the field-error summary (announced), else the last result line. */
+function FormMessage(props: {
+  errorCount: number
+  message: string | null
+  /** The one message that is good news; everything else is shown in red. */
+  okText: string
+  className: string
+}) {
+  const { errorCount, message, okText, className } = props
+  if (errorCount > 0) {
+    return (
+      <p role="alert" className={className} style={{ color: '#C2453A' }}>
+        {errorSummaryText(errorCount)}
+      </p>
+    )
+  }
+  if (!message) return null
+  return (
+    <p className={className} style={{ color: message === okText ? '#456F35' : '#C2453A' }}>
+      {message}
+    </p>
+  )
+}
+
 interface EditRowProps {
   clientId: string
   tourId: string
@@ -97,6 +122,8 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([])
+  const [errorTick, setErrorTick] = useState(0)
+  const formRef = useJumpToFirstError<HTMLDivElement>(errorTick)
 
   const patch: Record<string, unknown> = {}
   const nextReturnOn = returnOn === '' ? null : returnOn
@@ -135,6 +162,7 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
         const fields = data.fields ?? []
         if (fields.length > 0) {
           setFieldErrors(fields)
+          setErrorTick((n) => n + 1)
         } else {
           setMessage(errorMessageFor(data.error ?? 'save_failed'))
         }
@@ -153,9 +181,9 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
   const priceError = errorFor(fieldErrors, 'priceTextOverride')
 
   return (
-    <tr className="border-t border-black/10">
-      <td colSpan={5} className="px-3 py-3">
-        <div className="flex flex-col gap-3">
+    <tr className="block border-t border-black/10 sm:table-row">
+      <td colSpan={5} className="block px-3 py-3 sm:table-cell">
+        <div ref={formRef} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1 text-sm text-me-charcoal">
             <span className="font-semibold">出团日</span>
             <div className="text-me-charcoal">{departure.departOn}</div>
@@ -172,7 +200,7 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
               className="w-full rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
             />
             {returnOnError && (
-              <span className="text-xs" style={{ color: '#C2453A' }}>
+              <span data-field-error className="text-xs" style={{ color: '#C2453A' }}>
                 {returnOnError}
               </span>
             )}
@@ -191,7 +219,7 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
               ))}
             </select>
             {statusError && (
-              <span className="text-xs" style={{ color: '#C2453A' }}>
+              <span data-field-error className="text-xs" style={{ color: '#C2453A' }}>
                 {statusError}
               </span>
             )}
@@ -204,8 +232,9 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
               onChange={(e) => setPriceText(e.target.value)}
               className="w-full rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
             />
+            <span className="text-xs text-me-charcoal/60">{PRICE_HINT_TEXT}</span>
             {priceError && (
-              <span className="text-xs" style={{ color: '#C2453A' }}>
+              <span data-field-error className="text-xs" style={{ color: '#C2453A' }}>
                 {priceError}
               </span>
             )}
@@ -228,20 +257,28 @@ function EditRow({ clientId, tourId, departure, onCancel, onSaved, onDirtyChange
                 取消
               </button>
             </div>
-            {message && (
-              <div
-                className="text-xs"
-                style={{ color: message === '没有改动' ? '#5C8A4A' : '#C2453A' }}
-              >
-                {message}
-              </div>
-            )}
+            <FormMessage
+              errorCount={fieldErrors.length}
+              message={message}
+              okText="没有改动"
+              className="text-xs"
+            />
           </div>
         </div>
       </td>
     </tr>
   )
 }
+
+/**
+ * Below 640px a table squeezes its cells until the text breaks letter by letter, so each
+ * departure becomes a small stacked card instead: one line per value, label left, value right.
+ * Same markup both ways; the label comes from `data-label`.
+ */
+const CARD_ROW_CLASS =
+  'mb-2 block rounded-lg border border-black/10 px-1 py-1 sm:mb-0 sm:table-row sm:rounded-none sm:border-0 sm:border-t sm:p-0'
+const CARD_CELL_CLASS =
+  'flex items-center justify-between gap-4 px-2 py-1 text-right before:shrink-0 before:text-left before:text-xs before:font-semibold before:text-me-charcoal/60 before:content-[attr(data-label)] sm:table-cell sm:px-3 sm:py-2 sm:text-left sm:before:content-none'
 
 interface DepartureRowProps {
   departure: CatalogDepartureView
@@ -251,14 +288,12 @@ interface DepartureRowProps {
 function DepartureRow({ departure, onEdit }: DepartureRowProps) {
   const greyed = isPast(departure.departOn) || departure.status === 'cancelled'
   return (
-    <tr
-      className={`border-t border-black/10 ${greyed ? 'text-me-charcoal/40' : 'text-me-charcoal'}`}
-    >
-      <td className="px-3 py-2">{departure.departOn}</td>
-      <td className="px-3 py-2">{departure.returnOn ?? '—'}</td>
-      <td className="px-3 py-2">{STATUS_LABELS[departure.status]}</td>
-      <td className="px-3 py-2">{departure.priceTextOverride ?? '—'}</td>
-      <td className="px-3 py-2">
+    <tr className={`${CARD_ROW_CLASS} ${greyed ? 'text-me-charcoal/40' : 'text-me-charcoal'}`}>
+      <td data-label="出团日" className={CARD_CELL_CLASS}>{departure.departOn}</td>
+      <td data-label="返程日" className={CARD_CELL_CLASS}>{departure.returnOn ?? '—'}</td>
+      <td data-label="状态" className={CARD_CELL_CLASS}>{STATUS_LABELS[departure.status]}</td>
+      <td data-label="该班展示价" className={CARD_CELL_CLASS}>{departure.priceTextOverride ?? '—'}</td>
+      <td data-label="操作" className={CARD_CELL_CLASS}>
         <button
           type="button"
           onClick={onEdit}
@@ -288,6 +323,8 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([])
   const connected = useChannelsConnected()
   const ADDED_TEXT = departureAddedText(connected)
+  const [errorTick, setErrorTick] = useState(0)
+  const formRef = useJumpToFirstError<HTMLFormElement>(errorTick)
   useDirtyReport(departOn !== '' || returnOn !== '' || priceText.trim() !== '', onDirtyChange)
 
   async function handleSubmit(e: React.FormEvent) {
@@ -317,6 +354,7 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
         const fields = data.fields ?? []
         if (fields.length > 0) {
           setFieldErrors(fields)
+          setErrorTick((n) => n + 1)
         } else {
           setMessage(errorMessageFor(data.error ?? 'save_failed'))
         }
@@ -341,7 +379,7 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
   const priceError = errorFor(fieldErrors, 'priceTextOverride')
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6 border-t border-black/10 pt-4">
+    <form ref={formRef} onSubmit={handleSubmit} className="mt-6 border-t border-black/10 pt-4">
       <h3 className="mb-3 text-sm font-semibold text-me-charcoal">新增班期</h3>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <label className="flex flex-col gap-1 text-sm text-me-charcoal">
@@ -353,7 +391,7 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
             className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
           />
           {departOnError && (
-            <span className="text-xs" style={{ color: '#C2453A' }}>
+            <span data-field-error className="text-xs" style={{ color: '#C2453A' }}>
               {departOnError}
             </span>
           )}
@@ -367,7 +405,7 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
             className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
           />
           {returnOnError && (
-            <span className="text-xs" style={{ color: '#C2453A' }}>
+            <span data-field-error className="text-xs" style={{ color: '#C2453A' }}>
               {returnOnError}
             </span>
           )}
@@ -386,7 +424,7 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
             ))}
           </select>
           {statusError && (
-            <span className="text-xs" style={{ color: '#C2453A' }}>
+            <span data-field-error className="text-xs" style={{ color: '#C2453A' }}>
               {statusError}
             </span>
           )}
@@ -399,14 +437,15 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
             onChange={(e) => setPriceText(e.target.value)}
             className="rounded-lg border border-black/10 bg-me-ivory px-2 py-1 text-sm text-me-charcoal"
           />
+          <span className="text-xs text-me-charcoal/60">{PRICE_HINT_TEXT}</span>
           {priceError && (
-            <span className="text-xs" style={{ color: '#C2453A' }}>
+            <span data-field-error className="text-xs" style={{ color: '#C2453A' }}>
               {priceError}
             </span>
           )}
         </label>
       </div>
-      <div className="mt-3 flex items-center gap-3">
+      <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
           type="submit"
           disabled={saving}
@@ -414,14 +453,12 @@ function AddForm({ clientId, tourId, onAdded, onDirtyChange }: AddFormProps) {
         >
           添加这个班期
         </button>
-        {message && (
-          <span
-            className="text-sm"
-            style={{ color: message === ADDED_TEXT ? '#5C8A4A' : '#C2453A' }}
-          >
-            {message}
-          </span>
-        )}
+        <FormMessage
+          errorCount={fieldErrors.length}
+          message={message}
+          okText={ADDED_TEXT}
+          className="text-sm"
+        />
       </div>
     </form>
   )
@@ -451,8 +488,8 @@ export function DeparturesEditor({
   return (
     <div>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead>
+        <table className="block w-full text-sm sm:table sm:min-w-full">
+          <thead className="hidden sm:table-header-group">
             <tr className="text-left text-me-charcoal/70">
               <th className="px-3 py-2 font-semibold">出团日</th>
               <th className="px-3 py-2 font-semibold">返程日</th>
@@ -461,7 +498,7 @@ export function DeparturesEditor({
               <th className="px-3 py-2 font-semibold">操作</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="block sm:table-row-group">
             {sorted.map((d) =>
               editingId === d.id ? (
                 <EditRow

@@ -12,6 +12,7 @@ import {
   summariseContributors,
   summariseEntry,
   buildChangeViews,
+  trimDepartureForViewer,
 } from '../changes-view'
 
 const BATCH_A = 'b0000000-0000-0000-0000-000000000001'
@@ -459,6 +460,133 @@ describe('buildChangeViews', () => {
     expect(views.length).toBe(1)
     expect(views[0].tourId).toBeNull()
     expect(views[0].tourName).toBe('')
+  })
+})
+
+describe('buildChangeViews — system runs collapse (reading the website in)', () => {
+  const ctx = { tourNames: new Map<string, string>([['t1', 'Tour One']]), label: makeActorLabeler('me_admin', new Set()) }
+
+  /** n system rows one second apart, newest first, starting at `newestIso`. */
+  function systemRows(
+    prefix: string,
+    newestIso: string,
+    counts: { tours: number; departures: number },
+  ): ChangeLogEntry[] {
+    const newest = Date.parse(newestIso)
+    const rows: ChangeLogEntry[] = []
+    const total = counts.tours + counts.departures
+    for (let i = 0; i < total; i += 1) {
+      rows.push(
+        entry({
+          id: `${prefix}-${i}`,
+          entity: i < counts.departures ? 'departure' : 'tour',
+          entityId: `${prefix}-entity-${i}`,
+          action: 'insert',
+          after: { name: `Tour ${i}`, tour_id: 't1', depart_on: '2027-01-01', status: 'open' },
+          actor: 'seed',
+          createdAt: new Date(newest - i * 1000).toISOString(),
+        }),
+      )
+    }
+    return rows
+  }
+
+  it('54 system rows plus 1 manual edit become 2 views', () => {
+    const manual = entry({ id: 'manual', actor: 'edit by a@b.c', createdAt: '2026-10-10T03:00:00.000Z' })
+    const seeded = systemRows('s', '2026-10-10T02:00:53.000Z', { tours: 33, departures: 21 })
+    const views = buildChangeViews([manual, ...seeded], ctx)
+    expect(views).toHaveLength(2)
+    expect(views[0].id).toBe('manual')
+    expect(views[1]).toEqual({
+      id: 's-0',
+      createdAt: '2026-10-10T02:00:53.000Z',
+      actorLabel: SYSTEM_LABEL,
+      source: 'system',
+      tourId: null,
+      tourName: '',
+      summary: '系统：新增 33 个团、21 个班期',
+    })
+  })
+
+  it('two system batches ten minutes apart stay two views', () => {
+    const later = systemRows('b', '2026-10-10T02:10:10.000Z', { tours: 2, departures: 0 })
+    const earlier = systemRows('a', '2026-10-10T02:00:10.000Z', { tours: 3, departures: 1 })
+    const views = buildChangeViews([...later, ...earlier], ctx)
+    expect(views.map((view) => view.summary)).toEqual(['系统：新增 2 个团', '系统：新增 3 个团、1 个班期'])
+    expect(views.map((view) => view.createdAt)).toEqual(['2026-10-10T02:10:10.000Z', '2026-10-10T02:00:10.000Z'])
+  })
+
+  it('a single system row is not collapsed', () => {
+    const lone = entry({ id: 'lone', action: 'insert', actor: 'seed', after: { name: 'Solo' } })
+    const views = buildChangeViews([lone], ctx)
+    expect(views).toHaveLength(1)
+    expect(views[0].summary).toBe('新增团')
+    expect(views[0].tourId).toBe('t1')
+  })
+
+  it('rows exactly 120 seconds apart join; 121 seconds apart do not', () => {
+    const at = (id: string, iso: string) => entry({ id, action: 'insert', actor: 'seed', createdAt: iso })
+    const joined = buildChangeViews(
+      [at('x2', '2026-10-10T02:02:00.000Z'), at('x1', '2026-10-10T02:00:00.000Z')],
+      ctx,
+    )
+    expect(joined).toHaveLength(1)
+    const apart = buildChangeViews(
+      [at('y2', '2026-10-10T02:02:01.000Z'), at('y1', '2026-10-10T02:00:00.000Z')],
+      ctx,
+    )
+    expect(apart).toHaveLength(2)
+  })
+
+  it('a manual edit in the middle splits a run, and only non-zero kinds are listed', () => {
+    const mixed: ChangeLogEntry[] = [
+      entry({ id: 'u1', entity: 'departure', action: 'update', actor: 'seed', createdAt: '2026-10-10T02:00:09.000Z' }),
+      entry({ id: 'd1', entity: 'tour', action: 'delete', actor: 'seed', createdAt: '2026-10-10T02:00:08.000Z' }),
+      entry({ id: 'u2', entity: 'tour', action: 'update', actor: 'seed', createdAt: '2026-10-10T02:00:07.000Z' }),
+      entry({ id: 'm', actor: 'edit by a@b.c', createdAt: '2026-10-10T02:00:06.000Z' }),
+      entry({ id: 'i1', entity: 'tour', action: 'insert', actor: 'seed', createdAt: '2026-10-10T02:00:05.000Z' }),
+      entry({ id: 'i2', entity: 'tour', action: 'insert', actor: 'seed', createdAt: '2026-10-10T02:00:04.000Z' }),
+    ]
+    const views = buildChangeViews(mixed, ctx)
+    expect(views.map((view) => view.summary)).toEqual([
+      '系统：更新 1 个团、1 个班期、删除 1 个团',
+      '已保存（内容没有变化）',
+      '系统：新增 2 个团',
+    ])
+    expect(views[1].source).toBe('manual')
+  })
+
+  it('a client editor sees the same collapsed line, labelled 系统', () => {
+    const editorCtx = { tourNames: new Map<string, string>(), label: makeActorLabeler('client_editor', new Set()) }
+    const views = buildChangeViews(systemRows('s', '2026-10-10T02:00:10.000Z', { tours: 2, departures: 0 }), editorCtx)
+    expect(views).toHaveLength(1)
+    expect(views[0].actorLabel).toBe(SYSTEM_LABEL)
+  })
+})
+
+describe('trimDepartureForViewer', () => {
+  const departure = {
+    id: 'd1',
+    tourId: 't1',
+    clientId: 'c1',
+    departOn: '2027-01-01',
+    returnOn: null,
+    priceTextOverride: null,
+    status: 'open' as const,
+    internal: { airline: 'SECRET-AIR', capacity: 20, outboundRoute: 'AKL-PVG' },
+    updatedAt: 'v1',
+  }
+
+  it('hands a Magic Engine admin the row as it is', () => {
+    expect(trimDepartureForViewer('me_admin', departure)).toBe(departure)
+  })
+
+  it('empties internal for a client editor without touching the original', () => {
+    const trimmed = trimDepartureForViewer('client_editor', departure)
+    expect(trimmed.internal).toEqual({})
+    expect(JSON.stringify(trimmed)).not.toContain('SECRET-AIR')
+    expect({ ...trimmed, internal: departure.internal }).toEqual(departure)
+    expect(departure.internal.airline).toBe('SECRET-AIR')
   })
 })
 

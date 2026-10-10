@@ -8,6 +8,7 @@
  */
 
 import { useState } from 'react'
+import { useChannelsConnected } from './catalog-context'
 import { norm } from '@/lib/tour-catalog/normalize'
 import type {
   CatalogTourView,
@@ -15,6 +16,9 @@ import type {
   PreviewRejectedView,
   PreviewWarningView,
 } from './types'
+
+/** While no channel reads the catalog: say "not published yet", nothing about customers. */
+const IMPORT_DRAFT_ONLY_TEXT = '导入只改草稿，还没上架；导入后还要点上面的「查看并上架」。'
 
 /** Chinese labels for departure statuses. Local copy to avoid importing server-only modules. */
 const STATUS_LABELS: Record<string, string> = {
@@ -101,6 +105,7 @@ export function ImportPanel({
   const [ackWarnings, setAckWarnings] = useState(false)
   const [applying, setApplying] = useState(false)
   const [applied, setApplied] = useState(false)
+  const connected = useChannelsConnected()
 
   // Clear the preview/result area but keep the「已导入」message visible.
   const clearPreview = () => {
@@ -180,7 +185,10 @@ export function ImportPanel({
       <div>
         <h2 className="font-display font-black text-me-charcoal">上传出团表</h2>
         <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
-          选一份出团表文件（Excel 另存为 CSV 格式），先预览会改什么，确认没问题再导入。导入只改草稿，客人看不到；导入后还要点上面的「查看并上架」才会对外生效。
+          选一份出团表文件（Excel 另存为 CSV 格式），先预览会改什么，确认没问题再导入。
+          {connected
+            ? '导入只改草稿，客人看不到；导入后还要点上面的「查看并上架」才会对外生效。'
+            : IMPORT_DRAFT_ONLY_TEXT}
         </p>
       </div>
 
@@ -201,7 +209,7 @@ export function ImportPanel({
       </div>
 
       {applied && (
-        <p className="text-sm font-black text-[#5C8A4A]">已导入到草稿，客人还看不到；上架后才对外</p>
+        <p className="text-sm font-black text-[#456F35]">{connected ? '已导入到草稿，客人还看不到；上架后才对外' : '已导入到草稿，还没上架；还要点上面的「查看并上架」。'}</p>
       )}
 
       {state.phase === 'error' && (

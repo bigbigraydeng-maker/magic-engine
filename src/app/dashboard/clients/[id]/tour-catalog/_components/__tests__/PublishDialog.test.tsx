@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { screen, fireEvent, waitFor } from '@testing-library/react'
+import { renderConnected as render } from './render-connected'
 import type {
   PublishChange,
   PublishPreviewResponse,
@@ -388,5 +389,90 @@ describe('PublishDialog contributors and wording', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText(/客人在官网等地方看到的内容/)).toBeNull()
+  })
+})
+
+describe('PublishDialog: system is not an account', () => {
+  function line(contributors: Array<{ actorLabel: string; changes: number }>): string | null {
+    renderDialog({ ...makePreview(), contributors }, vi.fn())
+    return screen.queryByTestId('publish-contributors')?.textContent ?? null
+  }
+
+  it('counts only real accounts and reports system read-ins separately', () => {
+    expect(
+      line([
+        { actorLabel: 'amy@example.test', changes: 3 },
+        { actorLabel: '系统', changes: 54 },
+      ]),
+    ).toBe(
+      '这次包含 1 个账号的修改：amy@example.test 3 处，另有系统读入 54 处。上架会把所有人还没上架的修改一起发出去。',
+    )
+  })
+
+  it('with only system records, no account is counted at all', () => {
+    expect(line([{ actorLabel: '系统', changes: 54 }])).toBe(
+      '这次的修改是系统读入的 54 处。上架会把所有人还没上架的修改一起发出去。',
+    )
+  })
+})
+
+describe('PublishDialog small things', () => {
+  it('says which number to type once a wrong one was entered, and nothing before typing', () => {
+    renderDialog(
+      makePreview({ sellable: { before: 5, after: 2, needsCountConfirm: true } }),
+      vi.fn(),
+    )
+    expect(screen.queryByText('数字不对，应该输入 2')).toBeNull()
+    const input = screen.getByLabelText('输入上架后的可售团数')
+    fireEvent.change(input, { target: { value: '5' } })
+    expect(screen.getByRole('alert').textContent).toBe('数字不对，应该输入 2')
+    fireEvent.change(input, { target: { value: ' 2 ' } })
+    expect(screen.queryByText('数字不对，应该输入 2')).toBeNull()
+  })
+
+  it('the 关闭 button never wraps', () => {
+    renderDialog(makePreview(), vi.fn())
+    expect(screen.getByRole('button', { name: '关闭' }).className).toContain('whitespace-nowrap')
+  })
+
+  it('channels not connected: nothing in the dialog says 对外 or 客人', () => {
+    vi.stubGlobal('fetch', vi.fn())
+    const preview = makePreview({
+      firstPublish: true,
+      publishedVersion: 0,
+      changes: [],
+      sellable: { before: 0, after: 1, needsCountConfirm: true },
+      firstPublishRows: [
+        { tourId: 't1', tourName: 'Coral Loop', displayPriceText: null, upcomingDepartures: 0, nextDepartOn: null, sellable: true },
+      ],
+    })
+    render(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <PublishDialog clientId="c1" preview={preview} onRefresh={vi.fn()} onClose={vi.fn()} onPublished={vi.fn()} />
+      </CatalogUiProvider>,
+    )
+    expect(
+      screen.getByText('这是第一次上架：上架后可售的团共 1 个。请输入这个数字确认。'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('首次上架：共 1 个团，其中 1 个可售')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '是否可售' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/对外|客人/)
+  })
+
+  it('channels not connected: the red-row legend and the after-revert tick do not mention customers', () => {
+    vi.stubGlobal('fetch', vi.fn())
+    render(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <PublishDialog
+          clientId="c1"
+          preview={makePreview({ afterRevert: { toVersion: 2 } })}
+          onRefresh={vi.fn()}
+          onClose={vi.fn()}
+          onPublished={vi.fn()}
+        />
+      </CatalogUiProvider>,
+    )
+    expect(screen.getByLabelText(/我知道上一次是把已上架的内容换回了第 2 版/)).toBeInTheDocument()
+    expect(screen.getByRole('dialog').textContent).not.toMatch(/对外|客人/)
   })
 })

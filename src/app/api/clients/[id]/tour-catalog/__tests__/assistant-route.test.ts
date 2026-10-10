@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { adminAccess } from './access-fixtures'
 
 // vi.mock is hoisted above plain consts, so the mock fns must come from vi.hoisted.
-const { requireCatalogAccess, loadDraftCatalog, runAssistant, reserveAssistantCall, recordAssistantCost } =
+const { requireCatalogAccess, loadDraftCatalog, runAssistant, reserveAssistantCall, recordAssistantCost, getSettings } =
   vi.hoisted(() => ({
+    getSettings: vi.fn(),
     requireCatalogAccess: vi.fn(),
     loadDraftCatalog: vi.fn(),
     runAssistant: vi.fn(),
@@ -13,7 +14,7 @@ const { requireCatalogAccess, loadDraftCatalog, runAssistant, reserveAssistantCa
 
 vi.mock('@/lib/tour-catalog/access', () => ({ requireCatalogAccess }))
 vi.mock('@/lib/tour-catalog/store', () => ({ loadDraftCatalog }))
-vi.mock('@/lib/tour-catalog/store-access', () => ({ reserveAssistantCall, recordAssistantCost }))
+vi.mock('@/lib/tour-catalog/store-access', () => ({ reserveAssistantCall, recordAssistantCost, getSettings }))
 // Keep the real limits and error class; only the model call is replaced.
 vi.mock('@/lib/tour-catalog/assistant', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tour-catalog/assistant')>()),
@@ -46,6 +47,7 @@ beforeEach(() => {
   runAssistant.mockResolvedValue({ reply: 'ok', proposals: [], costUsd: 0.01 })
   reserveAssistantCall.mockResolvedValue('ok')
   recordAssistantCost.mockResolvedValue(undefined)
+  getSettings.mockResolvedValue({ logoUrl: null, brandPrimary: null, brandSecondary: null, channelsConnected: false })
 })
 
 describe('POST tour-catalog assistant route', () => {
@@ -274,5 +276,22 @@ describe('daily allowance (design §6.10.1 item 9)', () => {
       'staff@example.com',
       expect.anything(),
     )
+  })
+
+  it('passes channelsConnected from the saved settings; unreadable settings count as not connected', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(getSettings).toHaveBeenLastCalledWith(expect.anything(), CLIENT_ID)
+    expect(runAssistant).toHaveBeenLastCalledWith(expect.objectContaining({ channelsConnected: false }))
+
+    getSettings.mockResolvedValue({ logoUrl: null, brandPrimary: null, brandSecondary: null, channelsConnected: true })
+    await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(runAssistant).toHaveBeenLastCalledWith(expect.objectContaining({ channelsConnected: true }))
+
+    getSettings.mockRejectedValue(new Error('settings down'))
+    const res = await POST(makeRequest({ message: 'hi' }), makeContext())
+    expect(res.status).toBe(200)
+    expect(runAssistant).toHaveBeenLastCalledWith(expect.objectContaining({ channelsConnected: false }))
+    spy.mockRestore()
   })
 })

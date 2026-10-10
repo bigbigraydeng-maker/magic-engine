@@ -419,12 +419,25 @@ reply 描述的是**将要**做的改动，不是已经做完的。例如「准�
 
 {catalog}`
 
-/** The viewer may publish: point them at the publish button. */
-const PUBLISH_RULE_CAN_PUBLISH =
-  '- **上架 / 发布**。你只能提出对草稿的修改建议；草稿存下后客人还看不到，必须由管理员在页面上点［查看并上架］才对外生效。管理员说「上架」「发布」时，不要调用 propose_changes，用普通文本回复：请点页面上的［查看并上架］。'
-/** The viewer may not publish (client staff): point them at the request button instead. */
-const PUBLISH_RULE_CANNOT_PUBLISH =
-  '- **上架 / 发布**。你只能提出对草稿的修改建议；草稿存下后客人还看不到。你和当前使用者都不能上架；使用者说「上架」「发布」时，不要调用 propose_changes，用普通文本回复：请他点页面上的［请 Magic Engine 上架］。'
+/**
+ * What the assistant says about publishing. Two independent facts decide the wording:
+ *  - may the person talking publish (else: point them at the request button);
+ *  - is the published catalog wired to any outward channel yet (design §6.10.1 item 5). While it
+ *    is not, the assistant must not promise that customers will see anything.
+ */
+export function buildPublishRule(viewerCanPublish: boolean, channelsConnected: boolean): string {
+  const head = '- **上架 / 发布**。你只能提出对草稿的修改建议；'
+  if (channelsConnected) {
+    return viewerCanPublish
+      ? `${head}草稿存下后客人还看不到，必须由管理员在页面上点［查看并上架］才对外生效。管理员说「上架」「发布」时，不要调用 propose_changes，用普通文本回复：请点页面上的［查看并上架］。`
+      : `${head}草稿存下后客人还看不到。你和当前使用者都不能上架；使用者说「上架」「发布」时，不要调用 propose_changes，用普通文本回复：请他点页面上的［请 Magic Engine 上架］。`
+  }
+  const notConnected =
+    '草稿存下后还没上架；上架后的目录目前还没有接到官网等渠道，所以不要承诺上架后官网、广告或邮件会跟着变。'
+  return viewerCanPublish
+    ? `${head}${notConnected}上架要由管理员在页面上点［查看并上架］。管理员说「上架」「发布」时，不要调用 propose_changes，用普通文本回复：请点页面上的［查看并上架］。`
+    : `${head}${notConnected}你和当前使用者都不能上架；使用者说「上架」「发布」时，不要调用 propose_changes，用普通文本回复：请他点页面上的［请 Magic Engine 上架］。`
+}
 
 const FOCUS_RULES = `规则：
 - 管理员没有点名哪个团时（例如「出发日期」「这个团」「第 3 天」「价格加 100」），一律指这个团，**不要反问是哪个团**。
@@ -471,12 +484,11 @@ export function buildSystemPrompt(
   catalogIndex: string,
   focusSection: string,
   viewerCanPublish: boolean,
+  channelsConnected: boolean,
 ): string {
   // Function replacers: tour text may contain "$&"-style sequences that String.replace would expand.
   // {catalog} is replaced last so that nothing inside the catalog text can be taken for a placeholder.
-  return SYSTEM_PROMPT.replace('{publish_rule}', () =>
-    viewerCanPublish ? PUBLISH_RULE_CAN_PUBLISH : PUBLISH_RULE_CANNOT_PUBLISH,
-  )
+  return SYSTEM_PROMPT.replace('{publish_rule}', () => buildPublishRule(viewerCanPublish, channelsConnected))
     .replace('{today}', () => today)
     .replace('{catalog}', () => `${catalogIndex}\n\n${focusSection}`)
 }
@@ -567,6 +579,8 @@ export async function runAssistant(
     focusTourId?: string | null
     /** Whether the person talking may publish; decides what the assistant says about publishing. */
     viewerCanPublish: boolean
+    /** Whether the published catalog feeds any outward channel yet; false = promise nothing about customers. */
+    channelsConnected: boolean
   },
   deps?: AssistantDeps,
 ): Promise<AssistantResult> {
@@ -578,6 +592,7 @@ export async function runAssistant(
     buildCatalogIndex(snapshot),
     buildFocusSection(snapshot, input.focusTourId ?? null),
     input.viewerCanPublish,
+    input.channelsConnected,
   )
   const messages: Anthropic.MessageParam[] = [
     ...history.slice(-HISTORY_LIMIT).map((m) => ({ role: m.role, content: m.content })),

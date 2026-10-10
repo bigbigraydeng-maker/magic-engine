@@ -327,8 +327,8 @@ describe('listMembers', () => {
       },
     ]
     state.tables.client_portal_users = [
-      { client_id: 'client-1', email: 'Staff@CTS.Example' },
-      { client_id: 'client-2', email: 'nologin@cts.example' },
+      { client_id: 'client-1', email: 'Staff@CTS.Example', access_type: 'dashboard' },
+      { client_id: 'client-2', email: 'nologin@cts.example', access_type: 'both' },
     ]
     const members = await listMembers(db, 'client-1')
     expect(members).toEqual([
@@ -346,6 +346,36 @@ describe('listMembers', () => {
       },
     ])
   })
+  it('hasLogin is true only for access types that can enter the back office', async () => {
+    const { db, state } = makeDb()
+    const types = ['client', 'dashboard', 'fde', 'both', 'portal', 'self_serve', 'something_new', '']
+    state.tables.tour_catalog_members = types.map((type, index) => ({
+      client_id: 'client-1',
+      email: `m${index}@cts.example`,
+      granted_by: 'admin@example.com',
+      created_at: `2026-01-0${index + 1}T00:00:00Z`,
+    }))
+    state.tables.client_portal_users = types.map((type, index) => ({
+      client_id: 'client-1',
+      email: `m${index}@cts.example`,
+      access_type: type,
+    }))
+    const members = await listMembers(db, 'client-1')
+    expect(members.map((member) => member.hasLogin)).toEqual([true, true, true, true, false, false, false, false])
+  })
+
+  it('a portal-only row does not hide a second, dashboard row for the same email', async () => {
+    const { db, state } = makeDb()
+    state.tables.tour_catalog_members = [
+      { client_id: 'client-1', email: 'two@cts.example', granted_by: 'admin@example.com', created_at: '2026-01-01T00:00:00Z' },
+    ]
+    state.tables.client_portal_users = [
+      { client_id: 'client-1', email: 'two@cts.example', access_type: 'portal' },
+      { client_id: 'client-1', email: 'TWO@cts.example', access_type: 'client' },
+    ]
+    expect((await listMembers(db, 'client-1'))[0].hasLogin).toBe(true)
+  })
+
   it('still returns members with hasLogin false when the portal lookup errors', async () => {
     const { db, state } = makeDb()
     state.tables.tour_catalog_members = [
@@ -570,29 +600,51 @@ describe('getPendingPublishRequest', () => {
 })
 
 describe('upsertPublishRequest', () => {
-  it('inserts then updates the same open row', async () => {
+  const savedRow = {
+    id: 'r-1',
+    requested_by: 'a@example.com',
+    draft_version: 4,
+    note: 'please',
+    created_at: '2026-10-10T01:00:00Z',
+  }
+
+  it('asks the database once, atomically, and never writes the table itself', async () => {
     const { db, state } = makeDb()
-    const first = await upsertPublishRequest(db, 'client-1', 'a@example.com', 1, 'first')
-    expect(first.requestedBy).toBe('a@example.com')
-    expect(first.draftVersion).toBe(1)
-    expect(first.note).toBe('first')
-
-    const second = await upsertPublishRequest(db, 'client-1', 'b@example.com', 2, 'second')
-    expect(second.requestedBy).toBe('b@example.com')
-    expect(second.draftVersion).toBe(2)
-    expect(second.note).toBe('second')
-
-    const open = state.tables.tour_catalog_publish_requests.filter(
-      (row) => row.client_id === 'client-1' && row.handled_at === null,
-    )
-    expect(open).toHaveLength(1)
+    state.rpcResults.tour_catalog_request_publish = { data: savedRow, error: null }
+    const saved = await upsertPublishRequest(db, 'client-1', 'a@example.com', 4, 'please')
+    expect(state.rpcCalls).toEqual([
+      {
+        name: 'tour_catalog_request_publish',
+        args: {
+          p_client_id: 'client-1',
+          p_requested_by: 'a@example.com',
+          p_draft_version: 4,
+          p_note: 'please',
+        },
+      },
+    ])
+    expect(state.writes).toEqual([])
+    expect(saved).toEqual({
+      id: 'r-1',
+      requestedBy: 'a@example.com',
+      note: 'please',
+      createdAt: '2026-10-10T01:00:00Z',
+      draftVersion: 4,
+    })
   })
 
-  it('gives another client its own row', async () => {
+  it('throws the database message when the request is refused', async () => {
     const { db, state } = makeDb()
-    await upsertPublishRequest(db, 'client-1', 'a@example.com', 1, 'one')
-    await upsertPublishRequest(db, 'client-2', 'b@example.com', 1, 'two')
-    expect(state.tables.tour_catalog_publish_requests).toHaveLength(2)
+    state.rpcResults.tour_catalog_request_publish = { data: null, error: { message: 'invalid_actor' } }
+    await expect(upsertPublishRequest(db, 'client-1', ' ', 4, '')).rejects.toThrow('invalid_actor')
+  })
+
+  it('throws when the database answers without a row', async () => {
+    const { db, state } = makeDb()
+    state.rpcResults.tour_catalog_request_publish = { data: null, error: null }
+    await expect(upsertPublishRequest(db, 'client-1', 'a@example.com', 4, '')).rejects.toThrow(
+      'publish_request_not_saved',
+    )
   })
 })
 

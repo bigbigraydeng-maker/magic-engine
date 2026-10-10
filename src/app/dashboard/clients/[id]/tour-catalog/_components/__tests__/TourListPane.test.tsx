@@ -225,7 +225,12 @@ describe('tour-list-helpers', () => {
       after: '2000',
       risk: 'normal',
     }
-    expect(draftChangeLine(base)).toBe('展示价：对外现在 1000 → 草稿 2000')
+    expect(draftChangeLine(base, true)).toBe('展示价：对外现在 1000 → 草稿 2000')
+    // nothing reads the catalog yet: say what is published, not what is outward
+    expect(draftChangeLine(base, false)).toBe('展示价：已上架 1000 → 草稿 2000')
+    expect(draftChangeLine({ ...base, departOn: '2027-05-13' }, false)).toBe(
+      '2027-05-13 展示价：已上架 1000 → 草稿 2000',
+    )
   })
 
   it('compactPrice keeps only the amount for a list row', () => {
@@ -253,5 +258,26 @@ describe('tour-list-helpers', () => {
     ])
     expect(groups.map(g => g.tourId)).toEqual(['b', 'a', 'c'])
     expect(groups[0].changes.map(c => c.risk)).toEqual(['high', 'normal'])
+  })
+})
+
+describe('TourListPane 有改动未上架 before anything was published', () => {
+  it('explains that nothing is published yet instead of "no match"', () => {
+    renderPane({ neverPublished: true })
+    fireEvent.click(screen.getByRole('button', { name: '有改动未上架' }))
+    expect(screen.getByText('还没上架过，所有团都还没上架。')).toBeInTheDocument()
+    expect(screen.queryByText('没有符合条件的团')).toBeNull()
+  })
+
+  it('keeps the plain empty line once something was published, and for other filters', () => {
+    renderPane({ neverPublished: false })
+    fireEvent.click(screen.getByRole('button', { name: '有改动未上架' }))
+    expect(screen.getByText('没有符合条件的团')).toBeInTheDocument()
+  })
+
+  it('a search with no hit before the first publish is still just "no match"', () => {
+    renderPane({ neverPublished: true })
+    fireEvent.change(screen.getByLabelText('按团名搜索'), { target: { value: 'zzzz' } })
+    expect(screen.getByText('没有符合条件的团')).toBeInTheDocument()
   })
 })

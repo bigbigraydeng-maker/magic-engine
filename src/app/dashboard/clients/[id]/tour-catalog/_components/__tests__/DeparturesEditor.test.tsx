@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { renderConnected as render } from './render-connected'
 import { DeparturesEditor } from '../DeparturesEditor'
 import { ChangeLog } from '../ChangeLog'
 import type { CatalogDepartureView } from '../types'
@@ -549,5 +550,84 @@ describe('ChangeLog', () => {
     expect(onDirtyChange).toHaveBeenLastCalledWith(true)
     fireEvent.change(price, { target: { value: '' } })
     expect(onDirtyChange).toHaveBeenLastCalledWith(false)
+  })
+})
+
+describe('DeparturesEditor when a save is refused', () => {
+  const scrollIntoView = vi.fn()
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    scrollIntoView.mockClear()
+    Element.prototype.scrollIntoView = scrollIntoView
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  function refuse(fields: Array<{ field: string; code: string }>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse({ error: 'invalid_fields', fields }, false, 400)),
+    )
+  }
+
+  it('edit form: focuses the refused input and says so beside 保存', async () => {
+    refuse([{ field: 'priceTextOverride', code: 'invalid_price_format' }])
+    render(
+      <DeparturesEditor clientId="c1" tourId="tour-1" departures={[makeDeparture()]} onChanged={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByText('修改'))
+    const price = within(screen.getByText('保存').closest('td') as HTMLElement).getByRole('textbox')
+    fireEvent.change(price, { target: { value: '1199' } })
+    fireEvent.click(screen.getByText('保存'))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('有 1 项填得不对，已跳到第一处')
+    await waitFor(() => expect(document.activeElement).toBe(price))
+    expect(scrollIntoView.mock.instances[0]).toBe(price)
+  })
+
+  it('add form: focuses the refused input and says so beside the add button', async () => {
+    refuse([{ field: 'departOn', code: 'invalid_date' }])
+    const { container } = render(
+      <DeparturesEditor clientId="c1" tourId="tour-1" departures={[]} onChanged={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByText('添加这个班期'))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe('有 1 项填得不对，已跳到第一处')
+    const departInput = container.querySelector('form input[type="date"]')
+    await waitFor(() => expect(document.activeElement).toBe(departInput))
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('DeparturesEditor price hint and narrow layout', () => {
+  it('shows how to write a price under 该班展示价 in the add form and in the edit form', () => {
+    render(
+      <DeparturesEditor clientId="c1" tourId="tour-1" departures={[makeDeparture()]} onChanged={vi.fn()} />,
+    )
+    const text = '写法例：From NZD $4,999 per person；还没定写 TBC'
+    expect(screen.getAllByText(text)).toHaveLength(1)
+    fireEvent.click(screen.getByText('修改'))
+    expect(screen.getAllByText(text)).toHaveLength(2)
+  })
+
+  it('every cell carries its own label, so a narrow screen can stack them as a card', () => {
+    render(
+      <DeparturesEditor
+        clientId="c1"
+        tourId="tour-1"
+        departures={[makeDeparture({ priceTextOverride: 'TBC' })]}
+        onChanged={vi.fn()}
+      />,
+    )
+    const row = screen.getByText('2027-05-13').closest('tr') as HTMLElement
+    const labels = Array.from(row.querySelectorAll('td')).map(td => td.getAttribute('data-label'))
+    expect(labels).toEqual(['出团日', '返程日', '状态', '该班展示价', '操作'])
+    // stacked below 640px, a normal table row from there up
+    expect(row.className).toContain('block')
+    expect(row.className).toContain('sm:table-row')
+    expect(row.closest('table')?.querySelector('thead')?.className).toContain('hidden')
   })
 })

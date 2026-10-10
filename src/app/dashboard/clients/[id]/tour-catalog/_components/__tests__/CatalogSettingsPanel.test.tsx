@@ -114,8 +114,12 @@ describe('CatalogSettingsPanel members', () => {
     renderPanel()
     const amy = await screen.findByTestId('member-amy@example.test')
     const ben = screen.getByTestId('member-ben@example.test')
-    expect(within(amy).getByText('还没有登录账号')).toBeInTheDocument()
-    expect(within(ben).queryByText('还没有登录账号')).not.toBeInTheDocument()
+    expect(
+      within(amy).getByText(
+        '还没有这个客户的登录账号——先在客户主页「设置 → 用户权限」里给他开通，再让他登录',
+      ),
+    ).toBeInTheDocument()
+    expect(within(ben).queryByText(/还没有这个客户的登录账号/)).not.toBeInTheDocument()
   })
 
   it('adds a member with a normalised email', async () => {
@@ -135,7 +139,9 @@ describe('CatalogSettingsPanel members', () => {
     await screen.findByTestId('member-amy@example.test')
     fireEvent.change(screen.getByLabelText('邮箱'), { target: { value: 'bob' } })
     fireEvent.click(screen.getByRole('button', { name: '加入名单' }))
-    expect(await screen.findByText(MEMBERS_BAD_EMAIL)).toBeInTheDocument()
+    const message = await screen.findByText(MEMBERS_BAD_EMAIL)
+    // right under the input it is about, not at the top of the card
+    expect(message.previousElementSibling).toBe(screen.getByLabelText('邮箱'))
     const postCall = fetchMock.mock.calls.find(call => (call[1] as RequestInit | undefined)?.method === 'POST')
     expect(postCall).toBeUndefined()
   })

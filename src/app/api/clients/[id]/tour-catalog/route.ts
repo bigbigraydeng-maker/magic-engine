@@ -7,7 +7,7 @@ import {
   getSettings,
   listMemberEmails,
 } from '@/lib/tour-catalog/store-access'
-import { makeActorLabeler } from '@/lib/tour-catalog/changes-view'
+import { makeActorLabeler, trimDepartureForViewer } from '@/lib/tour-catalog/changes-view'
 import { normalizeDomain } from '@/lib/tour-catalog/seed'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { CatalogAccessEnvelope, PublishRequestView } from '@/lib/tour-catalog/catalog-contract'
@@ -54,10 +54,7 @@ export async function GET(
       settings: await getSettings(supabaseAdmin, clientId),
       pendingPublishRequest: await pendingRequestFor(clientId, viewer.role, viewer.email),
     }
-    const departures =
-      viewer.role === 'me_admin'
-        ? snapshot.departures
-        : snapshot.departures.map((departure) => ({ ...departure, internal: {} }))
+    const departures = snapshot.departures.map((departure) => trimDepartureForViewer(viewer.role, departure))
     return NextResponse.json({
       tours: snapshot.tours,
       departures,

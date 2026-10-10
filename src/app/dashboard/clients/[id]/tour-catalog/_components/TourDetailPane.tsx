@@ -7,7 +7,7 @@ import { TourEditor } from './TourEditor'
 import { DeparturesEditor } from './DeparturesEditor'
 import { ChangeLog } from './ChangeLog'
 import { priceText, upcomingCount, savedAsDraftText } from './catalog-format'
-import { useCatalogUi } from './catalog-context'
+import { useCatalogUi, useChannelsConnected } from './catalog-context'
 import { draftChangeLine, sortByRisk } from './tour-list-helpers'
 
 export interface TourDetailPaneProps {
@@ -23,6 +23,10 @@ export interface TourDetailPaneProps {
   /** Narrow screens: go back to the list. */
   onBack: () => void
   onOpenPublish: () => void
+  /** True once the publish status says the draft equals what is published. */
+  inSync?: boolean
+  /** Draft revision of the publish status; moves after every save. */
+  draftVersion?: number | null
 }
 
 export function TourDetailPane(props: TourDetailPaneProps): JSX.Element {
@@ -65,6 +69,7 @@ function DetailHeader(props: {
 
 function UnpublishedBox(props: { changes: PublishChange[] }): JSX.Element | null {
   const { changes } = props
+  const connected = useChannelsConnected()
   if (changes.length === 0) return null
   const sorted = sortByRisk(changes)
   return (
@@ -84,7 +89,7 @@ function UnpublishedBox(props: { changes: PublishChange[] }): JSX.Element | null
                 : 'text-sm font-semibold text-me-charcoal/70'
             }
           >
-            {draftChangeLine(change)}
+            {draftChangeLine(change, connected)}
           </li>
         ))}
       </ul>
@@ -114,7 +119,7 @@ function SavedNotice(props: { onOpenPublish: () => void }): JSX.Element {
   const { onOpenPublish } = props
   const { channelsConnected, canPublish } = useCatalogUi()
   return (
-    <p role="status" className="text-sm font-black text-[#5C8A4A]">
+    <p role="status" className="text-sm font-black text-[#456F35]">
       {savedAsDraftText(channelsConnected)}{' '}
       <button type="button" onClick={onOpenPublish} className="ml-2 underline">
         {canPublish ? '去上架' : '请 Magic Engine 上架'}
@@ -163,6 +168,12 @@ function TourDetail(props: TourDetailPaneProps & { tour: CatalogTourView }): JSX
   const [editing, setEditing] = useState(false)
   const [saved, setSaved] = useState(false)
   const { setTourDirty, setDepDirty } = useDirtyReport(onDirtyChange)
+  const inSync = props.inSync === true
+
+  // Published (or the draft went back to what is published): "saved, not published yet" is no longer true.
+  useEffect(() => {
+    if (inSync) setSaved(false)
+  }, [inSync, props.draftVersion])
 
   // The editor is gone after save / cancel, so whatever it held is no longer pending.
   const closeEditor = () => {
@@ -176,8 +187,9 @@ function TourDetail(props: TourDetailPaneProps & { tour: CatalogTourView }): JSX
     <div className="space-y-4 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
       <button
         type="button"
+        data-testid="detail-back"
         onClick={onBack}
-        className="text-xs font-bold text-me-charcoal/55 hover:text-me-ochre lg:hidden"
+        className="scroll-mt-4 text-xs font-bold text-me-charcoal/55 hover:text-me-ochre lg:hidden"
       >
         ← 返回列表
       </button>
@@ -186,7 +198,7 @@ function TourDetail(props: TourDetailPaneProps & { tour: CatalogTourView }): JSX
 
       <UnpublishedBox changes={changes} />
 
-      {saved ? <SavedNotice onOpenPublish={onOpenPublish} /> : null}
+      {saved && !inSync ? <SavedNotice onOpenPublish={onOpenPublish} /> : null}
 
       <TourEditSection
         clientId={clientId}

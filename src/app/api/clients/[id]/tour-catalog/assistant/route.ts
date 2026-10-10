@@ -19,7 +19,7 @@ import {
   runAssistant,
 } from '@/lib/tour-catalog/assistant'
 import type { AssistantMessage } from '@/lib/tour-catalog/assistant'
-import { recordAssistantCost, reserveAssistantCall } from '@/lib/tour-catalog/store-access'
+import { getSettings, recordAssistantCost, reserveAssistantCall } from '@/lib/tour-catalog/store-access'
 import { todayIso } from '@/lib/tour-catalog/dates'
 
 export const dynamic = 'force-dynamic'
@@ -89,6 +89,16 @@ async function readAssistantRequest(request: Request): Promise<ParsedRequest> {
   return { ok: true, value: { message, history: parseHistory(record.history), focusTourId } }
 }
 
+/** Unknown counts as "not connected": the assistant then promises nothing about what customers see. */
+async function channelsConnectedFor(clientId: string): Promise<boolean> {
+  try {
+    return (await getSettings(supabaseAdmin, clientId)).channelsConnected === true
+  } catch (error) {
+    console.warn('[tour-catalog-assistant] settings unreadable, assuming channels not connected', error)
+    return false
+  }
+}
+
 /** Run the model for an already-reserved call; whatever it cost is recorded, success or failure. */
 async function runReserved(
   clientId: string,
@@ -101,7 +111,8 @@ async function runReserved(
   try {
     const snapshot = await loadDraftCatalog(supabaseAdmin, clientId)
     const today = todayIso(new Date())
-    const result = await runAssistant({ snapshot, ...input, today, viewerCanPublish })
+    const channelsConnected = await channelsConnectedFor(clientId)
+    const result = await runAssistant({ snapshot, ...input, today, viewerCanPublish, channelsConnected })
     costUsd = result.costUsd
 
     console.info('[tour-catalog-assistant]', { clientId, costUsd: result.costUsd })

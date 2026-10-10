@@ -56,7 +56,7 @@ export function SeedPanel({
           {busy ? '正在读取…' : '读入网站上现有的团'}
         </button>
       </div>
-      {message && <p className="mt-3 text-sm font-black text-[#5C8A4A]">{message}</p>}
+      {message && <p className="mt-3 text-sm font-black text-[#456F35]">{message}</p>}
       {error && <p className="mt-3 text-sm font-black text-[#C2453A]">{error}</p>}
     </div>
   )

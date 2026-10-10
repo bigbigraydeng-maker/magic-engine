@@ -29,6 +29,8 @@ const world = vi.hoisted(() => ({
   touches: [] as string[],
   /** Reads of the two membership tables (the gate itself needs at most one of each). */
   membershipReads: [] as string[],
+  /** Arguments of every `.rpc()` call, in order. */
+  rpcArgs: [] as Array<{ name: string; args: unknown }>,
 }))
 
 vi.mock('@/lib/supabase-server', () => ({
@@ -90,8 +92,9 @@ vi.mock('@/lib/supabase', () => {
         else world.touches.push(`from:${table}`)
         return query(table)
       },
-      rpc(name: string) {
+      rpc(name: string, args?: unknown) {
         world.touches.push(`rpc:${name}`)
+        world.rpcArgs.push({ name, args })
         return Promise.resolve({ data: null, error: null })
       },
     },
@@ -240,6 +243,7 @@ function signIn(email: string | null): void {
 beforeEach(() => {
   world.sessionEmail = null
   world.touches = []
+  world.rpcArgs = []
   world.membershipReads = []
   world.tables = { [PORTAL_USERS_TABLE]: [], [MEMBERS_TABLE]: [] }
   delete process.env.TOUR_CATALOG_LOCAL_TEST
@@ -407,6 +411,9 @@ describe('a listed client editor', () => {
       p(CLIENT_B, {}),
     )
     expect([401, 403]).not.toContain(res.status)
-    expect(world.touches.some((t) => t.startsWith('insert:'))).toBe(true)
+    const calls = world.rpcArgs.filter((call) => call.name === 'tour_catalog_request_publish')
+    expect(calls).toHaveLength(1)
+    expect(calls[0].args).toMatchObject({ p_client_id: CLIENT_B, p_requested_by: 'staff@b.test', p_note: 'x' })
+    expect(JSON.stringify(calls[0].args)).not.toContain('admin@me.test')
   })
 })

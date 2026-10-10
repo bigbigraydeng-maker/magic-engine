@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, sep } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 /**
@@ -19,7 +20,6 @@ const CATALOG_PREFIXES = [
   'src/lib/tour-catalog/',
   'src/app/api/clients/[id]/tour-catalog/',
   'src/app/dashboard/clients/[id]/tour-catalog/',
-  'src/app/tc-local-preview/',
 ]
 
 const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')
@@ -40,30 +40,24 @@ function isTestFile(path: string): boolean {
   return /\.(test|spec)\.(tsx?|mjs|js)$/.test(path) || path.includes('/__tests__/')
 }
 
-function listSourceFiles(dir: string, out: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
-    if (name === 'node_modules' || name.startsWith('.')) continue
-    const full = join(dir, name)
-    if (statSync(full).isDirectory()) {
-      listSourceFiles(full, out)
-    } else if (SOURCE_FILE.test(name)) {
-      out.push(full)
-    }
-  }
-  return out
-}
+/** Paths that exist only on a developer's machine for local trials and must never be committed. */
+const LOCAL_ONLY_PATHS = ['src/app/tc-local-preview', 'local-test/']
 
-function toRepoPath(full: string): string {
-  return relative(process.cwd(), full).split(sep).join('/')
+/** Tracked files only (repo-relative, forward slashes): untracked local trial pages take no part. */
+function trackedFiles(...paths: string[]): string[] {
+  const out = execFileSync('git', ['ls-files', '-z', ...paths], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  return out.split('\0').filter((path) => path !== '')
 }
 
 function allSourceFiles(): string[] {
-  const files: string[] = []
-  for (const root of ROOTS) {
-    const dir = join(process.cwd(), root)
-    if (existsSync(dir)) listSourceFiles(dir, files)
-  }
-  return files
+  return trackedFiles(...ROOTS).filter((path) => {
+    const name = path.slice(path.lastIndexOf('/') + 1)
+    return SOURCE_FILE.test(name) && !path.split('/').some((part) => part === 'node_modules' || part.startsWith('.'))
+  })
 }
 
 function isInsideCatalog(path: string): boolean {
@@ -127,10 +121,9 @@ function violationsIn(path: string, text: string): string[] {
 
 function findViolations(): string[] {
   const violations: string[] = []
-  for (const full of allSourceFiles()) {
-    const path = toRepoPath(full)
+  for (const path of allSourceFiles()) {
     if (isTestFile(path) || isInsideCatalog(path)) continue
-    violations.push(...violationsIn(path, readFileSync(full, 'utf8')))
+    violations.push(...violationsIn(path, readFileSync(join(process.cwd(), path), 'utf8')))
   }
   return violations
 }
@@ -149,7 +142,7 @@ describe('tour catalog draft boundary', () => {
   })
 
   it('the scan really sees files and the catalog really contains what it forbids elsewhere', () => {
-    const files = allSourceFiles().map(toRepoPath)
+    const files = allSourceFiles()
     expect(files.length).toBeGreaterThan(100)
     expect(files.some((path) => path.startsWith('scripts/'))).toBe(true)
     const store = readFileSync(join(process.cwd(), 'src', 'lib', 'tour-catalog', 'store.ts'), 'utf8')
@@ -158,6 +151,16 @@ describe('tour catalog draft boundary', () => {
     const routePath = 'src/app/api/clients/[id]/tour-catalog/publish/route.ts'
     const route = readFileSync(join(process.cwd(), routePath), 'utf8')
     expect(violationsIn('x.ts', route).length).toBeGreaterThan(0)
+  })
+
+  it('the local trial page and its data are not tracked, and get no exemption if they ever are', () => {
+    const tracked = trackedFiles()
+    expect(tracked.length).toBeGreaterThan(100)
+    expect(tracked.filter((path) => LOCAL_ONLY_PATHS.some((local) => path.startsWith(local)))).toEqual([])
+    // Not on the allow-list: a committed copy would be scanned like any other file and fail.
+    const sample = `import { loadDraftCatalog } from '@/lib/tour-catalog/store'`
+    expect(isInsideCatalog('src/app/tc-local-preview/page.tsx')).toBe(false)
+    expect(violationsIn('src/app/tc-local-preview/page.tsx', sample).length).toBeGreaterThan(0)
   })
 
   it('refuses every way of naming a catalog table', () => {

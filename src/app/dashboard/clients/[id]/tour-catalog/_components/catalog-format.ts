@@ -67,6 +67,9 @@ export function departureAddedText(channelsConnected: boolean): string {
   return channelsConnected ? '已新增到草稿，客人还看不到' : '已新增到草稿，还没上架'
 }
 
+/** Always shown under a price input, so the accepted way of writing is known before saving. */
+export const PRICE_HINT_TEXT = '写法例：From NZD $4,999 per person；还没定写 TBC'
+
 /** 导入记录状态的中文说法。 */
 export const BATCH_STATUS_LABELS: Record<string, string> = {
   previewed: '只预览未导入',

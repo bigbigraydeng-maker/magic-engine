@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { CatalogSnapshotResponse } from './types'
 import type { PublishPreviewResponse } from '@/lib/tour-catalog/publish-contract'
 import type { PublishPreviewState } from './usePublishPreview'
@@ -111,6 +111,30 @@ interface ToursTabColumnsProps {
   onOpenPublish: () => void
   onSelect: (id: string) => void
   onBack: () => void
+  detailRef: RefObject<HTMLDivElement>
+}
+
+/** Draft equals what is published (and something has been published). */
+function draftInSync(preview: PublishPreviewResponse | null): boolean {
+  if (preview === null || preview.firstPublish || preview.publishedVersion === 0) return false
+  return preview.changes.length === 0
+}
+
+/** Phones show list and detail one at a time. Same breakpoint as the `lg:` classes below. */
+function isNarrowScreen(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth < 1024
+}
+
+/** Narrow screens: after picking a tour the detail replaces the list, so bring its top into view. */
+function useScrollToDetail(active: boolean, tourId: string | null): RefObject<HTMLDivElement> {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!active || !isNarrowScreen()) return
+    const col = ref.current
+    const target = col?.querySelector<HTMLElement>('[data-testid="detail-back"]') ?? col
+    if (target && typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'start' })
+  }, [active, tourId])
+  return ref
 }
 
 function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
@@ -140,12 +164,17 @@ function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
           changedTourIds={preview?.changedTourIds ?? []}
           selectedId={selected?.id ?? null}
           onSelect={onSelect}
+          neverPublished={preview !== null && (preview.firstPublish || preview.publishedVersion === 0)}
         />
         {snapshot.permissions.import ? null : (
           <p className="mt-2 px-1 text-xs font-semibold text-me-charcoal/70">{IMPORT_BY_ME_TEXT}</p>
         )}
       </div>
-      <div data-testid="tour-detail-col" className={narrowDetail ? 'min-w-0' : 'hidden min-w-0 lg:block'}>
+      <div
+        ref={props.detailRef}
+        data-testid="tour-detail-col"
+        className={narrowDetail ? 'min-w-0 scroll-mt-4' : 'hidden min-w-0 lg:block'}
+      >
         <TourDetailPane
           key={`${selected?.id ?? 'none'}:${nonce}`}
           clientId={clientId}
@@ -158,6 +187,8 @@ function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
           onDirtyChange={guard.setDirty}
           onBack={onBack}
           onOpenPublish={onOpenPublish}
+          inSync={draftInSync(preview)}
+          draftVersion={preview?.draftVersion ?? null}
         />
       </div>
     </div>
@@ -171,6 +202,7 @@ function ToursTab(props: ToursTabProps): JSX.Element {
   const [nonce, setNonce] = useState(0)
 
   const selected = snapshot.tours.find(t => t.id === selectedId) ?? snapshot.tours[0] ?? null
+  const detailRef = useScrollToDetail(narrowDetail, selected?.id ?? null)
 
   const handleSelect = (id: string) => {
     if (id !== selected?.id) {
@@ -200,6 +232,7 @@ function ToursTab(props: ToursTabProps): JSX.Element {
       onOpenPublish={onOpenPublish}
       onSelect={handleSelect}
       onBack={handleBack}
+      detailRef={detailRef}
     />
   )
 }

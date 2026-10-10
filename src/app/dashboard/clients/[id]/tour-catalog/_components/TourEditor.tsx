@@ -3,9 +3,10 @@
 import { useEffect, useState } from 'react'
 import type { CatalogItineraryDayView, CatalogTourView } from './types'
 import type { TourSavedResponse } from '@/lib/tour-catalog/api-contract'
-import { savedAsDraftText } from './catalog-format'
+import { PRICE_HINT_TEXT, savedAsDraftText } from './catalog-format'
 import { BRAND_BUTTON_CLASS } from './catalog-brand'
 import { useChannelsConnected } from './catalog-context'
+import { errorSummaryText, useJumpToFirstError } from './useErrorJump'
 
 /** Asked before the "manages departures" switch is saved. Unconnected: promise nothing about channels. */
 function managesChangeText(turningOn: boolean, connected: boolean): string {
@@ -20,7 +21,7 @@ function managesChangeText(turningOn: boolean, connected: boolean): string {
 }
 
 const DANGER = '#C2453A'
-const SUCCESS = '#5C8A4A'
+const SUCCESS = '#456F35'
 const AMBER = '#B7791F'
 
 const ERROR_MESSAGES: Record<string, string> = {
@@ -275,10 +276,14 @@ function parseFieldErrors(fields: unknown): FieldErrors {
 function FieldError({ message }: { message?: string }) {
   if (!message) return null
   return (
-    <p className="mt-1 text-xs" style={{ color: DANGER }}>
+    <p data-field-error className="mt-1 text-xs" style={{ color: DANGER }}>
       {message}
     </p>
   )
+}
+
+function PriceHint() {
+  return <p className="mt-1 text-xs text-me-charcoal/60">{PRICE_HINT_TEXT}</p>
 }
 
 function InternalTag() {
@@ -371,6 +376,9 @@ export function TourEditor({
   const [status, setStatus] = useState<string | null>(null)
   const [statusColor, setStatusColor] = useState<string>(SUCCESS)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const [errorTick, setErrorTick] = useState(0)
+  const rootRef = useJumpToFirstError<HTMLDivElement>(errorTick)
+  const errorCount = Object.keys(fieldErrors).length
 
   const dirty = Object.keys(buildPatch(form, tour, touched)).length > 0
   useEffect(() => {
@@ -464,6 +472,7 @@ export function TourEditor({
       const code = typeof body.error === 'string' ? body.error : 'save_failed'
       if (code === 'invalid_fields') {
         setFieldErrors(parseFieldErrors(body.fields))
+        setErrorTick((n) => n + 1)
       }
       setStatusColor(DANGER)
       setStatus(serverErrorMessage(code))
@@ -480,7 +489,7 @@ export function TourEditor({
     durationN !== null && form.days.length > 0 && durationN !== form.days.length
 
   return (
-    <div className="space-y-4 rounded-xl border border-black/10 bg-white p-4">
+    <div ref={rootRef} className="space-y-4 rounded-xl border border-black/10 bg-white p-4">
       <div>
         <Label>团名</Label>
         <input
@@ -530,6 +539,7 @@ export function TourEditor({
           value={form.displayPriceText}
           onChange={(e) => update('displayPriceText', e.target.value)}
         />
+        <PriceHint />
         <FieldError message={fieldErrors.displayPriceText} />
       </div>
 
@@ -540,6 +550,7 @@ export function TourEditor({
           value={form.singleSupplement}
           onChange={(e) => update('singleSupplement', e.target.value)}
         />
+        <PriceHint />
         <FieldError message={fieldErrors.singleSupplement} />
       </div>
 
@@ -661,14 +672,8 @@ export function TourEditor({
         </label>
       </div>
 
-      {status && (
-        <p className="text-sm font-semibold" style={{ color: statusColor }}>
-          {status}
-        </p>
-      )}
-
       {/* Sticks to the bottom of the screen: the form is long and 保存 must stay reachable. */}
-      <div className="sticky bottom-0 z-10 -mx-2 flex items-center gap-3 border-t border-black/10 bg-white/90 px-2 py-3 backdrop-blur">
+      <div className="sticky bottom-0 z-10 -mx-2 flex flex-wrap items-center gap-3 border-t border-black/10 bg-white/90 px-2 py-3 backdrop-blur">
         <button
           type="button"
           onClick={handleSave}
@@ -684,6 +689,15 @@ export function TourEditor({
         >
           取消
         </button>
+        {errorCount > 0 ? (
+          <p role="alert" className="min-w-0 text-sm font-semibold" style={{ color: DANGER }}>
+            {errorSummaryText(errorCount)}
+          </p>
+        ) : status ? (
+          <p className="min-w-0 text-sm font-semibold" style={{ color: statusColor }}>
+            {status}
+          </p>
+        ) : null}
       </div>
     </div>
   )

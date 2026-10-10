@@ -775,7 +775,7 @@ export function AssistantPanel({
           type="button"
           onClick={() => { void send() }}
           disabled={busy || input.trim() === ''}
-          className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white hover:bg-me-charcoal/85 disabled:cursor-not-allowed disabled:opacity-40"
+          className="whitespace-nowrap rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white hover:bg-me-charcoal/85 disabled:cursor-not-allowed disabled:opacity-40"
         >
           发送
         </button>

@@ -138,11 +138,11 @@ export function publishRequestNoticeText(
       ? `${request.requestedBy} 在 ${time} 请你上架：${note}`
       : `${request.requestedBy} 在 ${time} 请你上架（没有留备注）`
   }
-  const base = `已通知 Magic Engine 团队 · ${time}`
+  const base = `已通知 Magic Engine 团队 · ${time}。还没上架`
   if (draftVersion !== null && request.draftVersion < draftVersion) {
-    return `${base}（之后又有新的修改，可以再提交一次更新说明）`
+    return `${base}；之后又有新的修改，可以再提交一次更新说明。`
   }
-  return base
+  return `${base}，对方核对后会上架。`
 }
 
 /** One line under the status bar about the open publish request. Renders nothing when there is none. */

@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent, waitFor } from '@testing-library/react'
+import { renderConnected as render } from './render-connected'
 import { ImportPanel } from '../ImportPanel'
-import type { CatalogTourView, PreviewResponse } from '../types'
+import { BatchHistory } from '../BatchHistory'
+import { CatalogUiProvider } from '../catalog-context'
+import type { CatalogBatchView, CatalogTourView, PreviewResponse } from '../types'
 
 const TOUR: CatalogTourView = {
   id: 't1',
@@ -105,5 +108,46 @@ describe('ImportPanel intro', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.queryByText(/班期表/)).toBeNull()
+  })
+})
+
+const BATCH: CatalogBatchView = {
+  id: 'b1',
+  kind: 'departures',
+  status: 'applied',
+  createdAt: '2026-10-10T03:30:00Z',
+  rowCounts: { adds: 2, updates: 1 },
+}
+
+describe('ImportPanel and BatchHistory while no channel is connected', () => {
+  it('the intro says the import only changes the draft, nothing about customers', () => {
+    rtlRender(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <ImportPanel clientId="c1" tours={[TOUR]} onChanged={() => {}} />
+      </CatalogUiProvider>,
+    )
+    expect(
+      screen.getByText(/导入只改草稿，还没上架；导入后还要点上面的「查看并上架」。$/),
+    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/对外|客人/)
+  })
+
+  it('the import history says the same, and so does the undo question', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    rtlRender(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <BatchHistory
+          clientId="c1"
+          batches={[BATCH]}
+          onChanged={() => {}}
+        />
+      </CatalogUiProvider>,
+    )
+    expect(
+      screen.getByText('导入和撤销改的都是草稿，还没上架；之后还要点页面上方的「查看并上架」。'),
+    ).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '撤销这次导入' }))
+    expect(String(confirm.mock.calls[0][0])).not.toMatch(/对外|客人/)
+    expect(document.body.textContent).not.toMatch(/对外|客人/)
   })
 })

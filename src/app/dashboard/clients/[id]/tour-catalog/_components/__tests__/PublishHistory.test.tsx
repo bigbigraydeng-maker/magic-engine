@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { screen, fireEvent, waitFor, within } from '@testing-library/react'
+import { renderConnected as render } from './render-connected'
 import { PublishHistory } from '../PublishHistory'
 import { CatalogUiProvider } from '../catalog-context'
 
@@ -383,5 +384,64 @@ describe('PublishHistory by context', () => {
     expect(within(screen.getByTestId('publish-version-7')).getByText('当前已上架')).toBeInTheDocument()
     expect(screen.getByText('每上架一次记一版。标着「当前已上架」的是现在已上架的那一版。')).toBeInTheDocument()
     expect(screen.queryByText(/客人看到的永远是/)).toBeNull()
+  })
+})
+
+describe('PublishHistory wording', () => {
+  const firstEver = {
+    versions: [
+      { version: 2, createdAt: '2026-10-05T02:00:00Z', publishedBy: 'amy@x.test', note: '', sourceVersion: null, changeCount: 0, highRiskCount: 0, isCurrent: true },
+      { version: 1, createdAt: '2026-10-01T02:00:00Z', publishedBy: 'amy@x.test', note: '', sourceVersion: null, changeCount: 0, highRiskCount: 0, isCurrent: false },
+    ],
+  }
+  const revertPreview = {
+    targetVersion: 1,
+    publishedVersion: 2,
+    changes: [],
+    highRiskCount: 0,
+    keptStatuses: [{ tourName: 'Coral Loop', departOn: '2027-05-13', currentStatus: '已满团', oldStatus: '可订' }],
+    sellable: { before: 2, after: 2, needsCountConfirm: false },
+    diffHash: 'h',
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  async function renderUnconnected() {
+    vi.stubGlobal(
+      'fetch',
+      routeFetch([
+        [/publish\/history/, () => jsonResponse(firstEver)],
+        [/publish\/revert/, () => jsonResponse(revertPreview)],
+      ]),
+    )
+    render(
+      <CatalogUiProvider value={{ channelsConnected: false, canPublish: true }}>
+        <PublishHistory clientId="c1" refreshKey={0} onReverted={() => {}} />
+      </CatalogUiProvider>,
+    )
+    await screen.findByTestId('publish-version-1')
+  }
+
+  it('the very first publish reads 首次上架, not 改动 0 处', async () => {
+    await renderUnconnected()
+    const first = within(screen.getByTestId('publish-version-1'))
+    expect(first.getByText('首次上架')).toBeInTheDocument()
+    expect(first.queryByText(/改动 0 处/)).toBeNull()
+    // a later version with nothing changed still says how many
+    expect(within(screen.getByTestId('publish-version-2')).getByText('改动 0 处')).toBeInTheDocument()
+  })
+
+  it('channels not connected: the revert button and its dialog talk about what is published', async () => {
+    await renderUnconnected()
+    expect(screen.queryByRole('button', { name: '把对外内容换回这一版' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '把已上架的内容换回这一版' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: '把已上架的内容换回第 1 版' })).toBeInTheDocument()
+    expect(within(dialog).getByText('这只会把已上架的内容换回第 1 版。')).toBeInTheDocument()
+    await within(dialog).findByText('换回后，已上架的内容会有这些变化')
+    expect(within(dialog).getByText(/换回去会把已经没有的位置重新标成可订/)).toBeInTheDocument()
+    expect(dialog.textContent).not.toMatch(/对外|客人/)
   })
 })

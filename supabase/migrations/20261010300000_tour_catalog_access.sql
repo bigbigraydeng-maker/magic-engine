@@ -3,6 +3,28 @@
 -- publish requests, AI assistant daily limits, an append-only change log, actor and no-op
 -- hardening of the edit/import functions, and length/shape CHECKs as a second line of defence.
 -- Design doc: docs/specs/2026-10-09-cts-tour-catalog-in-me-design-v0.3.md §6.10 / §6.10.1
+--
+-- BEFORE APPLYING to any database that already holds catalog rows: run this READ-ONLY query first.
+-- Section 6 adds CHECK constraints and validates them against the existing rows; one offending row
+-- makes the whole migration fail. Every number below must be 0. If any is not, stop and fix the
+-- data (with PM approval) before applying — do not loosen the constraint.
+--
+--   select
+--     (select count(*) from public.tour_catalog_tours where length(name) > 200)                          as name_over_200,
+--     (select count(*) from public.tour_catalog_tours where length(title) > 300)                         as title_over_300,
+--     (select count(*) from public.tour_catalog_tours where length(short_description) > 3000)            as short_description_over_3000,
+--     (select count(*) from public.tour_catalog_tours where length(duration_text) > 60)                  as duration_text_over_60,
+--     (select count(*) from public.tour_catalog_tours where length(display_price_text) > 100)            as display_price_text_over_100,
+--     (select count(*) from public.tour_catalog_tours where length(single_supplement) > 100)             as single_supplement_over_100,
+--     (select count(*) from public.tour_catalog_tours where jsonb_typeof(highlights) is distinct from 'array')  as highlights_not_array,
+--     (select count(*) from public.tour_catalog_tours where jsonb_typeof(itinerary) is distinct from 'array')   as itinerary_not_array,
+--     (select count(*) from public.tour_catalog_tours where jsonb_typeof(inclusions) is distinct from 'array')  as inclusions_not_array,
+--     (select count(*) from public.tour_catalog_tours where jsonb_typeof(exclusions) is distinct from 'array')  as exclusions_not_array,
+--     (select count(*) from public.tour_catalog_tours where jsonb_typeof(tour_cities) is distinct from 'array') as tour_cities_not_array,
+--     (select count(*) from public.tour_catalog_tours where octet_length(itinerary::text) > 300000)      as itinerary_over_300000_bytes,
+--     (select count(*) from public.tour_catalog_departures where length(price_text_override) > 100)      as departure_price_over_100,
+--     (select count(*) from public.tour_catalog_tours)                                                   as tours_checked,
+--     (select count(*) from public.tour_catalog_departures)                                              as departures_checked;
 
 -- ---------------------------------------------------------------------------
 -- 1. Who may use the catalog besides Magic Engine global admins (default: nobody)
@@ -67,6 +89,11 @@ create table public.tour_catalog_publish_requests (
 create index tour_catalog_publish_requests_client_created_idx
   on public.tour_catalog_publish_requests (client_id, created_at desc);
 
+-- At most one unhandled request per client, guaranteed here rather than by the caller's read-then-write.
+create unique index tour_catalog_publish_requests_one_open_idx
+  on public.tour_catalog_publish_requests (client_id)
+  where handled_at is null;
+
 alter table public.tour_catalog_publish_requests enable row level security;
 
 create policy tour_catalog_publish_requests_service_role
@@ -77,6 +104,56 @@ create policy tour_catalog_publish_requests_service_role
   with check (true);
 
 revoke all on public.tour_catalog_publish_requests from anon, authenticated;
+
+-- Ask for a publish, atomically: the client's one open request is created, or — when one is already
+-- open — replaced by this one (latest asker, draft revision, note and time). Returns the open row.
+create function public.tour_catalog_request_publish(
+  p_client_id uuid,
+  p_requested_by text,
+  p_draft_version bigint,
+  p_note text
+)
+returns jsonb
+language plpgsql
+as $$
+declare
+  v_actor text := btrim(coalesce(p_requested_by, ''));
+  v_note text := coalesce(p_note, '');
+  v_row public.tour_catalog_publish_requests;
+begin
+  if v_actor = '' then
+    raise exception 'invalid_actor';
+  end if;
+
+  if length(v_note) > 500 then
+    raise exception 'invalid_note';
+  end if;
+
+  if p_client_id is null or p_draft_version is null then
+    raise exception 'invalid_request';
+  end if;
+
+  insert into public.tour_catalog_publish_requests (client_id, requested_by, draft_version, note)
+  values (p_client_id, v_actor, p_draft_version, v_note)
+  on conflict (client_id) where handled_at is null do update
+    set requested_by = excluded.requested_by,
+        draft_version = excluded.draft_version,
+        note = excluded.note,
+        created_at = now()
+  returning * into v_row;
+
+  return jsonb_build_object(
+    'id', v_row.id,
+    'requested_by', v_row.requested_by,
+    'draft_version', v_row.draft_version,
+    'note', v_row.note,
+    'created_at', v_row.created_at
+  );
+end;
+$$;
+
+revoke all on function public.tour_catalog_request_publish(uuid, text, bigint, text) from public, anon, authenticated;
+grant execute on function public.tour_catalog_request_publish(uuid, text, bigint, text) to service_role;
 
 -- ---------------------------------------------------------------------------
 -- 4. AI assistant usage: reserve-before-call counters per client / day / email
@@ -235,7 +312,9 @@ alter table public.tour_catalog_tours
     and jsonb_typeof(inclusions) = 'array'
     and jsonb_typeof(exclusions) = 'array'
     and jsonb_typeof(tour_cities) = 'array'
-    and pg_column_size(itinerary) <= 300000
+    -- Size of the JSON text, not pg_column_size(): the latter measures the stored (possibly
+    -- compressed) form, so the same value could pass or fail depending on how it is stored.
+    and octet_length(itinerary::text) <= 300000
   ) not valid;
 
 alter table public.tour_catalog_departures

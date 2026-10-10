@@ -8,6 +8,7 @@ import type {
 } from '@/lib/tour-catalog/publish-contract'
 import type { PublishContributor } from '@/lib/tour-catalog/catalog-contract'
 import { priceText } from './catalog-format'
+import { SYSTEM_ACTOR_LABEL } from './change-source'
 import { BRAND_BUTTON_CLASS } from './catalog-brand'
 import { useChannelsConnected } from './catalog-context'
 import {
@@ -23,11 +24,12 @@ import {
 
 function FirstPublishTable(props: { rows: FirstPublishRow[] }): JSX.Element {
   const { rows } = props
+  const outward = useChannelsConnected() ? '对外' : ''
   const sellableCount = rows.filter(r => r.sellable).length
   return (
     <div>
       <p className="text-sm font-black text-me-charcoal">
-        首次上架：共 {rows.length} 个团，其中 {sellableCount} 个对外可售
+        首次上架：共 {rows.length} 个团，其中 {sellableCount} 个{outward}可售
       </p>
       <div className="mt-2 max-h-[50vh] overflow-auto">
         <table className="min-w-full text-sm">
@@ -37,7 +39,7 @@ function FirstPublishTable(props: { rows: FirstPublishRow[] }): JSX.Element {
               <th className="px-2 py-1 font-semibold">展示价</th>
               <th className="px-2 py-1 font-semibold">未来班期数</th>
               <th className="px-2 py-1 font-semibold">下一班</th>
-              <th className="px-2 py-1 font-semibold">是否对外可售</th>
+              <th className="px-2 py-1 font-semibold">是否{outward}可售</th>
             </tr>
           </thead>
           <tbody>
@@ -71,6 +73,7 @@ function PublishGates(props: {
   setCountText: (v: string) => void
 }): JSX.Element {
   const { preview, ackHigh, setAckHigh, ackRevert, setAckRevert, countText, setCountText } = props
+  const live = useChannelsConnected() ? '对外内容' : '已上架的内容'
   return (
     <>
       {preview.highRiskCount > 0 ? (
@@ -80,7 +83,7 @@ function PublishGates(props: {
       ) : null}
       {preview.afterRevert ? (
         <AckCheckbox checked={ackRevert} onChange={setAckRevert}>
-          我知道上一次是把对外内容换回了第 {preview.afterRevert.toVersion}{' '}
+          我知道上一次是把{live}换回了第 {preview.afterRevert.toVersion}{' '}
           版，这次上架会把当时换掉的内容重新发出去
         </AckCheckbox>
       ) : null}
@@ -124,6 +127,7 @@ function usePublishSubmit(
 ): { submitting: boolean; message: string | null; submit: () => Promise<void> } {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const connected = useChannelsConnected()
 
   async function submit() {
     setSubmitting(true)
@@ -144,10 +148,10 @@ function usePublishSubmit(
         setMessage(STALE_TEXT)
         await onRefresh()
       } else {
-        setMessage(publishErrorText(data.error))
+        setMessage(publishErrorText(data.error, connected))
       }
     } catch {
-      setMessage(publishErrorText('publish_failed'))
+      setMessage(publishErrorText('publish_failed', connected))
     } finally {
       setSubmitting(false)
     }
@@ -300,13 +304,23 @@ export const PUBLISH_SUBTITLE_UNCONNECTED =
 function ContributorsLine(props: { preview: PreviewWithContributors }): JSX.Element | null {
   const list = (props.preview.contributors ?? []).filter(c => c.changes > 0 && c.actorLabel)
   if (list.length === 0) return null
-  const parts = list.map(c => `${c.actorLabel} ${c.changes} 处`).join('、')
+  // "系统" (e.g. the first read-in from the website) is not somebody's account: count it apart.
+  const accounts = list.filter(c => c.actorLabel !== SYSTEM_ACTOR_LABEL)
+  const systemChanges = list
+    .filter(c => c.actorLabel === SYSTEM_ACTOR_LABEL)
+    .reduce((sum, c) => sum + c.changes, 0)
+  const parts = accounts.map(c => `${c.actorLabel} ${c.changes} 处`).join('、')
+  const systemPart = systemChanges > 0 ? `另有系统读入 ${systemChanges} 处` : ''
+  const text =
+    accounts.length === 0
+      ? `这次的修改是系统读入的 ${systemChanges} 处`
+      : `这次包含 ${accounts.length} 个账号的修改：${parts}${systemPart ? `，${systemPart}` : ''}`
   return (
     <p
       data-testid="publish-contributors"
       className="mt-3 rounded-lg border border-black/10 bg-me-ivory px-3 py-2 text-sm font-semibold text-me-charcoal/80"
     >
-      这次包含 {list.length} 个账号的修改：{parts}。{PUBLISH_ALL_TEXT}。
+      {text}。{PUBLISH_ALL_TEXT}。
     </p>
   )
 }

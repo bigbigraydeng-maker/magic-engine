@@ -116,12 +116,14 @@ describe('RequestPublishDialog', () => {
 describe('publishRequestNoticeText', () => {
   it('tells an editor the team was notified', () => {
     const text = publishRequestNoticeText(request, false, 5)
-    expect(text).toMatch(/^已通知 Magic Engine 团队 · 2026年10月\d+日 \d{2}:\d{2}$/)
+    expect(text).toMatch(
+      /^已通知 Magic Engine 团队 · 2026年10月\d+日 \d{2}:\d{2}。还没上架，对方核对后会上架。$/,
+    )
   })
 
   it('adds the newer-edits suffix when the draft moved on', () => {
     const text = publishRequestNoticeText(request, false, 7)
-    expect(text.endsWith('（之后又有新的修改，可以再提交一次更新说明）')).toBe(true)
+    expect(text.endsWith('。还没上架；之后又有新的修改，可以再提交一次更新说明。')).toBe(true)
   })
 
   it('omits the suffix when the draft version is unknown', () => {

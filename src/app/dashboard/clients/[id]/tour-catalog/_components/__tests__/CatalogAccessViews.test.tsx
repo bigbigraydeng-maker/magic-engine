@@ -240,7 +240,9 @@ describe('client_editor view', () => {
     expect(calls(fetchMock, /\/tour-catalog\/publish$/, 'POST')).toHaveLength(0)
 
     const notice = await screen.findByTestId('publish-request-notice')
-    expect(notice.textContent).toMatch(/^已通知 Magic Engine 团队 · 2026年10月\d+日 \d{2}:\d{2}$/)
+    expect(notice.textContent).toMatch(
+      /^已通知 Magic Engine 团队 · 2026年10月\d+日 \d{2}:\d{2}。还没上架，对方核对后会上架。$/,
+    )
   })
 
   it('blocks the request while a tour has unsaved edits, with the existing reminder', async () => {
@@ -255,7 +257,9 @@ describe('client_editor view', () => {
   it('echoes a request that is already open', async () => {
     await renderReady({ snapshot: () => jsonResponse(editorSnapshot({ pendingPublishRequest: REQUEST })) })
     const notice = await screen.findByTestId('publish-request-notice')
-    expect(notice.textContent).toMatch(/^已通知 Magic Engine 团队 · 2026年10月\d+日 \d{2}:\d{2}$/)
+    expect(notice.textContent).toMatch(
+      /^已通知 Magic Engine 团队 · 2026年10月\d+日 \d{2}:\d{2}。还没上架，对方核对后会上架。$/,
+    )
   })
 
   it('says a newer note can be sent when the draft moved on after the request', async () => {
@@ -264,14 +268,14 @@ describe('client_editor view', () => {
         jsonResponse(editorSnapshot({ pendingPublishRequest: { ...REQUEST, draftVersion: 5 } })),
     })
     const notice = await screen.findByTestId('publish-request-notice')
-    expect(notice.textContent).toMatch(/（之后又有新的修改，可以再提交一次更新说明）$/)
+    expect(notice.textContent).toMatch(/。还没上架；之后又有新的修改，可以再提交一次更新说明。$/)
   })
 
   it('has no revert button in the publish history', async () => {
     await renderReady()
     fireEvent.click(screen.getByRole('tab', { name: '上架记录' }))
     await screen.findByTestId('publish-version-2')
-    expect(screen.queryByRole('button', { name: '把对外内容换回这一版' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /换回这一版/ })).toBeNull()
   })
 
   it('explains an empty catalog instead of offering to read the website in', async () => {
@@ -314,7 +318,7 @@ describe('me_admin view', () => {
     await renderReady({ snapshot: () => jsonResponse(adminSnapshot()) })
     fireEvent.click(screen.getByRole('tab', { name: '上架记录' }))
     const row = await screen.findByTestId('publish-version-2')
-    expect(within(row).getByRole('button', { name: '把对外内容换回这一版' })).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: '把已上架的内容换回这一版' })).toBeInTheDocument()
   })
 
   it('re-reads the catalog after saving settings, and the header follows', async () => {
@@ -410,8 +414,36 @@ describe('whole-page states', () => {
   it('tells someone who is not on the list, in Chinese', async () => {
     installFetch({ snapshot: () => jsonResponse({ error: 'Forbidden' }, 403) })
     render(<TourCatalogClient clientId="c1" />)
-    expect((await screen.findByRole('alert')).textContent).toContain(NO_ACCESS_TEXT)
+    expect((await screen.findByTestId('catalog-page-notice')).textContent).toBe(NO_ACCESS_TEXT)
     expect(document.body.textContent).not.toMatch(/Forbidden/)
+    // an explanation, not an alarm: no red box, nothing to retry
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+  })
+
+  it('losing access while the page is open shows the same calm card, not a red error', async () => {
+    let allowed = true
+    await renderReady({
+      snapshot: () =>
+        allowed ? jsonResponse(adminSnapshot()) : jsonResponse({ error: 'Forbidden' }, 403),
+    })
+    allowed = false
+    // any save makes the page re-read the catalog
+    fireEvent.click(screen.getByRole('button', { name: '编辑这个团' }))
+    fireEvent.change(screen.getByDisplayValue('Atlantis Gold — Coral Loop'), { target: { value: 'X' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    expect((await screen.findByTestId('catalog-page-notice')).textContent).toBe(NO_ACCESS_TEXT)
+    expect(screen.queryByText('团目录暂时打不开')).toBeNull()
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
+  })
+
+  it('a signed-out answer asks to refresh and sign in again', async () => {
+    installFetch({ snapshot: () => jsonResponse({ error: 'Unauthorized' }, 401) })
+    render(<TourCatalogClient clientId="c1" />)
+    expect((await screen.findByTestId('catalog-page-notice')).textContent).toBe(
+      '登录已过期，请刷新页面重新登录',
+    )
+    expect(screen.queryByRole('button', { name: '重试' })).toBeNull()
   })
 
   it('an answer without permissions is treated as look-only, and nothing reads undefined', async () => {
@@ -424,3 +456,35 @@ describe('whole-page states', () => {
     expect(document.body.textContent).not.toMatch(/undefined|null/)
   })
 })
+
+describe('narrow screens', () => {
+  const scrollIntoView = vi.fn()
+  const originalWidth = window.innerWidth
+
+  beforeEach(() => {
+    scrollIntoView.mockClear()
+    Element.prototype.scrollIntoView = scrollIntoView
+  })
+
+  afterEach(() => {
+    window.innerWidth = originalWidth
+  })
+
+  it('picking a tour on a phone brings the top of its detail (the back link) into view', async () => {
+    window.innerWidth = 375
+    await renderReady({ snapshot: () => jsonResponse(adminSnapshot()) })
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByTestId('tour-row-t2'))
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(1))
+    expect(scrollIntoView.mock.instances[0]).toBe(screen.getByTestId('detail-back'))
+  })
+
+  it('on a wide screen both columns are visible, so nothing scrolls', async () => {
+    window.innerWidth = 1440
+    await renderReady({ snapshot: () => jsonResponse(adminSnapshot()) })
+    fireEvent.click(screen.getByTestId('tour-row-t2'))
+    await screen.findByRole('heading', { name: 'Atlantis Gold — Deep Trench' })
+    expect(scrollIntoView).not.toHaveBeenCalled()
+  })
+})
+

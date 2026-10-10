@@ -9,6 +9,11 @@ import { formatBatchTime } from './catalog-format'
 import { RevertDialog } from './RevertDialog'
 import { useCatalogUi } from './catalog-context'
 
+/** Version 1 that is not a revert: there was nothing to compare with, so "0 changes" would mislead. */
+function isFirstPublish(version: PublishedVersionView): boolean {
+  return version.version === 1 && version.sourceVersion === null
+}
+
 function VersionMeta(props: { version: PublishedVersionView }): JSX.Element {
   const { version } = props
   return (
@@ -23,7 +28,7 @@ function VersionMeta(props: { version: PublishedVersionView }): JSX.Element {
         <span className="text-sm font-semibold text-me-charcoal/55">「{version.note}」</span>
       ) : null}
       <span className="text-sm font-semibold text-me-charcoal/55">
-        改动 {version.changeCount} 处
+        {isFirstPublish(version) ? '首次上架' : `改动 ${version.changeCount} 处`}
       </span>
       {version.highRiskCount > 0 ? (
         <span className="text-sm font-black text-[#C2453A]">
@@ -52,7 +57,7 @@ function VersionRow(props: {
     >
       <span className="font-black text-me-charcoal">{label}</span>
       {version.isCurrent ? (
-        <span className="rounded-full border border-[#5C8A4A]/30 bg-[#5C8A4A]/10 px-2 py-0.5 text-xs font-black text-[#5C8A4A]">
+        <span className="rounded-full border border-[#5C8A4A]/30 bg-[#5C8A4A]/10 px-2 py-0.5 text-xs font-black text-[#456F35]">
           {channelsConnected ? '当前对外' : '当前已上架'}
         </span>
       ) : (
@@ -67,7 +72,7 @@ function VersionRow(props: {
           onClick={() => onRevert(version.version)}
           className="rounded-lg border border-black/10 bg-white px-3 py-1 text-sm font-semibold text-me-charcoal hover:bg-me-ivory"
         >
-          把对外内容换回这一版
+          {channelsConnected ? '把对外内容换回这一版' : '把已上架的内容换回这一版'}
         </button>
       ) : null}
     </li>

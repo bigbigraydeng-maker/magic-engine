@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { screen, fireEvent } from '@testing-library/react'
+import { renderConnected as render } from './render-connected'
 import { PublishBar } from '../PublishBar'
 import type { PublishPreviewResponse } from '@/lib/tour-catalog/publish-contract'
 import { CatalogUiProvider } from '../catalog-context'

@@ -54,7 +54,7 @@ const TONE_CLASSES: Record<Tone, string> = {
 const TONE_TEXT: Record<Tone, string> = {
   neutral: 'text-me-charcoal',
   pending: 'text-[#B7791F]',
-  ok: 'text-[#5C8A4A]',
+  ok: 'text-[#456F35]',
   danger: 'text-[#C2453A]',
 }
 

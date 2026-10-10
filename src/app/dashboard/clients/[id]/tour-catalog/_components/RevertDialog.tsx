@@ -11,15 +11,19 @@ import {
   publishErrorText,
   sellableConfirmed,
 } from './publish-parts'
+import { useChannelsConnected } from './catalog-context'
 
 function KeptStatusTable(props: {
   rows: RevertPreviewResponse['keptStatuses']
 }): JSX.Element {
   const { rows } = props
+  const connected = useChannelsConnected()
   return (
     <div>
       <p className="text-sm font-black text-me-charcoal">
-        下面这些班期不会跟着换回旧状态：满团、取消是真实情况，换回去会让客人订到已经没有的位置。
+        {connected
+          ? '下面这些班期不会跟着换回旧状态：满团、取消是真实情况，换回去会让客人订到已经没有的位置。'
+          : '下面这些班期不会跟着换回旧状态：满团、取消是真实情况，换回去会把已经没有的位置重新标成可订。'}
       </p>
       <div className="mt-2 max-h-[40vh] overflow-auto">
         <table className="min-w-full text-sm">
@@ -55,10 +59,11 @@ function RevertBody(props: {
   setCountText: (v: string) => void
 }): JSX.Element {
   const { preview, ackHigh, setAckHigh, countText, setCountText } = props
+  const connected = useChannelsConnected()
   return (
     <>
       <h3 className="text-sm font-black text-me-charcoal">
-        换回后，客人看到的内容会有这些变化
+        {connected ? '换回后，客人看到的内容会有这些变化' : '换回后，已上架的内容会有这些变化'}
       </h3>
       <div className="max-h-[40vh] space-y-3 overflow-auto">
         <ChangeList changes={preview.changes} />
@@ -109,6 +114,7 @@ function useRevertPreview(input: RevertPreviewInput): {
   const { clientId, version, setAckHigh, setCountText } = input
   const [preview, setPreview] = useState<RevertPreviewResponse | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const connected = useChannelsConnected()
 
   const load = useCallback(async () => {
     setAckHigh(false)
@@ -124,13 +130,13 @@ function useRevertPreview(input: RevertPreviewInput): {
       } else {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
         setPreview(null)
-        setLoadError(publishErrorText(data.error))
+        setLoadError(publishErrorText(data.error, connected))
       }
     } catch {
       setPreview(null)
-      setLoadError(publishErrorText('publish_failed'))
+      setLoadError(publishErrorText('publish_failed', connected))
     }
-  }, [clientId, version, setAckHigh, setCountText])
+  }, [clientId, version, setAckHigh, setCountText, connected])
 
   return { preview, loadError, load }
 }
@@ -152,6 +158,7 @@ function useRevertSubmit(input: RevertSubmitInput): {
   const { clientId, preview, ackHigh, countText, load, onReverted } = input
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const connected = useChannelsConnected()
 
   async function submit() {
     if (!preview) return
@@ -173,10 +180,10 @@ function useRevertSubmit(input: RevertSubmitInput): {
         setMessage(STALE_TEXT)
         await load()
       } else {
-        setMessage(publishErrorText(data.error))
+        setMessage(publishErrorText(data.error, connected))
       }
     } catch {
-      setMessage(publishErrorText('publish_failed'))
+      setMessage(publishErrorText('publish_failed', connected))
     } finally {
       setSubmitting(false)
     }
@@ -187,10 +194,11 @@ function useRevertSubmit(input: RevertSubmitInput): {
 
 function RevertIntro(props: { version: number }): JSX.Element {
   const { version } = props
+  const connected = useChannelsConnected()
   return (
     <>
       <p className="text-sm font-black text-me-charcoal">
-        这只会把客人看到的内容换回第 {version} 版。
+        这只会把{connected ? '客人看到的内容' : '已上架的内容'}换回第 {version} 版。
       </p>
       <p className="text-sm font-black text-me-charcoal">
         你的草稿不会变；下次上架前请先改掉草稿里的错，否则会再发出去。
@@ -351,9 +359,13 @@ export function RevertDialog(props: {
     if (!preview || !canSubmit) return
     await submit()
   }
+  const connected = useChannelsConnected()
 
   return (
-    <DialogShell title={`把对外内容换回第 ${version} 版`} onClose={onClose}>
+    <DialogShell
+      title={`把${connected ? '对外内容' : '已上架的内容'}换回第 ${version} 版`}
+      onClose={onClose}
+    >
       <RevertContent
         version={version}
         preview={preview}

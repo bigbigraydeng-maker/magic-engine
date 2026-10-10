@@ -13,11 +13,18 @@ import { SeedPanel } from './SeedPanel'
 import { CatalogWorkspace } from './CatalogWorkspace'
 import { CatalogHeader } from './CatalogHeader'
 import { CatalogSkeleton } from './CatalogSkeleton'
-import { EMPTY_CATALOG_TEXT, NO_ACCESS_TEXT } from './page-notices'
+import {
+  CatalogPageNotice,
+  EMPTY_CATALOG_TEXT,
+  NO_ACCESS_TEXT,
+  SESSION_EXPIRED_TEXT,
+} from './page-notices'
 
 type State =
   | { phase: 'loading' }
   | { phase: 'error'; message: string }
+  /** Not a fault: this account may not (or no longer) open the page. Calm card, no retry. */
+  | { phase: 'notice'; text: string }
   | { phase: 'ready'; snapshot: CatalogSnapshotResponse }
 
 /** Used when the answer carries no permissions: look only, everything else off. */
@@ -79,9 +86,13 @@ interface CatalogSnapshotState {
   load: (silent?: boolean) => Promise<void>
 }
 
+/** Thrown for answers that are an explanation rather than a fault (no access, signed out). */
+class CatalogNotice extends Error {}
+
 async function fetchSnapshot(clientId: string): Promise<CatalogSnapshotResponse> {
   const res = await fetch(`/api/clients/${clientId}/tour-catalog`)
-  if (res.status === 403) throw new Error(NO_ACCESS_TEXT)
+  if (res.status === 403) throw new CatalogNotice(NO_ACCESS_TEXT)
+  if (res.status === 401) throw new CatalogNotice(SESSION_EXPIRED_TEXT)
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string }
     throw new Error(errorLabel(body.error ?? ''))
@@ -98,6 +109,10 @@ function useCatalogSnapshot(clientId: string): CatalogSnapshotState {
       try {
         setState({ phase: 'ready', snapshot: await fetchSnapshot(clientId) })
       } catch (err) {
+        if (err instanceof CatalogNotice) {
+          setState({ phase: 'notice', text: err.message })
+          return
+        }
         setState({ phase: 'error', message: err instanceof Error ? err.message : errorLabel('') })
       }
     },
@@ -139,6 +154,7 @@ export function TourCatalogClient({ clientId }: { clientId: string }): JSX.Eleme
   }, [load, refreshPublish])
 
   if (state.phase === 'loading') return <CatalogSkeleton />
+  if (state.phase === 'notice') return <CatalogPageNotice text={state.text} />
   if (state.phase === 'error') {
     return <LoadError message={state.message} onRetry={() => void load()} />
   }
