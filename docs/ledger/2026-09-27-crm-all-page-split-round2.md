@@ -2,15 +2,15 @@
 id: 2026-09-27-crm-all-page-split-round2
 title: 「全部客人」页第二轮拆分：抽屉内容搬进 ContactDetail.tsx，主文件 1081 → 709 行，回到 800 线以内
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27
 done_ref: pr:2089
 verify_by: 2026-10-01
 verify_how: 跑 `wc -l "src/app/dashboard/clients/[id]/crm/all/page.tsx"` 必须 < 800。另跑 `npm test -- all/__tests__`，除既有那 3 条 nal-mark-won-panel 失败（基线 21e7675b 同样失败、同样行号 71/83/109、同样报 Jordan Example 找不到）之外全绿
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-10
+check_note: 连续两晚判不了：PR 已合并，但 verify_how 要求的线上实证夜巡取不到，交 PM 决定是否关卡
 ---
 纯搬家，一行逻辑没改：`ContactDetail` 和只有它用的两个面板（`MarkWonPanel` / `ImportantMarkerEditor`）连同 `NAL_CLIENT_ID` 常量，一起搬进 `all/_components/ContactDetail.tsx`。搬前搬后那 372 行**逐字比对一致**（除了给三个组件加 `export`）。
 

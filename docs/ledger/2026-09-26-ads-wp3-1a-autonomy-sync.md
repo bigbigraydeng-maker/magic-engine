@@ -2,15 +2,15 @@
 id: 2026-09-26-ads-wp3-1a-autonomy-sync
 title: "广告自治开关同步到执行内核：Settings 面板拨的 observe / bounded_auto 会自动翻译成内核策略表六个 ads.* 键的 require_approval / auto_approve，内核一行不动，deny 永不覆盖"
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-25
 source: issue:1997
 verify_by: 2026-10-02
 verify_how: "生产库 client_automation_policies 里 CTS/NAL 六个 ads.* 键各一活动行 mode=auto_approve 且 updated_by 以 autonomy-sync: 开头；翻回 observe 后 24h 内变 require_approval"
 done_on: 2026-09-26
 done_ref: commit:ca11ecc8
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-10
+check_note: 连续两晚判不了：PR 已合并，但 verify_how 要求的线上实证夜巡取不到，交 PM 决定是否关卡
 ---
 WP3.1a（A 级）。写入口仍是现有 PATCH /api/clients/[id]/ad-strategy-config（全局管理员闸），只多记 autonomy_mode_updated_by 并发一条 Inngest 叫醒铃；
 worker `cloud-ads-autonomy-sync` 回库读当前值，经 SQL 函数 ads_sync_autonomy_policy 逐键写策略表（全仓唯一调用点，架构测试锁死），每键一行 ads_autonomy_sync_receipts；每日 pullback 末尾再对账一次。

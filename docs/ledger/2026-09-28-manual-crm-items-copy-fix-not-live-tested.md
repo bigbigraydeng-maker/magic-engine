@@ -9,7 +9,7 @@ done_on: 2026-09-28
 done_ref: pr:2167
 verify_by: 2026-09-29
 verify_how: "下一个新西兰工作日早上（下一次 pm-daily-todo 自动跑）之后，打开 PM 那封每日待办邮件，找「被标成永久别再联系」或「Messenger 客户说要停」这两类条目（有才看得到，没有就等下次有），确认『点链接直接打开他的抽屉』这句新文案而不是旧的『就地展开』——文案对了就翻 verified，不对翻 failed"
-last_checked: 2026-10-09
+last_checked: 2026-10-10
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 

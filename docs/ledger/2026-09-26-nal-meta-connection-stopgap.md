@@ -9,7 +9,7 @@ done_on: 2026-09-26
 done_ref: pr:2081
 verify_by: 2026-09-29
 verify_how: 我自己那次试跑已经不成（leadsIngested=0，被 unverified_shared_token 拦住，证据见 evidence 文件）——按闸门规矩新卡不能一出生就 failed，所以先记 done。复核这样做：先确认有人在 NAL 设置抽屉的 Facebook 主页卡片点过「重新核实」；点过了就跑一次单客户留资同步，leadsIngested 大于 0 才翻 verified；还没人点、或点了仍为 0，翻 failed
-last_checked: 2026-10-09
+last_checked: 2026-10-10
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 ⚠️ 状态写 done 不代表成了 —— 闸门不许新卡一出生就 failed（必须先 done、等夜巡或人核过再翻）。本卡的试跑结论是**没成**，细节在下面和 evidence 文件里。

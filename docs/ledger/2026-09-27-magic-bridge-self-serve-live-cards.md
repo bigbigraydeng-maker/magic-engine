@@ -2,15 +2,15 @@
 id: 2026-09-27-magic-bridge-self-serve-live-cards
 title: Magic Bridge 自助客户报告第三部分「值得你看一眼的广告」改为生成报告时现场算（同一套广告级规则），文案与报告建议换成老板自己能试的口吻
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27
 done_ref: pr:2113
 verify_by: 2026-10-06
 verify_how: PR 1 与 PR 2112 上线、Meta 审核通过、第一位自助客户生成报告后：① 打开那份报告，第三部分标题是「值得你看一眼的广告」或写明没做检查的原因（多个主页 / 广告太多 / 没拿到数据），不出现「我们在跟进」「告诉我们」；② CTS 的报告第三部分照旧是巡检来源、代管口吻；③ 第八部分建议是老板自己能试的一小步。不成：先看那份报告存下的证据里 report_voice 与 rule_section.source。
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-10
+check_note: 连续两晚判不了：PR 已合并，但 verify_how 要求的线上实证夜巡取不到，交 PM 决定是否关卡
 ---
 设计：docs/specs/2026-09-27-magic-bridge-self-serve-open-design.md（分支 chore/mb-open-eval）PR-2 段与 §8.4。只读、不改数据库、无对外副作用；同步只读一次，按 CLAUDE.md 例外不上 Inngest。
 只在「不在巡检名单」时现场算：没登记广告账户，或登记了但巡检一次都没跑过；巡检跑过但过期 / 拒判的代管客户照旧写原因。

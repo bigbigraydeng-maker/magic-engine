@@ -2,15 +2,15 @@
 id: 2026-09-26-ads-ad-level-rules-d2-d10
 title: 每日广告巡检下钻到单条广告：跟它自己平时比、拆漏斗看断在哪步、按点击数判样本够不够、按广告去向选核心指标、每条建议带回头检查时点和止损条件，结论进 PM 今日待办（只读，不接自动动作）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:4bb834a6
 done_on: 2026-09-26
 done_ref: pr:2033
 verify_by: 2026-10-03
 verify_how: PR 合并后第一封今日待办邮件里，出现「素材疲劳」或「点进去之后差了」类条目时，每条都写了对照的基线、样本点击数和止损条件；拿当天生产数据复算一条对得上。当天没有命中也算正常，但要能在看板巡察结果里看到这两条规则跑过（广告级单位出现或确认无命中）
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-10
+check_note: 连续两晚判不了：PR 已合并，但 verify_how 要求的线上实证夜巡取不到，交 PM 决定是否关卡
 ---
 设计稿：docs/specs/2026-09-26-ads-ad-level-rules-d2-d10-design.md（设计审 + 实施后审均为子牙 + 魏征，第 8 节是落地对照）。
 起因：CTS 一条新表单广告一周花费约三倍于同组，但巡检只看广告组层，被同组便宜广告稀释，没报。

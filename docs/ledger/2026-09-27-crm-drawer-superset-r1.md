@@ -2,15 +2,15 @@
 id: 2026-09-27-crm-drawer-superset-r1
 title: 两页的「点开一个人」各缺一半——R1 把抽屉补成超集：加上「要记住的事」和 NAL 的确认已成交
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27
 done_ref: pr:2127
 verify_by: 2026-10-01
 verify_how: 在「今天要联系」页点开任一客人，抽屉里要看得见「要记住的事」那一格（有提醒的人要把提醒和到期日带出来，不是空白）。NAL 的客人点「现在：…」再点「已成交」，要先弹录金额面板、不直接改阶段；点「已联系」不许弹。CTS 的客人点「已成交」也不许弹（CTS 走 Google 表格那条通道）
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-10
+check_note: 连续两晚判不了：PR 已合并，但 verify_how 要求的线上实证夜巡取不到，交 PM 决定是否关卡
 ---
 「今天要联系」和「全部客人」两页各有一个「点开一个人」的面板，**各缺一半**：抽屉能回私信回邮件，但没有「要记住的事」、也没有 NAL 的确认已成交；详情有那两个，却不能回消息。
 

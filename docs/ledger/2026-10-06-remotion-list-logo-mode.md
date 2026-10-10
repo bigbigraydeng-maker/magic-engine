@@ -9,7 +9,7 @@ verify_by: 2026-10-08
 verify_how: 看审查 agent 对「常驻 / 最后 2 拍」的判定与理由是否已写进交付说明；若判定常驻更优，出片机已更新后再建一张用 logoMode 的新工单进审核队列。
 done_on: 2026-10-06
 done_ref: doc:scripts/factory-worker/engines/remotion/README.md
-last_checked: 2026-10-09
+last_checked: 2026-10-10
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 只加可选字段 logoMode（always / last_beats，不写 = 最后 2 拍，旧工单渲出来不变）。

@@ -9,7 +9,7 @@ verify_by: 2026-10-02
 verify_how: 合并后员工能在 all 页点星标切换某人的置顶状态；后端 contacts.pinned_at 字段变化；C1b-1y 会接着加"原因+到期日"两个新字段
 done_on: 2026-09-25
 done_ref: pr:2003
-last_checked: 2026-10-09
+last_checked: 2026-10-10
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 方案 pr:2000 §7 C1 的第一小块（板桥硬伤 2 起步）。DeepSeek 一轮 $0.01；只改两个文件；tsc 0 新增，7 个既有测试全过。

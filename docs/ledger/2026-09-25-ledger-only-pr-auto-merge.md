@@ -9,7 +9,7 @@ verify_by: 2026-09-29
 verify_how: ①9/27 或 9/28 夜巡开出的 claude/ledger-verify-* PR 没有人点、自己合进了主干；②一个改了 src/ 的测试 PR 在「Ledger refs exist」红的情况下按不了合并。两条都成才算成
 done_on: 2026-09-25
 done_ref: pr:1988
-last_checked: 2026-10-09
+last_checked: 2026-10-10
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 PM 2026-09-25 回「合，免」。魏征复审指出：每翻一张卡都要 PM 点一次合并 = ROADMAP 的死法复刻。
