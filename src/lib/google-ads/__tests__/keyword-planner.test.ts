@@ -60,7 +60,7 @@ describe('generateKeywordIdeas · request shape', () => {
 
     const apiCall = calls[1]
     expect(apiCall.url).toBe(
-      'https://googleads.googleapis.com/v17/customers/1234567890:generateKeywordIdeas',
+      'https://googleads.googleapis.com/v25/customers/1234567890:generateKeywordIdeas',
     )
     expect(apiCall.init.method).toBe('POST')
 
