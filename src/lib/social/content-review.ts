@@ -41,7 +41,8 @@ export const REEL_AUTO_CHECK_KEYS = [
   'format_is_reel',
   // The v0.2 §2.1 example places these D checks in checklist_human even
   // though the shared constraint says D is server-owned. Keep them server-side
-  // and unmeasured until the first-comment publisher exists.
+  // (Daily Plan Posts: the server computes them from the stored copy — see
+  // `buildDailyPlanAutoChecks`; Reels compute them in `buildReelPublishAutoChecks`.)
   'cta_in_first_comment_not_body',
   'first_comment_link_has_tracking_params',
 ] as const satisfies readonly ContentCheckItemKey[]

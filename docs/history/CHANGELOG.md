@@ -350,8 +350,8 @@ PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
 ### 2026-09-28（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）
 
 PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)（2026-09-23 开工，2026-09-28 合并）：
-- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂、且主要原因需要
-  PM 动手（充值/换钥匙）时，自动出现在今日待办里，按实际出错的供应商（OpenAI/Google AI/Claude/
+- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂、且至少有一个原因需要
+  PM 动手（充值/换钥匙；不论它是不是占比最多的原因）时，自动出现在今日待办里，按实际出错的供应商（OpenAI/Google AI/Claude/
   Perplexity）给对应的充值或换钥匙指引；不用 PM 操心的原因（暂时限流/供应商出错/我们解析不出排名）
   单独归开发栏的新 kind `ai_tracker_all_failed_dev`，不计入 PM 待办数量。**数据库写入失败不在此列**：
   插入失败时那次探测根本不落库、更新失败时那一行会被误读成成功，两种情况现在都读不到、分不进
@@ -3679,5 +3679,11 @@ P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未�
 - `website/ai-training.html`、`website/ai-automation.html`、`website/ai-marketing-smes.html` 以及 `/cn/` 对应页已上线，SME-first public surface 补齐
 - `website/index.html`、`website/cn/index.html`、`website/robots.txt`、`website/sitemap.xml` 已同步新页面入口与抓取路径
 
+### 2026-09-28（广告巡检按创意主页划归属，别家客户的广告组不再算进诊断和自动暂停，PR [#2118](https://github.com/bigbigraydeng-maker/magic-engine/pull/2118)）
+
+- 生产核实：一个只登记给某客户的广告账户里投着另一个客户主页的广告，另一个账户里有挂第三个客户主页的广告组花过钱；广告组/系列层诊断（D1/D3/D4/D5/D7/D8/D9）和机会发现（O1/O2/O3）之前把账户里所有实体都算给登记的那个客户，D3 命中还会进自动暂停
+- 新增 `src/lib/ads-strategy/portfolio/diagnostics/ownership.ts`：按名下广告挂过的每个 Facebook 主页判归属，拿不准一律不算客户的；自动暂停出手前回库再核一次归属和快照新鲜度
+- 登记表不改成「共用」（会让客户整个主账户降级只做账户级、快照同步跳过四层）
+- 子牙+魏征设计审两轮、实施后审两轮，狄仁杰攻击验证四轮，加上仓库自带 Codex 自动审查六轮（含 1 次采纳自动修车道 `claude[bot]` 先推的等价实现），逐条核实修复或记入台账（`docs/ledger/2026-09-29-ads-ownership-mid-window-capture-gap.md`、`docs/ledger/2026-09-29-ads-cbo-orphan-sibling-not-connate.md`）
 
 ---

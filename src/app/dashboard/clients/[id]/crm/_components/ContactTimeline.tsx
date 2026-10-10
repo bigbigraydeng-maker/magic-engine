@@ -69,7 +69,34 @@ interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
   omittedMessages?: number
+  /** AI 摘要卡：意向等级 + 一句话 + 下一步。没有就不画。 */
+  brief?: { intentLevel: string; summary: string; nextAction: string | null } | null
   error?: string
+}
+
+const INTENT_BADGE: Record<string, { label: string; cls: string }> = {
+  high: { label: '高意向', cls: 'bg-[#C2453A] text-white' },
+  medium: { label: '中意向', cls: 'bg-[#E0A53A] text-white' },
+  low: { label: '低意向', cls: 'bg-me-charcoal/15 text-me-charcoal/70' },
+}
+
+function BriefCard({ brief }: { brief: NonNullable<Payload['brief']> }) {
+  const badge = INTENT_BADGE[brief.intentLevel]
+  return (
+    <div data-testid="timeline-brief" className="rounded-xl border border-me-charcoal/10 bg-white px-3 py-2">
+      <div className="flex items-center gap-2">
+        {badge && <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span>}
+        <span className="text-[10px] font-bold text-me-charcoal/40">AI 摘要</span>
+      </div>
+      <p className="mt-1 text-[13px] leading-relaxed text-me-charcoal/85">{brief.summary}</p>
+      {brief.nextAction && (
+        <p className="mt-1 text-[12px] text-me-charcoal/70">
+          <span className="font-bold">下一步：</span>
+          {brief.nextAction}
+        </p>
+      )}
+    </div>
+  )
 }
 
 /** 渠道 → 一眼能认的图标。认不出的新渠道给中性圆点，绝不空白。 */
@@ -491,6 +518,7 @@ export function ContactTimeline({
 
   return (
     <div className="space-y-2.5">
+      {data.brief && <BriefCard brief={data.brief} />}
       {/*
         🔴 来源这一行必须在滚动区**外面**（Codex 复审 PR #1038，2026-08-17）。
         它原先是滚动容器的第一个子元素，而下面那个 effect 会把容器直接滚到底 ——

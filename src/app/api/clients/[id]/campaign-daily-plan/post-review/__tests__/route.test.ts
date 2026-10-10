@@ -221,9 +221,36 @@ describe('campaign daily Post review — authorization and target binding', () =
 })
 
 describe('campaign daily Post review — truthful PASS boundary', () => {
-  it('validates a current image but fails closed because first-comment checks are not implemented', async () => {
+  it('records PASS with server-computed first-comment checks', async () => {
     allow()
     stubLatestPlan()
+    const asset = chain('maybeSingle', {
+      data: { id: ASSET_ID, storage_url: 'https://assets.test/post.png', mime_type: 'image/png', status: 'analyzed', archived_at: null },
+      error: null,
+    })
+    const update = chain('maybeSingle', { data: { id: PLAN_ID }, error: null })
+    mockFrom.mockReturnValueOnce(asset as never).mockReturnValueOnce(update as never)
+
+    const response = await PATCH(request(), params())
+    const json = await response.json()
+    const written = update.update.mock.calls[0][0] as { plan_data: { review_meta: { posts: Record<string, { checklist: Array<{ key: string; judge: string; outcome: string }> }> } } }
+    const stored = written.plan_data.review_meta.posts[DATE].checklist
+
+    expect(response.status).toBe(200)
+    expect(json.changed).toBe(true)
+    expect(asset.eq).toHaveBeenCalledWith('client_id', CLIENT_ID)
+    expect(asset.eq).toHaveBeenCalledWith('id', ASSET_ID)
+    expect(stored.find(item => item.key === 'cta_in_first_comment_not_body')).toMatchObject({ judge: 'AUTO', outcome: 'PASS' })
+    expect(stored.find(item => item.key === 'first_comment_link_has_tracking_params')).toMatchObject({ judge: 'AUTO', outcome: 'PASS' })
+    expect(stored.some(item => item.outcome === 'NOT_MEASURED')).toBe(false)
+    expect(mockFrom).toHaveBeenCalledTimes(3)
+  })
+
+  it('refuses PASS when the post text already contains its CTA link', async () => {
+    allow()
+    const leaking = planData()
+    leaking.bundles[0].post.body = 'Book at https://example.test/tour today'
+    stubLatestPlan(leaking)
     const asset = chain('maybeSingle', {
       data: { id: ASSET_ID, storage_url: 'https://assets.test/post.png', mime_type: 'image/png', status: 'analyzed', archived_at: null },
       error: null,
@@ -234,10 +261,10 @@ describe('campaign daily Post review — truthful PASS boundary', () => {
     const json = await response.json()
 
     expect(response.status).toBe(422)
-    expect(json.error).toBe('AUTO_CHECKS_UNAVAILABLE')
-    expect(json.blocked_checks).toEqual(['cta_in_first_comment_not_body', 'first_comment_link_has_tracking_params'])
-    expect(asset.eq).toHaveBeenCalledWith('client_id', CLIENT_ID)
-    expect(asset.eq).toHaveBeenCalledWith('id', ASSET_ID)
+    expect(json.error).toBe('AUTO_CHECKS_FAILED')
+    expect(json.failed_checks).toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'cta_in_first_comment_not_body' })]),
+    )
     expect(mockFrom).toHaveBeenCalledTimes(2)
   })
 
@@ -303,6 +330,23 @@ describe('campaign daily Post review — truthful PASS boundary', () => {
       reviewer_role: 'client-viewer',
     })
     expect(mockFrom).toHaveBeenCalledTimes(2)
+  })
+
+  it('stores server-computed AUTO checks on NEEDS_REVISION too', async () => {
+    allowClientViewer()
+    const incomplete = planData()
+    incomplete.bundles[0].post.image_asset_id = ''
+    stubLatestPlan(incomplete)
+    const update = chain('maybeSingle', { data: { id: PLAN_ID }, error: null })
+    mockFrom.mockReturnValueOnce(update as never)
+
+    const response = await PATCH(request({ verdict: 'NEEDS_REVISION', reason: 'Replace the image', checklist_human: REVISION_CHECKLIST }), params())
+    const written = update.update.mock.calls[0][0] as { plan_data: { review_meta: { posts: Record<string, { checklist: Array<{ key: string; judge: string; outcome: string }> }> } } }
+    const stored = written.plan_data.review_meta.posts[DATE].checklist
+
+    expect(response.status).toBe(200)
+    expect(stored.find(item => item.key === 'cta_in_first_comment_not_body')).toMatchObject({ judge: 'AUTO', outcome: 'PASS' })
+    expect(stored.find(item => item.key === 'first_comment_link_has_tracking_params')).toMatchObject({ judge: 'AUTO', outcome: 'PASS' })
   })
 })
 
