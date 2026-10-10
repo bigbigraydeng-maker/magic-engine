@@ -409,3 +409,27 @@ describe('摘要回传给抽屉', () => {
     await waitFor(() => expect(onSummary).toHaveBeenCalledWith(null))
   })
 })
+
+describe('AI 摘要卡：意向等级看得见', () => {
+  it('有摘要时在最上面显示意向标签、一句话和下一步', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        contact: { name: 'Sue', phone: null, email: null, stageLabel: null },
+        timeline: [touch()],
+        brief: { intentLevel: 'high', summary: '客人已确认合作', nextAction: '发最终账单' },
+      }),
+    }) as unknown as typeof fetch
+    draw()
+    await waitFor(() => expect(screen.getByText('高意向')).toBeTruthy())
+    expect(screen.getByText('客人已确认合作')).toBeTruthy()
+    expect(screen.getByText('发最终账单')).toBeTruthy()
+  })
+
+  it('没有摘要时不画这张卡', async () => {
+    mockTimeline([touch()])
+    draw()
+    await waitFor(() => expect(screen.getByText('打过去聊了两句')).toBeTruthy())
+    expect(screen.queryByTestId('timeline-brief')).toBeNull()
+  })
+})

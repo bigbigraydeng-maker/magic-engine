@@ -13,6 +13,33 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export const dynamic = 'force-dynamic'
 
+interface ActionRow {
+  id: string
+  action_type: string
+  vendor: string | null
+  payload: Record<string, unknown> | null
+  executed_at: string | null
+  execution_item_id: string | null
+}
+
+/**
+ * A reactivation that never reached Meta (authorized_pending) or failed there
+ * (meta_failed) must not read as "reactivated" in the history list. Rewrite the
+ * after-state back to the before-state and surface the real status so the UI
+ * shows before → before.
+ */
+function showTruthfulReactivation(row: ActionRow): ActionRow {
+  if (row.action_type !== 'ads.reactivate_campaign') return row
+  const payload = row.payload
+  if (!payload) return row
+  const status = payload.status
+  if (status !== 'authorized_pending' && status !== 'meta_failed') return row
+  return {
+    ...row,
+    payload: { ...payload, after: payload.before, display_status: status },
+  }
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
@@ -40,5 +67,5 @@ export async function GET(
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, actions: data ?? [] })
+  return NextResponse.json({ success: true, actions: (data ?? []).map(showTruthfulReactivation) })
 }
