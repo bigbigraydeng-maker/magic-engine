@@ -43,6 +43,7 @@ node render.mjs --props <props.json> --out <out.mp4> [--public-dir <素材目录
 | `items` | 3–7 条，每条 `{ text(≤48), clip, blurBackdrop }`；`blurBackdrop=true` 表示该条是抽象概念，镜头只当模糊氛围背景，避免画面假装在表现它 |
 | `itemLabel` / `revealTitle` | 条目上方小字、价格上方标题 |
 | `cutFlash` | 可选布尔；`false` 去掉切镜时的闪白，不写＝照旧闪白 |
+| `footageScrim` | 可选数字 0–1，所有镜头上「下半屏压暗渐变」的强度倍数；`1` 或不写＝原来的效果，`0.35` 约为三分之一强度，`0` 不压暗；字幕靠自带阴影保持可读 |
 | `price` | `{ backdropClip, fromLabel, currencyPrefix(直接拼在金额前，如 `A$`), amount(正整数), qualifier, dateLine, footnote }` |
 | `price.dateLine` | 可选；不写＝价格页不显示日期那一行 |
 | `price.footnoteSize` | 可选整数 30–60，脚注字号，缺省 30 |
