@@ -52,6 +52,8 @@ const VerdictSchema = z.object({
   we_declined: z.boolean(),
   /** 客人明说先看看 / 暂时不需要。 */
   customer_said_not_now: z.boolean(),
+  /** 我们拒绝他的那句原话。`we_declined` 为真时必填，对不上原文就不认这次「做不了」。 */
+  decline_quote: z.string(),
   customer_quote: z.string(),
   our_quote: z.string(),
   progression: z.string(),
@@ -120,7 +122,8 @@ Lines marked "US (auto-reply)" are canned messages (rate cards, welcome text, bo
 - we_gave_price: a real person on our side stated an actual price, rate or quote for this customer's case.
 - next_step_arranged: a real person on our side and the customer agreed a call, visit, meeting or pickup with a time or place; or a real person on our side promised a concrete next step (e.g. "I'll send the quotation") in reply to the customer's specifics. Asking the customer a question is NOT arranging a next step.
 - ordered_or_paid: the customer has ordered, paid, or is arranging an actual shipment with us.
-- we_declined: we told them we cannot do what they asked AND nothing else was arranged afterwards.
+- we_declined: a real person on our side EXPLICITLY said we cannot / do not do what they asked, AND nothing else was arranged afterwards. Asking a screening question ("does it contain batteries?", "what is the weight?") is NOT declining.
+- decline_quote: when we_declined is true, copy VERBATIM the US sentence that says we cannot do it. Otherwise empty string.
 - customer_said_not_now: the customer's LATEST position is a no — not now / just looking / "I'll be in touch" / too expensive / chose another provider / already sorted.
 - customer_quote: copy ONE sentence VERBATIM from a CUSTOMER line that best supports your answers. Character for character; it is checked against the transcript. Empty string if the customer wrote nothing usable.
 - our_quote: copy ONE sentence VERBATIM from a "US" line (never an auto-reply). Empty string if no real person on our side said anything relevant.
@@ -135,7 +138,7 @@ const SCHEMA = {
   additionalProperties: false,
   required: [
     'is_spam_or_unrelated', 'customer_gave_specifics', 'we_gave_price', 'next_step_arranged',
-    'ordered_or_paid', 'we_declined', 'customer_said_not_now',
+    'ordered_or_paid', 'we_declined', 'customer_said_not_now', 'decline_quote',
     'customer_quote', 'our_quote', 'progression', 'reason',
   ],
   properties: {
@@ -146,6 +149,7 @@ const SCHEMA = {
     ordered_or_paid: BOOL,
     we_declined: BOOL,
     customer_said_not_now: BOOL,
+    decline_quote: STR,
     customer_quote: STR,
     our_quote: STR,
     progression: STR,
@@ -190,6 +194,8 @@ async function askModel(
   const client = getOpenAIClient({ apiKey, bypassGateway: true })
   const res = await client.responses.create({
     model: modelName(),
+    // 固定输出不随机：同一段对话两次跑必须给同样的事实，否则这个判断不能拿来排名单。
+    temperature: 0,
     input: [
       { role: 'system', content: buildSystemPrompt(business) },
       { role: 'user', content: `Conversation:\n${transcript}` },
@@ -326,6 +332,26 @@ function grounded(quote: string, transcript: string): boolean {
   return q.length < 8 && transcript.includes(q)
 }
 
+/**
+ * 「我们做不了」站不站得住：拒绝那句原话必须在原文里；而且**拒绝之后我们没再接着办**。
+ *
+ * 实测（PM 标「该」的第 6 段）：我们说了「带电池的货现在做不了，要电池需 MSDS 证书」，随后
+ * 又要货物尺寸、要对方确认报关 —— 那是在继续办，不是收场。拒绝之后还有真人发的实质内容
+ * （超过 40 个字）就不算最终拒绝。
+ */
+function declineStands(quote: string, transcript: string, msgs: MsgRow[], canned: Set<string>): boolean {
+  if (!grounded(quote, transcript)) return false
+  const needle = quote.trim().toLowerCase().slice(0, 40)
+  let at = -1
+  msgs.forEach((m, i) => {
+    if (m.direction === 'outbound' && (m.body ?? '').toLowerCase().includes(needle)) at = i
+  })
+  if (at < 0) return true
+  return !msgs
+    .slice(at + 1)
+    .some((m) => m.direction === 'outbound' && !isCanned(m, canned) && (m.body ?? '').trim().length > 40)
+}
+
 function applyPostChecks(
   verdict: Verdict,
   transcript: string,
@@ -334,7 +360,12 @@ function applyPostChecks(
 ): { level: Level; downgraded: boolean; note: string } {
   const humanTurns = countTurns(msgs, canned)
   const customerLines = msgs.filter((m) => m.direction === 'inbound').length
-  const { level, rule } = levelFromFacts(verdict, humanTurns, customerLines)
+  // 「我们做不了」会把人压到低 —— 往下压的结论必须拿得出我们拒绝他的那句原话。
+  // 实测：我们问了一句「含不含电池」，模型就读成「我们做不了带电池的货」，把一位发了货物清单的客人判低。
+  const facts: Verdict = verdict.we_declined && !declineStands(verdict.decline_quote, transcript, msgs, canned)
+    ? { ...verdict, we_declined: false }
+    : verdict
+  const { level, rule } = levelFromFacts(facts, humanTurns, customerLines)
   if (level !== 'high') return { level, downgraded: false, note: rule }
 
   // 判高必须拿得出客人原话；我们那句给了就得对得上（没给不强求 —— 欠报价的情形我们可能一句像样的话都没有）。
