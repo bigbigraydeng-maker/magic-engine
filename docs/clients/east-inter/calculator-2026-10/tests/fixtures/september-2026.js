@@ -4,6 +4,7 @@ const current = require('../../pricing-rates.js');
 const clone = o => JSON.parse(JSON.stringify(o));
 const old = clone(current);
 old.effective = 'September 2026';
+old.bulkAir.unitKg = 0.5; // September calculator priced bulk air per 0.5kg (corrected to per 1kg on 2026-10-10)
 Object.assign(old.lcl.sydney,{firstRmb:1900,largeRmb:1600,nextRmb:1100});
 Object.assign(old.lcl.melbourne,{firstRmb:1900,largeRmb:1600,nextRmb:1100});
 Object.assign(old.lcl.brisbane,{firstRmb:1900,largeRmb:1600,nextRmb:1100});

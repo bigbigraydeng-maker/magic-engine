@@ -18,11 +18,12 @@ test('conversion rule: ceil(RMB / 4.9) reproduces every AUD figure of the Septem
   assert.equal(R.fees.fumigation,pdfAud.fumigation);
 });
 
-test('new quote vs old: only LCL sea freight changed; parcels, bulk air and fees are identical', () => {
+test('new quote vs old: only LCL sea freight changed; parcels, bulk-air unit prices and fees are identical (bulk-air billing unit corrected to 1kg)', () => {
   const o = resolveRates(old), n = resolveRates(config);
   assert.deepEqual(n.airParcel,o.airParcel);
   assert.deepEqual(n.seaParcel,o.seaParcel);
-  assert.deepEqual(n.bulk,o.bulk);
+  assert.deepEqual({...n.bulk,unitKg:0},{...o.bulk,unitKg:0}); // per-unit prices identical
+  assert.deepEqual([o.bulk.unitKg,n.bulk.unitKg],[0.5,1]); // only the billing unit was corrected
   assert.deepEqual(n.fees,o.fees);
   assert.notDeepEqual(n.lcl,o.lcl);
 });
@@ -76,19 +77,16 @@ test('Sea parcel Sydney 19.01kg rounds to 20kg and takes the flat rate: 20*3', (
 test('Sea parcel Brisbane 3kg: 22 + 2*7', () => assert.equal(est({service:'seaParcel',city:'brisbane',quantity:3}).total,36));
 test('Sea parcel Perth 25kg flat: 25*5', () => assert.equal(est({service:'seaParcel',city:'perth',quantity:25}).total,125));
 
-// ---- Bulk air (unit as configured = 0.5kg, same as the September calculator; AUD DDU/DDP per unit)
-test('Bulk air Sydney DDP 10kg (lower bound): 20 units * 11', () => assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP'}).total,220));
-test('Bulk air Sydney DDU 50kg (tax excluded): 100 units * 10', () => assert.equal(est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDU'}).total,1000));
-test('Bulk air Perth DDP 99kg (upper bound): 198 units * 12', () => assert.equal(est({service:'bulkAir',city:'perth',quantity:99,tax:'DDP'}).total,2376));
-test('Bulk air other cities DDU 12.3kg rounds to 25 units: 25 * 12', () => assert.equal(est({service:'bulkAir',city:'other',quantity:12.3,tax:'DDU'}).total,300));
-test('Bulk air uses the greater of actual and volume weight: 10kg actual, 0.1 m³ = 16.67kg, 34 units * 11', () => {
-  assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP',volume:0.1}).total,374);
+// ---- Bulk air (price per 1kg, confirmed by East Inter via the PM 2026-10-10; AUD DDU/DDP per kg)
+test('Bulk air Sydney DDP 10kg (lower bound): 10 kg * 11', () => assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP'}).total,110));
+test('Bulk air Sydney DDP 50kg: 50 * 11', () => assert.equal(est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDP'}).total,550));
+test('Bulk air Sydney DDU 50kg (tax excluded): 50 * 10', () => assert.equal(est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDU'}).total,500));
+test('Bulk air Perth DDP 99kg (upper bound): 99 * 12', () => assert.equal(est({service:'bulkAir',city:'perth',quantity:99,tax:'DDP'}).total,1188));
+test('Bulk air other cities DDU 12.3kg rounds up to 13kg: 13 * 12', () => assert.equal(est({service:'bulkAir',city:'other',quantity:12.3,tax:'DDU'}).total,156));
+test('Bulk air uses the greater of actual and volume weight: 10kg actual, 0.1 m³ = 16.67kg, 17kg * 11', () => {
+  assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP',volume:0.1}).total,187);
 });
 test('Bulk air refuses under 10kg and over 99kg', () => {
   assert.match(est({service:'bulkAir',city:'sydney',quantity:9.99}).error,/10–99kg/);
   assert.match(est({service:'bulkAir',city:'sydney',quantity:100}).error,/10–99kg/);
-});
-test('Bulk air unit switch: if the sheet price is per kg (unitKg 1) Sydney DDP 10kg is 10 * 11 = 110', () => {
-  const alt = JSON.parse(JSON.stringify(config)); alt.bulkAir.unitKg = 1;
-  assert.equal(createEngine(alt).estimate({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP'}).total,110);
 });

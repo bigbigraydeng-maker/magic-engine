@@ -33,10 +33,11 @@
       metro:{firstRmb:80,nextRmb:10,flatRmb:11},
       other:{firstRmb:105,nextRmb:30,flatRmb:24}
     },
-    // Bulk air, RMB for the 10KG+ tier. unitKg is the weight one price applies to: 0.5 reproduces the September calculator.
-    // OPEN QUESTION for PM/East Inter: the source sheet gives no unit; if it is RMB per kg, set unitKg to 1 (halves the bulk-air price).
+    // Bulk air, RMB for the 10KG+ tier. unitKg is the weight one price applies to.
+    // Confirmed by the PM on 2026-10-10 (answer relayed from East Inter): the sheet prices are per 1 kg.
+    // (The September calculator treated them as per 0.5kg, which doubled the bulk-air price.)
     bulkAir: {
-      unitKg: 0.5,
+      unitKg: 1,
       sydney:{DDURmb:48,DDPRmb:52,days:'6–8 days'},melbourne:{DDURmb:48,DDPRmb:52,days:'6–8 days'},
       brisbane:{DDURmb:50,DDPRmb:54,days:'8–10 days'},adelaide:{DDURmb:50,DDPRmb:54,days:'8–10 days'},
       perth:{DDURmb:52,DDPRmb:56,days:'8–12 days'},other:{DDURmb:57,DDPRmb:61,days:'8–12 days'}

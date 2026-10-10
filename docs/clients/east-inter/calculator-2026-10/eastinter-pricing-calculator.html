@@ -90,7 +90,7 @@
         lcl:'1 CBM = 1 cubic metre. Minimum: 1 m³; extra volume is prorated. At 10 m³ and above, the reduced first-CBM rate applies.',
         airParcel:'Small parcels: under approximately 10kg. Chargeable weight is rounded up to the next 0.5kg.',
         seaParcel:'Chargeable weight is rounded up to a whole kg. At 20kg billed weight and above, the flat per-kg rate applies.',
-        bulkAir:'10–99kg chargeable weight only. Both DDU and DDP are priced per 0.5kg, rounded up.'
+        bulkAir:'10–99kg chargeable weight only. Both DDU and DDP are priced per kg, rounded up to the next whole kg.'
       }[service];
       const quote=estimate({service,city,quantity,cargo:$('cargo').value,tax,delivery:$('delivery').value,volume:$('volume').value.trim()===''?null:$('volume').valueAsNumber});
       $('route-city').textContent=cities[city]; $('breakdown').replaceChildren();
