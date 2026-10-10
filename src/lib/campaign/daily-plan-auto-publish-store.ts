@@ -241,6 +241,7 @@ export async function tombstoneRecalledDates(input: {
       await revokeAuthorization({
         planId: input.planId,
         clientId: input.clientId,
+        authId: auth.id,
         byEmail: 'system:recall',
         reason: 'all authorised dates were recalled',
       })

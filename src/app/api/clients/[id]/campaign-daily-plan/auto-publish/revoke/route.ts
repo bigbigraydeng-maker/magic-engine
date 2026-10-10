@@ -95,7 +95,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       data: {
         request_id: revoked.request_id,
         client_id: clientId,
-        campaign_id: command.campaign_id,
+        // taken from the stored grant, not the request body
+        campaign_id: revoked.campaign_id,
         plan_id: command.plan_id,
         revoked_by_email: revokedByEmail,
         reason: command.reason,

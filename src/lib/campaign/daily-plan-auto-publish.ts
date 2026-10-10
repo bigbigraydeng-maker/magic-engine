@@ -125,6 +125,8 @@ export interface AutoPublishAuthorization {
   review_revision: string
   page_id: string
   dates: string[]
+  /** Dates the PM explicitly re-allowed after a recall (see `lift_recalled_dates`). */
+  lifted_dates: string[]
   max_per_day: number
   authorized_by_email: string
   authorized_by_user_id: string

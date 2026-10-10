@@ -105,6 +105,7 @@ function grant(overrides: Partial<AutoPublishAuthorization> = {}): AutoPublishAu
     review_revision: REVIEW_REVISION,
     page_id: PAGE_ID,
     dates: DATES,
+    lifted_dates: [],
     max_per_day: 1,
     authorized_by_email: 'admin@magicengine.cloud',
     authorized_by_user_id: USER_ID,
@@ -253,7 +254,7 @@ describe('POST auto-publish authorize — preview and confirm', () => {
     expect(res.status).toBe(200)
     expect(json).toMatchObject({ mode: 'AUTHORIZED', provider_impact: 'NONE', lifted_recalled: [DATES[1]] })
     expect(order).toEqual(['insert', 'send', 'activate', 'lift'])
-    expect(mockedInsert.mock.calls[0][0]).toMatchObject({ authorized_by_email: 'admin@magicengine.cloud', authorized_by_user_id: USER_ID })
+    expect(mockedInsert.mock.calls[0][0]).toMatchObject({ authorized_by_email: 'admin@magicengine.cloud', authorized_by_user_id: USER_ID, lifted_dates: [DATES[1]] })
     expect(mockedSend.mock.calls[0][0].name).toBe(DAILY_PLAN_AUTO_PUBLISH_AUTHORIZED_EVENT)
     expect(mockedLift).toHaveBeenCalledWith({ planId: PLAN_ID, clientId: CLIENT_ID, dates: [DATES[1]] })
   })

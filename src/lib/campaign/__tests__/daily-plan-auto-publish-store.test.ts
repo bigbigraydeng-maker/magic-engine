@@ -73,6 +73,7 @@ const baseRow: NewAutoPublishAuthorization = {
   review_revision: 'c0000000-0000-0000-0000-000000000004',
   page_id: '1234567890',
   dates: ['2024-02-01', '2024-02-02'],
+  lifted_dates: [],
   max_per_day: 1,
   authorized_by_email: 'ops@example.com',
   authorized_by_user_id: 'c0000000-0000-0000-0000-000000000005',
@@ -284,6 +285,8 @@ describe('tombstoneRecalledDates', () => {
 
     const update = auth.update.mock.calls[0][0] as Record<string, unknown>
     expect(update).toMatchObject({ revoked_by_email: 'system:recall' })
+    // revokes exactly the grant that was read, never a newer one
+    expect(auth.eq).toHaveBeenCalledWith('id', 'auth-1')
     expect(update.dates).toBeUndefined()
   })
 

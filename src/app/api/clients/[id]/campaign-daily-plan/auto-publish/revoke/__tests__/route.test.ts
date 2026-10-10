@@ -63,6 +63,7 @@ function revokedRow() {
     review_revision: 'c0000000-0000-0000-0000-0000000000bb',
     page_id: '1234567890',
     dates: ['2026-09-04'],
+    lifted_dates: [],
     max_per_day: 1,
     authorized_by_email: 'admin@example.com',
     authorized_by_user_id: 'c0000000-0000-0000-0000-0000000000cc',

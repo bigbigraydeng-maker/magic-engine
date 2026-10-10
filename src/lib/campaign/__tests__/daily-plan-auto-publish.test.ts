@@ -43,6 +43,7 @@ function authorization(overrides: Partial<AutoPublishAuthorization> = {}): AutoP
     review_revision: REVIEW_REVISION,
     page_id: PAGE_ID,
     dates: ['2026-09-04'],
+    lifted_dates: [],
     max_per_day: 1,
     authorized_by_email: 'ops@example.com',
     authorized_by_user_id: USER_ID,

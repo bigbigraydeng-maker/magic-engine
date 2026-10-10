@@ -205,6 +205,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       review_revision: command.review_revision,
       page_id: command.page_id,
       dates: command.dates,
+      lifted_dates: liftDates,
       max_per_day: command.max_per_day,
       authorized_by_email: authorizedByEmail,
       authorized_by_user_id: access.user.id,

@@ -12,6 +12,8 @@ create table public.daily_plan_auto_publish_auth (
   review_revision text not null,
   page_id text not null check (page_id ~ '^[0-9]{5,25}$'),
   dates text[] not null check (cardinality(dates) between 1 and 31),
+  -- dates the PM explicitly re-allowed after a recall; the publisher treats `recalled[]` as final except for these
+  lifted_dates text[] not null default '{}',
   max_per_day integer not null default 1 check (max_per_day between 1 and 3),
   authorized_by_email text not null,
   authorized_by_user_id uuid not null,
