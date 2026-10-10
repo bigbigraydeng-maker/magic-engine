@@ -21,17 +21,20 @@ vi.mock('@/lib/meta/page-posts', () => ({
   getPageAccessToken: vi.fn(),
   deletePagePost: vi.fn(),
 }))
+vi.mock('@/lib/campaign/daily-plan-auto-publish-store', () => ({ tombstoneRecalledDates: vi.fn() }))
 
 import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getStoredPageToken } from '@/lib/meta/token-manager'
 import { deletePagePost } from '@/lib/meta/page-posts'
+import { tombstoneRecalledDates } from '@/lib/campaign/daily-plan-auto-publish-store'
 
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockStoredToken = vi.mocked(getStoredPageToken)
 const mockDelete = vi.mocked(deletePagePost)
+const mockTombstone = vi.mocked(tombstoneRecalledDates)
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const CAMPAIGN_ID = 'a0000000-0000-0000-0000-000000000001'
@@ -142,6 +145,7 @@ beforeEach(() => {
   } as never)
   mockStoredToken.mockResolvedValue('stored-page-token')
   mockDelete.mockResolvedValue({ alreadyGone: false, raw: { success: true } })
+  mockTombstone.mockResolvedValue({ tombstoned: 2 })
 })
 
 afterEach(() => {
@@ -178,5 +182,38 @@ describe('recall — bare photo id and feed post id receipts', () => {
     expect(json.would_recall.map((r: { post_id: string }) => r.post_id)).toEqual([LEGACY_PHOTO_ID, STORY_ID])
     expect(mockDelete).not.toHaveBeenCalled()
     expect(updateSpy).not.toHaveBeenCalled()
+  })
+
+  it('🔴 a live recall tombstones the recalled dates so the automatic publisher can never re-send them', async () => {
+    stubTables()
+
+    const json = await (await POST(request({ no_recall: false }), params)).json()
+
+    expect(mockTombstone).toHaveBeenCalledTimes(1)
+    const input = mockTombstone.mock.calls[0][0]
+    expect(input.clientId).toBe(CLIENT_ID)
+    expect(input.planId).toBe(PLAN_ID)
+    expect(input.dates).toHaveLength(2)
+    expect(json.auto_publish_tombstone).toEqual({ status: 'OK', tombstoned: 2 })
+  })
+
+  it('🔴 when the tombstone write fails the recall still stands but the response says so', async () => {
+    stubTables()
+    mockTombstone.mockRejectedValue(new Error('db down'))
+
+    const response = await POST(request({ no_recall: false }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(json.status).toBe('RECALLED')
+    expect(json.auto_publish_tombstone).toEqual({ status: 'FAILED', detail: 'db down' })
+  })
+
+  it('a dry run never touches the automatic-publish tables', async () => {
+    stubTables()
+
+    await POST(request(), params)
+
+    expect(mockTombstone).not.toHaveBeenCalled()
   })
 })
