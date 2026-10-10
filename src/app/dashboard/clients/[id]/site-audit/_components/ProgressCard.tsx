@@ -204,8 +204,8 @@ export function ProgressCard({ job, isLoading, error, onViewPages }: ProgressCar
             {job.status === 'completed' ? '✓ ' : '✗ '}
             {STATUS_LABEL[job.status]}
           </p>
-          {job.status === 'failed' && job.error_message && (
-            <p data-testid="progress-error-message" className="text-xs text-red-600 mt-1">
+          {job.error_message && (
+            <p data-testid="progress-error-message" className={`text-xs mt-1 ${job.status === 'failed' ? 'text-red-600' : 'text-amber-600'}`}>
               {job.error_message}
             </p>
           )}

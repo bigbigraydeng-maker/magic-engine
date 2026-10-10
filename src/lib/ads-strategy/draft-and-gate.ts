@@ -3,8 +3,9 @@
  *
  * ── 三条不许绕的规矩 ──────────────────────────────────────────────────────
  * 1. **建出来的一律是暂停的。** 从这里建出来的广告，只有 `approveDraft`（人点头）能开，
- *    且它只认白名单里的类型。注意：`meta-ads/execute` 的 `ads.reactivate_campaign` 能把
- *    系列开成 ACTIVE，但广告组和广告仍是暂停，不会花钱（2026-10-04 魏征核对）。
+ *    且它只认白名单里的类型，点头的人必须是 PM（全局管理员，见 `@/lib/ads/spend-activation`），
+ *    开之前先把授权回执写进账本，写不进去就不开。`meta-ads/execute` 的
+ *    `ads.reactivate_campaign` 同样只有 PM 能用、同样先写回执。
  * 2. **闸门拦下的不进审批队列。** 拦下就是 ME 自己的活没干完，不该拿去问人
  *    「这个有问题你还开吗」—— 那是把技术判断塞回给人。
  * 3. **一步都不许静默。** 建失败、回读失败、闸门拦下，都会留一行账，且各自是
@@ -26,6 +27,7 @@ import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
+import { buildSpendActivationReceipt, type SpendActivationAuthority, type SpendActivationReceipt } from '@/lib/ads/spend-activation'
 
 /**
  * 一条广告动作在账本里的状态。
@@ -38,6 +40,13 @@ import { checkCreatedAsExpected } from './created-as-expected'
 export type DraftStatus =
   /** 建出来了、闸门过了、等人点头。**只有这个状态会出现在审批页。** */
   | 'awaiting_approval'
+  /**
+   * 人点了头、正在 Meta 那边开。由 approveDraft 用「只有等待批准的才占得到」的条件写入占位，
+   * 防止同一条被并发批准两次、或批准进行中被否决后又被覆盖。
+   * 正常几秒内变成 active，或开失败后退回 awaiting_approval；若进程中途被杀会停在这里，
+   * 不在审批队列里出现，需要人去 Meta 核对（宁可卡住也不重复开）。
+   */
+  | 'activating'
   /** 闸门拦下了 —— ME 自己的活没干完，不拿去烦人。 */
   | 'blocked'
   /** 建到一半失败了。 */
@@ -80,6 +89,14 @@ export interface DraftRecord {
   redlinesSkipped?: string[]
   /** 回读发现有东西不是暂停的 → 我们补了一刀暂停，结果在这里。 */
   autoPause?: { ok: boolean; failed: string[] }
+  /**
+   * 谁、凭什么把这条开起来的回执。开之前先写 `authorized_pending`，
+   * Meta 成功后 `executed`，失败 `meta_failed`（带 error）。
+   */
+  activation?: SpendActivationReceipt & {
+    status: 'authorized_pending' | 'executed' | 'meta_failed'
+    error?: string
+  }
 }
 
 export interface CreateDraftDeps {
@@ -374,12 +391,14 @@ function renderAutoPause(r: { ok: boolean; failed: string[] } | undefined): stri
  *
  * 开之前**再查一次状态**：草案可能是几小时前建的，中间 Meta 可能改过东西，
  * 也可能同一条被点了两次。只有 `awaiting_approval` 能开。
+ * 先用条件写入「占位」成 activating（只有 awaiting_approval 占得到），占不到就不开；开成功写 active，失败退回 awaiting_approval。
  */
 export async function approveDraft(
   actionId: string,
   supabase: SupabaseClient,
   accessToken: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+  authority: SpendActivationAuthority,
+): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   const { data, error } = await supabase
     .from('flywheel_actions')
     .select('id, client_id, payload')
@@ -408,17 +427,79 @@ export async function approveDraft(
     return { ok: false, error: '这条草案没记下 Meta 那边的 id，开不了' }
   }
 
+  const clientId = (data as { client_id: string }).client_id
+  const receipt = buildSpendActivationReceipt({
+    authority,
+    entry: 'ad-approval',
+    clientId,
+    campaignId: p.campaignId,
+    draftActionId: actionId,
+  })
+
+  // 占位：只有还在等待批准的才占得到。占不到说明别处已经动过它（并发批准 / 否决），不开。
+  const claimPayload: DraftRecord = {
+    ...p,
+    status: 'activating',
+    activation: { ...receipt, status: 'authorized_pending' },
+  }
+  const claim = await supabase
+    .from('flywheel_actions')
+    .update({ payload: claimPayload })
+    .eq('id', actionId)
+    .eq('payload->>status', 'awaiting_approval')
+    .select('id')
+  if (claim.error) {
+    return { ok: false, error: `授权回执写不进去，没有开：${claim.error.message}` }
+  }
+  if (!claim.data || claim.data.length !== 1) {
+    return { ok: false, error: '这条刚被别处处理过（可能已经被开启或否决），这次没有再开。' }
+  }
+
   const r = await activatePublished(
     { campaignId: p.campaignId, adSetId: p.adSetId, adIds: p.adIds },
     accessToken,
   )
-  if (!r.ok) return r
+  if (!r.ok) {
+    const failedPayload: DraftRecord = {
+      ...p,
+      status: 'awaiting_approval',
+      activation: { ...receipt, status: 'meta_failed', error: r.error },
+    }
+    const failed = await supabase
+      .from('flywheel_actions')
+      .update({ payload: failedPayload })
+      .eq('id', actionId)
+      .eq('payload->>status', 'activating')
+      .select('id')
+    if (failed.error || !failed.data || failed.data.length !== 1) {
+      console.error(
+        '[draft-and-gate] meta_failed receipt write-back failed:',
+        actionId,
+        failed.error?.message ?? 'no row matched',
+      )
+      return {
+        ok: false,
+        error: `${r.error}（另：失败记录没写成功，这条会停在「开启中」，请到 Meta 后台核对）`,
+      }
+    }
+    return r
+  }
 
-  await supabase
+  const donePayload: DraftRecord = {
+    ...p,
+    status: 'active',
+    activation: { ...receipt, status: 'executed' },
+  }
+  const done = await supabase
     .from('flywheel_actions')
-    .update({ payload: { ...p, status: 'active' satisfies DraftStatus } })
+    .update({ payload: donePayload })
     .eq('id', actionId)
-
+    .eq('payload->>status', 'activating')
+    .select('id')
+  if (done.error || !done.data || done.data.length !== 1) {
+    const msg = done.error?.message ?? '状态已被改动'
+    return { ok: true, warning: `广告已开，但账本状态没写成功：${msg}` }
+  }
   return { ok: true }
 }
 
@@ -437,12 +518,23 @@ export async function rejectDraft(
 
   const p = (data as { payload: DraftRecord | null } | null)?.payload
   if (!p) return { ok: false, error: '找不到这条草案' }
+  if (p.status !== 'awaiting_approval') {
+    return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能否决` }
+  }
 
-  await supabase
+  const rejected = await supabase
     .from('flywheel_actions')
     .update({
       payload: { ...p, status: 'rejected' satisfies DraftStatus, error: reason ?? p.error },
     })
     .eq('id', actionId)
+    .eq('payload->>status', 'awaiting_approval')
+    .select('id')
+  if (rejected.error) {
+    return { ok: false, error: rejected.error.message }
+  }
+  if (!rejected.data || rejected.data.length !== 1) {
+    return { ok: false, error: '这条刚被别处处理过，这次没有否决。' }
+  }
   return { ok: true }
 }

@@ -1,5 +1,5 @@
 /**
- * Google Ads API client — thin wrapper over Google Ads REST API (v17).
+ * Google Ads API client — thin wrapper over Google Ads REST API (v25).
  *
  * P18.B.1: Authentication via OAuth2 Service Account + developer token.
  *
@@ -16,7 +16,7 @@
  * Reference: https://developers.google.com/google-ads/api/docs/rest/overview
  */
 
-const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v17'
+const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v25'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 
 // ── Types ─────────────────────────────────────────────────────────────────────

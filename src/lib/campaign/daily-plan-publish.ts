@@ -107,6 +107,9 @@ export interface CampaignDailyPublishedPost {
    *  `event_send_failed`. The post is still on Facebook; only measurement is
    *  missing, and a failed record was written for the daily to-do list. */
   measurement_skipped_reason?: string
+  /** 首评状态:POSTED 已贴 / PENDING_PUBLISH 定时帖等公开后由工作流补 / FAILED 已留待办记录。旧回执没有此字段。 */
+  first_comment_status?: FirstCommentStatus
+  first_comment_id?: string
   page_id: string
   /** When *we* handed the post to Facebook. Same value whether Facebook
    *  publishes immediately or holds it until `scheduled_publish_time`. */
@@ -162,12 +165,17 @@ export interface CampaignDailyPublishMeta {
   recalled?: Array<{ date: string; idempotency_key: string; post_id: string; recalled_at: string; already_gone: boolean }>
 }
 
+export const FIRST_COMMENT_STATUSES = ['POSTED', 'PENDING_PUBLISH', 'FAILED'] as const
+export type FirstCommentStatus = (typeof FIRST_COMMENT_STATUSES)[number]
+
 const publishedPostSchema = z.object({
   date: dateStringSchema,
   idempotency_key: z.string().min(1),
   post_id: z.string().min(1),
   post_id_source: z.enum(['post_id', 'id']),
   measurement_skipped_reason: z.string().min(1).optional(),
+  first_comment_status: z.enum(FIRST_COMMENT_STATUSES).optional(),
+  first_comment_id: z.string().min(1).optional(),
   page_id: pageIdSchema,
   published_at: z.string().datetime(),
   scheduled_publish_time: z.string().datetime().optional(),
@@ -438,6 +446,7 @@ export const StoryResolveDueSchema = z.object({
   page_id: pageIdSchema,
   published_at: z.string().datetime(),
   scheduled_publish_time: z.string().datetime().optional(),
+  first_comment_text: z.string().min(1).max(2000).optional(),
   measure_at: z.array(measureWindowSchema).min(1).max(4),
 })
 

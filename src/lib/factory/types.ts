@@ -240,6 +240,15 @@ export interface PublishedRef {
    */
   video_state?: 'DRAFT' | 'PUBLISHED'
   /**
+   * Publer 通道专用:帖子在 Publer 里的状态。draft = 只存草稿(不会发出去);
+   * scheduled = 已排期,到点由 Publer 发出。Meta 原生通道用 video_state,不用这个。
+   */
+  provider_state?: 'draft' | 'scheduled'
+  /** Publer 通道专用:排期发布时间(UTC ISO)。草稿没有这个字段。 */
+  scheduled_at?: string
+  /** Publer 通道专用:建帖后回读列表成功、却没找到我们埋的幂等标记 —— 防重复发布的对账可能失效,要人看一眼 */
+  idempotency_unverified?: boolean
+  /**
    * 发布信号(me/factory.reel.published)的 Inngest 回执 id。
    * 有值 = 已喊过下游;空/缺 = 还没喊成 → 补发对账会重发(仅当 video_state=PUBLISHED)。
    */
