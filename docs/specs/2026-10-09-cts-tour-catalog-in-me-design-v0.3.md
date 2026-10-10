@@ -384,3 +384,37 @@ PM 停在 China Panorama 上说「出发日期，从 5 月 8 号修改到 6 月 
 - AI 额度按 UTC 日切（新西兰约中午重置）而页面说「明天再用」；管理员的调用也占客户额度。
 - 换回旧版成功后不会给上架请求结案；贡献者统计单次最多读 5000 行。
 - `src/app/dashboard/clients/[id]/page.tsx` 因新增卡片到 802 行（原 794）；`price.ts` 引用带客户名的模块（原有）。
+
+### 6.11 字段补齐与图片（PM 2026-10-10「补齐」；本机做完，不上线）
+
+**缺口（已核对，见台账 2026-10-10-cts-tour-catalog-field-gap-vs-website）**：官网团数据约 30 个字段，目录只承接了一半。简介与亮点在编辑器里有栏位但读进来是空的（官网的内部读取口不输出）；逐日行程丢了住宿、节日标记、航司标志；主图、图集、SEO 标题与描述、标签、常见问题、整团售罄、单房差说明、评分与评价、推荐阅读、快速回答在目录里根本没有。图片地址现在写在官网代码里，分布在四处：官网项目的存储（64 处）、站内相对路径（15 处）、图库 images.unsplash.com（26 处）、ME 自己的存储（2 处）。
+
+**验收（唯一标准）**：对官网全部团，「官网团数据」→ 读入目录 → 上架 → 目录按官网格式输出，逐字段比对差异为零；允许的例外只有两项并须在比对里显式列出：已过期的班期不输出、`updated_at` 以目录为准。
+
+**A. 官网读取口补字段（chinatravel 仓，另开草稿 PR，B 级）**
+`/api/internal/tours` 是公开只读口，内容与公开团页面相同。追加输出：`short_description`、`highlights`、`hero_image`、`gallery`、`meta_title`、`meta_description`、`tags`、`faqs`、`sold_out`、`single_supplement_note`、`rating`、`review_count`、`review_summary`、`related_blog_slugs`、`quick_answer`；`itinerary` 每天追加 `accommodation`、`festive_label`、`operator_logo`。只增不改，现有消费者（ME 的解析器忽略未知字段）不受影响。上线需 PM 同意；在此之前本机用「从官网代码直接生成的读取口内容」做读入与比对。
+
+**B. 目录补栏位（ME，新迁移 `20261010400000_tour_catalog_content.sql`，未应用到生产库）**
+- `tour_catalog_tours` 新列：`hero_image text`、`gallery jsonb '[]'`、`meta_title text`、`meta_description text`、`tags jsonb '[]'`、`faqs jsonb '[]'`（每项 `{question, answer, link?: {href, label}}`）、`sold_out boolean not null default false`、`single_supplement_note text`、`rating numeric(2,1)`（0–5）、`review_count integer`（≥ 0）、`review_summary text`、`related_blog_slugs jsonb '[]'`、`quick_answer text`。各带长度 / 类型 CHECK。
+- 逐日行程每天追加可选 `accommodation`、`festiveLabel`、`operatorLogo {src, alt}`。
+- `tour_catalog_settings` 新列 `image_hosts jsonb '[]'`：允许的图片主机名名单，只有全局管理员能改。
+- `tour_catalog_update_tour` 的可改字段白名单加入上述新键（`create or replace`，其余逻辑逐行保留：操作者为空拒绝、同值不落库、并发令牌、client_id 过滤）。
+- 快照：新列在旧快照里缺失时按「空 / 空数组 / false」读，等于加列前的对外行为（§6.8.1 第 6 条的加列规则）。
+
+**C. 图片与链接是外部输入（客户员工可改）**
+- 图片地址（主图、图集、航司标志）只接受两种：站内相对路径（以单个 `/` 开头，不含 `//`、`..`、反斜杠、控制字符）或 `https://` 地址且主机名在该客户的 `image_hosts` 名单里（或属于其登记的官网域名）；≤ 500 字符。图集 ≤ 30 张。
+- 常见问题里的链接 `href` 只接受站内相对路径（同上规则）；问题 ≤ 300 字、回答 ≤ 3000 字、≤ 30 条。标签 ≤ 30 个、每个 ≤ 60 字。SEO 标题 ≤ 200、描述 ≤ 500。快速回答 ≤ 1500。推荐阅读 slug 只允许小写字母、数字、连字符。评分 0–5 一位小数。所有文本沿用 §6.10.1 第 7 条的字符规则。
+- 「读入官网」时把读取口里出现的图片主机名写进 `image_hosts`（来源是客户自己的官网，由全局管理员触发）；之后管理员可在「设置」页签增删。
+- 本轮图片做到：能看缩略图、能换地址、能增删、能调顺序。**上传图片文件本轮不做**（需要定存储位置与配额，另行设计）。
+
+**D. 读入与输出**
+- `FirstPartyTour` 类型与解析器追加上述字段，全部可选（其它消费者不受影响）。`seedCatalog` 写入新列。
+- 新输出函数 `toWebsiteTours(tours, departures, today)`：产出与官网读取口同形的完整结构，是 P1b 官网改读目录时的契约，也是本轮零差异比对的被比对方。现有 `toFirstPartyTours` 不变。
+- 上架对照表：新字段都有中文名；`sold_out` 变化为高风险，其余为普通项；图集按「新增 / 移除 / 顺序变化」各出一条。
+
+**E. 页面**
+- 团详情（只读视图）显示主图缩略图、简介、亮点、天数、展示价，不再只有班期。
+- 编辑器按组折叠：基本信息 ｜ 图片 ｜ 行程（每天含住宿与节日标记）｜ 包含与不含 ｜ 常见问题 ｜ 搜索与标签 ｜ 评价。图片组：主图预览 + 换地址；图集缩略图网格，可加地址、移除、上移下移；地址不合规时给大白话错误。
+- 已有目录的补读：目录非空时「读入官网」不可用（现状）。本轮不做「只补空字段」的回填；生产库尚无数据，上线后首次读入即带全字段。本机试用库重建后重新读入。
+
+**不做**：图片上传；按字段细分客户员工权限（评分、SEO 等仍属 edit）；`operatorLogo` 的可视化编辑（原样保留，随行程一起保存）。
