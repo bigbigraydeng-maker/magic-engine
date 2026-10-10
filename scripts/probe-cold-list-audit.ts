@@ -16,6 +16,7 @@
  *     scripts/probe-cold-list-audit.ts <clientId> <outFile.md>
  */
 import { writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from '@/lib/crm/contact-model'
@@ -29,6 +30,7 @@ import {
   buildTranscript,
   applyPostChecks,
   isCanned,
+  mask,
   type MsgRow,
   type Verdict,
 } from './probe-intent-calibration'
@@ -40,6 +42,7 @@ interface ConvRow {
 }
 
 interface Row {
+  idx: number
   segment: Segment
   daysIdle: number
   lastFrom: 'customer' | 'us'
@@ -174,6 +177,7 @@ async function main(): Promise<void> {
       const checked = applyPostChecks(verdict as Verdict, transcript, msgs, canned)
       const lastAt = Date.parse(msgs[msgs.length - 1].sent_at)
       rows.push({
+        idx: i,
         segment: items[i].segment,
         daysIdle: Math.max(0, Math.floor((Date.now() - lastAt) / DAY)),
         lastFrom: lastSpeaker(msgs, canned),
@@ -224,6 +228,31 @@ async function main(): Promise<void> {
     ``,
   ].join('\n')
   await writeFile(outFile, md, 'utf8')
+
+  // 魏征复审：A 组（欠报价）要先让 PM 标 10 个，看有没有「不该」。中性摘要，不带任何判断，
+  // 只给多久没动静 + 原文片段（打码）。按稳定哈希取，不挑好看的。
+  const clip = (t: string | null | undefined) => mask((t ?? '').replace(/\s+/g, ' ').trim()).slice(0, 170)
+  const aRows = rows
+    .filter((r) => rule(r) === RULES[0])
+    .sort((a, b) =>
+      createHash('sha256').update(String(a.idx) + items[a.idx].contactId).digest('hex')
+        .localeCompare(createHash('sha256').update(String(b.idx) + items[b.idx].contactId).digest('hex')),
+    )
+    .slice(0, 10)
+  const digest = aRows
+    .map((r, n) => {
+      const msgs = allMsgs[r.idx]
+      const cust = msgs.filter((m) => m.direction === 'inbound')
+      const ours = msgs.filter((m) => m.direction === 'outbound' && !isCanned(m, canned))
+      return [
+        `${n + 1}.  ${r.daysIdle} 天没动静；客人说了 ${cust.length} 句，我们真人说了 ${ours.length} 句`,
+        `    客人说的货 / 需求：${clip(cust.find((m) => (m.body ?? '').length > 25)?.body ?? cust[0]?.body)}`,
+        `    客人最后一句：${clip(cust[cust.length - 1]?.body)}`,
+        `    我们最后一句：${clip(ours[ours.length - 1]?.body)}`,
+      ].join('\n')
+    })
+    .join('\n\n')
+  await writeFile(`${outFile}.A-digest.md`, digest, 'utf8')
   console.log(`读了 ${rows.length} 人；报告：${outFile}`)
   console.log(`tokens: input=${input} output=${output}`)
 }
