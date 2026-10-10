@@ -5,6 +5,7 @@
  */
 
 import {
+  DataForSeoTaskError,
   DATAFORSEO_API_BASE,
   DEFAULT_LOCATION_CODE,
   DEFAULT_LANGUAGE_CODE,
@@ -171,6 +172,8 @@ export async function fetchDomainRankOverview(
   // causing all stub competitor enrichment to silently return 0/0.
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           metrics?: {
@@ -181,7 +184,16 @@ export async function fetchDomainRankOverview(
     }>
   }
 
-  const organic = json.tasks?.[0]?.result?.[0]?.items?.[0]?.metrics?.organic
+
+  const task = json.tasks?.[0]
+  if ((task?.status_code ?? 0) !== 20000) {
+    throw new DataForSeoTaskError(
+      task?.status_code,
+      `DataForSEO domain_rank_overview task error ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const organic = task?.result?.[0]?.items?.[0]?.metrics?.organic
   return {
     organic_keywords: Math.round(organic?.count ?? 0),
     organic_traffic:  Math.round(organic?.etv   ?? 0),

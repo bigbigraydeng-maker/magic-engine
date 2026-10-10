@@ -30,6 +30,10 @@ export interface ContactRow {
   segment: string
   segmentLabel: string
   temperature: 'hot' | 'warm' | 'cold' | 'off'
+  /** 他实际能被联系到的渠道 —— PersonDrawer 靠它决定给哪几个按钮（不要兜底成 'phone'）。 */
+  suggestedChannel?: 'phone' | 'sms' | 'email' | 'messenger' | 'none'
+  /** 为什么排到这一批 —— 抽屉顶部「上次说到这」那一档用。 */
+  reason?: string
   custom: Record<string, string | null>
 }
 
@@ -118,8 +122,11 @@ export function relTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   const now = new Date()
-  if (d.toDateString() === now.toDateString()) return '今天'
-  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000)
+  // 按日历日算，不按 24 小时算：昨晚 11 点在今天早上 6 点就该叫「昨天」，
+  // 不能因为还没满 24 小时就掉回日期写法。
+  const dayOf = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate())
+  const days = Math.round((dayOf(now) - dayOf(d)) / 86_400_000)
+  if (days <= 0) return '今天'
   if (days === 1) return '昨天'
   if (days >= 2 && days < 30) return `${days}天前`
   return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })

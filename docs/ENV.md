@@ -143,6 +143,7 @@
 | `INTERNAL_WORKER_TOKEN` | Voice worker 内部鉴权 | Render-web | ✅ |
 | `FACTORY_WORKER_TOKEN` | Factory worker 认领工单鉴权 | Render-web + worker | ❌ |
 | `FACTORY_WORKER_TARGET_CLIENT_ID` | 本地 Factory worker 可选单客户 claim 目标；提供时服务端必须再与 `FACTORY_WORKER_CLIENT_IDS` 求交集，不提供时沿用现有全白名单行为 | worker-local `.env` | ❌ |
+| `FACTORY_REMOTION_CLIENT_IDS` | 本地 Factory worker 允许走 Remotion 引擎（`brief.engine='remotion'`）的 client_id，逗号分隔；默认空 = 全部拒绝 | worker-local `.env` | ❌ |
 | `UPLOAD_LINK_SECRET` | 客户免登录上传链接签名（未配时 fallback 到 `CRON_SECRET`） | Render-web | ❌ |
 | `ADMIN_KEY_KILL_SWITCH` | 紧急关停全部 admin API key（设 `true` 生效） | Render-web | ❌ |
 | `OPENAI_WEBHOOK_SECRET` | OpenAI Realtime webhook 校验 | Render-web | ✅ |
@@ -191,6 +192,9 @@
 |---|---|---|
 | `MOCK_EXTERNAL_SERVICES` | 测试时 mock 全部外部 API | 本地 / CI |
 | `FACTORY_PUBLISH_LIVE` | 🔴 Factory 是否真发布。**未配 = 静默发 DRAFT**（片子落库全绿但 FB 上没人看得见） | Render-web |
+| `FACTORY_INSTAGRAM_LIVE` | 🔴 Instagram 同步是否真发(**独立于** FACTORY_PUBLISH_LIVE,两个都明确为 `true` 才真排期)。**未配 = 只在 Publer 存草稿**,不会公开。Instagram 这条线第一次真连 Publer 必须先走草稿验证 | Render-web |
+| `FACTORY_INSTAGRAM_LIVE_CLIENTS` | 🔴 允许 Instagram 真发的客户 id 名单(逗号分隔)。**未配 = 空名单 = 所有客户只存草稿**。Publer 里绑了 Instagram 账号 ≠ 客户同意自动跟发,所以真发还要按客户点名 | Render-web |
+| `FACTORY_INSTAGRAM_ENABLED_CLIENTS` | 🔴 允许 Instagram 同步的「客户id:Publer 账号id」名单(逗号分隔,如 `a:b,c:d`)。**未配 = 一条都不处理(连草稿也不建)**;客户自己能改连接器里的账号绑定,所以绑定只是候选,必须和这里点名的账号完全一致才处理 | Render-web |
 | `FACTORY_WORKER_CLIENT_IDS` | Factory 认领工单的客户白名单。**不是 worker 自己读的** —— worker 调 `/api/factory/worker/claim`，白名单在那条路由里由 `src/lib/factory/worker-guard.ts` 读并 fail-closed（未配则拒绝全部 claim） | Render-web |
 | `PROSPECTING_SWEEP_ENABLED` | 线索挖掘总闸（默认 **关**）。`/api/cron/prospecting-sweep` 路由里读 —— 那是 web 进程，prospecting-sweep 这个 cron 只负责 `curl` | Render-web |
 | `JOB_SIGNAL_INGEST_ENABLED` / `JOB_SIGNAL_KEYWORDS` | 招聘信号采集开关（默认 **关**）+ 关键词。开关在 `/api/cron/job-boards-weekly` 路由里读，同样是 web 进程 | Render-web |

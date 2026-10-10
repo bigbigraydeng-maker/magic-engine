@@ -56,8 +56,12 @@ export function isPmKind(lane: TodoLane): lane is PmKind {
 export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // ── 1 · 要拍板的（撤不回 / 花钱 / 对外）─────────────────────────────
   conversion_needs_review: 'decide', // 告诉广告平台一笔成交，撤不回
+  payment_email_needs_human: 'truth', // 邮件说收到款了、系统判不了真假/金额，要人核对
   ai_auto_review_circuit_breaker: 'decide', // 重新打开「AI 自动发给广告平台」
   ads_auto_pause_pending: 'decide', // 暂停在花钱的广告组
+  // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
+  // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
+  ads_circuit_tripped: 'decide',
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
@@ -71,9 +75,14 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   meta_data_deletion_failure: 'decide',
   // Magic Bridge 免费名额快满：加不加额度、加到多少美元由 PM 定（花钱）；不加则新客户到月底出不了报告
   magic_bridge_quota: 'decide',
+  tools_wide_budget_warning: 'decide',
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
+  // 某客户 AI 可见度探测整周全挂，多数是余额用光/钥匙失效，需要人去充值/换钥匙
+  // （Codex 复审 2026-09-28 抓到：漏了这条会让 LANE_OF_KIND 穷举表类型检查过不了，
+  // laneOf() 拿到 undefined，所有新告警从 PM 清单和邮件里彻底消失）
+  ai_tracker_all_failed: 'one_click',
   video_credits_out: 'one_click', // 充值
   dataforseo_credits_out: 'one_click', // 充值
   creatomate_render_failed: 'one_click', // 多数是出片额度用完，要人充值
@@ -85,14 +94,19 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   facebook_sync_failing: 'one_click', // 主页管理员重新「连接 Meta」
   comment_scope_missing: 'one_click',
   comment_token_invalid: 'one_click',
+  comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
+  comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
   linkedin_progress_needs_setup: 'one_click',
   linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
+  daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
+  instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
+  instagram_publish_failed: 'dev', // 同步 Instagram 重试都失败：开发看原因，不占 PM 的清单
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
   // 主干合进去的代码没上线（各窗口说的「已上线」不算数）：看上线记录，催修复 PR 尽快合、或回一句
@@ -110,6 +124,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
   crm_important_due: 'client_side', // 客户员工约好的回电
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
+  tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
 
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
@@ -121,6 +136,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   messenger_draft_pending_approval: 'review',
   messenger_draft_escalation: 'review',
   price_claim_unbacked: 'review',
+  price_fact_unverified: 'review',
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
   cross_client_leak: 'truth',
@@ -146,9 +162,15 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   cron_blind: 'dev',
   cron_stuck: 'dev',
   cron_failing: 'dev',
+  ads_config_unreadable: 'dev', // 广告回拉读不出广告设置，字段没对齐或临时故障，都是我们的活
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
+  // 某客户整周 AI 可见度全挂，但原因清一色是「不用你动手」的那几类（限流/供应商出错/
+  // 解析失败/我们数据库写入失败）—— 没有充值或换钥匙这种需要人点一次的动作，
+  // 同 ai_tracker_all_failed 的 how 原文就写「这条不用你动手」，不该进 PM 动手栏
+  // （Codex 复审 2026-09-28）。
+  ai_tracker_all_failed_dev: 'dev',
   ai_gateway_broken: 'dev',
   playbook_reference_stale: 'dev',
   platform_connection_pipeline_down: 'dev',
