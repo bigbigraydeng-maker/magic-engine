@@ -117,7 +117,7 @@ export function buildRemotionText(props) {
     clean(p.fromLabel),
     clean(`${p.currencyPrefix}${p.amount.toLocaleString('en-US')}`),
     clean(p.qualifier),
-    clean(p.dateLine),
+    ...(p.dateLine === undefined || p.dateLine === null ? [] : [clean(p.dateLine)]),
     clean(p.footnote),
   ].join(' ')
   return { hook, items, reveal }
