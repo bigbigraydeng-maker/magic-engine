@@ -225,7 +225,7 @@ async function loadBriefs(clientId: string): Promise<BriefRow[]> {
   )
 }
 
-function pickSample(briefs: BriefRow[], perLevel: number, unknownCount: number): BriefRow[] {
+function pickSample(briefs: BriefRow[], perLevel: number, unknownCount: number, skip = 0): BriefRow[] {
   const byLevel = new Map<string, BriefRow[]>()
   for (const b of briefs) {
     const key = b.intent_level ?? 'unknown'
@@ -239,7 +239,8 @@ function pickSample(briefs: BriefRow[], perLevel: number, unknownCount: number):
       stableHash(a.conversation_id).localeCompare(stableHash(b.conversation_id)),
     )
     const take = level === 'unknown' ? unknownCount : perLevel
-    out.push(...list.slice(0, take))
+    // skip：跳过已经抽过的前 N 个（稳定哈希序）—— 要一批「没用过的」新对话做盲测时用。
+    out.push(...list.slice(skip, skip + take))
   }
   return out
 }
@@ -417,6 +418,25 @@ function agreementList(samples: Sample[]): string {
     .join('\n')
 }
 
+/** 盲测摘要：每段只给打码后的原文片段 + 双方各说了几句，不含任何判断。 */
+function buildDigest(all: MsgRow[][], canned: Set<string>): string {
+  const clip = (t: string | null | undefined) => mask((t ?? '').replace(/\s+/g, ' ').trim()).slice(0, 170)
+  return all
+    .map((msgs, i) => {
+      const cust = msgs.filter((m) => m.direction === 'inbound')
+      const ours = msgs.filter((m) => m.direction === 'outbound' && !isCanned(m, canned))
+      const lines = [
+        `#${String(i + 1).padStart(2, '0')}  客人说了 ${cust.length} 句，我们真人说了 ${ours.length} 句`,
+        `  客人第一句：${clip(cust[0]?.body)}`,
+        `  客人最后一句：${clip(cust[cust.length - 1]?.body)}`,
+        `  我们第一句：${clip(ours[0]?.body)}`,
+        `  我们最后一句：${clip(ours[ours.length - 1]?.body)}`,
+      ]
+      return lines.join('\n')
+    })
+    .join('\n\n')
+}
+
 function buildReport(clientId: string, samples: Sample[]): string {
   const total = samples.length
   const agree = samples.filter((s) => s.oldLevel === s.newLevel).length
@@ -517,7 +537,8 @@ async function main(): Promise<void> {
   const unknownCount = Number(unknownArg ?? 10) || 10
 
   const briefs = await loadBriefs(clientId)
-  const picked = pickSample(briefs, perLevel, unknownCount)
+  const skip = Number(process.argv[6] ?? 0) || 0
+  const picked = pickSample(briefs, perLevel, unknownCount, skip)
   const business = await loadBusinessName(clientId)
 
   const samples: Sample[] = []
@@ -537,6 +558,10 @@ async function main(): Promise<void> {
   }
 
   await writeFile(outFile, buildReport(clientId, samples), 'utf8')
+  // 盲测用的「中性摘要」：只有原文片段，不带任何新旧判断，给 PM 标注时不被答案带偏。
+  await writeFile(`${outFile}.digest.md`, buildDigest(allMsgs, canned), 'utf8')
+  // 本机用的编号 → 对话 id 对照（含真实 id，只落在 outFile 旁边，别提交、别贴出去）。
+  await writeFile(`${outFile}.ids.json`, JSON.stringify(picked.map((b) => b.conversation_id)), 'utf8')
 
   const agree = samples.filter((s) => s.oldLevel === s.newLevel).length
   console.log(`抽样 ${samples.length} 段，一致 ${agree} 段`)
