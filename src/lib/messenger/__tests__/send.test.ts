@@ -351,7 +351,7 @@ describe('回完私信，CRM 那边当场记上', () => {
     const cap = stubSupabase({ lastInboundAt: '2026-07-26T10:00:00.000Z' })
     mockUserToken.mockResolvedValue('user-token')
     mockPageToken.mockResolvedValue('page-token')
-    await sendReply({ clientId: CTS, conversationId: CONVO, body: '好的，我这就发给您', sentByEmail: 'a@b.com' })
+    await sendReply({ clientId: CTS, conversationId: CONVO, body: '好的，我这就发给您', sentByEmail: 'a@b.com', usedAiDraft: false })
 
     expect(cap.touchpointUpserts).toHaveLength(1)
     const { row } = cap.touchpointUpserts[0]
@@ -371,7 +371,7 @@ describe('回完私信，CRM 那边当场记上', () => {
     const cap = stubSupabase({ lastInboundAt: '2026-07-26T10:00:00.000Z' })
     mockUserToken.mockResolvedValue('user-token')
     mockPageToken.mockResolvedValue('page-token')
-    await sendReply({ clientId: CTS, conversationId: CONVO, body: 'hi', sentByEmail: 'a@b.com' })
+    await sendReply({ clientId: CTS, conversationId: CONVO, body: 'hi', sentByEmail: 'a@b.com', usedAiDraft: false })
 
     const { row, opts } = cap.touchpointUpserts[0]
     expect(row.source).toBe('messenger')
@@ -384,7 +384,7 @@ describe('回完私信，CRM 那边当场记上', () => {
     const cap = stubSupabase({ lastInboundAt: '2026-07-26T10:00:00.000Z', contactId: null })
     mockUserToken.mockResolvedValue('user-token')
     mockPageToken.mockResolvedValue('page-token')
-    await sendReply({ clientId: CTS, conversationId: CONVO, body: 'hi', sentByEmail: 'a@b.com' })
+    await sendReply({ clientId: CTS, conversationId: CONVO, body: 'hi', sentByEmail: 'a@b.com', usedAiDraft: false })
 
     expect(cap.touchpointUpserts).toHaveLength(0)
   })
@@ -397,7 +397,7 @@ describe('回完私信，CRM 那边当场记上', () => {
     const cap = stubSupabase({ lastInboundAt: '2026-07-26T10:00:00.000Z' })
     mockUserToken.mockResolvedValue('user-token')
     mockPageToken.mockResolvedValue(null) // 拿不到 page token，发不出去
-    const r = await sendReply({ clientId: CTS, conversationId: CONVO, body: 'hi', sentByEmail: 'a@b.com' })
+    const r = await sendReply({ clientId: CTS, conversationId: CONVO, body: 'hi', sentByEmail: 'a@b.com', usedAiDraft: false })
 
     expect(r.ok).toBe(false)
     expect(cap.touchpointUpserts).toHaveLength(0)
