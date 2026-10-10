@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest'
-import { publishPagePhotoPost, deletePagePost, readPageStoryId } from '../page-posts'
+import { publishPagePhotoPost, deletePagePost, readPageStoryId, PagePublishError } from '../page-posts'
 
 const PAGE = '1616575215312482'
 const TOKEN = 'page-access-token'
@@ -113,6 +113,45 @@ describe('publishPagePhotoPost — scheduled photo returns only a photo id', () 
         scheduledPublishTime: new Date('2026-09-04T20:00:00Z'), fetcher,
       }),
     ).rejects.toThrow(/scheduled_publish_time/)
+  })
+})
+
+describe('publishPagePhotoPost — failure certainty (decides whether a retry is safe)', () => {
+  const base = { pageId: PAGE, pageAccessToken: TOKEN, message: 'hi', imageUrl: 'https://x/img.jpg' }
+
+  async function failure(response: { ok: boolean; status?: number; body: unknown }): Promise<PagePublishError> {
+    const { fetcher } = fakeFetch(response)
+    const error = await publishPagePhotoPost({ ...base, fetcher }).catch(e => e)
+    expect(error).toBeInstanceOf(PagePublishError)
+    return error as PagePublishError
+  }
+
+  it('HTTP 4xx with a Graph error body = rejected (post not created), code and subcode kept', async () => {
+    const error = await failure({ ok: false, status: 400, body: { error: { message: 'bad', code: 100, error_subcode: 33 } } })
+    expect(error).toMatchObject({ certainty: 'rejected', httpStatus: 400, graphCode: 100, graphSubcode: 33 })
+  })
+
+  it('HTTP 429 or a throttling code = rate_limited', async () => {
+    expect((await failure({ ok: false, status: 429, body: { error: { message: 'slow down' } } })).certainty).toBe('rate_limited')
+    expect((await failure({ ok: false, status: 400, body: { error: { message: 'limit', code: 4 } } })).certainty).toBe('rate_limited')
+  })
+
+  it('🔴 HTTP 5xx = unknown — Facebook may have accepted the post', async () => {
+    expect((await failure({ ok: false, status: 503, body: { error: { message: 'gateway' } } })).certainty).toBe('unknown')
+  })
+
+  it('🔴 HTTP 200 with an error body, or with no post id = unknown, never "rejected"', async () => {
+    expect((await failure({ ok: true, status: 200, body: { error: { message: 'weird', code: 1 } } })).certainty).toBe('unknown')
+    expect((await failure({ ok: true, status: 200, body: {} })).certainty).toBe('unknown')
+  })
+
+  it('🔴 a network failure or timeout = unknown, and the request carried a timeout signal', async () => {
+    const fn = vi.fn(async () => { throw new TypeError('fetch failed') })
+    const error = await publishPagePhotoPost({ ...base, fetcher: fn as unknown as typeof fetch }).catch(e => e)
+    expect(error).toBeInstanceOf(PagePublishError)
+    expect((error as PagePublishError).certainty).toBe('unknown')
+    const init = (fn.mock.calls[0] as unknown as [string, RequestInit])[1]
+    expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 })
 
