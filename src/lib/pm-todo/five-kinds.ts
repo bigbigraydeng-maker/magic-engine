@@ -141,6 +141,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   auto_publish_stalled: 'review', // 该发的帖子没发出去：看原因、决定重发还是改
   auto_publish_unknown_outcome: 'truth', // 系统判不了真假：帖子到底有没有发出去，只有看主页的人知道
   auto_publish_unarmed: 'review', // 已授权却没动静：发布器可能没跑
+  auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
   cross_client_leak: 'truth',

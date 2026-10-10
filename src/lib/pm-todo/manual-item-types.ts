@@ -177,6 +177,8 @@ export type ManualItemKind =
   | 'auto_publish_unknown_outcome'
   /** 自动发布：已授权的日期到了，却没有任何发布记录 —— 发布器可能没在跑 */
   | 'auto_publish_unarmed'
+  /** 自动发布：记录说「已撤回」，但回执里同一天又有一条新发出的帖子 —— 主页上有帖、系统记录对不上，要人核对 */
+  | 'auto_publish_record_conflict'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
