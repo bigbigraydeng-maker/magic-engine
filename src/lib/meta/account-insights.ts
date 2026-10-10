@@ -40,6 +40,7 @@ export type MetaAccountInsightsFailure =
   | { kind: 'http_error'; status: number }
   | { kind: 'invalid_json' }
   | { kind: 'empty_data' }
+  | { kind: 'no_delivery' }
 
 export type MetaAccountInsightsResult =
   | { ok: true; insights: MetaAdsInsights }
@@ -115,7 +116,7 @@ export async function getAdAccountInsightsResult(
   if (data === undefined) return { ok: false, failure: { kind: 'empty_data' } }
   if (!Array.isArray(data)) return { ok: false, failure: { kind: 'invalid_json' } }
   const row = data[0] as GraphInsightsData | undefined
-  if (!row) return { ok: false, failure: { kind: 'empty_data' } }
+  if (!row) return { ok: false, failure: { kind: 'no_delivery' } }
 
   return { ok: true, insights: parseInsights(row) }
 }
