@@ -21,7 +21,7 @@ function mainLine(preview: PublishPreviewResponse): MainLine {
     const x = preview.publishedVersion
     return {
       tone: 'pending',
-      text: `有 ${n} 处改动还没上架 · 客人现在看到的仍是第 ${x} 版（${time}）`,
+      text: `有 ${n} 处改动还没上架 · 客人现在看到的是第 ${x} 版（${time}）`,
       canPublish: true,
     }
   }
@@ -90,6 +90,16 @@ function PublishBarLoading(): JSX.Element {
   )
 }
 
+/** One paragraph for "the latest version was a revert": what is live, how the draft differs, what to do. */
+function afterRevertText(preview: PublishPreviewResponse, toVersion: number): string {
+  const time = preview.publishedAt ? `，${formatBatchTime(preview.publishedAt)}` : ''
+  const live = `客人现在看到的是第 ${preview.publishedVersion} 版（内容换回了第 ${toVersion} 版${time}）。`
+  const k = preview.changes.length
+  if (k === 0) return `${live}草稿和它已经一致，没有需要上架的改动。`
+  const risky = preview.highRiskCount > 0 ? `，其中 ${preview.highRiskCount} 处涉及价格或班期` : ''
+  return `${live}草稿和它有 ${k} 处不同${risky}。请先把草稿里的错改掉；直接上架会把当时换掉的内容重新发出去。`
+}
+
 function PublishBarStatus(props: {
   preview: PublishPreviewResponse
   line: MainLine
@@ -102,17 +112,18 @@ function PublishBarStatus(props: {
       <div className="min-w-0">
         {preview.afterRevert ? (
           <p className="text-sm font-black text-[#C2453A]">
-            上一次操作是把对外内容换回了第 {preview.afterRevert.toVersion} 版；草稿里还留着当时被换掉的内容
+            {afterRevertText(preview, preview.afterRevert.toVersion)}
           </p>
-        ) : null}
-        <p className={`text-sm font-semibold ${TONE_TEXT[tone]}`}>
-          {line.text}
-          {preview.changes.length > 0 && preview.highRiskCount > 0 ? (
-            <span className="ml-2 rounded-full bg-[#C2453A] px-2 py-0.5 text-xs font-black text-white">
-              其中 {preview.highRiskCount} 处涉及价格或班期
-            </span>
-          ) : null}
-        </p>
+        ) : (
+          <p className={`text-sm font-semibold ${TONE_TEXT[tone]}`}>
+            {line.text}
+            {preview.changes.length > 0 && preview.highRiskCount > 0 ? (
+              <span className="ml-2 rounded-full bg-[#C2453A] px-2 py-0.5 text-xs font-black text-white">
+                其中 {preview.highRiskCount} 处涉及价格或班期
+              </span>
+            ) : null}
+          </p>
+        )}
       </div>
       <button
         type="button"

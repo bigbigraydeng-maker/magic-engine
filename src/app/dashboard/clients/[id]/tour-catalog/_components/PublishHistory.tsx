@@ -16,7 +16,7 @@ function VersionMeta(props: { version: PublishedVersionView }): JSX.Element {
         {formatBatchTime(version.createdAt)}
       </span>
       <span className="text-sm font-semibold text-me-charcoal/55">
-        {version.publishedBy} 上架
+        {version.publishedBy} {version.sourceVersion !== null ? '换回' : '上架'}
       </span>
       {version.note ? (
         <span className="text-sm font-semibold text-me-charcoal/55">「{version.note}」</span>
@@ -40,7 +40,7 @@ function VersionRow(props: {
   const { version, onRevert } = props
   const label =
     version.sourceVersion !== null
-      ? `第 ${version.version} 版（内容同第 ${version.sourceVersion} 版）`
+      ? `第 ${version.version} 版（文字和价格同第 ${version.sourceVersion} 版）`
       : `第 ${version.version} 版`
   return (
     <li

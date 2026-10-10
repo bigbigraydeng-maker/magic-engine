@@ -53,6 +53,55 @@ create trigger tour_catalog_published_append_only_truncate
 revoke all on function public.tour_catalog_published_append_only() from public, anon, authenticated;
 grant execute on function public.tour_catalog_published_append_only() to service_role;
 
+-- A published row may only be the next version for its client. Both functions below insert the
+-- row first and move tour_catalog_state.published_version afterwards (under the state row lock),
+-- so the normal path always satisfies this; a direct insert with a made-up version does not.
+create function public.tour_catalog_published_check_version()
+returns trigger
+language plpgsql
+as $$
+begin
+  if NEW.version is distinct from coalesce(
+       (select s.published_version from public.tour_catalog_state s where s.client_id = NEW.client_id), 0
+     ) + 1 then
+    raise exception 'tour_catalog_published_bad_version';
+  end if;
+  return NEW;
+end;
+$$;
+
+create trigger tour_catalog_published_check_version_row
+  before insert on public.tour_catalog_published
+  for each row
+  execute function public.tour_catalog_published_check_version();
+
+revoke all on function public.tour_catalog_published_check_version() from public, anon, authenticated;
+grant execute on function public.tour_catalog_published_check_version() to service_role;
+
+-- TRUNCATE fires no row triggers, so it would empty the draft without bumping the revision
+-- (and without any change record). The working tables refuse it outright.
+create function public.tour_catalog_truncate_forbidden()
+returns trigger
+language plpgsql
+as $$
+begin
+  raise exception 'tour_catalog_truncate_forbidden';
+end;
+$$;
+
+create trigger tour_catalog_tours_no_truncate
+  before truncate on public.tour_catalog_tours
+  for each statement
+  execute function public.tour_catalog_truncate_forbidden();
+
+create trigger tour_catalog_departures_no_truncate
+  before truncate on public.tour_catalog_departures
+  for each statement
+  execute function public.tour_catalog_truncate_forbidden();
+
+revoke all on function public.tour_catalog_truncate_forbidden() from public, anon, authenticated;
+grant execute on function public.tour_catalog_truncate_forbidden() to service_role;
+
 -- Bumping the draft revision on every working-table write makes the publish-time
 -- version comparison a real gate: any edit between read and publish invalidates it.
 create function public.tour_catalog_bump_on_write()
@@ -223,16 +272,36 @@ begin
     raise exception 'version_not_found';
   end if;
 
-  -- Revert restores the target's departures in their original order, but keeps the
-  -- current status/status_source/status_as_of for any departure that still exists:
-  -- sold out / cancelled are facts and must not roll back.
+  -- Revert restores the target's departures in their original order. Departure STATUS rule
+  -- (must stay identical to keepCurrentStatuses in src/lib/tour-catalog/publish.ts):
+  --   1. match each target departure to the currently published one by id, else by
+  --      (tour_id, depart_on) — undoing an import and importing again gives the same day a new id;
+  --   2. matched → keep the CURRENT status/status_source/status_as_of (sold out / cancelled are
+  --      facts and must not roll back);
+  --   3. not matched either way → the departure comes back as 'closed', never bookable: it was
+  --      deleted or cancelled since and must not reappear open.
   select coalesce(jsonb_agg(
-           case when c.d is null then t.d
+           case when c.d is null
+                then t.d || jsonb_build_object('status', 'closed', 'status_source', 'revert', 'status_as_of', now())
                 else t.d || jsonb_build_object('status', c.d->'status', 'status_source', c.d->'status_source', 'status_as_of', c.d->'status_as_of')
            end order by t.ord), '[]'::jsonb)
     into v_departures
     from jsonb_array_elements(coalesce(v_target->'departures', '[]'::jsonb)) with ordinality as t(d, ord)
-    left join jsonb_array_elements(coalesce(v_current->'departures', '[]'::jsonb)) as c(d) on c.d->>'id' = t.d->>'id';
+    left join lateral (
+      select coalesce(
+        (select x.d
+           from jsonb_array_elements(coalesce(v_current->'departures', '[]'::jsonb)) as x(d)
+          where x.d->>'id' = t.d->>'id'
+          order by x.d->>'id'
+          limit 1),
+        (select x.d
+           from jsonb_array_elements(coalesce(v_current->'departures', '[]'::jsonb)) as x(d)
+          where x.d->>'tour_id' = t.d->>'tour_id'
+            and x.d->>'depart_on' = t.d->>'depart_on'
+          order by x.d->>'id'
+          limit 1)
+      ) as d
+    ) as c on true;
 
   v_snapshot := jsonb_set(v_target, '{departures}', v_departures, true);
 

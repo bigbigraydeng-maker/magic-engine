@@ -414,6 +414,11 @@ export function TourEditor({
     return window.confirm(message)
   }
 
+  function handleCancel() {
+    if (dirty && !window.confirm('放弃这次没保存的修改吗？')) return
+    onCancel()
+  }
+
   async function handleSave() {
     setStatus(null)
     setFieldErrors({})
@@ -647,7 +652,8 @@ export function TourEditor({
         </p>
       )}
 
-      <div className="flex items-center gap-3">
+      {/* Sticks to the bottom of the screen: the form is long and 保存 must stay reachable. */}
+      <div className="sticky bottom-0 z-10 -mx-2 flex items-center gap-3 border-t border-black/10 bg-white/90 px-2 py-3 backdrop-blur">
         <button
           type="button"
           onClick={handleSave}
@@ -658,7 +664,7 @@ export function TourEditor({
         </button>
         <button
           type="button"
-          onClick={onCancel}
+          onClick={handleCancel}
           className="rounded-lg border border-black/10 px-4 py-2 text-sm font-semibold text-me-charcoal"
         >
           取消

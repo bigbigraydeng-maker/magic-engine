@@ -155,17 +155,31 @@ export function AckCheckbox(props: {
   )
 }
 
+/** Explains what the red rows in a change list mean. */
+export function RiskLegend(): JSX.Element {
+  return (
+    <p className="text-xs font-semibold text-me-charcoal/55">
+      <span className="font-black text-[#C2453A]">标红</span> =
+      价格、班期、是否在售这类客人会直接看到并据此下单的内容
+    </p>
+  )
+}
+
 export function SellableCountConfirm(props: {
   sellable: SellableCheck
   value: string
   onChange: (value: string) => void
+  /** Nothing is published yet, so there is no "from A" to compare with. */
+  firstPublish?: boolean
 }): JSX.Element | null {
-  const { sellable, value, onChange } = props
+  const { sellable, value, onChange, firstPublish = false } = props
   if (!sellable.needsCountConfirm) return null
   return (
     <div className="rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/10 p-3">
       <p className="text-sm font-black text-[#C2453A]">
-        上架后对外可售的团会从 {sellable.before} 个变成 {sellable.after} 个
+        {firstPublish
+          ? `这是第一次上架：上架后对外可售的团共 ${sellable.after} 个。请输入这个数字确认。`
+          : `上架后对外可售的团会从 ${sellable.before} 个变成 ${sellable.after} 个`}
       </p>
       <label className="mt-2 block text-sm font-black text-[#C2453A]">
         请在这里输入 {sellable.after} 确认

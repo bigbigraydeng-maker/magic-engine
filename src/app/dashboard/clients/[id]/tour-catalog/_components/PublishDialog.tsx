@@ -11,6 +11,7 @@ import {
   AckCheckbox,
   ChangeList,
   DialogShell,
+  RiskLegend,
   SellableCountConfirm,
   STALE_TEXT,
   publishErrorText,
@@ -84,6 +85,7 @@ function PublishGates(props: {
         sellable={preview.sellable}
         value={countText}
         onChange={setCountText}
+        firstPublish={preview.firstPublish}
       />
     </>
   )
@@ -246,9 +248,12 @@ function PublishBody(props: PublishBodyProps): JSX.Element {
       {preview.firstPublish ? (
         <FirstPublishTable rows={preview.firstPublishRows} />
       ) : (
-        <div className="max-h-[50vh] space-y-3 overflow-auto">
-          <ChangeList changes={preview.changes} />
-        </div>
+        <>
+          <RiskLegend />
+          <div className="max-h-[50vh] space-y-3 overflow-auto">
+            <ChangeList changes={preview.changes} />
+          </div>
+        </>
       )}
 
       <PublishGates

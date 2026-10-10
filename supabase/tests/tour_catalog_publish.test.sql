@@ -268,6 +268,125 @@ do $$ declare v_count int; v_draft bigint; v jsonb; begin
 end $$;
 reset role;
 
+-- ---------------------------------------------------------------------------
+-- Revert status rule, on a fresh client D (must match keepCurrentStatuses in publish.ts).
+--   v1: June (open, id …d1), July (open, id …d2)
+--   v2: June deleted and re-created with a NEW id (…d3) and cancelled; July deleted; August added (…d4)
+--   revert to v1 → June stays cancelled (matched by tour + date), July comes back CLOSED, August is gone.
+-- ---------------------------------------------------------------------------
+insert into clients(id) values ('00000000-0000-0000-0000-0000000000d4') on conflict do nothing;
+
+do $$ declare v_draft bigint; v jsonb; begin
+  insert into tour_catalog_tours(id, client_id, slug, destination, tier, name, display_price_text, manages_departures)
+    values ('66666666-6666-6666-6666-666666666666', '00000000-0000-0000-0000-0000000000d4', 'rev-tour', 'china', 'discovery', 'Revert tour', 'From NZD $3,000 per person', true);
+  insert into tour_catalog_departures(id, tour_id, client_id, depart_on, return_on, status, status_source) values
+    ('77777777-7777-7777-7777-7777777777d1', '66666666-6666-6666-6666-666666666666', '00000000-0000-0000-0000-0000000000d4', '2027-06-01', '2027-06-15', 'open', 'manual'),
+    ('77777777-7777-7777-7777-7777777777d2', '66666666-6666-6666-6666-666666666666', '00000000-0000-0000-0000-0000000000d4', '2027-07-01', '2027-07-15', 'open', 'manual');
+  select catalog_version into v_draft from tour_catalog_state where client_id='00000000-0000-0000-0000-0000000000d4';
+  perform tour_catalog_publish('00000000-0000-0000-0000-0000000000d4', v_draft, 0, 'pm@x', 'v1', '{}');
+
+  delete from tour_catalog_departures where id in ('77777777-7777-7777-7777-7777777777d1', '77777777-7777-7777-7777-7777777777d2');
+  insert into tour_catalog_departures(id, tour_id, client_id, depart_on, return_on, status, status_source) values
+    ('77777777-7777-7777-7777-7777777777d3', '66666666-6666-6666-6666-666666666666', '00000000-0000-0000-0000-0000000000d4', '2027-06-01', '2027-06-15', 'cancelled', 'reimport-test'),
+    ('77777777-7777-7777-7777-7777777777d4', '66666666-6666-6666-6666-666666666666', '00000000-0000-0000-0000-0000000000d4', '2027-08-01', '2027-08-15', 'open', 'manual');
+  select catalog_version into v_draft from tour_catalog_state where client_id='00000000-0000-0000-0000-0000000000d4';
+  perform tour_catalog_publish('00000000-0000-0000-0000-0000000000d4', v_draft, 1, 'pm@x', 'v2', '{}');
+
+  v := tour_catalog_revert_published('00000000-0000-0000-0000-0000000000d4', 1, 2, 'pm@x', 'back to v1', '{}');
+  insert into presults values ('P27 revert D to v1 creates v3', (v->>'version')::bigint = 3, v::text);
+end $$;
+
+-- P28 Same day re-created under a new id and cancelled: revert keeps it cancelled.
+do $$ declare v_snap jsonb; begin
+  select snapshot into v_snap from tour_catalog_published where client_id='00000000-0000-0000-0000-0000000000d4' and version=3;
+  insert into presults values ('P28 revert matches by tour+date when the id changed, keeps cancelled',
+    exists (select 1 from jsonb_array_elements(v_snap->'departures') d
+             where d->>'id' = '77777777-7777-7777-7777-7777777777d1'
+               and d->>'depart_on' = '2027-06-01'
+               and d->>'status' = 'cancelled'
+               and d->>'status_source' = 'reimport-test')
+      and not exists (select 1 from jsonb_array_elements(v_snap->'departures') d
+             where d->>'depart_on' = '2027-06-01' and d->>'status' <> 'cancelled'),
+    (v_snap->'departures')::text);
+end $$;
+
+-- P29 Departure deleted since: revert brings it back CLOSED, never bookable.
+do $$ declare v_snap jsonb; begin
+  select snapshot into v_snap from tour_catalog_published where client_id='00000000-0000-0000-0000-0000000000d4' and version=3;
+  insert into presults values ('P29 revert brings a deleted departure back as closed',
+    exists (select 1 from jsonb_array_elements(v_snap->'departures') d
+             where d->>'id' = '77777777-7777-7777-7777-7777777777d2'
+               and d->>'depart_on' = '2027-07-01'
+               and d->>'status' = 'closed'
+               and d->>'status_source' = 'revert'),
+    (v_snap->'departures')::text);
+end $$;
+
+-- P30 Departure added after the target version disappears; nothing else sneaks in.
+do $$ declare v_snap jsonb; begin
+  select snapshot into v_snap from tour_catalog_published where client_id='00000000-0000-0000-0000-0000000000d4' and version=3;
+  insert into presults values ('P30 revert drops departures added after the target version',
+    jsonb_array_length(v_snap->'departures') = 2
+      and not exists (select 1 from jsonb_array_elements(v_snap->'departures') d where d->>'depart_on' = '2027-08-01')
+      and not exists (select 1 from jsonb_array_elements(v_snap->'departures') d where d->>'status' in ('open', 'limited')),
+    (v_snap->'departures')::text);
+end $$;
+
+-- P31 A direct insert with a made-up version is refused.
+do $$ declare v_count int; begin
+  insert into tour_catalog_published(client_id, version, snapshot, published_by, draft_version)
+    values ('00000000-0000-0000-0000-0000000000d4', 999, '{"schema_version":1,"tours":[],"departures":[]}', 'attacker@x', 0);
+  insert into presults values ('P31 direct insert with a forged version refused', false, 'no error');
+exception when others then
+  select count(*) into v_count from tour_catalog_published where client_id='00000000-0000-0000-0000-0000000000d4' and version=999;
+  insert into presults values ('P31 direct insert with a forged version refused', sqlerrm = 'tour_catalog_published_bad_version' and v_count = 0, sqlerrm);
+end $$;
+
+-- P32 A direct insert that skips ahead (client C is at v2, insert v5) is refused by the same rule.
+do $$ begin
+  insert into tour_catalog_published(client_id, version, snapshot, published_by, draft_version)
+    values ('00000000-0000-0000-0000-0000000000c3', 5, '{"schema_version":1,"tours":[],"departures":[]}', 'attacker@x', 0);
+  insert into presults values ('P32 direct insert skipping ahead refused', false, 'no error');
+exception when others then insert into presults values ('P32 direct insert skipping ahead refused', sqlerrm = 'tour_catalog_published_bad_version', sqlerrm); end $$;
+
+-- P33 / P34 TRUNCATE on the working tables is refused. Each attempt runs in a sub-transaction that
+-- is ALWAYS rolled back (a deliberate raise follows the truncate), so the tables are never emptied.
+do $$ declare v_msg text; v_before int; v_after int; begin
+  select count(*) into v_before from tour_catalog_tours;
+  begin
+    truncate tour_catalog_tours cascade;
+    raise exception 'truncate_was_not_refused';
+  exception when others then v_msg := sqlerrm; end;
+  select count(*) into v_after from tour_catalog_tours;
+  insert into presults values ('P33 truncate tours refused',
+    v_msg = 'tour_catalog_truncate_forbidden' and v_before > 0 and v_after = v_before,
+    format('%s before=%s after=%s', v_msg, v_before, v_after));
+end $$;
+
+do $$ declare v_msg text; v_before int; v_after int; begin
+  select count(*) into v_before from tour_catalog_departures;
+  begin
+    truncate tour_catalog_departures;
+    raise exception 'truncate_was_not_refused';
+  exception when others then v_msg := sqlerrm; end;
+  select count(*) into v_after from tour_catalog_departures;
+  insert into presults values ('P34 truncate departures refused',
+    v_msg = 'tour_catalog_truncate_forbidden' and v_before > 0 and v_after = v_before,
+    format('%s before=%s after=%s', v_msg, v_before, v_after));
+end $$;
+
+-- P35 anon cannot execute the new trigger functions directly.
+do $$ declare v_ok boolean; begin
+  select not has_function_privilege('anon', 'public.tour_catalog_published_check_version()', 'execute')
+     and not has_function_privilege('authenticated', 'public.tour_catalog_published_check_version()', 'execute')
+     and not has_function_privilege('anon', 'public.tour_catalog_truncate_forbidden()', 'execute')
+     and not has_function_privilege('authenticated', 'public.tour_catalog_truncate_forbidden()', 'execute')
+     and has_function_privilege('service_role', 'public.tour_catalog_published_check_version()', 'execute')
+     and has_function_privilege('service_role', 'public.tour_catalog_truncate_forbidden()', 'execute')
+    into v_ok;
+  insert into presults values ('P35 new trigger functions: service_role only', v_ok, '');
+end $$;
+
 select name, case when ok then 'PASS' else 'FAIL' end as r, detail from presults order by name;
 -- Exit non-zero (with psql -v ON_ERROR_STOP=1) when any check failed.
 do $$ begin if exists (select 1 from presults where not ok) then raise exception 'tour catalog publish checks FAILED'; end if; end $$;

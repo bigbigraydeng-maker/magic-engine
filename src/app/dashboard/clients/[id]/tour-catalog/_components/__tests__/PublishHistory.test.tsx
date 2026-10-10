@@ -77,8 +77,8 @@ const revertPreviewFixture = {
     {
       tourName: 'Deep Trench',
       departOn: '2999-05-13',
-      currentStatus: 'sold_out',
-      oldStatus: 'open',
+      currentStatus: '已关闭（现在对外已没有这个班期）',
+      oldStatus: '可订',
     },
   ],
   sellable: { before: 5, after: 5, needsCountConfirm: false },
@@ -114,17 +114,19 @@ describe('PublishHistory', () => {
     render(<PublishHistory clientId="c1" refreshKey={0} onReverted={() => {}} />)
 
     const row7 = await screen.findByTestId('publish-version-7')
-    expect(within(row7).getByText('第 7 版（内容同第 4 版）')).toBeInTheDocument()
+    expect(within(row7).getByText('第 7 版（文字和价格同第 4 版）')).toBeInTheDocument()
     expect(within(row7).getByText('当前对外')).toBeInTheDocument()
     expect(within(row7).getByText('改动 3 处')).toBeInTheDocument()
     expect(within(row7).getByText('「换回旧价」')).toBeInTheDocument()
-    expect(within(row7).getByText(/ray@x\.test 上架/)).toBeInTheDocument()
+    expect(within(row7).getByText('ray@x.test 换回')).toBeInTheDocument()
+    expect(within(row7).queryByText(/ray@x\.test 上架/)).toBeNull()
     expect(
       within(row7).queryByRole('button', { name: '把对外内容换回这一版' }),
     ).toBeNull()
 
     const row6 = screen.getByTestId('publish-version-6')
     expect(within(row6).getByText('第 6 版')).toBeInTheDocument()
+    expect(within(row6).getByText('amy@x.test 上架')).toBeInTheDocument()
     expect(within(row6).getByText('历史')).toBeInTheDocument()
     expect(
       within(row6).getByRole('button', { name: '把对外内容换回这一版' }),
@@ -187,11 +189,18 @@ describe('PublishHistory', () => {
       await screen.findByText('展示价：NZD $5,299 → NZD $4,999'),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('下面这些班期保持现在的状态，不会跟着换回去'),
+      screen.getByText(
+        '下面这些班期不会跟着换回旧状态：满团、取消是真实情况，换回去会让客人订到已经没有的位置。',
+      ),
     ).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '出团日' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '换回后（保持现在的）' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '那一版当时的' })).toBeInTheDocument()
+    expect(screen.queryByText('出发日')).toBeNull()
     expect(screen.getByText('Deep Trench')).toBeInTheDocument()
     expect(screen.getByText('2999-05-13')).toBeInTheDocument()
-    expect(screen.getByText('已满团')).toBeInTheDocument()
+    // The server already sends plain-Chinese status text: shown as is, no second mapping.
+    expect(screen.getByText('已关闭（现在对外已没有这个班期）')).toBeInTheDocument()
     expect(screen.getByText('可订')).toBeInTheDocument()
 
     const confirm = screen.getByRole('button', { name: '确认换回这一版' })

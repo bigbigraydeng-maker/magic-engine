@@ -77,7 +77,7 @@ describe('PublishBar', () => {
       },
     ]
     renderBar({ preview: makePreview({ changes, highRiskCount: 1 }) })
-    expect(screen.getByText(/有 2 处改动还没上架 · 客人现在看到的仍是第 3 版/)).toBeInTheDocument()
+    expect(screen.getByText(/有 2 处改动还没上架 · 客人现在看到的是第 3 版（/)).toBeInTheDocument()
     expect(screen.getByText('其中 1 处涉及价格或班期')).toBeInTheDocument()
   })
 
@@ -106,12 +106,64 @@ describe('PublishBar', () => {
     expect(screen.getByLabelText('上架状态')).toHaveAttribute('data-tone', 'ok')
   })
 
-  it('shows the after-revert warning', () => {
+  it('shows the after-revert warning as one paragraph', () => {
+    const change = {
+      kind: 'tour_field' as const,
+      tourId: 't1',
+      tourName: 'X',
+      field: 'displayPriceText',
+      fieldLabel: '展示价',
+      before: '1',
+      after: '2',
+      risk: 'high' as const,
+    }
+    renderBar({
+      preview: makePreview({
+        afterRevert: { toVersion: 2 },
+        changes: [change, { ...change, field: 'title', fieldLabel: '标题', risk: 'normal' as const }],
+        highRiskCount: 1,
+      }),
+    })
+    const bar = screen.getByLabelText('上架状态')
+    expect(bar).toHaveAttribute('data-tone', 'danger')
+    const paragraphs = bar.querySelectorAll('p')
+    expect(paragraphs).toHaveLength(1)
+    const text = paragraphs[0].textContent ?? ''
+    expect(text).toMatch(/^客人现在看到的是第 3 版（内容换回了第 2 版，\d+月\d+日 \d{2}:\d{2}）。/)
+    expect(text).toContain(
+      '草稿和它有 2 处不同，其中 1 处涉及价格或班期。请先把草稿里的错改掉；直接上架会把当时换掉的内容重新发出去。',
+    )
+    expect(text).not.toContain('仍是')
+    expect(screen.getByRole('button', { name: '查看并上架' })).not.toBeDisabled()
+  })
+
+  it('after a revert, leaves out the price clause when nothing risky differs', () => {
+    renderBar({
+      preview: makePreview({
+        afterRevert: { toVersion: 2 },
+        changes: [
+          {
+            kind: 'tour_field' as const,
+            tourId: 't1',
+            tourName: 'X',
+            field: 'title',
+            fieldLabel: '标题',
+            before: 'a',
+            after: 'b',
+            risk: 'normal' as const,
+          },
+        ],
+      }),
+    })
+    expect(screen.getByText(/草稿和它有 1 处不同。请先把草稿里的错改掉/)).toBeInTheDocument()
+    expect(screen.queryByText(/涉及价格或班期/)).not.toBeInTheDocument()
+  })
+
+  it('after a revert with the draft already fixed, says there is nothing to publish', () => {
     renderBar({ preview: makePreview({ afterRevert: { toVersion: 2 } }) })
-    expect(
-      screen.getByText('上一次操作是把对外内容换回了第 2 版；草稿里还留着当时被换掉的内容'),
-    ).toBeInTheDocument()
+    expect(screen.getByText(/草稿和它已经一致，没有需要上架的改动。/)).toBeInTheDocument()
     expect(screen.getByLabelText('上架状态')).toHaveAttribute('data-tone', 'danger')
+    expect(screen.getByRole('button', { name: '查看并上架' })).toBeDisabled()
   })
 
   it('shows loading and error states', () => {

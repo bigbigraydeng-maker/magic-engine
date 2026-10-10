@@ -325,6 +325,73 @@ describe('TourCatalogClient', () => {
     expect(within(drawer).getByPlaceholderText('用大白话告诉我要改什么…')).toHaveValue('hello')
   })
 
+  it('does not open the publish dialog while a tour has unsaved edits, and says why', async () => {
+    await renderReady()
+    await makeDirty()
+    const confirmSpy = vi.spyOn(window, 'confirm')
+    const blockedText =
+      '这个团还有没保存的修改。请先点「保存」或「取消」，再来上架——没保存的内容不会被上架。'
+
+    fireEvent.click(screen.getByRole('button', { name: '查看并上架' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent(blockedText)
+    expect(confirmSpy).not.toHaveBeenCalled()
+    // Nothing was thrown away.
+    expect(screen.getByDisplayValue('Changed name')).toBeInTheDocument()
+
+    // Cancel the edit: the reminder goes, and publishing opens again.
+    confirmSpy.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByText(blockedText)).toBeNull())
+
+    fireEvent.click(screen.getByRole('button', { name: '查看并上架' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('clears the unsaved reminder after a save, and 去上架 goes through the same check', async () => {
+    await renderReady()
+    await makeDirty()
+    fireEvent.click(screen.getByRole('button', { name: '查看并上架' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(/还有没保存的修改/)
+
+    fireEvent.click(screen.getAllByRole('button', { name: '保存' })[0])
+    await screen.findByText(/已存为草稿，客人还看不到/)
+    expect(screen.queryByText(/还有没保存的修改/)).toBeNull()
+
+    // Dirty again (through the editor), then try the "去上架" link in the saved notice.
+    fireEvent.click(screen.getByRole('button', { name: '编辑这个团' }))
+    fireEvent.change(screen.getByDisplayValue('Atlantis Gold — Coral Loop'), {
+      target: { value: 'Again' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '去上架' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent(/还有没保存的修改/)
+  })
+
+  it('guards a browser refresh / close only while there are unsaved edits', async () => {
+    const addSpy = vi.spyOn(window, 'addEventListener')
+    const removeSpy = vi.spyOn(window, 'removeEventListener')
+    const beforeUnload = (spy: typeof addSpy | typeof removeSpy) =>
+      spy.mock.calls.filter(c => c[0] === 'beforeunload')
+
+    await renderReady()
+    expect(beforeUnload(addSpy)).toHaveLength(0)
+
+    await makeDirty()
+    expect(beforeUnload(addSpy)).toHaveLength(1)
+    expect(beforeUnload(removeSpy)).toHaveLength(0)
+
+    const handler = beforeUnload(addSpy)[0][1] as (event: Event) => void
+    const event = new Event('beforeunload', { cancelable: true })
+    handler(event)
+    expect(event.defaultPrevented).toBe(true)
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(beforeUnload(removeSpy)).toHaveLength(1))
+    expect(beforeUnload(removeSpy)[0][1]).toBe(handler)
+  })
+
   it('publishes and refreshes the status afterwards', async () => {
     let published = false
     const fetchMock = await renderReady({

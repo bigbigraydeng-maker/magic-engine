@@ -2,117 +2,11 @@ import { describe, it, expect } from 'vitest'
 import {
   computeDiffHash,
   diffCatalog,
-  keepCurrentStatuses,
   parsePublishedSnapshot,
   projectCatalog,
   type CatalogContent,
 } from '../publish'
-import type { CatalogDeparture, CatalogItineraryDay, CatalogTour } from '../types'
-
-const today = '2026-10-10'
-
-function tour(overrides: Partial<CatalogTour> = {}): CatalogTour {
-  return {
-    id: 't1',
-    clientId: 'c1',
-    slug: 's1',
-    destination: 'china',
-    tier: 'discovery',
-    name: 'Golden China',
-    title: null,
-    shortDescription: null,
-    durationText: '10 days',
-    displayPriceText: 'From NZD $4,999 per person',
-    highlights: [],
-    itinerary: [],
-    inclusions: [],
-    exclusions: [],
-    tourCities: [],
-    singleSupplement: null,
-    maxGroupSize: null,
-    isActive: true,
-    managesDepartures: true,
-    sortOrder: 1,
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...overrides,
-  }
-}
-
-function departure(overrides: Partial<CatalogDeparture> = {}): CatalogDeparture {
-  return {
-    id: 'd1',
-    tourId: 't1',
-    clientId: 'c1',
-    departOn: '2027-03-11',
-    returnOn: '2027-03-25',
-    priceTextOverride: null,
-    status: 'open',
-    internal: {},
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...overrides,
-  }
-}
-
-function toSnapshot(content: CatalogContent): Record<string, unknown> {
-  return {
-    schema_version: 1,
-    tours: content.tours.map((t) => ({
-      id: t.id,
-      client_id: t.clientId,
-      slug: t.slug,
-      destination: t.destination,
-      tier: t.tier,
-      name: t.name,
-      title: t.title,
-      short_description: t.shortDescription,
-      duration_text: t.durationText,
-      display_price_text: t.displayPriceText,
-      highlights: t.highlights,
-      itinerary: t.itinerary,
-      inclusions: t.inclusions,
-      exclusions: t.exclusions,
-      tour_cities: t.tourCities,
-      single_supplement: t.singleSupplement,
-      max_group_size: t.maxGroupSize,
-      is_active: t.isActive,
-      manages_departures: t.managesDepartures,
-      sort_order: t.sortOrder,
-      updated_at: t.updatedAt,
-    })),
-    departures: content.departures.map((d) => ({
-      id: d.id,
-      tour_id: d.tourId,
-      client_id: d.clientId,
-      depart_on: d.departOn,
-      return_on: d.returnOn,
-      price_text_override: d.priceTextOverride,
-      status: d.status,
-      updated_at: d.updatedAt,
-    })),
-  }
-}
-
-function day(overrides: Partial<CatalogItineraryDay> = {}): CatalogItineraryDay {
-  return { day: 1, title: 'Arrive', description: 'Welcome', ...overrides }
-}
-
-function richDraft(): CatalogContent {
-  return {
-    tours: [
-      tour({
-        id: 't1',
-        name: 'Golden China',
-        itinerary: [day({ day: 1, title: 'Arrive', description: 'Welcome', meals: ['dinner'] })],
-      }),
-      tour({ id: 't2', name: 'Silk Road', sortOrder: 2 }),
-    ],
-    departures: [
-      departure({ id: 'd1', tourId: 't1', departOn: '2027-03-11', internal: { airline: 'CA' } }),
-      departure({ id: 'd2', tourId: 't1', departOn: '2027-04-11' }),
-      departure({ id: 'd3', tourId: 't2', departOn: '2027-05-11' }),
-    ],
-  }
-}
+import { day, departure, richDraft, today, toSnapshot, tour } from './publish.fixtures'
 
 describe('diffCatalog', () => {
   it('publish then compare immediately yields zero differences', () => {
@@ -481,23 +375,123 @@ describe('diffCatalog', () => {
     expect(diff.sellable.before).toBe(0)
   })
 
-  it('truncates long text to 200 characters but still detects the change', () => {
+  it('shows a window around the first difference when long texts share a 250-character prefix', () => {
     const base = 'x'.repeat(250)
     const draft: CatalogContent = {
-      tours: [tour({ id: 't1', shortDescription: base })],
+      tours: [tour({ id: 't1', shortDescription: base + 'OLD-ENDING' })],
       departures: [],
     }
     const parsed = parsePublishedSnapshot(toSnapshot(draft))
     if (parsed === null) throw new Error('parse failed')
     const changed: CatalogContent = {
-      tours: [tour({ id: 't1', shortDescription: base.slice(0, 249) + 'y' })],
+      tours: [tour({ id: 't1', shortDescription: base + 'NEW-ENDING' })],
       departures: [],
     }
     const diff = diffCatalog(parsed, changed, today)
     const change = diff.changes.find((c) => c.field === 'shortDescription')
     expect(change).toBeDefined()
-    expect(change?.before?.length).toBe(200)
-    expect(change?.after?.length).toBe(200)
+    expect(change?.before).not.toBe(change?.after)
+    expect(change?.before).toContain('OLD-ENDING')
+    expect(change?.after).toContain('NEW-ENDING')
+    // 40 characters of shared context before the difference, cut marked with an ellipsis.
+    expect(change?.before).toBe('…' + 'x'.repeat(40) + 'OLD-ENDING')
+    expect(change?.after).toBe('…' + 'x'.repeat(40) + 'NEW-ENDING')
+  })
+
+  it('caps a long value at about 200 characters and marks both cut ends', () => {
+    const head = 'a'.repeat(300)
+    const tail = 'z'.repeat(300)
+    const draft: CatalogContent = {
+      tours: [tour({ id: 't1', shortDescription: head + 'B' + tail })],
+      departures: [],
+    }
+    const parsed = parsePublishedSnapshot(toSnapshot(draft))
+    if (parsed === null) throw new Error('parse failed')
+    const changed: CatalogContent = {
+      tours: [tour({ id: 't1', shortDescription: head + 'C' + tail })],
+      departures: [],
+    }
+    const change = diffCatalog(parsed, changed, today).changes.find((c) => c.field === 'shortDescription')
+    expect(change?.before).toBe('…' + 'a'.repeat(40) + 'B' + 'z'.repeat(159) + '…')
+    expect(change?.after).toBe('…' + 'a'.repeat(40) + 'C' + 'z'.repeat(159) + '…')
+  })
+
+  it('shows short values whole and cuts a long one from the start when the other side is empty', () => {
+    const long = 'q'.repeat(250)
+    const draft: CatalogContent = { tours: [tour({ id: 't1', shortDescription: null })], departures: [] }
+    const parsed = parsePublishedSnapshot(toSnapshot(draft))
+    if (parsed === null) throw new Error('parse failed')
+    const changed: CatalogContent = { tours: [tour({ id: 't1', shortDescription: long })], departures: [] }
+    const change = diffCatalog(parsed, changed, today).changes.find((c) => c.field === 'shortDescription')
+    expect(change?.before).toBeNull()
+    expect(change?.after).toBe('q'.repeat(200) + '…')
+
+    const exact = 'k'.repeat(200)
+    const shortChanged: CatalogContent = { tours: [tour({ id: 't1', shortDescription: exact })], departures: [] }
+    const shortChange = diffCatalog(parsed, shortChanged, today).changes.find((c) => c.field === 'shortDescription')
+    expect(shortChange?.after).toBe(exact)
+  })
+
+  it('shows different before/after when only the day number of an itinerary day changes', () => {
+    const draft: CatalogContent = {
+      tours: [tour({ id: 't1', itinerary: [day({ day: 1 }), day({ day: 2, title: 'Xi an' })] })],
+      departures: [],
+    }
+    const parsed = parsePublishedSnapshot(toSnapshot(draft))
+    if (parsed === null) throw new Error('parse failed')
+    const changed: CatalogContent = {
+      tours: [tour({ id: 't1', itinerary: [day({ day: 1 }), day({ day: 3, title: 'Xi an' })] })],
+      departures: [],
+    }
+    const changes = diffCatalog(parsed, changed, today).changes.filter((c) => c.field === 'itinerary')
+    expect(changes).toHaveLength(1)
+    expect(changes[0].before).not.toBe(changes[0].after)
+    expect(changes[0].before).toBe('第 2 天｜Xi an｜Welcome')
+    expect(changes[0].after).toBe('第 3 天｜Xi an｜Welcome')
+  })
+
+  it('spells out a new tour: the tour, its prices and every departure, all high risk', () => {
+    const draft = richDraft()
+    const parsed = parsePublishedSnapshot(toSnapshot(draft))
+    if (parsed === null) throw new Error('parse failed')
+    const changed: CatalogContent = {
+      tours: [
+        ...draft.tours,
+        tour({ id: 't3', name: 'New Tour', sortOrder: 3, displayPriceText: 'From NZD $3,999 per person', singleSupplement: 'NZD $800' }),
+      ],
+      departures: [
+        ...draft.departures,
+        departure({ id: 'n2', tourId: 't3', departOn: '2027-10-10', status: 'limited' }),
+        departure({ id: 'n1', tourId: 't3', departOn: '2027-09-09', priceTextOverride: 'NZD $4,080' }),
+      ],
+    }
+    const diff = diffCatalog(parsed, changed, today)
+    const forTour = diff.changes.filter((c) => c.tourId === 't3')
+    expect(forTour).toEqual([
+      { kind: 'tour_added', tourId: 't3', tourName: 'New Tour', fieldLabel: '新增团', before: null, after: 'New Tour', risk: 'high' },
+      { kind: 'tour_field', tourId: 't3', tourName: 'New Tour', field: 'displayPriceText', fieldLabel: '展示价', before: null, after: 'From NZD $3,999 per person', risk: 'high' },
+      { kind: 'tour_field', tourId: 't3', tourName: 'New Tour', field: 'singleSupplement', fieldLabel: '单房差', before: null, after: 'NZD $800', risk: 'high' },
+      { kind: 'departure_added', tourId: 't3', tourName: 'New Tour', departOn: '2027-09-09', fieldLabel: '新增班期', before: null, after: '2027-09-09（可订，NZD $4,080）', risk: 'high' },
+      { kind: 'departure_added', tourId: 't3', tourName: 'New Tour', departOn: '2027-10-10', fieldLabel: '新增班期', before: null, after: '2027-10-10（少量余位）', risk: 'high' },
+    ])
+    expect(diff.highRiskCount).toBe(5)
+  })
+
+  it('lists only the tour line for a new tour without prices or departures; a removed tour stays one line', () => {
+    const draft = richDraft()
+    const parsed = parsePublishedSnapshot(toSnapshot(draft))
+    if (parsed === null) throw new Error('parse failed')
+    const added: CatalogContent = {
+      tours: [...draft.tours, tour({ id: 't3', name: 'Bare', sortOrder: 3, displayPriceText: null, singleSupplement: null })],
+      departures: draft.departures,
+    }
+    expect(diffCatalog(parsed, added, today).changes.filter((c) => c.tourId === 't3').map((c) => c.kind)).toEqual(['tour_added'])
+
+    const removed: CatalogContent = {
+      tours: draft.tours.filter((t) => t.id !== 't1'),
+      departures: draft.departures.filter((d) => d.tourId !== 't1'),
+    }
+    expect(diffCatalog(parsed, removed, today).changes.filter((c) => c.tourId === 't1').map((c) => c.kind)).toEqual(['tour_removed'])
   })
 
   it('lists each changed tour once in changedTourIds', () => {
@@ -585,105 +579,5 @@ describe('computeDiffHash', () => {
       highRiskCount: 0,
     }
     expect(computeDiffHash(base)).not.toBe(computeDiffHash({ ...base, revertTargetVersion: 1 }))
-  })
-})
-
-describe('parsePublishedSnapshot', () => {
-  it('returns null for an unknown schema_version', () => {
-    const snapshot = { ...toSnapshot(richDraft()), schema_version: 2 }
-    expect(parsePublishedSnapshot(snapshot)).toBeNull()
-  })
-
-  it('returns null when schema_version is missing', () => {
-    const snapshot = toSnapshot(richDraft())
-    delete snapshot.schema_version
-    expect(parsePublishedSnapshot(snapshot)).toBeNull()
-  })
-
-  it('returns null for a non-object', () => {
-    expect(parsePublishedSnapshot(null)).toBeNull()
-    expect(parsePublishedSnapshot('nope')).toBeNull()
-    expect(parsePublishedSnapshot([])).toBeNull()
-  })
-
-  it('drops departures with unknown or missing status but keeps valid siblings', () => {
-    const snapshot = toSnapshot(richDraft())
-    const departures = snapshot.departures as Array<Record<string, unknown>>
-    departures.push({ id: 'bad1', tour_id: 't1', client_id: 'c1', depart_on: '2027-07-01', return_on: null, price_text_override: null, status: 'weird', updated_at: '2026-01-01T00:00:00Z' })
-    departures.push({ id: 'bad2', tour_id: 't1', client_id: 'c1', depart_on: '2027-08-01', return_on: null, price_text_override: null, updated_at: '2026-01-01T00:00:00Z' })
-    const parsed = parsePublishedSnapshot(snapshot)
-    expect(parsed).not.toBeNull()
-    if (parsed === null) return
-    const ids = parsed.departures.map((d) => d.id)
-    expect(ids).not.toContain('bad1')
-    expect(ids).not.toContain('bad2')
-    expect(ids).toContain('d1')
-  })
-
-  it('ignores internal data present in the raw departure', () => {
-    const snapshot = toSnapshot(richDraft())
-    const departures = snapshot.departures as Array<Record<string, unknown>>
-    departures[0].internal = { airline: 'CA', capacity: 30 }
-    const parsed = parsePublishedSnapshot(snapshot)
-    expect(parsed).not.toBeNull()
-    if (parsed === null) return
-    expect(parsed.departures[0].internal).toEqual({})
-  })
-})
-
-describe('keepCurrentStatuses', () => {
-  it('keeps the current status of a shared departure and reports it', () => {
-    const target: CatalogContent = {
-      tours: [tour({ id: 't1', name: 'Golden China' })],
-      departures: [departure({ id: 'd1', tourId: 't1', status: 'open' })],
-    }
-    const current: CatalogContent = {
-      tours: [tour({ id: 't1', name: 'Golden China' })],
-      departures: [departure({ id: 'd1', tourId: 't1', status: 'sold_out' })],
-    }
-    const result = keepCurrentStatuses(target, current)
-    expect(result.content.departures[0].status).toBe('sold_out')
-    expect(result.kept).toEqual([
-      { tourName: 'Golden China', departOn: '2027-03-11', currentStatus: '已满团', oldStatus: '可订' },
-    ])
-  })
-
-  it('keeps the target status for a departure only in target', () => {
-    const target: CatalogContent = {
-      tours: [tour({ id: 't1' })],
-      departures: [departure({ id: 'd1', status: 'limited' })],
-    }
-    const current: CatalogContent = { tours: [tour({ id: 't1' })], departures: [] }
-    const result = keepCurrentStatuses(target, current)
-    expect(result.content.departures[0].status).toBe('limited')
-    expect(result.kept).toEqual([])
-  })
-
-  it('produces no kept row when statuses are equal', () => {
-    const target: CatalogContent = {
-      tours: [tour({ id: 't1' })],
-      departures: [departure({ id: 'd1', status: 'open' })],
-    }
-    const current: CatalogContent = {
-      tours: [tour({ id: 't1' })],
-      departures: [departure({ id: 'd1', status: 'open' })],
-    }
-    const result = keepCurrentStatuses(target, current)
-    expect(result.kept).toEqual([])
-  })
-
-  it('takes tour fields from target and does not mutate inputs', () => {
-    const target: CatalogContent = {
-      tours: [tour({ id: 't1', name: 'Target Name' })],
-      departures: [departure({ id: 'd1', status: 'open' })],
-    }
-    const current: CatalogContent = {
-      tours: [tour({ id: 't1', name: 'Current Name' })],
-      departures: [departure({ id: 'd1', status: 'sold_out' })],
-    }
-    const result = keepCurrentStatuses(target, current)
-    expect(result.content.tours[0].name).toBe('Target Name')
-    expect(target.departures[0].status).toBe('open')
-    expect(current.departures[0].status).toBe('sold_out')
   })
 })

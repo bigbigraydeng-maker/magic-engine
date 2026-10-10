@@ -166,6 +166,28 @@ export async function loadPublishedProducts(
 }
 
 // ---------------------------------------------------------------------------
+// Unreadable published version
+// ---------------------------------------------------------------------------
+
+/**
+ * The state row says something is published, but the latest published version cannot be read.
+ * This must never be mistaken for "never published": a first-publish flow would skip the
+ * comparison table and overwrite the outward feed blind.
+ */
+export class PublishedUnreadableError extends Error {
+  constructor(clientId: string, publishedVersion: number) {
+    super(`tour_catalog_published_unreadable client=${clientId} published_version=${publishedVersion}`)
+    this.name = 'PublishedUnreadableError'
+  }
+}
+
+function assertPublishedReadable(clientId: string, state: PublishState, read: PublishedRead): void {
+  if (state.publishedVersion > 0 && !read.published) {
+    throw new PublishedUnreadableError(clientId, state.publishedVersion)
+  }
+}
+
+// ---------------------------------------------------------------------------
 // buildPublishPreview
 // ---------------------------------------------------------------------------
 
@@ -205,12 +227,15 @@ export async function buildPublishPreview(
   const state = await getPublishState(db, clientId)
   const draft = await loadDraftCatalog(db, clientId)
   const publishedRead = await loadPublished(db, clientId)
+  assertPublishedReadable(clientId, state, publishedRead)
 
   const draftContent: CatalogContent = { tours: draft.tours, departures: draft.departures }
   const publishedContent = publishedContentOf(publishedRead)
   const diff = diffCatalog(publishedContent, draftContent, today)
 
   const firstPublish = !publishedRead.published
+  // A first publish has no comparison table, so the sellable count is always typed by hand.
+  const sellable = firstPublish ? { ...diff.sellable, needsCountConfirm: true } : diff.sellable
   const publishedVersion = publishedRead.published ? publishedRead.version : state.publishedVersion
   const afterRevert =
     publishedRead.published && publishedRead.sourceVersion !== null
@@ -226,7 +251,7 @@ export async function buildPublishPreview(
     changes: diff.changes,
     changedTourIds: diff.changedTourIds,
     highRiskCount: diff.highRiskCount,
-    sellable: diff.sellable,
+    sellable,
     afterRevert,
     firstPublishRows: firstPublish ? buildFirstPublishRows(draftContent, today) : [],
     diffHash: computeDiffHash({
@@ -292,7 +317,16 @@ export async function publishDraft(
   actor: string,
   today: string,
 ): Promise<PublishActionResult> {
-  const preview = await buildPublishPreview(db, clientId, today)
+  let preview: PublishPreviewResponse
+  try {
+    preview = await buildPublishPreview(db, clientId, today)
+  } catch (err) {
+    if (err instanceof PublishedUnreadableError) {
+      console.error('tour_catalog_publish_refused', err.message)
+      return { ok: false, error: 'publish_failed' }
+    }
+    throw err
+  }
   const failure = checkPublishRequest(preview, req)
   if (failure !== null) {
     return { ok: false, error: failure }
@@ -334,7 +368,9 @@ export async function buildRevertPreview(
   targetVersion: number,
   today: string,
 ): Promise<RevertPreviewResponse | { error: PublishErrorCode }> {
+  const state = await getPublishState(db, clientId)
   const current = await loadPublished(db, clientId)
+  assertPublishedReadable(clientId, state, current)
   if (!current.published) {
     return { error: 'version_not_found' }
   }
@@ -424,7 +460,16 @@ export async function revertPublished(
   actor: string,
   today: string,
 ): Promise<PublishActionResult> {
-  const preview = await buildRevertPreview(db, clientId, req.version, today)
+  let preview: RevertPreviewResponse | { error: PublishErrorCode }
+  try {
+    preview = await buildRevertPreview(db, clientId, req.version, today)
+  } catch (err) {
+    if (err instanceof PublishedUnreadableError) {
+      console.error('tour_catalog_revert_refused', err.message)
+      return { ok: false, error: 'publish_failed' }
+    }
+    throw err
+  }
   if ('error' in preview) {
     return { ok: false, error: preview.error }
   }

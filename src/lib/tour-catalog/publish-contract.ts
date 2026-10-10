@@ -38,7 +38,7 @@ export interface SellableCheck {
   before: number
   /** Sellable tours in the outward feed, if this goes ahead. */
   after: number
-  /** True when `after` is 0 or dropped by more than 30% — the caller must type `after` to proceed. */
+  /** True when `after` is 0, dropped by more than 30%, or this is a first publish — the caller must type `after` to proceed. */
   needsCountConfirm: boolean
 }
 
@@ -122,7 +122,10 @@ export interface PublishHistoryResponse {
 export interface KeptStatusRow {
   tourName: string
   departOn: string
-  /** Status that stays (what is published now). */
+  /**
+   * Status the departure will have after the revert: what is published now, or
+   * 「已关闭（现在对外已没有这个班期）」when the departure no longer exists outward and comes back closed.
+   */
   currentStatus: string
   /** Status that version N had and that is NOT restored. */
   oldStatus: string

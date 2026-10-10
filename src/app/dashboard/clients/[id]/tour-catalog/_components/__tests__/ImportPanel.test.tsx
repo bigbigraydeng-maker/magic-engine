@@ -94,3 +94,16 @@ describe('ImportPanel warnings', () => {
     ).toBeInTheDocument()
   })
 })
+
+describe('ImportPanel intro', () => {
+  it('says the import only changes the draft and still needs publishing', () => {
+    render(<ImportPanel clientId="c1" tours={[TOUR]} onChanged={() => {}} />)
+    expect(screen.getByRole('heading', { name: '上传出团表' })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '选一份出团表文件（Excel 另存为 CSV 格式），先预览会改什么，确认没问题再导入。导入只改草稿，客人看不到；导入后还要点上面的「查看并上架」才会对外生效。',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/班期表/)).toBeNull()
+  })
+})

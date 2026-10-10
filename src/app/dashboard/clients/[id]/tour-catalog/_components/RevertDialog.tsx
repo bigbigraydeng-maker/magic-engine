@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { RevertPreviewResponse, RevertRequest } from '@/lib/tour-catalog/publish-contract'
-import { DEPARTURE_STATUS_LABELS } from './catalog-format'
 import {
   AckCheckbox,
   ChangeList,
@@ -13,10 +12,6 @@ import {
   sellableConfirmed,
 } from './publish-parts'
 
-function statusText(status: string): string {
-  return DEPARTURE_STATUS_LABELS[status] ?? status
-}
-
 function KeptStatusTable(props: {
   rows: RevertPreviewResponse['keptStatuses']
 }): JSX.Element {
@@ -24,16 +19,16 @@ function KeptStatusTable(props: {
   return (
     <div>
       <p className="text-sm font-black text-me-charcoal">
-        下面这些班期保持现在的状态，不会跟着换回去
+        下面这些班期不会跟着换回旧状态：满团、取消是真实情况，换回去会让客人订到已经没有的位置。
       </p>
       <div className="mt-2 max-h-[40vh] overflow-auto">
         <table className="min-w-full text-sm">
           <thead>
             <tr className="text-left text-me-charcoal/55">
               <th className="px-2 py-1 font-semibold">团名</th>
-              <th className="px-2 py-1 font-semibold">出发日</th>
-              <th className="px-2 py-1 font-semibold">现在的状态</th>
-              <th className="px-2 py-1 font-semibold">那一版的状态</th>
+              <th className="px-2 py-1 font-semibold">出团日</th>
+              <th className="px-2 py-1 font-semibold">换回后（保持现在的）</th>
+              <th className="px-2 py-1 font-semibold">那一版当时的</th>
             </tr>
           </thead>
           <tbody>
@@ -41,8 +36,8 @@ function KeptStatusTable(props: {
               <tr key={`${row.tourName}-${row.departOn}-${index}`} className="border-t border-black/10">
                 <td className="px-2 py-1 font-semibold text-me-charcoal">{row.tourName}</td>
                 <td className="px-2 py-1 text-me-charcoal/70">{row.departOn}</td>
-                <td className="px-2 py-1 text-me-charcoal/70">{statusText(row.currentStatus)}</td>
-                <td className="px-2 py-1 text-me-charcoal/70">{statusText(row.oldStatus)}</td>
+                <td className="px-2 py-1 text-me-charcoal/70">{row.currentStatus}</td>
+                <td className="px-2 py-1 text-me-charcoal/70">{row.oldStatus}</td>
               </tr>
             ))}
           </tbody>

@@ -274,6 +274,65 @@ describe('PublishDialog', () => {
     expect(screen.getByRole('button', { name: '确认上架' })).not.toBeDisabled()
   })
 
+  it('explains what the red rows mean above the change list', () => {
+    renderDialog(makePreview({ changes: [normalChange, highRiskChange], highRiskCount: 1 }), vi.fn())
+    const legend = screen.getByText(/价格、班期、是否在售这类客人会直接看到并据此下单的内容/)
+    expect(legend.textContent).toBe('标红 = 价格、班期、是否在售这类客人会直接看到并据此下单的内容')
+    const firstGroup = screen.getByText('Deep Trench')
+    expect(legend.compareDocumentPosition(firstGroup) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('on a first publish that needs the count typed, uses first-publish wording and blocks a wrong number', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, version: 1 }))
+    renderDialog(
+      makePreview({
+        firstPublish: true,
+        publishedVersion: 0,
+        changes: [],
+        sellable: { before: 0, after: 0, needsCountConfirm: true },
+        firstPublishRows: [
+          {
+            tourId: 't2',
+            tourName: 'Deep Trench',
+            displayPriceText: null,
+            upcomingDepartures: 0,
+            nextDepartOn: null,
+            sellable: false,
+          },
+        ],
+      }),
+      fetchMock,
+    )
+    expect(
+      screen.getByText('这是第一次上架：上架后对外可售的团共 0 个。请输入这个数字确认。'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/会从 0 个变成/)).toBeNull()
+
+    const input = screen.getByLabelText('输入上架后的可售团数')
+    const submit = screen.getByRole('button', { name: '确认上架' })
+    expect(submit).toBeDisabled()
+
+    fireEvent.change(input, { target: { value: '3' } })
+    expect(submit).toBeDisabled()
+    fireEvent.click(submit)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: '0' } })
+    expect(submit).not.toBeDisabled()
+    fireEvent.click(submit)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(readBody(fetchMock).confirmSellableCount).toBe(0)
+  })
+
+  it('keeps the from-A-to-B wording when it is not the first publish', () => {
+    renderDialog(
+      makePreview({ sellable: { before: 5, after: 2, needsCountConfirm: true } }),
+      vi.fn(),
+    )
+    expect(screen.getByText('上架后对外可售的团会从 5 个变成 2 个')).toBeInTheDocument()
+    expect(screen.queryByText(/这是第一次上架/)).toBeNull()
+  })
+
   it('prevents double submission', async () => {
     const fetchMock = vi.fn().mockReturnValue(new Promise<Response>(() => {}))
     renderDialog(makePreview(), fetchMock)

@@ -178,9 +178,9 @@ export function ImportPanel({
   return (
     <div className="space-y-5 rounded-xl border border-black/10 bg-white p-5 shadow-sm">
       <div>
-        <h2 className="font-display font-black text-me-charcoal">上传班期表</h2>
+        <h2 className="font-display font-black text-me-charcoal">上传出团表</h2>
         <p className="mt-1 text-sm font-semibold text-me-charcoal/55">
-          选一份 CSV 文件，先预览看看会改什么，确认没问题再导入。
+          选一份出团表文件（Excel 另存为 CSV 格式），先预览会改什么，确认没问题再导入。导入只改草稿，客人看不到；导入后还要点上面的「查看并上架」才会对外生效。
         </p>
       </div>
 

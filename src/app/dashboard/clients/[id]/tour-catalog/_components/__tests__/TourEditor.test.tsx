@@ -266,6 +266,39 @@ describe('TourEditor', () => {
     expect(screen.queryByText(/请确认/)).toBeNull()
   })
 
+  it('cancels straight away when nothing was changed', () => {
+    const confirmMock = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirmMock)
+    const onCancel = vi.fn()
+    render(<TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={onCancel} />)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(confirmMock).not.toHaveBeenCalled()
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks before throwing away unsaved edits on cancel', () => {
+    const confirmMock = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirmMock)
+    const onCancel = vi.fn()
+    render(<TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={onCancel} />)
+    fireEvent.change(screen.getByDisplayValue('南岛经典'), { target: { value: '南岛经典 2' } })
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(confirmMock).toHaveBeenCalledWith('放弃这次没保存的修改吗？')
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(screen.getByDisplayValue('南岛经典 2')).toBeTruthy()
+
+    confirmMock.mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the save / cancel row stuck to the bottom of the screen', () => {
+    render(<TourEditor clientId="c1" tour={makeTour()} onSaved={vi.fn()} onCancel={vi.fn()} />)
+    const row = screen.getByRole('button', { name: '保存' }).parentElement
+    expect(row).toHaveClass('sticky', 'bottom-0')
+  })
+
   it('reports unsaved input through onDirtyChange, and clean again when it goes away', () => {
     const onDirtyChange = vi.fn()
     const { unmount } = render(

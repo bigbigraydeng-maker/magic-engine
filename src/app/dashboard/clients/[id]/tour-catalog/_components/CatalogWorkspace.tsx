@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CatalogSnapshotResponse } from './types'
 import type { PublishPreviewResponse } from '@/lib/tour-catalog/publish-contract'
 import type { PublishPreviewState } from './usePublishPreview'
@@ -25,7 +25,12 @@ const TABS: CatalogTab[] = [
 
 export const UNSAVED_TEXT = '这个团有没保存的修改，离开会丢失。确定离开吗？'
 
+export const UNSAVED_BLOCKS_PUBLISH_TEXT =
+  '这个团还有没保存的修改。请先点「保存」或「取消」，再来上架——没保存的内容不会被上架。'
+
 interface LeaveGuard {
+  /** Same flag as isDirty(), as state: drives what is on screen. */
+  dirty: boolean
   setDirty: (dirty: boolean) => void
   isDirty: () => boolean
   confirmLeave: () => boolean
@@ -33,9 +38,11 @@ interface LeaveGuard {
 
 function useLeaveGuard(): LeaveGuard {
   const dirtyRef = useRef(false)
+  const [dirty, setDirtyState] = useState(false)
 
-  const setDirty = useCallback((dirty: boolean) => {
-    dirtyRef.current = dirty
+  const setDirty = useCallback((next: boolean) => {
+    dirtyRef.current = next
+    setDirtyState(next)
   }, [])
 
   const isDirty = useCallback(() => dirtyRef.current, [])
@@ -43,11 +50,27 @@ function useLeaveGuard(): LeaveGuard {
   const confirmLeave = useCallback(() => {
     if (!dirtyRef.current) return true
     const ok = window.confirm(UNSAVED_TEXT)
-    if (ok) dirtyRef.current = false
+    if (ok) setDirty(false)
     return ok
-  }, [])
+  }, [setDirty])
 
-  return useMemo(() => ({ setDirty, isDirty, confirmLeave }), [setDirty, isDirty, confirmLeave])
+  return useMemo(
+    () => ({ dirty, setDirty, isDirty, confirmLeave }),
+    [dirty, setDirty, isDirty, confirmLeave],
+  )
+}
+
+/** Browser refresh / close: ask before unsaved edits are thrown away. */
+function useBeforeUnloadGuard(dirty: boolean): void {
+  useEffect(() => {
+    if (!dirty) return
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [dirty])
 }
 
 interface ToursTabProps {
@@ -226,10 +249,11 @@ function WorkspacePanels(props: WorkspacePanelsProps): JSX.Element {
 function WorkspaceHeader(props: {
   publish: PublishPreviewState
   assistantOpen: boolean
+  publishBlocked: boolean
   onToggleAssistant: () => void
   onOpenPublish: () => void
 }): JSX.Element {
-  const { publish, assistantOpen, onToggleAssistant, onOpenPublish } = props
+  const { publish, assistantOpen, publishBlocked, onToggleAssistant, onOpenPublish } = props
   return (
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
@@ -242,6 +266,14 @@ function WorkspaceHeader(props: {
             void publish.refresh()
           }}
         />
+        {publishBlocked ? (
+          <p
+            role="alert"
+            className="mt-2 rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/10 px-4 py-2 text-sm font-black text-[#C2453A]"
+          >
+            {UNSAVED_BLOCKS_PUBLISH_TEXT}
+          </p>
+        ) : null}
       </div>
       <button
         type="button"
@@ -260,6 +292,8 @@ interface WorkspaceState {
   selectedId: string | null
   assistantOpen: boolean
   publishOpen: boolean
+  /** The user asked to publish while edits were unsaved: show why nothing opened. */
+  publishBlocked: boolean
   guard: LeaveGuard
   handleTab: (id: string) => void
   setSelectedId: (id: string | null) => void
@@ -274,7 +308,14 @@ function useWorkspaceState(): WorkspaceState {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
+  const [blockedAsked, setBlockedAsked] = useState(false)
   const guard = useLeaveGuard()
+  useBeforeUnloadGuard(guard.dirty)
+
+  // Saved or cancelled: the reminder has done its job.
+  useEffect(() => {
+    if (!guard.dirty) setBlockedAsked(false)
+  }, [guard.dirty])
 
   const handleTab = (id: string) => {
     if (id === activeTab) return
@@ -282,7 +323,16 @@ function useWorkspaceState(): WorkspaceState {
     setActiveTab(id)
   }
 
-  const openPublish = useCallback(() => setPublishOpen(true), [])
+  // Single entry for the status-bar button and the "去上架" link. Unsaved edits are not part of
+  // the draft yet, so the dialog would silently leave them out.
+  const isDirty = guard.isDirty
+  const openPublish = useCallback(() => {
+    if (isDirty()) {
+      setBlockedAsked(true)
+      return
+    }
+    setPublishOpen(true)
+  }, [isDirty])
   const closePublish = useCallback(() => setPublishOpen(false), [])
   const toggleAssistant = useCallback(() => setAssistantOpen(v => !v), [])
   const closeAssistant = useCallback(() => setAssistantOpen(false), [])
@@ -292,6 +342,7 @@ function useWorkspaceState(): WorkspaceState {
     selectedId,
     assistantOpen,
     publishOpen,
+    publishBlocked: blockedAsked && guard.dirty,
     guard,
     handleTab,
     setSelectedId,
@@ -356,6 +407,7 @@ export function CatalogWorkspace(props: {
       <WorkspaceHeader
         publish={publish}
         assistantOpen={state.assistantOpen}
+        publishBlocked={state.publishBlocked}
         onToggleAssistant={state.toggleAssistant}
         onOpenPublish={state.openPublish}
       />
