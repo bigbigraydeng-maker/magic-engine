@@ -97,6 +97,7 @@ function build(setup: Setup = {}) {
     now: setup.now ?? NOW,
     switches: { live: setup.live ?? true, clientIds: [CLIENT] },
     listLiveAuthorizations: async () => grants,
+    isGlobalAdmin: () => true,
     getActiveAuthorization: async planId =>
       setup.active === undefined || setup.active === 'same' ? (grants.find(g => g.plan_id === planId) ?? null) : setup.active,
     loadPlanState: async () =>
@@ -217,6 +218,15 @@ describe('runAutoPublishSweep — when it must do nothing', () => {
     const summary = await runAutoPublishSweep(deps)
     expect(resultsOf(summary)).toEqual(['*:skipped(CLIENT_OR_CAMPAIGN_INACTIVE)'])
     expect(runPublish).not.toHaveBeenCalled()
+  })
+
+  it('🔴 the authoriser is no longer a global administrator -> nothing is sent, even though the grant is otherwise valid', async () => {
+    const { deps, runPublish, claimAttempt } = build()
+    deps.isGlobalAdmin = () => false
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toEqual(['*:skipped(AUTHORIZER_NOT_ADMIN)'])
+    expect(runPublish).not.toHaveBeenCalled()
+    expect(claimAttempt).not.toHaveBeenCalled()
   })
 
   it('the plan row is gone -> skipped', async () => {

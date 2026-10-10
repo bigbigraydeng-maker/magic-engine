@@ -24,6 +24,7 @@ const emptyDeps = (listLive: () => Promise<never[]>): AutoPublishWorkerDeps => (
   now: new Date('2026-10-12T00:00:00Z'),
   switches: { live: false, clientIds: [] },
   listLiveAuthorizations: listLive,
+  isGlobalAdmin: () => true,
   getActiveAuthorization: async () => null,
   loadPlanState: async () => null,
   loadScope: async () => ({ clientStatus: null, campaignStatus: null }),

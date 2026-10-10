@@ -69,6 +69,8 @@ export interface AutoPublishWorkerDeps {
   now: Date
   switches: AutoPublishSwitches
   listLiveAuthorizations: () => Promise<AutoPublishAuthorization[]>
+  /** Is this still a global administrator? Checked on every sweep: a grant outlives neither its author's role nor their account. */
+  isGlobalAdmin: (email: string) => boolean
   /** The grant for this plan if it is still not revoked (null once revoked). */
   getActiveAuthorization: (planId: string, clientId: string) => Promise<AutoPublishAuthorization | null>
   loadPlanState: (planId: string, clientId: string) => Promise<PlanState | null>
@@ -177,6 +179,11 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
       })
       if (!verdict.active) {
         note('*', 'skipped', verdict.reason)
+        continue
+      }
+
+      if (!deps.isGlobalAdmin(auth.authorized_by_email)) {
+        note('*', 'skipped', 'AUTHORIZER_NOT_ADMIN')
         continue
       }
 

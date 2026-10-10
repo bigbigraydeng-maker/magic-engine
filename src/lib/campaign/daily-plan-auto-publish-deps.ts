@@ -4,6 +4,7 @@
  * the sweep itself so the sweep stays testable without a database.
  */
 import { supabaseAdmin } from '@/lib/supabase'
+import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { runDailyPlanPublish } from './daily-plan-publish-runner'
 import { getActiveAuthorization } from './daily-plan-auto-publish-store'
@@ -73,6 +74,7 @@ export function buildProductionDeps(now: Date, env: NodeJS.ProcessEnv = process.
       DAILY_PLAN_AUTO_PUBLISH_CLIENTS: env.DAILY_PLAN_AUTO_PUBLISH_CLIENTS,
     }),
     listLiveAuthorizations,
+    isGlobalAdmin: email => isGlobalAdminEmail(email),
     getActiveAuthorization,
     loadPlanState,
     loadScope,

@@ -116,6 +116,7 @@ function makeDeps(now: Date, runPublish: Script, extra: { receiptRecalled?: stri
     now,
     switches: { live: true, clientIds: [CLIENT] },
     listLiveAuthorizations,
+    isGlobalAdmin: () => true,
     getActiveAuthorization,
     loadPlanState: async () => ({
       planRevision: '2026-10-01T00:00:00.000Z', reviewRevision: '10000000-0000-0000-0000-000000000001',
