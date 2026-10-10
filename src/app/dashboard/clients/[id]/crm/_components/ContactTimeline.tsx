@@ -15,7 +15,12 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { describeStageActor, stageReasonForDisplay } from '@/lib/crm/actors'
+import {
+  describeStageActor,
+  isAutomatedActor,
+  stageReasonForDisplay,
+  STAGE_INFER_ACTOR,
+} from '@/lib/crm/actors'
 
 /**
  * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
@@ -69,34 +74,7 @@ interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
   omittedMessages?: number
-  /** AI 摘要卡：意向等级 + 一句话 + 下一步。没有就不画。 */
-  brief?: { intentLevel: string; summary: string; nextAction: string | null } | null
   error?: string
-}
-
-const INTENT_BADGE: Record<string, { label: string; cls: string }> = {
-  high: { label: '高意向', cls: 'bg-[#C2453A] text-white' },
-  medium: { label: '中意向', cls: 'bg-[#E0A53A] text-white' },
-  low: { label: '低意向', cls: 'bg-me-charcoal/15 text-me-charcoal/70' },
-}
-
-function BriefCard({ brief }: { brief: NonNullable<Payload['brief']> }) {
-  const badge = INTENT_BADGE[brief.intentLevel]
-  return (
-    <div data-testid="timeline-brief" className="rounded-xl border border-me-charcoal/10 bg-white px-3 py-2">
-      <div className="flex items-center gap-2">
-        {badge && <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${badge.cls}`}>{badge.label}</span>}
-        <span className="text-[10px] font-bold text-me-charcoal/40">AI 摘要</span>
-      </div>
-      <p className="mt-1 text-[13px] leading-relaxed text-me-charcoal/85">{brief.summary}</p>
-      {brief.nextAction && (
-        <p className="mt-1 text-[12px] text-me-charcoal/70">
-          <span className="font-bold">下一步：</span>
-          {brief.nextAction}
-        </p>
-      )}
-    </div>
-  )
 }
 
 /** 渠道 → 一眼能认的图标。认不出的新渠道给中性圆点，绝不空白。 */
@@ -186,6 +164,8 @@ const LONG_TIMELINE = 6
  * 这些字段**本来就在这条线里**，只是散在十几条记录的小标签里。销售开口前
  * 要的就是这三样，不该为了看它们把整条历史翻一遍。
  */
+export type StageSource = 'human' | 'ai_conversation' | 'order_system'
+
 export interface TimelineSummary {
   /** 最后一句有内容的话（客人说的或我们记的）。 */
   lastText: string | null
@@ -194,15 +174,39 @@ export interface TimelineSummary {
   /** 最新一次提到的团意向 / 出行时间 —— 越新的越算数。 */
   tour: string | null
   travelWindow: string | null
+  /**
+   * 「到哪一步了」是谁判的 —— 从最新一条阶段变更的 changedBy 推断。
+   * null = 这个人没有任何阶段变更记录（例如导入时直接带了阶段）→ 抽屉不显示来源，不许瞎标「人工标的」。
+   * 'order_system' 是给将来订单系统留的口子，今天没有任何代码会产生它。
+   */
+  stageSource: StageSource | null
+}
+
+/** changedBy → 来源。只认得出的才说；认不出的机器身份返回 null（宁可不显示，不许说错）。 */
+export function stageSourceOf(changedBy: string | null | undefined): StageSource | null {
+  if (!changedBy || !changedBy.trim()) return null
+  const a = changedBy.trim().toLowerCase()
+  if (a === STAGE_INFER_ACTOR) return 'ai_conversation'
+  if (a === 'order-system' || a.startsWith('system:order')) return 'order_system'
+  if (isAutomatedActor(a)) return null
+  return a.includes('@') ? 'human' : null
 }
 
 /** 从整条线里提炼摘要。线是从旧到新的，所以后面的覆盖前面的。 */
 function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
   if (timeline.length === 0) return null
-  const s: TimelineSummary = { lastText: null, lastWho: null, lastAt: null, tour: null, travelWindow: null }
+  const s: TimelineSummary = {
+    lastText: null,
+    lastWho: null,
+    lastAt: null,
+    tour: null,
+    travelWindow: null,
+    stageSource: null,
+  }
   for (const e of timeline) {
     if (e.tour) s.tour = e.tour
     if (e.travelWindow) s.travelWindow = e.travelWindow
+    if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
     const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
     if (text && text.trim()) {
       s.lastText = text.trim()
@@ -210,7 +214,7 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
       s.lastAt = e.at
     }
   }
-  return s.lastText || s.tour || s.travelWindow ? s : null
+  return s.lastText || s.tour || s.travelWindow || s.stageSource ? s : null
 }
 
 /**
@@ -518,7 +522,6 @@ export function ContactTimeline({
 
   return (
     <div className="space-y-2.5">
-      {data.brief && <BriefCard brief={data.brief} />}
       {/*
         🔴 来源这一行必须在滚动区**外面**（Codex 复审 PR #1038，2026-08-17）。
         它原先是滚动容器的第一个子元素，而下面那个 effect 会把容器直接滚到底 ——

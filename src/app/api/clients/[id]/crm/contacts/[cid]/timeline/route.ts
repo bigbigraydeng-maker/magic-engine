@@ -179,6 +179,11 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 按这些 id 取跨不了客户。空 body（图片 / 表情 / 附件 / 系统事件）下面丢掉。
   const convRows = (convs ?? []) as { id: string; channel: string | null }[]
   const convIds = convRows.map((c) => c.id)
+  // WhatsApp 跟 messenger 一样：触点只是「对话开始 / 最近一次来信 / 最近一次回复」几个
+  // 占位标记（给分段引擎用），原文在 conversation_messages。有 WhatsApp 对话的人，
+  // 占位标记不进时间线 —— 不然「客人最近一次来信」会夹在真实消息中间，像一条没内容的消息
+  // （PM 2026-10-10 看本地页：消息需要更清晰的分段展示）。没有对话记录的人仍显示标记，不让人消失。
+  const hasWhatsAppConversation = convRows.some((c) => c.channel === 'whatsapp')
   const convChannel = new Map(convRows.map((c) => [c.id, c.channel]))
   let messages: {
     conversation_id: string
@@ -197,29 +202,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     messages = (msgs ?? []) as typeof messages
   }
 
-  // AI 摘要卡（意向等级 + 一句话 + 下一步）。拿不到就不显示 —— 卡片是辅助信息，
-  // 不能因为它读失败让整条时间线打不开。多段对话取最新生成的一张。
-  let brief: { intentLevel: string; summary: string; nextAction: string | null } | null = null
-  if (convIds.length > 0) {
-    try {
-      const { data: b } = await supabaseAdmin
-        .from('conversation_briefs')
-        .select('intent_level, summary, next_action')
-        .in('conversation_id', convIds)
-        .order('generated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (b && typeof b.summary === 'string' && b.summary.trim()) {
-        brief = {
-          intentLevel: String(b.intent_level ?? 'unknown'),
-          summary: b.summary.trim(),
-          nextAction: typeof b.next_action === 'string' && b.next_action.trim() ? b.next_action.trim() : null,
-        }
-      }
-    } catch {
-      brief = null
-    }
-  }
+  // AI 摘要（意向 / 下一步）不再从这里出：2026-10-10 起由列表接口统一算进「该做什么」
+  // （lib/crm/brief-lookup → next-action），抽屉顶部那张卡吃的是列表行。这里再查一次是死查询。
 
   const stageLabel = new Map<string, string>()
   for (const s of (stageRows ?? []) as { stage_key: string; label: string }[]) {
@@ -237,6 +221,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     raw: string | null
     metadata: Record<string, unknown> | null
   }[]) {
+    if (hasWhatsAppConversation && t.channel === 'whatsapp') continue
     const m = t.metadata ?? {}
     entries.push({
       kind: 'touch',
@@ -327,6 +312,5 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     },
     timeline: entries,
     omittedMessages,
-    brief,
   })
 }
