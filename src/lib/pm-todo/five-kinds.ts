@@ -94,14 +94,18 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   facebook_sync_failing: 'one_click', // 主页管理员重新「连接 Meta」
   comment_scope_missing: 'one_click',
   comment_token_invalid: 'one_click',
+  comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
   linkedin_progress_needs_setup: 'one_click',
   linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
+  daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
+  instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
+  instagram_publish_failed: 'dev', // 同步 Instagram 重试都失败：开发看原因，不占 PM 的清单
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
   // 主干合进去的代码没上线（各窗口说的「已上线」不算数）：看上线记录，催修复 PR 尽快合、或回一句
@@ -131,6 +135,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   messenger_draft_pending_approval: 'review',
   messenger_draft_escalation: 'review',
   price_claim_unbacked: 'review',
+  price_fact_unverified: 'review',
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
   cross_client_leak: 'truth',

@@ -141,7 +141,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 正是这套告警最怕的东西（跟 mailbox-sync-hourly 同一个理由）。
   // 恢复时三件一起做：render.yaml 取消注释 + 本行加回来 + EMAIL_REPLY_DIGEST_ENABLED=true。
   // DAPE E 段：看板上的动作真正被跑掉的那一步。上线时挂着 ?dry_run=1 只选不做。
-  { service: 'execution-auto-run', jobName: 'execution-auto-run', schedule: '30 9 * * *', logsRuns: true, addedAt: '2026-08-06' },
+  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // { service: 'execution-auto-run', jobName: 'execution-auto-run', schedule: '30 9 * * *', logsRuns: true, addedAt: '2026-08-06' },
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '25 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '5 * * * *', logsRuns: true },
@@ -164,8 +165,9 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
       // ad_config / ads_growth_state 兜。所有广告客户都被人手暂停时它会误报一条（子牙 / 魏征复审，可接受）。
       { table: 'ads_growth_states', freshnessHours: 26 },
     ] },
-  { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
-  { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
+  { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 16 * * 1', logsRuns: true },
+  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
   // 效果回流两条 —— 2026-08-04 补接线：代码早就有，但从没进过 render.yaml，
   // 于是 prescription_outcomes 一条记录都没有（「方案有没有用」从没被回答过）。
   { service: 'kpi-backfill', jobName: 'kpi-backfill', schedule: '20 6 * * *', logsRuns: true, addedAt: '2026-08-04' },
@@ -258,7 +260,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 补登记（2026-09-05 对账测试抓出）：Tailor-made 导入/提取改成异步后加的扫尾任务，
   // 2026-08-28 进 render.yaml，清单里一直没有。老任务不补 addedAt（理由同上）。
   { service: 'tailor-made-jobs-sweeper', jobName: 'tailor-made-jobs-sweeper', schedule: '*/30 * * * *', logsRuns: true },
-  { service: 'team-memory-sweeper', jobName: 'team-memory-sweeper', schedule: '*/30 * * * *', logsRuns: true },
+  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // { service: 'team-memory-sweeper', jobName: 'team-memory-sweeper', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'viral-analyzer-worker', jobName: 'viral-analyzer-worker', schedule: '*/10 * * * *', logsRuns: true },
   { service: 'viral-discovery-weekly', jobName: 'viral-discovery-weekly', schedule: '0 0 * * *', logsRuns: true },
   { service: 'vision-analyzer', jobName: 'vision-analyzer', schedule: '50 * * * *', logsRuns: true },
@@ -426,4 +429,16 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 管它）。路由文件已在 2026-09-29（PR #2200）改成「被调用就返回 410 并记失败」，不再是回滚备用入口，
   // 也不要再把它当回滚路径：9-28 就是这样被带回来的。本条不该再被排班。
   'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout；路由 2026-09-29 起固定返回 410，不是回滚入口',
+
+  // 2026-10-07 PM 拍板暂停：没人读的空跑。render.yaml 那段已整块注释掉，
+  // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
+  'execution-auto-run': '2026-10-07 暂停（没人读的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+
+  // 2026-10-07 PM 拍板暂停：开关没开的空转。render.yaml 那段已整块注释掉，
+  // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
+  'job-boards-weekly': '2026-10-07 暂停（开关没开的空转），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+
+  // 2026-10-07 PM 拍板暂停：上游已停 6 周的空跑。render.yaml 那段已整块注释掉，
+  // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
+  'team-memory-sweeper': '2026-10-07 暂停（上游已停 6 周的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
 }

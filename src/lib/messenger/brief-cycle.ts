@@ -91,18 +91,20 @@ const ABORT_REASON: Record<string, string> = {
 /** 候选池一次最多从库里捞多少条对话（挑之前的粗筛上限，不是写卡上限）。 */
 const CANDIDATE_POOL = 500
 
+interface ExistingBrief {
+  source_message_count: number
+  regen_count: number
+  regen_count_date: string | null
+  knowledge_status: string | null
+}
+
 interface ConversationRow {
   id: string
   client_id: string
   message_count: number
   last_message_at: string | null
   last_message_from: string | null
-  conversation_briefs: {
-    source_message_count: number
-    regen_count: number
-    regen_count_date: string | null
-    knowledge_status: string | null
-  }[]
+  conversation_briefs: ExistingBrief | ExistingBrief[] | null
 }
 
 /**
@@ -144,7 +146,10 @@ export interface PostBriefSweepResult {
 }
 
 function toCandidate(row: ConversationRow): BriefCandidate {
-  const brief = row.conversation_briefs?.[0]
+  // PostgREST 对一对一关系返回对象、对一对多返回数组，两种都要认；只认数组会让
+  // 「已写过卡」永远判成没写过（2026-10 审计，每天约 1200 次调用只需约 70 次）。
+  const raw = row.conversation_briefs
+  const brief = Array.isArray(raw) ? raw[0] : raw ?? undefined
   return {
     conversationId: row.id,
     clientId: row.client_id,
