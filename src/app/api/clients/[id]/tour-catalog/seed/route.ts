@@ -50,6 +50,14 @@ export async function POST(
     const result = await seedCatalog(supabaseAdmin, clientId, feed)
     return NextResponse.json({ ok: true, ...result })
   } catch (error) {
+    // Refusals decided before anything is written: an old-shape feed, or a catalog that already has tours.
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'feed_missing_content_fields') {
+      return NextResponse.json({ error: 'feed_missing_content_fields' }, { status: 400 })
+    }
+    if (message === 'catalog_not_empty') {
+      return NextResponse.json({ error: 'catalog_not_empty' }, { status: 409 })
+    }
     console.error('tour_catalog_seed_failed', error)
     return NextResponse.json({ error: 'seed_failed' }, { status: 500 })
   }

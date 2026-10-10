@@ -4,7 +4,7 @@
  * on the client's own registered website domain (or a subdomain of it).
  */
 
-import { normalizeDomain } from './seed'
+import { normalizeDomain } from './domain'
 import type { CatalogSettings, SettingsErrorCode } from './catalog-contract'
 
 const MAX_IMAGE_HOSTS = 10

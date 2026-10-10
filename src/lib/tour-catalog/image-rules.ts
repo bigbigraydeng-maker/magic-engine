@@ -1,15 +1,17 @@
 /**
  * Image URL rules for the tour catalog. Pure, no I/O.
  *
- * An image address is acceptable when it is already used somewhere in the client's draft
- * catalog, or when it is a site-relative path under /images/, or when it is an https URL on
- * the client's own website domain (or a subdomain) or on one of the client's extra image hosts.
+ * An image address is acceptable when it is a site-relative path under /images/, or an https URL
+ * made of URL-safe characters only whose host is the client's own website domain (or a
+ * subdomain) or one of the client's extra image hosts. An address already used somewhere in the
+ * client's draft catalog is excused from the host list, and from nothing else.
  * SVG is refused: it can carry script. Design §6.10.1 item 6 / §6.11.1 item 5.
  */
 
 import type { CatalogTour } from './types'
 import type { ImageHostSuggestion } from './catalog-contract'
 import { hostBelongsToDomain } from './settings-validation'
+import { hasForbiddenChars } from './text-rules'
 
 export { isValidImageHost } from './settings-validation'
 
@@ -28,27 +30,42 @@ export const MAX_IMAGE_URL_LENGTH = 500
 export const MAX_IMAGE_HOSTS = 10
 
 const SITE_PATH_RE = /^\/images\/[A-Za-z0-9._/-]+\.(jpg|jpeg|png|webp|avif)$/
-const BAD_CHARS_RE = /[\s\u0000-\u001f\u007f\\]/
+/**
+ * The whole https address, as stored: letters, digits and URL-safe punctuation only. No
+ * credentials, no port, no `#` fragment, and none of `< > " ' \`` or white space — the website
+ * hands these addresses to the browser as they are (design §6.11.1).
+ */
+const HTTPS_URL_RE = /^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._~!$&()*+,;=:@%/-]*)?(\?[A-Za-z0-9._~!$&()*+,;=:@%/?-]*)?$/
+/** Refused in every image address, whatever its form. */
+const BAD_CHARS_RE = /[\s<>"'`\\]/
+/** `.svg` / `.svgz` anywhere in the decoded path, in any letter case. SVG can carry script. */
+const SVG_RE = /\.svgz?(\b|$|[/;?%])/i
 
-/** The lower-cased extension of the last path segment, or '' when there is none. */
-function pathExtension(pathname: string): string {
-  const segments = pathname.split('/')
-  const last = segments.length === 0 ? '' : segments[segments.length - 1]
-  const dot = last.lastIndexOf('.')
-  if (dot < 0) return ''
-  return last.slice(dot + 1).toLowerCase()
+export type ImageShapeIssue = 'too_long' | 'invalid_image_url'
+
+/** True when the path, percent-decoded once, names an SVG (or cannot be decoded at all). */
+function pathIsSvg(pathname: string): boolean {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    return true
+  }
+  return SVG_RE.test(decoded)
 }
 
 /** Check a site-relative path: /images/… with a raster extension, no '..' and no '//'. */
-function sitePathIssue(raw: string): ImageUrlIssue | null {
+function sitePathIssue(raw: string): ImageShapeIssue | null {
   if (!SITE_PATH_RE.test(raw)) return 'invalid_image_url'
   if (raw.includes('..')) return 'invalid_image_url'
   if (raw.includes('//')) return 'invalid_image_url'
+  if (pathIsSvg(raw)) return 'invalid_image_url'
   return null
 }
 
-/** Check an https URL: no credentials, no port, no SVG, host allowed. */
-function httpsUrlIssue(raw: string, ctx: ImageRuleContext): ImageUrlIssue | null {
+/** Check an https URL: safe characters only, parses, no credentials, no port, no SVG. */
+function httpsUrlShapeIssue(raw: string): ImageShapeIssue | null {
+  if (!HTTPS_URL_RE.test(raw)) return 'invalid_image_url'
   let url: URL
   try {
     url = new URL(raw)
@@ -57,21 +74,36 @@ function httpsUrlIssue(raw: string, ctx: ImageRuleContext): ImageUrlIssue | null
   }
   if (url.protocol !== 'https:') return 'invalid_image_url'
   if (url.username !== '' || url.password !== '' || url.port !== '') return 'invalid_image_url'
-  const ext = pathExtension(url.pathname)
-  if (ext === 'svg' || ext === 'svgz') return 'invalid_image_url'
-  const host = url.hostname.toLowerCase()
+  if (pathIsSvg(url.pathname)) return 'invalid_image_url'
+  return null
+}
+
+/**
+ * Everything about an image address except whose host it is: length, characters, protocol and
+ * form. Used when saving AND when reading the website in, where there is no host list yet.
+ */
+export function imageUrlShapeIssue(raw: string): ImageShapeIssue | null {
+  if (raw.length > MAX_IMAGE_URL_LENGTH) return 'too_long'
+  if (BAD_CHARS_RE.test(raw) || hasForbiddenChars(raw)) return 'invalid_image_url'
+  if (raw.startsWith('/')) return sitePathIssue(raw)
+  if (raw.startsWith('https://')) return httpsUrlShapeIssue(raw)
+  return 'invalid_image_url'
+}
+
+/**
+ * The shape checks always run. An address the catalog already uses is excused from ONE thing
+ * only — the host allow-list — so data read in from the website can still be saved before the
+ * list is filled in, and nothing else rides in on "it was already there".
+ */
+export function imageUrlIssue(raw: string, ctx: ImageRuleContext): ImageUrlIssue | null {
+  const shape = imageUrlShapeIssue(raw)
+  if (shape !== null) return shape
+  if (raw.startsWith('/')) return null
+  if (ctx.imagePool.has(raw)) return null
+  const host = new URL(raw).hostname.toLowerCase()
   if (hostBelongsToDomain(host, ctx.clientDomain)) return null
   if (ctx.imageHosts.includes(host)) return null
   return 'image_host_not_allowed'
-}
-
-export function imageUrlIssue(raw: string, ctx: ImageRuleContext): ImageUrlIssue | null {
-  if (ctx.imagePool.has(raw)) return null
-  if (raw.length > MAX_IMAGE_URL_LENGTH) return 'too_long'
-  if (BAD_CHARS_RE.test(raw)) return 'invalid_image_url'
-  if (raw.startsWith('/')) return sitePathIssue(raw)
-  if (raw.startsWith('https://')) return httpsUrlIssue(raw, ctx)
-  return 'invalid_image_url'
 }
 
 /** Every image address used by these tours, de-duplicated and sorted ascending. */

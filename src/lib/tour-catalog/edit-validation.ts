@@ -53,7 +53,7 @@ export interface TourPatch extends TourContentPatch {
   managesDepartures?: boolean
 }
 
-const TOUR_PATCH_KEYS: readonly string[] = [
+export const TOUR_PATCH_KEYS: readonly string[] = [
   'name',
   'title',
   'shortDescription',

@@ -19,7 +19,7 @@ import type {
   ProposalWarningView,
   TourPatchView,
 } from './types'
-import { assistantErrorLabel } from './catalog-format'
+import { assistantErrorLabel, proposalWarningText } from './catalog-format'
 
 /** A proposal plus the frozen diff lines captured when the reply arrived. */
 interface ProposalWithDiff extends AssistantProposalView {
@@ -219,12 +219,7 @@ function computeDiffLines(
 // Warnings
 // ---------------------------------------------------------------------------
 
-function warningText(warning: ProposalWarningView): string {
-  if (warning.code === 'itinerary_shrinks') {
-    return `行程会从 ${warning.from} 天减到 ${warning.to} 天，后面的天会被删掉。确定吗？`
-  }
-  return `行程里 ${warning.total} 天有 ${warning.changed} 天标题都变了，像是换成了别的行程，请仔细核对。`
-}
+const warningText = proposalWarningText
 
 function WarningBox({
   warnings,

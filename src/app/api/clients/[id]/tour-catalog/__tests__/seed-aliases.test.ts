@@ -161,6 +161,36 @@ describe('POST /tour-catalog/seed', () => {
     expect(seedCatalogMock).toHaveBeenCalledWith({}, CLIENT_ID, feed)
   })
 
+  it('returns 409 catalog_not_empty when the catalog already has tours', async () => {
+    allowAccess()
+    firstPartyTourSourceUrlMock.mockReturnValue('https://example.com/feed.json')
+    fetchFirstPartyFeedMock.mockResolvedValue({ source: 's', source_version: '1', products: [] })
+    seedCatalogMock.mockRejectedValue(new Error('catalog_not_empty'))
+    const res = await seedPOST(makeRequest({}), makeParams())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({ error: 'catalog_not_empty' })
+  })
+
+  it('returns 400 feed_missing_content_fields for an old-shape website feed', async () => {
+    allowAccess()
+    firstPartyTourSourceUrlMock.mockReturnValue('https://example.com/feed.json')
+    fetchFirstPartyFeedMock.mockResolvedValue({ source: 's', source_version: '1', products: [] })
+    seedCatalogMock.mockRejectedValue(new Error('feed_missing_content_fields'))
+    const res = await seedPOST(makeRequest({}), makeParams())
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({ error: 'feed_missing_content_fields' })
+  })
+
+  it('still answers 500 seed_failed for any other failure', async () => {
+    allowAccess()
+    firstPartyTourSourceUrlMock.mockReturnValue('https://example.com/feed.json')
+    fetchFirstPartyFeedMock.mockResolvedValue({ source: 's', source_version: '1', products: [] })
+    seedCatalogMock.mockRejectedValue(new Error('connection reset'))
+    const res = await seedPOST(makeRequest({}), makeParams())
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'seed_failed' })
+  })
+
   it('passes through the access denial response', async () => {
     const denied = new Response(JSON.stringify({ error: 'Forbidden' }), {
       status: 403,

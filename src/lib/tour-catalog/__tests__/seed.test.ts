@@ -5,6 +5,7 @@ import {
   tourKey,
   fetchFirstPartyFeed,
   seedCatalog,
+  feedLacksContentFields,
   type SeedPlan,
 } from '../seed'
 import type { FirstPartyTour, FirstPartyTourFeed } from '@/lib/web-intelligence/first-party-tours'
@@ -270,6 +271,10 @@ function makeFakeDb(existing: Array<{ destination: string; tier: string; slug: s
 }
 
 describe('seedCatalog', () => {
+  /** A new-shape product: the read-in guard refuses a feed where no tour has content fields. */
+  const seedTour = (overrides: Partial<FirstPartyTour> = {}): FirstPartyTour =>
+    makeTour({ short_description: 'Ten days around the South Island.', ...overrides })
+
   it('inserts tours then departures and reports counts', async () => {
     const { db, toursInsert, departuresInsert } = makeFakeDb([])
     toursInsert.mockReturnValue({
@@ -280,7 +285,7 @@ describe('seedCatalog', () => {
     })
     departuresInsert.mockResolvedValue({ error: null })
 
-    const result = await seedCatalog(db, 'client-1', makeFeed([makeTour()]))
+    const result = await seedCatalog(db, 'client-1', makeFeed([seedTour()]))
 
     expect(result.toursInserted).toBe(1)
     expect(result.departuresInserted).toBe(1)
@@ -305,25 +310,42 @@ describe('seedCatalog', () => {
       select: vi.fn().mockResolvedValue({ data: [], error: null }),
     })
 
-    const result = await seedCatalog(db, 'client-1', makeFeed([makeTour({ departure_dates: [] })]))
+    const result = await seedCatalog(db, 'client-1', makeFeed([seedTour({ departure_dates: [] })]))
 
     expect(result.toursInserted).toBe(1)
     expect(result.departuresInserted).toBe(0)
     expect(departuresInsert).not.toHaveBeenCalled()
   })
 
-  it('never inserts for existing keys', async () => {
+  it('refuses to read in when the catalog already has a tour, and writes nothing', async () => {
     const { db, toursInsert, departuresInsert } = makeFakeDb([
-      { destination: 'New Zealand', tier: 'premium', slug: 'south-island' },
+      { destination: 'Somewhere', tier: 'other', slug: 'unrelated-tour' },
     ])
 
-    const result = await seedCatalog(db, 'client-1', makeFeed([makeTour()]))
-
-    expect(result.toursInserted).toBe(0)
-    expect(result.departuresInserted).toBe(0)
-    expect(result.skippedExisting).toEqual(['New Zealand/premium/south-island'])
+    await expect(seedCatalog(db, 'client-1', makeFeed([seedTour()]))).rejects.toThrow('catalog_not_empty')
     expect(toursInsert).not.toHaveBeenCalled()
     expect(departuresInsert).not.toHaveBeenCalled()
+  })
+
+  it('refuses an old-shape feed (no tour has a main image or a short description) before touching the database', async () => {
+    const { db, toursInsert } = makeFakeDb([])
+    const oldShape = makeFeed([makeTour(), makeTour({ slug: 'north-island', hero_image: '', short_description: '  ' })])
+
+    await expect(seedCatalog(db, 'client-1', oldShape)).rejects.toThrow('feed_missing_content_fields')
+    expect(db.from).not.toHaveBeenCalled()
+    expect(toursInsert).not.toHaveBeenCalled()
+  })
+
+  it('reads a feed in when at least one tour carries the content fields', async () => {
+    const { db, toursInsert } = makeFakeDb([])
+    toursInsert.mockReturnValue({ select: vi.fn().mockResolvedValue({ data: [], error: null }) })
+    const mixed = makeFeed([
+      makeTour({ departure_dates: [] }),
+      makeTour({ slug: 'north-island', departure_dates: [], hero_image: '/images/a.jpg' }),
+    ])
+
+    const result = await seedCatalog(db, 'client-1', mixed)
+    expect(result.toursInserted).toBe(2)
   })
 
   it('throws when the tours insert fails', async () => {
@@ -332,7 +354,7 @@ describe('seedCatalog', () => {
       select: vi.fn().mockResolvedValue({ data: null, error: { message: 'boom' } }),
     })
 
-    await expect(seedCatalog(db, 'client-1', makeFeed([makeTour()]))).rejects.toThrow('boom')
+    await expect(seedCatalog(db, 'client-1', makeFeed([seedTour()]))).rejects.toThrow('boom')
   })
 
   it('deletes inserted tours and rethrows when the departures insert fails', async () => {
@@ -350,8 +372,8 @@ describe('seedCatalog', () => {
 
     await expect(
       seedCatalog(db, 'client-1', makeFeed([
-        makeTour({ slug: 'south-island' }),
-        makeTour({ slug: 'north-island' }),
+        seedTour({ slug: 'south-island' }),
+        seedTour({ slug: 'north-island' }),
       ])),
     ).rejects.toThrow('departures_boom')
 
@@ -372,7 +394,7 @@ describe('seedCatalog', () => {
     toursDeleteIn.mockResolvedValue({ error: { message: 'delete_boom' } })
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    await expect(seedCatalog(db, 'client-1', makeFeed([makeTour()])))
+    await expect(seedCatalog(db, 'client-1', makeFeed([seedTour()])))
       .rejects.toThrow('departures_boom')
 
     expect(consoleError).toHaveBeenCalled()
@@ -388,5 +410,14 @@ describe('normalizeDomain', () => {
     expect(normalizeDomain('https://www.CTStours.co.nz/tours?x=1')).toBe('ctstours.co.nz')
     expect(normalizeDomain('  ctstours.co.nz  ')).toBe('ctstours.co.nz')
     expect(normalizeDomain('http://example.com:8080/a')).toBe('example.com')
+  })
+})
+
+describe('feedLacksContentFields', () => {
+  it('is true only when there are tours and none has a main image or a short description', () => {
+    expect(feedLacksContentFields(makeFeed([]))).toBe(false)
+    expect(feedLacksContentFields(makeFeed([makeTour(), makeTour()]))).toBe(true)
+    expect(feedLacksContentFields(makeFeed([makeTour(), makeTour({ short_description: 'Intro' })]))).toBe(false)
+    expect(feedLacksContentFields(makeFeed([makeTour({ hero_image: '/images/a.jpg' })]))).toBe(false)
   })
 })

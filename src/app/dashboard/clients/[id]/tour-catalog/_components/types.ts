@@ -197,6 +197,8 @@ export interface FieldErrorView {
 export type ProposalWarningView =
   | { code: 'itinerary_shrinks'; from: number; to: number }
   | { code: 'itinerary_mostly_changed'; changed: number; total: number }
+  /** Days whose hotel / festive label could not be carried over from the stored itinerary. */
+  | { code: 'itinerary_extras_unmatched'; days: number[] }
 
 export type ProposalCheckView =
   | { ok: true; warnings?: ProposalWarningView[] }

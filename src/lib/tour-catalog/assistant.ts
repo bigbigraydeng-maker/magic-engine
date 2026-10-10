@@ -10,9 +10,10 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { getAnthropicClientDirect, MODEL_SONNET } from '@/lib/anthropic/client'
 import type { CatalogSnapshot } from './store'
-import type { CatalogItineraryDay, CatalogTour } from './types'
+import type { CatalogTour } from './types'
 import { CONTENT_PATCH_KEYS, type TourPatchContext } from './content-validation'
 import { collectImagePool } from './image-rules'
+import { mergeItineraryExtras } from './assistant-itinerary'
 import {
   validateDeparturePatch,
   validateNewDeparture,
@@ -37,6 +38,8 @@ export type Proposal =
 export type ProposalWarning =
   | { code: 'itinerary_shrinks'; from: number; to: number }
   | { code: 'itinerary_mostly_changed'; changed: number; total: number }
+  /** Days whose accommodation / festive label / logo could not be carried over: check them one by one. */
+  | { code: 'itinerary_extras_unmatched'; days: number[] }
 
 export type ProposalCheck =
   | { ok: true; warnings?: ProposalWarning[] }
@@ -213,27 +216,6 @@ function blockedAssistantKeys(patch: Record<string, unknown>): string[] {
   return Object.keys(patch).filter((key) => CONTENT_PATCH_KEYS.includes(key) && !ASSISTANT_CONTENT_KEYS.includes(key))
 }
 
-function mergeDayExtras(proposed: Record<string, unknown>, current: CatalogItineraryDay | undefined): Record<string, unknown> {
-  const { operatorLogo: _ignored, ...day } = proposed
-  if (!('accommodation' in day) && current?.accommodation !== undefined) day.accommodation = current.accommodation
-  if (!('festiveLabel' in day) && current?.festiveLabel !== undefined) day.festiveLabel = current.festiveLabel
-  // The logo is never the model's to set: whatever it sent is dropped and the stored one is kept.
-  return current?.operatorLogo === undefined ? day : { ...day, operatorLogo: current.operatorLogo }
-}
-
-/**
- * The model returns a whole itinerary but usually leaves out the per-day extras. Put them back by
- * day number before validating, or every assistant edit of an itinerary would wipe the
- * accommodation, festive labels and operator logos (design §6.11.1 item 2).
- */
-export function mergeItineraryExtras(current: readonly CatalogItineraryDay[], proposed: unknown): unknown {
-  if (!Array.isArray(proposed)) return proposed
-  const byDay = new Map(current.map((day) => [day.day, day]))
-  return proposed.map((item: unknown) =>
-    isPlainObject(item) ? mergeDayExtras(item, typeof item.day === 'number' ? byDay.get(item.day) : undefined) : item,
-  )
-}
-
 /** The assistant validates as a non-admin; the tour's own images are "already in the catalog". */
 function assistantContext(tour: CatalogTour): TourPatchContext {
   return {
@@ -254,10 +236,16 @@ function checkTourPatch(tour: CatalogTour, rawPatch: unknown): { patch: TourPatc
   if (blocked.length > 0) {
     return { patch: {}, check: { ok: false, errors: blocked.map((field) => ({ field, code: 'assistant_field_not_allowed' })) } }
   }
-  if ('itinerary' in input) input.itinerary = mergeItineraryExtras(tour.itinerary, input.itinerary)
+  let unmatchedDays: number[] = []
+  if ('itinerary' in input) {
+    const merged = mergeItineraryExtras(tour.itinerary, input.itinerary)
+    input.itinerary = merged.itinerary
+    unmatchedDays = merged.unmatchedDays
+  }
   const result = validateTourPatch(input, assistantContext(tour))
   if (!result.ok) return { patch: {}, check: { ok: false, errors: result.errors } }
   const warnings = itineraryWarnings(tour.itinerary, result.value.itinerary)
+  if (unmatchedDays.length > 0) warnings.push({ code: 'itinerary_extras_unmatched', days: unmatchedDays })
   return { patch: result.value, check: warnings.length > 0 ? { ok: true, warnings } : { ok: true } }
 }
 
@@ -452,7 +440,7 @@ const SYSTEM_PROMPT = `你是旅行社后台的行程目录 AI 助手。管理�
 
 ## 改动规则
 
-- 改逐日行程（itinerary）时，必须返回**完整的** itinerary 数组，day 从 1 连续编号到 n，不能只给改动的那一天。每天的住宿（accommodation）和节日标记（festiveLabel）没改就不用写，系统会按天号保留原值；要改就写上新值。
+- 改逐日行程（itinerary）时，必须返回**完整的** itinerary 数组，day 从 1 连续编号到 n，不能只给改动的那一天。每天的住宿（accommodation）和节日标记（festiveLabel）没改就不用写，系统会按当天的标题找回原值（所以没打算改的那几天，标题请原样保留）；要改就写上新值。
 - 价格字段（displayPriceText / priceTextOverride）必须写成 "From NZD $4,999 per person" 这种形式，或者 "TBC"。
 - 日期一律 YYYY-MM-DD。
 - 只给需要改的字段，其余不要出现。

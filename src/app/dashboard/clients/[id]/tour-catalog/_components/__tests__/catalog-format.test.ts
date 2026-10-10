@@ -6,6 +6,7 @@ import {
   departureAddedText,
   errorLabel,
   formatDateTimeWithYear,
+  proposalWarningText,
   savedAsDraftText,
 } from '../catalog-format'
 
@@ -56,5 +57,18 @@ describe('draft wording by the channels switch', () => {
   it('not connected: says it is not published, nothing about customers', () => {
     expect(savedAsDraftText(false)).toBe('已存为草稿，还没上架')
     expect(departureAddedText(false)).toBe('已新增到草稿，还没上架')
+  })
+})
+
+describe('proposalWarningText', () => {
+  it('explains each known warning in plain words and never prints raw fields for unknown ones', () => {
+    expect(proposalWarningText({ code: 'itinerary_shrinks', from: 18, to: 12 })).toContain('从 18 天减到 12 天')
+    expect(proposalWarningText({ code: 'itinerary_mostly_changed', changed: 9, total: 10 })).toContain('10 天有 9 天')
+    expect(proposalWarningText({ code: 'itinerary_extras_unmatched', days: [2, 5] })).toBe(
+      '第 2、5 天的住宿和节日标记对不上原来的行程，没有自动带过来，请逐天确认。',
+    )
+    const unknown = proposalWarningText({ code: 'something_new' })
+    expect(unknown).not.toContain('undefined')
+    expect(unknown).toContain('请仔细核对')
   })
 })

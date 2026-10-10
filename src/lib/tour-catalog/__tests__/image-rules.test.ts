@@ -5,6 +5,7 @@ import {
   collectImagePool,
   imageHostSuggestions,
   imageUrlIssue,
+  imageUrlShapeIssue,
   isValidImageHost,
   type ImageRuleContext,
 } from '../image-rules'
@@ -62,9 +63,86 @@ function makeCtx(overrides: Partial<ImageRuleContext> = {}): ImageRuleContext {
 }
 
 describe('imageUrlIssue', () => {
-  it('accepts an address already in the pool, even an http one', () => {
-    const ctx = makeCtx({ imagePool: new Set(['http://anything.example/x.jpg']) })
-    expect(imageUrlIssue('http://anything.example/x.jpg', ctx)).toBeNull()
+  it('excuses an address already in the pool from the host list only', () => {
+    const offList = 'https://not-listed.example/x.jpg'
+    expect(imageUrlIssue(offList, makeCtx())).toBe('image_host_not_allowed')
+    expect(imageUrlIssue(offList, makeCtx({ imagePool: new Set([offList]) }))).toBeNull()
+  })
+
+  it('still refuses an unsafe address that is already in the pool', () => {
+    const long = 'https://' + LISTED + '/' + 'a'.repeat(900)
+    const cases: Array<[string, string]> = [
+      ['javascript:alert(1)', 'invalid_image_url'],
+      ['data:image/png;base64,AAAA', 'invalid_image_url'],
+      ['http://anything.example/x.jpg', 'invalid_image_url'],
+      ['//evil.example/x.jpg', 'invalid_image_url'],
+      ['https://' + LISTED + '/x.svg', 'invalid_image_url'],
+      [long, 'too_long'],
+    ]
+    for (const [raw, expected] of cases) {
+      expect(imageUrlIssue(raw, makeCtx({ imagePool: new Set([raw]) }))).toBe(expected)
+    }
+  })
+
+  it('refuses markup, quotes, fragments and invisible characters in an https address', () => {
+    const base = 'https://' + DOMAIN
+    const bad = [
+      base + '/</script><script>alert(1)</script>.jpg',
+      base + '/a.jpg"onerror="alert(1)',
+      base + "/a.jpg'onerror='alert(1)",
+      base + '/a.jpg`',
+      base + '/a.jpg#</script>',
+      base + '/a.jpg#frag',
+      base + '/a' + String.fromCharCode(0x200b) + '.jpg',
+      base + '/a' + String.fromCharCode(0x202e) + '.jpg',
+      base + '/a' + String.fromCharCode(0x2028) + '.jpg',
+      base + '/a' + String.fromCharCode(0xfeff) + '.jpg',
+      base + '/a' + String.fromCharCode(0x7f) + '.jpg',
+      base + '/a\nb.jpg',
+      base + '/a b.jpg',
+      base + '/a{b}.jpg',
+      base + '/a|b.jpg',
+      base + '/a^b.jpg',
+      'https://' + DOMAIN + '\\@evil.example/a.jpg',
+      'https://exa mple.co.nz/a.jpg',
+    ]
+    for (const raw of bad) {
+      expect(imageUrlIssue(raw, makeCtx()), raw).toBe('invalid_image_url')
+      expect(imageUrlIssue(raw, makeCtx({ imagePool: new Set([raw]) })), raw).toBe('invalid_image_url')
+    }
+  })
+
+  it('refuses svg however it is spelled in the path', () => {
+    const base = 'https://' + LISTED
+    const bad = [
+      base + '/x.SvG',
+      base + '/x.svgz',
+      base + '/x.svg/',
+      base + '/x.svg;v=1',
+      base + '/x.svg/extra.png',
+      base + '/x%2Esvg',
+      base + '/x.%73vg',
+      base + '/x.svg%3Fy.png',
+      base + '/x.svg?download=1',
+      base + '/%E0%A4%A.jpg',
+    ]
+    for (const raw of bad) expect(imageUrlIssue(raw, makeCtx()), raw).toBe('invalid_image_url')
+    expect(imageUrlIssue(base + '/svg-icons/photo.png', makeCtx())).toBeNull()
+    expect(imageUrlIssue(base + '/my.svgs/photo.png', makeCtx())).toBeNull()
+  })
+
+  it('accepts ordinary CDN addresses with a query string', () => {
+    const ctx = makeCtx()
+    expect(imageUrlIssue('https://' + LISTED + '/photo-1508804185872?w=1600&q=80&auto=format&fit=crop', ctx)).toBeNull()
+    expect(imageUrlIssue('https://' + LISTED + '/storage/v1/object/public/a_b/c%20d~(1).JPG', ctx)).toBeNull()
+  })
+
+  it('imageUrlShapeIssue checks everything but the host', () => {
+    expect(imageUrlShapeIssue('https://anywhere.example/a.jpg')).toBeNull()
+    expect(imageUrlShapeIssue('/images/a.jpg')).toBeNull()
+    expect(imageUrlShapeIssue('//evil.example/a.jpg')).toBe('invalid_image_url')
+    expect(imageUrlShapeIssue('http://anywhere.example/a.jpg')).toBe('invalid_image_url')
+    expect(imageUrlShapeIssue('https://anywhere.example/' + 'a'.repeat(600))).toBe('too_long')
   })
 
   it('refuses an address longer than the limit', () => {

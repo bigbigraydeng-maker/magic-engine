@@ -12,6 +12,9 @@ export const ERROR_LABELS: Record<string, string> = {
   not_applicable: '这次导入现在不能撤销',
   alias_not_found: '这个叫法已经不存在了',
   alias_failed: '删除失败，请稍后重试',
+  feed_missing_content_fields:
+    '官网现在给出的团数据还不完整（没有图片和简介），先不读入。等官网更新后再试，否则读进来会缺内容',
+  catalog_not_empty: '目录里已经有团了，不能再整份读入',
 }
 
 /** "2026-10-10T00:26:16+13:00" -> "10月10日 00:26" in the viewer's local time; raw text if unparseable. */
@@ -95,4 +98,19 @@ export function priceText(displayPriceText: string | null): string {
   if (!displayPriceText) return '未定价'
   if (displayPriceText.toUpperCase().includes('TBC')) return '价格待定'
   return displayPriceText
+}
+
+/** Plain-Chinese sentence for one AI-proposal warning; unknown codes get a generic line, never raw fields. */
+export function proposalWarningText(warning: { code: string } & Record<string, unknown>): string {
+  if (warning.code === 'itinerary_shrinks') {
+    return `行程会从 ${String(warning.from)} 天减到 ${String(warning.to)} 天，后面的天会被删掉。确定吗？`
+  }
+  if (warning.code === 'itinerary_mostly_changed') {
+    return `行程里 ${String(warning.total)} 天有 ${String(warning.changed)} 天标题都变了，像是换成了别的行程，请仔细核对。`
+  }
+  if (warning.code === 'itinerary_extras_unmatched') {
+    const days = Array.isArray(warning.days) ? warning.days.join('、') : ''
+    return `第 ${days} 天的住宿和节日标记对不上原来的行程，没有自动带过来，请逐天确认。`
+  }
+  return '这条修改有需要留意的地方，请仔细核对。'
 }

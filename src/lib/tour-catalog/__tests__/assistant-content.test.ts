@@ -3,9 +3,9 @@ import {
   ASSISTANT_CONTENT_KEYS,
   buildCatalogIndex,
   checkProposal,
-  mergeItineraryExtras,
   tourDetail,
 } from '../assistant'
+import { mergeItineraryExtras } from '../assistant-itinerary'
 import type { CatalogSnapshot } from '../store'
 import type { CatalogItineraryDay } from '../types'
 import { blankTour } from './content-fixture'
@@ -45,7 +45,7 @@ describe('mergeItineraryExtras', () => {
   const current = snapshot.tours[0].itinerary
 
   it('restores stored extras by day number', () => {
-    const merged = mergeItineraryExtras(current, threeDays()) as CatalogItineraryDay[]
+    const merged = mergeItineraryExtras(current, threeDays()).itinerary as CatalogItineraryDay[]
     expect(merged[0].accommodation).toBe('Hotel One')
     expect(merged[0].festiveLabel).toBe('Lantern Festival')
     expect(merged[0].operatorLogo).toEqual({ src: '/images/air.png', alt: 'Sample Air' })
@@ -56,7 +56,7 @@ describe('mergeItineraryExtras', () => {
     const proposed = [
       { day: 1, title: 'Arrive', description: 'A', accommodation: 'New Hotel', festiveLabel: 'New Festival' },
     ]
-    const merged = mergeItineraryExtras(current, proposed) as CatalogItineraryDay[]
+    const merged = mergeItineraryExtras(current, proposed).itinerary as CatalogItineraryDay[]
     expect(merged[0].accommodation).toBe('New Hotel')
     expect(merged[0].festiveLabel).toBe('New Festival')
   })
@@ -65,7 +65,7 @@ describe('mergeItineraryExtras', () => {
     const proposed = [
       { day: 1, title: 'Arrive', description: 'A', operatorLogo: { src: '/images/other.png', alt: 'Other' } },
     ]
-    const merged = mergeItineraryExtras(current, proposed) as CatalogItineraryDay[]
+    const merged = mergeItineraryExtras(current, proposed).itinerary as CatalogItineraryDay[]
     expect(merged[0].operatorLogo).toEqual({ src: '/images/air.png', alt: 'Sample Air' })
   })
 
@@ -73,21 +73,21 @@ describe('mergeItineraryExtras', () => {
     const proposed = [
       { day: 3, title: 'Fly home', description: 'C', operatorLogo: { src: '/images/other.png', alt: 'Other' } },
     ]
-    const merged = mergeItineraryExtras(current, proposed) as CatalogItineraryDay[]
+    const merged = mergeItineraryExtras(current, proposed).itinerary as CatalogItineraryDay[]
     expect('operatorLogo' in merged[0]).toBe(false)
   })
 
   it('adds nothing for a day number that does not exist', () => {
     const proposed = [{ day: 9, title: 'Extra', description: 'D' }]
-    const merged = mergeItineraryExtras(current, proposed) as CatalogItineraryDay[]
+    const merged = mergeItineraryExtras(current, proposed).itinerary as CatalogItineraryDay[]
     expect('accommodation' in merged[0]).toBe(false)
     expect('festiveLabel' in merged[0]).toBe(false)
     expect('operatorLogo' in merged[0]).toBe(false)
   })
 
   it('returns non-array input unchanged and leaves non-object items alone', () => {
-    expect(mergeItineraryExtras(current, 'nope')).toBe('nope')
-    const merged = mergeItineraryExtras(current, ['raw', 5]) as unknown[]
+    expect(mergeItineraryExtras(current, 'nope')).toEqual({ itinerary: 'nope', unmatchedDays: [] })
+    const merged = mergeItineraryExtras(current, ['raw', 5]).itinerary as unknown[]
     expect(merged).toEqual(['raw', 5])
   })
 })
@@ -142,10 +142,10 @@ describe('checkProposal content handling', () => {
     expect(itinerary![0].operatorLogo).toEqual({ src: '/images/air.png', alt: 'Sample Air' })
   })
 
-  // NOTE: extras are merged back BY DAY NUMBER (design §6.11.1 item 2). When the model shortens the
-  // itinerary and renumbers, the stored logo of day 1 therefore stays on the new day 1 — the logo is
-  // not lost and not changed, so the proposal is acceptable; the "shrinks" warning tells the user.
-  it('keeps the stored logo on its day number when the model drops a day and renumbers', () => {
+  // Extras follow the day's TITLE now (assistant-itinerary.ts). Dropping the day that carries the
+  // logo therefore drops the logo — which the assistant may not do — instead of quietly moving the
+  // logo onto whatever day took over that day number.
+  it('refuses a proposal that drops the day carrying the logo', () => {
     const result = checkProposal(snapshot, {
       kind: 'update_tour',
       tourId: 'tour-1',
@@ -157,10 +157,27 @@ describe('checkProposal content handling', () => {
         ],
       },
     })
+    expect(result?.check).toEqual({ ok: false, errors: [{ field: '*', code: 'forbidden' }] })
+  })
+
+  it('keeps the logo and the hotels in place when a later day is dropped', () => {
+    const result = checkProposal(snapshot, {
+      kind: 'update_tour',
+      tourId: 'tour-1',
+      summary: 's',
+      patch: {
+        itinerary: [
+          { day: 1, title: 'Arrive', description: 'A' },
+          { day: 2, title: 'Fly home', description: 'C' },
+        ],
+      },
+    })
     expect(result).not.toBeNull()
     if (result === null || result.proposal.kind !== 'update_tour') throw new Error('unexpected proposal')
     expect(result.check).toEqual({ ok: true, warnings: [{ code: 'itinerary_shrinks', from: 3, to: 2 }] })
     expect(result.proposal.patch.itinerary?.[0].operatorLogo).toEqual({ src: '/images/air.png', alt: 'Sample Air' })
+    expect(result.proposal.patch.itinerary?.[0].accommodation).toBe('Hotel One')
+    expect(result.proposal.patch.itinerary?.[1].accommodation).toBeUndefined()
   })
 
   it('refuses an itinerary that no longer has the day number carrying the logo', () => {

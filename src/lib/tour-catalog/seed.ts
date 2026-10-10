@@ -13,6 +13,10 @@ import {
 } from '@/lib/web-intelligence/first-party-tours'
 import { parseDepartureDisplay } from './dates'
 import { validatePriceText } from './price'
+import { safeNoteText, sanitizeSeedProduct } from './seed-sanitize'
+
+/** `tourKey` of the notes that are about the feed as a whole, not about one tour. */
+export const FEED_NOTE_KEY = '(feed)'
 
 export interface SeedTourRow {
   slug: string
@@ -91,24 +95,8 @@ function acceptPrice(
   return price
 }
 
-/**
- * The database only stores a hero image that is a site path or an https URL (≤ 500 chars).
- * Anything else is left out and noted, so one odd value cannot fail the whole read-in.
- * No host check here: the source is the client's own website, read by a global admin.
- */
-function acceptHeroImage(value: string | undefined, key: string, notes: SeedPlan['notes']): string | null {
-  if (value === undefined || value === '') return null
-  if (value.length <= 500 && (value.startsWith('/') || value.startsWith('https://'))) return value
-  notes.push({ tourKey: key, note: 'hero_image_rejected:' + value.slice(0, 80) })
-  return null
-}
-
 /** The content columns of design §6.11.1; a field the feed does not send stays empty. */
-function buildContentColumns(
-  product: FirstPartyTour,
-  key: string,
-  notes: SeedPlan['notes'],
-): Pick<
+function buildContentColumns(product: FirstPartyTour): Pick<
   SeedTourRow,
   | 'short_description' | 'highlights' | 'hero_image' | 'gallery' | 'meta_title' | 'meta_description' | 'tags'
   | 'faqs' | 'sold_out' | 'single_supplement_note' | 'rating' | 'review_count' | 'review_summary' | 'quick_answer' | 'site_extras'
@@ -116,7 +104,7 @@ function buildContentColumns(
   return {
     short_description: product.short_description ?? null,
     highlights: product.highlights ?? [],
-    hero_image: acceptHeroImage(product.hero_image, key, notes),
+    hero_image: product.hero_image === undefined || product.hero_image === '' ? null : product.hero_image,
     gallery: product.gallery ?? [],
     meta_title: product.meta_title ?? null,
     meta_description: product.meta_description ?? null,
@@ -151,7 +139,7 @@ function buildTourRow(product: FirstPartyTour, notes: SeedPlan['notes']): SeedTo
     max_group_size: product.max_group_size ?? null,
     is_active: product.is_active,
     manages_departures: product.departure_dates.length > 0,
-    ...buildContentColumns(product, key, notes),
+    ...buildContentColumns(product),
   }
 }
 
@@ -177,24 +165,48 @@ function buildDepartureRows(product: FirstPartyTour, notes: SeedPlan['notes']): 
   return rows
 }
 
-/** Pure planner: turn a feed into insert rows, skipping already-present tours. */
+/**
+ * Pure planner: turn a feed into insert rows, skipping already-present tours. Every product goes
+ * through the save rules first (seed-sanitize.ts): what they refuse is emptied and noted, never
+ * stored. Anything the feed reader itself had to drop is carried over as a note too.
+ */
 export function planSeed(feed: FirstPartyTourFeed, existingKeys: ReadonlySet<string>): SeedPlan {
   const tours: SeedTourRow[] = []
   const departures: SeedDepartureRow[] = []
   const skippedExisting: string[] = []
   const notes: SeedPlan['notes'] = []
 
-  for (const product of feed.products) {
-    const key = tourKey(product)
+  for (const note of feed.parse_notes ?? []) notes.push({ tourKey: FEED_NOTE_KEY, note })
+
+  for (const raw of feed.products) {
+    const key = tourKey(raw)
     if (existingKeys.has(key)) {
       skippedExisting.push(key)
       continue
     }
+    const product = sanitizeSeedProduct(raw, (note) => notes.push({ tourKey: safeNoteText(key), note }))
+    if (product === null) continue
     tours.push(buildTourRow(product, notes))
     departures.push(...buildDepartureRows(product, notes))
   }
 
   return { tours, departures, skippedExisting, notes }
+}
+
+/**
+ * A feed from before the website sent the content fields: no tour carries a main image or a short
+ * description. Reading it in would leave those fields empty for good (read-in only works on an
+ * empty catalog) while the comparison report would still come out clean.
+ */
+export function feedLacksContentFields(feed: FirstPartyTourFeed): boolean {
+  if (feed.products.length === 0) return false
+  return feed.products.every(
+    (product) => !isNonEmpty(product.hero_image) && !isNonEmpty(product.short_description),
+  )
+}
+
+function isNonEmpty(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim() !== ''
 }
 
 const FEED_TIMEOUT_MS = 10_000
@@ -320,13 +332,19 @@ async function compensateInsertedTours(
   }
 }
 
-/** Plan and persist a feed for a client. Existing rows are never touched. */
+/**
+ * Plan and persist a feed for a client. Read-in is a one-off for an EMPTY catalog (design
+ * §6.11.1 item 12): with any tour already there it throws `catalog_not_empty`, and an old-shape
+ * feed throws `feed_missing_content_fields`. Nothing is written in either case.
+ */
 export async function seedCatalog(
   db: SupabaseClient,
   clientId: string,
   feed: FirstPartyTourFeed,
 ): Promise<SeedResult> {
+  if (feedLacksContentFields(feed)) throw new Error('feed_missing_content_fields')
   const existingKeys = await loadExistingKeys(db, clientId)
+  if (existingKeys.size > 0) throw new Error('catalog_not_empty')
   const plan = planSeed(feed, existingKeys)
 
   const tourIds = await insertTours(db, clientId, plan.tours)
@@ -348,13 +366,5 @@ export async function seedCatalog(
   }
 }
 
-/** "https://www.Example.co.nz/tours" -> "example.co.nz"; the feed source registry is keyed by bare hostname. */
-export function normalizeDomain(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/^[a-z]+:\/\//, '')
-    .replace(/^www\./, '')
-    .split(/[/?#]/)[0]
-    .replace(/:\d+$/, '')
-}
+// Lives in its own file so the validation modules can use it without importing the read-in code.
+export { normalizeDomain } from './domain'
