@@ -26,6 +26,7 @@ interface Row {
   doNotContact?: boolean
   email?: string | null
   lastTouchAt?: string | null
+  stageLabel?: string | null
   nextAction: { list: 'hot' | 'cold'; verb: string; verbLabel: string; line: string; reason: string; aiSuggestion: string | null; intentBoost: boolean }
   intent: 'high' | 'medium' | 'low' | 'unknown' | null
 }
@@ -136,21 +137,49 @@ describe('被误判成「别再联系」的人，这一页要给得出取消入�
   })
 })
 
-describe('「该做什么」一列', () => {
-  it('每行只画一个「该做什么」，不再有「跟进到哪步 / 现在冷热」两列', async () => {
+describe('最后一列：平铺看阶段，Magic Engine 智能看「该做什么」', () => {
+  it('平铺名单：最后一列是「到哪一步了」，显示阶段；没标的写「还没标」', async () => {
     stubFetch([
       contact('c1', 'Sue Masson', {
+        stageLabel: '已报价',
         nextAction: { list: 'hot', verb: 'call', verbLabel: '打给他', line: '打给他 —— 刚留资料', reason: '刚留资料', aiSuggestion: null, intentBoost: false },
       }),
+      contact('c2', 'Bob Other', { stageLabel: null }),
     ])
     render(<CrmAllContactsPage />)
 
     await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
+    expect(screen.getByText('到哪一步了')).toBeTruthy()
+    expect(screen.getByText('已报价')).toBeTruthy()
+    expect(screen.getByText('还没标')).toBeTruthy()
+    expect(screen.queryByText('该做什么')).toBeNull()
+    expect(screen.queryByText('打给他')).toBeNull()
+  })
+
+  it('Magic Engine 智能：最后一列才是「该做什么」', async () => {
+    stubPriority([
+      {
+        key: 'hot',
+        title: '今天要联系',
+        hint: 'h',
+        total: 1,
+        open: true,
+        items: [
+          contact('c1', 'Sue Masson', {
+            stageLabel: '已报价',
+            nextAction: { list: 'hot', verb: 'call', verbLabel: '打给他', line: '打给他 —— 刚留资料', reason: '刚留资料', aiSuggestion: null, intentBoost: false },
+          }),
+        ],
+      },
+      { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+
+    await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     expect(screen.getByText('该做什么')).toBeTruthy()
-    expect(screen.getByText('打给他')).toBeTruthy()
-    expect(screen.getByText('刚留资料')).toBeTruthy()
-    expect(screen.queryByText('跟进到哪步')).toBeNull()
-    expect(screen.queryByText('现在冷热')).toBeNull()
+    expect(screen.queryByText('到哪一步了')).toBeNull()
   })
 })
 
@@ -166,7 +195,7 @@ describe('「该做什么」一列', () => {
  * 人数是服务端给的 total，不是当前拿到几行；段是空的要明说「这一段现在没有人」，
  * 不能渲染成一片空白让人以为加载坏了。
  */
-describe('按「先联系谁」分段视图', () => {
+// 分段接口的假返回 —— 两个 describe 共用，所以放在模块层。
   interface StubSection {
     key: string
     title: string
@@ -221,6 +250,8 @@ describe('按「先联系谁」分段视图', () => {
     return calls
   }
 
+describe('按「先联系谁」分段视图', () => {
+
   const SECTIONS = (): StubSection[] => [
     {
       key: 'hot',
@@ -240,11 +271,11 @@ describe('按「先联系谁」分段视图', () => {
     },
   ]
 
-  it('点「按先联系谁分段」→ 改成问分段接口要数据', async () => {
+  it('点「Magic Engine 智能」→ 改成问分段接口要数据', async () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(calls.some((u) => u.includes('view=priority'))).toBe(true))
   })
@@ -253,7 +284,7 @@ describe('按「先联系谁」分段视图', () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     expect(screen.getByText('先放着')).toBeTruthy()
@@ -266,7 +297,7 @@ describe('按「先联系谁」分段视图', () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
     // cold 是 items=null：没有行，也不该冒出「这一段现在没有人」
@@ -277,7 +308,7 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
     await waitFor(() => expect(screen.getByText('先放着')).toBeTruthy())
     fireEvent.click(screen.getByText('先放着'))
 
@@ -293,7 +324,7 @@ describe('按「先联系谁」分段视图', () => {
     ])
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(screen.getByText('这一段现在没有人。')).toBeTruthy())
   })
@@ -303,7 +334,7 @@ describe('按「先联系谁」分段视图', () => {
     setUrl('?contact=z9')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() =>
       expect(calls.some((u) => u.includes('open=') && u.includes('cold'))).toBe(true),
@@ -314,7 +345,7 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     const before = calls.length
 
@@ -363,7 +394,7 @@ describe('分段视图 · 复审补测', () => {
     return calls
   }
 
-  const goGrouped = async () => fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+  const goGrouped = async () => fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
   /** M6：每段的人一个都不能少画。原来只比「画出来的 vs items 条数」，两边一起少就发现不了。 */
   it('M6 · 这一段下发了几个人，就必须画出几个人', async () => {
@@ -849,7 +880,7 @@ describe('B3 · 终端客户/同行筛选 + 批量发邮件', () => {
     await screen.findByText('Retail Rita')
     expect(screen.getByText('🤝 同行')).toBeTruthy()
 
-    fireEvent.click(screen.getByText(/按「先联系谁」分段/))
+    fireEvent.click(screen.getByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(screen.queryByText('🤝 同行')).toBeNull())
   })

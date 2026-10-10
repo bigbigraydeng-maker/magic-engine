@@ -11,8 +11,9 @@
  * 也顺带解决了「两份重复逻辑」的老毛病（原来 ContactDetail 和 PersonDrawer 各判一次
  * NAL、各接一份 WhatsApp 回复框）。删除的 ContactDetail.tsx 见这次改动的 diff。
  *
- * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；状态合成
- * 「该做什么」一列（阶段 / 冷热 / 意向三套状态合成一个概念，PM 2026-10-10）；
+ * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；
+ * 平铺名单像传统 CRM 一样显示「到哪一步了」；「该做什么」只在「Magic Engine 智能」
+ * 分段视图里显示（PM 2026-10-10）；
  * 每个空格填人话绝不留白；顶部搜索 + 表头排序 +
  * 总数；渠道/方向标签带 fallback（DB 加新枚举前端不炸）。
  */
@@ -636,10 +637,18 @@ export default function CrmAllContactsPage() {
           </td>
         ))}
         <td className="px-4 py-3">
-          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}>
-            {r.nextAction.verbLabel}
-          </span>
-          <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.reason}</span>
+          {grouped ? (
+            <>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}>
+                {r.nextAction.verbLabel}
+              </span>
+              <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.reason}</span>
+            </>
+          ) : r.stageLabel ? (
+            <span className="text-me-charcoal/70">{r.stageLabel}</span>
+          ) : (
+            <span className="text-me-charcoal/35">还没标</span>
+          )}
         </td>
       </tr>
     )
@@ -723,11 +732,11 @@ export default function CrmAllContactsPage() {
               }}
               className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
             >
-              {grouped ? '← 回到平铺名单' : '按「先联系谁」分段'}
+              {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
             </button>
             {grouped && (
               <span className="text-xs text-me-charcoal/45">
-                分段是系统按联系记录算的，跟「今天要联系」那一页同一套口径；段内按「该先联系谁」排，点表头不改顺序
+                系统读完往来记录和 AI 摘要，告诉你今天该先联系谁、做什么；段内按紧急程度排，点表头不改顺序
               </span>
             )}
             {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
@@ -831,7 +840,7 @@ export default function CrmAllContactsPage() {
                   {columns.map((c) => (
                     <th key={c.key} className="px-4 py-3">{c.label}</th>
                   ))}
-                  <th className="px-4 py-3">该做什么</th>
+                  <th className="px-4 py-3">{grouped ? '该做什么' : '到哪一步了'}</th>
                 </tr>
               </thead>
               <tbody>
