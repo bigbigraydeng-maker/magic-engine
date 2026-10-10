@@ -12,6 +12,7 @@ vi.mock('@/lib/supabase', () => ({
 
 import {
   activateAuthorization,
+  findReceiptRecalledDates,
   findRecalledDates,
   getActiveAuthorization,
   insertAuthorization,
@@ -38,6 +39,7 @@ interface ChainStub {
   select: ReturnType<typeof vi.fn>
   eq: ReturnType<typeof vi.fn>
   in: ReturnType<typeof vi.fn>
+  lte: ReturnType<typeof vi.fn>
   delete: ReturnType<typeof vi.fn>
   is: ReturnType<typeof vi.fn>
   single: ReturnType<typeof vi.fn>
@@ -55,6 +57,7 @@ function makeChain(result: StubResult): ChainStub {
   stub.select = vi.fn(self)
   stub.eq = vi.fn(self)
   stub.in = vi.fn(self)
+  stub.lte = vi.fn(self)
   stub.delete = vi.fn(self)
   stub.is = vi.fn(self)
   stub.single = vi.fn(async () => result)
@@ -221,7 +224,7 @@ describe('findRecalledDates / liftRecalledTombstones', () => {
 
   it('does not touch the database for an empty date list', async () => {
     expect(await findRecalledDates(PLAN, CLIENT, [])).toEqual([])
-    await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: [] })
+    await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: [], notNewerThan: new Date() })
     expect(fromMock).not.toHaveBeenCalled()
   })
 
@@ -229,12 +232,44 @@ describe('findRecalledDates / liftRecalledTombstones', () => {
     const chain = makeChain({ data: null, error: null })
     fromMock.mockReturnValue(chain)
 
-    await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: ['2024-02-02'] })
+    await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: ['2024-02-02'], notNewerThan: new Date() })
 
     expect(chain.delete).toHaveBeenCalled()
     expect(chain.eq).toHaveBeenCalledWith('status', 'blocked')
     expect(chain.eq).toHaveBeenCalledWith('reason_code', 'RECALLED')
     expect(chain.in).toHaveBeenCalledWith('date', ['2024-02-02'])
+  })
+
+  it('🔴 lifting only removes blocks written at or before the moment the caller looked', async () => {
+    const chain = makeChain({ data: null, error: null })
+    fromMock.mockReturnValue(chain)
+
+    await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: ['2024-02-02'], notNewerThan: new Date('2024-01-03T00:00:00.000Z') })
+
+    expect(chain.lte).toHaveBeenCalledWith('updated_at', '2024-01-03T00:00:00.000Z')
+  })
+})
+
+describe('findReceiptRecalledDates', () => {
+  it('reads recalled dates from the plan receipt, de-duplicated', async () => {
+    const chain = makeChain({
+      data: { plan_data: { publish_meta: { recalled: [{ date: '2024-02-01' }, { date: '2024-02-01' }, { date: '2024-02-03' }] } } },
+      error: null,
+    })
+    fromMock.mockReturnValue(chain)
+
+    expect(await findReceiptRecalledDates(PLAN, CLIENT)).toEqual(['2024-02-01', '2024-02-03'])
+    expect(fromMock).toHaveBeenCalledWith('social_plans')
+    expect(chain.eq).toHaveBeenCalledWith('client_id', CLIENT)
+  })
+
+  it('returns an empty list when there is no receipt or no recalls, and throws on a read error', async () => {
+    fromMock.mockReturnValue(makeChain({ data: { plan_data: {} }, error: null }))
+    expect(await findReceiptRecalledDates(PLAN, CLIENT)).toEqual([])
+    fromMock.mockReturnValue(makeChain({ data: null, error: null }))
+    expect(await findReceiptRecalledDates(PLAN, CLIENT)).toEqual([])
+    fromMock.mockReturnValue(makeChain({ data: null, error: { message: 'x' } }))
+    await expect(findReceiptRecalledDates(PLAN, CLIENT)).rejects.toBeTruthy()
   })
 })
 
@@ -288,6 +323,18 @@ describe('tombstoneRecalledDates', () => {
     // revokes exactly the grant that was read, never a newer one
     expect(auth.eq).toHaveBeenCalledWith('id', 'auth-1')
     expect(update.dates).toBeUndefined()
+  })
+
+  it('🔴 keeps an unknown_outcome row as-is (its "go and check the Page" signal must survive a recall)', async () => {
+    const { attempts } = stubTables({
+      existing: [{ date: '2024-02-01', status: 'unknown_outcome' }],
+      auth: null,
+    })
+
+    await tombstoneRecalledDates({ clientId: CLIENT, planId: PLAN, dates: ['2024-02-01', '2024-02-02'] })
+
+    const rows = attempts.upsert.mock.calls[0][0] as Array<{ date: string }>
+    expect(rows.map(r => r.date)).toEqual(['2024-02-02'])
   })
 
   it('🔴 refuses (throws) when a date is mid-send (claimed) instead of overwriting the claim', async () => {

@@ -6,6 +6,7 @@ vi.mock('@/lib/auth/whitelist', () => ({ isGlobalAdminEmail: vi.fn() }))
 vi.mock('@/lib/campaign/daily-plan-publish-runner', () => ({ runDailyPlanPublish: vi.fn() }))
 vi.mock('@/lib/campaign/daily-plan-auto-publish-store', () => ({
   activateAuthorization: vi.fn(),
+  findReceiptRecalledDates: vi.fn(),
   findRecalledDates: vi.fn(),
   getActiveAuthorization: vi.fn(),
   insertAuthorization: vi.fn(),
@@ -20,6 +21,7 @@ import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
 import {
   activateAuthorization,
+  findReceiptRecalledDates,
   findRecalledDates,
   getActiveAuthorization,
   insertAuthorization,
@@ -49,6 +51,7 @@ const mockedInsert = vi.mocked(insertAuthorization)
 const mockedRevoke = vi.mocked(revokeAuthorization)
 const mockedActivate = vi.mocked(activateAuthorization)
 const mockedRecalled = vi.mocked(findRecalledDates)
+const mockedReceiptRecalled = vi.mocked(findReceiptRecalledDates)
 const mockedActive = vi.mocked(getActiveAuthorization)
 const mockedLift = vi.mocked(liftRecalledTombstones)
 const mockedSend = vi.mocked(sendInngestEvent)
@@ -137,6 +140,7 @@ beforeEach(() => {
   mockedIsGlobalAdmin.mockReturnValue(true)
   stubClientPage(PAGE_ID)
   mockedRecalled.mockResolvedValue([])
+  mockedReceiptRecalled.mockResolvedValue([])
   mockedActive.mockResolvedValue(null)
   mockedRun.mockResolvedValue({ status: 200, body: dryRunBody })
   mockedInsert.mockResolvedValue({ ok: true, authorization: grant() })
@@ -212,6 +216,22 @@ describe('POST auto-publish authorize — refusals before the gates', () => {
     expect(mockedInsert).not.toHaveBeenCalled()
   })
 
+  it('🔴 a date recalled on the receipt is blocked even when its tombstone is missing (tombstone write had failed)', async () => {
+    mockedRecalled.mockResolvedValue([])
+    mockedReceiptRecalled.mockResolvedValue([DATES[0]])
+    const res = await callPost(validCommand())
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ error: 'DATE_RECALLED', dates: [DATES[0]] })
+    expect(mockedInsert).not.toHaveBeenCalled()
+  })
+
+  it('a receipt-recalled date can be sent again only when the PM lists it, and the grant records that', async () => {
+    mockedReceiptRecalled.mockResolvedValue([DATES[0]])
+    const res = await callPost(validCommand({ lift_recalled_dates: [DATES[0]] }))
+    expect(res.status).toBe(200)
+    expect(mockedInsert.mock.calls[0][0]).toMatchObject({ lifted_dates: [DATES[0]] })
+  })
+
   it('passes a gate refusal through unchanged and stores nothing', async () => {
     mockedRun.mockResolvedValue({ status: 409, body: { success: false, error: 'PRICE_FACT_UNVERIFIED' } })
     const res = await callPost(validCommand())
@@ -256,7 +276,7 @@ describe('POST auto-publish authorize — preview and confirm', () => {
     expect(order).toEqual(['insert', 'send', 'activate', 'lift'])
     expect(mockedInsert.mock.calls[0][0]).toMatchObject({ authorized_by_email: 'admin@magicengine.cloud', authorized_by_user_id: USER_ID, lifted_dates: [DATES[1]] })
     expect(mockedSend.mock.calls[0][0].name).toBe(DAILY_PLAN_AUTO_PUBLISH_AUTHORIZED_EVENT)
-    expect(mockedLift).toHaveBeenCalledWith({ planId: PLAN_ID, clientId: CLIENT_ID, dates: [DATES[1]] })
+    expect(mockedLift).toHaveBeenCalledWith({ planId: PLAN_ID, clientId: CLIENT_ID, dates: [DATES[1]], notNewerThan: expect.any(Date) })
   })
 
   it('returns 409 and sends no event when a live authorisation already exists', async () => {
@@ -273,6 +293,8 @@ describe('POST auto-publish authorize — preview and confirm', () => {
     expect(res.status).toBe(200)
     expect(mockedRevoke).toHaveBeenCalledTimes(1)
     expect(mockedRevoke.mock.calls[0][0]).toMatchObject({ authId: 'auth-1', clientId: CLIENT_ID, byEmail: 'system:superseded' })
+    // the replaced grant leaves a machine-readable revoked event
+    expect(mockedSend.mock.calls.some(call => call[0].id === 'req-1:superseded')).toBe(true)
   })
 
   it('does not supersede a live grant, nor a half-created one younger than five minutes', async () => {

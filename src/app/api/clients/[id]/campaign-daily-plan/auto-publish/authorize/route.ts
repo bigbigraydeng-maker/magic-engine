@@ -28,11 +28,13 @@ import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import {
   CampaignDailyAutoPublishAuthorizeCommandSchema,
   DAILY_PLAN_AUTO_PUBLISH_AUTHORIZED_EVENT,
+  DAILY_PLAN_AUTO_PUBLISH_REVOKED_EVENT,
   computeExpiry,
   judgeAuthorization,
 } from '@/lib/campaign/daily-plan-auto-publish'
 import {
   activateAuthorization,
+  findReceiptRecalledDates,
   findRecalledDates,
   getActiveAuthorization,
   insertAuthorization,
@@ -111,7 +113,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // A recalled post must stay recalled: the manual receipt moves it out of
     // `published[]`, so the dry run alone would happily treat it as "pending".
     // Only dates the PM explicitly lists in `lift_recalled_dates` may be sent again.
-    const recalledDates = await findRecalledDates(command.plan_id, clientId, command.dates)
+    // Two sources, either one blocks: the tombstone table and the receipt's own `recalled[]`.
+    const recallReadAt = new Date()
+    const [tombstoned, receiptRecalled] = await Promise.all([
+      findRecalledDates(command.plan_id, clientId, command.dates),
+      findReceiptRecalledDates(command.plan_id, clientId),
+    ])
+    const recalledDates = command.dates.filter(date => tombstoned.includes(date) || receiptRecalled.includes(date))
     const blockedByRecall = recalledDates.filter(date => !command.lift_recalled_dates.includes(date))
     if (blockedByRecall.length > 0) {
       return NextResponse.json(
@@ -189,6 +197,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           byEmail: 'system:superseded',
           reason: `superseded by a new authorisation (${verdict.active ? 'active' : verdict.reason})`,
         })
+        // Leave a machine-readable trace of the replaced grant (best-effort, never blocks).
+        try {
+          await sendInngestEvent({
+            id: `${previous.request_id}:superseded`,
+            name: DAILY_PLAN_AUTO_PUBLISH_REVOKED_EVENT,
+            data: {
+              request_id: previous.request_id,
+              client_id: clientId,
+              campaign_id: previous.campaign_id,
+              plan_id: command.plan_id,
+              revoked_by_email: 'system:superseded',
+              reason: 'superseded by a new authorisation',
+              authorization: 'REVOKED',
+              provider_impact: 'NONE',
+            },
+          })
+        } catch (error: unknown) {
+          console.error('[auto-publish authorize] superseded event not sent', errorMessage(error))
+        }
       }
     }
 
@@ -291,7 +318,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     // Lift the recall blocks last: if anything above failed, they all stay in place.
     try {
-      await liftRecalledTombstones({ planId: command.plan_id, clientId, dates: liftDates })
+      await liftRecalledTombstones({ planId: command.plan_id, clientId, dates: liftDates, notNewerThan: recallReadAt })
     } catch (error: unknown) {
       console.error('[auto-publish authorize] lifting recall blocks failed', errorMessage(error))
       return failure('RECALL_BLOCKS_NOT_LIFTED', await rollBack('recall blocks could not be lifted'))

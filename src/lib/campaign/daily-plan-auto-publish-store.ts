@@ -147,6 +147,8 @@ export async function liftRecalledTombstones(input: {
   planId: string
   clientId: string
   dates: string[]
+  /** Only blocks written at or before this instant are removed — a recall that landed after the caller looked must survive. */
+  notNewerThan: Date
 }): Promise<void> {
   if (input.dates.length === 0) return
   const { error } = await supabaseAdmin
@@ -157,6 +159,7 @@ export async function liftRecalledTombstones(input: {
     .eq('status', 'blocked')
     .eq('reason_code', 'RECALLED')
     .in('date', input.dates)
+    .lte('updated_at', input.notNewerThan.toISOString())
 
   if (error) throw error
 }
@@ -179,6 +182,34 @@ export async function findRecalledDates(planId: string, clientId: string, dates:
   if (error) throw error
 
   return ((data ?? []) as Array<{ date: string }>).map(row => row.date)
+}
+
+/**
+ * Dates recorded as recalled on the plan's own publish receipt (`publish_meta.recalled[]`).
+ * The receipt is the authoritative record of a recall (it is written in the same step as the
+ * Graph delete), so this is checked alongside the tombstone table: if the tombstone write ever
+ * failed, the receipt still says the post was taken down.
+ */
+export async function findReceiptRecalledDates(planId: string, clientId: string): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from('social_plans')
+    .select('plan_data')
+    .eq('id', planId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+
+  if (error) throw error
+  const planData = (data as { plan_data?: unknown } | null)?.plan_data
+  if (typeof planData !== 'object' || planData === null) return []
+  const meta = (planData as { publish_meta?: unknown }).publish_meta
+  if (typeof meta !== 'object' || meta === null) return []
+  const recalled = (meta as { recalled?: unknown }).recalled
+  if (!Array.isArray(recalled)) return []
+
+  const dates = recalled
+    .map(entry => (typeof entry === 'object' && entry !== null ? (entry as { date?: unknown }).date : undefined))
+    .filter((date): date is string => typeof date === 'string')
+  return Array.from(new Set(dates))
 }
 
 /**
@@ -216,7 +247,14 @@ export async function tombstoneRecalledDates(input: {
   const auth = await getActiveAuthorization(input.planId, input.clientId)
   const now = new Date().toISOString()
 
-  const attemptRows = input.dates.map(date => ({
+  // An `unknown_outcome` row carries a "go and check the Page" signal; keep it. Such a date is
+  // still caught by the receipt's `recalled[]` (see findReceiptRecalledDates).
+  const keepAsIs = new Set(
+    ((existing ?? []) as Array<{ date: string; status: string }>)
+      .filter(r => r.status === 'unknown_outcome')
+      .map(r => r.date),
+  )
+  const attemptRows = input.dates.filter(date => !keepAsIs.has(date)).map(date => ({
     auth_id: auth?.id ?? null,
     client_id: input.clientId,
     plan_id: input.planId,
@@ -228,11 +266,13 @@ export async function tombstoneRecalledDates(input: {
     updated_at: now,
   }))
 
-  const { error: upsertError } = await supabaseAdmin
-    .from(ATTEMPTS_TABLE)
-    .upsert(attemptRows, { onConflict: 'plan_id,date' })
+  if (attemptRows.length > 0) {
+    const { error: upsertError } = await supabaseAdmin
+      .from(ATTEMPTS_TABLE)
+      .upsert(attemptRows, { onConflict: 'plan_id,date' })
 
-  if (upsertError) throw upsertError
+    if (upsertError) throw upsertError
+  }
 
   if (auth !== null) {
     const remaining = remainingAuthorizedDates(auth.dates, input.dates)
