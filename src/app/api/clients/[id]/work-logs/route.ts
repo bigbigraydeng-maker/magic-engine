@@ -10,6 +10,23 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 interface Params { params: { id: string } }
 
+// 会话必须带邮箱：邮箱为空的会话在管理员名单配置有空项时会被误判成管理员（狄仁杰 2026-10-10 实证），
+// 所以这里不信 tier，先拦掉。共享守卫层的根治另行处理。
+function hasEmail(email: string | undefined | null): boolean {
+  return typeof email === 'string' && email.trim().length > 0
+}
+
+// 真实日历日期才算数：'2026-13-45' 形状对但不是日期，必须 400，不能落到数据库再报 500。
+function parseLogDate(raw: unknown): { ok: true; value: string } | { ok: false } {
+  if (raw === undefined || raw === null) return { ok: true, value: new Date().toISOString().slice(0, 10) }
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return { ok: false }
+  const parsed = new Date(`${raw}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== raw) return { ok: false }
+  return { ok: true, value: raw }
+}
+
+const MAX_SUMMARY_LENGTH = 5000
+
 // GET /api/clients/[id]/work-logs?limit=30
 export async function GET(_req: NextRequest, { params }: Params) {
   const access = await requireDashboardClientAccess(params.id)
@@ -18,6 +35,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
       { error: access.error, reason: access.reason },
       { status: access.status }
     )
+  }
+
+  if (!hasEmail(access.user.email)) {
+    return NextResponse.json({ error: 'Forbidden', reason: 'missing_email' }, { status: 403 })
   }
 
   const canWrite = access.tier === 'admin'
@@ -58,37 +79,37 @@ export async function POST(req: NextRequest, { params }: Params) {
     )
   }
 
+  if (!hasEmail(access.user.email)) {
+    return NextResponse.json({ error: 'Forbidden', reason: 'missing_email' }, { status: 403 })
+  }
+
   if (access.tier !== 'admin') {
     return NextResponse.json({ error: 'Forbidden', reason: 'admin_only' }, { status: 403 })
   }
 
   const author_email = (access.user.email ?? '').toLowerCase().trim()
-  if (!author_email) {
-    return NextResponse.json({ error: 'Forbidden', reason: 'missing_email' }, { status: 403 })
-  }
 
-  const body = (await req.json().catch(() => ({}))) as { summary?: unknown; log_date?: unknown }
+  const raw: unknown = await req.json().catch(() => null)
+  const body: { summary?: unknown; log_date?: unknown } =
+    raw !== null && typeof raw === 'object' ? raw : {}
 
   const summary = typeof body.summary === 'string' ? body.summary.trim() : ''
   if (!summary) {
     return NextResponse.json({ error: 'summary required' }, { status: 400 })
   }
 
-  let log_date: string
-  if (typeof body.log_date === 'string') {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(body.log_date)) {
-      return NextResponse.json({ error: 'log_date must be YYYY-MM-DD' }, { status: 400 })
-    }
-    log_date = body.log_date
-  } else if (body.log_date === undefined || body.log_date === null) {
-    log_date = new Date().toISOString().slice(0, 10)
-  } else {
+  if (summary.length > MAX_SUMMARY_LENGTH) {
+    return NextResponse.json({ error: 'summary too long' }, { status: 400 })
+  }
+
+  const logDate = parseLogDate(body.log_date)
+  if (!logDate.ok) {
     return NextResponse.json({ error: 'log_date must be YYYY-MM-DD' }, { status: 400 })
   }
 
   const { data, error } = await supabaseAdmin
     .from('fde_work_logs')
-    .insert({ client_id: params.id, summary, log_date, author_email })
+    .insert({ client_id: params.id, summary, log_date: logDate.value, author_email })
     .select('id, log_date, summary, author_email, created_at')
     .single()
 

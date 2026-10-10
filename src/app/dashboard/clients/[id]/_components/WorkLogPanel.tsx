@@ -17,6 +17,7 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
   const [saving, setSaving] = useState(false)
   const [canWrite, setCanWrite] = useState(false)
   const [denied, setDenied] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   async function fetchLogs() {
@@ -26,8 +27,11 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
       setLogs(data ?? [])
       setCanWrite(cw === true)
       setDenied(false)
+      setLoadFailed(false)
     } else if (res.status === 401 || res.status === 403) {
       setDenied(true)
+    } else {
+      setLoadFailed(true)
     }
     setLoading(false)
   }
@@ -58,7 +62,7 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
 
   async function handleDelete(logId: string) {
     const res = await fetch(`/api/clients/${clientId}/work-logs/${logId}`, { method: 'DELETE' })
-    if (res.ok) setLogs(prev => prev.filter(l => l.id !== logId))
+    if (res.ok || res.status === 404) setLogs(prev => prev.filter(l => l.id !== logId))
   }
 
   // Group logs by date
@@ -88,6 +92,14 @@ export function WorkLogPanel({ clientId }: { clientId: string }) {
     return (
       <div className="rounded-xl border border-dashed border-black/15 py-10 text-center">
         <p className="text-sm font-bold text-me-charcoal/50">你没有权限查看这位客户的工作日志</p>
+      </div>
+    )
+  }
+
+  if (loadFailed && logs.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-black/15 py-10 text-center">
+        <p className="text-sm font-bold text-me-charcoal/50">工作日志加载失败，请刷新页面重试</p>
       </div>
     )
   }

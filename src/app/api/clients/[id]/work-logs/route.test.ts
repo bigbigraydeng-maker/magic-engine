@@ -79,6 +79,24 @@ function asAnonymous() {
   mockAccess.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized', reason: 'unauthorized' })
 }
 
+// 非管理员的全部档位：写删必须对每一档都拒，而不是只拒 paid_client。
+const NON_ADMIN_TIERS = ['paid_client', 'self_serve', 'portal_only'] as const
+function asTierOf(clientId: string, tier: (typeof NON_ADMIN_TIERS)[number]) {
+  mockAccess.mockImplementation(async (requested: string) =>
+    requested === clientId
+      ? { ok: true, user: { email: 'staff@client-a.example' } as never, role: 'client-viewer', tier, allowedClientId: clientId }
+      : { ok: false, status: 403, error: 'Forbidden', reason: 'forbidden' },
+  )
+}
+function asAdminWithoutEmail() {
+  mockAccess.mockImplementation(async () => ({
+    ok: true, user: {} as never, role: 'admin', tier: 'admin', allowedClientId: null,
+  }))
+}
+function asLookupFailed() {
+  mockAccess.mockResolvedValue({ ok: false, status: 500, error: 'Authorization check failed', reason: 'lookup_failed' })
+}
+
 function seed(): Row[] {
   return [
     { id: 'log-a1', client_id: CLIENT_A, log_date: '2026-10-09', summary: 'A one', author_email: 'fde@magicengine.example', created_at: '2026-10-09T01:00:00Z' },
@@ -185,6 +203,45 @@ describe('GET /api/clients/[id]/work-logs', () => {
     const body = await res.json()
     expect(body.error).toBe('work_logs_read_failed')
     expect(JSON.stringify(body)).not.toContain('SECRET_DB_DETAIL')
+  })
+
+  it.each(NON_ADMIN_TIERS)('%s 档成员读自己这份 → 200，canWrite false，不带 author_email', async (tier) => {
+    asTierOf(CLIENT_A, tier)
+    const res = await GET(getReq(CLIENT_A), { params: { id: CLIENT_A } })
+    expect(res.status).toBe(200)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+
+    const body = await res.json()
+    expect(body.canWrite).toBe(false)
+    expect(body.logs).toHaveLength(1)
+    expect(body.logs[0].id).toBe('log-a1')
+    expect(body.logs[0]).not.toHaveProperty('author_email')
+    expect(JSON.stringify(body)).not.toContain('log-b1')
+    expect(JSON.stringify(body)).not.toContain('B one')
+  })
+
+  it('管理员身份但会话没有邮箱 → 403，reason missing_email，且不碰数据库', async () => {
+    asAdminWithoutEmail()
+    const res = await GET(getReq(CLIENT_A), { params: { id: CLIENT_A } })
+    expect(res.status).toBe(403)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+
+    const body = await res.json()
+    expect(body.reason).toBe('missing_email')
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('守卫查库失败 → 500，reason lookup_failed，且不碰数据库', async () => {
+    asLookupFailed()
+    const res = await GET(getReq(CLIENT_A), { params: { id: CLIENT_A } })
+    expect(res.status).toBe(500)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+
+    const body = await res.json()
+    expect(body.reason).toBe('lookup_failed')
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
   })
 })
 
@@ -315,5 +372,89 @@ describe('POST /api/clients/[id]/work-logs', () => {
     const body = await res.json()
     expect(body.error).toBe('work_logs_write_failed')
     expect(JSON.stringify(body)).not.toContain('SECRET_DB_DETAIL')
+  })
+
+  it.each(NON_ADMIN_TIERS)('%s 档成员写自己的客户 → 403 admin_only，不碰库', async (tier) => {
+    asTierOf(CLIENT_A, tier)
+    const res = await POST(postReq(CLIENT_A, { summary: 'hello' }), { params: { id: CLIENT_A } })
+    expect(res.status).toBe(403)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+
+    const body = await res.json()
+    expect(body.reason).toBe('admin_only')
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('log_date 形状对但不是真实日期（2026-13-45）→ 400，数据不变', async () => {
+    asGlobalAdmin()
+    const res = await POST(
+      postReq(CLIENT_A, { summary: 'hello', log_date: '2026-13-45' }),
+      { params: { id: CLIENT_A } },
+    )
+    expect(res.status).toBe(400)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('log_date 2026-02-30 → 400，数据不变', async () => {
+    asGlobalAdmin()
+    const res = await POST(
+      postReq(CLIENT_A, { summary: 'hello', log_date: '2026-02-30' }),
+      { params: { id: CLIENT_A } },
+    )
+    expect(res.status).toBe(400)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('请求体是 JSON null → 400 summary required，数据不变', async () => {
+    asGlobalAdmin()
+    const req = new NextRequest(`http://localhost:3001/api/clients/${CLIENT_A}/work-logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'null',
+    })
+    const res = await POST(req, { params: { id: CLIENT_A } })
+    expect(res.status).toBe(400)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+
+    const body = await res.json()
+    expect(body.error).toBe('summary required')
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('summary 超过 5000 字 → 400，数据不变', async () => {
+    asGlobalAdmin()
+    const res = await POST(
+      postReq(CLIENT_A, { summary: 'x'.repeat(5001) }),
+      { params: { id: CLIENT_A } },
+    )
+    expect(res.status).toBe(400)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('summary 不是字符串 → 400，数据不变', async () => {
+    asGlobalAdmin()
+    const res = await POST(
+      postReq(CLIENT_A, { summary: 123 }),
+      { params: { id: CLIENT_A } },
+    )
+    expect(res.status).toBe(400)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('守卫查库失败 → 500，reason lookup_failed，且不碰数据库', async () => {
+    asLookupFailed()
+    const res = await POST(postReq(CLIENT_A, { summary: 'hello' }), { params: { id: CLIENT_A } })
+    expect(res.status).toBe(500)
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+
+    const body = await res.json()
+    expect(body.reason).toBe('lookup_failed')
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
   })
 })

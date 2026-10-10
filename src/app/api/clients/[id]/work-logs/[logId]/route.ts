@@ -14,6 +14,12 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
     )
   }
 
+  // 会话必须带邮箱：邮箱为空的会话在管理员名单配置有空项时会被误判成管理员，先拦掉。
+  const email = access.user.email
+  if (typeof email !== 'string' || email.trim().length === 0) {
+    return NextResponse.json({ error: 'Forbidden', reason: 'missing_email' }, { status: 403 })
+  }
+
   if (access.tier !== 'admin') {
     return NextResponse.json(
       { error: 'Forbidden', reason: 'admin_only' },

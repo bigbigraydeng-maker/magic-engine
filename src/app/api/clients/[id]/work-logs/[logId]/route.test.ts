@@ -78,6 +78,24 @@ function asAnonymous() {
   mockAccess.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized', reason: 'unauthorized' })
 }
 
+// 非管理员的全部档位：写删必须对每一档都拒，而不是只拒 paid_client。
+const NON_ADMIN_TIERS = ['paid_client', 'self_serve', 'portal_only'] as const
+function asTierOf(clientId: string, tier: (typeof NON_ADMIN_TIERS)[number]) {
+  mockAccess.mockImplementation(async (requested: string) =>
+    requested === clientId
+      ? { ok: true, user: { email: 'staff@client-a.example' } as never, role: 'client-viewer', tier, allowedClientId: clientId }
+      : { ok: false, status: 403, error: 'Forbidden', reason: 'forbidden' },
+  )
+}
+function asAdminWithoutEmail() {
+  mockAccess.mockImplementation(async () => ({
+    ok: true, user: {} as never, role: 'admin', tier: 'admin', allowedClientId: null,
+  }))
+}
+function asLookupFailed() {
+  mockAccess.mockResolvedValue({ ok: false, status: 500, error: 'Authorization check failed', reason: 'lookup_failed' })
+}
+
 function seed(): Row[] {
   return [
     { id: 'log-a1', client_id: CLIENT_A, log_date: '2026-10-09', summary: 'A one', author_email: 'fde@magicengine.example', created_at: '2026-10-09T01:00:00Z' },
@@ -210,5 +228,44 @@ describe('DELETE /api/clients/[id]/work-logs/[logId]', () => {
     const body = await res.json()
     expect(body.error).toBe('work_logs_delete_failed')
     expect(JSON.stringify(body)).not.toContain('SECRET_DB_DETAIL')
+  })
+
+  it.each(NON_ADMIN_TIERS)('%s 档成员删自己客户的日志 → 403 admin_only，不碰库，数据不变', async (tier) => {
+    asTierOf(CLIENT_A, tier)
+
+    const res = await del(CLIENT_A, 'log-a1')
+
+    expect(res.status).toBe(403)
+    const body = await res.json()
+    expect(body.reason).toBe('admin_only')
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('管理员身份但会话没有邮箱 → 403 missing_email，不碰库，数据不变', async () => {
+    asAdminWithoutEmail()
+
+    const res = await del(CLIENT_A, 'log-a1')
+
+    expect(res.status).toBe(403)
+    const body = await res.json()
+    expect(body.reason).toBe('missing_email')
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
+  })
+
+  it('守卫查库失败 → 500 lookup_failed，不碰库，数据不变', async () => {
+    asLookupFailed()
+
+    const res = await del(CLIENT_A, 'log-a1')
+
+    expect(res.status).toBe(500)
+    const body = await res.json()
+    expect(body.reason).toBe('lookup_failed')
+    expect(mockAccess).toHaveBeenCalledWith(CLIENT_A)
+    expect(db.state.touched).toBe(0)
+    expect(db.state.rows).toEqual(seed())
   })
 })
