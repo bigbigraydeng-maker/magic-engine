@@ -131,7 +131,7 @@ export function PersonDrawer({
   const onSummary = useCallback((s: TimelineSummary | null) => setSummary(s), [])
 
   const changeStage = async (toStage: string, label: string) => {
-    if (!window.confirm(`到哪一步了：${row.stageLabel ?? '还没判出来'} → 改成「${label}」？`)) return
+    if (!window.confirm(`到哪一步了：${row.stageLabel ?? '还没标'} → 改成「${label}」？`)) return
     setChangingStage(false)
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
@@ -328,7 +328,7 @@ export function PersonDrawer({
               <>
                 <p className="text-base font-black text-me-charcoal">{row.nextAction.verbLabel}</p>
                 <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/75">
-                  {row.nextAction.line.slice(row.nextAction.verbLabel.length + 4)}
+                  {row.nextAction.reason}
                 </p>
                 {row.nextAction.aiSuggestion && (
                   <p className="mt-1.5 text-[13px] text-me-charcoal/85">
@@ -346,7 +346,7 @@ export function PersonDrawer({
                   onClick={() => setChangingStage((v) => !v)}
                   className="rounded-full border border-me-charcoal/15 bg-white px-3 py-1.5 text-xs font-bold text-me-charcoal/70"
                 >
-                  到哪一步了：{row.stageLabel ?? '还没判出来'}
+                  到哪一步了：{row.stageLabel ?? '还没标'}
                   {summary?.stageSource ? ` · ${STAGE_SOURCE_LABEL[summary.stageSource]}` : ''} ▾
                 </button>
                 {changingStage && (

@@ -49,6 +49,27 @@ const CONTACTS: Row[] = [
   },
 ]
 
+/**
+ * Stan：我们打过、他回过、然后我们又说了一句就断了（最后一条是我们的）→ `stale_conversation`。
+ * 专门用来测「聊过一轮断了 + AI 判高意向 → 抬进 hot；低意向 → 留在 cold」这条接口路径——
+ * 第一版拿 Bob 测，而 Bob 没触点本来就在 hot，任何意向都测不出抬升（魏征 2026-10-10 复审）。
+ */
+const STALE_CONTACT: Row = {
+  id: 'a3',
+  display_name: 'Stan',
+  primary_phone: '+6421000003',
+  primary_email: 'stan@example.com',
+  do_not_contact: false,
+  snooze_until: null,
+  stage: null,
+  first_seen_at: '2026-07-01T00:00:00.000Z',
+}
+const STALE_TOUCHES: Row[] = [
+  { id: 't1', contact_id: 'a3', channel: 'messenger', direction: 'inbound', occurred_at: '2026-07-30T00:00:00.000Z', summary: 'hi', raw: null, metadata: null, source: 'messenger' },
+  { id: 't2', contact_id: 'a3', channel: 'phone', direction: 'outbound', occurred_at: '2026-08-01T00:00:00.000Z', summary: '聊上了', raw: null, metadata: { outcome: 'spoke' }, source: 'me_manual' },
+]
+CONTACTS.push(STALE_CONTACT)
+
 const STAGES: Row[] = [
   { stage_key: 'quoted', label: '已报价', marketing_action: 'nurture', is_terminal: false },
 ]
@@ -114,6 +135,7 @@ function fakeDb(table: string) {
         return resolve({ data: CONTACTS, count: null, error: null })
       }
       if (table === 'client_pipeline_stages') return resolve({ data: STAGES, error: null })
+      if (table === 'contact_touchpoints') return resolve({ data: STALE_TOUCHES, error: null })
       if (table === 'conversations' || table === 'conversation_briefs') {
         return resolve({ data: BRIEF_ROWS[table] ?? [], error: null })
       }
@@ -276,7 +298,8 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     const byKey = Object.fromEntries(
       (body.sections as Array<{ key: string; total: number }>).map((s) => [s.key, s]),
     )
-    expect(byKey.cold.total).toBe(1)
+    // Sue（推迟中）+ Stan（聊过一轮断了、没摘要）
+    expect(byKey.cold.total).toBe(2)
     expect(byKey.hot.total).toBe(1)
   })
 
@@ -328,38 +351,40 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     expect(status).toBe(400)
   })
 
-  it('聊过一轮断了 + AI 判高意向 → 抬进 hot；判低意向 → 留在 cold', async () => {
-    BRIEF_ROWS.conversations = [{ id: 'c1', contact_id: 'a1' }]
+  it('聊过一轮断了（Stan）+ AI 判高意向 → 抬进 hot；判低意向 → 留在 cold，位置跟没摘要时一样', async () => {
+    type Sec = { key: string; total: number; items: Array<Record<string, unknown>> | null }
+    const findStan = (body: Record<string, unknown>, key: string) =>
+      (body.sections as Sec[]).find((s) => s.key === key)?.items?.find((r) => r.contactId === 'a3')
+
+    BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3' }]
     BRIEF_ROWS.conversation_briefs = [
-      {
-        conversation_id: 'c1',
-        intent_level: 'high',
-        next_action: '打给 Bob',
-        generated_at: '2026-10-01T00:00:00.000Z',
-      },
+      { conversation_id: 'c3', intent_level: 'high', next_action: '打给 Stan', generated_at: '2026-10-01T00:00:00.000Z' },
     ]
-    const high = await get('cts', '?view=priority')
-    const highHot = (high.body.sections as Array<{ key: string; items: Array<Record<string, unknown>> | null }>).find(
-      (s) => s.key === 'hot',
-    )
-    const highBob = highHot?.items?.find((r) => r.contactId === 'a1')
-    expect(highBob?.intent).toBe('high')
-    expect(String(highBob?.nextAction && (highBob.nextAction as { line: string }).line)).toMatch(/^打给他 —— /)
+    const high = await get('cts', '?view=priority&open=hot,cold')
+    const stanHigh = findStan(high.body, 'hot')
+    expect(stanHigh).toBeTruthy()
+    expect(stanHigh?.intent).toBe('high')
+    expect((stanHigh?.nextAction as { list: string; line: string; aiSuggestion: string | null }).list).toBe('hot')
+    expect((stanHigh?.nextAction as { line: string }).line).toContain('AI 读完对话判他意向高')
+    expect((stanHigh?.nextAction as { aiSuggestion: string | null }).aiSuggestion).toBe('打给 Stan')
+    expect(findStan(high.body, 'cold')).toBeUndefined()
 
     BRIEF_ROWS.conversation_briefs = [
-      {
-        conversation_id: 'c1',
-        intent_level: 'low',
-        next_action: '打给 Bob',
-        generated_at: '2026-10-01T00:00:00.000Z',
-      },
+      { conversation_id: 'c3', intent_level: 'low', next_action: '打给 Stan', generated_at: '2026-10-01T00:00:00.000Z' },
     ]
-    const low = await get('cts', '?view=priority')
-    const lowHot = (low.body.sections as Array<{ key: string; items: Array<Record<string, unknown>> | null }>).find(
-      (s) => s.key === 'hot',
-    )
-    const lowBob = lowHot?.items?.find((r) => r.contactId === 'a1')
-    expect(lowBob?.intent).toBe('low')
+    const low = await get('cts', '?view=priority&open=hot,cold')
+    const stanLow = findStan(low.body, 'cold')
+    expect(stanLow).toBeTruthy()
+    expect(stanLow?.intent).toBe('low')
+    expect((stanLow?.nextAction as { list: string }).list).toBe('cold')
+    expect(findStan(low.body, 'hot')).toBeUndefined()
+
+    // 没摘要：跟低意向落同一张名单 —— 意向只往上提，不往下压。
+    BRIEF_ROWS.conversations = []
+    BRIEF_ROWS.conversation_briefs = []
+    const none = await get('cts', '?view=priority&open=hot,cold')
+    expect(findStan(none.body, 'cold')).toBeTruthy()
+    expect(findStan(none.body, 'cold')?.intent).toBeNull()
   })
 
   it('client_id 收口：view=priority 也只按 URL 里那个客户查', async () => {

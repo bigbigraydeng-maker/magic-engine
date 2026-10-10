@@ -108,7 +108,10 @@ export async function loadLatestBriefByContact(clientId: string): Promise<BriefB
     )
 
     return latestBriefPerContact(convs, briefs)
-  } catch {
+  } catch (err) {
+    // 吞错但不哑：没这一行，真故障（例如 fetchAll 撞上限抛错）会变成「整页正常、全员无抬升」，
+    // 没人发现（子牙 2026-10-10 实施后复审）。响应里不带标记是为了不多一个字段，先靠日志。
+    console.error('[brief-lookup] load failed, falling back to no briefs', clientId, err instanceof Error ? err.message : err)
     return new Map()
   }
 }

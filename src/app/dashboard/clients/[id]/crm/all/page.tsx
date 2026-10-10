@@ -639,7 +639,7 @@ export default function CrmAllContactsPage() {
           <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}>
             {r.nextAction.verbLabel}
           </span>
-          <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.line.slice(r.nextAction.verbLabel.length + 4)}</span>
+          <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.reason}</span>
         </td>
       </tr>
     )

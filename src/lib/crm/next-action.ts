@@ -25,8 +25,10 @@ export interface NextAction {
   verb: NextActionVerb
   /** 给销售看的中文动词，例如「打给他」。 */
   verbLabel: string
-  /** 名单上那一行：`${verbLabel} —— ${seg.reason}`（高意向抬升时带后缀）。 */
+  /** 名单上那一行：`${verbLabel} —— ${reason}`。 */
   line: string
+  /** 「为什么」那半句（`seg.reason`，高意向抬升时带后缀）。页面别自己切 `line`，直接用它。 */
+  reason: string
   /** conversation_briefs.next_action，去掉首尾空白；没有就是 null。只在抽屉里显示。 */
   aiSuggestion: string | null
   /** 只有「聊过一轮就断了」因为高意向被抬进 hot 时才为 true。 */
@@ -103,13 +105,14 @@ export function nextActionFor(input: {
   const intentBoost = seg.segment === 'stale_conversation' && list === 'hot'
   const verb = verbOf(seg.segment, seg.suggestedChannel, list)
   const verbLabel = VERB_LABEL[verb]
-  const base = `${verbLabel} —— ${seg.reason}`
+  const reason = intentBoost ? `${seg.reason}${INTENT_BOOST_SUFFIX}` : seg.reason
   const trimmed = typeof aiNextAction === 'string' ? aiNextAction.trim() : ''
   return {
     list,
     verb,
     verbLabel,
-    line: intentBoost ? `${base}${INTENT_BOOST_SUFFIX}` : base,
+    line: `${verbLabel} —— ${reason}`,
+    reason,
     aiSuggestion: trimmed.length > 0 ? trimmed : null,
     intentBoost,
   }

@@ -97,21 +97,6 @@ function mockDb() {
         }),
       }
     }
-    if (table === 'conversation_briefs') {
-      return {
-        select: () => ({
-          in: () => ({
-            order: () => ({
-              limit: () => ({
-                maybeSingle: async () => ({
-                  data: { intent_level: 'high', summary: '客人已确认合作', next_action: '发最终账单' },
-                }),
-              }),
-            }),
-          }),
-        }),
-      }
-    }
     throw new Error(`unexpected table ${table}`)
   })
 }
@@ -149,9 +134,11 @@ describe('往来时间线的顺序', () => {
   })
 })
 
-describe('AI 摘要卡', () => {
-  it('带上最新摘要的意向等级、一句话和下一步', async () => {
+describe('AI 摘要不再从时间线接口出（2026-10-10 并进列表接口的「该做什么」）', () => {
+  it('响应里没有 brief，也不再查 conversation_briefs', async () => {
     const body = await (await call()).json()
-    expect(body.brief).toEqual({ intentLevel: 'high', summary: '客人已确认合作', nextAction: '发最终账单' })
+    expect(body).not.toHaveProperty('brief')
+    const tables = (supabaseAdmin.from as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])
+    expect(tables).not.toContain('conversation_briefs')
   })
 })

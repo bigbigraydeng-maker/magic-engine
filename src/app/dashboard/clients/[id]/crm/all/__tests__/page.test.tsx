@@ -26,7 +26,7 @@ interface Row {
   doNotContact?: boolean
   email?: string | null
   lastTouchAt?: string | null
-  nextAction: { list: 'hot' | 'cold'; verb: string; verbLabel: string; line: string; aiSuggestion: string | null; intentBoost: boolean }
+  nextAction: { list: 'hot' | 'cold'; verb: string; verbLabel: string; line: string; reason: string; aiSuggestion: string | null; intentBoost: boolean }
   intent: 'high' | 'medium' | 'low' | 'unknown' | null
 }
 
@@ -43,7 +43,7 @@ const contact = (id: string, name: string, over: Partial<Row> = {}) => ({
   segment: 'nurture',
   segmentLabel: '慢慢养',
   temperature: 'cold',
-  nextAction: { list: 'cold', verb: 'system_watching', verbLabel: '系统盯着', line: '系统盯着 —— 聊过一轮断了', aiSuggestion: null, intentBoost: false },
+  nextAction: { list: 'cold', verb: 'system_watching', verbLabel: '系统盯着', line: '系统盯着 —— 聊过一轮断了', reason: '聊过一轮断了', aiSuggestion: null, intentBoost: false },
   intent: null,
   // 真实响应里这个键**永远存在**（`responseRowFor` 无条件返回 `pinnedAt: c.pinned_at`）。
   // 漏了它，`row.pinnedAt === null` 会是 false（因为是 undefined），点⭐变成「取消置顶」——
@@ -140,7 +140,7 @@ describe('「该做什么」一列', () => {
   it('每行只画一个「该做什么」，不再有「跟进到哪步 / 现在冷热」两列', async () => {
     stubFetch([
       contact('c1', 'Sue Masson', {
-        nextAction: { list: 'hot', verb: 'call', verbLabel: '打给他', line: '打给他 —— 刚留资料', aiSuggestion: null, intentBoost: false },
+        nextAction: { list: 'hot', verb: 'call', verbLabel: '打给他', line: '打给他 —— 刚留资料', reason: '刚留资料', aiSuggestion: null, intentBoost: false },
       }),
     ])
     render(<CrmAllContactsPage />)

@@ -40,7 +40,7 @@ const contact = (id: string, name: string) => ({
   segment: 'nurture',
   segmentLabel: '慢慢养',
   temperature: 'cold',
-  nextAction: { list: 'cold', verb: 'system_watching', verbLabel: '系统盯着', line: '系统盯着 —— 聊过一轮断了', aiSuggestion: null, intentBoost: false },
+  nextAction: { list: 'cold', verb: 'system_watching', verbLabel: '系统盯着', line: '系统盯着 —— 聊过一轮断了', reason: '聊过一轮断了', aiSuggestion: null, intentBoost: false },
   intent: null,
   custom: {},
 })

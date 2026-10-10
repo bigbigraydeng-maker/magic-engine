@@ -197,29 +197,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     messages = (msgs ?? []) as typeof messages
   }
 
-  // AI 摘要卡（意向等级 + 一句话 + 下一步）。拿不到就不显示 —— 卡片是辅助信息，
-  // 不能因为它读失败让整条时间线打不开。多段对话取最新生成的一张。
-  let brief: { intentLevel: string; summary: string; nextAction: string | null } | null = null
-  if (convIds.length > 0) {
-    try {
-      const { data: b } = await supabaseAdmin
-        .from('conversation_briefs')
-        .select('intent_level, summary, next_action')
-        .in('conversation_id', convIds)
-        .order('generated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (b && typeof b.summary === 'string' && b.summary.trim()) {
-        brief = {
-          intentLevel: String(b.intent_level ?? 'unknown'),
-          summary: b.summary.trim(),
-          nextAction: typeof b.next_action === 'string' && b.next_action.trim() ? b.next_action.trim() : null,
-        }
-      }
-    } catch {
-      brief = null
-    }
-  }
+  // AI 摘要（意向 / 下一步）不再从这里出：2026-10-10 起由列表接口统一算进「该做什么」
+  // （lib/crm/brief-lookup → next-action），抽屉顶部那张卡吃的是列表行。这里再查一次是死查询。
 
   const stageLabel = new Map<string, string>()
   for (const s of (stageRows ?? []) as { stage_key: string; label: string }[]) {
@@ -327,6 +306,5 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     },
     timeline: entries,
     omittedMessages,
-    brief,
   })
 }
