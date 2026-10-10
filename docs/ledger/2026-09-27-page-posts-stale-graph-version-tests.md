@@ -1,7 +1,7 @@
 ---
 id: 2026-09-27-page-posts-stale-graph-version-tests
 title: Facebook 主页发帖那组测试主干上挂 4 条——是测试写死了旧版本号，不是发帖代码坏了；改成跟共享版本号走，并加一条防回归测试
-status: done
+status: verified
 owner: agent
 decided_on: 2026-09-27
 source: session:f53eddca
@@ -10,6 +10,8 @@ verify_how: 合并后在主干跑 `npx vitest run src/lib/meta/__tests__/page-po
 done_on: 2026-09-27
 done_ref: pr:2115
 last_checked: 2026-10-10
+check_note: 主干实测 57 条全过
+verified_ref: doc:docs/ledger/evidence/2026-09-27-page-posts-stale-graph-version-tests--2026-10-10.md
 ---
 根因：PR 1942 把 Meta 模块统一改用共享 GRAPH_BASE（v20.0 → v21.0），这两份测试还写死 v20.0。生产发帖路径只有版本号变了。
 只改测试文件，生产行为 0 改动（B 级）。新回归测试做过变异验证：page-posts 若再私自写死版本号，它会按名字变红。
