@@ -42,24 +42,34 @@ export const connB = (): TelephonyConnection => ({
 export const CUSTOMER = '0210000001'
 export const CUSTOMER_E164 = '+64210000001'
 
+/** 真实样例形状（VoIPLine 后台官方示例）：caller_id=来电号码；user_number=员工分机；conversation_duration=通话时长。 */
 export const ev = (type: string, over: Record<string, unknown> = {}) => ({
   type,
   unique_call_id: 'call-1',
   call_start_at: '2026-10-12T01:00:00.000Z',
-  user_extension: '101',
+  user_number: '101',
+  user_name: 'Staff',
+  dest_number: '0900000000',
   ...over,
 })
 
-export const inboundStart = (o: Record<string, unknown> = {}) => ev('user_inbound_call', { user_number: CUSTOMER, user_name: 'Test Caller', ...o })
-export const inboundAnswered = (o: Record<string, unknown> = {}) => ev('user_inbound_call_answered', { user_number: CUSTOMER, ...o })
-export const inboundEnded = (o: Record<string, unknown> = {}) => ev('user_inbound_call_completion', { user_number: CUSTOMER, duration: 95, answered: true, ...o })
-export const outboundStart = (o: Record<string, unknown> = {}) => ev('user_outbound_call', { dest_number: CUSTOMER, ...o })
-export const outboundAnswered = (o: Record<string, unknown> = {}) => ev('user_outbound_call_answered', { dest_number: CUSTOMER, ...o })
-export const outboundEnded = (o: Record<string, unknown> = {}) => ev('user_outbound_call_completion', { dest_number: CUSTOMER, duration: 0, answered: false, ...o })
-export const outboundRecording = (o: Record<string, unknown> = {}) =>
-  ev('outbound_call_recording', { dest_number: CUSTOMER, recording_id: 'rec-1', recording_url: 'https://recordings.example.test/rec-1', ...o })
-export const inboundRecording = (o: Record<string, unknown> = {}) =>
-  ev('inbound_call_recording', { user_number: CUSTOMER, recording_id: 'rec-2', recording_url: 'https://recordings.example.test/rec-2', ...o })
+const CONNECTED = '2026-10-12T01:00:05.000Z'
+export const inboundStart = (o: Record<string, unknown> = {}) => ev('user_inbound', { caller_id: CUSTOMER, caller_name: 'Test Caller', ...o })
+export const inboundAnswered = (o: Record<string, unknown> = {}) => ev('user_inbound_answered', { caller_id: CUSTOMER, connected_at: CONNECTED, ...o })
+export const inboundEnded = (o: Record<string, unknown> = {}) =>
+  ev('user_inbound_completed', { caller_id: CUSTOMER, connected_at: CONNECTED, call_duration: 100, conversation_duration: 95, ...o })
+export const outboundStart = (o: Record<string, unknown> = {}) => ev('user_outbound', { caller_id: '0900000000', dest_number: CUSTOMER, ...o })
+export const outboundAnswered = (o: Record<string, unknown> = {}) => ev('user_outbound_answered', { dest_number: CUSTOMER, connected_at: CONNECTED, ...o })
+export const outboundEnded = (o: Record<string, unknown> = {}) =>
+  ev('user_outbound_completed', { dest_number: CUSTOMER, connected_at: null, call_duration: 20, conversation_duration: 0, ...o })
+export const outboundRecording = (o: Record<string, unknown> = {}) => ({
+  type: 'recording_outbound', unique_call_id: 'call-1', caller_id: '0900000000', dest_number: CUSTOMER,
+  recorded_at: '2026-10-12T01:10:00.000Z', call_recording_link: 'https://recordings.example.test/rec-1', ...o,
+})
+export const inboundRecording = (o: Record<string, unknown> = {}) => ({
+  type: 'recording_inbound', unique_call_id: 'call-1', caller_id: CUSTOMER, dest_number: '0900000000',
+  recorded_at: '2026-10-12T01:10:00.000Z', call_recording_link: 'https://recordings.example.test/rec-2', ...o,
+})
 
 export function harness(conns = [connA(), connB()]) {
   const mem = createMemoryStore(conns)

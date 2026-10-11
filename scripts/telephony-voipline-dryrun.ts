@@ -41,7 +41,7 @@ async function main() {
 
   h = harness(); h.mem.addContact(CLIENT_A, CUSTOMER_E164)
   codes.length = 0
-  for (const e of [outboundStart(), outboundAnswered(), outboundEnded({ duration: 240, answered: true }), outboundRecording()]) codes.push((await h.send(e)).status)
+  for (const e of [outboundStart(), outboundAnswered(), outboundEnded({ connected_at: '2026-10-12T01:00:05.000Z', call_duration: 250, conversation_duration: 240 }), outboundRecording()]) codes.push((await h.send(e)).status)
   await h.drain()
   line('3 出站接通有录音', codes.join('/'), summ(h))
 

@@ -1,11 +1,12 @@
 /**
  * VoIPLine webhook 事件 → 我们自己说法的「通话事件」。
  *
- * 🔴 **字段名未经真实样本核对。** VoIPLine 知识库页面只把「呼入/呼出的开始、接通、
- * 结束、录音完成」的 JSON 样例放成图片，文字里只有 `webhook_component_event` 一种
- * 的字段名（unique_call_id / user_name / user_number / dest_number / call_start_at）。
- * 所以下面每个字段都按「一串可能的名字」去读，读不到就当没有，**绝不猜**。
- * 拿到 CTS 门户里的真实样本后，只改这个文件的别名表和对应测试，其余层不用动。
+ * 字段名依据：VoIPLine 客户后台 Integrations → Webhooks 页面里官方给的事件样例（2026-10-12 读取，
+ * 已核对：user_inbound / _answered / _completed、user_outbound_completed、recording_inbound）。
+ * 关键事实：`caller_id` 是**来电号码**，`user_number` 是**员工分机号**（不是客人号码），`user_name` 是员工名；
+ * `call_duration` 是**含响铃的总时长**，真正的通话时长是 `conversation_duration`；`connected_at` 为空 = 没接通。
+ * 仍未读到官方样例的：`user_outbound`、`user_outbound_answered`、`outbound_call_recording`（按同族字段推断，
+ * 外呼客人号码取 `dest_number`——**待真实外呼事件核对**）。读不到的字段当没有，绝不猜。
  *
  * 这个文件不碰数据库、不碰网络。
  */
@@ -56,16 +57,17 @@ const ALIASES = {
   callId: ['unique_call_id', 'call_id', 'uniqueid', 'unique_id'],
   type: ['type', 'event', 'event_type', 'event_name'],
   direction: ['direction', 'call_type', 'call_direction'],
-  time: ['call_start_at', 'timestamp', 'started_at', 'date', 'time', 'call_time'],
-  caller: ['user_number', 'caller_number', 'caller_id', 'from', 'cli', 'source_number'],
+  time: ['call_start_at', 'recorded_at', 'timestamp', 'started_at'],
+  caller: ['caller_id', 'caller_number', 'from', 'cli', 'source_number'],
   callee: ['dest_number', 'destination_number', 'destination', 'to', 'called_number'],
-  name: ['user_name', 'caller_name', 'cnam'],
-  extension: ['user_extension', 'extension', 'ext', 'agent_extension'],
-  extensionName: ['extension_name', 'agent_name', 'staff_name'],
-  duration: ['duration', 'talk_time', 'talk_duration', 'billsec', 'call_duration'],
+  name: ['caller_name', 'cnam'],
+  extension: ['user_number', 'user_extension', 'extension', 'ext'],
+  extensionName: ['user_name', 'extension_name', 'agent_name'],
+  // 只认「通话时长」；call_duration（含响铃）刻意不在这里。
+  duration: ['conversation_duration', 'talk_time', 'talk_duration', 'billsec'],
   answered: ['answered', 'is_answered'],
   recordingId: ['recording_id', 'recording_uuid'],
-  recordingUrl: ['recording_url', 'recording_link'],
+  recordingUrl: ['call_recording_link', 'recording_url', 'recording_link'],
 } as const
 
 function pick(obj: Record<string, unknown>, keys: readonly string[]): unknown {
@@ -165,7 +167,11 @@ export function parseVoiplineEvent(payload: unknown): ParseResult {
       counterpartyName: direction === 'inbound' ? str(pick(o, ALIASES.name)) : null,
       extension: str(pick(o, ALIASES.extension)),
       extensionName: str(pick(o, ALIASES.extensionName)),
-      answered: noAnswerType ? false : bool(pick(o, ALIASES.answered)),
+      // 接通判断：事件名说没接 → false；有明确 answered 标志用标志；
+      // 带 connected_at 字段的事件（answered / completed）：有值 = 接通，空 = 没接通。
+      answered: noAnswerType
+        ? false
+        : (bool(pick(o, ALIASES.answered)) ?? ('connected_at' in o ? Boolean(o.connected_at) : null)),
       talkSeconds: secs(pick(o, ALIASES.duration)),
       recordingId: str(pick(o, ALIASES.recordingId)),
       recordingUrl: str(pick(o, ALIASES.recordingUrl)),

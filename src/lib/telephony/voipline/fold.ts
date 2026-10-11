@@ -106,7 +106,8 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
 
     if (e.eventType === 'recording_ready' && (e.recordingId || e.recordingUrl)) {
       // 迟到 / 重发的录音：后到的覆盖前面的（同一通通常只有一条录音）。
-      recording = { ref: e.recordingId ?? `raw:${rawEventId}`, rawEventId }
+      recording = { // 官方录音事件没有录音编号：用通话编号当稳定引用（一通电话一条录音），不依赖事件到达顺序。
+      ref: e.recordingId ?? `call:${e.callId}`, rawEventId }
     }
   }
 

@@ -13,7 +13,7 @@
 | 员工人数、每人分机号、每人用话机/Webphone/手机 App | 分机 → 员工邮箱对照表要靠它 | |
 | 每个分机对应的员工登录邮箱（ME 里的登录邮箱） | 触点要记「是谁打的」 | |
 | 套餐里是否含 Integration/API 许可证、费用 | 官方说集成有许可证，CTS 账号权限未核实 | |
-| 门户里 webhook 事件的**真实样例 JSON**（每种事件各一条，已打码） | 我们的字段名是按别名表读的，**未经真实样本核对**，拿到后才能定稿 | |
+| ~~门户里 webhook 事件的真实样例~~ | **已部分核对（2026-10-12 读 VoIPLine 后台官方示例）**：入站开始/接通/完成、出站完成、入站录音已按官方字段实现；**出站开始、出站接通、出站录音的示例还没读到**，外呼客人号码目前按 `dest_number` 推断，要用真实外呼事件核对 | |
 
 ## 0.5 VoIPLine 官方回复里与本方案相关的几点（2026-10-06 邮件，统筹转述，未自行核对）
 - **账号归属要以 CTS 门户实际为准**：回复来自 voipline.co.nz 一侧，而本方案引用的 API/Webhook 文档在 voipline.net.au。哪个站点的字段和许可证适用于 CTS，拿到门户后再定。
@@ -25,6 +25,12 @@
 
 1. PM 回「同意」后，才对生产库应用新增的 4 张表和私有录音桶（迁移文件 `20261012000000_telephony_voipline_ingest.sql`，先预检再应用）。
 2. 为 CTS 生成一条「连接」：运行 `npx tsx scripts/telephony-voipline-connect.ts`（会在屏幕上**只显示一次**令牌，库里只存它的哈希），得到 **接收地址** `https://app.magicengine.com.au/api/webhooks/voipline/<连接编号>`。令牌用你们的密码管理器保存，不要贴进聊天或文档。
+
+## 1.5 2026-10-12 实际勘察结果（只读，没改任何设置）
+- 在 Chrome 里能登录的是 `au.voipcloud.online` 的账号，账号名 **Dixon Homes**（不是 CTS），预付费、1 个号码、1 个通道；PM 回复「Dixon Homes 就是要用的账号」。
+- **Integrations（集成）许可证状态：未开通（Integrations disabled）。** Webhooks 页面明说：没有这个许可证，webhook 端点可以建、触发项可以选，但**不会真的发**。开通许可证是付费项，价格未读，**需 PM 同意后才开通**。
+- Webhooks 页面真实字段：见 `src/lib/telephony/voipline/events.ts` 头部注释。要点：`caller_id`=来电号码；`user_number`=员工分机；`conversation_duration`=通话时长（`call_duration` 含响铃）；`connected_at` 为空=没接通；录音事件 `recording_inbound` 带 `call_recording_link`、`recorded_at`，**没有录音编号**。
+- 端点表单有：URL、Secret token、Default agent（可选）。令牌需要人在表单里粘贴一次（开发窗口规则不允许往输入框里填令牌）。
 
 ## 2. VoIPLine 门户里（Integration/API → Webhooks）
 
