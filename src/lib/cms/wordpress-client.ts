@@ -22,6 +22,7 @@
  */
 
 import { validateWordpressSiteUrl } from './url-guard'
+import { identityFromSlug, identityFromUrl, mergeIdentities, type PageIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
 import { assertPublicHost } from './ssrf-guard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -764,9 +765,27 @@ export interface UpdateExistingWordpressPostResult {
  * Does NOT change the post status (publish/draft/private stays as-is). Callers
  * that need a status change must use the existing publish/delete helpers.
  */
+/**
+ * Identity of the WP page being written: the CURRENT slug and link read back from WP, plus the new slug when
+ * the caller renames it (a rename into or out of a protected slug is gated either way). A `?p=ID` style
+ * permalink has path '/', which must not be mistaken for the home page when a real slug is known.
+ */
+function wordpressWriteIdentity(current: ExistingWordpressPost, newSlug: string | undefined): PageIdentity {
+  const parts: PageIdentity[] = []
+  if (current.slug) parts.push(identityFromSlug(current.slug))
+  if (newSlug) parts.push(identityFromSlug(newSlug))
+  if (current.link) {
+    const linkIdentity = identityFromUrl(current.link)
+    const isRootOnly = linkIdentity.paths.length === 1 && linkIdentity.paths[0].value === '/'
+    if (!(isRootOnly && current.slug)) parts.push(linkIdentity)
+  }
+  return parts.length === 0 ? identityFromUrl('') : mergeIdentities(...parts)
+}
+
 export async function updateExistingWordpressPost(
   config: WordpressClientConfig,
   input:  UpdateExistingWordpressPostInput,
+  guard:  PageWriteGuard,
 ): Promise<UpdateExistingWordpressPostResult> {
   if (!Number.isInteger(input.postId) || input.postId <= 0) {
     throw new WordpressFetchError(
@@ -797,6 +816,10 @@ export async function updateExistingWordpressPost(
       'HTTP_ERROR',
     )
   }
+
+  // Protected-page gate: read the live post back (this function does not trust the caller's idea of which page it is).
+  const current = await getExistingWordpressPost(config, input.postId, postType)
+  await guard.assert(wordpressWriteIdentity(current, input.slug), { targetType: postType })
 
   const path = `/${postType}s/${input.postId}`
   const res  = await wpFetch(config, path, {

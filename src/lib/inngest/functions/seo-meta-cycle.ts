@@ -30,6 +30,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
 import { createCtsRepoApplyAdapter } from '@/lib/seo-meta/cycle/apply-adapter'
+import { createPageWriteGuard, SYSTEM_ACTOR } from '@/lib/seo/protected-pages'
 import { generateMetaCycleTitle } from '@/lib/seo-meta/cycle/ai-meta'
 import {
   META_CYCLE_CRON,
@@ -124,7 +125,7 @@ export async function buildAdapterForClient(clientId: string): Promise<{ adapter
     repoName: conn.repoName,
     defaultBranch: conn.branch || 'main',
     dataDir: 'src/lib/data',
-  })
+  }, createPageWriteGuard({ supabase: supabaseAdmin, clientId, actor: SYSTEM_ACTOR, route: 'seo-meta-cycle' }))
   return { adapter }
 }
 

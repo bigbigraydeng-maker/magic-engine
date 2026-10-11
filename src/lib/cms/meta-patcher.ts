@@ -22,7 +22,7 @@
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export type PatchResult =
-  | { ok: true;  content: string }
+  | { ok: true;  content: string; anchorCount: number }
   | { ok: false; reason: string }
 
 // ─── patchMetaField ──────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ export function patchMetaField(
   )
 
   const updatedSource = source.slice(0, windowStart) + updatedWindow + source.slice(windowEnd)
-  return { ok: true, content: updatedSource }
+  return { ok: true, content: updatedSource, anchorCount: countSlugAnchors(source, slug) }
 }
 
 // ─── Private helpers ─────────────────────────────────────────────────────────
@@ -97,6 +97,17 @@ function findSlugPosition(source: string, slug: string): number {
   const re = new RegExp(`slug\\s*:\\s*(['"])${escapedSlug}\\1`)
   const m  = re.exec(source)
   return m ? m.index : -1
+}
+
+/**
+ * How many times `slug: '<target>'` appears in the file. More than one means the
+ * text-window patch may have landed in a different entry than the caller meant
+ * (e.g. the slug is also referenced from another entry) — callers that gate on
+ * "which page is being edited" must treat that as ambiguous.
+ */
+function countSlugAnchors(source: string, slug: string): number {
+  const re = new RegExp(`slug\\s*:\\s*(['"])${escapeRegex(slug)}\\1`, 'g')
+  return (source.match(re) ?? []).length
 }
 
 /**

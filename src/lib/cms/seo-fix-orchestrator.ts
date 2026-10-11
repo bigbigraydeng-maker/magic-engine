@@ -25,6 +25,7 @@ import { patchMetaField }             from './meta-patcher'
 import { ME_BRANCH_PREFIX, CMS_ACTION_TYPE } from './vocabulary'
 import type { CmsSeoFixPayload } from './vocabulary'
 import { supabaseAdmin } from '../supabase'
+import { identityFromSlug, unresolvedIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,8 @@ export interface SeoFixInput {
   executionItemId?:   string
   productionPackageId?: string
   fix:                CmsSeoFixPayload
+  /** Protected-page gate. The page identity is computed in here from the real patch target, not supplied by the caller. */
+  guard:              PageWriteGuard
 }
 
 export type SeoFixResult =
@@ -61,7 +64,7 @@ export type SeoFixErrorCode =
 // ─── orchestrateSeoFix ────────────────────────────────────────────────────────
 
 export async function orchestrateSeoFix(input: SeoFixInput): Promise<SeoFixResult> {
-  const { clientId, executionItemId, productionPackageId, fix } = input
+  const { clientId, executionItemId, productionPackageId, fix, guard } = input
 
   // ── Step 1: Load connection (includes decrypted PAT) ───────────────────────
   let conn: Awaited<ReturnType<typeof getConnection>>
@@ -110,6 +113,14 @@ export async function orchestrateSeoFix(input: SeoFixInput): Promise<SeoFixResul
   if (!patchResult.ok) {
     return { ok: false, reason: patchResult.reason, code: 'PATCH_ERROR' }
   }
+
+  // ── Step 3b: Protected-page gate ──────────────────────────────────────────
+  // The patch window is text-based: if the slug appears more than once in the file the edit may have
+  // landed in another entry, so the target page is ambiguous and the gate treats it as unknown.
+  await guard.assert(
+    patchResult.anchorCount > 1 ? unresolvedIdentity('ambiguous_slug_anchor') : identityFromSlug(fix.slug),
+    { targetType: 'data_file_entry' },
+  )
 
   // ── Step 4: Create feature branch ─────────────────────────────────────────
   const shortId    = randomBytes(4).toString('hex')

@@ -39,6 +39,7 @@
 import type { GithubClient } from '@/lib/cms/github-client'
 import { scrubString } from '@/lib/mcp/vendor-filter'
 import { buildSlugIndex, replaceMetaForSlug } from '@/lib/seo-meta/cts-meta-pr'
+import { identityFromSlug, identityFromUrl, mergeIdentities, ProtectedPageError, type PageWriteGuard } from '@/lib/seo/protected-pages'
 import { resolvePrGuard } from './pr-guard'
 import type { ApplyAdapter, ApplyAdapterResult, MetaCycleGateEvidence } from './types'
 
@@ -86,7 +87,7 @@ function buildPrBody(slug: string, keyword: string, oldTitle: string, newTitle: 
  * first apply call) and reuses it for every candidate processed in this
  * client's cycle run, instead of re-scanning the repo per candidate.
  */
-export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoConnection): ApplyAdapter {
+export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoConnection, pageGuard: PageWriteGuard): ApplyAdapter {
   const fileCache = new Map<string, FileCacheEntry>()
   let slugIndex: Map<string, string> | null = null
 
@@ -189,6 +190,20 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         return { applied: false, newTitle, newDesc, oldTitle: replaced.oldTitle, oldDesc: replaced.oldDesc, skipReason: 'dry_run' }
       }
 
+      // Protected-page gate: fresh read of the list right before the in-memory edit that will be committed.
+      const identity = mergeIdentities(
+        identityFromSlug(candidate.slug),
+        ...(candidate.pageUrl ? [identityFromUrl(candidate.pageUrl)] : []),
+      )
+      try {
+        await pageGuard.assert(identity, { targetType: 'data_file_entry' })
+      } catch (err) {
+        if (err instanceof ProtectedPageError) {
+          return { applied: false, newTitle, newDesc, oldTitle: replaced.oldTitle, oldDesc: replaced.oldDesc, skipReason: 'protected_page_blocked' }
+        }
+        throw err
+      }
+
       entry.source = replaced.updated
 
       const commit = await commitAndOpenPr(
@@ -201,6 +216,19 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
       )
       if (!commit.ok) return commit.result
 
+      // The list may have changed between the PR being opened and now: re-check before the auto-merge.
+      try {
+        await pageGuard.assert(identity, { targetType: 'data_file_entry_merge' })
+      } catch (err) {
+        if (err instanceof ProtectedPageError) {
+          return {
+            prUrl: commit.prUrl, prNumber: commit.prNumber, branch: commit.branch,
+            newTitle, newDesc, oldTitle: replaced.oldTitle, oldDesc: replaced.oldDesc,
+            applied: false, skipReason: 'protected_page_blocked_before_merge',
+          }
+        }
+        throw err
+      }
       const merged = await github.mergePullRequest(conn.repoOwner, conn.repoName, commit.prNumber).catch(() => false)
       const base = {
         prUrl: commit.prUrl,
