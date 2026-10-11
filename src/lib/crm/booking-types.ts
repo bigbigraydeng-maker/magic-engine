@@ -38,7 +38,7 @@ export type StoreResult<T> = { ok: true; value: T } | { ok: false; kind: StoreEr
 export type BookingWarningCode =
   | 'departure_changed' | 'departure_missing' | 'departure_cancelled' | 'departure_not_set'
   | 'holiday_table_missing' | 'tour_length_mismatch' | 'cruise_not_ticked' | 'override_stale'
-  | 'tour_missing' | 'due_unavailable' | 'pay_in_full'
+  | 'lead_cruise_note' | 'tour_missing' | 'due_unavailable' | 'pay_in_full'
 export interface BookingWarning {
   code: BookingWarningCode
   text: string                 // plain Chinese for the PM / staff

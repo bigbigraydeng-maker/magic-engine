@@ -36,7 +36,7 @@ export function nudgeRelative(dueInDays: number | null): string {
 
 /** Summarise one payment item's state in plain Chinese. */
 export function milestoneStatusText(m: MilestoneView): string {
-  if (m.state === 'paid') return `已收到款 ${shortDate(m.paidOn)}`
+  if (m.state === 'paid') return `已收到款 ${m.paidOn ?? '（未定）'}`
   if (m.dueOn !== null) return `未收到 · 到期 ${m.dueOn}（${dueRelative(m.dueInDays)}）`
   return `未收到 · ${m.dueNote ?? '到期日还没算出来'}`
 }

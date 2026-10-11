@@ -331,6 +331,28 @@ function catalogWarnings(
   return out
 }
 
+/** The one plain-words line saying which balance lead applies and why. */
+function leadNote(
+  input: BookingViewInput,
+  dates: DueDates | null,
+): BookingWarning | null {
+  const { rule } = input
+  if (input.item.booking.isCruise) {
+    const n = dates ? dates.leadDays : rule.balanceLeadDays.longOrCruise
+    return warn('lead_cruise_note', `尾款按出发前 ${n} 天算（邮轮）`, false, null)
+  }
+  const n = dates ? dates.leadDays : rule.balanceLeadDays.standard
+  if (dates !== null && dates.tier === 'long_or_cruise') {
+    return warn(
+      'cruise_not_ticked',
+      `尾款按出发前 ${n} 天算（团期 ${rule.longTourMinDays} 天以上）`,
+      false,
+      null,
+    )
+  }
+  return warn('cruise_not_ticked', `尾款按出发前 ${n} 天算（没勾邮轮）`, false, null)
+}
+
 /** Warnings about the computed dates and the tour length. */
 function dateWarnings(
   input: BookingViewInput,
@@ -340,10 +362,8 @@ function dateWarnings(
   if (dates !== null && dates.durationMismatch) {
     out.push(warn('tour_length_mismatch', '团天数对不上，请核对', false, null))
   }
-  if (!input.item.booking.isCruise) {
-    const n = dates ? dates.leadDays : input.rule.balanceLeadDays.standard
-    out.push(warn('cruise_not_ticked', `未勾邮轮按 ${n} 天算`, false, null))
-  }
+  const lead = leadNote(input, dates)
+  if (lead !== null) out.push(lead)
   if (dates !== null && dates.mode === 'full_payment') {
     out.push(
       warn('pay_in_full', '这单离出发太近，需一次付清', false, null),

@@ -395,7 +395,7 @@ describe('booking-format', () => {
       state: 'paid',
       paidOn: '2026-10-08',
     })
-    expect(milestoneStatusText(paid)).toBe('已收到款 10月08日')
+    expect(milestoneStatusText(paid)).toBe('已收到款 2026-10-08')
 
     const unpaidWithDue = makeMilestone('balance', {
       state: 'unpaid',

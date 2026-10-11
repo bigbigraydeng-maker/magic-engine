@@ -39,7 +39,7 @@ type Panel = 'none' | 'edit' | 'cancel'
 /** Booking-level warnings that belong above the payment items. */
 function topWarnings(warnings: BookingWarning[]): BookingWarning[] {
   return warnings.filter(
-    (w) => w.kind === null && w.code !== 'pay_in_full' && w.code !== 'cruise_not_ticked',
+    (w) => w.kind === null && w.code !== 'pay_in_full' && w.code !== 'cruise_not_ticked' && w.code !== 'lead_cruise_note',
   )
 }
 
@@ -102,7 +102,7 @@ export function BookingCard({
     ? `${CARD_CLASS} space-y-2 opacity-80 bg-me-ivory/60`
     : `${CARD_CLASS} space-y-2`
 
-  const cruiseWarning = booking.warnings.find((w) => w.code === 'cruise_not_ticked')
+  const cruiseWarning = booking.warnings.find((w) => w.code === 'cruise_not_ticked' || w.code === 'lead_cruise_note')
 
   return (
     <article data-testid="booking-card" aria-label={bookingTitle(booking)} className={cardClass}>

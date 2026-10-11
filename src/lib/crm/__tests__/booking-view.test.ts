@@ -147,13 +147,30 @@ describe('buildBookingView happy path', () => {
     expect(milestone(view, 'balance').dueOn).toBe('2026-12-12')
     expect(milestone(view, 'balance').dueInDays).toBe(61)
     expect(codes(view)).toEqual(['cruise_not_ticked'])
-    expect(view.warnings[0].text).toBe('未勾邮轮按 90 天算')
+    expect(view.warnings[0].text).toBe('尾款按出发前 90 天算（没勾邮轮）')
   })
 
   it('uses the cruise lead time when the cruise box is ticked', () => {
     const view = viewOf({ booking: { is_cruise: true } })
     expect(milestone(view, 'balance').dueOn).toBe('2026-11-12')
     expect(codes(view)).not.toContain('cruise_not_ticked')
+    expect(codes(view)).toContain('lead_cruise_note')
+    expect(view.warnings.find((w) => w.code === 'lead_cruise_note')?.text).toBe('尾款按出发前 120 天算（邮轮）')
+  })
+
+  it('says the long-tour reason, not the cruise box, when a 17-day tour uses the long lead', () => {
+    const view = viewOf({ departure: { returnOn: '2027-03-28' }, tour: { durationText: '17 Days' } })
+    expect(milestone(view, 'balance').dueOn).toBe('2026-11-12')
+    const note = view.warnings.find((w) => w.code === 'cruise_not_ticked')
+    expect(note?.text).toBe('尾款按出发前 120 天算（团期 16 天以上）')
+  })
+
+  it('takes the long-tour day count from the rule', () => {
+    const rule: TravelBookingRule = { ...TEST_RULE, longTourMinDays: 12 }
+    const view = viewOf({ rule })
+    expect(view.warnings.find((w) => w.code === 'cruise_not_ticked')?.text).toBe(
+      '尾款按出发前 120 天算（团期 12 天以上）',
+    )
   })
 
   it('reads the lead time from the rule, not a literal', () => {
@@ -162,7 +179,7 @@ describe('buildBookingView happy path', () => {
       balanceLeadDays: { standard: 60, longOrCruise: 100 },
     }
     const view = viewOf({ rule })
-    expect(view.warnings[0].text).toBe('未勾邮轮按 60 天算')
+    expect(view.warnings[0].text).toBe('尾款按出发前 60 天算（没勾邮轮）')
 
     const source = readFileSync(
       join(process.cwd(), 'src/lib/crm/booking-view.ts'),

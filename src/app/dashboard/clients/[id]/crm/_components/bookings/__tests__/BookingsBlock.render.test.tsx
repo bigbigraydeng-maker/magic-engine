@@ -135,7 +135,7 @@ describe('BookingsBlock card content', () => {
     expect(screen.getByText(/2027-03-12 出发/)).toBeInTheDocument()
 
     const deposit = screen.getByTestId('payment-deposit')
-    expect(within(deposit).getByText(/已收到款 10月08日/)).toBeInTheDocument()
+    expect(within(deposit).getByText(/已收到款 2026-10-08/)).toBeInTheDocument()
     expect(
       within(deposit).getByRole('button', { name: '撤销定金已收到款' }),
     ).toBeInTheDocument()
