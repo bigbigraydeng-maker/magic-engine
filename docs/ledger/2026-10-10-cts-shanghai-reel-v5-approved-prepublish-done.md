@@ -12,3 +12,4 @@ done_ref: doc:docs/clients/cts/2026-10-10-shanghai-reel-v5-15s-brief-and-selfche
 ---
 PM 2026-10-10 03:48 UTC 在后台对 fa4fdd89 点通过。发布前四件事（素材出处记录、当天重抓官网价格、首评过苏东坡、措辞）已补齐，见文档第九节。
 通过即授权发布：每小时第 5 分钟的发布任务会领走。没有起广告，没有联系客户。
+【2026-10-11 已公开】PM 亲口说「发这一条」后，用 Graph 接口把草稿 2309146606576700 改成公开（2026-10-11 04:35 UTC），补发首评（评论 id 2309146606576700_2565567933954188），工单 published_ref 已更新为 PUBLISHED。系统自带的 promoteReelToPublished 对已上传的草稿报错（code 6000 / subcode 1363130），本次改用 POST /{video_id} published=true 才成功；已另开卡修。
