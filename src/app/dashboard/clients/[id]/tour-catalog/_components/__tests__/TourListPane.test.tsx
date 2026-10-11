@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, within, cleanup } from '@testing-library/react'
 import { TourListPane } from '../TourListPane'
 import {
   compactPrice,
@@ -9,6 +9,9 @@ import {
   changeLine,
   draftChangeLine,
   groupChangesByTour,
+  groupToursByRegion,
+  regionTitle,
+  tierTitle,
 } from '../tour-list-helpers'
 import type { CatalogDepartureView, CatalogTourView } from '../types'
 import type { PublishChange } from '@/lib/tour-catalog/publish-contract'
@@ -90,7 +93,21 @@ function renderPane(overrides: Partial<Parameters<typeof TourListPane>[0]> = {})
   return { onSelect }
 }
 
+function installMemoryStorage(): void {
+  const store = new Map<string, string>()
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+    },
+  })
+}
+
 beforeEach(() => {
+  installMemoryStorage()
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
 })
@@ -103,9 +120,13 @@ afterEach(() => {
 describe('TourListPane', () => {
   it('renders group titles from the data', () => {
     renderPane()
-    expect(screen.getByRole('button', { name: /Atlantis Gold（2）/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Narnia（1）/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /New Zealand Budget（1）/ })).toBeInTheDocument()
+    // level 1: series (with counts), level 2: tier
+    expect(screen.getByRole('button', { name: '系列 Atlantis' })).toHaveTextContent('2 个团 · 2 个班期')
+    expect(screen.getByRole('button', { name: '系列 Narnia' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '系列 新西兰 New Zealand' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Gold（2）' })).toHaveTextContent('2 个班期')
+    expect(screen.getByRole('button', { name: '未分档（1）' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Budget（1）' })).toBeInTheDocument()
   })
 
   it('shows short names and hides the full name', () => {
@@ -169,10 +190,54 @@ describe('TourListPane', () => {
 
   it('collapses a group', () => {
     renderPane()
-    const header = screen.getByRole('button', { name: /Atlantis Gold（2）/ })
+    const header = screen.getByRole('button', { name: 'Gold（2）' })
     fireEvent.click(header)
     expect(header).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByTestId('tour-row-t1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('tour-row-t4')).toBeInTheDocument()
+  })
+
+  it('collapses a whole series and remembers it in this browser', () => {
+    renderPane()
+    fireEvent.click(screen.getByRole('button', { name: '系列 Atlantis' }))
+    expect(screen.queryByTestId('tour-row-t1')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Gold（2）' })).not.toBeInTheDocument()
+    expect(window.localStorage.getItem('tour-catalog:list-collapsed')).toContain('r:atlantis')
+    cleanup()
+    renderPane()
+    expect(screen.queryByTestId('tour-row-t1')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '系列 Atlantis' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('a search opens folded groups so hits are never hidden', () => {
+    renderPane()
+    fireEvent.click(screen.getByRole('button', { name: '系列 Atlantis' }))
+    fireEvent.change(screen.getByLabelText('按团名搜索'), { target: { value: 'coral' } })
+    expect(screen.getByTestId('tour-row-t1')).toBeInTheDocument()
+  })
+
+  it('search also matches the series name', () => {
+    renderPane()
+    fireEvent.change(screen.getByLabelText('按团名搜索'), { target: { value: '新西兰' } })
+    expect(screen.getAllByTestId(/^tour-row-/)).toHaveLength(1)
+  })
+})
+
+describe('tour-list-helpers hierarchy', () => {
+  it('groups series -> tier -> tours with counts', () => {
+    const regions = groupToursByRegion(TOURS, DEPARTURES)
+    expect(regions.map(r => r.title)).toEqual(['Atlantis', 'Narnia', '新西兰 New Zealand'])
+    expect(regions[0].tourCount).toBe(2)
+    expect(regions[0].departureCount).toBe(2)
+    expect(regions[0].tiers[0].title).toBe('Gold')
+    expect(regions[1].tiers[0].title).toBe('未分档')
+  })
+
+  it('regionTitle and tierTitle', () => {
+    expect(regionTitle('china')).toBe('中国 China')
+    expect(regionTitle('')).toBe('其他')
+    expect(tierTitle('')).toBe('未分档')
+    expect(tierTitle('Signature')).toBe('Signature')
   })
 })
 
