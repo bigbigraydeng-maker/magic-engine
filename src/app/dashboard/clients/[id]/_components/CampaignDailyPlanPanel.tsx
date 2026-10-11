@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 
 import { CampaignDailyPublishPanel, type PublishReceipt } from './CampaignDailyPublishPanel'
+import { VideoHandoffPanel } from './VideoHandoffPanel'
 import { CampaignDailyAutoPublishPanel } from './CampaignDailyAutoPublishPanel'
 import { POST_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemKey, type ContentCheckItemResult } from '@/lib/social/content-review'
 
@@ -596,7 +597,11 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
               </BundleCard>
 
               <BundleCard title="🎥 Reel（视频）">
-                <p className="text-xs text-me-charcoal/60">Reel 视频不在这里管理。</p>
+                {data?.plan_id && data.plan_revision && selectedDate && <VideoHandoffPanel
+                  key={`${clientId}:${campaignId}:${data.plan_id}:${data.plan_revision}:${selectedDate}`}
+                  clientId={clientId} campaignId={campaignId} planId={data.plan_id}
+                  revision={data.plan_revision} date={selectedDate} />}
+                <p className="text-xs text-me-charcoal/60">成片关联用于本日内容和广告候选；视频发布仍需单独审核与授权。</p>
                 <a href="?tab=reels" className="mt-1 inline-block text-xs text-me-ochre hover:underline">去「视频 Reels」页看成片 →</a>
               </BundleCard>
             </div>

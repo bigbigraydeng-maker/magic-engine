@@ -56,25 +56,30 @@ export async function POST(
   const config = await loadAdStrategyConfig(clientId)
   const entry = config.creative_pool.find(e => e.ref === parsed.ref)
   if (!entry) return NextResponse.json({ error: 'ref not in creative_pool' }, { status: 404 })
+  if (entry.kind === 'client_video') {
+    return NextResponse.json({ error: 'LIBRARY_VIDEO_REQUIRES_AD_PREPARATION' }, { status: 409 })
+  }
 
   if (entry.status === 'approved') {
     return NextResponse.json({ success: true, config, idempotent: true })
   }
 
   const nextPool: CreativePoolEntry[] = config.creative_pool.map(e =>
-    e.ref === parsed.ref
+    e.ref === parsed.ref && e.kind === entry.kind
       ? { ...e, status: 'approved', approved_by: approvedBy, approved_at: new Date().toISOString() }
       : e,
   )
 
-  const { error } = await supabaseAdmin
+  const { data: saved, error } = await supabaseAdmin
     .from('ad_strategy_configs')
-    .upsert(
-      { client_id: clientId, creative_pool: nextPool, updated_at: new Date().toISOString() },
-      { onConflict: 'client_id' },
-    )
+    .update({ creative_pool: nextPool, updated_at: new Date().toISOString() })
+    .eq('client_id', clientId)
+    .eq('creative_pool', JSON.stringify(config.creative_pool))
+    .select('client_id')
+    .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!saved) return NextResponse.json({ error: 'POOL_CHANGED_RELOAD' }, { status: 409 })
 
   return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId) })
 }

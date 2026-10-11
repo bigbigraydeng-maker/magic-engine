@@ -43,9 +43,9 @@ const PORTAL_MEMBER = 'owner@client.test'
 
 type Row = Record<string, unknown>
 
-function fakeTable(initial: Row[] = []) {
+function fakeTable(initial: Row[] = [], conflict = false) {
   const rows = new Map<string, Row>(initial.map(r => [String(r.client_id), r]))
-  const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
+  const write = vi.fn(async (row: Row, opts: { onConflict: string }) => {
     const key = String(row[opts.onConflict])
     rows.set(key, { ...(rows.get(key) ?? {}), ...row })
     return { error: null }
@@ -61,10 +61,24 @@ function fakeTable(initial: Row[] = []) {
           }),
         }),
       }),
-      upsert,
+      update: (patch: Row) => {
+        const filters: Array<[string, string]> = []
+        const query = {
+          eq: (field: string, value: string) => { filters.push([field, value]); return query },
+          select: () => query,
+          maybeSingle: async () => {
+            const matched = [...rows.values()].find(row => filters.every(([field, value]) =>
+              typeof row[field] === 'object' ? JSON.stringify(row[field]) === value : row[field] === value))
+            if (!matched || conflict) return { data: null, error: null }
+            await write({ ...patch, client_id: matched.client_id }, { onConflict: 'client_id' })
+            return { data: { client_id: matched.client_id }, error: null }
+          },
+        }
+        return query
+      },
     }
   }) as never)
-  return { rows, upsert }
+  return { rows, write }
 }
 
 function params() {
@@ -113,14 +127,14 @@ afterEach(() => {
 describe('creative-pool/approve — 内部员工批准', () => {
   it('POST { ref } → 200，approved_by 来自会话、approved_at 合法 ISO，其它条目原样保留', async () => {
     signedInAs(STAFF)
-    const { upsert } = fakeTable([seedRow()])
+    const { write } = fakeTable([seedRow()])
 
     const res = await POST(postRequest({ ref: 'v1' }), params())
     const json = await res.json()
 
     expect(res.status).toBe(200)
-    expect(upsert).toHaveBeenCalledTimes(1)
-    const [written] = upsert.mock.calls[0]
+    expect(write).toHaveBeenCalledTimes(1)
+    const [written] = write.mock.calls[0]
     const pool = written.creative_pool as Array<Record<string, unknown>>
     const v1 = pool.find(e => e.ref === 'v1')!
     expect(v1.status).toBe('approved')
@@ -134,58 +148,88 @@ describe('creative-pool/approve — 内部员工批准', () => {
 
   it('body 夹带 approved_by → 400 only ref is accepted，不写库', async () => {
     signedInAs(STAFF)
-    const { upsert } = fakeTable([seedRow()])
+    const { write } = fakeTable([seedRow()])
 
     const res = await POST(postRequest({ ref: 'v1', approved_by: 'attacker@x' }), params())
     const json = await res.json()
 
     expect(res.status).toBe(400)
     expect(json.error).toBe('only ref is accepted')
-    expect(upsert).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
   })
 
   it('ref 不在池里 → 404，不写库', async () => {
     signedInAs(STAFF)
-    const { upsert } = fakeTable([seedRow()])
+    const { write } = fakeTable([seedRow()])
 
     const res = await POST(postRequest({ ref: 'nope' }), params())
 
     expect(res.status).toBe(404)
-    expect(upsert).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
   })
 
   it('已批准的 ref → 200 且 idempotent，不写库', async () => {
     signedInAs(STAFF)
-    const { upsert } = fakeTable([seedRow()])
+    const { write } = fakeTable([seedRow()])
 
     const res = await POST(postRequest({ ref: 'wo-9' }), params())
     const json = await res.json()
 
     expect(res.status).toBe(200)
     expect(json.idempotent).toBe(true)
-    expect(upsert).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
   })
 })
 
 describe('creative-pool/approve — 非内部员工批不动', () => {
   it('付费客户门户成员 → 403，不写库', async () => {
     signedInAs(PORTAL_MEMBER)
-    const { upsert } = fakeTable([seedRow()])
+    const { write } = fakeTable([seedRow()])
 
     const res = await POST(postRequest({ ref: 'v1' }), params())
 
     expect(res.status).toBe(403)
-    expect(upsert).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
   })
 
   it('没登录 → 401，不写库', async () => {
     mockAccess.mockResolvedValue({ ok: true, user: { email: STAFF } as never } as never)
     mockSession.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized' })
-    const { upsert } = fakeTable([seedRow()])
+    const { write } = fakeTable([seedRow()])
 
     const res = await POST(postRequest({ ref: 'v1' }), params())
 
     expect(res.status).toBe(401)
-    expect(upsert).not.toHaveBeenCalled()
+    expect(write).not.toHaveBeenCalled()
   })
+})
+
+
+describe('candidate append / approval concurrency boundary', () => {
+  it('rejects a pool changed after the approval read', async () => {
+    signedInAs(STAFF)
+    const { write } = fakeTable([seedRow()], true)
+    expect((await POST(postRequest({ ref: 'v1' }), params())).status).toBe(409)
+    expect(write).not.toHaveBeenCalled()
+  })
+  it('never approves a client-library reference as an executable Meta video', async () => {
+    signedInAs(STAFF)
+    const { write } = fakeTable([{ ...seedRow(), creative_pool: [{ kind: 'client_video', ref: 'local-video', status: 'candidate' }] }])
+    expect((await POST(postRequest({ ref: 'local-video' }), params())).status).toBe(409)
+    expect(write).not.toHaveBeenCalled()
+  })
+})
+
+
+it('approves only the matching kind when two reference types share a ref', async () => {
+  signedInAs(STAFF)
+  const { write } = fakeTable([{ ...seedRow(), creative_pool: [
+    { kind: 'work_order', ref: 'shared-ref', status: 'candidate' },
+    { kind: 'client_video', ref: 'shared-ref', status: 'candidate' },
+  ] }])
+  expect((await POST(postRequest({ ref: 'shared-ref' }), params())).status).toBe(200)
+  expect(write.mock.calls[0][0].creative_pool).toEqual([
+    expect.objectContaining({ kind: 'work_order', status: 'approved' }),
+    { kind: 'client_video', ref: 'shared-ref', status: 'candidate' },
+  ])
 })

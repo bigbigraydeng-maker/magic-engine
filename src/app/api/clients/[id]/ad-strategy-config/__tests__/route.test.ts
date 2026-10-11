@@ -21,6 +21,7 @@ vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() })
 vi.mock('@/lib/auth/require-session', () => ({ requireSession: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/email/sender', () => ({ ME_MAIL_TO_ADDRESS: 'team@example.com' }))
+vi.mock('@/lib/ads-strategy/autonomy/notify', () => ({ notifyAutonomyModeChanged: vi.fn().mockResolvedValue({ sent: false, events: 0 }) }))
 
 import { GET, PATCH } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -292,5 +293,24 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
 
     expect(res.status).toBe(403)
     expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+
+describe('library video candidate context', () => {
+  it('rejects creating unverified library refs through the whole-pool PATCH', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([({ client_id: CLIENT, enabled: true, digest_recipients: [] })])
+    const res = await PATCH(patchRequest({ creative_pool: [{ kind: 'client_video', ref: 'fake-video', status: 'candidate' }] }), params())
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+  it('preserves the verified existing library candidate caption and campaign', async () => {
+    signedInAs(STAFF)
+    const entry = { kind: 'client_video', ref: 'library-1', status: 'candidate', title: 'Tour 2027', caption: 'Ask CTS', campaign_id: 'campaign-1' }
+    const { upsert } = fakeTable([{ ...({ client_id: CLIENT, enabled: true, digest_recipients: [] }), creative_pool: [entry] }])
+    const res = await PATCH(patchRequest({ creative_pool: [{ kind: 'client_video', ref: 'library-1', status: 'candidate' }] }), params())
+    expect(res.status).toBe(200)
+    expect(upsert.mock.calls[0][0].creative_pool).toEqual([entry])
   })
 })
