@@ -433,7 +433,7 @@ export class PagePublishError extends Error {
   }
 }
 
-function classifyPublishFailure(
+export function classifyPublishFailure(
   status: number,
   error: { code?: number } | undefined,
 ): PublishOutcomeCertainty {
