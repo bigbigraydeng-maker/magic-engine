@@ -4,7 +4,7 @@ title: 今日待办里同一个根因报了很多次的，折成一次，邮件�
 status: decided
 owner: agent
 decided_on: 2026-10-12
-source: pr:2488
+source: pr:2489
 verify_by: 2026-10-15
 verify_how: 看合并后发出的今日待办邮件，AI 可见度体检全挂了那几条不再出现在要你点一次的栏里（改在开发欠账计数里），同一客户的授权断了和私信同步失败只剩一条。
 ---
