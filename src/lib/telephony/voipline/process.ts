@@ -42,6 +42,7 @@ function receipt(stage: string, status: string, now: string, detail?: string): R
 
 function baseRow(conn: TelephonyConnection, folded: FoldedCall, prev: CallRow | null): CallRow {
   return {
+    provider: conn.provider,
     clientId: conn.clientId,
     connectionId: conn.id,
     providerCallId: folded.callId,
@@ -93,6 +94,7 @@ function touchpointInput(
 ): TouchpointInput {
   return {
     clientId: conn.clientId,
+    source: conn.provider,
     contactId,
     direction: planned.direction,
     occurredAt: planned.occurredAt,
@@ -170,6 +172,7 @@ async function writeCrm(
     row.matchStatus = 'matched'
   } else if (planned.customerInitiated) {
     contactId = await store.createContactForInboundCall({
+      source: conn.provider,
       clientId: conn.clientId,
       phoneE164: planned.phone,
       name: planned.name,
@@ -221,7 +224,7 @@ export async function processRawEvent(
       return null
     }
 
-    const prev = await store.getCall(conn.clientId, raw.callId)
+    const prev = await store.getCall(conn.clientId, conn.provider, raw.callId)
     const row = baseRow(conn, folded, prev)
 
     if (raw.event.eventType === 'other') {

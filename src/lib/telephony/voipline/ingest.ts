@@ -83,6 +83,7 @@ export async function handleVoiplineWebhook(store: TelephonyStore, input: Ingest
   let inserted: { inserted: boolean; id: string | null }
   try {
     inserted = await store.insertRawEvent({
+      provider: 'voipline',
       clientId: conn.clientId,
       connectionId: conn.id,
       callId: parsed.event.callId,

@@ -76,7 +76,7 @@ export function createMemoryStore(connections: TelephonyConnection[]) {
         .slice(0, limit)
     },
     async updateCallTouchpoint(t) {
-      const key = `${t.clientId}|voipline|${t.sourceRef}`
+      const key = `${t.clientId}|${t.source}|${t.sourceRef}`
       const cur = touchpoints.get(key)
       if (cur) touchpoints.set(key, { ...cur, ...t, id: cur.id })
     },
@@ -87,7 +87,8 @@ export function createMemoryStore(connections: TelephonyConnection[]) {
     async countExhaustedRaw(max) {
       return [...raw.values()].filter((r) => r.status === 'failed' && r.attempts >= max).length
     },
-    async getCall(clientId, callId) {
+    async getCall(clientId, provider, callId) {
+      void provider
       return calls.get(callKey(clientId, callId)) ?? null
     },
     async listStaleCalls(before, limit) {
@@ -110,7 +111,7 @@ export function createMemoryStore(connections: TelephonyConnection[]) {
         failures.touchpointWrites--
         throw new Error('写通话触点失败: simulated outage')
       }
-      const key = `${t.clientId}|voipline|${t.sourceRef}`
+      const key = `${t.clientId}|${t.source}|${t.sourceRef}`
       if (touchpoints.has(key)) return { touchpointId: touchpoints.get(key)!.id, created: false }
       const id = `tp-${++seq}`
       touchpoints.set(key, { ...t, id })

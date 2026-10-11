@@ -187,7 +187,7 @@ export function parseVoiplineEvent(payload: unknown): ParseResult {
  * 字节级相同的重发指纹相同，照样被挡掉。指纹直接对原始请求体取哈希（不做递归序列化，
  * 深层嵌套的载荷也不会炸栈）。各段用 JSON 数组拼接，避免通话编号里带冒号造成碰撞。
  */
-export function buildDedupeKey(account: string, event: NormalisedCallEvent, bodyText: string): string {
+export function buildDedupeKey(account: string, event: NormalisedCallEvent, bodyText: string, provider: string = VOIPLINE_PROVIDER): string {
   const fp = createHash('sha256').update(bodyText, 'utf8').digest('hex').slice(0, 16)
-  return JSON.stringify([VOIPLINE_PROVIDER, account, event.callId, event.rawType, fp])
+  return JSON.stringify([provider, account, event.callId, event.rawType, fp])
 }
