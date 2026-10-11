@@ -10,6 +10,7 @@ verify_how: 合并后在主干跑 `npx vitest run src/lib/meta/__tests__/page-po
 done_on: 2026-09-27
 done_ref: pr:2115
 last_checked: 2026-10-11
+check_note: 2026-10-11 夜巡环境未装依赖（无 node_modules），vitest 跑不起来，判据未能当晚实测；需在有依赖的环境跑 verify_how 两组测试后再翻 verified。
 ---
 根因：PR 1942 把 Meta 模块统一改用共享 GRAPH_BASE（v20.0 → v21.0），这两份测试还写死 v20.0。生产发帖路径只有版本号变了。
 只改测试文件，生产行为 0 改动（B 级）。新回归测试做过变异验证：page-posts 若再私自写死版本号，它会按名字变红。

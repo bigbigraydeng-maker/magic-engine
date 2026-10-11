@@ -10,6 +10,7 @@ verify_how: 查两件。①PM 是否在对话里明确同意试跑；②试跑�
 done_on: 2026-10-04
 done_ref: doc:docs/ledger/evidence/2026-10-04-me-messenger-ad-trial-run-awaiting-pm--stage-a.md
 last_checked: 2026-10-11
+check_note: 2026-10-11 夜巡到期复核未取得新证据，仅盖章；待下一晚按 verify_how 实查。
 ---
 会建 1 个系列、1 个广告组、1 个创意、1 条广告，全部暂停不花钱，回读后立刻删。
 阶段 A 用官方连接器验 Meta 接受这组参数；阶段 B 要带授权的服务器环境，本机拿不到，怎么拿到是未解决项。
