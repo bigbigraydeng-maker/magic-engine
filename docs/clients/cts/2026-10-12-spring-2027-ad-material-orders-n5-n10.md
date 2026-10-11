@@ -9,15 +9,15 @@
 | 项 | 内容 | **终版工单 / 文件** | 状态 |
 |---|---|---|---|
 | N5 | Best of China 第二条 15 秒 Reel「4 CITIES · 1 TRIP」（钩子与已发布的价格悬念不同） | 工单 **`f1f9c30a-f96a-416b-bc38-b8646a0314fb`** | `in_review` |
-| N6 | A Tale of Two Cities 第二条「10 天看北京和西安」（高铁钩子，兵马俑/长城/故宫；`f4b5d44f` 保留；**配乐 momentum.mp3**） | 工单 **`eed981dc-2186-41ab-8502-ca57adb864ad`**（r4） | `in_review` |
-| N7 | Shanghai & Surroundings 第二条「含什么」（机票 + 7 晚住宿 + 英语导游 + 13 餐逐项叠出；**配乐 jade_river_journey.mp3**） | 工单 **`3c4fa2a3-c347-4906-bdde-dd91bee681c4`**（r3） | `in_review` |
+| N6 | A Tale of Two Cities 第二条「10 天看北京和西安」（高铁钩子，兵马俑/长城/故宫；`f4b5d44f` 保留；**配乐 momentum_q.mp3，响度已对齐**） | 工单 **`c58a1ec6-efac-4647-b18e-40f714a365b9`**（r5） | `in_review` |
+| N7 | Shanghai & Surroundings 第二条「含什么」（机票 + 7 晚住宿 + 英语导游 + 13 餐逐项叠出；**配乐 jade_river_journey_q.mp3，响度已对齐**） | 工单 **`3eefd9ba-340d-4a1a-84ac-c9984335ad59`**（r4） | `in_review` |
 | N8 | 三个团各一张「行程亮点」图文，4:5 + 9:16 | `cards/highlights_{boc,tale,shanghai}_{4x5,9x16}.png`（6 张） | 已出 |
 | N9 | 暖热静图 3 张：Best of China、Natural China、Tale 另一版式（只放团名 + 出发月 + Flights included） | `cards/warm_boc_4x5.png`、`warm_nat_4x5.png`、`warm_tale_card_4x5.png` | 已出 |
 | N10 | 轻内容图文 1 组「3 things to know before you go」（封面 + 3 张） | `cards/tips_0_cover_4x5.png`、`tips_1_4x5.png`、`tips_2_4x5.png`、`tips_3_4x5.png` | 已出 |
 
 - `cards/` = `~/Dropbox/MagicLab_Studio/CTS/output/cards/`；成片 = `~/Dropbox/MagicLab_Studio/CTS/output/reels/`（`2026-10-11_boc2_f1f9c30a.mp4`、`..._tale2r3_afe7939f.mp4`、`..._sh2r2_f951018c.mp4`）。
 - 工单参数留档：[`2026-10-11-spring-2027-reel-orders/`](./2026-10-11-spring-2027-reel-orders/)（`BOC2-*`、`TALE2-*`、`SH2-*`）。
-- 旧版（已标 superseded，不要授权）：Tale2 r1 `45168a4e`、r2 `05c5896e`、r3 `afe7939f`（founders-at-dawn 配乐）；SH2 r1 `f4e12c12`、r2 `f951018c`（founders-at-dawn 配乐）。N5 `f1f9c30a` 保持 founders-at-dawn。
+- 旧版（已标 superseded，不要授权）：Tale2 r1 `45168a4e`、r2 `05c5896e`、r3 `afe7939f`（founders-at-dawn 配乐）、r4 `eed981dc`（momentum 未压低，-16.6 LUFS）；SH2 r1 `f4e12c12`、r2 `f951018c`（founders-at-dawn 配乐）、r3 `3c4fa2a3`（jade 未压低，-16.8 LUFS）。N5 `f1f9c30a` 保持 founders-at-dawn。
 - 素材出处：Dropbox `CTS/remotion-assets/clips/credits-v6.json`。
 
 ## 三条 Reel 的地名镜头清单（74 号要求）
@@ -96,3 +96,9 @@
 
 - N6 → `momentum.mp3`（40 秒曲，从 0 秒起），N7 → `jade_river_journey.mp3`（从 0 秒起），N5 仍 `founders-at-dawn.mp3`；都是 Dropbox 内音乐（PM 早定视为已授权）。**画面没动。** 配乐不再按节拍对齐（只有 founders-at-dawn 的节拍是量过的，所以这两条切点不一定踩在曲子拍点上）。
 - **马良音频窄复核：签字通过**——两条无削波（SH2 6–9 秒有 1 个采样点到 -1.7 dBFS，非整段平顶）、结尾收干净（最后 50 毫秒 -91 dB）、片里无人声、前 50 毫秒静音无硬切；整体响度 **-16.6（Tale）/ -16.8（SH2）LUFS，比 N5 的 -22.2 响约 5.5 LU**，同一批人连看会觉得突然变响。马良建议：①SH2 开头渐入拉到 ≥0.4 秒（现约 0.1 秒偏急）；②把 N5 配乐调到约 -17 LUFS 对齐，不要压低这两条。**这两点我没有做**（渐入与整体增益是模板/工厂的共享设置，要改要另开代码 PR，不在本卡范围）；请 74 号决定：接受响度差，还是给 N5 另配一首同响度的曲子重出。
+
+### 再追加：配乐音量对齐（74 号 10-12：不重做 N5 与 Tale f4b5d44f，把新两条压到 ≈ -22 LUFS）
+
+- **没有改共享模板**：在音乐文件层做——`music/momentum_q.mp3`＝momentum 衰减 5.5 dB + 0.5 秒渐入；`music/jade_river_journey_q.mp3`＝jade 衰减 5.8 dB + 0.6 秒渐入（Dropbox `CTS/remotion-assets/music/`，原曲不动），工单里 `musicFile` 指向新文件，画面没动。
+- 结果（成片整体响度）：Tale r5 **-22.1 LUFS**（峰 -11.4 dBFS），SH2 r4 **-22.8 LUFS**（峰 -7.5 dBFS）；N5 / f4b5d44f 为 -22.2。SH2 开头渐入约 0.5 秒。
+- **马良音频窄复核：签字通过**（各段相差 <4 dB，无削波，结尾干净；SH2 结尾 14.7 秒处还有 -29 dB、收得偏快但几乎听不出，不拦）。
