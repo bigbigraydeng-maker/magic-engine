@@ -9,7 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:2075
 verify_by: 2026-10-01
 verify_how: npm test -- scripts/auto-dev 全绿；§9 验收 1-6 实测通过；子牙+魏征+狄仁杰复审通过；PM 批准后 --admin 合并
-last_checked: 2026-10-09
+last_checked: 2026-10-11
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 R1 捡活+白名单、R2 七道硬闸、R3 刹车+维护、R4 沙箱+钩子+操作手册。

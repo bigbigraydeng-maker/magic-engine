@@ -9,7 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:2127
 verify_by: 2026-10-04
 verify_how: 重跑 `scripts/probe-crm-contacted-but-untouched.ts` 两个客户各一次。判成：「可以直接补跟」人数下降（说明真有人在打）。🔴 **NAL 那份要先看顶部有没有「少算警告」** —— 只要私信同步还没修通，那份名单就是残的，数字下降也说明不了什么
-last_checked: 2026-10-09
+last_checked: 2026-10-11
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 PM 2026-09-27 要 NAL 也来一份。做的时候发现照 CTS 那套判据跑，NAL 会返回 **0 人**，于是把判据放宽了。

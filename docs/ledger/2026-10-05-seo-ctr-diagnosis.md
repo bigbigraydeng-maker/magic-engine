@@ -10,6 +10,6 @@ verify_how: 周一自动运行后（10/5 04:30 UTC），CTS 看板里"加强页�
 done_on: 2026-10-05
 done_ref: pr:2232
 check_note: 线上只演练已当面跑通，见 evidence/2026-10-05-seo-weekly-list-live-dryrun；定时自动运行待首次运行后核对（2026-10-09 夜巡：本晚未取到新实证，原结论保留不变）
-last_checked: 2026-10-09
+last_checked: 2026-10-11
 ---
 设计：docs/specs/2026-10-04-seo-weekly-list-v0.2.md。只读谷歌搜索数据（免费），不改网站。点击率前后对比在 CTS 流量下判不了，只核对"页面真改了没"和排名。

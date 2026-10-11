@@ -9,7 +9,7 @@ done_on: 2026-09-28
 done_ref: pr:2165
 verify_by: 2026-10-05
 verify_how: "登录生产 ME，打开 CTS 或 NAL 的「全部客人」，点开任意一个人：能看到私信/邮件/WhatsApp 回复框、一键动作按钮；点「上一位/下一位」能正常切换、翻到下一页会自动打开新一页第一个人；两个人同时改同一个联系人的跟进阶段，后手那个应该看到「已经被别人改过」的提示而不是静默覆盖"
-last_checked: 2026-10-09
+last_checked: 2026-10-11
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 「全部客人」页原来点一行是就地展开一块简化的 ContactDetail（没有私信/邮件回复、没有一键动作），跟「今天要联系」页用的 PersonDrawer 抽屉是两份重复代码，各缺一半功能。这次统一换成 PersonDrawer，删除 ContactDetail.tsx，并加了「上一位/下一位」跨段/跨页导航。

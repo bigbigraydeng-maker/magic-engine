@@ -9,7 +9,7 @@ verify_by: 2026-10-01
 verify_how: ls ~/.claude/skills/grilling 存在且 settings 里没有放行 gh pr merge；或对应记忆文件已改为"未安装"
 done_on: 2026-09-25
 done_ref: pr:1989
-last_checked: 2026-10-09
+last_checked: 2026-10-11
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 审计发现 feedback-grill-before-building 声称装了 grilling 技能和 gh pr merge 拦截，
