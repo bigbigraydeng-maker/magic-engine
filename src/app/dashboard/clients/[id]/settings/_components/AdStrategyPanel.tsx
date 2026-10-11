@@ -45,20 +45,30 @@ export function AdStrategyPanel({ clientId }: Props) {
   const [saving, setSaving] = useState(false)
   const [banner, setBanner] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<boolean> => {
     setState({ phase: 'loading' })
     try {
       const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        const body: unknown = await res.json().catch(() => null)
+        const serverMessage =
+          typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string'
+            ? body.error
+            : `HTTP ${res.status}`
+        throw new Error(`加载失败:${serverMessage}`)
+      }
       const { config } = (await res.json()) as { config: Config }
       setState({ phase: 'ready', config })
       setRecipientsDraft(config.digest_recipients.join('\n'))
+      return true
     } catch (err) {
-      setState({ phase: 'error', message: err instanceof Error ? err.message : String(err) })
+      const raw = err instanceof Error ? err.message : String(err)
+      setState({ phase: 'error', message: raw.startsWith('加载失败:') ? raw : `加载失败:${raw}` })
+      return false
     }
   }, [clientId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { void load() }, [load])
 
   const save = async (patch: Partial<Config>, okText: string) => {
     setSaving(true)
@@ -77,6 +87,14 @@ export function AdStrategyPanel({ clientId }: Props) {
         return
       }
       const json = await res.json()
+      if (!res.ok && json.saved === true) {
+        // 已写库、只是回读失败：不能说「原来的设置还在」。重读一次——读到就显示真值，
+        // 读不到就停在读取失败（不给表单），并告诉人其实已经保存了。
+        const reloaded = await load()
+        if (reloaded) setBanner({ kind: 'ok', text: okText })
+        else setState({ phase: 'error', message: '设置已保存，但现在读不出来。请稍后点重试确认。' })
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
       setState({ phase: 'ready', config: json.config })
       setRecipientsDraft(json.config.digest_recipients.join('\n'))
@@ -114,7 +132,8 @@ export function AdStrategyPanel({ clientId }: Props) {
   if (state.phase === 'error') {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-        加载失败:{state.message}
+        {state.message}
+        <button type="button" onClick={() => { void load() }} className="ml-3 underline hover:no-underline">重试</button>
       </div>
     )
   }

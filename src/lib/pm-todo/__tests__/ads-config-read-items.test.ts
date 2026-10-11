@@ -84,6 +84,40 @@ describe('pushAdsConfigReadItems', () => {
     expect(items).toEqual([])
   })
 
+  it('🔴 体检加载器读设置失败（记在 ad_diagnostics / ads_growth_state 下）→ 也下发，同一客户两条只算一个', async () => {
+    const { client } = fakeLastRun({
+      finished_at: '2026-09-25T17:30:00Z',
+      summary: {
+        errors: [
+          { client_id: 'c1', source: 'ad_diagnostics', error: 'ad outcome config read failed: timeout' },
+          { client_id: 'c1', source: 'ads_growth_state', error: 'ad outcome config read failed: timeout' },
+          { client_id: 'c2', source: 'ad_diagnostics', error: 'ad_strategy_configs read failed: column "x" does not exist' },
+        ],
+      },
+    })
+    const items: ManualItem[] = []
+    await pushAdsConfigReadItems(client, items, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'ads_config_unreadable', client_id: 'infra' })
+    expect(items[0].what).toContain('2 个客户')
+    expect(items[0].what).toContain('timeout')
+  })
+
+  it('体检的其它报错（不是读设置失败）→ 不下发', async () => {
+    const { client } = fakeLastRun({
+      finished_at: '2026-09-25T17:30:00Z',
+      summary: {
+        errors: [
+          { client_id: 'c1', source: 'ad_diagnostics', error: 'ad_entity_snapshots query failed' },
+          { client_id: 'c1', source: 'ads_growth_state', error: 'no Meta token' },
+        ],
+      },
+    })
+    const items: ManualItem[] = []
+    await pushAdsConfigReadItems(client, items, NOW)
+    expect(items).toEqual([])
+  })
+
   it('只有别的报错 → 不下发', async () => {
     const { client } = fakeLastRun({
       finished_at: '2026-09-26T03:10:00Z',

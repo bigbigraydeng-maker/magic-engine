@@ -34,6 +34,7 @@ interface ConfigResponse {
   success?: boolean
   config?: AdStrategyConfig
   error?: string
+  saved?: boolean
 }
 
 // ─── Sub-components (each kept small and single-purpose) ──────────────────────
@@ -112,10 +113,12 @@ function CreativePoolList({
   clientId,
   entries,
   onApproved,
+  onSavedUnreadable,
 }: {
   clientId: string
   entries: CreativePoolEntry[]
   onApproved: (config: AdStrategyConfig) => void
+  onSavedUnreadable: () => Promise<void>
 }) {
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -130,6 +133,11 @@ function CreativePoolList({
         body: JSON.stringify({ ref }),
       })
       const json = (await res.json()) as ConfigResponse
+      if (json.saved === true && !json.config) {
+        // 已批准但服务端读不回素材池：让上层重读，不留着旧的「候选」状态。
+        await onSavedUnreadable()
+        return
+      }
       if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
       onApproved(json.config)
     } catch (err) {
@@ -187,14 +195,29 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
     setDraftMode(c.autonomy_mode)
   }
 
-  const load = async () => {
+  const load = async (): Promise<boolean> => {
     try {
       const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`)
       const json = (await res.json()) as ConfigResponse
       if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
       applyConfig(json.config)
+      return true
     } catch {
       setLoadError('读不到广告自治配置，稍后再试')
+      return false
+    }
+  }
+
+  // 服务端说「已写库但读不回」时，本地 config 已经是旧值：照旧显示会让下一次保存把差异算错
+  //（把模式改回原值会被判成「没有改动」而不发请求，服务器却还停在新值上）。重读一次；
+  // 读不到就只留提示、不给表单。
+  const reloadAfterUnreadableSave = async (okText: string) => {
+    const ok = await load()
+    if (ok) {
+      setDraftRefs('')
+      setMessage(okText)
+    } else {
+      setLoadError('设置已保存，但现在读不出来。请稍后刷新页面确认。')
     }
   }
 
@@ -249,6 +272,10 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
         body: JSON.stringify(body),
       })
       const json = (await res.json()) as ConfigResponse
+      if (json.saved === true && !json.config) {
+        await reloadAfterUnreadableSave('已保存')
+        return
+      }
       if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
 
       applyConfig(json.config)
@@ -284,7 +311,12 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
         <div>
           <span className="block text-sm font-medium text-gray-700">素材池</span>
           <div className="mt-1.5">
-            <CreativePoolList clientId={clientId} entries={config.creative_pool} onApproved={applyConfig} />
+            <CreativePoolList
+              clientId={clientId}
+              entries={config.creative_pool}
+              onApproved={applyConfig}
+              onSavedUnreadable={() => reloadAfterUnreadableSave('已批准')}
+            />
           </div>
           <textarea
             value={draftRefs}

@@ -12,7 +12,8 @@ import { fetchHourlyAdsetSpend, type GraphHourlySpendRow } from '@/lib/meta/enti
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { loadAdStrategyConfigWithSource, type AdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { EntitySnapshotRow } from '../snapshot'
-import { loadOutcomeConfig } from '../outcome-config'
+import { loadOutcomeConfig, type LoadedOutcomeConfig } from '../outcome-config'
+import { OUTCOME_CONFIG_READ_FAILED, STRATEGY_CONFIG_READ_FAILED, configReadFailedMessage } from './config-read-error'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
 import { d1NeedsHourly } from './d1-delivery-stall'
 import type { AccountInput, AudienceCountPoint, CaptureCoverage, DailyRow, DiagnosisInput, HourlyRow, SettingChange } from './types'
@@ -236,8 +237,18 @@ async function loadClientPageId(clientId: string): Promise<string | null> {
  */
 async function loadStrategyConfig(clientId: string): Promise<AdStrategyConfig> {
   const { config, source, error } = await loadAdStrategyConfigWithSource(clientId)
-  if (source === 'fallback') throw new Error(`ad_strategy_configs read failed: ${error ?? 'unknown error'}`)
+  if (source === 'fallback') throw new Error(configReadFailedMessage(STRATEGY_CONFIG_READ_FAILED, error))
   return config
+}
+
+/**
+ * 客户的「广告结果怎么算」。读失败要抛（同上）——塌成「没配置」会报一条假的 D7，
+ * 叫 FDE 去配一个其实早就配好的东西；「没有行」才是真没配，照旧往下走。
+ */
+async function loadOutcome(clientId: string): Promise<LoadedOutcomeConfig> {
+  const loaded = await loadOutcomeConfig(clientId)
+  if (loaded.source === 'read_error') throw new Error(configReadFailedMessage(OUTCOME_CONFIG_READ_FAILED, loaded.error))
+  return loaded
 }
 
 export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
@@ -248,7 +259,7 @@ export async function loadDiagnosisInput(clientId: string, date: string, evaluat
     accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date))
   }
   const [outcome, strategy, clientPageId] = await Promise.all([
-    loadOutcomeConfig(clientId),
+    loadOutcome(clientId),
     loadStrategyConfig(clientId),
     loadClientPageId(clientId),
   ])

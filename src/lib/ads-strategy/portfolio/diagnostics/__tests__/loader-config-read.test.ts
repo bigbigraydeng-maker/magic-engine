@@ -79,3 +79,29 @@ describe('loadDiagnosisInput — 广告设置读取', () => {
     expect(input.digestRecipients).toEqual([])
   })
 })
+
+describe('loadDiagnosisInput — 「广告结果怎么算」读取', () => {
+  beforeEach(() => {
+    mocks.loadAdStrategyConfigWithSource.mockResolvedValue({ config: strategyConfig([]), source: 'row' })
+  })
+
+  it('🔴 读失败 → 抛错并带原始报错，不塌成「没配置」', async () => {
+    mocks.loadOutcomeConfig.mockResolvedValue({ config: emptyOutcomeConfig(), source: 'read_error', error: 'timeout' })
+    await expect(loadDiagnosisInput('client-1', '2026-09-21', '2026-09-22T00:00:00Z'))
+      .rejects.toThrow('ad outcome config read failed: timeout')
+  })
+
+  it('没有这一行（真没配）→ 不抛，outcomeConfigured=false', async () => {
+    mocks.loadOutcomeConfig.mockResolvedValue({ config: emptyOutcomeConfig(), source: 'no_row' })
+    const input = await loadDiagnosisInput('client-1', '2026-09-21', '2026-09-22T00:00:00Z')
+    expect(input.outcomeConfigured).toBe(false)
+  })
+
+  it('读到了且主结果已设 → outcomeConfigured=true，配置照实透传', async () => {
+    const config = { ...emptyOutcomeConfig(), leading: 'messaging_started' as const, primary: 'lead' as const }
+    mocks.loadOutcomeConfig.mockResolvedValue({ config, source: 'row' })
+    const input = await loadDiagnosisInput('client-1', '2026-09-21', '2026-09-22T00:00:00Z')
+    expect(input.outcomeConfigured).toBe(true)
+    expect(input.outcome).toEqual(config)
+  })
+})

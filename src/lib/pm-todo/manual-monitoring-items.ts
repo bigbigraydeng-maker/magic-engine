@@ -9,6 +9,7 @@ import { shouldRemindToday, streakPhrase } from './remind-cadence'
 import { checkCronHealth } from '@/lib/cron/health'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
+import { isAdConfigReadFailure } from '@/lib/ads-strategy/portfolio/diagnostics/config-read-error'
 
 /**
  * `ad-readback-sweep` 写进运行记录的那份 summary 的形状。
@@ -499,7 +500,7 @@ const ADS_CONFIG_READ_STALE_HOURS = 30
  *
  * 为什么单独一条、不靠 `cron_failing`：这个任务常年挂着几条客户 Meta 报错，
  * 在 `cron_failing` 里永远是「报错」状态 —— 2026-09-25 读配置每次 400、所有客户的
- * 诊断和经营状态一起停了一天，混在老报错里没人看出来。这条只认 `ad_config` 这一种来源。
+ * 诊断和经营状态一起停了一天，混在老报错里没人看出来。这条只认「读广告设置失败」：`ad_config` 来源，加上体检加载器自己读失败时记在 `ad_diagnostics` / `ads_growth_state` 下的那种。
  *
  * 跟 `pushMailchimpExportItems` 同理：不只挑 completed —— 这类错误本身就会把那一轮标成 failed。
  */
@@ -528,7 +529,12 @@ export async function pushAdsConfigReadItems(
   const hoursOld = run.finished_at ? (now.getTime() - Date.parse(run.finished_at)) / 3_600_000 : null
   if (hoursOld !== null && hoursOld > ADS_CONFIG_READ_STALE_HOURS) return
 
-  const configErrors = run.summary.errors.filter((e) => e.source === 'ad_config')
+  // 两种来路都算：回拉自己读设置失败（ad_config），以及回拉读成功、体检加载器再读时失败
+  //（报错记在 ad_diagnostics / ads_growth_state 下，靠报错前缀认）。后一种不认的话，
+  // 那个客户当天没体检、没经营状态，却没有任何人被提醒。
+  const configErrors = run.summary.errors.filter((e) =>
+    e.source === 'ad_config' ||
+    ((e.source === 'ad_diagnostics' || e.source === 'ads_growth_state') && isAdConfigReadFailure(e.error ?? '')))
   const affected = new Set(configErrors.map((e) => e.client_id ?? '?'))
   if (affected.size === 0) return
 

@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfigWithSource, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,7 +53,12 @@ export async function POST(
   const parsed = parseApproveBody(raw)
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
-  const config = await loadAdStrategyConfig(clientId)
+  // 🔴 读失败时拿到的是空素材池的默认值，照旧往下走会报「ref 不在池里」——其实是没读到。
+  const loaded = await loadAdStrategyConfigWithSource(clientId)
+  if (loaded.source === 'fallback') {
+    return NextResponse.json({ error: '读不出这个客户当前的素材池，这次没有批准，请稍后再试' }, { status: 503 })
+  }
+  const config = loaded.config
   const entry = config.creative_pool.find(e => e.ref === parsed.ref)
   if (!entry) return NextResponse.json({ error: 'ref not in creative_pool' }, { status: 404 })
 
@@ -76,5 +81,13 @@ export async function POST(
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId) })
+  const after = await loadAdStrategyConfigWithSource(clientId)
+  if (after.source === 'fallback') {
+    // 批准已经写库，只是回读失败：如实说「已批准」，不拿空素材池冒充结果。
+    return NextResponse.json(
+      { error: '已批准，但读不出批准后的素材池，请刷新页面确认', saved: true },
+      { status: 503 },
+    )
+  }
+  return NextResponse.json({ success: true, config: after.config })
 }

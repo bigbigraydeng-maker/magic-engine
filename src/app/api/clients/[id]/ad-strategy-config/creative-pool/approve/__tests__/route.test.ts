@@ -13,7 +13,7 @@
  * 这样「去掉守卫」或「守卫放行受限管理员」都会让用例红。
  *
  * 假 supabase 按表建模：只认 ad_strategy_configs，一张按 client_id 存行的内存表；
- * 读回走真实的 loadAdStrategyConfig。
+ * 读回走真实的 loadAdStrategyConfigWithSource。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -43,11 +43,13 @@ const PORTAL_MEMBER = 'owner@client.test'
 
 type Row = Record<string, unknown>
 
-function fakeTable(initial: Row[] = []) {
+function fakeTable(initial: Row[] = [], readError: 'never' | 'always' | 'after_write' = 'never') {
   const rows = new Map<string, Row>(initial.map(r => [String(r.client_id), r]))
+  let written = false
   const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
     const key = String(row[opts.onConflict])
     rows.set(key, { ...(rows.get(key) ?? {}), ...row })
+    written = true
     return { error: null }
   })
   mockFrom.mockImplementation(((table: string) => {
@@ -55,10 +57,15 @@ function fakeTable(initial: Row[] = []) {
     return {
       select: () => ({
         eq: (col: string, val: string) => ({
-          maybeSingle: async () => ({
-            data: [...rows.values()].find(r => r[col] === val) ?? null,
-            error: null,
-          }),
+          maybeSingle: async () => {
+            if (readError === 'always' || (readError === 'after_write' && written)) {
+              return { data: null, error: { message: 'timeout' } }
+            }
+            return {
+              data: [...rows.values()].find(r => r[col] === val) ?? null,
+              error: null,
+            }
+          },
         }),
       }),
       upsert,
@@ -187,5 +194,40 @@ describe('creative-pool/approve — 非内部员工批不动', () => {
 
     expect(res.status).toBe(401)
     expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('creative-pool/approve — 读失败不冒充空素材池', () => {
+  it('🔴 读不出素材池 → 503 + 中文提示，不报「ref 不在池里」、不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([seedRow()], 'always')
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(503)
+    expect(json.error).toContain('读不出')
+    expect(upsert).not.toHaveBeenCalled()
+    // 界面靠 saved 分清「已批准但读不回」和「根本没批」——没批的这条绝不能带它
+    expect(json.saved).toBeUndefined()
+  })
+
+  it('🔴 批准写成功但回读失败 → 503 且 saved:true，不回空素材池', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([seedRow()], 'after_write')
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(503)
+    expect(json.saved).toBe(true)
+    expect(json.error).toContain('已批准')
+    expect(json.config).toBeUndefined()
+    expect(upsert).toHaveBeenCalledTimes(1)
+    const [written] = upsert.mock.calls[0]
+    const pool = written.creative_pool as Array<Record<string, unknown>>
+    const v1 = pool.find(e => e.ref === 'v1')!
+    expect(v1.status).toBe('approved')
+    expect(v1.approved_by).toBe(STAFF)
   })
 })

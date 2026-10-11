@@ -11,7 +11,7 @@
  * 这样「去掉守卫」或「守卫放行受限管理员」都会让用例红。
  *
  * 假 supabase 按表建模：只认 ad_strategy_configs，一张按 client_id 存行的内存表；
- * 读回走真实的 loadAdStrategyConfig。
+ * 读回走真实的 loadAdStrategyConfigWithSource。
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -41,11 +41,13 @@ const PORTAL_MEMBER = 'owner@client.test'
 
 type Row = Record<string, unknown>
 
-function fakeTable(initial: Row[] = []) {
+function fakeTable(initial: Row[] = [], readError: 'never' | 'always' | 'after_write' = 'never') {
   const rows = new Map<string, Row>(initial.map(r => [String(r.client_id), r]))
+  let written = false
   const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
     const key = String(row[opts.onConflict])
     rows.set(key, { ...(rows.get(key) ?? {}), ...row })
+    written = true
     return { error: null }
   })
   mockFrom.mockImplementation(((table: string) => {
@@ -53,10 +55,15 @@ function fakeTable(initial: Row[] = []) {
     return {
       select: () => ({
         eq: (col: string, val: string) => ({
-          maybeSingle: async () => ({
-            data: [...rows.values()].find(r => r[col] === val) ?? null,
-            error: null,
-          }),
+          maybeSingle: async () => {
+            if (readError === 'always' || (readError === 'after_write' && written)) {
+              return { data: null, error: { message: 'timeout' } }
+            }
+            return {
+              data: [...rows.values()].find(r => r[col] === val) ?? null,
+              error: null,
+            }
+          },
         }),
       }),
       upsert,
@@ -185,9 +192,12 @@ describe('ad-strategy-config — PATCH 内部员工照常改', () => {
     }) as never)
 
     const res = await PATCH(patchRequest({ autonomy_mode: 'observe' }), params())
+    const json = await res.json()
 
     expect(res.status).toBe(503)
     expect(upsert).not.toHaveBeenCalled()
+    // 界面靠 saved 分清「已存但读不回」和「根本没存」——没存的这条绝不能带它
+    expect(json.saved).toBeUndefined()
   })
 
   it('内部员工填错邮箱 → 400，不写库（守卫不吞掉原有校验）', async () => {
@@ -309,5 +319,35 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
 
     expect(res.status).toBe(403)
     expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('ad-strategy-config — 读失败不冒充默认值', () => {
+  it('🔴 GET 读不出设置 → 503 + 中文提示，不回默认配置', async () => {
+    signedInAs(VIEWER)
+    fakeTable([{ client_id: CLIENT, enabled: false, digest_recipients: ['x@staff.test'] }], 'always')
+
+    const res = await GET(new NextRequest(url()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(503)
+    expect(json.error).toContain('读不出')
+    expect(json.config).toBeUndefined()
+    expect(json.success).toBeUndefined()
+  })
+
+  it('🔴 PATCH 写成功但回读失败 → 503 且 saved:true，不回默认配置', async () => {
+    signedInAs(STAFF)
+    const { upsert, rows } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [] }], 'after_write')
+
+    const res = await PATCH(patchRequest({ enabled: false }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(503)
+    expect(json.saved).toBe(true)
+    expect(json.error).toContain('已保存')
+    expect(json.config).toBeUndefined()
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(rows.get(CLIENT)?.enabled).toBe(false)
   })
 })

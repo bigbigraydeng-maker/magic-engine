@@ -15,10 +15,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, loadAdStrategyConfigWithSource, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfigWithSource, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
+
+const READ_FAILED_MESSAGE = '读不出这个客户当前的广告设置，请稍后再试'
 
 export async function GET(
   _req: NextRequest,
@@ -28,8 +30,13 @@ export async function GET(
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
-  const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config })
+  // 🔴 读失败时不能把默认值（监测开、收件人空、自动模式关）当成真设置回给设置页：
+  //    看着像「没配过」，一填一存就盖掉没看见的旧值。原始报错不下发。
+  const loaded = await loadAdStrategyConfigWithSource(clientId)
+  if (loaded.source === 'fallback') {
+    return NextResponse.json({ error: READ_FAILED_MESSAGE }, { status: 503 })
+  }
+  return NextResponse.json({ success: true, config: loaded.config })
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -144,6 +151,13 @@ export async function PATCH(
     ? await notifyAutonomyModeChanged(clientId, updatedAt, { relaxed: true })
     : { sent: false, events: 0 }
 
-  const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config, sync_events: syncEvents })
+  const after = await loadAdStrategyConfigWithSource(clientId)
+  if (after.source === 'fallback') {
+    // 写库已经成功，只是回读失败：如实说「已保存」，不拿默认值冒充保存后的结果。
+    return NextResponse.json(
+      { error: '设置已保存，但读不出保存后的结果，请刷新页面确认', saved: true, sync_events: syncEvents },
+      { status: 503 },
+    )
+  }
+  return NextResponse.json({ success: true, config: after.config, sync_events: syncEvents })
 }
