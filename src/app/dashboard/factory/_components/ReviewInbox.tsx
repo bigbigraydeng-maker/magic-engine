@@ -153,8 +153,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       setOrders(pending)
       const mine = (json.orders ?? []).filter((o: WorkOrder & { client_id?: string }) => !clientId || o.client_id === clientId)
       setPublished(mine.filter((o: WorkOrder) => POST_PUBLISH.includes(o.status)))
-      setSuperseded(mine.filter((o: WorkOrder) => o.status === 'superseded'))
-      if (pending.length > 0) setHasShown(true)
+      const old = mine.filter((o: WorkOrder) => o.status === 'superseded')
+      setSuperseded(old)
+      // 只剩历史卡的客户也算「显示过」:否则对话框触发刷新时整块被加载提示替换,对话历史丢失
+      if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
       setError(null)
       setAcceptedFlagsError(typeof json.accepted_flags_error === 'string' && json.accepted_flags_error ? json.accepted_flags_error : null)
     } catch (e) {
@@ -372,11 +374,13 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
           )
         })()}
 
-        {superseded.length > 0 && (
+        {(() => {
+          const oldShown = superseded.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup)
+          return oldShown.length > 0 && (
           <details className="mt-8 group">
-            <summary className="cursor-pointer select-none text-sm font-medium text-slate-500">已作废 · {superseded.length} 条(旧版,已被新版替换,默认收起)</summary>
+            <summary className="cursor-pointer select-none text-sm font-medium text-slate-500">已作废 · {oldShown.length} 条(旧版,已被新版替换,默认收起)</summary>
             <div className="mt-3 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-              {superseded.map((o) => (
+              {oldShown.map((o) => (
                 <ReadOnlyTile
                   key={o.id}
                   id={o.id}
@@ -391,7 +395,8 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               ))}
             </div>
           </details>
-        )}
+          )
+        })()}
       </div>
 
         {clientId && <FactoryChat clientId={clientId} onActed={load} />}
