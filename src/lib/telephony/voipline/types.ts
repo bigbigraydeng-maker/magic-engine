@@ -112,4 +112,8 @@ export interface TelephonyStore {
   findContactIdsByPhone(clientId: string, phoneE164: string): Promise<string[]>
   createContactForInboundCall(input: { clientId: string; phoneE164: string; name: string | null; seenAt: string; country: 'NZ' | 'AU' }): Promise<string>
   writeCallTouchpoint(input: TouchpointInput): Promise<{ touchpointId: string | null; created: boolean }>
+  /** 同一通电话后到的事件改变了结论（转接后才接通等）：更新原触点，不新增。 */
+  updateCallTouchpoint(input: TouchpointInput): Promise<void>
+  /** 清理过期的拒绝回执（保留期）。返回删除条数。 */
+  purgeRejections(olderThanIso: string, payloadOlderThanIso: string): Promise<number>
 }

@@ -15,7 +15,7 @@
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { TELEPHONY_RAW_EVENT_RECEIVED } from '@/lib/telephony/voipline/events-contract'
-import { CRM_QUIET_MS, processRawEvent } from '@/lib/telephony/voipline/process'
+import { CRM_QUIET_MS, NO_END_EVENT_DETAIL, processRawEvent } from '@/lib/telephony/voipline/process'
 import { supabaseTelephonyStore } from '@/lib/telephony/voipline/store'
 import type { TelephonyStore } from '@/lib/telephony/voipline/types'
 
@@ -23,6 +23,8 @@ export const SWEEP_MIN_AGE_MS = 5 * 60 * 1000
 export const SWEEP_MAX_ATTEMPTS = 10
 export const SWEEP_BATCH = 50
 /** 超过这么久还没收到结束事件的通话，不再等，转人工确认。 */
+/** 同一通已结束电话最多被补处理重发这么多次，之后转人工确认。 */
+export const MAX_CALL_REDISPATCH = 5
 export const NO_END_EVENT_GIVE_UP_MS = 6 * 3600 * 1000
 
 export interface SweepResult {
@@ -43,24 +45,41 @@ export async function sweepStaleRawEvents(store: TelephonyStore, dispatch: Dispa
   let endedCallsRedispatched = 0
   let flaggedNoEnd = 0
   const calls = await store.listStaleCalls(new Date(now.getTime() - CRM_QUIET_MS).toISOString(), SWEEP_BATCH)
-  for (const c of calls) {
+  for (const stale of calls) {
+    // 发之前重读一遍：别人刚写成了就别再动（避免用旧行覆盖新状态）。
+    const c = await store.getCall(stale.clientId, stale.providerCallId)
+    if (!c || c.crmStatus !== 'pending') continue
+    const conn = await store.getConnection(c.connectionId)
+    if (!conn || !conn.active) continue
+    const redispatched = c.receipts.filter((r) => r.stage === 'sweep').length
+    const flag = async (detail: string, why: string) => {
+      await store.saveCall({
+        ...c,
+        crmStatus: 'needs_review',
+        crmDetail: detail,
+        receipts: [...c.receipts, { stage: 'crm', status: 'needs_review', at: now.toISOString(), detail: why }].slice(-50),
+      })
+      flaggedNoEnd++
+    }
     if (c.stage === 'ended') {
+      if (redispatched >= MAX_CALL_REDISPATCH) {
+        await flag('补处理多次仍没写进客户记录，需人工确认', 'redispatch_exhausted')
+        continue
+      }
       const evs = await store.listRawEventsForCall(c.clientId, c.connectionId, c.providerCallId)
       const last = [...evs].sort((a, b) => a.receivedAt.localeCompare(b.receivedAt)).pop()
       if (last) {
+        await store.saveCall({ ...c, receipts: [...c.receipts, { stage: 'sweep', status: 'redispatched', at: now.toISOString() }].slice(-50) })
         await dispatch(last.id, c.clientId, c.connectionId)
         endedCallsRedispatched++
       }
     } else if (now.getTime() - Date.parse(c.startedAt) > NO_END_EVENT_GIVE_UP_MS) {
-      await store.saveCall({
-        ...c,
-        crmStatus: 'needs_review',
-        crmDetail: '超过 6 小时没收到结束事件，需人工确认这通电话',
-        receipts: [...c.receipts, { stage: 'crm', status: 'needs_review', at: now.toISOString(), detail: 'no_end_event' }].slice(-50),
-      })
-      flaggedNoEnd++
+      await flag(NO_END_EVENT_DETAIL, 'no_end_event')
     }
   }
+  await store
+    .purgeRejections(new Date(now.getTime() - 14 * 86400_000).toISOString(), new Date(now.getTime() - 7 * 86400_000).toISOString())
+    .catch(() => undefined)
   const exhaustedRaw = await store.countExhaustedRaw(SWEEP_MAX_ATTEMPTS)
   return { rawRedispatched: stale.length, endedCallsRedispatched, flaggedNoEnd, exhaustedRaw }
 }

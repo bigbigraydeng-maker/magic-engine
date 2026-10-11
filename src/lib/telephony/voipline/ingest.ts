@@ -52,8 +52,9 @@ export async function handleVoiplineWebhook(store: TelephonyStore, input: Ingest
     return { status: 503, body: { status: 'unavailable' } }
   }
   if (!conn || !conn.active) {
+    // 连接不存在时不用请求里自带的编号当回执键（攻击者随便编，节流就失效）；只有真实存在的连接才记编号。
     return reject(401, conn ? 'connection_inactive' : 'unknown_connection', {
-      connectionId: input.connectionId,
+      connectionId: conn ? conn.id : null,
       clientId: conn?.clientId ?? null,
     })
   }

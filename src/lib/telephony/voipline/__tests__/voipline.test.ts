@@ -341,7 +341,7 @@ describe('审查后补的防线', () => {
   })
   it('来电没人接（voipline inbound 且非 spoke）不算「真人跟进过」；接通了才算；外呼未接仍按原规则算尝试', () => {
     const base = { channel: 'phone', source: 'voipline', occurredAt: '2026-10-12T00:00:00Z' } as const
-    expect(isHumanFollowup({ ...base, direction: 'inbound', metadata: { outcome: 'no_answer' } } as never)).toBe(false)
+    expect(isHumanFollowup({ ...base, direction: 'inbound', metadata: { outcome: 'missed_inbound' } } as never)).toBe(false)
     expect(isHumanFollowup({ ...base, direction: 'inbound', metadata: { outcome: 'spoke' } } as never)).toBe(true)
     expect(isHumanFollowup({ ...base, direction: 'outbound', metadata: { outcome: 'no_answer' } } as never)).toBe(true)
   })
@@ -377,8 +377,9 @@ describe('魏征审查后补的防线', () => {
     await h.send(outboundStart())
     await h.send(ev('user_outbound_call_completion', { dest_number: '0210000001', duration: 28 }))
     await h.drain()
-    expect(callOf(h)).toMatchObject({ answered: false })
-    expect(tpOf(h)[0]).toMatchObject({ outcome: 'no_answer', reached: false })
+    // 不判接通；也不断言「没接」：转人工确认，不写触点
+    expect(callOf(h)).toMatchObject({ answered: false, crmStatus: 'needs_review' })
+    expect(tpOf(h)).toHaveLength(0)
   })
   it('「没人接」类事件名不会被当成接通事件', () => {
     for (const n of ['inbound_call_no_answer', 'call_unanswered', 'outbound_call_busy', 'call_failed']) {
@@ -402,5 +403,61 @@ describe('魏征审查后补的防线', () => {
     const ids = [...h.emitted]
     await expect(processRawEvent(h.mem.store, ids[0], h.now, { quietMs: 0 })).rejects.toThrow()
     expect(h.mem.raw.get(ids[0])!.attempts).toBe(1)
+  })
+})
+
+describe('第二轮审查后补的防线', () => {
+  it('转接间隔很长：前台 15 秒那段先写，销售 10 分钟那段几分钟后才到 → 原触点被更新，不冻结', async () => {
+    const h = harness()
+    await h.send(inboundStart({ user_extension: '101' })); await h.send(inboundAnswered({ user_extension: '101' }))
+    await h.send(inboundEnded({ user_extension: '101', duration: 15 }))
+    await h.drain({ quietMs: 0 })
+    expect(tpOf(h)[0]).toMatchObject({ talkSeconds: 15, staffEmail: 'staff.one@example.test' })
+    await h.send(inboundAnswered({ user_extension: '102' })); await h.send(inboundEnded({ user_extension: '102', duration: 600 }))
+    await h.drain({ quietMs: 0 })
+    expect(tpOf(h)).toHaveLength(1)
+    expect(tpOf(h)[0]).toMatchObject({ talkSeconds: 600, staffEmail: 'staff.two@example.test', outcome: 'spoke' })
+    expect(callOf(h)!.receipts.some((r) => r.status === 'updated')).toBe(true)
+  })
+  it('振铃组：先有人 no_answer，后面另一个分机才接起来 → 触点从漏接更新成已接通', async () => {
+    const h = harness()
+    await h.send(inboundStart({ user_extension: '101' }))
+    await h.send(ev('user_inbound_call_no_answer', { user_number: '0210000001', user_extension: '101' }))
+    await h.drain({ quietMs: 0 })
+    expect(tpOf(h)[0]).toMatchObject({ outcome: 'missed_inbound' })
+    await h.send(inboundAnswered({ user_extension: '102' })); await h.send(inboundEnded({ user_extension: '102', duration: 600 }))
+    await h.drain({ quietMs: 0 })
+    expect(tpOf(h)[0]).toMatchObject({ outcome: 'spoke', talkSeconds: 600 })
+  })
+  it('没有接通事件、没有 answered 标志、但有 95 秒时长：不断言「没接」，转人工确认', async () => {
+    const h = harness()
+    await h.send(inboundStart()); await h.send(ev('user_inbound_call_completion', { user_number: '0210000001', duration: 95 }))
+    await h.drain()
+    expect(callOf(h)).toMatchObject({ crmStatus: 'needs_review', answered: false })
+    expect(tpOf(h)).toHaveLength(0)
+  })
+  it('6 小时被标「没结束」之后结束事件才到：重新处理并写 CRM', async () => {
+    const h = harness()
+    await h.send(inboundStart()); await h.drain()
+    await sweepStaleRawEvents(h.mem.store, async () => undefined, new Date('2026-10-12T09:00:00.000Z'))
+    expect(callOf(h)!.crmStatus).toBe('needs_review')
+    await h.send(inboundAnswered()); await h.send(inboundEnded()); await h.drain()
+    expect(callOf(h)!.crmStatus).toBe('written')
+    expect(tpOf(h)).toHaveLength(1)
+  })
+  it('已结束却一直写不成：补处理重发 5 次后转人工，不无限重发', async () => {
+    const h = harness()
+    await h.send(inboundStart()); await h.send(inboundEnded()); await h.drain({ quietMs: 120_000 })
+    let sent = 0
+    for (let i = 0; i < 8; i++) await sweepStaleRawEvents(h.mem.store, async () => { sent++ }, new Date('2026-10-12T02:00:00.000Z'))
+    expect(sent).toBe(5)
+    expect(callOf(h)!.crmStatus).toBe('needs_review')
+  })
+  it('连接被停用后，补处理不再重发它的通话', async () => {
+    const h = harness([connA({ active: false }), connB()])
+    h.mem.calls.set(`${CLIENT_A}|x`, { clientId: CLIENT_A, connectionId: CONN_A, providerCallId: 'x', stage: 'ended', direction: 'inbound', startedAt: '2026-10-12T00:00:00.000Z', crmStatus: 'pending', receipts: [] } as never)
+    let sent = 0
+    await sweepStaleRawEvents(h.mem.store, async () => { sent++ }, new Date('2026-10-12T02:00:00.000Z'))
+    expect(sent).toBe(0)
   })
 })

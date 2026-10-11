@@ -75,6 +75,15 @@ export function createMemoryStore(connections: TelephonyConnection[]) {
         .filter((r) => (r.status === 'pending' || r.status === 'failed') && r.receivedAt < olderThanIso && r.attempts < maxAttempts)
         .slice(0, limit)
     },
+    async updateCallTouchpoint(t) {
+      const key = `${t.clientId}|voipline|${t.sourceRef}`
+      const cur = touchpoints.get(key)
+      if (cur) touchpoints.set(key, { ...cur, ...t, id: cur.id })
+    },
+    async purgeRejections(before) {
+      void before
+      return 0
+    },
     async countExhaustedRaw(max) {
       return [...raw.values()].filter((r) => r.status === 'failed' && r.attempts >= max).length
     },

@@ -10,7 +10,7 @@
 
 import { describeCall, planCallIngest, type PlannedCall } from '../call-plan'
 import { foldCall, toCallRecord, type FoldedCall } from './fold'
-import type { CallRow, CrmStatus, MatchStatus, Receipt, TelephonyConnection, TelephonyStore } from './types'
+import type { CallRow, CrmStatus, MatchStatus, Receipt, TelephonyConnection, TelephonyStore, TouchpointInput } from './types'
 
 const MAX_RECEIPTS = 50
 
@@ -82,6 +82,42 @@ function pushReceipt(row: CallRow, r: Receipt) {
   row.receipts = [...row.receipts, r].slice(-MAX_RECEIPTS)
 }
 
+
+/** 这通电话写进触点的内容。写入和「后到事件改了结论后的更新」共用，保证两处口径一致。 */
+function touchpointInput(
+  conn: TelephonyConnection,
+  folded: FoldedCall,
+  planned: PlannedCall,
+  contactId: string,
+  staffEmail: string | null,
+): TouchpointInput {
+  return {
+    clientId: conn.clientId,
+    contactId,
+    direction: planned.direction,
+    occurredAt: planned.occurredAt,
+    summary: describeCall(planned),
+    sourceRef: `${conn.providerAccountId}:${folded.callId}`,
+    staffEmail,
+    // 有效联系 = call-plan 判断⑤；其余（含未接、秒挂）不冒充聊过。
+    // 来电没人接 = 我们漏接了客人（missed_inbound），不是「我们打过没接通」（no_answer），
+    // 否则下游会把漏接的人当成已经被我们尝试联系过。
+    outcome:
+      planned.countsAsReached || (planned.direction === 'inbound' && planned.answered && planned.talkSeconds >= 10)
+        ? 'spoke'
+        : planned.direction === 'inbound'
+          ? 'missed_inbound'
+          : 'no_answer',
+    reached: planned.countsAsReached,
+    answered: planned.answered,
+    talkSeconds: planned.talkSeconds,
+    providerCallId: folded.callId,
+  }
+}
+
+/** 通话结束事件迟迟没来、被扫描任务转人工确认时写的说明（结束事件后来到了就重新处理）。 */
+export const NO_END_EVENT_DETAIL = '超过 6 小时没收到结束事件，需人工确认这通电话'
+
 /** 通话结束且 CRM 还没写成时，做号码匹配 + 写触点。失败抛出，由调用方记失败状态。 */
 async function writeCrm(
   store: TelephonyStore,
@@ -96,6 +132,15 @@ async function writeCrm(
     row.matchStatus = 'needs_review'
     row.crmDetail = '事件里没有方向（呼入/呼出），不猜，等人确认'
     pushReceipt(row, receipt('crm', 'needs_review', now, 'no_direction'))
+    return
+  }
+
+  if (folded.answeredUnknown) {
+    // 缺接通事件却有通话时长：既不能记成「没接」也不能记成「聊过」，交给人确认。
+    row.crmStatus = 'needs_review'
+    row.matchStatus = 'needs_review'
+    row.crmDetail = '没收到接通事件但有通话时长，不确定是否接通'
+    pushReceipt(row, receipt('crm', 'needs_review', now, 'answered_unknown'))
     return
   }
 
@@ -141,28 +186,8 @@ async function writeCrm(
     return
   }
 
-  const tp = await store.writeCallTouchpoint({
-    clientId: conn.clientId,
-    contactId,
-    direction: planned.direction,
-    occurredAt: planned.occurredAt,
-    summary: describeCall(planned),
-    sourceRef: `${conn.providerAccountId}:${folded.callId}`,
-    staffEmail: row.staffEmail,
-    // 有效联系 = call-plan 判断⑤；其余（含未接、秒挂）一律 no_answer，不冒充聊过。
-    // 来电没人接 = 我们漏接了客人（missed_inbound），不是「我们打过没接通」（no_answer），
-    // 否则下游会把漏接的人当成已经被我们尝试联系过。
-    outcome:
-      planned.countsAsReached || (planned.direction === 'inbound' && planned.answered && planned.talkSeconds >= 10)
-        ? 'spoke'
-        : planned.direction === 'inbound'
-          ? 'missed_inbound'
-          : 'no_answer',
-    reached: planned.countsAsReached,
-    answered: planned.answered,
-    talkSeconds: planned.talkSeconds,
-    providerCallId: folded.callId,
-  })
+  const tpInput = touchpointInput(conn, folded, planned, contactId, row.staffEmail)
+  const tp = await store.writeCallTouchpoint(tpInput)
   row.contactId = contactId
   row.touchpointId = tp.touchpointId ?? row.touchpointId
   row.crmStatus = 'written'
@@ -212,7 +237,7 @@ export async function processRawEvent(
 
     const lastReceived = Math.max(...events.map((e) => Date.parse(e.receivedAt)))
     const inQuietWindow = folded.stage === 'ended' && now().getTime() - lastReceived < quietMs
-    if (folded.stage === 'ended' && !inQuietWindow && (row.crmStatus === 'pending' || row.crmStatus === 'failed')) {
+    if (folded.stage === 'ended' && !inQuietWindow && (row.crmStatus === 'pending' || row.crmStatus === 'failed' || (row.crmStatus === 'needs_review' && row.crmDetail === NO_END_EVENT_DETAIL))) {
       try {
         await writeCrm(store, conn, folded, row, stamp)
       } catch (err) {
@@ -220,10 +245,20 @@ export async function processRawEvent(
         row.crmDetail = safeErr(err)
         pushReceipt(row, receipt('crm', 'failed', stamp, row.crmDetail))
         await store.saveCall(row)
-        throw err
+        throw new Error(safeErr(err))
       }
     }
 
+    // 已写过触点、但后到的事件改变了结论（例如转接：前台那段先结束，销售那段 5 分钟后才到）→ 更新原触点。
+    if (prev && prev.crmStatus === 'written' && row.crmStatus === 'written' && row.contactId && folded.stage === 'ended' &&
+        (row.talkSeconds !== prev.talkSeconds || row.answered !== prev.answered || row.staffEmail !== prev.staffEmail)) {
+      const rec = toCallRecord(folded)
+      const planned = rec ? planCallIngest([rec], { defaultCountry: conn.defaultCountry }).calls[0] : undefined
+      if (planned) {
+        await store.updateCallTouchpoint(touchpointInput(conn, folded, planned, row.contactId, row.staffEmail))
+        pushReceipt(row, receipt('crm', 'updated', stamp, 'later_events_changed_outcome'))
+      }
+    }
     await store.saveCall(row)
     if (raw.event.eventType !== 'other') await store.markRaw(raw.id, 'processed', null)
     return {
@@ -238,6 +273,6 @@ export async function processRawEvent(
     // CRM 失败已在上面落了状态；其余（取数、存通话失败）只标原始事件，留给补处理重试。
     const msg = safeErr(err)
     await store.markRaw(raw.id, 'failed', msg).catch(() => undefined)
-    throw err
+    throw new Error(msg)
   }
 }

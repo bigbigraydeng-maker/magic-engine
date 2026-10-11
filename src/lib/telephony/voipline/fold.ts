@@ -33,6 +33,8 @@ export interface FoldedCall {
   counterpartyNumber: string | null
   counterpartyName: string | null
   answered: boolean
+  /** 没有接通事件、也没有明确的 answered 标志，但有 ≥10 秒的时长：不能断言「没接」，要人确认。 */
+  answeredUnknown: boolean
   talkSeconds: number
   /** 主处理员工的分机：接通且说得最久的那一段，没人接通就取第一个出现的。 */
   extension: string | null
@@ -67,6 +69,7 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
   let counterpartyName: string | null = null
   let sawAnswerEvent = false
   let explicitAnswered: boolean | null = null
+  let sawNoAnswerFlag = false
   let talkSeconds = 0
   let earliest: string | null = null
   const legMap = new Map<string, CallLeg>()
@@ -86,7 +89,10 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
     }
     if (e.eventType === 'call_ended') {
       bump('ended')
-      if (e.answered !== null) explicitAnswered = (explicitAnswered ?? false) || e.answered
+      if (e.answered !== null) {
+        explicitAnswered = (explicitAnswered ?? false) || e.answered
+        if (!e.answered) sawNoAnswerFlag = true
+      }
     }
     if (e.talkSeconds !== null) talkSeconds = Math.max(talkSeconds, e.talkSeconds)
 
@@ -121,6 +127,7 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
     counterpartyNumber,
     counterpartyName,
     answered,
+    answeredUnknown: !answered && explicitAnswered === null && !sawNoAnswerFlag && talkSeconds >= 10,
     talkSeconds,
     extension: primary?.extension ?? null,
     extensionName: primary?.extensionName ?? null,

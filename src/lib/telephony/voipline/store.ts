@@ -134,7 +134,22 @@ export const supabaseTelephonyStore: TelephonyStore = {
   },
 
   async insertRejection(row) {
-    // 未认证请求也能触发回执，所以同一（连接, 原因）一分钟内只记一条，表不会被刷爆。
+    // 令牌通过但读不懂的载荷：不按时间节流（接入初期一通电话连发好几个事件，都是校准样本），
+    // 但每个连接最多留 200 条。
+    if (row.reason.startsWith('unparseable') && row.connectionId) {
+      const { count } = await supabaseAdmin
+        .from('telephony_webhook_rejections')
+        .select('id', { count: 'exact', head: true })
+        .eq('connection_id', row.connectionId)
+        .like('reason', 'unparseable%')
+      if ((count ?? 0) >= 200) return
+      const { error: e2 } = await supabaseAdmin.from('telephony_webhook_rejections').insert({
+        connection_id: row.connectionId, client_id: row.clientId, reason: row.reason, received_at: row.receivedAt, payload: row.payload ?? null,
+      })
+      if (e2) throw new Error(`拒绝回执落库失败: ${e2.message}`)
+      return
+    }
+    // 其余（含未认证请求）同一（连接, 原因）一分钟内只记一条，表不会被刷爆。
     const since = new Date(new Date(row.receivedAt).getTime() - 60_000).toISOString()
     let q = supabaseAdmin.from('telephony_webhook_rejections').select('id').eq('reason', row.reason).gte('received_at', since).limit(1)
     q = row.connectionId ? q.eq('connection_id', row.connectionId) : q.is('connection_id', null)
@@ -202,6 +217,49 @@ export const supabaseTelephonyStore: TelephonyStore = {
       .eq('status', 'failed')
       .gte('attempts', maxAttempts)
     if (error) throw new Error(`数耗尽事件失败: ${error.message}`)
+    return count ?? 0
+  },
+
+  async updateCallTouchpoint(t) {
+    const { data: cur, error: rErr } = await supabaseAdmin
+      .from('contact_touchpoints')
+      .select('id, metadata')
+      .eq('client_id', t.clientId)
+      .eq('source', VOIPLINE_PROVIDER)
+      .eq('source_ref', t.sourceRef)
+      .maybeSingle()
+    if (rErr) throw new Error(`读通话触点失败: ${rErr.message}`)
+    if (!cur) return
+    const { error } = await supabaseAdmin
+      .from('contact_touchpoints')
+      .update({
+        summary: t.summary,
+        metadata: {
+          ...((cur.metadata as Record<string, unknown>) ?? {}),
+          outcome: t.outcome,
+          reached: t.reached,
+          answered: t.answered,
+          talk_seconds: t.talkSeconds,
+          logged_by: t.staffEmail,
+        },
+      })
+      .eq('id', cur.id)
+      .eq('client_id', t.clientId)
+    if (error) throw new Error(`更新通话触点失败: ${error.message}`)
+  },
+
+  async purgeRejections(olderThanIso, payloadOlderThanIso) {
+    const { error: pErr } = await supabaseAdmin
+      .from('telephony_webhook_rejections')
+      .update({ payload: null })
+      .lt('received_at', payloadOlderThanIso)
+      .not('payload', 'is', null)
+    if (pErr) throw new Error(`清理回执载荷失败: ${pErr.message}`)
+    const { count, error } = await supabaseAdmin
+      .from('telephony_webhook_rejections')
+      .delete({ count: 'exact' })
+      .lt('received_at', olderThanIso)
+    if (error) throw new Error(`清理拒绝回执失败: ${error.message}`)
     return count ?? 0
   },
 
