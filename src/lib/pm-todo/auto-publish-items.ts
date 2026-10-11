@@ -87,7 +87,9 @@ interface AttemptRow {
 /** 一行 `daily_plan_auto_publish_auth`（只声明这条待办用得到的列）。 */
 interface AuthRow {
   client_id: string
+  campaign_id: string
   plan_id: string
+  authorized_by_email: string
   dates: string[]
   authorized_at: string
   activated_at: string | null
@@ -127,7 +129,9 @@ function narrowAuth(value: unknown): AuthRow | null {
   }
   return {
     client_id: clientId,
+    campaign_id: str(value.campaign_id),
     plan_id: planId,
+    authorized_by_email: str(value.authorized_by_email),
     dates,
     authorized_at: str(value.authorized_at),
     activated_at: typeof value.activated_at === 'string' ? value.activated_at : null,
@@ -218,24 +222,47 @@ function buildAttemptItem(
   }
 }
 
-/** 一条「授权了却什么都没发生」的待办。 */
+/** 授权了、日期到了、却没有任何尝试记录的几种原因。 */
+type UnarmedCause = 'not_running' | 'client_inactive' | 'campaign_inactive' | 'authorizer_not_admin'
+
+/** 一条「授权了却什么都没发生」的待办；原因不同，话和下一步也不同。 */
 function buildUnarmedItem(
   clientId: string,
   clientName: string,
   dates: string[],
+  cause: UnarmedCause,
   live: boolean,
 ): ManualItem {
   const dateList = dates.slice().sort().join('、')
+  const base = { kind: 'auto_publish_unarmed' as const, client_id: clientId, client_name: clientName, href: clientHref(clientId) }
+  if (cause === 'client_inactive') {
+    return {
+      ...base,
+      what: `${clientName} 已授权自动发布，但这个客户现在不是「正式客户」状态，发布器会跳过，${dateList} 的帖子不会自动发。`,
+      how: '要继续自动发，先把客户状态改回正式客户；不想发了，就在发布面板里点「停止自动发布」。',
+    }
+  }
+  if (cause === 'campaign_inactive') {
+    return {
+      ...base,
+      what: `${clientName} 已授权自动发布，但这份计划所属的活动现在不是启用状态，发布器会跳过，${dateList} 的帖子不会自动发。`,
+      how: '要继续自动发，先把活动重新启用；不想发了，就在发布面板里点「停止自动发布」。',
+    }
+  }
+  if (cause === 'authorizer_not_admin') {
+    return {
+      ...base,
+      what: `${clientName} 的自动发布授权人现在已不是全局管理员（可能已离职或被收回权限），发布器会跳过，${dateList} 的帖子不会自动发。`,
+      how: '请现任管理员在发布面板里重新点一次「授权自动发布」；原来的授权可以直接停止。',
+    }
+  }
   const tail = live
     ? '库里一条发布尝试记录都没有，说明发布器根本没跑起来。'
-    : '自动发布现在还是演练模式（dry run），不会真的发出去，所以库里一条尝试记录都没有。'
+    : '这个客户的自动发布现在还是演练模式（dry run），不会真的发出去，所以库里一条尝试记录都没有。'
   return {
-    kind: 'auto_publish_unarmed',
-    client_id: clientId,
-    client_name: clientName,
+    ...base,
     what: `${clientName} 已经授权自动发布，${dateList} 的帖子该发了，但${tail}`,
     how: '回我一句，我来查定时任务和开关。',
-    href: clientHref(clientId),
   }
 }
 
@@ -309,12 +336,59 @@ async function findRecordConflicts(
   return byClient
 }
 
+/** 计划回执 `published[]` 里已经有帖子的日期。读失败要抛，不能当成「没有」。 */
+async function readReceiptPublishedDates(supabase: SupabaseClient, planId: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('social_plans')
+    .select('id, publish_meta:plan_data->publish_meta')
+    .eq('id', planId)
+  if (error) throw new Error('auto-publish-items: receipt read failed: ' + error.message)
+  const out = new Set<string>()
+  for (const row of (data ?? []) as unknown[]) {
+    if (!isRecord(row) || !isRecord(row.publish_meta)) continue
+    const published = row.publish_meta.published
+    if (!Array.isArray(published)) continue
+    for (const entry of published) {
+      const d = str(isRecord(entry) ? entry.date : undefined)
+      if (d) out.add(d)
+    }
+  }
+  return out
+}
+
+/** 发布器会因为什么而跳过这份授权；都不是的话，才是「发布器没跑」。读失败要抛。 */
+async function causeFor(
+  supabase: SupabaseClient,
+  grant: AuthRow,
+  isGlobalAdmin: ((email: string) => boolean) | undefined,
+): Promise<UnarmedCause> {
+  const [client, campaign] = await Promise.all([
+    supabase.from('clients').select('client_status').eq('id', grant.client_id).maybeSingle(),
+    supabase.from('campaign_briefs').select('status').eq('id', grant.campaign_id).eq('client_id', grant.client_id).maybeSingle(),
+  ])
+  if (client.error) throw new Error('auto-publish-items: client read failed: ' + client.error.message)
+  if (campaign.error) throw new Error('auto-publish-items: campaign read failed: ' + campaign.error.message)
+  const clientStatus = isRecord(client.data) ? str(client.data.client_status) : ''
+  const campaignStatus = isRecord(campaign.data) ? str(campaign.data.status) : ''
+  if (clientStatus !== 'active') return 'client_inactive'
+  if (campaignStatus !== 'active') return 'campaign_inactive'
+  if (isGlobalAdmin && !isGlobalAdmin(grant.authorized_by_email)) return 'authorizer_not_admin'
+  return 'not_running'
+}
+
 export async function pushAutoPublishItems(
   supabase: SupabaseClient,
   items: ManualItem[],
   now: Date,
   nameOf: (clientId: string) => string,
-  opts: { live: boolean },
+  opts: {
+    /** 全局「真发」开关；`liveFor` 没给时所有客户都按它判断。 */
+    live: boolean
+    /** 按客户判断「演练还是真发」（总开关开着、且客户在白名单里才算真发）。 */
+    liveFor?: (clientId: string) => boolean
+    /** 授权人邮箱现在还是不是全局管理员；没给就不做这项判断。 */
+    isGlobalAdmin?: (email: string) => boolean
+  },
 ): Promise<void> {
   const today = nzDate(now)
   const tomorrow = addDays(today, 1)
@@ -345,7 +419,7 @@ export async function pushAutoPublishItems(
   // ---- Source 2: the watchdog ----------------------------------------------
   const { data: authData, error: authError } = await supabase
     .from('daily_plan_auto_publish_auth')
-    .select('client_id, plan_id, dates, authorized_at, activated_at, expires_at, revoked_at')
+    .select('client_id, campaign_id, plan_id, authorized_by_email, dates, authorized_at, activated_at, expires_at, revoked_at')
     .is('revoked_at', null)
     .not('activated_at', 'is', null)
     .gt('expires_at', now.toISOString())
@@ -362,8 +436,9 @@ export async function pushAutoPublishItems(
   // 看门狗只关心今天和明天的日期。
   const watchedDates = new Set([today, tomorrow])
 
-  // 每个客户攒下「授权了但没尝试」的日期。
-  const unarmedByClient = new Map<string, string[]>()
+  // 每个「客户 + 原因」攒下「授权了但没尝试」的日期。
+  const unarmed = new Map<string, { clientId: string; cause: UnarmedCause; dates: string[] }>()
+  const liveFor = opts.liveFor ?? (() => opts.live)
 
   for (const grant of grants) {
     // 查询已经过滤过一遍；这里再确认一次：只有「已激活、没撤销、没过期」的授权才值得盯。
@@ -393,17 +468,24 @@ export async function pushAutoPublishItems(
       if (d) attemptedDates.add(d)
     }
 
-    const missing = watched.filter((d) => !attemptedDates.has(d))
+    let missing = watched.filter((d) => !attemptedDates.has(d))
     if (missing.length === 0) continue
 
-    const cur = unarmedByClient.get(grant.client_id) ?? []
+    // 人手动发过的日期，回执里已经有帖子 —— 发布器没动它是对的，不报。
+    const manuallyPublished = await readReceiptPublishedDates(supabase, grant.plan_id)
+    missing = missing.filter((d) => !manuallyPublished.has(d))
+    if (missing.length === 0) continue
+
+    const cause = await causeFor(supabase, grant, opts.isGlobalAdmin)
+    const key = `${grant.client_id}:${cause}`
+    const cur = unarmed.get(key) ?? { clientId: grant.client_id, cause, dates: [] }
     for (const d of missing) {
-      if (!cur.includes(d)) cur.push(d)
+      if (!cur.dates.includes(d)) cur.dates.push(d)
     }
-    unarmedByClient.set(grant.client_id, cur)
+    unarmed.set(key, cur)
   }
 
-  for (const [clientId, dates] of Array.from(unarmedByClient.entries())) {
-    items.push(buildUnarmedItem(clientId, nameOf(clientId), dates, opts.live))
+  for (const entry of Array.from(unarmed.values())) {
+    items.push(buildUnarmedItem(entry.clientId, nameOf(entry.clientId), entry.dates, entry.cause, liveFor(entry.clientId)))
   }
 }
