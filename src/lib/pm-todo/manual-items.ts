@@ -38,6 +38,7 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { foldRootCauseDuplicates } from './dedupe-root-cause'
 import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
@@ -66,7 +67,7 @@ export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
-import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems } from './manual-monitoring-items'
+import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
 
 export { pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
@@ -137,7 +138,8 @@ export async function loadManualItems(
   }
   // 两组同时跑，拼回时仍是「基础设施在前、客户通道在后」的原顺序（见 runPushers 头注）
   await runPushers(items, [...infra, ...clientPushers(supabase, clients, now)])
-  return items
+  // 同一个根因报了很多次的折成一次（AI 余额用完 → 各客户体检全挂只是症状；授权断了 + 同步失败 = 同一修法）
+  return foldRootCauseDuplicates(items).items
 }
 
 /** 跟客户名单无关的检查（余额、断电、定时任务、授权、钥匙……），客户表读挂了也照跑。 */
@@ -247,6 +249,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 这类失败混在该任务常年的 Meta 报错里，`cron_failing` 那条看不出来，必须单独捞。
     (b) => pushAdsConfigReadItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 广告配置读取检查失败（不阻塞其他待办）:', e),
+    ),
+    // 同一类：回拉读成功、自动暂停自己再读失败的窄窗口，痕迹只在它的回执里。
+    (b) => pushAdsAutoPauseConfigReadItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 自动暂停读配置检查失败（不阻塞其他待办）:', e),
     ),
     // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
     // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。

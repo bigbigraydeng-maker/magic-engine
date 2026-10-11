@@ -8,6 +8,7 @@ import { daysSinceLatest, makeSupabaseOutageReader, readRecentOutages, streakDay
 import { shouldRemindToday, streakPhrase } from './remind-cadence'
 import { checkCronHealth } from '@/lib/cron/health'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 
 /**
  * `ad-readback-sweep` 写进运行记录的那份 summary 的形状。
@@ -482,6 +483,14 @@ export async function pushMailchimpExportItems(
   }
 }
 
+/** 报错原话摘一段进 PM 邮件：去掉路由拼的前缀和任何 uuid，不把客户 id 带进去。 */
+function redactConfigReadError(raw: string): string {
+  return raw
+    .replace(/^.*?for this client:\s*/, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')
+    .slice(0, 120)
+}
+
 /** google-data-pullback-daily 每天一轮；超过这个窗口的记录算旧账，不再报。 */
 const ADS_CONFIG_READ_STALE_HOURS = 30
 
@@ -525,10 +534,7 @@ export async function pushAdsConfigReadItems(
 
   // 原始报错摘一段：「字段没加上」不会自己好，「一次超时」明天自己消失 —— 只有看报错才分得清
   //（子牙 / 魏征复审）。去掉路由拼的前缀和任何 uuid，不把客户 id 带进 PM 邮件。
-  const detail = (configErrors[0]?.error ?? '')
-    .replace(/^.*?for this client:\s*/, '')
-    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')
-    .slice(0, 120)
+  const detail = redactConfigReadError(configErrors[0]?.error ?? '')
 
   items.push({
     kind: 'ads_config_unreadable',
@@ -537,5 +543,46 @@ export async function pushAdsConfigReadItems(
     what: `广告每日回拉读不出 ${affected.size} 个客户的广告设置 —— 这些客户今天的广告诊断、经营状态、内部日报**和坏广告自动暂停**全部跳过了（广告数据本身照常在拉，钱照常在花）${detail ? `。报错原话：${detail}` : ''}。如果是数据库字段没加上，不会自己好；如果只是一次临时读取失败，明天这条会自己消失`,
     how: '这条不用你动手 —— 是我们这边的欠账。回我一句「查一下广告配置」我就去看是字段没对齐还是临时故障，并把漏掉的诊断补跑',
     href:'https://app.magicengine.com.au/dashboard/admin/cron-health',
+  })
+}
+
+/**
+ * 坏广告自动暂停那一步自己读不出广告设置 → 同一类系统欠账。
+ *
+ * 上面那条只看每日回拉的读取；回拉读成功、几分钟后自动暂停再读却失败时，唯一的痕迹是
+ * `ads-d3-auto-pause` 写进 flywheel_actions 的 failed 回执（带 config_read_error）。
+ * 两条不会同时出现：回拉读失败时诊断整段跳过，自动暂停根本不会被触发。
+ */
+export async function pushAdsAutoPauseConfigReadItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const since = new Date(now.getTime() - ADS_CONFIG_READ_STALE_HOURS * 3_600_000).toISOString()
+  const { data, error } = await supabase
+    .from('flywheel_actions')
+    .select('client_id, payload')
+    .eq('action_type', ADS_AUTO_PAUSE_ACTION_KEY)
+    .gte('created_at', since)
+    .not('payload->>config_read_error', 'is', null)
+    .limit(200)
+
+  if (error) throw new Error(`flywheel_actions query failed: ${error.message}`)
+
+  type Row = { client_id: string; payload: { config_read_error?: unknown } | null }
+  const rows = (data ?? []) as Row[]
+  if (rows.length === 0) return
+
+  const affected = new Set(rows.map((r) => r.client_id))
+  const first = rows[0].payload?.config_read_error
+  const detail = redactConfigReadError(typeof first === 'string' ? first : '')
+
+  items.push({
+    kind: 'ads_config_unreadable',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: `过去 30 小时里，坏广告自动暂停有 ${affected.size} 个客户读不出广告设置 —— 这些客户那一轮「花钱没结果」的广告组没判要不要停（没停、也没提交审批，钱照常在花；其中可能有本来就没开自动暂停的客户）${detail ? `。报错原话：${detail}` : ''}。只是一次临时读取失败的话，过一天这条会自己消失`,
+    how: '这条不用你动手 —— 是我们这边的欠账。回我一句「查一下广告配置」我就去看是字段没对齐还是临时故障',
+    href: 'https://app.magicengine.com.au/dashboard/admin/cron-health',
   })
 }
