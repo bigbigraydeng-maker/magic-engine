@@ -23,7 +23,7 @@
 | 路径 | 改已有页？ | 本稿 |
 |---|---|---|
 | 标题周循环 `apply-adapter`（写入单位=数据文件，一个文件含多页） | 是 | **覆盖**：逐 slug 过闸；**合并 PR 前再过一次**（写入到自动合并之间名单可能变） |
-| `seo-fix` → `seo-fix-orchestrator` | 是（数据文件里的条目） | **覆盖**（§2.3：用补丁实际落到的条目判） |
+| `seo-fix` → `seo-fix-orchestrator` | 是（数据文件里的条目） | **覆盖**（§2.1：slug 出现多次即 unknown） |
 | `cms/github/update-page` → `github-page-upgrade-publisher` | 是 | **覆盖** |
 | `cms/wordpress/update-post` → `updateExistingWordpressPost` | 是 | **覆盖** |
 | `capabilities/page-apply-optimization`（Draft PR） | 是 | **覆盖**（无 override） |
@@ -46,7 +46,7 @@
 | 周循环 | `apply-adapter`（每个要改的 slug） | `candidate.pageUrl` 路径 + 数据 slug（按现有约定数据 slug = URL 最后一段，`buildSlugIndex` 即按此找条目） |
 | 每周清单 | 清单代码 | URL 路径 + 最后一段 |
 | `update-page` | `publishPageUpgradeToGithub` | `page_url` 路径 **+ `resolveStaticHtmlPath` 实际解析出的 `filePath` 反推路径（kind=`file`，去 `.html`、去尾 `index`）**；解析失败（`NO_TARGET`）时仍先用 `page_url` 身份过闸，**先拒后报错**，避免泄露「这页有没有文件」 |
-| `seo-fix` | `orchestrateSeoFix` | 请求的数据 `slug` + **补丁实际落到的条目的 slug（`ownerSlug`）**；`file_path` 不进身份（数据文件是批量的，反推不出页面，魏征 N1）。`patchMetaField` 改为同时返回 `ownerSlug`（`findSlugPosition` 取第一处出现，若别的条目里引用了该 slug，补丁会落进别的条目，魏征 N2）。**两个 slug 都过闸，任一命中即拒。** |
+| `seo-fix` | `orchestrateSeoFix` | 请求的数据 `slug`；`file_path` 不进身份（数据文件是批量的，反推不出页面，魏征 N1）。**魏征 N2（补丁锚点取文件里第一处 `slug: 'x'`，若别的条目里引用了它，补丁会落进别的条目）的处理**：实测该文本窗口法**无法可靠还原「补丁实际落在哪个条目」**，所以改为 fail-closed——`patchMetaField` 额外返回 `anchorCount`（该 slug 在文件里出现几次）；**出现多于 1 次 → 身份记为 `unknown`**（非 PM 拒绝）。 |
 | `update-post` | `updateExistingWordpressPost`（内部先 `GET` 旧帖子，得到 `slug` + `link`） | 读回的 `slug` + `link` 路径（`link` 是 `/` 或 `?p=ID` 而 slug 非空时，**不当首页**）+ 请求体里新 `slug`（改前改后都算）；`target_type` 一并记入回执。`GET` 与 `PATCH` 之间被并发改名属残余风险 R-f |
 
 `normalizePagePath`：`decodeURIComponent`（失败 → `unknown`）、小写、去协议/域名/query/hash、去 `.html`、去尾 `/index`、去首尾斜杠；**首页别名 `''`、`/`、`home`、`index` 仅用于「页面身份」，统一得到 `paths=['/']` 且 `slugs=['', 'home', 'index']`；不用于名单项分类**。
@@ -90,7 +90,7 @@
 ## 4. 测试
 
 **行为测试**（每条写路径各一组）：保护页被拒；名单格式坏（非数组 / 夹非字符串 / 超 50 / `seo_config` 非对象）被拒；读库失败被拒；身份算不出/解码失败被拒；非 PM → 403 + 回执；PM → 放行且回执先于写入、回执写失败则不放行；变量没设 → 谁都不行；非成员 PM 邮箱 → 前一道 403；`seo-fix` 用**未保护 slug 但补丁窗口落在受保护条目内**（合成数据文件）→ 被拒；`update-post`：改前/改后 slug、`link` 为 `/?p=ID`、`target_type`；`update-page`：`%2D`、`%2F`、`.html`、`index`、`en/` 前缀 + 路径项后缀匹配（B3）、`NO_TARGET` 时先拒后报错；名单项 `'tours/'`、`'/china-tours'` 归一化后分类；首页别名全链路（首页不在名单时 `home` 项不被别名吞）；`apply-adapter` 同一数据文件含保护页与普通页时只拒保护页那条且不提交整文件、合并前名单变化被拦；每周清单名单坏 → 整客户跳过（现状 fail-open 的回归）；`runCtsMetaPr` 不带闸对象编译不过。
-**变异检验**（每种都必须有测试变红）：①每处 `guard.assert` 注释掉；②匹配永远 `open`；③`unknown` 当 `open`；④`ok:false` 当 `open`；⑤PM 判据永远真；⑥回执写失败仍放行；⑦`ownerSlug` 不参与判定；⑧合并前不再检。
+**变异检验**（每种都必须有测试变红）：①每处 `guard.assert` 注释掉；②匹配永远 `open`；③`unknown` 当 `open`；④`ok:false` 当 `open`；⑤PM 判据永远真；⑥回执写失败仍放行；⑦`anchorCount>1` 不判 unknown；⑧合并前不再检。
 **架构测试**（`architecture.test.ts`；通过数以实跑为准，同步上调 `kernel-architecture.yml` 的 `MIN_PASSED`，现 181）：①`PageWriteGuard` 品牌只在 `protected-pages.ts` 创建（`unique symbol`；禁止别处对该类型的字面量/`as`）；②上述写函数签名含 `guard`；③`kernel/` 不 import `protected-pages`，`protected-pages.ts` 不 import `@/lib/supabase`；④全仓只有 `protected-pages.ts` 取 `meta_cycle_protected_slugs`（扫属性访问与字面量，日志字符串已去掉）；⑤**新增写路径扫描**：`src/` 下凡 import（别名**或相对路径**）`PROVIDER_WRITE_MODULES` 任一模块、或含 `api.github.com` 且带写动词的文件（排除 `github-client.ts` 自身与测试），必须在代码里**调用** `guard.assert(`（只 import 类型不算），或在冻结白名单里；白名单**按「文件 + 允许的写调用次数」记，次数变了就红**，只准变短，每条带「为什么不会改已有页」；不按 HTTP 动词扫（WordPress 改旧页用 POST，按 PATCH/PUT 扫会漏，子牙 N2）。
 
 ## 5. 平台层级门（Inline，已核）
@@ -115,7 +115,7 @@
 
 1. `protected-pages.ts`（身份 / 归一化 / 解析 / 匹配 / 闸对象 / 回执）+ 纯函数单测。
 2. `roster.ts` / `runner.ts` / `candidates.ts` / `run.ts` 收口（含每周清单 fail-closed 回归）。
-3. 写函数加 `guard` 与各自的身份计算（`patchMetaField` 返回 `ownerSlug`；`update-post` 内部 `GET`；`apply-adapter` 契约；`runCtsMetaPr`；`page-apply-optimization` 注入与双检）。
+3. 写函数加 `guard` 与各自的身份计算（`patchMetaField` 返回 `anchorCount`；`update-post` 内部 `GET`；`apply-adapter` 契约；`runCtsMetaPr`；`page-apply-optimization` 注入与双检）。
 4. 三条路由接线 + PM 判据 + 行为测试 + 变异检验。
 5. 架构测试 + `MIN_PASSED` + `docs/ENV.md`。
 
