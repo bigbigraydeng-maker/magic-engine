@@ -20,8 +20,8 @@ alter table public.telephony_connections
       provider = 'twilio'
       and webhook_token_hash is null
       -- 令牌环境变量名只许这个前缀（运行时同样校验），写错一行也不会让服务读到别的密钥
-      and secret_ref ~ '^TWILIO_AUTH_TOKEN_[A-Z0-9_]{1,40}$'
+      and secret_ref is not null and secret_ref ~ '^TWILIO_AUTH_TOKEN_[A-Z0-9_]{1,40}$'
       -- 来电转接的员工号码必须是 E.164
-      and forward_to ~ '^\+[1-9][0-9]{7,14}$'
+      and forward_to is not null and forward_to ~ '^\+[1-9][0-9]{7,14}$'
     )
   );
