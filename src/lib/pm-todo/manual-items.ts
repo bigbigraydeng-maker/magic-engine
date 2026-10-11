@@ -38,6 +38,7 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
@@ -256,6 +257,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 而 Facebook 的留资只保留 90 天，超期永久取不回
     (b) => pushLeadSheetItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 日历上带日期的验证事项每天核对一遍 —— 读不到日历 / 巡检没跑成 / 没法自动核对都要摆到人眼前
+    (b) => pushCalendarClosureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 日历到期事项巡检待办检查失败（不阻塞其他待办）:', e),
     ),
     // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
     (b) => pushLinkedinProgressItems(supabase, b, now).catch((e) =>
