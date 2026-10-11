@@ -102,3 +102,22 @@
 - **没有改共享模板**：在音乐文件层做——`music/momentum_q.mp3`＝momentum 衰减 5.5 dB + 0.5 秒渐入；`music/jade_river_journey_q.mp3`＝jade 衰减 5.8 dB + 0.6 秒渐入（Dropbox `CTS/remotion-assets/music/`，原曲不动），工单里 `musicFile` 指向新文件，画面没动。
 - 结果（成片整体响度）：Tale r5 **-22.1 LUFS**（峰 -11.4 dBFS），SH2 r4 **-22.8 LUFS**（峰 -7.5 dBFS）；N5 / f4b5d44f 为 -22.2。SH2 开头渐入约 0.5 秒。
 - **马良音频窄复核：签字通过**（各段相差 <4 dB，无削波，结尾干净；SH2 结尾 14.7 秒处还有 -29 dB、收得偏快但几乎听不出，不拦）。
+
+## 再追加：开头加出发日期（PM 10-12 指令，74 号转达；PM 已确认 CTS 没有早鸟优惠）
+
+- **做法**：每条片开头 0–2.4 秒加两行字——第一行白字 `BOOK YOUR MARCH 2027 TOUR`，第二行红底白字 `DEPARTS <日期>`。**中性版：没有 Early Bird、limited、last chance、余位、限人数、免签。** 字块烧在各片的**开场镜头素材**里（Dropbox `remotion-assets/clips/c5_*_hook*.mp4`，字用 Montserrat 渲染成透明 PNG 叠在镜头上，淡入 0.2 秒、2.1 秒起淡出），**没有改共享模板**；视频仍走视频工厂出片。字块位置 y≈480–632（logo 之下、钩子之上），在安全区内。日期只用出团表 3 月班期：BOC 11 MARCH、Tale 18 MARCH、上海 25 MARCH、Natural China 26 MARCH 2027。
+- **改日期要重渲**（PM 已知代价）。响度沿用上一轮（整体约 -22 LUFS）。
+- **5 条新终版（只授权这五张；上一版终版与中间版已全部标 superseded）**：
+
+| 团 | 第几条 | 工单 | 开头日期 | 下 1/3 亮度 | 响度 | 状态 |
+|---|---|---|---|---|---|---|
+| A Tale of Two Cities | #1（价格悬念） | **`80d74aa4-b5bb-466e-becf-4197601e3e28`** | 18 MARCH 2027 | 58.7 | -22.2 | `in_review` |
+| Best of China | #2（4 CITIES · 1 TRIP） | **`04562fa5-5b52-4153-ae74-26aa459ac2d5`** | 11 MARCH 2027 | 63.8 | -22.2 | `in_review` |
+| A Tale of Two Cities | #2（10 DAYS · 2 CITIES · 1 TRAIN） | **`6fe26e9d-1971-4250-8e86-3964bae084f6`**（r7） | 18 MARCH 2027 | 68.6 | -22.1 | `in_review` |
+| Shanghai & Surroundings | #2（WHAT'S IN THE PRICE?） | **`65a0ac28-1e39-477c-b80b-414032a88f94`** | 25 MARCH 2027 | 62.8 | -22.8 | `in_review` |
+| Natural China | #1（价格悬念） | **`6f3fee5f-793b-4c34-9838-0805f5494db7`** | 26 MARCH 2027 | 65.9 | -22.2 | `in_review` |
+
+- 参数留档：`2026-10-11-spring-2027-reel-orders/{TALE-r4,BOC2-r2,TALE2-r7,SH2-r5,NAT-r4}-*.order.json`；成片 `~/Dropbox/MagicLab_Studio/CTS/output/reels/2026-10-11_d_*.mp4`。
+- 已发布的上海 v5r2 `fa4fdd89` 与 Best of China #1 `7ed7645b` 没动。
+- **窄复核**：苏东坡 5 条签字通过（出发日与官网一致，无稀缺/促销字样，「BOOK YOUR MARCH 2027 TOUR」不构成不实或紧迫暗示；提醒：这行字对 45–70 岁偏小，可再大一号）。马良：Tale#1、BOC#2、上海#2、Natural China 签字通过（字块 y480–632 在安全区内、与 logo 间距约 35px、与钩子首行 30–36px、淡入淡出自然、亮度与响度没被破坏；BOC 兵马俑上白字对比偏弱、字块左边缘 x≈42 与钩子 x≈90 不齐，可延后）；**Tale#2 第一版不签字**（字块与钩子「10」只隔 5px、白字被白色钢梁穿过）→ 重出 r7（字块上移 18px、第一行加半透明深色底），马良复核**签字通过**（与「10」间距约 23px；深色底与 logo 底边只隔 1–2px，略挤，可延后）。
+- 还在 `in_review` 的更早 Shanghai 旧工单（`2153778a`、`cda1d205`、`e4d40360` 等，别的窗口做的）我没动，**别点**。
