@@ -1,4 +1,4 @@
-# Story 自动发布（Facebook + Instagram）— 设计稿 v0.3（两轮审查后修订，待子牙复核改动处，未批，未开工）
+# Story 自动发布（Facebook + Instagram）— 设计稿 v0.4（两轮审查 + Codex 修订，待子牙复核改动处，未批，未开工）
 
 > **v0.3：第二轮审查（子牙 0 阻塞前提下 1 阻塞 + 数条必改；魏征 6 必改）已按 §12.2 处置，子牙只需复核改动处。** 以下为 v0.2 说明：第一轮审查两人都判「需改后再审」（子牙 2 阻塞 + 若干必改；魏征 1 阻塞 + 9 必改）。§12.1 逐条处置；正文已按处置改过，与 §12.1 冲突时以 §12.1 为准。本稿仍未经第二轮审查，不能当作已审定稿。**
 
@@ -135,7 +135,7 @@ Inngest 定时发布器 cloud-story-auto-publish（每 5 分钟 NZ 时区；Stor
     step.run(receipt)    ─ 有 provider 回执就记 PUBLISHED_UNVERIFIED，写 story.publish.attempted
     step.run(confirm)    ─ 回读 GET /{page_id}/stories 或 IG 媒体；确认了升为 PUBLISHED；**回读失败不降级、不重发**，只出待办
   **precheck 失败分类**：`FILE_CHANGED`（重算哈希与指纹不符）= 确定没发、**不可重试**；`FILE_UNREACHABLE`（下载失败 / 超时）= 确定没发、**窗口内下一轮可重试**（尝试行转非终态 `RETRYABLE`，见 §4.3）；任何「已调 Meta 但结果不明」= `UNKNOWN_OUTCOME`。**存储层必须强制「写后不可覆盖」**（不能只靠命名约定）：precheck 下载与 Meta 抓取之间文件若可被改，哈希核对会漏检；交给 Meta 的地址必须就是哈希核对过的同一个不可变路径。
-  **崩溃后规则**：没有 `container_id` 的 CLAIMED 超过 10 分钟（配置项）仍无终态，下一轮转 UNKNOWN_OUTCOME + 待办，**永不自动重发**（Story 没有撤回接口，比图文更要紧）。**已有 `container_id` 的行（状态 `CONTAINER_CREATED`）**：由接力函数查一次容器状态后才决定：就绪 → 继续发布；失败 / 过期 → `FAILED_FINAL`（确定没发）；仍查不到 → `UNKNOWN_OUTCOME`。容器轮询最长约 5 分钟，所以不适用上面 10 分钟线。**但接力事件可能丢**（容器已建并落库、进程在投递 `story.ig_container.created` 之前崩溃）：所以另设**回收扫描**——定时扫描器每轮把 `CONTAINER_CREATED` 且 `updated_at` 超过 15 分钟（配置项，须大于容器轮询上限）的行，补投一次 `story.ig_container.created`（以 `item_id+channel+container_id` 作事件幂等键，接力函数重复收到只查不重建）；补投后再超 30 分钟仍无终态 → `UNKNOWN_OUTCOME` + 今日待办。实现上也可用事务性 outbox（落库与事件登记同一事务），二者择一，PR 须写明。
+  **崩溃后规则**：没有 `container_id` 的 CLAIMED 超过 10 分钟（配置项）仍无终态，下一轮转 UNKNOWN_OUTCOME + 待办，**永不自动重发**（Story 没有撤回接口，比图文更要紧）。**已有 `container_id` 的行（状态 `CONTAINER_CREATED`）**：由接力函数查一次容器状态后才决定：就绪 → **先原子领取发布权**（带条件更新：`UPDATE ... SET status='PUBLISHING', publish_started_at=now() WHERE item_id=? AND channel=? AND status='CONTAINER_CREATED' AND container_id=?`，影响 1 行才许调 `media_publish`；0 行 = 别的处理器已领，直接退出，不调 provider）后继续发布；失败 / 过期 → `FAILED_FINAL`（确定没发）；仍查不到 → `UNKNOWN_OUTCOME`。容器轮询最长约 5 分钟，所以不适用上面 10 分钟线。**但接力事件可能丢**（容器已建并落库、进程在投递 `story.ig_container.created` 之前崩溃）：所以另设**回收扫描**——定时扫描器每轮把 `CONTAINER_CREATED` 且 `updated_at` 超过 15 分钟（配置项，须大于容器轮询上限）的行，补投一次 `story.ig_container.created`（以 `item_id+channel+container_id` 作事件幂等键，接力函数重复收到只查不重建）；补投后再超 30 分钟仍无终态 → `UNKNOWN_OUTCOME` + 今日待办。**`PUBLISHING` 状态规则**：调 `media_publish` 之前必须已处于 `PUBLISHING`；调用返回后写回执（`PUBLISHED_UNVERIFIED`）失败、或进程在调用后崩溃，该行停在 `PUBLISHING`，超过 10 分钟（配置项）由扫描器转 `UNKNOWN_OUTCOME` + 待办，**回收扫描与重复事件都不得对 `PUBLISHING` 行再次调 `media_publish`**；`media_publish` 明确返回错误（确定没发）才可转 `FAILED_FINAL`，且该更新带 `WHERE status='PUBLISHING'`，不得覆盖已写入的 `PUBLISHED_UNVERIFIED` / `PUBLISHED`。实现上也可用事务性 outbox（落库与事件登记同一事务），二者择一，PR 须写明。
   回读器 cloud-story-insights-readback：见 §7
 失败/拦截/不确定 ─▶ 今日待办（拉模式，沿用 price-fact-items.ts 的做法）
 ```
@@ -146,9 +146,11 @@ Inngest 定时发布器 cloud-story-auto-publish（每 5 分钟 NZ 时区；Stor
 
 每条事件 / 回执至少包含：`request_id`、`client_id`、`pack_id`、`item_id`、`source_record_id`（素材事实库条目编号）、`channel`（`facebook_story` / `instagram_story`）、`status`、`provider_receipt`（Facebook 返回的 `post_id` / Instagram 的媒体 `id`，**没有则为 null，不许伪造**）、`authorization_id`、`authorization_state`、`content_hash`、`mode`（`DRY_RUN` / `LIVE`）、`provider_impact`（`NONE` / `STORY_PUBLISHED`）、`cost_usd`（0）、`created_at`。
 
-`status` 取值：`DRY_RUN` · `CLAIMED` · `CONTAINER_CREATED`（仅 Instagram：容器已建、`container_id` 已落库、未发布）· `PUBLISHED_UNVERIFIED`（拿到 provider_receipt，回读还没确认）· `PUBLISHED`（**必须有 provider_receipt 且回读确认**；回读失败只停在上一档，不降级、不重发）· `BLOCKED`（带 `reason_code`）· `FAILED_FINAL` · `UNKNOWN_OUTCOME` · `MISSED_WINDOW` · `SKIPPED_NOT_AUTHORIZED` · `RETRYABLE`（**非终态**，仅用于 `FILE_UNREACHABLE` 这类确定没发的暂时失败，带 `retry_count`、`next_retry_at`）。
+`status` 取值：`DRY_RUN` · `CLAIMED` · `CONTAINER_CREATED`（仅 Instagram：容器已建、`container_id` 已落库、未发布）· `PUBLISHING`（仅 Instagram：已原子领取发布权、`media_publish` 调用中或结果未落库；**非终态但不可自动重试**）· `PUBLISHED_UNVERIFIED`（拿到 provider_receipt，回读还没确认）· `PUBLISHED`（**必须有 provider_receipt 且回读确认**；回读失败只停在上一档，不降级、不重发）· `BLOCKED`（带 `reason_code`）· `FAILED_FINAL` · `UNKNOWN_OUTCOME` · `MISSED_WINDOW` · `SKIPPED_NOT_AUTHORIZED` · `RETRYABLE`（**非终态**，仅用于 `FILE_UNREACHABLE` 这类确定没发的暂时失败，带 `retry_count`、`next_retry_at`）。
 
-**状态流转（终态加粗）**：`CLAIMED` →（Facebook）`PUBLISHED_UNVERIFIED` → **`PUBLISHED`**；`CLAIMED` →（Instagram）`CONTAINER_CREATED` → `PUBLISHED_UNVERIFIED` → **`PUBLISHED`**；任一步 → **`BLOCKED` / `FAILED_FINAL` / `UNKNOWN_OUTCOME` / `MISSED_WINDOW` / `SKIPPED_NOT_AUTHORIZED`**；`FILE_UNREACHABLE` 的 precheck 失败 → `RETRYABLE`（不是 `BLOCKED`），**重新领取**用带条件的更新：`UPDATE ... SET status='CLAIMED' WHERE item_id=? AND channel=? AND status='RETRYABLE' AND next_retry_at<=now() AND retry_count<N`（影响 1 行才算领到，唯一键不变、不重新插入），仍在发布时间窗内才可领；超窗 → `MISSED_WINDOW`，重试次数用尽 → `BLOCKED(FILE_UNREACHABLE)`。
+**状态流转（终态加粗）**：`CLAIMED` →（Facebook）`PUBLISHED_UNVERIFIED` → **`PUBLISHED`**；`CLAIMED` →（Instagram）`CONTAINER_CREATED` → `PUBLISHING` → `PUBLISHED_UNVERIFIED` → **`PUBLISHED`**；任一步 → **`BLOCKED` / `FAILED_FINAL` / `UNKNOWN_OUTCOME` / `MISSED_WINDOW` / `SKIPPED_NOT_AUTHORIZED`**；`FILE_UNREACHABLE` 的 precheck 失败 → `RETRYABLE`（不是 `BLOCKED`），**重新领取**用带条件的更新：`UPDATE ... SET status='CLAIMED' WHERE item_id=? AND channel=? AND status='RETRYABLE' AND next_retry_at<=now() AND retry_count<N`（影响 1 行才算领到，唯一键不变、不重新插入），仍在发布时间窗内才可领；超窗 → `MISSED_WINDOW`，重试次数用尽 → `BLOCKED(FILE_UNREACHABLE)`。
+
+**演练回执重领（`DRY_RUN` → `CLAIMED`）**：`DRY_RUN` 行因唯一键 `(item_id, channel)` 不能重新插入，所以规定带条件的重领：`UPDATE ... SET status='CLAIMED', mode='LIVE' WHERE item_id=? AND channel=? AND status='DRY_RUN' AND <当前仍在发布时间窗内> AND <全局 / 客户 / 渠道开关现在均为真发>`，影响 1 行才算领到；领到后**重新走完整 precheck**（授权、指纹、价格闸、熔断、值班表等一个不省，不沿用演练时的结果）。超窗的 `DRY_RUN` 行 → `MISSED_WINDOW`。对照既有每日计划实现 `daily-plan-auto-publish-decide.ts:206-207` 对 `dry_run` 的回收。
 **`PUBLISHED_UNVERIFIED` 的出口**：由回读器负责升为 `PUBLISHED`；发出后超过 24 小时仍未确认 → 转待办「请人工到主页核对」（Story 此时多已过期，核对靠回执与留痕），**不算熔断条件**，不重发。
 
 ### 4.4 Fail-closed（沿用每日计划做法，Story 更严）
@@ -187,7 +189,7 @@ Inngest 定时发布器 cloud-story-auto-publish（每 5 分钟 NZ 时区；Stor
 - 带地名的画面只用已核对可靠的镜头；真实产品 / 真实价格画面只能用客户自己提供的素材（CLAUDE.md §8）；客人肖像 PM 未拍板，**一律不用**。
 
 **文案红线（沿用 [手册 C-11](../sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md) 与 CTS 总方案）**
-不写余位 / max / 限人数 / 免签 / 航司；不写 cheapest / lowest；不写原价 / 现价 / 立省；不编评价；价格只写官网可溯措辞，**发前核官网实测页面**——注意既有两道闸**不会**请求官网（`loadOfferPriceFacts` 只读 `clients.factory_config.render.creatomate.offers`，`price-claim-gate` 只核图片来源），所以带价格的条目 `precheck` 必须**另加一步 `price-live-check`**：发前一刻抓取 `website_ref` 实测页面，解析出价格与文案比对；抓取失败 / 超时 / 解析不到 / 不一致 = `BLOCKED(PRICE_LIVE_MISMATCH 或 PRICE_LIVE_UNVERIFIED)`，fail-closed。若改用价格快照，快照须带 `checked_at` 且超过时效（默认 24 小时，配置项）即视为不可用，同样拦截；AU / NZ 英语拼写；对外不出现真实供应商名；客户禁用词读 `clients.brand_redline_phrases` + `master_briefs`。发布前复用既有两道价格闸（`price-claim-gate` / `price-fact-gate`）**并加上述 `price-live-check`**。
+不写余位 / max / 限人数 / 免签 / 航司；不写 cheapest / lowest；不写原价 / 现价 / 立省；不编评价；价格只写官网可溯措辞，**发前核官网实测页面**——注意既有两道闸**不会**请求官网（`loadOfferPriceFacts` 只读 `clients.factory_config.render.creatomate.offers`，`price-claim-gate` 只核图片来源），所以带价格的条目 `precheck` 必须**另加一步 `price-live-check`**：发前一刻抓取 `website_ref` 实测页面（**SSRF 防护**：抓取必须走现有 `src/lib/net/safe-fetch.ts` 的 `safeFetchText`（逐跳 DNS 校验 + 连接绑定），且 `website_ref` 的域名必须落在该客户已批准的官网域名白名单内，白名单读 `clients` 的官网域名配置；非 https、域名不在白名单、重定向到域外或解析到非公网地址 = `BLOCKED(PRICE_LIVE_UNVERIFIED)`，fail-closed，不降级为直连），解析出价格与文案比对；抓取失败 / 超时 / 解析不到 / 不一致 = `BLOCKED(PRICE_LIVE_MISMATCH 或 PRICE_LIVE_UNVERIFIED)`，fail-closed。若改用价格快照，快照须带 `checked_at` 且超过时效（默认 24 小时，配置项）即视为不可用，同样拦截；AU / NZ 英语拼写；对外不出现真实供应商名；客户禁用词读 `clients.brand_redline_phrases` + `master_briefs`。发布前复用既有两道价格闸（`price-claim-gate` / `price-fact-gate`）**并加上述 `price-live-check`**。
 
 **每条必须记录来源**（机器强制非空，缺 = 拦）：
 `source_record_id`（事实库条目）· `website_ref`（官网页面 URL + 核对日期）· `visual_ref`（素材编号 + 来源标签：客户实拍 / 客户提供 / 图库 / 工厂生成）· `place_verified`（带地名画面是否核对过）。**无来源就是 `BLOCKED`**，不是警告。
@@ -282,7 +284,7 @@ Story 24 小时就消失，**回读窗口比图文 Post 的 T+4h / T+72h 短得�
 ## 10. 三刀交付与上线前置（每刀单独验收、单独回滚）
 
 **顺序铁律：刀一验证不过就停，不建表（不先花刀二的钱）。**
-**刀一（零数据库、零真发）**：Facebook 主页 Story 的照片 / 视频两个发布方法 + Instagram 适配器（只写不调线上）+ 结构化错误；全部单测；**真实 Graph 试跑**（见下）验证 §3.5 的三个未核实项（IG Story 在 Facebook Login 下能否发；Reel 剪片段能否发 FB Story；Story 是否支持 `scheduled_publish_time`）。
+**刀一（零数据库、零真发）**：Facebook 主页 Story 的照片 / 视频两个发布方法 + Instagram 适配器（只写不调线上）+ 结构化错误；全部单测；**真实 Graph 试跑**（见下）验证 §3.5 的三个未核实项（IG Story 在 Facebook Login 下能否发；Reel 剪片段能否发 FB Story；Story 是否支持 `scheduled_publish_time`），**外加第四项：正文 / 文字能否随 Story 展示**（Facebook 与 Instagram 分别测：带 `message` / `caption` 发一条，再回读看正文是否出现在 Story 上或只留在后台）。**判据**：不展示独立正文 → §6 的价格说明与「回复了解」号召不能靠文案承载，改为**经苏东坡 / 马良审核的画面烧字**（此时 §6「画面不烧价格」建议作废并重写，且烧字进入 §6 的识别 + 逐图核对）；两种承载方式都不可行 → **停止，不进刀二、不建表**。
 **刀二（A 级迁移，PM 本人批）**：§5 的表 + 授权 / 撤销 / 预览墙接口 + 内容指纹；**仍没有任何自动发布**；授权接口回包带 `note: "Recorded only. The automatic publisher is not running yet."`（沿用 10-10 稿 §15）。
 **刀三**：Inngest 发布器 + 回读器 + 待办 + 看门狗 + 界面（界面上线前过 Impeccable，首次使用要先获准下载检查程序）；默认只演练；PM 说 go 才开真发。
 
@@ -290,7 +292,7 @@ Story 24 小时就消失，**回读窗口比图文 Post 的 T+4h / T+72h 短得�
 **真发开关前置（全部满足才许设环境变量）**
 1. 10-10 稿 §18 的 10 项清单（共享部分：占位丢失待办、手动与自动互斥、看门狗误报、`client_status = active` 等）已完成。
 2. CTS Instagram 已登记进商务账户（台账卡 10-16）+ **独立新授权**已完成 + 主页没有未完成的 Page Publishing Authorization。
-3. §3.5 三个未核实项已用**真实 Graph 调用**验证并回写本稿。
+3. §3.5 三个未核实项**及正文 / 文字展示能力**（§10 刀一第四项）已用**真实 Graph 调用**验证并回写本稿。
 4. **真实试跑**：Story 没有定时 / 撤回接口，**无法做「远期定时 + 立即撤回」**。方案：①优先找**非客户测试主页 / 测试 Instagram 账号**发 1 条；②没有，则只放 **CTS 1 条、PM 当面看着、发完立刻手动删、对账回执**，需要 PM 明确说 go。**当场试跑的每次结果写进 PR 的「## 当场试跑」**，没跑通不说「做好了」。
 5. 事实库盘点完成并据此定下首周条数；Facebook 与 Instagram 渠道分别单独开（先 Facebook，Instagram 等第 2 项满足后（**依赖：CTS Instagram 须先登记进商务账户，台账卡 10-16 到期；FB Story 可先走，IG 随后**））。
 6. 回读器在手动过渡期已用人工数据对过一遍口径。
@@ -378,6 +380,7 @@ Instagram 图文 / Reel 自动发布（另立项）· 改审核清单语义 · �
 
 ## 14. 版本
 
+- **v0.4（2026-10-12）**：按 Codex 第二轮四条意见修订：刀一加正文展示验证、IG 发布权原子领取与 `PUBLISHING` 状态、价格实测走 safeFetchText + 官网域名白名单、`DRY_RUN` 带条件重领。待子牙复核。
 - **v0.3（2026-10-12）**：按第二轮审查修订（§12.2）；量改为 PM 已确认的每天 3 条（目标上限）。待子牙复核改动处。
 - **v0.2（2026-10-12）**：按第一轮审查（子牙、魏征）修订，处置见 §12.1。未经第二轮审查。
 - **v0.1（2026-10-12）**：初稿，84 号窗口。未经任何审查。
