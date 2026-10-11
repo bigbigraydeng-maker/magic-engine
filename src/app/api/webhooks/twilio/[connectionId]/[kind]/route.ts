@@ -9,23 +9,15 @@ import { readCappedBody } from '@/lib/telephony/voipline/ingest'
 import { TELEPHONY_RAW_EVENT_RECEIVED } from '@/lib/telephony/voipline/events-contract'
 import { supabaseTelephonyStore } from '@/lib/telephony/voipline/store'
 import { handleTwilioWebhook } from '@/lib/telephony/twilio/ingest'
+import { resolvePublicBase } from '@/lib/telephony/twilio/url'
 
 export const dynamic = 'force-dynamic'
-
-/** Twilio 签名用的是它请求的那个公网地址；反向代理后要按转发头还原。 */
-function publicBase(req: NextRequest): string {
-  const fixed = process.env.TELEPHONY_PUBLIC_BASE_URL
-  if (fixed) return fixed.replace(/\/$/, '')
-  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host
-  const proto = req.headers.get('x-forwarded-proto') ?? 'https'
-  return `${proto}://${host}`
-}
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ connectionId: string; kind: string }> }): Promise<NextResponse> {
   const { connectionId, kind } = await ctx.params
   const bodyText = await readCappedBody(req)
   if (bodyText === null) return new NextResponse('<?xml version="1.0" encoding="UTF-8"?><Response><Hangup/></Response>', { status: 413, headers: { 'Content-Type': 'text/xml' } })
-  const baseUrl = publicBase(req)
+  const baseUrl = resolvePublicBase(req.headers, process.env.TELEPHONY_PUBLIC_BASE_URL, req.nextUrl.host)
   const result = await handleTwilioWebhook(supabaseTelephonyStore, {
     connectionId,
     kind,

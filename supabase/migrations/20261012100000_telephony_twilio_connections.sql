@@ -11,10 +11,17 @@ alter table public.telephony_connections add column if not exists secret_ref tex
 -- Twilio 来电转给哪个员工号码（E.164）
 alter table public.telephony_connections add column if not exists forward_to text;
 
--- 两种供应商各自必须配齐自己要的东西，缺了就连不上（不是静默放行）
+-- 两种供应商各自必须配齐自己要的东西、且不许带对方的东西（缺了就连不上，不是静默放行）
 alter table public.telephony_connections drop constraint if exists telephony_connections_provider_secret_check;
 alter table public.telephony_connections
   add constraint telephony_connections_provider_secret_check check (
-    (provider = 'voipline' and webhook_token_hash is not null)
-    or (provider = 'twilio' and secret_ref is not null)
+    (provider = 'voipline' and webhook_token_hash is not null and secret_ref is null)
+    or (
+      provider = 'twilio'
+      and webhook_token_hash is null
+      -- 令牌环境变量名只许这个前缀（运行时同样校验），写错一行也不会让服务读到别的密钥
+      and secret_ref ~ '^TWILIO_AUTH_TOKEN_[A-Z0-9_]{1,40}$'
+      -- 来电转接的员工号码必须是 E.164
+      and forward_to ~ '^\+[1-9][0-9]{7,14}$'
+    )
   );

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { computeTwilioSignature, verifyTwilioSignature } from '../signature'
 import { parseTwilioEvent } from '../events'
-import { handleTwilioWebhook, parseForm } from '../ingest'
+import { _clearConnCache, handleTwilioWebhook, parseForm } from '../ingest'
 import { createMemoryStore } from '../../voipline/__tests__/memory-store'
 import { processRawEvent } from '../../voipline/process'
 import type { TelephonyConnection } from '../../voipline/types'
@@ -9,7 +9,7 @@ import type { TelephonyConnection } from '../../voipline/types'
 const CLIENT = '33333333-3333-4333-8333-333333333333'
 const CONN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
 const ACCOUNT = 'ACtest0000000000000000000000000001'
-const SECRET_ENV = 'TEST_TWILIO_TOKEN'
+const SECRET_ENV = 'TWILIO_AUTH_TOKEN_TEST'
 const SECRET = 'test-auth-token-value'
 const STAFF = '+64210000099'
 const BASE = 'https://app.example.test'
@@ -19,6 +19,8 @@ const conn = (over: Partial<TelephonyConnection> = {}): TelephonyConnection => (
   id: CONN, clientId: CLIENT, provider: 'twilio', providerAccountId: ACCOUNT, webhookTokenHash: null,
   secretRef: SECRET_ENV, forwardTo: STAFF, defaultCountry: 'NZ', extensionMap: { [STAFF]: 'staff.one@example.test' }, active: true, ...over,
 })
+
+beforeEach(() => _clearConnCache())
 
 function rig(c: TelephonyConnection = conn()) {
   const mem = createMemoryStore([c])
@@ -32,7 +34,7 @@ function rig(c: TelephonyConnection = conn()) {
       const connectionId = o.connectionId ?? CONN
       const url = `${BASE}/api/webhooks/twilio/${connectionId}/${kind}`
       const body = new URLSearchParams(params).toString()
-      const signature = o.sig === undefined ? computeTwilioSignature(SECRET, url, parseForm(body)) : o.sig
+      const signature = o.sig === undefined ? computeTwilioSignature(SECRET, url, parseForm(body) ?? {}) : o.sig
       return handleTwilioWebhook(mem.store, { connectionId, kind, url, baseUrl: BASE, signature, bodyText: body, env, now, emit: async (id) => { emitted.push(id) } })
     },
     async drain() { for (const id of emitted.splice(0)) await processRawEvent(mem.store, id, now, { quietMs: 0 }) },
@@ -160,5 +162,105 @@ describe('Twilio fail-closed', () => {
     const res = await r.post('status', { ...base, ParentCallSid: 'CA0', CallStatus: 'completed' })
     expect(res.status).toBe(200)
     expect(r.mem.raw.size).toBe(0)
+  })
+})
+
+describe('审查后补的防线', () => {
+  it('变量名不在 TWILIO_AUTH_TOKEN_ 前缀内：当作没配，拒绝（不会读别的环境变量）', async () => {
+    const r = rig(conn({ secretRef: 'SUPABASE_SERVICE_ROLE_KEY' }))
+    expect((await r.post('status', base)).status).toBe(401)
+    expect(r.mem.rejections[0].reason).toBe('secret_not_configured')
+  })
+  it('数据库短暂不可用：来电仍验签并转接（用最近一次读到的连接），其余回调才回 503', async () => {
+    const r = rig()
+    await r.post('voice', base) // 先成功一次，缓存连接
+    r.mem.store.getConnection = async () => { throw new Error('db down') }
+    r.mem.store.insertRawEvent = async () => { throw new Error('db down') }
+    const v = await r.post('voice', { ...base, CallSid: 'CA9' })
+    expect(v.status).toBe(200)
+    expect(v.twiml).toContain(`<Number>${STAFF}</Number>`)
+    expect((await r.post('status', { ...base, CallSid: 'CA9', CallStatus: 'completed' })).status).toBe(503)
+  })
+  it('数据库不可用且没有缓存：不转接（宁可挂断也不在没验签的情况下转接）', async () => {
+    const r = rig()
+    r.mem.store.getConnection = async () => { throw new Error('db down') }
+    const v = await r.post('voice', base)
+    expect(v.status).toBe(503)
+    expect(v.twiml).toContain('<Hangup/>')
+  })
+  it('来电：落库失败也先转接', async () => {
+    const r = rig()
+    r.mem.store.insertRawEvent = async () => { throw new Error('db down') }
+    const v = await r.post('voice', base)
+    expect(v.status).toBe(200)
+    expect(v.twiml).toContain('<Dial')
+  })
+})
+
+describe('第二轮审查后补的防线', () => {
+  it('员工那段结果（dial）一直没到、只有父通话 completed 且总时长 600 秒：不记漏接，转人工确认', async () => {
+    const r = rig()
+    await r.post('voice', { ...base, CallStatus: 'ringing' })
+    await r.post('status', { ...base, CallStatus: 'completed', CallDuration: '600' })
+    await r.drain()
+    expect(call(r)).toMatchObject({ crmStatus: 'needs_review' })
+    expect(touchpoints(r)).toHaveLength(0)
+  })
+  it('转人工之后员工那段结果才到：重新处理并写成已接通', async () => {
+    const r = rig()
+    await r.post('voice', { ...base, CallStatus: 'ringing' })
+    await r.post('status', { ...base, CallStatus: 'completed', CallDuration: '600' })
+    await r.drain()
+    await r.post('dial', { ...base, DialCallStatus: 'completed', DialCallDuration: '580' })
+    await r.drain()
+    expect(call(r)).toMatchObject({ crmStatus: 'written', talkSeconds: 580 })
+    expect(touchpoints(r)[0]).toMatchObject({ outcome: 'spoke' })
+  })
+  it('父通话 busy/failed/canceled：没接；通话时长不会被父通话总时长撑大', async () => {
+    for (const st of ['busy', 'failed', 'canceled']) {
+      const r = rig()
+      await r.post('status', { ...base, CallStatus: st })
+      await r.drain()
+      expect(touchpoints(r)[0]).toMatchObject({ outcome: 'missed_inbound' })
+    }
+    const r = rig()
+    await r.post('status', { ...base, CallStatus: 'completed', CallDuration: '700' })
+    await r.post('dial', { ...base, DialCallStatus: 'completed', DialCallDuration: '90' })
+    await r.drain()
+    expect(call(r)).toMatchObject({ talkSeconds: 90 })
+  })
+  it('外呼方向的回调只留档，不写 CRM', async () => {
+    const r = rig()
+    await r.post('status', { ...base, Direction: 'outbound-api', To: CUSTOMER, CallStatus: 'completed' })
+    await r.drain()
+    expect(touchpoints(r)).toHaveLength(0)
+  })
+  it('同名参数：拒绝（400），不落库', async () => {
+    const r = rig()
+    const url = `${BASE}/api/webhooks/twilio/${CONN}/status`
+    const body = 'CallSid=CA1&CallSid=CA2&AccountSid=' + ACCOUNT
+    const res = await handleTwilioWebhook(r.mem.store, { connectionId: CONN, kind: 'status', url, baseUrl: BASE, signature: 'x', bodyText: body, env: () => SECRET, emit: async () => undefined })
+    expect(res.status).toBe(400)
+    expect(r.mem.raw.size).toBe(0)
+  })
+  it('同一请求换参数顺序 / 换编码重放：签名仍过，但指纹相同，不会多写一行', async () => {
+    const r = rig()
+    const p = { ...base, CallStatus: 'ringing' }
+    await r.post('status', p)
+    const url = `${BASE}/api/webhooks/twilio/${CONN}/status`
+    const reordered = 'To=%2B6498000000&CallStatus=ringing&From=%2B64210000001&Direction=inbound&CallSid=CA1&AccountSid=' + ACCOUNT
+    const sig = computeTwilioSignature(SECRET, url, parseForm(reordered) ?? {})
+    await handleTwilioWebhook(r.mem.store, { connectionId: CONN, kind: 'status', url, baseUrl: BASE, signature: sig, bodyText: reordered, env: (n) => (n === SECRET_ENV ? SECRET : undefined), emit: async () => undefined })
+    expect(r.mem.raw.size).toBe(1)
+  })
+})
+
+describe('公网地址还原', () => {
+  const h = (m: Record<string, string>) => ({ get: (k: string) => m[k] ?? null })
+  it('固定地址优先；转发头取第一个值', async () => {
+    const { resolvePublicBase } = await import('../url')
+    expect(resolvePublicBase(h({}), 'https://app.example.test/', 'x')).toBe('https://app.example.test')
+    expect(resolvePublicBase(h({ 'x-forwarded-host': 'a.example.test, b.example.test', 'x-forwarded-proto': 'https,http' }), undefined, 'x')).toBe('https://a.example.test')
+    expect(resolvePublicBase(h({ host: 'h.example.test' }), undefined, 'x')).toBe('https://h.example.test')
   })
 })

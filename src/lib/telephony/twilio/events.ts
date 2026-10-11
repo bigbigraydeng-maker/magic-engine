@@ -50,6 +50,9 @@ export function parseTwilioEvent(
   const direction = dir === 'inbound' ? 'inbound' : dir.startsWith('outbound') ? 'outbound' : null
   const counterparty = direction === 'inbound' ? s(p.From) : direction === 'outbound' ? s(p.To) : null
 
+  // 本期只做来电。外呼方向的回调（别处用 API 外呼并把状态回调指到这里）只留档，不进 CRM。
+  const keepOut = direction === 'outbound'
+
   const base: NormalisedCallEvent = {
     callId: callSid,
     eventType: 'other',
@@ -66,6 +69,8 @@ export function parseTwilioEvent(
     recordingUrl: null,
   }
 
+  if (keepOut) return { ok: true, event: { ...base, rawType: `twilio_${kind}_outbound_ignored` } }
+
   if (kind === 'voice') return { ok: true, event: { ...base, eventType: 'call_started', rawType: 'twilio_voice' } }
 
   if (kind === 'status') {
@@ -73,9 +78,12 @@ export function parseTwilioEvent(
     if (st === 'initiated' || st === 'queued' || st === 'ringing') {
       return { ok: true, event: { ...base, eventType: 'call_started', rawType: `twilio_status_${st}` } }
     }
-    if (['completed', 'busy', 'no-answer', 'failed', 'canceled'].includes(st)) {
-      // 父通话结束只能说明「通话结束了」，真通话时长和有没有人接要看 dial 那一段；
-      // 这里 answered=false 只是兜底（只要 dial 报过接通，折叠时「任一为真即为真」）。
+    if (st === 'completed') {
+      // 父通话 completed 只说明「线路结束了」，有没有人接、聊了多久要看 dial 那一段。
+      // 所以这里 answered 不下结论（null）；CallDuration 含响铃，只作「有时长却没接通结论」的线索（totalSeconds），不当通话时长。
+      return { ok: true, event: { ...base, eventType: 'call_ended', rawType: 'twilio_status_completed', answered: null, totalSeconds: num(p.CallDuration) } }
+    }
+    if (['busy', 'no-answer', 'failed', 'canceled'].includes(st)) {
       return { ok: true, event: { ...base, eventType: 'call_ended', rawType: `twilio_status_${st}`, answered: false } }
     }
     return { ok: true, event: { ...base, rawType: `twilio_status_${st || 'unknown'}` } }

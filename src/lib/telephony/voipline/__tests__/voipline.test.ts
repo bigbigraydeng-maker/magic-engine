@@ -54,13 +54,13 @@ describe('事件解析', () => {
     const b = parseVoiplineEvent(inboundEnded({ conversation_duration: 99 }))
     if (!a.ok || !b.ok) throw new Error('parse')
     const body = JSON.stringify(inboundEnded())
-    expect(buildDedupeKey('acct', a.event, body)).toBe(buildDedupeKey('acct', a.event, body))
-    expect(buildDedupeKey('acct', a.event, body)).not.toBe(buildDedupeKey('acct', b.event, JSON.stringify(inboundEnded({ conversation_duration: 99 }))))
+    expect(buildDedupeKey('acct', a.event, body, 'voipline')).toBe(buildDedupeKey('acct', a.event, body, 'voipline'))
+    expect(buildDedupeKey('acct', a.event, body, 'voipline')).not.toBe(buildDedupeKey('acct', b.event, JSON.stringify(inboundEnded({ conversation_duration: 99 })), 'voipline'))
     // 通话编号里带冒号也不会和别的账号撞键
     const x = parseVoiplineEvent({ ...inboundEnded(), unique_call_id: 'a:b' })
     const y = parseVoiplineEvent({ ...inboundEnded(), unique_call_id: 'b' })
     if (!x.ok || !y.ok) throw new Error('parse')
-    expect(buildDedupeKey('acct', x.event, body)).not.toBe(buildDedupeKey('acct:a', y.event, body))
+    expect(buildDedupeKey('acct', x.event, body, 'voipline')).not.toBe(buildDedupeKey('acct:a', y.event, body, 'voipline'))
   })
 })
 
