@@ -42,6 +42,7 @@ function receipt(stage: string, status: string, now: string, detail?: string): R
 
 function baseRow(conn: TelephonyConnection, folded: FoldedCall, prev: CallRow | null): CallRow {
   return {
+    provider: conn.provider,
     clientId: conn.clientId,
     connectionId: conn.id,
     providerCallId: folded.callId,
@@ -93,6 +94,7 @@ function touchpointInput(
 ): TouchpointInput {
   return {
     clientId: conn.clientId,
+    source: conn.provider,
     contactId,
     direction: planned.direction,
     occurredAt: planned.occurredAt,
@@ -116,6 +118,7 @@ function touchpointInput(
 }
 
 /** 通话结束事件迟迟没来、被扫描任务转人工确认时写的说明（结束事件后来到了就重新处理）。 */
+export const ANSWERED_UNKNOWN_DETAIL = '没收到接通事件但有通话时长，不确定是否接通'
 export const NO_END_EVENT_DETAIL = '超过 6 小时没收到结束事件，需人工确认这通电话'
 
 /** 通话结束且 CRM 还没写成时，做号码匹配 + 写触点。失败抛出，由调用方记失败状态。 */
@@ -139,7 +142,7 @@ async function writeCrm(
     // 缺接通事件却有通话时长：既不能记成「没接」也不能记成「聊过」，交给人确认。
     row.crmStatus = 'needs_review'
     row.matchStatus = 'needs_review'
-    row.crmDetail = '没收到接通事件但有通话时长，不确定是否接通'
+    row.crmDetail = ANSWERED_UNKNOWN_DETAIL
     pushReceipt(row, receipt('crm', 'needs_review', now, 'answered_unknown'))
     return
   }
@@ -170,6 +173,7 @@ async function writeCrm(
     row.matchStatus = 'matched'
   } else if (planned.customerInitiated) {
     contactId = await store.createContactForInboundCall({
+      source: conn.provider,
       clientId: conn.clientId,
       phoneE164: planned.phone,
       name: planned.name,
@@ -221,7 +225,7 @@ export async function processRawEvent(
       return null
     }
 
-    const prev = await store.getCall(conn.clientId, raw.callId)
+    const prev = await store.getCall(conn.clientId, conn.provider, raw.callId)
     const row = baseRow(conn, folded, prev)
 
     if (raw.event.eventType === 'other') {
@@ -236,8 +240,9 @@ export async function processRawEvent(
     }
 
     const lastReceived = Math.max(...events.map((e) => Date.parse(e.receivedAt)))
+    const recoverableReview = row.crmStatus === 'needs_review' && (row.crmDetail === NO_END_EVENT_DETAIL || row.crmDetail === ANSWERED_UNKNOWN_DETAIL)
     const inQuietWindow = folded.stage === 'ended' && now().getTime() - lastReceived < quietMs
-    if (folded.stage === 'ended' && !inQuietWindow && (row.crmStatus === 'pending' || row.crmStatus === 'failed' || (row.crmStatus === 'needs_review' && row.crmDetail === NO_END_EVENT_DETAIL))) {
+    if (folded.stage === 'ended' && !inQuietWindow && (row.crmStatus === 'pending' || row.crmStatus === 'failed' || (row.crmStatus === 'needs_review' && (row.crmDetail === NO_END_EVENT_DETAIL || row.crmDetail === ANSWERED_UNKNOWN_DETAIL)))) {
       try {
         await writeCrm(store, conn, folded, row, stamp)
       } catch (err) {
@@ -267,7 +272,7 @@ export async function processRawEvent(
       crmStatus: row.crmStatus,
       matchStatus: row.matchStatus,
       recordingStatus: row.recordingStatus,
-      ...(inQuietWindow && row.crmStatus === 'pending' ? { deferred: true } : {}),
+      ...(inQuietWindow && (row.crmStatus === 'pending' || recoverableReview) ? { deferred: true } : {}),
     }
   } catch (err) {
     // CRM 失败已在上面落了状态；其余（取数、存通话失败）只标原始事件，留给补处理重试。

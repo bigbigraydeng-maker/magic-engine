@@ -43,6 +43,8 @@ export interface NormalisedCallEvent {
   /** 事件自己声明的接通状态；没说就是 null（不等于没接通）。 */
   answered: boolean | null
   talkSeconds: number | null
+  /** 整通电话总时长（含响铃），只用来发现「有时长却没有接通结论」，**不是**通话时长。 */
+  totalSeconds?: number | null
   /** 录音编号（不是链接）；供应商没给编号时为 null。 */
   recordingId: string | null
   /** 录音链接——只存在于原始事件行（仅服务端可读），不进通话表、不进日志。 */
@@ -187,7 +189,7 @@ export function parseVoiplineEvent(payload: unknown): ParseResult {
  * 字节级相同的重发指纹相同，照样被挡掉。指纹直接对原始请求体取哈希（不做递归序列化，
  * 深层嵌套的载荷也不会炸栈）。各段用 JSON 数组拼接，避免通话编号里带冒号造成碰撞。
  */
-export function buildDedupeKey(account: string, event: NormalisedCallEvent, bodyText: string): string {
+export function buildDedupeKey(account: string, event: NormalisedCallEvent, bodyText: string, provider: string): string {
   const fp = createHash('sha256').update(bodyText, 'utf8').digest('hex').slice(0, 16)
-  return JSON.stringify([VOIPLINE_PROVIDER, account, event.callId, event.rawType, fp])
+  return JSON.stringify([provider, account, event.callId, event.rawType, fp])
 }
