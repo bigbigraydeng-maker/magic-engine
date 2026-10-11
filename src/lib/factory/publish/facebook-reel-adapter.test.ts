@@ -81,6 +81,7 @@ describe('promoteReelToPublished 草稿转正', () => {
       const url = String(input)
       requests.push({ url, init })
       if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published,from')) return Response.json({ published: false, from: { id: 'page-1' } })
       if (url.includes('fields=published')) {
         return Response.json({ published: true, permalink_url: 'https://facebook.test/reel/video-1' })
       }
@@ -102,26 +103,85 @@ describe('promoteReelToPublished 草稿转正', () => {
     expect(body.get('published')).toBe('true')
   })
 
-  it('POST 没返回 success → 抛错', async () => {
+  it('POST 没返回 success → 抛错(回读即便 published=true 也不放行)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published,from')) return Response.json({ published: false, from: { id: 'page-1' } })
+      if (url.includes('fields=published')) {
+        return Response.json({ published: true, permalink_url: 'https://facebook.test/reel/video-1' })
+      }
       if (url.endsWith('/video-1')) return Response.json({ success: false })
       return Response.json({})
     }))
 
-    await expect(promoteReelToPublished({ target, videoId: 'video-1' })).rejects.toThrow()
+    await expect(promoteReelToPublished({ target, videoId: 'video-1' })).rejects.toThrow(/success/)
   })
 
   it('回读 published 不是 true → 抛错(失败即抛,绝不吞)', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published,from')) return Response.json({ published: false, from: { id: 'page-1' } })
       if (url.includes('fields=published')) return Response.json({ published: false })
       if (url.endsWith('/video-1')) return Response.json({ success: true })
       return Response.json({})
     }))
 
     await expect(promoteReelToPublished({ target, videoId: 'video-1' })).rejects.toThrow()
+  })
+
+  it('转正前发现视频不属于本页 → 防误发拦截,绝不 POST', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      requests.push({ url, init })
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published,from')) return Response.json({ published: false, from: { id: 'other-page' } })
+      return Response.json({})
+    }))
+
+    await expect(promoteReelToPublished({ target, videoId: 'video-1' })).rejects.toThrow(/防误发/)
+    expect(requests.some(request => request.url.endsWith('/video-1') && request.init?.method === 'POST')).toBe(false)
+  })
+
+  it('转正前发现已经是 published → 跳过 POST,直接返回 PUBLISHED', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      requests.push({ url, init })
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published,from')) return Response.json({ published: true, from: { id: 'page-1' } })
+      if (url.includes('fields=published')) {
+        return Response.json({ published: true, permalink_url: 'https://facebook.test/reel/video-1' })
+      }
+      return Response.json({})
+    }))
+
+    const result = await promoteReelToPublished({ target, videoId: 'video-1' })
+
+    expect(result.video_state).toBe('PUBLISHED')
+    expect(requests.some(request => request.url.endsWith('/video-1') && request.init?.method === 'POST')).toBe(false)
+  })
+
+  it('回读前两次 published=false,第三次 true → 重试后成功', async () => {
+    let readBackCount = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published,from')) return Response.json({ published: false, from: { id: 'page-1' } })
+      if (url.includes('fields=published')) {
+        readBackCount++
+        if (readBackCount < 3) return Response.json({ published: false })
+        return Response.json({ published: true, permalink_url: 'https://facebook.test/reel/video-1' })
+      }
+      if (url.endsWith('/video-1') && init?.method === 'POST') return Response.json({ success: true })
+      return Response.json({})
+    }))
+
+    const result = await promoteReelToPublished({ target, videoId: 'video-1' })
+
+    expect(result.video_state).toBe('PUBLISHED')
+    expect(readBackCount).toBe(3)
   })
 })
