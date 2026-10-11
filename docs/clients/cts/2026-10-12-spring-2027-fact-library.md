@@ -33,7 +33,7 @@
 | BOC-05 | 交通 | D6 高铁 G89 北京→西安，15:00–19:12（二等座或类似）；国际段与国内段机票含在价内（文案只写 Flights）；含地面接送 | 10-12 |
 | BOC-06 | 西安亮点 | Terracotta Warriors（环幕电影 + Bronze Chariot）D7；Ancient City Wall、Big Wild Goose Pagoda D8；Small Wild Goose Pagoda Museum、Huimin Street D9 | 10-12 |
 | BOC-07 | 杭州/水乡 | Puyuan Fashion Ancient Town（宋式建筑、水道）D9；West Lake（Hua Gang Guan Yu、boat cruise、Su Causeway、Leifeng Pagoda）D10；Meijiawu Tea Plantation + Longjing 茶品尝、Qinghefang Ancient Street D11 | 10-12 |
-| BOC-08 | 上海亮点 | Yuyuan classical garden、the Bund、Nanjing Road（D12）；People's Square、Lujiazui circular corridor（三座地标塔）、World Cultural Heritage Art Exhibition Centre（D13） | 10-12 |
+| BOC-08 | 上海亮点 | Yuyuan Garden、the Bund、Nanjing Road（D12）；People's Square、Lujiazui circular corridor（三座地标塔）、World Cultural Heritage Art Exhibition Centre（D13） | 10-12 |
 | BOC-09 | 含项 | 机票；行程所列酒店；英语导游；行程所列门票与餐食；地面接送 | 10-12 |
 | BOC-10 | 餐食 | 共 22 餐：12 早餐、9 午餐、1 晚餐（D9）；其余自理 | 10-12 |
 | BOC-11 | 住宿 | 北京 4 晚（Beijing Wanda Moments 或类似，4 星）、西安 3 晚（Mercure Xi'an Downtown 或类似，4 星）、Puyuan 1 晚（5 星）、杭州 1 晚（Holiday Inn Hangzhou 或类似，4 星）、上海 3 晚（Holiday Inn Express Shanghai 或类似，4 星）；最终酒店订位时确认 | 10-12 |
@@ -50,7 +50,7 @@
 | TALE-04 | 北京 D2 | 到达北京；Temple of Heaven，之后茶厂；午餐 | 10-12 |
 | TALE-05 | 北京 D3 | Tiananmen Square、National Centre for the Performing Arts 拍照、Forbidden City、Beihai Park、丝绸厂；早餐午餐含；晚间可选杂技秀（自费） | 10-12 |
 | TALE-06 | 北京 D4 | Great Wall（途中玉雕厂）；回程外观 Bird's Nest 与 Water Cube（Olympic Park）；早餐午餐含 | 10-12 |
-| TALE-07 | 北京 D5 | 人力三轮（pedi-cab）胡同游；拜访传统家庭；午餐后 Silk Market | 10-12 |
+| TALE-07 | 北京 D5 | 人力三轮（pedi-cab）胡同游；拜访传统家庭；Silk Market | 10-12 |
 | TALE-08 | 交通 | D6 高铁 G89 北京→西安 15:00–19:12（二等座或类似）；国际与国内机票含（文案只写 Flights）；含地面接送 | 10-12 |
 | TALE-09 | 西安 D7 | Terracotta Warriors（环幕电影）+ Bronze Chariot 展；晚间可选 Tang Palace 歌舞宴（自费） | 10-12 |
 | TALE-10 | 西安 D8–D9 | Xi'an City Wall、Big Wild Goose Pagoda（D8）；Small Wild Goose Pagoda Museum、Huimin Street（Muslim Quarter）（D9） | 10-12 |
@@ -89,7 +89,7 @@
 | NAT-04 | 三峡 | Cruise the Yangtze River through the Three Gorges from Yichang to Chongqing | 10-12 |
 | NAT-05 | 重庆 | Liziba Monorail Station、Ciqikou、Hongyadong night scenery；Chongqing → Chengdu 乘一等座高铁 | 10-12 |
 | NAT-06 | 成都 | See giant pandas；People's Park、Taikoo Li、Kuanzhai Alley；可选 Sichuan Opera 变脸表演（自费，无价格） | 10-12 |
-| NAT-07 | 张家界 | Zhangjiajie National Forest Park：Bailong Elevator、Tianzi Mountain Cableway；Tianmen Mountain：Glass Skywalk、Guigu Plank Walk；成都→张家界乘高铁 | 10-12 |
+| NAT-07 | 张家界 | Zhangjiajie National Forest Park：Bailong Elevator、Tianzi Mountain Cableway；Tianmen Mountain：Glass Skywalk、Guigu Plank Walk | 10-12 |
 | NAT-08 | 上海 | Yuyuan Garden、the Bund、Huangpu River night cruise | 10-12 |
 | NAT-09 | 含项 | Return international airfares from Auckland；国内机票（文案只写 Flights）；4–5 星酒店；英语导游；行程所列门票与餐；含一等座高铁的地面交通；三峡游轮含在价内 | 10-12 |
 | NAT-10 | 餐食 | 共 38 餐：13 早、12 午、13 晚 | 10-12 |
