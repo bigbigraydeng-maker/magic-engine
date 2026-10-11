@@ -10,4 +10,4 @@ verify_how: 看第一刀（Meta 适配器，DeepSeek 写）的 PR 是否已开�
 ---
 PM 10-12 撤销 10-10「Story 不做」。设计稿：docs/specs/2026-10-12-story-auto-publish-design.md（风险级 A，未批、未开工，代码一行没写，没向任何主页发过东西）。
 卡点：CTS Instagram 未登记进商务账户（台账 2026-10-09-cts-instagram-register-into-business，10-16 到期）；Story 无定时 / 撤回接口；量（每天 3 条）要先盘点素材事实库再定。
-PM 10-12 经 74 号转述：设计稿批、取消手动过渡、要自动发（真发另批）。第一刀指令：docs/codex-prompts/2026-10-12-story-slice1-deepseek.md。待 PM 定：周包要求链接贴纸，接口未核实能不能加（设计稿 §3.6）。
+PM 10-12 经 74 号转述：设计稿批、取消手动过渡、要自动发（真发另批）。第一刀指令：docs/codex-prompts/2026-10-12-story-slice1-deepseek.md。PM 已定：Story 不带链接贴纸，链接放图文首评（设计稿 §3.6）。
