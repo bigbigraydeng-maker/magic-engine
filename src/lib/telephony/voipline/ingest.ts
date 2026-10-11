@@ -1,0 +1,97 @@
+/**
+ * webhook 接收的全部逻辑（路由只是壳，方便脱网测试）。
+ *
+ * 顺序固定：认连接 → 验令牌 → 解析 → **先把原始事件耐久落库** → 才发处理事件。
+ * 任何一步不确定都拒绝并留回执（fail-closed），不处理、不猜客户。
+ *
+ * 回 200 = 「原始事件已经安全落库」。落库失败回 503，让 PBX 有机会重发。
+ * 发处理事件失败不影响 200：事件行已在库里，补处理任务（sweep）会捞起来。
+ */
+
+import { buildDedupeKey, parseVoiplineEvent } from './events'
+import { verifyWebhookToken } from './auth'
+import type { TelephonyStore } from './types'
+
+export const MAX_BODY_BYTES = 256 * 1024
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export interface IngestInput {
+  connectionId: string
+  tokenHeader: string | null
+  bodyText: string
+  now?: () => Date
+  /** 发「原始事件已收到」业务事件；失败只吞掉（有补处理兜底）。 */
+  emit: (rawEventId: string, clientId: string, connectionId: string) => Promise<void>
+}
+
+export interface IngestResult {
+  status: 200 | 400 | 401 | 413 | 503
+  body: { status: string; receipt?: string | null }
+}
+
+export async function handleVoiplineWebhook(store: TelephonyStore, input: IngestInput): Promise<IngestResult> {
+  const receivedAt = (input.now ?? (() => new Date()))().toISOString()
+  const reject = async (
+    status: 400 | 401 | 413,
+    reason: string,
+    ids: { connectionId: string | null; clientId: string | null },
+  ): Promise<IngestResult> => {
+    // 回执写失败也不能让拒绝变成放行。
+    await store.insertRejection({ ...ids, reason, receivedAt }).catch(() => undefined)
+    return { status, body: { status: 'rejected' } }
+  }
+
+  // 令牌错和连接不存在对外是同一个答案，不给探测者区分的线索。
+  if (!UUID.test(input.connectionId)) {
+    return reject(401, 'bad_connection_id_format', { connectionId: null, clientId: null })
+  }
+  let conn
+  try {
+    conn = await store.getConnection(input.connectionId)
+  } catch {
+    return { status: 503, body: { status: 'unavailable' } }
+  }
+  if (!conn || !conn.active) {
+    return reject(401, conn ? 'connection_inactive' : 'unknown_connection', {
+      connectionId: input.connectionId,
+      clientId: conn?.clientId ?? null,
+    })
+  }
+  if (!verifyWebhookToken(input.tokenHeader, conn.webhookTokenHash)) {
+    return reject(401, 'bad_token', { connectionId: conn.id, clientId: conn.clientId })
+  }
+  if (Buffer.byteLength(input.bodyText, 'utf8') > MAX_BODY_BYTES) {
+    return reject(413, 'body_too_large', { connectionId: conn.id, clientId: conn.clientId })
+  }
+
+  let payload: unknown
+  try {
+    payload = JSON.parse(input.bodyText)
+  } catch {
+    return reject(400, 'invalid_json', { connectionId: conn.id, clientId: conn.clientId })
+  }
+  const parsed = parseVoiplineEvent(payload)
+  if (!parsed.ok) {
+    return reject(400, `unparseable:${parsed.reason}`, { connectionId: conn.id, clientId: conn.clientId })
+  }
+
+  let inserted: { inserted: boolean; id: string | null }
+  try {
+    inserted = await store.insertRawEvent({
+      clientId: conn.clientId,
+      connectionId: conn.id,
+      callId: parsed.event.callId,
+      dedupeKey: buildDedupeKey(conn.providerAccountId, parsed.event, payload),
+      receivedAt,
+      rawType: parsed.event.rawType,
+      event: parsed.event,
+      payload,
+    })
+  } catch {
+    return { status: 503, body: { status: 'storage_failed' } }
+  }
+  if (!inserted.inserted || !inserted.id) return { status: 200, body: { status: 'duplicate' } }
+
+  await input.emit(inserted.id, conn.clientId, conn.id).catch(() => undefined)
+  return { status: 200, body: { status: 'accepted', receipt: inserted.id } }
+}
