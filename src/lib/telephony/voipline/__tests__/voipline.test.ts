@@ -6,7 +6,7 @@ import { hashWebhookToken, verifyWebhookToken } from '../auth'
 import { buildDedupeKey, classifyEventType, parseVoiplineEvent } from '../events'
 import { sweepStaleRawEvents } from '@/lib/inngest/functions/telephony-voipline'
 import {
-  CLIENT_A, CLIENT_B, CONN_A, CONN_B, CUSTOMER_E164, TOKEN_A, TOKEN_B,
+  CLIENT_A, CLIENT_B, CONN_A, CONN_B, CUSTOMER_E164, TOKEN_A, TOKEN_B, connB,
   connA, harness, inboundAnswered, inboundEnded, inboundRecording, inboundStart,
   outboundAnswered, outboundEnded, outboundRecording, outboundStart, ev,
 } from './fixtures'
