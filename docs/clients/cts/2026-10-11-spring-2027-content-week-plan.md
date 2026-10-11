@@ -7,7 +7,7 @@
 ## 零、先说三件会改变你判断的事实
 
 1. **上海周边团的 Reel（v5r2，工单 `fa4fdd89`）不是「待审」，它已经在 2026-10-11 17:35（新西兰时间）真发布到 CTS Facebook 主页了**（工厂回执：`video_state=PUBLISHED`，首评已发）。所以排期里上海 Reel 只能「沿用」，不能再发一次。
-2. **Natural China（3/26）官网有两个互相矛盾的页面（PM 10-11 定行程以出团表为准：16 天，见第〇节）**：
+2. **Natural China（3/26）官网有两个独立在售的团页（Signature 16 天、Discovery 14 天，均保留；PM 10-11 定行程以出团表为准：16 天，见第〇节）**：
    - `China Signature — Natural China`（`/tours/china/signature/landscapes`）：16 天，**NZD $7,349**，单人房差 NZD $1,895，页面写 "Small group · max 16 travellers"。
    - `China Discovery — Natural China`（`/tours/china/discovery/natural-china`）：14 天，价格写 **TBC**，写 "max 20 travellers"。
    - CTS 出团表 3/26 出发、4/10 返回 = **16 天**，与 Signature 页吻合。**PM 10-11 已确认：价格 NZ$7,349、16 天（Signature 页）。**
@@ -22,13 +22,13 @@
 | Best of China 3/11→3/25，国航，去 北京(+1)、回 北京 | 15 天 | 15 天，D1 飞北京、D14 上海飞北京接回程 | ✅ |
 | A Tale of Two Cities 3/18→3/27，国航，去回都是北京 | 10 天 | 10 天，北京 4 晚 + 西安 3 晚，D9 飞回北京 | ✅ |
 | Shanghai & Surroundings 3/25→4/3，东航，去 上海(+1)、回 上海 | 10 天 | 10 天，D1 奥克兰—上海 | ✅ |
-| Natural China 3/26→4/10，东航，去 上海（直飞）、回 上海 | 16 天 | **Signature 页 16 天 ✅；Discovery 页 14 天 ❌** | 以表为准 = 16 天（Signature） |
+| Natural China 3/26→4/10，东航，去 上海（直飞）、回 上海 | 16 天 | **Signature 页（`CN-NAT16`）16 天 ✅；Discovery 页（`CN-NAT14`）是另一个独立在售的 14 天团，不适用此班** | 3/26 映射到 Signature（16 天） |
 
-**网页与表的矛盾（要 CTS 改网页，不是我们改文案）**：
-1. Discovery 版 Natural China 页写 **14 天**、价格 TBC，与表的 16 天不符 → 我们的帖子、Reel 一律写 16 天；该页应由 CTS 下线或改成 16 天。
+**网页与表的对应关系**：
+1. Discovery 版 Natural China（`CN-NAT14`，14 天，价格 TBC，无固定班期）与 Signature 版（`CN-NAT16`）是两个独立在售团（见 `2026-10-10-tour-codes-draft.md`）。出团表 3/26 的 16 天只能映射到 Signature → 我们的帖子、Reel 写 16 天；**Discovery 页保留，不下线、不改天数**，只需 CTS 确认 3/26 的产品映射。
 2. Signature 版 Natural China 页写 "max 16 travellers"，表里每班 20 席 → **文案不写任何人数**（原本就不写）。
 3. 表没有价格。**PM 在聊天里本人确认：Natural China 价格 NZ$7,349、16 天（2026-10-11）**——与 Signature 页一致，价格档位问题**已解决**，Natural China 的 Reel/帖 4 不再卡在价格上（发布授权仍需 PM 另给，发布当天仍要重核官网价）。
-4. 顺带（不影响本周）：Best of China、Tale、Shanghai、Natural China 页面只挂了各自第一班，表里同团后面的班期（如 Best of China 5/13、9/9、10/28）官网没有 → 见 10/09《2027 出团表 vs 官网》。
+4. 顺带（不影响本周）：表里有、官网确实缺的后续班期（据 10/09《2027 出团表 vs 官网》逐项）：Best of China 缺 9/9、10/28（官网已有两班）；Tale 缺 8/21、9/2、10/21、11/14（官网已有两班）；Shanghai 缺 5/25、11/5；Natural China（Signature）缺 5/28、6/14、8/8、10/8、11/1；另 China Legacy 缺 9/3。
 
 ## 一、四个团的官网事实（2026-10-11 逐页实抓，WebFetch）
 
@@ -182,4 +182,4 @@
 - **platform-shared 新增**：无（没有改任何共享代码）。
 - **client-specific**：全部——CTS 的价格、日期、团名、素材文件、文案，只在工单 JSON、`credits-v6.json` 和本文档里。
 - **有没有把客户事实写进 shared runtime**：没有。
-- **学习层级**：仍在 CTS 私有层；一条值得升通用手册的经验：「**官网同一个团可能有两个页面且数字互相矛盾，先用出团表的天数对一遍再选页面**」。
+- **学习层级**：仍在 CTS 私有层；一条值得升通用手册的经验：「**官网同名产品可能是两个独立在售的团（天数、价格不同），先查团代码登记表，再用出团表天数对一遍选页面，不要当成重复页**」。
