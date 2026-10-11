@@ -4,7 +4,7 @@ title: Facebook Reel「草稿转正」旧做法被 Facebook 拒绝（1363130）�
 status: decided
 owner: agent
 decided_on: 2026-10-11
-source: session:2e96d3
+source: session:7c3226a9
 verify_by: 2026-10-14
 verify_how: PR 合并后，下一条需要转正的草稿 Reel（讲课片「真发」或工厂工单转正）走新路径，回读 Facebook 该视频 published=true；若仍报错看 lecture-publish 回执里的 FB 原文。当前仍缺：工厂主线工单（content_work_orders）没有任何自动转正入口，要另开卡（涉及工单状态同步、首评、发布信号会触发下游建暂停广告草稿）
 ---
