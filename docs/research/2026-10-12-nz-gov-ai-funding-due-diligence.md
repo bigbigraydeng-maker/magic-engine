@@ -132,6 +132,32 @@
 - 2026-06 另有政府资助 Business South 的 AcceleratorNZ（再覆盖 500 家）和 Business Mentors NZ 的 AI 数字导师工具（[摘要]，来源 MBIE 新闻页，原页打不开），**资格和费用未核实**，不是买培训的补贴。
 - **未发现**面向中小企业的行业 AI 试点（旅游、物流、地产）。
 
+### 3.5 官方「基金总列表」全貌（补查，2026-10-12）
+
+Business.govt.nz 的 Funding Explorer 是政府自己的基金汇总工具，官方说明**目前共 15 个项目、约 NZ$2.5 亿**（[原文]：[说明页](https://www.business.govt.nz/news/looking-for-funding-try-funding-explorer)，发布并复核 2026-08-19）。总列表页本身是动态加载、抓到的是空的，所以以这篇说明页的名单为准。**这 15 个就是中央政府「面向企业」的全部基金，逐个对照如下：**
+
+| # | 项目 | 运营方（以各页为准） | 跟「AI 培训 / 客户买我们服务」的关系 |
+|---|---|---|---|
+| 1 | Management Capability Development Fund | MBIE / RBPN | **相关**，见 §2.1 |
+| 2 | AI Advisory Pilot | MBIE / RBPN | **相关**，见 §2.2 |
+| 3 | New to R&D Grant | MBIE | 研发类，见 §3.1，对 ME 自己**可能**相关 |
+| 4 | R&D Career Grant | MBIE | 补贴雇一名硕博研究员 6 个月（硕士最多 NZ$3 万，博士最多 NZ$3.5 万）；与客户买服务无关 |
+| 5 | R&D Experience Grant | MBIE | 2026/27 轮已关闭 |
+| 6 | International Growth Fund | NZTE | 出口企业：NZTE 最多出 40%，每家最多 NZ$60 万、三年内；**必须是 NZTE 客户**，年收入超 NZ$1 亿不合格；页面没提营销费用，也没提 AI；开放（[原文]：[资助页](https://www.business.govt.nz/browse-our-resource-library/funding-explorer/international-growth-fund)，2026-07-29）。**对我们的出口型客户可能有关，但我们没核实过任何客户是不是 NZTE 客户** |
+| 7 | Aspire NZ Seed Fund | NZ Growth Capital Partners（NZGCP） | **股权投资，不是补贴**：与私人投资人同投，每轮 NZ$5 万–150 万；面向员工少于 20 人的新西兰早期科技企业；开放（[原文]：[资助页](https://www.business.govt.nz/browse-our-resource-library/funding-explorer/aspire-nz-seed-fund)，2026-08-03）。**对 ME 自己（融资）可能相关**，见 §4B |
+| 8 | Pre Seed Accelerator Fund | MBIE（经批准的伙伴机构） | 补贴把**公共资金研究成果**商业化，**不对私营企业开放**（[原文]：[资助页](https://www.business.govt.nz/browse-our-resource-library/funding-explorer/pre-seed-accelerator-fund)，2026-08-03）；ME 不适用 |
+| 9 | Deep Tech Incubator Programme | （未读到） | 官方页打开 404，**未核实**；名字指向深科技孵化，对我们大概率不适用 |
+| 10 | Māori Development Fund | 毛利发展部（TPK） | 见 §3.2，门槛 NZ$10 万起 |
+| 11 | Māori Agribusiness funds | MPI | 农业，不相关 |
+| 12 | Primary Sector Growth Fund | MPI | 农业，不相关 |
+| 13 | Wood Processing Growth funding | MPI | 木材加工，不相关 |
+| 14 | Low Emission Heavy Vehicles Fund | 交通 / 环境相关部门 | 重型车减排，不相关 |
+| 15 | Waste Minimisation Fund | 环境部 | 垃圾减量，不相关 |
+
+- 这个总列表**之外**，我们还查到并写在前面的：RBPN 地区代理的共同出资工作坊（§3.3）、Poutama Trust（§3.2）、研发税收抵免（§3.1，是税收优惠，不是基金）、Work and Income 的就业类补贴（§3.1，招人才相关）、Work and Income 的 Business Training and Advice Grant（只给领福利、做自雇创业的个人，客户不是这类，不相关）。
+- **结论没变，但现在有凭据了：** 官方汇总工具收录的就是这 15 个，**直接和「AI 培训 / AI 应用」挂钩的只有 #1 和 #2**，其余要么是研发、出口、投资、农业、环保，要么不对我们开放。注意：这是官方「汇总工具收录的」范围，不保证新西兰所有政府部门的所有项目都在里面（地区代理工作坊、Poutama 就在它之外），所以其余项目仍以 §3.1–3.3 的逐层查证为准。
+- 总列表页日后可能新增项目，下次引用请重核。
+
 ## 4. 对问题 A–C 的详细回答
 
 ### A. 客户能不能用补贴买我们的服务？
@@ -156,6 +182,7 @@
   - **New to R&D Grant**：合格研发成本的 40%，最高 NZ$40 万；须满足「研发新手」门槛、有技术不确定性；软件开发只有「对研发关键」才算；**不能用其他新西兰政府资金共同出资**。
   - **研发税收抵免（RDTI）**：15%，年合格研发支出至少 NZ$5 万，须先登记并拿 General Approval。
   - 这两项能不能覆盖 ME 的 AI 平台开发，**我没法判断**（页面没明说 AI，现成 AI 工具不一定算研发）。需会计或官方（MBIE）确认，这是**花钱的事**，不是我替 PM 决定的。
+- **融资类（不是补贴，是股权投资）：Aspire NZ Seed Fund**（NZGCP）：与私人投资人同投，每轮 NZ$5 万–150 万，面向员工少于 20 人、有增长潜力的新西兰早期科技企业，开放，申请投入不到 4 小时。**ME 是否合适、要不要走这条，属于 PM 的融资决策，本文只列事实**；页面要求必须先找到私人投资人，且是竞争性分配。
 - 专为 ME 自己：未发现任何「AI 公司专属」的新西兰政府补助。
 
 ### C. ME 成为合格供应商 / 培训提供方需要什么？
@@ -202,6 +229,8 @@
 | ② 争取成为 AI 顾问试点的 approved AI 供应商 | 中 | 低 | 高 | 高中低 | **P2** |
 | ③ ME 自己申请研发类资助（New to R&D、RDTI） | 低：一次性事项 | 低 | 低：补的是自己的开发成本，客户看不见 | 低低低 | **P3 暂缓**，写进 ROADMAP 待认领 |
 | ④ 毛利客户走 Poutama | 低：目前没有已知毛利客户 | 低 | 低 | 低低低 | **P3 暂缓** |
+| ⑤ 出口型客户走 International Growth Fund（须是 NZTE 客户） | 低：只对出口客户、一次性 | 低 | 低：页面没提营销 / AI 费用 | 低低低 | **P3 暂缓** |
+| ⑥ ME 评估 Aspire NZ Seed Fund（股权融资） | 低：一次性 | 低 | 低：对客户收入无直接影响 | 低低低 | **P3 暂缓**；融资是 PM 的业务决策，可随时插队 |
 
 - ① ② 同属 P2，排队、资源富余时做。**但有两件事不占开发资源、零成本，建议马上做**：向奥克兰区域商业伙伴问清两个问题（见 6.2）。这属于判断事实，不是开发项目。
 - ③ 虽然金额可能很大（最高 NZ$40 万），按规则只能是 P3；**PM 如果业务上有别的考虑（比如现金流）可以插队**，由 PM 决定，我不替 PM 重新算分。
