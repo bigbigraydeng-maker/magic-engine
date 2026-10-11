@@ -141,3 +141,5 @@
   - E3 链（被已发布 `e8c5b66a`＝E3 v3 取代）：`a0773341`（E3）、`09e26e9e`（E3 v2 caption）、`a13cbd09`（E3 v2 logo-always）。
   - S3 链「下期出发」前几版（被同链更高版本 `59282423`＝S3 v3 取代）：`e2f92d54`（S3）、`770ab18a`（S3 v2）、`e01c44d6`（S3 v2 logo-always）。
   - **没动、列给 74 号定**：`59282423`（S3 v3 relaxed，下期出发角度的最高版，与 v5r2 不是同一角度，不确定是否还要用）、`60ca4fe4`（10-05「What the price includes (Remotion trial)」试验片）、`98734389`、`3be0d10f`（7 月的 Destination Inspiration 旧片）。
+
+- **74 号后续处理（10-12）**：`60ca4fe4`（10-05「What the price includes」试验片，从未授权）已标 superseded；`59282423`（S3 v3「下期出发」角度）**不标、不动，保留作上海团后续冲刺素材备选——未授权、PM 暂不点**；`98734389`、`3be0d10f`（7 月 Destination Inspiration 旧片，不属 3 月团）不动。
