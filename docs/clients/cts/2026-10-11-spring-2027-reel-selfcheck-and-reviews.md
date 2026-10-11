@@ -9,7 +9,7 @@
 | 团 | **终版工单（只授权这一张）** | 状态 | 被取代的旧版（**不要授权**，都是 `in_review`） |
 |---|---|---|---|
 | Best of China（3/11） | **`7ed7645b-30e6-47e8-8806-b0373da7da0a`**（r3） | `in_review` | r1 `2e15d2dd-29b4-4159-a13c-7b102758769b`（长城图右下角有黑斑）· r2 `fc15ff44-7e1a-4828-bf4e-e44f12510895` |
-| Natural China（3/26） | **`0fd18a93-382e-444c-86bd-ae930bc33cd8`**（r3） | `in_review` · **价格档位未获 CTS 确认，确认前不能授权** | r1 `0703a847-6c4d-4120-aa84-67c708a349ae`（下半屏亮度 35.5、标题与 FROM 重叠）· r2 `d906f59c-9574-42aa-89cc-c6e778f16125` |
+| Natural China（3/26） | **`0fd18a93-382e-444c-86bd-ae930bc33cd8`**（r3） | `in_review` · 价格 NZ$7,349 / 16 天已由 PM 10-11 本人确认；授权仍待 PM | r1 `0703a847-6c4d-4120-aa84-67c708a349ae`（下半屏亮度 35.5、标题与 FROM 重叠）· r2 `d906f59c-9574-42aa-89cc-c6e778f16125` |
 | Shanghai & Surroundings | 不重做。**`fa4fdd89-a161-495e-9010-80ce9d08343a` 已在 2026-10-11 17:35（新西兰时间）发布**（工厂回执 `PUBLISHED`） | published | — |
 
 - **在 ME 里点「通过」就等于发布授权**（每小时第 5 分钟的发布 worker 会领走 `approved`）。所以：只对上表加粗的两张点，旧版一张都不要点。
@@ -61,11 +61,11 @@
 
 | 秒 | 画面与文字 | ①图对不对 | ②文字对不对 | ③logo |
 |---|---|---|---|---|
-| 0–3 | 张家界石柱 + `NZ$7,XXX / 16 DAYS / FLIGHTS` | ✅ Unsplash 元数据 = Zhangjiajie | ⚠️ 16 天：Signature 页与出团表吻合（Discovery 页写 14 天）；价格档位待 CTS 确认 | ✅ |
+| 0–3 | 张家界石柱 + `NZ$7,XXX / 16 DAYS / FLIGHTS` | ✅ Unsplash 元数据 = Zhangjiajie | ✅ 16 天：出团表、Signature 页吻合，PM 确认 | ✅ |
 | 3.2–5.5 | 张家界石林 + `YOUR 16 DAYS 1/3 ZHANGJIAJIE FOREST PARK` | ✅ 元数据 = Zhangjiajie National Forest Park | ✅ 官网 Zhangjiajie National Forest Park | ✅ |
 | 5.5–8 | 洪崖洞夜景 + `2/3 HONGYADONG, CHONGQING` | ✅ 画面里招牌「洪崖洞」可见；元数据 = Chongqing | ✅ 官网：Hongyadong night scenery | ✅ |
 | 8–10.4 | 大熊猫 + `3/3 GIANT PANDAS, CHENGDU` | ✅ 元数据 = Chengdu Panda Breeding Research Center | ✅ 官网：giant pandas | ✅ |
-| 10.4–14.9 | 天门山 + `NATURAL CHINA. / FROM NZ$7,349 / PER PERSON · TWIN SHARE / SINGLE SUPPLEMENT NZ$1,895` | ✅ 元数据 = Tianmen Mountain（天门洞） | ⚠️ 价格取自 Signature 页，**档位待 CTS 确认** | ✅ |
+| 10.4–14.9 | 天门山 + `NATURAL CHINA. / FROM NZ$7,349 / PER PERSON · TWIN SHARE / SINGLE SUPPLEMENT NZ$1,895` | ✅ 元数据 = Tianmen Mountain（天门洞） | ✅ NZD $7,349：Signature 页 + PM 10-11 确认 | ✅ |
 
 ### 自测数字
 
@@ -90,7 +90,7 @@
 ## 六、发布前还要做的事（本轮没做，也没有授权做）
 
 1. **PM 授权发布**（只授权 §一 加粗的两张）；本窗口不发布、不起广告。
-2. **Natural China：CTS 书面确认 3/26 属 Signature 档、价格 NZD $7,349、16 天**；不确认，这张工单与排期里的帖 4 都不发。
+2. Natural China 价格 NZD $7,349、16 天：**PM 10-11 已本人确认**，不再卡价格；发布当天仍重核官网。
 3. **授权当天重新抓官网核对价格和出发日**（工厂审核页和发布 worker 都不会重新抓官网）；本批所有数字只在 2026-10-11 抓过。
 4. **首评原文和带追踪参数的网址**，授权前用工厂自己的首评生成函数生成，交苏东坡过目（发布 worker 授权后不等审查直接发）。
 5. **素材来源记录**已写入 `credits-v6.json`；长城（金山岭）、兵马俑图以 Unsplash 官方来源为准。
