@@ -126,7 +126,7 @@ const publicUrl = (path?: string) =>
   path ? `${SUPABASE_URL}/storage/v1/object/public/content-factory/${path}` : ''
 
 // clientId:只看该客户的待审(客户页概览用);hideWhenEmpty:没待审就不渲染(不占地方)
-export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hideWhenEmpty?: boolean } = {}) {
+export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?: string; hideWhenEmpty?: boolean; onReviewed?: () => void } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [published, setPublished] = useState<WorkOrder[]>([]) // 只读展示:已发布
   const [superseded, setSuperseded] = useState<WorkOrder[]>([]) // 只读展示:已作废,折叠在页面底部
@@ -166,6 +166,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
   useEffect(() => { void load() }, [load])
 
+  // 选中的团已不存在 → 清掉源状态,避免它以历史卡重新出现时旧筛选悄悄复活
+  useEffect(() => {
+    if (groupFilter && !groupCounts([...orders, ...published].map((o) => o.angle)).some((g) => g.group === groupFilter)) setGroupFilter(null)
+  }, [groupFilter, orders, published])
+
   const act = useCallback(async (id: string, payload: Record<string, unknown>) => {
     setBusy(id)
     setError(null)
@@ -181,12 +186,13 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       }
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
+      onReviewed?.() // 通知父页刷新工单,待审数才会变,自动切客户才会触发
     } catch (e) {
       setError(e instanceof Error ? reviewErrorZh(e.message, k => HUMAN_CHECK_LABEL[k as ContentCheckItemKey] ?? k) : '操作失败')
     } finally {
       setBusy(null)
     }
-  }, [])
+  }, [onReviewed])
 
   const acceptFlag = useCallback(async (id: string, category: string) => {
     setBusy(id)

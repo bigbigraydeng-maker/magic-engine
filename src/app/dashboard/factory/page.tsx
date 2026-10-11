@@ -211,7 +211,7 @@ export default function FactoryCockpitPage() {
             )}
 
             {/* ReviewInbox(clientId)= 视频审核(左)+ 问 Claude 对话框(右)。key 切客户时重挂,刷新历史 */}
-            {selectedClient && <ReviewInbox key={selectedClient} clientId={selectedClient} />}
+            {selectedClient && <ReviewInbox key={selectedClient} clientId={selectedClient} onReviewed={() => void load()} />}
           </>
         )}
       </section>
