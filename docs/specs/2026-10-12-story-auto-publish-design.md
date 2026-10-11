@@ -131,7 +131,7 @@ Inngest 定时发布器 cloud-story-auto-publish（每 5 分钟 NZ 时区；Stor
   for 每条「到点且授权有效」的 (item, channel)：
     step.run(claim)      ─ 占位（唯一键 (item_id, channel)），先占后发
     step.run(precheck)   ─ 发送前一刻再复核：授权仍有效（**读库不读缓存**）/ 内容指纹一致 / 开关 / 白名单 / 价格闸 / 客户与活动状态 / 同包熔断状态；**并重新下载实际要交给 Meta 的文件重算哈希**（见 §4.4-2）
-    step.run(publish)    ─ Instagram 两段式：先建容器，**容器 id 立刻落库**再发布；崩溃后不得重建容器；异常变数据，不抛
+    step.run(publish)    ─ Instagram 两段式：先建容器，**容器 id 立刻落库**（`story_publish_attempts.container_id` 字段，§5）再发布；崩溃后不得重建容器；异常变数据，不抛
     step.run(receipt)    ─ 有 provider 回执就记 PUBLISHED_UNVERIFIED，写 story.publish.attempted
     step.run(confirm)    ─ 回读 GET /{page_id}/stories 或 IG 媒体；确认了升为 PUBLISHED；**回读失败不降级、不重发**，只出待办
   **precheck 失败分类**：`FILE_CHANGED`（重算哈希与指纹不符）= 确定没发、**不可重试**；`FILE_UNREACHABLE`（下载失败 / 超时）= 确定没发、**窗口内下一轮可重试**；任何「已调 Meta 但结果不明」= `UNKNOWN_OUTCOME`。**存储层必须强制「写后不可覆盖」**（不能只靠命名约定）：precheck 下载与 Meta 抓取之间文件若可被改，哈希核对会漏检；交给 Meta 的地址必须就是哈希核对过的同一个不可变路径。
@@ -156,11 +156,11 @@ Inngest 定时发布器 cloud-story-auto-publish（每 5 分钟 NZ 时区；Stor
 1. 没有 PM 授权回执 → 不发。授权人只认全局管理员名单（`isGlobalAdminEmail`），授权带到期日（默认 7 天，对应周包），发送前复核授权人仍在名单。**授权沿用两段式激活**：先写未激活行 → 发 `story.pack.authorized` 事件 → 再激活（`activated_at`）；事件或激活失败按 id 回滚；读授权的所有地方只认「已激活 + 未撤 + 未过期」（同 10-10 稿 §16）。同一周包同一时刻只许一份有效授权（部分唯一索引，对应现有 `daily_plan_auto_publish_auth_active_plan_idx`）。
 2. **授权不是橡皮图章**：授权按钮前必须显示「审查结论 + 风险摘要」，PM 必须勾选「已看过全部 N 条；其中价格类 M 条、带地名画面 K 条、视频 V 条已逐条打开」才能点——这三类**每条单独列出、默认折叠**。**勾选只是自报，不算数：每一条「已打开」由服务端记录（打开动作 + 时间），授权接口校验三类条目全部有打开记录，缺一条就拒绝授权**；被机器闸或苏东坡「拦下」的条目**不出现在可授权清单里**。「预览墙看 10 分钟」只是我的未实测估计，**首周手动过渡期与首批授权后按实测改本稿**，不拿它当设计依据。
 3. 授权绑**每条内容指纹** = 正文 + 画面文件哈希 + 来源 + 渠道 + 时段 + `client_id` + `page_id` / Instagram 账号编号 + 授权到期日。指纹变了 = 授权对这一条失效，**不是整包失效、也不是悄悄放行**。
-   **指纹必须覆盖「真正发出去的那个文件」**：素材以公网地址交给 Meta（Instagram 是 Meta 自己去抓，Facebook 视频走 `rupload` 的 `file_url`），所以必须用**不可变存储路径**（带内容哈希的文件名，写入后不可覆盖），且 `precheck` 重新下载该地址、重算哈希，与指纹比对；对不上 = `BLOCKED(FILE_CHANGED)`。这同时回应 10-10 稿 §16.6 的「预览与确认之间的内容绑定」缺口。
+   **指纹必须覆盖「真正发出去的那个文件」**：素材以公网地址交给 Meta（Instagram 是 Meta 自己去抓，Facebook 视频走 `rupload` 的 `file_url`），所以必须用**不可变存储路径**（带内容哈希的文件名，写入后不可覆盖），且 `precheck` 重新下载该地址、重算哈希，与指纹比对；对不上 = `BLOCKED`（`reason_code=FILE_CHANGED`，不可重试；下载失败为 `reason_code=FILE_UNREACHABLE`，可重试）。这同时回应 10-10 稿 §16.6 的「预览与确认之间的内容绑定」缺口。
 4. 两层开关，默认只演练：`STORY_AUTO_PUBLISH_LIVE` 严格等于 `true`，**且**客户在 `STORY_AUTO_PUBLISH_CLIENTS` 名单，**且**渠道在 `STORY_AUTO_PUBLISH_CHANNELS` 名单（Instagram 单独开，因为它依赖独立授权与商务账户登记）。任一不满足 = 走完全部检查、不调 Meta、只写演练回执。
 5. 失败分类沿用 10-10 稿 §6：「确定没发出去且可重试」「确定没发出去重试没用」「不确定有没有发出去」；**不确定的绝不自动重试**，由 PM 去主页 / Instagram 核对后用 `confirm-unknown` 类接口登记真相。Story 因没有撤回接口，**不确定类的处理优先级高于图文**：待办里要写「24 小时内会自己消失，但在那之前客户看得见」。
 6. 整包暂停口径：同一周包里任一条在授权前演练被拦，该条不入授权范围并出待办；**已授权后发现某条有问题**，PM 点「停这一条」或「停整包」，发布器 `precheck` 读库即停（要有测试：停了之后下一轮零 Meta 调用）。已发出去的只能手动删（待办里写清路径：Business Suite → 内容 → Story → 删除，见 §9）。
-6b. **熔断（`story.circuit.tripped`）分级触发**：①任一条 `UNKNOWN_OUTCOME` → **停同包同渠道**后续条目；②某条被人工标记「已手动删除」→ **只停该条**并出待办（避免删一条错字帖就全周停摆）；③同渠道连续 N 条 `FAILED_FINAL`（N 默认 2，**客户配置项**，首周按实测调）→ 停同包同渠道。熔断只写**周包级暂停标记**，**不动授权行**；暂停标记读库不读缓存。**解封后：被暂停的条目按「Story 过时即废」处理，不顺延、不补发**（只有仍在时间窗内的才可继续，且重新走 precheck）；已有授权继续有效。同一轮扫描内多条同时到点的，**按条串行**，每条发前重读熔断标记，不允许并行各自通过。7. 回复接收人：每条带「回复」号召的 Story，precheck 读当天值班表，**无人值班 = `BLOCKED(NO_REPLY_OWNER)`**；超过 SLA 未回复的回复出待办。
+6b. **熔断（`story.circuit.tripped`）分级触发**：①任一条 `UNKNOWN_OUTCOME` → **停同包同渠道（精确按渠道：同一条内容 Facebook 出 UNKNOWN，不自动连带 Instagram，也不默认放行——该条的另一渠道由 PM 逐条确认后才继续）**后续条目；②某条被人工标记「已手动删除」→ **只停该条**并出待办（避免删一条错字帖就全周停摆）；③同渠道连续 N 条 `FAILED_FINAL`（N 默认 2，**客户配置项**，首周按实测调）→ 停同包同渠道。熔断只写**周包级暂停标记**，**不动授权行**；暂停标记读库不读缓存。**解封后：被暂停的条目按「Story 过时即废」处理，不顺延、不补发**（只有仍在时间窗内的才可继续，且重新走 precheck）；已有授权继续有效。同一轮扫描内多条同时到点的，**按条串行**，每条发前重读熔断标记，不允许并行各自通过。7. 回复接收人：每条带「回复」号召的 Story，precheck 读当天值班表，**无人值班 = `BLOCKED(NO_REPLY_OWNER)`**；超过 SLA 未回复的回复出待办。
 8. 客户非 `active`、活动非 `active`、主页 / Instagram 账号编号与授权不一致（`PAGE_ID_MISMATCH` 同类）→ 不发。
 
 ---
@@ -169,11 +169,11 @@ Inngest 定时发布器 cloud-story-auto-publish（每 5 分钟 NZ 时区；Stor
 
 10-10 稿的尝试表唯一键是 `(plan_id, date)`——**一天最多一条**，与「每天 3 条 Story × 2 渠道」**结构上冲突**。选项：
 
-- **建议（待子牙二审）**：新增 `story_pack_items`（周包条目：内容指纹、状态、渠道、时段）与 `story_publish_attempts`（唯一键 `(item_id, channel)`）两张小表，授权复用 `daily_plan_auto_publish_auth` 的思路但**另建 `story_pack_auth`**（授权绑 `pack_id` 与条目指纹集合），均走 service-role 模板 `FOR ALL TO service_role USING (true)`。
+- **建议（待子牙二审）**：新增 `story_pack_items`（周包条目：内容指纹、状态、渠道、时段）与 `story_publish_attempts`（唯一键 `(item_id, channel)`，含 `container_id`、`reason_code`）两张小表，授权复用 `daily_plan_auto_publish_auth` 的思路但**另建 `story_pack_auth`**（授权绑 `pack_id`（条目指纹存在 `story_pack_items`）），均走 service-role 模板 `FOR ALL TO service_role USING (true)`。
 - 备选：改现有尝试表唯一键。**不推荐**——动已上线的表会碰 Facebook 图文自动发布的占位逻辑，风险叠加。
 
 补充：RLS 必须写 `TO service_role`；授权表加「同一周包同时只有一份有效授权」的部分唯一索引；Instagram 新授权的令牌**用独立存储位，不覆盖现有主页令牌记录**；新授权的权限清单同时列 `instagram_manage_insights`（回读要用）。
-补充（子牙二轮）：授权表只存周包级元数据，条目指纹存 `story_pack_items`；到期日算进每条指纹，**授权续期 = 整包指纹全变 = 等于重新授权**，界面按重新授权对待。「已激活 + 未撤 + 未过期」的判断**抽成共用函数**，每日计划授权与 Story 授权两处都调它，防判据以后分叉。
+补充（子牙二轮）：「当天值班表」（回复接收人）与「条目打开记录」各需一处存放，**刀二前置待定项**（值班表由 74 号定维护人）；打开记录绑条目指纹，指纹变了即失效、需重新打开。授权表只存周包级元数据，条目指纹存 `story_pack_items`；到期日算进每条指纹，**授权续期 = 整包指纹全变 = 等于重新授权**，界面按重新授权对待。「已激活 + 未撤 + 未过期」的判断**抽成共用函数**，每日计划授权与 Story 授权两处都调它，防判据以后分叉。
 **部署顺序**：先建表，再上代码（10-10 稿 §16 的教训）。
 
 ---
