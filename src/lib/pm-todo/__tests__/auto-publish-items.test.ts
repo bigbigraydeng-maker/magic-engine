@@ -19,7 +19,9 @@ interface FakeOptions {
   attempts?: Row[]
   auth?: Row[]
   plans?: Row[]
-  failOn?: 'daily_plan_auto_publish_attempts' | 'daily_plan_auto_publish_auth' | 'social_plans'
+  clients?: Row[]
+  campaigns?: Row[]
+  failOn?: 'daily_plan_auto_publish_attempts' | 'daily_plan_auto_publish_auth' | 'social_plans' | 'clients' | 'campaign_briefs'
 }
 
 /**
@@ -32,6 +34,9 @@ function makeSupabase(opts: FakeOptions): SupabaseClient {
     daily_plan_auto_publish_attempts: opts.attempts ?? [],
     daily_plan_auto_publish_auth: opts.auth ?? [],
     social_plans: opts.plans ?? [],
+    // default: every client in the fixtures is active, and every campaign an auth row points at is active
+    clients: opts.clients ?? [{ id: 'client-alpine', client_status: 'active' }, { id: 'client-other', client_status: 'active' }],
+    campaign_briefs: opts.campaigns ?? (opts.auth ?? []).map((a) => ({ id: a.campaign_id, client_id: a.client_id, status: 'active' })),
   }
 
   const from = (table: string) => {
@@ -66,6 +71,7 @@ function makeSupabase(opts: FakeOptions): SupabaseClient {
 
     const builder: Record<string, unknown> = {}
     builder.select = () => builder
+    builder.maybeSingle = () => Promise.resolve(opts.failOn === table ? { data: null, error: { message: 'boom' } } : { data: matched()[0] ?? null, error: null })
     builder.order = () => builder
     builder.limit = () => builder
     builder.eq = (col: string, val: unknown) => {
@@ -150,6 +156,8 @@ function auth(overrides: {
 }): Row {
   return {
     client_id: overrides.client_id ?? CLIENT,
+    campaign_id: 'camp-1',
+    authorized_by_email: 'ray@example.test',
     plan_id: overrides.plan_id ?? 'plan-1',
     dates: overrides.dates ?? [TODAY],
     authorized_at: overrides.authorized_at ?? '2026-10-07T00:00:00Z',
@@ -492,5 +500,84 @@ describe('pushAutoPublishItems —— 记录对不上（墓碑写着已撤回，
     await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
     expect(items).toHaveLength(1)
     expect(items[0].what).toContain(`${TODAY}、${TOMORROW}`)
+  })
+})
+
+describe('pushAutoPublishItems —— 看门狗：别乱报，原因要说准', () => {
+  const unarmedAuth = () => auth({ dates: [TODAY] })
+
+  it('🔴 人手动发过这一天（回执里已有帖子）→ 不报「发布器没跑」', async () => {
+    const db = makeSupabase({
+      auth: [unarmedAuth()],
+      plans: [{ id: 'plan-1', publish_meta: { published: [{ date: TODAY, post_id: 'p1', published_at: '2026-10-07T10:00:00Z' }] } }],
+    })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(0)
+  })
+
+  it('回执里只有别的日期 → 这一天照样报', async () => {
+    const db = makeSupabase({
+      auth: [unarmedAuth()],
+      plans: [{ id: 'plan-1', publish_meta: { published: [{ date: TOMORROW, post_id: 'p1', published_at: '2026-10-07T10:00:00Z' }] } }],
+    })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('根本没跑起来')
+  })
+
+  it('客户不是正式客户 → 说准原因，不说「发布器没跑」', async () => {
+    const db = makeSupabase({ auth: [unarmedAuth()], clients: [{ id: CLIENT, client_status: 'prospect' }] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('auto_publish_unarmed')
+    expect(items[0].what).toContain('不是「正式客户」状态')
+    expect(items[0].what).not.toContain('根本没跑起来')
+  })
+
+  it('读不到客户记录 → 也按「不是正式客户」处理（不放行）', async () => {
+    const db = makeSupabase({ auth: [unarmedAuth()], clients: [] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items[0].what).toContain('不是「正式客户」状态')
+  })
+
+  it('活动停用 → 说准原因', async () => {
+    const db = makeSupabase({ auth: [unarmedAuth()], campaigns: [{ id: 'camp-1', client_id: CLIENT, status: 'paused' }] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items[0].what).toContain('活动现在不是启用状态')
+  })
+
+  it('授权人已不是全局管理员 → 说准原因，让现任管理员重新授权', async () => {
+    const db = makeSupabase({ auth: [unarmedAuth()] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, { live: true, isGlobalAdmin: () => false })
+    expect(items[0].what).toContain('已不是全局管理员')
+    expect(items[0].how).toContain('重新点一次')
+  })
+
+  it('🔴 演练还是真发按客户判断：总开关开着，但这个客户不在白名单 → 说演练', async () => {
+    const db = makeSupabase({ auth: [unarmedAuth()] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, { live: true, liveFor: () => false })
+    expect(items[0].what).toContain('演练模式')
+  })
+
+  it('同一客户同一原因多份授权合并成一条；不同原因分开', async () => {
+    const db = makeSupabase({
+      auth: [auth({ plan_id: 'plan-1', dates: [TODAY] }), auth({ plan_id: 'plan-2', dates: [TOMORROW] })],
+    })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain(`${TODAY}、${TOMORROW}`)
+  })
+
+  it('🔴 读客户记录失败 → 抛错，不当成「没问题」', async () => {
+    const db = makeSupabase({ auth: [unarmedAuth()], failOn: 'clients' })
+    await expect(pushAutoPublishItems(db, [], NOW, nameOf, LIVE)).rejects.toThrow(/client read failed/)
   })
 })

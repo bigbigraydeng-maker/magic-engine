@@ -33,6 +33,8 @@ import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
 import { pushAutoPublishItems } from './auto-publish-items'
+import { isLiveFor, readAutoPublishSwitches } from '@/lib/campaign/daily-plan-auto-publish-decide'
+import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
@@ -305,7 +307,17 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
       console.warn('[manual-items] 团目录上架请求待办读取失败（不阻塞其他待办）:', e),
     ),
     // 自动发布没发出去 / 不确定发没发出去 / 已授权却没动静 —— 人不在场，不捞出来没人知道
-    (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+    (b) => pushAutoPublishItems(supabase, b, now, nameOf, {
+      live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true',
+      liveFor: (clientId) => isLiveFor(
+        readAutoPublishSwitches({
+          DAILY_PLAN_AUTO_PUBLISH_LIVE: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE,
+          DAILY_PLAN_AUTO_PUBLISH_CLIENTS: process.env.DAILY_PLAN_AUTO_PUBLISH_CLIENTS,
+        }),
+        clientId,
+      ),
+      isGlobalAdmin: isGlobalAdminEmail,
+    }).catch((e) =>
       console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
     // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
