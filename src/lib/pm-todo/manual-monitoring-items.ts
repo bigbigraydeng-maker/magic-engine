@@ -550,7 +550,7 @@ export async function pushAdsConfigReadItems(
  * 坏广告自动暂停那一步自己读不出广告设置 → 同一类系统欠账。
  *
  * 上面那条只看每日回拉的读取；回拉读成功、几分钟后自动暂停再读却失败时，唯一的痕迹是
- * `ads-d3-auto-pause` 写进 flywheel_actions 的 blocked 回执（带 config_read_error）。
+ * `ads-d3-auto-pause` 写进 flywheel_actions 的 failed 回执（带 config_read_error）。
  * 两条不会同时出现：回拉读失败时诊断整段跳过，自动暂停根本不会被触发。
  */
 export async function pushAdsAutoPauseConfigReadItems(

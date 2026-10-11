@@ -370,11 +370,12 @@ export async function processD3Hit(
   if (fresh.source === 'fallback') {
     // 🔴 读不出开关 = 不知道客户现在允不允许出手：不提交 Kernel（fail closed），
     //    但也不能记成 dry_run_logged——那会让人以为是客户开着演练模式。
+    //    记 failed 不记 blocked：跟归属闸同一口径，「系统没法核实」≠「查过了、被拦下」。
     const error = fresh.error ?? 'unknown error'
     console.error(`[ads-d3-auto-pause] ad_strategy_configs 读失败，不出手：${args.clientId}: ${error}`)
     await recordFlywheelAction(deps.supabase, args.clientId, {
       ...basePayload,
-      status: 'blocked' satisfies string,
+      status: 'failed' satisfies string,
       reason: '读不出这个客户的广告自动化开关，这次不出手（等下一次诊断日报再判）',
       config_read_error: error,
     })
@@ -462,13 +463,13 @@ export function createD3AutoPauseFunction(deps: D3AutoPauseDeps) {
       if (loaded.source === 'fallback') {
         // 读失败时 loaded.config 是默认值（autopilot_enabled=false），照读会被记成
         // 「客户没开自动化」——方向安全但原因是错的。单独报出来，别跟 autopilot_disabled 混。
-        // 回执跟单条读失败同一种（blocked + config_read_error），今日待办从这里捞；
+        // 回执跟单条读失败同一种（failed + config_read_error），今日待办从这里捞；
         // 只写日志的话诊断完成事件只发一次，当天这个客户的 D3 就没人知道被跳过了。
         const error = loaded.error ?? 'unknown error'
         console.error(`[ads-d3-auto-pause] ad_strategy_configs 读失败，整条跳过：${d.client_id}: ${error}`)
         await step.run('record-config-read-failure', () =>
           recordFlywheelAction(deps.supabase, d.client_id, {
-            status: 'blocked' satisfies string,
+            status: 'failed' satisfies string,
             diagnosis_code: 'D3',
             diagnostic_run_id: d.diagnostic_run_id,
             insight_date: d.insight_date,

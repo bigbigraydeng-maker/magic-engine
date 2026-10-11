@@ -73,6 +73,13 @@ describe('loadDiagnosisInput — 广告设置读取', () => {
     expect(input.clientPageId).toBe('page-1')
   })
 
+  it('调用方已经读到收件人并传进来 → 不再读广告设置（那次重读就算会失败也不影响）', async () => {
+    mocks.loadAdStrategyConfigWithSource.mockResolvedValue({ config: strategyConfig([]), source: 'fallback', error: 'timeout' })
+    const input = await loadDiagnosisInput('client-1', '2026-09-21', '2026-09-22T00:00:00Z', { digestRecipients: ['b@x.com'] })
+    expect(input.digestRecipients).toEqual(['b@x.com'])
+    expect(mocks.loadAdStrategyConfigWithSource).not.toHaveBeenCalled()
+  })
+
   it('没有设置行（新客户）→ 照默认值走，不抛', async () => {
     mocks.loadAdStrategyConfigWithSource.mockResolvedValue({ config: strategyConfig([]), source: 'default' })
     const input = await loadDiagnosisInput('client-1', '2026-09-21', '2026-09-22T00:00:00Z')

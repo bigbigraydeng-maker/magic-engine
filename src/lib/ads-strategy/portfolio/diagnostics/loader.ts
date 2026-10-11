@@ -258,7 +258,17 @@ async function loadStrategyConfig(clientId: string): Promise<AdStrategyConfig> {
   return config
 }
 
-export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
+/**
+ * `known.digestRecipients`：调用方刚读过广告设置时把收件人传进来，这里就不再读第二遍——
+ * 每日回拉已经读成功，诊断不该因为几秒后多余的一次重读失败而整天停跑、连带不发自动暂停事件（卫青复审）。
+ * 没传才自己读，读失败照旧抛。
+ */
+export async function loadDiagnosisInput(
+  clientId: string,
+  date: string,
+  evaluatedAt: string,
+  known?: { digestRecipients: string[] },
+): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
   const clientPageId = await loadClientPageId(clientId)
@@ -266,16 +276,16 @@ export async function loadDiagnosisInput(clientId: string, date: string, evaluat
   for (const id of accountIds) {
     accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId, evaluatedAt))
   }
-  const [outcome, strategy] = await Promise.all([
+  const [outcome, digestRecipients] = await Promise.all([
     loadOutcomeConfig(clientId),
-    loadStrategyConfig(clientId),
+    known ? known.digestRecipients : loadStrategyConfig(clientId).then(c => c.digest_recipients),
   ])
   return {
     clientId, date, evaluatedAt,
     outcome: outcome.config,
     outcomeConfigured: outcome.source === 'row' && outcome.config.primary !== null,
     messagingReferralAvailable: MESSAGING_REFERRAL_AVAILABLE,
-    digestRecipients: strategy.digest_recipients,
+    digestRecipients,
     clientPageId,
     accounts,
   }

@@ -67,16 +67,12 @@ export async function PATCH(
 
   const update: Record<string, unknown> = { client_id: clientId, updated_at: new Date().toISOString() }
   const updatedAt = String(update.updated_at)
-  // 🔴 读不出改之前的设置就不保存：拿默认值（observe）当「改之前」，把自动模式改回 observe
-  //    会被判成「没变」、不发收紧事件，Kernel 那边继续按自动模式跑到每日对账（魏征复审）。
+  // 🔴 读不出改之前的设置时，不拿默认值（observe）当「改之前」：那样把自动模式改回 observe
+  //    会被判成「没变」、不发收紧事件（魏征复审）。也不拒绝保存：设置表持续读不出时，
+  //    收紧（调低上限 / 改回 observe）正是最需要能存进去的操作（卫青复审）。
+  //    before = null 表示「不知道改之前是什么」，下面一律按「变了」发叫醒铃。
   const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
-  if (loadedBefore.source === 'fallback') {
-    return NextResponse.json(
-      { error: '读不出这个客户当前的广告设置，这次没有保存，请稍后再试' },
-      { status: 503 },
-    )
-  }
-  const before = loadedBefore.config
+  const before = loadedBefore.source === 'fallback' ? null : loadedBefore.config
 
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') {
@@ -138,8 +134,9 @@ export async function PATCH(
 
   // 意向真的变了才发叫醒铃（spec §4.4）；发送失败不影响保存，每日 reconcile 会追上。
   const envelopeChanged =
-    (update.autonomy_mode !== undefined && update.autonomy_mode !== before.autonomy_mode) ||
-    (update.daily_budget_cap_cents !== undefined && update.daily_budget_cap_cents !== before.daily_budget_cap_cents)
+    (update.autonomy_mode !== undefined && (before === null || update.autonomy_mode !== before.autonomy_mode)) ||
+    (update.daily_budget_cap_cents !== undefined &&
+      (before === null || update.daily_budget_cap_cents !== before.daily_budget_cap_cents))
   const syncEvents = envelopeChanged
     ? await notifyAutonomyModeChanged(clientId, updatedAt, { relaxed: true })
     : { sent: false, events: 0 }

@@ -226,7 +226,7 @@ describe('processD3Hit', () => {
     expect(inserted[0].payload).toMatchObject({ status: 'blocked' })
   })
 
-  it('单条处理时开关读失败 → 记 blocked 并带原始报错，不提交 Kernel，也不记成 dry_run_logged', async () => {
+  it('单条处理时开关读失败 → 记 failed（系统没法核实）并带原始报错，不提交 Kernel，也不记成 dry_run_logged', async () => {
     const submitCandidate = vi.fn()
     const { supabase, inserted } = makeFakeFlywheelSupabase()
     const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => readFailed('boom')) })
@@ -236,7 +236,7 @@ describe('processD3Hit', () => {
     expect(result.outcome).toBe('skipped_config_read_failed')
     expect(submitCandidate).not.toHaveBeenCalled()
     expect(inserted).toHaveLength(1)
-    expect(inserted[0].payload).toMatchObject({ status: 'blocked', config_read_error: 'boom' })
+    expect(inserted[0].payload).toMatchObject({ status: 'failed', config_read_error: 'boom' })
   })
 
   it('flywheel_actions 写入失败必须抛错，不能吞（实测：mock insert 返回 error 时断言抛出）', async () => {
@@ -466,7 +466,7 @@ describe('createD3AutoPauseFunction —— 装配契约', () => {
     expect(inserted).toHaveLength(1)
     expect(inserted[0]).toMatchObject({ client_id: 'client-1', action_type: 'ads.auto_pause_on_d3' })
     expect(inserted[0].payload).toMatchObject({
-      status: 'blocked', insight_date: '2026-09-21', config_read_error: 'column "autopilot_enabled" does not exist',
+      status: 'failed', insight_date: '2026-09-21', config_read_error: 'column "autopilot_enabled" does not exist',
     })
   })
 
