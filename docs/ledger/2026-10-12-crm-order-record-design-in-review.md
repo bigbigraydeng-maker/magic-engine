@@ -1,6 +1,6 @@
 ---
 id: 2026-10-12-crm-order-record-design-in-review
-title: CRM 订单记录设计稿 v0.2 已并入两审第一轮意见，待第二轮核对后转 PM 批准；批准前不写代码不改生产库
+title: CRM 订单记录设计稿 v0.4 已过两审两轮（均带条件通过，条件已并入），待 PM 批准；批准前不写代码不改生产库
 status: decided
 owner: pm
 decided_on: 2026-10-12
