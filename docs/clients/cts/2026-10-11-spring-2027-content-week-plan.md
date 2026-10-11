@@ -148,9 +148,9 @@
 
 ### 帖 7 · Natural China 第二角度（周日）
 
-> Chengdu is home to the Chengdu Research Base of Giant Panda Breeding, one stop on our 16-day Natural China journey. Next departure: 26 March 2027.
+> Chengdu is where you meet giant pandas, one stop on our 16-day Natural China journey. Next departure: 26 March 2027.
 
-出处：官网 Signature 页 "giant pandas" + Discovery 页 "Chengdu Research Base of Giant Panda Breeding"；日期官网。**价格不写。**
+出处：官网 Signature 页 "giant pandas"；日期官网。**价格不写。** 注：具体基地名仅见于 Discovery 页（不同产品），Signature 页无证据，故不写。
 
 ## 四、素材清单（先看 Dropbox / 已有素材，再补）
 
