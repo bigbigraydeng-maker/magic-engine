@@ -240,6 +240,7 @@ export async function processRawEvent(
     }
 
     const lastReceived = Math.max(...events.map((e) => Date.parse(e.receivedAt)))
+    const recoverableReview = row.crmStatus === 'needs_review' && (row.crmDetail === NO_END_EVENT_DETAIL || row.crmDetail === ANSWERED_UNKNOWN_DETAIL)
     const inQuietWindow = folded.stage === 'ended' && now().getTime() - lastReceived < quietMs
     if (folded.stage === 'ended' && !inQuietWindow && (row.crmStatus === 'pending' || row.crmStatus === 'failed' || (row.crmStatus === 'needs_review' && (row.crmDetail === NO_END_EVENT_DETAIL || row.crmDetail === ANSWERED_UNKNOWN_DETAIL)))) {
       try {
@@ -271,7 +272,7 @@ export async function processRawEvent(
       crmStatus: row.crmStatus,
       matchStatus: row.matchStatus,
       recordingStatus: row.recordingStatus,
-      ...(inQuietWindow && row.crmStatus === 'pending' ? { deferred: true } : {}),
+      ...(inQuietWindow && (row.crmStatus === 'pending' || recoverableReview) ? { deferred: true } : {}),
     }
   } catch (err) {
     // CRM 失败已在上面落了状态；其余（取数、存通话失败）只标原始事件，留给补处理重试。

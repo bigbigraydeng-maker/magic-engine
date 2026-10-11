@@ -264,3 +264,35 @@ describe('公网地址还原', () => {
     expect(resolvePublicBase(h({ host: 'h.example.test' }), undefined, 'x')).toBe('https://h.example.test')
   })
 })
+
+describe('魏征第二轮补的防线（真实静默期下）', () => {
+  it('转人工确认之后员工结果才到：在真实静默期下先推迟、静默期过后补写成已接通', async () => {
+    const r = rig()
+    await r.post('voice', { ...base, CallStatus: 'ringing' })
+    await r.post('status', { ...base, CallStatus: 'completed', CallDuration: '600' })
+    await r.drain()
+    expect(call(r)).toMatchObject({ crmStatus: 'needs_review' })
+    await r.post('dial', { ...base, DialCallStatus: 'completed', DialCallDuration: '580' })
+    const id = r.emitted.splice(0)[0]
+    let clock = Date.now() + 10_000_000
+    const out1 = await processRawEvent(r.mem.store, id, () => new Date(clock), { quietMs: 120_000 })
+    // 事件刚到：落在静默期内 → 推迟（不丢），状态保持待确认
+    const justArrived = await processRawEvent(r.mem.store, id, () => new Date(Date.parse(r.mem.raw.get(id)!.receivedAt) + 1000), { quietMs: 120_000 })
+    expect(justArrived?.deferred).toBe(true)
+    expect(call(r)).toMatchObject({ crmStatus: 'needs_review' })
+    void out1
+    // 静默期过后再处理 → 写成已接通
+    clock = Date.parse(r.mem.raw.get(id)!.receivedAt) + 200_000
+    await processRawEvent(r.mem.store, id, () => new Date(clock), { quietMs: 120_000 })
+    expect(call(r)).toMatchObject({ crmStatus: 'written', talkSeconds: 580 })
+    expect(touchpoints(r)).toHaveLength(1)
+  })
+  it('外呼回调：原始事件类型是 other、已有联系人也不写触点', async () => {
+    const r = rig()
+    r.mem.addContact(CLIENT, CUSTOMER)
+    await r.post('status', { ...base, Direction: 'outbound-api', To: CUSTOMER, CallStatus: 'completed', CallDuration: '40' })
+    expect([...r.mem.raw.values()][0].event.eventType).toBe('other')
+    await r.drain()
+    expect(touchpoints(r)).toHaveLength(0)
+  })
+})
