@@ -1,4 +1,4 @@
-# CRM「订单记录」设计稿 v0.2（已并入子牙 + 魏征第一轮意见；PM 批准前不写代码、不改生产库）
+# CRM「订单记录」设计稿 v0.3（已并入子牙 + 魏征第一、二轮意见；PM 批准前不写代码、不改生产库）
 
 日期：2026-10-12 · 风险级：**A**（新表 + 记钱 + 将来的每周任务） · 起因：统筹转 PM 指派（需求留存卡 `docs/ledger/2026-10-12-crm-order-record-need-parked.md`）
 窗口：CRM 窗口（唯一写入者）。客户姓名等个人信息不进本文，一律用代号（客人 A、B…）。
@@ -46,8 +46,9 @@
 | `total_minor` bigint null, `currency` text null | **多少钱**（订单总价；第一步汇总页**不显示金额**，所以不涉及多币种相加） | 两列同有同无；金额>0；币种大写 3 字母（与 `me_sale_outcomes` 同口径） |
 | `payment_state` text not null | 付款状态 | CHECK ∈ `unpaid`/`deposit_paid`/`paid_full`（**退款不放这里**，走 cancelled） |
 | `evidence_kind` text not null | 证据类型 | CHECK ∈ `invoice`/`payment_email`/`other` |
-| `evidence_ref` text not null、`evidence_ref_norm` text not null | 证据编号（发票号）；norm = 去空格、转大写 | norm 由触发器生成；**建单后 evidence_ref/client_id/contact_id 不许改** |
-| `source` text not null | **来源标签** | CHECK ∈ `company_confirmed`/`customer_stated`/`staff_entered`；**`company_confirmed` 只允许 evidence_kind ∈ invoice/payment_email，且 norm 必须符合该客户配置的发票号格式**（CTS 的格式取自付款邮件识别已有的发票号规则） |
+| `evidence_ref` text not null、`evidence_ref_norm` text not null | 证据编号（发票号）；norm = **转大写并去掉全部空格和连字符**（与付款邮件识别 `extractInvoiceNumbers` 同一算法，实现时抽成一个共用函数，两边都调它，避免 `INV-123` 与 `INV123` 对不上） | norm 由触发器生成；**建单后 evidence_ref/client_id/contact_id 不许改** |
+| `party_no` int not null default 1 | 第几批人（同一客人为两批不同的人订同一个团时才是 2） | CHECK ≥1 |
+| `source` text not null | **来源标签** | CHECK ∈ `company_confirmed`/`customer_stated`/`staff_entered`；**`company_confirmed` 只允许 evidence_kind ∈ invoice/payment_email，且 norm 必须符合该客户配置的发票号格式**。⚠️ 魏征第二轮核实：付款邮件识别里**没有** CTS 专属格式（只有宽松的通用提取，调用处也没传格式），所以**格式必须来自 CTS 真实发票样本**：开工前置条件 = 拿到样本（Q1 一并要），写成客户配置；**格式没拿到之前一律不给 `company_confirmed`，全部先算「待核实」** |
 | `status` text not null | `active`/`cancelled` | 取消不删行；`cancelled` 必带 `cancel_reason` |
 | `cancel_reason` text null | | |
 | `batch_id` uuid null → `crm_order_import_batches` | 哪一批导入的 | |
@@ -55,14 +56,15 @@
 
 **唯一性（防错数的两道索引，均只约束 `status='active'` 的行，因此取消/更正后可以重导）**：
 1. `(client_id, evidence_kind, evidence_ref_norm)`：同一张发票只能进一次。
-2. 由联结表保证（见 3.2）：**一个客人在一个出发日只有一条有效订单**。定金与尾款是**同一行的付款状态变化**（尾款发票号记进事件），不是新行；同一客人真要订第二批人，走「改人数」。
+2. 由联结表保证（见 3.2）：`(client_id, contact_id, departure_id, party_no)` 在有效订单里唯一。**一张发票 = 一条订单**。同一客人在同一出发日再来一张发票时，导入**不自动判断**，进「待人判断」由人选：①这是同一单的尾款 → 用「更新付款」命令把原行置为已付全款，新发票号记进事件；②这是另一批人 → 人明确建 `party_no=2` 的新行（各自带自己的发票，人数各自累加）。这样「定金+尾款两张发票」不会被数成两次，「家长订 4 人、朋友另订 2 人」也不会丢发票。
 
 ### 3.2 联结表 `crm_order_departures`（CTS 专属零件，把订单挂到出发日）
 
 `order_id` pk → crm_orders；`departure_id` → `tour_catalog_departures(id)` **`on delete restrict`**；`client_id`。
 - **同客户校验**：写入时检查 订单.client_id = 联系人.client_id = 出发日.client_id（触发器，不一致直接拒绝）。
-- 部分唯一索引：`(client_id, contact_id, departure_id)` 仅对 active 订单生效（实现上把 contact_id 冗余进联结表以便建索引，由同一触发器保证与订单一致）。
-- **与团目录的交互（魏征 M6）**：出发日有订单后，团目录那边「撤回导入/删除出发日」会因 restrict 被拒；第一步要补一条测试 + 一句人话报错（「该出发日已有订单，不能撤」），不改团目录既有函数的其他行为。
+- 部分唯一索引：`(client_id, contact_id, departure_id, party_no)` 仅对 active 订单生效（实现上把 contact_id、party_no 冗余进联结表以便建索引，由同一触发器保证与订单一致）。
+- **联结表一旦建立不许改任何列**（BEFORE UPDATE 拒绝，写进测试）；换团 = 取消旧单 + 建新单（取消与重建在一个事务里，由「更正」命令保证，不会因索引被挡）。
+- **与团目录的交互（魏征 M6）**：出发日有订单后，团目录那边「撤回导入/删除出发日」会因 restrict 被拒。团目录的撤回函数**没有**捕获外键错误（已核对），所以第一步在**应用层调用处**捕获并翻译成人话（「该出发日已有订单，不能撤」），**不改**团目录既有的 SQL 函数；补一条测试。
 
 ### 3.3 批次表 `crm_order_import_batches`（另建，不复用团目录那张）
 
@@ -70,7 +72,7 @@
 
 ### 3.4 改动日志 `crm_order_events`（只增不改，自动写）
 
-- `order_id`、`client_id`、`action`（created/payment_changed/quantity_changed/cancelled/imported/rolled_back）、`actor`（**不得为空**，沿用团目录的 `set_config` 做法传入）、`before`/`after`（jsonb，**不含联系人信息**）、`batch_id`、`at`。
+- `order_id`、`client_id`、`action`（created/payment_changed/quantity_changed/cancelled/imported/rolled_back）、`actor`（**不得为空**，沿用团目录的 `set_config` 做法传入；**触发器遇到 actor 为空直接拒绝整条写入**，不写空值）、`before`/`after`（jsonb，**不含联系人信息**）、`batch_id`、`at`。
 - **由 AFTER 触发器自动写**（不靠应用手写，防漏）；触发器函数带 `search_path`；BEFORE UPDATE/DELETE/TRUNCATE 拒绝（照 `me_conversion_audit`）。`crm_orders` 另加 BEFORE DELETE 拒绝触发器。
 - **诚实声明**：这些触发器挡得住应用层和 service-role，**挡不住数据库 owner（迁移、SQL 通道）**；那一层靠流程（生产库写入必须 PM 说「导」）而不靠触发器。
 - 全部新表（orders / departures 联结 / batches / events）都写完整 RLS：`enable row level security` + `for all to service_role using (true) with check (true)` + `revoke all … from anon, authenticated`；禁止 `workspace_id`/`auth.uid()`。
@@ -79,11 +81,11 @@
 
 1. 输入：CTS 销售给的一张表（发票号、几个人、付款状态、对到联系人用的电话或邮箱）。**原件不复制进仓库/worktree**，只从原路径读，批次里只存 sha256；脚本输出一律打码；这是对「解析完即删」的修正（原件还在 Dropbox/邮箱里，删不掉也不必删）。
 2. 对联系人：按电话/邮箱对；**对不上、命中两个人、发票号格式不合、发票号已存在** → 进「待人判断」，不自动建；对联系人用 `mergeStrategy: 'reject'`，不自动合并。
-3. 预览：打码清单 + 汇总，计划存进批次表，得到 `batch_id` 与 `plan_sha256`。
-4. **应用**：`apply --batch <id> --plan-sha <hash>` 调一个**数据库函数**，在同一事务里按已存计划写全部订单+联结+事件（不是脚本逐条写，中途失败整批回滚）；**只有 PM 在对话里明确说「导」才执行**（生产库写入）；应用前再校验计划哈希没变。
+3. 预览：打码清单 + 汇总，计划存进批次表，得到 `batch_id` 与 `plan_sha256`；计划里除「可建订单」外，另有 `unresolved` 数组（对不上联系人/命中两人/格式不合/发票号已存在/疑似尾款或第二批人，每项只含行号与原因，不含个人信息）。
+4. **应用**：`apply --batch <id> --plan-sha <hash>` 调一个**数据库函数**，在同一事务里按已存计划写全部订单+联结+事件（不是脚本逐条写，中途失败整批回滚）；**只有 PM 在对话里明确说「导」才执行**（生产库写入）；应用前再校验计划哈希没变。**函数在同一事务里重新校验前置条件（防预览和写入之间世界变了）**：联系人仍存在且仍属同一客户、出发日仍存在且为 open、发票号没被别的批次抢先（靠唯一索引）；任何一条不满足 → 整批回滚并把原因写回批次。测试：预览后、应用前把一个联系人合并/删除，应用必须失败。
 5. **撤回整批**：同样是数据库函数，订单置 cancelled、写事件，不删行；撤回后同一份更正过的表可重导（唯一索引只管 active）。
 6. **单条更正**（魏征 M2，第一步就要有）：`cancel` / `set-quantity` / `set-payment` 三个受控命令，都写事件、都要原因，退团/换团/改人数靠它们。
-7. **管道不许断头**：每批的「待人判断」和「找不到付款证据」清单，**落进今日待办「需要你动手」栏**（复用 `src/lib/pm-todo/manual-items.ts` 现有的人工事项机制，每批一条、不带客人信息）。三件套：what（几条、各差在哪、影响哪个团人数）、how（逐条怎么处理）、href（直达汇总页的「待判断」区）。
+7. **管道不许断头**：每批的「待人判断」和「找不到付款证据」清单，**落进今日待办「需要你动手」栏**。⚠️ 这不是配置而是**共享运行时代码**：要在 `src/lib/pm-todo/manual-items.ts` 的推送列表里新增一个 pusher 文件 + 一行注册（算进第一步范围，PR 里要有它的测试）。规则：读 `crm_order_import_batches` 里 `status=applied` 且 `unresolved_count>0` 且 `unresolved_cleared_at` 为空的批次，**每批一条**，处理完（命令把 `unresolved_cleared_at` 置位）自动消失；不带客人信息。三件套：what（几条、各差在哪、影响哪个团人数）、how（逐条怎么处理）、href（**绝对网址**，直达汇总页「待判断」区；相对路径会被链接闸整条丢掉）。批次表因此多两列：`unresolved_count`、`unresolved_cleared_at`。
 
 ### 3.6 汇总页（只读）
 
@@ -135,7 +137,7 @@
 ## 8. 需要 PM 回答的问题（一次一条，按顺序问）
 
 **Q1（现在就要答）：3 月四团的第一版已订数据，谁给？**
-建议：请 CTS 销售给一张表（发票号、几个人、付款状态、客人电话或邮箱），我们预览给你看、你说「导」才写入。备选：我从邮箱只读摸一遍出草稿，再由销售核对（慢、会漏）。回 `销售给表` 或 `我先摸`。
+建议：请 CTS 销售给一张表（发票号、几个人、付款状态、客人电话或邮箱），**再附 3–5 个真实发票号样本**（用来定发票号格式；没有格式前所有订单只能算「待核实」），我们预览给你看、你说「导」才写入。备选：我从邮箱只读摸一遍出草稿，再由销售核对（慢、会漏）。回 `销售给表` 或 `我先摸`。
 
 后续（不一次抛）：Q2 对外只显示「公司确认」栏、「待核实」只内部看，是否同意；Q3 外部下单系统上线后谁是准的，现在上线了没有；Q4 汇总页除 ME 管理员外，CTS 销售要不要看；Q5 第三步要不要在客人抽屉里露一行证据；Q6 要不要加「直招/代理」一列。
 
@@ -170,6 +172,21 @@
 | 魏征建议 8 | 第一步偏大 | 部分采纳：砍超订提示和 3/27；其余是 A 级必需，保留 |
 | 魏征建议 10 | PM 话术术语多 | 采纳：加 §0「PM 版两句话」；术语集中在 §3 以下 |
 
-## 11. 第二轮复审（只核对修改）
+## 11. 第二轮复审结果与处理
 
-待做：子牙 + 魏征 Round 2 只核对 §10 所列修改是否落地且没引入新问题；通过后回统筹，转 PM 批准。**批准前不写代码、不改生产库。**
+魏征 Round 2：**带条件通过**，4 条必改 + 4 条建议，已全部并入 v0.3：
+
+| 编号 | 要点 | 处理 |
+|---|---|---|
+| N1 | 发票号格式闸没有来源（付款邮件识别里没有 CTS 格式） | 采纳：格式来自真实样本，成为开工前置；没拿到前一律「待核实」；norm 算法明写并共用函数（§3.1） |
+| N2 | 一客人一团一条与「两批人」冲突 | 采纳：加 `party_no`；同客人同团第二张发票进待人判断，人选「尾款」或「另一批人」（§3.1） |
+| N3 | 联结表可改列、换团路径不明 | 采纳：联结表不许改任何列；换团 = 取消 + 重建同事务（§3.2） |
+| N4 | 计划哈希挡不住预览与写入之间世界变了 | 采纳：应用函数事务内重新校验并整批回滚，加测试（§3.5） |
+| S1 | 待办是代码不是配置、要绝对网址、「每批一条」判据 | 采纳：新增 pusher + 绝对网址 + 批次表两列（§3.5） |
+| S2 | 待人判断存哪里 | 采纳：计划里 `unresolved` 数组（§3.5） |
+| S3 | restrict 报错要翻译 | 采纳：应用层捕获，不改团目录 SQL（§3.2） |
+| S4 | actor 为空要拒绝 | 采纳（§3.4） |
+
+子牙 Round 2：见下一节（回来后补）。作者**没有**再做第三轮；若 PM 或统筹要求再审，只核对本节八条。
+**批准前不写代码、不改生产库。**
+
