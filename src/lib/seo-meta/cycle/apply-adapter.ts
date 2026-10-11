@@ -194,7 +194,7 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
       // Protected-page gate: fresh read of the list right before the in-memory edit that will be committed.
       // replaceMetaForSlug edits the window of the FIRST `slug: '<x>'`; if that is a nested reference the edit
       // would land in another entry, so the page being edited is unknown.
-      const identity = firstSlugAnchorIsNested(entry.source, candidate.slug)
+      const identity = firstSlugAnchorIsNested(entry.source, candidate.slug, style)
         ? unresolvedIdentity('nested_slug_anchor')
         : mergeIdentities(
             identityFromSlug(candidate.slug),

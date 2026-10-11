@@ -39,4 +39,45 @@ describe('firstSlugAnchorIsNested', () => {
     const src = `export const data = { pages: [\n  { slug: 'a' },\n  { slug: 'b' },\n] }\n`
     expect(firstSlugAnchorIsNested(src, 'a')).toBe(false)
   })
+
+  // ── fail-closed: every "cannot tell" is nested/unknown (true) ─────────────────────────────────────────────
+  it('🔴 the first match sitting inside a comment => cannot tell => true', () => {
+    const src = `// slug: 'a' was removed\nexport const pages = [\n  { slug: 'a', metaTitle: 'A' },\n]\n`
+    expect(firstSlugAnchorIsNested(src, 'a')).toBe(true)
+  })
+
+  it("🔴 a snake_case key like parent_slug: 'a' is matched by the editors' substring search => cannot tell => true", () => {
+    const src = `export const pages = [\n  { parent_slug: 'a', slug: 'z' },\n  { slug: 'a', metaTitle: 'A' },\n]\n`
+    expect(firstSlugAnchorIsNested(src, 'a')).toBe(true)
+  })
+
+  it('🔴 a regex literal with a quote derails the scan (unbalanced) => true, never a quiet "not nested"', () => {
+    const src = `const q = /'/g\nexport const pages = [\n  { slug: 'a', metaTitle: 'A' },\n  { slug: 'b' },\n]\n`
+    expect(firstSlugAnchorIsNested(src, 'a')).toBe(true)
+  })
+
+  it('unterminated block comment / unbalanced brackets => true', () => {
+    expect(firstSlugAnchorIsNested(`export const pages = [\n  { slug: 'a' },\n/* never closed`, 'a')).toBe(true)
+    expect(firstSlugAnchorIsNested(`export const pages = [\n  { slug: 'a' ,\n`, 'a')).toBe(true)
+  })
+
+  // ── no false alarms from other `slug` shapes in the same file ─────────────────────────────────────────────
+  it('type annotations and function parameters named slug do not make every entry look nested', () => {
+    const withInterface = `interface P { slug: string }\nexport const pages: P[] = [\n  { slug: 'a' },\n  { slug: 'b' },\n]\n`
+    const withParam = `export function get(slug: string) { return slug }\nexport const pages = [\n  { slug: 'a' },\n]\n`
+    expect(firstSlugAnchorIsNested(withInterface, 'a')).toBe(false)
+    expect(firstSlugAnchorIsNested(withParam, 'a')).toBe(false)
+  })
+
+  it('a separate top-level object with a slug does not make list entries look nested', () => {
+    const src = `export const home = { slug: 'home' }\nexport const pages = [\n  { slug: 'a' },\n]\n`
+    // list entries sit deeper than the lone top-level object: documented limit — treated as nested (refused, never wrongly allowed)
+    expect(firstSlugAnchorIsNested(src, 'a')).toBe(true)
+  })
+
+  it('guide style anchors on the two-space-indented slug line only, ignoring earlier nested mentions', () => {
+    const src = `export const guides = [\n  {\n    related: [{ slug: 'b' }],\n  },\n  {\n  slug: 'b',\n  metaTitle: 'B',\n  },\n]\n`
+    expect(firstSlugAnchorIsNested(src, 'b', 'default')).toBe(true)
+    expect(firstSlugAnchorIsNested(src, 'b', 'guide')).toBe(false)
+  })
 })
