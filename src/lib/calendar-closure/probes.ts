@@ -106,20 +106,32 @@ async function probeCronRunOk(
     }
   }
 
-  const completed = rows.filter((r) => r.status === 'completed').length
-  if (completed > 0) {
+  // 正在进行中的记录（status=running）不是结果：巡检核对自己时会看到自己这一轮的开跑行，
+  // 把它算进"没有成功的"会每次都误判 failed（2026-10-12 首次线上真跑发现）。
+  const finished = rows.filter((r) => r.status !== 'running')
+  if (finished.length === 0) {
     return {
-      outcome: 'passed_needs_human_confirm',
-      fact: `${rows.length} 条运行记录里有成功的`,
+      outcome: 'not_yet',
+      fact: `时间窗内只有 ${rows.length} 条正在进行中的记录，还没有跑完的`,
       fetchedAt,
       sample,
     }
   }
 
-  const failed = rows.filter((r) => r.status === 'failed').length
+  const completed = finished.filter((r) => r.status === 'completed').length
+  if (completed > 0) {
+    return {
+      outcome: 'passed_needs_human_confirm',
+      fact: `${finished.length} 条跑完的运行记录里有成功的`,
+      fetchedAt,
+      sample,
+    }
+  }
+
+  const failed = finished.filter((r) => r.status === 'failed').length
   return {
     outcome: 'failed',
-    fact: `${rows.length} 条运行记录里没有成功的（${failed} 条失败）`,
+    fact: `${finished.length} 条跑完的运行记录里没有成功的（${failed} 条失败）`,
     fetchedAt,
     sample,
   }
