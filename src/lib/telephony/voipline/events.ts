@@ -65,7 +65,7 @@ const ALIASES = {
   duration: ['duration', 'talk_time', 'talk_duration', 'billsec', 'call_duration'],
   answered: ['answered', 'is_answered'],
   recordingId: ['recording_id', 'recording_uuid'],
-  recordingUrl: ['recording_url', 'recording_link', 'recording', 'url'],
+  recordingUrl: ['recording_url', 'recording_link'],
 } as const
 
 function pick(obj: Record<string, unknown>, keys: readonly string[]): unknown {
@@ -97,9 +97,18 @@ const bool = (v: unknown): boolean | null => {
   return null
 }
 
+/**
+ * 事件时间 → ISO。只认带时区的字符串和 epoch 数字；**没带时区的时间不猜**（服务器时区一变就差十几个小时），
+ * 返回 null，由调用方用收到时间兜底。
+ */
 const iso = (v: unknown): string | null => {
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const ms = v < 1e12 ? v * 1000 : v
+    const d = new Date(ms)
+    return Number.isNaN(d.getTime()) ? null : d.toISOString()
+  }
   const s = str(v)
-  if (!s) return null
+  if (!s || !/(z|[+-]\d{2}:?\d{2})$/i.test(s)) return null
   const t = new Date(s)
   return Number.isNaN(t.getTime()) ? null : t.toISOString()
 }
@@ -109,7 +118,9 @@ export function classifyEventType(rawType: string): CallEventType {
   const t = rawType.toLowerCase().replace(/[^a-z0-9]+/g, '_')
   if (/recording/.test(t)) return 'recording_ready'
   if (/(queue|ring_?group|voicemail|summary|webhook_component)/.test(t)) return 'other'
-  if (/(completion|complete|ended|end|hangup)/.test(t)) return 'call_ended'
+  // 「没人接 / 忙线 / 失败」是结束类事件，不是接通事件（必须排在 answer 判断之前）。
+  if (/(no_?answer|unanswered|busy|missed|failed|cancel)/.test(t)) return 'call_ended'
+  if (/(^|_)(completion|complete|completed|ended|end|hangup)(_|$)/.test(t)) return 'call_ended'
   if (/answer/.test(t)) return 'call_answered'
   if (/(inbound|outbound|call)/.test(t)) return 'call_started'
   return 'other'
@@ -133,6 +144,7 @@ export function parseVoiplineEvent(payload: unknown): ParseResult {
   if (!rawType) return { ok: false, reason: 'missing_event_type' }
 
   const direction = directionFrom(rawType, pick(o, ALIASES.direction))
+  const noAnswerType = /(no_?answer|unanswered|busy|missed|failed|cancel)/.test(rawType.replace(/[^a-z0-9]+/g, '_'))
   // 号码方向：呼入时对方是主叫；呼出时对方是被叫。方向不明就不猜号码。
   const counterpartyNumber =
     direction === 'inbound'
@@ -153,7 +165,7 @@ export function parseVoiplineEvent(payload: unknown): ParseResult {
       counterpartyName: direction === 'inbound' ? str(pick(o, ALIASES.name)) : null,
       extension: str(pick(o, ALIASES.extension)),
       extensionName: str(pick(o, ALIASES.extensionName)),
-      answered: bool(pick(o, ALIASES.answered)),
+      answered: noAnswerType ? false : bool(pick(o, ALIASES.answered)),
       talkSeconds: secs(pick(o, ALIASES.duration)),
       recordingId: str(pick(o, ALIASES.recordingId)),
       recordingUrl: str(pick(o, ALIASES.recordingUrl)),
@@ -161,27 +173,15 @@ export function parseVoiplineEvent(payload: unknown): ParseResult {
   }
 }
 
-/** 稳定序列化（键排序），用来给「同一份载荷重发」算同一个指纹。 */
-function canonical(v: unknown): string {
-  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`
-  if (v && typeof v === 'object') {
-    const o = v as Record<string, unknown>
-    return `{${Object.keys(o)
-      .sort()
-      .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
-      .join(',')}}`
-  }
-  return JSON.stringify(v)
-}
-
 /**
- * 去重键：供应商账号 + 通话编号 + 事件类型 + 载荷指纹。
+ * 去重键：供应商账号 + 通话编号 + 事件类型 + 请求体指纹。
  *
- * 加载荷指纹是刻意偏离「只用前三样」的：转接时同一个通话编号会有多段
+ * 加请求体指纹是刻意偏离「只用前三样」的：转接时同一个通话编号会有多段
  * answered / completion，只用前三样会把第二段当重复丢掉，那一段的员工和时长就没了。
- * 字节级相同的重发指纹相同，照样被挡掉。
+ * 字节级相同的重发指纹相同，照样被挡掉。指纹直接对原始请求体取哈希（不做递归序列化，
+ * 深层嵌套的载荷也不会炸栈）。各段用 JSON 数组拼接，避免通话编号里带冒号造成碰撞。
  */
-export function buildDedupeKey(account: string, event: NormalisedCallEvent, payload: unknown): string {
-  const fp = createHash('sha256').update(canonical(payload)).digest('hex').slice(0, 16)
-  return `${VOIPLINE_PROVIDER}:${account}:${event.callId}:${event.rawType}:${fp}`
+export function buildDedupeKey(account: string, event: NormalisedCallEvent, bodyText: string): string {
+  const fp = createHash('sha256').update(bodyText, 'utf8').digest('hex').slice(0, 16)
+  return JSON.stringify([VOIPLINE_PROVIDER, account, event.callId, event.rawType, fp])
 }

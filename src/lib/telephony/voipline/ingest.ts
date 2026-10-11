@@ -72,7 +72,11 @@ export async function handleVoiplineWebhook(store: TelephonyStore, input: Ingest
   }
   const parsed = parseVoiplineEvent(payload)
   if (!parsed.ok) {
-    return reject(400, `unparseable:${parsed.reason}`, { connectionId: conn.id, clientId: conn.clientId })
+    // 令牌通过、但读不懂：把载荷留下（只有服务端可读），好用真实样本校准字段别名；回 200 避免 PBX 反复重发。
+    await store
+      .insertRejection({ connectionId: conn.id, clientId: conn.clientId, reason: `unparseable:${parsed.reason}`, receivedAt, payload })
+      .catch(() => undefined)
+    return { status: 200, body: { status: 'unparsed' } }
   }
 
   let inserted: { inserted: boolean; id: string | null }
@@ -81,7 +85,7 @@ export async function handleVoiplineWebhook(store: TelephonyStore, input: Ingest
       clientId: conn.clientId,
       connectionId: conn.id,
       callId: parsed.event.callId,
-      dedupeKey: buildDedupeKey(conn.providerAccountId, parsed.event, payload),
+      dedupeKey: buildDedupeKey(conn.providerAccountId, parsed.event, input.bodyText),
       receivedAt,
       rawType: parsed.event.rawType,
       event: parsed.event,
@@ -94,4 +98,28 @@ export async function handleVoiplineWebhook(store: TelephonyStore, input: Ingest
 
   await input.emit(inserted.id, conn.clientId, conn.id).catch(() => undefined)
   return { status: 200, body: { status: 'accepted', receipt: inserted.id } }
+}
+
+/**
+ * 带上限地读请求体：超过上限立刻放弃（不把整个体读进内存）。
+ * 返回 null 表示超限。分块传输（没有 content-length）也靠累计字节数拦住。
+ */
+export async function readCappedBody(req: { headers: { get(k: string): string | null }; body: ReadableStream<Uint8Array> | null }): Promise<string | null> {
+  const declared = Number(req.headers.get('content-length') ?? '0')
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return null
+  if (!req.body) return ''
+  const reader = req.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => undefined)
+      return null
+    }
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks).toString('utf8')
 }

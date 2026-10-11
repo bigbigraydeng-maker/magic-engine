@@ -121,7 +121,8 @@ export const supabaseTelephonyStore: TelephonyStore = {
           dedupe_key: row.dedupeKey,
           received_at: row.receivedAt,
           status: 'pending',
-          normalised: row.event,
+          // 录音链接只留在 payload 列；normalised 里只留「有链接」的标记，避免两处都放敏感内容。
+          normalised: { ...row.event, recordingUrl: row.event.recordingUrl ? 'in_payload' : null },
           payload: row.payload,
         },
         { onConflict: 'dedupe_key', ignoreDuplicates: true },
@@ -133,11 +134,19 @@ export const supabaseTelephonyStore: TelephonyStore = {
   },
 
   async insertRejection(row) {
+    // 未认证请求也能触发回执，所以同一（连接, 原因）一分钟内只记一条，表不会被刷爆。
+    const since = new Date(new Date(row.receivedAt).getTime() - 60_000).toISOString()
+    let q = supabaseAdmin.from('telephony_webhook_rejections').select('id').eq('reason', row.reason).gte('received_at', since).limit(1)
+    q = row.connectionId ? q.eq('connection_id', row.connectionId) : q.is('connection_id', null)
+    const { data: recent, error: readErr } = await q
+    if (readErr) throw new Error(`读拒绝回执失败: ${readErr.message}`)
+    if ((recent ?? []).length > 0) return
     const { error } = await supabaseAdmin.from('telephony_webhook_rejections').insert({
       connection_id: row.connectionId,
       client_id: row.clientId,
       reason: row.reason,
       received_at: row.receivedAt,
+      payload: row.payload ?? null,
     })
     if (error) throw new Error(`拒绝回执落库失败: ${error.message}`)
   },
@@ -186,6 +195,16 @@ export const supabaseTelephonyStore: TelephonyStore = {
     return (data ?? []).map(asRaw)
   },
 
+  async countExhaustedRaw(maxAttempts) {
+    const { count, error } = await supabaseAdmin
+      .from('telephony_raw_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'failed')
+      .gte('attempts', maxAttempts)
+    if (error) throw new Error(`数耗尽事件失败: ${error.message}`)
+    return count ?? 0
+  },
+
   async getCall(clientId, callId) {
     const { data, error } = await supabaseAdmin
       .from('telephony_calls')
@@ -196,6 +215,18 @@ export const supabaseTelephonyStore: TelephonyStore = {
       .maybeSingle()
     if (error) throw new Error(`读通话失败: ${error.message}`)
     return data ? callFromDb(data) : null
+  },
+
+  async listStaleCalls(startedBeforeIso, limit) {
+    const { data, error } = await supabaseAdmin
+      .from('telephony_calls')
+      .select('*')
+      .eq('crm_status', 'pending')
+      .lt('started_at', startedBeforeIso)
+      .order('started_at', { ascending: true })
+      .limit(limit)
+    if (error) throw new Error(`读待补通话失败: ${error.message}`)
+    return (data ?? []).map(callFromDb)
   },
 
   async saveCall(row) {
@@ -272,6 +303,18 @@ export const supabaseTelephonyStore: TelephonyStore = {
         if (uErr) throw new Error(`更新联系人时间失败: ${uErr.message}`)
       }
     }
-    return { touchpointId: data?.id ?? null, created: data != null }
+    let touchpointId = data?.id ?? null
+    if (!touchpointId) {
+      // 命中幂等键（重试）：回查已有触点的 id，通话行才能和触点对上。
+      const { data: existing } = await supabaseAdmin
+        .from('contact_touchpoints')
+        .select('id')
+        .eq('client_id', t.clientId)
+        .eq('source', VOIPLINE_PROVIDER)
+        .eq('source_ref', t.sourceRef)
+        .maybeSingle()
+      touchpointId = (existing?.id as string | undefined) ?? null
+    }
+    return { touchpointId, created: data != null }
   },
 }

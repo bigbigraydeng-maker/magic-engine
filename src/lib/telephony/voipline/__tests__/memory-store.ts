@@ -16,7 +16,7 @@ export interface MemTouchpoint extends TouchpointInput {
 export function createMemoryStore(connections: TelephonyConnection[]) {
   const conns = new Map(connections.map((c) => [c.id, c]))
   const raw = new Map<string, RawEventRow & { payload: unknown; rawType: string; lastError: string | null }>()
-  const rejections: Array<{ connectionId: string | null; clientId: string | null; reason: string }> = []
+  const rejections: Array<{ connectionId: string | null; clientId: string | null; reason: string; payload?: unknown }> = []
   const calls = new Map<string, CallRow>()
   /** clientId -> phone -> contact ids */
   const contacts = new Map<string, Map<string, string[]>>()
@@ -55,7 +55,7 @@ export function createMemoryStore(connections: TelephonyConnection[]) {
       return { inserted: true, id }
     },
     async insertRejection(row) {
-      rejections.push({ connectionId: row.connectionId, clientId: row.clientId, reason: row.reason })
+      rejections.push({ connectionId: row.connectionId, clientId: row.clientId, reason: row.reason, payload: row.payload })
     },
     async getRawEvent(id) {
       return raw.get(id) ?? null
@@ -75,8 +75,14 @@ export function createMemoryStore(connections: TelephonyConnection[]) {
         .filter((r) => (r.status === 'pending' || r.status === 'failed') && r.receivedAt < olderThanIso && r.attempts < maxAttempts)
         .slice(0, limit)
     },
+    async countExhaustedRaw(max) {
+      return [...raw.values()].filter((r) => r.status === 'failed' && r.attempts >= max).length
+    },
     async getCall(clientId, callId) {
       return calls.get(callKey(clientId, callId)) ?? null
+    },
+    async listStaleCalls(before, limit) {
+      return [...calls.values()].filter((c) => c.crmStatus === 'pending' && c.startedAt < before).slice(0, limit)
     },
     async saveCall(row) {
       calls.set(callKey(row.clientId, row.providerCallId), structuredClone(row))
@@ -96,7 +102,7 @@ export function createMemoryStore(connections: TelephonyConnection[]) {
         throw new Error('写通话触点失败: simulated outage')
       }
       const key = `${t.clientId}|voipline|${t.sourceRef}`
-      if (touchpoints.has(key)) return { touchpointId: null, created: false }
+      if (touchpoints.has(key)) return { touchpointId: touchpoints.get(key)!.id, created: false }
       const id = `tp-${++seq}`
       touchpoints.set(key, { ...t, id })
       if (t.direction === 'inbound' || t.reached) lastSeen.set(t.contactId, t.occurredAt)

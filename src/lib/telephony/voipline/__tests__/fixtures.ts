@@ -69,6 +69,7 @@ export function harness(conns = [connA(), connB()]) {
   return {
     mem,
     emitted,
+    now,
     async send(payload: unknown, opts: { conn?: string; token?: string | null } = {}) {
       const connectionId = opts.conn ?? CONN_A
       const token = opts.token === undefined ? (connectionId === CONN_B ? TOKEN_B : TOKEN_A) : opts.token
@@ -84,10 +85,10 @@ export function harness(conns = [connA(), connB()]) {
       return res
     },
     /** 把所有已发出的处理事件按顺序处理掉（模拟 Inngest 消费）。 */
-    async drain() {
+    async drain(opts: { quietMs?: number } = { quietMs: 0 }) {
       const ids = emitted.splice(0)
       const outs = []
-      for (const id of ids) outs.push(await processRawEvent(mem.store, id, now))
+      for (const id of ids) outs.push(await processRawEvent(mem.store, id, now, opts))
       return outs
     },
   }

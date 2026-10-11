@@ -41,6 +41,17 @@ export interface FoldedCall {
   recording: { ref: string; rawEventId: string } | null
 }
 
+/** 事件自报的时间只在「收到时间前 30 天到后 5 分钟」内才采信，否则用收到时间（防乱填的未来/远古时间毒化记录）。 */
+const PAST_WINDOW_MS = 30 * 24 * 3600 * 1000
+const FUTURE_WINDOW_MS = 5 * 60 * 1000
+function trustedTime(claimed: string | null, receivedAt: string): string {
+  if (!claimed) return receivedAt
+  const c = Date.parse(claimed)
+  const r = Date.parse(receivedAt)
+  if (Number.isNaN(c) || Number.isNaN(r)) return receivedAt
+  return c < r - PAST_WINDOW_MS || c > r + FUTURE_WINDOW_MS ? receivedAt : claimed
+}
+
 const STAGE_RANK: Record<CallStage, number> = { unknown: 0, started: 1, answered: 2, ended: 3 }
 
 export function foldCall(inputs: FoldInput[]): FoldedCall | null {
@@ -62,7 +73,7 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
   let recording: FoldedCall['recording'] = null
 
   for (const { rawEventId, receivedAt, event: e } of evs) {
-    const at = e.occurredAt ?? receivedAt
+    const at = trustedTime(e.occurredAt, receivedAt)
     if (earliest === null || at < earliest) earliest = at
     direction ??= e.direction
     counterpartyNumber ??= e.counterpartyNumber
@@ -93,7 +104,9 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
     }
   }
 
-  const answered = sawAnswerEvent || explicitAnswered === true || (explicitAnswered === null && st.stage === 'ended' && talkSeconds > 0)
+  // 只认明确的接通事件 / 明确的 answered=true。不用「时长>0」推断：供应商的 duration 可能含响铃时间，
+  // 推断会把没接的电话记成有效联系。
+  const answered = sawAnswerEvent || explicitAnswered === true
   if (answered) bump('answered')
 
   const legs = [...legMap.values()]

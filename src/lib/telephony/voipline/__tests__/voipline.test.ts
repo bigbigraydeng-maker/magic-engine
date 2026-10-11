@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { processRawEvent } from '../process'
+import { readCappedBody, MAX_BODY_BYTES } from '../ingest'
+import { isHumanFollowup } from '@/lib/crm/lead-followup-due'
 import { hashWebhookToken, verifyWebhookToken } from '../auth'
 import { buildDedupeKey, classifyEventType, parseVoiplineEvent } from '../events'
 import { sweepStaleRawEvents } from '@/lib/inngest/functions/telephony-voipline'
@@ -8,6 +11,10 @@ import {
   outboundAnswered, outboundEnded, outboundRecording, outboundStart, ev,
 } from './fixtures'
 
+/** 试跑里把「重发处理事件」直接换成处理（不等静默期）。 */
+const direct = (h: ReturnType<typeof harness>) => async (id: string) => {
+  await processRawEvent(h.mem.store, id, h.now, { quietMs: 0 })
+}
 const tpOf = (h: ReturnType<typeof harness>) => [...h.mem.touchpoints.values()]
 const callOf = (h: ReturnType<typeof harness>, client = CLIENT_A, id = 'call-1') => h.mem.calls.get(`${client}|${id}`)
 
@@ -45,8 +52,14 @@ describe('事件解析', () => {
     const a = parseVoiplineEvent(inboundEnded())
     const b = parseVoiplineEvent(inboundEnded({ duration: 99 }))
     if (!a.ok || !b.ok) throw new Error('parse')
-    expect(buildDedupeKey('acct', a.event, inboundEnded())).toBe(buildDedupeKey('acct', a.event, { ...inboundEnded() }))
-    expect(buildDedupeKey('acct', a.event, inboundEnded())).not.toBe(buildDedupeKey('acct', b.event, inboundEnded({ duration: 99 })))
+    const body = JSON.stringify(inboundEnded())
+    expect(buildDedupeKey('acct', a.event, body)).toBe(buildDedupeKey('acct', a.event, body))
+    expect(buildDedupeKey('acct', a.event, body)).not.toBe(buildDedupeKey('acct', b.event, JSON.stringify(inboundEnded({ duration: 99 }))))
+    // 通话编号里带冒号也不会和别的账号撞键
+    const x = parseVoiplineEvent({ ...inboundEnded(), unique_call_id: 'a:b' })
+    const y = parseVoiplineEvent({ ...inboundEnded(), unique_call_id: 'b' })
+    if (!x.ok || !y.ok) throw new Error('parse')
+    expect(buildDedupeKey('acct', x.event, body)).not.toBe(buildDedupeKey('acct:a', y.event, body))
   })
 })
 
@@ -79,8 +92,10 @@ describe('接收：fail-closed 与回执', () => {
   it('坏 JSON / 缺通话编号 → 400 + 回执', async () => {
     const h = harness()
     expect((await h.send('{oops')).status).toBe(400)
-    expect((await h.send({ type: 'user_inbound_call' })).status).toBe(400)
+    // 令牌通过但读不懂：回 200（不让 PBX 反复重发），载荷留下来校准别名
+    expect((await h.send({ type: 'user_inbound_call', note: 'sample' })).status).toBe(200)
     expect(h.mem.rejections.map((x) => x.reason)).toEqual(['invalid_json', 'unparseable:missing_call_id'])
+    expect(h.mem.rejections[1].payload).toMatchObject({ note: 'sample' })
   })
   it('落库失败 → 503（让 PBX 重发），不发处理事件', async () => {
     const h = harness()
@@ -98,8 +113,8 @@ describe('接收：fail-closed 与回执', () => {
     })
     expect(res.status).toBe(200)
     expect(h.mem.raw.size).toBe(1)
-    const sweep = await sweepStaleRawEvents(h.mem.store, new Date('2026-10-12T03:00:00.000Z'))
-    expect(sweep.picked).toBe(1)
+    const sweep = await sweepStaleRawEvents(h.mem.store, direct(h), new Date('2026-10-12T03:00:00.000Z'))
+    expect(sweep.rawRedispatched).toBe(1)
   })
 })
 
@@ -134,7 +149,7 @@ describe('场景：外呼', () => {
     await h.send(outboundStart())
     await h.send(outboundEnded())
     await h.drain()
-    expect(tpOf(h)[0]).toMatchObject({ contactId: cid, outcome: 'no_answer', reached: false })
+    expect(tpOf(h)[0]).toMatchObject({ contactId: cid, outcome: 'no_answer', reached: false, staffEmail: null })
     expect(h.mem.lastSeen.has(cid)).toBe(false)
   })
   it('外呼秒挂（接通 3 秒）不算有效联系', async () => {
@@ -264,12 +279,11 @@ describe('失败可见 + 可重试', () => {
     await h.send(inboundStart()); await h.send(inboundEnded())
     const ids = [...h.emitted]
     h.emitted.length = 0
-    const { processRawEvent } = await import('../process')
-    await expect(processRawEvent(h.mem.store, ids[0])).rejects.toThrow()
+    await expect(processRawEvent(h.mem.store, ids[0], h.now, { quietMs: 0 })).rejects.toThrow()
     expect(callOf(h)!.crmStatus).toBe('failed')
     expect([...h.mem.raw.values()].some((r) => r.status === 'failed')).toBe(true)
-    const sweep = await sweepStaleRawEvents(h.mem.store, new Date('2026-10-12T03:00:00.000Z'))
-    expect(sweep.picked).toBeGreaterThan(0)
+    const sweep = await sweepStaleRawEvents(h.mem.store, direct(h), new Date('2026-10-12T03:00:00.000Z'))
+    expect(sweep.rawRedispatched).toBeGreaterThan(0)
     expect(callOf(h)!.crmStatus).toBe('written')
     expect(tpOf(h)).toHaveLength(1)
   })
@@ -279,5 +293,114 @@ describe('失败可见 + 可重试', () => {
     await h.drain()
     expect([...h.mem.raw.values()][0].status).toBe('ignored')
     expect(h.mem.calls.size).toBe(0)
+  })
+})
+
+describe('审查后补的防线', () => {
+  it('转接：前台那段 completion 先到、静默期内不写 CRM；销售那段到了之后再写，记成有效通话', async () => {
+    const h = harness()
+    await h.send(inboundStart({ user_extension: '101' }))
+    await h.send(inboundEnded({ user_extension: '101', duration: 8 }))
+    const [first] = await h.drain({ quietMs: 120_000 })
+    expect(first!.deferred).toBe(true)
+    expect(tpOf(h)).toHaveLength(0)
+    await h.send(inboundAnswered({ user_extension: '102' }))
+    await h.send(inboundEnded({ user_extension: '102', duration: 300 }))
+    await h.drain({ quietMs: 0 })
+    expect(tpOf(h)).toHaveLength(1)
+    expect(tpOf(h)[0]).toMatchObject({ outcome: 'spoke', talkSeconds: 300, staffEmail: 'staff.two@example.test' })
+  })
+  it('事件自报时间离谱（远未来 / 远古）：不采信，用收到时间，不毒化联系人最近出现时间', async () => {
+    const h = harness()
+    await h.send(inboundStart({ call_start_at: '2999-01-01T00:00:00.000Z' }))
+    await h.send(inboundEnded({ call_start_at: '2999-01-01T00:00:00.000Z' }))
+    await h.drain()
+    expect(Date.parse(callOf(h)!.startedAt)).toBeLessThan(Date.parse('2027-01-01'))
+    expect(Date.parse(tpOf(h)[0].occurredAt)).toBeLessThan(Date.parse('2027-01-01'))
+  })
+  it('分机名叫 constructor / __proto__：不会取到原型链上的东西', async () => {
+    const h = harness()
+    await h.send(inboundStart({ user_extension: 'constructor' })); await h.send(inboundEnded({ user_extension: 'constructor' }))
+    await h.drain()
+    expect(tpOf(h)[0].staffEmail).toBeNull()
+  })
+  it('深层嵌套的请求体不会让接收口 500', async () => {
+    const h = harness()
+    const deep = '['.repeat(100_000) + ']'.repeat(100_000)
+    const res = await h.send(`{"unique_call_id":"x","type":"user_inbound_call","z":${deep}}`)
+    expect([200, 400]).toContain(res.status)
+  })
+  it('读请求体：声明超限直接拒；分块超限也在累计时拦住；正常的读得出来', async () => {
+    const mk = (len: string | null, body: Uint8Array[] | null) => ({
+      headers: { get: (k: string) => (k === 'content-length' ? len : null) },
+      body: body ? new ReadableStream<Uint8Array>({ start(c) { body.forEach((b) => c.enqueue(b)); c.close() } }) : null,
+    })
+    expect(await readCappedBody(mk(String(MAX_BODY_BYTES + 1), null))).toBeNull()
+    expect(await readCappedBody(mk(null, [new Uint8Array(MAX_BODY_BYTES), new Uint8Array(10)]))).toBeNull()
+    expect(await readCappedBody(mk(null, [new TextEncoder().encode('{"a":1}')]))).toBe('{"a":1}')
+  })
+  it('来电没人接（voipline inbound 且非 spoke）不算「真人跟进过」；接通了才算；外呼未接仍按原规则算尝试', () => {
+    const base = { channel: 'phone', source: 'voipline', occurredAt: '2026-10-12T00:00:00Z' } as const
+    expect(isHumanFollowup({ ...base, direction: 'inbound', metadata: { outcome: 'no_answer' } } as never)).toBe(false)
+    expect(isHumanFollowup({ ...base, direction: 'inbound', metadata: { outcome: 'spoke' } } as never)).toBe(true)
+    expect(isHumanFollowup({ ...base, direction: 'outbound', metadata: { outcome: 'no_answer' } } as never)).toBe(true)
+  })
+  it('补处理：结束了却一直没写 CRM 的通话会被重新派发；6 小时没收到结束事件的转人工确认', async () => {
+    const h = harness()
+    await h.send(inboundStart()); await h.send(inboundEnded())
+    await h.drain({ quietMs: 120_000 })
+    const dispatched: string[] = []
+    const r = await sweepStaleRawEvents(h.mem.store, async (id) => { dispatched.push(id) }, new Date('2026-10-12T01:30:00.000Z'))
+    expect(r.endedCallsRedispatched).toBe(1)
+    const g = harness()
+    await g.send(inboundStart()); await g.drain({ quietMs: 0 })
+    const r2 = await sweepStaleRawEvents(g.mem.store, async () => undefined, new Date('2026-10-12T09:00:00.000Z'))
+    expect(r2.flaggedNoEnd).toBe(1)
+    expect(g.mem.calls.get(`${CLIENT_A}|call-1`)).toMatchObject({ crmStatus: 'needs_review' })
+  })
+  it('写 CRM 的错误文字里的长数字串会被打码', async () => {
+    const { safeErr } = await import('../process')
+    expect(safeErr(new Error('duplicate key (+64210000001) violates'))).not.toContain('64210000001')
+  })
+})
+
+describe('魏征审查后补的防线', () => {
+  it('来电没人接：outcome=missed_inbound，不记员工，不被当成「我们尝试过」', async () => {
+    const h = harness()
+    await h.send(inboundStart()); await h.send(inboundEnded({ duration: 0, answered: false }))
+    await h.drain()
+    expect(tpOf(h)[0]).toMatchObject({ outcome: 'missed_inbound', staffEmail: null, reached: false })
+  })
+  it('只有结束事件、没带 answered 标志、时长 28 秒（可能是响铃）：不判接通，不算有效联系', async () => {
+    const h = harness()
+    h.mem.addContact(CLIENT_A, CUSTOMER_E164)
+    await h.send(outboundStart())
+    await h.send(ev('user_outbound_call_completion', { dest_number: '0210000001', duration: 28 }))
+    await h.drain()
+    expect(callOf(h)).toMatchObject({ answered: false })
+    expect(tpOf(h)[0]).toMatchObject({ outcome: 'no_answer', reached: false })
+  })
+  it('「没人接」类事件名不会被当成接通事件', () => {
+    for (const n of ['inbound_call_no_answer', 'call_unanswered', 'outbound_call_busy', 'call_failed']) {
+      expect(classifyEventType(n)).toBe('call_ended')
+    }
+    const r = parseVoiplineEvent({ type: 'outbound_call_no_answer', unique_call_id: 'x', dest_number: '021' })
+    expect(r.ok && r.event.answered).toBe(false)
+  })
+  it('无时区的时间戳不猜（用收到时间）；epoch 秒能读', () => {
+    const a = parseVoiplineEvent(inboundStart({ call_start_at: '2026-10-12 09:15:00' }))
+    expect(a.ok && a.event.occurredAt).toBeNull()
+    const b = parseVoiplineEvent(inboundStart({ call_start_at: 1760230800 }))
+    expect(b.ok && b.event.occurredAt).toBe('2025-10-12T01:00:00.000Z')
+    const c = parseVoiplineEvent(inboundStart({ call_start_at: '2026-10-12T09:15:00+13:00' }))
+    expect(c.ok && c.event.occurredAt).toBe('2026-10-11T20:15:00.000Z')
+  })
+  it('一次失败只记一次重试次数', async () => {
+    const h = harness()
+    h.mem.failures.touchpointWrites = 1
+    await h.send(inboundStart()); await h.send(inboundEnded())
+    const ids = [...h.emitted]
+    await expect(processRawEvent(h.mem.store, ids[0], h.now, { quietMs: 0 })).rejects.toThrow()
+    expect(h.mem.raw.get(ids[0])!.attempts).toBe(1)
   })
 })

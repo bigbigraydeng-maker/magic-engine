@@ -14,12 +14,26 @@ import type { CallRow, CrmStatus, MatchStatus, Receipt, TelephonyConnection, Tel
 
 const MAX_RECEIPTS = 50
 
+/**
+ * 通话「结束」之后再静默这么久才写 CRM：转接时前台那一段的 completion 常常先到，
+ * 立刻写会把整通电话永久记成「未接」。静默期内有新事件到达就继续等。
+ */
+export const CRM_QUIET_MS = 120_000
+
+/** 错误文字落库前把长数字串（可能是客人号码）打码。 */
+export function safeErr(err: unknown): string {
+  const m = err instanceof Error ? err.message : 'unknown'
+  return m.replace(/\+?\d[\d\s-]{5,}\d/g, '[num]').slice(0, 300)
+}
+
 export interface ProcessOutcome {
   callId: string
   stage: string
   crmStatus: CrmStatus
   matchStatus: MatchStatus
   recordingStatus: string
+  /** true = 通话刚结束、还在静默期，CRM 还没写；稍后再处理一次。 */
+  deferred?: boolean
 }
 
 function receipt(stage: string, status: string, now: string, detail?: string): Receipt {
@@ -38,7 +52,8 @@ function baseRow(conn: TelephonyConnection, folded: FoldedCall, prev: CallRow | 
     answered: folded.answered,
     talkSeconds: folded.talkSeconds,
     extension: folded.extension,
-    staffEmail: folded.extension ? (conn.extensionMap[folded.extension] ?? null) : null,
+    // 没人接的电话不记员工：不能把「谁跟的」填给一个没接起来的人。
+    staffEmail: folded.answered ? staffFor(conn, folded.extension) : null,
     legs: folded.legs,
     // 下面这些是 CRM / 录音链路的状态，重折时必须沿用，不能被「重算」冲掉。
     contactId: prev?.contactId ?? null,
@@ -54,6 +69,13 @@ function baseRow(conn: TelephonyConnection, folded: FoldedCall, prev: CallRow | 
     learningEligible: false,
     receipts: prev?.receipts ?? [],
   }
+}
+
+/** 只认登记过的分机（自有属性 + 字符串值），`constructor` 之类的怪分机名不会取到原型链上的东西。 */
+function staffFor(conn: TelephonyConnection, ext: string | null): string | null {
+  if (!ext || !Object.prototype.hasOwnProperty.call(conn.extensionMap, ext)) return null
+  const v = conn.extensionMap[ext]
+  return typeof v === 'string' && v ? v : null
 }
 
 function pushReceipt(row: CallRow, r: Receipt) {
@@ -128,7 +150,14 @@ async function writeCrm(
     sourceRef: `${conn.providerAccountId}:${folded.callId}`,
     staffEmail: row.staffEmail,
     // 有效联系 = call-plan 判断⑤；其余（含未接、秒挂）一律 no_answer，不冒充聊过。
-    outcome: planned.countsAsReached || (planned.direction === 'inbound' && planned.answered && planned.talkSeconds >= 10) ? 'spoke' : 'no_answer',
+    // 来电没人接 = 我们漏接了客人（missed_inbound），不是「我们打过没接通」（no_answer），
+    // 否则下游会把漏接的人当成已经被我们尝试联系过。
+    outcome:
+      planned.countsAsReached || (planned.direction === 'inbound' && planned.answered && planned.talkSeconds >= 10)
+        ? 'spoke'
+        : planned.direction === 'inbound'
+          ? 'missed_inbound'
+          : 'no_answer',
     reached: planned.countsAsReached,
     answered: planned.answered,
     talkSeconds: planned.talkSeconds,
@@ -145,7 +174,9 @@ export async function processRawEvent(
   store: TelephonyStore,
   rawEventId: string,
   now: () => Date = () => new Date(),
+  opts: { quietMs?: number } = {},
 ): Promise<ProcessOutcome | null> {
+  const quietMs = opts.quietMs ?? CRM_QUIET_MS
   const raw = await store.getRawEvent(rawEventId)
   if (!raw) return null
   const conn = await store.getConnection(raw.connectionId)
@@ -179,15 +210,16 @@ export async function processRawEvent(
       pushReceipt(row, receipt('recording', 'pending_download', stamp))
     }
 
-    if (folded.stage === 'ended' && (row.crmStatus === 'pending' || row.crmStatus === 'failed')) {
+    const lastReceived = Math.max(...events.map((e) => Date.parse(e.receivedAt)))
+    const inQuietWindow = folded.stage === 'ended' && now().getTime() - lastReceived < quietMs
+    if (folded.stage === 'ended' && !inQuietWindow && (row.crmStatus === 'pending' || row.crmStatus === 'failed')) {
       try {
         await writeCrm(store, conn, folded, row, stamp)
       } catch (err) {
         row.crmStatus = 'failed'
-        row.crmDetail = err instanceof Error ? err.message.slice(0, 300) : 'unknown'
+        row.crmDetail = safeErr(err)
         pushReceipt(row, receipt('crm', 'failed', stamp, row.crmDetail))
         await store.saveCall(row)
-        await store.markRaw(raw.id, 'failed', row.crmDetail)
         throw err
       }
     }
@@ -200,10 +232,11 @@ export async function processRawEvent(
       crmStatus: row.crmStatus,
       matchStatus: row.matchStatus,
       recordingStatus: row.recordingStatus,
+      ...(inQuietWindow && row.crmStatus === 'pending' ? { deferred: true } : {}),
     }
   } catch (err) {
     // CRM 失败已在上面落了状态；其余（取数、存通话失败）只标原始事件，留给补处理重试。
-    const msg = err instanceof Error ? err.message.slice(0, 300) : 'unknown'
+    const msg = safeErr(err)
     await store.markRaw(raw.id, 'failed', msg).catch(() => undefined)
     throw err
   }

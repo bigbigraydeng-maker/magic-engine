@@ -78,7 +78,7 @@ export interface TouchpointInput {
   /** 幂等键：`<account>:<callId>`。 */
   sourceRef: string
   staffEmail: string | null
-  outcome: 'spoke' | 'no_answer'
+  outcome: 'spoke' | 'no_answer' | 'missed_inbound'
   reached: boolean
   answered: boolean
   talkSeconds: number
@@ -99,12 +99,15 @@ export interface TelephonyStore {
     payload: unknown
   }): Promise<{ inserted: boolean; id: string | null }>
   /** 被拒绝的请求也留回执（不存载荷）。 */
-  insertRejection(row: { connectionId: string | null; clientId: string | null; reason: string; receivedAt: string }): Promise<void>
+  insertRejection(row: { connectionId: string | null; clientId: string | null; reason: string; receivedAt: string; payload?: unknown }): Promise<void>
   getRawEvent(id: string): Promise<RawEventRow | null>
   listRawEventsForCall(clientId: string, connectionId: string, callId: string): Promise<RawEventRow[]>
   markRaw(id: string, status: RawStatus, error: string | null): Promise<void>
   listStaleRaw(olderThanIso: string, maxAttempts: number, limit: number): Promise<RawEventRow[]>
+  countExhaustedRaw(maxAttempts: number): Promise<number>
   getCall(clientId: string, callId: string): Promise<CallRow | null>
+  /** CRM 还没写（pending）且开始时间早于给定时刻的通话——补处理用。 */
+  listStaleCalls(startedBeforeIso: string, limit: number): Promise<CallRow[]>
   saveCall(row: CallRow): Promise<void>
   findContactIdsByPhone(clientId: string, phoneE164: string): Promise<string[]>
   createContactForInboundCall(input: { clientId: string; phoneE164: string; name: string | null; seenAt: string; country: 'NZ' | 'AU' }): Promise<string>

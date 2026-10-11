@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { inngest } from '@/lib/inngest/client'
-import { handleVoiplineWebhook } from '@/lib/telephony/voipline/ingest'
+import { handleVoiplineWebhook, readCappedBody } from '@/lib/telephony/voipline/ingest'
 import { TELEPHONY_RAW_EVENT_RECEIVED } from '@/lib/telephony/voipline/events-contract'
 import { supabaseTelephonyStore } from '@/lib/telephony/voipline/store'
 
@@ -14,7 +14,9 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ connectionId: string }> }): Promise<NextResponse> {
   const { connectionId } = await ctx.params
-  const bodyText = await req.text()
+  // 先限大小再读：没令牌的人也不能靠大请求体占内存。
+  const bodyText = await readCappedBody(req)
+  if (bodyText === null) return NextResponse.json({ status: 'rejected' }, { status: 413 })
   const result = await handleVoiplineWebhook(supabaseTelephonyStore, {
     connectionId,
     tokenHeader: req.headers.get('x-pbx-token'),

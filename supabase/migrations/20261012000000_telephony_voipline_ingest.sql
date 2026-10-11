@@ -44,7 +44,9 @@ create table public.telephony_webhook_rejections (
   connection_id uuid,
   client_id uuid,
   reason text not null,
-  received_at timestamptz not null
+  received_at timestamptz not null,
+  -- 仅「令牌通过但读不懂」时保存载荷（含号码；只有 service_role 可读），用来校准字段别名；未认证请求不存
+  payload jsonb
 );
 create index telephony_webhook_rejections_time_idx on public.telephony_webhook_rejections (received_at desc);
 

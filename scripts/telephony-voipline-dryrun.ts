@@ -6,6 +6,7 @@
  *     npx tsx scripts/telephony-voipline-dryrun.ts
  */
 
+import { processRawEvent } from '../src/lib/telephony/voipline/process'
 import { sweepStaleRawEvents } from '../src/lib/inngest/functions/telephony-voipline'
 import {
   CLIENT_A, CONN_A, CONN_B, CUSTOMER_E164, TOKEN_A, harness, inboundAnswered, inboundEnded, inboundRecording,
@@ -75,7 +76,7 @@ async function main() {
   h.mem.failures.touchpointWrites = 1
   await h.send(inboundStart()); await h.send(inboundEnded())
   await h.drain().catch((e: Error) => line('9a 写 CRM 失败', '200', `crm=${call(h)?.crmStatus}`, `错误可见：${e.message}`))
-  const sw = await sweepStaleRawEvents(h.mem.store, new Date('2026-10-12T03:00:00.000Z'))
+  const sw = await sweepStaleRawEvents(h.mem.store, async (id) => { await processRawEvent(h.mem.store, id, h.now, { quietMs: 0 }) }, new Date('2026-10-12T03:00:00.000Z'))
   line('9b 补处理重试', '-', summ(h), `sweep=${JSON.stringify(sw)}`)
 
   for (const r of rows) console.log(r.join('  |  '))
