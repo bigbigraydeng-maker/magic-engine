@@ -3,74 +3,53 @@
  *
  * Pure and injectable: every function takes an optional `fetcher` and never
  * touches the network unless the caller supplies one (defaults to global fetch).
- * Error classification mirrors `publishPagePhotoPost` in ./page-posts so callers
- * can reason about retry safety the same way across posts and stories.
+ * Transport and failure classification are delegated to ./story-graph, which
+ * mirrors `publishPagePhotoPost` in ./page-posts so callers can reason about
+ * retry safety the same way across posts and stories.
+ *
+ * NOTE: `timeoutMs` applies PER REQUEST. A three-step video story (start,
+ * upload, finish) can therefore take up to 3x `timeoutMs` in the worst case.
  */
 
 import { GRAPH_BASE } from './graph-base'
-import { PagePublishError, classifyPublishFailure } from './page-posts'
+import { PagePublishError } from './page-posts'
+import {
+  assertGraphId,
+  assertHttpsUrl,
+  getGraphJson,
+  postGraphJson,
+  requestGraph,
+} from './story-graph'
 
 export interface PublishedPageStory {
   postId: string
   raw: Record<string, unknown>
 }
 
-interface GraphErrorBody {
-  message?: string
-  code?: number
-  error_subcode?: number
-}
-
-interface GraphResponseBody {
-  id?: string
-  post_id?: string
-  video_id?: string
-  upload_url?: string
-  error?: GraphErrorBody
+export interface PageStoryRow {
+  postId: string
+  status: string
+  creationTime: string | null
+  mediaType: string | null
+  mediaId: string | null
+  url: string | null
 }
 
 /**
- * POST a JSON body to a Graph edge and classify the outcome exactly like
- * `publishPagePhotoPost`:
- *  - fetch throws (no response)            => certainty 'unknown'
- *  - 2xx carrying a Graph error body       => certainty 'unknown'
- *  - non-2xx                               => classifyPublishFailure(status, error)
- * The thrown message never contains the access token.
+ * Re-throw a PagePublishError preserving its classification detail fields but
+ * appending a suffix to the message. Non-PagePublishError values are rethrown
+ * unchanged.
  */
-async function postGraphJson(input: {
-  url: string
-  body: Record<string, unknown>
-  label: string
-  timeoutMs?: number
-  fetcher?: typeof fetch
-}): Promise<GraphResponseBody> {
-  const doFetch = input.fetcher ?? fetch
-  let res: Response
-  try {
-    res = await doFetch(input.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(input.body),
-      ...(input.timeoutMs ? { signal: AbortSignal.timeout(input.timeoutMs) } : {}),
-    })
-  } catch (error: unknown) {
-    // No response at all: the request may or may not have reached Facebook.
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new PagePublishError(reason, { certainty: 'unknown' })
-  }
-
-  const body = (await res.json().catch(() => null)) as GraphResponseBody | null
-  if (!res.ok || body?.error) {
-    const detail = body?.error?.message ?? `HTTP ${res.status}`
-    throw new PagePublishError(`${input.label}: ${detail}`, {
-      // A 2xx that carries an error body is not a clear refusal — treat as unknown.
-      certainty: res.ok ? 'unknown' : classifyPublishFailure(res.status, body?.error),
-      httpStatus: res.status,
-      graphCode: body?.error?.code ?? null,
-      graphSubcode: body?.error?.error_subcode ?? null,
+function rethrowWithSuffix(error: unknown, suffix: string): never {
+  if (error instanceof PagePublishError) {
+    throw new PagePublishError(`${error.message}${suffix}`, {
+      certainty: error.certainty,
+      httpStatus: error.httpStatus,
+      graphCode: error.graphCode,
+      graphSubcode: error.graphSubcode,
     })
   }
-  return body ?? {}
+  throw error
 }
 
 /**
@@ -91,10 +70,14 @@ export async function publishPagePhotoStory(input: {
   timeoutMs?: number
   fetcher?: typeof fetch
 }): Promise<PublishedPageStory> {
+  assertGraphId(input.pageId, 'publishPagePhotoStory pageId')
+  assertHttpsUrl(input.imageUrl, 'publishPagePhotoStory imageUrl')
+
   const photo = await postGraphJson({
     url: `${GRAPH_BASE}/${input.pageId}/photos`,
     body: { url: input.imageUrl, published: false, access_token: input.pageAccessToken },
     label: `publishPagePhotoStory ${input.pageId} (upload)`,
+    secrets: [input.pageAccessToken],
     timeoutMs: input.timeoutMs,
     fetcher: input.fetcher,
   })
@@ -105,13 +88,19 @@ export async function publishPagePhotoStory(input: {
     })
   }
 
-  const story = await postGraphJson({
-    url: `${GRAPH_BASE}/${input.pageId}/photo_stories`,
-    body: { photo_id: photoId, access_token: input.pageAccessToken },
-    label: `publishPagePhotoStory ${input.pageId} (publish)`,
-    timeoutMs: input.timeoutMs,
-    fetcher: input.fetcher,
-  })
+  let story: Awaited<ReturnType<typeof postGraphJson>>
+  try {
+    story = await postGraphJson({
+      url: `${GRAPH_BASE}/${input.pageId}/photo_stories`,
+      body: { photo_id: photoId, access_token: input.pageAccessToken },
+      label: `publishPagePhotoStory ${input.pageId} (publish)`,
+      secrets: [input.pageAccessToken],
+      timeoutMs: input.timeoutMs,
+      fetcher: input.fetcher,
+    })
+  } catch (error: unknown) {
+    rethrowWithSuffix(error, `; unpublished photo ${photoId} left behind (step 1 succeeded)`)
+  }
   const postId = story.post_id
   if (!postId) {
     throw new PagePublishError(`publishPagePhotoStory ${input.pageId}: provider returned no post id`, {
@@ -126,6 +115,9 @@ export async function publishPagePhotoStory(input: {
  *
  * Three steps: start an upload session, upload the bytes from `videoUrl`, then
  * finish the session. The caller must ensure `videoUrl` is a host Meta accepts.
+ *
+ * UNVERIFIED: the upload header names/format come from a documentation summary
+ * and have not been confirmed by a real call.
  */
 export async function publishPageVideoStory(input: {
   pageId: string
@@ -134,50 +126,82 @@ export async function publishPageVideoStory(input: {
   timeoutMs?: number
   fetcher?: typeof fetch
 }): Promise<PublishedPageStory> {
+  assertGraphId(input.pageId, 'publishPageVideoStory pageId')
+  assertHttpsUrl(input.videoUrl, 'publishPageVideoStory videoUrl')
+
+  const { videoId, uploadUrl } = await startVideoSession(input)
+  assertHttpsUrl(uploadUrl, 'publishPageVideoStory upload_url', ['facebook.com', 'fbcdn.net'])
+
+  const suffix = `; upload session video_id=${videoId} left unfinished`
+  try {
+    await uploadVideoBytes({
+      uploadUrl,
+      videoUrl: input.videoUrl,
+      pageAccessToken: input.pageAccessToken,
+      label: `publishPageVideoStory ${input.pageId} (upload)`,
+      timeoutMs: input.timeoutMs,
+      fetcher: input.fetcher,
+    })
+    return await finishVideoSession({ ...input, videoId })
+  } catch (error: unknown) {
+    return rethrowWithSuffix(error, suffix)
+  }
+}
+
+/** Step 1: open an upload session; a missing video_id/upload_url is an unknown outcome. */
+async function startVideoSession(input: {
+  pageId: string
+  pageAccessToken: string
+  timeoutMs?: number
+  fetcher?: typeof fetch
+}): Promise<{ videoId: string; uploadUrl: string }> {
   const start = await postGraphJson({
     url: `${GRAPH_BASE}/${input.pageId}/video_stories`,
     body: { upload_phase: 'start', access_token: input.pageAccessToken },
     label: `publishPageVideoStory ${input.pageId} (start)`,
+    secrets: [input.pageAccessToken],
     timeoutMs: input.timeoutMs,
     fetcher: input.fetcher,
   })
-  const videoId = start.video_id
-  const uploadUrl = start.upload_url
-  if (!videoId || !uploadUrl) {
+  if (!start.video_id || !start.upload_url) {
     throw new PagePublishError(`publishPageVideoStory ${input.pageId}: provider returned no upload session`, {
       certainty: 'unknown',
     })
   }
+  return { videoId: start.video_id, uploadUrl: start.upload_url }
+}
 
-  await uploadVideoBytes({
-    uploadUrl,
-    videoUrl: input.videoUrl,
-    pageAccessToken: input.pageAccessToken,
-    label: `publishPageVideoStory ${input.pageId} (upload)`,
-    timeoutMs: input.timeoutMs,
-    fetcher: input.fetcher,
-  })
-
+/** Step 3: finish the session; a missing post_id is an unknown outcome. */
+async function finishVideoSession(input: {
+  pageId: string
+  pageAccessToken: string
+  videoId: string
+  timeoutMs?: number
+  fetcher?: typeof fetch
+}): Promise<PublishedPageStory> {
   const finish = await postGraphJson({
     url: `${GRAPH_BASE}/${input.pageId}/video_stories`,
-    body: { video_id: videoId, upload_phase: 'finish', access_token: input.pageAccessToken },
+    body: { video_id: input.videoId, upload_phase: 'finish', access_token: input.pageAccessToken },
     label: `publishPageVideoStory ${input.pageId} (finish)`,
+    secrets: [input.pageAccessToken],
     timeoutMs: input.timeoutMs,
     fetcher: input.fetcher,
   })
-  const postId = finish.post_id
-  if (!postId) {
+  if (!finish.post_id) {
     throw new PagePublishError(`publishPageVideoStory ${input.pageId}: provider returned no post id`, {
       certainty: 'unknown',
     })
   }
-  return { postId, raw: finish as Record<string, unknown> }
+  return { postId: finish.post_id, raw: finish as Record<string, unknown> }
 }
 
 /**
  * Upload the video bytes to the session's upload_url. The `file_url` header
  * tells Graph where to pull the bytes from; the OAuth header carries the Page
  * token. Same failure classification as the JSON steps.
+ *
+ * UNVERIFIED: the upload header names/format come from a documentation summary
+ * and have not been confirmed by a real call.
  */
 async function uploadVideoBytes(input: {
   uploadUrl: string
@@ -187,42 +211,19 @@ async function uploadVideoBytes(input: {
   timeoutMs?: number
   fetcher?: typeof fetch
 }): Promise<void> {
-  const doFetch = input.fetcher ?? fetch
-  let res: Response
-  try {
-    // TODO(verify-with-real-call): exact upload headers
-    res = await doFetch(input.uploadUrl, {
-      method: 'POST',
-      headers: {
-        file_url: input.videoUrl,
-        Authorization: `OAuth ${input.pageAccessToken}`,
-      },
-      ...(input.timeoutMs ? { signal: AbortSignal.timeout(input.timeoutMs) } : {}),
-    })
-  } catch (error: unknown) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new PagePublishError(reason, { certainty: 'unknown' })
-  }
-
-  const body = (await res.json().catch(() => null)) as GraphResponseBody | null
-  if (!res.ok || body?.error) {
-    const detail = body?.error?.message ?? `HTTP ${res.status}`
-    throw new PagePublishError(`${input.label}: ${detail}`, {
-      certainty: res.ok ? 'unknown' : classifyPublishFailure(res.status, body?.error),
-      httpStatus: res.status,
-      graphCode: body?.error?.code ?? null,
-      graphSubcode: body?.error?.error_subcode ?? null,
-    })
-  }
-}
-
-export interface PageStoryRow {
-  postId: string
-  status: string
-  creationTime: string | null
-  mediaType: string | null
-  mediaId: string | null
-  url: string | null
+  // TODO(verify-with-real-call): exact upload headers
+  await requestGraph({
+    url: input.uploadUrl,
+    method: 'POST',
+    headers: {
+      file_url: input.videoUrl,
+      Authorization: `OAuth ${input.pageAccessToken}`,
+    },
+    label: input.label,
+    secrets: [input.pageAccessToken],
+    timeoutMs: input.timeoutMs,
+    fetcher: input.fetcher,
+  })
 }
 
 interface RawStory {
@@ -234,52 +235,63 @@ interface RawStory {
   url?: string
 }
 
+/** Type guard for a raw story entry coming back from Graph. */
+function isRawStory(value: unknown): value is RawStory {
+  return typeof value === 'object' && value !== null
+}
+
+/** Map a raw story entry to a PageStoryRow, or null when post_id is missing. */
+function toPageStoryRow(raw: RawStory): PageStoryRow | null {
+  const postId = raw.post_id
+  if (!postId) return null
+  return {
+    postId,
+    status: raw.status ?? '',
+    creationTime: raw.creation_time ?? null,
+    mediaType: raw.media_type ?? null,
+    mediaId: raw.media_id ?? null,
+    url: raw.url ?? null,
+  }
+}
+
 /**
  * Read back a Page's Stories for post-publish verification. `since`/`until`
  * are sent as unix seconds. Never throws on an empty list; a Graph error is
  * surfaced as a PagePublishError with the same classification as publishing.
+ * Entries without a post_id are dropped. `hasMore` is true when Graph returns
+ * a non-empty `paging.next` cursor.
  */
 export async function listPageStories(input: {
   pageId: string
   pageAccessToken: string
   since?: Date
   until?: Date
+  timeoutMs?: number
   fetcher?: typeof fetch
-}): Promise<PageStoryRow[]> {
-  const doFetch = input.fetcher ?? fetch
+}): Promise<{ stories: PageStoryRow[]; hasMore: boolean }> {
+  assertGraphId(input.pageId, 'listPageStories pageId')
+
   const fields = 'post_id,status,creation_time,media_type,media_id,url'
   const params = new URLSearchParams({ fields, access_token: input.pageAccessToken })
   if (input.since) params.set('since', String(Math.floor(input.since.getTime() / 1000)))
   if (input.until) params.set('until', String(Math.floor(input.until.getTime() / 1000)))
   const url = `${GRAPH_BASE}/${input.pageId}/stories?${params.toString()}`
 
-  let res: Response
-  try {
-    res = await doFetch(url)
-  } catch (error: unknown) {
-    const reason = error instanceof Error ? error.message : String(error)
-    throw new PagePublishError(reason, { certainty: 'unknown' })
-  }
+  const body = await getGraphJson({
+    url,
+    label: `listPageStories ${input.pageId}`,
+    secrets: [input.pageAccessToken],
+    timeoutMs: input.timeoutMs,
+    fetcher: input.fetcher,
+  })
 
-  const body = (await res.json().catch(() => null)) as
-    | { data?: RawStory[]; error?: GraphErrorBody }
-    | null
-  if (!res.ok || body?.error) {
-    const detail = body?.error?.message ?? `HTTP ${res.status}`
-    throw new PagePublishError(`listPageStories ${input.pageId}: ${detail}`, {
-      certainty: res.ok ? 'unknown' : classifyPublishFailure(res.status, body?.error),
-      httpStatus: res.status,
-      graphCode: body?.error?.code ?? null,
-      graphSubcode: body?.error?.error_subcode ?? null,
-    })
+  const stories: PageStoryRow[] = []
+  for (const entry of body.data ?? []) {
+    if (!isRawStory(entry)) continue
+    const row = toPageStoryRow(entry)
+    if (row) stories.push(row)
   }
-
-  return (body?.data ?? []).map((s) => ({
-    postId: s.post_id ?? '',
-    status: s.status ?? '',
-    creationTime: s.creation_time ?? null,
-    mediaType: s.media_type ?? null,
-    mediaId: s.media_id ?? null,
-    url: s.url ?? null,
-  }))
+  const next = body.paging?.next
+  const hasMore = typeof next === 'string' && next.length > 0
+  return { stories, hasMore }
 }

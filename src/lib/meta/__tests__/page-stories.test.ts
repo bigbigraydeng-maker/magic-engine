@@ -2,18 +2,21 @@
  * page-stories — publish photo/video Stories and read them back.
  *
  * These tests lock the multi-step Graph flows (photo upload → photo_stories,
- * video start → upload → finish) and the shared failure classification that
- * mirrors `publishPagePhotoPost`. Every function is injectable, so we drive
- * them with a scripted fetcher and never touch the real network.
+ * video start → upload → finish), the shared failure classification that
+ * mirrors `publishPagePhotoPost`, request-body/header shape, token redaction,
+ * input validation, the upload_url allow-list, and the read-back shape.
+ *
+ * Every function is injectable, so we drive them with a scripted fetcher and
+ * never touch the real network.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { publishPagePhotoStory, publishPageVideoStory, listPageStories } from '../page-stories'
 import { PagePublishError } from '../page-posts'
 import { GRAPH_BASE } from '../graph-base'
 
-const PAGE = '1616575215312482'
-const TOKEN = 'page-access-token'
+const PAGE = '111222333'
+const TOKEN = 'tok/en+1&x'
 
 type ScriptedResponse =
   | { ok: boolean; status?: number; body: unknown }
@@ -50,7 +53,7 @@ function fakeFetch(responses: ScriptedResponse[]) {
   return { fetcher: fn as typeof fetch, calls }
 }
 
-let fetchSpy: ReturnType<typeof vi.spyOn>
+let fetchSpy: MockInstance<typeof fetch>
 
 beforeEach(() => {
   fetchSpy = vi.spyOn(globalThis, 'fetch')
@@ -60,6 +63,7 @@ afterEach(() => {
   expect(fetchSpy).not.toHaveBeenCalled()
   vi.restoreAllMocks()
 })
+
 
 describe('publishPagePhotoStory — two-step upload then attach', () => {
   it('uploads an unpublished photo then attaches it to photo_stories', async () => {
@@ -318,8 +322,8 @@ describe('listPageStories — read-back', () => {
 
   it('an empty data list returns []', async () => {
     const { fetcher } = fakeFetch([{ ok: true, body: { data: [] } }])
-    const rows = await listPageStories({ pageId: PAGE, pageAccessToken: TOKEN, fetcher })
-    expect(rows).toEqual([])
+    const result = await listPageStories({ pageId: PAGE, pageAccessToken: TOKEN, fetcher })
+    expect(result.stories).toEqual([])
   })
 
   it('maps a story row to camelCase fields, including ARCHIVED status', async () => {
@@ -341,9 +345,9 @@ describe('listPageStories — read-back', () => {
       },
     ])
 
-    const rows = await listPageStories({ pageId: PAGE, pageAccessToken: TOKEN, fetcher })
+    const result = await listPageStories({ pageId: PAGE, pageAccessToken: TOKEN, fetcher })
 
-    expect(rows).toEqual([
+    expect(result.stories).toEqual([
       {
         postId: 'post1',
         status: 'ARCHIVED',
@@ -406,3 +410,4 @@ describe('timeoutMs — abort signal wiring', () => {
     expect(calls[1].init?.signal).toBeUndefined()
   })
 })
+
