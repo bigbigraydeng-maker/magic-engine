@@ -216,6 +216,17 @@ describe('TourListPane', () => {
     expect(screen.getByTestId('tour-row-t1')).toBeInTheDocument()
   })
 
+  it('clicking a header while a search forces groups open does not change the saved folding', () => {
+    renderPane()
+    fireEvent.change(screen.getByLabelText('按团名搜索'), { target: { value: 'coral' } })
+    fireEvent.click(screen.getByRole('button', { name: '系列 Atlantis' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Gold（1）' }))
+    expect(screen.getByTestId('tour-row-t1')).toBeInTheDocument()
+    expect(window.localStorage.getItem('tour-catalog:list-collapsed')).toBeNull()
+    fireEvent.change(screen.getByLabelText('按团名搜索'), { target: { value: '' } })
+    expect(screen.getByTestId('tour-row-t1')).toBeInTheDocument()
+  })
+
   it('search also matches the series name', () => {
     renderPane()
     fireEvent.change(screen.getByLabelText('按团名搜索'), { target: { value: '新西兰' } })
