@@ -107,8 +107,10 @@ function TierSection({ tier, ctx }: { tier: TourTierGroup; ctx: ListContext }) {
         type="button"
         aria-expanded={open}
         aria-label={`${tier.title}（${tier.tours.length}）`}
-        aria-disabled={ctx.forceOpen || undefined}
-        onClick={() => !ctx.forceOpen && ctx.onToggle(key)}
+        aria-disabled={ctx.forceOpen}
+        onClick={() => {
+          if (!ctx.forceOpen) ctx.onToggle(key)
+        }}
         className="sticky top-10 z-10 ml-2 flex h-9 w-[calc(100%-0.5rem)] items-center gap-1.5 border-l-2 border-me-charcoal/40 bg-me-ivory px-3 text-left text-sm font-black text-me-charcoal hover:bg-[#F1EBDD]"
       >
         <Chevron open={open} />
@@ -146,8 +148,10 @@ export function RegionSection({ region, ctx }: { region: TourRegionGroup; ctx: L
         type="button"
         aria-expanded={open}
         aria-label={`系列 ${region.title}`}
-        aria-disabled={ctx.forceOpen || undefined}
-        onClick={() => !ctx.forceOpen && ctx.onToggle(key)}
+        aria-disabled={ctx.forceOpen}
+        onClick={() => {
+          if (!ctx.forceOpen) ctx.onToggle(key)
+        }}
         className="sticky top-0 z-20 flex h-10 w-full items-center gap-1.5 bg-me-charcoal px-3 text-left text-base font-black text-white hover:bg-me-charcoal/90"
       >
         <Chevron open={open} />
