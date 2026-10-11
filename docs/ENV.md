@@ -139,6 +139,7 @@
 | `ADMIN_EMAILS` | 管理员白名单 | Render-web | ✅ |
 | `ADMIN_EMAIL_DOMAIN` | 管理员邮箱域白名单 | Render-web | ✅ |
 | `CLIENT_VIEWERS` | 客户只读账号白名单 | Render-web | ✅ |
+| `PROTECTED_PAGE_OVERRIDE_EMAILS` | 谁有权改「保护名单」里的页（逗号分隔、邮箱精确匹配，不认域名；必须是已验证邮箱）。**没设 = 谁都不能改保护页**（安全默认）。只管人点按钮的三条路（seo-fix / update-page / update-post）；自动流程永远不能改保护页 | Render-web | ✅ |
 | `INTERNAL_API_KEY` | 内部服务间调用（`api/factory/signals`） | Render-web | ✅ |
 | `INTERNAL_WORKER_TOKEN` | Voice worker 内部鉴权 | Render-web | ✅ |
 | `FACTORY_WORKER_TOKEN` | Factory worker 认领工单鉴权 | Render-web + worker | ❌ |

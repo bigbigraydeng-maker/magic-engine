@@ -47,7 +47,7 @@ export async function sweepStaleRawEvents(store: TelephonyStore, dispatch: Dispa
   const calls = await store.listStaleCalls(new Date(now.getTime() - CRM_QUIET_MS).toISOString(), SWEEP_BATCH)
   for (const stale of calls) {
     // 发之前重读一遍：别人刚写成了就别再动（避免用旧行覆盖新状态）。
-    const c = await store.getCall(stale.clientId, stale.providerCallId)
+    const c = await store.getCall(stale.clientId, stale.provider, stale.providerCallId)
     if (!c || c.crmStatus !== 'pending') continue
     const conn = await store.getConnection(c.connectionId)
     if (!conn || !conn.active) continue

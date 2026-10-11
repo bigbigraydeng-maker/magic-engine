@@ -51,7 +51,7 @@ export async function handleVoiplineWebhook(store: TelephonyStore, input: Ingest
   } catch {
     return { status: 503, body: { status: 'unavailable' } }
   }
-  if (!conn || !conn.active) {
+  if (!conn || !conn.active || conn.provider !== 'voipline') {
     // 连接不存在时不用请求里自带的编号当回执键（攻击者随便编，节流就失效）；只有真实存在的连接才记编号。
     return reject(401, conn ? 'connection_inactive' : 'unknown_connection', {
       connectionId: conn ? conn.id : null,
@@ -83,10 +83,11 @@ export async function handleVoiplineWebhook(store: TelephonyStore, input: Ingest
   let inserted: { inserted: boolean; id: string | null }
   try {
     inserted = await store.insertRawEvent({
+      provider: 'voipline',
       clientId: conn.clientId,
       connectionId: conn.id,
       callId: parsed.event.callId,
-      dedupeKey: buildDedupeKey(conn.providerAccountId, parsed.event, input.bodyText),
+      dedupeKey: buildDedupeKey(conn.providerAccountId, parsed.event, input.bodyText, 'voipline'),
       receivedAt,
       rawType: parsed.event.rawType,
       event: parsed.event,

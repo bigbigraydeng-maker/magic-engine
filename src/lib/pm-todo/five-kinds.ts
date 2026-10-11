@@ -104,6 +104,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
+  calendar_closure_calendar_unreadable: 'one_click', // 读不到 PM 日历：机器账号 / 日历共享要人点一次
+  calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
   instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
@@ -199,6 +201,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   lead_sheet_backfill_pending: 'dev', // 「跟开发窗口说一声跑一次试算」
   lead_sheet_backfill_count_unreliable: 'dev',
   lead_sheet_check_failed: 'dev',
+  calendar_closure_check_failed: 'dev', // 日历巡检自己没跑成
+  calendar_closure_needs_human: 'dev', // 到期事项没法自动核对：找窗口验一下
+  calendar_closure_no_ledger: 'dev', // 日历事件没有可用 ledger-id：补上编号或补建台账卡
   todo_items_unreadable: 'dev',
   // 平台治理：复查候选有没有新证据不是撤不回 / 花钱 / 对外，是开发窗口的日常活
   // （me-platform-tier-gate：L1 候选由子牙 / 魏征扫）。真要晋升时是商业决定，会作为
@@ -210,6 +215,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ledger_patrol_missing: 'dev',
 
   // ── 知会 → 周一周报 ──────────────────────────────────────────────────
+  calendar_closure_probe_passed: 'weekly', // 自动核对通过但只是部分证据：周报里报，窗口去补确认
   prescription_updated: 'weekly', // 本周方案已自动落地
   diagnostic_findings: 'weekly', // 本周体检结果，已排成看板动作
   not_indexed: 'weekly', // 未收录页面汇总：SEO 日常活（FDE / 开发在修），周报里报进度
@@ -246,6 +252,8 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   simaqian_patrol_failed: '口碑周巡没跑成，这周的评价回复草稿可能没出来',
   todo_items_unreadable: '人工待办今天整个没读出来 —— 下面的清单不全',
   lead_sheet_check_failed: '「线索进客户表格」的检查今天没跑成，表格缺没缺人看不出来',
+  calendar_closure_check_failed: '日历到期事项巡检今天没跑成，带日期的验证事项可能没人查',
+  calendar_closure_calendar_unreadable: '今天读不到 PM 日历，带日期的验证事项没人查',
   maliang_check_missing: '有成片出来后没做自检，「等你审片」可能没列全',
   ai_gateway_broken: 'AI 调用卡在网关，今天写稿 / 起草类的东西可能都没出来',
   cron_not_running: '有自动任务没按时跑，它负责的那一栏今天可能不全',

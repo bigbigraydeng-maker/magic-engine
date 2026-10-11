@@ -17,6 +17,7 @@ import { KernelError } from '@/lib/kernel/errors'
 import { canonicalDiffHash } from '../hash'
 import { createPageApplyOptimizationCapability } from '..'
 import type { PageApplyOptimizationDeps } from '../deps'
+import { gateFake, realGuard } from '@/lib/seo/__tests__/gate-test-kit'
 
 // ── Fake supabase：只支持 select('input').eq('id',...).limit(1) ────────────────
 function makeFakeSb(actionRuns: Record<string, { input: Record<string, unknown> }>): SupabaseClient {
@@ -72,6 +73,7 @@ function fakeDeps(gh: any, contentPaths: readonly string[] = ['website/geo.html'
       contentPaths, plainToken: 'tok',
     }),
     createGithubClient: () => gh,
+    createPageGuard: () => ({ clientId: 'c', assert: async () => undefined }) as never,
   }
 }
 
@@ -175,3 +177,40 @@ describe('prepare step · happy path', () => {
 //   * `src/lib/kernel/gateway.ts` assertDecisionMatches 独立重读 decision，forge ctx 过不了
 // 本 capability 的测试文件用 `as unknown as AuthorizedExecutionContext` 是显式规避
 // （测试文件被架构扫描排除，见 architecture.test.ts filter isTest）。这不是攻击面。
+
+describe('prepare step · protected-page gate (SYSTEM actor: no override, ever)', () => {
+  it('🔴 protected page: refused with protected_page, and the repo file is never even read', async () => {
+    let read = false
+    const gh = fakeGh({ getFileContent: async () => { read = true; return { sha: BLOB_SHA, content: '', size: 0, decodedContent: HTML_BEFORE } } })
+    const fake = gateFake({ meta_cycle_protected_slugs: ['geo'] })
+    const deps = { ...fakeDeps(gh), createPageGuard: () => realGuard(fake, 'system') }
+    await expect(runPrepare(deps, makeInput())).rejects.toMatchObject({
+      code: 'INVALID_INPUT',
+      humanReason: expect.stringMatching(/protected_page/),
+    })
+    expect(read).toBe(false)
+    expect(fake.receipts[0]?.summary).toMatchObject({ decision: 'denied_protected' })
+  })
+
+  it('🔴 protected via the resolved FILE path (path entry), even though the URL alone would not match', async () => {
+    const gh = fakeGh()
+    const fake = gateFake({ meta_cycle_protected_slugs: ['website/geo'] })
+    const deps = { ...fakeDeps(gh), createPageGuard: () => realGuard(fake, 'system') }
+    await expect(runPrepare(deps, makeInput())).rejects.toMatchObject({ humanReason: expect.stringMatching(/protected_page/) })
+  })
+
+  it('🔴 list unreadable / malformed => refused (never "protect nothing")', async () => {
+    for (const fake of [gateFake({}, { lookupError: true }), gateFake({ meta_cycle_protected_slugs: 'geo' })]) {
+      const deps = { ...fakeDeps(fakeGh()), createPageGuard: () => realGuard(fake, 'system') }
+      await expect(runPrepare(deps, makeInput())).rejects.toMatchObject({ humanReason: expect.stringMatching(/protected_page/) })
+    }
+  })
+
+  it('unprotected page passes the gate (no receipt) and prepare proceeds', async () => {
+    const fake = gateFake({ meta_cycle_protected_slugs: ['something-else'] })
+    const deps = { ...fakeDeps(fakeGh()), createPageGuard: () => realGuard(fake, 'system') }
+    const out = await runPrepare(deps, makeInput())
+    expect(out.output).toMatchObject({ page_url: 'https://example.com/geo', content_path: 'website/geo.html' })
+    expect(fake.receipts).toHaveLength(0)
+  })
+})

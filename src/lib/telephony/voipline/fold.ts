@@ -70,6 +70,7 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
   let sawAnswerEvent = false
   let explicitAnswered: boolean | null = null
   let sawNoAnswerFlag = false
+  let totalSeconds = 0
   let talkSeconds = 0
   let earliest: string | null = null
   const legMap = new Map<string, CallLeg>()
@@ -95,6 +96,7 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
       }
     }
     if (e.talkSeconds !== null) talkSeconds = Math.max(talkSeconds, e.talkSeconds)
+    if (e.totalSeconds != null) totalSeconds = Math.max(totalSeconds, e.totalSeconds)
 
     if (e.eventType !== 'recording_ready' && (e.extension || e.extensionName)) {
       const key = e.extension ?? e.extensionName ?? ''
@@ -128,7 +130,7 @@ export function foldCall(inputs: FoldInput[]): FoldedCall | null {
     counterpartyNumber,
     counterpartyName,
     answered,
-    answeredUnknown: !answered && explicitAnswered === null && !sawNoAnswerFlag && talkSeconds >= 10,
+    answeredUnknown: !answered && explicitAnswered === null && !sawNoAnswerFlag && Math.max(talkSeconds, totalSeconds) >= 10,
     talkSeconds,
     extension: primary?.extension ?? null,
     extensionName: primary?.extensionName ?? null,

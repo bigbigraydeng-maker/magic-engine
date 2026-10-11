@@ -3,7 +3,6 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { resolveContact } from '@/lib/crm/identity'
 import type { NormalisedCallEvent } from './events'
-import { VOIPLINE_PROVIDER } from './events'
 import type {
   CallRow,
   RawEventRow,
@@ -31,7 +30,7 @@ function callToDb(c: CallRow): Record<string, unknown> {
   return {
     client_id: c.clientId,
     connection_id: c.connectionId,
-    provider: VOIPLINE_PROVIDER,
+    provider: c.provider,
     provider_call_id: c.providerCallId,
     stage: c.stage,
     direction: c.direction,
@@ -60,6 +59,7 @@ function callToDb(c: CallRow): Record<string, unknown> {
 
 function callFromDb(r: Record<string, unknown>): CallRow {
   return {
+    provider: r.provider as CallRow['provider'],
     clientId: r.client_id as string,
     connectionId: r.connection_id as string,
     providerCallId: r.provider_call_id as string,
@@ -91,7 +91,7 @@ export const supabaseTelephonyStore: TelephonyStore = {
   async getConnection(id) {
     const { data, error } = await supabaseAdmin
       .from('telephony_connections')
-      .select('id, client_id, provider, provider_account_id, webhook_token_hash, default_country, extension_map, active')
+      .select('id, client_id, provider, provider_account_id, webhook_token_hash, secret_ref, forward_to, default_country, extension_map, active')
       .eq('id', id)
       .maybeSingle()
     if (error) throw new Error(`读通话连接失败: ${error.message}`)
@@ -102,6 +102,8 @@ export const supabaseTelephonyStore: TelephonyStore = {
       provider: data.provider,
       providerAccountId: data.provider_account_id,
       webhookTokenHash: data.webhook_token_hash,
+      secretRef: data.secret_ref ?? null,
+      forwardTo: data.forward_to ?? null,
       defaultCountry: data.default_country,
       extensionMap: (data.extension_map ?? {}) as Record<string, string>,
       active: data.active,
@@ -115,7 +117,7 @@ export const supabaseTelephonyStore: TelephonyStore = {
         {
           client_id: row.clientId,
           connection_id: row.connectionId,
-          provider: VOIPLINE_PROVIDER,
+          provider: row.provider,
           provider_call_id: row.callId,
           raw_type: row.rawType,
           dedupe_key: row.dedupeKey,
@@ -225,7 +227,7 @@ export const supabaseTelephonyStore: TelephonyStore = {
       .from('contact_touchpoints')
       .select('id, metadata')
       .eq('client_id', t.clientId)
-      .eq('source', VOIPLINE_PROVIDER)
+      .eq('source', t.source)
       .eq('source_ref', t.sourceRef)
       .maybeSingle()
     if (rErr) throw new Error(`读通话触点失败: ${rErr.message}`)
@@ -263,12 +265,12 @@ export const supabaseTelephonyStore: TelephonyStore = {
     return count ?? 0
   },
 
-  async getCall(clientId, callId) {
+  async getCall(clientId, provider, callId) {
     const { data, error } = await supabaseAdmin
       .from('telephony_calls')
       .select('*')
       .eq('client_id', clientId)
-      .eq('provider', VOIPLINE_PROVIDER)
+      .eq('provider', provider)
       .eq('provider_call_id', callId)
       .maybeSingle()
     if (error) throw new Error(`读通话失败: ${error.message}`)
@@ -304,13 +306,14 @@ export const supabaseTelephonyStore: TelephonyStore = {
     return [...new Set([...(ident.data ?? []).map((r) => r.contact_id as string), ...(primary.data ?? []).map((r) => r.id as string)])]
   },
 
-  async createContactForInboundCall({ clientId, phoneE164, name, seenAt }) {
+  async createContactForInboundCall(input) {
+    const { clientId, phoneE164, name, seenAt } = input
     const res = await resolveContact({
       clientId,
       identities: [{ kind: 'phone', value: phoneE164 }],
       // 来电显示名常常就是号码本身；没有字母就不当名字存。
       displayName: name && /[A-Za-z一-鿿]/.test(name) ? name : null,
-      source: VOIPLINE_PROVIDER,
+      source: input.source,
       seenAt,
       mergeStrategy: 'reject',
     })
@@ -339,7 +342,7 @@ export const supabaseTelephonyStore: TelephonyStore = {
             logged_by: t.staffEmail,
             provider_call_id: t.providerCallId,
           },
-          source: VOIPLINE_PROVIDER,
+          source: t.source,
           source_ref: t.sourceRef,
         },
         { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true },
@@ -368,7 +371,7 @@ export const supabaseTelephonyStore: TelephonyStore = {
         .from('contact_touchpoints')
         .select('id')
         .eq('client_id', t.clientId)
-        .eq('source', VOIPLINE_PROVIDER)
+        .eq('source', t.source)
         .eq('source_ref', t.sourceRef)
         .maybeSingle()
       touchpointId = (existing?.id as string | undefined) ?? null

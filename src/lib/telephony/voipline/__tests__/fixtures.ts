@@ -23,6 +23,8 @@ export const connA = (over: Partial<TelephonyConnection> = {}): TelephonyConnect
   provider: 'voipline',
   providerAccountId: 'acct-a',
   webhookTokenHash: hashWebhookToken(TOKEN_A),
+  secretRef: null,
+  forwardTo: null,
   defaultCountry: 'NZ',
   extensionMap: { '101': 'staff.one@example.test', '102': 'staff.two@example.test' },
   active: true,
