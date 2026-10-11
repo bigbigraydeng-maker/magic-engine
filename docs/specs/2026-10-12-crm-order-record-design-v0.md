@@ -1,4 +1,4 @@
-# CRM「订单记录」设计稿 v0.4（已并入子牙 + 魏征第一、二轮意见；PM 批准前不写代码、不改生产库）
+# CRM「订单记录」设计稿 v0.5（已并入子牙 + 魏征第一、二轮意见，并按 10/12 邮箱摸底更正发票号格式；PM 批准前不写代码、不改生产库）
 
 日期：2026-10-12 · 风险级：**A**（新表 + 记钱 + 将来的每周任务） · 起因：统筹转 PM 指派（需求留存卡 `docs/ledger/2026-10-12-crm-order-record-need-parked.md`）
 窗口：CRM 窗口（唯一写入者）。客户姓名等个人信息不进本文，一律用代号（客人 A、B…）。
@@ -48,7 +48,7 @@
 | `evidence_kind` text not null | 证据类型 | CHECK ∈ `invoice`/`payment_email`/`other` |
 | `evidence_ref` text not null、`evidence_ref_norm` text not null | 证据编号（发票号）；norm = **转大写并去掉全部空格和连字符**（与付款邮件识别 `extractInvoiceNumbers` 同一算法，实现时抽成一个共用函数，两边都调它，避免 `INV-123` 与 `INV123` 对不上；数据库侧写成 `regexp_replace(upper(x), '[\s-]+', '', 'g')`，测试含 `INV-1234` 对 `inv 1234`） | norm 由触发器生成；**建单后 evidence_ref/evidence_ref_norm/client_id/contact_id/source 不许改** |
 | `party_no` int not null default 1 | 第几批人（同一客人为两批不同的人订同一个团时才是 2） | CHECK ≥1 |
-| `source` text not null | **来源标签** | CHECK ∈ `company_confirmed`/`customer_stated`/`staff_entered`；**`company_confirmed` 只允许 evidence_kind ∈ invoice/payment_email，且 norm 必须符合该客户配置的发票号格式**。⚠️ 魏征第二轮核实：付款邮件识别里**没有** CTS 专属格式（只有宽松的通用提取，调用处也没传格式），所以**格式必须来自 CTS 真实发票样本**：开工前置条件 = 拿到样本（Q1 一并要），写成客户配置；**格式没拿到之前一律不给 `company_confirmed`，全部先算「待核实」**。格式校验**放在 apply 函数里**（把 CTS 的格式常量/配置作为参数传入，不合格的进「待人判断」），**不放进 CHECK**（CHECK 读不了客户配置）；表层 CHECK 只约束 evidence_kind |
+| `source` text not null | **来源标签** | CHECK ∈ `company_confirmed`/`customer_stated`/`staff_entered`；**`company_confirmed` 只允许 evidence_kind ∈ invoice/payment_email，且 norm 必须符合该客户配置的发票号格式**。⚠️ 魏征第二轮核实：付款邮件识别里**没有** CTS 专属格式（只有宽松的通用提取，调用处也没传格式），所以格式必须来自 CTS 真实发票样本。**2026-10-12 邮箱摸底已拿到（读了约 9 张真实发票）：CTS 发票号 = 5 位纯数字（如 84030 这个形状），写成 CTS 的客户配置 `^\d{5}$`**；`CTS4270311` 这类是发票文件名/Description 里的**团号**（同一团所有客人共用），不是发票号，应放进 `item_label`（买了什么）而不是 `evidence_ref`；发票上另有 Trip No.（行程编号），第一步不存。例外已见：`CTS4270406-…` 是报价单号不是发票号；发票改名重发号码不变；个别发票的 Contact Name 栏是模板残留，不能拿它对联系人。**格式校验仍放 apply 函数里**，格式不合的一律先算「待核实」。格式校验**放在 apply 函数里**（把 CTS 的格式常量/配置作为参数传入，不合格的进「待人判断」），**不放进 CHECK**（CHECK 读不了客户配置）；表层 CHECK 只约束 evidence_kind |
 | `status` text not null | `active`/`cancelled` | 取消不删行；`cancelled` 必带 `cancel_reason` |
 | `cancel_reason` text null | | |
 | `batch_id` uuid null → `crm_order_import_batches` | 哪一批导入的 | |
@@ -138,8 +138,8 @@
 
 ## 8. 需要 PM 回答的问题（一次一条，按顺序问）
 
-**Q1（现在就要答）：3 月四团的第一版已订数据，谁给？**
-建议：请 CTS 销售给一张表（发票号、几个人、付款状态、客人电话或邮箱），**再附 3–5 个真实发票号样本**（用来定发票号格式；没有格式前所有订单只能算「待核实」），我们预览给你看、你说「导」才写入。备选：我从邮箱只读摸一遍出草稿，再由销售核对（慢、会漏）。回 `销售给表` 或 `我先摸`。
+**Q1（已答）：3 月四团第一版已订数据 —— PM 选「我先摸」，已由邮箱只读摸出草稿（本地 Dropbox，含客人信息，不进仓库），待 CTS 销售核对。**
+建议：请 CTS 销售给一张表（发票号、几个人、付款状态、客人电话或邮箱），（发票号格式已由邮箱摸底确定为 5 位数字，不用再要样本），我们预览给你看、你说「导」才写入。备选：我从邮箱只读摸一遍出草稿，再由销售核对（慢、会漏）。回 `销售给表` 或 `我先摸`。
 
 后续（不一次抛）：Q2 对外只显示「公司确认」栏、「待核实」只内部看，是否同意；Q3 外部下单系统上线后谁是准的，现在上线了没有；Q4 汇总页除 ME 管理员外，CTS 销售要不要看；Q5 第三步要不要在客人抽屉里露一行证据；Q6 要不要加「直招/代理」一列。
 
