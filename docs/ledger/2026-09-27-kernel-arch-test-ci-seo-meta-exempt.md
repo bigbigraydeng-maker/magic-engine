@@ -12,8 +12,6 @@ done_ref: pr:2079
 verified_ref: doc:docs/ledger/evidence/2026-09-27-kernel-arch-test-ci-seo-meta-exempt--2026-10-11.md
 last_checked: 2026-10-11
 check_note: 2026-10-11 主干实查：三条路径仍在三处豁免清单，周循环仍引用 github-client 并直接调用 createBranch/commitFile/createPullRequest/mergePullRequest，3b 未落地，判不成，交 SEO 窗口
-last_checked: 2026-10-11
-check_note: 2026-10-11 夜巡到期复核未取得新证据，仅盖章；待下一晚按 verify_how 实查。
 ---
 子牙拍板：先豁免、先接 CI，不等 3b。3b 合并日期孔子答「不知道」（前面还排着 #1948 和卫青 task_5ac9a006），verify_by 按两周占位。
 按台账规则，这张卡满 7 天会以「做了没验」出现在待办邮件里，属正常：3b 还没落地。
