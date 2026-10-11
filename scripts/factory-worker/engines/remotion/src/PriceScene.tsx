@@ -3,7 +3,7 @@ import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig } from 'remotion'
 import { Footage, Reveal } from './components'
 import { fontFamily } from './theme'
 
-export const PriceScene: React.FC<{ backdrop: string; brandColor: string; fromLabel: string; currencyPrefix: string; amount: number; qualifier: string; dateLine?: string; footnote: string; footnoteSize?: number; top: number }> = ({ backdrop, brandColor, fromLabel, currencyPrefix, amount, qualifier, dateLine, footnote, footnoteSize, top }) => {
+export const PriceScene: React.FC<{ backdrop: string; brandColor: string; fromLabel: string; currencyPrefix: string; amount: number; qualifier: string; dateLine?: string; footnote: string; footnoteSize?: number; top: number; scrim?: number }> = ({ backdrop, brandColor, fromLabel, currencyPrefix, amount, qualifier, dateLine, footnote, footnoteSize, top, scrim }) => {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   // Long price strings shrink so they stay inside the 960px safe width (9 chars or fewer keep the base size).
@@ -12,7 +12,7 @@ export const PriceScene: React.FC<{ backdrop: string; brandColor: string; fromLa
   const pop = spring({ frame: frame - 4, fps, config: { damping: 11, stiffness: 160, mass: 0.7 } })
   return (
     <AbsoluteFill>
-      <Footage src={backdrop} zoomTo={1.05} />
+      <Footage src={backdrop} zoomTo={1.05} scrim={scrim} />
       <AbsoluteFill style={{ background: 'rgba(5,10,18,0.22)' }} />
       <div style={{ position: 'absolute', left: 0, width: 960, top, textAlign: 'center', fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.55)' }}>
         <Reveal delay={0}><div style={{ fontSize: 46, fontWeight: 800, letterSpacing: 10 }}>{fromLabel}</div></Reveal>

@@ -10,3 +10,4 @@ verify_how: CTS 主页管理员重新点「连接 Meta」后，下一轮评论�
 ---
 授权清单补上 pages_manage_engagement，并在今日待办里下发「连接 Meta」三件套。
 这一步只有主页管理员能做；修好后才会真回复客人，上线要 PM 本人回「合」。
+未验证：Meta 应用本身是否已获批 pages_manage_engagement；同意页若没有这一项，待办会继续存在，需转开发去 Meta 后台申请。

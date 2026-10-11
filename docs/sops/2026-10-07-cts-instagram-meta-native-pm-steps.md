@@ -1,7 +1,10 @@
 # CTS Instagram 改走 Meta 官方接口：PM 要做的步骤（暂缓中）
 
-状态：暂缓。恢复条件：PM 在手机 Instagram 里把 chinatravelservices 改成专业账号，并关联到 CTS Tours 的 Facebook 主页。
-查证结论（2026-10-07，只读）：CTS 主页目前没有关联 Instagram；ME 现有授权都没有 Instagram 发布权限；标准访问就够，不需要应用审核，企业认证卡住不影响。
+状态：已部分更正（2026-10-09）。第 1、2 步已完成：chinatravelservices 已是专业账号，且已关联在 CTS Tours 的 Facebook 主页下，不必重做。
+还剩两件独立的事，**登记完不等于 ME 能读到 Instagram 数据**：
+- **PM 这边**：把 chinatravelservices 登记进 CTStours 商务账户并分配给官方广告账户（需本人登录 Instagram），见 docs/ledger/2026-10-09-cts-instagram-register-into-business.md 与 docs/audits/2026-10-09-cts-instagram-connect-and-placement-leak.md。做完能拿到的是「IG 互动受众」和「把 IG 已发帖子转广告」。
+- **开发这边（还没做，没排期）**：ME 现有授权清单里没有 Instagram 读取权限，也还没有 Instagram 数据采集器，第 4 步那个授权按钮本身也没开发。所以粉丝 / 互动 / 内容表现这些数据进不了 ME，要等这部分做完才行。两件事分开跟踪，别把登记成功当成接口已接通。
+查证结论（2026-10-07，只读；其中“主页没有关联 Instagram”一条已被 2026-10-09 复查推翻，现已关联）：ME 现有授权都没有 Instagram 发布权限；标准访问就够，不需要应用审核，企业认证卡住不影响。
 
 ## 第 1 步：改成专业账号
 - 做什么：个人号发不了 Reel，必须是商业或创作者账号。

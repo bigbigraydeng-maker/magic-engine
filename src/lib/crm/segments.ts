@@ -443,6 +443,15 @@ const PHONE_VERDICTS: ReadonlySet<string> = new Set(['bad_number', 'spoke'])
  * 「今天试过了、晚点再试」本来就是销售那一天对这个人做完的事。
  * 坏号不一样 —— 它是「这条路永久关闭了，今天得换一条走」。
  */
+/**
+ * 电话系统记录的「外呼没人接」（metadata.answered === false）不算我们联系上了他，
+ * 也不算「今天已出手」（PM 2026-10-12 拍板）。手打笔记没有 answered 字段，仍按原规则：
+ * `no_answer` 是一次正常尝试。
+ */
+export function isUnansweredCall(metadata: Record<string, unknown> | null | undefined): boolean {
+  return metadata?.answered === false
+}
+
 export function isFailedReach(outcome: string | null | undefined): boolean {
   return outcome === 'bad_number'
 }

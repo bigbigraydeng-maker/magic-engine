@@ -59,6 +59,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   payment_email_needs_human: 'truth', // 邮件说收到款了、系统判不了真假/金额，要人核对
   ai_auto_review_circuit_breaker: 'decide', // 重新打开「AI 自动发给广告平台」
   ads_auto_pause_pending: 'decide', // 暂停在花钱的广告组
+  tour_publish_requested: 'decide', // 客户员工请我们把团目录的修改上架（对外）
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
@@ -94,11 +95,13 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   facebook_sync_failing: 'one_click', // 主页管理员重新「连接 Meta」
   comment_scope_missing: 'one_click',
   comment_token_invalid: 'one_click',
+  comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
   linkedin_progress_needs_setup: 'one_click',
   linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
+  daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   calendar_closure_calendar_unreadable: 'one_click', // 读不到 PM 日历：机器账号 / 日历共享要人点一次
@@ -136,6 +139,11 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   messenger_draft_pending_approval: 'review',
   messenger_draft_escalation: 'review',
   price_claim_unbacked: 'review',
+  price_fact_unverified: 'review',
+  auto_publish_stalled: 'review', // 该发的帖子没发出去：看原因、决定重发还是改
+  auto_publish_unknown_outcome: 'truth', // 系统判不了真假：帖子到底有没有发出去，只有看主页的人知道
+  auto_publish_unarmed: 'review', // 已授权却没动静：发布器可能没跑
+  auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────
   cross_client_leak: 'truth',

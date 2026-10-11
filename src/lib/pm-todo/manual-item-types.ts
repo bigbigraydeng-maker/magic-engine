@@ -27,10 +27,12 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
+import type { CommentAutoreplyRunFailingTodo } from './comment-autoreply-run-failing-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
 import type { CalendarClosureItemKind } from './calendar-closure-items'
+import type { TourPublishRequestItemKind } from './tour-catalog-publish-request-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
@@ -168,6 +170,16 @@ export type ManualItemKind =
   | 'blog_publish_channel_broken'
   | 'cross_client_leak'
   | 'price_claim_unbacked'
+  /** 每日计划里帖子的价格数字跟客户资料里该团的价格对不上（或没资料可对）—— 发布时整批会被拦 */
+  | 'price_fact_unverified'
+  /** 自动发布：帖子被拦 / 多次失败 / 发布时间已过没补发 —— 没发出去，要人看 */
+  | 'auto_publish_stalled'
+  /** 自动发布：系统不确定帖子有没有发出去，为防重复不自动重试 —— 要人去主页核对 */
+  | 'auto_publish_unknown_outcome'
+  /** 自动发布：已授权的日期到了，却没有任何发布记录 —— 发布器可能没在跑 */
+  | 'auto_publish_unarmed'
+  /** 自动发布：记录说「已撤回」，但回执里同一天又有一条新发出的帖子 —— 主页上有帖、系统记录对不上，要人核对 */
+  | 'auto_publish_record_conflict'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -196,6 +208,8 @@ export type ManualItemKind =
   | ToolLeadItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
+  /** 评论自动回复连续多轮整轮没扫完 —— 以前被记成「完成」，约一个月没人发现 */
+  | CommentAutoreplyRunFailingTodo['kind']
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind
   /** 上面那项检查自己没跑成 —— 不报 ≠ 钥匙都活着 */
@@ -208,6 +222,8 @@ export type ManualItemKind =
   | LeadSheetItemKind
   /** 日历上带日期的验证事项每日巡检：读不到日历 / 巡检没跑成 / 没法自动核对 / 核对没达预期 */
   | CalendarClosureItemKind
+  /** 客户员工改了团目录、请我们上架 —— 不上架这些修改不会对外生效（对外动作，只有 ME 管理员能点） */
+  | TourPublishRequestItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */

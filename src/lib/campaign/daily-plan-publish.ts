@@ -107,6 +107,9 @@ export interface CampaignDailyPublishedPost {
    *  `event_send_failed`. The post is still on Facebook; only measurement is
    *  missing, and a failed record was written for the daily to-do list. */
   measurement_skipped_reason?: string
+  /** 首评状态:POSTED 已贴 / PENDING_PUBLISH 定时帖等公开后由工作流补 / FAILED 已留待办记录。旧回执没有此字段。 */
+  first_comment_status?: FirstCommentStatus
+  first_comment_id?: string
   page_id: string
   /** When *we* handed the post to Facebook. Same value whether Facebook
    *  publishes immediately or holds it until `scheduled_publish_time`. */
@@ -119,12 +122,23 @@ export interface CampaignDailyPublishedPost {
   provider_response: Record<string, unknown>
 }
 
+/** How sure we are the Post was NOT created: rejected/rate_limited = definitely not; unknown = it may exist. */
+export type PublishFailureCertainty = 'rejected' | 'rate_limited' | 'unknown'
+
 export interface CampaignDailyPublishFailure {
   date: string
   idempotency_key: string
   error: string
   failed_at: string
+  /** Absent on receipts written before this field existed; readers must treat absent as `unknown`. */
+  certainty?: PublishFailureCertainty
 }
+
+/** Fixed failure text when the publish slot has already passed and the caller forbade an immediate publish. */
+export const MISSED_WINDOW_ERROR = 'MISSED_WINDOW'
+
+/** Fixed failure text when the caller's last-moment check refused the send (e.g. the grant was revoked). Nothing was sent. */
+export const ABORTED_BEFORE_SEND_ERROR = 'ABORTED_BEFORE_SEND'
 
 export interface CampaignDailyPublishPlannedPost {
   date: string
@@ -162,12 +176,17 @@ export interface CampaignDailyPublishMeta {
   recalled?: Array<{ date: string; idempotency_key: string; post_id: string; recalled_at: string; already_gone: boolean }>
 }
 
+export const FIRST_COMMENT_STATUSES = ['POSTED', 'PENDING_PUBLISH', 'FAILED'] as const
+export type FirstCommentStatus = (typeof FIRST_COMMENT_STATUSES)[number]
+
 const publishedPostSchema = z.object({
   date: dateStringSchema,
   idempotency_key: z.string().min(1),
   post_id: z.string().min(1),
   post_id_source: z.enum(['post_id', 'id']),
   measurement_skipped_reason: z.string().min(1).optional(),
+  first_comment_status: z.enum(FIRST_COMMENT_STATUSES).optional(),
+  first_comment_id: z.string().min(1).optional(),
   page_id: pageIdSchema,
   published_at: z.string().datetime(),
   scheduled_publish_time: z.string().datetime().optional(),
@@ -195,6 +214,7 @@ export const CampaignDailyPublishMetaSchema = z.object({
     idempotency_key: z.string().min(1),
     error: z.string(),
     failed_at: z.string().datetime(),
+    certainty: z.enum(['rejected', 'rate_limited', 'unknown']).optional(),
   })),
   event_ids: z.array(z.string().min(1)),
   date_offset_days: z.number().int().min(-30).max(30).optional(),
@@ -438,6 +458,7 @@ export const StoryResolveDueSchema = z.object({
   page_id: pageIdSchema,
   published_at: z.string().datetime(),
   scheduled_publish_time: z.string().datetime().optional(),
+  first_comment_text: z.string().min(1).max(2000).optional(),
   measure_at: z.array(measureWindowSchema).min(1).max(4),
 })
 
