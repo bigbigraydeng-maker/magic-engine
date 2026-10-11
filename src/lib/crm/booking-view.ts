@@ -62,7 +62,7 @@ interface DueOutcome {
 const DUE_UNAVAILABLE_TEXT = '到期日暂时算不出来，请核对出发日期'
 
 /** Shown for the balance milestone when no departure is chosen yet. */
-const NOT_SET_NOTE = '出发日期还没定，补上才有到期日'
+const NOT_SET_NOTE = '出发日期未定'
 
 /** Build a warning with the shared shape. */
 function warn(
@@ -308,7 +308,7 @@ function catalogWarnings(
     out.push(
       warn(
         'departure_missing',
-        `团目录里已找不到这个出发日期（原为 ${booking.departureDepartOn ?? '（未定）'}）`,
+        `团目录里已找不到这个出发日期（原为 ${booking.departureDepartOn ?? '（未定）'}），请点「改团/出发日期」重新选`,
         false,
         null,
       ),

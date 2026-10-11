@@ -298,6 +298,7 @@ const PAID_KEYS = ['expectedUpdatedAt', 'paidOn'] as const
 
 export function parsePaidBody(
   body: Record<string, unknown>,
+  today?: string,
 ): ParseResult<{ expectedUpdatedAt: string; paidOn: string | null }> {
   const unknown = rejectUnknownKeys(body, PAID_KEYS)
   if (unknown !== null) return { ok: false, error: unknown }
@@ -307,6 +308,10 @@ export function parsePaidBody(
 
   const paidOn = readIsoDate(body.paidOn, true)
   if (paidOn === undefined) return { ok: false, error: 'invalid_paid_on' }
+  // A payment cannot have been received after today (NZ date, passed in by the route).
+  if (today !== undefined && paidOn !== null && paidOn > today) {
+    return { ok: false, error: 'invalid_paid_on' }
+  }
 
   return { ok: true, value: { expectedUpdatedAt: expected.value, paidOn } }
 }

@@ -9,7 +9,7 @@
  * the rest of the 订单与付款 block.
  */
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import type { BookingView } from '@/lib/crm/booking-types'
 import { patchBooking } from './booking-api'
@@ -27,6 +27,16 @@ export function NoteEditor({ clientId, booking, busy, run }: NoteEditorProps): J
   const inputId = useId()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(booking.note ?? '')
+  const editButtonRef = useRef<HTMLButtonElement>(null)
+  const wasEditingRef = useRef(false)
+
+  useEffect(() => {
+    const wasEditing = wasEditingRef.current
+    wasEditingRef.current = editing
+    if (editing || !wasEditing) return
+    const target = editButtonRef.current
+    if (target !== null && target.isConnected) target.focus()
+  }, [editing])
 
   const startEditing = (): void => {
     setDraft(booking.note ?? '')
@@ -50,7 +60,13 @@ export function NoteEditor({ clientId, booking, busy, run }: NoteEditorProps): J
           备注：{booking.note ?? '（没有）'}
         </span>
         {booking.status === 'active' ? (
-          <button type="button" className={SECONDARY_BUTTON} onClick={startEditing} disabled={busy}>
+          <button
+            ref={editButtonRef}
+            type="button"
+            className={SECONDARY_BUTTON}
+            onClick={startEditing}
+            disabled={busy}
+          >
             改备注
           </button>
         ) : null}

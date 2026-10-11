@@ -10,7 +10,7 @@
 import { useState } from 'react'
 import type { NudgeMode, NudgeRow } from '@/lib/crm/booking-types'
 import { nudgeRelative } from './booking-format'
-import { SECONDARY_BUTTON } from './booking-styles'
+import { PRIMARY_BUTTON, SECONDARY_BUTTON } from './booking-styles'
 
 interface NudgeRowItemProps {
   row: NudgeRow
@@ -23,18 +23,24 @@ const SNOOZE_DAYS: Array<3 | 7 | 14> = [3, 7, 14]
 
 export function NudgeRowItem({ row, busy, onOpen, onAct }: NudgeRowItemProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [confirmQuiet, setConfirmQuiet] = useState(false)
   const name = row.contactName ?? '（没有名字）'
   const tourLine = `${row.tourName ?? '（团目录里已找不到这个团）'} · ${
-    row.departOn ? row.departOn + ' 出发' : '出发日期还没定'
+    row.departOn ? row.departOn + ' 出发' : '出发日期未定'
   }`
   const dueLine =
     row.dueOn !== null
       ? `${row.label} · 到期 ${row.dueOn}（${nudgeRelative(row.dueInDays)}）`
-      : `${row.label} · ${row.note ?? '出发日期还没定，补上才有到期日'}`
+      : `${row.label} · 到期日未定`
 
   const snooze = (days: 3 | 7 | 14) => {
     setMenuOpen(false)
     onAct('snooze', days)
+  }
+
+  const confirmQuietNow = () => {
+    setConfirmQuiet(false)
+    onAct('quiet')
   }
 
   return (
@@ -74,11 +80,11 @@ export function NudgeRowItem({ row, busy, onOpen, onAct }: NudgeRowItemProps) {
           type="button"
           className={SECONDARY_BUTTON}
           aria-expanded={menuOpen}
-          aria-label={`推迟（${name}）`}
+          aria-label={`推迟提醒（${name}）`}
           disabled={busy}
           onClick={() => setMenuOpen((open) => !open)}
         >
-          推迟
+          推迟提醒
         </button>
 
         {menuOpen
@@ -98,12 +104,40 @@ export function NudgeRowItem({ row, busy, onOpen, onAct }: NudgeRowItemProps) {
         <button
           type="button"
           className={SECONDARY_BUTTON}
-          aria-label={`线下已处理（${name}）`}
+          aria-label={`已线下收款，不再提醒（${name}）`}
           disabled={busy}
-          onClick={() => onAct('quiet')}
+          onClick={() => setConfirmQuiet(true)}
         >
-          线下已处理
+          已线下收款，不再提醒
         </button>
+
+        {confirmQuiet ? (
+          <div
+            role="group"
+            aria-label={`确认不再提醒（${name}）`}
+            className="flex flex-wrap items-center gap-2"
+          >
+            <span className="text-sm font-semibold text-me-charcoal">
+              点了这一项就不再提醒，确定吗？
+            </span>
+            <button
+              type="button"
+              className={PRIMARY_BUTTON}
+              disabled={busy}
+              onClick={confirmQuietNow}
+            >
+              确定
+            </button>
+            <button
+              type="button"
+              className={SECONDARY_BUTTON}
+              disabled={busy}
+              onClick={() => setConfirmQuiet(false)}
+            >
+              先不要
+            </button>
+          </div>
+        ) : null}
       </div>
     </li>
   )

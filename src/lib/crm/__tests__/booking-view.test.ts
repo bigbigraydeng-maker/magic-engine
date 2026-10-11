@@ -218,7 +218,7 @@ describe('buildBookingView departure warnings', () => {
   it('flags a departure that vanished from the catalog', () => {
     const view = viewOf({ departure: null })
     const warning = view.warnings.find((w) => w.code === 'departure_missing')
-    expect(warning?.text).toBe('团目录里已找不到这个出发日期（原为 2027-03-12）')
+    expect(warning?.text).toBe('团目录里已找不到这个出发日期（原为 2027-03-12），请点「改团/出发日期」重新选')
     expect(view.departOn).toBe('2027-03-12')
   })
 
@@ -246,7 +246,7 @@ describe('buildBookingView departure warnings', () => {
     expect(balance.dueOn).toBeNull()
     expect(balance.dueInDays).toBeNull()
     expect(balance.overdue).toBe(false)
-    expect(balance.dueNote).toBe('出发日期还没定，补上才有到期日')
+    expect(balance.dueNote).toBe('出发日期未定')
   })
 
   it('keeps the deposit-only date and marks it overdue when past', () => {

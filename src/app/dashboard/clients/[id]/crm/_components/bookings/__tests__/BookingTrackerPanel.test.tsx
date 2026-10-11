@@ -22,6 +22,7 @@ function makeNudgeList(over: Partial<NudgeList> = {}): NudgeList {
     rows: [],
     more: false,
     collapsedOverdue: 0,
+    collapsedRows: [],
     truncated: false,
     ...over,
   }
@@ -177,8 +178,8 @@ describe('BookingTrackerPanel', () => {
         }),
     })
 
-    expect(await screen.findByText('新西兰南北岛 · 出发日期还没定')).toBeInTheDocument()
-    expect(screen.getByText('定金 · 出发日期还没定，补上才有到期日')).toBeInTheDocument()
+    expect(await screen.findByText('新西兰南北岛 · 出发日期未定')).toBeInTheDocument()
+    expect(screen.getByText('定金 · 到期日未定')).toBeInTheDocument()
   })
 
   it('opens the guest profile when the row is clicked', async () => {
@@ -230,7 +231,7 @@ describe('BookingTrackerPanel', () => {
       nudge: () => makeNudgeList({ rows: [row] }),
     })
 
-    const snooze = await screen.findByRole('button', { name: '推迟（客人1）' })
+    const snooze = await screen.findByRole('button', { name: '推迟提醒（客人1）' })
     await user.click(snooze)
     expect(snooze).toHaveAttribute('aria-expanded', 'true')
 
@@ -256,7 +257,8 @@ describe('BookingTrackerPanel', () => {
       nudge: () => makeNudgeList({ rows: [row] }),
     })
 
-    await user.click(await screen.findByRole('button', { name: '线下已处理（客人1）' }))
+    await user.click(await screen.findByRole('button', { name: '已线下收款，不再提醒（客人1）' }))
+    await user.click(await screen.findByRole('button', { name: '确定' }))
 
     await waitFor(() => {
       expect(nudgeCalls(calls)).toHaveLength(1)

@@ -82,6 +82,7 @@ export function CancelBookingForm({
           请先写一句取消原因
         </p>
       ) : null}
+      <p className="text-sm font-semibold text-[#9B2C22]">取消后不能恢复</p>
       <div className="flex flex-wrap gap-2">
         <button
           type="button"

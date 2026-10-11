@@ -37,6 +37,22 @@ export interface UseBookingsResult {
   clearNotice: () => void
 }
 
+const REFRESH_FAILED_MESSAGE = '已保存，刷新没成功，请手动刷新'
+
+/** Keep only well-formed booking entries from an unknown list. */
+function sanitizeBookings(value: unknown): BookingView[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((entry): entry is BookingView => {
+    if (typeof entry !== 'object' || entry === null) return false
+    const record = entry as Record<string, unknown>
+    return (
+      typeof record.id === 'string' &&
+      Array.isArray(record.milestones) &&
+      Array.isArray(record.warnings)
+    )
+  })
+}
+
 /** Apply a fetch result to the current state, returning the next state. */
 function applyLoadResult(
   current: BookingsState,
@@ -46,7 +62,7 @@ function applyLoadResult(
     if (!Array.isArray(result.data.bookings)) {
       return { next: { status: 'hidden' }, notice: null }
     }
-    return { next: { status: 'ready', bookings: result.data.bookings }, notice: null }
+    return { next: { status: 'ready', bookings: sanitizeBookings(result.data.bookings) }, notice: null }
   }
   if (result.kind === 'hidden') {
     return { next: { status: 'hidden' }, notice: null }
@@ -76,17 +92,18 @@ export function useBookings(clientId: string, contactId: string): UseBookingsRes
   }, [])
 
   const load = useCallback(
-    async (showLoading: boolean): Promise<void> => {
+    async (showLoading: boolean): Promise<boolean> => {
       const requestId = ++requestIdRef.current
       if (showLoading) {
         setState({ status: 'loading' })
         setNotice(null)
       }
       const result = await fetchBookings(clientId, contactId)
-      if (!mountedRef.current || requestId !== requestIdRef.current) return
+      if (!mountedRef.current || requestId !== requestIdRef.current) return true
       const { next, notice: nextNotice } = applyLoadResult(stateRef.current, result)
       setState(next)
       if (nextNotice !== null) setNotice(nextNotice)
+      return result.ok
     },
     [clientId, contactId],
   )
@@ -95,7 +112,11 @@ export function useBookings(clientId: string, contactId: string): UseBookingsRes
     void load(true)
   }, [load])
 
-  const reload = useCallback((): Promise<void> => load(false), [load])
+  const reloadOk = useCallback((): Promise<boolean> => load(false), [load])
+
+  const reload = useCallback(async (): Promise<void> => {
+    await load(false)
+  }, [load])
 
   const run = useCallback<RunAction>(
     async (action) => {
@@ -107,7 +128,8 @@ export function useBookings(clientId: string, contactId: string): UseBookingsRes
         const result = await action()
         if (!mountedRef.current) return false
         if (result.ok) {
-          await reload()
+          const loaded = await reloadOk()
+          if (!loaded) setNotice(REFRESH_FAILED_MESSAGE)
           announceBookingsChanged()
           return true
         }
@@ -127,7 +149,7 @@ export function useBookings(clientId: string, contactId: string): UseBookingsRes
         if (mountedRef.current) setBusy(false)
       }
     },
-    [reload],
+    [reload, reloadOk],
   )
 
   const clearNotice = useCallback((): void => {

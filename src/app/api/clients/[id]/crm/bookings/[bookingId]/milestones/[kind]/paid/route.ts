@@ -8,6 +8,7 @@ import {
 } from '@/lib/crm/booking-http'
 import { parseKind, parsePaidBody } from '@/lib/crm/booking-input'
 import { setPaid } from '@/lib/crm/booking-store'
+import { nzTodayIso } from '@/lib/crm/booking-view'
 
 export const dynamic = 'force-dynamic'
 
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   const kind = parseKind(kindRaw)
   if (kind === null) return invalidRequest('invalid_kind')
 
-  const parsed = parsePaidBody(prepared.body)
+  const parsed = parsePaidBody(prepared.body, nzTodayIso())
   if (!parsed.ok) return invalidRequest(parsed.error)
 
   const result = await setPaid(

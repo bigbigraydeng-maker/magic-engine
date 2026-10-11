@@ -78,6 +78,7 @@ function PaidPanel(props: PaidPanelProps): JSX.Element {
           ref={inputRef}
           type="date"
           value={paidOn}
+          max={nzToday()}
           onChange={(e) => setPaidOn(e.target.value)}
           className="min-h-[44px] w-full rounded-lg border border-me-charcoal/25 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:outline-none focus-visible:ring-2 focus-visible:ring-me-ochre"
         />
@@ -86,7 +87,7 @@ function PaidPanel(props: PaidPanelProps): JSX.Element {
         <button
           type="button"
           className={PRIMARY_BUTTON}
-          disabled={busy || paidOn === ''}
+          disabled={busy || paidOn === '' || paidOn > nzToday()}
           onClick={() => void confirm()}
         >
           确认已收到款
@@ -182,6 +183,26 @@ function OverridePanel(props: OverridePanelProps): JSX.Element {
 export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
   const { clientId, booking, milestone, warnings, busy, readOnly, run } = props
   const [mode, setMode] = useState<Mode>('idle')
+  const paidButtonRef = useRef<HTMLButtonElement | null>(null)
+  const overrideButtonRef = useRef<HTMLButtonElement | null>(null)
+  const openerKindRef = useRef<'paid' | 'override' | null>(null)
+  const wasOpenRef = useRef(false)
+
+  useEffect(() => {
+    if (mode === 'idle') {
+      if (wasOpenRef.current) {
+        wasOpenRef.current = false
+        const opener =
+          openerKindRef.current === 'paid'
+            ? paidButtonRef.current
+            : overrideButtonRef.current
+        openerKindRef.current = null
+        if (opener !== null && opener.isConnected) opener.focus()
+      }
+    } else {
+      wasOpenRef.current = true
+    }
+  }, [mode])
 
   const statusClass = milestone.overdue
     ? 'text-[#9B2C22]'
@@ -220,7 +241,7 @@ export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
             <button
               type="button"
               className={SECONDARY_BUTTON}
-              aria-label={`撤销${milestone.label}已收到款`}
+              aria-label={`撤销${milestone.label}收款`}
               disabled={busy}
               onClick={() => void revoke()}
             >
@@ -230,19 +251,27 @@ export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
             <>
               <button
                 type="button"
+                ref={paidButtonRef}
                 className={PRIMARY_BUTTON}
                 aria-label={`${milestone.label}已收到款`}
                 disabled={busy}
-                onClick={() => setMode('confirm_paid')}
+                onClick={() => {
+                  openerKindRef.current = 'paid'
+                  setMode('confirm_paid')
+                }}
               >
                 已收到款
               </button>
               <button
                 type="button"
+                ref={overrideButtonRef}
                 className={SECONDARY_BUTTON}
-                aria-label={`改${milestone.label}到期日`}
+                aria-label={`改到期日（${milestone.label}）`}
                 disabled={busy}
-                onClick={() => setMode('override_due')}
+                onClick={() => {
+                  openerKindRef.current = 'override'
+                  setMode('override_due')
+                }}
               >
                 改到期日
               </button>

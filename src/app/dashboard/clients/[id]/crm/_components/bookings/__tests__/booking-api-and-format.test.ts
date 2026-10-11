@@ -395,7 +395,7 @@ describe('booking-format', () => {
       state: 'paid',
       paidOn: '2026-10-08',
     })
-    expect(milestoneStatusText(paid)).toBe('已收到款 2026-10-08')
+    expect(milestoneStatusText(paid)).toBe('✅ 已收 2026-10-08')
 
     const unpaidWithDue = makeMilestone('balance', {
       state: 'unpaid',
@@ -429,7 +429,7 @@ describe('booking-format', () => {
       '（团目录里已找不到这个团） · 2027-03-12 出发',
     )
     expect(bookingTitle(makeBooking({ departOn: null }))).toBe(
-      '新西兰南北岛 · 出发日期还没定',
+      '新西兰南北岛 · 出发日期未定',
     )
   })
 

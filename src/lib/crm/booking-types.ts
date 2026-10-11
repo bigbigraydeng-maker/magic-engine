@@ -89,6 +89,7 @@ export interface NudgeList {
   rows: NudgeRow[]             // at most `limit` rows, ordered overdue, then within_3, then within_14
   more: boolean                // more rows exist beyond `limit`
   collapsedOverdue: number     // bookings whose tightest item is overdue by more than 14 days (not listed)
+  collapsedRows: NudgeRow[]    // those same bookings as rows (most overdue first, at most 50)
   truncated: boolean           // the 500-candidate hard cap was hit
 }
 export interface BookingMember { email: string; grantedBy: string; createdAt: string }

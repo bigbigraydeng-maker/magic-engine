@@ -542,7 +542,7 @@ export function PersonDrawer({
           />
 
           {/* 订单与付款：没开通这项功能或没权限的人，这一块什么都不渲染 */}
-          <BookingsBlock clientId={clientId} contactId={row.contactId} />
+          <BookingsBlock key={row.contactId} clientId={clientId} contactId={row.contactId} />
 
           {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
           <div className="mt-5">

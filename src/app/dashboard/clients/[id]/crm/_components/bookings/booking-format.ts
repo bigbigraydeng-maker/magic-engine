@@ -36,7 +36,7 @@ export function nudgeRelative(dueInDays: number | null): string {
 
 /** Summarise one payment item's state in plain Chinese. */
 export function milestoneStatusText(m: MilestoneView): string {
-  if (m.state === 'paid') return `已收到款 ${m.paidOn ?? '（未定）'}`
+  if (m.state === 'paid') return `✅ 已收 ${m.paidOn ?? '（未定）'}`
   if (m.dueOn !== null) return `未收到 · 到期 ${m.dueOn}（${dueRelative(m.dueInDays)}）`
   return `未收到 · ${m.dueNote ?? '到期日还没算出来'}`
 }
@@ -44,7 +44,12 @@ export function milestoneStatusText(m: MilestoneView): string {
 /** Build the one-line heading for a booking card. */
 export function bookingTitle(b: BookingView): string {
   const name = b.tourName ?? '（团目录里已找不到这个团）'
-  return b.departOn ? `${name} · ${b.departOn} 出发` : `${name} · 出发日期还没定`
+  return b.departOn ? `${name} · ${b.departOn} 出发` : `${name} · 出发日期未定`
+}
+
+/** True when the booking has at least one payment item and all of them are paid. */
+export function isFullyPaid(b: BookingView): boolean {
+  return b.milestones.length > 0 && b.milestones.every((m) => m.state === 'paid')
 }
 
 /** Format a catalog date range as '2026-10-08 出发（2026-10-15 回）'. */

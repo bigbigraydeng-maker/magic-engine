@@ -12,6 +12,7 @@
 import { useNudgeList } from './useNudgeList'
 import { PaymentNudgeSection } from './PaymentNudgeSection'
 import { BookingMembersCard } from './BookingMembersCard'
+import { BookingsErrorBoundary } from './BookingsErrorBoundary'
 
 export interface BookingTrackerPanelProps {
   clientId: string
@@ -29,11 +30,13 @@ export function BookingTrackerPanel({
   }
 
   return (
-    <div className="space-y-4" data-testid="booking-tracker-panel">
-      <PaymentNudgeSection list={list} onOpenContact={onOpenContact} />
-      {list.state.status === 'ready' ? (
-        <BookingMembersCard clientId={clientId} />
-      ) : null}
-    </div>
+    <BookingsErrorBoundary>
+      <div className="space-y-4" data-testid="booking-tracker-panel">
+        <PaymentNudgeSection list={list} onOpenContact={onOpenContact} />
+        {list.state.status === 'ready' ? (
+          <BookingMembersCard clientId={clientId} />
+        ) : null}
+      </div>
+    </BookingsErrorBoundary>
   )
 }

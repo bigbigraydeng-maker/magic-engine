@@ -8,11 +8,11 @@
  * Cancelled bookings render a compact read-only summary instead.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { BookingView, BookingWarning } from '@/lib/crm/booking-types'
 import { confirmDeparture } from './booking-api'
-import { bookingTitle } from './booking-format'
+import { bookingTitle, isFullyPaid } from './booking-format'
 import { BookingWarnings } from './BookingWarnings'
 import { CancelBookingForm } from './CancelBookingForm'
 import { EditBookingForm } from './EditBookingForm'
@@ -60,14 +60,19 @@ function ActionRow({
   panel,
   busy,
   onToggle,
+  editButtonRef,
+  cancelButtonRef,
 }: {
   panel: Panel
   busy: boolean
   onToggle: (next: Panel) => void
+  editButtonRef: React.RefObject<HTMLButtonElement>
+  cancelButtonRef: React.RefObject<HTMLButtonElement>
 }): JSX.Element {
   return (
     <div className="flex flex-wrap gap-2">
       <button
+        ref={editButtonRef}
         type="button"
         className={SECONDARY_BUTTON}
         disabled={busy}
@@ -77,6 +82,7 @@ function ActionRow({
         改团/出发日期
       </button>
       <button
+        ref={cancelButtonRef}
         type="button"
         className={DANGER_BUTTON}
         disabled={busy}
@@ -96,36 +102,39 @@ export function BookingCard({
   run,
 }: BookingCardProps): JSX.Element {
   const [panel, setPanel] = useState<Panel>('none')
+  const editButtonRef = useRef<HTMLButtonElement>(null)
+  const cancelButtonRef = useRef<HTMLButtonElement>(null)
+  const lastPanelRef = useRef<Panel>('none')
+
+  useEffect(() => {
+    const previous = lastPanelRef.current
+    lastPanelRef.current = panel
+    if (panel !== 'none' || previous === 'none') return
+    const target = previous === 'edit' ? editButtonRef.current : cancelButtonRef.current
+    if (target !== null && target.isConnected) target.focus()
+  }, [panel])
 
   const cancelled = booking.status === 'cancelled'
   const cardClass = cancelled
     ? `${CARD_CLASS} space-y-2 opacity-80 bg-me-ivory/60`
     : `${CARD_CLASS} space-y-2`
 
+  const fullyPaid = !cancelled && isFullyPaid(booking)
   const cruiseWarning = booking.warnings.find((w) => w.code === 'cruise_not_ticked' || w.code === 'lead_cruise_note')
 
   return (
     <article data-testid="booking-card" aria-label={bookingTitle(booking)} className={cardClass}>
-      <h3 className="text-base font-black text-me-charcoal">{bookingTitle(booking)}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-base font-black text-me-charcoal">{bookingTitle(booking)}</h4>
+        {fullyPaid ? (
+          <span className="inline-block rounded-full border border-me-charcoal/20 bg-white px-2 py-0.5 text-xs font-semibold text-me-charcoal/80">
+            已付清
+          </span>
+        ) : null}
+      </div>
 
       {cancelled ? (
-        <>
-          <CancelledSummary booking={booking} />
-          <ul className="mt-2 space-y-2">
-            {booking.milestones.map((milestone) => (
-              <MilestoneRow
-                key={milestone.kind}
-                clientId={clientId}
-                booking={booking}
-                milestone={milestone}
-                warnings={booking.warnings.filter((w) => w.kind === milestone.kind)}
-                busy={busy}
-                readOnly
-                run={run}
-              />
-            ))}
-          </ul>
-        </>
+        <CancelledSummary booking={booking} />
       ) : (
         <>
           {booking.payInFull ? (
@@ -154,11 +163,17 @@ export function BookingCard({
             ))}
           </ul>
 
-          {cruiseWarning ? <p className={MUTED_TEXT}>{cruiseWarning.text}</p> : null}
+          {!fullyPaid && cruiseWarning ? <p className={MUTED_TEXT}>{cruiseWarning.text}</p> : null}
 
           <NoteEditor clientId={clientId} booking={booking} busy={busy} run={run} />
 
-          <ActionRow panel={panel} busy={busy} onToggle={setPanel} />
+          <ActionRow
+            panel={panel}
+            busy={busy}
+            onToggle={setPanel}
+            editButtonRef={editButtonRef}
+            cancelButtonRef={cancelButtonRef}
+          />
 
           {panel === 'edit' ? (
             <EditBookingForm

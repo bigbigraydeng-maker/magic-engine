@@ -146,7 +146,7 @@ describe('BookingsBlock payment actions', () => {
     })
     const { calls } = await setup([booking])
 
-    fireEvent.click(screen.getByRole('button', { name: '撤销定金已收到款' }))
+    fireEvent.click(screen.getByRole('button', { name: '撤销定金收款' }))
 
     await waitFor(() => {
       expect(postsTo(calls, '/milestones/deposit/unpaid')).toHaveLength(1)
@@ -253,7 +253,7 @@ describe('BookingsBlock payment actions', () => {
   it('overrides the balance due date', async () => {
     const { calls } = await setup([makeBooking()])
 
-    fireEvent.click(screen.getByRole('button', { name: '改尾款到期日' }))
+    fireEvent.click(screen.getByRole('button', { name: '改到期日（尾款）' }))
     const panel = await screen.findByRole('group', { name: '修改尾款到期日' })
     const input = within(panel).getByLabelText('新的到期日')
     fireEvent.change(input, { target: { value: '2026-12-20' } })
@@ -277,7 +277,7 @@ describe('BookingsBlock payment actions', () => {
     })
     const { calls } = await setup([booking])
 
-    fireEvent.click(screen.getByRole('button', { name: '改尾款到期日' }))
+    fireEvent.click(screen.getByRole('button', { name: '改到期日（尾款）' }))
     const panel = await screen.findByRole('group', { name: '修改尾款到期日' })
     fireEvent.click(within(panel).getByRole('button', { name: '恢复系统算的日期' }))
 

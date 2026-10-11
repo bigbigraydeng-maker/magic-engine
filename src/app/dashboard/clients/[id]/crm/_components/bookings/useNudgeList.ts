@@ -38,13 +38,23 @@ export interface UseNudgeListResult {
 
 /** Remove every row belonging to one booking from a ready list. */
 function withoutBooking(nudge: NudgeList, bookingId: string): NudgeList {
-  return { ...nudge, rows: nudge.rows.filter((r) => r.bookingId !== bookingId) }
+  return {
+    ...nudge,
+    rows: nudge.rows.filter((r) => r.bookingId !== bookingId),
+    collapsedRows: nudge.collapsedRows.filter((r) => r.bookingId !== bookingId),
+  }
 }
 
 /** True when a value looks like a NudgeList (object with an array of rows). */
 function isNudgeList(value: unknown): value is NudgeList {
   if (typeof value !== 'object' || value === null) return false
   return Array.isArray((value as { rows?: unknown }).rows)
+}
+
+/** Fill in a missing collapsedRows array so older responses do not crash. */
+function normaliseNudgeList(nudge: NudgeList): NudgeList {
+  if (Array.isArray(nudge.collapsedRows)) return nudge
+  return { ...nudge, collapsedRows: [] }
 }
 
 export function useNudgeList(clientId: string): UseNudgeListResult {
@@ -80,7 +90,7 @@ export function useNudgeList(clientId: string): UseNudgeListResult {
           setState({ status: 'hidden' })
           return
         }
-        setState({ status: 'ready', nudge: result.data.nudge })
+        setState({ status: 'ready', nudge: normaliseNudgeList(result.data.nudge) })
         return
       }
       if (result.kind === 'hidden') {

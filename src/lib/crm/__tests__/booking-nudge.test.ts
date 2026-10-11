@@ -219,6 +219,37 @@ describe('overdue fold boundary', () => {
   })
 })
 
+describe('collapsed rows (the guests behind the folded line)', () => {
+  it('lists each folded guest as a row, most overdue first, with the same shape', async () => {
+    chase(state, 1, '2026-09-10')
+    chase(state, 2, '2026-09-01')
+    chase(state, 3, '2026-09-20')
+    chase(state, 4, '2026-10-07')
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.collapsedOverdue).toBe(3)
+    expect(list.collapsedRows.map((row) => row.dueOn)).toEqual(['2026-09-01', '2026-09-10', '2026-09-20'])
+    const first = list.collapsedRows[0]
+    expect(first.contactName).toBe('Guest 2')
+    expect(first.bucket).toBe('overdue')
+    expect(first.milestoneUpdatedAt).toBeTruthy()
+    expect(first.tourName).toBeTruthy()
+    expect(list.rows.map((row) => row.dueOn)).toEqual(['2026-10-07'])
+  })
+
+  it('caps the folded rows at 50 but still counts every folded booking', async () => {
+    for (let n = 1; n <= 55; n += 1) chase(state, n, '2026-09-01')
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.collapsedOverdue).toBe(55)
+    expect(list.collapsedRows).toHaveLength(50)
+  })
+
+  it('has no folded rows when nothing is folded', async () => {
+    chase(state, 1, '2026-10-07')
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.collapsedRows).toEqual([])
+  })
+})
+
 describe('bucketFor', () => {
   it('maps due-in-days onto buckets', () => {
     expect(bucketFor(-15)).toBe('collapsed')
@@ -351,7 +382,7 @@ describe('exclusions', () => {
     expect(undated.dueOn).toBeNull()
     expect(undated.dueInDays).toBeNull()
     expect(undated.kind).toBe('balance')
-    expect(undated.note).toBe('出发日期还没定，补上才有到期日')
+    expect(undated.note).toBe('出发日期未定')
   })
 })
 
@@ -510,6 +541,7 @@ describe('empty client', () => {
       rows: [],
       more: false,
       collapsedOverdue: 0,
+      collapsedRows: [],
       truncated: false,
     })
   })
@@ -679,7 +711,7 @@ describe('undated bookings', () => {
     expect(list.rows[0].kind).toBe('deposit')
     expect(list.rows[0].dueOn).toBe('2026-10-08')
     expect(list.rows[0].bucket).toBe('overdue')
-    expect(list.rows[0].note).toBe('出发日期还没定，补上才有到期日')
+    expect(list.rows[0].note).toBe('出发日期未定')
   })
 
   it('folds an undated booking whose deposit is deep overdue', async () => {

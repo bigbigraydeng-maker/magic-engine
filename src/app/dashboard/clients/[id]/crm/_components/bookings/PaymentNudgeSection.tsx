@@ -8,7 +8,7 @@
  * nothing at all (loading / hidden render null).
  */
 
-import { useId } from 'react'
+import { useId, useState } from 'react'
 import { BookingNotice } from './BookingNotice'
 import { NudgeRowItem } from './NudgeRowItem'
 import { ERROR_TEXT, MUTED_TEXT, SECONDARY_BUTTON } from './booking-styles'
@@ -24,6 +24,8 @@ export function PaymentNudgeSection({
   onOpenContact,
 }: PaymentNudgeSectionProps): JSX.Element | null {
   const headingId = useId()
+  const collapsedListId = useId()
+  const [collapsedOpen, setCollapsedOpen] = useState(false)
 
   if (list.state.status === 'loading' || list.state.status === 'hidden') return null
 
@@ -94,9 +96,34 @@ export function PaymentNudgeSection({
       ) : null}
 
       {nudge.collapsedOverdue > 0 ? (
-        <p className={`mt-3 ${MUTED_TEXT}`}>
-          {`逾期很久（${nudge.collapsedOverdue} 单），已逾期超过 14 天，不再逐条列出，请到客人页面里查看。`}
-        </p>
+        <div className="mt-3">
+          <p className={MUTED_TEXT}>{`逾期很久（${nudge.collapsedOverdue} 单）`}</p>
+          <p className={MUTED_TEXT}>已逾期超过 14 天，不再逐条列出。</p>
+          {nudge.collapsedRows.length > 0 ? (
+            <button
+              type="button"
+              className={`mt-2 ${SECONDARY_BUTTON}`}
+              aria-expanded={collapsedOpen}
+              aria-controls={collapsedListId}
+              onClick={() => setCollapsedOpen((open) => !open)}
+            >
+              {collapsedOpen ? '收起' : '展开看是谁'}
+            </button>
+          ) : null}
+          {collapsedOpen && nudge.collapsedRows.length > 0 ? (
+            <ul id={collapsedListId} className="mt-2">
+              {nudge.collapsedRows.map((row) => (
+                <NudgeRowItem
+                  key={row.bookingId}
+                  row={row}
+                  busy={list.busyBookingId !== null}
+                  onOpen={() => onOpenContact(row.contactId, row.contactName)}
+                  onAct={(mode, days) => void list.act(row, mode, days)}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </div>
       ) : null}
 
       {nudge.truncated ? (

@@ -8,12 +8,13 @@
  * bookings first, then cancelled ones).
  */
 
-import { useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import type { BookingView } from '@/lib/crm/booking-types'
 import { AddBookingForm } from './AddBookingForm'
 import { BookingCard } from './BookingCard'
 import { BookingNotice } from './BookingNotice'
+import { BookingsErrorBoundary } from './BookingsErrorBoundary'
 import { useBookings } from './useBookings'
 import {
   ERROR_TEXT,
@@ -34,13 +35,23 @@ function orderBookings(bookings: BookingView[]): BookingView[] {
   return [...active, ...cancelled]
 }
 
-export function BookingsBlock({
+function BookingsBlockInner({
   clientId,
   contactId,
 }: BookingsBlockProps): JSX.Element | null {
   const headingId = useId()
   const { state, notice, busy, run, reload, clearNotice } = useBookings(clientId, contactId)
   const [adding, setAdding] = useState(false)
+  const addButtonRef = useRef<HTMLButtonElement>(null)
+  const lastAddingRef = useRef(false)
+
+  useEffect(() => {
+    const previous = lastAddingRef.current
+    lastAddingRef.current = adding
+    if (adding || !previous) return
+    const target = addButtonRef.current
+    if (target !== null && target.isConnected) target.focus()
+  }, [adding])
 
   if (state.status === 'loading' || state.status === 'hidden') {
     return null
@@ -77,6 +88,7 @@ export function BookingsBlock({
           订单与付款
         </h3>
         <button
+          ref={addButtonRef}
           type="button"
           className={PRIMARY_BUTTON}
           aria-expanded={adding}
@@ -116,5 +128,13 @@ export function BookingsBlock({
         ))}
       </div>
     </section>
+  )
+}
+
+export function BookingsBlock(props: BookingsBlockProps): JSX.Element {
+  return (
+    <BookingsErrorBoundary>
+      <BookingsBlockInner {...props} />
+    </BookingsErrorBoundary>
   )
 }

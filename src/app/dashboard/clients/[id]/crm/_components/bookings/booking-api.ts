@@ -21,6 +21,7 @@ export type ApiResult<T> =
   | { ok: false; kind: ApiFailureKind; message: string }
 
 export const STALE_MESSAGE = '别人刚改过，已为你刷新'
+export const CHANGED_MESSAGE = '这张订单刚刚有变化，已为你刷新'
 export const GENERIC_ERROR = '没有成功，请稍后再试'
 export const BAD_INPUT_ERROR = '填写的内容有问题，请检查后再试'
 export const BOOKINGS_CHANGED_EVENT = 'crm-bookings-changed'
@@ -93,9 +94,15 @@ export async function callApi<T>(
   if (res.status === 404 && parsed.error === 'booking_tracker_not_enabled') {
     return { ok: false, kind: 'hidden', message: '' }
   }
+  if (method !== 'GET' && res.status === 404 && parsed.error === 'not_found') {
+    return { ok: false, kind: 'stale', message: CHANGED_MESSAGE }
+  }
   if (res.status === 409) {
     if (parsed.error === 'stale') {
       return { ok: false, kind: 'stale', message: STALE_MESSAGE }
+    }
+    if (method !== 'GET' && parsed.error === 'booking_not_active') {
+      return { ok: false, kind: 'stale', message: CHANGED_MESSAGE }
     }
     const message =
       typeof parsed.message === 'string' && parsed.message.length > 0

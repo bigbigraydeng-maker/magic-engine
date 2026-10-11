@@ -32,6 +32,10 @@ export function useCatalogOptions(clientId: string): {
     void fetchOptions(clientId).then((result) => {
       if (cancelled) return
       if (result.ok) {
+        if (!Array.isArray(result.data.tours)) {
+          setState({ status: 'error', message: LOAD_ERROR })
+          return
+        }
         setState({ status: 'ready', tours: result.data.tours })
       } else {
         setState({ status: 'error', message: result.message || LOAD_ERROR })

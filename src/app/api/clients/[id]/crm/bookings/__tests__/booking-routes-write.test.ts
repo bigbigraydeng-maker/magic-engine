@@ -429,6 +429,27 @@ describe('happy path rpc arguments', () => {
     expect(body.changed).toBe(true)
   })
 
+  it('paid rejects a date after today (NZ) with 400 and never calls the database function', async () => {
+    const res = await paidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT, paidOn: '2026-10-13' }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'balance' }),
+    )
+    expect(res.status).toBe(400)
+    expect((await jsonOf(res)).error).toBe('invalid_paid_on')
+    expect(state().rpcCalls.filter((c) => c.name === 'crm_booking_set_paid')).toHaveLength(0)
+  })
+
+  it('paid accepts today in New Zealand even when UTC is still the day before', async () => {
+    vi.setSystemTime(new Date('2026-10-11T12:30:00Z'))
+    state().rpcData['crm_booking_set_paid'] = { changed: true, reason: null }
+    const res = await paidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT, paidOn: '2026-10-12' }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'balance' }),
+    )
+    expect(res.status).toBe(200)
+    expect(rpcArgs('crm_booking_set_paid').p_paid_on).toBe('2026-10-12')
+  })
+
   it('paid reports an unchanged result', async () => {
     state().rpcData['crm_booking_set_paid'] = { changed: false, reason: 'already_paid' }
     const res = await paidPOST(

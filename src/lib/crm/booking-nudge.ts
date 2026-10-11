@@ -39,6 +39,9 @@ export const NUDGE_DEFAULT_LIMIT = 10
 /** Hard ceiling on the number of rows returned. */
 export const NUDGE_MAX_LIMIT = 100
 
+/** At most this many long-overdue guests are listed behind the folded line. */
+export const NUDGE_COLLAPSED_ROWS_CAP = 50
+
 /** The bucket order used when sorting the assembled list. */
 const BUCKET_ORDER: Record<NudgeBucket, number> = {
   overdue: 0,
@@ -111,7 +114,7 @@ export function bucketFor(
 /** The decision for one booking: a row, a collapse, or nothing. */
 export type NudgeDecision =
   | { kind: 'row'; item: MilestoneView; bucket: NudgeBucket }
-  | { kind: 'collapsed' }
+  | { kind: 'collapsed'; item: MilestoneView }
   | { kind: 'skip' }
 
 /** True when a bucket is one of the three listable dated buckets. */
@@ -172,7 +175,8 @@ export function decideNudgeItem(
   const collapsed = dated.filter(
     (m) => bucketFor(m.dueInDays as number) === 'collapsed',
   )
-  if (collapsed.length > 0) return { kind: 'collapsed' }
+  const deepest = tightestOf(collapsed)
+  if (deepest !== null) return { kind: 'collapsed', item: deepest }
 
   const undated = items.filter((m) => m.dueOn === null)
   const pick = undatedPick(undated)
@@ -200,12 +204,15 @@ export function assembleNudgeList(
   collapsedOverdue: number,
   truncated: boolean,
   limit: number,
+  collapsedRows: NudgeRow[] = [],
 ): NudgeList {
   const sorted = [...rows].sort(compareRows)
+  const deepFirst = [...collapsedRows].sort(compareRows)
   return {
     rows: sorted.slice(0, limit),
     more: sorted.length > limit,
     collapsedOverdue,
+    collapsedRows: deepFirst.slice(0, NUDGE_COLLAPSED_ROWS_CAP),
     truncated,
   }
 }
@@ -261,7 +268,7 @@ interface RowContext {
 /** The outcome of considering one booking: a row, a collapse, or nothing. */
 type RowOutcome =
   | { kind: 'row'; row: NudgeRow }
-  | { kind: 'collapsed' }
+  | { kind: 'collapsed'; row: NudgeRow }
   | { kind: 'skip' }
 
 /** Build the NudgeRow for a decided item, or a skip/collapse marker. */
@@ -281,15 +288,30 @@ function outcomeForBooking(
   })
   const decision = decideNudgeItem(view, context.today)
   if (decision.kind === 'skip') return { kind: 'skip' }
-  if (decision.kind === 'collapsed') return { kind: 'collapsed' }
-
-  const { item, bucket } = decision
+  if (decision.kind === 'collapsed') {
+    return {
+      kind: 'collapsed',
+      row: rowFor(booking, contact.name, view, decision.item, 'overdue'),
+    }
+  }
   return {
     kind: 'row',
-    row: {
+    row: rowFor(booking, contact.name, view, decision.item, decision.bucket),
+  }
+}
+
+/** Assemble the list row for one booking and its chosen item. */
+function rowFor(
+  booking: BookingRow,
+  contactName: string | null,
+  view: BookingView,
+  item: MilestoneView,
+  bucket: NudgeBucket,
+): NudgeRow {
+  return {
       bookingId: booking.id,
       contactId: booking.contactId,
-      contactName: contact.name,
+      contactName,
       tourName: view.tourName,
       departOn: view.departOn,
       kind: item.kind,
@@ -300,7 +322,6 @@ function outcomeForBooking(
       note: undatedNoteOf(view),
       milestoneUpdatedAt: item.updatedAt,
       warningCodes: warningCodesOf(view),
-    },
   }
 }
 
@@ -320,14 +341,14 @@ function groupMilestones(
   return byBooking
 }
 
-/** Turn each booking into a row, counting the collapsed-overdue ones. */
+/** Turn each booking into a row, keeping the long-overdue ones apart. */
 function collectRows(
   bookings: BookingRow[],
   byBooking: Map<string, MilestoneRow[]>,
   context: RowContext,
-): { rows: NudgeRow[]; collapsedOverdue: number } {
+): { rows: NudgeRow[]; collapsedRows: NudgeRow[] } {
   const rows: NudgeRow[] = []
-  let collapsedOverdue = 0
+  const collapsedRows: NudgeRow[] = []
   for (const booking of bookings) {
     const outcome = outcomeForBooking(
       booking,
@@ -337,10 +358,10 @@ function collectRows(
     if (outcome.kind === 'row') {
       rows.push(outcome.row)
     } else if (outcome.kind === 'collapsed') {
-      collapsedOverdue += 1
+      collapsedRows.push(outcome.row)
     }
   }
-  return { rows, collapsedOverdue }
+  return { rows, collapsedRows }
 }
 
 /** True when an unpaid milestone is not quiet and not snoozed past today. */
@@ -371,7 +392,7 @@ export async function buildNudgeList(
     isEligibleMilestone(milestone, today),
   )
   if (eligible.length === 0) {
-    return { rows: [], more: false, collapsedOverdue: 0, truncated: false }
+    return { rows: [], more: false, collapsedOverdue: 0, collapsedRows: [], truncated: false }
   }
 
   const bookings = await listActiveBookingsByIds(
@@ -382,7 +403,7 @@ export async function buildNudgeList(
   const truncated = bookings.length > NUDGE_CANDIDATE_CAP
   const candidates = bookings.slice(0, NUDGE_CANDIDATE_CAP)
   if (candidates.length === 0) {
-    return { rows: [], more: false, collapsedOverdue: 0, truncated }
+    return { rows: [], more: false, collapsedOverdue: 0, collapsedRows: [], truncated }
   }
 
   const [contacts, facts] = await Promise.all([
@@ -397,7 +418,7 @@ export async function buildNudgeList(
 
   const byBooking = groupMilestones(eligible)
   const context: RowContext = { rule, today, facts, contacts }
-  const { rows, collapsedOverdue } = collectRows(candidates, byBooking, context)
+  const { rows, collapsedRows } = collectRows(candidates, byBooking, context)
 
-  return assembleNudgeList(rows, collapsedOverdue, truncated, limit)
+  return assembleNudgeList(rows, collapsedRows.length, truncated, limit, collapsedRows)
 }

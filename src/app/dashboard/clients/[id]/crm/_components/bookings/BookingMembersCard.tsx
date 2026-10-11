@@ -8,7 +8,7 @@
  * component with its own copy and API calls.
  */
 
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { BookingMember } from '@/lib/crm/booking-types'
 import {
   addMember,
@@ -140,6 +140,7 @@ export function BookingMembersCard(props: { clientId: string }): JSX.Element | n
   const [email, setEmail] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
 
   const load = useCallback(async () => {
     setState({ status: 'loading' })
@@ -167,40 +168,58 @@ export function BookingMembersCard(props: { clientId: string }): JSX.Element | n
   }, [])
 
   const submit = useCallback(async () => {
+    if (busy) return
+    if (busyRef.current) return
     const trimmed = email.trim().toLowerCase()
     if (!EMAIL_PATTERN.test(trimmed)) {
       setError(BAD_EMAIL)
       return
     }
     setError(null)
+    busyRef.current = true
     setBusy(true)
-    const result = await addMember(clientId, trimmed)
-    if (result.ok) {
-      applyMembers(result.data)
-      setEmail('')
-    } else {
-      setError(result.message || SAVE_ERROR)
+    try {
+      const result = await addMember(clientId, trimmed)
+      if (result.ok) {
+        applyMembers(result.data)
+        setEmail('')
+      } else if (result.kind === 'hidden') {
+        setState({ status: 'hidden' })
+      } else {
+        setError(result.message || SAVE_ERROR)
+      }
+    } finally {
+      busyRef.current = false
+      setBusy(false)
     }
-    setBusy(false)
-  }, [applyMembers, clientId, email])
+  }, [applyMembers, busy, clientId, email])
 
   const remove = useCallback(
     async (target: string) => {
+      if (busy) return
+      if (busyRef.current) return
       const confirmed = window.confirm(
         `确定把 ${target} 移出名单吗？移出后对方就看不到订单与付款了。`,
       )
       if (!confirmed) return
       setError(null)
+      busyRef.current = true
       setBusy(true)
-      const result = await removeMember(clientId, target)
-      if (result.ok) {
-        applyMembers(result.data)
-      } else {
-        setError(result.message || SAVE_ERROR)
+      try {
+        const result = await removeMember(clientId, target)
+        if (result.ok) {
+          applyMembers(result.data)
+        } else if (result.kind === 'hidden') {
+          setState({ status: 'hidden' })
+        } else {
+          setError(result.message || SAVE_ERROR)
+        }
+      } finally {
+        busyRef.current = false
+        setBusy(false)
       }
-      setBusy(false)
     },
-    [applyMembers, clientId],
+    [applyMembers, busy, clientId],
   )
 
   if (state.status === 'loading' || state.status === 'hidden') return null
