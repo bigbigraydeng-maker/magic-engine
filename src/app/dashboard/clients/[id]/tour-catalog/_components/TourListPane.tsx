@@ -92,7 +92,8 @@ function useTourListState(): TourListState {
 
   // Read after mount so server and first client render agree.
   useEffect(() => {
-    setCollapsed(readCollapsed())
+    const stored = readCollapsed()
+    if (stored.size > 0) setCollapsed(stored)
   }, [])
 
   const toggle = (key: string) => {
