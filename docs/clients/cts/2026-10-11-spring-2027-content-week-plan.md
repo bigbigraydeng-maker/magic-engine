@@ -7,11 +7,28 @@
 ## 零、先说三件会改变你判断的事实
 
 1. **上海周边团的 Reel（v5r2，工单 `fa4fdd89`）不是「待审」，它已经在 2026-10-11 17:35（新西兰时间）真发布到 CTS Facebook 主页了**（工厂回执：`video_state=PUBLISHED`，首评已发）。所以排期里上海 Reel 只能「沿用」，不能再发一次。
-2. **Natural China（3/26）官网有两个互相矛盾的页面**：
+2. **Natural China（3/26）官网有两个互相矛盾的页面（PM 10-11 定行程以出团表为准：16 天，见第〇节）**：
    - `China Signature — Natural China`（`/tours/china/signature/landscapes`）：16 天，**NZD $7,349**，单人房差 NZD $1,895，页面写 "Small group · max 16 travellers"。
    - `China Discovery — Natural China`（`/tours/china/discovery/natural-china`）：14 天，价格写 **TBC**，写 "max 20 travellers"。
    - CTS 出团表 3/26 出发、4/10 返回 = **16 天**，与 Signature 页吻合。**所以我暂按 Signature 页写，但「价格档位」必须 CTS 点头才能发布**（见第六节问题 1）。
 3. **A Tale of Two Cities 官网页的网址是 `/tours/china/discovery/beijing-xian`（页面标题是「Beijing & Xi'an Discovery Tour」，正文标题才是 A Tale of Two Cities）；Best of China 的网址是 `/tours/china/discovery/essentials`。** 猜网址（`/best-of-china`）是 404，别再猜。
+
+## 〇、PM 10-11 定：行程统一以出团表为准——网页逐项核对结果
+
+对象：表里 2027-03 四班（日期、天数、去回程城市、每班 20 席）。结论：**四个团的日期、天数、去回程城市与官网页面都对得上，只有两处网页与表矛盾，都已按表处理。**
+
+| 团 | 表 | 官网页 | 对得上吗 |
+|---|---|---|---|
+| Best of China 3/11→3/25，国航，去 北京(+1)、回 北京 | 15 天 | 15 天，D1 飞北京、D14 上海飞北京接回程 | ✅ |
+| A Tale of Two Cities 3/18→3/27，国航，去回都是北京 | 10 天 | 10 天，北京 4 晚 + 西安 3 晚，D9 飞回北京 | ✅ |
+| Shanghai & Surroundings 3/25→4/3，东航，去 上海(+1)、回 上海 | 10 天 | 10 天，D1 奥克兰—上海 | ✅ |
+| Natural China 3/26→4/10，东航，去 上海（直飞）、回 上海 | 16 天 | **Signature 页 16 天 ✅；Discovery 页 14 天 ❌** | 以表为准 = 16 天（Signature） |
+
+**网页与表的矛盾（要 CTS 改网页，不是我们改文案）**：
+1. Discovery 版 Natural China 页写 **14 天**、价格 TBC，与表的 16 天不符 → 我们的帖子、Reel 一律写 16 天；该页应由 CTS 下线或改成 16 天。
+2. Signature 版 Natural China 页写 "max 16 travellers"，表里每班 20 席 → **文案不写任何人数**（原本就不写）。
+3. 表只有日期、天数、航段、席位上限，**没有价格**。所以 **NZ$7,349（Signature 页）依旧是网页数字，表不能证明**；价格档位仍要 CTS 确认，Natural China 的 Reel/帖 4 的价格行等这一条。
+4. 顺带（不影响本周）：Best of China、Tale、Shanghai、Natural China 页面只挂了各自第一班，表里同团后面的班期（如 Best of China 5/13、9/9、10/28）官网没有 → 见 10/09《2027 出团表 vs 官网》。
 
 ## 一、四个团的官网事实（2026-10-11 逐页实抓，WebFetch）
 
