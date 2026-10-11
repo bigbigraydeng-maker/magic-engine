@@ -144,3 +144,23 @@ describe('csvCell', () => {
     expect(csvCell('plain')).toBe('plain')
   })
 })
+
+describe('toursToCsv review fixes', () => {
+  const base = {
+    id: 'd1', tourId: 't1', clientId: 'c', returnOn: null, priceTextOverride: null,
+    internal: {}, updatedAt: '2026-01-01T00:00:00Z',
+  }
+  it('counts only bookable future departures and shows the update date without time', () => {
+    const tour = makeTour({ id: 't1', updatedAt: '2026-10-10T13:30:12.044498+00:00' })
+    const deps = [
+      { ...base, id: 'a', departOn: '2099-01-01', status: 'cancelled' as const },
+      { ...base, id: 'b', departOn: '2099-02-01', status: 'open' as const },
+    ]
+    const line = toursToCsv([tour], deps, '2026-10-11').split('\r\n')[1]
+    const cells = line.split(',')
+    expect(cells).toContain('2026-10-10')
+    expect(line).not.toContain('T13:30')
+    expect(cells[12]).toBe('2')
+    expect(cells[13]).toBe('1')
+  })
+})

@@ -101,7 +101,9 @@ function tourRow(
   today: string,
 ): string[] {
   const own = departuresFor(tour, departures)
-  const upcoming = own.filter((d) => d.departOn >= today)
+  const upcoming = own.filter(
+    (d) => d.departOn >= today && d.status !== 'cancelled' && d.status !== 'closed',
+  )
   return [
     tour.name,
     text(tour.title),
@@ -132,7 +134,7 @@ function tourRow(
     num(tour.rating),
     num(tour.reviewCount),
     String(tour.itinerary.length),
-    tour.updatedAt,
+    tour.updatedAt.slice(0, 10),
   ]
 }
 

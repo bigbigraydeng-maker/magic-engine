@@ -171,7 +171,7 @@ function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
           download
           className="mt-2 inline-block px-1 text-xs font-bold text-me-charcoal underline decoration-black/30 underline-offset-2 hover:decoration-me-charcoal"
         >
-          导出全部团（表格文件，Excel 可直接打开）
+          导出全部团（含未上架的修改，Excel 可直接打开）
         </a>
         {snapshot.permissions.import ? null : (
           <p className="mt-2 px-1 text-xs font-semibold text-me-charcoal/70">{IMPORT_BY_ME_TEXT}</p>
