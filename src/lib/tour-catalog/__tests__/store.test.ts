@@ -47,6 +47,7 @@ function makeQuery(result: QueryResult) {
   q.eq = vi.fn(chain)
   q.order = vi.fn(chain)
   q.limit = vi.fn(chain)
+  q.range = vi.fn(chain)
   q.insert = vi.fn(chain)
   q.update = vi.fn(chain)
   q.delete = vi.fn(chain)
@@ -352,6 +353,69 @@ describe('loadDraftCatalog', () => {
     expect(toursQuery.order).toHaveBeenCalledWith('sort_order', { ascending: true })
     expect(toursQuery.order).toHaveBeenCalledWith('name', { ascending: true })
     expect(departuresQuery.order).toHaveBeenCalledWith('depart_on', { ascending: true })
+  })
+
+  it('reads every row past the 1000-row PostgREST cap, in stable order, dropping none', async () => {
+    // Fake that behaves like PostgREST: a response never carries more than 1000 rows.
+    const MAX_ROWS = 1000
+    function pagedTable(rows: Record<string, unknown>[]) {
+      const q: Record<string, unknown> = {}
+      const orders: string[] = []
+      let window: [number, number] | null = null
+      const chain = () => q
+      q.select = vi.fn(chain)
+      q.eq = vi.fn(chain)
+      q.order = vi.fn((col: string) => {
+        orders.push(col)
+        return q
+      })
+      q.range = vi.fn((from: number, to: number) => {
+        window = [from, to]
+        return q
+      })
+      q.then = (onFulfilled: (value: QueryResult) => unknown) => {
+        const [from, to] = window ?? [0, MAX_ROWS - 1]
+        const end = Math.min(to + 1, from + MAX_ROWS)
+        return Promise.resolve({ data: rows.slice(from, end), error: null }).then(onFulfilled)
+      }
+      return { q, orders }
+    }
+
+    const tours = pagedTable(
+      Array.from({ length: 2345 }, (_, i) => ({ id: `t${i}`, client_id: 'c1', name: `T${i}` })),
+    )
+    const departures = pagedTable(
+      Array.from({ length: 2000 }, (_, i) => ({
+        id: `d${i}`,
+        tour_id: 't0',
+        client_id: 'c1',
+        depart_on: '2026-03-01',
+        status: 'open',
+        updated_at: 'u',
+      })),
+    )
+    const aliases = pagedTable(
+      Array.from({ length: 1001 }, (_, i) => ({ alias_norm: `a${i}`, tour_id: 't0' })),
+    )
+    const db = makeDb({
+      from: (table) => {
+        if (table === 'tour_catalog_tours') return tours.q
+        if (table === 'tour_catalog_departures') return departures.q
+        return aliases.q
+      },
+    })
+
+    const snapshot = await loadDraftCatalog(db as never, 'c1')
+    expect(snapshot.tours).toHaveLength(2345)
+    expect(snapshot.departures).toHaveLength(2000)
+    expect(snapshot.aliases).toHaveLength(1001)
+    expect(new Set(snapshot.tours.map((t) => t.id)).size).toBe(2345)
+    expect(new Set(snapshot.departures.map((d) => d.id)).size).toBe(2000)
+    expect(snapshot.aliases[1000]).toEqual({ aliasNorm: 'a1000', tourId: 't0' })
+    // Page boundaries are only stable with a unique tie-breaker as the last sort key.
+    expect(tours.orders).toEqual(['sort_order', 'name', 'id', 'sort_order', 'name', 'id', 'sort_order', 'name', 'id'])
+    expect(departures.orders.at(-1)).toBe('id')
+    expect(aliases.orders.at(-1)).toBe('alias_norm')
   })
 
   it('throws with the Supabase error message', async () => {
