@@ -183,7 +183,7 @@ describe('runProbe — cron_run_ok', () => {
     })
     const result = await runProbe(probe('cron_run_ok', { job: 'social-comment-autoreply', within_hours: '24' }), deps)
     expect(result.outcome).toBe('passed_needs_human_confirm')
-    expect(result.fact).toBe('2 条运行记录里有成功的')
+    expect(result.fact).toBe('2 条跑完的运行记录里有成功的')
     expect(result.sample).toBe(2)
   })
 
@@ -196,7 +196,7 @@ describe('runProbe — cron_run_ok', () => {
     })
     const result = await runProbe(probe('cron_run_ok', { job: 'social-comment-autoreply', within_hours: '24' }), deps)
     expect(result.outcome).toBe('failed')
-    expect(result.fact).toBe('2 条运行记录里没有成功的（1 条失败）')
+    expect(result.fact).toBe('1 条跑完的运行记录里没有成功的（1 条失败）')
     expect(result.sample).toBe(2)
   })
 
@@ -378,5 +378,41 @@ describe('todo_item_present — comment_reply_scope_missing', () => {
       }),
     })
     expect((await runProbe(probe, deps)).outcome).toBe('unreadable')
+  })
+})
+
+describe('cron_run_ok — 正在进行中的记录不算结果', () => {
+  const probe = { name: 'cron_run_ok' as const, params: { job: 'social-comment-autoreply', within_hours: '72' } }
+
+  it('只有一条 running（巡检核对自己时看到自己这一轮）-> not_yet，不是 failed', async () => {
+    const deps = makeDeps({
+      allowedJobs: new Set(['social-comment-autoreply']),
+      loadCronRuns: vi.fn(async () => [{ status: 'running', started_at: '2026-10-12T00:00:00Z' }]),
+    })
+    const r = await runProbe(probe, deps)
+    expect(r.outcome).toBe('not_yet')
+    expect(r.sample).toBe(1)
+  })
+
+  it('running + 一条 completed -> 通过（running 不干扰）', async () => {
+    const deps = makeDeps({
+      allowedJobs: new Set(['social-comment-autoreply']),
+      loadCronRuns: vi.fn(async () => [
+        { status: 'running', started_at: '2026-10-12T00:00:00Z' },
+        { status: 'completed', started_at: '2026-10-11T00:00:00Z' },
+      ]),
+    })
+    expect((await runProbe(probe, deps)).outcome).toBe('passed_needs_human_confirm')
+  })
+
+  it('running + 一条 failed -> failed', async () => {
+    const deps = makeDeps({
+      allowedJobs: new Set(['social-comment-autoreply']),
+      loadCronRuns: vi.fn(async () => [
+        { status: 'running', started_at: '2026-10-12T00:00:00Z' },
+        { status: 'failed', started_at: '2026-10-11T00:00:00Z' },
+      ]),
+    })
+    expect((await runProbe(probe, deps)).outcome).toBe('failed')
   })
 })
