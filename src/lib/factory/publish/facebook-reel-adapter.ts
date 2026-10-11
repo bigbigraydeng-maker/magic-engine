@@ -208,23 +208,30 @@ export const facebookReelAdapter: PublishAdapter = {
  * 把已经躺在主页后台的草稿正式发出去 —— 不重新上传。
  *
  * 为什么要单独一条路:审片通过后「真发」如果走重新上传,主页上会同时留着一条草稿和一条正式的,
- * 等于每条片都要人去删一次。同一个 finish 接口再喊一次、把状态改成 PUBLISHED 就够了。
+ * 等于每条片都要人去删一次。
+ *
+ * 为什么不能再喊一次 finish(2026-10-11 CTS 主页真机验证,Graph v25.0):
+ * 对一条已经 finish 过的草稿再 POST /{page}/video_reels?upload_phase=finish&video_state=PUBLISHED,
+ * FB 直接 400 code 6000 subcode 1363130「Video Upload Is Missing」—— finish 只认「刚上传完还没收尾」的会话。
+ * 真正管用的是翻视频对象本身:POST /{video_id} 带 published=true,返回 {"success":true}。
+ * 翻完必须回读 published 确认(失败即抛,绝不吞),否则「以为发了其实没发」。
  */
 export async function promoteReelToPublished(params: {
   target: PublishTarget
   videoId: string
 }): Promise<PublishedRef> {
   const { accessToken, pageId } = await resolveToken(params.target)
-  await graphPost(`/${pageId}/video_reels`, {
-    upload_phase: 'finish',
-    video_id: params.videoId,
-    video_state: 'PUBLISHED',
-    access_token: accessToken,
-  })
+  const res = await graphPost(`/${params.videoId}`, { published: 'true', access_token: accessToken })
+  if (res['success'] !== true) {
+    throw new Error(`FB 草稿转正未返回 success: ${JSON.stringify(res)}`)
+  }
   const info = await fetch(
-    `${GRAPH}/${params.videoId}?fields=permalink_url&access_token=${accessToken}`,
+    `${GRAPH}/${params.videoId}?fields=published,permalink_url&access_token=${accessToken}`,
   )
   const j = (await info.json().catch(() => ({}))) as Record<string, unknown>
+  if (!info.ok || j['published'] !== true) {
+    throw new Error(`FB 草稿转正后回读 published 不是 true: ${JSON.stringify(j)}`)
+  }
   return {
     platform: 'facebook',
     page_id: pageId,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/meta/token-manager', () => ({ getStoredPageToken: vi.fn(async () => 'test-page-token') }))
-import { assertBrandMatches, encodeIdemTag, facebookReelAdapter } from './facebook-reel-adapter'
+import { assertBrandMatches, encodeIdemTag, facebookReelAdapter, promoteReelToPublished } from './facebook-reel-adapter'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -69,5 +69,59 @@ describe('Facebook Reel 首评', () => {
     const message = new URLSearchParams(String(commentRequest!.init?.body)).get('message')
     expect(message).toContain('Book now: https://example.test/?utm_source=facebook')
     expect(message).toMatch(/[⁣​‌]+$/)
+  })
+})
+
+describe('promoteReelToPublished 草稿转正', () => {
+  const target = { client_id: 'client-1', page_id: 'page-1', platform: 'facebook' as const }
+
+  it('翻 published=true 并回读确认,绝不重喊 finish', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      requests.push({ url, init })
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published')) {
+        return Response.json({ published: true, permalink_url: 'https://facebook.test/reel/video-1' })
+      }
+      if (url.endsWith('/video-1') && init?.method === 'POST') return Response.json({ success: true })
+      return Response.json({})
+    }))
+
+    const result = await promoteReelToPublished({ target, videoId: 'video-1' })
+
+    expect(result.video_state).toBe('PUBLISHED')
+    expect(result.video_id).toBe('video-1')
+    expect(result.permalink).toBe('https://facebook.test/reel/video-1')
+
+    expect(requests.some(request => request.url.endsWith('/video_reels'))).toBe(false)
+
+    const postRequest = requests.find(request => request.url.endsWith('/video-1') && request.init?.method === 'POST')
+    expect(postRequest).toBeDefined()
+    const body = new URLSearchParams(String(postRequest!.init?.body))
+    expect(body.get('published')).toBe('true')
+  })
+
+  it('POST 没返回 success → 抛错', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.endsWith('/video-1')) return Response.json({ success: false })
+      return Response.json({})
+    }))
+
+    await expect(promoteReelToPublished({ target, videoId: 'video-1' })).rejects.toThrow()
+  })
+
+  it('回读 published 不是 true → 抛错(失败即抛,绝不吞)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('fields=name')) return Response.json({ name: 'Example Brand' })
+      if (url.includes('fields=published')) return Response.json({ published: false })
+      if (url.endsWith('/video-1')) return Response.json({ success: true })
+      return Response.json({})
+    }))
+
+    await expect(promoteReelToPublished({ target, videoId: 'video-1' })).rejects.toThrow()
   })
 })
