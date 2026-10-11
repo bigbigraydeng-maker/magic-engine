@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-11
 done_on: 2026-10-11
-done_ref: pr:2448
+done_ref: pr:2453
 source: session:1a85e0eb
 verify_by: 2026-10-18
 verify_how: 登录团目录点左栏下方「导出全部团」，得到 tours-日期.csv，Excel 打开中文不乱码，33 行；表里没有航司、机位、航线等内部信息
