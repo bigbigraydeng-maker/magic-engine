@@ -49,7 +49,9 @@ function prodFacts(over: Partial<EnvelopeFacts> = {}): EnvelopeFacts {
   return {
     beforeCents: null,
     accountDailyTotalBeforeCents: null,
+    clientDailyTotalBeforeCents: null,
     dailyCapCents: null,
+    clientDailyCapCents: null,
     hoursSinceLastChange: null,
     learningPhaseApplicable: true,
     learningStage: null,
@@ -65,15 +67,51 @@ function req(over: Partial<EnvelopeRequest> = {}): EnvelopeRequest {
 
 const HUMAN = 'human'
 
-describe('人工止损信封 · 判据只剩撤回处理函数', () => {
+describe('人工减预算必须是真的收缩动作', () => {
+  function cut(afterCents: number, beforeCents: number | null = 1000, kind: EnvelopeRequest['kind'] = 'budget_change') {
+    return selectEnvelopeVerdict({
+      triggeredBy: 'human', actionKey: 'ads.cut_unit_budget',
+      request: { kind, afterCents }, facts: prodFacts({ beforeCents }), envelope: AI_ENVELOPE,
+    })
+  }
+
+  it.each([0, 500, 1000])('允许降低或保持预算 %s，不套用 AI 的 20% 限制', after => {
+    expect(cut(after).within).toBe(true)
+  })
+
+  it.each([1001, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('拒绝增加或无效目标 %s', after => {
+    expect(cut(after).within).toBe(false)
+  })
+
+  it.each([null, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])('拒绝无法证明的原预算 %s', before => {
+    expect(cut(500, before).within).toBe(false)
+  })
+
+  it.each(['pause', 'new_spend', 'creative_only'] as const)('不能用 %s 伪装减预算', kind => {
+    expect(cut(500, 1000, kind).within).toBe(false)
+  })
+
+  it.each([
+    { kind: 'pause', afterCents: 1 },
+    { kind: 'budget_change', afterCents: 0 },
+    { kind: 'new_spend', afterCents: 0 },
+  ] satisfies EnvelopeRequest[])('暂停必须是零花费的暂停请求：%j', request => {
+    expect(selectEnvelopeVerdict({
+      triggeredBy: 'human', actionKey: 'ads.pause_unit', request,
+      facts: prodFacts(), envelope: AI_ENVELOPE,
+    }).within).toBe(false)
+  })
+})
+
+describe('人工暂停信封 · 不受学习期与冷却期限制', () => {
   it('生产真实形状（CBO + 学习期读不到 + 冷却读不到 + 没设上限）→ 仍然放行', () => {
-    const v = isWithinHumanStopEnvelope(prodFacts())
+    const v = isWithinHumanStopEnvelope('ads.pause_unit', req(), prodFacts())
     expect(v.within).toBe(true)
     expect(v.reasons).toEqual([])
   })
 
   it('🔴 没注册撤回处理函数 → 拒（撤不回来的事就算人按也不做）', () => {
-    const v = isWithinHumanStopEnvelope(prodFacts({ hasRollbackHandler: false }))
+    const v = isWithinHumanStopEnvelope('ads.pause_unit', req(), prodFacts({ hasRollbackHandler: false }))
     expect(v.within).toBe(false)
     expect(v.reasons.join('')).toContain('撤回处理函数')
   })
@@ -87,18 +125,23 @@ describe('人工止损信封 · 判据只剩撤回处理函数', () => {
 })
 
 describe('人工止损信封 · 白名单是穷举的，不是黑名单', () => {
-  it('白名单只有两个收类动作', () => {
-    expect([...HUMAN_STOP_ACTION_KEYS].sort()).toEqual(['ads.cut_unit_budget', 'ads.pause_unit'])
+  it('白名单只有明确的四种收类动作', () => {
+    expect([...HUMAN_STOP_ACTION_KEYS].sort()).toEqual(['ads.cut_campaign_budget', 'ads.cut_unit_budget', 'ads.pause_campaign', 'ads.pause_unit'])
   })
 
-  it.each(['ads.pause_unit', 'ads.cut_unit_budget'])(
-    '%s + 人触发 → 走人工信封，生产真实形状也放行',
-    (actionKey) => {
+  it.each([
+    { actionKey: 'ads.pause_unit', request: req(), facts: prodFacts() },
+    { actionKey: 'ads.pause_campaign', request: req(), facts: prodFacts() },
+    { actionKey: 'ads.cut_unit_budget', request: req({ kind: 'budget_change', afterCents: 500 }), facts: prodFacts({ beforeCents: 1000 }) },
+    { actionKey: 'ads.cut_campaign_budget', request: req({ kind: 'budget_change', afterCents: 500 }), facts: prodFacts({ beforeCents: 1000 }) },
+  ])(
+    '$actionKey + 人触发 → 走人工信封，只允许真实收缩',
+    ({ actionKey, request, facts }) => {
       const v = selectEnvelopeVerdict({
         triggeredBy: HUMAN,
         actionKey,
-        request: req(),
-        facts: prodFacts(),
+        request,
+        facts,
         envelope: AI_ENVELOPE,
       })
       expect(v.envelopeUsed).toBe('human_stop')
@@ -111,8 +154,6 @@ describe('人工止损信封 · 白名单是穷举的，不是黑名单', () => 
     'ads.add_retargeting_adset',
     'ads.swap_creative',
     'ads.budget_move_plan',
-    'ads.pause_campaign',
-    'ads.cut_campaign_budget',
     'ads.boost_page_post',
     'ads.create_reel_ad',
   ])('🔴 %s 即使人触发也走 AI 信封（放类/建类没有「只会变少」这个安全性）', (actionKey) => {
@@ -185,7 +226,9 @@ describe('人工止损信封 · AI 信封那条路没被改坏（回归）', () 
       facts: {
         beforeCents: 1000,
         accountDailyTotalBeforeCents: 5000,
+        clientDailyTotalBeforeCents: 5000,
         dailyCapCents: 10_000,
+        clientDailyCapCents: 10_000,
         hoursSinceLastChange: 100,
         learningPhaseApplicable: true,
         learningStage: 'SUCCESS',

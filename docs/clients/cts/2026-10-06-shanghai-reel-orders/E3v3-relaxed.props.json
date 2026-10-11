@@ -1,0 +1,82 @@
+{
+ "brandColor": "#C41E3A",
+ "itemOverlayOpacity": 0.15,
+ "logoFile": "logo.png",
+ "musicFile": "music/founders-at-dawn.mp3",
+ "beats": [
+  0.0,
+  1.0,
+  2.0,
+  3.0,
+  4.0,
+  5.667,
+  7.333,
+  9.0,
+  10.667,
+  12.333,
+  14.0,
+  15.667,
+  17.333,
+  18.25,
+  19.167,
+  20.083,
+  21.0,
+  21.917,
+  22.833,
+  23.75,
+  24.667
+ ],
+ "hook": {
+  "clip": "clips/hook_bundgroup.mp4",
+  "lines": [
+   {
+    "badge": "10",
+    "text": "DAYS"
+   },
+   {
+    "badge": null,
+    "text": "SHANGHAI"
+   },
+   {
+    "badge": null,
+    "text": "+3 CITIES"
+   }
+  ]
+ },
+ "items": [
+  {
+   "text": "FLIGHTS FROM AUCKLAND",
+   "clip": "clips/item1_skylineday.mp4",
+   "blurBackdrop": false
+  },
+  {
+   "text": "7 NIGHTS OF HOTELS",
+   "clip": "clips/item2_aerialnight.mp4",
+   "blurBackdrop": true
+  },
+  {
+   "text": "THE BUND, SHANGHAI",
+   "clip": "clips/item3_bund.mp4",
+   "blurBackdrop": false
+  },
+  {
+   "text": "ANCIENT WATER TOWNS",
+   "clip": "clips/item2_watertown.mp4",
+   "blurBackdrop": false
+  }
+ ],
+ "itemLabel": "INCLUDED",
+ "revealTitle": "SHANGHAI + 3 CITIES.",
+ "price": {
+  "backdropClip": "clips/price_shanghaiday.mp4",
+  "fromLabel": "FROM",
+  "currencyPrefix": "NZ$",
+  "amount": 2699,
+  "qualifier": "PER PERSON · TWIN SHARE",
+  "footnote": "VISA: AS PER POLICY",
+  "footnoteSize": 38
+ },
+ "logoMode": "always",
+ "cutFlash": false,
+ "musicStartSec": 0.302
+}

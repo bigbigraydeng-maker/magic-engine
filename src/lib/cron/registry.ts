@@ -141,7 +141,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 正是这套告警最怕的东西（跟 mailbox-sync-hourly 同一个理由）。
   // 恢复时三件一起做：render.yaml 取消注释 + 本行加回来 + EMAIL_REPLY_DIGEST_ENABLED=true。
   // DAPE E 段：看板上的动作真正被跑掉的那一步。上线时挂着 ?dry_run=1 只选不做。
-  { service: 'execution-auto-run', jobName: 'execution-auto-run', schedule: '30 9 * * *', logsRuns: true, addedAt: '2026-08-06' },
+  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // { service: 'execution-auto-run', jobName: 'execution-auto-run', schedule: '30 9 * * *', logsRuns: true, addedAt: '2026-08-06' },
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '25 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '5 * * * *', logsRuns: true },
@@ -164,8 +165,9 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
       // ad_config / ads_growth_state 兜。所有广告客户都被人手暂停时它会误报一条（子牙 / 魏征复审，可接受）。
       { table: 'ads_growth_states', freshnessHours: 26 },
     ] },
-  { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 2 * * *', logsRuns: true },
-  { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
+  { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 16 * * 1', logsRuns: true },
+  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
   // 效果回流两条 —— 2026-08-04 补接线：代码早就有，但从没进过 render.yaml，
   // 于是 prescription_outcomes 一条记录都没有（「方案有没有用」从没被回答过）。
   { service: 'kpi-backfill', jobName: 'kpi-backfill', schedule: '20 6 * * *', logsRuns: true, addedAt: '2026-08-04' },
@@ -250,6 +252,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'reputation-snapshots-weekly', jobName: 'reputation-snapshots-weekly', schedule: '30 3 * * 1', logsRuns: true },
   { service: 'seo-patrol-daily', jobName: 'seo-patrol-daily', schedule: '0 4 * * *', logsRuns: true },
+  { service: 'seo-weekly-list', jobName: 'seo-weekly-list', schedule: '30 4 * * 1', logsRuns: true, addedAt: '2026-10-04' },
   { service: 'site-audit-cron', jobName: 'site-audit-cron', schedule: '0 2 * * *', logsRuns: true },
   { service: 'site-audit-weekly', jobName: 'site-audit-weekly', schedule: '0 1 * * 0', logsRuns: true },
   { service: 'social-comment-autoreply', jobName: 'social-comment-autoreply', schedule: '*/30 * * * *', logsRuns: true },
@@ -257,7 +260,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 补登记（2026-09-05 对账测试抓出）：Tailor-made 导入/提取改成异步后加的扫尾任务，
   // 2026-08-28 进 render.yaml，清单里一直没有。老任务不补 addedAt（理由同上）。
   { service: 'tailor-made-jobs-sweeper', jobName: 'tailor-made-jobs-sweeper', schedule: '*/30 * * * *', logsRuns: true },
-  { service: 'team-memory-sweeper', jobName: 'team-memory-sweeper', schedule: '*/30 * * * *', logsRuns: true },
+  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // { service: 'team-memory-sweeper', jobName: 'team-memory-sweeper', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'viral-analyzer-worker', jobName: 'viral-analyzer-worker', schedule: '*/10 * * * *', logsRuns: true },
   { service: 'viral-discovery-weekly', jobName: 'viral-discovery-weekly', schedule: '0 0 * * *', logsRuns: true },
   { service: 'vision-analyzer', jobName: 'vision-analyzer', schedule: '50 * * * *', logsRuns: true },
@@ -317,6 +321,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/competitors/watch.ts 的
   //    COMPETITOR_WATCH_CRON，同目录的测试会断言两边一致。
   { service: 'inngest:cloud-competitor-watch-weekly-fanout', jobName: 'competitor-watch-weekly', schedule: '45 5 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-20' },
+  // SEO 标题自动优化：每周一的「选页→过闸→改标题」主链（2026-09-20 起在线上跑，但此前**没登记**，
+  // 也就是说它哪天因为没 Sync 而安静地不跑了，这里不会喊——「不在监控范围」和「一切正常」在告警里长得一样）。
+  // 🔴 jobName 取的是主链最后一步的收尾回执（seo-meta-cycle-step6-completed）：每个客户的每次运行
+  //    不管走到哪一步（跳过、没适配器、跑完）都会写这一条，所以它是「这一周这条链醒过」的唯一证据。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/seo-meta/cycle/roster.ts 的 META_CYCLE_CRON，同目录测试会断言一致。
+  { service: 'inngest:cloud-seo-meta-cycle-fanout', jobName: 'seo-meta-cycle-step6-completed', schedule: '30 5 * * 1', logsRuns: true, scheduler: 'inngest' },
+  // SEO 标题自动优化的「验收」：每天一次，给改满 18 天的页查目标词排名（影子期，只写 seo_meta_log）。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/seo-meta/cycle/rank-sampler.ts 的 RANK_SAMPLER_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  { service: 'inngest:cloud-seo-meta-rank-sampler-fanout', jobName: 'seo-meta-rank-sampler', schedule: '20 20 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-04' },
   // 每周 AI 可见度追踪（GEO）灰度迁移。旧 Render cron `ai-tracker-weekly`（上面那条老登记）
   // 原样保留、对没开灰度开关的客户继续跑；这条新登记只覆盖开了
   // `seo_config.ai_visibility_inngest_enabled` 的客户，故意用不同的 jobName——两条链路
@@ -325,6 +339,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/ai-tracker/weekly-fanout.ts 的
   //    AI_VISIBILITY_WEEKLY_CRON，同目录的测试会断言两边一致。
   // 线索 → 客户指定的 Google 表格。每小时 20 分跑，排在 meta-leads-sync（整点）之后。
+  // 日历上带日期的验证事项，每天新西兰 07:20 核对一遍（第一步：只读）。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/calendar-closure-audit.ts 的 CALENDAR_CLOSURE_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  { service: 'inngest:cloud-calendar-closure-audit', jobName: 'calendar-closure-audit', schedule: '20 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-08' },
   { service: 'inngest:cloud-lead-sheet-sync-fanout', jobName: 'lead-sheet-sync', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
   // 「客人填了表还没人回」每天一封汇总信。新西兰早上 8 点（Inngest 的 cron 带 TZ=）。
@@ -412,6 +430,19 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
 
   // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
   // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试
-  // 管它）。路由文件和 startCronRun 调用留着只为回滚，本条不该再被排班。
-  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout，路由留着只为回滚',
+  // 管它）。路由文件已在 2026-09-29（PR #2200）改成「被调用就返回 410 并记失败」，不再是回滚备用入口，
+  // 也不要再把它当回滚路径：9-28 就是这样被带回来的。本条不该再被排班。
+  'cts-seo-optimizer': '2026-09-20 退役，换成 Inngest cloud-seo-meta-cycle-fanout；路由 2026-09-29 起固定返回 410，不是回滚入口',
+
+  // 2026-10-07 PM 拍板暂停：没人读的空跑。render.yaml 那段已整块注释掉，
+  // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
+  'execution-auto-run': '2026-10-07 暂停（没人读的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+
+  // 2026-10-07 PM 拍板暂停：开关没开的空转。render.yaml 那段已整块注释掉，
+  // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
+  'job-boards-weekly': '2026-10-07 暂停（开关没开的空转），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+
+  // 2026-10-07 PM 拍板暂停：上游已停 6 周的空跑。render.yaml 那段已整块注释掉，
+  // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
+  'team-memory-sweeper': '2026-10-07 暂停（上游已停 6 周的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
 }

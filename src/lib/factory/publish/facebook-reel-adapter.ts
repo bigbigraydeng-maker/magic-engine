@@ -6,7 +6,9 @@
 // draft=true → DRAFT(不公开,首测验格式);false → PUBLISHED(真发,不可逆)。
 // 幂等对账(魏征 B9 防"发了没记上"重发):caption 埋零宽 wo 标记,findExisting 扫最近 Reel 描述比对。
 
+import { createHash } from 'node:crypto'
 import { getStoredPageToken } from '@/lib/meta/token-manager'
+import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
 const GRAPH = 'https://graph.facebook.com/v25.0'
@@ -24,8 +26,31 @@ export function encodeIdemTag(woId: string): string {
 }
 
 // 品牌名归一(去 Pty Ltd/空格/符号/大小写)用于防误发页名匹配
-function normBrand(s: string): string {
+export function normBrand(s: string): string {
   return s.toLowerCase().replace(/pty\.?\s*ltd\.?/g, '').replace(/[^a-z0-9]/g, '')
+}
+
+function firstCommentMarker(idempotencyTag: string): string {
+  const hash = createHash('sha256').update(`reel-first-comment:${idempotencyTag}`).digest('hex').slice(0, 8)
+  return encodeIdemTag(hash)
+}
+
+async function ensurePageFirstComment(args: {
+  pageId: string
+  videoId: string
+  accessToken: string
+  idempotencyTag: string
+  message: string
+}): Promise<string> {
+  const marker = firstCommentMarker(args.idempotencyTag)
+  return ensureFacebookFirstComment({
+    graphBase: GRAPH,
+    objectId: args.videoId,
+    accessToken: args.accessToken,
+    marker,
+    message: args.message,
+    failureLabel: 'Reel',
+  })
 }
 
 // 取该页的 page token + 页名。
@@ -87,7 +112,7 @@ async function graphPost(path: string, params: Record<string, string>): Promise<
 export const facebookReelAdapter: PublishAdapter = {
   platform: 'facebook',
 
-  async publish({ videoUrl, caption, target, idempotencyTag, draft, onStarted }) {
+  async publish({ videoUrl, caption, firstComment, target, idempotencyTag, draft, onStarted }) {
     const { accessToken, pageId } = await resolveToken(target)
     const description = caption + encodeIdemTag(idempotencyTag)
 
@@ -117,6 +142,17 @@ export const facebookReelAdapter: PublishAdapter = {
       description,
     })
 
+    // A draft is not public, so Graph cannot accept a comment yet. Live posts
+    // receive the CTA in the first comment, using the stable work-order marker
+    // to recover safely if the worker is interrupted after the Reel is live.
+    const firstCommentId = draft || !firstComment?.trim() ? undefined : await ensurePageFirstComment({
+      pageId,
+      videoId,
+      accessToken,
+      idempotencyTag,
+      message: firstComment,
+    })
+
     // 拿 permalink(尽力,失败不阻塞——video_id 才是硬锚)
     let permalink: string | undefined
     try {
@@ -136,7 +172,14 @@ export const facebookReelAdapter: PublishAdapter = {
       permalink,
       // 盖戳:草稿 vs 正式。publish-worker 只在 PUBLISHED 时 emit 发布信号,草稿绝不通知下游。
       video_state: draft ? 'DRAFT' : 'PUBLISHED',
+      ...(firstCommentId ? { first_comment_id: firstCommentId } : {}),
     }
+  },
+
+  async ensureFirstComment({ target, videoId, idempotencyTag, message }) {
+    if (!message.trim()) throw new Error('首评内容不能为空')
+    const { accessToken, pageId } = await resolveToken(target)
+    return ensurePageFirstComment({ pageId, videoId, accessToken, idempotencyTag, message })
   },
 
   // 幂等对账:扫该页最近 Reel 的 description,命中零宽标记 = 已发,返回回执(不重发)
@@ -161,27 +204,83 @@ export const facebookReelAdapter: PublishAdapter = {
   },
 }
 
+// 回读重试间隔:测试环境(VITEST)下置 0,免得单测白等 1.5s。
+const READBACK_DELAY_MS = process.env.VITEST ? 0 : 1500
+
+/**
+ * 回读视频对象的 published/permalink_url,最多试 3 次(每次间隔 delayMs)。
+ * 转正后 FB 侧状态可能有一小段延迟,单次读不到就重试;三次都读不到才认失败。
+ */
+async function readBackPublished(
+  videoId: string,
+  accessToken: string,
+  delayMs: number = READBACK_DELAY_MS,
+): Promise<Record<string, unknown>> {
+  let last: Record<string, unknown> = {}
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, delayMs))
+    const info = await fetch(`${GRAPH}/${videoId}?fields=published,permalink_url&access_token=${accessToken}`)
+    const j = (await info.json().catch(() => ({}))) as Record<string, unknown>
+    last = j
+    if (info.ok && j['published'] === true) return j
+  }
+  return last
+}
+
 /**
  * 把已经躺在主页后台的草稿正式发出去 —— 不重新上传。
  *
  * 为什么要单独一条路:审片通过后「真发」如果走重新上传,主页上会同时留着一条草稿和一条正式的,
- * 等于每条片都要人去删一次。同一个 finish 接口再喊一次、把状态改成 PUBLISHED 就够了。
+ * 等于每条片都要人去删一次。
+ *
+ * 为什么不能再喊一次 finish(2026-10-11 CTS 主页真机验证,Graph v25.0):
+ * 对一条已经 finish 过的草稿再 POST /{page}/video_reels?upload_phase=finish&video_state=PUBLISHED,
+ * FB 直接 400 code 6000 subcode 1363130「Video Upload Is Missing」—— finish 只认「刚上传完还没收尾」的会话。
+ * 真正管用的是翻视频对象本身:POST /{video_id} 带 published=true,返回 {"success":true}。
+ * 翻完必须回读 published 确认(失败即抛,绝不吞),否则「以为发了其实没发」。
  */
 export async function promoteReelToPublished(params: {
   target: PublishTarget
   videoId: string
 }): Promise<PublishedRef> {
   const { accessToken, pageId } = await resolveToken(params.target)
-  await graphPost(`/${pageId}/video_reels`, {
-    upload_phase: 'finish',
-    video_id: params.videoId,
-    video_state: 'PUBLISHED',
-    access_token: accessToken,
-  })
-  const info = await fetch(
-    `${GRAPH}/${params.videoId}?fields=permalink_url&access_token=${accessToken}`,
+
+  // 转正前先读一眼视频对象(fail-closed):
+  // ① 读不到直接抛,绝不盲发;② 视频不属于本页 → 防误发拦截;③ 已经是 published 就别再 POST(幂等)。
+  const preRes = await fetch(
+    `${GRAPH}/${params.videoId}?fields=published,from&access_token=${accessToken}`,
   )
-  const j = (await info.json().catch(() => ({}))) as Record<string, unknown>
+  const preJson = (await preRes.json().catch(() => ({}))) as Record<string, unknown>
+  if (!preRes.ok) {
+    throw new Error(`FB 转正前读视频失败 ${preRes.status}: ${JSON.stringify(preJson)}`)
+  }
+  const from = preJson['from'] as Record<string, unknown> | undefined
+  if (from && typeof from['id'] === 'string' && from['id'] !== pageId) {
+    throw new Error(`视频 ${params.videoId} 不属于主页 ${pageId} —— 防误发拦截`)
+  }
+
+  // 已经是 published:跳过 POST,直接回读 permalink 组装回执。
+  if (preJson['published'] === true) {
+    const j = await readBackPublished(params.videoId, accessToken)
+    return {
+      platform: 'facebook',
+      page_id: pageId,
+      post_id: params.videoId,
+      video_id: params.videoId,
+      published_at: new Date().toISOString(),
+      permalink: typeof j['permalink_url'] === 'string' ? (j['permalink_url'] as string) : undefined,
+      video_state: 'PUBLISHED',
+    }
+  }
+
+  const res = await graphPost(`/${params.videoId}`, { published: 'true', access_token: accessToken })
+  if (res['success'] !== true) {
+    throw new Error(`FB 草稿转正未返回 success: ${JSON.stringify(res)}`)
+  }
+  const j = await readBackPublished(params.videoId, accessToken)
+  if (j['published'] !== true) {
+    throw new Error(`FB 草稿转正后回读 published 不是 true: ${JSON.stringify(j)}`)
+  }
   return {
     platform: 'facebook',
     page_id: pageId,

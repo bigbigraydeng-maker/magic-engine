@@ -19,6 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { analyzeViralReference } from '@/lib/reels/viral-analyzer'
 
 const DEFAULT_MIN_VIEWS = 50_000
@@ -82,6 +83,9 @@ async function getVideoDetails(
 // ─── Route handler ────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   let body: {
     keywords?: string
     industry?: string

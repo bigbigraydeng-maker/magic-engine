@@ -31,6 +31,8 @@ import {
 } from '@/lib/messenger/brief'
 import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-buyer-autotag'
 import { inferStagesFromConversations, type StageInferResult } from '@/lib/crm/stage-infer'
+import { inferConversationFacts, type FactsRunResult } from '@/lib/crm/facts/infer'
+import { supabaseFactsIo } from '@/lib/crm/facts/io'
 
 /**
  * 一轮最多写几张卡。**这是花钱的闸** —— 积压会顺着后面几轮慢慢排掉，
@@ -91,18 +93,20 @@ const ABORT_REASON: Record<string, string> = {
 /** 候选池一次最多从库里捞多少条对话（挑之前的粗筛上限，不是写卡上限）。 */
 const CANDIDATE_POOL = 500
 
+interface ExistingBrief {
+  source_message_count: number
+  regen_count: number
+  regen_count_date: string | null
+  knowledge_status: string | null
+}
+
 interface ConversationRow {
   id: string
   client_id: string
   message_count: number
   last_message_at: string | null
   last_message_from: string | null
-  conversation_briefs: {
-    source_message_count: number
-    regen_count: number
-    regen_count_date: string | null
-    knowledge_status: string | null
-  }[]
+  conversation_briefs: ExistingBrief | ExistingBrief[] | null
 }
 
 /**
@@ -141,10 +145,15 @@ export interface GenerateDueBriefsOptions {
 export interface PostBriefSweepResult {
   qualifiedBuyers: AutoTagResult | { error: string }
   stageInfer: StageInferResult | { error: string }
+  /** AI 读对话存事实（默认关，`CRM_FACTS_CLIENT_IDS` 列了客户才跑）。只写自己的表，不影响名单。 */
+  conversationFacts: FactsRunResult | { error: string }
 }
 
 function toCandidate(row: ConversationRow): BriefCandidate {
-  const brief = row.conversation_briefs?.[0]
+  // PostgREST 对一对一关系返回对象、对一对多返回数组，两种都要认；只认数组会让
+  // 「已写过卡」永远判成没写过（2026-10 审计，每天约 1200 次调用只需约 70 次）。
+  const raw = row.conversation_briefs
+  const brief = Array.isArray(raw) ? raw[0] : raw ?? undefined
   return {
     conversationId: row.id,
     clientId: row.client_id,
@@ -403,7 +412,17 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/stage-infer] 读往来填阶段整轮失败:', err)
   }
 
-  return { qualifiedBuyers, stageInfer }
+  // 存「AI 读对话得出的事实」。只写 conversation_facts 这一张自己的表，这一版名单**不读它**
+  // （PR2 才读）。整轮出错只记一笔，不影响上面两遍。
+  let conversationFacts: FactsRunResult | { error: string }
+  try {
+    conversationFacts = await inferConversationFacts(now, { io: supabaseFactsIo() })
+  } catch (err) {
+    conversationFacts = { error: err instanceof Error ? err.message : String(err) }
+    console.error('[crm/facts] 存对话事实整轮失败:', err)
+  }
+
+  return { qualifiedBuyers, stageInfer, conversationFacts }
 }
 
 /** 把 due 列表切成每段 `BRIEFS_PER_CHUNK` 条。抽出来是为了能直测切法。 */

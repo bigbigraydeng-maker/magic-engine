@@ -154,6 +154,31 @@ describe('completeWorkOrder — 交付落点(防管道断裂)', () => {
     expect(r.ok && r.status).toBe('in_review')
   })
 
+  it('渲染 worker 的媒体探测结果成为服务端 AUTO 清单；缺测继续 fail-closed', async () => {
+    const evidence = {
+      audio_stream_present: true,
+      audio_loudness_lufs: -18,
+      width: 1080,
+      height: 1920,
+      duration_seconds: 12,
+      subtitle_cues: [{ start_seconds: 0, end_seconds: 1, text: 'Discover China' }],
+      cover_mean_luma: 100,
+      cover_luma_range: 180,
+      cover_placeholder_detected: false,
+    }
+    const measured = mockSupabase(happyQueue())
+    await completeWorkOrder(measured.db, { ...PARAMS, mediaEvidence: evidence })
+    const checks = (measured.updates.find(u => u.table === 'content_work_orders')!.payload.output as Record<string, unknown>)
+      .quality_checklist_auto as Array<{ key: string; outcome: string }>
+    expect(checks.slice(0, 5).map(item => item.outcome)).toEqual(['PASS', 'PASS', 'PASS', 'PASS', 'PASS'])
+
+    const missing = mockSupabase(happyQueue())
+    await completeWorkOrder(missing.db, PARAMS)
+    const missingChecks = (missing.updates.find(u => u.table === 'content_work_orders')!.payload.output as Record<string, unknown>)
+      .quality_checklist_auto as Array<{ outcome: string }>
+    expect(missingChecks.slice(0, 5).every(item => item.outcome === 'NOT_MEASURED')).toBe(true)
+  })
+
   it('🔴 update 必须带防抢占条件:限本 worker + 限活跃状态', async () => {
     const { db, filters } = mockSupabase(happyQueue())
     await completeWorkOrder(db, PARAMS)

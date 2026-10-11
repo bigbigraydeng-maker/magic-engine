@@ -51,7 +51,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { gscSiteUrlFromConfig } from '@/lib/gsc/connected-clients'
 import { fetchGa4Snapshot, fetchGa4PaidSearchMetrics } from '@/lib/ga4/client'
-import { getAdAccountInsights, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
+import { getAdAccountInsightsResult, getAdCampaignInsights, MetaAdsInsights } from '@/lib/meta/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { SEO_METRIC_KEY, GA4_METRIC_KEY, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { adsMetricKeysWrittenBy } from '@/lib/flywheel/metric-registry'
@@ -95,7 +95,7 @@ interface ClientResult {
   client_id: string
   gsc?:       { success: boolean; snapshot_id?: string; error?: string }
   ga4?:       { success: boolean; snapshot_id?: string; error?: string }
-  meta?:      { success: boolean; snapshot_id?: string; error?: string }
+  meta?:      { success: boolean; snapshot_id?: string; error?: string; skipped?: 'no_active_ads' }
   /** Google Ads sync emits metrics straight into flywheel_metrics — no
    *  snapshot table yet, so `metrics_written` mirrors the spend/impressions
    *  count instead of a `snapshot_id`. */
@@ -603,7 +603,8 @@ export async function GET(req: NextRequest) {
   // ── 4. Tally results ───────────────────────────────────────────────────────
   const gscSynced       = results.filter(r => r.gsc?.success).length
   const ga4Synced       = results.filter(r => r.ga4?.success).length
-  const metaSynced      = results.filter(r => r.meta?.success).length
+  const metaSynced      = results.filter(r => r.meta?.success && !r.meta.skipped).length
+  const metaIdle        = results.filter(r => r.meta?.skipped === 'no_active_ads').length
   const googleAdsSynced = results.filter(r => r.google_ads?.success).length
   const adDailySynced   = results.filter(r => r.ad_daily?.success).length
   const adDailyRows     = results.reduce((sum, r) => sum + (r.ad_daily?.rows_written ?? 0), 0)
@@ -682,7 +683,7 @@ export async function GET(req: NextRequest) {
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
   })
   return NextResponse.json({
     success:           true,
@@ -690,6 +691,7 @@ export async function GET(req: NextRequest) {
     gsc_synced:        gscSynced,
     ga4_synced:        ga4Synced,
     meta_synced:       metaSynced,
+    meta_idle:         metaIdle,
     google_ads_synced: googleAdsSynced,
     ad_daily_synced:   adDailySynced,
     ad_daily_rows:     adDailyRows,
@@ -908,7 +910,7 @@ async function syncMeta(
   adAccountId: string,
   accessToken: string,
   clientSlug: string,
-): Promise<{ success: boolean; snapshot_id?: string; error?: string }> {
+): Promise<{ success: boolean; snapshot_id?: string; error?: string; skipped?: 'no_active_ads' }> {
   try {
     const today        = new Date()
     const thirtyDaysAgo = new Date(today)
@@ -916,14 +918,19 @@ async function syncMeta(
     const since = thirtyDaysAgo.toISOString().slice(0, 10)
     const until = today.toISOString().slice(0, 10)
 
-    const [insights, campaigns] = await Promise.all([
-      getAdAccountInsights(adAccountId, accessToken, since, until),
+    const [insightsResult, campaigns] = await Promise.all([
+      getAdAccountInsightsResult(adAccountId, accessToken, since, until),
       getAdCampaignInsights(adAccountId, accessToken, since, until),
     ])
 
-    if (!insights) {
-      return { success: false, error: 'getAdAccountInsights returned null — check META_SYSTEM_USER_TOKEN and ad account ID' }
+    if (!insightsResult.ok) {
+      const failure = insightsResult.failure
+      // Empty data array = account ran no ads in window, not an API error.
+      if (failure.kind === 'no_delivery') return { success: true, skipped: 'no_active_ads' }
+      const reason = failure.kind === 'http_error' ? `${failure.kind} (${failure.status})` : failure.kind
+      return { success: false, error: `getAdAccountInsights ${reason}` }
     }
+    const insights = insightsResult.insights
 
     const { data, error } = await supabaseAdmin
       .from('meta_ads_snapshots')
