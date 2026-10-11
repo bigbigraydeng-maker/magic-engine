@@ -118,7 +118,15 @@ export async function PATCH(
     if (parsed.length !== body.creative_pool.length) {
       return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref, status=candidate)' }, { status: 400 })
     }
-    update.creative_pool = parsed.map((e): CreativePoolEntry => ({ kind: e.kind, ref: e.ref, status: 'candidate' }))
+    // Library candidates can only originate in the validated video handoff.
+    // Preserve their context when the legacy whole-pool editor submits refs.
+    const libraryRefs = new Map(before.creative_pool.filter(e => e.kind === 'client_video').map(e => [e.ref, e]))
+    if (parsed.some(e => e.kind === 'client_video' && !libraryRefs.has(e.ref))) {
+      return NextResponse.json({ error: 'library video candidates must use /creative-pool/video' }, { status: 400 })
+    }
+    update.creative_pool = parsed.map((e): CreativePoolEntry => e.kind === 'client_video'
+      ? { ...libraryRefs.get(e.ref)!, status: 'candidate' }
+      : { kind: e.kind, ref: e.ref, status: 'candidate' })
   }
 
   const { error } = await supabaseAdmin

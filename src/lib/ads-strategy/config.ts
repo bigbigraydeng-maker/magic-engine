@@ -12,11 +12,14 @@ import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 export type AutonomyMode = 'observe' | 'bounded_auto'
 export type CreativePoolStatus = 'candidate' | 'approved'
 export interface CreativePoolEntry {
-  kind: 'meta_video' | 'work_order'
+  kind: 'meta_video' | 'work_order' | 'client_video'
   ref: string
   status: CreativePoolStatus
   approved_by?: string
   approved_at?: string
+  campaign_id?: string
+  title?: string
+  caption?: string
 }
 
 export interface AdStrategyConfig {
@@ -61,15 +64,20 @@ export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
     if (typeof item !== 'object' || item === null) continue
 
     const kind = 'kind' in item ? item.kind : undefined
-    if (kind !== 'meta_video' && kind !== 'work_order') continue
+    if (kind !== 'meta_video' && kind !== 'work_order' && kind !== 'client_video') continue
 
     const ref = 'ref' in item ? item.ref : undefined
     if (typeof ref !== 'string' || ref.length === 0) continue
 
     const status = 'status' in item ? item.status : undefined
     if (status !== 'candidate' && status !== 'approved') continue
+    // A library video is a review candidate, never an executable Meta video.
+    if (kind === 'client_video' && status !== 'candidate') continue
 
     const entry: CreativePoolEntry = { kind, ref, status }
+    for (const field of ['campaign_id', 'title', 'caption'] as const) {
+      if (field in item && typeof item[field] === 'string') entry[field] = item[field]
+    }
 
     const approvedBy = 'approved_by' in item ? item.approved_by : undefined
     if (typeof approvedBy === 'string') entry.approved_by = approvedBy

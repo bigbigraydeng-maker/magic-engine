@@ -13,6 +13,8 @@ import React from 'react'
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { CampaignDailyPlanPanel } from '../CampaignDailyPlanPanel'
+// Video I/O has its own integration and component suites.
+vi.mock('../VideoHandoffPanel', () => ({ VideoHandoffPanel: () => null }))
 
 // The auto-publish section reads its own status endpoint on mount. These tests script the panel's fetch
 // sequence call by call, so that section is stubbed here and exercised in its own test file.
@@ -283,7 +285,7 @@ describe('CampaignDailyPlanPanel — Reel readiness is script-only, media_status
     expect(screen.queryByText('Reel 草稿完整')).not.toBeInTheDocument()
     // The Reel script is no longer shown in the Post view; the card only
     // points to the dedicated Reels tab.
-    expect(screen.getByText('Reel 视频不在这里管理。')).toBeInTheDocument()
+    expect(screen.getByText('成片关联用于本日内容和广告候选；视频发布仍需单独审核与授权。')).toBeInTheDocument()
     const reelsLink = screen.getByRole('link', { name: '去「视频 Reels」页看成片 →' })
     expect(reelsLink).toHaveAttribute('href', '?tab=reels')
     expect(screen.queryByText(/暂无成片/)).not.toBeInTheDocument()
@@ -313,7 +315,7 @@ describe('CampaignDailyPlanPanel — Reel card points to the Reels tab only', ()
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    await screen.findByText('Reel 视频不在这里管理。')
+    await screen.findByText('成片关联用于本日内容和广告候选；视频发布仍需单独审核与授权。')
     expect(screen.queryByText('SECRET SCRIPT TEXT')).not.toBeInTheDocument()
     expect(screen.queryByText('SECRET BRIEF TEXT')).not.toBeInTheDocument()
     const reelsLink = screen.getByRole('link', { name: '去「视频 Reels」页看成片 →' })

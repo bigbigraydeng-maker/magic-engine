@@ -14,6 +14,7 @@
 
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { ClientVideoPreview } from '../_components/ClientVideoPreview'
 
 type AutonomyMode = 'observe' | 'bounded_auto'
 
@@ -22,6 +23,8 @@ interface CreativePoolEntry {
   ref: string
   status: string
   approved_by?: string | null
+  title?: string
+  caption?: string
 }
 
 interface AdStrategyConfig {
@@ -147,13 +150,18 @@ function CreativePoolList({
     <div className="space-y-1.5">
       {entries.map(e => (
         <div key={`${e.kind}:${e.ref}`} className="flex items-center justify-between gap-3 text-sm">
+          {e.kind === 'client_video' && <div className="space-y-2 min-w-0">
+            <p>{e.title ?? '外部制作成片'} · 待审核，尚未投放</p>
+            <ClientVideoPreview clientId={clientId} assetId={e.ref} />
+            <p className="whitespace-pre-wrap text-xs">{e.caption}</p>
+          </div>}
           <span className="min-w-0 truncate text-gray-600">
             {e.kind} · <span className="tabular-nums">{e.ref}</span> ·{' '}
             <span className={e.status === 'approved' ? 'text-emerald-600' : 'text-gray-400'}>
               {e.status === 'approved' ? `已批准 by ${e.approved_by ?? '—'}` : '候选'}
             </span>
           </span>
-          {e.status !== 'approved' && (
+          {e.status !== 'approved' && e.kind !== 'client_video' && (
             <button
               type="button"
               disabled={busyRef !== null}
