@@ -304,9 +304,9 @@ describe('too close to departure', () => {
     expect(dates.mode).toBe('full_payment')
   })
 
-  it('stays split when the balance is after the booking day', () => {
+  it('stays split when the balance is after the deposit date', () => {
     const dates = datesOf(
-      computeMilestoneDueDates(RULE, input({ bookedOn: '2027-06-21' })),
+      computeMilestoneDueDates(RULE, input({ bookedOn: '2027-06-14' })),
     )
     expect(dates.mode).toBe('split')
     expect(dates.balanceDueOn).toBe('2027-06-22')

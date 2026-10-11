@@ -109,7 +109,7 @@ do $$ declare v jsonb; v_id uuid; begin
   perform pg_temp.check('G03 exactly one created event for bk1, staff source, lower-cased actor',
     (select count(*) = 1 and bool_and(action = 'created') and bool_and(source = 'staff')
        and bool_and(actor_email = 'staff1@example.com')
-       from public.crm_booking_events where booking_id = v_id), '');
+       from public.crm_booking_events where booking_id = v_id and action = 'created'), '');
 end $$;
 
 do $$ declare v jsonb; begin
@@ -812,7 +812,7 @@ insert into aresults
      and p.proname like 'crm\_booking\_%'
      and p.prorettype <> 'trigger'::regtype;
 
-insert into aresults select 'G94d exactly 14 functions named crm_booking_% exist', count(*) = 14, count(*)::text
+insert into aresults select 'G94d exactly 16 functions named crm_booking_% exist', count(*) = 16, count(*)::text
   from pg_proc where pronamespace = 'public'::regnamespace and proname like 'crm\_booking\_%';
 
 set role anon;
@@ -888,7 +888,7 @@ do $$ declare v_ev_before bigint; v_ev_after bigint; v_bk bigint; v_ms bigint; b
   perform pg_temp.check('G110a deleting the contact cascades the booking and its milestones',
     v_bk = 0 and v_ms = 0, format('bookings=%s milestones=%s', v_bk, v_ms));
   perform pg_temp.check('G110b the events rows for the deleted booking survive',
-    v_ev_after = v_ev_before and v_ev_before > 0, format('before=%s after=%s', v_ev_before, v_ev_after));
+    v_ev_after >= v_ev_before and v_ev_before > 0, format('before=%s after=%s', v_ev_before, v_ev_after));
 end $$;
 
 do $$ declare v_n bigint; v_ret integer; v_after bigint; v_total_before bigint; v_total_after bigint; v_fp_before text; v_fp_after text; begin
@@ -902,22 +902,22 @@ do $$ declare v_n bigint; v_ret integer; v_after bigint; v_total_before bigint; 
   select count(*) into v_after from public.crm_booking_events where actor_email = 'staff1@example.com';
   select count(*) into v_total_after from public.crm_booking_events;
   select md5(string_agg(id::text || client_id::text || booking_id::text || coalesce(milestone_kind,'') || action || detail::text || source || created_at::text, '|' order by id))
-    into v_fp_after from public.crm_booking_events;
+    into v_fp_after from public.crm_booking_events where action <> 'actor_erased';
 
   perform pg_temp.check('G111a erase returns the number of rows it cleared',
     v_ret = v_n and v_n > 0, format('returned=%s expected=%s', v_ret, v_n));
   perform pg_temp.check('G111b no events remain for that email', v_after = 0, v_after::text);
-  perform pg_temp.check('G111c the total event count is unchanged', v_total_after = v_total_before,
+  perform pg_temp.check('G111c the total event count grows by exactly the one actor_erased event', v_total_after = v_total_before + 1,
     format('before=%s after=%s', v_total_before, v_total_after));
   perform pg_temp.check('G111d every other column is unchanged', v_fp_after = v_fp_before,
     format('before=%s after=%s', v_fp_before, v_fp_after));
 end $$;
 
 do $$ declare v_ret integer; v_before text; v_after text; begin
-  select md5(string_agg(to_jsonb(e)::text, '|' order by e.id)) into v_before from public.crm_booking_events e;
+  select md5(string_agg(to_jsonb(e)::text, '|' order by e.id)) into v_before from public.crm_booking_events e where action <> 'actor_erased';
   v_ret := public.crm_booking_erase_actor_email('00000000-0000-0000-0000-0000000000b2', 'staff1@example.com', 'Admin@Example.com');
-  select md5(string_agg(to_jsonb(e)::text, '|' order by e.id)) into v_after from public.crm_booking_events e;
-  perform pg_temp.check('G112 erase for client B returns 0 and changes nothing',
+  select md5(string_agg(to_jsonb(e)::text, '|' order by e.id)) into v_after from public.crm_booking_events e where action <> 'actor_erased';
+  perform pg_temp.check('G112 erase for client B returns 0 and changes no other event',
     v_ret = 0 and v_after = v_before, format('returned=%s', v_ret));
 end $$;
 
@@ -962,5 +962,395 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- Final report
 -- ---------------------------------------------------------------------------
+-- Chunk D of supabase/tests/crm_booking_tracker.test.sql
+-- Behaviour checks for supabase/migrations/20261012200000_crm_booking_tracker.sql
+-- (run after the tour catalog migrations and their test files, on a THROWAWAY local Postgres only).
+-- Chunks A, B and C defined the fixtures, ctx table and pg_temp helpers; this chunk reuses them
+-- directly and is inserted just before the final report query and the final do-block.
+-- State at this point: bk1 (active), bk_blank (active, ca3, TA2, its departure DA2 was deleted),
+-- bk_again (active, ca1, TA1, DA1b, live depart_on 2028-04-01), bk_today (cancelled).
+
+-- ---------------------------------------------------------------------------
+-- S1 direct writes (run as superuser; the triggers must fire anyway)
+-- ---------------------------------------------------------------------------
+select pg_temp.refused('G130 direct insert with a client B contact refused',
+  $q$insert into public.crm_bookings(client_id, contact_id, tour_id, booked_on, created_by) values ('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000b1','aaaaaaaa-0000-0000-0000-000000000001','2028-01-01','x@y.zz')$q$,
+  'cross_client_reference:contact_id%');
+
+select pg_temp.refused('G131 direct insert with a client B tour refused',
+  $q$insert into public.crm_bookings(client_id, contact_id, tour_id, booked_on, created_by) values ('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000a1','bbbbbbbb-0000-0000-0000-000000000001','2028-01-01','x@y.zz')$q$,
+  'cross_client_reference:tour_id%');
+
+select pg_temp.refused('G132 direct insert with a client B departure refused',
+  $q$insert into public.crm_bookings(client_id, contact_id, tour_id, departure_id, departure_depart_on, booked_on, created_by) values ('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000a1','aaaaaaaa-0000-0000-0000-000000000001','bbbbbbbb-0000-0000-0000-0000000000d1','2028-03-01','2028-01-01','x@y.zz')$q$,
+  'cross_client_reference:departure_id%');
+
+select pg_temp.refused('G133 direct update to a client B tour refused',
+  $q$update public.crm_bookings set tour_id = 'bbbbbbbb-0000-0000-0000-000000000001' where id = (select v::uuid from ctx where k='bk1')$q$,
+  'cross_client_reference:tour_id%');
+
+select pg_temp.refused('G134 direct update to a client B contact refused',
+  $q$update public.crm_bookings set contact_id = 'cccccccc-0000-0000-0000-0000000000b1' where id = (select v::uuid from ctx where k='bk1')$q$,
+  'cross_client_reference:contact_id%');
+
+do $$ begin
+  perform pg_temp.mk('bk_s1', 'cccccccc-0000-0000-0000-0000000000a3', 'aaaaaaaa-0000-0000-0000-000000000001', null, '2028-01-22', null, null, null);
+  delete from public.crm_booking_milestones where booking_id = pg_temp.bid('bk_s1');
+end $$;
+
+select pg_temp.refused('G135 direct milestone insert with a client B client_id refused',
+  $q$insert into public.crm_booking_milestones(booking_id, client_id, kind) values ((select v::uuid from ctx where k='bk_s1'),'00000000-0000-0000-0000-0000000000b2','deposit')$q$,
+  'cross_client_reference:booking%');
+
+select pg_temp.refused('G136 direct milestone update to a client B client_id refused',
+  $q$update public.crm_booking_milestones set client_id = '00000000-0000-0000-0000-0000000000b2' where booking_id = (select v::uuid from ctx where k='bk1') and kind = 'deposit'$q$,
+  'cross_client_reference:booking%');
+
+do $$ declare v jsonb; begin
+  update public.crm_bookings set party_size = 5 where id = pg_temp.bid('bk_blank');
+  select to_jsonb(b) into v from public.crm_bookings b where b.id = pg_temp.bid('bk_blank');
+  perform pg_temp.check('G137 a non-reference direct update still works when the catalog departure is gone',
+    (v->>'party_size')::int = 5, v::text);
+end $$;
+
+do $$ declare v jsonb; begin
+  insert into public.crm_booking_milestones(booking_id, client_id, kind)
+  values (pg_temp.bid('bk_s1'), '00000000-0000-0000-0000-0000000000a1', 'deposit');
+  select to_jsonb(m) into v from public.crm_booking_milestones m
+   where m.booking_id = pg_temp.bid('bk_s1') and m.kind = 'deposit';
+  perform pg_temp.check('G138 a direct milestone re-insert with the right client works',
+    v is not null and v->>'state' = 'unpaid', coalesce(v::text, 'no row'));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- S2 audit completeness
+-- ---------------------------------------------------------------------------
+do $$ declare v jsonb; v_created bigint; v_mc bigint; begin
+  v := public.crm_booking_create('00000000-0000-0000-0000-0000000000a1',
+    'cccccccc-0000-0000-0000-0000000000a1', 'aaaaaaaa-0000-0000-0000-000000000001',
+    null, '2028-01-23', null, null, 'DEL-SECRET', 'Staff1@Example.com');
+  insert into ctx(k, v) values ('bk_s2', v->>'id') on conflict (k) do update set v = excluded.v;
+
+  select count(*) into v_created
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_s2') and action = 'created';
+  select count(*) into v_mc
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_s2') and action = 'milestone_created';
+
+  perform pg_temp.check('G140 a created booking writes one created and two milestone_created events',
+    v_created = 1 and v_mc = 2, format('created=%s milestone_created=%s', v_created, v_mc));
+end $$;
+
+do $$ declare v_ev jsonb; v_n bigint; begin
+  delete from public.crm_booking_milestones
+   where booking_id = pg_temp.bid('bk_s2') and kind = 'balance';
+
+  select count(*) into v_n
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_s2') and action = 'milestone_deleted' and milestone_kind = 'balance';
+
+  select detail into v_ev
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_s2') and action = 'milestone_deleted' and milestone_kind = 'balance'
+   order by created_at desc, id desc
+   limit 1;
+
+  perform pg_temp.check('G141 a direct milestone delete writes one milestone_deleted event for balance',
+    v_n = 1 and v_ev is not null and v_ev->>'kind' = 'balance',
+    format('events=%s detail=%s', v_n, coalesce(v_ev::text, 'no event')));
+end $$;
+
+do $$ declare v_bd bigint; v_md bigint; v_leak bigint; begin
+  delete from public.crm_bookings where id = pg_temp.bid('bk_s2');
+
+  select count(*) into v_bd
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_s2') and action = 'booking_deleted';
+  select count(*) into v_md
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_s2') and action = 'milestone_deleted' and milestone_kind = 'deposit';
+  select count(*) into v_leak
+    from public.crm_booking_events
+   where detail::text like '%DEL-SECRET%';
+
+  perform pg_temp.check('G142a a direct booking delete writes one booking_deleted event',
+    v_bd = 1, v_bd::text);
+  perform pg_temp.check('G142b the cascaded deposit milestone writes a milestone_deleted event',
+    v_md = 1, v_md::text);
+  perform pg_temp.check('G142c no event detail leaks the booking note', v_leak = 0, v_leak::text);
+end $$;
+
+do $$ declare v_n bigint; begin
+  select count(*) into v_n
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_s2');
+  perform pg_temp.check('G143 all events for the deleted booking survive (>= 4)',
+    v_n >= 4, v_n::text);
+end $$;
+
+do $$ declare v_bk bigint; v_ms bigint; v_bd bigint; v_md bigint; v_leak bigint; begin
+  insert into public.contacts(id, client_id) values ('cccccccc-0000-0000-0000-0000000000b9', '00000000-0000-0000-0000-0000000000a1');
+  perform pg_temp.mk('bk_cc', 'cccccccc-0000-0000-0000-0000000000b9', 'aaaaaaaa-0000-0000-0000-000000000002', null, null, null, null, 'CC-SECRET');
+
+  delete from public.contacts where id = 'cccccccc-0000-0000-0000-0000000000b9';
+
+  select count(*) into v_bk from public.crm_bookings where id = pg_temp.bid('bk_cc');
+  select count(*) into v_ms from public.crm_booking_milestones where booking_id = pg_temp.bid('bk_cc');
+  select count(*) into v_bd from public.crm_booking_events where booking_id = pg_temp.bid('bk_cc') and action = 'booking_deleted';
+  select count(*) into v_md from public.crm_booking_events where booking_id = pg_temp.bid('bk_cc') and action = 'milestone_deleted';
+  select count(*) into v_leak from public.crm_booking_events where detail::text like '%CC-SECRET%';
+
+  perform pg_temp.check('G144a the contact cascade removes the booking and its milestones',
+    v_bk = 0 and v_ms = 0, format('bookings=%s milestones=%s', v_bk, v_ms));
+  perform pg_temp.check('G144b the cascade writes one booking_deleted and two milestone_deleted events',
+    v_bd = 1 and v_md = 2, format('booking_deleted=%s milestone_deleted=%s', v_bd, v_md));
+  perform pg_temp.check('G144c no event detail leaks the booking note', v_leak = 0, v_leak::text);
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- S3 check constraint
+-- ---------------------------------------------------------------------------
+select pg_temp.refused('G150 an email tick without an evidence ref is refused by the check constraint',
+  $q$update public.crm_booking_milestones set state = 'paid', paid_on = '2028-02-01', paid_source = 'email', paid_evidence_ref = null where booking_id = (select v::uuid from ctx where k='bk_again') and kind = 'deposit'$q$,
+  'new row for relation "crm_booking_milestones" violates check constraint%');
+
+do $$ declare v jsonb; begin
+  update public.crm_booking_milestones
+     set state = 'paid',
+         paid_on = '2028-02-01',
+         paid_source = 'staff',
+         paid_evidence_ref = 'keep-ref-1'
+   where booking_id = pg_temp.bid('bk_again')
+     and kind = 'deposit';
+
+  select to_jsonb(m) into v from public.crm_booking_milestones m
+   where m.booking_id = pg_temp.bid('bk_again') and m.kind = 'deposit';
+
+  perform pg_temp.check('G151 a staff tick may keep an old evidence ref',
+    v is not null and v->>'state' = 'paid' and v->>'paid_source' = 'staff'
+      and v->>'paid_evidence_ref' = 'keep-ref-1',
+    coalesce(v::text, 'no row'));
+
+  update public.crm_booking_milestones
+     set state = 'unpaid',
+         paid_on = null,
+         paid_source = null,
+         paid_evidence_ref = null
+   where booking_id = pg_temp.bid('bk_again')
+     and kind = 'deposit';
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- S4 setting residue
+-- ---------------------------------------------------------------------------
+do $$ declare v jsonb; v_ev jsonb; begin
+  update public.tour_catalog_departures set depart_on = '2028-04-05'
+   where id = 'aaaaaaaa-0000-0000-0000-0000000000d2';
+
+  v := public.crm_booking_confirm_departure('00000000-0000-0000-0000-0000000000a1', pg_temp.bid('bk_again'),
+    pg_temp.tok_b(pg_temp.bid('bk_again')), 'Staff1@Example.com');
+
+  perform pg_temp.check('G160a confirm_departure re-reads the moved live depart_on',
+    (v->>'departure_depart_on')::date = '2028-04-05', v::text);
+
+  perform pg_temp.check('G160b the function leaves no session settings behind',
+    coalesce(current_setting('crm_booking.action', true), '') = ''
+      and coalesce(current_setting('crm_booking.actor', true), '') = ''
+      and coalesce(current_setting('crm_booking.source', true), '') = '',
+    format('action=%s actor=%s source=%s',
+      coalesce(current_setting('crm_booking.action', true), '<null>'),
+      coalesce(current_setting('crm_booking.actor', true), '<null>'),
+      coalesce(current_setting('crm_booking.source', true), '<null>')));
+
+  update public.crm_bookings set party_size = 6 where id = pg_temp.bid('bk_again');
+
+  select detail into v_ev
+    from public.crm_booking_events
+   where booking_id = pg_temp.bid('bk_again')
+   order by created_at desc, id desc
+   limit 1;
+
+  perform pg_temp.check('G160c a later direct update is audited as system with a null actor',
+    v_ev is not null
+      and (select action from public.crm_booking_events
+            where booking_id = pg_temp.bid('bk_again') order by created_at desc, id desc limit 1) = 'edited'
+      and (select actor_email from public.crm_booking_events
+            where booking_id = pg_temp.bid('bk_again') order by created_at desc, id desc limit 1) is null
+      and (select source from public.crm_booking_events
+            where booking_id = pg_temp.bid('bk_again') order by created_at desc, id desc limit 1) = 'system',
+    coalesce(v_ev::text, 'no event'));
+end $$;
+
+do $$ declare v_ret integer; v_err text := 'no error'; begin
+  v_ret := public.crm_booking_erase_actor_email('00000000-0000-0000-0000-0000000000a1', 'nobody@example.com', 'Admin@Example.com');
+
+  begin
+    update public.crm_booking_events set detail = '{}'::jsonb
+     where id = (select id from public.crm_booking_events limit 1);
+  exception when others then v_err := sqlerrm;
+  end;
+
+  perform pg_temp.check('G161a erasing an unknown email returns 0', v_ret = 0, v_ret::text);
+  perform pg_temp.check('G161b the erase flag does not leak out of the function',
+    v_err = 'crm_booking_events_append_only'
+      and coalesce(current_setting('crm_booking.erase', true), '') = '',
+    format('error=%s erase=%s', v_err, coalesce(current_setting('crm_booking.erase', true), '<null>')));
+end $$;
+
+do $$ declare v jsonb; begin
+  v := public.crm_booking_nudge('00000000-0000-0000-0000-0000000000a1', pg_temp.bid('bk1'), 'deposit',
+    pg_temp.tok_m(pg_temp.bid('bk1'), 'deposit'), 'quiet', null, 'Staff1@Example.com');
+
+  perform pg_temp.check('G162 nudge leaves no session settings behind',
+    coalesce(current_setting('crm_booking.action', true), '') = ''
+      and coalesce(current_setting('crm_booking.actor', true), '') = ''
+      and coalesce(current_setting('crm_booking.source', true), '') = '',
+    format('action=%s actor=%s source=%s',
+      coalesce(current_setting('crm_booking.action', true), '<null>'),
+      coalesce(current_setting('crm_booking.actor', true), '<null>'),
+      coalesce(current_setting('crm_booking.source', true), '<null>')));
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- S5 erasure of created_by / granted_by
+-- ---------------------------------------------------------------------------
+do $$ declare v_pre bigint; v jsonb; v_before bigint; v_ret integer; v_after bigint; v_ev jsonb; v_new bigint; v_created_by text; v_created_by2 text; v_g1 text; v_g2 text; begin
+  insert into public.crm_booking_members(client_id, email, granted_by) values
+    ('00000000-0000-0000-0000-0000000000a1', 'm1@x.zz', 'Gone@Example.com'),
+    ('00000000-0000-0000-0000-0000000000b2', 'm2@x.zz', 'Gone@Example.com');
+
+  v := public.crm_booking_create('00000000-0000-0000-0000-0000000000a1',
+    'cccccccc-0000-0000-0000-0000000000a1', 'aaaaaaaa-0000-0000-0000-000000000002',
+    null, null, null, null, null, 'Gone@Example.com');
+  insert into ctx(k, v) values ('bk_gone', v->>'id') on conflict (k) do update set v = excluded.v;
+
+  v := public.crm_booking_create('00000000-0000-0000-0000-0000000000a1',
+    'cccccccc-0000-0000-0000-0000000000a2', 'aaaaaaaa-0000-0000-0000-000000000002',
+    null, null, null, null, null, 'gone@example.com.au');
+  insert into ctx(k, v) values ('bk_gone2', v->>'id') on conflict (k) do update set v = excluded.v;
+
+  select count(*) into v_before
+    from public.crm_booking_events
+   where client_id = '00000000-0000-0000-0000-0000000000a1' and actor_email = 'gone@example.com';
+
+  select count(*) into v_pre from public.crm_booking_events where action = 'actor_erased';
+  v_ret := public.crm_booking_erase_actor_email('00000000-0000-0000-0000-0000000000a1', ' GONE@example.com ', 'Admin@Example.com');
+
+  select created_by into v_created_by from public.crm_bookings where id = pg_temp.bid('bk_gone');
+  select created_by into v_created_by2 from public.crm_bookings where id = pg_temp.bid('bk_gone2');
+  select granted_by into v_g1 from public.crm_booking_members
+   where client_id = '00000000-0000-0000-0000-0000000000a1' and email = 'm1@x.zz';
+  select granted_by into v_g2 from public.crm_booking_members
+   where client_id = '00000000-0000-0000-0000-0000000000b2' and email = 'm2@x.zz';
+
+  select count(*) into v_after
+    from public.crm_booking_events
+   where client_id = '00000000-0000-0000-0000-0000000000a1' and actor_email = 'gone@example.com';
+
+  select count(*) - v_pre into v_new
+    from public.crm_booking_events
+   where action = 'actor_erased';
+
+  select to_jsonb(e) into v_ev
+    from public.crm_booking_events e
+   where e.client_id = '00000000-0000-0000-0000-0000000000a1' and e.action = 'actor_erased'
+   order by e.created_at desc, e.id desc
+   limit 1;
+
+  perform pg_temp.check('G170a erase returns the number of cleared events',
+    v_ret = v_before and v_before > 0, format('returned=%s expected=%s', v_ret, v_before));
+  perform pg_temp.check('G170b the erased booking created_by becomes (erased)',
+    v_created_by = '(erased)', coalesce(v_created_by, 'null'));
+  perform pg_temp.check('G170c the exact-match control booking is untouched',
+    v_created_by2 = 'gone@example.com.au', coalesce(v_created_by2, 'null'));
+  perform pg_temp.check('G170d the client A member granted_by becomes (erased)',
+    v_g1 = '(erased)', coalesce(v_g1, 'null'));
+  perform pg_temp.check('G170e the client B member is untouched',
+    v_g2 = 'Gone@Example.com', coalesce(v_g2, 'null'));
+  perform pg_temp.check('G170f no events remain for the erased email', v_after = 0, v_after::text);
+  perform pg_temp.check('G170g exactly one new actor_erased event with the right shape',
+    v_new = 1 and v_ev is not null
+      and v_ev->>'booking_id' = '00000000-0000-0000-0000-000000000000'
+      and v_ev->>'client_id' = '00000000-0000-0000-0000-0000000000a1'
+      and (v_ev->'detail'->>'rows')::int = v_ret
+      and v_ev->>'actor_email' = 'admin@example.com'
+      and v_ev->>'source' = 'staff'
+      and (v_ev->'detail')::text not like '%gone%',
+    coalesce(v_ev::text, 'no event'));
+end $$;
+
+do $$ declare v_gone bigint; v_kept bigint; begin
+  select count(*) into v_gone
+    from public.crm_booking_events
+   where client_id = '00000000-0000-0000-0000-0000000000a1' and actor_email = 'gone@example.com';
+  select count(*) into v_kept
+    from public.crm_booking_events
+   where actor_email = 'gone@example.com.au';
+
+  perform pg_temp.check('G171a no client A event keeps the erased email', v_gone = 0, v_gone::text);
+  perform pg_temp.check('G171b the near-miss email is still present', v_kept > 0, v_kept::text);
+end $$;
+
+do $$ begin
+  delete from public.crm_booking_members
+   where (client_id = '00000000-0000-0000-0000-0000000000a1' and email = 'm1@x.zz')
+      or (client_id = '00000000-0000-0000-0000-0000000000b2' and email = 'm2@x.zz');
+  perform pg_temp.check('G172 the two test members are cleaned up',
+    (select count(*) from public.crm_booking_members where email in ('m1@x.zz','m2@x.zz')) = 0, '');
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- S6 named patch errors
+-- ---------------------------------------------------------------------------
+select pg_temp.refused('G180 update with a malformed booked_on refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"booked_on":"not-a-date"}','Staff1@Example.com')$q$,
+  'invalid_patch:booked_on');
+
+select pg_temp.refused('G181 update with a malformed tour_id refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"tour_id":"zzz"}','Staff1@Example.com')$q$,
+  'invalid_patch:tour_id');
+
+select pg_temp.refused('G182 update with a malformed departure_id refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"departure_id":"zzz"}','Staff1@Example.com')$q$,
+  'invalid_patch:departure_id');
+
+select pg_temp.refused('G183 update with a non-numeric party_size refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"party_size":"abc"}','Staff1@Example.com')$q$,
+  'invalid_patch:party_size');
+
+select pg_temp.refused('G184 update with party_size 61 refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"party_size":61}','Staff1@Example.com')$q$,
+  'invalid_patch:party_size');
+
+select pg_temp.refused('G185 update with party_size 0 refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"party_size":0}','Staff1@Example.com')$q$,
+  'invalid_patch:party_size');
+
+select pg_temp.refused('G186 update with a non-boolean is_cruise refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"is_cruise":"maybe"}','Staff1@Example.com')$q$,
+  'invalid_patch:is_cruise');
+
+select pg_temp.refused('G187 update with a non-string note refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'{"note":123}','Staff1@Example.com')$q$,
+  'invalid_patch:note');
+
+select pg_temp.refused('G188 update with a 501-character note refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),jsonb_build_object('note', repeat('x',501)),'Staff1@Example.com')$q$,
+  'invalid_patch:note');
+
+select pg_temp.refused('G189 update with an array patch refused',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_blank'),(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_blank')),'[1]','Staff1@Example.com')$q$,
+  'invalid_patch:patch');
+
+do $$ declare v jsonb; begin
+  v := public.crm_booking_update('00000000-0000-0000-0000-0000000000a1', pg_temp.bid('bk_blank'),
+    pg_temp.tok_b(pg_temp.bid('bk_blank')), '{"party_size":7}', 'Staff1@Example.com');
+  perform pg_temp.check('G190 a valid patch still works on bk_blank',
+    (v->>'party_size')::int = 7, v::text);
+end $$;
+
+-- end of chunk D
+
 select name, case when ok then 'PASS' else 'FAIL' end as r, left(detail, 160) as detail from aresults order by name;
 do $$ begin if exists (select 1 from aresults where ok is not true) then raise exception 'crm booking tracker checks FAILED'; end if; end $$;

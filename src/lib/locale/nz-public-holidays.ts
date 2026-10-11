@@ -1,3 +1,5 @@
+// Used for working-day maths in bookings. src/lib/locale/calendar.ts is the marketing
+// calendar and keeps raw dates; do not merge them without checking marketing callers.
 /**
  * New Zealand NATIONAL public holidays, as a working-day table.
  *
@@ -165,10 +167,8 @@ function christmasPair(year: number): Array<[string, string]> {
   const christmas = isoFor(year, 12, 25)
   const boxing = isoFor(year, 12, 26)
   const christmasObserved = observedFixedDate(christmas, 2)
-  let boxingObserved = observedFixedDate(boxing, 2)
-  if (boxingObserved === christmasObserved) {
-    boxingObserved = addDaysIso(boxingObserved, 1)
-  }
+  // No collision branch needed: the Sunday shift of 2 already separates the two days.
+  const boxingObserved = observedFixedDate(boxing, 2)
   return [
     [christmasObserved, 'Christmas Day'],
     [boxingObserved, 'Boxing Day'],
@@ -189,6 +189,17 @@ function buildHolidays(year: number): ReadonlyMap<string, string> {
   if (matariki) entries.push([matariki, 'Matariki'])
   entries.push(...christmasPair(year))
   return new Map(entries)
+}
+
+/**
+ * Observed national holidays for ANY year, computed by the same rules. This is
+ * NOT the table the due-date code trusts: Matariki is only present for years in
+ * the official-date map, and years outside NZ_HOLIDAY_TABLE_YEARS are not
+ * reviewed. Exported so the weekend collision rules can be tested on years
+ * where they actually trigger (e.g. 2021, 2022, 2023, 2028).
+ */
+export function observedHolidaysForYear(year: number): ReadonlyMap<string, string> {
+  return buildHolidays(year)
 }
 
 /**

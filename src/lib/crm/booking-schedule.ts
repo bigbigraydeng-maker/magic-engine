@@ -63,20 +63,33 @@ export type DueDatesResult =
   | { state: 'no_departure' }
   | { state: 'invalid_input'; field: string }
 
-const DURATION_PATTERN = /(\d{1,3})\s*(?:days?|d(?![a-z])|天|日)/i
+/**
+ * A standalone 1-3 digit number token (not part of a longer digit run)
+ * directly followed by a day unit: days?/d/天/日.
+ * The lookbehind and lookahead stop '2026 days' from matching '26 days'.
+ */
+const DURATION_PATTERN =
+  /(?<!\d)(\d{1,3})(?!\d)\s*(?:days?|d(?![a-z])|天|日)/gi
+
+/** Inclusive upper bound for a plausible tour length in days. */
+const MAX_TOUR_DAYS = 120
 
 /**
- * First day count in the text, or null when there is none.
- * '16 Days 15 Nights' -> 16, '15D/14N' -> 15, '10 day' -> 10,
- * '14 nights' / '' / null / 'TBC' -> null, '0 days' -> null.
+ * First plausible day count in the text, or null when there is none.
+ * '16 Days 15 Nights' -> 16, '15D/14N' -> 15, '10 day' -> 10, '3天' -> 3,
+ * 'Tour 2026 - 16 days' -> 16,
+ * '14 nights' / '' / null / 'TBC' / '0 days' / '2026 days' / '200 days'
+ * -> null.
  */
 export function parseDurationDays(text: string | null): number | null {
   if (text === null) return null
-  const match = DURATION_PATTERN.exec(text)
-  if (match === null) return null
-  const days = Number(match[1])
-  if (!Number.isInteger(days) || days <= 0) return null
-  return days
+  for (const match of text.matchAll(DURATION_PATTERN)) {
+    const days = Number(match[1])
+    if (Number.isInteger(days) && days >= 1 && days <= MAX_TOUR_DAYS) {
+      return days
+    }
+  }
+  return null
 }
 
 /** Mutable accumulator for the years the holiday table does not cover. */
@@ -177,18 +190,32 @@ function chooseTier(
   return { tier: 'standard', leadDays: rule.balanceLeadDays.standard }
 }
 
-/** Move the balance date forward off weekends/holidays, one day at a time. */
-function rollForward(
+/**
+ * Move the balance date forward off weekends/holidays, one day at a time,
+ * but never past the day before departure. `rolledForward` is true only
+ * when the returned date differs from the input date.
+ */
+function rollForwardCapped(
   balanceDueOn: string,
+  departOn: string,
   missing: MissingYears,
 ): { balanceDueOn: string; rolledForward: boolean } {
+  const latest = addDaysIso(departOn, -1)
   let cursor = balanceDueOn
-  let rolled = false
-  while (statusFor(cursor, missing) !== 'working') {
+  while (statusFor(cursor, missing) !== 'working' && cursor < latest) {
     cursor = addDaysIso(cursor, 1)
-    rolled = true
   }
-  return { balanceDueOn: cursor, rolledForward: rolled }
+  return { balanceDueOn: cursor, rolledForward: cursor !== balanceDueOn }
+}
+
+/** Clamp an ISO date to at most `upper`. */
+function clampAtMost(iso: string, upper: string): string {
+  return iso > upper ? upper : iso
+}
+
+/** Clamp an ISO date to at least `lower`. */
+function clampAtLeast(iso: string, lower: string): string {
+  return iso < lower ? lower : iso
 }
 
 interface ValidatedInput {
@@ -232,12 +259,19 @@ function assembleDates(
   missing: MissingYears,
 ): DueDates {
   const rawBalance = addDaysIso(valid.departOn, -tier.leadDays)
-  const tooClose = diffDaysIso(rawBalance, valid.bookedOn) >= 0
+  const rolled = rule.balanceRollForward
+    ? rollForwardCapped(rawBalance, valid.departOn, missing)
+    : { balanceDueOn: rawBalance, rolledForward: false }
+  const balanceDueOn = rolled.balanceDueOn
+  const tooClose =
+    balanceDueOn <= depositDueOn || balanceDueOn <= valid.bookedOn
   if (tooClose) {
+    const latest = addDaysIso(valid.departOn, -1)
+    const due = clampAtLeast(clampAtMost(depositDueOn, latest), valid.bookedOn)
     return {
       mode: 'full_payment',
-      depositDueOn,
-      balanceDueOn: depositDueOn,
+      depositDueOn: due,
+      balanceDueOn: due,
       leadDays: tier.leadDays,
       tier: tier.tier,
       tourDays: length.tourDays,
@@ -246,13 +280,10 @@ function assembleDates(
       rolledForward: false,
     }
   }
-  const rolled = rule.balanceRollForward
-    ? rollForward(rawBalance, missing)
-    : { balanceDueOn: rawBalance, rolledForward: false }
   return {
     mode: 'split',
     depositDueOn,
-    balanceDueOn: rolled.balanceDueOn,
+    balanceDueOn,
     leadDays: tier.leadDays,
     tier: tier.tier,
     tourDays: length.tourDays,
@@ -267,8 +298,11 @@ function assembleDates(
  *
  * The deposit is the Nth working day after the booking day (the booking day
  * itself never counts). The balance is the departure date minus the tier lead
- * in calendar days. When the balance would land on or before the booking day
- * the two dates merge into a single "pay in full" date.
+ * in calendar days (rolled forward off weekends/holidays when configured,
+ * never past the day before departure). When the (rolled) balance falls on or
+ * before the deposit date or the booking day, the two dates merge into a single
+ * "pay in full" date: the deposit date, clamped to the day before departure
+ * and to no earlier than the booking day.
  */
 export function computeMilestoneDueDates(
   rule: TravelBookingRule,

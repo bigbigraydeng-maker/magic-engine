@@ -96,7 +96,7 @@ create table public.crm_booking_milestones (
   paid_on date,
   paid_source text check (paid_source is null or paid_source in ('staff','email')),
   -- Email reference (<message_id>:<kind>); kept when a milestone is un-paid so the same
-  -- email can never tick it a second time.
+  -- email can never tick it a second time. Evidence ref is permanent per email by design; staff tick is the recovery path.
   paid_evidence_ref text check (paid_evidence_ref is null or length(paid_evidence_ref) <= 300),
   due_override_on date,
   due_override_depart_on date,
@@ -109,7 +109,9 @@ create table public.crm_booking_milestones (
   check (
     (state = 'paid' and paid_on is not null and paid_source is not null)
     or (state = 'unpaid' and paid_on is null and paid_source is null)
-  )
+  ),
+  -- An email tick must always carry its email reference (staff ticks may keep an old one).
+  check (paid_source is distinct from 'email' or paid_evidence_ref is not null)
 );
 
 -- One email reference may tick at most one milestone per client.
@@ -143,12 +145,13 @@ create table public.crm_booking_events (
   milestone_kind text check (milestone_kind is null or milestone_kind in ('deposit','balance')),
   action text not null check (action in (
     'created','edited','cancelled','milestone_paid','milestone_unpaid','due_overridden',
-    'departure_confirmed','auto_tick_proposed','auto_tick_rejected'
+    'departure_confirmed','auto_tick_proposed','auto_tick_rejected',
+    'milestone_created','milestone_deleted','booking_deleted','actor_erased'
   )),
   detail jsonb not null default '{}',
   actor_email text,
   source text not null check (source in ('staff','email','system')),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default clock_timestamp()  -- real order for events written in one transaction
 );
 
 create index crm_booking_events_client_booking_created_idx
@@ -230,6 +233,26 @@ begin
       v_source
     );
     return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    insert into public.crm_booking_events (
+      client_id, booking_id, action, detail, actor_email, source
+    )
+    values (
+      old.client_id,
+      old.id,
+      'booking_deleted',
+      jsonb_build_object(
+        'status', old.status,
+        'tour_id', old.tour_id,
+        'departure_id', old.departure_id,
+        'has_note', old.note is not null
+      ),
+      v_actor,
+      v_source
+    );
+    return old;
   end if;
 
   if old.tour_id is distinct from new.tour_id then
@@ -333,7 +356,7 @@ revoke all on function public.crm_booking_audit_booking() from public, anon, aut
 grant execute on function public.crm_booking_audit_booking() to service_role;
 
 create trigger crm_bookings_audit
-  after insert or update on public.crm_bookings
+  after insert or update or delete on public.crm_bookings
   for each row
   execute function public.crm_booking_audit_booking();
 
@@ -346,6 +369,42 @@ declare
   v_source text := coalesce(nullif(current_setting('crm_booking.source', true), ''), 'system');
   v_changed text[] := array[]::text[];
 begin
+  if tg_op = 'INSERT' then
+    insert into public.crm_booking_events (
+      client_id, booking_id, milestone_kind, action, detail, actor_email, source
+    )
+    values (
+      new.client_id,
+      new.booking_id,
+      new.kind,
+      'milestone_created',
+      jsonb_build_object('kind', new.kind),
+      v_actor,
+      v_source
+    );
+    return new;
+  end if;
+
+  if tg_op = 'DELETE' then
+    insert into public.crm_booking_events (
+      client_id, booking_id, milestone_kind, action, detail, actor_email, source
+    )
+    values (
+      old.client_id,
+      old.booking_id,
+      old.kind,
+      'milestone_deleted',
+      jsonb_build_object(
+        'kind', old.kind,
+        'state', old.state,
+        'had_evidence_ref', old.paid_evidence_ref is not null
+      ),
+      v_actor,
+      v_source
+    );
+    return old;
+  end if;
+
   if old.state = 'unpaid' and new.state = 'paid' then
     insert into public.crm_booking_events (
       client_id, booking_id, milestone_kind, action, detail, actor_email, source
@@ -440,7 +499,7 @@ revoke all on function public.crm_booking_audit_milestone() from public, anon, a
 grant execute on function public.crm_booking_audit_milestone() to service_role;
 
 create trigger crm_booking_milestones_audit
-  after update on public.crm_booking_milestones
+  after insert or update or delete on public.crm_booking_milestones
   for each row
   execute function public.crm_booking_audit_milestone();
 
@@ -558,6 +617,10 @@ create function public.crm_booking_create(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -618,6 +681,10 @@ create function public.crm_booking_update(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -627,9 +694,15 @@ declare
   v_tour_id uuid;
   v_departure_id uuid;
   v_depart_on date;
+  v_party_size smallint;
+  v_note text;
 begin
   if p_actor is null or length(btrim(p_actor)) = 0 then
     raise exception 'invalid_actor';
+  end if;
+
+  if p_patch is not null and jsonb_typeof(p_patch) <> 'object' then
+    raise exception 'invalid_patch:patch';
   end if;
 
   v_actor := lower(btrim(p_actor));
@@ -653,6 +726,68 @@ begin
 
   if p_patch ? 'is_cruise' and p_patch->'is_cruise' = 'null'::jsonb then
     raise exception 'invalid_null:%', 'is_cruise';
+  end if;
+
+  -- Validate patch values up front so malformed input never reaches a raw cast error.
+  if p_patch ? 'tour_id' then
+    begin
+      v_tour_id := (p_patch->>'tour_id')::uuid;
+    exception
+      when data_exception then
+        raise exception 'invalid_patch:tour_id';
+    end;
+  end if;
+
+  if p_patch ? 'departure_id' then
+    begin
+      v_departure_id := nullif(p_patch->>'departure_id', '')::uuid;
+    exception
+      when data_exception then
+        raise exception 'invalid_patch:departure_id';
+    end;
+  end if;
+
+  if p_patch ? 'booked_on' then
+    begin
+      perform (p_patch->>'booked_on')::date;
+    exception
+      when data_exception then
+        raise exception 'invalid_patch:booked_on';
+    end;
+  end if;
+
+  if p_patch ? 'party_size' then
+    begin
+      v_party_size := nullif(p_patch->>'party_size', '')::smallint;
+    exception
+      when data_exception then
+        raise exception 'invalid_patch:party_size';
+    end;
+
+    if v_party_size is not null and (v_party_size < 1 or v_party_size > 60) then
+      raise exception 'invalid_patch:party_size';
+    end if;
+  end if;
+
+  if p_patch ? 'is_cruise' then
+    begin
+      perform (p_patch->>'is_cruise')::boolean;
+    exception
+      when data_exception then
+        raise exception 'invalid_patch:is_cruise';
+    end;
+  end if;
+
+  if p_patch ? 'note' then
+    if jsonb_typeof(p_patch->'note') not in ('string', 'null') then
+      raise exception 'invalid_patch:note';
+    end if;
+
+    v_note := nullif(btrim(coalesce(p_patch->>'note', '')), '');
+
+    if v_note is not null and length(v_note) > 500 then
+      raise exception 'invalid_patch:note';
+    end if;
   end if;
 
   select *
@@ -683,10 +818,13 @@ begin
   v_next.is_cruise := case when p_patch ? 'is_cruise' then (p_patch->>'is_cruise')::boolean else v_row.is_cruise end;
   v_next.note := case when p_patch ? 'note' then nullif(btrim(coalesce(p_patch->>'note', '')), '') else v_row.note end;
 
-  -- The final (tour_id, departure_id) pair must still be valid for this client.
+  -- The final (tour_id, departure_id) pair must be valid for this client, but only when it
+  -- changed: a note or party-size edit must keep working after the catalog hard-deleted a row.
   v_tour_id := v_next.tour_id;
   v_departure_id := v_next.departure_id;
-  v_depart_on := public.crm_booking_check_refs(p_client_id, null, v_tour_id, v_departure_id);
+  if v_tour_id is distinct from v_row.tour_id or v_departure_id is distinct from v_row.departure_id then
+    v_depart_on := public.crm_booking_check_refs(p_client_id, null, v_tour_id, v_departure_id);
+  end if;
 
   -- Snapshot rules: re-read when the departure is new or the tour changed; clear when the
   -- departure is cleared; leave alone when the departure is unchanged.
@@ -743,6 +881,10 @@ create function public.crm_booking_set_paid(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -866,6 +1008,10 @@ create function public.crm_booking_unset_paid(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -948,6 +1094,10 @@ create function public.crm_booking_override_due(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1058,6 +1208,10 @@ create function public.crm_booking_confirm_departure(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1139,6 +1293,10 @@ create function public.crm_booking_nudge(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1259,6 +1417,10 @@ create function public.crm_booking_cancel(
 )
 returns jsonb
 language plpgsql
+-- Function-level SET restores the previous settings when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1325,11 +1487,17 @@ create function public.crm_booking_erase_actor_email(
 )
 returns integer
 language plpgsql
+-- Function-level SET restores the previous values when the function exits.
+set crm_booking.actor = ''
+set crm_booking.source = ''
+set crm_booking.erase = ''
 as $$
 declare
   v_actor text;
   v_email text;
   v_count integer;
+  v_bookings_count integer;
+  v_members_count integer;
 begin
   if p_actor is null or length(btrim(p_actor)) = 0 then
     raise exception 'invalid_actor';
@@ -1354,6 +1522,33 @@ begin
 
   get diagnostics v_count = row_count;
 
+  update public.crm_bookings
+     set created_by = '(erased)'
+   where client_id = p_client_id
+     and lower(created_by) = lower(v_email);
+
+  get diagnostics v_bookings_count = row_count;
+
+  update public.crm_booking_members
+     set granted_by = '(erased)'
+   where client_id = p_client_id
+     and lower(granted_by) = lower(v_email);
+
+  get diagnostics v_members_count = row_count;
+
+  -- One audit event for the erasure itself; the erased email is never stored here.
+  insert into public.crm_booking_events (
+    client_id, booking_id, action, detail, actor_email, source
+  )
+  values (
+    p_client_id,
+    '00000000-0000-0000-0000-000000000000'::uuid,
+    'actor_erased',
+    jsonb_build_object('rows', v_count),
+    v_actor,
+    'staff'
+  );
+
   perform set_config('crm_booking.erase', '', true);
 
   return v_count;
@@ -1362,3 +1557,94 @@ $$;
 
 revoke all on function public.crm_booking_erase_actor_email(uuid, text, text) from public, anon, authenticated;
 grant execute on function public.crm_booking_erase_actor_email(uuid, text, text) to service_role;
+
+-- ---------------------------------------------------------------------------
+-- 18. Same-client integrity for direct table writes
+-- ---------------------------------------------------------------------------
+create function public.crm_booking_enforce_same_client()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'UPDATE'
+     and new.client_id is not distinct from old.client_id
+     and new.contact_id is not distinct from old.contact_id
+     and new.tour_id is not distinct from old.tour_id
+     and new.departure_id is not distinct from old.departure_id then
+    return new;
+  end if;
+
+  if not exists (
+    select 1 from public.contacts
+     where id = new.contact_id
+       and client_id = new.client_id
+  ) then
+    raise exception 'cross_client_reference:%', 'contact_id';
+  end if;
+
+  if not exists (
+    select 1 from public.tour_catalog_tours
+     where id = new.tour_id
+       and client_id = new.client_id
+  ) then
+    raise exception 'cross_client_reference:%', 'tour_id';
+  end if;
+
+  if new.departure_id is not null then
+    if not exists (
+      select 1 from public.tour_catalog_departures
+       where id = new.departure_id
+         and client_id = new.client_id
+         and tour_id = new.tour_id
+    ) then
+      raise exception 'cross_client_reference:%', 'departure_id';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.crm_booking_enforce_same_client() from public, anon, authenticated;
+grant execute on function public.crm_booking_enforce_same_client() to service_role;
+
+create trigger crm_bookings_enforce_same_client
+  before insert or update on public.crm_bookings
+  for each row
+  execute function public.crm_booking_enforce_same_client();
+
+-- crm_booking_milestones: the booking must exist and belong to the same client.
+-- On UPDATE check only when client_id or booking_id changed.
+create function public.crm_booking_milestone_enforce_client()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_booking_client_id uuid;
+begin
+  if tg_op = 'UPDATE'
+     and new.client_id is not distinct from old.client_id
+     and new.booking_id is not distinct from old.booking_id then
+    return new;
+  end if;
+
+  select client_id
+    into v_booking_client_id
+    from public.crm_bookings
+   where id = new.booking_id;
+
+  if not found or v_booking_client_id is distinct from new.client_id then
+    raise exception 'cross_client_reference:%', 'booking';
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.crm_booking_milestone_enforce_client() from public, anon, authenticated;
+grant execute on function public.crm_booking_milestone_enforce_client() to service_role;
+
+create trigger crm_booking_milestones_enforce_client
+  before insert or update on public.crm_booking_milestones
+  for each row
+  execute function public.crm_booking_milestone_enforce_client();
