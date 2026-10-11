@@ -38,6 +38,7 @@ import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { foldRootCauseDuplicates } from './dedupe-root-cause'
 import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
@@ -137,7 +138,8 @@ export async function loadManualItems(
   }
   // 两组同时跑，拼回时仍是「基础设施在前、客户通道在后」的原顺序（见 runPushers 头注）
   await runPushers(items, [...infra, ...clientPushers(supabase, clients, now)])
-  return items
+  // 同一个根因报了很多次的折成一次（AI 余额用完 → 各客户体检全挂只是症状；授权断了 + 同步失败 = 同一修法）
+  return foldRootCauseDuplicates(items).items
 }
 
 /** 跟客户名单无关的检查（余额、断电、定时任务、授权、钥匙……），客户表读挂了也照跑。 */
