@@ -82,6 +82,7 @@ function renderPane(overrides: Partial<Parameters<typeof TourListPane>[0]> = {})
   const onSelect = vi.fn()
   render(
     <TourListPane
+      clientId="c1"
       tours={TOURS}
       departures={DEPARTURES}
       changedTourIds={[]}
@@ -202,7 +203,7 @@ describe('TourListPane', () => {
     fireEvent.click(screen.getByRole('button', { name: '系列 Atlantis' }))
     expect(screen.queryByTestId('tour-row-t1')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Gold（2）' })).not.toBeInTheDocument()
-    expect(window.localStorage.getItem('tour-catalog:list-collapsed')).toContain('r:atlantis')
+    expect(window.localStorage.getItem('tour-catalog:list-collapsed:c1')).toContain('r:atlantis')
     cleanup()
     renderPane()
     expect(screen.queryByTestId('tour-row-t1')).not.toBeInTheDocument()
@@ -222,7 +223,7 @@ describe('TourListPane', () => {
     fireEvent.click(screen.getByRole('button', { name: '系列 Atlantis' }))
     fireEvent.click(screen.getByRole('button', { name: 'Gold（1）' }))
     expect(screen.getByTestId('tour-row-t1')).toBeInTheDocument()
-    expect(window.localStorage.getItem('tour-catalog:list-collapsed')).toBeNull()
+    expect(window.localStorage.getItem('tour-catalog:list-collapsed:c1')).toBeNull()
     fireEvent.change(screen.getByLabelText('按团名搜索'), { target: { value: '' } })
     expect(screen.getByTestId('tour-row-t1')).toBeInTheDocument()
   })

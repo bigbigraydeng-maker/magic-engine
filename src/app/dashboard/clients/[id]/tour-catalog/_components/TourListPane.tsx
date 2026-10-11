@@ -56,11 +56,11 @@ function ListToolbar({ query, filter, onQueryChange, onFilterChange }: ListToolb
   )
 }
 
-const COLLAPSE_STORAGE_KEY = 'tour-catalog:list-collapsed'
+const collapseStorageKey = (clientId: string) => `tour-catalog:list-collapsed:${clientId}`
 
-function readCollapsed(): Set<string> {
+function readCollapsed(clientId: string): Set<string> {
   try {
-    const raw = window.localStorage.getItem(COLLAPSE_STORAGE_KEY)
+    const raw = window.localStorage.getItem(collapseStorageKey(clientId))
     const parsed: unknown = raw ? JSON.parse(raw) : []
     return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [])
   } catch {
@@ -68,9 +68,9 @@ function readCollapsed(): Set<string> {
   }
 }
 
-function writeCollapsed(keys: Set<string>): void {
+function writeCollapsed(clientId: string, keys: Set<string>): void {
   try {
-    window.localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify([...keys]))
+    window.localStorage.setItem(collapseStorageKey(clientId), JSON.stringify([...keys]))
   } catch {
     // storage blocked: folding still works for this visit
   }
@@ -85,23 +85,22 @@ interface TourListState {
   toggle: (key: string) => void
 }
 
-function useTourListState(): TourListState {
+function useTourListState(clientId: string): TourListState {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<TourFilter>('all')
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
 
   // Read after mount so server and first client render agree.
   useEffect(() => {
-    const stored = readCollapsed()
-    if (stored.size > 0) setCollapsed(stored)
-  }, [])
+    setCollapsed(readCollapsed(clientId))
+  }, [clientId])
 
   const toggle = (key: string) => {
     setCollapsed(prev => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key)
       else next.add(key)
-      writeCollapsed(next)
+      writeCollapsed(clientId, next)
       return next
     })
   }
@@ -110,6 +109,7 @@ function useTourListState(): TourListState {
 }
 
 export function TourListPane(props: {
+  clientId: string
   tours: CatalogTourView[]
   departures: CatalogDepartureView[]
   changedTourIds: string[]
@@ -119,7 +119,7 @@ export function TourListPane(props: {
   neverPublished?: boolean
 }) {
   const { tours, departures, changedTourIds, selectedId, onSelect } = props
-  const { query, filter, collapsed, setQuery, setFilter, toggle } = useTourListState()
+  const { query, filter, collapsed, setQuery, setFilter, toggle } = useTourListState(props.clientId)
   const emptyText =
     props.neverPublished === true && filter === 'changed' ? NEVER_PUBLISHED_EMPTY_TEXT : NO_MATCH_TEXT
 
