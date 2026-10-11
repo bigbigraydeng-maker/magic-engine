@@ -11,7 +11,7 @@ import { FactoryChat } from './FactoryChat'
 import { OneClickConfirm } from './OneClickConfirm'
 import { OrderNo } from './OrderNo'
 import { PublishOutlets } from './PublishOutlets'
-import { publishedBadge } from './statusMeta'
+import { publishedBadge, POST_PUBLISH } from './statusMeta'
 import { PendingCardHead, ReadOnlyTile } from './OrderTile'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 
@@ -152,7 +152,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       )
       setOrders(pending)
       const mine = (json.orders ?? []).filter((o: WorkOrder & { client_id?: string }) => !clientId || o.client_id === clientId)
-      setPublished(mine.filter((o: WorkOrder) => o.status === 'published'))
+      setPublished(mine.filter((o: WorkOrder) => POST_PUBLISH.includes(o.status)))
       setSuperseded(mine.filter((o: WorkOrder) => o.status === 'superseded'))
       if (pending.length > 0) setHasShown(true)
       setError(null)

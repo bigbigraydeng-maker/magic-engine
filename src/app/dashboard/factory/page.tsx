@@ -1,13 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import { factoryConfigHref } from '@/lib/factory/config-link'
 import type { PublishedView } from '@/lib/factory/publish/publish-display'
 import { factoryVideoUrl } from '@/lib/factory/outlets'
-import { STATUS_META, STATUS_ORDER, publishedBadge, REASON_STATUSES } from './_components/statusMeta'
+import { STATUS_META, STATUS_ORDER, publishedBadge, REASON_STATUSES, POST_PUBLISH } from './_components/statusMeta'
 import { ReviewInbox } from './_components/ReviewInbox'
 
 // P21.J 驾驶舱 — 看片 + 对话框 + 全局工单状态,一页搞定(PM:factory 页 = 驾驶舱)
@@ -59,6 +59,7 @@ export default function FactoryCockpitPage() {
   const [reviving, setReviving] = useState<string | null>(null)
   const [worker, setWorker] = useState<{ last_heartbeat_at: string | null; active_count: number }>({ last_heartbeat_at: null, active_count: 0 })
   const [selectedClient, setSelectedClient] = useState<string | null>(null)
+  const manualPick = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -105,7 +106,7 @@ export default function FactoryCockpitPage() {
     const m = new Map<string, { id: string; name: string; count: number }>()
     for (const o of visibleOrders) {
       // 已发布 / 已作废也要能进审片区看历史卡片(count 只计待审)
-      if (o.status !== 'in_review' && o.status !== 'published' && o.status !== 'superseded') continue
+      if (o.status !== 'in_review' && !POST_PUBLISH.includes(o.status) && o.status !== 'superseded') continue
       const e = m.get(o.client_id) ?? { id: o.client_id, name: o.client_name, count: 0 }
       if (o.status === 'in_review') e.count += 1
       m.set(o.client_id, e)
@@ -119,7 +120,12 @@ export default function FactoryCockpitPage() {
     // 链接也要指得对 —— 没片子的时候恰恰最需要去检查配置。
     if (lockedClient) { setSelectedClient(lockedClient); return }
     if (reviewClients.length === 0) { setSelectedClient(null); return }
-    if (!reviewClients.some((c) => c.id === selectedClient)) setSelectedClient(reviewClients[0].id)
+    const current = reviewClients.find((c) => c.id === selectedClient)
+    // 用户手动点选的客户保留;自动选中的客户只剩历史时,跳到仍有待审的客户
+    const firstPending = reviewClients.find((c) => c.count > 0)
+    if (!current || (!manualPick.current && current.count === 0 && firstPending)) {
+      setSelectedClient((firstPending ?? reviewClients[0]).id)
+    }
   }, [reviewClients, selectedClient, lockedClient])
 
   const grouped = STATUS_ORDER
@@ -191,7 +197,7 @@ export default function FactoryCockpitPage() {
                   return (
                     <button
                       key={c.id}
-                      onClick={() => setSelectedClient(c.id)}
+                      onClick={() => { manualPick.current = true; setSelectedClient(c.id) }}
                       className={`px-3 h-9 rounded-lg text-sm font-medium border transition-colors inline-flex items-center gap-2 ${
                         active ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
