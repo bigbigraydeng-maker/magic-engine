@@ -61,7 +61,7 @@ jobs:
         env:
           RESULTS: ${{ runner.temp }}/kernel-architecture-results.json
           # 合并时的条数（2026-09-27：181）。架构测试只该越加越多；真要删测试，改这里同样要过 A 级审。
-          MIN_PASSED: '181'
+          MIN_PASSED: '201'
         run: |
           node -e '
             const path = require("path")
