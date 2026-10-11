@@ -67,10 +67,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
   maliang_render_failed: 'decide', // 成片不过关：返工（花钱）还是放弃
-  // 台账：决定了没人动（取消还是继续）、验过不成（重做还是关闭）—— 这是 PM 保留的
-  // 优先级决定（CLAUDE.md §2），而且 CLAUDE.md §9.6 承诺台账每个工作日被今日待办读一遍
-  ledger_decided_stale: 'decide',
-  ledger_verification_failed: 'decide',
+  // （台账的「决定了没人动」「验过不成」2026-10-12 起不在这里了：PM 拍板——邮件只发
+  //  「机器完成不了、必须他本人做」的事；这两类是窗口和开发的活，一次堆出 118 张卡，
+  //  PM 不会一条条看。见下面 dev 栏。）
   // 依法要求删数据我们答应了却没做到 —— 对外 / 合规义务。how 虽是「让开发查」，但主干明确
   // 要它留在 PM 可见栏（不许只写日志、进了 NEVER_DROP_KINDS），风险归 PM 拍板一栏。
   meta_data_deletion_failure: 'decide',
@@ -210,6 +209,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 一件新的拍板事再来找 PM。
   platform_candidate_review_due: 'dev',
   // 台账：做完了去验、目录读不出、夜巡没来 —— 都是做事的窗口 / 开发的活
+  // 台账：决定了没人动、验过不成 —— 窗口 / 开发去取消、认领或重做；PM 邮件里只留一行总数。
+  // CLAUDE.md §9.6「台账每个工作日被今日待办读一遍」仍成立：它们在「开发欠账」清单里每天重算。
+  ledger_decided_stale: 'dev',
+  ledger_verification_failed: 'dev',
   ledger_done_unverified: 'dev',
   ledger_unreadable: 'dev',
   ledger_patrol_missing: 'dev',
