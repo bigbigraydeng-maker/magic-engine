@@ -274,7 +274,7 @@ describe('processD3Hit —— 归属闸（第二道防线，2026-09-27）', () =
     const submitCandidate = vi.fn()
     const dryOffConfig = makeConfig({ autopilot_dry_run: false })
     const deps = makeDeps({
-      submitCandidate, loadConfig: vi.fn(async () => dryOffConfig),
+      submitCandidate, loadConfig: vi.fn(async () => loaded(dryOffConfig)),
       verifyAdsetOwnership: vi.fn(async (): Promise<AdsetOwnershipCheck> => ({ owned: false, verdict: 'client_page_unknown', detail: '没登记主页' })),
     })
     const result = await processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig })
@@ -298,7 +298,7 @@ describe('processD3Hit —— 归属闸（第二道防线，2026-09-27）', () =
     }))
     const { supabase, inserted } = makeFakeFlywheelSupabase()
     const dryOffConfig = makeConfig({ autopilot_dry_run: false })
-    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => dryOffConfig) })
+    const deps = makeDeps({ supabase, submitCandidate, loadConfig: vi.fn(async () => loaded(dryOffConfig)) })
     await processD3Hit(deps, { ...baseArgs, diagnosis: makeD3Diagnosis(), config: dryOffConfig })
     const own = { verdict: 'own', ads_checked: 2, client_page_id: 'page-own' }
     expect(inserted[0].payload).toMatchObject({ ownership: own })
