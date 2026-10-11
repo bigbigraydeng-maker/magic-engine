@@ -32,7 +32,6 @@ export function protectedPageResponse(err: unknown): NextResponse | null {
       success: false,
       error: 'This page is on the protected-page list. Only the account owner can change it.',
       code: 'PROTECTED_PAGE',
-      decision: err.decision,
     },
     { status: err.status },
   )

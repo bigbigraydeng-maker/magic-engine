@@ -5,6 +5,7 @@
  * written", not merely "the function called a mock".
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { vi } from 'vitest'
 import {
   createPageWriteGuard,
   resolveActorFromEmail,
@@ -46,10 +47,10 @@ export function gateFake(seoConfig: unknown, opts: { lookupError?: boolean } = {
 export type TestActor = 'fde' | 'pm' | 'system'
 
 export function realGuard(fake: GateFake, who: TestActor, clientId = 'client-1'): PageWriteGuard {
-  const env = { PROTECTED_PAGE_OVERRIDE_EMAILS: 'pm@example.com' }
+  vi.stubEnv('PROTECTED_PAGE_OVERRIDE_EMAILS', 'pm@example.com')
   const actor =
     who === 'system' ? SYSTEM_ACTOR
-    : who === 'pm' ? resolveActorFromEmail('PM@example.com ', true, env)
-    : resolveActorFromEmail('fde@example.com', true, env)
+    : who === 'pm' ? resolveActorFromEmail('PM@example.com ', true)
+    : resolveActorFromEmail('fde@example.com', true)
   return createPageWriteGuard({ supabase: fake.client, clientId, actor, route: 'test' })
 }

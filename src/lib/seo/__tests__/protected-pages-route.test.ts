@@ -46,7 +46,8 @@ describe('protectedPageResponse', () => {
   it('maps a gate refusal to 403 PROTECTED_PAGE and ignores every other error', async () => {
     const res = protectedPageResponse(new ProtectedPageError('unknown', 'x'))
     expect(res?.status).toBe(403)
-    expect(await res?.json()).toMatchObject({ code: 'PROTECTED_PAGE', decision: 'unknown' })
+    expect(await res?.json()).toMatchObject({ code: 'PROTECTED_PAGE' })
+    expect(await protectedPageResponse(new ProtectedPageError('protected', 'x'))?.json()).not.toHaveProperty('decision') // no probing which pages are listed
     expect(protectedPageResponse(new Error('boom'))).toBeNull()
   })
 })

@@ -2852,14 +2852,16 @@ describe('SEO 保护页统一闸（A1）', () => {
     },
   }
   const countWrites = (src: string): number => (src.match(WRITE_CALL) ?? []).length
+  /** A real gate call: on a guard variable (not `console.assert(` / `assert.ok(` / a test library). */
+  const GATE_CALL = /\b(?:input\.guard|pageGuard|guard)\.assert\(|\.createPageGuard\([^)]*\)\.assert\(/
+  const needsGate = (src: string): boolean => countWrites(src) > 0 && !GATE_CALL.test(src)
 
   it('每个会改客户仓库的文件：要么真的调用了闸，要么在冻结白名单里', () => {
     const offenders: string[] = []
     for (const f of PROD_FILES) {
       if (f === 'src/lib/cms/github-client.ts') continue // 定义处
       const src = readCode(f)
-      if (countWrites(src) === 0) continue
-      if (/\.assert\(/.test(src)) continue
+      if (!needsGate(src)) continue
       if (!WRITE_PATH_ALLOWLIST[f]) offenders.push(f)
     }
     expect(
@@ -2867,6 +2869,26 @@ describe('SEO 保护页统一闸（A1）', () => {
       '这些文件会改客户仓库里的页面，却没调用保护页闸（guard.assert）。' +
         '接上闸，或者先问子牙再进白名单（并写明为什么不会改已有页）。',
     ).toEqual([])
+  })
+
+  /**
+   * 编译期（必传 `guard` 参数）在 CI 里不一定被检查：next build 跳过类型检查（见 CLAUDE.md），所以这里再用文本钉一遍——
+   * 凡是调用这些「改已有页」函数的生产文件，必须在同一文件里造出闸（buildRouteGuard / createPageWriteGuard / systemPageGuard）。
+   */
+  it('「改已有页」函数的调用方必须自己造闸，不能传一个来路不明的对象', () => {
+    const UPDATERS = /\b(?:updateExistingWordpressPost|orchestrateSeoFix|publishPageUpgradeToGithub|runCtsMetaPr|createCtsRepoApplyAdapter)\(/
+    const DEFINES = /\bexport (?:async )?function (?:updateExistingWordpressPost|orchestrateSeoFix|publishPageUpgradeToGithub|runCtsMetaPr|createCtsRepoApplyAdapter)\b/
+    const MAKES_GUARD = /\b(?:buildRouteGuard|createPageWriteGuard|systemPageGuard)\(/
+    const offenders = PROD_FILES.filter((f) => {
+      const src = readCode(f)
+      return UPDATERS.test(src) && !DEFINES.test(src) && !MAKES_GUARD.test(src)
+    })
+    expect(offenders).toEqual([])
+  })
+
+  it('PM 身份只能由 protected-pages.ts / protected-pages-route.ts 产生（不许别处自己造「PM」）', () => {
+    const callers = PROD_FILES.filter((f) => /\bresolveActorFromEmail\(/.test(readCode(f)))
+    expect(callers.sort()).toEqual([PROTECTED_PAGES_FILE, 'src/lib/seo/protected-pages-route.ts'].sort())
   })
 
   it('白名单冻结：写调用次数一变就红；条目对应的文件必须还在', () => {
@@ -2890,9 +2912,10 @@ describe('SEO 保护页统一闸（A1）', () => {
     const noGate = `await github.commitFile(a, b, c)`
     const gated = `await guard.assert(identity)\nawait github.commitFile(a, b, c)`
     const inComment = stripComments(`// await github.commitFile(a, b, c)\nexport const x = 1`)
-    const flagged = (src: string) => countWrites(src) > 0 && !/\.assert\(/.test(src)
-    expect(flagged(noGate)).toBe(true)
-    expect(flagged(gated)).toBe(false)
-    expect(flagged(inComment)).toBe(false)
+    const fakeGate = `console.assert(true)\nawait github.commitFile(a, b, c)`
+    expect(needsGate(noGate)).toBe(true)
+    expect(needsGate(gated)).toBe(false)
+    expect(needsGate(inComment)).toBe(false)
+    expect(needsGate(fakeGate), 'console.assert( is not a gate').toBe(true)
   })
 })

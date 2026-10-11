@@ -8,7 +8,7 @@ import {
 } from './static-html-page-upgrade'
 import { CMS_ACTION_TYPE } from './vocabulary'
 import { supabaseAdmin } from '../supabase'
-import { identityFromUrl, mergeIdentities, type PageWriteGuard } from '@/lib/seo/protected-pages'
+import { assertGuardMatchesClient, identityFromUrl, mergeIdentities, type PageWriteGuard } from '@/lib/seo/protected-pages'
 
 export interface GithubPageUpgradeInput {
   clientId: string
@@ -49,6 +49,7 @@ export type GithubPageUpgradeResult =
 export async function publishPageUpgradeToGithub(
   input: GithubPageUpgradeInput,
 ): Promise<GithubPageUpgradeResult> {
+  assertGuardMatchesClient(input.guard, input.clientId)
   let conn: Awaited<ReturnType<typeof getConnection>>
   try {
     conn = await getConnection(input.clientId)

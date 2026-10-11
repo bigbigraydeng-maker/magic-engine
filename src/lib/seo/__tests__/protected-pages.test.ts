@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   HOME_PATH,
@@ -346,30 +346,33 @@ describe('decide', () => {
 // ---------------------------------------------------------------------------
 
 describe('resolveActorFromEmail', () => {
+  afterEach(() => { vi.unstubAllEnvs() })
+
   it('is not PM when the env var is unset', () => {
-    const actor = resolveActorFromEmail('pm@example.com', true, {})
+    vi.stubEnv('PROTECTED_PAGE_OVERRIDE_EMAILS', '')
+    const actor = resolveActorFromEmail('pm@example.com', true)
     expect(actor.isPm).toBe(false)
     expect(actor.kind).toBe('human')
   })
 
   it('trims and lowercases before matching', () => {
-    const actor = resolveActorFromEmail('  PM@Example.com ', true, {
-      PROTECTED_PAGE_OVERRIDE_EMAILS: ' pm@example.com , other@example.com ',
-    })
-    expect(actor.isPm).toBe(true)
+    vi.stubEnv('PROTECTED_PAGE_OVERRIDE_EMAILS', ' pm@example.com , other@example.com ')
+    expect(resolveActorFromEmail('  PM@Example.com ', true).isPm).toBe(true)
   })
 
   it('is not PM when the email is unverified', () => {
-    const actor = resolveActorFromEmail('pm@example.com', false, {
-      PROTECTED_PAGE_OVERRIDE_EMAILS: 'pm@example.com',
-    })
-    expect(actor.isPm).toBe(false)
+    vi.stubEnv('PROTECTED_PAGE_OVERRIDE_EMAILS', 'pm@example.com')
+    expect(resolveActorFromEmail('pm@example.com', false).isPm).toBe(false)
+  })
+
+  it('🔴 there is no way to pass an allow-list in: a third argument is not part of the API', () => {
+    expect(resolveActorFromEmail.length).toBe(2)
   })
 
   it('hashes the email and falls back to anonymous', () => {
-    const actor = resolveActorFromEmail('pm@example.com', true, {})
-    expect(actor.callerHash).toHaveLength(12)
-    expect(resolveActorFromEmail(null, false, {}).callerHash).toBe('anonymous')
+    vi.stubEnv('PROTECTED_PAGE_OVERRIDE_EMAILS', '')
+    expect(resolveActorFromEmail('pm@example.com', true).callerHash).toHaveLength(12)
+    expect(resolveActorFromEmail(null, false).callerHash).toBe('anonymous')
   })
 })
 
@@ -440,7 +443,7 @@ describe('createPageWriteGuard', () => {
     const fake = makeFakeSupabase({
       clients: [{ id: 'c1', seo_config: { meta_cycle_protected_slugs: ['a'] } }],
     })
-    const actor = resolveActorFromEmail('user@example.com', true, {})
+    const actor = resolveActorFromEmail('user@example.com', true)
     const guard = guardFor(fake, actor)
     await expect(guard.assert(identityFromUrl('/a'))).rejects.toBeInstanceOf(ProtectedPageError)
     expect(fake.cronRunLogs).toHaveLength(1)
@@ -463,14 +466,15 @@ describe('createPageWriteGuard', () => {
     const fake = makeFakeSupabase({
       clients: [{ id: 'c1', seo_config: { meta_cycle_protected_slugs: ['a'] } }],
     })
-    const actor = resolveActorFromEmail('pm@example.com', true, {
-      PROTECTED_PAGE_OVERRIDE_EMAILS: 'pm@example.com',
-    })
+    vi.stubEnv('PROTECTED_PAGE_OVERRIDE_EMAILS', 'pm@example.com')
+    const actor = resolveActorFromEmail('pm@example.com', true)
     await guardFor(fake, actor).assert(identityFromUrl('/a'))
     expect(fake.cronRunLogs).toHaveLength(1)
     expect((fake.cronRunLogs[0].summary as Record<string, unknown>).decision).toBe(
       'allowed_pm_override',
     )
+    // the receipt says WHAT was overridden (a protected page, vs. an unreadable list)
+    expect((fake.cronRunLogs[0].summary as Record<string, unknown>).overridden_decision).toBe('protected')
   })
 
   it('refuses a PM override when the receipt cannot be written', async () => {
@@ -478,9 +482,8 @@ describe('createPageWriteGuard', () => {
       clients: [{ id: 'c1', seo_config: { meta_cycle_protected_slugs: ['a'] } }],
       insertError: { message: 'boom' },
     })
-    const actor = resolveActorFromEmail('pm@example.com', true, {
-      PROTECTED_PAGE_OVERRIDE_EMAILS: 'pm@example.com',
-    })
+    vi.stubEnv('PROTECTED_PAGE_OVERRIDE_EMAILS', 'pm@example.com')
+    const actor = resolveActorFromEmail('pm@example.com', true)
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await expect(guardFor(fake, actor).assert(identityFromUrl('/a'))).rejects.toBeInstanceOf(
       ProtectedPageError,
@@ -506,5 +509,34 @@ describe('createPageWriteGuard', () => {
     fake.clients.set('c1', { id: 'c1', seo_config: { meta_cycle_protected_slugs: ['b'] } })
     await guard.assert(identityFromUrl('/a'))
     expect(fake.cronRunLogs).toHaveLength(1)
+  })
+})
+
+describe('canonical form is shared by pages and list entries (.html / .htm / index / slashes)', () => {
+  it.each([
+    ['china-tours.html', 'china-tours'],
+    ['china-tours.htm', 'china-tours'],
+    ['https://x.com/China-Tours/index.html', 'china-tours'],
+    ['foo/index/', 'foo'],
+    ['foo/index.html/', 'foo'],
+    ['public/en/china-tours.htm', 'public/en/china-tours'],
+  ])('page %s => %s', (input, want) => {
+    expect(normalizePagePath(input)).toBe(want)
+  })
+
+  it.each([
+    ['china-tours.html', 'china-tours'],
+    ['https://x.com/china-tours/index.html', 'china-tours'],
+    ['/en/china-tours.htm', 'en/china-tours'],
+    ['index', '/'],
+    ['home', 'home'], // list entries get no home alias: `home` stays a slug entry
+  ])('list entry %s => %s', (input, want) => {
+    expect(parseProtectedSlugs([input]).entries).toEqual([want])
+  })
+
+  it('🔴 an entry written as a file name still protects the page it names', () => {
+    const entries = parseProtectedSlugs(['china-tours.html', '/en/about.htm']).entries
+    expect(matchProtected(entries, identityFromUrl('https://x.com/china-tours'))).toBe(true)
+    expect(matchProtected(entries, identityFromUrl('public/en/about.htm', 'file'))).toBe(true)
   })
 })

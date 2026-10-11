@@ -22,7 +22,7 @@
  */
 
 import { validateWordpressSiteUrl } from './url-guard'
-import { identityFromSlug, identityFromUrl, mergeIdentities, type PageIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
+import { identityFromSlug, identityFromUrl, mergeIdentities, unresolvedIdentity, type PageIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
 import { assertPublicHost } from './ssrf-guard'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -767,19 +767,28 @@ export interface UpdateExistingWordpressPostResult {
  */
 /**
  * Identity of the WP page being written: the CURRENT slug and link read back from WP, plus the new slug when
- * the caller renames it (a rename into or out of a protected slug is gated either way). A `?p=ID` style
- * permalink has path '/', which must not be mistaken for the home page when a real slug is known.
+ * the caller renames it (a rename into or out of a protected slug is gated either way).
+ *
+ * Link handling: a link whose path is "/" with NO query string is the real site root, i.e. the front page, so it
+ * counts as the home page identity. A link like `/?p=123` (plain permalinks / drafts) is NOT the home page: it is
+ * ignored when a real slug is known, and when no slug is known either the page cannot be identified at all.
+ * Nothing readable => unresolved (decision 'unknown'), never silently "the home page".
  */
 function wordpressWriteIdentity(current: ExistingWordpressPost, newSlug: string | undefined): PageIdentity {
   const parts: PageIdentity[] = []
   if (current.slug) parts.push(identityFromSlug(current.slug))
   if (newSlug) parts.push(identityFromSlug(newSlug))
   if (current.link) {
-    const linkIdentity = identityFromUrl(current.link)
-    const isRootOnly = linkIdentity.paths.length === 1 && linkIdentity.paths[0].value === '/'
-    if (!(isRootOnly && current.slug)) parts.push(linkIdentity)
+    let queryOnly = false
+    try {
+      const u = new URL(current.link)
+      queryOnly = u.search.length > 0 && u.pathname.replace(/\/+$/, '') === ''
+    } catch {
+      return unresolvedIdentity('bad_link')
+    }
+    if (!queryOnly) parts.push(identityFromUrl(current.link))
   }
-  return parts.length === 0 ? identityFromUrl('') : mergeIdentities(...parts)
+  return parts.length === 0 ? unresolvedIdentity('no_slug_or_link') : mergeIdentities(...parts)
 }
 
 export async function updateExistingWordpressPost(

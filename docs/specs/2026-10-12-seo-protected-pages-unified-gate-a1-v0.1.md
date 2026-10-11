@@ -120,3 +120,15 @@
 5. 架构测试 + `MIN_PASSED` + `docs/ENV.md`。
 
 **当场试跑**：无新定时任务，不适用；PR 附本地 vitest 输出、`tsc --noEmit`、架构测试实跑条数。生产写、Render 环境变量：一概不做，交 PM。
+
+## 8. 实现与 v0.3 稿子的差异（实施后两轮审查的结论，已落代码）
+
+- **seo-fix / 周循环的「目标页是谁」**：v0.3 写的是「slug 在文件里出现多于 1 次即 unknown」。实施后审查（魏征）指出这既挡不住「只出现 1 次但落在别的条目里」，又会误拒「首个锚点就是条目自己、后面另有引用」的正常情况。改为：用括号深度（认字符串/注释）判断**第一个 `slug: 'x'` 是不是嵌在别的条目里**（`src/lib/cms/slug-anchor.ts`），是 → 身份 unknown。`seo-fix` 与 `apply-adapter` 同一规则；`seo-fix` 的闸移到补丁之前（拒绝不泄露 old_value 是否匹配）。
+- **WordPress 身份**：链接是站点根且无查询串 = 真首页（可被 `/` 名单项保护）；`/?p=ID` 类链接忽略；slug 与链接都读不到 → unknown，不再默认成首页。
+- **名单项与页面共用同一套规范化**（去 `.html/.htm`、去 `/index`、重复去斜杠）；`index` 名单项 = 首页；`home` 仍是 slug 项。
+- **PM 判据没有「传入名单」的口子**：`resolveActorFromEmail(email, verified)` 只读真实环境变量；架构测试限定只有两个文件能调用它。
+- **闸对象与客户核对**：`assertGuardMatchesClient`（orchestrator / publisher）；`apply-adapter` 的闸由同一客户的 `buildAdapterForClient` 构造。
+- **apply-adapter**：合并前被拦时**回滚内存里的编辑**，避免下一个候选把保护页改动带进别的自动合并 PR。
+- **架构测试 7 条**（实跑 203 条）：新增「改已有页函数的调用方必须自己造闸」「PM 身份只能由两个文件产生」；闸调用判据收紧到 `guard.assert(`（`console.assert(` 不算）。
+- **回执**：PM 放行的回执带 `overridden_decision`；403 响应体不再返回 `decision`（防探测名单）。
+- **未做（已知）**：每周清单名单坏时只在运行结果里记 `withheld='protected_list_malformed'`，没有另写回执行；`runCtsMetaPr` 带闸保留（已退役，建议后续删除）；WordPress / Shopify 的发布（新建页）函数不在扫描里，只靠白名单文字说明。

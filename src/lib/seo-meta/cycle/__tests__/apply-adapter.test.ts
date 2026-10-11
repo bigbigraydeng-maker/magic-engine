@@ -148,6 +148,34 @@ describe('protected-page gate inside apply (the write-time hard stop)', () => {
     expect(result.prNumber).toBe(99)
   })
 
+  it('🔴 blocked before merge: the in-memory edit is ROLLED BACK, so the next candidate\'s commit does not carry it', async () => {
+    const github = fakeGithub({ mergeResult: true })
+    const { guard } = guardDouble(2) // 1st assert (before edit) passes, 2nd (before merge) refuses, later ones pass
+    const adapter = createCtsRepoApplyAdapter(github, CONN, guard)
+    const first = await adapter.apply(input)
+    expect(first.skipReason).toBe('protected_page_blocked_before_merge')
+    const firstCommit = github.commitFile.mock.calls[0][4] as string
+    expect(firstCommit).toContain('New Title')
+
+    // second candidate in the same run, same cached file: it must start from the ORIGINAL source again
+    github.listPullRequestsByHead.mockResolvedValue([])
+    await adapter.apply({ ...input, candidate: candidate({ slug: 'foo' }), newTitle: 'Other Title' })
+    const secondCommit = github.commitFile.mock.calls[1][4] as string
+    expect(secondCommit).not.toContain('New Title')
+    expect(secondCommit).toContain('Other Title')
+  })
+
+  it('🔴 first `slug:` anchor is a nested reference in another entry => page unknown => gate sees an UNRESOLVED identity', async () => {
+    const NESTED = `export const pages = [\n  { slug: 'china-tours', related: [{ slug: 'foo' }], title: 'T', description: 'D' },\n  { slug: 'foo', title: 'Old Title', description: 'Old desc' },\n]\n`
+    const github = fakeGithub({ mergeResult: true })
+    github.getFileContent.mockResolvedValue({ decodedContent: NESTED, sha: 'blob-sha-1', content: '', size: NESTED.length })
+    const { guard, assert } = guardDouble(1)
+    const result = await createCtsRepoApplyAdapter(github, CONN, guard).apply(input)
+    expect(assert.mock.calls[0][0].unresolved).toBe('nested_slug_anchor')
+    expect(result.skipReason).toBe('protected_page_blocked')
+    expect(github.commitFile).not.toHaveBeenCalled()
+  })
+
   it('dry-run never asks the gate (nothing is written)', async () => {
     const github = fakeGithub({ mergeResult: true })
     const { guard, assert } = guardDouble()

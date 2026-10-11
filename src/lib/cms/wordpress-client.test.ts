@@ -668,6 +668,36 @@ describe('updateExistingWordpressPost', () => {
     expect(identity.slugs).toContain('about')
   })
 
+  it('the real front page (link is the site root, no query) IS the home page identity, so a "/" list entry can protect it', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 5, slug: 'welcome', link: 'https://oztop.com.au/', title: { raw: 't' }, content: { raw: 'c' },
+      excerpt: { raw: 'e' }, status: 'publish', modified: 'm', meta: {},
+    }), { status: 200 }))
+    const assert = vi.fn(async (_identity: PageIdentity) => { throw new ProtectedPageError('protected', 'refused') })
+    const guard = ({ clientId: 'c', assert }) as never as PageWriteGuard
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 5, title: 'T' }, guard)).rejects.toBeInstanceOf(ProtectedPageError)
+    const identity = assert.mock.calls[0][0] as PageIdentity
+    expect(identity.paths.map(p => p.value)).toContain('/')
+    expect(identity.slugs).toContain('welcome')
+  })
+
+  it.each([
+    ['no slug and no link', { slug: '', link: '' }],
+    ['no slug and only a ?p=ID link', { slug: '', link: 'https://oztop.com.au/?p=9' }],
+    ['link that cannot be parsed', { slug: 'x', link: 'not a url' }],
+  ])('🔴 %s => identity is UNRESOLVED (decision unknown), never silently "the home page"', async (_n, fields) => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 9, ...fields, title: { raw: 't' }, content: { raw: 'c' }, excerpt: { raw: 'e' }, status: 'draft', modified: 'm', meta: {},
+    }), { status: 200 }))
+    const assert = vi.fn(async (_identity: PageIdentity) => { throw new ProtectedPageError('unknown', 'refused') })
+    const guard = ({ clientId: 'c', assert }) as never as PageWriteGuard
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 9, title: 'T' }, guard)).rejects.toBeInstanceOf(ProtectedPageError)
+    expect((assert.mock.calls[0][0] as PageIdentity).unresolved).not.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('returns updatedFields = [content] without sending other keys when only content is set', async () => {
     // Regression guard against the most dangerous mistake: accidentally sending
     // `title: undefined` would NOT clear the title, but sending `title: ''`

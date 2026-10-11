@@ -86,4 +86,10 @@ describe('publishPageUpgradeToGithub — protected-page gate', () => {
     expect(result.ok).toBe(true)
     expect(fake.receipts).toHaveLength(0)
   })
+
+  it('🔴 a guard built for ANOTHER client is rejected (it would check the wrong client\'s list)', async () => {
+    const fake = gateFake({ meta_cycle_protected_slugs: ['about'] })
+    await expect(publishPageUpgradeToGithub(input('https://x.com/about', realGuard(fake, 'fde', 'client-OTHER')))).rejects.toThrow(/belongs to client/)
+    noWrites()
+  })
 })

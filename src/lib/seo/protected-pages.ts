@@ -57,23 +57,17 @@ export function normalizeSlug(v: string): string {
 }
 
 /**
- * Spec A. Input may be a full URL, a path, or a bare slug.
- * Returns null when decodeURIComponent throws (caller maps that to
- * `unresolvedIdentity('decode_failed')`).
+ * Shared canonical form for page paths AND list entries: trim, absolute URL -> pathname, drop query/hash,
+ * percent-decode, lowercase, strip slashes, strip a trailing `.html` / `.htm`, strip a trailing `/index`
+ * (repeating, so `foo/index.html/` and `foo/index/` both become `foo`). Returns null when decoding fails.
  */
-export function normalizePagePath(input: string): string | null {
+function canonicalPath(input: string): string | null {
   let s = input.trim()
-
-  // If it parses as an absolute URL, take its pathname.
   try {
-    const url = new URL(s)
-    s = url.pathname
+    s = new URL(s).pathname
   } catch {
     // not a full URL — continue with raw value
   }
-
-  // Drop query and hash (only meaningful for the non-URL branch; a URL's
-  // pathname already excludes them, but a bare path may still carry them).
   s = s.split('#')[0].split('?')[0]
 
   let decoded: string
@@ -83,11 +77,23 @@ export function normalizePagePath(input: string): string | null {
     return null
   }
 
-  let p = decoded.toLowerCase()
-  p = p.replace(/\.html$/, '')
-  p = p.replace(/\/index$/, '')
-  p = p.replace(/^\/+|\/+$/g, '')
+  let p = decoded.toLowerCase().replace(/^\/+|\/+$/g, '')
+  for (let i = 0; i < 4; i++) {
+    const before = p
+    p = p.replace(/\.html?$/, '').replace(/(^|\/)index$/, '').replace(/^\/+|\/+$/g, '')
+    if (p === before) break
+  }
+  return p
+}
 
+/**
+ * Spec A. Input may be a full URL, a path, or a bare slug.
+ * Returns null when decodeURIComponent throws (caller maps that to
+ * `unresolvedIdentity('decode_failed')`).
+ */
+export function normalizePagePath(input: string): string | null {
+  const p = canonicalPath(input)
+  if (p === null) return null
   if (p === '' || p === 'index' || p === 'home') return HOME_PATH
   return p
 }
@@ -149,28 +155,10 @@ export interface ParsedProtected {
  * decoded (caller maps that to malformed 'bad_entry').
  */
 function normalizeEntry(raw: string): string | null {
-  const trimmed = raw.trim()
-  let s = trimmed
-
-  try {
-    const url = new URL(s)
-    s = url.pathname
-  } catch {
-    // not a full URL — continue with raw value
-  }
-
-  s = s.split('#')[0].split('?')[0]
-
-  let decoded: string
-  try {
-    decoded = decodeURIComponent(s)
-  } catch {
-    return null
-  }
-
-  const stripped = decoded.replace(/^\/+|\/+$/g, '').toLowerCase()
-  if (stripped === '') return HOME_PATH
-  return stripped
+  const p = canonicalPath(raw)
+  if (p === null) return null
+  // List entries do NOT get the home aliases: `home` stays a slug entry. Only "nothing left" means the home page.
+  return p === '' ? HOME_PATH : p
 }
 
 /** Spec C. */
@@ -297,7 +285,6 @@ function hashEmail(email: string): string {
 export function resolveActorFromEmail(
   email: string | null | undefined,
   emailVerified: boolean,
-  env: Record<string, string | undefined> = process.env,
 ): PageWriteActor {
   const normalized = typeof email === 'string' ? email.trim().toLowerCase() : ''
   if (normalized.length === 0) {
@@ -305,13 +292,24 @@ export function resolveActorFromEmail(
   }
 
   const callerHash = hashEmail(normalized)
-  const allowList = (env.PROTECTED_PAGE_OVERRIDE_EMAILS ?? '')
+  // Always read from the real process environment: there is deliberately no way to pass the allow-list in,
+  // otherwise any caller could mint a PM actor for itself.
+  const allowList = (process.env.PROTECTED_PAGE_OVERRIDE_EMAILS ?? '')
     .split(',')
     .map((v) => v.trim().toLowerCase())
     .filter((v) => v.length > 0)
+  logOverrideListSizeOnce(allowList.length)
 
   const isPm = emailVerified && allowList.includes(normalized)
   return { kind: 'human', isPm, callerHash } as PageWriteActor
+}
+
+let overrideListSizeLogged = false
+/** One log line the first time the list is read: a mistyped variable shows up as "0" (no emails are logged). */
+function logOverrideListSizeOnce(size: number): void {
+  if (overrideListSizeLogged) return
+  overrideListSizeLogged = true
+  console.info(`[seo-protected-page-gate] override list has ${size} owner email(s)`)
 }
 
 // ---------------------------------------------------------------------------
@@ -331,6 +329,8 @@ export interface GateReceiptInput {
   identity: PageIdentity
   callerHash: string
   targetType: string | null
+  /** What the gate would have decided without the override ('protected' | 'unknown'). */
+  overriddenDecision?: GateDecision
 }
 
 /**
@@ -360,6 +360,7 @@ export async function writeGateReceipt(
       slugs: input.identity.slugs,
       target_type: input.targetType,
       caller_hash: input.callerHash,
+      overridden_decision: input.overriddenDecision ?? null,
     },
     error_message: null,
   })
@@ -421,6 +422,7 @@ export function createPageWriteGuard(input: {
           identity,
           callerHash: actor.callerHash,
           targetType,
+          overriddenDecision: decision,
         })
         if (!written) {
           throw new ProtectedPageError('unknown', 'receipt write failed, override refused')
@@ -444,4 +446,15 @@ export function createPageWriteGuard(input: {
   }
 
   return guard as PageWriteGuard
+}
+
+/**
+ * A guard reads the protected list of ITS client. A write function that receives a guard built for another client
+ * would check the wrong list and wave a protected page through, so the pair must match — a mismatch is a
+ * programming error, not a gate decision.
+ */
+export function assertGuardMatchesClient(guard: PageWriteGuard, clientId: string): void {
+  if (guard.clientId !== clientId) {
+    throw new Error(`page write guard belongs to client ${guard.clientId}, not ${clientId}`)
+  }
 }

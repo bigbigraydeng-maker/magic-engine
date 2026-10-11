@@ -39,7 +39,8 @@
 import type { GithubClient } from '@/lib/cms/github-client'
 import { scrubString } from '@/lib/mcp/vendor-filter'
 import { buildSlugIndex, replaceMetaForSlug } from '@/lib/seo-meta/cts-meta-pr'
-import { identityFromSlug, identityFromUrl, mergeIdentities, ProtectedPageError, type PageWriteGuard } from '@/lib/seo/protected-pages'
+import { firstSlugAnchorIsNested } from '@/lib/cms/slug-anchor'
+import { identityFromSlug, identityFromUrl, mergeIdentities, ProtectedPageError, unresolvedIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
 import { resolvePrGuard } from './pr-guard'
 import type { ApplyAdapter, ApplyAdapterResult, MetaCycleGateEvidence } from './types'
 
@@ -191,10 +192,14 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
       }
 
       // Protected-page gate: fresh read of the list right before the in-memory edit that will be committed.
-      const identity = mergeIdentities(
-        identityFromSlug(candidate.slug),
-        ...(candidate.pageUrl ? [identityFromUrl(candidate.pageUrl)] : []),
-      )
+      // replaceMetaForSlug edits the window of the FIRST `slug: '<x>'`; if that is a nested reference the edit
+      // would land in another entry, so the page being edited is unknown.
+      const identity = firstSlugAnchorIsNested(entry.source, candidate.slug)
+        ? unresolvedIdentity('nested_slug_anchor')
+        : mergeIdentities(
+            identityFromSlug(candidate.slug),
+            ...(candidate.pageUrl ? [identityFromUrl(candidate.pageUrl)] : []),
+          )
       try {
         await pageGuard.assert(identity, { targetType: 'data_file_entry' })
       } catch (err) {
@@ -204,6 +209,7 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         throw err
       }
 
+      const sourceBeforeEdit = entry.source
       entry.source = replaced.updated
 
       const commit = await commitAndOpenPr(
@@ -221,6 +227,9 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         await pageGuard.assert(identity, { targetType: 'data_file_entry_merge' })
       } catch (err) {
         if (err instanceof ProtectedPageError) {
+          // Roll the in-memory edit back: the file cache is reused by the next candidate of this run, and its
+          // commit must not smuggle this (now blocked) protected-page change into another auto-merged PR.
+          entry.source = sourceBeforeEdit
           return {
             prUrl: commit.prUrl, prNumber: commit.prNumber, branch: commit.branch,
             newTitle, newDesc, oldTitle: replaced.oldTitle, oldDesc: replaced.oldDesc,
