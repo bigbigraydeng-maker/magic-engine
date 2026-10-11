@@ -52,6 +52,7 @@ export interface MilestoneView {
   paidOn: string | null
   autoByEmail: boolean         // paidSource === 'email'
   dueOn: string | null         // the manual override when set, else the computed date, else null
+  dueNote: string | null       // plain Chinese note shown when no due date is available
   dueOverrideOn: string | null
   dueInDays: number | null     // dueOn minus NZ today (negative = overdue); null when dueOn is null
   overdue: boolean             // unpaid and dueOn < today
@@ -73,12 +74,13 @@ export interface BookingView {
   warnings: BookingWarning[]
 }
 
-export type NudgeBucket = 'overdue' | 'within_3' | 'within_14'
+export type NudgeBucket = 'overdue' | 'within_3' | 'within_14' | 'undated'
 export interface NudgeRow {
   bookingId: string; contactId: string; contactName: string | null
   tourName: string | null
   kind: MilestoneKind; label: string
-  dueOn: string; dueInDays: number; bucket: NudgeBucket
+  dueOn: string | null; dueInDays: number | null; bucket: NudgeBucket
+  note: string | null
   milestoneUpdatedAt: string
   warningCodes: BookingWarningCode[]
 }

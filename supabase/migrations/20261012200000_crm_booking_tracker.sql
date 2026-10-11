@@ -628,6 +628,8 @@ declare
   v_booked_on date;
   v_note text;
   v_row public.crm_bookings;
+  v_deposit_at timestamptz;
+  v_balance_at timestamptz;
 begin
   if p_actor is null or length(btrim(p_actor)) = 0 then
     raise exception 'invalid_actor';
@@ -657,10 +659,16 @@ begin
       raise exception 'duplicate_booking';
   end;
 
-  insert into public.crm_booking_milestones (booking_id, client_id, kind)
-  values
-    (v_row.id, p_client_id, 'deposit'),
-    (v_row.id, p_client_id, 'balance');
+  -- Each object must get a distinct updated_at token: the booking and its two milestones are
+  -- written in one transaction, so default now() would make all three identical and let a
+  -- token taken from the wrong object pass the stale check.
+  v_deposit_at := greatest(clock_timestamp(), v_row.updated_at + interval '1 microsecond');
+  insert into public.crm_booking_milestones (booking_id, client_id, kind, updated_at)
+  values (v_row.id, p_client_id, 'deposit', v_deposit_at);
+
+  v_balance_at := greatest(clock_timestamp(), v_deposit_at + interval '1 microsecond');
+  insert into public.crm_booking_milestones (booking_id, client_id, kind, updated_at)
+  values (v_row.id, p_client_id, 'balance', v_balance_at);
 
   return to_jsonb(v_row);
 end;

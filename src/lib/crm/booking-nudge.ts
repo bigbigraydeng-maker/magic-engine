@@ -1,10 +1,10 @@
 /**
  * Staff "付款要催" (payments to chase) list builder.
  *
- * Pure helpers (limit normalisation, tightest-item pick, bucketing, list
- * assembly) live at the top; buildNudgeList loads rows through the read store
- * and then delegates. The Supabase client is always passed in; this module
- * never imports a client.
+ * Pure helpers (limit normalisation, chaseability, tightest-item pick,
+ * bucketing, decision, list assembly) live at the top; buildNudgeList loads
+ * rows through the read store and then delegates. The Supabase client is
+ * always passed in; this module never imports a client.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -27,9 +27,9 @@ import {
 import { buildBookingView } from './booking-view'
 import type { TravelBookingRule } from './industry/travel-booking-rule'
 import {
-  listActiveBookingsForNudge,
+  listActiveBookingsByIds,
   listContactsForNudge,
-  listMilestonesForBookings,
+  listUnpaidMilestonesForClient,
   loadCatalogFacts,
 } from './booking-store-reads'
 
@@ -44,6 +44,7 @@ const BUCKET_ORDER: Record<NudgeBucket, number> = {
   overdue: 0,
   within_3: 1,
   within_14: 2,
+  undated: 3,
 }
 
 /** Clamp a caller-supplied limit into the supported range. */
@@ -57,11 +58,10 @@ export function normaliseNudgeLimit(raw: number | null): number {
   return raw
 }
 
-/** True when a milestone is unpaid, not quiet, dated and not snoozed. */
+/** True when a milestone is unpaid, not quiet and not snoozed past today. */
 function isChaseable(milestone: MilestoneView, today: string): boolean {
   if (milestone.state !== 'unpaid') return false
   if (milestone.quiet) return false
-  if (milestone.dueOn === null) return false
   if (milestone.remindAfter !== null && milestone.remindAfter > today) {
     return false
   }
@@ -89,6 +89,7 @@ export function pickTightestItem(
   let best: MilestoneView | null = null
   for (const milestone of view.milestones) {
     if (!isChaseable(milestone, today)) continue
+    if (milestone.dueOn === null) continue
     if (best === null || isTighter(milestone, best)) {
       best = milestone
     }
@@ -107,11 +108,88 @@ export function bucketFor(
   return 'later'
 }
 
+/** The decision for one booking: a row, a collapse, or nothing. */
+export type NudgeDecision =
+  | { kind: 'row'; item: MilestoneView; bucket: NudgeBucket }
+  | { kind: 'collapsed' }
+  | { kind: 'skip' }
+
+/** True when a bucket is one of the three listable dated buckets. */
+function isListableBucket(
+  bucket: NudgeBucket | 'collapsed' | 'later',
+): bucket is 'overdue' | 'within_3' | 'within_14' {
+  return bucket === 'overdue' || bucket === 'within_3' || bucket === 'within_14'
+}
+
+/** The tightest milestone among a set, or null when the set is empty. */
+function tightestOf(items: MilestoneView[]): MilestoneView | null {
+  let best: MilestoneView | null = null
+  for (const item of items) {
+    if (best === null || isTighter(item, best)) {
+      best = item
+    }
+  }
+  return best
+}
+
+/** The undated item to show: the deposit when present, else the first. */
+function undatedPick(items: MilestoneView[]): MilestoneView | null {
+  for (const item of items) {
+    if (item.kind === 'deposit') return item
+  }
+  return items[0] ?? null
+}
+
+/**
+ * Decide what one booking contributes to the chase list.
+ *
+ * A booking yields at most one decision: the tightest listable dated item,
+ * else a collapse when every dated item is long overdue, else an undated row,
+ * else nothing.
+ */
+export function decideNudgeItem(
+  view: BookingView,
+  today: string,
+): NudgeDecision {
+  if (view.status !== 'active') return { kind: 'skip' }
+  const items = view.milestones.filter((m) => isChaseable(m, today))
+  if (items.length === 0) return { kind: 'skip' }
+
+  const dated = items.filter((m) => m.dueOn !== null && m.dueInDays !== null)
+  const listable = dated.filter((m) =>
+    isListableBucket(bucketFor(m.dueInDays as number)),
+  )
+  if (listable.length > 0) {
+    const item = tightestOf(listable)
+    if (item !== null && item.dueInDays !== null) {
+      const bucket = bucketFor(item.dueInDays)
+      if (isListableBucket(bucket)) {
+        return { kind: 'row', item, bucket }
+      }
+    }
+  }
+
+  const collapsed = dated.filter(
+    (m) => bucketFor(m.dueInDays as number) === 'collapsed',
+  )
+  if (collapsed.length > 0) return { kind: 'collapsed' }
+
+  const undated = items.filter((m) => m.dueOn === null)
+  const pick = undatedPick(undated)
+  if (pick !== null) return { kind: 'row', item: pick, bucket: 'undated' }
+
+  return { kind: 'skip' }
+}
+
 /** Compare two rows for the assembled list order. */
 function compareRows(a: NudgeRow, b: NudgeRow): number {
   const byBucket = BUCKET_ORDER[a.bucket] - BUCKET_ORDER[b.bucket]
   if (byBucket !== 0) return byBucket
-  if (a.dueOn !== b.dueOn) return a.dueOn < b.dueOn ? -1 : 1
+  if (a.dueOn !== b.dueOn) {
+    if (a.dueOn === null) return 1
+    if (b.dueOn === null) return -1
+    return a.dueOn < b.dueOn ? -1 : 1
+  }
   if (a.bookingId !== b.bookingId) return a.bookingId < b.bookingId ? -1 : 1
   return 0
 }
@@ -162,6 +240,16 @@ function warningCodesOf(view: BookingView): BookingWarningCode[] {
   return out
 }
 
+/** The due note of the first undated unpaid milestone, or null. */
+function undatedNoteOf(view: BookingView): string | null {
+  for (const milestone of view.milestones) {
+    if (milestone.state !== 'unpaid') continue
+    if (milestone.dueOn !== null) continue
+    if (milestone.dueNote !== null) return milestone.dueNote
+  }
+  return null
+}
+
 /** Everything buildNudgeList needs to turn one booking into a row. */
 interface RowContext {
   rule: TravelBookingRule
@@ -176,10 +264,10 @@ type RowOutcome =
   | { kind: 'collapsed' }
   | { kind: 'skip' }
 
-/** Build the NudgeRow for a chaseable milestone, or a skip/collapse marker. */
+/** Build the NudgeRow for a decided item, or a skip/collapse marker. */
 function outcomeForBooking(
-  booking: Parameters<typeof buildBookingView>[0]['item']['booking'],
-  milestones: Parameters<typeof buildBookingView>[0]['item']['milestones'],
+  booking: BookingRow,
+  milestones: MilestoneRow[],
   context: RowContext,
 ): RowOutcome {
   const contact = context.contacts.get(booking.contactId)
@@ -191,13 +279,11 @@ function outcomeForBooking(
     rule: context.rule,
     today: context.today,
   })
-  const item = pickTightestItem(view, context.today)
-  if (item === null || item.dueInDays === null) return { kind: 'skip' }
+  const decision = decideNudgeItem(view, context.today)
+  if (decision.kind === 'skip') return { kind: 'skip' }
+  if (decision.kind === 'collapsed') return { kind: 'collapsed' }
 
-  const bucket = bucketFor(item.dueInDays)
-  if (bucket === 'collapsed') return { kind: 'collapsed' }
-  if (bucket === 'later') return { kind: 'skip' }
-
+  const { item, bucket } = decision
   return {
     kind: 'row',
     row: {
@@ -207,9 +293,10 @@ function outcomeForBooking(
       tourName: view.tourName,
       kind: item.kind,
       label: item.label,
-      dueOn: item.dueOn ?? '',
+      dueOn: item.dueOn,
       dueInDays: item.dueInDays,
       bucket,
+      note: undatedNoteOf(view),
       milestoneUpdatedAt: item.updatedAt,
       warningCodes: warningCodesOf(view),
     },
@@ -218,9 +305,9 @@ function outcomeForBooking(
 
 /** Group milestones by their booking id. */
 function groupMilestones(
-  milestones: Awaited<ReturnType<typeof listMilestonesForBookings>>,
-): Map<string, typeof milestones> {
-  const byBooking = new Map<string, typeof milestones>()
+  milestones: MilestoneRow[],
+): Map<string, MilestoneRow[]> {
+  const byBooking = new Map<string, MilestoneRow[]>()
   for (const milestone of milestones) {
     const list = byBooking.get(milestone.bookingId)
     if (list === undefined) {
@@ -255,6 +342,21 @@ function collectRows(
   return { rows, collapsedOverdue }
 }
 
+/** True when an unpaid milestone is not quiet and not snoozed past today. */
+function isEligibleMilestone(milestone: MilestoneRow, today: string): boolean {
+  if (milestone.state !== 'unpaid') return false
+  if (milestone.quiet) return false
+  if (milestone.remindAfter !== null && milestone.remindAfter > today) {
+    return false
+  }
+  return true
+}
+
+/** The distinct booking ids referenced by a set of milestones. */
+function bookingIdsOf(milestones: MilestoneRow[]): string[] {
+  return Array.from(new Set(milestones.map((milestone) => milestone.bookingId)))
+}
+
 /** Build the staff "payments to chase" list for one client. */
 export async function buildNudgeList(
   db: SupabaseClient,
@@ -263,33 +365,38 @@ export async function buildNudgeList(
   today: string,
   limit: number,
 ): Promise<NudgeList> {
-  const { bookings, truncated } = await listActiveBookingsForNudge(
+  const all = await listUnpaidMilestonesForClient(db, clientId)
+  const eligible = all.filter((milestone) =>
+    isEligibleMilestone(milestone, today),
+  )
+  if (eligible.length === 0) {
+    return { rows: [], more: false, collapsedOverdue: 0, truncated: false }
+  }
+
+  const bookings = await listActiveBookingsByIds(
     db,
     clientId,
-    NUDGE_CANDIDATE_CAP,
+    bookingIdsOf(eligible),
   )
-  if (bookings.length === 0) {
+  const truncated = bookings.length > NUDGE_CANDIDATE_CAP
+  const candidates = bookings.slice(0, NUDGE_CANDIDATE_CAP)
+  if (candidates.length === 0) {
     return { rows: [], more: false, collapsedOverdue: 0, truncated }
   }
 
-  const [milestones, contacts, facts] = await Promise.all([
-    listMilestonesForBookings(
-      db,
-      clientId,
-      bookings.map((booking) => booking.id),
-    ),
-    listContactsForNudge(db, clientId, contactIdsOf(bookings)),
+  const [contacts, facts] = await Promise.all([
+    listContactsForNudge(db, clientId, contactIdsOf(candidates)),
     loadCatalogFacts(
       db,
       clientId,
-      tourIdsOf(bookings),
-      departureIdsOf(bookings),
+      tourIdsOf(candidates),
+      departureIdsOf(candidates),
     ),
   ])
 
-  const byBooking = groupMilestones(milestones)
+  const byBooking = groupMilestones(eligible)
   const context: RowContext = { rule, today, facts, contacts }
-  const { rows, collapsedOverdue } = collectRows(bookings, byBooking, context)
+  const { rows, collapsedOverdue } = collectRows(candidates, byBooking, context)
 
   return assembleNudgeList(rows, collapsedOverdue, truncated, limit)
 }

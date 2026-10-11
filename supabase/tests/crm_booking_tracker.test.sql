@@ -1350,6 +1350,74 @@ do $$ declare v jsonb; begin
     (v->>'party_size')::int = 7, v::text);
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- S7 distinct concurrency tokens per object
+-- ---------------------------------------------------------------------------
+do $$ begin
+  perform pg_temp.mk('bk_tok', 'cccccccc-0000-0000-0000-0000000000a3', 'aaaaaaaa-0000-0000-0000-000000000002', null, '2028-02-07', null, null, null);
+end $$;
+
+do $$ declare v_b timestamptz; v_d timestamptz; v_bal timestamptz; begin
+  v_b := pg_temp.tok_b(pg_temp.bid('bk_tok'));
+  v_d := pg_temp.tok_m(pg_temp.bid('bk_tok'), 'deposit');
+  v_bal := pg_temp.tok_m(pg_temp.bid('bk_tok'), 'balance');
+  perform pg_temp.check('G200 booking, deposit and balance updated_at are three distinct ordered tokens',
+    v_b < v_d and v_d < v_bal,
+    format('booking=%s deposit=%s balance=%s', v_b, v_d, v_bal));
+end $$;
+
+select pg_temp.refused('G201a nudge refuses the booking token',
+  $q$select public.crm_booking_nudge('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'deposit',(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_tok')),'quiet',null,'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G201b set_paid refuses the booking token',
+  $q$select public.crm_booking_set_paid('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'balance',(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_tok')),'2028-02-08','staff',null,false,'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G201c override_due refuses the booking token',
+  $q$select public.crm_booking_override_due('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'deposit',(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_tok')),'2028-02-09','Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G201d unset_paid refuses the booking token',
+  $q$select public.crm_booking_unset_paid('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'deposit',(select updated_at from public.crm_bookings where id=(select v::uuid from ctx where k='bk_tok')),'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G202a nudge on balance refuses the deposit token',
+  $q$select public.crm_booking_nudge('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'balance',(select updated_at from public.crm_booking_milestones where booking_id=(select v::uuid from ctx where k='bk_tok') and kind='deposit'),'quiet',null,'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G202b nudge on deposit refuses the balance token',
+  $q$select public.crm_booking_nudge('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'deposit',(select updated_at from public.crm_booking_milestones where booking_id=(select v::uuid from ctx where k='bk_tok') and kind='balance'),'quiet',null,'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G202c set_paid on deposit refuses the balance token',
+  $q$select public.crm_booking_set_paid('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'deposit',(select updated_at from public.crm_booking_milestones where booking_id=(select v::uuid from ctx where k='bk_tok') and kind='balance'),'2028-02-08','staff',null,false,'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G203a update refuses the deposit token',
+  $q$select public.crm_booking_update('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),(select updated_at from public.crm_booking_milestones where booking_id=(select v::uuid from ctx where k='bk_tok') and kind='deposit'),'{"party_size":3}','Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G203b cancel refuses the deposit token',
+  $q$select public.crm_booking_cancel('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),(select updated_at from public.crm_booking_milestones where booking_id=(select v::uuid from ctx where k='bk_tok') and kind='deposit'),'nope','Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+select pg_temp.refused('G203c confirm_departure refuses the balance token',
+  $q$select public.crm_booking_confirm_departure('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),(select updated_at from public.crm_booking_milestones where booking_id=(select v::uuid from ctx where k='bk_tok') and kind='balance'),'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
+do $$ declare v_old timestamptz; v jsonb; begin
+  v_old := pg_temp.tok_m(pg_temp.bid('bk_tok'), 'deposit');
+  v := public.crm_booking_nudge('00000000-0000-0000-0000-0000000000a1', pg_temp.bid('bk_tok'), 'deposit',
+    v_old, 'nudged_today', null, 'Staff1@Example.com');
+  perform pg_temp.check('G204a nudge with the current deposit token succeeds',
+    (v->>'nudged_on') is not null, v::text);
+end $$;
+
+select pg_temp.refused('G204b nudge with the now-stale deposit token refused',
+  $q$select public.crm_booking_nudge('00000000-0000-0000-0000-0000000000a1',(select v::uuid from ctx where k='bk_tok'),'deposit',(select v::timestamptz from ctx where k='old_tok'),'quiet',null,'Staff1@Example.com')$q$,
+  'conflict:stale:%');
+
 -- end of chunk D
 
 select name, case when ok then 'PASS' else 'FAIL' end as r, left(detail, 160) as detail from aresults order by name;

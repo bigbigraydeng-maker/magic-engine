@@ -219,11 +219,77 @@ describe('buildBookingView departure warnings', () => {
     expect(codes(view)).not.toContain('due_unavailable')
     const warning = view.warnings.find((w) => w.code === 'departure_not_set')
     expect(warning?.text).toBe('出发日期还没定，补上才有到期日')
+
+    const deposit = milestone(view, 'deposit')
+    expect(deposit.dueOn).toBe('2026-10-15')
+    expect(deposit.dueInDays).toBe(3)
+    expect(deposit.dueNote).toBeNull()
+
+    const balance = milestone(view, 'balance')
+    expect(balance.dueOn).toBeNull()
+    expect(balance.dueInDays).toBeNull()
+    expect(balance.overdue).toBe(false)
+    expect(balance.dueNote).toBe('出发日期还没定，补上才有到期日')
+  })
+
+  it('keeps the deposit-only date and marks it overdue when past', () => {
+    const view = viewOf({
+      booking: {
+        departure_id: null,
+        departure_depart_on: null,
+        booked_on: '2026-09-01',
+      },
+    })
+    const deposit = milestone(view, 'deposit')
+    expect(deposit.dueOn).toBe('2026-09-04')
+    expect(deposit.overdue).toBe(true)
+  })
+
+  it('falls back to the deposit-only date when the full computation fails', () => {
+    const view = viewOf({
+      departure: { departOn: '2027-03-12', returnOn: '2027-03-01' },
+    })
+    expect(codes(view)).toContain('due_unavailable')
+    const deposit = milestone(view, 'deposit')
+    expect(deposit.dueOn).toBe('2026-10-15')
+    const balance = milestone(view, 'balance')
+    expect(balance.dueOn).toBeNull()
+    expect(balance.dueNote).toBe('到期日暂时算不出来，请核对出发日期')
+  })
+
+  it('warns about a missing holiday table on the deposit-only path', () => {
+    const view = viewOf({
+      booking: {
+        departure_id: null,
+        departure_depart_on: null,
+        booked_on: '2028-02-01',
+      },
+    })
+    const warning = view.warnings.find((w) => w.code === 'holiday_table_missing')
+    expect(warning).toBeDefined()
+    expect(warning?.text).toContain('2028')
+    expect(milestone(view, 'deposit').dueOn).not.toBeNull()
+  })
+
+  it('clears due notes and dates for a cancelled booking', () => {
+    const view = viewOf({ booking: { status: 'cancelled' } })
     for (const m of view.milestones) {
       expect(m.dueOn).toBeNull()
-      expect(m.dueInDays).toBeNull()
-      expect(m.overdue).toBe(false)
+      expect(m.dueNote).toBeNull()
     }
+  })
+
+  it('lets a manual override win when there is no departure', () => {
+    const view = viewOf({
+      booking: { departure_id: null, departure_depart_on: null },
+      balance: {
+        due_override_on: '2026-12-20',
+        due_override_depart_on: null,
+      },
+    })
+    const balance = milestone(view, 'balance')
+    expect(balance.dueOn).toBe('2026-12-20')
+    expect(balance.dueNote).toBeNull()
   })
 })
 

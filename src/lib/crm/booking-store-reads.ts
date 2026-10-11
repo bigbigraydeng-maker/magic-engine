@@ -7,6 +7,9 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAll } from '@/lib/supabase-paginate'
+import { isDoNotContact } from './dnc'
+import type { DncTouch } from './dnc'
 import type {
   BookingMember,
   BookingRow,
@@ -357,33 +360,128 @@ export async function loadCatalogFacts(
 
 // --- nudge candidates ---------------------------------------------------------
 
-export async function listActiveBookingsForNudge(
+const BOOKING_COLUMNS =
+  'id, contact_id, tour_id, departure_id, departure_depart_on, booked_on, party_size, is_cruise, status, cancel_note, note, created_at, updated_at'
+
+const MILESTONE_COLUMNS =
+  'id, booking_id, kind, state, paid_on, paid_source, due_override_on, due_override_depart_on, remind_after, nudged_on, quiet, updated_at'
+
+/** Every unpaid, non-quiet milestone for the client, paged past the 1000-row cap. */
+export async function listUnpaidMilestonesForClient(
   db: SupabaseClient,
   clientId: string,
-  cap: number,
-): Promise<{ bookings: BookingRow[]; truncated: boolean }> {
-  const res = await db
-    .from('crm_bookings')
-    .select(
-      'id, contact_id, tour_id, departure_id, departure_depart_on, booked_on, party_size, is_cruise, status, cancel_note, note, created_at, updated_at',
-    )
-    .eq('client_id', clientId)
-    .eq('status', 'active')
-    .order('booked_on', { ascending: true })
-    .limit(cap + 1)
-  if (res.error) {
-    throw new Error(res.error.message)
-  }
-
-  const bookings: BookingRow[] = []
-  for (const raw of rowsOf(res.data)) {
-    const booking = toBookingRow(raw)
-    if (booking !== null) {
-      bookings.push(booking)
+): Promise<MilestoneRow[]> {
+  const raw = await fetchAll(
+    (from, to) =>
+      db
+        .from('crm_booking_milestones')
+        .select(MILESTONE_COLUMNS)
+        .eq('client_id', clientId)
+        .eq('state', 'unpaid')
+        .eq('quiet', false)
+        .order('id', { ascending: true })
+        .range(from, to),
+    20000,
+  )
+  const out: MilestoneRow[] = []
+  for (const row of raw) {
+    const milestone = toMilestoneRow(row)
+    if (milestone !== null) {
+      out.push(milestone)
     }
   }
-  const truncated = bookings.length > cap
-  return { bookings: truncated ? bookings.slice(0, cap) : bookings, truncated }
+  return out
+}
+
+/** Active bookings for the given ids, merged and sorted by bookedOn then id. */
+export async function listActiveBookingsByIds(
+  db: SupabaseClient,
+  clientId: string,
+  bookingIds: string[],
+): Promise<BookingRow[]> {
+  const ids = unique(bookingIds)
+  if (ids.length === 0) {
+    return []
+  }
+  const out: BookingRow[] = []
+  for (const group of chunk(ids, CHUNK_SIZE)) {
+    const res = await db
+      .from('crm_bookings')
+      .select(BOOKING_COLUMNS)
+      .eq('client_id', clientId)
+      .eq('status', 'active')
+      .in('id', group)
+      .order('booked_on', { ascending: true })
+    if (res.error) {
+      throw new Error(res.error.message)
+    }
+    for (const raw of rowsOf(res.data)) {
+      const booking = toBookingRow(raw)
+      if (booking !== null) {
+        out.push(booking)
+      }
+    }
+  }
+  return out.sort((a, b) =>
+    a.bookedOn === b.bookedOn
+      ? a.id < b.id
+        ? -1
+        : a.id > b.id
+          ? 1
+          : 0
+      : a.bookedOn < b.bookedOn
+        ? -1
+        : 1,
+  )
+}
+
+/** DNC-relevant touchpoints per contact, newest first. */
+async function listDncTouches(
+  db: SupabaseClient,
+  clientId: string,
+  contactIds: string[],
+): Promise<Map<string, DncTouch[]>> {
+  const out = new Map<string, DncTouch[]>()
+  const ids = unique(contactIds)
+  if (ids.length === 0) {
+    return out
+  }
+  for (const group of chunk(ids, CHUNK_SIZE)) {
+    const raw = await fetchAll(
+      (from, to) =>
+        db
+          .from('contact_touchpoints')
+          .select('contact_id, occurred_at, metadata')
+          .eq('client_id', clientId)
+          .in('contact_id', group)
+          .order('occurred_at', { ascending: false })
+          .range(from, to),
+      20000,
+    )
+    for (const row of raw) {
+      if (!isRecord(row)) {
+        continue
+      }
+      const contactId = str(row.contact_id)
+      const occurredAt = str(row.occurred_at)
+      if (contactId === null || occurredAt === null) {
+        continue
+      }
+      const metadata = isRecord(row.metadata) ? row.metadata : {}
+      const touch: DncTouch = {
+        outcome: str(metadata.outcome),
+        flagged: metadata.do_not_contact === true,
+        occurredAt,
+      }
+      const list = out.get(contactId)
+      if (list === undefined) {
+        out.set(contactId, [touch])
+      } else {
+        list.push(touch)
+      }
+    }
+  }
+  return out
 }
 
 export async function listContactsForNudge(
@@ -396,6 +494,7 @@ export async function listContactsForNudge(
   if (ids.length === 0) {
     return out
   }
+  const touches = await listDncTouches(db, clientId, ids)
   for (const group of chunk(ids, CHUNK_SIZE)) {
     const res = await db
       .from('contacts')
@@ -415,7 +514,10 @@ export async function listContactsForNudge(
       }
       out.set(id, {
         name: nullableStr(raw.display_name),
-        doNotContact: bool(raw.do_not_contact),
+        doNotContact: isDoNotContact(
+          raw.do_not_contact === true,
+          touches.get(id) ?? [],
+        ),
       })
     }
   }

@@ -10,8 +10,17 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MilestoneKind, NudgeMode, StoreErrorKind, StoreResult } from './booking-types'
 
+/** Postgres SQLSTATEs for date/time and invalid-text-representation cast errors. */
+const CAST_ERROR_SQL_STATES: ReadonlySet<string> = new Set(['22007', '22008', '22P02'])
+
 /** Maps a raw SQL error message to a typed error kind and code. */
-export function mapRpcError(message: string): { kind: StoreErrorKind; code: string } {
+export function mapRpcError(message: string, sqlState?: string): { kind: StoreErrorKind; code: string } {
+  if (
+    (sqlState !== undefined && CAST_ERROR_SQL_STATES.has(sqlState)) ||
+    message.startsWith('invalid input syntax')
+  ) {
+    return { kind: 'invalid', code: 'invalid_input' }
+  }
   if (message.startsWith('conflict:stale:')) {
     return { kind: 'stale', code: message }
   }
@@ -53,7 +62,8 @@ async function callRpc(db: SupabaseClient, fn: string, args: RpcArgs): Promise<C
   try {
     const res = await db.rpc(fn, args)
     if (res.error) {
-      return { ok: false, ...mapRpcError(res.error.message) }
+      const sqlState = typeof res.error.code === 'string' ? res.error.code : undefined
+      return { ok: false, ...mapRpcError(res.error.message, sqlState) }
     }
     return { ok: true, data: res.data }
   } catch (err) {

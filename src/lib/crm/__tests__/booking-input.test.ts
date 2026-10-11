@@ -106,6 +106,82 @@ describe('parseExpectedOnly', () => {
   })
 })
 
+describe('expectedUpdatedAt strict ISO-8601 validation', () => {
+  // Tokens Date.parse accepts but which are not ISO-8601 with a timezone.
+  const NON_ISO_TOKENS = [
+    'Oct 1 2026',
+    '2026-10-01',
+    '2026-10-01T00:00:00',
+    '10/01/2026',
+    '2026-10-01 00:00:00+00:00',
+    'Thu, 01 Oct 2026 00:00:00 GMT',
+    '1759276800000',
+  ] as const
+
+  const ISO_TOKENS = [
+    '2026-10-01T00:00:00Z',
+    '2026-10-01T00:00:00.123456+00:00',
+    '2026-10-01T12:00:00+13:00',
+    '2026-10-01T00:00:00.5-05:30',
+  ] as const
+
+  it.each(NON_ISO_TOKENS)('parseExpectedOnly rejects %s', (token) => {
+    expect(parseExpectedOnly({ expectedUpdatedAt: token })).toEqual({
+      ok: false,
+      error: 'invalid_expected_updated_at',
+    })
+  })
+
+  it.each(ISO_TOKENS)('parseExpectedOnly accepts %s unchanged', (token) => {
+    expect(parseExpectedOnly({ expectedUpdatedAt: token })).toEqual({
+      ok: true,
+      value: { expectedUpdatedAt: token },
+    })
+  })
+
+  it.each(NON_ISO_TOKENS)('parsePaidBody rejects %s', (token) => {
+    expect(parsePaidBody({ expectedUpdatedAt: token })).toEqual({
+      ok: false,
+      error: 'invalid_expected_updated_at',
+    })
+  })
+
+  it.each(ISO_TOKENS)('parsePaidBody accepts %s unchanged', (token) => {
+    expect(parsePaidBody({ expectedUpdatedAt: token })).toEqual({
+      ok: true,
+      value: { expectedUpdatedAt: token, paidOn: null },
+    })
+  })
+
+  it.each(NON_ISO_TOKENS)('parsePatchBody rejects %s', (token) => {
+    expect(parsePatchBody({ expectedUpdatedAt: token, patch: { note: 'x' } })).toEqual({
+      ok: false,
+      error: 'invalid_expected_updated_at',
+    })
+  })
+
+  it.each(NON_ISO_TOKENS)('parseOverrideBody rejects %s', (token) => {
+    expect(parseOverrideBody({ expectedUpdatedAt: token, dueOn: null })).toEqual({
+      ok: false,
+      error: 'invalid_expected_updated_at',
+    })
+  })
+
+  it.each(NON_ISO_TOKENS)('parseNudgeBody rejects %s', (token) => {
+    expect(parseNudgeBody({ expectedUpdatedAt: token, mode: 'quiet' })).toEqual({
+      ok: false,
+      error: 'invalid_expected_updated_at',
+    })
+  })
+
+  it.each(NON_ISO_TOKENS)('parseCancelBody rejects %s', (token) => {
+    expect(parseCancelBody({ expectedUpdatedAt: token, cancelNote: 'gone' })).toEqual({
+      ok: false,
+      error: 'invalid_expected_updated_at',
+    })
+  })
+})
+
 describe('parseCreateBody', () => {
   it('parses a full valid body and trims the note', () => {
     const result = parseCreateBody({
@@ -143,6 +219,44 @@ describe('parseCreateBody', () => {
         partySize: null,
         isCruise: false,
         note: null,
+      },
+    })
+  })
+
+  it('rejects a note containing NUL', () => {
+    expect(parseCreateBody({ contactId: CONTACT_A1, tourId: TOUR_A1, note: 'a\u0000b' })).toEqual({
+      ok: false,
+      error: 'invalid_note',
+    })
+  })
+
+  it('rejects a note containing a bell character', () => {
+    expect(parseCreateBody({ contactId: CONTACT_A1, tourId: TOUR_A1, note: 'a\u0007b' })).toEqual({
+      ok: false,
+      error: 'invalid_note',
+    })
+  })
+
+  it('rejects a note containing a carriage return', () => {
+    expect(parseCreateBody({ contactId: CONTACT_A1, tourId: TOUR_A1, note: 'a\rb' })).toEqual({
+      ok: false,
+      error: 'invalid_note',
+    })
+  })
+
+  it('accepts a note with a tab and a newline, kept verbatim apart from trim', () => {
+    expect(
+      parseCreateBody({ contactId: CONTACT_A1, tourId: TOUR_A1, note: '  line1\n\tline2  ' }),
+    ).toEqual({
+      ok: true,
+      value: {
+        contactId: CONTACT_A1,
+        tourId: TOUR_A1,
+        departureId: null,
+        bookedOn: null,
+        partySize: null,
+        isCruise: false,
+        note: 'line1\n\tline2',
       },
     })
   })
@@ -218,6 +332,20 @@ describe('parsePatchBody', () => {
     expect(parsePatchBody({ expectedUpdatedAt: TOKEN, patch: { bookedOn: null } })).toEqual({
       ok: false,
       error: 'invalid_booked_on',
+    })
+  })
+
+  it('rejects a note containing NUL', () => {
+    expect(parsePatchBody({ expectedUpdatedAt: TOKEN, patch: { note: 'a\u0000b' } })).toEqual({
+      ok: false,
+      error: 'invalid_note',
+    })
+  })
+
+  it('accepts a note with a tab and a newline, kept verbatim apart from trim', () => {
+    expect(parsePatchBody({ expectedUpdatedAt: TOKEN, patch: { note: '  line1\n\tline2  ' } })).toEqual({
+      ok: true,
+      value: { expectedUpdatedAt: TOKEN, patch: { note: 'line1\n\tline2' } },
     })
   })
 })
@@ -329,6 +457,20 @@ describe('parseCancelBody', () => {
       error: 'invalid_cancel_note',
     })
   })
+
+  it('rejects a cancel note containing NUL', () => {
+    expect(parseCancelBody({ expectedUpdatedAt: TOKEN, cancelNote: 'a\u0000b' })).toEqual({
+      ok: false,
+      error: 'invalid_cancel_note',
+    })
+  })
+
+  it('accepts a cancel note containing a newline', () => {
+    expect(parseCancelBody({ expectedUpdatedAt: TOKEN, cancelNote: 'line1\nline2' })).toEqual({
+      ok: true,
+      value: { expectedUpdatedAt: TOKEN, cancelNote: 'line1\nline2' },
+    })
+  })
 })
 
 describe('parseKind', () => {
@@ -358,6 +500,13 @@ describe('normaliseBookingMemberEmail', () => {
 
   it.each(['nope', '', 'a@b', `${'a'.repeat(195)}@b.test`, 5, null])(
     'rejects %o',
+    (value) => {
+      expect(normaliseBookingMemberEmail(value)).toBeNull()
+    },
+  )
+
+  it.each(['a\u0000@x.test', 'a@x.test\u0000', 'a\t@x.test', 'a@x.\ntest', '\u007fa@x.test'])(
+    'rejects the control-character email %o',
     (value) => {
       expect(normaliseBookingMemberEmail(value)).toBeNull()
     },

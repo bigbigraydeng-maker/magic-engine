@@ -27,6 +27,7 @@ export interface FakeState {
   rpcErrors: Record<string, string>
   rpcData: Record<string, unknown>
   failTables: Set<string>
+  failAfter: Record<string, number>
 }
 
 interface QueryResult {
@@ -109,6 +110,12 @@ class FakeQuery implements PromiseLike<QueryResult> {
     return this
   }
 
+  range(from: number, to: number): this {
+    this.rangeFrom = from
+    this.rangeTo = to
+    return this
+  }
+
   maybeSingle(): this {
     this.single = true
     return this
@@ -128,6 +135,8 @@ class FakeQuery implements PromiseLike<QueryResult> {
 
   private orderCol: string | null = null
   private orderAscending = true
+  private rangeFrom: number | null = null
+  private rangeTo: number | null = null
 
   private matches(row: Row): boolean {
     for (const [col, val] of this.eqs) {
@@ -155,8 +164,13 @@ class FakeQuery implements PromiseLike<QueryResult> {
   }
 
   private run(): QueryResult {
+    const priorCount = this.state.queries.filter((q) => q.table === this.table).length
     this.record()
     if (this.state.failTables.has(this.table)) {
+      return { data: null, error: { message: 'boom' } }
+    }
+    const limit = this.state.failAfter[this.table]
+    if (limit !== undefined && priorCount >= limit) {
       return { data: null, error: { message: 'boom' } }
     }
     if (this.op === 'upsert') return this.runUpsert()
@@ -187,6 +201,9 @@ class FakeQuery implements PromiseLike<QueryResult> {
   private runSelect(): QueryResult {
     let rows = this.rows().filter((r) => this.matches(r))
     if (this.orderCol !== null) rows = sortRows(rows, this.orderCol, this.orderAscending)
+    if (this.rangeFrom !== null && this.rangeTo !== null) {
+      rows = rows.slice(this.rangeFrom, this.rangeTo + 1)
+    }
     if (this.limitValue !== null) rows = rows.slice(0, this.limitValue)
     const projected = rows.map((r) => project(r, this.columns))
     if (this.single) return { data: projected[0] ?? null, error: null }
@@ -209,6 +226,7 @@ export function createFakeDb(): { db: SupabaseClient; state: FakeState; reset: (
     rpcErrors: {},
     rpcData: {},
     failTables: new Set<string>(),
+    failAfter: {},
   }
 
   const fake = {
@@ -230,6 +248,7 @@ export function createFakeDb(): { db: SupabaseClient; state: FakeState; reset: (
     state.rpcErrors = {}
     state.rpcData = {}
     state.failTables.clear()
+    state.failAfter = {}
   }
 
   // Test-only cast: the fake implements just the surface the booking code uses.

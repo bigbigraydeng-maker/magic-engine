@@ -11,6 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   buildNudgeList,
   bucketFor,
+  decideNudgeItem,
   normaliseNudgeLimit,
   pickTightestItem,
 } from '../booking-nudge'
@@ -147,6 +148,7 @@ function milestone(over: Partial<MilestoneView>): MilestoneView {
     paidOn: null,
     autoByEmail: false,
     dueOn: '2026-10-08',
+    dueNote: null,
     dueOverrideOn: null,
     dueInDays: -4,
     overdue: true,
@@ -334,7 +336,7 @@ describe('exclusions', () => {
     expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(1)])
   })
 
-  it('skips a booking with no departure date', async () => {
+  it('keeps a booking with no departure date as an undated row', async () => {
     chase(state, 1, '2026-10-07')
     seed(state, {
       n: 2,
@@ -342,7 +344,14 @@ describe('exclusions', () => {
       deposit: { state: 'paid', paid_on: '2026-10-01', paid_source: 'staff' },
     })
     const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
-    expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(1)])
+    expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(1), uuid(2)])
+
+    const undated = list.rows[1]
+    expect(undated.bucket).toBe('undated')
+    expect(undated.dueOn).toBeNull()
+    expect(undated.dueInDays).toBeNull()
+    expect(undated.kind).toBe('balance')
+    expect(undated.note).toBe('出发日期还没定，补上才有到期日')
   })
 })
 
@@ -383,6 +392,14 @@ describe('other-client exclusion', () => {
 
   it('scopes every recorded query to the client', async () => {
     chase(state, 1, '2026-10-07')
+    push(state, 'contact_touchpoints', [
+      {
+        client_id: CLIENT_A,
+        contact_id: uuid(1001),
+        occurred_at: '2026-09-01T00:00:00Z',
+        metadata: { outcome: 'no_answer' },
+      },
+    ])
     await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
 
     const tables = new Set(state.queries.map((query) => query.table))
@@ -391,6 +408,7 @@ describe('other-client exclusion', () => {
     expect(tables.has('contacts')).toBe(true)
     expect(tables.has('tour_catalog_tours')).toBe(true)
     expect(tables.has('tour_catalog_departures')).toBe(true)
+    expect(tables.has('contact_touchpoints')).toBe(true)
 
     for (const query of state.queries) {
       expect(query.eqs).toContainEqual(['client_id', CLIENT_A])
@@ -427,8 +445,11 @@ describe('page size', () => {
 describe('hard cap', () => {
   it('flags truncation and caps the candidate query', async () => {
     for (let n = 1; n <= 505; n += 1) {
+      const bookedOn =
+        n === 1 ? '2026-01-01' : n === 505 ? '2026-09-30' : '2026-06-01'
       seed(state, {
         n,
+        booking: { booked_on: bookedOn },
         deposit: { state: 'paid', paid_on: '2026-10-01', paid_source: 'staff' },
         balance: {
           due_override_on: '2026-10-07',
@@ -437,13 +458,21 @@ describe('hard cap', () => {
       })
     }
 
-    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 100)
     expect(list.truncated).toBe(true)
 
-    const bookingQuery = state.queries.find(
+    const ids = list.rows.map((row) => row.bookingId)
+    expect(ids).toContain(uuid(1))
+    expect(ids).not.toContain(uuid(505))
+
+    const bookingQueries = state.queries.filter(
       (query) => query.table === 'crm_bookings',
     )
-    expect(bookingQuery?.limit).toBe(501)
+    expect(bookingQueries.length).toBeGreaterThan(0)
+    for (const query of bookingQueries) {
+      expect(query.eqs).toContainEqual(['client_id', CLIENT_A])
+      expect(query.eqs).toContainEqual(['status', 'active'])
+    }
   })
 
   it('does not flag truncation for a small client', async () => {
@@ -493,6 +522,273 @@ describe('read failure', () => {
     await expect(
       buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10),
     ).rejects.toThrow()
+  })
+})
+
+describe('candidate cap and long-paid bookings', () => {
+  it('does not let fully paid bookings consume the candidate cap', async () => {
+    for (let n = 1; n <= 501; n += 1) {
+      seed(state, {
+        n,
+        booking: { booked_on: '2026-01-01' },
+        deposit: { state: 'paid', paid_on: '2026-10-01', paid_source: 'staff' },
+        balance: { state: 'paid', paid_on: '2026-10-01', paid_source: 'staff' },
+      })
+    }
+    seed(state, {
+      n: 900,
+      booking: { booked_on: '2026-01-01' },
+      deposit: {
+        due_override_on: '2026-10-07',
+        due_override_depart_on: LIVE_DEPART_ON,
+      },
+      balance: { state: 'paid', paid_on: '2026-10-01', paid_source: 'staff' },
+    })
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 100)
+    expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(900)])
+    expect(list.truncated).toBe(false)
+
+    const milestoneQuery = state.queries.find(
+      (query) => query.table === 'crm_booking_milestones',
+    )
+    expect(milestoneQuery?.eqs).toContainEqual(['state', 'unpaid'])
+    expect(milestoneQuery?.eqs).toContainEqual(['quiet', false])
+    expect(milestoneQuery?.eqs).toContainEqual(['client_id', CLIENT_A])
+  })
+})
+
+describe('folding only when nothing is listable', () => {
+  it('lists the balance when the deposit is deep overdue', async () => {
+    seed(state, {
+      n: 1,
+      deposit: {
+        due_override_on: '2026-09-22',
+        due_override_depart_on: LIVE_DEPART_ON,
+      },
+      balance: {
+        due_override_on: '2026-10-14',
+        due_override_depart_on: LIVE_DEPART_ON,
+      },
+    })
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows).toHaveLength(1)
+    expect(list.rows[0].kind).toBe('balance')
+    expect(list.rows[0].dueOn).toBe('2026-10-14')
+    expect(list.rows[0].bucket).toBe('within_3')
+    expect(list.collapsedOverdue).toBe(0)
+  })
+
+  it('folds when every dated item is deep overdue', async () => {
+    seed(state, {
+      n: 1,
+      deposit: {
+        due_override_on: '2026-09-22',
+        due_override_depart_on: LIVE_DEPART_ON,
+      },
+      balance: {
+        due_override_on: '2026-09-12',
+        due_override_depart_on: LIVE_DEPART_ON,
+      },
+    })
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows).toEqual([])
+    expect(list.collapsedOverdue).toBe(1)
+  })
+
+  it('folds when the only listable item is far in the future', async () => {
+    seed(state, {
+      n: 1,
+      deposit: {
+        due_override_on: '2026-09-22',
+        due_override_depart_on: LIVE_DEPART_ON,
+      },
+      balance: {
+        due_override_on: '2026-11-21',
+        due_override_depart_on: LIVE_DEPART_ON,
+      },
+    })
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows).toEqual([])
+    expect(list.collapsedOverdue).toBe(1)
+  })
+
+  it('decideNudgeItem picks the listable balance over a collapsed deposit', () => {
+    const decision = decideNudgeItem(
+      view({
+        milestones: [
+          milestone({
+            kind: 'deposit',
+            dueOn: '2026-09-22',
+            dueInDays: -20,
+          }),
+          milestone({
+            kind: 'balance',
+            dueOn: '2026-10-14',
+            dueInDays: 2,
+          }),
+        ],
+      }),
+      TODAY,
+    )
+    expect(decision.kind).toBe('row')
+    if (decision.kind === 'row') {
+      expect(decision.item.kind).toBe('balance')
+      expect(decision.bucket).toBe('within_3')
+    }
+  })
+
+  it('decideNudgeItem collapses when every dated item is deep overdue', () => {
+    const decision = decideNudgeItem(
+      view({
+        milestones: [
+          milestone({
+            kind: 'deposit',
+            dueOn: '2026-09-22',
+            dueInDays: -20,
+          }),
+          milestone({
+            kind: 'balance',
+            dueOn: '2026-09-12',
+            dueInDays: -30,
+          }),
+        ],
+      }),
+      TODAY,
+    )
+    expect(decision.kind).toBe('collapsed')
+  })
+})
+
+describe('undated bookings', () => {
+  it('lists the deposit when the departure is unknown', async () => {
+    seed(state, {
+      n: 1,
+      booking: {
+        departure_id: null,
+        departure_depart_on: null,
+        booked_on: '2026-10-05',
+      },
+    })
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows).toHaveLength(1)
+    expect(list.rows[0].kind).toBe('deposit')
+    expect(list.rows[0].dueOn).toBe('2026-10-08')
+    expect(list.rows[0].bucket).toBe('overdue')
+    expect(list.rows[0].note).toBe('出发日期还没定，补上才有到期日')
+  })
+
+  it('folds an undated booking whose deposit is deep overdue', async () => {
+    seed(state, {
+      n: 1,
+      booking: {
+        departure_id: null,
+        departure_depart_on: null,
+        booked_on: '2026-09-01',
+      },
+    })
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows).toEqual([])
+    expect(list.collapsedOverdue).toBe(1)
+  })
+})
+
+describe('do-not-contact from touch history', () => {
+  /** Two chaseable bookings; the second has no contact-level DNC flag. */
+  function twoChaseable(): void {
+    chase(state, 1, '2026-10-07')
+    chase(state, 2, '2026-10-07', { contact: { do_not_contact: false } })
+  }
+
+  it('hides a contact flagged by a touch outcome', async () => {
+    twoChaseable()
+    push(state, 'contact_touchpoints', [
+      {
+        client_id: CLIENT_A,
+        contact_id: uuid(1002),
+        occurred_at: '2026-09-01T00:00:00Z',
+        metadata: { outcome: 'do_not_contact' },
+      },
+    ])
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(1)])
+  })
+
+  it('lists a contact whose do-not-contact was cleared', async () => {
+    chase(state, 1, '2026-10-07')
+    chase(state, 2, '2026-10-07', { contact: { do_not_contact: true } })
+    push(state, 'contact_touchpoints', [
+      {
+        client_id: CLIENT_A,
+        contact_id: uuid(1002),
+        occurred_at: '2026-08-01T00:00:00Z',
+        metadata: { outcome: 'do_not_contact' },
+      },
+      {
+        client_id: CLIENT_A,
+        contact_id: uuid(1002),
+        occurred_at: '2026-09-01T00:00:00Z',
+        metadata: { outcome: 'dnc_cleared' },
+      },
+    ])
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(1), uuid(2)])
+  })
+
+  it('ignores another client touch for the same contact id', async () => {
+    twoChaseable()
+    push(state, 'contact_touchpoints', [
+      {
+        client_id: CLIENT_B,
+        contact_id: uuid(1002),
+        occurred_at: '2026-09-01T00:00:00Z',
+        metadata: { outcome: 'do_not_contact' },
+      },
+    ])
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(1), uuid(2)])
+  })
+
+  it('hides a contact flagged by the metadata flag form', async () => {
+    twoChaseable()
+    push(state, 'contact_touchpoints', [
+      {
+        client_id: CLIENT_A,
+        contact_id: uuid(1002),
+        occurred_at: '2026-09-01T00:00:00Z',
+        metadata: { do_not_contact: true },
+      },
+    ])
+
+    const list = await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 10)
+    expect(list.rows.map((row) => row.bookingId)).toEqual([uuid(1)])
+  })
+
+  it('batches touch reads by at most 100 contact ids', async () => {
+    for (let n = 1; n <= 150; n += 1) {
+      chase(state, n, '2026-10-07')
+    }
+
+    await buildNudgeList(db, CLIENT_A, TEST_RULE, TODAY, 100)
+
+    const touchQueries = state.queries.filter(
+      (query) => query.table === 'contact_touchpoints',
+    )
+    expect(touchQueries.length).toBeLessThanOrEqual(2)
+    for (const query of touchQueries) {
+      expect(query.eqs).toContainEqual(['client_id', CLIENT_A])
+      const inFilter = query.ins.find(([col]) => col === 'contact_id')
+      expect(inFilter).toBeDefined()
+      expect((inFilter?.[1] ?? []).length).toBeLessThanOrEqual(100)
+    }
   })
 })
 

@@ -90,6 +90,9 @@ function rejectUnknownKeys(body: Record<string, unknown>, allowed: readonly stri
 
 const MAX_EXPECTED_UPDATED_AT = 64
 
+const ISO_8601_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
+
 /**
  * Reads the required optimistic-concurrency token. The original string is
  * returned unchanged; it is never reformatted.
@@ -100,6 +103,7 @@ function readExpectedUpdatedAt(body: Record<string, unknown>): ParseResult<strin
   if (raw.length === 0 || raw.length > MAX_EXPECTED_UPDATED_AT) {
     return { ok: false, error: 'invalid_expected_updated_at' }
   }
+  if (!ISO_8601_RE.test(raw)) return { ok: false, error: 'invalid_expected_updated_at' }
   if (Number.isNaN(Date.parse(raw))) return { ok: false, error: 'invalid_expected_updated_at' }
   return { ok: true, value: raw }
 }
@@ -119,9 +123,24 @@ export function parseLimitParam(raw: string | null): number | null {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
+/**
+ * True when `text` contains any control character U+0000-U+001F or U+007F.
+ * When `allowTabNewline` is true, tab (U+0009) and newline (U+000A) are
+ * permitted and do not count as control characters.
+ */
+function hasControlChars(text: string, allowTabNewline: boolean): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (allowTabNewline && (code === 0x09 || code === 0x0a)) continue
+    if (code <= 0x1f || code === 0x7f) return true
+  }
+  return false
+}
+
 /** Trim + lower-case, length 3..200, must look like an email; else null. */
 export function normaliseBookingMemberEmail(raw: unknown): string | null {
   if (typeof raw !== 'string') return null
+  if (hasControlChars(raw, false)) return null
   const email = raw.trim().toLowerCase()
   if (email.length < 3 || email.length > 200) return null
   return EMAIL_RE.test(email) ? email : null
@@ -154,6 +173,7 @@ function readPartySize(raw: unknown): number | null | undefined {
 function readNote(raw: unknown): string | null | undefined {
   if (raw === null || raw === undefined) return null
   if (typeof raw !== 'string') return undefined
+  if (hasControlChars(raw, true)) return undefined
   const note = raw.trim()
   if (note.length === 0) return null
   return note.length <= MAX_NOTE ? note : undefined
@@ -373,6 +393,7 @@ export function parseCancelBody(
 
   const raw = body.cancelNote
   if (typeof raw !== 'string') return { ok: false, error: 'invalid_cancel_note' }
+  if (hasControlChars(raw, true)) return { ok: false, error: 'invalid_cancel_note' }
   const cancelNote = raw.trim()
   if (cancelNote.length < 1 || cancelNote.length > MAX_CANCEL_NOTE) {
     return { ok: false, error: 'invalid_cancel_note' }

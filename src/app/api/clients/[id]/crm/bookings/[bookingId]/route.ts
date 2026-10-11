@@ -5,6 +5,7 @@ import {
   finishBookingWrite,
   invalidRequest,
   prepareBookingWrite,
+  reclassifyMissingReference,
 } from '@/lib/crm/booking-http'
 import { parsePatchBody } from '@/lib/crm/booking-input'
 import { updateBooking } from '@/lib/crm/booking-store'
@@ -27,13 +28,15 @@ export async function PATCH(req: NextRequest, { params }: RouteParams) {
   const parsed = parsePatchBody(prepared.body)
   if (!parsed.ok) return invalidRequest(parsed.error)
 
-  const result = await updateBooking(
-    supabaseAdmin,
-    clientId,
-    bookingId,
-    parsed.value.expectedUpdatedAt,
-    parsed.value.patch,
-    access.actor,
+  const result = reclassifyMissingReference(
+    await updateBooking(
+      supabaseAdmin,
+      clientId,
+      bookingId,
+      parsed.value.expectedUpdatedAt,
+      parsed.value.patch,
+      access.actor,
+    ),
   )
   return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule)
 }

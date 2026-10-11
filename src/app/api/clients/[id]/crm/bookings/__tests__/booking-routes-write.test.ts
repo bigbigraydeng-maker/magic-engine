@@ -330,7 +330,7 @@ describe('sql error mapping', () => {
     { sql: 'duplicate_booking', status: 409, error: 'duplicate_booking' },
     { sql: 'evidence_required', status: 403, error: 'Forbidden' },
     { sql: 'booking_not_found', status: 404, error: 'not_found' },
-    { sql: 'departure_not_found', status: 404, error: 'not_found' },
+    { sql: 'departure_not_found', status: 400, error: 'departure_not_found' },
     { sql: 'cross_client_reference:tour_id', status: 403, error: 'Forbidden' },
   ]
 

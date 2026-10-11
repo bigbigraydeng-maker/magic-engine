@@ -342,3 +342,35 @@ export function computeMilestoneDueDates(
     provisional: dates,
   }
 }
+
+/** Outcome of the deposit-only computation (no departure needed). */
+export type DepositOnlyResult =
+  | { state: 'ok'; depositDueOn: string }
+  | { state: 'holiday_table_missing'; depositDueOn: string; missingYears: number[] }
+  | { state: 'invalid_input' }
+
+/**
+ * Compute just the deposit due date from the booking date and the rule.
+ *
+ * The deposit is the Nth working day after the booking day (the booking day
+ * itself never counts). It depends only on the booking date and the rule,
+ * never on a departure — so it is available even when no departure is set.
+ */
+export function computeDepositDueOnly(
+  rule: TravelBookingRule,
+  bookedOn: string,
+): DepositOnlyResult {
+  if (!isIsoDate(bookedOn)) return { state: 'invalid_input' }
+  const missing: MissingYears = { years: new Set() }
+  const depositDueOn = nthWorkingDayAfter(
+    bookedOn,
+    rule.depositDueWorkingDays,
+    missing,
+  )
+  if (missing.years.size === 0) return { state: 'ok', depositDueOn }
+  return {
+    state: 'holiday_table_missing',
+    depositDueOn,
+    missingYears: [...missing.years].sort((a, b) => a - b),
+  }
+}

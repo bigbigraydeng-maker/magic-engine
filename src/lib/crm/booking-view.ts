@@ -19,7 +19,10 @@ import type {
 } from './booking-types'
 import { MILESTONE_LABELS } from './booking-types'
 import type { DueDates, DueDatesResult } from './booking-schedule'
-import { computeMilestoneDueDates } from './booking-schedule'
+import {
+  computeDepositDueOnly,
+  computeMilestoneDueDates,
+} from './booking-schedule'
 import type { TravelBookingRule } from './industry/travel-booking-rule'
 import {
   getBookingWithMilestones,
@@ -51,10 +54,15 @@ export interface BookingViewInput {
 interface DueOutcome {
   dates: DueDates | null
   warnings: BookingWarning[]
+  depositOnlyOn: string | null
+  balanceNote: string | null
 }
 
 /** Shown when the due date cannot be computed from the current inputs. */
 const DUE_UNAVAILABLE_TEXT = '到期日暂时算不出来，请核对出发日期'
+
+/** Shown for the balance milestone when no departure is chosen yet. */
+const NOT_SET_NOTE = '出发日期还没定，补上才有到期日'
 
 /** Build a warning with the shared shape. */
 function warn(
@@ -71,7 +79,20 @@ function dueUnavailable(): DueOutcome {
   return {
     dates: null,
     warnings: [warn('due_unavailable', DUE_UNAVAILABLE_TEXT, false, null)],
+    depositOnlyOn: null,
+    balanceNote: null,
   }
+}
+
+/** The holiday_table_missing warning text for a set of missing years. */
+function holidayTableWarning(missingYears: number[]): BookingWarning {
+  const years = missingYears.join('、')
+  return warn(
+    'holiday_table_missing',
+    `假日表缺失（${years} 年），到期日可能偏早`,
+    false,
+    null,
+  )
 }
 
 /** The computed due date for one milestone kind, or null when unavailable. */
@@ -83,13 +104,35 @@ function computedDue(
   return kind === 'deposit' ? dates.depositDueOn : dates.balanceDueOn
 }
 
+/** The computed due date for one milestone, using the deposit-only fallback. */
+function computedDueFromOutcome(
+  due: DueOutcome,
+  kind: MilestoneKind,
+): string | null {
+  if (kind === 'deposit') {
+    return due.dates?.depositDueOn ?? due.depositOnlyOn
+  }
+  return due.dates?.balanceDueOn ?? null
+}
+
+/** The due note for one milestone, or null when a due date is available. */
+function dueNoteFor(
+  due: DueOutcome,
+  kind: MilestoneKind,
+  dueOn: string | null,
+): string | null {
+  if (dueOn !== null) return null
+  if (kind === 'balance') return due.balanceNote ?? DUE_UNAVAILABLE_TEXT
+  return DUE_UNAVAILABLE_TEXT
+}
+
 /** Build one milestone view row. */
 function buildMilestoneView(
   row: MilestoneRow,
-  dates: DueDates | null,
+  due: DueOutcome,
   today: string,
 ): MilestoneView {
-  const dueOn = row.dueOverrideOn ?? computedDue(dates, row.kind)
+  const dueOn = row.dueOverrideOn ?? computedDueFromOutcome(due, row.kind)
   const dueInDays = dueOn === null ? null : diffDaysIso(today, dueOn)
   const overdue =
     row.state === 'unpaid' && dueInDays !== null && dueInDays < 0
@@ -100,6 +143,7 @@ function buildMilestoneView(
     paidOn: row.paidOn,
     autoByEmail: row.paidSource === 'email',
     dueOn,
+    dueNote: dueNoteFor(due, row.kind, dueOn),
     dueOverrideOn: row.dueOverrideOn,
     dueInDays,
     overdue,
@@ -114,32 +158,100 @@ function milestonesWithoutDates(
   rows: MilestoneRow[],
   today: string,
 ): MilestoneView[] {
-  return rows.map((row) => buildMilestoneView(row, null, today))
+  const empty: DueOutcome = {
+    dates: null,
+    warnings: [],
+    depositOnlyOn: null,
+    balanceNote: null,
+  }
+  return rows.map((row) => ({
+    ...buildMilestoneView(row, empty, today),
+    dueNote: null,
+  }))
 }
 
 /** Turn a due-date result into dates plus any warning it implies. */
 function resolveDueDates(result: DueDatesResult): DueOutcome {
   if (result.state === 'ok') {
-    return { dates: result.dates, warnings: [] }
+    return {
+      dates: result.dates,
+      warnings: [],
+      depositOnlyOn: null,
+      balanceNote: null,
+    }
   }
   if (result.state === 'holiday_table_missing') {
-    const years = result.missingYears.join('、')
     return {
       dates: result.provisional,
-      warnings: [
-        warn(
-          'holiday_table_missing',
-          `假日表缺失（${years} 年），到期日可能偏早`,
-          false,
-          null,
-        ),
-      ],
+      warnings: [holidayTableWarning(result.missingYears)],
+      depositOnlyOn: null,
+      balanceNote: null,
     }
   }
   if (result.state === 'no_departure') {
-    return { dates: null, warnings: [] }
+    return {
+      dates: null,
+      warnings: [],
+      depositOnlyOn: null,
+      balanceNote: null,
+    }
   }
   return dueUnavailable()
+}
+
+/** The deposit-only fallback outcome for a valid booking date. */
+function depositOnlyOutcome(
+  rule: TravelBookingRule,
+  bookedOn: string,
+  balanceNote: string,
+): DueOutcome {
+  const result = computeDepositDueOnly(rule, bookedOn)
+  if (result.state === 'ok') {
+    return {
+      dates: null,
+      warnings: [],
+      depositOnlyOn: result.depositDueOn,
+      balanceNote,
+    }
+  }
+  if (result.state === 'holiday_table_missing') {
+    return {
+      dates: null,
+      warnings: [holidayTableWarning(result.missingYears)],
+      depositOnlyOn: result.depositDueOn,
+      balanceNote,
+    }
+  }
+  return dueUnavailable()
+}
+
+/** The outcome when no departure is chosen yet: deposit only, if possible. */
+function noDepartureOutcome(
+  input: BookingViewInput,
+): DueOutcome {
+  if (!isIsoDate(input.item.booking.bookedOn)) return dueUnavailable()
+  return depositOnlyOutcome(
+    input.rule,
+    input.item.booking.bookedOn,
+    NOT_SET_NOTE,
+  )
+}
+
+/** The outcome when the full computation is unavailable for another reason. */
+function unavailableWithFallback(
+  input: BookingViewInput,
+): DueOutcome {
+  const fallback = isIsoDate(input.item.booking.bookedOn)
+    ? depositOnlyOutcome(
+        input.rule,
+        input.item.booking.bookedOn,
+        DUE_UNAVAILABLE_TEXT,
+      )
+    : dueUnavailable()
+  return {
+    ...fallback,
+    warnings: [warn('due_unavailable', DUE_UNAVAILABLE_TEXT, false, null)],
+  }
 }
 
 /** Compute due dates for an active booking, guarding invalid ISO input. */
@@ -149,10 +261,10 @@ function computeDueOutcome(
 ): DueOutcome {
   const { booking } = input.item
   if (effectiveDepartOn === null) {
-    return { dates: null, warnings: [] }
+    return noDepartureOutcome(input)
   }
   if (!isIsoDate(effectiveDepartOn) || !isIsoDate(booking.bookedOn)) {
-    return dueUnavailable()
+    return unavailableWithFallback(input)
   }
   const live = booking.departureId
     ? input.facts.departures.get(booking.departureId)
@@ -164,6 +276,9 @@ function computeDueOutcome(
     durationText: input.facts.tours.get(booking.tourId)?.durationText ?? null,
     isCruise: booking.isCruise,
   })
+  if (result.state === 'invalid_input') {
+    return unavailableWithFallback(input)
+  }
   return resolveDueDates(result)
 }
 
@@ -327,7 +442,7 @@ export function buildBookingView(input: BookingViewInput): BookingView {
   return baseView(
     input,
     effectiveDepartOn,
-    milestones.map((row) => buildMilestoneView(row, due.dates, input.today)),
+    milestones.map((row) => buildMilestoneView(row, due, input.today)),
     buildWarnings(input, effectiveDepartOn, due),
     due.dates?.mode === 'full_payment',
   )

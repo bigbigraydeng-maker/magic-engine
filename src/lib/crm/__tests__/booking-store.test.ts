@@ -72,6 +72,25 @@ describe('mapRpcError', () => {
     expect(result.code).toBe('unknown')
     expect(result.code).not.toContain('something strange')
   })
+
+  it.each(['22007', '22008', '22P02'] as const)(
+    'maps sqlState %s to invalid/invalid_input',
+    (sqlState) => {
+      const result = mapRpcError('anything', sqlState)
+      expect(result).toEqual({ kind: 'invalid', code: 'invalid_input' })
+    },
+  )
+
+  it('maps an invalid input syntax message to invalid/invalid_input without echoing it', () => {
+    const result = mapRpcError('invalid input syntax for type uuid: "zzz"')
+    expect(result).toEqual({ kind: 'invalid', code: 'invalid_input' })
+    expect(result.code).not.toContain('zzz')
+  })
+
+  it('leaves an unknown message with an unrelated sqlState as error/unknown', () => {
+    const result = mapRpcError('something strange', '23505')
+    expect(result).toEqual({ kind: 'error', code: 'unknown' })
+  })
 })
 
 describe('createBooking', () => {
@@ -326,5 +345,18 @@ describe('thrown rpc errors', () => {
     })
     const result = await updateBooking(db, CLIENT_A, BOOKING_A1, UPDATED_AT, { note: 'x' }, 'staff@a.test')
     expect(result).toEqual({ ok: false, kind: 'error', code: 'unknown' })
+  })
+})
+
+describe('cast error mapping end to end', () => {
+  it('maps a 22007 cast error to invalid/invalid_input', async () => {
+    vi.spyOn(db, 'rpc').mockImplementation(() =>
+      Promise.resolve({
+        data: null,
+        error: { message: 'invalid input syntax for type date: "x"', code: '22007' },
+      }) as never,
+    )
+    const result = await updateBooking(db, CLIENT_A, BOOKING_A1, UPDATED_AT, { note: 'x' }, 'staff@a.test')
+    expect(result).toEqual({ ok: false, kind: 'invalid', code: 'invalid_input' })
   })
 })
