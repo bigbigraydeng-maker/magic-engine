@@ -230,6 +230,8 @@ export interface PublishedRef {
   video_id?: string
   published_at: string
   permalink?: string
+  /** Published Reel's idempotently-created CTA comment, when enabled. */
+  first_comment_id?: string
   /**
    * 这条回执对应的是真·公开发布(PUBLISHED)还是草稿(DRAFT)。
    * 由 adapter 按 draft 参数盖戳 —— publish-worker 只在 PUBLISHED 时才 emit 发布信号,
@@ -237,6 +239,15 @@ export interface PublishedRef {
    * 补记),保守当作"不确定" —— 不 emit、不补发,等真查过 video_state 再说。
    */
   video_state?: 'DRAFT' | 'PUBLISHED'
+  /**
+   * Publer 通道专用:帖子在 Publer 里的状态。draft = 只存草稿(不会发出去);
+   * scheduled = 已排期,到点由 Publer 发出。Meta 原生通道用 video_state,不用这个。
+   */
+  provider_state?: 'draft' | 'scheduled'
+  /** Publer 通道专用:排期发布时间(UTC ISO)。草稿没有这个字段。 */
+  scheduled_at?: string
+  /** Publer 通道专用:建帖后回读列表成功、却没找到我们埋的幂等标记 —— 防重复发布的对账可能失效,要人看一眼 */
+  idempotency_unverified?: boolean
   /**
    * 发布信号(me/factory.reel.published)的 Inngest 回执 id。
    * 有值 = 已喊过下游;空/缺 = 还没喊成 → 补发对账会重发(仅当 video_state=PUBLISHED)。
@@ -258,6 +269,7 @@ export interface PublishAdapter {
   publish(args: {
     videoUrl: string
     caption: string
+    firstComment?: string
     target: PublishTarget
     idempotencyTag: string
     draft: boolean
@@ -265,6 +277,13 @@ export interface PublishAdapter {
   }): Promise<PublishedRef>
   /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
   findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
+  /** Create or recover the CTA first comment without duplicating it after a worker retry. */
+  ensureFirstComment?(args: {
+    target: PublishTarget
+    videoId: string
+    idempotencyTag: string
+    message: string
+  }): Promise<string>
 }
 
 export interface WorkOrderBrief {

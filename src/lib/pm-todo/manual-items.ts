@@ -21,24 +21,31 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pushAttributionItems } from './attribution-items'
 import { clientListUnreadableItem, loadActiveClients, type ClientRow } from './client-roster'
+import { pushAiTrackerFailureItems } from './ai-tracker-failure-items'
 import { pushConversionReviewItems } from './conversion-review-items'
+import { pushPaymentEmailNeedsHumanItems } from './payment-email-items'
 import { pushAiAutoReviewCircuitBreakerItems } from './ai-auto-review-circuit-breaker-items'
 import { pushMetaTokenHealthItems } from './meta-token-health-items'
 import { deployCheckFailedItem, pushDeployHealthItems } from './deploy-health-items'
 import { pushMessengerDraftItems } from './messenger-draft-items'
 import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
+import { pushPriceFactItems } from './price-fact-items'
+import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
+import { pushAutoPublishItems } from './auto-publish-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
+import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
@@ -70,6 +77,8 @@ import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
+import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
+import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -155,6 +164,12 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     }),
     // 按时没跑 / 查不出跑没跑 —— PM 2026-08-03 要求「不能完成需要有报错」
     (b) => pushCronHealthItems(supabase, b, now),
+    // 某客户的 AI 可见度探测整周全挂了 —— 没测成被当测出来是零（2026-09-20 三天没人知道）。
+    // 放在 infra 区而不是 per-client 区：它自己查 ai_visibility_runs，不看 clients 表里的
+    // 别的字段；但传 clients 进去是为了只对在服务的客户报警（Codex 复审 2026-09-28）。
+    (b) => pushAiTrackerFailureItems(supabase, b, now, clients).catch((e) =>
+      console.warn('[manual-items] AI 可见度全挂检查失败（不阻塞其他待办）:', e),
+    ),
     // 外部平台的授权断了 —— 跟上面几条一样属于基础设施检查，跟「系统里有几个客户」
     // 无关，所以放在客户名单那条提前返回之前。2026-09-24：CTS 邮箱断了 9 天没人知道，
     // 全站没有任何一条路会把它端出来（模块自己会兜底，不抛给这里）。
@@ -187,6 +202,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 成交/咨询等着人核对要不要告诉广告平台 —— 撤不回的动作，只能人点（#1397）
     (b) => pushConversionReviewItems(supabase, b, clients, now).catch((e) =>
       console.warn('[manual-items] 成交待核对读取失败（不阻塞其他待办）:', e),
+    ),
+    // 邮件里确认收到款、但系统没法自动记成交的 —— 不写进待办就死在运行日志里
+    (b) => pushPaymentEmailNeedsHumanItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 邮箱付款待核对读取失败（不阻塞其他待办）:', e),
     ),
     // AI 全自动审核被异常刹车暂停了 —— 拉模式，事件送达失败也照样出得来
     (b) => pushAiAutoReviewCircuitBreakerItems(supabase, b).catch((e) =>
@@ -243,6 +262,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushLeadSheetItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
     ),
+    // 日历上带日期的验证事项每天核对一遍 —— 读不到日历 / 巡检没跑成 / 没法自动核对都要摆到人眼前
+    (b) => pushCalendarClosureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 日历到期事项巡检待办检查失败（不阻塞其他待办）:', e),
+    ),
     // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
     (b) => pushLinkedinProgressItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] LinkedIn 进度贴待办检查失败（不阻塞其他待办）:', e),
@@ -282,6 +305,18 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushPriceGateItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 价格闸待办检查失败（不阻塞其他待办）:', e),
     ),
+    // 每日计划里写了价格但跟客户资料对不上的帖子 —— 发布出口会整批拦下，不捞出来没人知道
+    (b) => pushPriceFactItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 价格数字核对待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 客户员工改了团目录、点了「请 Magic Engine 上架」—— 不摆出来就没人去上架
+    (b) => pushTourCatalogPublishRequestItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 团目录上架请求待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 自动发布没发出去 / 不确定发没发出去 / 已授权却没动静 —— 人不在场，不捞出来没人知道
+    (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
+    ),
     // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
     (b) => pushPrescriptionItems(supabase, b, now, nameOf),
     // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
@@ -301,6 +336,11 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
     (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 工厂把 Facebook Reel 同步到客户 Instagram(Publer):账号掉线 / 重试都失败的，只有人能修 ——
+    // 回执只写在工单里没人读 = 发现死在库里。拉模式读回执,修好后这条自己消失
+    (b) => pushInstagramPublishItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] Instagram 同步待办读取失败（不阻塞其他待办）:', e),
     ),
     // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
     // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
@@ -798,6 +838,9 @@ async function pushAutoRunItems(
  *
  * 判定与文案都在 `comment-scope-items.ts`：那边直接读 cron 自己写的运行记录，
  * 所以这里说的话跟机器真遇到的失败永远一致。
+ *
+ * 也覆盖「读得到评论、但回复被 Meta 拒掉」的那种（缺 pages_manage_engagement）——
+ * 判定与文案在 `comment-reply-scope-items.ts`。
  */
 async function pushCommentScopeItems(
   supabase: SupabaseClient,
@@ -807,6 +850,28 @@ async function pushCommentScopeItems(
 ): Promise<void> {
   const todos = await fetchCommentScopeTodos(supabase, now)
   for (const t of todos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const failingTodos = await fetchCommentAutoreplyRunFailingTodos(supabase, now)
+  for (const t of failingTodos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const replyTodos = await fetchCommentReplyScopeTodos(supabase, now)
+  for (const t of replyTodos) {
     items.push({
       kind: t.kind,
       client_id: t.client_id,

@@ -5,12 +5,16 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { analyzeViralReference } from '@/lib/reels/viral-analyzer'
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   const { id } = params
 
   const { data: ref, error } = await supabaseAdmin

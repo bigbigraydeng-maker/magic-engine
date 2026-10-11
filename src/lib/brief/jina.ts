@@ -19,7 +19,11 @@ const MAX_RETRIES = 2       // 2 attempts max — total wait ≤ 31s before fall
 /**
  * Core Jina Reader fetch with retry/backoff. Returns the raw response body.
  */
-async function jinaFetch(url: string, returnFormat: 'markdown' | 'html'): Promise<string> {
+async function jinaFetch(
+  url: string,
+  returnFormat: 'markdown' | 'html',
+  accept: 'text/plain' | 'application/json' = 'text/plain',
+): Promise<string> {
   // Jina Reader expects the raw URL appended to the base path — no encoding.
   const jinaUrl = `https://r.jina.ai/${url}`
 
@@ -33,7 +37,7 @@ async function jinaFetch(url: string, returnFormat: 'markdown' | 'html'): Promis
       const jinaKey = process.env.JINA_API_KEY
       const res = await fetch(jinaUrl, {
         headers: {
-          'Accept': 'text/plain',
+          'Accept': accept,
           'X-Return-Format': returnFormat,
           ...(jinaKey ? { Authorization: `Bearer ${jinaKey}` } : {}),
         },
@@ -90,6 +94,43 @@ export async function fetchUrlAsMarkdown(url: string): Promise<JinaFetchResult> 
     : raw
 
   return { url, title, markdown, chars: markdown.length }
+}
+
+export interface JinaPageWithMeta extends JinaFetchResult {
+  /** The page's <meta name="description"> as Jina reports it; null when absent/blank. */
+  description: string | null
+}
+
+/**
+ * Same as fetchUrlAsMarkdown, but asks Jina for its JSON envelope, which —
+ * unlike the plain-text/markdown body — carries the page's meta description.
+ * The plain body has only "Title:/URL Source:/Markdown Content:", which is why
+ * client_site_pages.meta_description stayed empty for every crawled page.
+ * Verified 2026-10-05 against a live page: `data.description` equals the
+ * page's <meta name="description"> text, entities already decoded.
+ */
+export async function fetchUrlWithMeta(url: string): Promise<JinaPageWithMeta> {
+  const raw = await jinaFetch(url, 'markdown', 'application/json')
+  let data: { title?: unknown; description?: unknown; content?: unknown }
+  try {
+    const parsed = JSON.parse(raw) as { data?: typeof data }
+    data = parsed.data ?? {}
+  } catch {
+    throw new JinaError('Invalid JSON response', url)
+  }
+  const content = typeof data.content === 'string' ? data.content : ''
+  if (content.trim().length === 0) throw new JinaError('Empty response', url)
+
+  const h1 = content.match(/^#\s+(.+)$/m)?.[1]
+  const apiTitle = typeof data.title === 'string' && data.title.trim() ? data.title.trim() : undefined
+  const title = h1 ?? apiTitle ?? new URL(url).hostname
+  const markdown = content.length > MAX_CHARS
+    ? content.slice(0, MAX_CHARS) + '\n\n[Content truncated for processing]'
+    : content
+  const description = typeof data.description === 'string'
+    ? data.description.replace(/\s+/g, ' ').trim() || null
+    : null
+  return { url, title, markdown, chars: markdown.length, description }
 }
 
 /**

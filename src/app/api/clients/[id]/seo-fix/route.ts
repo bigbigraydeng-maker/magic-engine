@@ -27,6 +27,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { orchestrateSeoFix } from '@/lib/cms/seo-fix-orchestrator'
 import type { CmsSeoFixPayload } from '@/lib/cms/vocabulary'
+import { buildRouteGuard, protectedPageResponse } from '@/lib/seo/protected-pages-route'
 
 interface RouteContext {
   params: { id: string }
@@ -94,6 +95,7 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       executionItemId:    typeof execution_item_id    === 'string' ? execution_item_id    : undefined,
       productionPackageId: typeof production_package_id === 'string' ? production_package_id : undefined,
       fix,
+      guard: buildRouteGuard(access.user, clientId, 'seo-fix'),
     })
 
     if (!result.ok) {
@@ -111,6 +113,8 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
       flywheel_action_id: result.flywheelActionId,
     })
   } catch (err) {
+    const refused = protectedPageResponse(err)
+    if (refused) return refused
     console.error('[seo-fix]', clientId, err instanceof Error ? err.message : err)
     return NextResponse.json(
       { success: false, error: 'Unexpected error', code: 'INTERNAL_ERROR' },

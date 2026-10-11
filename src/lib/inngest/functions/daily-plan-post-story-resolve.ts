@@ -42,6 +42,8 @@ import {
 } from '@/lib/campaign/daily-plan-measurement-record'
 import { getStoredPageToken } from '@/lib/meta/token-manager'
 import { readPageStoryId } from '@/lib/meta/page-posts'
+import { ensureFacebookFirstComment, buildFirstCommentMarker } from '@/lib/meta/first-comment'
+import { GRAPH_BASE } from '@/lib/meta/graph-base'
 import { readRegisteredPageId } from './daily-plan-post-measurement'
 
 export const STORY_RESOLVE_FUNCTION_ID = `${CLOUD_FN_PREFIX}daily-plan-post-story-resolve`
@@ -69,6 +71,8 @@ export interface StoryResolveDeps {
   isRecalled: (due: StoryResolveDue) => Promise<boolean>
   send: (event: { id: string; name: string; data: Record<string, unknown> }) => Promise<InngestSendResult>
   writeRecord: (record: MeasurementRecord) => Promise<void>
+  /** Post the Daily Plan first comment on the now-public post. Resolves to the comment id, throws on failure. */
+  postFirstComment: (due: StoryResolveDue, postId: string) => Promise<string>
 }
 
 /** One read with the Page token fetched at execution time (it may have rotated since publish). */
@@ -79,6 +83,26 @@ export async function readStoryOnce(due: StoryResolveDue, fetcher: typeof fetch 
   if (read.ok) return { kind: 'resolved', postId: read.postId }
   if (read.reason === 'object_not_found') return { kind: 'gone' }
   return { kind: 'not_yet', reason: read.reason }
+}
+
+/**
+ * Post the Daily Plan first comment on the resolved post. Idempotent via the
+ * shared marker (namespace + idempotency key), so a replay never double-posts.
+ */
+export async function postFirstCommentOnce(due: StoryResolveDue, postId: string, fetcher?: typeof fetch): Promise<string> {
+  if (!due.first_comment_text) throw new Error('first_comment_text_missing')
+  const token = await getStoredPageToken(due.client_id, due.page_id)
+  if (!token) throw new Error('token_unavailable')
+  return ensureFacebookFirstComment({
+    graphBase: GRAPH_BASE,
+    objectId: postId,
+    expectedPageId: due.page_id,
+    accessToken: token,
+    marker: buildFirstCommentMarker('daily-plan-first-comment', due.idempotency_key),
+    message: due.first_comment_text,
+    failureLabel: '每日计划帖',
+    fetcher,
+  })
 }
 
 /**
@@ -110,6 +134,7 @@ function recordPost(due: StoryResolveDue): MeasurementRecordPost {
     photo_id: due.photo_id,
     page_id: due.page_id,
     ...(due.scheduled_publish_time ? { scheduled_publish_time: due.scheduled_publish_time } : {}),
+    ...(due.first_comment_text ? { first_comment_text: due.first_comment_text } : {}),
   }
 }
 
@@ -132,6 +157,48 @@ async function emitResolved(
     deps.send({ id: due.idempotency_key, name: DAILY_PLAN_POST_PUBLISHED_EVENT, data: parsed.data }),
   )
   return { ok: true, outcome: 'emitted', post_id: postId, attempt }
+}
+
+/**
+ * Post the first comment after the published event is sent. The step callback
+ * never throws: a failed comment must not retry the whole workflow or hide the
+ * already-sent published event — it leaves a `first_comment_failed` record for
+ * a human instead.
+ */
+async function postFirstCommentStep(
+  due: StoryResolveDue,
+  postId: string,
+  attempt: number,
+  step: StoryResolveStep,
+  deps: StoryResolveDeps,
+): Promise<void> {
+  if (!due.first_comment_text) return
+  await step.run('post-first-comment', async () => {
+    // A Post recalled between publish and this step must get no comment — and
+    // no failure record. A failed recall lookup must not block the attempt.
+    try {
+      if (await deps.isRecalled(due)) return { ok: true, skipped: 'recalled' }
+    } catch {
+      // fall through: a failed recall lookup must not block the comment attempt
+    }
+    try {
+      await deps.postFirstComment(due, postId)
+      return { ok: true }
+    } catch (error) {
+      try {
+        await deps.writeRecord({
+          status: 'failed',
+          outcome: 'first_comment_failed',
+          reason: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+          attempts: attempt,
+          post: { ...recordPost(due), post_id: postId, first_comment_text: due.first_comment_text },
+        })
+      } catch (recordError) {
+        console.error('[story-resolve] first comment failure record not written', recordError)
+      }
+      return { ok: false }
+    }
+  })
 }
 
 async function handleGone(due: StoryResolveDue, attempt: number, step: StoryResolveStep, deps: StoryResolveDeps): Promise<StoryResolveResult> {
@@ -176,7 +243,12 @@ export async function runStoryResolve(
     // Never read before the photo is public: Meta has no story id until then.
     await step.sleepUntil(`wait-resolve-${attempt}`, new Date(at))
     const read = await step.run(`read-story-id-${attempt}`, () => deps.readStory(due))
-    if (read.kind === 'resolved') return emitResolved(due, read.postId, attempt, step, deps)
+    if (read.kind === 'resolved') {
+      // Post the comment first: it never throws and is memoised/idempotent, so a
+      // failed or retried published-event send can never lose the comment.
+      await postFirstCommentStep(due, read.postId, attempt, step, deps)
+      return emitResolved(due, read.postId, attempt, step, deps)
+    }
     if (read.kind === 'gone') return handleGone(due, attempt, step, deps)
     lastReason = read.reason
   }
@@ -235,4 +307,5 @@ export const dailyPlanPostStoryResolve = createStoryResolveFunction({
   isRecalled: (due) => readIsRecalled(supabaseAdmin, due),
   send: (event) => sendInngestEvent(event),
   writeRecord: (record) => writeMeasurementRecord(supabaseAdmin, record),
+  postFirstComment: (due, postId) => postFirstCommentOnce(due, postId),
 })

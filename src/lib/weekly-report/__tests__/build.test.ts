@@ -128,6 +128,43 @@ describe('renderWeeklyReport — 断流 rule', () => {
     expect(html).toContain('⚠️ 变差了')
   })
 
+  it('rank verdict rows render as rank lines — never as an empty "— → —" CTR line — with the plain-language caveat once', () => {
+    const c: ClientWeekly = {
+      ...base,
+      auto_changes: {
+        ...base.auto_changes,
+        outcomes_checked_week: [
+          { page_slug: 'beijing-to-xian', baseline_ctr: null, observed_ctr: null, observed_impressions: null, outcome: null, rank_verdict: 'rank_moved_up', baseline_rank_group: 12, verdict_detail: { median_delta: -4 } },
+          { page_slug: 'chongqing-guide', baseline_ctr: null, observed_ctr: null, observed_impressions: null, outcome: null, rank_verdict: 'no_detectable_change', baseline_rank_group: 8, verdict_detail: { median_delta: 1 } },
+          { page_slug: 'visa-free', baseline_ctr: null, observed_ctr: null, observed_impressions: null, outcome: null, rank_verdict: 'not_measured', baseline_rank_group: null, verdict_detail: { reason: 'reverted' } },
+        ],
+      },
+    }
+    const { html } = renderWeeklyReport([c], '3 Aug 2026')
+    expect(html).toContain('/beijing-to-xian：目标词排名 第 12 名 → 第 8 名 · 🔺 上升了 4 名')
+    expect(html).toContain('/chongqing-guide：目标词排名 第 8 名 → 第 9 名 · ➖ 没看出变化')
+    expect(html).toContain('/visa-free：❔ 没测成（改完又被撤回了）')
+    expect(html).not.toContain('— → —')
+    expect(html.match(/排名没动 ≠ 改动没用/g)).toHaveLength(1)
+    expect(html).not.toMatch(/有效|变差了|改好了/)
+  })
+
+  it('legacy CTR rows still render, and a week with only legacy rows gets no rank caveat', () => {
+    const c: ClientWeekly = {
+      ...base,
+      auto_changes: { ...base.auto_changes, outcomes_checked_week: [{ page_slug: 'old-page', baseline_ctr: 0.02, observed_ctr: 0.03, observed_impressions: 300, outcome: 'improved' }] },
+    }
+    const { html } = renderWeeklyReport([c], '3 Aug 2026')
+    expect(html).toContain('✅ 改好了')
+    expect(html).not.toContain('排名没动 ≠ 改动没用')
+  })
+
+  it('says how many of this week\'s changes can be verified later (recorded a rank baseline), and says nothing when the figure is absent', () => {
+    const withBaseline: ClientWeekly = { ...base, auto_changes: { ...base.auto_changes, titles_applied_week: 3, titles_with_rank_baseline_week: 2 } }
+    expect(renderWeeklyReport([withBaseline], '3 Aug 2026').html).toContain('其中 2 个记下了改动前的排名、日后能验收')
+    expect(renderWeeklyReport([base], '3 Aug 2026').html).not.toContain('日后能验收')
+  })
+
   it('断更 ≥7 天 renders the streak warning', () => {
     const c: ClientWeekly = {
       ...base,

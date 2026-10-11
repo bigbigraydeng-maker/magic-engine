@@ -48,6 +48,8 @@ import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { tombstoneRecalledDates } from '@/lib/campaign/daily-plan-auto-publish-store'
+import { readAutoPublishRecords } from '@/lib/campaign/daily-plan-auto-publish-records'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { deletePagePost, getPageAccessToken } from '@/lib/meta/page-posts'
 import {
@@ -195,6 +197,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       row.publishMeta,
     )
 
+    // The unattended publisher may know about posts this receipt does not (its own record of a send whose
+    // receipt write failed) or about dates whose outcome is unsettled. Recall only deletes what the receipt
+    // lists, so these must be shown to the human instead of silently staying on the Page.
+    const autoPublishRecords = await readAutoPublishRecords({
+      planId: command.plan_id,
+      clientId,
+      dates: command.dates,
+      receiptPostIds: new Set([
+        ...row.publishMeta.published.map((p) => p.post_id),
+        ...(row.publishMeta.recalled ?? []).map((p) => p.post_id),
+      ]),
+    })
+    const autoPublishNote =
+      autoPublishRecords.status === 'UNKNOWN'
+        ? '没能读到自动发布器自己的记录，这几天主页上可能还有回执里没有的帖子，请到 Facebook 主页核对。'
+        : autoPublishRecords.posts.length > 0 || autoPublishRecords.unconfirmed.length > 0
+          ? '自动发布器的记录里有回执没列出的帖子，或有结果未确认的日期（见 auto_publish_records）。这些不会被本次撤回删除，请到 Facebook 主页核对。'
+          : undefined
+
     if (command.no_recall) {
       return NextResponse.json({
         success: true,
@@ -206,6 +227,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         })),
         already_recalled,
         not_published,
+        auto_publish_records: autoPublishRecords,
+        ...(autoPublishNote ? { auto_publish_note: autoPublishNote } : {}),
       })
     }
 
@@ -270,6 +293,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       })
     }
 
+    // A recalled post must never be published again by the automatic publisher.
+    // Mark its dates as blocked; if that write fails the recall itself still
+    // stands (the post is gone), but the response says so loudly — the automatic
+    // publisher also treats `recalled[]` on the receipt as final.
+    let autoPublishTombstone: { status: 'OK'; tombstoned: number } | { status: 'FAILED'; detail: string } = {
+      status: 'OK',
+      tombstoned: 0,
+    }
+    if (recalled.length > 0 || already_recalled.length > 0) {
+      try {
+        const marked = await tombstoneRecalledDates({
+          clientId,
+          planId: row.id,
+          dates: Array.from(new Set([...recalled.map((r) => r.date), ...already_recalled.map((r) => r.date)])),
+        })
+        autoPublishTombstone = { status: 'OK', tombstoned: marked.tombstoned }
+      } catch (err) {
+        console.error('[daily-plan recall] auto-publish tombstone failed', errorMessage(err))
+        autoPublishTombstone = { status: 'FAILED', detail: 'tombstone write failed; see server log' }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       status: failed.length === 0 ? 'RECALLED' : recalled.length === 0 ? 'FAILED' : 'PARTIAL',
@@ -278,6 +323,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       failed,
       already_recalled,
       not_published,
+      auto_publish_tombstone: autoPublishTombstone,
+      auto_publish_records: autoPublishRecords,
+      ...(autoPublishNote ? { auto_publish_note: autoPublishNote } : {}),
+      ...(autoPublishTombstone.status === 'FAILED'
+        ? { warning: '撤回成功，但没能在自动发布里把这些日期标成「已撤回」。请不要重新授权这些日期，并立刻告知开发。' }
+        : {}),
     })
   } catch (err) {
     return NextResponse.json(

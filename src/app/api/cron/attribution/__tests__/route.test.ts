@@ -24,23 +24,23 @@ let connectorsResult: { data: Array<{ client_id: string }> | null; error: { mess
   error: null,
 }
 
-/** What the route wrote into cron_run_logs on finish. */
+/** What the route wrote into cron_run_logs on finish (run-logger's upsert row). */
 let cronLogUpdate: Record<string, unknown> | null = null
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: (table: string) => {
       if (table === 'cron_run_logs') {
-        // startCronRun / finish (run-logger.ts) — log row lifecycle. The update
-        // payload is captured so tests can assert what the cron summary claims,
-        // not just what the HTTP response says.
+        // startCronRun / finish (run-logger.ts) — log row lifecycle. Start awaits
+        // insert({ id, job_name, status: 'running' }); finish awaits
+        // upsert(row, { onConflict: 'id' }) with the same id. The upsert row is
+        // captured so tests can assert what the cron summary claims, not just
+        // what the HTTP response says.
         return {
-          insert: () => ({
-            select: () => ({ single: async () => ({ data: { id: 'run-1' }, error: null }) }),
-          }),
-          update: (payload: Record<string, unknown>) => {
+          insert: async () => ({ data: null, error: null }),
+          upsert: async (payload: Record<string, unknown>) => {
             cronLogUpdate = payload
-            return { eq: async () => ({ data: null, error: null }) }
+            return { data: null, error: null }
           },
         }
       }

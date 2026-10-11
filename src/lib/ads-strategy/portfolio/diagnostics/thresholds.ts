@@ -9,6 +9,10 @@
 /** 近几天为一个评估窗口（D3/D4/D5/D8） */
 export const WINDOW_DAYS = 7
 
+// ── 归属判定（ownership.ts）─────────────────────────────────
+/** 广告层快照最近一轮必须不超过这么多小时前（快照每 3 小时一轮）；否则归属核实不到（Codex 2026-09-27） */
+export const OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS = 24
+
 // ── D1 投放卡住 ─────────────────────────────────────────────
 /** 预筛：当天花费 < 前 3 天花费中位数 × 这个比例，才去拉小时数据 */
 export const D1_PRESCREEN_DROP_RATIO = 0.75

@@ -5,6 +5,22 @@
 
 ---
 
+### 2026-10-10（CRM 客人页：三套状态合成一个「该做什么」，列表只分「今天要联系 / 先放着」两张名单）
+
+PR [#2421](https://github.com/bigbigraydeng-maker/magic-engine/pull/2421)（B 级，机器自动合）。PM 2026-10-10 看 NAL 全部客人页后拍板：页面少信息多引导，「跟进到哪步」「现在冷热」「高/中/低意向」三套并列状态合成一个概念——该做什么。列表两列合成一列「该做什么」（动作 + 为什么），分段 4 → 2；侧栏顶部一张三行卡（动作 / AI 建议 / 到哪一步了，谁判的只在有记录时写）；AI 意向只能把人往上提（聊断了 + 高意向 → 今天要联系），不往下压。新增 `lib/crm/next-action.ts`、`lib/crm/brief-lookup.ts`。当场试跑 NAL 生产只读：229 人 → 47 / 182，抬升 19，总数守恒；页面渲染探针 8 项全过。DeepSeek 8 轮约 US$0.057。设计审 + 实施后审各一轮（子牙 + 魏征），处置见 `docs/specs/2026-10-10-crm-one-next-action-design-v0.md`。顺带查出 NAL 109 张私信摘要正文冒充 CTS（另开窗口重算）与 18 条进线从没被真人回过（登记后续）。
+
+**Reuse Statement**：复用分段引擎、排序、阶段身份常量、现成 AI 摘要字段；新增两个 platform-shared 纯模块，无客户 / 行业语义；实现落点与层级门判定一致（L1 既有 CRM 能力内部收口）。
+
+---
+
+### 2026-10-05（Park Homes 官网：Riverside 页「工程进度」加上客户发来的进度更新视频）
+
+PR [#2252](https://github.com/bigbigraydeng-maker/magic-engine/pull/2252) 由机器自动合并（C 级），随后手动触发 `parkhomes-deploy.yml` 发布（自动合并不会触发发布，见 [合并审批](../../.github/merge-authorization.md)「已知缺口」），线上已核实。客户 Jason 2026-10-04 邮件发来一条 Riverside 进度更新视频（YouTube），要求放上网站。嵌入位置是 Riverside 页「Development progress」一段的航拍图下方，由 `projects.js` 里新增的可选字段 `story.progress.video` 驱动；说明只写「开发商提供，2026 年 10 月」（收到时间），不从视频推断分期或完工状态；原有的走访视频保留在原处。代码由 DeepSeek 写（aider 一次性 1 轮，$0.0042），Claude Code 出指令、审 diff、构建、提交。验证：站点构建 20 页通过；生成页与线上页均含新旧两个视频嵌入；浏览器实际打开线上页，新视频播放器加载正常（16:9，无横向溢出）。台账卡 `2026-10-05-parkhomes-riverside-update-video`。
+
+**Reuse Statement**：客户专属站点内容。复用既有 ProjectStory 布局和已有的视频嵌入写法；新增一个可选数据字段和约 15 行条件渲染，全部在客户站点目录内，未进入共享运行时。
+
+---
+
 ### 2026-09-27（Magic Engine 工具实验室第二步：官网「网站免费诊断」不再出假结果、有防刷与花费上限、中文页出中文结果）
 
 - **为什么**：官网免费诊断会在 AI 失败时把写死的示例当成诊断给访客看，前端还有假分数和夸大的进度；没有任何次数上限；只有英文、写死澳新语境。实施中又发现官网（Cloudflare）的服务端连不上数据库，诊断从没存下过一条线索。
@@ -338,6 +354,25 @@ PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
   导出限制的真实类型错误，已修
 
 ---
+
+### 2026-09-28（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）
+
+PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)（2026-09-23 开工，2026-09-28 合并）：
+- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂、且至少有一个原因需要
+  PM 动手（充值/换钥匙；不论它是不是占比最多的原因）时，自动出现在今日待办里，按实际出错的供应商（OpenAI/Google AI/Claude/
+  Perplexity）给对应的充值或换钥匙指引；不用 PM 操心的原因（暂时限流/供应商出错/我们解析不出排名）
+  单独归开发栏的新 kind `ai_tracker_all_failed_dev`，不计入 PM 待办数量。**数据库写入失败不在此列**：
+  插入失败时那次探测根本不落库、更新失败时那一行会被误读成成功，两种情况现在都读不到、分不进
+  `db_error` 桶（`ai-tracker-failure-items.ts` 里的 `db_error` 分类目前是死代码），见下方「3 条架构级
+  已知缺口」
+- 修复旧 cron `ai-tracker-weekly/route.ts`：全挂客户以前被算成"成功"，现在用新增的 `runs_conclusive`
+  字段（跟快照闸门同一套可判定标准）正确计入失败，含"AI 答了但我们解析不出排名"这种更隐蔽的全挂
+- 查询使用 `fetchAll` 分页器 + `(ran_at, id)` 稳定排序，避开 PostgREST 1000 行静默截断和分页跳行
+- 30 个新单测覆盖错误分桶、按供应商路由修复指引、连续失败周数计算、提醒节拍、活跃客户名单过滤、多客户场景
+- 经子牙（架构）+ 魏征（挑刺）+ Codex 三轮独立复审共 12 条意见，其中一条是真的编译不过的错误、一条
+  会让所有新告警从待办里彻底消失，均已修；3 条架构级已知缺口（数据库插入失败时这行数据完全不落库
+  检测不到、更新失败时那行会被误读成成功、批次没跑完时可能误报一次但会自愈）记入台账卡并回写
+  [ROADMAP §AI 可见度全挂告警上线后跟进](../ROADMAP.md)
 
 ### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
 
@@ -3652,5 +3687,11 @@ P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未�
 - `website/ai-training.html`、`website/ai-automation.html`、`website/ai-marketing-smes.html` 以及 `/cn/` 对应页已上线，SME-first public surface 补齐
 - `website/index.html`、`website/cn/index.html`、`website/robots.txt`、`website/sitemap.xml` 已同步新页面入口与抓取路径
 
+### 2026-09-28（广告巡检按创意主页划归属，别家客户的广告组不再算进诊断和自动暂停，PR [#2118](https://github.com/bigbigraydeng-maker/magic-engine/pull/2118)）
+
+- 生产核实：一个只登记给某客户的广告账户里投着另一个客户主页的广告，另一个账户里有挂第三个客户主页的广告组花过钱；广告组/系列层诊断（D1/D3/D4/D5/D7/D8/D9）和机会发现（O1/O2/O3）之前把账户里所有实体都算给登记的那个客户，D3 命中还会进自动暂停
+- 新增 `src/lib/ads-strategy/portfolio/diagnostics/ownership.ts`：按名下广告挂过的每个 Facebook 主页判归属，拿不准一律不算客户的；自动暂停出手前回库再核一次归属和快照新鲜度
+- 登记表不改成「共用」（会让客户整个主账户降级只做账户级、快照同步跳过四层）
+- 子牙+魏征设计审两轮、实施后审两轮，狄仁杰攻击验证四轮，加上仓库自带 Codex 自动审查六轮（含 1 次采纳自动修车道 `claude[bot]` 先推的等价实现），逐条核实修复或记入台账（`docs/ledger/2026-09-29-ads-ownership-mid-window-capture-gap.md`、`docs/ledger/2026-09-29-ads-cbo-orphan-sibling-not-connate.md`）
 
 ---

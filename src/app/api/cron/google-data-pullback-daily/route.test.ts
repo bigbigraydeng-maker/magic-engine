@@ -91,10 +91,12 @@ vi.mock('@/lib/ga4/client', () => ({
 // ── Mock Meta API ─────────────────────────────────────────────────────────────
 
 const mockGetAdAccountInsights = vi.fn()
+const mockGetAdAccountInsightsResult = vi.fn()
 const mockGetAdCampaignInsights = vi.fn()
 
 vi.mock('@/lib/meta/client', () => ({
   getAdAccountInsights:  (...args: unknown[]) => mockGetAdAccountInsights(...args),
+  getAdAccountInsightsResult: (...args: unknown[]) => mockGetAdAccountInsightsResult(...args),
   getAdCampaignInsights: (...args: unknown[]) => mockGetAdCampaignInsights(...args),
 }))
 
@@ -223,6 +225,12 @@ describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel�
       error: null,
     })
     mockGetAdAccountInsights.mockResolvedValue(MOCK_INSIGHTS)
+    mockGetAdAccountInsightsResult.mockImplementation(async (...args: unknown[]) => {
+      const insights = await mockGetAdAccountInsights(...args)
+      return insights
+        ? { ok: true, insights }
+        : { ok: false, failure: { kind: 'empty_data' } }
+    })
     mockGetAdCampaignInsights.mockResolvedValue([])
     mockSnapshotSingle.mockResolvedValue({ data: { id: 'snap-001' }, error: null })
 
@@ -280,6 +288,31 @@ describe('GET /api/cron/google-data-pullback-daily — P22.A.5 MetaAds flywheel�
     await GET(makeRequest(CRON_SECRET))
 
     expect(mockPullMetrics).not.toHaveBeenCalled()
+  })
+
+  it('keeps a Meta HTTP failure red and records its fingerprint in the cron receipt', async () => {
+    mockGetAdAccountInsightsResult.mockResolvedValue({
+      ok: false,
+      failure: { kind: 'http_error', status: 429 },
+    })
+
+    const { GET } = await import('./route')
+    const response = await GET(makeRequest(CRON_SECRET))
+    const json = await response.json()
+    const receipt = mockCronFinish.mock.calls.at(-1)?.[0] as {
+      error?: string
+      failed: number
+      summary: { errors: Array<{ client_id: string; source: string; error: string }> }
+    }
+
+    expect(json.failed).toBe(1)
+    expect(receipt.failed).toBe(1)
+    expect(receipt.error).toContain('meta: getAdAccountInsights http_error (429)')
+    expect(receipt.summary.errors).toContainEqual({
+      client_id: CLIENT_ID,
+      source: 'meta',
+      error: 'getAdAccountInsights http_error (429)',
+    })
   })
 
   it('does NOT call pullMetrics when META_SYSTEM_USER_TOKEN is missing', async () => {
@@ -997,5 +1030,113 @@ describe('GET /api/cron/google-data-pullback-daily — 评估日按广告账户�
 
     vi.mocked(evaluateClientAdHealth).mockReset()
     vi.mocked(sendAdHealthDigest).mockReset()
+  })
+})
+
+// ── 2026-10-07: idle Meta account is a skip, not a failure ───────────────────
+// A Meta ad account with no delivery (no_delivery) is a normal state, not an
+// error: it must not increment `failed`, must not write an error into the cron
+// receipt, and must not be counted as a synced snapshot. Every OTHER failure
+// kind (empty_data, http_error, network_error) stays a counted failure.
+describe('GET /api/cron/google-data-pullback-daily — idle Meta account is a skip, not a failure', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    process.env.CRON_SECRET          = CRON_SECRET
+    process.env.META_SYSTEM_USER_TOKEN = META_TOKEN
+
+    // Default: no GSC/GA4 connectors, one Meta client
+    mockConnectorsResult.mockResolvedValue({ data: [], error: null })
+    mockMetaClientsResult.mockResolvedValue({
+      data: [{ id: CLIENT_ID, meta_ad_account_id: AD_ACCOUNT }],
+      error: null,
+    })
+    mockGetAdCampaignInsights.mockResolvedValue([])
+    mockSnapshotSingle.mockResolvedValue({ data: { id: 'snap-001' }, error: null })
+
+    mockResolveMetaTokenDetailed.mockImplementation(async () =>
+      process.env.META_SYSTEM_USER_TOKEN
+        ? { token: process.env.META_SYSTEM_USER_TOKEN, source: 'shared_fallback' as const }
+        : null,
+    )
+    mockLoadTokenOwnerPeers.mockResolvedValue(null)
+  })
+
+  it('no_delivery → not a failure, no error, no snapshot, counted as idle', async () => {
+    mockGetAdAccountInsightsResult.mockResolvedValue({
+      ok: false,
+      failure: { kind: 'no_delivery' },
+    })
+
+    const { GET } = await import('./route')
+    const json = await (await GET(makeRequest(CRON_SECRET))).json()
+    const receipt = mockCronFinish.mock.calls.at(-1)?.[0] as {
+      error?: string
+      failed: number
+      summary: { errors: Array<{ client_id: string; source: string; error: string }>; meta_synced: number; meta_idle: number }
+    }
+
+    expect(json.failed).toBe(0)
+    expect(receipt.failed).toBe(0)
+    expect(receipt.error).toBeUndefined()
+    expect(receipt.summary.errors.some(e => e.source === 'meta')).toBe(false)
+    expect(receipt.summary.meta_synced).toBe(0)
+    expect(receipt.summary.meta_idle).toBe(1)
+    expect(mockSnapshotInsert).not.toHaveBeenCalled()
+  })
+
+  it('empty_data → still a counted failure', async () => {
+    mockGetAdAccountInsightsResult.mockResolvedValue({
+      ok: false,
+      failure: { kind: 'empty_data' },
+    })
+
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+    const receipt = mockCronFinish.mock.calls.at(-1)?.[0] as {
+      error?: string
+      failed: number
+      summary: { meta_idle: number }
+    }
+
+    expect(receipt.failed).toBe(1)
+    expect(receipt.error).toContain('meta: getAdAccountInsights empty_data')
+    expect(receipt.summary.meta_idle).toBe(0)
+  })
+
+  it('http_error (401) → still a counted failure', async () => {
+    mockGetAdAccountInsightsResult.mockResolvedValue({
+      ok: false,
+      failure: { kind: 'http_error', status: 401 },
+    })
+
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+    const receipt = mockCronFinish.mock.calls.at(-1)?.[0] as {
+      error?: string
+      failed: number
+      summary: { meta_idle: number }
+    }
+
+    expect(receipt.failed).toBe(1)
+    expect(receipt.error).toContain('http_error (401)')
+    expect(receipt.summary.meta_idle).toBe(0)
+  })
+
+  it('network_error → still a counted failure', async () => {
+    mockGetAdAccountInsightsResult.mockResolvedValue({
+      ok: false,
+      failure: { kind: 'network_error' },
+    })
+
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+    const receipt = mockCronFinish.mock.calls.at(-1)?.[0] as {
+      error?: string
+      failed: number
+      summary: { meta_idle: number }
+    }
+
+    expect(receipt.failed).toBe(1)
+    expect(receipt.summary.meta_idle).toBe(0)
   })
 })

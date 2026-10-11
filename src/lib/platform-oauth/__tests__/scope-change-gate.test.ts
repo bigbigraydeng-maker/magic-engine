@@ -85,6 +85,7 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
       'pages_manage_posts',
       'leads_retrieval',
       'pages_manage_ads',
+      'pages_manage_engagement',
     ])
   })
 

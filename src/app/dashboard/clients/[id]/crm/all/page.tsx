@@ -11,8 +11,10 @@
  * 也顺带解决了「两份重复逻辑」的老毛病（原来 ContactDetail 和 PersonDrawer 各判一次
  * NAL、各接一份 WhatsApp 回复框）。删除的 ContactDetail.tsx 见这次改动的 diff。
  *
- * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；状态拆成
- * 「跟进到哪步」+「现在冷热」两列；每个空格填人话绝不留白；顶部搜索 + 表头排序 +
+ * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；
+ * 平铺名单像传统 CRM 一样显示「到哪一步了」；「该做什么」只在「Magic Engine 智能」
+ * 分段视图里显示（PM 2026-10-10）；
+ * 每个空格填人话绝不留白；顶部搜索 + 表头排序 +
  * 总数；渠道/方向标签带 fallback（DB 加新枚举前端不炸）。
  */
 
@@ -28,8 +30,9 @@ import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } fro
 import type { Segment } from '@/lib/crm/segments'
 import { type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
+import { DAILY_QUOTA } from '@/lib/crm/next-action'
 import {
-  TEMP_CLS,
+  LIST_CLS,
   fmtDate,
   relTime,
   ts,
@@ -38,7 +41,7 @@ import {
 } from './_components/contact-table-types'
 
 // SectionKey 从 drawer-nav.ts 引，不在本文件另声明一份同样的字面量联合类型——
-// 只有一处定义，谁改了 lib/crm/list-sections.ts 的四段名字，这里跟着变，不用记得改两处。
+// 只有一处定义，谁改了 lib/crm/list-sections.ts 的两张名单（hot / cold）的名字，这里跟着变，不用记得改两处。
 interface PrioritySectionData {
   key: SectionKey
   title: string
@@ -75,6 +78,10 @@ function toDrawerRow(r: ContactRow): DrawerRow {
     stage: r.stage,
     stageLabel: r.stageLabel,
     reason: r.reason,
+    // 「该做什么」三行卡的内容 —— 跟列表那一格同一个对象，两处不会说两套话。
+    nextAction: r.nextAction,
+    // 只给抽屉显示一行「AI 初判（未校准）」小字，不参与任何判断。
+    intent: r.intent,
     // 后端 segmentContact() 的枚举值原样传下来，这里的 ContactRow.segment 类型是
     // string（跨接口共用的宽类型），值域跟 Segment 一致，不重新校验。
     segment: r.segment as Segment,
@@ -542,7 +549,7 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  const colCount = 7 + columns.length
+  const colCount = 6 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -633,16 +640,18 @@ export default function CrmAllContactsPage() {
           </td>
         ))}
         <td className="px-4 py-3">
-          {r.stageLabel ? (
+          {grouped ? (
+            <>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}>
+                {r.nextAction.verbLabel}
+              </span>
+              <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.reason}</span>
+            </>
+          ) : r.stageLabel ? (
             <span className="text-me-charcoal/70">{r.stageLabel}</span>
           ) : (
             <span className="text-me-charcoal/35">还没标</span>
           )}
-        </td>
-        <td className="px-4 py-3">
-          <span className={`rounded-full px-2 py-0.5 text-xs ${TEMP_CLS[r.temperature]}`}>
-            {r.segmentLabel}
-          </span>
         </td>
       </tr>
     )
@@ -693,7 +702,7 @@ export default function CrmAllContactsPage() {
 
           {stages.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-me-charcoal/45">跟进到哪步：</span>
+              <span className="text-xs text-me-charcoal/45">到哪一步了：</span>
               {stages.map((s) => {
                 const on = stageFilter.includes(s.stageKey)
                 return (
@@ -726,11 +735,11 @@ export default function CrmAllContactsPage() {
               }}
               className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
             >
-              {grouped ? '← 回到平铺名单' : '按「先联系谁」分段'}
+              {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
             </button>
             {grouped && (
               <span className="text-xs text-me-charcoal/45">
-                分段是系统按联系记录算的，跟「今天要联系」那一页同一套口径；段内按「该先联系谁」排，点表头不改顺序
+                系统读完往来记录和 AI 摘要，告诉你今天该先联系谁、做什么；段内按紧急程度排，点表头不改顺序
               </span>
             )}
             {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
@@ -802,7 +811,7 @@ export default function CrmAllContactsPage() {
               也会弹出「大家的跟进到哪步都还空着」（魏征 C3 / 子牙 P1-4 实测）。 */}
           {total > 0 && rows.length > 0 && rows.every((r) => !r.stage) && (
             <p className="rounded-lg bg-me-ivory px-3 py-2 text-xs leading-relaxed text-me-charcoal/55">
-              刚搬过来，大家的「跟进到哪步」都还空着 —— 聊完顺手标一下就行，不用一次标完。右边「现在冷热」是系统自动算的，现在就能用。
+              「该做什么」是系统按往来记录和 AI 摘要算的，现在就能用；点开一个人可以在里面标他到哪一步了。
             </p>
           )}
 
@@ -834,8 +843,7 @@ export default function CrmAllContactsPage() {
                   {columns.map((c) => (
                     <th key={c.key} className="px-4 py-3">{c.label}</th>
                   ))}
-                  <th className="px-4 py-3">跟进到哪步</th>
-                  <th className="px-4 py-3">现在冷热</th>
+                  <th className="px-4 py-3">{grouped ? '该做什么' : '到哪一步了'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -863,7 +871,20 @@ export default function CrmAllContactsPage() {
                         colSpan={colCount}
                         onToggle={() => toggleSection(s.key)}
                       />,
-                      open && s.items !== null && s.items.map((r) => renderRow(r)),
+                      open && s.items !== null && s.key === 'hot' && s.items.length > DAILY_QUOTA
+                        ? [
+                            ...s.items.slice(0, DAILY_QUOTA).map((r) => renderRow(r)),
+                            // 只在第一页画：翻到第二页时前面那 20 个已经看过了，线不该再出现。
+                            (sectionPages[s.key] ?? 1) <= 1 && (
+                              <tr key="quota-line" data-testid="quota-line">
+                                <td colSpan={colCount} className="border-y border-dashed border-me-charcoal/25 bg-me-ivory/60 px-4 py-2 text-center text-xs font-bold text-me-charcoal/55">
+                                  ↑ 今天先打这 {DAILY_QUOTA} 个 · 以下 {s.total - DAILY_QUOTA} 个排队，打完前面的再往下看 ↓
+                                </td>
+                              </tr>
+                            ),
+                            ...s.items.slice(DAILY_QUOTA).map((r) => renderRow(r)),
+                          ]
+                        : open && s.items !== null && s.items.map((r) => renderRow(r)),
                       open && s.items !== null && s.items.length === 0 && (
                         <tr key={`section-${s.key}-empty`}>
                           <td colSpan={colCount} className="px-4 py-4 text-center text-xs text-me-charcoal/35">

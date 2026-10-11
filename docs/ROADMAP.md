@@ -327,9 +327,8 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
 **§11 打分**：频率高（每日跑）· IMPACT 高（Check/Tune 段决定闭环通不通电）· 收入高（客户续费看广告效果）→ 三高 → **P0**。合同 [#1986](https://github.com/bigbigraydeng-maker/magic-engine/issues/1986)；设计稿 `docs/specs/2026-09-25-ads-impact-wp3-design-v1.md`（三方设计复审两轮：子牙 / 魏征 / 狄仁杰，21+27 条全部并入）。执行走 DeepSeek，本窗口统筹复审。
 
 - [ ] **WP3.1a 同步 worker**：`ad_strategy_configs.autonomy_mode` → `client_automation_policies.mode`（按 `(client_id, action_key)` 逐键条件 UPDATE，registry 动态取 `ads.*` 键；Kernel 一行不动；同步 SQL 函数 SECURITY DEFINER + REVOKE/GRANT；审计列 + receipts 表；架构测试 grep 禁令）。狄仁杰判「可进」。
-- [ ] **WP3.1b 熔断**：append-only `ads_circuit_events`（按账户，派生态：无 release 且 sticky/未过 24h = 熔断中）；resolver 钩子返回 unavailable → Kernel 两层拒；admin 解除接口 `guardGlobalAdmin`；**收编止损旁路** `ad-health/stop-loss/route.ts`（付费客户成员可直调 Meta 改预算/状态，不经 Kernel）；**账户级日预算上限**（`client_meta_ad_accounts.daily_budget_cap_cents` + envelope-facts 按账户取 + 绑定面板 UI；CTS 主 100 / 个人 50，客户级 150 为总闸）；**同 PR 修 WP2 遗留 [#1994](https://github.com/bigbigraydeng-maker/magic-engine/issues/1994)**（resolver 没接进生产 Kernel、pre_provider 不读 kernel_pre 快照、4000 行窗口）。migration 先 apply 再合并代码。
-- [ ] **WP3.1b PR A 拆出去的第四条旁路 · 止损接线 + B2 前端契约修 · 并入 PR C**（统筹 2026-09-28 技术决定）：🔴 **本 PR A 合并后，广告健康看板的"先按住钱"按钮仍完全绕过熔断器和执行内核，直接改 Meta**——`api/clients/[id]/ad-health/stop-loss/route.ts` 现在直调 `executeStopLoss`，一步都不经过 Kernel；`triggeredBy` 不是 `'human'` 的 AI 自治动作受熔断保护，人点按钮的这一种完全不受保护。这个洞在 PR C（三条旁路收编 + 止损接线 + 退休 `executeStopLoss` + B2）合并前一直开着，详见 [docs/ledger/2026-09-28-stop-loss-bypasses-circuit-breaker-until-pr-c.md](./ledger/2026-09-28-stop-loss-bypasses-circuit-breaker-until-pr-c.md)。提交适配器 `stop-loss-submission.ts` 已经写好、跟当前 Kernel/registry contract 核对过完全兼容，但**故意没提交进仓库**——先放在 worktree 外面 `.claude/worktrees/stop-loss-submission-holding/`，PR C 那一轮直接拿去放 `src/lib/ads-strategy/submission/` 就行，别重新设计一遍。还没接进路由、没写测试、没跑变异。
-🔴 **放进 `submission/` 目录那一刻，会撞上今晚新加的两层"人工触发身份"架构闸**：这个文件里的 `triggeredBy: 'human'` 会被判定成"没有配套鉴权调用"而报红（架构测试是按**单个文件**判定"声称人按的"和"有没有鉴权调用"两件事在不在同一个文件里，而这个文件是 Kernel 提交适配器，鉴权检查在**调用它的路由**里，不在它自己身上——两件事天生分在两个文件）。**这不是要放宽判据**（放宽等于给提权口子开后门），是接线那一轮必须先想清楚：要么这个适配器文件本身也做一次形式上的鉴权断言（即使实际鉴权已经在路由层做过），要么把两层闸的第二层改成"同一次调用链里存在鉴权"而不是"同一个文件里存在鉴权"（后者需要更贵的静态分析，本轮判据故意选了便宜但更严格的版本）。本发现是我自己写完适配器、拿它去跑架构测试探出来的（真实文件放进真实目录、真实跑测试，不是纸面推演）。
+- [x] **WP3.1b 核心安全链已合并（PR #2204）**：熔断、账户级预算上限、生产 Kernel 接线及 WP2 遗留修复已进入当前 `origin/main` 基线。WP3.1b 仍有后续欠账，不能据此称整包完成；预算 Inngest 首次云端注册/无写入探针与真实预算写入审批见 [Inngest 待验证台账](./ledger/2026-09-30-ads-campaign-budget-inngest-pending.md) 和 [安全试跑台账](./ledger/2026-09-30-ads-campaign-budget-first-run.md)。
+- [ ] **WP3.1b 止损接线 + B2 前端契约修（PR #2205 草稿待审）**：当前工作分支已把广告健康看板止损从直连 Meta 改为经 Kernel 提交；人身份边界由访问校验与架构测试约束。实现与待验收条件见[止损接线台账](./ledger/2026-09-30-ads-stop-loss-kernel-wiring.md)。尚未合并/部署；上线后仍须验证真实执行记录及熔断拒绝。
 - [ ] **WP3.1b 欠账（本轮明确没做，逐条登记，不许只留在台账里）**：
   - [ ] **系列级 / 自动化三条旁路真收编**（`meta-ads/execute`、`meta-ads/boost-post`、`winner-reel-sync`）—— 需新增 4 个 ActionKey + capability handler，PR B / C 承载；`winner-reel-sync` 的保护判据是**学习期**不是预算（必须另建独立广告组，往在投组加广告会重置该组学习期；手册 `playbook-ads-meta-general` :249/:333/:367/:127-131 记了四处，NAL 实例每留资 $19.6→$138 七倍恶化）
   - [ ] **运行时跨账户日上限强制** —— 卫青 2026-09-27 查实 CTS 两账户各花各的、合计 10 天超客户总闸。WP3.1b 只做了「配置时校验 sum ≤ 总闸」+「按账户取上限」，**运行时没人查「这个客户今天全部账户加起来花了多少」**，洞仍开着。不许因为 §3.9 做了就认为这条修好了
@@ -1841,3 +1840,84 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] **[P3] 看板 `workflows-health/page.tsx:214` 的文案过期了。**
       它写「**最近一次**挂着 running」，而现在 `startedAt` 是 48 小时窗口内**最早**那一轮；
       而且新加的 `rounds`（卡了几轮）没渲染出来，看板比待办少一条信息。
+
+## AI 可见度全挂告警 · 上线后跟进（PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)，2026-09-28 合并；代码已合并、单测已过，以下是三轮复审点出、**刻意没做**的部分）
+
+主体改动：某客户 AI 可见度体检整周全挂时自动进今日待办，分供应商给修复指引，不用 PM 操心的原因单独
+归开发栏。台账卡：[`docs/ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md`](./ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md)。
+**尚未当场试跑完整链路**：本改动同时改了 `/api/cron/ai-tracker-weekly` 的失败计数，并依赖随后运行
+的 `pm-daily-todo` 把失败读出来生成告警；按 CLAUDE.md「当场试跑」规则，这条「周检失败 → 待办生成」
+链路需要拿替身数据手动触发一次、看到真实待办回执后才能算完整验证，目前还没跑过。台账卡 `verify_by`
+定在 2026-09-30，届时用真实周检（或人为制造一次全挂）确认待办邮件里出现这条提醒，再把台账状态更新
+为 `verified`；在此之前不应把这个功能说成「已验证可用」，只能说「本体代码已合并」。
+以下按 §11：三条频率都低（都要撞上特定的低概率数据库/时序状态才会触发）、IMPACT 前两条中（真撞上
+会让检测彻底失效）后一条低（会自愈）、收入都低（没有证据显示已经影响过真实客户）→ 三条都是 P3。
+
+- [ ] **[P3] `ai_visibility_runs` 插入本身失败时，这行数据完全不落库，检测不到。**
+      `orchestrator.ts` 的 `processOne` 在 DB insert 失败时只 `runs_failed++`，不写任何行；
+      本模块的查询只读 `ai_visibility_runs`，一行没有 = 看起来跟「还没跑」一样。
+      要做的事：读一份按客户记录的批次/定时任务回执作第二数据源，或者插入失败时也落一行
+      占位记录（哪怕内容是空的）。
+
+- [ ] **[P3] `ai_visibility_runs` 插入成功但更新失败时，那一行会被误读成「成功」。**
+      `processOne` 第四步更新（写入解析结果/`parse_error_message`）失败时，`orchestrator.ts`
+      正确记了 `runs_failed++`，但最初插入的那一行仍然带着两个空字段（`error_message` /
+      `parse_error_message` 都是 `null`）——`isRunConclusive` 只看这两个字段，会把它当真成功。
+      要做的事：给该表加一个能区分「还没解析」/「解析成功」/「更新失败」三种状态的字段，
+      或者也用上面那条的批次回执来判定。
+
+- [ ] **[P3] 待办查询可能撞上「这周的批次还没跑完」，误报一次全挂。**
+      旧的 `ai-tracker-weekly` 定时任务周日 18:00 UTC 起跑、`pm-daily-todo` 一小时后就查；
+      如果某客户当前批次只跑完前几条且都失败，会被误判成「全挂」，甚至给出充值指引，
+      尽管剩下的探测随后会成功。属于低概率但会自愈的一类：下一天的检查会因为看到新的
+      成功记录而自动撤回提醒，不会一直卡在错的结论上。要做的事：依据批次完成回执或
+      预期探测数确认该周运行已结束后再生成告警（同上两条的批次回执可以一起解决）。
+
+## 每日计划价格数字核对 · 审查后登记（2026-10-08，PR 2365）
+
+**§11 打分**：频率中（每次发布都过）· IMPACT 关键度高（Act 外发出口）· 收入关联度高（错价 = 客户投诉）→ 以下为本 PR 审查中**未并入**的次要意见，记入待认领，不现在动。
+
+- [ ] **[P2] Publer 三条发布路由（`/api/publer/create-post` `schedule` `quick-post`）没接价格数字核对**，只有旧的图来源闸。
+- [ ] **[P2] 资料包由人手填，官网改价后会过期。** 官网事实快照（PR 2270）合并后，让核对改为对官网快照自动对账，并给资料加「核对日期」。
+- [ ] **[P3] 资料包里任意字段里的数字都算事实**（过期早鸟价、单人房加价可被当团价放行）。收紧成只认带语义的价格字段。
+- [ ] **[P3] 共享代码默认团名放在 `tour` 字段、破折号和括号出发地写法**，对旅游以外行业不通用；应改成 Industry Profile 或显式声明团名字段。没填资料包又写了价格的非旅游客户目前会被整批拦（待查哪些客户走每日计划发布）。
+- [ ] **[P3] 资料读失败时，待办只写日志不出条目**（出口则 500 不放行）。待办侧也应出一条「读不到资料」。
+- [ ] **[P3] 价格识别已知盲区**：无币种无提示词的 4 位裸价（含 1900–2099）、`块`、HTML 实体、`CNY`；「from 150 travellers」类老误伤现在会整批拦。
+- [ ] **[P3] 待办只看每个客户最新一份计划**，同客户并行第二个活动的计划不会出待办（发布时仍被拦）。
+- [ ] **[P3] `verifyPostPrices` 拆成「解析候选团」和「逐条核价」两段；`price-fact-items.ts` 的 `isRecord/readPath` 与 gate 重复。**
+- [ ] **[P3] 设置页资料包没有字段名提示**（`tour` `url` 影响匹配，价格字段名随意），加占位符说明。
+- [ ] **[P3] 魏征二审：新增的「带千分位逗号的数字都算价格」会多拦社交证明文案**（Join 2,500 happy guests、1,000 5-star reviews、1,500 bookings、up to 8,848 m）。补单位词表（customers/bookings/spots/rooms/m/tours/5-star reviews）；只会多拦、不会多放。
+- [ ] **[P2] 已知缺口：`now 1999`、`was 2,699, now 1999` 这类 1900–2099 间不带逗号的促销价会被当年份放过**（NZ 团价常落在这一带）。让 was/now 后面的数字不再按年份排除即可堵上。
+
+## SEO 负责人节奏 · 审查后续项（2026-10-08，设计稿 [docs/specs/2026-10-08-seo-lead-operating-rhythm-v0.1.md](./specs/2026-10-08-seo-lead-operating-rhythm-v0.1.md)，待 PM 批准第一阶段后再排）
+
+- [ ] 簇体检的「谁当主页」要有通用判据，不得写死客户页面（子牙）
+- [ ] P2-B 月度竞品词差落地时需要存历史，那时要新表评审（子牙）
+- [ ] P3 的 `seo.change.*` 事件补授权失效、幂等、重放规则（子牙）
+- [ ] P1-C 询盘取数口径落地后补一张台账卡（子牙）
+- [ ] 预诊断上线后，逐条核实 CTS 示范里「哪页在排这个词」的假设（魏征）
+- [ ] 算出张家界「第 4 → 前 3」的点击差额（用现有点击率曲线，不编数）（魏征）
+- [ ] 对账 42 号体检里「已过期清单卡」张数（§一写 4、§五写 3）（魏征）
+- [ ] 先测「卡从出生到被批」中位天数的基线，再定 ≤7 天目标（魏征）
+- [ ] 开源仓库的 SERP 重叠阈值用 CTS 实测校准后才可上线（设计稿 §11）
+
+- [ ] **[待排] 谷歌搜索广告（SEM）专家工作节奏设计**（PM 2026-10-09 拍板与 SEO 分开管理，归广告支柱；SEO 第一阶段跑起来后再排，不开工）。SEO 设计稿 §12 已定义两边「对表」接口；台账卡 `2026-10-09-sem-expert-rhythm-design-todo`
+
+## 广告负责人节奏 · 审查后续项（2026-10-10，设计稿 [docs/specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md](./specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md)，待 PM 批准第一阶段后再排）
+
+- [ ] **[P2] 把 `detectSpendSpike` / `detectClientSpendOverCap` 接到日循环上** —— 判据、阈值、fail-closed 防护全是现成的，生产里零个调用方；**先与 51 号窗口对口径**，别两边各写一套（魏征 D-2、卫青）
+- [ ] **[P3] 频次阈值按角色分档**（拉新 vs 再营销）需先扩 `AdsPlaybook` 接口（`playbooks/types.ts:23` 不收判断规则），且阈值须用 CTS/NAL 真实数据校准，不用开源的数字（子牙）
+- [ ] **[P2] W1 的「置信度」本期降级成「样本天数」**；真要做置信度得先定算法与取值域，否则实现出来是个凭感觉的字符串（子牙 6-3）
+- [ ] **[P2] 把广告组 / 广告层的 `frequency_7d` 真正填上**（`daily-insights.ts` 现在直接写死 null），否则疲劳分类长期只能靠系列层（魏征 B-1）
+- [ ] **[P3] `ad_entity_snapshots` 存按版位拆开的花费**，让 D9 能按真实花费判、不只按设置字段判（设计稿 §2.1 #4）
+- [ ] **[P3] NZ 版合规规则库**（AU 那份 `src/lib/compliance/au-rules.ts` 已存在但零调用方，先把 AU 接上广告草稿闸再谈 NZ）；Meta 个人属性规则也没落成可比对清单（设计稿 §2.1 #6）
+- [ ] **[P3] 命名规范自动校验**（CTS 一个账户里已有四种命名风格并存）（设计稿 §2.1 #2）
+- [ ] **[P3] 卫青手册 §三 把 `ad_health_prescriptions` 改成实际存在的表名**（生产库没这张表，照它去查会白跑一轮）（设计稿 §2.6）
+- [ ] **[P3] 季节性冲刺层排期（Q5）** 等 02 号窗口的 CTS 预算计划 PM 拍板后再排（设计稿 §3.4）
+- [ ] **[P3] `src/lib/cron/registry.ts` 两处清单与 `render.yaml` 不一致**：`google-data-pullback-daily` 写 `0 3 * * *`（实际 `0 17 * * *`）、`ad-entity-snapshot` 写 `30 */3`（实际 `30 */6`）；`reel-batch-render` 调了运行记录没人认领监控。**本分支基线 `registry.test.ts` 已有 2 条红，不是广告改动造成的**，碰 registry 的 PR 会撞上（子牙 4.1）
+
+## 广告 agent 手册 v1.0 · 审查后续项（2026-10-10，手册 [docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md](./sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md)，等 PM 回第十节拍板后再排）
+
+- [ ] **[P0] 授权红线落代码**：开投 / 加预算 / 改在投素材 / 改受众 / 关整系列永远只认 PM 身份审批接口；`winner-reel-sync-daily` 改只建 PAUSED（手册 §11 行 A1，A 级，等 PM 回第 1 问）
+- [ ] **[P2] S-01 / S-02 / S-11 / C-07 判据补门槛**：「抢量」「预期周事件数」「出价偏差」「素材够几周」目前只有方向、缺可验证门槛（子牙审查）
+- [ ] **[P3] 通用手册重号**：`playbook-ads-meta-general` 有两个 §十三、两个 §三十，建议改编号（记忆文件，不在本仓库）

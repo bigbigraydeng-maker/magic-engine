@@ -23,6 +23,7 @@
  * 发帖、发布文章、改 meta、提交收录、改商家页。
  */
 export const PROVIDER_WRITE_MODULES = [
+  '@/lib/meta/campaign-writes',
   '@/lib/publer/client',
   '@/lib/cms/wordpress-client',
   '@/lib/cms/shopify-client',
@@ -276,19 +277,20 @@ export const KERNEL_RUNNER_ALLOWED_CALLER_DIRS = [
  *
  * 🔴 新增一个目录 = 拆一次架构评审。加之前先问：现有目录能不能承载？
  */
-export const HUMAN_TRIGGER_ALLOWED_DIRS = ['src/lib/ads-strategy/submission/'] as const
+export const HUMAN_TRIGGER_ALLOWED_DIRS = ['src/lib/action-submission/'] as const
 
 /**
  * 传 `triggeredBy: 'human'` 的文件必须命中的鉴权调用之一（第二层）。
  *
- * 为什么是这三个：前两个是内部员工判据（`ADMIN_EMAILS` / `ADMIN_EMAIL_DOMAIN`），
- * 第三个是客户看板的按客户鉴权 —— 止损这个动作在看板上由人点，
+ * 为什么是这四个：前两个是内部员工判据（`ADMIN_EMAILS` / `ADMIN_EMAIL_DOMAIN`），
+ * 后两个是客户看板的按客户/付费权限鉴权 —— 看板里的预算下调和止损动作由人点，
  * 所以走客户鉴权也算「真有人按过」。**都不算的话，就没有任何东西证明有人在。**
  */
 export const HUMAN_TRIGGER_REQUIRED_AUTH_CALLS = [
   'requireGlobalAdmin',
   'guardGlobalAdmin',
   'requireDashboardClientAccess',
+  'requirePaidClientAccess',
 ] as const
 
 export const KERNEL_RUNNER_SOURCE_MODULES = ['@/lib/kernel/runner', '@/lib/kernel'] as const
