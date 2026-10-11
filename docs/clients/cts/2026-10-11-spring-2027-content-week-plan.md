@@ -42,7 +42,7 @@
 - 四页**都带「免签到 2026-12-31」横幅**，早于全部 3 月出发日：**所有文案、画面、评论都不提「免签」**。
 - 四页**都写 International and domestic airfares**，但 CTS 尚未确认国内段（见 10/10 上海 Reel 文档）：**文案只写 `Flights`，不写 domestic**。
 - 页面里**没有任何一页写航司名**；航司只在出团表里，**不对外写**。
-- 「每班 20 席」是内部配额：**不写「max 18」「限 20 人」「仅剩 N 席」**；**各班剩余席位库里没有**（第六节问题 2）。
+- 出团表原始字段是「人数 20」，**含义未确认**（可能是人数上限，也可能是已订人数；上海团另有记录把上限从 20 更正为 18），不得当作每班 20 席的容量：**不写「max 18」「限 20 人」「仅剩 N 席」**；**各班剩余席位库里没有**（第六节问题 2）。
 
 ## 二、一周排期（2026-10-12 周一 → 10-18 周日，新西兰时间 NZDT）
 
@@ -148,9 +148,9 @@
 
 ### 帖 7 · Natural China 第二角度（周日）
 
-> Chengdu is home to the Chengdu Research Base of Giant Panda Breeding, one stop on our 16-day Natural China journey. Next departure: 26 March 2027.
+> Chengdu is where you meet giant pandas, one stop on our 16-day Natural China journey. Next departure: 26 March 2027.
 
-出处：官网 Signature 页 "giant pandas" + Discovery 页 "Chengdu Research Base of Giant Panda Breeding"；日期官网。**价格不写。**
+出处：官网 Signature 页 "giant pandas"；日期官网。**价格不写。** 注：具体基地名仅见于 Discovery 页（不同产品），Signature 页无证据，故不写。
 
 ## 四、素材清单（先看 Dropbox / 已有素材，再补）
 
