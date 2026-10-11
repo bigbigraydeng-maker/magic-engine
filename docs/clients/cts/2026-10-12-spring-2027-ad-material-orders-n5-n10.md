@@ -1,0 +1,93 @@
+# CTS 2027 春季团：补充素材单 N5–N10 交付（3 条 Reel + 行程亮点图 + 暖热静图 + 轻内容图文）
+
+- **日期**：2026-10-12 ｜ **窗口**：75 号（素材与排期，听 74 号统管）｜ **风险级**：C
+- **背景**：PM 10-12「需要补充更多素材」；Facebook 带来的订单几乎 100%，3 月团销售窗口只到 11/30（约 6 周），老广告要尽快改投 3 月团素材 → 素材要多、要快、能同时测。
+- **全部只到「待审核」**：未发布、未起广告。视频只走视频工厂；静图本机按品牌 VI 渲染。上一份：[N1–N4](./2026-10-12-spring-2027-ad-material-orders-n1-n4.md)。
+
+## 状态一览（先看这张）
+
+| 项 | 内容 | **终版工单 / 文件** | 状态 |
+|---|---|---|---|
+| N5 | Best of China 第二条 15 秒 Reel「4 CITIES · 1 TRIP」（钩子与已发布的价格悬念不同） | 工单 **`f1f9c30a-f96a-416b-bc38-b8646a0314fb`** | `in_review` |
+| N6 | A Tale of Two Cities 第二条「10 天看北京和西安」（高铁钩子，兵马俑/长城/故宫；`f4b5d44f` 保留） | 工单 **`afe7939f-d990-473d-b395-625063dc91a0`** | `in_review` |
+| N7 | Shanghai & Surroundings 第二条「含什么」（机票 + 7 晚住宿 + 英语导游 + 13 餐逐项叠出） | 工单 **`f951018c-4ec8-4d1b-a135-b46c2443803f`** | `in_review` |
+| N8 | 三个团各一张「行程亮点」图文，4:5 + 9:16 | `cards/highlights_{boc,tale,shanghai}_{4x5,9x16}.png`（6 张） | 已出 |
+| N9 | 暖热静图 3 张：Best of China、Natural China、Tale 另一版式（只放团名 + 出发月 + Flights included） | `cards/warm_boc_4x5.png`、`warm_nat_4x5.png`、`warm_tale_card_4x5.png` | 已出 |
+| N10 | 轻内容图文 1 组「3 things to know before you go」（封面 + 3 张） | `cards/tips_0_cover_4x5.png`、`tips_1_4x5.png`、`tips_2_4x5.png`、`tips_3_4x5.png` | 已出 |
+
+- `cards/` = `~/Dropbox/MagicLab_Studio/CTS/output/cards/`；成片 = `~/Dropbox/MagicLab_Studio/CTS/output/reels/`（`2026-10-11_boc2_f1f9c30a.mp4`、`..._tale2r3_afe7939f.mp4`、`..._sh2r2_f951018c.mp4`）。
+- 工单参数留档：[`2026-10-11-spring-2027-reel-orders/`](./2026-10-11-spring-2027-reel-orders/)（`BOC2-*`、`TALE2-*`、`SH2-*`）。
+- 旧版（已标 superseded，不要授权）：Tale2 r1 `45168a4e`、r2 `05c5896e`；SH2 r1 `f4e12c12`。
+- 素材出处：Dropbox `CTS/remotion-assets/clips/credits-v6.json`。
+
+## 三条 Reel 的地名镜头清单（74 号要求）
+
+只有「已核对」的镜头配地名字幕；没有地名证据的镜头只配无地名字幕。
+
+| Reel | 镜头 | 字幕 | 地点证据 |
+|---|---|---|---|
+| N5 BOC2 | 兵马俑（开场，无地名字幕） | 无 | 画面一眼可认；Unsplash 无地点标 |
+| | 长城（Unsplash 地点＝Great Wall of China, Huairou） | THE GREAT WALL | 元数据 |
+| | 大雁塔（Unsplash 描述＝西安大雁塔，地点＝西安市） | BIG WILD GOOSE PAGODA, XI'AN | 元数据 |
+| | 西湖亭台（Unsplash 地点＝Xihu, Hangzhou） | WEST LAKE, HANGZHOU | 元数据 |
+| | 外滩夜景（价格页背景，无地名字幕） | 无（标题 BEIJING TO SHANGHAI.） | 东方明珠清楚可见 |
+| N6 TALE2 | 中国高铁（Unsplash 地点＝Guangzhou；开场，无地名字幕） | 无 | 元数据 |
+| | 长城（Jinshanling，元数据） | THE GREAT WALL | 元数据 |
+| | 兵马俑 | TERRACOTTA WARRIORS, XI'AN | 画面一眼可认 |
+| | 故宫航拍（Unsplash 地点＝Beijing） | THE FORBIDDEN CITY, BEIJING | 元数据 |
+| | 大雁塔（价格页背景） | 无 | 元数据 |
+| N7 SH2 | 水乡船（Unsplash 地点＝West Lake, Hangzhou；开场，无地名字幕） | 无 | 元数据 |
+| | 浦东夜景航拍（Dropbox 库内，上游来源未知；画面东方明珠清楚） | FLIGHTS & 7 NIGHTS' HOTELS（无地名） | 画面 |
+| | 外滩夜景（库存素材加工） | ENGLISH-SPEAKING GUIDE（无地名） | 东方明珠清楚 |
+| | 上海日景天际线 | 13 MEALS INCLUDED（无地名） | 陆家嘴清楚 |
+| | 西湖亭台（价格页背景） | 无 | 元数据 |
+
+**这一批没有用到**素材库里已确认出错的镜头（「西安城墙」其实是南京城墙、雷峰塔其实是东京浅草寺、鸟巢其实是昆虫特写等）。N6 第二版开场高铁：r2 用过一张红白车身的高铁照（地点未知，评审怀疑像印尼 Whoosh），已弃用，r3 换成广州地点标的中国高铁（`credits-v6.json` 里 `c4b_train.mp4` 已标 DO NOT USE）。
+
+## 官网事实（2026-10-12 重抓）
+
+- Best of China：NZD $4,080 pp twin share；单人房差 +NZD $800；15 天；11 March 2027；D3 Forbidden City、D4 Great Wall、D5 hutong pedi-cab、D6 高铁 G89、D7 Terracotta Warriors、D8 Xi'an City Wall / Big Wild Goose Pagoda、D10 West Lake boat cruise / Longjing tea、D12 Yuyuan Garden / The Bund / Nanjing Road。
+- Tale：NZD $3,480；单人房差 NZD $395；10 天 / 7 晚（北京 4 + 西安 3）；18 March 2027；7 早 5 午 0 晚。
+- Shanghai：NZD $2,699；单人房差 NZD $400；10 天；25 March 2027；7 晚住宿（官网酒店表 5 家；页面头部另写 9 nights，故片内**不写「5 HOTELS」**，只写 7 晚住宿）；7 早 + 5 午 + 1 晚 = 13 餐；英语导游。
+- 红线：全部没有 max/20 人/small group、余位、25 years/1928、免签、航司、domestic（只写 Flights）。
+
+## N5–N7 配方对账（`viral_reference_library` 旅游类，沿用 10-11 实查）
+
+| 配方列 | 库里的数 | 本批做法 | 判定 |
+|---|---|---|---|
+| 开场钩子 `text_overlay_question`（数字/问题文字） | 5.98M（n=122） | N5「4 CITIES / 1 TRIP」；N6「10 DAYS / 2 CITIES / 1 TRAIN」；N7「WHAT'S IN THE PRICE?」（问句） | 满足（三条钩子互不相同，也与已发布价格悬念不同，利于同时测） |
+| 开场钩子 `visual_shock` | 23.03M（n=30） | 兵马俑 / 高铁迎面有一点冲击 | 部分满足 |
+| `scenic_beauty` | 最差 1.51M | N7 开场水乡是风景，靠问句补救 | 部分满足 |
+| 真人出镜 / 旁白 / 幽默 | — | 无（PM 对肖像未拍板） | **未满足（有意）** |
+| 快剪 | — | 受众 45–70；每条目约 2–3 秒 | 有意未满足 |
+| 总时长 | 中位 34 秒 | 14.9 秒（PM 硬要求） | PM 要求优先 |
+
+## 分镜自检（逐秒 16 宫格实看；生产窗口自己的）
+
+- N5 BOC2 `f1f9c30a`：兵马俑开场 `4 CITIES / 1 TRIP / FLIGHTS` → 长城 → 大雁塔 → 西湖 → 外滩价格页 `BEIJING TO SHANGHAI. FROM NZ$4,080 / SINGLE SUPPLEMENT NZ$800`。下 1/3 亮度 63.8（我）/ 64.7（马良）。
+- N6 TALE2 r3 `afe7939f`：广州高铁开场 `10 DAYS / 2 CITIES / 1 TRAIN` → 长城 → 兵马俑 → 故宫 → 大雁塔价格页 `BEIJING & XI'AN. FROM NZ$3,480 / SINGLE SUPPLEMENT NZ$395`。亮度 68.6（r2 为 68.5，r1 开场暗 47.0 已淘汰）。
+- N7 SH2 r2 `f951018c`：水乡 `WHAT'S IN THE PRICE?` → `1/3 FLIGHTS & 7 NIGHTS' HOTELS` → `2/3 ENGLISH-SPEAKING GUIDE` → `3/3 13 MEALS INCLUDED`（每个条目约 2.8 秒）→ 价格页 `ONE PRICE. FROM NZ$2,699`。亮度 62.8。
+- 三条音轨相同（founders-at-dawn，分段 -30.7/-26.2/-27.1/-21.1/-24.0 dB；全程有声、无爆音）。**我没有用耳朵听，用的是 ffmpeg 分段测音量与工厂自动体检。** 同一广告组里三条连放配乐会重复，建议后续换曲（马良可延后项）。
+- 图卡逐张看过 contact sheet：logo 药丸完整、9:16 关键字在 y250–1580 内、无价格、无人像。
+
+## 审查结论
+
+> 生产方是我；内容由苏东坡、画面由马良各自独立抽帧、读官网、量数。
+
+- **苏东坡第一轮：3 条 Reel + 13 张图「未发现硬红线违规，必改项 0」**，逐句官网可溯；建议：①BOC「4 CITIES」官网城市列表另含住宿点 Puyuan（我保留：北京、西安、杭州、上海四大城市可溯，建议保留）；②Shanghai「7 NIGHTS, 5 HOTELS」官网页头写 9 nights → **已改**，只写 7 晚住宿；③Tale 开场高铁画面可能不是中国车型 → **已换成广州地点标的中国高铁**。需确认：首评文本发布前要生成并过目（caption 都写「首评里有完整行程」）。
+- **马良第一轮：「3 条 Reel 和 13 张图都能用，必改 1 条」**：Shanghai 4 个条目各 2.0 秒太短 → **已改成 3 个条目各约 2.8 秒**（机票与 7 晚住宿合并成一条）。可延后：三条共用同一段配乐、BOC/Tale 价格页下 1/3 偏暗（约 41–51）、单人补价细字压在照片上、静图脚注 26px（**已提到 28px**）、9:16 下方空白、tips_0 金色小标签对比弱、tips_3 标题改完整（**已改 `What is not in the price`**）与金额统一为 NZ$（**已统一**）、tips_1 连字符断行（**已改不间断连字符**）。
+- **第二轮（窄复核，只看改动）：苏东坡签字通过；马良签字通过。** 苏东坡：Shanghai r2 条目与 caption 可溯（「5 HOTELS」已去掉）；Tale r3 开场高铁车头可见「和谐号」、白底蓝带，判中国动车、不是印尼 Whoosh，但**只能当「中国高铁」示意，不能配成「就是北京到西安那趟车」**（文字没这样写）；tips_3 官网原文是 per person per day，**已补上「per person」**。马良：Shanghai r2 三个条目各 2.8 秒、价格页约 3.5 秒、亮度 62.8；Tale r3 开场亮度约 116–120、整条 68.1；卡片版式没坏。小瑕疵（不拦）：Shanghai 价格页刚出现时补价那行约 1 秒还在渐显；价格页下 1/3 偏暗（41–45）；tips_3 数字「3」比 1、2 低约 40px（延后）。
+
+## 发布前还要做的事（没做，也没有授权）
+
+1. **PM 本人在 ME 点通过**（每张工单一次；点通过＝授权发布）；旧版别点。
+2. **发布当天重核官网价格、出发日**。
+3. **首评**：自动首评缺主页评论权限不会生成；授权发布后按 BOC 做法在页面上以 CTS Tours 身份补发（工厂首评格式，带追踪参数）。**新片首评原文发布前交苏东坡过目。**
+4. 三条同时投放会共用同一段配乐，要不要换曲由 74 号/PM 定。
+5. 「March 2027」只适用 3/18、3/25 等 3 月班；以后推 4 月后班期，卡要改。
+
+## Reuse Statement
+
+- 复用视频工厂 `list` 模板（含 3 条目时用 19 个节拍，条目数不同只改 beats）、工单表、出片机、7 项体检；Unsplash 官方接口；品牌 VI 与 logo；上一批的图卡生成方法。无共享代码改动。
+- client-specific：团名、价格、日期、素材、文案只在工单 JSON、`credits-v6.json`、本文档。
+- 学习（升通用手册候选）：①**「含什么」逐项叠出的片子，每个条目 ≥2.8 秒，条目数 ≤3 才放得进 15 秒**；②**官网同一个数字（如 7 晚）可能在页面不同位置写法不一（9 nights vs 7 nights），片内只写与住宿表完全一致的数**；③**素材只有国家级地点证据（如广州）时只能配无地名字幕**。
