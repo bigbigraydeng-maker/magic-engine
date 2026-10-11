@@ -72,6 +72,7 @@ import { POST as unpaidPOST } from '../[bookingId]/milestones/[kind]/unpaid/rout
 import { POST as overridePOST } from '../[bookingId]/milestones/[kind]/override-due/route'
 import { POST as nudgePOST } from '../[bookingId]/milestones/[kind]/nudge/route'
 import { GET as nudgeListGET } from '../nudge-list/route'
+import { GET as optionsGET } from '../options/route'
 import { GET as membersGET, POST as membersPOST, DELETE as membersDELETE } from '../members/route'
 
 type Capability = 'view' | 'edit' | 'manage_members'
@@ -136,6 +137,7 @@ const HANDLERS: HandlerCase[] = [
     call: (c) => nudgePOST(request('POST', { expectedUpdatedAt: UPDATED_AT, mode: 'quiet' }), p(c)),
   },
   { name: 'GET nudge-list', capability: 'view', call: (c) => nudgeListGET(request('GET'), p(c)) },
+  { name: 'GET options', capability: 'view', call: (c) => optionsGET(request('GET'), p(c)) },
   { name: 'GET members', capability: 'manage_members', call: (c) => membersGET(request('GET'), p(c)) },
   { name: 'POST members', capability: 'manage_members', call: (c) => membersPOST(request('POST', { email: 'new@a.test' }), p(c)) },
   {
@@ -212,7 +214,7 @@ beforeEach(() => {
 
 describe('the matrix covers every handler', () => {
   it('has one case per registered handler', () => {
-    expect(HANDLERS).toHaveLength(13)
+    expect(HANDLERS).toHaveLength(14)
     expect(VIEW_EDIT.length + MANAGE_MEMBERS.length).toBe(HANDLERS.length)
   })
 })

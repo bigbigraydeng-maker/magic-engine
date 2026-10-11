@@ -291,6 +291,7 @@ function outcomeForBooking(
       contactId: booking.contactId,
       contactName: contact.name,
       tourName: view.tourName,
+      departOn: view.departOn,
       kind: item.kind,
       label: item.label,
       dueOn: item.dueOn,

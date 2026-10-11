@@ -78,6 +78,7 @@ export type NudgeBucket = 'overdue' | 'within_3' | 'within_14' | 'undated'
 export interface NudgeRow {
   bookingId: string; contactId: string; contactName: string | null
   tourName: string | null
+  departOn: string | null      // live catalog date, else the stored snapshot (same as BookingView.departOn)
   kind: MilestoneKind; label: string
   dueOn: string | null; dueInDays: number | null; bucket: NudgeBucket
   note: string | null

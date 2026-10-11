@@ -16,6 +16,7 @@ import { EmailReply } from './EmailReply'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
+import { BookingsBlock } from './bookings/BookingsBlock'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
 import { intentNote, type NextAction } from '@/lib/crm/next-action'
@@ -539,6 +540,9 @@ export function PersonDrawer({
               onSaved('✓ 邮件已发出', false)
             }}
           />
+
+          {/* 订单与付款：没开通这项功能或没权限的人，这一块什么都不渲染 */}
+          <BookingsBlock clientId={clientId} contactId={row.contactId} />
 
           {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
           <div className="mt-5">
