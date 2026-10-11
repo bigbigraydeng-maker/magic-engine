@@ -103,9 +103,10 @@ export async function publishPagePhotoStory(input: {
   }
   const postId = story.post_id
   if (!postId) {
-    throw new PagePublishError(`publishPagePhotoStory ${input.pageId}: provider returned no post id`, {
-      certainty: 'unknown',
-    })
+    throw new PagePublishError(
+      `publishPagePhotoStory ${input.pageId}: provider returned no post id; unpublished photo ${photoId} may be left behind`,
+      { certainty: 'unknown' },
+    )
   }
   return { postId, raw: story as Record<string, unknown> }
 }
@@ -130,10 +131,9 @@ export async function publishPageVideoStory(input: {
   assertHttpsUrl(input.videoUrl, 'publishPageVideoStory videoUrl')
 
   const { videoId, uploadUrl } = await startVideoSession(input)
-  assertHttpsUrl(uploadUrl, 'publishPageVideoStory upload_url', ['facebook.com', 'fbcdn.net'])
-
-  const suffix = `; upload session video_id=${videoId} left unfinished`
+  const suffix = `; video upload session video_id=${videoId} (check its state before any retry)`
   try {
+    assertHttpsUrl(uploadUrl, 'publishPageVideoStory upload_url', ['facebook.com', 'fbcdn.net'])
     await uploadVideoBytes({
       uploadUrl,
       videoUrl: input.videoUrl,
