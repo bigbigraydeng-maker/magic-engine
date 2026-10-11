@@ -104,9 +104,10 @@ export default function FactoryCockpitPage() {
   const reviewClients = useMemo(() => {
     const m = new Map<string, { id: string; name: string; count: number }>()
     for (const o of visibleOrders) {
-      if (o.status !== 'in_review') continue
+      // 已发布 / 已作废也要能进审片区看历史卡片(count 只计待审)
+      if (o.status !== 'in_review' && o.status !== 'published' && o.status !== 'superseded') continue
       const e = m.get(o.client_id) ?? { id: o.client_id, name: o.client_name, count: 0 }
-      e.count += 1
+      if (o.status === 'in_review') e.count += 1
       m.set(o.client_id, e)
     }
     return Array.from(m.values()).sort((a, b) => b.count - a.count)
@@ -179,7 +180,7 @@ export default function FactoryCockpitPage() {
           <p className="text-slate-400 text-sm">加载中…</p>
         ) : reviewClients.length === 0 ? (
           <div className="border border-slate-200 rounded-xl bg-white p-8 text-center text-slate-400 text-sm">
-            暂无待审成片。信号进来、片子做好后会出现在这里。
+            暂无成片。信号进来、片子做好后会出现在这里。
           </div>
         ) : (
           <>

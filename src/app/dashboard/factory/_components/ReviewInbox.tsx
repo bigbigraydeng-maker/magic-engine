@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
+import type { PublishedView } from '@/lib/factory/publish/publish-display'
 import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
 import { isAcceptableFlagCategory } from '@/lib/factory/review-flag-categories'
@@ -10,6 +11,7 @@ import { FactoryChat } from './FactoryChat'
 import { OneClickConfirm } from './OneClickConfirm'
 import { OrderNo } from './OrderNo'
 import { PublishOutlets } from './PublishOutlets'
+import { publishedBadge } from './statusMeta'
 import { PendingCardHead, ReadOnlyTile } from './OrderTile'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 
@@ -26,7 +28,7 @@ interface WorkOrder {
   angle: string
   rationale_one_liner: string
   created_at?: string
-  published?: { permalink: string | null } | null
+  published?: PublishedView | null
   // redline_hits:交付时服务端复扫命中的品牌红线词(complete-work-order.ts)。
   // 设计是「命中不打回,标红让人审有的放矢」——但此前唯一的「标红」实现在 Airtable 审核卡里,
   // 随 Airtable 退役一起没了。成片直连 in_review 后这条护栏必须在这里补上,否则命中红线的片子
@@ -208,7 +210,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
   // 只在「从没显示过 + 当前也没待审」时隐藏。一旦显示过就常驻——刷新时绝不整体卸载,
   // 否则右侧对话框(ReviewInbox 的子组件)会被连带卸载,历史 + 正在输入的指令全丢(PM 报的 bug)。
-  if (hideWhenEmpty && !hasShown && orders.length === 0) return null
+  if (hideWhenEmpty && !hasShown && orders.length === 0 && published.length === 0 && superseded.length === 0) return null
+  // 选中的团已无卡片(例如最后一条审完)→ 视同「全部」,否则剩余卡片被过滤光且筛选控件可能已隐藏
+  const groups = groupCounts([...orders, ...published].map((o) => o.angle))
+  const activeGroup = groupFilter && groups.some((g) => g.group === groupFilter) ? groupFilter : null
   if (!hasShown && loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
 
   return (
@@ -223,7 +228,6 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       <div className={clientId ? 'grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start' : ''}>
       <div>
         {(() => {
-          const groups = groupCounts([...orders, ...published].map((o) => o.angle))
           if (groups.length <= 1) return null
           return (
             <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
@@ -232,15 +236,15 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                   key={g.group ?? 'all'}
                   type="button"
                   onClick={() => setGroupFilter(g.group)}
-                  aria-pressed={groupFilter === g.group}
-                  className={`px-3 h-8 rounded-full text-xs font-medium border ${groupFilter === g.group ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                  aria-pressed={activeGroup === g.group}
+                  className={`px-3 h-8 rounded-full text-xs font-medium border ${activeGroup === g.group ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
                 >{g.group ?? '全部'} · {g.count}</button>
               ))}
             </div>
           )
         })()}
         <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-        {orders.filter((o) => !groupFilter || parseAngle(o.angle).group === groupFilter).map((o) => (
+        {orders.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup).map((o) => (
           <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-3 flex flex-col">
             <PendingCardHead
               id={o.id}
@@ -334,13 +338,16 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
         </div>
 
         {(() => {
-          const shown = published.filter((o) => !groupFilter || parseAngle(o.angle).group === groupFilter)
+          const shown = published.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup)
           if (shown.length === 0) return null
           return (
             <div className="mt-8">
               <h2 className="text-sm font-medium text-slate-600 mb-3">已发布 · {shown.length} 条</h2>
               <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-                {shown.map((o) => (
+                {shown.map((o) => {
+                  const b = publishedBadge(o.published ?? null)
+                  const tone = b.color.includes('green') ? 'green' : b.color.includes('slate') ? 'slate' : 'amber'
+                  return (
                   <ReadOnlyTile
                     key={o.id}
                     id={o.id}
@@ -349,10 +356,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
                     clientName={o.client_name}
                     createdAt={o.created_at}
                     videoSrc={publicUrl(o.output?.video_path)}
-                    status={{ label: '已发布', tone: 'green' }}
-                    link={o.published?.permalink ? { href: o.published.permalink, label: '在 Facebook 查看' } : null}
+                    status={{ label: b.label, tone }}
+                    link={b.href ? { href: b.href, label: '在 Facebook 查看' } : null}
                   />
-                ))}
+                  )
+                })}
               </div>
             </div>
           )
