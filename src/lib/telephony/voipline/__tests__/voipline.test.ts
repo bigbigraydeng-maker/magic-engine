@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { processRawEvent } from '../process'
 import { readCappedBody, MAX_BODY_BYTES } from '../ingest'
 import { isHumanFollowup } from '@/lib/crm/lead-followup-due'
+import { isUnansweredCall } from '@/lib/crm/segments'
 import { hashWebhookToken, verifyWebhookToken } from '../auth'
 import { buildDedupeKey, classifyEventType, parseVoiplineEvent } from '../events'
 import { sweepStaleRawEvents } from '@/lib/inngest/functions/telephony-voipline'
@@ -343,7 +344,11 @@ describe('审查后补的防线', () => {
     const base = { channel: 'phone', source: 'voipline', occurredAt: '2026-10-12T00:00:00Z' } as const
     expect(isHumanFollowup({ ...base, direction: 'inbound', metadata: { outcome: 'missed_inbound' } } as never)).toBe(false)
     expect(isHumanFollowup({ ...base, direction: 'inbound', metadata: { outcome: 'spoke' } } as never)).toBe(true)
-    expect(isHumanFollowup({ ...base, direction: 'outbound', metadata: { outcome: 'no_answer' } } as never)).toBe(true)
+    // 电话系统记录的外呼没人接（answered=false）：PM 2026-10-12 拍板不算跟进；手打笔记（无 answered 字段）仍算
+    expect(isHumanFollowup({ ...base, direction: 'outbound', metadata: { outcome: 'no_answer', answered: false } } as never)).toBe(false)
+    expect(isHumanFollowup({ ...base, source: 'me_manual', direction: 'outbound', metadata: { outcome: 'no_answer' } } as never)).toBe(true)
+    expect(isUnansweredCall({ answered: false })).toBe(true)
+    expect(isUnansweredCall({ outcome: 'no_answer' })).toBe(false)
   })
   it('补处理：结束了却一直没写 CRM 的通话会被重新派发；6 小时没收到结束事件的转人工确认', async () => {
     const h = harness()
