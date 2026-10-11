@@ -195,6 +195,25 @@ create trigger crm_booking_milestones_touch_updated_at
   execute function public.crm_booking_touch_updated_at();
 
 -- ---------------------------------------------------------------------------
+-- 5b. Clear the transaction-local session settings the write functions set.
+-- (Function-level SET on custom settings needs elevated rights on hosted Postgres, so each
+-- write function calls this right before it returns.)
+-- ---------------------------------------------------------------------------
+create function public.crm_booking_clear_settings()
+returns void
+language plpgsql
+as $$
+begin
+  perform set_config('crm_booking.actor', '', true);
+  perform set_config('crm_booking.source', '', true);
+  perform set_config('crm_booking.action', '', true);
+end;
+$$;
+
+revoke all on function public.crm_booking_clear_settings() from public, anon, authenticated;
+grant execute on function public.crm_booking_clear_settings() to service_role;
+
+-- ---------------------------------------------------------------------------
 -- 6. Audit triggers
 -- Session settings (transaction-local, set by the write functions):
 --   crm_booking.actor  -> events.actor_email
@@ -617,10 +636,6 @@ create function public.crm_booking_create(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -670,6 +685,8 @@ begin
   insert into public.crm_booking_milestones (booking_id, client_id, kind, updated_at)
   values (v_row.id, p_client_id, 'balance', v_balance_at);
 
+  perform public.crm_booking_clear_settings();
+
   return to_jsonb(v_row);
 end;
 $$;
@@ -689,10 +706,6 @@ create function public.crm_booking_update(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -846,6 +859,7 @@ begin
   end if;
 
   if to_jsonb(v_next) = to_jsonb(v_row) then
+    perform public.crm_booking_clear_settings();
     return to_jsonb(v_row);
   end if;
 
@@ -865,6 +879,8 @@ begin
     when unique_violation then
       raise exception 'duplicate_booking';
   end;
+
+  perform public.crm_booking_clear_settings();
 
   return to_jsonb(v_row);
 end;
@@ -889,10 +905,6 @@ create function public.crm_booking_set_paid(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -964,11 +976,13 @@ begin
   end if;
 
   if v_row.state = 'paid' then
+    perform public.crm_booking_clear_settings();
     return jsonb_build_object('changed', false, 'reason', 'already_paid', 'milestone', to_jsonb(v_row));
   end if;
 
   if v_evidence is not null then
     if v_evidence = v_row.paid_evidence_ref then
+      perform public.crm_booking_clear_settings();
       return jsonb_build_object('changed', false, 'reason', 'evidence_already_used', 'milestone', to_jsonb(v_row));
     end if;
 
@@ -977,6 +991,7 @@ begin
        where client_id = p_client_id
          and paid_evidence_ref = v_evidence
     ) then
+      perform public.crm_booking_clear_settings();
       return jsonb_build_object('changed', false, 'reason', 'evidence_already_used', 'milestone', to_jsonb(v_row));
     end if;
   end if;
@@ -994,8 +1009,11 @@ begin
      returning * into v_row;
   exception
     when unique_violation then
+      perform public.crm_booking_clear_settings();
       return jsonb_build_object('changed', false, 'reason', 'evidence_already_used', 'milestone', to_jsonb(v_row));
   end;
+
+  perform public.crm_booking_clear_settings();
 
   return jsonb_build_object('changed', true, 'reason', null, 'milestone', to_jsonb(v_row));
 end;
@@ -1016,10 +1034,6 @@ create function public.crm_booking_unset_paid(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1081,6 +1095,8 @@ begin
      and client_id = p_client_id
    returning * into v_row;
 
+  perform public.crm_booking_clear_settings();
+
   return to_jsonb(v_row);
 end;
 $$;
@@ -1102,10 +1118,6 @@ create function public.crm_booking_override_due(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1158,6 +1170,7 @@ begin
 
   if p_due_override_on is null then
     if v_row.due_override_on is null and v_row.due_override_depart_on is null then
+      perform public.crm_booking_clear_settings();
       return to_jsonb(v_row);
     end if;
 
@@ -1167,6 +1180,8 @@ begin
      where id = v_row.id
        and client_id = p_client_id
      returning * into v_row;
+
+    perform public.crm_booking_clear_settings();
 
     return to_jsonb(v_row);
   end if;
@@ -1188,6 +1203,7 @@ begin
 
   if v_row.due_override_on is not distinct from p_due_override_on
      and v_row.due_override_depart_on is not distinct from v_depart_on then
+    perform public.crm_booking_clear_settings();
     return to_jsonb(v_row);
   end if;
 
@@ -1197,6 +1213,8 @@ begin
    where id = v_row.id
      and client_id = p_client_id
    returning * into v_row;
+
+  perform public.crm_booking_clear_settings();
 
   return to_jsonb(v_row);
 end;
@@ -1216,10 +1234,6 @@ create function public.crm_booking_confirm_departure(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1269,6 +1283,7 @@ begin
   end if;
 
   if v_row.departure_depart_on is not distinct from v_depart_on then
+    perform public.crm_booking_clear_settings();
     return to_jsonb(v_row);
   end if;
 
@@ -1279,6 +1294,8 @@ begin
    where id = p_booking_id
      and client_id = p_client_id
    returning * into v_row;
+
+  perform public.crm_booking_clear_settings();
 
   return to_jsonb(v_row);
 end;
@@ -1301,10 +1318,6 @@ create function public.crm_booking_nudge(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1368,6 +1381,7 @@ begin
   if p_mode = 'nudged_today' then
     if v_row.nudged_on is not distinct from v_today
        and v_row.remind_after is not distinct from (v_today + 1) then
+      perform public.crm_booking_clear_settings();
       return to_jsonb(v_row);
     end if;
 
@@ -1378,11 +1392,14 @@ begin
        and client_id = p_client_id
      returning * into v_row;
 
+    perform public.crm_booking_clear_settings();
+
     return to_jsonb(v_row);
   end if;
 
   if p_mode = 'snooze' then
     if v_row.remind_after is not distinct from (v_today + p_days) then
+      perform public.crm_booking_clear_settings();
       return to_jsonb(v_row);
     end if;
 
@@ -1392,11 +1409,14 @@ begin
        and client_id = p_client_id
      returning * into v_row;
 
+    perform public.crm_booking_clear_settings();
+
     return to_jsonb(v_row);
   end if;
 
   -- quiet
   if v_row.quiet then
+    perform public.crm_booking_clear_settings();
     return to_jsonb(v_row);
   end if;
 
@@ -1405,6 +1425,8 @@ begin
    where id = v_row.id
      and client_id = p_client_id
    returning * into v_row;
+
+  perform public.crm_booking_clear_settings();
 
   return to_jsonb(v_row);
 end;
@@ -1425,10 +1447,6 @@ create function public.crm_booking_cancel(
 )
 returns jsonb
 language plpgsql
--- Function-level SET restores the previous settings when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.action = ''
 as $$
 declare
   v_actor text;
@@ -1475,6 +1493,8 @@ begin
      and client_id = p_client_id
    returning * into v_row;
 
+  perform public.crm_booking_clear_settings();
+
   return to_jsonb(v_row);
 end;
 $$;
@@ -1495,10 +1515,6 @@ create function public.crm_booking_erase_actor_email(
 )
 returns integer
 language plpgsql
--- Function-level SET restores the previous values when the function exits.
-set crm_booking.actor = ''
-set crm_booking.source = ''
-set crm_booking.erase = ''
 as $$
 declare
   v_actor text;
@@ -1558,6 +1574,8 @@ begin
   );
 
   perform set_config('crm_booking.erase', '', true);
+
+  perform public.crm_booking_clear_settings();
 
   return v_count;
 end;

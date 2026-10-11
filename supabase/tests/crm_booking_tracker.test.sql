@@ -812,7 +812,7 @@ insert into aresults
      and p.proname like 'crm\_booking\_%'
      and p.prorettype <> 'trigger'::regtype;
 
-insert into aresults select 'G94d exactly 16 functions named crm_booking_% exist', count(*) = 16, count(*)::text
+insert into aresults select 'G94d exactly 17 functions named crm_booking_% exist', count(*) = 17, count(*)::text
   from pg_proc where pronamespace = 'public'::regnamespace and proname like 'crm\_booking\_%';
 
 set role anon;
