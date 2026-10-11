@@ -4,7 +4,7 @@ title: 新西兰政府 AI 补贴尽调做完，待 PM 决定要不要往下走�
 status: decided
 owner: pm
 decided_on: 2026-10-12
-source: doc:docs/research/2026-10-12-nz-gov-ai-funding-due-diligence.md
+source: doc:docs/research/2026-10-12-nz-gov-ai-funding-due-diligence/report.md
 ---
 结论：客户能用补贴买「教老板的 AI 营销培训」和「AI 顾问落地」，代运营、订阅、员工培训不能报；都要客户先在区域商业伙伴网络免费登记。
 我们要当供应商：管理培训路径要新西兰公司 + 不低于 NZ$100 万职业责任险 + 给中小企业培训过的证据；AI 顾问路径官网没写怎么成为认可供应商。

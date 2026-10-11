@@ -98,7 +98,7 @@
 
 ### 3.3 区域 / district 层
 
-**结论：没有任何地区在中央体系之外自己另设 AI / 数字化补贴。** 各地能拿的钱，都是同一套 RBPN（管理培训补贴 + AI 顾问试点）经各地代理发放。
+**结论（本轮未发现，不等于已核实不存在）：** 本轮只核对了各地 RBP 代理页面和 5 个 district 议会的抽样，多处只读到搜索摘要或原页打不开，**未发现**中央体系之外的地区性 AI / 数字化补贴；已查到的地区资金都是同一套 RBPN（管理培训补贴 + AI 顾问试点）经各地代理发放。其余地区、议会、经济发展机构未逐一核实。
 
 - **奥克兰（我们公司在 Albany）：区域商业伙伴是 Auckland Business Chamber（奥克兰商会），不是 Tātaki Auckland Unlimited。** 来源：[官方代理名单](https://www.business.govt.nz/strategy-and-performance/regional-business-partner-network/find-your-local-regional-business-partner)（[原文]，复核 2025-07-21，我本人核对）；Tātaki 2022-07 公告其退出牵头交付（[原文]）。奥克兰商会 RBP 页（[摘要]，原页 403）写「小组培训 75%、每家财年最多 NZ$5,000」，另有说法写最低上年销售额 NZ$6 万，**均未能读到原页，只当线索**。
 - **Albany 本地**：Upper Harbour 本地委员会的补助分类是艺术、社区、环境、活动、遗产、体育，**没有企业 AI / 培训类**（[摘要]）。Business North Harbour（北岸商业促进区）有往期能力培训，未发现 AI 补贴。Auckland Council 通用企业补助：未发现。
@@ -134,7 +134,7 @@
 
 ### 3.5 官方「基金总列表」全貌（补查，2026-10-12）
 
-Business.govt.nz 的 Funding Explorer 是政府自己的基金汇总工具，官方说明**目前共 15 个项目、约 NZ$2.5 亿**（[原文]：[说明页](https://www.business.govt.nz/news/looking-for-funding-try-funding-explorer)，发布并复核 2026-08-19）。总列表页本身是动态加载、抓到的是空的，所以以这篇说明页的名单为准。**这 15 个就是中央政府「面向企业」的全部基金，逐个对照如下：**
+Business.govt.nz 的 Funding Explorer 是政府自己的基金汇总工具，官方说明**目前共 15 个项目、约 NZ$2.5 亿**（[原文]：[说明页](https://www.business.govt.nz/news/looking-for-funding-try-funding-explorer)，发布并复核 2026-08-19）。总列表页本身是动态加载、抓到的是空的，所以以这篇说明页的名单为准。**以下是 Funding Explorer 当前收录的这 15 个项目（不等于中央政府面向企业的全部基金），逐个对照如下：**
 
 | # | 项目 | 运营方（以各页为准） | 跟「AI 培训 / 客户买我们服务」的关系 |
 |---|---|---|---|
