@@ -25,9 +25,12 @@ const LEGACY_COLUMNS =
 
 const ORIGIN_KINDS: readonly OriginKind[] = ['company_confirmed', 'customer_stated', 'staff_entered']
 
+// PostgREST answers a select of a missing column with: column crm_bookings.origin_kind does not exist.
+// Match ONLY that shape: an error that merely mentions the column (permission, constraint) must still throw.
+const MISSING_ORIGIN_COLUMN = /column\s+[\w."]*\b(origin_kind|evidence_ref)"?\s+does not exist/i
+
 function isMissingOriginColumns(message: string): boolean {
-  if (message.includes('origin_kind') || message.includes('evidence_ref')) return true
-  return message.includes('42703')
+  return MISSING_ORIGIN_COLUMN.test(message)
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -38,9 +41,15 @@ function readNullableString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
 }
 
+/**
+ * Only a positive whole number counts as a head-count. Anything else (0, negative, fractional) is treated as
+ * "not filled in" so a dirty value can never shrink the total and overstate the remaining seats.
+ */
 function readPartySize(value: unknown): number | null {
   if (value === null || value === undefined) return null
-  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value > 0 ? value : null
+  }
   throw new Error('unmappable booking row')
 }
 

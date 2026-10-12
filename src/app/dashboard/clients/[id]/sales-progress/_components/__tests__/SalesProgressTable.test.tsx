@@ -300,3 +300,16 @@ describe('SalesProgressTable', () => {
     expect(/\d{8,}/.test(html)).toBe(false)
   })
 })
+
+import { statusText } from '../format'
+
+describe('statusText', () => {
+  it('shows sold out / limited, nothing for open or other statuses', () => {
+    const unit = (unitStatus: string) => ({
+      unitId: 'u', groupId: 'g', label: 'L', date: null, capacity: 20, capacityNote: null, unitStatus,
+    })
+    expect(statusText(unit('sold_out'))).toBe('团目录已标售罄')
+    expect(statusText(unit('limited'))).toBe('团目录标注名额紧张')
+    expect(statusText(unit('open'))).toBeNull()
+  })
+})

@@ -14,6 +14,7 @@ import {
   originLabel,
   peopleText,
   rowNotes,
+  statusText,
 } from './format'
 
 function companyOnlyText(row: UnitProgress): string | null {
@@ -59,7 +60,12 @@ function ProgressRow({ row }: { row: UnitProgress }): JSX.Element {
   return (
     <>
       <tr className="border-b border-me-charcoal/10">
-        <td className="px-3 py-2 text-me-charcoal">{row.unit.label}</td>
+        <td className="px-3 py-2 text-me-charcoal">
+          {row.unit.label}
+          {statusText(row.unit) !== null ? (
+            <span className="block text-xs text-me-charcoal/70">{statusText(row.unit)}</span>
+          ) : null}
+        </td>
         <td className="px-3 py-2 text-me-charcoal">{formatCapacity(row)}</td>
         <td className="px-3 py-2 text-me-charcoal">{row.companyConfirmed} 人</td>
         <td className="px-3 py-2 text-me-charcoal">{row.customerStated} 人</td>

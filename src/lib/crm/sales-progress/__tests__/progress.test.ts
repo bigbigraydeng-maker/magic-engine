@@ -73,10 +73,9 @@ describe('effectiveCapacity', () => {
     })
   })
 
-  it('ignores invalid inputs', () => {
-    const invalid = ['20', 0, -1, 1.5, NaN, null, undefined]
-    for (const value of invalid) {
-      expect(effectiveCapacity({ internalCapacity: value, tourMaxGroupSize: value })).toEqual({
+  it('ignores an invalid public tour number, and treats an invalid-but-present internal number as unusable', () => {
+    for (const value of ['20', 0, -1, 1.5, NaN, null, undefined]) {
+      expect(effectiveCapacity({ internalCapacity: null, tourMaxGroupSize: value })).toEqual({
         capacity: null,
         note: null,
       })
@@ -231,5 +230,21 @@ describe('computeProgress', () => {
     ]
     const result = computeProgress(units, [])
     expect(result.rows.map((row) => row.unit.unitId)).toEqual(['u3', 'u1', 'u2'])
+  })
+})
+
+describe('internal capacity present but unusable never falls back to the public number (overstating seats is the unsafe direction)', () => {
+  it.each([['"15"', '15'], ['0', 0], ['15.5', 15.5], ['-3', -3]])('internal %s with tour 18 -> unset + note', (_label, value) => {
+    expect(effectiveCapacity({ internalCapacity: value, tourMaxGroupSize: 18 })).toEqual({
+      capacity: null,
+      note: '内部座位格式不对，请到团目录核对',
+    })
+  })
+  it('missing or null internal still falls back to the tour number', () => {
+    expect(effectiveCapacity({ internalCapacity: undefined, tourMaxGroupSize: 18 })).toEqual({ capacity: 18, note: null })
+    expect(effectiveCapacity({ internalCapacity: null, tourMaxGroupSize: 18 })).toEqual({ capacity: 18, note: null })
+  })
+  it('readInternalCapacity: absent key is undefined, other keys never leak', () => {
+    expect(readInternalCapacity({ airline: 'CA' })).toBeUndefined()
   })
 })

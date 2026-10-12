@@ -74,7 +74,10 @@ async function loadDepartures(db: SupabaseClient, clientId: string): Promise<Dep
   const out: DepartureRow[] = []
   for (const raw of rows) {
     const mapped = mapDepartureRow(raw)
-    if (mapped !== null) out.push(mapped)
+    // A departure that cannot be read must fail the page: dropping it would silently turn its orders into
+    // "unattributed" and hide the real reason.
+    if (mapped === null) throw new Error('unmappable departure row')
+    out.push(mapped)
   }
   return out
 }

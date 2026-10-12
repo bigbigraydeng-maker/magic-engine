@@ -64,3 +64,10 @@ export function peopleText(b: SalesBooking): string {
   if (b.partySize === null) return '人数未填'
   return `${b.partySize} 人`
 }
+
+/** A small note when the source marks the unit sold out / limited, so the number is read together with it. */
+export function statusText(unit: UnitProgress['unit']): string | null {
+  if (unit.unitStatus === 'sold_out') return '团目录已标售罄'
+  if (unit.unitStatus === 'limited') return '团目录标注名额紧张'
+  return null
+}

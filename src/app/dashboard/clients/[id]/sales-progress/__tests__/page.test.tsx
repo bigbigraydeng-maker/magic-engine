@@ -77,6 +77,7 @@ describe('销售进度页', () => {
     loadSalesProgress.mockResolvedValue(DATA)
     await renderPage()
     expect(loadSalesProgress.mock.calls[0][1]).toBe('cts')
+    expect(requireBookingAccess.mock.invocationCallOrder[0]).toBeLessThan(loadSalesProgress.mock.invocationCallOrder[0])
     expect(screen.getByTestId('tabs')).toHaveTextContent('sales')
     expect(screen.getByText(/现在还没有录入任何订单/)).toBeInTheDocument()
   })

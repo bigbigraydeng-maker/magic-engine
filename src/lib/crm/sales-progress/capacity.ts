@@ -15,6 +15,8 @@ export interface EffectiveCapacityResult {
   note: string | null
 }
 
+export const INTERNAL_BAD_NOTE = '内部座位格式不对，请到团目录核对'
+
 /** A value is valid only if it is a finite integer strictly greater than 0. */
 function isValidCapacity(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) && value > 0
@@ -25,6 +27,13 @@ function isValidCapacity(value: unknown): value is number {
  * When both are valid and differ, the smaller one wins and a note is added.
  */
 export function effectiveCapacity(input: EffectiveCapacityInput): EffectiveCapacityResult {
+  // An internal capacity that is PRESENT but unusable (a string, 0, a fraction, a negative) must NOT silently fall
+  // back to the public tour-level number: the real internal limit may be smaller, and falling back would overstate
+  // the free seats. Only a missing / null internal value (nothing was entered) falls back.
+  const internalPresent = input.internalCapacity !== undefined && input.internalCapacity !== null
+  if (internalPresent && !isValidCapacity(input.internalCapacity)) {
+    return { capacity: null, note: INTERNAL_BAD_NOTE }
+  }
   const internal = isValidCapacity(input.internalCapacity) ? input.internalCapacity : null
   const tour = isValidCapacity(input.tourMaxGroupSize) ? input.tourMaxGroupSize : null
 
@@ -46,12 +55,12 @@ export function effectiveCapacity(input: EffectiveCapacityInput): EffectiveCapac
 
 /**
  * Read the `capacity` key from an internal capacity object.
- * Returns the raw value when `internal` is a plain object, otherwise null.
+ * Returns the raw value (undefined when the key is absent) when `internal` is a plain object, otherwise null.
  * Never returns any other key.
  */
 export function readInternalCapacity(internal: unknown): unknown {
   if (typeof internal !== 'object' || internal === null || Array.isArray(internal)) {
     return null
   }
-  return (internal as Record<string, unknown>).capacity ?? null
+  return (internal as Record<string, unknown>).capacity
 }

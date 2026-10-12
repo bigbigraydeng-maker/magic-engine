@@ -185,6 +185,64 @@ describe('loadSalesProgress', () => {
     expect(data.result.rows.map((r) => r.unit.unitId)).toEqual(['past-with-order', 'upcoming', 'undated'])
   })
 
+  it('matches the real PostgREST shape for a missing column (table-qualified name)', async () => {
+    const db = createFakeDb(
+      { crm_bookings: [{ ...BOOKING_ROW, origin_kind: null, evidence_ref: null }] },
+      { crm_bookings: 'column crm_bookings.origin_kind does not exist' },
+      { crm_bookings: 'origin_kind' },
+    )
+    const data = await loadSalesProgress(db as never, 'client-1', fakeSource([UNIT]))
+    expect(data.originColumnsMissing).toBe(true)
+  })
+
+  it('🔴 an error that merely mentions the column (not "does not exist") is NOT swallowed', async () => {
+    const db = createFakeDb(
+      { crm_bookings: [] },
+      { crm_bookings: 'permission denied for column origin_kind' },
+      { crm_bookings: 'origin_kind' },
+    )
+    await expect(
+      loadSalesProgress(db as never, 'client-1', fakeSource([UNIT])),
+    ).rejects.toThrow('permission denied for column origin_kind')
+  })
+
+  it('head-counts that are not positive whole numbers are treated as not filled in (never shrink the total)', async () => {
+    const rows = [0, -3, 2.5].map((n, i) => ({ ...BOOKING_ROW, id: `b-${i}`, party_size: n }))
+    const db = createFakeDb({ crm_bookings: rows })
+    const data = await loadSalesProgress(db as never, 'client-1', fakeSource([UNIT]))
+    expect(data.result.rows[0].total).toBe(0)
+    expect(data.result.rows[0].unfilledOrders).toBe(3)
+    expect(data.result.rows[0].remaining).toBe(18)
+  })
+
+  it('a string head-count is an unmappable row (throws, never silently dropped)', async () => {
+    const db = createFakeDb({ crm_bookings: [{ ...BOOKING_ROW, party_size: '2' }] })
+    await expect(
+      loadSalesProgress(db as never, 'client-1', fakeSource([UNIT])),
+    ).rejects.toThrow('unmappable booking row')
+  })
+
+  it('🔴 every query is limited to the client (eq client_id on orders, departures and tours)', async () => {
+    const db = createFakeDb({
+      crm_bookings: [BOOKING_ROW],
+      tour_catalog_departures: [DEPARTURE_ROW],
+      tour_catalog_tours: [TOUR_ROW],
+    })
+    await loadSalesProgress(db as never, 'client-1', createDepartureUnitSource(db as never))
+    for (const table of ['crm_bookings', 'tour_catalog_departures', 'tour_catalog_tours']) {
+      const mine = db.calls.filter((c) => c.table === table)
+      expect(mine.some((c) => c.method === 'eq:client_id'), table).toBe(true)
+    }
+  })
+
+  it('an unreadable departure row fails the load instead of being dropped', async () => {
+    const db = createFakeDb({
+      tour_catalog_departures: [{ ...DEPARTURE_ROW, depart_on: null }],
+      tour_catalog_tours: [TOUR_ROW],
+    })
+    await expect(createDepartureUnitSource(db as never).listSalesUnits('client-1')).rejects.toThrow('unmappable departure row')
+  })
+
   it('throws on a different error', async () => {
     const db = createFakeDb({ crm_bookings: [] }, { crm_bookings: 'permission denied' })
     await expect(
