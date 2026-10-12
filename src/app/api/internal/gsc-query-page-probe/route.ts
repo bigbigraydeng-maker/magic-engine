@@ -20,7 +20,7 @@ import { readBrandConfig, splitQueryRows } from '@/lib/gsc/brand-split'
  * Triggered through the manual trial workflow (`manual-cron-trial.yml`), which carries the CRON_SECRET; the GSC
  * credentials live on the server, never in a developer window.
  *
- * Query: client_id=<uuid> (REQUIRED), days=<1..7> (default 1), dry_run=1|0 (ignored: read-only)
+ * Query: client_id=<uuid> (REQUIRED), days=<1..7> (default 7; the trial workflow passes only client_id), dry_run=1|0 (ignored: read-only)
  * Auth: Bearer ${CRON_SECRET}
  */
 
@@ -58,8 +58,8 @@ export async function GET(req: NextRequest) {
   if (!clientId || !UUID.test(clientId)) {
     return NextResponse.json({ error: 'client_id (UUID) is required' }, { status: 400 })
   }
-  const daysRaw = Number(params.get('days') ?? '1')
-  const days = Number.isInteger(daysRaw) && daysRaw >= 1 && daysRaw <= 7 ? daysRaw : 1
+  const daysRaw = Number(params.get('days') ?? '7')
+  const days = Number.isInteger(daysRaw) && daysRaw >= 1 && daysRaw <= 7 ? daysRaw : 7
   const dryRun = params.get('dry_run') === '1'
   const fail = (status: string, code: number) =>
     NextResponse.json({ success: false, dry_run: dryRun, read_only: true, status }, { status: code })

@@ -61,7 +61,7 @@ CTS 28 天合并口径下不同「词×页」对共 4,289 个（现有只读通�
 
 ## 8. 只读探针（魏征必改 3：真实试跑）
 
-`GET /api/internal/gsc-query-page-probe`（非定时路由，同 gsc-query-overlap 放 `/api/internal/`）：Bearer CRON_SECRET；`client_id` 必填；`days`（1–31，默认 1，结束日 = 今天往前 5 天以避开未定稿日）；**只读、不写库、不需要迁移**；用与写入完全相同的转行函数，报告：逐日行数、重复键数、超长键数、`query` 大小写重复数、品牌拆分（若已配置）。加进 `manual-cron-trial.yml` 白名单（A 级，写进 PR）。合并后先跑它，拿到真实体量，再 PM 点头 apply 迁移。
+`GET /api/internal/gsc-query-page-probe`（非定时路由，同 gsc-query-overlap 放 `/api/internal/`）：Bearer CRON_SECRET；`client_id` 必填；`days`（1–7，默认 7，结束日 = 今天往前 5 天以避开未定稿日；工作流只传 client_id，所以默认就是 7 天）；**只读、不写库、不需要迁移**；用与写入完全相同的转行函数，报告：逐日行数、重复键数、超长键数、`query` 大小写重复数、品牌拆分（若已配置）。加进 `manual-cron-trial.yml` 白名单（A 级，写进 PR）。合并后先跑它，拿到真实体量，再 PM 点头 apply 迁移。
 
 ## 9. 换客户 / 换行业测试
 
