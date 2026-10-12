@@ -136,6 +136,14 @@ create table public.story_pack_item_opens (
   constraint story_pack_item_opens_once_key unique (item_id, channel, opened_by_user_id, opened_fingerprint)
 );
 
+-- Open records are evidence: never edited, never deleted.
+create function public.story_opens_freeze() returns trigger language plpgsql as $$
+begin
+  raise exception 'story_pack_item_opens rows are write-once';
+end $$;
+create trigger story_pack_item_opens_freeze_trg before update or delete on public.story_pack_item_opens
+  for each row execute function public.story_opens_freeze();
+
 -- 4. Atomic claim + outcome per (item, channel).
 create table public.story_publish_attempts (
   id uuid primary key default gen_random_uuid(),
@@ -194,9 +202,15 @@ create table public.story_publish_attempts (
 create index story_publish_attempts_client_status_idx on public.story_publish_attempts (client_id, status);
 create index story_publish_attempts_pack_idx on public.story_publish_attempts (pack_id, channel);
 
+-- updated_at moves only when the status changes, so a same-status write (e.g. a retry counter)
+-- can never reset the stale-claim / stale-publishing clocks the gate reads.
 create function public.story_touch_updated_at() returns trigger language plpgsql as $$
 begin
-  new.updated_at = now();
+  if new.status is distinct from old.status then
+    new.updated_at = now();
+  else
+    new.updated_at = old.updated_at;
+  end if;
   return new;
 end $$;
 
@@ -224,6 +238,10 @@ begin
        or new.channel is distinct from old.channel) then
     raise exception 'story_publish_attempts: settled rows keep their identity fields';
   end if;
+  if old.settled_by_email is not null
+     and (new.settled_by_email is distinct from old.settled_by_email or new.settled_reason is distinct from old.settled_reason) then
+    raise exception 'story_publish_attempts: the settlement record is write-once';
+  end if;
   if new.status = old.status then
     return new;
   end if;
@@ -248,6 +266,10 @@ end $$;
 create trigger story_publish_attempts_no_rollback_trg before update on public.story_publish_attempts
   for each row execute function public.story_publish_attempts_no_rollback();
 
+-- NOTE (Facebook): a Facebook story has no container step, so it goes CLAIMED -> PUBLISHED_UNVERIFIED
+-- directly (the CLAIMED row is the claim taken before the send; a crash is caught by the stale-claim rule).
+-- PUBLISHING exists for the two-step Instagram flow only.
+
 -- 5. Per (pack, channel) publish lease: only one sweep may be sending for a pack+channel at a time.
 -- Use story_take_lease(): it creates the row on first use and takes over only a free or expired lease.
 create table public.story_pack_lease (
@@ -263,18 +285,37 @@ create function public.story_take_lease(p_pack uuid, p_channel text, p_holder uu
 returns boolean language plpgsql as $$
 declare n integer;
 begin
+  if p_ttl is null or p_ttl <= interval '0' then
+    raise exception 'story_take_lease: ttl must be positive';
+  end if;
+  -- a free lease, an expired lease, or the holder renewing its own lease may be taken
   insert into public.story_pack_lease as l (pack_id, channel, holder, expires_at)
   values (p_pack, p_channel, p_holder, now() + p_ttl)
   on conflict (pack_id, channel) do update
     set holder = excluded.holder, expires_at = excluded.expires_at
-    where l.holder is null or l.expires_at < now();
+    where l.holder is null or l.expires_at < now() or l.holder = excluded.holder;
   get diagnostics n = row_count;
   return n = 1;
 end $$;
 
--- functions are executable by PUBLIC by default: lock it to the service role
+-- Hand the lease back as soon as the send is done so the next item of the pack can go this sweep.
+-- Only the current holder can release it.
+create function public.story_release_lease(p_pack uuid, p_channel text, p_holder uuid)
+returns boolean language plpgsql as $$
+declare n integer;
+begin
+  update public.story_pack_lease
+     set holder = null, expires_at = null
+   where pack_id = p_pack and channel = p_channel and holder = p_holder;
+  get diagnostics n = row_count;
+  return n = 1;
+end $$;
+
+-- functions are executable by PUBLIC by default: lock them to the service role
 revoke all on function public.story_take_lease(uuid, text, uuid, interval) from public, anon, authenticated;
 grant execute on function public.story_take_lease(uuid, text, uuid, interval) to service_role;
+revoke all on function public.story_release_lease(uuid, text, uuid) from public, anon, authenticated;
+grant execute on function public.story_release_lease(uuid, text, uuid) to service_role;
 
 -- 6. Where each media file has already been used (Facebook refuses a Story built from a file that was
 -- already published as a post / reel). Written by the Post / Reel publishers; a missing row means "unknown".
