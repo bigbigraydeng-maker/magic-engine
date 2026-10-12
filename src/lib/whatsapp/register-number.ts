@@ -105,7 +105,7 @@ export async function registerWhatsAppNumber(
   if (input.appSecret !== undefined) {
     const stored = await storeAppSecret(input.phoneNumberId, input.appSecret)
     if (!stored) {
-      return { ok: false, error: 'failed to store app secret' }
+      return { ok: false, error: 'token stored but failed to store app secret; rerun to retry (writes are idempotent)' }
     }
   }
 

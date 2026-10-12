@@ -86,3 +86,9 @@ source: 56 号窗口转述 PM 已批准；上位设计稿 56 号工作区 docs/s
 4. **登记函数**校验 `clients.whatsapp_phone_number_id` 等于传入号码（防登记错客户）；不一致直接报错不写。
 5. **漏项**：`src/lib/pm-todo/platform-connection-items.ts` 的 `PROVIDER_COPY` 补 `whatsapp`（`ENROLMENT_ANCHOR` 只管 gsc/ga4，不用动）。迁移保留 8 个旧值再加 `whatsapp`（沿用 20260811150000 写法）。`token-manager` 不对 whatsapp 调 `getValidToken`（发信直接读连接行）。
 6. **测试补**：「密钥表查询报错时 CTS 仍能收信」「连接行状态非 active → 424 不回退」「令牌解密失败 → 424 不回退」。
+
+## 10. 实施后审查补记（子牙，2026-10-13）
+
+- 密钥解密失败（`decrypt_failed`）返回 500（让 Meta 重投，不放行）。
+- 登记函数先写令牌、后写密钥；密钥写失败时返回明确错误「令牌已存、密钥未存，重跑即可」（两步写入都是幂等 upsert）。
+- 一个号码「登记了令牌、没登记密钥」，其收信会用 `META_APP_SECRET` 验签；若该号码属于另一个应用会被 401——所以接入 NAL 时令牌和密钥必须一起登记（PR 与台账写明）。

@@ -211,7 +211,7 @@ describe('registerWhatsAppNumber', () => {
       appSecret: SECRET,
     })
 
-    expect(result).toEqual({ ok: false, error: 'failed to store app secret' })
+    expect(result).toEqual({ ok: false, error: 'token stored but failed to store app secret; rerun to retry (writes are idempotent)' })
   })
 
   it('never leaks the token or secret in the result or console output', async () => {
