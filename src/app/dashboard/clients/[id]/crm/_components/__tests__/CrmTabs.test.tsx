@@ -43,6 +43,28 @@ describe('CrmTabs', () => {
     expect(String(calls[0][0])).toContain(`/api/clients/${ID}/crm/bookings/access`)
   })
 
+  it('shows 销售进度 next to 付款总览 (same probe, same gate) and links to the sales-progress page', async () => {
+    stub(async () => res(200))
+    render(<CrmTabs clientId={ID} active="sales" />)
+
+    const link = await screen.findByRole('link', { name: '销售进度' })
+    expect(link).toHaveAttribute('href', `/dashboard/clients/${ID}/sales-progress`)
+  })
+
+  it.each([403, 404, 500, 204])('does not show 销售进度 either when the probe answers %i', async (status) => {
+    let probeCalled = false
+    stub(async () => {
+      probeCalled = true
+      return res(status)
+    })
+    render(<CrmTabs clientId={ID} active="all" />)
+
+    await waitFor(() => expect(probeCalled).toBe(true))
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(screen.queryByRole('link', { name: '销售进度' })).toBeNull()
+  })
+
   it.each([403, 404, 500, 204])('does not show 付款总览 when the probe answers %i', async (status) => {
     let probeCalled = false
     stub(async () => {
