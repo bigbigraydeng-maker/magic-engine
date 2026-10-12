@@ -66,6 +66,7 @@ export function renderPreview(items: PlanItem[], summary: PlanSummary): string[]
     const v = perDeparture.get(key)
     if (v !== undefined) lines.push(`可导入 · ${key}：${v.orders} 单，${v.people} 人`)
   }
+  lines.push('提示：「可导入」只代表这行对得上客人和团，没有核对座位名额（人数是否装得下）。')
   for (const item of items) {
     lines.push(
       `${guestLabel(item.index)} · 发票 ${item.invoice} · ${item.partySize} 人 · ${statusText(item)} ${item.reasons.join(',')}`,

@@ -7,75 +7,25 @@
 
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { dirname, extname, isAbsolute, relative, resolve } from 'node:path'
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { supabaseAdmin } from '@/lib/supabase'
 import { normaliseEmail, normalisePhone } from '@/lib/crm/identity'
+import { parseArgs, pathsAreSafe } from '@/lib/crm/booking-import/cli-guards'
 import { runPreview } from '@/lib/crm/booking-import/run-preview'
 
 const APPLY_REFUSED = '导入还没有开放：这一版只做预览，不会写入任何东西。'
 const USAGE = '用法：import-march-bookings.ts <clientId> <inputJsonPath> [--out <planJsonPath>]'
 const PATH_REFUSED = '输入文件和输出文件都不能放在仓库目录里（里面有客人联系方式或联系人 id），输出文件还必须是新的 .json 文件、不能覆盖已有文件、不能和输入文件同一个'
 const GENERIC_ERROR = '出错了（为避免泄露客人信息，这里不显示详情）：'
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-interface Args {
-  clientId: string
-  inputPath: string
-  outPath: string | null
-}
-
-/** Strict parsing: anything starting with --apply is refused by the caller; any other unknown flag is an error. */
-function parseArgs(argv: string[]): Args | null {
-  const positional: string[] = []
-  let outPath: string | null = null
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i]
-    if (arg === '--out') {
-      const next = argv[i + 1]
-      if (next === undefined) return null
-      outPath = next
-      i += 1
-    } else if (arg.startsWith('--')) {
-      return null
-    } else {
-      positional.push(arg)
-    }
-  }
-  if (positional.length !== 2 || !UUID_RE.test(positional[0])) return null
-  return { clientId: positional[0], inputPath: positional[1], outPath }
-}
-
-/** The repository root, found from where this script lives (not from the current directory). */
-function repoRoot(): string {
+/** Every checkout of the repository: this worktree's top level AND the main checkout (via the common git dir). */
+function repoRoots(): string[] {
   const here = dirname(new URL(import.meta.url).pathname)
-  const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: here, encoding: 'utf8' }).trim()
-  return realpathSync(top)
-}
-
-/** Real path of a file that may not exist yet: the real path of its directory plus its name. Compared lower-case. */
-function realKey(target: string): string {
-  const abs = resolve(target)
-  const dir = realpathSync(dirname(abs))
-  return resolve(dir, abs.slice(dirname(abs).length + 1)).toLowerCase()
-}
-
-function isInside(root: string, target: string): boolean {
-  const rel = relative(root.toLowerCase(), target)
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-}
-
-/** True when the paths are acceptable. Called before any database access. */
-function pathsAreSafe(args: Args): boolean {
-  const root = repoRoot()
-  if (!existsSync(args.inputPath)) return false
-  if (isInside(root, realpathSync(resolve(args.inputPath)).toLowerCase())) return false
-  if (args.outPath === null) return true
-  if (extname(args.outPath).toLowerCase() !== '.json') return false
-  if (existsSync(args.outPath)) return false
-  const outKey = realKey(args.outPath)
-  if (isInside(root, outKey)) return false
-  return outKey !== realpathSync(resolve(args.inputPath)).toLowerCase()
+  const git = (arg: string) => execFileSync('git', ['rev-parse', arg], { cwd: here, encoding: 'utf8' }).trim()
+  const top = realpathSync(git('--show-toplevel'))
+  const common = realpathSync(resolve(here, git('--git-common-dir')))
+  return Array.from(new Set([top, dirname(common)]))
 }
 
 async function main(): Promise<number> {
@@ -90,7 +40,7 @@ async function main(): Promise<number> {
     console.log(USAGE)
     return 1
   }
-  if (!pathsAreSafe(args)) {
+  if (!pathsAreSafe(args, repoRoots())) {
     console.log(PATH_REFUSED)
     return 3
   }

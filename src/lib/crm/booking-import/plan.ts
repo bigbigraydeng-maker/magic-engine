@@ -40,7 +40,8 @@ function buildItem(row: ImportRow, facts: RowFacts, reasons: string[]): PlanItem
   }
 }
 
-const CLOSED_STATUSES = new Set(['cancelled', 'closed'])
+// Whitelist (same as the public catalog output): any other or unknown status goes to a human.
+const OPEN_STATUSES = new Set(['open', 'limited'])
 
 function guestDepartureKey(facts: RowFacts): string | null {
   if (facts.contact.kind !== 'one' || facts.departure === null) return null
@@ -58,9 +59,8 @@ function countBy(keys: Array<string | null>): Map<string, number> {
 function departureReasons(facts: RowFacts): string[] {
   if (facts.departureAmbiguous) return ['departure_ambiguous']
   if (facts.departure === null) return ['departure_not_found']
-  if (facts.departure.status !== null && CLOSED_STATUSES.has(facts.departure.status)) {
-    return ['departure_not_open']
-  }
+  if (facts.departure.status === null) return ['departure_status_unknown']
+  if (!OPEN_STATUSES.has(facts.departure.status)) return ['departure_not_open']
   return []
 }
 

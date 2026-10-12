@@ -29,6 +29,7 @@ interface FakeQuery {
 
 interface FakeDb {
   calls: FakeCall[]
+  eqs: Array<{ table: string; column: string; value: unknown }>
   from(table: string): FakeQuery
 }
 
@@ -38,8 +39,10 @@ function createFakeDb(
   errorOnlyWhenSelecting: Record<string, string> = {},
 ): FakeDb {
   const calls: FakeCall[] = []
+  const eqs: Array<{ table: string; column: string; value: unknown }> = []
   const db: FakeDb = {
     calls,
+    eqs,
     from(table: string) {
       calls.push({ table, method: 'from' })
       let selected = ''
@@ -49,8 +52,9 @@ function createFakeDb(
           calls.push({ table, method: `select:${columns}` })
           return query
         },
-        eq(column: string) {
+        eq(column: string, value?: unknown) {
           calls.push({ table, method: `eq:${column}` })
+          eqs.push({ table, column, value })
           return query
         },
         in(column: string) {
@@ -550,5 +554,50 @@ describe('review-driven guards', () => {
     const db = createFakeDb({ ...baseTables, ...ident })
     await readFacts(db as never, 'client-1', [makeRow({ phone: null, email: 'a"b),c@x.com' })], norm)
     expect(db.calls.some((c) => c.table === 'contact_identities')).toBe(false)
+  })
+})
+
+describe('status whitelist and filter values', () => {
+  const run = async (departure: Record<string, unknown>) => {
+    const db = createFakeDb({
+      contact_identities: [{ contact_id: 'c-1', kind: 'phone', value: '+64215550100' }],
+      tour_catalog_tours: [TOUR_ROW],
+      tour_catalog_departures: [departure],
+      crm_bookings: [],
+    })
+    const result = await runPreview({
+      clientId: 'client-1',
+      rawJson: JSON.stringify([
+        {
+          invoice: '11111',
+          originKind: 'company_confirmed',
+          partySize: 2,
+          tourKey: 'essentials',
+          departOn: '2029-03-11',
+          bookedOn: '2029-01-01',
+          phone: '021 555 0100',
+          email: null,
+        },
+      ]),
+      db: db as never,
+      norm,
+    })
+    return { text: result.lines.join('\n'), db }
+  }
+
+  it('open and limited are ready; sold_out, completed and unknown go to a human', async () => {
+    expect((await run(DEPARTURE_ROW)).text).toContain('可导入 1')
+    expect((await run({ ...DEPARTURE_ROW, status: 'limited' })).text).toContain('可导入 1')
+    expect((await run({ ...DEPARTURE_ROW, status: 'sold_out' })).text).toContain('departure_not_open')
+    expect((await run({ ...DEPARTURE_ROW, status: 'completed' })).text).toContain('departure_not_open')
+    expect((await run({ ...DEPARTURE_ROW, status: null })).text).toContain('departure_status_unknown')
+  })
+
+  it('every query is limited to the given client value, and orders to active', async () => {
+    const { db } = await run(DEPARTURE_ROW)
+    const clientEqs = db.eqs.filter((e) => e.column === 'client_id')
+    expect(clientEqs.length).toBeGreaterThan(0)
+    expect(clientEqs.every((e) => e.value === 'client-1')).toBe(true)
+    expect(db.eqs.some((e) => e.table === 'crm_bookings' && e.column === 'status' && e.value === 'active')).toBe(true)
   })
 })
