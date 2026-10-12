@@ -18,6 +18,7 @@ import {
   STORY_TERMINAL_STATUSES,
   type StoryAttemptStatus,
   type StoryAuthorization,
+  type AdminEmailSet,
   type StoryChannel,
   type StoryItemSpec,
   type StorySwitches,
@@ -90,7 +91,7 @@ export interface StoryGateInput {
     authorization: StoryAuthorization | null
     itemAuthorizationId: string | null
     packItems: StoryItemSpec[]
-    adminEmails: ReadonlySet<string>
+    adminEmails: AdminEmailSet
   }
   switches: StorySwitches
   /** Must be 'active'. */

@@ -28,6 +28,8 @@ function baseItem(overrides: Partial<StoryItemSpec> = {}): StoryItemSpec {
     website_ref: 'https://example.com/about',
     website_checked_on: '2026-10-12',
     has_reply_cta: false,
+    contains_price: false,
+    names_place: false,
     ...overrides,
   }
 }

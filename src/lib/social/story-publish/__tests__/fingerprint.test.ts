@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canonicalFingerprintInput,
+  computeContentFingerprint,
   computeItemFingerprint,
   computeManifestHash,
 } from '../fingerprint'
@@ -24,6 +25,8 @@ function baseItem(): StoryItemSpec {
     website_ref: 'https://example.com/facts/item-0001',
     website_checked_on: '2026-10-10',
     has_reply_cta: false,
+    contains_price: false,
+    names_place: false,
   }
 }
 
@@ -45,6 +48,8 @@ describe('computeItemFingerprint', () => {
     const item = baseItem()
     const reordered: StoryItemSpec = {
       has_reply_cta: item.has_reply_cta,
+      contains_price: item.contains_price,
+      names_place: item.names_place,
       website_checked_on: item.website_checked_on,
       website_ref: item.website_ref,
       source_record_ids: item.source_record_ids,
@@ -98,6 +103,8 @@ describe('computeItemFingerprint', () => {
         mutate: (i) => ({ ...i, website_checked_on: i.website_checked_on + 'x' }),
       },
       { name: 'has_reply_cta', mutate: (i) => ({ ...i, has_reply_cta: !i.has_reply_cta }) },
+      { name: 'contains_price', mutate: (i) => ({ ...i, contains_price: !i.contains_price }) },
+      { name: 'names_place', mutate: (i) => ({ ...i, names_place: !i.names_place }) },
     ]
 
     const hashes = mutations.map(({ name, mutate }) => {
@@ -160,6 +167,8 @@ describe('canonicalFingerprintInput', () => {
       'website_ref',
       'website_checked_on',
       'has_reply_cta',
+      'contains_price',
+      'names_place',
       'expires_at',
     ])
   })
@@ -243,6 +252,8 @@ describe('computeManifestHash', () => {
         mutate: (i) => ({ ...i, website_checked_on: i.website_checked_on + 'x' }),
       },
       { name: 'has_reply_cta', mutate: (i) => ({ ...i, has_reply_cta: !i.has_reply_cta }) },
+      { name: 'contains_price', mutate: (i) => ({ ...i, contains_price: !i.contains_price }) },
+      { name: 'names_place', mutate: (i) => ({ ...i, names_place: !i.names_place }) },
     ]
 
     for (const { name, mutate } of mutations) {
@@ -321,5 +332,33 @@ describe('instant spelling', () => {
     const a = computeItemFingerprint({ ...baseItem(), slot_at: 'not a date' }, '2026-10-19T09:00:00Z')
     const b = computeItemFingerprint({ ...baseItem(), slot_at: '1970-01-01T00:00:00.000Z' }, '2026-10-19T09:00:00Z')
     expect(a).not.toBe(b)
+  })
+})
+
+describe('computeContentFingerprint', () => {
+  it('is 64 hex, stable, and independent of any expiry', () => {
+    const a = computeContentFingerprint(baseItem())
+    expect(a).toMatch(/^[0-9a-f]{64}$/)
+    expect(computeContentFingerprint(baseItem())).toBe(a)
+    // it must differ from the expiry-bound fingerprint
+    expect(a).not.toBe(computeItemFingerprint(baseItem(), EXPIRES_AT))
+  })
+
+  it('changes when any content field changes', () => {
+    const base = computeContentFingerprint(baseItem())
+    const changed: StoryItemSpec[] = [
+      { ...baseItem(), text_line: 'other' },
+      { ...baseItem(), media_sha256: 'b'.repeat(64) },
+      { ...baseItem(), contains_price: !baseItem().contains_price },
+      { ...baseItem(), names_place: !baseItem().names_place },
+      { ...baseItem(), slot_at: '2026-10-13T09:00:00.000Z' },
+    ]
+    for (const item of changed) expect(computeContentFingerprint(item)).not.toBe(base)
+  })
+
+  it('treats two spellings of the same instant as equal', () => {
+    const a = computeContentFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:00Z' })
+    const b = computeContentFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:00.000+00:00' })
+    expect(a).toBe(b)
   })
 })
