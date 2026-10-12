@@ -8,7 +8,9 @@
  * `conversations` / `conversation_messages`.
  *
  * GET  — Meta's one-time subscription handshake (`hub.challenge`).
- * POST — the message payload. Signature-verified with `META_APP_SECRET`.
+ * POST — the message payload. Signature-verified with the per-number app
+ *        secret from `whatsapp_app_credentials`, falling back to
+ *        `META_APP_SECRET`.
  *
  * ## Three rules this file exists to uphold
  *
@@ -47,6 +49,11 @@ import { inngest } from '@/lib/inngest/client'
 // 字符串常量；payload 形状也改成跟 `ConversationMessageReceivedSchema` 完全
 // 一致（见下面 emit 调用处）。
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
+import {
+  MAX_WEBHOOK_BODY_BYTES,
+  extractWebhookPhoneNumberIds,
+  chooseWebhookSecret,
+} from '@/lib/whatsapp/app-secret'
 
 export const dynamic = 'force-dynamic'
 
@@ -495,14 +502,54 @@ async function storeMessage(
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const appSecret = process.env.META_APP_SECRET
-  if (!appSecret) {
-    return NextResponse.json({ error: 'Server misconfiguration: META_APP_SECRET not set' }, { status: 500 })
+  // The phone_number_id list is read from the UNVERIFIED body only to decide
+  // WHICH secret verifies it — nothing is processed unless that secret's
+  // signature matches. Mixed or unknown mixes are rejected so one app's secret
+  // can never vouch for another app's number. Never log secrets, signatures or
+  // the body.
+  const rawBody = await req.text()
+  if (Buffer.byteLength(rawBody, 'utf8') > MAX_WEBHOOK_BODY_BYTES) {
+    return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
   }
 
-  const rawBody = await req.text()
   const signature = req.headers.get('x-hub-signature-256')
-  if (!isValidSignature(rawBody, signature, appSecret)) {
+
+  const extracted = extractWebhookPhoneNumberIds(rawBody)
+  if (!extracted.ok) {
+    // Same body as a bad signature: do not hint at the reason.
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
+
+  const choice = await chooseWebhookSecret(extracted.ids)
+
+  let secret: string
+  if (choice.kind === 'reject') {
+    if (choice.reason === 'decrypt_failed') {
+      return NextResponse.json(
+        { error: 'Server misconfiguration: webhook secret unreadable' },
+        { status: 500 },
+      )
+    }
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  } else if (choice.kind === 'route') {
+    secret = choice.secret
+  } else if (choice.kind === 'env') {
+    const envSecret = process.env.META_APP_SECRET
+    if (!envSecret) {
+      return NextResponse.json({ error: 'Server misconfiguration: META_APP_SECRET not set' }, { status: 500 })
+    }
+    secret = envSecret
+  } else {
+    // lookup_failed: the credentials table is missing or erroring. Keep the CTS
+    // number working — only the env secret can pass here.
+    const envSecret = process.env.META_APP_SECRET
+    if (!envSecret || !isValidSignature(rawBody, signature, envSecret)) {
+      return NextResponse.json({ error: 'Credential lookup unavailable' }, { status: 503 })
+    }
+    secret = envSecret
+  }
+
+  if (!isValidSignature(rawBody, signature, secret)) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
