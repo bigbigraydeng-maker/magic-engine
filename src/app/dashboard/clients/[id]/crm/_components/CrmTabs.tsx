@@ -27,7 +27,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
 
-export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' }) {
+export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' | 'payments' }) {
   const base = `/dashboard/clients/${clientId}/crm`
   const cls = (on: boolean) =>
     `rounded-md px-4 py-1.5 text-sm font-bold transition ${
@@ -53,11 +53,32 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
   }, [clientId])
   const flags = industryFeatureFlags(industry)
 
+  // 「付款总览」页签：只有探针返回 200 才显示；403/404/出错/还没回来一律不显示（不暴露这个功能存在）。
+  const [showPayments, setShowPayments] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setShowPayments(false)
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/crm/bookings/access`)
+        if (!cancelled) setShowPayments(res.status === 200)
+      } catch {
+        // 网络出错：不显示
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [clientId])
+
   return (
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
         <Link href={`${base}/all`} className={cls(active === 'all')}>全部客人</Link>
         <Link href={`${base}/decisions`} className={cls(active === 'decisions')}>决策清单（只读）</Link>
+        {showPayments && (
+          <Link href={`${base}/payments`} className={cls(active === 'payments')}>付款总览</Link>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-me-charcoal/45">
         <span>相关工具：</span>
