@@ -46,3 +46,12 @@ Remaining before completion: bind confirmation to exact account and media revisi
 - User designated CTS as the first business test customer. Sandbox target user bigraydeng remains a technical test account, not evidence of a CTS account connection. CTS account identity must be verified before binding or uploading.
 - Minimal acceptance chain: CTS account authorization -> confirm account and one completed CTS video -> choose SELF_ONLY -> upload -> confirm TikTok finished processing and playback. Public publishing is a separate later action.
 - Remote submission proceeds as a draft PR, without merging or deploying. Main has advanced to c85b286983e7701ba9d310922d2b553700f11a73 at read-only remote lookup; branch integration/build against that main remains unverified.
+
+## Authorized test deployment
+- User explicitly authorized deployment. Created free Render Node service magic-engine-tiktok-test (srv-db6e7rqjnfac73df0ea0) from codex/tiktok-publishing-review, commit a82726b89, auto-deploy off. Deployment dep-db6e7sajnfac73df0flg started; final live status not yet verified.
+- Service URL https://magic-engine-tiktok-test.onrender.com. Only Supabase login/data configuration, admin allowlist, Sandbox TikTok credentials and application URLs copied into service configuration; no unrelated provider credentials or cron services. This is compute isolation, not database isolation: CTS business test uses existing application data.
+- Build begins with command -v ffprobe and reached npm run build, confirming build-environment executable availability. Runtime inspection still pending live service.
+- Browser verified Sandbox Target Users now lists ctstours1. Saved Sandbox callback to https://magic-engine-tiktok-test.onrender.com/api/auth/tiktok/callback and independently verified after page reload. Application-side OAuth still pending.
+- Draft PR Risk gate red due draft status/A-level review requirements, not evidence of a failed build. No main merge or production deploy.
+
+Deployment verification: Render deployment dep-db6e7sajnfac73df0flg is live at commit a82726b89. Server log reports Ready in 4.1s. Fresh HTTP checks: /login 200 with Magic Engine page; /api/auth/tiktok/connect without client_id 400 as expected. Browser independently shows Magic Engine login form. No app session at test hostname yet; user login required before CTS authorization. Browser proof saved in local outputs. Real OAuth exchange, runtime video proof and private upload remain unverified.
