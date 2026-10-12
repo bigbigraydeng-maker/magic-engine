@@ -26,7 +26,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface ClientResult {
   client_id: string
-  status: 'ok' | 'no_ga4_connection' | 'no_token' | 'error'
+  status: 'ok' | 'not_configured' | 'no_ga4_connection' | 'no_token' | 'error'
   summary?: OrganicLandingLeadsSummary
   error?: string
 }
@@ -64,10 +64,16 @@ export async function GET(req: NextRequest) {
       results.push({ client_id: c.client_id, status: 'no_ga4_connection' })
       continue
     }
+    const cfg = getLandingClassConfig(c.client_id)
+    if (!cfg) {
+      // No per-client rules (event name, product/guide URL patterns): report that, never guess another client's.
+      results.push({ client_id: c.client_id, status: 'not_configured' })
+      continue
+    }
     try {
-      const raw = await fetchGa4OrganicLandingLeadsRaw(propertyId, c.client_id, days)
+      const raw = await fetchGa4OrganicLandingLeadsRaw(propertyId, c.client_id, cfg, days)
       results.push(raw
-        ? { client_id: c.client_id, status: 'ok', summary: summariseOrganicLandingLeads(raw, getLandingClassConfig(c.client_id)) }
+        ? { client_id: c.client_id, status: 'ok', summary: summariseOrganicLandingLeads(raw, cfg) }
         : { client_id: c.client_id, status: 'no_token' })
     } catch (err) {
       // Fixed short code only: Google's response text (account / property details) stays in the server log.

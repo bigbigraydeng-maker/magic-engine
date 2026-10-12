@@ -548,14 +548,15 @@ const ORGANIC_LEAD_ROW_LIMIT = 250
 
 /**
  * Organic Search × landing page × enquiry events (read-only). Two reads:
- *  1. custom/auto events: enquiry_thank_you (site's unified event), form_submit
- *  2. legacy signal: page views of any path containing "thank"
+ *  1. events: the client's unified enquiry event (from client config), form_submit
+ *  2. legacy signal: page views of paths containing the client's thank-you text
  * Both are restricted to the Organic Search default channel group in the request itself,
  * so other channels never leave GA4.
  */
 export async function fetchGa4OrganicLandingLeadsRaw(
   propertyId: string,
   clientId: string,
+  cfg: { enquiryEvent: string; thankYouPathContains: string },
   periodDays: number = DEFAULT_PERIOD_DAYS,
 ): Promise<OrganicLandingLeadsRaw | null> {
   const token = await resolveAccessToken(clientId)
@@ -571,14 +572,14 @@ export async function fetchGa4OrganicLandingLeadsRaw(
     metrics: ['eventCount', 'totalUsers'],
     orderBy: 'eventCount',
     limit: ORGANIC_LEAD_ROW_LIMIT,
-    dimensionFilter: { andGroup: { expressions: [organic, { filter: { fieldName: 'eventName', inListFilter: { values: ['enquiry_thank_you', 'form_submit'] } } }] } },
+    dimensionFilter: { andGroup: { expressions: [organic, { filter: { fieldName: 'eventName', inListFilter: { values: [cfg.enquiryEvent, 'form_submit'] } } }] } },
   })
   const thankReport = await runReport(token, normalized, periodStart, periodEnd, {
     dimensions: ['sessionDefaultChannelGroup', 'landingPage'],
     metrics: ['screenPageViews', 'totalUsers'],
     orderBy: 'screenPageViews',
     limit: ORGANIC_LEAD_ROW_LIMIT,
-    dimensionFilter: { andGroup: { expressions: [organic, { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'CONTAINS', value: 'thank' } } }] } },
+    dimensionFilter: { andGroup: { expressions: [organic, { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'CONTAINS', value: cfg.thankYouPathContains } } }] } },
   })
   const rows: LandingEventRow[] = []
   for (const r of eventsReport.rows ?? []) {

@@ -45,6 +45,16 @@ const RAW = {
 }
 
 describe('GET /api/internal/ga4-organic-landing-leads', () => {
+  it('a client with no landing/event configuration is reported not_configured and GA4 is never asked', async () => {
+    process.env.CRON_SECRET = 's'
+    const OTHER = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
+    h.conns = [{ client_id: OTHER, config: { property_id: '123' } }]
+    h.raw = RAW
+    const body = await (await GET(req(`?client_id=${OTHER}`, 'Bearer s'))).json()
+    expect(body.results[0].status).toBe('not_configured')
+    expect(body.results[0].summary).toBeUndefined()
+  })
+
   afterEach(() => {
     delete process.env.CRON_SECRET
     h.conns = []
@@ -70,7 +80,7 @@ describe('GET /api/internal/ga4-organic-landing-leads', () => {
     const body = await res.json()
     expect(res.status).toBe(200)
     expect(body.read_only).toBe(true)
-    expect(body.results[0].summary.plain).toContain('enquiry_thank_you 3 次')
+    expect(body.results[0].summary.plain).toContain('enquiry_thank_you 共 3 次')
     expect(body.results[0].summary.buckets[0].landingClass).toBe('product')
     expect(h.eqCalls.some(c => c[0] === 'client_id' && c[1] === CID)).toBe(true)
   })

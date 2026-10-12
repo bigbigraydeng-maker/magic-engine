@@ -11,6 +11,8 @@ const BY_CLIENT: Record<string, LandingClassConfig> = {
   [CTS_CLIENT_ID]: {
     productPrefixes: ['/tours/', '/campaigns/'],
     guideContains: ['-travel-guide', '/blog', '/guide', '/faq', 'visa-guide', 'food-guide', 'best-time-to-visit'],
+    enquiryEvent: 'enquiry_thank_you',
+    thankYouPathContains: 'thank',
   },
 }
 
