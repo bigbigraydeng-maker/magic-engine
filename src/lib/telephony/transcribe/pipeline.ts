@@ -129,6 +129,9 @@ export async function runCallAnalysis(
     }
   }
 
+  // 服务商密钥没配：直接等待，不耗次数、不记失败（补上密钥后下一轮自动继续）。
+  if (!deps.env('ELEVENLABS_API_KEY') || !deps.env('DEEPSEEK_API_KEY')) return { status: 'waiting', detail: 'config_missing' }
+
   // ② 转写
   let transcript = await store.getTranscriptText(call.id)
   if (!transcript) {

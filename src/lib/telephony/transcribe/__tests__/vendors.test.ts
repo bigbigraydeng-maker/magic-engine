@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { deepseekAnalyzer, elevenlabsTranscriber } from '../vendors'
+import { deepseekAnalyzer, elevenlabsTranscriber, parseAnalysisJson } from '../vendors'
 
 const okJson = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
 
@@ -52,5 +52,13 @@ describe('vendors (ElevenLabs transcribe + DeepSeek analyse)', () => {
     await expect(deepseekAnalyzer('x')).rejects.toThrow()
     fetchMock.mockResolvedValue(okJson({ choices: [] }))
     await expect(deepseekAnalyzer('x')).rejects.toThrow('分析返回空内容')
+  })
+
+  it('drops only the invalid fact (unknown key) and strips code fences', () => {
+    const good = { key: 'party_size', value: '2', quote: 'two of us', confidence: 0.9 }
+    const bad = { key: 'travel_date', value: 'x', quote: 'y', confidence: 0.9 }
+    const raw = parseAnalysisJson('```json\n' + JSON.stringify({ summary: 's', facts: [bad, good] }) + '\n```')
+    expect(raw.facts).toEqual([good])
+    expect(() => parseAnalysisJson('not json')).toThrow(SyntaxError)
   })
 })

@@ -110,7 +110,7 @@ const goodDeps = (store: AnalysisStore, over: Partial<Parameters<typeof runCallA
     raw: { summary: '想了解南岛团', language: 'en', facts: [{ key: 'travel_window' as const, value: 'March', quote: 'South Island tour in March', confidence: 0.9 }, { key: 'concern' as const, value: 'price', quote: 'too expensive for us', confidence: 0.9 }] },
     model: 'm-a',
   }),
-  env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : undefined),
+  env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : n === 'ELEVENLABS_API_KEY' || n === 'DEEPSEEK_API_KEY' ? 'k' : undefined),
   fetcher: audioFetch(),
   ...over,
 })
@@ -150,6 +150,12 @@ describe('分析流水线', () => {
     const m2 = makeStore()
     const r2 = await runCallAnalysis(goodDeps(m2.store, { env: () => undefined }), ref)
     expect(r2.status).toBe('recording_failed')
+  })
+  it('转写 / 分析服务密钥没配：等待，不耗次数、不记失败', async () => {
+    const m = makeStore()
+    const r = await runCallAnalysis(goodDeps(m.store, { env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : undefined) }), ref)
+    expect(r).toMatchObject({ status: 'waiting', detail: 'config_missing' })
+    expect(m.call).toMatchObject({ transcriptStatus: 'not_started', transcriptAttempts: 0 })
   })
   it('转写失败：不写假摘要，transcript_status=failed，summary 仍是 not_started；错误只记类别、不带原文', async () => {
     const m = makeStore()
