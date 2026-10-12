@@ -50,6 +50,8 @@ function validEntry(overrides: Partial<StoryManifestEntry> = {}): StoryManifestE
     website_ref: 'https://example.com/about',
     website_checked_on: '2026-10-12',
     has_reply_cta: false,
+    contains_price: false,
+    names_place: false,
     ...overrides,
   }
 }
@@ -99,6 +101,8 @@ describe('ingestStoryAssets — happy path', () => {
       website_ref: 'https://example.com/about',
       website_checked_on: '2026-10-12',
       has_reply_cta: false,
+      contains_price: false,
+      names_place: false,
     })
 
     expect(ports.putIfAbsent).toHaveBeenCalledTimes(1)
@@ -743,5 +747,17 @@ describe('ingestStoryAssets — input validation throws', () => {
     }
 
     await expect(ingestStoryAssets(input)).rejects.toThrow(/Invalid maxVideoSeconds/)
+  })
+})
+
+describe('declarations must be real booleans', () => {
+  it('rejects a manifest entry whose price / place / reply declarations are not booleans', async () => {
+    for (const field of ['contains_price', 'names_place', 'has_reply_cta'] as const) {
+      const ports = makePorts()
+      const entry = { ...validEntry(), [field]: 'yes' } as unknown as StoryManifestEntry
+      const result = await ingestStoryAssets(baseInput([entry], ports))
+      expect(result.items).toHaveLength(0)
+      expect(result.rejected.map((r) => r.reason_code)).toEqual(['BAD_FIELDS'])
+    }
   })
 })

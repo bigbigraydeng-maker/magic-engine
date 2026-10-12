@@ -1,5 +1,5 @@
 import { computeItemFingerprint, computeManifestHash } from './fingerprint'
-import { storyItemKey, type StoryAuthorization, type StoryItemSpec } from './types'
+import { storyItemKey, type AdminEmailSet, type StoryAuthorization, type StoryItemSpec } from './types'
 
 /**
  * Outcome of judging whether a story item may be published right now.
@@ -44,7 +44,7 @@ export function judgeStoryAuthorization(input: {
   /** every item of the pack as it is stored right now (all channels), used to recompute the manifest hash */
   packItems: StoryItemSpec[]
   /** lowercase admin emails */
-  adminEmails: ReadonlySet<string>
+  adminEmails: AdminEmailSet
   now: Date
 }): StoryAuthState {
   const { authorization, item, itemAuthorizationId, packItems, adminEmails, now } =

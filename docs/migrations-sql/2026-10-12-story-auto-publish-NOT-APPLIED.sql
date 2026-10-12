@@ -77,6 +77,10 @@ create table public.story_pack_items (
   website_ref text not null check (website_ref like 'https://%'),
   website_checked_on date not null,
   has_reply_cta boolean not null default false,
+  -- declared at ingest; the authorise endpoint requires the PM to have opened every item that
+  -- shows a price, names a place, or is a video (covered by the fingerprint and the content lock)
+  contains_price boolean not null default false,
+  names_place boolean not null default false,
   authorization_id uuid references public.story_pack_auth(id),
   -- circuit-breaker pause for this single item (reason is a stable code)
   paused_at timestamptz,
@@ -111,7 +115,9 @@ begin
        or new.source_record_ids is distinct from old.source_record_ids
        or new.website_ref is distinct from old.website_ref
        or new.website_checked_on is distinct from old.website_checked_on
-       or new.has_reply_cta is distinct from old.has_reply_cta) then
+       or new.has_reply_cta is distinct from old.has_reply_cta
+       or new.contains_price is distinct from old.contains_price
+       or new.names_place is distinct from old.names_place) then
     raise exception 'story_pack_items: content is locked while a live authorisation covers it';
   end if;
   return new;
@@ -132,9 +138,14 @@ create table public.story_pack_item_opens (
   opened_fingerprint text not null check (opened_fingerprint ~ '^[0-9a-f]{64}$'),
   opened_at timestamptz not null default now(),
   constraint story_pack_item_opens_item_fk foreign key (item_id, channel)
-    references public.story_pack_items (item_id, channel),
-  constraint story_pack_item_opens_once_key unique (item_id, channel, opened_by_user_id, opened_fingerprint)
+    references public.story_pack_items (item_id, channel)
 );
+
+-- One row per person, item, version and UTC day: clicking twice in a day is one record, but opening the
+-- same unchanged item again on a later day writes a NEW row (an open only counts for 24 hours, so the
+-- person must be able to renew it; the rows themselves are write-once).
+create unique index story_pack_item_opens_once_per_day_idx
+  on public.story_pack_item_opens (item_id, channel, opened_by_user_id, opened_fingerprint, ((opened_at at time zone 'UTC')::date));
 
 -- Open records are evidence: never edited, never deleted.
 create function public.story_opens_freeze() returns trigger language plpgsql as $$
@@ -330,6 +341,37 @@ create table public.story_asset_usage (
 
 create index story_asset_usage_sha_idx on public.story_asset_usage (media_sha256);
 
+-- Who is on duty to answer replies, per client and day. A story that invites replies is blocked
+-- when nobody is on duty that day. Maintained by a person (owner: 74), read by the gate.
+create table public.story_reply_duty (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null,
+  duty_date date not null,
+  on_duty_email text not null check (position('@' in on_duty_email) > 1),
+  created_by_email text not null,
+  created_at timestamptz not null default now(),
+  constraint story_reply_duty_once_key unique (client_id, duty_date, on_duty_email)
+);
+
+-- Circuit-breaker marks: the publisher writes one when a pack/channel (item_id null) or a single item
+-- must stop. A mark is lifted by a person, never by the publisher.
+create table public.story_pack_pauses (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null,
+  pack_id uuid not null,
+  channel text check (channel is null or channel in ('facebook_story','instagram_story')),
+  item_id uuid,
+  reason_code text not null,
+  created_by text not null,
+  created_at timestamptz not null default now(),
+  lifted_at timestamptz,
+  lifted_by_email text,
+  constraint story_pack_pauses_lift_chk check ((lifted_at is null) = (lifted_by_email is null)),
+  constraint story_pack_pauses_scope_chk check (item_id is null or channel is not null)
+);
+
+create index story_pack_pauses_active_idx on public.story_pack_pauses (pack_id, channel) where lifted_at is null;
+
 -- Records are never deleted (an authorisation or an attempt is evidence).
 create function public.story_no_delete() returns trigger language plpgsql as $$
 begin
@@ -349,12 +391,16 @@ alter table public.story_pack_items enable row level security;
 alter table public.story_pack_item_opens enable row level security;
 alter table public.story_publish_attempts enable row level security;
 alter table public.story_pack_lease enable row level security;
+alter table public.story_reply_duty enable row level security;
+alter table public.story_pack_pauses enable row level security;
 alter table public.story_asset_usage enable row level security;
 
 create policy story_pack_auth_service_role on public.story_pack_auth for all to service_role using (true) with check (true);
 create policy story_pack_items_service_role on public.story_pack_items for all to service_role using (true) with check (true);
 create policy story_pack_item_opens_service_role on public.story_pack_item_opens for all to service_role using (true) with check (true);
 create policy story_publish_attempts_service_role on public.story_publish_attempts for all to service_role using (true) with check (true);
+create policy story_reply_duty_service_role on public.story_reply_duty for all to service_role using (true) with check (true);
+create policy story_pack_pauses_service_role on public.story_pack_pauses for all to service_role using (true) with check (true);
 create policy story_pack_lease_service_role on public.story_pack_lease for all to service_role using (true) with check (true);
 create policy story_asset_usage_service_role on public.story_asset_usage for all to service_role using (true) with check (true);
 
@@ -363,4 +409,6 @@ revoke all on public.story_pack_items from anon, authenticated;
 revoke all on public.story_pack_item_opens from anon, authenticated;
 revoke all on public.story_publish_attempts from anon, authenticated;
 revoke all on public.story_pack_lease from anon, authenticated;
+revoke all on public.story_reply_duty from anon, authenticated;
+revoke all on public.story_pack_pauses from anon, authenticated;
 revoke all on public.story_asset_usage from anon, authenticated;

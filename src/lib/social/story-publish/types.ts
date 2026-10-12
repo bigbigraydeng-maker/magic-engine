@@ -42,6 +42,10 @@ export interface StoryItemSpec {
   website_checked_on: string
   /** True when the picture invites the viewer to reply (needs a reply owner on duty). */
   has_reply_cta: boolean
+  /** True when the picture shows a price (the PM must have opened the item before authorising). */
+  contains_price: boolean
+  /** True when the picture names a place (the PM must have opened the item before authorising). */
+  names_place: boolean
 }
 
 /** Pack-level authorisation record (item fingerprints live on the item rows). */
@@ -67,6 +71,11 @@ export interface StoryAuthorization {
    * so rewriting an item row and its stored fingerprint cannot widen what the PM approved.
    */
   approved_item_fingerprints: Record<string, string>
+}
+
+/** Anything that can say whether an email belongs to a global administrator (a Set works). */
+export interface AdminEmailSet {
+  has(email: string): boolean
 }
 
 /** Stable key for one (item, channel). */

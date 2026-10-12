@@ -18,6 +18,7 @@ import {
   STORY_TERMINAL_STATUSES,
   type StoryAttemptStatus,
   type StoryAuthorization,
+  type AdminEmailSet,
   type StoryChannel,
   type StoryItemSpec,
   type StorySwitches,
@@ -90,7 +91,7 @@ export interface StoryGateInput {
     authorization: StoryAuthorization | null
     itemAuthorizationId: string | null
     packItems: StoryItemSpec[]
-    adminEmails: ReadonlySet<string>
+    adminEmails: AdminEmailSet
   }
   switches: StorySwitches
   /** Must be 'active'. */
@@ -364,6 +365,21 @@ function checkAssetUsage(input: StoryGateInput): StoryGateDecision | null {
   return record('BLOCKED', input.assetUsage === 'USED' ? 'ASSET_ALREADY_USED' : 'ASSET_USAGE_UNKNOWN', false)
 }
 
+/**
+ * Rule (g3): a price in the picture's text must be declared on the item.
+ *
+ * BEST EFFORT: this pattern only sees currency symbols, currency codes, "dollar(s)", "per person" and
+ * common Chinese currency words in `text_line`. It cannot read prices drawn into the picture itself;
+ * the human-declared `contains_price` stays the source of truth (it decides which items a person
+ * must open before authorising).
+ */
+function checkPriceDeclared(input: StoryGateInput): StoryGateDecision | null {
+  if (input.item.contains_price) return null
+  const pattern = /[$€£¥￥＄]|\b(?:nzd|aud|usd|rmb|cny)\b|\bdollars?\b|\bper person\b|纽币|澳币|美元|人民币|\d\s*(?:元|块)|(?:元|块)\s*\d/i
+  if (pattern.test(input.item.text_line)) return record('BLOCKED', 'PRICE_UNDECLARED', false)
+  return null
+}
+
 /** Rule (h): the price gate must be green. */
 function checkPrice(input: StoryGateInput): StoryGateDecision | null {
   if (input.priceGate === 'ERROR') return record('BLOCKED', 'PRICE_GATE_ERROR', true)
@@ -443,6 +459,7 @@ export function decideStoryPublish(input: StoryGateInput): StoryGateDecision {
     checkLateness,
     checkFile,
     checkAssetUsage,
+    checkPriceDeclared,
     checkPrice,
     checkReplyCtaDeclared,
     checkReplyOwner,

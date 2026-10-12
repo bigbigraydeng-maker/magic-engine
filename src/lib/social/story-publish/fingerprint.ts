@@ -39,6 +39,8 @@ export function canonicalFingerprintInput(item: StoryItemSpec, expiresAt: string
     website_ref: item.website_ref,
     website_checked_on: item.website_checked_on,
     has_reply_cta: item.has_reply_cta,
+    contains_price: item.contains_price,
+    names_place: item.names_place,
     expires_at: canonicalInstant(expiresAt),
   })
 }
@@ -75,4 +77,33 @@ export function computeManifestHash(items: StoryItemSpec[], expiresAt: string): 
   }
 
   return createHash('sha256').update(JSON.stringify(pairs)).digest('hex')
+}
+
+/**
+ * Fingerprint of what the PM sees when opening an item: every content field but
+ * not the authorisation expiry (which does not exist yet at that moment). Open
+ * records are bound to this value, so they go stale the moment the item changes.
+ */
+export function computeContentFingerprint(item: StoryItemSpec): string {
+  const parsed = JSON.parse(canonicalFingerprintInput(item, '1970-01-01T00:00:00.000Z')) as Record<string, unknown>
+  delete parsed.expires_at
+  return createHash('sha256').update(JSON.stringify(parsed)).digest('hex')
+}
+
+/**
+ * Hash over what the person sees in a preview: every item's content fingerprint, ordered by item key.
+ * It carries no expiry date (only, when given, the lifetime in days the person previewed), so a preview taken now and a confirmation sent a minute later agree as long as
+ * no item changed in between.
+ */
+export function computeContentManifestHash(
+  items: StoryItemSpec[],
+  options: { lifetimeDays?: number } = {},
+): string {
+  const pairs = items.map((item) => [storyItemKey(item), computeContentFingerprint(item)] as const)
+  const keys = new Set(pairs.map(([key]) => key))
+  if (keys.size !== pairs.length) throw new Error('computeContentManifestHash: duplicate item key')
+  pairs.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  // the lifetime the person previews is part of what they confirm
+  const payload = options.lifetimeDays === undefined ? pairs : { items: pairs, lifetime_days: options.lifetimeDays }
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex')
 }

@@ -57,6 +57,8 @@ export interface StoryManifestEntry {
   website_ref: string
   website_checked_on: string
   has_reply_cta: boolean
+  contains_price: boolean
+  names_place: boolean
 }
 
 export interface StoryIngestRejection {
@@ -204,6 +206,8 @@ export function buildItemSpec(params: {
     website_ref: entry.website_ref,
     website_checked_on: entry.website_checked_on,
     has_reply_cta: entry.has_reply_cta,
+    contains_price: entry.contains_price,
+    names_place: entry.names_place,
   }
 }
 
@@ -235,6 +239,14 @@ export function validateFields(entry: StoryManifestEntry): string | null {
   if (
     typeof entry.website_checked_on !== 'string' ||
     !isRealCalendarDate(entry.website_checked_on)
+  ) {
+    return 'BAD_FIELDS'
+  }
+  // the three declarations drive which items the PM must open before authorising: they must be real booleans
+  if (
+    typeof entry.has_reply_cta !== 'boolean' ||
+    typeof entry.contains_price !== 'boolean' ||
+    typeof entry.names_place !== 'boolean'
   ) {
     return 'BAD_FIELDS'
   }
