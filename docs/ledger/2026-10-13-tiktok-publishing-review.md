@@ -1,57 +1,13 @@
 ---
 id: 2026-10-13-tiktok-publishing-review
-title: TikTok creator settings and explicit post confirmation
-status: in_progress
-owner: codex
+title: TikTok 连接与私密发布首轮测试
+status: decided
+owner: agent
 decided_on: 2026-10-13
+source: pr:2540
 verify_by: 2026-10-14
-verify_how: Targeted tests plus real sandbox authorization and posting demonstration before review submission.
+verify_how: CTS 实际授权并完成一条私密视频上传，平台处理完成和播放正常后才转生产。
 ---
-
-User authorized continuing Magic Engine TikTok development. L3 existing social connector. Single writer: this chat. Worktree /Users/raydeng/Projects/magic-engine-tiktok-review, branch codex/tiktok-publishing-review, base d79c03ed4. Remote not refreshed. Original repository's unrelated changes untouched. No commit, push, deployment, credential export or actual TikTok post.
-
-Implemented creator-info query with existing client access control; a post preview form with account nickname, caption editing, explicit privacy choice, disabled-account interaction handling, interactions off by default, commercial disclosure and music/final confirmation. Queue retains review choices; execution queries current creator settings and refuses invalid/unconfirmed jobs before fetching media or initializing upload. Existing Facebook path remains in place.
-
-Verification: vitest four targeted files: 23 passed, exit 0. Scoped ESLint and git diff --check exit 0. Full tsc exit 2; clean archived base at same HEAD and same dependencies also exit 2, diagnostic lines identical. This is no new type diagnostics, not a global type-check pass. No production end-to-end verification.
-
-Remaining before completion: bind confirmation to exact account and media revision; validate actual video duration server-side; integration tests for queue persistence/client isolation; verify API options against current official docs; review by appropriate project owners; expose the flow through an active non-retired content workflow if necessary. Current UI integration is existing lecture workbench whose video creation pipeline is retired; existing completed lecture videos can use it, but it does not establish a general new-video publishing experience. video.upload draft path remains absent and must be implemented or its scope removed from review requests. App policy pages need OAuth/TikTok data practices checked. Configure sandbox credentials through approved secure configuration, exercise real user flow, record real demo, complete developer form and submit only after all required evidence is ready. Current production form has unsaved edits and no real demo.
-
-2026-10-13 continuation: account/media URL binding added and checked both at queue creation and execution. Creator query and upload now reuse the same token snapshot. 25 targeted tests pass; scoped lint/diff pass; full type diagnostics unchanged from archived base. Media bytes/revision and server-side duration verification still pending (URL binding does not detect overwriting at the same URL). Developer Sandbox 7695736130792736775 created, configured and independently verified by reload. Sandbox target-user authorization has not completed; Continue did not expose an authorization tab in the in-app browser. Production app still lacks a real demo. CTS account not registered; no technical need established.
-
-2026-10-13 latest continuation: actual bounded-disk video inspection implemented using ffprobe and SHA-256. Queue and execution compare actual duration/hash to the user preview; final upload chunk withheld if transferred bytes mismatch confirmed hash. Range responses and chunk byte counts checked. 33 targeted tests pass, including real ffprobe tests with a synthetic 1-second MP4 and client authorization/ownership denial checks. Full tsc still exit 2 with diagnostics identical to archived base. No real provider posting or deploy. User requested opening login; live in-app TikTok QR login page opened and preserved. Production/Sandbox authorization remains incomplete.
-
-2026-10-13 confirmed browser evidence: Chrome Sandbox target-user table now lists bigraydeng. Test-account authorization succeeded; no more login request required. Do not describe this account as CTS. Remaining: application-side sandbox credential configuration, active publishing workflow integration, real authorization/posting test and demo recording; no deployment or review submission yet.
-
-2026-10-13 Sandbox configuration: credentials copied from the authorized Chrome Sandbox UI directly to .env.tiktok-sandbox.local in this isolated worktree; file chmod 0600 and Git-ignore verified. Values not logged or copied to Dropbox. scripts/tiktok/verify-sandbox-config.mjs loads actual OAuth source with the isolated environment and verifies signing, tamper rejection, registered callback and requested scopes; exit 0, no provider requests. Registered callback remains https://app.magicengine.com.au/api/auth/tiktok/callback. The credential file is explicitly loaded by this checker only: Next does not automatically load this filename. No production environment changed and no server restarted. HTTPS test runtime/callback deployment and secure application environment activation still required before real OAuth exchange. Never report this as deployed or linked to the customer connection table.
-
-2026-10-13 testing run requested by user: configuration checker exit 0; six targeted Vitest files 33/33 pass, no skips. Real TikTok token endpoint called once using Sandbox credentials and an intentionally invalid authorization code: HTTP 200, error invalid_grant, no token issued. This is connectivity evidence, not successful OAuth/credential validity certification. Public deployed connect route without client_id returns 400; callback without code/state redirects 307 to /dashboard. Neither check posts data or verifies the new undeployed UI. Receipts saved under outputs/me-tiktok-app-20261013; no tokens or secrets included. Full real authorization/posting demo remains pending HTTPS runtime activation.
-
-## Continued chain: HTTPS environment and OAuth hardening
-
-- User confirmed Render workspace Big Big Ray (tea-d6c87qv5r7bs73aq68hg). Read-only service lookup found magic-engine-meta-ads-ai-staging, srv-daojkvrtqb8s73fk0cig, free Node service, branch main, auto-deploy off, preview generation off. This is an existing Meta Ads staging service; it is not yet designated or isolated for TikTok. No Render writes made.
-- Added random OAuth state, timing-safe signature comparison, HttpOnly/SameSite browser cookie binding, client-access recheck in callback, cookie clearing, and rejection of incomplete grants instead of recording requested grants as received.
-- Targeted previous suite + nonce tests: 35/35 pass (exit 0). New callback tests plus nonce tests: 6/6 pass (exit 0), covering other-browser callback, revoked access, missing grants and successful storage/cookie cleanup. Local sandbox config checker exit 0, providerRequests 0, runtimeDeployed false.
-- Deployment remains pending. Reusing Meta staging requires explicit scope confirmation and verified data/credential isolation; alternative is a dedicated test service. Real browser OAuth, upload and review demo are not completed. Runtime ffprobe availability remains unverified.
-- No commit, push, merge, deploy or TikTok post performed. All work remains on codex/tiktok-publishing-review at base d79c03ed4.
-
-## Minimal-scope follow-up
-- Removed requested video.upload scope because no inbox-draft upload flow is implemented. Direct post retains user.info.basic and video.publish. Portal allowed scopes have not yet been changed.
-- Added the missing Connect TikTok link and callback outcome messages to the existing client settings Connect tab; callback explicitly returns to tab=connect. No new account-management subsystem added.
-- Render read-only deploy lookup: existing Meta Ads staging last live deployment is 98f74f7b73ce7b2ebe31b6c043b2b1fa18f8b46d (2026-09-24), not this working branch. No staging configuration/deployment changed.
-- Eight-file targeted suite: 39 tests passed, exit 0. After return-tab change callback tests 4/4 passed, exit 0. Scoped ESLint and git diff --check exit 0. Config checker requests only implemented scopes, runtimeDeployed false.
-- Remaining: authorization for source submission and isolated test deployment, HTTPS callback registration, runtime ffprobe verification, real OAuth and private upload. No real test posting or audit submission claimed.
-
-## Submission and CTS first business test
-- User authorized unified submission. Local implementation committed as 5b3455190; credential file excluded and staged content scanned against the actual sandbox credentials before commit.
-- User designated CTS as the first business test customer. Sandbox target user bigraydeng remains a technical test account, not evidence of a CTS account connection. CTS account identity must be verified before binding or uploading.
-- Minimal acceptance chain: CTS account authorization -> confirm account and one completed CTS video -> choose SELF_ONLY -> upload -> confirm TikTok finished processing and playback. Public publishing is a separate later action.
-- Remote submission proceeds as a draft PR, without merging or deploying. Main has advanced to c85b286983e7701ba9d310922d2b553700f11a73 at read-only remote lookup; branch integration/build against that main remains unverified.
-
-## Authorized test deployment
-- User explicitly authorized deployment. Created free Render Node service magic-engine-tiktok-test (srv-db6e7rqjnfac73df0ea0) from codex/tiktok-publishing-review, commit a82726b89, auto-deploy off. Deployment dep-db6e7sajnfac73df0flg started; final live status not yet verified.
-- Service URL https://magic-engine-tiktok-test.onrender.com. Only Supabase login/data configuration, admin allowlist, Sandbox TikTok credentials and application URLs copied into service configuration; no unrelated provider credentials or cron services. This is compute isolation, not database isolation: CTS business test uses existing application data.
-- Build begins with command -v ffprobe and reached npm run build, confirming build-environment executable availability. Runtime inspection still pending live service.
-- Browser verified Sandbox Target Users now lists ctstours1. Saved Sandbox callback to https://magic-engine-tiktok-test.onrender.com/api/auth/tiktok/callback and independently verified after page reload. Application-side OAuth still pending.
-- Draft PR Risk gate red due draft status/A-level review requirements, not evidence of a failed build. No main merge or production deploy.
-
-Deployment verification: Render deployment dep-db6e7sajnfac73df0flg is live at commit a82726b89. Server log reports Ready in 4.1s. Fresh HTTP checks: /login 200 with Magic Engine page; /api/auth/tiktok/connect without client_id 400 as expected. Browser independently shows Magic Engine login form. No app session at test hostname yet; user login required before CTS authorization. Browser proof saved in local outputs. Real OAuth exchange, runtime video proof and private upload remain unverified.
+代码已提交，独立测试站已上线；真实授权及上传尚未完成。
+测试进度与检查记录：见 [检查点](../sops/tiktok-publishing-test-checkpoint.md)。
+生产部署以实际测试和项目复审通过为前提。
