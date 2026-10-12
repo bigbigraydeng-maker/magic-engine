@@ -12,7 +12,8 @@ const ORIGIN_KINDS: readonly OriginKind[] = [
 ]
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-const INVOICE_RE = /^\d{5}$/
+/** Default invoice shape (5 digits); another client's format is passed in by the caller, not edited here. */
+export const DEFAULT_INVOICE_PATTERN = /^\d{5}$/
 
 /** Trim, upper-case, and remove all whitespace and hyphens. */
 export function normaliseInvoice(raw: string): string {
@@ -57,13 +58,13 @@ function fail(index: number, code: string): ParseOutcome {
   return { ok: false, index, code }
 }
 
-function parseOne(index: number, raw: unknown): ParseOutcome {
+function parseOne(index: number, raw: unknown, invoicePattern: RegExp): ParseOutcome {
   if (!isPlainObject(raw)) return fail(index, 'bad_row')
 
   const invoiceRaw = readString(raw.invoice)
   if (invoiceRaw === null) return fail(index, 'bad_invoice')
   const invoice = normaliseInvoice(invoiceRaw)
-  if (!INVOICE_RE.test(invoice)) return fail(index, 'bad_invoice')
+  if (!invoicePattern.test(invoice)) return fail(index, 'bad_invoice')
 
   if (!isOriginKind(raw.originKind)) return fail(index, 'bad_origin')
 
@@ -126,9 +127,9 @@ function parseOne(index: number, raw: unknown): ParseOutcome {
 }
 
 /** Parse and validate the parsed JSON input. Returns one outcome per element. */
-export function parseRows(raw: unknown): ParseOutcome[] {
+export function parseRows(raw: unknown, invoicePattern: RegExp = DEFAULT_INVOICE_PATTERN): ParseOutcome[] {
   if (!Array.isArray(raw)) {
     return [{ ok: false, index: -1, code: 'not_an_array' }]
   }
-  return raw.map((element, index) => parseOne(index, element))
+  return raw.map((element, index) => parseOne(index, element, invoicePattern))
 }
