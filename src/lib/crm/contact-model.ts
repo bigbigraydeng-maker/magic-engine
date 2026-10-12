@@ -18,7 +18,7 @@
  */
 
 import type { ContactLike, TouchpointLike } from './segments'
-import { engagementFromMetadata } from './segments'
+import { engagementFromMetadata, isUnansweredCall } from './segments'
 import { reclassifyStoredOutcome } from './note-parser'
 import { isDoNotContact } from './dnc'
 import { isAutomatedTouch } from './automated-touch'
@@ -78,6 +78,8 @@ export function buildTouchpointLike(t: TouchpointRowLike): TouchpointLike {
     automated: isAutomatedTouch(t.source, md),
     // 员工按了推迟 / 取消推迟这两个按钮——客人那头什么都没收到，不算联系动作。
     action: actionOf(md),
+    // 电话系统记录的外呼没人接：我们没联系上他，不算「我们最后一次出站」。
+    unansweredCall: t.channel === 'phone' && t.direction === 'outbound' && isUnansweredCall(md),
   }
 }
 

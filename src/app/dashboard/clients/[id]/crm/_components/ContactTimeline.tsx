@@ -140,6 +140,7 @@ const VERDICT_ROW: Record<string, { icon: string; text: string; tone: 'stop' | '
 const OUTCOME_CHIP: Record<string, string> = {
   bad_number: '这个号打不通',
   no_answer: '打了没人接',
+  missed_inbound: '他打来我们没接到',
   not_interested: '他说不买了',
   not_interested_now: '这次先不去',
 }

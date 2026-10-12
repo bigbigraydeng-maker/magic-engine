@@ -115,6 +115,12 @@ describe('其余结论只挑影响下一步动作的', () => {
     expect(screen.getByText('他说不买了')).toBeTruthy()
   })
 
+  it('客人打来我们没接到（missed_inbound）显示成人话', async () => {
+    mockTimeline([touch({ summary: 'c', outcome: 'missed_inbound' })])
+    draw()
+    await waitFor(() => expect(screen.getByText('他打来我们没接到')).toBeTruthy())
+  })
+
   /**
    * `spoke` 是**兜底值** —— 任何没命中规则的普通备注都会落成它
    * （见 `note-parser` 的 `classifyNote` 结尾）。标出来等于满屏噪音，
