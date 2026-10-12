@@ -26,14 +26,18 @@ import {
 import {
   PAGE_CHAIN,
   buildPullEvents,
+  gscPageDailyFanOut,
+  gscPageDailyPull,
   type PullEvent,
 } from '../functions/gsc-page-daily'
 import {
   QUERY_PAGE_CHAIN,
   GSC_QUERY_PAGE_DAILY_FANOUT_ID,
   GSC_QUERY_PAGE_DAILY_PULL_ID,
+  QUERY_PAGE_PULL_DEPS,
   gscQueryPageDailyFanOut,
   gscQueryPageDailyPull,
+  queryPageFanOutDeps,
 } from '../functions/gsc-query-page-daily'
 import { CLOUD_FN_PREFIX } from '../client'
 
@@ -327,5 +331,65 @@ describe('two things the shared pull must keep apart (added after mutation probe
     await runPageDailyPull(h.step, d.deps, { ...BACKFILL, end_day: '2026-08-01' }, CTX)
     expect(seen.length).toBeGreaterThan(0)
     expect(new Set(seen)).toEqual(new Set(['gsc-query-page-daily-pull']))
+  })
+})
+
+interface FunctionOpts {
+  id: string
+  triggers: Array<{ cron?: string; event?: string }>
+  onFailure: (ctx: { event: { data: { run_id: string }; ts: number }; error: Error }) => Promise<void>
+}
+
+function optsOf(fn: unknown): FunctionOpts {
+  return (fn as { opts: FunctionOpts }).opts
+}
+
+describe('the production Inngest functions are wired to their own chain (added after the second review)', () => {
+  it('🔴 each function listens to its own trigger and nobody else\'s', () => {
+    expect(optsOf(gscQueryPageDailyPull).triggers).toEqual([{ event: 'gsc/query-page-daily.pull.due' }])
+    expect(optsOf(gscPageDailyPull).triggers).toEqual([{ event: 'gsc/page-daily.pull.due' }])
+    expect(optsOf(gscQueryPageDailyFanOut).triggers).toEqual([{ cron: `TZ=UTC ${GSC_QUERY_PAGE_DAILY_CRON}` }])
+    expect(optsOf(gscPageDailyFanOut).triggers[0].cron).not.toBe(optsOf(gscQueryPageDailyFanOut).triggers[0].cron)
+    expect(new Set([optsOf(gscPageDailyFanOut).id, optsOf(gscPageDailyPull).id, optsOf(gscQueryPageDailyFanOut).id, optsOf(gscQueryPageDailyPull).id]).size).toBe(4)
+  })
+
+  it('🔴 the pull worker carries the query-page data set; the dispatch plans from the query-page receipts with 4 backfill months', async () => {
+    expect(QUERY_PAGE_PULL_DEPS.dataset).toBe(QUERY_PAGE_DATASET)
+    fakeDb.tables.client_connectors = [{ client_id: A, anchor: 'gsc', status: 'connected', config: { site_url: SITE } }]
+    const plan = await queryPageFanOutDeps(supabaseAdmin).buildPlan('2026-10-13')
+    expect(plan.ok).toBe(true)
+    if (!plan.ok) return
+    expect(plan.orders.filter((o) => o.kind === 'daily')).toHaveLength(1)
+    expect(plan.orders.filter((o) => o.kind === 'backfill')).toHaveLength(4)
+    // a complete receipt in the PAGE receipts table must not count as coverage for this chain
+    fakeDb.tables.gsc_page_fetch_receipts = [
+      { id: crypto.randomUUID(), client_id: A, site_url: SITE, kind: 'backfill', request_start_day: '2026-09-01', request_end_day: '2026-09-30', data_through_day: '2026-09-30', status: 'complete', failure_kind: null, started_at: '2026-10-12T18:31:00Z' },
+    ]
+    const again = await queryPageFanOutDeps(supabaseAdmin).buildPlan('2026-10-13')
+    expect(again.ok && again.orders.some((o) => o.kind === 'backfill' && o.start_day === '2026-09-01')).toBe(true)
+  })
+
+  it('🔴 onFailure of the query-page functions closes the query-page run-log row and receipt', async () => {
+    const runId = 'run-wire-1'
+    const id = cronRunIdFromInngestRun(runId)
+    fakeDb.tables.cron_run_logs = [
+      { id, job_name: 'gsc-query-page-daily', status: 'running', started_at: new Date().toISOString() },
+    ]
+    await optsOf(gscQueryPageDailyFanOut).onFailure({ event: { data: { run_id: runId }, ts: Date.now() }, error: new Error('boom') })
+    expect(fakeDb.tables.cron_run_logs[0].status).toBe('failed')
+    // closing must not re-label the row as the other chain's job
+    expect(fakeDb.tables.cron_run_logs[0].job_name).toBe('gsc-query-page-daily')
+
+    const pullId = cronRunIdFromInngestRun('run-wire-2')
+    fakeDb.tables.cron_run_logs = [
+      { id: pullId, job_name: 'gsc-query-page-daily-pull', status: 'running', started_at: new Date().toISOString() },
+    ]
+    fakeDb.tables[QUERY_PAGE_RECEIPTS_TABLE] = [
+      { id: pullId, client_id: A, site_url: SITE, kind: 'daily', request_start_day: '2026-10-01', request_end_day: '2026-10-05', status: 'running', started_at: new Date().toISOString() },
+    ]
+    await optsOf(gscQueryPageDailyPull).onFailure({ event: { data: { run_id: 'run-wire-2' }, ts: Date.now() }, error: new Error('[gsc:other] x') })
+    expect(fakeDb.tables.cron_run_logs[0].status).toBe('failed')
+    expect(fakeDb.tables.cron_run_logs[0].job_name).toBe('gsc-query-page-daily-pull')
+    expect(fakeDb.tables[QUERY_PAGE_RECEIPTS_TABLE][0].status).toBe('failed')
   })
 })

@@ -320,3 +320,45 @@ describe('splitQueryRows', () => {
     expect(result.suspect_missed_brand).toEqual([])
   })
 })
+
+describe('review follow-ups: aliases fallback, stem boundary, suspect noise', () => {
+  it('falls back to the client\'s existing brand_aliases only when seo_config has no brand_terms array', () => {
+    const viaAliases = readBrandConfig({}, null, ['cts', 'boying'])
+    expect(viaAliases.status).toBe('ok')
+    if (viaAliases.status === 'ok') expect(viaAliases.matcher.brand).toEqual(['cts', 'boying'])
+    // not-an-object seo_config still uses the fallback
+    expect(readBrandConfig(null, null, ['cts']).status).toBe('ok')
+    // an explicit brand_terms array wins, even over a non-empty fallback
+    const explicit = readBrandConfig({ brand_terms: ['abc'] }, null, ['cts'])
+    expect(explicit.status === 'ok' && explicit.matcher.brand).toEqual(['abc'])
+    // an explicit but unusable array is NOT silently replaced by the fallback
+    expect(readBrandConfig({ brand_terms: [] }, null, ['cts'])).toEqual({ status: 'brand_terms_not_configured' })
+    // nothing anywhere
+    expect(readBrandConfig({}, null, undefined)).toEqual({ status: 'brand_terms_not_configured' })
+    expect(readBrandConfig({}, null, 'cts')).toEqual({ status: 'brand_terms_not_configured' })
+  })
+
+  it('🔴 a domain stem is added only when it STARTS with a configured term, not when the term is inside or at the end of it', () => {
+    const inside = readBrandConfig({ brand_terms: ['nal'] }, 'https://international.example.com/')
+    expect(inside.status === 'ok' && inside.matcher.brand).toEqual(['nal'])
+    const inside2 = readBrandConfig({ brand_terms: ['ab'] }, 'https://cabinet.example.com/')
+    expect(inside2.status === 'ok' && inside2.matcher.brand).toEqual(['ab'])
+    const starts = readBrandConfig({ brand_terms: ['nal'] }, 'https://nalfreight.example.com/')
+    expect(starts.status === 'ok' && starts.matcher.brand).toEqual(['nal', 'nalfreight'])
+    const ends = readBrandConfig({ brand_terms: ['nal'] }, 'https://international.example.com/')
+    expect(ends.status === 'ok' && ends.matcher.brand).toEqual(['nal'])
+  })
+
+  it('🔴 suspect list: words that start with a brand term are flagged; words that merely contain it are not', () => {
+    const matcher = { brand: ['cts', 'cts tours'], ambiguous: [] }
+    const rows = [
+      { query: 'best products nz', clicks: 9, impressions: 900, position: 5 },
+      { query: 'contacts lens', clicks: 8, impressions: 800, position: 5 },
+      { query: 'ctstour nz', clicks: 1, impressions: 5, position: 5 },
+      { query: 'ctstours auckland', clicks: 1, impressions: 4, position: 5 },
+    ]
+    const result = splitQueryRows(rows, matcher)
+    expect(result.suspect_missed_brand.map((s) => s.query)).toEqual(['ctstour nz', 'ctstours auckland'])
+    expect(result.non_brand.clicks).toBe(19)
+  })
+})

@@ -53,15 +53,17 @@ CTS 28 天合并口径下不同「词×页」对共 4,289 个（现有只读通�
 ## 7. 品牌 / 非品牌拆分（平台化关键）
 
 - **判据不写进共享代码。** 配置在 `clients.seo_config`：`brand_terms: string[]`（确定品牌词）、可选 `brand_ambiguous_terms: string[]`（歧义词，单独成桶，不硬判）。CTS 的取值（`cts` / `boying` / `ctstours`；歧义 `china travel service`）是写到 CTS 配置的**数据**，不是代码。
-- 共享匹配规则：NFKC + 去变音符 + 小写；撇号删除、其它标点转空格、折叠空格；纯拉丁配置词按**整词序列**匹配（`cts` 不命中 `facts`）；含非拉丁字符（中文）的配置词按子串匹配（已知会有误命中，输出带该说明）；**域名主体（如 `ctstours.co.nz` 的 `ctstours`，含 `sc-domain:` 写法）只在「它明显是某个已配置品牌词的延伸」时才并入**（`ctstours` 含 `cts`）——域名是通用词（如 `travel.example`）时不并入，否则所有含该词的查询会被误判成品牌；这种情况走 `suspect_missed_brand` 交人确认。品牌词优先于歧义词。
+- 共享匹配规则：NFKC + 去变音符 + 小写；撇号删除、其它标点转空格、折叠空格；纯拉丁配置词按**整词序列**匹配（`cts` 不命中 `facts`）；含非拉丁字符（中文）的配置词按子串匹配（已知会有误命中，输出带该说明）；**域名主体（如 `ctstours.co.nz` 的 `ctstours`，含 `sc-domain:` 写法）只在「以某个已配置品牌词开头」时才并入**（`ctstours` 以 `cts` 开头；`international` 里只是含 `nal`、不并入）——域名是通用词（如 `travel.example`）时不并入，否则所有含该词的查询会被误判成品牌；这种情况走 `suspect_missed_brand` 交人确认。品牌词优先于歧义词。
+- **复用已有品牌别名（实施后魏征指出）**：库里已有 `clients.brand_aliases`（Settings 有输入面板，`strategy/auto-fetch.ts` 的 `isBrandQueryMatch` 在用）。`seo_config` 里**没有** `brand_terms` 数组时，回退用 `brand_aliases`，不让客户填两遍；`brand_terms` 存在则以它为准（即使为空也不回退，避免悄悄换口径）。
 - **fail-closed**：配置缺失、非数组、规范化后为空/过短（<2 字符）的词一律丢弃；丢弃后无有效品牌词 → 返回 `brand_terms_not_configured`，不猜。读取端校验，不只靠写入口校验。
-- 输出四个桶：`brand / ambiguous / non_brand / unattributed`（= 页级合计 − 词级合计，同窗口）。每桶 clicks / impressions / 不同词数 / 曝光加权平均排名。另给 `suspect_missed_brand`：含品牌词子串但没被整词命中的查询（Top N），供人抽查。
+- 输出四个桶：`brand / ambiguous / non_brand / unattributed`（= 页级合计 − 词级合计，同窗口）。每桶 clicks / impressions / 不同词数 / 曝光加权平均排名。另给 `suspect_missed_brand`：某个**词以品牌词（拼接形式）开头**但没被整词命中的查询（Top N，如 `ctstour nz`；不再用「包含」匹配，否则 `products` / `contacts` 会淹没真漏判），供人抽查。另带 `coverage`（两张表各有几天数据）和 `warnings`（两表天数不一致、`unattributed` 为负时必报，回补期间缺的天会整段显示成 unattributed）。
 - 只读、不写库；一次读整窗口，仅适合批处理，不放请求路径；`fetchAll` 显式传 hardCap、按主键排序保证翻页稳定。
 - 写入口：`PATCH /api/clients/[id]/seo-config` 增加两个键（字符串数组，数量与单词长度有上限，归一化为空的词拒绝；「无已知键」判断同步更新）。**Settings 输入框本次不做**（CLAUDE.md §8 要求 UI 一起做，这里需要 PM 明示豁免——见 PR 正文，已作为待 PM 回答项）。该接口登录的是网页会话，CTS 取值的实际写入合并后由 PM 点头再做。
 
-## 8. 只读探针（魏征必改 3：真实试跑）
+## 8. 只读探针与取数入口（魏征必改 3：真实试跑）
 
-`GET /api/internal/gsc-query-page-probe`（非定时路由，同 gsc-query-overlap 放 `/api/internal/`）：Bearer CRON_SECRET；`client_id` 必填；`days`（1–7，默认 7，结束日 = 今天往前 5 天以避开未定稿日；工作流只传 client_id，所以默认就是 7 天）；**只读、不写库、不需要迁移**；用与写入完全相同的转行函数，报告：逐日行数、重复键数、超长键数、`query` 大小写重复数、品牌拆分（若已配置）。加进 `manual-cron-trial.yml` 白名单（A 级，写进 PR）。合并后先跑它，拿到真实体量，再 PM 点头 apply 迁移。
+`GET /api/internal/gsc-query-page-probe`（非定时路由，同 gsc-query-overlap 放 `/api/internal/`）：Bearer CRON_SECRET；`client_id` 必填；`days`（1–7，默认 7，结束日 = 今天往前 5 天以避开未定稿日；工作流只传 client_id，所以默认就是 7 天）；**只读、不写库、不需要迁移**；用与写入完全相同的转行函数，报告：逐日行数、重复键数、超长键数、`query` 大小写重复数、品牌拆分（若已配置）。加进 `manual-cron-trial.yml` 白名单（A 级，写进 PR）。合并后先跑它，拿到真实体量，再 PM 点头 apply 迁移。探针**和第一次真读一样**：过期的谷歌授权会被刷新并写回（`withGscAccess` 的既有行为），除此之外不写任何业务表；每天最多翻 2 页（同真实拉取的 5 万行上限）；输出只有数字和桶合计，**不含搜索词原文**（会进 GitHub Actions 摘要，搜索词可能带个人信息）；超 90 秒不再开新的一天并标 `stopped_early`；`days` 越界直接 400。
+另有 `GET /api/internal/gsc-brand-split`（只读自家表、不调谷歌；同样进白名单、只输出数字）：`getBrandSplit` 的第一个真实调用方，迁移 apply 后用它在线上验证拆分。
 
 ## 9. 换客户 / 换行业测试
 

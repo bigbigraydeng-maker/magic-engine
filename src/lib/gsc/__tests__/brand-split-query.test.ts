@@ -15,8 +15,8 @@ function qp(client: string, day: string, query: string, page: string, clicks: nu
   return { client_id: client, day, query, page_url: page, page_key: page, clicks, impressions, position }
 }
 
-function seed(seoConfig: unknown, siteUrl = 'https://ctstours.example.com/') {
-  fakeDb.tables.clients = [{ id: A, seo_config: seoConfig }, { id: B, seo_config: {} }]
+function seed(seoConfig: unknown, siteUrl = 'https://ctstours.example.com/', aliases: string[] = []) {
+  fakeDb.tables.clients = [{ id: A, seo_config: seoConfig, brand_aliases: aliases }, { id: B, seo_config: {}, brand_aliases: [] }]
   fakeDb.tables.client_connectors = [
     { client_id: A, anchor: 'gsc', status: 'connected', config: { site_url: siteUrl } },
   ]
@@ -68,6 +68,41 @@ describe('getBrandSplit', () => {
     expect(report.query_level).toEqual({ clicks: 18, impressions: 490, rows: 5 })
     expect(report.page_level).toEqual({ clicks: 21, impressions: 520 })
     expect(report.unattributed).toEqual({ clicks: 3, impressions: 30 })
+  })
+
+  it('a client with no brand_terms but existing brand_aliases is split with the aliases; explicit brand_terms win', async () => {
+    seed({}, 'https://ctstours.example.com/', ['cts'])
+    const viaAliases = await getBrandSplit(supabaseAdmin, A, WINDOW)
+    expect(viaAliases.status).toBe('ok')
+    seed({ brand_terms: ['great wall'] }, 'https://ctstours.example.com/', ['cts'])
+    const explicit = await getBrandSplit(supabaseAdmin, A, WINDOW)
+    expect(explicit.status === 'ok' && explicit.buckets.brand.clicks).toBe(2)
+  })
+
+  it('reports coverage and warns when the two tables cover different days or the gap is negative', async () => {
+    seed({ brand_terms: ['cts'] })
+    const ok = await getBrandSplit(supabaseAdmin, A, WINDOW)
+    expect(ok.status === 'ok' && ok.coverage).toEqual({ days_with_query_rows: 2, days_with_page_rows: 2 })
+    expect(ok.status === 'ok' && ok.warnings).toEqual([])
+    // a query day with no page rows at all: coverage differs and the gap goes negative
+    fakeDb.tables.gsc_query_page_daily.push(qp(A, '2026-09-04', 'cts tours', 'https://x/a', 50, 500))
+    const bad = await getBrandSplit(supabaseAdmin, A, WINDOW)
+    expect(bad.status).toBe('ok')
+    if (bad.status !== 'ok') return
+    expect(bad.coverage).toEqual({ days_with_query_rows: 3, days_with_page_rows: 2 })
+    expect(bad.unattributed.clicks).toBeLessThan(0)
+    expect(bad.warnings).toHaveLength(2)
+  })
+
+  it('🔴 the page-level total is also limited to this client and this window', async () => {
+    seed({ brand_terms: ['cts'] })
+    fakeDb.tables.gsc_page_daily.push(
+      { client_id: B, day: '2026-09-02', page_url: 'https://x/z', page_key: 'x/z', clicks: 1000, impressions: 1000, ctr: 1, position: 1 },
+      { client_id: A, day: '2026-10-15', page_url: 'https://x/z', page_key: 'x/z', clicks: 2000, impressions: 2000, ctr: 1, position: 1 },
+      { client_id: A, day: '2026-08-15', page_url: 'https://x/z', page_key: 'x/z', clicks: 4000, impressions: 4000, ctr: 1, position: 1 },
+    )
+    const report = await getBrandSplit(supabaseAdmin, A, WINDOW)
+    expect(report.status === 'ok' && report.page_level).toEqual({ clicks: 21, impressions: 520 })
   })
 
   it('a database error is thrown, not turned into an empty split', async () => {

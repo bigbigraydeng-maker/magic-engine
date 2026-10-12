@@ -12,6 +12,7 @@
  * Read-only towards Google, never publishes anything (`no_publish: true`).
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { CLOUD_FN_PREFIX } from '../client'
 import { startCronRunWithId } from '@/lib/cron/run-logger'
@@ -24,10 +25,12 @@ import {
   QUERY_PAGE_DATASET,
   QUERY_PAGE_RECEIPTS_TABLE,
 } from '@/lib/gsc/query-page-daily-store'
+import type { PullDeps } from '@/lib/gsc/page-daily-pull'
 import {
   createGscPageDailyFanOutFunction,
   createGscPageDailyPullFunction,
   defaultPullDeps,
+  type FanOutDeps,
   type GscChainVariant,
 } from './gsc-page-daily'
 
@@ -47,19 +50,21 @@ export const QUERY_PAGE_CHAIN: GscChainVariant = {
   dataset: QUERY_PAGE_DATASET,
 }
 
-/** Production instances. */
-export const gscQueryPageDailyFanOut = createGscPageDailyFanOutFunction(
-  {
+/** The dispatch's plan builder: the query-page receipts table and 4 backfill months per client per dispatch. */
+export function queryPageFanOutDeps(supabase: SupabaseClient = supabaseAdmin): FanOutDeps {
+  return {
     buildPlan: (today) =>
-      buildPageDailyPlan(supabaseAdmin, today, {
+      buildPageDailyPlan(supabase, today, {
         receiptsTable: QUERY_PAGE_RECEIPTS_TABLE,
         maxBackfillSegments: QUERY_PAGE_BACKFILL_SEGMENTS_PER_DISPATCH,
       }),
-  },
-  QUERY_PAGE_CHAIN,
-)
+  }
+}
 
-export const gscQueryPageDailyPull = createGscPageDailyPullFunction(
-  { ...defaultPullDeps(), dataset: QUERY_PAGE_DATASET },
-  QUERY_PAGE_CHAIN,
-)
+/** The pull worker's dependencies: the shared ones plus this chain's data set. */
+export const QUERY_PAGE_PULL_DEPS: PullDeps = { ...defaultPullDeps(), dataset: QUERY_PAGE_DATASET }
+
+/** Production instances. */
+export const gscQueryPageDailyFanOut = createGscPageDailyFanOutFunction(queryPageFanOutDeps(), QUERY_PAGE_CHAIN)
+
+export const gscQueryPageDailyPull = createGscPageDailyPullFunction(QUERY_PAGE_PULL_DEPS, QUERY_PAGE_CHAIN)

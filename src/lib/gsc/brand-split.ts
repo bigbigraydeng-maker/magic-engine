@@ -95,15 +95,21 @@ function deriveDomainStems(siteUrl: string): string[] {
   return stems
 }
 
+/**
+ * @param seoConfig  untrusted `clients.seo_config` JSON
+ * @param siteUrl    the client's GSC property (used only to derive a domain stem, see below)
+ * @param fallbackBrandTerms  the client's existing `clients.brand_aliases` list. Used ONLY when `seo_config` has no
+ *   `brand_terms` array at all, so a client that already maintains aliases (Settings has a panel for them) is not
+ *   asked to type the same words twice. An explicit `brand_terms` always wins.
+ */
 export function readBrandConfig(
   seoConfig: unknown,
   siteUrl?: string | null,
+  fallbackBrandTerms?: unknown,
 ): BrandConfigResult {
-  if (!isPlainObject(seoConfig)) {
-    return { status: 'brand_terms_not_configured' }
-  }
+  const cfg: Record<string, unknown> = isPlainObject(seoConfig) ? seoConfig : {}
 
-  const brandRaw = seoConfig['brand_terms']
+  const brandRaw = Array.isArray(cfg['brand_terms']) ? cfg['brand_terms'] : fallbackBrandTerms
   if (!Array.isArray(brandRaw)) {
     return { status: 'brand_terms_not_configured' }
   }
@@ -113,23 +119,23 @@ export function readBrandConfig(
     return { status: 'brand_terms_not_configured' }
   }
 
-  const ambiguousRaw = seoConfig['brand_ambiguous_terms']
+  const ambiguousRaw = cfg['brand_ambiguous_terms']
   const ambiguousTerms = normalizeTerms(toStringArray(ambiguousRaw))
 
   const brandSet = new Set(brandTerms)
   const ambiguousFiltered = ambiguousTerms.filter((term) => !brandSet.has(term))
 
   if (typeof siteUrl === 'string') {
-    // The domain stem is only added when it visibly extends a configured brand term (e.g. configured "abc",
+    // The domain stem is only added when it STARTS with a configured brand term (e.g. configured "abc",
     // domain "abctours.example"): a domain made of a generic word ("travel.example") must not turn every query
-    // containing that word into a brand query. Anything else the domain suggests is reported through
+    // containing that word into a brand query, and a short term ("nal") must not drag in "international" (a brand extension starts with the brand). Anything else the domain suggests is reported through
     // `suspect_missed_brand`, for a person to add to the configuration.
     const compactBrand = brandTerms.filter((t) => isAscii(t)).map((t) => t.replace(/ /g, ''))
     for (const stem of deriveDomainStems(siteUrl)) {
       if (stem.length < 2) continue
       if (brandSet.has(stem)) continue
       const compactStem = stem.replace(/ /g, '')
-      if (!compactBrand.some((t) => t.length >= 2 && compactStem.includes(t))) continue
+      if (!compactBrand.some((t) => t.length >= 2 && compactStem.startsWith(t))) continue
       brandSet.add(stem)
       brandTerms.push(stem)
     }
@@ -214,6 +220,9 @@ export function splitQueryRows(
   const ambiguous = emptyAccumulator()
   const nonBrand = emptyAccumulator()
 
+  // A query is a suspected missed brand query when one of its words STARTS with the concatenated form of a Latin
+  // brand term (term "cts" -> word "ctstour"; term "cts tours" -> word "ctstours"). Matching anywhere inside a word
+  // would flag every "products" / "contacts" for a term like "cts".
   const suspectTerms: string[] = []
   for (const term of matcher.brand) {
     if (!isLatinTerm(term)) continue
@@ -236,10 +245,10 @@ export function splitQueryRows(
     acc.queries.add(normalized)
 
     if (bucket === 'non_brand' && suspectTerms.length > 0) {
-      const joinedQuery = normalized.replace(/ /g, '')
+      const words = normalized.split(' ')
       let matched = false
       for (const term of suspectTerms) {
-        if (joinedQuery.includes(term)) {
+        if (words.some((w) => w.startsWith(term))) {
           matched = true
           break
         }

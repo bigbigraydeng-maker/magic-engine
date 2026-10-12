@@ -39,9 +39,8 @@
  *
  * brand_terms / brand_ambiguous_terms are the per-client brand-word lists behind the brand / non-brand split of the
  * stored Search Console queries (src/lib/gsc/brand-split.ts, docs/specs/2026-10-13-gsc-query-page-daily-design.md §7).
- * They live here — not in shared code — so a new client never needs a code change. Values are normalised to the same
- * form the matcher uses and a term that normalises to fewer than 2 characters is rejected (an empty term would match
- * every query). No Settings input yet: written through this PATCH only.
+ * They live here — not in shared code — so a new client never needs a code change. Terms are stored trimmed and de-duplicated (the matcher normalises on read) and a term that normalises to fewer than 2
+ * characters is rejected (an empty term would match every query). No Settings input yet: written through this PATCH only.
  *
  * Mirrors src/app/api/clients/[id]/brand-aliases/route.ts.
  */
