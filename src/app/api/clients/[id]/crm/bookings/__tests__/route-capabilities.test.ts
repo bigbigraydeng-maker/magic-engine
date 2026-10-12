@@ -24,6 +24,8 @@ const EXPECTED: Record<string, BookingCapability> = {
   '[bookingId]/milestones/[kind]/nudge/route.ts POST': 'edit',
   'nudge-list/route.ts GET': 'view',
   'options/route.ts GET': 'view',
+  'overview/route.ts GET': 'view',
+  'access/route.ts GET': 'view',
   'members/route.ts GET': 'manage_members',
   'members/route.ts POST': 'manage_members',
   'members/route.ts DELETE': 'manage_members',
