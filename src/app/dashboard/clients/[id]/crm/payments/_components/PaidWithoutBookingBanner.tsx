@@ -3,6 +3,7 @@
 import { useId, useState } from 'react'
 import Link from 'next/link'
 import { WARNING_CLASS, MUTED_TEXT, SECONDARY_BUTTON } from '../../_components/bookings/booking-styles'
+import { stashContactName } from '../../_components/bookings/payments-return'
 import { stageText } from './payments-format'
 
 export interface PaidWithoutBookingRow {
@@ -49,7 +50,10 @@ export function PaidWithoutBookingBanner(
             <li key={row.id} className="py-1">
               <Link
                 href={`/dashboard/clients/${clientId}/crm/all?contact=${encodeURIComponent(row.id)}&focus=bookings`}
-                onClick={onLeave}
+                onClick={() => {
+                  stashContactName(clientId, row.id, row.name)
+                  onLeave?.()
+                }}
                 className="inline-flex min-h-[40px] items-center underline font-bold"
               >
                 {row.name ?? '（没有姓名）'}
