@@ -33,6 +33,7 @@ on:
         options:
           - seo-weekly-list
           - ga4-form-funnel
+          - ga4-organic-landing-leads
           - keyword-opportunity
           - gsc-query-overlap
           - gsc-query-page-probe
@@ -82,13 +83,14 @@ jobs:
           case "$JOB" in
             seo-weekly-list) route="api/cron/seo-weekly-list" ;;
             ga4-form-funnel) route="api/internal/ga4-form-funnel" ;;
+            ga4-organic-landing-leads) route="api/internal/ga4-organic-landing-leads" ;;
             keyword-opportunity) route="api/internal/keyword-opportunity" ;;
             gsc-query-overlap) route="api/internal/gsc-query-overlap" ;;
             gsc-query-page-probe) route="api/internal/gsc-query-page-probe" ;;
             gsc-brand-split) route="api/internal/gsc-brand-split" ;;
             *) echo "::error::job not in allowlist"; exit 1 ;;
           esac
-          if { [ "$JOB" = "ga4-form-funnel" ] || [ "$JOB" = "keyword-opportunity" ] || [ "$JOB" = "gsc-query-overlap" ] || [ "$JOB" = "gsc-query-page-probe" ] || [ "$JOB" = "gsc-brand-split" ]; } && [ -z "${CLIENT_ID:-}" ]; then
+          if { [ "$JOB" = "ga4-form-funnel" ] || [ "$JOB" = "ga4-organic-landing-leads" ] || [ "$JOB" = "keyword-opportunity" ] || [ "$JOB" = "gsc-query-overlap" ] || [ "$JOB" = "gsc-query-page-probe" ] || [ "$JOB" = "gsc-brand-split" ]; } && [ -z "${CLIENT_ID:-}" ]; then
             echo "::error::$JOB needs client_id (one client per run)"; exit 1
           fi
 
@@ -141,6 +143,9 @@ jobs:
               filter='{success, dry_run, clients_processed, failed,
                results: [(.results // [])[] | {client_id, open_before, verified_pass, verify_pending, verify_not_measured, expired, inserted, duplicates, withheld, skipped_keywords, stale_crawl_pages, preview, item_errors: ((.item_errors // []) | length), error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end)}]}' ;;
             ga4-form-funnel)
+              filter='{success, dry_run, read_only, days, clients_processed, failed,
+               results: [(.results // [])[] | {client_id, status, error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end), summary: (.summary // null)}]}' ;;
+            ga4-organic-landing-leads)
               filter='{success, dry_run, read_only, days, clients_processed, failed,
                results: [(.results // [])[] | {client_id, status, error: ((.error // null) | if . == null then null else (tostring | .[0:160]) end), summary: (.summary // null)}]}' ;;
             keyword-opportunity)
