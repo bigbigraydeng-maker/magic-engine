@@ -95,3 +95,7 @@
 - **用过的只有两张**：Tale r1 `d6a16ac0`（作废）和 10-05 的 Remotion 试验片 `23ba32e8`（镜头标签 xian-citywall，从未授权，建议永不授权）。**已发布的 Best of China `7ed7645b`、上海 v5r2 `fa4fdd89` 都没用到，待审的 Natural China `0fd18a93` 也没有，无需下架。**
 - `stock/` 其它地名素材抽检（看中间帧）：❌ `v_leifeng_18688462`＝东京浅草寺红塔+晴空塔；`v_birdsnest_38077180`＝昆虫/鸟巢特写；`guilin_34078134`＝粉色非洲菊；`v_yuyuan_35646223` 与 `v_nanjingroad_35646223` 同一镜头（南京路夜景）；`zhangjiajie_35560827`＝雪山。❓ 未证实：`v_watertown_27958758`、`shanghai_18803234`、`v_longjing_36651487`、`zhangjiajie_33356707`。✅ 可靠：`v_bund_36546365`、陆家嘴三条、`guilin_36275860`、`v_westlake_35080573`。
 - 另一处疑点（未查画面，只列）：`templates/tailor-made-itinerary/heroes` 里有一张 `xian-city-wall` 英雄图，来源与是否真是西安未核，建议后续看一眼 `CREDITS.json`。
+
+## 更正（2026-10-13）：BOC 与 Tale #1「已发布」的说法
+
+此前本文与对 74 号的汇报写「BOC `7ed7645b` 已发布并公开可见」「Tale #1 `e29b0986` 已发布并核对」，**不对**：它们在 Facebook 上是**草稿**（工厂默认草稿模式，ME 里「通过」只传草稿，不公开）；回执 `video_state=DRAFT` 是真话，不是「没刷新」。我当时用主页管理员账号看页面，管理员能看到草稿，误当成公开。首评是我在草稿页上以 CTS Tours 身份手动补的（管理员可见，公众看不到）。以后「已发布」以视频对象 published 字段为准。
