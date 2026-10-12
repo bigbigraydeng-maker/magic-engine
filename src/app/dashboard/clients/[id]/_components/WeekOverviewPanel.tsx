@@ -134,7 +134,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
       >
         <p className="text-base font-bold text-me-charcoal">{mode.headline}</p>
         <p className="text-sm text-me-charcoal/80">{mode.detail}</p>
-        <p className="text-sm text-me-charcoal/80">这一周由系统自动排期，你只需要点一次授权。</p>
+        <p className="text-sm text-me-charcoal/80">这一周的内容已经排好，你看一遍、点一次授权就行。</p>
         <p className="text-sm text-me-charcoal/80">
           Story：
           {data.story_error

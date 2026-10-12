@@ -129,7 +129,7 @@ describe('WeekOverviewPanel', () => {
     expect(screen.getByText('这一周的画面复核')).toBeTruthy()
     expect(screen.getByText(/以 PM 在工厂点通过的时间为准/)).toBeTruthy()
     expect(screen.getByText(/尚未接入：还没有「报名」/)).toBeTruthy()
-    expect(screen.getByText(/由系统自动排期，你只需要点一次授权/)).toBeTruthy()
+    expect(screen.getByText(/这一周的内容已经排好，你看一遍、点一次授权就行/)).toBeTruthy()
   })
 
   it('a missing quota says "名额未配置" and never pretends to be 0', async () => {
