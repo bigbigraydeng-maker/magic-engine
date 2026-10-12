@@ -28,6 +28,7 @@ import { BatchEmail, type BatchEmailBucket } from '../_components/BatchEmail'
 import { PrioritySectionHeader } from './_components/PrioritySection'
 import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
 import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
+import { takeContactName } from '../_components/bookings/payments-return'
 import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
 import type { Segment } from '@/lib/crm/segments'
 import { type KindView } from '@/lib/crm/kind-filter'
@@ -306,7 +307,13 @@ export default function CrmAllContactsPage() {
     setDeepLinkId(null)
     // 这个人不在表里（换客户了 / 记录被删）——**必须说出来**，
     // 否则页面一声不吭，FDE 只会以为链接坏了。
+    const stashedName = takeContactName(clientId, deepLinkId)
     if (!rows.some((r) => r.contactId === deepLinkId)) {
+      // 名单只装了第一页：付款总览带来的人常在后面几页。有名字就按名字搜出来再开抽屉。
+      if (stashedName) {
+        openContactFromNudge(deepLinkId, stashedName)
+        return
+      }
       setToast('这个人不在这份名单里了 —— 用上面的搜索框找找看')
       window.setTimeout(() => setToast(null), 4000)
       return

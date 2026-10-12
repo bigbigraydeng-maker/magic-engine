@@ -21,6 +21,7 @@
 
 import { getValidAccessToken } from '@/lib/google-oauth/client'
 import type { FormFunnelRaw } from './form-funnel'
+import type { OrganicLandingLeadsRaw, LandingEventRow } from './organic-landing-leads'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { supabaseAdmin } from '@/lib/supabase'
 import { toGa4ResourceName } from './property-id'
@@ -541,4 +542,52 @@ export async function fetchGa4FormFunnelRaw(
   const thankYouTotal = { events: num(totalRow?.metricValues?.[0]?.value), users: num(totalRow?.metricValues?.[1]?.value) }
 
   return { periodStart, periodEnd, events, startByPath, thankYouByPath, thankYouTotal }
+}
+
+const ORGANIC_LEAD_ROW_LIMIT = 250
+
+/**
+ * Organic Search × landing page × enquiry events (read-only). Two reads:
+ *  1. events: the client's unified enquiry event (from client config), form_submit
+ *  2. legacy signal: page views of paths containing the client's thank-you text
+ * Both are restricted to the Organic Search default channel group in the request itself,
+ * so other channels never leave GA4.
+ */
+export async function fetchGa4OrganicLandingLeadsRaw(
+  propertyId: string,
+  clientId: string,
+  cfg: { enquiryEvent: string; thankYouPathContains: string },
+  periodDays: number = DEFAULT_PERIOD_DAYS,
+): Promise<OrganicLandingLeadsRaw | null> {
+  const token = await resolveAccessToken(clientId)
+  if (!token) return null
+  const normalized = normalizePropertyId(propertyId)
+  const periodEnd = toIsoDate(new Date())
+  const periodStart = toIsoDate(daysAgo(periodDays))
+  const num = (v: string | undefined): number => Number(v ?? '0') || 0
+  const organic = { filter: { fieldName: 'sessionDefaultChannelGroup', stringFilter: { matchType: 'EXACT', value: 'Organic Search' } } }
+
+  const eventsReport = await runReport(token, normalized, periodStart, periodEnd, {
+    dimensions: ['sessionDefaultChannelGroup', 'landingPage', 'eventName'],
+    metrics: ['eventCount', 'totalUsers'],
+    orderBy: 'eventCount',
+    limit: ORGANIC_LEAD_ROW_LIMIT,
+    dimensionFilter: { andGroup: { expressions: [organic, { filter: { fieldName: 'eventName', inListFilter: { values: [cfg.enquiryEvent, 'form_submit'] } } }] } },
+  })
+  const thankReport = await runReport(token, normalized, periodStart, periodEnd, {
+    dimensions: ['sessionDefaultChannelGroup', 'landingPage'],
+    metrics: ['screenPageViews', 'totalUsers'],
+    orderBy: 'screenPageViews',
+    limit: ORGANIC_LEAD_ROW_LIMIT,
+    dimensionFilter: { andGroup: { expressions: [organic, { filter: { fieldName: 'pagePath', stringFilter: { matchType: 'CONTAINS', value: cfg.thankYouPathContains } } }] } },
+  })
+  const rows: LandingEventRow[] = []
+  for (const r of eventsReport.rows ?? []) {
+    rows.push({ channel: r.dimensionValues?.[0]?.value ?? '', landingPath: r.dimensionValues?.[1]?.value ?? '', event: r.dimensionValues?.[2]?.value ?? '', events: num(r.metricValues?.[0]?.value), users: num(r.metricValues?.[1]?.value) })
+  }
+  for (const r of thankReport.rows ?? []) {
+    rows.push({ channel: r.dimensionValues?.[0]?.value ?? '', landingPath: r.dimensionValues?.[1]?.value ?? '', event: 'thank_you_page_view', events: num(r.metricValues?.[0]?.value), users: num(r.metricValues?.[1]?.value) })
+  }
+  const truncated = (eventsReport.rows?.length ?? 0) >= ORGANIC_LEAD_ROW_LIMIT || (thankReport.rows?.length ?? 0) >= ORGANIC_LEAD_ROW_LIMIT
+  return { periodStart, periodEnd, rows, truncated }
 }

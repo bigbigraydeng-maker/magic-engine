@@ -42,7 +42,7 @@ export function resetPaymentsProbeCache(): void {
   probeCache.clear()
 }
 
-export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' | 'payments' }) {
+export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' | 'payments' | 'sales' }) {
   const base = `/dashboard/clients/${clientId}/crm`
   const cls = (on: boolean) =>
     `rounded-md px-4 py-1.5 text-sm font-bold transition ${
@@ -99,6 +99,10 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
         <Link href={`${base}/decisions`} className={cls(active === 'decisions')}>决策清单（只读）</Link>
         {showPayments && (
           <Link href={`${base}/payments`} className={cls(active === 'payments')}>付款总览</Link>
+        )}
+        {/* 销售进度页和付款总览走同一道名单闸，同一个探针：能看付款总览的人才看得到它。 */}
+        {showPayments && (
+          <Link href={`/dashboard/clients/${clientId}/sales-progress`} className={cls(active === 'sales')}>销售进度</Link>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-me-charcoal/45">
