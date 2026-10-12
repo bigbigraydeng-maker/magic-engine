@@ -1,3 +1,4 @@
+import type { PostReview } from '@/lib/tiktok/post-review'
 // 单讲数据层 — 讲课式内容存取都走这里，别处不许直接拼 snapshot。
 // content_posts.generation_context_snapshot 结构(讲课式)：
 //   lecture: LectureScript            结构化脚本(唯一真相源；script 列只是它拼出来的只读投影)
@@ -66,6 +67,7 @@ export interface LecturePublished {
  */
 export interface LecturePublishRequest {
   platform: 'facebook' | 'tiktok'
+  tiktokReview?: PostReview
   status: 'pending' | 'sending' | 'done' | 'failed'
   /**
    * true = 这一条要真的公开发出去;不填 = 只发草稿(主页后台可见、公众看不到)。

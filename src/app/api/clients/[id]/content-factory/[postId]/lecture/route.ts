@@ -1,3 +1,6 @@
+import { inspectTikTokVideo } from '@/lib/tiktok/video-proof'
+import { validateReview } from '@/lib/tiktok/post-review'
+import { getTikTokCreatorInfo } from '@/lib/factory/publish/tiktok-adapter'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 // 单讲工作台 API — 讲课式内容的脚本审改 / 制作方式 / 录像直传 / 重做 / 开始做片。
 // GET   详情(结构化脚本 + 制作方式 + 做片任务状态 + 客户 VI 色)
@@ -149,6 +152,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       redoReason?: string
       instruction?: string
       live?: boolean
+      tiktokReview?: unknown
       platform?: string
     }
     const loaded = await loadLecturePost(params.id, params.postId)
@@ -231,9 +235,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         }
         // live=true 才真的公开;不填一律只发草稿。这个决定跟着这一条片走,
         // 不再靠一个「一开全客户都真发」的全局开关。
-        const live = body.live === true
+        let live = body.live === true
         // 发到哪个平台。不填按 Facebook 走(老调用方一行不用改)。
         const platform = body.platform === 'tiktok' ? 'tiktok' as const : 'facebook' as const
+        let tiktokReview
+        if (platform === 'tiktok') {
+          try {
+            const creator = await getTikTokCreatorInfo(params.id)
+            const videoProof = await inspectTikTokVideo(loaded.post.source_video_url)
+            tiktokReview = validateReview(body.tiktokReview, {...creator,videoProof}, loaded.post.source_video_url)
+            live = tiktokReview.privacy === 'PUBLIC_TO_EVERYONE'
+          } catch (e) {
+            return NextResponse.json({ error: e instanceof Error ? e.message : '发布设置无效' }, { status: 400 })
+          }
+        }
         if (live && !loaded.captions?.length) {
           return NextResponse.json(
             { error: '还没校准过字幕 — 公开发之前先看一遍第⑥步' },
@@ -243,7 +258,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         await setPublishRequest({
           clientId: params.id,
           postId: params.postId,
-          request: { platform, status: 'pending', live, requestedAt: new Date().toISOString() },
+          request: { platform, status: 'pending', live, ...(tiktokReview ? { tiktokReview } : {}), requestedAt: new Date().toISOString() },
         })
         return NextResponse.json({ ok: true, queued: true, live, platform })
       }

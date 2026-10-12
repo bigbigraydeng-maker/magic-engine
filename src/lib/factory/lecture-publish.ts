@@ -1,3 +1,4 @@
+import type { PostReview } from '@/lib/tiktok/post-review'
 // 讲课片发布执行 —— 由后台 cron 调用，不在网页请求里跑。
 //
 // 为什么必须放后台:发布要等 Facebook 把几十 MB 视频从我们的存储拉过去，
@@ -47,12 +48,14 @@ async function publishLectureToTikTok(params: {
   videoUrl: string
   caption: string
   live: boolean
+  review?: PostReview
 }): Promise<PublishOutcome> {
   const { clientId, postId, videoUrl, caption, live } = params
   try {
     const result = await publishToTikTok({
       clientId, videoUrl, caption,
-      privacy: live ? 'PUBLIC_TO_EVERYONE' : 'SELF_ONLY',
+      privacy: params.review?.privacy ?? 'SELF_ONLY',
+      review: params.review,
     })
 
     // 等转码。最多约 2 分钟——还没好也不算失败(TikTok 会自己发完),
@@ -122,7 +125,7 @@ export async function runOneLecturePublish(params: {
 
   await setPublishRequest({
     clientId, postId,
-    request: { platform, status: 'sending', requestedAt: loaded.publishRequest?.requestedAt ?? new Date().toISOString(), startedAt: new Date().toISOString() },
+    request: { ...loaded.publishRequest, platform, status: 'sending', requestedAt: loaded.publishRequest?.requestedAt ?? new Date().toISOString(), startedAt: new Date().toISOString() },
   })
 
   try {
@@ -134,6 +137,7 @@ export async function runOneLecturePublish(params: {
         videoUrl: loaded.post.source_video_url,
         caption: loaded.lecture.ctaVariants?.fbTiktok ?? loaded.lecture.title,
         live,
+        review: loaded.publishRequest?.tiktokReview,
       })
     }
 
