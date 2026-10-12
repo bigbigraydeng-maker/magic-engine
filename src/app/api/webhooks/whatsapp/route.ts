@@ -540,10 +540,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     secret = envSecret
   } else {
-    // lookup_failed: the credentials table is missing or erroring. Keep the CTS
-    // number working — only the env secret can pass here.
+    // lookup_failed. Only "the table is not deployed yet" may fall back to the env
+    // secret (then no number can have its own secret, so the CTS number keeps
+    // working). Any other failure fails closed: otherwise the env secret could
+    // vouch for a number that has its own app secret.
     const envSecret = process.env.META_APP_SECRET
-    if (!envSecret || !isValidSignature(rawBody, signature, envSecret)) {
+    if (!choice.tableMissing || !envSecret || !isValidSignature(rawBody, signature, envSecret)) {
       return NextResponse.json({ error: 'Credential lookup unavailable' }, { status: 503 })
     }
     secret = envSecret

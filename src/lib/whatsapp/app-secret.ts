@@ -11,8 +11,8 @@ export type ExtractedNumbers =
 export type WebhookSecretChoice =
   | { kind: 'env' }
   | { kind: 'route'; secret: string }
-  | { kind: 'lookup_failed' }
-  | { kind: 'reject'; reason: 'mixed_apps' | 'decrypt_failed' }
+  | { kind: 'lookup_failed'; tableMissing: boolean }
+  | { kind: 'reject'; reason: 'mixed_apps' | 'decrypt_failed' | 'disabled_number' }
 
 const PHONE_NUMBER_ID_PATTERN = /^[0-9]{1,32}$/
 
@@ -81,7 +81,11 @@ export function extractWebhookPhoneNumberIds(rawBody: string): ExtractedNumbers 
 type CredentialRow = {
   phone_number_id: unknown
   app_secret_enc: unknown
+  status?: unknown
 }
+
+/** Postgres undefined_table / PostgREST schema-cache miss: the table is not deployed yet. */
+const TABLE_MISSING_CODES = new Set(['42P01', 'PGRST205'])
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
@@ -96,18 +100,23 @@ export async function chooseWebhookSecret(
   try {
     const { data, error } = await supabaseAdmin
       .from('whatsapp_app_credentials')
-      .select('phone_number_id, app_secret_enc')
+      .select('phone_number_id, app_secret_enc, status')
       .in('phone_number_id', ids)
-      .eq('status', 'active')
 
     if (error) {
       console.error('[whatsapp/app-secret] credential lookup failed')
-      return { kind: 'lookup_failed' }
+      const code = (error as { code?: unknown }).code
+      return { kind: 'lookup_failed', tableMissing: typeof code === 'string' && TABLE_MISSING_CODES.has(code) }
     }
     rows = Array.isArray(data) ? (data as CredentialRow[]) : []
   } catch {
     console.error('[whatsapp/app-secret] credential lookup failed')
-    return { kind: 'lookup_failed' }
+    return { kind: 'lookup_failed', tableMissing: false }
+  }
+
+  // A disabled number must be refused, not quietly handed to the env secret.
+  if (rows.some((row) => row.status === 'disabled')) {
+    return { kind: 'reject', reason: 'disabled_number' }
   }
 
   const matched = new Set<string>()

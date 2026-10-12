@@ -136,8 +136,9 @@ function stubDb(
     msgUpsertFails?: boolean
     resolveContactThrows?: boolean
     optoutUnlinkedUpdateFails?: boolean
-    credRows?: { phone_number_id: string; app_secret_enc: string }[]
-    credLookupFails?: boolean
+    credRows?: { phone_number_id: string; app_secret_enc: string; status?: string }[]
+    credLookupFails?: boolean // table not deployed yet (42P01)
+    credLookupTransientFails?: boolean // any other lookup error
   } = {},
 ): Captured {
   const captured: Captured = { convoUpserts: [], msgUpserts: [], touchUpserts: [], updates: [], filters: {} }
@@ -204,8 +205,10 @@ function stubDb(
 
     if (table === 'whatsapp_app_credentials') {
       result = opts.credLookupFails
-        ? { data: null, error: { message: 'relation does not exist' } }
-        : { data: opts.credRows ?? [], error: null }
+        ? { data: null, error: { code: '42P01', message: 'relation does not exist' } }
+        : opts.credLookupTransientFails
+          ? { data: null, error: { message: 'connection timeout' } }
+          : { data: opts.credRows ?? [], error: null }
     }
 
     if (table === 'clients') {
@@ -558,6 +561,7 @@ describe('POST — 一条坏消息不能带走一整批', () => {
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
+        in: () => chain,
         lt: () => chain,
         single: async () => result,
         maybeSingle: async () => result,
@@ -748,13 +752,28 @@ describe('per-app signature secret', () => {
     expect(shared.msgUpserts.length).toBeGreaterThan(0)
   })
 
-  it('credLookupFails → env SECRET 签名 → 200（表缺失不能弄坏 CTS）；错误 secret → 503', async () => {
+  it('表没建（credLookupFails）→ env SECRET 签名 → 200（表缺失不能弄坏 CTS）；错误 secret → 503', async () => {
     stubDb({ credLookupFails: true })
     expect((await POST(makePost(messagePayload()))).status).toBe(200)
 
     const raw = JSON.stringify(messagePayload())
     const res = await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))
     expect(res.status).toBe(503)
+  })
+
+  it('密钥表查询瞬时出错（不是表没建）→ 即使用环境密钥签对也 503，不放行', async () => {
+    stubDb({ credLookupTransientFails: true })
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(503)
+  })
+
+  it('号码的密钥行被停用 → 401，环境密钥不能替它背书', async () => {
+    stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET, status: 'disabled' }],
+    })
+    expect((await POST(makePost(messagePayload()))).status).toBe(401)
+    const raw = JSON.stringify(messagePayload())
+    expect((await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))).status).toBe(401)
   })
 
   it('phone_number_id 是数字（未加引号）→ 401', async () => {
@@ -817,7 +836,7 @@ describe('per-app signature secret', () => {
     logSpy.mockRestore()
   })
 
-  it('凭据查询用 whatsapp_app_credentials 表，号码在 __in_phone_number_id 过滤里，status=active', async () => {
+  it('凭据查询用 whatsapp_app_credentials 表，号码在 __in_phone_number_id 过滤里', async () => {
     const captured = stubDb({
       credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET }],
     })
@@ -827,7 +846,6 @@ describe('per-app signature secret', () => {
     expect(mockFrom).toHaveBeenCalledWith('whatsapp_app_credentials')
     expect(captured.filters.whatsapp_app_credentials).toMatchObject({
       __in_phone_number_id: [PHONE_NUMBER_ID],
-      status: 'active',
     })
   })
 })

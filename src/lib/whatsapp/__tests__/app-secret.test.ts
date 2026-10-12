@@ -18,7 +18,7 @@ import {
   MAX_WEBHOOK_PHONE_NUMBER_IDS,
 } from '../app-secret'
 
-type Row = { phone_number_id: string; app_secret_enc: string }
+type Row = { phone_number_id: string; app_secret_enc: string; status?: string }
 
 type QueryRecord = {
   table: string
@@ -38,10 +38,6 @@ function makeFromMock(
       select: () => chain,
       in: (column: string, values: string[]) => {
         record.inArgs = [column, values]
-        return chain
-      },
-      eq: (column: string, value: string) => {
-        record.eqArgs = [column, value]
         if (typeof result === 'function') {
           return Promise.resolve(result())
         }
@@ -285,7 +281,7 @@ describe('chooseWebhookSecret', () => {
       makeFromMock({ data: null, error: { message: 'boom' } }) as never,
     )
     const result = await chooseWebhookSecret(['111'])
-    expect(result).toEqual({ kind: 'lookup_failed' })
+    expect(result).toEqual({ kind: 'lookup_failed', tableMissing: false })
     const logged = errorSpy.mock.calls.flat().join(' ')
     expect(logged).not.toContain('boom')
     errorSpy.mockRestore()
@@ -299,7 +295,7 @@ describe('chooseWebhookSecret', () => {
       }) as never,
     )
     const result = await chooseWebhookSecret(['111'])
-    expect(result).toEqual({ kind: 'lookup_failed' })
+    expect(result).toEqual({ kind: 'lookup_failed', tableMissing: false })
     const logged = errorSpy.mock.calls.flat().join(' ')
     expect(logged).not.toContain('network down')
     errorSpy.mockRestore()
@@ -313,6 +309,48 @@ describe('chooseWebhookSecret', () => {
     expect(queryRecords).toHaveLength(1)
     expect(queryRecords[0].table).toBe('whatsapp_app_credentials')
     expect(queryRecords[0].inArgs).toEqual(['phone_number_id', ['111', '222']])
-    expect(queryRecords[0].eqArgs).toEqual(['status', 'active'])
+  })
+})
+
+describe('chooseWebhookSecret — table missing, disabled rows, empty secrets', () => {
+  it.each(['42P01', 'PGRST205'])('error code %s → lookup_failed with tableMissing true', async (code) => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(supabaseAdmin.from).mockImplementation(
+      makeFromMock({ data: null, error: { code, message: 'relation does not exist' } }) as never,
+    )
+    expect(await chooseWebhookSecret(['111'])).toEqual({ kind: 'lookup_failed', tableMissing: true })
+    errorSpy.mockRestore()
+  })
+
+  it('a disabled row is refused, not handed to the env secret', async () => {
+    vi.mocked(supabaseAdmin.from).mockImplementation(
+      makeFromMock({
+        data: [{ phone_number_id: '111', app_secret_enc: 'enc:S1', status: 'disabled' }],
+        error: null,
+      }) as never,
+    )
+    expect(await chooseWebhookSecret(['111'])).toEqual({ kind: 'reject', reason: 'disabled_number' })
+  })
+
+  it('a disabled row among otherwise active ones is still refused', async () => {
+    vi.mocked(supabaseAdmin.from).mockImplementation(
+      makeFromMock({
+        data: [
+          { phone_number_id: '111', app_secret_enc: 'enc:S1', status: 'active' },
+          { phone_number_id: '222', app_secret_enc: 'enc:S1', status: 'disabled' },
+        ],
+        error: null,
+      }) as never,
+    )
+    expect(await chooseWebhookSecret(['111', '222'])).toEqual({ kind: 'reject', reason: 'disabled_number' })
+  })
+
+  it('a secret that decrypts to an empty string is rejected (an empty HMAC key is forgeable)', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(supabaseAdmin.from).mockImplementation(
+      makeFromMock({ data: [{ phone_number_id: '111', app_secret_enc: 'enc:' }], error: null }) as never,
+    )
+    expect(await chooseWebhookSecret(['111'])).toEqual({ kind: 'reject', reason: 'decrypt_failed' })
+    errorSpy.mockRestore()
   })
 })
