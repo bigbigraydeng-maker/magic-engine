@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-13
 done_on: 2026-10-13
-done_ref: pr:pending
+done_ref: pr:2535
 source: session:1a85e0eb
 verify_by: 2026-10-20
 verify_how: 登录后在团目录点开一个有订单的团，面板里出现「销售情况」及按出发日的数字；名单外账号看不到这一块；点「在付款总览里看明细」跳到该团的付款总览
