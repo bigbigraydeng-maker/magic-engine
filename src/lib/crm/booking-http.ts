@@ -18,6 +18,23 @@ import { asPlainObject, isUuid, readJsonBody } from '@/lib/tour-catalog/http'
 /** Matches an acceptable JSON content-type header (charset optional). */
 const JSON_CONTENT_TYPE = /^application\/json\s*(;\s*charset=[\w.-]+)?\s*$/i
 
+/**
+ * Add a `Server-Timing` header (`gate` = access check, `total` = whole handler) so the
+ * real server time can be read in browser DevTools. Durations only: no ids, no personal data.
+ */
+export function withServerTiming(
+  response: NextResponse,
+  startedAt: number,
+  gateMs: number,
+): NextResponse {
+  const total = Math.max(0, performance.now() - startedAt)
+  response.headers.set(
+    'Server-Timing',
+    `gate;dur=${Math.max(0, gateMs).toFixed(1)}, total;dur=${total.toFixed(1)}`,
+  )
+  return response
+}
+
 /** Build a JSON error response, optionally with a plain-language message. */
 export function jsonError(error: string, status: number, message?: string): NextResponse {
   const body: { error: string; message?: string } = { error }

@@ -353,8 +353,10 @@ export async function loadCatalogFacts(
   tourIds: string[],
   departureIds: string[],
 ): Promise<CatalogFacts> {
-  const tours = await loadTourFacts(db, clientId, tourIds)
-  const departures = await loadDepartureFacts(db, clientId, departureIds)
+  const [tours, departures] = await Promise.all([
+    loadTourFacts(db, clientId, tourIds),
+    loadDepartureFacts(db, clientId, departureIds),
+  ])
   return { tours, departures }
 }
 
@@ -494,7 +496,33 @@ export async function listContactsForNudge(
   if (ids.length === 0) {
     return out
   }
-  const touches = await listDncTouches(db, clientId, ids)
+  // The touchpoint read and the contact read do not depend on each other.
+  const [touches, rows] = await Promise.all([
+    listDncTouches(db, clientId, ids),
+    fetchContactRowsForNudge(db, clientId, ids),
+  ])
+  for (const raw of rows) {
+    if (!isRecord(raw)) {
+      continue
+    }
+    const id = str(raw.id)
+    if (id === null) {
+      continue
+    }
+    out.set(id, {
+      name: nullableStr(raw.display_name),
+      doNotContact: isDoNotContact(raw.do_not_contact === true, touches.get(id) ?? []),
+    })
+  }
+  return out
+}
+
+async function fetchContactRowsForNudge(
+  db: SupabaseClient,
+  clientId: string,
+  ids: string[],
+): Promise<unknown[]> {
+  const rows: unknown[] = []
   for (const group of chunk(ids, CHUNK_SIZE)) {
     const res = await db
       .from('contacts')
@@ -504,24 +532,9 @@ export async function listContactsForNudge(
     if (res.error) {
       throw new Error(res.error.message)
     }
-    for (const raw of rowsOf(res.data)) {
-      if (!isRecord(raw)) {
-        continue
-      }
-      const id = str(raw.id)
-      if (id === null) {
-        continue
-      }
-      out.set(id, {
-        name: nullableStr(raw.display_name),
-        doNotContact: isDoNotContact(
-          raw.do_not_contact === true,
-          touches.get(id) ?? [],
-        ),
-      })
-    }
+    rows.push(...rowsOf(res.data))
   }
-  return out
+  return rows
 }
 
 // --- booking members ----------------------------------------------------------
