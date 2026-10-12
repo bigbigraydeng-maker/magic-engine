@@ -110,8 +110,8 @@ export function StoryPackView({ clientId, preview, live, otherAuthorized, onChan
       const expires = typeof json.expires_at === 'string' ? json.expires_at : preview.expires_at_if_authorized
       setMessage(
         live
-          ? '已授权：到点会真的发出去。'
-          : `已授权：现在是演练模式，到点只检查、不会发出。注意：到 ${formatSlot(expires)} 之前，一旦开启真发，没发的内容会自动发出。`,
+          ? `已授权「${preview.title}」这一周：到点会真的发出去。`
+          : `已授权「${preview.title}」这一周：现在是演练模式，到点只检查、不会发出。注意：到 ${formatSlot(expires)} 之前，一旦开启真发，没发的内容会自动发出。`,
       )
     }
     // the notice is already set (and lives in the page), then stay busy until the fresh state is on screen

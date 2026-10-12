@@ -110,6 +110,7 @@ export default function StoryPage() {
               <select
                 value={selected ?? ''}
                 onChange={(e) => {
+                  setNotice(null)
                   setLoad('loading')
                   void refresh(e.target.value)
                 }}
