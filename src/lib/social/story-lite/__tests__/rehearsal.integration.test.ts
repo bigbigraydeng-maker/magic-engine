@@ -122,6 +122,12 @@ describe.skipIf(!REST_URL || !REST_KEY)('Story lite — rehearsal against a real
     expect(await store.getPack(packId, randomUUID())).toBeNull()
   })
 
+  it('lists the client\'s packs with their item counts (page list)', async () => {
+    const rows = await store.listPacksForClient(clientId, 10)
+    expect(rows.map((r) => [r.pack.id, r.item_count])).toEqual([[packId, 4]])
+    expect(await store.listPacksForClient(randomUUID(), 10)).toEqual([])
+  })
+
   it('previews: nothing blocks, a stable hash is returned', async () => {
     const preview = await buildLitePreview({ ports, packId, clientId, actor: ADMIN, now: T0 })
     expect(preview.ok).toBe(true)

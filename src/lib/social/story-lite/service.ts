@@ -92,7 +92,7 @@ function resolveLifetimeDays(lifetimeDays: number | undefined): LiteResult<numbe
   return ok(days)
 }
 
-function packState(pack: LitePack, now: Date): LitePackState {
+export function packState(pack: LitePack, now: Date): LitePackState {
   if (pack.revoked_at !== null) return 'REVOKED'
   if (pack.authorized_at === null) return 'DRAFT'
   if (pack.expires_at !== null && pack.expires_at > now.toISOString()) return 'AUTHORIZED'
@@ -444,12 +444,15 @@ async function summariseAfterRevoke(
 ): Promise<{
   sent: Array<{ item_id: string; provider_receipt: string | null }>
   in_flight: Array<{ item_id: string; status: LiteItemStatus }>
+  available: boolean
 }> {
   let items: LiteItem[] = []
+  let available = true
   try {
     items = await ports.store.getItems(packId, clientId)
   } catch {
-    items = []
+    // the pack IS revoked, but we could not read what was already sent: say so, never claim "nothing sent"
+    available = false
   }
 
   const sent = items
@@ -459,7 +462,7 @@ async function summariseAfterRevoke(
     .filter((item) => item.status === 'CLAIMED' || item.status === 'UNKNOWN_OUTCOME')
     .map((item) => ({ item_id: item.item_id, status: item.status }))
 
-  return { sent, in_flight: inFlight }
+  return { sent, in_flight: inFlight, available }
 }
 
 /** Revoke a pack: stops everything not yet sent. Already-published stories stay. */
@@ -467,6 +470,8 @@ export interface LiteRevokeOutcome {
   pack_id: string
   sent: Array<{ item_id: string; provider_receipt: string | null }>
   in_flight: Array<{ item_id: string; status: LiteItemStatus }>
+  /** False when the pack was stopped but the sent / in-flight summary could not be read. */
+  summary_available: boolean
   note: string
 }
 
@@ -496,5 +501,11 @@ export async function revokeLitePack(input: {
   })
 
   const summary = await summariseAfterRevoke(ports, packId, clientId)
-  return ok({ pack_id: packId, sent: summary.sent, in_flight: summary.in_flight, note: REVOKED_NOTE })
+  return ok({
+    pack_id: packId,
+    sent: summary.sent,
+    in_flight: summary.in_flight,
+    summary_available: summary.available,
+    note: REVOKED_NOTE,
+  })
 }

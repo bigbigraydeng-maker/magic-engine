@@ -9,7 +9,7 @@
  */
 import { computeItemFingerprint } from './fingerprint'
 import type { LiteStore } from './store'
-import type { LiteItem, LiteItemStatus, LitePack, LiteSwitches } from './types'
+import { isLiveFor, type LiteItem, type LiteItemStatus, type LitePack, type LiteSwitches } from './types'
 
 export interface SweepConfig {
   earlyMinutes: number
@@ -335,7 +335,7 @@ async function evaluateItem(
 ): Promise<SweepRecord | null> {
   if (item.status !== 'PENDING') return null
 
-  const live = deps.switches.live && deps.switches.clientIds.includes(pack.client_id.toLowerCase())
+  const live = isLiveFor(deps.switches, pack.client_id)
   const timing = timingDecision(item, deps.now, deps.config)
   if (timing !== null) return settleTiming(deps, item, timing, live)
 

@@ -34,3 +34,18 @@ export function toLiteResponse<T extends object>(result: LiteResult<T>): NextRes
   if (result.details !== undefined) body.details = result.details
   return NextResponse.json(body, { status: result.status })
 }
+
+/** Like `resolveLiteActor`, for routes that have no pack id (the pack list). */
+export async function resolveLiteClientActor(clientId: string): Promise<LiteActorResolution> {
+  if (!isUuid(clientId)) {
+    return { ok: false, response: NextResponse.json({ success: false, error: 'BAD_ID' }, { status: 400 }) }
+  }
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) {
+    return { ok: false, response: NextResponse.json({ success: false, error: access.error }, { status: access.status }) }
+  }
+  return {
+    ok: true,
+    actor: { id: access.user.id, email: access.user.email ?? '', allowedClientId: access.allowedClientId },
+  }
+}

@@ -109,3 +109,8 @@ export interface LiteSwitches {
   /** Lowercased client ids allowed to publish for real. */
   clientIds: string[]
 }
+
+/** Real publishing needs BOTH switches: the global one on, and this client on the list. One definition for the publisher and the page banner. */
+export function isLiveFor(switches: LiteSwitches, clientId: string): boolean {
+  return switches.live && switches.clientIds.includes(clientId.trim().toLowerCase())
+}
