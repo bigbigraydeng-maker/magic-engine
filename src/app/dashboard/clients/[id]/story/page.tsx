@@ -16,6 +16,14 @@ import { StoryPackView } from './StoryPackView'
 
 type LoadState = 'loading' | 'ready' | 'forbidden' | 'error'
 
+async function readPreview(url: string): Promise<LitePreview | 'forbidden' | 'failed'> {
+  const res = await fetch(url)
+  if (res.status === 401 || res.status === 403) return 'forbidden'
+  const json = (await res.json().catch(() => ({}))) as { success?: boolean } & Partial<LitePreview>
+  if (!res.ok || json.success !== true) return 'failed'
+  return json as LitePreview
+}
+
 export default function StoryPage() {
   const clientId = useParams().id as string
   const [load, setLoad] = useState<LoadState>('loading')
@@ -23,6 +31,7 @@ export default function StoryPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [preview, setPreview] = useState<LitePreview | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
+  const [verified, setVerified] = useState(false)
   const seq = useRef(0)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -44,20 +53,27 @@ export default function StoryPage() {
         setPreviewFailed(false)
         return setLoad('ready')
       }
-      const pRes = await fetch(`/api/clients/${clientId}/story-lite/${pick.pack_id}/preview`)
+      const previewUrl = `/api/clients/${clientId}/story-lite/${pick.pack_id}/preview`
+      // 1) fast first look (no picture re-download) so the page is on screen at once; 2) the full check enables authorising
+      const quick = await readPreview(`${previewUrl}?check_files=0`)
       if (stale()) return
-      if (pRes.status === 401 || pRes.status === 403) return setLoad('forbidden')
-      const pJson = (await pRes.json().catch(() => ({}))) as { success?: boolean } & Partial<LitePreview>
-      if (stale()) return
-      if (!pRes.ok || pJson.success !== true) {
+      if (quick === 'forbidden') return setLoad('forbidden')
+      if (quick === 'failed') {
         // keep the picker usable: only this week failed to read, and the page says so
         setPreview(null)
         setPreviewFailed(true)
         return setLoad('ready')
       }
       setPreviewFailed(false)
-      setPreview(pJson as LitePreview)
+      setVerified(false)
+      setPreview(quick)
       setLoad('ready')
+      const full = await readPreview(previewUrl)
+      if (stale()) return
+      if (full === 'forbidden') return setLoad('forbidden')
+      if (full === 'failed') return setLoad('error')
+      setPreview(full)
+      setVerified(true)
     } catch {
       if (!stale()) setLoad('error')
     }
@@ -126,7 +142,7 @@ export default function StoryPage() {
           )}
 
           {preview ? (
-            <StoryPackView clientId={clientId} preview={preview} live={list.live} otherAuthorized={list.packs.filter((p) => p.state === 'AUTHORIZED' && p.pack_id !== preview.pack_id).length}
+            <StoryPackView clientId={clientId} preview={preview} live={list.live} verified={verified} otherAuthorized={list.packs.filter((p) => p.state === 'AUTHORIZED' && p.pack_id !== preview.pack_id).length}
               onChanged={() => refresh()}
               onNotice={setNotice} />
           ) : previewFailed ? (

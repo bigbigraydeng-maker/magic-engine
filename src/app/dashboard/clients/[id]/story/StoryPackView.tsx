@@ -12,6 +12,7 @@ import {
   describePackState,
   describeProblem,
   describeStopResult,
+  thumbnailUrl,
   describeRange,
   formatSlot,
 } from '@/lib/social/story-lite/page-text'
@@ -21,6 +22,8 @@ interface Props {
   clientId: string
   preview: LitePreview
   live: boolean
+  /** False while only the fast first look is on screen: pictures not yet re-checked, so authorising stays off. */
+  verified: boolean
   /** Number of OTHER weeks that are still authorised (the stop button only stops this one). */
   otherAuthorized: number
   onChanged: () => Promise<void>
@@ -29,6 +32,7 @@ interface Props {
 }
 
 function Thumb({ item }: { item: LitePreviewItem }) {
+  const [small, setSmall] = useState(true)
   const frame = 'h-40 w-[90px] shrink-0 overflow-hidden rounded-lg bg-me-charcoal/10'
   if (item.media_kind === 'video') {
     return (
@@ -40,7 +44,14 @@ function Thumb({ item }: { item: LitePreviewItem }) {
   return (
     <div className={frame}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={item.media_url} alt={item.text_line} className="h-full w-full object-cover" loading="lazy" />
+      <img
+        src={small ? thumbnailUrl(item.media_url) : item.media_url}
+        alt={item.text_line}
+        className="h-full w-full object-cover"
+        loading="lazy"
+        decoding="async"
+        onError={() => setSmall(false)}
+      />
     </div>
   )
 }
@@ -69,13 +80,13 @@ function ItemCard({ item, showProblems, packState }: { item: LitePreviewItem; sh
   )
 }
 
-export function StoryPackView({ clientId, preview, live, otherAuthorized, onChanged, onNotice }: Props) {
+export function StoryPackView({ clientId, preview, live, verified, otherAuthorized, onChanged, onNotice }: Props) {
   const [busy, setBusy] = useState(false)
   const setMessage = onNotice
   const [confirmingStop, setConfirmingStop] = useState(false)
 
   const base = `/api/clients/${clientId}/story-lite/${preview.pack_id}`
-  const canAuthorize = preview.state === 'DRAFT' && preview.can_authorize
+  const canAuthorize = verified && preview.state === 'DRAFT' && preview.can_authorize
   const canStop = preview.state === 'AUTHORIZED' || preview.state === 'DRAFT'
 
   async function call(path: 'authorize' | 'revoke', body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
@@ -149,13 +160,18 @@ export function StoryPackView({ clientId, preview, live, otherAuthorized, onChan
       </ul>
 
       <div className="space-y-3 rounded-xl border border-black/10 bg-white p-4">
-        {preview.state === 'DRAFT' && preview.can_authorize && (
+        {preview.state === 'DRAFT' && !verified && (
+          <p role="status" className="text-sm font-medium text-me-charcoal">
+            正在核对图片是不是都还在、有没有被改过…核对完才能点「授权这一周」。
+          </p>
+        )}
+        {preview.state === 'DRAFT' && verified && preview.can_authorize && (
           <p className="text-sm leading-relaxed text-me-charcoal">
             你将授权：{describeRange(preview.items.map((i) => i.slot_at))}。授权的有效期{preview.lifetime_days}天，到{' '}
             {formatSlot(preview.expires_at_if_authorized)} 为止。
           </p>
         )}
-        {preview.state === 'DRAFT' && !preview.can_authorize && (
+        {preview.state === 'DRAFT' && verified && !preview.can_authorize && (
           <div className="space-y-1">
             <p className="text-sm font-medium text-[#B03A2E]">现在不能授权，先解决问题：</p>
             <ul className="space-y-0.5">

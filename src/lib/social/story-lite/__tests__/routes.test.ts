@@ -226,6 +226,19 @@ describe('preview GET', () => {
     expect(body.content_hash as string).toMatch(/^[0-9a-f]{64}$/)
   })
 
+  it('?check_files=0 is the fast look: skips the picture re-check, says so, and the full preview still checks', async () => {
+    const checkFile = vi.fn(async () => 'CHANGED' as const)
+    vi.mocked(createLiteServicePorts).mockReturnValue({ ...ports, checkFile })
+    const quick = await readJson(await previewGET(jsonRequest('GET', undefined, 'http://localhost/x?check_files=0'), params()))
+    expect(checkFile).not.toHaveBeenCalled()
+    expect(quick.files_checked).toBe(false)
+    expect(quick.can_authorize).toBe(true) // unchecked: the page must not authorise on this
+    const full = await readJson(await previewGET(jsonRequest('GET'), params()))
+    expect(checkFile).toHaveBeenCalledTimes(2)
+    expect(full.files_checked).toBeUndefined()
+    expect(full.can_authorize).toBe(false) // the real check catches the changed file
+  })
+
   it('returns 400 BAD_EXPIRY for lifetime_days=0', async () => {
     const res = await previewGET(jsonRequest('GET', undefined, 'http://localhost/x?lifetime_days=0'), params())
     expect(res.status).toBe(400)

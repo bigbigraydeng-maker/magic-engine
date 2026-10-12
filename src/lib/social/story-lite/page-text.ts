@@ -128,3 +128,14 @@ export function describeStopResult(title: string, sentCount: number, inFlightCou
   if (inFlightCount > 0) parts.push(`另有 ${inFlightCount} 条正在发或不确定有没有发出去，请到 Facebook 主页核对，已发出的要手动删除。`)
   return parts.join('')
 }
+
+/**
+ * A small picture for the page's thumbnail. Supabase storage can resize on the fly (about 70 KB instead of 2-3 MB);
+ * any other address is returned as is. The caller falls back to the original if the small one fails to load.
+ */
+export function thumbnailUrl(url: string): string {
+  const marker = '/storage/v1/object/public/'
+  const at = url.indexOf(marker)
+  if (at < 0 || url.includes('?')) return url
+  return `${url.slice(0, at)}/storage/v1/render/image/public/${url.slice(at + marker.length)}?width=180&height=320&resize=cover&quality=60`
+}
