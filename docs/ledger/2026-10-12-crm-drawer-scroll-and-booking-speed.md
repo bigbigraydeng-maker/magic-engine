@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-12
 done_on: 2026-10-12
-done_ref: pr:2503
+done_ref: pr:2502
 source: session:1a85e0eb
 verify_by: 2026-10-19
 verify_how: PM 在 CRM 全部客人页打开任意客人抽屉，鼠标滚轮只让抽屉里的内容滚动、背后的列表不动；浏览器开发者工具里付款进度接口的 Server-Timing 头能看到 gate 与 total 毫秒数，比上线当天快
