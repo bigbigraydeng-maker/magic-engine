@@ -1,13 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { deepseekAnalyzer, elevenlabsTranscriber, parseAnalysisJson } from '../vendors'
+import { deepseekAnalyzer, twilioTranscriber, parseAnalysisJson } from '../vendors'
 
 const okJson = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
 
-describe('vendors (ElevenLabs transcribe + DeepSeek analyse)', () => {
+describe('vendors (Twilio transcribe + DeepSeek analyse)', () => {
   const fetchMock = vi.fn()
   beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock)
-    vi.stubEnv('ELEVENLABS_API_KEY', 'el-test')
     vi.stubEnv('DEEPSEEK_API_KEY', 'ds-test')
   })
   afterEach(() => {
@@ -16,22 +15,38 @@ describe('vendors (ElevenLabs transcribe + DeepSeek analyse)', () => {
     vi.unstubAllEnvs()
   })
 
-  it('transcribes via ElevenLabs with the xi-api-key header', async () => {
-    fetchMock.mockResolvedValue(okJson({ text: ' hello there ' }))
-    const out = await elevenlabsTranscriber({ bytes: new Uint8Array([1, 2, 3]), filename: 'c.mp3' })
-    expect(out).toEqual({ text: 'hello there', model: 'scribe_v1' })
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('https://api.elevenlabs.io/v1/speech-to-text')
-    expect((init.headers as Record<string, string>)['xi-api-key']).toBe('el-test')
+  const INPUT = { recordingSid: 'RE' + 'a'.repeat(32), accountSid: 'AC' + 'b'.repeat(32), authToken: 'tok', serviceSid: 'GA' + 'c'.repeat(32) }
+
+  it('reuses an existing Twilio transcript for the recording and joins sentences by channel', async () => {
+    fetchMock
+      .mockResolvedValueOnce(okJson({ transcripts: [{ sid: 'GT1', status: 'completed' }] }))
+      .mockResolvedValueOnce(okJson({ sentences: [{ media_channel: 1, transcript: ' hi ' }, { media_channel: 2, transcript: '' }, { media_channel: 2, transcript: 'hello' }] }))
+    const out = await twilioTranscriber(INPUT)
+    expect(out).toEqual({ text: '声道1：hi\n声道2：hello', model: 'twilio-intelligence' })
+    const [url0, init0] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url0).toContain(`SourceSid=${INPUT.recordingSid}`)
+    expect((init0.headers as Record<string, string>).authorization).toBe(`Basic ${Buffer.from(`${INPUT.accountSid}:tok`).toString('base64')}`)
+    expect(fetchMock.mock.calls.some((c) => (c[1] as RequestInit).method === 'POST')).toBe(false)
   })
 
-  it('fails on empty transcript, http error and missing key', async () => {
-    fetchMock.mockResolvedValue(okJson({ text: '  ' }))
-    await expect(elevenlabsTranscriber({ bytes: new Uint8Array([1]), filename: 'c.mp3' })).rejects.toThrow('转写结果为空')
-    fetchMock.mockResolvedValue(new Response('no', { status: 401 }))
-    await expect(elevenlabsTranscriber({ bytes: new Uint8Array([1]), filename: 'c.mp3' })).rejects.toThrow('401')
-    vi.stubEnv('ELEVENLABS_API_KEY', '')
-    await expect(elevenlabsTranscriber({ bytes: new Uint8Array([1]), filename: 'c.mp3' })).rejects.toThrow('未配置')
+  it('submits a new transcript when none exists for the recording', async () => {
+    fetchMock
+      .mockResolvedValueOnce(okJson({ transcripts: [] }))
+      .mockResolvedValueOnce(okJson({ sid: 'GT2', status: 'completed' }))
+      .mockResolvedValueOnce(okJson({ sentences: [{ media_channel: 1, transcript: 'x' }] }))
+    await twilioTranscriber(INPUT)
+    const post = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(post[1].method).toBe('POST')
+    expect(String(post[1].body)).toContain('ServiceSid=')
+  })
+
+  it('fails on failed status, empty sentences and http error', async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ transcripts: [{ sid: 'GT3', status: 'failed' }] }))
+    await expect(twilioTranscriber(INPUT)).rejects.toThrow('转写失败')
+    fetchMock.mockResolvedValueOnce(okJson({ transcripts: [{ sid: 'GT4', status: 'completed' }] })).mockResolvedValueOnce(okJson({ sentences: [] }))
+    await expect(twilioTranscriber(INPUT)).rejects.toThrow('转写结果为空')
+    fetchMock.mockResolvedValueOnce(new Response('no', { status: 401 }))
+    await expect(twilioTranscriber(INPUT)).rejects.toThrow('401')
   })
 
   it('analyses via DeepSeek json mode, wraps transcript in delimiters and validates output', async () => {

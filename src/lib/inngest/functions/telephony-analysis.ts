@@ -10,7 +10,7 @@ import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { runCallAnalysis, MAX_STEP_ATTEMPTS } from '@/lib/telephony/transcribe/pipeline'
 import { supabaseAnalysisStore } from '@/lib/telephony/transcribe/store'
-import { deepseekAnalyzer, elevenlabsTranscriber } from '@/lib/telephony/transcribe/vendors'
+import { deepseekAnalyzer, twilioTranscriber } from '@/lib/telephony/transcribe/vendors'
 
 export const TELEPHONY_RECORDING_READY = 'telephony.call.recording.ready' as const
 
@@ -27,7 +27,7 @@ export const telephonyCallAnalysis = inngest.createFunction(
     const ref = { clientId: String(d.client_id ?? ''), provider: String(d.provider ?? ''), providerCallId: String(d.call_id ?? '') }
     if (!ref.clientId || !ref.provider || !ref.providerCallId) return { status: 'invalid_payload' as const }
     return step.run('analyse-call', () =>
-      runCallAnalysis({ store: supabaseAnalysisStore, transcribe: elevenlabsTranscriber, analyze: deepseekAnalyzer, env: (n) => process.env[n] }, ref),
+      runCallAnalysis({ store: supabaseAnalysisStore, transcribe: twilioTranscriber, analyze: deepseekAnalyzer, env: (n) => process.env[n] }, ref),
     )
   },
 )

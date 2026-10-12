@@ -110,7 +110,7 @@ const goodDeps = (store: AnalysisStore, over: Partial<Parameters<typeof runCallA
     raw: { summary: '想了解南岛团', language: 'en', facts: [{ key: 'travel_window' as const, value: 'March', quote: 'South Island tour in March', confidence: 0.9 }, { key: 'concern' as const, value: 'price', quote: 'too expensive for us', confidence: 0.9 }] },
     model: 'm-a',
   }),
-  env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : n === 'ELEVENLABS_API_KEY' || n === 'DEEPSEEK_API_KEY' ? 'k' : undefined),
+  env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : n === 'TWILIO_INTELLIGENCE_SERVICE_SID' || n === 'DEEPSEEK_API_KEY' ? 'k' : undefined),
   fetcher: audioFetch(),
   ...over,
 })

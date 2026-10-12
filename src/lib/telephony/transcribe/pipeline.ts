@@ -6,7 +6,7 @@
  * 整条流水线受连接上的 analysis_enabled 开关控制，默认关（客人对话要 CTS 书面同意后才开）。
  */
 
-import { downloadTwilioRecording, RecordingFetchError } from './recording'
+import { downloadTwilioRecording, recordingSidFromUrl, RecordingFetchError } from './recording'
 import { verifyFacts, ANALYSIS_SCHEMA_VERSION, type VerifiedAnalysis } from './analysis-schema'
 import { SECRET_REF_PATTERN } from '@/lib/telephony/twilio/ingest'
 import type { Analyzer, Transcriber } from './vendors'
@@ -106,7 +106,6 @@ export async function runCallAnalysis(
   if (call.recordingStatus === 'none') return { status: 'waiting', detail: 'no_recording_yet' }
 
   // ① 录音下载
-  let audio: Uint8Array | null = null
   if (call.recordingStatus !== 'downloaded') {
     if (call.recordingAttempts >= MAX_STEP_ATTEMPTS) return { status: 'recording_failed', detail: 'attempts_exhausted' }
     try {
@@ -120,7 +119,6 @@ export async function runCallAnalysis(
       const path = `${call.clientId}/${call.startedAt.slice(0, 4)}/${call.id}.mp3`
       await store.uploadRecording(path, rec.bytes, rec.contentType)
       await store.patchCall(call.id, { recordingStatus: 'downloaded', recordingStoragePath: path }, { stage: 'recording', status: 'downloaded' })
-      audio = rec.bytes
       call.recordingStoragePath = path
     } catch (e) {
       const c = errClass('recording', e)
@@ -130,7 +128,8 @@ export async function runCallAnalysis(
   }
 
   // 服务商密钥没配：直接等待，不耗次数、不记失败（补上密钥后下一轮自动继续）。
-  if (!deps.env('ELEVENLABS_API_KEY') || !deps.env('DEEPSEEK_API_KEY')) return { status: 'waiting', detail: 'config_missing' }
+  const serviceSid = deps.env('TWILIO_INTELLIGENCE_SERVICE_SID')
+  if (!serviceSid || !deps.env('DEEPSEEK_API_KEY')) return { status: 'waiting', detail: 'config_missing' }
 
   // ② 转写
   let transcript = await store.getTranscriptText(call.id)
@@ -140,8 +139,11 @@ export async function runCallAnalysis(
     const since = new Date(now.getTime() - 24 * 3600_000).toISOString()
     if ((await store.countTranscribedSince(conn.id, since)) >= DAILY_TRANSCRIBE_CAP) return { status: 'waiting', detail: 'daily_cap' }
     try {
-      audio ??= await store.downloadRecording(call.recordingStoragePath as string)
-      const out = await deps.transcribe({ bytes: audio, filename: `${call.id}.mp3` })
+      const url = call.recordingRawEventId ? await store.getRecordingUrl(call.recordingRawEventId) : null
+      const recordingSid = url ? recordingSidFromUrl(url) : null
+      const authToken = conn.secretRef && SECRET_REF_PATTERN.test(conn.secretRef) ? deps.env(conn.secretRef) : undefined
+      if (!recordingSid || !authToken) throw new RecordingFetchError('bad_url', '缺少录音编号或令牌')
+      const out = await deps.transcribe({ recordingSid, accountSid: conn.accountSid, authToken, serviceSid })
       await store.saveTranscript({ callId: call.id, clientId: call.clientId, text: out.text, model: out.model })
       await store.patchCall(call.id, { transcriptStatus: 'done' }, { stage: 'transcript', status: 'done' })
       transcript = out.text

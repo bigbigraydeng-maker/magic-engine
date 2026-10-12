@@ -1,18 +1,21 @@
 /**
- * 转写 / 分析的外部服务调用：转写 = ElevenLabs Scribe（语音识别），分析 = DeepSeek（文字理解）。
+ * 转写 / 分析的外部服务调用：转写 = Twilio 自带的转写服务（直接转它自己存的录音），分析 = DeepSeek（文字理解）。
  * 密钥必须在函数内部读取（CLAUDE.md §7）。DeepSeek 没有语音识别接口，所以两步用两家。
  */
 
 import { ANALYSIS_JSON_SCHEMA, FACT_KEYS, RawAnalysisSchema, RawFactSchema, type RawAnalysis } from './analysis-schema'
 
-export const TRANSCRIBE_MODEL = 'scribe_v1'
+export const TRANSCRIBE_MODEL = 'twilio-intelligence'
 export const ANALYZE_MODEL = 'deepseek-chat'
-const TRANSCRIBE_URL = 'https://api.elevenlabs.io/v1/speech-to-text'
+const TWILIO_INTEL = 'https://intelligence.twilio.com/v2'
+const TRANSCRIBE_POLL_MS = 5_000
+const TRANSCRIBE_MAX_WAIT_MS = 90_000
 const ANALYZE_URL = 'https://api.deepseek.com/chat/completions'
 const REQUEST_TIMEOUT_MS = 120_000
 
+export interface TranscribeInput { recordingSid: string; accountSid: string; authToken: string; serviceSid: string }
 export interface Transcriber {
-  (audio: { bytes: Uint8Array; filename: string }): Promise<{ text: string; model: string }>
+  (input: TranscribeInput): Promise<{ text: string; model: string }>
 }
 export interface Analyzer {
   (transcript: string): Promise<{ raw: RawAnalysis; model: string }>
@@ -24,19 +27,52 @@ function requireKey(name: string): string {
   return v
 }
 
-export const elevenlabsTranscriber: Transcriber = async ({ bytes, filename }) => {
-  const form = new FormData()
-  form.append('model_id', TRANSCRIBE_MODEL)
-  form.append('file', new Blob([Buffer.from(bytes)], { type: 'audio/mpeg' }), filename)
-  const res = await fetch(TRANSCRIBE_URL, {
-    method: 'POST',
-    headers: { 'xi-api-key': requireKey('ELEVENLABS_API_KEY') },
-    body: form,
+interface TwilioTranscript { sid?: string; status?: string }
+interface TwilioSentence { media_channel?: number; transcript?: string }
+
+async function twilioIntel<T>(i: TranscribeInput, method: 'GET' | 'POST', path: string, form?: Record<string, string>): Promise<T> {
+  const res = await fetch(`${TWILIO_INTEL}${path}`, {
+    method,
+    headers: {
+      authorization: `Basic ${Buffer.from(`${i.accountSid}:${i.authToken}`).toString('base64')}`,
+      ...(form ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
+    },
+    body: form ? new URLSearchParams(form).toString() : undefined,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
   if (!res.ok) throw new Error(`转写服务返回 ${res.status}`)
-  const out = (await res.json()) as { text?: unknown }
-  const text = typeof out.text === 'string' ? out.text.trim() : ''
+  return (await res.json()) as T
+}
+
+/**
+ * Twilio 一条录音只允许一份转写：先按录音找已有的（重试时复用），没有才提交。
+ * 在本步内最多等 90 秒；还没转完就报错，下一轮补扫会接着取同一份，不会重复提交、重复计费。
+ */
+export const twilioTranscriber: Transcriber = async (i) => {
+  const found = await twilioIntel<{ transcripts?: TwilioTranscript[] }>(i, 'GET', `/Transcripts?SourceSid=${encodeURIComponent(i.recordingSid)}&PageSize=1`)
+  let t = found.transcripts?.[0]
+  if (!t?.sid) {
+    t = await twilioIntel<TwilioTranscript>(i, 'POST', '/Transcripts', {
+      ServiceSid: i.serviceSid,
+      Channel: JSON.stringify({ media_properties: { source_sid: i.recordingSid } }),
+    })
+  }
+  const sid = t.sid
+  if (!sid) throw new Error('转写没有编号')
+  const deadline = Date.now() + TRANSCRIBE_MAX_WAIT_MS
+  let status = t.status
+  while (status !== 'completed') {
+    if (status === 'failed' || status === 'canceled') throw new Error('转写失败')
+    if (Date.now() > deadline) throw new Error('转写还没完成')
+    await new Promise((r) => setTimeout(r, TRANSCRIBE_POLL_MS))
+    status = (await twilioIntel<TwilioTranscript>(i, 'GET', `/Transcripts/${sid}`)).status
+  }
+  const sentences = await twilioIntel<{ sentences?: TwilioSentence[] }>(i, 'GET', `/Transcripts/${sid}/Sentences?PageSize=1000`)
+  const text = (sentences.sentences ?? [])
+    .map((x) => ({ ch: x.media_channel ?? 0, text: (x.transcript ?? '').trim() }))
+    .filter((x) => x.text)
+    .map((x) => `声道${x.ch}：${x.text}`)
+    .join('\n')
   if (!text) throw new Error('转写结果为空')
   return { text, model: TRANSCRIBE_MODEL }
 }
