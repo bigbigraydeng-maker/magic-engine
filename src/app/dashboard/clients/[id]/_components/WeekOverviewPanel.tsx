@@ -21,7 +21,15 @@ import {
 import type { LitePackState } from '@/lib/social/story-lite/service'
 import type { OverviewReel, OverviewStoryItem, PublishingQuota, WeekOverview } from '@/lib/social/week-overview/build'
 
-const ROLE_LABEL: Record<string, string> = { inspiration: '灵感', fact: '事实', invite: '邀请私信' }
+const ROLE_LABEL: Record<string, string> = {
+  inspiration: '灵感',
+  fact: '事实',
+  invite: '邀请私信',
+  itinerary: '讲清行程',
+  price_inclusions: '价格与含项',
+  reason: '理由',
+  acquisition: '拉新',
+}
 
 /** "用了 3/3" or "名额未配置": a missing quota is never shown as 0. */
 function usedOf(used: number, limit: number | null | undefined): string {

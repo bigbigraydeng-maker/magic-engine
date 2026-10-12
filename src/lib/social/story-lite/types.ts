@@ -12,8 +12,8 @@ export type LiteChannel = 'facebook_story' | 'instagram_story'
 export type LiteMediaKind = 'image' | 'video'
 
 /** What a Story is for in the day (the calendar spreads the three roles over the three time slots). */
-export type LiteRole = 'inspiration' | 'fact' | 'invite'
-export const LITE_ROLES: readonly LiteRole[] = ['inspiration', 'fact', 'invite']
+export type LiteRole = 'inspiration' | 'fact' | 'invite' | 'itinerary' | 'price_inclusions' | 'reason' | 'acquisition'
+export const LITE_ROLES: readonly LiteRole[] = ['inspiration', 'fact', 'invite', 'itinerary', 'price_inclusions', 'reason', 'acquisition']
 
 export const LITE_ITEM_STATUSES = [
   'PENDING', // waiting for its time (or for the next sweep after a harmless retry)
