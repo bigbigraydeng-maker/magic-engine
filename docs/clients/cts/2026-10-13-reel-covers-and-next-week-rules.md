@@ -1,0 +1,28 @@
+# CTS Reel 干净封面 + 下周包（10/19–10/25）起的三条规则
+
+- **日期**：2026-10-13 ｜ 窗口：75 号 ｜ 来源：74 号转 PM 看过首帧总览图后的三点（PM 没要求本周返工；Story 替换稿 v2 已通过，`stories-replacement-v2/` 与 `2026-10-13-story-replacement-v2.md` 保持不动，由 84 号入库）。
+
+## 一、下周包起的三条规则
+
+1. **版式要有变化，去掉「下半截死黑」**：此前所有 Story 都是「上半照片、下半截压黑、字在中间」同一版式；下半留黑原是给链接贴纸让位，PM 已定不放贴纸，下周起去掉这块死黑，字的位置与明暗做出变化（字可在上/中/下，亮图配深字或浅字，不再每张底部大片压黑）。
+2. **整体要亮**：旅游账号画面偏亮；渐变只在文字下面做局部托底，不再整体压暗。
+3. **Reel 封面单独指定干净一帧（过马良）**：不要让「字叠在一起的第一帧」或「NZ$2,XXX 没填完的悬念价」当封面。已公开的不动。
+
+## 二、4 条待发 Reel 的干净封面（规则 3）
+
+位置：`~/Dropbox/MagicLab_Studio/CTS/output/reel-covers/`（9:16，1080×1920；只有 logo + 一行小标签 + 一行标题；无价格悬念、无出发日横幅；亮图，标题下做局部深色渐变托底；标题在 y≈1250–1400，4:5 与 1:1 中心裁切都不会被切）。
+
+| 封面文件 | 对应 Reel / 工单 | 图 | 标题 |
+|---|---|---|---|
+| `cover_shanghai2.png` | Shanghai #2 `ef3ee050-3bd2-41c7-b256-cbf1b30c8183` | Unsplash `42Ah4zCgT-w`（Xihu, Hangzhou，西湖亭台） | What is in the price? |
+| `cover_boc2.png` | Best of China #2 `b8a6461b-6254-414b-af67-24da2cecea06` | Unsplash `ZZV1FOGaQ8s`（兵马俑，一眼可认） | 4 cities, 1 trip |
+| `cover_tale2.png` | Tale #2 `d03abd74-f520-4b99-a1a4-fb7b2f53b42f` | Unsplash `G8EMij997dE`（Guangzhou，中国高铁；不配地名） | 10 days, 2 cities |
+| `cover_naturalchina.png` | Natural China `cc876dc3-5776-4c3a-becb-4dda36b57137` | Unsplash `K5TxOEJ0GOw`（Zhangjiajie） | Natural China（16 days from Auckland） |
+
+**马良审**：4 张都「干净、不像半成品、值得当封面」；封面之间、与已公开 4 条封面（e8c5b66a、v5r2、BOC#1、Tale#1）两两不撞（亭台橙绿、兵马俑灰、高铁白、张家界青绿）。必改 1 项：Tale#2 标题压在白色高铁车头上对比弱 → **已改**（加深局部渐变，白字托在深色上；我肉眼复看已清楚，**该张改后没有再送马良复审**）。下 1/3 亮度：Shanghai#2 84.8、BOC#2 53.7、Tale#2 101.8（改前）、Natural China 57.5。
+
+**封面怎么用不在本卡范围**：工厂发布目前未必支持指定封面；这 4 张是「指定的干净封面」，由 74 号/发布设计决定如何挂上（或用于 Reel 之外的封面展示）。我没动工单。
+
+## 三、已发现但不归我处理的问题
+
+- **已公开的上海 `e8c5b66a`（10-06）封面是 7 位真实客人合影（脸清楚）**，不符合「不要客人正脸」；已报 74 号，等 PM 决定，**我没动**。
