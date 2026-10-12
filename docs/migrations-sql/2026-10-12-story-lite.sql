@@ -1,5 +1,5 @@
--- Story "lite" auto-publish — 2 tables.  >>> NOT APPLIED. <<<
--- Apply only after explicit PM approval. service-role only (every policy MUST say TO service_role).
+-- Story "lite" auto-publish — 2 tables.  APPLIED to prod 2026-10-12 08:51 UTC (migration 20261012_story_lite_tables, PM "建表").
+-- service-role only (every policy MUST say TO service_role). Rollback: drop table public.story_items; drop table public.story_packs;
 -- Replaces the superseded 8-table draft (2026-10-12-story-auto-publish-NOT-APPLIED.sql).
 -- Design: docs/specs/2026-10-12-story-lite-design.md
 
