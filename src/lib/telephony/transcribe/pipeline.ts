@@ -8,9 +8,14 @@
 
 import { downloadTwilioRecording, RecordingFetchError } from './recording'
 import { verifyFacts, ANALYSIS_SCHEMA_VERSION, type VerifiedAnalysis } from './analysis-schema'
+import { SECRET_REF_PATTERN } from '@/lib/telephony/twilio/ingest'
 import type { Analyzer, Transcriber } from './vendors'
 
 export const MAX_STEP_ATTEMPTS = 3
+/** 每个连接每天最多转写这么多通（花钱的闸；打开开关前的最低限度保护）。 */
+export const DAILY_TRANSCRIBE_CAP = 60
+/** 本期只支持 Twilio 的录音取回；别的供应商先不处理（不白烧重试次数）。 */
+export const SUPPORTED_PROVIDERS = ['twilio'] as const
 
 export interface AnalysisCall {
   id: string
@@ -25,6 +30,7 @@ export interface AnalysisCall {
   recordingRawEventId: string | null
   recordingStoragePath: string | null
   recordingAttempts: number
+  transcriptAttempts: number
   analysisAttempts: number
   touchpointId: string | null
 }
@@ -34,7 +40,10 @@ export interface AnalysisConnection {
   clientId: string
   accountSid: string
   secretRef: string | null
+  active: boolean
   analysisEnabled: boolean
+  /** 开关打开的时刻；更早开始的通话永远不处理。 */
+  analysisEnabledAt: string | null
 }
 
 export interface AnalysisStore {
@@ -45,14 +54,18 @@ export interface AnalysisStore {
   downloadRecording(path: string): Promise<Uint8Array>
   patchCall(id: string, patch: Partial<{
     recordingStatus: AnalysisCall['recordingStatus']; recordingStoragePath: string | null; recordingAttempts: number
-    transcriptStatus: AnalysisCall['transcriptStatus']; summaryStatus: AnalysisCall['summaryStatus']
-    analysisAttempts: number; analysisError: string | null
+    transcriptStatus: AnalysisCall['transcriptStatus']; transcriptAttempts: number
+    summaryStatus: AnalysisCall['summaryStatus']; analysisAttempts: number; analysisError: string | null
   }>, receipt: { stage: string; status: string; detail?: string }): Promise<void>
   getTranscriptText(callId: string): Promise<string | null>
   saveTranscript(row: { callId: string; clientId: string; text: string; model: string }): Promise<void>
+  /** 已有分析就返回它的 id，不覆盖（人工复核结果不能被重跑冲掉）。 */
+  getAnalysisId(callId: string): Promise<string | null>
   saveAnalysis(row: { callId: string; clientId: string; model: string; analysis: VerifiedAnalysis }): Promise<string>
-  /** 把「有一份待复核的分析」标到对应触点的元数据上（不写正文，不改 outcome 等既有字段）。 */
+  /** 数据库里原子合并，把「有一份待复核分析」标到触点元数据上（不写正文）。 */
   markTouchpoint(touchpointId: string, clientId: string, analysisId: string): Promise<void>
+  /** 这个连接从某时刻起已经转写了多少通（日上限用）。 */
+  countTranscribedSince(connectionId: string, sinceIso: string): Promise<number>
 }
 
 export interface PipelineDeps {
@@ -61,6 +74,7 @@ export interface PipelineDeps {
   analyze: Analyzer
   env: (name: string) => string | undefined
   fetcher?: typeof fetch
+  now?: () => Date
 }
 
 export interface PipelineResult {
@@ -68,7 +82,12 @@ export interface PipelineResult {
   detail?: string
 }
 
-const safeMsg = (e: unknown) => (e instanceof Error ? e.message : 'unknown').replace(/\+?\d[\d\s-]{6,}\d/g, '[num]').slice(0, 200)
+/** 失败只记「类别」，不记原始报错文字（报错里可能带着转写片段 / 客人原话）。 */
+function errClass(stage: 'recording' | 'transcript' | 'analysis', e: unknown): string {
+  if (e instanceof RecordingFetchError) return `recording_${e.code}`
+  if (stage === 'analysis') return e instanceof SyntaxError || (e instanceof Error && e.name === 'ZodError') ? 'analysis_json_invalid' : 'analysis_vendor_error'
+  return `${stage}_error`
+}
 
 export async function runCallAnalysis(
   deps: PipelineDeps,
@@ -77,10 +96,12 @@ export async function runCallAnalysis(
   const { store } = deps
   const call = await store.getCall(ref.clientId, ref.provider, ref.providerCallId)
   if (!call) return { status: 'skipped', detail: 'call_not_found' }
+  if (!(SUPPORTED_PROVIDERS as readonly string[]).includes(call.provider)) return { status: 'skipped', detail: 'unsupported_provider' }
   const conn = await store.getConnection(call.connectionId)
   if (!conn || conn.clientId !== call.clientId) return { status: 'skipped', detail: 'connection_mismatch' }
-  // 隐私闸：默认关。没有 CTS 书面同意之前，客人的通话不进转写。
-  if (!conn.analysisEnabled) return { status: 'skipped', detail: 'analysis_not_enabled' }
+  // 隐私闸：默认关；停用的连接不处理；开关打开之前开始的通话永远不处理（不回捞历史录音）。
+  if (!conn.active || !conn.analysisEnabled || !conn.analysisEnabledAt) return { status: 'skipped', detail: 'analysis_not_enabled' }
+  if (Date.parse(call.startedAt) < Date.parse(conn.analysisEnabledAt)) return { status: 'skipped', detail: 'before_enabled_at' }
   if (call.summaryStatus === 'done') return { status: 'done' }
   if (call.recordingStatus === 'none') return { status: 'waiting', detail: 'no_recording_yet' }
 
@@ -91,48 +112,74 @@ export async function runCallAnalysis(
     try {
       const url = call.recordingRawEventId ? await store.getRecordingUrl(call.recordingRawEventId) : null
       if (!url) throw new RecordingFetchError('bad_url', '没有录音链接')
-      const token = conn.secretRef ? deps.env(conn.secretRef) : undefined
+      // 令牌变量名只许 TWILIO_AUTH_TOKEN_ 前缀（和接收口同一条规则）：库里写错一行不能让服务把别的密钥当 Twilio 令牌发出去。
+      const token = conn.secretRef && SECRET_REF_PATTERN.test(conn.secretRef) ? deps.env(conn.secretRef) : undefined
       if (!token) throw new RecordingFetchError('http_error', '服务器没配 Twilio 令牌')
       const rec = await downloadTwilioRecording({ url, accountSid: conn.accountSid, authToken: token, fetcher: deps.fetcher })
-      const path = `${call.clientId}/${call.startedAt.slice(0, 4)}/${call.providerCallId}.mp3`
+      // 路径只用数据库 uuid：供应商给的通话编号不进文件名（防路径穿越与同名覆盖）。
+      const path = `${call.clientId}/${call.startedAt.slice(0, 4)}/${call.id}.mp3`
       await store.uploadRecording(path, rec.bytes, rec.contentType)
       await store.patchCall(call.id, { recordingStatus: 'downloaded', recordingStoragePath: path }, { stage: 'recording', status: 'downloaded' })
       audio = rec.bytes
       call.recordingStoragePath = path
     } catch (e) {
-      await store.patchCall(call.id, { recordingStatus: 'failed', recordingAttempts: call.recordingAttempts + 1, analysisError: safeMsg(e) }, { stage: 'recording', status: 'failed', detail: safeMsg(e) })
-      return { status: 'recording_failed', detail: safeMsg(e) }
+      const c = errClass('recording', e)
+      await store.patchCall(call.id, { recordingStatus: 'failed', recordingAttempts: call.recordingAttempts + 1, analysisError: c }, { stage: 'recording', status: 'failed', detail: c })
+      return { status: 'recording_failed', detail: c }
     }
   }
 
   // ② 转写
   let transcript = await store.getTranscriptText(call.id)
   if (!transcript) {
-    if (call.analysisAttempts >= MAX_STEP_ATTEMPTS) return { status: 'transcript_failed', detail: 'attempts_exhausted' }
+    if (call.transcriptAttempts >= MAX_STEP_ATTEMPTS) return { status: 'transcript_failed', detail: 'attempts_exhausted' }
+    const now = (deps.now ?? (() => new Date()))()
+    const since = new Date(now.getTime() - 24 * 3600_000).toISOString()
+    if ((await store.countTranscribedSince(conn.id, since)) >= DAILY_TRANSCRIBE_CAP) return { status: 'waiting', detail: 'daily_cap' }
     try {
       audio ??= await store.downloadRecording(call.recordingStoragePath as string)
-      const out = await deps.transcribe({ bytes: audio, filename: `${call.providerCallId}.mp3` })
+      const out = await deps.transcribe({ bytes: audio, filename: `${call.id}.mp3` })
       await store.saveTranscript({ callId: call.id, clientId: call.clientId, text: out.text, model: out.model })
       await store.patchCall(call.id, { transcriptStatus: 'done' }, { stage: 'transcript', status: 'done' })
       transcript = out.text
     } catch (e) {
-      await store.patchCall(call.id, { transcriptStatus: 'failed', analysisAttempts: call.analysisAttempts + 1, analysisError: safeMsg(e) }, { stage: 'transcript', status: 'failed', detail: safeMsg(e) })
-      return { status: 'transcript_failed', detail: safeMsg(e) }
+      const c = errClass('transcript', e)
+      await store.patchCall(call.id, { transcriptStatus: 'failed', transcriptAttempts: call.transcriptAttempts + 1, analysisError: c }, { stage: 'transcript', status: 'failed', detail: c })
+      return { status: 'transcript_failed', detail: c }
     }
+  } else if (call.transcriptStatus !== 'done') {
+    // 转写其实已经存下了，但状态没跟上（上次中途出错）：纠正状态，不重做。
+    await store.patchCall(call.id, { transcriptStatus: 'done' }, { stage: 'transcript', status: 'done', detail: 'status_repaired' })
   }
 
   // ③ 分析（原话核验）
   if (call.analysisAttempts >= MAX_STEP_ATTEMPTS) return { status: 'analysis_failed', detail: 'attempts_exhausted' }
-  try {
-    const out = await deps.analyze(transcript)
-    const verified = verifyFacts(out.raw, transcript)
-    const analysisId = await store.saveAnalysis({ callId: call.id, clientId: call.clientId, model: out.model, analysis: verified })
-    await store.patchCall(call.id, { summaryStatus: 'done' }, { stage: 'analysis', status: 'pending_review', detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} v${ANALYSIS_SCHEMA_VERSION}` })
-    if (call.touchpointId) await store.markTouchpoint(call.touchpointId, call.clientId, analysisId)
-    return { status: 'done' }
-  } catch (e) {
-    // 摘要失败就是失败：不写假摘要、不标 done。
-    await store.patchCall(call.id, { summaryStatus: 'failed', analysisAttempts: call.analysisAttempts + 1, analysisError: safeMsg(e) }, { stage: 'analysis', status: 'failed', detail: safeMsg(e) })
-    return { status: 'analysis_failed', detail: safeMsg(e) }
+  let analysisId = await store.getAnalysisId(call.id)
+  if (!analysisId) {
+    try {
+      const out = await deps.analyze(transcript)
+      const verified = verifyFacts(out.raw, transcript)
+      analysisId = await store.saveAnalysis({ callId: call.id, clientId: call.clientId, model: out.model, analysis: verified })
+      const truncated = transcript.length > 60_000 ? ' truncated=1' : ''
+      await store.patchCall(call.id, { summaryStatus: 'done' }, { stage: 'analysis', status: 'pending_review', detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} v${ANALYSIS_SCHEMA_VERSION}${truncated}` })
+    } catch (e) {
+      // 摘要失败就是失败：不写假摘要、不标 done。
+      const c = errClass('analysis', e)
+      await store.patchCall(call.id, { summaryStatus: 'failed', analysisAttempts: call.analysisAttempts + 1, analysisError: c }, { stage: 'analysis', status: 'failed', detail: c })
+      return { status: 'analysis_failed', detail: c }
+    }
+  } else {
+    // 分析其实已存下（上次中途出错），状态没跟上：纠正状态，不重跑。
+    await store.patchCall(call.id, { summaryStatus: 'done' }, { stage: 'analysis', status: 'pending_review', detail: 'status_repaired' })
   }
+
+  // 触点标记失败不影响「分析已完成」：只记回执，不把已完成的分析改成失败、不重跑花钱。
+  if (call.touchpointId) {
+    try {
+      await store.markTouchpoint(call.touchpointId, call.clientId, analysisId)
+    } catch {
+      await store.patchCall(call.id, {}, { stage: 'touchpoint_mark', status: 'failed', detail: 'mark_failed' })
+    }
+  }
+  return { status: 'done' }
 }

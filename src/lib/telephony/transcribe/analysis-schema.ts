@@ -47,14 +47,61 @@ export interface VerifiedAnalysis {
   droppedFacts: number
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[\s　"'“”‘’.,，。!！?？、:;；]+/g, '')
+const norm = (s: string) => s.toLowerCase().replace(/[\s\u3000"'“”‘’.,，。!！?？、:;；]+/g, '')
 
-/** 事实的原话必须真的出现在转写里（忽略空白和标点、大小写）。 */
+/** 原话归一化后至少这么长才算有分量（「好的」「ok」「是的」这类应答不能当证据）。 */
+export const MIN_QUOTE_CHARS = 6
+
+const ENGLISH_NUMBERS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  fifteen: 15, twenty: 20, thirty: 30, forty: 40, fifty: 50,
+}
+const CN_DIGIT: Record<string, number> = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
+
+/** 抽出文本里出现的数字（阿拉伯数字、k/万/千 简写、英文数字词、常见中文数字）。只用来核对「值里的数字在原话里有依据」。 */
+export function numbersIn(text: string): Set<number> {
+  const out = new Set<number>()
+  const t = text.toLowerCase()
+  for (const m of t.matchAll(/(\d+(?:[.,]\d+)*)\s*(k|万|千|w)?/g)) {
+    const base = Number(m[1].replace(/,/g, ''))
+    if (!Number.isFinite(base)) continue
+    out.add(base)
+    if (m[2] === 'k' || m[2] === '千') out.add(base * 1000)
+    if (m[2] === '万' || m[2] === 'w') out.add(base * 10000)
+  }
+  for (const [w, n] of Object.entries(ENGLISH_NUMBERS)) if (new RegExp(`\\b${w}\\b`).test(t)) out.add(n)
+  for (const m of t.matchAll(/([零一二两三四五六七八九十]+)([万千百]?)/g)) {
+    const digits = [...m[1]].map((c) => CN_DIGIT[c])
+    let n = 0
+    if (digits.length === 1) n = digits[0]
+    else if (digits[0] === 10) n = 10 + (digits[1] ?? 0)
+    else if (digits.length === 2 && digits[1] === 10) n = digits[0] * 10
+    else n = Number(digits.join(''))
+    const unit = m[2] === '万' ? 10000 : m[2] === '千' ? 1000 : m[2] === '百' ? 100 : 1
+    out.add(n * unit)
+  }
+  return out
+}
+
+const NUMERIC_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['budget', 'party_size'])
+const NEGATION = /(don'?t|do not|never|stop)\s+(call|contact|ring|phone)|别再|不要再|不用再|请勿|不要打|别打了|remove (me|my number)/i
+
+/** 数值类事实：值里的每个数字都必须能在原话里找到依据（防「原话是真的、数字是编的」）。 */
+function valueSupported(f: RawFact): boolean {
+  if (f.key === 'do_not_contact') return NEGATION.test(f.quote)
+  if (!NUMERIC_KEYS.has(f.key)) return true
+  const need = [...numbersIn(f.value)]
+  if (need.length === 0) return false
+  const have = numbersIn(f.quote)
+  return need.every((n) => have.has(n))
+}
+
+/** 事实的原话必须真的出现在转写里，且够长；数值类和「别再联系」还要核对值与原话一致。 */
 export function verifyFacts(raw: RawAnalysis, transcript: string): VerifiedAnalysis {
   const t = norm(transcript)
   const kept = raw.facts.filter((f) => {
     const q = norm(f.quote)
-    return q.length >= 2 && t.includes(q)
+    return q.length >= MIN_QUOTE_CHARS && t.includes(q) && valueSupported(f)
   })
   return { summary: raw.summary, language: raw.language, facts: kept, droppedFacts: raw.facts.length - kept.length }
 }

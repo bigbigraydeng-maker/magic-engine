@@ -10,7 +10,7 @@ export const supabaseAnalysisStore: AnalysisStore = {
   async getCall(clientId, provider, providerCallId) {
     const { data, error } = await supabaseAdmin
       .from('telephony_calls')
-      .select('id, client_id, connection_id, provider, provider_call_id, started_at, recording_status, transcript_status, summary_status, recording_raw_event_id, recording_storage_path, recording_attempts, analysis_attempts, touchpoint_id')
+      .select('id, client_id, connection_id, provider, provider_call_id, started_at, recording_status, transcript_status, summary_status, recording_raw_event_id, recording_storage_path, recording_attempts, transcript_attempts, analysis_attempts, touchpoint_id')
       .eq('client_id', clientId)
       .eq('provider', provider)
       .eq('provider_call_id', providerCallId)
@@ -22,7 +22,7 @@ export const supabaseAnalysisStore: AnalysisStore = {
       providerCallId: data.provider_call_id, startedAt: data.started_at,
       recordingStatus: data.recording_status, transcriptStatus: data.transcript_status, summaryStatus: data.summary_status,
       recordingRawEventId: data.recording_raw_event_id, recordingStoragePath: data.recording_storage_path,
-      recordingAttempts: data.recording_attempts ?? 0, analysisAttempts: data.analysis_attempts ?? 0,
+      recordingAttempts: data.recording_attempts ?? 0, transcriptAttempts: data.transcript_attempts ?? 0, analysisAttempts: data.analysis_attempts ?? 0,
       touchpointId: data.touchpoint_id,
     } as AnalysisCall
   },
@@ -30,20 +30,20 @@ export const supabaseAnalysisStore: AnalysisStore = {
   async getConnection(id) {
     const { data, error } = await supabaseAdmin
       .from('telephony_connections')
-      .select('id, client_id, provider_account_id, secret_ref, analysis_enabled')
+      .select('id, client_id, provider_account_id, secret_ref, active, analysis_enabled, analysis_enabled_at')
       .eq('id', id)
       .maybeSingle()
     if (error) throw new Error(`读连接失败: ${error.message}`)
     if (!data) return null
-    return { id: data.id, clientId: data.client_id, accountSid: data.provider_account_id, secretRef: data.secret_ref, analysisEnabled: data.analysis_enabled === true } as AnalysisConnection
+    return { id: data.id, clientId: data.client_id, accountSid: data.provider_account_id, secretRef: data.secret_ref, active: data.active === true, analysisEnabled: data.analysis_enabled === true, analysisEnabledAt: data.analysis_enabled_at ?? null } as AnalysisConnection
   },
 
   async getRecordingUrl(rawEventId) {
     const { data, error } = await supabaseAdmin.from('telephony_raw_events').select('payload').eq('id', rawEventId).maybeSingle()
     if (error) throw new Error(`读录音事件失败: ${error.message}`)
     const p = (data?.payload ?? {}) as Record<string, unknown>
-    // Twilio 录音回调字段 RecordingUrl；VoIPLine 是 call_recording_link
-    const url = p.RecordingUrl ?? p.call_recording_link
+    // 本期只支持 Twilio 的录音回调字段 RecordingUrl
+    const url = p.RecordingUrl
     return typeof url === 'string' ? url : null
   },
 
@@ -67,6 +67,7 @@ export const supabaseAnalysisStore: AnalysisStore = {
     if (patch.recordingAttempts !== undefined) row.recording_attempts = patch.recordingAttempts
     if (patch.transcriptStatus !== undefined) row.transcript_status = patch.transcriptStatus
     if (patch.summaryStatus !== undefined) row.summary_status = patch.summaryStatus
+    if (patch.transcriptAttempts !== undefined) row.transcript_attempts = patch.transcriptAttempts
     if (patch.analysisAttempts !== undefined) row.analysis_attempts = patch.analysisAttempts
     if (patch.analysisError !== undefined) row.analysis_error = patch.analysisError
     const { error } = await supabaseAdmin.from('telephony_calls').update(row).eq('id', id)
@@ -86,31 +87,43 @@ export const supabaseAnalysisStore: AnalysisStore = {
     if (error) throw new Error(`存转写失败: ${error.message}`)
   },
 
+  async getAnalysisId(callId) {
+    const { data, error } = await supabaseAdmin.from('telephony_call_analyses').select('id').eq('call_id', callId).eq('schema_version', ANALYSIS_SCHEMA_VERSION).maybeSingle()
+    if (error) throw new Error(`读分析失败: ${error.message}`)
+    return (data?.id as string | undefined) ?? null
+  },
+
   async saveAnalysis(row) {
+    // 只新增、不覆盖：已有的分析（可能已被人工复核）不能被重跑冲掉。
     const { data, error } = await supabaseAdmin
       .from('telephony_call_analyses')
-      .upsert(
-        {
-          call_id: row.callId, client_id: row.clientId, schema_version: ANALYSIS_SCHEMA_VERSION, model: row.model,
-          summary: row.analysis.summary, language: row.analysis.language, facts: row.analysis.facts,
-          dropped_facts: row.analysis.droppedFacts, review_status: 'pending_review',
-        },
-        { onConflict: 'call_id,schema_version' },
-      )
+      .insert({
+        call_id: row.callId, client_id: row.clientId, schema_version: ANALYSIS_SCHEMA_VERSION, model: row.model,
+        summary: row.analysis.summary, language: row.analysis.language, facts: row.analysis.facts,
+        dropped_facts: row.analysis.droppedFacts, review_status: 'pending_review',
+      })
       .select('id')
       .single()
-    if (error || !data) throw new Error(`存分析失败: ${error?.message ?? 'empty'}`)
+    if (error) {
+      const { data: existing } = await supabaseAdmin.from('telephony_call_analyses').select('id').eq('call_id', row.callId).eq('schema_version', ANALYSIS_SCHEMA_VERSION).maybeSingle()
+      if (existing) return existing.id as string
+      throw new Error('存分析失败')
+    }
     return data.id as string
   },
 
   async markTouchpoint(touchpointId, clientId, analysisId) {
-    const { data: cur } = await supabaseAdmin.from('contact_touchpoints').select('metadata').eq('id', touchpointId).eq('client_id', clientId).maybeSingle()
-    if (!cur) return
-    const { error } = await supabaseAdmin
-      .from('contact_touchpoints')
-      .update({ metadata: { ...((cur.metadata as Record<string, unknown>) ?? {}), call_analysis_id: analysisId, call_analysis_review: 'pending_review' } })
-      .eq('id', touchpointId)
-      .eq('client_id', clientId)
-    if (error) throw new Error(`标记触点失败: ${error.message}`)
+    const { error } = await supabaseAdmin.rpc('telephony_mark_touchpoint', { p_touchpoint_id: touchpointId, p_client_id: clientId, p_analysis_id: analysisId })
+    if (error) throw new Error('标记触点失败')
+  },
+
+  async countTranscribedSince(connectionId, sinceIso) {
+    const { count, error } = await supabaseAdmin
+      .from('telephony_transcripts')
+      .select('call_id, telephony_calls!inner(connection_id)', { count: 'exact', head: true })
+      .eq('telephony_calls.connection_id', connectionId)
+      .gte('created_at', sinceIso)
+    if (error) throw new Error(`数转写失败: ${error.message}`)
+    return count ?? 0
   },
 }

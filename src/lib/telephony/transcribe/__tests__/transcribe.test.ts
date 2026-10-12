@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { downloadTwilioRecording, MAX_RECORDING_BYTES, RecordingFetchError } from '../recording'
-import { verifyFacts, type RawAnalysis } from '../analysis-schema'
+import { numbersIn, verifyFacts, type RawAnalysis } from '../analysis-schema'
 import { runCallAnalysis, MAX_STEP_ATTEMPTS, type AnalysisCall, type AnalysisConnection, type AnalysisStore } from '../pipeline'
 
 const ACCT = 'AC' + 'a'.repeat(32)
@@ -62,13 +62,14 @@ describe('分析：原话核验', () => {
   })
 })
 
-function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<AnalysisConnection> } = {}) {
+function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<AnalysisConnection>; transcribedToday?: number; markFails?: boolean } = {}) {
+  const over2 = { transcribedToday: over.transcribedToday ?? 0 }
   const call: AnalysisCall = {
     id: 'call-row-1', clientId: 'client-1', connectionId: 'conn-1', provider: 'twilio', providerCallId: 'CA1', startedAt: '2026-10-12T11:37:24.000Z',
     recordingStatus: 'pending_download', transcriptStatus: 'not_started', summaryStatus: 'not_started', recordingRawEventId: 'raw-rec', recordingStoragePath: null,
-    recordingAttempts: 0, analysisAttempts: 0, touchpointId: 'tp-1', ...over.call,
+    recordingAttempts: 0, transcriptAttempts: 0, analysisAttempts: 0, touchpointId: 'tp-1', ...over.call,
   }
-  const conn: AnalysisConnection = { id: 'conn-1', clientId: 'client-1', accountSid: ACCT, secretRef: 'TWILIO_AUTH_TOKEN_CTS', analysisEnabled: true, ...over.conn }
+  const conn: AnalysisConnection = { id: 'conn-1', clientId: 'client-1', accountSid: ACCT, secretRef: 'TWILIO_AUTH_TOKEN_CTS', active: true, analysisEnabled: true, analysisEnabledAt: '2026-10-12T00:00:00.000Z', ...over.conn }
   const files = new Map<string, Uint8Array>()
   const transcripts = new Map<string, string>()
   const analyses: Array<{ callId: string; summary: string; facts: unknown[]; dropped: number }> = []
@@ -86,13 +87,16 @@ function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<Analysis
       if (patch.recordingAttempts !== undefined) call.recordingAttempts = patch.recordingAttempts
       if (patch.transcriptStatus) call.transcriptStatus = patch.transcriptStatus
       if (patch.summaryStatus) call.summaryStatus = patch.summaryStatus
+      if (patch.transcriptAttempts !== undefined) call.transcriptAttempts = patch.transcriptAttempts
       if (patch.analysisAttempts !== undefined) call.analysisAttempts = patch.analysisAttempts
       receipts.push(`${r.stage}:${r.status}`)
     },
     async getTranscriptText(id) { return transcripts.get(id) ?? null },
     async saveTranscript(r) { transcripts.set(r.callId, r.text) },
+    async getAnalysisId(id) { return analyses.find((a) => a.callId === id) ? 'an-1' : null },
+    async countTranscribedSince() { return over2.transcribedToday },
     async saveAnalysis(r) { analyses.push({ callId: r.callId, summary: r.analysis.summary, facts: r.analysis.facts, dropped: r.analysis.droppedFacts }); return 'an-1' },
-    async markTouchpoint(tp, _c, an) { marks.push(`${tp}:${an}`) },
+    async markTouchpoint(tp, _c, an) { if (over.markFails) throw new Error('boom'); marks.push(`${tp}:${an}`) },
   }
   return { store, call, files, transcripts, analyses, receipts, marks }
 }
@@ -119,11 +123,11 @@ describe('分析流水线', () => {
     expect(touched).toBe(false)
     expect(m.files.size).toBe(0)
   })
-  it('完整成功：录音入私有桶（按客户/年份/通话编号）→ 转写 → 分析（编造的事实被丢）→ 标记触点待复核', async () => {
+  it('完整成功：录音入私有桶（按客户/年份/数据库 uuid，不用供应商给的通话编号）→ 转写 → 分析（编造的事实被丢）→ 标记触点待复核', async () => {
     const m = makeStore()
     const r = await runCallAnalysis(goodDeps(m.store), ref)
     expect(r.status).toBe('done')
-    expect([...m.files.keys()]).toEqual(['client-1/2026/CA1.mp3'])
+    expect([...m.files.keys()]).toEqual(['client-1/2026/call-row-1.mp3'])
     expect(m.call).toMatchObject({ recordingStatus: 'downloaded', transcriptStatus: 'done', summaryStatus: 'done' })
     expect(m.analyses[0].facts).toHaveLength(1)
     expect(m.analyses[0].dropped).toBe(1)
@@ -146,11 +150,12 @@ describe('分析流水线', () => {
     const r2 = await runCallAnalysis(goodDeps(m2.store, { env: () => undefined }), ref)
     expect(r2.status).toBe('recording_failed')
   })
-  it('转写失败：不写假摘要，transcript_status=failed，summary 仍是 not_started', async () => {
+  it('转写失败：不写假摘要，transcript_status=failed，summary 仍是 not_started；错误只记类别、不带原文', async () => {
     const m = makeStore()
-    const r = await runCallAnalysis(goodDeps(m.store, { transcribe: async () => { throw new Error('vendor down') } }), ref)
-    expect(r.status).toBe('transcript_failed')
-    expect(m.call).toMatchObject({ transcriptStatus: 'failed', summaryStatus: 'not_started', analysisAttempts: 1 })
+    const r = await runCallAnalysis(goodDeps(m.store, { transcribe: async () => { throw new Error('vendor down: 客人说我叫张三') } }), ref)
+    expect(r).toMatchObject({ status: 'transcript_failed', detail: 'transcript_error' })
+    expect(m.call).toMatchObject({ transcriptStatus: 'failed', summaryStatus: 'not_started', transcriptAttempts: 1, analysisAttempts: 0 })
+    expect(JSON.stringify(m.receipts)).not.toContain('张三')
     expect(m.analyses).toHaveLength(0)
   })
   it('分析失败：summary_status=failed（不是 done），不标触点；转写已存下来，重试不用重转', async () => {
@@ -167,7 +172,7 @@ describe('分析流水线', () => {
   it('失败次数达到上限：停手，不再无限重试', async () => {
     const m = makeStore({ call: { recordingAttempts: MAX_STEP_ATTEMPTS } })
     expect((await runCallAnalysis(goodDeps(m.store), ref)).detail).toBe('attempts_exhausted')
-    const m2 = makeStore({ call: { recordingStatus: 'downloaded', recordingStoragePath: 'p', analysisAttempts: MAX_STEP_ATTEMPTS } })
+    const m2 = makeStore({ call: { recordingStatus: 'downloaded', recordingStoragePath: 'p', transcriptAttempts: MAX_STEP_ATTEMPTS } })
     m2.files.set('p', new Uint8Array(1))
     expect((await runCallAnalysis(goodDeps(m2.store), ref)).status).toBe('transcript_failed')
   })
@@ -178,5 +183,78 @@ describe('分析流水线', () => {
   it('连接和通话不是同一个客户：不处理', async () => {
     const m = makeStore({ conn: { clientId: 'other-client' } })
     expect((await runCallAnalysis(goodDeps(m.store), ref)).status).toBe('skipped')
+  })
+})
+
+describe('审查后补的防线', () => {
+  it('开关打开之前开始的通话：永远不处理（不回捞历史录音）', async () => {
+    const m = makeStore({ conn: { analysisEnabledAt: '2026-10-13T00:00:00.000Z' } })
+    expect(await runCallAnalysis(goodDeps(m.store), ref)).toMatchObject({ status: 'skipped', detail: 'before_enabled_at' })
+    expect(m.files.size).toBe(0)
+  })
+  it('连接停用 / 没有开关时间 / 不是 Twilio：不处理', async () => {
+    expect((await runCallAnalysis(goodDeps(makeStore({ conn: { active: false } }).store), ref)).detail).toBe('analysis_not_enabled')
+    expect((await runCallAnalysis(goodDeps(makeStore({ conn: { analysisEnabledAt: null } }).store), ref)).detail).toBe('analysis_not_enabled')
+    expect((await runCallAnalysis(goodDeps(makeStore({ call: { provider: 'voipline' } }).store), { ...ref, provider: 'voipline' })).detail).toBe('unsupported_provider')
+  })
+  it('令牌变量名不在 TWILIO_AUTH_TOKEN_ 前缀内：不读环境变量、不下载', async () => {
+    const m = makeStore({ conn: { secretRef: 'SUPABASE_SERVICE_ROLE_KEY' } })
+    let asked: string[] = []
+    const r = await runCallAnalysis(goodDeps(m.store, { env: (n: string) => { asked.push(n); return 'leak' } }), ref)
+    expect(r.status).toBe('recording_failed')
+    expect(asked).toEqual([])
+  })
+  it('每天转写次数到上限：等，不花钱、不消耗重试次数', async () => {
+    const m = makeStore({ call: { recordingStatus: 'downloaded', recordingStoragePath: 'p' }, transcribedToday: 60 })
+    m.files.set('p', new Uint8Array(1))
+    expect(await runCallAnalysis(goodDeps(m.store), ref)).toMatchObject({ status: 'waiting', detail: 'daily_cap' })
+    expect(m.call.transcriptAttempts).toBe(0)
+  })
+  it('分析已存下，只是标触点失败：不改成失败、不重跑分析、不重复花钱', async () => {
+    const m = makeStore({ markFails: true })
+    const r = await runCallAnalysis(goodDeps(m.store), ref)
+    expect(r.status).toBe('done')
+    expect(m.call.summaryStatus).toBe('done')
+    expect(m.analyses).toHaveLength(1)
+  })
+  it('转写失败 2 次后成功，分析仍有 3 次机会（两步的次数分开算）', async () => {
+    const m = makeStore({ call: { recordingStatus: 'downloaded', recordingStoragePath: 'p', transcriptAttempts: 2 } })
+    m.files.set('p', new Uint8Array(1))
+    const r = await runCallAnalysis(goodDeps(m.store), ref)
+    expect(r.status).toBe('done')
+    expect(m.call.analysisAttempts).toBe(0)
+  })
+  it('分析 JSON 坏了：只记类别 analysis_json_invalid，不带模型输出片段', async () => {
+    const m = makeStore()
+    const r = await runCallAnalysis(goodDeps(m.store, { analyze: async () => { JSON.parse('{"summary": "客人说他的名字是王小明') ; throw new Error('x') } }), ref)
+    expect(r.detail).toBe('analysis_json_invalid')
+    expect(JSON.stringify(m.receipts)).not.toContain('王小明')
+  })
+})
+
+describe('原话核验加强', () => {
+  const transcript = 'Please do not call us again, we are not interested. 我们预算大概两万纽币，四个人。 好的 ok 是的'
+  const f = (key: RawAnalysis['facts'][number]['key'], value: string, quote: string) => ({ key, value, quote, confidence: 0.9 })
+  const run = (facts: RawAnalysis['facts']) => verifyFacts({ summary: 's', language: null, facts }, transcript).facts.map((x) => x.key)
+
+  it('通用应答词当原话 → 丢（「好的」「ok」「是的」）', () => {
+    expect(run([f('do_not_contact', '客人要求别再联系', '好的'), f('budget', 'NZD 200000', 'ok'), f('party_size', '4', '是的')])).toEqual([])
+  })
+  it('原话是真的、数字是编的 → 丢；数字有依据（两万=20000、四=4）→ 留', () => {
+    expect(run([f('budget', 'NZD 200000', '预算大概两万纽币'), f('party_size', '12', '四个人，好的')])).toEqual([])
+    expect(run([f('budget', 'NZD 20000', '我们预算大概两万纽币'), f('party_size', '4', '我们预算大概两万纽币，四个人')])).toEqual(['budget', 'party_size'])
+  })
+  it('数值类事实的值里没有数字 → 丢', () => {
+    expect(run([f('budget', '很多', '我们预算大概两万纽币')])).toEqual([])
+  })
+  it('do_not_contact 的原话必须真的是拒绝联系的话', () => {
+    expect(run([f('do_not_contact', '要求别再联系', 'we are not interested.')])).toEqual([])
+    expect(run([f('do_not_contact', '要求别再联系', 'Please do not call us again')])).toEqual(['do_not_contact'])
+  })
+  it('numbersIn：k / 万 / 英文数字词 / 中文数字', () => {
+    expect([...numbersIn('about 20k and four people, 两万, 三百')].sort((a, b) => a - b)).toEqual([4, 20, 300, 2000, 20000].sort((a, b) => a - b).filter((n) => [...numbersIn('about 20k and four people, 两万, 三百')].includes(n)))
+    expect(numbersIn('20k').has(20000)).toBe(true)
+    expect(numbersIn('four people').has(4)).toBe(true)
+    expect(numbersIn('两万').has(20000)).toBe(true)
   })
 })
