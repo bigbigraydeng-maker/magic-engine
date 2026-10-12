@@ -71,7 +71,11 @@ export default function StoryPage() {
       const full = await readPreview(previewUrl)
       if (stale()) return
       if (full === 'forbidden') return setLoad('forbidden')
-      if (full === 'failed') return setLoad('error')
+      if (full === 'failed') {
+        // keep the fast look on screen; authorising stays off (verified is false) and the page says why
+        setNotice('图片核对没有完成，现在不能授权。请刷新页面再试；还不行就找开发。')
+        return
+      }
       setPreview(full)
       setVerified(true)
     } catch {

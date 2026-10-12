@@ -168,7 +168,6 @@ async function loadPackAndItems(
   return ok({ pack, items })
 }
 
-/** Build the per-item preview rows and collect every problem code seen. */
 /** The preview re-downloads every picture to compare its hash: do them side by side, not one after another. */
 const PREVIEW_CHECK_CONCURRENCY = 9
 
@@ -187,6 +186,7 @@ async function mapWithLimit<T, R>(inputs: T[], limit: number, task: (input: T) =
   return results
 }
 
+/** Build the per-item preview rows and collect every problem code seen. */
 async function buildPreviewItems(
   ports: LiteServicePorts,
   items: LiteItem[],
