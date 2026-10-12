@@ -32,6 +32,9 @@ export interface StoryActor {
   allowedClientId: string | null
 }
 
+/** An open record counts for 24 hours; after that the person must open the item again. */
+export const STORY_OPEN_VALIDITY_MS = 24 * 60 * 60 * 1000
+
 /** An item needs a person to have opened it before the pack can be authorised. */
 export function itemRequiresOpen(item: Pick<StoryItemSpec, 'contains_price' | 'names_place' | 'media_kind'>): boolean {
   return item.contains_price || item.names_place || item.media_kind === 'video'
@@ -71,6 +74,11 @@ export interface StoryPackPreview {
   pack_id: string
   client_id: string
   items: StoryPreviewItem[]
+  /**
+   * Hash of everything this preview shows (`computeContentManifestHash`). Confirming an authorisation
+   * must send it back; a different value means the pack changed after it was previewed.
+   */
+  content_hash: string
   counts: { total: number; requires_open: number; opened: number; with_problems: number }
   /** True only when no item has a problem and every item that must be opened has been. */
   can_authorize: boolean

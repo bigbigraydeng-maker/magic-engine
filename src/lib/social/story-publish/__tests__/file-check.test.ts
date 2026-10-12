@@ -105,3 +105,64 @@ describe('checkMediaFile', () => {
     expect(spy).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('checkMediaFile hardening', () => {
+  function chunked(chunks: Uint8Array[], onCancel?: () => void): Response {
+    let index = 0
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (index < chunks.length) controller.enqueue(chunks[index++])
+        else controller.close()
+      },
+      cancel() {
+        onCancel?.()
+      },
+    })
+    return new Response(stream, { status: 200 })
+  }
+
+  it('hashes a body delivered in several chunks', async () => {
+    const half = Math.floor(BODY.length / 2)
+    const fetcher: typeof fetch = async () => chunked([BODY.slice(0, half), BODY.slice(half)])
+    await expect(checkMediaFile(item(), { fetcher })).resolves.toBe('OK')
+  })
+
+  it('stops reading a chunked body that grows past the cap, without a content-length', async () => {
+    let cancelled = false
+    const big = new Uint8Array(64)
+    const fetcher: typeof fetch = async () => chunked([big, big, big, big], () => { cancelled = true })
+    await expect(checkMediaFile(item(), { fetcher, maxBytes: 100 })).resolves.toBe('UNREACHABLE')
+    expect(cancelled).toBe(true)
+  })
+
+  it('only downloads from allowed hosts (exact host or subdomain); an empty list denies all', async () => {
+    const calls: string[] = []
+    const fetcher: typeof fetch = async (url) => {
+      calls.push(String(url))
+      return okResponse(BODY)
+    }
+    const ok = item({ media_url: 'https://storage.example.com/a.png' })
+    await expect(checkMediaFile(ok, { fetcher, allowedHosts: ['storage.example.com'] })).resolves.toBe('OK')
+    await expect(checkMediaFile(ok, { fetcher, allowedHosts: ['example.com'] })).resolves.toBe('OK')
+    calls.length = 0
+    await expect(checkMediaFile(ok, { fetcher, allowedHosts: ['other.com'] })).resolves.toBe('UNREACHABLE')
+    await expect(checkMediaFile(ok, { fetcher, allowedHosts: [] })).resolves.toBe('UNREACHABLE')
+    await expect(
+      checkMediaFile(item({ media_url: 'https://evil-example.com/a.png' }), { fetcher, allowedHosts: ['example.com'] }),
+    ).resolves.toBe('UNREACHABLE')
+    await expect(
+      checkMediaFile(item({ media_url: 'https://169.254.169.254/latest' }), { fetcher, allowedHosts: ['example.com'] }),
+    ).resolves.toBe('UNREACHABLE')
+    expect(calls).toEqual([])
+  })
+
+  it('asks for a fresh copy (no cache)', async () => {
+    const seen: Array<RequestInit | undefined> = []
+    const fetcher: typeof fetch = async (_url, init) => {
+      seen.push(init)
+      return okResponse(BODY)
+    }
+    await checkMediaFile(item(), { fetcher })
+    expect(seen[0]?.cache).toBe('no-store')
+  })
+})

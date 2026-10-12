@@ -187,6 +187,69 @@ describe.skipIf(!REST_URL || !REST_KEY)('SupabaseStoryStore against a real datab
 
   // ---- 1. read paths ------------------------------------------------------
 
+  /** The hash the REAL preview shows right now: a confirmation must carry it. */
+  async function previewHash(): Promise<string> {
+    const preview = await buildStoryPackPreview({ ports, packId, clientId, actor: ADMIN, now: NOW })
+    if (!preview.ok) throw new Error('preview failed: ' + preview.error)
+    return preview.value.content_hash
+  }
+
+  it('only links items that belong to the named pack and client', async () => {
+    // a second pack of the same client, with its own items
+    const otherPackId = randomUUID()
+    const otherItems: Array<Record<string, unknown>> = packItems(clientId, otherPackId).map((row) => ({
+      ...row,
+      media_sha256: freshSha(),
+    }))
+    const insert = await db.from('story_pack_items').insert(otherItems)
+    if (insert.error) throw insert.error
+
+    const foreign = { item_id: String(otherItems[0].item_id), channel: 'facebook_story' as const }
+    await expect(
+      store.linkItemsToAuthorization({ authId: randomUUID(), packId, clientId, items: [foreign] }),
+    ).rejects.toThrow('unknown item')
+    await expect(
+      store.linkItemsToAuthorization({ authId: randomUUID(), packId: otherPackId, clientId: randomUUID(), items: [foreign] }),
+    ).rejects.toThrow('unknown item')
+
+    const stored = await db.from('story_pack_items').select('authorization_id').eq('pack_id', otherPackId)
+    expect(stored.error).toBeNull()
+    expect((stored.data ?? []).every((row: { authorization_id: string | null }) => row.authorization_id === null)).toBe(true)
+  })
+
+  it('reads only the active circuit marks of the named pack', async () => {
+    const pausedPackId = randomUUID()
+    const rows = [
+      { client_id: clientId, pack_id: pausedPackId, channel: null, item_id: null, reason_code: 'MANUAL', created_by: 'pm@example.com' },
+      { client_id: clientId, pack_id: pausedPackId, channel: 'facebook_story', item_id: randomUUID(), reason_code: 'UNKNOWN_OUTCOME', created_by: 'system:circuit' },
+      {
+        client_id: clientId, pack_id: pausedPackId, channel: 'instagram_story', item_id: null, reason_code: 'LIFTED',
+        created_by: 'system:circuit', lifted_at: new Date().toISOString(), lifted_by_email: 'pm@example.com',
+      },
+    ]
+    const insert = await db.from('story_pack_pauses').insert(rows)
+    if (insert.error) throw insert.error
+
+    const marks = await store.getActivePauses(pausedPackId, clientId)
+    expect(marks).toHaveLength(2)
+    expect(marks).toContainEqual({ channel: null, item_id: null })
+    expect(marks.some((m) => m.channel === 'facebook_story' && m.item_id !== null)).toBe(true)
+    expect(marks.some((m) => m.channel === 'instagram_story')).toBe(false)
+    expect(await store.getActivePauses(packId, clientId)).toEqual([])
+    expect(await store.getActivePauses(pausedPackId, randomUUID())).toEqual([])
+  })
+
+  it('refuses a confirmation that carries a stale preview hash and writes nothing', async () => {
+    const result = await authorizeStoryPack({
+      ports, packId, clientId, actor: ADMIN, confirm: true, expectedContentHash: 'f'.repeat(64), now: NOW,
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe('PACK_CHANGED_SINCE_PREVIEW')
+    const auths = await db.from('story_pack_auth').select('id').eq('pack_id', packId)
+    expect(auths.data ?? []).toEqual([])
+  })
+
   it('reads the pack back sorted with canonical timestamps', async () => {
     const read = await store.getPackItems(packId, clientId)
     expect(read).toHaveLength(3)
@@ -282,6 +345,7 @@ describe.skipIf(!REST_URL || !REST_KEY)('SupabaseStoryStore against a real datab
       clientId,
       actor: ADMIN,
       confirm: true,
+      expectedContentHash: await previewHash(),
       now: NOW,
     })
     expect(result.ok).toBe(false)
@@ -337,6 +401,7 @@ describe.skipIf(!REST_URL || !REST_KEY)('SupabaseStoryStore against a real datab
       clientId,
       actor: ADMIN,
       confirm: true,
+      expectedContentHash: await previewHash(),
       now: NOW,
     })
     expect(result.ok).toBe(true)
@@ -432,6 +497,7 @@ describe.skipIf(!REST_URL || !REST_KEY)('SupabaseStoryStore against a real datab
       clientId,
       actor: ADMIN,
       confirm: true,
+      expectedContentHash: await previewHash(),
       now: NOW,
     })
     expect(second.ok).toBe(false)

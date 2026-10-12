@@ -9,7 +9,12 @@ import { z } from 'zod'
 
 import { createStoryServicePorts } from '@/lib/social/story-publish/ports'
 import { recordStoryItemOpen } from '@/lib/social/story-publish/preview'
-import { internalError, resolveStoryActor, toResponse } from '@/lib/social/story-publish/route-support'
+import {
+  internalError,
+  requireJsonContentType,
+  resolveStoryActor,
+  toResponse,
+} from '@/lib/social/story-publish/route-support'
 import { STORY_CHANNELS } from '@/lib/social/story-publish/types'
 
 const BodySchema = z
@@ -19,6 +24,9 @@ const BodySchema = z
 export async function POST(req: NextRequest, { params }: { params: { id: string; packId: string } }): Promise<NextResponse> {
   const resolved = await resolveStoryActor(params.id, params.packId)
   if (!resolved.ok) return resolved.response
+
+  const notJson = requireJsonContentType(req)
+  if (notJson) return notJson
 
   const parsed = BodySchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {

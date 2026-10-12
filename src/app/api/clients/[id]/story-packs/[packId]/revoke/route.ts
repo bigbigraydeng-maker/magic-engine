@@ -10,13 +10,21 @@ import { z } from 'zod'
 
 import { createStoryServicePorts } from '@/lib/social/story-publish/ports'
 import { revokeStoryPack } from '@/lib/social/story-publish/authorize'
-import { internalError, resolveStoryActor, toResponse } from '@/lib/social/story-publish/route-support'
+import {
+  internalError,
+  requireJsonContentType,
+  resolveStoryActor,
+  toResponse,
+} from '@/lib/social/story-publish/route-support'
 
 const BodySchema = z.object({ reason: z.string().trim().min(1).max(300) }).strict()
 
 export async function POST(req: NextRequest, { params }: { params: { id: string; packId: string } }): Promise<NextResponse> {
   const resolved = await resolveStoryActor(params.id, params.packId)
   if (!resolved.ok) return resolved.response
+
+  const notJson = requireJsonContentType(req)
+  if (notJson) return notJson
 
   const parsed = BodySchema.safeParse(await req.json().catch(() => null))
   if (!parsed.success) {

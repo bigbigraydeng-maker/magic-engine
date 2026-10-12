@@ -75,6 +75,31 @@ function collectBlocking(items: StoryPreviewItem[]): string[] {
   return blocking
 }
 
+/** Validate the requested expiry window; returns the day count or an error result. */
+function validateExpiry(
+  raw: number | undefined,
+): StoryServiceResult<number> {
+  const expiresInDays = raw ?? DEFAULT_EXPIRES_IN_DAYS
+  if (
+    !Number.isInteger(expiresInDays) ||
+    expiresInDays < MIN_EXPIRES_IN_DAYS ||
+    expiresInDays > MAX_EXPIRES_IN_DAYS
+  ) {
+    return { ok: false, status: 400, error: 'BAD_EXPIRY' }
+  }
+  return { ok: true, value: expiresInDays }
+}
+
+/** Counts shown on the preview header. */
+function buildCounts(items: StoryPreviewItem[]): StoryPackPreview['counts'] {
+  return {
+    total: items.length,
+    requires_open: items.filter((item) => item.requires_open).length,
+    opened: items.filter((item) => item.requires_open && item.opened_by_me).length,
+    with_problems: items.filter((item) => item.problems.length > 0).length,
+  }
+}
+
 export async function buildStoryPackPreview(input: {
   ports: StoryServicePorts
   packId: string
@@ -87,14 +112,8 @@ export async function buildStoryPackPreview(input: {
   const admin = requireGlobalAdmin(ports, actor)
   if (!admin.ok) return admin
 
-  const expiresInDays = input.expiresInDays ?? DEFAULT_EXPIRES_IN_DAYS
-  if (
-    !Number.isInteger(expiresInDays) ||
-    expiresInDays < MIN_EXPIRES_IN_DAYS ||
-    expiresInDays > MAX_EXPIRES_IN_DAYS
-  ) {
-    return { ok: false, status: 400, error: 'BAD_EXPIRY' }
-  }
+  const expiry = validateExpiry(input.expiresInDays)
+  if (!expiry.ok) return expiry
 
   const evaluated = await evaluateStoryPack({
     ports,
@@ -102,7 +121,7 @@ export async function buildStoryPackPreview(input: {
     clientId,
     actor,
     now,
-    expiresInDays,
+    expiresInDays: expiry.value,
   })
 
   if (evaluated.items.length === 0) {
@@ -111,12 +130,6 @@ export async function buildStoryPackPreview(input: {
 
   const items = evaluated.items.map(toPreviewItem)
   const blocking = collectBlocking(items)
-  const counts = {
-    total: items.length,
-    requires_open: items.filter((item) => item.requires_open).length,
-    opened: items.filter((item) => item.requires_open && item.opened_by_me).length,
-    with_problems: items.filter((item) => item.problems.length > 0).length,
-  }
 
   return {
     ok: true,
@@ -124,7 +137,8 @@ export async function buildStoryPackPreview(input: {
       pack_id: packId,
       client_id: clientId,
       items,
-      counts,
+      content_hash: evaluated.contentHash,
+      counts: buildCounts(items),
       can_authorize: blocking.length === 0,
       blocking,
     },

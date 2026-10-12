@@ -28,12 +28,23 @@ export const DEFAULT_STORY_GATE_CONFIG: StoryServicePorts['config'] = {
   maxRetries: 3,
 }
 
+/** The only host story media may be downloaded from: our own public storage (empty = deny everything). */
+function mediaHosts(): string[] {
+  const raw = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!raw) return []
+  try {
+    return [new URL(raw).hostname]
+  } catch {
+    return []
+  }
+}
+
 /** Build the real ports. Called inside request handlers (never at module load). */
 export function createStoryServicePorts(): StoryServicePorts {
   return {
     store: new SupabaseStoryStore(supabaseAdmin),
     adminEmails: { has: (email: string) => isGlobalAdminEmail(email) },
-    checkFile: (item) => checkMediaFile(item),
+    checkFile: (item) => checkMediaFile(item, { allowedHosts: mediaHosts() }),
     // The live price check against the official website is not built yet. Failing closed means
     // an item that shows a price cannot be authorised until it exists (items without a price are unaffected).
     checkPrice: async () => 'ERROR',

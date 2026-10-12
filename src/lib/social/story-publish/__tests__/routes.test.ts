@@ -98,6 +98,9 @@ let store: InMemoryStoryStore
 let ports: StoryServicePorts
 
 beforeEach(() => {
+  // the routes use the real clock: pin it before the fixed slots so "slot in the past" never fires
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-11T23:00:00.000Z'))
   vi.clearAllMocks()
   store = seedGreenStore()
   ports = makePorts(store)
@@ -105,6 +108,10 @@ beforeEach(() => {
   vi.mocked(requireDashboardClientAccess).mockResolvedValue(
     adminAccess as Awaited<ReturnType<typeof requireDashboardClientAccess>>,
   )
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 function params(id: string = CLIENT_ID, packId: string = PACK_ID) {
@@ -117,6 +124,13 @@ function jsonRequest(method: string, body?: unknown, url = 'http://localhost/x')
     body: body === undefined ? undefined : JSON.stringify(body),
     headers: { 'content-type': 'application/json' },
   })
+}
+
+/** A confirmation body carrying the hash its own preview returned. */
+async function confirmBody(extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const preview = await previewGET(jsonRequest('GET'), params())
+  const body = (await preview.json()) as { content_hash?: string }
+  return { confirm: true, content_hash: body.content_hash, ...extra }
 }
 
 async function readJson(res: Response): Promise<Record<string, unknown>> {
@@ -320,7 +334,7 @@ describe('authorize POST', () => {
   })
 
   it('authorises the pack when confirm is true', async () => {
-    const res = await authorizePOST(jsonRequest('POST', { confirm: true }), params())
+    const res = await authorizePOST(jsonRequest('POST', await confirmBody()), params())
     expect(res.status).toBe(200)
     const body = await readJson(res)
     expect(body.success).toBe(true)
@@ -334,10 +348,10 @@ describe('authorize POST', () => {
   })
 
   it('returns 409 ALREADY_AUTHORIZED on a second authorise', async () => {
-    const first = await authorizePOST(jsonRequest('POST', { confirm: true }), params())
+    const first = await authorizePOST(jsonRequest('POST', await confirmBody()), params())
     expect(first.status).toBe(200)
 
-    const second = await authorizePOST(jsonRequest('POST', { confirm: true }), params())
+    const second = await authorizePOST(jsonRequest('POST', await confirmBody()), params())
     expect(second.status).toBe(409)
     expect(await readJson(second)).toMatchObject({ success: false, error: 'ALREADY_AUTHORIZED' })
   })
@@ -381,7 +395,7 @@ describe('revoke POST', () => {
   })
 
   it('revokes the live grant and says published stories are NOT removed', async () => {
-    const authorized = await authorizePOST(jsonRequest('POST', { confirm: true }), params())
+    const authorized = await authorizePOST(jsonRequest('POST', await confirmBody()), params())
     expect(authorized.status).toBe(200)
 
     const res = await revokePOST(jsonRequest('POST', { reason: 'mistake' }), params())
@@ -393,7 +407,7 @@ describe('revoke POST', () => {
   })
 
   it('returns 404 NOTHING_TO_REVOKE on a second revoke', async () => {
-    await authorizePOST(jsonRequest('POST', { confirm: true }), params())
+    await authorizePOST(jsonRequest('POST', await confirmBody()), params())
     const first = await revokePOST(jsonRequest('POST', { reason: 'mistake' }), params())
     expect(first.status).toBe(200)
 
@@ -416,5 +430,53 @@ describe('unexpected failures', () => {
     const body = await readJson(res)
     expect(body).toEqual({ success: false, error: 'INTERNAL_ERROR' })
     expect(JSON.stringify(body)).not.toContain('secret-db-detail')
+  })
+})
+
+describe('state-changing routes accept JSON only', () => {
+  function formRequest(): NextRequest {
+    return new NextRequest('http://localhost/x', {
+      method: 'POST',
+      body: 'confirm=true',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    })
+  }
+
+  it('refuses a form post with 415 on open, authorize and revoke, and writes nothing', async () => {
+    for (const handler of [openPOST, authorizePOST, revokePOST]) {
+      const res = await handler(formRequest(), params())
+      expect(res.status).toBe(415)
+      expect(await readJson(res)).toEqual({ success: false, error: 'UNSUPPORTED_MEDIA_TYPE' })
+    }
+    expect(store.allAuthorizations()).toEqual([])
+    expect(ports.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('refuses a text/plain post even when the body is valid JSON', async () => {
+    const req = new NextRequest('http://localhost/x', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+      headers: { 'content-type': 'text/plain' },
+    })
+    const res = await authorizePOST(req, params())
+    expect(res.status).toBe(415)
+    expect(store.allAuthorizations()).toEqual([])
+  })
+})
+
+describe('authorize needs the preview content hash', () => {
+  it('refuses a confirmation without content_hash, with a malformed one, and with a stale one', async () => {
+    const missing = await authorizePOST(jsonRequest('POST', { confirm: true }), params())
+    expect(missing.status).toBe(400)
+    expect(await readJson(missing)).toMatchObject({ error: 'CONTENT_HASH_REQUIRED' })
+
+    const malformed = await authorizePOST(jsonRequest('POST', { confirm: true, content_hash: 'xyz' }), params())
+    expect(malformed.status).toBe(400)
+    expect(await readJson(malformed)).toEqual({ success: false, error: 'INVALID_AUTHORIZE_COMMAND' })
+
+    const stale = await authorizePOST(jsonRequest('POST', { confirm: true, content_hash: 'a'.repeat(64) }), params())
+    expect(stale.status).toBe(409)
+    expect(await readJson(stale)).toMatchObject({ error: 'PACK_CHANGED_SINCE_PREVIEW' })
+    expect(store.allAuthorizations()).toEqual([])
   })
 })

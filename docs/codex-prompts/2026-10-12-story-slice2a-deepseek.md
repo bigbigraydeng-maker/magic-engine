@@ -529,3 +529,76 @@ Tests:
 - unexpected failure: make the in-memory store's getPackItems throw new Error('secret-db-detail') for one test => 500 { success:false, error:'INTERNAL_ERROR' } and the response body never contains 'secret-db-detail'.
 RULES: only edit that draft file. Keep under 600 lines. No `any`. Do not ask questions.
 ```
+
+### 审查后修订轮
+
+#### r9
+
+```text
+Edit BOTH src/lib/social/story-publish/in-memory-store.ts and src/lib/social/story-publish/supabase-store.ts (attached for editing; store.ts and types.ts are read-only: the StoryStore port changed). Make exactly these changes and nothing else:
+1. `linkItemsToAuthorization(input: { authId: string; packId: string; clientId: string; items: Array<{ item_id: string; channel: StoryChannel }> })` — now scoped. In-memory: every listed (item_id, channel) must exist AND have pack_id === packId AND client_id === clientId, otherwise throw Error('unknown item') before changing anything (validate all first). Supabase: add `.eq('pack_id', input.packId).eq('client_id', input.clientId)` to each update (an update that touches no row still throws Error('unknown item')).
+2. NEW port method `getActivePauses(packId: string, clientId: string): Promise<StoryPauseMark[]>` (type StoryPauseMark is exported from store.ts: { channel: StoryChannel | null; item_id: string | null }). In-memory: add public seed helper `seedPause(packId: string, clientId: string, mark: StoryPauseMark, lifted = false)` storing marks; getActivePauses returns copies of the NOT lifted marks for that pack and client. Supabase: select channel, item_id from story_pack_pauses where pack_id and client_id and lifted_at is null (`.is('lifted_at', null)`); throw on error; map rows to StoryPauseMark (channel and item_id may be null).
+Keep all existing behaviour. Update imports (StoryPauseMark from './store'). No `any`, no `as unknown as`, no process.env. Do not ask questions.
+```
+
+#### r10
+
+```text
+Edit BOTH src/lib/social/story-publish/evaluate.ts and src/lib/social/story-publish/preview.ts (attached for editing; store.ts, types.ts, service-ports.ts, fingerprint.ts, in-memory-store.ts, gates.ts are read-only context). Make exactly these changes:
+evaluate.ts
+ 1. `EvaluatedStoryPack` gains `contentHash: string` = `computeContentManifestHash(items)` (import it from './fingerprint').
+ 2. ALREADY_ATTEMPTED: only these attempt statuses count: CLAIMED, RETRYABLE, CONTAINER_CREATED, PUBLISHING, PUBLISHED_UNVERIFIED, PUBLISHED, FAILED_FINAL, UNKNOWN_OUTCOME, MISSED_WINDOW (define `const ATTEMPT_BLOCKS_AUTHORIZATION: ReadonlySet<StoryAttemptStatus>`). DRY_RUN, BLOCKED and SKIPPED_NOT_AUTHORIZED do NOT make a problem and `alreadyAttempted` stays null for them (the field keeps meaning "a sent or in-flight attempt exists").
+ 3. Open evidence has a lifetime: an open record only counts when its `opened_at` parses and is not older than STORY_OPEN_VALIDITY_MS before `now` and not more than 60 seconds in the future (import STORY_OPEN_VALIDITY_MS from './service-ports').
+ 4. Slot in the past: when the item's slot_at parses and is earlier than `now`, add the problem 'SLOT_IN_PAST' (in addition to whatever the gate said; do not duplicate it).
+ 5. Circuit marks: call `ports.store.getActivePauses(packId, clientId)` once per evaluation; for each item `itemPaused = item.paused_at !== null || marks.some(m => m.item_id === item.item_id && (m.channel === null || m.channel === item.channel))` and `packChannelPaused = marks.some(m => m.item_id === null && (m.channel === null || m.channel === item.channel))`; pass both into the gate's `circuit`. (gateDryRun/evaluateItem need the marks as an input.)
+preview.ts
+ 6. `StoryPackPreview` now has `content_hash`: set it from the evaluation's contentHash.
+ 7. `buildStoryPackPreview` must be under 50 lines: extract helpers (validateExpiry, buildCounts, ...).
+Keep every function under 50 lines, no `any`, no `as unknown as`, no process.env. Do not ask questions.
+```
+
+#### r11
+
+```text
+Rewrite src/lib/social/story-publish/authorize.ts (attached for editing; keep what is not mentioned). Read-only context: types.ts, store.ts, service-ports.ts, evaluate.ts, preview.ts, fingerprint.ts. The goals: a different, safer ORDER of the write steps, a preview-bound confirmation, and every function under 50 lines (split into small helpers; today authorizeStoryPack is ~165 lines and armGrant 56).
+authorizeStoryPack input gains `expectedContentHash?: string`. The outcome type for AUTHORIZED gains `note: string` = 'Recorded only. The automatic publisher is not running yet.'
+NEW ORDER (every refusal writes nothing unless noted):
+ 1. requireGlobalAdmin => 403. expiresInDays 1..14 else 400 BAD_EXPIRY.
+ 2. preview = buildStoryPackPreview(...). Not ok => return it. confirm !== true => PREVIEW (no writes).
+ 3. confirm === true: expectedContentHash must be a 64-char lowercase hex string else 400 CONTENT_HASH_REQUIRED; it must equal preview.content_hash else 409 PACK_CHANGED_SINCE_PREVIEW. Then preview.blocking: ITEMS_NOT_OPENED => 409 (details = the unopened items); any other => 422 PACK_NOT_AUTHORIZABLE (details = per-item problems).
+ 4. evaluated = evaluateStoryPack(...) again; REPEAT the same three checks on it: evaluated.contentHash must equal preview.content_hash (else 409 PACK_CHANGED_SINCE_PREVIEW), no item requiresOpen && !openedByActor (409 ITEMS_NOT_OPENED), no item with problems (422 PACK_NOT_AUTHORIZABLE).
+ 5. A live grant: supersede only when expired, or never armed and older than 5 minutes (as today); the 'superseded' packRevoked event (id `${live.id}:superseded`) is sent ONLY when store.revokeAuthorization returned a non-null row; otherwise 409 ALREADY_AUTHORIZED.
+ 6. insertAuthorization (inactive) — ALREADY_AUTHORIZED => 409.
+ 7. From here ANY failure rolls back this grant by id (revoke with byEmail 'system:authorize-failed'), reports rollback 'OK' | 'FAILED', status 500 and the matching error, in this order:
+    a. linkItemsToAuthorization({ authId, packId, clientId, items }) throws => 'ITEMS_NOT_LINKED'.
+    b. verifyUnchanged (re-read the pack; every item's computeItemFingerprint(item, expiresAt) must equal evaluated.approvedFingerprints, same key set, manifest hash equal) false => 409 'PACK_CHANGED_DURING_AUTHORIZATION' with the rollback result.
+    c. send the packAuthorized event (id = requestId; data as today plus `mode: 'DRY_RUN'`) — throws => 'AUTHORIZATION_EVENT_NOT_SENT'.
+    d. activateAuthorization throws => 'AUTHORIZATION_NOT_ACTIVATED'; returns null => 409 'AUTHORIZATION_REVOKED_DURING_ARMING' (rollback 'OK').
+    When a rollback happens AFTER the authorized event was sent (step d), also send a best-effort packRevoked event (id `${authId}:rollback`) so nothing downstream keeps believing the pack is authorised.
+ 8. Success: { mode:'AUTHORIZED', authorization_id, request_id, expires_at, item_count, provider_impact:'NONE', note }.
+ 9. Swallowed best-effort events must at least log: `console.error('[story-authorize] event not sent', eventName)` (event NAME only, never the error object or data).
+revokeStoryPack: same checks as today with these changes: reading attempts after the revoke is wrapped in try/catch — on failure return ok with `in_flight: []`, `already_sent: []` and `attempts_known: false` (the revoke itself already succeeded; never turn it into a 500); the result splits statuses: `in_flight` = CLAIMED, RETRYABLE, CONTAINER_CREATED, PUBLISHING, UNKNOWN_OUTCOME; `already_sent` = PUBLISHED_UNVERIFIED, PUBLISHED; add `attempts_known: boolean` (true normally). The note stays.
+Keep exports AuthorizeOutcome, AuthorizeResult, authorizeStoryPack, revokeStoryPack. No `any`, no process.env. Do not ask questions. Only edit authorize.ts.
+```
+
+#### r12
+
+```text
+Fix pass on src/lib/social/story-publish/authorize.ts (attached for editing; types.ts, store.ts, service-ports.ts, evaluate.ts, preview.ts, fingerprint.ts read-only). Keep ALL behaviour except the three corrections below.
+1. TYPES: `StoryServiceResult` has no `details`/`rollback`. Define locally `export type AuthorizeFailure = { ok: false; status: number; error: string; details?: unknown; rollback?: 'OK' | 'FAILED' }` and make every internal check function (checkEvaluated, checkPreview, checkContentHash, insertGrant, clearLiveGrant, ...) return `{ ok: true; value: T } | AuthorizeFailure` instead of StoryServiceResult<T>. The file must type-check with no errors.
+2. ORDER: in authorizeStoryPack the verification that the pack is unchanged (`verifyUnchanged`) must run RIGHT AFTER the items are linked and BEFORE the packAuthorized event is sent. The required write order is: insert (inactive) -> link items -> verifyUnchanged -> send packAuthorized event -> activate. A failure in link (ITEMS_NOT_LINKED, 500), in verify (409 PACK_CHANGED_DURING_AUTHORIZATION) or in the event (AUTHORIZATION_EVENT_NOT_SENT, 500) rolls the grant back WITHOUT sending a packRevoked event (the authorised event was not sent); a failure in activate (AUTHORIZATION_NOT_ACTIVATED) rolls back AND sends the best-effort packRevoked event (id `${authId}:rollback`); activate returning null => 409 AUTHORIZATION_REVOKED_DURING_ARMING with rollback 'OK'. Today verifyUnchanged runs at the very end, after arming: move it.
+3. FUNCTION LENGTH (hard limit 50 lines per function, count from the signature line to the closing brace): authorizeStoryPack (121 lines today), armGrant (68) and revokeStoryPack (70) are too long. Split them, for example: authorizeStoryPack = admin/expiry/preview/confirm checks (helper `confirmChecks`) + `writeGrant`; split armGrant into `linkItemsOrRollback`, `verifyOrRollback`, `sendAuthorizedEventOrRollback`, `activateOrRollback`, each returning `{ ok: true } | AuthorizeFailure`; revokeStoryPack = `readRevokeInput` + the revoke + `summariseAttempts`. After editing, count the lines of every function yourself and make sure none exceeds 50.
+No `any`, no process.env. Do not ask questions. Only edit authorize.ts.
+```
+
+#### r13
+
+```text
+Edit the test file src/lib/social/story-publish/evaluate-draft.test.ts (attached for editing; read-only context: evaluate.ts, types.ts, store.ts, service-ports.ts, fingerprint.ts, in-memory-store.ts). KEEP every existing test unchanged (fix an existing test only if the NEW behaviour below makes it wrong, and say why in a comment) and ADD tests for the new evaluate.ts behaviour:
+1. Attempt statuses: rows with status DRY_RUN, BLOCKED, SKIPPED_NOT_AUTHORIZED do NOT add a problem and leave alreadyAttempted null; each of CLAIMED, RETRYABLE, CONTAINER_CREATED, PUBLISHING, PUBLISHED_UNVERIFIED, PUBLISHED, FAILED_FINAL, UNKNOWN_OUTCOME, MISSED_WINDOW adds the problem 'ALREADY_ATTEMPTED' and sets alreadyAttempted to that status (loop over them with store.seedAttempts).
+2. Open evidence lifetime (STORY_OPEN_VALIDITY_MS = 24h from './service-ports'): for a price item (contains_price true) an open recorded with opened_at = now - 23h and the current content fingerprint counts (openedByActor true); now - 25h does not; now + 2 minutes (future) does not; now + 30 seconds still counts. Record them with store.recordOpen using computeContentFingerprint.
+3. SLOT_IN_PAST: an item whose slot_at is 1 minute before `now` gets the problem 'SLOT_IN_PAST' (and still reports whatever the gate said); slot exactly equal to now does not.
+4. Circuit marks via store.seedPause(packId, clientId, mark): { channel: null, item_id: null } pauses every item (problems contain 'CIRCUIT_PAUSED'); { channel: 'facebook_story', item_id: null } pauses facebook items but not instagram items; { channel: 'facebook_story', item_id: '<that item>' } pauses only that item; a lifted mark (seedPause(..., true)) changes nothing; item.paused_at set also pauses.
+5. contentHash: equals computeContentManifestHash of the stored items; changes when an item's text_line changes; is the same for expiresInDays 1 and 14 while manifestHash differs between them.
+Keep imports tidy; no `any`, no `as unknown as`. Under 800 lines total. Only edit that draft file. Do not ask questions.
+```

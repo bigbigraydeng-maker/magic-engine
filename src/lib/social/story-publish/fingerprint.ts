@@ -89,3 +89,16 @@ export function computeContentFingerprint(item: StoryItemSpec): string {
   delete parsed.expires_at
   return createHash('sha256').update(JSON.stringify(parsed)).digest('hex')
 }
+
+/**
+ * Hash over what the person sees in a preview: every item's content fingerprint, ordered by item key.
+ * It carries no expiry, so a preview taken now and a confirmation sent a minute later agree as long as
+ * no item changed in between.
+ */
+export function computeContentManifestHash(items: StoryItemSpec[]): string {
+  const pairs = items.map((item) => [storyItemKey(item), computeContentFingerprint(item)] as const)
+  const keys = new Set(pairs.map(([key]) => key))
+  if (keys.size !== pairs.length) throw new Error('computeContentManifestHash: duplicate item key')
+  pairs.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return createHash('sha256').update(JSON.stringify(pairs)).digest('hex')
+}

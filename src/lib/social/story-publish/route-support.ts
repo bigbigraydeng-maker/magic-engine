@@ -55,6 +55,16 @@ export function toResponse<T extends object>(result: ForwardableResult<T>): Next
   return NextResponse.json(body, { status: result.status })
 }
 
+/**
+ * State-changing routes accept JSON only. A cross-site form post cannot send `application/json`
+ * without a CORS preflight, so this closes the plain-form request path.
+ */
+export function requireJsonContentType(req: { headers: { get(name: string): string | null } }): NextResponse | null {
+  const type = (req.headers.get('content-type') ?? '').toLowerCase()
+  if (type.startsWith('application/json')) return null
+  return NextResponse.json({ success: false, error: 'UNSUPPORTED_MEDIA_TYPE' }, { status: 415 })
+}
+
 /** A fixed, never-leaky 500 body for anything unexpected. */
 export function internalError(): NextResponse {
   return NextResponse.json({ success: false, error: 'INTERNAL_ERROR' }, { status: 500 })

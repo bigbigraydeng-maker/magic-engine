@@ -47,6 +47,12 @@ export interface StoryAttemptView {
   status: StoryAttemptStatus
 }
 
+/** A circuit-breaker mark. `channel` null = the whole pack; `item_id` set = one item. */
+export interface StoryPauseMark {
+  channel: StoryChannel | null
+  item_id: string | null
+}
+
 /** The accounts a client is registered against, read from the client record. */
 export interface RegisteredStoryAccounts {
   facebook_page_id: string | null
@@ -79,9 +85,14 @@ export interface StoryStore {
     now: Date
   }): Promise<StoryAuthorization | null>
 
-  /** Point items at the grant that covers them. */
+  /**
+   * Point items at the grant that covers them. Scoped to the pack and client: an item id that belongs
+   * to another pack or client is "unknown" and throws.
+   */
   linkItemsToAuthorization(input: {
     authId: string
+    packId: string
+    clientId: string
     items: Array<{ item_id: string; channel: StoryChannel }>
   }): Promise<void>
 
@@ -93,6 +104,9 @@ export interface StoryStore {
 
   /** Attempts already on file for a pack (so a preview can say what is already sent). */
   listAttempts(packId: string): Promise<StoryAttemptView[]>
+
+  /** Active (not lifted) circuit-breaker marks of a pack: whole pack / one channel / one item. */
+  getActivePauses(packId: string, clientId: string): Promise<StoryPauseMark[]>
 
   /** The registered accounts and status of a client; null when the client does not exist. */
   getRegisteredAccounts(clientId: string): Promise<RegisteredStoryAccounts | null>

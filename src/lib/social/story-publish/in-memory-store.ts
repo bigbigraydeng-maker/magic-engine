@@ -14,6 +14,7 @@ import type {
   RegisteredStoryAccounts,
   StoryAttemptView,
   StoryOpenRecord,
+  StoryPauseMark,
   StoryStore,
   StoredStoryItem,
 } from './store'
@@ -23,6 +24,13 @@ interface RevocationRecord {
   byEmail: string
   reason: string
   at: string
+}
+
+interface PauseRecord {
+  packId: string
+  clientId: string
+  mark: StoryPauseMark
+  lifted: boolean
 }
 
 export class InMemoryStoryStore implements StoryStore {
@@ -35,6 +43,7 @@ export class InMemoryStoryStore implements StoryStore {
   private readonly accounts = new Map<string, RegisteredStoryAccounts>()
   private readonly replyDuty = new Set<string>()
   private readonly assetUsage = new Map<string, 'UNUSED' | 'USED'>()
+  private readonly pauses: PauseRecord[] = []
 
   // ---- seed helpers -------------------------------------------------------
 
@@ -61,6 +70,20 @@ export class InMemoryStoryStore implements StoryStore {
       packId,
       attempts.map((a) => ({ ...a })),
     )
+  }
+
+  seedPause(
+    packId: string,
+    clientId: string,
+    mark: StoryPauseMark,
+    lifted = false,
+  ): void {
+    this.pauses.push({
+      packId,
+      clientId,
+      mark: { channel: mark.channel, item_id: mark.item_id },
+      lifted,
+    })
   }
 
   // ---- read helpers -------------------------------------------------------
@@ -182,12 +205,20 @@ export class InMemoryStoryStore implements StoryStore {
 
   async linkItemsToAuthorization(input: {
     authId: string
+    packId: string
+    clientId: string
     items: Array<{ item_id: string; channel: StoryChannel }>
   }): Promise<void> {
     const targets: StoredStoryItem[] = []
     for (const ref of input.items) {
       const item = this.items.get(itemKey(ref.item_id, ref.channel))
-      if (!item) throw new Error('unknown item')
+      if (
+        !item ||
+        item.pack_id !== input.packId ||
+        item.client_id !== input.clientId
+      ) {
+        throw new Error('unknown item')
+      }
       targets.push(item)
     }
     for (const item of targets) {
@@ -223,6 +254,23 @@ export class InMemoryStoryStore implements StoryStore {
   async listAttempts(packId: string): Promise<StoryAttemptView[]> {
     const stored = this.attempts.get(packId)
     return stored ? stored.map((a) => ({ ...a })) : []
+  }
+
+  async getActivePauses(
+    packId: string,
+    clientId: string,
+  ): Promise<StoryPauseMark[]> {
+    return this.pauses
+      .filter(
+        (pause) =>
+          pause.packId === packId &&
+          pause.clientId === clientId &&
+          !pause.lifted,
+      )
+      .map((pause) => ({
+        channel: pause.mark.channel,
+        item_id: pause.mark.item_id,
+      }))
   }
 
   async getRegisteredAccounts(

@@ -612,3 +612,26 @@ describe('RETRYABLE row integrity', () => {
     }
   })
 })
+
+// ─── 13. Price in the text must be declared ─────────────────────────────────────
+
+describe('price declared', () => {
+  for (const text of ['From NZ$3,480 per person', 'Only 2,699 NZD', '4 days, 10 dollars a day', '价格 3480 元', '纽币 3,480', 'Twin share, per person']) {
+    it(`blocks the undeclared price "${text}"`, () => {
+      const d = decideStoryPublish(baseInput({ item: baseItem({ text_line: text, contains_price: false }) }))
+      expect(d).toEqual({ action: 'RECORD', status: 'BLOCKED', reason_code: 'PRICE_UNDECLARED', retryable: false })
+    })
+  }
+
+  it('lets a declared price through to the normal price gate', () => {
+    const item = baseItem({ text_line: 'From NZ$3,480 per person', contains_price: true })
+    expect(decideStoryPublish(baseInput({ item, priceGate: 'OK' }))).toEqual({ action: 'PUBLISH' })
+    expect(decideStoryPublish(baseInput({ item, priceGate: 'BLOCKED' }))).toMatchObject({ reason_code: 'PRICE_GATE_BLOCKED' })
+  })
+
+  it('does not mistake dates or day counts for prices', () => {
+    for (const text of ['Departs 18 March 2027', '10 days across 2 cities', 'Day 4: the Great Wall']) {
+      expect(decideStoryPublish(baseInput({ item: baseItem({ text_line: text }) }))).toEqual({ action: 'PUBLISH' })
+    }
+  })
+})

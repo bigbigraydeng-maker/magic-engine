@@ -239,6 +239,8 @@ describe('InMemoryStoryStore', () => {
       store.seedItems([makeItem({ item_id: 'a' }), makeItem({ item_id: 'b' })])
       await store.linkItemsToAuthorization({
         authId: 'auth-1',
+        packId: 'pack-1',
+        clientId: 'client-1',
         items: [
           { item_id: 'a', channel: 'facebook_story' },
           { item_id: 'b', channel: 'facebook_story' },
@@ -254,6 +256,8 @@ describe('InMemoryStoryStore', () => {
       await expect(
         store.linkItemsToAuthorization({
           authId: 'auth-1',
+          packId: 'pack-1',
+          clientId: 'client-1',
           items: [
             { item_id: 'a', channel: 'facebook_story' },
             { item_id: 'missing', channel: 'facebook_story' },
@@ -366,5 +370,47 @@ describe('InMemoryStoryStore', () => {
       items[0].text_line = 'mutated'
       expect(store.allItems()[0].text_line).toBe('Hello')
     })
+  })
+})
+
+describe('linkItemsToAuthorization scope', () => {
+  it('treats an item of another pack or client as unknown and changes nothing', async () => {
+    const store = new InMemoryStoryStore()
+    store.seedItems([makeItem({ item_id: 'a' }), makeItem({ item_id: 'other', pack_id: 'pack-2' })])
+    await expect(
+      store.linkItemsToAuthorization({
+        authId: 'auth-1',
+        packId: 'pack-1',
+        clientId: 'client-1',
+        items: [
+          { item_id: 'a', channel: 'facebook_story' },
+          { item_id: 'other', channel: 'facebook_story' },
+        ],
+      }),
+    ).rejects.toThrow('unknown item')
+    expect(store.allItems().every((i) => i.authorization_id === null)).toBe(true)
+
+    await expect(
+      store.linkItemsToAuthorization({
+        authId: 'auth-1',
+        packId: 'pack-1',
+        clientId: 'client-other',
+        items: [{ item_id: 'a', channel: 'facebook_story' }],
+      }),
+    ).rejects.toThrow('unknown item')
+  })
+})
+
+describe('getActivePauses', () => {
+  it('returns only the active marks of that pack and client, as copies', async () => {
+    const store = new InMemoryStoryStore()
+    store.seedPause('pack-1', 'client-1', { channel: null, item_id: null })
+    store.seedPause('pack-1', 'client-1', { channel: 'facebook_story', item_id: 'a' }, true)
+    store.seedPause('pack-2', 'client-1', { channel: null, item_id: null })
+    store.seedPause('pack-1', 'client-2', { channel: null, item_id: null })
+    const marks = await store.getActivePauses('pack-1', 'client-1')
+    expect(marks).toEqual([{ channel: null, item_id: null }])
+    marks[0].channel = 'instagram_story'
+    expect(await store.getActivePauses('pack-1', 'client-1')).toEqual([{ channel: null, item_id: null }])
   })
 })

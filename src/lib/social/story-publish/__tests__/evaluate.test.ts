@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { InMemoryStoryStore } from '../in-memory-store'
-import { computeContentFingerprint, computeItemFingerprint, computeManifestHash } from '../fingerprint'
+import {
+  computeContentFingerprint,
+  computeContentManifestHash,
+  computeItemFingerprint,
+  computeManifestHash,
+} from '../fingerprint'
 import { evaluateStoryPack } from '../evaluate'
-import type { StoryServicePorts } from '../service-ports'
+import { STORY_OPEN_VALIDITY_MS, type StoryServicePorts } from '../service-ports'
 import type { StoredStoryItem } from '../store'
-import { storyItemKey, type StoryItemSpec } from '../types'
+import { storyItemKey, type StoryAttemptStatus, type StoryItemSpec } from '../types'
 
 const NOW = new Date('2026-10-12T00:00:00.000Z')
 const SLOT = '2026-10-12T00:00:00.000Z'
@@ -342,6 +347,40 @@ describe('evaluateStoryPack — existing attempts', () => {
     expect(result.items[0].alreadyAttempted).toBe('PUBLISHED')
     expect(result.items[0].problems).toContain('ALREADY_ATTEMPTED')
   })
+
+  it('does not block on DRY_RUN, BLOCKED or SKIPPED_NOT_AUTHORIZED attempts', async () => {
+    const nonBlocking: StoryAttemptStatus[] = ['DRY_RUN', 'BLOCKED', 'SKIPPED_NOT_AUTHORIZED']
+    for (const status of nonBlocking) {
+      const store = seedGreenStore()
+      store.seedAttempts([{ item_id: 'item-1', channel: 'facebook_story', status }], 'pack-1')
+      const result = await evaluate(store, makePorts(store))
+
+      expect(result.items[0].alreadyAttempted).toBeNull()
+      expect(result.items[0].problems).not.toContain('ALREADY_ATTEMPTED')
+    }
+  })
+
+  it('blocks on every sent or in-flight attempt status', async () => {
+    const blocking: StoryAttemptStatus[] = [
+      'CLAIMED',
+      'RETRYABLE',
+      'CONTAINER_CREATED',
+      'PUBLISHING',
+      'PUBLISHED_UNVERIFIED',
+      'PUBLISHED',
+      'FAILED_FINAL',
+      'UNKNOWN_OUTCOME',
+      'MISSED_WINDOW',
+    ]
+    for (const status of blocking) {
+      const store = seedGreenStore()
+      store.seedAttempts([{ item_id: 'item-1', channel: 'facebook_story', status }], 'pack-1')
+      const result = await evaluate(store, makePorts(store))
+
+      expect(result.items[0].alreadyAttempted).toBe(status)
+      expect(result.items[0].problems).toContain('ALREADY_ATTEMPTED')
+    }
+  })
 })
 
 describe('evaluateStoryPack — requiresOpen and openedByActor', () => {
@@ -416,5 +455,165 @@ describe('evaluateStoryPack — requiresOpen and openedByActor', () => {
 
     const result = await evaluate(store, makePorts(store))
     expect(result.items[0].openedByActor).toBe(false)
+  })
+})
+
+describe('evaluateStoryPack — open evidence lifetime', () => {
+  async function evaluateWithOpenAt(openedAt: Date): Promise<boolean> {
+    const store = seedGreenStore(greenItem({ contains_price: true }))
+    const item = store.allItems()[0]
+    await store.recordOpen({
+      item_id: item.item_id,
+      channel: item.channel,
+      opened_by_user_id: 'user-1',
+      opened_fingerprint: computeContentFingerprint(item),
+      opened_at: openedAt.toISOString(),
+    })
+    const result = await evaluate(store, makePorts(store))
+    return result.items[0].openedByActor
+  }
+
+  it('counts an open recorded 23 hours ago', async () => {
+    const openedAt = new Date(NOW.getTime() - 23 * 60 * 60 * 1000)
+    expect(await evaluateWithOpenAt(openedAt)).toBe(true)
+  })
+
+  it('does not count an open recorded 25 hours ago', async () => {
+    const openedAt = new Date(NOW.getTime() - 25 * 60 * 60 * 1000)
+    expect(await evaluateWithOpenAt(openedAt)).toBe(false)
+  })
+
+  it('does not count an open recorded 2 minutes in the future', async () => {
+    const openedAt = new Date(NOW.getTime() + 2 * 60 * 1000)
+    expect(await evaluateWithOpenAt(openedAt)).toBe(false)
+  })
+
+  it('counts an open recorded 30 seconds in the future (clock skew tolerance)', async () => {
+    const openedAt = new Date(NOW.getTime() + 30 * 1000)
+    expect(await evaluateWithOpenAt(openedAt)).toBe(true)
+  })
+
+  it('uses a 24 hour validity window', () => {
+    expect(STORY_OPEN_VALIDITY_MS).toBe(24 * 60 * 60 * 1000)
+  })
+})
+
+describe('evaluateStoryPack — SLOT_IN_PAST', () => {
+  it('reports SLOT_IN_PAST when the slot is one minute before now', async () => {
+    const store = seedGreenStore(
+      greenItem({ slot_at: new Date(NOW.getTime() - 60 * 1000).toISOString() }),
+    )
+    const result = await evaluate(store, makePorts(store))
+
+    expect(result.items[0].problems).toContain('SLOT_IN_PAST')
+    // The gate still ran and reported its own outcome.
+    expect(result.items[0].decision).toEqual({ action: 'DRY_RUN' })
+  })
+
+  it('does not report SLOT_IN_PAST when the slot equals now', async () => {
+    const store = seedGreenStore(greenItem({ slot_at: NOW.toISOString() }))
+    const result = await evaluate(store, makePorts(store))
+
+    expect(result.items[0].problems).not.toContain('SLOT_IN_PAST')
+  })
+})
+
+describe('evaluateStoryPack — circuit marks', () => {
+  it('pauses every item with a whole-pack mark', async () => {
+    const store = seedGreenStore()
+    store.seedPause('pack-1', 'client-1', { channel: null, item_id: null })
+    const result = await evaluate(store, makePorts(store))
+
+    expect(result.items[0].problems).toContain('CIRCUIT_PAUSED')
+  })
+
+  it('pauses only facebook items with a facebook channel mark', async () => {
+    const store = new InMemoryStoryStore()
+    const fb = greenItem({ item_id: 'fb', channel: 'facebook_story' })
+    const ig = greenItem({
+      item_id: 'ig',
+      channel: 'instagram_story',
+      media_sha256: 'b'.repeat(64),
+    })
+    store.seedItems([fb, ig])
+    store.seedAccounts('client-1', {
+      facebook_page_id: '1234567890',
+      instagram_user_id: '1234567890',
+      client_status: 'active',
+    })
+    store.seedAssetUsage(fb.media_sha256, 'UNUSED')
+    store.seedAssetUsage(ig.media_sha256, 'UNUSED')
+    store.seedPause('pack-1', 'client-1', { channel: 'facebook_story', item_id: null })
+
+    const result = await evaluate(store, makePorts(store))
+    const byId = new Map(result.items.map((entry) => [entry.item.item_id, entry]))
+
+    expect(byId.get('fb')?.problems).toContain('CIRCUIT_PAUSED')
+    expect(byId.get('ig')?.problems).not.toContain('CIRCUIT_PAUSED')
+  })
+
+  it('pauses only the named item with an item mark', async () => {
+    const store = new InMemoryStoryStore()
+    const a = greenItem({ item_id: 'a' })
+    const b = greenItem({ item_id: 'b', media_sha256: 'b'.repeat(64) })
+    store.seedItems([a, b])
+    store.seedAccounts('client-1', {
+      facebook_page_id: '1234567890',
+      instagram_user_id: '9876543210',
+      client_status: 'active',
+    })
+    store.seedAssetUsage(a.media_sha256, 'UNUSED')
+    store.seedAssetUsage(b.media_sha256, 'UNUSED')
+    store.seedPause('pack-1', 'client-1', { channel: 'facebook_story', item_id: 'a' })
+
+    const result = await evaluate(store, makePorts(store))
+    const byId = new Map(result.items.map((entry) => [entry.item.item_id, entry]))
+
+    expect(byId.get('a')?.problems).toContain('CIRCUIT_PAUSED')
+    expect(byId.get('b')?.problems).not.toContain('CIRCUIT_PAUSED')
+  })
+
+  it('ignores a lifted mark', async () => {
+    const store = seedGreenStore()
+    store.seedPause('pack-1', 'client-1', { channel: null, item_id: null }, true)
+    const result = await evaluate(store, makePorts(store))
+
+    expect(result.items[0].problems).not.toContain('CIRCUIT_PAUSED')
+  })
+
+  it('pauses an item whose paused_at is set', async () => {
+    const store = seedGreenStore(greenItem({ paused_at: '2026-10-11T00:00:00.000Z' }))
+    const result = await evaluate(store, makePorts(store))
+
+    expect(result.items[0].problems).toContain('CIRCUIT_PAUSED')
+  })
+})
+
+describe('evaluateStoryPack — contentHash', () => {
+  it('equals computeContentManifestHash of the stored items', async () => {
+    const store = seedGreenStore()
+    const result = await evaluate(store, makePorts(store))
+
+    expect(result.contentHash).toBe(computeContentManifestHash(store.allItems()))
+  })
+
+  it('changes when an item text_line changes', async () => {
+    const store = seedGreenStore()
+    const before = await evaluate(store, makePorts(store))
+
+    const changed = greenItem({ text_line: 'A different line' })
+    store.seedItems([changed])
+    const after = await evaluate(store, makePorts(store))
+
+    expect(after.contentHash).not.toBe(before.contentHash)
+  })
+
+  it('is stable across expiry while manifestHash differs', async () => {
+    const store = seedGreenStore()
+    const short = await evaluate(store, makePorts(store), { expiresInDays: 1 })
+    const long = await evaluate(store, makePorts(store), { expiresInDays: 14 })
+
+    expect(short.contentHash).toBe(long.contentHash)
+    expect(short.manifestHash).not.toBe(long.manifestHash)
   })
 })

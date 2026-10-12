@@ -17,6 +17,7 @@ import type {
   RegisteredStoryAccounts,
   StoryAttemptView,
   StoryOpenRecord,
+  StoryPauseMark,
   StoryStore,
   StoredStoryItem,
 } from './store'
@@ -93,6 +94,11 @@ interface IdRow {
 
 interface UsedInRow {
   used_in: string
+}
+
+interface PauseRow {
+  channel: string | null
+  item_id: string | null
 }
 
 // ---- helpers --------------------------------------------------------------
@@ -262,6 +268,8 @@ export class SupabaseStoryStore implements StoryStore {
 
   async linkItemsToAuthorization(input: {
     authId: string
+    packId: string
+    clientId: string
     items: Array<{ item_id: string; channel: StoryChannel }>
   }): Promise<void> {
     for (const ref of input.items) {
@@ -270,6 +278,8 @@ export class SupabaseStoryStore implements StoryStore {
         .update({ authorization_id: input.authId })
         .eq('item_id', ref.item_id)
         .eq('channel', ref.channel)
+        .eq('pack_id', input.packId)
+        .eq('client_id', input.clientId)
         .select('item_id')
       if (error) throw error
       const rows = data as ItemIdRow[] | null
@@ -331,6 +341,24 @@ export class SupabaseStoryStore implements StoryStore {
       item_id: row.item_id,
       channel: row.channel as StoryChannel,
       status: row.status as StoryAttemptStatus,
+    }))
+  }
+
+  async getActivePauses(
+    packId: string,
+    clientId: string,
+  ): Promise<StoryPauseMark[]> {
+    const { data, error } = await this.db
+      .from('story_pack_pauses')
+      .select('channel, item_id')
+      .eq('pack_id', packId)
+      .eq('client_id', clientId)
+      .is('lifted_at', null)
+    if (error) throw error
+    const rows = data as PauseRow[] | null
+    return (rows ?? []).map((row) => ({
+      channel: row.channel === null ? null : (row.channel as StoryChannel),
+      item_id: row.item_id,
     }))
   }
 

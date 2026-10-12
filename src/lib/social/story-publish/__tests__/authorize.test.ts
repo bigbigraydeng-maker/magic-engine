@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { InMemoryStoryStore } from '../in-memory-store'
 import { computeItemFingerprint, computeManifestHash } from '../fingerprint'
 import { authorizeStoryPack, revokeStoryPack } from '../authorize'
-import { recordStoryItemOpen } from '../preview'
+import { buildStoryPackPreview, recordStoryItemOpen } from '../preview'
 import type { StoryActor, StoryServicePorts } from '../service-ports'
 import type { StoredStoryItem } from '../store'
 import { STORY_EVENTS } from '../types'
@@ -101,17 +101,36 @@ async function authorize(
     actor: StoryActor
     confirm: boolean
     expiresInDays: number
+    expectedContentHash: string | null
     now: Date
   }> = {},
 ) {
+  const packId = overrides.packId ?? 'pack-1'
+  const clientId = overrides.clientId ?? 'client-1'
+  const actor = overrides.actor ?? ADMIN
+  const now = overrides.now ?? NOW
+  // A confirmation must carry the hash its own preview showed; fetch it unless the test sets one
+  // (`null` = send none).
+  let expectedContentHash: string | undefined
+  if (overrides.expectedContentHash === null) {
+    expectedContentHash = undefined
+  } else if (overrides.expectedContentHash !== undefined) {
+    expectedContentHash = overrides.expectedContentHash
+  } else {
+    const preview = await buildStoryPackPreview({
+      ports, packId, clientId, actor, now, expiresInDays: overrides.expiresInDays,
+    })
+    expectedContentHash = preview.ok ? preview.value.content_hash : undefined
+  }
   return authorizeStoryPack({
     ports,
-    packId: overrides.packId ?? 'pack-1',
-    clientId: overrides.clientId ?? 'client-1',
-    actor: overrides.actor ?? ADMIN,
+    packId,
+    clientId,
+    actor,
     confirm: overrides.confirm ?? true,
     expiresInDays: overrides.expiresInDays,
-    now: overrides.now ?? NOW,
+    expectedContentHash,
+    now,
   })
 }
 
@@ -440,8 +459,9 @@ describe('authorizeStoryPack — rollback', () => {
       getPackItems: async (packId: string, clientId: string) => {
         calls += 1
         const items = await original(packId, clientId)
-        // read 1 = preview (looks fine and opened); read 2 = the write evaluation sees an edited video item
-        if (calls === 2) {
+        // read 1 = the helper's own preview, read 2 = authorize's preview (both look fine and opened);
+        // read 3 = the write evaluation sees an edited video item
+        if (calls === 3) {
           return items.map((item) => (item.item_id === 'item-3' ? { ...item, text_line: 'Edited after opening' } : item))
         }
         return items
@@ -451,14 +471,14 @@ describe('authorizeStoryPack — rollback', () => {
     const result = await authorize(ports)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.error).toBe('ITEMS_NOT_OPENED')
+    expect(result.error).toBe('PACK_CHANGED_SINCE_PREVIEW')
     expect(store.allAuthorizations()).toHaveLength(0)
+    expect(ports.sendEvent).not.toHaveBeenCalled()
   })
 
-  it('rolls back and reports 409 PACK_CHANGED_DURING_AUTHORIZATION when an item changed', async () => {
+  it('rolls back and reports 409 PACK_CHANGED_DURING_AUTHORIZATION, before any event is sent', async () => {
     const store = seedGreenStore()
     const ports = makePorts(store)
-    await openItem(ports, 'item-3')
 
     const original = store.getPackItems.bind(store)
     let calls = 0
@@ -466,8 +486,9 @@ describe('authorizeStoryPack — rollback', () => {
       getPackItems: async (packId: string, clientId: string) => {
         calls += 1
         const items = await original(packId, clientId)
-        // reads 1 (preview) and 2 (write evaluation) see the pack as authorised; the final check sees an edit
-        if (calls >= 3) {
+        // reads 1-2 = the helper's preview and authorize's preview, read 3 = the write evaluation,
+        // read 4 = the final check after linking: it sees an edit
+        if (calls >= 4) {
           return items.map((item) => ({ ...item, text_line: 'Changed line' }))
         }
         return items
@@ -481,6 +502,91 @@ describe('authorizeStoryPack — rollback', () => {
     expect(result.error).toBe('PACK_CHANGED_DURING_AUTHORIZATION')
     expect(result.rollback).toBe('OK')
     expect(store.allAuthorizations().every((a) => a.revoked_at !== null)).toBe(true)
+    // the check runs BEFORE the authorised event, so nothing downstream ever heard of this grant
+    expect(ports.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('requires the preview content hash to confirm', async () => {
+    const store = seedGreenStore()
+    const ports = makePorts(store)
+    const missing = await authorize(ports, { expectedContentHash: null })
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.status).toBe(400)
+    expect(missing.error).toBe('CONTENT_HASH_REQUIRED')
+
+    const malformed = await authorize(ports, { expectedContentHash: 'abc' })
+    expect(malformed.ok).toBe(false)
+    if (malformed.ok) return
+    expect(malformed.error).toBe('CONTENT_HASH_REQUIRED')
+
+    const stale = await authorize(ports, { expectedContentHash: 'f'.repeat(64) })
+    expect(stale.ok).toBe(false)
+    if (stale.ok) return
+    expect(stale.status).toBe(409)
+    expect(stale.error).toBe('PACK_CHANGED_SINCE_PREVIEW')
+    expect(store.allAuthorizations()).toHaveLength(0)
+    expect(ports.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('does not announce a revoked grant when the authorised event itself failed', async () => {
+    const store = seedGreenStore()
+    const names: string[] = []
+    const sendEvent = vi.fn(async (event: { name: string }) => {
+      names.push(event.name)
+      if (event.name === STORY_EVENTS.packAuthorized) throw new Error('inngest down')
+    })
+    const ports = makePorts(store, { sendEvent })
+    const result = await authorize(ports)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe('AUTHORIZATION_EVENT_NOT_SENT')
+    expect(result.rollback).toBe('OK')
+    expect(names).toEqual([STORY_EVENTS.packAuthorized])
+  })
+
+  it('announces the rollback when activation fails after the authorised event was sent', async () => {
+    const store = seedGreenStore()
+    Object.assign(store, { activateAuthorization: async () => { throw new Error('db') } })
+    const names: string[] = []
+    const sendEvent = vi.fn(async (event: { name: string }) => {
+      names.push(event.name)
+    })
+    const ports = makePorts(store, { sendEvent })
+    const result = await authorize(ports)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe('AUTHORIZATION_NOT_ACTIVATED')
+    expect(result.rollback).toBe('OK')
+    expect(names).toEqual([STORY_EVENTS.packAuthorized, STORY_EVENTS.packRevoked])
+  })
+
+  it('links the items before it sends the authorised event', async () => {
+    const store = seedGreenStore()
+    const order: string[] = []
+    const link = store.linkItemsToAuthorization.bind(store)
+    Object.assign(store, {
+      linkItemsToAuthorization: async (input: Parameters<typeof link>[0]) => {
+        order.push('link')
+        return link(input)
+      },
+    })
+    const sendEvent = vi.fn(async () => {
+      order.push('event')
+    })
+    const ports = makePorts(store, { sendEvent })
+    const result = await authorize(ports)
+    expect(result.ok).toBe(true)
+    expect(order).toEqual(['link', 'event'])
+  })
+
+  it('reports the recorded-only note on success', async () => {
+    const store = seedGreenStore()
+    const ports = makePorts(store)
+    const result = await authorize(ports)
+    expect(result.ok).toBe(true)
+    if (!result.ok || result.value.mode !== 'AUTHORIZED') return
+    expect(result.value.note).toBe('Recorded only. The automatic publisher is not running yet.')
   })
 })
 
@@ -613,6 +719,44 @@ describe('revokeStoryPack', () => {
     expect(result.ok).toBe(true)
     const auth = store.allAuthorizations().find((a) => a.id === authId)
     expect(auth?.revoked_at).not.toBeNull()
+  })
+
+  it('splits what is still in flight from what already went out', async () => {
+    const store = seedGreenStore(threeItemPack())
+    const ports = makePorts(store)
+    await openItem(ports, 'item-3')
+    const authorized = await authorize(ports)
+    expect(authorized.ok).toBe(true)
+
+    store.seedAttempts(
+      [
+        { item_id: 'item-1', channel: 'facebook_story', status: 'CLAIMED' },
+        { item_id: 'item-2', channel: 'facebook_story', status: 'UNKNOWN_OUTCOME' },
+        { item_id: 'item-3', channel: 'facebook_story', status: 'PUBLISHED_UNVERIFIED' },
+      ],
+      'pack-1',
+    )
+    const result = await revokeStoryPack({ ports, packId: 'pack-1', clientId: 'client-1', actor: ADMIN, reason: 'stop', now: NOW })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.in_flight.map((a) => a.status).sort()).toEqual(['CLAIMED', 'UNKNOWN_OUTCOME'])
+    expect(result.value.already_sent.map((a) => a.status)).toEqual(['PUBLISHED_UNVERIFIED'])
+    expect(result.value.attempts_known).toBe(true)
+  })
+
+  it('still reports a successful revoke when the attempts cannot be read afterwards', async () => {
+    const store = seedGreenStore()
+    const ports = makePorts(store)
+    const authorized = await authorize(ports)
+    expect(authorized.ok).toBe(true)
+    Object.assign(store, { listAttempts: async () => { throw new Error('db') } })
+
+    const result = await revokeStoryPack({ ports, packId: 'pack-1', clientId: 'client-1', actor: ADMIN, reason: 'stop', now: NOW })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.attempts_known).toBe(false)
+    expect(result.value.in_flight).toEqual([])
+    expect(store.allAuthorizations().every((a) => a.revoked_at !== null)).toBe(true)
   })
 
   it('returns 404 NOTHING_TO_REVOKE on a second revoke', async () => {
