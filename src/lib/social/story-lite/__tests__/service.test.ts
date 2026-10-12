@@ -383,6 +383,22 @@ describe('buildLitePreview', () => {
   })
 })
 
+describe('authorizeLitePack — pictures are always re-checked', () => {
+  it('a changed picture blocks authorisation even when the hash came from a fast (unchecked) preview', async () => {
+    // the fast first look the page uses reports every file as OK; its content hash is the same as the full one
+    const quick = await makeHarness({ checkFileResult: 'OK' })
+    const quickPreview = await buildLitePreview(previewInput(quick.ports))
+    expect(quickPreview.ok).toBe(true)
+    if (!quickPreview.ok) return
+    // authorising runs its own full check against the real file state, which has changed
+    const real = await makeHarness({ checkFileResult: 'CHANGED' })
+    const result = await authorizeLitePack(authorizeInput(real.ports, { expectedContentHash: quickPreview.value.content_hash }))
+    expect(result.ok).toBe(false)
+    const pack = await real.store.getPack(PACK_ID, CLIENT_ID)
+    expect(pack?.authorized_at).toBeNull()
+  })
+})
+
 describe('authorizeLitePack', () => {
   it('rejects a non-admin with 403', async () => {
     const { ports } = await makeHarness()

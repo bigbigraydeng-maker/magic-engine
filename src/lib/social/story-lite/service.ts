@@ -168,6 +168,24 @@ async function loadPackAndItems(
   return ok({ pack, items })
 }
 
+/** The preview re-downloads every picture to compare its hash: do them side by side, not one after another. */
+const PREVIEW_CHECK_CONCURRENCY = 9
+
+/** Run `task` over `inputs` with at most `limit` in flight; results keep the input order and an error rejects. */
+async function mapWithLimit<T, R>(inputs: T[], limit: number, task: (input: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(inputs.length)
+  let next = 0
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = next++
+      if (index >= inputs.length) return
+      results[index] = await task(inputs[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, inputs.length) }, () => worker()))
+  return results
+}
+
 /** Build the per-item preview rows and collect every problem code seen. */
 async function buildPreviewItems(
   ports: LiteServicePorts,
@@ -176,23 +194,22 @@ async function buildPreviewItems(
   now: Date,
   lifetimeDays: number,
 ): Promise<{ previewItems: LitePreviewItem[]; allProblems: string[] }> {
-  const previewItems: LitePreviewItem[] = []
-  const allProblems: string[] = []
-  for (const item of items) {
-    const problems = await itemProblems(ports, item, pageId, now, lifetimeDays)
-    allProblems.push(...problems)
-    previewItems.push({
-      item_id: item.item_id,
-      channel: item.channel,
-      slot_at: item.slot_at,
-      media_kind: item.media_kind,
-      media_url: item.media_url,
-      text_line: item.text_line,
-      source_ref: item.source_ref,
-      status: item.status,
-      problems,
-    })
-  }
+  const checked = await mapWithLimit(items, PREVIEW_CHECK_CONCURRENCY, async (item) => ({
+    item,
+    problems: await itemProblems(ports, item, pageId, now, lifetimeDays),
+  }))
+  const previewItems: LitePreviewItem[] = checked.map(({ item, problems }) => ({
+    item_id: item.item_id,
+    channel: item.channel,
+    slot_at: item.slot_at,
+    media_kind: item.media_kind,
+    media_url: item.media_url,
+    text_line: item.text_line,
+    source_ref: item.source_ref,
+    status: item.status,
+    problems,
+  }))
+  const allProblems = checked.flatMap(({ problems }) => problems)
   return { previewItems, allProblems }
 }
 

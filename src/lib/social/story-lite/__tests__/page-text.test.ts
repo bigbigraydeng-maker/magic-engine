@@ -8,6 +8,7 @@ import {
   describeProblem,
   describeRange,
   describeStopResult,
+  thumbnailUrl,
   formatSlot,
 } from '../page-text'
 import type { LiteItemStatus } from '../types'
@@ -98,5 +99,13 @@ describe('story page wording', () => {
   it('rehearsal wording says an authorisation stays valid after live is switched on', () => {
     expect(describeMode(false).detail).toContain('一旦开启真发')
     expect(describeItemStatus('UNKNOWN_OUTCOME')).toContain('核对')
+  })
+
+  it('thumbnails use the small-picture address for storage files, and leave other addresses alone', () => {
+    expect(thumbnailUrl('https://x.supabase.co/storage/v1/object/public/visual-assets/a/b.png')).toBe(
+      'https://x.supabase.co/storage/v1/render/image/public/visual-assets/a/b.png?width=180&height=320&resize=cover&quality=60',
+    )
+    expect(thumbnailUrl('https://cdn.example.com/a.jpg')).toBe('https://cdn.example.com/a.jpg')
+    expect(thumbnailUrl('https://x.supabase.co/storage/v1/object/public/b/a.png?v=2')).toBe('https://x.supabase.co/storage/v1/object/public/b/a.png?v=2')
   })
 })
