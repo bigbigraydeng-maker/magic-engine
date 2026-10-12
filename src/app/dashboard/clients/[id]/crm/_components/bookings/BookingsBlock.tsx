@@ -16,6 +16,7 @@ import { BookingCard } from './BookingCard'
 import { BookingNotice } from './BookingNotice'
 import { BookingsErrorBoundary } from './BookingsErrorBoundary'
 import { useBookings } from './useBookings'
+import { hasFocusBookings, stripFocusFromUrl } from './payments-return'
 import {
   ERROR_TEXT,
   MUTED_TEXT,
@@ -44,6 +45,17 @@ function BookingsBlockInner({
   const [adding, setAdding] = useState(false)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const lastAddingRef = useRef(false)
+  const sectionRef = useRef<HTMLElement>(null)
+  const scrolledRef = useRef(false)
+
+  // 从付款总览点进来（focus=bookings）：数据加载完后滚到这一段，只滚一次。
+  useEffect(() => {
+    if (state.status !== 'ready' || scrolledRef.current || !hasFocusBookings()) return
+    scrolledRef.current = true
+    sectionRef.current?.scrollIntoView?.({ block: 'start' })
+    // 用过一次就从地址栏拿掉，免得换下一位客人时又滚一次、又冒出返回链接。
+    stripFocusFromUrl()
+  }, [state.status])
 
   useEffect(() => {
     const previous = lastAddingRef.current
@@ -79,7 +91,7 @@ function BookingsBlockInner({
   const ordered = orderBookings(state.bookings)
 
   return (
-    <section data-testid="bookings-block" aria-labelledby={headingId} className="mt-5 space-y-3">
+    <section ref={sectionRef} id="crm-bookings-block" data-testid="bookings-block" aria-labelledby={headingId} className="mt-5 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3
           id={headingId}

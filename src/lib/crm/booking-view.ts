@@ -350,7 +350,7 @@ function leadNote(
       null,
     )
   }
-  return warn('cruise_not_ticked', `尾款按出发前 ${n} 天算（没勾邮轮）`, false, null)
+  return { ...warn('cruise_not_ticked', `尾款按出发前 ${n} 天算（没勾邮轮）`, false, null), defaultLead: true }
 }
 
 /** Warnings about the computed dates and the tour length. */
