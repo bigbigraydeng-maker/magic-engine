@@ -49,8 +49,16 @@ export interface VerifiedAnalysis {
 
 const norm = (s: string) => s.toLowerCase().replace(/[\s\u3000"'“”‘’.,，。!！?？、:;；]+/g, '')
 
-/** 原话归一化后至少这么长才算有分量（「好的」「ok」「是的」这类应答不能当证据）。 */
-export const MIN_QUOTE_CHARS = 6
+const CJK = /[\u4e00-\u9fff]/g
+
+/**
+ * 原话够不够分量：中文至少 4 个字、其余语言归一化后至少 10 个字符。
+ * （「好的」「ok」「是的」「yes please」这类应答不能当证据；但「我们三个人」「两万纽币」这种短而有信息的中文能过。）
+ */
+export function quoteLongEnough(normalised: string): boolean {
+  const cjk = (normalised.match(CJK) ?? []).length
+  return cjk > 0 ? normalised.length >= 4 : normalised.length >= 10
+}
 
 const ENGLISH_NUMBERS: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
@@ -58,11 +66,12 @@ const ENGLISH_NUMBERS: Record<string, number> = {
 }
 const CN_DIGIT: Record<string, number> = { 零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 }
 
-/** 抽出文本里出现的数字（阿拉伯数字、k/万/千 简写、英文数字词、常见中文数字）。只用来核对「值里的数字在原话里有依据」。 */
+/** 抽出文本里出现的数字（阿拉伯数字、k/万/千 简写、英文数字词、常见中文数字）。9 位以上的连续数字当电话号码，不算金额/人数。 */
 export function numbersIn(text: string): Set<number> {
   const out = new Set<number>()
   const t = text.toLowerCase()
   for (const m of t.matchAll(/(\d+(?:[.,]\d+)*)\s*(k|万|千|w)?/g)) {
+    if (m[1].replace(/[.,]/g, '').length >= 9) continue
     const base = Number(m[1].replace(/,/g, ''))
     if (!Number.isFinite(base)) continue
     out.add(base)
@@ -83,25 +92,46 @@ export function numbersIn(text: string): Set<number> {
   return out
 }
 
-const NUMERIC_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['budget', 'party_size'])
-const NEGATION = /(don'?t|do not|never|stop)\s+(call|contact|ring|phone)|别再|不要再|不用再|请勿|不要打|别打了|remove (me|my number)/i
+const CURRENCIES: Record<string, string[]> = {
+  NZD: ['nzd', 'nz$', 'nz dollar', '纽币', '新西兰元', '纽元', '新币'],
+  USD: ['usd', 'us$', 'us dollar', '美元', '美金', '刀'],
+  CNY: ['cny', 'rmb', '人民币', '块钱'],
+  AUD: ['aud', 'au$', 'australian dollar', '澳元', '澳币'],
+}
+const currenciesIn = (text: string): string[] => {
+  const t = text.toLowerCase()
+  return Object.entries(CURRENCIES).filter(([, toks]) => toks.some((k) => t.includes(k))).map(([c]) => c)
+}
+const AMOUNT_CUE = /预算|budget|dollar|bucks|\$|万|k\b|元|块/i
+const PEOPLE_CUE = /people|person|persons|adult|adults|kids|children|child|pax|travell?ers|guests|位|个人|人|口/i
 
-/** 数值类事实：值里的每个数字都必须能在原话里找到依据（防「原话是真的、数字是编的」）。 */
+const NUMERIC_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['budget', 'party_size'])
+/** 第一人称的拒绝联系（不是任何含 stop/别再 的句子）。 */
+const NEGATION = /(don'?t|do not|please don'?t|stop)\s+(call|calling|contact|contacting|ring|phone)\s+(me|us)\b|别再(给我|联系我|打给我|打电话)|不要再(给我|联系我|打电话)|不用再(联系|打电话)|请勿(再)?联系(我|我们)|remove (me|my number|us) from/i
+const QUESTION = /[?？]|什么意思|为什么|why\b|是什么/i
+
+/** 数值类事实：值里的数字必须有原话依据，且原话要像金额/人数，不是电话号码、日期、钟点。「别再联系」必须是第一人称的陈述句。 */
 function valueSupported(f: RawFact): boolean {
-  if (f.key === 'do_not_contact') return NEGATION.test(f.quote)
+  if (f.key === 'do_not_contact') return NEGATION.test(f.quote) && !QUESTION.test(f.quote)
   if (!NUMERIC_KEYS.has(f.key)) return true
   const need = [...numbersIn(f.value)]
-  if (need.length === 0) return false
+  if (need.length === 0 || need.some((n) => n > 10_000_000)) return false
   const have = numbersIn(f.quote)
-  return need.every((n) => have.has(n))
+  if (!need.every((n) => have.has(n))) return false
+  if (f.key === 'party_size') return PEOPLE_CUE.test(f.quote) && need.every((n) => n <= 99)
+  // budget：原话必须有金额线索；值里写了币种，原话里必须有对应币种（不许把纽币改成美元）
+  const quoteCur = currenciesIn(f.quote)
+  const valueCur = currenciesIn(f.value)
+  if (valueCur.length > 0 && !valueCur.every((c) => quoteCur.includes(c))) return false
+  return AMOUNT_CUE.test(f.quote) || quoteCur.length > 0
 }
 
-/** 事实的原话必须真的出现在转写里，且够长；数值类和「别再联系」还要核对值与原话一致。 */
+/** 事实的原话必须真的出现在转写里，且够分量；数值类和「别再联系」还要核对值与原话一致。 */
 export function verifyFacts(raw: RawAnalysis, transcript: string): VerifiedAnalysis {
   const t = norm(transcript)
   const kept = raw.facts.filter((f) => {
     const q = norm(f.quote)
-    return q.length >= MIN_QUOTE_CHARS && t.includes(q) && valueSupported(f)
+    return quoteLongEnough(q) && t.includes(q) && valueSupported(f)
   })
   return { summary: raw.summary, language: raw.language, facts: kept, droppedFacts: raw.facts.length - kept.length }
 }

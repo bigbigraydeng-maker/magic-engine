@@ -39,7 +39,7 @@ export const openaiAnalyzer: Analyzer = async (transcript) => {
     response_format: { type: 'json_schema', json_schema: { name: 'call_analysis', strict: true, schema: ANALYSIS_JSON_SCHEMA as unknown as Record<string, unknown> } },
     messages: [
       { role: 'system', content: SYSTEM },
-      { role: 'user', content: `<<<TRANSCRIPT\n${transcript.slice(0, 60_000)}\nTRANSCRIPT>>>` },
+      { role: 'user', content: `<<<TRANSCRIPT\n${transcript.slice(0, 60_000).replaceAll('TRANSCRIPT>>>', '').replaceAll('<<<TRANSCRIPT', '')}\nTRANSCRIPT>>>` },
     ],
   })
   const content = res.choices[0]?.message?.content

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { downloadTwilioRecording, MAX_RECORDING_BYTES, RecordingFetchError } from '../recording'
 import { numbersIn, verifyFacts, type RawAnalysis } from '../analysis-schema'
+import { planAnalysisSweep } from '@/lib/inngest/functions/telephony-analysis'
 import { runCallAnalysis, MAX_STEP_ATTEMPTS, type AnalysisCall, type AnalysisConnection, type AnalysisStore } from '../pipeline'
 
 const ACCT = 'AC' + 'a'.repeat(32)
@@ -256,5 +257,40 @@ describe('原话核验加强', () => {
     expect(numbersIn('20k').has(20000)).toBe(true)
     expect(numbersIn('four people').has(4)).toBe(true)
     expect(numbersIn('两万').has(20000)).toBe(true)
+  })
+})
+
+describe('原话核验：第二轮审查补的反例', () => {
+  const T = 'we do not want the South Island tour. my number is 0211234567. we leave on 20 march. 我们三个人，预算两万纽币。 Meet at twelve o clock. never stop calling my mum. 不要再联系我是什么意思？ Please do not call us again.'
+  const f = (key: RawAnalysis['facts'][number]['key'], value: string, quote: string) => ({ key, value, quote, confidence: 0.9 })
+  const kept = (facts: RawAnalysis['facts']) => verifyFacts({ summary: 's', language: null, facts }, T).facts.map((x) => `${x.key}:${x.value}`)
+
+  it('中文短原话能过（我们三个人 = 3 人；两万纽币 = NZD 20000），不再被长度误丢', () => {
+    expect(kept([f('party_size', '3', '我们三个人'), f('budget', 'NZD 20000', '预算两万纽币')])).toEqual(['party_size:3', 'budget:NZD 20000'])
+  })
+  it('币种不一致：原话是纽币，值写美元/人民币 → 丢', () => {
+    expect(kept([f('budget', 'USD 20000', '预算两万纽币'), f('budget', 'CNY 20000', '预算两万纽币')])).toEqual([])
+  })
+  it('电话号码当预算、日期当预算、钟点当人数 → 丢', () => {
+    expect(kept([f('budget', 'NZD 211234567', 'my number is 0211234567'), f('budget', 'NZD 20', 'we leave on 20 march'), f('party_size', '12', 'Meet at twelve o clock')])).toEqual([])
+  })
+  it('别再联系：反问句、「never stop calling my mum」不是拒绝联系 → 丢；真拒绝才留', () => {
+    expect(kept([f('do_not_contact', 'x', '不要再联系我是什么意思？'), f('do_not_contact', 'x', 'never stop calling my mum')])).toEqual([])
+    expect(kept([f('do_not_contact', 'x', 'Please do not call us again')])).toEqual(['do_not_contact:x'])
+  })
+  it('英文通用短句（<10 字符）不能当证据', () => {
+    expect(kept([f('concern', 'x', 'yes please'), f('concern', 'x', 'that is fine')])).toEqual([])
+  })
+})
+
+describe('补扫：逐连接各查各的', () => {
+  it('每个连接用自己的开启时刻；没开启时刻的连接不扫；各连接名额互不挤占', async () => {
+    const asked: Array<[string, string, number]> = []
+    const out = await planAnalysisSweep({
+      listEnabledConnections: async () => [{ id: 'c1', analysis_enabled_at: '2026-10-12T00:00:00Z' }, { id: 'c2', analysis_enabled_at: null }, { id: 'c3', analysis_enabled_at: '2026-10-13T00:00:00Z' }],
+      listCalls: async (id, since, limit) => { asked.push([id, since, limit]); return [{ client_id: 'k', provider: 'twilio', provider_call_id: `call-${id}` }] },
+    })
+    expect(asked).toEqual([['c1', '2026-10-12T00:00:00Z', 10], ['c3', '2026-10-13T00:00:00Z', 10]])
+    expect(out.map((r) => r.provider_call_id)).toEqual(['call-c1', 'call-c3'])
   })
 })

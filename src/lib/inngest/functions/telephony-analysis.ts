@@ -32,41 +32,59 @@ export const telephonyCallAnalysis = inngest.createFunction(
   },
 )
 
+export interface SweepCandidate { client_id: string; provider: string; provider_call_id: string }
+export interface SweepDeps {
+  listEnabledConnections(): Promise<Array<{ id: string; analysis_enabled_at: string | null }>>
+  /** 某连接在 since 之后、次数没超限、还没分析完的通话（按开始时间升序，最多 limit 条）。 */
+  listCalls(connectionId: string, since: string, limit: number): Promise<SweepCandidate[]>
+}
+export const SWEEP_PER_CONNECTION = 10
+
+/** 逐个连接各查各的（各用各自的开启时刻）：别的连接的老通话不会挤占名额，开启之前的通话永远不会被选中。 */
+export async function planAnalysisSweep(deps: SweepDeps): Promise<SweepCandidate[]> {
+  const out: SweepCandidate[] = []
+  for (const c of await deps.listEnabledConnections()) {
+    if (!c.analysis_enabled_at) continue
+    out.push(...(await deps.listCalls(c.id, c.analysis_enabled_at, SWEEP_PER_CONNECTION)))
+  }
+  return out
+}
+
+const supabaseSweepDeps: SweepDeps = {
+  async listEnabledConnections() {
+    const { data } = await supabaseAdmin.from('telephony_connections').select('id, analysis_enabled_at').eq('analysis_enabled', true).eq('active', true).eq('provider', 'twilio')
+    return (data ?? []) as Array<{ id: string; analysis_enabled_at: string | null }>
+  },
+  async listCalls(connectionId, since, limit) {
+    const { data, error } = await supabaseAdmin
+      .from('telephony_calls')
+      .select('client_id, provider, provider_call_id')
+      .eq('connection_id', connectionId)
+      .eq('provider', 'twilio')
+      .gte('started_at', since)
+      .lt('started_at', new Date(Date.now() - 3 * 60_000).toISOString())
+      .in('recording_status', ['pending_download', 'downloaded', 'failed'])
+      .lt('recording_attempts', MAX_STEP_ATTEMPTS)
+      .lt('transcript_attempts', MAX_STEP_ATTEMPTS)
+      .lt('analysis_attempts', MAX_STEP_ATTEMPTS)
+      .neq('summary_status', 'done')
+      .order('started_at', { ascending: true })
+      .limit(limit)
+    if (error) throw new Error(`读待分析通话失败: ${error.message}`)
+    return (data ?? []) as SweepCandidate[]
+  },
+}
+
 /** 每 10 分钟：把「有录音、分析没做完、次数没超限」的通话重新发出去。 */
 export const telephonyCallAnalysisSweep = inngest.createFunction(
   { id: `${CLOUD_FN_PREFIX}telephony-call-analysis-sweep`, name: 'Telephony — analysis sweep', retries: 1, concurrency: { limit: 1 } },
   { cron: '*/10 * * * *' },
   async ({ step }) =>
     step.run('sweep', async () => {
-      // 只扫「允许分析」的连接（默认全关，关着的不重发、不空转）。
-      const { data: enabled } = await supabaseAdmin.from('telephony_connections').select('id, analysis_enabled_at').eq('analysis_enabled', true).eq('active', true).eq('provider', 'twilio')
-      const conns = (enabled ?? []).filter((c) => c.analysis_enabled_at)
-      if (conns.length === 0) return { dispatched: 0 }
-      const ids = conns.map((c) => c.id as string)
-      const since = conns.map((c) => c.analysis_enabled_at as string).sort()[0]
-      const { data, error } = await supabaseAdmin
-        .from('telephony_calls')
-        .select('client_id, provider, provider_call_id, connection_id')
-        .in('recording_status', ['pending_download', 'downloaded', 'failed'])
-        .in('connection_id', ids)
-        .gte('started_at', since)
-        .eq('provider', 'twilio')
-        .lt('recording_attempts', MAX_STEP_ATTEMPTS)
-        .lt('transcript_attempts', MAX_STEP_ATTEMPTS)
-        .lt('analysis_attempts', MAX_STEP_ATTEMPTS)
-        .neq('summary_status', 'done')
-        .order('started_at', { ascending: true })
-        .lt('started_at', new Date(Date.now() - 3 * 60_000).toISOString())
-        .limit(30)
-      if (error) throw new Error(`读待分析通话失败: ${error.message}`)
-      const rows = data ?? []
+      const rows = await planAnalysisSweep(supabaseSweepDeps)
       const bucket = Math.floor(Date.now() / 600_000)
       for (const r of rows) {
-        await inngest.send({
-          id: `analysis:${r.provider_call_id}:${bucket}`,
-          name: TELEPHONY_RECORDING_READY,
-          data: { client_id: r.client_id, provider: r.provider, call_id: r.provider_call_id },
-        })
+        await inngest.send({ id: `analysis:${r.provider_call_id}:${bucket}`, name: TELEPHONY_RECORDING_READY, data: { client_id: r.client_id, provider: r.provider, call_id: r.provider_call_id } })
       }
       return { dispatched: rows.length }
     }),

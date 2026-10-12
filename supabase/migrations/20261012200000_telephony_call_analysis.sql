@@ -4,6 +4,19 @@
 alter table public.telephony_connections add column if not exists analysis_enabled boolean not null default false;
 -- 只处理「开关打开之后」才开始的通话；打开之前录的（同意书之前的）历史录音永远不回捞
 alter table public.telephony_connections add column if not exists analysis_enabled_at timestamptz;
+-- 开关由 false 变 true 的那一刻，数据库自己写「开启时刻」（关了再开会刷新，不靠人记得改）；关掉就清空
+create or replace function public.telephony_set_analysis_enabled_at() returns trigger language plpgsql as $$
+begin
+  if new.analysis_enabled is true and (tg_op = 'INSERT' or old.analysis_enabled is distinct from true) then
+    new.analysis_enabled_at := now();
+  elsif new.analysis_enabled is not true then
+    new.analysis_enabled_at := null;
+  end if;
+  return new;
+end $$;
+create trigger telephony_connections_analysis_enabled_at
+  before insert or update on public.telephony_connections
+  for each row execute function public.telephony_set_analysis_enabled_at();
 alter table public.telephony_connections add constraint telephony_connections_analysis_enabled_at_check
   check (analysis_enabled = false or analysis_enabled_at is not null);
 
@@ -54,7 +67,7 @@ create or replace function public.telephony_mark_touchpoint(p_touchpoint_id uuid
 returns void
 language sql
 security definer
-set search_path = public
+set search_path = public, pg_temp
 as $$
   update public.contact_touchpoints
      set metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('call_analysis_id', p_analysis_id::text, 'call_analysis_review', 'pending_review')
