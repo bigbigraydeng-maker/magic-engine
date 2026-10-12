@@ -124,7 +124,7 @@ export async function handleTwilioWebhook(store: TelephonyStore, input: TwilioIn
     })
   } catch {
     // 来电：落库失败也要先把电话接通转接（签名已验过）；这一条「来电开始」事件丢了，后面的状态/员工结果回调还会进来。
-    if (kind === 'voice' && conn.forwardTo) return { status: 200, twiml: forwardFor(input.baseUrl, conn) }
+    if (kind === 'voice' && conn.forwardTo) return { status: 200, twiml: forwardFor(input.baseUrl, conn, params.To) }
     return { status: 503, twiml: HANGUP_TWIML }
   }
   void fromCache
@@ -133,10 +133,10 @@ export async function handleTwilioWebhook(store: TelephonyStore, input: TwilioIn
   if (kind !== 'voice') return { status: 200, twiml: EMPTY_TWIML }
   // 来电：没配好转接号码就不转接、不录音。
   if (!conn.forwardTo) return { status: 200, twiml: HANGUP_TWIML }
-  return { status: 200, twiml: forwardFor(input.baseUrl, conn) }
+  return { status: 200, twiml: forwardFor(input.baseUrl, conn, params.To) }
 }
 
-function forwardFor(baseUrl: string, conn: TelephonyConnection): string {
+function forwardFor(baseUrl: string, conn: TelephonyConnection, calledNumber?: string | null): string {
   const root = `${baseUrl}/api/webhooks/twilio/${conn.id}`
-  return inboundForwardTwiml({ forwardTo: conn.forwardTo as string, dialActionUrl: `${root}/dial`, recordingCallbackUrl: `${root}/recording` })
+  return inboundForwardTwiml({ forwardTo: conn.forwardTo as string, dialActionUrl: `${root}/dial`, recordingCallbackUrl: `${root}/recording`, callerId: calledNumber })
 }
