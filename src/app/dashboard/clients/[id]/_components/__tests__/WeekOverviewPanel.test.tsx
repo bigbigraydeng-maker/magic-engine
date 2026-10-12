@@ -11,6 +11,7 @@ const CLIENT = '11111111-1111-4111-8111-111111111111'
 function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
   return {
     live: false,
+    quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 3 },
     story: {
       newer_draft_title: null,
       pack_id: 'p1',
@@ -27,6 +28,7 @@ function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
           media_url: 'https://x.supabase.co/storage/v1/object/public/b/a.png',
           text_line: '第一条',
           status: 'PENDING',
+          role: 'inspiration',
         },
         {
           item_id: 'i2',
@@ -36,6 +38,7 @@ function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
           media_url: 'https://x.supabase.co/storage/v1/object/public/b/b.png',
           text_line: '第二条',
           status: 'PENDING',
+          role: null,
         },
       ],
     },
@@ -113,5 +116,25 @@ describe('WeekOverviewPanel', () => {
     const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
     await screen.findByText(/演练模式/)
     expect(container.textContent).not.toMatch(/信封|素材池|指纹|哈希|hash|fingerprint/i)
+  })
+
+  it('shows used/limit per day from the client config, the role, the gap section, and the title sentence', async () => {
+    mockFetch({ success: true, ...overview() })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    expect(await screen.findByText(/Story（用了 2\/3）/)).toBeTruthy()
+    expect(screen.getByText(/每天名额 2 条/)).toBeTruthy()
+    expect(screen.getByText(/每周名额 3 条/)).toBeTruthy()
+    expect(screen.getByText(/灵感/)).toBeTruthy()
+    expect(screen.getByText('没能进日历')).toBeTruthy()
+    expect(screen.getByText(/尚未接入：还没有「报名」/)).toBeTruthy()
+    expect(screen.getByText(/由系统自动排期，你只需要点一次授权/)).toBeTruthy()
+  })
+
+  it('a missing quota says "名额未配置" and never pretends to be 0', async () => {
+    mockFetch({ success: true, ...overview({ quota: null }) })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText(/演练模式/)
+    expect(container.textContent).toContain('名额未配置')
+    expect(container.textContent).not.toMatch(/用了 \d+\/0/)
   })
 })

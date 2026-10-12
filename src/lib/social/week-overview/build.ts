@@ -7,7 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { packState, requireGlobalAdmin, type LitePackState, type LiteResult, type LiteServicePorts } from '../story-lite/service'
-import { isLiveFor, type LiteActor, type LiteChannel, type LiteItemStatus, type LiteMediaKind, type LiteSwitches } from '../story-lite/types'
+import { isLiveFor, type LiteActor, type LiteChannel, type LiteItemStatus, type LiteMediaKind, type LiteRole, type LiteSwitches } from '../story-lite/types'
 import { toPublishedView } from '../../factory/publish/publish-display'
 
 export interface OverviewStoryItem {
@@ -18,6 +18,8 @@ export interface OverviewStoryItem {
   media_url: string
   text_line: string
   status: LiteItemStatus
+  /** Inspiration / fact / invite; null until the roles are recorded. */
+  role: LiteRole | null
 }
 
 export interface OverviewStoryPack {
@@ -40,7 +42,16 @@ export interface OverviewReel {
   permalink: string | null
 }
 
+/** How many of each kind the client wants per day / week. A kind that is not configured is null ("not configured"), never 0. */
+export interface PublishingQuota {
+  post_per_day: number | null
+  story_per_day: number | null
+  reel_per_week: number | null
+}
+
 export interface WeekOverview {
+  /** Client-layer quotas; null when the client has no calendar configuration at all. */
+  quota: PublishingQuota | null
   /** True only when real publishing is switched on for this client. */
   live: boolean
   /** The Story pack in play: an authorised one first (it WILL publish), otherwise the newest draft; null when none. */
@@ -92,6 +103,33 @@ export async function listClientReels(db: SupabaseClient, clientId: string): Pro
     })
 }
 
+function wholeNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
+}
+
+/**
+ * The client's own quotas from `clients.publishing_calendar_config` = { quota: { post_per_day, story_per_day, reel_per_week } }.
+ * No config (or the column not created yet) = null: the page says "未配置", it never pretends the quota is 0.
+ */
+export async function readPublishingQuota(db: SupabaseClient, clientId: string): Promise<PublishingQuota | null> {
+  const { data, error } = await db.from('clients').select('publishing_calendar_config').eq('id', clientId).maybeSingle()
+  if (error) {
+    // the config column is added by a separate, approved migration: before that, "not configured"
+    if (error.code === '42703' || /does not exist|column/i.test(error.message)) return null
+    throw new Error(error.message)
+  }
+  const raw = (data as { publishing_calendar_config?: unknown } | null)?.publishing_calendar_config
+  const quota = raw && typeof raw === 'object' ? (raw as { quota?: unknown }).quota : null
+  if (!quota || typeof quota !== 'object') return null
+  const q = quota as Record<string, unknown>
+  const result: PublishingQuota = {
+    post_per_day: wholeNumber(q.post_per_day),
+    story_per_day: wholeNumber(q.story_per_day),
+    reel_per_week: wholeNumber(q.reel_per_week),
+  }
+  return result.post_per_day === null && result.story_per_day === null && result.reel_per_week === null ? null : result
+}
+
 async function readStory(ports: LiteServicePorts, clientId: string, now: Date): Promise<OverviewStoryPack | null> {
   const rows = await ports.store.listPacksForClient(clientId, 10)
   // an authorised pack is the one that will publish: it must never be hidden behind a newer draft
@@ -116,6 +154,7 @@ async function readStory(ports: LiteServicePorts, clientId: string, now: Date): 
       media_url: item.media_url,
       text_line: item.text_line,
       status: item.status,
+      role: item.role ?? null,
     })),
   }
 }
@@ -139,11 +178,16 @@ export async function buildWeekOverview(input: {
   if (!admin.ok) return admin
 
   // the two reads are independent: run them side by side, and let one failing never hide the other
-  const [story, reels] = await Promise.allSettled([readStory(ports, clientId, now), listClientReels(db, clientId)])
+  const [story, reels, quota] = await Promise.allSettled([
+    readStory(ports, clientId, now),
+    listClientReels(db, clientId),
+    readPublishingQuota(db, clientId),
+  ])
   return {
     ok: true,
     value: {
       live: isLiveFor(switches, clientId),
+      quota: quota.status === 'fulfilled' ? quota.value : null,
       story: story.status === 'fulfilled' ? story.value : null,
       story_error: story.status === 'rejected' ? failureText('story', story.reason) : null,
       reels: reels.status === 'fulfilled' ? reels.value : [],

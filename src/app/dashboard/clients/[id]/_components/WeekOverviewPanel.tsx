@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * 「本周总览」：一个地方看这一周的 Story、图文 Post、视频 Reel 排到哪了。只读：授权和停仍在各自的页面。
+ * 「发布日历」：一个地方看这一周的 Story、图文 Post、视频 Reel 排到哪了、每天名额用了几个。只读：授权和停仍在各自的页面。
  * 一次请求拿全部（服务端按客户过滤，不下载原图，缩略图用小图）。
  */
 import Link from 'next/link'
@@ -19,7 +19,14 @@ import {
   thumbnailUrl,
 } from '@/lib/social/story-lite/page-text'
 import type { LitePackState } from '@/lib/social/story-lite/service'
-import type { OverviewReel, OverviewStoryItem, WeekOverview } from '@/lib/social/week-overview/build'
+import type { OverviewReel, OverviewStoryItem, PublishingQuota, WeekOverview } from '@/lib/social/week-overview/build'
+
+const ROLE_LABEL: Record<string, string> = { inspiration: '灵感', fact: '事实', invite: '邀请私信' }
+
+/** "用了 3/3" or "名额未配置": a missing quota is never shown as 0. */
+function usedOf(used: number, limit: number | null | undefined): string {
+  return typeof limit === 'number' ? `用了 ${used}/${limit}` : `${used} 条（名额未配置）`
+}
 
 type LoadState = 'loading' | 'ready' | 'forbidden' | 'error'
 
@@ -41,7 +48,8 @@ function StoryRow({ item, packState }: { item: OverviewStoryItem; packState: Lit
       <div className="min-w-0">
         <p className="text-sm font-semibold leading-snug text-me-charcoal">{item.text_line}</p>
         <p className="text-xs text-me-charcoal/70">
-          {formatClock(item.slot_at)} · Facebook 主页 Story · {describeItemStatusInPack(item.status, packState)}
+          {formatClock(item.slot_at)}
+          {item.role ? ` · ${ROLE_LABEL[item.role] ?? ''}` : ''} · Facebook 主页 Story · {describeItemStatusInPack(item.status, packState)}
         </p>
       </div>
     </li>
@@ -118,6 +126,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
       >
         <p className="text-base font-bold text-me-charcoal">{mode.headline}</p>
         <p className="text-sm text-me-charcoal/80">{mode.detail}</p>
+        <p className="text-sm text-me-charcoal/80">这一周由系统自动排期，你只需要点一次授权。</p>
         <p className="text-sm text-me-charcoal/80">
           Story：
           {data.story_error
@@ -148,14 +157,17 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
             <article key={day.key} className="space-y-3 rounded-xl border border-black/10 bg-white p-3">
               <h3 className="text-sm font-bold text-me-charcoal">{describeNzDay(day.key)}</h3>
               <div>
-                <p className="mb-1 text-xs font-semibold text-me-charcoal/70">Story（{day.items.length} 条）</p>
+                <p className="mb-1 text-xs font-semibold text-me-charcoal/70">Story（{usedOf(day.items.length, data.quota?.story_per_day)}）</p>
                 <ul className="space-y-2">
                   {day.items.map((item) => (
                     <StoryRow key={item.item_id} item={item} packState={story?.state ?? 'DRAFT'} />
                   ))}
                 </ul>
               </div>
-              <p className="text-xs text-me-charcoal/70">图文 Post：尚未接入（做好后会显示在这里）</p>
+              <p className="text-xs text-me-charcoal/70">
+                图文 Post：尚未接入（做好后会显示在这里）
+                {typeof data.quota?.post_per_day === 'number' ? `，每天名额 ${data.quota.post_per_day} 条` : '，名额未配置'}
+              </p>
             </article>
           ))}
         </div>
@@ -163,6 +175,10 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
 
       <section className="space-y-2 rounded-xl border border-black/10 bg-white p-3">
         <h2 className="text-lg font-bold text-me-charcoal">视频 Reel（按状态，没有固定发布日）</h2>
+        <p className="text-xs text-me-charcoal/70">
+          {typeof data.quota?.reel_per_week === 'number' ? `每周名额 ${data.quota.reel_per_week} 条` : '每周名额未配置'}
+          ；Reel 没有固定发布日，名额用量暂不统计。
+        </p>
         {data.reels_error && <p className="text-sm font-medium text-[#B03A2E]">Reel 读取失败，请刷新页面。</p>}
         {!data.reels_error && data.reels.length === 0 && <p className="text-sm text-me-charcoal/80">现在没有可看的 Reel。</p>}
         <ul className="space-y-1.5">
@@ -171,6 +187,13 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
           ))}
         </ul>
         {data.reels.length > 12 && <p className="text-xs text-me-charcoal/70">还有 {data.reels.length - 12} 条更早的，去视频工厂看全部。</p>}
+      </section>
+
+      <section className="space-y-1 rounded-xl border border-black/10 bg-white p-3">
+        <h2 className="text-lg font-bold text-me-charcoal">没能进日历</h2>
+        <p className="text-sm text-me-charcoal/80">
+          尚未接入：还没有「报名」这一步。以后被规则挡下的内容（比如事实没出处、画面没过审、图和最近发过的重复）会在这里列出来，并写明被哪一条规则挡的，不会只留在日志里。
+        </p>
       </section>
     </div>
   )

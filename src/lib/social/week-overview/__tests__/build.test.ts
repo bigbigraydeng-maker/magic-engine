@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { InMemoryLiteStore } from '../../story-lite/in-memory-store'
 import type { LiteServicePorts } from '../../story-lite/service'
 import type { LiteActor, NewLiteItem } from '../../story-lite/types'
-import { buildWeekOverview } from '../build'
+import { buildWeekOverview, readPublishingQuota } from '../build'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const OTHER = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
@@ -125,5 +125,24 @@ describe('buildWeekOverview', () => {
     expect(result.value.story_error).not.toBeNull()
     expect(result.value.story).toBeNull()
     expect(result.value.reels).toHaveLength(1)
+  })
+})
+
+describe('readPublishingQuota', () => {
+  function quotaDb(result: { data: unknown; error: { code?: string; message: string } | null }) {
+    const chain = { select: () => chain, eq: () => chain, maybeSingle: async () => result }
+    return { from: () => chain } as never
+  }
+  it('reads the client\'s own numbers and treats bad values as not configured', async () => {
+    const q = await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: { quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 'x' } } }, error: null }), CLIENT)
+    expect(q).toEqual({ post_per_day: 2, story_per_day: 3, reel_per_week: null })
+  })
+  it('no config, empty config or a missing column is "not configured" (null), never zeros', async () => {
+    expect(await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: null }, error: null }), CLIENT)).toBeNull()
+    expect(await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: { quota: {} } }, error: null }), CLIENT)).toBeNull()
+    expect(await readPublishingQuota(quotaDb({ data: null, error: { code: '42703', message: 'column clients.publishing_calendar_config does not exist' } }), CLIENT)).toBeNull()
+  })
+  it('any other database error is thrown, not hidden', async () => {
+    await expect(readPublishingQuota(quotaDb({ data: null, error: { message: 'timeout' } }), CLIENT)).rejects.toThrow('timeout')
   })
 })
