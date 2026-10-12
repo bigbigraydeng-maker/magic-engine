@@ -1,6 +1,6 @@
 ---
 id: 2026-10-12-crm-order-record-design-in-review
-title: CRM 订单记录设计稿 v1.0 改为复用已上线的订单与付款进度（crm_bookings），只补来源与发票号两列和销售进度只读页；已过第四轮两审，待 PM 批准；批准前不写代码不改生产库
+title: CRM 订单记录设计稿 v1.1 复用已上线的订单与付款进度（crm_bookings），补来源发票号两列、金额列和销售进度只读页；金额部分待第五轮两审，待 PM 批准；批准前不写代码不改生产库
 status: decided
 owner: pm
 decided_on: 2026-10-12
