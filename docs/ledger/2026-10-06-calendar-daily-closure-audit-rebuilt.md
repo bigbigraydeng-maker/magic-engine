@@ -2,7 +2,7 @@
 id: 2026-10-06-calendar-daily-closure-audit-rebuilt
 title: 日历上带日期的验证事项，每天早上自动核对并闭环（定时任务重写并重新启用）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-10-06
 source: session:ca1d7290
 verify_by: 2026-10-08
@@ -10,7 +10,7 @@ verify_how: 看 10 月 7 日和 8 日两天的回执文件都在、日历里新�
 done_on: 2026-10-06
 done_ref: doc:docs/ledger/evidence/calendar-verification-audit--prompt-after-20261006.md
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 PM 2026-10-06 要求每天有人核日历里的验证事项；统筹转达同意。原提示词存档在同目录 prompt-before 文件，回滚就是换回它。
 当场试跑一次：处理 30 条，已验证 8、没达预期 3、没查成 18、等 PM 动手 1，回执在本机 calendar-audit-receipts 目录。

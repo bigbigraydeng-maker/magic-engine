@@ -2,7 +2,7 @@
 id: 2026-09-25-agent-crm-shipped-cts
 title: 同行渠道（旅行社 Agent 客户）页面上线、两张表已建，等第一条 AI 自动提取进表
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-24
 source: pr:1983
 verify_by: 2026-09-29
@@ -10,7 +10,7 @@ verify_how: 生产库 agent_customers 出现 ≥1 行由邮件同步自动写入
 done_on: 2026-09-24
 done_ref: pr:1983
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 入口：客户工作台「同行渠道」卡。每小时邮件同步对 trade 域名联系人跑 AI 提取，pax>30 标 needs_review。
 两张 migration（agent_customers 建表 / dedup 唯一索引）已 apply。测试向导窗口正带 PM 走一遍。

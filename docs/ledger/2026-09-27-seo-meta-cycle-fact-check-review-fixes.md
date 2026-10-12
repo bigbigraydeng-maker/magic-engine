@@ -2,7 +2,7 @@
 id: 2026-09-27-seo-meta-cycle-fact-check-review-fixes
 title: SEO Meta-Cycle 事实核对闸门 5+4 条审查缺陷修复（反向检查 + 多币种/促销/数量 + 出发点/别名 + 日期扩展 + AI判官提示词 + 格式归一 + slug 解析加固）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: pr:1948
 done_on: 2026-09-27
@@ -10,7 +10,7 @@ done_ref: pr:1948
 verify_by: 2026-10-04
 verify_how: 周一 cron 正常跑完无回归；/china-tours 被正确拦截（反向 + 正向事实检查均触发）
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 子牙 + 魏征审查 PR #1948 提出 5 条缺陷 + 子牙追加 4 项必改，全部修复：
 1. BLOCKER: hard-fact-check 增加反向检查 — AI 改写新增的事实同样拦截

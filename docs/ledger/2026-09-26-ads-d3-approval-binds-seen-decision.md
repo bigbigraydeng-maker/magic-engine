@@ -10,6 +10,7 @@ verify_how: 合并上线后、关掉 D3 演练模式前，只读查生产 D3 等
 done_on: 2026-09-26
 done_ref: pr:2063
 last_checked: 2026-10-12
+check_note: 夜巡盖章：本晚未取到 verify_how 所需的线上/生产证据，不翻状态，仅盖章
 ---
 子牙 2026-09-26 查出两处：approveAndRun 不传「人看到的那份审批请求」；同一条 D3 等批准出两条矛盾待办。
 共享登记表 src/lib/kernel/dedicated-approval-entries.ts 由本卡负责，孔子 SEO 3b 直接加一行复用。

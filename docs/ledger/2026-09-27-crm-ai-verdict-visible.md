@@ -2,7 +2,7 @@
 id: 2026-09-27-crm-ai-verdict-visible
 title: AI 判了 972 次阶段、每次都写了理由和客人原话，但员工一次都看不到完整的——两个页面都改好了
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27
@@ -10,7 +10,7 @@ done_ref: pr:2114
 verify_by: 2026-10-01
 verify_how: 跑 `npx tsx --env-file=<.env.local> scripts/probe-crm-stage-actor-label.ts`。判成：每一种「谁改的」都翻成人话（不含冒号、机器不带「改的」二字）、带客人原话的那些剥完开头原话还在、AI 判断带理由的比例 ≥95%。数字会涨（AI 每天在判），涨了不算问题；出现新的机器身份（形如 `ai:xxx` / `system:xxx`）会被脚本判成「系统」而不是漏出去，但该在 actors.ts 里给它一句正式翻译
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 PM 2026-09-27 定的方向：**尽量少让人手动填写或选择，让大模型根据互动痕迹去记录、判断、给建议。**
 

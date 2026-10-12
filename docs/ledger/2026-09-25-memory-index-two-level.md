@@ -2,7 +2,7 @@
 id: 2026-09-25-memory-index-two-level
 title: 记忆索引改成两级——总索引留在截断线以下，四份分区索引兜住其余文件，每个记忆文件两跳可达
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-25
 source: doc:docs/ledger/evidence/2026-09-24-memory-index-over-limit--2026-09-25.md
 verify_by: 2026-10-02
@@ -10,7 +10,7 @@ verify_how: 跑 bash ~/.claude/scripts/memory-index-check.sh（仓库副本 docs
 done_on: 2026-09-25
 done_ref: pr:1993
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 接替 2026-09-24-memory-index-over-limit（原判据"全部文件都在 MEMORY.md 一个文件里且小于 17KB"数学上做不到，已翻 failed，算式见证据文件）。
 2026-09-25 已做：读完 144 个未索引文件，27 个合并进手册/主题记忆后挪出目录，其余全部入索引；总索引 13,642 字节，326 个文件两跳全覆盖。

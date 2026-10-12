@@ -2,7 +2,7 @@
 id: 2026-09-26-ads-digest-pick-ads-measurable-goal
 title: 客户同时有多个进行中目标时，广告日报的目标进度改成优先看广告能量到的那个（留资/私信开聊），不再因为最新的是报名目标就一直空着
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:803d3b06
 verify_by: 2026-09-29
@@ -10,7 +10,7 @@ verify_how: 合并上线后第一份 CTS 广告日报的目标进度段显示的
 done_on: 2026-09-26
 done_ref: pr:2056
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 根因：日报取目标只拿最新一个进行中目标；CTS 最新的是报名目标（读成交记录，常为未判），广告能量的留资目标被跳过。
 修法按指标种类挑，不按客户挑；都不是广告指标时仍取最新。

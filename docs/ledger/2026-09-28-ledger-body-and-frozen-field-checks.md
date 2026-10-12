@@ -2,7 +2,7 @@
 id: 2026-09-28-ledger-body-and-frozen-field-checks
 title: 台账解析器加了两条校验——正文不超 5 行和冻结字段不许改
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-28
 source: session:38d2a4d8
 verify_by: 2026-10-05
@@ -10,6 +10,6 @@ verify_how: 造两张故意违规的卡跑 `npx vitest run src/lib/ledger`：①
 done_on: 2026-09-28
 done_ref: pr:2155
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 后续：6 张老卡的 title/verify_how 被 YAML 空格# 截断（夜巡读到的也是截断版），需让夜巡改读原始文本——ads-d3-autopause-one-click-approval / ads-wp2-gateway-envelope-recheck / b2-changelog-and-ledger-correction / cts-title-cycle-stays-on / nal-messenger-outage-task-already-sent / pm-todo-five-kinds-merge-new-kinds

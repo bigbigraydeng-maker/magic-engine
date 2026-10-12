@@ -10,6 +10,7 @@ verify_how: ①chinatravel#216 合并部署后 curl 3 页，标题/描述与 seo
 done_on: 2026-09-29
 done_ref: pr:2200
 last_checked: 2026-10-12
+check_note: 夜巡盖章：本晚未取到 verify_how 所需的线上/生产证据，不翻状态，仅盖章
 ---
 9-28 05:31 UTC 的 3 个错改（chinatravel#213）来自已退役的 cts-seo-optimizer，不是 Inngest 周循环（pr:2172 修的是后者）。
 原因：0e0b0f619 把 Render 定时改成一次性「9-28 跑」，6d9ff7707 只从 render.yaml 删掉；Render 不会因此删服务，957cca364 又给这条无闸门路径加了自动合并。

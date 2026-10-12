@@ -2,7 +2,7 @@
 id: 2026-09-26-seo-not-indexed-reasons-fix
 title: 今日待办的「页面没被谷歌收录」改成按谷歌给的原因报数、给对动作，并认出被网站防火墙挡住的假页面
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:3b976bb5
 verify_by: 2026-10-06
@@ -10,7 +10,7 @@ verify_how: 上线（先 apply 数据库改动、再合并代码）后第一次�
 done_on: 2026-09-26
 done_ref: pr:2040
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 PM 2026-09-26 在孔子只读评估窗口回「用 deepseek 修复 你来做质量检测」。DeepSeek 写代码，本窗口审 diff、跑测试、提 PR。
 改动面：数据库约束（migration：放开 antibot_challenged、回填三列）、site-audit 检测器 / job-executor / job-runner、seo/index-status、pm-todo 两个文件、blog/content-gate、站点页面清单接口与页面、seo-patrol/index-check、SiteGround SOP。

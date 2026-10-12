@@ -2,7 +2,7 @@
 id: 2026-09-25-ads-d3-auto-pause-review-fixes
 title: 广告 D3 自动暂停 PR 代码审查四项修复落地（RLS 安全漏洞 + 合并冲突 + dry_run 保护 + 实时读配置）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-25
 source: pr:2010
 done_on: 2026-09-25
@@ -10,7 +10,7 @@ done_ref: pr:2010
 verify_by: 2026-10-02
 verify_how: PR 合并后 ad_strategy_configs 表的 RLS 策略含 TO service_role；autopilot_dry_run 手动改后不被 migration 覆盖；processD3Hit 执行前重读配置
 last_checked: 2026-10-12
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 代码审查发现四项问题，本次全部修复并推送：
 1. RLS 漏洞：原 migration 漏 TO service_role，anon 可读写 autopilot 开关，新建修复 migration
