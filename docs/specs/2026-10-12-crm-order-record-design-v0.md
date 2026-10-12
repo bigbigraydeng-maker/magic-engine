@@ -47,6 +47,7 @@ v0.8 之前两审（子牙+魏征，共三轮）里**仍然适用**的结论保�
 - **不改现有 `crm_booking_create`**（第四轮两审一致：改签名会让 Postgres 同时存在 9 参与 11 参两个同名函数，PostgREST 对「界面加订单」的具名调用会报「选不出来」直接 500，且原有 revoke/grant 是按 9 参数写的）。改为**另建一个只给导入工具用的新函数** `crm_booking_create_with_origin`（内部复用 `crm_booking_check_refs`、同样的审计与乐观并发风格；`revoke … from public, anon, authenticated; grant … to service_role`，按新签名写全）。界面「加订单」第一步不暴露这两列。**测试**：旧的 9 参数调用依然成功；新函数 `company_confirmed` 不带发票号被拒。
 - **唯一冲突按约束名拆开**：发票号冲突抛 `duplicate_evidence_ref`，同客人同团同出发日冲突仍抛 `duplicate_booking`；`mapRpcError` 认识新码。导入重跑时先**按发票号读回已有订单，核对联系人与出发日一致才算「已导」**，不一致进「待人判断」。
 - **审计**：用 `create or replace` 替换 `crm_booking_audit_booking`：INSERT 的 `created` 事件 detail 加进 `origin_kind`、`evidence_ref`（发票号不是个人信息，可写；备注原文仍不写）；UPDATE 分支加这两列的 changed 判断（`evidence_ref` 不可改，只是兜底）。注意函数内 `set_config('crm_booking.source','staff')` 是审计来源标记，与新列无关，代码注释写清。
+- **写迁移时的两条硬要求（订单与付款作者 2026-10-13 提醒）**：①`create or replace crm_booking_audit_booking` 时**保持原有 `crm_booking_clear_settings()` 调用和 return 路径不变**（生产库不允许函数级 SET，它首次上线栽过），并在沙盘库重跑 `supabase/tests/crm_booking_tracker.test.sql`，必须仍是 **278 PASS**，再加新用例；②新函数 `crm_booking_create_with_origin` 同样 `revoke … from public, anon, authenticated`、只 grant 给 service_role，别漏。
 - 迁移只含 `alter table … add column`（可空，不重写表）+ CHECK + 部分唯一索引 + 触发器 + 新函数 + 审计触发器替换；先在本机 Postgres 沙盘重放，**生产 apply 要 PM 回「同意」**；迁移 SQL 写完还要请订单与付款窗口的作者复核。
 
 ### 3.2 金额：第一步不显示（需要 PM 一句话）
