@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-13
 done_on: 2026-10-13
-done_ref: pr:pending
+done_ref: pr:2532
 source: session:1a85e0eb
 verify_by: 2026-10-20
 verify_how: 登录后在「付款总览」点「看名单」里排在后面的名字，客人抽屉应打开并滚到「订单与付款」，不再出现「不在这份名单里了」
