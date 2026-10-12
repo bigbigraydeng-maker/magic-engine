@@ -53,6 +53,19 @@ export function renderPreview(items: PlanItem[], summary: PlanSummary): string[]
   lines.push(
     `可导入合计 ${summary.readyPeople} 人；其中要标「定金已收」的 ${summary.depositsToMarkPaid} 单`,
   )
+  const readyUnpaid = items.filter((item) => item.status === 'ready' && !item.depositPaid).length
+  lines.push(`可导入且定金没标已收（导入后会进付款催办名单）：${readyUnpaid} 单`)
+  const perDeparture = new Map<string, { orders: number; people: number }>()
+  for (const item of items) {
+    if (item.status !== 'ready') continue
+    const key = `${item.tourKey} ${item.departOn}`
+    const cur = perDeparture.get(key) ?? { orders: 0, people: 0 }
+    perDeparture.set(key, { orders: cur.orders + 1, people: cur.people + item.partySize })
+  }
+  for (const key of Array.from(perDeparture.keys()).sort()) {
+    const v = perDeparture.get(key)
+    if (v !== undefined) lines.push(`可导入 · ${key}：${v.orders} 单，${v.people} 人`)
+  }
   for (const item of items) {
     lines.push(
       `${guestLabel(item.index)} · 发票 ${item.invoice} · ${item.partySize} 人 · ${statusText(item)} ${item.reasons.join(',')}`,

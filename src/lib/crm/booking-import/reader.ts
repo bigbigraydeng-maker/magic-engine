@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '../../supabase-paginate'
+import { loadSalesDepartureFacts } from '../../tour-catalog/sales-facts'
 import type {
   ContactMatch,
   ExistingOrder,
@@ -25,7 +26,7 @@ export interface ReadFactsResult {
 }
 
 const IDENTITY_CHUNK = 100
-const EVIDENCE_REF_MISSING_RE = /column\s+[\w."]*\bevidence_ref"?\s+does not exist/i
+const EVIDENCE_REF_MISSING_RE = /column\s+[\w."]*\b(evidence_ref|origin_kind)"?\s+does not exist/i
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0
@@ -59,14 +60,25 @@ function mapIdentityRow(raw: unknown): IdentityRow | null {
   return { contact_id: row.contact_id, kind: row.kind, value: row.value }
 }
 
+/**
+ * Only plain identity characters may be put into a PostgREST filter: quotes, backslashes, commas, brackets and control
+ * characters can break the filter (and make the error text echo the value, which is a contact detail). A value with
+ * anything else is simply never looked up, so the row ends up as "contact not found" and a human looks at it.
+ */
+const SAFE_IDENTITY = /^[A-Za-z0-9+@._'-]+$/
+
+function isSafeIdentity(value: string): boolean {
+  return SAFE_IDENTITY.test(value)
+}
+
 /** Collect the distinct normalised identity values across all rows. */
 function collectIdentityValues(rows: ImportRow[], norm: Normalisers): string[] {
   const values = new Set<string>()
   for (const row of rows) {
     const phone = norm.normalisePhone(row.phone)
-    if (phone !== null && phone.length > 0) values.add(phone)
+    if (phone !== null && isSafeIdentity(phone)) values.add(phone)
     const email = norm.normaliseEmail(row.email)
-    if (email !== null && email.length > 0) values.add(email)
+    if (email !== null && isSafeIdentity(email)) values.add(email)
   }
   return Array.from(values)
 }
@@ -76,6 +88,7 @@ async function loadIdentityChunk(
   clientId: string,
   values: string[],
 ): Promise<IdentityRow[]> {
+  // The database error text may echo the looked-up values (contact details): never let it out.
   const raw = await fetchAll<unknown>(
     (from, to) =>
       db
@@ -87,7 +100,9 @@ async function loadIdentityChunk(
         .order('id', { ascending: true })
         .range(from, to),
     5000,
-  )
+  ).catch(() => {
+    throw new Error('identity_lookup_failed')
+  })
   const out: IdentityRow[] = []
   for (const element of raw) {
     const mapped = mapIdentityRow(element)
@@ -126,12 +141,12 @@ function matchContact(
 ): ContactMatch {
   const ids = new Set<string>()
   const phone = norm.normalisePhone(row.phone)
-  if (phone !== null) {
+  if (phone !== null && isSafeIdentity(phone)) {
     const found = index.get(phone)
     if (found !== undefined) for (const id of found) ids.add(id)
   }
   const email = norm.normaliseEmail(row.email)
-  if (email !== null) {
+  if (email !== null && isSafeIdentity(email)) {
     const found = index.get(email)
     if (found !== undefined) for (const id of found) ids.add(id)
   }
@@ -141,119 +156,51 @@ function matchContact(
   return { kind: 'many', contactIds: sorted }
 }
 
-interface TourRow {
-  id: string
-  slug: string
+interface DepartureIndex {
+  /** `${slug}|${depart_on}` -> every catalog departure with that key (more than one = ambiguous) */
+  byKey: Map<string, ResolvedDeparture[]>
 }
 
-interface DepartureRow {
-  id: string
-  tour_id: string
-  depart_on: string
-}
-
-function mapTourRow(raw: unknown): TourRow | null {
-  if (typeof raw !== 'object' || raw === null) return null
-  const row = raw as Record<string, unknown>
-  if (!isNonEmptyString(row.id)) return null
-  if (!isNonEmptyString(row.slug)) return null
-  return { id: row.id, slug: row.slug }
-}
-
-function mapDepartureRow(raw: unknown): DepartureRow | null {
-  if (typeof raw !== 'object' || raw === null) return null
-  const row = raw as Record<string, unknown>
-  if (!isNonEmptyString(row.id)) return null
-  if (!isNonEmptyString(row.tour_id)) return null
-  if (!isNonEmptyString(row.depart_on)) return null
-  return { id: row.id, tour_id: row.tour_id, depart_on: row.depart_on }
-}
-
-async function loadTours(db: SupabaseClient, clientId: string): Promise<TourRow[]> {
-  const raw = await fetchAll<unknown>(
-    (from, to) =>
-      db
-        .from('tour_catalog_tours')
-        .select('id, slug')
-        .eq('client_id', clientId)
-        .order('id', { ascending: true })
-        .range(from, to),
-    2000,
-  )
-  const out: TourRow[] = []
-  for (const element of raw) {
-    const mapped = mapTourRow(element)
-    if (mapped === null) throw new Error('unmappable tour row')
-    out.push(mapped)
+/** Departures come ONLY through the sanctioned catalog reader (sales-facts): this tool never touches the tables. */
+async function loadDepartureIndex(db: SupabaseClient, clientId: string): Promise<DepartureIndex> {
+  const facts = await loadSalesDepartureFacts(db, clientId)
+  const byKey = new Map<string, ResolvedDeparture[]>()
+  for (const fact of facts) {
+    if (fact.tourSlug === null) continue
+    const key = `${fact.tourSlug}|${fact.departOn}`
+    const list = byKey.get(key) ?? []
+    list.push({ departureId: fact.departureId, tourId: fact.tourId, status: fact.status })
+    byKey.set(key, list)
   }
-  return out
-}
-
-async function loadDepartures(db: SupabaseClient, clientId: string): Promise<DepartureRow[]> {
-  const raw = await fetchAll<unknown>(
-    (from, to) =>
-      db
-        .from('tour_catalog_departures')
-        .select('id, tour_id, depart_on')
-        .eq('client_id', clientId)
-        .order('id', { ascending: true })
-        .range(from, to),
-    5000,
-  )
-  const out: DepartureRow[] = []
-  for (const element of raw) {
-    const mapped = mapDepartureRow(element)
-    if (mapped === null) throw new Error('unmappable departure row')
-    out.push(mapped)
-  }
-  return out
-}
-
-/** `${slug}|${depart_on}` -> resolved departure. */
-async function loadDepartureIndex(
-  db: SupabaseClient,
-  clientId: string,
-): Promise<Map<string, ResolvedDeparture>> {
-  const [tours, departures] = await Promise.all([
-    loadTours(db, clientId),
-    loadDepartures(db, clientId),
-  ])
-  const slugById = new Map<string, string>()
-  for (const tour of tours) slugById.set(tour.id, tour.slug)
-  const index = new Map<string, ResolvedDeparture>()
-  for (const departure of departures) {
-    const slug = slugById.get(departure.tour_id)
-    if (slug === undefined) continue
-    index.set(`${slug}|${departure.depart_on}`, {
-      departureId: departure.id,
-      tourId: departure.tour_id,
-    })
-  }
-  return index
+  return { byKey }
 }
 
 interface OrderRow {
   id: string
   contact_id: string
   departure_id: string | null
+  tour_id: string | null
   status: string
   evidence_ref: string | null
+  party_size: number | null
+  origin_kind: string | null
 }
 
-function mapOrderRow(raw: unknown, withEvidence: boolean): OrderRow | null {
+function mapOrderRow(raw: unknown, withOrigin: boolean): OrderRow | null {
   if (typeof raw !== 'object' || raw === null) return null
   const row = raw as Record<string, unknown>
   if (!isNonEmptyString(row.id)) return null
   if (!isNonEmptyString(row.contact_id)) return null
   if (!isNonEmptyString(row.status)) return null
-  const departureId = isNonEmptyString(row.departure_id) ? row.departure_id : null
-  const evidenceRef = withEvidence && isNonEmptyString(row.evidence_ref) ? row.evidence_ref : null
   return {
     id: row.id,
     contact_id: row.contact_id,
-    departure_id: departureId,
+    departure_id: isNonEmptyString(row.departure_id) ? row.departure_id : null,
+    tour_id: isNonEmptyString(row.tour_id) ? row.tour_id : null,
     status: row.status,
-    evidence_ref: evidenceRef,
+    evidence_ref: withOrigin && isNonEmptyString(row.evidence_ref) ? row.evidence_ref : null,
+    party_size: typeof row.party_size === 'number' ? row.party_size : null,
+    origin_kind: withOrigin && isNonEmptyString(row.origin_kind) ? row.origin_kind : null,
   }
 }
 
@@ -267,7 +214,7 @@ async function loadOrders(db: SupabaseClient, clientId: string): Promise<OrdersR
     (from, to) =>
       db
         .from('crm_bookings')
-        .select('id, contact_id, departure_id, status, evidence_ref')
+        .select('id, contact_id, departure_id, tour_id, status, party_size, evidence_ref, origin_kind')
         .eq('client_id', clientId)
         .eq('status', 'active')
         .order('id', { ascending: true })
@@ -289,7 +236,7 @@ async function loadOrders(db: SupabaseClient, clientId: string): Promise<OrdersR
     (from, to) =>
       db
         .from('crm_bookings')
-        .select('id, contact_id, departure_id, status')
+        .select('id, contact_id, departure_id, tour_id, status, party_size')
         .eq('client_id', clientId)
         .eq('status', 'active')
         .order('id', { ascending: true })
@@ -314,8 +261,11 @@ function toExistingOrder(row: OrderRow): ExistingOrder {
     bookingId: row.id,
     contactId: row.contact_id,
     departureId: row.departure_id,
+    tourId: row.tour_id,
     status: 'active',
     evidenceRef: row.evidence_ref,
+    partySize: row.party_size,
+    originKind: row.origin_kind,
   }
 }
 
@@ -327,6 +277,10 @@ function findOrderWithInvoice(orders: OrderRow[], invoice: string): ExistingOrde
   return null
 }
 
+/**
+ * An active order of the same guest on the same departure — OR on the same tour with no departure chosen (the order
+ * table treats "no departure" as its own slot, so such an order is still the same guest on the same tour).
+ */
 function findOrderForGuest(
   orders: OrderRow[],
   contact: ContactMatch,
@@ -334,9 +288,10 @@ function findOrderForGuest(
 ): ExistingOrder | null {
   if (contact.kind !== 'one' || departure === null) return null
   for (const order of orders) {
-    if (order.contact_id === contact.contactId && order.departure_id === departure.departureId) {
-      return toExistingOrder(order)
-    }
+    if (order.contact_id !== contact.contactId) continue
+    const sameDeparture = order.departure_id === departure.departureId
+    const sameTourNoDeparture = order.departure_id === null && order.tour_id === departure.tourId
+    if (sameDeparture || sameTourNoDeparture) return toExistingOrder(order)
   }
   return null
 }
@@ -344,16 +299,18 @@ function findOrderForGuest(
 function buildFacts(
   rows: ImportRow[],
   identityIndex: Map<string, Set<string>>,
-  departureIndex: Map<string, ResolvedDeparture>,
+  departureIndex: DepartureIndex,
   orders: OrderRow[],
   norm: Normalisers,
 ): RowFacts[] {
   return rows.map((row) => {
     const contact = matchContact(row, identityIndex, norm)
-    const departure = departureIndex.get(`${row.tourKey}|${row.departOn}`) ?? null
+    const matches = departureIndex.byKey.get(`${row.tourKey}|${row.departOn}`) ?? []
+    const departure = matches.length === 1 ? matches[0] : null
     return {
       contact,
       departure,
+      departureAmbiguous: matches.length > 1,
       orderWithInvoice: findOrderWithInvoice(orders, row.invoice),
       orderForGuestAndDeparture: findOrderForGuest(orders, contact, departure),
     }

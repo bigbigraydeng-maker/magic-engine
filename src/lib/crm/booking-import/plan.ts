@@ -19,16 +19,14 @@ function decideStatus(reasons: string[]): PlanStatus {
   return 'needs_human'
 }
 
-function buildItem(
-  row: ImportRow,
-  facts: RowFacts,
-  reasons: string[],
-): PlanItem {
+function buildItem(row: ImportRow, facts: RowFacts, reasons: string[]): PlanItem {
   const contactId = facts.contact.kind === 'one' ? facts.contact.contactId : null
   const departure = facts.departure
   return {
     index: row.index,
     invoice: row.invoice,
+    tourKey: row.tourKey,
+    departOn: row.departOn,
     status: decideStatus(reasons),
     reasons: reasons.slice(),
     contactId,
@@ -42,42 +40,65 @@ function buildItem(
   }
 }
 
+const CLOSED_STATUSES = new Set(['cancelled', 'closed'])
+
+function guestDepartureKey(facts: RowFacts): string | null {
+  if (facts.contact.kind !== 'one' || facts.departure === null) return null
+  return `${facts.contact.contactId}|${facts.departure.departureId}`
+}
+
+function countBy(keys: Array<string | null>): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const key of keys) {
+    if (key !== null) counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return counts
+}
+
+function departureReasons(facts: RowFacts): string[] {
+  if (facts.departureAmbiguous) return ['departure_ambiguous']
+  if (facts.departure === null) return ['departure_not_found']
+  if (facts.departure.status !== null && CLOSED_STATUSES.has(facts.departure.status)) {
+    return ['departure_not_open']
+  }
+  return []
+}
+
+function invoiceOrderReasons(row: ImportRow, facts: RowFacts, blocking: boolean): string[] {
+  const order = facts.orderWithInvoice
+  if (order === null) return []
+  const sameContact = facts.contact.kind === 'one' && facts.contact.contactId === order.contactId
+  const sameDeparture = facts.departure !== null && order.departureId === facts.departure.departureId
+  if (!sameContact || !sameDeparture || blocking) return ['invoice_used_elsewhere']
+  // Same invoice, same guest, same departure: only "already imported" when nothing about it differs.
+  const differs = order.partySize !== row.partySize || order.originKind !== row.originKind
+  return differs ? ['imported_but_differs'] : ['already_imported']
+}
+
+/** Reasons for ONE row. Duplicates are decided on the whole input first, so BOTH rows of a pair are held back. */
 function collectReasons(
   row: ImportRow,
   facts: RowFacts,
-  seenInvoices: Set<string>,
+  invoiceCounts: Map<string, number>,
+  guestCounts: Map<string, number>,
 ): string[] {
   const reasons: string[] = []
-
-  if (seenInvoices.has(row.invoice)) reasons.push('duplicate_in_input')
-  seenInvoices.add(row.invoice)
+  if ((invoiceCounts.get(row.invoice) ?? 0) > 1) reasons.push('duplicate_in_input')
+  const guestKey = guestDepartureKey(facts)
+  if (guestKey !== null && (guestCounts.get(guestKey) ?? 0) > 1) reasons.push('duplicate_guest_in_input')
 
   if (facts.contact.kind === 'none') reasons.push('contact_not_found')
   if (facts.contact.kind === 'many') reasons.push('contact_ambiguous')
+  reasons.push(...departureReasons(facts))
 
-  if (facts.departure === null) reasons.push('departure_not_found')
-
-  const blocking = reasons.length > 0
+  reasons.push(...invoiceOrderReasons(row, facts, reasons.length > 0))
 
   const order = facts.orderWithInvoice
-  if (order !== null) {
-    const sameContact =
-      facts.contact.kind === 'one' && facts.contact.contactId === order.contactId
-    const sameDeparture =
-      facts.departure !== null && order.departureId === facts.departure.departureId
-    if (sameContact && sameDeparture && !blocking) {
-      reasons.push('already_imported')
-    } else {
-      reasons.push('invoice_used_elsewhere')
-    }
-  }
-
   const guestOrder = facts.orderForGuestAndDeparture
   // Compare by booking id: the reader may hand back two separate objects for the same order.
   if (guestOrder !== null && (order === null || guestOrder.bookingId !== order.bookingId)) {
     reasons.push('order_exists_for_guest')
   }
-
   return reasons
 }
 
@@ -86,15 +107,21 @@ export function buildPlan(rows: ImportRow[], facts: RowFacts[]): PlanItem[] {
   if (rows.length !== facts.length) {
     throw new Error('rows and facts length mismatch')
   }
-  const seenInvoices = new Set<string>()
-  const items: PlanItem[] = []
-  for (let i = 0; i < rows.length; i += 1) {
-    const row = rows[i]
-    const fact = facts[i]
-    const reasons = collectReasons(row, fact, seenInvoices)
-    items.push(buildItem(row, fact, reasons))
-  }
-  return items
+  const invoiceCounts = countBy(rows.map((row) => row.invoice))
+  const guestCounts = countBy(facts.map(guestDepartureKey))
+  return rows.map((row, i) => buildItem(row, facts[i], collectReasons(row, facts[i], invoiceCounts, guestCounts)))
+}
+
+/**
+ * When the order table has no invoice column yet (migration not applied), the "already imported?" check was NOT done,
+ * so nothing may be called ready: the plan is not usable for a real import.
+ */
+export function markInvoiceCheckUnavailable(items: PlanItem[]): PlanItem[] {
+  return items.map((item) =>
+    item.status === 'ready'
+      ? { ...item, status: 'needs_human' as const, reasons: [...item.reasons, 'invoice_check_unavailable'] }
+      : item,
+  )
 }
 
 /** Aggregate counts and per-departure people for a plan. */

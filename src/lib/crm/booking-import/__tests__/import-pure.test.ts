@@ -49,7 +49,8 @@ function makeRow(overrides: Partial<ImportRow> = {}): ImportRow {
 function makeFacts(overrides: Partial<RowFacts> = {}): RowFacts {
   return {
     contact: { kind: 'one', contactId: 'c1' },
-    departure: { departureId: 'd1', tourId: 't1' },
+    departure: { departureId: 'd1', tourId: 't1', status: 'open' },
+    departureAmbiguous: false,
     orderWithInvoice: null,
     orderForGuestAndDeparture: null,
     ...overrides,
@@ -178,6 +179,9 @@ describe('buildPlan', () => {
         departureId: 'd1',
         status: 'active',
         evidenceRef: null,
+        tourId: 't1',
+        partySize: 2,
+        originKind: 'company_confirmed',
       },
     })
     const items = buildPlan([makeRow()], [facts])
@@ -193,6 +197,9 @@ describe('buildPlan', () => {
         departureId: 'd1',
         status: 'active',
         evidenceRef: null,
+        tourId: 't1',
+        partySize: 2,
+        originKind: 'company_confirmed',
       },
     })
     const items = buildPlan([makeRow()], [facts])
@@ -208,6 +215,9 @@ describe('buildPlan', () => {
         departureId: 'd1',
         status: 'active',
         evidenceRef: null,
+        tourId: 't1',
+        partySize: 2,
+        originKind: 'company_confirmed',
       },
     })
     const items = buildPlan([makeRow()], [facts])
@@ -224,6 +234,9 @@ describe('buildPlan', () => {
         departureId: 'd1',
         status: 'active',
         evidenceRef: null,
+        tourId: 't1',
+        partySize: 2,
+        originKind: 'company_confirmed',
       },
     })
     const items = buildPlan([makeRow()], [facts])
@@ -252,6 +265,8 @@ describe('summarise', () => {
       {
         index: 0,
         invoice: '84030',
+        tourKey: 'essentials',
+        departOn: '2025-06-01',
         status: 'ready',
         reasons: [],
         contactId: 'c1',
@@ -266,6 +281,8 @@ describe('summarise', () => {
       {
         index: 1,
         invoice: '84031',
+        tourKey: 'essentials',
+        departOn: '2025-06-01',
         status: 'skip_already_imported',
         reasons: ['already_imported'],
         contactId: 'c1',
@@ -280,6 +297,8 @@ describe('summarise', () => {
       {
         index: 2,
         invoice: '84032',
+        tourKey: 'essentials',
+        departOn: '2025-06-01',
         status: 'needs_human',
         reasons: ['contact_not_found'],
         contactId: null,
@@ -361,10 +380,11 @@ describe('buildPlan: the guest order is the invoice order (two separate objects,
       index: 0, invoice: '84030', originKind: 'company_confirmed' as const, partySize: 2, tourKey: 'essentials',
       departOn: '2029-03-11', bookedOn: '2029-01-05', phone: '+6421111111', email: null, depositPaid: false, paidOn: null,
     }
-    const existing = { bookingId: 'b1', contactId: 'c1', departureId: 'd1', status: 'active' as const, evidenceRef: '84030' }
+    const existing = { bookingId: 'b1', contactId: 'c1', departureId: 'd1', tourId: 't1', status: 'active' as const, evidenceRef: '84030', partySize: 2, originKind: 'company_confirmed' }
     const facts = {
       contact: { kind: 'one' as const, contactId: 'c1' },
-      departure: { departureId: 'd1', tourId: 't1' },
+      departure: { departureId: 'd1', tourId: 't1', status: 'open' },
+      departureAmbiguous: false,
       orderWithInvoice: existing,
       orderForGuestAndDeparture: { ...existing },
     }

@@ -58,7 +58,7 @@ function fail(index: number, code: string): ParseOutcome {
 }
 
 function parseOne(index: number, raw: unknown): ParseOutcome {
-  if (!isPlainObject(raw)) return fail(index, 'bad_invoice')
+  if (!isPlainObject(raw)) return fail(index, 'bad_row')
 
   const invoiceRaw = readString(raw.invoice)
   if (invoiceRaw === null) return fail(index, 'bad_invoice')
@@ -86,6 +86,8 @@ function parseOne(index: number, raw: unknown): ParseOutcome {
   const bookedOn = readString(raw.bookedOn)
   if (bookedOn === null || !isRealDate(bookedOn)) return fail(index, 'bad_date')
 
+  // A phone given as a JSON number (no quotes) must not be silently dropped.
+  if (raw.phone !== undefined && raw.phone !== null && typeof raw.phone !== 'string') return fail(index, 'bad_phone')
   const phone = readOptionalString(raw.phone)
   const emailRaw = readOptionalString(raw.email)
   const email = emailRaw === null ? null : emailRaw.toLowerCase()
@@ -93,7 +95,7 @@ function parseOne(index: number, raw: unknown): ParseOutcome {
 
   const depositRaw = raw.depositPaid
   if (depositRaw !== undefined && typeof depositRaw !== 'boolean') {
-    return fail(index, 'missing_paid_on')
+    return fail(index, 'bad_deposit_flag')
   }
   const depositPaid = depositRaw === true
 
@@ -102,10 +104,10 @@ function parseOne(index: number, raw: unknown): ParseOutcome {
     const paidOnRaw = readString(raw.paidOn)
     if (paidOnRaw === null || !isRealDate(paidOnRaw)) return fail(index, 'missing_paid_on')
     paidOn = paidOnRaw
-  } else {
-    const paidOnRaw = readOptionalString(raw.paidOn)
-    paidOn = paidOnRaw !== null && isRealDate(paidOnRaw) ? paidOnRaw : null
   }
+  // ISO dates compare as strings: the invoice cannot be later than the departure, nor the payment before the invoice.
+  if (bookedOn > departOn) return fail(index, 'bad_date_order')
+  if (paidOn !== null && paidOn < bookedOn) return fail(index, 'bad_date_order')
 
   const row: ImportRow = {
     index,

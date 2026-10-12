@@ -29,20 +29,31 @@ export type ContactMatch =
   | { kind: 'one'; contactId: string }
   | { kind: 'many'; contactIds: string[] }
 
-export interface ResolvedDeparture { departureId: string; tourId: string }
+export interface ResolvedDeparture {
+  departureId: string
+  tourId: string
+  /** raw status from the catalog (open / limited / sold_out / closed / cancelled), null when unknown */
+  status: string | null
+}
 
 export interface ExistingOrder {
   bookingId: string
   contactId: string
   departureId: string | null
+  /** the tour the order is for (an order may be hung on a tour with no departure chosen) */
+  tourId: string | null
   status: 'active' | 'cancelled'
   evidenceRef: string | null
+  partySize: number | null
+  originKind: string | null
 }
 
 /** Everything the read-only reader found out about ONE input row. */
 export interface RowFacts {
   contact: ContactMatch
   departure: ResolvedDeparture | null
+  /** more than one catalog departure matched tour key + date: refuse to guess */
+  departureAmbiguous: boolean
   /** an ACTIVE order that already holds this invoice number, if any */
   orderWithInvoice: ExistingOrder | null
   /** an ACTIVE order of the same guest on the same departure, if any */
@@ -54,6 +65,9 @@ export type PlanStatus = 'ready' | 'skip_already_imported' | 'needs_human'
 export interface PlanItem {
   index: number
   invoice: string
+  /** the tour key and date as typed in the input, for labelling the preview */
+  tourKey: string
+  departOn: string
   status: PlanStatus
   reasons: string[]             // machine codes, e.g. contact_not_found
   contactId: string | null

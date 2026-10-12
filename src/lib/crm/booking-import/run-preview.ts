@@ -2,11 +2,13 @@
 // Pure glue: no IO of its own, no logging, no writes. The Supabase client is passed in.
 // Invalid rows are reported by label and code only; contact details are never printed.
 // Returns the preview lines, the plan items, the plan fingerprint and a few counters.
+// The fingerprint hashes the plan items only. It is NOT an authorisation: a future write step must re-read the
+// database, rebuild the plan from the input file, compare, and re-check every invoice at write time.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { guestLabel, renderPreview } from './mask'
 import { parseRows } from './parse'
-import { buildPlan, planHash, summarise } from './plan'
+import { buildPlan, markInvoiceCheckUnavailable, planHash, summarise } from './plan'
 import { readFacts, type Normalisers } from './reader'
 import type { ImportRow, PlanItem } from './types'
 
@@ -25,6 +27,7 @@ export interface PreviewOutput {
   originColumnsMissing: boolean
 }
 
+const NO_FINGERPRINT_LINE = '计划指纹：不给（订单表缺列，发票号查重没做过，这份计划不能用来导入）'
 const BAD_JSON_LINE = '输入文件不是合法的 JSON'
 const MISSING_COLUMNS_LINE =
   '提醒：订单表里还没有「来源」「发票号」两列（迁移没应用），所以无法核对发票号是否已导入。'
@@ -82,9 +85,11 @@ export async function runPreview(input: PreviewInput): Promise<PreviewOutput> {
     rows,
     input.norm,
   )
-  const items = buildPlan(rows, facts)
+  const planned = buildPlan(rows, facts)
+  // Without the invoice column the "already imported?" check was not done: nothing is ready, and no fingerprint is given.
+  const items = originColumnsMissing ? markInvoiceCheckUnavailable(planned) : planned
   const summary = summarise(items)
-  const planSha = await planHash(items)
+  const planSha = originColumnsMissing ? '' : await planHash(items)
 
   const lines: string[] = []
   if (invalidLines.length > 0) {
@@ -93,7 +98,7 @@ export async function runPreview(input: PreviewInput): Promise<PreviewOutput> {
   }
   for (const line of renderPreview(items, summary)) lines.push(line)
   if (originColumnsMissing) lines.push(MISSING_COLUMNS_LINE)
-  lines.push(`计划指纹：${planSha}`)
+  lines.push(originColumnsMissing ? NO_FINGERPRINT_LINE : `计划指纹：${planSha}`)
 
   return {
     lines,

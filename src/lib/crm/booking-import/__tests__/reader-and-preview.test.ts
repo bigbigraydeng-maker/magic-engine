@@ -112,8 +112,8 @@ function makeRow(overrides: Partial<ImportRow> = {}): ImportRow {
   }
 }
 
-const TOUR_ROW = { id: 'tour-1', slug: 'essentials' }
-const DEPARTURE_ROW = { id: 'dep-1', tour_id: 'tour-1', depart_on: '2029-03-11' }
+const TOUR_ROW = { id: 'tour-1', name: 'Essentials', slug: 'essentials', max_group_size: 20 }
+const DEPARTURE_ROW = { id: 'dep-1', tour_id: 'tour-1', depart_on: '2029-03-11', status: 'open', internal: {} }
 
 describe('readFacts - contacts', () => {
   it('matches none when no identity is found', async () => {
@@ -187,7 +187,7 @@ describe('readFacts - departures', () => {
       crm_bookings: [],
     })
     const { facts } = await readFacts(db as never, 'client-1', [makeRow()], norm)
-    expect(facts[0].departure).toEqual({ departureId: 'dep-1', tourId: 'tour-1' })
+    expect(facts[0].departure).toEqual({ departureId: 'dep-1', tourId: 'tour-1', status: 'open' })
   })
 
   it('returns null when no departure matches', async () => {
@@ -392,7 +392,7 @@ describe('runPreview', () => {
         tourKey: 'essentials',
         departOn: '2029-03-11',
         bookedOn: '2029-01-01',
-        phone: '021 555 0100',
+        phone: '021 555 0101',
         email: null,
         depositPaid: false,
       },
@@ -420,7 +420,10 @@ describe('runPreview', () => {
       },
     ]
     const db = createFakeDb({
-      contact_identities: [{ contact_id: 'c-1', kind: 'phone', value: '+64215550100' }],
+      contact_identities: [
+        { contact_id: 'c-1', kind: 'phone', value: '+64215550100' },
+        { contact_id: 'c-2', kind: 'phone', value: '+64215550101' },
+      ],
       tour_catalog_tours: [TOUR_ROW],
       tour_catalog_departures: [DEPARTURE_ROW],
       crm_bookings: [
@@ -430,6 +433,9 @@ describe('runPreview', () => {
           departure_id: 'dep-1',
           status: 'active',
           evidence_ref: ' 22-222 ',
+          tour_id: 'tour-1',
+          party_size: 2,
+          origin_kind: 'company_confirmed',
         },
       ],
     })
@@ -443,7 +449,8 @@ describe('runPreview', () => {
     expect(text).toContain('预览（只读，没有写入任何东西）')
     expect(text).toContain('计划指纹：')
     expect(text).toContain('contact_not_found')
-    expect(text).toContain('already_imported')
+    expect(text).toContain('已导入过 1')
+    expect(text).toContain('可导入 1')
     expect(text).not.toContain('5550100')
     expect(text).not.toContain('5550199')
   })
@@ -455,8 +462,93 @@ describe('scripts/import-march-bookings.ts', () => {
     const source = readFileSync(scriptPath, 'utf8')
     expect(source).toContain('--apply')
     expect(source).toContain('return 2')
+    // the only `.update(` allowed is the file hash, not a database call
+    const withoutHash = source.replace(/createHash\('sha256'\)\.update\(/g, '')
     for (const token of ['.insert(', '.update(', '.delete(', '.upsert(', '.rpc(']) {
-      expect(source).not.toContain(token)
+      expect(withoutHash).not.toContain(token)
     }
+  })
+})
+
+describe('review-driven guards', () => {
+  const baseTables = {
+    tour_catalog_tours: [TOUR_ROW],
+    tour_catalog_departures: [DEPARTURE_ROW],
+    crm_bookings: [] as unknown[],
+  }
+  const rowJson = (over: Record<string, unknown>) => ({
+    invoice: '11111',
+    originKind: 'company_confirmed',
+    partySize: 2,
+    tourKey: 'essentials',
+    departOn: '2029-03-11',
+    bookedOn: '2029-01-01',
+    phone: '021 555 0100',
+    email: null,
+    depositPaid: false,
+    ...over,
+  })
+  const ident = { contact_identities: [{ contact_id: 'c-1', kind: 'phone', value: '+64215550100' }] }
+
+  it('two rows with the same invoice are both sent to a human', async () => {
+    const db = createFakeDb({ ...baseTables, ...ident })
+    const result = await runPreview({
+      clientId: 'client-1',
+      rawJson: JSON.stringify([rowJson({}), rowJson({ phone: '021 555 0100', departOn: '2029-03-11' })]),
+      db: db as never,
+      norm,
+    })
+    expect(result.lines.join('\n')).toContain('duplicate_in_input')
+    expect(result.lines.join('\n')).toContain('可导入 0')
+  })
+
+  it('same slug and date on two departures is ambiguous, not guessed', async () => {
+    const db = createFakeDb({
+      ...baseTables,
+      ...ident,
+      tour_catalog_departures: [DEPARTURE_ROW, { ...DEPARTURE_ROW, id: 'dep-2' }],
+    })
+    const { facts } = await readFacts(db as never, 'client-1', [makeRow()], norm)
+    expect(facts[0].departure).toBeNull()
+    expect(facts[0].departureAmbiguous).toBe(true)
+  })
+
+  it('a cancelled departure is not open', async () => {
+    const db = createFakeDb({
+      ...baseTables,
+      ...ident,
+      tour_catalog_departures: [{ ...DEPARTURE_ROW, status: 'cancelled' }],
+    })
+    const result = await runPreview({
+      clientId: 'client-1',
+      rawJson: JSON.stringify([rowJson({})]),
+      db: db as never,
+      norm,
+    })
+    expect(result.lines.join('\n')).toContain('departure_not_open')
+  })
+
+  it('missing origin columns: nothing is ready and there is no plan fingerprint', async () => {
+    const db = createFakeDb(
+      { ...baseTables, ...ident },
+      { crm_bookings: 'column crm_bookings.evidence_ref does not exist' },
+      { crm_bookings: 'evidence_ref' },
+    )
+    const result = await runPreview({
+      clientId: 'client-1',
+      rawJson: JSON.stringify([rowJson({})]),
+      db: db as never,
+      norm,
+    })
+    const text = result.lines.join('\n')
+    expect(text).toContain('invoice_check_unavailable')
+    expect(text).toContain('可导入 0')
+    expect(result.planSha).toBe('')
+  })
+
+  it('identity values with unsafe characters are never sent to the database', async () => {
+    const db = createFakeDb({ ...baseTables, ...ident })
+    await readFacts(db as never, 'client-1', [makeRow({ phone: null, email: 'a"b),c@x.com' })], norm)
+    expect(db.calls.some((c) => c.table === 'contact_identities')).toBe(false)
   })
 })
