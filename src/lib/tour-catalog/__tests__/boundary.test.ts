@@ -179,7 +179,7 @@ describe('tour catalog draft boundary', () => {
     expect(/\.(insert|update|upsert|delete|rpc)\(/.test(facts)).toBe(false)
     expect(/from\s+['"][^'"]*\/crm\//.test(facts)).toBe(false)
     // The selected columns are named once each: widening them fails here.
-    expect(facts).toContain(`SALES_FACT_TOUR_COLUMNS = 'id, name, max_group_size'`)
+    expect(facts).toContain(`SALES_FACT_TOUR_COLUMNS = 'id, name, slug, max_group_size'`)
     expect(facts).toContain(`SALES_FACT_DEPARTURE_COLUMNS = 'id, tour_id, depart_on, status, internal'`)
     const selects = Array.from(facts.matchAll(/\.select\(([^)]*)\)/g)).map((m) => m[1].trim())
     expect(Array.from(new Set(selects)).sort()).toEqual(['SALES_FACT_DEPARTURE_COLUMNS', 'SALES_FACT_TOUR_COLUMNS'])

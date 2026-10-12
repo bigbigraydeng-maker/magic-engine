@@ -14,13 +14,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase-paginate'
 
-export const SALES_FACT_TOUR_COLUMNS = 'id, name, max_group_size'
+export const SALES_FACT_TOUR_COLUMNS = 'id, name, slug, max_group_size'
 export const SALES_FACT_DEPARTURE_COLUMNS = 'id, tour_id, depart_on, status, internal'
 
 export interface SalesDepartureFacts {
   departureId: string
   tourId: string
   tourName: string | null
+  /** the tour's catalog slug, e.g. used by the local import preview to find a departure by tour + date */
+  tourSlug: string | null
   departOn: string
   status: string | null
   /** raw value of the internal `capacity` key: undefined when the key is absent (never any other key) */
@@ -41,6 +43,7 @@ function internalCapacityOf(internal: unknown): unknown {
 
 interface TourFact {
   name: string | null
+  slug: string | null
   maxGroupSize: unknown
 }
 
@@ -60,7 +63,11 @@ async function readTours(db: SupabaseClient, clientId: string): Promise<Map<stri
     if (typeof raw !== 'object' || raw === null) continue
     const row = raw as Record<string, unknown>
     if (!isNonEmptyString(row.id)) continue
-    tours.set(row.id, { name: typeof row.name === 'string' ? row.name : null, maxGroupSize: row.max_group_size })
+    tours.set(row.id, {
+      name: typeof row.name === 'string' ? row.name : null,
+      slug: typeof row.slug === 'string' ? row.slug : null,
+      maxGroupSize: row.max_group_size,
+    })
   }
   return tours
 }
@@ -93,6 +100,7 @@ export async function loadSalesDepartureFacts(db: SupabaseClient, clientId: stri
       departureId: row.id,
       tourId: row.tour_id,
       tourName: tour?.name ?? null,
+      tourSlug: tour?.slug ?? null,
       departOn: row.depart_on,
       status: typeof row.status === 'string' ? row.status : null,
       internalCapacity: internalCapacityOf(row.internal),
