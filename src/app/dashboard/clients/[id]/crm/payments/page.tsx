@@ -17,6 +17,7 @@ import { saveReturnQuery } from '../_components/bookings/payments-return'
 import { SummaryTable } from './_components/SummaryTable'
 import { SummaryFooter } from './_components/SummaryFooter'
 import { PaidWithoutBookingBanner } from './_components/PaidWithoutBookingBanner'
+import { PaymentsErrorBoundary } from './_components/PaymentsErrorBoundary'
 import { EmptyState } from './_components/EmptyState'
 import { OrdersFilters } from './_components/OrdersFilters'
 import { OrdersTable } from './_components/OrdersTable'
@@ -86,25 +87,31 @@ function PaymentsPageInner(): JSX.Element {
           正在加载付款总览…
         </p>
       )}
-      {state.status === 'error' && (
-        <div role="alert" className="space-y-2">
-          <p className={MUTED_LINE}>付款总览暂时算不出来，请稍后再试</p>
-          <button type="button" className={SECONDARY_BUTTON} onClick={retry}>
-            重试
-          </button>
-        </div>
-      )}
+      {state.status === 'error' && <ErrorBranch retry={retry} />}
       {state.status === 'ready' && (
-        <ReadyView
-          clientId={clientId}
-          query={query}
-          data={state.data}
-          refreshing={state.refreshing}
-          navigate={navigate}
-          onOpenRow={onOpenRow}
-          onLeave={onLeave}
-        />
+        <PaymentsErrorBoundary resetKey={state.data} fallback={<ErrorBranch retry={retry} />}>
+          <ReadyView
+            clientId={clientId}
+            query={query}
+            data={state.data}
+            refreshing={state.refreshing}
+            navigate={navigate}
+            onOpenRow={onOpenRow}
+            onLeave={onLeave}
+          />
+        </PaymentsErrorBoundary>
       )}
+    </div>
+  )
+}
+
+function ErrorBranch(props: { retry: () => void }): JSX.Element {
+  return (
+    <div role="alert" className="space-y-2">
+      <p className={MUTED_LINE}>付款总览暂时算不出来，请稍后再试</p>
+      <button type="button" className={SECONDARY_BUTTON} onClick={props.retry}>
+        重试
+      </button>
     </div>
   )
 }
@@ -150,6 +157,11 @@ function ReadyView(props: ReadyViewProps): JSX.Element {
   return (
     <section aria-busy={refreshing} className="space-y-5">
       <h2 className="text-lg font-black text-me-charcoal">{PAGE_HEADING}</h2>
+      {refreshing && (
+        <p role="status" aria-live="polite" className="text-sm font-semibold text-me-charcoal/70">
+          更新中…
+        </p>
+      )}
       {!data.hasBookings ? (
         <>
           <EmptyState clientId={clientId} />

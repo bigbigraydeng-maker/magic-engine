@@ -27,6 +27,21 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
 
+const PROBE_TTL_MS = 5 * 60 * 1000
+const probeCache = new Map<string, { ok: boolean; at: number }>()
+
+/** The cached probe answer for this client, or null when there is none or it is older than 5 minutes. */
+function readProbeCache(clientId: string): boolean | null {
+  const hit = probeCache.get(clientId)
+  if (hit === undefined || Date.now() - hit.at > PROBE_TTL_MS) return null
+  return hit.ok
+}
+
+/** Test hook: forget every cached probe answer. */
+export function resetPaymentsProbeCache(): void {
+  probeCache.clear()
+}
+
 export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' | 'payments' }) {
   const base = `/dashboard/clients/${clientId}/crm`
   const cls = (on: boolean) =>
@@ -54,16 +69,22 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
   const flags = industryFeatureFlags(industry)
 
   // 「付款总览」页签：只有探针返回 200 才显示；403/404/出错/还没回来一律不显示（不暴露这个功能存在）。
-  const [showPayments, setShowPayments] = useState(false)
+  // 结果按客户缓存 5 分钟（出错不缓存），所以在 CRM 各页之间切换时页签不会消失再弹出来。
+  const [showPayments, setShowPayments] = useState(() => readProbeCache(clientId) === true)
   useEffect(() => {
+    const cached = readProbeCache(clientId)
+    setShowPayments(cached === true)
+    if (cached !== null) return
     let cancelled = false
-    setShowPayments(false)
     void (async () => {
       try {
         const res = await fetch(`/api/clients/${clientId}/crm/bookings/access`)
+        if (res.status === 200 || res.status === 403 || res.status === 404) {
+          probeCache.set(clientId, { ok: res.status === 200, at: Date.now() })
+        }
         if (!cancelled) setShowPayments(res.status === 200)
       } catch {
-        // 网络出错：不显示
+        // 网络出错：不显示，也不缓存（下次再试）
       }
     })()
     return () => {

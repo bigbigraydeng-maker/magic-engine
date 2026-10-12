@@ -27,6 +27,11 @@ interface GroupRowProps {
   onSelect: (key: string | null) => void
 }
 
+/** Id of one warning line, so the select button can be described by it. */
+function warnId(group: OverviewGroup, code: string): string {
+  return `warn-${group.key}-${code}`
+}
+
 /** Spoken name of the select button (the visible text is split over several lines). */
 function selectLabel(group: OverviewGroup): string {
   if (group.kind === 'undecided') return '只看还没选出发日期的订单'
@@ -53,6 +58,7 @@ function GroupRowLabel({ group, selected, onSelect }: GroupRowProps) {
         type="button"
         aria-pressed={selected}
         aria-label={selectLabel(group)}
+        aria-describedby={warnings.length > 0 ? warnings.map((w) => warnId(group, w.code)).join(' ') : undefined}
         onClick={handleClick}
         className={SELECT_BUTTON_CLASS}
       >
@@ -68,7 +74,7 @@ function GroupRowLabel({ group, selected, onSelect }: GroupRowProps) {
           </>
         )}
         {warnings.map((entry) => (
-          <span key={entry.code} className={WARNING_LINE_CLASS}>
+          <span key={entry.code} id={warnId(group, entry.code)} className={WARNING_LINE_CLASS}>
             {entry.text}
           </span>
         ))}

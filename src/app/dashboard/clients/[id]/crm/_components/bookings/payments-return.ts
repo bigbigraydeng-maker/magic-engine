@@ -35,3 +35,12 @@ export function paymentsReturnHref(clientId: string): string {
     return base
   }
 }
+
+/** Remove `focus` from the address bar (keeps every other parameter and the history entry). */
+export function stripFocusFromUrl(): void {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('focus')) return
+  url.searchParams.delete('focus')
+  window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+}

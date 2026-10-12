@@ -138,7 +138,7 @@ export type OverviewHandler = (url: string) => Response | Promise<Response>
 
 /** Stub fetch: overview calls go to `handler`; the tab probe and options calls get fixed answers. */
 export function stubFetch(handler: OverviewHandler) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/crm/bookings/overview')) return handler(url)
     if (url.includes('/crm/bookings/access')) return json(200, { ok: true })

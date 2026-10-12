@@ -1,7 +1,9 @@
 import React from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import { CrmTabs } from '../CrmTabs'
+import { CrmTabs, resetPaymentsProbeCache } from '../CrmTabs'
+
+beforeEach(() => resetPaymentsProbeCache())
 
 afterEach(() => {
   cleanup()

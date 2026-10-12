@@ -16,7 +16,7 @@ import { BookingCard } from './BookingCard'
 import { BookingNotice } from './BookingNotice'
 import { BookingsErrorBoundary } from './BookingsErrorBoundary'
 import { useBookings } from './useBookings'
-import { hasFocusBookings } from './payments-return'
+import { hasFocusBookings, stripFocusFromUrl } from './payments-return'
 import {
   ERROR_TEXT,
   MUTED_TEXT,
@@ -53,6 +53,8 @@ function BookingsBlockInner({
     if (state.status !== 'ready' || scrolledRef.current || !hasFocusBookings()) return
     scrolledRef.current = true
     sectionRef.current?.scrollIntoView?.({ block: 'start' })
+    // 用过一次就从地址栏拿掉，免得换下一位客人时又滚一次、又冒出返回链接。
+    stripFocusFromUrl()
   }, [state.status])
 
   useEffect(() => {

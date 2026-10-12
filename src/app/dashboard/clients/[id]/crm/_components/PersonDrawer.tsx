@@ -214,7 +214,7 @@ export function PersonDrawer({
       <aside className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-me-ivory shadow-2xl sm:max-w-[580px]">
         <header className="flex items-start justify-between gap-3 border-b border-me-charcoal/10 bg-white px-4 py-3">
           <div className="min-w-0">
-            <BackToPayments clientId={clientId} />
+            <BackToPayments key={row.contactId} clientId={clientId} />
             <h2 className="truncate text-lg font-black text-me-charcoal">{row.name}</h2>
           </div>
           <button

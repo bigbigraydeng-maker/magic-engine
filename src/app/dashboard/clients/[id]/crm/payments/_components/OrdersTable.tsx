@@ -20,12 +20,20 @@ interface OrdersTableProps {
 }
 
 export function OrdersTable(props: OrdersTableProps): JSX.Element {
+  const dim = props.refreshing ? 'opacity-50 transition-opacity' : ''
   if (props.rows.length === 0) {
-    return <p className={MUTED_TEXT}>{props.emptyText}</p>
+    return (
+      <div aria-busy={props.refreshing} className={dim}>
+        <p role="status" className={MUTED_TEXT}>
+          {props.emptyText}
+        </p>
+        <Pager page={props.page} pageCount={props.pageCount} total={props.total} onPage={props.onPage} />
+      </div>
+    )
   }
 
   return (
-    <div aria-busy={props.refreshing}>
+    <div aria-busy={props.refreshing} className={dim}>
       <div className="overflow-x-auto rounded-xl border border-me-charcoal/15 bg-white">
         <table className="min-w-[640px] w-full border-collapse text-sm text-me-charcoal">
           <caption className="sr-only">全部订单</caption>
@@ -75,7 +83,11 @@ function OrderRow(props: OrderRowProps): JSX.Element {
   const { row } = props
   return (
     <tr
-      onClick={() => props.onOpenRow(row)}
+      onClick={() => {
+        // Selecting text (to copy a note) must not navigate away.
+        if (window.getSelection()?.toString()) return
+        props.onOpenRow(row)
+      }}
       className="cursor-pointer border-b border-me-charcoal/10 align-top hover:bg-me-ivory"
     >
       <th scope="row" className="px-3 py-2 text-left font-normal">
