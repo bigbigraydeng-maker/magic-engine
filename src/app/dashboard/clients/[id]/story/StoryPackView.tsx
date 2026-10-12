@@ -8,7 +8,7 @@ import { useState } from 'react'
 
 import {
   describeActionError,
-  describeItemStatus,
+  describeItemStatusInPack,
   describePackState,
   describeProblem,
   describeStopResult,
@@ -24,6 +24,8 @@ interface Props {
   /** Number of OTHER weeks that are still authorised (the stop button only stops this one). */
   otherAuthorized: number
   onChanged: () => Promise<void>
+  /** Shown by the page, outside this view, so it survives a failed refresh. */
+  onNotice: (text: string | null) => void
 }
 
 function Thumb({ item }: { item: LitePreviewItem }) {
@@ -43,7 +45,7 @@ function Thumb({ item }: { item: LitePreviewItem }) {
   )
 }
 
-function ItemCard({ item, showProblems }: { item: LitePreviewItem; showProblems: boolean }) {
+function ItemCard({ item, showProblems, packState }: { item: LitePreviewItem; showProblems: boolean; packState: LitePreview['state'] }) {
   return (
     <li className="flex gap-3 rounded-xl border border-black/10 bg-white p-3">
       <Thumb item={item} />
@@ -52,7 +54,7 @@ function ItemCard({ item, showProblems }: { item: LitePreviewItem; showProblems:
         <p className="text-xs text-me-charcoal/70">
           计划发布：{formatSlot(item.slot_at)}（新西兰时间） · 发到：Facebook 主页 Story
         </p>
-        <p className="text-xs font-medium text-me-charcoal/80">状态：{describeItemStatus(item.status)}</p>
+        <p className="text-xs font-medium text-me-charcoal/80">状态：{describeItemStatusInPack(item.status, packState)}</p>
         {showProblems && item.problems.length > 0 && (
           <ul className="space-y-0.5">
             {item.problems.map((code) => (
@@ -67,9 +69,9 @@ function ItemCard({ item, showProblems }: { item: LitePreviewItem; showProblems:
   )
 }
 
-export function StoryPackView({ clientId, preview, live, otherAuthorized, onChanged }: Props) {
+export function StoryPackView({ clientId, preview, live, otherAuthorized, onChanged, onNotice }: Props) {
   const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
+  const setMessage = onNotice
   const [confirmingStop, setConfirmingStop] = useState(false)
 
   const base = `/api/clients/${clientId}/story-lite/${preview.pack_id}`
@@ -104,8 +106,6 @@ export function StoryPackView({ clientId, preview, live, otherAuthorized, onChan
       lifetime_days: preview.lifetime_days,
       content_hash: preview.content_hash,
     })
-    // stay busy until the fresh state is on screen, so a second click cannot hit the old state
-    await onChanged()
     if (json) {
       const expires = typeof json.expires_at === 'string' ? json.expires_at : preview.expires_at_if_authorized
       setMessage(
@@ -114,6 +114,8 @@ export function StoryPackView({ clientId, preview, live, otherAuthorized, onChan
           : `已授权：现在是演练模式，到点只检查、不会发出。注意：到 ${formatSlot(expires)} 之前，一旦开启真发，没发的内容会自动发出。`,
       )
     }
+    // the notice is already set (and lives in the page), then stay busy until the fresh state is on screen
+    await onChanged()
     setBusy(false)
   }
 
@@ -121,12 +123,12 @@ export function StoryPackView({ clientId, preview, live, otherAuthorized, onChan
     setConfirmingStop(false)
     setBusy(true)
     const json = await call('revoke', { reason: 'PM 在 Story 页面点了停' })
-    await onChanged()
     if (json) {
       const sent = Array.isArray(json.sent) ? json.sent.length : 0
       const inFlight = Array.isArray(json.in_flight) ? json.in_flight.length : 0
-      setMessage(describeStopResult(preview.title, sent, inFlight))
+      setMessage(describeStopResult(preview.title, sent, inFlight, json.summary_available !== false))
     }
+    await onChanged()
     setBusy(false)
   }
 
@@ -142,7 +144,7 @@ export function StoryPackView({ clientId, preview, live, otherAuthorized, onChan
 
       <ul className="space-y-3">
         {preview.items.map((item) => (
-          <ItemCard key={item.item_id} item={item} showProblems={preview.state === 'DRAFT'} />
+          <ItemCard key={item.item_id} item={item} showProblems={preview.state === 'DRAFT'} packState={preview.state} />
         ))}
       </ul>
 
@@ -206,11 +208,6 @@ export function StoryPackView({ clientId, preview, live, otherAuthorized, onChan
             </button>
           )}
         </div>
-        {message && (
-          <p role="status" className="text-sm font-medium text-me-charcoal">
-            {message}
-          </p>
-        )}
       </div>
     </section>
   )

@@ -96,6 +96,13 @@ export function describeRange(slots: string[]): string {
   return `共 ${slots.length} 条，${first} 到 ${last}（新西兰时间）`
 }
 
+/** Item status line: a story that was never sent shows what the week's state means for it. */
+export function describeItemStatusInPack(status: LiteItemStatus, packState: LitePackState): string {
+  if (status === 'PENDING' && packState === 'REVOKED') return '已停，不会发'
+  if (status === 'PENDING' && packState === 'EXPIRED') return '授权已过期，不会发'
+  return describeItemStatus(status)
+}
+
 /** What the page says after the authorise / stop call came back with an error code. */
 const ACTION_ERROR_TEXT: Record<string, string> = {
   GLOBAL_ADMIN_REQUIRED: '只有管理员能授权',
@@ -111,8 +118,12 @@ export function describeActionError(code: string): string {
 }
 
 /** What the page says right after 「停」, from the stop result. Never claims "all stopped" while something is unsettled. */
-export function describeStopResult(title: string, sentCount: number, inFlightCount: number): string {
+export function describeStopResult(title: string, sentCount: number, inFlightCount: number, summaryAvailable = true): string {
   const parts = [`已停「${title}」这一周，这一周还没发的不会再发。`]
+  if (!summaryAvailable) {
+    parts.push('但现在读不到哪些已经发出去了，不确定有没有已发出的，请到 Facebook 主页核对，已发出的要手动删除。')
+    return parts.join('')
+  }
   if (sentCount > 0) parts.push(`已经发出去的 ${sentCount} 条不会撤回，需要的话请到 Facebook 主页手动删除。`)
   if (inFlightCount > 0) parts.push(`另有 ${inFlightCount} 条正在发或不确定有没有发出去，请到 Facebook 主页核对，已发出的要手动删除。`)
   return parts.join('')

@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { LitePreview } from '@/lib/social/story-lite/service'
 
+import { useState } from 'react'
+
 import { StoryPackView } from '../StoryPackView'
 
 const CLIENT = '11111111-1111-4111-8111-111111111111'
@@ -36,6 +38,19 @@ function preview(overrides: Partial<LitePreview> = {}): LitePreview {
   }
 }
 
+type ViewProps = Parameters<typeof StoryPackView>[0]
+
+/** Renders the view the way the page does: the notice lives outside the view. */
+function Host(props: Omit<ViewProps, 'onNotice'>) {
+  const [notice, setNotice] = useState<string | null>(null)
+  return (
+    <>
+      {notice && <p role="status">{notice}</p>}
+      <StoryPackView {...props} onNotice={setNotice} />
+    </>
+  )
+}
+
 function mockFetch(body: unknown, status = 200) {
   const fn = vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }))
   vi.stubGlobal('fetch', fn)
@@ -49,7 +64,7 @@ describe('StoryPackView', () => {
   it('authorise sends the preview hash and confirm, and says what authorisation means in rehearsal', async () => {
     const fetchFn = mockFetch({ success: true })
     const onChanged = vi.fn(async () => {})
-    render(<StoryPackView clientId={CLIENT} preview={preview()} live={false} otherAuthorized={0} onChanged={onChanged} />)
+    render(<Host clientId={CLIENT} preview={preview()} live={false} otherAuthorized={0} onChanged={onChanged} />)
     fireEvent.click(screen.getByRole('button', { name: '授权这一周' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
     const [url, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit]
@@ -61,7 +76,7 @@ describe('StoryPackView', () => {
   it('a pack-level blocker (client not active) is shown in words and the button is disabled', () => {
     mockFetch({})
     render(
-      <StoryPackView
+      <Host
         clientId={CLIENT}
         preview={preview({ can_authorize: false, blocking: ['CLIENT_NOT_ACTIVE'] })}
         live={false}
@@ -76,7 +91,7 @@ describe('StoryPackView', () => {
   it('stop needs a second click, names the week, and never says all-stopped while something is unsettled', async () => {
     const fetchFn = mockFetch({ success: true, sent: [{ item_id: 'x' }], in_flight: [{ item_id: 'y' }] })
     render(
-      <StoryPackView clientId={CLIENT} preview={preview({ state: 'AUTHORIZED' })} live={false} otherAuthorized={0} onChanged={async () => {}} />,
+      <Host clientId={CLIENT} preview={preview({ state: 'AUTHORIZED' })} live={false} otherAuthorized={0} onChanged={async () => {}} />,
     )
     fireEvent.click(screen.getByRole('button', { name: '停' }))
     expect(fetchFn).not.toHaveBeenCalled()
@@ -89,7 +104,7 @@ describe('StoryPackView', () => {
 
   it('warns when other weeks are still authorised', () => {
     mockFetch({})
-    render(<StoryPackView clientId={CLIENT} preview={preview()} live={false} otherAuthorized={2} onChanged={async () => {}} />)
+    render(<Host clientId={CLIENT} preview={preview()} live={false} otherAuthorized={2} onChanged={async () => {}} />)
     expect(screen.getByText(/另外还有 2 周也处于已授权状态/)).toBeTruthy()
   })
 
@@ -97,16 +112,56 @@ describe('StoryPackView', () => {
     mockFetch({})
     const p = preview({ state: 'AUTHORIZED' })
     p.items[0].problems = ['NOT_PENDING', 'SLOT_IN_PAST']
-    render(<StoryPackView clientId={CLIENT} preview={p} live={false} otherAuthorized={0} onChanged={async () => {}} />)
+    render(<Host clientId={CLIENT} preview={p} live={false} otherAuthorized={0} onChanged={async () => {}} />)
     expect(screen.queryByText(/已经处理过了/)).toBeNull()
   })
 
   it('a lost network answer says "not sure it worked" and refreshes', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline') }))
     const onChanged = vi.fn(async () => {})
-    render(<StoryPackView clientId={CLIENT} preview={preview()} live={false} otherAuthorized={0} onChanged={onChanged} />)
+    render(<Host clientId={CLIENT} preview={preview()} live={false} otherAuthorized={0} onChanged={onChanged} />)
     fireEvent.click(screen.getByRole('button', { name: '授权这一周' }))
     expect(await screen.findByText(/不确定有没有成功/)).toBeTruthy()
     expect(onChanged).toHaveBeenCalled()
+  })
+
+  it('stays busy until the refresh finished, so a second click cannot hit the old state', async () => {
+    const fetchFn = mockFetch({ success: true })
+    let release: () => void = () => {}
+    const onChanged = vi.fn(() => new Promise<void>((resolve) => { release = resolve }))
+    render(<Host clientId={CLIENT} preview={preview()} live={false} otherAuthorized={0} onChanged={onChanged} />)
+    const button = screen.getByRole('button', { name: '授权这一周' }) as HTMLButtonElement
+    fireEvent.click(button)
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(button.disabled).toBe(true)
+    fireEvent.click(button)
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+    release()
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy())
+  })
+
+  it('a stopped week does not show its unsent stories as waiting', () => {
+    mockFetch({})
+    render(<Host clientId={CLIENT} preview={preview({ state: 'REVOKED' })} live={false} otherAuthorized={0} onChanged={async () => {}} />)
+    expect(screen.getByText(/已停，不会发/)).toBeTruthy()
+    expect(screen.queryByText(/等待发布/)).toBeNull()
+  })
+
+  it('if the sent/in-flight summary could not be read, the stop notice says so instead of "all stopped"', async () => {
+    mockFetch({ success: true, sent: [], in_flight: [], summary_available: false })
+    render(<Host clientId={CLIENT} preview={preview({ state: 'AUTHORIZED' })} live={false} otherAuthorized={0} onChanged={async () => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: '停' }))
+    fireEvent.click(screen.getByRole('button', { name: '确定停' }))
+    const text = await screen.findByText(/读不到哪些已经发出去/)
+    expect(text.textContent).toContain('核对')
+  })
+
+  it('the stop notice is set BEFORE the refresh, so a slow or failed refresh cannot hide it', async () => {
+    mockFetch({ success: true, sent: [{ item_id: 'x' }], in_flight: [] })
+    const onChanged = vi.fn(() => new Promise<void>(() => {})) // a refresh that never comes back
+    render(<Host clientId={CLIENT} preview={preview({ state: 'AUTHORIZED' })} live={false} otherAuthorized={0} onChanged={onChanged} />)
+    fireEvent.click(screen.getByRole('button', { name: '停' }))
+    fireEvent.click(screen.getByRole('button', { name: '确定停' }))
+    expect(await screen.findByText(/已停「第3周」/)).toBeTruthy()
   })
 })

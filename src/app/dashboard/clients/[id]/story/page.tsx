@@ -24,6 +24,7 @@ export default function StoryPage() {
   const [preview, setPreview] = useState<LitePreview | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
   const seq = useRef(0)
+  const [notice, setNotice] = useState<string | null>(null)
 
   const refresh = useCallback(async (wanted?: string) => {
     const mine = ++seq.current
@@ -44,6 +45,7 @@ export default function StoryPage() {
         return setLoad('ready')
       }
       const pRes = await fetch(`/api/clients/${clientId}/story-lite/${pick.pack_id}/preview`)
+      if (stale()) return
       if (pRes.status === 401 || pRes.status === 403) return setLoad('forbidden')
       const pJson = (await pRes.json().catch(() => ({}))) as { success?: boolean } & Partial<LitePreview>
       if (stale()) return
@@ -57,7 +59,7 @@ export default function StoryPage() {
       setPreview(pJson as LitePreview)
       setLoad('ready')
     } catch {
-      setLoad('error')
+      if (!stale()) setLoad('error')
     }
   }, [clientId, selected])
 
@@ -78,10 +80,16 @@ export default function StoryPage() {
         <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal">Story 自动发布</h1>
       </div>
 
+      {notice && (
+        <p role="status" className="rounded-lg border border-black/10 bg-white px-4 py-3 text-sm font-medium text-me-charcoal">
+          {notice}
+        </p>
+      )}
+
       {load === 'loading' && <p className="text-sm text-me-charcoal/70">正在读取…</p>}
       {load === 'forbidden' && <p className="text-sm font-medium text-[#B03A2E]">这个页面只有管理员能看。</p>}
       {load === 'error' && (
-        <p className="text-sm font-medium text-[#B03A2E]">读取失败，现在不知道状态，请刷新页面；还不行就找开发。</p>
+        <p className="text-sm font-medium text-[#B03A2E]">读取失败，现在不知道状态。如果你刚点过「授权」或「停」，那一下可能已经生效，请刷新页面确认；还不行就找开发。</p>
       )}
 
       {load === 'ready' && list && (
@@ -118,7 +126,8 @@ export default function StoryPage() {
 
           {preview ? (
             <StoryPackView clientId={clientId} preview={preview} live={list.live} otherAuthorized={list.packs.filter((p) => p.state === 'AUTHORIZED' && p.pack_id !== preview.pack_id).length}
-              onChanged={() => refresh()} />
+              onChanged={() => refresh()}
+              onNotice={setNotice} />
           ) : previewFailed ? (
             <p className="text-sm font-medium text-[#B03A2E]">这一周读不出来（可能里面还没有 Story），现在不知道状态，不能授权。可以换一周看，或找开发。</p>
           ) : (

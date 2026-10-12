@@ -617,5 +617,13 @@ describe('revokeLitePack', () => {
     if (!result.ok) return
     expect(result.value.sent).toEqual([])
     expect(result.value.in_flight).toEqual([])
+    // and it says the summary is unavailable instead of pretending nothing was sent
+    expect(result.value.summary_available).toBe(false)
+  })
+
+  it('a readable summary is marked available', async () => {
+    const { ports } = await makeHarness()
+    const result = await revokeLitePack(revokeInput(ports))
+    expect(result.ok && result.value.summary_available).toBe(true)
   })
 })
