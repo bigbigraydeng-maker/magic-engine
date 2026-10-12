@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { canonicalFingerprintInput, computeItemFingerprint } from '../fingerprint'
-import type { StoryItemSpec } from '../types'
+import {
+  canonicalFingerprintInput,
+  computeItemFingerprint,
+  computeManifestHash,
+} from '../fingerprint'
+import { storyItemKey, type StoryItemSpec } from '../types'
 
 const EXPIRES_AT = '2026-11-01T00:00:00.000Z'
 
@@ -170,5 +174,132 @@ describe('canonicalFingerprintInput', () => {
 
     expect(parsed.source_record_ids).toEqual([...original].sort())
     expect(item.source_record_ids).toEqual(original)
+  })
+})
+
+describe('computeManifestHash', () => {
+  function itemA(): StoryItemSpec {
+    return baseItem()
+  }
+
+  function itemB(): StoryItemSpec {
+    return { ...baseItem(), item_id: 'item-0002' }
+  }
+
+  function itemC(): StoryItemSpec {
+    return { ...baseItem(), item_id: 'item-0003' }
+  }
+
+  it('returns 64 lowercase hex characters', () => {
+    const hash = computeManifestHash([itemA(), itemB()], EXPIRES_AT)
+    expect(hash).toMatch(HEX_64)
+  })
+
+  it('is stable for the same items and expiry', () => {
+    const first = computeManifestHash([itemA(), itemB()], EXPIRES_AT)
+    const second = computeManifestHash([itemA(), itemB()], EXPIRES_AT)
+    expect(first).toBe(second)
+  })
+
+  it('is independent of the order of the input items', () => {
+    const forward = computeManifestHash([itemA(), itemB(), itemC()], EXPIRES_AT)
+    const reversed = computeManifestHash([itemC(), itemB(), itemA()], EXPIRES_AT)
+    const shuffled = computeManifestHash([itemB(), itemA(), itemC()], EXPIRES_AT)
+
+    expect(reversed).toBe(forward)
+    expect(shuffled).toBe(forward)
+  })
+
+  it('changes when any single item changes', () => {
+    const baseHash = computeManifestHash([itemA(), itemB()], EXPIRES_AT)
+
+    const mutations: Array<{ name: string; mutate: (item: StoryItemSpec) => StoryItemSpec }> = [
+      { name: 'item_id', mutate: (i) => ({ ...i, item_id: i.item_id + 'x' }) },
+      { name: 'pack_id', mutate: (i) => ({ ...i, pack_id: i.pack_id + 'x' }) },
+      { name: 'client_id', mutate: (i) => ({ ...i, client_id: i.client_id + 'x' }) },
+      {
+        name: 'channel',
+        mutate: (i) => ({
+          ...i,
+          channel: i.channel === 'facebook_story' ? 'instagram_story' : 'facebook_story',
+        }),
+      },
+      { name: 'slot_at', mutate: (i) => ({ ...i, slot_at: i.slot_at + 'x' }) },
+      {
+        name: 'media_kind',
+        mutate: (i) => ({ ...i, media_kind: i.media_kind === 'image' ? 'video' : 'image' }),
+      },
+      { name: 'media_url', mutate: (i) => ({ ...i, media_url: i.media_url + 'x' }) },
+      { name: 'media_sha256', mutate: (i) => ({ ...i, media_sha256: i.media_sha256 + 'x' }) },
+      { name: 'text_line', mutate: (i) => ({ ...i, text_line: i.text_line + 'x' }) },
+      { name: 'account_id', mutate: (i) => ({ ...i, account_id: i.account_id + 'x' }) },
+      {
+        name: 'source_record_ids',
+        mutate: (i) => ({ ...i, source_record_ids: [...i.source_record_ids, 'record-c'] }),
+      },
+      { name: 'website_ref', mutate: (i) => ({ ...i, website_ref: i.website_ref + 'x' }) },
+      {
+        name: 'website_checked_on',
+        mutate: (i) => ({ ...i, website_checked_on: i.website_checked_on + 'x' }),
+      },
+      { name: 'has_reply_cta', mutate: (i) => ({ ...i, has_reply_cta: !i.has_reply_cta }) },
+    ]
+
+    for (const { name, mutate } of mutations) {
+      const hash = computeManifestHash([mutate(itemA()), itemB()], EXPIRES_AT)
+      expect(hash, `mutation of ${name} should change the manifest hash`).not.toBe(baseHash)
+    }
+  })
+
+  it('changes when an item is added or removed', () => {
+    const two = computeManifestHash([itemA(), itemB()], EXPIRES_AT)
+    const three = computeManifestHash([itemA(), itemB(), itemC()], EXPIRES_AT)
+    const one = computeManifestHash([itemA()], EXPIRES_AT)
+
+    expect(three).not.toBe(two)
+    expect(one).not.toBe(two)
+  })
+
+  it('changes when expiresAt changes', () => {
+    const items = [itemA(), itemB()]
+    expect(computeManifestHash(items, '2026-11-02T00:00:00.000Z')).not.toBe(
+      computeManifestHash(items, EXPIRES_AT),
+    )
+  })
+
+  it('allows an empty list and gives a stable hash', () => {
+    const first = computeManifestHash([], EXPIRES_AT)
+    const second = computeManifestHash([], EXPIRES_AT)
+
+    expect(first).toMatch(HEX_64)
+    expect(first).toBe(second)
+  })
+
+  it('throws on a duplicate item key (same item_id and channel)', () => {
+    const duplicate = [itemA(), itemA()]
+
+    expect(() => computeManifestHash(duplicate, EXPIRES_AT)).toThrow(
+      'computeManifestHash: duplicate item key',
+    )
+  })
+
+  it('treats the same item_id on two different channels as two distinct keys', () => {
+    const facebook = itemA()
+    const instagram: StoryItemSpec = { ...itemA(), channel: 'instagram_story' }
+
+    expect(storyItemKey(facebook)).not.toBe(storyItemKey(instagram))
+
+    expect(() => computeManifestHash([facebook, instagram], EXPIRES_AT)).not.toThrow()
+    expect(computeManifestHash([facebook, instagram], EXPIRES_AT)).toMatch(HEX_64)
+  })
+
+  it('does not mutate the input array', () => {
+    const items = [itemC(), itemA(), itemB()]
+    const original = [...items]
+
+    computeManifestHash(items, EXPIRES_AT)
+
+    expect(items).toEqual(original)
+    expect(items.map((item) => item.item_id)).toEqual(['item-0003', 'item-0001', 'item-0002'])
   })
 })

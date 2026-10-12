@@ -136,3 +136,38 @@ describe('buildStoryReceipt', () => {
     ).toThrow()
   })
 })
+
+describe('published receipts need a live authorization', () => {
+  const published = ['PUBLISHED', 'PUBLISHED_UNVERIFIED'] as const
+
+  it('throws when a published status has no authorization id', () => {
+    for (const status of published) {
+      expect(() =>
+        buildStoryReceipt({ ...baseInput(status), mode: 'LIVE', authorizationId: null }),
+      ).toThrow()
+      expect(() =>
+        buildStoryReceipt({ ...baseInput(status), mode: 'LIVE', authorizationId: '  ' }),
+      ).toThrow()
+    }
+  })
+
+  it('throws when a published status carries a non-ACTIVE authorization state', () => {
+    for (const status of published) {
+      for (const state of ['NONE', 'REVOKED', 'EXPIRED', 'FINGERPRINT_MISMATCH']) {
+        expect(() =>
+          buildStoryReceipt({ ...baseInput(status), mode: 'LIVE', authorizationState: state }),
+        ).toThrow()
+      }
+    }
+  })
+
+  it('still allows non-published statuses without an authorization id', () => {
+    const receipt = buildStoryReceipt({
+      ...baseInput('SKIPPED_NOT_AUTHORIZED'),
+      mode: 'LIVE',
+      authorizationId: null,
+      authorizationState: 'NONE',
+    })
+    expect(receipt.authorization_id).toBeNull()
+  })
+})

@@ -171,3 +171,132 @@ On success push a StoryItemSpec { item_id, pack_id: packId, client_id: clientId,
 Test (vitest, fake ports, no real I/O): happy path (png and mp4) producing correct media_sha256 (compute expected with createHash in the test), objectPath, and fields; each rejection reason above; a bad entry does not stop the next good entry; duplicate handling; clientSlug invalid throws; putIfAbsent receives the content-addressed path and the same bytes; created=false (already uploaded) still succeeds; jpeg => '.jpg' path; path traversal attempts ('../x.png', 'a/../../x.png', '/etc/x.png') never reach readFile (assert readFile not called).
 RULES: edit only those two files. No `any`, no `as unknown as`, no process.env, no real network or filesystem. English comments. Do not ask questions.
 ```
+
+## 修订轮（子牙 + 魏征第一轮审查后）
+
+### r6b
+
+```text
+Edit ONLY the test file src/lib/social/story-publish/fingerprint-draft.test.ts (attached for editing; fingerprint.ts and types.ts are read-only and already contain computeManifestHash). KEEP every existing export and every existing test unchanged. The implementation already exists (read-only). Its contract:
+`export function computeManifestHash(items: StoryItemSpec[], expiresAt: string): string` — builds the array of [storyItemKey(item), computeItemFingerprint(item, expiresAt)] pairs for every item, sorts the pairs by key (plain string comparison, ascending), and returns the lowercase sha256 hex of JSON.stringify(sortedPairs). Throws `new Error('computeManifestHash: duplicate item key')` when two items share the same key. An empty list is allowed and gives a stable hash. Import `storyItemKey` (a value) from './types' next to the existing type import.
+Add tests to fingerprint.test.ts: manifest hash is 64 hex; independent of input order; changes when any single item changes; changes when an item is added or removed; changes with a different expiresAt; throws on duplicate key (same item_id and channel); the same item_id on two different channels are two distinct keys (no throw); the input array is not mutated (order preserved after the call).
+RULES: edit only the test file. No `any`, no `as unknown as`, no process.env. Do not ask questions.
+```
+
+### r7b
+
+```text
+Rewrite ONLY the test file src/lib/social/story-publish/authorization-draft.test.ts (attached for editing; authorization.ts, types.ts and fingerprint.ts are read-only; authorization.ts already implements the new contract below). The judge now recompute fingerprints itself from raw material instead of trusting values passed by the caller.
+New contract:
+```ts
+export type StoryAuthState =
+  | 'ACTIVE' | 'NONE' | 'WRONG_PACK' | 'WRONG_CLIENT' | 'NOT_ACTIVATED' | 'REVOKED' | 'EXPIRED'
+  | 'AUTHORIZER_NOT_ADMIN' | 'AUTHORIZATION_ID_MISMATCH' | 'NO_AUTHORIZED_FINGERPRINT'
+  | 'FINGERPRINT_MISMATCH' | 'MANIFEST_MISMATCH'
+export function judgeStoryAuthorization(input: {
+  authorization: StoryAuthorization | null
+  item: StoryItemSpec
+  /** the authorization id stored on the item row (null = item never authorised) */
+  itemAuthorizationId: string | null
+  /** every item of the pack as it is stored right now (all channels), used to recompute the manifest hash */
+  packItems: StoryItemSpec[]
+  adminEmails: ReadonlySet<string>
+  now: Date
+}): StoryAuthState
+```
+Check order, first hit wins: null => NONE; pack_id mismatch => WRONG_PACK; client_id mismatch => WRONG_CLIENT; activated_at missing/unparseable => NOT_ACTIVATED; revoked_at non-null => REVOKED; expires_at unparseable or <= now => EXPIRED; authorizer email (trim, lowercase) not in adminEmails => AUTHORIZER_NOT_ADMIN; itemAuthorizationId !== authorization.id => AUTHORIZATION_ID_MISMATCH; approved = authorization.approved_item_fingerprints[storyItemKey(item)] missing/empty => NO_AUTHORIZED_FINGERPRINT; computeItemFingerprint(item, authorization.expires_at) !== approved => FINGERPRINT_MISMATCH; computeManifestHash(packItems, authorization.expires_at) !== authorization.manifest_hash (wrap in try/catch: a throw such as duplicate key => MANIFEST_MISMATCH) => MANIFEST_MISMATCH; else ACTIVE. The item itself must be among packItems (same key) else MANIFEST_MISMATCH. Use Object.prototype.hasOwnProperty.call for the snapshot lookup (no prototype keys like '__proto__' may match).
+Imports: types from './types' (StoryAuthorization, StoryItemSpec, storyItemKey value) and { computeItemFingerprint, computeManifestHash } from './fingerprint'.
+Tests: build a real valid fixture inside the test with computeItemFingerprint/computeManifestHash (helper `makeAuthorizedFixture()` returning {authorization, item, packItems, adminEmails, now}); keep the old per-state cases (adapted), and ADD: AUTHORIZATION_ID_MISMATCH; NO_AUTHORIZED_FINGERPRINT (key missing from snapshot, and empty-string value); FINGERPRINT_MISMATCH when any item field changes after authorisation (loop several fields); FINGERPRINT_MISMATCH when only the authorization expires_at changed (renewal without re-authorising: recomputed fingerprint differs from snapshot); MANIFEST_MISMATCH when a sibling item in packItems is changed, added or removed while the item itself is unchanged; MANIFEST_MISMATCH when the item is not in packItems; the old precedence tests; '__proto__' as an item_id never matches a snapshot key; ACTIVE only for the fully valid fixture.
+RULES: edit only the test file. No `any`, no `as unknown as`, no process.env. Do not ask questions.
+```
+
+### r8
+
+```text
+Rewrite src/lib/social/story-publish/gates.ts (attached for editing; the previous version is a good base — keep readStorySwitches, isStoryLiveFor, the helper style, and the rule-group structure). types.ts, authorization.ts, fingerprint.ts are read-only contracts.
+CHANGES (all required):
+1. StoryGateInput: REMOVE `authState`. ADD `auth: { authorization: StoryAuthorization | null; itemAuthorizationId: string | null; packItems: StoryItemSpec[]; adminEmails: ReadonlySet<string> }` and compute the state INSIDE the gate with `judgeStoryAuthorization({ ...input.auth, item: input.item, now: input.now })` (so a stale cached state can never be passed in). ADD `registeredAccountId: string | null`. CHANGE `existingAttempt` to `{ status: string; updated_at: string; next_retry_at: string | null; retry_count: number } | null` (status is a plain string so an unknown status fails closed). ADD to `config`: `stalePublishingMinutes: number` and `maxRetries: number`.
+2. StoryGateDecision SKIP reason_code union gains 'WAITING_RETRY'.
+3. NEW first step `checkConfig(input)`: every config number (maxLateMinutes, earlyMinutes, staleClaimMinutes, stalePublishingMinutes, maxWebsiteAgeDays) must satisfy Number.isFinite and >= 0; maxRetries must be a non-negative integer; input.now must be a valid Date (Number.isNaN(now.getTime()) false). Otherwise RECORD BLOCKED 'BAD_CONFIG' retryable false.
+4. checkExistingAttempt: (i) status not a member of STORY_ATTEMPT_STATUSES => RECORD BLOCKED 'UNKNOWN_EXISTING_STATUS' false. (ii) terminal status => SKIP ALREADY_TERMINAL. (iii) 'CLAIMED' with updated_at unparseable or older than staleClaimMinutes => RECORD UNKNOWN_OUTCOME 'STALE_CLAIM' false. (iv) 'PUBLISHING' with updated_at unparseable or older than stalePublishingMinutes => RECORD UNKNOWN_OUTCOME 'STALE_PUBLISHING' false. (v) otherwise 'CLAIMED' | 'CONTAINER_CREATED' | 'PUBLISHING' => SKIP IN_PROGRESS. (vi) 'RETRYABLE': retry_count >= maxRetries => RECORD BLOCKED 'FILE_UNREACHABLE' false; next_retry_at null/unparseable or later than now => SKIP WAITING_RETRY; else fall through to normal evaluation. (vii) 'DRY_RUN', 'BLOCKED', 'SKIPPED_NOT_AUTHORIZED' fall through.
+5. checkFile: fileCheck 'UNREACHABLE' => RECORD with status 'RETRYABLE' reason 'FILE_UNREACHABLE' retryable true; ANY other value that is not exactly 'OK' (including 'CHANGED' and unexpected runtime values) => RECORD BLOCKED 'FILE_CHANGED' retryable false.
+6. checkPrice: 'ERROR' => RECORD BLOCKED 'PRICE_GATE_ERROR' retryable true; ANY other value that is not exactly 'OK' => RECORD BLOCKED 'PRICE_GATE_BLOCKED' retryable false.
+7. New rule after checkSource and before checkCircuit: `checkAccount`: registeredAccountId null/empty or !== item.account_id => RECORD BLOCKED 'ACCOUNT_MISMATCH' false.
+8. New rule right before checkReplyOwner: `checkReplyCtaDeclared`: if !item.has_reply_cta and /\b(reply|replies|dm us|message us|inbox|comment below)\b/i matches item.text_line => RECORD BLOCKED 'REPLY_CTA_UNDECLARED' false.
+9. checkWebsite: validate website_checked_on strictly: it must match /^\d{4}-\d{2}-\d{2}$/ AND round-trip (parse year/month/day, build new Date(Date.UTC(y, m-1, d)), its toISOString().slice(0,10) must equal the original string, so '2026-13-01' and '2026-02-31' are rejected); any failure, NaN age, age > maxWebsiteAgeDays or age < -1 => RECORD BLOCKED 'WEBSITE_CHECK_STALE' true. https check on website_ref stays.
+10. Rule order (first hit wins): checkConfig, checkExistingAttempt, checkDue, checkContext, checkAuthorization, checkSource, checkAccount, checkCircuit, checkLateness, checkFile, checkPrice, checkReplyCtaDeclared, checkReplyOwner, checkWebsite, then switches (PUBLISH / DRY_RUN).
+Keep file under 450 lines, every function under 50 lines, no `any`, no process.env. Import `judgeStoryAuthorization` from './authorization'; keep exporting what other code may use. Do not ask questions. Only edit gates.ts.
+```
+
+### r9
+
+```text
+Create src/lib/social/story-publish/gates-draft.test.ts (exists empty): the main test file for the REWRITTEN gates.ts (attached read-only, together with types.ts, authorization.ts, fingerprint.ts and fixture-note.md). Use the attached old-gates.test.ts as the template for structure and keep EVERY test idea from it that is still valid, adapted to the new input shape (no `authState`; use auth fixtures as described in fixture-note.md). Must cover: baseline PUBLISH / DRY_RUN; readStorySwitches and isStoryLiveFor cases; every rule of the old suite (not-due, missed window, client/campaign status, circuit, price OK/BLOCKED/ERROR, reply owner, website age, https website_ref, source missing, existing attempt terminal/in-progress/stale CLAIMED, bad slot); the precedence tests (authorization beats file/price; circuit beats price; terminal existing beats everything; NOT_DUE beats not-authorized; a loop proving no single failing input yields PUBLISH); IG-not-enabled-but-FB-enabled test; the two 'source check ordering' tests. Keep the file under 600 lines. Authorization failure cases to include here: revoked, expired, not activated, admin removed from the admin set => decision RECORD SKIPPED_NOT_AUTHORIZED with the state as reason_code.
+RULES: only edit gates-draft.test.ts. No `any`, no `as unknown as`, no process.env. Do not ask questions.
+```
+
+### r10
+
+```text
+Create src/lib/social/story-publish/gates-hardening-draft.test.ts (exists empty): tests ONLY for the NEW behaviour of the rewritten gates.ts (attached read-only with types.ts, authorization.ts, fingerprint.ts, fixture-note.md). Cover every item below with at least one test; boundary tests must test both sides of the boundary:
+1. BAD_CONFIG: NaN, Infinity, -1 for each of maxLateMinutes, earlyMinutes, staleClaimMinutes, stalePublishingMinutes, maxWebsiteAgeDays; maxRetries 1.5 and -1; invalid Date `now` => RECORD BLOCKED 'BAD_CONFIG' and never PUBLISH. Also: with NaN earlyMinutes and a slot a day in the future the result must still not be PUBLISH.
+2. website_checked_on '2026-13-01', '2026-02-31', '2026-10-1', '', 'abc' => BLOCKED WEBSITE_CHECK_STALE; boundary: exactly maxWebsiteAgeDays old passes, one day older blocks; one day in the future passes, two days in the future blocks.
+3. Fail-closed on unexpected runtime values: fileCheck 'weird' (cast through a small helper that returns the value typed as the union, e.g. `function asFile(v: string): StoryGateInput['fileCheck'] { return v as StoryGateInput['fileCheck'] }`), priceGate 'weird' => BLOCKED FILE_CHANGED / PRICE_GATE_BLOCKED; fileCheck 'UNREACHABLE' => RECORD status 'RETRYABLE' reason FILE_UNREACHABLE retryable true; priceGate 'ERROR' => PRICE_GATE_ERROR retryable true.
+4. Unknown existing status 'SOMETHING_NEW' => BLOCKED UNKNOWN_EXISTING_STATUS (never PUBLISH); every status in STORY_ATTEMPT_STATUSES gives a defined decision (loop) and none of the terminal ones can give PUBLISH.
+5. PUBLISHING: fresh (updated 5 min ago) => SKIP IN_PROGRESS; updated exactly stalePublishingMinutes ago => still SKIP (boundary) ; 1 ms older => UNKNOWN_OUTCOME STALE_PUBLISHING; unparseable updated_at => UNKNOWN_OUTCOME. CLAIMED boundary the same with staleClaimMinutes. CONTAINER_CREATED any age => SKIP IN_PROGRESS.
+6. RETRYABLE: retry_count 3 with maxRetries 3 => BLOCKED FILE_UNREACHABLE retryable false; next_retry_at in the future or null or garbage => SKIP WAITING_RETRY; next_retry_at equal to now => falls through to normal evaluation (PUBLISH when all green); retry_count 2 allowed.
+7. ACCOUNT_MISMATCH: registeredAccountId null, '' and a different id => BLOCKED ACCOUNT_MISMATCH; ordering: an unauthorised item with a mismatching account reports SKIPPED_NOT_AUTHORIZED first.
+8. REPLY_CTA_UNDECLARED: text_line 'Reply for details' with has_reply_cta false => BLOCKED; with has_reply_cta true and replyOwnerPresent true => PUBLISH; 'Replying' alone does not match? (the regex uses word boundaries: 'reply' matches 'Reply for details' and 'replies', but 'Replying' should NOT match — assert that); 'DM us' matches.
+9. Authorization freshness: the gate computes the auth state itself: changing the item text after authorisation (item in auth.packItems and item differ) => SKIPPED_NOT_AUTHORIZED reason 'FINGERPRINT_MISMATCH'; authorization expires_at changed (renewal) => FINGERPRINT_MISMATCH; sibling changed => MANIFEST_MISMATCH; itemAuthorizationId null => AUTHORIZATION_ID_MISMATCH.
+10. DRY_RUN existing attempt falls through: existing DRY_RUN + live switches => PUBLISH; existing BLOCKED / SKIPPED_NOT_AUTHORIZED rows fall through as well.
+RULES: only edit gates-hardening-draft.test.ts. No `any`; the only allowed cast is the tiny typed helper described in item 3. No process.env. Keep under 650 lines. Do not ask questions.
+```
+
+### r11
+
+```text
+Rewrite src/lib/social/story-publish/pack-ingest.ts (attached for editing; the previous version is a good base — keep its structure, helpers and reason-code style). types.ts is a read-only contract. Required changes:
+PORTS (update the interfaces and their doc comments):
+- `readFile(relativePath)`: document that a real implementation MUST resolve the real path (realpath) and refuse anything that is a symlink or resolves outside the pack folder, and MUST enforce a byte cap itself.
+- `probe(bytes, kind)` now returns `{ width: number; height: number; durationSec: number | null; format: 'png' | 'jpeg' | 'mp4' | 'unknown' }`.
+- `putIfAbsent(objectPath, bytes, contentType)` now returns `{ publicUrl: string; created: boolean; existingSha256: string | null }` (existingSha256 = lowercase hex sha256 of the object ALREADY stored at that path when created is false, else null).
+INPUT: add `publicBaseUrl: string` (must start with 'https://'; normalise by ensuring a single trailing '/'; a bad value throws `new Error('ingestStoryAssets: invalid publicBaseUrl')`). Add optional `maxImageBytes` (default 10 * 1024 * 1024) and `maxVideoBytes` (default 100 * 1024 * 1024). `clientId` and `packId` must match the UUID regex /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i else throw. `maxVideoSeconds` must be a finite number > 0 else throw. A bad clientSlug still throws.
+PER-ENTRY RULES (cheap checks first, I/O last; a failing entry is pushed to `rejected` with a stable reason_code and processing continues):
+ 1. 'BAD_ITEM_ID': item_id must match the UUID regex. 'DUPLICATE_ITEM' for repeated (item_id, channel).
+ 2. 'NO_ACCOUNT': accountIds[channel] must match /^\d{5,25}$/.
+ 3. 'BAD_FIELDS': slot_at parseable by Date.parse; text_line non-empty after trim and <= 200 chars; source_record_ids non-empty array of non-empty trimmed strings; website_ref starts with 'https://'; website_checked_on a REAL calendar date (matches /^\d{4}-\d{2}-\d{2}$/ and round-trips through Date.UTC + toISOString().slice(0,10)).
+ 4. 'BAD_PATH': file empty; starts with '/'; contains '\\', NUL, '%', ':' or a Windows drive prefix; any path segment is '', '.' or '..' (so './x.png', 'a//b.png', 'a/./b.png', '../x.png' are all rejected).
+ 5. 'BAD_EXTENSION' (case-insensitive ext): .png/.jpg/.jpeg for image, .mp4 for video.
+ 6. 'READ_FAILED', 'EMPTY_FILE', then 'FILE_TOO_LARGE' when bytes.length exceeds the cap for the kind (checked BEFORE probe).
+ 7. 'PROBE_FAILED'; 'FORMAT_MISMATCH' when probe.format is not the format implied by the extension (png->'png', jpg/jpeg->'jpeg', mp4->'mp4'; 'unknown' never matches); 'BAD_ASPECT' unless width*16 === height*9 and width >= 540; for video 'BAD_DURATION' unless durationSec is a finite number > 0 and <= maxVideoSeconds.
+ 8. sha256 (node:crypto). objectPath = `story-assets/${clientSlug}/${packId}/${sha256}.${ext}` (jpeg normalised to jpg). putIfAbsent failure => 'UPLOAD_FAILED'. publicUrl must equal `${publicBaseUrl}${objectPath}` exactly else 'URL_NOT_EXPECTED'. When created is false: existingSha256 null => 'CANNOT_VERIFY_EXISTING'; existingSha256 !== sha256 => 'OBJECT_CONTENT_MISMATCH'.
+On success push the StoryItemSpec as before (media_url = publicUrl). Never log or return file bytes. Every function under 50 lines (split into helpers: validateFields, validatePath, extensionFor, checkMedia, uploadAsset, ...). File under 500 lines. No `any`, no process.env, no real I/O. Do not ask questions. Only edit pack-ingest.ts.
+```
+
+### r12
+
+```text
+Create src/lib/social/story-publish/pack-ingest-draft.test.ts (exists empty): full test file for the REWRITTEN pack-ingest.ts (attached read-only with types.ts). Use the attached old-ingest.test.ts as the structural template and keep every still-valid test idea, adapted to the new contracts (ports: probe returns format; putIfAbsent returns existingSha256; new input publicBaseUrl; UUID ids; digit-only account ids). Define a `makePorts()` helper with vi.fn-based fakes and a `validEntry()` helper. publicBaseUrl in tests: 'https://cdn.example.com/public/'. Tests (each asserts reason codes via `rejected` and that later good entries still succeed where relevant):
+- happy path png and mp4 (sha256 computed in the test with createHash; objectPath `story-assets/<slug>/<packId>/<sha>.png`; media_url equals publicBaseUrl + objectPath; item fields copied; jpeg => '.jpg').
+- BAD_ITEM_ID (non-UUID, id containing ':'), DUPLICATE_ITEM, NO_ACCOUNT ('', 'abc', '1234', digits of length 26), BAD_FIELDS (bad slot_at, empty text_line, 201-char text_line, empty source_record_ids, a blank source id, http website_ref, website_checked_on '2026-13-01' and '2026-02-31').
+- BAD_PATH for each of: '', '/etc/x.png', '../x.png', 'a/../../x.png', 'a\\b.png', './x.png', 'a//b.png', 'a/./b.png', 'x%2e%2e.png', 'C:x.png', 'a:b.png', 'x\0.png'; assert readFile never called for them.
+- BAD_EXTENSION ('x.gif', 'x.png' for kind video, 'x.mp4' for kind image, uppercase '.PNG' accepted).
+- READ_FAILED, EMPTY_FILE, FILE_TOO_LARGE (image 10 MiB + 1 byte rejected, exactly 10 MiB accepted; video custom maxVideoBytes), probe not called for too-large files.
+- PROBE_FAILED, FORMAT_MISMATCH (png bytes probed as 'jpeg'; 'unknown'), BAD_ASPECT (1080x1920 ok; 1080x1921, 540x960 ok, 270x480 rejected for width < 540), BAD_DURATION (null, 0, -1, NaN, 16 for default max 15; 15 accepted; custom maxVideoSeconds 30).
+- UPLOAD_FAILED, URL_NOT_EXPECTED (publicUrl from another host, and same host different path), created=false with matching existingSha256 succeeds, created=false with existingSha256 null => CANNOT_VERIFY_EXISTING, created=false with a different hash => OBJECT_CONTENT_MISMATCH; putIfAbsent receives the content-addressed path, the same bytes and the right contentType.
+- throws: bad clientSlug, non-UUID clientId, non-UUID packId, publicBaseUrl 'http://x/', maxVideoSeconds 0 / NaN / Infinity is allowed? (Infinity is NOT finite => throws).
+- one bad entry never stops the next good one; ingest never returns or logs bytes (items have no bytes property).
+Keep the file under 750 lines. RULES: only edit that file. No `any`, no `as unknown as`, no process.env, no real I/O. Do not ask questions.
+```
+
+### 测试夹具说明
+
+```text
+FIXTURE PATTERN to use in BOTH new gate test files (copy exactly, then adapt names):
+- NOW = new Date('2026-10-12T09:00:00.000Z'); EXPIRES = '2026-10-19T09:00:00.000Z'.
+- baseItem(overrides) as in the old test (slot_at = NOW iso, account_id '55566677788' (digits), website_checked_on '2026-10-12', source_record_ids ['rec-1'], has_reply_cta false, text_line 'Hello', client_id 'client-1', pack_id 'pack-1', item_id 'item-1', channel 'facebook_story').
+- makeAuth(items: StoryItemSpec[]): builds a real StoryAuthorization: { id: 'auth-1', pack_id: 'pack-1', client_id: 'client-1', authorized_by_email: 'pm@example.com', authorized_by_user_id: 'user-1', authorized_at: '2026-10-11T09:00:00.000Z', activated_at: '2026-10-11T09:01:00.000Z', expires_at: EXPIRES, revoked_at: null, manifest_hash: computeManifestHash(items, EXPIRES), approved_item_fingerprints: Object.fromEntries(items.map(i => [storyItemKey(i), computeItemFingerprint(i, EXPIRES)])) }.
+- baseInput(overrides): item = baseItem(), auth = { authorization: makeAuth([item]), itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }, registeredAccountId '55566677788', switches LIVE {live true, clientIds ['client-1'], channels ['facebook_story']}, clientStatus 'active', campaignStatus 'active', circuit {false,false}, fileCheck 'OK', priceGate 'OK', replyOwnerPresent true, existingAttempt null, config { maxLateMinutes: 30, earlyMinutes: 30, staleClaimMinutes: 15, stalePublishingMinutes: 10, maxWebsiteAgeDays: 7, maxRetries: 3 }.
+- To flip an authorization failure, change auth (e.g. revoked_at set, activated_at null, adminEmails empty set) — never pass a precomputed state.
+Imports in the draft test files (they live next to the sources before being moved): './gates', './types', './authorization', './fingerprint'.
+```

@@ -13,14 +13,16 @@
  * gates yields a non-PUBLISH outcome.
  */
 import {
+  STORY_ATTEMPT_STATUSES,
   STORY_CHANNELS,
   STORY_TERMINAL_STATUSES,
   type StoryAttemptStatus,
+  type StoryAuthorization,
   type StoryChannel,
   type StoryItemSpec,
   type StorySwitches,
 } from './types'
-import type { StoryAuthState } from './authorization'
+import { judgeStoryAuthorization } from './authorization'
 
 // ─── Feature switches ─────────────────────────────────────────────────────────
 
@@ -79,23 +81,41 @@ export function isStoryLiveFor(
 export interface StoryGateInput {
   now: Date
   item: StoryItemSpec
-  /** Already computed by judgeStoryAuthorization. */
-  authState: StoryAuthState
+  /**
+   * Raw authorisation inputs. The gate recomputes the authorisation state
+   * itself via `judgeStoryAuthorization`, so a stale cached state can never be
+   * passed in.
+   */
+  auth: {
+    authorization: StoryAuthorization | null
+    itemAuthorizationId: string | null
+    packItems: StoryItemSpec[]
+    adminEmails: ReadonlySet<string>
+  }
   switches: StorySwitches
   /** Must be 'active'. */
   clientStatus: string | null
   /** Must be 'active'. */
   campaignStatus: string | null
+  /** The account id registered for this client/channel; must match the item. */
+  registeredAccountId: string | null
   circuit: { itemPaused: boolean; packChannelPaused: boolean }
   fileCheck: 'OK' | 'CHANGED' | 'UNREACHABLE'
   priceGate: 'OK' | 'BLOCKED' | 'ERROR'
   replyOwnerPresent: boolean
-  existingAttempt: { status: StoryAttemptStatus; updated_at: string } | null
+  existingAttempt: {
+    status: string
+    updated_at: string
+    next_retry_at: string | null
+    retry_count: number
+  } | null
   config: {
     maxLateMinutes: number
     earlyMinutes: number
     staleClaimMinutes: number
+    stalePublishingMinutes: number
     maxWebsiteAgeDays: number
+    maxRetries: number
   }
 }
 
@@ -103,7 +123,10 @@ export interface StoryGateInput {
 export type StoryGateDecision =
   | { action: 'PUBLISH' }
   | { action: 'DRY_RUN' }
-  | { action: 'SKIP'; reason_code: 'ALREADY_TERMINAL' | 'IN_PROGRESS' | 'NOT_DUE' }
+  | {
+      action: 'SKIP'
+      reason_code: 'ALREADY_TERMINAL' | 'IN_PROGRESS' | 'NOT_DUE' | 'WAITING_RETRY'
+    }
   | { action: 'RECORD'; status: StoryAttemptStatus; reason_code: string; retryable: boolean }
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
@@ -118,7 +141,9 @@ function record(
 }
 
 /** Build a SKIP decision. */
-function skip(reason_code: 'ALREADY_TERMINAL' | 'IN_PROGRESS' | 'NOT_DUE'): StoryGateDecision {
+function skip(
+  reason_code: 'ALREADY_TERMINAL' | 'IN_PROGRESS' | 'NOT_DUE' | 'WAITING_RETRY',
+): StoryGateDecision {
   return { action: 'SKIP', reason_code }
 }
 
@@ -141,27 +166,85 @@ function daysBetween(a: string, b: string): number {
   return Math.round((to - from) / 86_400_000)
 }
 
+/** True when a value is a finite number >= 0. */
+function isNonNegativeFinite(value: number): boolean {
+  return Number.isFinite(value) && value >= 0
+}
+
+/** True when a value is a non-negative integer. */
+function isNonNegativeInteger(value: number): boolean {
+  return Number.isInteger(value) && value >= 0
+}
+
+/** True when a string is a real YYYY-MM-DD calendar date (round-trips). */
+function isValidCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const year = Number(value.slice(0, 4))
+  const month = Number(value.slice(5, 7))
+  const day = Number(value.slice(8, 10))
+  const built = new Date(Date.UTC(year, month - 1, day))
+  return built.toISOString().slice(0, 10) === value
+}
+
+/** True when a string is a member of the known attempt statuses. */
+function isKnownAttemptStatus(value: string): value is StoryAttemptStatus {
+  return (STORY_ATTEMPT_STATUSES as readonly string[]).includes(value)
+}
+
 // ─── Rule groups ──────────────────────────────────────────────────────────────
+
+/** Rule (0): the config and clock must be sane before anything else runs. */
+function checkConfig(input: StoryGateInput): StoryGateDecision | null {
+  const { config, now } = input
+  if (Number.isNaN(now.getTime())) return record('BLOCKED', 'BAD_CONFIG', false)
+
+  const numbers = [
+    config.maxLateMinutes,
+    config.earlyMinutes,
+    config.staleClaimMinutes,
+    config.stalePublishingMinutes,
+    config.maxWebsiteAgeDays,
+  ]
+  if (!numbers.every(isNonNegativeFinite)) return record('BLOCKED', 'BAD_CONFIG', false)
+  if (!isNonNegativeInteger(config.maxRetries)) return record('BLOCKED', 'BAD_CONFIG', false)
+
+  return null
+}
 
 /**
  * Rule (a): an existing attempt row may stop re-evaluation.
  *
- * Terminal statuses are final. A `CLAIMED` row that has gone stale is recorded
- * as an unknown outcome so the item is not retried blindly. Any other
- * in-flight status is skipped as in progress. Statuses such as `DRY_RUN`,
- * `BLOCKED` and `SKIPPED_NOT_AUTHORIZED` do not stop re-evaluation.
+ * Terminal statuses are final. A `CLAIMED` or `PUBLISHING` row that has gone
+ * stale is recorded as an unknown outcome so the item is not retried blindly.
+ * A `RETRYABLE` row waits until its retry time, or blocks once retries are
+ * exhausted. Any other in-flight status is skipped as in progress. Statuses
+ * such as `DRY_RUN`, `BLOCKED` and `SKIPPED_NOT_AUTHORIZED` do not stop
+ * re-evaluation.
  */
 function checkExistingAttempt(input: StoryGateInput): StoryGateDecision | null {
   const existing = input.existingAttempt
   if (existing === null) return null
 
+  if (!isKnownAttemptStatus(existing.status)) {
+    return record('BLOCKED', 'UNKNOWN_EXISTING_STATUS', false)
+  }
+
   if (STORY_TERMINAL_STATUSES.has(existing.status)) return skip('ALREADY_TERMINAL')
 
+  const updated = parseInstant(existing.updated_at)
+  const nowMs = input.now.getTime()
+
   if (existing.status === 'CLAIMED') {
-    const updated = parseInstant(existing.updated_at)
-    const staleBefore = input.now.getTime() - input.config.staleClaimMinutes * 60_000
+    const staleBefore = nowMs - input.config.staleClaimMinutes * 60_000
     if (updated === null || updated < staleBefore) {
       return record('UNKNOWN_OUTCOME', 'STALE_CLAIM', false)
+    }
+  }
+
+  if (existing.status === 'PUBLISHING') {
+    const staleBefore = nowMs - input.config.stalePublishingMinutes * 60_000
+    if (updated === null || updated < staleBefore) {
+      return record('UNKNOWN_OUTCOME', 'STALE_PUBLISHING', false)
     }
   }
 
@@ -171,6 +254,14 @@ function checkExistingAttempt(input: StoryGateInput): StoryGateDecision | null {
     existing.status === 'PUBLISHING'
   ) {
     return skip('IN_PROGRESS')
+  }
+
+  if (existing.status === 'RETRYABLE') {
+    if (existing.retry_count >= input.config.maxRetries) {
+      return record('BLOCKED', 'FILE_UNREACHABLE', false)
+    }
+    const nextRetry = parseInstant(existing.next_retry_at)
+    if (nextRetry === null || nextRetry > nowMs) return skip('WAITING_RETRY')
   }
 
   return null
@@ -199,16 +290,33 @@ function checkContext(input: StoryGateInput): StoryGateDecision | null {
   return null
 }
 
+/** Rule (d): the item must be fully authorised right now. */
+function checkAuthorization(input: StoryGateInput): StoryGateDecision | null {
+  const authState = judgeStoryAuthorization({
+    authorization: input.auth.authorization,
+    item: input.item,
+    itemAuthorizationId: input.auth.itemAuthorizationId,
+    packItems: input.auth.packItems,
+    adminEmails: input.auth.adminEmails,
+    now: input.now,
+  })
+  if (authState !== 'ACTIVE') {
+    return record('SKIPPED_NOT_AUTHORIZED', authState, false)
+  }
+  return null
+}
+
 /** Rule (k): an item with no fact-library source can never be published. */
 function checkSource(input: StoryGateInput): StoryGateDecision | null {
   if (input.item.source_record_ids.length === 0) return record('BLOCKED', 'SOURCE_MISSING', false)
   return null
 }
 
-/** Rule (d): the item must be fully authorised right now. */
-function checkAuthorization(input: StoryGateInput): StoryGateDecision | null {
-  if (input.authState !== 'ACTIVE') {
-    return record('SKIPPED_NOT_AUTHORIZED', input.authState, false)
+/** Rule (l): the item's account must match the registered account. */
+function checkAccount(input: StoryGateInput): StoryGateDecision | null {
+  const registered = input.registeredAccountId
+  if (registered === null || registered === '' || registered !== input.item.account_id) {
+    return record('BLOCKED', 'ACCOUNT_MISMATCH', false)
   }
   return null
 }
@@ -232,15 +340,27 @@ function checkLateness(input: StoryGateInput): StoryGateDecision | null {
 
 /** Rule (g): the media file must still match its recorded hash. */
 function checkFile(input: StoryGateInput): StoryGateDecision | null {
-  if (input.fileCheck === 'CHANGED') return record('BLOCKED', 'FILE_CHANGED', false)
-  if (input.fileCheck === 'UNREACHABLE') return record('BLOCKED', 'FILE_UNREACHABLE', true)
+  if (input.fileCheck === 'UNREACHABLE') {
+    return record('RETRYABLE', 'FILE_UNREACHABLE', true)
+  }
+  if (input.fileCheck !== 'OK') return record('BLOCKED', 'FILE_CHANGED', false)
   return null
 }
 
 /** Rule (h): the price gate must be green. */
 function checkPrice(input: StoryGateInput): StoryGateDecision | null {
-  if (input.priceGate === 'BLOCKED') return record('BLOCKED', 'PRICE_GATE_BLOCKED', false)
   if (input.priceGate === 'ERROR') return record('BLOCKED', 'PRICE_GATE_ERROR', true)
+  if (input.priceGate !== 'OK') return record('BLOCKED', 'PRICE_GATE_BLOCKED', false)
+  return null
+}
+
+/** Rule (m): a reply CTA in the text must be declared on the item. */
+function checkReplyCtaDeclared(input: StoryGateInput): StoryGateDecision | null {
+  if (input.item.has_reply_cta) return null
+  const pattern = /\b(reply|replies|dm us|message us|inbox|comment below)\b/i
+  if (pattern.test(input.item.text_line)) {
+    return record('BLOCKED', 'REPLY_CTA_UNDECLARED', false)
+  }
   return null
 }
 
@@ -255,19 +375,21 @@ function checkReplyOwner(input: StoryGateInput): StoryGateDecision | null {
 /**
  * Rule (j): the website reference must be https and recently checked.
  *
- * The check date may be at most one day in the future to absorb timezone skew
- * between the checker and this process.
+ * The check date must be a real calendar date (round-tripped, so `2026-13-01`
+ * and `2026-02-31` are rejected) and may be at most one day in the future to
+ * absorb timezone skew between the checker and this process.
  */
 function checkWebsite(input: StoryGateInput): StoryGateDecision | null {
   if (!input.item.website_ref.startsWith('https://')) {
     return record('BLOCKED', 'WEBSITE_CHECK_STALE', true)
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.item.website_checked_on)) {
+  if (!isValidCalendarDate(input.item.website_checked_on)) {
     return record('BLOCKED', 'WEBSITE_CHECK_STALE', true)
   }
 
   const today = utcDateString(input.now.getTime())
   const ageDays = daysBetween(input.item.website_checked_on, today)
+  if (Number.isNaN(ageDays)) return record('BLOCKED', 'WEBSITE_CHECK_STALE', true)
   if (ageDays > input.config.maxWebsiteAgeDays) {
     return record('BLOCKED', 'WEBSITE_CHECK_STALE', true)
   }
@@ -288,15 +410,18 @@ function checkWebsite(input: StoryGateInput): StoryGateDecision | null {
  */
 export function decideStoryPublish(input: StoryGateInput): StoryGateDecision {
   const checks: Array<(input: StoryGateInput) => StoryGateDecision | null> = [
+    checkConfig,
     checkExistingAttempt,
     checkDue,
     checkContext,
     checkAuthorization,
     checkSource,
+    checkAccount,
     checkCircuit,
     checkLateness,
     checkFile,
     checkPrice,
+    checkReplyCtaDeclared,
     checkReplyOwner,
     checkWebsite,
   ]

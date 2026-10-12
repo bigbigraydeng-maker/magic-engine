@@ -71,6 +71,13 @@ export function buildStoryReceipt(input: {
     )
   }
 
+  if (isPublished) {
+    // A published story must be traceable to a live authorisation.
+    if (input.authorizationState !== 'ACTIVE' || !input.authorizationId || input.authorizationId.trim() === '') {
+      throw new Error(`buildStoryReceipt: status ${input.status} requires an ACTIVE authorization with an id`)
+    }
+  }
+
   if (input.status === 'DRY_RUN' && input.mode !== 'DRY_RUN') {
     throw new Error('buildStoryReceipt: status DRY_RUN requires mode DRY_RUN')
   }

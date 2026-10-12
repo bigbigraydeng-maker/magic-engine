@@ -14,17 +14,35 @@ import type {
  */
 
 export interface StoryAssetPorts {
+  /**
+   * Read a file from the pack folder.
+   *
+   * A real implementation MUST resolve the real path (realpath) and refuse
+   * anything that is a symlink or that resolves outside the pack folder, and
+   * MUST enforce a byte cap itself (this module only re-checks the size after
+   * the read).
+   */
   readFile(relativePath: string): Promise<Uint8Array>
   probe(
     bytes: Uint8Array,
     kind: StoryMediaKind,
-  ): Promise<{ width: number; height: number; durationSec: number | null }>
-  /** Content-addressed upload; MUST NOT overwrite an existing object. created=false when it already existed. */
+  ): Promise<{
+    width: number
+    height: number
+    durationSec: number | null
+    format: 'png' | 'jpeg' | 'mp4' | 'unknown'
+  }>
+  /**
+   * Content-addressed upload; MUST NOT overwrite an existing object.
+   * `created` is false when the object already existed, in which case
+   * `existingSha256` is the lowercase hex sha256 of the bytes ALREADY stored
+   * at that path (null when the implementation cannot verify them).
+   */
   putIfAbsent(
     objectPath: string,
     bytes: Uint8Array,
     contentType: string,
-  ): Promise<{ publicUrl: string; created: boolean }>
+  ): Promise<{ publicUrl: string; created: boolean; existingSha256: string | null }>
 }
 
 export interface StoryManifestEntry {
@@ -54,9 +72,13 @@ export interface StoryIngestInput {
   packId: string
   /** account id per channel (Facebook Page id / Instagram user id) */
   accountIds: Record<StoryChannel, string>
+  /** Public base URL for uploaded assets; must start with 'https://'. */
+  publicBaseUrl: string
   entries: StoryManifestEntry[]
   ports: StoryAssetPorts
   maxVideoSeconds?: number
+  maxImageBytes?: number
+  maxVideoBytes?: number
 }
 
 export interface StoryIngestResult {
@@ -65,7 +87,14 @@ export interface StoryIngestResult {
 }
 
 const CLIENT_SLUG_RE = /^[a-z0-9][a-z0-9-]{1,40}$/
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ACCOUNT_ID_RE = /^\d{5,25}$/
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
 const DEFAULT_MAX_VIDEO_SECONDS = 15
+const DEFAULT_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+const DEFAULT_MAX_VIDEO_BYTES = 100 * 1024 * 1024
 
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg'])
 const VIDEO_EXTS = new Set(['mp4'])
@@ -75,9 +104,11 @@ export function validatePath(file: string): boolean {
   if (!file) return false
   if (file.includes('\0')) return false
   if (file.includes('\\')) return false
+  if (file.includes('%')) return false
+  if (file.includes(':')) return false
   if (file.startsWith('/')) return false
   const segments = file.split('/')
-  if (segments.some((s) => s === '..')) return false
+  if (segments.some((s) => s === '' || s === '.' || s === '..')) return false
   return true
 }
 
@@ -131,7 +162,21 @@ export function durationOk(
   durationSec: number | null,
   maxVideoSeconds: number,
 ): boolean {
-  return durationSec !== null && durationSec <= maxVideoSeconds
+  return (
+    durationSec !== null &&
+    Number.isFinite(durationSec) &&
+    durationSec > 0 &&
+    durationSec <= maxVideoSeconds
+  )
+}
+
+/** True when the string is a real calendar date (YYYY-MM-DD). */
+export function isRealCalendarDate(value: string): boolean {
+  if (!DATE_RE.test(value)) return false
+  const [y, m, d] = value.split('-').map((p) => Number(p))
+  const ms = Date.UTC(y, m - 1, d)
+  const round = new Date(ms).toISOString().slice(0, 10)
+  return round === value
 }
 
 /** Build the StoryItemSpec for a validated entry. */
@@ -170,6 +215,32 @@ function reject(
   return { item_id: entry.item_id, channel: entry.channel, reason_code }
 }
 
+/** Validate the non-file fields of an entry. */
+export function validateFields(entry: StoryManifestEntry): string | null {
+  if (!UUID_RE.test(entry.item_id)) return 'BAD_ITEM_ID'
+  if (typeof entry.slot_at !== 'string' || Number.isNaN(Date.parse(entry.slot_at))) {
+    return 'BAD_FIELDS'
+  }
+  const text = typeof entry.text_line === 'string' ? entry.text_line.trim() : ''
+  if (text.length === 0 || text.length > 200) return 'BAD_FIELDS'
+  if (!Array.isArray(entry.source_record_ids) || entry.source_record_ids.length === 0) {
+    return 'BAD_FIELDS'
+  }
+  for (const id of entry.source_record_ids) {
+    if (typeof id !== 'string' || id.trim().length === 0) return 'BAD_FIELDS'
+  }
+  if (typeof entry.website_ref !== 'string' || !entry.website_ref.startsWith('https://')) {
+    return 'BAD_FIELDS'
+  }
+  if (
+    typeof entry.website_checked_on !== 'string' ||
+    !isRealCalendarDate(entry.website_checked_on)
+  ) {
+    return 'BAD_FIELDS'
+  }
+  return null
+}
+
 /** Validate path + extension; returns the canonical ext or a reason code. */
 function validateFile(
   entry: StoryManifestEntry,
@@ -182,14 +253,11 @@ function validateFile(
   return { ext: normaliseExt(rawExt) }
 }
 
-/** Read + probe the file; returns bytes and probe result or a reason code. */
-async function readAndProbe(
+/** Read the file; returns bytes or a reason code. */
+async function readFile(
   entry: StoryManifestEntry,
   ports: StoryAssetPorts,
-): Promise<
-  | { bytes: Uint8Array; probe: { width: number; height: number; durationSec: number | null } }
-  | { reason: string }
-> {
+): Promise<{ bytes: Uint8Array } | { reason: string }> {
   let bytes: Uint8Array
   try {
     bytes = await ports.readFile(entry.file)
@@ -197,31 +265,88 @@ async function readAndProbe(
     return { reason: 'READ_FAILED' }
   }
   if (!bytes || bytes.length === 0) return { reason: 'EMPTY_FILE' }
+  return { bytes }
+}
 
-  let probe: { width: number; height: number; durationSec: number | null }
+/** Probe the bytes; returns the probe result or a reason code. */
+async function probeBytes(
+  entry: StoryManifestEntry,
+  bytes: Uint8Array,
+  ports: StoryAssetPorts,
+): Promise<
+  | {
+      probe: {
+        width: number
+        height: number
+        durationSec: number | null
+        format: 'png' | 'jpeg' | 'mp4' | 'unknown'
+      }
+    }
+  | { reason: string }
+> {
   try {
-    probe = await ports.probe(bytes, entry.media_kind)
+    const probe = await ports.probe(bytes, entry.media_kind)
+    return { probe }
   } catch {
     return { reason: 'PROBE_FAILED' }
   }
-  return { bytes, probe }
+}
+
+/** The probe format implied by a canonical extension. */
+function expectedFormat(ext: string): 'png' | 'jpeg' | 'mp4' {
+  if (ext === 'png') return 'png'
+  if (ext === 'jpg') return 'jpeg'
+  return 'mp4'
+}
+
+/** Check size, format, aspect and (for video) duration. */
+export function checkMedia(params: {
+  entry: StoryManifestEntry
+  ext: string
+  bytes: Uint8Array
+  probe: {
+    width: number
+    height: number
+    durationSec: number | null
+    format: 'png' | 'jpeg' | 'mp4' | 'unknown'
+  }
+  maxImageBytes: number
+  maxVideoBytes: number
+  maxVideoSeconds: number
+}): string | null {
+  const { entry, ext, bytes, probe, maxImageBytes, maxVideoBytes, maxVideoSeconds } =
+    params
+  const cap = entry.media_kind === 'image' ? maxImageBytes : maxVideoBytes
+  if (bytes.length > cap) return 'FILE_TOO_LARGE'
+  if (probe.format !== expectedFormat(ext)) return 'FORMAT_MISMATCH'
+  if (!aspectOk(probe.width, probe.height)) return 'BAD_ASPECT'
+  if (entry.media_kind === 'video' && !durationOk(probe.durationSec, maxVideoSeconds)) {
+    return 'BAD_DURATION'
+  }
+  return null
 }
 
 /** Upload the bytes content-addressed; returns publicUrl or a reason code. */
-async function uploadAsset(
-  objectPath: string,
-  bytes: Uint8Array,
-  contentType: string,
-  ports: StoryAssetPorts,
-): Promise<{ publicUrl: string } | { reason: string }> {
-  let result: { publicUrl: string; created: boolean }
+async function uploadAsset(params: {
+  objectPath: string
+  bytes: Uint8Array
+  contentType: string
+  sha256: string
+  publicBaseUrl: string
+  ports: StoryAssetPorts
+}): Promise<{ publicUrl: string } | { reason: string }> {
+  const { objectPath, bytes, contentType, sha256, publicBaseUrl, ports } = params
+  let result: { publicUrl: string; created: boolean; existingSha256: string | null }
   try {
     result = await ports.putIfAbsent(objectPath, bytes, contentType)
   } catch {
     return { reason: 'UPLOAD_FAILED' }
   }
-  if (!result.publicUrl || !result.publicUrl.startsWith('https://')) {
-    return { reason: 'URL_NOT_HTTPS' }
+  const expectedUrl = `${publicBaseUrl}${objectPath}`
+  if (result.publicUrl !== expectedUrl) return { reason: 'URL_NOT_EXPECTED' }
+  if (!result.created) {
+    if (result.existingSha256 === null) return { reason: 'CANNOT_VERIFY_EXISTING' }
+    if (result.existingSha256 !== sha256) return { reason: 'OBJECT_CONTENT_MISMATCH' }
   }
   return { publicUrl: result.publicUrl }
 }
@@ -230,10 +355,18 @@ async function uploadAsset(
 async function processEntry(
   entry: StoryManifestEntry,
   input: StoryIngestInput,
-  maxVideoSeconds: number,
+  limits: {
+    maxVideoSeconds: number
+    maxImageBytes: number
+    maxVideoBytes: number
+    publicBaseUrl: string
+  },
 ): Promise<{ item: StoryItemSpec } | { rejection: StoryIngestRejection }> {
+  const fieldReason = validateFields(entry)
+  if (fieldReason) return { rejection: reject(entry, fieldReason) }
+
   const accountId = input.accountIds[entry.channel]
-  if (typeof accountId !== 'string' || accountId.length === 0) {
+  if (typeof accountId !== 'string' || !ACCOUNT_ID_RE.test(accountId)) {
     return { rejection: reject(entry, 'NO_ACCOUNT') }
   }
 
@@ -241,24 +374,38 @@ async function processEntry(
   if ('reason' in fileCheck) return { rejection: reject(entry, fileCheck.reason) }
   const { ext } = fileCheck
 
-  const read = await readAndProbe(entry, input.ports)
+  const read = await readFile(entry, input.ports)
   if ('reason' in read) return { rejection: reject(entry, read.reason) }
 
-  if (!aspectOk(read.probe.width, read.probe.height)) {
-    return { rejection: reject(entry, 'BAD_ASPECT') }
-  }
-  if (
-    entry.media_kind === 'video' &&
-    !durationOk(read.probe.durationSec, maxVideoSeconds)
-  ) {
-    return { rejection: reject(entry, 'BAD_DURATION') }
-  }
+  const cap = entry.media_kind === 'image' ? limits.maxImageBytes : limits.maxVideoBytes
+  if (read.bytes.length > cap) return { rejection: reject(entry, 'FILE_TOO_LARGE') }
+
+  const probed = await probeBytes(entry, read.bytes, input.ports)
+  if ('reason' in probed) return { rejection: reject(entry, probed.reason) }
+
+  const mediaReason = checkMedia({
+    entry,
+    ext,
+    bytes: read.bytes,
+    probe: probed.probe,
+    maxImageBytes: limits.maxImageBytes,
+    maxVideoBytes: limits.maxVideoBytes,
+    maxVideoSeconds: limits.maxVideoSeconds,
+  })
+  if (mediaReason) return { rejection: reject(entry, mediaReason) }
 
   const sha256 = sha256Hex(read.bytes)
   const objectPath = buildObjectPath(input.clientSlug, input.packId, sha256, ext)
   const contentType = contentTypeFor(ext)
 
-  const upload = await uploadAsset(objectPath, read.bytes, contentType, input.ports)
+  const upload = await uploadAsset({
+    objectPath,
+    bytes: read.bytes,
+    contentType,
+    sha256,
+    publicBaseUrl: limits.publicBaseUrl,
+    ports: input.ports,
+  })
   if ('reason' in upload) return { rejection: reject(entry, upload.reason) }
 
   const item = buildItemSpec({
@@ -272,20 +419,52 @@ async function processEntry(
   return { item }
 }
 
+/** Normalise the public base URL to a single trailing slash, or throw. */
+function normalisePublicBaseUrl(value: string): string {
+  if (typeof value !== 'string' || !value.startsWith('https://')) {
+    throw new Error('ingestStoryAssets: invalid publicBaseUrl')
+  }
+  return value.endsWith('/') ? value : `${value}/`
+}
+
+/** Validate the input-level invariants; throws on programmer error. */
+function validateInput(input: StoryIngestInput): {
+  maxVideoSeconds: number
+  maxImageBytes: number
+  maxVideoBytes: number
+  publicBaseUrl: string
+} {
+  if (!CLIENT_SLUG_RE.test(input.clientSlug)) {
+    throw new Error(`Invalid clientSlug: ${input.clientSlug}`)
+  }
+  if (!UUID_RE.test(input.clientId)) {
+    throw new Error(`Invalid clientId: ${input.clientId}`)
+  }
+  if (!UUID_RE.test(input.packId)) {
+    throw new Error(`Invalid packId: ${input.packId}`)
+  }
+  const maxVideoSeconds = input.maxVideoSeconds ?? DEFAULT_MAX_VIDEO_SECONDS
+  if (!Number.isFinite(maxVideoSeconds) || maxVideoSeconds <= 0) {
+    throw new Error(`Invalid maxVideoSeconds: ${input.maxVideoSeconds}`)
+  }
+  const maxImageBytes = input.maxImageBytes ?? DEFAULT_MAX_IMAGE_BYTES
+  const maxVideoBytes = input.maxVideoBytes ?? DEFAULT_MAX_VIDEO_BYTES
+  const publicBaseUrl = normalisePublicBaseUrl(input.publicBaseUrl)
+  return { maxVideoSeconds, maxImageBytes, maxVideoBytes, publicBaseUrl }
+}
+
 /**
  * Ingest a story pack manifest into StoryItemSpec rows.
  *
- * A bad clientSlug throws (programmer error). A bad entry is pushed to
- * `rejected` with a stable reason_code and processing continues.
+ * A bad clientSlug / clientId / packId / publicBaseUrl / maxVideoSeconds throws
+ * (programmer error). A bad entry is pushed to `rejected` with a stable
+ * reason_code and processing continues.
  */
 export async function ingestStoryAssets(
   input: StoryIngestInput,
 ): Promise<StoryIngestResult> {
-  if (!CLIENT_SLUG_RE.test(input.clientSlug)) {
-    throw new Error(`Invalid clientSlug: ${input.clientSlug}`)
-  }
+  const limits = validateInput(input)
 
-  const maxVideoSeconds = input.maxVideoSeconds ?? DEFAULT_MAX_VIDEO_SECONDS
   const items: StoryItemSpec[] = []
   const rejected: StoryIngestRejection[] = []
   const seen = new Set<string>()
@@ -298,7 +477,7 @@ export async function ingestStoryAssets(
     }
     seen.add(key)
 
-    const result = await processEntry(entry, input, maxVideoSeconds)
+    const result = await processEntry(entry, input, limits)
     if ('item' in result) items.push(result.item)
     else rejected.push(result.rejection)
   }

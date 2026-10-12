@@ -56,11 +56,28 @@ export interface StoryAuthorization {
   activated_at: string | null
   expires_at: string
   revoked_at: string | null
+  /**
+   * Hash over every authorised item's fingerprint, frozen at authorisation time
+   * (see `computeManifestHash`). Never changes after it is written.
+   */
+  manifest_hash: string
+  /**
+   * Read-only snapshot of each authorised item's fingerprint, keyed by
+   * `storyItemKey(item)` (`${item_id}:${channel}`). Frozen at authorisation time,
+   * so rewriting an item row and its stored fingerprint cannot widen what the PM approved.
+   */
+  approved_item_fingerprints: Record<string, string>
+}
+
+/** Stable key for one (item, channel). */
+export function storyItemKey(item: { item_id: string; channel: StoryChannel }): string {
+  return `${item.item_id}:${item.channel}`
 }
 
 export const STORY_ATTEMPT_STATUSES = [
   'DRY_RUN',
   'CLAIMED',
+  'RETRYABLE',
   'CONTAINER_CREATED',
   'PUBLISHING',
   'PUBLISHED_UNVERIFIED',

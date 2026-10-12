@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { StoryItemSpec } from './types'
+import { storyItemKey, type StoryItemSpec } from './types'
 
 /**
  * Builds the canonical string that is hashed to fingerprint a story item.
@@ -38,4 +38,30 @@ export function canonicalFingerprintInput(item: StoryItemSpec, expiresAt: string
  */
 export function computeItemFingerprint(item: StoryItemSpec, expiresAt: string): string {
   return createHash('sha256').update(canonicalFingerprintInput(item, expiresAt)).digest('hex')
+}
+
+/**
+ * Returns the lowercase hex sha256 of the manifest over every item's
+ * `[storyItemKey(item), computeItemFingerprint(item, expiresAt)]` pair.
+ *
+ * The pairs are sorted by key (plain ascending string comparison) so the hash
+ * is independent of the order the items were supplied in. An empty list is
+ * allowed and yields a stable hash. Throws when two items share the same key,
+ * because a manifest must describe each (item, channel) exactly once.
+ */
+export function computeManifestHash(items: StoryItemSpec[], expiresAt: string): string {
+  const pairs: Array<[string, string]> = items.map((item) => [
+    storyItemKey(item),
+    computeItemFingerprint(item, expiresAt),
+  ])
+
+  pairs.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+
+  for (let i = 1; i < pairs.length; i += 1) {
+    if (pairs[i][0] === pairs[i - 1][0]) {
+      throw new Error('computeManifestHash: duplicate item key')
+    }
+  }
+
+  return createHash('sha256').update(JSON.stringify(pairs)).digest('hex')
 }

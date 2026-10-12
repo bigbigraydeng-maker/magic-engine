@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import {
-  decideStoryPublish,
-  isStoryLiveFor,
-  readStorySwitches,
-  type StoryGateInput,
-} from '../gates'
-import type { StoryChannel, StoryItemSpec, StorySwitches } from '../types'
+import { decideStoryPublish, isStoryLiveFor, readStorySwitches, type StoryGateInput } from '../gates'
+import { computeItemFingerprint, computeManifestHash } from '../fingerprint'
+import { storyItemKey, type StoryAuthorization, type StoryChannel, type StoryItemSpec, type StorySwitches } from '../types'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const NOW = new Date('2026-10-12T09:00:00.000Z')
+const EXPIRES = '2026-10-19T09:00:00.000Z'
 
 /** A story item whose slot is exactly `now`, so timing gates are neutral. */
 function baseItem(overrides: Partial<StoryItemSpec> = {}): StoryItemSpec {
@@ -23,12 +20,31 @@ function baseItem(overrides: Partial<StoryItemSpec> = {}): StoryItemSpec {
     media_url: 'https://cdn.example.com/a.png',
     media_sha256: 'a'.repeat(64),
     text_line: 'Hello',
-    account_id: 'page-1',
+    account_id: '55566677788',
     source_record_ids: ['rec-1'],
     website_ref: 'https://example.com/facts',
     website_checked_on: '2026-10-12',
     has_reply_cta: false,
     ...overrides,
+  }
+}
+
+/** Build a real, fully valid authorization over the given items. */
+function makeAuth(items: StoryItemSpec[]): StoryAuthorization {
+  return {
+    id: 'auth-1',
+    pack_id: 'pack-1',
+    client_id: 'client-1',
+    authorized_by_email: 'pm@example.com',
+    authorized_by_user_id: 'user-1',
+    authorized_at: '2026-10-11T09:00:00.000Z',
+    activated_at: '2026-10-11T09:01:00.000Z',
+    expires_at: EXPIRES,
+    revoked_at: null,
+    manifest_hash: computeManifestHash(items, EXPIRES),
+    approved_item_fingerprints: Object.fromEntries(
+      items.map(i => [storyItemKey(i), computeItemFingerprint(i, EXPIRES)]),
+    ),
   }
 }
 
@@ -40,13 +56,22 @@ const LIVE_SWITCHES: StorySwitches = {
 
 /** A baseline input where every gate is green. */
 function baseInput(overrides: Partial<StoryGateInput> = {}): StoryGateInput {
+  // An overridden item is authorised as-is unless the test passes its own `auth`
+  // (tamper tests pass an `auth` built from the original item).
+  const item = overrides.item ?? baseItem()
   return {
     now: NOW,
-    item: baseItem(),
-    authState: 'ACTIVE',
+    item,
+    auth: {
+      authorization: makeAuth([item]),
+      itemAuthorizationId: 'auth-1',
+      packItems: [item],
+      adminEmails: new Set(['pm@example.com']),
+    },
     switches: LIVE_SWITCHES,
     clientStatus: 'active',
     campaignStatus: 'active',
+    registeredAccountId: '55566677788',
     circuit: { itemPaused: false, packChannelPaused: false },
     fileCheck: 'OK',
     priceGate: 'OK',
@@ -56,7 +81,9 @@ function baseInput(overrides: Partial<StoryGateInput> = {}): StoryGateInput {
       maxLateMinutes: 30,
       earlyMinutes: 30,
       staleClaimMinutes: 15,
+      stalePublishingMinutes: 10,
       maxWebsiteAgeDays: 7,
+      maxRetries: 3,
     },
     ...overrides,
   }
@@ -84,7 +111,12 @@ describe('decideStoryPublish baseline', () => {
 
 describe('rule (a): existing attempt', () => {
   it('skips a terminal attempt', () => {
-    const existingAttempt = { status: 'PUBLISHED' as const, updated_at: NOW.toISOString() }
+    const existingAttempt = {
+      status: 'PUBLISHED',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({
       action: 'SKIP',
       reason_code: 'ALREADY_TERMINAL',
@@ -93,7 +125,7 @@ describe('rule (a): existing attempt', () => {
 
   it('records a stale claim as an unknown outcome', () => {
     const updated_at = new Date(NOW.getTime() - 60 * 60_000).toISOString()
-    const existingAttempt = { status: 'CLAIMED' as const, updated_at }
+    const existingAttempt = { status: 'CLAIMED', updated_at, next_retry_at: null, retry_count: 0 }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({
       action: 'RECORD',
       status: 'UNKNOWN_OUTCOME',
@@ -103,7 +135,12 @@ describe('rule (a): existing attempt', () => {
   })
 
   it('records an unparseable claim timestamp as an unknown outcome', () => {
-    const existingAttempt = { status: 'CLAIMED' as const, updated_at: 'not-a-date' }
+    const existingAttempt = {
+      status: 'CLAIMED',
+      updated_at: 'not-a-date',
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({
       action: 'RECORD',
       status: 'UNKNOWN_OUTCOME',
@@ -113,7 +150,12 @@ describe('rule (a): existing attempt', () => {
   })
 
   it('skips a fresh claim as in progress', () => {
-    const existingAttempt = { status: 'CLAIMED' as const, updated_at: NOW.toISOString() }
+    const existingAttempt = {
+      status: 'CLAIMED',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({
       action: 'SKIP',
       reason_code: 'IN_PROGRESS',
@@ -121,7 +163,12 @@ describe('rule (a): existing attempt', () => {
   })
 
   it('skips a container-created attempt as in progress', () => {
-    const existingAttempt = { status: 'CONTAINER_CREATED' as const, updated_at: NOW.toISOString() }
+    const existingAttempt = {
+      status: 'CONTAINER_CREATED',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({
       action: 'SKIP',
       reason_code: 'IN_PROGRESS',
@@ -129,7 +176,12 @@ describe('rule (a): existing attempt', () => {
   })
 
   it('skips a publishing attempt as in progress', () => {
-    const existingAttempt = { status: 'PUBLISHING' as const, updated_at: NOW.toISOString() }
+    const existingAttempt = {
+      status: 'PUBLISHING',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({
       action: 'SKIP',
       reason_code: 'IN_PROGRESS',
@@ -137,17 +189,32 @@ describe('rule (a): existing attempt', () => {
   })
 
   it('re-evaluates a dry-run attempt', () => {
-    const existingAttempt = { status: 'DRY_RUN' as const, updated_at: NOW.toISOString() }
+    const existingAttempt = {
+      status: 'DRY_RUN',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({ action: 'PUBLISH' })
   })
 
   it('re-evaluates a blocked attempt', () => {
-    const existingAttempt = { status: 'BLOCKED' as const, updated_at: NOW.toISOString() }
+    const existingAttempt = {
+      status: 'BLOCKED',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({ action: 'PUBLISH' })
   })
 
   it('re-evaluates a skipped-not-authorized attempt', () => {
-    const existingAttempt = { status: 'SKIPPED_NOT_AUTHORIZED' as const, updated_at: NOW.toISOString() }
+    const existingAttempt = {
+      status: 'SKIPPED_NOT_AUTHORIZED',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     expect(decideStoryPublish(baseInput({ existingAttempt }))).toEqual({ action: 'PUBLISH' })
   })
 })
@@ -209,11 +276,54 @@ describe('rules (c) and (k): context', () => {
 // ─── Rule (d): authorization ──────────────────────────────────────────────────
 
 describe('rule (d): authorization', () => {
-  it('records the auth state when not active', () => {
-    expect(decideStoryPublish(baseInput({ authState: 'REVOKED' }))).toEqual({
+  it('records a revoked authorization', () => {
+    const item = baseItem()
+    const authorization = { ...makeAuth([item]), revoked_at: '2026-10-12T08:00:00.000Z' }
+    const auth = { authorization, itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }
+    expect(decideStoryPublish(baseInput({ auth }))).toEqual({
       action: 'RECORD',
       status: 'SKIPPED_NOT_AUTHORIZED',
       reason_code: 'REVOKED',
+      retryable: false,
+    })
+  })
+
+  it('records an expired authorization', () => {
+    const item = baseItem()
+    const authorization = { ...makeAuth([item]), expires_at: '2026-10-12T08:00:00.000Z' }
+    const auth = { authorization, itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }
+    expect(decideStoryPublish(baseInput({ auth }))).toEqual({
+      action: 'RECORD',
+      status: 'SKIPPED_NOT_AUTHORIZED',
+      reason_code: 'EXPIRED',
+      retryable: false,
+    })
+  })
+
+  it('records a not-activated authorization', () => {
+    const item = baseItem()
+    const authorization = { ...makeAuth([item]), activated_at: null }
+    const auth = { authorization, itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }
+    expect(decideStoryPublish(baseInput({ auth }))).toEqual({
+      action: 'RECORD',
+      status: 'SKIPPED_NOT_AUTHORIZED',
+      reason_code: 'NOT_ACTIVATED',
+      retryable: false,
+    })
+  })
+
+  it('records an authorizer who is no longer an admin', () => {
+    const item = baseItem()
+    const auth = {
+      authorization: makeAuth([item]),
+      itemAuthorizationId: 'auth-1',
+      packItems: [item],
+      adminEmails: new Set<string>(),
+    }
+    expect(decideStoryPublish(baseInput({ auth }))).toEqual({
+      action: 'RECORD',
+      status: 'SKIPPED_NOT_AUTHORIZED',
+      reason_code: 'AUTHORIZER_NOT_ADMIN',
       retryable: false,
     })
   })
@@ -272,7 +382,7 @@ describe('rule (g): file check', () => {
   it('blocks retryably when the file is unreachable', () => {
     expect(decideStoryPublish(baseInput({ fileCheck: 'UNREACHABLE' }))).toEqual({
       action: 'RECORD',
-      status: 'BLOCKED',
+      status: 'RETRYABLE',
       reason_code: 'FILE_UNREACHABLE',
       retryable: true,
     })
@@ -375,7 +485,10 @@ describe('rule (j): website check', () => {
 
 describe('precedence', () => {
   it('prefers the authorization failure over a file change', () => {
-    const decision = decideStoryPublish(baseInput({ authState: 'REVOKED', fileCheck: 'CHANGED' }))
+    const item = baseItem()
+    const authorization = { ...makeAuth([item]), revoked_at: '2026-10-12T08:00:00.000Z' }
+    const auth = { authorization, itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }
+    const decision = decideStoryPublish(baseInput({ auth, fileCheck: 'CHANGED' }))
     expect(decision).toEqual({
       action: 'RECORD',
       status: 'SKIPPED_NOT_AUTHORIZED',
@@ -396,11 +509,19 @@ describe('precedence', () => {
   })
 
   it('lets a terminal attempt beat every other failing gate', () => {
-    const existingAttempt = { status: 'PUBLISHED' as const, updated_at: NOW.toISOString() }
+    const item = baseItem()
+    const authorization = { ...makeAuth([item]), revoked_at: '2026-10-12T08:00:00.000Z' }
+    const auth = { authorization, itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }
+    const existingAttempt = {
+      status: 'PUBLISHED',
+      updated_at: NOW.toISOString(),
+      next_retry_at: null,
+      retry_count: 0,
+    }
     const decision = decideStoryPublish(
       baseInput({
+        auth,
         existingAttempt,
-        authState: 'REVOKED',
         fileCheck: 'CHANGED',
         priceGate: 'BLOCKED',
         clientStatus: 'paused',
@@ -411,7 +532,9 @@ describe('precedence', () => {
 
   it('lets NOT_DUE beat a not-authorized state', () => {
     const item = baseItem({ slot_at: new Date(NOW.getTime() + 60 * 60_000).toISOString() })
-    const decision = decideStoryPublish(baseInput({ item, authState: 'REVOKED' }))
+    const authorization = { ...makeAuth([item]), revoked_at: '2026-10-12T08:00:00.000Z' }
+    const auth = { authorization, itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }
+    const decision = decideStoryPublish(baseInput({ item, auth }))
     expect(decision).toEqual({ action: 'SKIP', reason_code: 'NOT_DUE' })
   })
 })
@@ -420,14 +543,33 @@ describe('precedence', () => {
 
 describe('never publishes unless every gate is green', () => {
   const failingInputs: Array<[string, Partial<StoryGateInput>]> = [
-    ['terminal attempt', { existingAttempt: { status: 'PUBLISHED', updated_at: NOW.toISOString() } }],
-    ['in-progress attempt', { existingAttempt: { status: 'CLAIMED', updated_at: NOW.toISOString() } }],
+    [
+      'terminal attempt',
+      {
+        existingAttempt: {
+          status: 'PUBLISHED',
+          updated_at: NOW.toISOString(),
+          next_retry_at: null,
+          retry_count: 0,
+        },
+      },
+    ],
+    [
+      'in-progress attempt',
+      {
+        existingAttempt: {
+          status: 'CLAIMED',
+          updated_at: NOW.toISOString(),
+          next_retry_at: null,
+          retry_count: 0,
+        },
+      },
+    ],
     ['not due', { item: baseItem({ slot_at: new Date(NOW.getTime() + 60 * 60_000).toISOString() }) }],
     ['bad slot', { item: baseItem({ slot_at: 'not-a-date' }) }],
     ['client not active', { clientStatus: 'paused' }],
     ['campaign not active', { campaignStatus: 'paused' }],
     ['source missing', { item: baseItem({ source_record_ids: [] }) }],
-    ['not authorized', { authState: 'REVOKED' }],
     ['circuit paused', { circuit: { itemPaused: true, packChannelPaused: false } }],
     ['slot passed', { item: baseItem({ slot_at: new Date(NOW.getTime() - 60 * 60_000).toISOString() }) }],
     ['file changed', { fileCheck: 'CHANGED' }],
@@ -512,12 +654,14 @@ describe('per-channel enablement', () => {
   })
 })
 
+// ─── Source check ordering ────────────────────────────────────────────────────
+
 describe('source check ordering', () => {
   it('reports not-authorized before a missing source when both apply', () => {
-    const input = baseInput({
-      authState: 'REVOKED',
-      item: baseItem({ source_record_ids: [] }),
-    })
+    const item = baseItem({ source_record_ids: [] })
+    const authorization = { ...makeAuth([item]), revoked_at: '2026-10-12T08:00:00.000Z' }
+    const auth = { authorization, itemAuthorizationId: 'auth-1', packItems: [item], adminEmails: new Set(['pm@example.com']) }
+    const input = baseInput({ auth, item })
     expect(decideStoryPublish(input)).toMatchObject({
       action: 'RECORD',
       status: 'SKIPPED_NOT_AUTHORIZED',
