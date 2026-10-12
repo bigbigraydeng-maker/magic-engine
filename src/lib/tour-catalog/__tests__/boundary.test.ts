@@ -27,9 +27,11 @@ const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')
 /**
  * Modules anyone may import from freely: type / response-shape modules, plus `publish-request-feed`,
  * which reads only the open "please publish" requests (who / when / note) for the daily to-do list
- * and has no way to reach the draft.
+ * and has no way to reach the draft. `booking-facts` is read-only, reads just the two catalog tables
+ * with fixed column lists, and its facts are shown only to the client's own staff — the self-test
+ * below pins that down.
  */
-const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract', 'catalog-contract', 'publish-request-feed'])
+const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract', 'catalog-contract', 'publish-request-feed', 'booking-facts'])
 /** store-publish is importable only for these names. */
 const PUBLISHED_READER_MODULE = 'store-publish'
 const PUBLISHED_READER_NAMES = new Set(['loadPublishedProducts', 'PublishedProductsRead'])
@@ -139,6 +141,30 @@ describe('tour catalog draft boundary', () => {
     expect(Array.from(new Set(tables))).toEqual([`${DB_OBJECT_PREFIX}publish_requests`])
     expect(/from\s+['"]\.\//.test(feed)).toBe(false)
     expect(/\.(insert|update|upsert|delete|rpc)\(/.test(feed)).toBe(false)
+  })
+
+  it('the booking facts reader only reads the two catalog tables, never writes, and imports no CRM code', () => {
+    const facts = readFileSync(join(process.cwd(), 'src', 'lib', 'tour-catalog', 'booking-facts.ts'), 'utf8')
+    const tables = facts.match(new RegExp(`${DB_OBJECT_PREFIX}[a-z_]+`, 'g')) ?? []
+    expect(Array.from(new Set(tables)).sort()).toEqual([
+      `${DB_OBJECT_PREFIX}departures`,
+      `${DB_OBJECT_PREFIX}tours`,
+    ])
+    expect(/\.(insert|update|upsert|delete|rpc)\(/.test(facts)).toBe(false)
+    expect(/from\s+['"][^'"]*\/crm\//.test(facts)).toBe(false)
+    // The selected columns are the minimal ones, named once each: widening them fails here.
+    expect(facts).toContain(`BOOKING_FACT_TOUR_COLUMNS = 'id, name, duration_text'`)
+    expect(facts).toContain(`BOOKING_FACT_DEPARTURE_COLUMNS = 'id, tour_id, depart_on, return_on, status'`)
+    expect(facts).toContain(`BOOKING_OPTION_TOUR_COLUMNS = 'id, name, duration_text, is_active'`)
+    expect(facts).toContain(`BOOKING_OPTION_DEPARTURE_COLUMNS = 'id, tour_id, depart_on, return_on, status'`)
+    // Nothing selects anything other than those four constants.
+    const selects = Array.from(facts.matchAll(/\.select\(([^)]*)\)/g)).map((m) => m[1].trim())
+    expect(Array.from(new Set(selects)).sort()).toEqual([
+      'BOOKING_FACT_DEPARTURE_COLUMNS',
+      'BOOKING_FACT_TOUR_COLUMNS',
+      'BOOKING_OPTION_DEPARTURE_COLUMNS',
+      'BOOKING_OPTION_TOUR_COLUMNS',
+    ])
   })
 
   it('the scan really sees files and the catalog really contains what it forbids elsewhere', () => {

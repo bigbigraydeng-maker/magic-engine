@@ -1,9 +1,12 @@
 ---
 id: 2026-10-10-cts-tour-catalog-go-live-order
 title: 团目录上线必须按固定顺序：先数据库、再 ME 代码、再官网读取口、再首次读入、比对为零后才谈接通官网
-status: decided
+status: done
+verify_by: 2026-10-18
 owner: agent
 decided_on: 2026-10-10
+done_on: 2026-10-11
+done_ref: pr:2439
 source: session:1a85e0eb
 verify_how: 生产环境团目录「设置」页签点「和官网现在的内容比一下」，显示官网与目录团数相同、0 处不同、没有读不懂的条目
 ---
