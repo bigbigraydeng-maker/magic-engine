@@ -16,6 +16,12 @@
 --   -- restore the audit function: re-run the "create function public.crm_booking_audit_booking()" block of
 --   -- 20261012200000_crm_booking_tracker.sql as "create or replace function" (it does not mention the new columns);
 --   alter table public.crm_bookings drop column evidence_ref, drop column origin_kind;  -- only after confirming no data you want to keep
+--   ORDER MATTERS: restore the audit function BEFORE dropping the columns (plpgsql does not track column dependencies:
+--   dropping first would succeed and then every insert into crm_bookings would fail inside the trigger).
+--   After a rollback there are 17 crm_booking_% functions again: set G94d in supabase/tests/crm_booking_tracker.test.sql back to 17.
+--
+-- NOTE: the CTS invoice format (5 digits) is checked by the import script, not here: it is a client rule, and this
+-- migration is client-neutral (it only enforces 3-40 upper-case letters/digits after normalisation).
 
 -- ---------------------------------------------------------------------------
 -- 1. New nullable columns (no table rewrite; old rows stay NULL, never back-filled with guesses)
@@ -28,7 +34,10 @@ alter table public.crm_bookings
   add constraint crm_bookings_origin_kind_values
     check (origin_kind is null or origin_kind in ('company_confirmed', 'customer_stated', 'staff_entered')),
   add constraint crm_bookings_evidence_ref_shape
-    check (evidence_ref is null or (length(evidence_ref) between 3 and 40 and evidence_ref !~ '\s')),
+    -- Whitelist, not a blacklist of whitespace: zero-width characters, BOM, en dashes and full-width digits are
+    -- refused, and the rule does not depend on the database locale. The create function normalises first
+    -- (upper case, no whitespace / hyphens), so a stored value is always upper-case letters and digits.
+    check (evidence_ref is null or evidence_ref ~ '^[A-Z0-9]{3,40}$'),
   add constraint crm_bookings_company_confirmed_needs_evidence
     check (origin_kind is distinct from 'company_confirmed' or evidence_ref is not null);
 
@@ -268,12 +277,16 @@ begin
   if p_departure_id is null then
     raise exception 'departure_required';
   end if;
-  if p_origin_kind is not null and p_origin_kind not in ('company_confirmed', 'customer_stated', 'staff_entered') then
+  -- An import must say where the order came from (a NULL origin is what old, hand-entered orders have).
+  if p_origin_kind is null or p_origin_kind not in ('company_confirmed', 'customer_stated', 'staff_entered') then
     raise exception 'invalid_origin_kind';
   end if;
 
   -- Normalised form: upper case, no whitespace or hyphens (same rule as the payment-email invoice extractor).
   v_ref := nullif(regexp_replace(upper(coalesce(p_evidence_ref, '')), '[\s-]+', '', 'g'), '');
+  if v_ref is not null and v_ref !~ '^[A-Z0-9]{3,40}$' then
+    raise exception 'invalid_evidence_ref';
+  end if;
   if p_origin_kind = 'company_confirmed' and v_ref is null then
     raise exception 'evidence_required';
   end if;

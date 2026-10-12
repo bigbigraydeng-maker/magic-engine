@@ -160,8 +160,49 @@ select pg_temp.ocheck('N17e nobody but service_role can execute the immutability
 select pg_temp.ocheck('N17f session settings are cleared after the write (no actor leaks into the next statement)',
   coalesce(current_setting('crm_booking.actor', true), '') = '');
 
+-- N18: invoice whitelist (zero-width / BOM / en dash / minus / full-width digits are refused, in the function and in the table)
+select pg_temp.orefused('N18a zero-width space inside the invoice refused',
+  $q$select public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e3','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2',date '2029-01-09',1::smallint,false,null,'company_confirmed',E'84​030','Staff1@Example.com')$q$,
+  'invalid_evidence_ref');
+select pg_temp.orefused('N18b BOM in front of the invoice refused',
+  $q$select public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e3','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2',date '2029-01-09',1::smallint,false,null,'company_confirmed',E'﻿84030','Staff1@Example.com')$q$,
+  'invalid_evidence_ref');
+select pg_temp.orefused('N18c en dash refused (only ASCII hyphen is normalised away)',
+  $q$select public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e3','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2',date '2029-01-09',1::smallint,false,null,'company_confirmed',E'84–030','Staff1@Example.com')$q$,
+  'invalid_evidence_ref');
+select pg_temp.orefused('N18d full-width digits refused',
+  $q$select public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e3','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2',date '2029-01-09',1::smallint,false,null,'company_confirmed',E'８４０３０','Staff1@Example.com')$q$,
+  'invalid_evidence_ref');
+select pg_temp.orefused('N18e too short (2 chars) gets the business code, not a raw CHECK error',
+  $q$select public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e3','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2',date '2029-01-09',1::smallint,false,null,'customer_stated','84','Staff1@Example.com')$q$,
+  'invalid_evidence_ref');
+select pg_temp.orefused('N18f table CHECK: lower-case invoice refused on a direct insert',
+  $q$insert into public.crm_bookings(client_id,contact_id,tour_id,departure_id,departure_depart_on,booked_on,created_by,origin_kind,evidence_ref) values ('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2','2029-03-11','2029-01-01','x','customer_stated','abc99')$q$,
+  '23514');
+select pg_temp.orefused('N18g table CHECK: zero-width character refused on a direct insert',
+  $q$insert into public.crm_bookings(client_id,contact_id,tour_id,departure_id,departure_depart_on,booked_on,created_by,origin_kind,evidence_ref) values ('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2','2029-03-11','2029-01-01','x','customer_stated',E'84030​')$q$,
+  '23514');
+
+-- N19: an import must state its origin
+select pg_temp.orefused('N19 NULL origin_kind refused by the import function',
+  $q$select public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e3','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e2',date '2029-01-09',1::smallint,false,null,null,'84040','Staff1@Example.com')$q$,
+  'invalid_origin_kind');
+
+-- N20: the same invoice number may exist for two different clients; conflict priority is pinned
+do $$ declare v jsonb; begin
+  v := public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000b2','cccccccc-0000-0000-0000-0000000000e9',
+    'bbbbbbbb-0000-0000-0000-0000000000e1','bbbbbbbb-0000-0000-0000-0000000000e2', date '2029-01-09', 1::smallint, false, null,
+    'company_confirmed', '84030', 'Staff1@Example.com');
+  perform pg_temp.ocheck('N20a the same invoice number for another client is allowed', v->>'evidence_ref' = '84030', v::text);
+end $$;
+select pg_temp.orefused('N20b same guest + same departure + same invoice reports duplicate_booking (older index is checked first)',
+  $q$select public.crm_booking_create_with_origin('00000000-0000-0000-0000-0000000000a1','cccccccc-0000-0000-0000-0000000000e3','aaaaaaaa-0000-0000-0000-0000000000e1','aaaaaaaa-0000-0000-0000-0000000000e3',date '2029-01-09',1::smallint,false,null,'customer_stated','84030','Staff1@Example.com')$q$,
+  'duplicate_booking');
+select pg_temp.ocheck('N20c service_role can execute the immutability trigger function',
+  has_function_privilege('service_role', 'public.crm_booking_origin_immutable()', 'execute'));
+
 -- A block that errored out leaves NO row behind, so also pin the number of checks that must have run.
-select pg_temp.ocheck('N99 all 33 checks above ran (none was skipped by an unexpected error)', (select count(*) from oresults) = 33, (select count(*) from oresults)::text);
+select pg_temp.ocheck('N99 all 44 checks above ran (none was skipped by an unexpected error)', (select count(*) from oresults) = 44, (select count(*) from oresults)::text);
 
 select name, case when ok then 'PASS' else 'FAIL' end as r, left(detail, 160) as detail from oresults order by name;
 do $$ begin
