@@ -1,7 +1,7 @@
 ---
 id: 2026-10-13-crm-sales-progress-page
 title: 销售进度只读页（每个出发日的座位上限、已订人数、剩余）已做好，只给订单与付款名单里的人；订单还是 0 行所以先显示空
-status: done
+status: decided
 owner: agent
 decided_on: 2026-10-13
 source: session:f53ba28d
