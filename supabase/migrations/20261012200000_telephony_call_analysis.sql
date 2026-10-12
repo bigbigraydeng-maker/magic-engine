@@ -5,7 +5,7 @@ alter table public.telephony_connections add column if not exists analysis_enabl
 -- 只处理「开关打开之后」才开始的通话；打开之前录的（同意书之前的）历史录音永远不回捞
 alter table public.telephony_connections add column if not exists analysis_enabled_at timestamptz;
 -- 开关由 false 变 true 的那一刻，数据库自己写「开启时刻」（关了再开会刷新，不靠人记得改）；关掉就清空
-create or replace function public.telephony_set_analysis_enabled_at() returns trigger language plpgsql as $$
+create or replace function public.telephony_set_analysis_enabled_at() returns trigger language plpgsql set search_path = public, pg_temp as $$
 begin
   if new.analysis_enabled is true and (tg_op = 'INSERT' or old.analysis_enabled is distinct from true) then
     new.analysis_enabled_at := now();

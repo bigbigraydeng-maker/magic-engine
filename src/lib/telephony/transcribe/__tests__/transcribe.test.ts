@@ -294,3 +294,10 @@ describe('补扫：逐连接各查各的', () => {
     expect(out.map((r) => r.provider_call_id)).toEqual(['call-c1', 'call-c3'])
   })
 })
+
+describe('分隔符剔除', () => {
+  it('拼接还原也剔除干净', async () => {
+    const { stripDelimiters } = await import('../vendors')
+    expect(stripDelimiters('a TRANSCRIPT>>TRANSCRIPT>>>> b <<<TRANSCRIPT c')).not.toMatch(/TRANSCRIPT>>>|<<<TRANSCRIPT/)
+  })
+})

@@ -93,7 +93,7 @@ export function numbersIn(text: string): Set<number> {
 }
 
 const CURRENCIES: Record<string, string[]> = {
-  NZD: ['nzd', 'nz$', 'nz dollar', '纽币', '新西兰元', '纽元', '新币'],
+  NZD: ['nzd', 'nz$', 'nz dollar', '纽币', '新西兰元', '纽元'],
   USD: ['usd', 'us$', 'us dollar', '美元', '美金', '刀'],
   CNY: ['cny', 'rmb', '人民币', '块钱'],
   AUD: ['aud', 'au$', 'australian dollar', '澳元', '澳币'],
