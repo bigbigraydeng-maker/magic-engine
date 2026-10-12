@@ -100,4 +100,30 @@ describe('buildWeekOverview', () => {
     const other = await buildWeekOverview({ ports: ports(store), db, clientId: CLIENT, actor: ADMIN, switches: { live: true, clientIds: [OTHER] }, now: NOW })
     expect(other.ok && other.value.live).toBe(false)
   })
+
+  it('an authorised pack is never hidden behind a newer draft', async () => {
+    const store = new InMemoryLiteStore()
+    await store.insertPack({ id: 'old', client_id: CLIENT, title: 'authorised week', now: new Date('2026-10-10T00:00:00Z') }, [item('i1', '2026-10-14T19:30:00Z')])
+    await store.authorizePack({ packId: 'old', clientId: CLIENT, byEmail: 'a@b.c', byUserId: 'u', now: new Date('2026-10-12T00:00:00Z'), expiresAt: new Date('2026-10-20T00:00:00Z'), contentHash: 'c'.repeat(64), fingerprints: { i1: 'f'.repeat(64) } })
+    await store.insertPack({ id: 'new', client_id: CLIENT, title: 'newer draft', now: new Date('2026-10-12T12:00:00Z') }, [item('i2', '2026-10-15T19:30:00Z')])
+    const { db } = fakeDb([])
+    const result = await buildWeekOverview({ ports: ports(store), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now: NOW })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.story?.title).toBe('authorised week')
+    expect(result.value.story?.state).toBe('AUTHORIZED')
+    expect(result.value.story?.newer_draft_title).toBe('newer draft')
+  })
+
+  it('a failed Story read says so and still shows the Reels', async () => {
+    const store = new InMemoryLiteStore()
+    store.listPacksForClient = async () => { throw new Error('db down') }
+    const { db } = fakeDb([reelRow('r1', CLIENT, 'in_review', 'v/1.mp4')])
+    const result = await buildWeekOverview({ ports: ports(store), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now: NOW })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.story_error).not.toBeNull()
+    expect(result.value.story).toBeNull()
+    expect(result.value.reels).toHaveLength(1)
+  })
 })

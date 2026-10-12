@@ -117,6 +117,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
         className={`rounded-xl border px-4 py-3 ${data.live ? 'border-[#B03A2E] bg-[#B03A2E]/10' : 'border-me-ochre/50 bg-me-ochre/10'}`}
       >
         <p className="text-base font-bold text-me-charcoal">{mode.headline}</p>
+        <p className="text-sm text-me-charcoal/80">{mode.detail}</p>
         <p className="text-sm text-me-charcoal/80">
           Story：
           {data.story_error
@@ -128,10 +129,18 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
             去 Story 页授权 / 停
           </Link>
         </p>
+        {story?.newer_draft_title && (
+          <p className="text-sm font-medium text-me-charcoal">
+            另外还有一个新的周包「{story.newer_draft_title}」还没授权，上面说的是已经授权的那个。
+          </p>
+        )}
       </div>
 
       <section className="space-y-3">
         <h2 className="text-lg font-bold text-me-charcoal">每天排了什么</h2>
+        {data.story_error && data.reels_error && (
+          <p className="text-sm font-medium text-[#B03A2E]">Story 和 Reel 都读取失败，现在不知道这一周排到哪了，请刷新页面；还不行就找开发。</p>
+        )}
         {data.story_error && <p className="text-sm font-medium text-[#B03A2E]">Story 读取失败，下面的 Story 不完整，请刷新。</p>}
         {!data.story_error && days.length === 0 && <p className="text-sm text-me-charcoal/80">这一周还没有 Story。</p>}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

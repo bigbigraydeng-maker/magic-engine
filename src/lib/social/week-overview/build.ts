@@ -21,6 +21,8 @@ export interface OverviewStoryItem {
 }
 
 export interface OverviewStoryPack {
+  /** Title of a newer, not-yet-authorised pack waiting behind an authorised one; null otherwise. */
+  newer_draft_title: string | null
   pack_id: string
   title: string
   state: LitePackState
@@ -41,7 +43,7 @@ export interface OverviewReel {
 export interface WeekOverview {
   /** True only when real publishing is switched on for this client. */
   live: boolean
-  /** The newest Story pack that is still in play (not stopped, not expired); null when there is none. */
+  /** The Story pack in play: an authorised one first (it WILL publish), otherwise the newest draft; null when none. */
   story: OverviewStoryPack | null
   /** Set when the Story read failed: the page must say "cannot read", never "no Stories". */
   story_error: string | null
@@ -71,6 +73,7 @@ export async function listClientReels(db: SupabaseClient, clientId: string): Pro
     .select('id, status, angle, created_at, video_path:output->>video_path, published_ref')
     .eq('client_id', clientId)
     .not('status', 'in', `(${HIDDEN_REEL_STATUSES.join(',')})`)
+    .not('output->>video_path', 'is', null)
     .order('created_at', { ascending: false })
     .limit(REEL_LIMIT)
   if (error) throw new Error(error.message)
@@ -91,13 +94,15 @@ export async function listClientReels(db: SupabaseClient, clientId: string): Pro
 
 async function readStory(ports: LiteServicePorts, clientId: string, now: Date): Promise<OverviewStoryPack | null> {
   const rows = await ports.store.listPacksForClient(clientId, 10)
-  const current = rows.find(({ pack }) => {
-    const state = packState(pack, now)
-    return state === 'DRAFT' || state === 'AUTHORIZED'
-  })
+  // an authorised pack is the one that will publish: it must never be hidden behind a newer draft
+  const authorised = rows.find(({ pack }) => packState(pack, now) === 'AUTHORIZED')
+  const draft = rows.find(({ pack }) => packState(pack, now) === 'DRAFT')
+  const current = authorised ?? draft
   if (!current) return null
+  const newerDraft = authorised && draft && draft.pack.created_at > authorised.pack.created_at ? draft.pack.title : null
   const items = await ports.store.getItems(current.pack.id, clientId)
   return {
+    newer_draft_title: newerDraft,
     pack_id: current.pack.id,
     title: current.pack.title,
     state: packState(current.pack, now),
@@ -115,8 +120,9 @@ async function readStory(ports: LiteServicePorts, clientId: string, now: Date): 
   }
 }
 
-function failureText(error: unknown): string {
-  void error
+function failureText(source: 'story' | 'reels', error: unknown): string {
+  // the page only says "cannot read"; the reason goes to the server log (no customer data in it)
+  console.error('[week-overview]', source, 'read failed:', error instanceof Error ? error.message : 'unknown')
   return 'read failed'
 }
 
@@ -139,9 +145,9 @@ export async function buildWeekOverview(input: {
     value: {
       live: isLiveFor(switches, clientId),
       story: story.status === 'fulfilled' ? story.value : null,
-      story_error: story.status === 'rejected' ? failureText(story.reason) : null,
+      story_error: story.status === 'rejected' ? failureText('story', story.reason) : null,
       reels: reels.status === 'fulfilled' ? reels.value : [],
-      reels_error: reels.status === 'rejected' ? failureText(reels.reason) : null,
+      reels_error: reels.status === 'rejected' ? failureText('reels', reels.reason) : null,
       post: { connected: false },
     },
   }

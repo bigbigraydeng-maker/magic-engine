@@ -12,6 +12,7 @@ function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
   return {
     live: false,
     story: {
+      newer_draft_title: null,
       pack_id: 'p1',
       title: '第3周',
       state: 'AUTHORIZED',
@@ -67,6 +68,20 @@ describe('WeekOverviewPanel', () => {
     expect(screen.getAllByText(/图文 Post：尚未接入/).length).toBe(1) // both Stories fall on one New Zealand day
     expect(screen.getByText('上海价格')).toBeTruthy()
     expect(screen.getByText('待审核')).toBeTruthy()
+  })
+
+  it('shows the rehearsal explanation and warns about a newer, not yet authorised pack', async () => {
+    const base = overview()
+    mockFetch({ success: true, ...overview({ story: { ...base.story!, newer_draft_title: '新周包' } }) })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    expect(await screen.findByText(/一旦开启真发/)).toBeTruthy()
+    expect(screen.getByText(/新的周包「新周包」还没授权/)).toBeTruthy()
+  })
+
+  it('both reads failing gets one clear message', async () => {
+    mockFetch({ success: true, ...overview({ story: null, story_error: 'read failed', reels: [], reels_error: 'read failed' }) })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    expect(await screen.findByText(/Story 和 Reel 都读取失败/)).toBeTruthy()
   })
 
   it('live mode is announced', async () => {
