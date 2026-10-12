@@ -182,12 +182,18 @@ describe('pushStoryLiteItems —— 不确定有没有发出去', () => {
     expect(items[0].href).toContain(`/dashboard/clients/${CLIENT}`)
   })
 
-  it('🔴 旧日期的「不确定」→ 仍然出待办，直到有人确认（不能悄悄消失）', async () => {
-    const db = makeSupabase({ items: [item({ status: 'UNKNOWN_OUTCOME', slot_at: `${OLD}T00:00:00Z` })] })
-    const items: ManualItem[] = []
-    await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
-    expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('story_unknown_outcome')
+  it('🔴 还在 36 小时内的「不确定」→ 出待办；超过 36 小时（Story 早已消失）→ 不再提醒', async () => {
+    // NOW = 2026-10-08T01:00Z
+    const recent = makeSupabase({ items: [item({ status: 'UNKNOWN_OUTCOME', slot_at: '2026-10-06T20:00:00Z' })] }) // 29 小时前
+    const itemsRecent: ManualItem[] = []
+    await pushStoryLiteItems(recent, itemsRecent, NOW, nameOf, LIVE)
+    expect(itemsRecent).toHaveLength(1)
+    expect(itemsRecent[0].kind).toBe('story_unknown_outcome')
+
+    const old = makeSupabase({ items: [item({ status: 'UNKNOWN_OUTCOME', slot_at: `${OLD}T00:00:00Z` })] })
+    const itemsOld: ManualItem[] = []
+    await pushStoryLiteItems(old, itemsOld, NOW, nameOf, LIVE)
+    expect(itemsOld).toHaveLength(0)
   })
 
   it('同一客户多条 → 只出一条，列出所有时间', async () => {
@@ -296,14 +302,35 @@ describe('pushStoryLiteItems —— 看门狗：授权了却什么都没发生',
     expect(items[0].what).toContain('发布器根本没跑起来')
   })
 
-  it('已经有检查记录（last_check_at 非空）→ 不报', async () => {
+  it('发布器活着（最近 30 分钟内写过检查记录）→ 不报', async () => {
     const db = makeSupabase({
       packs: [pack({})],
-      items: [item({ status: 'PENDING', slot_at: '2026-10-07T00:00:00Z', last_check_at: '2026-10-07T00:05:00Z' })],
+      items: [item({ status: 'PENDING', slot_at: '2026-10-07T00:00:00Z', last_check_at: '2026-10-08T00:45:00Z' })],
     })
     const items: ManualItem[] = []
     await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
     expect(items).toHaveLength(0)
+  })
+
+  it('🔴 发布器跑过一次再死掉（检查记录是 2 小时前的）→ 照样报', async () => {
+    const db = makeSupabase({
+      packs: [pack({})],
+      items: [item({ status: 'PENDING', slot_at: '2026-10-07T00:00:00Z', last_check_at: '2026-10-07T23:00:00Z' })],
+    })
+    const items: ManualItem[] = []
+    await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('story_unarmed')
+  })
+
+  it('🔴 卡在 CLAIMED（扫描抢占后挂了）且发布器已停 → 报', async () => {
+    const db = makeSupabase({
+      packs: [pack({})],
+      items: [item({ status: 'CLAIMED', slot_at: '2026-10-07T00:00:00Z', last_check_at: null })],
+    })
+    const items: ManualItem[] = []
+    await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
+    expect(items.map((i) => i.kind)).toContain('story_unarmed')
   })
 
   it('到点还不到 1 小时 → 不报（给发布器一点时间）', async () => {
@@ -326,14 +353,14 @@ describe('pushStoryLiteItems —— 看门狗：授权了却什么都没发生',
     expect(items).toHaveLength(0)
   })
 
-  it('已过期的周包 → 不报', async () => {
+  it('🔴 周包已过期但条目还卡着 → 照样报（发布器整周没跑，告警不能跟着消失）', async () => {
     const db = makeSupabase({
       packs: [pack({ expires_at: '2026-10-01T00:00:00Z' })],
       items: [item({ status: 'PENDING', slot_at: '2026-10-07T00:00:00Z', last_check_at: null })],
     })
     const items: ManualItem[] = []
     await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
-    expect(items).toHaveLength(0)
+    expect(items.map((i) => i.kind)).toContain('story_unarmed')
   })
 
   it('未授权的周包 → 不报', async () => {

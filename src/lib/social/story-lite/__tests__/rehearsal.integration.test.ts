@@ -275,6 +275,44 @@ describe.skipIf(!REST_URL || !REST_KEY)('Story lite — rehearsal against a real
     expect(second.ok).toBe(false)
   })
 
+  it('🔴 a stop pressed after the claim but before the send still stops it (real database)', async () => {
+    const pack5 = randomUUID()
+    const items = [newItem('2026-10-18T08:30:00.000Z')]
+    await store.insertPack({ id: pack5, client_id: clientId, title: 'stop in the gap', now: T0 }, items)
+    const preview = await buildLitePreview({ ports, packId: pack5, clientId, actor: ADMIN, now: T0 })
+    if (!preview.ok) throw new Error('preview failed')
+    const auth = await authorizeLitePack({
+      ports, packId: pack5, clientId, actor: ADMIN, confirm: true, expectedContentHash: preview.value.content_hash, now: T0,
+    })
+    expect(auth.ok).toBe(true)
+
+    const before = publishCalls.length
+    const deps = senderDeps(new Date('2026-10-18T08:30:00.000Z'), true)
+    // the token lookup takes network time: the PM presses "stop" while it runs
+    deps.getPageToken = async () => {
+      await store.revokePack({ packId: pack5, clientId, byEmail: 'pm@example.com', reason: 'stop', now: new Date('2026-10-18T08:30:01.000Z') })
+      return 'stub-token'
+    }
+    const summary = await runStorySweep(deps)
+    expect(dueOutcomes(summary, pack5).map((r) => [r.outcome, r.reason_code])).toEqual([['RETRY_LATER', 'PACK_NOT_LIVE']])
+    expect(publishCalls.length).toBe(before)
+    expect((await store.getItems(pack5, clientId))[0].status).toBe('PENDING')
+  })
+
+  it('a sweep that died after claiming is turned into UNKNOWN_OUTCOME by the NEXT sweep, never resent', async () => {
+    const pack6 = randomUUID()
+    const items = [newItem('2026-10-19T08:30:00.000Z')]
+    await store.insertPack({ id: pack6, client_id: clientId, title: 'stale via sweep', now: T0 }, items)
+    const claimed = await store.claimItem(items[0].item_id, new Date('2026-10-19T08:30:00.000Z'))
+    expect(claimed?.status).toBe('CLAIMED')
+
+    const before = publishCalls.length
+    const summary = await runStorySweep(senderDeps(new Date('2026-10-19T09:00:00.000Z'), true))
+    expect(summary.staleExpired).toContain(items[0].item_id)
+    expect(publishCalls.length).toBe(before)
+    expect((await store.getItems(pack6, clientId))[0].status).toBe('UNKNOWN_OUTCOME')
+  })
+
   it('a sweep that died after claiming is turned into UNKNOWN_OUTCOME, not resent', async () => {
     const pack4 = randomUUID()
     const items = [newItem('2026-10-17T08:30:00.000Z')]

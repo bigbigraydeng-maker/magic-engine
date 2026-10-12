@@ -110,7 +110,8 @@ async function emitBestEffort(
 ): Promise<void> {
   try {
     await deps.emit({
-      id: `${item.item_id}:${item.attempt_count}`,
+      // a rehearsal never changes attempt_count: key it by the run time so its receipts are not de-duplicated away
+      id: mode === 'DRY_RUN' ? `${item.item_id}:dry:${deps.now.getTime()}` : `${item.item_id}:${item.attempt_count}`,
       name: 'story.item.attempted',
       data: {
         client_id: item.client_id,
@@ -188,7 +189,7 @@ async function settle(
   })
 }
 
-/** After a send, a lost claim means the story may be out there: never retried. */
+/** After a send, a lost claim (or a failed write) means the story may be out there: never retried. */
 async function settleAfterSend(
   deps: SenderDeps,
   item: LiteItem,
@@ -196,10 +197,18 @@ async function settleAfterSend(
   reason: string | null,
   providerReceipt: string | null,
 ): Promise<SweepRecord> {
-  const settled = await settle(deps, item, to, reason, providerReceipt)
+  let settled = false
+  let failure: 'SETTLE_LOST' | 'SETTLE_FAILED' = 'SETTLE_LOST'
+  try {
+    settled = await settle(deps, item, to, reason, providerReceipt)
+  } catch {
+    failure = 'SETTLE_FAILED'
+    // the story id exists only in memory now: leave it in the log and in the receipt event
+    console.error('[story-lite] settle failed after send', { item_id: item.item_id, provider_receipt: providerReceipt })
+  }
   if (!settled) {
-    const rec = record(item, 'UNKNOWN_OUTCOME', 'SETTLE_LOST', 'LIVE', providerReceipt)
-    await emitBestEffort(deps, item, 'UNKNOWN_OUTCOME', 'SETTLE_LOST', 'LIVE', providerReceipt)
+    const rec = record(item, 'UNKNOWN_OUTCOME', failure, 'LIVE', providerReceipt)
+    await emitBestEffort(deps, item, 'UNKNOWN_OUTCOME', failure, 'LIVE', providerReceipt)
     return rec
   }
   const rec = record(item, to === 'SENT' ? 'SENT' : to === 'FAILED' ? 'FAILED' : 'UNKNOWN_OUTCOME', reason, 'LIVE', providerReceipt)
@@ -217,6 +226,14 @@ async function packStillLive(deps: SenderDeps, pack: LitePack): Promise<boolean>
   return fresh.expires_at > deps.now.toISOString()
 }
 
+/** The pack stopped being live after the claim: hand the item back untouched, nothing is sent. */
+async function releaseNotLive(deps: SenderDeps, claimed: LiteItem): Promise<SweepRecord> {
+  await settle(deps, claimed, 'PENDING', 'PACK_NOT_LIVE')
+  const rec = record(claimed, 'RETRY_LATER', 'PACK_NOT_LIVE', 'LIVE')
+  await emitBestEffort(deps, claimed, 'RETRY_LATER', 'PACK_NOT_LIVE', 'LIVE', null)
+  return rec
+}
+
 /** Live path: claim, re-check the pack, re-run the checks, get a token, publish, settle. */
 async function sendClaimed(
   deps: SenderDeps,
@@ -227,12 +244,7 @@ async function sendClaimed(
   const claimed = await deps.store.claimItem(item.item_id, deps.now)
   if (claimed === null) return record(item, 'LOST_CLAIM', null, 'LIVE')
 
-  if (!(await packStillLive(deps, pack))) {
-    await settle(deps, claimed, 'PENDING', 'PACK_NOT_LIVE')
-    const rec = record(claimed, 'RETRY_LATER', 'PACK_NOT_LIVE', 'LIVE')
-    await emitBestEffort(deps, claimed, 'RETRY_LATER', 'PACK_NOT_LIVE', 'LIVE', null)
-    return rec
-  }
+  if (!(await packStillLive(deps, pack))) return releaseNotLive(deps, claimed)
 
   const reason = await checkItem(deps, claimed, registration)
   if (reason !== null) {
@@ -260,6 +272,9 @@ async function sendClaimed(
     await emitBestEffort(deps, claimed, 'BLOCKED', 'NO_PAGE_TOKEN', 'LIVE', null)
     return rec
   }
+
+  // the checks above took network time: look at the pack once more, immediately before sending
+  if (!(await packStillLive(deps, pack))) return releaseNotLive(deps, claimed)
 
   return publishClaimed(deps, claimed, token)
 }
@@ -291,6 +306,26 @@ function readCertainty(error: unknown): 'rejected' | 'rate_limited' | 'unknown' 
   return 'unknown'
 }
 
+/** Too late (or an unreadable slot): in a live run the item is settled for good; a rehearsal only notes it. */
+async function settleTiming(
+  deps: SenderDeps,
+  item: LiteItem,
+  timing: Decision,
+  live: boolean,
+): Promise<SweepRecord> {
+  if (timing.outcome === 'SKIPPED_NOT_DUE') return record(item, 'SKIPPED_NOT_DUE', null, 'DRY_RUN')
+  if (!live) return runRehearsal(deps, item, timing.reason)
+
+  const claimed = await deps.store.claimItem(item.item_id, deps.now)
+  if (claimed === null) return record(item, 'LOST_CLAIM', null, 'LIVE')
+  // MISSED: never sent late. BAD_SLOT: blocked, so the row is not retried forever.
+  const to: LiteItemStatus = timing.outcome === 'MISSED' ? 'MISSED' : 'BLOCKED'
+  await settle(deps, claimed, to, timing.reason)
+  const rec = record(claimed, timing.outcome, timing.reason, 'LIVE')
+  await emitBestEffort(deps, claimed, timing.outcome, timing.reason, 'LIVE', null)
+  return rec
+}
+
 /** One PENDING item: timing, then rehearsal or live. */
 async function evaluateItem(
   deps: SenderDeps,
@@ -300,27 +335,10 @@ async function evaluateItem(
 ): Promise<SweepRecord | null> {
   if (item.status !== 'PENDING') return null
 
-  const timing = timingDecision(item, deps.now, deps.config)
-  if (timing !== null) {
-    if (timing.outcome === 'SKIPPED_NOT_DUE') return record(item, 'SKIPPED_NOT_DUE', null, 'DRY_RUN')
-    if (timing.outcome === 'MISSED') {
-      const claimed = await deps.store.claimItem(item.item_id, deps.now)
-      if (claimed === null) return record(item, 'LOST_CLAIM', null, 'LIVE')
-      await settle(deps, claimed, 'MISSED', timing.reason)
-      const rec = record(claimed, 'MISSED', timing.reason, 'LIVE')
-      await emitBestEffort(deps, claimed, 'MISSED', timing.reason, 'LIVE', null)
-      return rec
-    }
-    // BAD_SLOT: claim then block, so the row is not retried forever.
-    const claimed = await deps.store.claimItem(item.item_id, deps.now)
-    if (claimed === null) return record(item, 'LOST_CLAIM', null, 'LIVE')
-    await settle(deps, claimed, 'BLOCKED', timing.reason)
-    const rec = record(claimed, 'BLOCKED', timing.reason, 'LIVE')
-    await emitBestEffort(deps, claimed, 'BLOCKED', timing.reason, 'LIVE', null)
-    return rec
-  }
-
   const live = deps.switches.live && deps.switches.clientIds.includes(pack.client_id.toLowerCase())
+  const timing = timingDecision(item, deps.now, deps.config)
+  if (timing !== null) return settleTiming(deps, item, timing, live)
+
   if (!live) {
     const reason = await checkItem(deps, item, registration)
     return runRehearsal(deps, item, reason)

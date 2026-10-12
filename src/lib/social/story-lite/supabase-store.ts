@@ -157,6 +157,28 @@ export class SupabaseLiteStore implements LiteStore {
     return ((data as ItemRow[] | null) ?? []).map(mapItem)
   }
 
+  /** Store each item's fingerprint. Harmless while the pack is not authorised (the sweep only reads live packs). */
+  private async writeFingerprints(items: LiteItem[], fingerprints: Record<string, string>): Promise<void> {
+    for (const item of items) {
+      const { error } = await this.db
+        .from('story_items')
+        .update({ authorized_fingerprint: fingerprints[item.item_id] })
+        .eq('item_id', item.item_id)
+      if (error) throw error
+    }
+  }
+
+  /** Why a conditional authorisation update matched nothing. */
+  private async whyNotAuthorized(
+    packId: string,
+    clientId: string,
+  ): Promise<{ ok: false; error: 'ALREADY_AUTHORIZED' | 'REVOKED' | 'NOT_FOUND' }> {
+    const current = await this.getPack(packId, clientId)
+    if (current === null) return { ok: false, error: 'NOT_FOUND' }
+    if (current.revoked_at !== null) return { ok: false, error: 'REVOKED' }
+    return { ok: false, error: 'ALREADY_AUTHORIZED' }
+  }
+
   async authorizePack(input: {
     packId: string
     clientId: string
@@ -177,6 +199,11 @@ export class SupabaseLiteStore implements LiteStore {
       if (input.fingerprints[item.item_id] === undefined) throw new Error('missing fingerprint')
     }
 
+    // Order matters: fingerprints FIRST, the authorisation stamp LAST. A sweep that runs in between sees
+    // a pack that is not authorised yet and ignores it; stamping first would let it meet an item with
+    // no fingerprint and block it for good.
+    await this.writeFingerprints(items, input.fingerprints)
+
     const { data, error } = await this.db
       .from('story_packs')
       .update({
@@ -193,35 +220,7 @@ export class SupabaseLiteStore implements LiteStore {
       .select('*')
       .maybeSingle()
     if (error) throw error
-
-    if (data === null) {
-      const current = await this.getPack(input.packId, input.clientId)
-      if (current === null) return { ok: false, error: 'NOT_FOUND' }
-      if (current.revoked_at !== null) return { ok: false, error: 'REVOKED' }
-      return { ok: false, error: 'ALREADY_AUTHORIZED' }
-    }
-
-    try {
-      for (const item of items) {
-        const { error: itemError } = await this.db
-          .from('story_items')
-          .update({ authorized_fingerprint: input.fingerprints[item.item_id] })
-          .eq('item_id', item.item_id)
-        if (itemError) throw itemError
-      }
-    } catch (fingerprintError) {
-      const { error: undoError } = await this.db
-        .from('story_packs')
-        .update({
-          revoked_at: input.now.toISOString(),
-          revoked_by_email: 'system:authorize-failed',
-          revoked_reason: 'fingerprints could not be stored',
-        })
-        .eq('id', input.packId)
-        .eq('client_id', input.clientId)
-      if (undoError) throw undoError
-      throw fingerprintError
-    }
+    if (data === null) return this.whyNotAuthorized(input.packId, input.clientId)
 
     return { ok: true, pack: mapPack(data as PackRow) }
   }

@@ -30,6 +30,15 @@ const NZ_TZ = 'Pacific/Auckland'
 /** 巡检每 10 分钟跑一次；到点超过这么久还没有任何记录 = 发布器没跑起来。 */
 const WATCHDOG_GRACE_MS = 60 * 60 * 1000
 
+/**
+ * 「不确定有没有发出去」只提醒到这么久为止：Story 发出 24 小时后自己消失，再过 12 小时
+ * 「到底发没发」已经没有意义，也没有别的办法销号 —— 不设这条界线它会永远挂在待办里。
+ */
+const UNKNOWN_WINDOW_MS = 36 * 60 * 60 * 1000
+
+/** 发布器每 10 分钟会写一次检查结果；超过这么久没写 = 发布器死了。 */
+const SWEEP_ALIVE_MS = 30 * 60 * 1000
+
 /** 「失败 / 时间已过」类只看最近这些天：更早的已经没意义。 */
 const STALLED_LOOKBACK_DAYS = 14
 
@@ -148,11 +157,13 @@ interface ClientStalled {
   reasons: string[]
 }
 
-/** 把「不确定」按客户归拢：不设日期下限，没人收口就一直挂着。 */
-function groupUnknown(rows: StoryItemRow[]): ClientUnknown[] {
+/** 把「不确定」按客户归拢：只提醒到 Story 过期后 12 小时（再往后没有意义）。 */
+function groupUnknown(rows: StoryItemRow[], now: Date): ClientUnknown[] {
   const groups = new Map<string, ClientUnknown>()
   for (const row of rows) {
     if (row.status !== 'UNKNOWN_OUTCOME') continue
+    const slot = Date.parse(row.slot_at)
+    if (Number.isNaN(slot) || now.getTime() - slot > UNKNOWN_WINDOW_MS) continue
     const cur = groups.get(row.client_id) ?? { clientId: row.client_id, stamps: [] }
     const stamp = nzStamp(row.slot_at)
     if (stamp && !cur.stamps.includes(stamp)) cur.stamps.push(stamp)
@@ -241,14 +252,15 @@ async function readStoryItems(supabase: SupabaseClient): Promise<StoryItemRow[]>
   return rows
 }
 
-/** 读「已授权、没撤销、没过期」的周包；读失败要抛。 */
-async function readLivePacks(supabase: SupabaseClient, now: Date): Promise<StoryPackRow[]> {
+/**
+ * 读「已授权、没撤销」的周包（过期的也要读：发布器整周没跑、包过期了，告警不能跟着消失）；读失败要抛。
+ */
+async function readAuthorizedPacks(supabase: SupabaseClient): Promise<StoryPackRow[]> {
   const { data, error } = await supabase
     .from('story_packs')
     .select('id, client_id, authorized_at, expires_at, revoked_at')
     .not('authorized_at', 'is', null)
     .is('revoked_at', null)
-    .gt('expires_at', now.toISOString())
   if (error) throw new Error('story-lite-items: packs read failed: ' + error.message)
   const rows: StoryPackRow[] = []
   for (const row of (data ?? []) as unknown[]) {
@@ -258,25 +270,35 @@ async function readLivePacks(supabase: SupabaseClient, now: Date): Promise<Story
   return rows
 }
 
-/** 看门狗：已授权的周包里，到点超过 1 小时、还没任何检查记录的 PENDING Story。 */
+/**
+ * 看门狗：已授权的周包里，到点超过 1 小时、还卡在 PENDING / CLAIMED、而且发布器最近 30 分钟没写过检查记录的 Story。
+ * 「最近 30 分钟写过检查记录」说明发布器活着（演练模式下 PENDING 本来就不会变）；不依赖「从没检查过」，
+ * 所以发布器跑过一次再死掉也会报。
+ */
 async function findUnarmedClients(
   supabase: SupabaseClient,
   packs: StoryPackRow[],
   now: Date,
 ): Promise<string[]> {
   const dueBefore = new Date(now.getTime() - WATCHDOG_GRACE_MS).toISOString()
+  const lookback = new Date(now.getTime() - STALLED_LOOKBACK_DAYS * 86_400_000).toISOString()
+  const aliveAfter = now.getTime() - SWEEP_ALIVE_MS
   const clients: string[] = []
   for (const pack of packs) {
     const { data, error } = await supabase
       .from('story_items')
-      .select('client_id')
+      .select('client_id, slot_at, last_check_at')
       .eq('pack_id', pack.id)
-      .eq('status', 'PENDING')
-      .is('last_check_at', null)
+      .in('status', ['PENDING', 'CLAIMED'])
       .lt('slot_at', dueBefore)
     if (error) throw new Error('story-lite-items: watchdog read failed: ' + error.message)
-    if ((data ?? []).length === 0) continue
-    if (!clients.includes(pack.client_id)) clients.push(pack.client_id)
+    const stuck = ((data ?? []) as unknown[]).filter((row) => {
+      if (!isRecord(row)) return false
+      if (str(row.slot_at) < lookback) return false
+      const checkedAt = typeof row.last_check_at === 'string' ? Date.parse(row.last_check_at) : NaN
+      return Number.isNaN(checkedAt) || checkedAt < aliveAfter
+    })
+    if (stuck.length > 0 && !clients.includes(pack.client_id)) clients.push(pack.client_id)
   }
   return clients
 }
@@ -288,9 +310,9 @@ export async function pushStoryLiteItems(
   nameOf: (clientId: string) => string,
   opts: { live: boolean },
 ): Promise<void> {
-  // ---- Source 1: 不确定有没有发出去（不设日期下限） -------------------------
+  // ---- Source 1: 不确定有没有发出去（只提醒到 Story 过期后 12 小时） --------
   const storyItems = await readStoryItems(supabase)
-  for (const agg of groupUnknown(storyItems)) {
+  for (const agg of groupUnknown(storyItems, now)) {
     items.push(buildUnknownItem(agg, nameOf(agg.clientId)))
   }
 
@@ -300,7 +322,7 @@ export async function pushStoryLiteItems(
   }
 
   // ---- Source 3: 看门狗 ----------------------------------------------------
-  const packs = await readLivePacks(supabase, now)
+  const packs = await readAuthorizedPacks(supabase)
   for (const clientId of await findUnarmedClients(supabase, packs, now)) {
     items.push(buildUnarmedItem(clientId, nameOf(clientId), opts.live))
   }

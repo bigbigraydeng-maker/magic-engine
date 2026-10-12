@@ -441,6 +441,28 @@ describe('authorizeLitePack', () => {
     expect(pack?.authorized_at).toBeNull()
   })
 
+  it('🔴 refuses when an item changes between the preview and the write (the file checks take time)', async () => {
+    const { store, ports } = await makeHarness()
+    const preview = await buildLitePreview(previewInput(ports))
+    if (!preview.ok) throw new Error('preview failed')
+
+    const original = store.getItems.bind(store)
+    let reads = 0
+    store.getItems = async (packId, clientId) => {
+      reads += 1
+      const items = await original(packId, clientId)
+      // read 1 is authorizeLitePack's own preview; read 2 is the write: somebody edited a line in between
+      return reads >= 2 ? items.map((item, index) => (index === 0 ? { ...item, text_line: 'Edited after the preview' } : item)) : items
+    }
+
+    const result = await authorizeLitePack(authorizeInput(ports, { expectedContentHash: preview.value.content_hash }))
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.error).toBe('PACK_CHANGED_SINCE_PREVIEW')
+    expect((await store.getPack(PACK_ID, CLIENT_ID))?.authorized_at).toBeNull()
+  })
+
   it('authorises a healthy pack and stores fingerprints', async () => {
     const { store, ports, sendEvent } = await makeHarness()
     const preview = await buildLitePreview(previewInput(ports))

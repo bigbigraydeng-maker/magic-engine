@@ -348,6 +348,11 @@ async function writeAuthorization(input: {
 }): Promise<LiteResult<LiteAuthorizeOutcome>> {
   const { ports, packId, clientId, actor, now } = input
   const items = await ports.store.getItems(packId, clientId)
+  // The preview took a moment (it downloads every file). What gets authorised is what is stored NOW,
+  // so it must still be exactly what the person confirmed.
+  if (computePackContentHash(items, input.lifetimeDays) !== input.contentHash) {
+    return fail(409, 'PACK_CHANGED_SINCE_PREVIEW')
+  }
   const fingerprints: Record<string, string> = {}
   for (const item of items) fingerprints[item.item_id] = computeItemFingerprint(item)
 

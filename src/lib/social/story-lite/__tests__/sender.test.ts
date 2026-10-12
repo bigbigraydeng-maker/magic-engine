@@ -473,3 +473,95 @@ describe('runStorySweep — races and provider errors', () => {
     expect(items[0].status).toBe('SENT')
   })
 })
+
+describe('runStorySweep — review fixes', () => {
+  const LATE = new Date(NOW.getTime() + 30 * 60_000)
+
+  it('🔴 a revoke that lands between the claim and the send stops the send', async () => {
+    const store = new InMemoryLiteStore()
+    await seedAuthorizedPack(store)
+    // the token lookup takes network time: the PM presses "stop" while it runs
+    const getPageToken = vi.fn(async () => {
+      await store.revokePack({ packId: PACK, clientId: CLIENT, byEmail: 'pm@example.com', reason: 'stop', now: NOW })
+      return 'token-1'
+    })
+    const deps = makeDeps(store, { getPageToken }, LIVE)
+
+    const summary = await runStorySweep(deps)
+
+    expect(deps.publish).not.toHaveBeenCalled()
+    expect(summary.records[0].outcome).toBe('RETRY_LATER')
+    expect(summary.records[0].reason_code).toBe('PACK_NOT_LIVE')
+    expect((await store.getItems(PACK, CLIENT))[0].status).toBe('PENDING')
+  })
+
+  it('🔴 a failed write after the send is "outcome unknown" with the story id kept, and the sweep goes on', async () => {
+    const store = new InMemoryLiteStore()
+    await seedAuthorizedPack(store, [makeItem({ item_id: 'item-1' }), makeItem({ item_id: 'item-2', media_sha256: 'b'.repeat(64) })])
+    const realSettle = store.settleItem.bind(store)
+    let calls = 0
+    store.settleItem = async (input) => {
+      calls += 1
+      if (calls === 1) throw new Error('db blip')
+      return realSettle(input)
+    }
+    const publish = vi.fn(async ({ item }: { item: LiteItem }) => ({ postId: `story-${item.item_id}` }))
+    const deps = makeDeps(store, { publish }, LIVE)
+
+    const summary = await runStorySweep(deps)
+
+    expect(summary.records.map((r) => r.outcome)).toEqual(['UNKNOWN_OUTCOME', 'SENT'])
+    expect(summary.records[0].reason_code).toBe('SETTLE_FAILED')
+    expect(summary.records[0].provider_receipt).toBe('story-item-1')
+    expect(publish).toHaveBeenCalledTimes(2)
+  })
+
+  it('rehearsal never changes an item that is already too late (it only notes it)', async () => {
+    const store = new InMemoryLiteStore()
+    await seedAuthorizedPack(store)
+    const deps = makeDeps(store, { now: LATE })
+
+    const summary = await runStorySweep(deps)
+
+    expect(summary.records[0].outcome).toBe('DRY_RUN')
+    expect(summary.records[0].reason_code).toBe('SLOT_PASSED')
+    const item = (await store.getItems(PACK, CLIENT))[0]
+    expect(item.status).toBe('PENDING')
+    expect(item.attempt_count).toBe(0)
+  })
+
+  it('live: an item that is too late is MISSED and never sent', async () => {
+    const store = new InMemoryLiteStore()
+    await seedAuthorizedPack(store)
+    const deps = makeDeps(store, { now: LATE }, LIVE)
+    const summary = await runStorySweep(deps)
+    expect(summary.records[0].outcome).toBe('MISSED')
+    expect(deps.publish).not.toHaveBeenCalled()
+  })
+
+  it('rehearsal events are keyed by run time so a later rehearsal is not swallowed as a duplicate', async () => {
+    const store = new InMemoryLiteStore()
+    await seedAuthorizedPack(store)
+    const ids: string[] = []
+    const emit = vi.fn(async (event: { id: string }) => {
+      ids.push(event.id)
+    })
+    await runStorySweep(makeDeps(store, { emit }))
+    await runStorySweep(makeDeps(store, { emit, now: new Date(NOW.getTime() + 60_000) }))
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it('🔴 a sweep that died after claiming: the next sweep turns it into "outcome unknown", never sends it', async () => {
+    const store = new InMemoryLiteStore()
+    await seedAuthorizedPack(store)
+    await store.claimItem('item-1', NOW)
+    const later = new Date(NOW.getTime() + 30 * 60_000)
+    const deps = makeDeps(store, { now: later }, LIVE)
+
+    const summary = await runStorySweep(deps)
+
+    expect(summary.staleExpired).toEqual(['item-1'])
+    expect(deps.publish).not.toHaveBeenCalled()
+    expect((await store.getItems(PACK, CLIENT))[0].status).toBe('UNKNOWN_OUTCOME')
+  })
+})
