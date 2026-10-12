@@ -34,6 +34,7 @@ import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
+import { storyLitePublish } from './story-lite-publish'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 
 export const cloudFunctions = [
@@ -83,6 +84,7 @@ export const cloudFunctions = [
   toolsLabLeadFollowUp,
   toolsLabReportEmailReceipt,
   dailyPlanAutoPublish,
+  storyLitePublish,
   telephonyVoiplineProcess,
   telephonyVoiplineSweep,
 ]
