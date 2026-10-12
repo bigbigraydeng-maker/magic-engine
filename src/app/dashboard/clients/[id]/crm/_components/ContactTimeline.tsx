@@ -15,7 +15,12 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { describeStageActor, stageReasonForDisplay } from '@/lib/crm/actors'
+import {
+  describeStageActor,
+  isAutomatedActor,
+  stageReasonForDisplay,
+  STAGE_INFER_ACTOR,
+} from '@/lib/crm/actors'
 
 /**
  * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
@@ -159,6 +164,8 @@ const LONG_TIMELINE = 6
  * 这些字段**本来就在这条线里**，只是散在十几条记录的小标签里。销售开口前
  * 要的就是这三样，不该为了看它们把整条历史翻一遍。
  */
+export type StageSource = 'human' | 'ai_conversation' | 'order_system'
+
 export interface TimelineSummary {
   /** 最后一句有内容的话（客人说的或我们记的）。 */
   lastText: string | null
@@ -167,15 +174,39 @@ export interface TimelineSummary {
   /** 最新一次提到的团意向 / 出行时间 —— 越新的越算数。 */
   tour: string | null
   travelWindow: string | null
+  /**
+   * 「到哪一步了」是谁判的 —— 从最新一条阶段变更的 changedBy 推断。
+   * null = 这个人没有任何阶段变更记录（例如导入时直接带了阶段）→ 抽屉不显示来源，不许瞎标「人工标的」。
+   * 'order_system' 是给将来订单系统留的口子，今天没有任何代码会产生它。
+   */
+  stageSource: StageSource | null
+}
+
+/** changedBy → 来源。只认得出的才说；认不出的机器身份返回 null（宁可不显示，不许说错）。 */
+export function stageSourceOf(changedBy: string | null | undefined): StageSource | null {
+  if (!changedBy || !changedBy.trim()) return null
+  const a = changedBy.trim().toLowerCase()
+  if (a === STAGE_INFER_ACTOR) return 'ai_conversation'
+  if (a === 'order-system' || a.startsWith('system:order')) return 'order_system'
+  if (isAutomatedActor(a)) return null
+  return a.includes('@') ? 'human' : null
 }
 
 /** 从整条线里提炼摘要。线是从旧到新的，所以后面的覆盖前面的。 */
 function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
   if (timeline.length === 0) return null
-  const s: TimelineSummary = { lastText: null, lastWho: null, lastAt: null, tour: null, travelWindow: null }
+  const s: TimelineSummary = {
+    lastText: null,
+    lastWho: null,
+    lastAt: null,
+    tour: null,
+    travelWindow: null,
+    stageSource: null,
+  }
   for (const e of timeline) {
     if (e.tour) s.tour = e.tour
     if (e.travelWindow) s.travelWindow = e.travelWindow
+    if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
     const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
     if (text && text.trim()) {
       s.lastText = text.trim()
@@ -183,7 +214,7 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
       s.lastAt = e.at
     }
   }
-  return s.lastText || s.tour || s.travelWindow ? s : null
+  return s.lastText || s.tour || s.travelWindow || s.stageSource ? s : null
 }
 
 /**

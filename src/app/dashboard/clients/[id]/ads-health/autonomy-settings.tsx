@@ -30,6 +30,36 @@ interface AdStrategyConfig {
   creative_pool: CreativePoolEntry[]
 }
 
+interface CreativeLabel {
+  title: string
+  subtitle: string | null
+  publishedAt: string | null
+  url: string | null
+}
+
+interface LabelsResponse {
+  labels?: Record<string, CreativeLabel>
+}
+
+/** Stored in cents; shown to people in whole currency units. */
+function centsToDisplay(cents: number | null): string {
+  if (cents == null) return ''
+  const v = cents / 100
+  return Number.isInteger(v) ? String(v) : v.toFixed(2)
+}
+
+function displayToCents(text: string): number | null {
+  if (text.trim() === '') return null
+  const v = parseFloat(text)
+  return Number.isFinite(v) ? Math.round(v * 100) : NaN
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })
+}
+
 interface ConfigResponse {
   success?: boolean
   config?: AdStrategyConfig
@@ -49,21 +79,25 @@ function CapField({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700">日预算上限</label>
+      <label className="block text-sm font-medium text-gray-700">每天最多花多少</label>
       <div className="mt-1.5 flex items-center gap-2">
         <input
           type="number"
-          min={1}
+          min={0.01}
+          step="0.01"
           value={draftCap}
           onChange={e => onChange(e.target.value)}
           placeholder="未设"
           className="w-40 rounded-lg border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
         />
-        <span className="text-xs text-gray-400">分（账户币种）</span>
+        <span className="text-xs text-gray-400">$ / 天（按广告账户的币种）</span>
       </div>
-      <p className="mt-1 text-xs text-gray-400">留空 = 未设 → 系统只巡察不动钱</p>
+      <p className="mt-1 text-xs text-gray-400">广告自动化每天最多花这么多钱。留空 = 没设上限，这时系统只看不动钱。</p>
       <p className="mt-0.5 text-xs text-gray-400">
-        当前：<span className="tabular-nums text-gray-600">{currentCap ?? '未设'}</span>
+        当前：
+        <span className="tabular-nums text-gray-600">
+          {currentCap == null ? '未设' : `$${centsToDisplay(currentCap)} / 天`}
+        </span>
       </p>
     </div>
   )
@@ -80,7 +114,7 @@ function ModeField({
 }) {
   return (
     <div>
-      <span className="block text-sm font-medium text-gray-700">自治模式</span>
+      <span className="block text-sm font-medium text-gray-700">广告自动化做到哪一步</span>
       <div className="mt-1.5 space-y-1.5">
         <label className="flex items-center gap-2 text-sm text-gray-700">
           <input
@@ -90,7 +124,7 @@ function ModeField({
             onChange={() => onChange('observe')}
             className="accent-me-ochre"
           />
-          只巡察不动钱
+          只巡察，不动钱
         </label>
         <label className={`flex items-center gap-2 text-sm ${capUnset ? 'text-gray-400' : 'text-gray-700'}`}>
           <input
@@ -101,9 +135,32 @@ function ModeField({
             onChange={() => onChange('bounded_auto')}
             className="accent-me-ochre"
           />
-          信封内自动执行 — 需要日预算上限已设
+          在每天上限内自动调整预算 / 暂停广告（需要先设好上面的每天上限）
         </label>
       </div>
+    </div>
+  )
+}
+
+function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeLabel | undefined }) {
+  const fbUrl = label?.url ?? (entry.kind === 'meta_video' ? `https://www.facebook.com/reel/${entry.ref}` : null)
+  return (
+    <div className="min-w-0">
+      <p className="truncate text-gray-800">
+        {label ? label.title : <span className="text-amber-700">未能识别，请核对</span>}
+        {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
+      </p>
+      <p className="text-xs text-gray-400">
+        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{entry.ref}</span>
+        {fbUrl && (
+          <>
+            {' '}·{' '}
+            <a href={fbUrl} target="_blank" rel="noreferrer" className="text-gray-500 underline hover:text-gray-700">
+              在 Facebook 打开
+            </a>
+          </>
+        )}
+      </p>
     </div>
   )
 }
@@ -119,8 +176,21 @@ function CreativePoolList({
 }) {
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [labels, setLabels] = useState<Record<string, CreativeLabel>>({})
+  const refKey = entries.map(e => e.ref).join(',')
+
+  useEffect(() => {
+    if (refKey === '') return
+    let alive = true
+    fetch(`/api/clients/${clientId}/ad-strategy-config/creative-pool/labels`)
+      .then(r => (r.ok ? (r.json() as Promise<LabelsResponse>) : { labels: {} }))
+      .then(j => { if (alive) setLabels(j.labels ?? {}) })
+      .catch(() => { /* names stay "unrecognised"; never block approval UI */ })
+    return () => { alive = false }
+  }, [clientId, refKey])
 
   const approve = async (ref: string) => {
+    if (!window.confirm('批准后这条视频才允许用于广告。不会自动开广告、不花钱。')) return
     setBusyRef(ref)
     setError(null)
     try {
@@ -140,29 +210,29 @@ function CreativePoolList({
   }
 
   if (entries.length === 0) {
-    return <p className="text-xs text-gray-400">素材池还是空的。</p>
+    return <p className="text-xs text-gray-400">还没有视频。</p>
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2.5">
       {entries.map(e => (
         <div key={`${e.kind}:${e.ref}`} className="flex items-center justify-between gap-3 text-sm">
-          <span className="min-w-0 truncate text-gray-600">
-            {e.kind} · <span className="tabular-nums">{e.ref}</span> ·{' '}
-            <span className={e.status === 'approved' ? 'text-emerald-600' : 'text-gray-400'}>
-              {e.status === 'approved' ? `已批准 by ${e.approved_by ?? '—'}` : '候选'}
+          <VideoRow entry={e} label={labels[e.ref]} />
+          <div className="flex shrink-0 items-center gap-2">
+            <span className={`text-xs ${e.status === 'approved' ? 'text-emerald-600' : 'text-gray-400'}`}>
+              {e.status === 'approved' ? `已批准（${e.approved_by ?? '—'}）` : '待批准'}
             </span>
-          </span>
-          {e.status !== 'approved' && (
-            <button
-              type="button"
-              disabled={busyRef !== null}
-              onClick={() => approve(e.ref)}
-              className="shrink-0 rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              {busyRef === e.ref ? '批准中…' : '批准'}
-            </button>
-          )}
+            {e.status !== 'approved' && (
+              <button
+                type="button"
+                disabled={busyRef !== null}
+                onClick={() => approve(e.ref)}
+                className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {busyRef === e.ref ? '批准中…' : '批准'}
+              </button>
+            )}
+          </div>
         </div>
       ))}
       {error && <p className="text-xs text-red-600">{error}</p>}
@@ -183,7 +253,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
 
   const applyConfig = (c: AdStrategyConfig) => {
     setConfig(c)
-    setDraftCap(c.daily_budget_cap_cents == null ? '' : String(c.daily_budget_cap_cents))
+    setDraftCap(centsToDisplay(c.daily_budget_cap_cents))
     setDraftMode(c.autonomy_mode)
   }
 
@@ -224,7 +294,11 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
     try {
       const body: Record<string, unknown> = {}
 
-      const parsedCap = draftCap.trim() === '' ? null : parseInt(draftCap, 10)
+      const parsedCap = displayToCents(draftCap)
+      if (parsedCap !== null && (!Number.isInteger(parsedCap) || parsedCap <= 0)) {
+        setMessage('每天上限要填大于 0 的金额')
+        return
+      }
       if (parsedCap !== config.daily_budget_cap_cents) body.daily_budget_cap_cents = parsedCap
       if (draftMode !== config.autonomy_mode) body.autonomy_mode = draftMode
 
@@ -263,7 +337,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-5">
-      <h2 className="text-sm font-semibold text-gray-800">目标 · 日预算上限 · 素材池</h2>
+      <h2 className="text-sm font-semibold text-gray-800">目标 · 每天最多花多少 · 可用于广告的视频</h2>
 
       <div className="mt-4 space-y-5">
         <div>
@@ -282,7 +356,10 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
         <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
 
         <div>
-          <span className="block text-sm font-medium text-gray-700">素材池</span>
+          <span className="block text-sm font-medium text-gray-700">可用于广告的视频</span>
+          <p className="mt-1 text-xs text-gray-400">
+            只有在这里批准过的视频，广告自动化才允许拿去投。批准本身不会开广告、不花钱。
+          </p>
           <div className="mt-1.5">
             <CreativePoolList clientId={clientId} entries={config.creative_pool} onApproved={applyConfig} />
           </div>
@@ -290,11 +367,11 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
             value={draftRefs}
             onChange={e => setDraftRefs(e.target.value)}
             rows={3}
-            placeholder="提报候选（每行一个 Meta 视频 ID 或 work order ID）"
+            placeholder="添加待批准的视频（每行填一个 Facebook 视频编号）"
             className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-gray-400 focus:outline-none"
           />
           <p className="mt-1 text-xs text-amber-700">
-            提报新候选会把整个素材池重设为候选状态，已批准的需要重新批准
+            注意：添加新视频后，上面已批准的视频会全部变回「待批准」，需要重新点批准。
           </p>
         </div>
       </div>

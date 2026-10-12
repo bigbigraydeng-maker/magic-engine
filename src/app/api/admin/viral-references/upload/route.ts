@@ -13,6 +13,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { analyzeUploadedReference } from '@/lib/reels/viral-analyzer'
 import { writeFile, unlink } from 'fs/promises'
 import { tmpdir } from 'os'
@@ -30,6 +31,9 @@ const ALLOWED_MIME = new Set([
 ])
 
 export async function POST(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   let formData: FormData
   try {
     formData = await req.formData()
@@ -81,7 +85,8 @@ export async function POST(req: NextRequest) {
   }
 
   // 2. Save file to /tmp
-  const ext = file.name.split('.').pop()?.toLowerCase() || 'mp4'
+  const rawExt = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const ext = /^[a-z0-9]{1,5}$/.test(rawExt) ? rawExt : 'mp4'
   const tmpPath = path.join(tmpdir(), `viral_upload_${inserted.id}.${ext}`)
 
   try {

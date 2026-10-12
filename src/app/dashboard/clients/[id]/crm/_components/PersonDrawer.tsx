@@ -10,14 +10,18 @@
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
-import { ContactTimeline, type TimelineSummary } from './ContactTimeline'
+import { ContactTimeline, type TimelineSummary, type StageSource } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
+import { BookingsBlock } from './bookings/BookingsBlock'
+import { BackToPayments } from './BackToPayments'
+import { useBodyScrollLock } from './useBodyScrollLock'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
+import { intentNote, type NextAction } from '@/lib/crm/next-action'
 
 export interface DrawerRow {
   contactId: string
@@ -57,6 +61,19 @@ export interface DrawerRow {
    * （见 `lib/crm/dnc` 与 `api/.../dnc` 路由）。
    */
   doNotContact?: boolean
+  /**
+   * 「该做什么」—— 阶段 / 冷热 / 意向合成的那一个概念（PM 2026-10-10）。
+   * 列表接口算好传进来；没有（老调用方）就退回只显示阶段按钮。
+   */
+  nextAction?: NextAction
+  /** 最新 AI 摘要的意向。只用来显示一行「AI 初判（未校准）」小字，不影响任何按钮或排序。 */
+  intent?: 'high' | 'medium' | 'low' | 'unknown' | null
+}
+
+const STAGE_SOURCE_LABEL: Record<StageSource, string> = {
+  human: '人工标的',
+  ai_conversation: 'AI 从对话里读的',
+  order_system: '订单系统',
 }
 
 /**
@@ -106,6 +123,8 @@ export function PersonDrawer({
   const [markingWon, setMarkingWon] = useState(false)
   /** 阶段的「其他」展开没有 —— 默认只给下一步 + 一个出口。 */
   const [allStages, setAllStages] = useState(false)
+  /** 「更多」折叠区 —— 次要控件都收在这里，屏幕上只留一个主按钮（PM：按钮太多）。 */
+  const [moreOpen, setMoreOpen] = useState(false)
   /** 一键动作正在写 —— 防双击记成两笔。 */
   const [quickBusy, setQuickBusy] = useState(false)
   /** 记完一笔换个 key，让时间线重新拉一次 —— 刚记的那条要立刻出现在上面。 */
@@ -119,7 +138,7 @@ export function PersonDrawer({
   const onSummary = useCallback((s: TimelineSummary | null) => setSummary(s), [])
 
   const changeStage = async (toStage: string, label: string) => {
-    if (!window.confirm(`现在：${row.stageLabel ?? '还没标到哪一步'} → 改成「${label}」？`)) return
+    if (!window.confirm(`到哪一步了：${row.stageLabel ?? '还没标'} → 改成「${label}」？`)) return
     setChangingStage(false)
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${row.contactId}/stage`, {
@@ -179,6 +198,7 @@ export function PersonDrawer({
   }
 
   // 这一刻该给哪几个按钮 / 哪几个阶段 —— 判断全在 lib 里，页面不自己拍。
+  useBodyScrollLock()
   const actions = drawerActions(row.segment ?? 'stale_conversation', row.suggestedChannel ?? 'phone')
   const stageChoices = nextStageChoices(stages, row.stage)
 
@@ -194,8 +214,8 @@ export function PersonDrawer({
       <aside className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-me-ivory shadow-2xl sm:max-w-[580px]">
         <header className="flex items-start justify-between gap-3 border-b border-me-charcoal/10 bg-white px-4 py-3">
           <div className="min-w-0">
+            <BackToPayments key={row.contactId} clientId={clientId} />
             <h2 className="truncate text-lg font-black text-me-charcoal">{row.name}</h2>
-            {row.reason && <p className="mt-0.5 text-xs text-me-charcoal/55">{row.reason}</p>}
           </div>
           <button
             onClick={onClose}
@@ -229,7 +249,7 @@ export function PersonDrawer({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
           {/*
             开口前要知道的三样，摆在**第一屏**（PM 2026-08-17，CTS 销售视角）。
 
@@ -309,65 +329,36 @@ export function PersonDrawer({
             )}
           </div>
 
-          {/* 现在到哪一步了（点一下可改，改前二次确认） */}
-          {/* 「要记住的事」：打开就看得见，不用滚。跟「全部客人」那页同一个组件。 */}
-          <div className="mt-3">
-            <ImportantMarkerEditor
-              clientId={clientId}
-              row={{ contactId: row.contactId, important: row.important ?? null }}
-              // 不重拉整块看板 —— 抽屉还开着，脚下的列表跳动会让人失去位置（同 ComposeNote）。
-              onSaved={(msg) => onSaved(msg, false)}
-            />
+          {/* 该做什么 —— 三行：动作 + 为什么 / AI 建议 / 到哪一步了（点开可改）。
+              这一块取代了原来并排的三套状态（阶段按钮、冷热标签、意向小圆标），PM 2026-10-10：
+              页面少信息多引导，只留一个概念告诉人该做什么。 */}
+          <div className="mt-3 rounded-xl border border-me-charcoal/10 bg-white px-3 py-2.5" data-testid="next-action-card">
+            {row.nextAction ? (
+              <>
+                <p className="text-base font-black text-me-charcoal">{row.nextAction.verbLabel}</p>
+                <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/75">
+                  {row.nextAction.reason}
+                </p>
+                {row.nextAction.aiSuggestion && (
+                  <p className="mt-1.5 text-[13px] text-me-charcoal/85">
+                    <span className="font-bold">AI 建议：</span>
+                    {row.nextAction.aiSuggestion}
+                  </p>
+                )}
+                {intentNote(row.intent ?? null) && (
+                  <p className="mt-1 text-[11px] text-me-charcoal/40">{intentNote(row.intent ?? null)}</p>
+                )}
+              </>
+            ) : (
+              row.reason && <p className="text-[13px] text-me-charcoal/75">{row.reason}</p>
+            )}
+            {stages.length > 0 && (
+              <p className="mt-2 text-[12px] text-me-charcoal/55" data-testid="stage-line">
+                到哪一步了：{row.stageLabel ?? '还没标'}
+                {summary?.stageSource ? ` · ${STAGE_SOURCE_LABEL[summary.stageSource]}` : ''}
+              </p>
+            )}
           </div>
-
-          {stages.length > 0 && (
-            <div className="mt-3">
-              <button
-                onClick={() => setChangingStage((v) => !v)}
-                className="rounded-full border border-me-charcoal/15 bg-white px-3 py-1.5 text-xs font-bold text-me-charcoal/70"
-              >
-                现在：{row.stageLabel ?? '还没标到哪一步'}
-              </button>
-              {changingStage && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {/* 只给下一步 + 一个「谈崩了」的出口。
-                      铺 9 个阶段的问题不是占地方，是每多一个选项就多一次犹豫 ——
-                      而「新线索」直接跳「已付全款」的情况根本不存在。 */}
-                  {(allStages
-                    ? [...stageChoices.suggested, ...stageChoices.rest]
-                    : stageChoices.suggested
-                  ).map((s) => (
-                    <button
-                      key={s.stageKey}
-                      onClick={() => {
-                        // 🔴 判据照抄「全部客人」那一页（ContactDetail），一个字没改：
-                        // 只有 NAL 把人标成「已成交」时要先录金额、再回传广告转化。
-                        // 两页必须说同一件事，否则销售在一页能标、另一页标不了。
-                        // 那个客户 id 按设计稿要在后续轮改成读配置，这一轮先保持一致。
-                        if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
-                          setChangingStage(false)
-                          setMarkingWon(true)
-                          return
-                        }
-                        void changeStage(s.stageKey, s.label)
-                      }}
-                      className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                  {!allStages && stageChoices.rest.length > 0 && (
-                    <button
-                      onClick={() => setAllStages(true)}
-                      className="rounded-full border border-dashed border-me-charcoal/25 px-3 py-1.5 text-[13px] font-bold text-me-charcoal/50"
-                    >
-                      其他 {stageChoices.rest.length} 个…
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
 
           {/* 现在该做什么 —— 最多两个按钮，措辞按他能被联系到的渠道走。
               一个从没被联系过的人只有两种结果：打通了，或者没打通。
@@ -390,26 +381,17 @@ export function PersonDrawer({
               />
             ) : !composing ? (
               <div className="flex gap-2">
-                {actions.map((a) =>
-                  a.kind === 'log' ? (
+                {actions
+                  .filter((a) => a.kind === 'log')
+                  .map((a) => (
                     <button
                       key={a.kind}
                       onClick={() => setComposing(true)}
-                      className="flex-1 rounded-lg bg-me-charcoal py-2.5 text-[15px] font-black text-white"
+                      className="w-full rounded-lg bg-me-charcoal py-2.5 text-[15px] font-black text-white"
                     >
                       {a.label}
                     </button>
-                  ) : (
-                    <button
-                      key={a.kind}
-                      disabled={quickBusy}
-                      onClick={() => void quickLog(a.cannedNote ?? '')}
-                      className="shrink-0 rounded-lg border border-me-charcoal/25 bg-white px-4 py-2.5 text-[15px] font-bold text-me-charcoal/75 disabled:opacity-40"
-                    >
-                      {a.label}
-                    </button>
-                  ),
-                )}
+                  ))}
               </div>
             ) : (
               <ComposeNote
@@ -428,6 +410,94 @@ export function PersonDrawer({
             )}
           </div>
 
+          {/* 「更多」—— 次要控件都收在这里，屏幕上只留一个主按钮（PM：按钮太多）。
+              markingWon / composing 那两个面板占屏时整块藏起来，别跟它们抢。 */}
+          {!markingWon && !composing && (
+            <div className="mt-2">
+              <button
+                type="button"
+                onClick={() => setMoreOpen((v) => !v)}
+                aria-expanded={moreOpen}
+                className="text-xs font-bold text-me-charcoal/45 hover:text-me-charcoal/70"
+              >
+                {moreOpen ? '收起 ▴' : '更多 ▾'}
+              </button>
+              {moreOpen && (
+                <div className="mt-2 space-y-3 rounded-xl border border-me-charcoal/10 bg-white p-3" data-testid="drawer-more">
+                  {/* 一键结果：没打通 / 发出去了等他回 */}
+                  {actions
+                    .filter((a) => a.kind !== 'log')
+                    .map((a) => (
+                      <button
+                        key={a.kind}
+                        disabled={quickBusy}
+                        onClick={() => void quickLog(a.cannedNote ?? '')}
+                        className="shrink-0 rounded-lg border border-me-charcoal/25 bg-white px-4 py-2.5 text-[15px] font-bold text-me-charcoal/75 disabled:opacity-40"
+                      >
+                        {a.label}
+                      </button>
+                    ))}
+                  {/* 改到哪一步 */}
+                  {stages.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => setChangingStage((v) => !v)}
+                        className="rounded-full border border-me-charcoal/15 bg-white px-3 py-1.5 text-xs font-bold text-me-charcoal/70"
+                      >
+                        改「到哪一步了」▾
+                      </button>
+                      {changingStage && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {/* 只给下一步 + 一个「谈崩了」的出口。
+                              铺 9 个阶段的问题不是占地方，是每多一个选项就多一次犹豫 ——
+                              而「新线索」直接跳「已付全款」的情况根本不存在。 */}
+                          {(allStages
+                            ? [...stageChoices.suggested, ...stageChoices.rest]
+                            : stageChoices.suggested
+                          ).map((s) => (
+                            <button
+                              key={s.stageKey}
+                              onClick={() => {
+                                // 🔴 判据照抄「全部客人」那一页（ContactDetail），一个字没改：
+                                // 只有 NAL 把人标成「已成交」时要先录金额、再回传广告转化。
+                                // 两页必须说同一件事，否则销售在一页能标、另一页标不了。
+                                // 那个客户 id 按设计稿要在后续轮改成读配置，这一轮先保持一致。
+                                if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
+                                  setChangingStage(false)
+                                  setMarkingWon(true)
+                                  return
+                                }
+                                void changeStage(s.stageKey, s.label)
+                              }}
+                              className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"
+                            >
+                              {s.label}
+                            </button>
+                          ))}
+                          {!allStages && stageChoices.rest.length > 0 && (
+                            <button
+                              onClick={() => setAllStages(true)}
+                              className="rounded-full border border-dashed border-me-charcoal/25 px-3 py-1.5 text-[13px] font-bold text-me-charcoal/50"
+                            >
+                              其他 {stageChoices.rest.length} 个…
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* 要记住的事 */}
+                  <ImportantMarkerEditor
+                    clientId={clientId}
+                    row={{ contactId: row.contactId, important: row.important ?? null }}
+                    // 不重拉整块看板 —— 抽屉还开着，脚下的列表跳动会让人失去位置（同 ComposeNote）。
+                    onSaved={(msg) => onSaved(msg, false)}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 在这一页直接回私信 —— 没有私信线的人这里什么都不渲染。
               110 位 CTS 客人只有 Facebook 身份，卡上写着「只能在 Messenger
               回他」，之前却要跳去另一个页面才回得了。 */}
@@ -436,6 +506,8 @@ export function PersonDrawer({
             contactId={row.contactId}
             customerName={row.name}
             viewerEmail={viewerEmail}
+            phone={row.phoneUnusable ? null : row.phone}
+            email={row.email}
             onSent={() => {
               setTimelineKey((k) => k + 1)
               onSaved('✓ 私信已发出', false)
@@ -452,6 +524,8 @@ export function PersonDrawer({
             contactId={row.contactId}
             customerName={row.name}
             viewerEmail={viewerEmail}
+            phone={row.phoneUnusable ? null : row.phone}
+            email={row.email}
             onSent={() => {
               setTimelineKey((k) => k + 1)
               onSaved('✓ WhatsApp 已发出', false)
@@ -470,6 +544,9 @@ export function PersonDrawer({
               onSaved('✓ 邮件已发出', false)
             }}
           />
+
+          {/* 订单与付款：没开通这项功能或没权限的人，这一块什么都不渲染 */}
+          <BookingsBlock key={row.contactId} clientId={clientId} contactId={row.contactId} />
 
           {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
           <div className="mt-5">

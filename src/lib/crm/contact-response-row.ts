@@ -18,6 +18,7 @@
 
 import { buildContactModel } from '@/lib/crm/contact-model'
 import { segmentContact, SEGMENT_ACTION_META } from '@/lib/crm/segments'
+import { nextActionFor, type IntentLevel } from '@/lib/crm/next-action'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import {
   extractCustomColumns,
@@ -87,6 +88,7 @@ export function responseRowFor(
   stageMeta: Map<string, { label: string; suppressed: boolean }>,
   model: ReturnType<typeof buildContactModel>,
   seg: ReturnType<typeof segmentContact>,
+  brief?: { intent: IntentLevel | null; nextAction: string | null } | null,
 ): { row: Record<string, unknown>; custom: Record<CustomColumnKey, string | null> } {
   // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
   // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
@@ -156,6 +158,12 @@ export function responseRowFor(
        */
       suggestedChannel: seg.suggestedChannel,
       reason: seg.reason,
+      /**
+       * 「该做什么」—— 三套状态（阶段 / 冷热 / 意向）合成的那一个概念（PM 2026-10-10）。
+       * 列表只画这一行；stage / segment 字段仍返回，抽屉和筛选还在用。
+       */
+      nextAction: nextActionFor({ seg, intent: brief?.intent ?? null, aiNextAction: brief?.nextAction ?? null }),
+      intent: brief?.intent ?? null,
       custom,
     },
   }

@@ -31,11 +31,16 @@ import { pushMessengerDraftItems } from './messenger-draft-items'
 import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushPriceFactItems } from './price-fact-items'
+import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
+import { pushAutoPublishItems } from './auto-publish-items'
+import { pushStoryLiteItems } from './story-lite-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { foldRootCauseDuplicates } from './dedupe-root-cause'
+import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
@@ -63,7 +68,7 @@ export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
-import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems } from './manual-monitoring-items'
+import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
 
 export { pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
@@ -75,6 +80,7 @@ import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
 import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
+import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -133,7 +139,8 @@ export async function loadManualItems(
   }
   // 两组同时跑，拼回时仍是「基础设施在前、客户通道在后」的原顺序（见 runPushers 头注）
   await runPushers(items, [...infra, ...clientPushers(supabase, clients, now)])
-  return items
+  // 同一个根因报了很多次的折成一次（AI 余额用完 → 各客户体检全挂只是症状；授权断了 + 同步失败 = 同一修法）
+  return foldRootCauseDuplicates(items).items
 }
 
 /** 跟客户名单无关的检查（余额、断电、定时任务、授权、钥匙……），客户表读挂了也照跑。 */
@@ -244,6 +251,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushAdsConfigReadItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 广告配置读取检查失败（不阻塞其他待办）:', e),
     ),
+    // 同一类：回拉读成功、自动暂停自己再读失败的窄窗口，痕迹只在它的回执里。
+    (b) => pushAdsAutoPauseConfigReadItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 自动暂停读配置检查失败（不阻塞其他待办）:', e),
+    ),
     // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
     // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
     (b) => pushFacebookSyncFailingItems(supabase, b, now).catch((e) =>
@@ -253,6 +264,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 而 Facebook 的留资只保留 90 天，超期永久取不回
     (b) => pushLeadSheetItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 日历上带日期的验证事项每天核对一遍 —— 读不到日历 / 巡检没跑成 / 没法自动核对都要摆到人眼前
+    (b) => pushCalendarClosureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 日历到期事项巡检待办检查失败（不阻塞其他待办）:', e),
     ),
     // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
     (b) => pushLinkedinProgressItems(supabase, b, now).catch((e) =>
@@ -296,6 +311,18 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 每日计划里写了价格但跟客户资料对不上的帖子 —— 发布出口会整批拦下，不捞出来没人知道
     (b) => pushPriceFactItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 价格数字核对待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 客户员工改了团目录、点了「请 Magic Engine 上架」—— 不摆出来就没人去上架
+    (b) => pushTourCatalogPublishRequestItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 团目录上架请求待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 自动发布没发出去 / 不确定发没发出去 / 已授权却没动静 —— 人不在场，不捞出来没人知道
+    (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // Story 自动发布没发出去 / 不知道发没发出去 / 已授权却没动静
+    (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
     // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
     (b) => pushPrescriptionItems(supabase, b, now, nameOf),
@@ -830,6 +857,17 @@ async function pushCommentScopeItems(
 ): Promise<void> {
   const todos = await fetchCommentScopeTodos(supabase, now)
   for (const t of todos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const failingTodos = await fetchCommentAutoreplyRunFailingTodos(supabase, now)
+  for (const t of failingTodos) {
     items.push({
       kind: t.kind,
       client_id: t.client_id,

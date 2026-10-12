@@ -42,6 +42,12 @@ export function CampaignPanel({ clientId }: Props) {
     setCampaigns(prev => prev.map(c => c.id === updated.id ? updated : c))
   }
 
+  // 已过期（有效期早于今天）的推广活动不删数据，折叠进「已结束」。
+  const today = new Date().toISOString().slice(0, 10)
+  const isExpired = (c: CampaignBrief) => !!c.valid_until && c.valid_until < today
+  const liveCampaigns = campaigns.filter(c => !isExpired(c))
+  const expiredCampaigns = campaigns.filter(isExpired)
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48">
@@ -78,7 +84,7 @@ export function CampaignPanel({ clientId }: Props) {
       )}
 
       {/* Campaign list */}
-      {campaigns.length === 0 && !showForm ? (
+      {liveCampaigns.length === 0 && !showForm ? (
         <div className="bg-white rounded-xl border border-dashed border-black/10 py-14 text-center">
           <p className="text-2xl mb-2">🎯</p>
           <p className="text-sm font-medium text-me-charcoal/60">暂无进行中的推广活动</p>
@@ -86,7 +92,7 @@ export function CampaignPanel({ clientId }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
-          {campaigns.map(c => (
+          {liveCampaigns.map(c => (
             <CampaignCard
               key={c.id}
               campaign={c}
@@ -98,8 +104,8 @@ export function CampaignPanel({ clientId }: Props) {
         </div>
       )}
 
-      {/* Archived toggle */}
-      <ArchivedCampaigns clientId={clientId} />
+      {/* 已结束（已过期 + 已归档），默认折叠 */}
+      <ArchivedCampaigns clientId={clientId} expired={expiredCampaigns} />
     </div>
   )
 }
@@ -602,7 +608,7 @@ function CampaignCard({
 
 // ─── Archived campaigns (collapsed by default) ────────────────────────────────
 
-function ArchivedCampaigns({ clientId }: { clientId: string }) {
+function ArchivedCampaigns({ clientId, expired }: { clientId: string; expired: CampaignBrief[] }) {
   const [open, setOpen] = useState(false)
   const [archived, setArchived] = useState<CampaignBrief[]>([])
   const [loading, setLoading] = useState(false)
@@ -631,15 +637,26 @@ function ArchivedCampaigns({ clientId }: { clientId: string }) {
         onClick={toggle}
         className="text-xs text-me-charcoal/45 hover:text-me-charcoal/60 transition-colors"
       >
-        {open ? '▲ 隐藏已归档活动' : '▼ 查看已归档活动'}
+        {open ? '▲ 隐藏已结束活动' : `▼ 已结束的活动（${expired.length + archived.length}）`}
       </button>
 
       {open && (
         <div className="mt-3 space-y-2">
           {loading && <p className="text-xs text-me-charcoal/45 animate-pulse">加载中…</p>}
-          {!loading && archived.length === 0 && (
-            <p className="text-xs text-me-charcoal/45">暂无归档活动</p>
+          {!loading && archived.length === 0 && expired.length === 0 && (
+            <p className="text-xs text-me-charcoal/45">暂无已结束活动</p>
           )}
+          {expired.map(c => (
+            <div key={c.id} className="bg-me-ivory rounded-lg border border-black/[.06] px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-me-charcoal/55">{c.title}</p>
+                {c.valid_from && (
+                  <p className="text-xs text-me-charcoal/45">{c.valid_from} → {c.valid_until ?? '—'}</p>
+                )}
+              </div>
+              <span className="text-xs bg-me-ivory text-me-charcoal/55 px-2 py-0.5 rounded-full">已过期</span>
+            </div>
+          ))}
           {archived.map(c => (
             <div key={c.id} className="bg-me-ivory rounded-lg border border-black/[.06] px-4 py-3 flex items-center justify-between">
               <div>
