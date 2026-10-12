@@ -125,6 +125,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   leads_metric_untrusted: 'client_side', // 客户统计后台的「关键事件」设置
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
   crm_important_due: 'client_side', // 客户员工约好的回电
+  phone_call_needs_review: 'client_side', // 电话没能自动记进客人档案，客户销售要看一眼是谁
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
   tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
 
