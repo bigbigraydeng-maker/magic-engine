@@ -143,7 +143,8 @@ v0.8 之前两审（子牙+魏征，共三轮）里**仍然适用**的结论保�
 
 **要 PM 回答的问题（一次一条）**：
 - **Q3（已答）**：PM 选「要金额」（统筹转述，2026-10-13），方案见 §3.2，订单与付款作者已同意。
-- **Q5（现在要答）：谁要看进度页？** 现在名单里只有 2 个邮箱，CTS 销售不在里面就没人能用；要加的话请订单与付款窗口按名单加进 `crm_booking_members`。
+- **Q5（已答，统筹转述 PM，2026-10-13：「就这两个」）**：销售进度页（含金额）只给 `crm_booking_members` 名单里现有的 2 个邮箱（info@ctstours.co.nz、ctstours1@chinatravel.co.nz）加 ME 管理员，**不扩名单**；权限沿用 `requireBookingAccess` 名单制。另：PM 在统筹窗口原话说过「60 CRM 需要显示金额」，已由统筹转给订单与付款窗口作依据（金额的依据因此有两处转述，仍以批准前请 PM 亲口确认一句为准）。
+- ~~**Q5（原问题）：谁要看进度页？**~~ 现在名单里只有 2 个邮箱，CTS 销售不在里面就没人能用；要加的话请订单与付款窗口按名单加进 `crm_booking_members`。
 - 后续（不一次抛）：Q4 对外只显示「公司确认」栏、「客人自述/待核实」只内部看，是否同意；Q6 外部下单系统上线后谁是准的；Q7 订单要不要也存「报价」。
 
 ## 9. 已知缺口（诚实声明）
@@ -195,3 +196,63 @@ v0.8 之前两审（子牙+魏征，共三轮）里**仍然适用**的结论保�
 ## 11. 历史与复审记录（简）
 
 v0.2–v0.8 经子牙 + 魏征三轮复审（带条件通过，条件均已并入当时的稿子）；其中关于座位上限不写对外字段（v0.8）、销售进度页独立只读、剩余保守算法、证据强度、行业/权限闸的结论沿用到本稿。v0.9 因发现与已上线的订单与付款进度重复而改为复用，第四轮复审结果见 §10。
+
+## 12. 实现计划（草案；设计稿批准前不写进 `supabase/migrations`、不动库）
+
+### 12.1 分三个 PR（各自过风险闸，按顺序）
+
+| PR | 内容 | 风险 | 谁写 | 前置 |
+|---|---|---|---|---|
+| **A 迁移** | 给 `crm_bookings` / `crm_booking_milestones` 加列、约束、索引、触发器；新函数 `crm_booking_create_with_origin`、`crm_booking_set_amounts`；替换两个审计触发器；放宽 `crm_booking_events.action` CHECK | **A**（改已上线表 + 记钱，且迁移 apply 是不可逆动作） | Claude Code 自写（例外②：A 级安全核心 / 数据库函数，PR 里写原因） | 设计稿 PM 批准；PM 亲口确认「要金额」；订单与付款作者复核 SQL |
+| **B 销售进度页** | 适配器、纯函数（剩余/已收/不一致/强度算法）、服务端页、取数函数、测试 | **A**（读客户订单与金额、新页面、名单制鉴权）| DeepSeek 写（Claude 出每轮指令 + 审 diff），鉴权与金额漏出相关由 Claude 复核 | PR A 的列在库里（页面在列不存在时全部降级为「来源未标/金额未填」，不报错） |
+| **C 导入工具** | 本地脚本：预览（只读联系人查找）→ PM 说「导」→ 应用（逐单 `create_with_origin` + `set_paid`）→ 撤回（`crm_booking_cancel`） | **A**（写订单与金额） | DeepSeek 写，Claude 审 | PR A 已 apply；CTS 销售 8 条核对回复；PM 说「导」 |
+
+### 12.2 文件清单（预计）
+
+- **PR A**：`supabase/migrations/<时间戳>_crm_booking_origin_and_amounts.sql`（新）；`supabase/tests/crm_booking_origin_and_amounts.test.sql`（新，沙盘用）；`src/lib/crm/booking-http.ts`（`mapRpcError` 认识 `duplicate_evidence_ref`、`conflict:stale:` 已有）；对应单测；台账卡。
+- **PR B**：`src/lib/crm/sales-progress/`（`units.ts` 适配器接口、`units-cts.ts` CTS 适配器、`calc.ts` 纯函数、`load.ts` 取数、`types.ts`）；`src/app/dashboard/clients/[id]/sales-progress/page.tsx` + `_components/`；若有点开明细的取数接口：`src/app/api/clients/[id]/sales-progress/...`（每个自带 `requireBookingAccess`）；`__tests__`（含「每个新路由都调同一道闸」、金额只在本页响应里、适配器无写调用、`internal` 其余键不出适配器、算法夹具）；客户首页入口卡片（`dashboard/clients/[id]/page.tsx` 一处）；台账卡。
+- **PR C**：`scripts/import-march-bookings.ts`（新，本地运行，不进生产服务）+ 单测（打码、只读查找、失败停止、撤回幂等）；台账卡。
+- **不碰**：订单与付款的 `booking-store-reads.ts` / `booking-overview-reads.ts` 列清单；`tour-catalog/*`；`contacts` 写入路径；`me_sale_outcomes`。
+
+### 12.3 迁移（PR A）SQL 骨架（**草案，未写入仓库迁移目录、未执行**）
+
+```sql
+-- 1) 新列（全部可空，不重写表；旧行不回填）
+alter table public.crm_bookings
+  add column origin_kind text check (origin_kind in ('company_confirmed','customer_stated','staff_entered')),
+  add column evidence_ref text check (evidence_ref is null or (length(evidence_ref) between 3 and 40 and evidence_ref !~ '\s')),
+  add column total_minor bigint check (total_minor is null or (total_minor > 0 and total_minor <= 100000000000)),
+  add column currency text check (currency is null or (currency = upper(currency) and length(currency) = 3)),
+  add constraint crm_bookings_total_needs_currency check (total_minor is null or currency is not null),
+  add constraint crm_bookings_company_confirmed_needs_evidence check (origin_kind is distinct from 'company_confirmed' or evidence_ref is not null);
+alter table public.crm_booking_milestones
+  add column amount_minor bigint check (amount_minor is null or (amount_minor > 0 and amount_minor <= 100000000000));
+-- 2) 发票号唯一（取消不占号）
+create unique index crm_bookings_evidence_ref_active_uidx
+  on public.crm_bookings (client_id, evidence_ref) where evidence_ref is not null and status = 'active';
+-- 3) origin_kind / evidence_ref 建单后不可改的 BEFORE UPDATE 触发器（不拦 updated_at 触碰）
+-- 4) crm_booking_events.action：drop 旧 CHECK，重加（含现有全部 13 个取值 + 'milestone_amount_set'）
+-- 5) create or replace crm_booking_audit_booking / crm_booking_audit_milestone（保持 crm_booking_clear_settings() 调用与 return 路径不变；
+--    created 事件加 origin_kind、has_evidence_ref；金额变更写 old/new + 原因）
+-- 6) 新函数 crm_booking_create_with_origin(...) / crm_booking_set_amounts(...)；不动旧 crm_booking_create 的签名
+--    revoke all on function … from public, anon, authenticated; grant execute … to service_role;
+```
+币种白名单、发票号 5 位数字格式在**函数里**校验（CHECK 读不了客户配置）；`set_amounts` 的令牌/锁序/返回见 §3.2。
+
+### 12.4 沙盘重放方案（本机 Postgres，不碰生产）
+
+1. 按 `reference-local-postgres-replay-sandbox` 的做法起本机 Postgres（手写 Supabase 桩：`auth`/`service_role` 角色等）。
+2. 依次重放：团目录迁移 → `20261012200000_crm_booking_tracker.sql`（原样）→ 订单与付款作者的 `supabase/tests/crm_booking_tracker.test.sql`，**必须仍是 278 PASS**（基线）。
+3. 重放本迁移，再跑一遍 278 项（**必须全过**），再跑新增用例：旧 9 参 `crm_booking_create` 调用仍成功；`company_confirmed` 无发票号被拒；同一发票号取消后可重建、`active` 内不可重复；`origin_kind`/`evidence_ref` 建单后改写被拒；总价有值而币种空被拒；币种单独有值（总价空）可写；只改金额也多一行审计且 old/new 正确；`set_amounts` 令牌不符抛 `conflict:stale:`；两个人改不同节点互不覆盖、改同一节点冲突；新旧值相同不写不刷令牌；新函数 anon/authenticated 无执行权。
+4. 沙盘输出（PASS 数、失败为 0）原样贴进 PR 的「当场试跑」。生产 apply 由 PM 回「同意」后才执行，**回读核对**列、约束、索引、触发器、函数权限。
+5. **回滚方案**（迁移文件里同时带反向脚本，PM 批准 apply 时一并给）：去掉新触发器、新函数；还原两个审计函数为原版本（原文在原迁移里，保留逐字副本）；还原 `action` CHECK 到原 13 个取值；删新索引与新约束；列留着（可空，不影响旧行为）或在确认无数据后删。
+
+### 12.5 PR B / PR C 的当场试跑方案
+
+- **PR B**：本机用合成的订单/节点/出发日夹具起页面，截图贴 PR；生产上线后用只读核对「页面数字 = 数据库直接汇总」；因生产订单现为 0 行，首次上线页面是空的是**预期**，不算失败。
+- **PR C**：先对一个测试客户跑完整「预览→导→撤回→重导」；对 CTS 真数据只跑**预览**（打码输出），**写入必须 PM 在对话里说「导」**；导入后回读：9 单、人数合计、定金已收、催款名单未多出这 9 单、`me_sale_outcomes` 行数不变。
+
+### 12.6 费用与外发
+
+迁移、页面、导入都不花钱、不外发、不触达任何客人；没有新的定时任务（每周对账是第 2 步，另案，不在本计划内）。
+
