@@ -92,7 +92,7 @@ function resolveLifetimeDays(lifetimeDays: number | undefined): LiteResult<numbe
   return ok(days)
 }
 
-function packState(pack: LitePack, now: Date): LitePackState {
+export function packState(pack: LitePack, now: Date): LitePackState {
   if (pack.revoked_at !== null) return 'REVOKED'
   if (pack.authorized_at === null) return 'DRAFT'
   if (pack.expires_at !== null && pack.expires_at > now.toISOString()) return 'AUTHORIZED'

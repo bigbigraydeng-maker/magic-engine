@@ -248,6 +248,27 @@ export class SupabaseLiteStore implements LiteStore {
     return data === null ? null : mapPack(data as PackRow)
   }
 
+  async listPacksForClient(clientId: string, limit: number): Promise<Array<{ pack: LitePack; item_count: number }>> {
+    const { data, error } = await this.db
+      .from('story_packs')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+      .limit(limit)
+    if (error) throw error
+    const packs = ((data as PackRow[] | null) ?? []).map(mapPack)
+    const result: Array<{ pack: LitePack; item_count: number }> = []
+    for (const pack of packs) {
+      const { count, error: countError } = await this.db
+        .from('story_items')
+        .select('item_id', { count: 'exact', head: true })
+        .eq('pack_id', pack.id)
+      if (countError) throw countError
+      result.push({ pack, item_count: count ?? 0 })
+    }
+    return result
+  }
+
   async listLivePacks(now: Date): Promise<LitePack[]> {
     const { data, error } = await this.db
       .from('story_packs')
