@@ -82,6 +82,7 @@ describe('Twilio 接收与整条链路', () => {
     expect(res.twiml).toContain('may be recorded')
     expect(res.twiml).toContain(`<Number>${STAFF}</Number>`)
     expect(res.twiml).toContain('record="record-from-answer-dual"')
+    expect(res.twiml).toContain('callerId="+6498000000"')
     expect(res.twiml).toContain(`${BASE}/api/webhooks/twilio/${CONN}/dial`)
     expect(r.mem.raw.size).toBe(1)
   })
@@ -274,13 +275,11 @@ describe('魏征第二轮补的防线（真实静默期下）', () => {
     expect(call(r)).toMatchObject({ crmStatus: 'needs_review' })
     await r.post('dial', { ...base, DialCallStatus: 'completed', DialCallDuration: '580' })
     const id = r.emitted.splice(0)[0]
-    let clock = Date.now() + 10_000_000
-    const out1 = await processRawEvent(r.mem.store, id, () => new Date(clock), { quietMs: 120_000 })
+    let clock = 0
     // 事件刚到：落在静默期内 → 推迟（不丢），状态保持待确认
     const justArrived = await processRawEvent(r.mem.store, id, () => new Date(Date.parse(r.mem.raw.get(id)!.receivedAt) + 1000), { quietMs: 120_000 })
     expect(justArrived?.deferred).toBe(true)
     expect(call(r)).toMatchObject({ crmStatus: 'needs_review' })
-    void out1
     // 静默期过后再处理 → 写成已接通
     clock = Date.parse(r.mem.raw.get(id)!.receivedAt) + 200_000
     await processRawEvent(r.mem.store, id, () => new Date(clock), { quietMs: 120_000 })
