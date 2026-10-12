@@ -32,6 +32,7 @@ import { libaiCopyProvenance } from './libai-copy-provenance'
 import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
+import { gscQueryPageDailyFanOut, gscQueryPageDailyPull } from './gsc-query-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
 import { storyLitePublish } from './story-lite-publish'
@@ -82,6 +83,8 @@ export const cloudFunctions = [
   simaqianReputationWeekly,
   gscPageDailyFanOut,
   gscPageDailyPull,
+  gscQueryPageDailyFanOut,
+  gscQueryPageDailyPull,
   toolsLabLeadFollowUp,
   toolsLabReportEmailReceipt,
   dailyPlanAutoPublish,
