@@ -12,6 +12,12 @@ import { shortDate } from '../../_components/bookings/booking-format'
 
 export const PAGE_HEADING = '收款进度（按订单数统计，系统不记金额）'
 
+/** '10月14日' for this NZ year, '2027年5月10日' for any other year. `today` is the NZ ISO date; no clock here. */
+export function dateLabel(iso: string | null, today: string): string {
+  if (iso === null || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return shortDate(iso)
+  return iso.slice(0, 4) === today.slice(0, 4) ? shortDate(iso) : `${Number(iso.slice(0, 4))}年${shortDate(iso)}`
+}
+
 export function unitLabel(n: number): string {
   return `${n}单`
 }
@@ -61,11 +67,11 @@ function daysBetween(fromIso: string, toIso: string): number | null {
 export function milestoneCellText(cell: OverviewMilestoneCell | null, today: string): string {
   if (cell === null) return '—'
   const quiet = cell.quiet && cell.state === 'unpaid' ? ' · 线下已处理' : ''
-  if (cell.state === 'paid') return `✅ ${shortDate(cell.paidOn)}`
+  if (cell.state === 'paid') return `✅ ${dateLabel(cell.paidOn, today)}`
   if (cell.dueOn === null) return `⬜ ${cell.dueNote ?? '到期日还没算出来'}${quiet}`
   if (cell.overdue) {
     const days = daysBetween(cell.dueOn, today)
     return `⬜ 已过期${days !== null && days > 0 ? `${days}天` : ''}${quiet}`
   }
-  return `⬜ 到期 ${shortDate(cell.dueOn)}${quiet}`
+  return `⬜ 到期 ${dateLabel(cell.dueOn, today)}${quiet}`
 }

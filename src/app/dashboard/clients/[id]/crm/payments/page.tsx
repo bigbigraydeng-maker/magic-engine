@@ -186,6 +186,7 @@ function SummarySection(props: {
         <SummaryTable
           groups={data.summary.groups}
           totals={data.summary.totals}
+          today={data.today}
           selectedKey={query.departureId}
           onSelect={(key) => navigate({ departureId: key })}
         />

@@ -44,6 +44,7 @@ export interface BookingWarning {
   text: string                 // plain Chinese for the PM / staff
   needsConfirm: boolean        // true only for departure_changed (staff must press the confirm button)
   kind: MilestoneKind | null   // which milestone it is about, null = the whole booking
+  defaultLead?: true           // the standard-lead-time note (nothing unusual); roll-up lists leave it out
 }
 export interface MilestoneView {
   kind: MilestoneKind

@@ -58,7 +58,7 @@ describe('付款总览 interactions', () => {
 
   it('the undecided row filters with departureId=none', async () => {
     const fetchMock = await renderReady()
-    fireEvent.click(screen.getByRole('button', { name: /出发日期还没定/ }))
+    fireEvent.click(screen.getByRole('button', { name: /还没选出发日期/ }))
     await waitFor(() => {
       expect(overviewCalls(fetchMock).some((u) => u.includes('departureId=none'))).toBe(true)
     })

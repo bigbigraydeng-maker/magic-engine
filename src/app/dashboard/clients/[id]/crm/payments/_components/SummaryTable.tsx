@@ -6,8 +6,7 @@
  */
 
 import type { OverviewGroup, OverviewTotals } from '@/lib/crm/booking-overview-types'
-import { groupTitle, unitLabel, unsettledText, warningText } from './payments-format'
-import { shortDate } from '../../_components/bookings/booking-format'
+import { dateLabel, groupTitle, unitLabel, unsettledText, warningText } from './payments-format'
 
 const CELL_CLASS = 'px-3 py-2 text-right align-top tabular-nums'
 const HEAD_CLASS = 'px-3 py-2 text-right align-bottom text-xs font-black text-me-charcoal/70'
@@ -24,7 +23,16 @@ const WARNING_LINE_CLASS = 'mt-1 text-xs font-semibold text-[#7C3A06]'
 interface GroupRowProps {
   group: OverviewGroup
   selected: boolean
+  today: string
   onSelect: (key: string | null) => void
+}
+
+/** Spoken name of the select button (the visible text is split over several lines). */
+function selectLabel(group: OverviewGroup): string {
+  if (group.kind === 'undecided') return '只看还没选出发日期的订单'
+  if (group.kind === 'unknown_date') return '只看日期不明的出发'
+  const title = groupTitle(group)
+  return `只看 ${title.tour} ${group.departOn ?? ''} 出发的订单`.replace(/\s+/g, ' ')
 }
 
 /** The first cell: a button that selects (or clears) this departure date. */
@@ -44,6 +52,7 @@ function GroupRowLabel({ group, selected, onSelect }: GroupRowProps) {
       <button
         type="button"
         aria-pressed={selected}
+        aria-label={selectLabel(group)}
         onClick={handleClick}
         className={SELECT_BUTTON_CLASS}
       >
@@ -69,20 +78,20 @@ function GroupRowLabel({ group, selected, onSelect }: GroupRowProps) {
 }
 
 /** One body row: the label cell plus the six count cells. */
-function GroupRow({ group, selected, onSelect }: GroupRowProps) {
+function GroupRow({ group, selected, today, onSelect }: GroupRowProps) {
   return (
     <tr
       onClick={() => onSelect(selected ? null : group.key)}
       className={selected ? 'cursor-pointer bg-me-ochre/10' : 'cursor-pointer'}
     >
-      <GroupRowLabel group={group} selected={selected} onSelect={onSelect} />
+      <GroupRowLabel group={group} selected={selected} today={today} onSelect={onSelect} />
       <td className={CELL_CLASS}>{unitLabel(group.orders)}</td>
       <td className={CELL_CLASS}>{unitLabel(group.depositPaid)}</td>
       <td className={CELL_CLASS}>{unitLabel(group.balancePaid)}</td>
       <td className={CELL_CLASS}>{unsettledText(group.unsettled, group.unsettledOverdue)}</td>
       <td className={CELL_CLASS}>{unitLabel(group.offlineHandled)}</td>
       <td className={CELL_CLASS}>
-        {group.nearestDueOn === null ? '—' : shortDate(group.nearestDueOn)}
+        {group.nearestDueOn === null ? '—' : dateLabel(group.nearestDueOn, today)}
       </td>
     </tr>
   )
@@ -93,8 +102,9 @@ export function SummaryTable(props: {
   selectedKey: string | null
   onSelect: (key: string | null) => void
   totals: OverviewTotals
+  today: string
 }): JSX.Element {
-  const { groups, selectedKey, onSelect, totals } = props
+  const { groups, selectedKey, onSelect, totals, today } = props
 
   return (
     <div className="overflow-x-auto rounded-xl border border-me-charcoal/15 bg-white">
@@ -131,6 +141,7 @@ export function SummaryTable(props: {
               key={group.key}
               group={group}
               selected={group.key === selectedKey}
+              today={today}
               onSelect={onSelect}
             />
           ))}

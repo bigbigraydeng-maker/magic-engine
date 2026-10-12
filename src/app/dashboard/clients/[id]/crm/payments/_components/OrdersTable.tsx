@@ -2,8 +2,7 @@
 
 import Link from 'next/link'
 import { MUTED_TEXT, SECONDARY_BUTTON } from '../../_components/bookings/booking-styles'
-import { shortDate } from '../../_components/bookings/booking-format'
-import { milestoneCellText } from './payments-format'
+import { dateLabel, milestoneCellText } from './payments-format'
 import type { OverviewListRow } from '@/lib/crm/booking-overview-types'
 
 interface OrdersTableProps {
@@ -105,7 +104,7 @@ function OrderRow(props: OrderRowProps): JSX.Element {
       <td className="px-3 py-2">{milestoneCellText(row.deposit, props.today)}</td>
       <td className="px-3 py-2">{milestoneCellText(row.balance, props.today)}</td>
       <td className="px-3 py-2">
-        {row.lastNudgedOn === null ? '—' : shortDate(row.lastNudgedOn)}
+        {row.lastNudgedOn === null ? '—' : dateLabel(row.lastNudgedOn, props.today)}
       </td>
       <td className="px-3 py-2">
         <NoteCell note={row.note} warnings={row.warnings} />

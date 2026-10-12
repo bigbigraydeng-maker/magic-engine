@@ -77,7 +77,7 @@ describe('付款总览 page rendering', () => {
     expect(within(rowB).getByText('出发日变了，请确认')).toBeTruthy()
     expect(within(rowB).getByText('8月05日')).toBeTruthy()
 
-    const rowUndecided = groupRow(/出发日期还没定/)
+    const rowUndecided = groupRow(/还没选出发日期/)
     expect(within(rowUndecided).getByText('10月02日')).toBeTruthy()
   })
 
@@ -90,7 +90,7 @@ describe('付款总览 page rendering', () => {
     renderPage()
     await screen.findByRole('table', { name: '各出发日期的收款进度' })
 
-    const row = groupRow(/出发日期还没定/)
+    const row = groupRow(/还没选出发日期/)
     expect(within(row).getByText('—')).toBeTruthy()
   })
 

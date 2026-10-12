@@ -120,9 +120,11 @@ function cellFor(
   view: OverviewEntry['view'],
   kind: MilestoneKind,
 ): OverviewMilestoneCell | null {
+  // A cancelled order owes nothing: no 未收 cells that could read as money still due.
+  if (view.status === 'cancelled') return null
   const m = view.milestones.find((x) => x.kind === kind)
   if (m === undefined) return null
-  return toCell(m, view.status === 'cancelled')
+  return toCell(m, false)
 }
 
 /** Copy a MilestoneView into a list cell; cancelled bookings are never overdue. */
@@ -158,7 +160,8 @@ function toRow(
     deposit: cellFor(view, 'deposit'),
     balance: cellFor(view, 'balance'),
     lastNudgedOn: lastNudgedOn(item),
-    warnings: view.warnings.map((w) => ({ code: w.code, text: w.text })),
+    // The standard lead-time note repeats on every row; keep only the unusual ones (cruise, long tour).
+    warnings: view.warnings.filter((w) => w.defaultLead !== true).map((w) => ({ code: w.code, text: w.text })),
     note: view.status === 'cancelled' ? view.cancelNote : view.note,
   }
 }

@@ -217,8 +217,9 @@ describe('toOverviewListRows', () => {
     if (r4 === undefined) throw new Error('missing row for booking 4')
     expect(r4.contactName).toBeNull()
     expect(r4.status).toBe('cancelled')
-    expect(r4.deposit?.overdue).toBe(false)
-    expect(r4.balance?.overdue).toBe(false)
+    // D4: a cancelled order owes nothing, so no cells that could read as money still due.
+    expect(r4.deposit).toBeNull()
+    expect(r4.balance).toBeNull()
     expect(r4.note).toBe('changed plans')
   })
 
