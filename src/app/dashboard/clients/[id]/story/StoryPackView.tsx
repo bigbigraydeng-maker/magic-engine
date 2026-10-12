@@ -11,6 +11,7 @@ import {
   describeItemStatus,
   describePackState,
   describeProblem,
+  describeStopResult,
   describeRange,
   formatSlot,
 } from '@/lib/social/story-lite/page-text'
@@ -20,7 +21,9 @@ interface Props {
   clientId: string
   preview: LitePreview
   live: boolean
-  onChanged: () => void
+  /** Number of OTHER weeks that are still authorised (the stop button only stops this one). */
+  otherAuthorized: number
+  onChanged: () => Promise<void>
 }
 
 function Thumb({ item }: { item: LitePreviewItem }) {
@@ -40,7 +43,7 @@ function Thumb({ item }: { item: LitePreviewItem }) {
   )
 }
 
-function ItemCard({ item }: { item: LitePreviewItem }) {
+function ItemCard({ item, showProblems }: { item: LitePreviewItem; showProblems: boolean }) {
   return (
     <li className="flex gap-3 rounded-xl border border-black/10 bg-white p-3">
       <Thumb item={item} />
@@ -50,7 +53,7 @@ function ItemCard({ item }: { item: LitePreviewItem }) {
           计划发布：{formatSlot(item.slot_at)}（新西兰时间） · 发到：Facebook 主页 Story
         </p>
         <p className="text-xs font-medium text-me-charcoal/80">状态：{describeItemStatus(item.status)}</p>
-        {item.problems.length > 0 && (
+        {showProblems && item.problems.length > 0 && (
           <ul className="space-y-0.5">
             {item.problems.map((code) => (
               <li key={code} className="text-xs font-medium text-[#B03A2E]">
@@ -64,7 +67,7 @@ function ItemCard({ item }: { item: LitePreviewItem }) {
   )
 }
 
-export function StoryPackView({ clientId, preview, live, onChanged }: Props) {
+export function StoryPackView({ clientId, preview, live, otherAuthorized, onChanged }: Props) {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [confirmingStop, setConfirmingStop] = useState(false)
@@ -74,7 +77,6 @@ export function StoryPackView({ clientId, preview, live, onChanged }: Props) {
   const canStop = preview.state === 'AUTHORIZED' || preview.state === 'DRAFT'
 
   async function call(path: 'authorize' | 'revoke', body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
-    setBusy(true)
     setMessage(null)
     try {
       const res = await fetch(`${base}/${path}`, {
@@ -85,39 +87,51 @@ export function StoryPackView({ clientId, preview, live, onChanged }: Props) {
       const json = (await res.json().catch(() => null)) as Record<string, unknown> | null
       if (!res.ok || !json || json.success !== true) {
         setMessage(describeActionError(typeof json?.error === 'string' ? json.error : ''))
-        onChanged()
         return null
       }
       return json
     } catch {
-      setMessage('网络出了问题，没成功，请刷新页面再试')
+      // the request may have reached the server even though the answer was lost
+      setMessage('网络出了问题，不确定有没有成功。页面已刷新，请看上面显示的最新状态。')
       return null
-    } finally {
-      setBusy(false)
     }
   }
 
   async function authorize() {
+    setBusy(true)
     const json = await call('authorize', {
       confirm: true,
       lifetime_days: preview.lifetime_days,
       content_hash: preview.content_hash,
     })
+    // stay busy until the fresh state is on screen, so a second click cannot hit the old state
+    await onChanged()
     if (json) {
-      setMessage(live ? '已授权：到点会真的发出去。' : '已授权：现在是演练模式，到点只检查、不会发出。')
-      onChanged()
+      const expires = typeof json.expires_at === 'string' ? json.expires_at : preview.expires_at_if_authorized
+      setMessage(
+        live
+          ? '已授权：到点会真的发出去。'
+          : `已授权：现在是演练模式，到点只检查、不会发出。注意：到 ${formatSlot(expires)} 之前，一旦开启真发，没发的内容会自动发出。`,
+      )
     }
+    setBusy(false)
   }
 
   async function stop() {
     setConfirmingStop(false)
+    setBusy(true)
     const json = await call('revoke', { reason: 'PM 在 Story 页面点了停' })
+    await onChanged()
     if (json) {
       const sent = Array.isArray(json.sent) ? json.sent.length : 0
-      setMessage(sent > 0 ? `已停。已经发出去的 ${sent} 条不会撤回，剩下的不会再发。` : '已停。剩下的都不会再发。')
-      onChanged()
+      const inFlight = Array.isArray(json.in_flight) ? json.in_flight.length : 0
+      setMessage(describeStopResult(preview.title, sent, inFlight))
     }
+    setBusy(false)
   }
+
+  const itemCodes = new Set(preview.items.flatMap((item) => item.problems))
+  const packLevelProblems = preview.blocking.filter((code) => !itemCodes.has(code))
 
   return (
     <section className="space-y-4" aria-label={preview.title}>
@@ -128,7 +142,7 @@ export function StoryPackView({ clientId, preview, live, onChanged }: Props) {
 
       <ul className="space-y-3">
         {preview.items.map((item) => (
-          <ItemCard key={item.item_id} item={item} />
+          <ItemCard key={item.item_id} item={item} showProblems={preview.state === 'DRAFT'} />
         ))}
       </ul>
 
@@ -140,7 +154,22 @@ export function StoryPackView({ clientId, preview, live, onChanged }: Props) {
           </p>
         )}
         {preview.state === 'DRAFT' && !preview.can_authorize && (
-          <p className="text-sm font-medium text-[#B03A2E]">上面还有标红的问题，先解决才能授权。</p>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-[#B03A2E]">现在不能授权，先解决问题：</p>
+            <ul className="space-y-0.5">
+              {packLevelProblems.map((code) => (
+                <li key={code} className="text-sm font-medium text-[#B03A2E]">
+                  ⚠ {describeProblem(code)}
+                </li>
+              ))}
+              {packLevelProblems.length === 0 && <li className="text-sm text-me-charcoal">上面每条标红的问题都要先解决。</li>}
+            </ul>
+          </div>
+        )}
+        {otherAuthorized > 0 && (
+          <p role="status" className="text-sm font-medium text-[#B03A2E]">
+            注意：另外还有 {otherAuthorized} 周也处于已授权状态，这里的「停」只停当前这一周。
+          </p>
         )}
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -153,7 +182,7 @@ export function StoryPackView({ clientId, preview, live, onChanged }: Props) {
           </button>
           {confirmingStop ? (
             <span className="flex items-center gap-2 rounded-lg bg-[#B03A2E]/10 px-3 py-2">
-              <span className="text-sm font-medium text-[#B03A2E]">确定要停吗？剩下还没发的都不会再发。</span>
+              <span className="text-sm font-medium text-[#B03A2E]">确定只停「{preview.title}」这一周吗？停掉后这一周不能再授权，要重新出周包；其他周不受影响。</span>
               <button
                 type="button"
                 disabled={busy}

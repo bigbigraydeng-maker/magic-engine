@@ -7,6 +7,7 @@ import {
   describePackState,
   describeProblem,
   describeRange,
+  describeStopResult,
   formatSlot,
 } from '../page-text'
 import type { LiteItemStatus } from '../types'
@@ -78,5 +79,24 @@ describe('story page wording', () => {
     expect(describeActionError('PACK_CHANGED_SINCE_PREVIEW')).toContain('改过')
     expect(describeActionError('???')).toContain('没成功')
     expect(describeActionError('PACK_CHANGED_SINCE_PREVIEW')).not.toMatch(BANNED)
+  })
+
+  it('after 「停」 it never says all is stopped while something is sent or unsettled', () => {
+    const clean = describeStopResult('第3周', 0, 0)
+    expect(clean).toContain('不会再发')
+    expect(clean).toContain('第3周')
+    expect(clean).not.toContain('核对')
+    const sent = describeStopResult('第3周', 2, 0)
+    expect(sent).toContain('2 条')
+    expect(sent).toContain('手动删除')
+    const unsure = describeStopResult('第3周', 0, 1)
+    expect(unsure).toContain('1 条')
+    expect(unsure).toContain('核对')
+    expect(describeStopResult('第3周', 1, 1)).toMatch(/1 条不会撤回.*1 条正在发/)
+  })
+
+  it('rehearsal wording says an authorisation stays valid after live is switched on', () => {
+    expect(describeMode(false).detail).toContain('一旦开启真发')
+    expect(describeItemStatus('UNKNOWN_OUTCOME')).toContain('核对')
   })
 })

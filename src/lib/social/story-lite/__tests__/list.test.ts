@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { InMemoryLiteStore } from '../in-memory-store'
-import { isLiveFor, listLitePacks } from '../list'
+import { listLitePacks } from '../list'
+import { isLiveFor } from '../types'
 import type { LiteServicePorts } from '../service'
 import type { LiteActor, NewLiteItem } from '../types'
 

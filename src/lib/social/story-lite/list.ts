@@ -3,7 +3,7 @@
  * Read-only. Global administrators only (same gate as preview / authorise / revoke).
  */
 import { packState, requireGlobalAdmin, type LitePackState, type LiteResult, type LiteServicePorts } from './service'
-import type { LiteActor, LiteSwitches } from './types'
+import { isLiveFor, type LiteActor, type LiteSwitches } from './types'
 
 const LIST_LIMIT = 10
 
@@ -21,11 +21,6 @@ export interface LitePackList {
   /** True only when this client is really allowed to publish right now. */
   live: boolean
   packs: LitePackSummary[]
-}
-
-/** Real publishing needs BOTH switches: the global one on, and this client on the list. */
-export function isLiveFor(switches: LiteSwitches, clientId: string): boolean {
-  return switches.live && switches.clientIds.includes(clientId.trim().toLowerCase())
 }
 
 export async function listLitePacks(input: {

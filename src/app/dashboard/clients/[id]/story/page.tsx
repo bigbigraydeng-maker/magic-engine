@@ -6,7 +6,7 @@
  */
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { describeMode, describePackState } from '@/lib/social/story-lite/page-text'
 import type { LitePackList } from '@/lib/social/story-lite/list'
@@ -22,10 +22,15 @@ export default function StoryPage() {
   const [list, setList] = useState<LitePackList | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [preview, setPreview] = useState<LitePreview | null>(null)
+  const [previewFailed, setPreviewFailed] = useState(false)
+  const seq = useRef(0)
 
   const refresh = useCallback(async (wanted?: string) => {
+    const mine = ++seq.current
+    const stale = () => mine !== seq.current
     try {
       const res = await fetch(`/api/clients/${clientId}/story-lite`)
+      if (stale()) return
       if (res.status === 401 || res.status === 403) return setLoad('forbidden')
       const json = (await res.json()) as { success?: boolean } & Partial<LitePackList>
       if (!res.ok || json.success !== true || !json.packs) return setLoad('error')
@@ -35,11 +40,20 @@ export default function StoryPage() {
       setSelected(pick?.pack_id ?? null)
       if (!pick) {
         setPreview(null)
+        setPreviewFailed(false)
         return setLoad('ready')
       }
       const pRes = await fetch(`/api/clients/${clientId}/story-lite/${pick.pack_id}/preview`)
-      const pJson = (await pRes.json()) as { success?: boolean } & Partial<LitePreview>
-      if (!pRes.ok || pJson.success !== true) return setLoad('error')
+      if (pRes.status === 401 || pRes.status === 403) return setLoad('forbidden')
+      const pJson = (await pRes.json().catch(() => ({}))) as { success?: boolean } & Partial<LitePreview>
+      if (stale()) return
+      if (!pRes.ok || pJson.success !== true) {
+        // keep the picker usable: only this week failed to read, and the page says so
+        setPreview(null)
+        setPreviewFailed(true)
+        return setLoad('ready')
+      }
+      setPreviewFailed(false)
       setPreview(pJson as LitePreview)
       setLoad('ready')
     } catch {
@@ -103,7 +117,10 @@ export default function StoryPage() {
           )}
 
           {preview ? (
-            <StoryPackView clientId={clientId} preview={preview} live={list.live} onChanged={() => void refresh()} />
+            <StoryPackView clientId={clientId} preview={preview} live={list.live} otherAuthorized={list.packs.filter((p) => p.state === 'AUTHORIZED' && p.pack_id !== preview.pack_id).length}
+              onChanged={() => refresh()} />
+          ) : previewFailed ? (
+            <p className="text-sm font-medium text-[#B03A2E]">这一周读不出来（可能里面还没有 Story），现在不知道状态，不能授权。可以换一周看，或找开发。</p>
           ) : (
             <p className="text-sm text-me-charcoal/80">现在还没有要授权的 Story 周包。周包准备好以后会出现在这里。</p>
           )}

@@ -26,7 +26,7 @@ const ITEM_STATUS_TEXT: Record<LiteItemStatus, string> = {
   PENDING: '等待发布',
   CLAIMED: '正在发布',
   SENT: '已发出',
-  UNKNOWN_OUTCOME: '不确定有没有发出去',
+  UNKNOWN_OUTCOME: '不确定有没有发出去，请到 Facebook 主页核对',
   FAILED: '发布失败',
   BLOCKED: '检查没通过，没发',
   MISSED: '错过了时间，没发',
@@ -58,13 +58,13 @@ export function describeMode(live: boolean): ModeBanner {
     return {
       tone: 'live',
       headline: '真发已开：授权后，到点会真的发到 Facebook 主页',
-      detail: '点「停」可以随时停下还没发的；已经发出去的不会撤回。',
+      detail: '点「停」可以随时停下还没发的；已经发出去的不会撤回，需要的话要到 Facebook 主页手动删除。',
     }
   }
   return {
     tone: 'rehearsal',
     headline: '演练模式：不会真发',
-    detail: '现在点授权只是记下你同意，系统到点只会检查、不会发出任何内容。',
+    detail: '现在点授权只是记下你同意，系统到点只会检查、不会发出任何内容。注意：授权在有效期内一直算数，之后一旦开启真发，没发的内容会自动发出，不用再授权一次。',
   }
 }
 
@@ -81,7 +81,7 @@ export function formatSlot(iso: string): string {
     weekday: 'short',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hourCycle: 'h23',
   }).formatToParts(date)
   const get = (type: string): string => parts.find((p) => p.type === type)?.value ?? ''
   return `${get('month')}月${get('day')}日 ${get('weekday')} ${get('hour')}:${get('minute')}`
@@ -108,4 +108,12 @@ const ACTION_ERROR_TEXT: Record<string, string> = {
 
 export function describeActionError(code: string): string {
   return ACTION_ERROR_TEXT[code] ?? '没成功，请刷新页面再试；还不行就找开发'
+}
+
+/** What the page says right after 「停」, from the stop result. Never claims "all stopped" while something is unsettled. */
+export function describeStopResult(title: string, sentCount: number, inFlightCount: number): string {
+  const parts = [`已停「${title}」这一周，这一周还没发的不会再发。`]
+  if (sentCount > 0) parts.push(`已经发出去的 ${sentCount} 条不会撤回，需要的话请到 Facebook 主页手动删除。`)
+  if (inFlightCount > 0) parts.push(`另有 ${inFlightCount} 条正在发或不确定有没有发出去，请到 Facebook 主页核对，已发出的要手动删除。`)
+  return parts.join('')
 }

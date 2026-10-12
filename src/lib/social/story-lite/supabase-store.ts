@@ -254,6 +254,7 @@ export class SupabaseLiteStore implements LiteStore {
       .select('*')
       .eq('client_id', clientId)
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(limit)
     if (error) throw error
     const packs = ((data as PackRow[] | null) ?? []).map(mapPack)
