@@ -101,6 +101,12 @@ export interface StoryGateInput {
   registeredAccountId: string | null
   circuit: { itemPaused: boolean; packChannelPaused: boolean }
   fileCheck: 'OK' | 'CHANGED' | 'UNREACHABLE'
+  /**
+   * Whether this media file was already published as a post / reel / story.
+   * Facebook refuses a Story built from a file used before, so Facebook only
+   * passes on 'UNUSED'; a missing record ('UNKNOWN') blocks, it never passes.
+   */
+  assetUsage: 'UNUSED' | 'USED' | 'UNKNOWN'
   priceGate: 'OK' | 'BLOCKED' | 'ERROR'
   replyOwnerPresent: boolean
   existingAttempt: {
@@ -257,11 +263,15 @@ function checkExistingAttempt(input: StoryGateInput): StoryGateDecision | null {
   }
 
   if (existing.status === 'RETRYABLE') {
+    if (!Number.isFinite(existing.retry_count)) return record('BLOCKED', 'RETRY_STATE_INVALID', false)
     if (existing.retry_count >= input.config.maxRetries) {
       return record('BLOCKED', 'FILE_UNREACHABLE', false)
     }
+    if (!Number.isFinite(existing.retry_count)) return record('BLOCKED', 'RETRY_STATE_INVALID', false)
     const nextRetry = parseInstant(existing.next_retry_at)
-    if (nextRetry === null || nextRetry > nowMs) return skip('WAITING_RETRY')
+    // a RETRYABLE row must always carry a readable retry time; without one it would wait forever
+    if (nextRetry === null) return record('BLOCKED', 'RETRY_STATE_INVALID', false)
+    if (nextRetry > nowMs) return skip('WAITING_RETRY')
   }
 
   return null
@@ -347,6 +357,13 @@ function checkFile(input: StoryGateInput): StoryGateDecision | null {
   return null
 }
 
+/** Rule (g2): Facebook refuses a Story made from an already-published file. */
+function checkAssetUsage(input: StoryGateInput): StoryGateDecision | null {
+  if (input.item.channel !== 'facebook_story') return null
+  if (input.assetUsage === 'UNUSED') return null
+  return record('BLOCKED', input.assetUsage === 'USED' ? 'ASSET_ALREADY_USED' : 'ASSET_USAGE_UNKNOWN', false)
+}
+
 /** Rule (h): the price gate must be green. */
 function checkPrice(input: StoryGateInput): StoryGateDecision | null {
   if (input.priceGate === 'ERROR') return record('BLOCKED', 'PRICE_GATE_ERROR', true)
@@ -354,10 +371,15 @@ function checkPrice(input: StoryGateInput): StoryGateDecision | null {
   return null
 }
 
-/** Rule (m): a reply CTA in the text must be declared on the item. */
+/**
+ * Rule (m): a reply CTA in the text must be declared on the item.
+ *
+ * BEST EFFORT: this word list is a heuristic safety net (English and Chinese).
+ * The real source of truth is the human-declared `has_reply_cta`.
+ */
 function checkReplyCtaDeclared(input: StoryGateInput): StoryGateDecision | null {
   if (input.item.has_reply_cta) return null
-  const pattern = /\b(reply|replies|dm us|message us|inbox|comment below)\b/i
+  const pattern = /\b(reply|replies|dm us|message us|inbox|comment below)\b|回复|私信|留言|评论|咨询我们|联系我们/i
   if (pattern.test(input.item.text_line)) {
     return record('BLOCKED', 'REPLY_CTA_UNDECLARED', false)
   }
@@ -420,6 +442,7 @@ export function decideStoryPublish(input: StoryGateInput): StoryGateDecision {
     checkCircuit,
     checkLateness,
     checkFile,
+    checkAssetUsage,
     checkPrice,
     checkReplyCtaDeclared,
     checkReplyOwner,

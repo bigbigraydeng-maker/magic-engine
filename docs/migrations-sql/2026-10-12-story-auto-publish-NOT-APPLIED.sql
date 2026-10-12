@@ -41,8 +41,10 @@ begin
   if old.activated_at is not null and new.activated_at is distinct from old.activated_at then
     raise exception 'story_pack_auth: activated_at is write-once';
   end if;
-  if old.revoked_at is not null and new.revoked_at is distinct from old.revoked_at then
-    raise exception 'story_pack_auth: a revocation cannot be undone';
+  if old.revoked_at is not null and (new.revoked_at is distinct from old.revoked_at
+     or new.revoked_by_email is distinct from old.revoked_by_email
+     or new.revoked_reason is distinct from old.revoked_reason) then
+    raise exception 'story_pack_auth: a revocation is write-once';
   end if;
   return new;
 end $$;
@@ -50,7 +52,8 @@ end $$;
 create trigger story_pack_auth_freeze_trg before update on public.story_pack_auth
   for each row execute function public.story_pack_auth_freeze();
 
--- one live authorisation per pack at a time
+-- one live authorisation per pack at a time (an expired but un-revoked grant still occupies it:
+-- re-authorising a pack must revoke the old grant first — the authorise endpoint must do that)
 create unique index story_pack_auth_active_pack_idx
   on public.story_pack_auth (pack_id)
   where revoked_at is null;
@@ -74,8 +77,6 @@ create table public.story_pack_items (
   website_ref text not null check (website_ref like 'https://%'),
   website_checked_on date not null,
   has_reply_cta boolean not null default false,
-  -- fingerprint the PM authorised for this item (null until authorised)
-  authorized_fingerprint text check (authorized_fingerprint is null or authorized_fingerprint ~ '^[0-9a-f]{64}$'),
   authorization_id uuid references public.story_pack_auth(id),
   -- circuit-breaker pause for this single item (reason is a stable code)
   paused_at timestamptz,
@@ -88,6 +89,15 @@ create table public.story_pack_items (
 -- only pause fields, the authorisation link and the stored fingerprint may change.
 create function public.story_pack_items_lock_content() returns trigger language plpgsql as $$
 begin
+  if new.item_id is distinct from old.item_id or new.channel is distinct from old.channel then
+    raise exception 'story_pack_items: the key (item_id, channel) is immutable';
+  end if;
+  -- the authorisation link cannot be cleared or swapped while the old grant is still live
+  if old.authorization_id is not null
+     and new.authorization_id is distinct from old.authorization_id
+     and exists (select 1 from public.story_pack_auth a where a.id = old.authorization_id and a.revoked_at is null) then
+    raise exception 'story_pack_items: the authorisation link is locked while the grant is live';
+  end if;
   if old.authorization_id is not null
      and exists (select 1 from public.story_pack_auth a where a.id = old.authorization_id and a.revoked_at is null)
      and (new.pack_id is distinct from old.pack_id
@@ -151,6 +161,8 @@ create table public.story_publish_attempts (
   retry_count integer not null default 0 check (retry_count >= 0),
   -- set when the publish right is taken (status PUBLISHING); the stale-publish sweep reads it
   publish_started_at timestamptz,
+  settled_by_email text,
+  settled_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint story_publish_attempts_item_channel_key unique (item_id, channel),
@@ -171,8 +183,12 @@ create table public.story_publish_attempts (
   ),
   -- the two-step Instagram states always know their container
   constraint story_publish_attempts_container_chk check (
-    status not in ('CONTAINER_CREATED','PUBLISHING') or container_id is not null
-  )
+    channel <> 'instagram_story' or status not in ('CONTAINER_CREATED','PUBLISHING') or container_id is not null
+  ),
+  -- a retryable row always knows when it may be retried
+  constraint story_publish_attempts_retry_chk check (status <> 'RETRYABLE' or next_retry_at is not null),
+  -- who settled an unknown outcome by hand, and why (set together with the status change)
+  constraint story_publish_attempts_settled_chk check ((settled_by_email is null) = (settled_reason is null))
 );
 
 create index story_publish_attempts_client_status_idx on public.story_publish_attempts (client_id, status);
@@ -187,21 +203,44 @@ end $$;
 create trigger story_publish_attempts_touch_trg before update on public.story_publish_attempts
   for each row execute function public.story_touch_updated_at();
 
--- Outcomes only move forward: a published / failed / missed row can never be rolled back,
--- PUBLISHED_UNVERIFIED may only be confirmed, UNKNOWN_OUTCOME may only be settled by a human.
+-- Outcomes only move along allowed transitions (a white list), so a published / in-flight row can
+-- never be rolled back to a state that would be sent again. UNKNOWN_OUTCOME may only be settled by a
+-- human, who must be recorded.
 create function public.story_publish_attempts_no_rollback() returns trigger language plpgsql as $$
 begin
+  -- receipts and container ids are write-once once present
+  if old.provider_receipt is not null and new.provider_receipt is distinct from old.provider_receipt then
+    raise exception 'story_publish_attempts: provider_receipt is write-once';
+  end if;
+  if old.container_id is not null and new.container_id is distinct from old.container_id then
+    raise exception 'story_publish_attempts: container_id is write-once';
+  end if;
+  if old.status in ('PUBLISHED','PUBLISHED_UNVERIFIED','FAILED_FINAL','MISSED_WINDOW','UNKNOWN_OUTCOME')
+     and (new.mode is distinct from old.mode
+       or new.content_hash is distinct from old.content_hash
+       or new.auth_id is distinct from old.auth_id
+       or new.request_id is distinct from old.request_id
+       or new.item_id is distinct from old.item_id
+       or new.channel is distinct from old.channel) then
+    raise exception 'story_publish_attempts: settled rows keep their identity fields';
+  end if;
   if new.status = old.status then
     return new;
   end if;
-  if old.status in ('PUBLISHED','FAILED_FINAL','MISSED_WINDOW') then
-    raise exception 'story_publish_attempts: % is final', old.status;
+  if not (
+       (old.status in ('DRY_RUN','BLOCKED','SKIPPED_NOT_AUTHORIZED')
+          and new.status in ('DRY_RUN','BLOCKED','SKIPPED_NOT_AUTHORIZED','MISSED_WINDOW','RETRYABLE','CLAIMED'))
+    or (old.status = 'RETRYABLE' and new.status in ('CLAIMED','BLOCKED','MISSED_WINDOW'))
+    or (old.status = 'CLAIMED' and new.status in ('CONTAINER_CREATED','PUBLISHED_UNVERIFIED','BLOCKED','RETRYABLE','FAILED_FINAL','UNKNOWN_OUTCOME','MISSED_WINDOW'))
+    or (old.status = 'CONTAINER_CREATED' and new.status in ('PUBLISHING','FAILED_FINAL','UNKNOWN_OUTCOME'))
+    or (old.status = 'PUBLISHING' and new.status in ('PUBLISHED_UNVERIFIED','FAILED_FINAL','UNKNOWN_OUTCOME'))
+    or (old.status = 'PUBLISHED_UNVERIFIED' and new.status = 'PUBLISHED')
+    or (old.status = 'UNKNOWN_OUTCOME' and new.status in ('PUBLISHED_UNVERIFIED','PUBLISHED','FAILED_FINAL'))
+  ) then
+    raise exception 'story_publish_attempts: transition % -> % is not allowed', old.status, new.status;
   end if;
-  if old.status = 'PUBLISHED_UNVERIFIED' and new.status <> 'PUBLISHED' then
-    raise exception 'story_publish_attempts: PUBLISHED_UNVERIFIED can only become PUBLISHED';
-  end if;
-  if old.status = 'UNKNOWN_OUTCOME' and new.status not in ('PUBLISHED_UNVERIFIED','PUBLISHED','FAILED_FINAL') then
-    raise exception 'story_publish_attempts: UNKNOWN_OUTCOME can only be settled to a confirmed outcome';
+  if old.status = 'UNKNOWN_OUTCOME' and (new.settled_by_email is null or new.settled_reason is null) then
+    raise exception 'story_publish_attempts: settling an unknown outcome must record who and why';
   end if;
   return new;
 end $$;
@@ -210,15 +249,32 @@ create trigger story_publish_attempts_no_rollback_trg before update on public.st
   for each row execute function public.story_publish_attempts_no_rollback();
 
 -- 5. Per (pack, channel) publish lease: only one sweep may be sending for a pack+channel at a time.
--- Take it with: update ... set holder = :run, expires_at = now() + :ttl
---               where pack_id = :p and channel = :c and (holder is null or expires_at < now())  -- 1 row = got it
+-- Use story_take_lease(): it creates the row on first use and takes over only a free or expired lease.
 create table public.story_pack_lease (
   pack_id uuid not null,
   channel text not null check (channel in ('facebook_story','instagram_story')),
   holder uuid,
   expires_at timestamptz,
-  primary key (pack_id, channel)
+  primary key (pack_id, channel),
+  constraint story_pack_lease_pair_chk check ((holder is null) = (expires_at is null))
 );
+
+create function public.story_take_lease(p_pack uuid, p_channel text, p_holder uuid, p_ttl interval)
+returns boolean language plpgsql as $$
+declare n integer;
+begin
+  insert into public.story_pack_lease as l (pack_id, channel, holder, expires_at)
+  values (p_pack, p_channel, p_holder, now() + p_ttl)
+  on conflict (pack_id, channel) do update
+    set holder = excluded.holder, expires_at = excluded.expires_at
+    where l.holder is null or l.expires_at < now();
+  get diagnostics n = row_count;
+  return n = 1;
+end $$;
+
+-- functions are executable by PUBLIC by default: lock it to the service role
+revoke all on function public.story_take_lease(uuid, text, uuid, interval) from public, anon, authenticated;
+grant execute on function public.story_take_lease(uuid, text, uuid, interval) to service_role;
 
 -- 6. Where each media file has already been used (Facebook refuses a Story built from a file that was
 -- already published as a post / reel). Written by the Post / Reel publishers; a missing row means "unknown".
@@ -232,6 +288,19 @@ create table public.story_asset_usage (
 );
 
 create index story_asset_usage_sha_idx on public.story_asset_usage (media_sha256);
+
+-- Records are never deleted (an authorisation or an attempt is evidence).
+create function public.story_no_delete() returns trigger language plpgsql as $$
+begin
+  raise exception '% rows are never deleted', tg_table_name;
+end $$;
+
+create trigger story_pack_auth_no_delete_trg before delete on public.story_pack_auth
+  for each row execute function public.story_no_delete();
+create trigger story_pack_items_no_delete_trg before delete on public.story_pack_items
+  for each row execute function public.story_no_delete();
+create trigger story_publish_attempts_no_delete_trg before delete on public.story_publish_attempts
+  for each row execute function public.story_no_delete();
 
 -- RLS: service-role only, on every table (TO service_role is mandatory).
 alter table public.story_pack_auth enable row level security;

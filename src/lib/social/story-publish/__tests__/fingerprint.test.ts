@@ -303,3 +303,23 @@ describe('computeManifestHash', () => {
     expect(items.map((item) => item.item_id)).toEqual(['item-0003', 'item-0001', 'item-0002'])
   })
 })
+
+describe('instant spelling', () => {
+  it('fingerprints the same moment identically however it is written', () => {
+    const a = computeItemFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:00Z' }, '2026-10-19T09:00:00Z')
+    const b = computeItemFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:00.000Z' }, '2026-10-19T09:00:00.000+00:00')
+    expect(a).toBe(b)
+  })
+
+  it('still changes when the moment itself changes', () => {
+    const a = computeItemFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:00Z' }, '2026-10-19T09:00:00Z')
+    const b = computeItemFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:01Z' }, '2026-10-19T09:00:00Z')
+    expect(a).not.toBe(b)
+  })
+
+  it('never lets an unreadable instant equal a real one', () => {
+    const a = computeItemFingerprint({ ...baseItem(), slot_at: 'not a date' }, '2026-10-19T09:00:00Z')
+    const b = computeItemFingerprint({ ...baseItem(), slot_at: '1970-01-01T00:00:00.000Z' }, '2026-10-19T09:00:00Z')
+    expect(a).not.toBe(b)
+  })
+})

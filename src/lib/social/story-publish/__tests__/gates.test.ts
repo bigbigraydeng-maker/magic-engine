@@ -74,6 +74,7 @@ function baseInput(overrides: Partial<StoryGateInput> = {}): StoryGateInput {
     registeredAccountId: '55566677788',
     circuit: { itemPaused: false, packChannelPaused: false },
     fileCheck: 'OK',
+    assetUsage: 'UNUSED',
     priceGate: 'OK',
     replyOwnerPresent: true,
     existingAttempt: null,

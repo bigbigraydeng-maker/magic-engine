@@ -69,6 +69,7 @@ function baseInput(overrides: Partial<StoryGateInput> = {}): StoryGateInput {
     registeredAccountId: '55566677788',
     circuit: { itemPaused: false, packChannelPaused: false },
     fileCheck: 'OK',
+    assetUsage: 'UNUSED',
     priceGate: 'OK',
     replyOwnerPresent: true,
     existingAttempt: null,
@@ -351,22 +352,22 @@ describe('RETRYABLE', () => {
     expect(d).toEqual({ action: 'SKIP', reason_code: 'WAITING_RETRY' })
   })
 
-  it('next_retry_at null => SKIP WAITING_RETRY', () => {
+  it('next_retry_at null => BLOCKED RETRY_STATE_INVALID (never waits forever)', () => {
     const d = decideStoryPublish(
       baseInput({
         existingAttempt: { status: 'RETRYABLE', updated_at: NOW.toISOString(), next_retry_at: null, retry_count: 1 },
       }),
     )
-    expect(d).toEqual({ action: 'SKIP', reason_code: 'WAITING_RETRY' })
+    expect(d).toEqual({ action: 'RECORD', status: 'BLOCKED', reason_code: 'RETRY_STATE_INVALID', retryable: false })
   })
 
-  it('next_retry_at garbage => SKIP WAITING_RETRY', () => {
+  it('next_retry_at garbage => BLOCKED RETRY_STATE_INVALID', () => {
     const d = decideStoryPublish(
       baseInput({
         existingAttempt: { status: 'RETRYABLE', updated_at: NOW.toISOString(), next_retry_at: 'nope', retry_count: 1 },
       }),
     )
-    expect(d).toEqual({ action: 'SKIP', reason_code: 'WAITING_RETRY' })
+    expect(d).toEqual({ action: 'RECORD', status: 'BLOCKED', reason_code: 'RETRY_STATE_INVALID', retryable: false })
   })
 
   it('next_retry_at equal to now => falls through to normal evaluation (PUBLISH)', () => {
@@ -538,5 +539,74 @@ describe('non-blocking existing attempts fall through', () => {
       }),
     )
     expect(d).toEqual({ action: 'PUBLISH' })
+  })
+})
+
+// ─── 11. Asset usage (Facebook refuses a Story from an already-published file) ──
+
+describe('asset usage gate', () => {
+  it('blocks a Facebook story whose file was already used', () => {
+    expect(decideStoryPublish(baseInput({ assetUsage: 'USED' }))).toEqual({
+      action: 'RECORD', status: 'BLOCKED', reason_code: 'ASSET_ALREADY_USED', retryable: false,
+    })
+  })
+
+  it('blocks a Facebook story whose usage is unknown (a missing record never passes)', () => {
+    expect(decideStoryPublish(baseInput({ assetUsage: 'UNKNOWN' }))).toEqual({
+      action: 'RECORD', status: 'BLOCKED', reason_code: 'ASSET_USAGE_UNKNOWN', retryable: false,
+    })
+  })
+
+  it('blocks any unexpected runtime value on Facebook', () => {
+    const weird = 'maybe' as StoryGateInput['assetUsage']
+    const d = decideStoryPublish(baseInput({ assetUsage: weird }))
+    expect(d.action).toBe('RECORD')
+  })
+
+  it('does not apply the rule to Instagram stories', () => {
+    const item = baseItem({ channel: 'instagram_story' })
+    const switches = { live: true, clientIds: ['client-1'], channels: ['instagram_story' as const] }
+    for (const assetUsage of ['USED', 'UNKNOWN'] as const) {
+      expect(decideStoryPublish(baseInput({ item, assetUsage, switches }))).toEqual({ action: 'PUBLISH' })
+    }
+  })
+
+  it('passes a Facebook story with an unused file', () => {
+    expect(decideStoryPublish(baseInput({ assetUsage: 'UNUSED' }))).toEqual({ action: 'PUBLISH' })
+  })
+})
+
+// ─── 12. Chinese reply words and RETRYABLE state integrity ──────────────────────
+
+describe('reply words in Chinese', () => {
+  for (const text of ['欢迎回复了解详情', '私信我们', '留言咨询', '评论告诉我']) {
+    it(`blocks undeclared reply call "${text}"`, () => {
+      const d = decideStoryPublish(baseInput({ item: baseItem({ text_line: text }) }))
+      expect(d).toEqual({ action: 'RECORD', status: 'BLOCKED', reason_code: 'REPLY_CTA_UNDECLARED', retryable: false })
+    })
+  }
+})
+
+describe('RETRYABLE row integrity', () => {
+  const retry = (over: Partial<NonNullable<StoryGateInput['existingAttempt']>>) =>
+    baseInput({
+      existingAttempt: {
+        status: 'RETRYABLE', updated_at: NOW.toISOString(),
+        next_retry_at: NOW.toISOString(), retry_count: 1, ...over,
+      },
+    })
+
+  it('blocks a RETRYABLE row without a retry time instead of waiting forever', () => {
+    for (const next_retry_at of [null, 'garbage']) {
+      expect(decideStoryPublish(retry({ next_retry_at }))).toEqual({
+        action: 'RECORD', status: 'BLOCKED', reason_code: 'RETRY_STATE_INVALID', retryable: false,
+      })
+    }
+  })
+
+  it('blocks a RETRYABLE row whose retry_count is not a finite number', () => {
+    for (const retry_count of [NaN, Infinity]) {
+      expect(decideStoryPublish(retry({ retry_count })).action).toBe('RECORD')
+    }
   })
 })

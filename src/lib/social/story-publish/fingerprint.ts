@@ -10,6 +10,17 @@ import { storyItemKey, type StoryItemSpec } from './types'
  * ids in the input never changes the fingerprint, and the caller's array is
  * never mutated.
  */
+/**
+ * Normalise an instant to the canonical ISO form so `…Z`, `….000Z` and `+00:00`
+ * spellings of the same moment fingerprint identically (a database may return a
+ * different spelling than the one used at authorisation). An unreadable value is
+ * kept distinguishable so it can never equal a real instant.
+ */
+function canonicalInstant(value: string): string {
+  const ms = Date.parse(value)
+  return Number.isNaN(ms) ? `INVALID:${value}` : new Date(ms).toISOString()
+}
+
 export function canonicalFingerprintInput(item: StoryItemSpec, expiresAt: string): string {
   const sortedSourceRecordIds = [...item.source_record_ids].sort()
 
@@ -18,7 +29,7 @@ export function canonicalFingerprintInput(item: StoryItemSpec, expiresAt: string
     pack_id: item.pack_id,
     client_id: item.client_id,
     channel: item.channel,
-    slot_at: item.slot_at,
+    slot_at: canonicalInstant(item.slot_at),
     media_kind: item.media_kind,
     media_url: item.media_url,
     media_sha256: item.media_sha256,
@@ -28,7 +39,7 @@ export function canonicalFingerprintInput(item: StoryItemSpec, expiresAt: string
     website_ref: item.website_ref,
     website_checked_on: item.website_checked_on,
     has_reply_cta: item.has_reply_cta,
-    expires_at: expiresAt,
+    expires_at: canonicalInstant(expiresAt),
   })
 }
 
