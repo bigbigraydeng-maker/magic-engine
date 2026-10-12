@@ -40,3 +40,9 @@ Remaining before completion: bind confirmation to exact account and media revisi
 - Render read-only deploy lookup: existing Meta Ads staging last live deployment is 98f74f7b73ce7b2ebe31b6c043b2b1fa18f8b46d (2026-09-24), not this working branch. No staging configuration/deployment changed.
 - Eight-file targeted suite: 39 tests passed, exit 0. After return-tab change callback tests 4/4 passed, exit 0. Scoped ESLint and git diff --check exit 0. Config checker requests only implemented scopes, runtimeDeployed false.
 - Remaining: authorization for source submission and isolated test deployment, HTTPS callback registration, runtime ffprobe verification, real OAuth and private upload. No real test posting or audit submission claimed.
+
+## Submission and CTS first business test
+- User authorized unified submission. Local implementation committed as 5b3455190; credential file excluded and staged content scanned against the actual sandbox credentials before commit.
+- User designated CTS as the first business test customer. Sandbox target user bigraydeng remains a technical test account, not evidence of a CTS account connection. CTS account identity must be verified before binding or uploading.
+- Minimal acceptance chain: CTS account authorization -> confirm account and one completed CTS video -> choose SELF_ONLY -> upload -> confirm TikTok finished processing and playback. Public publishing is a separate later action.
+- Remote submission proceeds as a draft PR, without merging or deploying. Main has advanced to c85b286983e7701ba9d310922d2b553700f11a73 at read-only remote lookup; branch integration/build against that main remains unverified.
