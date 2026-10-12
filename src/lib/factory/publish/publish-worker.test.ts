@@ -6,8 +6,7 @@
  * 而「有实现、没接上」正是这个 bug 本身的形态(红线扫描一直存在于交付环节,却从未
  * 覆盖真正发出去的那串文案)。
  *
- * 关键事实:交付时扫的是 output.caption + 分镜文字;发布时发的是 buildCaption() 从
- * brief.copy.endcard 另拼的字。两串不是同一个东西。
+ * 发布正文取分镜文案;CTA 与带追踪参数的落地页链接必须放在首评。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,6 +22,7 @@ vi.mock('./facebook-reel-adapter', () => ({
 import { runPublishWorker } from './publish-worker'
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockPublish = vi.mocked(facebookReelAdapter.publish)
@@ -37,13 +37,20 @@ interface Scenario {
   endcard: Record<string, unknown>
   /** 模拟红线查询失败(fail-closed 用例) */
   redlineQueryError?: boolean
+  checklistReady?: boolean
+  noAngle?: boolean
+  /** 上次上传到一半崩了:留着 provisional 回执 */
+  interrupted?: boolean
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
 let woUpdates: Record<string, unknown>[]
+/** 记录所有 insert payload,用来断言三落库内容 */
+let inserts: { table: string; payload: Record<string, unknown> }[]
 
 function installMocks(s: Scenario) {
   woUpdates = []
+  inserts = []
   let claimed = false
 
   mockFrom.mockImplementation((table: string) => {
@@ -63,9 +70,18 @@ function installMocks(s: Scenario) {
                 client_id: CLIENT_ID,
                 master_brief_id: 'mb-1',
                 publish_attempts: 0,
-                published_ref: null,
-                output: { video_path: 'renders/c/wo/final.mp4' },
-                brief: { angle: 'X', copy: { endcard: s.endcard } },
+              published_ref: s.interrupted ? { provisional: true, video_id: 'v1' } : null,
+                review_ref: s.checklistReady === false ? {} : { checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
+                  key, judge: 'HUMAN', outcome: 'PASS', detail: null,
+                  source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
+                })) },
+                output: {
+                  video_path: 'renders/c/wo/final.mp4',
+                  ...(s.checklistReady === false ? {} : {
+                    quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
+                  }),
+                },
+                brief: { ...(s.noAngle ? {} : { angle: 'X' }), copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
               },
               error: null,
             }
@@ -103,7 +119,7 @@ function installMocks(s: Scenario) {
     for (const m of ['eq', 'or', 'order', 'limit', 'maybeSingle', 'single']) builder[m] = () => builder
     builder.select = (cols?: string) => { ctx.select = cols ?? ''; return builder }
     builder.update = (p: Record<string, unknown>) => { ctx.isUpdate = true; ctx.payload = p; return builder }
-    builder.insert = () => builder
+    builder.insert = (p: Record<string, unknown>) => { inserts.push({ table, payload: p }); return builder }
     ;(builder as { then: unknown }).then = (r: (v: { data: unknown; error: unknown }) => unknown) => r(resolve())
     return builder as never
   })
@@ -174,12 +190,67 @@ describe('发布正文红线闸', () => {
     expect(finalStatus()!.status).toBe('published')
   })
 
-  it('发布正文由 cta + offer + url 拼成(确认扫的就是真发出去的那串)', async () => {
+  it('legacy approved row without checklist is quarantined before provider access', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, checklistReady: false })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('approval_checklist_incomplete')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('正文使用分镜文案,CTA 与追踪链接放首评', async () => {
     installMocks({ redlines: [], endcard: { cta: 'Book now', offer: ['Save 20%', 'Ends Friday'], url: 'https://ctstours.co.nz' } })
     await run()
 
     expect(mockPublish).toHaveBeenCalledWith(
-      expect.objectContaining({ caption: 'Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz' }),
+      expect.objectContaining({
+        caption: 'Explore with us',
+        firstComment: expect.stringContaining('Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz/?utm_source=facebook&utm_medium=organic_social'),
+      }),
     )
+  })
+})
+
+describe('发布记录与失败原因', () => {
+  it('publish failure writes a token-free reject_reason', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    mockPublish.mockRejectedValueOnce(new Error('FB upload 失败 400: access_token=EAAfaketokenfaketokenfaketoken1234 https://graph.facebook.com/x'))
+    await run()
+
+    const last = finalStatus()!
+    expect(last.status).toBe('publish_failed')
+    expect(typeof last.reject_reason).toBe('string')
+    expect(String(last.reject_reason)).toContain('FB upload 失败 400')
+    expect(String(last.reject_reason)).not.toContain('EAAfake')
+    expect(String(last.reject_reason)).not.toContain('graph.facebook.com')
+  })
+
+  it('a successful publish clears the old reason and labels the vendor by channel, not customer', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    await run()
+
+    expect(finalStatus()).toMatchObject({ status: 'published', reject_reason: null })
+    const fw = inserts.find((i) => i.table === 'flywheel_actions')
+    expect(fw?.payload.vendor).toBe('meta_graph')
+    expect(JSON.stringify(inserts)).not.toContain('oztop')
+  })
+
+  it('title falls back to the brand name, never the placeholder "factory reel"', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, noAngle: true })
+    await run()
+
+    const ex = inserts.find((i) => i.table === 'execution_items')
+    expect(String(ex?.payload.title)).toContain('CTS Tours')
+    expect(String(ex?.payload.title)).not.toContain('factory reel')
+  })
+
+  it('interrupted upload is not re-sent and tells the PM to check manually', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, interrupted: true })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('interrupted_verify_manual')
+    expect(String(finalStatus()!.reject_reason)).toContain('中断')
   })
 })

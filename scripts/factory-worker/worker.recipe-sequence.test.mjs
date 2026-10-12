@@ -108,6 +108,17 @@ function makeDeps(overrides = {}) {
       tmpJoin: (a, b) => `${a}/${b}`,
       probeDurationFn: (p) => (p.includes('final') ? 12.0 : 5.0),
       probeLoudnessFn: () => -18,
+      probeMediaEvidenceFn: () => ({
+        audio_stream_present: true,
+        audio_loudness_lufs: -18,
+        width: 1080,
+        height: 1920,
+        duration_seconds: 12,
+        subtitle_cues: [{ start_seconds: 0, end_seconds: 1, text: 'Discover China' }],
+        cover_mean_luma: 100,
+        cover_luma_range: 180,
+        cover_placeholder_detected: false,
+      }),
       hashFileFn: () => SHA,
       execAssembleFn: async () => {},
       completeFn: async (payload) => {
@@ -146,6 +157,7 @@ describe('runRecipeSequence — provider payload contract', () => {
     expect(providerCalls[1].durationSeconds).toBe(5)
     expect(completeCalls).toHaveLength(1)
     expect(completeCalls[0].actual_cost_usd).toBeCloseTo(0.45, 3)
+    expect(completeCalls[0].media_evidence.width).toBe(1080)
   })
 
   it('每段无 inventory clip_ids(合同 §1)', async () => {

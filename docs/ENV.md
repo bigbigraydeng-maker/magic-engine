@@ -139,10 +139,12 @@
 | `ADMIN_EMAILS` | 管理员白名单 | Render-web | ✅ |
 | `ADMIN_EMAIL_DOMAIN` | 管理员邮箱域白名单 | Render-web | ✅ |
 | `CLIENT_VIEWERS` | 客户只读账号白名单 | Render-web | ✅ |
+| `PROTECTED_PAGE_OVERRIDE_EMAILS` | 谁有权改「保护名单」里的页（逗号分隔、邮箱精确匹配，不认域名；必须是已验证邮箱）。**没设 = 谁都不能改保护页**（安全默认）。只管人点按钮的三条路（seo-fix / update-page / update-post）；自动流程永远不能改保护页 | Render-web | ✅ |
 | `INTERNAL_API_KEY` | 内部服务间调用（`api/factory/signals`） | Render-web | ✅ |
 | `INTERNAL_WORKER_TOKEN` | Voice worker 内部鉴权 | Render-web | ✅ |
 | `FACTORY_WORKER_TOKEN` | Factory worker 认领工单鉴权 | Render-web + worker | ❌ |
 | `FACTORY_WORKER_TARGET_CLIENT_ID` | 本地 Factory worker 可选单客户 claim 目标；提供时服务端必须再与 `FACTORY_WORKER_CLIENT_IDS` 求交集，不提供时沿用现有全白名单行为 | worker-local `.env` | ❌ |
+| `FACTORY_REMOTION_CLIENT_IDS` | 本地 Factory worker 允许走 Remotion 引擎（`brief.engine='remotion'`）的 client_id，逗号分隔；默认空 = 全部拒绝 | worker-local `.env` | ❌ |
 | `UPLOAD_LINK_SECRET` | 客户免登录上传链接签名（未配时 fallback 到 `CRON_SECRET`） | Render-web | ❌ |
 | `ADMIN_KEY_KILL_SWITCH` | 紧急关停全部 admin API key（设 `true` 生效） | Render-web | ❌ |
 | `OPENAI_WEBHOOK_SECRET` | OpenAI Realtime webhook 校验 | Render-web | ✅ |
@@ -191,6 +193,13 @@
 |---|---|---|
 | `MOCK_EXTERNAL_SERVICES` | 测试时 mock 全部外部 API | 本地 / CI |
 | `FACTORY_PUBLISH_LIVE` | 🔴 Factory 是否真发布。**未配 = 静默发 DRAFT**（片子落库全绿但 FB 上没人看得见） | Render-web |
+| `FACTORY_INSTAGRAM_LIVE` | 🔴 Instagram 同步是否真发(**独立于** FACTORY_PUBLISH_LIVE,两个都明确为 `true` 才真排期)。**未配 = 只在 Publer 存草稿**,不会公开。Instagram 这条线第一次真连 Publer 必须先走草稿验证 | Render-web |
+| `DAILY_PLAN_AUTO_PUBLISH_LIVE` | 🔴 每日计划图文 Post 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部发布闸门、什么都不发也不写库，只在 cron_run_logs 留一行）。第一次真发必须 PM 明确说 go | Render-web |
+| `STORY_AUTO_PUBLISH_LIVE` | 🔴 Story 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部检查、什么都不发，只记检查结果）。真发还要客户在 `STORY_AUTO_PUBLISH_CLIENTS` 名单里；第一次真发必须 PM 明确说 go | Render-web |
+| `STORY_AUTO_PUBLISH_CLIENTS` | Story 自动发布允许真发的客户 id，逗号分隔、小写。**未配或不在名单 = 只演练** | Render-web |
+| `DAILY_PLAN_AUTO_PUBLISH_CLIENTS` | 🔴 允许自动真发的客户 id 白名单（逗号分隔，小写）。**不在名单里的客户永远只演练**，即使上面的总开关打开了 | Render-web |
+| `FACTORY_INSTAGRAM_LIVE_CLIENTS` | 🔴 允许 Instagram 真发的客户 id 名单(逗号分隔)。**未配 = 空名单 = 所有客户只存草稿**。Publer 里绑了 Instagram 账号 ≠ 客户同意自动跟发,所以真发还要按客户点名 | Render-web |
+| `FACTORY_INSTAGRAM_ENABLED_CLIENTS` | 🔴 允许 Instagram 同步的「客户id:Publer 账号id」名单(逗号分隔,如 `a:b,c:d`)。**未配 = 一条都不处理(连草稿也不建)**;客户自己能改连接器里的账号绑定,所以绑定只是候选,必须和这里点名的账号完全一致才处理 | Render-web |
 | `FACTORY_WORKER_CLIENT_IDS` | Factory 认领工单的客户白名单。**不是 worker 自己读的** —— worker 调 `/api/factory/worker/claim`，白名单在那条路由里由 `src/lib/factory/worker-guard.ts` 读并 fail-closed（未配则拒绝全部 claim） | Render-web |
 | `PROSPECTING_SWEEP_ENABLED` | 线索挖掘总闸（默认 **关**）。`/api/cron/prospecting-sweep` 路由里读 —— 那是 web 进程，prospecting-sweep 这个 cron 只负责 `curl` | Render-web |
 | `JOB_SIGNAL_INGEST_ENABLED` / `JOB_SIGNAL_KEYWORDS` | 招聘信号采集开关（默认 **关**）+ 关键词。开关在 `/api/cron/job-boards-weekly` 路由里读，同样是 web 进程 | Render-web |
@@ -237,6 +246,8 @@
 | `META_SYSTEM_USER_TOKEN_<域名>` | 🔴 **每客户一把的 Meta 广告令牌，名字运行时拼出来**（`domainToEnvKey`，`src/lib/meta/token-selection.ts`），静态扫描扫不到，完整清单只在 Render 面板上 | Render-web |
 | `META_PIXEL_ID_<域名>` | 每客户像素 ID，同样是运行时拼名（`src/lib/meta/capi/config.ts`） | Render-web |
 | `CRM_NOTE_MODEL` / `CRM_STAGE_INFER_MODEL` / `MESSENGER_BRIEF_MODEL` / `MARKET_INTEL_MODEL` | 各功能的模型名覆盖，默认都是 `gpt-4o-mini` | Render-web（可不配） |
+| `CRM_FACTS_CLIENT_IDS` | 「AI 读对话存事实」要给哪些客户跑（逗号分隔的客户 UUID），**未配 = 全关**（fail-closed）。目前只该配 NAL；提示词里「具体货物」是物流语义，别的行业先别开 | Render-web |
+| `CRM_FACTS_MODEL` / `CRM_FACTS_DAILY_LIMIT` / `CRM_FACTS_PER_RUN` | 存事实用的模型（默认 `gpt-4o`）、每客户每天最多读几段（默认 80）、每小时那一轮最多读几段（默认 5，上限 20）。可不配 | Render-web（可不配） |
 | `WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS` | Web Intelligence 客户白名单，未配 = 谁都不跑 | Render-web |
 | `WEB_INTELLIGENCE_TRAFFIC_ENABLED` | Web Intelligence 流量检查总闸，默认 **关** | Render-web |
 | `WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES` | 第一方行程数据源配置（JSON） | Render-web |

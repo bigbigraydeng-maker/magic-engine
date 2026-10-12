@@ -95,17 +95,39 @@ export async function readSheetValues(
 }
 
 /**
- * 往一个范围的末尾**追加**若干行。返回 Sheets 报回来的「真写进去的行数」。
+ * 从 A1 范围里取出工作表标题：最后一个 `!` 之前的部分。
+ * 去掉包裹的单引号，并把转义的双写 `''` 还原成单个 `'`
+ * （Sheets 的 A1 记法：`'It''s'!A:ZZ` 指的是标题为 `It's` 的工作表）。
+ */
+function tabTitleFromRange(range: string): string {
+  const bang = range.lastIndexOf('!')
+  const raw = bang === -1 ? range : range.slice(0, bang)
+  if (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2) {
+    return raw.slice(1, -1).replace(/''/g, "'")
+  }
+  return raw
+}
+
+/**
+ * 往一个范围的末尾**追加**若干行。返回写进去的行数。
  *
- * 🔴 **只 append，绝不覆盖**。用的是 `values:append` + `insertDataOption=INSERT_ROWS`：
- *    Sheets 会在已有数据的下面插入新行，不会碰任何一个已有单元格。
+ * 🔴 **只 append，绝不覆盖**。用的是 `spreadsheets.batchUpdate` 的 `appendCells`：
+ *    Sheets 会在**该工作表最后一行有数据的行**下面插入新行，永远从 A 列开始，
+ *    需要时自动插行，不会碰任何一个已有单元格。
  *    CTS 那张旧表从第 18 列起全是员工手打的跟进记录（"call back when she is free"
  *    这类），还有一片人工维护的名单区 —— 任何一次覆盖都是不可逆的损失。
  *
- * 🔴 **`valueInputOption=RAW`，不是 USER_ENTERED**。两个实测过的坑都靠它挡住：
+ * 🔴 **2026-10 事故：不能用 `values:append`。** 之前用的是
+ *    `values:append` + `insertDataOption=INSERT_ROWS`，它依赖 Google 的「表格识别」。
+ *    实测那张表中间有一个空行，Google 就把新行越放越靠右（第 77 列，之后每行 +32，
+ *    最后到第 695 列），行永远对不上表头，判重（读第 1、15 列）也永远找不到它们 ——
+ *    同一批 lead 每小时被重写一遍。`appendCells` 按工作表（不是表格）定位，
+ *    从 A 列开始，彻底绕开表格识别。
+ *
+ * 🔴 **文本一律走 `stringValue`**，等价于以前的 `valueInputOption=RAW`：
+ *    `stringValue` 表示「原样存成文本，别替我解析」。两个实测过的坑都靠它挡住：
  *    · 电话 `0210140952` 被当成数字吃掉前导 0 → 变成 210140952；
  *    · 电话 `+64211...` 开头的 `+` 被 Sheets 当成公式。
- *    RAW 表示「原样存成文本，别替我解析」。
  *
  * 需要写权限（`SHEETS_RW_SCOPE`）。客户只授过只读的话 Google 会回 403，
  * 这里原样抛出去让调用方下发人工待办，不吞。
@@ -123,14 +145,44 @@ export async function appendSheetValues(
   const token = await resolveAccessToken(clientId, { fetcher }, SHEETS_RW_SCOPE)
   if (!token) throw new GoogleSheetsNotConfiguredError(clientId)
 
-  const url =
-    `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}:append` +
-    `?valueInputOption=RAW&insertDataOption=INSERT_ROWS&responseValueRenderOption=UNFORMATTED_VALUE`
+  const tabTitle = tabTitleFromRange(range)
 
+  const metaUrl = `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}?fields=sheets.properties(sheetId,title)`
+  const metaRes = await fetcher(metaUrl, { headers: { Authorization: `Bearer ${token}` } })
+  if (!metaRes.ok) {
+    const body = await metaRes.text().catch(() => '')
+    throw new GoogleSheetsError(
+      metaRes.status,
+      `Sheets API 读取表信息失败 (${metaRes.status}): ${body.slice(0, 300)}`,
+    )
+  }
+
+  const meta = (await metaRes.json()) as {
+    sheets?: { properties?: { sheetId?: number; title?: string } }[]
+  }
+  const sheet = (meta.sheets ?? []).find((s) => s.properties?.title === tabTitle)
+  if (!sheet?.properties || typeof sheet.properties.sheetId !== 'number') {
+    throw new GoogleSheetsError(404, `Sheets API 找不到工作表「${tabTitle}」`)
+  }
+  const sheetId = sheet.properties.sheetId
+
+  const url = `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}:batchUpdate`
   const res = await fetcher(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ values: rows.map((r) => [...r]) }),
+    body: JSON.stringify({
+      requests: [
+        {
+          appendCells: {
+            sheetId,
+            rows: rows.map((r) => ({
+              values: r.map((cell) => ({ userEnteredValue: { stringValue: cell } })),
+            })),
+            fields: 'userEnteredValue',
+          },
+        },
+      ],
+    }),
   })
 
   if (!res.ok) {
@@ -141,8 +193,6 @@ export async function appendSheetValues(
     )
   }
 
-  const json = (await res.json()) as { updates?: { updatedRows?: number } }
-  // 🔴 回执报的行数跟我们打算写的对不上 = 只写进去一半，必须让调用方看见真实数字，
-  //    不能拿 rows.length 当成「写成了这么多」。
-  return json.updates?.updatedRows ?? 0
+  // batchUpdate 是原子的，回执里没有行数 —— 2xx 就代表整批都写进去了。
+  return rows.length
 }

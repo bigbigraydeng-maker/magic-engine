@@ -1,53 +1,46 @@
 /**
- * WP3 R4 — 「全部客人」页的分段视图（4 段 + 段内排序 + 段内分页 + focus 定位）。
+ * WP3 R4 — 「全部客人」页的分段视图（2 张名单 + 段内排序 + 段内分页 + focus 定位）。
  *
- * 前三段是今天页那三层：客人在等你 / 还没搭上话 / 先放着，系统盯着。
- * 第四段「不在今天名单」——nurture_future（以后才走）+ excluded（推迟中 / 停止营销 / 拒联）。
+ * 两张名单：hot（今天要联系）/ cold（先放着）。hot = 原 waiting + acted 两层；
+ * cold = 原 queued + off_list 两层。意向只能往上抬：只有「聊过一轮就断了」
+ * （stale_conversation）+ 高意向会从 cold 抬进 hot，medium / low / unknown /
+ * 没有 brief 一律不动（见 next-action.ts 头注）。
  *
- * 这是纯函数：输入已排好序列出来的每个客人（`segmentContact` 结果 + pinnedAt + contactId），
- * 输出 4 段（每段 total + 是否展开 + 展开时的这一页 items + focus 命中位置）。
+ * 这是纯函数：输入已排好序列出来的每个客人（`segmentContact` 结果 + pinnedAt + contactId + intent），
+ * 输出 2 张名单（每张 total + 是否展开 + 展开时的这一页 items + focus 命中位置）。
  *
  * 排序（同 today 路由 `route.ts:713-726`）：
  *   1. 置顶（`pinnedAt` 有值）在前，按 pinnedAt 越晚越前；
- *   2. 其余按 `compareForWorklist` —— 段内先小后大。
+ *   2. 其余按 `compareNextAction` —— 先按分段，同段高意向排前。
  *
- * 分页：每段独立翻页，size 由调用方给（默认 100，跟老列表一致）。段收起来时不算 items，
- * 只回 total —— 避免每次请求都装 4 段各 100 行的 items。
+ * 分页：每张名单独立翻页，size 由调用方给（默认 100，跟老列表一致）。名单收起来时不算 items，
+ * 只回 total —— 避免每次请求都装两张名单各 100 行的 items。
  *
- * focus：给 contactId → 找到它落在哪段第几页；page 自动跳到那一页，section 展开。
+ * focus：给 contactId → 找到它落在哪张名单第几页；page 自动跳到那一页，section 展开。
  *
- * 2026-08-02 事故（`worklist-groups.ts` 头注）教训在这里同样成立：每一段的 members
- * 覆盖必须穷尽 —— 漏掉一个 Segment，人就凭空消失。测试用 `Segment` 的 keyof 做穷举断言。
+ * 2026-08-02 事故（`worklist-groups.ts` 头注）教训在这里同样成立：每一个
+ * Segment × 意向（含 null）都必须落进恰好一张名单 —— 漏掉一个组合，人就凭空消失。
+ * 测试用 `Segment` 的 keyof × `INTENT_LEVELS` 做穷举断言。
  */
 
-import type { Segment, SegmentResult } from './segments'
-import { compareForWorklist } from './segments'
-import { LAYER_META, WORKLIST_GROUPS, type WorklistLayer } from './worklist-groups'
+import type { SegmentResult } from './segments'
+import {
+  LIST_META,
+  listOf,
+  compareNextAction,
+  type IntentLevel,
+  type NextActionList,
+} from './next-action'
 
-/** 4 段之一的 key。前三段跟层同名；第四段 `off_list` 是 today 页原本没画的那部分。 */
-export type SectionKey = WorklistLayer | 'off_list'
+/** 两张名单之一。原四段（waiting/acted/queued/off_list）合成 hot / cold，见 next-action.ts 头注。 */
+export type SectionKey = NextActionList
 
-export const OFF_LIST_META = {
-  title: '不在今天名单',
-  hint: '以后才走 / 已成交 / 停止营销 / 拒联 —— 不占今天动作，翻的时候要用再点开。',
-} as const
+export const SECTION_KEYS: readonly SectionKey[] = ['hot', 'cold']
 
-/** 每段的显示元数据（title / hint 只用 LAYER_META 与 OFF_LIST_META 一份）。 */
+/** 每张名单的显示元数据（title / hint 只用 LIST_META 一份）。 */
 export function sectionMeta(key: SectionKey): { title: string; hint: string } {
-  if (key === 'off_list') return { ...OFF_LIST_META }
-  return { ...LAYER_META[key] }
+  return { ...LIST_META[key] }
 }
-
-/** Segment → 所在段。前三段查 WORKLIST_GROUPS；nurture_future / excluded 落 off_list。 */
-export const SECTION_OF_SEGMENT: Record<Segment, SectionKey> = (() => {
-  const out: Partial<Record<Segment, SectionKey>> = {}
-  for (const g of WORKLIST_GROUPS) for (const m of g.members) out[m] = g.layer
-  out['nurture_future'] = 'off_list'
-  out['excluded'] = 'off_list'
-  // 这个断言在运行时不会成立到「有段没落进四段」——但补一次运行时守卫，
-  // 免得未来新增 Segment 忘了在这里连一根线：TS 编译期漏了会掉进 4 段之外。
-  return out as Record<Segment, SectionKey>
-})()
 
 /**
  * 装配好的一行——上游从 SQL + segmentContact 拼出来后喂进本函数。
@@ -58,6 +51,8 @@ export interface RankedContact {
   seg: SegmentResult
   /** `contacts.pinned_at` —— 置顶按时间倒序，NULL 排后面。 */
   pinnedAt: string | null
+  /** conversation_briefs.intent_level（最新一张）；null = 没有 AI 摘要。只能把人往上抬，见 next-action.ts。 */
+  intent: IntentLevel | null
 }
 
 export interface SectionResult<T> {
@@ -96,12 +91,12 @@ export interface FocusResult {
   page?: number
 }
 
-/** 排序：置顶在前，同置顶按 pinnedAt 倒序；其余按 compareForWorklist。 */
+/** 排序：置顶在前，同置顶按 pinnedAt 倒序；其余按 compareNextAction。 */
 export function compareRanked(a: RankedContact, b: RankedContact): number {
   const ap = a.pinnedAt ? Date.parse(a.pinnedAt) : 0
   const bp = b.pinnedAt ? Date.parse(b.pinnedAt) : 0
   if (ap !== bp) return bp - ap // 有 pinnedAt 的排前面；两个都有的越新越前
-  return compareForWorklist(a.seg, b.seg)
+  return compareNextAction(a, b)
 }
 
 /**
@@ -116,22 +111,18 @@ export function buildSections<T>(
 ): { sections: SectionResult<T>[]; focus: FocusResult } {
   const perPage = Math.max(1, opts.perPage ?? 100)
   const defaults: Record<SectionKey, boolean> = {
-    waiting: true,
-    acted: true,
-    queued: false,
-    off_list: false,
+    hot: true,
+    cold: false,
   }
   const openOf = (k: SectionKey): boolean => opts.open?.[k] ?? defaults[k]
   const pageOf = (k: SectionKey): number => Math.max(1, opts.page?.[k] ?? 1)
 
   const buckets: Record<SectionKey, RankedContact[]> = {
-    waiting: [],
-    acted: [],
-    queued: [],
-    off_list: [],
+    hot: [],
+    cold: [],
   }
   for (const c of contacts) {
-    const key = SECTION_OF_SEGMENT[c.seg.segment] ?? 'off_list'
+    const key = listOf(c.seg.segment, c.intent)
     buckets[key].push(c)
   }
   for (const key of Object.keys(buckets) as SectionKey[]) buckets[key].sort(compareRanked)
@@ -147,7 +138,7 @@ export function buildSections<T>(
     }
   }
 
-  const sections: SectionResult<T>[] = (['waiting', 'acted', 'queued', 'off_list'] as SectionKey[]).map((key) => {
+  const sections: SectionResult<T>[] = SECTION_KEYS.map((key) => {
     const bucket = buckets[key]
     const total = bucket.length
     const open = openOf(key)

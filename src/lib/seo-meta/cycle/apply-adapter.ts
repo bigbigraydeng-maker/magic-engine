@@ -39,6 +39,8 @@
 import type { GithubClient } from '@/lib/cms/github-client'
 import { scrubString } from '@/lib/mcp/vendor-filter'
 import { buildSlugIndex, replaceMetaForSlug } from '@/lib/seo-meta/cts-meta-pr'
+import { firstSlugAnchorIsNested } from '@/lib/cms/slug-anchor'
+import { identityFromSlug, identityFromUrl, mergeIdentities, ProtectedPageError, unresolvedIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
 import { resolvePrGuard } from './pr-guard'
 import type { ApplyAdapter, ApplyAdapterResult, MetaCycleGateEvidence } from './types'
 
@@ -86,7 +88,7 @@ function buildPrBody(slug: string, keyword: string, oldTitle: string, newTitle: 
  * first apply call) and reuses it for every candidate processed in this
  * client's cycle run, instead of re-scanning the repo per candidate.
  */
-export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoConnection): ApplyAdapter {
+export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoConnection, pageGuard: PageWriteGuard): ApplyAdapter {
   const fileCache = new Map<string, FileCacheEntry>()
   let slugIndex: Map<string, string> | null = null
 
@@ -95,7 +97,9 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
     const dir = await github
       .listDirectory(conn.repoOwner, conn.repoName, conn.dataDir, conn.defaultBranch)
       .catch(() => [])
-    const dataFiles = dir.filter((e) => e.type === 'file' && /^(seo-pages|blogs).*\.ts$/.test(e.name))
+    // guides.ts (destination guides) is allowed by EXACT name only: its entries use metaTitle/metaDescription
+    // and need the 'guide' field style — a look-alike file name must never be edited with the wrong style.
+    const dataFiles = dir.filter((e) => e.type === 'file' && /^(seo-pages.*|blogs.*|guides)\.ts$/.test(e.name))
     for (const entry of dataFiles) {
       const f = await github
         .getFileContent(conn.repoOwner, conn.repoName, entry.path, conn.defaultBranch)
@@ -177,7 +181,8 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_any_data_file' }
       }
 
-      const replaced = replaceMetaForSlug(entry.source, candidate.slug, newTitle, newDesc)
+      const style = path.split('/').pop() === 'guides.ts' ? 'guide' : 'default'
+      const replaced = replaceMetaForSlug(entry.source, candidate.slug, newTitle, newDesc, style)
       if (!replaced) {
         return { applied: false, newTitle, newDesc, oldTitle: '', oldDesc: '', skipReason: 'slug_not_in_file' }
       }
@@ -186,6 +191,25 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
         return { applied: false, newTitle, newDesc, oldTitle: replaced.oldTitle, oldDesc: replaced.oldDesc, skipReason: 'dry_run' }
       }
 
+      // Protected-page gate: fresh read of the list right before the in-memory edit that will be committed.
+      // replaceMetaForSlug edits the window of the FIRST `slug: '<x>'`; if that is a nested reference the edit
+      // would land in another entry, so the page being edited is unknown.
+      const identity = firstSlugAnchorIsNested(entry.source, candidate.slug, style)
+        ? unresolvedIdentity('nested_slug_anchor')
+        : mergeIdentities(
+            identityFromSlug(candidate.slug),
+            ...(candidate.pageUrl ? [identityFromUrl(candidate.pageUrl)] : []),
+          )
+      try {
+        await pageGuard.assert(identity, { targetType: 'data_file_entry' })
+      } catch (err) {
+        if (err instanceof ProtectedPageError) {
+          return { applied: false, newTitle, newDesc, oldTitle: replaced.oldTitle, oldDesc: replaced.oldDesc, skipReason: 'protected_page_blocked' }
+        }
+        throw err
+      }
+
+      const sourceBeforeEdit = entry.source
       entry.source = replaced.updated
 
       const commit = await commitAndOpenPr(
@@ -198,6 +222,22 @@ export function createCtsRepoApplyAdapter(github: GithubClient, conn: CtsRepoCon
       )
       if (!commit.ok) return commit.result
 
+      // The list may have changed between the PR being opened and now: re-check before the auto-merge.
+      try {
+        await pageGuard.assert(identity, { targetType: 'data_file_entry_merge' })
+      } catch (err) {
+        if (err instanceof ProtectedPageError) {
+          // Roll the in-memory edit back: the file cache is reused by the next candidate of this run, and its
+          // commit must not smuggle this (now blocked) protected-page change into another auto-merged PR.
+          entry.source = sourceBeforeEdit
+          return {
+            prUrl: commit.prUrl, prNumber: commit.prNumber, branch: commit.branch,
+            newTitle, newDesc, oldTitle: replaced.oldTitle, oldDesc: replaced.oldDesc,
+            applied: false, skipReason: 'protected_page_blocked_before_merge',
+          }
+        }
+        throw err
+      }
       const merged = await github.mergePullRequest(conn.repoOwner, conn.repoName, commit.prNumber).catch(() => false)
       const base = {
         prUrl: commit.prUrl,

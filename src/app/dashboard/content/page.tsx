@@ -40,6 +40,7 @@ interface ExecutionItemLite {
   dimension: string;
   phase: number;
   content_post_id: string | null;
+  source_kind?: string;
 }
 
 const statusColors: Record<string, string> = {
@@ -444,7 +445,8 @@ export default function ContentBoardPage() {
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (!controller.signal.aborted && executionFetchAbortRef.current === controller && modalPostIdRef.current === post.id && d?.items) {
-          setExecItems(d.items as ExecutionItemLite[]);
+          // 自主行动卡（只读、来自流水账）不是执行项，关联不了帖子 —— 不进下拉。
+          setExecItems((d.items as ExecutionItemLite[]).filter(it => it.source_kind !== 'flywheel_action'));
         }
       })
       .catch(() => { /* 静默：拉取失败时降级为「无可关联项」*/ });

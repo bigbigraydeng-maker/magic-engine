@@ -30,6 +30,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
 import { createCtsRepoApplyAdapter } from '@/lib/seo-meta/cycle/apply-adapter'
+import { createPageWriteGuard, SYSTEM_ACTOR } from '@/lib/seo/protected-pages'
 import { generateMetaCycleTitle } from '@/lib/seo-meta/cycle/ai-meta'
 import {
   META_CYCLE_CRON,
@@ -124,7 +125,7 @@ export async function buildAdapterForClient(clientId: string): Promise<{ adapter
     repoName: conn.repoName,
     defaultBranch: conn.branch || 'main',
     dataDir: 'src/lib/data',
-  })
+  }, createPageWriteGuard({ supabase: supabaseAdmin, clientId, actor: SYSTEM_ACTOR, route: 'seo-meta-cycle' }))
   return { adapter }
 }
 
@@ -151,7 +152,10 @@ async function runSixSteps(
   const step1 = await step.run('check-due', async () => runStep1CheckDue(supabaseAdmin, adapter, config, weekKey, false))
   await step.run('log-step1-receipt', async () => writeStepReceipt(supabaseAdmin, {
     jobName: STEP1_JOB_NAME, clientId, weekKey, status: 'completed',
-    processed: step1.checked, completed: step1.checked, failed: 0, summary: step1,
+    processed: step1.checked, completed: step1.checked, failed: 0,
+    // The page-CTR check is off during the rank shadow period (runner.ts Step1Options); say so
+    // in the receipt, so zeros here read as "switched off" and not "nothing was due".
+    summary: { ...step1, legacy_ctr_check: 'off_rank_shadow_period' },
   }))
 
   // Step 2: candidates_ready

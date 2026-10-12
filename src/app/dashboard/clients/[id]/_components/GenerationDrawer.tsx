@@ -231,7 +231,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
               <div className="mt-3">
                 {campaigns.length === 0 ? (
                   <p className="text-xs text-me-ochre bg-me-ochre/10 rounded-lg px-3 py-2">
-                    当前无进行中的活动。请先在「推广活动」tab 中创建活动。
+                    当前无进行中的活动。请先在客户的「推广活动」页面创建活动。
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -347,7 +347,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
             </button>
           )}
           <p className="text-center text-xs text-me-charcoal/45">
-            批量生成请前往「推广活动」tab 使用一键生成
+            批量生成请前往客户的「推广活动」页面使用一键生成
           </p>
         </div>
         </BriefGateBanner>

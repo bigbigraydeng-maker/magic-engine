@@ -10,15 +10,17 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { GoogleAIFileManager } from '@google/generative-ai/server'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
+import { randomUUID } from 'crypto'
 import { promisify } from 'util'
 import { unlink, access } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchYouTubeMetadata } from './youtube-metadata'
+import { assertSafeViralSourceUrl, validateViralSourceUrl } from './viral-url-guard'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 const ANALYSIS_MODEL = 'gemini-2.5-flash'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -181,7 +183,11 @@ export async function analyzeLocalVideoFile(
 // ─── Non-YouTube URL: yt-dlp download → analyzeLocalVideoFile ────────────────
 
 async function downloadAndAnalyzeVideo(url: string, apiKey: string): Promise<ViralAnalysisResult> {
-  const tmpFile = path.join(tmpdir(), `viral_ref_${Date.now()}.mp4`)
+  // Defence in depth: the caller already ran the full check; never let an unchecked url reach yt-dlp.
+  const checked = validateViralSourceUrl(url)
+  if (!checked.ok) throw new Error(`Unsafe viral source url: ${checked.reason}`)
+
+  const tmpFile = path.join(tmpdir(), `viral_ref_${randomUUID()}.mp4`)
 
   // yt-dlp lives in project root on Render (downloaded by build command).
   // Falls back to system PATH for local dev where yt-dlp is installed globally.
@@ -189,15 +195,17 @@ async function downloadAndAnalyzeVideo(url: string, apiKey: string): Promise<Vir
   let cmd = 'yt-dlp'
   try {
     await access(ytDlpBin)
-    cmd = `"${ytDlpBin}"`
+    cmd = ytDlpBin
   } catch {
     // local binary missing — fall back to PATH
   }
 
   try {
-    await execAsync(
-      `${cmd} -f "best[height<=720][ext=mp4]/best[height<=720]/best" -o "${tmpFile}" "${url}"`,
-      { timeout: 180_000 }
+    // argv array, no shell; `--` stops yt-dlp treating the url as an option.
+    await execFileAsync(
+      cmd,
+      ['-f', 'best[height<=720][ext=mp4]/best[height<=720]/best', '--no-playlist', '-o', tmpFile, '--', checked.url],
+      { timeout: 180_000 },
     )
 
     return await analyzeLocalVideoFile(tmpFile, apiKey, 'video/mp4')
@@ -425,13 +433,17 @@ export async function analyzeViralReference(referenceId: string, url: string): P
     .eq('id', referenceId)
 
   try {
-    const platform = detectPlatform(url)
+    // Upload rows keep only a label; the file is gone after the upload request, so there is nothing to fetch.
+    if (url.startsWith('upload://')) throw new Error('Uploaded file is not stored, cannot be re-analysed from its label')
+    // Rows can pre-date the guard or be written by other paths, so re-check on every analysis.
+    const safeUrl = await assertSafeViralSourceUrl(url)
+    const platform = detectPlatform(safeUrl)
     const result = platform === 'youtube'
-      ? await analyzeYouTubeVideo(url, apiKey)
-      : await downloadAndAnalyzeVideo(url, apiKey)
+      ? await analyzeYouTubeVideo(safeUrl, apiKey)
+      : await downloadAndAnalyzeVideo(safeUrl, apiKey)
 
     // Fetch YouTube metadata (returns nulls for non-YouTube or no API key)
-    const metadata = await fetchYouTubeMetadata(url)
+    const metadata = await fetchYouTubeMetadata(safeUrl)
 
     await finalizeAnalysis(referenceId, result, metadata)
   } catch (err: unknown) {

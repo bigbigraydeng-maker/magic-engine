@@ -161,6 +161,17 @@ describe('日报内容（真实回放诊断）', () => {
     expect(html).toContain('结果真相断层')
   })
 
+  it('目标进度未判：归属不足照旧写「归属数据不足」；广告设置读失败不冒充成归属不足', () => {
+    const pace = { expectedToDate: 35, actualToDate: null, gapPct: null, projectedEnd: null, verdict: 'unknown' as const, reason: 'r' }
+    const goal = { title: 'G', label: '留资', target: 50, dayIndex: 15, totalDays: 30, pace }
+    const build = (g: typeof goal & { configReadError?: string }) =>
+      buildInternalDigest({ clientName: 'C', date: '2026-09-13', run: ctsRun, decision: 'alert', legacyNeedsAction: [], droppedRecipients: 0, goal: g }).html
+    expect(build(goal)).toContain('归属数据不足，未判（r）')
+    const failed = build({ ...goal, pace: { ...pace, reason: '读不出广告设置' }, configReadError: 'boom' })
+    expect(failed).toContain('— 未判（读不出广告设置）')
+    expect(failed).not.toContain('归属数据不足')
+  })
+
   it('不出现任何挪预算 / 改广告的操作指令', () => {
     const { html } = buildInternalDigest({ clientName: 'New Asian Logistics', date: '2026-09-13', run: nalRun, decision: 'alert', legacyNeedsAction: [], droppedRecipients: 0 })
     expect(html).not.toMatch(/挪预算|加预算|减预算|暂停这/)
