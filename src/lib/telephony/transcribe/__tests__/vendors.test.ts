@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { deepseekAnalyzer, twilioTranscriber, parseAnalysisJson } from '../vendors'
+import { deepseekAnalyzer, twilioTranscriber, makeTwilioTranscriber, TranscriptPendingError, parseAnalysisJson } from '../vendors'
+import { recordingSidFromUrl } from '../recording'
 
 const okJson = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
 
@@ -47,6 +48,35 @@ describe('vendors (Twilio transcribe + DeepSeek analyse)', () => {
     await expect(twilioTranscriber(INPUT)).rejects.toThrow('转写结果为空')
     fetchMock.mockResolvedValueOnce(new Response('no', { status: 401 }))
     await expect(twilioTranscriber(INPUT)).rejects.toThrow('401')
+  })
+
+  it('polls until completed, and reports pending (not failure) when it takes too long', async () => {
+    const fast = makeTwilioTranscriber({ pollMs: 1, maxWaitMs: 50 })
+    fetchMock
+      .mockResolvedValueOnce(okJson({ transcripts: [{ sid: 'GT5', status: 'in-progress' }] }))
+      .mockResolvedValueOnce(okJson({ status: 'in-progress' }))
+      .mockResolvedValueOnce(okJson({ status: 'completed' }))
+      .mockResolvedValueOnce(okJson({ sentences: [{ media_channel: 1, transcript: 'done' }] }))
+    expect((await fast(INPUT)).text).toBe('声道1：done')
+    fetchMock.mockReset()
+    fetchMock.mockImplementation(async (url: string) => (String(url).includes('SourceSid') ? okJson({ transcripts: [{ sid: 'GT6', status: 'queued' }] }) : okJson({ status: 'queued' })))
+    await expect(fast(INPUT)).rejects.toBeInstanceOf(TranscriptPendingError)
+  })
+
+  it('follows sentence pagination only to the Twilio intelligence host', async () => {
+    fetchMock
+      .mockResolvedValueOnce(okJson({ transcripts: [{ sid: 'GT7', status: 'completed' }] }))
+      .mockResolvedValueOnce(okJson({ sentences: [{ media_channel: 1, transcript: 'one' }], meta: { next_page_url: 'https://intelligence.twilio.com/v2/Transcripts/GT7/Sentences?PageSize=1000&Page=1' } }))
+      .mockResolvedValueOnce(okJson({ sentences: [{ media_channel: 2, transcript: 'two' }], meta: { next_page_url: 'https://evil.example/steal' } }))
+    expect((await twilioTranscriber(INPUT)).text).toBe('声道1：one\n声道2：two')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('extracts the recording sid only from official Twilio recording urls', () => {
+    const ok = `https://api.twilio.com/2010-04-01/Accounts/AC${'a'.repeat(32)}/Recordings/RE${'b'.repeat(32)}`
+    expect(recordingSidFromUrl(ok)).toBe('RE' + 'b'.repeat(32))
+    expect(recordingSidFromUrl(`${ok}.mp3?x=1`)).toBe('RE' + 'b'.repeat(32))
+    expect(recordingSidFromUrl('https://evil.example/Recordings/RE' + 'b'.repeat(32))).toBeNull()
   })
 
   it('analyses via DeepSeek json mode, wraps transcript in delimiters and validates output', async () => {

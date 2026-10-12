@@ -9,7 +9,7 @@
 import { downloadTwilioRecording, recordingSidFromUrl, RecordingFetchError } from './recording'
 import { verifyFacts, ANALYSIS_SCHEMA_VERSION, type VerifiedAnalysis } from './analysis-schema'
 import { SECRET_REF_PATTERN } from '@/lib/telephony/twilio/ingest'
-import type { Analyzer, Transcriber } from './vendors'
+import { TranscriptPendingError, type Analyzer, type Transcriber } from './vendors'
 
 export const MAX_STEP_ATTEMPTS = 3
 /** 每个连接每天最多转写这么多通（花钱的闸；打开开关前的最低限度保护）。 */
@@ -148,6 +148,8 @@ export async function runCallAnalysis(
       await store.patchCall(call.id, { transcriptStatus: 'done' }, { stage: 'transcript', status: 'done' })
       transcript = out.text
     } catch (e) {
+      // 还在转：等下一轮，不计失败次数、不改状态（Twilio 那边转完后下一轮直接取）。
+      if (e instanceof TranscriptPendingError) return { status: 'waiting', detail: 'transcript_pending' }
       const c = errClass('transcript', e)
       await store.patchCall(call.id, { transcriptStatus: 'failed', transcriptAttempts: call.transcriptAttempts + 1, analysisError: c }, { stage: 'transcript', status: 'failed', detail: c })
       return { status: 'transcript_failed', detail: c }
