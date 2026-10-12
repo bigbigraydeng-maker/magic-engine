@@ -135,6 +135,7 @@ function item(overrides: {
   slot_at?: string
   reason_code?: string | null
   last_check_at?: string | null
+  claimed_at?: string | null
   pack_id?: string
 }): Row {
   return {
@@ -143,6 +144,7 @@ function item(overrides: {
     slot_at: overrides.slot_at ?? `${TODAY}T00:00:00Z`,
     reason_code: overrides.reason_code ?? null,
     last_check_at: overrides.last_check_at ?? null,
+    claimed_at: overrides.claimed_at ?? null,
     pack_id: overrides.pack_id ?? 'pack-1',
   }
 }
@@ -285,6 +287,18 @@ describe('pushStoryLiteItems —— 没发出去', () => {
     const items: ManualItem[] = []
     await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
     expect(items).toHaveLength(0)
+  })
+})
+
+describe('pushStoryLiteItems —— 不确定窗口按抢占时间算', () => {
+  it('🔴 计划时间已超 36 小时、但刚被转成不确定（抢占时间在窗口内）→ 照样报', async () => {
+    const db = makeSupabase({
+      packs: [pack({})],
+      items: [item({ status: 'UNKNOWN_OUTCOME', slot_at: '2026-10-05T00:00:00Z', claimed_at: '2026-10-07T20:00:00Z' })],
+    })
+    const items: ManualItem[] = []
+    await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
+    expect(items.map((i) => i.kind)).toContain('story_unknown_outcome')
   })
 })
 

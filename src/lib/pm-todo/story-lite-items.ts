@@ -93,6 +93,7 @@ interface StoryItemRow {
   slot_at: string
   reason_code: string | null
   last_check_at: string | null
+  claimed_at: string | null
 }
 
 /** 一行 `story_packs`（只声明这条待办用得到的列）。 */
@@ -116,6 +117,7 @@ function narrowItem(value: unknown): StoryItemRow | null {
     slot_at: slotAt,
     reason_code: typeof value.reason_code === 'string' ? value.reason_code : null,
     last_check_at: typeof value.last_check_at === 'string' ? value.last_check_at : null,
+    claimed_at: typeof value.claimed_at === 'string' ? value.claimed_at : null,
   }
 }
 
@@ -162,8 +164,9 @@ function groupUnknown(rows: StoryItemRow[], now: Date): ClientUnknown[] {
   const groups = new Map<string, ClientUnknown>()
   for (const row of rows) {
     if (row.status !== 'UNKNOWN_OUTCOME') continue
-    const slot = Date.parse(row.slot_at)
-    if (Number.isNaN(slot) || now.getTime() - slot > UNKNOWN_WINDOW_MS) continue
+    // 窗口从「进入不确定状态」（抢占时刻）起算；发布器停摆很久才恢复时，按计划时间算会一条都不报
+    const anchor = Date.parse(row.claimed_at ?? row.slot_at)
+    if (Number.isNaN(anchor) || now.getTime() - anchor > UNKNOWN_WINDOW_MS) continue
     const cur = groups.get(row.client_id) ?? { clientId: row.client_id, stamps: [] }
     const stamp = nzStamp(row.slot_at)
     if (stamp && !cur.stamps.includes(stamp)) cur.stamps.push(stamp)
@@ -241,7 +244,7 @@ function buildUnarmedItem(clientId: string, clientName: string, live: boolean): 
 async function readStoryItems(supabase: SupabaseClient): Promise<StoryItemRow[]> {
   const { data, error } = await supabase
     .from('story_items')
-    .select('client_id, status, slot_at, reason_code, last_check_at')
+    .select('client_id, status, slot_at, reason_code, last_check_at, claimed_at')
     .in('status', ['UNKNOWN_OUTCOME', 'FAILED', 'BLOCKED', 'MISSED'])
   if (error) throw new Error('story-lite-items: items read failed: ' + error.message)
   const rows: StoryItemRow[] = []
