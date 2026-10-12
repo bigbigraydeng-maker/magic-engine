@@ -4,87 +4,33 @@
     {
       "name": "magic-engine",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev"
-      ],
+      "runtimeArgs": ["run", "dev"],
       "port": 3001,
       "autoPort": false
     },
     {
       "name": "membership-deck",
       "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "public/decks/magic-lab-class-membership/serve.py"
-      ],
+      "runtimeArgs": ["public/decks/magic-lab-class-membership/serve.py"],
       "port": 8799
     },
     {
       "name": "parkhomes-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "run",
-        "dev",
-        "--prefix",
-        "docs/clients/parkhomes/web"
-      ],
+      "runtimeArgs": ["run", "dev", "--prefix", "docs/clients/parkhomes/web"],
       "port": 4321
     },
     {
       "name": "marketing-website",
       "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "-m",
-        "http.server",
-        "8877",
-        "--directory",
-        "website"
-      ],
+      "runtimeArgs": ["-m", "http.server", "8877", "--directory", "website"],
       "port": 8877
     },
     {
       "name": "scratch-preview",
       "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "-m",
-        "http.server",
-        "8901",
-        "--directory",
-        ".claude/scratch",
-        "--bind",
-        "127.0.0.1"
-      ],
+      "runtimeArgs": ["-m", "http.server", "8901", "--directory", ".claude/scratch", "--bind", "127.0.0.1"],
       "port": 8901
-    },
-    {
-      "name": "tour-catalog-local",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": [
-        "-c",
-        "eval \"$(sed -n -E 's/^(ANTHROPIC_API_KEY|CF_AIG_TOKEN)=/export \\1=/p' /Users/raydeng/Projects/magic-engine/.env.local)\"; NEXT_PUBLIC_SUPABASE_URL=http://localhost:3098 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.xPnntm0hHvysnLiryjJ_41xo9ztTEoMoy2FErliHM1E SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.xPnntm0hHvysnLiryjJ_41xo9ztTEoMoy2FErliHM1E TOUR_CATALOG_LOCAL_TEST=1 WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES='{\"ctstours.co.nz\":\"https://www.ctstours.co.nz/api/internal/tours\"}' npx next dev -p 3011"
-      ],
-      "port": 3011,
-      "autoPort": false
-    },
-    {
-      "name": "cts-traveller-form",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": [
-        "-c",
-        "cd /Users/raydeng/Projects/chinatravel-traveller-form && npx next start -p 3010"
-      ],
-      "port": 3010,
-      "autoPort": false
-    },
-    {
-      "name": "tour-catalog-local-editor",
-      "runtimeExecutable": "sh",
-      "runtimeArgs": [
-        "-c",
-        "eval \"$(sed -n -E 's/^(ANTHROPIC_API_KEY|CF_AIG_TOKEN)=/export \\1=/p' /Users/raydeng/Projects/magic-engine/.env.local)\"; NEXT_PUBLIC_SUPABASE_URL=http://localhost:3098 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.xPnntm0hHvysnLiryjJ_41xo9ztTEoMoy2FErliHM1E SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoic2VydmljZV9yb2xlIn0.xPnntm0hHvysnLiryjJ_41xo9ztTEoMoy2FErliHM1E TOUR_CATALOG_LOCAL_TEST=1 TOUR_CATALOG_LOCAL_ROLE=editor TOUR_CATALOG_LOCAL_EMAIL=staff1@ctstours.co.nz WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES='{\"ctstours.co.nz\":\"https://www.ctstours.co.nz/api/internal/tours\"}' npx next dev -p 3011"
-      ],
-      "port": 3011,
-      "autoPort": false
     }
   ]
 }
