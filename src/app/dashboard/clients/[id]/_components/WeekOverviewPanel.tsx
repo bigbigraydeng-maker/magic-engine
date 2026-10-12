@@ -177,7 +177,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
         <h2 className="text-lg font-bold text-me-charcoal">视频 Reel（按状态，没有固定发布日）</h2>
         <p className="text-xs text-me-charcoal/70">
           {typeof data.quota?.reel_per_week === 'number' ? `每周名额 ${data.quota.reel_per_week} 条` : '每周名额未配置'}
-          ；Reel 没有固定发布日，名额用量暂不统计。
+          ；Reel 没有固定发布日（以 PM 在工厂点通过的时间为准，通过后下一个整点发），所以不按日期排，名额用量暂不统计。
         </p>
         {data.reels_error && <p className="text-sm font-medium text-[#B03A2E]">Reel 读取失败，请刷新页面。</p>}
         {!data.reels_error && data.reels.length === 0 && <p className="text-sm text-me-charcoal/80">现在没有可看的 Reel。</p>}
@@ -187,6 +187,13 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
           ))}
         </ul>
         {data.reels.length > 12 && <p className="text-xs text-me-charcoal/70">还有 {data.reels.length - 12} 条更早的，去视频工厂看全部。</p>}
+      </section>
+
+      <section className="space-y-1 rounded-xl border border-black/10 bg-white p-3">
+        <h2 className="text-lg font-bold text-me-charcoal">这一周的画面复核</h2>
+        <p className="text-sm text-me-charcoal/80">
+          尚未接入：授权前会有一步「整周画面复核」（把这一周所有 Reel 封面和 Story 首帧拼成一张总览图，看有没有两张撞脸），做好后结果会显示在这里。
+        </p>
       </section>
 
       <section className="space-y-1 rounded-xl border border-black/10 bg-white p-3">
