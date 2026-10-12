@@ -1,8 +1,8 @@
 ---
 id: 2026-09-24-claimed-gates-missing
 title: 记忆里说"已装好"的两个机械闸（开工盘问技能、合并拦截）在机器上不存在——要么补装要么把记忆改成"没装"
-status: verified
-owner: agent
+status: done
+owner: pm
 decided_on: 2026-09-24
 source: session:beef24ba
 verify_by: 2026-10-01
@@ -10,8 +10,7 @@ verify_how: ls ~/.claude/skills/grilling 存在且 settings 里没有放行 gh p
 done_on: 2026-09-25
 done_ref: pr:1989
 last_checked: 2026-10-12
-check_note: 记忆已改为未安装且 settings 未放行 gh pr merge，与实际一致
-verified_ref: doc:docs/ledger/evidence/2026-09-24-claimed-gates-missing--2026-10-12.md
+check_note: 连续两晚判不了（10-09、10-12），转 PM：夜巡环境读不到本机 ~/.claude 的技能目录、settings 与记忆文件，verify_how 要求的实证取不到；此前一版夜巡写的证据时间晚于提交时间，已撤回，待人在本机核对。
 ---
 审计发现 feedback-grill-before-building 声称装了 grilling 技能和 gh pr merge 拦截，
 实际 settings.local.json 反而放行了 gh pr *。"防护已建"的记录本身是假的。

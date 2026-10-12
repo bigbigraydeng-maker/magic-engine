@@ -2,13 +2,13 @@
 id: 2026-09-28-nal-whatsapp-old-creative-paused
 title: 停掉 NAL WhatsApp 系列里已疲劳的旧素材：点击率跌破健康区间、连续两天零开聊还在花钱，新素材已在扛主力
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-28
 done_on: 2026-09-28
 done_ref: doc:docs/ledger/2026-09-28-nal-whatsapp-old-creative-paused.md
 source: session:e78010ff
 last_checked: 2026-10-12
-check_note: 补录卡，到期核查还没做（verify_by 已过）。2026-10-10 在 CrazyContent 库按客户名和日期查工作日志没查到 09-28 那条，广告编号取不到，需人工从当日执行回执找编号再核查。
+check_note: 连续两晚判不了（10-10、10-12），转 PM。补录卡，到期核查还没做（verify_by 已过）。2026-10-10 在 CrazyContent 库按客户名和日期查工作日志没查到 09-28 那条，广告编号取不到，需人工从当日执行回执找编号再核查。
 verify_by: 2026-10-05
 verify_how: 广告编号从 fde_work_logs 该客户 2026-09-28 那条取（本卡不留客户经营数据），数字按那两个编号从 ad_daily_insights 取。查两件：①旧素材广告有没有被谁重新打开——不能只读 10-05 当天的单次 `effective_status`（这只是快照，中间若被重开又重新暂停会漏判）：先拉 `ad_daily_insights` 该广告编号 **09-29** 至 10-05 逐日的花费/展示记录（09-28 当天广告是暂停前才产生花费/展示，`date_start`/`time_increment=1` 是整日聚合值，把 09-28 计入会把暂停前的正常花费误判成暂停后被重开，必须从 09-29 起算；若确实需要核对 09-28 当天有没有在暂停后又被重开，要另外拉该日的小时级数据按暂停时间点切分，不能用整日聚合值），任何一天出现非零花费或展示即视为期间被重新打开过，要报告并追问原因；若逐日记录全为零/空，再读一次当前 `effective_status` 确认仍落在 `PAUSED`（`status` 不作数，遇 `IN_PROCESS` 过渡态等 20 秒回读）作为收尾确认，两步都要做，不能只做后一步；②新素材单独扛量一周后，点击率和每次开聊成本有没有开始下滑（同样的疲劳信号：CTR 跌破健康区间下限、连续两天零转化还在花钱）——如果有，说明它也快到寿命，要提前准备第三条素材，不要等它也归零才动手
 ---
