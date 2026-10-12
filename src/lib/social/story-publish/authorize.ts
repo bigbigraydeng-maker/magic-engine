@@ -377,23 +377,30 @@ async function activateOrRollback(input: {
     activated = await ports.store.activateAuthorization(authId, clientId)
   } catch {
     const rollback = await rollbackGrant({ ports, authId, packId, clientId, now })
-    await sendEventQuietly(ports, {
-      id: `${authId}:rollback`,
-      name: STORY_EVENTS.packRevoked,
-      data: {
-        client_id: clientId,
-        pack_id: packId,
-        authorization_id: authId,
-        authorization: 'REVOKED',
-        provider_impact: 'NONE',
-      },
-    })
+    await announceRollback(ports, authId, packId, clientId)
     return { ok: false, status: 500, error: 'AUTHORIZATION_NOT_ACTIVATED', rollback }
   }
   if (activated === null) {
+    // someone revoked it between the event and the arming: downstream already heard "authorised"
+    await announceRollback(ports, authId, packId, clientId)
     return { ok: false, status: 409, error: 'AUTHORIZATION_REVOKED_DURING_ARMING', rollback: 'OK' }
   }
   return { ok: true }
+}
+
+/** Tell downstream that a grant whose "authorised" event already went out no longer stands. */
+async function announceRollback(ports: StoryServicePorts, authId: string, packId: string, clientId: string): Promise<void> {
+  await sendEventQuietly(ports, {
+    id: `${authId}:rollback`,
+    name: STORY_EVENTS.packRevoked,
+    data: {
+      client_id: clientId,
+      pack_id: packId,
+      authorization_id: authId,
+      authorization: 'REVOKED',
+      provider_impact: 'NONE',
+    },
+  })
 }
 
 /** Insert the inactive grant, or report that one already exists. */

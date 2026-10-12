@@ -594,7 +594,8 @@ describe('evaluateStoryPack — contentHash', () => {
     const store = seedGreenStore()
     const result = await evaluate(store, makePorts(store))
 
-    expect(result.contentHash).toBe(computeContentManifestHash(store.allItems()))
+    // the default preview lifetime (7 days) is part of what the person confirms
+    expect(result.contentHash).toBe(computeContentManifestHash(store.allItems(), { lifetimeDays: 7 }))
   })
 
   it('changes when an item text_line changes', async () => {
@@ -608,12 +609,14 @@ describe('evaluateStoryPack — contentHash', () => {
     expect(after.contentHash).not.toBe(before.contentHash)
   })
 
-  it('is stable across expiry while manifestHash differs', async () => {
+  it('changes with the previewed lifetime (and so does manifestHash), but not with the clock', async () => {
     const store = seedGreenStore()
     const short = await evaluate(store, makePorts(store), { expiresInDays: 1 })
     const long = await evaluate(store, makePorts(store), { expiresInDays: 14 })
+    const longAgain = await evaluate(store, makePorts(store), { expiresInDays: 14 })
 
-    expect(short.contentHash).toBe(long.contentHash)
+    expect(short.contentHash).not.toBe(long.contentHash)
     expect(short.manifestHash).not.toBe(long.manifestHash)
+    expect(long.contentHash).toBe(longAgain.contentHash)
   })
 })

@@ -414,3 +414,21 @@ describe('getActivePauses', () => {
     expect(await store.getActivePauses('pack-1', 'client-1')).toEqual([{ channel: null, item_id: null }])
   })
 })
+
+describe('recordOpen renewal', () => {
+  it('writes a new record when the same person opens the same version on a later UTC day', async () => {
+    const store = new InMemoryStoryStore()
+    store.seedItems([makeItem()])
+    const base = {
+      item_id: 'item-1',
+      channel: 'facebook_story' as StoryChannel,
+      opened_by_user_id: 'user-1',
+      opened_fingerprint: 'a'.repeat(64),
+    }
+    await store.recordOpen({ ...base, opened_at: '2026-10-12T10:00:00.000Z' })
+    await store.recordOpen({ ...base, opened_at: '2026-10-12T23:00:00.000Z' })
+    expect(await store.listOpens('pack-1')).toHaveLength(1)
+    await store.recordOpen({ ...base, opened_at: '2026-10-13T11:00:00.000Z' })
+    expect(await store.listOpens('pack-1')).toHaveLength(2)
+  })
+})

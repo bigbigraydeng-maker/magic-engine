@@ -90,7 +90,7 @@ export async function evaluateStoryPack(input: {
     approvedFingerprints[storyItemKey(item)] = computeItemFingerprint(item, expiresAt)
   }
   const manifestHash = computeManifestHash(items, expiresAt)
-  const contentHash = computeContentManifestHash(items)
+  const contentHash = computeContentManifestHash(items, { lifetimeDays: expiresInDays })
 
   const grant = buildGrant({
     packId,

@@ -239,6 +239,25 @@ describe.skipIf(!REST_URL || !REST_KEY)('SupabaseStoryStore against a real datab
     expect(await store.getActivePauses(pausedPackId, randomUUID())).toEqual([])
   })
 
+  it('writes a fresh open record when the same unchanged item is opened again on a later day', async () => {
+    const renewalPack = randomUUID()
+    const rows: Array<Record<string, unknown>> = packItems(clientId, renewalPack).map((row) => ({
+      ...row,
+      media_sha256: freshSha(),
+    }))
+    const insert = await db.from('story_pack_items').insert(rows)
+    if (insert.error) throw insert.error
+    const itemId = String(rows[2].item_id)
+    const user = randomUUID()
+    const base = { item_id: itemId, channel: 'facebook_story' as const, opened_by_user_id: user, opened_fingerprint: 'a'.repeat(64) }
+
+    await store.recordOpen({ ...base, opened_at: '2026-10-12T10:00:00.000Z' })
+    await store.recordOpen({ ...base, opened_at: '2026-10-12T22:00:00.000Z' }) // same UTC day: one record
+    expect(await store.listOpens(renewalPack)).toHaveLength(1)
+    await store.recordOpen({ ...base, opened_at: '2026-10-13T11:00:00.000Z' }) // next day: renewal
+    expect(await store.listOpens(renewalPack)).toHaveLength(2)
+  })
+
   it('refuses a confirmation that carries a stale preview hash and writes nothing', async () => {
     const result = await authorizeStoryPack({
       ports, packId, clientId, actor: ADMIN, confirm: true, expectedContentHash: 'f'.repeat(64), now: NOW,

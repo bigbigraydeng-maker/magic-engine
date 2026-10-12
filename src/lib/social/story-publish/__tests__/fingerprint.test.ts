@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   canonicalFingerprintInput,
   computeContentFingerprint,
+  computeContentManifestHash,
   computeItemFingerprint,
   computeManifestHash,
 } from '../fingerprint'
@@ -360,5 +361,18 @@ describe('computeContentFingerprint', () => {
     const a = computeContentFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:00Z' })
     const b = computeContentFingerprint({ ...baseItem(), slot_at: '2026-10-12T09:00:00.000+00:00' })
     expect(a).toBe(b)
+  })
+})
+
+describe('computeContentManifestHash lifetime', () => {
+  it('binds the previewed lifetime when one is given and stays unbound otherwise', () => {
+    const items = [baseItem()]
+    const plain = computeContentManifestHash(items)
+    expect(computeContentManifestHash(items)).toBe(plain)
+    const seven = computeContentManifestHash(items, { lifetimeDays: 7 })
+    const fourteen = computeContentManifestHash(items, { lifetimeDays: 14 })
+    expect(seven).not.toBe(fourteen)
+    expect(seven).not.toBe(plain)
+    expect(computeContentManifestHash(items, { lifetimeDays: 7 })).toBe(seven)
   })
 })

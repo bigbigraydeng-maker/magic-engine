@@ -149,6 +149,9 @@ function mapAuth(row: AuthRow): StoryAuthorization {
 
 // ---- store ----------------------------------------------------------------
 
+/** Postgres unique-violation SQLSTATE. */
+const UNIQUE_VIOLATION = '23505'
+
 export class SupabaseStoryStore implements StoryStore {
   constructor(private readonly db: SupabaseClient) {}
 
@@ -288,21 +291,16 @@ export class SupabaseStoryStore implements StoryStore {
   }
 
   async recordOpen(record: StoryOpenRecord): Promise<void> {
-    const { error } = await this.db.from('story_pack_item_opens').upsert(
-      {
-        item_id: record.item_id,
-        channel: record.channel,
-        opened_by_user_id: record.opened_by_user_id,
-        opened_fingerprint: record.opened_fingerprint,
-        opened_at: record.opened_at,
-      },
-      {
-        onConflict: 'item_id,channel,opened_by_user_id,opened_fingerprint',
-        ignoreDuplicates: true,
-      },
-    )
+    const { error } = await this.db.from('story_pack_item_opens').insert({
+      item_id: record.item_id,
+      channel: record.channel,
+      opened_by_user_id: record.opened_by_user_id,
+      opened_fingerprint: record.opened_fingerprint,
+      opened_at: record.opened_at,
+    })
+    // The same person opening the same version twice on the same UTC day is one record, not an error.
     // An unknown item surfaces as the foreign-key error and is thrown.
-    if (error) throw error
+    if (error && error.code !== UNIQUE_VIOLATION) throw error
   }
 
   async listOpens(packId: string): Promise<StoryOpenRecord[]> {

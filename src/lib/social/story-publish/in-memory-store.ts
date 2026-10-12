@@ -234,8 +234,10 @@ export class InMemoryStoryStore implements StoryStore {
         open.item_id === record.item_id &&
         open.channel === record.channel &&
         open.opened_by_user_id === record.opened_by_user_id &&
-        open.opened_fingerprint === record.opened_fingerprint,
+        open.opened_fingerprint === record.opened_fingerprint &&
+        open.opened_at.slice(0, 10) === record.opened_at.slice(0, 10),
     )
+    // same person + item + version + UTC day = one record; a later day writes a new one (renewal)
     if (exists) return
     this.opens.push({ ...record })
   }

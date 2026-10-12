@@ -630,7 +630,7 @@ describe('price declared', () => {
   })
 
   it('does not mistake dates or day counts for prices', () => {
-    for (const text of ['Departs 18 March 2027', '10 days across 2 cities', 'Day 4: the Great Wall']) {
+    for (const text of ['Departs 18 March 2027', '10 days across 2 cities', 'Day 4: the Great Wall', '元旦出发的团', '北京到西安的块状地貌']) {
       expect(decideStoryPublish(baseInput({ item: baseItem({ text_line: text }) }))).toEqual({ action: 'PUBLISH' })
     }
   })

@@ -138,9 +138,14 @@ create table public.story_pack_item_opens (
   opened_fingerprint text not null check (opened_fingerprint ~ '^[0-9a-f]{64}$'),
   opened_at timestamptz not null default now(),
   constraint story_pack_item_opens_item_fk foreign key (item_id, channel)
-    references public.story_pack_items (item_id, channel),
-  constraint story_pack_item_opens_once_key unique (item_id, channel, opened_by_user_id, opened_fingerprint)
+    references public.story_pack_items (item_id, channel)
 );
+
+-- One row per person, item, version and UTC day: clicking twice in a day is one record, but opening the
+-- same unchanged item again on a later day writes a NEW row (an open only counts for 24 hours, so the
+-- person must be able to renew it; the rows themselves are write-once).
+create unique index story_pack_item_opens_once_per_day_idx
+  on public.story_pack_item_opens (item_id, channel, opened_by_user_id, opened_fingerprint, ((opened_at at time zone 'UTC')::date));
 
 -- Open records are evidence: never edited, never deleted.
 create function public.story_opens_freeze() returns trigger language plpgsql as $$

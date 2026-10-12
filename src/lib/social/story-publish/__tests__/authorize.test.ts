@@ -506,6 +506,33 @@ describe('authorizeStoryPack — rollback', () => {
     expect(ports.sendEvent).not.toHaveBeenCalled()
   })
 
+  it('refuses a confirmation whose lifetime differs from the previewed one', async () => {
+    const store = seedGreenStore()
+    const ports = makePorts(store)
+    const preview = await buildStoryPackPreview({
+      ports, packId: 'pack-1', clientId: 'client-1', actor: ADMIN, now: NOW, expiresInDays: 7,
+    })
+    expect(preview.ok).toBe(true)
+    if (!preview.ok) return
+    const result = await authorize(ports, { expiresInDays: 14, expectedContentHash: preview.value.content_hash })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe('PACK_CHANGED_SINCE_PREVIEW')
+    expect(store.allAuthorizations()).toHaveLength(0)
+  })
+
+  it('announces the rollback when the grant was revoked by someone else during arming', async () => {
+    const store = seedGreenStore()
+    Object.assign(store, { activateAuthorization: async () => null })
+    const names: string[] = []
+    const ports = makePorts(store, { sendEvent: vi.fn(async (event: { name: string }) => { names.push(event.name) }) })
+    const result = await authorize(ports)
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe('AUTHORIZATION_REVOKED_DURING_ARMING')
+    expect(names).toEqual([STORY_EVENTS.packAuthorized, STORY_EVENTS.packRevoked])
+  })
+
   it('requires the preview content hash to confirm', async () => {
     const store = seedGreenStore()
     const ports = makePorts(store)

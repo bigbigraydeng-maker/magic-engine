@@ -92,13 +92,18 @@ export function computeContentFingerprint(item: StoryItemSpec): string {
 
 /**
  * Hash over what the person sees in a preview: every item's content fingerprint, ordered by item key.
- * It carries no expiry, so a preview taken now and a confirmation sent a minute later agree as long as
+ * It carries no expiry date (only, when given, the lifetime in days the person previewed), so a preview taken now and a confirmation sent a minute later agree as long as
  * no item changed in between.
  */
-export function computeContentManifestHash(items: StoryItemSpec[]): string {
+export function computeContentManifestHash(
+  items: StoryItemSpec[],
+  options: { lifetimeDays?: number } = {},
+): string {
   const pairs = items.map((item) => [storyItemKey(item), computeContentFingerprint(item)] as const)
   const keys = new Set(pairs.map(([key]) => key))
   if (keys.size !== pairs.length) throw new Error('computeContentManifestHash: duplicate item key')
   pairs.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  return createHash('sha256').update(JSON.stringify(pairs)).digest('hex')
+  // the lifetime the person previews is part of what they confirm
+  const payload = options.lifetimeDays === undefined ? pairs : { items: pairs, lifetime_days: options.lifetimeDays }
+  return createHash('sha256').update(JSON.stringify(payload)).digest('hex')
 }

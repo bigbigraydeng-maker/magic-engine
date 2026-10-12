@@ -375,7 +375,7 @@ function checkAssetUsage(input: StoryGateInput): StoryGateDecision | null {
  */
 function checkPriceDeclared(input: StoryGateInput): StoryGateDecision | null {
   if (input.item.contains_price) return null
-  const pattern = /[$€£¥￥＄]|\b(?:nzd|aud|usd|rmb|cny)\b|\bdollars?\b|\bper person\b|纽币|澳币|美元|人民币|元|块钱/i
+  const pattern = /[$€£¥￥＄]|\b(?:nzd|aud|usd|rmb|cny)\b|\bdollars?\b|\bper person\b|纽币|澳币|美元|人民币|\d\s*(?:元|块)|(?:元|块)\s*\d/i
   if (pattern.test(input.item.text_line)) return record('BLOCKED', 'PRICE_UNDECLARED', false)
   return null
 }
