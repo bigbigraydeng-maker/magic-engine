@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FakeState } from '@/lib/crm/__tests__/booking-fake-db'
-import { CLIENT_A, CONTACT_A1 } from '@/lib/crm/__tests__/booking-fixtures'
+import { CLIENT_A, CONTACT_A1, DEPARTURES_TABLE, TOURS_TABLE } from '@/lib/crm/__tests__/booking-fixtures'
 import { ADMIN_EMAIL, params, request, seedStandardWorld, setupAuthEnv } from './routes-support'
 
 /**
@@ -108,7 +108,7 @@ describe('booking GET speed', () => {
     expect(at(1)).toEqual(['clients'])
     expect(at(2)).toEqual(['contacts', 'crm_bookings'])
     expect(at(3)).toEqual(['crm_booking_milestones'])
-    expect(at(4)).toEqual(['tour_catalog_departures', 'tour_catalog_tours'])
+    expect(at(4)).toEqual([DEPARTURES_TABLE, TOURS_TABLE])
   })
 
   it('listed member: 5 sequential round trips (was 8 queries in a row)', async () => {

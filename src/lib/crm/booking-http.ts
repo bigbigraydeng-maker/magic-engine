@@ -13,7 +13,7 @@ import { findForbiddenField } from './booking-input'
 import { getBookingWithMilestones } from './booking-store-reads'
 import { getBookingView, nzTodayIso } from './booking-view'
 import type { TravelBookingRule } from './industry/travel-booking-rule'
-import { asPlainObject, isUuid, readJsonBody } from '@/lib/tour-catalog/http'
+import { asPlainObject, isUuid, readJsonBody } from '@/lib/http/request-helpers'
 
 /** Matches an acceptable JSON content-type header (charset optional). */
 const JSON_CONTENT_TYPE = /^application\/json\s*(;\s*charset=[\w.-]+)?\s*$/i

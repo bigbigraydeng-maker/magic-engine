@@ -31,6 +31,8 @@ import {
   departureRow,
   milestoneRow,
   tourRow,
+  DEPARTURES_TABLE,
+  TOURS_TABLE,
 } from './booking-fixtures'
 
 const TODAY = '2026-10-12'
@@ -166,8 +168,8 @@ beforeEach(() => {
   const fake = createFakeDb()
   db = fake.db
   state = fake.state
-  push(state, 'tour_catalog_tours', [tourRow()])
-  push(state, 'tour_catalog_departures', [departureRow()])
+  push(state, TOURS_TABLE, [tourRow()])
+  push(state, DEPARTURES_TABLE, [departureRow()])
 })
 
 describe('buildNudgeList ordering and buckets', () => {
@@ -437,8 +439,8 @@ describe('other-client exclusion', () => {
     expect(tables.has('crm_bookings')).toBe(true)
     expect(tables.has('crm_booking_milestones')).toBe(true)
     expect(tables.has('contacts')).toBe(true)
-    expect(tables.has('tour_catalog_tours')).toBe(true)
-    expect(tables.has('tour_catalog_departures')).toBe(true)
+    expect(tables.has(TOURS_TABLE)).toBe(true)
+    expect(tables.has(DEPARTURES_TABLE)).toBe(true)
     expect(tables.has('contact_touchpoints')).toBe(true)
 
     for (const query of state.queries) {

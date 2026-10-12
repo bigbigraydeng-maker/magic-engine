@@ -25,6 +25,8 @@ import {
   contactRow,
   departureRow,
   tourRow,
+  DEPARTURES_TABLE,
+  TOURS_TABLE,
 } from '@/lib/crm/__tests__/booking-fixtures'
 
 export const ADMIN_EMAIL = 'admin@me.test'
@@ -85,11 +87,11 @@ export function seedStandardWorld(state: FakeState): void {
       contactRow({ id: CONTACT_A2, client_id: CLIENT_A, display_name: 'Ana' }),
       contactRow({ id: CONTACT_B1, client_id: CLIENT_B, display_name: 'Bob' }),
     ],
-    tour_catalog_tours: [
+    [TOURS_TABLE]: [
       tourRow({ id: TOUR_A1, client_id: CLIENT_A }),
       tourRow({ id: TOUR_B1, client_id: CLIENT_B }),
     ],
-    tour_catalog_departures: [
+    [DEPARTURES_TABLE]: [
       departureRow({ id: DEP_A1, tour_id: TOUR_A1, client_id: CLIENT_A }),
       departureRow({ id: DEP_B1, tour_id: TOUR_B1, client_id: CLIENT_B }),
     ],

@@ -36,6 +36,8 @@ import {
   departureRow,
   milestoneRow,
   tourRow,
+  DEPARTURES_TABLE,
+  TOURS_TABLE,
 } from './booking-fixtures'
 
 const { db, state, reset } = createFakeDb()
@@ -148,11 +150,11 @@ describe('tenant scoping', () => {
       contactRow({ id: CONTACT_A1, client_id: CLIENT_A }),
       contactRow({ id: CONTACT_B1, client_id: CLIENT_B }),
     ])
-    seed('tour_catalog_tours', [
+    seed(TOURS_TABLE, [
       tourRow({ id: TOUR_A1, client_id: CLIENT_A }),
       tourRow({ id: TOUR_B1, client_id: CLIENT_B }),
     ])
-    seed('tour_catalog_departures', [
+    seed(DEPARTURES_TABLE, [
       departureRow({ id: DEP_A1, client_id: CLIENT_A }),
       departureRow({ id: DEP_B1, client_id: CLIENT_B }),
     ])
@@ -242,11 +244,11 @@ describe('loadCatalogFacts', () => {
     for (let i = 0; i < 250; i += 1) {
       ids.push(`10000000-0000-4000-8000-${String(i).padStart(12, '0')}`)
     }
-    seed('tour_catalog_tours', [tourRow({ id: ids[0], client_id: CLIENT_A })])
+    seed(TOURS_TABLE, [tourRow({ id: ids[0], client_id: CLIENT_A })])
 
     await loadCatalogFacts(db, CLIENT_A, ids, [])
 
-    const queries = selectsOn('tour_catalog_tours')
+    const queries = selectsOn(TOURS_TABLE)
     expect(queries).toHaveLength(3)
     for (const query of queries) {
       const inFilter = query.ins.find(([col]) => col === 'id')
@@ -259,11 +261,11 @@ describe('loadCatalogFacts', () => {
     await loadCatalogFacts(db, CLIENT_A, [], [])
     expect(state.queries).toHaveLength(0)
 
-    seed('tour_catalog_tours', [tourRow({ id: TOUR_A1, client_id: CLIENT_A })])
-    seed('tour_catalog_departures', [departureRow({ id: DEP_A1, client_id: CLIENT_A })])
+    seed(TOURS_TABLE, [tourRow({ id: TOUR_A1, client_id: CLIENT_A })])
+    seed(DEPARTURES_TABLE, [departureRow({ id: DEP_A1, client_id: CLIENT_A })])
     const facts = await loadCatalogFacts(db, CLIENT_A, [TOUR_A1, TOUR_A1], [DEP_A1, DEP_A1])
 
-    const tourQuery = selectsOn('tour_catalog_tours')[0]
+    const tourQuery = selectsOn(TOURS_TABLE)[0]
     expect(tourQuery.ins[0][1]).toEqual([TOUR_A1])
     expect(facts.tours.get(TOUR_A1)).toEqual({
       id: TOUR_A1,
@@ -535,7 +537,7 @@ describe('failure surfaces', () => {
     seed('crm_bookings', bookingPair(BOOKING_A1, CLIENT_A))
     seed('contacts', [contactRow()])
     seed('crm_booking_milestones', [milestoneRow()])
-    seed('tour_catalog_tours', [tourRow()])
+    seed(TOURS_TABLE, [tourRow()])
     seed('crm_booking_members', [
       { client_id: CLIENT_A, email: 'a@x.test', granted_by: 'admin@me.test', created_at: UPDATED_AT },
     ])
@@ -552,7 +554,7 @@ describe('failure surfaces', () => {
     await expect(listMilestonesForBookings(db, CLIENT_A, [BOOKING_A1])).rejects.toThrow(Error)
 
     state.failTables.clear()
-    state.failTables.add('tour_catalog_tours')
+    state.failTables.add(TOURS_TABLE)
     await expect(loadCatalogFacts(db, CLIENT_A, [TOUR_A1], [])).rejects.toThrow(Error)
 
     state.failTables.clear()
