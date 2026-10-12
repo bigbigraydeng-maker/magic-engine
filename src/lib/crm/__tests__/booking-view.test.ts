@@ -40,6 +40,8 @@ import {
   departureRow,
   milestoneRow,
   tourRow,
+  DEPARTURES_TABLE,
+  TOURS_TABLE,
 } from './booking-fixtures'
 
 const TODAY = '2026-10-12'
@@ -501,11 +503,11 @@ describe('async view helpers', () => {
           kind: 'balance',
         }),
       ],
-      tour_catalog_tours: [
+      [TOURS_TABLE]: [
         tourRow(),
         tourRow({ id: TOUR_B1, client_id: CLIENT_B, name: 'Other Tour' }),
       ],
-      tour_catalog_departures: [
+      [DEPARTURES_TABLE]: [
         departureRow(),
         departureRow({
           id: DEP_B1,

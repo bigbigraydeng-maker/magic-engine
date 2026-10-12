@@ -9,6 +9,7 @@ import {
   notFoundResponse,
   readBookingBody,
   storeFailureResponse,
+  withServerTiming,
 } from '@/lib/crm/booking-http'
 import { parseCreateBody } from '@/lib/crm/booking-input'
 import { createBooking } from '@/lib/crm/booking-store'
@@ -23,9 +24,11 @@ interface RouteParams {
 }
 
 export async function GET(req: NextRequest, { params }: RouteParams) {
+  const start = performance.now()
   const { id: clientId } = await params
 
   const access = await requireBookingAccess(clientId, 'view')
+  const gateMs = performance.now() - start
   if (!access.ok) return access.response
 
   const contactId = req.nextUrl.searchParams.get('contactId')
@@ -37,18 +40,19 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const belongs = await contactBelongsToClient(supabaseAdmin, clientId, contactId)
-    if (!belongs) {
+    // The ownership check and the (client-scoped) bookings read are independent, so
+    // they start together. The ownership result still decides first: a contact that
+    // is not this client's is a 404 whatever the bookings read did.
+    const [belongsResult, bookingsResult] = await Promise.allSettled([
+      contactBelongsToClient(supabaseAdmin, clientId, contactId),
+      getContactBookingViews(supabaseAdmin, clientId, contactId, access.rule, nzTodayIso()),
+    ])
+    if (belongsResult.status === 'rejected') throw belongsResult.reason
+    if (!belongsResult.value) {
       return notFoundResponse()
     }
-    const bookings = await getContactBookingViews(
-      supabaseAdmin,
-      clientId,
-      contactId,
-      access.rule,
-      nzTodayIso(),
-    )
-    return NextResponse.json({ bookings })
+    if (bookingsResult.status === 'rejected') throw bookingsResult.reason
+    return withServerTiming(NextResponse.json({ bookings: bookingsResult.value }), start, gateMs)
   } catch (err) {
     return internalErrorResponse('bookings_list_failed', err)
   }

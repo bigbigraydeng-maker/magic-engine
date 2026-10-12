@@ -10,6 +10,8 @@ import {
   DISABLED_LEADS_CONFIG,
   departureRow,
   tourRow,
+  DEPARTURES_TABLE,
+  TOURS_TABLE,
 } from '@/lib/crm/__tests__/booking-fixtures'
 import {
   ADMIN_EMAIL,
@@ -144,7 +146,7 @@ describe('GET options', () => {
   })
 
   it('never reads or returns private departure columns', async () => {
-    const deps = state().tables.tour_catalog_departures
+    const deps = state().tables[DEPARTURES_TABLE]
     const dep = deps.find((r) => r.id === DEP_A1)
     if (dep === undefined) throw new Error('seeded departure missing')
     dep.internal = { cost: 'SECRET-COST' }
@@ -156,7 +158,7 @@ describe('GET options', () => {
     expect(text).not.toContain('SECRET-PRICE')
     expect(text).not.toContain('internal')
 
-    const departureQueries = state().queries.filter((q) => q.table === 'tour_catalog_departures')
+    const departureQueries = state().queries.filter((q) => q.table === DEPARTURES_TABLE)
     expect(departureQueries.length).toBeGreaterThan(0)
     for (const query of departureQueries) {
       const columns = query.columns ?? ''
@@ -166,7 +168,7 @@ describe('GET options', () => {
   })
 
   it('excludes past, cancelled and closed departures and sorts the rest by date', async () => {
-    const deps = state().tables.tour_catalog_departures
+    const deps = state().tables[DEPARTURES_TABLE]
     const extra: Row[] = [
       departureRow({ id: '20000000-0000-4000-8000-0000000000e1', tour_id: TOUR_A1, client_id: CLIENT_A, depart_on: '2026-10-11', status: 'open' }),
       departureRow({ id: '20000000-0000-4000-8000-0000000000e2', tour_id: TOUR_A1, client_id: CLIENT_A, depart_on: '2026-10-12', status: 'open' }),
@@ -195,10 +197,10 @@ describe('GET options', () => {
   })
 
   it('lists a tour with no future departures, hides inactive tours and foreign departures', async () => {
-    const tours = state().tables.tour_catalog_tours
+    const tours = state().tables[TOURS_TABLE]
     tours.push(tourRow({ id: '10000000-0000-4000-8000-0000000000a2', client_id: CLIENT_A, name: 'Empty Tour' }))
     tours.push(tourRow({ id: '10000000-0000-4000-8000-0000000000a3', client_id: CLIENT_A, name: 'Inactive Tour', is_active: false }))
-    state().tables.tour_catalog_departures.push(
+    state().tables[DEPARTURES_TABLE].push(
       departureRow({ id: '20000000-0000-4000-8000-0000000000f1', tour_id: '10000000-0000-4000-8000-0000000000a2', client_id: CLIENT_A, depart_on: '2026-10-11', status: 'open' }),
       departureRow({ id: '20000000-0000-4000-8000-0000000000f2', tour_id: '99999999-0000-4000-8000-000000000000', client_id: CLIENT_A, depart_on: '2027-05-01', status: 'open' }),
     )
@@ -216,7 +218,7 @@ describe('GET options', () => {
   it('scopes every catalog query to the client', async () => {
     await optionsFor(CLIENT_A)
     const catalogQueries = state().queries.filter(
-      (q) => q.table === 'tour_catalog_tours' || q.table === 'tour_catalog_departures',
+      (q) => q.table === TOURS_TABLE || q.table === DEPARTURES_TABLE,
     )
     expect(catalogQueries.length).toBeGreaterThan(0)
     for (const query of catalogQueries) {
@@ -273,7 +275,7 @@ describe('GET options access gate', () => {
 describe('GET options uses the Pacific/Auckland date for "today"', () => {
   it('excludes a departure that is already past in New Zealand', async () => {
     vi.setSystemTime(new Date('2026-10-11T12:30:00Z'))
-    state().tables.tour_catalog_departures.push(
+    state().tables[DEPARTURES_TABLE].push(
       departureRow({ id: '20000000-0000-4000-8000-0000000000d1', tour_id: TOUR_A1, client_id: CLIENT_A, depart_on: '2026-10-11', status: 'open' }),
     )
     const res = await optionsFor(CLIENT_A)

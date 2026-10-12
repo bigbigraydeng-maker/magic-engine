@@ -110,13 +110,17 @@ async function resolveRole(
   email: string,
   role: string,
   allowedClientId: string | null | undefined,
+  /** Lets an independent read (the config load) run in the same tick as the member lookup. */
+  whileLookingUp?: () => void,
 ): Promise<{ ok: true; role: BookingRole } | { ok: false; response: NextResponse }> {
   const unrestricted = allowedClientId === null || allowedClientId === undefined
   if (role === 'admin' && unrestricted) {
     return { ok: true, role: 'me_admin' }
   }
 
-  const membership = await lookupBookingMember(clientId, email)
+  const pending = lookupBookingMember(clientId, email)
+  whileLookingUp?.()
+  const membership = await pending
   if (membership === 'lookup_failed') {
     return { ok: false, response: NextResponse.json({ error: 'Authorization check failed' }, { status: 500 }) }
   }
@@ -151,7 +155,23 @@ export async function requireBookingAccess(
     return deny(403, 'Forbidden')
   }
 
-  const resolved = await resolveRole(clientId, email, result.role, result.allowedClientId)
+  // The config load does not depend on the role, so for non-admins it starts in the
+  // same tick as the member lookup. The decisions below are applied in the original
+  // order (member 500 / 403, capability 403, then config 500 / 404). loadBookingRule
+  // never rejects, so an unused result cannot become an unhandled rejection.
+  let rulePromise: Promise<ConfigLoad> | null = null
+  const startRuleLoad = () => {
+    if (capability !== 'manage_members' && rulePromise === null) {
+      rulePromise = loadBookingRule(clientId)
+    }
+  }
+  const resolved = await resolveRole(
+    clientId,
+    email,
+    result.role,
+    result.allowedClientId,
+    startRuleLoad,
+  )
   if (!resolved.ok) {
     return { ok: false, response: resolved.response }
   }
@@ -165,7 +185,8 @@ export async function requireBookingAccess(
     return { ok: true, actor: email, role, rule: null }
   }
 
-  const loaded = await loadBookingRule(clientId)
+  startRuleLoad()
+  const loaded = await (rulePromise as Promise<ConfigLoad> | null ?? loadBookingRule(clientId))
   if (!loaded.ok) {
     return { ok: false, response: loaded.response }
   }

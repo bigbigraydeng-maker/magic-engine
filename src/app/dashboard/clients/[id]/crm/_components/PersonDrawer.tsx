@@ -17,6 +17,7 @@ import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
 import { BookingsBlock } from './bookings/BookingsBlock'
+import { useBodyScrollLock } from './useBodyScrollLock'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
 import { intentNote, type NextAction } from '@/lib/crm/next-action'
@@ -196,6 +197,7 @@ export function PersonDrawer({
   }
 
   // 这一刻该给哪几个按钮 / 哪几个阶段 —— 判断全在 lib 里，页面不自己拍。
+  useBodyScrollLock()
   const actions = drawerActions(row.segment ?? 'stale_conversation', row.suggestedChannel ?? 'phone')
   const stageChoices = nextStageChoices(stages, row.stage)
 
@@ -245,7 +247,7 @@ export function PersonDrawer({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
           {/*
             开口前要知道的三样，摆在**第一屏**（PM 2026-08-17，CTS 销售视角）。
 

@@ -10,6 +10,8 @@ import {
   BOOKING_A2,
   BOOKING_B1,
   bookingPair,
+  DEPARTURES_TABLE,
+  TOURS_TABLE,
 } from '@/lib/crm/__tests__/booking-fixtures'
 import {
   ADMIN_EMAIL,
@@ -208,7 +210,7 @@ describe('GET bookings', () => {
   })
 
   it('warns when the live departure date differs from the snapshot', async () => {
-    const deps = state().tables.tour_catalog_departures
+    const deps = state().tables[DEPARTURES_TABLE]
     const dep = deps.find((r) => r.id === '20000000-0000-4000-8000-0000000000a1')
     if (dep === undefined) throw new Error('seeded departure missing')
     dep.depart_on = '2027-03-19'

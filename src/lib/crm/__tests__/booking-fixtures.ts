@@ -146,3 +146,12 @@ export function bookingPair(
   })
   return [booking, deposit, balance]
 }
+
+/**
+ * The catalog tables the booking reads touch, re-exported from the catalog folder
+ * (which owns those names) so no CRM file spells them out.
+ */
+export {
+  BOOKING_FACT_TOURS_TABLE as TOURS_TABLE,
+  BOOKING_FACT_DEPARTURES_TABLE as DEPARTURES_TABLE,
+} from '@/lib/tour-catalog/__tests__/booking-fact-tables'

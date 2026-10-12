@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { loadBookingDepartureFacts, loadBookingTourFacts } from '@/lib/tour-catalog/booking-facts'
 import { isDoNotContact } from './dnc'
 import type { DncTouch } from './dnc'
 import type {
@@ -15,9 +16,7 @@ import type {
   BookingRow,
   BookingStatus,
   BookingWithMilestones,
-  CatalogDepartureFacts,
   CatalogFacts,
-  CatalogTourFacts,
   MilestoneKind,
   MilestoneRow,
 } from './booking-types'
@@ -277,75 +276,9 @@ export async function listMilestonesForBookings(
 }
 
 // --- catalog facts ------------------------------------------------------------
-
-async function loadTourFacts(
-  db: SupabaseClient,
-  clientId: string,
-  tourIds: string[],
-): Promise<Map<string, CatalogTourFacts>> {
-  const tours = new Map<string, CatalogTourFacts>()
-  const uniqueTours = unique(tourIds)
-  for (const group of chunk(uniqueTours, CHUNK_SIZE)) {
-    const res = await db
-      .from('tour_catalog_tours')
-      .select('id, name, duration_text')
-      .eq('client_id', clientId)
-      .in('id', group)
-    if (res.error) {
-      throw new Error(res.error.message)
-    }
-    for (const raw of rowsOf(res.data)) {
-      if (!isRecord(raw)) {
-        continue
-      }
-      const id = str(raw.id)
-      const name = str(raw.name)
-      if (id === null || name === null) {
-        continue
-      }
-      tours.set(id, { id, name, durationText: nullableStr(raw.duration_text) })
-    }
-  }
-  return tours
-}
-
-async function loadDepartureFacts(
-  db: SupabaseClient,
-  clientId: string,
-  departureIds: string[],
-): Promise<Map<string, CatalogDepartureFacts>> {
-  const departures = new Map<string, CatalogDepartureFacts>()
-  const uniqueDepartures = unique(departureIds)
-  for (const group of chunk(uniqueDepartures, CHUNK_SIZE)) {
-    const res = await db
-      .from('tour_catalog_departures')
-      .select('id, tour_id, depart_on, return_on, status')
-      .eq('client_id', clientId)
-      .in('id', group)
-    if (res.error) {
-      throw new Error(res.error.message)
-    }
-    for (const raw of rowsOf(res.data)) {
-      if (!isRecord(raw)) {
-        continue
-      }
-      const id = str(raw.id)
-      const tourId = str(raw.tour_id)
-      const departOn = str(raw.depart_on)
-      if (id === null || tourId === null || departOn === null) {
-        continue
-      }
-      departures.set(id, {
-        id,
-        tourId,
-        departOn,
-        returnOn: nullableStr(raw.return_on),
-        status: str(raw.status) ?? '',
-      })
-    }
-  }
-  return departures
-}
+// The tour/departure queries live in the catalog module
+// (`@/lib/tour-catalog/booking-facts`) because only the catalog folder may name
+// its tables.
 
 export async function loadCatalogFacts(
   db: SupabaseClient,
@@ -353,8 +286,10 @@ export async function loadCatalogFacts(
   tourIds: string[],
   departureIds: string[],
 ): Promise<CatalogFacts> {
-  const tours = await loadTourFacts(db, clientId, tourIds)
-  const departures = await loadDepartureFacts(db, clientId, departureIds)
+  const [tours, departures] = await Promise.all([
+    loadBookingTourFacts(db, clientId, tourIds),
+    loadBookingDepartureFacts(db, clientId, departureIds),
+  ])
   return { tours, departures }
 }
 
@@ -494,7 +429,33 @@ export async function listContactsForNudge(
   if (ids.length === 0) {
     return out
   }
-  const touches = await listDncTouches(db, clientId, ids)
+  // The touchpoint read and the contact read do not depend on each other.
+  const [touches, rows] = await Promise.all([
+    listDncTouches(db, clientId, ids),
+    fetchContactRowsForNudge(db, clientId, ids),
+  ])
+  for (const raw of rows) {
+    if (!isRecord(raw)) {
+      continue
+    }
+    const id = str(raw.id)
+    if (id === null) {
+      continue
+    }
+    out.set(id, {
+      name: nullableStr(raw.display_name),
+      doNotContact: isDoNotContact(raw.do_not_contact === true, touches.get(id) ?? []),
+    })
+  }
+  return out
+}
+
+async function fetchContactRowsForNudge(
+  db: SupabaseClient,
+  clientId: string,
+  ids: string[],
+): Promise<unknown[]> {
+  const rows: unknown[] = []
   for (const group of chunk(ids, CHUNK_SIZE)) {
     const res = await db
       .from('contacts')
@@ -504,24 +465,9 @@ export async function listContactsForNudge(
     if (res.error) {
       throw new Error(res.error.message)
     }
-    for (const raw of rowsOf(res.data)) {
-      if (!isRecord(raw)) {
-        continue
-      }
-      const id = str(raw.id)
-      if (id === null) {
-        continue
-      }
-      out.set(id, {
-        name: nullableStr(raw.display_name),
-        doNotContact: isDoNotContact(
-          raw.do_not_contact === true,
-          touches.get(id) ?? [],
-        ),
-      })
-    }
+    rows.push(...rowsOf(res.data))
   }
-  return out
+  return rows
 }
 
 // --- booking members ----------------------------------------------------------
