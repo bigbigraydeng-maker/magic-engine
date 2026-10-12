@@ -2,6 +2,7 @@
 id: 2026-10-13-crm-information-architecture-v0
 title: CRM 页面太割裂：出「信息架构」小稿（今天 / 全部客人 / 按团看三种视角，各块归谁），代码先不动
 status: decided
+done_ref: pr:2544
 owner: agent
 decided_on: 2026-10-13
 source: session:1a85e0eb
