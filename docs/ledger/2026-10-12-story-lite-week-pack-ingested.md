@@ -1,7 +1,7 @@
 ---
 id: 2026-10-12-story-lite-week-pack-ingested
 title: CTS 10/13–10/18 周包的 18 张 Story 图已入库（待授权）；还没授权、没发、没调 Meta
-status: done
+status: decided
 owner: pm
 decided_on: 2026-10-12
 source: session:61a3b5f4
