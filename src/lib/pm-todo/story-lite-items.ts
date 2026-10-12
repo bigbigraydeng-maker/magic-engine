@@ -285,6 +285,8 @@ async function findUnarmedClients(
   const aliveAfter = now.getTime() - SWEEP_ALIVE_MS
   const clients: string[] = []
   for (const pack of packs) {
+    // 过期的包发布器不再扫：只有「从没检查过」才算没动静，否则演练包过期后会天天误报
+    const packExpired = pack.expires_at !== null && Date.parse(pack.expires_at) <= now.getTime()
     const { data, error } = await supabase
       .from('story_items')
       .select('client_id, slot_at, last_check_at')
@@ -296,7 +298,8 @@ async function findUnarmedClients(
       if (!isRecord(row)) return false
       if (str(row.slot_at) < lookback) return false
       const checkedAt = typeof row.last_check_at === 'string' ? Date.parse(row.last_check_at) : NaN
-      return Number.isNaN(checkedAt) || checkedAt < aliveAfter
+      if (Number.isNaN(checkedAt)) return true
+      return !packExpired && checkedAt < aliveAfter
     })
     if (stuck.length > 0 && !clients.includes(pack.client_id)) clients.push(pack.client_id)
   }

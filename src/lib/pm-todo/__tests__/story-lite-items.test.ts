@@ -363,6 +363,16 @@ describe('pushStoryLiteItems —— 看门狗：授权了却什么都没发生',
     expect(items.map((i) => i.kind)).toContain('story_unarmed')
   })
 
+  it('🔴 周包已过期、条目演练时检查过（检查记录较旧）→ 不报（否则演练包过期后天天误报）', async () => {
+    const db = makeSupabase({
+      packs: [pack({ expires_at: '2026-10-07T12:00:00Z' })],
+      items: [item({ status: 'PENDING', slot_at: '2026-10-07T00:00:00Z', last_check_at: '2026-10-07T06:00:00Z' })],
+    })
+    const items: ManualItem[] = []
+    await pushStoryLiteItems(db, items, NOW, nameOf, LIVE)
+    expect(items.map((i) => i.kind)).not.toContain('story_unarmed')
+  })
+
   it('未授权的周包 → 不报', async () => {
     const db = makeSupabase({
       packs: [pack({ authorized_at: null })],
