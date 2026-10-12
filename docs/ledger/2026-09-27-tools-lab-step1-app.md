@@ -9,7 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:2123
 verify_by: 2026-10-04
 verify_how: 合并上线后在正式网站查三件事：① 未登录打开 app.magicengine.com.au/meta-ads-ai/mine 跳到中文注册页（「免费注册，开始体检」）；② 示例报告 /meta-ads-ai/demo 默认是「自己用，你会看到」，底部按钮指向 /meta-ads-ai/mine；③ 第一位从这里注册的自助客户，website_lead_events 里有一条 tool_signup（destination=ads-check），且只有一条。不成：先看这位客户是不是从 /meta-ads-ai/mine 进来的。
-last_checked: 2026-10-09
+last_checked: 2026-10-12
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 设计：docs/specs/2026-09-27-tools-lab-step1-ads-check-design.md（v2，设计审 子牙 + 魏征 + 板桥）。PM 方案：https://claude.ai/artifact/VRzBuqmDHHcKvbQNBM2CJe 。官网部分（实验室首页、介绍页）另一个 PR。

@@ -9,7 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:2112
 verify_by: 2026-10-04
 verify_how: 迁移执行、PR 合并上线后：① 用一个测试用自助注册客户打开 Magic Bridge 页，看到「正在等 Meta 官方审核」和示例报告链接，没有连接按钮；② CTS 的 Magic Bridge 页照常打开、照常能生成报告；③ 生产 meta_ads_ai_quota_config 有三行（facebook_user 1、ad_account 1、platform 30）。不成：先查迁移是否已执行（邀请表有没有 source 列）。
-last_checked: 2026-10-09
+last_checked: 2026-10-12
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 PM 9/27 定方向 A（新客户自助用），额度默认值 PM 同意；不接 MTC。设计：docs/specs/2026-09-27-magic-bridge-self-serve-open-design.md（分支 chore/mb-open-eval）§2、§8。

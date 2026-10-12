@@ -9,7 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:2090
 verify_by: 2026-10-03
 verify_how: 合并上线后打开 CTS 的 Magic Bridge 客户页，现有报告应跟以前一模一样（旧报告不出卡片、页面不报错）。若那时 CTS 授权账户已有正在投放的广告并重新生成过报告：有变差广告就在报告最上面看到浅灰框「我们正在跟进的广告」，每条广告名只出现一次，正文第三部分只剩一句话；没有变差就不出框。页面打不开或正文第三部分内容缺失，先看这份报告的第三部分原文有没有被找到替换。
-last_checked: 2026-10-09
+last_checked: 2026-10-12
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 PM 9/26 经小秘书转「做C包」重启（原 ROADMAP 里搁置的包 C）。设计稿：docs/specs/2026-09-27-magic-bridge-rule-cards-design.md（v2 + §5 实施记录）。

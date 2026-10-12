@@ -10,5 +10,6 @@ verify_how: 该 PR 合并后，目标页能选这个指标；给 CTS 建目标�
 done_on: 2026-10-04
 done_ref: pr:2228
 check_note: PR 已合并；首次真实取数待 10/5 核对
+last_checked: 2026-10-12
 ---
 设计稿：docs/specs/2026-10-04-seo-weekly-list-v0.2.md 的 S1。建目标那步是生产数据写，需 PM 再回「合」。

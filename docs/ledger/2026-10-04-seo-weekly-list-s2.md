@@ -10,7 +10,7 @@ verify_how: 10-05 04:30 UTC 后查 cron_run_logs 里 seo-weekly-list 有成功�
 done_on: 2026-10-05
 done_ref: pr:2237
 check_note: 线上只演练已当面跑通，见 evidence/2026-10-05-seo-weekly-list-live-dryrun；定时自动运行待首次运行后核对（2026-10-09 夜巡：本晚未取到新实证，原结论保留不变）
-last_checked: 2026-10-09
+last_checked: 2026-10-12
 ---
 设计：docs/specs/2026-10-04-seo-weekly-list-v0.2.md（S2）。新定时任务要 Render 同步 blueprint 才会创建，不同步不会跑也不报错。
 

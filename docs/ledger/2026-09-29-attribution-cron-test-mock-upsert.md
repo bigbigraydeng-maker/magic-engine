@@ -9,6 +9,7 @@ verify_by: 2026-10-01
 verify_how: PR 合并后在主干跑 npx vitest run src/app/api/cron/attribution，34 条全过算成；到期 PR 还没合并就判不了，check_note 写「A 级等 PM 合」
 done_on: 2026-09-29
 done_ref: commit:fa789db249b44b85d46b22bda588c1352d36c03f
+last_checked: 2026-10-12
 ---
 根因：运行日志收尾从 update 改成 upsert（PR #1434，2026-09-09 进主干），这份测试的假 Supabase 没跟上，31 条都报 upsert is not a function；业务代码没坏。
 改法：假件照现写法建模（开跑 await insert，收尾 await upsert），收尾那一行照旧记下来，原有断言一字未改；故意改坏业务代码 3 处，测试分别变红 6/2/1 条。

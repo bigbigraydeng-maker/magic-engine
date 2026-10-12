@@ -9,7 +9,7 @@ done_on: 2026-09-25
 done_ref: pr:2010
 verify_by: 2026-10-02
 verify_how: PR 合并后 ad_strategy_configs 表的 RLS 策略含 TO service_role；autopilot_dry_run 手动改后不被 migration 覆盖；processD3Hit 执行前重读配置
-last_checked: 2026-10-09
+last_checked: 2026-10-12
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 代码审查发现四项问题，本次全部修复并推送：

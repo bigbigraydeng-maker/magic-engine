@@ -9,7 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:1948
 verify_by: 2026-10-04
 verify_how: 周一 cron 正常跑完无回归；/china-tours 被正确拦截（反向 + 正向事实检查均触发）
-last_checked: 2026-10-09
+last_checked: 2026-10-12
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 子牙 + 魏征审查 PR #1948 提出 5 条缺陷 + 子牙追加 4 项必改，全部修复：
