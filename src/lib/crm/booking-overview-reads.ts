@@ -75,9 +75,11 @@ export async function listBookingsForOverview(
   const out: BookingRow[] = []
   for (const row of raw) {
     const booking = toBookingRow(row)
-    if (booking !== null) {
-      out.push(booking)
+    // A row the mapper cannot read must fail the whole page, never vanish from the counts.
+    if (booking === null) {
+      throw new Error('unmappable booking row')
     }
+    out.push(booking)
   }
   return out
 }
@@ -105,9 +107,10 @@ export async function listMilestonesForClient(
   const out: MilestoneRow[] = []
   for (const row of raw) {
     const milestone = toMilestoneRow(row)
-    if (milestone !== null) {
-      out.push(milestone)
+    if (milestone === null) {
+      throw new Error('unmappable milestone row')
     }
+    out.push(milestone)
   }
   return out
 }
@@ -179,41 +182,22 @@ export const PAID_STAGES = ['deposit_paid', 'paid_full', 'traveling_soon'] as co
 export async function listPaidStageContactsWithoutBooking(
   db: SupabaseClient,
   clientId: string,
+  /** The bookings already loaded by listBookingsForOverview (active AND cancelled): one source, so the figures cannot disagree. */
+  bookings: BookingRow[],
 ): Promise<{ total: number; rows: Array<{ id: string; name: string | null; stage: string }> }> {
-  const [contactRows, bookingRows] = await Promise.all([
-    fetchAll(
-      (from, to) =>
-        db
-          .from('contacts')
-          .select('id, display_name, stage')
-          .eq('client_id', clientId)
-          .in('stage', [...PAID_STAGES])
-          .order('id', { ascending: true })
-          .range(from, to),
-      OVERVIEW_HARD_CAP,
-    ),
-    fetchAll(
-      (from, to) =>
-        db
-          .from('crm_bookings')
-          .select('contact_id')
-          .eq('client_id', clientId)
-          .order('id', { ascending: true })
-          .range(from, to),
-      OVERVIEW_HARD_CAP,
-    ),
-  ])
+  const contactRows = await fetchAll(
+    (from, to) =>
+      db
+        .from('contacts')
+        .select('id, display_name, stage')
+        .eq('client_id', clientId)
+        .in('stage', [...PAID_STAGES])
+        .order('id', { ascending: true })
+        .range(from, to),
+    OVERVIEW_HARD_CAP,
+  )
 
-  const booked = new Set<string>()
-  for (const raw of bookingRows) {
-    if (!isRecord(raw)) {
-      continue
-    }
-    const contactId = str(raw.contact_id)
-    if (contactId !== null) {
-      booked.add(contactId)
-    }
-  }
+  const booked = new Set<string>(bookings.map((b) => b.contactId))
 
   const missing: Array<{ id: string; name: string | null; stage: string }> = []
   for (const raw of contactRows) {

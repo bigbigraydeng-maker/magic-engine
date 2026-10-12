@@ -49,8 +49,12 @@ export interface OverviewGroup {
   offlineHandled: number
   /** Earliest due date among unpaid, non-quiet items; null when none can be worked out. */
   nearestDueOn: string | null
-  /** Unpaid items including quiet ones: decides whether a past group stays in the default view. */
+  /** Unpaid items including quiet ones. */
   unpaidItems: number
+  /** Unpaid items NOT marked quiet: decides whether a past group stays in the default view. */
+  openItems: number
+  /** True when bookings of this group carry different stored dates (live departure missing). Informational. */
+  dateAmbiguous: boolean
   /** Catalog warnings seen in the group (departure_missing, tour_missing, departure_changed, ...). */
   warningCodes: BookingWarningCode[]
 }
@@ -76,13 +80,21 @@ export interface OverviewSummary {
   groups: OverviewGroup[]
   /** Sums over the groups in `groups` (the visible ones). */
   totals: OverviewTotals
-  /** Past groups that are fully paid and were left out of the default view. */
+  /** Groups left out of the default view (past with nothing open to collect). */
   hiddenGroupCount: number
+  /** Active orders inside those hidden groups (totals cover visible groups only). */
+  hiddenOrders: number
+  /** Hidden groups that were hidden only because every unpaid item is marked offline-handled. */
+  hiddenOfflineOnlyGroups: number
   notes: OverviewNotes
 }
 
 /** 订单清单 状态筛选: 全部 / 未收齐 / 已收齐 / 已取消. */
-export type OverviewStatusFilter = 'all' | 'unsettled' | 'settled' | 'cancelled'
+/**
+ * `all` = every ACTIVE order (cancelled are excluded, so a group's 订单 count equals the list count);
+ * `unsettled` / `settled` / `offline` partition the active orders; `cancelled` is the only way to see cancelled ones.
+ */
+export type OverviewStatusFilter = 'all' | 'unsettled' | 'settled' | 'offline' | 'cancelled'
 
 export interface OverviewListQuery {
   /** undefined = any departure, null = orders with no departure chosen, string = that departure_id. */

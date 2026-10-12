@@ -229,7 +229,7 @@ describe('GET overview', () => {
 
     expect(body.summary.notes.cancelledOrders).toBe(1)
     expect(body.hasBookings).toBe(true)
-    expect(body.list.total).toBe(4)
+    expect(body.list.total).toBe(3) // status all = active only (cancelled n3 excluded)
 
     const anaRow = body.list.rows.find((r) => r.contactName === 'Ana')
     expect(anaRow).toBeDefined()
@@ -302,8 +302,8 @@ describe('GET overview', () => {
     const dep = overviewOf(
       await jsonOf(await overviewFor(CLIENT_A, `?departureId=${DEP_A1}`)),
     )
-    // n1 (cancelled) and n3 both sit on DEP_A1; the no-departure booking does not.
-    expect(dep.list.rows).toHaveLength(2)
+    // status all = active only: the cancelled n1 is excluded, so only n3 shows for DEP_A1.
+    expect(dep.list.rows).toHaveLength(1)
 
     const unsettled = overviewOf(
       await jsonOf(await overviewFor(CLIENT_A, '?status=unsettled')),
@@ -462,5 +462,48 @@ describe('GET access', () => {
     const disabled = await accessFor(CLIENT_A)
     expect(disabled.status).toBe(404)
     expect(await jsonOf(disabled)).not.toEqual({ ok: true })
+  })
+})
+
+describe('GET overview, round 2 (S1, S3, S4, S5, S6)', () => {
+  it('one unreadable booking row is a 500 with no numbers at all', async () => {
+    seed([spec({ n: 1 }), spec({ n: 2 })])
+    const bad = state().tables.crm_bookings[0]
+    bad.status = 'not-a-status'
+    const res = await overviewFor(CLIENT_A)
+    expect(res.status).toBe(500)
+    expect(Object.keys(await jsonOf(res))).toEqual(['error'])
+  })
+
+  it('a booking with a missing milestone is a 500 with no numbers', async () => {
+    seed([spec({ n: 1 }), spec({ n: 2 })])
+    state().tables.crm_booking_milestones = state().tables.crm_booking_milestones.slice(1)
+    const res = await overviewFor(CLIENT_A)
+    expect(res.status).toBe(500)
+    expect(Object.keys(await jsonOf(res))).toEqual(['error'])
+  })
+
+  it('the summary carries the new hidden counts and groups carry the new flags', async () => {
+    seed([spec({ n: 1, deposit: { state: 'paid' }, balance: { due: '2027-01-01' } })])
+    const body = await jsonOf(await overviewFor(CLIENT_A))
+    const summary = body.summary as Record<string, unknown>
+    expect(summary.hiddenOrders).toBe(0)
+    expect(summary.hiddenOfflineOnlyGroups).toBe(0)
+    const group = (summary.groups as Array<Record<string, unknown>>)[0]
+    expect(group.dateAmbiguous).toBe(false)
+    expect(group.openItems).toBe(1)
+  })
+
+  it('status=offline is accepted; status=all excludes cancelled; status=cancelled shows them', async () => {
+    seed([
+      spec({ n: 1, deposit: { state: 'paid' }, balance: { quiet: true, due: '2027-01-01' } }),
+      spec({ n: 2, status: 'cancelled' }),
+      spec({ n: 3, deposit: { state: 'paid' }, balance: { due: '2027-01-01' } }),
+    ])
+    const rowsFor = async (query: string): Promise<number> =>
+      overviewOf(await jsonOf(await overviewFor(CLIENT_A, query))).list.rows.length
+    expect(await rowsFor('?status=offline')).toBe(1)
+    expect(await rowsFor('?status=all')).toBe(2)
+    expect(await rowsFor('?status=cancelled')).toBe(1)
   })
 })

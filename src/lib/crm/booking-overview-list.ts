@@ -21,7 +21,7 @@ import type {
   OverviewStatusFilter,
 } from './booking-overview-types'
 import { OVERVIEW_PAGE_SIZE } from './booking-overview-types'
-import { isFullyPaid, isUnsettled } from './booking-overview'
+import { isFullyPaid, isOfflineOnly, isUnsettled } from './booking-overview'
 
 /** The band an entry sorts into: upcoming, past, or undated. */
 type SortBand = 0 | 1 | 2
@@ -45,9 +45,11 @@ function matchesStatus(
   filter: OverviewStatusFilter,
   entry: OverviewEntry,
 ): boolean {
-  if (filter === 'all') return true
   if (filter === 'cancelled') return status === 'cancelled'
-  if (filter === 'unsettled') return status === 'active' && isUnsettled(entry.view)
+  if (status === 'cancelled') return false
+  if (filter === 'all') return true
+  if (filter === 'unsettled') return isUnsettled(entry.view)
+  if (filter === 'offline') return isOfflineOnly(entry.view)
   return isFullyPaid(entry.view)
 }
 

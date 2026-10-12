@@ -67,6 +67,13 @@ export function isFullyPaid(view: BookingView): boolean {
   )
 }
 
+/** True when the booking is active, has no open item, is not fully paid, and has an unpaid quiet item. */
+export function isOfflineOnly(view: BookingView): boolean {
+  if (view.status !== 'active') return false
+  if (isUnsettled(view) || isFullyPaid(view)) return false
+  return view.milestones.some(isQuietItem)
+}
+
 /** A fresh, empty group for the given key and kind. */
 function emptyGroup(
   key: string,
@@ -92,6 +99,8 @@ function emptyGroup(
     offlineHandled: 0,
     nearestDueOn: null,
     unpaidItems: 0,
+    openItems: 0,
+    dateAmbiguous: false,
     warningCodes: [],
   }
 }
@@ -171,6 +180,7 @@ function addBookingToGroup(group: OverviewGroup, view: BookingView): void {
   group.unpaidItems += view.milestones.filter(
     (m) => m.state === 'unpaid',
   ).length
+  group.openItems += view.milestones.filter(isOpenItem).length
   group.warningCodes = mergeWarnings(group.warningCodes, groupWarnings(view))
 }
 
@@ -200,6 +210,9 @@ function foldView(
 ): void {
   const key = groupKeyOf(view)
   const group = groups.get(key) ?? newGroupFor(view)
+  if (view.departOn !== null && group.departOn !== null && view.departOn !== group.departOn) {
+    group.dateAmbiguous = true
+  }
   group.departOn = minDate(group.departOn, view.departOn)
   if (group.kind !== 'undecided') group.kind = departureKind(group.departOn)
   addBookingToGroup(group, view)
@@ -209,7 +222,8 @@ function foldView(
 /** Set the departed flag on every group from its departOn and today. */
 function markDeparted(groups: OverviewGroup[], today: string): void {
   for (const group of groups) {
-    group.departed = group.departOn !== null && group.departOn < today
+    // Disagreeing stored dates are not a fact: never call such a group departed (it stays visible).
+    group.departed = !group.dateAmbiguous && group.departOn !== null && group.departOn < today
   }
 }
 
@@ -235,27 +249,40 @@ function compareGroups(a: OverviewGroup, b: OverviewGroup): number {
   return a.key < b.key ? -1 : 1
 }
 
-/** True when a group is past and fully paid, or an empty unknown_date group. */
+/** True when a group is past (or date-unknown) and has nothing OPEN to collect (offline-handled items do not count). */
 function isHiddenGroup(group: OverviewGroup): boolean {
-  if (group.unpaidItems > 0) return false
+  if (group.openItems > 0) return false
   if (group.kind === 'undecided') return false
   if (group.kind === 'unknown_date') return true
   return group.departed
 }
 
-/** Split groups into the visible set and the hidden count. */
+interface HiddenSplit {
+  visible: OverviewGroup[]
+  hiddenGroupCount: number
+  hiddenOrders: number
+  hiddenOfflineOnlyGroups: number
+}
+
+/** Split groups into the visible set and the hidden counts. */
 function filterVisible(
   groups: OverviewGroup[],
   includePastPaid: boolean,
-): { visible: OverviewGroup[]; hiddenGroupCount: number } {
-  if (includePastPaid) return { visible: groups, hiddenGroupCount: 0 }
-  const visible: OverviewGroup[] = []
-  let hiddenGroupCount = 0
-  for (const group of groups) {
-    if (isHiddenGroup(group)) hiddenGroupCount += 1
-    else visible.push(group)
+): HiddenSplit {
+  if (includePastPaid) {
+    return { visible: groups, hiddenGroupCount: 0, hiddenOrders: 0, hiddenOfflineOnlyGroups: 0 }
   }
-  return { visible, hiddenGroupCount }
+  const out: HiddenSplit = { visible: [], hiddenGroupCount: 0, hiddenOrders: 0, hiddenOfflineOnlyGroups: 0 }
+  for (const group of groups) {
+    if (!isHiddenGroup(group)) {
+      out.visible.push(group)
+      continue
+    }
+    out.hiddenGroupCount += 1
+    out.hiddenOrders += group.orders
+    if (group.unpaidItems > 0) out.hiddenOfflineOnlyGroups += 1
+  }
+  return out
 }
 
 /** Sum the numeric columns over the visible groups. */
@@ -308,7 +335,7 @@ function buildGroups(
   entries: OverviewEntry[],
   today: string,
   includePastPaid: boolean,
-): { groups: OverviewGroup[]; hiddenGroupCount: number } {
+): HiddenSplit {
   const map = new Map<string, OverviewGroup>()
   for (const { view } of entries) {
     if (view.status !== 'active') continue
@@ -317,8 +344,7 @@ function buildGroups(
   const all = [...map.values()]
   markDeparted(all, today)
   all.sort(compareGroups)
-  const { visible, hiddenGroupCount } = filterVisible(all, includePastPaid)
-  return { groups: visible, hiddenGroupCount }
+  return filterVisible(all, includePastPaid)
 }
 
 /** Aggregate the overview: groups, totals and cross-group notes. */
@@ -327,15 +353,13 @@ export function summariseOverview(
   today: string,
   includePastPaid: boolean,
 ): OverviewSummary {
-  const { groups, hiddenGroupCount } = buildGroups(
-    entries,
-    today,
-    includePastPaid,
-  )
+  const split = buildGroups(entries, today, includePastPaid)
   return {
-    groups,
-    totals: sumTotals(groups),
-    hiddenGroupCount,
+    groups: split.visible,
+    totals: sumTotals(split.visible),
+    hiddenGroupCount: split.hiddenGroupCount,
+    hiddenOrders: split.hiddenOrders,
+    hiddenOfflineOnlyGroups: split.hiddenOfflineOnlyGroups,
     notes: countNotes(entries, today),
   }
 }

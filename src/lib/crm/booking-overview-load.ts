@@ -84,6 +84,10 @@ function groupMilestones(
   }
   return bookings.map((booking) => {
     const own = byBooking.get(booking.id) ?? []
+    // The database guarantees exactly one deposit and one balance; anything else is a data error.
+    if (own.length !== 2 || own.filter((m) => m.kind === 'deposit').length !== 1) {
+      throw new Error('incomplete milestone set')
+    }
     const sorted = [...own].sort(
       (a, b) => milestoneRank(a.kind) - milestoneRank(b.kind),
     )
@@ -140,10 +144,10 @@ export async function loadBookingOverview(
   today: string,
   req: OverviewRequest,
 ): Promise<OverviewPayload> {
-  const [bookings, milestones, paidWithoutBooking] = await Promise.all([
-    listBookingsForOverview(db, clientId),
+  const bookings = await listBookingsForOverview(db, clientId)
+  const [milestones, paidWithoutBooking] = await Promise.all([
     listMilestonesForClient(db, clientId),
-    listPaidStageContactsWithoutBooking(db, clientId),
+    listPaidStageContactsWithoutBooking(db, clientId, bookings),
   ])
 
   const items = groupMilestones(bookings, milestones)

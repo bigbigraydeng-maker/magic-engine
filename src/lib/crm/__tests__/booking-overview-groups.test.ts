@@ -252,7 +252,10 @@ describe('default view', () => {
     expect(all.hiddenGroupCount).toBe(0)
   })
 
-  it('a past group whose only unpaid item is marked offline-handled is still shown', () => {
+  // S4 (product owner's delegate): this test used to pin the OLD rule (such a group stayed visible).
+  // New rule: offline-handled = staff said "stop reminding me", so the group is hidden by default,
+  // but it is counted in hiddenOfflineOnlyGroups so the page can say so.
+  it('a past group whose only unpaid item is offline-handled is hidden by default but counted', () => {
     const s = summariseOverview(
       entriesOf(
         [
@@ -268,7 +271,19 @@ describe('default view', () => {
       TODAY,
       false,
     )
-    const g = group(s, depId(2))
+    expect(s.groups.find((x) => x.key === depId(2))).toBeUndefined()
+    expect(s.hiddenGroupCount).toBe(1)
+    expect(s.hiddenOfflineOnlyGroups).toBe(1)
+    expect(s.hiddenOrders).toBe(1)
+    const shown = summariseOverview(
+      entriesOf(
+        [{ n: 1, departureId: depId(2), deposit: { state: 'paid' }, balance: { quiet: true, due: '2026-09-01' } }],
+        FACTS,
+      ),
+      TODAY,
+      true,
+    )
+    const g = group(shown, depId(2))
     expect(g.offlineHandled).toBe(1)
     expect(g.unsettled).toBe(0)
   })

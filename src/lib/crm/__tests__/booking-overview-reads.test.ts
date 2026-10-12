@@ -19,6 +19,11 @@ beforeEach(() => {
   reset()
 })
 
+/** The paid-stage reader takes the bookings the page already loaded (one source of truth). */
+async function paidWithoutBooking(): Promise<Awaited<ReturnType<typeof listPaidStageContactsWithoutBooking>>> {
+  return listPaidStageContactsWithoutBooking(db, CLIENT_A, await listBookingsForOverview(db, CLIENT_A))
+}
+
 function seed(table: string, rows: Row[]): void {
   state.tables[table] = rows
 }
@@ -216,7 +221,7 @@ describe('listPaidStageContactsWithoutBooking', () => {
     seed('contacts', contacts)
     seed('crm_bookings', [])
 
-    const result = await listPaidStageContactsWithoutBooking(db, CLIENT_A)
+    const result = await paidWithoutBooking()
     expect(result.total).toBe(29)
     expect(result.rows).toHaveLength(29)
     const stages = new Set(result.rows.map((r) => r.stage))
@@ -237,7 +242,7 @@ describe('listPaidStageContactsWithoutBooking', () => {
       ...cancelledRows.filter((row) => !('kind' in row)),
     ])
 
-    const result = await listPaidStageContactsWithoutBooking(db, CLIENT_A)
+    const result = await paidWithoutBooking()
     expect(result.total).toBe(2)
     expect(result.rows.map((r) => r.id)).toEqual([cid(3), cid(4)])
     for (const row of result.rows) {
@@ -253,7 +258,7 @@ describe('listPaidStageContactsWithoutBooking', () => {
     seed('contacts', contacts)
     seed('crm_bookings', [])
 
-    const result = await listPaidStageContactsWithoutBooking(db, CLIENT_A)
+    const result = await paidWithoutBooking()
     expect(result.total).toBe(250)
     expect(result.rows).toHaveLength(PAID_WITHOUT_BOOKING_ROW_CAP)
   })
@@ -266,7 +271,7 @@ describe('listPaidStageContactsWithoutBooking', () => {
       bookingRow({ id: bid(1), client_id: CLIENT_B, contact_id: cid(1) }),
     ])
 
-    const result = await listPaidStageContactsWithoutBooking(db, CLIENT_A)
+    const result = await paidWithoutBooking()
     expect(result.total).toBe(1)
     expect(result.rows.map((r) => r.id)).toEqual([cid(1)])
   })
@@ -287,7 +292,7 @@ describe('overview readers never touch contact_touchpoints', () => {
     await listBookingsForOverview(db, CLIENT_A)
     await listMilestonesForClient(db, CLIENT_A)
     await listContactNamesForClient(db, CLIENT_A, [cid(1)])
-    await listPaidStageContactsWithoutBooking(db, CLIENT_A)
+    await paidWithoutBooking()
 
     expect(state.queries.some((q) => q.table === 'contact_touchpoints')).toBe(false)
   })

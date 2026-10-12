@@ -9,7 +9,7 @@ import { isUuid } from '@/lib/http/request-helpers'
 import type { OverviewRequest } from './booking-overview-load'
 import type { OverviewStatusFilter } from './booking-overview-types'
 
-const STATUS_VALUES: readonly OverviewStatusFilter[] = ['all', 'unsettled', 'settled', 'cancelled']
+const STATUS_VALUES: readonly OverviewStatusFilter[] = ['all', 'unsettled', 'settled', 'offline', 'cancelled']
 
 /** The query value that means "orders with no departure chosen yet". */
 export const NO_DEPARTURE_PARAM = 'none'

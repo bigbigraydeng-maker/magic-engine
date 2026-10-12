@@ -87,10 +87,11 @@ function ids(entries: OverviewEntry[]): string[] {
 }
 
 describe('selectOverviewListPage', () => {
-  it('status all includes cancelled and every booking', () => {
+  it('status all covers every ACTIVE booking and never a cancelled one (S6)', () => {
     const page = selectOverviewListPage(ENTRIES, q({ status: 'all' }), TODAY)
-    expect(page.total).toBe(7)
-    expect(page.entries).toHaveLength(7)
+    expect(page.total).toBe(6)
+    expect(page.entries).toHaveLength(6)
+    expect(ids(page.entries)).not.toContain(bid(4))
   })
 
   it('status filters split the bookings', () => {
@@ -135,7 +136,7 @@ describe('selectOverviewListPage', () => {
       q({ departureId: undefined }),
       TODAY,
     )
-    expect(anyDep.total).toBe(7)
+    expect(anyDep.total).toBe(6)
   })
 
   it('tourId filter keeps only that tour', () => {
@@ -146,7 +147,6 @@ describe('selectOverviewListPage', () => {
   it('orders nearest-first: upcoming ascending, then past descending, then undated', () => {
     const page = selectOverviewListPage(ENTRIES, q({ status: 'all' }), TODAY)
     expect(ids(page.entries)).toEqual([
-      bid(4),
       bid(6),
       bid(1),
       bid(2),
