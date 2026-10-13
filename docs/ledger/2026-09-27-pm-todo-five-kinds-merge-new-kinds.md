@@ -9,8 +9,6 @@ verify_by: 2026-09-29
 verify_how: 上线后第一个工作日，若下列任一待办触发，确认它落在指定车道（连同母卡 2026-09-26-pm-todo-five-kinds 一起验）：deploy_not_live 出现在「系统进不去、要你点一次」栏、magic_bridge_quota 与 meta_data_deletion_failure 出现在「要你拍板」栏、deploy_check_failed 不进 PM 邮件正文（只进后台开发欠账 + 顶部盲点提示）。合并前已由穷举类型检查 + pm-todo 494 条测试 + 子牙复审坐实
 done_on: 2026-09-27
 done_ref: pr:2065
-last_checked: 2026-10-10
-check_note: 夜巡盖章（10-10）：生产/线上只读核查不在本轮修复授权内，verify_how 的线上实证本晚未取到，不翻状态；仅记录未核查，待下一轮夜巡取证
 ---
 原作者窗口（hopeful-williamson）归档后转手接手，把 PR #2065 的 CONFLICTING 解掉。
 
