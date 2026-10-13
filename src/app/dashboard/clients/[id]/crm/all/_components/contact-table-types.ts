@@ -97,6 +97,7 @@ export const DIRECTION_LABEL: Record<string, string> = {
 }
 export const OUTCOME_LABEL: Record<string, string> = {
   no_answer: '没接通',
+  missed_inbound: '漏接来电',
   bad_number: '号码不通',
   do_not_contact: '别再联系',
   not_interested: '没兴趣',

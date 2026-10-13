@@ -443,6 +443,15 @@ const PHONE_VERDICTS: ReadonlySet<string> = new Set(['bad_number', 'spoke'])
  * 「今天试过了、晚点再试」本来就是销售那一天对这个人做完的事。
  * 坏号不一样 —— 它是「这条路永久关闭了，今天得换一条走」。
  */
+/**
+ * 电话系统记录的「外呼没人接」（metadata.answered === false）不算我们联系上了他，
+ * 也不算「今天已出手」（PM 2026-10-12 拍板）。手打笔记没有 answered 字段，仍按原规则：
+ * `no_answer` 是一次正常尝试。
+ */
+export function isUnansweredCall(metadata: Record<string, unknown> | null | undefined): boolean {
+  return metadata?.answered === false
+}
+
 export function isFailedReach(outcome: string | null | undefined): boolean {
   return outcome === 'bad_number'
 }
@@ -787,6 +796,9 @@ export function segmentContact(
     if (days >= FRESH_LEAD_DAYS) {
       return make('handoff_sop', `进线 ${days} 天，一直没人联系过 —— 交给系统跟`, 'email')
     }
+    // 没有任何一条客人来信的时间（lastInbound 为 0，比如只有一个名字/号码的新建客人）时，
+    // 不能拿 0 当时间去算 —— 会算出「进线 20739 天」（从 1970 年起）。没有时间就不说时间。
+    if (lastInbound === 0) return make('new_untouched', '进线了，还没人联系', 'phone')
     return make('new_untouched', `进线 ${humanGap(nowMs - lastInbound)} 还没人联系`, 'phone')
   }
 

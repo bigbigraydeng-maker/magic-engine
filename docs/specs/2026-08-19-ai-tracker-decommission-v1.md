@@ -124,6 +124,8 @@
 
 `/api/diagnose/route.ts`（import runOpenAI/runClaude，硬编码 BRAND `'CTS Tours NZ'`）+ `/api/diagnostic/{details,questions,response,results,parser-errors,verify-brands}/route.ts`（各自直读 `ai_visibility_runs[B]`/`ai_visibility_queries[B]`，硬编码 CTS clientId `c0000000-...`）。**全仓零代码调用方、不在 cron/UI**，是早期手测端点，**非生产打分器**（生产打分在 `/api/clients/[id]/diagnostic/*`）。随系统 B 删。删掉 `/api/diagnose` 后 `runClaude` 即无外部消费方（利于组 B）。
 
+> **进度（2026-09-27）**：`/api/diagnose` 已删（公开且每次调用花 OpenAI + Claude，单独提前处理，见台账 `2026-09-27-lock-public-paid-endpoints`）。`/api/diagnostic/*` 6 个仍在、仍无鉴权（公开可读 CTS 数据），已另开任务处理；组 G 未完成。
+
 ### 组 H — 博客选题链（REWIRE→M1）
 
 - `src/lib/blog/topic-selector.ts`：读 `ai_visibility_queries[B]`:70 + `ai_visibility_runs[B]`:86（`client_brand_rank` 定选题）。活：`weekly-blog.ts:201` + `blog/opportunities` 端点，跑在 cron **`blog-weekly`**（`render.yaml:719`，周二 03:00）。
