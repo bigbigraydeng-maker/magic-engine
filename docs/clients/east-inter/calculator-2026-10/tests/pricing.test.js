@@ -97,3 +97,18 @@ test('LCL over 500kg/CBM is charged at weight: Sydney 1 m3 1000kg = 2 CBM', () =
   assert.equal(light.total, est({service:'lcl',city:'sydney',quantity:1}).total);
 });
 test('Bulk air DDU warns the A$110 clearance fee is excluded', () => assert.match(est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDU'}).warning,/A\$110/));
+// ---- Rule from the sea sheet note 12: actual weight / 500kg = CBM (the greater of volume and weight/500 is charged)
+test('LCL Sydney 1 m³ 1000kg bills 2 CBM: 378 + 215', () => assert.equal(est({service:'lcl',city:'sydney',quantity:1,weightKg:1000}).total,593));
+test('LCL Sydney 4 m³ 3000kg bills 6 CBM: 378 + 5*215', () => assert.equal(est({service:'lcl',city:'sydney',quantity:4,weightKg:3000}).total,1453));
+test('LCL Sydney 4 m³ 1990kg stays at 4 CBM (3.98 < 4): 378 + 3*215', () => assert.equal(est({service:'lcl',city:'sydney',quantity:4,weightKg:1990}).total,1023));
+test('LCL Sydney 1 m³ 5000kg bills 10 CBM and takes the 10+ first-CBM rate: 317 + 9*215', () => assert.equal(est({service:'lcl',city:'sydney',quantity:1,weightKg:5000}).total,2252));
+test('LCL Gold Coast 1 m³ 1000kg bills 2 CBM: 378 + 215 + minimum 275', () => assert.equal(est({service:'lcl',city:'goldCoast',quantity:1,weightKg:1000}).total,868));
+// ---- Tax wording follows the sheets: 含税 channel = duties and taxes included; 不含税 channel = recipient pays, A$110 clearance above A$1,000
+test('Bulk air DDU warning: recipient pays duties/GST, A$110 clearance fee only above A$1,000 goods value', () => {
+  const w = est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDU'}).warning;
+  assert.match(w,/A\$110/); assert.match(w,/exceeds A\$1,000/); assert.match(w,/recipient pays/);
+});
+test('Bulk air DDP (tax-included sheet): says taxes included, does not invent a 15% prepaid tax', () => {
+  const q = est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDP'});
+  assert.match(q.note,/duties and taxes are included/); assert.doesNotMatch(q.warning+q.note,/15%/);
+});

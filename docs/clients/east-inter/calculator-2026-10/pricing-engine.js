@@ -87,10 +87,10 @@
         const rate=R.bulk[city]||R.bulk.other,unit=R.bulk.unitKg,units=ceilUnits(weight,unit);
         billed=units*unit; total=units*rate[tax]; days=rate.days;
         lines.push([units+' × '+unit+'kg × '+money(rate[tax]),total]);
-        note=tax+' · Billed weight: '+number(billed)+'kg. '+(tax === 'DDP' ? 'DDP: East Inter prepays Australian duties and taxes.' : 'Recipient pays Australian duties and GST on arrival; these are not included.');
+        note=tax+' · Billed weight: '+number(billed)+'kg. '+(tax === 'DDP' ? 'DDP: tax-included channel; Australian duties and taxes are included in this rate.' : 'Recipient pays Australian duties and GST on arrival; these are not included.');
       }
-      if (service === 'bulkAir' && tax === 'DDU') warning='Freight only. The source rate sheet also lists a A$110 clearance fee for tax-excluded bulk air, which is not included in this estimate. Duties and GST are payable by the recipient. Contact us for the full total.';
-      if (service === 'bulkAir' && tax === 'DDP') warning='Freight only. The source rate sheet also requires a 15% prepaid tax on goods value for DDP, which cannot be calculated here (goods value is not collected). Contact us for the DDP total.';
+      if (service === 'bulkAir' && tax === 'DDU') warning='Freight only. On this tax-excluded channel the recipient pays Australian duties and GST, and a A$110 clearance fee per shipment applies where declared goods value exceeds A$1,000 (payable by the recipient at destination). Remote-postcode and oversize surcharges may also apply. Contact us for the full total.';
+      if (service === 'bulkAir' && tax === 'DDP') warning='Freight only. Remote-postcode, oversize/overweight and certain product surcharges listed in the rate sheet may apply. Contact us to confirm.';
       if (!Number.isFinite(total)) return {error:'The entered shipment size is too large. Contact us for a quote.'};
       if (service !== 'lcl') {
         note+=' Actual weight: '+number(quantity)+'kg.';

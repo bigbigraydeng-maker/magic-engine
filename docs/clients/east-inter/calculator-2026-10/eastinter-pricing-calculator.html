@@ -99,14 +99,14 @@
       $('route-city').textContent=cities[city]; $('breakdown').replaceChildren();
       $('quantity-error').textContent=quote.error||''; $('quantity-error').hidden=!quote.error; $('quantity').setAttribute('aria-invalid',String(Boolean(quote.error)));
       $('surcharge').hidden=!quote.warning; $('surcharge').textContent=quote.warning||'';
-      $('estimate-title').textContent='Estimated freight charges';
+      $('estimate-title').textContent=service === 'bulkAir' && tax === 'DDP' ? 'Estimated total, tax included' : 'Estimated freight charges';
       if (quote.error) {
         $('price').textContent='—'; $('transit').textContent='—'; $('quote-subtitle').textContent='Check shipment details'; $('pricing-note').textContent=quote.error; row('No estimate available','—'); return;
       }
       $('price').textContent=money(quote.total); $('transit').textContent=quote.days;
       $('quote-subtitle').textContent=serviceNames[service]+' · '+number(service === 'lcl'?quantity:quote.billed)+(service === 'lcl'?' m³':'kg billed')+(service === 'bulkAir'?' · '+tax:'');
       quote.lines.forEach(([label,amount]) => row(label,money(amount)));
-      row('Estimated freight total',money(quote.total),true);
+      row('Estimated '+(service === 'bulkAir' && tax === 'DDP'?'total':'freight total'),money(quote.total),true);
       $('pricing-note').textContent=quote.note;
     }
     document.querySelectorAll('[data-service]').forEach(button => button.addEventListener('click',() => selectService(button.dataset.service)));
