@@ -65,3 +65,8 @@ describe('humanTikTokError', () => {
     expect(humanTikTokError('ECONNRESET')).toBeTruthy()
   })
 })
+
+
+it('explains private-account restriction separately from video visibility', () => {
+  expect(humanTikTokError('unaudited_client_can_only_post_to_private_accounts')).toContain('账号本身需设为私密')
+})

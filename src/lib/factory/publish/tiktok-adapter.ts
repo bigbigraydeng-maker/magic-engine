@@ -57,6 +57,9 @@ export function chunkRange(
 
 /** 把 TikTok 的报错翻成客户能行动的话。原始报错留日志给我们排查。 */
 export function humanTikTokError(raw: string): string {
+  if (/unaudited_client_can_only_post_to_private_accounts/i.test(raw)) {
+    return 'TikTok 未审核应用只能向私密账号发片；账号本身需设为私密，同时视频选择仅自己可见。'
+  }
   if (/unaudited_client/i.test(raw)) {
     return 'TikTok 应用还没过审 —— 现在只能发成「仅自己可见」，过审后才能公开'
   }
