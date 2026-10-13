@@ -16,6 +16,9 @@ export interface LiteStore {
 
   getPack(packId: string, clientId: string): Promise<LitePack | null>
 
+  /** The client's newest packs (created_at desc), at most `limit`, each with its item count — for the preview page list. */
+  listPacksForClient(clientId: string, limit: number): Promise<Array<{ pack: LitePack; item_count: number }>>
+
   /** Every item of a pack ordered by slot, then item id. */
   getItems(packId: string, clientId: string): Promise<LiteItem[]>
 

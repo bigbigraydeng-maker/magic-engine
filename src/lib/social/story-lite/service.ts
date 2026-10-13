@@ -92,7 +92,7 @@ function resolveLifetimeDays(lifetimeDays: number | undefined): LiteResult<numbe
   return ok(days)
 }
 
-function packState(pack: LitePack, now: Date): LitePackState {
+export function packState(pack: LitePack, now: Date): LitePackState {
   if (pack.revoked_at !== null) return 'REVOKED'
   if (pack.authorized_at === null) return 'DRAFT'
   if (pack.expires_at !== null && pack.expires_at > now.toISOString()) return 'AUTHORIZED'
@@ -168,6 +168,24 @@ async function loadPackAndItems(
   return ok({ pack, items })
 }
 
+/** The preview re-downloads every picture to compare its hash: do them side by side, not one after another. */
+const PREVIEW_CHECK_CONCURRENCY = 9
+
+/** Run `task` over `inputs` with at most `limit` in flight; results keep the input order and an error rejects. */
+async function mapWithLimit<T, R>(inputs: T[], limit: number, task: (input: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(inputs.length)
+  let next = 0
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = next++
+      if (index >= inputs.length) return
+      results[index] = await task(inputs[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, inputs.length) }, () => worker()))
+  return results
+}
+
 /** Build the per-item preview rows and collect every problem code seen. */
 async function buildPreviewItems(
   ports: LiteServicePorts,
@@ -176,23 +194,22 @@ async function buildPreviewItems(
   now: Date,
   lifetimeDays: number,
 ): Promise<{ previewItems: LitePreviewItem[]; allProblems: string[] }> {
-  const previewItems: LitePreviewItem[] = []
-  const allProblems: string[] = []
-  for (const item of items) {
-    const problems = await itemProblems(ports, item, pageId, now, lifetimeDays)
-    allProblems.push(...problems)
-    previewItems.push({
-      item_id: item.item_id,
-      channel: item.channel,
-      slot_at: item.slot_at,
-      media_kind: item.media_kind,
-      media_url: item.media_url,
-      text_line: item.text_line,
-      source_ref: item.source_ref,
-      status: item.status,
-      problems,
-    })
-  }
+  const checked = await mapWithLimit(items, PREVIEW_CHECK_CONCURRENCY, async (item) => ({
+    item,
+    problems: await itemProblems(ports, item, pageId, now, lifetimeDays),
+  }))
+  const previewItems: LitePreviewItem[] = checked.map(({ item, problems }) => ({
+    item_id: item.item_id,
+    channel: item.channel,
+    slot_at: item.slot_at,
+    media_kind: item.media_kind,
+    media_url: item.media_url,
+    text_line: item.text_line,
+    source_ref: item.source_ref,
+    status: item.status,
+    problems,
+  }))
+  const allProblems = checked.flatMap(({ problems }) => problems)
   return { previewItems, allProblems }
 }
 
@@ -444,12 +461,15 @@ async function summariseAfterRevoke(
 ): Promise<{
   sent: Array<{ item_id: string; provider_receipt: string | null }>
   in_flight: Array<{ item_id: string; status: LiteItemStatus }>
+  available: boolean
 }> {
   let items: LiteItem[] = []
+  let available = true
   try {
     items = await ports.store.getItems(packId, clientId)
   } catch {
-    items = []
+    // the pack IS revoked, but we could not read what was already sent: say so, never claim "nothing sent"
+    available = false
   }
 
   const sent = items
@@ -459,7 +479,7 @@ async function summariseAfterRevoke(
     .filter((item) => item.status === 'CLAIMED' || item.status === 'UNKNOWN_OUTCOME')
     .map((item) => ({ item_id: item.item_id, status: item.status }))
 
-  return { sent, in_flight: inFlight }
+  return { sent, in_flight: inFlight, available }
 }
 
 /** Revoke a pack: stops everything not yet sent. Already-published stories stay. */
@@ -467,6 +487,8 @@ export interface LiteRevokeOutcome {
   pack_id: string
   sent: Array<{ item_id: string; provider_receipt: string | null }>
   in_flight: Array<{ item_id: string; status: LiteItemStatus }>
+  /** False when the pack was stopped but the sent / in-flight summary could not be read. */
+  summary_available: boolean
   note: string
 }
 
@@ -496,5 +518,11 @@ export async function revokeLitePack(input: {
   })
 
   const summary = await summariseAfterRevoke(ports, packId, clientId)
-  return ok({ pack_id: packId, sent: summary.sent, in_flight: summary.in_flight, note: REVOKED_NOTE })
+  return ok({
+    pack_id: packId,
+    sent: summary.sent,
+    in_flight: summary.in_flight,
+    summary_available: summary.available,
+    note: REVOKED_NOTE,
+  })
 }

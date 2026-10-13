@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { TikTokPostReview } from '@/components/tiktok/PostReview'
 import Link from 'next/link'
 
 interface LectureSection {
@@ -115,6 +116,7 @@ export default function LectureWorkbenchPage() {
   const clientId = params?.id
   const postId = params?.postId
 
+  const [tikTokReviewOpen, setTikTokReviewOpen] = useState(false)
   const [data, setData] = useState<Detail | null>(null)
   const [draft, setDraft] = useState<Lecture | null>(null)
   const [dirty, setDirty] = useState(false)
@@ -320,11 +322,9 @@ export default function LectureWorkbenchPage() {
     await patch({ action: 'publish_facebook' }, 'fb', '已排队 ✅ 后台在发，几分钟后这里会显示结果')
   }
 
-  // TikTok:应用过审之前 TikTok 强制只有本人可见,所以这里不给「公开」选项 ——
-  // 给了也发不出去,只会让人以为是我们坏了。过审后再放开。
+  // Read current creator settings and require an explicit confirmation.
   async function publishToTikTok() {
-    if (!window.confirm('发到 TikTok？\n\n现在只能发成「仅自己可见」——TikTok 要求应用先过审才允许公开发布。\n先用它验证片子在 TikTok 上长什么样。')) return
-    await patch({ action: 'publish_facebook', platform: 'tiktok' }, 'tk', '已排队 ✅ 后台在发，几分钟后这里会显示结果')
+    setTikTokReviewOpen(true)
   }
 
   // 公开发布是不可逆的对外动作,所以单独一个按钮 + 单独一次确认,绝不跟「发草稿」共用一下点击。
@@ -1022,6 +1022,17 @@ export default function LectureWorkbenchPage() {
           </p>
         )}
       </section>
+      {tikTokReviewOpen && data?.post.videoUrl && clientId && <TikTokPostReview
+        clientId={clientId} postId={postId ?? ''} videoUrl={data.post.videoUrl} caption={draft?.ctaVariants?.fbTiktok ?? draft?.title ?? ''}
+        onClose={() => setTikTokReviewOpen(false)}
+        onSubmit={async tiktokReview => {
+          const response = await fetch(`/api/clients/${clientId}/content-factory/${postId}/lecture`, { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'publish_facebook',platform:'tiktok',tiktokReview}) })
+          const result = await response.json()
+          if (!response.ok) throw new Error(result.error || '发布请求失败')
+          setNotice('TikTok 发布请求已排队，请稍后查看结果')
+          await load()
+        }}
+      />}
     </div>
   )
 }

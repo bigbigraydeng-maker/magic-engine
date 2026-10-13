@@ -95,6 +95,17 @@ export class InMemoryLiteStore implements LiteStore {
     return copyPack(pack)
   }
 
+  async listPacksForClient(clientId: string, limit: number): Promise<Array<{ pack: LitePack; item_count: number }>> {
+    return Array.from(this.packs.values())
+      .filter((pack) => pack.client_id === clientId)
+      .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
+      .slice(0, limit)
+      .map((pack) => ({
+        pack: copyPack(pack),
+        item_count: Array.from(this.items.values()).filter((item) => item.pack_id === pack.id).length,
+      }))
+  }
+
   async getItems(packId: string, clientId: string): Promise<LiteItem[]> {
     const pack = this.packs.get(packId)
     if (!pack || pack.client_id !== clientId) return []
