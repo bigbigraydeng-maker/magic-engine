@@ -47,6 +47,8 @@ export async function pushWhatsappUnclaimedItems(
     .from('whatsapp_unclaimed_numbers')
     .select('phone_number_id, last_seen_at, last_kind')
     .is('resolved_at', null)
+    // The stale filter must run BEFORE the limit: otherwise 50 fresh junk rows could crowd out a real one.
+    .gte('last_seen_at', new Date(now.getTime() - STALE_MS).toISOString())
     .order('last_seen_at', { ascending: false })
     .limit(50)
 
@@ -110,7 +112,7 @@ export async function pushWhatsappUnclaimedItems(
         `（最近一次：${dateOnly(row.last_seen_at)}）`,
       how:
         `在对应客户的设置页「WhatsApp 号码」里，把号码编号 ${id} 绑上去；` +
-        '绑好后下一条消息就会进来（Meta 会重投没存下的历史）',
+        '绑好后下一条消息就会进来；Meta 重投没存下的历史的时间有限（通常只有几天），请尽快绑',
       href: `${APP_BASE}/dashboard/clients`,
     })
   }

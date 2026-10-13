@@ -48,6 +48,14 @@ function makeFakeSupabase(state: FakeState) {
           }
           return builder
         },
+        gte(column: string, value: string) {
+          // ISO timestamps compare correctly as strings.
+          rows = rows.filter((r) => {
+            const v = r[column as keyof UnclaimedRow]
+            return typeof v === 'string' && v >= value
+          })
+          return builder
+        },
         order(column: string, opts: { ascending: boolean }) {
           rows = rows.slice().sort((a, b) => {
             const av = a[column as keyof UnclaimedRow]

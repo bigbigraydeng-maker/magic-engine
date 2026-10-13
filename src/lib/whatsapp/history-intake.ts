@@ -69,23 +69,28 @@ function ourDigitSet(ours: { phoneNumberId: string; displayNumber?: string }): S
   return set
 }
 
-/** A finite number, or a numeric string coerced to a number, else null. */
+/** Largest value we accept for the integer columns (phase / chunk_order). Anything else is
+ *  stored as null: one odd value must never turn a once-only delivery into a permanent 503. */
+const MAX_SMALL_INT = 1_000_000
+
+/** A small non-negative integer (or numeric string of one), else null. */
 function parseMetaNumber(value: number | string | undefined): number | null {
   if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null
+    return Number.isInteger(value) && value >= 0 && value <= MAX_SMALL_INT ? value : null
   }
-  if (typeof value === 'string' && /^[0-9]+$/.test(value)) {
-    return Number(value)
+  if (typeof value === 'string' && /^[0-9]{1,7}$/.test(value)) {
+    const n = Number(value)
+    return n <= MAX_SMALL_INT ? n : null
   }
   return null
 }
 
-/** ISO string from a seconds-since-epoch numeric string, else null. */
+/** ISO string from a seconds-since-epoch numeric string, else null. Never throws: an
+ *  out-of-range timestamp must not poison the whole delivery. */
 function parseTimestamp(timestamp: string | undefined): string | null {
-  if (typeof timestamp === 'string' && /^[0-9]+$/.test(timestamp)) {
-    return new Date(Number(timestamp) * 1000).toISOString()
-  }
-  return null
+  if (typeof timestamp !== 'string' || !/^[0-9]{1,13}$/.test(timestamp)) return null
+  const date = new Date(Number(timestamp) * 1000)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
 /** Truncate a string to `max` chars, or null when not a non-empty string. */
@@ -235,5 +240,16 @@ export async function storeHistoryChunks(
   }
 
   console.log(`[whatsapp/history-intake] stored=${stored} skipped=${skipped}`)
+  if (skipped > 0) {
+    // Counts only. A non-zero number here after go-live usually means our number's format does not
+    // match Meta's `from` (or the display number is missing) — history is delivered once, so it
+    // must be noticed, not lost quietly.
+    console.error(`[whatsapp/history-intake] skipped ${skipped} message(s) — check sender/number matching`)
+  }
+  if (stored === 0 && skipped > 0) {
+    // Nothing usable in a delivery that did contain messages: refuse so Meta redelivers
+    // instead of acknowledging (and losing) history we could not read.
+    throw new Error('history delivery contained messages but none could be stored')
+  }
   return { stored, skipped }
 }

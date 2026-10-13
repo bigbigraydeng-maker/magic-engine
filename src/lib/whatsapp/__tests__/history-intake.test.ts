@@ -158,15 +158,15 @@ describe('storeHistoryChunks', () => {
         ],
       },
     ]
-    const res = await storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)
-    expect(res).toEqual({ stored: 0, skipped: 1 })
+    // Nothing storable in a delivery that did contain messages -> refuse (503) so Meta redelivers.
+    await expect(storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)).rejects.toThrow('none could be stored')
     expect(rows()).toHaveLength(0)
   })
 
   it('skips a message with NO `from` at all and never defaults to customer', async () => {
     const chunks = [{ threads: [{ id: CUSTOMER, messages: [{ id: 'wamid.nofrom', timestamp: '1700000000' }] }] }]
-    const res = await storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)
-    expect(res).toEqual({ stored: 0, skipped: 1 })
+    // Nothing storable in a delivery that did contain messages -> refuse (503) so Meta redelivers.
+    await expect(storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)).rejects.toThrow('none could be stored')
     expect(rows()).toHaveLength(0)
   })
 
@@ -181,8 +181,8 @@ describe('storeHistoryChunks', () => {
         ],
       },
     ]
-    const res = await storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)
-    expect(res).toEqual({ stored: 0, skipped: 1 })
+    // Nothing storable in a delivery that did contain messages -> refuse (503) so Meta redelivers.
+    await expect(storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)).rejects.toThrow('none could be stored')
   })
 
   it('skips a thread with a bad id', async () => {
@@ -196,8 +196,8 @@ describe('storeHistoryChunks', () => {
         ],
       },
     ]
-    const res = await storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)
-    expect(res).toEqual({ stored: 0, skipped: 1 })
+    // Nothing storable in a delivery that did contain messages -> refuse (503) so Meta redelivers.
+    await expect(storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)).rejects.toThrow('none could be stored')
   })
 
   it('skips a message with no id', async () => {
@@ -211,8 +211,8 @@ describe('storeHistoryChunks', () => {
         ],
       },
     ]
-    const res = await storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)
-    expect(res).toEqual({ stored: 0, skipped: 1 })
+    // Nothing storable in a delivery that did contain messages -> refuse (503) so Meta redelivers.
+    await expect(storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)).rejects.toThrow('none could be stored')
   })
 
   it('de-duplicates the same wamid within one call and across calls', async () => {
@@ -347,3 +347,43 @@ describe('storeHistoryChunks', () => {
     spy.mockRestore()
   })
 })
+
+describe('storeHistoryChunks — poison values must not poison the delivery', () => {
+  const ours = { phoneNumberId: OUR_PNID }
+  const chunk = (over: Record<string, unknown>, ts = '1700000000') => ({
+    ...over,
+    threads: [{ id: CUSTOMER, messages: [{ id: 'wamid.p', from: CUSTOMER, timestamp: ts }] }],
+  })
+
+  it('an absurdly long timestamp becomes null instead of throwing', async () => {
+    const res = await storeHistoryChunks('client-1', ours, [chunk({}, '9'.repeat(30))])
+    expect(res.stored).toBe(1)
+    expect(rows()[0].sent_at).toBeNull()
+  })
+
+  it('a timestamp past the Date range becomes null instead of throwing', async () => {
+    const res = await storeHistoryChunks('client-1', ours, [chunk({}, '9999999999999')])
+    expect(res.stored).toBe(1)
+    expect(rows()[0].sent_at).toBeNull()
+  })
+
+  it('a fractional / huge phase and chunk_order become null (integer columns)', async () => {
+    const res = await storeHistoryChunks('client-1', ours, [
+      chunk({ metadata: { phase: 1.5, chunk_order: 99999999999 } }),
+    ])
+    expect(res.stored).toBe(1)
+    expect(rows()[0].phase).toBeNull()
+    expect(rows()[0].chunk_order).toBeNull()
+  })
+
+  it('a partly unreadable delivery stores what it can and says so loudly', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await storeHistoryChunks('client-1', ours, [
+      { threads: [{ id: CUSTOMER, messages: [{ id: 'wamid.ok', from: CUSTOMER }, { id: 'wamid.bad', from: '999000111' }] }] },
+    ])
+    expect(res).toEqual({ stored: 1, skipped: 1 })
+    expect(errSpy.mock.calls.flat().map(String).join(' ')).toContain('skipped 1 message(s)')
+    errSpy.mockRestore()
+  })
+})
+

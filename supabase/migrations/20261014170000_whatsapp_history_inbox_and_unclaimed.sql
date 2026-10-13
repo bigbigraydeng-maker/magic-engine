@@ -5,6 +5,8 @@
 -- subscribes the Meta app to the `history` field (history is delivered once; the code refuses it with
 -- 503 until the inbox exists). Empty tables = no behaviour change.
 -- Privacy: the inbox keeps METADATA ONLY (who/when/direction/type) — never message bodies (PM 2026-10-10).
+-- Apply in a quiet hour: the partial index on conversation_outbound_log briefly blocks writes to that table.
+-- (UPDATE/DELETE are granted now so the later claim/cleanup work needs no second migration.)
 -- Reversible: DROP TABLE public.whatsapp_history_inbox; DROP TABLE public.whatsapp_unclaimed_numbers;
 --             DROP INDEX IF EXISTS public.conversation_outbound_log_meta_message_idx;
 
@@ -44,14 +46,14 @@ DROP POLICY IF EXISTS service_role_full ON public.whatsapp_history_inbox;
 CREATE POLICY service_role_full ON public.whatsapp_history_inbox
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 REVOKE ALL ON public.whatsapp_history_inbox FROM PUBLIC, anon, authenticated;
-GRANT SELECT, INSERT ON public.whatsapp_history_inbox TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.whatsapp_history_inbox TO service_role;
 
 ALTER TABLE public.whatsapp_unclaimed_numbers ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS service_role_full ON public.whatsapp_unclaimed_numbers;
 CREATE POLICY service_role_full ON public.whatsapp_unclaimed_numbers
   FOR ALL TO service_role USING (true) WITH CHECK (true);
 REVOKE ALL ON public.whatsapp_unclaimed_numbers FROM PUBLIC, anon, authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.whatsapp_unclaimed_numbers TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.whatsapp_unclaimed_numbers TO service_role;
 
 COMMENT ON TABLE public.whatsapp_history_inbox IS
   'WhatsApp history-sync messages waiting to be claimed. Metadata only (no bodies). No contacts/conversations/touchpoints are created from these rows.';
