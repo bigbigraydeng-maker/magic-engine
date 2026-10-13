@@ -15,25 +15,36 @@ import { POST } from './route'
 
 interface Db {
   contact: { id: string; primary_phone: string | null; do_not_contact: boolean } | null
-  touches: Array<{ metadata: Record<string, unknown> | null; occurred_at: string }>
+  touches: Array<{ channel?: string; direction?: string; source?: string | null; metadata: Record<string, unknown> | null; occurred_at: string }>
   conn: Record<string, unknown> | null
+  conns?: Array<Record<string, unknown>>
   touchesError?: boolean
+  /** [客户今天已外呼次数, 该员工今天已外呼次数]；null = 读失败 */
+  counts?: [number, number] | null
 }
-const CONN = { id: 'conn-1', provider_account_id: 'ACx', secret_ref: 'TWILIO_AUTH_TOKEN_CTS', extension_map: { '+64210000099': 'staff@example.test' }, default_country: 'NZ' }
+const CONN: Record<string, unknown> = { id: 'conn-1', provider_account_id: 'ACx', secret_ref: 'TWILIO_AUTH_TOKEN_CTS', extension_map: { '+64210000099': 'staff@example.test' }, default_country: 'NZ' }
 
 function mockDb(db: Db) {
+  let rawCalls = 0
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
-    const chain = (data: unknown, error: unknown = null) => {
+    const chain = (data: unknown, error: unknown = null, count?: number) => {
       const c: Record<string, unknown> = {}
       c.select = () => c
       c.eq = () => c
+      c.gte = () => c
+      c.limit = () => c
       c.maybeSingle = async () => ({ data, error })
-      c.then = (res: (v: unknown) => unknown) => Promise.resolve({ data, error }).then(res)
+      c.then = (res: (v: unknown) => unknown) => Promise.resolve({ data, error, count }).then(res)
       return c
     }
     if (table === 'contacts') return chain(db.contact)
     if (table === 'contact_touchpoints') return chain(db.touches, db.touchesError ? { message: 'x' } : null)
-    if (table === 'telephony_connections') return chain(db.conn)
+    if (table === 'telephony_connections') return chain(db.conns ?? (db.conn ? [db.conn] : []))
+    if (table === 'telephony_raw_events') {
+      const counts = db.counts === undefined ? ([0, 0] as [number, number]) : db.counts
+      const i = rawCalls++
+      return counts === null ? chain(null, { message: 'x' }) : chain(null, null, counts[i % 2])
+    }
     throw new Error(`unexpected table ${table}`)
   })
 }
@@ -91,6 +102,42 @@ describe('POST 点击外呼', () => {
     mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [], conn: CONN })
     vi.stubEnv('TWILIO_AUTH_TOKEN_CTS', '')
     expect((await call()).status).toBe(500)
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('号码所在国家不在放行名单 / 高价号段 → 422，不拨；环境变量可加国家', async () => {
+    mockDb({ contact: { id: 'c', primary_phone: '+86 138 0013 8000', do_not_contact: false }, touches: [], conn: CONN })
+    expect((await call()).status).toBe(422)
+    mockDb({ contact: { id: 'c', primary_phone: '+64 900 123 456', do_not_contact: false }, touches: [], conn: CONN })
+    expect((await call()).status).toBe(422)
+    expect(start).not.toHaveBeenCalled()
+    vi.stubEnv('TELEPHONY_OUTBOUND_COUNTRIES', '+86')
+    mockDb({ contact: { id: 'c', primary_phone: '+86 138 0013 8000', do_not_contact: false }, touches: [], conn: CONN })
+    expect((await call()).status).toBe(200)
+  })
+
+  it('每日上限：客户或员工任一到顶 → 429；读不到计数 → 500；都不拨', async () => {
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [], conn: CONN, counts: [80, 0] })
+    expect((await call()).status).toBe(429)
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [], conn: CONN, counts: [0, 40] })
+    expect((await call()).status).toBe(429)
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [], conn: CONN, counts: null })
+    expect((await call()).status).toBe(500)
+    expect(start).not.toHaveBeenCalled()
+    vi.stubEnv('TELEPHONY_OUTBOUND_DAILY_CAP_STAFF', '41')
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [], conn: CONN, counts: [0, 40] })
+    expect((await call()).status).toBe(200)
+  })
+
+  it('号码已标成打不通（最近一次电话结果是 bad_number）→ 409，不拨', async () => {
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [{ channel: 'phone', direction: 'outbound', source: 'voice_agent', metadata: { outcome: 'bad_number' }, occurred_at: '2026-10-01T00:00:00Z' }], conn: CONN })
+    expect((await call()).status).toBe(409)
+    expect(start).not.toHaveBeenCalled()
+  })
+
+  it('一个客户有多条电话连接 → 不猜，422', async () => {
+    mockDb({ contact: { id: 'c', primary_phone: '021 000 0001', do_not_contact: false }, touches: [], conn: CONN, conns: [CONN, { ...CONN, id: 'conn-2' }] })
+    expect((await call()).status).toBe(422)
     expect(start).not.toHaveBeenCalled()
   })
 

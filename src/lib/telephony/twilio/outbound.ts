@@ -106,3 +106,20 @@ export async function startOutboundCall(a: StartOutboundArgs): Promise<{ callSid
   if (!out.sid) throw new Error('外呼没有返回编号')
   return { callSid: out.sid }
 }
+
+/** 默认只放行 CTS 的客人所在的两个国家；要加别的国家，在服务器环境变量里逐个加（带 +）。 */
+export const DEFAULT_OUTBOUND_PREFIXES = ['+64', '+61'] as const
+/** 高价 / 付费号段：新西兰 0900、澳洲 190x。放行的国家里也不许拨。 */
+const PREMIUM = [/^\+64900/, /^\+6119[0-9]/]
+
+export function outboundNumberAllowed(e164: string, allowedPrefixes: readonly string[] = DEFAULT_OUTBOUND_PREFIXES): boolean {
+  if (!E164.test(e164)) return false
+  if (PREMIUM.some((r) => r.test(e164))) return false
+  return allowedPrefixes.some((p) => /^\+[1-9][0-9]{0,3}$/.test(p) && e164.startsWith(p))
+}
+
+/** 读环境变量里的放行国家前缀（逗号分隔）；没配 / 全是坏值就用默认。 */
+export function parseAllowedPrefixes(raw: string | undefined): readonly string[] {
+  const list = (raw ?? '').split(',').map((x) => x.trim()).filter((x) => /^\+[1-9][0-9]{0,3}$/.test(x))
+  return list.length > 0 ? list : DEFAULT_OUTBOUND_PREFIXES
+}

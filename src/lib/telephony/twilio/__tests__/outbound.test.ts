@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findCallerNumber, noticeTwiml, outboundBridgeTwiml, staffPhoneForEmail, startOutboundCall } from '../outbound'
+import { findCallerNumber, noticeTwiml, outboundBridgeTwiml, outboundNumberAllowed, parseAllowedPrefixes, staffPhoneForEmail, startOutboundCall } from '../outbound'
 
 const ACC = 'AC' + 'a'.repeat(32)
 const CONN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
@@ -58,5 +58,22 @@ describe('findCallerNumber / startOutboundCall', () => {
     await expect(startOutboundCall({ accountSid: ACC, authToken: 't', connectionId: CONN, staffPhone: 'x', customer: '+64210000001', baseUrl: 'https://h' })).rejects.toThrow()
     const fetcher = (async (url: string) => (String(url).includes('IncomingPhoneNumbers') ? json(numbers) : json({}, 400))) as unknown as typeof fetch
     await expect(startOutboundCall({ accountSid: ACC, authToken: 't', connectionId: CONN, staffPhone: '+64210000099', customer: '+64210000001', baseUrl: 'https://h', fetcher })).rejects.toThrow('400')
+  })
+})
+
+describe('号码放行名单', () => {
+  it('默认只放新西兰 / 澳洲，其余国家与高价号段都不放', () => {
+    expect(outboundNumberAllowed('+6421841210')).toBe(true)
+    expect(outboundNumberAllowed('+61412345678')).toBe(true)
+    expect(outboundNumberAllowed('+8613800138000')).toBe(false)
+    expect(outboundNumberAllowed('+882123456789')).toBe(false)
+    expect(outboundNumberAllowed('+64900123456')).toBe(false)
+    expect(outboundNumberAllowed('+611900123456')).toBe(false)
+    expect(outboundNumberAllowed('021 000 0001')).toBe(false)
+  })
+  it('环境变量可加国家；写坏了回到默认', () => {
+    expect(outboundNumberAllowed('+8613800138000', parseAllowedPrefixes('+86, +64'))).toBe(true)
+    expect(parseAllowedPrefixes('86;;abc')).toEqual(['+64', '+61'])
+    expect(parseAllowedPrefixes(undefined)).toEqual(['+64', '+61'])
   })
 })
