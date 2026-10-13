@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
+import type { PublishedView } from '@/lib/factory/publish/publish-display'
 import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
 import { isAcceptableFlagCategory } from '@/lib/factory/review-flag-categories'
@@ -10,6 +11,9 @@ import { FactoryChat } from './FactoryChat'
 import { OneClickConfirm } from './OneClickConfirm'
 import { OrderNo } from './OrderNo'
 import { PublishOutlets } from './PublishOutlets'
+import { publishedBadge, POST_PUBLISH } from './statusMeta'
+import { PendingCardHead, ReadOnlyTile } from './OrderTile'
+import { groupCounts, parseAngle } from './reviewCardMeta'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -23,6 +27,8 @@ interface WorkOrder {
   fact_source_url?: string | null // 工单自带的官网产品页(brief.copy.endcard.url),用来预填「事实有来源」
   angle: string
   rationale_one_liner: string
+  created_at?: string
+  published?: PublishedView | null
   // redline_hits:交付时服务端复扫命中的品牌红线词(complete-work-order.ts)。
   // 设计是「命中不打回,标红让人审有的放矢」——但此前唯一的「标红」实现在 Airtable 审核卡里,
   // 随 Airtable 退役一起没了。成片直连 in_review 后这条护栏必须在这里补上,否则命中红线的片子
@@ -120,8 +126,11 @@ const publicUrl = (path?: string) =>
   path ? `${SUPABASE_URL}/storage/v1/object/public/content-factory/${path}` : ''
 
 // clientId:只看该客户的待审(客户页概览用);hideWhenEmpty:没待审就不渲染(不占地方)
-export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hideWhenEmpty?: boolean } = {}) {
+export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?: string; hideWhenEmpty?: boolean; onReviewed?: () => void } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
+  const [published, setPublished] = useState<WorkOrder[]>([]) // 只读展示:已发布
+  const [superseded, setSuperseded] = useState<WorkOrder[]>([]) // 只读展示:已作废,折叠在页面底部
+  const [groupFilter, setGroupFilter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasShown, setHasShown] = useState(false) // 显示过一次就常驻,刷新不卸载(防对话框丢历史)
   const [busy, setBusy] = useState<string | null>(null)
@@ -142,7 +151,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
           o.status === 'in_review' && (!clientId || o.client_id === clientId),
       )
       setOrders(pending)
-      if (pending.length > 0) setHasShown(true)
+      const mine = (json.orders ?? []).filter((o: WorkOrder & { client_id?: string }) => !clientId || o.client_id === clientId)
+      setPublished(mine.filter((o: WorkOrder) => POST_PUBLISH.includes(o.status)))
+      const old = mine.filter((o: WorkOrder) => o.status === 'superseded')
+      setSuperseded(old)
+      // 只剩历史卡的客户也算「显示过」:否则对话框触发刷新时整块被加载提示替换,对话历史丢失
+      if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
       setError(null)
       setAcceptedFlagsError(typeof json.accepted_flags_error === 'string' && json.accepted_flags_error ? json.accepted_flags_error : null)
     } catch (e) {
@@ -153,6 +167,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
   }, [clientId])
 
   useEffect(() => { void load() }, [load])
+
+  // 选中的团已不存在 → 清掉源状态,避免它以历史卡重新出现时旧筛选悄悄复活
+  useEffect(() => {
+    if (groupFilter && !groupCounts([...orders, ...published].map((o) => o.angle)).some((g) => g.group === groupFilter)) setGroupFilter(null)
+  }, [groupFilter, orders, published])
 
   const act = useCallback(async (id: string, payload: Record<string, unknown>) => {
     setBusy(id)
@@ -169,12 +188,13 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       }
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
+      onReviewed?.() // 通知父页刷新工单,待审数才会变,自动切客户才会触发
     } catch (e) {
       setError(e instanceof Error ? reviewErrorZh(e.message, k => HUMAN_CHECK_LABEL[k as ContentCheckItemKey] ?? k) : '操作失败')
     } finally {
       setBusy(null)
     }
-  }, [])
+  }, [onReviewed])
 
   const acceptFlag = useCallback(async (id: string, category: string) => {
     setBusy(id)
@@ -198,7 +218,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
 
   // 只在「从没显示过 + 当前也没待审」时隐藏。一旦显示过就常驻——刷新时绝不整体卸载,
   // 否则右侧对话框(ReviewInbox 的子组件)会被连带卸载,历史 + 正在输入的指令全丢(PM 报的 bug)。
-  if (hideWhenEmpty && !hasShown && orders.length === 0) return null
+  if (hideWhenEmpty && !hasShown && orders.length === 0 && published.length === 0 && superseded.length === 0) return null
+  // 选中的团已无卡片(例如最后一条审完)→ 视同「全部」,否则剩余卡片被过滤光且筛选控件可能已隐藏
+  const groups = groupCounts([...orders, ...published].map((o) => o.angle))
+  const activeGroup = groupFilter && groups.some((g) => g.group === groupFilter) ? groupFilter : null
   if (!hasShown && loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
 
   return (
@@ -211,29 +234,36 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
       {acceptedFlagsError && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">「已接受」记录读取失败,已接受的提醒可能显示不准:{acceptedFlagsError}</div>}
 
       <div className={clientId ? 'grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start' : ''}>
-      <div className="space-y-4">
-        {orders.map((o) => (
-          <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-4 flex flex-col sm:flex-row gap-4">
-            <div className="shrink-0 mx-auto sm:mx-0">
-              {o.output?.video_path ? (
-                <video
-                  controls
-                  src={publicUrl(o.output.video_path)}
-                  className="rounded-lg bg-black w-[180px] max-h-[320px]"
-                />
-              ) : (
-                <div className="w-[180px] h-[320px] rounded-lg bg-slate-100 grid place-items-center text-xs text-slate-400">无成片</div>
-              )}
+      <div>
+        {(() => {
+          if (groups.length <= 1) return null
+          return (
+            <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
+              {[{ group: null as string | null, count: orders.length + published.length }, ...groups].map((g) => (
+                <button
+                  key={g.group ?? 'all'}
+                  type="button"
+                  onClick={() => setGroupFilter(g.group)}
+                  aria-pressed={activeGroup === g.group}
+                  className={`px-3 h-8 rounded-full text-xs font-medium border ${activeGroup === g.group ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                >{g.group ?? '全部'} · {g.count}</button>
+              ))}
             </div>
+          )
+        })()}
+        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+        {orders.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup).map((o) => (
+          <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-3 flex flex-col">
+            <PendingCardHead
+              id={o.id}
+              angle={o.angle}
+              rationale={o.rationale_one_liner}
+              clientName={o.client_name}
+              createdAt={o.created_at}
+              videoSrc={publicUrl(o.output?.video_path)}
+            />
 
             <div className="flex-1 min-w-0 flex flex-col">
-              <div className="flex items-center gap-2 text-sm mb-2 flex-wrap">
-                <span className="font-medium text-slate-800">{o.client_name}</span>
-                <span className="text-xs text-slate-500 border border-slate-200 rounded-full px-2 py-0.5">{o.angle}</span>
-                <OrderNo id={o.id} />
-              </div>
-              <p className="text-sm text-slate-700 bg-blue-50 rounded-lg px-3 py-2 mb-4">{o.rationale_one_liner}</p>
-
               {redlineHitsOf(o).length > 0 && (
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
                   <p className="text-sm font-medium text-red-800">⚠️ 文案命中品牌红线,请逐字核对后再通过</p>
@@ -313,6 +343,61 @@ export function ReviewInbox({ clientId, hideWhenEmpty }: { clientId?: string; hi
             </div>
           </div>
         ))}
+        </div>
+
+        {(() => {
+          const shown = published.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup)
+          if (shown.length === 0) return null
+          return (
+            <div className="mt-8">
+              <h2 className="text-sm font-medium text-slate-600 mb-3">已发布 · {shown.length} 条</h2>
+              <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+                {shown.map((o) => {
+                  const b = publishedBadge(o.published ?? null)
+                  const tone = b.color.includes('green') ? 'green' : b.color.includes('slate') ? 'slate' : 'amber'
+                  return (
+                  <div key={o.id}><ReadOnlyTile
+                    key={o.id}
+                    id={o.id}
+                    angle={o.angle}
+                    rationale={o.rationale_one_liner}
+                    clientName={o.client_name}
+                    createdAt={o.created_at}
+                    videoSrc={publicUrl(o.output?.video_path)}
+                    status={{ label: b.label, tone }}
+                    link={b.href ? { href: b.href, label: '在 Facebook 查看' } : null}
+                  />
+                  {o.output?.video_path && <a className="mt-2 inline-block text-sm text-blue-600 underline" href={`/dashboard/clients/${o.client_id}/tiktok/${o.id}`}>发布到 TikTok（需单独确认）</a>}</div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
+
+        {(() => {
+          const oldShown = superseded.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup)
+          return oldShown.length > 0 && (
+          <details className="mt-8 group">
+            <summary className="cursor-pointer select-none text-sm font-medium text-slate-500">已作废 · {oldShown.length} 条(旧版,已被新版替换,默认收起)</summary>
+            <div className="mt-3 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+              {oldShown.map((o) => (
+                <ReadOnlyTile
+                  key={o.id}
+                  id={o.id}
+                  angle={o.angle}
+                  rationale={o.rationale_one_liner}
+                  clientName={o.client_name}
+                  createdAt={o.created_at}
+                  videoSrc={publicUrl(o.output?.video_path)}
+                  status={{ label: '已作废', tone: 'slate' }}
+                  dim
+                />
+              ))}
+            </div>
+          </details>
+          )
+        })()}
       </div>
 
         {clientId && <FactoryChat clientId={clientId} onActed={load} />}

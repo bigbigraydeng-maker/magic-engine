@@ -17,6 +17,11 @@
  *    还在演练模式），而不是「跑了但失败」。没有这条，一个静默死掉的发布器
  *    可以一直不吭声。
  *
+ * 3. **记录对不上**（`auto_publish_record_conflict`）—— 尝试记录写着「已撤回」（墓碑），
+ *    但该计划的发布回执里同一天又出现了一条比墓碑更晚发出的帖子。典型来路：自动发布器
+ *    发出帖子之后才发现自己那行占位已被撤回墓碑顶掉，帖子发出去了却没处记账。
+ *    这种帖子只存在于主页上，系统自己的记录里是「没发」，必须人去看一眼。
+ *
  * 本文件一行写操作都没有：只读事件、生成待办。
  */
 
@@ -28,6 +33,7 @@ export type AutoPublishItemKind =
   | 'auto_publish_stalled'
   | 'auto_publish_unknown_outcome'
   | 'auto_publish_unarmed'
+  | 'auto_publish_record_conflict'
 
 const NZ_TZ = 'Pacific/Auckland'
 
@@ -71,9 +77,11 @@ function clientHref(clientId: string): string {
 /** 一行 `daily_plan_auto_publish_attempts`（只声明这条待办用得到的列）。 */
 interface AttemptRow {
   client_id: string
+  plan_id: string
   date: string
   status: string
   reason_code: string | null
+  updated_at: string
 }
 
 /** 一行 `daily_plan_auto_publish_auth`（只声明这条待办用得到的列）。 */
@@ -95,9 +103,11 @@ function narrowAttempt(value: unknown): AttemptRow | null {
   if (!clientId || !date) return null
   return {
     client_id: clientId,
+    plan_id: str(value.plan_id),
     date,
     status: str(value.status),
     reason_code: typeof value.reason_code === 'string' ? value.reason_code : null,
+    updated_at: str(value.updated_at),
   }
 }
 
@@ -229,6 +239,76 @@ function buildUnarmedItem(
   }
 }
 
+/** 一条「记录对不上」的待办。 */
+function buildConflictItem(clientId: string, clientName: string, dates: string[]): ManualItem {
+  const dateList = dates.slice().sort().join('、')
+  return {
+    kind: 'auto_publish_record_conflict',
+    client_id: clientId,
+    client_name: clientName,
+    what:
+      `${clientName} 的 ${dateList} 这几天，系统记录写着「已撤回」，但发布回执里之后又出现了一条新发出的帖子 —— ` +
+      `主页上很可能有一条系统自己没记账的帖子。`,
+    how:
+      '打开客户的 Facebook 主页看这几天有没有帖子。如果是你撤回后手动重发的，在发布面板重新授权并点名「解除撤回」就能清掉这条；' +
+      '如果不是你发的，回我一句，我来查是哪一次发布没记上。',
+    href: clientHref(clientId),
+  }
+}
+
+/** 回执里每个日期最近一条 `published[]` 的发出时间（毫秒）。 */
+function publishedAtByDate(list: unknown): Map<string, number> {
+  const out = new Map<string, number>()
+  if (!Array.isArray(list)) return out
+  for (const entry of list) {
+    if (!isRecord(entry)) continue
+    const date = str(entry.date)
+    const at = Date.parse(str(entry.published_at))
+    if (!date || Number.isNaN(at)) continue
+    const prev = out.get(date)
+    if (prev === undefined || at > prev) out.set(date, at)
+  }
+  return out
+}
+
+/** 墓碑 + 回执里更晚的发布 = 记录对不上；按客户归拢日期。读失败要抛，不能当成「没有冲突」。 */
+async function findRecordConflicts(
+  supabase: SupabaseClient,
+  attempts: AttemptRow[],
+  today: string,
+): Promise<Map<string, string[]>> {
+  const cutoff = addDays(today, -ATTEMPT_LOOKBACK_DAYS)
+  const tombstones = attempts.filter(
+    (a) => a.status === 'blocked' && a.reason_code === 'RECALLED' && a.plan_id !== '' && a.date >= cutoff,
+  )
+  const byClient = new Map<string, string[]>()
+  if (tombstones.length === 0) return byClient
+
+  const planIds = Array.from(new Set(tombstones.map((t) => t.plan_id)))
+  const { data, error } = await supabase
+    .from('social_plans')
+    .select('id, publish_meta:plan_data->publish_meta')
+    .in('id', planIds)
+  if (error) throw new Error('auto-publish-items: receipt read failed: ' + error.message)
+
+  const receipts = new Map<string, Map<string, number>>()
+  for (const row of (data ?? []) as unknown[]) {
+    if (!isRecord(row)) continue
+    const meta = isRecord(row.publish_meta) ? row.publish_meta : {}
+    receipts.set(str(row.id), publishedAtByDate(meta.published))
+  }
+
+  for (const t of tombstones) {
+    const publishedAt = receipts.get(t.plan_id)?.get(t.date)
+    const tombstonedAt = Date.parse(t.updated_at)
+    if (publishedAt === undefined || Number.isNaN(tombstonedAt) || publishedAt <= tombstonedAt) continue
+    const cur = byClient.get(t.client_id) ?? []
+    if (!cur.includes(t.date)) cur.push(t.date)
+    byClient.set(t.client_id, cur)
+  }
+  return byClient
+}
+
 export async function pushAutoPublishItems(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -242,7 +322,7 @@ export async function pushAutoPublishItems(
   // ---- Source 1: attempts needing attention --------------------------------
   const { data: attemptData, error: attemptError } = await supabase
     .from('daily_plan_auto_publish_attempts')
-    .select('client_id, date, status, reason_code')
+    .select('client_id, plan_id, date, status, reason_code, updated_at')
   if (attemptError) {
     throw new Error('auto-publish-items: attempts read failed: ' + attemptError.message)
   }
@@ -255,6 +335,11 @@ export async function pushAutoPublishItems(
 
   for (const agg of groupAttempts(attempts, today)) {
     items.push(buildAttemptItem(agg, nameOf(agg.clientId)))
+  }
+
+  // ---- Source 1b: tombstone says "recalled" but the receipt shows a later post ------
+  for (const [clientId, dates] of Array.from((await findRecordConflicts(supabase, attempts, today)).entries())) {
+    items.push(buildConflictItem(clientId, nameOf(clientId), dates))
   }
 
   // ---- Source 2: the watchdog ----------------------------------------------

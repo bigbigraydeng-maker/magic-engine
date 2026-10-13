@@ -79,6 +79,7 @@ interface PreviewResult {
 interface RevokeResult {
   in_flight_status?: string
   in_flight?: Array<{ date: string }>
+  in_flight_unconfirmed?: Array<{ date: string }>
 }
 
 /** Plain-Chinese translations (with a next step) for the error codes the routes can return. */
@@ -380,6 +381,9 @@ export function CampaignDailyAutoPublishPanel({
       setInFlight({
         in_flight_status: typeof json.in_flight_status === 'string' ? json.in_flight_status : undefined,
         in_flight: Array.isArray(json.in_flight) ? (json.in_flight as Array<{ date: string }>) : [],
+        in_flight_unconfirmed: Array.isArray(json.in_flight_unconfirmed)
+          ? (json.in_flight_unconfirmed as Array<{ date: string }>)
+          : [],
       })
       setConfirmingRevoke(false)
       setStopReason('')
@@ -482,6 +486,12 @@ export function CampaignDailyAutoPublishPanel({
           没能确认 Facebook 上有没有已排好时间、还没公开的帖子，请到该客户 Facebook 主页的「已定时」里看一眼。
         </p>
       )}
+      {inFlight.in_flight_unconfirmed && inFlight.in_flight_unconfirmed.length > 0 ? (
+        <p className="mt-1 text-[#C2453A]">
+          这些日期系统不确定有没有发出去：{inFlight.in_flight_unconfirmed.map(item => shortDate(item.date)).join('、')}。
+          请到客户 Facebook 主页看一眼，再回这里登记结果。
+        </p>
+      ) : null}
     </div>
   ) : null
 

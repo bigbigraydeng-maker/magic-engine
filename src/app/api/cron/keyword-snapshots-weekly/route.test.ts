@@ -5,11 +5,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
-const { mockClientsQuery, mockEq, mockSnapshotRankedKeywordsForClient, mockCaptureSerpForClient } = vi.hoisted(() => ({
+const { mockClientsQuery, mockEq, mockSnapshotRankedKeywordsForClient, mockCaptureSerpForClient, mockSnapshotWatched } = vi.hoisted(() => ({
   mockClientsQuery: vi.fn(),
   mockEq: vi.fn(),
   mockSnapshotRankedKeywordsForClient: vi.fn(),
   mockCaptureSerpForClient: vi.fn(),
+  mockSnapshotWatched: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase', () => ({
@@ -31,6 +32,11 @@ vi.mock('@/lib/seo-intelligence/keyword-snapshots', () => ({
 vi.mock('@/lib/seo-intelligence/serp-capture', () => ({
   captureSerpForClient: mockCaptureSerpForClient,
 }))
+
+vi.mock('@/lib/seo-intelligence/watch-keywords', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/seo-intelligence/watch-keywords')>()
+  return { ...actual, snapshotWatchedKeywordsForClient: mockSnapshotWatched }
+})
 
 // startCronRun writes to cron_run_logs via supabaseAdmin — out of scope here
 vi.mock('@/lib/cron/run-logger', () => ({
@@ -146,6 +152,86 @@ describe('GET /api/cron/keyword-snapshots-weekly', () => {
       name: '',
       brand_aliases: null,
     })
+  })
+
+  it('runs the watch-keyword step only for clients whose seo_config lists watch keywords', async () => {
+    mockClientsQuery.mockResolvedValueOnce({
+      data: [
+        { id: 'client-a', domain: 'a.co.nz', semrush_db: 'nz', seo_config: { rank_watch_keywords: [' Alpha Trip ', 'beta route'] } },
+        { id: 'client-b', domain: 'b.co.nz', semrush_db: 'nz', seo_config: null },
+      ],
+      error: null,
+    })
+    mockSnapshotRankedKeywordsForClient.mockResolvedValue({
+      client_id: 'x', domain: 'x', location_code: 2554, keywords_seen: 1, snapshots_written: 1,
+    })
+    mockSnapshotWatched.mockResolvedValueOnce({
+      client_id: 'client-a', dry_run: false, keywords_requested: 2, skipped_already_snapshotted: [],
+      readings: [], rows_written: 2, cost_usd: 0.031,
+    })
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+    const json = await res.json()
+
+    expect(mockSnapshotWatched).toHaveBeenCalledTimes(1)
+    expect(mockSnapshotWatched).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'client-a' }),
+      ['alpha trip', 'beta route'],
+    )
+    expect(json.results[0].watch).toMatchObject({ rows_written: 2 })
+    expect(json.results[1].watch).toBeUndefined()
+  })
+
+  it('clients without rank_watch_keywords keep the original path: no watch call, no watch fields', async () => {
+    mockClientsQuery.mockResolvedValueOnce({
+      data: [
+        { id: 'client-none', domain: 'n.co.nz', semrush_db: 'nz' },
+        { id: 'client-null', domain: 'm.co.nz', semrush_db: 'nz', seo_config: null },
+        { id: 'client-empty', domain: 'e.co.nz', semrush_db: 'nz', seo_config: { rank_watch_keywords: [] } },
+        { id: 'client-junk', domain: 'j.co.nz', semrush_db: 'nz', seo_config: { rank_watch_keywords: 'not-an-array' } },
+      ],
+      error: null,
+    })
+    mockSnapshotRankedKeywordsForClient.mockResolvedValue({
+      client_id: 'x', domain: 'x', location_code: 2554, keywords_seen: 10, snapshots_written: 10,
+    })
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(mockSnapshotWatched).not.toHaveBeenCalled()
+    expect(mockSnapshotRankedKeywordsForClient).toHaveBeenCalledTimes(4)
+    expect(mockCaptureSerpForClient).toHaveBeenCalledTimes(4)
+    expect(json.snapshots_written).toBe(40)
+    expect(json.failed).toBe(0)
+    for (const r of json.results) {
+      expect(r).not.toHaveProperty('watch')
+      expect(r).not.toHaveProperty('watch_error')
+      expect(r).toHaveProperty('serp')
+    }
+  })
+
+  it('a watch-keyword failure is recorded but does not undo or fail the main snapshot', async () => {
+    mockClientsQuery.mockResolvedValueOnce({
+      data: [{ id: 'client-a', domain: 'a.co.nz', semrush_db: 'nz', seo_config: { rank_watch_keywords: ['alpha trip'] } }],
+      error: null,
+    })
+    mockSnapshotRankedKeywordsForClient.mockResolvedValueOnce({
+      client_id: 'client-a', domain: 'a.co.nz', location_code: 2554, keywords_seen: 50, snapshots_written: 50,
+    })
+    mockSnapshotWatched.mockRejectedValueOnce(new Error('keyword_snapshots watch upsert failed: boom'))
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.failed).toBe(0)
+    expect(json.snapshots_written).toBe(50)
+    expect(json.results[0].watch_error).toMatch(/watch upsert failed/)
   })
 
   it('continues processing remaining clients when one snapshot fails', async () => {
