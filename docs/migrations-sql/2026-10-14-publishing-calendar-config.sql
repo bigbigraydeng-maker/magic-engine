@@ -1,5 +1,5 @@
--- Publishing calendar — client-layer quota config + Story role.  >>> NOT APPLIED. <<<
--- Apply only after explicit PM approval. Both columns are optional: the page shows "not configured" without them.
+-- Publishing calendar — client-layer quota config + Story role.  APPLIED to prod 2026-10-13 14:33 UTC (migration 20261014_publishing_calendar_config).
+-- Both columns are optional and nullable (no default). Rollback: alter table public.story_items drop column role; alter table public.clients drop column publishing_calendar_config;
 -- Design: docs/specs/2026-10-14-publishing-calendar-design.md
 
 -- 1. The client's own quotas, e.g. {"quota":{"post_per_day":2,"story_per_day":3,"reel_per_week":3}}
