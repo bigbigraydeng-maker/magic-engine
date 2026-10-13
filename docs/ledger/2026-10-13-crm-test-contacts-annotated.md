@@ -6,6 +6,8 @@ owner: agent
 decided_on: 2026-10-13
 source: session:f53ba28d
 verify_by: 2026-10-20
+done_on: 2026-10-13
+done_ref: pr:2520
 verify_how: 打开 CTS 客人页搜两个测试号码尾号，确认两位客人身上有「测试联系人」的重要标记；回滚方法：把这两位的 important_note 清空（只在内容等于这句话时清）；标注本身不会把他们移出热名单，若热名单仍显示他们再问 PM 要不要推迟
 ---
 PM 经统筹转述同意（2026-10-13）：只给两位测试联系人写 contacts.important_note = 「测试联系人（电话接入测试，非真实客人，请勿跟进）」，不动别的联系人、不删。

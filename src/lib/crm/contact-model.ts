@@ -106,7 +106,7 @@ export function buildContactModel(
     // 「别再联系」的真相源是不可变的触点：contacts 列写失败过 / 历史导入只写了 outcome。
     // 两种写法都认；判据只有一份见 lib/crm/dnc（同时认「人明确纠正过这条判错了」）。
     doNotContact: isDoNotContact(
-      row.do_not_contact,
+      row.do_not_contact === true,
       own.map((t) => ({
         outcome: (t.metadata?.outcome as string) ?? null,
         flagged: t.metadata?.do_not_contact === true,
