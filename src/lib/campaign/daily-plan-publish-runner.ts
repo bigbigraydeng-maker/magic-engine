@@ -344,6 +344,14 @@ export interface RunDailyPlanPublishInput {
   command: CampaignDailyPublishCommand
   /** The human who authorised this publish; written to the receipt. Caller-supplied, never read from a session here. */
   approvedByUserId: string
+  /** The instant schedule decisions are made against (default: now). */
+  now?: Date
+  /** false = a slot that already passed is a MISSED_WINDOW failure instead of an immediate publish. Default true (manual path). */
+  allowImmediate?: boolean
+  /** Request timeout for the Facebook call (default none, as the manual route). */
+  requestTimeoutMs?: number
+  /** Last-moment check before the Facebook call; false = do not send that date. */
+  beforeSend?: (date: string) => Promise<boolean>
 }
 
 export interface RunDailyPlanPublishResult {
@@ -430,6 +438,10 @@ export async function runDailyPlanPublish(input: RunDailyPlanPublishInput): Prom
         pageToken: page.token,
         row,
         command,
+        now: input.now,
+        allowImmediate: input.allowImmediate,
+        requestTimeoutMs: input.requestTimeoutMs,
+        beforeSend: input.beforeSend,
       })
 
   const merged = [...alreadyPublished, ...outcome.published]

@@ -41,6 +41,7 @@ import {
   liftRecalledTombstones,
   revokeAuthorization,
 } from '@/lib/campaign/daily-plan-auto-publish-store'
+import { clearNonStickyAttempts } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
 import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -316,11 +317,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       return NextResponse.json({ success: false, error: 'AUTHORIZATION_REVOKED_DURING_ARMING' }, { status: 409 })
     }
 
-    // Lift the recall blocks last: if anything above failed, they all stay in place.
+    // Housekeeping once the grant is armed: start the covered dates clean, then lift recall blocks last
+    // (if anything above failed, the blocks all stay in place).
     try {
+      await clearNonStickyAttempts({ planId: command.plan_id, clientId, dates: command.dates })
       await liftRecalledTombstones({ planId: command.plan_id, clientId, dates: liftDates, notNewerThan: recallReadAt })
     } catch (error: unknown) {
-      console.error('[auto-publish authorize] lifting recall blocks failed', errorMessage(error))
+      console.error('[auto-publish authorize] clearing old attempts / lifting recall blocks failed', errorMessage(error))
       return failure('RECALL_BLOCKS_NOT_LIFTED', await rollBack('recall blocks could not be lifted'))
     }
 

@@ -13,6 +13,7 @@ vi.mock('@/lib/campaign/daily-plan-auto-publish-store', () => ({
   liftRecalledTombstones: vi.fn(),
   revokeAuthorization: vi.fn(),
 }))
+vi.mock('@/lib/campaign/daily-plan-auto-publish-worker-store', () => ({ clearNonStickyAttempts: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn() }))
 
@@ -28,6 +29,7 @@ import {
   liftRecalledTombstones,
   revokeAuthorization,
 } from '@/lib/campaign/daily-plan-auto-publish-store'
+import { clearNonStickyAttempts } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
 import type { AutoPublishAuthorization } from '@/lib/campaign/daily-plan-auto-publish'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -54,6 +56,7 @@ const mockedRecalled = vi.mocked(findRecalledDates)
 const mockedReceiptRecalled = vi.mocked(findReceiptRecalledDates)
 const mockedActive = vi.mocked(getActiveAuthorization)
 const mockedLift = vi.mocked(liftRecalledTombstones)
+const mockedClear = vi.mocked(clearNonStickyAttempts)
 const mockedSend = vi.mocked(sendInngestEvent)
 const mockedFrom = vi.mocked(supabaseAdmin.from)
 
@@ -147,6 +150,7 @@ beforeEach(() => {
   mockedActivate.mockResolvedValue(grant({ activated_at: '2024-01-01T00:00:05.000Z' }))
   mockedRevoke.mockResolvedValue(null)
   mockedLift.mockResolvedValue(undefined)
+  mockedClear.mockResolvedValue(undefined)
   mockedSend.mockResolvedValue({ event_ids: ['evt-1'] })
 })
 
@@ -274,6 +278,8 @@ describe('POST auto-publish authorize — preview and confirm', () => {
     expect(res.status).toBe(200)
     expect(json).toMatchObject({ mode: 'AUTHORIZED', provider_impact: 'NONE', lifted_recalled: [DATES[1]] })
     expect(order).toEqual(['insert', 'send', 'activate', 'lift'])
+    // a new authorisation starts the covered dates clean (old 'not yet / not this time' rows removed)
+    expect(mockedClear).toHaveBeenCalledWith({ planId: PLAN_ID, clientId: CLIENT_ID, dates: DATES })
     expect(mockedInsert.mock.calls[0][0]).toMatchObject({ authorized_by_email: 'admin@magicengine.cloud', authorized_by_user_id: USER_ID, lifted_dates: [DATES[1]] })
     expect(mockedSend.mock.calls[0][0].name).toBe(DAILY_PLAN_AUTO_PUBLISH_AUTHORIZED_EVENT)
     expect(mockedLift).toHaveBeenCalledWith({ planId: PLAN_ID, clientId: CLIENT_ID, dates: [DATES[1]], notNewerThan: expect.any(Date) })

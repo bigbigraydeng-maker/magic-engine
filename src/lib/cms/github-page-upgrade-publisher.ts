@@ -8,6 +8,7 @@ import {
 } from './static-html-page-upgrade'
 import { CMS_ACTION_TYPE } from './vocabulary'
 import { supabaseAdmin } from '../supabase'
+import { assertGuardMatchesClient, identityFromUrl, mergeIdentities, type PageWriteGuard } from '@/lib/seo/protected-pages'
 
 export interface GithubPageUpgradeInput {
   clientId: string
@@ -18,6 +19,8 @@ export interface GithubPageUpgradeInput {
   enhancedMetaDescription: string
   enhancedHtmlBody: string
   executionItemId?: string
+  /** Protected-page gate. Identity is computed in here from the real write target. */
+  guard: PageWriteGuard
 }
 
 export type GithubPageUpgradeResult =
@@ -46,6 +49,7 @@ export type GithubPageUpgradeResult =
 export async function publishPageUpgradeToGithub(
   input: GithubPageUpgradeInput,
 ): Promise<GithubPageUpgradeResult> {
+  assertGuardMatchesClient(input.guard, input.clientId)
   let conn: Awaited<ReturnType<typeof getConnection>>
   try {
     conn = await getConnection(input.clientId)
@@ -61,6 +65,14 @@ export async function publishPageUpgradeToGithub(
   }
 
   const pathResult = resolveStaticHtmlPath(input.pageUrl, conn.contentPaths ?? [])
+  // Gate first, THEN report NO_TARGET: a refusal must not reveal whether the page has a source file.
+  await input.guard.assert(
+    mergeIdentities(
+      identityFromUrl(input.pageUrl),
+      ...(pathResult.ok ? [identityFromUrl(pathResult.filePath, 'file')] : []),
+    ),
+    { targetType: 'static_html_page' },
+  )
   if (!pathResult.ok) {
     return { ok: false, code: 'NO_TARGET', reason: pathResult.reason }
   }

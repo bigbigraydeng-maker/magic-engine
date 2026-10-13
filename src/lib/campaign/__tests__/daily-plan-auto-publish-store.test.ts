@@ -40,6 +40,7 @@ interface ChainStub {
   eq: ReturnType<typeof vi.fn>
   in: ReturnType<typeof vi.fn>
   lte: ReturnType<typeof vi.fn>
+  or: ReturnType<typeof vi.fn>
   delete: ReturnType<typeof vi.fn>
   is: ReturnType<typeof vi.fn>
   single: ReturnType<typeof vi.fn>
@@ -58,6 +59,7 @@ function makeChain(result: StubResult): ChainStub {
   stub.eq = vi.fn(self)
   stub.in = vi.fn(self)
   stub.lte = vi.fn(self)
+  stub.or = vi.fn(self)
   stub.delete = vi.fn(self)
   stub.is = vi.fn(self)
   stub.single = vi.fn(async () => result)
@@ -235,8 +237,7 @@ describe('findRecalledDates / liftRecalledTombstones', () => {
     await liftRecalledTombstones({ planId: PLAN, clientId: CLIENT, dates: ['2024-02-02'], notNewerThan: new Date() })
 
     expect(chain.delete).toHaveBeenCalled()
-    expect(chain.eq).toHaveBeenCalledWith('status', 'blocked')
-    expect(chain.eq).toHaveBeenCalledWith('reason_code', 'RECALLED')
+    expect(chain.or).toHaveBeenCalledWith('and(status.eq.blocked,reason_code.eq.RECALLED),status.eq.published')
     expect(chain.in).toHaveBeenCalledWith('date', ['2024-02-02'])
   })
 
