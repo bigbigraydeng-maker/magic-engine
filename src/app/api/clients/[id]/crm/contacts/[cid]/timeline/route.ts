@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
+import { normalisePhone } from '@/lib/crm/identity'
 
 interface RouteParams {
   params: { id: string; cid: string }
@@ -33,6 +34,9 @@ function cleanStr(v: unknown): string | null {
   const s = v.trim()
   return s ? s : null
 }
+
+/** 只回看这么久以内拨出的电话（超过的要么早已整理好，要么早已失败）。 */
+const PENDING_CALL_WINDOW_MS = 30 * 60_000
 
 interface CallAnalysisView {
   id: string
@@ -106,6 +110,8 @@ type TimelineEntry =
       competitor: string | null
       /** 这通电话的 AI 分析（电话接入的转写 + 提炼）。只读展示 + 人工复核；没有就不带。 */
       callAnalysis?: CallAnalysisView
+      /** 刚拨出、还没整理成正式记录的电话（通话中 / 已挂断等整理）。页面据此立刻显示「打过了」并自动刷新。 */
+      pendingCall?: 'ringing' | 'ended'
     }
   | {
       kind: 'message'
@@ -343,6 +349,52 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // ⚠️ 上面取 conversation_messages 时的 `ascending: false` + `limit(3000)`
   // **不能跟着改**：那里倒序是为了「超量时留下最近的 3000 条」。改成正序会变成
   // 留下最老的 3000 条，话痨客户的近期对话反而全丢。排序只在这一行做。
+  // 刚拨出、还没写进 CRM 的外呼：通话挂断后系统要再等约 2 分钟才整理成正式记录，
+  // 这段时间页面上必须看得出「这个电话打过了」，员工才敢直接关抽屉去下一位。
+  const dialed = normalisePhone(contact.primary_phone)
+  if (dialed) {
+    const since = new Date(Date.now() - PENDING_CALL_WINDOW_MS).toISOString()
+    const { data: initiated } = await supabaseAdmin
+      .from('telephony_raw_events')
+      .select('provider_call_id, received_at')
+      .eq('client_id', clientId)
+      .eq('raw_type', 'twilio_status_initiated')
+      .eq('normalised->>direction', 'outbound')
+      .eq('normalised->>counterpartyNumber', dialed)
+      .gte('received_at', since)
+    const started = (initiated ?? []) as { provider_call_id: string; received_at: string }[]
+    if (started.length > 0) {
+      const ids = started.map((r) => r.provider_call_id)
+      const [{ data: callRows }, { data: endedRows }] = await Promise.all([
+        supabaseAdmin.from('telephony_calls').select('provider_call_id, crm_status').eq('client_id', clientId).in('provider_call_id', ids),
+        supabaseAdmin.from('telephony_raw_events').select('provider_call_id').eq('client_id', clientId).eq('raw_type', 'twilio_status_completed').in('provider_call_id', ids),
+      ])
+      // 已经整理过（写进 CRM / 跳过 / 要人看 / 失败）的不再显示成「整理中」：那时正式记录（或原因）已经在别处。
+      const settled = new Set(((callRows ?? []) as { provider_call_id: string; crm_status: string }[]).filter((c) => c.crm_status !== 'pending').map((c) => c.provider_call_id))
+      const ended = new Set(((endedRows ?? []) as { provider_call_id: string }[]).map((r) => r.provider_call_id))
+      for (const r of started) {
+        if (settled.has(r.provider_call_id)) continue
+        const done = ended.has(r.provider_call_id)
+        entries.push({
+          kind: 'touch',
+          at: r.received_at,
+          channel: 'phone',
+          direction: 'outbound',
+          summary: done ? '刚拨出的电话已结束，正在整理成记录（约 2 分钟，不用等，可以直接去下一位）' : '正在通话中…（挂断后这里会自动整理成记录）',
+          raw: null,
+          dncFlag: false,
+          rawKind: 'verbatim',
+          tour: null,
+          outcome: null,
+          travelWindow: null,
+          callbackAt: null,
+          competitor: null,
+          pendingCall: done ? 'ended' : 'ringing',
+        })
+      }
+    }
+  }
+
   entries.sort((a, b) => ts(a.at) - ts(b.at))
 
   return NextResponse.json({
