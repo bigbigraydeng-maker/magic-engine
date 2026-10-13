@@ -1,6 +1,6 @@
 ---
 id: 2026-10-11-cts-tour-catalog-go-live-steps-1-2
-title: 团目录上线第 1-5 步已做：正式库建表、ME 新代码、官网读取口（chinatravel#229）、首次读入 33 个团、与官网比对 0 处不同；品牌设置、使用名单、登录服务核对还没做
+title: 团目录上线第 1、2 步已做：正式库建了 5 批表和函数，ME 新代码已合并上线；官网读取口、首次读入、使用名单还没做
 status: done
 owner: agent
 decided_on: 2026-10-11
