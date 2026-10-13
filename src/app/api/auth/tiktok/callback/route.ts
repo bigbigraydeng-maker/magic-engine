@@ -6,16 +6,22 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { exchangeCode, fetchDisplayName, TIKTOK_SCOPES, verifyState } from '@/lib/tiktok-oauth/client'
+import { exchangeCode, fetchDisplayName, TIKTOK_SCOPES, TIKTOK_STATE_COOKIE, verifyState } from '@/lib/tiktok-oauth/client'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
 
-type Outcome = 'connected' | 'denied' | 'bad_state' | 'exchange_failed'
+type Outcome = 'connected' | 'denied' | 'bad_state' | 'exchange_failed' | 'missing_scopes'
 
 function back(clientId: string | null, outcome: Outcome): NextResponse {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
   const path = clientId ? `/dashboard/clients/${clientId}/settings` : '/dashboard'
-  return NextResponse.redirect(`${appUrl}${path}?tiktok=${outcome}`)
+  const response = NextResponse.redirect(`${appUrl}${path}?tab=connect&tiktok=${outcome}`)
+  response.cookies.set(TIKTOK_STATE_COOKIE, '', {
+    httpOnly: true, secure: new URL(appUrl).protocol === 'https:',
+    sameSite: 'lax', path: '/api/auth/tiktok', maxAge: 0,
+  })
+  return response
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -25,15 +31,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const code = params.get('code')
   const state = params.get('state')
-  if (!code || !state) return back(null, 'bad_state')
+  if (!code || !state || req.cookies.get(TIKTOK_STATE_COOKIE)?.value !== state) {
+    return back(null, 'bad_state')
+  }
 
   const verified = verifyState(state)
   if (!verified) return back(null, 'bad_state')
   const { clientId } = verified
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok) return back(null, 'bad_state')
 
   const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'}/api/auth/tiktok/callback`
   const tokens = await exchangeCode(code, redirectUri)
   if (!tokens) return back(clientId, 'exchange_failed')
+  if (!tokens.openId || !TIKTOK_SCOPES.every(scope => tokens.scopes.includes(scope))) {
+    return back(clientId, 'missing_scopes')
+  }
 
   const displayName = await fetchDisplayName(tokens.accessToken)
 
@@ -47,7 +60,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     accountId: tokens.openId,
     displayName: displayName || tokens.openId,
     // 存实际拿到的授权范围,不是我们请求的那份 —— 用户可能只勾了一部分
-    scopes: tokens.scopes.length > 0 ? tokens.scopes : [...TIKTOK_SCOPES],
+    scopes: tokens.scopes,
   })
 
   return back(clientId, 'connected')

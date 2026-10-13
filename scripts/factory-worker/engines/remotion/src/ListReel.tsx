@@ -11,7 +11,7 @@ const Hook: React.FC<{ props: ListReelProps }> = ({ props }) => {
   const { fps } = useVideoConfig()
   return (
     <AbsoluteFill>
-      <Footage src={props.hook.clip} zoomTo={1.1} />
+      <Footage src={props.hook.clip} zoomTo={1.1} scrim={props.footageScrim} />
       <div style={{ position: 'absolute', left: 90, top: 640, width: 870, fontFamily, color: '#fff', textShadow: '0 6px 30px rgba(0,0,0,0.7)' }}>
         {props.hook.lines.map((line, i) => {
           const p = spring({ frame: frame - i * 9, fps, config: { damping: 9, stiffness: 170, mass: 0.6 } })
@@ -37,7 +37,7 @@ const Item: React.FC<{ props: ListReelProps; index: number; dur: number }> = ({ 
   const prog = (index + frame / dur) / props.items.length
   return (
     <AbsoluteFill>
-      <AbsoluteFill style={{ transform: `scale(${punch})`, filter: props.items[index].blurBackdrop ? 'blur(14px)' : 'none' }}><Footage src={props.items[index].clip} zoomTo={1.08} /></AbsoluteFill>
+      <AbsoluteFill style={{ transform: `scale(${punch})`, filter: props.items[index].blurBackdrop ? 'blur(14px)' : 'none' }}><Footage src={props.items[index].clip} zoomTo={1.08} scrim={props.footageScrim} /></AbsoluteFill>
       {props.itemOverlayOpacity > 0 ? <AbsoluteFill style={{ background: `rgba(0,0,0,${props.itemOverlayOpacity})` }} /> : null}
       <div style={{ position: 'absolute', left: 90, top: 640, width: 870, fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.85)' }}>
         <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: 4, opacity: 0.95 }}>{props.itemLabel} {index + 1}/{props.items.length}</div>
@@ -66,7 +66,7 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <Sequence key={i} from={timing.itemFrom[i]} durationInFrames={timing.itemDur[i]}><Item props={props} index={i} dur={timing.itemDur[i]} />{flash ? <CutFlash /> : null}</Sequence>
       ))}
       <Sequence from={timing.revealFrom} durationInFrames={timing.totalFrames - timing.revealFrom}>
-        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} footnoteSize={props.price.footnoteSize} top={700} />
+        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} footnoteSize={props.price.footnoteSize} top={700} scrim={props.footageScrim} />
         <div style={{ position: 'absolute', left: 90, top: 596, fontFamily, color: '#fff', fontSize: 60, fontWeight: 900, textShadow: '0 4px 24px rgba(0,0,0,0.6)' }}><Reveal delay={0}><div>{props.revealTitle}</div></Reveal></div>
         {flash ? <CutFlash /> : null}
       </Sequence>

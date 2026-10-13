@@ -48,3 +48,6 @@ export function publishedBadge(p: PublishedView | null): { label: string; color:
 
 /** statuses whose reject_reason is a real failure/rejection reason (not stale text from an earlier attempt). queued: worker/[id]/fail 把可重试失败退回 queued 并写原因 */
 export const REASON_STATUSES: readonly WorkOrderStatus[] = ['queued', 'publish_failed', 'failed', 'dead_letter', 'review_rejected']
+
+// 发布后阶段(已发布 / 监测中 / 已关闭):审片区的「已发布」历史卡片统一用这组状态
+export const POST_PUBLISH: readonly WorkOrderStatus[] = ['published', 'measuring', 'closed']

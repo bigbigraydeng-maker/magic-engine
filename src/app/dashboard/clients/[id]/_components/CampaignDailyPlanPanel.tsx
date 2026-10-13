@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 
 import { CampaignDailyPublishPanel, type PublishReceipt } from './CampaignDailyPublishPanel'
+import { CampaignDailyAutoPublishPanel } from './CampaignDailyAutoPublishPanel'
 import { POST_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemKey, type ContentCheckItemResult } from '@/lib/social/content-review'
 
 interface Props {
@@ -729,6 +730,17 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           queueReceiptReady={Boolean(publishQueueReceipt)}
           publishReceipt={data.publish_receipt ?? null}
           onPublished={load}
+        />
+
+        <CampaignDailyAutoPublishPanel
+          clientId={clientId}
+          campaignId={campaignId}
+          planId={data.plan_id}
+          planRevision={data.plan_revision}
+          reviewRevision={data.review_revision}
+          facebookPageId={data.facebook_page_id ?? null}
+          reviewedDates={publishQueueReceipt?.posts.map(post => post.date) ?? []}
+          queueReceiptReady={Boolean(publishQueueReceipt)}
         />
 
         {/* Publishing + Ad preview */}

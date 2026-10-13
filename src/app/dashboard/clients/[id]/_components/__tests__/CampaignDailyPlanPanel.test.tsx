@@ -14,6 +14,16 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { CampaignDailyPlanPanel } from '../CampaignDailyPlanPanel'
 
+// The auto-publish section reads its own status endpoint on mount. These tests script the panel's fetch
+// sequence call by call, so that section is stubbed here and exercised in its own test file.
+const autoPublishProps = vi.fn()
+vi.mock('../CampaignDailyAutoPublishPanel', () => ({
+  CampaignDailyAutoPublishPanel: (props: Record<string, unknown>) => {
+    autoPublishProps(props)
+    return null
+  },
+}))
+
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const CAMPAIGN_ID = 'campaign-uuid'
 
@@ -458,6 +468,14 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     await screen.findByText('✓ 发布准备回执已生成')
     expect(screen.getByText('Inngest 已记录')).toBeInTheDocument()
+    // the auto-publish section is handed this exact plan's identity and the reviewed dates from the receipt
+    const lastProps = autoPublishProps.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(lastProps).toMatchObject({
+      clientId: CLIENT_ID,
+      campaignId: CAMPAIGN_ID,
+      reviewedDates: ['2026-08-24'],
+      queueReceiptReady: true,
+    })
     const postCall = vi.mocked(global.fetch).mock.calls[1]
     expect(postCall[0]).toBe(`/api/clients/${CLIENT_ID}/campaign-daily-plan/publish-queue`)
     expect(JSON.parse(postCall[1]!.body as string)).toMatchObject({
