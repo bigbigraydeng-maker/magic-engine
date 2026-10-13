@@ -14,7 +14,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { ContactTimeline, stageSourceOf, type TimelineEntry } from '../ContactTimeline'
 
 const touch = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
@@ -488,5 +488,54 @@ describe('到哪一步了是谁判的（stageSource）', () => {
   it('stageSourceOf 直接判：订单系统 / 空值', () => {
     expect(stageSourceOf('order-system')).toBe('order_system')
     expect(stageSourceOf('')).toBeNull()
+  })
+})
+
+describe('刚拨出、整理中的电话 —— 页面要立刻看得出「打过了」', () => {
+  it('通话中 / 已挂断整理中各有自己的标签和说明', async () => {
+    mockTimeline([
+      touch({ pendingCall: 'ringing', summary: '正在通话中…（挂断后这里会自动整理成记录）' }),
+      touch({ at: '2026-08-10T00:05:00Z', pendingCall: 'ended', summary: '刚拨出的电话已结束，正在整理成记录（约 2 分钟，不用等，可以直接去下一位）' }),
+    ])
+    draw()
+    await waitFor(() => expect(screen.getAllByTestId('pending-call')).toHaveLength(2))
+    expect(screen.getByText(/通话中$/)).toBeTruthy()
+    expect(screen.getByText(/已挂断，整理中/)).toBeTruthy()
+    expect(screen.getByText(/可以直接去下一位/)).toBeTruthy()
+  })
+
+  it('点过拨打后自动刷新：整理中的电话变成正式记录，列表不闪成「加载中」', async () => {
+    vi.useFakeTimers()
+    try {
+      const first = [touch({ pendingCall: 'ended', summary: '刚拨出的电话已结束，正在整理成记录（约 2 分钟，不用等，可以直接去下一位）' })]
+      const second = [touch({ summary: '外呼，通话 43 秒' })]
+      let n = 0
+      global.fetch = vi.fn().mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({ contact: { name: 'Sue', phone: null, email: null, stageLabel: null }, timeline: n++ === 0 ? first : second }),
+      })) as unknown as typeof fetch
+      render(<ContactTimeline clientId="cts" contactId="c1" dialedAt={Date.now()} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      expect(screen.getAllByTestId('pending-call')).toHaveLength(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(8_100) })
+      expect(screen.queryByText('加载往来记录…')).toBeNull()
+      expect(screen.queryAllByTestId('pending-call')).toHaveLength(0)
+      expect(screen.getByText('外呼，通话 43 秒')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('没点过拨打、也没有整理中的电话：不自动刷新', async () => {
+    vi.useFakeTimers()
+    try {
+      mockTimeline([touch({ summary: '打过去聊了两句' })])
+      render(<ContactTimeline clientId="cts" contactId="c1" />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect((global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
