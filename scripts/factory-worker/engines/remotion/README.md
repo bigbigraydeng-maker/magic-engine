@@ -95,7 +95,7 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 
 | 字段 | 规则 |
 |---|---|
-| `bgColor` / `textColor` / `brandColor` | `#RRGGBB`；文字色对背景对比度 ≥ 4.5，品牌色（数值与条形，按半透明卡片合成后的底色算）≥ 3，不够直接拒 |
+| `bgColor` / `textColor` / `brandColor` | `#RRGGBB`；文字色按各自合成后的实际底色（背景、卡片、副标签 0.85 透明、免责 0.8 透明）对比度都 ≥ 4.5，品牌色（数值与条形，按半透明卡片合成后的底色算）≥ 3，不够直接拒 |
 | `logoFile` / `musicFile` | 相对文件名或 `null`（不要就写 `null`）；`musicStartSec` 可选 |
 | `hook.lines` | 1–2 行，每行 ≤ 12 字符；最后一行用品牌色；开场先在画面中央放大停留 `hookSec` 秒，再缩到顶部 |
 | `hookSec` / `rowSec` / `holdSec` | 开场停留 1–4 秒 / 每行出现间隔 0.6–2.5 秒 / 结尾停留 1–6 秒；总时长 = 三者相加，没有节拍 |
@@ -103,7 +103,7 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 | `barMode` | `none`（所有 `bar` 必须 `null`）/ `bars`（等起点条形，行间比长度）/ `steps`（条形起点逐行右移成阶梯）；非 `none` 时每行都要写 `bar` |
 | `disclaimer` | 底部固定一行小字，≤ 48 字符，整片常驻 |
 
-`loadTemplate('datacard')` 也返回 `recipeGaps`：纯数字卡没有镜头，「真人出镜/自拍感」「真实感」「航拍/空镜」恒为未满足，`render.mjs` 每次都打印。这只是配方缺口回执；还没有对照 `viral_reference_library` 做逐列对账表，在对账完成前这个模板不接出片机、不对外发布。
+`loadTemplate('datacard')` 也返回 `recipeGaps`：纯数字卡没有镜头，「真人出镜/自拍感」「真实感」「航拍/空镜」恒为未满足，`render.mjs` 每次都打印。这只是配方缺口回执；还没有对照 `viral_reference_library` 做逐列对账表，在对账完成前这个模板不接出片机、不对外发布，`render.mjs --template datacard` 也会直接拒绝（`DATACARD_RECIPE_NOT_RECONCILED`）。
 
 **出片机还没接它**：`remotion-branch.mjs` 收到 `datacard` 工单会直接以 `DATACARD_NOT_WIRED:` 拒收（字幕与服务端红线复扫还没做）；出片机准入客户名单没动。
 

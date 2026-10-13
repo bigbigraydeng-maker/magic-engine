@@ -80,9 +80,18 @@ export const DataCardPropsSchema = z
     if (val.barMode !== 'none' && !hasBar.every(Boolean)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['rows'], message: 'barMode 不是 none 时每行都必须写 bar（0 到 1）' });
     }
-    const textRatio = contrastRatio(val.textColor, val.bgColor);
-    if (textRatio < MIN_TEXT_CONTRAST) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['textColor'], message: `文字色与背景色对比度只有 ${textRatio.toFixed(1)}，至少需要 ${MIN_TEXT_CONTRAST}` });
+    // judge each text role on the colour it is actually painted over, after its opacity
+    const card = cardColor(val.bgColor, val.textColor);
+    const roles: Array<[string, number]> = [
+      ['背景上的文字', contrastRatio(val.textColor, val.bgColor)],
+      ['卡片上的主标签', contrastRatio(val.textColor, card)],
+      ['卡片上的副标签', contrastRatio(blend(val.textColor, card, SUBLABEL_OPACITY), card)],
+      ['免责文案', contrastRatio(blend(val.textColor, val.bgColor, DISCLAIMER_OPACITY), val.bgColor)],
+    ];
+    for (const [role, ratio] of roles) {
+      if (ratio < MIN_TEXT_CONTRAST) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['textColor'], message: `${role}合成后对比度只有 ${ratio.toFixed(1)}，至少需要 ${MIN_TEXT_CONTRAST}` });
+      }
     }
     // values and bars are drawn on the translucent card (textColor at 8% alpha), not on the bare background
     const accentRatio = contrastRatio(val.brandColor, cardColor(val.bgColor, val.textColor));
@@ -93,6 +102,21 @@ export const DataCardPropsSchema = z
 
 /** Inferred props type for the data-card template. */
 export type DataCardProps = z.infer<typeof DataCardPropsSchema>;
+
+/** Opacity the renderer applies to row sublabels. */
+export const SUBLABEL_OPACITY = 0.85;
+/** Opacity the renderer applies to the disclaimer line. */
+export const DISCLAIMER_OPACITY = 0.8;
+
+/** Colour of `fg` painted at `alpha` over `bg`, as #RRGGBB. */
+export function blend(fg: string, bg: string, alpha: number): string {
+  const mix = (o: number) => {
+    const b = parseInt(bg.slice(o, o + 2), 16);
+    const f = parseInt(fg.slice(o, o + 2), 16);
+    return Math.round(f * alpha + b * (1 - alpha)).toString(16).padStart(2, '0');
+  };
+  return `#${mix(1)}${mix(3)}${mix(5)}`;
+}
 
 /** Card fill (textColor at alpha 0x14 over bgColor) as #RRGGBB, matching how the renderer paints it. */
 export function cardColor(bg: string, fg: string): string {

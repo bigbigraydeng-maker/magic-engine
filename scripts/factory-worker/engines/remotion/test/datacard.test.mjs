@@ -152,3 +152,7 @@ test('accent contrast is judged on the translucent card colour', async () => {
   assert.equal(cardColor('#000000', '#FFFFFF'), '#141414')
   assert.throws(() => parseDataCardProps({ ...base, bgColor: '#000000', textColor: '#FFFFFF', brandColor: '#5A5A5A' }), /卡片底色/)
 })
+
+test('text contrast is judged after card fill and opacity', () => {
+  assert.throws(() => parseDataCardProps({ ...base(), bgColor: '#FFFFFF', textColor: '#767676' }), /合成后对比度/)
+})
