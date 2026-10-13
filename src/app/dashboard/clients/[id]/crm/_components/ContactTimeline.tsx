@@ -15,7 +15,13 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { describeStageActor, stageReasonForDisplay } from '@/lib/crm/actors'
+import { CallAnalysisCard, type CallAnalysisData } from './CallAnalysisCard'
+import {
+  describeStageActor,
+  isAutomatedActor,
+  stageReasonForDisplay,
+  STAGE_INFER_ACTOR,
+} from '@/lib/crm/actors'
 
 /**
  * 「谁改的」的显示名。系统自动打标写的是一个英文标记（审计要机器可读），
@@ -55,6 +61,10 @@ export interface TimelineEntry {
   travelWindow?: string | null
   callbackAt?: string | null
   competitor?: string | null
+  /** 这通电话的 AI 分析（只读展示 + 人工复核）。 */
+  callAnalysis?: CallAnalysisData
+  /** 刚拨出、还没整理成正式记录的电话。 */
+  pendingCall?: 'ringing' | 'ended'
   // stage
   fromLabel?: string | null
   toLabel?: string | null
@@ -135,6 +145,7 @@ const VERDICT_ROW: Record<string, { icon: string; text: string; tone: 'stop' | '
 const OUTCOME_CHIP: Record<string, string> = {
   bad_number: '这个号打不通',
   no_answer: '打了没人接',
+  missed_inbound: '他打来我们没接到',
   not_interested: '他说不买了',
   not_interested_now: '这次先不去',
 }
@@ -159,6 +170,8 @@ const LONG_TIMELINE = 6
  * 这些字段**本来就在这条线里**，只是散在十几条记录的小标签里。销售开口前
  * 要的就是这三样，不该为了看它们把整条历史翻一遍。
  */
+export type StageSource = 'human' | 'ai_conversation' | 'order_system'
+
 export interface TimelineSummary {
   /** 最后一句有内容的话（客人说的或我们记的）。 */
   lastText: string | null
@@ -167,15 +180,39 @@ export interface TimelineSummary {
   /** 最新一次提到的团意向 / 出行时间 —— 越新的越算数。 */
   tour: string | null
   travelWindow: string | null
+  /**
+   * 「到哪一步了」是谁判的 —— 从最新一条阶段变更的 changedBy 推断。
+   * null = 这个人没有任何阶段变更记录（例如导入时直接带了阶段）→ 抽屉不显示来源，不许瞎标「人工标的」。
+   * 'order_system' 是给将来订单系统留的口子，今天没有任何代码会产生它。
+   */
+  stageSource: StageSource | null
+}
+
+/** changedBy → 来源。只认得出的才说；认不出的机器身份返回 null（宁可不显示，不许说错）。 */
+export function stageSourceOf(changedBy: string | null | undefined): StageSource | null {
+  if (!changedBy || !changedBy.trim()) return null
+  const a = changedBy.trim().toLowerCase()
+  if (a === STAGE_INFER_ACTOR) return 'ai_conversation'
+  if (a === 'order-system' || a.startsWith('system:order')) return 'order_system'
+  if (isAutomatedActor(a)) return null
+  return a.includes('@') ? 'human' : null
 }
 
 /** 从整条线里提炼摘要。线是从旧到新的，所以后面的覆盖前面的。 */
 function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
   if (timeline.length === 0) return null
-  const s: TimelineSummary = { lastText: null, lastWho: null, lastAt: null, tour: null, travelWindow: null }
+  const s: TimelineSummary = {
+    lastText: null,
+    lastWho: null,
+    lastAt: null,
+    tour: null,
+    travelWindow: null,
+    stageSource: null,
+  }
   for (const e of timeline) {
     if (e.tour) s.tour = e.tour
     if (e.travelWindow) s.travelWindow = e.travelWindow
+    if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
     const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
     if (text && text.trim()) {
       s.lastText = text.trim()
@@ -183,7 +220,7 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
       s.lastAt = e.at
     }
   }
-  return s.lastText || s.tour || s.travelWindow ? s : null
+  return s.lastText || s.tour || s.travelWindow || s.stageSource ? s : null
 }
 
 /**
@@ -319,7 +356,7 @@ function Chips({ items }: { items: string[] }) {
 }
 
 /** 触点：电话 / 表单 / 以后的任何新渠道。判决那一档在这里加边加话。 */
-function TouchRow({ e }: { e: TimelineEntry }) {
+function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   const icon = CHANNEL_ICON[e.channel ?? ''] ?? '•'
   const name = CHANNEL_NAME[e.channel ?? ''] ?? e.channel ?? '接触'
   const chips = [
@@ -332,6 +369,17 @@ function TouchRow({ e }: { e: TimelineEntry }) {
 
   const verdict = verdictOf(e)
   const stop = verdict?.tone === 'stop'
+
+  if (e.pendingCall) {
+    return (
+      <div data-testid="pending-call" className="rounded-xl border border-dashed border-me-ochre/60 bg-me-ochre/[0.06] px-3 py-2">
+        <p className="text-[10px] font-bold text-me-ochre">
+          📞 电话 · 我们打出去的 · {when(e.at)} · {e.pendingCall === 'ringing' ? '通话中' : '已挂断，整理中'}
+        </p>
+        <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{e.summary}</p>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -350,14 +398,15 @@ function TouchRow({ e }: { e: TimelineEntry }) {
       )}
       <Verdict e={e} />
       <Chips items={chips} />
+      {e.callAnalysis && <CallAnalysisCard clientId={clientId} analysis={e.callAnalysis} />}
     </div>
   )
 }
 
-function Row({ e }: { e: TimelineEntry }) {
+function Row({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   if (e.kind === 'message') return <MessageRow e={e} />
   if (e.kind === 'stage') return <StageRow e={e} />
-  return <TouchRow e={e} />
+  return <TouchRow e={e} clientId={clientId} />
 }
 
 /**
@@ -382,18 +431,36 @@ function useTimeline(
   clientId: string,
   contactId: string,
   onSummary?: (s: TimelineSummary | null) => void,
+  dialedAt?: number | null,
 ) {
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
   const alive = useRef(true)
   const [attempt, setAttempt] = useState(0)
+  // 自动刷新那几次不要把列表换成「加载中…」，不然刚拨出的电话一闪一闪。
+  const silent = useRef(false)
+  const dataRef = useRef<Payload | null>(null)
+  const hasPending = !!data?.timeline.some((e) => e.pendingCall)
+
+  // 点了拨打之后：先等回调到达（头 90 秒一直刷），之后只要还有「整理中」的电话就继续刷（挂断约 2 分钟后变成正式记录）。
+  useEffect(() => {
+    if (!hasPending && !(dialedAt && Date.now() - dialedAt < 90_000)) return
+    const t = setInterval(() => {
+      const fresh = !!dialedAt && Date.now() - dialedAt < 90_000
+      if (!hasPending && !fresh) return
+      silent.current = true
+      setAttempt((n) => n + 1)
+    }, 8_000)
+    return () => clearInterval(t)
+  }, [hasPending, dialedAt])
 
   useEffect(() => {
     alive.current = true
     const ctrl = new AbortController()
     const run = async () => {
-      setLoading(true)
+      if (!silent.current) setLoading(true)
+      silent.current = false
       setErr(null)
       try {
         const res = await fetch(
@@ -403,12 +470,15 @@ function useTimeline(
         const json = (await res.json()) as Payload
         if (!res.ok) throw new Error(json.error ?? '加载失败')
         if (!alive.current) return
+        dataRef.current = json
         setData(json)
         onSummary?.(summarise(json.timeline ?? []))
       } catch (e) {
         // 被自己 abort 掉的不是失败，什么都别改 —— 改了就是替一个已经作废的
         // 请求说话，而它说的正好是旧的。
         if (!alive.current || (e instanceof Error && e.name === 'AbortError')) return
+        // 自动刷新那次失败不打断已经显示的内容，下一轮再试。
+        if (dataRef.current) return
         setErr(e instanceof Error ? e.message : '加载失败')
         // 拉失败时把摘要清掉 —— 顶上那张卡留着上一个人的话，比空着危险得多。
         onSummary?.(null)
@@ -468,9 +538,12 @@ export function ContactTimeline({
   clientId,
   contactId,
   onSummary,
+  dialedAt,
 }: {
   clientId: string
   contactId: string
+  /** 员工刚点了拨打的时间（毫秒）；有它就自动刷新，直到这通电话变成正式记录。 */
+  dialedAt?: number | null
   /**
    * 把摘要交给抽屉，让它渲染在**最上面**那张卡里。
    *
@@ -479,7 +552,7 @@ export function ContactTimeline({
    */
   onSummary?: (s: TimelineSummary | null) => void
 }) {
-  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary)
+  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt)
   const listRef = useStickToLatest(data)
 
   if (loading || err || !data || data.timeline.length === 0) {
@@ -508,7 +581,7 @@ export function ContactTimeline({
         className={`space-y-2.5 ${long ? 'max-h-[52vh] overflow-y-auto pr-1' : ''}`}
       >
         {data.timeline.map((e, i) => (
-          <Row key={i} e={e} />
+          <Row key={i} e={e} clientId={clientId} />
         ))}
         {!!data.omittedMessages && (
           <p className="pt-1 text-center text-[10px] text-me-charcoal/30">

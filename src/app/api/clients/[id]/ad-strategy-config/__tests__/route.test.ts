@@ -21,15 +21,20 @@ vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() })
 vi.mock('@/lib/auth/require-session', () => ({ requireSession: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/email/sender', () => ({ ME_MAIL_TO_ADDRESS: 'team@example.com' }))
+vi.mock('@/lib/ads-strategy/autonomy/notify', () => ({
+  notifyAutonomyModeChanged: vi.fn(async () => ({ sent: true, events: 2 })),
+}))
 
 import { GET, PATCH } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireSession } from '@/lib/auth/require-session'
 import { supabaseAdmin } from '@/lib/supabase'
+import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockSession = vi.mocked(requireSession)
 const mockFrom = vi.mocked(supabaseAdmin.from)
+const mockNotify = vi.mocked(notifyAutonomyModeChanged)
 
 const CLIENT = 'client-uuid-ad-strategy-config-test'
 const STAFF = 'fde@staff.test'
@@ -171,6 +176,39 @@ describe('ad-strategy-config — PATCH 内部员工照常改', () => {
       daily_budget_cap_cents: null, autonomy_mode: 'observe', creative_pool: [],
       autopilot_enabled: false, autopilot_dry_run: true,
     })
+  })
+
+  it('🔴 改之前的设置读不出 → 照样保存（收紧必须存得进去），并且一律发叫醒铃——不拿默认值 observe 当「改之前」', async () => {
+    signedInAs(STAFF)
+    const upsert = vi.fn(async () => ({ error: null }))
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: 'timeout' } }) }) }),
+        upsert,
+      }
+    }) as never)
+
+    // 默认值的 autonomy_mode 也是 observe：按默认值比会判成「没变」，一个事件都不发。
+    const res = await PATCH(patchRequest({ autonomy_mode: 'observe' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(mockNotify).toHaveBeenCalledTimes(1)
+    expect(json.sync_events).toEqual({ sent: true, events: 2 })
+  })
+
+  it('改之前读得出、值没变 → 不发叫醒铃（读成功的路径行为不变）', async () => {
+    signedInAs(STAFF)
+    fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], autonomy_mode: 'observe' }])
+
+    const res = await PATCH(patchRequest({ autonomy_mode: 'observe' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(mockNotify).not.toHaveBeenCalled()
+    expect(json.sync_events).toEqual({ sent: false, events: 0 })
   })
 
   it('内部员工填错邮箱 → 400，不写库（守卫不吞掉原有校验）', async () => {

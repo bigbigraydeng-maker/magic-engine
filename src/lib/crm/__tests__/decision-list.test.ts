@@ -40,7 +40,7 @@ describe('buildDecisionList', () => {
         contact: '021123456',
         why: '客户来消息了，已经等了 3 小时',
         nextAction: '建议致电',
-        layerLabel: '客人在等你',
+        layerLabel: '今天要联系',
         pinned: false,
       },
     ])

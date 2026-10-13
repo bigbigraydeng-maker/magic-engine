@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { ContentHub } from './_components/ContentHub';
 import { GenerationDrawer } from './_components/GenerationDrawer';
 import { SettingsDrawer, type SettingsTab } from './_components/SettingsDrawer';
 import { ZhugePriorityWidget } from './_components/ZhugePriorityWidget';
@@ -618,16 +617,6 @@ export default function ClientDetailPage() {
               </button>
             </div>
           )}
-
-          {/* ── 推广活动（Campaign 基座）──────────────────────────────────────────
-              Master Brief × Campaign = FDE 工作的上下文基座。
-              所有内容生产（社媒/博客/广告）应当在某个活跃 Campaign 下进行。 */}
-          <BriefGateBanner clientId={clientId} featureLabel="workspace production entry points">
-            <section>
-              <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">推广活动</p>
-              <ContentHub clientId={clientId} />
-            </section>
-          </BriefGateBanner>
         </>
       )}
 
@@ -649,7 +638,9 @@ export default function ClientDetailPage() {
                 <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
                 <ToolCard href={`/dashboard/content?client=${clientId}`}         title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
+                <ToolCard href={`/dashboard/clients/${clientId}/campaigns`}      title="推广活动"       desc="Campaign 列表、排期、各推广活动的内容" badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/daily-plan`}     title="每日计划"       desc="推广活动 7 日内容排期审核 · Facebook Post 通过/打回" badge="in_house" />
+                <ToolCard href={`/dashboard/clients/${clientId}/story`}          title="Story 自动发布" desc="看这一周要发的 Story · 一键授权 / 随时停（仅管理员）" badge="in_house" />
                 <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
                 <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/settings?tab=connect`} title="平台连接"    desc="连接 GBP · GSC · GA4 · Meta 广告账户" badge="in_house" />
@@ -680,6 +671,14 @@ export default function ClientDetailPage() {
                   href={`/dashboard/clients/${clientId}/tailor-made`}
                   title="Tailor-made 行程单"
                   desc="定制行程：粘贴行程 → AI 解析 → 上传出票单读航班 → 导出品牌 PDF"
+                  badge="in_house"
+                />
+              )}
+              {industryFeatureFlags(client?.industry).tour_catalog && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/tour-catalog`}
+                  title="团目录 · Beta"
+                  desc="团名、行程、展示价、出发班期统一在这里维护。测试版。"
                   badge="in_house"
                 />
               )}

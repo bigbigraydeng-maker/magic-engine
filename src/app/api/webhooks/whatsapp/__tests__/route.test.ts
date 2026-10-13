@@ -36,6 +36,12 @@ vi.mock('@/lib/messenger-agent/optout', async (orig) => {
 // 实现表结构；那张表的真实建模在 health-heartbeat.test.ts。
 vi.mock('@/lib/messenger-agent/optout-failures', () => ({ recordOptOutWriteFailure: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+vi.mock('@/lib/platform-oauth/vocabulary', () => ({
+  decryptToken: vi.fn((v: string) => {
+    if (v === 'enc:BAD') throw new Error('bad')
+    return v.replace(/^enc:/, '')
+  }),
+}))
 
 import { GET, POST } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -130,6 +136,9 @@ function stubDb(
     msgUpsertFails?: boolean
     resolveContactThrows?: boolean
     optoutUnlinkedUpdateFails?: boolean
+    credRows?: { phone_number_id: string; app_secret_enc: string; status?: string }[]
+    credLookupFails?: boolean // table not deployed yet (42P01)
+    credLookupTransientFails?: boolean // any other lookup error
   } = {},
 ): Captured {
   const captured: Captured = { convoUpserts: [], msgUpserts: [], touchUpserts: [], updates: [], filters: {} }
@@ -156,6 +165,10 @@ function stubDb(
       },
       is: (col: string, val: unknown) => {
         f[`__is_${col}`] = val
+        return chain
+      },
+      in: (col: string, vals: unknown) => {
+        f[`__in_${col}`] = vals
         return chain
       },
       single: async () => result,
@@ -188,6 +201,14 @@ function stubDb(
         }
         return chain
       },
+    }
+
+    if (table === 'whatsapp_app_credentials') {
+      result = opts.credLookupFails
+        ? { data: null, error: { code: '42P01', message: 'relation does not exist' } }
+        : opts.credLookupTransientFails
+          ? { data: null, error: { message: 'connection timeout' } }
+          : { data: opts.credRows ?? [], error: null }
     }
 
     if (table === 'clients') {
@@ -237,11 +258,12 @@ describe('GET — 订阅握手', () => {
 })
 
 describe('POST — 签名验证', () => {
-  it('签名不对 → 401，一行库都不碰', async () => {
+  it('签名不对 → 401，只读密钥表，客户/会话/消息表一行都不碰', async () => {
     stubDb()
     const res = await POST(makePost(messagePayload(), { signature: 'sha256=' + '0'.repeat(64) }))
     expect(res.status).toBe(401)
-    expect(mockFrom).not.toHaveBeenCalled()
+    // 选密钥要先读 whatsapp_app_credentials（只读）；除此之外任何表都不许碰。
+    expect(mockFrom.mock.calls.map((c) => c[0])).toEqual(['whatsapp_app_credentials'])
   })
 
   it('没带签名头 → 401', async () => {
@@ -539,6 +561,7 @@ describe('POST — 一条坏消息不能带走一整批', () => {
       const chain: Record<string, unknown> = {
         select: () => chain,
         eq: () => chain,
+        in: () => chain,
         lt: () => chain,
         single: async () => result,
         maybeSingle: async () => result,
@@ -639,5 +662,190 @@ describe('POST — 不许用 WhatsApp 昵称盖掉已有的名字', () => {
     expect(mockResolveContact).toHaveBeenCalledWith(
       expect.objectContaining({ displayName: '🌸小美🌸' }),
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 每个号码用自己的 app secret 验签（whatsapp_app_credentials）。
+// 号码列表只从「未验签」的 body 里读出来决定用哪把钥匙；只有那把钥匙的签名
+// 对得上才会继续处理。混用 / 未知组合一律拒，一把 app 的 secret 绝不能替
+// 另一个 app 的号码背书。
+// ---------------------------------------------------------------------------
+describe('per-app signature secret', () => {
+  const NAL_SECRET = 'nal-app-secret'
+
+  function signWith(secret: string, body: string): string {
+    return 'sha256=' + createHmac('sha256', secret).update(body, 'utf8').digest('hex')
+  }
+
+  it('号码有自己的 secret 行 → 用 NAL_SECRET 签名 → 200 且落库', async () => {
+    const captured = stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET }],
+    })
+    const raw = JSON.stringify(messagePayload())
+    const res = await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))
+    expect(res.status).toBe(200)
+    expect(captured.msgUpserts).toHaveLength(1)
+  })
+
+  it('号码有自己的 app → 用 env SECRET 签名 → 401（env secret 不能替它背书）', async () => {
+    stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET }],
+    })
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(401)
+  })
+
+  it('号码没有行 → env SECRET 签名 → 200（CTS 不变）；NAL_SECRET 签名 → 401', async () => {
+    stubDb()
+    const ok = await POST(makePost(messagePayload()))
+    expect(ok.status).toBe(200)
+
+    const raw = JSON.stringify(messagePayload())
+    const bad = await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))
+    expect(bad.status).toBe(401)
+  })
+
+  it('混合 payload（一个有行、一个没行）→ 用任一 secret 签名都 401', async () => {
+    stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET }],
+    })
+    const base = messagePayload()
+    const other = messagePayload()
+    const otherChange = other.entry[0].changes[0]
+    otherChange.value.metadata.phone_number_id = '111222333'
+    const mixed = {
+      entry: [{ changes: [base.entry[0].changes[0], otherChange] }],
+    }
+
+    const raw = JSON.stringify(mixed)
+    expect((await POST(makePost(mixed, { signature: signWith(NAL_SECRET, raw) }))).status).toBe(401)
+    expect((await POST(makePost(mixed, { signature: signWith(SECRET, raw) }))).status).toBe(401)
+  })
+
+  it('两个号码各有不同 secret → 401；两个号码共用同一 secret 并用它签名 → 200', async () => {
+    const different = stubDb({
+      credRows: [
+        { phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET },
+        { phone_number_id: '111222333', app_secret_enc: 'enc:other-secret' },
+      ],
+    })
+    const base = messagePayload()
+    const other = messagePayload()
+    const otherChange = other.entry[0].changes[0]
+    otherChange.value.metadata.phone_number_id = '111222333'
+    const twoNumbers = {
+      entry: [{ changes: [base.entry[0].changes[0], otherChange] }],
+    }
+    const rawTwo = JSON.stringify(twoNumbers)
+    expect((await POST(makePost(twoNumbers, { signature: signWith(NAL_SECRET, rawTwo) }))).status).toBe(401)
+    expect(different.msgUpserts).toHaveLength(0)
+
+    const shared = stubDb({
+      credRows: [
+        { phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET },
+        { phone_number_id: '111222333', app_secret_enc: 'enc:' + NAL_SECRET },
+      ],
+    })
+    const res = await POST(makePost(twoNumbers, { signature: signWith(NAL_SECRET, rawTwo) }))
+    expect(res.status).toBe(200)
+    expect(shared.msgUpserts.length).toBeGreaterThan(0)
+  })
+
+  it('表没建（credLookupFails）→ env SECRET 签名 → 200（表缺失不能弄坏 CTS）；错误 secret → 503', async () => {
+    stubDb({ credLookupFails: true })
+    expect((await POST(makePost(messagePayload()))).status).toBe(200)
+
+    const raw = JSON.stringify(messagePayload())
+    const res = await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))
+    expect(res.status).toBe(503)
+  })
+
+  it('密钥表查询瞬时出错（不是表没建）→ 即使用环境密钥签对也 503，不放行', async () => {
+    stubDb({ credLookupTransientFails: true })
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(503)
+  })
+
+  it('号码的密钥行被停用 → 401，环境密钥不能替它背书', async () => {
+    stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET, status: 'disabled' }],
+    })
+    expect((await POST(makePost(messagePayload()))).status).toBe(401)
+    const raw = JSON.stringify(messagePayload())
+    expect((await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))).status).toBe(401)
+  })
+
+  it('phone_number_id 是数字（未加引号）→ 401', async () => {
+    stubDb()
+    const payload = messagePayload()
+    ;(payload.entry[0].changes[0].value.metadata as { phone_number_id: unknown }).phone_number_id = 999888777
+    const res = await POST(makePost(payload))
+    expect(res.status).toBe(401)
+  })
+
+  it('21 个不同号码 → 401', async () => {
+    stubDb()
+    const changes = Array.from({ length: 21 }, (_, i) => {
+      const p = messagePayload()
+      p.entry[0].changes[0].value.metadata.phone_number_id = String(100000000 + i)
+      return p.entry[0].changes[0]
+    })
+    const res = await POST(makePost({ entry: [{ changes }] }))
+    expect(res.status).toBe(401)
+  })
+
+  it('body 超过 1,000,000 字节 → 413，且不查 whatsapp_app_credentials', async () => {
+    stubDb()
+    const big = 'x'.repeat(1_000_001)
+    const raw = JSON.stringify({ entry: [], pad: big })
+    const res = await POST(makePost({}, { rawBody: raw, signature: sign(raw) }))
+    expect(res.status).toBe(413)
+    expect(mockFrom).not.toHaveBeenCalledWith('whatsapp_app_credentials')
+  })
+
+  it('行里是 enc:BAD → 500', async () => {
+    stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:BAD' }],
+    })
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(500)
+  })
+
+  it('per-app secret 绝不进日志', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET }],
+    })
+    const raw = JSON.stringify(messagePayload())
+    await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))
+
+    stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET }],
+    })
+    await POST(makePost(messagePayload()))
+
+    const allArgs = [...errorSpy.mock.calls, ...logSpy.mock.calls].flat()
+    for (const arg of allArgs) {
+      expect(String(arg)).not.toContain(NAL_SECRET)
+    }
+
+    errorSpy.mockRestore()
+    logSpy.mockRestore()
+  })
+
+  it('凭据查询用 whatsapp_app_credentials 表，号码在 __in_phone_number_id 过滤里', async () => {
+    const captured = stubDb({
+      credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:' + NAL_SECRET }],
+    })
+    const raw = JSON.stringify(messagePayload())
+    await POST(makePost(messagePayload(), { signature: signWith(NAL_SECRET, raw) }))
+
+    expect(mockFrom).toHaveBeenCalledWith('whatsapp_app_credentials')
+    expect(captured.filters.whatsapp_app_credentials).toMatchObject({
+      __in_phone_number_id: [PHONE_NUMBER_ID],
+    })
   })
 })

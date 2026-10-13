@@ -2777,3 +2777,145 @@ export const x = 1`,
     }
   })
 })
+
+/**
+ * SEO 保护页统一闸（手册行 A1，设计稿 docs/specs/2026-10-12-seo-protected-pages-unified-gate-a1-v0.1.md）。
+ *
+ * 为什么放在 Kernel 架构测试里：「改客户网站已有页面」的路径散在 cms/、seo-meta/、capabilities/ 三处，
+ * 其中 `seo-fix-orchestrator` 用相对路径引 `./github-client`，上面那条「对外写只能由 capability 调用」
+ * 的别名匹配根本看不见它。保护名单只靠各处「记得查」，9-28 事故就是漏了一条路。
+ * 这里把「谁能改已有页」钉成：要么在代码里真的调用了 `.assert(`（闸），要么冻结在白名单里（只准变短）。
+ */
+describe('SEO 保护页统一闸（A1）', () => {
+  const PROTECTED_PAGES_FILE = 'src/lib/seo/protected-pages.ts'
+  const PROD_FILES = ALL_FILES.filter((f) => !isTest(f))
+
+  it('品牌对象（PageWriteGuard / PageWriteActor）只能在 protected-pages.ts 里铸造', () => {
+    const offenders = PROD_FILES.filter((f) => f !== PROTECTED_PAGES_FILE).filter((f) =>
+      /\bas\s+(?:never\s+as\s+|unknown\s+as\s+)?PageWrite(?:Guard|Actor)\b/.test(readCode(f)),
+    )
+    expect(offenders, '强转出一个闸对象 = 绕过保护名单。只准用 createPageWriteGuard / resolveActorFromEmail / SYSTEM_ACTOR。').toEqual([])
+  })
+
+  it('品牌符号不许导出（否则外部能用对象字面量造出闸）', () => {
+    const src = readCode(PROTECTED_PAGES_FILE)
+    expect(src).toMatch(/declare const guardBrand: unique symbol/)
+    expect(src).toMatch(/declare const actorBrand: unique symbol/)
+    expect(src).not.toMatch(/export\s+(?:declare\s+)?const\s+(?:guardBrand|actorBrand)/)
+  })
+
+  it('这几个写客户网站的函数签名必须收闸对象（改了签名不收闸 = 红）', () => {
+    const required: ReadonlyArray<readonly [file: string, pattern: RegExp]> = [
+      ['src/lib/cms/seo-fix-orchestrator.ts', /guard:\s+PageWriteGuard/],
+      ['src/lib/cms/github-page-upgrade-publisher.ts', /guard:\s+PageWriteGuard/],
+      ['src/lib/cms/wordpress-client.ts', /export async function updateExistingWordpressPost\([^)]*guard:\s+PageWriteGuard/],
+      ['src/lib/seo-meta/cycle/apply-adapter.ts', /pageGuard:\s+PageWriteGuard/],
+      ['src/lib/seo-meta/cts-meta-pr.ts', /export async function runCtsMetaPr\(\s*guard:\s+PageWriteGuard/],
+      ['src/lib/capabilities/page-apply-optimization/deps.ts', /createPageGuard:\s*\(clientId: string\)\s*=>\s*PageWriteGuard/],
+    ]
+    const missing = required.filter(([file, re]) => !re.test(readCode(file))).map(([file]) => file)
+    expect(missing).toEqual([])
+  })
+
+  it('Kernel 不 import 保护页模块；保护页模块不直连 service-role 客户端', () => {
+    const kernelImporters = PROD_FILES.filter((f) => f.startsWith('src/lib/kernel/')).filter((f) =>
+      /from\s+['"]@\/lib\/seo\//.test(readCode(f)),
+    )
+    expect(kernelImporters, 'Kernel 不许 import 域模块（依赖方向只有 bridge → kernel）').toEqual([])
+    expect(readCode(PROTECTED_PAGES_FILE)).not.toMatch(/from\s+['"]@\/lib\/supabase['"]/)
+  })
+
+  it('全仓只有 protected-pages.ts 读保护名单那个配置字段（别再长出第三种写法）', () => {
+    const readers = PROD_FILES.filter((f) => f !== PROTECTED_PAGES_FILE).filter((f) =>
+      readCode(f).includes('meta_cycle_protected_slugs'),
+    )
+    expect(readers).toEqual([])
+  })
+
+  /**
+   * 「改客户仓库已有页」的判据：调用 GithubClient 的 commitFile / createPullRequest / mergePullRequest。
+   * 按方法名而不是按 import 路径扫：`./github-client` 这种相对写法也逃不掉；也不按 HTTP 动词扫
+   * （WordPress 改旧页用 POST，按 PATCH/PUT 扫会漏掉最主要的那条）。
+   *
+   * 命中的文件必须在代码里**调用** `.assert(`（光 import 类型不算），或者冻结在下面的白名单里：
+   * 白名单按「文件 + 写调用次数」记，次数变了就红，只准变短，每条写明为什么不会改已有页。
+   */
+  const WRITE_CALL = /\.(?:commitFile|createPullRequest|mergePullRequest)\(/g
+  const WRITE_PATH_ALLOWLIST: Readonly<Record<string, { calls: number; why: string }>> = {
+    'src/lib/cms/blog-publisher.ts': {
+      calls: 2,
+      why: '新文章只建新文件（commitFile 不带 sha，已有同名文件时 GitHub 会拒绝）；不改已有页',
+    },
+    'src/app/api/clients/[id]/cms/publish-geo-to-github/route.ts': {
+      calls: 2,
+      why: '往全站模板 <head> 注入 GEO 标记（站点级），会影响保护页——PM 判据，台账 2026-10-12-seo-protected-pages-unified-gate-a1 跟进，不在 A1 范围',
+    },
+  }
+  const countWrites = (src: string): number => (src.match(WRITE_CALL) ?? []).length
+  /** A real gate call: on a guard variable (not `console.assert(` / `assert.ok(` / a test library). */
+  const GATE_CALL = /\b(?:input\.guard|pageGuard|guard)\.assert\(|\.createPageGuard\([^)]*\)\.assert\(/
+  const needsGate = (src: string): boolean => countWrites(src) > 0 && !GATE_CALL.test(src)
+
+  it('每个会改客户仓库的文件：要么真的调用了闸，要么在冻结白名单里', () => {
+    const offenders: string[] = []
+    for (const f of PROD_FILES) {
+      if (f === 'src/lib/cms/github-client.ts') continue // 定义处
+      const src = readCode(f)
+      if (!needsGate(src)) continue
+      if (!WRITE_PATH_ALLOWLIST[f]) offenders.push(f)
+    }
+    expect(
+      offenders,
+      '这些文件会改客户仓库里的页面，却没调用保护页闸（guard.assert）。' +
+        '接上闸，或者先问子牙再进白名单（并写明为什么不会改已有页）。',
+    ).toEqual([])
+  })
+
+  /**
+   * 编译期（必传 `guard` 参数）在 CI 里不一定被检查：next build 跳过类型检查（见 CLAUDE.md），所以这里再用文本钉一遍——
+   * 凡是调用这些「改已有页」函数的生产文件，必须在同一文件里造出闸（buildRouteGuard / createPageWriteGuard / systemPageGuard）。
+   */
+  it('「改已有页」函数的调用方必须自己造闸，不能传一个来路不明的对象', () => {
+    const UPDATERS = /\b(?:updateExistingWordpressPost|orchestrateSeoFix|publishPageUpgradeToGithub|runCtsMetaPr|createCtsRepoApplyAdapter)\(/
+    const DEFINES = /\bexport (?:async )?function (?:updateExistingWordpressPost|orchestrateSeoFix|publishPageUpgradeToGithub|runCtsMetaPr|createCtsRepoApplyAdapter)\b/
+    const MAKES_GUARD = /\b(?:buildRouteGuard|createPageWriteGuard|systemPageGuard)\(/
+    const offenders = PROD_FILES.filter((f) => {
+      const src = readCode(f)
+      return UPDATERS.test(src) && !DEFINES.test(src) && !MAKES_GUARD.test(src)
+    })
+    expect(offenders).toEqual([])
+  })
+
+  it('PM 身份只能由 protected-pages.ts / protected-pages-route.ts 产生（不许别处自己造「PM」）', () => {
+    const callers = PROD_FILES.filter((f) => /\bresolveActorFromEmail\(/.test(readCode(f)))
+    expect(callers.sort()).toEqual([PROTECTED_PAGES_FILE, 'src/lib/seo/protected-pages-route.ts'].sort())
+  })
+
+  it('白名单冻结：写调用次数一变就红；条目对应的文件必须还在', () => {
+    const drift: string[] = []
+    for (const [f, entry] of Object.entries(WRITE_PATH_ALLOWLIST)) {
+      if (!ALL_FILES.includes(f)) {
+        drift.push(`${f}：文件已不存在，白名单条目要删`)
+        continue
+      }
+      const n = countWrites(readCode(f))
+      if (n !== entry.calls) drift.push(`${f}：写调用 ${n} 次，白名单记的是 ${entry.calls} 次——有新的写入口？先过闸再改这里`)
+    }
+    expect(drift).toEqual([])
+    expect(Object.keys(WRITE_PATH_ALLOWLIST).sort()).toEqual([
+      'src/app/api/clients/[id]/cms/publish-geo-to-github/route.ts',
+      'src/lib/cms/blog-publisher.ts',
+    ])
+  })
+
+  it('扫描器咬得住（合成源码）：有写调用没闸 = 命中；有闸 = 放行；只写在注释里 = 不算', () => {
+    const noGate = `await github.commitFile(a, b, c)`
+    const gated = `await guard.assert(identity)\nawait github.commitFile(a, b, c)`
+    const inComment = stripComments(`// await github.commitFile(a, b, c)\nexport const x = 1`)
+    const fakeGate = `console.assert(true)\nawait github.commitFile(a, b, c)`
+    expect(needsGate(noGate)).toBe(true)
+    expect(needsGate(gated)).toBe(false)
+    expect(needsGate(inComment)).toBe(false)
+    expect(needsGate(fakeGate), 'console.assert( is not a gate').toBe(true)
+  })
+})

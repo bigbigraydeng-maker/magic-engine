@@ -139,6 +139,13 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
     refreshScope: 'per_connection',
     why: '同 meta，token-manager 里也还没有 TikTok 的刷新实现',
   },
+  [PLATFORM_PROVIDERS.WHATSAPP]: {
+    refreshable: false,
+    staleHours: null,
+    // staleHours 为 null 时这个字段用不上，仍要填 —— 免得以后打开心跳时漏想一层。
+    refreshScope: 'per_connection',
+    why: '系统用户令牌不过期；WhatsApp 的心跳口径（超 N 小时没有任何事件）还没做，做之前不拿 last_synced_at 当心跳',
+  },
 }
 
 // ─── 刷新时会不会重放权限清单 ─────────────────────────────────────────────────
@@ -164,6 +171,7 @@ export const SCOPE_REPLAYED_ON_REFRESH: Record<PlatformProvider, readonly string
   [PLATFORM_PROVIDERS.GOOGLE_GTM]: null,
   [PLATFORM_PROVIDERS.META]: null,
   [PLATFORM_PROVIDERS.TIKTOK]: null,
+  [PLATFORM_PROVIDERS.WHATSAPP]: null,
 }
 
 // ─── 输入 / 输出 ──────────────────────────────────────────────────────────────

@@ -27,7 +27,7 @@ export async function runPortfolioDiagnostics(
 ): Promise<DailyDiagnosticsResult> {
   try {
     const evaluatedAt = new Date().toISOString()
-    const input = await loadDiagnosisInput(clientId, insightDate, evaluatedAt)
+    const input = await loadDiagnosisInput(clientId, insightDate, evaluatedAt, { digestRecipients: configuredRecipients })
     const run = runDiagnostics({ ...input, digestRecipients: configuredRecipients })
     const goal = await buildDigestGoalContext(clientId, insightDate)
     const digest = await persistAndSendInternalDigest({ clientId, clientName, date: insightDate, run, configuredRecipients, goal })

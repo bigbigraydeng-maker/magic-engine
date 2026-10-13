@@ -23,6 +23,12 @@ import type {
 } from '@/types/diagnostic'
 import type { ExecutionMode, FlywheelName, OutcomeVerdict } from '@/lib/flywheel/adapters/types'
 import { fetchLatestOutcomesByAction } from '@/lib/flywheel/execution-outcomes'
+import {
+  resolveAutonomousBoardState,
+  boardViewerFor,
+  CLIENT_VISIBLE_LEDGER_STATUSES,
+  type BoardViewer,
+} from '@/lib/flywheel/autonomous-action-board'
 
 /** Summary of the latest attribution outcome for an execution item. */
 export interface ItemOutcomeSummary {
@@ -219,7 +225,9 @@ export async function GET(
       linked_post: linkedPostByItem[it.id] ?? null,
       content_state: contentStateByItem[it.id] ?? null,
     }))
-    const autonomousItems = prescriptionId ? [] : await fetchAutonomousActionItems(clientId)
+    // 客户成员只看真做了 / 正在做 / 等确认的自主行动；没做成的、演练的只给内部看（且写明没执行）。
+    const viewer = boardViewerFor(access)
+    const autonomousItems = prescriptionId ? [] : await fetchAutonomousActionItems(clientId, viewer)
     const allItems = [...autonomousItems, ...items]
 
     // 拉取这些 item 涉及的处方元数据（按处方分组 + 补充/修订按钮用）
@@ -453,35 +461,77 @@ function computePriority(args: {
 }
 
 
-async function fetchAutonomousActionItems(clientId: string): Promise<ExecutionItemWithLogs[]> {
-  const { data: actionRows, error } = await supabaseAdmin
+const AUTONOMOUS_ACTION_LIMIT = 50
+const AUTONOMOUS_ACTION_COLUMNS =
+  'id, client_id, flywheel, action_type, execution_mode, vendor, payload, expected_metric, expected_delta, executed_at, created_at'
+
+type AutonomousFilter = 'all' | 'no_status' | 'client_visible_status'
+
+async function queryAutonomousActions(
+  clientId: string,
+  filter: AutonomousFilter,
+): Promise<FlywheelActionForExecution[] | null> {
+  let query = supabaseAdmin
     .from('flywheel_actions')
-    .select('id, client_id, flywheel, action_type, execution_mode, vendor, payload, expected_metric, expected_delta, executed_at, created_at')
+    .select(AUTONOMOUS_ACTION_COLUMNS)
     .eq('client_id', clientId)
     .is('execution_item_id', null)
+  if (filter === 'no_status') query = query.is('payload->>status', null)
+  if (filter === 'client_visible_status') query = query.in('payload->>status', [...CLIENT_VISIBLE_LEDGER_STATUSES])
+
+  const { data, error } = await query
     .order('executed_at', { ascending: false })
-    .limit(50)
+    .limit(AUTONOMOUS_ACTION_LIMIT)
 
   if (error) {
     console.error('[execution GET] autonomous actions fetch error (non-fatal):', error)
-    return []
+    return null
   }
+  return (data ?? []) as FlywheelActionForExecution[]
+}
 
-  const actions = (actionRows ?? []) as FlywheelActionForExecution[]
+/**
+ * 内部：最近 50 条，全看。
+ * 客户：看不到的记录在数据库那一步就筛掉，不占这 50 个名额 —— 否则连着几十条演练 / 被拦记录
+ * 会把客户真正该看到的挤出去。「账上没写状态」和「状态词客户可见」分两次查再合并，
+ * 不拼 or 条件。下面 buildAutonomousItem 仍会再判一次，这里筛错了也不会放出不该看的。
+ */
+async function fetchAutonomousActionItems(clientId: string, viewer: BoardViewer): Promise<ExecutionItemWithLogs[]> {
+  const batches = viewer === 'internal'
+    ? [await queryAutonomousActions(clientId, 'all')]
+    : await Promise.all([
+        queryAutonomousActions(clientId, 'no_status'),
+        queryAutonomousActions(clientId, 'client_visible_status'),
+      ])
+  if (batches.some(batch => batch === null)) return []
+
+  const actions = batches
+    .flatMap(batch => batch ?? [])
+    .sort((a, b) => (b.executed_at ?? b.created_at).localeCompare(a.executed_at ?? a.created_at))
+    .slice(0, AUTONOMOUS_ACTION_LIMIT)
+
   const outcomeByAction = await fetchLatestOutcomesByAction(actions.map(a => a.id))
-  return actions.map(action => buildAutonomousItem(action, outcomeByAction[action.id] ?? null))
+  return actions
+    .map(action => buildAutonomousItem(action, outcomeByAction[action.id] ?? null, viewer))
+    .filter((item): item is ExecutionItemWithLogs => item !== null)
 }
 
 function buildAutonomousItem(
   action: FlywheelActionForExecution,
   outcome: ItemOutcomeSummary | null,
-): ExecutionItemWithLogs {
+  viewer: BoardViewer,
+): ExecutionItemWithLogs | null {
   const payload = action.payload ?? {}
+  // 账上的 payload.status 才是这件事的真实状态 —— 演练 / 被拦 / 失败 / 等确认都不是「已完成」。
+  const state = resolveAutonomousBoardState(payload.status, viewer)
+  if (!state) return null
   const executedAt = action.executed_at ?? action.created_at
   const keyword = typeof payload.primary_keyword === 'string' ? payload.primary_keyword : null
-  const title = action.action_type === 'seo.publish_blog'
+  const baseTitle = action.action_type === 'seo.publish_blog'
     ? keyword ? `生成博客：${keyword}` : '生成博客'
     : `${action.flywheel.toUpperCase()} · ${action.action_type}`
+  const title = state.label ? `${baseTitle}（${state.label}）` : baseTitle
+  const reached = state.status === 'completed' || state.status === 'in_progress'
 
   return {
     id: action.id,
@@ -491,9 +541,9 @@ function buildAutonomousItem(
     dimension: flywheelToDimension(action.flywheel),
     phase: 1,
     title,
-    description: `自主行动 · ${action.action_type} · ${formatDate(executedAt)}`,
+    description: `自主行动 · ${action.action_type} · ${state.label ? `${state.label} · ` : ''}${formatDate(executedAt)}`,
     fix_type: modeToFixType(action.execution_mode),
-    status: 'completed',
+    status: state.status,
     steps_json: {
       source: 'flywheel_action',
       action_type: action.action_type,
@@ -507,8 +557,8 @@ function buildAutonomousItem(
     },
     assigned_to: null,
     due_date: null,
-    started_at: executedAt,
-    completed_at: executedAt,
+    started_at: reached ? executedAt : null,
+    completed_at: state.status === 'completed' ? executedAt : null,
     sort_order: 0,
     created_at: action.created_at,
     updated_at: action.created_at,
