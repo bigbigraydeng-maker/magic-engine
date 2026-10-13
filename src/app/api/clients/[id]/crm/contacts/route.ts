@@ -29,7 +29,7 @@ import {
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
-import { loadLatestBriefByContact, type BriefByContact } from '@/lib/crm/brief-lookup'
+import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
 import {
   extractCustomColumns,
@@ -241,6 +241,9 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
 async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
+  // 全客户 AI 摘要跟搜什么、翻哪页无关，是这次请求里最慢的一段（实测约 0.7 秒）：
+  // 一进来就开跑（跟下面的页查询并行），且 30 秒内同一客户只查一次——搜索框每敲一个字都会进来。
+  const briefsPromise = loadLatestBriefByContactCached(clientId)
   let total: number
   let pageContacts: ContactRow[]
   let stageRows: StageRow[]
@@ -349,7 +352,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
               .order('id', { ascending: false })
               .range(from, to),
           ),
-      loadLatestBriefByContact(clientId),
+      briefsPromise,
     ])
   } catch (err) {
     return NextResponse.json(
