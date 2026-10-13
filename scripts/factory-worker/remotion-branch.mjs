@@ -439,6 +439,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       `UNKNOWN_TEMPLATE: 不认识的模板 ${JSON.stringify(String(template)).slice(0, 40)}：出片机的模板注册表里没有它。先升级出片机，或检查工单 brief.remotion.template`,
     )
   }
+  // The data-card template is registered in the engine but the worker has no captions / red-line rescan for it yet: refuse before rendering.
+  if (template === 'datacard') {
+    throw new RemotionOrderError('DATACARD_NOT_WIRED: 数据卡模板已在渲染引擎里注册，但出片机还没接上它的字幕和红线复扫，暂不接单')
+  }
   let props
   let files
   let timing

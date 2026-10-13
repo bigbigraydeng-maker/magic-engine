@@ -11,10 +11,15 @@ import {
   recipeGapsOf,
   type RecipeGap,
 } from './montage.ts';
+import {
+  parseDataCardProps,
+  collectDataCardAssetFiles,
+  computeDataCardTiming,
+} from './datacard.ts';
 import { stagedFileName, type MusicCatalog } from './music.ts';
 
 /** Allowed template ids. */
-export const TEMPLATE_IDS = ['list', 'montage'] as const;
+export const TEMPLATE_IDS = ['list', 'montage', 'datacard'] as const;
 
 /** One supported template id. */
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
@@ -47,6 +52,15 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
       props,
       assetFiles: collectAssetFiles(props),
       totalFrames,
+    };
+  }
+  if (id === 'datacard') {
+    const props = parseDataCardProps(input);
+    return {
+      compositionId: 'DataCardReel',
+      props,
+      assetFiles: collectDataCardAssetFiles(props),
+      totalFrames: computeDataCardTiming(props).totalFrames,
     };
   }
   const props = parseMontageReelProps(input);
