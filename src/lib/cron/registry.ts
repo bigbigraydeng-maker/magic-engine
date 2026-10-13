@@ -381,6 +381,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // no order is sent and this entry will look overdue — the only legitimate silence.
   // 🔴 schedule must not be hand-copied: it is the upstream fan-out's GSC_PAGE_DAILY_CRON (registry.test.ts).
   { service: 'inngest:cloud-gsc-page-daily-pull', jobName: 'gsc-page-daily-pull', schedule: '30 18 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-26' },
+  // Per-(query, page) daily Google Search Console store: the same chain as the two entries above run with its own
+  // event / job names / receipts table (docs/specs/2026-10-13-gsc-query-page-daily-design.md). Its first run also
+  // starts the 16-month backfill (4 months per client per day, so about 4 days).
+  // 🔴 schedule must not be hand-copied: the only definition is GSC_QUERY_PAGE_DAILY_CRON in
+  //    src/lib/gsc/query-page-daily-store.ts, and registry.test.ts asserts they are equal.
+  // 🔴 timestampColumn is `started_at` for the same reason as the per-page chain (finished_at is NULL while running).
+  { service: 'inngest:cloud-gsc-query-page-daily-fanout', jobName: 'gsc-query-page-daily', schedule: '0 19 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-13',
+    outputTables: [{ table: 'gsc_query_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' }] },
+  // The pull orders of the chain above, under their own job name (same reasons as gsc-page-daily-pull).
+  { service: 'inngest:cloud-gsc-query-page-daily-pull', jobName: 'gsc-query-page-daily-pull', schedule: '0 19 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-13' },
 ] as const
 
 /**
