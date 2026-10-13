@@ -131,7 +131,7 @@
 
 ## 九、发布前置项完成情况（PM 通过后补齐，2026-10-10）
 
-PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`，通过人 bigbigraydeng@gmail.com，2026-10-10 03:48 UTC）。**注意：在 ME 里「通过」就是发布授权**——每小时第 5 分钟的 `factory-publish-worker` 会把 `approved` 的成片领走发布（render.yaml 第 976 行）。本轮把第六节的前置项在它领走之前补齐：
+PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`，通过人 bigbigraydeng@gmail.com，2026-10-10 03:48 UTC）。**【2026-10-11 更正】我当时写「通过就是发布授权、会自动对外发布」是错的。** 实际情况：每小时第 5 分钟的 `factory-publish-worker` 确实在 2026-10-10 04:05 UTC 领走了它，工单状态变 `published`；但 Render 上没设 `FACTORY_PUBLISH_LIVE=true`，发布器处在**草稿模式**（以 `video_state=DRAFT` 上传），Facebook 返回 `video_state: DRAFT`、永久链接 `/reel/2309146606576700/`。**也就是说这条 Reel 躺在 CTS 主页的后台草稿里，没有对外公开**；工单状态写 `published` 不等于公众能看到。要让它公开，需 PM 明确点头后，用已有的 `promoteReelToPublished`（同一接口把状态改成 PUBLISHED，不重新上传）只转正这一条；不建议打开全局开关（会影响所有客户）。本轮把第六节的前置项在它领走之前补齐：
 
 | 前置项 | 结果 |
 |---|---|
