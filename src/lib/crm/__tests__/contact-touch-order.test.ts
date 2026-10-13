@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { orderContactIdsByLatestTouch, type TouchRowLite } from '../contact-touch-order'
+import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '../contact-touch-order'
 
 const C = (id: string, firstSeenAt: string | null = null) => ({ id, firstSeenAt })
 
@@ -60,5 +60,26 @@ describe('orderContactIdsByLatestTouch', () => {
     expect(s.reads.length).toBe(2)
     expect(ids[0]).toBe('a')
     expect(new Set(ids)).toEqual(new Set(['a', 'b', 'c']))
+  })
+})
+
+describe('scanLatestTouchContactIds (no-filter fast path)', () => {
+  it('returns the first `need` distinct people, newest first, and stops reading', async () => {
+    const all = [T('a', '5'), T('a', '4'), T('b', '3'), T('c', '2'), T('d', '1')]
+    const s = stream(all, 2)
+    const ids = await scanLatestTouchContactIds({ need: 2, ...s, pageSize: 2, maxPages: 5 })
+    expect(ids).toEqual(['a', 'b'])
+    expect(s.reads).toEqual([0, 1])
+  })
+
+  it('returns null when there are not enough distinct people (caller falls back to the full path)', async () => {
+    const s = stream([T('a', '2'), T('a', '1')], 10)
+    expect(await scanLatestTouchContactIds({ need: 2, ...s, pageSize: 10, maxPages: 5 })).toBeNull()
+  })
+
+  it('returns null at the page limit instead of a short list', async () => {
+    const all = [T('a', '4'), T('a', '3'), T('a', '2'), T('a', '1')]
+    const s = stream(all, 1)
+    expect(await scanLatestTouchContactIds({ need: 2, ...s, pageSize: 1, maxPages: 2 })).toBeNull()
   })
 })
