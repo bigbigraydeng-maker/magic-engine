@@ -7,7 +7,7 @@ decided_on: 2026-10-13
 source: session:74f85b6e
 verify_how: 下一条经系统公开的 Reel，先看到它有一条 social.publish_post 动作行且行上标着已公开，再看到 4 小时后有读数行；两件都看到才算这条链通了
 ---
-10/14 查实（只读）：草稿上传时发布程序写过动作行（类型 factory_reel_publish），但行上记的是「草稿」和上传时间，转公开后这行不会更新。
-读数接线会回读这一行，要求行上写着「已公开」且公开时间与事件一致，否则跳过，不登记 social.publish_post，所以没有任何读数。
-因此根因在上游：线上是草稿模式时，无论自动还是手工转公开都接不上。CTS 的 social.publish_post 最后一行停在 9 月上旬。
-证据见 docs/clients/cts/social-review/2026-10-patrol-log.md 的 10/14 一节。标题与判据于 10/14 按 74 号要求用 --allow-frozen 改过。
+根因（10/14 只读查实）：草稿上传时写了一行动作记录（factory_reel_publish），上面记的是「草稿」，转公开后从不回写；读数接线看到「草稿」就跳过，不登记 social.publish_post。线上是草稿模式时，自动或手工转公开都接不上。
+已公开的 4 条 Reel，发后 4 小时和 72 小时这两个时点的历史读数补不回来，接受损失；改这 4 行属于改已有数据，未获 PM 点头前不动。
+同根的两处记录不准，只记录不改：上传成草稿当天工作日志就写了「已发到」；其中一条的渠道名写成了别的客户。
+证据见 docs/clients/cts/social-review/2026-10-patrol-log.md 的 10/14 一节。编号里的 manual-promote 是旧说法；标题与判据 10/14 经 --allow-frozen 改过。
