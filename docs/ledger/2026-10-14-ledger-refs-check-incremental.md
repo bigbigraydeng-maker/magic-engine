@@ -1,10 +1,12 @@
 ---
 id: 2026-10-14-ledger-refs-check-incremental
 title: 「Ledger refs exist」只核对本 PR 新增/改动的卡，同一 PR 号一次运行只查一次；全库核对留给本机/定时（LEDGER_REFS_FULL=1）
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-14
-source: session:1a85e0eb
+done_on: 2026-10-14
+done_ref: pr:2580
+source: pr:2580
 verify_by: 2026-10-21
 verify_how: 一周内各 PR 不再因「台账引用/风险门/改动范围」轮流因接口超限变红；一次运行的接口调用数从 225 降到个位数
 ---
