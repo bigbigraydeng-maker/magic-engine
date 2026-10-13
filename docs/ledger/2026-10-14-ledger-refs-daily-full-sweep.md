@@ -1,6 +1,6 @@
 ---
 id: 2026-10-14-ledger-refs-daily-full-sweep
-title: 后续：加一个每天一次的台账指针全库核对定时任务（LEDGER_REFS_FULL=1），补上「PR 只查改动卡」留下的 pr:/issue: 覆盖缺口
+title: 后续：加一个每天一次的台账指针全库核对定时任务（LEDGER_REFS_FULL=1），补上「PR 只查改动卡」留下的 pr 和 issue 指针的覆盖缺口
 status: decided
 owner: agent
 decided_on: 2026-10-14
