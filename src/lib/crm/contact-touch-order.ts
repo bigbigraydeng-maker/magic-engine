@@ -64,3 +64,34 @@ export async function orderContactIdsByLatestTouch(opts: TouchOrderOptions): Pro
 
   return [...seen, ...rest]
 }
+
+export interface ScanOptions {
+  /** 至少要凑够几个不同的人（= page * perPage）。 */
+  need: number
+  fetchTouchPage: (pageIndex: number) => Promise<TouchRowLite[]>
+  pageSize: number
+  maxPages: number
+}
+
+/**
+ * 没有任何筛选时的快路径：不用先把全客户的 id 都取出来，直接从最新触点往回翻，
+ * 翻到凑够 need 个不同的人为止，返回他们的 id（最新互动在前）。
+ * 凑不够（触点里的人不到 need 个，或翻页到上限）时返回 null —— 调用方改走完整路径，
+ * 那条路会把没有触点的人按首次进线接在后面。
+ */
+export async function scanLatestTouchContactIds(opts: ScanOptions): Promise<string[] | null> {
+  const { need, fetchTouchPage, pageSize, maxPages } = opts
+  const seen: string[] = []
+  const seenSet = new Set<string>()
+  for (let i = 0; i < maxPages; i++) {
+    const rows = await fetchTouchPage(i)
+    for (const row of rows) {
+      if (seenSet.has(row.contact_id)) continue
+      seenSet.add(row.contact_id)
+      seen.push(row.contact_id)
+      if (seen.length >= need) return seen
+    }
+    if (rows.length < pageSize) break
+  }
+  return null
+}

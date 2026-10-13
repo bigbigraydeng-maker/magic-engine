@@ -226,6 +226,23 @@ describe('GET contacts — 分页形状', () => {
     expect(order.indexOf('a3')).toBeLessThan(order.indexOf('a2'))
   })
 
+  /** 默认打开页面（没有筛选）走快路径：不取全客户 id，总数用 count，前几位从最新触点翻出来。 */
+  it('没有筛选且触点够凑一页 → 不取全客户 id 列表，总数用 count', async () => {
+    scanRows = [{ contact_id: 'a1', occurred_at: '2026-10-14T01:00:00.000Z' }]
+    const { body } = await get('client-a', '?page=1&perPage=1')
+    const fullIdList = recorded.filter((r) => r.table === 'contacts' && !r.countHead && !r.ins.some(([c]) => c === 'id'))
+    expect(fullIdList).toHaveLength(0)
+    expect(recorded.some((r) => r.table === 'contacts' && r.countHead)).toBe(true)
+    expect(body.total).toBe(3)
+  })
+
+  it('有筛选时仍走完整路径（先取符合筛选的 id 再排）', async () => {
+    scanRows = [{ contact_id: 'a1', occurred_at: '2026-10-14T01:00:00.000Z' }]
+    await get('client-a', '?page=1&perPage=1&stage=quoted')
+    const fullIdList = recorded.filter((r) => r.table === 'contacts' && !r.countHead && !r.ins.some(([c]) => c === 'id'))
+    expect(fullIdList.length).toBeGreaterThan(0)
+  })
+
   it('total 是符合筛选的全部人数，不受翻页影响', async () => {
     const { body } = await get('client-a', '?page=2&perPage=1')
     expect(body.total).toBe(3)
