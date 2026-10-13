@@ -46,6 +46,8 @@ function matches(row: Row, filters: QueryRecord['filters']): boolean {
 
 /** Table whose single-row selects should fail (set per test, reset in afterEach below). */
 let failSelectOn: string | null = null
+/** Simulates losing the race: the FIRST conversations select misses a row that another delivery just created. */
+let hideNextConversationSelect = false
 
 function makeQuery(tableName: string) {
   const store = table(tableName)
@@ -160,6 +162,10 @@ function makeQuery(tableName: string) {
 
   function resolveSingle(): { data: unknown; error: unknown } {
     if (failSelectOn === tableName) return { data: null, error: { message: 'boom' } }
+    if (tableName === 'conversations' && hideNextConversationSelect) {
+      hideNextConversationSelect = false
+      return { data: null, error: null }
+    }
     const { data, error } = execute()
     if (error) return { data: null, error }
     const rows = data as Row[]
@@ -315,6 +321,30 @@ describe('storeEcho', () => {
     expect(convo.last_message_from).toBe('customer')
     // The message row is still stored.
     expect(messageRows()).toHaveLength(1)
+  })
+
+  it('losing the create race never overwrites the existing conversation (ignoreDuplicates)', async () => {
+    table('conversations').rows.push({
+      id: 'convo-1',
+      client_id: 'client-1',
+      channel: 'whatsapp',
+      conversation_id: CUSTOMER,
+      participant_psid: CUSTOMER,
+      contact_id: 'contact-1',
+      last_message_at: '2030-01-01T00:00:00.000Z',
+      last_message_from: 'customer',
+    })
+    hideNextConversationSelect = true
+    try {
+      await storeEcho('client-1', OURS, echo())
+    } finally {
+      hideNextConversationSelect = false
+    }
+
+    const rows = conversationRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].last_message_from).toBe('customer')
+    expect(rows[0].last_message_at).toBe('2030-01-01T00:00:00.000Z')
   })
 
   it('moves the clock forward when the echo is later than the customer message', async () => {
