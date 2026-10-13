@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:pending
+done_ref: pr:2567
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 登录后打开付款总览，有过期的出发日整行是淡红底；上线前我在 PM 的 Chrome 里量过计算后的背景色是透明
