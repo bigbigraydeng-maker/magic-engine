@@ -69,7 +69,7 @@ export interface LecturePublishRequest {
   platform: 'facebook' | 'tiktok'
   tiktokReview?: PostReview
   status: 'pending' | 'sending' | 'processing' | 'done' | 'failed'
-  /** Persist before the first upload byte; retries query this task instead of creating another. */
+  /** Persist init receipt immediately; retries query this task and never repeat uncertain init. */
   tiktokPublishId?: string
   tiktokAccountId?: string
   /**
