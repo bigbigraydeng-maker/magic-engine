@@ -31,6 +31,8 @@ import {
 } from '@/lib/messenger/brief'
 import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-buyer-autotag'
 import { inferStagesFromConversations, type StageInferResult } from '@/lib/crm/stage-infer'
+import { inferConversationFacts, type FactsRunResult } from '@/lib/crm/facts/infer'
+import { supabaseFactsIo } from '@/lib/crm/facts/io'
 
 /**
  * 一轮最多写几张卡。**这是花钱的闸** —— 积压会顺着后面几轮慢慢排掉，
@@ -143,6 +145,8 @@ export interface GenerateDueBriefsOptions {
 export interface PostBriefSweepResult {
   qualifiedBuyers: AutoTagResult | { error: string }
   stageInfer: StageInferResult | { error: string }
+  /** AI 读对话存事实（默认关，`CRM_FACTS_CLIENT_IDS` 列了客户才跑）。只写自己的表，不影响名单。 */
+  conversationFacts: FactsRunResult | { error: string }
 }
 
 function toCandidate(row: ConversationRow): BriefCandidate {
@@ -408,7 +412,17 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/stage-infer] 读往来填阶段整轮失败:', err)
   }
 
-  return { qualifiedBuyers, stageInfer }
+  // 存「AI 读对话得出的事实」。只写 conversation_facts 这一张自己的表，这一版名单**不读它**
+  // （PR2 才读）。整轮出错只记一笔，不影响上面两遍。
+  let conversationFacts: FactsRunResult | { error: string }
+  try {
+    conversationFacts = await inferConversationFacts(now, { io: supabaseFactsIo() })
+  } catch (err) {
+    conversationFacts = { error: err instanceof Error ? err.message : String(err) }
+    console.error('[crm/facts] 存对话事实整轮失败:', err)
+  }
+
+  return { qualifiedBuyers, stageInfer, conversationFacts }
 }
 
 /** 把 due 列表切成每段 `BRIEFS_PER_CHUNK` 条。抽出来是为了能直测切法。 */

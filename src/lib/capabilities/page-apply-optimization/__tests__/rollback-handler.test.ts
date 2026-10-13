@@ -45,6 +45,7 @@ const VALID_RUN_INPUT = {
 
 const PREP_OUTPUT = {
   repo_owner: OWNER, repo_name: REPO, default_branch: 'main',
+  page_url: 'https://x.com/page',
   content_path: 'website/x.html',
   page_version_token: BLOB_SHA,
   branch_name: OWNED_BRANCH,
@@ -122,6 +123,7 @@ function makeCap(gh: unknown) {
       contentPaths: ['website/x.html'], plainToken: 't',
     }),
     createGithubClient: () => gh as never,
+    createPageGuard: () => ({ clientId: 'c', assert: async () => undefined }) as never,
   })
 }
 

@@ -122,12 +122,23 @@ export interface CampaignDailyPublishedPost {
   provider_response: Record<string, unknown>
 }
 
+/** How sure we are the Post was NOT created: rejected/rate_limited = definitely not; unknown = it may exist. */
+export type PublishFailureCertainty = 'rejected' | 'rate_limited' | 'unknown'
+
 export interface CampaignDailyPublishFailure {
   date: string
   idempotency_key: string
   error: string
   failed_at: string
+  /** Absent on receipts written before this field existed; readers must treat absent as `unknown`. */
+  certainty?: PublishFailureCertainty
 }
+
+/** Fixed failure text when the publish slot has already passed and the caller forbade an immediate publish. */
+export const MISSED_WINDOW_ERROR = 'MISSED_WINDOW'
+
+/** Fixed failure text when the caller's last-moment check refused the send (e.g. the grant was revoked). Nothing was sent. */
+export const ABORTED_BEFORE_SEND_ERROR = 'ABORTED_BEFORE_SEND'
 
 export interface CampaignDailyPublishPlannedPost {
   date: string
@@ -203,6 +214,7 @@ export const CampaignDailyPublishMetaSchema = z.object({
     idempotency_key: z.string().min(1),
     error: z.string(),
     failed_at: z.string().datetime(),
+    certainty: z.enum(['rejected', 'rate_limited', 'unknown']).optional(),
   })),
   event_ids: z.array(z.string().min(1)),
   date_offset_days: z.number().int().min(-30).max(30).optional(),

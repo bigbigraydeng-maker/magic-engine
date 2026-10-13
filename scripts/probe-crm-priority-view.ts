@@ -1,5 +1,5 @@
 /**
- * 「全部客人」4 段跟进视图的**当场试跑**脚本 —— 对真实数据只读跑一遍装配管道。
+ * 「全部客人」hot / cold 两张名单视图的**当场试跑**脚本 —— 对真实数据只读跑一遍装配管道。
  *
  * ## 为什么在仓库里而不是一次性脚本
  *
@@ -18,24 +18,26 @@
  *
  * ## 它检查什么
  *
- * 1. **没人凭空消失** —— 4 段人数之和必须等于该客户联系人总数。这正是
+ * 1. **没人凭空消失** —— 两张名单人数之和必须等于该客户联系人总数。这正是
  *    2026-08-02「33 位客人在页面上一个字都看不到」那次事故的判据
  *    （见 `lib/crm/worklist-groups.ts` 头注）。
- * 2. **分段只是分组、没有改判** —— 每段人数必须等于该段成员 segment 在旧的
- *    平铺口径下的人数之和。不等说明 `SECTION_OF_SEGMENT` 跟 `segmentContact`
- *    的认知对不上。
+ * 2. **分段只是分组、没有改判** —— 每张名单人数必须等于按 `listOf(segment, intent)`
+ *    从旧平铺口径逐人归堆后的人数之和。不等说明 `listOf` 跟 `segmentContact` 的认知对不上。
+ *    顺带打印「因 AI 判高意向被抬进 hot」的人数（PM 2026-10-10：意向只能往上提）。
  * 3. 打印每段前 3 个抽样，人眼能看出落段合不合理。
  *
  * ## 全程只有 SELECT
  *
- * 三条 `select`，无写操作。安全地对生产跑。
+ * 五条 `select`（多了 conversations / conversation_briefs 两条取 AI 摘要意向），无写操作。安全地对生产跑。
  */
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from '@/lib/crm/contact-model'
 import { segmentContact, SEGMENT_META, type Segment } from '@/lib/crm/segments'
-import { SECTION_OF_SEGMENT, type SectionKey } from '@/lib/crm/list-sections'
+import type { SectionKey } from '@/lib/crm/list-sections'
+import { listOf } from '@/lib/crm/next-action'
+import { loadLatestBriefByContact } from '@/lib/crm/brief-lookup'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 
 /** 默认客户 = CTS。这是脚本参数的缺省值，不是判据 —— 共享代码里没有客户事实。 */
@@ -80,7 +82,8 @@ async function main(): Promise<void> {
         .range(f, t),
     ),
   ])
-  console.log(`INPUT client=${CLIENT_ID} contacts=${contacts.length} touchpoints=${touches.length} stages=${stageRows.length}`)
+  const briefs = await loadLatestBriefByContact(CLIENT_ID)
+  console.log(`INPUT client=${CLIENT_ID} contacts=${contacts.length} touchpoints=${touches.length} stages=${stageRows.length} briefs=${briefs.size}`)
 
   const stageMeta = new Map<string, StageMetaLike>()
   for (const s of stageRows) {
@@ -103,16 +106,22 @@ async function main(): Promise<void> {
     byContact.set(t.contact_id, l)
   }
   const segCount = new Map<Segment, number>()
+  const expected: Record<SectionKey, number> = { hot: 0, cold: 0 }
+  let boosted = 0
   for (const c of contacts) {
     const seg = segmentContact(buildContactModel(c, byContact.get(c.id) ?? [], stageMeta), now)
     segCount.set(seg.segment, (segCount.get(seg.segment) ?? 0) + 1)
+    const intent = briefs.get(c.id)?.intent ?? null
+    const list = listOf(seg.segment, intent)
+    expected[list] += 1
+    if (seg.segment === 'stale_conversation' && list === 'hot') boosted += 1
   }
   console.log('OLD flat segment distribution:')
   for (const s of Object.keys(SEGMENT_META) as Segment[]) {
     console.log(`  ${s.padEnd(20)} ${String(segCount.get(s) ?? 0).padStart(4)}`)
   }
 
-  // 新口径：4 段视图（全部展开好数人头）。
+  // 新口径：hot / cold 两张名单（全部展开好数人头）。
   const { sections } = buildPriorityView(
     {
       contacts,
@@ -120,7 +129,8 @@ async function main(): Promise<void> {
       stageMeta,
       now,
       perPage: 5000,
-      open: { waiting: true, acted: true, queued: true, off_list: true },
+      open: { hot: true, cold: true },
+      briefs,
     },
     (row, ranked) => ({
       id: row.id,
@@ -139,10 +149,9 @@ async function main(): Promise<void> {
   }
   console.log(`SUM sections=${sum} contacts=${contacts.length} match=${sum === contacts.length}`)
 
-  // 交叉核对：每段人数应等于该段成员 segment 的旧口径人数之和。
-  const expected: Record<SectionKey, number> = { waiting: 0, acted: 0, queued: 0, off_list: 0 }
-  for (const [seg, n] of segCount) expected[SECTION_OF_SEGMENT[seg] ?? 'off_list'] += n
-  const got: Record<SectionKey, number> = { waiting: 0, acted: 0, queued: 0, off_list: 0 }
+  // 交叉核对：每张名单人数应等于逐人 listOf(segment, intent) 归堆后的人数之和。
+  console.log(`BOOSTED stale_conversation + AI high intent → hot: ${boosted}`)
+  const got: Record<SectionKey, number> = { hot: 0, cold: 0 }
   for (const s of sections) got[s.key] = s.total
   console.log('CROSSCHECK expected:', JSON.stringify(expected))
   console.log('CROSSCHECK got     :', JSON.stringify(got))

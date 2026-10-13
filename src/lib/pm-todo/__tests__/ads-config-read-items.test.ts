@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 vi.mock('@/lib/seo/url-kind', () => ({ isHtmlPageUrl: () => true }))
 
-import { pushAdsConfigReadItems } from '../manual-monitoring-items'
+import { pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from '../manual-monitoring-items'
 import { loadManualItems } from '../manual-items'
 import type { ManualItem } from '../manual-item-types'
 
@@ -116,7 +116,7 @@ describe('pushAdsConfigReadItems', () => {
  *    「声明了没接上」。这条钉住接线本身。
  */
 describe('loadManualItems 接上了 pushAdsConfigReadItems', () => {
-  function wholeDbFake() {
+  function wholeDbFake(withAutoPause = false) {
     const from = (table: string) => {
       const filters: Record<string, unknown> = {}
       const chain: Record<string, unknown> = {}
@@ -145,6 +145,9 @@ describe('loadManualItems 接上了 pushAdsConfigReadItems', () => {
             error: null,
           })
         }
+        if (withAutoPause && table === 'flywheel_actions' && filters.action_type === 'ads.auto_pause_on_d3') {
+          return res({ data: [{ client_id: 'c2', payload: { config_read_error: 'timeout' } }], error: null })
+        }
         return res({ data: [], error: null })
       }
       return chain
@@ -160,5 +163,61 @@ describe('loadManualItems 接上了 pushAdsConfigReadItems', () => {
     expect(hit).toHaveLength(1)
     expect(hit[0].what).toContain('1 个客户')
     vi.restoreAllMocks()
+  })
+
+  it('自动暂停自己读失败的回执 → 完整构建出来的今日待办里也有一条', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const items = await loadManualItems(wholeDbFake(true), NOW)
+    const hit = items.filter((i) => i.kind === 'ads_config_unreadable' && i.what.includes('坏广告自动暂停有'))
+    expect(hit).toHaveLength(1)
+    vi.restoreAllMocks()
+  })
+})
+
+describe('pushAdsAutoPauseConfigReadItems', () => {
+  function fakeReceipts(rows: Array<{ client_id: string; payload: unknown }>, queryError: string | null = null) {
+    const calls: Array<[string, unknown[]]> = []
+    const chain = {
+      select: (...a: unknown[]) => { calls.push(['select', a]); return chain },
+      eq: (...a: unknown[]) => { calls.push(['eq', a]); return chain },
+      gte: (...a: unknown[]) => { calls.push(['gte', a]); return chain },
+      not: (...a: unknown[]) => { calls.push(['not', a]); return chain },
+      limit: async () => ({ data: rows, error: queryError ? { message: queryError } : null }),
+    }
+    const client = { from: (t: string) => { calls.push(['from', [t]]); return chain } } as unknown as SupabaseClient
+    return { client, calls }
+  }
+
+  it('30 小时内有读设置失败的回执 → 一条系统欠账，按客户去重，客户 id 不进邮件', async () => {
+    const { client, calls } = fakeReceipts([
+      { client_id: 'c1', payload: { config_read_error: 'canceling statement due to timeout (c0000000-0000-0000-0000-000000000000)' } },
+      { client_id: 'c1', payload: { config_read_error: 'timeout' } },
+      { client_id: 'c2', payload: { config_read_error: 'timeout' } },
+    ])
+    const items: ManualItem[] = []
+    await pushAdsAutoPauseConfigReadItems(client, items, NOW)
+
+    expect(calls).toContainEqual(['from', ['flywheel_actions']])
+    expect(calls).toContainEqual(['eq', ['action_type', 'ads.auto_pause_on_d3']])
+    expect(calls).toContainEqual(['gte', ['created_at', '2026-09-25T03:00:00.000Z']])
+    expect(calls).toContainEqual(['not', ['payload->>config_read_error', 'is', null]])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'ads_config_unreadable', client_id: 'infra' })
+    expect(items[0].what).toContain('2 个客户')
+    expect(items[0].what).toContain('canceling statement due to timeout')
+    expect(items[0].what).not.toContain('c0000000-0000-0000-0000-000000000000')
+  })
+
+  it('没有这类回执 → 不下发', async () => {
+    const { client } = fakeReceipts([])
+    const items: ManualItem[] = []
+    await pushAdsAutoPauseConfigReadItems(client, items, NOW)
+    expect(items).toEqual([])
+  })
+
+  it('查询本身出错 → 抛出（不能当成「没问题」）', async () => {
+    const { client } = fakeReceipts([], 'permission denied')
+    await expect(pushAdsAutoPauseConfigReadItems(client, [], NOW)).rejects.toThrow('permission denied')
   })
 })

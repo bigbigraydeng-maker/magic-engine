@@ -128,3 +128,21 @@
 - **有没有把客户事实写进 shared runtime**：没有（`footageScrim` 是通用倍数，无任何客户内容）。
 - **学习层级**：仍在 CTS 客户私有层。可泛化的一条经验（**「下半屏太暗」先量素材本身再动模板；真要动模板，加可选倍数参数、证明默认不变**）已在第二版经验里存在，是否升进通用手册由统筹定。
 - **与层级门判定是否一致**：一致。工单参数 = L4 客户配置；`footageScrim` 是对已有 L2 模板的最小可选扩展，没有新增能力线。
+
+## 九、发布前置项完成情况（PM 通过后补齐，2026-10-10）
+
+PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`，通过人 bigbigraydeng@gmail.com，2026-10-10 03:48 UTC）。**【2026-10-11 更正】我当时写「通过就是发布授权、会自动对外发布」是错的。** 实际情况：每小时第 5 分钟的 `factory-publish-worker` 确实在 2026-10-10 04:05 UTC 领走了它，工单状态变 `published`；但 Render 上没设 `FACTORY_PUBLISH_LIVE=true`，发布器处在**草稿模式**（以 `video_state=DRAFT` 上传），Facebook 返回 `video_state: DRAFT`、永久链接 `/reel/2309146606576700/`。**也就是说这条 Reel 躺在 CTS 主页的后台草稿里，没有对外公开**；工单状态写 `published` 不等于公众能看到。要让它公开，需 PM 明确点头后，用已有的 `promoteReelToPublished`（同一接口把状态改成 PUBLISHED，不重新上传）只转正这一条；不建议打开全局开关（会影响所有客户）。本轮把第六节的前置项在它领走之前补齐：
+
+| 前置项 | 结果 |
+|---|---|
+| 素材来源记录 | 已写 Dropbox `CTS/remotion-assets/clips/credits-v5.json`（5 条）：苏州、西湖是 Unsplash 带出处；浦东夜景航拍、上海日景是 Dropbox 素材库内、更上游来源**未知**（按 PM 10-05/06 口径 Dropbox 内视为已授权）；外滩是库存素材 `v_bund_36546365` 加工，库存清单里没有它的条目，只有文件名里的编号。**这两处「未知」如实保留，没有编造出处** |
+| 授权当天重抓官网 | 2026-10-10 重抓：NZD $2,699 per person twin share；单人房差 `Own room + NZD $400`；10 Days；`Next confirmed departure 25 March 2027`；`International and domestic airfares`；7 晚、5 家酒店；13 餐；`English-speaking tour guide`。与成片、首评、正文一致，无变化 |
+| 首评原文与追踪链接 | 用工厂自己的 `buildReelFirstComment` 按工单生成（未手改）：`Full itinerary and inclusions` / `10 days from Auckland · NZD $2,699 per person, twin share · Next departure 25 March 2027` / 官网行程页链接，带 `utm_source=facebook`、`utm_medium=organic_social`、`utm_campaign=me_factory_reel`、`utm_content=fa4fdd89-…`。**苏东坡复审：通过，无必改项**（每句标官网可溯；正文无免签/domestic/max 18/25 years/1928/加号；`Flights` 足够安全）。我没有真实点击该链接验证落地页 |
+| 机票、免签措辞 | 正文只写 `Flights`；官网横幅「免签到 2026-12-31」早于出发日，帖子与评论回复都不提 |
+| 只发终版 | 授权的是 `fa4fdd89`；`2153778a`（r1）和 `cda1d205`（第二版）仍是 `in_review`，没有授权 |
+
+**苏东坡可选建议（未采纳，不影响事实）**：正文可把价格句提前，让信息流预览先露出价格；`Flights` 想更保守可改 `Airfares`。已记录，发布后看数据再说。
+
+### 十、2026-10-11 已对外公开
+
+PM 回复「发这一条」后：①草稿（2309146606576700）改为公开，Facebook 返回 `published:true`、`publish_status: published`、公开时间 2026-10-11 04:35 UTC；②补发首评（带追踪参数的行程链接，评论 id `2309146606576700_2565567933954188`）；③工单 `fa4fdd89` 的 `published_ref` 更新为 `video_state: PUBLISHED`；④未登录访问 `facebook.com/reel/2309146606576700/` 返回 HTTP 200（页面是否真正播放需人眼看）。**系统自带的 `promoteReelToPublished` 对已上传草稿会报 `1363130 Video Upload Is Missing`，没有改动任何东西；这次用 `POST /{video_id}` 带 `published=true` 成功。** 没有起广告、没有联系客户。
