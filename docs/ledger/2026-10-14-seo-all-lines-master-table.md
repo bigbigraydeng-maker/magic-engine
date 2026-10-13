@@ -1,6 +1,6 @@
 ---
 id: 2026-10-14-seo-all-lines-master-table
-title: SEO 全线总表第 1 版写好（13 条线、冲突 6 处、要 PM 回答的 8 个问题已排队），交 18 号统筹
+title: SEO 全线总表第 1 版写好（13 条线、冲突 6 处、要 PM 回答的问题已瘦身为 3 个），交 18 号统筹
 status: done
 owner: agent
 decided_on: 2026-10-14
