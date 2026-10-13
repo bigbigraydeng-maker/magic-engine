@@ -38,6 +38,13 @@ export interface AdStrategyConfig {
  */
 export type ConfigSource = 'row' | 'default' | 'fallback'
 
+/** A config plus where it came from; `error` is set only when source is 'fallback'. */
+export interface LoadedAdStrategyConfig {
+  config: AdStrategyConfig
+  source: ConfigSource
+  error?: string
+}
+
 /** 缺行默认：引擎开、日报到全局收件箱；autonomy_mode 一律 observe（spec 2026-09-24 §14 M4：缺行按锁定处理，绝不默认放开动钱）。 */
 export function defaultConfig(clientId: string): AdStrategyConfig {
   return {
@@ -94,7 +101,7 @@ export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
  */
 export async function loadAdStrategyConfigWithSource(
   clientId: string,
-): Promise<{ config: AdStrategyConfig; source: ConfigSource; error?: string }> {
+): Promise<LoadedAdStrategyConfig> {
   const { data, error } = await supabaseAdmin
     .from('ad_strategy_configs')
     .select('client_id, enabled, digest_recipients, daily_budget_cap_cents, autonomy_mode, creative_pool, autopilot_enabled, autopilot_dry_run')

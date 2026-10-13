@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-11
 done_on: 2026-10-11
-done_ref: pr:2439
+done_ref: pr:2446
 source: session:1a85e0eb
 verify_how: 正式环境未登录访问团目录接口返回 401；正式库里团目录 11 张表全部开启权限保护、匿名零权限、团数据为 0 条
 ---

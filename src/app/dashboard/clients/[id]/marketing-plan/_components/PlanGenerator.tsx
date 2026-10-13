@@ -221,7 +221,7 @@ export function PlanGenerator({ clientId, onGenerated, onCancel, initiativeId, d
             </select>
             {campaigns.length === 0 && (
               <p className="text-[11px] text-amber-600 mt-1">
-                ⚠ 没有活跃 Campaign — 建议先在客户主页创建一个推广活动以提供清晰目标
+                ⚠ 没有活跃 Campaign — 建议先在客户的「推广活动」页面创建一个推广活动以提供清晰目标
               </p>
             )}
           </div>

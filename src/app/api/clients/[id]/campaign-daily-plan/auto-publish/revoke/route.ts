@@ -25,6 +25,7 @@ import {
   DAILY_PLAN_AUTO_PUBLISH_REVOKED_EVENT,
 } from '@/lib/campaign/daily-plan-auto-publish'
 import { revokeAuthorization } from '@/lib/campaign/daily-plan-auto-publish-store'
+import { readAutoPublishRecords } from '@/lib/campaign/daily-plan-auto-publish-records'
 import { CampaignDailyPublishMetaSchema } from '@/lib/campaign/daily-plan-publish'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -114,6 +115,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // wrapped so a read failure cannot fail the response.
   let inFlight: InFlightPost[] = []
   let inFlightStatus: 'OK' | 'UNKNOWN' = 'UNKNOWN'
+  const receiptPostIds = new Set<string>()
   try {
     const { data, error } = await supabaseAdmin
       .from('social_plans')
@@ -135,6 +137,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         inFlightStatus = 'OK'
       } else if (metaParsed.success) {
         const now = Date.now()
+        for (const post of metaParsed.data.published) receiptPostIds.add(post.post_id)
         inFlight = metaParsed.data.published
           .filter(post => {
             if (post.scheduled_publish_time === undefined) return false
@@ -154,6 +157,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     inFlightStatus = 'UNKNOWN'
   }
 
+  // The publisher's own records can know about posts the receipt does not (a receipt write that failed after
+  // Facebook accepted the post) and about dates whose outcome nobody has confirmed. A failed read is UNKNOWN.
+  const records = await readAutoPublishRecords({
+    planId: command.plan_id,
+    clientId,
+    dates: revoked.dates,
+    receiptPostIds,
+  })
+  if (records.status === 'UNKNOWN') inFlightStatus = 'UNKNOWN'
+  const nowMs = Date.now()
+  for (const post of records.posts) {
+    const at = post.scheduled_publish_time === null ? NaN : Date.parse(post.scheduled_publish_time)
+    if (!Number.isNaN(at) && at > nowMs) {
+      inFlight.push({ date: post.date, post_id: post.post_id, scheduled_publish_time: post.scheduled_publish_time as string })
+    }
+  }
+
   return NextResponse.json({
     success: true,
     mode: 'REVOKED',
@@ -161,6 +181,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     event_status: eventStatus,
     in_flight: inFlight,
     in_flight_status: inFlightStatus,
+    in_flight_unconfirmed: records.unconfirmed,
     note: 'Posts already submitted to Facebook stay scheduled until they are recalled.',
   })
 }

@@ -8,6 +8,11 @@ import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/s
 import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
 import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
 import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB } from '../gsc/page-daily-plan'
+import {
+  GSC_QUERY_PAGE_DAILY_CRON,
+  GSC_QUERY_PAGE_DAILY_JOB,
+  GSC_QUERY_PAGE_DAILY_PULL_JOB,
+} from '../gsc/query-page-daily-store'
 import { META_CYCLE_CRON } from '@/lib/seo-meta/cycle/roster'
 import { RANK_SAMPLER_CRON, RANK_SAMPLER_JOB } from '@/lib/seo-meta/cycle/rank-sampler'
 import { STEP6_JOB_NAME } from '@/lib/seo-meta/cycle/receipts'
@@ -440,6 +445,21 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
     expect(entry!.scheduler).toBe('inngest')
     expect(entry!.schedule, 'the pull entry must follow GSC_PAGE_DAILY_CRON (its upstream fan-out)').toBe(GSC_PAGE_DAILY_CRON)
     expect(entry!.outputTables).toBeUndefined()
+  })
+
+  it('🔴 GSC per-(query, page) daily: own schedule constant, own job names, own receipts table', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_QUERY_PAGE_DAILY_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_QUERY_PAGE_DAILY_JOB} entry`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, 'the registry schedule differs from GSC_QUERY_PAGE_DAILY_CRON').toBe(GSC_QUERY_PAGE_DAILY_CRON)
+    expect(entry!.outputTables).toEqual([
+      { table: 'gsc_query_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' },
+    ])
+    const pull = CRON_REGISTRY.find((e) => e.jobName === GSC_QUERY_PAGE_DAILY_PULL_JOB)
+    expect(pull, `CRON_REGISTRY has no ${GSC_QUERY_PAGE_DAILY_PULL_JOB} entry`).toBeDefined()
+    expect(pull!.schedule).toBe(GSC_QUERY_PAGE_DAILY_CRON)
+    // None of the four job names may coincide: a shared name would let one chain hide the other's failures.
+    expect(new Set([GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB, GSC_QUERY_PAGE_DAILY_JOB, GSC_QUERY_PAGE_DAILY_PULL_JOB]).size).toBe(4)
   })
 
   it('🔴 SEO 改标题周一主链：周期不许手抄，且必须登记（没登记 = 它安静地不跑时没人喊）', () => {
