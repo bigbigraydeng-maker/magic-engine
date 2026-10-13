@@ -183,6 +183,37 @@ describe('GET /api/cron/keyword-snapshots-weekly', () => {
     expect(json.results[1].watch).toBeUndefined()
   })
 
+  it('clients without rank_watch_keywords keep the original path: no watch call, no watch fields', async () => {
+    mockClientsQuery.mockResolvedValueOnce({
+      data: [
+        { id: 'client-none', domain: 'n.co.nz', semrush_db: 'nz' },
+        { id: 'client-null', domain: 'm.co.nz', semrush_db: 'nz', seo_config: null },
+        { id: 'client-empty', domain: 'e.co.nz', semrush_db: 'nz', seo_config: { rank_watch_keywords: [] } },
+        { id: 'client-junk', domain: 'j.co.nz', semrush_db: 'nz', seo_config: { rank_watch_keywords: 'not-an-array' } },
+      ],
+      error: null,
+    })
+    mockSnapshotRankedKeywordsForClient.mockResolvedValue({
+      client_id: 'x', domain: 'x', location_code: 2554, keywords_seen: 10, snapshots_written: 10,
+    })
+
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET))
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(mockSnapshotWatched).not.toHaveBeenCalled()
+    expect(mockSnapshotRankedKeywordsForClient).toHaveBeenCalledTimes(4)
+    expect(mockCaptureSerpForClient).toHaveBeenCalledTimes(4)
+    expect(json.snapshots_written).toBe(40)
+    expect(json.failed).toBe(0)
+    for (const r of json.results) {
+      expect(r).not.toHaveProperty('watch')
+      expect(r).not.toHaveProperty('watch_error')
+      expect(r).toHaveProperty('serp')
+    }
+  })
+
   it('a watch-keyword failure is recorded but does not undo or fail the main snapshot', async () => {
     mockClientsQuery.mockResolvedValueOnce({
       data: [{ id: 'client-a', domain: 'a.co.nz', semrush_db: 'nz', seo_config: { rank_watch_keywords: ['alpha trip'] } }],
