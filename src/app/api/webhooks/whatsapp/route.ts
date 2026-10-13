@@ -32,8 +32,11 @@
  * Inbound is classified (`lib/whatsapp/inbound-classify.ts`): customer messages
  * → storeMessage (unchanged); staff-phone echoes → storeEcho (outbound message,
  * no opt-out check, no event, never moves the customer clock); failed delivery
- * statuses → applyFailedStatus; history → refused with 503 until the history
- * inbox ships (it is delivered once, so it must not be acknowledged).
+ * statuses → applyFailedStatus; history → stored metadata-only into
+ * `whatsapp_history_inbox` ("to be claimed"; no contacts, conversations,
+ * touchpoints or events). A history chunk whose shape we do not recognise is
+ * still refused with 503 so Meta redelivers — and the Meta app must NOT be
+ * subscribed to the `history` field before the migration is applied.
  */
 
 import { createHmac, timingSafeEqual } from 'crypto'
@@ -67,6 +70,8 @@ import {
   type WhatsAppReferral,
 } from '@/lib/whatsapp/inbound-classify'
 import { storeEcho, applyFailedStatus } from '@/lib/whatsapp/inbound-handlers'
+import { storeHistoryChunks } from '@/lib/whatsapp/history-intake'
+import { recordUnclaimedNumber, type UnclaimedKind } from '@/lib/whatsapp/unclaimed'
 
 export const dynamic = 'force-dynamic'
 
@@ -480,8 +485,10 @@ async function withClient(
   phoneNumberId: string,
   count: number,
   what: string,
+  kind: UnclaimedKind,
   failures: string[],
   fn: (clientId: string) => Promise<void>,
+  retryIfUnmapped = false,
 ): Promise<void> {
   const lookup = await resolveClientId(phoneNumberId)
   if (!lookup.ok) {
@@ -497,22 +504,79 @@ async function withClient(
       // must not hold up the delivery — but it is a real configuration hole
       // AND a real customer message being lost.
       //
-      // TODO(#1331): this currently dead-ends in a log line, which 铁律 3
-      // 下半 forbids. It needs to reach 「🙋 需要你动手」 via
-      // lib/pm-todo/manual-items.ts. Deferred out of this PR because the
-      // signal has nowhere to persist yet — by definition we do not know
-      // which client to attach it to, so it needs its own store. Both
-      // reviewers agreed this is a follow-up, not a merge blocker, since
-      // the alternative (503 forever) would take the whole subscription
-      // down over one client's misconfiguration.
+      // TODO(#1331): the number is now registered in
+      // `whatsapp_unclaimed_numbers` and surfaces as a to-do via
+      // `lib/pm-todo/whatsapp-unclaimed-items.ts`, so it no longer dead-ends
+      // in a log line (铁律 3 下半). The log line stays as the immediate
+      // signal; the registry is what a human actually sees.
+      await recordUnclaimedNumber(phoneNumberId, kind)
       console.error(
         `[webhooks/whatsapp] no client mapped to phone_number_id=${phoneNumberId} ` +
           `— ${count} ${what} dropped. Set clients.whatsapp_phone_number_id.`,
       )
+      if (retryIfUnmapped) {
+        // History is delivered exactly once, so a 200 here would lose it for
+        // good. Hold it back (503) so Meta redelivers once someone binds the
+        // number.
+        console.error(
+          `[webhooks/whatsapp] ${what} held back (503) until a client binds this number`,
+        )
+        failures.push(`unclaimed:${phoneNumberId}`)
+      }
     }
     return
   }
   await fn(lookup.clientId)
+}
+
+/**
+ * Handle a `history` change: store metadata-only rows into
+ * `whatsapp_history_inbox`, refuse an unrecognised chunk shape, and acknowledge
+ * media follow-ups without storing them.
+ *
+ * History is delivered exactly once, so anything we cannot store must produce a
+ * failure entry (503) rather than a silent 200.
+ */
+async function handleHistory(
+  change: Extract<ReturnType<typeof classifyInboundChanges>[number], { kind: 'history' }>,
+  failures: string[],
+): Promise<void> {
+  const unrecognised = change.itemCount - change.chunks.length - change.mediaFollowUps
+  if (unrecognised > 0) {
+    console.error(
+      '[webhooks/whatsapp] history chunk shape not recognised — refusing so Meta redelivers',
+    )
+    failures.push('history_unrecognised')
+  }
+
+  if (change.mediaFollowUps > 0) {
+    console.log(
+      `[webhooks/whatsapp] history media follow-up acknowledged but not stored (count=${change.mediaFollowUps})`,
+    )
+  }
+
+  if (change.chunks.length > 0) {
+    await withClient(
+      change.phoneNumberId,
+      change.chunks.length,
+      'history chunk(s)',
+      'history',
+      failures,
+      async (clientId) => {
+        try {
+          await storeHistoryChunks(
+            clientId,
+            { phoneNumberId: change.phoneNumberId, displayNumber: change.displayNumber },
+            change.chunks,
+          )
+        } catch {
+          console.error('[webhooks/whatsapp] history intake failed')
+          failures.push('history_failed')
+        }
+      },
+      true,
+    )
+  }
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -584,7 +648,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   for (const change of classifyInboundChanges(payload)) {
     switch (change.kind) {
       case 'customer_messages': {
-        await withClient(change.phoneNumberId, change.messages.length, 'message(s)', failures, async (clientId) => {
+        await withClient(change.phoneNumberId, change.messages.length, 'message(s)', 'customer_messages', failures, async (clientId) => {
           for (const msg of change.messages) {
             try {
               await storeMessage(clientId, msg, change.contactName)
@@ -599,7 +663,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       case 'echoes': {
-        await withClient(change.phoneNumberId, change.echoes.length, 'staff-phone echo(es)', failures, async (clientId) => {
+        await withClient(change.phoneNumberId, change.echoes.length, 'staff-phone echo(es)', 'echoes', failures, async (clientId) => {
           for (const echo of change.echoes) {
             try {
               const result = await storeEcho(
@@ -622,7 +686,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         // client lookup (a lookup error would otherwise 503 a harmless receipt).
         const failed = change.statuses.filter((s) => s.status === 'failed')
         if (failed.length === 0) break
-        await withClient(change.phoneNumberId, failed.length, 'failed-delivery receipt(s)', failures, async (clientId) => {
+        await withClient(change.phoneNumberId, failed.length, 'failed-delivery receipt(s)', 'statuses', failures, async (clientId) => {
           for (const status of failed) {
             try {
               await applyFailedStatus(clientId, status)
@@ -636,12 +700,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       case 'history': {
-        // Meta delivers history exactly once, so a 200 here would lose it for
-        // good. Refuse until the history inbox ships.
-        console.error(
-          '[webhooks/whatsapp] history delivery received but history intake is not enabled yet — refusing so Meta redelivers',
-        )
-        failures.push('history_not_enabled')
+        await handleHistory(change, failures)
         break
       }
 
