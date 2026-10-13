@@ -25,6 +25,34 @@ export function saveReturnQuery(clientId: string, search: string): void {
   }
 }
 
+const NAME_KEY_PREFIX = 'crm-deeplink-name:'
+
+/**
+ * Remember a guest's name for the next page, so the guest list can search for them when they are not
+ * on the page it loads first. The name goes through sessionStorage (not the address bar) because it
+ * is personal data. Without storage the link still works for guests on the first page.
+ */
+export function stashContactName(clientId: string, contactId: string, name: string | null): void {
+  try {
+    const key = `${NAME_KEY_PREFIX}${clientId}:${contactId}`
+    if (name && name.trim().length > 0) window.sessionStorage.setItem(key, name.trim())
+  } catch {
+    // storage blocked: only guests already on the first page can be opened
+  }
+}
+
+/** Read and remove the name saved by stashContactName (null when none). */
+export function takeContactName(clientId: string, contactId: string): string | null {
+  try {
+    const key = `${NAME_KEY_PREFIX}${clientId}:${contactId}`
+    const v = window.sessionStorage.getItem(key)
+    window.sessionStorage.removeItem(key)
+    return v
+  } catch {
+    return null
+  }
+}
+
 /** Where 「← 回付款进度」 goes: the payments page plus the saved query string, if it still looks like one. */
 export function paymentsReturnHref(clientId: string): string {
   const base = `/dashboard/clients/${clientId}/crm/payments`

@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { MUTED_TEXT, SECONDARY_BUTTON } from '../../_components/bookings/booking-styles'
+import { stashContactName } from '../../_components/bookings/payments-return'
 import { dateLabel, milestoneCellText } from './payments-format'
 import type { OverviewListRow } from '@/lib/crm/booking-overview-types'
 
@@ -96,6 +97,7 @@ function OrderRow(props: OrderRowProps): JSX.Element {
           className="inline-flex min-h-[40px] items-center font-bold underline focus-visible:ring-2 focus-visible:ring-me-ochre"
           onClick={(e) => {
             e.stopPropagation()
+            stashContactName(props.clientId, row.contactId, row.contactName)
             props.onLeave()
           }}
         >
