@@ -32,9 +32,12 @@ import { libaiCopyProvenance } from './libai-copy-provenance'
 import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
+import { gscQueryPageDailyFanOut, gscQueryPageDailyPull } from './gsc-query-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
+import { storyLitePublish } from './story-lite-publish'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
+import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 
 export const cloudFunctions = [
   webIntelligenceCapture,
@@ -80,11 +83,16 @@ export const cloudFunctions = [
   simaqianReputationWeekly,
   gscPageDailyFanOut,
   gscPageDailyPull,
+  gscQueryPageDailyFanOut,
+  gscQueryPageDailyPull,
   toolsLabLeadFollowUp,
   toolsLabReportEmailReceipt,
   dailyPlanAutoPublish,
+  storyLitePublish,
   telephonyVoiplineProcess,
   telephonyVoiplineSweep,
+  telephonyCallAnalysis,
+  telephonyCallAnalysisSweep,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

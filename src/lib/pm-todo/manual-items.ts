@@ -33,11 +33,13 @@ import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
 import { pushAutoPublishItems } from './auto-publish-items'
+import { pushStoryLiteItems } from './story-lite-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { foldRootCauseDuplicates } from './dedupe-root-cause'
 import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
@@ -137,7 +139,8 @@ export async function loadManualItems(
   }
   // 两组同时跑，拼回时仍是「基础设施在前、客户通道在后」的原顺序（见 runPushers 头注）
   await runPushers(items, [...infra, ...clientPushers(supabase, clients, now)])
-  return items
+  // 同一个根因报了很多次的折成一次（AI 余额用完 → 各客户体检全挂只是症状；授权断了 + 同步失败 = 同一修法）
+  return foldRootCauseDuplicates(items).items
 }
 
 /** 跟客户名单无关的检查（余额、断电、定时任务、授权、钥匙……），客户表读挂了也照跑。 */
@@ -316,6 +319,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 自动发布没发出去 / 不确定发没发出去 / 已授权却没动静 —— 人不在场，不捞出来没人知道
     (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
       console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // Story 自动发布没发出去 / 不知道发没发出去 / 已授权却没动静
+    (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
     // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
     (b) => pushPrescriptionItems(supabase, b, now, nameOf),
