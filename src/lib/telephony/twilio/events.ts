@@ -35,6 +35,11 @@ function ts(v: string | undefined): string | null {
 export interface TwilioParseOptions {
   /** 来电转给的员工号码（E.164），也就是员工分机表的键。 */
   forwardTo: string | null
+  /**
+   * 点击外呼：对方（客户）号码，来自我们自己生成并经 Twilio 验签的回调地址。
+   * 有它才处理外呼方向；没有就像以前一样只留档（外呼那条父通话的 To 是员工手机，不是客户）。
+   */
+  outboundCounterparty?: string | null
 }
 
 export function parseTwilioEvent(
@@ -48,10 +53,11 @@ export function parseTwilioEvent(
 
   const dir = (s(p.Direction) ?? '').toLowerCase()
   const direction = dir === 'inbound' ? 'inbound' : dir.startsWith('outbound') ? 'outbound' : null
-  const counterparty = direction === 'inbound' ? s(p.From) : direction === 'outbound' ? s(p.To) : null
+  const clickToCall = direction === 'outbound' && !!opts.outboundCounterparty
+  const counterparty = direction === 'inbound' ? s(p.From) : clickToCall ? (opts.outboundCounterparty as string) : direction === 'outbound' ? s(p.To) : null
 
-  // 本期只做来电。外呼方向的回调（别处用 API 外呼并把状态回调指到这里）只留档，不进 CRM。
-  const keepOut = direction === 'outbound'
+  // 外呼方向：只有点击外呼（带验签后的客户号码）才进 CRM；别处用 API 外呼并指到这里的回调只留档。
+  const keepOut = direction === 'outbound' && !clickToCall
 
   const base: NormalisedCallEvent = {
     callId: callSid,
@@ -61,7 +67,7 @@ export function parseTwilioEvent(
     occurredAt: ts(p.Timestamp),
     counterpartyNumber: counterparty,
     counterpartyName: direction === 'inbound' ? s(p.CallerName) : null,
-    extension: opts.forwardTo,
+    extension: clickToCall ? s(p.To) : opts.forwardTo,
     extensionName: null,
     answered: null,
     talkSeconds: null,

@@ -45,6 +45,9 @@ const STALLED_LOOKBACK_DAYS = 14
 /** 这些状态是「没发出去」的。 */
 const STALLED_STATUSES = new Set(['FAILED', 'BLOCKED', 'MISSED'])
 
+/** A person took this story out on purpose (reason code starts with this): that is not a failure to chase. */
+const REMOVED_BY_PERSON_PREFIX = 'PM_REMOVED'
+
 /** True for a plain object (not null, not an array). */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -181,6 +184,7 @@ function groupStalled(rows: StoryItemRow[], now: Date): ClientStalled[] {
   const groups = new Map<string, ClientStalled>()
   for (const row of rows) {
     if (!STALLED_STATUSES.has(row.status)) continue
+    if (row.reason_code?.startsWith(REMOVED_BY_PERSON_PREFIX)) continue
     if (row.slot_at.slice(0, 10) < cutoff) continue
     const cur = groups.get(row.client_id) ?? { clientId: row.client_id, stamps: [], reasons: [] }
     const stamp = nzStamp(row.slot_at)

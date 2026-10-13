@@ -1,12 +1,11 @@
-import { createHash } from 'crypto'
+import { snapshotReviewedTikTokVideo, storedTikTokSourcePath } from '@/lib/tiktok/publish-source'
 import { inspectTikTokVideo } from '@/lib/tiktok/video-proof'
 import { validateReview, type CreatorInfo, type PostReview } from '@/lib/tiktok/post-review'
 /**
  * TikTok 发布 —— Content Posting API(直接发布)。
  *
- * 为什么是分块直传,不是给个链接让 TikTok 自己来拉:
- * TikTok 的「拉取链接」模式要求先在开发者后台**验证域名归属**。我们的成片放在存储服务上,
- * 域名不是我们的,验证不了。所以只能自己把文件推过去(init 拿上传地址 → 分块 PUT → 轮询状态)。
+ * 服务端成片通过已验证 URL 前缀让 TikTok 拉取。用户确认后先固化核验过的字节，
+ * 防止审核预览与平台拉取之间的原始文件覆盖；副本不在 init 后删除。
  *
  * ⚠️ 应用没过 TikTok 审核之前,发出去的片子一律只有作者自己可见 —— 这是 TikTok 定的,
  * 不是我们的开关。所以「发成功了」和「别人看得到」在过审前是两件事,界面上必须说清楚。
@@ -123,17 +122,12 @@ export async function publishToTikTok(params: {
 
   const creator = await getTikTokCreatorInfo(params.clientId, token)
   if (!params.review) throw new Error('请先确认 TikTok 发布设置')
+  storedTikTokSourcePath(params.videoUrl, params.clientId)
   const videoProof = await inspectTikTokVideo(params.videoUrl)
   const reviewed = validateReview(params.review, {...creator,videoProof}, params.videoUrl)
   if (reviewed.privacy !== params.privacy) throw new Error('发布范围与确认记录不一致')
 
-  // 先摸一下文件多大 —— init 必须先报准确的字节数,报错了整个上传作废
-  const head = await fetch(params.videoUrl, { method: 'HEAD' })
-  const videoSize = Number(head.headers.get('content-length') ?? 0)
-  if (!Number.isFinite(videoSize) || videoSize <= 0) {
-    throw new Error(`取不到成片大小(${head.status}) —— 无法上传`)
-  }
-  const { chunkSize, totalChunks } = planChunks(videoSize)
+  const pullUrl = await snapshotReviewedTikTokVideo(params.videoUrl, params.clientId, reviewed.videoSha256)
 
   const init = await post('/post/publish/video/init/', token.accessToken, {
     post_info: {
@@ -145,60 +139,17 @@ export async function publishToTikTok(params: {
       brand_organic_toggle: reviewed.ownBrand,
       brand_content_toggle: reviewed.brandedContent,
     },
-    source_info: {
-      source: 'FILE_UPLOAD',
-      video_size: videoSize,
-      chunk_size: chunkSize,
-      total_chunk_count: totalChunks,
-    },
+    source_info: { source: 'PULL_FROM_URL', video_url: pullUrl },
   })
 
-  const data = (init['data'] ?? {}) as { publish_id?: string; upload_url?: string }
-  if (!data.publish_id || !data.upload_url) {
-    throw new Error(`TikTok init 没给上传地址: ${JSON.stringify(init)}`)
-  }
-
-  // Persist the provider task before uploading; persistence failure must stop delivery.
-  await params.onInitialized?.(data.publish_id, token.openId)
-
-  // 分块推过去。逐块从存储按 Range 取、立刻转发,不把整条片读进内存 ——
-  // 一次性读进来正是之前把做片进程撑爆的原因(160MB 录像静默 OOM)。
-  const uploadHash = createHash('sha256')
-  for (let i = 0; i < totalChunks; i++) {
-    const { start, end } = chunkRange(i, totalChunks, chunkSize, videoSize)
-    const part = await fetch(params.videoUrl, { headers: { Range: `bytes=${start}-${end}` } })
-    if (!part.ok || !part.body) throw new Error(`取第 ${i + 1} 块失败 ${part.status}`)
-    const expectedBytes = end - start + 1
-    if ((totalChunks > 1 && part.status !== 206) || (part.status === 206 && part.headers.get('content-range') !== `bytes ${start}-${end}/${videoSize}`)) throw new Error('成片服务器未返回正确的视频分块')
-    const reader = part.body.getReader()
-    const chunks: Uint8Array[] = []
-    let received = 0
-    try {
-      for (;;) {
-        const chunk = await reader.read()
-        if (chunk.done) break
-        received += chunk.value.byteLength
-        if (received > expectedBytes) throw new Error('成片分块超过预期大小')
-        chunks.push(chunk.value)
-      }
-    } finally { await reader.cancel().catch(() => {}) }
-    if (received !== expectedBytes) throw new Error('成片分块不完整')
-    const buf = Buffer.concat(chunks)
-    uploadHash.update(buf)
-    if (i === totalChunks - 1 && uploadHash.digest('hex') !== reviewed.videoSha256) throw new Error('上传时成片内容已改变，发布已停止')
-    const up = await fetch(data.upload_url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Length': String(buf.length),
-        'Content-Range': `bytes ${start}-${end}/${videoSize}`,
-      },
-      body: buf,
-    })
-    // 201 = 收完最后一块;206 = 收下了还等后面的。其它都算失败。
-    if (up.status !== 201 && up.status !== 206 && up.status !== 200) {
-      throw new Error(`上传第 ${i + 1}/${totalChunks} 块失败 ${up.status}: ${await up.text().catch(() => '')}`)
-    }
+  const data = (init['data'] ?? {}) as { publish_id?: string }
+  if (!data.publish_id) throw new Error('TikTok init 未返回发布编号')
+  // PULL init already starts retrieval. A failed receipt write is uncertain, never retry init.
+  try {
+    await params.onInitialized?.(data.publish_id, token.openId)
+  } catch (error) {
+    console.error('[tiktok] provider receipt not persisted', { clientId:params.clientId,publishId:data.publish_id })
+    throw error
   }
 
   return { publishId: data.publish_id, privacy: params.privacy }
