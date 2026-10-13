@@ -8,6 +8,7 @@ import { MAX_BODY_BYTES } from '../voipline/ingest'
 import type { TelephonyConnection, TelephonyStore } from '../voipline/types'
 import { parseTwilioEvent, TWILIO_PROVIDER, type TwilioKind } from './events'
 import { verifyTwilioSignature } from './signature'
+import { E164, noticeTwiml, OUTBOUND_CP_PARAM } from './outbound'
 import { EMPTY_TWIML, HANGUP_TWIML, inboundForwardTwiml } from './twiml'
 
 /** 令牌环境变量名只许这个前缀：库里一行写错也不能让服务把别的密钥当签名令牌。 */
@@ -20,6 +21,8 @@ export function _clearConnCache() { connCache.clear() }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const TWILIO_KINDS: readonly TwilioKind[] = ['voice', 'status', 'dial', 'recording']
+/** 接收口认的地址类别：四类回调 + 外呼时客户接起放的告知（不落库、只回 TwiML）。 */
+const ROUTE_KINDS: readonly string[] = [...TWILIO_KINDS, 'notice']
 
 export interface TwilioIngestInput {
   connectionId: string
@@ -64,10 +67,10 @@ export async function handleTwilioWebhook(store: TelephonyStore, input: TwilioIn
     return { status, twiml: HANGUP_TWIML }
   }
 
-  if (!UUID.test(input.connectionId) || !(TWILIO_KINDS as readonly string[]).includes(input.kind)) {
+  if (!UUID.test(input.connectionId) || !ROUTE_KINDS.includes(input.kind)) {
     return deny(401, 'bad_connection_id_format', { connectionId: null, clientId: null })
   }
-  const kind = input.kind as TwilioKind
+  const kind = input.kind as TwilioKind | 'notice'
   let conn: TelephonyConnection | null
   let fromCache = false
   try {
@@ -100,7 +103,18 @@ export async function handleTwilioWebhook(store: TelephonyStore, input: TwilioIn
     return deny(401, 'account_mismatch', { connectionId: conn.id, clientId: conn.clientId })
   }
 
-  const parsed = parseTwilioEvent(kind, params, { forwardTo: conn.forwardTo })
+  // 外呼时客户接起的告知：验过签名和账号后只回一段 TwiML，不落库。
+  if (kind === 'notice') return { status: 200, twiml: noticeTwiml() }
+
+  const cp = (() => {
+    try {
+      const v = new URL(input.url).searchParams.get(OUTBOUND_CP_PARAM)
+      return v && E164.test(v) ? v : null
+    } catch {
+      return null
+    }
+  })()
+  const parsed = parseTwilioEvent(kind, params, { forwardTo: conn.forwardTo, outboundCounterparty: cp })
   if (!parsed.ok) {
     if (parsed.reason === 'child_leg') return { status: 200, twiml: EMPTY_TWIML }
     await store

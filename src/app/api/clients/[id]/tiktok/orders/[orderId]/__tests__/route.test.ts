@@ -48,6 +48,21 @@ describe('ordinary completed video TikTok publishing gate',()=>{
   expect(m.eq).toHaveBeenCalledWith('updated_at','2026-10-13T00:00:00.000Z')
  })
 
+ it('claims before provider init and blocks retry when every receipt write fails',async()=>{
+  const order={id:'order',client_id:'cts',status:'approved',updated_at:'2026-10-13T00:00:00.000Z',output:{video_path:'renders/video.mp4'} as Record<string,unknown>}
+  m.single.mockImplementation(async()=>({data:{...order,output:{...order.output}}}))
+  m.creator.mockResolvedValue({accountId:'account',creator_nickname:'CTS',privacy_level_options:['SELF_ONLY'],comment_disabled:false,duet_disabled:false,stitch_disabled:false,max_video_post_duration_sec:30})
+  m.proof.mockResolvedValue({sha256:'a'.repeat(64),durationSeconds:12})
+  let writes=0
+  m.updated.mockImplementation(()=>{writes++;if(writes>1)return{data:[],error:new Error('storage unavailable')};const value=m.update.mock.lastCall![0];order.output=value.output;order.updated_at=value.updated_at;return{data:[{id:'order',updated_at:order.updated_at}],error:null}})
+  m.publish.mockImplementation(async params=>{expect(order.output.tiktok_publish).toMatchObject({status:'sending'});await params.onInitialized('provider-id','account');throw new Error('unreachable')})
+  const review={accountId:'account',videoUrl:'https://example.com/storage/v1/object/public/content-factory/renders/video.mp4',videoSha256:'a'.repeat(64),privacy:'SELF_ONLY',caption:'Test',allowComment:false,allowDuet:false,allowStitch:false,ownBrand:false,brandedContent:false,musicConsent:true,confirmed:true,durationSeconds:12}
+  const request=()=>new Request('https://test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({review})})
+  expect((await POST(request(),context)).status).toBe(400)
+  expect((await POST(request(),context)).status).toBe(409)
+  expect(m.publish).toHaveBeenCalledTimes(1)
+ })
+
  it('rejects unauthorized client before reading video or contacting TikTok',async()=>{
   m.access.mockResolvedValue({ok:false,status:403,error:'Forbidden'})
   expect((await POST(new Request('https://test',{method:'POST'}),context)).status).toBe(403)
