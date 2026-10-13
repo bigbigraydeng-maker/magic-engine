@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:2588
+done_ref: pr:2593
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 在 PM 的 Chrome 里量名单接口：默认打开比现在的约 2.1 秒明显更快；有搜索/筛选时行为和排序不变
