@@ -9,7 +9,7 @@ verify_how: 合并后观察一周内是否还发生"多窗口同时跑测试导�
 verify_by: 2026-10-05
 done_on: 2026-09-28
 done_ref: pr:2164
-last_checked: 2026-10-09
+last_checked: 2026-10-13
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 

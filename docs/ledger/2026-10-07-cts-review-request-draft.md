@@ -9,7 +9,7 @@ verify_by: 2026-10-08
 done_on: 2026-10-08
 done_ref: pr:2354
 verify_how: "PM 看 hello 邮箱测试邮件；让 CTS 给一份「确实出行过」的客人名单，换掉草稿里占位的已付款名单后，才谈发送（发送须 PM 本人说发）"
-last_checked: 2026-10-09
+last_checked: 2026-10-13
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 Mailchimp 草稿编号 d15110cf0b，未发送未排期，只测试到 hello 和 info 邮箱；模板已存 Mailchimp，仓库备份在 docs/clients/cts/email-templates/。

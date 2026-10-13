@@ -9,7 +9,7 @@ done_on: 2026-09-27
 done_ref: pr:2111
 verify_by: 2026-10-04
 verify_how: 迁移执行、PR 合并上线后，用应用密钥给一个不存在的 Facebook 编号签一个删除请求发到 https://app.magicengine.com.au/api/meta/data-deletion ，应返回确认码；打开返回的进度链接显示「没有存这个 Facebook 账号的数据」；数据库 meta_data_deletion_requests 多一行 no_data，任何连接不变。说明页 https://app.magicengine.com.au/data-deletion 不登录能打开。不成：先查迁移是否已执行（函数 meta_process_data_deletion 是否存在）。
-last_checked: 2026-10-09
+last_checked: 2026-10-13
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 设计：docs/specs/2026-09-27-magic-bridge-self-serve-open-design.md §8.5（分支 chore/mb-open-eval）。

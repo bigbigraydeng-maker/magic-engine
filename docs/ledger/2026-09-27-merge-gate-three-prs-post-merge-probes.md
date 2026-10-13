@@ -8,7 +8,7 @@ source: session:29a26321
 verify_how: 三张卡（配置密钥判 A、当场试跑、自报风险级）都是 verified，且各自的证据文件在 docs/ledger/evidence/ 下能打开
 done_on: 2026-09-27
 done_ref: pr:2109
-last_checked: 2026-10-09
+last_checked: 2026-10-13
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 探测 PR：#2101-2103（配置文件判 A）、#2106-2108（当场试跑：缺段红 / edited 补段绿 / 出口绿）、#2130（自报风险级 4 种写法全判 A）。全部已关闭、分支保留。

@@ -9,6 +9,7 @@ verify_by: 2026-09-29
 verify_how: 合并后在主干跑 `npx vitest run src/lib/meta/__tests__/page-posts.test.ts src/lib/inngest/functions/__tests__/daily-plan-post-story-resolve.test.ts`，全部通过、零失败算成（2026-10-10 合并主干后实测 57 条，条数会随主干新增测试变化，不作判据）；有一条红就是没修好
 done_on: 2026-09-27
 done_ref: pr:2115
+last_checked: 2026-10-13
 ---
 根因：PR 1942 把 Meta 模块统一改用共享 GRAPH_BASE（v20.0 → v21.0），这两份测试还写死 v20.0。生产发帖路径只有版本号变了。
 只改测试文件，生产行为 0 改动（B 级）。新回归测试做过变异验证：page-posts 若再私自写死版本号，它会按名字变红。

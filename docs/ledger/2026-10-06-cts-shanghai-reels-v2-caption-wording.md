@@ -9,7 +9,7 @@ verify_by: 2026-10-07
 verify_how: 审核页看新两张工单（09e26e9e / 770ab18a）：7 项自动检查全过、没有「字幕疑似内部标签」提醒；人工通读一遍字幕与声音。旧两张不再看。
 done_on: 2026-10-06
 done_ref: doc:docs/audits/2026-10-06-cts-shanghai-reels-v2-caption-wording.md
-last_checked: 2026-10-09
+last_checked: 2026-10-13
 check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 把条目小标题 THE TRIP 换成 INCLUDED（官网 What's Included），条目 1 改为 FLIGHTS FROM AUCKLAND。
