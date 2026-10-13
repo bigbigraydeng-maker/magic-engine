@@ -1,12 +1,12 @@
 ---
 id: 2026-10-10-daily-plan-auto-publish-slice2-tables
-title: 自动发布第二刀已上线：两张记授权的表已建好，授权/撤销接口已合并（还不会发布任何东西）
+title: 自动发布第二刀：两张记授权的表要等 PM 同意才建，建完上线才算数
 status: done
 owner: agent
 decided_on: 2026-10-10
 source: pr:2430
 verify_by: 2026-10-14
-verify_how: 线上查两张表仍在、只有后台服务能读写、表里没有意外数据；这一刀没有自动运行的东西，所以不用等日期，到期抽查一次即可
+verify_how: PM 回「建表合并」后：线上两张表已存在（只有后台服务能读写），授权接口预览能走通；没动静就是卡在 PM 这一步
 done_on: 2026-10-10
 done_ref: pr:2430
 ---
