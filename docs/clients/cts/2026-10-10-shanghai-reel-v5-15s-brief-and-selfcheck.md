@@ -142,3 +142,7 @@ PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`�
 | 只发终版 | 授权的是 `fa4fdd89`；`2153778a`（r1）和 `cda1d205`（第二版）仍是 `in_review`，没有授权 |
 
 **苏东坡可选建议（未采纳，不影响事实）**：正文可把价格句提前，让信息流预览先露出价格；`Flights` 想更保守可改 `Airfares`。已记录，发布后看数据再说。
+
+### 十、2026-10-11 已对外公开
+
+PM 回复「发这一条」后：①草稿（2309146606576700）改为公开，Facebook 返回 `published:true`、`publish_status: published`、公开时间 2026-10-11 04:35 UTC；②补发首评（带追踪参数的行程链接，评论 id `2309146606576700_2565567933954188`）；③工单 `fa4fdd89` 的 `published_ref` 更新为 `video_state: PUBLISHED`；④未登录访问 `facebook.com/reel/2309146606576700/` 返回 HTTP 200（页面是否真正播放需人眼看）。**系统自带的 `promoteReelToPublished` 对已上传草稿会报 `1363130 Video Upload Is Missing`，没有改动任何东西；这次用 `POST /{video_id}` 带 `published=true` 成功。** 没有起广告、没有联系客户。
