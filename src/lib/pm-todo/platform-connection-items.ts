@@ -158,6 +158,11 @@ const PROVIDER_COPY: Record<string, ProviderCopy> = {
     cost: '这个客户的 TikTok 数据进不来，也发不出去',
     reconnect: null,
   },
+  whatsapp: {
+    label: 'WhatsApp',
+    cost: '这个号码的客人消息进不来，也回不了',
+    reconnect: null,
+  },
 }
 
 function copyOf(provider: string): ProviderCopy {
