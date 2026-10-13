@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadAdStrategyConfigWithSource, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
@@ -67,7 +67,12 @@ export async function PATCH(
 
   const update: Record<string, unknown> = { client_id: clientId, updated_at: new Date().toISOString() }
   const updatedAt = String(update.updated_at)
-  const before = await loadAdStrategyConfig(clientId)
+  // 🔴 读不出改之前的设置时，不拿默认值（observe）当「改之前」：那样把自动模式改回 observe
+  //    会被判成「没变」、不发收紧事件（魏征复审）。也不拒绝保存：设置表持续读不出时，
+  //    收紧（调低上限 / 改回 observe）正是最需要能存进去的操作（卫青复审）。
+  //    before = null 表示「不知道改之前是什么」，下面一律按「变了」发叫醒铃。
+  const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
+  const before = loadedBefore.source === 'fallback' ? null : loadedBefore.config
 
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') {
@@ -129,8 +134,9 @@ export async function PATCH(
 
   // 意向真的变了才发叫醒铃（spec §4.4）；发送失败不影响保存，每日 reconcile 会追上。
   const envelopeChanged =
-    (update.autonomy_mode !== undefined && update.autonomy_mode !== before.autonomy_mode) ||
-    (update.daily_budget_cap_cents !== undefined && update.daily_budget_cap_cents !== before.daily_budget_cap_cents)
+    (update.autonomy_mode !== undefined && (before === null || update.autonomy_mode !== before.autonomy_mode)) ||
+    (update.daily_budget_cap_cents !== undefined &&
+      (before === null || update.daily_budget_cap_cents !== before.daily_budget_cap_cents))
   const syncEvents = envelopeChanged
     ? await notifyAutonomyModeChanged(clientId, updatedAt, { relaxed: true })
     : { sent: false, events: 0 }

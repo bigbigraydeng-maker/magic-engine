@@ -165,20 +165,21 @@ describe('验收 · 2026-09-25「166 件」', () => {
   it('新口径：只剩五类，每一类有几件', () => {
     const view = buildTodoView(AFTER)
     const byKind = Object.fromEntries(view.sections.map((s) => [s.pm_kind, s.rows.length]))
-    expect(byKind).toEqual({ decide: 4, one_click: 8, client_side: 4, review: 4, truth: 5 })
-    expect(view.totalItems).toBe(25)
+    // 2026-10-12：台账「验过不成」从拍板栏挪进开发欠账（PM：邮件只发机器完成不了的事）→ 拍板 4→3、开发 6→7
+    expect(byKind).toEqual({ decide: 3, one_click: 8, client_side: 4, review: 4, truth: 5 })
+    expect(view.totalItems).toBe(24)
     // 挪走的也都有去处：开发欠账清单 6 件（合并后）、周报 8 件、24 小时 70 次任务失败
-    expect(view.routedToDev).toBe(6)
+    expect(view.routedToDev).toBe(7)
     expect(view.routedToWeekly).toBe(8)
     expect(view.cronFailures24h).toBe(70)
 
     const email = buildTodoEmail(5, AFTER, '25 Sept')
-    expect(email.subject).toBe('📋 今日待办 · 周五 · 25 件')
+    expect(email.subject).toBe('📋 今日待办 · 周五 · 24 件')
     // 不该出现在每日待办里的东西
     for (const gone of ['SEO 巡逻', '本周新建议卡', '这周系统替你做了什么', 'Afterpay Team 发到公司邮箱', 'Big Ray Deng', '还有 23 封']) {
       expect(email.html).not.toContain(gone)
     }
-    expect(email.html).toContain('6 件开发欠账')
+    expect(email.html).toContain('7 件开发欠账')
     expect(email.html).toContain('8 件系统知会挪到周一周报')
 
     if (process.env.PRINT_TODO_FIXTURE) {

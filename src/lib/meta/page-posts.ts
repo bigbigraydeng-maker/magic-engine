@@ -433,7 +433,7 @@ export class PagePublishError extends Error {
   }
 }
 
-function classifyPublishFailure(
+export function classifyPublishFailure(
   status: number,
   error: { code?: number } | undefined,
 ): PublishOutcomeCertainty {
@@ -473,6 +473,8 @@ export async function publishPagePhotoPost(input: {
   message: string
   imageUrl: string
   scheduledPublishTime?: Date
+  /** Optional upper bound for the request. Unset = no timeout (the manual path's long-standing behaviour); an unattended caller sets one. */
+  timeoutMs?: number
   fetcher?: typeof fetch
 }): Promise<PublishedPagePost> {
   const doFetch = input.fetcher ?? fetch
@@ -497,6 +499,7 @@ export async function publishPagePhotoPost(input: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
+      ...(input.timeoutMs ? { signal: AbortSignal.timeout(input.timeoutMs) } : {}),
     })
   } catch (error: unknown) {
     // No response at all: the request may or may not have reached Facebook.

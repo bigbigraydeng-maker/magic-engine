@@ -339,6 +339,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 schedule 这一列不许手抄：唯一定义在 src/lib/ai-tracker/weekly-fanout.ts 的
   //    AI_VISIBILITY_WEEKLY_CRON，同目录的测试会断言两边一致。
   // 线索 → 客户指定的 Google 表格。每小时 20 分跑，排在 meta-leads-sync（整点）之后。
+  // 日历上带日期的验证事项，每天新西兰 07:20 核对一遍（第一步：只读）。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/calendar-closure-audit.ts 的 CALENDAR_CLOSURE_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  { service: 'inngest:cloud-calendar-closure-audit', jobName: 'calendar-closure-audit', schedule: '20 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-08' },
   { service: 'inngest:cloud-lead-sheet-sync-fanout', jobName: 'lead-sheet-sync', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
   // 「客人填了表还没人回」每天一封汇总信。新西兰早上 8 点（Inngest 的 cron 带 TZ=）。
@@ -377,6 +381,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // no order is sent and this entry will look overdue — the only legitimate silence.
   // 🔴 schedule must not be hand-copied: it is the upstream fan-out's GSC_PAGE_DAILY_CRON (registry.test.ts).
   { service: 'inngest:cloud-gsc-page-daily-pull', jobName: 'gsc-page-daily-pull', schedule: '30 18 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-26' },
+  // Per-(query, page) daily Google Search Console store: the same chain as the two entries above run with its own
+  // event / job names / receipts table (docs/specs/2026-10-13-gsc-query-page-daily-design.md). Its first run also
+  // starts the 16-month backfill (4 months per client per day, so about 4 days).
+  // 🔴 schedule must not be hand-copied: the only definition is GSC_QUERY_PAGE_DAILY_CRON in
+  //    src/lib/gsc/query-page-daily-store.ts, and registry.test.ts asserts they are equal.
+  // 🔴 timestampColumn is `started_at` for the same reason as the per-page chain (finished_at is NULL while running).
+  { service: 'inngest:cloud-gsc-query-page-daily-fanout', jobName: 'gsc-query-page-daily', schedule: '0 19 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-13',
+    outputTables: [{ table: 'gsc_query_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' }] },
+  // The pull orders of the chain above, under their own job name (same reasons as gsc-page-daily-pull).
+  { service: 'inngest:cloud-gsc-query-page-daily-pull', jobName: 'gsc-query-page-daily-pull', schedule: '0 19 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-13' },
 ] as const
 
 /**

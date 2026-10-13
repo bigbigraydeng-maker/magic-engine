@@ -9,6 +9,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { publishPagePhotoPost, deletePagePost, readPageStoryId, PagePublishError } from '../page-posts'
+import { GRAPH_BASE } from '../graph-base'
 
 const PAGE = '1616575215312482'
 const TOKEN = 'page-access-token'
@@ -71,7 +72,7 @@ describe('publishPagePhotoPost — immediate vs scheduled', () => {
       message: 'hi', imageUrl: 'https://x/img.jpg', fetcher,
     })
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/${PAGE}/photos`)
+    expect(calls[0].url).toBe(`${GRAPH_BASE}/${PAGE}/photos`)
     expect(r).toEqual({
       postId: `${PAGE}_1750835520181969`,
       postIdSource: 'post_id',
@@ -198,7 +199,7 @@ describe('deletePagePost — idempotency and error surfacing', () => {
     const { fetcher, calls } = fakeFetch({ ok: true, body: { success: true } })
     await deletePagePost({ postId: '1750835520181969', pageAccessToken: TOKEN, fetcher })
     expect(calls[0].init?.method).toBe('DELETE')
-    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/1750835520181969?access_token=${TOKEN}`)
+    expect(calls[0].url).toBe(`${GRAPH_BASE}/1750835520181969?access_token=${TOKEN}`)
   })
 
   it('url-encodes the post id — a raw underscore-heavy id must not break the request line', async () => {
@@ -236,7 +237,7 @@ describe('readPageStoryId — read-back after the photo is public', () => {
 
     expect(r).toEqual({ ok: true, postId: `${PAGE}_${PHOTO}` })
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(`https://graph.facebook.com/v20.0/${PHOTO}?fields=page_story_id&access_token=${TOKEN}`)
+    expect(calls[0].url).toBe(`${GRAPH_BASE}/${PHOTO}?fields=page_story_id&access_token=${TOKEN}`)
     expect(calls[0].init?.method ?? 'GET').toBe('GET')
     expect(calls[0].init?.signal).toBeInstanceOf(AbortSignal)
   })
@@ -276,5 +277,43 @@ describe('readPageStoryId — read-back after the photo is public', () => {
     }))
     const r = await readPageStoryId({ photoId: PHOTO, pageId: PAGE, pageAccessToken: TOKEN, fetcher, timeoutMs: 20 })
     expect(r).toEqual({ ok: false, reason: 'timeout' })
+  })
+})
+
+/**
+ * Regression (2026-09-27): PR 1942 moved every Meta module to the shared
+ * GRAPH_BASE (v20.0 → v21.0) but these tests pinned the old version literal,
+ * so three went red on main. The fix asserts against the shared constant —
+ * but comparing the produced URL to the *current value* of GRAPH_BASE proves
+ * nothing on its own: a local `const GRAPH_BASE = 'https://graph.facebook.com/v21.0'`
+ * copy-pasted into page-posts.ts would match today's value and pass here too,
+ * then silently stop tracking the shared constant on the next version bump.
+ * Mocking `../graph-base` to a sentinel value neither module would produce by
+ * coincidence is what actually proves page-posts.ts *imports* the shared
+ * constant rather than owning its own copy of it.
+ */
+describe('Graph version — page-posts follows the shared GRAPH_BASE', () => {
+  it('publish, delete and story read-back use the mocked GRAPH_BASE import, not a local copy', async () => {
+    const SENTINEL_BASE = 'https://graph.facebook.com/vSENTINEL-TEST-ONLY'
+    vi.resetModules()
+    vi.doMock('../graph-base', () => ({ GRAPH_BASE: SENTINEL_BASE }))
+
+    try {
+      const mod = await import('../page-posts')
+
+      const pub = fakeFetch({ ok: true, body: { post_id: `${PAGE}_1`, id: '1' } })
+      await mod.publishPagePhotoPost({ pageId: PAGE, pageAccessToken: TOKEN, message: 'hi', imageUrl: 'https://x/img.jpg', fetcher: pub.fetcher })
+      const del = fakeFetch({ ok: true, body: { success: true } })
+      await mod.deletePagePost({ postId: '1', pageAccessToken: TOKEN, fetcher: del.fetcher })
+      const read = fakeFetch({ ok: true, body: { page_story_id: `${PAGE}_1`, id: '1' } })
+      await mod.readPageStoryId({ photoId: '1', pageId: PAGE, pageAccessToken: TOKEN, fetcher: read.fetcher })
+
+      for (const url of [pub.calls[0].url, del.calls[0].url, read.calls[0].url]) {
+        expect(url.startsWith(`${SENTINEL_BASE}/`)).toBe(true)
+      }
+    } finally {
+      vi.doUnmock('../graph-base')
+      vi.resetModules()
+    }
   })
 })

@@ -3,12 +3,17 @@ import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+vi.mock('@/lib/campaign/daily-plan-auto-publish-worker-store', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/campaign/daily-plan-auto-publish-worker-store')>()),
+  listFreshClaims: vi.fn(),
+}))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn() }))
 vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn(),
   getStoredPageToken: vi.fn(),
 }))
-vi.mock('@/lib/meta/page-posts', () => ({
+vi.mock('@/lib/meta/page-posts', async importOriginal => ({
+  ...(await importOriginal<typeof import('@/lib/meta/page-posts')>()),
   getPageAccessToken: vi.fn(),
   publishPagePhotoPost: vi.fn(),
 }))
@@ -21,6 +26,7 @@ import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { listFreshClaims } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken, publishPagePhotoPost } from '@/lib/meta/page-posts'
 import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
@@ -34,6 +40,7 @@ import {
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockSendInngestEvent = vi.mocked(sendInngestEvent)
+const mockFreshClaims = vi.mocked(listFreshClaims)
 const mockGetMetaToken = vi.mocked(getMetaTokenForClient)
 const mockGetStoredPageToken = vi.mocked(getStoredPageToken)
 const mockGetPageToken = vi.mocked(getPageAccessToken)
@@ -259,6 +266,7 @@ function armProvider() {
 beforeEach(() => {
   allow()
   mockFirstComment.mockResolvedValue('comment_1')
+  mockFreshClaims.mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -613,6 +621,8 @@ describe('publish bridge — live run records real provider ids', () => {
     expect(json.success).toBe(false)
     expect(json.receipt.failed).toHaveLength(1)
     expect(json.receipt.failed[0].date).toBe(DATES[0])
+    // a plain Error (not a classified Graph answer) must be recorded as `unknown`: the Post may exist
+    expect(json.receipt.failed[0].certainty).toBe('unknown')
     expect(json.receipt.published).toHaveLength(1)
     expect(json.receipt.published[0].post_id).toBe(`${PAGE_ID}_1750000093`)
   })
@@ -1207,3 +1217,56 @@ describe('publish bridge — price fact check', () => {
     expect((await response.json()).error).toBe('PRICE_CLAIM_UNBACKED')
   })
 })
+
+describe('publish bridge — never races the unattended publisher', () => {
+  it('🔴 a live publish is refused while the unattended publisher holds a fresh claim on a requested date', async () => {
+    stubTables()
+    armProvider()
+    mockFreshClaims.mockResolvedValue([{ date: DATES[0] } as never])
+
+    const response = await POST(request({ no_publish: false }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json).toMatchObject({ error: 'AUTO_PUBLISH_IN_PROGRESS', dates: [DATES[0]] })
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('a claim on a date the caller did not ask for does not block it', async () => {
+    stubTables()
+    armProvider()
+    mockFreshClaims.mockResolvedValue([{ date: '2099-01-01' } as never])
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[1]] }), params)
+
+    expect(response.status).not.toBe(409)
+  })
+
+  it('a dry run never looks at claims', async () => {
+    stubTables()
+    await POST(request({ no_publish: true }), params)
+    expect(mockFreshClaims).not.toHaveBeenCalled()
+  })
+
+  it('if the auto-publish tables do not exist at all, the manual publish is not blocked', async () => {
+    stubTables()
+    armProvider()
+    mockFreshClaims.mockRejectedValue({ code: '42P01', message: 'relation "daily_plan_auto_publish_attempts" does not exist' })
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(200)
+  })
+
+  it('🔴 if the claims cannot be read the publish does not go ahead (fail closed)', async () => {
+    stubTables()
+    armProvider()
+    mockFreshClaims.mockRejectedValue(new Error('db down'))
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(500)
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+})
+
