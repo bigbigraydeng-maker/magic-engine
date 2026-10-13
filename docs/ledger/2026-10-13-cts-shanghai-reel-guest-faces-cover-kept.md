@@ -5,6 +5,7 @@ status: done
 owner: pm
 decided_on: 2026-10-13
 source: session:74f85b6e
+verify_how: 打开巡检记录文档，10/13 一节里有「封面留着」这条决定；之后各天的巡检不再把这条 Reel 的封面当问题报
 done_on: 2026-10-13
 done_ref: doc:docs/clients/cts/social-review/2026-10-patrol-log.md
 ---
