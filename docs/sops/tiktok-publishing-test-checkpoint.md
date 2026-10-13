@@ -75,3 +75,7 @@ Real CTS first test completed: after explicit user authorization, ctstours1 temp
 Claude Opus second review accepted the corrected PR scope, short CAS filters, scope gate and missing-dependency handling. It did not approve production: production runtime proof/preflight and a new long, multipart private upload on the latest deployed code remain outstanding. The previous successful provider upload ran 932a69d23.
 Repository preflight is now `node scripts/tiktok/check-runtime.mjs`; run it in the production Render build command before the existing build steps after the source is merged, and record runtime evidence. Do not configure an unmerged script path on the live main service.
 Latest test deployment requested: dep-db70krqj9qps73aqasng at 5dad01159. This is a test deployment, not a production transfer.
+
+### Release authorization and security follow-up
+User explicitly requested designated reviews/signatures and production deployment, with no overdevelopment. Security review found a P1 stale lecture enqueue race; enqueue now uses the already loaded updated_at CAS and returns409 on mismatch, preserving a worker's initialized task. Independent security re-review passed; 11 focused regression tests pass.
+Production crazycontent Web Shell independently ran `ffprobe -version`: ffprobe version5.1.9-0+deb12u1 (Debian12), confirming the current production runtime dependency. Repository preflight will be added to production build/start after merge.

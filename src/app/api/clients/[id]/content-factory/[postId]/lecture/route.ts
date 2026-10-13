@@ -24,7 +24,7 @@ import {
   saveCaptions,
   saveLectureScript,
   setLectureProduction,
-  setPublishRequest,
+  claimLecturePublish,
   setSectionClip,
   type LectureMethod,
 } from '@/lib/factory/lecture-post'
@@ -256,11 +256,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
             { status: 400 },
           )
         }
-        await setPublishRequest({
-          clientId: params.id,
-          postId: params.postId,
-          request: { platform, status: 'pending', live, ...(tiktokReview ? { tiktokReview } : {}), requestedAt: new Date().toISOString() },
-        })
+        const queued = await claimLecturePublish(params.id, params.postId, loaded.post.generation_context_snapshot,
+          { platform, status: 'pending', live, ...(tiktokReview ? { tiktokReview } : {}), requestedAt: new Date().toISOString() }, loaded.post.updated_at)
+        if (!queued) return NextResponse.json({error:'发布任务或成片已更新，请刷新后核对'},{status:409})
         return NextResponse.json({ ok: true, queued: true, live, platform })
       }
 

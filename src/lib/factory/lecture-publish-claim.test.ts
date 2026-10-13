@@ -16,6 +16,10 @@ describe('atomic lecture publication claim',()=>{
     await expect(claimLecturePublish('c','p',snapshot,request,'')).rejects.toThrow('缺少发布版本')
     expect(state.update).not.toHaveBeenCalled()
   })
+  it('does not overwrite an initialized task with a stale pending enqueue',async()=>{
+    expect(await claimLecturePublish('c','p',snapshot,snapshot.lecture_publish_request,'stale-revision')).toBe(false)
+    expect(state.filters).toContainEqual(['updated_at','stale-revision'])
+  })
   it('returns false when another writer has already changed the snapshot',async()=>{
     expect(await claimLecturePublish('c','p',snapshot,request,'revision')).toBe(false)
   })
