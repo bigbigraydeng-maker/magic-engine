@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:pending
+done_ref: pr:2577
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 全部客人里「今天要联系」段，WhatsApp Business、Dan Sun 这类没留联系方式的客人，原因文字改为「进线了，还没人联系」，不再出现 20739 天
