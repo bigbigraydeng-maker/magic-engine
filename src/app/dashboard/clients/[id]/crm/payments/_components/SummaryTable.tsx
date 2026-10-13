@@ -86,7 +86,7 @@ function GroupRowLabel({ group, selected, onSelect }: GroupRowProps) {
 /** Row colour: red tint when something is overdue, green tint when every order is fully paid. */
 function rowTone(group: OverviewGroup, selected: boolean): string {
   if (selected) return 'cursor-pointer bg-me-ochre/10'
-  if (group.unsettledOverdue > 0) return 'cursor-pointer bg-[#C2453A]/8'
+  if (group.unsettledOverdue > 0) return 'cursor-pointer bg-[#C2453A]/10'
   const allPaid =
     group.orders > 0 && group.unsettled === 0 && group.depositPaid === group.orders && group.balancePaid === group.orders
   return allPaid ? 'cursor-pointer bg-[#456F35]/10' : 'cursor-pointer'

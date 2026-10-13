@@ -86,7 +86,7 @@ describe('付款总览 page rendering', () => {
     renderPage()
     await screen.findByRole('heading', { name: PAGE_HEADING })
     const rowA = groupRow(/2027-03-19 出发/)
-    expect(rowA.className).toContain('bg-[#C2453A]/8')
+    expect(rowA.className).toContain('bg-[#C2453A]/10')
     expect(within(rowA).getByText('（1 已过期）').className).toContain('text-[#C2453A]')
   })
 
