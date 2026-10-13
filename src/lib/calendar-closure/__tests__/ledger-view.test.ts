@@ -25,7 +25,7 @@ afterEach(() => {
 })
 
 describe('buildLedgerView', () => {
-  it('covers a decided card idle more than 7 days', () => {
+  it('does not cover a decided card idle more than 7 days (dev lane)', () => {
     const dir = makeDir()
     writeCard(dir, 'card-decided', [
       'id: card-decided',
@@ -40,7 +40,7 @@ describe('buildLedgerView', () => {
     const view = buildLedgerView(TODAY, dir)
 
     expect(view.cards.get('card-decided')?.status).toBe('decided')
-    expect(view.coveredLedgerIds.has('card-decided')).toBe(true)
+    expect(view.coveredLedgerIds.has('card-decided')).toBe(false) // 决定了没动现在在开发欠账栏，PM 邮件里没有
     expect(view.parseErrorCount).toBe(0)
   })
 
@@ -65,7 +65,7 @@ describe('buildLedgerView', () => {
     expect(view.coveredLedgerIds.has('card-done')).toBe(false)
   })
 
-  it('covers a failed card', () => {
+  it('does not cover a failed card (dev lane)', () => {
     const dir = makeDir()
     writeCard(dir, 'card-failed', [
       'id: card-failed',
@@ -84,7 +84,8 @@ describe('buildLedgerView', () => {
     const view = buildLedgerView(TODAY, dir)
 
     expect(view.cards.get('card-failed')?.status).toBe('failed')
-    expect(view.coveredLedgerIds.has('card-failed')).toBe(true)
+    // 2026-10-12 起「验过不成」在开发欠账栏、PM 邮件里没有，所以不算「已覆盖」
+    expect(view.coveredLedgerIds.has('card-failed')).toBe(false)
   })
 
   it('lists a verified card but does not cover it', () => {
