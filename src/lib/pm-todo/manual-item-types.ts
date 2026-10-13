@@ -180,6 +180,12 @@ export type ManualItemKind =
   | 'auto_publish_unarmed'
   /** 自动发布：记录说「已撤回」，但回执里同一天又有一条新发出的帖子 —— 主页上有帖、系统记录对不上，要人核对 */
   | 'auto_publish_record_conflict'
+  /** Story 自动发布：某条 Story 被拦 / 被平台拒绝 / 时间已过没补发 —— 没发出去，要人看 */
+  | 'story_stalled'
+  /** Story 自动发布：不确定某条 Story 有没有发出去，为防重复不自动重试 —— 要人去主页核对 */
+  | 'story_unknown_outcome'
+  /** Story 自动发布：已授权的周包到点了，却没有任何发布 / 演练记录 —— 发布器可能没在跑 */
+  | 'story_unarmed'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */

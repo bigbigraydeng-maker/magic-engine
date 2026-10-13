@@ -7,6 +7,7 @@ import { TourEditor } from './TourEditor'
 import { DeparturesEditor } from './DeparturesEditor'
 import { ChangeLog } from './ChangeLog'
 import { TourSummary } from './TourSummary'
+import { TourSalesLine } from './TourSalesLine'
 import { priceText, upcomingCount, savedAsDraftText } from './catalog-format'
 import { useCatalogUi, useChannelsConnected } from './catalog-context'
 import {
@@ -234,6 +235,8 @@ function TourDetail(props: TourDetailPaneProps & { tour: CatalogTourView }): JSX
       <DetailHeader tour={tour} departures={departures} />
 
       {editing ? null : <TourSummary tour={tour} domain={siteDomain ?? null} />}
+
+      {editing ? null : <TourSalesLine clientId={clientId} tourId={tour.id} />}
 
       <UnpublishedBox changes={changes} />
 
