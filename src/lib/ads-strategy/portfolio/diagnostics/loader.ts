@@ -10,7 +10,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { fetchHourlyAdsetSpend, type GraphHourlySpendRow } from '@/lib/meta/entity-settings'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
-import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfigWithSource, type AdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
@@ -248,7 +248,27 @@ async function loadClientPageId(clientId: string): Promise<string | null> {
   return (data as { facebook_page_id: string | null } | null)?.facebook_page_id ?? null
 }
 
-export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
+/**
+ * 客户的广告设置。读失败要抛（同上）——塌成默认值会让收件人检查拿着空列表跑，
+ * 该报的「收件人混了外部邮箱」就静默漏掉了；「没有行」是新客户，照默认值走。
+ */
+async function loadStrategyConfig(clientId: string): Promise<AdStrategyConfig> {
+  const { config, source, error } = await loadAdStrategyConfigWithSource(clientId)
+  if (source === 'fallback') throw new Error(`ad_strategy_configs read failed: ${error ?? 'unknown error'}`)
+  return config
+}
+
+/**
+ * `known.digestRecipients`：调用方刚读过广告设置时把收件人传进来，这里就不再读第二遍——
+ * 每日回拉已经读成功，诊断不该因为几秒后多余的一次重读失败而整天停跑、连带不发自动暂停事件（卫青复审）。
+ * 没传才自己读，读失败照旧抛。
+ */
+export async function loadDiagnosisInput(
+  clientId: string,
+  date: string,
+  evaluatedAt: string,
+  known?: { digestRecipients: string[] },
+): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
   const clientPageId = await loadClientPageId(clientId)
@@ -256,16 +276,16 @@ export async function loadDiagnosisInput(clientId: string, date: string, evaluat
   for (const id of accountIds) {
     accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId, evaluatedAt))
   }
-  const [outcome, strategy] = await Promise.all([
+  const [outcome, digestRecipients] = await Promise.all([
     loadOutcomeConfig(clientId),
-    loadAdStrategyConfig(clientId),
+    known ? known.digestRecipients : loadStrategyConfig(clientId).then(c => c.digest_recipients),
   ])
   return {
     clientId, date, evaluatedAt,
     outcome: outcome.config,
     outcomeConfigured: outcome.source === 'row' && outcome.config.primary !== null,
     messagingReferralAvailable: MESSAGING_REFERRAL_AVAILABLE,
-    digestRecipients: strategy.digest_recipients,
+    digestRecipients,
     clientPageId,
     accounts,
   }

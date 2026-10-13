@@ -18,7 +18,8 @@ type Row = Record<string, unknown>
 interface FakeOptions {
   attempts?: Row[]
   auth?: Row[]
-  failOn?: 'daily_plan_auto_publish_attempts' | 'daily_plan_auto_publish_auth'
+  plans?: Row[]
+  failOn?: 'daily_plan_auto_publish_attempts' | 'daily_plan_auto_publish_auth' | 'social_plans'
 }
 
 /**
@@ -30,6 +31,7 @@ function makeSupabase(opts: FakeOptions): SupabaseClient {
   const tables: Record<string, Row[]> = {
     daily_plan_auto_publish_attempts: opts.attempts ?? [],
     daily_plan_auto_publish_auth: opts.auth ?? [],
+    social_plans: opts.plans ?? [],
   }
 
   const from = (table: string) => {
@@ -125,9 +127,11 @@ function attempt(overrides: {
   status?: string
   reason_code?: string | null
   plan_id?: string
+  updated_at?: string
 }): Row {
   return {
     client_id: overrides.client_id ?? CLIENT,
+    updated_at: overrides.updated_at ?? '2026-10-07T00:00:00Z',
     date: overrides.date ?? TODAY,
     status: overrides.status ?? 'failed_final',
     reason_code: overrides.reason_code ?? null,
@@ -431,5 +435,62 @@ describe('pushAutoPublishItems —— 看门狗：授权了却什么都没发生
     expect(items).toHaveLength(1)
     expect(items[0].what).toContain(TODAY)
     expect(items[0].what).toContain(TOMORROW)
+  })
+})
+
+describe('pushAutoPublishItems —— 记录对不上（墓碑写着已撤回，回执里却有更晚的帖子）', () => {
+  const tomb = (over: { date?: string; updated_at?: string } = {}) =>
+    attempt({ status: 'blocked', reason_code: 'RECALLED', date: over.date ?? TODAY, updated_at: over.updated_at ?? '2026-10-07T00:00:00Z' })
+  const plan = (published: Array<{ date: string; published_at: string }>) => ({ id: 'plan-1', publish_meta: { published } })
+
+  it('墓碑之后回执里又有同一天的帖子 → 一条 auto_publish_record_conflict，带客户名和日期', async () => {
+    const db = makeSupabase({ attempts: [tomb()], plans: [plan([{ date: TODAY, published_at: '2026-10-07T05:00:00Z' }])] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('auto_publish_record_conflict')
+    expect(items[0].what).toContain(CLIENT_NAME)
+    expect(items[0].what).toContain(TODAY)
+    expect(items[0].href).toContain(`/dashboard/clients/${CLIENT}`)
+  })
+
+  it('回执里的帖子比墓碑更早（正常撤回后原帖已移出）→ 不出待办', async () => {
+    const db = makeSupabase({ attempts: [tomb()], plans: [plan([{ date: TODAY, published_at: '2026-10-06T05:00:00Z' }])] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(0)
+  })
+
+  it('回执里没有这一天 → 不出待办', async () => {
+    const db = makeSupabase({ attempts: [tomb()], plans: [plan([{ date: TOMORROW, published_at: '2026-10-07T05:00:00Z' }])] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(0)
+  })
+
+  it('超过 14 天的旧墓碑不再提醒', async () => {
+    const db = makeSupabase({ attempts: [tomb({ date: OLD })], plans: [plan([{ date: OLD, published_at: '2026-10-07T05:00:00Z' }])] })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(0)
+  })
+
+  it('🔴 读回执失败 → 抛错，不能当成「没有冲突」', async () => {
+    const db = makeSupabase({ attempts: [tomb()], failOn: 'social_plans' })
+    await expect(pushAutoPublishItems(db, [], NOW, nameOf, LIVE)).rejects.toThrow(/receipt read failed/)
+  })
+
+  it('同一客户多天冲突合并成一条', async () => {
+    const db = makeSupabase({
+      attempts: [tomb({ date: TODAY }), tomb({ date: TOMORROW })],
+      plans: [plan([
+        { date: TODAY, published_at: '2026-10-07T05:00:00Z' },
+        { date: TOMORROW, published_at: '2026-10-07T05:00:00Z' },
+      ])],
+    })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, LIVE)
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain(`${TODAY}、${TOMORROW}`)
   })
 })

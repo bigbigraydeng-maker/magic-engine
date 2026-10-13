@@ -49,6 +49,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { tombstoneRecalledDates } from '@/lib/campaign/daily-plan-auto-publish-store'
+import { readAutoPublishRecords } from '@/lib/campaign/daily-plan-auto-publish-records'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { deletePagePost, getPageAccessToken } from '@/lib/meta/page-posts'
 import {
@@ -196,6 +197,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       row.publishMeta,
     )
 
+    // The unattended publisher may know about posts this receipt does not (its own record of a send whose
+    // receipt write failed) or about dates whose outcome is unsettled. Recall only deletes what the receipt
+    // lists, so these must be shown to the human instead of silently staying on the Page.
+    const autoPublishRecords = await readAutoPublishRecords({
+      planId: command.plan_id,
+      clientId,
+      dates: command.dates,
+      receiptPostIds: new Set([
+        ...row.publishMeta.published.map((p) => p.post_id),
+        ...(row.publishMeta.recalled ?? []).map((p) => p.post_id),
+      ]),
+    })
+    const autoPublishNote =
+      autoPublishRecords.status === 'UNKNOWN'
+        ? '没能读到自动发布器自己的记录，这几天主页上可能还有回执里没有的帖子，请到 Facebook 主页核对。'
+        : autoPublishRecords.posts.length > 0 || autoPublishRecords.unconfirmed.length > 0
+          ? '自动发布器的记录里有回执没列出的帖子，或有结果未确认的日期（见 auto_publish_records）。这些不会被本次撤回删除，请到 Facebook 主页核对。'
+          : undefined
+
     if (command.no_recall) {
       return NextResponse.json({
         success: true,
@@ -207,6 +227,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         })),
         already_recalled,
         not_published,
+        auto_publish_records: autoPublishRecords,
+        ...(autoPublishNote ? { auto_publish_note: autoPublishNote } : {}),
       })
     }
 
@@ -302,6 +324,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       already_recalled,
       not_published,
       auto_publish_tombstone: autoPublishTombstone,
+      auto_publish_records: autoPublishRecords,
+      ...(autoPublishNote ? { auto_publish_note: autoPublishNote } : {}),
       ...(autoPublishTombstone.status === 'FAILED'
         ? { warning: '撤回成功，但没能在自动发布里把这些日期标成「已撤回」。请不要重新授权这些日期，并立刻告知开发。' }
         : {}),

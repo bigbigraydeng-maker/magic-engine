@@ -17,7 +17,9 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { detectPlatform, analyzeViralReference } from '@/lib/reels/viral-analyzer'
+import { validateViralSourceUrl } from '@/lib/reels/viral-url-guard'
 
 // Fields needed for InsightsPanel only (lightweight)
 const INSIGHT_FIELDS = [
@@ -39,6 +41,9 @@ interface VideoInput {
 }
 
 export async function GET(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   const { searchParams } = new URL(req.url)
 
   const isSummary = searchParams.get('summary') === '1'
@@ -103,6 +108,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   let body: { videos?: VideoInput[] }
   try {
     body = await req.json()
@@ -118,22 +126,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Maximum 30 videos per batch' }, { status: 400 })
   }
 
-  for (const v of videos) {
-    if (!v.url || !v.industry) {
+  const safeUrls: string[] = []
+  for (const [i, v] of videos.entries()) {
+    if (!v || !v.url || !v.industry) {
       return NextResponse.json(
         { success: false, error: 'Each video must have url and industry' },
         { status: 400 }
       )
     }
+    const check = validateViralSourceUrl(v.url)
+    if (!check.ok) {
+      return NextResponse.json(
+        { success: false, error: `videos[${i}].url rejected: ${check.reason}` },
+        { status: 400 }
+      )
+    }
+    safeUrls.push(check.url)
   }
 
-  const rows = videos.map(v => ({
-    source_url:      v.url,
+  const rows = videos.map((v, i) => ({
+    source_url:      safeUrls[i],
     industry:        v.industry,
     content_goal:    v.content_goal ?? 'brand',
     is_our_video:    v.is_our_video ?? false,
     client_id:       v.client_id ?? null,
-    platform:        detectPlatform(v.url),
+    platform:        detectPlatform(safeUrls[i]),
     notes:           v.notes ?? null,
     analysis_status: 'pending',
   }))

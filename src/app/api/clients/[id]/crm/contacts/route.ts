@@ -28,7 +28,8 @@ import {
   type StageRow,
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
-import type { SectionKey } from '@/lib/crm/list-sections'
+import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
+import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
 import {
   extractCustomColumns,
@@ -48,11 +49,11 @@ interface ListQuery {
   stages: string[]
   /** 已 trim；空串当 null。 */
   q: string | null
-  /** `?view=priority` → 4 段视图。null = 老的平铺列表。 */
+  /** `?view=priority` → hot / cold 两张名单视图。null = 老的平铺列表。 */
   view: 'priority' | null
-  /** 段展开状态：`?open=waiting,acted`。缺省 undefined = 用 list-sections 的默认（前两段展开）。 */
+  /** 段展开状态：`?open=hot,cold`。缺省 undefined = 用 list-sections 的默认（前两段展开）。 */
   open?: Partial<Record<SectionKey, boolean>>
-  /** 段内翻页：`?p_waiting=2&p_off_list=1`，1-based。 */
+  /** 段内翻页：`?p_hot=2&p_cold=1`，1-based。 */
   sectionPage?: Partial<Record<SectionKey, number>>
   /** `?contact=<id>` —— 今日待办的直达链接；服务端定位它落在哪段哪页。 */
   focusContactId?: string
@@ -114,7 +115,6 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
   // 语法拆坏（甚至注入别的条件）。不尝试转义 —— 直接拒绝，让调用方自己清。
   if (q !== null && /[,()]/.test(q)) return { error: 'invalid characters in q' }
 
-  const SECTION_KEYS: SectionKey[] = ['waiting', 'acted', 'queued', 'off_list']
   const rawView = sp.get('view')
   if (rawView !== null && rawView !== 'priority') return { error: 'invalid view' }
   const view = rawView === 'priority' ? ('priority' as const) : null
@@ -241,6 +241,9 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
 async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
+  // 全客户 AI 摘要跟搜什么、翻哪页无关，是这次请求里最慢的一段（实测约 0.7 秒）：
+  // 一进来就开跑（跟下面的页查询并行），且 30 秒内同一客户只查一次——搜索框每敲一个字都会进来。
+  const briefsPromise = loadLatestBriefByContactCached(clientId)
   let total: number
   let pageContacts: ContactRow[]
   let stageRows: StageRow[]
@@ -334,11 +337,12 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
 
   const pageIds = pageContacts.map((c) => c.id)
   let touches: TouchRow[]
+  let briefs: BriefByContact
   try {
-    touches =
+    ;[touches, briefs] = await Promise.all([
       pageIds.length === 0
-        ? []
-        : await fetchAll<TouchRow>((from, to) =>
+        ? Promise.resolve([] as TouchRow[])
+        : fetchAll<TouchRow>((from, to) =>
             supabaseAdmin
               .from('contact_touchpoints')
               .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
@@ -347,7 +351,9 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
               .order('occurred_at', { ascending: false })
               .order('id', { ascending: false })
               .range(from, to),
-          )
+          ),
+      briefsPromise,
+    ])
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '读取失败' },
@@ -355,7 +361,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     )
   }
 
-  const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows)
+  const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows, briefs)
 
   return NextResponse.json({
     total,
@@ -371,7 +377,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
 }
 
 /**
- * `?view=priority` —— 4 段跟进视图。
+ * `?view=priority` —— hot / cold 两张名单视图。
  *
  * 跟 getPaged 的区别：**不分页拉人**。分段依赖「现在几点」（约好的回电到点没到、
  * 打不通满 3 天转交、推迟到没到期），不能在 SQL 里算，所以必须把筛选后的子集
@@ -386,9 +392,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
+  let briefs: BriefByContact
   try {
     const filters = contactFilterParams(query)
-    ;[contacts, touches, stageRows] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs] = await Promise.all([
       fetchAll<ContactRow>((from, to) => {
         let b = supabaseAdmin
           .from('contacts')
@@ -415,6 +422,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
           .order('sort_order', { ascending: true })
           .range(from, to),
       ),
+      loadLatestBriefByContact(clientId),
     ])
   } catch (err) {
     return NextResponse.json(
@@ -442,10 +450,11 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       open: query.open,
       page: query.sectionPage,
       focusContactId: query.focusContactId,
+      briefs,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
-      const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg)
+      const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg, briefs.get(row.id) ?? null)
       customPerContact.push(built.custom)
       return built.row
     },
@@ -494,8 +503,9 @@ export async function GET(
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
+  let briefs: BriefByContact
   try {
-    ;[contacts, touches, stageRows] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs] = await Promise.all([
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
@@ -511,7 +521,7 @@ export async function GET(
           .eq('client_id', clientId)
           .order('occurred_at', { ascending: false })
           // 同一时刻的多条（导入数据里表单与通话常共用一个时间戳）需要一个
-          // 确定的次序，否则每次刷新顺序都可能不同。
+          // 确定的次序，否则每次刷新顺序可能不同。
           .order('id', { ascending: false })
           .range(from, to),
       ),
@@ -523,6 +533,7 @@ export async function GET(
           .order('sort_order', { ascending: true })
           .range(from, to),
       ),
+      loadLatestBriefByContact(clientId),
     ])
   } catch (err) {
     return NextResponse.json(
@@ -531,7 +542,7 @@ export async function GET(
     )
   }
 
-  const { out, customPerContact } = assembleRows(contacts, touches, stageRows)
+  const { out, customPerContact } = assembleRows(contacts, touches, stageRows, briefs)
 
   return NextResponse.json({
     totalContacts: out.length,
@@ -551,6 +562,7 @@ function assembleRows(
   contacts: ContactRow[],
   touches: TouchRow[],
   stageRows: StageRow[],
+  briefs: BriefByContact,
 ): {
   out: Array<Record<string, unknown>>
   customPerContact: Array<Record<CustomColumnKey, string | null>>
@@ -577,7 +589,7 @@ function assembleRows(
     const seg = segmentContact(model, now)
     // 响应行也只有一份 —— view=priority 与本路径共用 responseRowFor，
     // 否则两个入口会各自长出一套字段（2026-09-26 R5b：就是在这里发现它已经被抄了第二份）。
-    const built = responseRowFor(c, tps, stageMeta, model, seg)
+    const built = responseRowFor(c, tps, stageMeta, model, seg, briefs.get(c.id) ?? null)
     customPerContact.push(built.custom)
     return built.row
   })

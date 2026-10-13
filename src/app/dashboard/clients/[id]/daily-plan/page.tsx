@@ -113,7 +113,7 @@ export default function DailyPlanPage() {
           <p className="text-sm font-medium text-me-charcoal/60">该客户暂无进行中的推广活动</p>
           <p className="text-xs text-me-charcoal/45 mt-1">
             先去
-            <Link href={`/dashboard/clients/${clientId}`} className="text-me-ochre hover:underline mx-1">推广活动</Link>
+            <Link href={`/dashboard/clients/${clientId}/campaigns`} className="text-me-ochre hover:underline mx-1">推广活动</Link>
             新建一个活动，每日计划才有内容可审核
           </p>
         </div>
