@@ -59,6 +59,7 @@ import { MailchimpAudiencePanel } from './_components/MailchimpAudiencePanel'
 import { LeadNotifyEmailsPanel } from './_components/LeadNotifyEmailsPanel'
 import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
+import { BookingMembersCard } from '../crm/_components/bookings/BookingMembersCard'
 import { CommentAuditList } from './_components/CommentAuditList'
 import { MessengerEmergencyStopPanel } from './_components/MessengerEmergencyStopPanel'
 import {
@@ -199,6 +200,9 @@ function TabBody({
           </SettingsSection>
           <SettingsSection icon="📤" title="客户素材上传链接（免登录）">
             <UploadLinkPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🔑" title="权限：谁能看订单与付款进度">
+            <BookingMembersCard clientId={clientId} />
           </SettingsSection>
         </>
       )
