@@ -70,3 +70,8 @@ Real CTS first test completed: after explicit user authorization, ctstours1 temp
 - Browser duration tolerates up to one second of container rounding; the server-probed duration enforces the creator limit. Lecture request budget raised to 300 seconds.
 - Follow-up validation: 10 test files / 72 tests pass, including real MP4 inspection, OAuth scope gate, concurrent claims, changed approval, large metadata and durable provider task recovery. `git diff --check` passes. Live long-metadata CAS has not yet been rerun; no additional CTS upload was performed.
 - Impeccable context loaded; mechanical detector over TikTok confirmation component and dedicated order page returned [] (0 findings, no UI changes needed). Scoped ESLint passes. Production Render crazycontent currently has no explicit ffprobe build preflight; configure and verify before enabling production uploads.
+
+### Second designated review outcome
+Claude Opus second review accepted the corrected PR scope, short CAS filters, scope gate and missing-dependency handling. It did not approve production: production runtime proof/preflight and a new long, multipart private upload on the latest deployed code remain outstanding. The previous successful provider upload ran 932a69d23.
+Repository preflight is now `node scripts/tiktok/check-runtime.mjs`; run it in the production Render build command before the existing build steps after the source is merged, and record runtime evidence. Do not configure an unmerged script path on the live main service.
+Latest test deployment requested: dep-db70krqj9qps73aqasng at 5dad01159. This is a test deployment, not a production transfer.
