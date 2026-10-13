@@ -302,6 +302,26 @@ describe('pushStoryLiteItems —— 不确定窗口按抢占时间算', () => {
   })
 })
 
+describe('pushStoryLiteItems —— 人为撤下的不算「没发出去」', () => {
+  it('原因代码以 PM_REMOVED 开头的被拦条目不进「没发出去」提醒；别的被拦照常提醒', async () => {
+    const removed = makeSupabase({
+      packs: [pack({})],
+      items: [item({ status: 'BLOCKED', slot_at: `${TODAY}T20:00:00Z`, reason_code: 'PM_REMOVED_20261014 PM 决定撤下' })],
+    })
+    const items: ManualItem[] = []
+    await pushStoryLiteItems(removed, items, NOW, nameOf, LIVE)
+    expect(items.filter((i) => i.kind === 'story_stalled')).toHaveLength(0)
+
+    const real = makeSupabase({
+      packs: [pack({})],
+      items: [item({ status: 'BLOCKED', slot_at: `${TODAY}T20:00:00Z`, reason_code: 'FILE_CHANGED' })],
+    })
+    const items2: ManualItem[] = []
+    await pushStoryLiteItems(real, items2, NOW, nameOf, LIVE)
+    expect(items2.filter((i) => i.kind === 'story_stalled')).toHaveLength(1)
+  })
+})
+
 describe('pushStoryLiteItems —— 看门狗：授权了却什么都没发生', () => {
   it('已授权、到点超过 1 小时、PENDING 且没有检查记录 → 一条 story_unarmed', async () => {
     const db = makeSupabase({
