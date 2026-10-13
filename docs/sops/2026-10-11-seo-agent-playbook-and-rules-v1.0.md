@@ -78,6 +78,15 @@ CTS 每周一自动改最多 3 页标题 / 描述并上线的做法保留；前�
 - 只读 → 档 1。
 - 「状态字段 = 已授权」不算授权（记忆 `feedback-status-field-as-authorization-leaks-gates`）。**批准 / 不批准要有人的名字和时间的回执**（见 §13 行 B1）。
 
+### 2.2c 2026-10-14 修订（PM 拍板：细节不问我，要工作流和目标导向）
+
+> PM 原话：「这种细节性问题不用问我，我要的是 SEO Agent 的工作流和目标为导向的工作方案。」下面**取代**上表「档 2 一律等人点头」中针对官网 B/C 级、非保护页改动的部分；其余档位不变。
+
+- **档 2 的批准权下放给写入者（agent）**，条件**全部**满足才算：①页面**不在保护名单**，且不是「带价格 / 出发日的商业页」（这类仍是档 3）；②改动属于：站内链接、正文改写、死链修复、页面合并并永久跳转（有抢词证据：同一客户两页共用词曝光 ≥1,000 / 28 天）、已下架产品文字清理；③**独立审查**（不是写入者自己）出具「可以合」，审查意见里的中高项已改；④线上检查全绿且合并的就是审查过的那个 SHA；⑤改动**可回退**（跳转可撤、内容在 Git 里）；⑥事后**一句话汇报**（目标进度 / 做了什么 / 偏离信号），并留回执（PR 号 + 审查结论 + 线上抽查结果）。
+- **仍然只问 PM**（档 3）：花钱（含付费查询超额、广告）、**保护页**的标题 / 描述 / 正文 / 跳转、`canonical` / `noindex`、带价格出发日的商业页新稿、对外发布到客户不知情的渠道、A 级（数据库结构、鉴权、合并规则）、不可逆删除、业务事实（价格、产品是否保留）。
+- **档 4 不变**。
+- 这条修订的运行方式见 `docs/sops/2026-10-14-seo-agent-workflow-and-goal-plan-v1.md`（§3 决策权、§5 偏离处理）。
+
 ### 2.2b 每个档 2 / 档 3 动作的回执（SEO 版，字段沿用 44 号 §7 与广告手册 §2.2b）
 
 `request_id`、`client_id`、`source_record_id`（清单卡 / 改动稿 id）、`status`（proposed / authorized / applied / verified / rolled_back / failed）、`authorization`（`not_required_readonly` / `pending_pm` / `granted` / `denied`）、**授权人 + 批的是哪个版本**（改动稿被改过则旧授权作废）、`cost`（provider + 金额，没有写 0）、**改前基线与改后线上读回**、`created_at`、怎么撤回（SEO 里一般 = 在网站仓库点 GitHub 的 Revert）。
@@ -219,6 +228,9 @@ CTS 每周一自动改最多 3 页标题 / 描述并上线的做法保留；前�
 | **P-03e** | **所有会写客户网站的路径，都必须先过同一个保护检查**（见 5.3.5） | 9-28 的第二个元凶就是「有一条写入路径没有闸」 | **缺，见下表** |
 
 #### 5.3.5 所有「写客户网站」的路径，谁认保护名单？（本稿 grep 核实，**全仓只有 2 处读 `meta_cycle_protected_slugs`**）
+
+> **2026-10-14 更新**：下表是 10-11 写稿时的 grep 结果，**已过时**。PR #2469（保护页统一闸，10-11 已合并）之后，`seo-fix`、`cms/github/update-page`、`cms/wordpress/update-post` 三个人触发路由（`protected-pages-route`）、`page-apply-optimization`、`github-page-upgrade-publisher`、`seo-fix-orchestrator`、`wordpress-client`、`seo-meta/cts-meta-pr`、标题周循环、每周清单都已读统一闸（以 `git grep protected-pages origin/main` 为准）。**仍未接的**：Oztop 旧定时任务 `/api/cron/oztop-seo-optimizer`（PM 10-12 说先不管）、全站页头注入 `cms/publish-geo-to-github`（开 PR 由人合并，改的是共用页头文件，风险低）、博客新建（新页不在名单里）。下表保留作历史对照。
+
 
 | 写入路径 | 触发方式 | 读保护名单？ | 代码证据 | 本手册要求 |
 |---|---|---|---|---|
