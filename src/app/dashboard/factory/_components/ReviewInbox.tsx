@@ -356,7 +356,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   const b = publishedBadge(o.published ?? null)
                   const tone = b.color.includes('green') ? 'green' : b.color.includes('slate') ? 'slate' : 'amber'
                   return (
-                  <ReadOnlyTile
+                  <div key={o.id}><ReadOnlyTile
                     key={o.id}
                     id={o.id}
                     angle={o.angle}
@@ -367,6 +367,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                     status={{ label: b.label, tone }}
                     link={b.href ? { href: b.href, label: '在 Facebook 查看' } : null}
                   />
+                  {o.output?.video_path && <a className="mt-2 inline-block text-sm text-blue-600 underline" href={`/dashboard/clients/${o.client_id}/tiktok/${o.id}`}>发布到 TikTok（需单独确认）</a>}</div>
                   )
                 })}
               </div>

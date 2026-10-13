@@ -28,6 +28,8 @@ export type CalendarClosureItemKind =
   | 'calendar_closure_probe_failed'
   | 'calendar_closure_probe_passed'
   | 'calendar_closure_no_ledger'
+  /** 每天一行汇总：日历上到期没闭环的件数（不逐条塞满邮件） */
+  | 'calendar_closure_overdue_summary'
 
 /** 与 types.ts 里的 CALENDAR_CLOSURE_JOB 是同一个值，这里只做再导出。 */
 export const CALENDAR_CLOSURE_JOB_NAME = CALENDAR_CLOSURE_JOB
@@ -39,6 +41,7 @@ const CALENDAR_CONSOLE_URL = 'https://console.cloud.google.com/iam-admin/service
 const CALENDAR_SETTINGS_URL = 'https://calendar.google.com/calendar/u/0/r/settings'
 const CALENDAR_FALLBACK_URL = 'https://calendar.google.com/calendar'
 const INNGEST_URL = 'https://app.inngest.com'
+const DEV_DEBT_URL = 'https://app.magicengine.com.au/dashboard/admin/cron-health#dev-debt'
 
 /** 巡检超过这么久没跑，就当它没在跑。 */
 const STALE_MS = 36 * 60 * 60 * 1000
@@ -202,6 +205,22 @@ export function buildCalendarClosureItems(receipt: AuditReceipt, now: Date): Man
         '在事件描述第一行补上 ledger-id: <台账卡 id>，再加一行 verify_how 摘要；' +
           '或让窗口补建台账卡。',
         noLedger[0].htmlLink || CALENDAR_FALLBACK_URL,
+      ),
+    )
+  }
+
+  // 每天一行汇总：到期没闭环的件数。逐条清单在「开发欠账」页，不塞满邮件。
+  const open = receipt.results.filter((r) => r.kind !== 'closed' && r.kind !== 'covered')
+  const stale = typeof receipt.stale_open === 'number' ? receipt.stale_open : 0
+  if (open.length > 0 || stale > 0) {
+    const old = open.filter((r) => r.overdueDays >= 3).length
+    const staleText = stale > 0 ? `；另有 ${stale} 件超过 14 天的旧事项，不再逐条提醒` : ''
+    items.push(
+      infraItem(
+        'calendar_closure_overdue_summary',
+        `日历上有 ${open.length} 件到期还没闭环的验证事项（其中 ${old} 件已超过 2 天）${staleText}。`,
+        '打开开发欠账清单看逐条明细；核完一件，就在日历事件标题前加 ✅（或写「作废」），它明天就不会再出现。',
+        DEV_DEBT_URL,
       ),
     )
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { downloadTwilioRecording, MAX_RECORDING_BYTES, RecordingFetchError } from '../recording'
 import { numbersIn, verifyFacts, type RawAnalysis } from '../analysis-schema'
 import { planAnalysisSweep } from '@/lib/inngest/functions/telephony-analysis'
+import { TranscriptPendingError } from '../vendors'
 import { runCallAnalysis, MAX_STEP_ATTEMPTS, type AnalysisCall, type AnalysisConnection, type AnalysisStore } from '../pipeline'
 
 const ACCT = 'AC' + 'a'.repeat(32)
@@ -110,7 +111,7 @@ const goodDeps = (store: AnalysisStore, over: Partial<Parameters<typeof runCallA
     raw: { summary: '想了解南岛团', language: 'en', facts: [{ key: 'travel_window' as const, value: 'March', quote: 'South Island tour in March', confidence: 0.9 }, { key: 'concern' as const, value: 'price', quote: 'too expensive for us', confidence: 0.9 }] },
     model: 'm-a',
   }),
-  env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : n === 'ELEVENLABS_API_KEY' || n === 'DEEPSEEK_API_KEY' ? 'k' : undefined),
+  env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : n === 'TWILIO_INTELLIGENCE_SERVICE_SID' || n === 'DEEPSEEK_API_KEY' ? 'k' : undefined),
   fetcher: audioFetch(),
   ...over,
 })
@@ -155,6 +156,12 @@ describe('分析流水线', () => {
     const m = makeStore()
     const r = await runCallAnalysis(goodDeps(m.store, { env: (n: string) => (n === 'TWILIO_AUTH_TOKEN_CTS' ? 'tok' : undefined) }), ref)
     expect(r).toMatchObject({ status: 'waiting', detail: 'config_missing' })
+    expect(m.call).toMatchObject({ transcriptStatus: 'not_started', transcriptAttempts: 0 })
+  })
+  it('转写还在进行：等待，不计失败次数、不改状态', async () => {
+    const m = makeStore()
+    const r = await runCallAnalysis(goodDeps(m.store, { transcribe: async () => { throw new TranscriptPendingError() } }), ref)
+    expect(r).toMatchObject({ status: 'waiting', detail: 'transcript_pending' })
     expect(m.call).toMatchObject({ transcriptStatus: 'not_started', transcriptAttempts: 0 })
   })
   it('转写失败：不写假摘要，transcript_status=failed，summary 仍是 not_started；错误只记类别、不带原文', async () => {

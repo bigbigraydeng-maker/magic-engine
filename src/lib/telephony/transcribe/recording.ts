@@ -43,3 +43,9 @@ export async function downloadTwilioRecording(args: {
   if (buf.byteLength > MAX_RECORDING_BYTES) throw new RecordingFetchError('too_large', '录音超过大小上限')
   return { bytes: buf, contentType: res.headers.get('content-type') ?? 'audio/mpeg', recordingSid: m[2] }
 }
+
+/** 从 Twilio 录音链接里取录音编号（RE 开头）；不是官方录音路径就返回 null。 */
+export function recordingSidFromUrl(url: string): string | null {
+  const m = ALLOWED.exec(url.split(/[?#]/)[0].replace(/\.(mp3|wav|json)$/i, ''))
+  return m ? m[2] : null
+}
