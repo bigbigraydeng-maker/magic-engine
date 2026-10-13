@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-13
 done_on: 2026-10-13
-done_ref: pr:pending
+done_ref: pr:2528
 source: session:1a85e0eb
 verify_by: 2026-10-27
 verify_how: 60 号的订单金额迁移合并后，src/lib/crm/__tests__/booking-no-money-columns.test.ts 仍通过；付款总览页与抽屉接口响应里没有金额
