@@ -793,6 +793,14 @@ describe('从没人联系过：新的留在名单上，陈年积压交给系统'
     expect(r.reason).toContain('天')
   })
 
+  /** 没有任何来信时间的新建客人，不能拿 1970 年当进线时间（曾显示「进线 20739 天」）。 */
+  it('没有来信时间的客人不说荒唐的天数', () => {
+    const r = segmentContact(contact({ touchpoints: [] }), NOW)
+    expect(r.segment).toBe('new_untouched')
+    expect(r.reason).not.toMatch(/\d+\s*(天|小时)/)
+    expect(r.reason).toContain('还没人联系')
+  })
+
   /** 交给系统 ≠ 放弃：他哪天回话了，立刻回到最上面那层。 */
   it('陈年积压的人一开口，立刻回到「客人在等你」', () => {
     const c = contact({

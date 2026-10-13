@@ -86,7 +86,7 @@ describe('付款总览 dates across years', () => {
 
     await screen.findByText(PAGE_HEADING)
     expect(await screen.findByText('⬜ 到期 2027年5月10日')).toBeTruthy()
-    expect(screen.getByText('2027年2月03日')).toBeTruthy()
+    expect(screen.getByText('2027年2月3日')).toBeTruthy()
     expect(screen.getAllByText('⬜ 到期 12月19日').length).toBeGreaterThan(0)
     expect(screen.getByText('2025年11月30日')).toBeTruthy()
   })

@@ -805,6 +805,9 @@ export function segmentContact(
     if (days >= FRESH_LEAD_DAYS) {
       return make('handoff_sop', `进线 ${days} 天，一直没人联系过 —— 交给系统跟`, 'email')
     }
+    // 没有任何一条客人来信的时间（lastInbound 为 0，比如只有一个名字/号码的新建客人）时，
+    // 不能拿 0 当时间去算 —— 会算出「进线 20739 天」（从 1970 年起）。没有时间就不说时间。
+    if (lastInbound === 0) return make('new_untouched', '进线了，还没人联系', 'phone')
     return make('new_untouched', `进线 ${humanGap(nowMs - lastInbound)} 还没人联系`, 'phone')
   }
 
