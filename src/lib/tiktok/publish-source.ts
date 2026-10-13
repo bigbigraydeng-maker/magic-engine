@@ -24,6 +24,8 @@ export async function snapshotReviewedTikTokVideo(videoUrl: string, clientId: st
   // copy never overwrites; an existing hash object is acceptable only after reinspection.
   if (error && String((error as { statusCode?: string | number }).statusCode) !== '409') throw new Error('无法准备 TikTok 发布副本')
   const url = storage.getPublicUrl(path).data.publicUrl
+  const expected = `${new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).origin}${PUBLIC_PREFIX}${path}`
+  if (url !== expected) throw new Error('发布地址不属于已验证的存储前缀')
   const proof = await inspectTikTokVideo(url)
   if (proof.sha256 !== sha256) throw new Error('发布副本与已确认视频不一致，发布已停止')
   return url
