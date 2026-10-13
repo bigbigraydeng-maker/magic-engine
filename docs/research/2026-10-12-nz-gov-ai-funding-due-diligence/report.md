@@ -100,8 +100,8 @@
 
 **结论（本轮未发现，不等于已核实不存在）：** 本轮只核对了各地 RBP 代理页面和 5 个 district 议会的抽样，多处只读到搜索摘要或原页打不开，**未发现**中央体系之外的地区性 AI / 数字化补贴；已查到的地区资金都是同一套 RBPN（管理培训补贴 + AI 顾问试点）经各地代理发放。其余地区、议会、经济发展机构未逐一核实。
 
-- **奥克兰（我们公司在 Albany）：区域商业伙伴是 Auckland Business Chamber（奥克兰商会），不是 Tātaki Auckland Unlimited。** 来源：[官方代理名单](https://www.business.govt.nz/strategy-and-performance/regional-business-partner-network/find-your-local-regional-business-partner)（[原文]，复核 2025-07-21，我本人核对）；Tātaki 2022-07 公告其退出牵头交付（[原文]）。奥克兰商会 RBP 页（[摘要]，原页 403）写「小组培训 75%、每家财年最多 NZ$5,000」，另有说法写最低上年销售额 NZ$6 万，**均未能读到原页，只当线索**。
-- **Albany 本地**：Upper Harbour 本地委员会的补助分类是艺术、社区、环境、活动、遗产、体育，**没有企业 AI / 培训类**（[摘要]）。Business North Harbour（北岸商业促进区）有往期能力培训，未发现 AI 补贴。Auckland Council 通用企业补助：未发现。
+- **奥克兰（公司地址已由 Albany 迁到 Epsom，仍属奥克兰，区域商业伙伴不变）：区域商业伙伴是 Auckland Business Chamber（奥克兰商会），不是 Tātaki Auckland Unlimited。** 来源：[官方代理名单](https://www.business.govt.nz/strategy-and-performance/regional-business-partner-network/find-your-local-regional-business-partner)（[原文]，复核 2025-07-21，我本人核对）；Tātaki 2022-07 公告其退出牵头交付（[原文]）。奥克兰商会 RBP 页（[摘要]，原页 403）写「小组培训 75%、每家财年最多 NZ$5,000」，另有说法写最低上年销售额 NZ$6 万，**均未能读到原页，只当线索**。
+- **本地委员会（本轮按旧地址 Albany 查的，新地址 Epsom 所属委员会的企业类补助本轮未查）**：Upper Harbour 本地委员会的补助分类是艺术、社区、环境、活动、遗产、体育，**没有企业 AI / 培训类**（[摘要]）。Business North Harbour（北岸商业促进区）有往期能力培训，未发现 AI 补贴。Auckland Council 通用企业补助：未发现。
 - **各地区域商业伙伴代理 → 有无额外补贴**（均以官方代理名单为准）：
 
 | 地区 | 代理 | 额外 AI / 数字化 / 培训补贴 |
@@ -177,7 +177,7 @@ Business.govt.nz 的 Funding Explorer 是政府自己的基金汇总工具，官
 
 ### B. Magic Engine 自己能申请什么？
 
-- ME（新西兰注册公司，奥克兰 Albany）**以买方身份**也许能申请 MCDF（管理培训）和 AI 顾问试点，但这两项补贴的是「买培训 / 买 AI 顾问」，**不补贴我们自己做产品开发**。AI 顾问试点页明确不报「开发要卖给客户的 AI 产品」。
+- ME（新西兰注册公司，奥克兰 Epsom；本文成稿时用的是旧地址 Albany）**以买方身份**也许能申请 MCDF（管理培训）和 AI 顾问试点，但这两项补贴的是「买培训 / 买 AI 顾问」，**不补贴我们自己做产品开发**。AI 顾问试点页明确不报「开发要卖给客户的 AI 产品」。
 - **可能适用，资格未核实**：
   - **New to R&D Grant**：合格研发成本的 40%，最高 NZ$40 万；须满足「研发新手」门槛、有技术不确定性；软件开发只有「对研发关键」才算；**不能用其他新西兰政府资金共同出资**。
   - **研发税收抵免（RDTI）**：15%，年合格研发支出至少 NZ$5 万（委托 approved research provider 时据称例外，**未核实**），须先登记并拿 General Approval。
