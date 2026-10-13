@@ -8,8 +8,9 @@ done_on: 2026-10-12
 done_ref: doc:docs/ledger/evidence/2026-10-12-nm-medspa-generic-welcome-receipt.md
 source: session:29d2f37f
 verify_by: 2026-10-14
-verify_how: 读回在投广告的素材，欢迎语三处和自动跟进语都不含 new clients；旧广告已暂停；再看新广告有无被拒
+verify_how: 读回在投广告的素材，欢迎语三处和自动跟进语都不含 new clients；旧广告已暂停；再看新广告有无被拒；并从在投新广告发起一条测试私信，核对客人实际收到的欢迎语和自动跟进语都是新文案（预览不显示欢迎语，读回字段不能代替）；另核对 NZ$158 套餐适用范围（见下）
 ---
 PM 10/12 回「改」「去」「换」。素材不可原地改，已新建素材和新广告，审核通过后已开新停旧。
 PM 回「去」：自动跟进语也一并去掉新客限定（第二版）。$158 是否限新客仍未核实。
 对象编号、改前改后原文、回滚见 doc:docs/ledger/evidence/2026-10-12-nm-medspa-generic-welcome-receipt.md。
+待核实（阻塞「verified」）：NZ$158 是否仅限新客。两段文案已删「for new clients」，若套餐实际仍限新客，广告会向老客宣传无法兑现的价格。须以客户批准资料或官网核实：仍限新客 → 立即恢复限定；已扩展到所有客人 → 在回执记录依据。旧 FAQ 问题 “Is the NZ$158 offer for new clients?” 见 docs/ledger/2026-10-10-nm-medspa-ad-faq-published.md。
