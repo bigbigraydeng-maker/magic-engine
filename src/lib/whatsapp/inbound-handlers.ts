@@ -32,7 +32,6 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { buildIdentities, resolveContact } from '@/lib/crm/identity'
 import type { WhatsAppEcho, WhatsAppStatus } from './inbound-classify'
 
 /** Shown as the sender of a message typed on the phone App — we cannot know
@@ -81,16 +80,17 @@ function echoBody(echo: WhatsAppEcho): string | null {
   return `[${echo.type ?? 'unsupported'} message]`
 }
 
-/** True when this echo is one we should store: a real message from our own
- *  number to a customer, not a revoke/edit and not a self-send. */
-function isStorableEcho(echo: WhatsAppEcho, ourDigits: Set<string>): boolean {
-  if (typeof echo.id !== 'string' || echo.id.length === 0) return false
-  if (typeof echo.to !== 'string' || !/^[0-9]{5,20}$/.test(echo.to)) return false
-  if (typeof echo.from !== 'string') return false
-  if (!ourDigits.has(digits(echo.from))) return false
-  if (ourDigits.has(digits(echo.to))) return false
-  if (echo.type === 'revoke' || echo.type === 'edit') return false
-  return true
+/** Why an echo is not stored, or null when it should be. The reason is logged
+ *  (fixed text, never the number or body) so a whole class of echoes cannot be
+ *  dropped silently — e.g. if Meta's `from` format ever stops matching ours. */
+function echoSkipReason(echo: WhatsAppEcho, ourDigits: Set<string>): string | null {
+  if (typeof echo.id !== 'string' || echo.id.length === 0) return 'missing_id'
+  if (typeof echo.to !== 'string' || !/^[0-9]{5,20}$/.test(echo.to)) return 'bad_recipient'
+  if (typeof echo.from !== 'string') return 'missing_sender'
+  if (!ourDigits.has(digits(echo.from))) return 'sender_not_our_number'
+  if (ourDigits.has(digits(echo.to))) return 'recipient_is_our_number'
+  if (echo.type === 'revoke' || echo.type === 'edit') return 'revoke_or_edit'
+  return null
 }
 
 /** Find the conversation id for this customer, or null. */
@@ -107,56 +107,6 @@ async function findConversationId(
     .maybeSingle()
   if (error) throw new Error(`conversation lookup failed: ${error.message}`)
   return (data?.id as string | undefined) ?? null
-}
-
-/** Resolve a contact for a brand-new customer, best-effort. */
-async function resolveEchoContact(
-  clientId: string,
-  waId: string,
-  sentAt: string,
-): Promise<string | null> {
-  try {
-    const resolved = await resolveContact({
-      clientId,
-      identities: buildIdentities({ phone: `+${waId}` }),
-      displayName: null,
-      overwriteDisplayName: false,
-      source: 'whatsapp',
-      seenAt: sentAt,
-    })
-    return resolved.contactId
-  } catch {
-    console.error('[whatsapp/inbound-handlers] resolveContact failed')
-    return null
-  }
-}
-
-/** Create the conversation for a customer we have never seen, then re-select
- *  its id (the upsert returns no row on conflict). */
-async function createConversation(
-  clientId: string,
-  waId: string,
-  sentAt: string,
-): Promise<string> {
-  const contactId = await resolveEchoContact(clientId, waId, sentAt)
-
-  const { error } = await supabaseAdmin.from('conversations').upsert(
-    {
-      client_id: clientId,
-      channel: 'whatsapp',
-      conversation_id: waId,
-      participant_psid: waId,
-      ...(contactId ? { contact_id: contactId } : {}),
-      last_message_at: sentAt,
-      last_message_from: 'page',
-    },
-    { onConflict: 'client_id,conversation_id', ignoreDuplicates: true },
-  )
-  if (error) throw new Error(`conversation upsert failed: ${error.message}`)
-
-  const id = await findConversationId(clientId, waId)
-  if (!id) throw new Error('conversation not found after upsert')
-  return id
 }
 
 /** Store the outbound message row. Throws on error. */
@@ -176,7 +126,9 @@ async function storeEchoMessage(
       body: echoBody(echo),
       sent_at: sentAt,
     },
-    { onConflict: 'conversation_id,message_id' },
+    // ignoreDuplicates: a redelivery — or Meta echoing a message ME itself sent through the API —
+    // must never overwrite the row that already exists (it carries the real sender).
+    { onConflict: 'conversation_id,message_id', ignoreDuplicates: true },
   )
   if (error) throw new Error(`conversation_messages upsert failed: ${error.message}`)
 }
@@ -212,10 +164,10 @@ async function recordEchoTouch(
   const sourceRef = `${conversationId}:out`
   const body = {
     summary: '我们在 WhatsApp 回复过',
-    metadata: { thread_id: conversationId, sender: 'page' },
+    metadata: { thread_id: conversationId, sender: 'page', origin: 'whatsapp_business_app_echo' },
   }
   try {
-    await supabaseAdmin.from('contact_touchpoints').upsert(
+    const created = await supabaseAdmin.from('contact_touchpoints').upsert(
       {
         client_id: clientId,
         contact_id: contactId,
@@ -228,13 +180,17 @@ async function recordEchoTouch(
       },
       { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true },
     )
-    await supabaseAdmin
+    const advanced = await supabaseAdmin
       .from('contact_touchpoints')
       .update({ occurred_at: sentAt })
       .eq('client_id', clientId)
       .eq('source', 'whatsapp')
       .eq('source_ref', sourceRef)
       .lt('occurred_at', sentAt)
+    // supabase-js reports failures as `{ error }`, it does not throw.
+    if (created.error || advanced.error) {
+      console.error('[whatsapp/inbound-handlers] touchpoint write failed')
+    }
   } catch {
     console.error('[whatsapp/inbound-handlers] touchpoint write failed')
   }
@@ -243,8 +199,9 @@ async function recordEchoTouch(
 /**
  * Store a message the business typed on the WhatsApp phone App.
  *
- * Returns 'skipped' for anything not applicable (not our number, a revoke or
- * edit, a malformed payload). Throws on a database error so the webhook can
+ * Returns 'skipped' (with a fixed-text log line giving the reason) for anything
+ * not applicable (not our number, a revoke or edit, a malformed payload, a number
+ * with no existing conversation). Throws on a database error so the webhook can
  * answer 503 and Meta redelivers.
  */
 export async function storeEcho(
@@ -252,21 +209,25 @@ export async function storeEcho(
   ours: OurNumber,
   echo: WhatsAppEcho,
 ): Promise<'stored' | 'skipped'> {
-  const ourDigits = ourDigitSet(ours)
-  if (!isStorableEcho(echo, ourDigits)) return 'skipped'
+  const reason = echoSkipReason(echo, ourDigitSet(ours))
+  if (reason) {
+    console.error(`[whatsapp/inbound-handlers] echo skipped: reason=${reason}`)
+    return 'skipped'
+  }
 
   const waId = echo.to as string
   const sentAt = echoSentAt(echo.timestamp)
 
-  let conversationId = await findConversationId(clientId, waId)
-  let contactId: string | null = null
-
-  if (conversationId) {
-    contactId = await contactIdForConversation(conversationId)
-  } else {
-    conversationId = await createConversation(clientId, waId, sentAt)
-    contactId = await contactIdForConversation(conversationId)
+  // Only attach to a conversation that already exists. The phone App echoes EVERY
+  // chat the staff have (suppliers, friends, strangers); creating a contact for
+  // each would flood the CRM. A customer who writes in gets a conversation from
+  // the normal inbound path, and later echoes then attach to it.
+  const conversationId = await findConversationId(clientId, waId)
+  if (!conversationId) {
+    console.error('[whatsapp/inbound-handlers] echo skipped: reason=no_existing_conversation')
+    return 'skipped'
   }
+  const contactId = await contactIdForConversation(conversationId)
 
   await storeEchoMessage(conversationId, ours, echo, sentAt)
   await advanceThreadClock(conversationId, sentAt)

@@ -299,6 +299,34 @@ describe('POST — failed status dispatch (messages/statuses)', () => {
   })
 })
 
+describe('POST — receipts and declined history', () => {
+  it('sent/delivered/read receipts cost no client lookup and no handler call', async () => {
+    const captured = stubDb()
+    const res = await POST(
+      makePost(
+        change('messages', {
+          statuses: [
+            { id: 'wamid.S1', status: 'delivered', recipient_id: WA_ID },
+            { id: 'wamid.S2', status: 'read', recipient_id: WA_ID },
+          ],
+        }),
+      ),
+    )
+    expect(res.status).toBe(200)
+    expect(mockApplyFailedStatus).not.toHaveBeenCalled()
+    expect(captured.touchedTables).not.toContain('clients')
+  })
+
+  it('declined history sharing (errors only, no threads) → 200, there is no data to lose', async () => {
+    stubDb()
+    const res = await POST(
+      makePost(change('history', { history: [{ errors: [{ code: 2593109, title: 'History sync is turned off' }] }] })),
+    )
+    expect(res.status).toBe(200)
+    expect(mockStoreEcho).not.toHaveBeenCalled()
+  })
+})
+
 describe('POST — history dispatch', () => {
   it('history → 503, no handler spies, nothing stored, clients not even queried', async () => {
     const captured = stubDb()

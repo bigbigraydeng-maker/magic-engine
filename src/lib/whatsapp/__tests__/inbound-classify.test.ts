@@ -317,3 +317,13 @@ describe('classifyInboundChanges — ordering across entries and changes', () =>
     ])
   })
 })
+
+describe('declined history sharing', () => {
+  it('history:[{errors}] with no threads is ignored, not refused', () => {
+    const payload = {
+      entry: [{ changes: [{ field: 'history', value: { metadata: { phone_number_id: '123' }, history: [{ errors: [{ code: 2593109 }] }] } }] }],
+    }
+    expect(classifyInboundChanges(payload)).toEqual([{ kind: 'ignored', field: 'history_declined' }])
+  })
+})
+

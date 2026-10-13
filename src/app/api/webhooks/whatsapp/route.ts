@@ -479,6 +479,7 @@ async function storeMessage(
 async function withClient(
   phoneNumberId: string,
   count: number,
+  what: string,
   failures: string[],
   fn: (clientId: string) => Promise<void>,
 ): Promise<void> {
@@ -506,7 +507,7 @@ async function withClient(
       // down over one client's misconfiguration.
       console.error(
         `[webhooks/whatsapp] no client mapped to phone_number_id=${phoneNumberId} ` +
-          `— ${count} message(s) dropped. Set clients.whatsapp_phone_number_id.`,
+          `— ${count} ${what} dropped. Set clients.whatsapp_phone_number_id.`,
       )
     }
     return
@@ -583,7 +584,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   for (const change of classifyInboundChanges(payload)) {
     switch (change.kind) {
       case 'customer_messages': {
-        await withClient(change.phoneNumberId, change.messages.length, failures, async (clientId) => {
+        await withClient(change.phoneNumberId, change.messages.length, 'message(s)', failures, async (clientId) => {
           for (const msg of change.messages) {
             try {
               await storeMessage(clientId, msg, change.contactName)
@@ -598,7 +599,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       case 'echoes': {
-        await withClient(change.phoneNumberId, change.echoes.length, failures, async (clientId) => {
+        await withClient(change.phoneNumberId, change.echoes.length, 'staff-phone echo(es)', failures, async (clientId) => {
           for (const echo of change.echoes) {
             try {
               const result = await storeEcho(
@@ -617,8 +618,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       case 'statuses': {
-        await withClient(change.phoneNumberId, change.statuses.length, failures, async (clientId) => {
-          for (const status of change.statuses) {
+        // Only failures are reconciled; sent/delivered/read receipts must not cost a
+        // client lookup (a lookup error would otherwise 503 a harmless receipt).
+        const failed = change.statuses.filter((s) => s.status === 'failed')
+        if (failed.length === 0) break
+        await withClient(change.phoneNumberId, failed.length, 'failed-delivery receipt(s)', failures, async (clientId) => {
+          for (const status of failed) {
             try {
               await applyFailedStatus(clientId, status)
             } catch {

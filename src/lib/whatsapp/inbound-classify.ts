@@ -231,10 +231,16 @@ function classifyHistoryField(
   phoneNumberId: string,
   displayNumber: string | undefined,
 ): InboundChange[] {
-  const historyCount = plainObjectsOnly(value.history).length
+  const historyItems = plainObjectsOnly(value.history)
+  // A declined share ("history sharing turned off") is `history:[{errors:[…]}]` with no
+  // threads: there is no data in it to lose, so it must not be refused forever.
+  const withData = historyItems.filter((item) => !('errors' in item) || Array.isArray(item.threads))
+  const declinedOnly = historyItems.length > 0 && withData.length === 0
   const messagesCount = plainObjectsOnly(value.messages).length
-  const itemCount = historyCount + messagesCount
-  if (itemCount === 0) return []
+  const itemCount = withData.length + messagesCount
+  if (itemCount === 0) {
+    return declinedOnly ? [{ kind: 'ignored', field: 'history_declined' }] : []
+  }
   return [
     {
       kind: 'history',

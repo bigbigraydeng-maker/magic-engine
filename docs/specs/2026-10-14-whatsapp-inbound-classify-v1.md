@@ -134,3 +134,14 @@ PR 正文「## 当场试跑」逐项写：触发方式、时间、退出码、�
 10. **隐私**：`whatsapp_history_inbox` 存客人号（个人信息），本轮不做清理任务；PR2 里写明保留期由认领流程那一轮定，且表只存元数据；日志与待办里不出现客人号、不出现正文。
 11. **PR1 并不「零变化」**：PR1 会新增回声写入、failed 状态更新、history 的 503 守卫。对现有客户的影响：现状下回声/状态/历史本就没人订阅（订阅字段只有 messages），所以线上实际流量不变；订阅字段要等 PR 都上线后 56 号才打开。
 12. **补变异用例**：①`field=smb_message_echoes` 却带 `messages[]` → 不入客人通道；②`field=messages` 却带 `message_echoes[]` → 忽略并计数；③`echo.to` 等于我方号 → 跳过；④去掉 `ignoreDuplicates` → 并发重投用例（同一回声两次投递，只一行）；⑤去掉 `.lt(...)` → 乱序用例（先新后旧，时间不后退）；⑥history 守卫去掉 → history 必须回 503；⑦状态回调 `recipient_id` 不符 → 不更新；⑧回声不触发 Inngest、不写 inbound 触点、不改 `last_message_from` 为 customer。
+
+## 8. 实施后审查补记（子牙 + 魏征，2026-10-14；与前文冲突处以本节为准）
+
+- **回声只挂到已有会话，不再为陌生号码新建联系人/会话**（魏征：手机 App 的所有聊天——供应商、朋友——都会回声，建联系人会把 CRM 灌满，`email-reply-due` 还把 whatsapp 当「客人主动找上门」）。没有现成会话 → 跳过并记固定文案日志 `no_existing_conversation`；客人一旦来信，会话由正常入口建立，之后的回声自动挂上。（取代 §1.3 第 2 点。）
+- **任何跳过都必须记原因码**（`missing_id / bad_recipient / missing_sender / sender_not_our_number / recipient_is_our_number / revoke_or_edit / no_existing_conversation`），固定文案，不含号码与正文——防止「我方号码格式对不上」造成整类回声静默丢失。**上线后第一条真实回声要在日志里核对 `sender_not_our_number` 有没有出现。**
+- 回声写消息用 `ignoreDuplicates`：Meta 若把我们 API 发出的消息（同一 wamid）也回显，不会把真实发送人邮箱覆盖成「手机 App 员工」。
+- 回声触点 `metadata.origin='whatsapp_business_app_echo'`，方便以后区分「员工手动回」与「App 自动问候/离线回复」（App 自动消息同样会回声，目前无法区分——已知影响，见 PR）。
+- 触点写失败现在真的会记日志（supabase-js 返回 `{error}` 而不抛错，原先的 try/catch 是死代码）。
+- 状态回调：只有 `failed` 才查客户并对账；sent/delivered/read 回执不再触发客户查询（避免一次查询失败把无害回执回成 503）。
+- **「拒绝分享历史」形态**（`history:[{errors:[…]}]`，无 threads）归 ignored 回 200，不会被 503 永久重投；有数据的历史与「媒体补发」仍回 503，直到历史收件箱上线。**订阅 `history` 字段必须等 PR2 上线之后**；上线前不要订阅。
+- `MAX_WEBHOOK_BODY_BYTES` 5MB 的两侧边界各有测试。验签前对未验证请求体解析一次（选密钥）、验签后再解析一次，5MB 下是放大点，已知；PR2 视情况改成只对 history 放宽。

@@ -46,8 +46,6 @@ function matches(row: Row, filters: QueryRecord['filters']): boolean {
 
 /** Table whose single-row selects should fail (set per test, reset in afterEach below). */
 let failSelectOn: string | null = null
-/** Simulates losing the race: the FIRST conversations select misses a row that another delivery just created. */
-let hideNextConversationSelect = false
 
 function makeQuery(tableName: string) {
   const store = table(tableName)
@@ -162,10 +160,6 @@ function makeQuery(tableName: string) {
 
   function resolveSingle(): { data: unknown; error: unknown } {
     if (failSelectOn === tableName) return { data: null, error: { message: 'boom' } }
-    if (tableName === 'conversations' && hideNextConversationSelect) {
-      hideNextConversationSelect = false
-      return { data: null, error: null }
-    }
     const { data, error } = execute()
     if (error) return { data: null, error }
     const rows = data as Row[]
@@ -266,17 +260,29 @@ beforeEach(() => {
   })
 })
 
+/** An existing WhatsApp thread for CUSTOMER (the customer wrote in earlier). */
+function seedConversation(over: Record<string, unknown> = {}): void {
+  table('conversations').rows.push({
+    id: 'convo-1',
+    client_id: 'client-1',
+    channel: 'whatsapp',
+    conversation_id: CUSTOMER,
+    participant_psid: CUSTOMER,
+    contact_id: 'contact-1',
+    last_message_at: '2000-01-01T00:00:00.000Z',
+    last_message_from: 'customer',
+    ...over,
+  })
+}
+
 describe('storeEcho', () => {
-  it('creates a conversation for a new customer and stores the message', async () => {
+  it('stores the echo as an outbound message on the existing conversation', async () => {
+    seedConversation()
     const result = await storeEcho('client-1', OURS, echo())
     expect(result).toBe('stored')
 
     expect(conversationRows()).toHaveLength(1)
     const convo = conversationRows()[0]
-    expect(convo.client_id).toBe('client-1')
-    expect(convo.channel).toBe('whatsapp')
-    expect(convo.conversation_id).toBe(CUSTOMER)
-    expect(convo.participant_psid).toBe(CUSTOMER)
     expect(convo.last_message_from).toBe('page')
     expect(convo.last_message_at).toBe(new Date(1700000000 * 1000).toISOString())
 
@@ -289,13 +295,50 @@ describe('storeEcho', () => {
 
     expect(touchpointRows()).toHaveLength(1)
     expect(touchpointRows()[0].direction).toBe('outbound')
+    expect(touchpointRows()[0].metadata).toMatchObject({ origin: 'whatsapp_business_app_echo' })
+    expect(resolveContact).not.toHaveBeenCalled()
+  })
 
-    expect(resolveContact).toHaveBeenCalledTimes(1)
-    const call = (resolveContact as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]
-    expect(call.overwriteDisplayName).toBe(false)
+  it('a number with no existing conversation is skipped — no contact, no conversation, no message', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = await storeEcho('client-1', OURS, echo())
+    expect(result).toBe('skipped')
+    expect(conversationRows()).toHaveLength(0)
+    expect(messageRows()).toHaveLength(0)
+    expect(touchpointRows()).toHaveLength(0)
+    expect(resolveContact).not.toHaveBeenCalled()
+    const logged = errSpy.mock.calls.flat().map(String).join(' ')
+    expect(logged).toContain('no_existing_conversation')
+    expect(logged).not.toContain(CUSTOMER)
+    errSpy.mockRestore()
+  })
+
+  it('every skip logs a fixed reason and never the number or body', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await storeEcho('client-1', OURS, echo({ from: '999999999' }))
+    await storeEcho('client-1', OURS, echo({ type: 'revoke' }))
+    const logged = errSpy.mock.calls.flat().map(String).join(' ')
+    expect(logged).toContain('sender_not_our_number')
+    expect(logged).toContain('revoke_or_edit')
+    expect(logged).not.toContain(CUSTOMER)
+    expect(logged).not.toContain('999999999')
+    errSpy.mockRestore()
+  })
+
+  it('a redelivery of a message ME sent through the API never overwrites that row (ignoreDuplicates)', async () => {
+    seedConversation()
+    table('conversation_messages').rows.push({
+      id: 'm-1', conversation_id: 'convo-1', message_id: 'wamid.ECHO1', direction: 'outbound',
+      sender_id: OURS.phoneNumberId, sender_name: 'staff@example.com', body: 'sent via ME',
+    })
+    await storeEcho('client-1', OURS, echo({ id: 'wamid.ECHO1' }))
+    const rows = messageRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].sender_name).toBe('staff@example.com')
   })
 
   it('is idempotent when the same echo is delivered twice', async () => {
+    seedConversation()
     await storeEcho('client-1', OURS, echo())
     const second = await storeEcho('client-1', OURS, echo())
     expect(second).toBe('stored')
@@ -321,30 +364,6 @@ describe('storeEcho', () => {
     expect(convo.last_message_from).toBe('customer')
     // The message row is still stored.
     expect(messageRows()).toHaveLength(1)
-  })
-
-  it('losing the create race never overwrites the existing conversation (ignoreDuplicates)', async () => {
-    table('conversations').rows.push({
-      id: 'convo-1',
-      client_id: 'client-1',
-      channel: 'whatsapp',
-      conversation_id: CUSTOMER,
-      participant_psid: CUSTOMER,
-      contact_id: 'contact-1',
-      last_message_at: '2030-01-01T00:00:00.000Z',
-      last_message_from: 'customer',
-    })
-    hideNextConversationSelect = true
-    try {
-      await storeEcho('client-1', OURS, echo())
-    } finally {
-      hideNextConversationSelect = false
-    }
-
-    const rows = conversationRows()
-    expect(rows).toHaveLength(1)
-    expect(rows[0].last_message_from).toBe('customer')
-    expect(rows[0].last_message_at).toBe('2030-01-01T00:00:00.000Z')
   })
 
   it('moves the clock forward when the echo is later than the customer message', async () => {
@@ -419,12 +438,14 @@ describe('storeEcho', () => {
   })
 
   it('stores when `from` equals our displayNumber with formatting', async () => {
+    seedConversation()
     const result = await storeEcho('client-1', OURS, echo({ from: '+64 21 000 0000' }))
     expect(result).toBe('stored')
     expect(messageRows()).toHaveLength(1)
   })
 
   it('throws on a database error during the message upsert', async () => {
+    seedConversation()
     const spy = vi.spyOn(supabaseAdmin, 'from').mockImplementation((name: string) => {
       const q = makeQuery(name)
       if (name === 'conversation_messages') {
@@ -444,6 +465,7 @@ describe('storeEcho', () => {
   })
 
   it('does not throw when the touchpoint write fails', async () => {
+    seedConversation()
     const spy = vi.spyOn(supabaseAdmin, 'from').mockImplementation((name: string) => {
       const q = makeQuery(name)
       if (name === 'contact_touchpoints') {
@@ -463,6 +485,7 @@ describe('storeEcho', () => {
   })
 
   it('never logs the customer number or body', async () => {
+    seedConversation()
     const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await storeEcho('client-1', OURS, echo())
     for (const call of logSpy.mock.calls) {
