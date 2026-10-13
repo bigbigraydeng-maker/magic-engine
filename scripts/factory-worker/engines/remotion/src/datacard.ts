@@ -11,9 +11,11 @@ export const MAX_HOOK_LINES = 2;
 /** Widest hook line (characters); longer lines would shrink below readable size. */
 export const MAX_HOOK_LINE_CHARS = 12;
 /** Widest label / sublabel / disclaimer (characters); the renderer shrinks the font so even all-capital text of this length fits one line. */
-export const MAX_LABEL_CHARS = 24;
-export const MAX_SUBLABEL_CHARS = 32;
-export const MAX_DISCLAIMER_CHARS = 48;
+export const MAX_LABEL_CHARS = 20;
+export const MAX_SUBLABEL_CHARS = 28;
+/** Widest value text (characters); sized so even ten all-capital W still fits the value column. */
+export const MAX_VALUE_CHARS = 10;
+export const MAX_DISCLAIMER_CHARS = 44;
 /** Minimum WCAG contrast of body text on the background. */
 export const MIN_TEXT_CONTRAST = 4.5;
 /** Minimum WCAG contrast of the accent (values, bars) on the background. */
@@ -26,7 +28,7 @@ const hexColor = z.string().regex(HEX_COLOR, { message: '颜色必须是 #RRGGBB
 const ROW = z
   .object({
     label: text(MAX_LABEL_CHARS),
-    value: text(14),
+    value: text(MAX_VALUE_CHARS),
     sublabel: text(MAX_SUBLABEL_CHARS).nullable(),
     bar: z
       .number()
@@ -93,10 +95,13 @@ export const DataCardPropsSchema = z
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['textColor'], message: `${role}合成后对比度只有 ${ratio.toFixed(1)}，至少需要 ${MIN_TEXT_CONTRAST}` });
       }
     }
-    // values and bars are drawn on the translucent card (textColor at 8% alpha), not on the bare background
-    const accentRatio = contrastRatio(val.brandColor, cardColor(val.bgColor, val.textColor));
+    // values and bars sit on the translucent card; the hook's last line uses the brand colour straight on the background
+    const accentRatio = Math.min(
+      contrastRatio(val.brandColor, cardColor(val.bgColor, val.textColor)),
+      contrastRatio(val.brandColor, val.bgColor),
+    );
     if (accentRatio < MIN_ACCENT_CONTRAST) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['brandColor'], message: `品牌色与卡片底色对比度只有 ${accentRatio.toFixed(1)}，至少需要 ${MIN_ACCENT_CONTRAST}` });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['brandColor'], message: `品牌色在卡片底色或背景上的对比度只有 ${accentRatio.toFixed(1)}，至少需要 ${MIN_ACCENT_CONTRAST}` });
     }
   });
 

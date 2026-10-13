@@ -63,8 +63,10 @@ describe('datacard schema', () => {
   test('text fields reject empty, control characters and over-length', () => {
     rejects((p) => { p.rows[0].label = '  ' })
     rejects((p) => { p.rows[0].value = 'x\u0007' })
-    rejects((p) => { p.disclaimer = 'x'.repeat(49) })
-    rejects((p) => { p.rows[0].value = 'x'.repeat(15) })
+    rejects((p) => { p.disclaimer = 'x'.repeat(45) })
+    rejects((p) => { p.rows[0].value = 'x'.repeat(11) })
+    rejects((p) => { p.rows[0].label = 'x'.repeat(21) })
+    rejects((p) => { p.rows[0].sublabel = 'x'.repeat(29) })
   })
 
   test('colours must be #RRGGBB', () => {
@@ -155,4 +157,24 @@ test('accent contrast is judged on the translucent card colour', async () => {
 
 test('text contrast is judged after card fill and opacity', () => {
   assert.throws(() => parseDataCardProps({ ...base(), bgColor: '#FFFFFF', textColor: '#767676' }), /合成后对比度/)
+})
+
+test('worst-case width text at the schema limits is accepted (the renderer shrinks it to fit)', () => {
+  const p = base()
+  p.hook.lines = ['W'.repeat(12), 'W'.repeat(12)]
+  p.rows[0] = { label: 'W'.repeat(20), value: 'W'.repeat(10), sublabel: 'W'.repeat(28), bar: 0.5 }
+  p.disclaimer = 'W'.repeat(44)
+  assert.doesNotThrow(() => parseDataCardProps(p))
+})
+
+test('brand colour must also contrast with the bare background (hook last line)', () => {
+  rejects((p) => { p.bgColor = '#101D2E'; p.brandColor = '#101D2E' }, '对比度')
+})
+
+test('datacard reports the reconciled recipe gaps and the CLI no longer blanket-refuses it', () => {
+  const gaps = loadTemplate('datacard', base()).recipeGaps
+  assert.deepEqual(gaps.map((g) => g.column), ['开场钩子 visual_shock', '真人出镜/自拍感', '真实感', '行业配方'])
+  assert.ok(fs.existsSync(new URL('../DATACARD_RECIPE_RECONCILIATION.md', import.meta.url)))
+  const render = fs.readFileSync(new URL('../render.mjs', import.meta.url), 'utf8')
+  assert.ok(!render.includes('DATACARD_RECIPE_NOT_RECONCILED'))
 })

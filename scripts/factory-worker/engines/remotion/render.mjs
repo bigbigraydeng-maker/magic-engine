@@ -12,7 +12,7 @@ const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [�
 选项：
   --props <file>              必填，props JSON 文件路径
   --out <file.mp4>            必填，输出 mp4 文件路径（必须以 .mp4 结尾）
-  --template <list|montage>   模板，默认 list（datacard 配方对账完成前 CLI 拒绝出片）
+  --template <list|montage|datacard>   模板，默认 list
   --public-dir <dir>          素材目录（默认：render.mjs 同级的 public）
   --concurrency <int>         并发数 1..16（默认 2）
   --timeout-sec <int>         总超时秒数，至少 30（默认 600）
@@ -80,10 +80,6 @@ function parseCliArgs(argv) {
   const template = values.template ?? 'list'
   if (!isTemplateId(template)) {
     throw new CliError(`--template 只能是 ${TEMPLATE_IDS.join(' / ')}，收到：${template}`, 2)
-  }
-
-  if (template === 'datacard') {
-    throw new CliError('datacard 模板尚未完成 viral_reference_library 逐列配方对账，CLI 暂不允许出片（DATACARD_RECIPE_NOT_RECONCILED）', 2)
   }
 
   const defaultPublicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public')

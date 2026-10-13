@@ -42,11 +42,12 @@ export interface LoadedTemplate {
   recipeGaps?: RecipeGap[];
 }
 
-/** Footage-based recipe columns a pure data card can never satisfy (it has no shots); reported on every render. */
+/** Recipe columns a pure data card cannot satisfy (no shots, no industry recipe); mirrors DATACARD_RECIPE_RECONCILIATION.md and is reported on every render. */
 const DATACARD_RECIPE_GAPS: RecipeGap[] = [
+  { column: '开场钩子 visual_shock', status: '未满足', reason: '数据卡是纯色底加文字，没有强视觉冲击' },
   { column: '真人出镜/自拍感', status: '未满足', reason: '数据卡没有镜头素材，无真人画面' },
   { column: '真实感', status: '未满足', reason: '数据卡没有自有实拍素材' },
-  { column: '航拍/空镜', status: '未满足', reason: '数据卡没有航拍或空镜画面' },
+  { column: '行业配方', status: '未满足', reason: '配方库没有物流/贸易等行业记录，行业层配方空白' },
 ];
 
 /** Parse and validate input for a template, returning everything the renderer needs. */
