@@ -66,6 +66,7 @@ export function makeFakeDb(seed: FakeSeed): FakeDb {
       let orderCol: string | null = null
       let orderAscending = true
       let limitCount: number | null = null
+      let rangeWindow: [number, number] | null = null
 
       const applyFilters = (): Record<string, unknown>[] => {
         let rows = tableRows(seed, table).filter((row) =>
@@ -84,6 +85,9 @@ export function makeFakeDb(seed: FakeSeed): FakeDb {
         }
         if (limitCount !== null) {
           rows = rows.slice(0, limitCount)
+        }
+        if (rangeWindow !== null) {
+          rows = rows.slice(rangeWindow[0], rangeWindow[1] + 1)
         }
         return rows
       }
@@ -113,6 +117,10 @@ export function makeFakeDb(seed: FakeSeed): FakeDb {
         },
         limit: (n: number) => {
           limitCount = n
+          return builder
+        },
+        range: (from: number, to: number) => {
+          rangeWindow = [from, to]
           return builder
         },
         maybeSingle: () => {

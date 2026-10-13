@@ -131,15 +131,19 @@ export async function upsertPageDayRows(
 }
 
 /** Insert the running receipt for one order; a duplicate id means it already exists. */
-export async function openReceipt(supabase: SupabaseClient, input: OpenReceiptInput): Promise<void> {
+export async function openReceipt(
+  supabase: SupabaseClient,
+  input: OpenReceiptInput,
+  table: string = PAGE_FETCH_RECEIPTS_TABLE,
+): Promise<void> {
   const { error } = await supabase
-    .from(PAGE_FETCH_RECEIPTS_TABLE)
+    .from(table)
     .insert({ ...input, status: 'running' })
   if (!error) return
   // An earlier attempt of the same step already inserted this receipt and only
   // the response was lost — the retry is a no-op, not a failure.
   if (error.code === '23505') return
-  throw new Error(`[db] ${PAGE_FETCH_RECEIPTS_TABLE} insert failed: ${error.message}`)
+  throw new Error(`[db] ${table} insert failed: ${error.message}`)
 }
 
 /** Record which days Google had finalised data for inside the requested range. */
@@ -147,13 +151,14 @@ export async function recordFinalizedRange(
   supabase: SupabaseClient,
   receiptId: string,
   range: GscDayRange,
+  table: string = PAGE_FETCH_RECEIPTS_TABLE,
 ): Promise<void> {
   const { error } = await supabase
-    .from(PAGE_FETCH_RECEIPTS_TABLE)
+    .from(table)
     .update({ data_from_day: range.firstDay, data_through_day: range.lastDay })
     .eq('id', receiptId)
   if (error) {
-    throw new Error(`[db] ${PAGE_FETCH_RECEIPTS_TABLE} update failed: ${error.message}`)
+    throw new Error(`[db] ${table} update failed: ${error.message}`)
   }
 }
 
@@ -163,13 +168,14 @@ export async function closeReceipt(
   receiptId: string,
   input: CloseReceiptInput,
   now: Date = new Date(),
+  table: string = PAGE_FETCH_RECEIPTS_TABLE,
 ): Promise<void> {
   const { error } = await supabase
-    .from(PAGE_FETCH_RECEIPTS_TABLE)
+    .from(table)
     .update({ ...input, finished_at: now.toISOString() })
     .eq('id', receiptId)
   if (error) {
-    throw new Error(`[db] ${PAGE_FETCH_RECEIPTS_TABLE} update failed: ${error.message}`)
+    throw new Error(`[db] ${table} update failed: ${error.message}`)
   }
 }
 
@@ -183,9 +189,10 @@ export async function closeReceiptIfRunning(
   receiptId: string,
   input: { failure_kind: FailureKind; error: string },
   now: Date = new Date(),
+  table: string = PAGE_FETCH_RECEIPTS_TABLE,
 ): Promise<{ started_at: string } | null> {
   const { data, error } = await supabase
-    .from(PAGE_FETCH_RECEIPTS_TABLE)
+    .from(table)
     .update({ status: 'failed', failure_kind: input.failure_kind, error: input.error, finished_at: now.toISOString() })
     .eq('id', receiptId)
     .eq('status', 'running')
@@ -234,11 +241,12 @@ export async function loadPlanReceipts(
   supabase: SupabaseClient,
   clientIds: readonly string[],
   sinceDay: string,
+  table: string = PAGE_FETCH_RECEIPTS_TABLE,
 ): Promise<PlanReceipt[]> {
   if (clientIds.length === 0) return []
   const rows = await fetchAll<Record<string, unknown>>((from, to) =>
     supabase
-      .from(PAGE_FETCH_RECEIPTS_TABLE)
+      .from(table)
       .select('client_id, site_url, kind, status, failure_kind, request_start_day, request_end_day, data_through_day, started_at')
       .in('client_id', [...clientIds])
       .gte('request_end_day', sinceDay)
@@ -252,9 +260,16 @@ export async function loadPlanReceipts(
 }
 
 /** Build one dispatch's plan (orders + stopped months), or report why it could not be built. */
+/** Which receipts table and how many backfill months per dispatch; the page-level defaults are today's behaviour. */
+export interface PlanOptions {
+  readonly receiptsTable?: string
+  readonly maxBackfillSegments?: number
+}
+
 export async function buildPageDailyPlan(
   supabase: SupabaseClient,
   today: string,
+  options: PlanOptions = {},
 ): Promise<PlanResult> {
   const roster = await loadGscConnectedClients(supabase)
   if (!roster.ok) return { ok: false, reason: `roster: ${roster.reason}` }
@@ -265,10 +280,11 @@ export async function buildPageDailyPlan(
       supabase,
       roster.clients.map((c) => c.clientId),
       backfillWindowStart(today),
+      options.receiptsTable,
     )
   } catch (err) {
     return { ok: false, reason: `receipts: ${err instanceof Error ? err.message : String(err)}` }
   }
 
-  return { ok: true, clients: roster.clients.length, ...planPageDailyPulls(roster.clients, receipts, today) }
+  return { ok: true, clients: roster.clients.length, ...planPageDailyPulls(roster.clients, receipts, today, options.maxBackfillSegments) }
 }

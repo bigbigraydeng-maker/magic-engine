@@ -6,6 +6,7 @@
 
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAll } from '@/lib/supabase-paginate'
 import { norm } from './normalize'
 import { readDayExtras, readTourContent } from './content-fields'
 import type { ImportPlan } from './plan'
@@ -187,37 +188,42 @@ export async function loadDraftCatalog(
   db: SupabaseClient,
   clientId: string,
 ): Promise<CatalogSnapshot> {
-  const toursRes = await db
-    .from('tour_catalog_tours')
-    .select('*')
-    .eq('client_id', clientId)
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true })
-  if (toursRes.error) {
-    throw new Error(toursRes.error.message)
-  }
+  // PostgREST caps one response at 1000 rows without an error, so every list is paged with a
+  // stable order (the trailing id / primary-key column makes page boundaries deterministic).
+  const tourRows = await fetchAll<Record<string, unknown>>((from, to) =>
+    db
+      .from('tour_catalog_tours')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 
-  const departuresRes = await db
-    .from('tour_catalog_departures')
-    .select('*')
-    .eq('client_id', clientId)
-    .order('depart_on', { ascending: true })
-  if (departuresRes.error) {
-    throw new Error(departuresRes.error.message)
-  }
+  const departureRows = await fetchAll<Record<string, unknown>>((from, to) =>
+    db
+      .from('tour_catalog_departures')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('depart_on', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 
-  const aliasesRes = await db
-    .from('tour_catalog_aliases')
-    .select('*')
-    .eq('client_id', clientId)
-  if (aliasesRes.error) {
-    throw new Error(aliasesRes.error.message)
-  }
+  const aliasRows = await fetchAll<Record<string, unknown>>((from, to) =>
+    db
+      .from('tour_catalog_aliases')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('alias_norm', { ascending: true })
+      .range(from, to),
+  )
 
   return {
-    tours: rowsOf(toursRes.data).map(mapTourRow),
-    departures: rowsOf(departuresRes.data).map(mapDepartureRow),
-    aliases: rowsOf(aliasesRes.data).map(mapAliasRow),
+    tours: rowsOf(tourRows).map(mapTourRow),
+    departures: rowsOf(departureRows).map(mapDepartureRow),
+    aliases: rowsOf(aliasRows).map(mapAliasRow),
   }
 }
 
