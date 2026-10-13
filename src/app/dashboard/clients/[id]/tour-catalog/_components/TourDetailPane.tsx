@@ -10,7 +10,14 @@ import { TourSummary } from './TourSummary'
 import { TourSalesLine } from './TourSalesLine'
 import { priceText, upcomingCount, savedAsDraftText } from './catalog-format'
 import { useCatalogUi, useChannelsConnected } from './catalog-context'
-import { draftChangeLine, sortByRisk } from './tour-list-helpers'
+import {
+  draftChangeLine,
+  groupTitle,
+  regionTitle,
+  shortTourName,
+  sortByRisk,
+  tierTitle,
+} from './tour-list-helpers'
 
 export interface TourDetailPaneProps {
   clientId: string
@@ -42,6 +49,25 @@ export function TourDetailPane(props: TourDetailPaneProps): JSX.Element {
   return <TourDetail {...props} tour={props.tour} />
 }
 
+function Breadcrumb({ tour }: { tour: CatalogTourView }): JSX.Element {
+  const shortName = shortTourName(tour.name, groupTitle(tour.destination, tour.tier))
+  return (
+    <nav
+      aria-label="当前位置"
+      data-testid="tour-breadcrumb"
+      className="flex flex-wrap items-center gap-1.5 text-xs font-bold text-me-charcoal/70"
+    >
+      <span>{regionTitle(tour.destination)}</span>
+      <span aria-hidden="true">›</span>
+      <span>{tierTitle(tour.tier)}</span>
+      <span aria-hidden="true">›</span>
+      <span aria-current="page" className="text-me-charcoal">
+        {shortName}
+      </span>
+    </nav>
+  )
+}
+
 function DetailHeader(props: {
   tour: CatalogTourView
   departures: CatalogDepartureView[]
@@ -49,6 +75,7 @@ function DetailHeader(props: {
   const { tour, departures } = props
   return (
     <div className="space-y-1">
+      <Breadcrumb tour={tour} />
       <h2 className="font-display text-lg font-black text-me-charcoal">{tour.name}</h2>
       <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-me-charcoal/55">
         <span>{priceText(tour.displayPriceText)}</span>
