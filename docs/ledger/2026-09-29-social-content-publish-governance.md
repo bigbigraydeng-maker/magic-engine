@@ -2,7 +2,7 @@
 id: 2026-09-29-social-content-publish-governance
 title: 社媒 Post 与 Reel 审批必须携带可追溯清单并在能力未测时阻断
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-29
 source: doc:docs/ledger/2026-09-29-social-publish-gate-risk-accepted.md
 verify_by: 2026-10-06

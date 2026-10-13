@@ -2,7 +2,7 @@
 id: 2026-09-27-seo-meta-cycle-fact-check-review-fixes
 title: SEO Meta-Cycle 事实核对闸门 5+4 条审查缺陷修复（反向检查 + 多币种/促销/数量 + 出发点/别名 + 日期扩展 + AI判官提示词 + 格式归一 + slug 解析加固）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: pr:1948
 done_on: 2026-09-27

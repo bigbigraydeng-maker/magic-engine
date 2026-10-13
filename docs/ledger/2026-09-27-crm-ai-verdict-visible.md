@@ -2,7 +2,7 @@
 id: 2026-09-27-crm-ai-verdict-visible
 title: AI 判了 972 次阶段、每次都写了理由和客人原话，但员工一次都看不到完整的——两个页面都改好了
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27

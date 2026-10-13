@@ -2,7 +2,7 @@
 id: 2026-09-26-ads-wp3-1a-autonomy-sync
 title: "广告自治开关同步到执行内核：Settings 面板拨的 observe / bounded_auto 会自动翻译成内核策略表六个 ads.* 键的 require_approval / auto_approve，内核一行不动，deny 永不覆盖"
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-25
 source: issue:1997
 verify_by: 2026-10-02

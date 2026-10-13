@@ -2,7 +2,7 @@
 id: 2026-09-27-auto-dev-lane-r1-r4
 title: 自动开发车道 R1-R4 写完、102 测试全绿、PR 已开
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:fd4b0edd
 done_on: 2026-09-27

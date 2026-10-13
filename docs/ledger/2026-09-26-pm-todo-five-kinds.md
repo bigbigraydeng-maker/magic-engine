@@ -2,7 +2,7 @@
 id: 2026-09-26-pm-todo-five-kinds
 title: 今日待办（邮件和后台页面）只给 PM 留五类事：拍板、点一次、转给客户、发前看一眼、认真假
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:dba1f247
 verify_by: 2026-09-29

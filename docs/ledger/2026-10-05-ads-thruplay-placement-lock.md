@@ -2,7 +2,7 @@
 id: 2026-10-05-ads-thruplay-placement-lock
 title: 看完类视频广告建组锁 FB+IG 版位已做完，合并后要用暂停状态真建一次验证 Meta 接受
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-10-05
 source: session:10bbca62
 verify_by: 2026-10-09

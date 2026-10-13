@@ -2,7 +2,7 @@
 id: 2026-09-27-tools-lab-step2-changelog-backfill
 title: 把工具实验室第二步（PR 2126）正式环境当场试跑结果，补记进更新日志和对应台账卡
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

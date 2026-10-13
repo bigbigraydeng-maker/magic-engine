@@ -1,7 +1,7 @@
 ---
 id: 2026-09-27-crm-all-page-split-round2
 title: 「全部客人」页第二轮拆分：抽屉内容搬进 ContactDetail.tsx，主文件 1081 → 709 行，回到 800 线以内
-status: done
+status: failed
 owner: agent
 decided_on: 2026-09-27
 source: session:5b9407a2

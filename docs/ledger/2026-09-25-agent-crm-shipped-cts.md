@@ -2,7 +2,7 @@
 id: 2026-09-25-agent-crm-shipped-cts
 title: 同行渠道（旅行社 Agent 客户）页面上线、两张表已建，等第一条 AI 自动提取进表
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-24
 source: pr:1983
 verify_by: 2026-09-29

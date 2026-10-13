@@ -2,7 +2,7 @@
 id: 2026-09-26-ads-digest-pick-ads-measurable-goal
 title: 客户同时有多个进行中目标时，广告日报的目标进度改成优先看广告能量到的那个（留资/私信开聊），不再因为最新的是报名目标就一直空着
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:803d3b06
 verify_by: 2026-09-29

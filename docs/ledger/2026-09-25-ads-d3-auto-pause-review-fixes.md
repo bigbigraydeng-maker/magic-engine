@@ -2,7 +2,7 @@
 id: 2026-09-25-ads-d3-auto-pause-review-fixes
 title: 广告 D3 自动暂停 PR 代码审查四项修复落地（RLS 安全漏洞 + 合并冲突 + dry_run 保护 + 实时读配置）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-25
 source: pr:2010
 done_on: 2026-09-25

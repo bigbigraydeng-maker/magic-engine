@@ -1,7 +1,7 @@
 ---
 id: 2026-09-28-ledger-body-and-frozen-field-checks
 title: 台账解析器加了两条校验——正文不超 5 行和冻结字段不许改
-status: done
+status: verified
 owner: agent
 decided_on: 2026-09-28
 source: session:38d2a4d8

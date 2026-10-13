@@ -2,7 +2,7 @@
 id: 2026-09-25-memory-index-two-level
 title: 记忆索引改成两级——总索引留在截断线以下，四份分区索引兜住其余文件，每个记忆文件两跳可达
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-25
 source: doc:docs/ledger/evidence/2026-09-24-memory-index-over-limit--2026-09-25.md
 verify_by: 2026-10-02

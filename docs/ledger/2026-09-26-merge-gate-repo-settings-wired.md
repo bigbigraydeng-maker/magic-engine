@@ -2,7 +2,7 @@
 id: 2026-09-26-merge-gate-repo-settings-wired
 title: 合并闸接线完成：Protect main 加 ops-review-loop-tests；新建 Risk gate 独立规则集（admin 可 bypass）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:777d6ed4
 verify_by: 2026-10-03

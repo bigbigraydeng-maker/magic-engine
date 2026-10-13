@@ -2,7 +2,7 @@
 id: 2026-09-29-daily-plan-standalone-entry
 title: 每日计划从推广活动页面拆成独立入口
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-29
 source: session:5a6abe7a
 verify_by: 2026-10-03

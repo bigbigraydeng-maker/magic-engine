@@ -2,7 +2,7 @@
 id: 2026-09-26-seo-site-level-verdicts-unknown
 title: SEO 动作的效果不再拿整站流量涨跌来判：整站指标一律记「不知道」，成功率只算能判定的案例
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:3b976bb5
 verify_by: 2026-10-03

@@ -2,7 +2,7 @@
 id: 2026-09-27-deploy-not-live-todo
 title: 合进主干的代码超过 30 分钟没上线正式网站，今日待办就出一条「正式网站已经 X 小时没换上新代码」，写明从哪个 PR 起没上线
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:a853a3c2
 done_on: 2026-09-27

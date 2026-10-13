@@ -2,7 +2,7 @@
 id: 2026-09-26-seo-not-indexed-reasons-fix
 title: 今日待办的「页面没被谷歌收录」改成按谷歌给的原因报数、给对动作，并认出被网站防火墙挡住的假页面
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:3b976bb5
 verify_by: 2026-10-06

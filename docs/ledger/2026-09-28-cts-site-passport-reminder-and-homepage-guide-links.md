@@ -2,7 +2,7 @@
 id: 2026-09-28-cts-site-passport-reminder-and-homepage-guide-links
 title: CTS 官网两处改动上线——填表页加护照有效期提醒（免签口径+链到签证指南）、首页 6 张城市卡片改指向详尽指南页；待确认真站生效
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-28
 source: session:b408a472
 verify_by: 2026-09-29

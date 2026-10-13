@@ -2,7 +2,7 @@
 id: 2026-09-26-meta-env-token-health-todo
 title: Render 里的 Meta 钥匙被作废时，第二天进 PM 今日待办（CTS 钥匙 5 天死 3 次都是 PM 自己问才发现）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: pr:2025
 done_on: 2026-09-26

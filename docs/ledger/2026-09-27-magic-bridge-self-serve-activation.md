@@ -2,7 +2,7 @@
 id: 2026-09-27-magic-bridge-self-serve-activation
 title: Magic Bridge 新注册客户自助开通 + 防刷免费额度：自助客户自己点开通用 90 天；同一 Facebook 用户 / 同一广告账户每月各 1 美元、全平台每月 30 美元；Meta 审核通过前只有测试者能连 Facebook
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

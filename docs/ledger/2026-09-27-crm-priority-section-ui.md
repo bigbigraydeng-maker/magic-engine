@@ -2,7 +2,7 @@
 id: 2026-09-27-crm-priority-section-ui
 title: 「全部客人」页能按「先联系谁」分 4 段显示了；拿 CTS 1010 人 / NAL 197 人真数据渲染过真页面
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27

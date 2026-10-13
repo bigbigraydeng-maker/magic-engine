@@ -1,7 +1,7 @@
 ---
 id: 2026-09-29-attribution-cron-test-mock-upsert
 title: attribution 定时任务的测试跟上运行日志新写法：9 月 9 日起一直红着的 31 条测试转绿（只改测试，不改业务代码）
-status: done
+status: verified
 owner: agent
 decided_on: 2026-09-29
 source: session:609cc526

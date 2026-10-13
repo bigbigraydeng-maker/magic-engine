@@ -2,7 +2,7 @@
 id: 2026-09-27-ads-health-client-visible-filter
 title: 客户看广告健康页时只给看标了「客户可见」的问题，内部建议（如受众池断供要加钱）不再发到客户浏览器
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:72d14b94
 verify_by: 2026-10-02

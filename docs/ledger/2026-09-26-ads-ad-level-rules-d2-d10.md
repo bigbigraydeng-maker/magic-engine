@@ -2,7 +2,7 @@
 id: 2026-09-26-ads-ad-level-rules-d2-d10
 title: 每日广告巡检下钻到单条广告：跟它自己平时比、拆漏斗看断在哪步、按点击数判样本够不够、按广告去向选核心指标、每条建议带回头检查时点和止损条件，结论进 PM 今日待办（只读，不接自动动作）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:4bb834a6
 done_on: 2026-09-26

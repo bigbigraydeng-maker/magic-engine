@@ -2,7 +2,7 @@
 id: 2026-10-05-parkhomes-riverside-update-video
 title: Park Homes 客户发来的 Riverside 进度更新视频，放进官网 Riverside 页的「工程进度」一段
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-10-05
 source: session:57655847
 verify_by: 2026-10-07

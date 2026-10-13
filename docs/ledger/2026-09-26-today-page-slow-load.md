@@ -2,7 +2,7 @@
 id: 2026-09-26-today-page-slow-load
 title: 「今日待办」页面打开太慢——改成各项检查同时查、外网链接检查最多等 2.5 秒
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:37bf3bc6
 verify_by: 2026-09-29

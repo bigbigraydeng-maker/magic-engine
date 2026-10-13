@@ -2,7 +2,7 @@
 id: 2026-09-27-tools-lab-step1-app
 title: 工具实验室第一步（应用部分）——外人从一个固定入口进 Facebook 广告体检，中文注册 / 登录，注册完直接进体检；示例报告默认自助版；客户看得到的地方不再出现内部代号 Magic Bridge
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

@@ -2,7 +2,7 @@
 id: 2026-09-27-kernel-arch-test-ci-required
 title: 内核架构检查接进每个 PR 自动跑，并设成挡合并的必过项（红了谁都合不进）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:d1add426
 verify_by: 2026-09-30

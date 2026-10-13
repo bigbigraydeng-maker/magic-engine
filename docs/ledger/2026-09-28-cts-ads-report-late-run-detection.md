@@ -2,7 +2,7 @@
 id: 2026-09-28-cts-ads-report-late-run-detection
 title: CTS 日检改成核对广告日报"几点开跑"，迟到超 1 小时或有定时任务卡住超 2 小时都报 P0
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-28
 source: session:b4770bbd
 verify_by: 2026-09-30

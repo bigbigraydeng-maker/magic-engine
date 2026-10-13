@@ -1,7 +1,7 @@
 ---
 id: 2026-09-28-risk-case-insensitive-a-rules
 title: A 级规则大小写不敏感匹配——堵住 macOS ignorecase 绕过漏洞
-status: done
+status: verified
 owner: agent
 decided_on: 2026-09-28
 source: session:679ea2bf

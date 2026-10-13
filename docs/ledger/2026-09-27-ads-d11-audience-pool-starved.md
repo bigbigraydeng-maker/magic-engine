@@ -2,7 +2,7 @@
 id: 2026-09-27-ads-d11-audience-pool-starved
 title: 每日广告巡检新增「再营销受众池断供」提醒：视频受众池一周没长、给它补人的广告几乎没花钱时，在 PM 今日待办里建议开顶层视频广告补人（只读，开广告要人点，不进客户报告）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

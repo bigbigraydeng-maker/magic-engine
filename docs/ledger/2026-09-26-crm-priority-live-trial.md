@@ -2,7 +2,7 @@
 id: 2026-09-26-crm-priority-live-trial
 title: 4 段跟进视图对 CTS / NAL 真实数据当场试跑通过（没人凭空消失、分段只分组不改判），试跑脚本入库可复跑
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 done_on: 2026-09-26
 done_ref: pr:2045

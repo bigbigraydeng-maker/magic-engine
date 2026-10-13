@@ -2,7 +2,7 @@
 id: 2026-09-27-application-build-required
 title: 编译检查设成挡合并的必过项——编译不过的代码，机器自动合和管理员手动合都合不进主干
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:a853a3c2
 verify_by: 2026-09-30

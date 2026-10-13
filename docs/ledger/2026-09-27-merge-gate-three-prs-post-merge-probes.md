@@ -2,7 +2,7 @@
 id: 2026-09-27-merge-gate-three-prs-post-merge-probes
 title: 合并闸三个修复（配置密钥判 A、当场试跑闸、自报风险级识别）合并后都开真实探测 PR 验过，三张卡翻成已验证
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:29a26321
 verify_how: 三张卡（配置密钥判 A、当场试跑、自报风险级）都是 verified，且各自的证据文件在 docs/ledger/evidence/ 下能打开

@@ -2,7 +2,7 @@
 id: 2026-09-28-vitest-thread-cap
 title: vitest 加进程数上限——防止多窗口同时跑测试压垮机器
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-28
 source: session:d63d16ff
 verify_how: 合并后观察一周内是否还发生"多窗口同时跑测试导致机器要手动 pkill"的情况；没有就算验过

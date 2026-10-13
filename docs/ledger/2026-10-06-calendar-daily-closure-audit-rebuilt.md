@@ -2,7 +2,7 @@
 id: 2026-10-06-calendar-daily-closure-audit-rebuilt
 title: 日历上带日期的验证事项，每天早上自动核对并闭环（定时任务重写并重新启用）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-10-06
 source: session:ca1d7290
 verify_by: 2026-10-08

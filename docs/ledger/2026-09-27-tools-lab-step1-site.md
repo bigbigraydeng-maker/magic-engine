@@ -2,7 +2,7 @@
 id: 2026-09-27-tools-lab-step1-site
 title: 工具实验室第一步（官网部分）——新增中文「Magic Engine 工具实验室」页，中文首页挂入口；广告体检介绍页去掉 17 项申请表改成「免费体检我的广告」直达注册，保留一个留邮箱的轻表单；页面可被搜索引擎收录
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

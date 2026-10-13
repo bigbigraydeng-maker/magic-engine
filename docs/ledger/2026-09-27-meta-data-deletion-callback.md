@@ -2,7 +2,7 @@
 id: 2026-09-27-meta-data-deletion-callback
 title: Facebook 数据删除回调与说明页：用户在 Facebook 里移除 Magic Engine 并要求删数据时，自动撤销他在所有客户下的广告只读连接、清空授权和报告内容，并给他确认码查进度（Meta 审核必填）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

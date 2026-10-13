@@ -2,7 +2,7 @@
 id: 2026-09-27-tools-lab-step2-site-check
 title: 工具实验室第二步——网站免费诊断上架：不再给访客看假结果（AI 失败或打不开网站就如实说），加防刷和每月花费上限，中文页出中文结果和中文邮件，报告邮件一条线索只发一次并全部转义
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

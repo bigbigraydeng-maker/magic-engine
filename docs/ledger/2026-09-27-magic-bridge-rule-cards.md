@@ -2,7 +2,7 @@
 id: 2026-09-27-magic-bridge-rule-cards
 title: Magic Bridge 客户页加「我们正在跟进的广告」卡片：巡检查出变差的广告在报告最上面一条一张卡讲清楚，报告正文第三部分改成一句话指过去（只改展示，不改判断）
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

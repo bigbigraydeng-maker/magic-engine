@@ -2,7 +2,7 @@
 id: 2026-10-04-seo-competitors-gap-24h-server-cache
 title: SEO 情报页竞品差距接口加 24 小时缓存，不再每次打开都扣 DataForSEO 的钱
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-10-04
 source: session:923e4990
 verify_by: 2026-10-08

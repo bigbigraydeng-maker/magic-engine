@@ -2,7 +2,7 @@
 id: 2026-09-27-crm-drawer-superset-r1
 title: 两页的「点开一个人」各缺一半——R1 把抽屉补成超集：加上「要记住的事」和 NAL 的确认已成交
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27

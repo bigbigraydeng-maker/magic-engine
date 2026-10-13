@@ -2,7 +2,7 @@
 id: 2026-09-27-magic-bridge-self-serve-live-cards
 title: Magic Bridge 自助客户报告第三部分「值得你看一眼的广告」改为生成报告时现场算（同一套广告级规则），文案与报告建议换成老板自己能试的口吻
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:4bb834a6
 done_on: 2026-09-27

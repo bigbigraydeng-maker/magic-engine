@@ -2,7 +2,7 @@
 id: 2026-10-05-claim-recognition-hardening
 title: 发布闸的价格/日期识别补强（认出 NZD、¥、元、15 March 等写法）已做完，等影子统计和 PM 回「合」
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-10-05
 source: session:1bfd1871
 verify_by: 2026-10-08

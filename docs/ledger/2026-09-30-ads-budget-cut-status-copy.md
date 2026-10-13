@@ -2,7 +2,7 @@
 id: 2026-09-30-ads-budget-cut-status-copy
 title: 预算下调成功提示只确认预算变化，不猜测广告投放状态
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-30
 source: pr:2206
 verify_by: 2026-10-07
