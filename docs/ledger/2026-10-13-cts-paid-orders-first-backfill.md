@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-13
 done_on: 2026-10-13
-done_ref: session:1a85e0eb
+done_ref: pr:2547
 source: session:1a85e0eb
 verify_by: 2026-10-20
 verify_how: 付款总览里 2026-11-03 一行应显示 8 单、定金已收 8、尾款已收 4；2026-10-15 2 单；2027-03-11 2 单；2027-03-18 1 单。CTS 员工核对阶段推定的付款状态（即将出行阶段只标了定金）。
