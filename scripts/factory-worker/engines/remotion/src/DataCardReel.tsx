@@ -64,13 +64,15 @@ const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number }> 
   const stepOffset = props.barMode === 'steps' ? (index / (n - 1)) * 0.3 : 0
   const barSpan = props.barMode === 'steps' ? 0.7 : 1
   const inner = WIDTH - CARD_PAD * 2
+  // value gets the width the label column leaves free; shrink the font so long values never overlap the label
+  const valueFont = Math.min(Math.round(70 * k), Math.floor((inner * 0.42) / (Math.max(1, row.value.length) * CHAR_W)))
   return (
     <div style={{ position: 'absolute', left: LEFT, width: WIDTH, top: layoutOf(props).rowsTop + index * rowH, height: rowH - ROW_GAP, fontFamily, color: props.textColor, background: `${props.textColor}14`, borderRadius: 18, opacity: Math.min(1, p * 2), transform: `translateX(${(1 - p) * 120}px)` }}>
       <div style={{ position: 'absolute', left: CARD_PAD, top: 0, bottom: row.bar !== null ? Math.round(16 * k) : 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: inner * 0.56 }}>
         <div style={{ fontSize: Math.round(42 * k), fontWeight: 800, lineHeight: 1.1 }}>{row.label}</div>
         {row.sublabel !== null ? <div style={{ fontSize: Math.max(22, Math.round(27 * k)), fontWeight: 600, opacity: 0.85, lineHeight: 1.15 }}>{row.sublabel}</div> : null}
       </div>
-      <div style={{ position: 'absolute', right: CARD_PAD, top: 0, bottom: row.bar !== null ? Math.round(16 * k) : 0, display: 'flex', alignItems: 'center', fontSize: Math.round(70 * k), fontWeight: 900, color: props.brandColor, whiteSpace: 'nowrap' }}>{row.value}</div>
+      <div style={{ position: 'absolute', right: CARD_PAD, top: 0, bottom: row.bar !== null ? Math.round(16 * k) : 0, display: 'flex', alignItems: 'center', fontSize: valueFont, fontWeight: 900, color: props.brandColor, whiteSpace: 'nowrap' }}>{row.value}</div>
       {row.bar !== null ? (
         <div style={{ position: 'absolute', left: CARD_PAD + inner * stepOffset, bottom: Math.round(10 * k), width: inner * barSpan * row.bar * grow, height: Math.max(6, Math.round(10 * k)), borderRadius: 6, background: props.brandColor }} />
       ) : null}
