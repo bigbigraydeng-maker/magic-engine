@@ -43,9 +43,11 @@
 | 文件 | 替换哪条 | 角色 | 图上文字 | 事实库依据 | 图片出处与「一眼认得出」 |
 |---|---|---|---|---|---|
 | `draft_A_nat_invite.png` | #6 天门山邀请 | 邀请 | Chongqing by night? Message us.（Natural China） | NAT-05 | Unsplash `e30DonUn83Y`（Chongqing）；画面里是「洪崖洞」招牌，一眼可认；无雪 |
-| `draft_B_boc_fact.png` | #8 豫园 | 事实 | The Bund, Shanghai（Best of China · Day 12） | BOC-08（D12 the Bund） | 库存素材 `v_bund_36546365` 截帧（东方明珠一眼可认）；夜景无雪 |
-| `draft_C_sh_invite.png` | #12 Suzhou to Shanghai | 邀请 | Visiting Suzhou? Message us.（Shanghai & Surroundings） | SH-03、SH-04 | Unsplash `Idmw1ePVUFE`（Suzhou 园林）；文字说苏州、图就是苏州 |
-| `draft_D_beijing_insp.png` | #13 胡同 | 灵感 | The Temple of Heaven（Day 2 · Best of China and A Tale of Two Cities） | 官网 BOC/Tale D2 Temple of Heaven | winter 库 `w_templeofheaven-spring_0xn9T2cEigE`（天坛祈年殿，晴空无雪）；一眼可认 |
+| `draft_B_boc_fact.png` | #8 豫园 | 事实 | Walk the Great Wall（Day 4 · Best of China） | 官网 Experiences「Walk the Great Wall」；BOC-04 | winter 库 `w_greatwall-spring_i56swU7BDbQ`（春季山花长城，无雪，一眼可认） |
+| `draft_C_sh_invite.png` | #12 Suzhou to Shanghai | 邀请 | Shanghai at night? Message us.（Shanghai & Surroundings） | SH-08（D8 The Bund 与上海住宿） | 库存素材 `v_bund_36546365` 截帧（东方明珠夜景，一眼是上海；上一版苏州园林被判「认不出是苏州」，文字改成上海） |
+| `draft_D_beijing_insp.png` | #13 胡同 | 灵感 | The Temple of Heaven（Day 2 in Beijing） | 官网 BOC/Tale D2 Temple of Heaven | winter 库 `w_templeofheaven-spring_0xn9T2cEigE`（天坛祈年殿，晴空无雪）；一眼可认 |
 | `draft_E_boc_invite.png` | #15 四城邀请 | 邀请 | Four cities, one trip? Message us.（Best of China） | BOC-03 | winter 库 `w_terracotta_UqSNn_KoDA4`（兵马俑，一眼可认）；2 行、位置在上中部 |
 
 总览图（含与下周 Natural China Reel 封面对比）：`~/Dropbox/MagicLab_Studio/CTS/output/weekpack-2026-10-20/replacement-drafts-overview.jpg`。
+
+**审查**：第一轮——苏东坡：5 条事实可溯、无红线、无雪无人脸；苏州园林那张「不会有人一眼认出是苏州」。马良：A、B、D、E 一眼认得出且通过；**C（苏州园林）认不出 → 已改成上海夜景（东方明珠）+「Shanghai at night?」**；**D 小标签折成孤字「CITIES」→ 已缩短为「Day 2 in Beijing」**；原 B（外滩）与新 C 同为外滩，故 B 换成春季山花长城（BOC D4）。五张两两不像、与下周 Natural China 封面不像；下 1/3 亮度除苏州园林旧 C（39）外均不黑。第二轮复核见下。
