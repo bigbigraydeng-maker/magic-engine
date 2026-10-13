@@ -26,6 +26,9 @@ import { type StageOption } from '../_components/ComposeNote'
 import { PersonDrawer, type DrawerRow } from '../_components/PersonDrawer'
 import { BatchEmail, type BatchEmailBucket } from '../_components/BatchEmail'
 import { PrioritySectionHeader } from './_components/PrioritySection'
+import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
+import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
+import { takeContactName } from '../_components/bookings/payments-return'
 import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
 import type { Segment } from '@/lib/crm/segments'
 import { type KindView } from '@/lib/crm/kind-filter'
@@ -304,7 +307,13 @@ export default function CrmAllContactsPage() {
     setDeepLinkId(null)
     // 这个人不在表里（换客户了 / 记录被删）——**必须说出来**，
     // 否则页面一声不吭，FDE 只会以为链接坏了。
+    const stashedName = takeContactName(clientId, deepLinkId)
     if (!rows.some((r) => r.contactId === deepLinkId)) {
+      // 名单只装了第一页：付款总览带来的人常在后面几页。有名字就按名字搜出来再开抽屉。
+      if (stashedName) {
+        openContactFromNudge(deepLinkId, stashedName)
+        return
+      }
       setToast('这个人不在这份名单里了 —— 用上面的搜索框找找看')
       window.setTimeout(() => setToast(null), 4000)
       return
@@ -370,6 +379,20 @@ export default function CrmAllContactsPage() {
       closeDrawer()
     }
   }, [drawerContactId, rows, loading, sectionsLoading, pendingNav])
+
+  // 「付款要催」名单里点一个人：在当前这页就直接开抽屉，不在就先按名字搜，搜到再开。
+  const openContactFromNudge = useOpenContactFromNudge({
+    contactIds: rows.map((r) => r.contactId),
+    loading,
+    sectionsLoading,
+    debouncedQuery: qDebounced,
+    setQuery: setQ,
+    openDrawer,
+    notify: (message) => {
+      setToast(message)
+      window.setTimeout(() => setToast(null), 4000)
+    },
+  })
 
   // 搜索交给服务端了，这里只排当前页。放在 buildNavInput 前面——它的闭包引用 sorted，
   // 声明顺序倒过来会在渲染时踩 TDZ（"Cannot access 'sorted' before initialization"）。
@@ -678,6 +701,9 @@ export default function CrmAllContactsPage() {
         </div>
       )}
 
+      {/* 付款要催（没开通这项功能或没权限的人，这一块什么都不渲染） */}
+      <BookingTrackerPanel clientId={clientId} onOpenContact={openContactFromNudge} />
+
       {loading && rows.length === 0 && <p className="py-16 text-center text-sm text-me-charcoal/40">加载中…</p>}
 
       {error && (
@@ -689,17 +715,22 @@ export default function CrmAllContactsPage() {
         </div>
       )}
 
+      {/* 搜索框必须一直挂在页面上：之前它跟着下面那一大块一起被 `!loading` 包住，
+          每敲一个字、过 300ms 请求一发出，整块（含输入框）被卸载再重装，焦点丢了、
+          像「每打一个字页面就刷新一次」（PM 2026-10-13 录屏）。 */}
+      {!error && (
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 客户打回来了？按名字 / 电话 / 邮箱找他"
+          className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
+        />
+      )}
+
+      {!error && qError && <p className="text-xs font-semibold text-[#C2453A]">{qError}</p>}
+
       {!error && !loading && (
         <>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="🔍 客户打回来了？按名字 / 电话 / 邮箱找他"
-            className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
-          />
-
-          {qError && <p className="text-xs font-semibold text-[#C2453A]">{qError}</p>}
-
           {stages.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs text-me-charcoal/45">到哪一步了：</span>

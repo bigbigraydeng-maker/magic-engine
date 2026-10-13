@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ProtectedPageError, type PageIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
 
 // Mock SSRF guard so tests don't do real DNS lookups (oztop.com.au etc.).
 vi.mock('./ssrf-guard', () => ({
@@ -469,6 +470,13 @@ describe('getExistingWordpressPost', () => {
 })
 
 describe('updateExistingWordpressPost', () => {
+  const GET_BODY = JSON.stringify({
+    id: 123, slug: 'tile-sizes-explained', link: 'https://oztop.com.au/tile-sizes-explained/',
+    title: { raw: 't' }, content: { raw: 'c' }, excerpt: { raw: 'e' }, status: 'publish', modified: 'm', meta: {},
+  })
+  /** Every write now first reads the live post back (the protected-page gate computes identity from it). */
+  const queueGet = (fm: ReturnType<typeof vi.fn>) => fm.mockResolvedValueOnce(makeResponse(GET_BODY, { status: 200 }))
+  const openGuard = (): PageWriteGuard => ({ clientId: 'c', assert: vi.fn(async () => undefined) }) as never
   const realFetch = globalThis.fetch
   let fetchMock: ReturnType<typeof vi.fn>
 
@@ -482,6 +490,7 @@ describe('updateExistingWordpressPost', () => {
   })
 
   it('sends ONLY the fields the caller specified — partial update', async () => {
+    queueGet(fetchMock)
     fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
       id: 123,
       link: 'https://oztop.com.au/tile-sizes-explained/',
@@ -492,10 +501,10 @@ describe('updateExistingWordpressPost', () => {
     const result = await updateExistingWordpressPost(CONFIG, {
       postId:  123,
       seoTitle: 'New Yoast Title',
-    })
+    }, openGuard())
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const init = fetchMock.mock.calls[1][1] as RequestInit
     expect(init.method).toBe('POST')
     const sentBody = JSON.parse(init.body as string) as Record<string, unknown>
 
@@ -518,6 +527,7 @@ describe('updateExistingWordpressPost', () => {
   })
 
   it('maps Yoast meta keys correctly: seoTitle/seoDescription/focusKeyphrase', async () => {
+    queueGet(fetchMock)
     fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
       id: 123, link: 'x', modified: 'y',
     }), { status: 200 }))
@@ -528,9 +538,9 @@ describe('updateExistingWordpressPost', () => {
       seoTitle:       'T',
       seoDescription: 'D',
       focusKeyphrase: 'K',
-    })
+    }, openGuard())
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const init = fetchMock.mock.calls[1][1] as RequestInit
     const body = JSON.parse(init.body as string) as Record<string, unknown>
 
     expect(body).toEqual({
@@ -543,6 +553,7 @@ describe('updateExistingWordpressPost', () => {
   })
 
   it('uses /pages/{id} for postType="page"', async () => {
+    queueGet(fetchMock)
     fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
       id: 7, link: 'x', modified: 'y',
     }), { status: 200 }))
@@ -552,13 +563,14 @@ describe('updateExistingWordpressPost', () => {
       postId:   7,
       postType: 'page',
       title:    'New Page Title',
-    })
+    }, openGuard())
 
-    const calledUrl = fetchMock.mock.calls[0][0] as string
+    const calledUrl = fetchMock.mock.calls[1][0] as string
     expect(calledUrl).toBe('https://oztop.com.au/wp-json/wp/v2/pages/7')
   })
 
   it('forwards empty string values (clearing a Yoast field is a valid intent)', async () => {
+    queueGet(fetchMock)
     fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
       id: 123, link: 'x', modified: 'y',
     }), { status: 200 }))
@@ -567,16 +579,16 @@ describe('updateExistingWordpressPost', () => {
     await updateExistingWordpressPost(CONFIG, {
       postId:         123,
       focusKeyphrase: '',
-    })
+    }, openGuard())
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const init = fetchMock.mock.calls[1][1] as RequestInit
     const body = JSON.parse(init.body as string) as Record<string, unknown>
     expect(body.meta).toEqual({ _yoast_wpseo_focuskw: '' })
   })
 
   it('rejects when NO updatable field is supplied', async () => {
     const { updateExistingWordpressPost } = await import('./wordpress-client')
-    await expect(updateExistingWordpressPost(CONFIG, { postId: 123 }))
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 123 }, openGuard()))
       .rejects.toMatchObject({
         name: 'WordpressFetchError',
         code: 'HTTP_ERROR',
@@ -591,12 +603,13 @@ describe('updateExistingWordpressPost', () => {
       await expect(updateExistingWordpressPost(CONFIG, {
         postId: invalid as number,
         title:  'whatever',
-      })).rejects.toMatchObject({ name: 'WordpressFetchError', code: 'HTTP_ERROR' })
+      }, openGuard())).rejects.toMatchObject({ name: 'WordpressFetchError', code: 'HTTP_ERROR' })
       expect(fetchMock).toHaveBeenCalledTimes(0)
     },
   )
 
   it('reports `updatedFields` in input order so the audit layer can log them', async () => {
+    queueGet(fetchMock)
     fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
       id: 123, link: 'x', modified: 'y',
     }), { status: 200 }))
@@ -607,28 +620,89 @@ describe('updateExistingWordpressPost', () => {
       title:          'Tile Sizes Explained — Updated',
       seoTitle:       'New Yoast',
       focusKeyphrase: 'tile sizing',
-    })
+    }, openGuard())
 
     expect(result.updatedFields).toEqual(['title', 'seoTitle', 'focusKeyphrase'])
   })
 
   it('propagates WAF errors (Wordfence block on PATCH)', async () => {
+    queueGet(fetchMock)
     fetchMock.mockResolvedValueOnce(makeResponse('Generated by Wordfence', { status: 403 }))
 
     const { updateExistingWordpressPost } = await import('./wordpress-client')
     await expect(updateExistingWordpressPost(CONFIG, {
       postId:   123,
       seoTitle: 'x',
-    })).rejects.toMatchObject({
+    }, openGuard())).rejects.toMatchObject({
       name: 'WordpressFetchError',
       code: 'WORDFENCE_BLOCK',
     })
+  })
+
+  it('🔴 protected-page gate: asserts on the identity read back from WP and sends NO write when refused', async () => {
+    queueGet(fetchMock)
+    const assert = vi.fn(async (_identity: PageIdentity) => { throw new ProtectedPageError('protected', 'refused') })
+    const guard = ({ clientId: 'c', assert }) as never as PageWriteGuard
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 123, seoTitle: 'x', slug: 'renamed-to' }, guard))
+      .rejects.toBeInstanceOf(ProtectedPageError)
+    expect(fetchMock).toHaveBeenCalledTimes(1) // the read-back only; the POST never happened
+    const identity = assert.mock.calls[0][0] as PageIdentity
+    // current slug, the NEW slug (a rename into/out of a protected slug is gated) and the link path all count
+    expect(identity.slugs).toEqual(expect.arrayContaining(['tile-sizes-explained', 'renamed-to']))
+    expect(identity.paths.map(p => p.value)).toContain('tile-sizes-explained')
+  })
+
+  it('a ?p=ID style permalink (path "/") is NOT mistaken for the home page when a real slug is known', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 123, slug: 'about', link: 'https://oztop.com.au/?p=123', title: { raw: 't' }, content: { raw: 'c' },
+      excerpt: { raw: 'e' }, status: 'draft', modified: 'm', meta: {},
+    }), { status: 200 }))
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({ id: 123, link: 'x', modified: 'y' }), { status: 200 }))
+    const assert = vi.fn(async (_identity: PageIdentity) => undefined)
+    const guard = ({ clientId: 'c', assert }) as never as PageWriteGuard
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await updateExistingWordpressPost(CONFIG, { postId: 123, title: 'T' }, guard)
+    const identity = assert.mock.calls[0][0] as PageIdentity
+    expect(identity.paths.map(p => p.value)).not.toContain('/')
+    expect(identity.slugs).toContain('about')
+  })
+
+  it('the real front page (link is the site root, no query) IS the home page identity, so a "/" list entry can protect it', async () => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 5, slug: 'welcome', link: 'https://oztop.com.au/', title: { raw: 't' }, content: { raw: 'c' },
+      excerpt: { raw: 'e' }, status: 'publish', modified: 'm', meta: {},
+    }), { status: 200 }))
+    const assert = vi.fn(async (_identity: PageIdentity) => { throw new ProtectedPageError('protected', 'refused') })
+    const guard = ({ clientId: 'c', assert }) as never as PageWriteGuard
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 5, title: 'T' }, guard)).rejects.toBeInstanceOf(ProtectedPageError)
+    const identity = assert.mock.calls[0][0] as PageIdentity
+    expect(identity.paths.map(p => p.value)).toContain('/')
+    expect(identity.slugs).toContain('welcome')
+  })
+
+  it.each([
+    ['no slug and no link', { slug: '', link: '' }],
+    ['no slug and only a ?p=ID link', { slug: '', link: 'https://oztop.com.au/?p=9' }],
+    ['link that cannot be parsed', { slug: 'x', link: 'not a url' }],
+  ])('🔴 %s => identity is UNRESOLVED (decision unknown), never silently "the home page"', async (_n, fields) => {
+    fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
+      id: 9, ...fields, title: { raw: 't' }, content: { raw: 'c' }, excerpt: { raw: 'e' }, status: 'draft', modified: 'm', meta: {},
+    }), { status: 200 }))
+    const assert = vi.fn(async (_identity: PageIdentity) => { throw new ProtectedPageError('unknown', 'refused') })
+    const guard = ({ clientId: 'c', assert }) as never as PageWriteGuard
+    const { updateExistingWordpressPost } = await import('./wordpress-client')
+    await expect(updateExistingWordpressPost(CONFIG, { postId: 9, title: 'T' }, guard)).rejects.toBeInstanceOf(ProtectedPageError)
+    expect((assert.mock.calls[0][0] as PageIdentity).unresolved).not.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('returns updatedFields = [content] without sending other keys when only content is set', async () => {
     // Regression guard against the most dangerous mistake: accidentally sending
     // `title: undefined` would NOT clear the title, but sending `title: ''`
     // WOULD. Make sure absent inputs never sneak into the request body.
+    queueGet(fetchMock)
     fetchMock.mockResolvedValueOnce(makeResponse(JSON.stringify({
       id: 123, link: 'x', modified: 'y',
     }), { status: 200 }))
@@ -637,9 +711,9 @@ describe('updateExistingWordpressPost', () => {
     await updateExistingWordpressPost(CONFIG, {
       postId:  123,
       content: '<p>Brand new body.</p>',
-    })
+    }, openGuard())
 
-    const init = fetchMock.mock.calls[0][1] as RequestInit
+    const init = fetchMock.mock.calls[1][1] as RequestInit
     const body = JSON.parse(init.body as string) as Record<string, unknown>
     expect(body).toEqual({ content: '<p>Brand new body.</p>' })
     expect(body).not.toHaveProperty('title')
