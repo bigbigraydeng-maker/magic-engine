@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:pending
+done_ref: pr:2588
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 全部客人（平铺名单）第一页最上面是今天刚有来往的客人；搜索与筛选后仍按最近互动排；翻页顺序连续
