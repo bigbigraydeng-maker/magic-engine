@@ -13,7 +13,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
 import { SECONDARY_BUTTON } from '../_components/bookings/booking-styles'
-import { saveReturnQuery } from '../_components/bookings/payments-return'
+import { saveReturnQuery, stashContactName } from '../_components/bookings/payments-return'
 import { SummaryTable } from './_components/SummaryTable'
 import { SummaryFooter } from './_components/SummaryFooter'
 import { PaidWithoutBookingBanner } from './_components/PaidWithoutBookingBanner'
@@ -65,6 +65,7 @@ function PaymentsPageInner(): JSX.Element {
   const onOpenRow = useCallback(
     (row: OverviewListRow) => {
       onLeave()
+      stashContactName(clientId, row.contactId, row.contactName)
       router.push(
         `/dashboard/clients/${clientId}/crm/all?contact=${encodeURIComponent(row.contactId)}&focus=bookings`,
       )

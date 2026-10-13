@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { NudgeList, NudgeRow } from '@/lib/crm/booking-types'
 import { BookingTrackerPanel } from '../BookingTrackerPanel'
+import { BookingMembersCard } from '../BookingMembersCard'
 import {
   CLIENT,
   installFetch,
@@ -49,7 +50,13 @@ function setup(opts: SetupOptions): { calls: FetchCall[]; onOpenContact: ReturnT
     route('POST', '/nudge', opts.nudgePost ?? (() => jsonResponse({ booking: makeBooking() }))),
   ]
   const { calls } = installFetch(routes)
-  render(<BookingTrackerPanel clientId={CLIENT} onOpenContact={onOpenContact} />)
+  // The members card moved to client settings (权限); the tests mount it next to the panel as the pages do.
+  render(
+    <>
+      <BookingTrackerPanel clientId={CLIENT} onOpenContact={onOpenContact} />
+      <BookingMembersCard clientId={CLIENT} />
+    </>,
+  )
   return { calls, onOpenContact }
 }
 

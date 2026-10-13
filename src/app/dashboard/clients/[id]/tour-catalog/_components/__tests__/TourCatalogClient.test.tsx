@@ -238,10 +238,11 @@ describe('TourCatalogClient', () => {
     await screen.findByText('还没有上架记录')
   })
 
-  it('groups tours by series from the data', async () => {
+  it('groups tours by series and tier from the data', async () => {
     await renderReady()
-    expect(screen.getByRole('button', { name: /Atlantis Gold（2）/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Narnia（1）/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '系列 Atlantis' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Gold（2）' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '系列 Narnia' })).toBeInTheDocument()
   })
 
   it('selects the first tour by default and switches on click', async () => {
@@ -255,6 +256,13 @@ describe('TourCatalogClient', () => {
     expect(
       screen.queryByRole('heading', { level: 2, name: 'Atlantis Gold — Coral Loop' }),
     ).toBeNull()
+  })
+
+  it('shows a series > tier > tour breadcrumb above the detail', async () => {
+    await renderReady()
+    expect(screen.getByTestId('tour-breadcrumb')).toHaveTextContent('Atlantis›Gold›Coral Loop')
+    fireEvent.click(screen.getByTestId('tour-row-t3'))
+    expect(screen.getByTestId('tour-breadcrumb')).toHaveTextContent('Narnia›未分档›Lantern Waste')
   })
 
   it('shows the publish status bar and per-tour change markers', async () => {

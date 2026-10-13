@@ -3,6 +3,7 @@ import { render, screen, waitFor, within, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { NudgeList, NudgeRow } from '@/lib/crm/booking-types'
 import { BookingTrackerPanel } from '../BookingTrackerPanel'
+import { BookingMembersCard } from '../BookingMembersCard'
 import {
   CLIENT,
   FORBIDDEN_WORDS,
@@ -52,7 +53,13 @@ function setup(opts: SetupOptions): { calls: FetchCall[]; onOpenContact: ReturnT
     route('POST', '/nudge', opts.nudgePost ?? (() => jsonResponse({ booking: makeBooking() }))),
   ]
   const { calls } = installFetch(routes)
-  render(<BookingTrackerPanel clientId={CLIENT} onOpenContact={onOpenContact} />)
+  // The members card moved to client settings (权限); the tests mount it next to the panel as the pages do.
+  render(
+    <>
+      <BookingTrackerPanel clientId={CLIENT} onOpenContact={onOpenContact} />
+      {opts.members !== undefined ? <BookingMembersCard clientId={CLIENT} /> : null}
+    </>,
+  )
   return { calls, onOpenContact }
 }
 
@@ -63,6 +70,19 @@ function nudgeCalls(calls: FetchCall[]): FetchCall[] {
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
+})
+
+describe('BookingTrackerPanel does not own the members card', () => {
+  it('renders the reminder list without the members heading', async () => {
+    const onOpenContact = vi.fn()
+    installFetch([
+      route('GET', '/nudge-list?limit=', () => jsonResponse({ nudge: makeNudgeList({ rows: [makeNudgeRow(1)] }) })),
+      route('GET', '/bookings/members', () => jsonResponse({ members: [{ email: 'info@cts.test', grantedBy: 'a@b.test', createdAt: '2026-10-12T00:00:00Z' }] })),
+    ])
+    render(<BookingTrackerPanel clientId={CLIENT} onOpenContact={onOpenContact} />)
+    expect(await screen.findByRole('heading', { name: '付款要催' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '谁能用付款进度' })).not.toBeInTheDocument()
+  })
 })
 
 describe('BookingTrackerPanel', () => {

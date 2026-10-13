@@ -1,3 +1,8 @@
+-- ===========================================================================================
+-- SUPERSEDED — DO NOT APPLY.  (2026-10-12, PM: "最小版")
+-- This 8-table design was judged over-built for 18 stories a week and one client. It is replaced by
+-- docs/migrations-sql/2026-10-12-story-lite-NOT-APPLIED.sql (2 tables). Kept only as a record.
+-- ===========================================================================================
 -- Story auto-publish (slice 2) — tables.  >>> NOT APPLIED. <<<
 -- Apply only after explicit PM approval; on approval move to supabase/migrations/ with a timestamp name.
 -- service-role only (RLS policy MUST say TO service_role). Design: docs/specs/2026-10-12-story-auto-publish-design.md §5.

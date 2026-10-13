@@ -21,6 +21,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { GET } from '../route'
+import { resetBriefCacheForTests } from '@/lib/crm/brief-lookup'
 
 type Row = Record<string, unknown>
 
@@ -152,6 +153,7 @@ async function get(clientId: string, qs = '') {
 }
 
 beforeEach(() => {
+  resetBriefCacheForTests()
   recorded = []
   BRIEF_ROWS.conversations = []
   BRIEF_ROWS.conversation_briefs = []

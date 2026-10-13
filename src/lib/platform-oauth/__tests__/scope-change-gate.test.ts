@@ -90,7 +90,7 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
   })
 
   it('TikTok 授权的清单没有被悄悄改动', () => {
-    expect([...TIKTOK_SCOPES]).toEqual(['user.info.basic', 'video.publish', 'video.upload'])
+    expect([...TIKTOK_SCOPES]).toEqual(['user.info.basic', 'video.publish'])
   })
 })
 

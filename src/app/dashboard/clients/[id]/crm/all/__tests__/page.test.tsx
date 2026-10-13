@@ -118,6 +118,68 @@ describe('?contact=<id> 直达链接', () => {
   })
 })
 
+describe('?contact=<id> 的人不在第一页（付款总览点名字）', () => {
+  it('带着名字来 → 按名字搜出来再开抽屉，不再提示「不在名单里」', async () => {
+    const first = [contact('c1', 'Bob Other')]
+    const found = [contact('c9', 'Aiitha Chandra')]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
+          const items = url.includes('q=Aiitha') ? found : first
+          return { ok: true, json: async () => ({ items, total: items.length, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    window.sessionStorage.setItem('crm-deeplink-name:cts:c9', 'Aiitha Chandra')
+    setUrl('?contact=c9&focus=bookings')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy(), { timeout: 4000 })
+    expect(screen.queryByText(/不在这份名单里了/)).toBeNull()
+    // 名字用完即删：之后手动点别人不会被它拽回来。
+    expect(window.sessionStorage.getItem('crm-deeplink-name:cts:c9')).toBeNull()
+  })
+
+  it('没带名字（存储被拦）→ 仍明说不在名单里，不装作成功', async () => {
+    stubFetch([contact('c1', 'Bob Other')])
+    setUrl('?contact=c9&focus=bookings')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(screen.getByText(/不在这份名单里了/)).toBeTruthy())
+  })
+})
+
+describe('搜索框', () => {
+  it('敲字触发重新加载时，输入框不被卸载（焦点不丢，不像整页刷新）', async () => {
+    let release: (() => void) | null = null
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
+          if (url.includes('q=Sue')) await new Promise<void>((r) => { release = r })
+          const items = [contact('c1', 'Sue Masson')]
+          return { ok: true, json: async () => ({ items, total: 1, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    const input = (await screen.findByPlaceholderText(/客户打回来了/)) as HTMLInputElement
+    input.focus()
+    fireEvent.change(input, { target: { value: 'Sue' } })
+    // 防抖 300ms 后请求发出、页面进入加载中
+    await waitFor(() => expect(release).not.toBeNull(), { timeout: 3000 })
+    expect(input.isConnected).toBe(true)
+    expect(screen.getByPlaceholderText(/客户打回来了/)).toBe(input)
+    expect(document.activeElement).toBe(input)
+    release!()
+  })
+})
+
 describe('被误判成「别再联系」的人，这一页要给得出取消入口', () => {
   it('展开后看得到取消入口 —— 人工任务说的那个按钮就是它', async () => {
     stubFetch([contact('c1', 'Sue Masson', { doNotContact: true })])

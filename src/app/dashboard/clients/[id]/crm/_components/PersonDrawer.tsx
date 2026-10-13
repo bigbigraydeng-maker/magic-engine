@@ -7,6 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { CallButton } from './CallButton'
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
@@ -129,6 +130,8 @@ export function PersonDrawer({
   const [quickBusy, setQuickBusy] = useState(false)
   /** 记完一笔换个 key，让时间线重新拉一次 —— 刚记的那条要立刻出现在上面。 */
   const [timelineKey, setTimelineKey] = useState(0)
+  /** 刚点了拨打的时间：往来记录据此自动刷新，直到这通电话变成正式记录。 */
+  const [dialedAt, setDialedAt] = useState<number | null>(null)
   /**
    * 顶上那张「上次说到这」卡片的内容，由 `ContactTimeline` 算好回传。
    * `useCallback` 是必须的：这个函数进了那边的 `load` 依赖，每次渲染换一个新
@@ -312,6 +315,16 @@ export function PersonDrawer({
               >
                 📞 {row.phone}
               </a>
+            )}
+            {row.phone && !row.phoneUnusable && !row.doNotContact && (
+              <CallButton
+                clientId={clientId}
+                contactId={row.contactId}
+                onDialed={() => {
+                  setDialedAt(Date.now())
+                  setTimelineKey((k) => k + 1)
+                }}
+              />
             )}
             {row.email && (
               <a
@@ -558,6 +571,7 @@ export function PersonDrawer({
               clientId={clientId}
               contactId={row.contactId}
               onSummary={onSummary}
+              dialedAt={dialedAt}
             />
           </div>
         </div>

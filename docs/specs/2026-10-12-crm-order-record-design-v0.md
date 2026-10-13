@@ -1,207 +1,200 @@
-# CRM「订单记录」设计稿 v0.5（已并入子牙 + 魏征第一、二轮意见，并按 10/12 邮箱摸底更正发票号格式；PM 批准前不写代码、不改生产库）
+# CRM「订单来源」与「销售进度（座位）」设计稿 v1.2（复用已上线的订单与付款进度；PM 2026-10-13 明确「不要金额」，金额整块已撤；PM 批准前不写代码、不改生产库）
 
-日期：2026-10-12 · 风险级：**A**（新表 + 记钱 + 将来的每周任务） · 起因：统筹转 PM 指派（需求留存卡 `docs/ledger/2026-10-12-crm-order-record-need-parked.md`）
-窗口：CRM 窗口（唯一写入者）。客户姓名等个人信息不进本文，一律用代号（客人 A、B…）。
+日期：2026-10-13 · 风险级：**A**（给已上线的表加列 + 新读页 + 写订单的导入） · 起因：统筹转 PM 指派；PM 拍板「分开做」，随后 PM 本人对订单与付款窗口说「不要金额」
+窗口：CRM 窗口（唯一写入者）；与「订单与付款」窗口（CTS 会议总结：房型/客人档案/代金券，建了 crm_bookings 家族）已直接对接，其答复见 §8。客户姓名等个人信息不进本文，一律用代号。
 
-## 0. PM 版两句话
+## 0. PM 版几句话
 
-1. **要做什么**：给 CRM 加一张「订单记录」——每个客人买了哪个团、几个人、付到哪一步，每一条都带发票号这种证据；第一步只让 CTS 看到 **3 月四个团（3/11、3/18、3/25、3/26）每团公司确认的已订人数**。
-2. **不做什么**：第一步不改客人页、不自动去邮箱核对、不碰给 Meta 回传成交的那条线、不改客人的「跟进到哪一步」。
+1. **不再新建订单表**：主干上已有另一个窗口做好并上线的「订单与付款进度」（`crm_bookings` 一家子），我们复用它，只补两样：①每张订单的**来源标签和发票号**（证明是「公司确认」还是「客人自述」）；②一个**独立的只读「销售进度」页**，按出发日一行一行看：**座位上限、已订人数、剩余**。
+2. **金额不做（PM 本人 2026-10-13 原话：「其实我们不是特别在意总的金额，毕竟我们不是财务软件…不要金额」）**。此前统筹转述过「要金额」并据此出过 v1.1，**已全部撤掉**，不加任何金额列、不加改金额函数、不显示金额。v1.1 的金额设计与两审意见留在 git 历史里，需要时可恢复。
+3. **分工（PM 要的三样东西）**：①CRM 里看每位客人的付款进度、②团目录里某个团的面板看这个团订了几单、定金/尾款各收几单——这两样**订单与付款窗口做**；③销售进度页的座位/上限——**本设计做**，并提供一个共享的「有效上限」读法，团目录面板也可调用（见 §3.3）。
+4. **不做什么**：不改客人页、不改它的付款节点逻辑、不碰给 Meta 回传成交的线。
 
-**最小第一步**：订单表 + 一个「先预览、你说『导』才写入、整批能撤回」的录入工具 + 一页按团汇总的只读页。
+**最小第一步**：给订单加「来源 + 发票号」两列（改已上线的表，A 级，先出方案等批准）+ 销售进度页（只读）+ 一个「先预览、你说『导』才写入」的导入工具，把 3 月四团邮箱摸出来的 9 单走它自己的建单函数录进去。
 
-## 1. 平台层级判定（me-platform-tier-gate · Full）
+**PM 只需要看这几行（下面第 3 节往后是给技术复审看的，可以跳过）**：
+- 页面第一次上线时是**空的**（订单表现在 0 行），要等 3 月 9 单导入后才有数，这是正常的，不是坏了。
+- 导入的 9 单会同时把「定金已收」标上，否则系统会当成欠款去催销售——这一步我们会在导入前列给你看。
+- 录错了不能直接改发票号，只能「取消、重建」。
+- 页面只有名单里的 2 个人能看（PM 已定「就这两个」）。
 
-- 对象：CRM 订单记录（买了什么 / 哪天 / 几个 / 多少钱 / 付款状态 / 证据 / 来源）。
-- **层级**：既有 CRM 能力的扩展（L1 候选，证据只有 CTS 一家，按默认降级先登记为候选，**等 PM 一句「记」才落库**）。通用部分 = 订单表；**CTS 专属只有两样**：①「订单挂到哪个出发日」的联结表（旅游目录是 CTS 的）；②「哪些来源算占位」的口径（L4 配置）。
-- **换客户测试**：Oztop = 订货单（买了什么=品类，几个=数量，无出发日）；NAL = 一票货（件数）；Roman = 定金单（几个恒为 1）。通用表的列名都不用改，只是不挂出发日。**通过**。
-- **换行业测试**：同上，✓。**防反例**：共享表里不出现「出发日」「团员」「房型」；出发日只在联结表里出现。
-- **红线 2/4/5/7**：共享代码不含客户名/团号字样，团号只作数据。
-- **与外部下单系统的关系（魏征 M9）**：2026-09-15 PM 已定，CTS 的下单系统由外部程序员做，ME 不自建库存/门户，将来用「对方导出文件 + AI 识别」把订单同步进 ME 自己的客户记录。**本表就是那条同步将来的落点**，不是第二套订单系统：外部系统上线前由销售表灌入；上线后改由导出文件灌入，两种来源都带证据和来源标签，谁是准的见 §8 Q3。
-- 登记：L1 候选「CRM 订单记录」，待 PM `记`。
+## 1. 为什么这样（简史）
 
-## 2. 现状盘点（读真实库/代码得出）
+2026-10-13 读主干代码时发现订单与付款窗口已经做好 `crm_bookings`（一客一团一出发日一条订单、人数 `party_size`、取消、定金/尾款两个付款节点、只增审计日志、名单制权限、付款总览页），迁移 `20261012200000_crm_booking_tracker.sql` 已在生产库建好（读到：`crm_bookings` 0 行、`crm_booking_members` 2 行）。我 v0.1–v0.8 自建 `crm_orders` 与它重复，违反复用优先，统筹同意撤掉自己的表、复用它（v0.9）。v1.0 并入第四轮两审；v1.1 曾按统筹转述加了金额并过第五轮两审；**PM 本人随后说「不要金额」，v1.2 撤掉金额**。完整历史见 git 里各版提交。
 
-| 现有零件 | 能不能直接用 | 原因 |
+## 2. 现状盘点（读真实代码和生产库得出）
+
+| 零件 | 现状 | 我们怎么用 |
 |---|---|---|
-| `me_sale_outcomes`（成交记录） | ❌ 不当订单用 | 一行 = 一次到账；没有买了什么/几个；一批准就计入目标进度、周报，并可能真发给 Meta，撤不回。它有 `order_ref` 列（注：CTS 内部单号），付款邮件识别也会提取发票号（`src/lib/conversions/payment-email-extract.ts` 的 `extractInvoiceNumbers`）——**所以订单的证据号要与它同口径**，第二步才能按同一个号对账。CTS 在库里 677 行，全是线索类，没有「已购买」 |
-| `tour_catalog_departures`（出发日） | ✅ 联结表挂这里 | 有 id、client_id、depart_on、status；文件头明写不存订单和席位；生产库里 3/11、3/18、3/25、3/26 四行都在（还有 3/27 日本一行），状态 open |
-| `tour_catalog_import_batches` | ❌ 不复用 | `kind` 有 CHECK 只许 departures/status；apply/rollback 函数为出发日写死；团目录页会把批次列出来——订单批次混进去会污染它、还会把客人信息带进团目录员工可见的表（子牙 M3、魏征 M5） |
-| `contacts.stage`（已付订金/全款） | 只读参考，互不驱动 | CTS 现 21 位已付（14 位为 74 号经 PM 授权补标，有台账与回滚）；回答「谁付了钱」，答不了「哪个团、几个人」 |
-| 自动识别付款邮件（PR #2212，主干，默认关） | 第二步的对账来源 | 只写定金不写尾款；它会自动推进阶段并可能回传，**本设计不与它连** |
-| `contact_deals`（2026-07-28 拍板、从未建） | 本表接棒 | 旧稿一人一团一行、定金全款摊两对列；新稿一单一条，付款状态一列；直招/代理第一步不做 |
-| 外部下单系统（2026-09-15 PM 定） | 见 §1 | ME 不自建库存/门户；本表是同步落点 |
+| `crm_bookings` | 列：`contact_id`（必填）、`tour_id`、`departure_id`、`departure_depart_on`（建单时抄的出发日快照）、`booked_on`、`party_size`（smallint 1–60，**可空**）、`status`（active/cancelled，取消必带 `cancel_note`）、`note`、`created_by`；同一客人同一团同一出发日只许一张 active（唯一索引）；**不存金额（本设计也不加）** | 订单的唯一来源 |
+| `crm_booking_milestones` | 每单两个节点 deposit/balance，`state` unpaid/paid，`paid_source` staff/email，`paid_evidence_ref` = 邮件引用（有 CHECK、client 内唯一） | 只读：判「定金是否已收」；**不往里放发票号**（会撞它的规则） |
+| `crm_booking_events` | 只增审计日志 | 新列要进它的 changed 列表 |
+| 数据库函数 `crm_booking_create / update / cancel / set_paid / unset_paid` | 带乐观并发与审计，只给 service_role | 导入走它（建单走新函数，见 §3.1），不直接写表 |
+| 权限 `requireBookingAccess(clientId, 'view')` | ME 管理员或 `crm_booking_members` 名单内（现为 2 个邮箱，PM 定不扩） | 销售进度页用同一道闸，不用 `requirePaidClientAccess` |
+| 付款总览页 + `booking-overview-*.ts` | 按出发日汇总订单张数、定金/尾款已收；**不含座位数/上限** | 读逻辑复用其分组；座位上限这块归本设计（对方已确认不做） |
+| `me_sale_outcomes`（成交记录） | 一行=一次到账，一批准就计入目标并可能真发给 Meta | **不连、不读** |
+| `tour_catalog_departures` / `tour_catalog_tours` | 出发日表；`internal.capacity`（内部座位，不对外）；团级 `max_group_size`（**会对外**） | 只读，见 §3.3 |
 
 ## 3. 设计
 
-### 3.1 表 `crm_orders`（通用，列名中性）
+### 3.1 给 `crm_bookings` 增补两列（改已上线表；对方窗口已同意）
 
-| 列 | 含义 | 约束 |
-|---|---|---|
-| `id` uuid pk | | |
-| `client_id` uuid not null → clients | 租户 | |
-| `contact_id` uuid not null → contacts | 买的人 | 表里**不存**姓名/电话/邮箱 |
-| `item_label` text not null | **买了什么**（产品/团名，如 Best of China） | 1–200 字 |
-| `quantity` int not null | **几个** | CHECK 1–99 |
-| `total_minor` bigint null, `currency` text null | **多少钱**（订单总价；第一步汇总页**不显示金额**，所以不涉及多币种相加） | 两列同有同无；金额>0；币种大写 3 字母（与 `me_sale_outcomes` 同口径） |
-| `payment_state` text not null | 付款状态 | CHECK ∈ `unpaid`/`deposit_paid`/`paid_full`（**退款不放这里**，走 cancelled） |
-| `evidence_kind` text not null | 证据类型 | CHECK ∈ `invoice`/`payment_email`/`other` |
-| `evidence_ref` text not null、`evidence_ref_norm` text not null | 证据编号（发票号）；norm = **转大写并去掉全部空格和连字符**（与付款邮件识别 `extractInvoiceNumbers` 同一算法，实现时抽成一个共用函数，两边都调它，避免 `INV-123` 与 `INV123` 对不上；数据库侧写成 `regexp_replace(upper(x), '[\s-]+', '', 'g')`，测试含 `INV-1234` 对 `inv 1234`） | norm 由触发器生成；**建单后 evidence_ref/evidence_ref_norm/client_id/contact_id/source 不许改** |
-| `party_no` int not null default 1 | 第几批人（同一客人为两批不同的人订同一个团时才是 2） | CHECK ≥1 |
-| `source` text not null | **来源标签** | CHECK ∈ `company_confirmed`/`customer_stated`/`staff_entered`；**`company_confirmed` 只允许 evidence_kind ∈ invoice/payment_email，且 norm 必须符合该客户配置的发票号格式**。⚠️ 魏征第二轮核实：付款邮件识别里**没有** CTS 专属格式（只有宽松的通用提取，调用处也没传格式），所以格式必须来自 CTS 真实发票样本。**2026-10-12 邮箱摸底已拿到（读了约 9 张真实发票）：CTS 发票号 = 5 位纯数字（如 84030 这个形状），写成 CTS 的客户配置 `^\d{5}$`**；`CTS4270311` 这类是发票文件名/Description 里的**团号**（同一团所有客人共用），不是发票号，应放进 `item_label`（买了什么）而不是 `evidence_ref`；发票上另有 Trip No.（行程编号），第一步不存。例外已见：`CTS4270406-…` 是报价单号不是发票号；发票改名重发号码不变；个别发票的 Contact Name 栏是模板残留，不能拿它对联系人。**格式校验仍放 apply 函数里**，格式不合的一律先算「待核实」。格式校验**放在 apply 函数里**（把 CTS 的格式常量/配置作为参数传入，不合格的进「待人判断」），**不放进 CHECK**（CHECK 读不了客户配置）；表层 CHECK 只约束 evidence_kind |
-| `status` text not null | `active`/`cancelled` | 取消不删行；`cancelled` 必带 `cancel_reason` |
-| `cancel_reason` text null | | |
-| `batch_id` uuid null → `crm_order_import_batches` | 哪一批导入的 | |
-| `created_by`, `created_at`, `updated_at` | | |
+> 命名：来源列叫 **`origin_kind`**（不叫 `source`）——订单家族里 `crm_booking_events.source`（staff/email/system）、会话设置 `crm_booking.source`、`paid_source` 已占了这个词，且 HTTP 层 `FORBIDDEN_BODY_FIELDS` 会递归拒绝名为 `source` 的字段。
 
-**唯一性（防错数的两道索引，均只约束 `status='active'` 的行，因此取消/更正后可以重导）**：
-1. `(client_id, evidence_kind, evidence_ref_norm)`：同一张发票只能进一次。
-**「公司确认」不能被改数绕过**：任何单条命令改了人数或付款状态，该行 `source` 自动降为 `staff_entered`（事件记录降级），要重新变回 `company_confirmed` 只能走新批次声明；`set-payment` 升到 `paid_full` 必须带新证据号，并按同一 norm 在**全客户范围内查重**（同一张尾款发票不能挂到两个订单）。
+- `origin_kind` text **null 允许**，CHECK ∈ `company_confirmed` / `customer_stated` / `staff_entered`。旧行与以后手工录的单，来源为空 = 页面显示「来源未标」，按「待核实」算，**不回填猜值**。表上再加 CHECK：`origin_kind is distinct from 'company_confirmed' or evidence_ref is not null`。
+- `evidence_ref` text null，存**发票号**（CTS 发票号 = 5 位纯数字，由函数校验，数据库只约束长度与不含空白；归一化 = 大写 + 去掉空白和连字符，与付款邮件识别的发票号提取同一规则）。**部分唯一索引 `(client_id, evidence_ref) where evidence_ref is not null and status = 'active'`**——取消的单保留发票号做审计但不占号，撤回后同一张发票可重导，「挂错客人 → 取消 → 在正确客人名下重建」走得通。
+- **建单后 `origin_kind`、`evidence_ref` 都不可改**（BEFORE UPDATE 触发器；不拦合法的 `updated_at` 触碰；`crm_booking_update` 是显式列更新，新列不会被它覆盖）。录错 = **取消、重建**。
+- **不改现有 `crm_booking_create`**（改签名会让 Postgres 同时存在 9 参与 11 参两个同名函数，PostgREST 对「界面加订单」的具名调用会选不出来直接 500，且原有 revoke/grant 按 9 参数写）。**另建只给导入工具用的新函数** `crm_booking_create_with_origin`（内部复用 `crm_booking_check_refs`，同样的审计与乐观并发风格；`revoke … from public, anon, authenticated; grant … to service_role`）。界面「加订单」不暴露这两列。**测试**：旧 9 参调用仍成功；`company_confirmed` 不带发票号被拒。
+- **唯一冲突按约束名拆开**：发票号冲突抛 `duplicate_evidence_ref`，同客人同团同出发日冲突仍抛 `duplicate_booking`；`mapRpcError` 认识新码。导入重跑时先**按发票号读回已有订单，核对联系人与出发日一致才算「已导」**，不一致进「待人判断」。
+- **审计**：`create or replace crm_booking_audit_booking`：`created` 事件 detail 加 `origin_kind`、`has_evidence_ref`（**只存「有没有发票号」的布尔，不存发票号原文**，与现有迁移对邮件证据只存布尔一致）；UPDATE 分支加这两列的 changed 判断（`evidence_ref` 不可改，只是兜底）。注意函数内 `set_config('crm_booking.source','staff')` 是审计来源标记，与新列无关。**不需要放宽 `crm_booking_events.action` 的 CHECK**（没有新动作名）。
+- **写迁移时的两条硬要求（订单与付款作者提醒）**：①`create or replace crm_booking_audit_booking` 时保持原有 `crm_booking_clear_settings()` 调用和 return 路径不变（生产库不允许函数级 SET），并在沙盘库重跑 `supabase/tests/crm_booking_tracker.test.sql`，必须仍是 **278 PASS**，再加新用例；②新函数同样 `revoke … from public, anon, authenticated`、只 grant 给 service_role。
+- 迁移只含 `alter table … add column`（可空，不重写表）+ CHECK + 部分唯一索引 + 触发器 + 新函数 + 审计函数替换；先在本机 Postgres 沙盘重放，**生产 apply 要 PM 回「同意」**。
 
-2. 由联结表保证（见 3.2）：`(client_id, contact_id, departure_id, party_no)` 在有效订单里唯一。**一张发票 = 一条订单**。同一客人在同一出发日再来一张发票时，导入**不自动判断**，进「待人判断」由人选：①这是同一单的尾款 → 用「更新付款」命令把原行置为已付全款，新发票号记进事件；②这是另一批人 → 人明确建 `party_no=2` 的新行（各自带自己的发票，人数各自累加）。这样「定金+尾款两张发票」不会被数成两次，「家长订 4 人、朋友另订 2 人」也不会丢发票。
+### 3.2 金额：不做（PM 2026-10-13 原话「不要金额」）
 
-### 3.2 联结表 `crm_order_departures`（CTS 专属零件，把订单挂到出发日）
+订单与付款设计的取向「只记进度、不记钱」保持不变。本设计不加 `total_minor` / `currency` / `amount_minor`，不加改金额函数，审计里不记金额，销售进度页不显示金额；3 月草稿里邮箱读到的定金金额**不导入**（只导人数、发票号、来源、定金已收状态）。若将来 PM 要金额，v1.1 的设计与两审意见在 git 历史里，可作起点，但属另一轮 A 级改动。
 
-`order_id` pk → crm_orders；`departure_id` → `tour_catalog_departures(id)` **`on delete restrict`**；`client_id`。
-- **同客户校验**：写入时检查 订单.client_id = 联系人.client_id = 出发日.client_id（触发器，不一致直接拒绝）。
-- 部分唯一索引：`(client_id, contact_id, departure_id, party_no) where is_active`。⚠️ Postgres 的部分索引条件只能引用本表的列，所以联结表自带 `is_active`；订单取消时由**同一个触发器**同步置 false，且订单状态**只能 active→cancelled，不能反向**（防止恢复时撞索引）。`contact_id`、`party_no` 冗余进联结表，**INSERT 时由触发器从订单拷贝**（调用方不传，比「检查」更稳），之后锁死。
-- **联结表一旦建立只有触发器能把 `is_active` 置 false，其他列一律不许改**（BEFORE UPDATE 拒绝，`order_id/departure_id/contact_id` 都锁死，写进测试）；换团 = 取消旧单 + 建新单（取消与重建在一个事务里，由「更正」命令保证，不会因索引被挡）。
-- **与团目录的交互（魏征 M6）**：出发日有订单后，团目录那边「撤回导入/删除出发日」会因 restrict 被拒。**已取消的订单也会继续挡**（联结行为审计保留）：口径是「出发日有过订单就不删，只能把状态改成 cancelled」，已知并接受。团目录的撤回函数**没有**捕获外键错误（已核对；它是逐条 delete 且在同一事务里，被拦时整批回滚，原子性没问题），所以第一步在**应用层调用处**按 SQLSTATE 23503 + 约束名捕获并翻译成人话（「该出发日已有订单，不能撤」），**不改**团目录既有的 SQL 函数；补一条测试。
+### 3.3 销售进度页（独立只读页：座位上限、已订人数、剩余）
 
-### 3.3 批次表 `crm_order_import_batches`（另建，不复用团目录那张）
+- **位置**：`/dashboard/clients/[id]/sales-progress`（服务端页；客户首页入口卡片、Tour 目录页页头链接留后续步骤）。不放进客人页，不放进 Tour 目录页（目录页页头写明不记订单、权限是另一份名单、81 号窗口正在改它）。
+- **权限**：`requireBookingAccess(clientId, 'view')`（名单制；底下依次过「付费客户」「名单」「该客户启用订单与付款配置」，没启用返回 404）。它返回 `NextResponse`，服务端页面要自己转成 `notFound()` 或「无权限」提示。页面、每个取数接口各自带同一道闸；**测试照现有 `access-gate.test.ts` / `route-capabilities.test.ts` 范式，断言每个新路由都调用同一道闸**；无权限账号/别的客户 id 取不到。能看的人 = 名单现有 2 个邮箱（PM 已定不扩名单）。
+- **读哪一层**：页面自己查一次 `crm_bookings`（只取需要的列，含新列）+ 出发日表；**不改**共享的 `BOOKING_COLUMNS` 清单和 `BookingRow` 类型。总览页的分页上限（50 条/`OVERVIEW_HARD_CAP`）要核对，超过上限时不能悄悄少算，必须显示「只读了前 N 条」。
+- **共享代码里只认「销售单元」**：适配器接口 `listSalesUnits(clientId) → [{unitId, label, date?, capacity?, capacityNote?, unitStatus}]`；CTS 适配器读 `tour_catalog_departures`（只读，不写，不读 `internal` 其他键）；旅游词只在适配器与文案配置里。换成地产（楼盘/户型）或物流（发运批次）时外壳不改。**「有效上限」读法单独做成一个共享纯函数**（输入：出发日内部座位、团级对外上限；输出：上限数字 + 来源说明），**团目录里某个团的销售情况面板（订单与付款窗口做）也调用它**，保证全站「这个团几个座位」只有一个口径（PM 要「团目录字段能被别的功能统一调用」）。
+- **一行（一个出发日）显示**：
+  1. **座位上限**：主来源 = 该出发日的 `internal.capacity`（内部座位，**不对外**；3 月四团均为 20）；若该团另有对外的团级 `max_group_size`（公开口径，上海周边团官方 18，PM 定「按 18 算」），**取两者较小者**并标注「内部 20 / 官方 18，按 18 算」。**不往 `max_group_size` 写 20，也不改任何对外字段**（CTS 红线：对外不出现人数上限；`max_group_size` 在发给官网的数据里，而 `internal` 不进任何输出）。都没有 =「上限未设置」，剩余显示「上限未设置」，不默认 20。适配器只取 `internal.capacity` 这一个键，读后丢弃整个 `internal`。
+  2. **已订人数**（只统计 `status=active`，人数 = 各单 `party_size` 相加）：**公司确认**（`origin_kind=company_confirmed`）｜**客人自述**（`customer_stated`）｜**待核实**（`staff_entered` 与来源未标）。**对外只说「公司确认」一栏。**
+  3. **人数未填 N 单**：`party_size` 为空的订单单列，**不按 1 计**。
+  4. **剩余**（保守算法，避免第一批全是待核实时高估空位而超卖）：上限 − （三栏之和）；旁小字「仅算公司确认：N」；若还有人数未填的单，加提示「另有 N 单人数未填，剩余可能更少」。**未归属的人数**（订单没挂出发日 `departure_id` 为空，或出发日行已被团目录硬删而 `departure_id` 悬空，靠订单上的出发日快照 `departure_depart_on` 认出）按团单列，并在该团每一行的剩余旁提示「另有 N 人未归属出发日，剩余可能更少」。已订 > 上限显示红字「超订 N 人」，不显示负数；只提示不拦截，文案写明「系统不会拦截，请销售自行把关」。
+  5. 每个数字可点开看是哪几张订单（只显示发票号、日期，不显示姓名电话）。
+  6. 页头「数据截至 xx 时刻」；订单与出发日同一次查询读取。已取消的订单不计入任何栏；`cancelled/closed` 的出发日不进主列表，上面挂着的有效订单单列一行；`sold_out/limited` 要显示，不能当关闭。订单联系人被删会连带删订单（外键级联），座位数会无声减少——「数据截至」旁在订单数比上次少时提示。
+- 另放两行小字：「订单未挂出发日」条数、「CRM 里阶段为已付但没有订单」的人数（只读差额，不联动）。
+- **不显示**：付款进度（已收定金/尾款几单）、证据强度、金额——付款进度由订单与付款窗口在「团目录面板」和付款总览里做，本页不重复，避免两处口径打架。
+- 「公司确认」口径、剩余算法写在页面的服务端常量 + 测试里，第一步不做配置界面。
+- **测试**：无权限账号/别的客户 id 取不到；每个新路由都调同一道闸；适配器无 `insert/update/delete/rpc` 且返回值里无 `internal` 其他键（含航司航线的夹具断言）；内部 20 + 官方 18 → 按 18 并带差异说明；上限都缺 → 上限未设置；`party_size` 空的单不进人数、进「未填」；取消的单不计；未挂出发日/悬空订单单列并提示；剩余保守算法与超订显示；「有效上限」共享纯函数单测（含团目录面板将来调用的边界）。
 
-`id`、`client_id`、`file_sha256`（只存哈希，**不存原件内容**）、`plan`（**只放 contact_id 与打码摘要，不放电话邮箱**）、`plan_sha256`、`declared_source`（导入人对整批声明的来源标签，写进每条订单与事件）、`status`（previewed/applied/rolled_back/rejected）、`applied_by`、时间。唯一索引：同客户同哈希，仅 previewed/applied 状态下唯一，回滚后可重导。
+### 3.4 3 月四团的数据怎么进来（导入工具）
 
-### 3.4 改动日志 `crm_order_events`（只增不改，自动写）
+- 来源：邮箱只读摸出的草稿（本地 Dropbox，含客人信息，**不进仓库**）；3/11 共 8 单 15 人、3/18 共 1 单 2 人、3/25 与 3/26 暂 0 单；全部是定金；CTS 销售对 8 条问题的核对回复后再定稿。**金额不导入**（§3.2）。
+- 工具：本地脚本（不进生产服务）。**预览**：按电话/邮箱只读查 `contacts`（`select id` + `client_id` 过滤，电话用同一套归一化比较、邮箱小写比较；**不调 `resolveContact`**——它会在没命中时建人、命中时改最近接触时间）；命中 0 或 ≥2 的进「待人判断」，不自动建、不自动合并；输出打码清单 + 汇总，并**列出「导入后付款催办名单上会多出几条」**。→ **PM 在对话里说「导」**才执行。
+- **应用，每单两步**：①调 `crm_booking_create_with_origin`（带 `origin_kind`、`evidence_ref`；`departure_id` **必须**用团目录里真实的出发日 id；`booked_on` **显式传发票日期**）；②对**已确认收到定金**的单，再调现有 `crm_booking_set_paid`（deposit 节点，`paid_source='staff'`，**不带** `evidence_ref`；`paid_on` 取发票或到账日）。不做第②步，这 9 单会被当成「欠定金」进催款名单，还会烧掉 CTS「每人每周最多 2 封」的额度。这 9 单的「已收」是员工代标的，审计里来源是 `staff`，页面文案不要写成「邮件核实」。
+- 每单一个事务、带审计；任一单失败立即停止并报告已成功几单；脚本在本地写一份**只含订单 id 和发票号**的进度文件，重跑以它对账（并按发票号读回核对）。
+- **撤回**：对已导入的单调现有的 **`crm_booking_cancel`**（不是 `crm_booking_update`——它不允许改状态），需先逐单读出 `expected_updated_at`，`cancel_note` 写「导入批次 <日期> 撤回」（≤200 字）；已取消的单（报 `booking_not_active`）算「已撤回」，不算失败；不删行。取消后发票号释放，可重导。
+- 同一客人同一团两张发票（定金一张、尾款一张）：**不自动判断**，进待人判断由人选（尾款 → 在原单上用现有「已收款」操作；另一批人 → 同一单把 `party_size` 加大并在备注里写明，不改唯一索引）。**第一步每单只存一个发票号**（第一张）；尾款发票号第一步不进系统，只在备注里写。
+- 个人信息：原件不复制进仓库；脚本输出一律打码；PR/文档只出现代号。
 
-- `order_id`、`client_id`、`action`（created/payment_changed/quantity_changed/cancelled/imported/rolled_back）、`actor`（**不得为空**，沿用团目录的 `set_config` 做法传入；**触发器遇到 actor 为空直接拒绝整条写入**，不写空值）、`before`/`after`（jsonb，**不含联系人信息**）、`batch_id`、`at`。
-- **由 AFTER 触发器自动写**（不靠应用手写，防漏）；触发器函数带 `search_path`；BEFORE UPDATE/DELETE/TRUNCATE 拒绝（照 `me_conversion_audit`）。`crm_orders` 另加 BEFORE DELETE 与 TRUNCATE 拒绝触发器。
-- **诚实声明**：这些触发器挡得住应用层和 service-role，**挡不住数据库 owner（迁移、SQL 通道）**；那一层靠流程（生产库写入必须 PM 说「导」）而不靠触发器。
-- 全部新表（orders / departures 联结 / batches / events）都写完整 RLS：`enable row level security` + `for all to service_role using (true) with check (true)` + `revoke all … from anon, authenticated`；禁止 `workspace_id`/`auth.uid()`。
+### 3.5 「报价」
 
-### 3.5 录入（只有「预览 → PM 说『导』→ 应用」，没有自由编辑）
-
-1. 输入：CTS 销售给的一张表（发票号、几个人、付款状态、对到联系人用的电话或邮箱）。**原件不复制进仓库/worktree**，只从原路径读，批次里只存 sha256；脚本输出一律打码；这是对「解析完即删」的修正（原件还在 Dropbox/邮箱里，删不掉也不必删）。
-2. 对联系人：⚠️ **预览阶段必须只读**。现有 `resolveContact`（`src/lib/crm/identity.ts`）即使传 `mergeStrategy: 'reject'`，也会在「一个都没命中」时**新建联系人**、命中一个时还会更新最近接触时间和名字，所以**不能调它**。第一步新写一个**只读查找函数**：按归一化后的电话/邮箱查 `contact_identities`，只返回 contact_id（算进第一步范围）。**对不上、命中两个人、发票号格式不合、发票号已存在** → 进「待人判断」，不自动建、不自动合并。
-3. 预览：打码清单 + 汇总，计划存进批次表，得到 `batch_id` 与 `plan_sha256`。**哈希统一在数据库里算**（入库时 `sha256(convert_to(plan::text,'utf8'))`，Postgres 内置、不需要扩展），应用层不自己算（`JSON.stringify` 与 `jsonb::text` 不会一致）；PM 看到的预览必须由**同一份已入库的 plan** 渲染出来，否则绑定的是看不见的东西；计划里除「可建订单」外，另有 `unresolved` 数组（对不上联系人/命中两人/格式不合/发票号已存在/疑似尾款或第二批人，每项只含行号与原因，不含个人信息）。
-4. **应用**：`apply --batch <id> --plan-sha <hash>` 调一个**数据库函数**，在同一事务里按已存计划写全部订单+联结+事件（不是脚本逐条写，中途失败整批回滚）；**只有 PM 在对话里明确说「导」才执行**（生产库写入）；应用前再校验计划哈希没变。**函数在同一事务里重新校验前置条件（防预览和写入之间世界变了）**：联系人仍存在且仍属同一客户、出发日仍存在且为 open、发票号没被别的批次抢先（靠唯一索引）；任何一条不满足 → 整批回滚并把原因写回批次。测试：预览后、应用前把一个联系人合并/删除，应用必须失败。
-5. **撤回整批**：同样是数据库函数，订单置 cancelled、写事件，不删行；撤回后同一份更正过的表可重导（唯一索引只管 active）。
-6. **单条更正**（魏征 M2，第一步就要有）：`cancel` / `set-quantity` / `set-payment` / `create-one`（单条新建，换团 = 取消 + 单条新建，同一事务）四个受控命令。**每一个都做成数据库函数**，函数内部用 `set_config` 设 actor 再写（应用层直接 update 设不了 actor，会被触发器拒绝）；都写事件、都要原因，退团/换团/改人数靠它们。事件分工：`imported`/`rolled_back` 由 apply/撤回函数写，其余由 AFTER 触发器自动写（避免实现时漏写批次事件）。
-7. **管道不许断头**：每批的「待人判断」和「找不到付款证据」清单，**落进今日待办「需要你动手」栏**。⚠️ 这不是配置而是**共享运行时代码**：要在 `src/lib/pm-todo/manual-items.ts` 的推送列表里新增一个 pusher 文件 + 一行注册（算进第一步范围，PR 里要有它的测试）。规则：读 `crm_order_import_batches` 里 `status=applied` 且 `unresolved_count>0` 且 `unresolved_cleared_at` 为空的批次，**每批一条**，处理完（命令把 `unresolved_cleared_at` 置位）自动消失；不带客人信息。三件套：what（几条、各差在哪、影响哪个团人数）、how（逐条怎么处理）、href（**绝对网址**，直达汇总页「待判断」区；相对路径会被链接闸整条丢掉）。批次表因此多两列：`unresolved_count`、`unresolved_cleared_at`。
-
-### 3.6 汇总页（只读）
-
-- 位置：CRM 目录下新增一页「订单」（`/dashboard/clients/[id]/crm/orders`），**沿用现有 CRM 页面的登录与客户隔离**（clientId 取自路由并校验成员资格）；谁看得见 = 现在能进 CTS 的 CRM 的人，第一步**不显示金额**，所以只涉及人数、发票号、团。
-- 每个出发日一行：**公司确认（对外只说这一栏）｜待核实｜合计**。「公司确认」= `source=company_confirmed` 且 `payment_state ∈ {deposit_paid, paid_full}` 且 `status=active`。
-- 另放两行小字：「订单未挂出发日」条数、「CRM 里阶段为已付但没有订单」的人数（只读差额，不联动）。每个数字可点开看是哪几张发票。
-- 「公司确认」口径写在汇总页的**服务端常量 + 测试**里，第一步不做配置界面（防范围蔓延）。第一步**不做**超订提示、不显示 3/27 日本团（PM 要了再加，成本很低）。
-
-### 3.7 每周自动核对（第二步，只写方案）
-
-- 一个 Inngest 定时函数读 info 邮箱本周收款邮件（复用 #2212 的读信与识别），与 `crm_orders` 按**归一化发票号**对：邮件有订单无 / 订单有邮件无 / 金额或人数对不上。
-- 对不上的进今日待办（三件套 what/how/href），**全程只读邮件 + 写对账结果，不外发、不扣费、不回传 Meta**；读不到邮箱 fail-closed（报「没核成」，不报「全对」）。
-- **当场试跑方案**：①测试客户 + 两封造好的邮件夹具，跑完整链路并故意造一条对不上；②CTS 真邮箱只读空跑一次（`dry_run`，不写库），输出「读到几封、对上几张、对不上几张」；③PR 正文写「当场试跑」一段。第二步开工前先把这条路径设计好。
-- 第二步才引入的联系人合并/删除个人信息等问题见 §9。
+订单从**发票**起算（`evidence_ref` 是发票号）。报价单号是另一种编号，`evidence_ref` 建单后不可改，报价→发票是两个编号，硬放同一行会冲突；报价阶段仍由 CRM 现有阶段承载。
 
 ## 4. 分步
 
 | 步 | 内容 | 风险 |
 |---|---|---|
-| **1（最小）** | 4 张表 + 触发器 + 录入工具（预览/导/撤回/单条更正）+ 只读汇总页 + 待办落点 | A |
-| 2 | 每周核对 + 待办卡 | A |
-| 3 | 客人抽屉里一行只读证据行（不影响名单/排序/阶段，不新增可点状态） | B |
-| 4 | 直招/代理拆分；付款邮件自动建订单（先「待核实」）；对接外部下单系统导出文件 | A |
+| **1a** | 迁移（给 `crm_bookings` 加 `origin_kind`、`evidence_ref`、CHECK、部分唯一索引、不可改触发器、新函数 `crm_booking_create_with_origin`、审计触发器替换），本机沙盘重放（含「旧 9 参调用仍成功」「278 项仍全过」）；订单与付款作者复核；**PM 批准后**才在生产 apply | A |
+| **1b** | 销售进度页（只读）+ 适配器 + 「有效上限」共享函数 + 测试 | A（读客户订单数据、新页面） |
+| **1c** | 导入工具 + 3 月 9 单（等 CTS 销售核对回复、PM 说「导」） | A（写订单） |
+| 2 | 每周自动对账邮箱收款邮件（订单与付款窗口已有 P3/P4 自动勾选设计，本设计不另造） | A |
+| 3 | Tour 目录页页头加「查看销售进度」链接（先与改该页的窗口协调） | B |
 
 ## 5. 资源优先级（ENGINEERING_QUALITY_GATES §11）
 
-- **频率：高**——3 月四团正在售，销售和 PM 每天问「这团现在几个人」，现靠翻邮箱和团员名单图手数。
-- **IMPACT 闭环关键度：高**——卡在 Measure 的事实源：各团真实已订人数是之后判断「广告往哪个团加钱」的依据；**第一步本身不连广告和回传，只是把数从手数变成可核对的数**。
-- **收入关联度：高**——直接决定 3 月四团的销售跟进与超订/少订风险。
-- **判定：零低、三高 → P0。** 统筹此前因广告计划未收尾暂停；现 PM 给出「尽快让 CTS 看到 3 月四团」，以 PM 最新指示为准（不是用广告回路当理由）。
+频率高（3 月四团在售，每天问「这团几个人、还剩几个座位」）/ IMPACT 高（Measure 事实源，决定各团跟进力度；第一步本身不连广告）/ 收入高（直接关系销售跟进与超订风险）→ **零低三高 → P0**（以 PM 最新指示为准）。
 
-## 6. 风险与防线（每条给出可验证位置）
+## 6. 风险与防线
 
-1. **错数**：对外只说「公司确认」栏；每行必带证据；发票号归一化（大小写/空格）后唯一；同一客人同一出发日仅一条有效订单；`company_confirmed` 受证据类型与发票号格式约束。**验证**：测试覆盖「大小写不同的同一发票」「定金+尾款两张发票」「同一客人二次导入」「取消后重导」。
-2. **钱与外发**：本表**没有任何到 `me_sale_outcomes`/Meta 的写入路径**，`me_sale_outcomes` 全部调用点（`src/lib/conversions/*`、`src/app/api/admin/conversions/*`）都不指向本表。**验证**：PR 里 grep 清单 + 导入前后 `me_sale_outcomes` 行数不变。未来任何把订单连到它的改动按另案 A 级。
-3. **张冠李戴 / 跨客户**：联系人命中两个人或对不上 → 待人判断；触发器强制订单、联系人、出发日同属一个客户；联系人被合并后订单挂在旧 id 上的分叉，第一步用 `mergeStrategy: 'reject'` 避免，合并后订单迁移留到第二步。
-4. **个人信息**：订单与事件不含姓名/电话/邮箱；批次计划只含 contact_id；原件不进仓库；输出打码；文档/PR 用代号。
-5. **回滚**：整批撤回 + 单条更正；整套表可下线（没有任何其他表依赖，联结表对出发日是 restrict 反向约束，下线前需先清联结）。
-6. **团目录既有操作**：见 3.2 的 restrict 与测试。
+1. **错数**：对外只说「公司确认」；每单可点开看发票号；来源缺失一律按待核实；`party_size` 空不当 1；剩余用保守算法；未归属人数单列并提示；同一发票号在有效订单里只能出现一次。
+2. **钱与外发**：本设计没有任何到 `me_sale_outcomes`/Meta 的路径；**不存金额**；不进邮件自动勾选、不进任何回传。
+3. **不往对外字段写座位**：上限只读内部座位；`max_group_size` 只读不写；适配器测试断言。
+4. **个人信息与权限**：页面名单制闸 + 取数接口各自同闸；号码/姓名不出现在进度页；导入原件不进仓库；审计里发票号只存布尔。
+5. **改已上线表**：只加可空列 + CHECK + 部分唯一索引 + 触发器 + **新函数（不改现有函数签名）**；迁移先在沙盘重放；生产 apply 要 PM 同意；回滚 = 去掉新触发器/索引/新函数、还原审计函数、列留着或确认无数据后删。数据库触发器挡得住应用层和 service-role，挡不住数据库 owner（迁移/SQL 通道），那一层靠「生产写入必须 PM 同意/说导」。
+6. **与订单与付款窗口的边界**：本设计不改它的付款节点、提醒、自动勾选逻辑；只加两列和一个读页；加列的迁移 SQL 写完由它的作者复核。
 
 ## 7. Reuse Statement
 
-- 复用：`tour_catalog_departures`（只读引用）、`contacts`、CRM 页面鉴权、`me_conversion_audit` 的只增触发器写法、团目录的批次哈希/撤回思路（不复用其表）、付款邮件的发票号规则、今日待办的人工事项机制、#2212 的读信（第二步）。
-- 新增：通用订单表/事件/批次（platform-shared）；联结表与「占位口径」（CTS 专属，L4）。
-- 行业专属：无。客户专属：团名、发票号格式、占位口径。
-- shared runtime 有无客户名/ID/行业判断：无。
-- 决策时分类与落点一致性：决策为「通用订单 + CTS 专属联结」，实现落点按此，交付时对账。
+- 复用：`crm_bookings` 家族（订单、节点、审计、数据库函数）、`requireBookingAccess`、`booking-overview-*.ts` 分组逻辑、团目录出发日只读数据、`internal.capacity`。
+- 新增：给订单加来源与发票号两列（platform-shared，列名中性）；销售进度页外壳（通用，只认「销售单元」适配器）；「有效上限」共享纯函数；CTS 适配器与「公司确认」口径（L4，旅游词只在这里）。
+- 行业专属：无。客户专属：发票号格式（5 位数字）、团号、座位数字。
+- shared runtime 里有无客户名/ID/行业判断：无。
+- 决策时分类与落点一致性：决策为「复用既有订单家族 + 通用只读外壳 + CTS 适配器」，实现落点按此，交付时对账。
+- 层级判定：L1（既有 CRM/订单能力的扩展，证据只有 CTS 一家，按默认降级登记为候选，待 PM 一句「记」）。
 
-## 8. 需要 PM 回答的问题（一次一条，按顺序问）
+## 8. 与订单与付款窗口的约定，以及需要 PM 回答的问题
 
-**Q1（已答）：3 月四团第一版已订数据 —— PM 选「我先摸」，已由邮箱只读摸出草稿（本地 Dropbox，含客人信息，不进仓库），待 CTS 销售核对。**
-建议：请 CTS 销售给一张表（发票号、几个人、付款状态、客人电话或邮箱），（发票号格式已由邮箱摸底确定为 5 位数字，不用再要样本），我们预览给你看、你说「导」才写入。备选：我从邮箱只读摸一遍出草稿，再由销售核对（慢、会漏）。回 `销售给表` 或 `我先摸`。
+**已由对方窗口答复并确认（2026-10-13）**：①同意把来源 + `evidence_ref` 加在 `crm_bookings` 上（不放节点表；列名已按建议改为 `origin_kind`，对方知悉并无异议）；旧行允许 null，不回填；新列进审计；②9 单走它的数据库函数（先对到 `contact_id`，不直接写表、不绕审计），导入属 A 级先出方案；③`party_size` = 「这单占几个座位」，可空，空的单列「人数未填」不按 1 计；取消 = `status='cancelled'`；尾款是同一订单的 balance 节点；「另一批人」现在建不了第二张，不要私自放宽索引；④销售进度页同走 `requireBookingAccess`；它没有计划做座位/上限页。⑤它已落笔：审计与抹除一节、不含金额列的源码守卫测试（PR 2528）；因 PM 改为不要金额，它会把自己设计稿 §7.3 改回「不含金额」，守卫测试保留。
 
-后续（不一次抛）：Q2 对外只显示「公司确认」栏、「待核实」只内部看，是否同意；Q3 外部下单系统上线后谁是准的，现在上线了没有；Q4 汇总页除 ME 管理员外，CTS 销售要不要看；Q5 第三步要不要在客人抽屉里露一行证据；Q6 要不要加「直招/代理」一列。
+**我的技术取舍（不抛 PM）**：「另一批人」第一步用同一单把 `party_size` 加大 + 备注写明，不改唯一索引。
+
+**PM 的答复**：
+- Q2/Q2b（座位上限）：3/11、3/18、3/26 上限 20；上海周边团官方 18，按 18 算并标注，内部座位保持 20、不写生产库。
+- Q3（金额）：**PM 本人 2026-10-13 对订单与付款窗口说「不要金额」**，取代此前统筹转述的「要金额」。
+- Q5（谁看进度页）：「就这两个」（统筹转述，2026-10-13）：名单里现有 2 个邮箱 + ME 管理员，不扩名单。
+
+**后续（不一次抛）**：Q4 对外只显示「公司确认」栏、「客人自述/待核实」只内部看，是否同意；Q6 外部下单系统上线后谁是准的；Q7 订单要不要也存「报价」。
 
 ## 9. 已知缺口（诚实声明）
 
-- 生产库数字（34 行出发日、677 行成交、21 位已付、14 位补标）是我读到的，未经第二人核对。
-- 「公司确认」的盖章：本稿定为「导入人对整批声明 + PM 说『导』」，**不是逐行销售确认**；销售给的表算 `company_confirmed`，邮箱摸出的草稿一律 `staff_entered` 不得升级。
-- 1 位客人邮箱里找不到付款确认，需 CTS 销售核实；该单不进「公司确认」，保持待核实，并进待办。
-- 客人要求删除个人信息时订单怎么处理（订单只存 contact_id；事件不含个人信息；订单本身属业务记录，是否随联系人一起匿名化）：第二步前定。
-- 联系人合并后订单迁移：第二步前定。库里已有的「同一个人两个 id」仍可各挂一单，绕过「同客人同团一条」；汇总页「待判断」区顺带按发票号提示同团重复。
-- 数据库 owner 层面的防篡改只靠流程，见 3.4。
-- 本稿没有核对：CTS 是否还有 3 月以外已售团需要同批录入（Q1 回答时一并问）。
+- `crm_bookings` 现在 0 行：进度页第一版上线时全部是「还没人录」，要等 1c 导入（需 CTS 销售核对 + PM 说「导」）才有数。
+- 生产库数字（出发日 34 行、`internal.capacity` 23 个为 20、3 月四团均 20、`crm_bookings` 0 行、`crm_booking_members` 2 行）是我读到的，未经第二人核对。
+- 迁移 SQL 还没写：方向性设计；v0.9 复用方案已过第四轮两审；v1.1 的金额部分已撤，**撤掉金额后的 v1.2 没有新增风险面，未再做复审**（只是删除了已审过的金额内容）。迁移 SQL 写完要订单与付款窗口作者复核，PM 批准后才能 apply。
+- 「公司确认」口径：由导入时声明 + PM 说「导」决定，不是逐单销售确认。
+- 联系人合并后订单分叉、客人要求删除个人信息时订单怎么处理：沿用订单与付款窗口的既有处理，本设计不另造。
+- 3 月草稿里 9 单的核对（8 条问题）还在等 CTS 销售回复，最终数以回复为准。
+- 「团目录面板里看订了几单、定金/尾款各收几单」与「CRM 里看每位客人付款进度」由订单与付款窗口做，本设计只提供共享的「有效上限」读法；两边的座位口径是否一致，靠这个共享函数保证。
 
-## 10. 两审意见处理对照（第一轮）
+## 10. 复审记录（简）
 
-| 来源 | 要点 | 处理 |
-|---|---|---|
-| 子牙 M1 | 旅游外键写进共享表 | 采纳：外键只在联结表（CTS 专属） |
-| 子牙 M2 | 漏 `order_ref`/发票号提取 | 采纳：§2 写明；证据号同口径；拆清 item_label 与 evidence_ref |
-| 子牙 M3 / 魏征 M5 | 不复用团目录批次表 | 采纳：另建批次表，计划里无个人信息 |
-| 子牙 M4 | 金额/状态含义混 | 采纳：金额=总价且汇总页不显示；refunded 去掉走 cancelled |
-| 子牙 M5 / 魏征 M7 | A 级安全写清 | 采纳：§3.4 全 RLS、触发器、actor 非空、owner 层说明 |
-| 子牙建议 | `on_date` 删除；事件日志可后置 | 采纳删 `on_date`；**不采纳后置事件日志**——生产库记钱的 A 级表必须从第一天可回查，且改为自动触发器写 |
-| 魏征 M1 | 重复计人数 | 采纳：同客人同出发日唯一 + 定金尾款同行 |
-| 魏征 M2 | 无取消/更正路径 | 采纳：3.5 第 6 点；索引改只约束 active |
-| 魏征 M3 | 「公司确认」可被随意盖章 | 采纳：证据类型与发票号格式约束 + 批次声明 + PM 说「导」 |
-| 魏征 M4 | 跨表同客户 | 采纳：触发器强制 |
-| 魏征 M6 | restrict 与团目录撤回交互 | 采纳：3.2 |
-| 魏征 M8 | `--apply` 授权、原件处理 | 采纳：计划哈希绑定 + PM 说「导」；原件不落盘 |
-| 魏征 M9 | 与外部下单系统关系 | 采纳：§1，Q3 |
-| 魏征 M10 | 管道断头 | 采纳：3.5 第 7 点，进今日待办 |
-| 魏征建议 8 | 第一步偏大 | 部分采纳：砍超订提示和 3/27；其余是 A 级必需，保留 |
-| 魏征建议 10 | PM 话术术语多 | 采纳：加 §0「PM 版两句话」；术语集中在 §3 以下 |
+v0.2–v0.8（自建表）经子牙 + 魏征三轮；v0.9–v1.0 经第四轮（复用方案、加列、导入）：带条件通过，条件已并入；v1.1 经第五轮（金额）：带条件通过——**金额随 PM「不要金额」整块撤掉**，第五轮意见中与金额无关的结论（审计里发票号只存布尔、取消释放发票号、不许改旧函数签名等）已保留在本稿。完整的逐条处理对照在 git 历史各版里。**批准前不写代码、不改生产库。**
 
-## 11. 第二轮复审结果与处理
+## 11. 实现计划（草案；设计稿批准前不写进 `supabase/migrations`、不动库）
 
-魏征 Round 2：**带条件通过**，4 条必改 + 4 条建议，已全部并入（v0.3）：
+### 11.1 分三个 PR（各自过风险闸，按顺序）
 
-| 编号 | 要点 | 处理 |
-|---|---|---|
-| N1 | 发票号格式闸没有来源（付款邮件识别里没有 CTS 格式） | 采纳：格式来自真实样本，成为开工前置；没拿到前一律「待核实」；norm 算法明写并共用函数（§3.1） |
-| N2 | 一客人一团一条与「两批人」冲突 | 采纳：加 `party_no`；同客人同团第二张发票进待人判断，人选「尾款」或「另一批人」（§3.1） |
-| N3 | 联结表可改列、换团路径不明 | 采纳：联结表不许改任何列；换团 = 取消 + 重建同事务（§3.2） |
-| N4 | 计划哈希挡不住预览与写入之间世界变了 | 采纳：应用函数事务内重新校验并整批回滚，加测试（§3.5） |
-| S1 | 待办是代码不是配置、要绝对网址、「每批一条」判据 | 采纳：新增 pusher + 绝对网址 + 批次表两列（§3.5） |
-| S2 | 待人判断存哪里 | 采纳：计划里 `unresolved` 数组（§3.5） |
-| S3 | restrict 报错要翻译 | 采纳：应用层捕获，不改团目录 SQL（§3.2） |
-| S4 | actor 为空要拒绝 | 采纳（§3.4） |
+| PR | 内容 | 风险 | 谁写 | 前置 |
+|---|---|---|---|---|
+| **A 迁移** | 给 `crm_bookings` 加 `origin_kind`/`evidence_ref`、约束、索引、不可改触发器；新函数 `crm_booking_create_with_origin`；替换 `crm_booking_audit_booking` | **A**（改已上线表，apply 不可逆） | Claude Code 自写（例外②：A 级数据库函数，PR 里写原因） | 设计稿 PM 批准；订单与付款作者复核 SQL |
+| **B 销售进度页** | 适配器、「有效上限」共享函数、纯函数（剩余/三栏/未归属）、服务端页、取数函数、测试、入口卡片 | **A**（读客户订单、新页面、名单制鉴权） | DeepSeek 写（Claude 出指令 + 审 diff），鉴权由 Claude 复核 | PR A 的列在库里（列不存在时页面降级为「来源未标」，不报错） |
+| **C 导入工具** | 本地脚本：预览（只读联系人查找）→ PM 说「导」→ 应用（逐单 `create_with_origin` + `set_paid`）→ 撤回（`crm_booking_cancel`） | **A**（写订单） | DeepSeek 写，Claude 审 | PR A 已 apply；CTS 销售 8 条核对回复；PM 说「导」 |
 
-子牙 Round 2：**带条件通过**，7 条必改，已全部并入 v0.4（子牙同意不需要完整第三轮，只核对这 7 条）：
+### 11.2 文件清单（预计）
 
-| 编号 | 要点 | 处理 |
-|---|---|---|
-| 1 | 联结表部分索引引用不了订单 status | 采纳：联结表自带 `is_active`，触发器同步，订单只能 active→cancelled，联结表锁死（§3.2） |
-| 2 | norm 要连连字符一起去掉 | 采纳：写明算法与 SQL，共用函数，加测试（§3.1） |
-| 3 | 改数后「公司确认」仍保留；尾款发票不查重 | 采纳：`source` 不可改、改数自动降级、`paid_full` 必带证据并全客户查重（§3.1） |
-| 4 | 更正命令要做成数据库函数、缺单条新建 | 采纳：四个命令全做数据库函数，换团 = 取消 + 单条新建（§3.5） |
-| 5 | `resolveContact` 会在预览时建人改人 | 采纳：不调它，新写只读查找（§3.5） |
-| 6 | 计划哈希口径要在数据库里算 | 采纳（§3.5） |
-| 7 | 格式校验放不进 CHECK | 采纳：放 apply 函数（§3.1） |
-| 建议 | 取消订单仍挡团目录撤回、补 TRUNCATE 触发器、重复联系人缺口、联结 contact_id 由触发器拷贝、`imported/rolled_back` 事件分工 | 全部采纳（§3.2 / §3.4 / §9 / §3.5） |
+- **PR A**：`supabase/migrations/<时间戳>_crm_booking_origin_evidence.sql`（新）；`supabase/tests/crm_booking_origin_evidence.test.sql`（新，沙盘用）；`src/lib/crm/booking-http.ts`（`mapRpcError` 认识 `duplicate_evidence_ref`）+ 单测；台账卡。
+- **PR B**：`src/lib/crm/sales-progress/`（`units.ts`、`units-cts.ts`、`capacity.ts` 有效上限、`calc.ts`、`load.ts`、`types.ts`）；`src/app/dashboard/clients/[id]/sales-progress/page.tsx` + `_components/`；若有点开明细的取数接口：`src/app/api/clients/[id]/sales-progress/...`（每个自带 `requireBookingAccess`）；`__tests__`；客户首页入口卡片（`dashboard/clients/[id]/page.tsx` 一处）；台账卡。
+- **PR C**：`scripts/import-march-bookings.ts`（新，本地运行）+ 单测（打码、只读查找、失败停止、撤回幂等）；台账卡。
+- **不碰**：`booking-store-reads.ts` / `booking-overview-reads.ts` 的列清单；`tour-catalog/*`；`contacts` 写入路径；`me_sale_outcomes`。
 
-第三轮不做完整复审；若 PM 或统筹要求再审，只核对 §11 两张表里的 15 条。
-**批准前不写代码、不改生产库。**
+### 11.3 迁移（PR A）SQL 骨架（**草案，未写入仓库迁移目录、未执行**）
 
+```sql
+-- 1) 新列（全部可空，不重写表；旧行不回填）
+alter table public.crm_bookings
+  add column origin_kind text check (origin_kind in ('company_confirmed','customer_stated','staff_entered')),
+  add column evidence_ref text check (evidence_ref is null or (length(evidence_ref) between 3 and 40 and evidence_ref !~ '\s')),
+  add constraint crm_bookings_company_confirmed_needs_evidence
+    check (origin_kind is distinct from 'company_confirmed' or evidence_ref is not null);
+-- 2) 发票号唯一（取消不占号）
+create unique index crm_bookings_evidence_ref_active_uidx
+  on public.crm_bookings (client_id, evidence_ref) where evidence_ref is not null and status = 'active';
+-- 3) origin_kind / evidence_ref 建单后不可改的 BEFORE UPDATE 触发器（不拦 updated_at 触碰）
+-- 4) create or replace crm_booking_audit_booking（保持 crm_booking_clear_settings() 调用与 return 路径不变；
+--    created 事件加 origin_kind、has_evidence_ref；UPDATE 分支加两列 changed 判断）
+-- 5) 新函数 crm_booking_create_with_origin(...)；不动旧 crm_booking_create 的签名
+--    revoke all on function … from public, anon, authenticated; grant execute … to service_role;
+```
+发票号 5 位数字格式在**函数里**校验（CHECK 读不了客户配置）。
+
+### 11.4 沙盘重放方案（本机 Postgres，不碰生产）
+
+1. 按 `reference-local-postgres-replay-sandbox` 起本机 Postgres（手写 Supabase 桩）。
+2. 依次重放：团目录迁移 → `20261012200000_crm_booking_tracker.sql`（原样）→ 订单与付款作者的 `supabase/tests/crm_booking_tracker.test.sql`，**必须仍是 278 PASS**（基线）。
+3. 重放本迁移，再跑一遍 278 项（**必须全过**），再跑新增用例：旧 9 参 `crm_booking_create` 仍成功；`company_confirmed` 无发票号被拒；同一发票号取消后可重建、`active` 内不可重复；`origin_kind`/`evidence_ref` 建单后改写被拒；新函数 anon/authenticated 无执行权；`created` 审计事件含 `origin_kind` 与 `has_evidence_ref`，不含发票号原文；`duplicate_evidence_ref` 与 `duplicate_booking` 区分。
+4. 沙盘输出（PASS 数、失败为 0）原样贴进 PR「当场试跑」。生产 apply 由 PM 回「同意」后才执行，**回读核对**列、约束、索引、触发器、函数权限。
+5. **回滚**（迁移文件里同时带反向脚本，PM 批准 apply 时一并给）：去掉新触发器、新函数；还原审计函数为原版本（原文在原迁移里，保留逐字副本）；删新索引与新约束；列留着（可空，不影响旧行为）或确认无数据后删。
+
+### 11.5 PR B / PR C 的当场试跑方案
+
+- **PR B**：本机用合成的订单/出发日夹具起页面，截图贴 PR；生产上线后用只读核对「页面数字 = 数据库直接汇总」；因生产订单现为 0 行，首次上线页面是空的是预期，不算失败。
+- **PR C**：先对一个测试客户跑完整「预览→导→撤回→重导」；对 CTS 真数据只跑**预览**（打码输出），**写入必须 PM 在对话里说「导」**；导入后回读：9 单、人数合计、定金已收、催款名单未多出这 9 单、`me_sale_outcomes` 行数不变。
+
+### 11.6 费用与外发
+
+迁移、页面、导入都不花钱、不外发、不触达任何客人；没有新的定时任务（每周对账是第 2 步，另案）。
