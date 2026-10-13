@@ -27,3 +27,25 @@
 
 - **已公开的上海 `e8c5b66a`（10-06）封面是 7 位真实客人合影（脸清楚）**：PM 本人回「**留着**」，不动；**新内容仍不用客人正脸**。
 - **封面怎么挂到 Reel 上**：工厂能不能指定封面 74 号还没核实；核实前**不改工单、不在 Facebook 上手动换封面**，4 张封面先放着。
+
+## 四、10-14 新增：PM 撤下 5 条后的经验（写进下周规则）与替换稿
+
+**PM 看巡检员 18 行发前核对表后撤下 5 条**（#6 天门山 10/15 20:00、#8 豫园 10/16 13:00、#12「Suzhou to Shanghai」10/17 20:00、#13 胡同 10/18 08:30、#15 四城邀请 10/18 20:00）；其余 13 条整周放行。原因：画面与文字对不上或看不出是哪里（巡检员独立核对也认不出天门山、认不出胡同；#12 文字写苏州到上海、图却是杭州西湖亭台；#15 字折 4 行最长最靠下），以及 #8 是大雪街景却配 3 月出发的团。
+
+**四条经验（下周包起严格执行）**
+1. **图必须能让一个不认识的人一眼对上文字说的地方，认不出就别用**（天门山、胡同这类「像某处的局部」不用；标志性地标才用：外滩东方明珠、洪崖洞招牌、兵马俑、天坛祈年殿、长城）。
+2. **文字说 A 地，图就不能是 B 地**（说苏州就用苏州园林，不能拿杭州西湖凑）。
+3. **雪景不要配 3 月及以后出发的团**（四个 3 月团全部不用雪景）；雪景留给冬季团或冬季主题。冬季图库仍保留，只在冬季内容里用。
+4. **邀请句控制在 2 行内，位置别压到最下面**（邀请类文字块放在上中部，不压画面下半）。
+
+**替换稿（给下周包 10/19–10/25 用；本周这 5 条怎么撤由 84 号处理，我没动）**：位置 `~/Dropbox/MagicLab_Studio/CTS/output/stories-next-week-drafts/`；新版式：**不再整块压黑**，只在文字块后面做局部半透明托底，整体更亮，字位置各不相同（符合第一节规则 1、2）。
+
+| 文件 | 替换哪条 | 角色 | 图上文字 | 事实库依据 | 图片出处与「一眼认得出」 |
+|---|---|---|---|---|---|
+| `draft_A_nat_invite.png` | #6 天门山邀请 | 邀请 | Chongqing by night? Message us.（Natural China） | NAT-05 | Unsplash `e30DonUn83Y`（Chongqing）；画面里是「洪崖洞」招牌，一眼可认；无雪 |
+| `draft_B_boc_fact.png` | #8 豫园 | 事实 | The Bund, Shanghai（Best of China · Day 12） | BOC-08（D12 the Bund） | 库存素材 `v_bund_36546365` 截帧（东方明珠一眼可认）；夜景无雪 |
+| `draft_C_sh_invite.png` | #12 Suzhou to Shanghai | 邀请 | Visiting Suzhou? Message us.（Shanghai & Surroundings） | SH-03、SH-04 | Unsplash `Idmw1ePVUFE`（Suzhou 园林）；文字说苏州、图就是苏州 |
+| `draft_D_beijing_insp.png` | #13 胡同 | 灵感 | The Temple of Heaven（Day 2 · Best of China and A Tale of Two Cities） | 官网 BOC/Tale D2 Temple of Heaven | winter 库 `w_templeofheaven-spring_0xn9T2cEigE`（天坛祈年殿，晴空无雪）；一眼可认 |
+| `draft_E_boc_invite.png` | #15 四城邀请 | 邀请 | Four cities, one trip? Message us.（Best of China） | BOC-03 | winter 库 `w_terracotta_UqSNn_KoDA4`（兵马俑，一眼可认）；2 行、位置在上中部 |
+
+总览图（含与下周 Natural China Reel 封面对比）：`~/Dropbox/MagicLab_Studio/CTS/output/weekpack-2026-10-20/replacement-drafts-overview.jpg`。
