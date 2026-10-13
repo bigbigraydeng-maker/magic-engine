@@ -11,4 +11,4 @@ done_on: 2026-10-10
 done_ref: doc:docs/clients/cts/2026-10-10-shanghai-reel-v5-15s-brief-and-selfcheck.md
 ---
 PM 2026-10-10 03:48 UTC 在后台对 fa4fdd89 点通过。发布前四件事（素材出处记录、当天重抓官网价格、首评过苏东坡、措辞）已补齐，见文档第九节。
-通过即授权发布：每小时第 5 分钟的发布任务会领走。没有起广告，没有联系客户。
+【2026-10-11 更正】发布任务 2026-10-10 04:05 UTC 已领走，但因 Render 未设 FACTORY_PUBLISH_LIVE=true，只以草稿上传到 Facebook（video_state=DRAFT，/reel/（ID 见简报文档）/），**没有公开**；工单状态写 published 有误导性。转正需 PM 明确点头。没有起广告，没有联系客户。
