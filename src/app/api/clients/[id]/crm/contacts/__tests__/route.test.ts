@@ -17,7 +17,7 @@ vi.mock('@/lib/auth/client-access', () => ({
   requirePaidClientAccess: vi.fn(async () => ({ ok: true, user: { email: 'roman@example.com' } })),
 }))
 
-vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn(), rpc: vi.fn() } }))
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { GET } from '../route'
@@ -93,6 +93,9 @@ interface Recorded {
 let recorded: Recorded[]
 /** 排序扫描（不带 contact_id 的 .in）用的触点；默认就是 STALE_TOUCHES。 */
 let scanRows: Row[] | null = null
+/** 数据库函数的假返回；null = 函数还没装（报错，路由要退回老路径）。 */
+let rpcRows: Array<{ id: string; total: number }> | null = null
+let rpcCalls: Array<Record<string, unknown>> = []
 
 /**
  * 假 builder。链式方法都返回自己，`then` 让它可 await。
@@ -162,6 +165,13 @@ beforeEach(() => {
   resetBriefCacheForTests()
   recorded = []
   scanRows = null
+  rpcRows = null
+  rpcCalls = []
+  ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (_name: string, args: Record<string, unknown>) => {
+    rpcCalls.push(args)
+    if (rpcRows === null) return { data: null, error: { message: 'function crm_contacts_page_by_latest_touch does not exist' } }
+    return { data: rpcRows, error: null }
+  })
   BRIEF_ROWS.conversations = []
   BRIEF_ROWS.conversation_briefs = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(fakeDb)
@@ -241,6 +251,65 @@ describe('GET contacts — 分页形状', () => {
     await get('client-a', '?page=1&perPage=1&stage=quoted')
     const fullIdList = recorded.filter((r) => r.table === 'contacts' && !r.countHead && !r.ins.some(([c]) => c === 'id'))
     expect(fullIdList.length).toBeGreaterThan(0)
+  })
+
+  describe('数据库函数路径', () => {
+    it('函数可用 → 用它返回的 id 顺序和总数，不再取全客户 id 列表也不扫触点', async () => {
+      rpcRows = [{ id: 'a3', total: 3 }, { id: 'a1', total: 3 }]
+      const { body } = await get('client-a', '?page=1&perPage=2')
+      expect((body.items as Array<{ contactId: string }>).map((r) => r.contactId)).toEqual(['a3', 'a1'])
+      expect(body.total).toBe(3)
+      const fullIdList = recorded.filter((r) => r.table === 'contacts' && !r.countHead && !r.ins.some(([c]) => c === 'id'))
+      expect(fullIdList).toHaveLength(0)
+      const scan = recorded.filter((r) => r.table === 'contact_touchpoints' && !r.ins.some(([c]) => c === 'contact_id'))
+      expect(scan).toHaveLength(0)
+    })
+
+    it('把筛选、搜索和翻页逐项交给函数', async () => {
+      rpcRows = [{ id: 'a1', total: 2 }]
+      await get('client-a', '?page=2&perPage=1&stage=quoted&q=Bob')
+      expect(rpcCalls[0]).toMatchObject({
+        p_client_id: 'client-a',
+        p_stages: ['quoted'],
+        p_q: 'Bob',
+        p_limit: 1,
+        p_offset: 1,
+      })
+    })
+
+    it('没有筛选时 p_stages / p_q 是 null（不是空数组或空串）', async () => {
+      rpcRows = [{ id: 'a1', total: 3 }]
+      await get('client-a', '?page=1&perPage=100')
+      expect(rpcCalls[0]).toMatchObject({ p_stages: null, p_q: null, p_in_ids: null, p_not_in_ids: null })
+    })
+
+    it('函数还没装上（报错）→ 退回老路径，页面照样 200 且按触点排序', async () => {
+      rpcRows = null
+      scanRows = [{ contact_id: 'a1', occurred_at: '2026-10-14T01:00:00.000Z' }]
+      const { status, body } = await get('client-a', '?page=1&perPage=100')
+      expect(status).toBe(200)
+      expect((body.items as Array<{ contactId: string }>)[0].contactId).toBe('a1')
+    })
+
+    it('翻过头时拿总数的那次调用出错 → 退回老路径，不悄悄报 0', async () => {
+      let n = 0
+      ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (_name: string, args: Record<string, unknown>) => {
+        rpcCalls.push(args)
+        n += 1
+        return n === 1 ? { data: [], error: null } : { data: null, error: { message: 'boom' } }
+      })
+      const { status, body } = await get('client-a', '?page=2&perPage=1')
+      expect(status).toBe(200)
+      expect(body.total).toBe(3) // 老路径的真实总数，不是 0
+    })
+
+    it('翻过头（这一页没有人）→ 再问一次第一页拿总数', async () => {
+      rpcRows = []
+      const { body } = await get('client-a', '?page=9&perPage=100')
+      expect(body.items).toEqual([])
+      expect(rpcCalls).toHaveLength(2)
+      expect(rpcCalls[1]).toMatchObject({ p_limit: 1, p_offset: 0 })
+    })
   })
 
   it('total 是符合筛选的全部人数，不受翻页影响', async () => {
