@@ -11,6 +11,8 @@ export const PM_CALENDAR_ID = 'hello@magicengine.cloud'
 export const CALENDAR_TIMEZONE = 'Pacific/Auckland'
 /** 只看开始日在 [今天-14天, 今天]（新西兰日期）内的事件 */
 export const WINDOW_DAYS = 14
+/** 超过 WINDOW_DAYS 的旧事项不再逐条核对，但最多回看这么多天，只数个数，不许悄悄消失 */
+export const STALE_LOOKBACK_DAYS = 60
 /** 每次最多核对多少条，其余顺延 */
 export const MAX_EVENTS_PER_RUN = 30
 
@@ -113,6 +115,8 @@ export interface ClassifyOutput {
   deferred: number
   /** 窗口内、到期（≤今天）的事件总数（含已 closed） */
   candidates: number
+  /** 超过 WINDOW_DAYS 天（至 STALE_LOOKBACK_DAYS 天）仍没闭环的旧事项个数，只计数 */
+  staleOpen: number
 }
 
 /** 写进 cron_run_logs.summary 的回执 */
@@ -131,6 +135,8 @@ export interface AuditReceipt {
   candidates: number
   processed: number
   deferred: number
+  /** 超过 14 天仍没闭环的旧事项个数（只计数，不逐条核对） */
+  stale_open: number
   results: EventResult[]
   /** 读日历/读台账失败的原因（status 不是 ok 时必填） */
   error: string | null

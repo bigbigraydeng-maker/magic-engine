@@ -103,6 +103,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
+  calendar_closure_overdue_summary: 'truth', // 日历到期没闭环的件数：「认一下」哪些真做了
   calendar_closure_calendar_unreadable: 'one_click', // 读不到 PM 日历：机器账号 / 日历共享要人点一次
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
@@ -125,6 +126,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   leads_metric_untrusted: 'client_side', // 客户统计后台的「关键事件」设置
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
   crm_important_due: 'client_side', // 客户员工约好的回电
+  phone_call_needs_review: 'client_side', // 电话没能自动记进客人档案，客户销售要看一眼是谁
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
   tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
 
