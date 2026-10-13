@@ -159,6 +159,7 @@ function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
         className={`min-w-0 lg:sticky lg:top-4 ${narrowDetail ? 'hidden lg:block' : ''}`}
       >
         <TourListPane
+          clientId={clientId}
           tours={snapshot.tours}
           departures={snapshot.departures}
           changedTourIds={preview?.changedTourIds ?? []}
