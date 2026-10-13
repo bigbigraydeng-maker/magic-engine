@@ -19,6 +19,11 @@ field() {
     | tr -d '\r' || true
 }
 
+# 同一个 PR 号在一次运行里只查一次（结果记在临时目录的文件里；pr_state 是在 $(...) 子进程里调的，
+# 不能用变量记）。查不到也记，免得同一个坏编号重复烧额度。
+CACHE_DIR="$(mktemp -d)"
+trap 'rm -rf "$CACHE_DIR"' EXIT
+
 # pr_state <n> —— 打印 open 或合并时间戳；查不到则非零退出；无凭据则打印 skip
 pr_state() {
   local n="$1"
@@ -26,7 +31,24 @@ pr_state() {
     echo "skip"
     return 0
   fi
-  gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.merged_at // "open"'
+  local cache="${CACHE_DIR}/pr-${n}"
+  if [[ -f "$cache" ]]; then
+    local cached
+    cached="$(cat "$cache")"
+    if [[ "$cached" == "__ERR__" ]]; then
+      return 1
+    fi
+    echo "$cached"
+    return 0
+  fi
+  local out
+  if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.merged_at // "open"')"; then
+    printf '%s' "$out" > "$cache"
+    echo "$out"
+    return 0
+  fi
+  printf '%s' "__ERR__" > "$cache"
+  return 1
 }
 
 # check_exists <file> <key> <ref> —— 按 kind 校验指针是否真实存在
@@ -84,6 +106,11 @@ check_exists() {
 }
 
 # ---- 1. 每张卡的指针都要真实存在 ----
+# PR 上下文里只核对「本 PR 新增/改动的卡」：已合并的旧卡在它们自己的 PR 里查过了，每个 PR 都把
+# 全库两百多张卡重查一遍，会把 CI 自带令牌每小时约 1000 次的额度烧光，之后所有 PR 的这项检查
+# （和同样要调接口的风险门、改动范围检查）一起变红，重跑只会烧得更快（2026-10-14 实测）。
+# 没有 PR 上下文（本机/定时任务），或设了 LEDGER_REFS_FULL=1，仍然全库核对。
+# 失败照旧是关的：改动的卡里有查不到的指针，一律红；接口超限时对改动卡也是红，不会误绿。
 all_cards=()
 for f in docs/ledger/*.md; do
   [[ -e "$f" ]] || continue
@@ -91,7 +118,19 @@ for f in docs/ledger/*.md; do
   all_cards+=("$f")
 done
 
-for f in "${all_cards[@]}"; do
+cards_to_check=("${all_cards[@]}")
+if [[ -n "${BASE_SHA:-}" && -n "${HEAD_SHA:-}" && "${LEDGER_REFS_FULL:-}" != "1" ]]; then
+  cards_to_check=()
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    [[ "$f" =~ ^docs/ledger/[^/]+\.md$ ]] || continue
+    [[ "$(basename "$f")" == "README.md" ]] && continue
+    [[ -e "$f" ]] || continue
+    cards_to_check+=("$f")
+  done < <(git diff --name-only --diff-filter=AMR "$BASE_SHA...$HEAD_SHA" -- 'docs/ledger/*.md' || true)
+fi
+
+for f in "${cards_to_check[@]+"${cards_to_check[@]}"}"; do
   for key in source done_ref verified_ref; do
     val="$(field "$f" "$key")"
     if [[ -n "$val" ]]; then
@@ -164,4 +203,4 @@ if [[ "${#FAILS[@]}" -gt 0 ]]; then
   exit 1
 fi
 
-echo "ledger refs ok (${#all_cards[@]} cards)"
+echo "ledger refs ok (checked ${#cards_to_check[@]} of ${#all_cards[@]} cards)"
