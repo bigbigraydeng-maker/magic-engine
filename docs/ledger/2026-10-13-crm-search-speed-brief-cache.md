@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-13
 done_on: 2026-10-13
-done_ref: pr:pending
+done_ref: pr:2557
 source: session:1a85e0eb
 verify_by: 2026-10-20
 verify_how: 在全部客人页连续搜索，第二次起结果明显更快；AI 摘要抬升的意向在 30 秒内可能不是最新（可接受）
