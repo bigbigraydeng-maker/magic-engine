@@ -62,7 +62,7 @@ function montageProps() {
 }
 
 test('TEMPLATE_IDS lists the supported templates', () => {
-  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage'])
+  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage', 'datacard'])
 })
 
 test('isTemplateId accepts known ids and rejects others', () => {
