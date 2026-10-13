@@ -31,6 +31,7 @@ import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { orderContactIdsByLatestTouch, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
   extractCustomColumns,
   visibleCustomColumns,
@@ -231,6 +232,31 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
   return { tradeIds, staffIds }
 }
 
+/** 每批读多少条触点来排序；最多读几批（防止一个大客户把整张触点表翻一遍）。 */
+const TOUCH_SCAN_PAGE = 1000
+const TOUCH_SCAN_MAX_PAGES = 40
+
+const PAGE_CONTACT_COLUMNS =
+  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at'
+
+/** 按给定顺序取一页的人。`.in()` 一次最多 100 个 id（URL 长度），分批并行取后按原顺序拼回。 */
+async function loadContactsByIds(clientId: string, ids: string[]): Promise<ContactRow[]> {
+  if (ids.length === 0) return []
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100))
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId).in('id', chunk),
+    ),
+  )
+  const byId = new Map<string, ContactRow>()
+  for (const res of results) {
+    if (res.error) throw new Error(res.error.message)
+    for (const row of (res.data ?? []) as ContactRow[]) byId.set(row.id, row)
+  }
+  return ids.map((id) => byId.get(id)).filter((c): c is ContactRow => c !== undefined)
+}
+
 /**
  * 分页路径：只拉当前页的人 + 这些人的触点。
  *
@@ -274,45 +300,20 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
       }
     }
 
-    let countBuilder = supabaseAdmin
-      .from('contacts')
-      .select('id', { count: 'exact', head: true })
-      .eq('client_id', clientId)
-    if (filters.stages !== null) countBuilder = countBuilder.in('stage', filters.stages)
-    if (filters.orExpr !== null) countBuilder = countBuilder.or(filters.orExpr)
-    if (kindInIds !== null) countBuilder = countBuilder.in('id', kindInIds)
-    if (kindNotInIds !== null && kindNotInIds.length > 0) {
-      countBuilder = countBuilder.not('id', 'in', `(${kindNotInIds.join(',')})`)
-    }
-
-    let pageBuilder = supabaseAdmin
-      .from('contacts')
-      .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at')
-      .eq('client_id', clientId)
-    if (filters.stages !== null) pageBuilder = pageBuilder.in('stage', filters.stages)
-    if (filters.orExpr !== null) pageBuilder = pageBuilder.or(filters.orExpr)
-    if (kindInIds !== null) pageBuilder = pageBuilder.in('id', kindInIds)
-    if (kindNotInIds !== null && kindNotInIds.length > 0) {
-      pageBuilder = pageBuilder.not('id', 'in', `(${kindNotInIds.join(',')})`)
-    }
-
-    const [countRes, pageRes, stages] = await Promise.all([
-      countBuilder,
-      pageBuilder
-        // 🔴 2026-09-28 修：原来是 `.order('id', ...)`——`contacts.id` 是 UUID，
-        // 按它排等于按随机字符串排。第 1 页选出来的 20 个人跟"谁最近有动静"没有
-        // 任何关系，而页面上「最近联系 ↓」那个箭头只对**已经选出的这一页**做
-        // 客户端排序（page.tsx 注释自己写着「排序只对当前页生效」）——两层叠加，
-        // 效果是"挑 20 个近乎随机的人，把这 20 个人按最近联系排一下"，
-        // 今晚刚建档的 WhatsApp 测试联系人因此在 1026 人里怎么翻都翻不到。
-        // 改成按 `first_seen_at` 倒序：真正的"按最后一次接触排"要在每人身上先
-        // 算出跨渠道最新触点时间再排序，这份 SQL 目前是查完整批触点后在内存里
-        // 组装（见本文件头注），做不到"先排序再分页"——那是一次更大的改动
-        // （物化视图 / 缓存列），记进台账，不在这次一起做。`first_seen_at` 是
-        // 唯一已经在这次查询里、单调、不为空的时间列，至少让"今天刚进来的人"
-        // 能在默认视图里被看见，比随机排序找不到强。
-        .order('first_seen_at', { ascending: false })
-        .range((query.page - 1) * query.perPage, query.page * query.perPage - 1),
+    // 先取「符合筛选的全部人」的 id（几百到一两千行，只带 id 和首次进线时间），再按「最近有互动」排好序，
+    // 最后只把当前这一页的人取全。排序不能放在 SQL 里：「最近联系」是逐人对触点取最大值，
+    // 而 contacts.last_seen_at 不可信（生产里 721/1159 人比真实最新触点旧）。见 contact-touch-order.ts。
+    const [idRows, stages] = await Promise.all([
+      fetchAll<{ id: string; first_seen_at: string | null }>((from, to) => {
+        let b = supabaseAdmin.from('contacts').select('id, first_seen_at').eq('client_id', clientId)
+        if (filters.stages !== null) b = b.in('stage', filters.stages)
+        if (filters.orExpr !== null) b = b.or(filters.orExpr)
+        if (kindInIds !== null) b = b.in('id', kindInIds)
+        if (kindNotInIds !== null && kindNotInIds.length > 0) {
+          b = b.not('id', 'in', `(${kindNotInIds.join(',')})`)
+        }
+        return b.order('id', { ascending: true }).range(from, to)
+      }),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
           .from('client_pipeline_stages')
@@ -323,10 +324,27 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
       ),
     ])
 
-    if (countRes.error) throw new Error(countRes.error.message)
-    if (pageRes.error) throw new Error(pageRes.error.message)
-    total = countRes.count ?? 0
-    pageContacts = (pageRes.data ?? []) as ContactRow[]
+    const orderedIds = await orderContactIdsByLatestTouch({
+      contacts: idRows.map((r) => ({ id: r.id, firstSeenAt: r.first_seen_at })),
+      need: query.page * query.perPage,
+      pageSize: TOUCH_SCAN_PAGE,
+      maxPages: TOUCH_SCAN_MAX_PAGES,
+      fetchTouchPage: async (i) => {
+        const res = await supabaseAdmin
+          .from('contact_touchpoints')
+          .select('contact_id, occurred_at')
+          .eq('client_id', clientId)
+          .order('occurred_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(i * TOUCH_SCAN_PAGE, (i + 1) * TOUCH_SCAN_PAGE - 1)
+        if (res.error) throw new Error(res.error.message)
+        return (res.data ?? []) as TouchRowLite[]
+      },
+    })
+
+    total = orderedIds.length
+    const wantedIds = orderedIds.slice((query.page - 1) * query.perPage, query.page * query.perPage)
+    pageContacts = await loadContactsByIds(clientId, wantedIds)
     stageRows = stages
   } catch (err) {
     return NextResponse.json(

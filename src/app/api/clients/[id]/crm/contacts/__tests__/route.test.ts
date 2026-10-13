@@ -91,6 +91,8 @@ interface Recorded {
 }
 
 let recorded: Recorded[]
+/** 排序扫描（不带 contact_id 的 .in）用的触点；默认就是 STALE_TOUCHES。 */
+let scanRows: Row[] | null = null
 
 /**
  * 假 builder。链式方法都返回自己，`then` 让它可 await。
@@ -136,7 +138,11 @@ function fakeDb(table: string) {
         return resolve({ data: CONTACTS, count: null, error: null })
       }
       if (table === 'client_pipeline_stages') return resolve({ data: STAGES, error: null })
-      if (table === 'contact_touchpoints') return resolve({ data: STALE_TOUCHES, error: null })
+      if (table === 'contact_touchpoints') {
+        // 排序用的「最新触点」扫描没有 .in('contact_id', …)；取页用的有。
+        const isScan = !rec.ins.some(([col]) => col === 'contact_id')
+        return resolve({ data: isScan && scanRows !== null ? scanRows : STALE_TOUCHES, error: null })
+      }
       if (table === 'conversations' || table === 'conversation_briefs') {
         return resolve({ data: BRIEF_ROWS[table] ?? [], error: null })
       }
@@ -155,6 +161,7 @@ async function get(clientId: string, qs = '') {
 beforeEach(() => {
   resetBriefCacheForTests()
   recorded = []
+  scanRows = null
   BRIEF_ROWS.conversations = []
   BRIEF_ROWS.conversation_briefs = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation(fakeDb)
@@ -194,11 +201,35 @@ describe('GET contacts — 分页形状', () => {
    * 钉的是「排的是哪一列、朝哪个方向」——不是随便一个 `.order()` 调用就算过，
    * 按 `id` 升序、按 `first_seen_at` 升序都会让这条测试露出来。
    */
-  it('分页查询按 first_seen_at 倒序，不是按 id（UUID 排等于随机排）', async () => {
+  it('排序：先按真实触点时间扫（occurred_at 倒序），不再按 first_seen_at 或 id 分页', async () => {
     await get('client-a', '?page=1&perPage=20')
-    const contactsQuery = recorded.find((r) => r.table === 'contacts' && !r.countHead)
-    expect(contactsQuery?.orders).toContainEqual(['first_seen_at', { ascending: false }])
-    expect(contactsQuery?.orders.map((o) => o[0])).not.toContain('id')
+    const scan = recorded.find((r) => r.table === 'contact_touchpoints' && !r.ins.some(([c]) => c === 'contact_id'))
+    expect(scan?.orders).toContainEqual(['occurred_at', { ascending: false }])
+    // 取全客户 id 那条只为拿 id 和首次进线时间，用 id 排序保证 range 翻页稳定
+    const idQuery = recorded.find((r) => r.table === 'contacts' && !r.countHead && !r.ins.some(([c]) => c === 'id'))
+    expect(idQuery?.orders).toContainEqual(['id', { ascending: true }])
+  })
+
+  /**
+   * PM 2026-10-14：今天有新互动的老客人要自动排到最上面。老写法按 first_seen_at 分页，
+   * 老客人今天来了新消息也沉在后面。这里让 a1（最早进线）有最新的触点，它必须排第一。
+   */
+  it('今天有新互动的老客人排最前（不是按进线时间）', async () => {
+    scanRows = [
+      { contact_id: 'a1', occurred_at: '2026-10-14T01:00:00.000Z' },
+      { contact_id: 'a3', occurred_at: '2026-08-01T00:00:00.000Z' },
+    ]
+    const { body } = await get('client-a', '?page=1&perPage=100')
+    const order = (body.items as Array<{ contactId: string }>).map((r) => r.contactId)
+    expect(order[0]).toBe('a1')
+    expect(order.indexOf('a1')).toBeLessThan(order.indexOf('a3'))
+    expect(order.indexOf('a3')).toBeLessThan(order.indexOf('a2'))
+  })
+
+  it('total 是符合筛选的全部人数，不受翻页影响', async () => {
+    const { body } = await get('client-a', '?page=2&perPage=1')
+    expect(body.total).toBe(3)
+    expect(body.items).toHaveLength(1)
   })
 
   it('?perPage=10000 → clamp 到 500', async () => {
@@ -261,9 +292,10 @@ describe('GET contacts — 分段跟今天页共用形状（WP3 R3）', () => {
 describe('GET contacts — 筛选落到 SQL', () => {
   it('?stage=quoted&stage=deposit_paid → .in 收到两个值', async () => {
     await get('client-a', '?stage=quoted&stage=deposit_paid')
-    const contactQueries = recorded.filter((r) => r.table === 'contacts')
-    expect(contactQueries.length).toBeGreaterThan(0)
-    for (const q of contactQueries) {
+    // 取「符合筛选的全部人」的那条查询带筛选；按 id 取当前页的那条不需要（id 已经是筛过的）。
+    const filterQueries = recorded.filter((r) => r.table === 'contacts' && !r.ins.some(([c]) => c === 'id'))
+    expect(filterQueries.length).toBeGreaterThan(0)
+    for (const q of filterQueries) {
       expect(q.ins).toEqual(expect.arrayContaining([['stage', ['quoted', 'deposit_paid']]]))
     }
   })
