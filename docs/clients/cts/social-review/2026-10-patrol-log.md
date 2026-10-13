@@ -330,3 +330,22 @@
 
 互动：4 条公开 Reel 赞 2 / 0 / 1 / 0，评论各 1（均为自家首评），分享数接口不返回。n=4，样本太少不下结论。
 
+### 「没有互动读数」的根因查实（10/14 10:10，只读；74 号要求）
+
+**结论：问题不在「手工转公开」这一步，而在更上游。草稿上传时动作行是写了的，但写的是「草稿」，之后转公开它不会更新；读数接线看到「草稿」就跳过。所以只要线上是草稿模式，任何一条 Reel 都接不上读数。**
+
+| 查了什么 | 结果 | 证据 |
+|---|---|---|
+| 草稿上传时发布程序有没有写动作行 | **写了** | `flywheel_actions` 里 5 条工单各有 1 行，类型 `factory_reel_publish`（n=5：27 天团、上海常青版、上海 v5、BOC、Tale #1），写入时间就是各自上传时间 |
+| 这些行上记的状态 | 全是「草稿」 | 5 行的 `video_state` 都是 `DRAFT`，包括后来已公开的 4 条 |
+| `social.publish_post` 行 | 这 5 条一行都没有 | 74 号查到 CTS 这类行最后一条在 9 月 6 日；我按工单号和视频号全表搜，只搜到上面 5 行 `factory_reel_publish` |
+| 读数接线凭什么登记 | 回读 `factory_reel_publish` 行，要求行上 `video_state` 是 `PUBLISHED`，且公开时间与事件里的一致；不满足就返回 `not_published` 或 `published_at_mismatch`，不登记 | `src/lib/inngest/functions/factory-reel-measurement-adapter.ts` 的 `rebindFactoryReelAction` |
+| 动作行在哪写、转公开时改不改 | 只在上传那一刻写一次 | `src/lib/factory/publish/publish-worker.ts` 的 `writeThreeBooks`；转公开函数只改视频和工单回执，没有回写这一行（我读代码所见，未运行验证） |
+| 自动公开的那条（上海 v5）是否例外 | 不例外 | 它回执里有发布事件编号，但动作行同样是 `DRAFT`，同样没有读数 |
+
+**顺带两处不准的记录（只记录，不改）**
+- 这 5 条在上传成草稿当天，工作日志里就写了「已发到…」，当时其实只是草稿。
+- 10/05 那条（27 天团）的工作日志写的渠道名是别的客户的名字，疑似标签取错。
+
+台账卡 `2026-10-13-cts-reel-manual-promote-no-measurement` 的标题和判据已按 74 号要求改具体（用了改卡脚本的正式放行开关，留痕）。
+
