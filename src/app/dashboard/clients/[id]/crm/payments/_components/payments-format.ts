@@ -18,6 +18,20 @@ export function dateLabel(iso: string | null, today: string): string {
   return iso.slice(0, 4) === today.slice(0, 4) ? shortDate(iso) : `${Number(iso.slice(0, 4))}年${shortDate(iso)}`
 }
 
+/** Full date with the year, plus 「已过 N 天」 when it is already behind us: 2026年7月6日（已过 99 天）. */
+export function dueDateText(iso: string | null, today: string): string {
+  if (iso === null || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '—'
+  const [y, m, d] = iso.split('-').map(Number)
+  const days = daysBetween(iso, today)
+  const base = `${y}年${m}月${d}日`
+  return days !== null && days > 0 ? `${base}（已过 ${days} 天）` : base
+}
+
+/** 「5/7」: how many of the orders have this item paid. */
+export function ratioText(paid: number, orders: number): string {
+  return `${paid}/${orders}`
+}
+
 export function unitLabel(n: number): string {
   return `${n}单`
 }
