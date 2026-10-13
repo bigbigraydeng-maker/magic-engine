@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-13
 done_on: 2026-10-13
-done_ref: pr:pending
+done_ref: pr:2556
 source: session:1a85e0eb
 verify_by: 2026-10-20
 verify_how: 在全部客人页搜索框连续敲字，输入框不闪、不丢焦点；客人页上不再有「谁能用付款进度」；设置 → CRM 页签最下面有「权限：谁能看订单与付款进度」
