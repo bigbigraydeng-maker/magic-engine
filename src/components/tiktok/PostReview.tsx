@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { validateReview, type CreatorInfo, type PostReview, type Privacy } from '@/lib/tiktok/post-review'
-export function TikTokPostReview({ clientId, postId, videoUrl, caption, onSubmit, onClose }: {
-  clientId: string; postId: string; videoUrl: string; caption: string
+export function TikTokPostReview({ clientId, postId, videoUrl, caption, creatorEndpoint, onSubmit, onClose }: {
+  clientId: string; postId: string; videoUrl: string; caption: string; creatorEndpoint?: string
   onSubmit: (review: PostReview) => Promise<void>; onClose: () => void
 }) {
   const [creator, setCreator] = useState<CreatorInfo | null>(null)
@@ -12,13 +12,13 @@ export function TikTokPostReview({ clientId, postId, videoUrl, caption, onSubmit
   const [review, setReview] = useState<PostReview>({ accountId:'',videoSha256:'',videoUrl,privacy: '' as Privacy, caption, allowComment:false, allowDuet:false, allowStitch:false, ownBrand:false, brandedContent:false, musicConsent:false, confirmed:false, durationSeconds:0 })
   useEffect(() => {
     let active = true
-    fetch(`/api/clients/${clientId}/tiktok/creator?post_id=${encodeURIComponent(postId)}`, { cache:'no-store' }).then(async r => {
+    fetch(creatorEndpoint ?? `/api/clients/${clientId}/tiktok/creator?post_id=${encodeURIComponent(postId)}`, { cache:'no-store' }).then(async r => {
       const data = await r.json()
       if (!r.ok) throw new Error(data.error || '无法读取 TikTok 账号')
       if (active) { setCreator(data); setReview(v => ({ ...v, accountId:data.accountId,videoSha256:data.videoProof?.sha256 ?? '' })) }
     }).catch(e => { if (active) setError(e.message) })
     return () => { active = false }
-  }, [clientId, postId])
+  }, [clientId, postId, creatorEndpoint])
   function set(key: keyof PostReview, value: boolean | number | string) { setReview(v => ({ ...v, [key]: value })) }
   async function submit() {
     if (!creator) return

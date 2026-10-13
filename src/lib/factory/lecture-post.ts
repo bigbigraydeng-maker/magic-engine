@@ -68,7 +68,10 @@ export interface LecturePublished {
 export interface LecturePublishRequest {
   platform: 'facebook' | 'tiktok'
   tiktokReview?: PostReview
-  status: 'pending' | 'sending' | 'done' | 'failed'
+  status: 'pending' | 'sending' | 'processing' | 'done' | 'failed'
+  /** Persist before the first upload byte; retries query this task instead of creating another. */
+  tiktokPublishId?: string
+  tiktokAccountId?: string
   /**
    * true = 这一条要真的公开发出去;不填 = 只发草稿(主页后台可见、公众看不到)。
    *
@@ -212,6 +215,17 @@ export async function setPublishRequest(params: {
   request: LecturePublishRequest | null
 }): Promise<void> {
   await patchSnapshot(params.clientId, params.postId, { lecture_publish_request: params.request })
+}
+
+/** Compare-and-set the exact snapshot so concurrent workers cannot both claim a send. */
+export async function claimLecturePublish(clientId: string, postId: string, snapshot: LecturePostRow['generation_context_snapshot'], request: LecturePublishRequest): Promise<boolean> {
+  const { data, error } = await supabaseAdmin.from('content_posts')
+    .update({ generation_context_snapshot: { ...snapshot, lecture_publish_request: request } })
+    .eq('client_id', clientId).eq('id', postId)
+    .eq('generation_context_snapshot', JSON.stringify(snapshot))
+    .select('id')
+  if (error) throw error
+  return Boolean(data?.length)
 }
 
 /** 记一条发布回执(追加，不覆盖——同一条片可能先发草稿再发公开)。 */

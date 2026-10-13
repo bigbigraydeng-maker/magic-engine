@@ -240,6 +240,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         const platform = body.platform === 'tiktok' ? 'tiktok' as const : 'facebook' as const
         let tiktokReview
         if (platform === 'tiktok') {
+          if (loaded.publishRequest?.tiktokPublishId || (loaded.publishRequest?.platform === 'tiktok' && loaded.publishRequest.startedAt)) return NextResponse.json({error:'已有 TikTok 执行记录，请先核验原任务，不能重新上传'},{status:409})
           try {
             const creator = await getTikTokCreatorInfo(params.id)
             const videoProof = await inspectTikTokVideo(loaded.post.source_video_url)

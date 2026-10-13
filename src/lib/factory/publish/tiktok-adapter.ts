@@ -112,6 +112,7 @@ export async function publishToTikTok(params: {
   caption: string
   privacy: TikTokPrivacy
   review?: PostReview
+  onInitialized?: (publishId: string, accountId: string) => Promise<void>
 }): Promise<TikTokPublishResult> {
   const token = await getValidTikTokToken(params.clientId)
   if (!token) throw new Error('这个客户还没连过 TikTok(access_token 取不到)')
@@ -152,6 +153,9 @@ export async function publishToTikTok(params: {
   if (!data.publish_id || !data.upload_url) {
     throw new Error(`TikTok init 没给上传地址: ${JSON.stringify(init)}`)
   }
+
+  // Persist the provider task before uploading; persistence failure must stop delivery.
+  await params.onInitialized?.(data.publish_id, token.openId)
 
   // 分块推过去。逐块从存储按 Range 取、立刻转发,不把整条片读进内存 ——
   // 一次性读进来正是之前把做片进程撑爆的原因(160MB 录像静默 OOM)。
@@ -206,9 +210,11 @@ export type TikTokPostStatus = 'processing' | 'published' | 'failed'
 export async function checkTikTokStatus(
   clientId: string,
   publishId: string,
+  expectedAccountId?: string,
 ): Promise<{ status: TikTokPostStatus; detail?: string }> {
   const token = await getValidTikTokToken(clientId)
   if (!token) throw new Error('这个客户还没连过 TikTok(access_token 取不到)')
+  if (expectedAccountId && token.openId !== expectedAccountId) throw new Error('TikTok 目标账号已改变，无法核验原发布任务')
   const json = await post('/post/publish/status/fetch/', token.accessToken, { publish_id: publishId })
   const data = (json['data'] ?? {}) as { status?: string; fail_reason?: string }
   const s = data.status ?? ''
