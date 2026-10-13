@@ -163,6 +163,13 @@ describe('storeHistoryChunks', () => {
     expect(rows()).toHaveLength(0)
   })
 
+  it('skips a message with NO `from` at all and never defaults to customer', async () => {
+    const chunks = [{ threads: [{ id: CUSTOMER, messages: [{ id: 'wamid.nofrom', timestamp: '1700000000' }] }] }]
+    const res = await storeHistoryChunks('client-1', { phoneNumberId: OUR_PNID }, chunks)
+    expect(res).toEqual({ stored: 0, skipped: 1 })
+    expect(rows()).toHaveLength(0)
+  })
+
   it('skips a thread whose id is our own number', async () => {
     const chunks = [
       {
