@@ -4,6 +4,8 @@ const creator: CreatorInfo = { videoProof:{sha256:'a'.repeat(64),durationSeconds
 const review: PostReview = { accountId:'test-account',videoUrl:'https://example.com/video.mp4',videoSha256:'a'.repeat(64),privacy:'SELF_ONLY',caption:'Original video',allowComment:false,allowDuet:false,allowStitch:false,ownBrand:false,brandedContent:false,musicConsent:true,confirmed:true,durationSeconds:12 }
 describe('TikTok post confirmation', () => {
   it('rejects changed media bytes at unchanged URL',()=>expect(()=>validateReview({...review,videoSha256:'b'.repeat(64)},creator,review.videoUrl)).toThrow('内容已改变'))
+  it('uses server duration despite harmless browser rounding',()=>expect(validateReview({...review,durationSeconds:12.8},creator).durationSeconds).toBe(12))
+  it('rejects authoritative server duration beyond account limit',()=>expect(()=>validateReview(review,{...creator,videoProof:{sha256:review.videoSha256,durationSeconds:31}})).toThrow('时长'))
   it('rejects browser duration inconsistent with server inspection',()=>expect(()=>validateReview({...review,durationSeconds:4},creator)).toThrow('时长'))
   it('rejects changed account',()=>expect(()=>validateReview({...review,accountId:'other-account'},creator)).toThrow('账号已改变'))
   it('rejects changed video before queuing or sending',()=>expect(()=>validateReview(review,creator,'https://example.com/replacement.mp4')).toThrow('成片已改变'))

@@ -6,7 +6,7 @@ import { publishToTikTok,checkTikTokStatus } from './publish/tiktok-adapter'
 import {runOneLecturePublish,selectPendingPublishes} from './lecture-publish'
 const request={platform:'tiktok' as const,status:'pending' as const,requestedAt:'2026-10-13',tiktokReview:{privacy:'SELF_ONLY'}}
 function load(req:unknown=request,published:unknown[]=[]) {
-  vi.mocked(loadLecturePost).mockResolvedValue({post:{source_video_url:'https://example.com/video.mp4',generation_context_snapshot:{lecture_publish_request:req}},lecture:{title:'Test'},publishRequest:req,published} as never)
+  vi.mocked(loadLecturePost).mockResolvedValue({post:{updated_at:'revision',source_video_url:'https://example.com/video.mp4',generation_context_snapshot:{lecture_publish_request:req}},lecture:{title:'Test'},publishRequest:req,published} as never)
 }
 beforeEach(()=>{vi.clearAllMocks();load();vi.mocked(claimLecturePublish).mockResolvedValue(true);vi.mocked(setPublishRequest).mockResolvedValue(undefined);vi.mocked(recordPublished).mockResolvedValue(undefined)})
 afterEach(()=>vi.unstubAllEnvs())

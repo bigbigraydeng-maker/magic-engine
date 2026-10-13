@@ -57,6 +57,7 @@ export function chunkRange(
 
 /** 把 TikTok 的报错翻成客户能行动的话。原始报错留日志给我们排查。 */
 export function humanTikTokError(raw: string): string {
+  if (/缺少 ffprobe/.test(raw)) return '发布服务缺少 ffprobe，请管理员配置视频核验依赖'
   if (/unaudited_client_can_only_post_to_private_accounts/i.test(raw)) {
     return 'TikTok 未审核应用只能向私密账号发片；账号本身需设为私密，同时视频选择仅自己可见。'
   }

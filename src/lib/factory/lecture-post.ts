@@ -102,6 +102,7 @@ interface LectureSnapshot {
 }
 
 export interface LecturePostRow {
+  updated_at: string
   id: string
   client_id: string
   title: string
@@ -140,7 +141,7 @@ export async function loadLecturePost(
 } | null> {
   const { data, error } = await supabaseAdmin
     .from('content_posts')
-    .select('id, client_id, title, status, platforms, source, source_video_url, format, generation_context_snapshot')
+    .select('id, client_id, title, status, platforms, source, source_video_url, format, generation_context_snapshot, updated_at')
     .eq('client_id', clientId)
     .eq('id', postId)
     .single()
@@ -217,12 +218,13 @@ export async function setPublishRequest(params: {
   await patchSnapshot(params.clientId, params.postId, { lecture_publish_request: params.request })
 }
 
-/** Compare-and-set the exact snapshot so concurrent workers cannot both claim a send. */
-export async function claimLecturePublish(clientId: string, postId: string, snapshot: LecturePostRow['generation_context_snapshot'], request: LecturePublishRequest): Promise<boolean> {
+/** Claim against the database-triggered revision; keep long scripts out of the query URL. */
+export async function claimLecturePublish(clientId: string, postId: string, snapshot: LecturePostRow['generation_context_snapshot'], request: LecturePublishRequest, updatedAt: string): Promise<boolean> {
+  if (!updatedAt) throw new Error('缺少发布版本，请重新加载')
   const { data, error } = await supabaseAdmin.from('content_posts')
     .update({ generation_context_snapshot: { ...snapshot, lecture_publish_request: request } })
     .eq('client_id', clientId).eq('id', postId)
-    .eq('generation_context_snapshot', JSON.stringify(snapshot))
+    .eq('updated_at', updatedAt)
     .select('id')
   if (error) throw error
   return Boolean(data?.length)

@@ -51,6 +51,7 @@ describe('chunkRange(字节区间必须严丝合缝盖满整条片)', () => {
 })
 
 describe('humanTikTokError', () => {
+  it('reports missing inspection dependency as a service problem',()=>expect(humanTikTokError('发布服务缺少 ffprobe，请管理员配置视频核验依赖')).toContain('缺少 ffprobe'))
   it('未过审说清「不是失败,是只有自己看得见」', () => {
     expect(humanTikTokError('unaudited_client_can_only_post_to_private_accounts'))
       .toContain('仅自己可见')

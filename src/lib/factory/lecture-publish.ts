@@ -114,7 +114,7 @@ export async function runOneLecturePublish(params: {
   if (!pending) return { postId, ok:false, error:'没有待发布请求' }
   if (platform === 'tiktok' && pending.status !== 'pending' && !pending.tiktokPublishId) return { postId, ok:false,error:'上次发布结果未确认，请先人工核验' }
   const request: LecturePublishRequest = { ...pending, platform, status:'sending', startedAt:new Date().toISOString() }
-  if (!await claimLecturePublish(clientId, postId, loaded.post.generation_context_snapshot, request)) return { postId,ok:false,error:'另一个任务已领取发布' }
+  if (!await claimLecturePublish(clientId, postId, loaded.post.generation_context_snapshot, request, loaded.post.updated_at)) return { postId,ok:false,error:'另一个任务已领取发布' }
 
   try {
     if (!loaded.post.source_video_url) throw new Error('还没有成片')

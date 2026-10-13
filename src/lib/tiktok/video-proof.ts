@@ -38,7 +38,14 @@ export async function inspectTikTokVideo(url: string): Promise<{ sha256: string;
         }
       }
     } finally { await reader.cancel().catch(() => {}); await handle.close() }
-    const { stdout } = await exec('ffprobe', ['-v','error','-protocol_whitelist','file,pipe','-show_entries','format=duration:stream=codec_type','-of','json',file], { timeout:30_000,maxBuffer:64*1024 })
+    let stdout: string
+    try {
+      const result = await exec('ffprobe', ['-v','error','-protocol_whitelist','file,pipe','-show_entries','format=duration:stream=codec_type','-of','json',file], { timeout:30_000,maxBuffer:64*1024 })
+      stdout = result.stdout
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('发布服务缺少 ffprobe，请管理员配置视频核验依赖')
+      throw error
+    }
     const info = JSON.parse(stdout) as {format?: {duration?: string};streams?: {codec_type?:string}[]}
     const durationSeconds = Number(info.format?.duration)
     if (!info.streams?.some(s => s.codec_type === 'video') || !Number.isFinite(durationSeconds) || durationSeconds <= 0) throw new Error('成片文件无法识别为有效视频')

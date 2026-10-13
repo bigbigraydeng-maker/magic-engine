@@ -8,21 +8,26 @@ import { getTikTokCreatorInfo, publishToTikTok, checkTikTokStatus, humanTikTokEr
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 interface Submission { status: string; privacy?: string; publishId?: string; accountId?: string; error?: string }
-interface Order { id: string; client_id: string; status: string; angle: string; output: Record<string, unknown> | null }
+interface Order { id: string; client_id: string; status: string; angle: string; updated_at: string; output: Record<string, unknown> | null }
 async function load(clientId: string, orderId: string): Promise<Order | null> {
-  const { data, error } = await supabaseAdmin.from('content_work_orders').select('id,client_id,status,angle,output').eq('id',orderId).eq('client_id',clientId).single()
+  const { data, error } = await supabaseAdmin.from('content_work_orders').select('id,client_id,status,angle,updated_at,output').eq('id',orderId).eq('client_id',clientId).single()
   if (error || !data) return null
   return data as Order
 }
 function video(order: Order) { return factoryVideoUrl(typeof order.output?.video_path === 'string' ? order.output.video_path : '', process.env.NEXT_PUBLIC_SUPABASE_URL!) }
 async function save(order: Order, state: Submission, claim = false) {
   const output = {...order.output, tiktok_publish:state}
-  let query = supabaseAdmin.from('content_work_orders').update({output}).eq('id',order.id).eq('client_id',order.client_id)
+  // Existing output writers (complete-work-order and Instagram store) explicitly advance
+  // updated_at. Follow the same CAS contract; a full output filter can exceed URL limits.
+  const previousMs = Date.parse(order.updated_at)
+  if (!Number.isFinite(previousMs)) throw new Error('工单版本缺失，请刷新后核对')
+  const updatedAt = new Date(Math.max(Date.now(), previousMs + 1)).toISOString()
+  let query = supabaseAdmin.from('content_work_orders').update({output,updated_at:updatedAt}).eq('id',order.id).eq('client_id',order.client_id).eq('updated_at',order.updated_at)
   if (claim) query = query.eq('status',order.status)
-  query = order.output === null ? query.is('output',null) : query.eq('output',JSON.stringify(order.output))
-  const {data,error} = await query.select('id')
+  const {data,error} = await query.select('id,updated_at')
   if (error || !data?.length) throw new Error('工单已更新或正在发布，请刷新后核对')
   order.output = output
+  order.updated_at = data[0].updated_at as string
 }
 type Context = {params:{id:string;orderId:string}}
 export async function GET(req: Request, {params}: Context) {

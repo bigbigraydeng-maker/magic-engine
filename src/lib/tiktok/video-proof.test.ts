@@ -1,13 +1,10 @@
 // @vitest-environment node
 import { readFile } from 'fs/promises'
-import { execFileSync } from 'child_process'
 import { createHash } from 'crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { inspectTikTokVideo } from './video-proof'
-let available = true
-try { execFileSync('ffprobe',['-version'],{stdio:'ignore'}) } catch { available = false }
 afterEach(()=>vi.unstubAllGlobals())
-describe.skipIf(!available)('actual video inspection',()=>{
+describe('actual video inspection',()=>{
   it('derives duration and identity from real MP4 bytes',async()=>{
     const bytes = await readFile(new URL('./__fixtures__/one-second.mp4',import.meta.url))
     vi.stubGlobal('fetch',vi.fn(async()=>new Response(bytes)))

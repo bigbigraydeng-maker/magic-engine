@@ -30,7 +30,7 @@ import {
 } from '@/lib/factory/lecture-post'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120 // redo_section / regen_script 要等 Claude
+export const maxDuration = 300 // redo_section / regen_script 要等 Claude
 
 const BUCKET = 'content-factory'
 

@@ -6,17 +6,21 @@ beforeEach(()=>{state.filters=[];state.rows=[];state.error=null;state.update.moc
 describe('atomic lecture publication claim',()=>{
   const snapshot={lecture_publish_request:{platform:'tiktok' as const,status:'pending' as const,requestedAt:'now'},unrelated:'preserved'}
   const request={...snapshot.lecture_publish_request,status:'sending' as const,startedAt:'now'}
-  it('compares the whole previous JSON snapshot and preserves other fields',async()=>{
+  it('compares the short database revision and preserves other fields',async()=>{
     state.rows=[{id:'p'}]
-    expect(await claimLecturePublish('c','p',snapshot,request)).toBe(true)
-    expect(state.filters).toEqual([['client_id','c'],['id','p'],['generation_context_snapshot',JSON.stringify(snapshot)]])
+    expect(await claimLecturePublish('c','p',snapshot,request,'revision')).toBe(true)
+    expect(state.filters).toEqual([['client_id','c'],['id','p'],['updated_at','revision']])
     expect(state.update).toHaveBeenCalledWith({generation_context_snapshot:{...snapshot,lecture_publish_request:request}})
   })
+  it('rejects absent revision before issuing a database update',async()=>{
+    await expect(claimLecturePublish('c','p',snapshot,request,'')).rejects.toThrow('缺少发布版本')
+    expect(state.update).not.toHaveBeenCalled()
+  })
   it('returns false when another writer has already changed the snapshot',async()=>{
-    expect(await claimLecturePublish('c','p',snapshot,request)).toBe(false)
+    expect(await claimLecturePublish('c','p',snapshot,request,'revision')).toBe(false)
   })
   it('does not treat database errors as successful claims',async()=>{
     state.error=new Error('database unavailable')
-    await expect(claimLecturePublish('c','p',snapshot,request)).rejects.toThrow('database unavailable')
+    await expect(claimLecturePublish('c','p',snapshot,request,'revision')).rejects.toThrow('database unavailable')
   })
 })
