@@ -10,6 +10,10 @@ export const MAX_ROWS = 7;
 export const MAX_HOOK_LINES = 2;
 /** Widest hook line (characters); longer lines would shrink below readable size. */
 export const MAX_HOOK_LINE_CHARS = 12;
+/** Widest label / sublabel / disclaimer (characters); the renderer shrinks the font so even all-capital text of this length fits one line. */
+export const MAX_LABEL_CHARS = 24;
+export const MAX_SUBLABEL_CHARS = 32;
+export const MAX_DISCLAIMER_CHARS = 48;
 /** Minimum WCAG contrast of body text on the background. */
 export const MIN_TEXT_CONTRAST = 4.5;
 /** Minimum WCAG contrast of the accent (values, bars) on the background. */
@@ -21,9 +25,9 @@ const hexColor = z.string().regex(HEX_COLOR, { message: '颜色必须是 #RRGGBB
 
 const ROW = z
   .object({
-    label: text(28),
+    label: text(MAX_LABEL_CHARS),
     value: text(14),
-    sublabel: text(44).nullable(),
+    sublabel: text(MAX_SUBLABEL_CHARS).nullable(),
     bar: z
       .number()
       .min(0, { message: '条形长度必须在 0 到 1 之间' })
@@ -65,7 +69,7 @@ export const DataCardPropsSchema = z
     barMode: z.enum(['none', 'bars', 'steps'], {
       message: 'barMode 只能是 none、bars 或 steps',
     }),
-    disclaimer: text(60),
+    disclaimer: text(MAX_DISCLAIMER_CHARS),
   })
   .strict()
   .superRefine((val, ctx) => {
@@ -80,14 +84,26 @@ export const DataCardPropsSchema = z
     if (textRatio < MIN_TEXT_CONTRAST) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['textColor'], message: `文字色与背景色对比度只有 ${textRatio.toFixed(1)}，至少需要 ${MIN_TEXT_CONTRAST}` });
     }
-    const accentRatio = contrastRatio(val.brandColor, val.bgColor);
+    // values and bars are drawn on the translucent card (textColor at 8% alpha), not on the bare background
+    const accentRatio = contrastRatio(val.brandColor, cardColor(val.bgColor, val.textColor));
     if (accentRatio < MIN_ACCENT_CONTRAST) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['brandColor'], message: `品牌色与背景色对比度只有 ${accentRatio.toFixed(1)}，至少需要 ${MIN_ACCENT_CONTRAST}` });
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['brandColor'], message: `品牌色与卡片底色对比度只有 ${accentRatio.toFixed(1)}，至少需要 ${MIN_ACCENT_CONTRAST}` });
     }
   });
 
 /** Inferred props type for the data-card template. */
 export type DataCardProps = z.infer<typeof DataCardPropsSchema>;
+
+/** Card fill (textColor at alpha 0x14 over bgColor) as #RRGGBB, matching how the renderer paints it. */
+export function cardColor(bg: string, fg: string): string {
+  const a = 0x14 / 255;
+  const mix = (o: number) => {
+    const b = parseInt(bg.slice(o, o + 2), 16);
+    const f = parseInt(fg.slice(o, o + 2), 16);
+    return Math.round(f * a + b * (1 - a)).toString(16).padStart(2, '0');
+  };
+  return `#${mix(1)}${mix(3)}${mix(5)}`;
+}
 
 /** WCAG relative luminance of a #RRGGBB colour. */
 function luminance(hex: string): number {

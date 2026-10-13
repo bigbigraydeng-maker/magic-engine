@@ -11,8 +11,15 @@ const LOGO_H = 70
 const ROWS_BOTTOM = 1160
 const DISCLAIMER_TOP = 1190
 const CHAR_W = 0.78
+// widest glyph (capital W at weight 900) per em; used so validated worst-case text still fits one line
+const WIDE_CHAR_W = 0.95
 const ROW_GAP = 12
 const CARD_PAD = 24
+
+/** Largest font size (px) at which `chars` worst-case-width characters fit in `width`. */
+function fitFont(width: number, chars: number) {
+  return Math.floor(width / (Math.max(1, chars) * WIDE_CHAR_W))
+}
 
 /** Compact (settled) hook font size and the scale that blows it up to centre stage. */
 function hookMetrics(props: DataCardProps) {
@@ -69,8 +76,8 @@ const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number }> 
   return (
     <div style={{ position: 'absolute', left: LEFT, width: WIDTH, top: layoutOf(props).rowsTop + index * rowH, height: rowH - ROW_GAP, fontFamily, color: props.textColor, background: `${props.textColor}14`, borderRadius: 18, opacity: Math.min(1, p * 2), transform: `translateX(${(1 - p) * 120}px)` }}>
       <div style={{ position: 'absolute', left: CARD_PAD, top: 0, bottom: row.bar !== null ? Math.round(16 * k) : 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', maxWidth: inner * 0.56 }}>
-        <div style={{ fontSize: Math.round(42 * k), fontWeight: 800, lineHeight: 1.1 }}>{row.label}</div>
-        {row.sublabel !== null ? <div style={{ fontSize: Math.max(22, Math.round(27 * k)), fontWeight: 600, opacity: 0.85, lineHeight: 1.15 }}>{row.sublabel}</div> : null}
+        <div style={{ fontSize: Math.min(Math.round(42 * k), fitFont(inner * 0.56, row.label.length)), fontWeight: 800, lineHeight: 1.1, whiteSpace: 'nowrap' }}>{row.label}</div>
+        {row.sublabel !== null ? <div style={{ whiteSpace: 'nowrap', fontSize: Math.min(Math.max(22, Math.round(27 * k)), fitFont(inner * 0.56, row.sublabel.length)), fontWeight: 600, opacity: 0.85, lineHeight: 1.15 }}>{row.sublabel}</div> : null}
       </div>
       <div style={{ position: 'absolute', right: CARD_PAD, top: 0, bottom: row.bar !== null ? Math.round(16 * k) : 0, display: 'flex', alignItems: 'center', fontSize: valueFont, fontWeight: 900, color: props.brandColor, whiteSpace: 'nowrap' }}>{row.value}</div>
       {row.bar !== null ? (
@@ -96,7 +103,7 @@ export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
           <Row props={props} index={i} rowFrames={timing.rowFrames} />
         </Sequence>
       ))}
-      <div style={{ position: 'absolute', left: LEFT, width: WIDTH, top: DISCLAIMER_TOP, textAlign: 'center', fontFamily, fontSize: 26, fontWeight: 600, color: props.textColor, opacity: 0.8, whiteSpace: 'nowrap' }}>{props.disclaimer}</div>
+      <div style={{ position: 'absolute', left: LEFT, width: WIDTH, top: DISCLAIMER_TOP, textAlign: 'center', fontFamily, fontSize: Math.min(26, fitFont(WIDTH, props.disclaimer.length)), fontWeight: 600, color: props.textColor, opacity: 0.8, whiteSpace: 'nowrap' }}>{props.disclaimer}</div>
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )

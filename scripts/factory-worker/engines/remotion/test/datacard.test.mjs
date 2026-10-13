@@ -63,7 +63,7 @@ describe('datacard schema', () => {
   test('text fields reject empty, control characters and over-length', () => {
     rejects((p) => { p.rows[0].label = '  ' })
     rejects((p) => { p.rows[0].value = 'x\u0007' })
-    rejects((p) => { p.disclaimer = 'x'.repeat(61) })
+    rejects((p) => { p.disclaimer = 'x'.repeat(49) })
     rejects((p) => { p.rows[0].value = 'x'.repeat(15) })
   })
 
@@ -144,4 +144,11 @@ describe('datacard registry wiring', () => {
     const listRaw = JSON.parse(fs.readFileSync(new URL('../examples/sydney-apartment.props.json', import.meta.url), 'utf8'))
     assert.throws(() => loadTemplate('datacard', listRaw))
   })
+})
+
+test('accent contrast is judged on the translucent card colour', async () => {
+  const { cardColor, parseDataCardProps } = await import('../src/datacard.ts')
+  const base = JSON.parse((await import('node:fs')).readFileSync(new URL('../examples/fictional-datacard.props.json', import.meta.url), 'utf8'))
+  assert.equal(cardColor('#000000', '#FFFFFF'), '#141414')
+  assert.throws(() => parseDataCardProps({ ...base, bgColor: '#000000', textColor: '#FFFFFF', brandColor: '#5A5A5A' }), /卡片底色/)
 })

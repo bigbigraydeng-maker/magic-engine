@@ -42,6 +42,13 @@ export interface LoadedTemplate {
   recipeGaps?: RecipeGap[];
 }
 
+/** Footage-based recipe columns a pure data card can never satisfy (it has no shots); reported on every render. */
+const DATACARD_RECIPE_GAPS: RecipeGap[] = [
+  { column: '真人出镜/自拍感', status: '未满足', reason: '数据卡没有镜头素材，无真人画面' },
+  { column: '真实感', status: '未满足', reason: '数据卡没有自有实拍素材' },
+  { column: '航拍/空镜', status: '未满足', reason: '数据卡没有航拍或空镜画面' },
+];
+
 /** Parse and validate input for a template, returning everything the renderer needs. */
 export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
   if (id === 'list') {
@@ -61,6 +68,7 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
       props,
       assetFiles: collectDataCardAssetFiles(props),
       totalFrames: computeDataCardTiming(props).totalFrames,
+      recipeGaps: DATACARD_RECIPE_GAPS,
     };
   }
   const props = parseMontageReelProps(input);
