@@ -6,7 +6,7 @@
  */
 
 import type { OverviewGroup, OverviewTotals } from '@/lib/crm/booking-overview-types'
-import { dateLabel, groupTitle, unitLabel, unsettledText, warningText } from './payments-format'
+import { dueDateText, groupTitle, ratioText, warningText } from './payments-format'
 
 const CELL_CLASS = 'px-3 py-2 text-right align-top tabular-nums'
 const HEAD_CLASS = 'px-3 py-2 text-right align-bottom text-xs font-black text-me-charcoal/70'
@@ -83,22 +83,42 @@ function GroupRowLabel({ group, selected, onSelect }: GroupRowProps) {
   )
 }
 
-/** One body row: the label cell plus the six count cells. */
-function GroupRow({ group, selected, today, onSelect }: GroupRowProps) {
+/** Row colour: red tint when something is overdue, green tint when every order is fully paid. */
+function rowTone(group: OverviewGroup, selected: boolean): string {
+  if (selected) return 'cursor-pointer bg-me-ochre/10'
+  if (group.unsettledOverdue > 0) return 'cursor-pointer bg-[#C2453A]/8'
+  const allPaid =
+    group.orders > 0 && group.unsettled === 0 && group.depositPaid === group.orders && group.balancePaid === group.orders
+  return allPaid ? 'cursor-pointer bg-[#456F35]/10' : 'cursor-pointer'
+}
+
+/** 「未收齐」: the count, with the overdue part in red so it cannot be missed. */
+function UnsettledCell(props: { unsettled: number; overdue: number }): JSX.Element {
   return (
-    <tr
-      onClick={() => onSelect(selected ? null : group.key)}
-      className={selected ? 'cursor-pointer bg-me-ochre/10' : 'cursor-pointer'}
-    >
+    <>
+      {props.unsettled}
+      {props.overdue > 0 ? (
+        <span className="ml-1 font-black text-[#C2453A]">{`（${props.overdue} 已过期）`}</span>
+      ) : null}
+    </>
+  )
+}
+
+/** One body row: the label cell plus the six cells. Items are 「已收/总数」 so progress reads at a glance. */
+function GroupRow({ group, selected, today, onSelect }: GroupRowProps) {
+  const due = group.nearestDueOn
+  const duePast = due !== null && due < today
+  return (
+    <tr onClick={() => onSelect(selected ? null : group.key)} className={rowTone(group, selected)}>
       <GroupRowLabel group={group} selected={selected} today={today} onSelect={onSelect} />
-      <td className={CELL_CLASS}>{unitLabel(group.orders)}</td>
-      <td className={CELL_CLASS}>{unitLabel(group.depositPaid)}</td>
-      <td className={CELL_CLASS}>{unitLabel(group.balancePaid)}</td>
-      <td className={CELL_CLASS}>{unsettledText(group.unsettled, group.unsettledOverdue)}</td>
-      <td className={CELL_CLASS}>{unitLabel(group.offlineHandled)}</td>
+      <td className={CELL_CLASS}>{group.orders}</td>
+      <td className={CELL_CLASS}>{ratioText(group.depositPaid, group.orders)}</td>
+      <td className={CELL_CLASS}>{ratioText(group.balancePaid, group.orders)}</td>
       <td className={CELL_CLASS}>
-        {group.nearestDueOn === null ? '—' : dateLabel(group.nearestDueOn, today)}
+        <UnsettledCell unsettled={group.unsettled} overdue={group.unsettledOverdue} />
       </td>
+      <td className={CELL_CLASS}>{group.offlineHandled}</td>
+      <td className={duePast ? `${CELL_CLASS} font-bold text-[#C2453A]` : CELL_CLASS}>{dueDateText(due, today)}</td>
     </tr>
   )
 }
@@ -161,13 +181,13 @@ export function SummaryTable(props: {
             <th scope="row" className="px-3 py-2 text-left align-top text-sm font-black">
               合计（上面当前显示的这几行相加）
             </th>
-            <td className={`${CELL_CLASS} font-black`}>{unitLabel(totals.orders)}</td>
-            <td className={`${CELL_CLASS} font-black`}>{unitLabel(totals.depositPaid)}</td>
-            <td className={`${CELL_CLASS} font-black`}>{unitLabel(totals.balancePaid)}</td>
+            <td className={`${CELL_CLASS} font-black`}>{totals.orders}</td>
+            <td className={`${CELL_CLASS} font-black`}>{ratioText(totals.depositPaid, totals.orders)}</td>
+            <td className={`${CELL_CLASS} font-black`}>{ratioText(totals.balancePaid, totals.orders)}</td>
             <td className={`${CELL_CLASS} font-black`}>
-              {unsettledText(totals.unsettled, totals.unsettledOverdue)}
+              <UnsettledCell unsettled={totals.unsettled} overdue={totals.unsettledOverdue} />
             </td>
-            <td className={`${CELL_CLASS} font-black`}>{unitLabel(totals.offlineHandled)}</td>
+            <td className={`${CELL_CLASS} font-black`}>{totals.offlineHandled}</td>
             <td className={CELL_CLASS} />
           </tr>
         </tfoot>

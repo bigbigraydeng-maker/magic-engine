@@ -53,7 +53,7 @@ function groupRow(name: RegExp): HTMLElement {
 }
 
 describe('付款总览 page rendering', () => {
-  it('renders the heading, every column header and the top table counts with the unit 单', async () => {
+  it('renders the heading, every column header and the top table counts as 已收/总数', async () => {
     stubFetch(() => json(200, makePayload()))
     renderPage()
 
@@ -65,20 +65,29 @@ describe('付款总览 page rendering', () => {
     }
 
     const rowA = groupRow(/2027-03-19 出发/)
-    expect(within(rowA).getByText('6单')).toBeTruthy()
-    expect(within(rowA).getByText('5单')).toBeTruthy()
-    expect(within(rowA).getByText('2单')).toBeTruthy()
-    expect(within(rowA).getByText('4单（1单已过期）')).toBeTruthy()
-    expect(within(rowA).getByText('1单')).toBeTruthy()
-    expect(within(rowA).getByText('12月19日')).toBeTruthy()
+    expect(within(rowA).getByText('6')).toBeTruthy()
+    expect(within(rowA).getByText('5/6')).toBeTruthy()
+    expect(within(rowA).getByText('2/6')).toBeTruthy()
+    expect(within(rowA).getByText('（1 已过期）')).toBeTruthy()
+    expect(within(rowA).getByText('1')).toBeTruthy()
+    expect(within(rowA).getByText('2026年12月19日')).toBeTruthy()
 
     const rowB = groupRow(/2026-11-02 出发/)
     expect(within(rowB).getByText('已出发')).toBeTruthy()
     expect(within(rowB).getByText('出发日变了，请确认')).toBeTruthy()
-    expect(within(rowB).getByText('8月05日')).toBeTruthy()
+    expect(within(rowB).getByText('2026年8月5日（已过 68 天）')).toBeTruthy()
 
     const rowUndecided = groupRow(/还没选出发日期/)
-    expect(within(rowUndecided).getByText('10月02日')).toBeTruthy()
+    expect(within(rowUndecided).getByText('2026年10月2日（已过 10 天）')).toBeTruthy()
+  })
+
+  it('tints overdue rows red and fully paid rows green, and shows overdue in red', async () => {
+    stubFetch(() => json(200, makePayload()))
+    renderPage()
+    await screen.findByRole('heading', { name: PAGE_HEADING })
+    const rowA = groupRow(/2027-03-19 出发/)
+    expect(rowA.className).toContain('bg-[#C2453A]/8')
+    expect(within(rowA).getByText('（1 已过期）').className).toContain('text-[#C2453A]')
   })
 
   it('shows a dash for a group whose nearest due date is unknown', async () => {
@@ -101,11 +110,11 @@ describe('付款总览 page rendering', () => {
     const table = await screen.findByRole('table', { name: '各出发日期的收款进度' })
     const footer = within(table).getByText('合计（上面当前显示的这几行相加）').closest('tr')
     if (footer === null) throw new Error('footer row not found')
-    expect(within(footer).getByText('10单')).toBeTruthy()
-    expect(within(footer).getByText('8单')).toBeTruthy()
-    expect(within(footer).getByText('3单')).toBeTruthy()
-    expect(within(footer).getByText('6单（3单已过期）')).toBeTruthy()
-    expect(within(footer).getByText('2单')).toBeTruthy()
+    expect(within(footer).getByText('10')).toBeTruthy()
+    expect(within(footer).getByText('8/10')).toBeTruthy()
+    expect(within(footer).getByText('3/10')).toBeTruthy()
+    expect(within(footer).getByText('（3 已过期）')).toBeTruthy()
+    expect(within(footer).getByText('2')).toBeTruthy()
 
     expect(screen.getByText('另有 2 个已出发且已收齐的出发日期没显示')).toBeTruthy()
     expect(screen.getByRole('button', { name: '也看已收齐的过去出发' })).toBeTruthy()
@@ -196,7 +205,7 @@ describe('付款总览 page rendering', () => {
     expect(await screen.findByRole('note')).toBeTruthy()
     expect(
       screen.getByText(
-        /另有 29 位客人的阶段已经是「已付定金」「已付全款」或「即将出行」，但一张订单都没有/,
+        /另有 29 位客人已付款（定金 \/ 全款 \/ 即将出行），但还没有订单/,
       ),
     ).toBeTruthy()
     cleanup()
