@@ -2,7 +2,7 @@
 id: 2026-09-27-kernel-arch-test-ci-seo-meta-exempt
 title: SEO 标题周循环有 3 个文件绕过内核、直接改客户网站仓库，先登记为临时例外；SEO 3b（B7）落地时必须清掉
 status: failed
-owner: pm
+owner: agent
 decided_on: 2026-09-27
 source: session:d1add426
 verify_by: 2026-10-11
