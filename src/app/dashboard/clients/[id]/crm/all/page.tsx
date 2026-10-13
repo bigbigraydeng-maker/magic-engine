@@ -715,17 +715,22 @@ export default function CrmAllContactsPage() {
         </div>
       )}
 
+      {/* 搜索框必须一直挂在页面上：之前它跟着下面那一大块一起被 `!loading` 包住，
+          每敲一个字、过 300ms 请求一发出，整块（含输入框）被卸载再重装，焦点丢了、
+          像「每打一个字页面就刷新一次」（PM 2026-10-13 录屏）。 */}
+      {!error && (
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 客户打回来了？按名字 / 电话 / 邮箱找他"
+          className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
+        />
+      )}
+
+      {!error && qError && <p className="text-xs font-semibold text-[#C2453A]">{qError}</p>}
+
       {!error && !loading && (
         <>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="🔍 客户打回来了？按名字 / 电话 / 邮箱找他"
-            className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
-          />
-
-          {qError && <p className="text-xs font-semibold text-[#C2453A]">{qError}</p>}
-
           {stages.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-xs text-me-charcoal/45">到哪一步了：</span>
