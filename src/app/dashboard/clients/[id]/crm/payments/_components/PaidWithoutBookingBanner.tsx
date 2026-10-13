@@ -32,18 +32,20 @@ export function PaidWithoutBookingBanner(
 
   return (
     <div role="note" className={WARNING_CLASS}>
-      <p>
-        {`⚠ 另有 ${total} 位客人的阶段已经是「已付定金」「已付全款」或「即将出行」，但一张订单都没有 —— 他们的付款在这页看不见，先给他们补录订单。`}
-      </p>
-      <button
-        type="button"
-        className={`${SECONDARY_BUTTON} mt-2`}
-        aria-expanded={expanded}
-        aria-controls={listId}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        看名单
-      </button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p>
+          {`⚠ 另有 ${total} 位客人已付款（定金 / 全款 / 即将出行），但还没有订单，付款在这页看不到。`}
+        </p>
+        <button
+          type="button"
+          className={`${SECONDARY_BUTTON} min-h-[32px] px-3 py-1 text-xs`}
+          aria-expanded={expanded}
+          aria-controls={listId}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? '收起名单' : '看名单'}
+        </button>
+      </div>
       {expanded ? (
         <ul id={listId} className="mt-2 max-h-72 overflow-y-auto">
           {rows.map((row) => (
