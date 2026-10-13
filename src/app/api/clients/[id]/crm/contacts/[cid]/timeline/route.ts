@@ -34,6 +34,27 @@ function cleanStr(v: unknown): string | null {
   return s ? s : null
 }
 
+interface CallAnalysisView {
+  id: string
+  summary: string
+  reviewStatus: 'pending_review' | 'confirmed' | 'rejected'
+  facts: { key: string; value: string; quote: string }[]
+}
+
+function asReviewStatus(v: unknown): CallAnalysisView['reviewStatus'] {
+  return v === 'confirmed' || v === 'rejected' ? v : 'pending_review'
+}
+
+function asFacts(v: unknown): CallAnalysisView['facts'] {
+  if (!Array.isArray(v)) return []
+  return v.flatMap((f) => {
+    const o = (f ?? {}) as Record<string, unknown>
+    return typeof o.key === 'string' && typeof o.value === 'string' && typeof o.quote === 'string'
+      ? [{ key: o.key, value: o.value, quote: o.quote }]
+      : []
+  })
+}
+
 type TimelineEntry =
   | {
       kind: 'touch'
@@ -83,6 +104,8 @@ type TimelineEntry =
       travelWindow: string | null
       callbackAt: string | null
       competitor: string | null
+      /** 这通电话的 AI 分析（电话接入的转写 + 提炼）。只读展示 + 人工复核；没有就不带。 */
+      callAnalysis?: CallAnalysisView
     }
   | {
       kind: 'message'
@@ -212,6 +235,26 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   const entries: TimelineEntry[] = []
 
+  // 电话触点上挂着的 AI 分析：按 client_id 收口，别人的分析编号塞进触点也读不到。
+  const analysisIds = [
+    ...new Set(
+      ((touches ?? []) as { metadata: Record<string, unknown> | null }[])
+        .map((t) => t.metadata?.call_analysis_id)
+        .filter((v): v is string => typeof v === 'string'),
+    ),
+  ]
+  const analyses = new Map<string, CallAnalysisView>()
+  if (analysisIds.length > 0) {
+    const { data: rows } = await supabaseAdmin
+      .from('telephony_call_analyses')
+      .select('id, summary, facts, review_status')
+      .eq('client_id', clientId)
+      .in('id', analysisIds)
+    for (const r of (rows ?? []) as { id: string; summary: string; facts: unknown; review_status: unknown }[]) {
+      analyses.set(r.id, { id: r.id, summary: r.summary, reviewStatus: asReviewStatus(r.review_status), facts: asFacts(r.facts) })
+    }
+  }
+
   for (const t of (touches ?? []) as {
     channel: string
     direction: 'inbound' | 'outbound'
@@ -247,6 +290,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       travelWindow: cleanStr(m.travel_window),
       callbackAt: cleanStr(m.callback_at),
       competitor: cleanStr(m.competitor),
+      callAnalysis: typeof m.call_analysis_id === 'string' ? analyses.get(m.call_analysis_id) : undefined,
     })
   }
 

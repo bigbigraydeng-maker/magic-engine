@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { CallAnalysisCard, type CallAnalysisData } from './CallAnalysisCard'
 import {
   describeStageActor,
   isAutomatedActor,
@@ -60,6 +61,8 @@ export interface TimelineEntry {
   travelWindow?: string | null
   callbackAt?: string | null
   competitor?: string | null
+  /** 这通电话的 AI 分析（只读展示 + 人工复核）。 */
+  callAnalysis?: CallAnalysisData
   // stage
   fromLabel?: string | null
   toLabel?: string | null
@@ -350,7 +353,7 @@ function Chips({ items }: { items: string[] }) {
 }
 
 /** 触点：电话 / 表单 / 以后的任何新渠道。判决那一档在这里加边加话。 */
-function TouchRow({ e }: { e: TimelineEntry }) {
+function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   const icon = CHANNEL_ICON[e.channel ?? ''] ?? '•'
   const name = CHANNEL_NAME[e.channel ?? ''] ?? e.channel ?? '接触'
   const chips = [
@@ -381,14 +384,15 @@ function TouchRow({ e }: { e: TimelineEntry }) {
       )}
       <Verdict e={e} />
       <Chips items={chips} />
+      {e.callAnalysis && <CallAnalysisCard clientId={clientId} analysis={e.callAnalysis} />}
     </div>
   )
 }
 
-function Row({ e }: { e: TimelineEntry }) {
+function Row({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   if (e.kind === 'message') return <MessageRow e={e} />
   if (e.kind === 'stage') return <StageRow e={e} />
-  return <TouchRow e={e} />
+  return <TouchRow e={e} clientId={clientId} />
 }
 
 /**
@@ -539,7 +543,7 @@ export function ContactTimeline({
         className={`space-y-2.5 ${long ? 'max-h-[52vh] overflow-y-auto pr-1' : ''}`}
       >
         {data.timeline.map((e, i) => (
-          <Row key={i} e={e} />
+          <Row key={i} e={e} clientId={clientId} />
         ))}
         {!!data.omittedMessages && (
           <p className="pt-1 text-center text-[10px] text-me-charcoal/30">
