@@ -156,6 +156,15 @@ export interface TouchpointLike {
    */
   action?: 'snooze' | 'unsnooze' | null
   /**
+   * 电话系统记录的「外呼没人接」（`channel=phone`、方向出站、`metadata.answered===false`）。
+   *
+   * 这一笔我们拨出去了、但**没有联系上客人**（PM 2026-10-12：不算已出手、不算真人跟进）。
+   * `segmentContact` 因此不把它算进「我们最后一次出站」，否则一个只被拨过一通没人接的
+   * 新线索会被当成「已联系过」，掉出「新线索还没碰」那一段。入站漏接（客人打进来我们没接）
+   * 不受影响：那是客人来找过我们。
+   */
+  unansweredCall?: boolean
+  /**
    * 这一笔从哪来的（`contact_touchpoints.source`）。
    *
    * 目前只有一个用处，但很要紧：判「电话线通不通」时要分得清
@@ -608,7 +617,7 @@ export function segmentContact(
   //
   // 行为信号不参与 lastInbound / lastOutbound / lastAny：它既不能让人升进
   // 「客户回话了」，也不该把「等了几天」重置成 0。它只在下面的点击规则里用。
-  const messages = tps.filter((t) => !t.engagement)
+  const messages = tps.filter((t) => !t.engagement && !t.unansweredCall)
   const lastInbound = Math.max(0, ...messages.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)))
   const lastOutbound = Math.max(0, ...messages.filter((t) => t.direction === 'outbound').map((t) => ts(t.occurredAt)))
 
@@ -796,6 +805,9 @@ export function segmentContact(
     if (days >= FRESH_LEAD_DAYS) {
       return make('handoff_sop', `进线 ${days} 天，一直没人联系过 —— 交给系统跟`, 'email')
     }
+    // 没有任何一条客人来信的时间（lastInbound 为 0，比如只有一个名字/号码的新建客人）时，
+    // 不能拿 0 当时间去算 —— 会算出「进线 20739 天」（从 1970 年起）。没有时间就不说时间。
+    if (lastInbound === 0) return make('new_untouched', '进线了，还没人联系', 'phone')
     return make('new_untouched', `进线 ${humanGap(nowMs - lastInbound)} 还没人联系`, 'phone')
   }
 
