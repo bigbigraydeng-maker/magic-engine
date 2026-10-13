@@ -112,3 +112,25 @@ PR 正文「## 当场试跑」逐项写：触发方式、时间、退出码、�
 
 ## 6. Reuse Statement（草稿）
 复用：现有 webhook 骨架（验签、`resolveClientId`、`upsertConversation` 的联系人解析、`storeMessage` 原样不动）、`conversation_messages`/`conversations`/`contact_touchpoints`、`send.ts` 的触点幂等键约定、今日待办 `infraPushers` 机制、`db-replay-and-verify.sh`。新增且平台共享：分类器、回声/状态处理、待认领表与未认领登记、待办 kind。行业专属：无。客户专属：只有表里的行（号码、客人号元数据），共享代码无任何客户名/ID。换客户测试：NAL 换成 CTS 或地产客户，共享代码不用改。落点与 tier-gate 决策（L3，挂 CRM）一致。
+
+## 7. 设计审查修订（子牙 + 魏征，2026-10-14，已并入；与前文冲突处以本节为准）
+
+**Meta 官方样例已核（developers.facebook.com 文档页，2026-10-14 读取）**：回声与历史的 `value.metadata.phone_number_id` 都在 `entry[].changes[].value.metadata` 下（所以现有「验签前选密钥」逻辑能取到号码，不会掉进环境密钥）；`history` 外层是 Meta 原生 `entry[].changes[]{field:'history', value:{messaging_product, metadata, history[]}}`（360dialog 的 `{id,event,data}` 包装不用管）；回声 `type` 取值含 `text/image/video/document/revoke/edit`；拒绝分享是扁平的 `{metadata, history:[{errors:[…]}]}`；文档里还有一个「媒体补发」例子，`messages` 直接放在 `value` 下、`field` 仍是 `history`（官方文档自己前后矛盾，上线前要用真实推送核）；**文档没有给出请求体大小上限**，只说一次可能数千条，建议先落盘再异步处理。
+
+1. **分类以 `field` 为准，冲突就拒**：`field='messages'` 只认 `messages[]` 与 `statuses[]`（二者各自独立处理，不因其中一个非空而跳过另一个）；`field='smb_message_echoes'` 只认 `message_echoes[]`；`field='history'` 只认 `history[]` 与「媒体补发」的 `messages[]`（后者归 history 类，不走客人通道）。任何一个 field 下出现别的类的数组 → 该数组忽略并计一次 `malformed`（固定文案日志），**绝不**当客人消息处理。其余未知 field（如 `smb_app_state_sync`）→ `ignored`。
+2. **malformed 的应答**：格式异常的项只写固定文案日志、不影响同一次投递里其他项的处理；本次投递能存的照存。整次投递是否回 200 仍由「有没有存失败」决定（沿用现有规则）。
+3. **history 在 PR2 上线前回 503（守卫）**：PR1 里分类到 `history` 的项，整次投递回 503 `history_not_enabled` 并计数，让 Meta 自己重投（历史只推一次，宁可让 Meta 重试，也不回 200 丢掉）；加测试。**订阅 `history` 字段的前提是 PR2 已上线**，写进 PR 与台账。
+4. **history 遇到无人认领号码 → 503 而不是 200**：因为绑定后重投能成功（与客人消息「无人认领回 200」不同）；同时登记未认领号码与下发待办，PM/FDE 绑好后 Meta 的重投自然入库。`whatsapp_history_inbox` 因此永远带有效 `client_id`（子牙 §3 的矛盾解决）。
+5. **回声的方向与号码校验**：`echo.to` 必须是纯数字且**不等于**我方号码（`display_phone_number` 的数字或 `phone_number_id`）；`echo.from` 必须等于我方号码（数字比对），否则跳过并计 `malformed`（不给我方号建会话）。回声 `type` 为 `revoke` / `edit` → 本轮**不入库**，只计数并写固定文案日志（撤回/编辑的语义归下一轮）。历史里方向无法判定（我方号缺失）→ 跳过并计数，不默认归客人。
+6. **回声写入的调用形状（子牙 §1）**：
+   - 先 `select('id,last_message_at').eq('client_id',..).eq('channel','whatsapp').eq('conversation_id',客人号).maybeSingle()`；
+   - 没有 → `upsert({client_id,channel:'whatsapp',conversation_id,participant_psid,contact_id?,last_message_at:sentAt,last_message_from:'page'},{onConflict:'client_id,conversation_id',ignoreDuplicates:true})`，再 `select id` 一次（冲突时返回 0 行，必须再取）；**新建时直接带初值**，不依赖后面的 `lt` 更新；
+   - 已有 → `update({last_message_at:sentAt,last_message_from:'page'}).eq('id',id).lt('last_message_at',sentAt)`（条件在数据库端，抗乱序；`last_message_at` 为空时 `lt` 不命中，所以会话本来就必有该字段）；
+   - `last_message_from='page'` 的语义：回声时间晚于客人最后一条消息 = 「我们已回」，这是预期；若回声早于客人最后一条（乱序），`lt` 不命中，保持 customer（正确）。
+   - 触点：回声与 `send.ts` 共用同一个幂等键 `${conversationId}:out`、同一行触点、只往前推时间——这是**预期**（同一个会话只保留最新一次我方回复时间）。
+7. **状态回调更严**：只处理 `failed`；先按 `(client_id, meta_message_id)` 取发送记录与其会话，**要求会话 `participant_psid == status.recipient_id`** 才更新；`error_message` 只写 `code` + `title`，不含 `recipient_id`；只从 `sent` → `failed`（延迟到的 delivered/read 本轮不存，所以不会被误判为失败）。
+8. **请求体上限**：`MAX_WEBHOOK_BODY_BYTES` 由 1MB 调到 5MB（Meta 文档无上限，历史一次可达数千条；仍保持有界）；PR1 里改 `app-secret.ts` 的常量并加边界测试。
+9. **§0.4 补漏**：`crm/today/route.ts:370` 把我方发出的触点算「今天已联系」→ 回声会让该客人从今天待办里消失（逻辑合理：员工已经回了）；`conversions/payment-email-detect-run.ts:228`、`crm/nal-messenger-lead-sync-run.ts:192` 读 `direction='outbound'` 消息 → 实施时逐处核对（只读核对，不改它们），结果写进 PR 的「已知影响」。
+10. **隐私**：`whatsapp_history_inbox` 存客人号（个人信息），本轮不做清理任务；PR2 里写明保留期由认领流程那一轮定，且表只存元数据；日志与待办里不出现客人号、不出现正文。
+11. **PR1 并不「零变化」**：PR1 会新增回声写入、failed 状态更新、history 的 503 守卫。对现有客户的影响：现状下回声/状态/历史本就没人订阅（订阅字段只有 messages），所以线上实际流量不变；订阅字段要等 PR 都上线后 56 号才打开。
+12. **补变异用例**：①`field=smb_message_echoes` 却带 `messages[]` → 不入客人通道；②`field=messages` 却带 `message_echoes[]` → 忽略并计数；③`echo.to` 等于我方号 → 跳过；④去掉 `ignoreDuplicates` → 并发重投用例（同一回声两次投递，只一行）；⑤去掉 `.lt(...)` → 乱序用例（先新后旧，时间不后退）；⑥history 守卫去掉 → history 必须回 503；⑦状态回调 `recipient_id` 不符 → 不更新；⑧回声不触发 Inngest、不写 inbound 触点、不改 `last_message_from` 为 customer。
