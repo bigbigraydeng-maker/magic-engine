@@ -81,37 +81,80 @@ export function latestBriefPerContact(
  * 在内存里按 conversation_id 连起来 —— 不用 `.in()`，免得 PostgREST URL 被几百个 id 撑爆。
  * 查询失败不抛：返回空 Map，列表照常显示，只是没有意向抬升（摘要是辅助信息，不能让整页打不开）。
  */
+async function loadBriefsOrThrow(clientId: string): Promise<BriefByContact> {
+  const convs = await fetchAll<{ id: string; contact_id: string | null }>((from, to) =>
+    supabaseAdmin
+      .from('conversations')
+      .select('id, contact_id')
+      .eq('client_id', clientId)
+      .not('contact_id', 'is', null)
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
+
+  const briefs = await fetchAll<{
+    conversation_id: string
+    intent_level: unknown
+    next_action: unknown
+    generated_at: string | null
+  }>((from, to) =>
+    supabaseAdmin
+      .from('conversation_briefs')
+      .select('conversation_id, intent_level, next_action, generated_at')
+      .eq('client_id', clientId)
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
+
+  return latestBriefPerContact(convs, briefs)
+}
+
+function logBriefFailure(clientId: string, err: unknown): void {
+  // 吞错但不哑：没这一行，真故障（例如 fetchAll 撞上限抛错）会变成「整页正常、全员无抬升」，
+  // 没人发现（子牙 2026-10-10 实施后复审）。响应里不带标记是为了不多一个字段，先靠日志。
+  console.error('[brief-lookup] load failed, falling back to no briefs', clientId, err instanceof Error ? err.message : err)
+}
+
 export async function loadLatestBriefByContact(clientId: string): Promise<BriefByContact> {
   try {
-    const convs = await fetchAll<{ id: string; contact_id: string | null }>((from, to) =>
-      supabaseAdmin
-        .from('conversations')
-        .select('id, contact_id')
-        .eq('client_id', clientId)
-        .not('contact_id', 'is', null)
-        .order('id', { ascending: true })
-        .range(from, to),
-    )
-
-    const briefs = await fetchAll<{
-      conversation_id: string
-      intent_level: unknown
-      next_action: unknown
-      generated_at: string | null
-    }>((from, to) =>
-      supabaseAdmin
-        .from('conversation_briefs')
-        .select('conversation_id, intent_level, next_action, generated_at')
-        .eq('client_id', clientId)
-        .order('id', { ascending: true })
-        .range(from, to),
-    )
-
-    return latestBriefPerContact(convs, briefs)
+    return await loadBriefsOrThrow(clientId)
   } catch (err) {
-    // 吞错但不哑：没这一行，真故障（例如 fetchAll 撞上限抛错）会变成「整页正常、全员无抬升」，
-    // 没人发现（子牙 2026-10-10 实施后复审）。响应里不带标记是为了不多一个字段，先靠日志。
-    console.error('[brief-lookup] load failed, falling back to no briefs', clientId, err instanceof Error ? err.message : err)
+    logBriefFailure(clientId, err)
+    return new Map()
+  }
+}
+
+/**
+ * 同上，但短时间内同一客户只查一次。搜索框每敲一个字都会触发一次名单请求，而这份
+ * 「全客户摘要」跟搜什么无关、占了请求里最长的一段（实测约 0.7 秒）。摘要只是辅助信息，
+ * 晚几十秒更新没有关系。失败不缓存（下一次请求重试），也不抛。
+ */
+const BRIEF_CACHE = new Map<string, { at: number; promise: Promise<BriefByContact> }>()
+
+export function resetBriefCacheForTests(): void {
+  BRIEF_CACHE.clear()
+}
+
+export async function loadLatestBriefByContactCached(
+  clientId: string,
+  maxAgeMs: number = 30_000,
+  now: () => number = Date.now,
+): Promise<BriefByContact> {
+  const hit = BRIEF_CACHE.get(clientId)
+  if (hit !== undefined && now() - hit.at < maxAgeMs) {
+    try {
+      return await hit.promise
+    } catch {
+      // the shared load failed; fall through and try once ourselves
+    }
+  }
+  const promise = loadBriefsOrThrow(clientId)
+  BRIEF_CACHE.set(clientId, { at: now(), promise })
+  try {
+    return await promise
+  } catch (err) {
+    if (BRIEF_CACHE.get(clientId)?.promise === promise) BRIEF_CACHE.delete(clientId)
+    logBriefFailure(clientId, err)
     return new Map()
   }
 }
