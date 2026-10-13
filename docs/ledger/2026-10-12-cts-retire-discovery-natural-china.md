@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-12
 done_on: 2026-10-12
-done_ref: pr:chinatravel#231
+done_ref: pr:2510
 source: session:1a85e0eb
 verify_by: 2026-10-19
 verify_how: 打开 https://www.ctstours.co.nz/tours/china/discovery/natural-china 应跳到 /tours/china/signature/landscapes；/tours/china/discovery 列表里没有它；ME 团目录里该团显示为停用
