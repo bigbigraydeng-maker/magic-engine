@@ -7,6 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { CallButton } from './CallButton'
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
@@ -312,6 +313,9 @@ export function PersonDrawer({
               >
                 📞 {row.phone}
               </a>
+            )}
+            {row.phone && !row.phoneUnusable && !row.doNotContact && (
+              <CallButton clientId={clientId} contactId={row.contactId} />
             )}
             {row.email && (
               <a

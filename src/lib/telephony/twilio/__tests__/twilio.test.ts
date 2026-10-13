@@ -30,11 +30,12 @@ function rig(c: TelephonyConnection = conn()) {
   const env = (n: string) => (n === SECRET_ENV ? SECRET : undefined)
   return {
     mem, emitted, now,
-    async post(kind: string, params: Record<string, string>, o: { sig?: string | null; connectionId?: string } = {}) {
+    async post(kind: string, params: Record<string, string>, o: { sig?: string | null; connectionId?: string; query?: string; signedQuery?: string } = {}) {
       const connectionId = o.connectionId ?? CONN
-      const url = `${BASE}/api/webhooks/twilio/${connectionId}/${kind}`
+      const path = `${BASE}/api/webhooks/twilio/${connectionId}/${kind}`
+      const url = `${path}${o.query ?? ''}`
       const body = new URLSearchParams(params).toString()
-      const signature = o.sig === undefined ? computeTwilioSignature(SECRET, url, parseForm(body) ?? {}) : o.sig
+      const signature = o.sig === undefined ? computeTwilioSignature(SECRET, `${path}${o.signedQuery ?? o.query ?? ''}`, parseForm(body) ?? {}) : o.sig
       return handleTwilioWebhook(mem.store, { connectionId, kind, url, baseUrl: BASE, signature, bodyText: body, env, now, emit: async (id) => { emitted.push(id) } })
     },
     async drain() { for (const id of emitted.splice(0)) await processRawEvent(mem.store, id, now, { quietMs: 0 }) },
@@ -293,5 +294,54 @@ describe('魏征第二轮补的防线（真实静默期下）', () => {
     expect([...r.mem.raw.values()][0].event.eventType).toBe('other')
     await r.drain()
     expect(touchpoints(r)).toHaveLength(0)
+  })
+})
+
+describe('点击外呼的回调', () => {
+  const OUT = { AccountSid: ACCOUNT, CallSid: 'CA1', Direction: 'outbound-api', From: '+6498000000', To: STAFF }
+  const CP = `?cp=${encodeURIComponent(CUSTOMER)}`
+
+  it('带验签后的客户号码：进 CRM，对方是客户、员工按分机表认出', async () => {
+    const r = rig()
+    r.mem.addContact(CLIENT, CUSTOMER)
+    await r.post('status', { ...OUT, CallStatus: 'completed', CallDuration: '70' }, { query: CP })
+    await r.post('dial', { ...OUT, DialCallStatus: 'completed', DialCallDuration: '40' }, { query: CP })
+    await r.drain()
+    expect(call(r)).toMatchObject({ direction: 'outbound', counterpartyE164: CUSTOMER, talkSeconds: 40, crmStatus: 'written', staffEmail: 'staff.one@example.test' })
+    expect(touchpoints(r)).toHaveLength(1)
+  })
+
+  it('客户没接：记成外呼没接通', async () => {
+    const r = rig()
+    r.mem.addContact(CLIENT, CUSTOMER)
+    await r.post('dial', { ...OUT, DialCallStatus: 'no-answer' }, { query: CP })
+    await r.drain()
+    expect(call(r)).toMatchObject({ direction: 'outbound', answered: false })
+  })
+
+  it('客户号码被改过（和签名的地址不一致）→ 401，不落库', async () => {
+    const r = rig()
+    const res = await r.post('dial', { ...OUT, DialCallStatus: 'completed' }, { query: '?cp=%2B64210000002', signedQuery: CP })
+    expect(res.status).toBe(401)
+    expect(r.mem.raw.size).toBe(0)
+  })
+
+  it('cp 不是合格号码：当没有，外呼回调只留档', async () => {
+    const r = rig()
+    r.mem.addContact(CLIENT, CUSTOMER)
+    await r.post('status', { ...OUT, CallStatus: 'completed' }, { query: '?cp=abc' })
+    await r.drain()
+    expect(touchpoints(r)).toHaveLength(0)
+  })
+
+  it('notice：验签通过回告知语音、不落库；签名错 → 401', async () => {
+    const r = rig()
+    const ok = await r.post('notice', { ...OUT, CallStatus: 'in-progress' })
+    expect(ok.status).toBe(200)
+    expect(ok.twiml).toContain('<Say')
+    expect(ok.twiml).toContain('may be recorded')
+    expect(r.mem.raw.size).toBe(0)
+    const bad = await r.post('notice', { ...OUT }, { sig: 'wrong' })
+    expect(bad.status).toBe(401)
   })
 })
