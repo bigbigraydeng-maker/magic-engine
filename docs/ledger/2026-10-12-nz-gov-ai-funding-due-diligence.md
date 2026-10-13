@@ -1,9 +1,11 @@
 ---
 id: 2026-10-12-nz-gov-ai-funding-due-diligence
-title: 新西兰政府 AI 补贴尽调做完，待 PM 决定要不要往下走成为认可供应商
-status: decided
+title: 新西兰政府 AI 补贴尽调已做完并提交，四项后续等 PM 回复
+status: done
 owner: pm
 decided_on: 2026-10-12
+done_on: 2026-10-12
+done_ref: pr:2483
 source: doc:docs/research/2026-10-12-nz-gov-ai-funding-due-diligence/report.md
 verify_by: 2026-10-15
 verify_how: 到期看 PM 是否已对四项待决定各回一句（问/买/查/评估 或 不做）；有回复的立刻照办，没回复就在今日待办里再提醒一次，不要自己对外发邮件或花钱

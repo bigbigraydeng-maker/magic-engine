@@ -12,7 +12,7 @@
 |---|---|
 | A. 客户能不能用补贴买我们的服务？ | **部分能。** 能报的是「教老板 / 管理者的培训」和「AI 顾问落地」；代运营、订阅制软件、独立的员工培训不能报（管理培训补贴排除员工培训；AI 顾问试点的落地阶段若含员工培训，官方页列为可支持，可能可报，需顾问确认）。客户必须先在区域商业伙伴网络（RBPN）免费登记。 |
 | B. ME 自己能申请什么？ | 管理培训补贴和 AI 顾问试点是**给买方的**，ME 自己做产品开发不在范围内。**可能**适用的是研发类（New to R&D Grant、R&D 税收抵免），资格**未核实**，需会计 / 官方确认。 |
-| C. ME 要当合格供应商要什么？ | 管理培训路径：新西兰境内公司 + 公司编号（NZBN）+ 不低于 NZ$100 万的职业责任险 + 给中小企业做过培训的证据，网上登记免费约 15 分钟，**不要求 NZQA / 培训机构注册**。AI 顾问试点路径：要成为「approved AI service provider」，**官网没有公开申请入口，未核实**。 |
+| C. ME 要当合格供应商要什么？ | 管理培训路径：新西兰境内公司 + 公司编号（NZBN）+ 不低于 NZ$100 万的职业责任险 + 给中小企业做过培训的证据，网上登记免费约 15 分钟，**官网三页都没列 NZQA / 培训机构（PTE）注册要求，尚待区域商业伙伴确认**。AI 顾问试点路径：要成为「approved AI service provider」，**官网没有公开申请入口，未核实**。 |
 | D. 先做什么？ | 先向奥克兰区域商业伙伴问清两件事（成本几乎为零），再决定要不要买保险、登记成供应商。按 §11 打分都是 P2。见 §6。 |
 
 **最大的三个坑（写销售话术前必看）：**
@@ -40,7 +40,7 @@
 | 谁有资格 | 少于 50 名全职员工；有 NZBN；在新西兰经营；私营（或符合条件的毛利信托）；须先与增长顾问做一次诊断会谈（discovery session）确认有能力缺口 |
 | 是否必须先成为 RBPN 客户 | **是**，免费，网上登记约 5–10 分钟，只需 NZBN |
 | 补贴给谁 | 补贴**企业买培训**，但培训必须来自 RBPN 登记的供应商，顾问给短名单，企业从中选 |
-| 供应商要求 | 必须是 RBPN 登记服务供应商（见 §5） |
+| 供应商要求 | 必须是 RBPN 登记服务供应商（见 §4C） |
 | 可报科目 | 见下 |
 | 申请流程与耗时 | 登记 → 顾问 5 个工作日内联系 → 诊断会谈 → 顾问推荐供应商 → 企业选定。页面估计企业侧 4–12 小时 |
 | 当前是否开放 | 资助页写 Open，资金用完为止；奥克兰部分页面写名额有限（[摘要]） |
@@ -80,8 +80,8 @@
 | NZTE（出口） | **没有通用的出口培训 / 数字营销补贴**；有出口基础课、融资指导、「国际增长基金」（仅限 NZTE 重点客户、凭邀请） | [出口援助页](https://www.nzte.govt.nz/export-assistance)（[原文]，无日期） | 「Export Capability」具体项目官网查不到 |
 | TEC（高等教育委员会） | 微学分（micro-credential）：**资助培训提供方，不是企业**；提供方须经 NZQA 批准。工业技能委员会（Industry Skills Boards）2026-01 起取代原 WDC，负责定标准，**不发企业培训补贴** | TEC 页面多数抓取为空，**[摘要]** | TEC 微学分页、ISB 页原文；2026 年「企业买 AI 培训」类资助：未发现 |
 | MSD / Work and Income | 都是「招人 + 培训」类：Mana in Mahi（工资补贴最多 NZ$16,000/年，培训课程费最多 NZ$8,000/年）、Flexi-wage、Skills for Industry。**不适用现有员工的 AI 培训** | [Mana in Mahi](https://www.workandincome.govt.nz/employers/subsidies-training-and-other-help/mana-in-mahi)（[原文]，2026-07-23）· [Flexi-wage](https://www.workandincome.govt.nz/employers/subsidies-training-and-other-help/flexi-wage)（[原文]，2026-07-03） | Skills Investment Subsidy 官方页面没读到 |
-| Inland Revenue 研发税收抵免（RDTI） | 15% 税收抵免；每年合格研发支出至少 NZ$5 万；须先在 myIR 登记再申请 MBIE 的 General Approval。**是否适用 AI 应用开发：页面没明说**，核心判断是「是否解决科学或技术上的不确定性」，只把现成工具用到新场景一般不够 | [IR 概览](https://www.ird.govt.nz/research-and-development/tax-incentive)（[原文]，2026-04-09）· [资格页](https://www.rdti.govt.nz/is-my-business-eligible)（[原文]） | 「内部软件开发」支出上限（搜到 NZ$300 万 / NZ$2,500 万两个互相矛盾的数）：未核实 |
-| 国家 AI 战略 | 2025-07 发布，重点是推动企业**采纳** AI，轻监管。**战略本身没有补贴条款**；配套有免费的 Responsible AI 指南 | [指南新闻页](https://www.business.govt.nz/news/new-guidance-to-help-you-use-ai-responsibly)（[原文]，2025-07-18） | 战略 PDF 正文没读到；后续行动计划未查到 |
+| Inland Revenue 研发税收抵免（RDTI） | 15% 税收抵免；每年合格研发支出至少 NZ$5 万（审阅意见称 IR 官方说明规定：委托 approved research provider 做研发时不受该下限限制，[eligible-expenditure 页](https://www.ird.govt.nz/research-and-development/tax-incentive/eligibility/eligible-expenditure)，**我未读该页原文，需核对是否适用**）；须先在 myIR 登记再申请 MBIE 的 General Approval。**是否适用 AI 应用开发：页面没明说**，核心判断是「是否解决科学或技术上的不确定性」，只把现成工具用到新场景一般不够 | [IR 概览](https://www.ird.govt.nz/research-and-development/tax-incentive)（[原文]，2026-04-09）· [资格页](https://www.rdti.govt.nz/is-my-business-eligible)（[原文]） | 「内部软件开发」支出上限（搜到 NZ$300 万 / NZ$2,500 万两个互相矛盾的数）：未核实 |
+| 国家 AI 战略 | 2025-07 发布，重点是推动企业**采纳** AI，轻监管。**本轮从已读材料中未发现战略附带补贴条款（战略正文没读到，不等于不存在）**；配套有免费的 Responsible AI 指南 | [指南新闻页](https://www.business.govt.nz/news/new-guidance-to-help-you-use-ai-responsibly)（[原文]，2025-07-18） | 战略 PDF 正文没读到；后续行动计划未查到 |
 | Digital Boost | **已关闭**（2024-10-31，政府称无后续经费），学习内容迁到 business.govt.nz | [MBIE 决定文件](https://www.mbie.govt.nz/dmsdocument/29896-final-decisions-digital-boost-programme-pdf)（**[摘要]**） | 官方原页打不开 |
 
 ### 3.2 行业与专项
@@ -180,7 +180,7 @@ Business.govt.nz 的 Funding Explorer 是政府自己的基金汇总工具，官
 - ME（新西兰注册公司，奥克兰 Albany）**以买方身份**也许能申请 MCDF（管理培训）和 AI 顾问试点，但这两项补贴的是「买培训 / 买 AI 顾问」，**不补贴我们自己做产品开发**。AI 顾问试点页明确不报「开发要卖给客户的 AI 产品」。
 - **可能适用，资格未核实**：
   - **New to R&D Grant**：合格研发成本的 40%，最高 NZ$40 万；须满足「研发新手」门槛、有技术不确定性；软件开发只有「对研发关键」才算；**不能用其他新西兰政府资金共同出资**。
-  - **研发税收抵免（RDTI）**：15%，年合格研发支出至少 NZ$5 万，须先登记并拿 General Approval。
+  - **研发税收抵免（RDTI）**：15%，年合格研发支出至少 NZ$5 万（委托 approved research provider 时据称例外，**未核实**），须先登记并拿 General Approval。
   - 这两项能不能覆盖 ME 的 AI 平台开发，**我没法判断**（页面没明说 AI，现成 AI 工具不一定算研发）。需会计或官方（MBIE）确认，这是**花钱的事**，不是我替 PM 决定的。
 - **融资类（不是补贴，是股权投资）：Aspire NZ Seed Fund**（NZGCP）：与私人投资人同投，每轮 NZ$5 万–150 万，面向员工少于 20 人、有增长潜力的新西兰早期科技企业，开放，申请投入不到 4 小时。**ME 是否合适、要不要走这条，属于 PM 的融资决策，本文只列事实**；页面要求必须先找到私人投资人，且是竞争性分配。
 - 专为 ME 自己：未发现任何「AI 公司专属」的新西兰政府补助。
@@ -190,7 +190,7 @@ Business.govt.nz 的 Funding Explorer 是政府自己的基金汇总工具，官
 **路径 1：RBPN 登记服务供应商（管理培训补贴用）**
 - 来源：[成为供应商](https://www.business.govt.nz/strategy-and-performance/regional-business-partner-network/becoming-a-service-provider)（[原文]，复核 2025-07-22）、[供应商信息](https://www.business.govt.nz/strategy-and-performance/regional-business-partner-network/information-for-registered-service-providers)（[原文]，复核 2025-07-21）。
 - **条件（页面写「申请前必须全部满足」）**：公司在新西兰境内；有 NZBN；**职业责任险（Professional Indemnity）不低于 NZ$100 万，每年续保，无例外**；有给中小企业做过管理培训的成绩记录，最好网站上能展示。页面还说**不找「动手实施 / 做咨询」的机构**，定位必须是教老板、教管理者。
-- **不要求** NZQA 认可课程或培训机构（PTE）注册（三页都没提，页面没写不等于明文豁免）。
+- 官网三页都**没有列出** NZQA 认可课程或培训机构（PTE）注册要求；页面没写不等于明文豁免，**未核实，需向区域商业伙伴或 NZQA 确认**。
 - **流程**：RBPN 平台网上登记约 15 分钟，登记时要加第一个服务；MBIE 确认该服务（条款写 MBIE 可因任何原因拒绝）。**审批要多久：未核实**。登记免费，页面没写供应商费用。
 - **结算规则**：开课前声明利益冲突；服务描述写明培训目标、可衡量的学习成果、含 GST 总价、授课方式和时间；**供应商先向客户收自付部分，再向 MBIE 申领补贴**，活动结束后 2 个月内提交，活动最长 6 个月；不报差旅、餐食、住宿；虚假申领会被终止合同。
 - **对我们的缺口**：①有没有 NZ$100 万职业责任险（**未核实，需 PM / 财务确认**）；②「给中小企业做过培训的证据」我们**目前没有**（ME 做的是代运营和产品，不是培训）；③课程必须设计成「教老板」的培训形态。
@@ -221,13 +221,13 @@ Business.govt.nz 的 Funding Explorer 是政府自己的基金汇总工具，官
 
 ### 6.1 §11 三维打分（频率 / IMPACT 闭环关键度 / 收入关联度）
 
-按 [ENGINEERING_QUALITY_GATES §11](../ENGINEERING_QUALITY_GATES.md) 判定：
+按 [ENGINEERING_QUALITY_GATES §11](../../ENGINEERING_QUALITY_GATES.md) 判定：
 
 | 事项 | 频率 | IMPACT 闭环关键度 | 收入关联度 | 组合 | 优先级 |
 |---|---|---|---|---|---|
 | ① 把「教老板的 AI 营销小组课」做成 RBPN 登记供应商（走 MCDF，客户能少付） | 中：每个新客户谈价时都会撞上，但不是每天 | 低：不在 IMPACT 关键路径，是获客侧 | 高：直接影响客户愿不愿意付费 | 高中低 | **P2** |
 | ② 争取成为 AI 顾问试点的 approved AI 供应商 | 中 | 低 | 高 | 高中低 | **P2** |
-| ③ ME 自己申请研发类资助（New to R&D、RDTI） | 低：一次性事项 | 低 | 低：补的是自己的开发成本，客户看不见 | 低低低 | **P3 暂缓**，写进 ROADMAP 待认领 |
+| ③ ME 自己申请研发类资助（New to R&D、RDTI） | 低：一次性事项 | 低 | 低：补的是自己的开发成本，客户看不见 | 低低低 | **P3 暂缓**（**尚未写入 ROADMAP**，等 PM 决定是否值得登记） |
 | ④ 毛利客户走 Poutama | 低：目前没有已知毛利客户 | 低 | 低 | 低低低 | **P3 暂缓** |
 | ⑤ 出口型客户走 International Growth Fund（须是 NZTE 客户） | 低：只对出口客户、一次性 | 低 | 低：页面没提营销 / AI 费用 | 低低低 | **P3 暂缓** |
 | ⑥ ME 评估 Aspire NZ Seed Fund（股权融资） | 低：一次性 | 低 | 低：对客户收入无直接影响 | 低低低 | **P3 暂缓**；融资是 PM 的业务决策，可随时插队 |
