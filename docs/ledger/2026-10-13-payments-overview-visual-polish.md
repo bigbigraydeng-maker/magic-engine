@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-13
 done_on: 2026-10-14
-done_ref: pr:pending
+done_ref: pr:2561
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 登录后打开付款总览：有过期的出发日整行淡红；日期带年份且过去的标「已过N天」；定金/尾款显示成 5/7；橙色提示条只占一行
