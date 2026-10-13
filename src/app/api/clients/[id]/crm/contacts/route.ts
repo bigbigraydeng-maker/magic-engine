@@ -348,9 +348,10 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
         console.warn('[crm contacts] page function unavailable, using the app-side path:', rpcRes.error.message)
       } else {
         const rows = (rpcRes.data ?? []) as Array<{ id: string; total: number | string }>
-        let rpcTotal = rows.length > 0 ? Number(rows[0].total) : 0
+        let rpcTotal: number | null = rows.length > 0 ? Number(rows[0].total) : 0
         if (rows.length === 0 && query.page > 1) {
-          // 翻过头了：这一页没有人，总数得再问一次第一页才知道。
+          // 翻过头了：这一页没有人，总数得再问一次第一页才知道。问不到就当函数不可用、退回老路径，
+          // 不能悄悄报 0。
           const first = await supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
             p_client_id: clientId,
             p_stages: filters.stages,
@@ -360,13 +361,20 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
             p_limit: 1,
             p_offset: 0,
           })
-          const firstRows = (first.data ?? []) as Array<{ total: number | string }>
-          rpcTotal = firstRows.length > 0 ? Number(firstRows[0].total) : 0
+          if (first.error) {
+            console.warn('[crm contacts] page function total lookup failed, using the app-side path:', first.error.message)
+            rpcTotal = null
+          } else {
+            const firstRows = (first.data ?? []) as Array<{ total: number | string }>
+            rpcTotal = firstRows.length > 0 ? Number(firstRows[0].total) : 0
+          }
         }
-        total = rpcTotal
-        pageContacts = await loadContactsByIds(clientId, rows.map((r) => r.id))
-        stageRows = stagesRpc
-        fastDone = true
+        if (rpcTotal !== null) {
+          total = rpcTotal
+          pageContacts = await loadContactsByIds(clientId, rows.map((r) => r.id))
+          stageRows = stagesRpc
+          fastDone = true
+        }
       }
     }
 

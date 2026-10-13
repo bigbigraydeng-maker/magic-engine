@@ -291,6 +291,18 @@ describe('GET contacts — 分页形状', () => {
       expect((body.items as Array<{ contactId: string }>)[0].contactId).toBe('a1')
     })
 
+    it('翻过头时拿总数的那次调用出错 → 退回老路径，不悄悄报 0', async () => {
+      let n = 0
+      ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (_name: string, args: Record<string, unknown>) => {
+        rpcCalls.push(args)
+        n += 1
+        return n === 1 ? { data: [], error: null } : { data: null, error: { message: 'boom' } }
+      })
+      const { status, body } = await get('client-a', '?page=2&perPage=1')
+      expect(status).toBe(200)
+      expect(body.total).toBe(3) // 老路径的真实总数，不是 0
+    })
+
     it('翻过头（这一页没有人）→ 再问一次第一页拿总数', async () => {
       rpcRows = []
       const { body } = await get('client-a', '?page=9&perPage=100')

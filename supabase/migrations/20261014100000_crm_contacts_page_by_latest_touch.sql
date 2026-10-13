@@ -14,7 +14,7 @@
 -- ROLLBACK (do not run automatically):
 --   drop function public.crm_contacts_page_by_latest_touch(uuid, text[], text, uuid[], uuid[], integer, integer);
 
-create function public.crm_contacts_page_by_latest_touch(
+create or replace function public.crm_contacts_page_by_latest_touch(
   p_client_id uuid,
   p_stages text[],
   p_q text,
@@ -51,7 +51,7 @@ as $$
   )
   select f.id, count(*) over () as total
   from filtered f
-  order by f.last_at desc nulls last, f.first_seen_at desc, f.id
+  order by f.last_at desc nulls last, f.first_seen_at desc nulls last, f.id
   limit least(greatest(coalesce(p_limit, 100), 0), 500)
   offset greatest(coalesce(p_offset, 0), 0)
 $$;

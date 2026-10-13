@@ -55,6 +55,22 @@ select pg_temp.pcheck('not in ids', pg_temp.ids(p_not => array['c0000000-0000-00
 -- 8. limit is capped at 500 and null/negative are safe
 select pg_temp.pcheck('limit null is safe', pg_temp.ids(p_limit => null) = '01,03,02,05,04');
 select pg_temp.pcheck('negative limit -> none', pg_temp.ids(p_limit => -5) = '');
+-- 8b. wildcard characters in the search term behave like the old ilike (they are wildcards), empty id list matches nobody,
+--     an offset past the end returns an empty page, paging past int range does not corrupt results
+select pg_temp.pcheck('percent in q is a wildcard like before', pg_temp.ids(p_q => '%') = '01,03,02,05,04', pg_temp.ids(p_q => '%'));
+select pg_temp.pcheck('empty in-list matches nobody', pg_temp.ids(p_in => array[]::uuid[]) = '');
+select pg_temp.pcheck('offset past the end is an empty page', pg_temp.ids(p_limit => 2, p_offset => 99) = '');
+insert into public.contacts(id, client_id, display_name, first_seen_at) values
+  ('c0000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-0000000000a1', 'Tie 1', '2026-05-05'),
+  ('c0000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-0000000000a1', 'Tie 2', '2026-05-05'),
+  ('c0000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-0000000000a1', 'Tie 3', '2026-05-05');
+insert into public.contact_touchpoints(client_id, contact_id, channel, direction, occurred_at, source, source_ref)
+  select '00000000-0000-0000-0000-0000000000a1', id, 'email', 'inbound', '2026-04-04T00:00:00Z', 't', 'tie-' || id::text
+  from public.contacts where display_name like 'Tie %';
+select pg_temp.pcheck('tie paging is exact (3 ties over 2 pages)',
+  pg_temp.ids(p_q => 'Tie', p_limit => 2, p_offset => 0) = '11,12' and pg_temp.ids(p_q => 'Tie', p_limit => 2, p_offset => 2) = '13',
+  pg_temp.ids(p_q => 'Tie', p_limit => 2, p_offset => 0) || ' | ' || pg_temp.ids(p_q => 'Tie', p_limit => 2, p_offset => 2));
+
 -- 9. function is read-only (stable) and locked down
 select pg_temp.pcheck('stable', (select provolatile from pg_proc where proname = 'crm_contacts_page_by_latest_touch') = 's');
 select pg_temp.pcheck('anon/authenticated cannot execute',
