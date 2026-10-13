@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 
-export function CallButton({ clientId, contactId }: { clientId: string; contactId: string }) {
+export function CallButton({ clientId, contactId, onDialed }: { clientId: string; contactId: string; onDialed?: () => void }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
@@ -17,7 +17,8 @@ export function CallButton({ clientId, contactId }: { clientId: string; contactI
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/call`, { method: 'POST' })
       const j = (await res.json().catch(() => ({}))) as { message?: string; error?: string }
-      setMsg(res.ok ? { ok: true, text: j.message ?? '正在拨打' } : { ok: false, text: j.error ?? '拨打没成功，请重试' })
+      setMsg(res.ok ? { ok: true, text: '已发起：先响你登记的手机，接起后自动接通客人。挂断后这里会显示「整理中」，约 2 分钟变成正式记录，不用等，可以直接去下一位。' } : { ok: false, text: j.error ?? '拨打没成功，请重试' })
+      if (res.ok) onDialed?.()
     } catch {
       setMsg({ ok: false, text: '拨打没成功，请重试' })
     } finally {
@@ -35,7 +36,7 @@ export function CallButton({ clientId, contactId }: { clientId: string; contactI
       >
         {busy ? '正在发起…' : '📞 用 CTS 号码拨打（自动录音）'}
       </button>
-      {msg && <span className={`text-xs font-semibold ${msg.ok ? 'text-me-charcoal/70' : 'text-[#C2453A]'}`}>{msg.text}</span>}
+      {msg && <span className={`w-full text-xs font-semibold ${msg.ok ? 'text-me-charcoal/70' : 'text-[#C2453A]'}`}>{msg.ok ? '✓ ' : ''}{msg.text}</span>}
     </div>
   )
 }
