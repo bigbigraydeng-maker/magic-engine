@@ -6,6 +6,10 @@
 - **依据**：97 号日历 v0.2（PR 2560，分支 `feat/social-three-lines-master-table-97`）。所有事实只来自官网 www.eastinter.com.au 首页和 /eastinter-pricing-calculator；我 10-14 重新读了官网原始页面，逐句核过。
 - **语言**：中文为主，每条末尾一句英文。语言选择是 97 号日历里的假设，PM 可改。
 
+## 苏东坡审查（10-14，独立审，只对照官网原文）
+
+D1–D6「改后可过」，上面各条已按审查意见改好；D7「不可过」，见 D7 开头。**改后的版本还需苏东坡复看一遍才算过**；马良要等有画面再审。
+
 ## 0. 先看这三条（影响能不能发）
 
 1. **官网第 3 步和日历 E3 措辞不一样。** 官网原文是「①告诉我们货物、起运地、目的地 ②安排提货，或把货送到我们的中国仓库 ③我们负责集运、国际运输和清关 ④送到你在澳洲的家、仓库或公司」。日历写的是「中国提货→集运→海运或空运→澳洲配送」，**我按官网原文写**，已在 D3 里用。
@@ -47,7 +51,7 @@ D1 起连排 7 天，图文 12:00，Reel 19:00（澳东时间）。**现在没�
 送达城市：悉尼、墨尔本、布里斯班、阿德莱德、珀斯
 目的地不在名单里？也可以直接问我们。
 
-海运、空运、送货上门，一个团队跟到底。
+海运、空运、送货上门，一个团队，从中国送到澳洲门口。
 
 From Guangzhou and Shenzhen to Sydney, Melbourne, Brisbane, Adelaide and Perth — ask our team.
 ```
@@ -57,31 +61,30 @@ From Guangzhou and Shenzhen to Sydney, Melbourne, Brisbane, Adelaide and Perth �
 |---|---|
 | 发货城市 / 送达城市 / 不在名单里可以问 | E1 |
 | 海运、空运、送货上门 | 首页 hero「sea, air and door-to-door delivery」 |
-| 一个团队跟到底 | 首页 hero「One team, door to door」 |
+| 一个团队，从中国送到澳洲门口 | 首页 hero「One team, door to door」（苏东坡审：不写「跟到底」，避免暗示可查进度） |
 
 ## D2 · Post（一图看懂）· 12:00
 
-**画面**：四宫格图标——海运拼箱 / 海运整柜 / 空运 / 集运。不写天数、不写价格。
+**画面**：三格图标——海运（拼箱 / 整柜）/ 空运 / 集运。不写天数、不写价格。
 
 **正文**
 ```
-中国发澳洲，有四种常见发法：
+中国发澳洲，有三种常见发法：
 
-① 海运拼箱（LCL）：货量不大，也能走海运
-② 海运整柜（FCL）：家具、库存货、整柜
-③ 空运：急件、高价值货物
-④ 集运：多个供应商的货，先在中国合并成一票再发
+① 海运：家具、库存货，或整柜；拼箱（LCL）、整柜（FCL）都有
+② 空运：急件、高价值货物
+③ 集运：多个供应商的货，先在中国合并成一票再发
+发货前请先联系我们，确认收货地址和包装要求。
 
 还可以加：进出口清关、仓储与包装、澳洲末端配送。
 
 Sea, air, consolidation — pick what fits your cargo.
 ```
-**首评**：`https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d2&utm_content=post#services`
+**首评**：`https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d2&utm_content=post#services` 加一句「税费、关税、保险请订舱前向团队确认。」（E4）
 
 | 句子 | 出处 |
 |---|---|
-| ①②③④ 的描述 | E2 |
-| 「货量不大也能走海运」 | 首页 Services「From a few boxes to a full container」 |
+| ①②③ 的描述、发货前先联系 | E2；首页 FAQ「contact our team before dispatching goods」 |
 | 可以加的三项 | E2 |
 
 ## D3 · Reel（视频工厂）· 19:00
@@ -92,11 +95,11 @@ Sea, air, consolidation — pick what fits your cargo.
 
 | 镜 | 屏幕字幕 | 配音（中文） | 出处 |
 |---|---|---|---|
-| 1 | 中国发澳洲，几步？ | 货从中国发到澳洲，要几步？四步。 | E3 |
+| 1 | 几步到澳洲？ | 货从中国发到澳洲，要几步？四步。 | E3 |
 | 2 | ① 告诉我们 | 第一步，告诉我们货物、起运地和目的地，我们帮你选方式。 | E3 |
-| 3 | ② 送到仓库 | 第二步，安排提货，或把货送到我们的中国仓库。 | E3 |
+| 3 | ② 提货或送仓 | 第二步，安排提货，或把货送到我们的中国仓库。 | E3 |
 | 4 | ③ 我们负责 | 第三步，集运、国际运输和清关，我们来协调。 | E3 |
-| 5 | ④ 送到家门 | 第四步，送到你在澳洲的家、仓库或公司。 | E3 |
+| 5 | ④ 送到澳洲 | 第四步，送到你在澳洲的家、仓库或公司。 | E3 |
 | 6 | 先问再发 | 想知道怎么发？先告诉我们货物情况。 | E3 / E5 |
 
 **帖子正文**
@@ -106,7 +109,7 @@ Sea, air, consolidation — pick what fits your cargo.
 
 Four steps, China to Australia.
 ```
-**首评**：`https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d3&utm_content=reel#how`
+**首评**：`https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d3&utm_content=reel#how` 加两句「发货前请先联系我们确认收货地址。税费、关税、保险请订舱前向团队确认。」（E4）
 
 ## D4 · Post（实用清单）· 12:00
 
@@ -126,7 +129,7 @@ Four steps, China to Australia.
 不同规格的箱子，再附一份装箱单。
 发到 zzj@eastinter.net，团队跟进。
 
-Origin, destination, goods, packages, weight, dimensions — that's all we need to quote.
+Origin, destination, goods, packages, weight, dimensions — what we need to request a quote.
 ```
 **首评**：`https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d4&utm_content=post#faq`
 
@@ -141,13 +144,13 @@ Origin, destination, goods, packages, weight, dimensions — that's all we need 
 
 **正文**
 ```
-运费按哪个重量算？
+价格计算器按哪个重量估价？
 
 规则：实际重量和体积重量，哪个大按哪个。
 体积重量 = 长 × 宽 × 高（厘米）÷ 6000
 
 举个算术例子（只演示公式，不是报价）：
-一个 50 × 40 × 30 厘米的箱子，体积重量 = 60000 ÷ 6000 = 10 公斤。
+一个 50 × 40 × 30 厘米的箱子，体积重量 = 60000 ÷ 6000 = 10 公斤。实际重量更大的话，则按实际重量。
 
 在计算器里不填体积，就只按实际重量估价。
 估价仅供参考，最终费用以正式报价为准。
@@ -159,13 +162,13 @@ Chargeable weight = the greater of actual and volume weight.
 | 句子 | 出处 |
 |---|---|
 | 取较大者、体积重量公式、不填体积只按实际重量 | E7 |
-| 50×40×30 的例子 | **不是官网事实**，是用官网公式做的纯算术；请苏东坡决定留不留 |
+| 50×40×30 的例子 | **不是官网事实**，是用官网公式做的纯算术；苏东坡审：留，并补「实际重量更大则按实际」 |
 | 估价仅供参考… | E8 |
 
 ## D6 · Post（轮播 4 张）· 12:00
 
 **第 1 张**：海运还是空运？怎么选
-**第 2 张**：海运——适合货量大、时间灵活
+**第 2 张**：海运——一般更适合货量大、时间灵活
 **第 3 张**：空运——适合急件、高价值货物
 **第 4 张**：拿不准？告诉我们货物情况和你需要到货的日期，团队帮你推荐，并确认当前时效
 
@@ -188,6 +191,8 @@ Sea or air? Tell us your cargo and your date — we'll recommend.
 | 不写天数、不写价格 | 官网 FAQ 也没给 |
 
 ## D7 · Reel（视频工厂，录真实界面）· 19:00
+
+> **苏东坡审：不可过。** 录屏必然显示金额和预计时效，而页头「October 2026 rates」生效日期客户未确认，「只演示操作不念数字」做不到（除非遮住结果栏，那样片子没意义）。**等客户书面确认费率可对外用，且拍摄和发布都在有效期内，才重新送审。** D5 首评带计算器链接，同样等确认后再发。
 
 **主题**：30 秒用价格计算器估一单。**卡点：示例数字必须来自计算器真跑出的结果，并经客户确认；费率标 2026 年 10 月。**
 
@@ -230,7 +235,9 @@ Instant AUD estimate, with a clear breakdown. No sign-up.
 | 有声音 | 配音 + 音乐，成片必须真播放确认 | 待成片 |
 
 3. **做法**：只走 `src/lib/factory/`，不自己写脚本调生成或发布接口。D7 用录屏素材 + 工厂合成。成片出来后：我先真播放确认有声音、截 9 宫格逐镜自检；再交**苏东坡**（内容）和**马良**（画面）各独立审；审过也不等于可发，发布需 PM 授权。
-4. **库里的 East Inter 发布目标页面编号与记忆里不一致**（库里 1380418771813147；记忆里 61594133083327）。这条已记进台账，发布前须核对到底哪个是客户的真主页。
+4. **发布主页编号已核对（10-14，只读）**：库里的发布目标 1380418771813147 在 Meta 上查得名称 East Inter International、类别「货物与集装箱公司」，就是客户主页；早先记的 61594133083327 是主页网址里的另一种编号，接口查不到，**以库里为准，不用改库**。
+   **没核到的**：这个主页上现在有没有遗留的排期帖（9-28 那批 Reel 排期台账说删了 2 条、剩 5 条没跑）——系统令牌读不了排期，要用主页令牌查，发布前必须查一遍。
+5. **官网计算器页头「October 2026 rates」是 63 号窗口 10-10 的假设**（台账卡写「生效月份写 October 2026 是假设，已问东际」，东际还没回）。D5、D7 在客户确认生效日期前不要发。
 
 ## 4. 每条发布前的人工检查（沿用日历第 4 节）
 
