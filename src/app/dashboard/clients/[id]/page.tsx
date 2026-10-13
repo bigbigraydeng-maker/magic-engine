@@ -640,6 +640,7 @@ export default function ClientDetailPage() {
                 <ToolCard href={`/dashboard/content?client=${clientId}`}         title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/campaigns`}      title="推广活动"       desc="Campaign 列表、排期、各推广活动的内容" badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/daily-plan`}     title="每日计划"       desc="推广活动 7 日内容排期审核 · Facebook Post 通过/打回" badge="in_house" />
+                <ToolCard href={`/dashboard/clients/${clientId}/story`}          title="Story 自动发布" desc="看这一周要发的 Story · 一键授权 / 随时停（仅管理员）" badge="in_house" />
                 <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
                 <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/settings?tab=connect`} title="平台连接"    desc="连接 GBP · GSC · GA4 · Meta 广告账户" badge="in_house" />
