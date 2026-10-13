@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:pending
+done_ref: pr:2569
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 登录后看付款总览、全部客人、广告相关页的提示框与标签：之前透明的淡红/淡绿/淡金底色现在应显示；没有页面因此出现难看的大色块
