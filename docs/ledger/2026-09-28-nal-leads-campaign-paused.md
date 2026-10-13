@@ -2,7 +2,7 @@
 id: 2026-09-28-nal-leads-campaign-paused
 title: 停掉 NAL 那个「买留资却送去私信」的广告系列：换素材后开聊到留资的转化显著变差、单个留资成本显著上涨
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-28
 done_on: 2026-09-28
 done_ref: pr:2151

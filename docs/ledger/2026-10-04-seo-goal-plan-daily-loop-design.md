@@ -1,7 +1,7 @@
 ---
 id: 2026-10-04-seo-goal-plan-daily-loop-design
 title: CTS 的 SEO 要有活目标、每周自动排活、每天核验——设计稿已出，等 PM 定目标档位
-status: done
+status: verified
 owner: pm
 decided_on: 2026-10-04
 source: session:cdd5dbf9

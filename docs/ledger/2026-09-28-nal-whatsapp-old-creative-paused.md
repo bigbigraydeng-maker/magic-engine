@@ -2,7 +2,7 @@
 id: 2026-09-28-nal-whatsapp-old-creative-paused
 title: 停掉 NAL WhatsApp 系列里已疲劳的旧素材：点击率跌破健康区间、连续两天零开聊还在花钱，新素材已在扛主力
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-28
 done_on: 2026-09-28
 done_ref: doc:docs/ledger/2026-09-28-nal-whatsapp-old-creative-paused.md
