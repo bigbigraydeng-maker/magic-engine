@@ -450,6 +450,29 @@ describe('auto-publish panel — an active authorisation is legible', () => {
     expect(screen.queryByRole('button', { name: /停止自动发布/ })).toBeNull()
   })
 
+  it('🔴 shows dates whose outcome nobody has confirmed after stopping', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(ACTIVE_STATUS))
+      .mockResolvedValueOnce(jsonResponse({
+        success: true,
+        in_flight_status: 'OK',
+        in_flight: [],
+        in_flight_unconfirmed: [{ date: '2026-09-04', status: 'unknown_outcome' }],
+      }))
+      .mockResolvedValueOnce(jsonResponse(MANAGEABLE_STATUS))
+    global.fetch = fetchMock as never
+    await renderPanel()
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /停止自动发布/ })).toBeTruthy()
+    })
+    fireEvent.change(screen.getByLabelText('停止原因'), { target: { value: '计划要改' } })
+    await click(/停止自动发布/)
+    await click(/确定，停止/)
+
+    await waitFor(() => expect(screen.getByText(/系统不确定有没有发出去：.*09-04/)).toBeTruthy())
+  })
+
   it('says so in red when it cannot tell what is already in flight', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(ACTIVE_STATUS))

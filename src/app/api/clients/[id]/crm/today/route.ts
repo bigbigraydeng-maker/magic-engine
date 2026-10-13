@@ -28,6 +28,7 @@ import {
   engagementFromMetadata,
   isPhoneVerdict,
   isFailedReach,
+  isUnansweredCall,
   latestIntentVerdict,
 } from '@/lib/crm/segments'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
@@ -374,6 +375,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
           // 拨到一个空号不算「我们出手了」—— 客人什么都没收到，
           // 该走的备用渠道一次都还没走。判据跟 day-list 共用同一个函数。
           !isFailedReach(t.metadata?.outcome as string | undefined) &&
+          // 电话系统记录的「没人接」同样不算出手（PM 2026-10-12）。
+          !isUnansweredCall(t.metadata) &&
           localDay(t.occurred_at, timeZone) === todayLocal,
       )
       .map((t) => t.contact_id),

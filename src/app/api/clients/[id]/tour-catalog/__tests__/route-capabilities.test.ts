@@ -36,6 +36,7 @@ const EXPECTED: Record<string, CatalogCapability> = {
   'members/route.ts DELETE': 'manage_members',
   'settings/route.ts PUT': 'manage_settings',
   'site-diff/route.ts GET': 'manage_settings',
+  'export/route.ts GET': 'view',
   'publish-requests/route.ts POST': 'request_publish',
 }
 

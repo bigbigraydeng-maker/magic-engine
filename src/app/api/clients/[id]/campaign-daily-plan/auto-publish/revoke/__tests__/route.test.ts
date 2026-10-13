@@ -10,6 +10,9 @@ vi.mock('@/lib/auth/whitelist', () => ({
 vi.mock('@/lib/campaign/daily-plan-auto-publish-store', () => ({
   revokeAuthorization: vi.fn(),
 }))
+vi.mock('@/lib/campaign/daily-plan-auto-publish-records', () => ({
+  readAutoPublishRecords: vi.fn(),
+}))
 vi.mock('@/lib/workflows/inngest-event', () => ({
   sendInngestEvent: vi.fn(),
 }))
@@ -20,6 +23,7 @@ vi.mock('@/lib/supabase', () => ({
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { revokeAuthorization } from '@/lib/campaign/daily-plan-auto-publish-store'
+import { readAutoPublishRecords } from '@/lib/campaign/daily-plan-auto-publish-records'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { supabaseAdmin } from '@/lib/supabase'
 import { POST } from '../route'
@@ -33,6 +37,7 @@ const mockedAccess = vi.mocked(requireDashboardClientAccess)
 const mockedAdmin = vi.mocked(isGlobalAdminEmail)
 const mockedRevoke = vi.mocked(revokeAuthorization)
 const mockedSend = vi.mocked(sendInngestEvent)
+const mockedRecords = vi.mocked(readAutoPublishRecords)
 const mockedFrom = vi.mocked(supabaseAdmin.from)
 
 function makeRequest(body: unknown): NextRequest {
@@ -151,6 +156,7 @@ beforeEach(() => {
   mockedRevoke.mockResolvedValue(revokedRow())
   mockedSend.mockResolvedValue({ event_ids: ['evt-1'] })
   mockPlanReadMissing()
+  mockedRecords.mockResolvedValue({ status: 'OK', posts: [], unconfirmed: [] })
 })
 
 describe('POST /auto-publish/revoke', () => {
@@ -289,6 +295,46 @@ describe('POST /auto-publish/revoke', () => {
     expect(res.status).toBe(200)
     const body = await res.json()
     expect(body.in_flight).toEqual([])
+    expect(body.in_flight_status).toBe('UNKNOWN')
+  })
+
+  it('🔴 a scheduled post known only to the auto-publisher records is listed as in_flight, and receipt ids are passed down', async () => {
+    const future = new Date(Date.now() + 3 * 24 * 3_600_000).toISOString()
+    mockPlanRead(validPublishMeta([publishedPost({ date: '2026-09-04', post_id: '1234567890_1', scheduled_publish_time: future })]))
+    mockedRecords.mockResolvedValue({
+      status: 'OK',
+      posts: [{ date: '2026-09-05', post_id: '1234567890_9', scheduled_publish_time: future }],
+      unconfirmed: [],
+    })
+
+    const body = await (await POST(makeRequest(validBody()), { params: { id: CLIENT_ID } })).json()
+
+    expect(body.in_flight.map((p: { post_id: string }) => p.post_id)).toEqual(['1234567890_1', '1234567890_9'])
+    const arg = mockedRecords.mock.calls[0][0]
+    expect(arg.dates).toEqual(['2026-09-04'])
+    expect([...arg.receiptPostIds]).toEqual(['1234567890_1'])
+  })
+
+  it('an auto-published post whose time has already passed is not in_flight', async () => {
+    const past = new Date(Date.now() - 3_600_000).toISOString()
+    mockedRecords.mockResolvedValue({
+      status: 'OK',
+      posts: [{ date: '2026-09-05', post_id: '1234567890_9', scheduled_publish_time: past }],
+      unconfirmed: [],
+    })
+    const body = await (await POST(makeRequest(validBody()), { params: { id: CLIENT_ID } })).json()
+    expect(body.in_flight).toEqual([])
+  })
+
+  it('🔴 unsettled dates are returned as in_flight_unconfirmed', async () => {
+    mockedRecords.mockResolvedValue({ status: 'OK', posts: [], unconfirmed: [{ date: '2026-09-04', status: 'unknown_outcome' }] })
+    const body = await (await POST(makeRequest(validBody()), { params: { id: CLIENT_ID } })).json()
+    expect(body.in_flight_unconfirmed).toEqual([{ date: '2026-09-04', status: 'unknown_outcome' }])
+  })
+
+  it('🔴 an unreadable attempts table turns an otherwise OK answer into UNKNOWN', async () => {
+    mockedRecords.mockResolvedValue({ status: 'UNKNOWN', posts: [], unconfirmed: [] })
+    const body = await (await POST(makeRequest(validBody()), { params: { id: CLIENT_ID } })).json()
     expect(body.in_flight_status).toBe('UNKNOWN')
   })
 })

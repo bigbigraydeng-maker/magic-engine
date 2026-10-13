@@ -29,6 +29,7 @@ import {
 import { buildCtrGapItem, buildDecayItem, buildNearMissItem, type ItemContext, type PlanItemDraft } from './items'
 import { buildDecayCandidates, type DecayCandidate } from './decay'
 import { checkKeywordPages, type KeywordPageCheck } from './keyword-page-check'
+import { parseProtectedSlugs, readProtectedRaw } from '@/lib/seo/protected-pages'
 import { buildTopicMap, type TopicMapEntry } from './topic-map'
 import { CAUSE_LABEL, diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
@@ -69,7 +70,7 @@ export interface WeeklyListClientResult {
   expired: number
   inserted: number
   duplicates: number
-  withheld: 'wip_cap' | 'no_candidates' | 'no_snapshot' | 'stale_snapshot' | null
+  withheld: 'wip_cap' | 'no_candidates' | 'no_snapshot' | 'stale_snapshot' | 'protected_list_malformed' | null
   skipped_keywords: number
   preview: string[]
   /** High-potential pages left out because their last crawl is too old to take a baseline from (data gap, surfaced not hidden). */
@@ -339,6 +340,16 @@ async function buildDrafts(
   const clientId = client.id
   const locationCode = LOCATION_CODE_BY_DB[client.semrush_db ?? 'au'] ?? LOCATION_CODE_BY_DB.au
 
+  // Protected-page list FIRST (before any query): a malformed list must withhold the whole client,
+  // never degrade to "protect nothing" (SEO playbook P-02b).
+  const protectedRaw = readProtectedRaw(client.seo_config)
+  const protectedParsed = protectedRaw.malformed ? null : parseProtectedSlugs(protectedRaw.raw)
+  if (protectedParsed === null || protectedParsed.malformed) {
+    result.withheld = 'protected_list_malformed'
+    return []
+  }
+  const protectedSlugs = protectedParsed.entries
+
   // keyword snapshot (latest day)
   const { data: latestSnap, error: snapErr } = await supabase
     .from('keyword_snapshots').select('snapshot_date').eq('client_id', clientId).eq('location_code', locationCode)
@@ -391,11 +402,7 @@ async function buildDrafts(
     if (c) sitePageByCanon.set(c, p)
   }
 
-  // exclusions: meta-cycle protected pages + pages it changed in the last 30 days
-  const seoConfig = (client.seo_config && typeof client.seo_config === 'object' ? client.seo_config : {}) as Record<string, unknown>
-  const protectedSlugs = Array.isArray(seoConfig.meta_cycle_protected_slugs)
-    ? (seoConfig.meta_cycle_protected_slugs as unknown[]).filter((s): s is string => typeof s === 'string')
-    : []
+  // exclusions: pages the meta-cycle changed in the last 30 days (protected pages were resolved up front)
   const since30 = new Date(now.getTime() - 30 * DAY_MS).toISOString()
   const { data: metaLog, error: metaErr } = await supabase
     .from('seo_meta_log').select('page_url').eq('client_id', clientId).gte('optimised_at', since30)
