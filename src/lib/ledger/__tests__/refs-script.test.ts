@@ -130,6 +130,44 @@ describe('ledger-check-refs.sh (PR mode)', () => {
     expect(r.out).toContain('2026-01-02-old-bad')
   })
 
+  it('turns red (never "0 cards checked, ok") when git cannot work out what the PR changed', () => {
+    card('2026-10-14-new-good', { done_ref: 'pr:500' })
+    commitNew()
+    const r = run({ BASE_SHA: '0000000000000000000000000000000000000001' })
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('算不出本 PR 改了哪些台账卡')
+  })
+
+  it('checks a card whose file name is not ASCII (git must not escape the path)', () => {
+    card('2026-10-14-中文卡', { done_ref: 'pr:404', source: 'pr:500' })
+    commitNew()
+    const r = run()
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('中文卡')
+  })
+
+  it('treats an empty API answer as "not found", not as a pass', () => {
+    writeFileSync(join(dir, 'bin', 'gh'), `#!/usr/bin/env bash\necho "$*" >> "${calls}"\nexit 0\n`)
+    card('2026-10-14-new-good', { done_ref: 'pr:77', source: 'pr:500' })
+    commitNew()
+    const r = run()
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('查不到')
+  })
+
+  it('still verifies doc: pointers of untouched old cards (local, costs no API calls)', () => {
+    card('2026-01-03-old-doc', { done_ref: 'doc:docs/nope/missing.md' })
+    git('add', '-A', 'docs')
+    git('commit', '-q', '-m', 'old doc card')
+    git('tag', '-f', 'base')
+    card('2026-10-14-new-good', { done_ref: 'pr:500' })
+    commitNew()
+    const r = run()
+    expect(r.code).not.toBe(0)
+    expect(r.out).toContain('2026-01-03-old-doc')
+    expect(r.calls.some((c) => c.includes('pulls/404'))).toBe(false)
+  })
+
   it('LEDGER_REFS_FULL=1 still checks every card (daily sweep / local use)', () => {
     card('2026-10-14-new-good', { done_ref: 'pr:500' })
     commitNew()

@@ -24,6 +24,19 @@ field() {
 CACHE_DIR="$(mktemp -d)"
 trap 'rm -rf "$CACHE_DIR"' EXIT
 
+# ledger_diff [git diff 参数...] —— 打印「BASE...HEAD 之间 docs/ledger 下改动的文件名」。
+# git 算不出来（BASE_SHA/HEAD_SHA 不可用、浅克隆没有基点……）时不能当成「没有改动」：
+# 记一个标志，最后统一报红（失败即红，不会悄悄变成「0 张卡被核对」而误绿）。
+DIFF_FAIL_FLAG="${CACHE_DIR}/diff-failed"
+ledger_diff() {
+  local out
+  if ! out="$(git -c core.quotepath=false diff --name-only "$@" "$BASE_SHA...$HEAD_SHA" -- 'docs/ledger/*.md' 2>/dev/null)"; then
+    : > "$DIFF_FAIL_FLAG"
+    return 0
+  fi
+  printf '%s\n' "$out"
+}
+
 # pr_state <n> —— 打印 open 或合并时间戳；查不到则非零退出；无凭据则打印 skip
 pr_state() {
   local n="$1"
@@ -42,7 +55,7 @@ pr_state() {
     return 0
   fi
   local out
-  if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.merged_at // "open"')"; then
+  if out="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${n}" --jq '.merged_at // "open"')" && [[ -n "$out" ]]; then
     printf '%s' "$out" > "$cache"
     echo "$out"
     return 0
@@ -118,7 +131,7 @@ for f in docs/ledger/*.md; do
   all_cards+=("$f")
 done
 
-cards_to_check=("${all_cards[@]}")
+cards_to_check=("${all_cards[@]+"${all_cards[@]}"}")
 if [[ -n "${BASE_SHA:-}" && -n "${HEAD_SHA:-}" && "${LEDGER_REFS_FULL:-}" != "1" ]]; then
   cards_to_check=()
   while IFS= read -r f; do
@@ -127,13 +140,20 @@ if [[ -n "${BASE_SHA:-}" && -n "${HEAD_SHA:-}" && "${LEDGER_REFS_FULL:-}" != "1"
     [[ "$(basename "$f")" == "README.md" ]] && continue
     [[ -e "$f" ]] || continue
     cards_to_check+=("$f")
-  done < <(git diff --name-only --diff-filter=AMR "$BASE_SHA...$HEAD_SHA" -- 'docs/ledger/*.md' || true)
+  done < <(ledger_diff --diff-filter=AMR)
 fi
 
-for f in "${cards_to_check[@]+"${cards_to_check[@]}"}"; do
+# 本地能查、不花接口额度的指针（commit: / doc:）对全库每张卡都查 —— 文档被改名或删除是最容易悄悄变坏的。
+# pr: / issue: / url: 只对上面选出的卡查（要调接口）。
+checked_list="$(printf '%s\n' "${cards_to_check[@]+"${cards_to_check[@]}"}")"
+for f in "${all_cards[@]+"${all_cards[@]}"}"; do
+  in_scope=0
+  if grep -qxF -- "$f" <<<"$checked_list"; then in_scope=1; fi
   for key in source done_ref verified_ref; do
     val="$(field "$f" "$key")"
-    if [[ -n "$val" ]]; then
+    [[ -n "$val" ]] || continue
+    kind="${val%%:*}"
+    if [[ "$in_scope" -eq 1 || "$kind" == "commit" || "$kind" == "doc" ]]; then
       check_exists "$f" "$key" "$val"
     fi
   done
@@ -141,8 +161,8 @@ done
 
 # ---- 2. PR 上下文下的绑定规则 ----
 if [[ -n "${BASE_SHA:-}" && -n "${HEAD_SHA:-}" && -n "${PR_NUMBER:-}" ]]; then
-  changed="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" -- 'docs/ledger/*.md' | grep -v 'README\.md' || true)"
-  added="$(git diff --name-only --diff-filter=A "$BASE_SHA...$HEAD_SHA" -- 'docs/ledger/*.md' | grep -v 'README\.md' || true)"
+  changed="$(ledger_diff | grep -v 'README\.md' || true)"
+  added="$(ledger_diff --diff-filter=A | grep -v 'README\.md' || true)"
 
   # git 的通配会穿过 /，evidence/ 里的证据文件不是卡，别按卡的规则查
   changed="$(grep -E '^docs/ledger/[^/]+\.md$' <<<"$changed" || true)"
@@ -192,6 +212,10 @@ if [[ -n "${BASE_SHA:-}" && -n "${HEAD_SHA:-}" && -n "${PR_NUMBER:-}" ]]; then
       fi
     fi
   done <<<"$changed"
+fi
+
+if [[ -f "$DIFF_FAIL_FLAG" ]]; then
+  FAILS+=("算不出本 PR 改了哪些台账卡（BASE_SHA/HEAD_SHA 不可用或 git diff 失败）——按失败处理，不当成「没有改动」")
 fi
 
 # ---- 3. 汇总 ----
