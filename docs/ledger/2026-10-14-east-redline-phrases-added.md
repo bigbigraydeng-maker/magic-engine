@@ -5,6 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 source: session:9cbc0338
+verify_by: 2026-10-21
+verify_how: 第一条 East 成片交审时，用含 countdown 的测试字幕确认审核页会标红；没标红就是词没生效
 done_on: 2026-10-14
 done_ref: doc:docs/clients/east-inter/2026-10-14-east-video-factory-wiring-plan.md
 ---
