@@ -1,12 +1,12 @@
 ---
 id: 2026-10-14-east-video-factory-wiring-plan
-title: East Inter 出片接线已全部完成：东际试跑单已被出片机领走并出片
+title: East Inter 出片接线：只剩出片机本机名单加 East 并重启（其余已完成）
 status: done
 owner: agent
 decided_on: 2026-10-14
 source: session:9cbc0338
-verify_by: 2026-10-17
-verify_how: 东际试跑成片被真人真播放确认无误（见 2026-10-15-east-trial-video-a-done-b-pending）；出片机以后再领东际单仍正常
+verify_by: 2026-10-16
+verify_how: PR 2646 合并后，看出片机本机名单（FACTORY_REMOTION_CLIENT_IDS 与 FACTORY_CLIENT_STUDIO）是否已加 East 并重启；没加就提醒 18 号
 done_on: 2026-10-15
 done_ref: pr:2646
 ---
