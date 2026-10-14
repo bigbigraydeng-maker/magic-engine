@@ -38,6 +38,7 @@ import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
@@ -83,6 +84,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
   'ai_tracker_all_failed',
   'ai_tracker_all_failed_dev',
+  // 待确认电话的链接是需要登录的页面，探活多半判成坏链接 —— 不能因此让「有电话没记进客人档案」静默消失。
+  'phone_call_needs_review',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -194,6 +197,8 @@ export type ManualItemKind =
   | 'dm_maybe_stop'
   /** 客人身上的「⭐重要标记」到期了 —— 员工手工设的"约好周三 3 点回电"这种事，到点该做了 */
   | 'crm_important_due'
+  /** 电话系统收了通话但没能自动记进客人档案（待确认 / 没记成）—— 要人看一眼是谁、补记一笔 */
+  | 'phone_call_needs_review'
   /** 平台候选（docs/registry/platform-candidates.md）到了复查日期 —— 见 me-platform-tier-gate skill */
   | 'platform_candidate_review_due'
   /** 客户方案文档里写了一次性人工动作（如"明早 09:00 前扫一眼 xx"），只登记在文档里等于没下发 */
@@ -237,6 +242,8 @@ export type ManualItemKind =
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
   | AdsCircuitItemKind
+  /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
+  | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
   | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */

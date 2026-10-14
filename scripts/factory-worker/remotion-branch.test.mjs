@@ -534,6 +534,18 @@ describe('montage template and shared music', () => {
     expect(deps.renderFn).not.toHaveBeenCalled()
   })
 
+  it('refuses the data-card template before rendering (worker not wired for it yet)', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, { loadEngineFn: async () => makeEngine({ isTemplateId: (id) => ['list', 'montage', 'datacard'].includes(id) }) })
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'datacard', props: MONTAGE_PROPS }
+    const err = await errOf(run(env, deps, wo))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBeFalsy()
+    expect(err.message.startsWith('DATACARD_NOT_WIRED:')).toBe(true)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
   it('rejects an unknown template', async () => {
     const env = makeEnv()
     const deps = makeDeps(env)

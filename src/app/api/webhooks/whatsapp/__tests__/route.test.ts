@@ -795,9 +795,16 @@ describe('per-app signature secret', () => {
     expect(res.status).toBe(401)
   })
 
-  it('body 超过 1,000,000 字节 → 413，且不查 whatsapp_app_credentials', async () => {
+  it('body 恰好 5,000,000 字节不算超限（继续走验签，坏签名 → 401 而不是 413）', async () => {
     stubDb()
-    const big = 'x'.repeat(1_000_001)
+    const big = 'x'.repeat(5_000_000)
+    const res = await POST(makePost({}, { rawBody: big, signature: 'sha256=' + '0'.repeat(64) }))
+    expect(res.status).toBe(401)
+  })
+
+  it('body 超过 5,000,000 字节 → 413，且不查 whatsapp_app_credentials', async () => {
+    stubDb()
+    const big = 'x'.repeat(5_000_001)
     const raw = JSON.stringify({ entry: [], pad: big })
     const res = await POST(makePost({}, { rawBody: raw, signature: sign(raw) }))
     expect(res.status).toBe(413)

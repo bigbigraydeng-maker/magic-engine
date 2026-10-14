@@ -151,6 +151,30 @@ describe('?contact=<id> 的人不在第一页（付款总览点名字）', () =>
   })
 })
 
+describe('平铺名单每页 50 人', () => {
+  it('请求带 perPage=50，页脚按 50 算总页数', async () => {
+    const contacts = Array.from({ length: 3 }, (_, i) => contact(`c${i}`, `Guest ${i}`))
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url)
+        if (url.includes('/crm/contacts?')) {
+          return { ok: true, json: async () => ({ items: contacts, total: 120, page: 1, perPage: 50, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(screen.getByText('Guest 0')).toBeTruthy())
+    expect(urls.some((u) => u.includes('perPage=50'))).toBe(true)
+    expect(urls.some((u) => u.includes('perPage=100'))).toBe(false)
+    expect(screen.getByText(/共 120 人 · 第 1 \/ 3 页/)).toBeTruthy()
+  })
+})
+
 describe('搜索框', () => {
   it('敲字触发重新加载时，输入框不被卸载（焦点不丢，不像整页刷新）', async () => {
     let release: (() => void) | null = null

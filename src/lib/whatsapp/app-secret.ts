@@ -1,7 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { decryptToken } from '@/lib/platform-oauth/vocabulary'
 
-export const MAX_WEBHOOK_BODY_BYTES = 1_000_000
+export const MAX_WEBHOOK_BODY_BYTES = 5_000_000
 export const MAX_WEBHOOK_PHONE_NUMBER_IDS = 20
 
 export type ExtractedNumbers =

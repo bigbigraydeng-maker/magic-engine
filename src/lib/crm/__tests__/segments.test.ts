@@ -793,6 +793,14 @@ describe('从没人联系过：新的留在名单上，陈年积压交给系统'
     expect(r.reason).toContain('天')
   })
 
+  /** 没有任何来信时间的新建客人，不能拿 1970 年当进线时间（曾显示「进线 20739 天」）。 */
+  it('没有来信时间的客人不说荒唐的天数', () => {
+    const r = segmentContact(contact({ touchpoints: [] }), NOW)
+    expect(r.segment).toBe('new_untouched')
+    expect(r.reason).not.toMatch(/\d+\s*(天|小时)/)
+    expect(r.reason).toContain('还没人联系')
+  })
+
   /** 交给系统 ≠ 放弃：他哪天回话了，立刻回到最上面那层。 */
   it('陈年积压的人一开口，立刻回到「客人在等你」', () => {
     const c = contact({
@@ -1074,3 +1082,35 @@ describe('行业剧本：通用引擎不该认识「旅游」这两个字', () =
     expect(segmentContact(c, NOW, shortWindow).segment).not.toBe('clicked_link')
   })
 })
+
+/**
+ * 电话系统记录的「外呼没人接」不算我们联系上了他（PM 2026-10-12）。
+ * 少了这一条，一个只被拨过一通没人接的新线索会被当成「已联系过」，掉出「新线索还没碰」。
+ */
+describe('外呼没人接不算已联系', () => {
+  const lead = form('2026-07-26T06:00:00Z')
+
+  it('只被拨过一通没人接 → 仍是「新线索还没碰」', () => {
+    const c = contact({
+      touchpoints: [lead, call('2026-07-26T08:00:00Z', 'no_answer', { unansweredCall: true })],
+    })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('new_untouched')
+    expect(r.lastTouchAt).toBe(new Date('2026-07-26T06:00:00Z').toISOString())
+  })
+
+  it('同样一通但接通了（没带 unansweredCall）→ 算我们联系过', () => {
+    const c = contact({ touchpoints: [lead, call('2026-07-26T08:00:00Z', 'spoke')] })
+    expect(segmentContact(c, NOW).segment).not.toBe('new_untouched')
+  })
+
+  it('入站漏接（客人打来我们没接）仍算客人来找过 —— 不受影响', () => {
+    const c = contact({
+      touchpoints: [
+        { channel: 'phone', direction: 'inbound', occurredAt: '2026-07-26T09:00:00Z', outcome: 'missed_inbound' },
+      ],
+    })
+    expect(segmentContact(c, NOW).lastTouchAt).toBe(new Date('2026-07-26T09:00:00Z').toISOString())
+  })
+})
+
