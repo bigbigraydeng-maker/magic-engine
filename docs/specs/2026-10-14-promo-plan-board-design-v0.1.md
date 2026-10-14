@@ -259,13 +259,18 @@ interface AdsStepSettings {            // 全部是「这个计划实例的数�
 
 魏征和子牙独立查出：今天「未批准什么都不做」只是口号，**至少 4 条旁路**。v1 开工的第一批工作是堵它们，**比加广告栏优先**：
 
-1. **批准要有"抢占"**：批准接口今天是「先派发再改状态」，无事务无锁。改为条件更新抢占（`UPDATE … WHERE status='draft' RETURNING`，抢到的才派发），零迁移；点两下批准不会派两份。
+1. **批准要有"抢占"，而且失败后能接着做**：批准接口今天是「先派发再改状态」，无事务无锁。**不能**用「把状态改成已批准」当一次性锁（Codex 指出：改完状态后派发失败，计划会永远显示已批准却没有任务，正是 Roman 那次的故障）。v1 改为带"租约"的三步（零迁移，状态存在 `plan_data.approval` 里）：
+   ① **抢占**：条件更新 `plan_data.approval.state` 从空 / 租约已过期 → `dispatching`（写租约到期时间、请求号）；抢不到就返回"正在处理"；
+   ② **派发**：按步骤号**先查后插**（已存在同 `promo_ref.step_id` 的任务卡就跳过），所以重试不会重复；
+   ③ **收尾**：全部派完才把计划状态改成已批准、`approval.state='done'`，并写回执。
+   进程中途挂掉：租约到期后，再点一次就从第②步接着做。v2 把这三步换成 Inngest 事件 + 数据库层去重（§6.2、§7）。
+   - **按阶段批准（Codex）**：计划里有多个阶段时，"批准本阶段"**不等于批准整个计划**。v1 需要记录每个阶段自己的批准状态（`plan_data.approval.phases[阶段号]`，同样用租约抢占），**只派发该阶段的步骤**；现有批准路由一次派发全部 `plan_data.tasks` 的行为要拆成"按阶段派发"。没有这一步，后面阶段无法保证等检查清单通过才派发。
 2. **批准后锁住计划内容**：今天 PATCH 能随时整体改 `plan_data`（含将来的 `promo`）。改为：`approved/completed` 的计划拒绝改 `plan_data`；要改必须「撤销批准→改→重批」。否则会出现「批的是 A、跑的是 B」。
 3. **所有往 `execution_items`（来源 marketing_plan）写任务卡的入口都要查计划已批准**：①批准路由；②`POST /execution`（今天只查计划存在，不查状态——**草稿计划也能派活**）；③`save-to-board`（今天自动挂到「该客户最新已批准计划」，和批准的阶段无关）。三个入口列清单冻结，只许缩小。
 4. **`PATCH` 的状态改写收紧**：今天只拦 approved，其余值随便改（含 completed）；`completed` 改为由阶段全部完成推导。
 5. **PromoSpec 校验必须在 PATCH 和 approve 两个入口都跑**（不只在生成器里），畸形输入按「未批准」处理（fail-closed）；写 `schema` 版本号和升级策略。
 6. **租户校验**：`goal_id`、`campaign_brief_id` 必须校验属于同一个客户（否则可以挂别家的目标、读到别家的目标值）；对账读取的每一张表都带 `client_id`；写单测。
-7. **预算上限在服务端强制**：`daily_budget_cents ≤ ad_strategy_configs.daily_budget_cap_cents`，上限变更后已批准计划要重新核，不能只在类型注释里写。
+7. **预算上限在服务端强制，且按"总额"算**（Codex）：`daily_budget_cap_cents` 是客户每日**总**上限，不是单个步骤的上限。保存、批准、（v2）开启三个时点都要把 ①本阶段**全部**广告步骤的日预算 ②该客户账户上**已在投放**的广告预算 加总，按账户和币种分别对照 `client_meta_ad_accounts` 的账户级日上限和 `ad_strategy_configs.daily_budget_cap_cents`，任一超出就拒绝；上限变更后已批准计划要重新核。写单测：两个步骤各自不超、合计超的情况必须被拦。
 8. **暂停整个计划**：v1 就要有「暂停（不再派发）」按钮；撤销（含已派内部卡的处理）在 v2。
 9. **批准留回执（v1 无新表）**：把派发结果（请求号、派发数、时间、操作者）写进 `plan_data.receipts`——Roman 那次「批准了但什么也没发生」正是因为没有回执。
 10. 其余沿用：生成器不动；「阶段+广告」草案由**人确认后**写入 `plan_data.promo`，v1 不让 AI 自动写广告预算；从 Goal 页进入的入口保留并带上 `goal_id`（Go，见 §5.4）。
@@ -338,11 +343,15 @@ CREATE TABLE promo_plan_receipts (
 ALTER TABLE promo_plan_receipts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY promo_plan_receipts_service_role ON promo_plan_receipts
   FOR ALL TO service_role USING (true) WITH CHECK (true);   -- 必须有 TO service_role
--- 追加式：不开 UPDATE/DELETE 的业务路径；纠错=追加一条新回执。
+-- 追加式必须由触发器强制（service_role 会绕过 RLS，光不开 UPDATE/DELETE 的业务路径挡不住）：
+-- 照仓库已有范式 authorization_decisions_append_only() / ads_circuit_events_append_only_trigger，
+-- 加一个拒绝 UPDATE / DELETE / TRUNCATE 的触发器；纠错 = 追加一条新回执。
 ALTER TABLE marketing_plans ADD COLUMN plan_revision int NOT NULL DEFAULT 1;
 -- 派发防重复（共享表 execution_items，A 级）：
--- CREATE UNIQUE INDEX ... ON execution_items (marketing_plan_id, (steps_json->>'step_id'))
---   WHERE source='marketing_plan' AND steps_json ? 'step_id';
+-- 步骤号存放位置只有一处：steps_json.promo_ref.step_id（嵌套路径），索引和谓词都读这个路径：
+-- CREATE UNIQUE INDEX ... ON execution_items (marketing_plan_id, (steps_json->'promo_ref'->>'step_id'))
+--   WHERE source='marketing_plan' AND steps_json->'promo_ref' ? 'step_id';
+-- 且校验器保证"步骤号在同一计划内唯一"。
 ```
 - `goal_id` 在 v2 提成 `marketing_plans` 的真列并加外键（放在 jsonb 里没有外键，目标被删/改状态无人知道）；v1 只在应用层校验同客户。
 - 生产库实查（2026-10-14，只读 `pg_policies`）：`marketing_plans`、`execution_items`、`social_plans` 的访问策略**都只对 service_role 开放**。注意 `20260524000003_marketing_plans.sql` 的迁移文件里漏写了 `TO service_role`（子牙发现），生产库实际是对的（可能后来修过）；新表一律照模板写全。
@@ -445,6 +454,8 @@ ALTER TABLE marketing_plans ADD COLUMN plan_revision int NOT NULL DEFAULT 1;
 | **子牙（架构）** | 无需推翻；3 项决定：v2a/v2b 拆法**同意**、"步骤引用不合表"**同意**、"jsonb 存阶段步骤"**v1 同意、v2 前状态要离开 jsonb** | ①守卫不能读可被改的状态字段、v1 别宣称"代码保证" → §5.2/5.3 已改，强度声明写明；②批准后 PATCH 可改内容 → 已列必做；③批准无抢占 → 已列必做；④未核实项不拦批 → 已分硬门/软门；⑤"计划值"口径未定义 → §4.5 已补；⑥首次全灰 → 已写预期；⑦草稿状态映射 → §6.2 已补；另：Kernel 实为 8 个广告动作、`ads.create_ad` 非 Kernel key、daily-plan 校验会丢字段且固定 7 天 → 已改；**marketing_plans 迁移漏 TO service_role → 生产实查已是对的**，已记 |
 | **魏征（挑刺）** | 方向对，"未批准什么都不做"今天有 ≥4 条旁路 | 25 条意见：必改项（旁路、批准竞态、硬软门、数据时效、结果成熟期、Inngest 例外的替代回执、租户校验）**全部并入 §4.4/4.5/5.2/6.1**；"Roman 直接写库"已降为"高度疑似"，"没人用"降为"没有新增使用"；优先级改为**先堵旁路再加功能**。未采纳/延后：把当场试跑对照改成自动化断言（可选，v1 实施时再定）；DB 层触发器兜底放 v2 |
 | **板桥（非技术）** | §0 原版只能看懂约 60% | §0 整段按大白话重写；顶部加"PM 只看 §0 和 §9"；"闸"改"检查清单"；灰色 unknown 单独成色；按钮文案 v1 不叫"批准开投"（见 §9）；"合 N"改成"同意设计 / 做第一步"；出错谁通知写进 §0；风险级 A/B 从 PM 页面拿掉 |
+
+| **Codex 自动审查（PR #2649，5 条 P1）** | 全部成立，已改 | ①v1 要真正按阶段批准、只派该阶段步骤 → §5.2-1；②预算上限要按账户/客户**总额**算 → §5.2-7；③回执"不可改"要靠触发器 → §7；④去重索引要读嵌套的 `promo_ref.step_id` → §7；⑤"先抢占后派发"失败后不可恢复 → §5.2-1 改成带租约、可重试、先查后插 |
 
 **未跑的审查**：狄仁杰（攻击验证）——按规则在 v2 实施后补，本设计阶段不需要。
 **我自己没复核的**：调查代理引用的 `DECISIONS.md` 行号、CHANGELOG 未勾选项（已在 §3.3 标明"沿用"）。
