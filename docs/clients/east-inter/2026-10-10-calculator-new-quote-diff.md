@@ -92,3 +92,11 @@
 - 空运大件加重量分档：含税 10KG+ / 50KG+，不含税 10KG以上 / 51KG以上，整票按所在档单价（表里没明说是否整票，按行业惯例整票）。
 - 海运拼箱加可选重量栏：重量÷500kg 与体积取大，说明里写明折算。
 - 页面日期标签中性写 CURRENT RATES，东际给了生效日期再改配置里的 `effective`。
+
+## 10. Impeccable 网页检查（2026-10-14，PM 许可下载）
+
+命令：`IMPECCABLE_ALLOW_DOWNLOAD=1 .claude/skills/impeccable/scripts/impeccable detect <页面目录>`，退出码 0。
+- **修复前**（9 月 20 日线上版 `d60c23a`）：19 项。**本轮改动后、修复前**：20 项（新增的重量栏说明文字 11px）。
+- **修复后**：6 项。已修：全部小于 11px 的功能文字（7/9/10px）提到 11px，其余 11px 正文提到 12px，共 13 项。
+- **保留 6 项，理由**：`wide-tracking`×3 是「OCTOBER/CURRENT RATES」等短的全大写小标签，字距宽是有意设计，不是正文（检测器把它归为正文，属误判）；`kicker-above-heading`（PLAN YOUR SHIPMENT）和 `dark-glow`（深色估价卡阴影）是站点既有设计语言，客户品牌色/视觉资料未到位前不重做；`cramped-padding`（页面顶部条）是站点全局页眉，不在本计算器范围，且修复前版本里就有。
+- 页面截图确认版式未被打乱。
