@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-10-09
 source: session:4d4d7a49
 done_on: 2026-10-09
-done_ref: pr:2386
+done_ref: pr:2615
 verify_by: 2026-10-13
 verify_how: 跑 `wc -l "src/app/dashboard/clients/[id]/crm/all/page.tsx"` 必须 < 800。另跑 `npm test -- all/__tests__`，应 3 个文件 50 条全绿
 ---
