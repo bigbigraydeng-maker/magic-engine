@@ -319,7 +319,8 @@ export async function countRevokeBlockers(planId: string): Promise<{ tasks_in_pr
       .from('production_packages')
       .select('id', { count: 'exact', head: true })
       .eq('marketing_plan_id', planId)
-      .not('status', 'in', '(draft,archived)'),
+      // 只数还在进行的生产包；已发布 / 已衡量 / 失败 这类终态处理不了，不能永远挡住退回
+      .in('status', ['generating', 'ready_for_review', 'revision_requested', 'approved', 'scheduled']),
   ])
   if (tasks.error) throw new Error(`Failed to check in-progress tasks: ${tasks.error.message}`)
   if (pkgs.error) throw new Error(`Failed to check started packages: ${pkgs.error.message}`)
