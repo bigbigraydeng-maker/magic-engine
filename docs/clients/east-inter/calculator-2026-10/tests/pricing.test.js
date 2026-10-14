@@ -132,3 +132,37 @@ test('DDU clearance fee and threshold are rendered from config, not hard-coded i
 test('Bulk air warnings say batteries/magnets are priced on a separate rate', () => {
   for (const tax of ['DDP','DDU']) assert.match(est({service:'bulkAir',city:'sydney',quantity:50,tax}).warning,/batteries or magnets are priced on a separate rate/);
 });
+// ---- Remote delivery postcodes (空运大件 sheets): extra RMB 3 / 10 / 16 per kg -> A$1 / 3 / 4 per kg; 单询 postcodes get no price
+test('Remote postcode RMB3 tier (2361): Sydney DDP 50kg 550 + 50 * A$1', () => {
+  const q = est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDP',postcode:'2361'});
+  assert.equal(q.total,600); assert.ok(q.lines.some(l => /Remote postcode surcharge · 2361/.test(l[0]) && l[1] === 50));
+});
+test('Remote postcode RMB10 tier (4272): Sydney DDU 20kg 200 + 20 * A$3', () => assert.equal(est({service:'bulkAir',city:'sydney',quantity:20,tax:'DDU',postcode:'4272'}).total,260));
+test('Remote postcode RMB16 tier (0840, leading zero kept): Brisbane DDP 10kg 120 + 10 * A$4', () => assert.equal(est({service:'bulkAir',city:'brisbane',quantity:10,tax:'DDP',postcode:'0840'}).total,160));
+test('Remote surcharge uses the billed (rounded-up, volume-aware) weight: 12.3kg bills 13kg, tier 3 -> 13 * A$1', () => {
+  assert.equal(est({service:'bulkAir',city:'sydney',quantity:12.3,tax:'DDU',postcode:'2406'}).total,13*10+13);
+});
+test('Postcodes listed under two tiers use the higher surcharge (4411, 6765 are in RMB3 and RMB16)', () => {
+  assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDU',postcode:'4411'}).total,100+40);
+  assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDU',postcode:'6765'}).total,100+40);
+});
+test('Ask-for-quote postcode (0822) adds no surcharge and says the delivery charge is on request', () => {
+  const q = est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP',postcode:'0822'});
+  assert.equal(q.total,110); assert.match(q.warning,/quoted on request/);
+});
+test('No-service note postcodes (2898, 3885) are also ask-for-quote', () => {
+  for (const pc of ['2898','3885']) assert.match(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP',postcode:pc}).warning,/quoted on request/);
+});
+test('Normal postcode (2000) and blank postcode add nothing', () => {
+  assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP',postcode:'2000'}).total,110);
+  assert.equal(est({service:'bulkAir',city:'sydney',quantity:10,tax:'DDP'}).total,110);
+});
+test('Invalid postcode is rejected; postcode is ignored for non-bulk-air services', () => {
+  assert.match(est({service:'bulkAir',city:'sydney',quantity:10,postcode:'20'}).error,/4-digit/);
+  assert.equal(est({service:'lcl',city:'sydney',quantity:2,postcode:'2361'}).total,593);
+});
+test('Every surcharge postcode in the config is a 4-digit string and no postcode is both surcharged and ask-for-quote', () => {
+  const sc = Object.values(config.remotePostcodes.surchargeRmbPerKg).flat();
+  assert.ok(sc.every(p => /^\d{4}$/.test(p)));
+  assert.deepEqual(sc.filter(p => config.remotePostcodes.askQuote.includes(p)),[]);
+});
