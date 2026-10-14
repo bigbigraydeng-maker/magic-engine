@@ -569,12 +569,23 @@ describe('montage template and shared music', () => {
       expect(srt).toContain('00:00:02,000 --> 00:00:03,200')
     })
 
-    it('strips invisible characters from the caption so a banned phrase cannot hide', async () => {
+    it('refuses bidi or invisible characters that could make caption differ from the screen', async () => {
       const env = makeEnv()
-      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 8 })) })
-      const props = { ...DC_PROPS, disclaimer: 'Lim\u200bited time' }
-      await run(env, deps, dcWo(props))
-      expect(deps.completeFn.mock.calls[0][0].caption).toContain('Limited time')
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, disclaimer: '\u202eemit detimil\u202c' }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('双向控制字符')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
+    it('refuses a client without a studio mapping with a non-retryable error', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), clientStudio: {} })
+      const err = await errOf(run(env, deps, dcWo({ ...DC_PROPS, logoFile: null })))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.retryable).toBeFalsy()
+      expect(err.message).toContain('FACTORY_CLIENT_STUDIO')
     })
 
     it('refuses props whose label is only invisible characters', async () => {

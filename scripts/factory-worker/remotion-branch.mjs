@@ -168,6 +168,10 @@ export function assertDatacardTextVisible(props) {
   const parts = [...props.hook.lines.map((t) => ['钩子', t]), ...props.rows.flatMap((r, i) => [[`第 ${i + 1} 行标签`, r.label], [`第 ${i + 1} 行数值`, r.value]]), ['免责文案', props.disclaimer]]
   for (const [name, t] of parts) {
     if (clean(t) === '') throw new RemotionOrderError(`数据卡${name}清理后是空的（只含不可见字符）`)
+    // The renderer paints raw props; a caption that silently drops bidi/invisible characters could differ from what is on screen.
+    if (clean(t) !== String(t).trim().normalize('NFKC')) {
+      throw new RemotionOrderError(`数据卡${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+    }
   }
 }
 
@@ -524,7 +528,11 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
         throw new RemotionOrderError(e.message)
       }
     }
-    const clientRootDir = join(deps.studioRoot, deps.clientStudio[wo.client_id])
+    const clientFolder = deps.clientStudio[wo.client_id]
+    if (!clientFolder) {
+      throw new RemotionOrderError(`客户 ${wo.client_id} 没配 studio 目录：在出片机 FACTORY_CLIENT_STUDIO 里加一条映射`)
+    }
+    const clientRootDir = join(deps.studioRoot, clientFolder)
     const assetLibDir = join(clientRootDir, 'remotion-assets')
     let musicSource = null
     if (props.musicFile) {
