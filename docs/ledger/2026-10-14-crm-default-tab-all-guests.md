@@ -1,9 +1,11 @@
 ---
 id: 2026-10-14-crm-default-tab-all-guests
 title: PM 定：CRM 默认先看全部客人（不另设今天页）
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-14
+done_on: 2026-10-14
+done_ref: pr:2651
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 打开客户的 CRM 入口 /crm 会跳到全部客人，页签里全部客人排第一；没有「今天」页签
