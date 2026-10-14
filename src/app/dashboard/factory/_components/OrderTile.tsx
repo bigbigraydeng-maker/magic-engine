@@ -21,8 +21,8 @@ export function CardVideo({ src, onDuration }: { src: string; onDuration?: (s: n
   )
 }
 
-export function StatusTag({ label, tone }: { label: string; tone: 'amber' | 'green' | 'slate' }) {
-  const cls = tone === 'amber' ? 'bg-amber-100 text-amber-800' : tone === 'green' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
+export function StatusTag({ label, tone }: { label: string; tone: 'amber' | 'green' | 'slate' | 'orange' }) {
+  const cls = tone === 'orange' ? 'bg-orange-100 text-orange-700' : tone === 'amber' ? 'bg-amber-100 text-amber-800' : tone === 'green' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
   return <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{label}</span>
 }
 
@@ -33,7 +33,7 @@ export function CardTitle(props: {
   clientName: string
   createdAt?: string | null
   duration: number | null
-  status: { label: string; tone: 'amber' | 'green' | 'slate' }
+  status: { label: string; tone: 'amber' | 'green' | 'slate' | 'orange' }
 }) {
   const p = parseAngle(props.angle)
   return (
@@ -60,7 +60,8 @@ export function ReadOnlyTile(props: {
   clientName: string
   createdAt?: string | null
   videoSrc: string
-  status: { label: string; tone: 'amber' | 'green' | 'slate' }
+  status: { label: string; tone: 'amber' | 'green' | 'slate' | 'orange' }
+  note?: string
   link?: { href: string; label: string } | null
   dim?: boolean
 }) {
@@ -77,6 +78,7 @@ export function ReadOnlyTile(props: {
         duration={duration}
         status={props.status}
       />
+      {props.note && <p className="mb-2 text-xs text-orange-700">{props.note}</p>}
       {props.link && (
         <a href={props.link.href} target="_blank" rel="noopener noreferrer" className="mt-auto text-sm text-blue-600 underline">{props.link.label}</a>
       )}

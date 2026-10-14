@@ -105,8 +105,8 @@ export default function FactoryCockpitPage() {
   const reviewClients = useMemo(() => {
     const m = new Map<string, { id: string; name: string; count: number }>()
     for (const o of visibleOrders) {
-      // 已发布 / 已作废也要能进审片区看历史卡片(count 只计待审)
-      if (o.status !== 'in_review' && !POST_PUBLISH.includes(o.status) && o.status !== 'superseded') continue
+      // 已发布 / 已作废 / 已打回也要能进审片区看历史卡片(打回完客户不能整块消失,否则看不到理由)(count 只计待审)
+      if (o.status !== 'in_review' && !POST_PUBLISH.includes(o.status) && o.status !== 'superseded' && o.status !== 'review_rejected') continue
       const e = m.get(o.client_id) ?? { id: o.client_id, name: o.client_name, count: 0 }
       if (o.status === 'in_review') e.count += 1
       m.set(o.client_id, e)

@@ -13,6 +13,7 @@ import { OrderNo } from './OrderNo'
 import { PublishOutlets } from './PublishOutlets'
 import { publishedBadge, POST_PUBLISH } from './statusMeta'
 import { PendingCardHead, ReadOnlyTile } from './OrderTile'
+import { RejectDialog } from './RejectDialog'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
@@ -28,6 +29,7 @@ interface WorkOrder {
   angle: string
   rationale_one_liner: string
   created_at?: string
+  reject_reason?: string | null
   published?: PublishedView | null
   // redline_hits:交付时服务端复扫命中的品牌红线词(complete-work-order.ts)。
   // 设计是「命中不打回,标红让人审有的放矢」——但此前唯一的「标红」实现在 Airtable 审核卡里,
@@ -130,6 +132,9 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [published, setPublished] = useState<WorkOrder[]>([]) // 只读展示:已发布
   const [superseded, setSuperseded] = useState<WorkOrder[]>([]) // 只读展示:已作废,折叠在页面底部
+  const [rejected, setRejected] = useState<WorkOrder[]>([]) // 只读展示:已打回(带理由)
+  const [rejecting, setRejecting] = useState<{ order: WorkOrder; mode: 'quality' | 'budget' } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [groupFilter, setGroupFilter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasShown, setHasShown] = useState(false) // 显示过一次就常驻,刷新不卸载(防对话框丢历史)
@@ -155,8 +160,9 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       setPublished(mine.filter((o: WorkOrder) => POST_PUBLISH.includes(o.status)))
       const old = mine.filter((o: WorkOrder) => o.status === 'superseded')
       setSuperseded(old)
+      setRejected(mine.filter((o: WorkOrder) => o.status === 'review_rejected'))
       // 只剩历史卡的客户也算「显示过」:否则对话框触发刷新时整块被加载提示替换,对话历史丢失
-      if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
+      if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => o.status === 'review_rejected') || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
       setError(null)
       setAcceptedFlagsError(typeof json.accepted_flags_error === 'string' && json.accepted_flags_error ? json.accepted_flags_error : null)
     } catch (e) {
@@ -173,7 +179,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
     if (groupFilter && !groupCounts([...orders, ...published].map((o) => o.angle)).some((g) => g.group === groupFilter)) setGroupFilter(null)
   }, [groupFilter, orders, published])
 
-  const act = useCallback(async (id: string, payload: Record<string, unknown>) => {
+  const act = useCallback(async (id: string, payload: Record<string, unknown>, okNotice?: string) => {
     setBusy(id)
     setError(null)
     try {
@@ -188,13 +194,16 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       }
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
+      setRejecting(null)
+      if (okNotice) setNotice(okNotice)
       onReviewed?.() // 通知父页刷新工单,待审数才会变,自动切客户才会触发
+      void load() // 刷新本区:已打回列表要立刻出现
     } catch (e) {
       setError(e instanceof Error ? reviewErrorZh(e.message, k => HUMAN_CHECK_LABEL[k as ContentCheckItemKey] ?? k) : '操作失败')
     } finally {
       setBusy(null)
     }
-  }, [onReviewed])
+  }, [onReviewed, load])
 
   const acceptFlag = useCallback(async (id: string, category: string) => {
     setBusy(id)
@@ -230,7 +239,8 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
         待审 {orders.length > 0 ? <span className="text-amber-600">· 今天 {orders.length} 条等你</span> : <span className="text-slate-400">· 都审完了,去忙别的</span>}
       </h2>
 
-      {error && !confirming && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
+      {error && !confirming && !rejecting && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
+      {notice && <div role="status" className="mb-3 px-4 py-2 rounded-lg bg-orange-50 text-orange-800 text-sm">{notice}</div>}
       {acceptedFlagsError && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">「已接受」记录读取失败,已接受的提醒可能显示不准:{acceptedFlagsError}</div>}
 
       <div className={clientId ? 'grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start' : ''}>
@@ -339,7 +349,21 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
 
               <PublishOutlets />
 
-              <p className="text-xs text-slate-400">要改画面或调预算?在右边跟 Claude 说人话即可。</p>
+              <div className="flex flex-wrap gap-2 mb-2">
+                <button
+                  type="button"
+                  onClick={() => { setError(null); setRejecting({ order: o, mode: 'quality' }) }}
+                  disabled={busy === o.id}
+                  className="flex-1 px-3 h-10 rounded-lg border border-orange-300 text-orange-800 text-sm font-medium hover:bg-orange-50 disabled:opacity-50"
+                >打回·画面</button>
+                <button
+                  type="button"
+                  onClick={() => { setError(null); setRejecting({ order: o, mode: 'budget' }) }}
+                  disabled={busy === o.id}
+                  className="flex-1 px-3 h-10 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+                >打回·预算</button>
+              </div>
+              <p className="text-xs text-slate-400">打回不会发布任何东西。也可以在右边跟 Claude 说人话改。</p>
             </div>
           </div>
         ))}
@@ -375,6 +399,27 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
           )
         })()}
 
+        {rejected.length > 0 && (
+          <details className="mt-8 group">
+            <summary className="cursor-pointer select-none text-sm font-medium text-orange-700">已打回 · {rejected.length} 条(带理由,默认收起)</summary>
+            <div className="mt-3 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+              {rejected.map((o) => (
+                <ReadOnlyTile
+                  key={o.id}
+                  id={o.id}
+                  angle={o.angle}
+                  rationale={o.rationale_one_liner}
+                  clientName={o.client_name}
+                  createdAt={o.created_at}
+                  videoSrc={publicUrl(o.output?.video_path)}
+                  status={{ label: '已打回', tone: 'orange' }}
+                  note={o.reject_reason ? `打回理由:${o.reject_reason}` : '打回理由:未记录'}
+                />
+              ))}
+            </div>
+          </details>
+        )}
+
         {(() => {
           const oldShown = superseded.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup)
           return oldShown.length > 0 && (
@@ -402,6 +447,23 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
 
         {clientId && <FactoryChat clientId={clientId} onActed={load} />}
       </div>
+
+      {rejecting && (
+        <RejectDialog
+          mode={rejecting.mode}
+          orderNo={rejecting.order.id.slice(0, 8)}
+          busy={busy === rejecting.order.id}
+          error={error}
+          onClose={() => setRejecting(null)}
+          onSubmit={(payload) => void act(
+            rejecting.order.id,
+            payload,
+            rejecting.mode === 'quality'
+              ? `已打回 #${rejecting.order.id.slice(0, 8)}:${String(payload.feedback ?? '')}`
+              : `已调整预算 #${rejecting.order.id.slice(0, 8)}:$${String(payload.new_budget_usd ?? '')}(片子仍在待审,没有发布)`,
+          )}
+        />
+      )}
 
       {confirming && (
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
