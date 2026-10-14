@@ -565,6 +565,89 @@ describe('end card', () => {
   })
 })
 
+describe('cardTop', () => {
+  test('599 is rejected', () => {
+    rejects((props) => {
+      props.cardTop = 599
+    }, 'cardTop 必须在 600 到 940 之间')
+  })
+
+  test('941 is rejected', () => {
+    rejects((props) => {
+      props.cardTop = 941
+    }, 'cardTop 必须在 600 到 940 之间')
+  })
+
+  test('600 is accepted', () => {
+    const props = validProps()
+    props.cardTop = 600
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.cardTop, 600)
+  })
+
+  test('940 is accepted', () => {
+    const props = validProps()
+    props.cardTop = 940
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.cardTop, 940)
+  })
+
+  test('absent is accepted', () => {
+    const props = parsePostcardProps(validProps())
+    assert.equal(props.cardTop, undefined)
+  })
+})
+
+describe('priceSec with a price card', () => {
+  test('4 seconds with a price card is rejected', () => {
+    rejects((props) => {
+      props.timing.priceSec = 4
+    }, '带价格卡时最后一段至少 5 秒')
+  })
+
+  test('4 seconds with price null and an end card is accepted', () => {
+    const props = validProps()
+    props.price = null
+    props.end = { backdropClip: 'clips/end.mp4', title: 'QUIET HARBOUR' }
+    props.timing.priceSec = 4
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.timing.priceSec, 4)
+  })
+
+  test('2.9 seconds is rejected with a price card', () => {
+    rejects((props) => {
+      props.timing.priceSec = 2.9
+    })
+  })
+
+  test('2.9 seconds is rejected with an end card', () => {
+    rejects((props) => {
+      props.price = null
+      props.end = { backdropClip: 'clips/end.mp4', title: 'QUIET HARBOUR' }
+      props.timing.priceSec = 2.9
+    })
+  })
+})
+
+describe('timing with an end card', () => {
+  test('price null, hookSec 3, sceneSec 4 (3 scenes), priceSec 4 gives 570 frames', () => {
+    const props = validProps()
+    props.price = null
+    props.end = { backdropClip: 'clips/end.mp4', title: 'QUIET HARBOUR' }
+    props.timing.hookSec = 3
+    props.timing.sceneSec = 4
+    props.timing.priceSec = 4
+    const base = props.scenes[0]
+    props.scenes = [
+      { ...base, clip: 'clips/a.mp4' },
+      { ...base, clip: 'clips/b.mp4' },
+      { ...base, clip: 'clips/c.mp4' },
+    ]
+    const timing = computePostcardTiming(parsePostcardProps(props))
+    assert.equal(timing.totalFrames, 570)
+  })
+})
+
 describe('error text', () => {
   test('formatZodIssues produces one line per issue', () => {
     const result = PostcardPropsSchema.safeParse({})

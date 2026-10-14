@@ -28,7 +28,7 @@ const Scene: React.FC<{ props: PostcardProps; index: number }> = ({ props, index
   return (
     <AbsoluteFill>
       <Footage src={scene.clip} zoomTo={1.05} scrim={props.scrim ?? 0.35} />
-      <div style={{ position: 'absolute', left, top: 800, width, background: `rgba(0,0,0,${props.cardOpacity})`, borderRadius: 24, padding: '28px 36px', fontFamily, opacity: o }}>
+      <div style={{ position: 'absolute', left, top: props.cardTop ?? 800, width, background: `rgba(0,0,0,${props.cardOpacity})`, borderRadius: 24, padding: '28px 36px', fontFamily, opacity: o }}>
         <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: 3, textTransform: 'uppercase', color: props.accent ?? '#ffffff', marginBottom: 14 }}>{scene.place}</div>
         <div style={{ fontSize: 66, fontWeight: 800, lineHeight: 1.15, color: '#fff', textShadow: '0 3px 16px rgba(0,0,0,0.6)' }}>{scene.line}</div>
       </div>
