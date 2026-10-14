@@ -8,12 +8,12 @@
  * 数据加载与竞态处理在 usePaymentsOverview 里，这里只负责呈现。
  */
 
-import { Suspense, useCallback, useMemo } from 'react'
+import { Suspense, useCallback, useMemo, useState } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
 import { SECONDARY_BUTTON } from '../_components/bookings/booking-styles'
-import { saveReturnQuery, stashContactName } from '../_components/bookings/payments-return'
+import { ContactDrawerHost } from '../_components/ContactDrawerHost'
 import { SummaryTable } from './_components/SummaryTable'
 import { SummaryFooter } from './_components/SummaryFooter'
 import { PaidWithoutBookingBanner } from './_components/PaidWithoutBookingBanner'
@@ -58,20 +58,14 @@ function PaymentsPageInner(): JSX.Element {
     [router, base, query],
   )
 
-  const onLeave = useCallback(() => {
-    saveReturnQuery(clientId, toSearchString(query))
-  }, [clientId, query])
-
-  const onOpenRow = useCallback(
-    (row: OverviewListRow) => {
-      onLeave()
-      stashContactName(clientId, row.contactId, row.contactName)
-      router.push(
-        `/dashboard/clients/${clientId}/crm/all?contact=${encodeURIComponent(row.contactId)}&focus=bookings`,
-      )
-    },
-    [clientId, router, onLeave],
-  )
+  // 点客人：原地弹出抽屉，筛选、页码、滚动位置都不动；关掉后刷新一次数字（抽屉里可能改了付款）。
+  const [openContact, setOpenContact] = useState<{ id: string; name: string | null } | null>(null)
+  const onOpenContact = useCallback((id: string, name: string | null) => setOpenContact({ id, name }), [])
+  const onOpenRow = useCallback((row: OverviewListRow) => onOpenContact(row.contactId, row.contactName), [onOpenContact])
+  const closeContact = useCallback(() => {
+    setOpenContact(null)
+    retry()
+  }, [retry])
 
   if (state.status === 'hidden') {
     return <p className="p-6 text-sm text-me-charcoal/70">这一页没有开通</p>
@@ -98,9 +92,18 @@ function PaymentsPageInner(): JSX.Element {
             refreshing={state.refreshing}
             navigate={navigate}
             onOpenRow={onOpenRow}
-            onLeave={onLeave}
+            onOpenContact={onOpenContact}
           />
         </PaymentsErrorBoundary>
+      )}
+      {openContact !== null && (
+        <ContactDrawerHost
+          clientId={clientId}
+          contactId={openContact.id}
+          name={openContact.name}
+          scrollToBookings
+          onClose={closeContact}
+        />
       )}
     </div>
   )
@@ -141,17 +144,17 @@ interface ReadyViewProps {
   refreshing: boolean
   navigate: (change: Partial<PaymentsQuery>) => void
   onOpenRow: (row: OverviewListRow) => void
-  onLeave: () => void
+  onOpenContact: (id: string, name: string | null) => void
 }
 
 function ReadyView(props: ReadyViewProps): JSX.Element {
-  const { clientId, query, data, refreshing, navigate, onOpenRow, onLeave } = props
+  const { clientId, query, data, refreshing, navigate, onOpenRow, onOpenContact } = props
   const banner = (
     <PaidWithoutBookingBanner
       clientId={clientId}
       total={data.paidWithoutBooking.total}
       rows={data.paidWithoutBooking.rows}
-      onLeave={onLeave}
+      onOpenContact={onOpenContact}
     />
   )
 
@@ -179,7 +182,6 @@ function ReadyView(props: ReadyViewProps): JSX.Element {
             refreshing={refreshing}
             navigate={navigate}
             onOpenRow={onOpenRow}
-            onLeave={onLeave}
           />
         </>
       )}
@@ -225,11 +227,10 @@ interface OrdersSectionProps {
   refreshing: boolean
   navigate: (change: Partial<PaymentsQuery>) => void
   onOpenRow: (row: OverviewListRow) => void
-  onLeave: () => void
 }
 
 function OrdersSection(props: OrdersSectionProps): JSX.Element {
-  const { clientId, query, data, refreshing, navigate, onOpenRow, onLeave } = props
+  const { clientId, query, data, refreshing, navigate, onOpenRow } = props
   return (
     <section className="space-y-3">
       <h2 className="text-lg font-black text-me-charcoal">全部订单</h2>
@@ -253,7 +254,6 @@ function OrdersSection(props: OrdersSectionProps): JSX.Element {
         refreshing={refreshing}
         onPage={(p) => navigate({ page: p })}
         onOpenRow={onOpenRow}
-        onLeave={onLeave}
       />
     </section>
   )
