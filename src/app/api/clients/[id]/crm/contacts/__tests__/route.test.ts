@@ -294,6 +294,18 @@ describe('GET contacts — 分页形状', () => {
       expect(h).not.toMatch(/a1|client-a|@/)
     })
 
+    it('函数给出这一页的 id 后，取触点和取资料同时开始（触点查询先发出，不排在资料之后）', async () => {
+      rpcRows = [{ id: 'a1', total: 3 }, { id: 'a3', total: 3 }]
+      await get('client-a', '?page=1&perPage=2')
+      const touchIdx = recorded.findIndex((r) => r.table === 'contact_touchpoints' && r.ins.some(([c]) => c === 'contact_id'))
+      const rowsIdx = recorded.findIndex((r) => r.table === 'contacts' && r.ins.some(([c]) => c === 'id'))
+      expect(touchIdx).toBeGreaterThanOrEqual(0)
+      expect(rowsIdx).toBeGreaterThanOrEqual(0)
+      expect(touchIdx).toBeLessThan(rowsIdx)
+      // 只读这一页的触点一次，不重复读
+      expect(recorded.filter((r) => r.table === 'contact_touchpoints' && r.ins.some(([c]) => c === 'contact_id'))).toHaveLength(1)
+    })
+
     it('函数还没装上（报错）→ 退回老路径，页面照样 200 且按触点排序', async () => {
       rpcRows = null
       scanRows = [{ contact_id: 'a1', occurred_at: '2026-10-14T01:00:00.000Z' }]

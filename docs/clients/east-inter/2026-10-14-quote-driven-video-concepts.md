@@ -48,6 +48,23 @@
 | **V7** | 「想估价？30 秒教你」 | 官网计算器三步：选服务、选城市、填体积；结尾一句英文 | 30s | 日历 D7 的升级版，教会观众自己试，试完想问 | 表 A |
 | **V8** | 「周二截货，下周一开船」 | 一周时间线：周二截货 → 下周一开船 → 约 20 天到悉尼 | 15s | 时间感，催促「这周要不要发」 | 表 C + 表 A |
 
+## 2.5 英文版画面文字（成片用这版；中文稿搁置）
+
+通用角标（每条都带，以 101 号过审的为准）：`Current rates · Indicative estimate. Final charges are subject to a binding quote.`
+
+| # | First-frame hook (large text) | On-screen lines (short) |
+|---|---|---|
+| V1 | How much to ship 1 m³ from Guangzhou to Sydney? → **A$378** | Door to door · Clearance included · Approx. 20 days |
+| V2 | Same 5 m³. Which Australian city costs least? | Sydney, Melbourne, Brisbane A$1,238 · Perth A$1,512 · Adelaide A$1,658 · Gold Coast A$1,513 |
+| V3 | Ship more, pay less per m³? | 1 m³ A$378 → 20 m³ about A$220 per m³ (calculated from the estimator) |
+| V4 | Sending 2 kg from China? → **A$33** | Air parcel 7–12 days · Sea parcel 25 kg A$75, 30–40 days |
+| V5 | 50 kg by air, duties and taxes included? → **A$550** | DDP · Approx. 6–8 days · Remote-postcode, oversize and some product surcharges may apply |
+| V6 | 4 costs not in your freight quote | GST on goods value · Import duty 0–10% · Fumigation A$143 · Customs broker fee A$99 (A$201 if cargo over A$10,000) |
+| V7 | Get a freight estimate in 30 seconds | Choose service · Choose city · Enter volume |
+| V8 | When does my cargo ship? | Cargo cut-off Tuesday · Vessel departs the following Monday · Approx. 20 days to Sydney（运营信息，不是限时促销，不写 last chance / hurry） |
+
+首评英文模板（不烧进画面）：`Get your own estimate: https://www.eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-<day>` · `Binding quote: info@eastinter.com.au`。拼写用澳新英文。
+
 ## 3. 建议的出片顺序（对应周五开投）
 
 1. **第一批**（周五广告素材）：V1、V2、V3。理由：数字最直观，一条一句话讲清，最容易引出咨询。
@@ -62,5 +79,6 @@
 - 费率只有 10 月；11 月起要重新核，视频里不写月份，只写「当前报价」。
 - 我试算时页面给的 Perth 时效是「25–30 天」，第一次读时一度为空，**成片前要再录一遍确认**。
 - 「搬家」「华人」之类受众说法只在中文旧站，**官网没有，视频里不写**。
+- **语言（PM 10-14 拍板）：画面文字、字幕、旁白、首评、帖子文案 100% 英文，面向澳洲本地买家**；下表钩子的中文是内部说明，成片里一律用下面的英文版。
 - 澳洲对价格广告有「说清楚条件」的消费者法要求：「起」「约」「估价」要写清；**本文档没有做法律审核，A 级以上外发前要有人看**。
 - 本窗口没做配方对账表，由出片窗口（101 号）在工厂流程里做。
