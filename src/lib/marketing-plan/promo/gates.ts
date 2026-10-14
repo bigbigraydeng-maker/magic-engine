@@ -231,7 +231,7 @@ export interface ApprovalVerdict {
   can_approve: boolean
   blockers: GateResult[]
   unverified: GateResult[]
-  /** 第一阶段全部检查结果（含通过项），写进批准回执用 */
+  /** 第一阶段的全部检查结果（含绿色通过项），供批准回执留底 */
   results: GateResult[]
   /** 计划里有广告预算却没有任何广告步骤等情况下的说明 */
   note: string | null
