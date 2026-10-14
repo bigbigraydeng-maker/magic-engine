@@ -34,14 +34,15 @@
       metro:{firstRmb:80,nextRmb:10,flatRmb:11},
       other:{firstRmb:105,nextRmb:30,flatRmb:24}
     },
-    // Bulk air, RMB for the 10KG+ tier. unitKg is the weight one price applies to.
+    // Bulk air, RMB. DDURmb / DDPRmb are [minimum chargeable kg, RMB] tiers: DDP (含税 sheet) 10KG+ and 50KG+, DDU (不含税 sheet) 10KG以上 and 51KG以上.
+    // The 100KG+ and higher tiers are outside this calculator's 10–99kg range. unitKg is the weight one price applies to.
     // Confirmed by the PM on 2026-10-10 (answer relayed from East Inter): the sheet prices are per 1 kg.
     // (The September calculator treated them as per 0.5kg, which doubled the bulk-air price.)
     bulkAir: {
       unitKg: 1,
-      sydney:{DDURmb:48,DDPRmb:52,days:'6–8 days'},melbourne:{DDURmb:48,DDPRmb:52,days:'6–8 days'},
-      brisbane:{DDURmb:50,DDPRmb:54,days:'8–10 days'},adelaide:{DDURmb:50,DDPRmb:54,days:'8–10 days'},
-      perth:{DDURmb:52,DDPRmb:56,days:'8–12 days'},other:{DDURmb:57,DDPRmb:61,days:'8–12 days'}
+      sydney:{DDURmb:[[10,48],[51,47]],DDPRmb:[[10,52],[50,51]],days:'6–8 days'},melbourne:{DDURmb:[[10,48],[51,47]],DDPRmb:[[10,52],[50,51]],days:'6–8 days'},
+      brisbane:{DDURmb:[[10,50],[51,49]],DDPRmb:[[10,54],[50,53]],days:'8–10 days'},adelaide:{DDURmb:[[10,50],[51,49]],DDPRmb:[[10,54],[50,53]],days:'8–10 days'},
+      perth:{DDURmb:[[10,52],[51,51]],DDPRmb:[[10,56],[50,55]],days:'8–12 days'},other:{DDURmb:[[10,57],[51,56]],DDPRmb:[[10,61],[50,60]],days:'8–12 days'}
     },
     // Fees quoted in the sea sheet notes. fumigationRmb is converted; broker fees are AUD in the source.
     fees: {fumigationRmb:700, brokerAud:99, brokerHighAud:201, brokerHighThresholdAud:10000}

@@ -14,7 +14,7 @@ test('conversion rule: ceil(RMB / 4.9) reproduces every AUD figure of the Septem
   }
   for (const [k,[first,next]] of Object.entries(pdfAud.airParcel)) assert.deepEqual([R.airParcel[k].first,R.airParcel[k].next],[first,next],k);
   for (const [k,[first,next,flat]] of Object.entries(pdfAud.seaParcel)) assert.deepEqual([R.seaParcel[k].first,R.seaParcel[k].next,R.seaParcel[k].flat],[first,next,flat],k);
-  for (const [k,[ddu,ddp]] of Object.entries(pdfAud.bulk)) assert.deepEqual([R.bulk[k].DDU,R.bulk[k].DDP],[ddu,ddp],k);
+  for (const [k,[ddu,ddp]] of Object.entries(pdfAud.bulk)) assert.deepEqual([R.bulk[k].DDU[0][1],R.bulk[k].DDP[0][1]],[ddu,ddp],k);
   assert.equal(R.fees.fumigation,pdfAud.fumigation);
 });
 
@@ -111,4 +111,12 @@ test('Bulk air DDU warning: recipient pays duties/GST, A$110 clearance fee only 
 test('Bulk air DDP (tax-included sheet): says taxes included, does not invent a 15% prepaid tax', () => {
   const q = est({service:'bulkAir',city:'sydney',quantity:50,tax:'DDP'});
   assert.match(q.note,/duties and taxes are included/); assert.doesNotMatch(q.warning+q.note,/15%/);
+});
+// ---- Bulk air weight tiers (含税 sheet: 10KG+ / 50KG+; 不含税 sheet: 10KG以上 / 51KG以上), whole shipment at the tier rate
+test('Bulk air Brisbane DDP 49kg uses the 10KG+ tier (54 RMB -> A$12): 49 * 12', () => assert.equal(est({service:'bulkAir',city:'brisbane',quantity:49,tax:'DDP'}).total,588));
+test('Bulk air Brisbane DDP 50kg switches to the 50KG+ tier (53 RMB -> A$11): 50 * 11', () => assert.equal(est({service:'bulkAir',city:'brisbane',quantity:50,tax:'DDP'}).total,550));
+test('Bulk air Brisbane DDU 50kg is still on the 10KG tier (50 RMB -> A$11): 50 * 11', () => assert.equal(est({service:'bulkAir',city:'brisbane',quantity:50,tax:'DDU'}).total,550));
+test('Bulk air Brisbane DDU 51kg switches to the 51KG tier (49 RMB -> A$10): 51 * 10', () => assert.equal(est({service:'bulkAir',city:'brisbane',quantity:51,tax:'DDU'}).total,510));
+test('LCL weight rule is explained in the note when it changes the billed CBM', () => {
+  assert.match(est({service:'lcl',city:'sydney',quantity:1,weightKg:1000}).note,/500kg per m³, so 2 m³ is charged/);
 });

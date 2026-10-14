@@ -21,7 +21,7 @@
     const seaParcel = {};
     Object.entries(config.seaParcel).forEach(([k,r]) => {seaParcel[k] = {first:aud(r.firstRmb),next:aud(r.nextRmb),flat:aud(r.flatRmb)};});
     const bulk = {unitKg:config.bulkAir.unitKg};
-    Object.entries(config.bulkAir).forEach(([k,r]) => {if (k !== 'unitKg') bulk[k] = {DDU:aud(r.DDURmb),DDP:aud(r.DDPRmb),days:r.days};});
+    Object.entries(config.bulkAir).forEach(([k,r]) => {if (k !== 'unitKg') bulk[k] = {DDU:r.DDURmb.map(([kg,v]) => [kg,aud(v)]),DDP:r.DDPRmb.map(([kg,v]) => [kg,aud(v)]),days:r.days};});
     const f = config.fees;
     const fees = {fumigation:aud(f.fumigationRmb),broker:f.brokerAud,brokerHigh:f.brokerHighAud,brokerHighThreshold:f.brokerHighThresholdAud};
     return {lcl,airParcel,seaParcel,bulk,fees};
@@ -50,8 +50,8 @@
         total=first+(cbm-1)*rate.next; days=rate.days;
         lines.push(['First CBM · '+(cbm >= 10 ? '10 m³ and above' : 'under 10 m³'),first]);
         if (cbm > 1) lines.push(['Additional '+number(cbm-1)+' m³ × '+money(rate.next),(cbm-1)*rate.next]);
-        if (cbm > quantity) note+='Cargo weight exceeds 500kg per m³, so '+number(cbm)+' m³ is charged (500kg = 1 m³). ';
         note='Includes China export clearance, ocean freight, Australian import clearance and AQIS inspection. ';
+        if (cbm > quantity) note+='Cargo weight exceeds 500kg per m³, so '+number(cbm)+' m³ is charged (500kg = 1 m³). ';
         if (rate.extra && (!rate.optional || delivery === 'door')) {
           const fee=Math.max(cbm*rate.extra,rate.minimum);
           total+=fee;
@@ -85,8 +85,9 @@
         warning=seaExtras;
       } else {
         const rate=R.bulk[city]||R.bulk.other,unit=R.bulk.unitKg,units=ceilUnits(weight,unit);
-        billed=units*unit; total=units*rate[tax]; days=rate.days;
-        lines.push([units+' × '+unit+'kg × '+money(rate[tax]),total]);
+        const unitPrice=rate[tax].filter(([minKg]) => weight >= minKg).pop()[1];
+        billed=units*unit; total=units*unitPrice; days=rate.days;
+        lines.push([units+' × '+unit+'kg × '+money(unitPrice),total]);
         note=tax+' · Billed weight: '+number(billed)+'kg. '+(tax === 'DDP' ? 'DDP: tax-included channel; Australian duties and taxes are included in this rate.' : 'Recipient pays Australian duties and GST on arrival; these are not included.');
       }
       if (service === 'bulkAir' && tax === 'DDU') warning='Freight only. On this tax-excluded channel the recipient pays Australian duties and GST, and a A$110 clearance fee per shipment applies where declared goods value exceeds A$1,000 (payable by the recipient at destination). Remote-postcode and oversize surcharges may also apply. Contact us for the full total.';
