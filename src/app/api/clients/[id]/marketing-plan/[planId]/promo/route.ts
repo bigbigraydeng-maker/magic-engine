@@ -36,7 +36,11 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
-    const [board, options] = await Promise.all([buildPromoBoard(plan), loadPromoOptions(ctx.params.id)])
+    // 下拉选项只有草稿填表才用；读不到时页面照常显示（选项为空，表格里会提示）
+    const [board, options] = await Promise.all([
+      buildPromoBoard(plan),
+      plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
+    ])
     return NextResponse.json({ success: true, board, options })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

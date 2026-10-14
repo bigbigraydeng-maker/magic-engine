@@ -3,7 +3,7 @@
 import type { PromoStep } from '@/lib/marketing-plan/promo/spec'
 import type { PromoAccountOption } from '@/lib/marketing-plan/promo/options'
 import { centsToYuan, splitList, yuanToCents } from '@/lib/marketing-plan/promo/form'
-import { Field, inputCls } from './Field'
+import { Field, LocalInput, inputCls } from './Field'
 
 type StepOf<K extends PromoStep['kind']> = Extract<PromoStep, { kind: K }>
 interface Props<K extends PromoStep['kind']> { step: StepOf<K>; onChange: (s: StepOf<K>) => void }
@@ -17,17 +17,20 @@ export function AdsFields({ step, onChange, accounts }: Props<'ads_campaign'> & 
       <Field label="广告账户" hint={accounts === null ? '读取广告账户失败，稍后刷新再试' : accounts.length === 0 ? '这个客户还没有绑定广告账户' : undefined}>
         <select className={inputCls} value={s.ad_account_id} onChange={e => set({ ad_account_id: e.target.value })}>
           <option value="">请选择</option>
+          {s.ad_account_id !== '' && !(accounts ?? []).some(a => a.id === s.ad_account_id) && (
+            <option value={s.ad_account_id}>{s.ad_account_id}（不在这个客户名下，请重选）</option>
+          )}
           {(accounts ?? []).map(a => <option key={a.id} value={a.id}>{a.id}</option>)}
         </select>
       </Field>
       <Field label="每天预算（元，按账户币种）" hint={cap ? `这个账户每天最多 ${cap / 100} 元，超了保存不了` : undefined}>
-        <input className={inputCls} inputMode="decimal" value={centsToYuan(s.daily_budget_cents)} onChange={e => set({ daily_budget_cents: yuanToCents(e.target.value) })} />
+        <LocalInput value={s.daily_budget_cents} format={centsToYuan} parse={yuanToCents} onValue={n => set({ daily_budget_cents: n })} />
       </Field>
       <Field label="受众" hint="填现有受众的名称或编号，不新建">
         <input className={inputCls} value={s.audience_ref} onChange={e => set({ audience_ref: e.target.value })} />
       </Field>
       <Field label="已批准的素材" hint="多个用逗号隔开；可以先空着，开投前的检查会提醒">
-        <input className={inputCls} value={s.creative_refs.join(', ')} onChange={e => set({ creative_refs: splitList(e.target.value) })} />
+        <LocalInput value={s.creative_refs} format={l => l.join(', ')} parse={splitList} onValue={l => set({ creative_refs: l })} />
       </Field>
     </div>
   )
@@ -36,12 +39,16 @@ export function AdsFields({ step, onChange, accounts }: Props<'ads_campaign'> & 
 export function SocialFields({ step, onChange }: Props<'social_cadence'>) {
   const s = step.settings
   const num = (v: string) => Math.max(0, Math.floor(Number(v) || 0))
+  const show = (n: number) => (n > 0 ? String(n) : '')
+  const field = (label: string, key: 'posts_per_week' | 'stories_per_week' | 'reels_per_month') => (
+    <Field label={label}><LocalInput value={s[key]} format={show} parse={num} onValue={n => set({ [key]: n })} /></Field>
+  )
   const set = (patch: Partial<typeof s>) => onChange({ ...step, settings: { ...s, ...patch } })
   return (
     <div className="grid grid-cols-3 gap-3">
-      <Field label="每周帖子（条）"><input className={inputCls} inputMode="numeric" value={s.posts_per_week} onChange={e => set({ posts_per_week: num(e.target.value) })} /></Field>
-      <Field label="每周快拍（条）"><input className={inputCls} inputMode="numeric" value={s.stories_per_week} onChange={e => set({ stories_per_week: num(e.target.value) })} /></Field>
-      <Field label="每月短视频（条）"><input className={inputCls} inputMode="numeric" value={s.reels_per_month} onChange={e => set({ reels_per_month: num(e.target.value) })} /></Field>
+      {field('每周帖子（条）', 'posts_per_week')}
+      {field('每周快拍（条）', 'stories_per_week')}
+      {field('每月短视频（条）', 'reels_per_month')}
     </div>
   )
 }

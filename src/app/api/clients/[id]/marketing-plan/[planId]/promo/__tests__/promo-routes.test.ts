@@ -131,6 +131,17 @@ describe('GET promo — 一页纸', () => {
     expect(json.options.goals[0].id).toBe('g1')
     expect(m.loadOptions).toHaveBeenCalledWith('client-1')
   })
+  it('已批准的计划不读填表选项；选项读取失败也不拖垮整页', async () => {
+    m.plan = planWith(undefined, { status: 'approved' })
+    const approved = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(approved.options).toBeNull()
+    expect(m.loadOptions).not.toHaveBeenCalled()
+    m.plan = planWith(undefined)
+    m.loadOptions.mockRejectedValue(new Error('db down'))
+    const res = await GET(req(null, 'GET'), { params: P })
+    expect(res.status).toBe(200)
+    expect((await res.json()).options).toBeNull()
+  })
   it('畸形 promo：spec_valid=false 且带问题，不放行', async () => {
     m.plan = planWith({ schema: 'promo_v1' })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()

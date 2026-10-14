@@ -21,6 +21,9 @@ import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
+/** 计划内容变了（含从「高级」保存）就换 key，让表格和文本编辑器都重新读最新内容。 */
+const planKey = (p: MarketingPlan) => `${p.id}:${JSON.stringify((p.plan_data as unknown as { promo?: unknown })?.promo ?? null)}`
+
 const hasPromo = (p: MarketingPlan) => !!(p.plan_data as unknown as { promo?: unknown })?.promo
 
 /** 默认看哪份：有推广结构的已批准计划 > 有推广结构的草稿 > 任意草稿。 */
@@ -201,10 +204,10 @@ export function PromoPlanClient() {
 
             {selected.status === 'draft' && (
               <>
-                <PromoSpecForm key={selected.id + String(board.has_promo)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
+                <PromoSpecForm key={planKey(selected)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
                 <details className="rounded-xl border border-gray-200 bg-white">
                   <summary className="px-4 py-3 text-xs text-gray-500 cursor-pointer">高级：直接改结构文本（只给技术同事用）</summary>
-                  <PromoSpecEditor key={selected.id + String(board.has_promo)} clientId={clientId} plan={selected} onSaved={() => void refresh(selected.id)} />
+                  <PromoSpecEditor key={planKey(selected)} clientId={clientId} plan={selected} onSaved={() => void refresh(selected.id)} />
                 </details>
               </>
             )}

@@ -70,14 +70,19 @@ function PhaseCard({ phase, index, options, spec, setSpec }: {
 function GoalPicker({ clientId, spec, options, setSpec }: { clientId: string; spec: PromoSpec; options: PromoOptions | null; setSpec: (s: PromoSpec) => void }) {
   const goals = options?.goals ?? []
   return (
+    <div>
     <Field label="这份计划为哪个目标服务"
-      hint={goals.length === 0 ? '这个客户还没有进行中的目标，先建一个目标再回来填' : undefined}>
+      hint={goals.length === 0 ? '没有读到进行中的目标：可能这个客户还没建，也可能读取失败，刷新页面再看' : undefined}>
       <select className={inputCls} value={spec.goal_id} onChange={e => setSpec(setGoal(spec, e.target.value))}>
         <option value="">请选择</option>
+        {spec.goal_id !== '' && !goals.some(g => g.id === spec.goal_id) && (
+          <option value={spec.goal_id}>{spec.goal_id}（不是进行中的目标，请重选）</option>
+        )}
         {goals.map(g => <option key={g.id} value={g.id}>{g.title}（{g.period_start} 至 {g.period_end}）</option>)}
       </select>
-      {goals.length === 0 && <Link href={`/dashboard/clients/${clientId}/goals`} className="text-xs text-indigo-600 underline">去建目标 →</Link>}
     </Field>
+    {goals.length === 0 && <Link href={`/dashboard/clients/${clientId}/goals`} className="text-xs text-indigo-600 underline">去目标页看看 →</Link>}
+    </div>
   )
 }
 
