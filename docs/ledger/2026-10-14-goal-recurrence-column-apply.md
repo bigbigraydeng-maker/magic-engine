@@ -10,4 +10,4 @@ verify_how: PM 回「加列」后：库里目标表出现 recurrence 列；把 N
 ---
 PR 2428 已合并，NAL 十月目标已补建（只有一条），但迁移没有自动上库：库里没有 recurrence 列。
 没加之前，每天的目标过期检查「标过期」正常、「续下个月」那步报错，十一月前对 NAL 无实际影响。
-迁移文件：supabase/migrations/20261010090000_goal_monthly_recurrence.sql（只加可空列和索引，不改现有数据）。
+迁移文件：supabase/migrations 下的 goal_monthly_recurrence 迁移（10-10 文件）（只加可空列和索引，不改现有数据）。
