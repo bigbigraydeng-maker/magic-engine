@@ -27,9 +27,12 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
+import type { CommentAutoreplyRunFailingTodo } from './comment-autoreply-run-failing-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { CalendarClosureItemKind } from './calendar-closure-items'
+import type { TourPublishRequestItemKind } from './tour-catalog-publish-request-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
@@ -81,6 +84,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
   'ai_tracker_all_failed',
   'ai_tracker_all_failed_dev',
+  // 待确认电话的链接是需要登录的页面，探活多半判成坏链接 —— 不能因此让「有电话没记进客人档案」静默消失。
+  'phone_call_needs_review',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -170,6 +175,20 @@ export type ManualItemKind =
   | 'price_claim_unbacked'
   /** 每日计划里帖子的价格数字跟客户资料里该团的价格对不上（或没资料可对）—— 发布时整批会被拦 */
   | 'price_fact_unverified'
+  /** 自动发布：帖子被拦 / 多次失败 / 发布时间已过没补发 —— 没发出去，要人看 */
+  | 'auto_publish_stalled'
+  /** 自动发布：系统不确定帖子有没有发出去，为防重复不自动重试 —— 要人去主页核对 */
+  | 'auto_publish_unknown_outcome'
+  /** 自动发布：已授权的日期到了，却没有任何发布记录 —— 发布器可能没在跑 */
+  | 'auto_publish_unarmed'
+  /** 自动发布：记录说「已撤回」，但回执里同一天又有一条新发出的帖子 —— 主页上有帖、系统记录对不上，要人核对 */
+  | 'auto_publish_record_conflict'
+  /** Story 自动发布：某条 Story 被拦 / 被平台拒绝 / 时间已过没补发 —— 没发出去，要人看 */
+  | 'story_stalled'
+  /** Story 自动发布：不确定某条 Story 有没有发出去，为防重复不自动重试 —— 要人去主页核对 */
+  | 'story_unknown_outcome'
+  /** Story 自动发布：已授权的周包到点了，却没有任何发布 / 演练记录 —— 发布器可能没在跑 */
+  | 'story_unarmed'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -178,6 +197,8 @@ export type ManualItemKind =
   | 'dm_maybe_stop'
   /** 客人身上的「⭐重要标记」到期了 —— 员工手工设的"约好周三 3 点回电"这种事，到点该做了 */
   | 'crm_important_due'
+  /** 电话系统收了通话但没能自动记进客人档案（待确认 / 没记成）—— 要人看一眼是谁、补记一笔 */
+  | 'phone_call_needs_review'
   /** 平台候选（docs/registry/platform-candidates.md）到了复查日期 —— 见 me-platform-tier-gate skill */
   | 'platform_candidate_review_due'
   /** 客户方案文档里写了一次性人工动作（如"明早 09:00 前扫一眼 xx"），只登记在文档里等于没下发 */
@@ -198,6 +219,8 @@ export type ManualItemKind =
   | ToolLeadItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
+  /** 评论自动回复连续多轮整轮没扫完 —— 以前被记成「完成」，约一个月没人发现 */
+  | CommentAutoreplyRunFailingTodo['kind']
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind
   /** 上面那项检查自己没跑成 —— 不报 ≠ 钥匙都活着 */
@@ -208,6 +231,10 @@ export type ManualItemKind =
   | 'deploy_check_failed'
   /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
   | LeadSheetItemKind
+  /** 日历上带日期的验证事项每日巡检：读不到日历 / 巡检没跑成 / 没法自动核对 / 核对没达预期 */
+  | CalendarClosureItemKind
+  /** 客户员工改了团目录、请我们上架 —— 不上架这些修改不会对外生效（对外动作，只有 ME 管理员能点） */
+  | TourPublishRequestItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */

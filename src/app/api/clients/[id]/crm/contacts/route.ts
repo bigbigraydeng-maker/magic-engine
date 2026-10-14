@@ -28,8 +28,10 @@ import {
   type StageRow,
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
-import type { SectionKey } from '@/lib/crm/list-sections'
+import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
+import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
   extractCustomColumns,
   visibleCustomColumns,
@@ -48,11 +50,11 @@ interface ListQuery {
   stages: string[]
   /** 已 trim；空串当 null。 */
   q: string | null
-  /** `?view=priority` → 4 段视图。null = 老的平铺列表。 */
+  /** `?view=priority` → hot / cold 两张名单视图。null = 老的平铺列表。 */
   view: 'priority' | null
-  /** 段展开状态：`?open=waiting,acted`。缺省 undefined = 用 list-sections 的默认（前两段展开）。 */
+  /** 段展开状态：`?open=hot,cold`。缺省 undefined = 用 list-sections 的默认（前两段展开）。 */
   open?: Partial<Record<SectionKey, boolean>>
-  /** 段内翻页：`?p_waiting=2&p_off_list=1`，1-based。 */
+  /** 段内翻页：`?p_hot=2&p_cold=1`，1-based。 */
   sectionPage?: Partial<Record<SectionKey, number>>
   /** `?contact=<id>` —— 今日待办的直达链接；服务端定位它落在哪段哪页。 */
   focusContactId?: string
@@ -114,7 +116,6 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
   // 语法拆坏（甚至注入别的条件）。不尝试转义 —— 直接拒绝，让调用方自己清。
   if (q !== null && /[,()]/.test(q)) return { error: 'invalid characters in q' }
 
-  const SECTION_KEYS: SectionKey[] = ['waiting', 'acted', 'queued', 'off_list']
   const rawView = sp.get('view')
   if (rawView !== null && rawView !== 'priority') return { error: 'invalid view' }
   const view = rawView === 'priority' ? ('priority' as const) : null
@@ -231,6 +232,44 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
   return { tradeIds, staffIds }
 }
 
+/** 每批读多少条触点来排序；最多读几批（防止一个大客户把整张触点表翻一遍）。 */
+const TOUCH_SCAN_PAGE = 1000
+const TOUCH_SCAN_MAX_PAGES = 40
+
+const PAGE_CONTACT_COLUMNS =
+  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at'
+
+/** 最新触点倒序的第 i 批（只带 contact_id / occurred_at，给排序用）。 */
+async function fetchTouchBatch(clientId: string, i: number): Promise<TouchRowLite[]> {
+  const res = await supabaseAdmin
+    .from('contact_touchpoints')
+    .select('contact_id, occurred_at')
+    .eq('client_id', clientId)
+    .order('occurred_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(i * TOUCH_SCAN_PAGE, (i + 1) * TOUCH_SCAN_PAGE - 1)
+  if (res.error) throw new Error(res.error.message)
+  return (res.data ?? []) as TouchRowLite[]
+}
+
+/** 按给定顺序取一页的人。`.in()` 一次最多 100 个 id（URL 长度），分批并行取后按原顺序拼回。 */
+async function loadContactsByIds(clientId: string, ids: string[]): Promise<ContactRow[]> {
+  if (ids.length === 0) return []
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100))
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId).in('id', chunk),
+    ),
+  )
+  const byId = new Map<string, ContactRow>()
+  for (const res of results) {
+    if (res.error) throw new Error(res.error.message)
+    for (const row of (res.data ?? []) as ContactRow[]) byId.set(row.id, row)
+  }
+  return ids.map((id) => byId.get(id)).filter((c): c is ContactRow => c !== undefined)
+}
+
 /**
  * 分页路径：只拉当前页的人 + 这些人的触点。
  *
@@ -241,9 +280,12 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
 async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
-  let total: number
-  let pageContacts: ContactRow[]
-  let stageRows: StageRow[]
+  // 全客户 AI 摘要跟搜什么、翻哪页无关，是这次请求里最慢的一段（实测约 0.7 秒）：
+  // 一进来就开跑（跟下面的页查询并行），且 30 秒内同一客户只查一次——搜索框每敲一个字都会进来。
+  const briefsPromise = loadLatestBriefByContactCached(clientId)
+  let total = 0
+  let pageContacts: ContactRow[] = []
+  let stageRows: StageRow[] = []
   try {
     // 两次查询的过滤条件必须逐字一致 —— 共享一份过滤参数后各自 apply。
     const filters = contactFilterParams(query)
@@ -271,60 +313,138 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
       }
     }
 
-    let countBuilder = supabaseAdmin
-      .from('contacts')
-      .select('id', { count: 'exact', head: true })
-      .eq('client_id', clientId)
-    if (filters.stages !== null) countBuilder = countBuilder.in('stage', filters.stages)
-    if (filters.orExpr !== null) countBuilder = countBuilder.or(filters.orExpr)
-    if (kindInIds !== null) countBuilder = countBuilder.in('id', kindInIds)
-    if (kindNotInIds !== null && kindNotInIds.length > 0) {
-      countBuilder = countBuilder.not('id', 'in', `(${kindNotInIds.join(',')})`)
+    // 先取「符合筛选的全部人」的 id（几百到一两千行，只带 id 和首次进线时间），再按「最近有互动」排好序，
+    // 最后只把当前这一页的人取全。排序不能放在 SQL 里：「最近联系」是逐人对触点取最大值，
+    // 而 contacts.last_seen_at 不可信（生产里 721/1159 人比真实最新触点旧）。见 contact-touch-order.ts。
+    const noFilter =
+      filters.stages === null && filters.orExpr === null && kindInIds === null && kindNotInIds === null
+    const need = query.page * query.perPage
+    let fastDone = false
+
+    // 最快的路径：数据库函数一次返回「这一页的 id（按最近真实互动排好）+ 符合筛选的总数」，
+    // 筛选条件在函数里逐项对应上面的 stage / q / kind。函数还没装上（迁移晚于代码上线）或出错时，
+    // 记一条日志，退回下面两条老路径——页面不会因此打不开。
+    {
+      const [rpcRes, stagesRpc] = await Promise.all([
+        supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
+          p_client_id: clientId,
+          p_stages: filters.stages,
+          p_q: query.q,
+          p_in_ids: kindInIds,
+          p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
+          p_limit: query.perPage,
+          p_offset: (query.page - 1) * query.perPage,
+        }),
+        fetchAll<StageRow>((from, to) =>
+          supabaseAdmin
+            .from('client_pipeline_stages')
+            .select('stage_key, label, marketing_action, is_terminal')
+            .eq('client_id', clientId)
+            .order('sort_order', { ascending: true })
+            .range(from, to),
+        ),
+      ])
+      if (rpcRes.error) {
+        console.warn('[crm contacts] page function unavailable, using the app-side path:', rpcRes.error.message)
+      } else {
+        const rows = (rpcRes.data ?? []) as Array<{ id: string; total: number | string }>
+        let rpcTotal: number | null = rows.length > 0 ? Number(rows[0].total) : 0
+        if (rows.length === 0 && query.page > 1) {
+          // 翻过头了：这一页没有人，总数得再问一次第一页才知道。问不到就当函数不可用、退回老路径，
+          // 不能悄悄报 0。
+          const first = await supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
+            p_client_id: clientId,
+            p_stages: filters.stages,
+            p_q: query.q,
+            p_in_ids: kindInIds,
+            p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
+            p_limit: 1,
+            p_offset: 0,
+          })
+          if (first.error) {
+            console.warn('[crm contacts] page function total lookup failed, using the app-side path:', first.error.message)
+            rpcTotal = null
+          } else {
+            const firstRows = (first.data ?? []) as Array<{ total: number | string }>
+            rpcTotal = firstRows.length > 0 ? Number(firstRows[0].total) : 0
+          }
+        }
+        if (rpcTotal !== null) {
+          total = rpcTotal
+          pageContacts = await loadContactsByIds(clientId, rows.map((r) => r.id))
+          stageRows = stagesRpc
+          fastDone = true
+        }
+      }
     }
 
-    let pageBuilder = supabaseAdmin
-      .from('contacts')
-      .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at')
-      .eq('client_id', clientId)
-    if (filters.stages !== null) pageBuilder = pageBuilder.in('stage', filters.stages)
-    if (filters.orExpr !== null) pageBuilder = pageBuilder.or(filters.orExpr)
-    if (kindInIds !== null) pageBuilder = pageBuilder.in('id', kindInIds)
-    if (kindNotInIds !== null && kindNotInIds.length > 0) {
-      pageBuilder = pageBuilder.not('id', 'in', `(${kindNotInIds.join(',')})`)
+    // 快路径（默认打开页面就是这条）：没有筛选时，不必把全客户的 id 取出来再排——
+    // 总数用一次 count，前 need 位直接从最新触点往回翻出来；三件事并行，少两三次往返。
+    if (!fastDone && noFilter) {
+      const [countRes, scanned, stagesFast] = await Promise.all([
+        supabaseAdmin.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', clientId),
+        scanLatestTouchContactIds({
+          need,
+          pageSize: TOUCH_SCAN_PAGE,
+          maxPages: TOUCH_SCAN_MAX_PAGES,
+          fetchTouchPage: (i) => fetchTouchBatch(clientId, i),
+        }),
+        fetchAll<StageRow>((from, to) =>
+          supabaseAdmin
+            .from('client_pipeline_stages')
+            .select('stage_key, label, marketing_action, is_terminal')
+            .eq('client_id', clientId)
+            .order('sort_order', { ascending: true })
+            .range(from, to),
+        ),
+      ])
+      if (countRes.error) throw new Error(countRes.error.message)
+      if (scanned !== null) {
+        total = countRes.count ?? 0
+        pageContacts = await loadContactsByIds(
+          clientId,
+          scanned.slice((query.page - 1) * query.perPage, query.page * query.perPage),
+        )
+        stageRows = stagesFast
+        fastDone = true
+      }
     }
 
-    const [countRes, pageRes, stages] = await Promise.all([
-      countBuilder,
-      pageBuilder
-        // 🔴 2026-09-28 修：原来是 `.order('id', ...)`——`contacts.id` 是 UUID，
-        // 按它排等于按随机字符串排。第 1 页选出来的 20 个人跟"谁最近有动静"没有
-        // 任何关系，而页面上「最近联系 ↓」那个箭头只对**已经选出的这一页**做
-        // 客户端排序（page.tsx 注释自己写着「排序只对当前页生效」）——两层叠加，
-        // 效果是"挑 20 个近乎随机的人，把这 20 个人按最近联系排一下"，
-        // 今晚刚建档的 WhatsApp 测试联系人因此在 1026 人里怎么翻都翻不到。
-        // 改成按 `first_seen_at` 倒序：真正的"按最后一次接触排"要在每人身上先
-        // 算出跨渠道最新触点时间再排序，这份 SQL 目前是查完整批触点后在内存里
-        // 组装（见本文件头注），做不到"先排序再分页"——那是一次更大的改动
-        // （物化视图 / 缓存列），记进台账，不在这次一起做。`first_seen_at` 是
-        // 唯一已经在这次查询里、单调、不为空的时间列，至少让"今天刚进来的人"
-        // 能在默认视图里被看见，比随机排序找不到强。
-        .order('first_seen_at', { ascending: false })
-        .range((query.page - 1) * query.perPage, query.page * query.perPage - 1),
-      fetchAll<StageRow>((from, to) =>
-        supabaseAdmin
-          .from('client_pipeline_stages')
-          .select('stage_key, label, marketing_action, is_terminal')
-          .eq('client_id', clientId)
-          .order('sort_order', { ascending: true })
-          .range(from, to),
-      ),
-    ])
+    if (!fastDone) {
+      const [idRows, stages] = await Promise.all([
+        fetchAll<{ id: string; first_seen_at: string | null }>((from, to) => {
+          let b = supabaseAdmin.from('contacts').select('id, first_seen_at').eq('client_id', clientId)
+          if (filters.stages !== null) b = b.in('stage', filters.stages)
+          if (filters.orExpr !== null) b = b.or(filters.orExpr)
+          if (kindInIds !== null) b = b.in('id', kindInIds)
+          if (kindNotInIds !== null && kindNotInIds.length > 0) {
+            b = b.not('id', 'in', `(${kindNotInIds.join(',')})`)
+          }
+          return b.order('id', { ascending: true }).range(from, to)
+        }),
+        fetchAll<StageRow>((from, to) =>
+          supabaseAdmin
+            .from('client_pipeline_stages')
+            .select('stage_key, label, marketing_action, is_terminal')
+            .eq('client_id', clientId)
+            .order('sort_order', { ascending: true })
+            .range(from, to),
+        ),
+      ])
 
-    if (countRes.error) throw new Error(countRes.error.message)
-    if (pageRes.error) throw new Error(pageRes.error.message)
-    total = countRes.count ?? 0
-    pageContacts = (pageRes.data ?? []) as ContactRow[]
-    stageRows = stages
+      const orderedIds = await orderContactIdsByLatestTouch({
+        contacts: idRows.map((r) => ({ id: r.id, firstSeenAt: r.first_seen_at })),
+        need: query.page * query.perPage,
+        pageSize: TOUCH_SCAN_PAGE,
+        maxPages: TOUCH_SCAN_MAX_PAGES,
+        fetchTouchPage: (i) => fetchTouchBatch(clientId, i),
+      })
+
+      total = orderedIds.length
+      const wantedIds = orderedIds.slice((query.page - 1) * query.perPage, query.page * query.perPage)
+      pageContacts = await loadContactsByIds(clientId, wantedIds)
+      stageRows = stages
+    }
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '读取失败' },
@@ -334,11 +454,12 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
 
   const pageIds = pageContacts.map((c) => c.id)
   let touches: TouchRow[]
+  let briefs: BriefByContact
   try {
-    touches =
+    ;[touches, briefs] = await Promise.all([
       pageIds.length === 0
-        ? []
-        : await fetchAll<TouchRow>((from, to) =>
+        ? Promise.resolve([] as TouchRow[])
+        : fetchAll<TouchRow>((from, to) =>
             supabaseAdmin
               .from('contact_touchpoints')
               .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
@@ -347,7 +468,9 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
               .order('occurred_at', { ascending: false })
               .order('id', { ascending: false })
               .range(from, to),
-          )
+          ),
+      briefsPromise,
+    ])
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '读取失败' },
@@ -355,7 +478,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     )
   }
 
-  const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows)
+  const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows, briefs)
 
   return NextResponse.json({
     total,
@@ -371,7 +494,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
 }
 
 /**
- * `?view=priority` —— 4 段跟进视图。
+ * `?view=priority` —— hot / cold 两张名单视图。
  *
  * 跟 getPaged 的区别：**不分页拉人**。分段依赖「现在几点」（约好的回电到点没到、
  * 打不通满 3 天转交、推迟到没到期），不能在 SQL 里算，所以必须把筛选后的子集
@@ -386,9 +509,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
+  let briefs: BriefByContact
   try {
     const filters = contactFilterParams(query)
-    ;[contacts, touches, stageRows] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs] = await Promise.all([
       fetchAll<ContactRow>((from, to) => {
         let b = supabaseAdmin
           .from('contacts')
@@ -415,6 +539,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
           .order('sort_order', { ascending: true })
           .range(from, to),
       ),
+      loadLatestBriefByContact(clientId),
     ])
   } catch (err) {
     return NextResponse.json(
@@ -442,10 +567,11 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       open: query.open,
       page: query.sectionPage,
       focusContactId: query.focusContactId,
+      briefs,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
-      const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg)
+      const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg, briefs.get(row.id) ?? null)
       customPerContact.push(built.custom)
       return built.row
     },
@@ -494,8 +620,9 @@ export async function GET(
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
+  let briefs: BriefByContact
   try {
-    ;[contacts, touches, stageRows] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs] = await Promise.all([
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
@@ -511,7 +638,7 @@ export async function GET(
           .eq('client_id', clientId)
           .order('occurred_at', { ascending: false })
           // 同一时刻的多条（导入数据里表单与通话常共用一个时间戳）需要一个
-          // 确定的次序，否则每次刷新顺序都可能不同。
+          // 确定的次序，否则每次刷新顺序可能不同。
           .order('id', { ascending: false })
           .range(from, to),
       ),
@@ -523,6 +650,7 @@ export async function GET(
           .order('sort_order', { ascending: true })
           .range(from, to),
       ),
+      loadLatestBriefByContact(clientId),
     ])
   } catch (err) {
     return NextResponse.json(
@@ -531,7 +659,7 @@ export async function GET(
     )
   }
 
-  const { out, customPerContact } = assembleRows(contacts, touches, stageRows)
+  const { out, customPerContact } = assembleRows(contacts, touches, stageRows, briefs)
 
   return NextResponse.json({
     totalContacts: out.length,
@@ -551,6 +679,7 @@ function assembleRows(
   contacts: ContactRow[],
   touches: TouchRow[],
   stageRows: StageRow[],
+  briefs: BriefByContact,
 ): {
   out: Array<Record<string, unknown>>
   customPerContact: Array<Record<CustomColumnKey, string | null>>
@@ -577,7 +706,7 @@ function assembleRows(
     const seg = segmentContact(model, now)
     // 响应行也只有一份 —— view=priority 与本路径共用 responseRowFor，
     // 否则两个入口会各自长出一套字段（2026-09-26 R5b：就是在这里发现它已经被抄了第二份）。
-    const built = responseRowFor(c, tps, stageMeta, model, seg)
+    const built = responseRowFor(c, tps, stageMeta, model, seg, briefs.get(c.id) ?? null)
     customPerContact.push(built.custom)
     return built.row
   })

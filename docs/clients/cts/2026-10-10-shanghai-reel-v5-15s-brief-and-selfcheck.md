@@ -131,7 +131,7 @@
 
 ## 九、发布前置项完成情况（PM 通过后补齐，2026-10-10）
 
-PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`，通过人 bigbigraydeng@gmail.com，2026-10-10 03:48 UTC）。**注意：在 ME 里「通过」就是发布授权**——每小时第 5 分钟的 `factory-publish-worker` 会把 `approved` 的成片领走发布（render.yaml 第 976 行）。本轮把第六节的前置项在它领走之前补齐：
+PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`，通过人 bigbigraydeng@gmail.com，2026-10-10 03:48 UTC）。**【2026-10-11 更正】我当时写「通过就是发布授权、会自动对外发布」是错的。** 实际情况：每小时第 5 分钟的 `factory-publish-worker` 确实在 2026-10-10 04:05 UTC 领走了它，工单状态变 `published`；但 Render 上没设 `FACTORY_PUBLISH_LIVE=true`，发布器处在**草稿模式**（以 `video_state=DRAFT` 上传），Facebook 返回 `video_state: DRAFT`、永久链接 `/reel/2309146606576700/`。**也就是说这条 Reel 躺在 CTS 主页的后台草稿里，没有对外公开**；工单状态写 `published` 不等于公众能看到。要让它公开，需 PM 明确点头后，用已有的 `promoteReelToPublished`（同一接口把状态改成 PUBLISHED，不重新上传）只转正这一条；不建议打开全局开关（会影响所有客户）。本轮把第六节的前置项在它领走之前补齐：
 
 | 前置项 | 结果 |
 |---|---|
@@ -142,3 +142,7 @@ PM 已在 M1 后台对工单 `fa4fdd89` 点了「通过」（状态 `approved`�
 | 只发终版 | 授权的是 `fa4fdd89`；`2153778a`（r1）和 `cda1d205`（第二版）仍是 `in_review`，没有授权 |
 
 **苏东坡可选建议（未采纳，不影响事实）**：正文可把价格句提前，让信息流预览先露出价格；`Flights` 想更保守可改 `Airfares`。已记录，发布后看数据再说。
+
+### 十、2026-10-11 已对外公开
+
+PM 回复「发这一条」后：①草稿（2309146606576700）改为公开，Facebook 返回 `published:true`、`publish_status: published`、公开时间 2026-10-11 04:35 UTC；②补发首评（带追踪参数的行程链接，评论 id `2309146606576700_2565567933954188`）；③工单 `fa4fdd89` 的 `published_ref` 更新为 `video_state: PUBLISHED`；④未登录访问 `facebook.com/reel/2309146606576700/` 返回 HTTP 200（页面是否真正播放需人眼看）。**系统自带的 `promoteReelToPublished` 对已上传草稿会报 `1363130 Video Upload Is Missing`，没有改动任何东西；这次用 `POST /{video_id}` 带 `published=true` 成功。** 没有起广告、没有联系客户。

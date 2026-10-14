@@ -27,6 +27,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { parseJsonResponse } from '@/lib/anthropic/client'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
+import { identityFromSlug, type PageWriteGuard } from '@/lib/seo/protected-pages'
 
 export const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const DATA_DIR = 'src/lib/data'
@@ -367,6 +368,7 @@ export interface CtsMetaPrResult {
 }
 
 export async function runCtsMetaPr(
+  guard: PageWriteGuard,
   supabase: SupabaseClient = supabaseAdmin,
 ): Promise<CtsMetaPrResult> {
   try {
@@ -470,6 +472,8 @@ export async function runCtsMetaPr(
         attempts.push({ slug: candidate.slug, step: 'slug_not_in_file' })
         continue
       }
+      // Legacy executor: still must pass the protected-page gate before any edit is staged.
+      await guard.assert(identityFromSlug(candidate.slug), { targetType: 'data_file_entry' })
       entry.source = replaced.updated
       entry.dirty = true
       attempts.push({ slug: candidate.slug, step: 'applied' })
