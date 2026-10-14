@@ -4,7 +4,7 @@
 - **Status**: draft only. Nothing published, no switch set, no database write. Risk C. D1/D2/D4 cards and copy go to Sudongpo (copy) and Maliang (visuals); price cards 1 and 2 (English) already passed both. D3/D5/D6/D7 below are text drafts only, not yet reviewed.
 - **Rules kept**: facts only from www.eastinter.com.au (calculator page included); say "current rates", never a month; every price carries "Indicative estimate. Final charges are subject to a binding quote."; no "spots left", no early-bird, no countdown, no "live tracking" (the site says online tracking is not connected yet).
 - **Spelling**: Australian English. Prices in A$.
-- **Open for the client / PM**: whether the A$ figures include GST (the calculator page does not say). Until answered, price copy keeps "Not included: GST, import duty, fumigation, customs broker fee" and says "estimate".
+- **GST (resolved 10-14 by Sudongpo)**: the calculator's own result note for sea freight says "Not included: any applicable GST (10% of goods value), import duty (0–10%) ..."; bulk air DDP says duties and taxes are included, DDU says they are not. So the A$ figures for sea freight do not include GST, and the cards already say so. No question for the client.
 
 ## Facts used (page → fact)
 
@@ -30,7 +30,7 @@ Somewhere else? Just ask our team.
 
 Sea freight, air freight and door-to-door delivery. One team, from China to your door in Australia.
 ```
-First comment: `https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d1&utm_content=post`
+First comment: `https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d1&utm_content=post#coverage`
 
 ## D2 · Post · three ways (card: `d2-en.png`)
 
@@ -49,12 +49,12 @@ First comment: `.../?utm_source=facebook&utm_medium=organic&utm_campaign=eastint
 
 ## D3 · Reel (video factory only; blocked, see below)
 
-On-screen text (short lines, safe area y270–1248): "Four steps." / "China to Australia." / "1 Tell us your plans" / "2 Send it to our warehouse" / "3 We handle the journey" / "4 Delivered to your door".
+On-screen text (short lines, safe area y270–1248): "Four steps." / "China to Australia." / "1 Tell us what you're shipping" / "2 Send it to our warehouse" / "3 We handle the journey" / "4 Delivered to your door".
 Post text:
 ```
 China to Australia in four steps. Tell us what you are shipping, where from and where to, and we will help you choose a shipping option.
 ```
-First comment: `.../?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d3&utm_content=reel#how` + "Contact us before dispatching goods to confirm the receiving address. Taxes, duties, insurance and destination charges should be confirmed before booking."
+First comment: `.../?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d3&utm_content=reel#how` + "Taxes, duties, insurance and destination charges should be confirmed with our team before booking. Consolidating? Contact us before dispatching goods to confirm the receiving address."
 
 ## D4 · Post · quote checklist (card: `d4-en.png`)
 
@@ -73,17 +73,17 @@ Email our team: zzj@eastinter.net
 ```
 First comment: `.../?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d4&utm_content=post#faq`
 
-## D5 · Post · weight rule (text only, unreviewed)
+## D5 · Post · weight rule (Sudongpo reviewed 10-14; edits applied)
 
 ```
-Which weight does the calculator use?
+How is parcel weight charged?
 
-The greater of actual weight and volume weight.
+For air parcels, sea parcels and bulk air, the calculator uses the greater of actual weight and volume weight.
 Volume weight = length × width × height (cm) ÷ 6,000.
 
-Example (just the formula, not a quote): a 50 × 40 × 30 cm box has a volume weight of 60,000 ÷ 6,000 = 10 kg. If the box actually weighs more, the actual weight is used.
+An illustration only, not a quote: a 40 × 30 × 20 cm box has a volume weight of 24,000 ÷ 6,000 = 4 kg. If the box actually weighs more, the actual weight is used.
 
-If you leave volume blank, the estimate uses actual weight only.
+If you leave volume blank, the estimate uses actual weight only. LCL sea freight is priced by cubic metre (m³).
 
 Indicative estimate. Final charges are subject to a binding quote.
 ```
@@ -97,13 +97,13 @@ Sea or air from China?
 
 Sea freight generally suits larger shipments when your schedule is flexible. Air freight suits urgent and higher-value goods.
 
-Not sure? Share your cargo details and the date you need it in Australia, and our team will recommend an option and confirm current transit estimates.
+Not sure? Share your cargo details and the date you need it in Australia, and our team can recommend an option and confirm current transit estimates.
 ```
 First comment: `.../?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d6&utm_content=carousel#faq`
 
 ## D7 · Reel · calculator walkthrough (blocked; not reviewed)
 
-Screen recording of the real calculator, then big text: "Pick a service" / "Choose delivery" / "General or sensitive goods?" / "DDU or DDP" / "Enter weight and volume" / "Get an instant estimate". Figures shown only from a live run, labelled "example", with "Indicative estimate. Final charges are subject to a binding quote." on screen. The result panel shows the estimate and transit time, so this Reel carries numbers; confirm the GST question first.
+Screen recording of the real calculator (origin Guangzhou only; do not imply Shenzhen is quoted), then big text: "Pick a service" / "Choose delivery" / "Enter volume or weight" / "Get an instant estimate" (for bulk air: "DDU (duties unpaid) or DDP (duties prepaid)"; for air parcels: "General or sensitive goods?"). For sea freight the recording must show the page's own "Not included: GST, import duty, fumigation, broker fee" note on screen. Figures shown only from a live run, labelled "example", with "Indicative estimate. Final charges are subject to a binding quote." on screen. The result panel shows the estimate and transit time, so this Reel carries numbers.
 ```
 Instant estimate in AUD, with a clear cost breakdown. No sign-up.
 Indicative estimate. Final charges are subject to a binding quote.
