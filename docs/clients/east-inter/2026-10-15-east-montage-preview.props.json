@@ -44,256 +44,289 @@
   20.847,
   21.393
  ],
- "totalBeats": 33,
+ "totalBeats": 30,
  "fastBars": [
-  3,
-  6
+  2,
+  4
  ],
  "placeTerms": [],
  "words": [
   {
    "at": 0,
    "beats": 1,
-   "text": "1 M³",
+   "text": "1 M³ ≈A$378",
    "bg": "brand",
-   "rot": -3
+   "rot": 0,
+   "clipTag": "cover"
   },
   {
    "at": 1,
    "beats": 1,
    "text": "CHINA",
    "bg": "white",
-   "rot": 3
+   "rot": 2,
+   "clipTag": "ship"
   },
   {
    "at": 2,
    "beats": 1,
    "text": "TO",
    "bg": "black",
-   "rot": -2
+   "rot": -2,
+   "clipTag": "ship"
   },
   {
    "at": 3,
    "beats": 1,
    "text": "SYDNEY",
    "bg": "brand",
-   "rot": 4
+   "rot": 1,
+   "clipTag": "aerial"
   },
   {
    "at": 4,
    "beats": 3,
    "text": "≈A$378",
    "bg": "brand",
-   "rot": -2
+   "rot": -1,
+   "clipTag": "aerial"
   },
   {
    "at": 7,
    "beats": 1,
-   "text": "EXCL.",
+   "text": "DOOR",
    "bg": "white",
-   "rot": 3
+   "rot": -2,
+   "clipTag": "dock"
   },
   {
    "at": 8,
    "beats": 1,
-   "text": "GST",
+   "text": "TO",
    "bg": "black",
-   "rot": -3
+   "rot": 2,
+   "clipTag": "dock"
   },
   {
    "at": 9,
    "beats": 1,
-   "text": "& DUTY",
+   "text": "DOOR",
    "bg": "brand",
-   "rot": 2
+   "rot": -1,
+   "clipTag": "racks"
   },
   {
    "at": 10,
-   "beats": 1,
-   "text": "DOOR",
+   "beats": 2,
+   "text": "CLEARANCE",
    "bg": "white",
-   "rot": -4
-  },
-  {
-   "at": 11,
-   "beats": 1,
-   "text": "TO",
-   "bg": "black",
-   "rot": 3
+   "rot": 0,
+   "clipTag": "scan"
   },
   {
    "at": 12,
-   "beats": 1,
-   "text": "DOOR",
-   "bg": "brand",
-   "rot": -2
+   "beats": 2,
+   "text": "INCLUDED",
+   "bg": "black",
+   "rot": 0,
+   "clipTag": "scan"
   },
   {
    "at": 14,
-   "beats": 1,
-   "text": "CUSTOMS",
-   "bg": "white",
-   "rot": 2
-  },
-  {
-   "at": 15,
-   "beats": 1,
-   "text": "CLEARED",
-   "bg": "black",
-   "rot": -3
+   "beats": 2,
+   "text": "LIVE",
+   "bg": "brand",
+   "rot": -2,
+   "clipTag": "wrap"
   },
   {
    "at": 16,
-   "beats": 1,
-   "text": "30KM",
-   "bg": "brand",
-   "rot": 4
-  },
-  {
-   "at": 17,
-   "beats": 1,
-   "text": "DELIVERY",
+   "beats": 2,
+   "text": "PRICES",
    "bg": "white",
-   "rot": -2
+   "rot": 1,
+   "clipTag": "wrap"
   },
   {
    "at": 18,
-   "beats": 1,
-   "text": "INCLUDED",
+   "beats": 3,
+   "text": "ONLINE",
    "bg": "black",
-   "rot": 3
-  },
-  {
-   "at": 20,
-   "beats": 1,
-   "text": "LIVE",
-   "bg": "brand",
-   "rot": -3
+   "rot": 0,
+   "clipTag": "racks"
   },
   {
    "at": 21,
    "beats": 1,
-   "text": "PRICES",
-   "bg": "white",
-   "rot": 2
+   "text": "NO",
+   "bg": "brand",
+   "rot": 2,
+   "clipTag": "ship"
   },
   {
    "at": 22,
-   "beats": 1,
-   "text": "ONLINE",
-   "bg": "black",
-   "rot": -4
+   "beats": 2,
+   "text": "SIGN-UP",
+   "bg": "white",
+   "rot": 0,
+   "clipTag": "aerial"
   },
   {
    "at": 24,
    "beats": 1,
-   "text": "NO",
-   "bg": "brand",
-   "rot": 3
+   "text": "CURRENT",
+   "bg": "black",
+   "rot": 0,
+   "clipTag": "endcard"
   },
   {
    "at": 25,
    "beats": 1,
-   "text": "SIGN-UP",
-   "bg": "white",
-   "rot": -2
+   "text": "RATES",
+   "bg": "brand",
+   "rot": -1,
+   "clipTag": "endcard"
   },
   {
-   "at": 27,
-   "beats": 1,
-   "text": "CURRENT",
-   "bg": "black",
-   "rot": 2
+   "at": 26,
+   "beats": 2,
+   "text": "ESTIMATES",
+   "bg": "white",
+   "rot": 0,
+   "clipTag": "endcard"
   },
   {
    "at": 28,
-   "beats": 1,
-   "text": "RATES",
-   "bg": "brand",
-   "rot": -3
-  },
-  {
-   "at": 29,
-   "beats": 1,
-   "text": "ESTIMATES",
-   "bg": "white",
-   "rot": 3
-  },
-  {
-   "at": 30,
-   "beats": 1,
+   "beats": 2,
    "text": "ONLY",
    "bg": "black",
-   "rot": -2
+   "rot": 0,
+   "clipTag": "endcardb"
   }
  ],
  "clips": [
   {
-   "file": "clips/aerial-a.mp4",
-   "tag": "aerial-a",
-   "kind": "aerial",
+   "file": "clips/cover-a.mp4",
+   "tag": "cover",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/cover-b.mp4",
+   "tag": "cover",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcard-a.mp4",
+   "tag": "endcard",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcard-b.mp4",
+   "tag": "endcard",
+   "kind": "detail",
    "source": "stock",
    "lenFrames": 105
   },
   {
    "file": "clips/ship-a.mp4",
-   "tag": "ship-a",
+   "tag": "ship",
    "kind": "street",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/forklift-a.mp4",
-   "tag": "forklift-a",
-   "kind": "person",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/parcels-a.mp4",
-   "tag": "parcels-a",
-   "kind": "detail",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/aerial-b.mp4",
-   "tag": "aerial-b",
-   "kind": "aerial",
    "source": "stock",
    "lenFrames": 105
   },
   {
    "file": "clips/ship-b.mp4",
-   "tag": "ship-b",
+   "tag": "ship",
    "kind": "street",
    "source": "stock",
    "lenFrames": 105
   },
   {
-   "file": "clips/forklift-b.mp4",
-   "tag": "forklift-b",
-   "kind": "person",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/parcels-b.mp4",
-   "tag": "parcels-b",
-   "kind": "detail",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/aerial-c.mp4",
-   "tag": "aerial-c",
+   "file": "clips/aerial-a.mp4",
+   "tag": "aerial",
    "kind": "aerial",
    "source": "stock",
    "lenFrames": 105
   },
   {
-   "file": "clips/parcels-c.mp4",
-   "tag": "parcels-c",
+   "file": "clips/aerial-b.mp4",
+   "tag": "aerial",
+   "kind": "aerial",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/dock-a.mp4",
+   "tag": "dock",
+   "kind": "street",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/dock-b.mp4",
+   "tag": "dock",
+   "kind": "street",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/racks-a.mp4",
+   "tag": "racks",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/racks-b.mp4",
+   "tag": "racks",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/scan-a.mp4",
+   "tag": "scan",
+   "kind": "person",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/scan-b.mp4",
+   "tag": "scan",
+   "kind": "person",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/wrap-a.mp4",
+   "tag": "wrap",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/wrap-b.mp4",
+   "tag": "wrap",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcardb-a.mp4",
+   "tag": "endcardb",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcardb-b.mp4",
+   "tag": "endcardb",
    "kind": "detail",
    "source": "stock",
    "lenFrames": 105
