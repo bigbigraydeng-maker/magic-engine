@@ -220,6 +220,14 @@ describe('POST approve — 推广计划批准前检查', () => {
     // 通过项也要留在快照里，否则全部通过的批准会留下空快照
     expect(meta.approval_receipt.gate_snapshot.results.some(r => r.light === 'green')).toBe(true)
   })
+  it('带推广结构的计划：批准时不派老任务，旧任务里没有推广步骤编号也不挡批准', async () => {
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks() })))
+    m.plan = planWith(baseSpec())
+    ;(m.plan as { plan_data: { tasks: unknown[] } }).plan_data.tasks = [{ kind: 'blog_article', title: '老任务', description: 'd', due_date: '2026-11-01' }]
+    const res = await APPROVE(req({}), { params: P })
+    expect(res.status).toBe(200)
+    expect(m.dispatch).not.toHaveBeenCalled()
+  })
   it('畸形 promo → 400，不批准（fail closed）', async () => {
     m.plan = planWith({ schema: 'promo_v1' })
     expect((await APPROVE(req({}), { params: P })).status).toBe(400)

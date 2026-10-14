@@ -19,7 +19,7 @@ import { dispatchPlanTasks, revokePlanTasks } from '@/lib/marketing-plan/task-di
 import { manualChecksOf } from '@/lib/marketing-plan/promo/board'
 import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
-import { findStep, hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
@@ -81,17 +81,6 @@ export async function POST(
       if (!parsed.ok) {
         return NextResponse.json({ success: false, error: '推广计划结构不合法，不能批准', issues: parsed.issues }, { status: 400 })
       }
-      // 派发的任务必须都映射到获批推广结构里真实存在的阶段 / 步骤，否则是改结构前留下的旧任务
-      const orphan = (planRow.plan_data.tasks ?? []).filter(
-        t => !t.promo_ref || !findStep(parsed.spec, t.promo_ref.phase_id, t.promo_ref.step_id),
-      )
-      if (orphan.length > 0) {
-        return NextResponse.json({
-          success: false,
-          error: '计划里有任务没有对应到推广计划的阶段 / 步骤（可能是改过阶段后留下的旧任务），请重新生成或清理这些任务后再批准',
-          orphan_tasks: orphan.map(t => t.title),
-        }, { status: 400 })
-      }
       const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow))
       const verdict = evaluateApproval(parsed.spec, facts.gate)
       if (!verdict.can_approve) {
@@ -108,7 +97,11 @@ export async function POST(
     }
 
     // 4. 派发任务（先派发，成功后再改状态 — 防止状态改了但任务未派发）
-    const dispatchResult = await dispatchPlanTasks(planRow)
+    //    带推广结构的计划不派生成计划时附带的老任务：工作改按推广步骤手工加卡（execution 接口要求 promo_ref）。
+    const isPromoPlan = hasPromoField(planRow.plan_data)
+    const dispatchResult = isPromoPlan
+      ? { marketing_plan_id: planRow.id, tasks_created: 0, tasks_skipped: 0, task_ids: [], packages_created: 0, package_ids: [] }
+      : await dispatchPlanTasks(planRow)
 
     // 5. 改状态 + 写批准回执（generation_meta 保存接口不接受，不会被覆盖）
     //    派发重试时已派过的任务会被跳过（dispatch.tasks_skipped），所以这里可以放心重试。
