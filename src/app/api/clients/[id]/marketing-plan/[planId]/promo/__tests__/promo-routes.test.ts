@@ -172,6 +172,18 @@ describe('POST verify — 人工核实', () => {
 })
 
 describe('POST acknowledge — 按计划继续', () => {
+  const onTrackSpend = () => {
+    const days: Record<string, number> = {}
+    for (let d = 4; d <= 10; d++) days[`2026-11-${String(d).padStart(2, '0')}`] = 5000
+    return { act_1: days }
+  }
+  beforeEach(() => { m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts(), goodReconFacts({ spend_cents_by_account_day: onTrackSpend() }))) })
+  it('对账落后 / 看不清时 → 409，不留"没意见"记录', async () => {
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts(), goodReconFacts({ spend_cents_by_account_day: { act_1: {} } })))
+    m.plan = planWith(baseSpec(), { status: 'approved' })
+    expect((await ACK(req({}), { params: P })).status).toBe(409)
+    expect(m.updates).toHaveLength(0)
+  })
   it('只在已批准时可点；记一条，按窗口起始日幂等', async () => {
     m.plan = planWith(baseSpec(), { status: 'draft' })
     expect((await ACK(req({}), { params: P })).status).toBe(409)

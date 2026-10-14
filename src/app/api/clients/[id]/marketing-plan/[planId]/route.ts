@@ -90,6 +90,12 @@ export async function PATCH(
           error: 'Use POST /[planId]/approve to approve a plan (triggers task dispatch).',
         }, { status: 400 })
       }
+      if (body.status === 'archived') {
+        return NextResponse.json({
+          success: false,
+          error: 'Use DELETE to archive a plan (clears its pending tasks).',
+        }, { status: 400 })
+      }
       updates.status = body.status
     }
 

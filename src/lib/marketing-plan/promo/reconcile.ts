@@ -122,9 +122,17 @@ function spendRow(spec: PromoSpec, win: { start: string; end: string }, f: Recon
   if (plannedTotal === 0) {
     return { ...base, planned: 0, actual: null, status: 'unknown', reason: '这个窗口内没有生效的广告步骤（可能在暂停区间或阶段之外）' }
   }
+  // 实际花费只算计划生效的那几天（阶段内、不在暂停区间），和计划口径一致
+  const activeDays = new Set<string>()
+  for (const { phase, step } of allAdsSteps(spec)) {
+    for (const day of eachDay(win.start, win.end)) {
+      if (stepActiveOn(step, phase.start_date, phase.end_date, day)) activeDays.add(`${step.settings.ad_account_id}|${day}`)
+    }
+  }
   let actual = 0
-  for (const acc of Object.keys(planned)) {
-    for (const day of eachDay(win.start, win.end)) actual += f.spend_cents_by_account_day[acc]?.[day] ?? 0
+  for (const key of activeDays) {
+    const [acc, day] = key.split('|')
+    actual += f.spend_cents_by_account_day[acc]?.[day] ?? 0
   }
   const ratio = actual / plannedTotal
   const pct = Math.round(ratio * 100)

@@ -29,12 +29,12 @@ export function canWriteTasksToPlan(status: MarketingPlanStatus): boolean {
   return status === 'approved'
 }
 
-/** 退回草稿（从已锁定状态回到 draft）需要先清掉还没开始的待办。 */
+/** 任何「非草稿 → 草稿」都算退回：先检查在途工作、清掉没开始的待办（包括已归档的计划再改回草稿）。 */
 export function isRevertToDraft(
   current: MarketingPlanStatus,
   next: MarketingPlanStatus | undefined,
 ): boolean {
-  return next === 'draft' && isPlanContentLocked(current)
+  return next === 'draft' && current !== 'draft'
 }
 
 /**

@@ -151,8 +151,13 @@ export async function POST(
       }, { status: 409 })
     }
     if (updateErr) {
-      // 任务已派发但状态没改 — 记录警告但不抛错（让 PM 看到任务已存在）
-      console.error('[marketing-plan approve] tasks dispatched but status update failed:', updateErr)
+      // 任务已派发但状态没改：撤回本次派发，免得草稿计划名下留着已上看板的任务
+      console.error('[marketing-plan approve] status update failed, revoking dispatch:', updateErr)
+      await revokePlanTasks(params.planId, params.id)
+      return NextResponse.json({
+        success: false,
+        error: '批准没有保存成功，已撤销本次派发，请稍后重试。',
+      }, { status: 500 })
     }
 
     return NextResponse.json({

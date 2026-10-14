@@ -133,7 +133,9 @@ interface InsightsRead {
   as_of: string | null
 }
 
-async function loadInsights(clientId: string, accountIds: string[], win: { start: string; end: string }): Promise<InsightsRead> {
+async function loadInsights(
+  clientId: string, accountIds: string[], win: { start: string; end: string }, staleDays: number, now: Date,
+): Promise<InsightsRead> {
   if (accountIds.length === 0) return { spend: {}, results: 0, as_of: null }
   const { data, error } = await supabaseAdmin
     .from('ad_daily_insights')
@@ -156,6 +158,11 @@ async function loadInsights(clientId: string, accountIds: string[], win: { start
     results += r.results ?? 0
     if (r.fetched_at && (asOf === null || r.fetched_at > asOf)) asOf = r.fetched_at
   }
+  // 同步中途断了：某个账户最后一行远早于窗口末尾，或整体入库时间过旧 → 缺的天不是 0，是看不清
+  const lastDay = addDays(win.end, -1)
+  const covered = accountIds.every(id => Object.keys(spend[id] ?? {}).some(d => d >= lastDay))
+  const fresh = asOf !== null && (now.getTime() - Date.parse(asOf)) / 86_400_000 <= staleDays
+  if (!covered || !fresh) return { spend: null, results: null, as_of: asOf }
   return { spend, results, as_of: asOf }
 }
 
@@ -220,7 +227,7 @@ export async function loadPromoFacts(
     loadStrategyConfig(clientId),
     loadDailyPlanCoverage(clientId, today),
     loadGoal(clientId, spec.goal_id),
-    loadInsights(clientId, planAccountIds, win),
+    loadInsights(clientId, planAccountIds, win, playbook.factFreshnessDays, now),
     loadPublishedCount(clientId, win, accountTimezones),
   ])
 

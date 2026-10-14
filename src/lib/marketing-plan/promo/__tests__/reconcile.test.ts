@@ -40,6 +40,16 @@ function spendFacts(perDayCents: number) {
   return { act_1: days }
 }
 
+describe('reconcileWeek — 实际花费只算计划生效的天', () => {
+  it('阶段只占窗口后 2 天时，之前几天同账户的花费不算进来（不会虚报超出）', () => {
+    const spec = baseSpec()
+    spec.phases[0].start_date = '2026-11-09'
+    const f = goodReconFacts({ spend_cents_by_account_day: spendFacts(5000) })
+    const spend = reconcileWeek(spec, TODAY, f, pb).rows.find(x => x.key === 'spend')!
+    expect(spend.status).toBe('on_track')
+  })
+})
+
 describe('reconcileWeek — 头条', () => {
   it('花费正常 + 目标按节奏 → 基本按计划', () => {
     const f = goodReconFacts({ spend_cents_by_account_day: spendFacts(5000) })
