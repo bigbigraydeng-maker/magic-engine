@@ -137,6 +137,19 @@ export async function POST(
       .maybeSingle()
 
     if (!updateErr && !updated) {
+      // 先看看是不是另一个批准请求已经赢了：赢家派的待办是对的，绝不能撤
+      const { data: now } = await supabaseAdmin
+        .from('marketing_plans')
+        .select('status')
+        .eq('id', params.planId)
+        .eq('client_id', params.id)
+        .maybeSingle<{ status: string }>()
+      if (now?.status === 'approved') {
+        return NextResponse.json({
+          success: false,
+          error: '这份计划刚刚已经被批准了，本次请求没有重复处理。',
+        }, { status: 409 })
+      }
       // 草稿在我们检查之后被改了：派发的是旧内容的任务，撤掉，让调用方重新批准
       await revokePlanTasks(params.planId, params.id)
       return NextResponse.json({

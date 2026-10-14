@@ -10,6 +10,9 @@ const m = vi.hoisted(() => ({
   dispatch: vi.fn(),
   revoke: vi.fn(),
   revocable: vi.fn(),
+  casMiss: false,
+  missed: false,
+  statusAfter: 'draft',
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
 }))
@@ -26,8 +29,13 @@ vi.mock('@/lib/supabase', () => {
     c.select = () => c
     c.eq = () => c
     c.single = async () => ({ data: m.plan, error: m.plan ? null : { message: 'nf' } })
-    c.maybeSingle = async () => ({ data: m.plan, error: null })
+    c.maybeSingle = async () => {
+      if (m.casMiss && c.updated) { m.missed = true; return { data: null, error: null } }
+      if (m.casMiss && m.missed) return { data: { status: m.statusAfter }, error: null }
+      return { data: m.plan, error: null }
+    }
     c.update = (u: Record<string, unknown>) => {
+      c.updated = true
       m.updates.push(u)
       m.plan = { ...(m.plan ?? {}), ...u }
       return c
@@ -47,6 +55,7 @@ const mk = (body: unknown, method = 'PATCH') =>
 beforeEach(() => {
   vi.clearAllMocks()
   m.updates = []
+  m.casMiss = false; m.missed = false; m.statusAfter = 'draft'
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.revoke.mockResolvedValue({ revoked: 3 })
   m.revocable.mockResolvedValue({ tasks_in_progress: 0, packages_started: 0 })
@@ -171,5 +180,22 @@ describe('DELETE — 先确认计划属于当前客户', () => {
     const res = await DELETE(new NextRequest('http://localhost/x', { method: 'DELETE' }), { params: P })
     expect(res.status).toBe(404)
     expect(m.revoke).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST approve — 并发批准', () => {
+  it('更新没命中是因为另一个批准请求已经赢了 → 409，绝不撤销赢家派的待办', async () => {
+    m.dispatch.mockResolvedValue({ marketing_plan_id: 'plan-1', tasks_created: 1, tasks_skipped: 0, task_ids: ['t'], packages_created: 0, package_ids: [] })
+    m.casMiss = true; m.statusAfter = 'approved'
+    const res = await APPROVE(new NextRequest('http://localhost/x', { method: 'POST', body: '{}' }), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.revoke).not.toHaveBeenCalled()
+  })
+  it('更新没命中是因为草稿内容被改了 → 409，并撤销本次派发', async () => {
+    m.dispatch.mockResolvedValue({ marketing_plan_id: 'plan-1', tasks_created: 1, tasks_skipped: 0, task_ids: ['t'], packages_created: 0, package_ids: [] })
+    m.casMiss = true; m.statusAfter = 'draft'
+    const res = await APPROVE(new NextRequest('http://localhost/x', { method: 'POST', body: '{}' }), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.revoke).toHaveBeenCalledWith('plan-1', 'client-1')
   })
 })

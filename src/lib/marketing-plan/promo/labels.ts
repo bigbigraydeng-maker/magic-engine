@@ -67,5 +67,8 @@ export function approveButtonState(board: Pick<PromoBoard, 'plan_status' | 'appr
 
 /** 已批准计划上「按计划继续」是否该出现。 */
 export function continueButtonVisible(board: Pick<PromoBoard, 'plan_status' | 'reconcile' | 'reviewed_this_window'>): boolean {
-  return board.plan_status === 'approved' && board.reconcile !== null && !board.reviewed_this_window
+  if (board.plan_status !== 'approved' || board.reconcile === null || board.reviewed_this_window) return false
+  // 只有对账没异常才允许"没意见"：看不清 / 落后 / 超标时点它会留下误导的"看过、没意见"记录
+  const rec = board.reconcile
+  return !rec.blind && !rec.rows.some(r => r.status === 'behind' || r.status === 'over')
 }

@@ -44,6 +44,13 @@ describe('continueButtonVisible', () => {
   it('已批准 + 有对账 + 这个窗口还没点过 → 显示', () => {
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: false })).toBe(true)
   })
+  it('本周看不清 / 落后 / 超标 → 不显示（不能对异常留下"没意见"）', () => {
+    const row = (status: 'behind' | 'over' | 'on_track') => ({ key: 'spend' as const, label: 's', planned: 1, actual: 1, unit: '', status, reason: '', as_of: null })
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, blind: true }, reviewed_this_window: false })).toBe(false)
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('behind')] }, reviewed_this_window: false })).toBe(false)
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('over')] }, reviewed_this_window: false })).toBe(false)
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('on_track')] }, reviewed_this_window: false })).toBe(true)
+  })
   it('点过了 / 草稿 / 没有对账 → 不显示', () => {
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: true })).toBe(false)
     expect(continueButtonVisible({ plan_status: 'draft', reconcile: rec, reviewed_this_window: false })).toBe(false)
