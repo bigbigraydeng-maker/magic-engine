@@ -92,6 +92,7 @@ import {
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 import { pushPlatformConnectionItems } from './platform-connection-items'
+import { pushWhatsappUnclaimedItems } from './whatsapp-unclaimed-items'
 import { pushLedgerItems } from './ledger-items'
 import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
@@ -181,6 +182,11 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
     (b) => pushPlatformConnectionItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
+    ),
+    // WhatsApp 收到了消息但没客户绑定这个号码 —— 消息没存下来，只有人能去设置页绑一次。
+    // 表还没上线时模块自己静默返回，不抛给这里。
+    (b) => pushWhatsappUnclaimedItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] WhatsApp 无人认领号码检查失败（不阻塞其他待办）:', e),
     ),
     // 写在 Render 里的 Meta 钥匙被 Meta 作废 —— 上面那条只查「连接 Meta」按钮存下的授权，
     // 这条补的是环境变量里的钥匙（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
