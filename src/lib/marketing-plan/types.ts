@@ -134,6 +134,8 @@ export interface PlanTask {
    *   'client_info'  — 需要客户提供信息（产品数据、案例等）
    */
   requires?: PlanTaskRequires | null
+  /** 推广计划（plan_data.promo）下的任务必须指明所属阶段 / 步骤，批准时校验。 */
+  promo_ref?: { phase_id: string; step_id: string } | null
 }
 
 // ─── 完整 Plan 数据 ────────────────────────────────────────────────────────────

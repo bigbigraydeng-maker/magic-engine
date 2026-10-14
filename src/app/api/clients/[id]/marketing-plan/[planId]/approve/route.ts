@@ -19,7 +19,7 @@ import { dispatchPlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import { manualChecksOf } from '@/lib/marketing-plan/promo/board'
 import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
-import { hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { findStep, hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
@@ -80,6 +80,17 @@ export async function POST(
       const parsed = parsePromoSpec((planRow.plan_data as unknown as { promo: unknown }).promo)
       if (!parsed.ok) {
         return NextResponse.json({ success: false, error: '推广计划结构不合法，不能批准', issues: parsed.issues }, { status: 400 })
+      }
+      // 派发的任务必须都映射到获批推广结构里真实存在的阶段 / 步骤，否则是改结构前留下的旧任务
+      const orphan = (planRow.plan_data.tasks ?? []).filter(
+        t => !t.promo_ref || !findStep(parsed.spec, t.promo_ref.phase_id, t.promo_ref.step_id),
+      )
+      if (orphan.length > 0) {
+        return NextResponse.json({
+          success: false,
+          error: '计划里有任务没有对应到推广计划的阶段 / 步骤（可能是改过阶段后留下的旧任务），请重新生成或清理这些任务后再批准',
+          orphan_tasks: orphan.map(t => t.title),
+        }, { status: 400 })
       }
       const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow))
       const verdict = evaluateApproval(parsed.spec, facts.gate)

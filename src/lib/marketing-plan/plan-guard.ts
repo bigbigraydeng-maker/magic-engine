@@ -55,9 +55,18 @@ export function lockedFieldsTouched(body: {
 
 // ─── 派发去重 ──────────────────────────────────────────────────────────────────
 
-/** 同一份计划里「标题 + 截止日」相同视为同一张卡（旧任务没有稳定编号，只能这样认）。 */
-export function planTaskKey(title: string, dueDate: string | null | undefined): string {
-  return `${title.trim()}|${dueDate ?? ''}`
+/**
+ * 同一份计划里「标题 + 截止日 + 类型 + 平台（+ 推广步骤编号）」相同视为同一张卡
+ * （旧任务没有稳定编号，只能这样认；同天同标题发 Facebook / Instagram 是两张卡）。
+ */
+export function planTaskKey(
+  title: string,
+  dueDate: string | null | undefined,
+  kind?: string | null,
+  platform?: string | null,
+  promoStepId?: string | null,
+): string {
+  return `${title.trim()}|${dueDate ?? ''}|${kind ?? ''}|${platform ?? ''}|${promoStepId ?? ''}`
 }
 
 /**
@@ -71,7 +80,7 @@ export function filterUndispatched(
   const seen = new Set(existingKeys)
   const out: { task: PlanTask; index: number }[] = []
   tasks.forEach((task, index) => {
-    const key = planTaskKey(task.title, task.due_date)
+    const key = planTaskKey(task.title, task.due_date, task.kind, task.platform, task.promo_ref?.step_id)
     if (seen.has(key)) return
     seen.add(key) // 同一批里重复的标题+日期也只派一次
     out.push({ task, index })

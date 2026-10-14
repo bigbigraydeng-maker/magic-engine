@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
-  existing: [] as { title: string; due_date: string | null }[],
+  existing: [] as { title: string; due_date: string | null; steps_json?: Record<string, unknown> }[],
   existingError: null as { message: string } | null,
   inserted: [] as Record<string, unknown>[][],
   packageInserts: [] as Record<string, unknown>[][],
@@ -72,7 +72,7 @@ describe('dispatchPlanTasks — 去重', () => {
   })
 
   it('重试：已经派过的跳过，只补缺的，sort_order 保持原下标', async () => {
-    state.existing = [{ title: 'A', due_date: '2026-10-20' }]
+    state.existing = [{ title: 'A', due_date: '2026-10-20', steps_json: { kind: 'blog_article' } }]
     const res = await dispatchPlanTasks(plan([task('A', '2026-10-20'), task('B', '2026-10-21')]))
     expect(res.tasks_created).toBe(1)
     expect(res.tasks_skipped).toBe(1)
@@ -81,7 +81,7 @@ describe('dispatchPlanTasks — 去重', () => {
   })
 
   it('全部派过：不插入、不建生产包', async () => {
-    state.existing = [{ title: 'A', due_date: '2026-10-20' }]
+    state.existing = [{ title: 'A', due_date: '2026-10-20', steps_json: { kind: 'blog_article' } }]
     const res = await dispatchPlanTasks(plan([task('A', '2026-10-20')]))
     expect(res.tasks_created).toBe(0)
     expect(res.tasks_skipped).toBe(1)
@@ -90,7 +90,7 @@ describe('dispatchPlanTasks — 去重', () => {
   })
 
   it('生产包只为新派发的任务建', async () => {
-    state.existing = [{ title: 'A', due_date: '2026-10-20' }]
+    state.existing = [{ title: 'A', due_date: '2026-10-20', steps_json: { kind: 'blog_article' } }]
     const res = await dispatchPlanTasks(plan([task('A', '2026-10-20'), task('B', '2026-10-21')]))
     expect(res.packages_created).toBe(1)
     const ids = (state.packageInserts[0][0].source_payload as { execution_item_ids: string[] }).execution_item_ids

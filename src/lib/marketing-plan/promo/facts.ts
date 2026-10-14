@@ -80,7 +80,7 @@ async function loadStrategyConfig(clientId: string): Promise<GateFacts['config']
   }
 }
 
-/** 每日计划从 today 起「连续」排了几天（遇到第一个空档就停）；一天都没排 = 0；读失败 = null。 */
+/** 每日计划从 today 起往后排到了第几天；一天都没排 = 0；读失败 = null。 */
 async function loadDailyPlanCoverage(clientId: string, today: string): Promise<number | null> {
   const { data, error } = await supabaseAdmin
     .from('social_plans')
@@ -91,12 +91,18 @@ async function loadDailyPlanCoverage(clientId: string, today: string): Promise<n
   const plannedDays = new Set<string>()
   for (const row of (data ?? []) as { plan_data: { days?: { date: string; slots?: Record<string, string> }[] } }[]) {
     for (const d of row.plan_data?.days ?? []) {
-      if (Object.values(d.slots ?? {}).some(v => v === 'PLANNED')) plannedDays.add(d.date)
+      const planned = Object.values(d.slots ?? {}).some(v => v === 'PLANNED')
+      if (planned && d.date >= today) plannedDays.add(d.date)
     }
   }
-  let run = 0
-  while (plannedDays.has(addDays(today, run))) run++
-  return run
+  // 从今天起逐日数，遇到第一个空档就停
+  let count = 0
+  for (let day = today; plannedDays.has(day); count++) {
+    const next = new Date(`${day}T00:00:00Z`)
+    next.setUTCDate(next.getUTCDate() + 1)
+    day = next.toISOString().slice(0, 10)
+  }
+  return count
 }
 
 /** 目标：必须属于同一客户，否则当作读不到。 */
