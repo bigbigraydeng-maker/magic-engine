@@ -12,6 +12,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import {
+  PLAN_CONTENT_LOCKED_MESSAGE,
+  isRevertToDraft,
+  lockedFieldsTouched,
+} from '@/lib/marketing-plan/plan-guard'
 
 interface PatchBody {
   title?: string
@@ -92,6 +97,35 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: 'No fields to update' }, { status: 400 })
     }
 
+    // 已批准 / 已完成的计划内容被锁住：批准的是 A，就不能悄悄改成 B 继续跑。
+    // 要改内容就先退回草稿（status: 'draft'），退回时清掉还没开始的待办。
+    const { data: current, error: currentErr } = await supabaseAdmin
+      .from('marketing_plans')
+      .select('status')
+      .eq('id', params.planId)
+      .eq('client_id', params.id)
+      .maybeSingle<{ status: MarketingPlanStatus }>()
+    if (currentErr) throw currentErr
+    if (!current) {
+      return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
+    }
+
+    const revertingToDraft = isRevertToDraft(current.status, body.status)
+    const touched = lockedFieldsTouched(body)
+    if (!revertingToDraft && touched.length > 0 && (current.status === 'approved' || current.status === 'completed')) {
+      return NextResponse.json({
+        success: false,
+        error: PLAN_CONTENT_LOCKED_MESSAGE,
+        locked_fields: touched,
+      }, { status: 409 })
+    }
+
+    let revoked = 0
+    if (revertingToDraft) {
+      // 退回草稿 = 撤销批准：清掉这份计划还没开始的待办，已开工的保留（由 FDE 处理）。
+      revoked = (await revokePlanTasks(params.planId)).revoked
+    }
+
     const { data, error } = await supabaseAdmin
       .from('marketing_plans')
       .update(updates)
@@ -101,7 +135,7 @@ export async function PATCH(
       .single()
 
     if (error) throw error
-    return NextResponse.json({ success: true, plan: data })
+    return NextResponse.json({ success: true, plan: data, ...(revertingToDraft ? { revoked_tasks: revoked } : {}) })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })

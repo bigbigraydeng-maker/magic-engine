@@ -16,6 +16,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { PLAN_NOT_APPROVED_MESSAGE, canWriteTasksToPlan } from '@/lib/marketing-plan/plan-guard'
+import type { MarketingPlanStatus } from '@/lib/marketing-plan/types'
 import type {
   ExecutionItem, ExecutionLog, PrescriptionStatus,
   DiagnosticDimension, FixType, LinkedContentPost,
@@ -639,12 +641,16 @@ export async function POST(
     if (isMarketingPlan) {
       const { data: plan, error: planErr } = await supabaseAdmin
         .from('marketing_plans')
-        .select('id')
+        .select('id, status')
         .eq('id', body.marketing_plan_id!)
         .eq('client_id', clientId)
-        .single<{ id: string }>()
+        .single<{ id: string; status: MarketingPlanStatus }>()
       if (planErr || !plan) {
         return NextResponse.json({ success: false, error: 'Marketing Plan 不存在' }, { status: 404 })
+      }
+      // 草稿计划不能往执行看板派活（以前只查「计划存在」，草稿也能加任务）
+      if (!canWriteTasksToPlan(plan.status)) {
+        return NextResponse.json({ success: false, error: PLAN_NOT_APPROVED_MESSAGE }, { status: 409 })
       }
 
       const { data: maxRow } = await supabaseAdmin

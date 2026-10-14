@@ -155,6 +155,17 @@ export interface MarketingPlanData {
   executive_summary?: string | null
 }
 
+// ─── 批准回执 ──────────────────────────────────────────────────────────────────
+
+export interface ApprovalReceipt {
+  request_id: string
+  approved_by: string | null
+  approved_at: string
+  tasks_created: number
+  tasks_skipped: number
+  packages_created: number
+}
+
 // ─── 数据库行类型 ─────────────────────────────────────────────────────────────
 
 export interface MarketingPlan {
@@ -174,6 +185,8 @@ export interface MarketingPlan {
     generated_at?: string
     /** true = 生成时撞到输出上限被截断，tasks/email 等数组可能不完整，需要人工核对再批准。 */
     truncated?: boolean
+    /** 批准回执：每次批准成功后由服务端写入（保存接口不接受这一列，所以不会被覆盖）。*/
+    approval_receipt?: ApprovalReceipt
   } | null
   approved_at: string | null
   created_at: string
@@ -200,6 +213,8 @@ export interface GeneratePlanRequest {
 export interface DispatchResult {
   marketing_plan_id: string
   tasks_created: number
+  /** 这次因为已经派发过而跳过的任务数（批准重试 / 并发点两次时 > 0）*/
+  tasks_skipped?: number
   task_ids: string[]
   packages_created: number
   package_ids: string[]

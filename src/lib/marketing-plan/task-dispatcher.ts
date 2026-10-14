@@ -13,6 +13,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { filterUndispatched, planTaskKey } from './plan-guard'
 import type {
   DispatchResult,
   MarketingPlan,
@@ -196,12 +197,32 @@ async function createProductionPackagesFromPlan(
 
 export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchResult> {
   const tasks = plan.plan_data?.tasks ?? []
-
-  if (tasks.length === 0) {
-    return { marketing_plan_id: plan.id, tasks_created: 0, task_ids: [], packages_created: 0, package_ids: [] }
+  const empty: DispatchResult = {
+    marketing_plan_id: plan.id, tasks_created: 0, tasks_skipped: 0,
+    task_ids: [], packages_created: 0, package_ids: [],
   }
 
-  const rows = tasks.map((task, idx) => ({
+  if (tasks.length === 0) return empty
+
+  // 去重：批准重试 / 并发点两次时，这份计划已经派过的任务不再重复插入。
+  // 先查后插没有数据库唯一约束兜底（设计稿 §0.1：第一步接受较弱保证），
+  // 残余风险是两个人「同时」点批准各派一份，后果只是多出内部待办。
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from('execution_items')
+    .select('title, due_date')
+    .eq('marketing_plan_id', plan.id)
+    .eq('source', 'marketing_plan')
+  if (existingErr) {
+    throw new Error(`Failed to read existing plan tasks: ${existingErr.message}`)
+  }
+  const existingKeys = new Set(
+    (existing ?? []).map(r => planTaskKey(String(r.title ?? ''), r.due_date as string | null)),
+  )
+  const fresh = filterUndispatched(tasks, existingKeys)
+  const skipped = tasks.length - fresh.length
+  if (fresh.length === 0) return { ...empty, tasks_skipped: skipped }
+
+  const rows = fresh.map(({ task, index }) => ({
     client_id:         plan.client_id,
     prescription_id:   null,
     marketing_plan_id: plan.id,
@@ -215,7 +236,7 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
     status:            'pending',
     steps_json:        buildStepsJson(task),
     execution_target:  buildExecutionTarget(task),
-    sort_order:        idx,
+    sort_order:        index,
     due_date:          task.due_date,
   }))
 
@@ -230,11 +251,16 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
 
   const ids = (data ?? []).map(r => r.id as string)
 
-  const { packages_created, package_ids } = await createProductionPackagesFromPlan(plan, tasks, ids)
+  const { packages_created, package_ids } = await createProductionPackagesFromPlan(
+    plan,
+    fresh.map(f => f.task),
+    ids,
+  )
 
   return {
     marketing_plan_id: plan.id,
     tasks_created:     ids.length,
+    tasks_skipped:     skipped,
     task_ids:          ids,
     packages_created,
     package_ids,

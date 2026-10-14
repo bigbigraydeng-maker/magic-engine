@@ -7,12 +7,16 @@
  *   3. 返回派发结果
  *
  * 幂等性：如果 Plan 已是 approved 状态，返回当前状态，不重复派发。
+ * 重试安全：派发中途失败时计划保持 draft，再点一次只会补派还没派过的任务
+ * （dispatchPlanTasks 按「标题+截止日」跳过已存在的）。
+ * 保证强度：应用层；两个人「同时」点批准仍可能各派一份内部待办（设计稿 §0.1，PM 已接受）。
  */
 
+import { randomUUID } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { dispatchPlanTasks } from '@/lib/marketing-plan/task-dispatcher'
-import type { MarketingPlan } from '@/lib/marketing-plan/types'
+import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
@@ -67,12 +71,23 @@ export async function POST(
     // 4. 派发任务（先派发，成功后再改状态 — 防止状态改了但任务未派发）
     const dispatchResult = await dispatchPlanTasks(planRow)
 
-    // 5. 改状态
+    // 5. 改状态 + 写批准回执（generation_meta 保存接口不接受，不会被覆盖）
+    //    派发重试时已派过的任务会被跳过（dispatch.tasks_skipped），所以这里可以放心重试。
+    const approvedAt = new Date().toISOString()
+    const receipt: ApprovalReceipt = {
+      request_id: randomUUID(),
+      approved_by: access.user.email ?? null,
+      approved_at: approvedAt,
+      tasks_created: dispatchResult.tasks_created,
+      tasks_skipped: dispatchResult.tasks_skipped ?? 0,
+      packages_created: dispatchResult.packages_created,
+    }
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('marketing_plans')
       .update({
         status: 'approved',
-        approved_at: new Date().toISOString(),
+        approved_at: approvedAt,
+        generation_meta: { ...(planRow.generation_meta ?? {}), approval_receipt: receipt },
       })
       .eq('id', params.planId)
       .select('*')
@@ -87,6 +102,7 @@ export async function POST(
       success: true,
       plan: updated ?? planRow,
       dispatch: dispatchResult,
+      receipt,
     })
 
   } catch (err: unknown) {
