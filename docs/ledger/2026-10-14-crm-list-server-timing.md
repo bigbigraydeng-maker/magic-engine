@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:2606
+done_ref: pr:2620
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 在 PM 的 Chrome 里读名单接口响应的 Server-Timing，能看到 gate / rpc_stages / page_rows / page_ready / touches_briefs / assemble / total 各步毫秒数；响应里没有编号或个人信息
