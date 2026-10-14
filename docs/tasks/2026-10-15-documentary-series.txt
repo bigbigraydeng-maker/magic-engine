@@ -21,3 +21,5 @@ Cover verification: 12/12 full-size and mobile designs visually reviewed, all co
 Cover final offline build exit 0. No commit/push/merge/deploy or production changes.
 
 AUTHORIZATION UPDATE 2026-10-15: user explicitly approved arranging go-live and continuing video production. Commit/push/PR/merge/deploy for this reviewed series feature now authorized, plus necessary verification and linking approved review assets. No social publishing authorization inferred. Continue Chongqing documentary after deployment using the approved style; platform/data permission changes remain excluded.
+
+Release check: Risk gate treated photo-credits filenames as credential/credit budget paths. Renamed these attribution-only text files to explicit *-attribution.txt (contents unchanged) and updated references. No gate rules or protections changed.

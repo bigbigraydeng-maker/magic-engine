@@ -25,7 +25,7 @@
         "url": "/content-series/cts/covers/shanghai-beyond-skyline-card.jpg",
         "fullUrl": "/content-series/cts/covers/shanghai-beyond-skyline.jpg",
         "mobileUrl": "/content-series/cts/covers/shanghai-beyond-skyline-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/shanghai-beyond-skyline-credits.txt",
+        "creditUrl": "/content-series/cts/covers/shanghai-beyond-skyline-attribution.txt",
         "status": "approved",
         "photoNote": ""
       }
@@ -50,7 +50,7 @@
         "url": "/content-series/cts/covers/chongqing-many-levels-card.jpg",
         "fullUrl": "/content-series/cts/covers/chongqing-many-levels.jpg",
         "mobileUrl": "/content-series/cts/covers/chongqing-many-levels-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/chongqing-many-levels-credits.txt",
+        "creditUrl": "/content-series/cts/covers/chongqing-many-levels-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -75,7 +75,7 @@
         "url": "/content-series/cts/covers/zhangjiajie-more-than-view-card.jpg",
         "fullUrl": "/content-series/cts/covers/zhangjiajie-more-than-view.jpg",
         "mobileUrl": "/content-series/cts/covers/zhangjiajie-more-than-view-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/zhangjiajie-more-than-view-credits.txt",
+        "creditUrl": "/content-series/cts/covers/zhangjiajie-more-than-view-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -100,7 +100,7 @@
         "url": "/content-series/cts/covers/yangtze-life-along-river-card.jpg",
         "fullUrl": "/content-series/cts/covers/yangtze-life-along-river.jpg",
         "mobileUrl": "/content-series/cts/covers/yangtze-life-along-river-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/yangtze-life-along-river-credits.txt",
+        "creditUrl": "/content-series/cts/covers/yangtze-life-along-river-attribution.txt",
         "status": "draft",
         "photoNote": "图库航行画面，不代表 CTS 指定船舶。"
       }
@@ -125,7 +125,7 @@
         "url": "/content-series/cts/covers/suzhou-slowing-down-card.jpg",
         "fullUrl": "/content-series/cts/covers/suzhou-slowing-down.jpg",
         "mobileUrl": "/content-series/cts/covers/suzhou-slowing-down-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/suzhou-slowing-down-credits.txt",
+        "creditUrl": "/content-series/cts/covers/suzhou-slowing-down-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -150,7 +150,7 @@
         "url": "/content-series/cts/covers/hangzhou-beside-lake-card.jpg",
         "fullUrl": "/content-series/cts/covers/hangzhou-beside-lake.jpg",
         "mobileUrl": "/content-series/cts/covers/hangzhou-beside-lake-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/hangzhou-beside-lake-credits.txt",
+        "creditUrl": "/content-series/cts/covers/hangzhou-beside-lake-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -175,7 +175,7 @@
         "url": "/content-series/cts/covers/chengdu-beyond-panda-card.jpg",
         "fullUrl": "/content-series/cts/covers/chengdu-beyond-panda.jpg",
         "mobileUrl": "/content-series/cts/covers/chengdu-beyond-panda-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/chengdu-beyond-panda-credits.txt",
+        "creditUrl": "/content-series/cts/covers/chengdu-beyond-panda-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -200,7 +200,7 @@
         "url": "/content-series/cts/covers/winter-harbin-after-dark-card.jpg",
         "fullUrl": "/content-series/cts/covers/winter-harbin-after-dark.jpg",
         "mobileUrl": "/content-series/cts/covers/winter-harbin-after-dark-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/winter-harbin-after-dark-credits.txt",
+        "creditUrl": "/content-series/cts/covers/winter-harbin-after-dark-attribution.txt",
         "status": "draft",
         "photoNote": "历史冰景（来源标注2010），不代表当季活动布置。"
       }
@@ -225,7 +225,7 @@
         "url": "/content-series/cts/covers/winter-jilin-rime-card.jpg",
         "fullUrl": "/content-series/cts/covers/winter-jilin-rime.jpg",
         "mobileUrl": "/content-series/cts/covers/winter-jilin-rime-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/winter-jilin-rime-credits.txt",
+        "creditUrl": "/content-series/cts/covers/winter-jilin-rime-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -250,7 +250,7 @@
         "url": "/content-series/cts/covers/winter-beijing-street-card.jpg",
         "fullUrl": "/content-series/cts/covers/winter-beijing-street.jpg",
         "mobileUrl": "/content-series/cts/covers/winter-beijing-street-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/winter-beijing-street-credits.txt",
+        "creditUrl": "/content-series/cts/covers/winter-beijing-street-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -275,7 +275,7 @@
         "url": "/content-series/cts/covers/winter-zhangjiajie-card.jpg",
         "fullUrl": "/content-series/cts/covers/winter-zhangjiajie.jpg",
         "mobileUrl": "/content-series/cts/covers/winter-zhangjiajie-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/winter-zhangjiajie-credits.txt",
+        "creditUrl": "/content-series/cts/covers/winter-zhangjiajie-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
@@ -300,7 +300,7 @@
         "url": "/content-series/cts/covers/winter-kiwi-preparation-card.jpg",
         "fullUrl": "/content-series/cts/covers/winter-kiwi-preparation.jpg",
         "mobileUrl": "/content-series/cts/covers/winter-kiwi-preparation-mobile.jpg",
-        "creditUrl": "/content-series/cts/covers/winter-kiwi-preparation-credits.txt",
+        "creditUrl": "/content-series/cts/covers/winter-kiwi-preparation-attribution.txt",
         "status": "draft",
         "photoNote": ""
       }
