@@ -5,8 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:2594
-source: pr:2594
+done_ref: pr:2605
+source: pr:2605
 verify_by: 2026-10-21
 verify_how: 函数 crm_contacts_page_by_latest_touch 在生产库存在；anon/authenticated 不可执行；名单接口默认约 1.4 秒
 ---
