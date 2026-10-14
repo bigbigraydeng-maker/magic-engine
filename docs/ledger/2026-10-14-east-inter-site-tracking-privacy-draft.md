@@ -1,12 +1,14 @@
 ---
 id: 2026-10-14-east-inter-site-tracking-privacy-draft
-title: East Inter 官网追踪代码和隐私页草稿做好了，等 PM 给 Meta 像素编号和 GA4 编号、同意后才上线
-status: decided
-owner: pm
+title: East Inter 官网追踪代码和隐私页已上线（Meta 像素 + GA4），GA4 报表还要再看一次
+status: done
+owner: agent
 decided_on: 2026-10-14
 source: session:342d4a50
+done_on: 2026-10-14
+done_ref: pr:2619
 verify_by: 2026-10-16
-verify_how: PM 提供两个编号并同意上线后，官网加上追踪，在 Meta 事件测试工具和 GA4 实时报表里各看到一次页面访问和一次邮件点击；打开 eastinter.com.au/privacy 不再是 404。
+verify_how: 官网站点提交 571de66 已发布。已验：eastinter.com.au/privacy 打开 200，Meta 数据集 last_fired 有新时间。还要验：GA4 实时报表看到访问和邮件点击事件；Meta 事件里出现 Contact/ViewContent（数据有延迟，次日再看）。
 ---
 范围只有追踪和 /privacy。草稿和测试在 docs/clients/east-inter/site-tracking-2026-10/，官网仓库没动。
-需要 PM 给：Meta 像素编号、GA4 衡量编号、（可选）隐私页要写的公司全名/ABN。
+Meta 像素 2901017560298130、GA4 G-Y0L10QHRLB 都已填，PM 10-14 回「发布」，官网提交 571de66。回滚：官网仓库删 tracking-config.js、tracking.js、privacy.html，index.html 与计算器页还原到 35fa64f。
