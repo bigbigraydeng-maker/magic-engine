@@ -3,5 +3,5 @@
  */
 window.EastInterTracking = {
   metaPixelId: '2901017560298130',  // East Inter Pixel (dataset), linked to the East AUD ad account; ID supplied by coordinator window 18 on 2026-10-14
-  ga4MeasurementId: null    // Google Analytics 4 measurement ID, looks like G-XXXXXXXXXX
+  ga4MeasurementId: 'G-Y0L10QHRLB'  // GA4 property eastinter.com.au (account East Inter, created 2026-10-14 with PM approval); AUD, Sydney time
 };

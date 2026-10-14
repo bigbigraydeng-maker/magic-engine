@@ -4,11 +4,11 @@
 
 ## 要 PM 提供的东西（不得自拟）
 1. ~~Meta 像素编号~~：已有，`2901017560298130`（East Inter Pixel，已连 East 澳币广告户，统筹 18 号 10-14 提供），已填进 `tracking-config.js`。代码里 `fbq('init', id)` 不传任何用户信息；Meta 后台的「自动高级匹配」开关必须保持关闭（这是数据集设置，不在代码里，需在 Events Manager 里确认）。**10-14 统筹 18 号已核对：「网站自动高级匹配」为关闭。** 另有一项默认开着：「自动包含更详细的页面和商品信息」（AI 识别页面详情，不含个人信息），未改动，**PM 10-14 已定：关闭。** 由 18 号在 Meta 后台（Events Manager → East Inter Pixel → 设置）关掉，上线前确认。
-2. **GA4 衡量编号**：形如 `G-XXXXXXXXXX`，需要为 eastinter.com.au 建一个 GA4 媒体资源。
+2. ~~GA4 衡量编号~~：已建，`G-Y0L10QHRLB`（谷歌分析账户 East Inter → 媒体资源 eastinter.com.au，澳元、悉尼时区；10-14 PM 同意条款后由我创建；创建时 4 项数据共享全部取消），已填进 `tracking-config.js`。
 3. **隐私页主体名称**：目前页面只写「East Inter International Logistics」（与官网页脚一致）；如要写澳洲公司全名或 ABN，请给。
 4. **隐私页要不要请人看一眼法律措辞**（建议开投前看，页面把数据去向写成了 China + Google/Meta 海外处理）。
 
-GA4 编号仍为空：没填前 GA4 那一块不加载；Meta 已填，合并并发布后即开始记事件。
+两个编号都已填：合并并发布官网后两边即开始记事件；发布前什么都不会发。
 
 ## 文件 → 官网仓库
 - `tracking-config.js`（新）填两个编号；`tracking.js`（新）；`privacy.html`（新）
