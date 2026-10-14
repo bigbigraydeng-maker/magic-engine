@@ -50,7 +50,7 @@
 
 ## 2.5 英文版画面文字（成片用这版；中文稿搁置）
 
-通用角标（每条都带）：`Current rates · Estimates only, subject to a binding quote`
+通用角标（每条都带，以 101 号过审的为准）：`Current rates · Indicative estimate. Final charges are subject to a binding quote.`
 
 | # | First-frame hook (large text) | On-screen lines (short) |
 |---|---|---|
