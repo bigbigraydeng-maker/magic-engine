@@ -8,6 +8,7 @@ import {
   collectPostcardAssetFiles,
   textWidthUnits,
   bannedWordHits,
+  priceMentionHits,
   normalizeForScan,
   MIN_SCENES,
   MAX_SCENES,
@@ -265,6 +266,75 @@ describe('banned words (curly quotes and new phrases)', () => {
     assert.deepEqual(bannedWordHits('Unlimited access'), [])
     assert.deepEqual(bannedWordHits('a small group of 12'), [])
     assert.deepEqual(bannedWordHits('限 12 人小团'), [])
+  })
+})
+
+describe('banned words (latest additions)', () => {
+  test('flags new English promotional phrases', () => {
+    assert.ok(bannedWordHits('Last days').length > 0)
+    assert.ok(bannedWordHits('Act fast').length > 0)
+    assert.ok(bannedWordHits('Selling out').length > 0)
+    assert.ok(bannedWordHits('Closing soon').length > 0)
+    assert.ok(bannedWordHits('Offer closes').length > 0)
+    assert.ok(bannedWordHits('3 left').length > 0)
+  })
+
+  test('flags new Chinese promotional phrases', () => {
+    assert.ok(bannedWordHits('席位有限').length > 0)
+    assert.ok(bannedWordHits('售罄').length > 0)
+    assert.ok(bannedWordHits('手慢无').length > 0)
+  })
+
+  test('does not flag allowed wording', () => {
+    assert.deepEqual(bannedWordHits('Unlimited access'), [])
+    assert.deepEqual(bannedWordHits('限 12 人小团'), [])
+  })
+})
+
+describe('price mentions', () => {
+  test('flags currency symbols and codes', () => {
+    assert.ok(priceMentionHits('From $1,999').length > 0)
+    assert.ok(priceMentionHits('A$1999').length > 0)
+    assert.ok(priceMentionHits('1999 NZD').length > 0)
+    assert.ok(priceMentionHits('NZ$ 2,999').length > 0)
+  })
+
+  test('flags Chinese price phrases', () => {
+    assert.ok(priceMentionHits('仅需 1999').length > 0)
+    assert.ok(priceMentionHits('8折').length > 0)
+    assert.ok(priceMentionHits('1999元').length > 0)
+  })
+
+  test('does not flag plain numbers', () => {
+    assert.deepEqual(priceMentionHits('18 days'), [])
+    assert.deepEqual(priceMentionHits('Day 12'), [])
+    assert.deepEqual(priceMentionHits('Year 2027'), [])
+    assert.deepEqual(priceMentionHits('a 12-person group'), [])
+  })
+
+  test('a hook line with a price is rejected', () => {
+    rejects((props) => {
+      props.hook.lines = ['FROM $1999']
+    }, '画面文字里不许出现价格')
+  })
+
+  test('an end title with a price is rejected when price is null', () => {
+    rejects((props) => {
+      props.price = null
+      props.end = { backdropClip: 'clips/end.mp4', title: 'From NZD 1999' }
+    }, '画面文字里不许出现价格')
+  })
+
+  test('a scene line containing a dollar sign is rejected', () => {
+    rejects((props) => {
+      props.scenes[0].line = 'The tour costs $'
+    }, '画面文字里不许出现价格')
+  })
+
+  test('a normal price object still parses', () => {
+    const props = parsePostcardProps(validProps())
+    assert.equal(props.price.currencyPrefix, '$')
+    assert.equal(props.price.amount, 1200)
   })
 })
 

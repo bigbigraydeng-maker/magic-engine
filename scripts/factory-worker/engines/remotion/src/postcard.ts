@@ -67,6 +67,23 @@ export const ENGLISH_BANNED = [
   'spaces are limited',
   'places are limited',
   'spots are limited',
+  'last day',
+  'last days',
+  'final days',
+  'ends friday',
+  'ends monday',
+  'ends tomorrow',
+  "don't wait",
+  'act fast',
+  'selling out',
+  'sells out',
+  'sell out',
+  'few places left',
+  'closing soon',
+  'offer closes',
+  'offer ends',
+  'hurry up',
+  'dont miss out',
 ];
 
 /** Chinese phrases that must never appear (plain substring match). */
@@ -101,12 +118,24 @@ export const CHINESE_BANNED = [
   '錯過再等',
   '限额',
   '限額',
+  '席位有限',
+  '座位有限',
+  '数量有限',
+  '名额有限',
+  '售罄',
+  '手慢无',
+  '抓紧',
+  '即将结束',
+  '马上结束',
+  '最后几天',
+  '最後幾天',
 ];
 
 /** Scarcity patterns that must never appear (returned as the matched text). */
 const SCARCITY_PATTERNS = [
   /only\s+\d+\s+(left|remaining|seats|spots|places)/i,
   /\b\d+\s+(days?|weeks?|seats?|spots?)\s+left\b/i,
+  /\b\d+\s+left\b/i,
   /\boffer\s+ends\b/i,
   /\bexpir(?:es|ed|ing)\b/i,
   /\bonly\s+(a\s+few|one|two|three|four|five|six|seven|eight|nine|ten)\s+(left|remaining)\b/i,
@@ -179,6 +208,25 @@ export function bannedWordHits(s: string): string[] {
   }
   for (const word of CHINESE_BANNED) {
     if (compact.includes(word)) hits.push(word);
+  }
+  return hits;
+}
+
+/** On-screen price mentions that must never appear in body text (prices belong on the price card or the first-comment link). */
+export function priceMentionHits(s: string): string[] {
+  const hits: string[] = [];
+  const normalized = normalizeForScan(s);
+  const patterns: RegExp[] = [
+    /[$€£¥￥]/,
+    /\b(?:nzd|aud|usd|cny|rmb|nz\$|a\$)\b/i,
+    /\d[\d,.]*\s*(?:nzd|aud|usd|元|块|刀|美元|新币)/i,
+    /(?:nzd|aud|usd|nz\$|a\$)\s*\d/i,
+    /(?:仅需|只要|低至|起价|售价|价格|特价|折扣)\s*\d/,
+    /\d\s*折/,
+  ];
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match !== null) hits.push(match[0]);
   }
   return hits;
 }
@@ -402,6 +450,27 @@ export const PostcardPropsSchema = z
           code: z.ZodIssueCode.custom,
           path,
           message: `文字里不能出现促销词：${hits.join('、')}`,
+        });
+      }
+    }
+
+    const priceTargets: Array<[Array<string | number>, string]> = [
+      ...val.hook.lines.map((line, i): [Array<string | number>, string] => [['hook', 'lines', i], line]),
+      ...val.scenes.flatMap((scene, i): Array<[Array<string | number>, string]> => [
+        [['scenes', i, 'place'], scene.place],
+        [['scenes', i, 'line'], scene.line],
+      ]),
+    ];
+    if (val.end !== null) {
+      priceTargets.push([['end', 'title'], val.end.title]);
+    }
+    for (const [path, value] of priceTargets) {
+      const hits = priceMentionHits(value);
+      if (hits.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: '画面文字里不许出现价格（价格只放价格卡或首评链接）',
         });
       }
     }
