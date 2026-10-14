@@ -1,0 +1,59 @@
+{
+ "_status": "DRAFT_NOT_SUBMITTED — 没有提交到视频工厂，没有花钱，没有发布。提交前必须补齐 blocked_by 各项。",
+ "blocked_by": [
+  "logo 源文件缺失（master_briefs 与素材库均无）",
+  "品牌主色未确认（master_briefs.vi_colors 为空；#1A3F6F 仅是一次活动点缀色，不等于品牌主色）",
+  "factory_config.remotion_asset_pool 为空（工厂要求至少 8 条镜头、3 种类型）",
+  "viral_reference_library 无物流行业配方，仅有跨行业开场钩子统计"
+ ],
+ "client_id": "2e3f040d-4497-4527-89f6-50b6fa91e205",
+ "master_brief_id": "09aae30e-160e-494f-b25c-98ff22a1ef72",
+ "goal_id": null,
+ "order_type": "fresh_angle",
+ "angle": "4 steps from China to your Australian door (15s, text-led, from the website's own How-it-works)",
+ "angle_source": {
+  "source": "manual_remotion_east_inter",
+  "authorized_by": "待 PM 授权；PM 2026-10-10 原话「安排 east inter 的每日发布内容，post+reels」。只出片到 in_review，不发布",
+  "facts_checked": "eastinter.com.au 2026-10-10 现场抓取：How it works 四步原文（Tell us your plans / Send it to our warehouse / We handle the journey / Delivered to your door）；发货城市广州、深圳；无价格、无时效、无在线追踪。"
+ },
+ "budget_cap_usd": 0.5,
+ "publish": {
+  "no_publish": true,
+  "publishing_authorization": "NOT_AUTHORIZED",
+  "first_comment": "Get your instant AUD estimate: https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=organic&utm_campaign=ei_daily&utm_content=reel1",
+  "target_slot": "2026-10-13 19:30 AEDT / 21:30 NZDT（假设，未测）"
+ },
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": null,
+    "logoFile": null,
+    "logoMode": "always",
+    "footageScrim": 0.35,
+    "musicFile": null,
+    "hook": {
+     "clip": "TBD: 强对比硬切镜头（visual_shock / abrupt-cut）；避开港口全景慢推",
+     "lines": [
+      { "badge": null, "text": "CHINA → AUSTRALIA" },
+      { "badge": "4", "text": "STEPS" }
+     ]
+    },
+    "items": [
+     { "text": "1  TELL US YOUR PLANS", "clip": "TBD", "source_fact": "官网 How it works 1" },
+     { "text": "2  SEND IT TO OUR WAREHOUSE", "clip": "TBD", "source_fact": "官网 How it works 2" },
+     { "text": "3  WE HANDLE THE JOURNEY", "clip": "TBD", "source_fact": "官网 How it works 3" },
+     { "text": "4  DELIVERED TO YOUR DOOR", "clip": "TBD", "source_fact": "官网 How it works 4" }
+    ],
+    "end_card": "INSTANT AUD ESTIMATE · EASTINTER.COM.AU"
+   }
+  }
+ },
+ "acceptance": [
+  "全片 ≤15 秒，有声音（出片后必须真播放 + volumedetect）",
+  "字幕落在竖版安全区 y=270~1248，短句大字",
+  "全片零价格、零天数、不出现实时追踪",
+  "逐镜 9 宫格自检 → 苏东坡（内容）+ 马良（画面）独立审 → PM 授权后才发布"
+ ]
+}
