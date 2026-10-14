@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import type { PublishedView } from '@/lib/factory/publish/publish-display'
 import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
@@ -135,6 +135,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   const [rejected, setRejected] = useState<WorkOrder[]>([]) // 只读展示:已打回(带理由)
   const [rejecting, setRejecting] = useState<{ order: WorkOrder; mode: 'quality' | 'budget' } | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const inFlight = useRef(false) // 同一帧连点也只发一次
   const [groupFilter, setGroupFilter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasShown, setHasShown] = useState(false) // 显示过一次就常驻,刷新不卸载(防对话框丢历史)
@@ -180,8 +181,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   }, [groupFilter, orders, published])
 
   const act = useCallback(async (id: string, payload: Record<string, unknown>, okNotice?: string) => {
+    if (inFlight.current) return
+    inFlight.current = true
     setBusy(id)
     setError(null)
+    setNotice(null)
     try {
       const res = await fetch(`/api/factory/work-orders/${id}/review`, {
         method: 'POST',
@@ -197,10 +201,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       setRejecting(null)
       if (okNotice) setNotice(okNotice)
       onReviewed?.() // 通知父页刷新工单,待审数才会变,自动切客户才会触发
-      void load() // 刷新本区:已打回列表要立刻出现
+      if (okNotice) void load() // 打回后本区的「已打回」列表要立刻出现
     } catch (e) {
       setError(e instanceof Error ? reviewErrorZh(e.message, k => HUMAN_CHECK_LABEL[k as ContentCheckItemKey] ?? k) : '操作失败')
     } finally {
+      inFlight.current = false
       setBusy(null)
     }
   }, [onReviewed, load])
@@ -454,7 +459,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
           orderNo={rejecting.order.id.slice(0, 8)}
           busy={busy === rejecting.order.id}
           error={error}
-          onClose={() => setRejecting(null)}
+          onClose={() => { setRejecting(null); setError(null) }}
           onSubmit={(payload) => void act(
             rejecting.order.id,
             payload,
