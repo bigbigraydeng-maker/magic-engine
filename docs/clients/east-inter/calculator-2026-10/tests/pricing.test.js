@@ -120,3 +120,15 @@ test('Bulk air Brisbane DDU 51kg switches to the 51KG tier (49 RMB -> A$10): 51 
 test('LCL weight rule is explained in the note when it changes the billed CBM', () => {
   assert.match(est({service:'lcl',city:'sydney',quantity:1,weightKg:1000}).note,/500kg per m³, so 2 m³ is charged/);
 });
+// ---- Review round 2: tiers use the billed (rounded-up) weight; fee amounts come from config; AQIS fumigation fee is disclosed
+test('Bulk air DDP 49.1kg bills 50kg and takes the 50KG+ tier: Brisbane 50 * 11', () => assert.equal(est({service:'bulkAir',city:'brisbane',quantity:49.1,tax:'DDP'}).total,550));
+test('Bulk air DDU 50.1kg bills 51kg and takes the 51KG tier: Brisbane 51 * 10', () => assert.equal(est({service:'bulkAir',city:'brisbane',quantity:50.1,tax:'DDU'}).total,510));
+test('Sea freight warning discloses the A$49 AQIS fee for fumigated goods', () => assert.match(est({service:'lcl',city:'sydney',quantity:2}).warning,/AQIS inspection of fumigated goods \(A\$49 per shipment\)/));
+test('DDU clearance fee and threshold are rendered from config, not hard-coded in the engine', () => {
+  const alt = JSON.parse(JSON.stringify(config)); alt.fees.dduClearanceAud = 120; alt.fees.dduClearanceThresholdAud = 1500;
+  const w = createEngine(alt).estimate({service:'bulkAir',city:'sydney',quantity:50,tax:'DDU'}).warning;
+  assert.match(w,/A\$120 clearance fee/); assert.match(w,/exceeds A\$1,500/);
+});
+test('Bulk air warnings say batteries/magnets are priced on a separate rate', () => {
+  for (const tax of ['DDP','DDU']) assert.match(est({service:'bulkAir',city:'sydney',quantity:50,tax}).warning,/batteries or magnets are priced on a separate rate/);
+});

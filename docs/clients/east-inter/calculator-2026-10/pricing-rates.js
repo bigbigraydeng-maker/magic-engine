@@ -45,6 +45,8 @@
       perth:{DDURmb:[[10,52],[51,51]],DDPRmb:[[10,56],[50,55]],days:'8–12 days'},other:{DDURmb:[[10,57],[51,56]],DDPRmb:[[10,61],[50,60]],days:'8–12 days'}
     },
     // Fees quoted in the sea sheet notes. fumigationRmb is converted; broker fees are AUD in the source.
-    fees: {fumigationRmb:700, brokerAud:99, brokerHighAud:201, brokerHighThresholdAud:10000}
+    fees: {fumigationRmb:700, brokerAud:99, brokerHighAud:201, brokerHighThresholdAud:10000, aqisFumigationAud:49,
+      // Tax-excluded bulk air (不含税 sheet): clearance fee applies when declared goods value exceeds the threshold.
+      dduClearanceAud:110, dduClearanceThresholdAud:1000}
   };
 });

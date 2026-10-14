@@ -23,11 +23,12 @@
     @media(max-width:520px){.topbar .site-container span{display:none}.topbar .site-container{justify-content:flex-end}.site-container{width:calc(100% - 32px)}.site-header{height:78px}.brand{gap:9px;font-size:18px}.mark{width:43px;height:43px;font-size:25px}.mark span{font-size:16px}.brand small{font-size:12px}.home-link{padding:9px 12px;font-size:12px}.site-nav{gap:0}main{padding:27px 16px 30px}h1{font-size:34px;letter-spacing:-1.2px;max-width:340px}.intro{margin-bottom:23px}.intro p:last-child{font-size:12px}.form-card{padding:22px 20px}.services{gap:9px}.service{padding:13px 11px}.service[aria-pressed="true"]{padding:12px 10px}.service small{font-size:12px}.below{gap:14px;font-size:12px}.quote-top,.quote-body{padding:23px}.price strong{font-size:46px}.footer-top{grid-template-columns:1fr;gap:28px}.footer-top>div:first-child{grid-column:auto}.footer-bottom{display:block}.footer-bottom span{display:block;margin-top:6px}}
     @media(max-width:390px){.brand>span:last-child{display:none}.below{flex-wrap:wrap}.home-link{font-size:12px}.form-card{padding:20px 16px}.quote-top,.quote-body{padding:21px 19px}}
     @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  .brand-logo{max-width:100%}@media(max-width:390px){.brand-logo{height:34px!important}}
   </style>
 </head>
 <body>
   <div class="topbar"><div class="site-container"><span>From China. To your door in Australia.</span><a href="mailto:zzj@eastinter.net">Talk to our freight team ↗</a></div></div>
-  <header class="site-header"><div class="header-inner site-container"><a class="brand" href="/" aria-label="East Inter home"><img src="/assets/east-inter-logo.svg" alt="East Inter International Logistics" width="326" height="80" style="height:50px;width:auto;display:block"></a><nav class="site-nav" aria-label="Main navigation"><a href="/#services">Our services</a><a href="/eastinter-pricing-calculator" aria-current="page">Pricing calculator</a><a href="/#how">How it works</a><a href="/#coverage">Destinations</a><a class="home-link" href="/" aria-label="Back to East Inter home page">Back to home ↗</a></nav></div></header>
+  <header class="site-header"><div class="header-inner site-container"><a class="brand" href="/" aria-label="East Inter home"><img src="/assets/east-inter-logo.svg" alt="East Inter International Logistics" width="326" height="80" class="brand-logo" style="height:50px;width:auto;display:block"></a><nav class="site-nav" aria-label="Main navigation"><a href="/#services">Our services</a><a href="/eastinter-pricing-calculator" aria-current="page">Pricing calculator</a><a href="/#how">How it works</a><a href="/#coverage">Destinations</a><a class="home-link" href="/" aria-label="Back to East Inter home page">Back to home ↗</a></nav></div></header>
   <main>
     <div class="intro"><div><p class="eyebrow">PLAN YOUR SHIPMENT</p><h1>Shipping Cost Estimator</h1><p>Guangzhou to Australia. Get an instant estimate in Australian dollars.</p></div><div class="rate-tag"><span class="dot"></span> <span id="rate-tag-text">CURRENT RATES</span></div></div>
     <div class="layout">
@@ -52,7 +53,7 @@
     </div>
     <div class="below"><span><i>✓</i> Instant estimates</span><span><i>✓</i> Clear breakdown</span><span><i>✓</i> No sign-up</span></div>
   </main>
-  <footer class="site-footer"><div class="site-container"><div class="footer-top"><div><a class="brand" href="/"><img src="/assets/east-inter-logo.svg" alt="East Inter International Logistics" width="326" height="80" style="height:50px;width:auto;display:block"></a><p>Your China–Australia freight connection.<br>广州东际国际货运代理有限公司</p></div><div><h3>Explore</h3><div class="footer-links"><a href="/">Home</a><a href="/#services">Our services</a><a href="/eastinter-pricing-calculator">Pricing calculator</a><a href="/#coverage">Destinations</a></div></div><div><h3>Let's talk</h3><div class="footer-links"><a href="mailto:zzj@eastinter.net">zzj@eastinter.net ↗</a><a href="tel:+862082507023">+86 20 8250 7023</a><a href="mailto:info@eastinter.com.au">Request a binding quote</a></div></div></div><div class="footer-bottom"><span>© 2026 East Inter International Logistics.</span><span>All prices in AUD · <span id="footer-effective">Current</span> rates</span></div></div></footer>
+  <footer class="site-footer"><div class="site-container"><div class="footer-top"><div><a class="brand" href="/"><img src="/assets/east-inter-logo.svg" alt="East Inter International Logistics" width="326" height="80" class="brand-logo" style="height:50px;width:auto;display:block"></a><p>Your China–Australia freight connection.<br>广州东际国际货运代理有限公司</p></div><div><h3>Explore</h3><div class="footer-links"><a href="/">Home</a><a href="/#services">Our services</a><a href="/eastinter-pricing-calculator">Pricing calculator</a><a href="/#coverage">Destinations</a></div></div><div><h3>Let's talk</h3><div class="footer-links"><a href="mailto:zzj@eastinter.net">zzj@eastinter.net ↗</a><a href="tel:+862082507023">+86 20 8250 7023</a><a href="mailto:info@eastinter.com.au">Request a binding quote</a></div></div></div><div class="footer-bottom"><span>© 2026 East Inter International Logistics.</span><span>All prices in AUD · <span id="footer-effective">Current</span> rates</span></div></div></footer>
   <script src="pricing-rates.js"></script>
   <script src="pricing-engine.js"></script>
   <script>
@@ -98,7 +99,9 @@
       }[service];
       const quote=estimate({service,city,quantity,cargo:$('cargo').value,tax,delivery:$('delivery').value,volume:$('volume').value.trim()===''?null:$('volume').valueAsNumber,weightKg:$('lcl-weight').value.trim()===''?null:$('lcl-weight').valueAsNumber});
       $('route-city').textContent=cities[city]; $('breakdown').replaceChildren();
-      $('quantity-error').textContent=quote.error||''; $('quantity-error').hidden=!quote.error; $('quantity').setAttribute('aria-invalid',String(Boolean(quote.error)));
+      $('quantity-error').textContent=quote.error||''; $('quantity-error').hidden=!quote.error;
+      const errField=!quote.error?null:/packed volume/.test(quote.error)?'volume':/cargo weight/.test(quote.error)?'lcl-weight':'quantity';
+      ['quantity','volume','lcl-weight'].forEach(id => {const bad=id === errField; $(id).setAttribute('aria-invalid',String(bad)); if (bad) $(id).setAttribute('aria-describedby',[...new Set([...($(id).getAttribute('aria-describedby')||'').split(' ').filter(Boolean),'quantity-error'])].join(' '));});
       $('surcharge').hidden=!quote.warning; $('surcharge').textContent=quote.warning||'';
       $('estimate-title').textContent=service === 'bulkAir' && tax === 'DDP' ? 'Estimated total, tax included' : 'Estimated freight charges';
       if (quote.error) {
