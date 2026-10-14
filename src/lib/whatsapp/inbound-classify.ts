@@ -65,6 +65,29 @@ export interface WhatsAppStatus {
   errors?: Array<{ code?: number | string; title?: string }>
 }
 
+export interface HistoryMessage {
+  from?: string
+  to?: string
+  id?: string
+  timestamp?: string
+  type?: string
+  history_context?: { status?: string }
+}
+
+export interface HistoryThread {
+  id?: string
+  messages?: HistoryMessage[]
+}
+
+export interface HistoryChunk {
+  metadata?: {
+    phase?: number | string
+    chunk_order?: number | string
+    progress?: number | string
+  }
+  threads?: HistoryThread[]
+}
+
 export type InboundChange =
   | {
       kind: 'customer_messages'
@@ -88,6 +111,8 @@ export type InboundChange =
       phoneNumberId: string
       displayNumber?: string
       itemCount: number
+      chunks: HistoryChunk[]
+      mediaFollowUps: number
     }
   | { kind: 'ignored'; field: string }
   | {
@@ -241,12 +266,17 @@ function classifyHistoryField(
   if (itemCount === 0) {
     return declinedOnly ? [{ kind: 'ignored', field: 'history_declined' }] : []
   }
+  // Only chunks that actually carry threads are forwarded; deeper validation is the
+  // intake module's job.
+  const chunks = withData.filter((item) => Array.isArray(item.threads)) as HistoryChunk[]
   return [
     {
       kind: 'history',
       phoneNumberId,
       ...(displayNumber !== undefined ? { displayNumber } : {}),
       itemCount,
+      chunks,
+      mediaFollowUps: messagesCount,
     },
   ]
 }

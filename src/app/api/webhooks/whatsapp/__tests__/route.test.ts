@@ -36,6 +36,8 @@ vi.mock('@/lib/messenger-agent/optout', async (orig) => {
 // 实现表结构；那张表的真实建模在 health-heartbeat.test.ts。
 vi.mock('@/lib/messenger-agent/optout-failures', () => ({ recordOptOutWriteFailure: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+// 无主号码登记表：这里的测试只关心路由与入库，不让它碰真表。
+vi.mock('@/lib/whatsapp/unclaimed', () => ({ recordUnclaimedNumber: vi.fn() }))
 vi.mock('@/lib/platform-oauth/vocabulary', () => ({
   decryptToken: vi.fn((v: string) => {
     if (v === 'enc:BAD') throw new Error('bad')
