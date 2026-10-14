@@ -1,5 +1,5 @@
 /**
- * GET /api/clients/[id]/marketing-plan/[planId]/promo — 推广计划「一页纸」（只读：灯 + 对账）
+ * GET /api/clients/[id]/marketing-plan/[planId]/promo — 推广计划「一页纸」（只读：灯 + 对账）+ 填表用的下拉选项
  * PUT /api/clients/[id]/marketing-plan/[planId]/promo — 保存推广计划结构（只有草稿可以改）
  *
  * 设计稿 docs/specs/2026-10-14-promo-plan-board-design-v0.1.md。
@@ -13,6 +13,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
 import { loadGoal, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
+import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
 import { allAdsSteps, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketing-plan/plan-guard'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
@@ -35,7 +36,12 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   try {
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
-    return NextResponse.json({ success: true, board: await buildPromoBoard(plan) })
+    // 下拉选项只有草稿填表才用；读不到时页面照常显示（选项为空，表格里会提示）
+    const [board, options] = await Promise.all([
+      buildPromoBoard(plan),
+      plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
+    ])
+    return NextResponse.json({ success: true, board, options })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })
