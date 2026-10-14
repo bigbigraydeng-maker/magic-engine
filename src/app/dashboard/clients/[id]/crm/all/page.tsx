@@ -122,7 +122,11 @@ export default function CrmAllContactsPage() {
   const [kindFilter, setKindFilter] = useState<KindView>('all')
   const [page, setPage] = useState(1)
   // C1a 固定 100，先不给改每页条数的入口。
+  // 分段（智能）视图：服务端每段默认 100 一页，这里的页数换算要与之一致。
   const [perPage] = useState(100)
+  // 平铺名单每页 50 人：一页里每个人都要读往来记录并算「该做什么」，人数减半，接口和渲染都明显更快
+  // （PM 2026-10-14：这页常用，要提速）。
+  const [flatPerPage] = useState(50)
   const [sortKey, setSortKey] = useState<'firstSeenAt' | 'lastTouchAt'>('lastTouchAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -198,7 +202,7 @@ export default function CrmAllContactsPage() {
         // 提前消费旧数据的是 fetchInFlightRef（见该 ref 定义处的头注），这一行只管 UI。
         setLoading(true)
         params.set('page', String(page))
-        params.set('perPage', String(perPage))
+        params.set('perPage', String(flatPerPage))
         if (qDebounced.trim()) params.set('q', qDebounced.trim())
         for (const s of stageFilter) params.append('stage', s)
         if (kindFilter !== 'all') params.set('kind', kindFilter)
@@ -265,7 +269,7 @@ export default function CrmAllContactsPage() {
       setSectionsLoading(false)
       fetchInFlightRef.current = false
     }
-  }, [clientId, page, perPage, qDebounced, stageFilter, kindFilter, grouped, openSections, sectionPages])
+  }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
     void loadList()
@@ -430,7 +434,7 @@ export default function CrmAllContactsPage() {
       loadedIds: ids,
       currentIndex: ids.indexOf(drawerContactId),
       page,
-      totalPages: Math.max(1, Math.ceil(total / perPage)),
+      totalPages: Math.max(1, Math.ceil(total / flatPerPage)),
     }
   }
 
@@ -976,7 +980,7 @@ export default function CrmAllContactsPage() {
           {!grouped && (
             <div className="mt-4 flex items-center justify-between text-sm">
               <span className="text-me-charcoal/50">
-                共 {total} 人 · 第 {page} / {Math.max(1, Math.ceil(total / perPage))} 页
+                共 {total} 人 · 第 {page} / {Math.max(1, Math.ceil(total / flatPerPage))} 页
               </span>
               <div className="flex gap-2">
                 <button
@@ -987,7 +991,7 @@ export default function CrmAllContactsPage() {
                   上一页
                 </button>
                 <button
-                  disabled={page >= Math.ceil(total / perPage)}
+                  disabled={page >= Math.ceil(total / flatPerPage)}
                   onClick={() => setPage((p) => p + 1)}
                   className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
                 >
