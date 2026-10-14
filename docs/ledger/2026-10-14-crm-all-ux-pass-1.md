@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:2627
+done_ref: pr:2629
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 打开全部客人：付款要催没有新款时只占一行，名单第一行明显上移；表头右上提示是「默认按最近有来往排序；点表头只在本页内重排」
