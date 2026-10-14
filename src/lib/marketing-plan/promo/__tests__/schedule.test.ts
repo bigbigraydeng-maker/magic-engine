@@ -97,6 +97,17 @@ describe('博客 / 邮件 / 广告', () => {
     { id: 'n', kind: 'newsletter_email', settings: { topic: '主题乙', due_date: '2026-11-10', requires_link: true } },
     { id: 'a', kind: 'ads_campaign', settings: { ad_account_id: 'acc', daily_budget_cents: 5000, audience_ref: '受众A', creative_refs: [], placements: [], paused_ranges: [] } },
   ]
+  it('广告阶段内有暂停区间：写明区间，不只看第一天', () => {
+    const paused: PromoStep = { id: 'a', kind: 'ads_campaign', settings: { ad_account_id: 'acc', daily_budget_cents: 100, audience_ref: 'x', creative_refs: [], placements: [], paused_ranges: [{ from: '2026-11-10', to: '2026-11-12' }, { from: '2027-01-01', to: '2027-01-02' }] } }
+    const text = expandPromoSchedule(one('2026-11-02', '2026-11-30', [paused]), PB).days[0].items[0].text
+    expect(text).toContain('2026-11-10 至 2026-11-12')
+    expect(text).not.toContain('2027-01-01') // 阶段之外的区间不提
+  })
+  it('小数条数（脏数据）当 0 处理，不报「阶段太短」', () => {
+    const sch = expandPromoSchedule(one('2026-11-02', '2026-11-08', [social(0.5, 0, 0)]), PB)
+    expect(sch.totals.post).toBe(0)
+    expect(sch.notes).toEqual([])
+  })
   it('落在各自日期，同一天按固定顺序；广告只在阶段开始日出现', () => {
     const sch = expandPromoSchedule(one('2026-11-02', '2026-11-30', steps), PB)
     expect(sch.days.map(d => d.date)).toEqual(['2026-11-02', '2026-11-10'])

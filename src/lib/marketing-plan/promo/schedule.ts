@@ -98,7 +98,7 @@ function weeklyWeekdays(perWeek: number, pb: PromoPlaybook, shift: number): Set<
 }
 
 function expandWeekly(ctx: Ctx, step: Social, kind: 'post' | 'story', perWeek: number): void {
-  if (!(perWeek > 0)) return
+  if (!(Math.floor(perWeek) > 0)) return
   const name = kind === 'post' ? '帖子' : '快拍'
   if (perWeek > MAX_PER_WEEK) note(ctx, `${ctx.phase.name}：每周最多排 ${MAX_PER_WEEK} 条${name}，计划里写的更多，只排了 ${MAX_PER_WEEK} 条。`)
   const wds = weeklyWeekdays(perWeek, ctx.pb, kind === 'story' ? ctx.pb.storyWeekdayShift : 0)
@@ -138,10 +138,11 @@ function expandDated(ctx: Ctx, step: Extract<PromoStep, { kind: 'blog_article' |
 function expandAds(ctx: Ctx, step: Extract<PromoStep, { kind: 'ads_campaign' }>): void {
   const s = step.settings
   const start = ctx.phase.start_date
-  const paused = s.paused_ranges.some(r => start >= r.from && start <= r.to)
+  const pauses = s.paused_ranges.filter(r => r.to >= start && r.from <= ctx.phase.end_date).slice(0, 3)
+  const pausedText = pauses.length > 0 ? `；计划里的暂停区间：${pauses.map(r => `${r.from} 至 ${r.to}`).join('、')}` : ''
   push(ctx, start, {
     kind: 'ads_start', phase_id: ctx.phase.id, step_id: step.id,
-    text: `计划开投日（开投需要 PM 在广告审批页另行批准，目前广告没有投）：日预算 ${(s.daily_budget_cents / 100).toFixed(2)}（币种以广告账户为准），受众引用 ${clip(s.audience_ref)}${paused ? '；计划里这天处于暂停区间' : ''}`,
+    text: `计划开投日（开投需要 PM 在广告审批页另行批准，目前广告没有投）：日预算 ${(s.daily_budget_cents / 100).toFixed(2)}（币种以广告账户为准），受众引用 ${clip(s.audience_ref)}${pausedText}`,
   })
 }
 

@@ -55,7 +55,7 @@ export function ScheduleTable({ schedule, mode, today }: { schedule: Schedule; m
       </div>
       {schedule.error && <p className="px-4 py-3 text-sm text-red-700 bg-red-50">{schedule.error}</p>}
       {schedule.too_dense && (
-        <p className="px-4 py-3 text-sm text-yellow-900 bg-yellow-50">排得太密了（超过 400 件），不逐日展开。请减少每周条数或缩短阶段。</p>
+        <p className="px-4 py-3 text-sm text-yellow-900 bg-yellow-50">排得太密了，不逐日展开。请减少每周条数或缩短阶段。</p>
       )}
       {schedule.notes.length > 0 && (
         <ul className="px-4 py-2 space-y-0.5 bg-gray-50">{schedule.notes.map((n, i) => <li key={i} className="text-xs text-gray-600">• {n}</li>)}</ul>
@@ -65,7 +65,7 @@ export function ScheduleTable({ schedule, mode, today }: { schedule: Schedule; m
           <p className="px-4 pt-3 text-xs font-semibold text-gray-600">{w.week} 起的一周</p>
           <ul className="px-4 pb-3 divide-y divide-gray-50">
             {w.days.map(d => (
-              <li key={d.date} className={`py-2 grid grid-cols-[9rem_1fr] gap-2 ${d.date < today ? 'opacity-50' : ''}`}>
+              <li key={d.date} className={`py-2 grid grid-cols-1 sm:grid-cols-[9rem_1fr] gap-2 ${d.date < today ? 'opacity-50' : ''}`}>
                 <p className="text-xs text-gray-700">{d.date.slice(5)} {WEEKDAY[isoWeekday(d.date)]}{d.date < today ? '（已过，是否完成未核对）' : ''}</p>
                 <ul className="space-y-0.5">
                   {d.items.map((it, i) => (

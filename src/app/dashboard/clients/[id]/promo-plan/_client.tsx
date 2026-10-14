@@ -122,7 +122,7 @@ export function PromoPlanClient() {
 
   const approve = board ? approveButtonState(board) : null
   // 「今天」按悉尼日期（澳新客户的日历日），不用 UTC，免得早上少算一天
-  const todayIso = useMemo(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date()), [])
+  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date())
   // 展示用的推广结构：示例开着看示例，否则看这份计划自己的
   const shownSpec = useMemo(
     () => (showSample ? buildPromoSample(todayIso) : selected ? readPromoSpec(selected.plan_data) : null),
@@ -131,7 +131,8 @@ export function PromoPlanClient() {
   const shownPhases = useMemo(() => (shownSpec ? describePromoSpec(shownSpec) : null), [shownSpec])
   // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
   const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
-  const scheduleMode = showSample ? 'sample' : selected?.status === 'draft' ? 'preview' : 'approved'
+  const approvedLike = selected?.status === 'approved' || selected?.status === 'completed'
+  const scheduleMode = showSample ? 'sample' : approvedLike ? 'approved' : 'preview'
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
