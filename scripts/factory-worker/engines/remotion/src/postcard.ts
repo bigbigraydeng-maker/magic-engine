@@ -288,8 +288,8 @@ const TIMING = z
       .max(6, { message: '每段时长必须在 3 到 6 秒之间' }),
     priceSec: z
       .number()
-      .min(5, { message: '价格时长必须在 5 到 8 秒之间' })
-      .max(8, { message: '价格时长必须在 5 到 8 秒之间' }),
+      .min(3, { message: '价格时长必须在 3 到 8 秒之间' })
+      .max(8, { message: '价格时长必须在 3 到 8 秒之间' }),
   })
   .strict();
 
@@ -389,6 +389,11 @@ export const PostcardPropsSchema = z
     cardSide: z.enum(['left', 'center'], {
       message: 'cardSide 只能是 left 或 center',
     }),
+    cardTop: z
+      .number()
+      .min(600, { message: 'cardTop 必须在 600 到 940 之间' })
+      .max(940, { message: 'cardTop 必须在 600 到 940 之间' })
+      .optional(),
     accent: hexColor.optional(),
     hook: HOOK,
     scenes: z
@@ -522,6 +527,14 @@ export const PostcardPropsSchema = z
         code: z.ZodIssueCode.custom,
         path: ['end'],
         message: 'price 和 end 必须二选一：要么显示价格，要么显示结束卡',
+      });
+    }
+
+    if (val.price !== null && val.timing.priceSec < 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['timing', 'priceSec'],
+        message: '带价格卡时最后一段至少 5 秒（只有片尾标题卡时可以短到 3 秒）',
       });
     }
 
