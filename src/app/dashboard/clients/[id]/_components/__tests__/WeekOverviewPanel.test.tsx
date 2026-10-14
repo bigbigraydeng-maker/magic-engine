@@ -87,6 +87,16 @@ describe('WeekOverviewPanel', () => {
     expect(await screen.findByText(/Story 和 Reel 都读取失败/)).toBeTruthy()
   })
 
+  it('a video story shows a video thumbnail and says so (no big image download)', async () => {
+    const base = overview()
+    mockFetch({ success: true, ...overview({ story: { ...base.story!, items: [{ ...base.story!.items[0], media_kind: 'video', media_url: 'https://x.supabase.co/storage/v1/object/public/b/v.mp4' }] } }) })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText('第一条')
+    expect(container.querySelector('video')).not.toBeNull()
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.textContent).toContain('视频')
+  })
+
   it('live mode is announced', async () => {
     mockFetch({ success: true, ...overview({ live: true }) })
     render(<WeekOverviewPanel clientId={CLIENT} />)

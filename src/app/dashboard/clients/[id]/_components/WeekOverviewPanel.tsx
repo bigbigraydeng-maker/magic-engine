@@ -43,20 +43,24 @@ function StoryRow({ item, packState }: { item: OverviewStoryItem; packState: Lit
   return (
     <li className="flex gap-3">
       <div className="h-20 w-[45px] shrink-0 overflow-hidden rounded bg-me-charcoal/10">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={small ? thumbnailUrl(item.media_url) : item.media_url}
-          alt={item.text_line}
-          className="h-full w-full object-cover"
-          loading="lazy"
-          decoding="async"
-          onError={() => setSmall(false)}
-        />
+        {item.media_kind === 'video' ? (
+          <video src={item.media_url} muted playsInline preload="metadata" className="h-full w-full object-cover" aria-label="视频缩略图" />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={small ? thumbnailUrl(item.media_url) : item.media_url}
+            alt={item.text_line}
+            className="h-full w-full object-cover"
+            loading="lazy"
+            decoding="async"
+            onError={() => setSmall(false)}
+          />
+        )}
       </div>
       <div className="min-w-0">
         <p className="text-sm font-semibold leading-snug text-me-charcoal">{item.text_line}</p>
         <p className="text-xs text-me-charcoal/70">
-          {formatClock(item.slot_at)}
+          {formatClock(item.slot_at)}{item.media_kind === 'video' ? ' · 视频' : ''}
           {item.role ? ` · ${ROLE_LABEL[item.role] ?? ''}` : ''} · Facebook 主页 Story · {describeItemStatusInPack(item.status, packState)}
         </p>
       </div>
