@@ -87,6 +87,19 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 - 每条镜头带 `lenFrames`（时长帧数）、可选 `luma`（平均亮度，用来拉平镜头间亮度差）、`source`（own / stock / ai）。
 - 音画偏差：节拍对应帧整体后移 `MONTAGE_SYNC_SHIFT_FRAMES = 2` 帧（实测：1 帧时偏差 −33 毫秒，2 帧时 +1 毫秒）。
 
+## 明信片模板（`--template postcard`）
+
+一句话一景：全屏素材慢推，下半部一张半透明「明信片卡」（地点小字 + 一句话），**没有 N/N 计数、对勾方块、进度条、弹跳动画**，字幕放慢（每景默认 3.6 秒，文字淡入 0.6 秒），给 45–70 岁观众。开场 1–3 行文字钩子 → 2–4 景 → 价格卡（复用 `PriceScene`）→ 可选 logo、音乐。1080×1920，30fps，文字在安全区 y 270–1248、x ≤ 960 内。渲染：`node render.mjs --template postcard --props <props.json> --public-dir <素材目录> --out <out.mp4>`；示例（虚构）：`examples/fictional-postcard.props.json`。
+
+参数与闸（`src/postcard.ts`，`.strict()`，**没有默认值**，缺项直接拒）：
+- 用「字宽单位」限长（中文 1.0、英文字母数字 0.55、空格 0.3）：钩子每行 ≤ 8.7、一句话 ≤ 25、地名 ≤ 19，避免折行爆版。
+- **禁词闸**：钩子、地名、一句话、价格文字里出现「限时/截止/早鸟/倒计时/最后机会/仅剩/名额/限量/deadline/early bird/countdown/last chance/book now/only N seats left…」一律拒；英文按整词匹配（`unlimited` 不误杀）。它只拦这些词，**拦不住编造的行程或价格**。
+- **出处闸**：每景必须带 `sourceUrl`（http/https）和 `sourceQuote`/`placeSourceQuote`（出处原文），且原文里要含这句话的主要词。**这只证明「填了且相关」，不证明官网真有这句话**——事实核对仍靠人工与苏东坡审；渲染前自动抓网页核对是后续项。
+- 总时长 = 开场 + 景数×每景 + 价格卡 ≤ 25 秒；默认样片 2 景约 16.4 秒。
+- 同周多条片请用不同的 `cardSide`（`left`/`center`）和 `accent`，避免又像同一个模子。
+
+**出片机已接它**：`remotion-branch.mjs` 收到 `postcard` 工单，把钩子、每景「地名 + 一句话」、价格块拼成字幕和红线复扫用的 caption；不可见字符/双向控制字符会被拒；仍受客户准入名单（`FACTORY_REMOTION_CLIENT_IDS`）约束。**旧版出片机不认识 `postcard`，会拒收**——升级出片机之前不要建 `postcard` 工单。
+
 ## 数据卡模板（`--template datacard`）
 
 纯数字画面，**没有镜头素材**：钩子大字（第 0 帧就是字，不是风景）→ 3–7 行数据逐行出现（标签、数值、可选副标签）→ 可选对比条形或阶梯 → 底部固定一行免责小字 → 可选 logo、可选音乐。1080×1920，30fps，内容都在安全区 y 270–1248、x ≤ 960 内，不烧 CTA。渲染：`node render.mjs --template datacard --props <props.json> --public-dir <素材目录> --out <out.mp4>`；示例（虚构）：`examples/fictional-datacard.props.json`。
@@ -111,7 +124,7 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 
 ## 出片机怎么用这些模板（包 C）
 
-出片机（`scripts/factory-worker/remotion-branch.mjs`）按工单 `brief.remotion = { template, props }` 渲染：`template` 必须是 `src/templates.ts` 注册表里有的（现在是 `list`、`montage`、`datacard`；`datacard` 已接，见上节），不认识的直接拒（不重试）；`--template` 会原样传给 `render.mjs`。**旧版出片机不认识 `montage`，也会拒收**——所以升级出片机之前不要建 `montage` 工单。
+出片机（`scripts/factory-worker/remotion-branch.mjs`）按工单 `brief.remotion = { template, props }` 渲染：`template` 必须是 `src/templates.ts` 注册表里有的（现在是 `list`、`montage`、`datacard`、`postcard`；`datacard`、`postcard` 已接，见上节），不认识的直接拒（不重试）；`--template` 会原样传给 `render.mjs`。**旧版出片机不认识 `montage`，也会拒收**——所以升级出片机之前不要建 `montage` 工单。
 
 - **音乐从共享乐库取**：`props.musicFile` 如果是 `catalog/music.json` 里某首的暂存名（`stagedFileName`，如 `pipa-trap.m4a`），出片机从 `<STUDIO_ROOT>/<目录里的 folder>/<file>`（即 `Music/`、`_shared/music/`）拷进该单暂存目录，路径必须落在该乐库文件夹内（含符号链接）；不在目录里的音乐名仍按 R2a 老办法从该客户的 `remotion-assets/` 取。出片机 Mac 上这两个乐库文件夹要在（Dropbox 同步到 `MagicLab_Studio/` 下）。
 - **目录里的暂存名是保留名**：目录里有的暂存名（如 `pipa-trap.m4a`）一律从乐库取，即使客户素材库里也有同名文件（出片机会写一条「乐库优先」日志）。客户专属授权曲不要放进共享目录，用不同的文件名放在该客户的 `remotion-assets/` 里。
