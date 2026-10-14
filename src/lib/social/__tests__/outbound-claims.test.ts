@@ -145,3 +145,172 @@ describe('must pass — no false alarm on ordinary replies', () => {
     expect(scanOutboundClaims(text)).toEqual([])
   })
 })
+
+// ─── Review round 1 (子牙 / 魏征 / 狄仁杰) — every row below slipped through or misfired ───
+
+describe('review: URL strip must not swallow the Chinese text after it', () => {
+  it.each(['详情www.cts.co.nz价格3880纽币', 'https://a.com/x保证包过 价格$9999'])('%s', (text) => {
+    expect(scanOutboundClaims(text).length).toBeGreaterThan(0)
+  })
+  it('the claim after a URL is found, the URL itself is ignored', () => {
+    expect(kinds('https://a.com/x保证包过')).toContain('promise')
+    expect(scanOutboundClaims('https://ctstours.co.nz/tours?utm_content=20261014')).toEqual([])
+  })
+})
+
+describe('review: a second price after a price word is not swallowed', () => {
+  it('团费3880，订金5000 reports both amounts', () => {
+    const v = scanOutboundClaims('团费3880，订金5000').filter((h) => h.kind === 'price').map((h) => h.value)
+    expect(v).toEqual(expect.arrayContaining(['3880', '5000']))
+  })
+  it('价格3880，另加2000 reports both', () => {
+    const v = scanOutboundClaims('价格3880，另加2000').filter((h) => h.kind === 'price').map((h) => h.value)
+    expect(v).toEqual(expect.arrayContaining(['3880', '2000']))
+  })
+})
+
+describe('review: separators must not glue unrelated numbers together', () => {
+  it('团费$3,880，12月31日出发 keeps 3880 and the date apart', () => {
+    const hits = scanOutboundClaims('团费$3,880，12月31日出发')
+    expect(hits.filter((h) => h.kind === 'price').map((h) => h.value)).toContain('3880')
+    expect(hits.filter((h) => h.kind === 'price').map((h) => h.value)).not.toContain('388012')
+    expect(hits.find((h) => h.kind === 'date')?.value).toBe('12-31')
+  })
+  it('价格3880，500元 is 3880 and 500, never 3880500', () => {
+    const v = scanOutboundClaims('价格3880，500元').filter((h) => h.kind === 'price').map((h) => h.value)
+    expect(v).toEqual(expect.arrayContaining(['3880', '500']))
+    expect(v).not.toContain('3880500')
+  })
+})
+
+describe('review: prices with no currency word', () => {
+  it.each([
+    ['这条路线每位3880，含住宿', '3880'],
+    ['整个行程总共3880', '3880'],
+    ['只要3880', '3880'],
+    ['3880起', '3880'],
+    ['3880/人', '3880'],
+    ['每位三八八零就行', '3880'],
+    ['我们的团费是三千八百八十', '3880'],
+    ['三千八百八十', '3880'],
+    ['三万八千', '38000'],
+    ['贰仟捌佰', '2800'],
+    ['3880 New Zealand dollars', '3880'],
+    ['3 880 dollars', '3880'],
+    ['三千八百八十圆', '3880'],
+    ['3880塊', '3880'],
+    ['紐幣3880', '3880'],
+    ['貳佰紐幣', '200'],
+  ])('%s', (text, amount) => {
+    expect(scanOutboundClaims(text).filter((h) => h.kind === 'price').map((h) => h.value)).toContain(amount)
+  })
+})
+
+describe('review: traditional Chinese is covered', () => {
+  it.each([
+    ['簽證我們可以幫您辦理，不會拒簽', 'visa'],
+    ['這個團保證成行', 'promise'],
+    ['保證出簽', 'promise'],
+    ['免簽證入境', 'visa'],
+    ['名額有限', 'availability'],
+    ['全網最低價', 'discount'],
+  ] as Array<[string, ClaimKind]>)('%s', (text, kind) => {
+    expect(kinds(text)).toContain(kind)
+  })
+})
+
+describe('review: more promise / discount / availability / visa wording', () => {
+  it.each([
+    ['包您满意', 'promise'],
+    ['百分之百没问题', 'promise'],
+    ['绝对没问题', 'promise'],
+    ['肯定能过', 'promise'],
+    ['担保出票', 'promise'],
+    ['不满意全额退钱', 'promise'],
+    ['we promise you a seat', 'promise'],
+    ['full refund if you are not happy', 'promise'],
+    ['半价', 'discount'],
+    ['买一送一', 'discount'],
+    ['free breakfast included', 'discount'],
+    ['早鸟价', 'discount'],
+    ['内部价', 'discount'],
+    ['20 percent off', 'discount'],
+    ['最后两个位置', 'availability'],
+    ['只剩最后几位', 'availability'],
+    ['almost full', 'availability'],
+    ['no visa needed', 'visa'],
+    ['you do not need a visa', 'visa'],
+    ['签证没问题', 'visa'],
+  ] as Array<[string, ClaimKind]>)('%s', (text, kind) => {
+    expect(kinds(text)).toContain(kind)
+  })
+})
+
+describe('review: more date and duration wording', () => {
+  it.each([
+    '十月二十号出发',
+    '10月20号出发',
+    '10月廿号出发',
+    '12.31出发',
+    '31/12出发',
+    '12/31出发',
+    '月底出发',
+    '年底前报名',
+    '明年三月',
+    '11月初',
+    '后天出发',
+    'Dec. 31',
+    '1st December',
+    '31st of December',
+    'december 31st',
+    'tomorrow',
+    'next friday',
+    'this saturday',
+    'end of the month',
+  ])('date: %s', (text) => {
+    expect(kinds(text)).toContain('date')
+  })
+  it.each(['10天', '7天行程', '7D6N', '七日六夜', '一星期', '两个星期', '一个半月', '3天2晚', '我们会在一个工作日内联系您。'])(
+    'duration: %s',
+    (text) => {
+      expect(kinds(text)).toContain('duration')
+    },
+  )
+})
+
+describe('review: false alarms removed', () => {
+  it.each([
+    '我们一起去看看吧，三位同行',
+    '一定要带护照',
+    '第一次来新西兰吗',
+    '第三天去罗托鲁瓦',
+    '评分4.8，非常满意',
+    '万一有变化我们会通知您',
+    '我们的电话是021 123 4567',
+    'Please feel free to contact us any time.',
+    'Feel free to ask if you have any questions.',
+  ])('%s', (text) => {
+    expect(scanOutboundClaims(text)).toEqual([])
+  })
+})
+
+describe('review: hard limits, fail closed', () => {
+  it('input over the length cap is reported as scan_error input_too_long', () => {
+    const hits = scanOutboundClaims('您好'.repeat(1600))
+    expect(hits).toEqual([{ kind: 'scan_error', match: 'input_too_long' }])
+  })
+  it('very long input is reported, not scanned for seconds', () => {
+    const t0 = Date.now()
+    const hits = scanOutboundClaims('1'.repeat(50000))
+    expect(Date.now() - t0).toBeLessThan(1000)
+    expect(hits.map((h) => h.kind)).toContain('scan_error')
+  })
+  it('a number too large to be a number is not silently dropped', () => {
+    expect(scanOutboundClaims('价格$' + '9'.repeat(400)).length).toBeGreaterThan(0)
+  })
+  it('long chinese-numeral run stays fast', () => {
+    const t0 = Date.now()
+    scanOutboundClaims('一二三四五六七八九十'.repeat(250))
+    expect(Date.now() - t0).toBeLessThan(1000)
+  })
+})
