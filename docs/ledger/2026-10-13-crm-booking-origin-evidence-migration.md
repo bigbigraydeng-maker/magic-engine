@@ -5,7 +5,7 @@ status: done
 owner: pm
 decided_on: 2026-10-13
 done_on: 2026-10-14
-done_ref: pr:2536
+done_ref: pr:2655
 source: session:f53ba28d
 verify_by: 2026-10-20
 verify_how: PM 回合并并同意应用后，应用到生产库，回读核对两列、三条约束、部分唯一索引、不可改触发器、两个函数的执行权限只给 service_role，旧的建订单函数仍是一个且签名未变；之后用 CTS 真数据跑只读预览，不写库
