@@ -200,3 +200,10 @@ Dropbox `00_Inbox/industry-logistics/2026-10-14_International_Logistics/original
   8. Story 首帧（与封面不同）：`evidence/…-v3-story-first-frame.jpg`（仓库货架底 +「Same price to Sydney · Melbourne · Brisbane / A$1,238 / 5 m³ by sea · door to door / Current rates · Estimates only」），原图在 `East_Inter/review-assets/`。5 m³ 到三城同价来自计算器引擎（Melbourne/Brisbane 5 m³ 也是 A$1,238，Brisbane 约 25 天）。这只是 Story 的首帧静图，不是 Story 成片。
 - **分镜自检（9 宫格）**：`evidence/2026-10-15-v3-storyboard-9grid.jpg` + 结尾四帧 `evidence/2026-10-15-v3-endcard-frames.jpg`；逐格看过：无第三方品牌字样、无地名、无月份/倒计时/限时/最低价；价格在第 0 帧和第 4–6 拍都见到。**我看的是本机同参数预览，没能打开存储桶里出片机渲的那份。** 音乐 Horizon's Call 已由 PM 听过无人声。
 - 没解决（模板限制）：首帧 logo 与第一词必须数字开头的规则；词「砸入」动画 0.1 秒超边；真人出镜/真实感/行业配方仍是缺口。
+
+## 13. v4（第二轮审改，111 号，2026-10-15）
+
+- 工单 `b872551f-1ef3-44f8-839a-836a824dd039`（取代 `bf7fe47c…`，旧单不动），出片机本机渲染，花费 0，不发布。参数 `2026-10-15-east-montage-preview.props.json`。
+- 逐条：①**封面第 0 帧**：原因是模板每个词开头 3 帧从 1.7 倍放大「砸入」+ 整个镜头层第 0 帧放大 1.22 倍，贴边内容会被切。改法：第一个词缩短成「1」（窄），logo/价格/路线放进封面素材板的安全边距内（X 130–950），帧 0 与 0.3 秒都不贴边（`evidence/2026-10-15-v4-cover-frame0-and-0.3s.jpg`）。②**结尾板**：现在只有价格 + logo + **See your live estimate** + **eastinter.com.au**（官网真实域名，页面当前跳转到 eastinter.com.au）+ `1 CBM · Guangzhou → Sydney · current rates` + `Estimates only`；字幕词 CURRENT/RATES/ESTIMATES/ONLY 已删，板上只剩价格卡（因为模板每拍必须有词，用价格词占位，不再乱跳）。③**logo 不重影**：板里的 logo 按模板叠加位置反向补偿（1.04 倍），最后 2 拍用无 logo 板 + 模板叠加。④**Story 首帧**：补了 Melbourne、Brisbane 5 m³ 线上计算器截图（均 A$1,238，Brisbane 约 25 天），标题改「5 m³ to Sydney · Melbourne · Brisbane」+「Same estimate for all three」。⑤起运地写 Guangzhou（板、Story、caption 都加）。⑥**M3→CBM**：模板对字幕做 Unicode 规范化会把「m³」变成「m3」，所以视频里一律写「1 CBM」，caption 写「1 CBM (1 m³)」，不再有 M3。⑦换掉欧式砖拱老仓库+红叉车镜头（DOOR TO DOOR 现在用仓库货架/港口船/俯拍）。
+- 仍未解决（模板限制）：每词开头 0.1 秒砸入动画（马良已认可）；logo 不是模板首帧自带；真人出镜/真实感/物流配方缺口。
+- 我没能打开存储桶里出片机渲的真实文件；以上是本机同参数渲染的逐帧自检，请马良/苏东坡复审真实件。

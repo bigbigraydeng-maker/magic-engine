@@ -44,7 +44,7 @@
   20.847,
   21.393
  ],
- "totalBeats": 30,
+ "totalBeats": 31,
  "fastBars": [
   2,
   4
@@ -54,7 +54,7 @@
   {
    "at": 0,
    "beats": 1,
-   "text": "1 M³ ≈A$378",
+   "text": "1",
    "bg": "brand",
    "rot": 0,
    "clipTag": "cover"
@@ -62,13 +62,21 @@
   {
    "at": 1,
    "beats": 1,
+   "text": "CBM",
+   "bg": "white",
+   "rot": 0,
+   "clipTag": "cover"
+  },
+  {
+   "at": 2,
+   "beats": 1,
    "text": "CHINA",
    "bg": "white",
    "rot": 2,
    "clipTag": "ship"
   },
   {
-   "at": 2,
+   "at": 3,
    "beats": 1,
    "text": "TO",
    "bg": "black",
@@ -76,7 +84,7 @@
    "clipTag": "ship"
   },
   {
-   "at": 3,
+   "at": 4,
    "beats": 1,
    "text": "SYDNEY",
    "bg": "brand",
@@ -84,7 +92,7 @@
    "clipTag": "aerial"
   },
   {
-   "at": 4,
+   "at": 5,
    "beats": 3,
    "text": "≈A$378",
    "bg": "brand",
@@ -92,31 +100,31 @@
    "clipTag": "aerial"
   },
   {
-   "at": 7,
+   "at": 8,
    "beats": 1,
    "text": "DOOR",
    "bg": "white",
    "rot": -2,
-   "clipTag": "dock"
-  },
-  {
-   "at": 8,
-   "beats": 1,
-   "text": "TO",
-   "bg": "black",
-   "rot": 2,
-   "clipTag": "dock"
+   "clipTag": "racks"
   },
   {
    "at": 9,
    "beats": 1,
-   "text": "DOOR",
-   "bg": "brand",
-   "rot": -1,
+   "text": "TO",
+   "bg": "black",
+   "rot": 2,
    "clipTag": "racks"
   },
   {
    "at": 10,
+   "beats": 1,
+   "text": "DOOR",
+   "bg": "brand",
+   "rot": -1,
+   "clipTag": "ship"
+  },
+  {
+   "at": 11,
    "beats": 2,
    "text": "CLEARANCE",
    "bg": "white",
@@ -124,7 +132,7 @@
    "clipTag": "scan"
   },
   {
-   "at": 12,
+   "at": 13,
    "beats": 2,
    "text": "INCLUDED",
    "bg": "black",
@@ -132,7 +140,7 @@
    "clipTag": "scan"
   },
   {
-   "at": 14,
+   "at": 15,
    "beats": 2,
    "text": "LIVE",
    "bg": "brand",
@@ -140,7 +148,7 @@
    "clipTag": "wrap"
   },
   {
-   "at": 16,
+   "at": 17,
    "beats": 2,
    "text": "PRICES",
    "bg": "white",
@@ -148,7 +156,7 @@
    "clipTag": "wrap"
   },
   {
-   "at": 18,
+   "at": 19,
    "beats": 3,
    "text": "ONLINE",
    "bg": "black",
@@ -156,7 +164,7 @@
    "clipTag": "racks"
   },
   {
-   "at": 21,
+   "at": 22,
    "beats": 1,
    "text": "NO",
    "bg": "brand",
@@ -164,7 +172,7 @@
    "clipTag": "ship"
   },
   {
-   "at": 22,
+   "at": 23,
    "beats": 2,
    "text": "SIGN-UP",
    "bg": "white",
@@ -172,34 +180,26 @@
    "clipTag": "aerial"
   },
   {
-   "at": 24,
-   "beats": 1,
-   "text": "CURRENT",
-   "bg": "black",
-   "rot": 0,
-   "clipTag": "endcard"
-  },
-  {
    "at": 25,
-   "beats": 1,
-   "text": "RATES",
+   "beats": 3,
+   "text": "≈A$378",
    "bg": "brand",
-   "rot": -1,
-   "clipTag": "endcard"
-  },
-  {
-   "at": 26,
-   "beats": 2,
-   "text": "ESTIMATES",
-   "bg": "white",
    "rot": 0,
    "clipTag": "endcard"
   },
   {
    "at": 28,
-   "beats": 2,
-   "text": "ONLY",
+   "beats": 1,
+   "text": "1 CBM",
    "bg": "black",
+   "rot": 0,
+   "clipTag": "endcard"
+  },
+  {
+   "at": 29,
+   "beats": 2,
+   "text": "≈A$378",
+   "bg": "brand",
    "rot": 0,
    "clipTag": "endcardb"
   }
@@ -234,6 +234,20 @@
    "lenFrames": 105
   },
   {
+   "file": "clips/endcardb-a.mp4",
+   "tag": "endcardb",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcardb-b.mp4",
+   "tag": "endcardb",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
    "file": "clips/ship-a.mp4",
    "tag": "ship",
    "kind": "street",
@@ -258,20 +272,6 @@
    "file": "clips/aerial-b.mp4",
    "tag": "aerial",
    "kind": "aerial",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/dock-a.mp4",
-   "tag": "dock",
-   "kind": "street",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/dock-b.mp4",
-   "tag": "dock",
-   "kind": "street",
    "source": "stock",
    "lenFrames": 105
   },
@@ -313,20 +313,6 @@
   {
    "file": "clips/wrap-b.mp4",
    "tag": "wrap",
-   "kind": "detail",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/endcardb-a.mp4",
-   "tag": "endcardb",
-   "kind": "detail",
-   "source": "stock",
-   "lenFrames": 105
-  },
-  {
-   "file": "clips/endcardb-b.mp4",
-   "tag": "endcardb",
    "kind": "detail",
    "source": "stock",
    "lenFrames": 105
