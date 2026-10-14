@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
+import { countRevokeBlockers, revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
@@ -122,7 +122,16 @@ export async function PATCH(
 
     let revoked = 0
     if (revertingToDraft) {
-      // 退回草稿 = 撤销批准：清掉这份计划还没开始的待办，已开工的保留（由 FDE 处理）。
+      // 已开工的任务 / 已开始的生产包还在跑：先不许撤回，否则执行物对不上任何获批内容。
+      const running = await countRevokeBlockers(params.planId)
+      if (running.tasks_in_progress > 0 || running.packages_started > 0) {
+        return NextResponse.json({
+          success: false,
+          error: '这份计划已有进行中的任务或已开始的生产包，处理完（完成或跳过）后才能退回草稿。',
+          ...running,
+        }, { status: 409 })
+      }
+      // 退回草稿 = 撤销批准：清掉这份计划还没开始的待办和草稿生产包（有已开工的上面已拒绝）。
       revoked = (await revokePlanTasks(params.planId)).revoked
     }
 

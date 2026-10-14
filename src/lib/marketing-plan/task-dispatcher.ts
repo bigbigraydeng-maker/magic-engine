@@ -280,5 +280,34 @@ export async function revokePlanTasks(planId: string): Promise<{ revoked: number
   if (error) {
     throw new Error(`Failed to revoke plan tasks: ${error.message}`)
   }
+
+  // 批准时生成的生产包：还没开始（draft）的一并归档，免得留下指向已删任务的陈旧包
+  const { error: pkgErr } = await supabaseAdmin
+    .from('production_packages')
+    .update({ status: 'archived' })
+    .eq('marketing_plan_id', planId)
+    .eq('status', 'draft')
+  if (pkgErr) {
+    throw new Error(`Failed to archive plan production packages: ${pkgErr.message}`)
+  }
   return { revoked: (data ?? []).length }
+}
+
+/** 撤回批准前的检查：已开工的任务 / 已开始的生产包还在跑，就不能撤回。 */
+export async function countRevokeBlockers(planId: string): Promise<{ tasks_in_progress: number; packages_started: number }> {
+  const [tasks, pkgs] = await Promise.all([
+    supabaseAdmin
+      .from('execution_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('marketing_plan_id', planId)
+      .eq('status', 'in_progress'),
+    supabaseAdmin
+      .from('production_packages')
+      .select('id', { count: 'exact', head: true })
+      .eq('marketing_plan_id', planId)
+      .not('status', 'in', '(draft,archived)'),
+  ])
+  if (tasks.error) throw new Error(`Failed to check in-progress tasks: ${tasks.error.message}`)
+  if (pkgs.error) throw new Error(`Failed to check started packages: ${pkgs.error.message}`)
+  return { tasks_in_progress: tasks.count ?? 0, packages_started: pkgs.count ?? 0 }
 }

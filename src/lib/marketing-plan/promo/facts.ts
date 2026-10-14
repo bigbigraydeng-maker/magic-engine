@@ -138,6 +138,8 @@ async function loadInsights(clientId: string, accountIds: string[], win: { start
     .gte('insight_date', win.start)
     .lte('insight_date', win.end)
   if (error) return { spend: null, results: null, as_of: null }
+  // Meta 零花费日不返回行：整个窗口一行都没有，可能是真零也可能是取数断档，证明不了覆盖就按「看不清」
+  if ((data ?? []).length === 0) return { spend: null, results: null, as_of: null }
   const spend: Record<string, Record<string, number>> = {}
   let results = 0
   let asOf: string | null = null

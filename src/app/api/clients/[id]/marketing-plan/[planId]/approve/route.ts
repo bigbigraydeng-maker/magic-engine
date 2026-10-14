@@ -92,7 +92,7 @@ export async function POST(
       }
       gateSnapshot = {
         taken_at: new Date().toISOString(),
-        results: verdict.blockers.concat(verdict.unverified).map(r => ({ key: r.key, light: r.light, hard: r.hard })),
+        results: verdict.results.map(r => ({ key: r.key, light: r.light, hard: r.hard })),
       }
     }
 
