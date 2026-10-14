@@ -283,6 +283,17 @@ describe('GET contacts — 分页形状', () => {
       expect(rpcCalls[0]).toMatchObject({ p_stages: null, p_q: null, p_in_ids: null, p_not_in_ids: null })
     })
 
+    it('响应带 Server-Timing：各步耗时（只有步骤名和毫秒数）', async () => {
+      rpcRows = [{ id: 'a1', total: 3 }]
+      const req = new NextRequest('http://localhost/api/clients/client-a/crm/contacts?page=1&perPage=100')
+      const res = await GET(req, { params: { id: 'client-a' } })
+      const h = res.headers.get('Server-Timing') ?? ''
+      for (const step of ['gate', 'rpc_stages', 'page_rows', 'page_ready', 'touches_briefs', 'assemble', 'total']) {
+        expect(h).toContain(`${step};dur=`)
+      }
+      expect(h).not.toMatch(/a1|client-a|@/)
+    })
+
     it('函数还没装上（报错）→ 退回老路径，页面照样 200 且按触点排序', async () => {
       rpcRows = null
       scanRows = [{ contact_id: 'a1', occurred_at: '2026-10-14T01:00:00.000Z' }]

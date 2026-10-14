@@ -31,6 +31,7 @@ import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { createStepTimer, type StepTimer } from '@/lib/http/step-timing'
 import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
   extractCustomColumns,
@@ -279,7 +280,12 @@ async function loadContactsByIds(clientId: string, ids: string[]): Promise<Conta
  * 触点必须按 `contact_id in (当前页)` 收窄：CTS 量级下全量触点 1271 条，
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
-async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
+async function getPaged(
+  clientId: string,
+  query: ListQuery,
+  viewerEmail: string | null,
+  timer: StepTimer,
+): Promise<NextResponse> {
   // 全客户 AI 摘要跟搜什么、翻哪页无关，是这次请求里最慢的一段（实测约 0.7 秒）：
   // 一进来就开跑（跟下面的页查询并行），且 30 秒内同一客户只查一次——搜索框每敲一个字都会进来。
   const briefsPromise = loadLatestBriefByContactCached(clientId)
@@ -344,6 +350,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
             .range(from, to),
         ),
       ])
+      timer.step('rpc_stages')
       if (rpcRes.error) {
         console.warn('[crm contacts] page function unavailable, using the app-side path:', rpcRes.error.message)
       } else {
@@ -372,6 +379,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
         if (rpcTotal !== null) {
           total = rpcTotal
           pageContacts = await loadContactsByIds(clientId, rows.map((r) => r.id))
+          timer.step('page_rows')
           stageRows = stagesRpc
           fastDone = true
         }
@@ -452,6 +460,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     )
   }
 
+  timer.step('page_ready')
   const pageIds = pageContacts.map((c) => c.id)
   let touches: TouchRow[]
   let briefs: BriefByContact
@@ -478,9 +487,11 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     )
   }
 
+  timer.step('touches_briefs')
   const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows, briefs)
+  timer.step('assemble')
 
-  return NextResponse.json({
+  const res = NextResponse.json({
     total,
     page: query.page,
     perPage: query.perPage,
@@ -491,6 +502,8 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     // 从自己的 data.viewerEmail 拿是同一个模式，不新起一个接口）。
     viewerEmail,
   })
+  res.headers.set('Server-Timing', timer.header())
+  return res
 }
 
 /**
@@ -600,18 +613,20 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
+  const timer = createStepTimer()
   const clientId = params.id
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+  timer.step('gate')
   const viewerEmail = access.user.email?.toLowerCase().trim() ?? null
 
   const parsed = parseListQuery(new URL(req.url))
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
-  if (parsed.paged) return getPaged(clientId, parsed, viewerEmail)
+  if (parsed.paged) return getPaged(clientId, parsed, viewerEmail, timer)
   if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
