@@ -8,6 +8,7 @@ import { NextRequest } from 'next/server'
 const m = vi.hoisted(() => ({
   access: vi.fn(),
   planStatus: 'draft' as string | null,
+  planData: {} as Record<string, unknown>,
   inserts: [] as { table: string; row: Record<string, unknown> }[],
 }))
 
@@ -22,7 +23,7 @@ vi.mock('@/lib/supabase', () => {
     c.single = async () =>
       table === 'marketing_plans'
         ? m.planStatus
-          ? { data: { id: 'plan-1', status: m.planStatus }, error: null }
+          ? { data: { id: 'plan-1', status: m.planStatus, plan_data: m.planData }, error: null }
           : { data: null, error: { message: 'nf' } }
         : { data: { id: 'item-1' }, error: null }
     c.maybeSingle = async () => ({ data: null, error: null })
@@ -38,6 +39,7 @@ vi.mock('@/lib/supabase', () => {
 })
 
 import { POST } from '../route'
+import { baseSpec } from '@/lib/marketing-plan/promo/__tests__/fixtures'
 
 const req = (body: unknown) =>
   new NextRequest('http://localhost/x', { method: 'POST', body: JSON.stringify(body) })
@@ -48,6 +50,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.inserts = []
   m.planStatus = 'draft'
+  m.planData = {}
   m.access.mockResolvedValue({ ok: true })
 })
 
@@ -72,5 +75,42 @@ describe('POST /execution — marketing_plan 来源只认已批准的计划', ()
     m.planStatus = null
     const res = await POST(req(body), params)
     expect(res.status).toBe(404)
+  })
+})
+
+describe('POST /execution — 推广计划的任务必须指明属于哪一步', () => {
+  const stepRow = () => m.inserts.find(i => i.table === 'execution_items')?.row as { steps_json: Record<string, unknown> } | undefined
+
+  beforeEach(() => { m.planStatus = 'approved'; m.planData = { promo: baseSpec() } })
+
+  it('没带 promo_ref → 400，不写卡', async () => {
+    const res = await POST(req(body), params)
+    expect(res.status).toBe(400)
+    expect(stepRow()).toBeUndefined()
+  })
+
+  it('指向不存在的阶段 / 步骤 → 400', async () => {
+    expect((await POST(req({ ...body, promo_ref: { phase_id: 'p1', step_id: 'nope' } }), params)).status).toBe(400)
+    expect((await POST(req({ ...body, promo_ref: { phase_id: 'p9', step_id: 's-ads' } }), params)).status).toBe(400)
+    expect(stepRow()).toBeUndefined()
+  })
+
+  it('步骤存在 → 写卡，并把 promo_ref 记进 steps_json', async () => {
+    const res = await POST(req({ ...body, promo_ref: { phase_id: 'p1', step_id: 's-soc' } }), params)
+    expect(res.status).toBe(200)
+    expect(stepRow()?.steps_json.promo_ref).toEqual({ phase_id: 'p1', step_id: 's-soc' })
+  })
+
+  it('promo 畸形 → 一律拒绝（fail closed），哪怕带了 promo_ref', async () => {
+    m.planData = { promo: { schema: 'promo_v1' } }
+    const res = await POST(req({ ...body, promo_ref: { phase_id: 'p1', step_id: 's-soc' } }), params)
+    expect(res.status).toBe(400)
+  })
+
+  it('旧版计划（没有 promo）：不要求 promo_ref，行为不变', async () => {
+    m.planData = { tasks: [] }
+    const res = await POST(req(body), params)
+    expect(res.status).toBe(200)
+    expect(stepRow()?.steps_json.promo_ref).toBeUndefined()
   })
 })

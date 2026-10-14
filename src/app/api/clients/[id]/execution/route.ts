@@ -18,6 +18,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { PLAN_NOT_APPROVED_MESSAGE, canWriteTasksToPlan } from '@/lib/marketing-plan/plan-guard'
 import type { MarketingPlanStatus } from '@/lib/marketing-plan/types'
+import { findStep, hasPromoField, readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type {
   ExecutionItem, ExecutionLog, PrescriptionStatus,
   DiagnosticDimension, FixType, LinkedContentPost,
@@ -619,6 +620,8 @@ export async function POST(
       fix_type?: FixType
       platform?: string
       kind?: string
+      /** 推广计划（plan_data.promo）的任务必须指明属于哪个阶段的哪一步 */
+      promo_ref?: { phase_id?: string; step_id?: string }
     }
 
     const title = (body.title ?? '').trim()
@@ -641,16 +644,32 @@ export async function POST(
     if (isMarketingPlan) {
       const { data: plan, error: planErr } = await supabaseAdmin
         .from('marketing_plans')
-        .select('id, status')
+        .select('id, status, plan_data')
         .eq('id', body.marketing_plan_id!)
         .eq('client_id', clientId)
-        .single<{ id: string; status: MarketingPlanStatus }>()
+        .single<{ id: string; status: MarketingPlanStatus; plan_data: unknown }>()
       if (planErr || !plan) {
         return NextResponse.json({ success: false, error: 'Marketing Plan 不存在' }, { status: 404 })
       }
       // 草稿计划不能往执行看板派活（以前只查「计划存在」，草稿也能加任务）
       if (!canWriteTasksToPlan(plan.status)) {
         return NextResponse.json({ success: false, error: PLAN_NOT_APPROVED_MESSAGE }, { status: 409 })
+      }
+
+      // 推广计划的任务必须带步骤引用，并且该阶段 / 步骤要存在于这份计划里；
+      // 旧版计划（没有 promo 字段）保持原行为，只查"计划已批准"。
+      let promoRef: { phase_id: string; step_id: string } | null = null
+      if (hasPromoField(plan.plan_data)) {
+        const spec = readPromoSpec(plan.plan_data)
+        const phaseId = body.promo_ref?.phase_id ?? ''
+        const stepId = body.promo_ref?.step_id ?? ''
+        if (!spec || !findStep(spec, phaseId, stepId)) {
+          return NextResponse.json(
+            { success: false, error: '推广计划的任务必须指明属于哪个阶段的哪一步（promo_ref），且该步骤要存在于计划里' },
+            { status: 400 },
+          )
+        }
+        promoRef = { phase_id: phaseId, step_id: stepId }
       }
 
       const { data: maxRow } = await supabaseAdmin
@@ -668,6 +687,7 @@ export async function POST(
         source: 'fde_manual_add',
         kind,
         platform,
+        ...(promoRef ? { promo_ref: promoRef } : {}),
         estimated_hours: 1,
         required_skills: kind === 'social_reel' ? ['video direction', 'social copywriting'] : ['social copywriting'],
       }

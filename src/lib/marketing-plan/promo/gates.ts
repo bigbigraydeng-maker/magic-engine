@@ -14,7 +14,7 @@
 
 import type { PromoPlaybook, PromoEvidence } from './playbooks'
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
-import { allAdsSteps, type PromoPhase, type PromoSpec } from './spec'
+import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
 
 export type Light = 'green' | 'yellow' | 'red' | 'gray'
 export type GateGroup = 'tool' | 'rhythm' | 'content'
@@ -76,6 +76,11 @@ export interface GateFacts {
   } | null
   /** 每日计划从今天起往后连续排了几天；读不到 = null */
   daily_plan_coverage_days: number | null
+  /**
+   * 计划批准后内容被锁，后面阶段的人工核实记录写在服务端的 generation_meta 里（不在 plan_data），
+   * 这里与计划里自带的 checks 合并，同一项取最近一次。
+   */
+  manual_checks: ManualCheck[]
 }
 
 const EVIDENCE: PromoEvidence = 'unvalidated_default'
@@ -168,7 +173,9 @@ function manualChecks(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateRes
       how: '把稀缺性 / 截止日等说法发给客户确认，确认后在计划里点「已核实」。' },
   ]
   return defs.map(d => {
-    const rec = spec.checks.find(c => c.phase_id === phase.id && c.check_key === d.key)
+    const rec = [...spec.checks, ...f.manual_checks]
+      .filter(c => c.phase_id === phase.id && c.check_key === d.key)
+      .sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
     if (!rec) return make(d.key, d.group, d.label, d.hard, 'gray', '还没有人核实', d.how)
     const age = ageDays(rec.verified_at, f.now)
     if (age === null || age > f.playbook.factFreshnessDays * 4) {

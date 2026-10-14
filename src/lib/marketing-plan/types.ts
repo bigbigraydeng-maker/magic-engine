@@ -157,6 +157,20 @@ export interface MarketingPlanData {
 
 // ─── 批准回执 ──────────────────────────────────────────────────────────────────
 
+export interface PromoManualCheckRecord {
+  phase_id: string
+  check_key: string
+  verified_by: string
+  verified_at: string
+  note: string
+}
+
+export interface WeeklyReviewRecord {
+  week_start: string
+  by: string | null
+  at: string
+}
+
 export interface ApprovalReceipt {
   request_id: string
   approved_by: string | null
@@ -164,6 +178,8 @@ export interface ApprovalReceipt {
   tasks_created: number
   tasks_skipped: number
   packages_created: number
+  /** 批准当时第一阶段的检查清单快照（事后能说清「批的时候是什么状态」）*/
+  gate_snapshot?: { taken_at: string; results: { key: string; light: string; hard: boolean }[] }
 }
 
 // ─── 数据库行类型 ─────────────────────────────────────────────────────────────
@@ -187,6 +203,10 @@ export interface MarketingPlan {
     truncated?: boolean
     /** 批准回执：每次批准成功后由服务端写入（保存接口不接受这一列，所以不会被覆盖）。*/
     approval_receipt?: ApprovalReceipt
+    /** FDE 在计划批准后补充的人工核实记录（plan_data 被锁，所以放这里；服务端写入）。*/
+    promo_checks?: PromoManualCheckRecord[]
+    /** PM 每周「按计划继续」的确认记录（服务端写入，按 week_start 幂等）。*/
+    weekly_reviews?: WeeklyReviewRecord[]
   } | null
   approved_at: string | null
   created_at: string

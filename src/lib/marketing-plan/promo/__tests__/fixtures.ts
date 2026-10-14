@@ -34,6 +34,7 @@ export function goodFacts(overrides: Partial<GateFacts> = {}): GateFacts {
     snapshots: { act_1: { account_status: 1, captured_at: '2026-10-29T00:00:00Z' } },
     config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'approved' }] },
     daily_plan_coverage_days: 10,
+    manual_checks: [],
     ...overrides,
   }
 }

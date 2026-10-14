@@ -16,6 +16,10 @@ import { randomUUID } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { dispatchPlanTasks } from '@/lib/marketing-plan/task-dispatcher'
+import { manualChecksOf } from '@/lib/marketing-plan/promo/board'
+import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
+import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
+import { hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
@@ -68,6 +72,30 @@ export async function POST(
       }, { status: 400 })
     }
 
+    // 3b. 推广计划（plan_data.promo）：批准前先过检查清单。只看第一阶段的硬门——红或灰就不批准。
+    //     后面阶段的检查只在每周对账页亮灯提醒，不阻止、也不是授权动作。
+    //     没有 promo 字段的旧版计划完全不走这一步。
+    let gateSnapshot: ApprovalReceipt['gate_snapshot']
+    if (hasPromoField(planRow.plan_data)) {
+      const parsed = parsePromoSpec((planRow.plan_data as unknown as { promo: unknown }).promo)
+      if (!parsed.ok) {
+        return NextResponse.json({ success: false, error: '推广计划结构不合法，不能批准', issues: parsed.issues }, { status: 400 })
+      }
+      const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow))
+      const verdict = evaluateApproval(parsed.spec, facts.gate)
+      if (!verdict.can_approve) {
+        return NextResponse.json({
+          success: false,
+          error: '检查清单有没过的硬门，暂时不能批准',
+          blockers: verdict.blockers.map(b => ({ key: b.key, label: b.label, light: b.light, reason: b.reason, how: b.how })),
+        }, { status: 409 })
+      }
+      gateSnapshot = {
+        taken_at: new Date().toISOString(),
+        results: verdict.blockers.concat(verdict.unverified).map(r => ({ key: r.key, light: r.light, hard: r.hard })),
+      }
+    }
+
     // 4. 派发任务（先派发，成功后再改状态 — 防止状态改了但任务未派发）
     const dispatchResult = await dispatchPlanTasks(planRow)
 
@@ -81,6 +109,7 @@ export async function POST(
       tasks_created: dispatchResult.tasks_created,
       tasks_skipped: dispatchResult.tasks_skipped ?? 0,
       packages_created: dispatchResult.packages_created,
+      ...(gateSnapshot ? { gate_snapshot: gateSnapshot } : {}),
     }
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('marketing_plans')
