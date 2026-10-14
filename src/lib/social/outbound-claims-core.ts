@@ -153,17 +153,21 @@ export function parseChineseNumber(raw: string): number | null {
   let sawAny = false
   let lastUnit = 0
   let trailingDigit = -1
+  // A 零 after a unit means the following digit is a plain ones digit, so the
+  // colloquial 'trailing digit = next lower unit' rule must be switched off.
+  let zeroAfterUnit = false
 
   for (const ch of s) {
     if (ch in DIGIT_MAP) {
       current = DIGIT_MAP[ch]
       sawAny = true
+      if (current === 0 && lastUnit > 0) zeroAfterUnit = true
       trailingDigit = current
     } else if (ch in UNIT_MAP) {
       const unit = UNIT_MAP[ch]
       sawAny = true
       if (unit === 10000) {
-        section = (section + (current || 1)) * unit
+        section = ((section + current) || 1) * unit
         total += section
         section = 0
         current = 0
@@ -175,6 +179,7 @@ export function parseChineseNumber(raw: string): number | null {
         lastUnit = unit
         trailingDigit = -1
       }
+      zeroAfterUnit = false
     } else {
       return null
     }
@@ -183,7 +188,7 @@ export function parseChineseNumber(raw: string): number | null {
   if (!sawAny) return null
 
   // colloquial trailing digit: '三千八' -> 3800, '一万二' -> 12000
-  if (trailingDigit >= 0 && lastUnit > 0) {
+  if (trailingDigit >= 0 && lastUnit > 0 && !zeroAfterUnit) {
     const nextUnit = lastUnit / 10
     if (nextUnit >= 1) {
       section += trailingDigit * nextUnit

@@ -53,7 +53,7 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
   let m: RegExpExecArray | null
 
   // YYYY年M月D日/号
-  const cnFull = /(\d{4})\s*年\s*(\d{1,2}|[一二三四五六七八九十]+)\s*月\s*(\d{1,2}|[一二三四五六七八九十廿卅]+)\s*[日号]/g
+  const cnFull = /(\d{4})\s{0,3}年\s{0,3}(\d{1,2}|[一二三四五六七八九十]{1,12})\s{0,3}月\s{0,3}(\d{1,2}|[一二三四五六七八九十廿卅]{1,12})\s{0,3}[日号]/g
   while ((m = cnFull.exec(text)) !== null) {
     const md = parseCnMonthDay(m[2], m[3])
     if (md) hits.push({ kind: 'date', match: m[0], value: `${m[1]}-${pad2(md.m)}-${pad2(md.d)}` })
@@ -70,14 +70,14 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
   }
 
   // M月D日/号 (no year)
-  const cnShort = /(\d{1,2}|[一二三四五六七八九十]+)\s*月\s*(\d{1,2}|[一二三四五六七八九十廿卅]+)\s*[日号]/g
+  const cnShort = /(\d{1,2}|[一二三四五六七八九十]{1,12})\s{0,3}月\s{0,3}(\d{1,2}|[一二三四五六七八九十廿卅]{1,12})\s{0,3}[日号]/g
   while ((m = cnShort.exec(text)) !== null) {
     const md = parseCnMonthDay(m[1], m[2])
     if (md) hits.push({ kind: 'date', match: m[0], value: `${pad2(md.m)}-${pad2(md.d)}` })
   }
 
   // M月D with no day suffix, only when followed by a departure/deadline marker
-  const cnNoSuffix = /(\d{1,2}|[一二三四五六七八九十]+)\s*月\s*(\d{1,2}|[一二三四五六七八九十廿卅]+)(?=\s*(?:出发|截止|前|止|至|到|开团|报名)|$)/g
+  const cnNoSuffix = /(\d{1,2}|[一二三四五六七八九十]{1,12})\s{0,3}月\s{0,3}(\d{1,2}|[一二三四五六七八九十廿卅]{1,12})(?=\s{0,3}(?:出发|截止|前|止|至|到|开团|报名)|$)/g
   while ((m = cnNoSuffix.exec(text)) !== null) {
     const md = parseCnMonthDay(m[1], m[2])
     if (md) hits.push({ kind: 'date', match: m[0], value: `${pad2(md.m)}-${pad2(md.d)}` })
@@ -85,7 +85,7 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
 
   // English: 'dec 31', '16 november 2026', '31 dec', 'dec. 31st', '31st of december'
   const monthNames = Object.keys(MONTHS).join('|')
-  const enMonthDay = new RegExp(`\\b(${monthNames})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*(\\d{4}))?\\b`, 'gi')
+  const enMonthDay = new RegExp(`\\b(${monthNames})\\.?\\s{1,3}(\\d{1,2})(?:st|nd|rd|th)?(?:\\s{0,3},?\\s{0,3}(\\d{4}))?\\b`, 'gi')
   while ((m = enMonthDay.exec(text)) !== null) {
     const mo = MONTHS[m[1].toLowerCase()]
     const d = Number(m[2])
@@ -94,7 +94,7 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
       hits.push({ kind: 'date', match: m[0], value })
     }
   }
-  const enDayMonth = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(${monthNames})\\.?(?:\\s*,?\\s*(\\d{4}))?\\b`, 'gi')
+  const enDayMonth = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s{1,3}(?:of\\s{1,3})?(${monthNames})\\.?(?:\\s{0,3},?\\s{0,3}(\\d{4}))?\\b`, 'gi')
   while ((m = enDayMonth.exec(text)) !== null) {
     const mo = MONTHS[m[2].toLowerCase()]
     const d = Number(m[1])
@@ -111,7 +111,7 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
   }
 
   // Numeric day/month without year: A[./-]B, only near a marker word.
-  const numericShort = /(\d{1,2})\s*([./-])\s*(\d{1,2})/g
+  const numericShort = /(\d{1,2})\s{0,3}([./-])\s{0,3}(\d{1,2})/g
   while ((m = numericShort.exec(text)) !== null) {
     const a = Number(m[1])
     const b = Number(m[3])
@@ -135,7 +135,7 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
   }
 
   // Day-first / labelled numeric dates: A/B/YYYY, A/B/YY, and labelled A/B.
-  const dayFirstFull = /(?<!\d)(\d{1,2})\s*([/.\-])\s*(\d{1,2})\s*\2\s*(\d{4}|\d{2})(?!\d)/g
+  const dayFirstFull = /(?<!\d)(\d{1,2})\s{0,3}([/.\-])\s{0,3}(\d{1,2})\s{0,3}\2\s{0,3}(\d{4}|\d{2})(?!\d)/g
   while ((m = dayFirstFull.exec(text)) !== null) {
     const a = Number(m[1])
     const b = Number(m[3])
@@ -156,7 +156,7 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
 
   // Labelled A/B or A.B with no year: 出发日期：12.25, 日期：25/12, 报名截止：12/20
   const DATE_LABELS = '出发日期|报名截止|截止日期|出发|日期|截止|开团|返程|回程|起飞'
-  const labelledShort = new RegExp(`(?:${DATE_LABELS})\\s*[:：]?\\s*(\\d{1,2})\\s*([/.])\\s*(\\d{1,2})`, 'g')
+  const labelledShort = new RegExp(`(?:${DATE_LABELS})\\s{0,3}[:：]?\\s{0,3}(\\d{1,2})\\s{0,3}([/.])\\s{0,3}(\\d{1,2})`, 'g')
   while ((m = labelledShort.exec(text)) !== null) {
     const a = Number(m[1])
     const b = Number(m[3])
@@ -174,8 +174,42 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
   }
 
   // Month word followed by 初/底/中/份
-  const monthPart = /(\d{1,2}|[一二三四五六七八九十]+)\s*月\s*(?:初|底|中|份)/g
+  const monthPart = /(\d{1,2}|[一二三四五六七八九十]{1,12})\s{0,3}月\s{0,3}(?:初|底|中|份)/g
   while ((m = monthPart.exec(text)) !== null) {
+    hits.push({ kind: 'date', match: m[0] })
+  }
+
+  // Day-only: 20号出发 / 二十号出发 / 15日截止, only near a marker.
+  const dayOnly = /(?<![0-9])(\d{1,2}|[二三]?十[一二三四五六七八九]?|廿[一二三四五六七八九]?|卅[一]?)\s{0,1}[号日]/g
+  while ((m = dayOnly.exec(text)) !== null) {
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 2)
+    const before = text.slice(Math.max(0, m.index - 2), m.index)
+    if (/^(?:楼|线|路|层|室|座|栋|排|号)/.test(after)) continue
+    if (/月\s?$/.test(before)) continue // the day belongs to a month-day date handled above
+    const markerAfter = /^(?:出发|截止|前|到期|报名|开团|起)/.test(after)
+    const markerBefore = /(?:在|于|到|至|从|自|由)$/.test(before)
+    if (markerAfter || markerBefore) hits.push({ kind: 'date', match: m[0] })
+  }
+
+  // Month-only: 11月出发 / 十二月出发 / 2026年11月
+  const monthOnly = /(\d{1,2}|十[一二]?|[一二三四五六七八九])\s{0,3}月/g
+  while ((m = monthOnly.exec(text)) !== null) {
+    const after = text.slice(m.index + m[0].length, m.index + m[0].length + 3)
+    const before = text.slice(Math.max(0, m.index - 5), m.index)
+    const dayFollows = /^\s{0,3}(?:\d{1,2}|[二三]?十[一二三四五六七八九]?|廿[一二三四五六七八九]?|卅一?|[一二三四五六七八九])\s{0,1}[日号]/.test(text.slice(m.index + m[0].length, m.index + m[0].length + 6))
+    if (dayFollows) continue
+    if (/^(?:出发|截止|前|报名|开团|份)/.test(after) || after === '' || /年$/.test(before)) {
+      hits.push({ kind: 'date', match: m[0] })
+    }
+  }
+
+  // English: 'the 20th', 'on friday'
+  const enTheDay = /\bthe\s{1,3}(\d{1,2})(?:st|nd|rd|th)\b/gi
+  while ((m = enTheDay.exec(text)) !== null) {
+    hits.push({ kind: 'date', match: m[0] })
+  }
+  const enOnDay = /\bon\s{1,3}(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi
+  while ((m = enOnDay.exec(text)) !== null) {
     hits.push({ kind: 'date', match: m[0] })
   }
 
@@ -203,21 +237,25 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
 /* ------------------------------------------------------------------ */
 
 export function detectDuration(text: string, hits: ClaimHit[]): void {
-  const num = `(?:\\d+|[${CN_NUM_CHARS}]+)`
+  // Cheap guard: if none of the duration trigger characters appear, skip the
+  // (bounded but still non-trivial) patterns entirely.
+  if (!/[天日晚夜周星期礼拜小时个月工作日dn]/.test(text)) return
+
+  const num = `(?:\\d{1,6}|[${CN_NUM_CHARS}]{1,12})`
   const patterns = [
-    `${num}\\s*天\\s*${num}\\s*[晚夜]`,
-    `${num}\\s*日\\s*${num}\\s*[夜晚]`,
-    `${num}\\s*日游`,
-    `${num}\\s*天\\s*[内后]`,
-    `${num}\\s*个工作日`,
-    `${num}\\s*小时\\s*[内后]`,
-    `${num}\\s*周(?:行程)?`,
-    `${num}\\s*个?\\s*(?:星期|礼拜)`,
-    `${num}\\s*个月`,
-    `${num}\\s*个半月`,
-    `${num}\\s*小时`,
-    `半\\s*个月`,
-    `半\\s*个半月`,
+    `${num}\\s{0,3}天\\s{0,3}${num}\\s{0,3}[晚夜]`,
+    `${num}\\s{0,3}日\\s{0,3}${num}\\s{0,3}[夜晚]`,
+    `${num}\\s{0,3}日游`,
+    `${num}\\s{0,3}天\\s{0,3}[内后]`,
+    `${num}\\s{0,3}个工作日`,
+    `${num}\\s{0,3}小时\\s{0,3}[内后]`,
+    `${num}\\s{0,3}周(?:行程)?`,
+    `${num}\\s{0,3}个?\\s{0,3}(?:星期|礼拜)`,
+    `${num}\\s{0,3}个月`,
+    `${num}\\s{0,3}个半月`,
+    `${num}\\s{0,3}小时`,
+    `半\\s{0,3}个月`,
+    `半\\s{0,3}个半月`,
   ]
   for (const p of patterns) {
     const re = new RegExp(p, 'g')
@@ -228,7 +266,7 @@ export function detectDuration(text: string, hits: ClaimHit[]): void {
   }
 
   // Bare N天, but not 第N天 (ordinal day-of-trip, not a duration)
-  const bareDay = new RegExp(`(?<!第)\\s*${num}\\s*天`, 'g')
+  const bareDay = new RegExp(`(?<!第)\\s{0,3}${num}\\s{0,3}天`, 'g')
   let m: RegExpExecArray | null
   while ((m = bareDay.exec(text)) !== null) {
     hits.push({ kind: 'duration', match: m[0] })

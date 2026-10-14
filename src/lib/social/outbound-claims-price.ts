@@ -26,8 +26,11 @@ interface NumToken {
 const CURRENCY_WORDS = [
   'new zealand dollars',
   'kiwi dollars',
+  'kiwis',
+  'kiwi',
   'nz dollars',
   '新西兰元',
+  '新西兰',
   '纽币',
   '纽元',
   '新币',
@@ -100,15 +103,33 @@ const PRICE_WORDS = [
   '只需',
   '只卖',
   '售',
+  '总计',
+  '共',
+  '一共',
+  '共计',
+  '总共',
+  '合计',
+  '低至',
+  '最低',
+  '一人',
+  '每对',
+  '每间',
+  '每晚',
+  '仅',
   'price',
   'cost',
   'costs',
+  'total',
+  'only',
+  'about',
   'from',
+  'deposit',
+  'low',
 ]
 
 const PRICE_WORD_RE = new RegExp(`(?:${PRICE_WORDS.join('|')})`)
 
-const SUFFIX_RE = /^(?:起|\/人|\/位|每人|每位|一位|per person|pp|each)/
+const SUFFIX_RE = /^\s?(?:起|\/人|\/位|每人|每位|一位|per person|per couple|per room|for 2|each|pp|左右|上下|以内|以上)/
 
 const DATE_DURATION_FOLLOW = /^(?:月|日|号|年|天|晚|夜|周|小时|分钟|个工作日)/
 const UNIT_FOLLOW = /^(?:位|个|人|张|间|次|天|晚)/
@@ -194,9 +215,24 @@ function tokenise(text: string): NumToken[] {
           end += 1
           colloquial = true
         } else if (suf === '万') {
-          value = value * 10000
-          end += 1
-          colloquial = true
+          // X万Y colloquial: '3万8' -> 38000
+          const next = end + 1 < n ? text[end + 1] : ''
+          if (/[0-9]/.test(next) || isCnNumChar(next)) {
+            const y = /[0-9]/.test(next) ? Number(next) : DIGIT_MAP[next]
+            if (y !== undefined && y !== null) {
+              value = value * 10000 + y * 1000
+              end += 2
+              colloquial = true
+            } else {
+              value = value * 10000
+              end += 1
+              colloquial = true
+            }
+          } else {
+            value = value * 10000
+            end += 1
+            colloquial = true
+          }
         } else if (suf === '千') {
           // X千Y colloquial: '3千8' -> 3800
           const next = end + 1 < n ? text[end + 1] : ''
@@ -227,6 +263,12 @@ function tokenise(text: string): NumToken[] {
       continue
     }
     if (isCnNumChar(ch)) {
+      // A leading 一 that is really part of a word (一共/一人/一起/一些/一下/
+      // 一定/一般/一直/一切/一边/一路) is not a number token.
+      if (ch === '一' && i + 1 < n && '共人起些下定般直切边路'.includes(text[i + 1])) {
+        i++
+        continue
+      }
       let j = i
       while (j < n && isCnNumChar(text[j])) j++
       const run = text.slice(i, j)
@@ -290,6 +332,9 @@ function findPriceWordBefore(text: string, start: number, tokens: NumToken[]): s
     end--
     skipped++
   }
+  // English copula between the price word and the number: 'price is 3880'
+  const copula = /\s{0,2}\b(?:is|are|was|at)\s{0,2}$/.exec(text.slice(Math.max(0, end - 8), end))
+  if (copula) end -= copula[0].length
   const lo = Math.max(0, end - 8)
   for (let s = lo; s <= end; s++) {
     const slice = text.slice(s, end)

@@ -353,3 +353,56 @@ describe('review 2: more wording', () => {
     expect(kinds(text)).toContain(kind)
   })
 })
+
+// ─── Review round 2b (魏征 二审) ───
+describe('review 2b: no catastrophic regex time on 3000-char inputs', () => {
+  it.each([
+    ['三'.repeat(1000) + ' '.repeat(1999)],
+    ['十'.repeat(1000) + ' '.repeat(1999)],
+    ['三'.repeat(2999)],
+    ['三'.repeat(1400) + '天' + '三'.repeat(1400)],
+    ['1 '.repeat(1499)],
+  ])('adversarial input %#', (text) => {
+    const t0 = Date.now()
+    scanOutboundClaims(text)
+    expect(Date.now() - t0).toBeLessThan(300)
+  })
+})
+
+describe('review 2b: wrong normalised amounts', () => {
+  it.each([
+    ['三千二百零五元', '3205'],
+    ['十万元', '100000'],
+    ['3万8', '38000'],
+    ['两千零五块', '2005'],
+  ])('%s', (text, amount) => {
+    expect(scanOutboundClaims(text).filter((h) => h.kind === 'price').map((h) => h.value)).toContain(amount)
+  })
+})
+
+describe('review 2b: English price words and more Chinese price shapes', () => {
+  it.each(['price is 3880', 'costs 3880', 'total 4000', 'only 4000', '3880 per couple', 'from 3880', '4000 kiwi', '一共4000', '总计4000', '共4000', '4000左右', '低至3880'])(
+    '%s',
+    (text) => {
+      expect(kinds(text)).toContain('price')
+    },
+  )
+})
+
+describe('review 2b: dates without a month, month-only, and visa/availability/discount wording', () => {
+  it.each(['20号出发', '二十号出发', '15日截止', '11月出发', '十二月出发', '2026年11月', 'on the 20th', '星期三出发', 'on friday'])('date: %s', (text) => {
+    expect(kinds(text)).toContain('date')
+  })
+  it.each([
+    ['需要签证', 'visa'], ['you need a visa', 'visa'],
+    ['还有座位', 'availability'], ['有空位', 'availability'], ['seats available', 'availability'], ['订满', 'availability'], ['sold-out', 'availability'],
+    ['免费取消', 'discount'], ['免费改期', 'discount'], ['no extra charge', 'discount'], ['save 200', 'discount'], ['省200', 'discount'],
+    ['will be refunded', 'promise'], ['we will refund you in full', 'promise'],
+  ] as Array<[string, ClaimKind]>)('%s', (text, kind) => {
+    expect(kinds(text)).toContain(kind)
+  })
+  it('a bare 20号 in ordinary text (e.g. 1号线 / 20号楼) is not flagged without a date marker', () => {
+    expect(scanOutboundClaims('酒店在20号楼')).toEqual([])
+    expect(scanOutboundClaims('请坐1号线地铁')).toEqual([])
+  })
+})
