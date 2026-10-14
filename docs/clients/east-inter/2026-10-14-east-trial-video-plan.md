@@ -207,3 +207,11 @@ Dropbox `00_Inbox/industry-logistics/2026-10-14_International_Logistics/original
 - 逐条：①**封面第 0 帧**：原因是模板每个词开头 3 帧从 1.7 倍放大「砸入」+ 整个镜头层第 0 帧放大 1.22 倍，贴边内容会被切。改法：第一个词缩短成「1」（窄），logo/价格/路线放进封面素材板的安全边距内（X 130–950），帧 0 与 0.3 秒都不贴边（`evidence/2026-10-15-v4-cover-frame0-and-0.3s.jpg`）。②**结尾板**：现在只有价格 + logo + **See your live estimate** + **eastinter.com.au**（官网真实域名，页面当前跳转到 eastinter.com.au）+ `1 CBM · Guangzhou → Sydney · current rates` + `Estimates only`；字幕词 CURRENT/RATES/ESTIMATES/ONLY 已删，板上只剩价格卡（因为模板每拍必须有词，用价格词占位，不再乱跳）。③**logo 不重影**：板里的 logo 按模板叠加位置反向补偿（1.04 倍），最后 2 拍用无 logo 板 + 模板叠加。④**Story 首帧**：补了 Melbourne、Brisbane 5 m³ 线上计算器截图（均 A$1,238，Brisbane 约 25 天），标题改「5 m³ to Sydney · Melbourne · Brisbane」+「Same estimate for all three」。⑤起运地写 Guangzhou（板、Story、caption 都加）。⑥**M3→CBM**：模板对字幕做 Unicode 规范化会把「m³」变成「m3」，所以视频里一律写「1 CBM」，caption 写「1 CBM (1 m³)」，不再有 M3。⑦换掉欧式砖拱老仓库+红叉车镜头（DOOR TO DOOR 现在用仓库货架/港口船/俯拍）。
 - 仍未解决（模板限制）：每词开头 0.1 秒砸入动画（马良已认可）；logo 不是模板首帧自带；真人出镜/真实感/物流配方缺口。
 - 我没能打开存储桶里出片机渲的真实文件；以上是本机同参数渲染的逐帧自检，请马良/苏东坡复审真实件。
+
+## 14. v5（第三轮审改，只改结尾板 + 一个字幕词，111 号，2026-10-15）
+
+- 工单 `9ddac532-2441-480b-9dd5-3e5ad10eca8f`（取代 `b872551f…`，旧单不动），出片机本机渲染，花费 0，不发布。v4 苏东坡已通过；马良除结尾板外封面第 0 帧、Story 首帧、音轨、镜头均通过。
+- **结尾板怎么锁静止（模板限制的绕法，不改代码）**：模板每一拍都是一个新镜头段，每段开头 5 帧把镜头层从 1.22 倍缩回 1.04 倍并抖动，所以「每拍脉冲」是模板行为。绕法：节拍数组允许任意间隔，把结尾做成**一个 3 秒的长镜头段**（beat 25→26 间隔 3.0 秒），整个结尾只在开头有一次 5 帧入场缩放，之后完全静止（`evidence/2026-10-15-v5-endcard-frames.jpg` 前 2 帧是入场、后面是静止、末帧是模板自带淡出）。模板叠的 logo 因此是结尾 3.5 秒里**唯一的 logo，位置固定**（左上，不是居中放大——模板 logo 位置不可配）。
+- 结尾板内容：Guangzhou 路线行 + See your live estimate 按钮 + 「≈」徽标 + A$378 大字 + eastinter.com.au + Current rates · Estimates only，全部在安全边距 ≥60px（入场放大 1.22 倍时也不贴边）；删掉了「1 CBM」闪牌和重复价格词，因为模板每拍必须有词，结尾那一个词用「≈」（1 个字符，砸入 1.7 倍时也放得下）。
+- 字幕：LIVE PRICES → CURRENT PRICES。封面价格条字号收小。
+- **没能做到的**：logo 居中放大（模板 logo 位置固定在左上）；结尾板下方约 1/3 仍为空——那是 Facebook 界面遮挡区（y>1248），把内容放进去会被盖住，所以内容集中在 470–1250 之间。若 PM 要求 logo 居中/结尾板铺满全屏，需要改模板（加 endcard 参数），属开发窗口，建议用 DeepSeek 写、子牙魏征审。
