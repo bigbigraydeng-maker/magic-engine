@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:2623
+done_ref: pr:2627
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 在 PM 的 Chrome 里读 Server-Timing：默认打开 total 比约 1.0 秒明显更低，page_rows 与 touches_briefs 两步合并成一步的耗时（约 0.5 秒）
