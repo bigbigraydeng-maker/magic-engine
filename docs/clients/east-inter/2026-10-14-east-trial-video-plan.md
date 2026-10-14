@@ -150,3 +150,38 @@ Dropbox `00_Inbox/industry-logistics/2026-10-14_International_Logistics/original
 - **B 版（物流素材+价格混剪）**：本机预览已做（17.6 秒，9 段裁成竖屏的 Pexels 素材；props 存 `2026-10-15-east-montage-preview.props.json`）。**没提交工单。** 已知问题：价格 ≈A$378 只停约 1 秒；画面有 TOYOTA/INNOVA 字样；两段公路货车像南亚路景需换；音乐没听过、节拍未验；正式提交前素材要先放进 `MagicLab_Studio/East_Inter/remotion-assets/clips/`（现在只在本机临时目录）。
 - 竞品对比与「澳洲本地 Spotyard 为何更低」见第 7、8 节。
 - 后续（不在本轮做）：不可见字符整类拒收（U+FE0F 等，list/montage/datacard 三个模板共有）；数据卡免责句 44 字符上限放不下完整句。
+
+## 11. B 版（混剪）已建单 + 配方对账表 + 分镜自检（111 号，2026-10-15）
+
+- 工单 `c716f7ee-67f6-4ee8-beec-e7dea921d9bf`（东际，goal=占位 `4160565f…`），出片机渲染（纯本机，**没调任何付费生成接口，花费 0**，预算上限 0.5 美元），status=`in_review`，7 项自动检查全 PASS，`redline_hits=[]`。成片 18.2 秒。PM 在对话回「提交混剪」授权，18 号也回「东际继续」。素材 10 段（Pexels 授权，来源/授权见 `MagicLab_Studio/East_Inter/remotion-assets/clips/SOURCES.txt`），已排除所有带第三方品牌的画面。
+- **以后不需要再改出片机自启文件**：106 号/18 号已把 plist 里写死「只领 CTS」两行去掉，名单现在由 `.env` 管；线上白名单（Render `FACTORY_WORKER_CLIENT_IDS`）已含 CTS、Oztop、东际。
+
+### 配方对账表（mixed montage；库 `viral_reference_library` 10-15 复查：行业只有 travel/beauty/fashion/tech/fitness/real_estate/flooring/food/ai_education/digital_marketing，无物流）
+
+| 配方列 | 这次做了什么 | 判定 |
+|---|---|---|
+| 第 0 帧数字/文字钩子 | 第 0 帧「1 M³」大字 + 码头镜头 | ✅ 满足 |
+| 禁风景空镜开场 | 开场是码头航拍但同时有大字钩子，不是空镜 | ⚠️ 部分 |
+| 视觉冲击 visual_shock | 无强冲击镜头 | ❌ 未满足 |
+| 快切 | 每拍一切（约 0.55 秒），指定小节半拍加速 | ✅ 满足 |
+| 满屏大字 | 一词一屏，多种底色/旋转 | ✅ 满足 |
+| 航拍 | 3 段码头航拍 + 港口船 | ⚠️ 部分 |
+| 配乐踩点 | 拍点按乐库登记 110 BPM 算，登记状态 beats_unverified，没人听过/量过 | ❓ 未验证 |
+| 真人出镜 / 自拍感 | 只有叉车操作员远景，无真人面对镜头 | ❌ 未满足 |
+| 真实感（自有实拍） | 全部是 Pexels 库存 | ❌ 未满足（`recipe_gaps` 已记） |
+| 弱化 logo、不加尾卡 | logo 只在最后 2 拍 | ✅ 满足 |
+| 素材真实性 | 授权已登记；配文写 Illustrative footage，不暗示东际实拍 | ✅ 满足 |
+| 行业配方（物流） | 库里没有 | ❌ 缺口 |
+
+### 分镜自检（本机同参数预览逐帧看过；出片机渲的那份我没能打开）
+
+| 时间 | 画面 | 文字 | logo |
+|---|---|---|---|
+| 0.2s | 码头起重机航拍 ✓ | 「1 M³」✓ | 无（设计） |
+| 2.4s | 码头集装箱船航拍 ✓ | 「≈A$378」✓，停约 1.6 秒 | 无 |
+| 5.6s | 阴天海面集装箱船 ✓ | 「EXCL.」→「GST」→「& DUTY」✓ | 无 |
+| 8.0s | 码头起重机 ✓ | 「DOOR TO DOOR」✓ | 无 |
+| 11–14s | 海面船 / 航拍 ✓ | 「CUSTOMS CLEARED」「30KM DELIVERY INCLUDED」✓ | 无 |
+| 15–17s | 叉车搬托盘（操作员远景，不特写面部）✓ | 「LIVE PRICES ONLINE」「NO SIGN-UP」✓ | 无 |
+| 18s（末 2 拍） | 海面船 | 无字 | 东际 logo 完整、清晰 ✓ |
+未见：月份、倒计时、限时、最低价、第三方品牌文字。**价格在 4–7 拍出现，约占片长 1/4 处，不是第一秒**；封面（第 0 帧）是「1 M³」+ 码头，不是价格数字本身。

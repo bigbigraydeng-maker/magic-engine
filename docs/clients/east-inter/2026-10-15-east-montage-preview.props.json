@@ -44,7 +44,7 @@
   20.847,
   21.393
  ],
- "totalBeats": 32,
+ "totalBeats": 33,
  "fastBars": [
   3,
   6
@@ -81,146 +81,146 @@
   },
   {
    "at": 4,
-   "beats": 2,
+   "beats": 3,
    "text": "≈A$378",
    "bg": "brand",
    "rot": -2
   },
   {
-   "at": 6,
+   "at": 7,
    "beats": 1,
    "text": "EXCL.",
    "bg": "white",
    "rot": 3
   },
   {
-   "at": 7,
+   "at": 8,
    "beats": 1,
    "text": "GST",
    "bg": "black",
    "rot": -3
   },
   {
-   "at": 8,
+   "at": 9,
    "beats": 1,
    "text": "& DUTY",
    "bg": "brand",
    "rot": 2
   },
   {
-   "at": 9,
+   "at": 10,
    "beats": 1,
    "text": "DOOR",
    "bg": "white",
    "rot": -4
   },
   {
-   "at": 10,
+   "at": 11,
    "beats": 1,
    "text": "TO",
    "bg": "black",
    "rot": 3
   },
   {
-   "at": 11,
+   "at": 12,
    "beats": 1,
    "text": "DOOR",
    "bg": "brand",
    "rot": -2
   },
   {
-   "at": 13,
+   "at": 14,
    "beats": 1,
    "text": "CUSTOMS",
    "bg": "white",
    "rot": 2
   },
   {
-   "at": 14,
+   "at": 15,
    "beats": 1,
    "text": "CLEARED",
    "bg": "black",
    "rot": -3
   },
   {
-   "at": 15,
+   "at": 16,
    "beats": 1,
    "text": "30KM",
    "bg": "brand",
    "rot": 4
   },
   {
-   "at": 16,
+   "at": 17,
    "beats": 1,
    "text": "DELIVERY",
    "bg": "white",
    "rot": -2
   },
   {
-   "at": 17,
+   "at": 18,
    "beats": 1,
    "text": "INCLUDED",
    "bg": "black",
    "rot": 3
   },
   {
-   "at": 19,
+   "at": 20,
    "beats": 1,
    "text": "LIVE",
    "bg": "brand",
    "rot": -3
   },
   {
-   "at": 20,
+   "at": 21,
    "beats": 1,
    "text": "PRICES",
    "bg": "white",
    "rot": 2
   },
   {
-   "at": 21,
+   "at": 22,
    "beats": 1,
    "text": "ONLINE",
    "bg": "black",
    "rot": -4
   },
   {
-   "at": 23,
+   "at": 24,
    "beats": 1,
    "text": "NO",
    "bg": "brand",
    "rot": 3
   },
   {
-   "at": 24,
+   "at": 25,
    "beats": 1,
    "text": "SIGN-UP",
    "bg": "white",
    "rot": -2
   },
   {
-   "at": 26,
+   "at": 27,
    "beats": 1,
    "text": "CURRENT",
    "bg": "black",
    "rot": 2
   },
   {
-   "at": 27,
+   "at": 28,
    "beats": 1,
    "text": "RATES",
    "bg": "brand",
    "rot": -3
   },
   {
-   "at": 28,
+   "at": 29,
    "beats": 1,
    "text": "ESTIMATES",
    "bg": "white",
    "rot": 3
   },
   {
-   "at": 29,
+   "at": 30,
    "beats": 1,
    "text": "ONLY",
    "bg": "black",
@@ -236,22 +236,22 @@
    "lenFrames": 105
   },
   {
-   "file": "clips/street-a.mp4",
-   "tag": "street-a",
+   "file": "clips/ship-a.mp4",
+   "tag": "ship-a",
    "kind": "street",
    "source": "stock",
    "lenFrames": 105
   },
   {
-   "file": "clips/person-a.mp4",
-   "tag": "person-a",
+   "file": "clips/forklift-a.mp4",
+   "tag": "forklift-a",
    "kind": "person",
    "source": "stock",
    "lenFrames": 105
   },
   {
-   "file": "clips/detail-a.mp4",
-   "tag": "detail-a",
+   "file": "clips/parcels-a.mp4",
+   "tag": "parcels-a",
    "kind": "detail",
    "source": "stock",
    "lenFrames": 105
@@ -264,30 +264,37 @@
    "lenFrames": 105
   },
   {
-   "file": "clips/street-b.mp4",
-   "tag": "street-b",
+   "file": "clips/ship-b.mp4",
+   "tag": "ship-b",
    "kind": "street",
    "source": "stock",
    "lenFrames": 105
   },
   {
-   "file": "clips/person-b.mp4",
-   "tag": "person-b",
+   "file": "clips/forklift-b.mp4",
+   "tag": "forklift-b",
    "kind": "person",
    "source": "stock",
    "lenFrames": 105
   },
   {
-   "file": "clips/detail-b.mp4",
-   "tag": "detail-b",
+   "file": "clips/parcels-b.mp4",
+   "tag": "parcels-b",
    "kind": "detail",
    "source": "stock",
    "lenFrames": 105
   },
   {
-   "file": "clips/street-c.mp4",
-   "tag": "street-c",
-   "kind": "street",
+   "file": "clips/aerial-c.mp4",
+   "tag": "aerial-c",
+   "kind": "aerial",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/parcels-c.mp4",
+   "tag": "parcels-c",
+   "kind": "detail",
    "source": "stock",
    "lenFrames": 105
   }
