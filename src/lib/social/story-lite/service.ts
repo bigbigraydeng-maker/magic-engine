@@ -7,13 +7,13 @@
  */
 import { computeItemFingerprint, computePackContentHash } from './fingerprint'
 import type { LiteStore } from './store'
-import type { LiteActor, LiteChannel, LiteItem, LiteItemStatus, LiteMediaKind, LitePack } from './types'
+import type { LiteActor, LiteChannel, LiteFileCheck, LiteItem, LiteItemStatus, LiteMediaKind, LitePack } from './types'
 
 export interface LiteServicePorts {
   store: LiteStore
   adminEmails: { has(email: string): boolean }
   /** Re-download the file and compare its hash. Injected: the service never touches the network. */
-  checkFile(item: LiteItem): Promise<'OK' | 'CHANGED' | 'UNREACHABLE'>
+  checkFile(item: LiteItem): Promise<LiteFileCheck>
   sendEvent(event: { id: string; name: string; data: Record<string, unknown> }): Promise<void>
 }
 
@@ -132,7 +132,7 @@ async function itemProblems(
   if (accountMismatch(item, pageId)) problems.push('ACCOUNT_MISMATCH')
   if (PRICE_PATTERN.test(item.text_line)) problems.push('PRICE_IN_TEXT')
 
-  let fileResult: 'OK' | 'CHANGED' | 'UNREACHABLE'
+  let fileResult: LiteFileCheck
   try {
     fileResult = await ports.checkFile(item)
   } catch {
@@ -140,6 +140,7 @@ async function itemProblems(
   }
   if (fileResult === 'CHANGED') problems.push('FILE_CHANGED')
   if (fileResult === 'UNREACHABLE') problems.push('FILE_UNREACHABLE')
+  if (fileResult === 'BAD_VIDEO') problems.push('VIDEO_NOT_ACCEPTABLE')
 
   return problems
 }
