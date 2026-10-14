@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:2605
+done_ref: pr:2606
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 在 PM 的 Chrome 里量名单接口 perPage=50：默认打开比 perPage=100 的约 1.4 秒更快；页脚显示按 50 人一页的总页数；智能分段视图不受影响
