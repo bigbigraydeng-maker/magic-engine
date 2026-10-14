@@ -45,14 +45,18 @@ if (!process.env.OPENAI_API_KEY) {
   process.exit(1)
 }
 
-const GREETING_EN =
-  'Hello, this is the AI assistant from CTS Tours. This call may be recorded for quality purposes. Is now a good time for a quick chat about the China tour you enquired about?'
-const GREETING_ZH = '您好，我是 CTS Tours 的 AI 助理，这通电话可能会被录音。请问您现在方便简单聊两分钟，聊聊您咨询过的中国旅行团吗？'
+/** 系统固定播放（Twilio 先说完才接 AI），客人打断不了，也不依赖模型照念：自报是 AI + 录音告知，中英文各一遍。 */
+const DISCLOSURE_EN = 'Hello, this is an automated AI assistant calling from CTS Tours. This call may be recorded.'
+const DISCLOSURE_ZH = '您好，这里是 CTS Tours 的 AI 智能助理，这通电话可能会被录音。'
+/** 告知之后 AI 的第一句（按本通电话锁定的语言）。 */
+const OPENING_EN = 'Is now a good time for a quick chat about the China tour you enquired about?'
+const OPENING_ZH = '请问您现在方便简单聊两分钟，聊聊您咨询过的中国旅行团吗？'
 
 const INSTRUCTIONS = `You are an AI assistant calling on behalf of CTS Tours (a New Zealand travel agency) to follow up on a customer who asked about a China tour.
 Rules (hard):
-- You already told the customer you are an AI and that the call may be recorded. Never claim to be human. If asked, say you are an AI assistant.
-- Speak the customer's language (English or Chinese); switch if they switch. Keep every turn short (1-2 sentences), friendly, no filler.
+- The system already told the customer you are an AI and that the call may be recorded. Never claim to be human. If asked, say you are an AI assistant.
+- LANGUAGE LOCK: this call is in ${LANG === 'zh' ? 'Mandarin Chinese (普通话)' : 'English'}. Reply ONLY in that language, every turn, without exception. Phone audio is noisy: mis-heard words, single words, names or fragments in another language are NOT a reason to switch. Switch only if the customer clearly says, in a full sentence, that they want the other language; then stay in that language for the rest of the call.
+- Keep every turn short (1-2 sentences), friendly, natural, no filler.
 - Goal: ask if now is a good time; then find out ONLY: which tour or destination, travel window, number of travellers. Do not ask for budget or personal details.
 - NEVER state prices, availability, discounts or promises. If asked, say a colleague will confirm and will call back.
 - If the customer asks for a human, or is annoyed, say a colleague will call them back soon, thank them, and call end_call.
@@ -127,7 +131,7 @@ const server = createServer(async (req, res) => {
     }
     const wss = publicBase.replace('https://', 'wss://')
     res.writeHead(200, { 'Content-Type': 'text/xml' }).end(
-      `<?xml version="1.0" encoding="UTF-8"?><Response><Connect><Stream url="${wss}/stream"><Parameter name="token" value="${callToken}"/></Stream></Connect></Response>`,
+      `<?xml version="1.0" encoding="UTF-8"?><Response><Say language="en-AU">${DISCLOSURE_EN}</Say><Say language="zh-CN">${DISCLOSURE_ZH}</Say><Connect><Stream url="${wss}/stream"><Parameter name="token" value="${callToken}"/></Stream></Connect></Response>`,
     )
     return
   }
@@ -164,8 +168,10 @@ wss.on('connection', (twilio) => {
         audio: {
           input: {
             format: { type: 'audio/pcmu' },
-            transcription: { model: 'gpt-4o-mini-transcribe' },
-            turn_detection: { type: 'server_vad', create_response: true, interrupt_response: true },
+            transcription: { model: 'gpt-4o-mini-transcribe', language: LANG === 'zh' ? 'zh' : 'en' },
+            noise_reduction: { type: 'near_field' },
+            // 电话线路杂音多：触发阈值调高、说完要停 0.6 秒才算一句，减少把杂音当成客人开口而打断 AI。
+            turn_detection: { type: 'server_vad', threshold: 0.65, silence_duration_ms: 600, prefix_padding_ms: 300, create_response: true, interrupt_response: true },
           },
           output: { format: { type: 'audio/pcmu' }, voice: 'marin' },
         },
@@ -181,7 +187,7 @@ wss.on('connection', (twilio) => {
         // 开场白由我们固定下发（先自报 AI + 录音告知），不交给模型临场发挥。
         sendOpenAI({
           type: 'response.create',
-          response: { instructions: `Say exactly this sentence and nothing else: "${LANG === 'zh' ? GREETING_ZH : GREETING_EN}"` },
+          response: { instructions: `Say exactly this sentence and nothing else: "${LANG === 'zh' ? OPENING_ZH : OPENING_EN}"` },
         })
         break
       case 'response.output_audio.delta':
