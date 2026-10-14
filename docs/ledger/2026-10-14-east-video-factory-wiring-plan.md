@@ -5,6 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 source: session:9cbc0338
+verify_by: 2026-10-17
+verify_how: 东际试跑成片被真人真播放确认无误（见 2026-10-15-east-trial-video-a-done-b-pending）；出片机以后再领东际单仍正常
 done_on: 2026-10-15
 done_ref: pr:2646
 ---
