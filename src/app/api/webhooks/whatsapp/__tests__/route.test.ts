@@ -36,6 +36,8 @@ vi.mock('@/lib/messenger-agent/optout', async (orig) => {
 // 实现表结构；那张表的真实建模在 health-heartbeat.test.ts。
 vi.mock('@/lib/messenger-agent/optout-failures', () => ({ recordOptOutWriteFailure: vi.fn() }))
 vi.mock('@/lib/inngest/client', () => ({ inngest: { send: vi.fn() } }))
+// 无主号码登记表：这里的测试只关心路由与入库，不让它碰真表。
+vi.mock('@/lib/whatsapp/unclaimed', () => ({ recordUnclaimedNumber: vi.fn() }))
 vi.mock('@/lib/platform-oauth/vocabulary', () => ({
   decryptToken: vi.fn((v: string) => {
     if (v === 'enc:BAD') throw new Error('bad')
@@ -44,6 +46,7 @@ vi.mock('@/lib/platform-oauth/vocabulary', () => ({
 }))
 
 import { GET, POST } from '../route'
+import { resetRejectLog } from '@/lib/whatsapp/reject-log'
 import { supabaseAdmin } from '@/lib/supabase'
 import { resolveContact } from '@/lib/crm/identity'
 import { recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
@@ -254,6 +257,106 @@ describe('GET — 订阅握手', () => {
     delete process.env.META_VERIFY_TOKEN
     const req = new NextRequest('https://me.example.com/api/webhooks/whatsapp?hub.mode=subscribe')
     expect((await GET(req)).status).toBe(500)
+  })
+})
+
+describe('POST — 拒收必须留一行说明（原先拒签完全没有日志）', () => {
+  beforeEach(() => resetRejectLog())
+  const logged = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.flat().map(String).join(' ')
+
+  it('拒签 → 日志只有原因码/密钥来源/个数/有无签名头，没有密钥、签名、号码、正文', async () => {
+    stubDb()
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const badSig = 'sha256=' + '0'.repeat(64)
+    const res = await POST(makePost(messagePayload(), { signature: badSig }))
+    expect(res.status).toBe(401)
+    const text = logged(errSpy)
+    expect(text).toContain('delivery rejected: reason=signature_mismatch secret_source=env numbers=1 signature_header=present')
+    expect(text).not.toContain(SECRET)
+    expect(text).not.toContain(badSig)
+    expect(text).not.toContain(PHONE_NUMBER_ID)
+    expect(text).not.toContain('请问明天有团吗')
+    errSpy.mockRestore()
+  })
+
+  it('没带签名头 → 日志写明 signature_header=absent', async () => {
+    stubDb()
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    await POST(makePost(messagePayload(), { signature: null }))
+    expect(logged(errSpy)).toContain('signature_header=absent')
+    errSpy.mockRestore()
+  })
+
+  it('号码有自己的密钥、却用环境密钥签 → 日志写 secret_source=route', async () => {
+    stubDb({ credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:other-app-secret' }] })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(401)
+    expect(logged(errSpy)).toContain('reason=signature_mismatch secret_source=route')
+    errSpy.mockRestore()
+  })
+
+  it('号码格式异常 → 日志写 reason=malformed_number（响应体仍与拒签一样）', async () => {
+    stubDb()
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const payload = messagePayload()
+    ;(payload.entry[0].changes[0].value.metadata as { phone_number_id: unknown }).phone_number_id = 999888777
+    const res = await POST(makePost(payload))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Invalid signature' })
+    expect(logged(errSpy)).toContain('reason=malformed_number')
+    errSpy.mockRestore()
+  })
+
+  it('号码被停用 → 401，响应体不变，日志写 reason=disabled_number', async () => {
+    stubDb({ credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:x', status: 'disabled' }] })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Invalid signature' })
+    expect(logged(errSpy)).toContain('reason=disabled_number')
+    expect(logged(errSpy)).not.toContain('reason=mixed_apps')
+    errSpy.mockRestore()
+  })
+
+  it('同一包里两个号码、只有一个有自己的密钥 → 401，日志写 reason=mixed_apps', async () => {
+    stubDb({ credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:x' }] })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const payload = messagePayload()
+    const second = JSON.parse(JSON.stringify(payload.entry[0].changes[0]))
+    second.value.metadata.phone_number_id = '111222333'
+    payload.entry[0].changes.push(second)
+    const res = await POST(makePost(payload))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'Invalid signature' })
+    expect(logged(errSpy)).toContain('reason=mixed_apps')
+    errSpy.mockRestore()
+  })
+
+  it('密钥读不出来 → 500，响应体不变，日志写 reason=secret_unreadable', async () => {
+    stubDb({ credRows: [{ phone_number_id: PHONE_NUMBER_ID, app_secret_enc: 'enc:BAD' }] })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'Server misconfiguration: webhook secret unreadable' })
+    expect(logged(errSpy)).toContain('reason=secret_unreadable')
+    errSpy.mockRestore()
+  })
+
+  it('拒签的响应体仍是 Invalid signature', async () => {
+    stubDb()
+    const res = await POST(makePost(messagePayload(), { signature: 'sha256=' + '0'.repeat(64) }))
+    expect(await res.json()).toEqual({ error: 'Invalid signature' })
+  })
+
+  it('密钥表瞬时出错 → 503 且日志写 reason=lookup_unavailable', async () => {
+    stubDb({ credLookupTransientFails: true })
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await POST(makePost(messagePayload()))
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'Credential lookup unavailable' })
+    expect(logged(errSpy)).toContain('reason=lookup_unavailable secret_source=env')
+    errSpy.mockRestore()
   })
 })
 
