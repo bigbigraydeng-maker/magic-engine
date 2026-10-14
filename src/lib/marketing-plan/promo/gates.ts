@@ -173,7 +173,8 @@ function manualChecks(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateRes
       how: '把稀缺性 / 截止日等说法发给客户确认，确认后在计划里点「已核实」。' },
   ]
   return defs.map(d => {
-    const rec = [...spec.checks, ...f.manual_checks]
+    // 只信服务端经 /promo/verify 写入的核实记录；spec.checks 是客户端可写的，不能当证据
+    const rec = f.manual_checks
       .filter(c => c.phase_id === phase.id && c.check_key === d.key)
       .sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
     if (!rec) return make(d.key, d.group, d.label, d.hard, 'gray', '还没有人核实', d.how)

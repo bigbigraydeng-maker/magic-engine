@@ -161,6 +161,18 @@ export async function DELETE(
   }
 
   try {
+    // 先确认这份计划属于当前客户，再动它名下的待办 / 生产包（它们只按计划编号过滤）
+    const { data: owned, error: ownedErr } = await supabaseAdmin
+      .from('marketing_plans')
+      .select('id')
+      .eq('id', params.planId)
+      .eq('client_id', params.id)
+      .maybeSingle()
+    if (ownedErr) throw ownedErr
+    if (!owned) {
+      return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
+    }
+
     // 先清除该 Plan 下所有 pending 的执行项（已开工/已完成的保留）
     const { revoked } = await revokePlanTasks(params.planId)
 

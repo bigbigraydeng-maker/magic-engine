@@ -54,3 +54,10 @@ export function goodReconFacts(overrides: Partial<ReconcileFacts> = {}): Reconci
     ...overrides,
   }
 }
+
+/** 服务端 /promo/verify 写入的两项人工核实记录（硬门只信这类记录，不信计划里客户端可写的 checks） */
+export function verifiedChecks(at = '2026-10-28T00:00:00Z') {
+  return ['landing.item_live', 'content.wording_permission'].map(k => ({
+    phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: at, note: '',
+  }))
+}

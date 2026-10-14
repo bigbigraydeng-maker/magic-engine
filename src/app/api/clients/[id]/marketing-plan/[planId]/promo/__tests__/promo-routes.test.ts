@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
-import { baseSpec, goodFacts, goodReconFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { baseSpec, goodFacts, goodReconFacts, verifiedChecks } from '@/lib/marketing-plan/promo/__tests__/fixtures'
 
 const m = vi.hoisted(() => ({
   access: vi.fn(),
@@ -207,8 +207,8 @@ describe('POST approve — 推广计划批准前检查', () => {
     expect(m.updates).toHaveLength(0)
   })
   it('全部过关 → 批准，并把批准当时的灯快照写进回执', async () => {
-    const spec = baseSpec({ checks: ['landing.item_live', 'content.wording_permission'].map(k => ({
-      phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '' })) })
+    const spec = baseSpec()
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks() })))
     m.plan = planWith(spec)
     const res = await APPROVE(req({}), { params: P })
     expect(res.status).toBe(200)
@@ -224,10 +224,10 @@ describe('POST approve — 推广计划批准前检查', () => {
     expect(m.dispatch).not.toHaveBeenCalled()
   })
   it('后面阶段的红灯不阻止批准', async () => {
-    const spec = baseSpec({ checks: ['landing.item_live', 'content.wording_permission'].map(k => ({
-      phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '' })) })
+    const spec = baseSpec()
     spec.phases[1].steps = [{ id: 'later', kind: 'ads_campaign', settings: {
       ad_account_id: 'act_none', daily_budget_cents: 100, audience_ref: 'a', creative_refs: [], placements: [], paused_ranges: [] } }]
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks() })))
     m.plan = planWith(spec)
     expect((await APPROVE(req({}), { params: P })).status).toBe(200)
   })

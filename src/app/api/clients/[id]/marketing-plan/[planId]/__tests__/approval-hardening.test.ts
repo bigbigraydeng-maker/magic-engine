@@ -37,7 +37,7 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from: () => chain() } }
 })
 
-import { PATCH } from '../route'
+import { DELETE, PATCH } from '../route'
 import { POST as APPROVE } from '../approve/route'
 
 const P = { id: 'client-1', planId: 'plan-1' }
@@ -162,5 +162,14 @@ describe('POST approve — 回执与重试', () => {
     const res = await APPROVE(mk({}, 'POST'), { params: P })
     expect(res.status).toBe(400)
     expect(m.dispatch).not.toHaveBeenCalled()
+  })
+})
+
+describe('DELETE — 先确认计划属于当前客户', () => {
+  it('计划不属于这个客户 → 404，不碰它名下的待办 / 生产包', async () => {
+    m.plan = null
+    const res = await DELETE(new NextRequest('http://localhost/x', { method: 'DELETE' }), { params: P })
+    expect(res.status).toBe(404)
+    expect(m.revoke).not.toHaveBeenCalled()
   })
 })
