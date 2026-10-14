@@ -19,6 +19,7 @@ interface RejectDialogProps {
   error: string | null
   onSubmit: (payload: Record<string, unknown>) => void
   onClose: () => void
+  onModeChange?: (mode: 'quality' | 'budget') => void
 }
 
 function ErrorBox({ message }: { message: string | null }) {
@@ -90,7 +91,7 @@ function BudgetBody({ raw, onRaw }: { raw: string; onRaw: (value: string) => voi
   )
 }
 
-export function RejectDialog({ mode, orderNo, busy, error, onSubmit, onClose }: RejectDialogProps) {
+export function RejectDialog({ mode, orderNo, busy, error, onSubmit, onClose, onModeChange }: RejectDialogProps) {
   const [selected, setSelected] = useState<ContentCheckItemKey[]>([])
   const [freeText, setFreeText] = useState('')
   const [budgetRaw, setBudgetRaw] = useState('')
@@ -133,6 +134,21 @@ export function RejectDialog({ mode, orderNo, busy, error, onSubmit, onClose }: 
           <p id="reject-dialog-title" className="font-medium text-slate-900">{title}</p>
           <span className="text-xs text-slate-400 font-mono">{orderNo}</span>
         </div>
+
+        {onModeChange && (
+          <div className="mb-4 flex gap-2" role="tablist" aria-label="打回类型">
+            {([['quality', '画面有问题'], ['budget', '只改预算']] as const).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => onModeChange(m)}
+                className={`px-3 h-9 rounded-lg text-sm border ${mode === m ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+              >{label}</button>
+            ))}
+          </div>
+        )}
 
         {mode === 'quality' ? (
           <QualityBody selected={selected} onToggle={toggle} freeText={freeText} onFreeText={setFreeText} />
