@@ -46,7 +46,6 @@ beforeEach(() => {
     ad_daily_insights: { data: [
       { ad_account_id: 'act_1', insight_date: '2026-11-04', spend: '50.00', results: 3, fetched_at: '2026-11-11T00:00:00Z' },
       { ad_account_id: 'act_1', insight_date: '2026-11-05', spend: 12.345, results: 2, fetched_at: '2026-11-12T00:00:00Z' },
-      { ad_account_id: 'act_1', insight_date: '2026-11-10', spend: 0, results: 0, fetched_at: '2026-11-12T00:00:00Z' },
     ] },
     content_posts: { count: 4 },
   }
@@ -75,7 +74,7 @@ describe('loadPromoFacts — 正常读取', () => {
     expect(f.gate.accounts).toEqual([{ ad_account_id: 'act_1', currency: 'AUD', daily_cap_cents: 10000, owned_by_client: true }])
     expect(f.gate.config).toMatchObject({ daily_budget_cap_cents: 20000, primary_result: 'leads' })
     expect(f.gate.config?.creative_pool).toEqual([{ ref: 'vid-1', status: 'approved' }])
-    expect(f.recon.spend_cents_by_account_day).toEqual({ act_1: { '2026-11-04': 5000, '2026-11-05': 1235, '2026-11-10': 0 } })
+    expect(f.recon.spend_cents_by_account_day).toEqual({ act_1: { '2026-11-04': 5000, '2026-11-05': 1235 } })
     expect(f.recon.meta_results).toBe(5)
     expect(f.recon.goal?.current_value).toBe(38)
     expect(f.recon.content_published).toBe(4)
@@ -111,12 +110,34 @@ describe('loadPromoFacts — 读失败一律 null / 不放行', () => {
     st.results.social_plans = { data: [{ plan_data: { days: [day('2026-11-12'), day('2026-11-13'), day('2026-11-20')] } }] }
     expect((await loadPromoFacts('client-1', baseSpec(), [], NOW)).gate.daily_plan_coverage_days).toBe(2)
   })
-  it('同步中途断了（最后一行远早于窗口末尾）→ 按读不出来，不是缺的天算 0', async () => {
+  it('同步中途断了（最后一次入库早于窗口末尾）→ 按读不出来，不是缺的天算 0', async () => {
     st.results.ad_daily_insights = { data: [
-      { ad_account_id: 'act_1', insight_date: '2026-11-04', spend: '50.00', results: 3, fetched_at: '2026-11-12T00:00:00Z' },
-      { ad_account_id: 'act_1', insight_date: '2026-11-05', spend: '50.00', results: 2, fetched_at: '2026-11-12T00:00:00Z' },
+      { ad_account_id: 'act_1', insight_date: '2026-11-04', spend: '50.00', results: 3, fetched_at: '2026-11-08T00:00:00Z' },
+      { ad_account_id: 'act_1', insight_date: '2026-11-05', spend: '50.00', results: 2, fetched_at: '2026-11-08T00:00:00Z' },
     ], error: null }
     expect((await loadPromoFacts('client-1', baseSpec(), [], NOW)).recon.spend_cents_by_account_day).toBeNull()
+  })
+  it('同步活着（窗口结束后还入过库）、末尾几天没行 = 真的零花费，不是读不出来', async () => {
+    st.results.ad_daily_insights = { data: [
+      { ad_account_id: 'act_1', insight_date: '2026-11-04', spend: '50.00', results: 3, fetched_at: '2026-11-12T00:00:00Z' },
+    ], error: null }
+    expect((await loadPromoFacts('client-1', baseSpec(), [], NOW)).recon.spend_cents_by_account_day).toEqual({ act_1: { '2026-11-04': 5000 } })
+  })
+  it('后面阶段才用的账户没数据，不拖累前面阶段', async () => {
+    const spec = baseSpec()
+    spec.phases[1].steps = [{ id: 's2', kind: 'ads_campaign', settings: {
+      ad_account_id: 'act_2', daily_budget_cents: 5000, audience_ref: 'a', creative_refs: [], placements: [], paused_ranges: [] } }]
+    expect((await loadPromoFacts('client-1', spec, [], NOW)).recon.spend_cents_by_account_day).not.toBeNull()
+  })
+  it('两个账户都在生效、其中一个断档 → 整体按读不出来', async () => {
+    const spec = baseSpec()
+    spec.phases[0].steps.push({ id: 's2', kind: 'ads_campaign', settings: {
+      ad_account_id: 'act_2', daily_budget_cents: 5000, audience_ref: 'a', creative_refs: [], placements: [], paused_ranges: [] } })
+    st.results.ad_daily_insights = { data: [
+      { ad_account_id: 'act_1', insight_date: '2026-11-04', spend: '50.00', results: 3, fetched_at: '2026-11-12T00:00:00Z' },
+      { ad_account_id: 'act_2', insight_date: '2026-11-04', spend: '50.00', results: 3, fetched_at: '2026-11-05T00:00:00Z' },
+    ], error: null }
+    expect((await loadPromoFacts('client-1', spec, [], NOW)).recon.spend_cents_by_account_day).toBeNull()
   })
   it('入库时间太旧 → 按读不出来', async () => {
     st.results.ad_daily_insights = { data: [

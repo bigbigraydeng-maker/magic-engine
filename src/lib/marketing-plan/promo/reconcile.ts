@@ -117,7 +117,7 @@ function spendRow(spec: PromoSpec, win: { start: string; end: string }, f: Recon
     return { ...base, planned: plannedTotal, actual: null, status: 'unknown', reason: '广告账户时区未确定，不能按天核对花费' }
   }
   if (f.spend_cents_by_account_day === null) {
-    return { ...base, planned: plannedTotal, actual: null, status: 'unknown', reason: '广告花费读不出来' }
+    return { ...base, planned: plannedTotal, actual: null, status: 'unknown', reason: '广告花费读不出来（数据没同步，或这几天账户没有花费记录，请到广告账户确认是不是停了）' }
   }
   if (plannedTotal === 0) {
     return { ...base, planned: 0, actual: null, status: 'unknown', reason: '这个窗口内没有生效的广告步骤（可能在暂停区间或阶段之外）' }

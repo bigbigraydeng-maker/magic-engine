@@ -12,7 +12,7 @@ import { parseCreativePool } from '@/lib/ads-strategy/config'
 import type { AccountCapFacts } from './budget-caps'
 import type { AccountSnapshotFact, GateFacts } from './gates'
 import { resolvePromoPlaybook, type PromoPlaybook } from './playbooks'
-import { addDays, reconcileWindow, type GoalFact, type ReconcileFacts } from './reconcile'
+import { addDays, plannedSpendCents, reconcileWindow, type GoalFact, type ReconcileFacts } from './reconcile'
 import { allAdsSteps, type ManualCheck, type PromoSpec } from './spec'
 
 export interface LoadedPromoFacts {
@@ -134,7 +134,7 @@ interface InsightsRead {
 }
 
 async function loadInsights(
-  clientId: string, accountIds: string[], win: { start: string; end: string }, staleDays: number, now: Date,
+  clientId: string, accountIds: string[], activeAccountIds: string[], win: { start: string; end: string }, staleDays: number, now: Date,
 ): Promise<InsightsRead> {
   if (accountIds.length === 0) return { spend: {}, results: 0, as_of: null }
   const { data, error } = await supabaseAdmin
@@ -151,16 +151,22 @@ async function loadInsights(
   const spend: Record<string, Record<string, number>> = {}
   let results = 0
   let asOf: string | null = null
+  const lastFetchedMs: Record<string, number> = {}
   for (const r of (data ?? []) as { ad_account_id: string; insight_date: string; spend: number | string | null; results: number | null; fetched_at: string | null }[]) {
     const cents = Math.round(Number(r.spend ?? 0) * 100)
     spend[r.ad_account_id] ??= {}
     spend[r.ad_account_id][r.insight_date] = (spend[r.ad_account_id][r.insight_date] ?? 0) + cents
     results += r.results ?? 0
     if (r.fetched_at && (asOf === null || r.fetched_at > asOf)) asOf = r.fetched_at
+    const ms = r.fetched_at ? Date.parse(r.fetched_at) : 0
+    if (ms > (lastFetchedMs[r.ad_account_id] ?? 0)) lastFetchedMs[r.ad_account_id] = ms
   }
-  // 同步中途断了：某个账户最后一行远早于窗口末尾，或整体入库时间过旧 → 缺的天不是 0，是看不清
-  const lastDay = addDays(win.end, -1)
-  const covered = accountIds.every(id => Object.keys(spend[id] ?? {}).some(d => d >= lastDay))
+  // 只检查窗口内计划真正生效的账户（后面阶段才用的账户不该拖累前面阶段）。
+  // 缺的天是"真零花费"还是"同步断了"：Meta 零花费日不返回行，所以看这个账户有没有在窗口结束之后被同步过——
+  // 有（入库时间晚于窗口末尾）说明同步活着，缺的天就是真的 0；没有就证明不了，按看不清。
+  const windowEndMs = Date.parse(`${addDays(win.end, 1)}T00:00:00Z`)
+  const syncedAfterWindow = (id: string) => (lastFetchedMs[id] ?? 0) >= windowEndMs
+  const covered = activeAccountIds.every(id => syncedAfterWindow(id))
   const fresh = asOf !== null && (now.getTime() - Date.parse(asOf)) / 86_400_000 <= staleDays
   if (!covered || !fresh) return { spend: null, results: null, as_of: asOf }
   return { spend, results, as_of: asOf }
@@ -227,7 +233,7 @@ export async function loadPromoFacts(
     loadStrategyConfig(clientId),
     loadDailyPlanCoverage(clientId, today),
     loadGoal(clientId, spec.goal_id),
-    loadInsights(clientId, planAccountIds, win, playbook.factFreshnessDays, now),
+    loadInsights(clientId, planAccountIds, Object.keys(plannedSpendCents(spec, win)), win, playbook.factFreshnessDays, now),
     loadPublishedCount(clientId, win, accountTimezones),
   ])
 
