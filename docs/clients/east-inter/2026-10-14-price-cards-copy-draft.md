@@ -164,3 +164,34 @@ Four costs not included in the sea freight estimate — confirm before booking.
 - 每天哪一张、几点发：沿用 97 号日历（图文 12:00 澳东时间），首评人工补；**现在没有开始日期**。
 - 审查：苏东坡审文案；马良等卡面设计出来再审。logo 和品牌主色仍在向客户要。
 - 客户确认费率可对外用 + 生效日期，是所有卡的前置。
+
+## 英文版（供 108 号广告中英各半测试；只做卡 1、卡 2）
+
+英文只用官网计算器页的英文说法，不另加承诺。卡面角落统一用官网原句：「Indicative estimate. Final charges are subject to a binding quote.」
+
+**卡 1 英文**
+卡面：Guangzhou to Sydney · Sea freight LCL, 1 m³ · **A$378** · Door to door · clearance included · approx. 20 days
+```
+Sea freight LCL from Guangzhou to Sydney, 1 m³: A$378 estimate.
+Door to door, with China and Australia clearance and AQIS inspection included. Approx. 20 days.
+Melbourne is the same price; Brisbane is the same price, approx. 25 days.
+
+Indicative estimate only. Final charges are subject to a binding quote.
+Try the calculator for your own cargo.
+```
+首评：`https://www.eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-pc1en&utm_content=card`
+
+**卡 2 英文**
+卡面：Same 5 m³, which city? · Sydney · Melbourne · Brisbane A$1,238 · Perth A$1,512 · Adelaide A$1,658（卡面小字：From Guangzhou · sea freight LCL · Perth and Adelaide include door delivery）
+```
+Sea freight LCL from Guangzhou, 5 m³, calculator estimates:
+Sydney, Melbourne, Brisbane A$1,238 · Perth A$1,512 · Adelaide A$1,658
+Perth and Adelaide include door delivery (calculator default). Transit times differ by city.
+
+Indicative estimate only. Final charges are subject to a binding quote.
+```
+首评：同卡 1，`utm_campaign=eastinter-pc2en`
+
+## 画面草稿（10-14，供马良审）
+
+7 张 1080×1080 图：`docs/clients/east-inter/cards-draft/`（卡 1 中英、卡 2 中英、D1、D2、D4 的中文版）。用 63 号做的 logo 草稿和 PM 定的三色（深海军蓝 #123B63 / 海洋蓝 #1F7AB8 / 金 #F2A900），只用文字和色块，没有图库图、没有 AI 生成画面，所以没有来源争议。
