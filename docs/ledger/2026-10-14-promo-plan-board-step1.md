@@ -1,8 +1,8 @@
 ---
 id: 2026-10-14-promo-plan-board-step1
 title: 推广计划第一步已写完待合并：批准加固 + 只读推广计划页（10-14）
-status: done
-owner: claude
+status: decided
+owner: agent
 decided_on: 2026-10-14
 source: doc:docs/specs/2026-10-14-promo-plan-board-design-v0.1.md
 verify_by: 2026-10-21
