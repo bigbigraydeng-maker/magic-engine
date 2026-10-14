@@ -1,0 +1,7 @@
+Look Beyond the Panda
+Photo: Daderot
+Source: https://commons.wikimedia.org/wiki/File:Teahouse_in_Peoples_Park_-_Chengdu,_China_-_DSC05353.jpg
+Licence: https://commons.wikimedia.org/wiki/File:Teahouse_in_Peoples_Park_-_Chengdu,_China_-_DSC05353.jpg ; CC0 ; http://creativecommons.org/publicdomain/zero/1.0/deed.en
+Changes: 16:9 crop, uniform dark gradient, typography and CTS brand overlay; no scene generation.
+
+
