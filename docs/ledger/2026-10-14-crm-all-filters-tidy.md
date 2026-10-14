@@ -1,9 +1,11 @@
 ---
 id: 2026-10-14-crm-all-filters-tidy
 title: 全部客人页筛选整理：先选看谁（全部/终端客户/同行），智能开关靠右，阶段筛选放到下一行
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-14
+done_on: 2026-10-14
+done_ref: pr:2653
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 打开全部客人，搜索框下第一行是 全部 / 终端客户 / 同行 切换，智能开关在这一行最右；阶段按钮在第二行
