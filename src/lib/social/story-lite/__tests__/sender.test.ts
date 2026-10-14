@@ -268,6 +268,20 @@ describe('runStorySweep — pre-send checks', () => {
     expect(deps.publish).not.toHaveBeenCalled()
   })
 
+  it('a video that is not acceptable is BLOCKED for good and never sent', async () => {
+    const store = new InMemoryLiteStore()
+    await seedAuthorizedPack(store)
+    const deps = makeDeps(store, { checkFile: vi.fn(async () => 'BAD_VIDEO' as const) }, LIVE)
+
+    const summary = await runStorySweep(deps)
+
+    expect(summary.records[0].outcome).toBe('BLOCKED')
+    expect(summary.records[0].reason_code).toBe('VIDEO_NOT_ACCEPTABLE')
+    const items = await store.getItems(PACK, CLIENT)
+    expect(items[0].status).toBe('BLOCKED')
+    expect(deps.publish).not.toHaveBeenCalled()
+  })
+
   it('treats a throwing checkFile as UNREACHABLE', async () => {
     const store = new InMemoryLiteStore()
     await seedAuthorizedPack(store)

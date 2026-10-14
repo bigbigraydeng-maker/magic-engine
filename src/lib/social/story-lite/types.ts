@@ -114,3 +114,6 @@ export interface LiteSwitches {
 export function isLiveFor(switches: LiteSwitches, clientId: string): boolean {
   return switches.live && switches.clientIds.includes(clientId.trim().toLowerCase())
 }
+
+/** Result of the pre-send check of a story file. BAD_VIDEO: a video that is not the right length / shape / size. */
+export type LiteFileCheck = 'OK' | 'CHANGED' | 'UNREACHABLE' | 'BAD_VIDEO'
