@@ -1,8 +1,8 @@
 # East Inter 报价驱动的视频设计（8 个创意）· 97 号统筹出，2026-10-14
 
 - **性质**：只是创意设计文档，没建工单、没发布、没改库。风险级 C。
-- **数字来源**：官网 www.eastinter.com.au 价格计算器（页面标 **October 2026 rates**，澳元），我 10-14 在真实页面上只读试算，没提交任何表单。
-- **硬规则**：①视频里的数字只能用下表，不许估；②每条画面角落写「2026年10月费率·估价仅供参考，以正式报价为准」（官网原话的意思）；③**客户确认这些费率可对外用之前，一条都不能发**；④费率每月会变，10 月底后要重新核。
+- **数字来源**：官网 www.eastinter.com.au 价格计算器（澳元），我 10-14 在真实页面上只读试算，没提交任何表单。**10-14 下午 63 号把页面标签从「October 2026 rates」改成中性的「CURRENT RATES」（东际没给生效日期，也没确认新报价可对外公开）；我重新试算，悉尼 / 墨尔本 / 布里斯班 / 珀斯 / 阿德莱德 / 黄金海岸 1、5、10 立方米，以及空运小包、海运小包、空运大货，数字与下表完全一致。**
+- **硬规则**：①视频里的数字只能用下表，不许估；②每条画面角落写「当前报价·估价仅供参考，以正式报价为准」（官网原话的意思；不再写「2026年10月」，页面标签已改）；③**客户确认这些费率可对外用之前，一条都不能发**；④费率会变，成片前必须重新核；东际没给生效日期，所以视频里不写月份。
 - **视频一律走视频工厂**，苏东坡（内容）+ 马良（画面）审，成片真播放确认有声音。物流行业爆款配方库是 0 条，配方对账表里「真人出镜 / 航拍」两列满足不了，诚实标缺口；这批用「真实网页录屏 + 大字」的 UGC 风格，最贴近配方里「真实粗糙感」那一列。
 
 ## 1. 计算器实测数字（起运地只有广州；LCL = 海运拼箱，门到门，含清关）
@@ -43,10 +43,27 @@
 | **V2** | 「同样 5 立方米，送到哪个城市最便宜？」 | 六个城市逐个切换，数字在屏幕上排队，最后按价格排序；悉尼、墨尔本、布里斯班 A$1,238，阿德莱德 A$1,658 | 20–25s | 对比型，观众会代入自己的城市 | 表 A |
 | **V3** | 「货越多，每立方米越便宜？」 | 悉尼 1/2/5/10/20 立方米的总价依次出现，旁边写单价；结尾「约便宜 42%」 | 20s | 让有大货量的人主动来问 | 表 A + 我算的 |
 | **V4** | 「寄 2 公斤，一周到？」→ **A$33** | 空运小包 2 kg A$33、7–12 天；对照海运小包 25 kg A$75、30–40 天 | 15s | 小件寄送的人群最多，价格一眼看懂 | 表 B |
-| **V5** | 「50 公斤空运，含税到门？」→ **A$550** | 空运大货 DDP，6–8 天，「到货无额外费用」 | 15–20s | 做生意的人最怕到货加费，这条直接打这个点 | 表 B |
+| **V5** | 「50 公斤空运，含税到门？」→ **A$550** | 空运大货 DDP，6–8 天；页面原话：澳洲关税和税费已含在这个价里（DDP）。**不写「到货无额外费用」**：页面同时写了偏远邮编、超大超重和部分商品附加费可能适用，要写进画面小字 | 15–20s | 做生意的人最怕到货加费，这条直接打这个点 | 表 B |
 | **V6** | 「报价里没算的 4 笔钱，你知道吗？」 | 逐条出现：GST、关税、熏蒸、报关行费，最后「先问清楚，不踩坑」 | 20s | 透明感，建立信任；看完会想来确认自己的货要不要付 | 表 C |
 | **V7** | 「想估价？30 秒教你」 | 官网计算器三步：选服务、选城市、填体积；结尾一句英文 | 30s | 日历 D7 的升级版，教会观众自己试，试完想问 | 表 A |
 | **V8** | 「周二截货，下周一开船」 | 一周时间线：周二截货 → 下周一开船 → 约 20 天到悉尼 | 15s | 时间感，催促「这周要不要发」 | 表 C + 表 A |
+
+## 2.5 英文版画面文字（成片用这版；中文稿搁置）
+
+通用角标（每条都带，以 101 号过审的为准）：`Current rates · Indicative estimate. Final charges are subject to a binding quote.`
+
+| # | First-frame hook (large text) | On-screen lines (short) |
+|---|---|---|
+| V1 | How much to ship 1 m³ from Guangzhou to Sydney? → **A$378** | Door to door · Clearance included · Approx. 20 days |
+| V2 | Same 5 m³. Which Australian city costs least? | Sydney, Melbourne, Brisbane A$1,238 · Perth A$1,512 · Adelaide A$1,658 · Gold Coast A$1,513 |
+| V3 | Ship more, pay less per m³? | 1 m³ A$378 → 20 m³ about A$220 per m³ (calculated from the estimator) |
+| V4 | Sending 2 kg from China? → **A$33** | Air parcel 7–12 days · Sea parcel 25 kg A$75, 30–40 days |
+| V5 | 50 kg by air, duties and taxes included? → **A$550** | DDP · Approx. 6–8 days · Remote-postcode, oversize and some product surcharges may apply |
+| V6 | 4 costs not in your freight quote | GST on goods value · Import duty 0–10% · Fumigation A$143 · Customs broker fee A$99 (A$201 if cargo over A$10,000) |
+| V7 | Get a freight estimate in 30 seconds | Choose service · Choose city · Enter volume |
+| V8 | When does my cargo ship? | Cargo cut-off Tuesday · Vessel departs the following Monday · Approx. 20 days to Sydney（运营信息，不是限时促销，不写 last chance / hurry） |
+
+首评英文模板（不烧进画面）：`Get your own estimate: https://www.eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-<day>` · `Binding quote: info@eastinter.com.au`。拼写用澳新英文。
 
 ## 3. 建议的出片顺序（对应周五开投）
 
@@ -58,9 +75,10 @@
 
 ## 4. 风险和没核实的
 
-- **客户是否同意把 October 2026 费率公开**：没确认，这批视频全部卡在这一条。
-- 费率只有 10 月；11 月起要重新核，视频里写死「2026年10月费率」。
+- **客户是否同意把当前报价公开**：没确认（东际没给生效日期），这批视频全部卡在这一条。
+- 费率只有 10 月；11 月起要重新核，视频里不写月份，只写「当前报价」。
 - 我试算时页面给的 Perth 时效是「25–30 天」，第一次读时一度为空，**成片前要再录一遍确认**。
 - 「搬家」「华人」之类受众说法只在中文旧站，**官网没有，视频里不写**。
+- **语言（PM 10-14 拍板）：画面文字、字幕、旁白、首评、帖子文案 100% 英文，面向澳洲本地买家**；下表钩子的中文是内部说明，成片里一律用下面的英文版。
 - 澳洲对价格广告有「说清楚条件」的消费者法要求：「起」「约」「估价」要写清；**本文档没有做法律审核，A 级以上外发前要有人看**。
 - 本窗口没做配方对账表，由出片窗口（101 号）在工厂流程里做。
