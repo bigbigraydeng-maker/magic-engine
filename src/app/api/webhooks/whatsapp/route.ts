@@ -28,6 +28,12 @@
  * Routing an inbound message to a client_id goes through
  * `clients.whatsapp_phone_number_id` (20260902000001) — never a hardcoded
  * client_id here.
+ *
+ * Inbound is classified (`lib/whatsapp/inbound-classify.ts`): customer messages
+ * → storeMessage (unchanged); staff-phone echoes → storeEcho (outbound message,
+ * no opt-out check, no event, never moves the customer clock); failed delivery
+ * statuses → applyFailedStatus; history → refused with 503 until the history
+ * inbox ships (it is delivered once, so it must not be acknowledged).
  */
 
 import { createHmac, timingSafeEqual } from 'crypto'
@@ -54,6 +60,13 @@ import {
   extractWebhookPhoneNumberIds,
   chooseWebhookSecret,
 } from '@/lib/whatsapp/app-secret'
+import {
+  classifyInboundChanges,
+  type WhatsAppInboundMessage,
+  type WhatsAppMedia,
+  type WhatsAppReferral,
+} from '@/lib/whatsapp/inbound-classify'
+import { storeEcho, applyFailedStatus } from '@/lib/whatsapp/inbound-handlers'
 
 export const dynamic = 'force-dynamic'
 
@@ -113,51 +126,6 @@ function isValidSignature(rawBody: string, signatureHeader: string | null, appSe
 // ---------------------------------------------------------------------------
 // Meta's documented Cloud API webhook payload.
 // ---------------------------------------------------------------------------
-
-/** The ad/CTA click that started a thread. Present on the FIRST inbound message
- *  only — no read API returns it later, so it is captured on sight. */
-interface WhatsAppReferral {
-  source_url?: string
-  source_id?: string
-  source_type?: string
-  headline?: string
-  body?: string
-  ctwa_clid?: string
-}
-
-interface WhatsAppMedia {
-  id?: string
-  mime_type?: string
-  sha256?: string
-  caption?: string
-  filename?: string
-}
-
-interface WhatsAppInboundMessage {
-  id?: string
-  from?: string
-  timestamp?: string
-  type?: string
-  text?: { body?: string }
-  referral?: WhatsAppReferral
-  image?: WhatsAppMedia
-  video?: WhatsAppMedia
-  audio?: WhatsAppMedia
-  document?: WhatsAppMedia
-  sticker?: WhatsAppMedia
-}
-
-interface WhatsAppWebhookPayload {
-  entry?: Array<{
-    changes?: Array<{
-      value?: {
-        metadata?: { phone_number_id?: string }
-        contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>
-        messages?: WhatsAppInboundMessage[]
-      }
-    }>
-  }>
-}
 
 /** Media attached to a message, if any — kept so the Meta media id survives.
  *  Meta deletes the underlying file after ~30 days; losing the id loses the
@@ -501,6 +469,52 @@ async function storeMessage(
   }
 }
 
+/**
+ * Resolve the client for a phone_number_id, then run `fn` with it. Keeps the
+ * three "resolve then handle" branches in POST identical and short.
+ *
+ * Returns true when the change was handled (or was genuinely not applicable),
+ * false when it produced a failure entry. `failures` is appended to in place.
+ */
+async function withClient(
+  phoneNumberId: string,
+  count: number,
+  what: string,
+  failures: string[],
+  fn: (clientId: string) => Promise<void>,
+): Promise<void> {
+  const lookup = await resolveClientId(phoneNumberId)
+  if (!lookup.ok) {
+    if (lookup.kind === 'lookup_failed') {
+      // Our fault, not Meta's: ask for redelivery rather than swallow it.
+      console.error(
+        `[webhooks/whatsapp] client lookup FAILED for phone_number_id=${phoneNumberId} ` +
+          `— this is a lookup error, not an unmapped number: ${lookup.message}`,
+      )
+      failures.push(`lookup_failed:${phoneNumberId}`)
+    } else {
+      // Genuinely nobody owns this number. Retrying will not help, so this
+      // must not hold up the delivery — but it is a real configuration hole
+      // AND a real customer message being lost.
+      //
+      // TODO(#1331): this currently dead-ends in a log line, which 铁律 3
+      // 下半 forbids. It needs to reach 「🙋 需要你动手」 via
+      // lib/pm-todo/manual-items.ts. Deferred out of this PR because the
+      // signal has nowhere to persist yet — by definition we do not know
+      // which client to attach it to, so it needs its own store. Both
+      // reviewers agreed this is a follow-up, not a merge blocker, since
+      // the alternative (503 forever) would take the whole subscription
+      // down over one client's misconfiguration.
+      console.error(
+        `[webhooks/whatsapp] no client mapped to phone_number_id=${phoneNumberId} ` +
+          `— ${count} ${what} dropped. Set clients.whatsapp_phone_number_id.`,
+      )
+    }
+    return
+  }
+  await fn(lookup.clientId)
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // The phone_number_id list is read from the UNVERIFIED body only to decide
   // WHICH secret verifies it — nothing is processed unless that secret's
@@ -555,66 +569,91 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
-  let payload: WhatsAppWebhookPayload
+  let payload: unknown
   try {
     payload = JSON.parse(rawBody)
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Every message is attempted independently: one bad message must not discard
-  // the others in the same delivery. `failed` decides the status code below.
+  // Every change is attempted independently: one bad change must not discard
+  // the others in the same delivery. `failures` decides the status code below.
   let stored = 0
   const failures: string[] = []
 
-  for (const entry of payload.entry ?? []) {
-    for (const change of entry.changes ?? []) {
-      const value = change.value
-      const phoneNumberId = value?.metadata?.phone_number_id
-      const messages = value?.messages ?? []
-      // Status callbacks (delivered/read) and other change types have no
-      // `messages` array — not an error, just nothing to store.
-      if (!phoneNumberId || messages.length === 0) continue
-
-      const lookup = await resolveClientId(phoneNumberId)
-      if (!lookup.ok) {
-        if (lookup.kind === 'lookup_failed') {
-          // Our fault, not Meta's: ask for redelivery rather than swallow it.
-          console.error(
-            `[webhooks/whatsapp] client lookup FAILED for phone_number_id=${phoneNumberId} ` +
-              `— this is a lookup error, not an unmapped number: ${lookup.message}`,
-          )
-          failures.push(`lookup_failed:${phoneNumberId}`)
-        } else {
-          // Genuinely nobody owns this number. Retrying will not help, so this
-          // must not hold up the delivery — but it is a real configuration hole
-          // AND a real customer message being lost.
-          //
-          // TODO(#1331): this currently dead-ends in a log line, which 铁律 3
-          // 下半 forbids. It needs to reach 「🙋 需要你动手」 via
-          // lib/pm-todo/manual-items.ts. Deferred out of this PR because the
-          // signal has nowhere to persist yet — by definition we do not know
-          // which client to attach it to, so it needs its own store. Both
-          // reviewers agreed this is a follow-up, not a merge blocker, since
-          // the alternative (503 forever) would take the whole subscription
-          // down over one client's misconfiguration.
-          console.error(
-            `[webhooks/whatsapp] no client mapped to phone_number_id=${phoneNumberId} ` +
-              `— ${messages.length} message(s) dropped. Set clients.whatsapp_phone_number_id.`,
-          )
-        }
-        continue
+  for (const change of classifyInboundChanges(payload)) {
+    switch (change.kind) {
+      case 'customer_messages': {
+        await withClient(change.phoneNumberId, change.messages.length, 'message(s)', failures, async (clientId) => {
+          for (const msg of change.messages) {
+            try {
+              await storeMessage(clientId, msg, change.contactName)
+              stored++
+            } catch (err) {
+              console.error(`[webhooks/whatsapp] failed to store message ${msg.id}:`, err)
+              failures.push(`store_failed:${msg.id ?? 'unknown'}`)
+            }
+          }
+        })
+        break
       }
 
-      const contactName = value?.contacts?.[0]?.profile?.name
-      for (const msg of messages) {
-        try {
-          await storeMessage(lookup.clientId, msg, contactName)
-          stored++
-        } catch (err) {
-          console.error(`[webhooks/whatsapp] failed to store message ${msg.id}:`, err)
-          failures.push(`store_failed:${msg.id ?? 'unknown'}`)
-        }
+      case 'echoes': {
+        await withClient(change.phoneNumberId, change.echoes.length, 'staff-phone echo(es)', failures, async (clientId) => {
+          for (const echo of change.echoes) {
+            try {
+              const result = await storeEcho(
+                clientId,
+                { phoneNumberId: change.phoneNumberId, displayNumber: change.displayNumber },
+                echo,
+              )
+              if (result === 'stored') stored++
+            } catch {
+              console.error('[webhooks/whatsapp] echo store failed')
+              failures.push('echo_failed')
+            }
+          }
+        })
+        break
+      }
+
+      case 'statuses': {
+        // Only failures are reconciled; sent/delivered/read receipts must not cost a
+        // client lookup (a lookup error would otherwise 503 a harmless receipt).
+        const failed = change.statuses.filter((s) => s.status === 'failed')
+        if (failed.length === 0) break
+        await withClient(change.phoneNumberId, failed.length, 'failed-delivery receipt(s)', failures, async (clientId) => {
+          for (const status of failed) {
+            try {
+              await applyFailedStatus(clientId, status)
+            } catch {
+              console.error('[webhooks/whatsapp] status update failed')
+              failures.push('status_failed')
+            }
+          }
+        })
+        break
+      }
+
+      case 'history': {
+        // Meta delivers history exactly once, so a 200 here would lose it for
+        // good. Refuse until the history inbox ships.
+        console.error(
+          '[webhooks/whatsapp] history delivery received but history intake is not enabled yet — refusing so Meta redelivers',
+        )
+        failures.push('history_not_enabled')
+        break
+      }
+
+      case 'malformed': {
+        console.error(
+          `[webhooks/whatsapp] malformed change ignored (field=${change.field}, reason=${change.reason})`,
+        )
+        break
+      }
+
+      case 'ignored': {
+        break
       }
     }
   }
