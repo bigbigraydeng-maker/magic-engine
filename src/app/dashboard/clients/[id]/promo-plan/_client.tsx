@@ -17,7 +17,9 @@ import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { PlanOverview } from './_components/PlanOverview'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
+import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
+import { PromoSpecForm } from './_components/PromoSpecForm'
 
 const hasPromo = (p: MarketingPlan) => !!(p.plan_data as unknown as { promo?: unknown })?.promo
 
@@ -35,6 +37,7 @@ export function PromoPlanClient() {
   const [plans, setPlans] = useState<MarketingPlan[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [board, setBoard] = useState<PromoBoard | null>(null)
+  const [options, setOptions] = useState<PromoOptions | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -53,9 +56,10 @@ export function PromoPlanClient() {
 
   const loadBoard = useCallback(async (planId: string) => {
     const res = await fetch(`${base}/${planId}/promo`)
-    const json = await res.json() as { success: boolean; board?: PromoBoard; error?: string }
+    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; error?: string }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
+    setOptions(json.options ?? null)
   }, [base])
 
   const refresh = useCallback(async (keepId?: string | null) => {
@@ -196,7 +200,13 @@ export function PromoPlanClient() {
             </div>
 
             {selected.status === 'draft' && (
-              <PromoSpecEditor key={selected.id + String(board.has_promo)} clientId={clientId} plan={selected} onSaved={() => void refresh(selected.id)} />
+              <>
+                <PromoSpecForm key={selected.id + String(board.has_promo)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
+                <details className="rounded-xl border border-gray-200 bg-white">
+                  <summary className="px-4 py-3 text-xs text-gray-500 cursor-pointer">高级：直接改结构文本（只给技术同事用）</summary>
+                  <PromoSpecEditor key={selected.id + String(board.has_promo)} clientId={clientId} plan={selected} onSaved={() => void refresh(selected.id)} />
+                </details>
+              </>
             )}
           </>
         )}

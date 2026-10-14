@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
   access: vi.fn(),
   loadGoal: vi.fn(),
   loadPromoFacts: vi.fn(),
+  loadOptions: vi.fn(),
   dispatch: vi.fn(),
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
@@ -22,6 +23,7 @@ vi.mock('@/lib/marketing-plan/promo/facts', async () => {
   const actual = await vi.importActual<typeof import('@/lib/marketing-plan/promo/facts')>('@/lib/marketing-plan/promo/facts')
   return { ...actual, loadGoal: m.loadGoal, loadPromoFacts: m.loadPromoFacts }
 })
+vi.mock('@/lib/marketing-plan/promo/options', () => ({ loadPromoOptions: m.loadOptions }))
 vi.mock('@/lib/supabase', () => {
   const chain = (): Record<string, unknown> => {
     const c: Record<string, unknown> = {}
@@ -60,6 +62,7 @@ beforeEach(() => {
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.loadGoal.mockResolvedValue({ status: 'active' })
   m.loadPromoFacts.mockResolvedValue(loadedFacts())
+  m.loadOptions.mockResolvedValue({ goals: [{ id: 'g1', title: '目标一', period_start: '2026-11-01', period_end: '2026-12-31' }], accounts: [{ id: 'act_1', cap_cents: null }] })
   m.dispatch.mockResolvedValue({ marketing_plan_id: 'plan-1', tasks_created: 0, tasks_skipped: 0, task_ids: [], packages_created: 0, package_ids: [] })
   m.plan = planWith(undefined)
 })
@@ -122,6 +125,11 @@ describe('GET promo — 一页纸', () => {
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
     expect(json.board.has_promo).toBe(false)
     expect(m.loadPromoFacts).not.toHaveBeenCalled()
+  })
+  it('同时返回填表用的选项，并且只按路径里的客户去读', async () => {
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.options.goals[0].id).toBe('g1')
+    expect(m.loadOptions).toHaveBeenCalledWith('client-1')
   })
   it('畸形 promo：spec_valid=false 且带问题，不放行', async () => {
     m.plan = planWith({ schema: 'promo_v1' })
