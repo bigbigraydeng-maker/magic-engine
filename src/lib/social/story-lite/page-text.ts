@@ -140,3 +140,26 @@ export function thumbnailUrl(url: string): string {
   if (at < 0 || url.includes('?')) return url
   return `${url.slice(0, at)}/storage/v1/render/image/public/${url.slice(at + marker.length)}?width=180&height=320&resize=cover&quality=60`
 }
+
+/** New Zealand calendar date of an instant, "2026-10-14"; unreadable input comes back as "" (never invented). */
+export function nzDateKey(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('en-CA', { timeZone: NZ_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+}
+
+/** "10月14日 周三" for a "YYYY-MM-DD" New Zealand date key. */
+export function describeNzDay(dateKey: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey)
+  if (!match) return dateKey
+  const noon = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12))
+  const weekday = new Intl.DateTimeFormat('zh-CN', { timeZone: 'UTC', weekday: 'short' }).format(noon)
+  return `${Number(match[2])}月${Number(match[3])}日 ${weekday}`
+}
+
+/** "08:30" in New Zealand time; unreadable input is shown as-is. */
+export function formatClock(iso: string): string {
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: NZ_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)
+}
