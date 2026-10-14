@@ -2,6 +2,6 @@
  * Both IDs must come from the PM; do not guess or reuse another client's IDs.
  */
 window.EastInterTracking = {
-  metaPixelId: null,        // Meta Pixel / dataset ID for East Inter, digits only
+  metaPixelId: '2901017560298130',  // East Inter Pixel (dataset), linked to the East AUD ad account; ID supplied by coordinator window 18 on 2026-10-14
   ga4MeasurementId: null    // Google Analytics 4 measurement ID, looks like G-XXXXXXXXXX
 };

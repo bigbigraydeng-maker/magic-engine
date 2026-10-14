@@ -3,12 +3,12 @@
 范围只有两样：①追踪（Meta 像素 + GA4）②/privacy 页。官网在独立仓库 `bigbigraydeng-maker/east-inter-demo`，本目录是可直接放进去的成品文件；**没有部署，合并本 PR 不会改官网**。
 
 ## 要 PM 提供的东西（不得自拟）
-1. **Meta 像素（数据集）编号**：East Inter 自己的，纯数字，在 East 广告户 / 商务管理平台的「数据集」里建或取。
+1. ~~Meta 像素编号~~：已有，`2901017560298130`（East Inter Pixel，已连 East 澳币广告户，统筹 18 号 10-14 提供），已填进 `tracking-config.js`。代码里 `fbq('init', id)` 不传任何用户信息；Meta 后台的「自动高级匹配」开关必须保持关闭（这是数据集设置，不在代码里，需在 Events Manager 里确认）。
 2. **GA4 衡量编号**：形如 `G-XXXXXXXXXX`，需要为 eastinter.com.au 建一个 GA4 媒体资源。
 3. **隐私页主体名称**：目前页面只写「East Inter International Logistics」（与官网页脚一致）；如要写澳洲公司全名或 ABN，请给。
 4. **隐私页要不要请人看一眼法律措辞**（建议开投前看，页面把数据去向写成了 China + Google/Meta 海外处理）。
 
-两个编号没填之前，追踪代码什么都不加载、什么都不发（已测）。
+GA4 编号仍为空：没填前 GA4 那一块不加载；Meta 已填，合并并发布后即开始记事件。
 
 ## 文件 → 官网仓库
 - `tracking-config.js`（新）填两个编号；`tracking.js`（新）；`privacy.html`（新）
