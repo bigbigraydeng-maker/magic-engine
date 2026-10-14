@@ -44,13 +44,13 @@ source: PM 2026-10-10「Magic Engine 应该具备让用户的 WhatsApp Business 
 ## 4. 目标设计（B 路线）
 
 ### 4.1 客户看到的流程
-设置页 →「连接 WhatsApp Business」→ Meta 弹窗（Embedded Signup）选企业、选号、选「并存（手机照常用）」或「迁到接口」→ 弹窗关闭 → 页面立刻显示「已连接：号码 + 状态 + 最近一次收到消息的时间」→ 出问题显示一句人话 + 一个「重新连接」按钮。
+设置页 →「连接 WhatsApp Business」→ Meta 弹窗（Embedded Signup）选企业、选号、选「并存（手机照常用）」或「迁到接口」→ 弹窗关闭 → 页面先显示「开通中」（授权已保存，正在订阅推送）→ 仅当 §4.2(3) 第③步机器回执成功后才切为「已连接：号码 + 状态 + 最近一次收到消息的时间」→ 订阅步骤重试中显示「开通中」，最终失败显示「开通失败」一句人话 + 「重试」按钮，绝不显示成功；之后出问题显示一句人话 + 一个「重新连接」按钮。状态集：provisioning / connected / error / disconnecting / disconnected。
 
 ### 4.2 后端分段（每段对应一个独立 PR）
 1. **连接入口**：新路由 `api/auth/whatsapp/connect`（发签名 state）和 `callback`（收弹窗回传的授权码 + 企业账户 ID + 号码 ID，换令牌，加密存 `platform_oauth_connections`，provider=`whatsapp`）。沿用 `meta-oauth/client.ts` 的签名 state 与 `requireDashboardClientAccess`。**落库前必须从 Graph 端校验（fail closed）**：签名 state 与权限检查只证明操作者能访问某个 ME 客户，不证明弹窗回传的 `waba_id` / `phone_number_id` 属于换回的令牌。回调先用换到的令牌向 Graph 查实际授权的企业账户与其下号码，以及实际授予的权限范围（须含 `whatsapp_business_messaging` / `whatsapp_business_management`）；回传的 ID 与 Graph 结果不匹配、或权限不足，一律不写库、不写路由表，并记机器回执。做法对齐 Facebook 回调「先枚举令牌实际授权的 Page、只绑匹配项」（`src/app/api/auth/facebook/callback/route.ts:80-115`）。
-2. **按号路由表**（新表，窄）：`phone_number_id`（唯一）→ `client_id`、`waba_id`、`mode`（coexistence / cloud）、`status`、`webhook_subscribed_at`、`history_sync_state`。令牌不放这里，放 `platform_oauth_connections`，避免两处存凭据。**每行必须带 `connection_id`（外键指向经 Graph 校验的那条 `platform_oauth_connections`）**：该表允许同一客户/provider 多行，而 `getValidToken(clientId, provider)` 只取最新一行，两个号由不同 Meta 主体授权时旧号会拿到新号的令牌。发送与健康检查一律经 `getValidTokenForConnection(connection_id)` 精确取令牌，不用按客户+provider 的取法。`clients.whatsapp_phone_number_id` 保留为读兜底，迁完再退役。**这张表要走 RLS 的 service-role 模板（`TO service_role`），A 级改库，合并前问 PM。**
-3. **开户后三件事（不放在授权回调里，走 Inngest 分步工作流）**：回调只做一件事——存下授权，并投递一个幂等事件（如 `whatsapp.connection.authorized`，以企业账户+号码为幂等键）。随后由工作流分三步各自记机器回执（request id、client id、状态、是否重试、created_at）：①把我们的应用订阅到这个企业账户的消息推送；②并存号触发历史同步；③写「已连接」回执。每步可单独重试，不会因回调超时而重复触发或丢失；历史只推一次，所以②必须以①成功回执为前提且只允许成功一次。**必须先把「历史/回声」的处理代码上线，再放客户开户**——历史只推一次，错过拿不回（9-29 方案已写）。
-4. **收信改造**：入口三分类——客人新消息 / 员工手机回声（记成「我方发出」，不判退订、不改客人最后说话时间）/ 历史同步（不建人、不写触点、不发事件，先进「待认领」）；再加送达状态回调。验签密钥改用技术服务商应用的密钥；路由改查 §4.2 第 2 条那张表。号码没人认领时，下发人工待办（三件套：what/how/href），不再只写日志（还 #1331 的债）。
+2. **按号路由表**（新表，窄）：`phone_number_id`（唯一）→ `client_id`、`waba_id`、`mode`（coexistence / cloud）、`status`、`webhook_subscribed_at`、`history_sync_state`。令牌不放这里，放 `platform_oauth_connections`，避免两处存凭据。**每行必须带 `connection_id`（外键指向经 Graph 校验的那条 `platform_oauth_connections`）**：该表允许同一客户/provider 多行，而 `getValidToken(clientId, provider)` 只取最新一行，两个号由不同 Meta 主体授权时旧号会拿到新号的令牌。发送与健康检查一律经 `getValidTokenForConnection(connection_id)` 精确取令牌，不用按客户+provider 的取法。`clients.whatsapp_phone_number_id` 保留为读兜底，迁完再退役。**租户一致性由数据库保证**：先在 `platform_oauth_connections` 上保证 `UNIQUE(id, client_id)`（`20260920064556_meta_ads_ai_read_grants.sql` 已有同类做法，若该表尚无则同 PR 补），路由表用 `(connection_id, client_id)` 组合外键引用它，使号码与凭据不可能属于不同客户；写入路径禁止用普通 upsert 静默改换 `client_id` / `connection_id`（冲突时报错并下发人工待办），§5 的手工过渡行同样受此约束。**这张表要走 RLS 的 service-role 模板（`TO service_role`），A 级改库，合并前问 PM。**
+3. **开户后三件事（不放在授权回调里，走 Inngest 分步工作流）**：回调只做一件事——存下授权，并投递一个幂等事件（如 `whatsapp.connection.authorized`，以企业账户+号码为幂等键）。随后由工作流分三步各自记机器回执（request id、client id、状态、是否重试、created_at）：①把我们的应用订阅到这个企业账户的消息推送；②并存号触发历史同步；③写「已连接」回执（页面据此才显示已连接）。企业账户的消息推送订阅是 **WABA 级共享资源**：同一企业账户下多个号码共用，订阅步骤须幂等。每步可单独重试，不会因回调超时而重复触发或丢失；历史只推一次，所以②必须以①成功回执为前提且只允许成功一次。**必须先把「历史/回声」的处理代码上线，再放客户开户**——历史只推一次，错过拿不回（9-29 方案已写）。
+4. **收信改造**：先持久化再处理——验签通过后，先把原始包与幂等回执（payload 哈希、request id、收到时间、状态）可靠落库并立即回 200，再由 Inngest 异步、可续跑地逐条拆分处理（逐条幂等，单条失败只重试该条，不再对整包返回 503 导致整批重放；历史只推一次，不能依赖对方重试补取）。入口三分类——客人新消息 / 员工手机回声（记成「我方发出」，不判退订、不改客人最后说话时间）/ 历史同步（不建人、不写触点、不发事件，先进「待认领」）；再加送达状态回调。验签密钥改用技术服务商应用的密钥；路由改查 §4.2 第 2 条那张表。号码没人认领时，下发人工待办（三件套：what/how/href），不再只写日志（还 #1331 的债）。
 4b. **回声作废待发草稿**：并存模式下客人消息可能已生成等待审批（最多四小时）的 AI 草稿；员工从手机回复（回声）落库为我方发出时，必须同时把该会话中、由更早客人消息触发的 pending/approved 草稿置为失效（记回执）。发送阶段（`conversation-inbound-draft.ts` 发送前复查，现仅查退订、渠道开关、窗口）另加一条：触发消息之后若已有任何我方出站消息，则不发、草稿置失效，避免稍后批准造成重复答复。
 5. **发信改造**：`sendWhatsApp` 改成按号取凭据（不再读全局环境变量，也不再要求等于某一个号）；`isConnected` 看真实授权状态；超 24 小时走模板消息（模板的创建/列表/状态用官方接口，做成设置页里一个小列表，**模板只许人手逐条发，不许自动群发**）。
 6. **健康监控与自愈提示**：接入 `connection-health`——令牌失效 / 号码被封 / 推送订阅被撤，都变成「今日待办」里的一条人话。判据靠**主动检查**（定时查令牌、号码状态、推送订阅是否还在），不用「多久没收到消息」当断线——安静的号码和失效的推送看起来一样，会给低流量客户误报；`connection-health` 对 Meta 的 `staleHours` 本就是 `null`，沿用。最后一条消息时间只作活跃度指标展示。当场试跑见 §8。
@@ -86,7 +86,7 @@ source: PM 2026-10-10「Magic Engine 应该具备让用户的 WhatsApp Business 
 2. 默认先存元数据（谁、何时、几次、到哪一步）；对话正文落不落库、落多久、能否送 AI，是**开户前置条件**（见 §4.3），三项未定不对真实客户开户。
 3. 含真实姓名电话的对话送大模型前，先看供应商条款与脱敏要求。
 4. 历史同步是一次性大批量写入：整批入库升 A 级，入库前先有「待认领」闸与验收（号码解析、时间合并规则）。
-5. 令牌加密存储，日志里不许出现令牌；断开连接走**单独的断开工作流**（Inngest）：调 Meta 接口撤销授权并取消该企业账户的推送订阅，两步都拿到回执后才把本地连接置为停用；任一步失败则保持「断开中」可重试并下发人工待办。注意 `lib/meta-oauth/data-deletion.ts` 只是接收 Meta 删除请求的回调、只处理 `meta_ads_read` 本地数据，不会撤权也不会退订，**不能当断开入口**；它另需扩展覆盖新 provider 的本地数据删除。
+5. 令牌加密存储，日志里不许出现令牌；断开连接走**单独的断开工作流**（Inngest）：调 Meta 接口撤销授权；**仅当该企业账户下已没有其它活跃号码时**才取消该企业账户的推送订阅（断开单个号码只停用其路由行与凭据，其余号码继续收信），所需步骤都拿到回执后才把本地连接置为停用；任一步失败则保持「断开中」可重试并下发人工待办。注意 `lib/meta-oauth/data-deletion.ts` 只是接收 Meta 删除请求的回调、只处理 `meta_ads_read` 本地数据，不会撤权也不会退订，**不能当断开入口**；它另需扩展覆盖新 provider 的本地数据删除。
 
 ## 8. 当场试跑方案（先设计，开工前就定好）
 
