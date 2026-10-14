@@ -7,7 +7,7 @@
 
 - 仓库 `bigbigraydeng-maker/east-inter-demo`（GitHub Pages，`CNAME` = `eastinter.com.au`），文件 `eastinter-pricing-calculator.html`，线上 `https://eastinter.com.au/eastinter-pricing-calculator.html`。
 - 线上版（2026-09-20 提交 d60c23a）比 Dropbox 里的原型多了站点页眉和 `?service=&city=&quantity=` 链接参数；本次改动以**线上版**为底。
-- 草稿放在 `docs/clients/east-inter/calculator-2026-10/`（本仓库）。**已部署**到 east-inter-demo 仓库（外部部署提交 `65b2fdd`）并上线，以台账为准。
+- 草稿放在 `docs/clients/east-inter/calculator-2026-10/`（本仓库）。**已部署**到 east-inter-demo 仓库并上线：首发提交 `65b2fdd`（10-10），按报价表修正税费口径、500kg/立方规则后为 `b2be46f`，补空运大件 50/51kg 分档后为 `28a1df1`。
 
 ## 2. 新旧报价差异（只有海运拼箱变了）
 
@@ -73,7 +73,7 @@
 
 - 新增 `pricing-rates.js`（全部价格，RMB 原价 + 汇率 4.9）、`pricing-engine.js`（计算逻辑，不含任何价格数字，原样搬出）。HTML 只删掉内联的价格和计算函数、改为引用这两个文件，页面外观与交互未动；"September 2026" 三处改为 "October 2026"。
 - 下次换报价只改 `pricing-rates.js`（含 `effective` 生效月份，页面标签、页脚、meta description 均从它读取）。
-- **没做**：偏远邮编附加费（RMB3/10/16/KG）——旧计算器本来就没有，计算器按城市选、没有邮编输入，加它要新增输入框，属于改界面，留给 PM 决定；对应测试也因此没写。空运大件 50/51KG 以上的更低档价也没做（旧计算器只用 10KG+ 档）。
+- **没做**：偏远邮编附加费（RMB3/10/16/KG）——旧计算器本来就没有，计算器按城市选、没有邮编输入，加它要新增输入框，属于改界面，留给 PM 决定；页面只给文字提示「偏远邮编/超大件附加费可能另收」；对应测试也因此没写。空运大件 50/51KG 以上的更低档价也没做（旧计算器只用 10KG+ 档）。
 
 ## 7. 测试结果
 
@@ -84,4 +84,11 @@
 
 ## 8. 回滚
 
-线上已部署（提交 `65b2fdd`），回滚目标为部署前的提交 `d60c23a`：把 east-inter-demo 仓库 `eastinter-pricing-calculator.html` 回到提交 `d60c23a`、删掉 `pricing-rates.js` 与 `pricing-engine.js` 即可。
+线上已部署（首发 `65b2fdd`，最新 `28a1df1`），回滚目标为部署前的提交 `d60c23a`：把 east-inter-demo 仓库 `eastinter-pricing-calculator.html` 回到提交 `d60c23a`、删掉 `pricing-rates.js` 与 `pricing-engine.js` 即可。
+
+## 9. 后续追加（2026-10-14，PM「以表格为准，上线修正」）
+
+- 税费口径按两张表区分：含税（DDP）= 价格已含关税和税，不加 15%（15% 预付税是不含税表里「另做 DDP 模式」才有的条款，不属于本计算器的含税渠道）；不含税（DDU）= 收件人自付关税/GST，货值超过 AUD1,000 另有 A$110 清关费。
+- 空运大件加重量分档：含税 10KG+ / 50KG+，不含税 10KG以上 / 51KG以上，整票按所在档单价（表里没明说是否整票，按行业惯例整票）。
+- 海运拼箱加可选重量栏：重量÷500kg 与体积取大，说明里写明折算。
+- 页面日期标签中性写 CURRENT RATES，东际给了生效日期再改配置里的 `effective`。

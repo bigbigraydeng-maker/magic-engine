@@ -7,7 +7,8 @@
 
 ### 2026-10-10（East Inter 官网：运费计算器换成新版报价）
 
-PR [#2427](https://github.com/bigbigraydeng-maker/magic-engine/pull/2427)。计算器按东际新报价表更新海运拼箱各城市单价；海运拼箱新增可选「货物总重量」，超过 500kg/立方按 500kg=1 立方计费；空运大件不含税（DDU）结果明确提示不含 A$110 清关费、DDP 提示不含 15% 预付税。新旧报价逐项对比见 `docs/clients/east-inter/2026-10-10-calculator-new-quote-diff.md`，台账卡 `2026-10-10-east-inter-calculator-new-quote`。回滚：还原 PR #2427（计算器文件在 `docs/clients/east-inter/calculator-2026-10/`）。验证：`node --test tests/pricing.test.js` 39 项通过。网页 Impeccable 检查尚未运行。
+PR [#2427](https://github.com/bigbigraydeng-maker/magic-engine/pull/2427)。计算器按东际新报价表（人民币÷4.9 向上取整，沿用旧规则）更新海运拼箱各城市单价；空运大件计费单位更正为每公斤（东际确认；旧版高报一倍）并按表加 50/51kg 分档；海运拼箱新增可选「货物总重量」，按 500kg=1 立方取大；含税空运大件提示已含关税和税（不加 15%），不含税提示收件人自付关税/GST、货值超 AUD1,000 另有 A$110 清关费；页面日期标签中性写 CURRENT RATES（生效日期待东际确认）。新旧对比见 `docs/clients/east-inter/2026-10-10-calculator-new-quote-diff.md`，台账卡 `2026-10-10-east-inter-calculator-new-quote`。
+**上线位置**：客户站点仓库 `bigbigraydeng-maker/east-inter-demo`（eastinter.com.au），首发 `65b2fdd`，之后 `b2be46f`、`28a1df1`。**回滚**：在该仓库把 `eastinter-pricing-calculator.html` 还原到 `d60c23a`，并删除 `pricing-rates.js`、`pricing-engine.js`（还原 PR #2427 只会删本仓库的草稿和记录，不会回滚客户网站）。验证：`node --test tests/pricing.test.js` 51 项通过。网页 Impeccable 检查尚未运行（需 PM 许可下载检查程序）。
 
 **Reuse Statement**：客户专属计算器，全部在客户交付目录内，未进入共享运行时。
 
