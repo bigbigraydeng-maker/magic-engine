@@ -12,6 +12,9 @@ import { useParams } from 'next/navigation'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 import type { PromoBoard } from '@/lib/marketing-plan/promo/board'
 import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
+import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
+import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { PlanOverview } from './_components/PlanOverview'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
@@ -36,6 +39,7 @@ export function PromoPlanClient() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [showSample, setShowSample] = useState(false)
 
   const base = `/api/clients/${clientId}/marketing-plan`
 
@@ -106,6 +110,14 @@ export function PromoPlanClient() {
   }
 
   const approve = board ? approveButtonState(board) : null
+  const realPhases = useMemo(() => {
+    const spec = selected ? readPromoSpec(selected.plan_data) : null
+    return spec ? describePromoSpec(spec) : null
+  }, [selected])
+  const samplePhases = useMemo(
+    () => (showSample ? describePromoSpec(buildPromoSample(new Date().toISOString().slice(0, 10))) : null),
+    [showSample],
+  )
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
@@ -146,6 +158,16 @@ export function PromoPlanClient() {
         {board && selected && (
           <>
             <Headline board={board} plan={selected} />
+            {samplePhases
+              ? <PlanOverview phases={samplePhases} sample onCloseSample={() => setShowSample(false)} />
+              : realPhases
+                ? <PlanOverview phases={realPhases} />
+                : (
+                  <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4 flex flex-wrap items-center gap-3">
+                    <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。想先看看做好是什么样？</p>
+                    <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
+                  </div>
+                )}
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
             {board.has_promo && !board.spec_valid && <SpecProblems board={board} />}
