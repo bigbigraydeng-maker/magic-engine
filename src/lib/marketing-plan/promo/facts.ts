@@ -159,14 +159,37 @@ async function loadInsights(clientId: string, accountIds: string[], win: { start
   return { spend, results, as_of: asOf }
 }
 
-async function loadPublishedCount(clientId: string, win: { start: string; end: string }): Promise<number | null> {
+/** The UTC instant at which `day` (YYYY-MM-DD) begins on the wall clock of `timezone`. */
+export function localDayStartUtc(day: string, timezone: string): Date {
+  const target = Date.parse(`${day}T00:00:00Z`)
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+  const wallAt = (ms: number): number => {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(ms)).map(x => [x.type, x.value]))
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second)
+  }
+  let guess = target
+  for (let i = 0; i < 3; i++) guess = target - (wallAt(guess) - guess)
+  return new Date(guess)
+}
+
+/** 时区由广告账户快照给出；没有账户或账户时区不一致 / 未知 → 无法确定窗口边界，返回 null（未知）。 */
+async function loadPublishedCount(
+  clientId: string,
+  win: { start: string; end: string },
+  timezones: (string | null)[],
+): Promise<number | null> {
+  const tz = timezones.length > 0 && timezones.every(t => t !== null && t === timezones[0]) ? timezones[0] : null
+  if (tz === null) return null
   const { count, error } = await supabaseAdmin
     .from('content_posts')
     .select('id', { count: 'exact', head: true })
     .eq('client_id', clientId)
     .eq('status', 'published')
-    .gte('published_at', `${win.start}T00:00:00Z`)
-    .lt('published_at', `${addDays(win.end, 1)}T00:00:00Z`)
+    .gte('published_at', localDayStartUtc(win.start, tz).toISOString())
+    .lt('published_at', localDayStartUtc(addDays(win.end, 1), tz).toISOString())
   return error ? null : (count ?? 0)
 }
 
@@ -189,7 +212,8 @@ export async function loadPromoFacts(
 
   const owned = await loadOwnedAccounts(clientId)
   const snapshots = await loadSnapshots(planAccountIds)
-  const { today, known } = resolveToday(planAccountIds.map(id => snapshots[id]?.timezone_name ?? null), now)
+  const accountTimezones = planAccountIds.map(id => snapshots[id]?.timezone_name ?? null)
+  const { today, known } = resolveToday(accountTimezones, now)
   const win = reconcileWindow(today, playbook.insightsUnstableDays)
 
   const [config, coverage, goal, insights, published] = await Promise.all([
@@ -197,7 +221,7 @@ export async function loadPromoFacts(
     loadDailyPlanCoverage(clientId, today),
     loadGoal(clientId, spec.goal_id),
     loadInsights(clientId, planAccountIds, win),
-    loadPublishedCount(clientId, win),
+    loadPublishedCount(clientId, win, accountTimezones),
   ])
 
   const ownedSet = new Map((owned ?? []).map(a => [a.id, a]))

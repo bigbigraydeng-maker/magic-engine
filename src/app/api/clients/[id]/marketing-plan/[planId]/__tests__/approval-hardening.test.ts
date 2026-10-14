@@ -86,7 +86,7 @@ describe('PATCH — 已批准的计划内容被锁住', () => {
     m.plan = { ...m.plan, status: 'approved' }
     const res = await PATCH(mk({ status: 'draft', plan_data: { tasks: [] } }), { params: P })
     expect(res.status).toBe(200)
-    expect(m.revoke).toHaveBeenCalledWith('plan-1')
+    expect(m.revoke).toHaveBeenCalledWith('plan-1', 'client-1')
     expect((await res.json()).revoked_tasks).toBe(3)
     expect(m.updates[0]).toMatchObject({ status: 'draft' })
   })

@@ -49,7 +49,8 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     const body = (await req.json().catch(() => null)) as { promo?: unknown } | null
     const parsed = parsePromoSpec(body?.promo)
     if (!parsed.ok) return NextResponse.json({ success: false, error: '推广计划结构不合法', issues: parsed.issues }, { status: 400 })
-    const spec = parsed.spec
+    // 人工核实记录只能由 /promo/verify 写入 generation_meta；保存请求里带的 checks 一律丢弃
+    const spec = { ...parsed.spec, checks: [], gate_snapshot: undefined }
 
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })

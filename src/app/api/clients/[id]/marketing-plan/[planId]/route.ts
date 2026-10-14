@@ -132,7 +132,7 @@ export async function PATCH(
         }, { status: 409 })
       }
       // 退回草稿 = 撤销批准：清掉这份计划还没开始的待办和草稿生产包（有已开工的上面已拒绝）。
-      revoked = (await revokePlanTasks(params.planId)).revoked
+      revoked = (await revokePlanTasks(params.planId, params.id)).revoked
     }
 
     const { data, error } = await supabaseAdmin
@@ -174,7 +174,7 @@ export async function DELETE(
     }
 
     // 先清除该 Plan 下所有 pending 的执行项（已开工/已完成的保留）
-    const { revoked } = await revokePlanTasks(params.planId)
+    const { revoked } = await revokePlanTasks(params.planId, params.id)
 
     // 软删除 — 改 status 而非真删，保留历史
     const { data, error } = await supabaseAdmin

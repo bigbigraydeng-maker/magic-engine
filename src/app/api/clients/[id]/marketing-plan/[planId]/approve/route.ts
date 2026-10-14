@@ -15,7 +15,7 @@
 import { randomUUID } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { dispatchPlanTasks } from '@/lib/marketing-plan/task-dispatcher'
+import { dispatchPlanTasks, revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import { manualChecksOf } from '@/lib/marketing-plan/promo/board'
 import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
@@ -130,9 +130,20 @@ export async function POST(
         generation_meta: { ...(planRow.generation_meta ?? {}), approval_receipt: receipt },
       })
       .eq('id', params.planId)
+      .eq('client_id', params.id)
+      .eq('status', 'draft')
+      .eq('updated_at', planRow.updated_at) // 内容在检查 / 派发期间被保存改过 → 不批准
       .select('*')
-      .single()
+      .maybeSingle()
 
+    if (!updateErr && !updated) {
+      // 草稿在我们检查之后被改了：派发的是旧内容的任务，撤掉，让调用方重新批准
+      await revokePlanTasks(params.planId, params.id)
+      return NextResponse.json({
+        success: false,
+        error: '计划在批准过程中被修改了，已撤销本次派发，请刷新后重新批准。',
+      }, { status: 409 })
+    }
     if (updateErr) {
       // 任务已派发但状态没改 — 记录警告但不抛错（让 PM 看到任务已存在）
       console.error('[marketing-plan approve] tasks dispatched but status update failed:', updateErr)

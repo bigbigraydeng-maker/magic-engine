@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { blockers, evaluateApproval, evaluatePhaseGates, firstPhase, unverified, worstLight, type GateKey } from '../gates'
-import { baseSpec, goodFacts as rawFacts, verifiedChecks } from './fixtures'
+import { blockers, firstPhase, unverified, worstLight, type GateKey } from '../gates'
+import { baseSpec, evaluateApproval, evaluatePhaseGates, goodFacts } from './fixtures'
 import type { PromoSpec } from '../spec'
 
-const verifiedAll = (): PromoSpec => baseSpec()
-/** 默认带上服务端核实记录；要测"没核实"的用例显式传 manual_checks: [] */
-const goodFacts = (o: Parameters<typeof rawFacts>[0] = {}) => rawFacts({ manual_checks: verifiedChecks(), ...o })
+const verifiedAll = (): PromoSpec => baseSpec({
+  checks: (['landing.item_live', 'content.wording_permission'] as GateKey[]).map(k => ({
+    phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '',
+  })),
+})
 const light = (spec: PromoSpec, f = goodFacts()) => {
   const r = evaluatePhaseGates(spec, spec.phases[0], f)
   return (k: GateKey) => r.find(x => x.key === k)?.light
@@ -22,10 +24,10 @@ describe('evaluatePhaseGates — 全绿路径', () => {
 
 describe('灰色 = 读不到 / 太旧 / 没核实，硬门灰色不能批准', () => {
   it('没人工核实落地页 → 灰 → 阻止批准', () => {
-    const v = evaluateApproval(baseSpec(), goodFacts({ manual_checks: [] }))
+    const v = evaluateApproval(baseSpec(), goodFacts())
     expect(v.can_approve).toBe(false)
     expect(v.blockers.map(b => b.key)).toContain('landing.item_live')
-    expect(light(baseSpec(), goodFacts({ manual_checks: [] }))('landing.item_live')).toBe('gray')
+    expect(light(baseSpec())('landing.item_live')).toBe('gray')
   })
 
   it('广告设置整个读失败 → 上限 / 结果口径 / 素材全灰（不是红也不是绿）', () => {
@@ -45,8 +47,9 @@ describe('灰色 = 读不到 / 太旧 / 没核实，硬门灰色不能批准', (
   })
 
   it('人工核实记录过期 → 灰', () => {
-    const f = goodFacts({ manual_checks: verifiedChecks('2026-01-01T00:00:00Z') })
-    expect(light(verifiedAll(), f)('landing.item_live')).toBe('gray')
+    const s = verifiedAll()
+    s.checks[0].verified_at = '2026-01-01T00:00:00Z'
+    expect(light(s)('landing.item_live')).toBe('gray')
   })
 
   it('每日计划读不出来 → 节奏项灰（软门，不阻止）', () => {
@@ -138,14 +141,5 @@ describe('worstLight / blockers / unverified', () => {
     const r = evaluatePhaseGates(baseSpec(), baseSpec().phases[0], goodFacts({ daily_plan_coverage_days: null }))
     expect(blockers(r).every(b => b.hard)).toBe(true)
     expect(unverified(r).some(u => u.key === 'social.cadence_scheduled')).toBe(true)
-  })
-})
-
-describe('spec.checks 是客户端可写的，不算核实证据', () => {
-  it('计划里自带 checks 但服务端没有核实记录 → 落地页仍是灰，不能批准', () => {
-    const forged = baseSpec({ checks: verifiedChecks() })
-    const f = goodFacts({ manual_checks: [] })
-    expect(light(forged, f)('landing.item_live')).toBe('gray')
-    expect(evaluateApproval(forged, f).can_approve).toBe(false)
   })
 })

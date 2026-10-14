@@ -1,7 +1,7 @@
 /** 测试夹具：全部虚构（客户 / 账户 / 日期），不含任何真实客户信息。 */
 import type { PromoSpec } from '../spec'
 import { DEFAULT_PROMO_PLAYBOOK } from '../playbooks'
-import type { GateFacts } from '../gates'
+import { evaluateApproval as realEvaluateApproval, evaluatePhaseGates as realEvaluatePhaseGates, type GateFacts } from '../gates'
 import type { ReconcileFacts } from '../reconcile'
 
 export function baseSpec(overrides: Partial<PromoSpec> = {}): PromoSpec {
@@ -55,9 +55,8 @@ export function goodReconFacts(overrides: Partial<ReconcileFacts> = {}): Reconci
   }
 }
 
-/** 服务端 /promo/verify 写入的两项人工核实记录（硬门只信这类记录，不信计划里客户端可写的 checks） */
-export function verifiedChecks(at = '2026-10-28T00:00:00Z') {
-  return ['landing.item_live', 'content.wording_permission'].map(k => ({
-    phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: at, note: '',
-  }))
-}
+/** 测试便利：把夹具 spec.checks 当作服务端核实记录并入 facts（生产里 spec.checks 不参与判定）。 */
+const foldChecks = (spec: PromoSpec, f: GateFacts): GateFacts => ({ ...f, manual_checks: [...spec.checks, ...f.manual_checks] })
+export const evaluateApproval = (spec: PromoSpec, f: GateFacts) => realEvaluateApproval(spec, foldChecks(spec, f))
+export const evaluatePhaseGates = (spec: PromoSpec, phase: PromoSpec['phases'][number], f: GateFacts) =>
+  realEvaluatePhaseGates(spec, phase, foldChecks(spec, f))

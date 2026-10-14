@@ -2,11 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { approveButtonState, continueButtonVisible, formatRowValue, LIGHT_META, ROW_STATUS_META } from '../labels'
 import { buildPromoTemplate } from '../template'
 import { parsePromoSpec } from '../spec'
-import { evaluateApproval } from '../gates'
-import { baseSpec, goodFacts as rawFacts, verifiedChecks } from './fixtures'
+import { baseSpec, evaluateApproval, goodFacts } from './fixtures'
 
-const verified = () => baseSpec()
-const goodFacts = (o: Parameters<typeof rawFacts>[0] = {}) => rawFacts({ manual_checks: verifiedChecks(), ...o })
+const verified = () => baseSpec({ checks: ['landing.item_live', 'content.wording_permission'].map(k => ({
+  phase_id: 'p1', check_key: k, verified_by: 'a', verified_at: '2026-10-28T00:00:00Z', note: '' })) })
 
 describe('approveButtonState', () => {
   it('不是草稿 → 不显示（已批准的计划没有"批准"）', () => {
@@ -18,7 +17,7 @@ describe('approveButtonState', () => {
     expect(s).toMatchObject({ visible: true, disabled: true, label: '暂时不能批' })
   })
   it('硬门没过 → 灰着，并逐项说缺什么、怎么办', () => {
-    const approval = evaluateApproval(baseSpec(), goodFacts({ manual_checks: [] }))
+    const approval = evaluateApproval(baseSpec(), goodFacts())
     const s = approveButtonState({ plan_status: 'draft', approval, spec_valid: true })
     expect(s.disabled).toBe(true)
     expect(s.blockers.length).toBeGreaterThan(0)
