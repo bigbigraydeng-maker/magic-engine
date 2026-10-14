@@ -205,6 +205,8 @@ export interface MarketingPlan {
     truncated?: boolean
     /** 批准回执：每次批准成功后由服务端写入（保存接口不接受这一列，所以不会被覆盖）。*/
     approval_receipt?: ApprovalReceipt
+    /** 计划被退回草稿时，把当时的批准回执挪到这里留底（服务端写入），草稿上不再留着「有效」的批准记录。*/
+    previous_approvals?: ApprovalReceipt[]
     /** FDE 在计划批准后补充的人工核实记录（plan_data 被锁，所以放这里；服务端写入）。*/
     promo_checks?: PromoManualCheckRecord[]
     /** PM 每周「按计划继续」的确认记录（服务端写入，按 week_start 幂等）。*/

@@ -135,6 +135,87 @@ describe('PATCH — 已批准的计划内容被锁住', () => {
   })
 })
 
+describe('PATCH — 推广结构只能走专用保存接口', () => {
+  const promo = { schema: 'promo_v1', goal_id: 'g1', phases: [{ id: 'p', name: 'x', start_date: '2026-11-01', end_date: '2026-11-02', steps: [] }], checks: [] }
+  beforeEach(() => { m.plan = { ...m.plan, plan_data: { tasks: [], promo } } })
+
+  it('草稿：把推广结构改掉 → 409，不写库', async () => {
+    const res = await PATCH(mk({ plan_data: { tasks: [], promo: { ...promo, goal_id: 'other-client-goal' } } }), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('草稿：把推广结构删掉（想躲批准前的检查）→ 409，不写库', async () => {
+    const res = await PATCH(mk({ plan_data: { tasks: [] } }), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('草稿：给没有推广结构的计划塞一份 → 409', async () => {
+    m.plan = { ...m.plan, plan_data: { tasks: [] } }
+    const res = await PATCH(mk({ plan_data: { tasks: [], promo } }), { params: P })
+    expect(res.status).toBe(409)
+  })
+  it.each([['null', null], ['字符串', 'x'], ['数组', []]])('plan_data 是%s → 400，不写库', async (_n, bad) => {
+    const res = await PATCH(mk({ plan_data: bad }), { params: P })
+    expect(res.status).toBe(400)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('已批准 + 推广结构被改：仍被拦（不会因为状态不同放行）', async () => {
+    m.plan = { ...m.plan, status: 'approved' }
+    const res = await PATCH(mk({ plan_data: { tasks: [], promo: { ...promo, goal_id: 'x' } } }), { params: P })
+    expect([409]).toContain(res.status)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('草稿：推广结构原样带回（键顺序不同）+ 改别的内容 → 可以保存', async () => {
+    const reordered = JSON.parse(JSON.stringify(promo, ['checks', 'phases', 'goal_id', 'schema', 'id', 'name', 'start_date', 'end_date', 'steps']))
+    const res = await PATCH(mk({ plan_data: { tasks: [{ title: 'new' }], promo: reordered } }), { params: P })
+    expect(res.status).toBe(200)
+    expect(m.updates).toHaveLength(1)
+  })
+  it('只改标题（不带 plan_data）不受影响', async () => {
+    const res = await PATCH(mk({ title: '改个名' }), { params: P })
+    expect(res.status).toBe(200)
+  })
+})
+
+describe('PATCH — 并发 / 状态 / 退回草稿留底', () => {
+  it('读完到写入之间计划被别处改过（时间戳对不上）→ 409，不覆盖', async () => {
+    m.casMiss = true
+    const res = await PATCH(mk({ title: '改个名' }), { params: P })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain('刷新')
+  })
+  it('退回草稿时刚好被别处改了：409，如实说待办已清、计划仍是已批准，要再点一次', async () => {
+    m.plan = { ...m.plan, status: 'approved' }
+    m.casMiss = true
+    const res = await PATCH(mk({ status: 'draft' }), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.revoke).toHaveBeenCalled()
+    const json = await res.json()
+    expect(json.error).toContain('仍是已批准')
+    expect(json.error).toContain('再点一次')
+  })
+  it('草稿不能直接标成已完成（没批准过）', async () => {
+    const res = await PATCH(mk({ status: 'completed' }), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('已批准 → 已完成：允许', async () => {
+    m.plan = { ...m.plan, status: 'approved' }
+    expect((await PATCH(mk({ status: 'completed' }), { params: P })).status).toBe(200)
+  })
+  it('已批准 → 退回草稿：批准时间清空，旧回执挪到 previous_approvals，草稿上不再留「有效」回执', async () => {
+    const receipt = { request_id: 'r1', approved_by: 'pm@example.com', approved_at: '2026-10-20T03:04:05Z', tasks_created: 3, tasks_skipped: 0, packages_created: 0 }
+    m.plan = { ...m.plan, status: 'approved', approved_at: '2026-10-20T03:04:05Z', generation_meta: { model: 'x', approval_receipt: receipt } }
+    const res = await PATCH(mk({ status: 'draft' }), { params: P })
+    expect(res.status).toBe(200)
+    const upd = m.updates[0] as { approved_at: unknown; generation_meta: Record<string, unknown> }
+    expect(upd.approved_at).toBeNull()
+    expect(upd.generation_meta.approval_receipt).toBeUndefined()
+    expect(upd.generation_meta.previous_approvals).toEqual([receipt])
+    expect(upd.generation_meta.model).toBe('x')
+  })
+})
+
 describe('POST approve — 回执与重试', () => {
   it('草稿：派发后改成已批准，并写回执（含跳过数、操作者）', async () => {
     m.dispatch.mockResolvedValue({
