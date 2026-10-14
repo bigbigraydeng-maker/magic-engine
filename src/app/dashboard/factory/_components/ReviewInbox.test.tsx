@@ -172,3 +172,43 @@ it('renders the publish outlets disclosure with the outlet list', async () => {
   expect(document.body.textContent).toContain('未接通')
   expect(document.body.textContent).toContain('Facebook 主页 Reel')
 })
+
+const btnEq = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text)
+const openReject = async () => { await click(btnEq('再想想')); await click(btnEq('打回')) }
+
+it('打回 needs a reason, posts reject_quality, and shows the 已打回 notice', async () => {
+  await mount([{ ok: true }])
+  await openReject()
+  await click(btn('确认打回'))
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('请至少选一条打回理由')
+  expect(reviewPosts()).toHaveLength(0)
+  const chip = [...document.querySelectorAll('label')].find(l => l.textContent?.includes('字幕太长或太小'))
+  await click(chip?.querySelector('input') ?? undefined)
+  await click(btn('确认打回'))
+  expect(reviewPosts()).toHaveLength(1)
+  const body = reviewPosts()[0].body as { action: string; feedback: string }
+  expect(body.action).toBe('reject_quality')
+  expect(body.feedback).toContain('字幕太长或太小')
+  expect(document.body.textContent).toContain('已打回 #w1')
+})
+
+it('只改预算 tab posts reject_budget', async () => {
+  await mount([{ ok: true }])
+  await openReject()
+  await click(btnEq('只改预算(不打回)'))
+  const input = document.querySelector('input[type="number"]') as HTMLInputElement
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '20')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await click(btn('确认调整预算'))
+  expect(reviewPosts()[0].body).toEqual({ action: 'reject_budget', new_budget_usd: 20 })
+})
+
+it('card shows short title and hides engineering notes inside 详情; no Claude chat', async () => {
+  await mount([], { client_name: 'CTS', angle: 'Grand Tour #3: 钩子', rationale_one_liner: 'v2 loudness 74 window' })
+  expect(document.body.textContent).toContain('CTS｜Grand Tour｜第3条｜v2')
+  expect(document.body.textContent).not.toContain('问 Claude')
+  const details = [...document.querySelectorAll('details')].find(d => d.textContent?.includes('loudness 74'))
+  expect(details?.querySelector('summary')?.textContent).toBe('详情')
+})
