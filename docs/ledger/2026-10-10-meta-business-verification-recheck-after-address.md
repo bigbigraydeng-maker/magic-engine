@@ -1,12 +1,14 @@
 ---
 id: 2026-10-10-meta-business-verification-recheck-after-address
 title: Magic Engine 的 Meta 企业认证仍卡审核中；新西兰公司注册处地址变更 10-19 才生效，Meta 助手建议不撤回、10-19 后再看
-status: decided
+status: done
 owner: pm
 decided_on: 2026-10-10
 source: session:5d7b9a84
-verify_by: 2026-10-20
-verify_how: "①打开 business.facebook.com/latest/settings/security_center/?business_id=1265811139097132 看「公司验证」是否还是审核中；②打开 app.companiesoffice.govt.nz/companies/app/ui/pages/companies/4002043/detail 确认注册地址已变成 Unit 10, 29 Mauranui Avenue, Epsom；③若认证仍未通过：向业务支持中心助手要人工（它 10-10 说「24 小时后再试」），并按它给的清单准备 PDF 重新提交（最新公司注册证书 + 90 天内显示新地址的账单/IRD 信函）"
+verify_by: 2026-10-16
+done_on: 2026-10-14
+done_ref: pr:2648
+verify_how: "0）10-14 已提交复审，10-16 看结果：页面是「通过」即成；仍被拒则上传 Spark 账单再提交。其余旧步骤备查：①打开 business.facebook.com/latest/settings/security_center/?business_id=1265811139097132 看「公司验证」是否还是审核中；②打开 app.companiesoffice.govt.nz/companies/app/ui/pages/companies/4002043/detail 确认注册地址已变成 Unit 10, 29 Mauranui Avenue, Epsom；③若认证仍未通过：向业务支持中心助手要人工（它 10-10 说「24 小时后再试」），并按它给的清单准备 PDF 重新提交（最新公司注册证书 + 90 天内显示新地址的账单/IRD 信函）"
 ---
 10-10 事实（都是当天只读核实或与 Meta 助手对话所得）：
 - 公司注册处记录：注册办公室和送达地址仍是旧地址（Albany），**新地址（Unit 10, 29 Mauranui Avenue, Epsom）已于 10-09 提交，10-19 才生效**。
