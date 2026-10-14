@@ -107,11 +107,11 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 
 已知限制：极端文案（整行全是最宽字母 W）在渲染器每个并行页的第 0、1 帧（约 66 毫秒）仍会短暂超宽，第 2 帧起按实测缩放正常，原因未查清；普通文案第 0–3 帧平滑，无此现象。
 
-**出片机还没接它**：`remotion-branch.mjs` 收到 `datacard` 工单会直接以 `DATACARD_NOT_WIRED:` 拒收（字幕与服务端红线复扫还没做）；出片机准入客户名单没动。
+**出片机已接它**：`remotion-branch.mjs` 收到 `datacard` 工单，会把屏幕上全部文字拼成字幕和红线复扫用的 caption；仍受客户准入名单（`FACTORY_REMOTION_CLIENT_IDS`）约束，名单没动。
 
 ## 出片机怎么用这些模板（包 C）
 
-出片机（`scripts/factory-worker/remotion-branch.mjs`）按工单 `brief.remotion = { template, props }` 渲染：`template` 必须是 `src/templates.ts` 注册表里有的（现在是 `list`、`montage`、`datacard`；`datacard` 出片机暂拒，见上节），不认识的直接拒（不重试）；`--template` 会原样传给 `render.mjs`。**旧版出片机不认识 `montage`，也会拒收**——所以升级出片机之前不要建 `montage` 工单。
+出片机（`scripts/factory-worker/remotion-branch.mjs`）按工单 `brief.remotion = { template, props }` 渲染：`template` 必须是 `src/templates.ts` 注册表里有的（现在是 `list`、`montage`、`datacard`；`datacard` 已接，见上节），不认识的直接拒（不重试）；`--template` 会原样传给 `render.mjs`。**旧版出片机不认识 `montage`，也会拒收**——所以升级出片机之前不要建 `montage` 工单。
 
 - **音乐从共享乐库取**：`props.musicFile` 如果是 `catalog/music.json` 里某首的暂存名（`stagedFileName`，如 `pipa-trap.m4a`），出片机从 `<STUDIO_ROOT>/<目录里的 folder>/<file>`（即 `Music/`、`_shared/music/`）拷进该单暂存目录，路径必须落在该乐库文件夹内（含符号链接）；不在目录里的音乐名仍按 R2a 老办法从该客户的 `remotion-assets/` 取。出片机 Mac 上这两个乐库文件夹要在（Dropbox 同步到 `MagicLab_Studio/` 下）。
 - **目录里的暂存名是保留名**：目录里有的暂存名（如 `pipa-trap.m4a`）一律从乐库取，即使客户素材库里也有同名文件（出片机会写一条「乐库优先」日志）。客户专属授权曲不要放进共享目录，用不同的文件名放在该客户的 `remotion-assets/` 里。
