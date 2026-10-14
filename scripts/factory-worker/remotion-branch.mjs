@@ -253,7 +253,8 @@ export function copyWithinRoot(srcReal, rootReal, dest) {
 
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
-  if (!props.logoFile.toLowerCase().endsWith('.png')) {
+  const hasLogo = typeof props.logoFile === 'string'
+  if (hasLogo && !props.logoFile.toLowerCase().endsWith('.png')) {
     throw new RemotionOrderError('logo 文件名必须是 .png（logo 一律取自该客户品牌包的 watermark.png）')
   }
   const lower = files.map((f) => f.toLowerCase())
@@ -261,9 +262,11 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
     throw new RemotionOrderError('素材文件名大小写不敏感地重复了，请改名')
   }
 
-  const logoDest = join(stageDir, props.logoFile)
-  mkdirSync(dirname(logoDest), { recursive: true })
-  copyFileSync(join(brandkitDir, 'assets', 'watermark.png'), logoDest)
+  if (hasLogo) {
+    const logoDest = join(stageDir, props.logoFile)
+    mkdirSync(dirname(logoDest), { recursive: true })
+    copyFileSync(join(brandkitDir, 'assets', 'watermark.png'), logoDest)
+  }
 
   if (musicPath !== null) {
     try {
@@ -513,11 +516,13 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     const tmpDir = join(root, 'tmp')
     for (const d of [stageDir, outDir, tmpDir]) mkdirSync(d, { recursive: true })
 
-    let brandkitDir
-    try {
-      brandkitDir = deps.brandkitFor(wo.client_id)
-    } catch (e) {
-      throw new RemotionOrderError(e.message)
+    let brandkitDir = null
+    if (typeof props.logoFile === 'string') {
+      try {
+        brandkitDir = deps.brandkitFor(wo.client_id)
+      } catch (e) {
+        throw new RemotionOrderError(e.message)
+      }
     }
     const clientRootDir = join(deps.studioRoot, deps.clientStudio[wo.client_id])
     const assetLibDir = join(clientRootDir, 'remotion-assets')
