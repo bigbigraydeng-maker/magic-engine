@@ -1,0 +1,335 @@
+{
+ "brandColor": "#1F7AB8",
+ "logoFile": "logo.png",
+ "musicFile": "horizons-call.mp3",
+ "beats": [
+  0.12,
+  0.665,
+  1.211,
+  1.756,
+  2.302,
+  2.847,
+  3.393,
+  3.938,
+  4.484,
+  5.029,
+  5.575,
+  6.12,
+  6.665,
+  7.211,
+  7.756,
+  8.302,
+  8.847,
+  9.393,
+  9.938,
+  10.484,
+  11.029,
+  11.575,
+  12.12,
+  12.665,
+  13.211,
+  13.756,
+  14.302,
+  14.847,
+  15.393,
+  15.938,
+  16.484,
+  17.029,
+  17.575,
+  18.12,
+  18.665,
+  19.211,
+  19.756,
+  20.302,
+  20.847,
+  21.393
+ ],
+ "totalBeats": 30,
+ "fastBars": [
+  2,
+  4
+ ],
+ "placeTerms": [],
+ "words": [
+  {
+   "at": 0,
+   "beats": 1,
+   "text": "1 M³ ≈A$378",
+   "bg": "brand",
+   "rot": 0,
+   "clipTag": "cover"
+  },
+  {
+   "at": 1,
+   "beats": 1,
+   "text": "CHINA",
+   "bg": "white",
+   "rot": 2,
+   "clipTag": "ship"
+  },
+  {
+   "at": 2,
+   "beats": 1,
+   "text": "TO",
+   "bg": "black",
+   "rot": -2,
+   "clipTag": "ship"
+  },
+  {
+   "at": 3,
+   "beats": 1,
+   "text": "SYDNEY",
+   "bg": "brand",
+   "rot": 1,
+   "clipTag": "aerial"
+  },
+  {
+   "at": 4,
+   "beats": 3,
+   "text": "≈A$378",
+   "bg": "brand",
+   "rot": -1,
+   "clipTag": "aerial"
+  },
+  {
+   "at": 7,
+   "beats": 1,
+   "text": "DOOR",
+   "bg": "white",
+   "rot": -2,
+   "clipTag": "dock"
+  },
+  {
+   "at": 8,
+   "beats": 1,
+   "text": "TO",
+   "bg": "black",
+   "rot": 2,
+   "clipTag": "dock"
+  },
+  {
+   "at": 9,
+   "beats": 1,
+   "text": "DOOR",
+   "bg": "brand",
+   "rot": -1,
+   "clipTag": "racks"
+  },
+  {
+   "at": 10,
+   "beats": 2,
+   "text": "CLEARANCE",
+   "bg": "white",
+   "rot": 0,
+   "clipTag": "scan"
+  },
+  {
+   "at": 12,
+   "beats": 2,
+   "text": "INCLUDED",
+   "bg": "black",
+   "rot": 0,
+   "clipTag": "scan"
+  },
+  {
+   "at": 14,
+   "beats": 2,
+   "text": "LIVE",
+   "bg": "brand",
+   "rot": -2,
+   "clipTag": "wrap"
+  },
+  {
+   "at": 16,
+   "beats": 2,
+   "text": "PRICES",
+   "bg": "white",
+   "rot": 1,
+   "clipTag": "wrap"
+  },
+  {
+   "at": 18,
+   "beats": 3,
+   "text": "ONLINE",
+   "bg": "black",
+   "rot": 0,
+   "clipTag": "racks"
+  },
+  {
+   "at": 21,
+   "beats": 1,
+   "text": "NO",
+   "bg": "brand",
+   "rot": 2,
+   "clipTag": "ship"
+  },
+  {
+   "at": 22,
+   "beats": 2,
+   "text": "SIGN-UP",
+   "bg": "white",
+   "rot": 0,
+   "clipTag": "aerial"
+  },
+  {
+   "at": 24,
+   "beats": 1,
+   "text": "CURRENT",
+   "bg": "black",
+   "rot": 0,
+   "clipTag": "endcard"
+  },
+  {
+   "at": 25,
+   "beats": 1,
+   "text": "RATES",
+   "bg": "brand",
+   "rot": -1,
+   "clipTag": "endcard"
+  },
+  {
+   "at": 26,
+   "beats": 2,
+   "text": "ESTIMATES",
+   "bg": "white",
+   "rot": 0,
+   "clipTag": "endcard"
+  },
+  {
+   "at": 28,
+   "beats": 2,
+   "text": "ONLY",
+   "bg": "black",
+   "rot": 0,
+   "clipTag": "endcardb"
+  }
+ ],
+ "clips": [
+  {
+   "file": "clips/cover-a.mp4",
+   "tag": "cover",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/cover-b.mp4",
+   "tag": "cover",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcard-a.mp4",
+   "tag": "endcard",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcard-b.mp4",
+   "tag": "endcard",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/ship-a.mp4",
+   "tag": "ship",
+   "kind": "street",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/ship-b.mp4",
+   "tag": "ship",
+   "kind": "street",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/aerial-a.mp4",
+   "tag": "aerial",
+   "kind": "aerial",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/aerial-b.mp4",
+   "tag": "aerial",
+   "kind": "aerial",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/dock-a.mp4",
+   "tag": "dock",
+   "kind": "street",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/dock-b.mp4",
+   "tag": "dock",
+   "kind": "street",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/racks-a.mp4",
+   "tag": "racks",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/racks-b.mp4",
+   "tag": "racks",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/scan-a.mp4",
+   "tag": "scan",
+   "kind": "person",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/scan-b.mp4",
+   "tag": "scan",
+   "kind": "person",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/wrap-a.mp4",
+   "tag": "wrap",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/wrap-b.mp4",
+   "tag": "wrap",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcardb-a.mp4",
+   "tag": "endcardb",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  },
+  {
+   "file": "clips/endcardb-b.mp4",
+   "tag": "endcardb",
+   "kind": "detail",
+   "source": "stock",
+   "lenFrames": 105
+  }
+ ]
+}
