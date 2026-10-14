@@ -1,11 +1,11 @@
 ---
 id: 2026-10-14-east-video-factory-wiring-plan
-title: East Inter 出片接线：数据卡代码已接线，剩本机名单/品牌包/红线词待 18 号和 PM
+title: East Inter 出片接线：只剩出片机本机名单加 East 并重启（其余已完成）
 status: decided
 owner: agent
 decided_on: 2026-10-14
 source: session:9cbc0338
 verify_by: 2026-10-16
-verify_how: 数据卡接线随 PR 2646 合并；之后看 18 号/PM 是否已加出片机名单、品牌包、红线词（均不在仓库）；没人回就到期提醒 18 号
+verify_how: PR 2646 合并后，看出片机本机名单（FACTORY_REMOTION_CLIENT_IDS 与 FACTORY_CLIENT_STUDIO）是否已加 East 并重启；没加就提醒 18 号
 ---
-East 被拒是四处各缺一块：出片机本机名单、East 没有素材文件夹和品牌包、数据卡代码没接线、红线词未查。其中数据卡代码接线（删 DATACARD_NOT_WIRED，补 caption/SRT）已在 PR 2646 完成；其余三项仍待办，仍受名单约束，没出片。详见 docs/clients/east-inter/2026-10-14-east-video-factory-wiring-plan.md。
+已完成：数据卡代码接线（PR 2646）、East 品牌包（Dropbox East_Inter/brandkit）、East 红线词 22 个（见 2026-10-14-east-redline-phrases-added）。未完成：出片机本机 `.env` 里把 East（client_id 2e3f040d-4497-4527-89f6-50b6fa91e205）加进 FACTORY_REMOTION_CLIENT_IDS，并在 FACTORY_CLIENT_STUDIO 映射到 East_Inter，然后重启出片机——这步不在仓库里，要 18 号/PM 在出片机上做。没出片。详见 docs/clients/east-inter/2026-10-14-east-video-factory-wiring-plan.md。

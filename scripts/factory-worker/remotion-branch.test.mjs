@@ -579,6 +579,16 @@ describe('montage template and shared music', () => {
       expect(deps.renderFn).not.toHaveBeenCalled()
     })
 
+    it('refuses bidi characters hidden in a row sublabel', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, rows: [{ ...DC_PROPS.rows[0], sublabel: '\u202eemit detimil\u202c' }, DC_PROPS.rows[1], DC_PROPS.rows[2]] }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('副标签')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
     it('refuses a client without a studio mapping with a non-retryable error', async () => {
       const env = makeEnv()
       const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), clientStudio: {} })

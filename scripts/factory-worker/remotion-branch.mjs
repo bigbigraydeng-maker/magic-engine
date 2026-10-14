@@ -165,7 +165,7 @@ export function buildDatacardCaption(props) {
 
 // Refuse data-card props whose hook, labels, values or disclaimer are all invisible after cleaning.
 export function assertDatacardTextVisible(props) {
-  const parts = [...props.hook.lines.map((t) => ['钩子', t]), ...props.rows.flatMap((r, i) => [[`第 ${i + 1} 行标签`, r.label], [`第 ${i + 1} 行数值`, r.value]]), ['免责文案', props.disclaimer]]
+  const parts = [...props.hook.lines.map((t) => ['钩子', t]), ...props.rows.flatMap((r, i) => [[`第 ${i + 1} 行标签`, r.label], [`第 ${i + 1} 行数值`, r.value], ...(r.sublabel == null ? [] : [[`第 ${i + 1} 行副标签`, r.sublabel]])]), ['免责文案', props.disclaimer]]
   for (const [name, t] of parts) {
     if (clean(t) === '') throw new RemotionOrderError(`数据卡${name}清理后是空的（只含不可见字符）`)
     // The renderer paints raw props; a caption that silently drops bidi/invisible characters could differ from what is on screen.
