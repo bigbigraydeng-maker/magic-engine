@@ -1,5 +1,8 @@
 # CTS 广告计划（单一权威一页纸）· 105 号 · 2026-10-15
 
+> **草稿，未获批（PM 2026-10-15 回「不批」）。** 不是权威来源，不得据此执行。第 1–3 步（10/21 官方账户起投、提到 72、测试臂）一律不得推进；第 0 步（还款后只恢复、不改任何设置）是 PM 此前已批的，保持。
+> PM 的方向是：计划要做进 ME 后台、用代码控制（见 `docs/specs/2026-10-15-promo-plan-board-tier-report-and-design-brief.md`）。等 PM 指出哪里不满意再改。
+
 **取代**（以后只看本文，旧文只当明细和过程记录）：`2026-10-11-cts-ads-master-plan-v1.0.md`、`2026-10-11-cts-2027-march-tours-meta-ads-strategy-v0.1.md`、`2026-10-14-march-may-2027-ads-plan.md`（3–5 月方案）、`2026-10-14-cts-ads-budget-for-pm-approval-v1.md`、`2026-10-14-cts-staged-budget-final.md`（保留作逐步明细）、`2026-10-14-ads-social-weekly-table.md` 的广告列。
 **没动任何账户、没改任何上限、没开投。** 每一步开投、加钱、改上限仍要 PM 本人点头。
 
