@@ -59,3 +59,49 @@ PM 10-15 指示：广告计划和社媒动态计划不能再放在对话框里�
 ## 在此之前
 
 两份一页纸（`2026-10-15-cts-ads-plan-onepager.md`、`...-social-plan-onepager.md`）是**过渡期的权威来源**，进了板块后以板块为准，文档只留历史。
+
+---
+
+# 补充（PM 10-15 第二条指示）：三层逻辑与和现有 Marketing Plan / 每日计划的合并
+
+PM 原话三条：①**计划审批**：先有计划，计划什么也不要做；审批同意后再去生成内容。②**代码合并**：调整现有 Marketing Plan 和 Go 的功能，看代码怎么合并。③**执行落地**：最终生成每日计划，借视频工厂、Blog、Newsletter 统一干活。
+
+## 一、现状（2026-10-15 只读查实，不是回忆）
+
+| 已有 | 在哪 | 状态 |
+|---|---|---|
+| Marketing Plan（计划层） | `marketing_plans` 表、`src/lib/marketing-plan/{types,generator,task-dispatcher}.ts`、`/dashboard/clients/[id]/marketing-plan` | **已有审批状态机**：draft → approved → completed → archived；**批准时才派任务**（`task-dispatcher.ts` 把 `plan_data.tasks` 写进 `execution_items`）。但库里最后一条 approved 是 2026-08-20，**近两个月没人用** |
+| 计划内容维度 | `types.ts` | 已含 social（每周帖子/每月 Reels/每周 Story）、blog（月度篇数+主题）、email（newsletter 主题与节奏）、kpis、tasks |
+| 每日计划（执行层） | `campaign_daily_plan` 路由族、`/dashboard/clients/[id]/daily-plan` | 在用；含发布队列、自动发布与授权（`daily_plan_auto_publish_auth/attempts`）、复盘 |
+| 广告层 | `ad_strategy_configs`、`src/lib/ads-strategy/*`、Kernel 授权与留痕 | 在用，但**和 Marketing Plan 不相连**：计划里没有广告维度 |
+| 活动简报 | `campaign_briefs` | 在用 |
+
+**所以不是从零建，是三件事**：①Marketing Plan 加「广告维度 + 分阶段 + 闸」；②把它和每日计划接起来（批准的计划→每日计划→工厂/Blog/Newsletter）；③把广告的执行与留痕挂到同一条链上。
+
+## 二、PM 三层对应到代码（设计任务书的真正内容）
+
+**第 1 层 计划审批（先计划，不做事）**
+- 复用 `marketing_plans` 的状态机，**不新建一套**。
+- 扩 `plan_data`：加 `ads`（分阶段：每步受众、预算、素材、开投条件）与 `gates`（闸项清单）；社媒维度已有，补「主推团/主推主题轮换」。
+- **硬约束**：`status != 'approved'` 时，**不得派任何任务、不得建任何草稿、不得生成内容**。现在 dispatcher 已是「批准才派」，要把这条扩到广告与内容生成的所有入口（逐个调用点加判断，不是写在文档里）。
+- 批准要钉版本（批准的是哪一版 plan_data 的哈希），之后改动要重新批准。
+
+**第 2 层 代码合并（Marketing Plan × 每日计划 × 广告）**
+- `marketing_plans.plan_data.tasks` → `execution_items`（已有）→ **每日计划按日取任务**（现在两边各走各的，要接）。
+- 广告阶段表不另起炉灶：阶段的「开投」动作走 Kernel 的人工批准与外发授权（`human-approval`、`outward-authorization`、`lineage`），预算上限仍读 `ad_strategy_configs`。
+- 闸项由代码算（账户状态、素材池已批准、红线词、价格与官网一致、预算余量、中文内容闸、订位数），**算不出的显示「未知」，不显示绿**。
+- 要先回答的合并问题（交给开发窗口调查后给结论，别猜）：现有 `execution_items` 与每日计划是否同一套任务模型？`campaign_briefs` 与 `initiatives/goals` 谁是目标的真相源？Marketing Plan 近两个月无人用，是功能不好用还是流程绕过去了？
+
+**第 3 层 执行落地（每日计划 → 三个工厂）**
+- 每日计划是唯一出口：社媒（视频工厂出 Reel、图文、Story）、Blog、Newsletter。
+- 每条产出带 plan_id 与 task_id，发布回执写回，看板显示「计划 N 条 / 已产出 M 条 / 已发布 K 条」。
+- 发布、扣费、对客外发仍 fail-closed：没有批准事件和回执不许算完成。
+
+## 三、分期（建议）
+
+- **D1 调查与设计**（不写代码）：现状调查（上面三个合并问题）+ 数据模型与闸项清单 + 页面草图；两审（子牙、魏征）+ 板桥（面向客户端）。
+- **D2 v1 只读看板**：计划里的广告阶段与闸项状态，数据全部读现有表；不动账户。
+- **D3 批准链**：批准钉版本；未批准不得生成内容（逐个调用点）。
+- **D4 接每日计划与三个工厂**：任务流转与回执。
+
+**风险级**：A（新表/改批准链/碰外发）。上线要 PM 回「合 N」。
