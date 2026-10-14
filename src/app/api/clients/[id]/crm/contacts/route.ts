@@ -59,6 +59,8 @@ interface ListQuery {
   sectionPage?: Partial<Record<SectionKey, number>>
   /** `?contact=<id>` —— 今日待办的直达链接；服务端定位它落在哪段哪页。 */
   focusContactId?: string
+  /** `?ids=a,b` —— 只取这几位客人（最多 20 位），付款总览页原地弹出抽屉用；不筛选、不排序、不翻页。 */
+  ids?: string[]
   /**
    * `?kind=retail|trade` —— 只筛终端客户 / 只筛同行（2026-09-28 WP-B3）。
    * 不传 = 老行为，不做任何按身份的筛选，逐字不变（默认「全部客人」不因为
@@ -70,6 +72,8 @@ interface ListQuery {
 
 const DEFAULT_PER_PAGE = 100
 const MAX_PER_PAGE = 500
+const MAX_IDS = 20
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * 解析列表查询参数。
@@ -83,7 +87,7 @@ const MAX_PER_PAGE = 500
 function parseListQuery(url: URL): ListQuery | { error: string } {
   const sp = url.searchParams
   const paged =
-    sp.has('page') || sp.has('perPage') || sp.has('stage') || sp.has('stages') || sp.has('q') || sp.has('kind')
+    sp.has('page') || sp.has('perPage') || sp.has('stage') || sp.has('stages') || sp.has('q') || sp.has('kind') || sp.has('ids')
 
   const rawPage = sp.get('page')
   const rawPerPage = sp.get('perPage')
@@ -149,12 +153,20 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
   const rawFocus = sp.get('contact')
   const focusContactId = rawFocus === null ? undefined : rawFocus.trim() || undefined
 
+  let ids: string[] | undefined
+  if (sp.has('ids')) {
+    ids = (sp.get('ids') ?? '').split(',').map((v) => v.trim()).filter((v) => v.length > 0)
+    if (ids.length === 0 || ids.length > MAX_IDS || !ids.every((v) => UUID_RE.test(v))) {
+      return { error: 'invalid ids' }
+    }
+  }
+
   const rawKind = sp.get('kind')
   if (rawKind !== null && rawKind !== 'retail' && rawKind !== 'trade') return { error: 'invalid kind' }
   const kind = rawKind === 'retail' || rawKind === 'trade' ? rawKind : undefined
 
   // view=priority 不走分页路径：它自己一次拉全（筛选后的）子集再在内存里分段。
-  return { paged: view === null && paged, page, perPage, stages, q, view, open, sectionPage, focusContactId, kind }
+  return { paged: view === null && paged, page, perPage, stages, q, view, open, sectionPage, focusContactId, ids, kind }
 }
 
 /**
@@ -283,6 +295,47 @@ async function loadContactsByIds(clientId: string, ids: string[]): Promise<Conta
     for (const row of (res.data ?? []) as ContactRow[]) byId.set(row.id, row)
   }
   return ids.map((id) => byId.get(id)).filter((c): c is ContactRow => c !== undefined)
+}
+
+/**
+ * `?ids=` 路径：只取指定的几位客人，组装方式与列表逐字相同（同一个 assembleRows）。
+ * 付款总览页点客人名字时用它原地弹出抽屉；按 client_id 收口，别家客户的编号取不到。
+ */
+async function getByIds(
+  clientId: string,
+  ids: string[],
+  viewerEmail: string | null,
+  timer: StepTimer,
+): Promise<NextResponse> {
+  try {
+    const [pageContacts, touches, stageRows, briefs] = await Promise.all([
+      loadContactsByIds(clientId, ids),
+      fetchTouchesFor(clientId, ids),
+      fetchAll<StageRow>((from, to) =>
+        supabaseAdmin
+          .from('client_pipeline_stages')
+          .select('stage_key, label, marketing_action, is_terminal')
+          .eq('client_id', clientId)
+          .order('sort_order', { ascending: true })
+          .range(from, to),
+      ),
+      loadLatestBriefByContactCached(clientId),
+    ])
+    timer.step('by_ids')
+    const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows, briefs)
+    const res = NextResponse.json({
+      total: out.length,
+      page: 1,
+      perPage: ids.length,
+      columns: visibleCustomColumns(customPerContact),
+      items: out,
+      viewerEmail,
+    })
+    res.headers.set('Server-Timing', timer.header())
+    return res
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : '读取失败' }, { status: 500 })
+  }
 }
 
 /**
@@ -639,6 +692,7 @@ export async function GET(
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
+  if (parsed.ids !== undefined) return getByIds(clientId, parsed.ids, viewerEmail, timer)
   if (parsed.paged) return getPaged(clientId, parsed, viewerEmail, timer)
   if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
 

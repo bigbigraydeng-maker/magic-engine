@@ -3,7 +3,6 @@
 import { useId, useState } from 'react'
 import Link from 'next/link'
 import { WARNING_CLASS, MUTED_TEXT, SECONDARY_BUTTON } from '../../_components/bookings/booking-styles'
-import { stashContactName } from '../../_components/bookings/payments-return'
 import { stageText } from './payments-format'
 
 export interface PaidWithoutBookingRow {
@@ -16,13 +15,14 @@ export interface PaidWithoutBookingBannerProps {
   clientId: string
   total: number
   rows: PaidWithoutBookingRow[]
-  onLeave?: () => void
+  /** 点名字：原地弹出这位客人的抽屉（不传就按普通链接跳走）。 */
+  onOpenContact?: (id: string, name: string | null) => void
 }
 
 export function PaidWithoutBookingBanner(
   props: PaidWithoutBookingBannerProps,
 ): JSX.Element | null {
-  const { clientId, total, rows, onLeave } = props
+  const { clientId, total, rows, onOpenContact } = props
   const [expanded, setExpanded] = useState(false)
   const listId = useId()
 
@@ -52,9 +52,10 @@ export function PaidWithoutBookingBanner(
             <li key={row.id} className="py-1">
               <Link
                 href={`/dashboard/clients/${clientId}/crm/all?contact=${encodeURIComponent(row.id)}&focus=bookings`}
-                onClick={() => {
-                  stashContactName(clientId, row.id, row.name)
-                  onLeave?.()
+                onClick={(e) => {
+                  if (!onOpenContact || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                  e.preventDefault()
+                  onOpenContact(row.id, row.name)
                 }}
                 className="inline-flex min-h-[40px] items-center underline font-bold"
               >
