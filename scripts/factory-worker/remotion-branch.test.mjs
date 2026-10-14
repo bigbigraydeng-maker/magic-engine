@@ -742,6 +742,23 @@ describe('real engine contract', () => {
     expect(segments.music.id).toBe('pipa-trap')
     expect(deps.renderFn.mock.calls[0][0].template).toBe('montage')
   })
+
+  it.skipIf(!hasEngine)('runs the fictional data-card example through the real engine', async () => {
+    const props = JSON.parse(readFileSync(join(REMOTION_ENGINE_DIR, 'examples', 'fictional-datacard.props.json'), 'utf8'))
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      loadEngineFn: () => loadRemotionEngine(),
+      probeMediaEvidenceFn: vi.fn((_f, _srt) => ({ width: 1080, height: 1920, duration_seconds: 11, audio_stream_present: false })),
+    })
+    writeFileSync(join(env.lib, 'logo.png'), 'logo')
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'datacard', props }
+    const eng = await loadRemotionEngine()
+    expect(typeof eng.computeDataCardTiming).toBe('function')
+    const res = await run(env, deps, wo)
+    expect(res).toEqual({ ok: true, cost: 0 })
+    expect(deps.completeFn.mock.calls[0][0].caption).toContain('Town Alpha $120')
+  })
 })
 
 describe('buildRemotionText optional dateLine', () => {
