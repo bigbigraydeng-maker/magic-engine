@@ -78,6 +78,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const templates = await import(pathToFileURL(join(engineDir, 'src', 'templates.ts')).href)
     const montage = await import(pathToFileURL(join(engineDir, 'src', 'montage.ts')).href)
     const music = await import(pathToFileURL(join(engineDir, 'src', 'music.ts')).href)
+    const datacard = await import(pathToFileURL(join(engineDir, 'src', 'datacard.ts')).href)
     let catalog = null
     return {
       computeTimingFromProps: timing.computeTimingFromProps,
@@ -85,6 +86,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       isTemplateId: templates.isTemplateId,
       loadTemplate: templates.loadTemplate,
       montageFrameOf: montage.montageFrameOf,
+      computeDataCardTiming: datacard.computeDataCardTiming,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
           JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
@@ -141,6 +143,43 @@ export function buildRemotionSrt(props, timing, fps) {
     cues.push([timing.itemFrom[i] / fps, (timing.itemFrom[i] + timing.itemDur[i]) / fps, items[i]])
   }
   cues.push([timing.revealFrom / fps, timing.totalFrames / fps - 0.1, reveal])
+  return cues
+    .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
+    .join('')
+}
+
+// Every on-screen data-card string (hook, rows, disclaimer) as cleaned strings, in reading order.
+export function buildDatacardText(props) {
+  const hook = props.hook.lines.map(clean).join(' ')
+  const rows = props.rows.map((r) =>
+    [clean(r.label), clean(r.value), ...(r.sublabel === null || r.sublabel === undefined ? [] : [clean(r.sublabel)])].join(' '),
+  )
+  return { hook, rows, disclaimer: clean(props.disclaimer) }
+}
+
+// Every data-card string joined for the server-side red-line rescan.
+export function buildDatacardCaption(props) {
+  const { hook, rows, disclaimer } = buildDatacardText(props)
+  return [hook, ...rows, disclaimer].join(' · ')
+}
+
+// Refuse data-card props whose hook, labels, values or disclaimer are all invisible after cleaning.
+export function assertDatacardTextVisible(props) {
+  const parts = [...props.hook.lines.map((t) => ['钩子', t]), ...props.rows.flatMap((r, i) => [[`第 ${i + 1} 行标签`, r.label], [`第 ${i + 1} 行数值`, r.value]]), ['免责文案', props.disclaimer]]
+  for (const [name, t] of parts) {
+    if (clean(t) === '') throw new RemotionOrderError(`数据卡${name}清理后是空的（只含不可见字符）`)
+  }
+}
+
+// Build the SRT captions for the data card: hook, one cue per row, disclaimer held with the last row.
+export function buildDatacardSrt(props, timing, fps) {
+  const { hook, rows, disclaimer } = buildDatacardText(props)
+  const end = timing.totalFrames / fps - 0.1
+  const cues = [[0, timing.hookFrames / fps, hook]]
+  rows.forEach((text, i) => {
+    const last = i === rows.length - 1
+    cues.push([timing.rowFrom[i] / fps, last ? end : timing.rowFrom[i + 1] / fps, last ? `${text} · ${disclaimer}` : text])
+  })
   return cues
     .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
     .join('')
@@ -439,10 +478,6 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       `UNKNOWN_TEMPLATE: 不认识的模板 ${JSON.stringify(String(template)).slice(0, 40)}：出片机的模板注册表里没有它。先升级出片机，或检查工单 brief.remotion.template`,
     )
   }
-  // The data-card template is registered in the engine but the worker has no captions / red-line rescan for it yet: refuse before rendering.
-  if (template === 'datacard') {
-    throw new RemotionOrderError('DATACARD_NOT_WIRED: 数据卡模板已在渲染引擎里注册，但出片机还没接上它的字幕和红线复扫，暂不接单')
-  }
   let props
   let files
   let timing
@@ -459,6 +494,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
   }
   if (template === 'montage') assertMontageTextVisible(props)
+  if (template === 'datacard') {
+    assertDatacardTextVisible(props)
+    timing = eng.computeDataCardTiming(props)
+  }
 
   const hb = startHeartbeats({
     woId: wo.work_order_id,
@@ -537,8 +576,12 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     }
     const srtText = template === 'list'
       ? buildRemotionSrt(props, timing, eng.FPS)
-      : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
-    const caption = template === 'list' ? buildRemotionCaption(props) : buildMontageCaption(props)
+      : template === 'datacard'
+        ? buildDatacardSrt(props, timing, eng.FPS)
+        : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
+    const caption = template === 'list'
+      ? buildRemotionCaption(props)
+      : template === 'datacard' ? buildDatacardCaption(props) : buildMontageCaption(props)
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
     const expected = totalFrames / eng.FPS
     if (evidence.width !== 1080 || evidence.height !== 1920) {

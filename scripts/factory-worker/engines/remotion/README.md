@@ -107,7 +107,7 @@ props 里没有任何默认值，缺项直接拒。`src/montage.ts` 的卡口（
 
 已知限制：极端文案（整行全是最宽字母 W）在渲染器每个并行页的第 0、1 帧（约 66 毫秒）仍会短暂超宽，第 2 帧起按实测缩放正常，原因未查清；普通文案第 0–3 帧平滑，无此现象。
 
-**出片机还没接它**：`remotion-branch.mjs` 收到 `datacard` 工单会直接以 `DATACARD_NOT_WIRED:` 拒收（字幕与服务端红线复扫还没做）；出片机准入客户名单没动。
+**出片机已接它**：`remotion-branch.mjs` 收到 `datacard` 工单，会把屏幕上全部文字拼成字幕和红线复扫用的 caption；仍受客户准入名单（`FACTORY_REMOTION_CLIENT_IDS`）约束，名单没动。
 
 ## 出片机怎么用这些模板（包 C）
 
