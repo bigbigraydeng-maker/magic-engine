@@ -231,6 +231,8 @@ export interface ApprovalVerdict {
   can_approve: boolean
   blockers: GateResult[]
   unverified: GateResult[]
+  /** 第一阶段全部检查结果（含通过项），写进批准回执用 */
+  results: GateResult[]
   /** 计划里有广告预算却没有任何广告步骤等情况下的说明 */
   note: string | null
 }
@@ -248,6 +250,7 @@ export function evaluateApproval(spec: PromoSpec, f: GateFacts): ApprovalVerdict
     can_approve: b.length === 0,
     blockers: b,
     unverified: unverified(results),
+    results,
     note: allAdsSteps(spec).length === 0 ? '计划里没有广告步骤，只检查了社媒与内容项。' : null,
   }
 }

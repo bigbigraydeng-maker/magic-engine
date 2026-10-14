@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
+import { checkPlanRevocable, revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
@@ -122,6 +122,10 @@ export async function PATCH(
 
     let revoked = 0
     if (revertingToDraft) {
+      const check = await checkPlanRevocable(params.planId)
+      if (!check.ok) {
+        return NextResponse.json({ success: false, error: check.reason }, { status: 409 })
+      }
       // 退回草稿 = 撤销批准：清掉这份计划还没开始的待办，已开工的保留（由 FDE 处理）。
       revoked = (await revokePlanTasks(params.planId)).revoked
     }

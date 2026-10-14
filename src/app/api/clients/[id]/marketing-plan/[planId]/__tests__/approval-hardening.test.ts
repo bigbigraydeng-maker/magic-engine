@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   access: vi.fn(),
   dispatch: vi.fn(),
   revoke: vi.fn(),
+  revocable: vi.fn(),
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
 }))
@@ -17,6 +18,7 @@ vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({
   dispatchPlanTasks: m.dispatch,
   revokePlanTasks: m.revoke,
+  checkPlanRevocable: m.revocable,
 }))
 vi.mock('@/lib/supabase', () => {
   const chain = (): Record<string, unknown> => {
@@ -47,6 +49,7 @@ beforeEach(() => {
   m.updates = []
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.revoke.mockResolvedValue({ revoked: 3 })
+  m.revocable.mockResolvedValue({ ok: true })
   m.plan = { id: 'plan-1', client_id: 'client-1', status: 'draft', generation_meta: { model: 'x' }, plan_data: { tasks: [] } }
 })
 
@@ -86,6 +89,15 @@ describe('PATCH — 已批准的计划内容被锁住', () => {
     expect(m.revoke).toHaveBeenCalledWith('plan-1')
     expect((await res.json()).revoked_tasks).toBe(3)
     expect(m.updates[0]).toMatchObject({ status: 'draft' })
+  })
+
+  it('已批准 → 退回草稿：有待办已开工 / 生产包已开始时拒绝，计划内容不动', async () => {
+    m.plan = { ...m.plan, status: 'approved' }
+    m.revocable.mockResolvedValue({ ok: false, reason: '有 1 个待办已经开工' })
+    const res = await PATCH(mk({ status: 'draft', plan_data: { tasks: [] } }), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.revoke).not.toHaveBeenCalled()
+    expect(m.updates).toHaveLength(0)
   })
 
   it('草稿保存"草稿"状态：不触发清待办', async () => {

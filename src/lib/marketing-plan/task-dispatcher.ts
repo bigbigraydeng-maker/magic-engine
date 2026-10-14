@@ -269,7 +269,42 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
 
 // ─── 反向操作：删除某 Plan 派发的所有未完成任务（用于"撤回审批"场景）─────────
 
-export async function revokePlanTasks(planId: string): Promise<{ revoked: number }> {
+/**
+ * 退回草稿前的检查：已经开工的待办 / 已经往下走的生产包，说明旧版计划的东西已经在执行，
+ * 这时不能把计划内容改掉——返回原因让调用方拒绝（409）。读失败一律当作不能退回。
+ */
+export async function checkPlanRevocable(planId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const { count, error } = await supabaseAdmin
+    .from('execution_items')
+    .select('id', { count: 'exact', head: true })
+    .eq('marketing_plan_id', planId)
+    .eq('status', 'in_progress')
+  if (error) return { ok: false, reason: `读不到待办状态，暂不能退回：${error.message}` }
+  if ((count ?? 0) > 0) {
+    return { ok: false, reason: `有 ${count} 个待办已经开工，先处理完（完成或跳过）再退回草稿。` }
+  }
+
+  const { data: pkgs, error: pkgErr } = await supabaseAdmin
+    .from('production_packages')
+    .select('id, status')
+    .eq('marketing_plan_id', planId)
+  if (pkgErr) return { ok: false, reason: `读不到生产包状态，暂不能退回：${pkgErr.message}` }
+  const live = (pkgs ?? []).filter(p => p.status !== 'archived')
+  if (live.some(p => p.status !== 'draft')) {
+    return { ok: false, reason: '有生产包已经开始生产，先处理完再退回草稿。' }
+  }
+  if (live.length > 0) {
+    const { count: itemCount, error: itemErr } = await supabaseAdmin
+      .from('production_items')
+      .select('id', { count: 'exact', head: true })
+      .in('package_id', live.map(p => p.id as string))
+    if (itemErr) return { ok: false, reason: `读不到生产包内容，暂不能退回：${itemErr.message}` }
+    if ((itemCount ?? 0) > 0) return { ok: false, reason: '生产包里已经有内容条目，先处理完再退回草稿。' }
+  }
+  return { ok: true }
+}
+
+export async function revokePlanTasks(planId: string): Promise<{ revoked: number; packages_removed: number }> {
   const { data, error } = await supabaseAdmin
     .from('execution_items')
     .delete()
@@ -280,5 +315,16 @@ export async function revokePlanTasks(planId: string): Promise<{ revoked: number
   if (error) {
     throw new Error(`Failed to revoke plan tasks: ${error.message}`)
   }
-  return { revoked: (data ?? []).length }
+
+  // 同一次批准派出的空草稿生产包一起清掉，免得留下指向已删待办的陈旧包、再批准时又多出一套
+  const { data: pkgs, error: pkgErr } = await supabaseAdmin
+    .from('production_packages')
+    .delete()
+    .eq('marketing_plan_id', planId)
+    .eq('status', 'draft')
+    .select('id')
+  if (pkgErr) {
+    throw new Error(`Failed to revoke plan packages: ${pkgErr.message}`)
+  }
+  return { revoked: (data ?? []).length, packages_removed: (pkgs ?? []).length }
 }

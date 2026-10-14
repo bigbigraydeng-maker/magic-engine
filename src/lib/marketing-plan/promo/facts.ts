@@ -148,6 +148,9 @@ async function loadInsights(clientId: string, accountIds: string[], win: { start
     results += r.results ?? 0
     if (r.fetched_at && (asOf === null || r.fetched_at > asOf)) asOf = r.fetched_at
   }
+  // Meta 不返回零花费日的行：整个窗口没有行，可能是真的没花钱，也可能是取数断了。
+  // 证明不了窗口被覆盖就按"读不出来"处理，免得把数据断档显示成"花费 0、进度落后"。
+  if (accountIds.some(id => !spend[id])) return { spend: null, results: null, as_of: asOf }
   return { spend, results, as_of: asOf }
 }
 
