@@ -52,3 +52,10 @@ Dropbox `00_Inbox/industry-logistics/2026-10-14_International_Logistics`：20 �
 ## 6. 一个必须先说清的缺口
 
 数据卡是**纯数字画面，没有镜头素材**。PM 要的「用物流素材做视频」，6 条里只有「价格封面/价格卡」那部分能靠数据卡；**带素材的画面要走 montage 模板**（已接线，也受 ①② 约束）。所以 6 条建议做成：**价格封面（datacard 出 1 张片头）+ montage 素材片体**，或先交 montage 版。需 18 号定拼法，我再动。另：物流行业配方库为 0 条，对账表只能如实写缺口。
+
+## 7. 进展（111 号，同日晚）
+
+- PR 2646（A 级草稿）：数据卡接线已过子牙+魏征审，问题已修；等 PM 本人回「合 2646」。
+- §3a 已做：`MagicLab_Studio/East_Inter/brandkit/`（logo_color / logo_white / watermark / brand_red.txt，logo 来自本目录 brand/ 的 SVG 渲染，主色 #1F7AB8）。库里 master_briefs 的 VI 字段为空，颜色以 PM 指定为准。`remotion-assets/` 已建空目录。
+- §3c 只读查到：East 的 client_id 为 `2e3f040d-4497-4527-89f6-50b6fa91e205`（库 glbdnayojixmexgofbsd），`brand_redline_phrases` 为空数组 → 复扫对 East 目前是空转。要补禁用词（倒计时/限时/截止/最低价/最便宜等）须写生产库，A 级，待 PM 点头，未写。
+- §3b 未做：出片机 `.env` 加 East 的 client_id（两项）并重启，等 PM/18 号。
