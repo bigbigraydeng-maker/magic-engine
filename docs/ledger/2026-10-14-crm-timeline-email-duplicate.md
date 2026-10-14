@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-14
 done_on: 2026-10-14
-done_ref: pr:2620
+done_ref: pr:2623
 source: session:1a85e0eb
 verify_by: 2026-10-21
 verify_how: 打开 Tony's Lord Nelson 的抽屉：18:41 我们回的那封邮件只出现一次（气泡）；客人来的邮件仍是「主题卡片 + 正文气泡」
