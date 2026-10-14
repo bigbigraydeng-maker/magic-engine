@@ -6,7 +6,7 @@ owner: pm
 decided_on: 2026-10-14
 source: session:0bd22676
 verify_by: 2026-10-17
-verify_how: 看客户有没有回 logo、主色、照片和计算器当前费率能否演示；没回就仍不能出图出片，文案保持待审；同时看有没有人定下谁在 Business Suite 点发布
+verify_how: 看苏东坡复看过没、真实照片有没有；PM 已定报价可公开、logo 主色由 PM 定（卡 `2026-10-14-east-inter-pm-decides-quote-public-and-brand`）；同时看有没有人定下谁在 Business Suite 点发布
 ---
 文案稿和客户消息稿在 docs/clients/east-inter/ 下，只用官网信息，没发布、没设开关、没写库。
 消息稿要走 PM 的微信发出（系统里没有客户联系渠道），视频 D3、D7 等 logo 和照片，物流行业没有爆款配方样本。
