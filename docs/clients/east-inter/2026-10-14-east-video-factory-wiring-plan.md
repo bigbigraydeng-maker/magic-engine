@@ -1,6 +1,6 @@
 # East Inter 出片接线方案（111 号，2026-10-14）
 
-- **性质**：只读核对 + 方案，没改任何代码/名单/库，没出片。风险级 **A**（改准入 + 改出片机代码），须子牙+魏征两审、PM 回「合 N」。
+- **性质**：方案 + §2 数据卡接线代码（PR 2646）；没改名单/库，没出片。风险级 **A**（改准入 + 改出片机代码），须子牙+魏征两审、PM 回「合 N」。
 - **核对基线**：origin/main `b876f4bf4`（本地快照，2026-10-14）。
 
 ## 1. East 为什么被拒（事实）
@@ -9,7 +9,7 @@
 |---|---|---|---|
 | ① remotion 准入名单 | 出片机本机 `.env` 的 `FACTORY_REMOTION_CLIENT_IDS`（`scripts/factory-worker/worker.mjs:139` 读，`remotion-branch.mjs:360` 判）。**不在仓库、不在数据库**，默认空=全拒 | 出片机进程 | 不在名单 → 报「这个客户没有开通 remotion 出片」 |
 | ② 客户→素材文件夹映射 | 出片机 `.env` 的 `FACTORY_CLIENT_STUDIO`（`worker.mjs:85`、`brandkitFor`），**绝不回退别家品牌包**（2026-08 Oztop 事故） | 出片机进程 | 没配；且 `~/Dropbox/MagicLab_Studio/` 下**没有 East 文件夹、没有品牌包** → 即使入名单也会失败 |
-| ③ 数据卡模板 | `remotion-branch.mjs:443` 对 `datacard` 一律抛 `DATACARD_NOT_WIRED` | 出片机代码 | 模板已注册（PR 2582），但没接线 |
+| ③ 数据卡模板 | 原 `remotion-branch.mjs` 对 `datacard` 一律抛 `DATACARD_NOT_WIRED` | 出片机代码 | **已接线（PR 2646：拒收已删，caption/SRT 已补）**；模板 PR 2582 |
 | ④ 红线复扫 | 服务端 `complete-work-order.ts:200` 用 `clients.brand_redline_phrases` 扫 worker 回传的 `caption` | 服务端 | East 的红线词是否已配，**未查（要查库，只读）** |
 
 结论：被拒不是「一道锁」，是四处各缺一块；其中①②是本机配置（不进仓库），③是代码，④是库里的客户配置。
@@ -45,7 +45,7 @@ Dropbox `00_Inbox/industry-logistics/2026-10-14_International_Logistics`：20 �
 ## 5. 先后顺序（等 18 号拍板）
 
 1. 18 号看本方案 → 通过。
-2. 本窗口写 §2 代码 + 测试（A 级，PR 草稿，子牙+魏征审，PM 回「合 N」）。
+2. §2 代码 + 测试已写（PR 2646，A 级，子牙+魏征审，PM 回「合 N」）。
 3. 合并后：做 §3a/d，18 号/PM 做 §3b/c。
 4. 之后才出 6 条片 → 苏东坡+马良审。**不发布、不设开关、不写生产库。**
 
