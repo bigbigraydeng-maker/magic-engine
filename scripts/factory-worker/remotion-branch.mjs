@@ -182,13 +182,15 @@ export function buildPostcardText(props) {
   const hook = props.hook.lines.map(clean).join(' ')
   const scenes = props.scenes.map((sc) => `${clean(sc.place)} ${clean(sc.line)}`)
   const p = props.price
-  const price = [
-    clean(p.fromLabel),
-    clean(`${p.currencyPrefix}${p.amount.toLocaleString('en-US')}`),
-    clean(p.qualifier),
-    ...(p.dateLine === undefined || p.dateLine === null ? [] : [clean(p.dateLine)]),
-    clean(p.footnote),
-  ].join(' ')
+  const price = p == null
+    ? clean(props.end.title)
+    : [
+      clean(p.fromLabel),
+      clean(`${p.currencyPrefix}${p.amount.toLocaleString('en-US')}`),
+      clean(p.qualifier),
+      ...(p.dateLine === undefined || p.dateLine === null ? [] : [clean(p.dateLine)]),
+      clean(p.footnote),
+    ].join(' ')
   return { hook, scenes, price }
 }
 
@@ -203,10 +205,14 @@ export function assertPostcardTextVisible(props) {
   const parts = [
     ...props.hook.lines.map((t) => ['钩子', t]),
     ...props.scenes.flatMap((sc, i) => [[`第 ${i + 1} 景地名`, sc.place], [`第 ${i + 1} 景文案`, sc.line]]),
-    ['价格前缀', props.price.fromLabel],
-    ['价格说明', props.price.qualifier],
-    ['价格脚注', props.price.footnote],
-    ...(props.price.dateLine == null ? [] : [['价格日期行', props.price.dateLine]]),
+    ...(props.price == null
+      ? [['片尾标题', props.end.title]]
+      : [
+        ['价格前缀', props.price.fromLabel],
+        ['价格说明', props.price.qualifier],
+        ['价格脚注', props.price.footnote],
+        ...(props.price.dateLine == null ? [] : [['价格日期行', props.price.dateLine]]),
+      ]),
   ]
   for (const [name, t] of parts) {
     if (clean(t) === '') throw new RemotionOrderError(`明信片${name}清理后是空的（只含不可见字符）`)

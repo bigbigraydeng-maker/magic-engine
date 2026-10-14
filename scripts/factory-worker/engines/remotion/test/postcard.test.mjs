@@ -57,6 +57,7 @@ const validProps = () => ({
     qualifier: 'per person',
     footnote: 'Sample itinerary only',
   },
+  end: null,
   timing: {
     hookSec: 3,
     sceneSec: 4,
@@ -233,6 +234,40 @@ describe('banned words (extended)', () => {
   })
 })
 
+describe('banned words (curly quotes and new phrases)', () => {
+  test('flags a curly-apostrophe banned phrase', () => {
+    assert.ok(bannedWordHits('Don\u2019t miss out').length > 0)
+  })
+
+  test('flags new English promotional phrases', () => {
+    assert.ok(bannedWordHits('Book soon').length > 0)
+    assert.ok(bannedWordHits('Closes soon').length > 0)
+    assert.ok(bannedWordHits('Booking closes Friday').length > 0)
+    assert.ok(bannedWordHits('Final call').length > 0)
+    assert.ok(bannedWordHits('Going fast').length > 0)
+    assert.ok(bannedWordHits('Few seats').length > 0)
+    assert.ok(bannedWordHits('Sale ends Friday').length > 0)
+    assert.ok(bannedWordHits('While stocks last').length > 0)
+    assert.ok(bannedWordHits('Prices rise soon').length > 0)
+    assert.ok(bannedWordHits('Seats are limited').length > 0)
+    assert.ok(bannedWordHits('This offer expired').length > 0)
+  })
+
+  test('flags new Chinese promotional phrases', () => {
+    assert.ok(bannedWordHits('最后一天').length > 0)
+    assert.ok(bannedWordHits('仅限今天').length > 0)
+    assert.ok(bannedWordHits('错过再等').length > 0)
+    assert.ok(bannedWordHits('限额').length > 0)
+    assert.ok(bannedWordHits('限·时').length > 0)
+  })
+
+  test('does not flag allowed wording', () => {
+    assert.deepEqual(bannedWordHits('Unlimited access'), [])
+    assert.deepEqual(bannedWordHits('a small group of 12'), [])
+    assert.deepEqual(bannedWordHits('限 12 人小团'), [])
+  })
+})
+
 describe('sourceUrl', () => {
   test('a non-http url is rejected', () => {
     rejects((props) => {
@@ -263,6 +298,31 @@ describe('sourceUrl', () => {
     props.scenes[0].sourceUrl = 'https://example.com/tour'
     const parsed = parsePostcardProps(props)
     assert.equal(parsed.scenes[0].sourceUrl, 'https://example.com/tour')
+  })
+
+  test('reserved hosts and credentials are rejected', () => {
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'https://foo.localhost/x'
+    })
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'https://user:pw@example.com/x'
+    })
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'http://a.b'
+    })
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'https://example.internal/x'
+    })
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'http://[::1]/x'
+    })
+  })
+
+  test('a normal https url with a path passes', () => {
+    const props = validProps()
+    props.scenes[0].sourceUrl = 'https://www.example.com/tours/silk-road'
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.scenes[0].sourceUrl, 'https://www.example.com/tours/silk-road')
   })
 })
 
@@ -298,6 +358,38 @@ describe('source quote relevance', () => {
     rejects((props) => {
       props.scenes[0].sourceQuote = 'the harbour wakes slowly, book now'
     }, '促销词')
+  })
+})
+
+describe('source quote coverage', () => {
+  test('a Chinese line needs at least half its characters', () => {
+    rejects((props) => {
+      props.scenes[0].line = '京都的秋天'
+      props.scenes[0].sourceQuote = '这里有的'
+    }, '出处片段里找不到这句话的主要词')
+  })
+
+  test('a Chinese line with a supporting quote passes', () => {
+    const props = validProps()
+    props.scenes[0].line = '京都的秋天'
+    props.scenes[0].sourceQuote = '京都的秋天很美'
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.scenes[0].line, '京都的秋天')
+  })
+
+  test('an English line needs at least half its long words', () => {
+    rejects((props) => {
+      props.scenes[0].line = 'Quiet harbour boats drift'
+      props.scenes[0].sourceQuote = 'harbour only'
+    }, '出处片段里找不到这句话的主要词')
+  })
+
+  test('an English line with a supporting quote passes', () => {
+    const props = validProps()
+    props.scenes[0].line = 'Quiet harbour boats drift'
+    props.scenes[0].sourceQuote = 'quiet harbour boats'
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.scenes[0].line, 'Quiet harbour boats drift')
   })
 })
 
@@ -352,6 +444,54 @@ describe('asset collection', () => {
     const files = collectPostcardAssetFiles(parsePostcardProps(props))
     assert.ok(files.includes('music/track.mp3'))
     assert.equal(files.length, 6)
+  })
+})
+
+describe('end card', () => {
+  test('price null with an end card parses', () => {
+    const props = validProps()
+    props.price = null
+    props.end = { backdropClip: 'clips/end.mp4', title: 'QUIET HARBOUR' }
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.price, null)
+    assert.ok(parsed.end !== null)
+    assert.equal(parsed.end.title, 'QUIET HARBOUR')
+  })
+
+  test('price null and end null is rejected', () => {
+    rejects((props) => {
+      props.price = null
+      props.end = null
+    }, 'price 和 end 必须二选一')
+  })
+
+  test('price non-null and end non-null is rejected', () => {
+    rejects((props) => {
+      props.end = { backdropClip: 'clips/end.mp4', title: 'QUIET HARBOUR' }
+    }, 'price 和 end 必须二选一')
+  })
+
+  test('an end title with a banned word is rejected', () => {
+    rejects((props) => {
+      props.price = null
+      props.end = { backdropClip: 'clips/end.mp4', title: 'Last chance' }
+    }, '促销词')
+  })
+
+  test('an end title wider than 14 units is rejected', () => {
+    rejects((props) => {
+      props.price = null
+      props.end = { backdropClip: 'clips/end.mp4', title: 'A'.repeat(30) }
+    }, '结束卡标题太宽')
+  })
+
+  test('asset collection uses the end backdrop when price is null', () => {
+    const props = validProps()
+    props.price = null
+    props.end = { backdropClip: 'clips/end.mp4', title: 'QUIET HARBOUR' }
+    const files = collectPostcardAssetFiles(parsePostcardProps(props))
+    assert.ok(files.includes('clips/end.mp4'))
+    assert.ok(!files.includes('clips/price.mp4'))
   })
 })
 

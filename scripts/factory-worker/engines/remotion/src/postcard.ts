@@ -16,6 +16,8 @@ export const HOOK_LINE_UNITS = 8.7;
 export const SCENE_LINE_UNITS = 25;
 /** Width budget of one scene place label, in units. */
 export const PLACE_UNITS = 19;
+/** Width budget of the end-card title, in units. */
+export const END_TITLE_UNITS = 14;
 
 /** English phrases that must never appear (matched as whole words, case-insensitive). */
 export const ENGLISH_BANNED = [
@@ -42,6 +44,29 @@ export const ENGLISH_BANNED = [
   "don't miss out",
   'last few',
   'almost gone',
+  'book soon',
+  'closes soon',
+  'booking closes',
+  'final call',
+  'going fast',
+  'few seats',
+  'last seats',
+  'few spots',
+  'last spots',
+  'sale ends',
+  'while stocks last',
+  'while supplies last',
+  'selling out fast',
+  'sell out fast',
+  'fills up fast',
+  'filling fast',
+  'prices rise soon',
+  'price goes up',
+  'prices increase',
+  'seats are limited',
+  'spaces are limited',
+  'places are limited',
+  'spots are limited',
 ];
 
 /** Chinese phrases that must never appear (plain substring match). */
@@ -66,6 +91,16 @@ export const CHINESE_BANNED = [
   '倒數',
   '最後機會',
   '早鳥',
+  '最后一天',
+  '最後一天',
+  '仅限',
+  '僅限',
+  '今天最后',
+  '今天最後',
+  '错过再等',
+  '錯過再等',
+  '限额',
+  '限額',
 ];
 
 /** Scarcity patterns that must never appear (returned as the matched text). */
@@ -73,7 +108,7 @@ const SCARCITY_PATTERNS = [
   /only\s+\d+\s+(left|remaining|seats|spots|places)/i,
   /\b\d+\s+(days?|weeks?|seats?|spots?)\s+left\b/i,
   /\boffer\s+ends\b/i,
-  /\bexpires?\b/i,
+  /\bexpir(?:es|ed|ing)\b/i,
   /\bonly\s+(a\s+few|one|two|three|four|five|six|seven|eight|nine|ten)\s+(left|remaining)\b/i,
   /\bjust\s+\d+\s+(spots?|seats?|places?)\b/i,
 ];
@@ -97,12 +132,15 @@ function isWideChar(code: number): boolean {
 
 /**
  * Normalize a string for banned-word scanning: NFKC-normalize, strip zero-width /
- * bidi / control characters, collapse non-breaking spaces and runs of
- * hyphens/dashes/underscores/whitespace into a single space, then trim.
+ * bidi / control characters, map curly quotes to ASCII, collapse non-breaking
+ * spaces and runs of hyphens/dashes/underscores/whitespace into a single space,
+ * then trim.
  */
 export function normalizeForScan(s: string): string {
   let out = s.normalize('NFKC');
   out = out.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00AD]/g, '');
+  out = out.replace(/[\u2018\u2019\u201B\u02BC]/g, "'");
+  out = out.replace(/[\u201C\u201D]/g, '"');
   out = out.replace(/\u00A0/g, ' ');
   out = out.replace(/[-_\s]+/g, ' ');
   return out.trim();
@@ -129,7 +167,7 @@ export function textWidthUnits(s: string, uppercase = false): number {
 export function bannedWordHits(s: string): string[] {
   const hits: string[] = [];
   const normalized = normalizeForScan(s);
-  const compact = normalized.replace(/\s+/g, '');
+  const compact = normalized.replace(/[\s·・•.]/g, '');
   for (const word of ENGLISH_BANNED) {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`(?<![A-Za-z])${escaped}(?![A-Za-z])`, 'i');
@@ -165,7 +203,7 @@ const SCENE = z
   })
   .strict();
 
-const PRICE = z
+const PRICE_SHAPE = z
   .object({
     backdropClip: relFile('镜头文件', CLIP_EXTS),
     fromLabel: text(20),
@@ -180,6 +218,13 @@ const PRICE = z
       .min(30, { message: '脚注字号必须在 30 到 60 之间' })
       .max(60, { message: '脚注字号必须在 30 到 60 之间' })
       .optional(),
+  })
+  .strict();
+
+const END = z
+  .object({
+    backdropClip: relFile('镜头文件', CLIP_EXTS),
+    title: text(40),
   })
   .strict();
 
@@ -222,22 +267,53 @@ function relevanceTokens(s: string): string[] {
   return tokens;
 }
 
-/** True when at least one token of `text` occurs in `quote` (or the whole text when it has no tokens). */
+/**
+ * True when the quote supports the text. When the text has no tokens the whole
+ * text must occur in the quote; otherwise at least half (rounded up) of the
+ * tokens must occur in the quote.
+ */
 function quoteSupports(text: string, quote: string): boolean {
   const tokens = relevanceTokens(text);
   const haystack = normalizeForScan(quote).toLowerCase();
   if (tokens.length === 0) {
     return haystack.includes(normalizeForScan(text).toLowerCase());
   }
-  return tokens.some((token) => haystack.includes(token));
+  const needed = Math.ceil(tokens.length / 2);
+  let found = 0;
+  for (const token of tokens) {
+    if (haystack.includes(token)) found += 1;
+  }
+  return found >= needed;
 }
 
-/** True when the URL is a plain http(s) URL with a real host (not localhost / IPv4). */
+/** True when the URL is a plain http(s) URL with a real host (not localhost / IPv4 / IPv6 / reserved TLD). */
 function isAcceptableSourceUrl(url: string): boolean {
   if (!/^https?:\/\/[^\s/]+\.[^\s/]+(\/\S*)?$/.test(url)) return false;
-  const host = url.replace(/^https?:\/\//, '').split(/[/?#]/)[0].split(':')[0].toLowerCase();
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (parsed.username !== '' || parsed.password !== '') return false;
+  const host = parsed.hostname.toLowerCase();
   if (host === 'localhost') return false;
+  if (
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.endsWith('.lan') ||
+    host.endsWith('.test') ||
+    host.endsWith('.invalid')
+  ) {
+    return false;
+  }
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+  if (host.includes(':')) return false;
+  const labels = host.split('.');
+  const last = labels[labels.length - 1];
+  if (!/^[a-z]{2,}$/.test(last)) return false;
   return true;
 }
 
@@ -271,7 +347,8 @@ export const PostcardPropsSchema = z
       .array(SCENE)
       .min(MIN_SCENES, { message: '场景数量最少 2 个' })
       .max(MAX_SCENES, { message: '场景数量最多 4 个' }),
-    price: PRICE,
+    price: PRICE_SHAPE.nullable(),
+    end: END.nullable(),
     timing: TIMING,
   })
   .strict()
@@ -309,12 +386,14 @@ export const PostcardPropsSchema = z
         [['scenes', i, 'place'], scene.place],
         [['scenes', i, 'line'], scene.line],
       ]),
-      [['price', 'fromLabel'], val.price.fromLabel],
-      [['price', 'qualifier'], val.price.qualifier],
-      [['price', 'footnote'], val.price.footnote],
     ];
-    if (val.price.dateLine !== undefined) {
-      bannedTargets.push([['price', 'dateLine'], val.price.dateLine]);
+    if (val.price !== null) {
+      bannedTargets.push([['price', 'fromLabel'], val.price.fromLabel]);
+      bannedTargets.push([['price', 'qualifier'], val.price.qualifier]);
+      bannedTargets.push([['price', 'footnote'], val.price.footnote]);
+      if (val.price.dateLine !== undefined) {
+        bannedTargets.push([['price', 'dateLine'], val.price.dateLine]);
+      }
     }
     for (const [path, value] of bannedTargets) {
       const hits = bannedWordHits(value);
@@ -366,6 +445,34 @@ export const PostcardPropsSchema = z
         });
       }
     });
+
+    const hasPrice = val.price !== null;
+    const hasEnd = val.end !== null;
+    if (hasPrice === hasEnd) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['end'],
+        message: 'price 和 end 必须二选一：要么显示价格，要么显示结束卡',
+      });
+    }
+
+    if (val.end !== null) {
+      if (textWidthUnits(val.end.title, true) > END_TITLE_UNITS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['end', 'title'],
+          message: `结束卡标题太宽（最多约 ${END_TITLE_UNITS} 个单位）`,
+        });
+      }
+      const endHits = bannedWordHits(val.end.title);
+      if (endHits.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['end', 'title'],
+          message: `文字里不能出现促销词：${endHits.join('、')}`,
+        });
+      }
+    }
 
     const totalSec = val.timing.hookSec + val.scenes.length * val.timing.sceneSec + val.timing.priceSec;
     if (totalSec > MAX_TOTAL_SEC) {
@@ -421,7 +528,11 @@ export function collectPostcardAssetFiles(props: PostcardProps): string[] {
   for (const scene of props.scenes) {
     files.push(scene.clip);
   }
-  files.push(props.price.backdropClip);
+  if (props.price !== null) {
+    files.push(props.price.backdropClip);
+  } else if (props.end !== null) {
+    files.push(props.end.backdropClip);
+  }
   files.push(props.logoFile);
   if (props.musicFile !== null) {
     files.push(props.musicFile);

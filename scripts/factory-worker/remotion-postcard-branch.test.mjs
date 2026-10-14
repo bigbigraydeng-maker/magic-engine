@@ -89,4 +89,11 @@ describe('assertPostcardTextVisible', () => {
   it('does not throw for valid props', () => {
     expect(() => assertPostcardTextVisible(props())).not.toThrow()
   })
+
+  it('uses the end title instead of a price block when price is null', () => {
+    const noPrice = { ...props(), price: null, end: { backdropClip: 'clips/e.mp4', title: 'QUIET HARBOUR' } }
+    expect(buildPostcardText(noPrice).price).toBe('QUIET HARBOUR')
+    expect(() => assertPostcardTextVisible(noPrice)).not.toThrow()
+    expect(() => assertPostcardTextVisible({ ...noPrice, end: { backdropClip: 'clips/e.mp4', title: '\u200b' } })).toThrow(RemotionOrderError)
+  })
 })
