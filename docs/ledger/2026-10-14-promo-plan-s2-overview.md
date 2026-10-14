@@ -4,7 +4,7 @@ title: 推广计划 S2：阶段卡片总览 + 示例计划预览（115 号，10-
 status: decided
 owner: agent
 decided_on: 2026-10-14
-source: pr:promo-plan-s2
+source: pr:2666
 verify_by: 2026-10-28
 verify_how: PM 在客户页「推广计划」点「看示例计划」，看到预热/主推/收尾三个阶段卡片；有真实推广结构的计划直接显示卡片
 ---
