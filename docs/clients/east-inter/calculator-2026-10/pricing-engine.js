@@ -24,20 +24,24 @@
     Object.entries(config.bulkAir).forEach(([k,r]) => {if (k !== 'unitKg') bulk[k] = {DDU:r.DDURmb.map(([kg,v]) => [kg,aud(v)]),DDP:r.DDPRmb.map(([kg,v]) => [kg,aud(v)]),days:r.days};});
     const f = config.fees;
     const fees = {fumigation:aud(f.fumigationRmb),broker:f.brokerAud,brokerHigh:f.brokerHighAud,brokerHighThreshold:f.brokerHighThresholdAud,aqisFumigation:f.aqisFumigationAud,dduClearance:f.dduClearanceAud,dduClearanceThreshold:f.dduClearanceThresholdAud};
-    return {lcl,airParcel,seaParcel,bulk,fees};
+    const rp = config.remotePostcodes || {surchargeRmbPerKg:{},askQuote:[]};
+    const remote = {surchargeAudPerKg:{},askQuote:new Set(rp.askQuote)};
+    Object.entries(rp.surchargeRmbPerKg).forEach(([rmb,list]) => list.forEach(pc => {remote.surchargeAudPerKg[pc] = aud(Number(rmb));}));
+    return {lcl,airParcel,seaParcel,bulk,fees,remote};
   }
 
   function createEngine(config) {
     const R = resolveRates(config);
     const seaExtras = 'Not included: any applicable GST (10% of goods value), import duty (0–10%, depending on product), fumigation ('+money(R.fees.fumigation)+' per shipment for wood/natural materials), AQIS inspection of fumigated goods ('+money(R.fees.aqisFumigation)+' per shipment), or customs broker fee ('+money(R.fees.broker)+'; '+money(R.fees.brokerHigh)+' if cargo value exceeds '+money(R.fees.brokerHighThreshold)+'). Contact us to confirm which charges apply.';
 
-    function estimate({service,city,quantity,cargo='normal',tax='DDP',delivery='door',volume=null,weightKg=null}) {
+    function estimate({service,city,quantity,cargo='normal',tax='DDP',delivery='door',volume=null,weightKg=null,postcode=null}) {
       if (!Number.isFinite(quantity) || quantity <= 0) return {error:'Enter a valid weight or volume greater than zero.'};
       if (service !== 'lcl' && volume !== null && (!Number.isFinite(volume) || volume < 0)) return {error:'Enter a valid packed volume of zero or greater, or leave it blank.'};
       if (service === 'lcl' && weightKg !== null && (!Number.isFinite(weightKg) || weightKg < 0)) return {error:'Enter a valid cargo weight of zero or greater, or leave it blank.'};
       const volumetric = service === 'lcl' || volume === null ? 0 : volume * 1000000 / 6000;
       const weight = service === 'lcl' ? quantity : Math.max(quantity,volumetric);
       if (!Number.isFinite(weight)) return {error:'The entered shipment size is too large. Contact us for a quote.'};
+      if (service === 'bulkAir' && postcode !== null && !/^\d{4}$/.test(postcode)) return {error:'Enter a 4-digit Australian postcode, or leave it blank.'};
       if (service === 'lcl' && quantity < 1) return {error:'LCL rates start at 1 m³. Contact us for smaller shipments.'};
       const lclCbm = service === 'lcl' && weightKg !== null ? Math.max(quantity,weightKg / 500) : quantity;
       if (service === 'bulkAir' && (weight < 10 || weight > 99)) return {error:'Standard bulk air rates cover 10–99kg chargeable weight only. Contact us for other weights, including the reduced rates for shipments over 100kg.'};
@@ -92,6 +96,14 @@
       }
       if (service === 'bulkAir' && tax === 'DDU') warning='Freight only, for general goods. On this tax-excluded channel the recipient pays Australian duties and GST, and a '+money(R.fees.dduClearance)+' clearance fee per shipment applies where declared goods value exceeds '+money(R.fees.dduClearanceThreshold)+' (payable by the recipient at destination). Goods with batteries or magnets are priced on a separate rate. Remote-postcode and oversize surcharges may also apply. Contact us for the full total.';
       if (service === 'bulkAir' && tax === 'DDP') warning='Freight only, for general goods. Goods with batteries or magnets are priced on a separate rate. Remote-postcode, oversize/overweight and certain product surcharges listed in the rate sheet may apply. Contact us to confirm.';
+      if (service === 'bulkAir' && postcode !== null) {
+        if (R.remote.askQuote.has(postcode)) warning+=' Postcode '+postcode+' is a remote or limited-service area: the delivery charge is quoted on request, so it is not included here. Contact us.';
+        else if (R.remote.surchargeAudPerKg[postcode]) {
+          const per=R.remote.surchargeAudPerKg[postcode], extra=per*billed;
+          total+=extra; lines.push(['Remote postcode surcharge · '+postcode+' · '+number(billed)+'kg × '+money(per),extra]);
+          note+=' Remote delivery postcode '+postcode+': surcharge included.';
+        }
+      }
       if (!Number.isFinite(total)) return {error:'The entered shipment size is too large. Contact us for a quote.'};
       if (service !== 'lcl') {
         note+=' Actual weight: '+number(quantity)+'kg.';
