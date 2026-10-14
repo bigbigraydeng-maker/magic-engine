@@ -69,24 +69,28 @@ function KindFilter(props: Pick<FilterProps, 'kindFilter' | 'onKindFilterChange'
   )
 }
 
+/**
+ * 第一行：先选「看谁」（全部 / 终端客户 / 同行），智能分段开关靠右。
+ * 阶段筛选在它下面——先收窄人群，再按阶段细分，顺序跟人的想法一致（2026-10-14 好用性整理）。
+ */
 function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' | 'kindFilter' | 'onKindFilterChange'>) {
   const { grouped, onToggleGrouped, kindFilter, onKindFilterChange } = props
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={onToggleGrouped}
-        className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
-      >
-        {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
-      </button>
+      {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
+      {!grouped && <KindFilter kindFilter={kindFilter} onKindFilterChange={onKindFilterChange} />}
       {grouped && (
         <span className="text-xs text-me-charcoal/45">
           系统读完往来记录和 AI 摘要，告诉你今天该先联系谁、做什么；段内按紧急程度排，点表头不改顺序
         </span>
       )}
-      {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
-      {!grouped && <KindFilter kindFilter={kindFilter} onKindFilterChange={onKindFilterChange} />}
+      <button
+        type="button"
+        onClick={onToggleGrouped}
+        className="ml-auto rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
+      >
+        {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
+      </button>
     </div>
   )
 }
@@ -94,16 +98,16 @@ function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' |
 export function ListFilters(props: FilterProps) {
   return (
     <>
-      <StageFilter
-        stages={props.stages}
-        stageFilter={props.stageFilter}
-        onStageFilterChange={props.onStageFilterChange}
-      />
       <GroupToggleRow
         grouped={props.grouped}
         onToggleGrouped={props.onToggleGrouped}
         kindFilter={props.kindFilter}
         onKindFilterChange={props.onKindFilterChange}
+      />
+      <StageFilter
+        stages={props.stages}
+        stageFilter={props.stageFilter}
+        onStageFilterChange={props.onStageFilterChange}
       />
     </>
   )

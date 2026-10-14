@@ -9,8 +9,8 @@ done_on: 2026-09-27
 done_ref: doc:docs/ledger/2026-09-27-cts-thruplay-audience-supply.md
 verify_by: 2026-09-28
 verify_how: 三项全查。①版位干净：拉该广告组昨天的花费按版位拆（breakdowns=publisher_platform），audience_network 花费必须约等于 0，不为 0 立刻暂停该组并记事故。②池子开始涨：查 ad_entity_snapshots 里「看完视频的人」「看过 50% 的人」两个受众的人数下限，要比 9/26 的 2.22 万 / 3.78 万有上升；持平说明供血没生效，回头查视频有没有真进池。③真实完播成本：拉该组完播数和花费，算每次完播成本，跟历史被污染期的数字区别开（污染期完播率虚高到 90%+）。三项任一不达标就写进 check_note 并把结论交回 PM，不要自动加预算
-last_checked: 2026-10-09
-check_note: ②部分确认（9-28：ad_entity_snapshots 两池子 9-27 当天涨幅高于此前 10 天噪音）；①③（版位花费 / 真实完播成本）生产库没有每日 placement 拆分或完播数表，必须直调 Meta 报表接口，夜巡只读 SQL 取不到——两轮都判不了，交 PM
+last_checked: 2026-10-14
+check_note: 第三轮仍判不了，但今晚查出了「为什么取不到」的根因：①③ 要的版位拆分和完播数只能走 Meta 报表接口，而池子所在的那个 CTS 个人广告账号今晚在广告接口里是 account_status=UNSETTLED、is_queryable=false（原因只给了 Unknown error），工具明确要求不得对它发查询；名字叫 CTS 的那个业务组合账号是空壳。退路也断了：生产库 ad_daily_insights 里 CTS 三个层级的最新一天都停在 10-10，今天 10-14 已缺 4 天。两件事都超出本卡范围，已另开卡请 PM 看
 ---
 PM 2026-09-27「$15 先跑」。
 
