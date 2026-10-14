@@ -22,6 +22,8 @@
 3. 优先用 CTS 近 14 天**没用过**的曲子；用过的（`founders-at-dawn`、`jade_river_journey`、`momentum_q`、`feel-good-travel`、`road-afar`）按上面规则计数。
 4. 曲子在片子的 `brief.remotion.props.musicFile` 里可读（我已核对）。曲库清单以 106 号手里的为准；仓库 `scripts/factory-worker/engines/remotion/catalog/music.json` 29 首，**其中只有 `pipa-trap` 量过音画偏差（状态 ready），其余是 `beats_unverified`**——换曲后第一次渲完要量一次偏差，±50 毫秒内才算数（工厂既有规矩）。
 
+5. **Story 视频的 BGM 也按同样规则计数**（84 号 10-15：Story 发布通道已支持视频 Story，Meta 接口没有音乐贴纸，BGM 只能烧进视频；视频必须走视频工厂并过审；MVP=每天 3 条里先做 1 条约 6 秒视频）。库里 Story 条目没有 BGM 曲目字段，**先把曲目编号记在周包文档 / 出片单里**，我放行前对照。Story 视频还没真跑过，上线第一条仍按「第一次真实调用」小心。
+
 **② 内容配比**
 1. **任一连续 4 条 Reel / Post 里，「清单 / 价格卡」型（list 模板、价格屏）至多 1 条。**
 2. **Reel 每周：清单 / 价格屏 ≤ 1 条，其余 ≥ 2 条用别的类型。**
