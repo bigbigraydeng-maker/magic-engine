@@ -1,5 +1,8 @@
 # East Inter 图文价格卡文案稿 v0.1（待审稿，101 号，2026-10-14）
 
+> **SHELVED 搁置不发（10-14 PM 拍板：East Inter 社媒和广告 100% 英文，面向澳洲本地买家）。** 本文件保留不删。英文版见 `2026-10-14-d1-d7-copy-en-draft.md`；价格卡的英文版见本文件末尾「英文版」一节。
+
+
 - **性质**：只是文案草稿。没发布、没建单、没设开关、没写库。风险级 C。**卡点更新（10-14）：PM 已决定新报价可对外使用，不再等客户确认**（台账卡 `2026-10-14-east-inter-pm-decides-quote-public-and-brand`）。仍然不能自己发：苏东坡要复看、发布要 PM 授权、谁点发布未定。
 - **用途**：周五前给广告和自然发布顶位的图文价格卡；视频（V1/V6/V7）等出片机准入和客户确认。
 - **没审过**：苏东坡、马良没看。审过之前不许当成可发版本。
@@ -169,7 +172,7 @@ Four costs not included in the sea freight estimate — confirm before booking.
 
 ## 英文版（供 108 号广告中英各半测试；只做卡 1、卡 2）
 
-英文只用官网计算器页的英文说法，不另加承诺。卡面角落统一用官网原句：「Indicative estimate. Final charges are subject to a binding quote.」
+英文只用官网计算器页的英文说法，不另加承诺。卡面角落统一为「Current rates · Indicative estimate. Final charges are subject to a binding quote.」（后半句是官网原句，前面加 Current rates 表示不写月份）
 
 **卡 1 英文**（10-14 苏东坡复审后改：大字加「约」，补「不含」）
 卡面：Guangzhou to Sydney · Sea freight LCL, 1 m³ · **A$378** · Door to door · clearance included · approx. 20 days
