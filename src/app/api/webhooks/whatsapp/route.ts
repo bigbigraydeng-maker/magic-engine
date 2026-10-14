@@ -72,6 +72,7 @@ import {
 import { storeEcho, applyFailedStatus } from '@/lib/whatsapp/inbound-handlers'
 import { storeHistoryChunks } from '@/lib/whatsapp/history-intake'
 import { recordUnclaimedNumber, type UnclaimedKind } from '@/lib/whatsapp/unclaimed'
+import { logRejection } from '@/lib/whatsapp/reject-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -579,6 +580,41 @@ async function handleHistory(
   }
 }
 
+type RejectReason =
+  | 'malformed_number'
+  | 'mixed_apps'
+  | 'disabled_number'
+  | 'signature_mismatch'
+  | 'lookup_unavailable'
+  | 'secret_unreadable'
+
+/**
+ * Refuse a delivery AND leave one fixed-text line saying why. Before this, a rejected signature
+ * was completely silent, so "Meta says it sent it, we show nothing" could not be diagnosed — the
+ * usual cause is a number whose app secret we do not hold (it then falls back to the env secret).
+ * The line carries only a reason code, which secret SOURCE was tried, a count and whether a
+ * signature header was present — never a secret, a signature, a number, an id or any body text.
+ */
+function rejectionLine(
+  reason: RejectReason,
+  ctx: { source: 'route' | 'env' | 'none'; numbers: number; hasSignatureHeader: boolean },
+): string {
+  return (
+    `[webhooks/whatsapp] delivery rejected: reason=${reason} secret_source=${ctx.source} ` +
+    `numbers=${ctx.numbers} signature_header=${ctx.hasSignatureHeader ? 'present' : 'absent'}`
+  )
+}
+
+function reject(
+  reason: RejectReason,
+  status: 401 | 503,
+  ctx: { source: 'route' | 'env' | 'none'; numbers: number; hasSignatureHeader: boolean },
+): NextResponse {
+  logRejection(`${reason}:${ctx.source}`, rejectionLine(reason, ctx))
+  const error = status === 503 ? 'Credential lookup unavailable' : 'Invalid signature'
+  return NextResponse.json({ error }, { status })
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   // The phone_number_id list is read from the UNVERIFIED body only to decide
   // WHICH secret verifies it — nothing is processed unless that secret's
@@ -591,24 +627,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const signature = req.headers.get('x-hub-signature-256')
+  const hasSignatureHeader = signature !== null
 
   const extracted = extractWebhookPhoneNumberIds(rawBody)
   if (!extracted.ok) {
-    // Same body as a bad signature: do not hint at the reason.
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    // Same body as a bad signature: do not hint at the reason to the caller (the log has it).
+    return reject('malformed_number', 401, { source: 'none', numbers: 0, hasSignatureHeader })
   }
+  const numbers = extracted.ids.length
 
   const choice = await chooseWebhookSecret(extracted.ids)
 
   let secret: string
   if (choice.kind === 'reject') {
     if (choice.reason === 'decrypt_failed') {
+      // A server-side configuration fault (every delivery for these numbers fails): leave a trace too.
+      logRejection(
+        'secret_unreadable:route',
+        rejectionLine('secret_unreadable', { source: 'route', numbers, hasSignatureHeader }),
+      )
       return NextResponse.json(
         { error: 'Server misconfiguration: webhook secret unreadable' },
         { status: 500 },
       )
     }
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    return reject(choice.reason === 'disabled_number' ? 'disabled_number' : 'mixed_apps', 401, {
+      source: 'none',
+      numbers,
+      hasSignatureHeader,
+    })
   } else if (choice.kind === 'route') {
     secret = choice.secret
   } else if (choice.kind === 'env') {
@@ -624,13 +671,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // vouch for a number that has its own app secret.
     const envSecret = process.env.META_APP_SECRET
     if (!choice.tableMissing || !envSecret || !isValidSignature(rawBody, signature, envSecret)) {
-      return NextResponse.json({ error: 'Credential lookup unavailable' }, { status: 503 })
+      return reject('lookup_unavailable', 503, { source: 'env', numbers, hasSignatureHeader })
     }
     secret = envSecret
   }
 
   if (!isValidSignature(rawBody, signature, secret)) {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+    return reject('signature_mismatch', 401, {
+      source: choice.kind === 'route' ? 'route' : 'env',
+      numbers,
+      hasSignatureHeader,
+    })
   }
 
   let payload: unknown
