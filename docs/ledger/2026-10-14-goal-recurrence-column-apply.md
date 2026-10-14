@@ -1,13 +1,13 @@
 ---
 id: 2026-10-14-goal-recurrence-column-apply
-title: 给目标表加「每月自动续建」标记那一列（等 PM 回「加列」），之后才能跑线上试跑
+title: 目标表的「每月自动续建」列已加；还差把 NAL 十月目标标成每月续建（改现有数据，等 PM 回「标记」）
 status: decided
 owner: pm
 decided_on: 2026-10-14
 source: pr:2428
-verify_by: 2026-10-16
-verify_how: PM 回「加列」后：库里目标表出现 recurrence 列；把 NAL 十月那条（2026-10-01~10-31）标成每月续建；带密钥访问 goals-expiry-check?dry_run=1 返回 200 且 planned 不含十月；再真跑一次十月仍只有 1 条。撤回办法：删掉该列和同名索引 uniq_goals_monthly_per_client_metric_month。
+verify_by: 2026-10-17
+verify_how: PM 回「标记」后：把 NAL 十月那条（2026-10-01~10-31）recurrence 设成 monthly；带密钥访问 goals-expiry-check?dry_run=1，应 200 且 planned 为 0、skipped_existing 为 1（十月已有，不重复建）；真跑一次后十月仍只有 1 条。11-01 之后应自动出现十一月那条（目标仍 300）。
 ---
-PR 2428 已合并，NAL 十月目标已补建（只有一条），但迁移没有自动上库：库里没有 recurrence 列。
-没加之前，每天的目标过期检查「标过期」正常、「续下个月」那步报错，十一月前对 NAL 无实际影响。
-迁移文件：supabase/migrations/20261010090000_goal_monthly_recurrence.sql（只加可空列和索引，不改现有数据）。
+2026-10-15 已加列（可空，现有 32 条目标一条未改，非空行 0），同名索引已建；线上试跑 dry_run=1 返回 200、无报错，但因为还没有任何目标被标成每月续建，planned=0，所以「不重复建」还没被证明。
+回滚加列：drop index if exists uniq_goals_monthly_per_client_metric_month; alter table goals drop column if exists recurrence;
+下一步（改现有数据，需 PM）：update goals set recurrence='monthly' where id in (NAL 十月那条 018b7053-656e-4640-ae66-e21833583901)；回滚：把它设回 null。
