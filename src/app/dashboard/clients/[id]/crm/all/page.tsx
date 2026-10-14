@@ -626,7 +626,7 @@ export default function CrmAllContactsPage() {
             <p className="text-xs font-bold text-me-charcoal/50">
               {grouped ? `共 ${total} 位客人` : `第 ${page} 页，共 ${total} 位客人`}
             </p>
-            {!grouped && <p className="text-xs text-me-charcoal/40">排序只对当前页生效</p>}
+            {!grouped && <p className="text-xs text-me-charcoal/40">默认按最近有来往排序；点表头只在本页内重排</p>}
           </div>
 
           {/* 刚搬过来时安抚一句，别让「全空的跟进阶段」像没做完的作业 */}
