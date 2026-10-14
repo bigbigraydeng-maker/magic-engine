@@ -31,6 +31,17 @@ export const ENGLISH_BANNED = [
   'spots left',
   'selling fast',
   'sold out soon',
+  'limited places',
+  'limited seats',
+  'limited availability',
+  'limited spaces',
+  'ends soon',
+  'book early',
+  'book today',
+  'act now',
+  "don't miss out",
+  'last few',
+  'almost gone',
 ];
 
 /** Chinese phrases that must never appear (plain substring match). */
@@ -45,12 +56,26 @@ export const CHINESE_BANNED = [
   '限量',
   '先到先得',
   '还剩',
+  '限定',
+  '限時',
+  '截至',
+  '抢',
+  '搶',
+  '名額',
+  '僅剩',
+  '倒數',
+  '最後機會',
+  '早鳥',
 ];
 
 /** Scarcity patterns that must never appear (returned as the matched text). */
 const SCARCITY_PATTERNS = [
   /only\s+\d+\s+(left|remaining|seats|spots|places)/i,
   /\b\d+\s+(days?|weeks?|seats?|spots?)\s+left\b/i,
+  /\boffer\s+ends\b/i,
+  /\bexpires?\b/i,
+  /\bonly\s+(a\s+few|one|two|three|four|five|six|seven|eight|nine|ten)\s+(left|remaining)\b/i,
+  /\bjust\s+\d+\s+(spots?|seats?|places?)\b/i,
 ];
 
 const CJK_RANGES = [
@@ -70,8 +95,22 @@ function isWideChar(code: number): boolean {
   return false;
 }
 
-/** Width of a string in layout units (CJK = 1, space = 0.3, other = 0.55), rounded to 2 decimals. */
-export function textWidthUnits(s: string): number {
+/**
+ * Normalize a string for banned-word scanning: NFKC-normalize, strip zero-width /
+ * bidi / control characters, collapse non-breaking spaces and runs of
+ * hyphens/dashes/underscores/whitespace into a single space, then trim.
+ */
+export function normalizeForScan(s: string): string {
+  let out = s.normalize('NFKC');
+  out = out.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u00AD]/g, '');
+  out = out.replace(/\u00A0/g, ' ');
+  out = out.replace(/[-_\s]+/g, ' ');
+  return out.trim();
+}
+
+/** Width of a string in layout units (CJK = 1, space = 0.3, other = 0.55 or 0.7 when uppercase), rounded to 2 decimals. */
+export function textWidthUnits(s: string, uppercase = false): number {
+  const latin = uppercase ? 0.7 : 0.55;
   let total = 0;
   for (const ch of s) {
     const code = ch.codePointAt(0) ?? 0;
@@ -80,7 +119,7 @@ export function textWidthUnits(s: string): number {
     } else if (ch === ' ') {
       total += 0.3;
     } else {
-      total += 0.55;
+      total += latin;
     }
   }
   return Math.round(total * 100) / 100;
@@ -89,17 +128,19 @@ export function textWidthUnits(s: string): number {
 /** Every banned word or scarcity phrase found in the text. */
 export function bannedWordHits(s: string): string[] {
   const hits: string[] = [];
+  const normalized = normalizeForScan(s);
+  const compact = normalized.replace(/\s+/g, '');
   for (const word of ENGLISH_BANNED) {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const re = new RegExp(`(?<![A-Za-z])${escaped}(?![A-Za-z])`, 'i');
-    if (re.test(s)) hits.push(word);
+    if (re.test(normalized)) hits.push(word);
   }
   for (const pattern of SCARCITY_PATTERNS) {
-    const match = s.match(pattern);
+    const match = normalized.match(pattern);
     if (match !== null) hits.push(match[0]);
   }
   for (const word of CHINESE_BANNED) {
-    if (s.includes(word)) hits.push(word);
+    if (compact.includes(word)) hits.push(word);
   }
   return hits;
 }
@@ -181,12 +222,23 @@ function relevanceTokens(s: string): string[] {
   return tokens;
 }
 
-/** True when at least one token of `text` occurs in `quote`. */
+/** True when at least one token of `text` occurs in `quote` (or the whole text when it has no tokens). */
 function quoteSupports(text: string, quote: string): boolean {
   const tokens = relevanceTokens(text);
-  if (tokens.length === 0) return true;
-  const haystack = quote.toLowerCase();
+  const haystack = normalizeForScan(quote).toLowerCase();
+  if (tokens.length === 0) {
+    return haystack.includes(normalizeForScan(text).toLowerCase());
+  }
   return tokens.some((token) => haystack.includes(token));
+}
+
+/** True when the URL is a plain http(s) URL with a real host (not localhost / IPv4). */
+function isAcceptableSourceUrl(url: string): boolean {
+  if (!/^https?:\/\/[^\s/]+\.[^\s/]+(\/\S*)?$/.test(url)) return false;
+  const host = url.replace(/^https?:\/\//, '').split(/[/?#]/)[0].split(':')[0].toLowerCase();
+  if (host === 'localhost') return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
+  return true;
 }
 
 /** Schema for the generic travel-postcard video template props. No defaults: a missing field is rejected. */
@@ -225,7 +277,7 @@ export const PostcardPropsSchema = z
   .strict()
   .superRefine((val, ctx) => {
     val.hook.lines.forEach((line, i) => {
-      if (textWidthUnits(line) > HOOK_LINE_UNITS) {
+      if (textWidthUnits(line, true) > HOOK_LINE_UNITS) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['hook', 'lines', i],
@@ -242,7 +294,7 @@ export const PostcardPropsSchema = z
           message: `第 ${i + 1} 段文字太宽（最多约 ${SCENE_LINE_UNITS} 个单位）`,
         });
       }
-      if (textWidthUnits(scene.place) > PLACE_UNITS) {
+      if (textWidthUnits(scene.place, true) > PLACE_UNITS) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['scenes', i, 'place'],
@@ -276,7 +328,7 @@ export const PostcardPropsSchema = z
     }
 
     val.scenes.forEach((scene, i) => {
-      if (!/^https?:\/\/\S+$/.test(scene.sourceUrl)) {
+      if (!isAcceptableSourceUrl(scene.sourceUrl)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['scenes', i, 'sourceUrl'],
@@ -295,6 +347,22 @@ export const PostcardPropsSchema = z
           code: z.ZodIssueCode.custom,
           path: ['scenes', i, 'placeSourceQuote'],
           message: '出处片段里找不到这句话的主要词',
+        });
+      }
+      const quoteHits = bannedWordHits(scene.sourceQuote);
+      if (quoteHits.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scenes', i, 'sourceQuote'],
+          message: `文字里不能出现促销词：${quoteHits.join('、')}`,
+        });
+      }
+      const placeQuoteHits = bannedWordHits(scene.placeSourceQuote);
+      if (placeQuoteHits.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scenes', i, 'placeSourceQuote'],
+          message: `文字里不能出现促销词：${placeQuoteHits.join('、')}`,
         });
       }
     });

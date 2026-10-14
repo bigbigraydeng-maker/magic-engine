@@ -8,6 +8,7 @@ import {
   collectPostcardAssetFiles,
   textWidthUnits,
   bannedWordHits,
+  normalizeForScan,
   MIN_SCENES,
   MAX_SCENES,
   MAX_TOTAL_SEC,
@@ -146,6 +147,11 @@ describe('text width', () => {
     assert.equal(textWidthUnits('a b'), 1.4)
   })
 
+  test('textWidthUnits uppercase latin counts 0.7 per letter', () => {
+    assert.equal(textWidthUnits('ABC', true), 2.1)
+    assert.equal(textWidthUnits('ABC'), 1.65)
+  })
+
   test('a hook line over the budget is rejected', () => {
     rejects((props) => {
       props.hook.lines = ['A very long hook line indeed']
@@ -187,11 +193,76 @@ describe('banned words', () => {
   })
 })
 
+describe('banned words (extended)', () => {
+  test('flags new English promotional phrases', () => {
+    assert.ok(bannedWordHits('Limited places').length > 0)
+    assert.ok(bannedWordHits('limited-seats').length > 0)
+    assert.ok(bannedWordHits('LAST-CHANCE').length > 0)
+    assert.ok(bannedWordHits('Last\u200B chance').length > 0)
+    assert.ok(bannedWordHits('last\u00A0chance').length > 0)
+    assert.ok(bannedWordHits('book-now').length > 0)
+    assert.ok(bannedWordHits('Ends soon').length > 0)
+    assert.ok(bannedWordHits('only three left').length > 0)
+  })
+
+  test('flags new Chinese promotional phrases', () => {
+    assert.ok(bannedWordHits('限定名额').length > 0)
+    assert.ok(bannedWordHits('限時').length > 0)
+    assert.ok(bannedWordHits('截至周五').length > 0)
+    assert.ok(bannedWordHits('抢购').length > 0)
+    assert.ok(bannedWordHits('名 额').length > 0)
+  })
+
+  test('does not flag allowed wording (extended)', () => {
+    assert.deepEqual(bannedWordHits('Unlimited access'), [])
+    assert.deepEqual(bannedWordHits('limited edition'), [])
+    assert.deepEqual(bannedWordHits('a 12-person group'), [])
+    assert.deepEqual(bannedWordHits('限 12 人小团'), [])
+  })
+
+  test('normalizeForScan strips zero-width and collapses separators', () => {
+    assert.equal(normalizeForScan('Last\u200B chance'), 'Last chance')
+    assert.equal(normalizeForScan('book-now'), 'book now')
+    assert.equal(normalizeForScan('a\u00A0b'), 'a b')
+  })
+
+  test('a hook line with a zero-width-joined banned word is rejected', () => {
+    rejects((props) => {
+      props.hook.lines = ['Last\u200B chance']
+    }, '促销词')
+  })
+})
+
 describe('sourceUrl', () => {
   test('a non-http url is rejected', () => {
     rejects((props) => {
       props.scenes[0].sourceUrl = 'ftp://x'
     })
+  })
+
+  test('a bare host without a dot is rejected', () => {
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'https://a'
+    })
+  })
+
+  test('localhost is rejected', () => {
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'http://localhost/x'
+    })
+  })
+
+  test('an IPv4 host is rejected', () => {
+    rejects((props) => {
+      props.scenes[0].sourceUrl = 'http://10.0.0.1/x'
+    })
+  })
+
+  test('a normal https url passes', () => {
+    const props = validProps()
+    props.scenes[0].sourceUrl = 'https://example.com/tour'
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.scenes[0].sourceUrl, 'https://example.com/tour')
   })
 })
 
@@ -206,6 +277,27 @@ describe('source quote relevance', () => {
     rejects((props) => {
       props.scenes[0].placeSourceQuote = 'completely unrelated words here'
     }, '出处片段里找不到这句话的主要词')
+  })
+
+  test('short text with an unrelated quote is rejected', () => {
+    rejects((props) => {
+      props.scenes[0].line = 'Go to a zoo'
+      props.scenes[0].sourceQuote = 'unrelated text'
+    }, '出处片段里找不到这句话的主要词')
+  })
+
+  test('short text with a supporting quote passes', () => {
+    const props = validProps()
+    props.scenes[0].line = 'Go to a zoo'
+    props.scenes[0].sourceQuote = 'You can go to a zoo here'
+    const parsed = parsePostcardProps(props)
+    assert.equal(parsed.scenes[0].line, 'Go to a zoo')
+  })
+
+  test('a banned word inside sourceQuote is rejected', () => {
+    rejects((props) => {
+      props.scenes[0].sourceQuote = 'the harbour wakes slowly, book now'
+    }, '促销词')
   })
 })
 

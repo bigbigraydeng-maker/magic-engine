@@ -7,17 +7,13 @@ import { FPS } from './timing'
 import { fontFamily } from './theme'
 
 const Hook: React.FC<{ props: PostcardProps }> = ({ props }) => {
-  const frame = useCurrentFrame()
   return (
     <AbsoluteFill>
       <Footage src={props.hook.clip} zoomTo={1.06} scrim={props.scrim ?? 0.35} />
       <div style={{ position: 'absolute', left: 90, top: 640, width: 790, fontFamily, color: '#fff', fontSize: 96, fontWeight: 900, lineHeight: 1.12, textShadow: '0 6px 30px rgba(0,0,0,0.7)' }}>
-        {props.hook.lines.map((line, i) => {
-          const o = interpolate(frame, [i * 8, i * 8 + 18], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
-          return (
-            <div key={i} style={{ opacity: o, transform: `translateY(${(1 - o) * 14}px)` }}>{line}</div>
-          )
-        })}
+        {props.hook.lines.map((line, i) => (
+          <div key={i}>{line}</div>
+        ))}
       </div>
     </AbsoluteFill>
   )
