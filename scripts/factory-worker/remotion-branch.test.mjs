@@ -534,6 +534,89 @@ describe('montage template and shared music', () => {
     expect(deps.renderFn).not.toHaveBeenCalled()
   })
 
+  describe('datacard template', () => {
+    const DC_PROPS = {
+      logoFile: 'logo.png', musicFile: null,
+      hook: { lines: ['SAME BOX', '3 PRICES'] },
+      rows: [
+        { label: 'Alpha', value: '$120', sublabel: 'per m3', bar: 0.4 },
+        { label: 'Beta', value: '$210', sublabel: null, bar: 0.7 },
+        { label: 'Gamma', value: '$300', sublabel: null, bar: 1 },
+      ],
+      disclaimer: 'Estimates only.',
+    }
+    const DC_TIMING = { hookFrames: 60, rowFrames: 36, rowFrom: [60, 96, 132], totalFrames: 240 }
+    const dcEngine = () => makeEngine({
+      isTemplateId: (id) => ['list', 'montage', 'datacard'].includes(id),
+      loadTemplate: (id, p) => ({ compositionId: 'DataCardReel', props: p, assetFiles: ['logo.png'], totalFrames: 240 }),
+      computeDataCardTiming: () => DC_TIMING,
+    })
+    const dcWo = (props = DC_PROPS) => {
+      const wo = makeWo()
+      wo.brief.remotion = { template: 'datacard', props }
+      return wo
+    }
+
+    it('renders and sends every on-screen string as caption and SRT', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 8, audio_stream_present: false })) })
+      const res = await run(env, deps, dcWo())
+      expect(res.ok).toBe(true)
+      const sent = deps.completeFn.mock.calls[0][0]
+      for (const word of ['SAME BOX 3 PRICES', 'Alpha $120 per m3', 'Beta $210', 'Estimates only.']) expect(sent.caption).toContain(word)
+      const srt = deps.uploadSignedFn.mock.calls.find((c) => c[2] === 'text/plain')[1].toString()
+      expect(srt).toContain('Gamma $300 · Estimates only.')
+      expect(srt).toContain('00:00:02,000 --> 00:00:03,200')
+    })
+
+    it('refuses bidi or invisible characters that could make caption differ from the screen', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, disclaimer: '\u202eemit detimil\u202c' }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('双向控制字符')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
+    it('refuses bidi characters hidden in a row sublabel', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, rows: [{ ...DC_PROPS.rows[0], sublabel: '\u202eemit detimil\u202c' }, DC_PROPS.rows[1], DC_PROPS.rows[2]] }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('副标签')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
+    it('refuses a client without a studio mapping with a non-retryable error', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), clientStudio: {} })
+      const err = await errOf(run(env, deps, dcWo({ ...DC_PROPS, logoFile: null })))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.retryable).toBeFalsy()
+      expect(err.message).toContain('FACTORY_CLIENT_STUDIO')
+    })
+
+    it('refuses props whose label is only invisible characters', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, rows: [{ ...DC_PROPS.rows[0], label: '\u200b' }, DC_PROPS.rows[1], DC_PROPS.rows[2]] }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('清理后是空的')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
+    it('is still refused for a client that is not on the remotion allowlist', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), allowedClientIds: [] })
+      const err = await errOf(run(env, deps, dcWo()))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+  })
+
   it('rejects an unknown template', async () => {
     const env = makeEnv()
     const deps = makeDeps(env)
@@ -679,6 +762,23 @@ describe('real engine contract', () => {
     expect(segments.template).toBe('montage')
     expect(segments.music.id).toBe('pipa-trap')
     expect(deps.renderFn.mock.calls[0][0].template).toBe('montage')
+  })
+
+  it.skipIf(!hasEngine)('runs the fictional data-card example through the real engine', async () => {
+    const props = JSON.parse(readFileSync(join(REMOTION_ENGINE_DIR, 'examples', 'fictional-datacard.props.json'), 'utf8'))
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      loadEngineFn: () => loadRemotionEngine(),
+      probeMediaEvidenceFn: vi.fn((_f, _srt) => ({ width: 1080, height: 1920, duration_seconds: 11, audio_stream_present: false })),
+    })
+    writeFileSync(join(env.lib, 'logo.png'), 'logo')
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'datacard', props }
+    const eng = await loadRemotionEngine()
+    expect(typeof eng.computeDataCardTiming).toBe('function')
+    const res = await run(env, deps, wo)
+    expect(res).toEqual({ ok: true, cost: 0 })
+    expect(deps.completeFn.mock.calls[0][0].caption).toContain('Town Alpha $120')
   })
 })
 

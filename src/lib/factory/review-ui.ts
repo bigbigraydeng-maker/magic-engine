@@ -18,6 +18,8 @@ export function reviewErrorZh(error: string, labelOf: (key: string) => string): 
   if (error === 'checklist contains an invalid source_ref') return '来源网址格式不对,要填 https:// 开头的完整网址。'
   if (error === 'checklist source is not owned by this client') return '填的素材编号不属于这个客户,请改填官网产品页网址。'
   if (error.startsWith('automatic checklist')) return '自动媒体检测还没通过,系统不允许通过这条。请找开发处理,不是你填错了。'
+  if (error === 'quality rejection requires a failed checklist item') return '打回要至少选一条理由。'
+  if (error.startsWith('new_budget_usd')) return '预算要填大于 0、不超过 $50 的数字。'
   if (error.startsWith('only in_review') || error.includes('no longer in_review')) return '这条已经不在待审状态了,请刷新页面。'
   if (error.startsWith('checklist ')) return '清单提交有问题,请刷新页面重新勾一遍;还不行就把下面这句发给开发:' + error
   return `没通过成功:${error}(把这句话发给开发)`

@@ -62,7 +62,7 @@ function montageProps() {
 }
 
 test('TEMPLATE_IDS lists the supported templates', () => {
-  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage'])
+  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage', 'datacard', 'postcard'])
 })
 
 test('isTemplateId accepts known ids and rejects others', () => {
@@ -177,4 +177,16 @@ test('musicSourceOf skips a corrupt catalog entry without throwing', () => {
   assert.ok(src)
   assert.equal(src.id, 'pipa-trap')
   assert.equal(musicSourceOf(catalog, 'unknown.mp3'), null)
+})
+
+test('loadTemplate postcard returns PostcardReel metadata', () => {
+  const input = JSON.parse(fs.readFileSync(new URL('../examples/fictional-postcard.props.json', import.meta.url), 'utf8'))
+  const loaded = loadTemplate('postcard', input)
+  assert.equal(loaded.compositionId, 'PostcardReel')
+  assert.equal(loaded.totalFrames, 492)
+  assert.ok(loaded.assetFiles.includes('clips/hook.mp4'))
+})
+
+test('isTemplateId accepts postcard', () => {
+  assert.equal(isTemplateId('postcard'), true)
 })

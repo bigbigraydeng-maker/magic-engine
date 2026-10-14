@@ -336,6 +336,27 @@ describe('该做什么卡', () => {
   })
 })
 
+describe('抽屉里的块顺序（PM 2026-10-14：先读往来记录，再回复）', () => {
+  it('往来记录在回复框之前，订单与付款在往来记录之前', () => {
+    render(
+      <PersonDrawer
+        clientId="cts"
+        row={row({ segment: 'new_untouched', suggestedChannel: 'phone' })}
+        stages={[{ stageKey: 'contacted', label: '已联系' }]}
+        viewerEmail="fde@example.com"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    )
+    const heading = screen.getByText('往来记录')
+    const replies = screen.getByTestId('drawer-replies')
+    // 回复框容器在往来记录标题之后（FOLLOWING = 4）
+    expect(heading.compareDocumentPosition(replies) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 没有任何回复框时，容器是空的，不占位
+    expect(replies.className).toContain('empty:hidden')
+  })
+})
+
 describe('按钮精简（PM 2026-10-10：一屏只留一个主按钮）', () => {
   it('默认只看得到一个主按钮；「没打通」「改到哪一步」「要记住的事」都不在屏上', () => {
     render(

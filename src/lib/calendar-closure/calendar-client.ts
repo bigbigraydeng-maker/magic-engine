@@ -13,7 +13,7 @@
 
 import { loadServiceAccount, mintServiceAccountToken } from '@/lib/google-oauth/service-account'
 import { shiftDate } from '@/lib/ledger/walk'
-import { CALENDAR_TIMEZONE, PM_CALENDAR_ID, type CalendarEvent } from './types'
+import { CALENDAR_TIMEZONE, PM_CALENDAR_ID, STALE_LOOKBACK_DAYS, type CalendarEvent } from './types'
 
 export const CALENDAR_READONLY_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly'
 
@@ -113,7 +113,7 @@ export async function readCalendarEvents(opts: {
     }
   }
 
-  const timeMin = `${shiftDate(opts.todayNz, -15)}T00:00:00Z`
+  const timeMin = `${shiftDate(opts.todayNz, -(STALE_LOOKBACK_DAYS + 1))}T00:00:00Z`
   const timeMax = `${shiftDate(opts.todayNz, 1)}T23:59:59Z`
 
   const events: CalendarEvent[] = []

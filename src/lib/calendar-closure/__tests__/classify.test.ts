@@ -191,6 +191,20 @@ describe('classifyEvents independence', () => {
   })
 })
 
+describe('classifyEvents 旧事项只计数', () => {
+  it('超过 14 天（到 60 天）没闭环的算 staleOpen，不进 decisions；已闭环的不算；超过 60 天的不看', () => {
+    const events = [
+      makeEvent({ id: 'old-open', startNz: '2026-09-01', description: '' }), // 37 天前，没编号
+      makeEvent({ id: 'old-closed', startNz: '2026-09-01', title: '✅ done' }),
+      makeEvent({ id: 'ancient', startNz: '2026-07-01', description: '' }), // 99 天前
+      makeEvent({ id: 'recent', startNz: '2026-10-05', description: '' }),
+    ]
+    const out = classifyEvents(makeInput({ events }))
+    expect(out.staleOpen).toBe(1)
+    expect(out.decisions.map((d) => d.eventId)).toEqual(['recent'])
+  })
+})
+
 describe('classifyEvents limit and ordering', () => {
   it('keeps MAX_EVENTS_PER_RUN actionable, defers the rest, keeps closed', () => {
     const events: CalendarEvent[] = []

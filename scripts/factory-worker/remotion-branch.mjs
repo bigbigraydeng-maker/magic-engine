@@ -78,6 +78,8 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const templates = await import(pathToFileURL(join(engineDir, 'src', 'templates.ts')).href)
     const montage = await import(pathToFileURL(join(engineDir, 'src', 'montage.ts')).href)
     const music = await import(pathToFileURL(join(engineDir, 'src', 'music.ts')).href)
+    const datacard = await import(pathToFileURL(join(engineDir, 'src', 'datacard.ts')).href)
+    const postcard = await import(pathToFileURL(join(engineDir, 'src', 'postcard.ts')).href)
     let catalog = null
     return {
       computeTimingFromProps: timing.computeTimingFromProps,
@@ -85,6 +87,8 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       isTemplateId: templates.isTemplateId,
       loadTemplate: templates.loadTemplate,
       montageFrameOf: montage.montageFrameOf,
+      computeDataCardTiming: datacard.computeDataCardTiming,
+      computePostcardTiming: postcard.computePostcardTiming,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
           JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
@@ -141,6 +145,103 @@ export function buildRemotionSrt(props, timing, fps) {
     cues.push([timing.itemFrom[i] / fps, (timing.itemFrom[i] + timing.itemDur[i]) / fps, items[i]])
   }
   cues.push([timing.revealFrom / fps, timing.totalFrames / fps - 0.1, reveal])
+  return cues
+    .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
+    .join('')
+}
+
+// Every on-screen data-card string (hook, rows, disclaimer) as cleaned strings, in reading order.
+export function buildDatacardText(props) {
+  const hook = props.hook.lines.map(clean).join(' ')
+  const rows = props.rows.map((r) =>
+    [clean(r.label), clean(r.value), ...(r.sublabel === null || r.sublabel === undefined ? [] : [clean(r.sublabel)])].join(' '),
+  )
+  return { hook, rows, disclaimer: clean(props.disclaimer) }
+}
+
+// Every data-card string joined for the server-side red-line rescan.
+export function buildDatacardCaption(props) {
+  const { hook, rows, disclaimer } = buildDatacardText(props)
+  return [hook, ...rows, disclaimer].join(' · ')
+}
+
+// Refuse data-card props whose hook, labels, values or disclaimer are all invisible after cleaning.
+export function assertDatacardTextVisible(props) {
+  const parts = [...props.hook.lines.map((t) => ['钩子', t]), ...props.rows.flatMap((r, i) => [[`第 ${i + 1} 行标签`, r.label], [`第 ${i + 1} 行数值`, r.value], ...(r.sublabel == null ? [] : [[`第 ${i + 1} 行副标签`, r.sublabel]])]), ['免责文案', props.disclaimer]]
+  for (const [name, t] of parts) {
+    if (clean(t) === '') throw new RemotionOrderError(`数据卡${name}清理后是空的（只含不可见字符）`)
+    // The renderer paints raw props; a caption that silently drops bidi/invisible characters could differ from what is on screen.
+    if (clean(t) !== String(t).trim().normalize('NFKC')) {
+      throw new RemotionOrderError(`数据卡${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+    }
+  }
+}
+
+// Every on-screen postcard string (hook, scene place + line, price block) as cleaned strings, in reading order.
+export function buildPostcardText(props) {
+  const hook = props.hook.lines.map(clean).join(' ')
+  const scenes = props.scenes.map((sc) => `${clean(sc.place)} ${clean(sc.line)}`)
+  const p = props.price
+  const price = p == null
+    ? clean(props.end.title)
+    : [
+      clean(p.fromLabel),
+      clean(`${p.currencyPrefix}${p.amount.toLocaleString('en-US')}`),
+      clean(p.qualifier),
+      ...(p.dateLine === undefined || p.dateLine === null ? [] : [clean(p.dateLine)]),
+      clean(p.footnote),
+    ].join(' ')
+  return { hook, scenes, price }
+}
+
+// Every postcard string joined for the server-side red-line rescan.
+export function buildPostcardCaption(props) {
+  const { hook, scenes, price } = buildPostcardText(props)
+  return [hook, ...scenes, price].join(' · ')
+}
+
+// The renderer paints raw props, so text that cleans to nothing or differs once invisible characters are dropped must be refused.
+export function assertPostcardTextVisible(props) {
+  const parts = [
+    ...props.hook.lines.map((t) => ['钩子', t]),
+    ...props.scenes.flatMap((sc, i) => [[`第 ${i + 1} 景地名`, sc.place], [`第 ${i + 1} 景文案`, sc.line]]),
+    ...(props.price == null
+      ? [['片尾标题', props.end.title]]
+      : [
+        ['价格前缀', props.price.fromLabel],
+        ['价格说明', props.price.qualifier],
+        ['价格脚注', props.price.footnote],
+        ...(props.price.dateLine == null ? [] : [['价格日期行', props.price.dateLine]]),
+      ]),
+  ]
+  for (const [name, t] of parts) {
+    if (clean(t) === '') throw new RemotionOrderError(`明信片${name}清理后是空的（只含不可见字符）`)
+    if (clean(t) !== String(t).trim().normalize('NFKC')) {
+      throw new RemotionOrderError(`明信片${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+    }
+  }
+}
+
+// Build the SRT captions from the postcard timing layout.
+export function buildPostcardSrt(props, timing, fps) {
+  const { hook, scenes, price } = buildPostcardText(props)
+  const cues = [[0, timing.hookFrames / fps, hook]]
+  scenes.forEach((text, i) => cues.push([timing.sceneFrom[i] / fps, (timing.sceneFrom[i] + timing.sceneDur[i]) / fps, text]))
+  cues.push([timing.priceFrom / fps, timing.totalFrames / fps - 0.1, price])
+  return cues
+    .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
+    .join('')
+}
+
+// Build the SRT captions for the data card: hook, one cue per row, disclaimer held with the last row.
+export function buildDatacardSrt(props, timing, fps) {
+  const { hook, rows, disclaimer } = buildDatacardText(props)
+  const end = timing.totalFrames / fps - 0.1
+  const cues = [[0, timing.hookFrames / fps, hook]]
+  rows.forEach((text, i) => {
+    const last = i === rows.length - 1
+    cues.push([timing.rowFrom[i] / fps, last ? end : timing.rowFrom[i + 1] / fps, last ? `${text} · ${disclaimer}` : text])
+  })
   return cues
     .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
     .join('')
@@ -214,7 +315,8 @@ export function copyWithinRoot(srcReal, rootReal, dest) {
 
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
-  if (!props.logoFile.toLowerCase().endsWith('.png')) {
+  const hasLogo = typeof props.logoFile === 'string'
+  if (hasLogo && !props.logoFile.toLowerCase().endsWith('.png')) {
     throw new RemotionOrderError('logo 文件名必须是 .png（logo 一律取自该客户品牌包的 watermark.png）')
   }
   const lower = files.map((f) => f.toLowerCase())
@@ -222,9 +324,11 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
     throw new RemotionOrderError('素材文件名大小写不敏感地重复了，请改名')
   }
 
-  const logoDest = join(stageDir, props.logoFile)
-  mkdirSync(dirname(logoDest), { recursive: true })
-  copyFileSync(join(brandkitDir, 'assets', 'watermark.png'), logoDest)
+  if (hasLogo) {
+    const logoDest = join(stageDir, props.logoFile)
+    mkdirSync(dirname(logoDest), { recursive: true })
+    copyFileSync(join(brandkitDir, 'assets', 'watermark.png'), logoDest)
+  }
 
   if (musicPath !== null) {
     try {
@@ -455,6 +559,14 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
   }
   if (template === 'montage') assertMontageTextVisible(props)
+  if (template === 'datacard') {
+    assertDatacardTextVisible(props)
+    timing = eng.computeDataCardTiming(props)
+  }
+  if (template === 'postcard') {
+    assertPostcardTextVisible(props)
+    timing = eng.computePostcardTiming(props)
+  }
 
   const hb = startHeartbeats({
     woId: wo.work_order_id,
@@ -470,13 +582,19 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     const tmpDir = join(root, 'tmp')
     for (const d of [stageDir, outDir, tmpDir]) mkdirSync(d, { recursive: true })
 
-    let brandkitDir
-    try {
-      brandkitDir = deps.brandkitFor(wo.client_id)
-    } catch (e) {
-      throw new RemotionOrderError(e.message)
+    let brandkitDir = null
+    if (typeof props.logoFile === 'string') {
+      try {
+        brandkitDir = deps.brandkitFor(wo.client_id)
+      } catch (e) {
+        throw new RemotionOrderError(e.message)
+      }
     }
-    const clientRootDir = join(deps.studioRoot, deps.clientStudio[wo.client_id])
+    const clientFolder = deps.clientStudio[wo.client_id]
+    if (!clientFolder) {
+      throw new RemotionOrderError(`客户 ${wo.client_id} 没配 studio 目录：在出片机 FACTORY_CLIENT_STUDIO 里加一条映射`)
+    }
+    const clientRootDir = join(deps.studioRoot, clientFolder)
     const assetLibDir = join(clientRootDir, 'remotion-assets')
     let musicSource = null
     if (props.musicFile) {
@@ -533,8 +651,16 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     }
     const srtText = template === 'list'
       ? buildRemotionSrt(props, timing, eng.FPS)
-      : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
-    const caption = template === 'list' ? buildRemotionCaption(props) : buildMontageCaption(props)
+      : template === 'datacard'
+        ? buildDatacardSrt(props, timing, eng.FPS)
+        : template === 'postcard'
+          ? buildPostcardSrt(props, timing, eng.FPS)
+          : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
+    const caption = template === 'list'
+      ? buildRemotionCaption(props)
+      : template === 'datacard'
+        ? buildDatacardCaption(props)
+        : template === 'postcard' ? buildPostcardCaption(props) : buildMontageCaption(props)
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
     const expected = totalFrames / eng.FPS
     if (evidence.width !== 1080 || evidence.height !== 1920) {

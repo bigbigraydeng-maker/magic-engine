@@ -63,6 +63,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  goal_rollover_missing: 'dev', // 月循环目标没自动续上：广告自治/日报失去目标口径，是系统没跑通，转开发
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
@@ -103,6 +104,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
+  calendar_closure_overdue_summary: 'truth', // 日历到期没闭环的件数：「认一下」哪些真做了
   calendar_closure_calendar_unreadable: 'one_click', // 读不到 PM 日历：机器账号 / 日历共享要人点一次
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
@@ -110,6 +112,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
   instagram_publish_failed: 'dev', // 同步 Instagram 重试都失败：开发看原因，不占 PM 的清单
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
+  whatsapp_number_unclaimed: 'one_click', // 号码在发消息但没客户绑定它，去设置页绑一次
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
   // 主干合进去的代码没上线（各窗口说的「已上线」不算数）：看上线记录，催修复 PR 尽快合、或回一句
   // 「修上线」。主干明确要它留在 PM 可见栏（进了 NEVER_DROP_KINDS），不进开发欠账被埋掉。
@@ -125,6 +128,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   leads_metric_untrusted: 'client_side', // 客户统计后台的「关键事件」设置
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
   crm_important_due: 'client_side', // 客户员工约好的回电
+  phone_call_needs_review: 'client_side', // 电话没能自动记进客人档案，客户销售要看一眼是谁
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
   tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
 

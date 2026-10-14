@@ -636,6 +636,7 @@ export default function ClientDetailPage() {
               <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">内容生产</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
+                <ToolCard href={`/dashboard/clients/${clientId}/promo-plan`}     title="推广计划"       desc="批准前什么都不做 · 每周对账 · 下一阶段检查清单" badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
                 <ToolCard href={`/dashboard/content?client=${clientId}`}         title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/campaigns`}      title="推广活动"       desc="Campaign 列表、排期、各推广活动的内容" badge="in_house" />

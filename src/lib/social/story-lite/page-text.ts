@@ -14,6 +14,7 @@ const PROBLEM_TEXT: Record<string, string> = {
   PRICE_IN_TEXT: '文字里出现了价格，Story 不放价格，请先改掉',
   FILE_CHANGED: '图片和当初登记的不一样了，请重新确认图片',
   FILE_UNREACHABLE: '现在打不开这张图片，请检查图片链接',
+  VIDEO_NOT_ACCEPTABLE: '这个视频不合要求（要 1 到 60 秒、竖屏、宽至少 540 像素、能正常打开），请让视频工厂重新出片',
   CLIENT_NOT_ACTIVE: '这个客户现在不是启用状态',
   PACK_NOT_DRAFT: '这一周已经授权过或已经停掉了',
 }

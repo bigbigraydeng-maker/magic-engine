@@ -1,0 +1,108 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Best of China #2: 'four cities, one trip' 15-second reel (departs 11 March 2027; v1, hook differs from published 7ed7645b; no guests) | v-dated: opening banner 'BOOK YOUR MARCH 2027 TOUR / DEPARTS 11 MARCH 2027' baked into the hook clip 0-2.4s (PM 2026-10-12; 'Early Bird' wording pending CTS confirmation)",
+ "angle_source": {
+  "source": "manual_remotion_cts_spring2027",
+  "authorized_by": "74 号 CTS 广告总控补充需求单（2026-10-12，PM 要求补充更多素材）；只出片到 in_review，不发布、不起广告",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/essentials, 2026-10-12：NZD 4,080 pp twin share；单人房差 +NZD 800；15 days；11 March 2027；Beijing/Xi'an/Hangzhou/Shanghai；D4 Great Wall、D6 高铁 G89、D8 Big Wild Goose Pagoda、D10 West Lake boat cruise；International and domestic airfares（片内只写 FLIGHTS）。"
+ },
+ "rationale_one_liner": "BOC 第二条：钩子换成「4 CITIES / 1 TRIP」，不重复已发布那条的价格悬念；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.08,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.35,
+    "musicFile": "music/founders-at-dawn.mp3",
+    "musicStartSec": 0.302,
+    "beats": [
+     0,
+     0.8,
+     1.6,
+     2.4,
+     3.2,
+     4.35,
+     5.5,
+     6.65,
+     7.8,
+     8.95,
+     10.1,
+     10.7,
+     11.3,
+     11.9,
+     12.5,
+     13.1,
+     13.7,
+     14.3,
+     14.9
+    ],
+    "hook": {
+     "clip": "clips/c5_boc2_hook.mp4",
+     "lines": [
+      {
+       "badge": null,
+       "text": "4 CITIES"
+      },
+      {
+       "badge": null,
+       "text": "1 TRIP"
+      },
+      {
+       "badge": null,
+       "text": "FLIGHTS"
+      }
+     ]
+    },
+    "items": [
+     {
+      "text": "THE GREAT WALL",
+      "clip": "clips/c4_greatwall_huairou.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "BIG WILD GOOSE PAGODA, XI'AN",
+      "clip": "clips/c3b_bigwildgoose.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "WEST LAKE, HANGZHOU",
+      "clip": "clips/c4_westlake_pavilion.mp4",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "YOUR 15 DAYS",
+    "revealTitle": "BEIJING TO SHANGHAI.",
+    "price": {
+     "backdropClip": "clips/v3_bund_night_zoom.mp4",
+     "fromLabel": "FROM",
+     "currencyPrefix": "NZ$",
+     "amount": 4080,
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "footnote": "SINGLE SUPPLEMENT NZ$800",
+     "footnoteSize": 50
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Four cities, one trip: Beijing, Xi'an, Hangzhou and Shanghai, with a high-speed train from Beijing to Xi'an. Flights, hotels, an English-speaking tour guide and the meals listed in the itinerary are in the price. NZD $4,080 per person, twin share; single supplement NZD $800. Travel insurance and tips are not included. Next departure 11 March 2027.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/essentials",
+    "offer": [
+     "15 days from Auckland",
+     "NZD $4,080 per person, twin share",
+     "Next departure 11 March 2027"
+    ]
+   }
+  }
+ }
+}

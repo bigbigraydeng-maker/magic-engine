@@ -3,6 +3,7 @@ import { isClosedTitle, parseDescription } from './parse-event'
 import {
   MAX_EVENTS_PER_RUN,
   WINDOW_DAYS,
+  STALE_LOOKBACK_DAYS,
   type CalendarEvent,
   type ClassifyOutput,
   type EventDecision,
@@ -143,10 +144,17 @@ function compareDecisions(a: EventDecision, b: EventDecision): number {
 
 export function classifyEvents(input: ClassifyInput): ClassifyOutput {
   const decisions: EventDecision[] = []
+  let staleOpen = 0
 
   for (const event of input.events) {
     const d = daysBetween(event.startNz, input.todayNz)
-    if (d < 0 || d > WINDOW_DAYS) continue
+    if (d < 0 || d > STALE_LOOKBACK_DAYS) continue
+    if (d > WINDOW_DAYS) {
+      // 超出逐条核对窗口的旧事项：只数「还没闭环」的个数，让它们不会悄悄消失
+      const tier = decideEvent(event, d, input).tier
+      if (tier !== 'closed' && tier !== 'covered') staleOpen += 1
+      continue
+    }
     decisions.push(decideEvent(event, d, input))
   }
 
@@ -169,5 +177,6 @@ export function classifyEvents(input: ClassifyInput): ClassifyOutput {
     decisions: [...kept, ...rest],
     deferred,
     candidates,
+    staleOpen,
   }
 }

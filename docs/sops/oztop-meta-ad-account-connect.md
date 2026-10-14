@@ -1,3 +1,5 @@
+> **已废弃：并入 `.claude/skills/me-meta-ad-account-setup`；本文要求 ID 带 `act_` 与该技能相反，以代码实际读取格式为准（代码规范存储形为 `act_<digits>`，见 `src/lib/meta/ad-account-binding.ts`）。**
+
 # SOP — Oztop Meta Ad Account 连入 ME 后台
 
 > **目的**：把 Oztop 的 Meta 广告账户 ID 配到数据库，让 ME 后台知道 "Oztop 跑广告时调哪个账户"。

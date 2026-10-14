@@ -3,7 +3,6 @@
 import { useId, useState } from 'react'
 import Link from 'next/link'
 import { WARNING_CLASS, MUTED_TEXT, SECONDARY_BUTTON } from '../../_components/bookings/booking-styles'
-import { stashContactName } from '../../_components/bookings/payments-return'
 import { stageText } from './payments-format'
 
 export interface PaidWithoutBookingRow {
@@ -16,13 +15,14 @@ export interface PaidWithoutBookingBannerProps {
   clientId: string
   total: number
   rows: PaidWithoutBookingRow[]
-  onLeave?: () => void
+  /** 点名字：原地弹出这位客人的抽屉（不传就按普通链接跳走）。 */
+  onOpenContact?: (id: string, name: string | null) => void
 }
 
 export function PaidWithoutBookingBanner(
   props: PaidWithoutBookingBannerProps,
 ): JSX.Element | null {
-  const { clientId, total, rows, onLeave } = props
+  const { clientId, total, rows, onOpenContact } = props
   const [expanded, setExpanded] = useState(false)
   const listId = useId()
 
@@ -32,27 +32,30 @@ export function PaidWithoutBookingBanner(
 
   return (
     <div role="note" className={WARNING_CLASS}>
-      <p>
-        {`⚠ 另有 ${total} 位客人的阶段已经是「已付定金」「已付全款」或「即将出行」，但一张订单都没有 —— 他们的付款在这页看不见，先给他们补录订单。`}
-      </p>
-      <button
-        type="button"
-        className={`${SECONDARY_BUTTON} mt-2`}
-        aria-expanded={expanded}
-        aria-controls={listId}
-        onClick={() => setExpanded((v) => !v)}
-      >
-        看名单
-      </button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p>
+          {`⚠ 另有 ${total} 位客人已付款（定金 / 全款 / 即将出行），但还没有订单，付款在这页看不到。`}
+        </p>
+        <button
+          type="button"
+          className={`${SECONDARY_BUTTON} min-h-[32px] px-3 py-1 text-xs`}
+          aria-expanded={expanded}
+          aria-controls={listId}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? '收起名单' : '看名单'}
+        </button>
+      </div>
       {expanded ? (
         <ul id={listId} className="mt-2 max-h-72 overflow-y-auto">
           {rows.map((row) => (
             <li key={row.id} className="py-1">
               <Link
                 href={`/dashboard/clients/${clientId}/crm/all?contact=${encodeURIComponent(row.id)}&focus=bookings`}
-                onClick={() => {
-                  stashContactName(clientId, row.id, row.name)
-                  onLeave?.()
+                onClick={(e) => {
+                  if (!onOpenContact || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+                  e.preventDefault()
+                  onOpenContact(row.id, row.name)
                 }}
                 className="inline-flex min-h-[40px] items-center underline font-bold"
               >

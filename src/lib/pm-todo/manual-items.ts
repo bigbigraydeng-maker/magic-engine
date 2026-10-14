@@ -46,6 +46,7 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
@@ -61,12 +62,12 @@ import {
   type NotIndexedRow,
 } from './manual-item-types'
 import { pushLinkedinProgressItems } from './manual-linkedin-items'
-import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
-export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
@@ -91,6 +92,7 @@ import {
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 import { pushPlatformConnectionItems } from './platform-connection-items'
+import { pushWhatsappUnclaimedItems } from './whatsapp-unclaimed-items'
 import { pushLedgerItems } from './ledger-items'
 import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
@@ -180,6 +182,11 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
     (b) => pushPlatformConnectionItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
+    ),
+    // WhatsApp 收到了消息但没客户绑定这个号码 —— 消息没存下来，只有人能去设置页绑一次。
+    // 表还没上线时模块自己静默返回，不抛给这里。
+    (b) => pushWhatsappUnclaimedItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] WhatsApp 无人认领号码检查失败（不阻塞其他待办）:', e),
     ),
     // 写在 Render 里的 Meta 钥匙被 Meta 作废 —— 上面那条只查「连接 Meta」按钮存下的授权，
     // 这条补的是环境变量里的钥匙（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
@@ -380,6 +387,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 月循环目标没自动续上 —— 自动续建失败不许只写日志（铁律 3）
+    (b) => pushGoalRolloverItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 月目标续建缺口待办生成失败（不阻塞其他待办）:', e),
+    ),
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
@@ -392,6 +403,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 可能被一句「不打算去」误判成永久拒联的人 —— 刻意不自动解除，交给人看一眼。
     (b) => pushDncReviewItems(supabase, b, ids, nameOf).catch((e) =>
       console.warn('[manual-items] 拒联复核待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 电话系统收了通话、但没能自动记进客人档案 —— 接真实客人线路前必须有人看得见（PM 2026-10-12）
+    (b) => pushPhoneReviewItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 待确认电话待办生成失败（不阻塞其他待办）:', e),
     ),
     // 反向的那一半：客人在私信里像是说了「别再联系」，而判据从来读不到私信（#1025）。
     // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。
