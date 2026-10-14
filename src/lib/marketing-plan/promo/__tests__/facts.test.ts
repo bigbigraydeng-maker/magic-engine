@@ -99,6 +99,12 @@ describe('loadPromoFacts — 读失败一律 null / 不放行', () => {
     expect(f.recon.spend_cents_by_account_day).toBeNull()
     expect(f.recon.meta_results).toBeNull()
   })
+  it('花费查询成功但窗口内没有任何行 → 按读不出来处理（不是 0）', async () => {
+    st.results.ad_daily_insights = { data: [], error: null }
+    const f = await loadPromoFacts('client-1', baseSpec(), [], NOW)
+    expect(f.recon.spend_cents_by_account_day).toBeNull()
+    expect(f.recon.meta_results).toBeNull()
+  })
   it('广告设置读失败 → config=null', async () => {
     st.results.ad_strategy_configs = { data: null, error: err }
     expect((await loadPromoFacts('client-1', baseSpec(), [], NOW)).gate.config).toBeNull()

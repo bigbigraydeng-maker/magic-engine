@@ -212,9 +212,11 @@ describe('POST approve — 推广计划批准前检查', () => {
     m.plan = planWith(spec)
     const res = await APPROVE(req({}), { params: P })
     expect(res.status).toBe(200)
-    const meta = m.updates[0].generation_meta as { approval_receipt: { gate_snapshot: { results: { key: string }[] } } }
+    const meta = m.updates[0].generation_meta as { approval_receipt: { gate_snapshot: { results: { key: string; light: string }[] } } }
     expect(m.updates[0].status).toBe('approved')
     expect(meta.approval_receipt.gate_snapshot.results.map(r => r.key)).toContain('ads.budget_within_caps')
+    // 通过项也要留在快照里，否则全部通过的批准会留下空快照
+    expect(meta.approval_receipt.gate_snapshot.results.some(r => r.light === 'green')).toBe(true)
   })
   it('畸形 promo → 400，不批准（fail closed）', async () => {
     m.plan = planWith({ schema: 'promo_v1' })

@@ -33,7 +33,7 @@ describe('approveButtonState', () => {
     expect(s.hint).toContain('广告不会自动投放')
   })
   it('全部通过 → 可以批，且明说广告不会自动投放', () => {
-    const approval = { can_approve: true, blockers: [], unverified: [], note: null }
+    const approval = { can_approve: true, blockers: [], unverified: [], results: [], note: null }
     const s = approveButtonState({ plan_status: 'draft', approval, spec_valid: true })
     expect(s).toMatchObject({ visible: true, disabled: false, label: '批准计划' })
     expect(s.hint).toContain('广告不会自动投放')

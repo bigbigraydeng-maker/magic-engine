@@ -9,7 +9,7 @@ const m = vi.hoisted(() => ({
   access: vi.fn(),
   dispatch: vi.fn(),
   revoke: vi.fn(),
-  blockers: vi.fn(),
+  revocable: vi.fn(),
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
 }))
@@ -18,7 +18,7 @@ vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({
   dispatchPlanTasks: m.dispatch,
   revokePlanTasks: m.revoke,
-  countRevokeBlockers: m.blockers,
+  countRevokeBlockers: m.revocable,
 }))
 vi.mock('@/lib/supabase', () => {
   const chain = (): Record<string, unknown> => {
@@ -49,7 +49,7 @@ beforeEach(() => {
   m.updates = []
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.revoke.mockResolvedValue({ revoked: 3 })
-  m.blockers.mockResolvedValue({ tasks_in_progress: 0, packages_started: 0 })
+  m.revocable.mockResolvedValue({ tasks_in_progress: 0, packages_started: 0 })
   m.plan = { id: 'plan-1', client_id: 'client-1', status: 'draft', generation_meta: { model: 'x' }, plan_data: { tasks: [] } }
 })
 
@@ -91,10 +91,10 @@ describe('PATCH — 已批准的计划内容被锁住', () => {
     expect(m.updates[0]).toMatchObject({ status: 'draft' })
   })
 
-  it('已批准 → 退回草稿：有进行中的任务 → 409，不清待办也不改计划', async () => {
+  it('已批准 → 退回草稿：有待办已开工 / 生产包已开始时拒绝，计划内容不动', async () => {
     m.plan = { ...m.plan, status: 'approved' }
-    m.blockers.mockResolvedValue({ tasks_in_progress: 2, packages_started: 0 })
-    const res = await PATCH(mk({ status: 'draft' }), { params: P })
+    m.revocable.mockResolvedValue({ tasks_in_progress: 1, packages_started: 0 })
+    const res = await PATCH(mk({ status: 'draft', plan_data: { tasks: [] } }), { params: P })
     expect(res.status).toBe(409)
     expect(m.revoke).not.toHaveBeenCalled()
     expect(m.updates).toHaveLength(0)
