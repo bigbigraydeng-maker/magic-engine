@@ -1,6 +1,7 @@
 # CTS 四周内容日历（10/26–11/22）· AI 提频 · 按格式拆 · 97 号出 · 草稿 v0.1
 
 - **性质**：只是计划文档，没发布、没建单、没设开关。风险级 C。
+- **与执行单对过（10-14，PR 2634 `2026-10-14-cts-ads-social-execution-order-v1.md`）**：社媒部分（10/17 提频方案、10/19–10/25 W1 Natural 过渡周、10/23 W2 周包 Shanghai 主推 + 5 月团事实库 + BoC / Tale 非主推周各 2 条 Post）与本文一致，我据此把非主推周的 Tale 也保到 ≥ 2 条。
 - **来源**：105 号 10-14 要求（PM：基于 AI 提频、用更多广告社媒内容和素材、技能可复用）。执行单 `2026-10-14-cts-ads-social-execution-order-v1.md` **我没拿到**（105 号说随 PR 2603 合进了主干，我 10-14 实查：PR 2603 的文件清单里没有它，主干里也没有，请 105 号补推），以下按 105 号消息里的要求写；执行单与本文冲突，以执行单为准。
 - **主推团顺序（已定）**：10/26 Shanghai → 11/2 Tale → 11/9 Natural（只对暖人群）→ 11/16 Shanghai。BoC 不设主推周，每周保 2 条 Post；5 月团每周 ≤4 条、只做认知。全英文，无人数 / 航司 / 紧迫话术（截止、限时、倒计时、最后机会、还剩几周）。
 - **红线沿用**：价格当天核官网；带价文案要配**确认来源的实拍图**，没有就把价格放首评；事实只用事实库编号。
@@ -41,10 +42,10 @@
 
 | 周 | 主推团 | Post（14）| Story（21）| Reel（≤3，只用已审片）| 复用版（文件，不发布）| 缺口 |
 |---|---|---|---|---|---|---|
-| **W1 10/26–11/1** | **Shanghai & Surroundings** | Shanghai ≥ 7，BoC ≥ 2，其余 Tale / Natural / 5 月团（≤4）| 邀请位 ≥ 4 个讲 Shanghai；灵感与事实位讲 Shanghai / 苏杭 / 其他团 | 周二 Shanghai #2「价格里有什么」（审片中，PM 点通过后人工转公开）；周四 Shanghai S3v3（审片中）；周六：**无新片**，复用 10/11 已公开 v5r2 并标明 | 每条 Reel 出 Shorts / TikTok / IG 版（9:16 同源、字幕英文、封面=第一帧）| 周六 Reel 无新片；Shanghai 带价文案无实拍图 |
-| **W2 11/2–11/8** | **A Tale of Two Cities** | Tale ≥ 7，BoC ≥ 2，Shanghai ≥ 2，其余 | 邀请位 ≥ 4 个讲 Tale（北京 / 西安）| 周二 Tale #2「十天北京西安」（审片中）；周四、周六：**无新片**，复用已公开 Tale #1（10/13 凌晨补发，自然触达差）并标明 | 同上 | Tale 两条 Reel 位无新片 |
-| **W3 11/9–11/15** | **Natural China**（只对暖人群，不冷启动）| Natural ≥ 7（只发图文，因 Natural Reel 已用过），BoC ≥ 2，Shanghai ≥ 2 | 邀请位 ≥ 4 个讲 Natural（张家界 / 重庆 / 成都）| **不新开 Natural 工单（105 号定）**；Reel 位用已通过的 Shanghai / Tale 片轮换 | 同上 | Natural 无 Reel；暖人群受众池靠前两周积累 |
-| **W4 11/16–11/22** | **Shanghai & Surroundings** | 同 W1 | 同 W1 | **不新开工单（105 号 10-14 定）**：复用已有 SH2 系列；11/2 看完 Shanghai 几条的互动再定要不要新开（**不晚于 11/6 批**）| 同上 | 若 11/6 前决定新开，出片 + 审要约一周 |
+| **W1 10/26–11/1** | **Shanghai & Surroundings** | Shanghai ≥ 7，**BoC ≥ 2，Tale ≥ 2**（执行单：10/26 周 BoC / Tale 非主推周各 2 条，因广告第 1 步投 BoC 暖、Tale 暖人群），其余 Natural / 5 月团（≤4）| 邀请位 ≥ 4 个讲 Shanghai；灵感与事实位讲 Shanghai / 苏杭 / 其他团 | 周二 Shanghai #2「价格里有什么」（审片中，PM 点通过后人工转公开）；周四 Shanghai S3v3（审片中）；周六：**无新片**，复用 10/11 已公开 v5r2 并标明 | 每条 Reel 出 Shorts / TikTok / IG 版（9:16 同源、字幕英文、封面=第一帧）| 周六 Reel 无新片；Shanghai 带价文案无实拍图 |
+| **W2 11/2–11/8** | **A Tale of Two Cities** | Tale ≥ 7，BoC ≥ 2，Shanghai ≥ 2，其余 Natural / 5 月团（≤4）| 邀请位 ≥ 4 个讲 Tale（北京 / 西安）| 周二 Tale #2「十天北京西安」（审片中）；周四、周六：**无新片**，复用已公开 Tale #1（10/13 凌晨补发，自然触达差）并标明 | 同上 | Tale 两条 Reel 位无新片 |
+| **W3 11/9–11/15** | **Natural China**（只对暖人群，不冷启动）| Natural ≥ 7（只发图文，因 Natural Reel 已用过），BoC ≥ 2，Shanghai ≥ 2，Tale ≥ 2 | 邀请位 ≥ 4 个讲 Natural（张家界 / 重庆 / 成都）| **不新开 Natural 工单（105 号定）**；Reel 位用已通过的 Shanghai / Tale 片轮换 | 同上 | Natural 无 Reel；暖人群受众池靠前两周积累 |
+| **W4 11/16–11/22** | **Shanghai & Surroundings** | Shanghai ≥ 7，BoC ≥ 2，Tale ≥ 2，其余 5 月团（≤4）| 同 W1 | **不新开工单（105 号 10-14 定）**：复用已有 SH2 系列；11/2 看完 Shanghai 几条的互动再定要不要新开（**不晚于 11/6 批**）| 同上 | 若 11/6 前决定新开，出片 + 审要约一周 |
 
 **5 月团穿插**（每周 ≤4 条 Post，只做认知）：只讲官网有班期的 Silk Road 5/13、Panorama 5/8、BoC 5/13、Legacy 5/28；Silk Road 回程差一天、Legacy 回程残缺，**只写出发日**；5/25 Shanghai、5/28 Natural 官网没有，不写日期不放链接。
 
