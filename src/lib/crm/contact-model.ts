@@ -18,7 +18,7 @@
  */
 
 import type { ContactLike, TouchpointLike } from './segments'
-import { engagementFromMetadata } from './segments'
+import { engagementFromMetadata, isUnansweredCall } from './segments'
 import { reclassifyStoredOutcome } from './note-parser'
 import { isDoNotContact } from './dnc'
 import { isAutomatedTouch } from './automated-touch'
@@ -78,6 +78,8 @@ export function buildTouchpointLike(t: TouchpointRowLike): TouchpointLike {
     automated: isAutomatedTouch(t.source, md),
     // 员工按了推迟 / 取消推迟这两个按钮——客人那头什么都没收到，不算联系动作。
     action: actionOf(md),
+    // 电话系统记录的外呼没人接：我们没联系上他，不算「我们最后一次出站」。
+    unansweredCall: t.channel === 'phone' && t.direction === 'outbound' && isUnansweredCall(md),
   }
 }
 
@@ -104,7 +106,7 @@ export function buildContactModel(
     // 「别再联系」的真相源是不可变的触点：contacts 列写失败过 / 历史导入只写了 outcome。
     // 两种写法都认；判据只有一份见 lib/crm/dnc（同时认「人明确纠正过这条判错了」）。
     doNotContact: isDoNotContact(
-      row.do_not_contact,
+      row.do_not_contact === true,
       own.map((t) => ({
         outcome: (t.metadata?.outcome as string) ?? null,
         flagged: t.metadata?.do_not_contact === true,

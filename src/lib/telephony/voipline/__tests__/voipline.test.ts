@@ -109,7 +109,7 @@ describe('接收：fail-closed 与回执', () => {
   it('发处理事件失败不影响 200，补处理任务能捞起来', async () => {
     const h = harness()
     const res = await (await import('../ingest')).handleVoiplineWebhook(h.mem.store, {
-      connectionId: CONN_A, tokenHeader: TOKEN_A, bodyText: JSON.stringify(inboundStart()),
+      connectionId: CONN_A, tokenHeader: TOKEN_A, bodyText: JSON.stringify(inboundStart()), now: () => new Date('2026-10-12T01:00:00.000Z'),
       emit: async () => { throw new Error('inngest down') },
     })
     expect(res.status).toBe(200)

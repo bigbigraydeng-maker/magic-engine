@@ -63,6 +63,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  goal_rollover_missing: 'dev', // 月循环目标没自动续上：广告自治/日报失去目标口径，是系统没跑通，转开发
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
@@ -103,6 +104,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
+  calendar_closure_overdue_summary: 'truth', // 日历到期没闭环的件数：「认一下」哪些真做了
   calendar_closure_calendar_unreadable: 'one_click', // 读不到 PM 日历：机器账号 / 日历共享要人点一次
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
@@ -125,6 +127,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   leads_metric_untrusted: 'client_side', // 客户统计后台的「关键事件」设置
   knowledge_fact_expiring_soon: 'client_side', // 团期 / 价格要跟客户确认
   crm_important_due: 'client_side', // 客户员工约好的回电
+  phone_call_needs_review: 'client_side', // 电话没能自动记进客人档案，客户销售要看一眼是谁
   messenger_draft_send_failed: 'client_side', // 回复没发出去，要人工发给客人
   tool_lead_needs_followup: 'client_side', // 工具实验室有人留资，值得联系一下
 
@@ -142,6 +145,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   auto_publish_stalled: 'review', // 该发的帖子没发出去：看原因、决定重发还是改
   auto_publish_unknown_outcome: 'truth', // 系统判不了真假：帖子到底有没有发出去，只有看主页的人知道
   auto_publish_unarmed: 'review', // 已授权却没动静：发布器可能没跑
+  story_stalled: 'review', // 某条 Story 没发出去：看原因、决定重发还是改
+  story_unknown_outcome: 'truth', // 系统判不了真假：Story 到底有没有发出去，只有看主页的人知道
+  story_unarmed: 'review', // 已授权却没动静：发布器可能没跑
   auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────

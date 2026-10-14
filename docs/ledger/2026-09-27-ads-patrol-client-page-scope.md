@@ -6,6 +6,8 @@ owner: agent
 decided_on: 2026-09-27
 source: session:b487d1fb
 verify_by: 2026-10-01
+last_checked: 2026-10-09
+check_note: PR#2118 已合并(9-28)。10-09 只读核实：CTS 巡检「没参与诊断」清单 10-03 起每天 0 条，10-08 无 D3 命中，ads.auto_pause_on_d3 在 flywheel_actions 全库 0 行；归属闸「own 放行」路径在生产还没被实际触发，未到 verified，等出现第一条 D3 命中再核。
 verify_how: 合并部署后第一次每日巡检跑完，查 CTS 当天巡检记录：排除清单里没有挂 CTS 主页的广告组被误切；D3 命中的广告组名下广告全挂 CTS 主页；自动暂停记账里每条要么带归属判定 own，要么是 blocked/failed 并写明归属原因。PR 还没合并就只盖章不判
 done_on: 2026-09-28
 done_ref: pr:2195

@@ -33,6 +33,7 @@ import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
 import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
 import { pushAutoPublishItems } from './auto-publish-items'
+import { pushStoryLiteItems } from './story-lite-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
@@ -45,6 +46,7 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
@@ -60,12 +62,12 @@ import {
   type NotIndexedRow,
 } from './manual-item-types'
 import { pushLinkedinProgressItems } from './manual-linkedin-items'
-import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
 export { pushLinkedinProgressItems } from './manual-linkedin-items'
-export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
@@ -319,6 +321,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
       console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
+    // Story 自动发布没发出去 / 不知道发没发出去 / 已授权却没动静
+    (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
+    ),
     // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
     (b) => pushPrescriptionItems(supabase, b, now, nameOf),
     // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
@@ -375,6 +381,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 月循环目标没自动续上 —— 自动续建失败不许只写日志（铁律 3）
+    (b) => pushGoalRolloverItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 月目标续建缺口待办生成失败（不阻塞其他待办）:', e),
+    ),
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
@@ -387,6 +397,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 可能被一句「不打算去」误判成永久拒联的人 —— 刻意不自动解除，交给人看一眼。
     (b) => pushDncReviewItems(supabase, b, ids, nameOf).catch((e) =>
       console.warn('[manual-items] 拒联复核待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 电话系统收了通话、但没能自动记进客人档案 —— 接真实客人线路前必须有人看得见（PM 2026-10-12）
+    (b) => pushPhoneReviewItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 待确认电话待办生成失败（不阻塞其他待办）:', e),
     ),
     // 反向的那一半：客人在私信里像是说了「别再联系」，而判据从来读不到私信（#1025）。
     // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。

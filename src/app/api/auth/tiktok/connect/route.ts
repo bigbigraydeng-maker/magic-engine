@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { buildAuthUrl, buildState } from '@/lib/tiktok-oauth/client'
+import { buildAuthUrl, buildState, TIKTOK_STATE_COOKIE } from '@/lib/tiktok-oauth/client'
 
 function appUrl(): string {
   return process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
@@ -27,7 +27,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   try {
     const redirectUri = `${appUrl()}/api/auth/tiktok/callback`
-    return NextResponse.redirect(buildAuthUrl(buildState(clientId), redirectUri))
+    const state = buildState(clientId)
+    const response = NextResponse.redirect(buildAuthUrl(state, redirectUri))
+    response.cookies.set(TIKTOK_STATE_COOKIE, state, {
+      httpOnly: true, secure: new URL(redirectUri).protocol === 'https:',
+      sameSite: 'lax', path: '/api/auth/tiktok', maxAge: 600,
+    })
+    return response
   } catch (err) {
     // 应用凭证没配 —— 说清缺哪个,别甩 500
     return NextResponse.json(
