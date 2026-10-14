@@ -2,7 +2,6 @@
 
 import {
   type ClaimHit,
-  CN_NUM_CHARS,
   DIGIT_MAP,
   formatAmount,
   isCnNumChar,
@@ -101,6 +100,10 @@ const PRICE_WORDS = [
   '只需',
   '只卖',
   '售',
+  'price',
+  'cost',
+  'costs',
+  'from',
 ]
 
 const PRICE_WORD_RE = new RegExp(`(?:${PRICE_WORDS.join('|')})`)
@@ -271,14 +274,21 @@ function findCurrencyAfter(text: string, end: number): string | null {
   return m ? m[0] : null
 }
 
-/** Price word ending within 8 chars before `start`, with no number token between. */
+/** Filler chars allowed between a price word and its number. */
+const PRICE_FILLER_RE = /[\s：:是为约大概含税()（）【】\[\]¥$.]/
+
+/**
+ * Price word ending within 8 chars before `start`, with no number token between.
+ * Up to 4 filler characters (whitespace, colons, 是/为/约/含税, brackets, …)
+ * may sit between the end of the price word and the number.
+ */
 function findPriceWordBefore(text: string, start: number, tokens: NumToken[]): string | null {
-  // allow up to 2 whitespace chars between the price word and the token
+  // skip backwards over up to 4 filler chars between the price word and the token
   let end = start
-  let ws = 0
-  while (end > 0 && /\s/.test(text[end - 1]) && ws < 2) {
+  let skipped = 0
+  while (end > 0 && skipped < 4 && PRICE_FILLER_RE.test(text[end - 1])) {
     end--
-    ws++
+    skipped++
   }
   const lo = Math.max(0, end - 8)
   for (let s = lo; s <= end; s++) {

@@ -3,8 +3,6 @@
 import {
   type ClaimHit,
   CN_NUM_CHARS,
-  DIGIT_MAP,
-  isCnNumChar,
   pad2,
   parseChineseNumber,
 } from './outbound-claims-core'
@@ -126,6 +124,45 @@ export function detectDate(text: string, hits: ClaimHit[]): void {
     const push = (mo: number, d: number) => {
       if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
         hits.push({ kind: 'date', match: matchText, value: `${pad2(mo)}-${pad2(d)}` })
+      }
+    }
+    if (a > 12 && b <= 12) push(b, a)
+    else if (a <= 12 && b > 12) push(a, b)
+    else if (a <= 12 && b <= 12) {
+      push(a, b)
+      push(b, a)
+    }
+  }
+
+  // Day-first / labelled numeric dates: A/B/YYYY, A/B/YY, and labelled A/B.
+  const dayFirstFull = /(?<!\d)(\d{1,2})\s*([/.\-])\s*(\d{1,2})\s*\2\s*(\d{4}|\d{2})(?!\d)/g
+  while ((m = dayFirstFull.exec(text)) !== null) {
+    const a = Number(m[1])
+    const b = Number(m[3])
+    let year = m[4]
+    if (year.length === 2) year = `20${year}`
+    const push = (mo: number, d: number) => {
+      if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+        hits.push({ kind: 'date', match: m![0], value: `${year}-${pad2(mo)}-${pad2(d)}` })
+      }
+    }
+    if (a > 12 && b <= 12) push(b, a)
+    else if (a <= 12 && b > 12) push(a, b)
+    else if (a <= 12 && b <= 12) {
+      push(b, a)
+      push(a, b)
+    }
+  }
+
+  // Labelled A/B or A.B with no year: 出发日期：12.25, 日期：25/12, 报名截止：12/20
+  const DATE_LABELS = '出发日期|报名截止|截止日期|出发|日期|截止|开团|返程|回程|起飞'
+  const labelledShort = new RegExp(`(?:${DATE_LABELS})\\s*[:：]?\\s*(\\d{1,2})\\s*([/.])\\s*(\\d{1,2})`, 'g')
+  while ((m = labelledShort.exec(text)) !== null) {
+    const a = Number(m[1])
+    const b = Number(m[3])
+    const push = (mo: number, d: number) => {
+      if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) {
+        hits.push({ kind: 'date', match: m![0], value: `${pad2(mo)}-${pad2(d)}` })
       }
     }
     if (a > 12 && b <= 12) push(b, a)

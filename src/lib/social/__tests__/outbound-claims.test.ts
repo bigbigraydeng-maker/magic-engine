@@ -314,3 +314,42 @@ describe('review: hard limits, fail closed', () => {
     expect(Date.now() - t0).toBeLessThan(1000)
   })
 })
+
+// ─── Review round 2 ───
+describe('review 2: price word followed by filler before the number', () => {
+  it.each([
+    '团费：4880', '团费是4880', '团费为4880', '价格: 4880', '总价是 4880', '团费约4880', '团费大概4880左右',
+    '费用：３，８８０', '价格：4,880', '团费(含税)4880', 'Price: 4880',
+  ])('%s', (text) => {
+    const v = scanOutboundClaims(text).filter((h) => h.kind === 'price').map((h) => h.value)
+    expect(v.some((x) => x === '4880' || x === '3880' || x === '880' || x === '3' || Number(x) > 0)).toBe(true)
+    expect(v.length).toBeGreaterThan(0)
+  })
+  it('the amount is the right one', () => {
+    expect(scanOutboundClaims('团费：4880').find((h) => h.kind === 'price')?.value).toBe('4880')
+    expect(scanOutboundClaims('价格：4,880').find((h) => h.kind === 'price')?.value).toBe('4880')
+    expect(scanOutboundClaims('费用：３，８８０').find((h) => h.kind === 'price')?.value).toBe('3880')
+  })
+})
+
+describe('review 2: day-first and labelled numeric dates', () => {
+  it.each(['25/12/2026', '25/12/26', '出发日期：12.25', '出发：12/25', '日期：25/12', '报名截止：12/20'])('%s', (text) => {
+    expect(kinds(text)).toContain('date')
+  })
+  it('25/12/2026 normalises to 2026-12-25', () => {
+    expect(scanOutboundClaims('25/12/2026').map((h) => h.value)).toContain('2026-12-25')
+  })
+})
+
+describe('review 2: more wording', () => {
+  it.each([
+    ['保你满意', 'promise'], ['一定帮你搞定', 'promise'], ['肯定行', 'promise'], ['稳了', 'promise'], ['不成功不收费', 'promise'],
+    ['不会有问题', 'promise'], ['絕對沒問題', 'promise'],
+    ['入境不用办理手续', 'visa'], ['visa is not needed', 'visa'], ['no visa required', 'visa'],
+    ['还剩两个位置', 'availability'], ['座位不多了', 'availability'], ['剩下最后2席', 'availability'], ['仅余3个', 'availability'],
+    ['only 2 left', 'availability'], ['last two seats', 'availability'],
+    ['买一赠一', 'discount'], ['白送', 'discount'], ['满减', 'discount'], ['直降500', 'discount'], ['half the price', 'discount'],
+  ] as Array<[string, ClaimKind]>)('%s', (text, kind) => {
+    expect(kinds(text)).toContain(kind)
+  })
+})

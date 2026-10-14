@@ -43,6 +43,7 @@ const TRAD_TO_SIMP: Record<string, string> = {
   歡: '欢', 迎: '迎', 驗: '验', 規: '规', 劃: '划', 計: '计', 護: '护',
   辦: '办', 拒: '拒', 剩: '剩', 贈: '赠', 禮: '礼', 折: '折', 減: '减',
   賬: '账', 財: '财',
+  絕: '绝', 沒: '没', 問: '问', 題: '题', 幫: '帮', 順: '顺', 鐘: '钟',
 }
 
 function toSimplified(s: string): string {
@@ -54,7 +55,12 @@ function toSimplified(s: string): string {
 export function normalise(text: string): string {
   // Thousands-comma removal must run on the ORIGINAL text, before NFKC turns
   // the Chinese comma '，' into ',' (which would wrongly glue '3,880，12月').
-  let s = text.replace(/(?<!\d)(\d{1,3}(?:,\d{3})+)(?!\d)/g, (m) => m.replace(/,/g, ''))
+  // Handle both ASCII ',' and fullwidth '，' here, but only when the comma sits
+  // between digit groups of exactly 3 digits (so '3880，订金' is left alone).
+  let s = text.replace(
+    /(?<![0-9０-９])([0-9０-９]{1,3}(?:[,，][0-9０-９]{3})+)(?![0-9０-９])/g,
+    (m) => m.replace(/[,，]/g, ''),
+  )
   s = s.normalize('NFKC')
   s = s.replace(URL_RE, ' ')
   s = s.replace(INVISIBLE, '')

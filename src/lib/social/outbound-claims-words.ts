@@ -13,31 +13,35 @@ const PROMISE_WORDS = [
   '包您满意', '包满意', '百分之百', '绝对没问题', '绝对可以', '肯定能',
   '肯定可以', '没问题', '担保', '打包票', '一定会', '退钱', '包退',
   '保成行', '保证成行', '必成团',
+  '保你满意', '一定帮你', '肯定行', '稳了', '包搞定', '不成功不收费', '不会有问题',
 ]
 const PROMISE_EN = /\b(guarantee|guaranteed|definitely will|money back|we promise|i promise|promise you|definitely|full refund|no problem at all|absolutely)\b/gi
 
 const VISA_WORDS = [
   '免签', '落地签', '拒签', '出签', '过签',
   '免签证', '不需要签证', '无需签证', '签证没问题', '不会拒签', '包签',
+  '入境不用办理', '不用办理手续',
 ]
 const VISA_CTX = ['免', '无需', '不需要', '不用', '通过', '费用', '办理', '一般']
-const VISA_EN = /\b(?:visa\b[^.!?]*\b(?:free|waiver|approved|guarantee|fee)\b|no visa needed|visa not required|you do not need a visa|don't need a visa|visa free|visa-free|nzeta is required|eta is required)\b/gi
+const VISA_EN = /\b(?:visa\b[^.!?]*\b(?:free|waiver|approved|guarantee|fee)\b|no visa needed|no visa required|visa not required|visa is not needed|visa isn't needed|you do not need a visa|don't need a visa|visa free|visa-free|nzeta is required|eta is required)\b/gi
 
 const AVAILABILITY_WORDS = [
   '仅剩', '只剩', '余位', '余票', '名额', '满团', '还有位置',
   '还有位子', '位置不多', '席位',
   '最后两个位置', '最后几位', '最后几个位置', '最后一个位置', '只剩最后',
   '快满', '即将满团', '快订满',
+  '还剩', '座位不多', '剩下最后', '仅余', '余座',
 ]
-const AVAILABILITY_EN = /\b(seats? left|spots? left|sold out|fully booked|limited availability|almost full|last few seats|last seats|a few seats left|nearly full)\b/gi
+const AVAILABILITY_EN = /\b(seats? left|spots? left|sold out|fully booked|limited availability|almost full|last few seats|last seats|a few seats left|nearly full|only \d+ left|last (?:two|three|few|\d+) seats?)\b/gi
 
 const DISCOUNT_WORDS = [
   '最低价', '最便宜', '全网最低', '免费升级', '免费赠送', '免费送',
   '赠送', '优惠', '折扣', '立减', '打折', '特价', '限时',
   '半价', '买一送一', '送机', '包早餐', '免费早餐', '早鸟', '底价',
   '内部价', '特惠', '促销', '优惠价',
+  '买一赠一', '白送', '满减', '直降',
 ]
-const DISCOUNT_EN = /\b(discount|half price|half-price|half off|free upgrade|free breakfast|free transfer|free gift|free cancellation|free pickup|free of charge|for free|best price|lowest price|buy one get one|percent off|early bird)\b|\d+\s*percent off/gi
+const DISCOUNT_EN = /\b(discount|half price|half-price|half off|half the price|free upgrade|free breakfast|free transfer|free gift|free cancellation|free pickup|free of charge|for free|best price|lowest price|buy one get one|percent off|early bird)\b|\d+\s*percent off/gi
 
 export function detectWords(text: string, hits: ClaimHit[]): void {
   let m: RegExpExecArray | null
