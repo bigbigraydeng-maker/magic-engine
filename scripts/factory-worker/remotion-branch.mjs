@@ -79,6 +79,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const montage = await import(pathToFileURL(join(engineDir, 'src', 'montage.ts')).href)
     const music = await import(pathToFileURL(join(engineDir, 'src', 'music.ts')).href)
     const datacard = await import(pathToFileURL(join(engineDir, 'src', 'datacard.ts')).href)
+    const postcard = await import(pathToFileURL(join(engineDir, 'src', 'postcard.ts')).href)
     let catalog = null
     return {
       computeTimingFromProps: timing.computeTimingFromProps,
@@ -87,6 +88,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       loadTemplate: templates.loadTemplate,
       montageFrameOf: montage.montageFrameOf,
       computeDataCardTiming: datacard.computeDataCardTiming,
+      computePostcardTiming: postcard.computePostcardTiming,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
           JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
@@ -173,6 +175,62 @@ export function assertDatacardTextVisible(props) {
       throw new RemotionOrderError(`数据卡${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
     }
   }
+}
+
+// Every on-screen postcard string (hook, scene place + line, price block) as cleaned strings, in reading order.
+export function buildPostcardText(props) {
+  const hook = props.hook.lines.map(clean).join(' ')
+  const scenes = props.scenes.map((sc) => `${clean(sc.place)} ${clean(sc.line)}`)
+  const p = props.price
+  const price = p == null
+    ? clean(props.end.title)
+    : [
+      clean(p.fromLabel),
+      clean(`${p.currencyPrefix}${p.amount.toLocaleString('en-US')}`),
+      clean(p.qualifier),
+      ...(p.dateLine === undefined || p.dateLine === null ? [] : [clean(p.dateLine)]),
+      clean(p.footnote),
+    ].join(' ')
+  return { hook, scenes, price }
+}
+
+// Every postcard string joined for the server-side red-line rescan.
+export function buildPostcardCaption(props) {
+  const { hook, scenes, price } = buildPostcardText(props)
+  return [hook, ...scenes, price].join(' · ')
+}
+
+// The renderer paints raw props, so text that cleans to nothing or differs once invisible characters are dropped must be refused.
+export function assertPostcardTextVisible(props) {
+  const parts = [
+    ...props.hook.lines.map((t) => ['钩子', t]),
+    ...props.scenes.flatMap((sc, i) => [[`第 ${i + 1} 景地名`, sc.place], [`第 ${i + 1} 景文案`, sc.line]]),
+    ...(props.price == null
+      ? [['片尾标题', props.end.title]]
+      : [
+        ['价格前缀', props.price.fromLabel],
+        ['价格说明', props.price.qualifier],
+        ['价格脚注', props.price.footnote],
+        ...(props.price.dateLine == null ? [] : [['价格日期行', props.price.dateLine]]),
+      ]),
+  ]
+  for (const [name, t] of parts) {
+    if (clean(t) === '') throw new RemotionOrderError(`明信片${name}清理后是空的（只含不可见字符）`)
+    if (clean(t) !== String(t).trim().normalize('NFKC')) {
+      throw new RemotionOrderError(`明信片${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+    }
+  }
+}
+
+// Build the SRT captions from the postcard timing layout.
+export function buildPostcardSrt(props, timing, fps) {
+  const { hook, scenes, price } = buildPostcardText(props)
+  const cues = [[0, timing.hookFrames / fps, hook]]
+  scenes.forEach((text, i) => cues.push([timing.sceneFrom[i] / fps, (timing.sceneFrom[i] + timing.sceneDur[i]) / fps, text]))
+  cues.push([timing.priceFrom / fps, timing.totalFrames / fps - 0.1, price])
+  return cues
+    .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
+    .join('')
 }
 
 // Build the SRT captions for the data card: hook, one cue per row, disclaimer held with the last row.
@@ -505,6 +563,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     assertDatacardTextVisible(props)
     timing = eng.computeDataCardTiming(props)
   }
+  if (template === 'postcard') {
+    assertPostcardTextVisible(props)
+    timing = eng.computePostcardTiming(props)
+  }
 
   const hb = startHeartbeats({
     woId: wo.work_order_id,
@@ -591,10 +653,14 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       ? buildRemotionSrt(props, timing, eng.FPS)
       : template === 'datacard'
         ? buildDatacardSrt(props, timing, eng.FPS)
-        : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
+        : template === 'postcard'
+          ? buildPostcardSrt(props, timing, eng.FPS)
+          : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
     const caption = template === 'list'
       ? buildRemotionCaption(props)
-      : template === 'datacard' ? buildDatacardCaption(props) : buildMontageCaption(props)
+      : template === 'datacard'
+        ? buildDatacardCaption(props)
+        : template === 'postcard' ? buildPostcardCaption(props) : buildMontageCaption(props)
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
     const expected = totalFrames / eng.FPS
     if (evidence.width !== 1080 || evidence.height !== 1920) {

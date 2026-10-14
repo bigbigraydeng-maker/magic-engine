@@ -10,12 +10,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { countRevokeBlockers, revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
-import type { MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
+import type { MarketingPlan, MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import {
   PLAN_CONTENT_LOCKED_MESSAGE,
+  PROMO_CHANGED_VIA_PATCH_MESSAGE,
   isRevertToDraft,
   lockedFieldsTouched,
+  promoFieldChanged,
 } from '@/lib/marketing-plan/plan-guard'
 
 interface PatchBody {
@@ -77,6 +79,9 @@ export async function PATCH(
 
   try {
     const body = await req.json().catch(() => ({})) as PatchBody
+    if (body.plan_data !== undefined && (body.plan_data === null || typeof body.plan_data !== 'object' || Array.isArray(body.plan_data))) {
+      return NextResponse.json({ success: false, error: 'plan_data 必须是一个对象' }, { status: 400 })
+    }
 
     const updates: Record<string, unknown> = {}
     if (body.title !== undefined)       updates.title      = body.title
@@ -107,13 +112,22 @@ export async function PATCH(
     // 要改内容就先退回草稿（status: 'draft'），退回时清掉还没开始的待办。
     const { data: current, error: currentErr } = await supabaseAdmin
       .from('marketing_plans')
-      .select('status')
+      .select('status, plan_data, generation_meta, updated_at')
       .eq('id', params.planId)
       .eq('client_id', params.id)
-      .maybeSingle<{ status: MarketingPlanStatus }>()
+      .maybeSingle<{ status: MarketingPlanStatus; plan_data: unknown; generation_meta: MarketingPlan['generation_meta']; updated_at: string }>()
     if (currentErr) throw currentErr
     if (!current) {
       return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
+    }
+
+    // 推广结构只能走专用保存接口（那里才核对目标 / 账户 / 预算）；通用保存不能改它，也不能把它删掉
+    if (body.plan_data !== undefined && promoFieldChanged(current.plan_data, body.plan_data)) {
+      return NextResponse.json({ success: false, error: PROMO_CHANGED_VIA_PATCH_MESSAGE }, { status: 409 })
+    }
+    // 「已完成」只能从「已批准」走过去：草稿直接改成已完成 = 没批准过却像批准过
+    if (body.status === 'completed' && current.status !== 'approved') {
+      return NextResponse.json({ success: false, error: '只有已批准的计划才能标记为已完成。' }, { status: 409 })
     }
 
     const revertingToDraft = isRevertToDraft(current.status, body.status)
@@ -139,6 +153,13 @@ export async function PATCH(
       }
       // 退回草稿 = 撤销批准：清掉这份计划还没开始的待办和草稿生产包（有已开工的上面已拒绝）。
       revoked = (await revokePlanTasks(params.planId, params.id)).revoked
+      // 退回草稿后，旧批准记录不再算「有效」：回执挪去留底，批准时间清空（再次批准会写新的）
+      const { approval_receipt: oldReceipt, ...restMeta } = current.generation_meta ?? {}
+      updates.approved_at = null
+      updates.generation_meta = {
+        ...restMeta,
+        ...(oldReceipt ? { previous_approvals: [...(restMeta.previous_approvals ?? []), oldReceipt].slice(-10) } : {}),
+      }
     }
 
     const { data, error } = await supabaseAdmin
@@ -146,10 +167,17 @@ export async function PATCH(
       .update(updates)
       .eq('id', params.planId)
       .eq('client_id', params.id)
+      .eq('updated_at', current.updated_at) // 读完到写入之间被别处改过（含批准、推广页保存）→ 不覆盖
       .select('*')
-      .single()
+      .maybeSingle()
 
     if (error) throw error
+    if (!data) {
+      const error = revertingToDraft
+        ? '这份计划刚刚在别处被修改了，退回草稿没有完成：还没开始的待办已经清掉，但计划仍是已批准。请刷新页面后再点一次「退回草稿」。'
+        : '这份计划刚刚在别处被修改了，这次保存没有生效。请刷新页面后再试。'
+      return NextResponse.json({ success: false, error, ...(revertingToDraft ? { revoked_tasks: revoked } : {}) }, { status: 409 })
+    }
     return NextResponse.json({ success: true, plan: data, ...(revertingToDraft ? { revoked_tasks: revoked } : {}) })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

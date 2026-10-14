@@ -53,6 +53,35 @@ export function lockedFieldsTouched(body: {
   return touched
 }
 
+// ─── 推广结构只能走推广计划页保存 ────────────────────────────────────────────────
+
+export const PROMO_CHANGED_VIA_PATCH_MESSAGE =
+  '这次保存会改动（或丢掉）计划里的推广结构。推广结构只能在「推广计划」页保存，那里会核对目标、账户和预算；如果你没打算改它，请刷新页面后再保存。'
+
+/** 键排序后的 JSON：键顺序不同但内容一样的两份结构算同一份。 */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    return `{${Object.keys(obj).sort().map(k => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
+function promoOf(planData: unknown): unknown {
+  if (!planData || typeof planData !== 'object') return null
+  return (planData as { promo?: unknown }).promo ?? null
+}
+
+/**
+ * 通用保存接口（PATCH）带来的 plan_data 里，推广结构（promo）是否和库里不一样（含被丢掉、被新增）。
+ * 不一样就拒绝：推广结构的校验（目标 / 账户归属、预算上限）只在专用保存接口里做，
+ * 通用保存不能绕过它，也不能靠「删掉 promo」躲开批准前的检查清单。
+ */
+export function promoFieldChanged(currentPlanData: unknown, nextPlanData: unknown): boolean {
+  return stableStringify(promoOf(currentPlanData)) !== stableStringify(promoOf(nextPlanData))
+}
+
 // ─── 派发去重 ──────────────────────────────────────────────────────────────────
 
 /**

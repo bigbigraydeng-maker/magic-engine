@@ -14,6 +14,7 @@ import type { PromoBoard } from '@/lib/marketing-plan/promo/board'
 import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
 import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
@@ -175,6 +176,7 @@ export function PromoPlanClient() {
                     <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
                   </div>
                 )}
+            <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
             {board.has_promo && !board.spec_valid && <SpecProblems board={board} />}

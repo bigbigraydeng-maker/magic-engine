@@ -16,10 +16,15 @@ import {
   collectDataCardAssetFiles,
   computeDataCardTiming,
 } from './datacard.ts';
+import {
+  parsePostcardProps,
+  collectPostcardAssetFiles,
+  computePostcardTiming,
+} from './postcard.ts';
 import { stagedFileName, type MusicCatalog } from './music.ts';
 
 /** Allowed template ids. */
-export const TEMPLATE_IDS = ['list', 'montage', 'datacard'] as const;
+export const TEMPLATE_IDS = ['list', 'montage', 'datacard', 'postcard'] as const;
 
 /** One supported template id. */
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
@@ -70,6 +75,15 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
       assetFiles: collectDataCardAssetFiles(props),
       totalFrames: computeDataCardTiming(props).totalFrames,
       recipeGaps: DATACARD_RECIPE_GAPS,
+    };
+  }
+  if (id === 'postcard') {
+    const props = parsePostcardProps(input);
+    return {
+      compositionId: 'PostcardReel',
+      props,
+      assetFiles: collectPostcardAssetFiles(props),
+      totalFrames: computePostcardTiming(props).totalFrames,
     };
   }
   const props = parseMontageReelProps(input);
