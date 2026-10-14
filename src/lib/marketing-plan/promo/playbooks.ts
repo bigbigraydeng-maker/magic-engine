@@ -25,6 +25,19 @@ export interface PromoPlaybook {
   readonly behindBelowRatio: number
   /** 实际花费 / 计划花费 高于这个比例算「超」。 */
   readonly spendOverRatio: number
+  /**
+   * 排期表：每周 N 条内容落在星期几（ISO 星期，周一=1…周日=7）。键是每周条数 1–7。
+   * 只是「均匀摊开」的默认摆法，不是任何行业的发布时间经验。
+   */
+  readonly scheduleWeekdays: Readonly<Record<number, readonly number[]>>
+  /** 快拍相对帖子错开几天（让一天不要全撞在一起）。 */
+  readonly storyWeekdayShift: number
+  /** 短视频只落在这些星期（默认工作日；周末高峰的行业以后在行业剧本里改）。排期表按「周一起算」分组，这一点目前是默认假设。 */
+  readonly reelWeekdays: readonly number[]
+  /** 排期表防护：展开后最多多少件、所有阶段合计最多多少天、最多多少个步骤。 */
+  readonly scheduleMaxItems: number
+  readonly scheduleMaxSpanDays: number
+  readonly scheduleMaxSteps: number
   readonly evidence: PromoEvidence
 }
 
@@ -36,6 +49,20 @@ export const DEFAULT_PROMO_PLAYBOOK: PromoPlaybook = {
   cadenceCoverageMinDays: 7,
   behindBelowRatio: 0.8,
   spendOverRatio: 1.2,
+  scheduleWeekdays: {
+    1: [3],
+    2: [2, 4],
+    3: [1, 3, 5],
+    4: [1, 2, 4, 5],
+    5: [1, 2, 3, 4, 5],
+    6: [1, 2, 3, 4, 5, 6],
+    7: [1, 2, 3, 4, 5, 6, 7],
+  },
+  storyWeekdayShift: 1,
+  reelWeekdays: [1, 2, 3, 4, 5],
+  scheduleMaxItems: 1000,
+  scheduleMaxSpanDays: 800,
+  scheduleMaxSteps: 200,
   evidence: 'unvalidated_default',
 }
 

@@ -16,6 +16,9 @@ import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
+import { ScheduleTable } from './_components/ScheduleTable'
+import { expandPromoSchedule } from '@/lib/marketing-plan/promo/schedule'
+import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
@@ -118,14 +121,17 @@ export function PromoPlanClient() {
   }
 
   const approve = board ? approveButtonState(board) : null
-  const realPhases = useMemo(() => {
-    const spec = selected ? readPromoSpec(selected.plan_data) : null
-    return spec ? describePromoSpec(spec) : null
-  }, [selected])
-  const samplePhases = useMemo(
-    () => (showSample ? describePromoSpec(buildPromoSample(new Date().toISOString().slice(0, 10))) : null),
-    [showSample],
+  // 「今天」按悉尼日期（澳新客户的日历日），不用 UTC，免得早上少算一天
+  const todayIso = useMemo(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date()), [])
+  // 展示用的推广结构：示例开着看示例，否则看这份计划自己的
+  const shownSpec = useMemo(
+    () => (showSample ? buildPromoSample(todayIso) : selected ? readPromoSpec(selected.plan_data) : null),
+    [showSample, selected, todayIso],
   )
+  const shownPhases = useMemo(() => (shownSpec ? describePromoSpec(shownSpec) : null), [shownSpec])
+  // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
+  const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
+  const scheduleMode = showSample ? 'sample' : selected?.status === 'draft' ? 'preview' : 'approved'
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
@@ -166,16 +172,15 @@ export function PromoPlanClient() {
         {board && selected && (
           <>
             <Headline board={board} plan={selected} />
-            {samplePhases
-              ? <PlanOverview phases={samplePhases} sample onCloseSample={() => setShowSample(false)} />
-              : realPhases
-                ? <PlanOverview phases={realPhases} />
-                : (
+            {shownPhases
+              ? <PlanOverview phases={shownPhases} sample={showSample} onCloseSample={showSample ? () => setShowSample(false) : undefined} />
+              : (
                   <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4 flex flex-wrap items-center gap-3">
                     <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。想先看看做好是什么样？</p>
                     <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
                   </div>
                 )}
+            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
