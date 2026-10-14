@@ -105,6 +105,11 @@ describe('loadPromoFacts — 读失败一律 null / 不放行', () => {
     expect(f.recon.spend_cents_by_account_day).toBeNull()
     expect(f.recon.meta_results).toBeNull()
   })
+  it('每日计划覆盖按连续天数算：中间有空档就在空档处停', async () => {
+    const day = (date: string) => ({ date, slots: { fb: 'PLANNED' } })
+    st.results.social_plans = { data: [{ plan_data: { days: [day('2026-11-12'), day('2026-11-13'), day('2026-11-20')] } }] }
+    expect((await loadPromoFacts('client-1', baseSpec(), [], NOW)).gate.daily_plan_coverage_days).toBe(2)
+  })
   it('广告设置读失败 → config=null', async () => {
     st.results.ad_strategy_configs = { data: null, error: err }
     expect((await loadPromoFacts('client-1', baseSpec(), [], NOW)).gate.config).toBeNull()

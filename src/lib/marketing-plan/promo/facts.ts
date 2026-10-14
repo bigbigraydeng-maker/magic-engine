@@ -80,7 +80,7 @@ async function loadStrategyConfig(clientId: string): Promise<GateFacts['config']
   }
 }
 
-/** 每日计划从 today 起往后排到了第几天；一天都没排 = 0；读失败 = null。 */
+/** 每日计划从 today 起「连续」排了几天（遇到第一个空档就停）；一天都没排 = 0；读失败 = null。 */
 async function loadDailyPlanCoverage(clientId: string, today: string): Promise<number | null> {
   const { data, error } = await supabaseAdmin
     .from('social_plans')
@@ -88,15 +88,15 @@ async function loadDailyPlanCoverage(clientId: string, today: string): Promise<n
     .eq('client_id', clientId)
     .contains('plan_data', { plan_kind: 'campaign_daily_v1' })
   if (error) return null
-  let last: string | null = null
+  const plannedDays = new Set<string>()
   for (const row of (data ?? []) as { plan_data: { days?: { date: string; slots?: Record<string, string> }[] } }[]) {
     for (const d of row.plan_data?.days ?? []) {
-      const planned = Object.values(d.slots ?? {}).some(v => v === 'PLANNED')
-      if (planned && d.date >= today && (last === null || d.date > last)) last = d.date
+      if (Object.values(d.slots ?? {}).some(v => v === 'PLANNED')) plannedDays.add(d.date)
     }
   }
-  if (last === null) return 0
-  return Math.round((Date.parse(`${last}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000) + 1
+  let run = 0
+  while (plannedDays.has(addDays(today, run))) run++
+  return run
 }
 
 /** 目标：必须属于同一客户，否则当作读不到。 */

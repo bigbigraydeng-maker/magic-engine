@@ -103,6 +103,15 @@ describe('目标进度（复用 goal-pace，不拿整期目标当分母）', () 
     expect(r.rows.find(x => x.key === 'results_goal')?.status).toBe('immature')
   })
 
+  it('目标数字太久没同步 / 没有同步时间 → 看不清（不是落后）', () => {
+    const stale = goodReconFacts({ spend_cents_by_account_day: spendFacts(5000) })
+    stale.goal!.current_value_fetched_at = '2026-11-01T00:00:00Z'
+    expect(reconcileWeek(baseSpec(), TODAY, stale, pb).rows.find(x => x.key === 'results_goal')?.status).toBe('unknown')
+    const missing = goodReconFacts({ spend_cents_by_account_day: spendFacts(5000) })
+    missing.goal!.current_value_fetched_at = null
+    expect(reconcileWeek(baseSpec(), TODAY, missing, pb).rows.find(x => x.key === 'results_goal')?.status).toBe('unknown')
+  })
+
   it('目标已过期 / 归档 → 目标不适用（unknown），不用旧分母', () => {
     const f = goodReconFacts({ spend_cents_by_account_day: spendFacts(5000) })
     f.goal!.status = 'expired'

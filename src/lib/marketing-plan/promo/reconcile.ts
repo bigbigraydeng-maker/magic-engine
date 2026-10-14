@@ -146,6 +146,11 @@ function goalRow(spec: PromoSpec, today: string, f: ReconcileFacts, pb: PromoPla
   if (g.target_value === null || g.baseline_value === null) {
     return { ...base, planned: null, actual: null, status: 'unknown', reason: '目标缺少起点或目标值' }
   }
+  // 目标数字多久没同步了？同步断档时拿旧数字算进度，会把"取数断了"显示成"落后"
+  const fetchedDay = g.current_value_fetched_at ? g.current_value_fetched_at.slice(0, 10) : null
+  if (fetchedDay === null || daysBetween(fetchedDay, today) > pb.factFreshnessDays) {
+    return { ...base, planned: null, actual: null, status: 'unknown', reason: `目标数字${fetchedDay === null ? '没有同步时间' : `已超过 ${pb.factFreshnessDays} 天没同步`}，不能据此判断进度` }
+  }
   const elapsed = daysBetween(g.period_start, today) + 1
   const pace = computeGoalPace({
     targetValue: g.target_value, baselineValue: g.baseline_value,
