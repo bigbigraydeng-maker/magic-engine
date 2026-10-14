@@ -14,24 +14,29 @@
 |---|---|---|---|---|---|---|
 | **W0 10/14–10/19**（正在跑，已定） | 无单一主推（Story 周包混合 6 天；Reel 此前已发 BoC / Tale / 上海各 1 条，平台公开 10/13 凌晨 01:19–01:20 补发） | **Story**：每天 08:30 灵感 / 13:00 事实 / 20:00 邀请，授权包 18 条里 5 条被撤、第一条真发 10/14 20:00；**Post**：75 号 10/12 周排期，每天 1 条人工；**Reel**：无新增 | [74] | [74] 看过 BoC / Tale Reel 的人要等公开满 48 小时（最早 10/15 01:20 起可用） | — | 待 PM 选路 |
 | **W1 10/19–10/25**（周包已定，苏东坡通过、马良有条件通过） | **Natural China**（Reel 10/20 + Post 3 + Story 3 最多） | **Reel**：10/20 19:30 Natural China（拉新）；**Post**：14 条（12:00 / 19:00，10/20 晚一条提前 17:30），角色全是「讲清行程」，不带价格，Tale 3、Panorama 3、Natural 3、Silk 2、Shanghai 1、BoC 1、Legacy 1；**Story**：17 条（4 位置空：10/24 13:00 与 20:00、10/25 08:30 与 20:00），按灵感 / 事实 / 邀请三个时段 | [74] | [74]（Natural China Reel 10/21 19:30 后满 48 小时） | Natural `/tours/china/signature/landscapes` | 待 PM 选路 |
-| **W2 10/26–11/1**（提议，周包 10/23 交） | **Shanghai & Surroundings**（74 号「第 1 周」，最便宜门槛最低） | **Reel**：可用已审片的 Shanghai #2「价格里有什么」（需 PM 在工厂点通过，并人工转公开）；**Post** ≥ 5 条 Shanghai，BoC ≥ 2 条（统筹 10-14 定）；**Story**：Shanghai 为主的邀请位 | [74] 周三起 | [74] | Shanghai `/tours/china/discovery/shanghai-surroundings` | 待 PM 选路 |
-| **W3 11/2–11/8** | **A Tale of Two Cities** | **Reel**：Tale #2「十天北京西安」（审片中）；Post / Story 同上规则 | [74] | [74] | Tale `/tours/china/discovery/beijing-xian` | 待 PM 选路 |
-| **W4 11/9–11/15** | **Best of China**（3/11 最早，最急） | **Reel**：BoC #2「四城一趟」（审片中） | [74] 这周加力 | [74] | BoC `/tours/china/discovery/essentials` | 待 PM 选路 |
-| **W5 11/16–11/22** | **Natural China**（最贵，暖人群） | Reel 位：目前**无新成片**，要么复用已公开的并说明、要么新开工单（105 号定，需 74 批） | [74] | [74] 只投看过内容 / 打开过表单的人 | Natural 同上 | 待 PM 选路 |
-| **W6 11/23–11/29** | 轮回 Shanghai；开始穿插 5 月团（只做认知） | Reel 位同上；5 月团 Post 每周 ≤ 4 条，只讲官网有的 Silk Road 5/13、Panorama 5/8、BoC 5/13、Legacy 5/28 | [74] | [74] | Shanghai 同上；5 月团 Silk `/tours/china/signature/silk-road`、Panorama `/tours/china/signature/grand-tour`、Legacy `/tours/china/signature/imperial-heritage` | 待 PM 选路 |
-| **W7 11/30–12/6** | Tale；**3 月团销售期 11/30 截止** | 截止口径要 CTS 确认能否对外说 | [74] | [74] | Tale 同上 | 待 PM 选路 |
+| **W2 10/26–11/1**（105 号 10-14 裁定，周包 10/23 交） | **Shanghai & Surroundings**（3/25，最便宜门槛最低，约剩位子最多） | **Reel**：Shanghai #2「价格里有什么」（审片中；需 PM 在工厂点通过并人工转公开；**主推团的 Reel 必须是当周公开的**，否则广告只能吃上周受众池）；**Post** ≥ 一半是 Shanghai，BoC ≥ 2 条；**Story**：三个邀请位讲 Shanghai | [74] 周三起 | [74] | Shanghai `/tours/china/discovery/shanghai-surroundings` | 待 105 号方案（PR 2603）PM 批后填 |
+| **W3 11/2–11/8** | **A Tale of Two Cities**（3/18） | **Reel**：Tale #2「十天北京西安」（审片中，同上规则）；其余同规则，BoC ≥ 2 条 | [74] | [74] | Tale `/tours/china/discovery/beijing-xian` | 同上 |
+| **W4 11/9–11/15** | **Natural China**（3/26，最贵，**只对看过内容的人，不冷启动**） | **Reel**：Natural 已于 W1 用过，本周**无新成片**（要新开工单，105 号决定）；Post 一半 Natural，BoC ≥ 2 条 | [74] 只投看过内容 / 打开过表单的人 | [74] | Natural `/tours/china/signature/landscapes` | 同上 |
+| **W5 11/16–11/22** | 轮回 **Shanghai** | Reel 位：可复用 Shanghai 已公开成片并说明，或新开工单；BoC ≥ 2 条 | [74] | [74] | Shanghai 同上 | 同上 |
+| **W6 11/23–11/29** | 轮回 **Tale** | 同上；开始穿插 5 月团（每周 ≤ 4 条，只做认知，只讲官网有的 Silk Road 5/13、Panorama 5/8、BoC 5/13、Legacy 5/28） | [74] | [74] | Tale 同上；5 月团 Silk `/tours/china/signature/silk-road`、Panorama `/tours/china/signature/grand-tour`、Legacy `/tours/china/signature/imperial-heritage` | 同上 |
+| **W7 11/30–12/6** | 按席位定；**3 月团销售期 11/30 截止** | 截止口径要 CTS 确认能否对外说 | [74] | [74] | 按主推团 | 同上 |
+
+> **席位数据限定（原样）**：下面顺序所依据的剩余位子来自 **10/3 的名单，已 11 天旧，CTS 一直没给最新已订数**，所以这个顺序是按现有最好的数据排的，**不是确定的事实**；CTS 一给新数字就可能要重排。CTS 最新席位数由 105 号走 PM 去要。
+> 依据（10/3 名单，约数）：BoC（3/11）约剩 5 位，近乎卖满，边际最低，**不设主推周**；Shanghai（3/25）约剩 20、Natural（3/26）约剩 20、Tale（3/18）约剩 16。
+> **Reel 封面 = 成片第一帧**，工厂发布代码不支持指定封面；某条第一帧不好看只能退回重做，不能临时换封面。
+> **口径来源**：「主推团」定义、轮回顺序、BoC 不设主推周，均由 105 号（PM 授权牵头 CTS 广告与社媒）10-14 裁定，取代我与 74 号此前的草案。
 
 **5/25 Shanghai、5/28 Natural China 官网没有班期页（74 号另派窗口在补），这两班在官网上线前不放链接、不写日期。**
 
-## 2. 要统筹 / 74 / 75 判的三个口径冲突（我只报，不自己定）
+## 2. 三个口径已裁定（105 号 10-14）
 
-1. **「一周只主推一个团」vs 周包与统筹决定。** 已通过的 10/19 周包是 7 个团混排（只有 Natural 稍多）；统筹 10-14 又定 BoC 与 Shanghai 每周至少 2 条。需要把「主推」定义清楚才能统一：我的建议是——**主推团占当周 Reel + 至少一半 Post + Story 邀请位；BoC 与 Shanghai 非主推周也保 2 条 Post；5 月团每周 ≤ 4 条**。
-2. **10/19 那周是过渡周**：74 号「第 1 周 = Shanghai」，但周包已按 Natural（Reel 10/20）定稿。我把 74 号的轮回顺序往后挪一周（W2 起 Shanghai），请 74 号确认。
-3. **BoC 最急（3/11）却只在 W4 11/9 才主推一次**：这周以后到 11/30 只剩 W4 一个主推周加每周 2 条配角帖。是否要提前，由 74 号和统筹定。
+1. **主推团** = 当周 Reel + 至少一半 Post + Story 邀请位；**BoC 与 Shanghai 非主推周每周保 2 条 Post；5 月团每周 ≤ 4 条，只做认知**。主推团的 Reel 必须是当周公开的。
+2. **10/19 周是过渡周**（Natural，周包已两轮签字，不动）；轮回顺序从 10/26 起：Shanghai → Tale → Natural → Shanghai → Tale → 11/30 按席位定。
+3. **BoC 不设主推周**（105 号起先裁了相反的顺序，随后改判：74 号按席位排是对的）。
 
 ## 3. 前提（不成立的地方，这张表就要改）
 
 - **Reel 产能没证实**：统筹只读查到线上渲染表，9/07 周后基本无新任务；这张表的 Reel 位只用**已审片的成片**（审片中 5 条），不假定每周 3 条。新出片要 105 号决定、74 号批、走视频工厂。
 - **Reel 要 PM 点通过**，工厂是草稿模式，点了只是草稿，要人工转公开；公开时间以平台为准。
 - **Story 与 Post 的放行**：Story 开关已开，之后的放行按每周授权；Post 全人工。
-- 预算列全部「待 PM 选路」：结清欠款 / 提高上限 / 集中打 1–2 个团，PM 还没选。
+- 预算列：PM 已选「结清欠款、让个人账户回来」，具体预算口径由 105 号方案（`2026-10-14-cts-ads-budget-for-pm-approval-v1.md`，PR 2603）PM 批后填。
