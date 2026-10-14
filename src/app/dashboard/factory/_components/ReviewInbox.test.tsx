@@ -195,7 +195,7 @@ it('打回 needs a reason, posts reject_quality, and shows the 已打回 notice'
 it('只改预算 tab posts reject_budget', async () => {
   await mount([{ ok: true }])
   await openReject()
-  await click(btnEq('只改预算'))
+  await click(btnEq('只改预算(不打回)'))
   const input = document.querySelector('input[type="number"]') as HTMLInputElement
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '20')

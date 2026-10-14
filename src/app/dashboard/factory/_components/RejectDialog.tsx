@@ -137,14 +137,14 @@ export function RejectDialog({ mode, orderNo, busy, error, onSubmit, onClose, on
 
         {onModeChange && (
           <div className="mb-4 flex gap-2" role="tablist" aria-label="打回类型">
-            {([['quality', '画面有问题'], ['budget', '只改预算']] as const).map(([m, label]) => (
+            {([['quality', '画面有问题'], ['budget', '只改预算(不打回)']] as const).map(([m, label]) => (
               <button
                 key={m}
                 type="button"
                 role="tab"
                 aria-selected={mode === m}
                 onClick={() => onModeChange(m)}
-                className={`px-3 h-9 rounded-lg text-sm border ${mode === m ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
+                className={`px-3 h-11 rounded-lg text-sm border ${mode === m ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200'}`}
               >{label}</button>
             ))}
           </div>

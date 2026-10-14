@@ -147,9 +147,10 @@ function QualityFlagsBlock({ o, onAccept, busy }: { o: WorkOrder; onAccept: (cat
                   onClick={() => onAccept(f.category)}
                   disabled={busy}
                   title="接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒"
-                  className="mt-1 px-2 h-7 rounded border border-amber-300 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                  className="mt-1 px-3 h-11 rounded border border-amber-300 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
                 >PM 已接受</button>
               )}
+              {isAcceptableFlagCategory(f.category) && <p className="mt-1 text-xs text-amber-700">接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒</p>}
             </div>
           ))}
         </div>
@@ -288,9 +289,9 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   const shownRejected = rejected.filter(inGroup)
   const shownOld = superseded.filter(inGroup)
   const segs: Array<{ key: Seg; label: string; count: number }> = [
-    { key: 'pending', label: '待审', count: orders.length },
-    { key: 'done', label: '已通过/已发布', count: published.length },
-    { key: 'rejected', label: '已打回', count: rejected.length },
+    { key: 'pending', label: '待审', count: shownPending.length },
+    { key: 'done', label: '已通过/已发布', count: shownDone.length },
+    { key: 'rejected', label: '已打回', count: shownRejected.length },
   ]
   const gridCls = 'grid gap-3 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]'
 
@@ -370,23 +371,24 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   <button
                     onClick={() => { setError(null); setConfirming(o); setShowDetails(false); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
                     disabled={busy === o.id}
-                    className="w-full h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
+                    className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
                   >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
                   <button
                     type="button"
                     onClick={() => { setError(null); setRejecting({ order: o, mode: 'quality' }) }}
                     disabled={busy === o.id}
-                    className="w-full h-10 rounded-lg border border-orange-300 text-orange-800 text-sm font-medium hover:bg-orange-50 disabled:opacity-50"
+                    className="w-full h-11 rounded-lg border border-orange-300 text-orange-800 text-sm font-medium hover:bg-orange-50 disabled:opacity-50"
                   >打回</button>
                   {o.output?.video_path && (
                     <a
                       href={factoryVideoUrl(o.output.video_path, SUPABASE_URL, `${o.id.slice(0, 8)}.mp4`)}
                       download
-                      className="text-xs text-blue-600 underline text-center"
+                      className="w-full h-11 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium grid place-items-center hover:bg-slate-50"
                       target="_blank"
                       rel="noopener noreferrer"
                     >下载成片</a>
                   )}
+                  {!o.output?.video_path && <span className="w-full h-11 rounded-lg border border-slate-200 text-slate-400 text-sm grid place-items-center">无成片</span>}
                   <PublishOutlets />
                 </div>
               </div>

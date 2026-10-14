@@ -17,10 +17,10 @@ export function CardVideo({ src, onDuration }: { src: string; onDuration?: (s: n
       preload="metadata"
       src={src}
       onLoadedMetadata={(e) => onDuration?.(e.currentTarget.duration)}
-      className="w-full max-w-[120px] mx-auto aspect-[9/16] rounded-lg bg-black object-contain"
+      className="w-full max-w-[140px] mx-auto aspect-[9/16] rounded-lg bg-black object-contain"
     />
   ) : (
-    <div className="w-full max-w-[120px] mx-auto aspect-[9/16] rounded-lg bg-slate-100 grid place-items-center text-xs text-slate-500">无成片</div>
+    <div className="w-full max-w-[140px] mx-auto aspect-[9/16] rounded-lg bg-slate-100 grid place-items-center text-xs text-slate-500">无成片</div>
   )
 }
 
