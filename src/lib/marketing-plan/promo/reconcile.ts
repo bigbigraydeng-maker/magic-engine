@@ -146,6 +146,10 @@ function goalRow(spec: PromoSpec, today: string, f: ReconcileFacts, pb: PromoPla
   if (g.target_value === null || g.baseline_value === null) {
     return { ...base, planned: null, actual: null, status: 'unknown', reason: '目标缺少起点或目标值' }
   }
+  const fetchedDay = g.current_value_fetched_at?.slice(0, 10) ?? null
+  if (fetchedDay === null || daysBetween(fetchedDay, today) > pb.factFreshnessDays) {
+    return { ...base, planned: null, actual: null, status: 'unknown', reason: `目标数据已超过 ${pb.factFreshnessDays} 天没更新（或没有更新时间），不能判断进度` }
+  }
   const elapsed = daysBetween(g.period_start, today) + 1
   const pace = computeGoalPace({
     targetValue: g.target_value, baselineValue: g.baseline_value,

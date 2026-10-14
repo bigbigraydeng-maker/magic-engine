@@ -84,6 +84,7 @@ function buildStepsJson(task: PlanTask): Record<string, unknown> {
   return {
     source: 'marketing_plan',
     kind: task.kind,
+    ...(task.promo_ref ? { promo_ref: task.promo_ref } : {}),
     platform: platformSingle,         // 兼容旧字段
     platforms: platformsArray,        // 新：量产扇出用
     topic: task.topic ?? null,
@@ -209,14 +210,17 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
   // 残余风险是两个人「同时」点批准各派一份，后果只是多出内部待办。
   const { data: existing, error: existingErr } = await supabaseAdmin
     .from('execution_items')
-    .select('title, due_date')
+    .select('title, due_date, steps_json')
     .eq('marketing_plan_id', plan.id)
     .eq('source', 'marketing_plan')
   if (existingErr) {
     throw new Error(`Failed to read existing plan tasks: ${existingErr.message}`)
   }
   const existingKeys = new Set(
-    (existing ?? []).map(r => planTaskKey(String(r.title ?? ''), r.due_date as string | null)),
+    (existing ?? []).map(r => {
+      const sj = (r.steps_json ?? {}) as { kind?: string; platform?: string | null; promo_ref?: { step_id?: string } }
+      return planTaskKey(String(r.title ?? ''), r.due_date as string | null, sj.kind, sj.platform, sj.promo_ref?.step_id)
+    }),
   )
   const fresh = filterUndispatched(tasks, existingKeys)
   const skipped = tasks.length - fresh.length

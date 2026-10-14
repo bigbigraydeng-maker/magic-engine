@@ -69,3 +69,9 @@ describe('filterUndispatched', () => {
     expect(planTaskKey(' A ', '2026-10-20')).toBe(planTaskKey('A', '2026-10-20'))
   })
 })
+
+describe('planTaskKey — 类型与平台参与去重', () => {
+  it('同天同标题、不同平台 → 不同的键', () => {
+    expect(planTaskKey('A', '2026-10-20', 'social_post', 'facebook')).not.toBe(planTaskKey('A', '2026-10-20', 'social_post', 'instagram'))
+  })
+})

@@ -117,6 +117,14 @@ describe('目标进度（复用 goal-pace，不拿整期目标当分母）', () 
     expect(row.reason).toContain('不重叠')
   })
 
+  it('目标快照过期或没有取数时间 → unknown，不判落后', () => {
+    for (const at of ['2026-10-01T00:00:00Z', null]) {
+      const f = goodReconFacts({ spend_cents_by_account_day: spendFacts(5000) })
+      f.goal!.current_value_fetched_at = at
+      expect(reconcileWeek(baseSpec(), TODAY, f, pb).rows.find(x => x.key === 'results_goal')?.status).toBe('unknown')
+    }
+  })
+
   it('目标当前值读不到 → unknown，不当 0', () => {
     const f = goodReconFacts({ spend_cents_by_account_day: spendFacts(5000) })
     f.goal!.current_value = null

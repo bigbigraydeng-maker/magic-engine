@@ -88,15 +88,21 @@ async function loadDailyPlanCoverage(clientId: string, today: string): Promise<n
     .eq('client_id', clientId)
     .contains('plan_data', { plan_kind: 'campaign_daily_v1' })
   if (error) return null
-  let last: string | null = null
+  const plannedDays = new Set<string>()
   for (const row of (data ?? []) as { plan_data: { days?: { date: string; slots?: Record<string, string> }[] } }[]) {
     for (const d of row.plan_data?.days ?? []) {
       const planned = Object.values(d.slots ?? {}).some(v => v === 'PLANNED')
-      if (planned && d.date >= today && (last === null || d.date > last)) last = d.date
+      if (planned && d.date >= today) plannedDays.add(d.date)
     }
   }
-  if (last === null) return 0
-  return Math.round((Date.parse(`${last}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000) + 1
+  // 从今天起逐日数，遇到第一个空档就停
+  let count = 0
+  for (let day = today; plannedDays.has(day); count++) {
+    const next = new Date(`${day}T00:00:00Z`)
+    next.setUTCDate(next.getUTCDate() + 1)
+    day = next.toISOString().slice(0, 10)
+  }
+  return count
 }
 
 /** 目标：必须属于同一客户，否则当作读不到。 */
