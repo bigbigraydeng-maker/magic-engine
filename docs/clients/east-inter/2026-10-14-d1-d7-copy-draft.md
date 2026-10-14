@@ -75,10 +75,9 @@ From Guangzhou and Shenzhen to Sydney, Melbourne, Brisbane, Adelaide and Perth �
 
 ① 海运：家具、库存货，或整柜；拼箱（LCL）、整柜（FCL）都有
 ② 空运：急件、高价值货物
-③ 集运：多个供应商的货，先在中国合并成一票再发
-发货前请先联系我们，确认收货地址和包装要求。
+③ 集运：多个供应商的货，先在中国合并成一票再发（集运请在发货前先联系我们，确认收货地址和包装要求）
 
-还可以加：进出口清关、仓储与包装、澳洲末端配送。
+我们还提供：进出口清关、仓储与包装、末端配送。
 
 Sea, air, consolidation — pick what fits your cargo.
 ```
@@ -129,16 +128,16 @@ Four steps, China to Australia.
 ✔ 外箱尺寸
 
 不同规格的箱子，再附一份装箱单。
-发到 zzj@eastinter.net，团队跟进。
+发给我们的团队：zzj@eastinter.net
 
-Origin, destination, goods, packages, weight, dimensions — what we need to request a quote.
+What to have ready when you ask us for a quote: origin, destination, goods, packages, weight, dimensions.
 ```
 **首评**：`https://www.eastinter.com.au/?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-d4&utm_content=post#faq`
 
 | 句子 | 出处 |
 |---|---|
 | 六项清单、装箱单 | E5 |
-| 发到 zzj@eastinter.net | E10（首页报价表单发到这个邮箱） |
+| 发给我们的团队：zzj@eastinter.net | E10（首页报价表单发到这个邮箱；不写「团队跟进」，官网没有响应承诺） |
 
 ## D5 · Post（教学）· 12:00
 

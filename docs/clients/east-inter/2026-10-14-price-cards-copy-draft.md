@@ -15,16 +15,17 @@
 
 ## 卡 1 · 一立方米多少钱
 
-**卡面大字**：从广州到悉尼，1 立方米海运拼箱？→ **A$378**
+**卡面大字**：从广州到悉尼，海运拼箱 1 立方米 → **约 A$378**（卡面另有「不含」小字，见画面草稿）
 **卡面小字**：门到门 · 含清关 · 预计约 20 天
 **角落**：当前报价 · 估价仅供参考，以正式报价为准
 
 **正文**
 ```
-从广州发到悉尼，海运拼箱（LCL）1 立方米，计算器估价：A$378。
-门到门，含两端清关和检疫，预计约 20 天。
+从广州发到悉尼，海运拼箱（LCL）1 立方米，计算器估价约 A$378。
+门到门，含两端清关和检疫，仓库 30 公里内送货已含（超出范围请询价）。预计约 20 天，时效为估计，以团队确认为准。
 墨尔本同价；布里斯班同价，预计约 25 天。
 
+不含：进口 GST（货值 10%）、进口关税（0–10%，看商品）、熏蒸（木制或天然材料，每票 A$143）、报关行费 A$99（货值超 A$10,000 为 A$201）。订舱前请向团队确认。
 估价仅供参考，以正式报价为准。你的货多少钱，用计算器 30 秒就能估。
 
 LCL sea freight, Guangzhou to Sydney, 1 m³: A$378 estimate. Indicative only.
@@ -38,7 +39,7 @@ LCL sea freight, Guangzhou to Sydney, 1 m³: A$378 estimate. Indicative only.
 
 ## 卡 2 · 同样 5 立方米，送到哪个城市
 
-**卡面大字**：同样 5 立方米，哪个城市便宜？
+**卡面大字**：5 立方米海运拼箱，送到哪个城市？
 **卡面列表**（按价格从低到高）：悉尼 A$1,238 · 墨尔本 A$1,238 · 布里斯班 A$1,238 · 珀斯 A$1,512 · 阿德莱德 A$1,658
 **角落**：同上
 
@@ -46,10 +47,11 @@ LCL sea freight, Guangzhou to Sydney, 1 m³: A$378 estimate. Indicative only.
 ```
 从广州发海运拼箱 5 立方米，计算器估价：
 
-悉尼 A$1,238 · 墨尔本 A$1,238 · 布里斯班 A$1,238
-珀斯 A$1,512 · 阿德莱德 A$1,658
+悉尼 约 A$1,238 · 墨尔本 约 A$1,238 · 布里斯班 约 A$1,238
+珀斯（弗里曼特尔）约 A$1,512 · 阿德莱德 约 A$1,658
 
-珀斯、阿德莱德的金额包含送货上门（按计算器默认选项）。预计时效从约 20 天到约 30 天不等，各城市不同。
+珀斯、阿德莱德已含送货上门费；悉尼、墨尔本、布里斯班含仓库 30 公里内送货。预计时效约 20 天到约 30 天不等，各城市不同。
+不含：进口 GST、关税、熏蒸、报关行费，订舱前请向团队确认。
 估价仅供参考，以正式报价为准。
 
 Same 5 m³ by sea, different cities. Indicative estimates only.
@@ -169,26 +171,27 @@ Four costs not included in the sea freight estimate — confirm before booking.
 
 英文只用官网计算器页的英文说法，不另加承诺。卡面角落统一用官网原句：「Indicative estimate. Final charges are subject to a binding quote.」
 
-**卡 1 英文**
+**卡 1 英文**（10-14 苏东坡复审后改：大字加「约」，补「不含」）
 卡面：Guangzhou to Sydney · Sea freight LCL, 1 m³ · **A$378** · Door to door · clearance included · approx. 20 days
 ```
-Sea freight LCL from Guangzhou to Sydney, 1 m³: A$378 estimate.
-Door to door, with China and Australia clearance and AQIS inspection included. Approx. 20 days.
-Melbourne is the same price; Brisbane is the same price, approx. 25 days.
+Sea freight LCL from Guangzhou to Sydney, 1 m³: approx. A$378 estimate.
+Door to door, with China and Australia clearance and AQIS inspection included. Delivery within 30 km of the warehouse is included. Approx. 20 days (an estimate; confirmed by our team).
+Melbourne: same price. Brisbane: same price, approx. 25 days.
 
-Indicative estimate only. Final charges are subject to a binding quote.
+Not included: GST (10% of goods value), import duty (0–10%, depending on product), fumigation (A$143 per shipment for wood or natural materials), customs broker fee (A$99; A$201 if cargo value exceeds A$10,000). Contact us to confirm.
+Indicative estimate. Final charges are subject to a binding quote.
 Try the calculator for your own cargo.
 ```
 首评：`https://www.eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=organic&utm_campaign=eastinter-pc1en&utm_content=card`
 
-**卡 2 英文**
+**卡 2 英文**（同上改）
 卡面：Same 5 m³, which city? · Sydney · Melbourne · Brisbane A$1,238 · Perth A$1,512 · Adelaide A$1,658（卡面小字：From Guangzhou · sea freight LCL · Perth and Adelaide include door delivery）
 ```
 Sea freight LCL from Guangzhou, 5 m³, calculator estimates:
 Sydney, Melbourne, Brisbane A$1,238 · Perth A$1,512 · Adelaide A$1,658
-Perth and Adelaide include door delivery (calculator default). Transit times differ by city.
-
-Indicative estimate only. Final charges are subject to a binding quote.
+Perth (Fremantle) and Adelaide include door delivery; Sydney, Melbourne and Brisbane include delivery within 30 km of the warehouse. Transit times differ by city.
+Not included: GST, import duty, fumigation, customs broker fee. Contact us to confirm.
+Indicative estimate. Final charges are subject to a binding quote.
 ```
 首评：同卡 1，`utm_campaign=eastinter-pc2en`
 
