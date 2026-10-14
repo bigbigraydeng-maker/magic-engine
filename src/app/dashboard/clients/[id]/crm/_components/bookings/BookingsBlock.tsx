@@ -27,6 +27,8 @@ import {
 export interface BookingsBlockProps {
   clientId: string
   contactId: string
+  /** 原地弹出的抽屉（付款总览页）没有 `focus=bookings` 地址参数，用它直接要求滚到这一段。 */
+  scrollIntoViewOnReady?: boolean
 }
 
 /** Active bookings first (in given order), then cancelled ones. */
@@ -39,6 +41,7 @@ function orderBookings(bookings: BookingView[]): BookingView[] {
 function BookingsBlockInner({
   clientId,
   contactId,
+  scrollIntoViewOnReady = false,
 }: BookingsBlockProps): JSX.Element | null {
   const headingId = useId()
   const { state, notice, busy, run, reload, clearNotice } = useBookings(clientId, contactId)
@@ -50,12 +53,13 @@ function BookingsBlockInner({
 
   // 从付款总览点进来（focus=bookings）：数据加载完后滚到这一段，只滚一次。
   useEffect(() => {
-    if (state.status !== 'ready' || scrolledRef.current || !hasFocusBookings()) return
+    if (state.status !== 'ready' || scrolledRef.current) return
+    if (!scrollIntoViewOnReady && !hasFocusBookings()) return
     scrolledRef.current = true
     sectionRef.current?.scrollIntoView?.({ block: 'start' })
     // 用过一次就从地址栏拿掉，免得换下一位客人时又滚一次、又冒出返回链接。
     stripFocusFromUrl()
-  }, [state.status])
+  }, [state.status, scrollIntoViewOnReady])
 
   useEffect(() => {
     const previous = lastAddingRef.current

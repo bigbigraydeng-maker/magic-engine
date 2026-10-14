@@ -737,3 +737,30 @@ describe('GET contacts — kind 筛选（WP-B3）', () => {
     expect(body.items).toEqual([])
   })
 })
+
+describe('GET contacts — ?ids= 只取指定的客人', () => {
+  const ID_A = 'a1a1a1a1-0000-4000-8000-000000000001'
+
+  it('只按这几个编号取人和触点，按客户收口，不走排序扫描也不调数据库函数', async () => {
+    const { status, body } = await get('c-1', `?ids=${ID_A}`)
+    expect(status).toBe(200)
+    expect(Array.isArray(body.items)).toBe(true)
+    expect(body.viewerEmail).toBe('roman@example.com')
+
+    const contactsQ = recorded.find((r) => r.table === 'contacts')
+    expect(contactsQ?.eqs).toContainEqual(['client_id', 'c-1'])
+    expect(contactsQ?.ins).toContainEqual(['id', [ID_A]])
+    const touchQ = recorded.filter((r) => r.table === 'contact_touchpoints')
+    expect(touchQ).toHaveLength(1)
+    expect(touchQ[0].ins).toContainEqual(['contact_id', [ID_A]])
+    expect(touchQ[0].eqs).toContainEqual(['client_id', 'c-1'])
+    expect(rpcCalls).toHaveLength(0)
+  })
+
+  it('编号不是 uuid、为空或超过 20 个 → 400', async () => {
+    expect((await get('c-1', '?ids=not-a-uuid')).status).toBe(400)
+    expect((await get('c-1', '?ids=')).status).toBe(400)
+    const many = Array.from({ length: 21 }, (_, i) => `a1a1a1a1-0000-4000-8000-${String(i).padStart(12, '0')}`).join(',')
+    expect((await get('c-1', `?ids=${many}`)).status).toBe(400)
+  })
+})
