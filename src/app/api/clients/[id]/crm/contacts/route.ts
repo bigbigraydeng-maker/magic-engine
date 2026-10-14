@@ -31,6 +31,7 @@ import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { createStepTimer, type StepTimer } from '@/lib/http/step-timing'
 import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
   extractCustomColumns,
@@ -239,6 +240,20 @@ const TOUCH_SCAN_MAX_PAGES = 40
 const PAGE_CONTACT_COLUMNS =
   'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at'
 
+/** 这一页的人的全部触点（带全字段，给分段与整理用）。 */
+function fetchTouchesFor(clientId: string, ids: string[]): Promise<TouchRow[]> {
+  return fetchAll<TouchRow>((from, to) =>
+    supabaseAdmin
+      .from('contact_touchpoints')
+      .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
+      .eq('client_id', clientId)
+      .in('contact_id', ids)
+      .order('occurred_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+  )
+}
+
 /** 最新触点倒序的第 i 批（只带 contact_id / occurred_at，给排序用）。 */
 async function fetchTouchBatch(clientId: string, i: number): Promise<TouchRowLite[]> {
   const res = await supabaseAdmin
@@ -279,13 +294,20 @@ async function loadContactsByIds(clientId: string, ids: string[]): Promise<Conta
  * 触点必须按 `contact_id in (当前页)` 收窄：CTS 量级下全量触点 1271 条，
  * 分页的意义就是别为了 100 个人把全库读一遍。
  */
-async function getPaged(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
+async function getPaged(
+  clientId: string,
+  query: ListQuery,
+  viewerEmail: string | null,
+  timer: StepTimer,
+): Promise<NextResponse> {
   // 全客户 AI 摘要跟搜什么、翻哪页无关，是这次请求里最慢的一段（实测约 0.7 秒）：
   // 一进来就开跑（跟下面的页查询并行），且 30 秒内同一客户只查一次——搜索框每敲一个字都会进来。
   const briefsPromise = loadLatestBriefByContactCached(clientId)
   let total = 0
   let pageContacts: ContactRow[] = []
   let stageRows: StageRow[] = []
+  // 数据库函数给出这一页的 id 之后，这一页的触点与「取这些人的资料」互不依赖，同时开始（省约 0.17 秒）。
+  let touchesEarly: Promise<TouchRow[]> | null = null
   try {
     // 两次查询的过滤条件必须逐字一致 —— 共享一份过滤参数后各自 apply。
     const filters = contactFilterParams(query)
@@ -321,9 +343,74 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     const need = query.page * query.perPage
     let fastDone = false
 
+    // 最快的路径：数据库函数一次返回「这一页的 id（按最近真实互动排好）+ 符合筛选的总数」，
+    // 筛选条件在函数里逐项对应上面的 stage / q / kind。函数还没装上（迁移晚于代码上线）或出错时，
+    // 记一条日志，退回下面两条老路径——页面不会因此打不开。
+    {
+      const [rpcRes, stagesRpc] = await Promise.all([
+        supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
+          p_client_id: clientId,
+          p_stages: filters.stages,
+          p_q: query.q,
+          p_in_ids: kindInIds,
+          p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
+          p_limit: query.perPage,
+          p_offset: (query.page - 1) * query.perPage,
+        }),
+        fetchAll<StageRow>((from, to) =>
+          supabaseAdmin
+            .from('client_pipeline_stages')
+            .select('stage_key, label, marketing_action, is_terminal')
+            .eq('client_id', clientId)
+            .order('sort_order', { ascending: true })
+            .range(from, to),
+        ),
+      ])
+      timer.step('rpc_stages')
+      if (rpcRes.error) {
+        console.warn('[crm contacts] page function unavailable, using the app-side path:', rpcRes.error.message)
+      } else {
+        const rows = (rpcRes.data ?? []) as Array<{ id: string; total: number | string }>
+        let rpcTotal: number | null = rows.length > 0 ? Number(rows[0].total) : 0
+        if (rows.length === 0 && query.page > 1) {
+          // 翻过头了：这一页没有人，总数得再问一次第一页才知道。问不到就当函数不可用、退回老路径，
+          // 不能悄悄报 0。
+          const first = await supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
+            p_client_id: clientId,
+            p_stages: filters.stages,
+            p_q: query.q,
+            p_in_ids: kindInIds,
+            p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
+            p_limit: 1,
+            p_offset: 0,
+          })
+          if (first.error) {
+            console.warn('[crm contacts] page function total lookup failed, using the app-side path:', first.error.message)
+            rpcTotal = null
+          } else {
+            const firstRows = (first.data ?? []) as Array<{ total: number | string }>
+            rpcTotal = firstRows.length > 0 ? Number(firstRows[0].total) : 0
+          }
+        }
+        if (rpcTotal !== null) {
+          total = rpcTotal
+          const rpcIds = rows.map((r) => r.id)
+          if (rpcIds.length > 0) {
+            touchesEarly = fetchTouchesFor(clientId, rpcIds)
+            // 资料那一步若先出错，这条提前开始的查询不能变成没人接的未处理异常。
+            touchesEarly.catch(() => undefined)
+          }
+          pageContacts = await loadContactsByIds(clientId, rpcIds)
+          timer.step('page_rows')
+          stageRows = stagesRpc
+          fastDone = true
+        }
+      }
+    }
+
     // 快路径（默认打开页面就是这条）：没有筛选时，不必把全客户的 id 取出来再排——
     // 总数用一次 count，前 need 位直接从最新触点往回翻出来；三件事并行，少两三次往返。
-    if (noFilter) {
+    if (!fastDone && noFilter) {
       const [countRes, scanned, stagesFast] = await Promise.all([
         supabaseAdmin.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', clientId),
         scanLatestTouchContactIds({
@@ -395,6 +482,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     )
   }
 
+  timer.step('page_ready')
   const pageIds = pageContacts.map((c) => c.id)
   let touches: TouchRow[]
   let briefs: BriefByContact
@@ -402,16 +490,7 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     ;[touches, briefs] = await Promise.all([
       pageIds.length === 0
         ? Promise.resolve([] as TouchRow[])
-        : fetchAll<TouchRow>((from, to) =>
-            supabaseAdmin
-              .from('contact_touchpoints')
-              .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
-              .eq('client_id', clientId)
-              .in('contact_id', pageIds)
-              .order('occurred_at', { ascending: false })
-              .order('id', { ascending: false })
-              .range(from, to),
-          ),
+        : (touchesEarly ?? fetchTouchesFor(clientId, pageIds)),
       briefsPromise,
     ])
   } catch (err) {
@@ -421,9 +500,11 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     )
   }
 
+  timer.step('touches_briefs')
   const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows, briefs)
+  timer.step('assemble')
 
-  return NextResponse.json({
+  const res = NextResponse.json({
     total,
     page: query.page,
     perPage: query.perPage,
@@ -434,6 +515,8 @@ async function getPaged(clientId: string, query: ListQuery, viewerEmail: string 
     // 从自己的 data.viewerEmail 拿是同一个模式，不新起一个接口）。
     viewerEmail,
   })
+  res.headers.set('Server-Timing', timer.header())
+  return res
 }
 
 /**
@@ -543,18 +626,20 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
+  const timer = createStepTimer()
   const clientId = params.id
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+  timer.step('gate')
   const viewerEmail = access.user.email?.toLowerCase().trim() ?? null
 
   const parsed = parseListQuery(new URL(req.url))
   if ('error' in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 })
   }
-  if (parsed.paged) return getPaged(clientId, parsed, viewerEmail)
+  if (parsed.paged) return getPaged(clientId, parsed, viewerEmail, timer)
   if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
