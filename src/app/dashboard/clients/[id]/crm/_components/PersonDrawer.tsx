@@ -103,6 +103,7 @@ export function PersonDrawer({
   onClose,
   onSaved,
   nav,
+  scrollToBookings = false,
 }: {
   clientId: string
   row: DrawerRow
@@ -117,6 +118,8 @@ export function PersonDrawer({
    * `lib/crm/drawer-nav.ts` 算出下一步该做什么，这里只管画按钮、转发点击。
    */
   nav?: DrawerNav
+  /** 一打开就滚到「订单与付款」（付款总览页原地弹出时用）。 */
+  scrollToBookings?: boolean
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
@@ -512,7 +515,7 @@ export function PersonDrawer({
           )}
 
           {/* 订单与付款：没开通这项功能或没权限的人，这一块什么都不渲染 */}
-          <BookingsBlock key={row.contactId} clientId={clientId} contactId={row.contactId} />
+          <BookingsBlock key={row.contactId} clientId={clientId} contactId={row.contactId} scrollIntoViewOnReady={scrollToBookings} />
 
           {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
           <div className="mt-5">
