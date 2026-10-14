@@ -240,6 +240,20 @@ const TOUCH_SCAN_MAX_PAGES = 40
 const PAGE_CONTACT_COLUMNS =
   'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at'
 
+/** 这一页的人的全部触点（带全字段，给分段与整理用）。 */
+function fetchTouchesFor(clientId: string, ids: string[]): Promise<TouchRow[]> {
+  return fetchAll<TouchRow>((from, to) =>
+    supabaseAdmin
+      .from('contact_touchpoints')
+      .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
+      .eq('client_id', clientId)
+      .in('contact_id', ids)
+      .order('occurred_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, to),
+  )
+}
+
 /** 最新触点倒序的第 i 批（只带 contact_id / occurred_at，给排序用）。 */
 async function fetchTouchBatch(clientId: string, i: number): Promise<TouchRowLite[]> {
   const res = await supabaseAdmin
@@ -292,6 +306,8 @@ async function getPaged(
   let total = 0
   let pageContacts: ContactRow[] = []
   let stageRows: StageRow[] = []
+  // 数据库函数给出这一页的 id 之后，这一页的触点与「取这些人的资料」互不依赖，同时开始（省约 0.17 秒）。
+  let touchesEarly: Promise<TouchRow[]> | null = null
   try {
     // 两次查询的过滤条件必须逐字一致 —— 共享一份过滤参数后各自 apply。
     const filters = contactFilterParams(query)
@@ -378,7 +394,13 @@ async function getPaged(
         }
         if (rpcTotal !== null) {
           total = rpcTotal
-          pageContacts = await loadContactsByIds(clientId, rows.map((r) => r.id))
+          const rpcIds = rows.map((r) => r.id)
+          if (rpcIds.length > 0) {
+            touchesEarly = fetchTouchesFor(clientId, rpcIds)
+            // 资料那一步若先出错，这条提前开始的查询不能变成没人接的未处理异常。
+            touchesEarly.catch(() => undefined)
+          }
+          pageContacts = await loadContactsByIds(clientId, rpcIds)
           timer.step('page_rows')
           stageRows = stagesRpc
           fastDone = true
@@ -468,16 +490,7 @@ async function getPaged(
     ;[touches, briefs] = await Promise.all([
       pageIds.length === 0
         ? Promise.resolve([] as TouchRow[])
-        : fetchAll<TouchRow>((from, to) =>
-            supabaseAdmin
-              .from('contact_touchpoints')
-              .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
-              .eq('client_id', clientId)
-              .in('contact_id', pageIds)
-              .order('occurred_at', { ascending: false })
-              .order('id', { ascending: false })
-              .range(from, to),
-          ),
+        : (touchesEarly ?? fetchTouchesFor(clientId, pageIds)),
       briefsPromise,
     ])
   } catch (err) {
