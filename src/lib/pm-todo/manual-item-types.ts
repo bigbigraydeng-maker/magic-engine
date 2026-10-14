@@ -65,6 +65,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
   //   链接是需要登录的后台页，探活大概率判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
   'facebook_sync_failing',
+  // whatsapp_number_unclaimed：链接指向需要登录的后台页，探活可能判成坏链接 —— 消息正在丢，宁可让人自己找入口，也不能静默消失。
+  'whatsapp_number_unclaimed',
   'ai_provider_exhausted',
   'ai_alerting_broken',
   // 「授权体检自己读不出来了」「整条通道停了」跟 ai_alerting_broken 是同一类：
@@ -284,6 +286,8 @@ export type ManualItemKind =
   | 'conversation_health_check_error'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
+  /** WhatsApp 收到了消息但没有客户绑定这个号码 */
+  | 'whatsapp_number_unclaimed'
   /**
    * 外部平台的授权断了 / 没了心跳 / 权限清单不够用（2026-09-24 CTS 邮箱断 9 天）。
    * 只有人能重新走一次同意页，所以必须进人工车道，不许只躺在 error_message 里。
