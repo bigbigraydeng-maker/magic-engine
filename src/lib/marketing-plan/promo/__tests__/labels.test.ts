@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { approveButtonState, continueButtonVisible, formatRowValue, LIGHT_META, ROW_STATUS_META } from '../labels'
 import { buildPromoTemplate } from '../template'
 import { parsePromoSpec } from '../spec'
-import { evaluateApproval } from '../gates'
-import { baseSpec, goodFacts } from './fixtures'
+import { baseSpec, evaluateApproval, goodFacts } from './fixtures'
 
 const verified = () => baseSpec({ checks: ['landing.item_live', 'content.wording_permission'].map(k => ({
   phase_id: 'p1', check_key: k, verified_by: 'a', verified_at: '2026-10-28T00:00:00Z', note: '' })) })

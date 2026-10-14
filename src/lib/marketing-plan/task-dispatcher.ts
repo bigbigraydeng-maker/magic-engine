@@ -273,7 +273,17 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
 
 // ─── 反向操作：删除某 Plan 派发的所有未完成任务（用于"撤回审批"场景）─────────
 
-export async function revokePlanTasks(planId: string): Promise<{ revoked: number }> {
+export async function revokePlanTasks(planId: string, clientId: string): Promise<{ revoked: number }> {
+  // 先确认计划属于这个客户，再动任何关联资源（不靠 UUID 保密）
+  const { data: owned, error: ownErr } = await supabaseAdmin
+    .from('marketing_plans')
+    .select('id')
+    .eq('id', planId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (ownErr) throw new Error(`Failed to verify plan ownership: ${ownErr.message}`)
+  if (!owned) throw new Error('Plan not found')
+
   const { data, error } = await supabaseAdmin
     .from('execution_items')
     .delete()

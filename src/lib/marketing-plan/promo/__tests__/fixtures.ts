@@ -1,7 +1,7 @@
 /** 测试夹具：全部虚构（客户 / 账户 / 日期），不含任何真实客户信息。 */
 import type { PromoSpec } from '../spec'
 import { DEFAULT_PROMO_PLAYBOOK } from '../playbooks'
-import type { GateFacts } from '../gates'
+import { evaluateApproval as realEvaluateApproval, evaluatePhaseGates as realEvaluatePhaseGates, type GateFacts } from '../gates'
 import type { ReconcileFacts } from '../reconcile'
 
 export function baseSpec(overrides: Partial<PromoSpec> = {}): PromoSpec {
@@ -54,3 +54,9 @@ export function goodReconFacts(overrides: Partial<ReconcileFacts> = {}): Reconci
     ...overrides,
   }
 }
+
+/** 测试便利：把夹具 spec.checks 当作服务端核实记录并入 facts（生产里 spec.checks 不参与判定）。 */
+const foldChecks = (spec: PromoSpec, f: GateFacts): GateFacts => ({ ...f, manual_checks: [...spec.checks, ...f.manual_checks] })
+export const evaluateApproval = (spec: PromoSpec, f: GateFacts) => realEvaluateApproval(spec, foldChecks(spec, f))
+export const evaluatePhaseGates = (spec: PromoSpec, phase: PromoSpec['phases'][number], f: GateFacts) =>
+  realEvaluatePhaseGates(spec, phase, foldChecks(spec, f))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { blockers, evaluateApproval, evaluatePhaseGates, firstPhase, unverified, worstLight, type GateKey } from '../gates'
-import { baseSpec, goodFacts } from './fixtures'
+import { blockers, firstPhase, unverified, worstLight, type GateKey } from '../gates'
+import { baseSpec, evaluateApproval, evaluatePhaseGates, goodFacts } from './fixtures'
 import type { PromoSpec } from '../spec'
 
 const verifiedAll = (): PromoSpec => baseSpec({
