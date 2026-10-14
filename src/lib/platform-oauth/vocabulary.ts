@@ -30,6 +30,8 @@ export const PLATFORM_PROVIDERS = {
   MICROSOFT_MAIL: 'microsoft_mail',
   GOOGLE_GA4: 'google_ga4',
   GOOGLE_GTM: 'google_gtm',
+  /** WhatsApp Business number: one row per (client, phone_number_id); access token is the number's own token. */
+  WHATSAPP: 'whatsapp',
 } as const
 
 export type PlatformProvider = (typeof PLATFORM_PROVIDERS)[keyof typeof PLATFORM_PROVIDERS]

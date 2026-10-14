@@ -26,6 +26,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { identityFromSlug, identityFromUrl, matchProtected, mergeIdentities } from '@/lib/seo/protected-pages'
 import { readPageMetrics } from '@/lib/seo/post-publish-monitor-store'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
@@ -289,11 +290,19 @@ export async function runStep3Gate(
     // canEditSlug — a protected conversion page (e.g. CTS's /china-tours)
     // must never be auto-edited, no matter what the rest of the gate or the
     // fact-check would otherwise allow. Zero cost: no network call.
-    if (candidate.slug && config.protectedSlugs.includes(candidate.slug.toLowerCase())) {
+    const identityParts = [
+      ...(candidate.pageUrl ? [identityFromUrl(candidate.pageUrl)] : []),
+      ...(candidate.slug ? [identityFromSlug(candidate.slug)] : []),
+    ]
+    const hasIdentity = identityParts.length > 0
+    const identity = mergeIdentities(...identityParts)
+    if (!hasIdentity || identity.unresolved !== null || matchProtected(config.protectedSlugs, identity)) {
       failures.push({
         candidate,
         reason: GATE_REASON.PROTECTED_PAGE,
-        detail: `slug "${candidate.slug}" is on this client's protected conversion-page list (clients.seo_config.meta_cycle_protected_slugs) — meta-cycle never touches it automatically, regardless of gate/fact-check outcome`,
+        detail: hasIdentity && identity.unresolved === null
+          ? `page "${candidate.slug ?? candidate.pageUrl}" is on this client's protected-page list — meta-cycle never touches it automatically, regardless of gate/fact-check outcome`
+          : `page identity could not be resolved (${identity.unresolved ?? 'no_slug_or_url'}) — fail-closed, treated as protected`,
       })
       continue
     }

@@ -36,8 +36,7 @@ export function ContactTableHead(props: {
         {columns.map((c) => (
           <th key={c.key} className="px-4 py-3">{c.label}</th>
         ))}
-        <th className="px-4 py-3">跟进到哪步</th>
-        <th className="px-4 py-3">现在冷热</th>
+        <th className="px-4 py-3">{grouped ? '该做什么' : '到哪一步了'}</th>
       </tr>
     </thead>
   )

@@ -40,6 +40,7 @@ function makeGoal(overrides: Partial<GoalRow> = {}): GoalRow {
     verdict: null,
     verdict_at: null,
     verdict_summary: null,
+    recurrence: null,
     fde_reasoning: null,
     is_beta: false,
     current_value: null,

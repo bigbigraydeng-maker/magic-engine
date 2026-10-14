@@ -1,7 +1,7 @@
 'use client'
 
 import {
-  TEMP_CLS,
+  LIST_CLS,
   fmtDate,
   relTime,
   type ContactRow,
@@ -56,33 +56,34 @@ function NameCell({ r }: { r: ContactRow }) {
   )
 }
 
-function StageCells({ r }: { r: ContactRow }) {
+function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
   return (
-    <>
-      <td className="px-4 py-3">
-        {r.stageLabel ? (
-          <span className="text-me-charcoal/70">{r.stageLabel}</span>
-        ) : (
-          <span className="text-me-charcoal/35">还没标</span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        <span className={`rounded-full px-2 py-0.5 text-xs ${TEMP_CLS[r.temperature]}`}>
-          {r.segmentLabel}
-        </span>
-      </td>
-    </>
+    <td className="px-4 py-3">
+      {grouped ? (
+        <>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}>
+            {r.nextAction.verbLabel}
+          </span>
+          <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.reason}</span>
+        </>
+      ) : r.stageLabel ? (
+        <span className="text-me-charcoal/70">{r.stageLabel}</span>
+      ) : (
+        <span className="text-me-charcoal/35">还没标</span>
+      )}
+    </td>
   )
 }
 
 export function ContactTableRow(props: {
   row: ContactRow
   active: boolean
+  grouped: boolean
   columns: CustomColumnMeta[]
   onToggle: (contactId: string) => void
   onTogglePin: (row: ContactRow) => void
 }) {
-  const { row: r, active, columns, onToggle, onTogglePin } = props
+  const { row: r, active, grouped, columns, onToggle, onTogglePin } = props
   return (
     <tr
       // 直达链接靠它定位（?contact=<id> 打开对应抽屉）
@@ -104,7 +105,7 @@ export function ContactTableRow(props: {
           {r.custom[c.key] ?? <span className="text-me-charcoal/35">还没聊到</span>}
         </td>
       ))}
-      <StageCells r={r} />
+      <StageCell r={r} grouped={grouped} />
     </tr>
   )
 }

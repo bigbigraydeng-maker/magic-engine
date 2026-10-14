@@ -6,9 +6,6 @@ import { type KindView } from '@/lib/crm/kind-filter'
 import { type ContactRow } from './contact-table-types'
 
 type FilterProps = {
-  q: string
-  onQChange: (v: string) => void
-  qError: string | null
   stages: StageOption[]
   stageFilter: string[]
   onStageFilterChange: (updater: (prev: string[]) => string[]) => void
@@ -23,7 +20,7 @@ function StageFilter(props: Pick<FilterProps, 'stages' | 'stageFilter' | 'onStag
   if (stages.length === 0) return null
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-me-charcoal/45">跟进到哪步：</span>
+      <span className="text-xs text-me-charcoal/45">到哪一步了：</span>
       {stages.map((s) => {
         const on = stageFilter.includes(s.stageKey)
         return (
@@ -81,11 +78,11 @@ function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' |
         onClick={onToggleGrouped}
         className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
       >
-        {grouped ? '← 回到平铺名单' : '按「先联系谁」分段'}
+        {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
       </button>
       {grouped && (
         <span className="text-xs text-me-charcoal/45">
-          分段是系统按联系记录算的，跟「今天要联系」那一页同一套口径；段内按「该先联系谁」排，点表头不改顺序
+          系统读完往来记录和 AI 摘要，告诉你今天该先联系谁、做什么；段内按紧急程度排，点表头不改顺序
         </span>
       )}
       {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
@@ -97,13 +94,6 @@ function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' |
 export function ListFilters(props: FilterProps) {
   return (
     <>
-      <input
-        value={props.q}
-        onChange={(e) => props.onQChange(e.target.value)}
-        placeholder="🔍 客户打回来了？按名字 / 电话 / 邮箱找他"
-        className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
-      />
-      {props.qError && <p className="text-xs font-semibold text-[#C2453A]">{props.qError}</p>}
       <StageFilter
         stages={props.stages}
         stageFilter={props.stageFilter}

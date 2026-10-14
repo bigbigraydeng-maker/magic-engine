@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-10-09
 source: session:4d4d7a49
 done_on: 2026-10-09
-done_ref: branch:claude/exciting-yalow-45e12d
+done_ref: pr:2386
 verify_by: 2026-10-13
 verify_how: 跑 `wc -l "src/app/dashboard/clients/[id]/crm/all/page.tsx"` 必须 < 800。另跑 `npm test -- all/__tests__`，应 3 个文件 39 条全绿（本轮实测 nal-mark-won-panel 那 3 条旧失败这次也过了，原因未追查，别当成修好了）
 ---

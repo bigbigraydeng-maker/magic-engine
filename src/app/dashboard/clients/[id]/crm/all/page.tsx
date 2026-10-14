@@ -11,8 +11,10 @@
  * 也顺带解决了「两份重复逻辑」的老毛病（原来 ContactDetail 和 PersonDrawer 各判一次
  * NAL、各接一份 WhatsApp 回复框）。删除的 ContactDetail.tsx 见这次改动的 diff。
  *
- * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；状态拆成
- * 「跟进到哪步」+「现在冷热」两列；每个空格填人话绝不留白；顶部搜索 + 表头排序 +
+ * 板桥定的几条落地：进线时间显示真实首条触点（后端已算）不是导入日期；
+ * 平铺名单像传统 CRM 一样显示「到哪一步了」；「该做什么」只在「Magic Engine 智能」
+ * 分段视图里显示（PM 2026-10-10）；
+ * 每个空格填人话绝不留白；顶部搜索 + 表头排序 +
  * 总数；渠道/方向标签带 fallback（DB 加新枚举前端不炸）。
  */
 
@@ -23,20 +25,19 @@ import { CrmTabs } from '../_components/CrmTabs'
 import { type StageOption } from '../_components/ComposeNote'
 import { PersonDrawer } from '../_components/PersonDrawer'
 import { PrioritySectionHeader } from './_components/PrioritySection'
+import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
+import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
+import { takeContactName } from '../_components/bookings/payments-return'
+import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
+import { type KindView } from '@/lib/crm/kind-filter'
+import { dayProgress } from '@/lib/crm/day-list'
+import { DAILY_QUOTA } from '@/lib/crm/next-action'
+import { ts, type ContactRow, type CustomColumnMeta } from './_components/contact-table-types'
 import { ContactTableRow } from './_components/ContactTableRow'
 import { ContactTableHead } from './_components/ContactTableHead'
 import { ListFilters, TradeBatchPanel } from './_components/ListFilters'
 import { FlatPagination, SectionPagerRow } from './_components/ListPagination'
-import {
-  isToday,
-  toDrawerRow,
-  sectionRange,
-  type PrioritySectionData,
-} from './_components/list-helpers'
-import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
-import { type KindView } from '@/lib/crm/kind-filter'
-import { dayProgress } from '@/lib/crm/day-list'
-import { ts, type ContactRow, type CustomColumnMeta } from './_components/contact-table-types'
+import { isToday, toDrawerRow, sectionRange, type PrioritySectionData } from './_components/list-helpers'
 
 /** 抽屉打开时正在等下一页数据 —— 拿到之后打开这一页的首个/末个。 */
 type PendingNav =
@@ -70,7 +71,11 @@ export default function CrmAllContactsPage() {
   const [kindFilter, setKindFilter] = useState<KindView>('all')
   const [page, setPage] = useState(1)
   // C1a 固定 100，先不给改每页条数的入口。
+  // 分段（智能）视图：服务端每段默认 100 一页，这里的页数换算要与之一致。
   const [perPage] = useState(100)
+  // 平铺名单每页 50 人：一页里每个人都要读往来记录并算「该做什么」，人数减半，接口和渲染都明显更快
+  // （PM 2026-10-14：这页常用，要提速）。
+  const [flatPerPage] = useState(50)
   const [sortKey, setSortKey] = useState<'firstSeenAt' | 'lastTouchAt'>('lastTouchAt')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
@@ -146,7 +151,7 @@ export default function CrmAllContactsPage() {
         // 提前消费旧数据的是 fetchInFlightRef（见该 ref 定义处的头注），这一行只管 UI。
         setLoading(true)
         params.set('page', String(page))
-        params.set('perPage', String(perPage))
+        params.set('perPage', String(flatPerPage))
         if (qDebounced.trim()) params.set('q', qDebounced.trim())
         for (const s of stageFilter) params.append('stage', s)
         if (kindFilter !== 'all') params.set('kind', kindFilter)
@@ -213,7 +218,7 @@ export default function CrmAllContactsPage() {
       setSectionsLoading(false)
       fetchInFlightRef.current = false
     }
-  }, [clientId, page, perPage, qDebounced, stageFilter, kindFilter, grouped, openSections, sectionPages])
+  }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
     void loadList()
@@ -255,7 +260,13 @@ export default function CrmAllContactsPage() {
     setDeepLinkId(null)
     // 这个人不在表里（换客户了 / 记录被删）——**必须说出来**，
     // 否则页面一声不吭，FDE 只会以为链接坏了。
+    const stashedName = takeContactName(clientId, deepLinkId)
     if (!rows.some((r) => r.contactId === deepLinkId)) {
+      // 名单只装了第一页：付款总览带来的人常在后面几页。有名字就按名字搜出来再开抽屉。
+      if (stashedName) {
+        openContactFromNudge(deepLinkId, stashedName)
+        return
+      }
       setToast('这个人不在这份名单里了 —— 用上面的搜索框找找看')
       window.setTimeout(() => setToast(null), 4000)
       return
@@ -322,6 +333,20 @@ export default function CrmAllContactsPage() {
     }
   }, [drawerContactId, rows, loading, sectionsLoading, pendingNav])
 
+  // 「付款要催」名单里点一个人：在当前这页就直接开抽屉，不在就先按名字搜，搜到再开。
+  const openContactFromNudge = useOpenContactFromNudge({
+    contactIds: rows.map((r) => r.contactId),
+    loading,
+    sectionsLoading,
+    debouncedQuery: qDebounced,
+    setQuery: setQ,
+    openDrawer,
+    notify: (message) => {
+      setToast(message)
+      window.setTimeout(() => setToast(null), 4000)
+    },
+  })
+
   // 搜索交给服务端了，这里只排当前页。放在 buildNavInput 前面——它的闭包引用 sorted，
   // 声明顺序倒过来会在渲染时踩 TDZ（"Cannot access 'sorted' before initialization"）。
   const sorted = [...rows].sort((a, b) => {
@@ -358,7 +383,7 @@ export default function CrmAllContactsPage() {
       loadedIds: ids,
       currentIndex: ids.indexOf(drawerContactId),
       page,
-      totalPages: Math.max(1, Math.ceil(total / perPage)),
+      totalPages: Math.max(1, Math.ceil(total / flatPerPage)),
     }
   }
 
@@ -500,7 +525,7 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  const colCount = 7 + columns.length
+  const colCount = 6 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -515,6 +540,18 @@ export default function CrmAllContactsPage() {
       return base.includes(key) ? base.filter((k) => k !== key) : [...base, key]
     })
   }
+
+  const renderRow = (r: ContactRow) => (
+    <ContactTableRow
+      key={r.contactId}
+      row={r}
+      active={drawerContactId === r.contactId}
+      grouped={grouped}
+      columns={columns}
+      onToggle={toggleDetail}
+      onTogglePin={togglePin}
+    />
+  )
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-6">
@@ -537,6 +574,9 @@ export default function CrmAllContactsPage() {
         </div>
       )}
 
+      {/* 付款要催（没开通这项功能或没权限的人，这一块什么都不渲染） */}
+      <BookingTrackerPanel clientId={clientId} onOpenContact={openContactFromNudge} />
+
       {loading && rows.length === 0 && <p className="py-16 text-center text-sm text-me-charcoal/40">加载中…</p>}
 
       {error && (
@@ -548,14 +588,24 @@ export default function CrmAllContactsPage() {
         </div>
       )}
 
+      {/* 搜索框必须一直挂在页面上：之前它跟着下面那一大块一起被 `!loading` 包住，
+          每敲一个字、过 300ms 请求一发出，整块（含输入框）被卸载再重装，焦点丢了、
+          像「每打一个字页面就刷新一次」（PM 2026-10-13 录屏）。 */}
+      {!error && (
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="🔍 客户打回来了？按名字 / 电话 / 邮箱找他"
+          className="w-full rounded-xl border border-black/10 bg-white px-4 py-2.5 text-sm focus:border-me-charcoal focus:outline-none"
+        />
+      )}
+
+      {!error && qError && <p className="text-xs font-semibold text-[#C2453A]">{qError}</p>}
+
       {!error && !loading && (
         <>
-          {/* 分段视图的服务端还没接 ?kind=（B3 只接了平铺路径）——切过去时把筛选
-              收回「全部」，不留一个选了但悄悄不生效的筛选条件（见上面状态定义处的注）。 */}
+          {/* 切到智能分段视图时把筛选收回「全部」：分段视图服务端还没接 ?kind=，不留一个选了但悄悄不生效的筛选条件 */}
           <ListFilters
-            q={q}
-            onQChange={setQ}
-            qError={qError}
             stages={stages}
             stageFilter={stageFilter}
             onStageFilterChange={setStageFilter}
@@ -585,7 +635,7 @@ export default function CrmAllContactsPage() {
               也会弹出「大家的跟进到哪步都还空着」（魏征 C3 / 子牙 P1-4 实测）。 */}
           {total > 0 && rows.length > 0 && rows.every((r) => !r.stage) && (
             <p className="rounded-lg bg-me-ivory px-3 py-2 text-xs leading-relaxed text-me-charcoal/55">
-              刚搬过来，大家的「跟进到哪步」都还空着 —— 聊完顺手标一下就行，不用一次标完。右边「现在冷热」是系统自动算的，现在就能用。
+              「该做什么」是系统按往来记录和 AI 摘要算的，现在就能用；点开一个人可以在里面标他到哪一步了。
             </p>
           )}
 
@@ -605,17 +655,7 @@ export default function CrmAllContactsPage() {
                     </td>
                   </tr>
                 )}
-                {!grouped &&
-                  sorted.map((r) => (
-                    <ContactTableRow
-                      key={r.contactId}
-                      row={r}
-                      active={drawerContactId === r.contactId}
-                      columns={columns}
-                      onToggle={toggleDetail}
-                      onTogglePin={togglePin}
-                    />
-                  ))}
+                {!grouped && sorted.map((r) => renderRow(r))}
                 {grouped &&
                   sections.map((s) => {
                     const open = openSections === null ? s.open : openSections.includes(s.key)
@@ -632,18 +672,20 @@ export default function CrmAllContactsPage() {
                         colSpan={colCount}
                         onToggle={() => toggleSection(s.key)}
                       />,
-                      open &&
-                        s.items !== null &&
-                        s.items.map((r) => (
-                          <ContactTableRow
-                            key={r.contactId}
-                            row={r}
-                            active={drawerContactId === r.contactId}
-                            columns={columns}
-                            onToggle={toggleDetail}
-                            onTogglePin={togglePin}
-                          />
-                        )),
+                      open && s.items !== null && s.key === 'hot' && s.items.length > DAILY_QUOTA
+                        ? [
+                            ...s.items.slice(0, DAILY_QUOTA).map((r) => renderRow(r)),
+                            // 只在第一页画：翻到第二页时前面那 20 个已经看过了，线不该再出现。
+                            (sectionPages[s.key] ?? 1) <= 1 && (
+                              <tr key="quota-line" data-testid="quota-line">
+                                <td colSpan={colCount} className="border-y border-dashed border-me-charcoal/25 bg-me-ivory/60 px-4 py-2 text-center text-xs font-bold text-me-charcoal/55">
+                                  ↑ 今天先打这 {DAILY_QUOTA} 个 · 以下 {s.total - DAILY_QUOTA} 个排队，打完前面的再往下看 ↓
+                                </td>
+                              </tr>
+                            ),
+                            ...s.items.slice(DAILY_QUOTA).map((r) => renderRow(r)),
+                          ]
+                        : open && s.items !== null && s.items.map((r) => renderRow(r)),
                       open && s.items !== null && s.items.length === 0 && (
                         <tr key={`section-${s.key}-empty`}>
                           <td colSpan={colCount} className="px-4 py-4 text-center text-xs text-me-charcoal/35">
@@ -682,7 +724,7 @@ export default function CrmAllContactsPage() {
             <FlatPagination
               total={total}
               page={page}
-              perPage={perPage}
+              perPage={flatPerPage}
               onPrev={() => setPage((p) => p - 1)}
               onNext={() => setPage((p) => p + 1)}
             />

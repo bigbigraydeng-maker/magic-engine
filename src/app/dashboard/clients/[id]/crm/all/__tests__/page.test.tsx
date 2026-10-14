@@ -26,6 +26,9 @@ interface Row {
   doNotContact?: boolean
   email?: string | null
   lastTouchAt?: string | null
+  stageLabel?: string | null
+  nextAction: { list: 'hot' | 'cold'; verb: string; verbLabel: string; line: string; reason: string; aiSuggestion: string | null; intentBoost: boolean }
+  intent: 'high' | 'medium' | 'low' | 'unknown' | null
 }
 
 const contact = (id: string, name: string, over: Partial<Row> = {}) => ({
@@ -41,6 +44,8 @@ const contact = (id: string, name: string, over: Partial<Row> = {}) => ({
   segment: 'nurture',
   segmentLabel: '慢慢养',
   temperature: 'cold',
+  nextAction: { list: 'cold', verb: 'system_watching', verbLabel: '系统盯着', line: '系统盯着 —— 聊过一轮断了', reason: '聊过一轮断了', aiSuggestion: null, intentBoost: false },
+  intent: null,
   // 真实响应里这个键**永远存在**（`responseRowFor` 无条件返回 `pinnedAt: c.pinned_at`）。
   // 漏了它，`row.pinnedAt === null` 会是 false（因为是 undefined），点⭐变成「取消置顶」——
   // fixture 比真接口少一个键，测的就不是线上那条路了。
@@ -113,6 +118,92 @@ describe('?contact=<id> 直达链接', () => {
   })
 })
 
+describe('?contact=<id> 的人不在第一页（付款总览点名字）', () => {
+  it('带着名字来 → 按名字搜出来再开抽屉，不再提示「不在名单里」', async () => {
+    const first = [contact('c1', 'Bob Other')]
+    const found = [contact('c9', 'Aiitha Chandra')]
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
+          const items = url.includes('q=Aiitha') ? found : first
+          return { ok: true, json: async () => ({ items, total: items.length, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    window.sessionStorage.setItem('crm-deeplink-name:cts:c9', 'Aiitha Chandra')
+    setUrl('?contact=c9&focus=bookings')
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy(), { timeout: 4000 })
+    expect(screen.queryByText(/不在这份名单里了/)).toBeNull()
+    // 名字用完即删：之后手动点别人不会被它拽回来。
+    expect(window.sessionStorage.getItem('crm-deeplink-name:cts:c9')).toBeNull()
+  })
+
+  it('没带名字（存储被拦）→ 仍明说不在名单里，不装作成功', async () => {
+    stubFetch([contact('c1', 'Bob Other')])
+    setUrl('?contact=c9&focus=bookings')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(screen.getByText(/不在这份名单里了/)).toBeTruthy())
+  })
+})
+
+describe('平铺名单每页 50 人', () => {
+  it('请求带 perPage=50，页脚按 50 算总页数', async () => {
+    const contacts = Array.from({ length: 3 }, (_, i) => contact(`c${i}`, `Guest ${i}`))
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(url)
+        if (url.includes('/crm/contacts?')) {
+          return { ok: true, json: async () => ({ items: contacts, total: 120, page: 1, perPage: 50, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(screen.getByText('Guest 0')).toBeTruthy())
+    expect(urls.some((u) => u.includes('perPage=50'))).toBe(true)
+    expect(urls.some((u) => u.includes('perPage=100'))).toBe(false)
+    expect(screen.getByText(/共 120 人 · 第 1 \/ 3 页/)).toBeTruthy()
+  })
+})
+
+describe('搜索框', () => {
+  it('敲字触发重新加载时，输入框不被卸载（焦点不丢，不像整页刷新）', async () => {
+    let release: (() => void) | null = null
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
+          if (url.includes('q=Sue')) await new Promise<void>((r) => { release = r })
+          const items = [contact('c1', 'Sue Masson')]
+          return { ok: true, json: async () => ({ items, total: 1, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [] }) }
+      }),
+    )
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    const input = (await screen.findByPlaceholderText(/客户打回来了/)) as HTMLInputElement
+    input.focus()
+    fireEvent.change(input, { target: { value: 'Sue' } })
+    // 防抖 300ms 后请求发出、页面进入加载中
+    await waitFor(() => expect(release).not.toBeNull(), { timeout: 3000 })
+    expect(input.isConnected).toBe(true)
+    expect(screen.getByPlaceholderText(/客户打回来了/)).toBe(input)
+    expect(document.activeElement).toBe(input)
+    release!()
+  })
+})
+
 describe('被误判成「别再联系」的人，这一页要给得出取消入口', () => {
   it('展开后看得到取消入口 —— 人工任务说的那个按钮就是它', async () => {
     stubFetch([contact('c1', 'Sue Masson', { doNotContact: true })])
@@ -132,6 +223,52 @@ describe('被误判成「别再联系」的人，这一页要给得出取消入�
   })
 })
 
+describe('最后一列：平铺看阶段，Magic Engine 智能看「该做什么」', () => {
+  it('平铺名单：最后一列是「到哪一步了」，显示阶段；没标的写「还没标」', async () => {
+    stubFetch([
+      contact('c1', 'Sue Masson', {
+        stageLabel: '已报价',
+        nextAction: { list: 'hot', verb: 'call', verbLabel: '打给他', line: '打给他 —— 刚留资料', reason: '刚留资料', aiSuggestion: null, intentBoost: false },
+      }),
+      contact('c2', 'Bob Other', { stageLabel: null }),
+    ])
+    render(<CrmAllContactsPage />)
+
+    await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
+    expect(screen.getByText('到哪一步了')).toBeTruthy()
+    expect(screen.getByText('已报价')).toBeTruthy()
+    expect(screen.getByText('还没标')).toBeTruthy()
+    expect(screen.queryByText('该做什么')).toBeNull()
+    expect(screen.queryByText('打给他')).toBeNull()
+  })
+
+  it('Magic Engine 智能：最后一列才是「该做什么」', async () => {
+    stubPriority([
+      {
+        key: 'hot',
+        title: '今天要联系',
+        hint: 'h',
+        total: 1,
+        open: true,
+        items: [
+          contact('c1', 'Sue Masson', {
+            stageLabel: '已报价',
+            nextAction: { list: 'hot', verb: 'call', verbLabel: '打给他', line: '打给他 —— 刚留资料', reason: '刚留资料', aiSuggestion: null, intentBoost: false },
+          }),
+        ],
+      },
+      { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
+    ])
+    render(<CrmAllContactsPage />)
+
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+
+    await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
+    expect(screen.getByText('该做什么')).toBeTruthy()
+    expect(screen.queryByText('到哪一步了')).toBeNull()
+  })
+})
+
 /**
  * 分段视图（WP3 R7）。
  *
@@ -144,7 +281,7 @@ describe('被误判成「别再联系」的人，这一页要给得出取消入�
  * 人数是服务端给的 total，不是当前拿到几行；段是空的要明说「这一段现在没有人」，
  * 不能渲染成一片空白让人以为加载坏了。
  */
-describe('按「先联系谁」分段视图', () => {
+// 分段接口的假返回 —— 两个 describe 共用，所以放在模块层。
   interface StubSection {
     key: string
     title: string
@@ -199,34 +336,20 @@ describe('按「先联系谁」分段视图', () => {
     return calls
   }
 
+describe('按「先联系谁」分段视图', () => {
+
   const SECTIONS = (): StubSection[] => [
     {
-      key: 'waiting',
-      title: '客人在等你',
+      key: 'hot',
+      title: '今天要联系',
       hint: '今天必须有人回',
       total: 2,
       open: true,
       items: [contact('w1', 'Sue Masson'), contact('w2', 'Bob Other')],
     },
     {
-      key: 'acted',
-      title: '还没搭上话',
-      hint: '要你主动出击',
-      total: 1,
-      open: true,
-      items: [contact('a1', 'Ann New')],
-    },
-    {
-      key: 'queued',
-      title: '先放着，系统盯着',
-      hint: '他一开口会自己跳回来',
-      total: 7,
-      open: false,
-      items: null,
-    },
-    {
-      key: 'off_list',
-      title: '不在今天名单',
+      key: 'cold',
+      title: '先放着',
       hint: '以后才走 / 已成交',
       total: 3,
       open: false,
@@ -234,27 +357,25 @@ describe('按「先联系谁」分段视图', () => {
     },
   ]
 
-  it('点「按先联系谁分段」→ 改成问分段接口要数据', async () => {
+  it('点「Magic Engine 智能」→ 改成问分段接口要数据', async () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(calls.some((u) => u.includes('view=priority'))).toBe(true))
   })
 
-  it('四段的段名和人数都露出来 —— 收起来的段也要露，不然又是「人凭空消失」', async () => {
+  it('两张名单的段名和人数都露出来 —— 收起来的段也要露，不然又是「人凭空消失」', async () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
-    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
-    expect(screen.getByText('还没搭上话')).toBeTruthy()
-    expect(screen.getByText('先放着，系统盯着')).toBeTruthy()
-    expect(screen.getByText('不在今天名单')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
+    expect(screen.getByText('先放着')).toBeTruthy()
     // 人数认服务端的 total，不是当前这一页拿到几行 —— 收起来的段一行都没拿到。
-    expect(screen.getByText('7 人')).toBeTruthy()
+    expect(screen.getByText('2 人')).toBeTruthy()
     expect(screen.getByText('3 人')).toBeTruthy()
   })
 
@@ -262,11 +383,10 @@ describe('按「先联系谁」分段视图', () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
-    expect(screen.getByText('Ann New')).toBeTruthy()
-    // queued / off_list 是 items=null：没有行，也不该冒出「这一段现在没有人」
+    // cold 是 items=null：没有行，也不该冒出「这一段现在没有人」
     expect(screen.queryByText('这一段现在没有人。')).toBeNull()
   })
 
@@ -274,38 +394,36 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
-    await waitFor(() => expect(screen.getByText('先放着，系统盯着')).toBeTruthy())
-    fireEvent.click(screen.getByText('先放着，系统盯着'))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    await waitFor(() => expect(screen.getByText('先放着')).toBeTruthy())
+    fireEvent.click(screen.getByText('先放着'))
 
     await waitFor(() =>
-      expect(calls.some((u) => u.includes('open=') && u.includes('queued'))).toBe(true),
+      expect(calls.some((u) => u.includes('open=') && u.includes('cold'))).toBe(true),
     )
   })
 
   it('展开了但这一段没人 → 明说「这一段现在没有人」，不是一片空白', async () => {
     stubPriority([
-      { key: 'waiting', title: '客人在等你', hint: 'h1', total: 0, open: true, items: [] },
-      { key: 'acted', title: '还没搭上话', hint: 'h2', total: 0, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h3', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h4', total: 0, open: false, items: null },
+      { key: 'hot', title: '今天要联系', hint: 'h1', total: 0, open: true, items: [] },
+      { key: 'cold', title: '先放着', hint: 'h4', total: 0, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(screen.getByText('这一段现在没有人。')).toBeTruthy())
   })
 
   it('直达链接落在收起来的段里 → 自动把那一段打开，别让人点进来什么都看不到', async () => {
-    const calls = stubPriority(SECTIONS(), { found: true, section: 'off_list', page: 1 })
+    const calls = stubPriority(SECTIONS(), { found: true, section: 'cold', page: 1 })
     setUrl('?contact=z9')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
     await waitFor(() =>
-      expect(calls.some((u) => u.includes('open=') && u.includes('off_list'))).toBe(true),
+      expect(calls.some((u) => u.includes('open=') && u.includes('cold'))).toBe(true),
     )
   })
 
@@ -313,8 +431,8 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
-    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     const before = calls.length
 
     fireEvent.click(screen.getByText(/回到平铺名单/))
@@ -362,16 +480,14 @@ describe('分段视图 · 复审补测', () => {
     return calls
   }
 
-  const goGrouped = async () => fireEvent.click(await screen.findByText(/按「先联系谁」分段/))
+  const goGrouped = async () => fireEvent.click(await screen.findByText(/Magic Engine 智能/))
 
   /** M6：每段的人一个都不能少画。原来只比「画出来的 vs items 条数」，两边一起少就发现不了。 */
   it('M6 · 这一段下发了几个人，就必须画出几个人', async () => {
     stubSections([
-      { key: 'waiting', title: '客人在等你', hint: 'h', total: 3, open: true,
+      { key: 'hot', title: '今天要联系', hint: 'h', total: 3, open: true,
         items: [contact('w1', 'Aaa One'), contact('w2', 'Bbb Two'), contact('w3', 'Ccc Three')] },
-      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
@@ -386,8 +502,8 @@ describe('分段视图 · 复审补测', () => {
       const today = new Date().toISOString()
       stubSections([
         {
-          key: 'waiting',
-          title: '客人在等你',
+          key: 'hot',
+          title: '今天要联系',
           hint: 'h',
           total: 2,
           open: true,
@@ -396,9 +512,7 @@ describe('分段视图 · 复审补测', () => {
             contact('w2', 'Bbb Two', { lastTouchAt: '2020-01-01T00:00:00Z' }),
           ],
         },
-        { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
-        { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-        { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+        { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
       ])
       render(<CrmAllContactsPage />)
       await goGrouped()
@@ -409,16 +523,14 @@ describe('分段视图 · 复审补测', () => {
       const today = new Date().toISOString()
       stubSections([
         {
-          key: 'waiting',
-          title: '客人在等你',
+          key: 'hot',
+          title: '今天要联系',
           hint: 'h',
           total: 1,
           open: true,
           items: [contact('w1', 'Aaa One', { lastTouchAt: today })],
         },
-        { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
-        { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-        { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+        { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
       ])
       render(<CrmAllContactsPage />)
       await goGrouped()
@@ -427,14 +539,12 @@ describe('分段视图 · 复审补测', () => {
 
     it('段是收起的（items=null）→ 不显示进度，不能拿 0 冒充"今天一个都没处理"', async () => {
       stubSections([
-        { key: 'waiting', title: '客人在等你', hint: 'h', total: 5, open: false, items: null },
-        { key: 'acted', title: '还没搭上话', hint: 'h', total: 5, open: false, items: null },
-        { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-        { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+        { key: 'hot', title: '今天要联系', hint: 'h', total: 5, open: false, items: null },
+        { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
       ])
       render(<CrmAllContactsPage />)
       await goGrouped()
-      await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+      await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
       expect(screen.queryByText(/今天动过/)).toBeNull()
       expect(screen.queryByText(/今天都过了一遍/)).toBeNull()
     })
@@ -447,33 +557,29 @@ describe('分段视图 · 复审补测', () => {
   it('B1 · 段里的人没显示完，必须说清还有多少 + 给得出翻页', async () => {
     const many = Array.from({ length: 100 }, (_, i) => contact(`w${i}`, `Person ${i}`))
     const calls = stubSections([
-      { key: 'waiting', title: '客人在等你', hint: 'h', total: 217, open: true, items: many },
-      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      { key: 'hot', title: '今天要联系', hint: 'h', total: 217, open: true, items: many },
+      { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
-    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
 
     // 必须显式说出「共 217 人、现在看的是第几到第几」，不能只写 217 然后画 100 行。
     expect(screen.getByText(/共 217 人/)).toBeTruthy()
     expect(screen.getByText(/第 1–100 个/)).toBeTruthy()
     expect(screen.getByText(/第 1 \/ 3 页/)).toBeTruthy()
 
-    // 而且翻得过去 —— 点下一页要真的把 p_waiting=2 发出去。
+    // 而且翻得过去 —— 点下一页要真的把 p_hot=2 发出去。
     fireEvent.click(screen.getByText('下一页'))
-    await waitFor(() => expect(calls.some((c) => c.includes('p_waiting=2'))).toBe(true))
+    await waitFor(() => expect(calls.some((c) => c.includes('p_hot=2'))).toBe(true))
   })
 
   /** 人数不超过一页时不该冒出翻页控件 —— 多一个没用的控件就多一次误解。 */
   it('B1 · 一页装得下就不显示翻页', async () => {
     stubSections([
-      { key: 'waiting', title: '客人在等你', hint: 'h', total: 2, open: true,
+      { key: 'hot', title: '今天要联系', hint: 'h', total: 2, open: true,
         items: [contact('w1', 'Aaa One'), contact('w2', 'Bbb Two')] },
-      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
@@ -488,10 +594,8 @@ describe('分段视图 · 复审补测', () => {
    */
   it('M7 · 段是收起的，就算数据在手上也不许画出来', async () => {
     stubSections([
-      { key: 'waiting', title: '客人在等你', hint: 'h', total: 1, open: true, items: [contact('w1', 'Shown Person')] },
-      { key: 'acted', title: '还没搭上话', hint: 'h', total: 1, open: false, items: [contact('a1', 'Hidden Person')] },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      { key: 'hot', title: '今天要联系', hint: 'h', total: 1, open: true, items: [contact('w1', 'Shown Person')] },
+      { key: 'cold', title: '先放着', hint: 'h', total: 1, open: false, items: [contact('a1', 'Hidden Person')] },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
@@ -502,33 +606,29 @@ describe('分段视图 · 复审补测', () => {
   /** M8 / M12：▾▸、aria-expanded、那句说明文字，原来一处都没被断言。 */
   it('M8 · 展开和收起的段头，箭头和 aria-expanded 要分得开', async () => {
     stubSections([
-      { key: 'waiting', title: '客人在等你', hint: '今天必须有人回', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
-      { key: 'acted', title: '还没搭上话', hint: '要你主动出击', total: 0, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h3', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h4', total: 0, open: false, items: null },
+      { key: 'hot', title: '今天要联系', hint: '今天必须有人回', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
+      { key: 'cold', title: '先放着', hint: '以后才走 / 已成交', total: 0, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
-    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
 
-    const openHead = screen.getByText('客人在等你').closest('button')
-    const shutHead = screen.getByText('还没搭上话').closest('button')
+    const openHead = screen.getByText('今天要联系').closest('button')
+    const shutHead = screen.getByText('先放着').closest('button')
     expect(openHead?.getAttribute('aria-expanded')).toBe('true')
     expect(shutHead?.getAttribute('aria-expanded')).toBe('false')
     expect(openHead?.textContent).toContain('▾')
     expect(shutHead?.textContent).toContain('▸')
     // M12：段头那句人话说明不能悄悄消失
     expect(openHead?.textContent).toContain('今天必须有人回')
-    expect(shutHead?.textContent).toContain('要你主动出击')
+    expect(shutHead?.textContent).toContain('以后才走 / 已成交')
   })
 
   /** B3：分段模式下点⭐，星星必须当场亮 —— 只更新 rows 的那一版永远不亮。 */
   it('B3 · 分段模式下点⭐，星星当场就要变', async () => {
     stubSections([
-      { key: 'waiting', title: '客人在等你', hint: 'h', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
-      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      { key: 'hot', title: '今天要联系', hint: 'h', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
+      { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
@@ -556,24 +656,20 @@ describe('分段视图 · 复审补测', () => {
   /** C3：四段全收起时不许冒出「大家的跟进到哪步都还空着」。 */
   it('C3 · 全部收起时不许说「大家阶段都空着」这种假话', async () => {
     stubSections([
-      { key: 'waiting', title: '客人在等你', hint: 'h', total: 5, open: false, items: null },
-      { key: 'acted', title: '还没搭上话', hint: 'h', total: 5, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 5, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 5, open: false, items: null },
+      { key: 'hot', title: '今天要联系', hint: 'h', total: 5, open: false, items: null },
+      { key: 'cold', title: '先放着', hint: 'h', total: 5, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
-    await waitFor(() => expect(screen.getByText('客人在等你')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     expect(screen.queryByText(/都还空着/)).toBeNull()
   })
 
   /** B2：分段模式下表头不许假装能排序。 */
   it('B2 · 分段模式下表头没有排序箭头、点了也不该有排序入口', async () => {
     stubSections([
-      { key: 'waiting', title: '客人在等你', hint: 'h', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
-      { key: 'acted', title: '还没搭上话', hint: 'h', total: 0, open: false, items: null },
-      { key: 'queued', title: '先放着，系统盯着', hint: 'h', total: 0, open: false, items: null },
-      { key: 'off_list', title: '不在今天名单', hint: 'h', total: 0, open: false, items: null },
+      { key: 'hot', title: '今天要联系', hint: 'h', total: 1, open: true, items: [contact('w1', 'Aaa One')] },
+      { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
     ])
     render(<CrmAllContactsPage />)
     await goGrouped()
@@ -870,8 +966,44 @@ describe('B3 · 终端客户/同行筛选 + 批量发邮件', () => {
     await screen.findByText('Retail Rita')
     expect(screen.getByText('🤝 同行')).toBeTruthy()
 
-    fireEvent.click(screen.getByText(/按「先联系谁」分段/))
+    fireEvent.click(screen.getByText(/Magic Engine 智能/))
 
     await waitFor(() => expect(screen.queryByText('🤝 同行')).toBeNull())
+  })
+})
+
+/**
+ * 每天打 20 个（PM 2026-10-10）：「今天要联系」不管多少人都全列出来（人不能因为上限消失），
+ * 只是第 20 个之后画一条线，写明后面是排队的。
+ */
+describe('今天要联系 · 每天 20 个的分界线', () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => contact(`h${i + 1}`, `Person ${String(i + 1).padStart(2, '0')}`))
+  const sections = (n: number) => [
+    { key: 'hot', title: '今天要联系', hint: 'h', total: n, open: true, items: many(n) },
+    { key: 'cold', title: '先放着', hint: 'h', total: 0, open: false, items: null },
+  ]
+
+  it('25 个人：全部画出来，线画在第 20 个之后，写明排队 5 个', async () => {
+    stubPriority(sections(25))
+    render(<CrmAllContactsPage />)
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    await waitFor(() => expect(screen.getByText('Person 25')).toBeTruthy())
+
+    const line = screen.getByTestId('quota-line')
+    expect(line.textContent).toContain('今天先打这 20 个')
+    expect(line.textContent).toContain('以下 5 个排队')
+    const rows = Array.from(document.querySelectorAll('tbody tr'))
+    const idx = rows.indexOf(line as HTMLTableRowElement)
+    // 线前面正好 1 行段头 + 20 个人
+    expect(rows.slice(0, idx).filter((r) => (r.textContent ?? '').includes('Person')).length).toBe(20)
+    expect(rows.slice(idx + 1).filter((r) => (r.textContent ?? '').includes('Person')).length).toBe(5)
+  })
+
+  it('刚好 20 个或更少：不画线', async () => {
+    stubPriority(sections(20))
+    render(<CrmAllContactsPage />)
+    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    await waitFor(() => expect(screen.getByText('Person 20')).toBeTruthy())
+    expect(screen.queryByTestId('quota-line')).toBeNull()
   })
 })

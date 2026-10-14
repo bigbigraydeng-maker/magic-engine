@@ -6,15 +6,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/strategy/goals', () => ({ listActiveGoals: vi.fn() }))
 vi.mock('@/lib/strategy/auto-fetch', () => ({ autoFetchMetricValue: vi.fn() }))
-vi.mock('../../config', () => ({ loadAdStrategyConfig: vi.fn() }))
+vi.mock('../../config', () => ({ loadAdStrategyConfigWithSource: vi.fn() }))
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
-import { loadAdStrategyConfig } from '../../config'
-import { medianCostPerResultCents, buildDigestGoalContext, pickDigestGoal, MIN_MEDIAN_DAYS } from '../goal-context'
+import { loadAdStrategyConfigWithSource } from '../../config'
+import { medianCostPerResultCents, buildDigestGoalContext, pickDigestGoal, withoutCapLens, MIN_MEDIAN_DAYS } from '../goal-context'
 import type { GoalRow } from '@/types/strategy'
 import type { AdStrategyConfig } from '../../config'
+import type { GoalPace } from '../../goal-pace'
 
 interface InsightRow {
   insight_date: string
@@ -85,6 +86,7 @@ function goalRow(overrides: Partial<GoalRow> = {}): GoalRow {
     verdict: null,
     verdict_at: null,
     verdict_summary: null,
+    recurrence: null,
     fde_reasoning: null,
     is_beta: true,
     current_value: null,
@@ -202,7 +204,7 @@ describe('buildDigestGoalContext', () => {
       reason: '主结果归不到广告（§14 M2）',
       unknown: true,
     })
-    vi.mocked(loadAdStrategyConfig).mockResolvedValue(adStrategyConfig())
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
     insightsTable([])
 
     const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
@@ -225,7 +227,7 @@ describe('buildDigestGoalContext', () => {
       snapshot_date: '2026-09-15',
       label: '35 conversions',
     })
-    vi.mocked(loadAdStrategyConfig).mockResolvedValue(adStrategyConfig())
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
     insightsTable([])
 
     const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
@@ -249,7 +251,7 @@ describe('buildDigestGoalContext', () => {
       snapshot_date: '2026-09-30',
       label: 'lead',
     })
-    vi.mocked(loadAdStrategyConfig).mockResolvedValue(adStrategyConfig())
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
     insightsTable([])
 
     const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
@@ -257,6 +259,63 @@ describe('buildDigestGoalContext', () => {
     expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
       goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-30' },
     })
+  })
+})
+
+describe('buildDigestGoalContext — 广告设置读失败', () => {
+  function fetched(value: number) {
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value, source: 'ad_daily_insights', snapshot_date: '2026-09-15', label: 'lead',
+    })
+  }
+  function configReadFails() {
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({
+      config: adStrategyConfig(), source: 'fallback', error: 'relation timeout',
+    })
+  }
+
+  it('按节奏走 + 读失败 → 降成未判，并把原始报错带出去', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow()])
+    fetched(35) // 第 15/30 天，线性预期 35 → 本来是 on_track
+    configReadFails()
+    insightsTable([])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('读不出广告设置')
+    expect(ctx?.configReadError).toBe('relation timeout')
+  })
+
+  it('落后 + 读失败 → 仍报落后（只靠线性节奏就成立），同样带报错', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow()])
+    fetched(20)
+    configReadFails()
+    insightsTable([])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
+    expect(ctx?.pace.verdict).toBe('behind')
+    expect(ctx?.configReadError).toBe('relation timeout')
+  })
+
+  it('读成功 → 不带 configReadError', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow()])
+    fetched(35)
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'default' })
+    insightsTable([])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
+    expect(ctx?.pace.verdict).toBe('on_track')
+    expect(ctx && 'configReadError' in ctx).toBe(false)
+  })
+})
+
+describe('withoutCapLens', () => {
+  const base: GoalPace = { expectedToDate: 35, actualToDate: 35, gapPct: 0, projectedEnd: 50, verdict: 'on_track', reason: 'x' }
+  it('只把 on_track 降成 unknown，其余原样', () => {
+    expect(withoutCapLens(base).verdict).toBe('unknown')
+    for (const verdict of ['behind', 'unreachable_within_caps', 'unknown'] as const) {
+      expect(withoutCapLens({ ...base, verdict })).toEqual({ ...base, verdict })
+    }
   })
 })
 
