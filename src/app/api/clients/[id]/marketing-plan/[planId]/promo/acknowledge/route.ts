@@ -7,12 +7,12 @@
 import { continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
 import type { MarketingPlan, WeeklyReviewRecord } from '@/lib/marketing-plan/types'
 
 export async function POST(_req: NextRequest, { params }: { params: { id: string; planId: string } }) {
-  const access = await requirePaidClientAccess(params.id)
+  const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
     const { data: plan } = await supabaseAdmin

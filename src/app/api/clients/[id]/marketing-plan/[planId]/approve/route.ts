@@ -21,7 +21,7 @@ import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
 import { hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
 
@@ -29,7 +29,7 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
-  const access = await requirePaidClientAccess(params.id)
+  const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   }

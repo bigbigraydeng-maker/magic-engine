@@ -15,9 +15,10 @@ const m = vi.hoisted(() => ({
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
   updateFilters: [] as [string, unknown][],
+  casMiss: false,
 }))
 
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
+vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access, requirePlanApproverAccess: m.access }))
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({ dispatchPlanTasks: m.dispatch, revokePlanTasks: vi.fn() }))
 vi.mock('@/lib/marketing-plan/promo/facts', async () => {
   const actual = await vi.importActual<typeof import('@/lib/marketing-plan/promo/facts')>('@/lib/marketing-plan/promo/facts')
@@ -30,8 +31,12 @@ vi.mock('@/lib/supabase', () => {
     c.select = () => c
     c.eq = (col: string, val: unknown) => { m.updateFilters.push([col, val]); return c }
     c.single = async () => ({ data: m.plan, error: null })
-    c.maybeSingle = async () => ({ data: m.plan, error: null })
-    c.update = (u: Record<string, unknown>) => { m.updates.push(u); m.plan = { ...(m.plan ?? {}), ...u }; return c }
+    c.maybeSingle = async () => {
+      // 模拟落库时被别处抢先改过：update 之后返回空
+      if (m.casMiss && c.updated) return { data: null, error: null }
+      return { data: m.plan, error: null }
+    }
+    c.update = (u: Record<string, unknown>) => { c.updated = true; m.updates.push(u); m.plan = { ...(m.plan ?? {}), ...u }; return c }
     return c
   }
   return { supabaseAdmin: { from: () => chain() } }
@@ -58,7 +63,7 @@ const loadedFacts = (gate = goodFacts(), recon = goodReconFacts()) => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
-  m.updates = []; m.updateFilters = []
+  m.updates = []; m.updateFilters = []; m.casMiss = false
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.loadGoal.mockResolvedValue({ status: 'active' })
   m.loadPromoFacts.mockResolvedValue(loadedFacts())
@@ -117,6 +122,20 @@ describe('PUT promo — 保存时服务端校验', () => {
   it('没权限 → 原样返回', async () => {
     m.access.mockResolvedValue({ ok: false, status: 403, error: 'no' })
     expect((await PUT(req({ promo: baseSpec() }, 'PUT'), { params: P })).status).toBe(403)
+  })
+  it('expected_updated_at 与库里不一致 → 409，不写库', async () => {
+    m.plan = planWith(undefined, { updated_at: '2026-11-01T00:00:00Z' })
+    const res = await PUT(req({ promo: baseSpec(), expected_updated_at: '2026-10-01T00:00:00Z' }, 'PUT'), { params: P })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain('别处被改过')
+    expect(m.updates).toHaveLength(0)
+  })
+  it('落库时 update 返回空（别处抢先改了）→ 409 而不是 500', async () => {
+    m.plan = planWith(undefined, { updated_at: '2026-11-01T00:00:00Z' })
+    m.casMiss = true
+    const res = await PUT(req({ promo: baseSpec(), expected_updated_at: '2026-11-01T00:00:00Z' }, 'PUT'), { params: P })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain('别处被改过')
   })
 })
 

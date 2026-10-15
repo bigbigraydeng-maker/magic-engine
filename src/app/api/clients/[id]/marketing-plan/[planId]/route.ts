@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { countRevokeBlockers, revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlan, MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import {
   PLAN_CONTENT_LOCKED_MESSAGE,
   PROMO_CHANGED_VIA_PATCH_MESSAGE,
@@ -131,6 +131,13 @@ export async function PATCH(
     }
 
     const revertingToDraft = isRevertToDraft(current.status, body.status)
+    // 退回草稿 = 撤销批准并清掉未开工待办，不能让客户员工做，只有内部账号可以
+    if (revertingToDraft) {
+      const approver = await requirePlanApproverAccess(params.id)
+      if (!approver.ok) {
+        return NextResponse.json({ success: false, error: approver.error, reason: approver.reason }, { status: approver.status })
+      }
+    }
     const touched = lockedFieldsTouched(body)
     if (!revertingToDraft && touched.length > 0 && (current.status === 'approved' || current.status === 'completed')) {
       return NextResponse.json({
@@ -189,7 +196,7 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
-  const access = await requirePaidClientAccess(params.id)
+  const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   }

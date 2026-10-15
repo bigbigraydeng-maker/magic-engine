@@ -8,13 +8,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { MANUAL_GATE_KEYS } from '@/lib/marketing-plan/promo/gates'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { MarketingPlan, PromoManualCheckRecord } from '@/lib/marketing-plan/types'
 
 export async function POST(req: NextRequest, { params }: { params: { id: string; planId: string } }) {
-  const access = await requirePaidClientAccess(params.id)
+  const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
     const body = (await req.json().catch(() => ({}))) as { phase_id?: string; check_key?: string; note?: string }

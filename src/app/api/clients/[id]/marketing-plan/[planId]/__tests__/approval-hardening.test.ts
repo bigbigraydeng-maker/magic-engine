@@ -7,6 +7,7 @@ import { NextRequest } from 'next/server'
 
 const m = vi.hoisted(() => ({
   access: vi.fn(),
+  approver: vi.fn(),
   dispatch: vi.fn(),
   revoke: vi.fn(),
   revocable: vi.fn(),
@@ -18,7 +19,7 @@ const m = vi.hoisted(() => ({
   updates: [] as Record<string, unknown>[],
 }))
 
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
+vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access, requirePlanApproverAccess: m.approver }))
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({
   dispatchPlanTasks: m.dispatch,
   revokePlanTasks: m.revoke,
@@ -59,6 +60,7 @@ beforeEach(() => {
   m.updates = []
   m.updErr = false; m.casMiss = false; m.missed = false; m.statusAfter = 'draft'
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
+  m.approver.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.revoke.mockResolvedValue({ revoked: 3 })
   m.revocable.mockResolvedValue({ tasks_in_progress: 0, packages_started: 0 })
   m.plan = { id: 'plan-1', client_id: 'client-1', status: 'draft', generation_meta: { model: 'x' }, plan_data: { tasks: [] } }
@@ -295,6 +297,41 @@ describe('PATCH — 归档 / 非草稿回草稿都不能绕过清理', () => {
     expect(res.status).toBe(200)
     expect(m.revocable).toHaveBeenCalled()
     expect(m.revoke).toHaveBeenCalled()
+  })
+})
+
+describe('只有内部账号能批准 / 退回草稿 / 归档', () => {
+  beforeEach(() => {
+    m.approver.mockResolvedValue({ ok: false, status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', reason: 'approver_only' })
+  })
+
+  it('POST approve → 403，不派发、不写库', async () => {
+    const res = await APPROVE(mk({}, 'POST'), { params: P })
+    expect(res.status).toBe(403)
+    expect((await res.json()).reason).toBe('approver_only')
+    expect(m.updates).toHaveLength(0)
+    expect(m.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('PATCH 退回草稿 → 403，不清待办、不写库', async () => {
+    m.plan = { ...m.plan, status: 'approved' }
+    const res = await PATCH(mk({ status: 'draft' }), { params: P })
+    expect(res.status).toBe(403)
+    expect(m.revoke).not.toHaveBeenCalled()
+    expect(m.updates).toHaveLength(0)
+  })
+
+  it('PATCH 普通字段（草稿改标题）→ 仍 200，不查内部账号', async () => {
+    const res = await PATCH(mk({ title: 'x' }), { params: P })
+    expect(res.status).toBe(200)
+    expect(m.approver).not.toHaveBeenCalled()
+  })
+
+  it('DELETE 归档 → 403，不清待办、不写库', async () => {
+    const res = await DELETE(new NextRequest('http://localhost/x', { method: 'DELETE' }), { params: P })
+    expect(res.status).toBe(403)
+    expect(m.revoke).not.toHaveBeenCalled()
+    expect(m.updates).toHaveLength(0)
   })
 })
 
