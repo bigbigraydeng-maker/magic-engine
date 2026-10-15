@@ -196,6 +196,13 @@ export const A_RISK_RULES = [
   { basenameIncludes: 'publisher', why: '对外发布 —— 发出去就撤不回来', category: RISK_CATEGORY.OUTWARD_WRITE },
   { prefix: 'src/lib/email/', why: '对外发信', category: RISK_CATEGORY.OUTWARD_WRITE },
   { basenameIncludes: 'guardrail', why: '花费 / 发布安全闸 —— 它松了别的全松', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // --- Music vocal gate: the registry IS the gate; a hand-written signature would otherwise pass as B ---
+  { pattern: /^scripts\/factory-worker\/.*music[-_]?vocal[^/]*$/i, why: '音乐人声闸：登记表 music-vocals.json、闸模块、回填工具及其测试 —— 登记表就是闸本身，签字格式可被手写伪造，只能靠人审', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/remotion-branch.mjs', why: '出片机 Remotion 分支：人声闸接线点，删掉接线 = 含人声音乐直接出片', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/worker.mjs', why: '出片机主程序：旧版/recipe 路径的人声闸接线点', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/creative-recipe.mjs', why: '出片机 recipe 路径：BGM 解析，人声闸依赖它选出的文件', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/remotion-branch.test.mjs', why: '出片机 Remotion 分支测试：删掉「没有人声闸就拒绝出片」的断言 = 闸静默失效', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/worker.recipe-sequence.test.mjs', why: '出片机 recipe 分支测试：含「未注入人声闸就拒绝出片」的断言', category: RISK_CATEGORY.OUTWARD_WRITE },
   { basenameIncludes: 'ssrf', why: 'SSRF 出网边界', category: RISK_CATEGORY.NETWORK_BOUNDARY },
 
   // --- Credentials --------------------------------------------------------

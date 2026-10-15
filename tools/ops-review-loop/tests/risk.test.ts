@@ -70,6 +70,15 @@ const A_PATHS: Array<[string, string]> = [
   ['src/lib/social/facebook-publisher.ts', 'outward publish'],
   ['src/lib/email/sender.ts', 'outward email'],
   ['src/lib/meta/guardrails.ts', 'spend guardrail'],
+  ['scripts/factory-worker/engines/remotion/catalog/music-vocals.json', 'music vocal registry'],
+  ['scripts/factory-worker/music-vocal-gate.mjs', 'music vocal gate'],
+  ['scripts/factory-worker/music-vocal-gate.test.mjs', 'music vocal gate test'],
+  ['scripts/factory-worker/tools/backfill-music-vocals.mjs', 'music vocal backfill tool'],
+  ['scripts/factory-worker/remotion-branch.mjs', 'music vocal gate wiring'],
+  ['scripts/factory-worker/worker.mjs', 'music vocal gate wiring'],
+  ['scripts/factory-worker/creative-recipe.mjs', 'recipe BGM resolution'],
+  ['scripts/factory-worker/remotion-branch.test.mjs', 'music vocal gate wiring test'],
+  ['scripts/factory-worker/worker.recipe-sequence.test.mjs', 'recipe gate wiring test'],
   ['src/lib/cms/ssrf-guard.ts', 'SSRF boundary'],
   ['.env', 'credentials'],
   ['apps/worker/.env.production', 'credentials'],
@@ -108,6 +117,18 @@ const A_PATHS: Array<[string, string]> = [
 describe('every protected path rates A', () => {
   it.each(A_PATHS)('%s (%s)', (path) => {
     expect(classifyFile(path).risk).toBe('A')
+  })
+
+  it('does not rate unrelated files A: same-folder README, and docs that merely mention the gate', () => {
+    expect(classifyFile('scripts/factory-worker/engines/remotion/README.md').risk).toBe('C')
+    expect(classifyFile('docs/specs/2026-10-16-music-vocal-gate-design.md').risk).toBe('C')
+    expect(classifyFile('docs/ledger/2026-10-16-music-vocal-gate-code-pr.md').risk).toBe('C')
+  })
+
+  it('catches filename spelling variants of the vocal gate files inside factory-worker', () => {
+    for (const p of ['scripts/factory-worker/music_vocal_gate.mjs', 'scripts/factory-worker/tools/music-vocals.json']) {
+      expect(classifyFile(p).risk).toBe('A')
+    }
   })
 
   it('every A rule in the table is exercised by at least one path above', () => {

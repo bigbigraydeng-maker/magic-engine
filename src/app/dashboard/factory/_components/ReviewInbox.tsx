@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import type { PublishedView } from '@/lib/factory/publish/publish-display'
-import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V2, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
-import { isAcceptableFlagCategory } from '@/lib/factory/review-flag-categories'
 import { factoryVideoUrl } from '@/lib/factory/outlets'
 import { OneClickConfirm } from './OneClickConfirm'
 import { OrderNo } from './OrderNo'
@@ -42,16 +41,19 @@ interface WorkOrder {
     quality_flags?: Array<{ category: string; detail: string }>
     quality_checklist_auto?: ContentCheckItemResult[]
   } | null
-  accepted_flags?: Array<{ category: string; accepted_at: string; accepted_by: string }>
 }
 
 const redlineHitsOf = (o: WorkOrder): string[] =>
   Array.isArray(o.output?.redline_hits) ? o.output.redline_hits.filter((h) => typeof h === 'string' && h) : []
 
+// 「人称口吻不符简报」检测已于 2026-10-16 取消;历史工单里残留的这类标记只在展示层过滤,不改库。
+const RETIRED_FLAG_CATEGORIES = ['narrator_voice_mismatch']
+
 const qualityFlagsOf = (o: WorkOrder): Array<{ category: string; detail: string }> =>
   Array.isArray(o.output?.quality_flags)
     ? o.output.quality_flags
         .filter((f) => f && typeof f === 'object')
+        .filter((f) => !RETIRED_FLAG_CATEGORIES.includes((f as { category?: string }).category ?? ''))
         .map((f) => ({
           category: typeof f.category === 'string' && f.category ? f.category : 'unknown',
           detail: typeof f.detail === 'string' ? f.detail : '',
@@ -63,25 +65,16 @@ const autoChecklistOf = (o: WorkOrder): ContentCheckItemResult[] =>
 const autoChecklistReady = (o: WorkOrder): boolean =>
   autoChecklistOf(o).length > 0 && autoChecklistOf(o).every(item => item.judge === 'AUTO' && item.outcome === 'PASS')
 
-const acceptedCategoriesOf = (o: WorkOrder): string[] => (o.accepted_flags ?? []).map(f => f.category)
-
-const acceptedDateOf = (o: WorkOrder, category: string): string | null => {
-  const entry = (o.accepted_flags ?? []).find(f => f.category === category)
-  return entry ? entry.accepted_at.slice(0, 10) : null
-}
-
 const gateOf = (o: WorkOrder) => reviewGate({
   autoReady: autoChecklistReady(o),
   redlineHits: redlineHitsOf(o),
   qualityFlags: qualityFlagsOf(o),
-  acceptedCategories: acceptedCategoriesOf(o),
   factSourcePrefilled: defaultFactSourceRef(o.fact_source_url) !== '',
 })
 
 const QUALITY_FLAG_LABEL: Record<string, string> = {
   competitor_brand: '⚠️ 疑似把竞品品牌当自己卖点',
   placeholder_caption: '⚠️ 字幕疑似内部标签冒充文案',
-  narrator_voice_mismatch: '⚠️ 人称口吻疑似不符简报要求',
   quality_check_unavailable: '⚠️ 品控检测暂不可用,请重点人工复核',
 }
 
@@ -99,6 +92,7 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
   asset_provenance_labeled: '素材来源已标注',
   asset_provenance_matches_claim_context: '素材与主张场景相符',
   bgm_segmented_with_fades: 'BGM 分段并带淡入淡出',
+  bgm_listened_no_vocals: '我已开声音听过，背景音乐里没有人声',
   format_is_reel: '发布格式为 Reel',
   cta_in_first_comment_not_body: 'CTA 位于首评而非正文',
   first_comment_link_has_tracking_params: '首评链接含追踪参数',
@@ -107,14 +101,19 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
 type ChecklistDraft = Record<ContentCheckItemKey, { outcome: CheckItemOutcome; detail: string; source_ref: string }>
 const FACT_KEYS: readonly ContentCheckItemKey[] = ['factual_claims_have_source', 'factual_claims_source_verified']
 const emptyChecklistDraft = (factSource = ''): ChecklistDraft => Object.fromEntries(
-  REEL_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
+  REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
 ) as ChecklistDraft
 
+// The listened-to-the-audio item is never bulk-passed: it only counts if the reviewer ticks it themselves.
+const MANUAL_ONLY_KEYS: readonly ContentCheckItemKey[] = ['bgm_listened_no_vocals']
 const allPass = (draft: ChecklistDraft): ChecklistDraft =>
-  Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+  Object.fromEntries(REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, MANUAL_ONLY_KEYS.includes(key) ? draft[key] : { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+
+// One-click path: the confirm button is only enabled after the reviewer ticks "listened, no vocals".
+const markListened = (draft: ChecklistDraft): ChecklistDraft => ({ ...draft, bgm_listened_no_vocals: { ...draft.bgm_listened_no_vocals, outcome: 'PASS' } })
 
 const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
-  REEL_HUMAN_CHECK_KEYS.map(key => ({
+  REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
     key,
     judge: 'HUMAN',
     outcome: draft[key].outcome,
@@ -124,45 +123,18 @@ const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
 
 type Seg = 'pending' | 'done' | 'rejected'
 
-// 品控提示:没处理的黄框直接显示;PM 已接受的收进折叠,不占位
-function QualityFlagsBlock({ o, onAccept, busy }: { o: WorkOrder; onAccept: (category: string) => void; busy: boolean }) {
+// 品控提示:有就显示黄框(只读;没有「接受」按钮,提示本身就该被处理)
+function QualityFlagsBlock({ o }: { o: WorkOrder }) {
   const flags = qualityFlagsOf(o)
   if (flags.length === 0) return null
-  const settled = (f: { category: string }) => isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(o).includes(f.category)
-  const open = flags.filter((f) => !settled(f))
-  const done = flags.filter(settled)
   return (
-    <div className="mb-2 space-y-1">
-      {open.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 space-y-1">
-          {open.map((f, i) => (
-            <div key={i}>
-              <p className="text-xs text-amber-800">
-                <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-                <span className="block text-amber-700 mt-0.5">{f.detail}</span>
-              </p>
-              {isAcceptableFlagCategory(f.category) && (
-                <button
-                  type="button"
-                  onClick={() => onAccept(f.category)}
-                  disabled={busy}
-                  title="接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒"
-                  className="mt-1 px-3 h-11 rounded border border-amber-300 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                >PM 已接受</button>
-              )}
-              {isAcceptableFlagCategory(f.category) && <p className="mt-1 text-xs text-amber-700">接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒</p>}
-            </div>
-          ))}
-        </div>
-      )}
-      {done.length > 0 && (
-        <details className="text-xs text-slate-500">
-          <summary className="cursor-pointer select-none">已接受的提醒 · {done.length}</summary>
-          {done.map((f, i) => (
-            <p key={i} className="mt-1">已接受({acceptedDateOf(o, f.category)}) · {QUALITY_FLAG_LABEL[f.category]?.replace('⚠️ ', '') ?? '品控提示'}</p>
-          ))}
-        </details>
-      )}
+    <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 space-y-1">
+      {flags.map((f, i) => (
+        <p key={i} className="text-xs text-amber-800">
+          <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+          <span className="block text-amber-700 mt-0.5">{f.detail}</span>
+        </p>
+      ))}
     </div>
   )
 }
@@ -186,7 +158,6 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   const [hasShown, setHasShown] = useState(false) // 显示过一次就常驻,刷新不卸载(防对话框丢历史)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [acceptedFlagsError, setAcceptedFlagsError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<WorkOrder | null>(null)
   const [checklistDraft, setChecklistDraft] = useState<ChecklistDraft>(emptyChecklistDraft)
   const [showDetails, setShowDetails] = useState(false)
@@ -210,7 +181,6 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       // 只剩历史卡的客户也算「显示过」:否则对话框触发刷新时整块被加载提示替换,对话历史丢失
       if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => o.status === 'review_rejected') || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
       setError(null)
-      setAcceptedFlagsError(typeof json.accepted_flags_error === 'string' && json.accepted_flags_error ? json.accepted_flags_error : null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -255,26 +225,6 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
     }
   }, [onReviewed, load])
 
-  const acceptFlag = useCallback(async (id: string, category: string) => {
-    setBusy(id)
-    setError(null)
-    try {
-      const res = await fetch(`/api/factory/work-orders/${id}/accept-flag`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category }),
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        setError(`没接受成功:${j.error ?? res.status}`)
-        return
-      }
-      await load()
-    } finally {
-      setBusy(null)
-    }
-  }, [load])
-
   // 只在「从没显示过 + 当前也没待审」时隐藏。一旦显示过就常驻——刷新时绝不整体卸载,
   // 否则右侧对话框(ReviewInbox 的子组件)会被连带卸载,历史 + 正在输入的指令全丢(PM 报的 bug)。
   if (hideWhenEmpty && !hasShown && orders.length === 0 && published.length === 0 && superseded.length === 0) return null
@@ -312,7 +262,6 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
 
       {error && !confirming && !rejecting && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
       {notice && <div role="status" className="mb-3 px-4 py-2 rounded-lg bg-orange-50 text-orange-800 text-sm">{notice}</div>}
-      {acceptedFlagsError && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">「已接受」记录读取失败,已接受的提醒可能显示不准:{acceptedFlagsError}</div>}
 
       {groups.length > 1 && (
         <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
@@ -354,7 +303,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   </div>
                 )}
 
-                <QualityFlagsBlock o={o} onAccept={(c) => void acceptFlag(o.id, c)} busy={busy === o.id} />
+                <QualityFlagsBlock o={o} />
 
                 {!autoChecklistReady(o) && (
                   <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
@@ -503,22 +452,13 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
             )}
 
             {qualityFlagsOf(confirming).length > 0 && (
-              <div className="mb-3 space-y-1">
-                {qualityFlagsOf(confirming).filter(f => isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category)).map((f, i) => (
-                  <p key={`accepted-${i}`} className="text-sm text-slate-500">
-                    已接受({acceptedDateOf(confirming, f.category)}) · {QUALITY_FLAG_LABEL[f.category]?.replace('⚠️ ', '') ?? '品控提示'}
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                {qualityFlagsOf(confirming).map((f, i) => (
+                  <p key={i} className="text-sm text-amber-800">
+                    <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+                    <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
                   </p>
                 ))}
-                {qualityFlagsOf(confirming).some(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category))) && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
-                    {qualityFlagsOf(confirming).filter(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category))).map((f, i) => (
-                      <p key={i} className="text-sm text-amber-800">
-                        <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-                        <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
-                      </p>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 
@@ -529,10 +469,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 return (
                   <div className="mb-4">
                     <OneClickConfirm
-                      itemLabels={REEL_HUMAN_CHECK_KEYS.map(k => HUMAN_CHECK_LABEL[k])}
+                      itemLabels={REEL_HUMAN_CHECK_KEYS_V2.map(k => HUMAN_CHECK_LABEL[k])}
                       sourceUrl={defaultFactSourceRef(confirming.fact_source_url)}
                       busy={busy === confirming.id}
-                      onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(checklistDraft)) })}
+                      onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(markListened(checklistDraft))) })}
                       onExpand={() => setShowDetails(true)}
                     />
                   </div>
@@ -555,10 +495,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址:已按这条片的链接预填,请确认这个页面确实支持片里的价格/天数/日期,不是就改成对应产品页。点「全部标为通过」前请先逐项看过。</p>
               <button
                 type="button"
-                onClick={() => setChecklistDraft(prev => Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...prev[key], outcome: 'PASS' }])) as ChecklistDraft)}
+                onClick={() => setChecklistDraft(prev => allPass(prev))}
                 className="px-3 h-8 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
-              >{REEL_HUMAN_CHECK_KEYS.length} 项全部标为通过</button>
-              {REEL_HUMAN_CHECK_KEYS.map(key => (
+              >{REEL_HUMAN_CHECK_KEYS_V2.length - MANUAL_ONLY_KEYS.length} 项全部标为通过（“已听声音”需单独勾）</button>
+              {REEL_HUMAN_CHECK_KEYS_V2.map(key => (
                 <div key={key} className="rounded-lg border border-slate-200 p-3">
                   <p className="text-sm font-medium text-slate-800">{HUMAN_CHECK_LABEL[key]}</p>
                   <div className="mt-2 flex gap-4 text-xs">
@@ -608,7 +548,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               {(showDetails || !gateOf(confirming).oneClick) && (
                 <button
                   onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
-                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS.some(key => checklistDraft[key].outcome !== 'PASS')}
+                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS_V2.some(key => checklistDraft[key].outcome !== 'PASS')}
                   className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
                 >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
               )}

@@ -1,7 +1,7 @@
-import { REEL_HUMAN_CHECK_KEYS, type ContentCheckItemKey, type ContentCheckItemResult } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V2, type ContentCheckItemKey, type ContentCheckItemResult } from '@/lib/social/content-review'
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from '@/lib/factory/constants'
 
-// One-click reject reasons. Keys must all be members of REEL_HUMAN_CHECK_KEYS.
+// One-click reject reasons. Keys must all be members of REEL_HUMAN_CHECK_KEYS_V2.
 export const REJECT_REASON_LABEL: Partial<Record<ContentCheckItemKey, string>> = {
   subtitle_short_and_large: '字幕太长或太小,看不清',
   asset_provenance_labeled: '素材来源没标注',
@@ -11,6 +11,7 @@ export const REJECT_REASON_LABEL: Partial<Record<ContentCheckItemKey, string>> =
   safe_zone_text_in_bounds: '文字被平台界面挡住',
   logo_watermark_present: 'Logo 不对或不完整',
   asset_provenance_matches_claim_context: '画面和说的不是一回事(城市/地标/产品)',
+  bgm_listened_no_vocals: '背景音乐里有人声',
 }
 
 export const REJECT_REASON_KEYS = Object.keys(REJECT_REASON_LABEL) as ContentCheckItemKey[]
@@ -29,7 +30,7 @@ export function buildQualityRejectPayload(
   const labels = picked.map((key) => REJECT_REASON_LABEL[key] ?? key).join('；')
   const feedback = text ? `${labels}。补充：${text}` : labels
 
-  const checklist_human: ContentCheckItemResult[] = REEL_HUMAN_CHECK_KEYS.map((key) =>
+  const checklist_human: ContentCheckItemResult[] = REEL_HUMAN_CHECK_KEYS_V2.map((key) =>
     picked.includes(key)
       ? { key, judge: 'HUMAN', outcome: 'FAIL', detail: text || REJECT_REASON_LABEL[key] || key, source_ref: null }
       : { key, judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: null },
