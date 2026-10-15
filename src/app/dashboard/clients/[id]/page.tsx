@@ -684,6 +684,14 @@ export default function ClientDetailPage() {
                   badge="in_house"
                 />
               )}
+              {industryFeatureFlags(client?.industry).business_calculator && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/business-calculator`}
+                  title="经营测算 · 内部"
+                  desc="手填广告、线索价、转化率、价格和成本，算年度利润；可存多个场景对比。仅内部模拟。"
+                  badge="in_house"
+                />
+              )}
               {industryFeatureFlags(client?.industry).projects && (
                 <ToolCard
                   href={`/dashboard/clients/${clientId}/projects`}
