@@ -16,6 +16,8 @@ export type WatchCode =
   | 'reconcile_deviation'      // 本周对账：落后或超出
   | 'reconcile_blind'          // 本周对账：看不清（没读到 / 没接通）
   | 'plan_structure_unreadable' // 已批准的计划里，推广结构读不出来（自动执行依据不了它）
+  | 'daily_plan_gap'            // 未来 7 天，每日计划里排好草稿的条数少于推广计划要求的条数
+  | 'daily_plan_unreadable'     // 读不到每日计划（读库失败），没法核对条数
 
 export interface WatchFinding {
   code: WatchCode

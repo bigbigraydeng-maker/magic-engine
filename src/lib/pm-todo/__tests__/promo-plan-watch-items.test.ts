@@ -137,6 +137,20 @@ describe('同一件事连着出现：前 3 天每天提醒，之后只在周日'
   })
 })
 
+describe('读不到每日计划是我们这边的欠账，不进 PM 的清单', () => {
+  it('daily_plan_unreadable 走 promo_plan_watch_broken，不并进 promo_plan_watch', async () => {
+    const out = await run([okRow(receipt({ items: [
+      item(),
+      item({ code: 'daily_plan_unreadable', what: '每日计划这次读不出来，没法核对条数。', how: '这条不用你动手，是我们这边的欠账。' }),
+    ] }))])
+    expect(out.filter(i => i.kind === 'promo_plan_watch')).toHaveLength(1)
+    const broken = out.filter(i => i.kind === 'promo_plan_watch_broken')
+    expect(broken).toHaveLength(1)
+    expect(broken[0].what).toContain('读不出来')
+    expect(out.find(i => i.kind === 'promo_plan_watch')?.what).not.toContain('读不出来')
+  })
+})
+
 describe('登记与护栏', () => {
   it('两种待办都登记了车道：要 PM 拍板的进 decide，检查自己没跑成的进 dev；都不会被探活丢掉', () => {
     expect(LANE_OF_KIND.promo_plan_watch).toBe('decide')

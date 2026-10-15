@@ -19,6 +19,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MarketingPlan } from '../types'
 import { buildPromoBoard } from './board'
 import { detectWatchFindings, type WatchCode, type WatchFinding } from './daily-watch'
+import { loadDailyPlanSnapshots, type DailyPlanRead } from './daily-plan-read'
+import { detectSlotGaps } from './slot-gaps'
+import { DEFAULT_PROMO_PLAYBOOK } from './playbooks'
+import { readPromoSpec } from './spec'
 
 /** cron_run_logs 里登记的任务名。 */
 export const PROMO_WATCH_JOB = 'promo-plan-daily-watch'
@@ -137,6 +141,15 @@ export async function runPromoPlanWatch(
   const sources: WatchItemSource[] = []
   const failures: WatchPlanFailure[] = []
   let status: WatchReceipt['status'] = 'ok'
+  // 每日计划按客户缓存：同一客户有多份推广计划时，一轮只读一次 social_plans
+  const dailyPlanReads = new Map<string, Promise<DailyPlanRead>>()
+  const readDailyPlans = (clientId: string): Promise<DailyPlanRead> => {
+    const cached = dailyPlanReads.get(clientId)
+    if (cached) return cached
+    const fresh = loadDailyPlanSnapshots(supabase, clientId).catch((err): DailyPlanRead => ({ status: 'read_failed', error: messageOf(err) }))
+    dailyPlanReads.set(clientId, fresh)
+    return fresh
+  }
 
   // 顺序处理，不并发。
   for (const plan of plans) {
@@ -144,6 +157,13 @@ export async function runPromoPlanWatch(
     try {
       const board = await buildPromoBoard(plan, now)
       const findings = detectWatchFindings(board, { title })
+      // 已批准 + 已开始 + 时区已知 → 再核对「未来 7 天每日计划里排好草稿的条数够不够」（草稿 / 未开始 / 时区未知不查）
+      if (plan.status === 'approved' && board.spec_valid && board.timezone_known && board.today !== null && board.reconcile !== null && board.reconcile.week_index !== null) {
+        const spec = readPromoSpec(plan.plan_data)
+        if (spec) {
+          findings.push(...detectSlotGaps({ title, today: board.today, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read: await readDailyPlans(plan.client_id) }))
+        }
+      }
       for (const finding of findings) {
         sources.push({
           client_id: plan.client_id,
