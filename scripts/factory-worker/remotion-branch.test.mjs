@@ -852,6 +852,15 @@ describe('music vocal gate', () => {
     expect(deps.renderFn).not.toHaveBeenCalled()
   })
 
+  it('production wiring: with NO injected gate the shipped registry blocks unregistered music before render', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env, { musicVocalGateFn: undefined })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/音乐人声检查没过.*MUSIC_VOCAL_UNREGISTERED/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
   it('does not run the gate when the order has no music', async () => {
     const env = makeEnv()
     const deps = makeDeps(env)

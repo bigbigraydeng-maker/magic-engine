@@ -179,3 +179,17 @@ export function assertBgmFileVocalClear(path, registryPath, { label = '', readFi
   const sha256 = createHash('sha256').update(readFileFn(path)).digest('hex')
   return assertMusicVocalClear({ registry, sha256, startSec: 0, durationSec: LEGACY_BGM_WINDOW_SEC, marginSec: 0, label })
 }
+
+// Legacy `assemble` rule in one testable place: a file BGM must be registered vocal-free; a
+// mood-only request lets make_promo pick a track we cannot see, so it is refused; no music and
+// no mood means make_promo renders without a music bed (verified in make_promo.py), so it passes.
+export function assertLegacyBgmVocalGate({ bgm, musicMood, registryPath, readFileFn = readFileSync }) {
+  if (bgm) return assertBgmFileVocalClear(bgm, registryPath, { label: 'legacy', readFileFn })
+  if (musicMood) {
+    throw new MusicVocalGateError(
+      'MUSIC_VOCAL_UNREGISTERED',
+      'music_mood 由出片程序自选曲，选中的文件无法在出片前核验人声；请改成指定曲目并先登记',
+    )
+  }
+  return null
+}

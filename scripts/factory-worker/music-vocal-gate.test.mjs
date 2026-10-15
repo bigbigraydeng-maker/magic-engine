@@ -9,6 +9,7 @@ import {
   LEGACY_BGM_WINDOW_SEC,
   MusicVocalGateError,
   assertBgmFileVocalClear,
+  assertLegacyBgmVocalGate,
   assertMusicVocalClear,
   loadMusicVocalRegistry,
   parseMusicVocalRegistry,
@@ -213,5 +214,26 @@ describe('assertBgmFileVocalClear (legacy / recipe paths)', () => {
     expect(() => assertBgmFileVocalClear('/m.mp3', '/r.json', { readFileFn: read('[]') })).toThrow(/未登记/)
     expect(() => assertBgmFileVocalClear('/m.mp3', '/r.json', { readFileFn: read(reg({ verdict: 'present', signedBy: 'auto-scan' })) })).toThrow(/含人声/)
     expect(() => assertBgmFileVocalClear('/m.mp3', '/r.json', { readFileFn: read('not json') })).toThrow(/解析失败/)
+  })
+})
+
+describe('assertLegacyBgmVocalGate (legacy assemble rule)', () => {
+  const sha = createHash('sha256').update('bgm-bytes').digest('hex')
+  const regText = (verdict, extra = {}) => JSON.stringify([{ sha256: sha, name: 'bgm', verdict, signedBy: verdict === 'present' ? 'auto-scan' : 'human:Ray', signedAt: '2026-10-16T00:00:00.000Z', evidence: 'doc:x', ...extra }])
+  const read = (text) => (p) => (String(p).endsWith('.json') ? text : Buffer.from('bgm-bytes'))
+  it('unregistered file BGM is refused', () => {
+    expect(() => assertLegacyBgmVocalGate({ bgm: '/m.mp3', musicMood: null, registryPath: '/r.json', readFileFn: read('[]') })).toThrow(/未登记/)
+  })
+  it('vocal file BGM is refused', () => {
+    expect(() => assertLegacyBgmVocalGate({ bgm: '/m.mp3', musicMood: null, registryPath: '/r.json', readFileFn: read(regText('present')) })).toThrow(/含人声/)
+  })
+  it('registered vocal-free file BGM passes', () => {
+    expect(assertLegacyBgmVocalGate({ bgm: '/m.mp3', musicMood: null, registryPath: '/r.json', readFileFn: read(regText('none')) }).verdict).toBe('none')
+  })
+  it('mood-only request (renderer picks the track) is refused', () => {
+    expect(() => assertLegacyBgmVocalGate({ bgm: null, musicMood: 'calm', registryPath: '/r.json', readFileFn: read(regText('none')) })).toThrow(/music_mood/)
+  })
+  it('no music and no mood passes (make_promo renders without a music bed)', () => {
+    expect(assertLegacyBgmVocalGate({ bgm: null, musicMood: null, registryPath: '/r.json' })).toBeNull()
   })
 })
