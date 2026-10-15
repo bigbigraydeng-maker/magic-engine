@@ -6,9 +6,17 @@ import {
 } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import {
+  MusicVocalGateError,
+  assertMusicVocalClear,
+  loadMusicVocalRegistry,
+  sha256File,
+  usedWindowFromProps,
+} from './music-vocal-gate.mjs'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
 export const REMOTION_ENGINE_DIR = join(import.meta.dirname, 'engines', 'remotion')
+export const MUSIC_VOCAL_REGISTRY_PATH = join(REMOTION_ENGINE_DIR, 'catalog', 'music-vocals.json')
 
 /** Non-retryable order error: the server must not hand this order back to us. */
 export class RemotionOrderError extends Error {
@@ -354,6 +362,15 @@ export function classifyStageError(e) {
   return 'unreadable'
 }
 
+// Vocal-free gate on the STAGED music file (the exact bytes that get rendered).
+// Fail-closed: unregistered, vocal, or window-not-covered music never renders.
+export async function defaultMusicVocalGate({ stagedPath, props, totalFrames, fps, label, registryPath = MUSIC_VOCAL_REGISTRY_PATH }) {
+  const registry = loadMusicVocalRegistry(registryPath)
+  const sha256 = await sha256File(stagedPath)
+  const { startSec, durationSec } = usedWindowFromProps({ musicStartSec: props.musicStartSec, totalFrames, fps })
+  return assertMusicVocalClear({ registry, sha256, startSec, durationSec, label })
+}
+
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
   const hasLogo = typeof props.logoFile === 'string'
@@ -677,6 +694,18 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath, musicRoot, musicFolder: musicSource ? musicSource.folder : '' })
     hb.assertAlive()
 
+    let vocalGate = null
+    if (props.musicFile) {
+      const gateFn = deps.musicVocalGateFn ?? defaultMusicVocalGate
+      try {
+        vocalGate = await gateFn({ stagedPath: join(stageDir, props.musicFile), props, totalFrames, fps: eng.FPS, label: props.musicFile })
+      } catch (e) {
+        const reason = e instanceof MusicVocalGateError ? `${e.code}: ${e.message}` : `检查本身出错：${e.message}`
+        throw new RemotionOrderError('音乐人声检查没过（出片已拦下）：' + reason)
+      }
+      hb.assertAlive()
+    }
+
     const propsFile = join(root, 'props.json')
     writeFileSync(propsFile, JSON.stringify(props, null, 2))
     const finalPath = join(outDir, 'final.mp4')
@@ -750,6 +779,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
           ? { source: 'catalog', id: musicSource.id, folder: musicSource.folder, file: musicSource.file, status: musicSource.status }
           : (props.musicFile ? { source: 'client_library', file: props.musicFile } : null),
         props,
+        music_vocal_gate: vocalGate,
         recipe_gaps: recipeGaps,
         render: { attempts, elapsed_s },
       }, null, 2),
