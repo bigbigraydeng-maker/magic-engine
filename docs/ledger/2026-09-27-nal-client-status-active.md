@@ -1,7 +1,7 @@
 ---
 id: 2026-09-27-nal-client-status-active
 title: NAL 在库里被标成「潜在客户」，被 9 个定时任务静默跳过——PM 授权改成正式客户，已改
-status: done
+status: verified
 owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
@@ -9,8 +9,9 @@ done_on: 2026-09-27
 done_ref: commit:4b3e958a
 verify_by: 2026-09-29
 verify_how: 跑 `select client_status from clients where id='4ae76381-cd45-43bd-85cd-98cfd7604007'` 必须是 active。再看 NAL 有没有进那几个每周任务：`select job_name, started_at from cron_run_logs where job_name in ('keyword-snapshots-weekly','ai-tracker-weekly','site-audit-weekly','goal-current-value-refresh') order by started_at desc limit 8`，然后确认这几次运行的处理清单里含 NAL。另外查 `select current_value, current_value_fetched_at from goals where client_id='4ae76381-...' and status='active'`——不再是 null 才算真通
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-15
+check_note: client_status=active；关键词快照 10-12 写入 NAL；目标当前值 171（10-14 刷新）
+verified_ref: doc:docs/ledger/evidence/2026-09-27-nal-client-status-active--2026-10-15.md
 ---
 **PM 2026-09-27 授权，已执行：`clients.client_status` 由 `prospect` 改成 `active`，1 行。** PM 原话「改 / NAL 现在也是正式客户」。
 
