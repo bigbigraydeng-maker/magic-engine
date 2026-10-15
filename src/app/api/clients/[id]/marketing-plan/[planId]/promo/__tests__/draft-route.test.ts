@@ -44,7 +44,17 @@ const req = (body: unknown) =>
 const draftFacts = () => ({
   today: '2026-11-12',
   insights_as_of: '2026-11-11T00:00:00Z',
-  headroom: { ok: false, reason: 'no_cap' },
+  headroom: { ok: false as const, reason: 'no_cap' },
+  account_delivering_minor: null,
+  account_cap_minor: null,
+  committed_minor: 0,
+  daily: null,
+  audiences: null,
+  audiences_complete: null,
+  approved_creatives: null,
+  budget_share_of_headroom: 0.5,
+  min_audience_size: 1000,
+  max_creatives: 3,
 })
 
 beforeEach(() => {
