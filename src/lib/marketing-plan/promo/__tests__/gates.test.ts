@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { blockers, firstPhase, unverified, worstLight, type GateKey } from '../gates'
 import { baseSpec, evaluateApproval, evaluatePhaseGates, goodFacts } from './fixtures'
 import type { PromoSpec } from '../spec'
+import { promoContentHash } from '../content-hash'
 
 const verifiedAll = (): PromoSpec => baseSpec({
   checks: (['landing.item_live', 'content.wording_permission'] as GateKey[]).map(k => ({
@@ -141,5 +142,93 @@ describe('worstLight / blockers / unverified', () => {
     const r = evaluatePhaseGates(baseSpec(), baseSpec().phases[0], goodFacts({ daily_plan_coverage_days: null }))
     expect(blockers(r).every(b => b.hard)).toBe(true)
     expect(unverified(r).some(u => u.key === 'social.cadence_scheduled')).toBe(true)
+  })
+})
+
+describe('批准前评估所有含广告的阶段', () => {
+  // 把 baseSpec 里已有的 p2 改成含广告步骤的阶段，并指定开始日期（NOW=2026-10-30，新鲜度 7 天）
+  const withAdsPhase = (startDate: string): PromoSpec => {
+    const s = structuredClone(verifiedAll())
+    // 第一阶段只留社媒步骤，让红灯只可能来自 p2
+    s.phases[0].steps = s.phases[0].steps.filter(st => st.kind === 'social_cadence')
+    const p2 = s.phases.find(p => p.id === 'p2')!
+    p2.start_date = startDate
+    p2.steps = [{
+      id: 'p2-ads', kind: 'ads_campaign', settings: {
+        ad_account_id: 'act_1', daily_budget_cents: 1000, audience_ref: 'a',
+        creative_refs: ['vid-1'], placements: [], paused_ranges: [],
+      },
+    }]
+    return s
+  }
+
+  it('a. 第一阶段只有社媒、p2 有广告且到期、素材未批准 → 不能批准，blockers 里有 p2', () => {
+    const s = withAdsPhase('2026-11-02')
+    const f = goodFacts({ config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'candidate' }] } })
+    const v = evaluateApproval(s, f)
+    expect(v.can_approve).toBe(false)
+    expect(v.blockers.some(b => b.phase_id === 'p2')).toBe(true)
+  })
+
+  it('b. 同上但 p2 在三个月后开始 → 不阻塞，进 deferred_blockers', () => {
+    const s = withAdsPhase('2026-12-01')
+    const f = goodFacts({ config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'candidate' }] } })
+    const v = evaluateApproval(s, f)
+    expect(v.blockers.length).toBe(0)
+    expect(v.can_approve).toBe(true)
+    expect(v.deferred_blockers.some(b => b.phase_id === 'p2')).toBe(true)
+  })
+
+  it('c. p2 到期且素材已批准、账户快照很旧（灰）→ 不能批准', () => {
+    const s = withAdsPhase('2026-11-02')
+    const f = goodFacts({
+      config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'approved' }] },
+      snapshots: { act_1: { account_status: 1, captured_at: '2026-09-01T00:00:00Z' } },
+    })
+    const v = evaluateApproval(s, f)
+    expect(v.can_approve).toBe(false)
+    expect(v.blockers.some(b => b.phase_id === 'p2' && b.key === 'ads.account_usable')).toBe(true)
+  })
+
+  it('d. results 里每条都带 phase_id；两个阶段都有广告时同一个 key 各出现一次', () => {
+    const s = withAdsPhase('2026-11-02')
+    // 给第一阶段补回一个广告步骤，让两个阶段都跑广告硬门
+    s.phases[0].steps.push({ id: 'p1-ads', kind: 'ads_campaign', settings: {
+      ad_account_id: 'act_1', daily_budget_cents: 1000, audience_ref: 'a', creative_refs: ['vid-1'], placements: [], paused_ranges: [] } })
+    const v = evaluateApproval(s, goodFacts())
+    expect(v.results.every(r => typeof r.phase_id === 'string')).toBe(true)
+    const phases = v.results.filter(r => r.key === 'ads.account_usable').map(r => r.phase_id)
+    expect(phases).toContain('p1')
+    expect(phases).toContain('p2')
+  })
+})
+
+describe('人工核实绑内容版本', () => {
+  const rec = (hash?: string) => ({
+    phase_id: 'p1', check_key: 'landing.item_live', verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '',
+    ...(hash === undefined ? {} : { content_hash: hash }),
+  })
+  const landing = (spec: PromoSpec, records: ReturnType<typeof rec>[]) =>
+    evaluatePhaseGates(spec, spec.phases[0], goodFacts({ manual_checks: records })).find(r => r.key === 'landing.item_live')!
+
+  it('核实时的内容指纹 = 现在的指纹 → 绿', () => {
+    const spec = baseSpec()
+    expect(landing(spec, [rec(promoContentHash(spec))]).light).toBe('green')
+  })
+  it('内容在核实之后改过（指纹对不上）→ 灰，写明要重新核实', () => {
+    const spec = baseSpec()
+    const r = landing(spec, [rec('0000000000000000')])
+    expect(r.light).toBe('gray')
+    expect(r.reason).toContain('需要重新核实')
+  })
+  it('旧核实记录没有内容指纹 → 灰（fail-closed）', () => {
+    const r = landing(baseSpec(), [rec()])
+    expect(r.light).toBe('gray')
+    expect(r.reason).toContain('需要重新核实')
+  })
+  it('同一项有新旧两条：只认指纹对得上的那条', () => {
+    const spec = baseSpec()
+    const stale = { ...rec('0000000000000000'), verified_at: '2026-10-29T00:00:00Z' }
+    expect(landing(spec, [stale, rec(promoContentHash(spec))]).light).toBe('green')
   })
 })

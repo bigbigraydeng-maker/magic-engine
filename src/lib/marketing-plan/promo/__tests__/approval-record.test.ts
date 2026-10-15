@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { describeApprovalRecord } from '../approval-record'
+import { baseSpec } from './fixtures'
+import { promoContentHash } from '../content-hash'
 
 const PROMO = { schema: 'promo_v1' }
 const receipt = (over: Record<string, unknown> = {}) => ({
@@ -84,5 +86,31 @@ describe('记录残缺或被手改时不崩', () => {
   })
   it('时间不是合法日期 → 写「没有记录」', () => {
     expect(describeApprovalRecord(plan('approved', receipt({ approved_at: 'not-a-date' })))!.tone).toBe('normal')
+  })
+})
+
+describe('内容版本', () => {
+  const withPromo = (r?: unknown) => plan('approved', r, { plan_data: { promo: baseSpec() } })
+  it('回执内容版本和现在一致 → 正常，说明批准的就是这一版', () => {
+    const v = describeApprovalRecord(withPromo(receipt({ content_hash: promoContentHash(baseSpec()) })))!
+    expect(v.tone).toBe('normal')
+    expect(v.lines.join('\n')).toContain('批准的就是现在这一版内容')
+  })
+  it('回执内容版本对不上 → 标红，说明批准后内容被改过', () => {
+    const v = describeApprovalRecord(withPromo(receipt({ content_hash: 'other-hash' })))!
+    expect(v.tone).toBe('alert')
+    expect(v.lines.join('\n')).toContain('批准的不是现在这一版内容')
+  })
+  it('旧回执没有内容版本 → 正常，说明没有记录内容版本', () => {
+    const v = describeApprovalRecord(withPromo(receipt()))!
+    expect(v.tone).toBe('normal')
+    expect(v.lines.join('\n')).toContain('没有记录内容版本')
+  })
+  it('没有推广结构 → 不出现内容版本行', () => {
+    const v = describeApprovalRecord(plan('approved', receipt({ content_hash: 'other-hash' })))!
+    const text = v.lines.join('\n')
+    expect(text).not.toContain('批准的就是现在这一版内容')
+    expect(text).not.toContain('批准的不是现在这一版内容')
+    expect(text).not.toContain('没有记录内容版本')
   })
 })

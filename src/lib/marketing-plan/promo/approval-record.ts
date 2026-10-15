@@ -5,7 +5,8 @@
  */
 
 import type { MarketingPlan } from '../types'
-import { hasPromoField } from './spec'
+import { hasPromoField, readPromoSpec } from './spec'
+import { promoContentHash } from './content-hash'
 import { LIGHT_META } from './labels'
 import type { Light } from './gates'
 
@@ -83,13 +84,31 @@ export function describeApprovalRecord(
 
   const snapshot = isRecord(receipt.gate_snapshot) ? receipt.gate_snapshot : null
   const snapshotText = snapshot ? snapshotLine(snapshot) : null
+
+  // 内容版本：批准时的内容指纹和现在的内容指纹对不上 → 批准后内容被改过，标红
+  const approvedHash = asString(receipt.content_hash)
+  const spec = readPromoSpec(plan.plan_data)
+  let contentText: string | null = null
+  let contentChanged = false
+  if (spec !== null) {
+    if (approvedHash === null) {
+      contentText = '这份计划的批准没有记录内容版本（较早的计划）。'
+    } else if (approvedHash === promoContentHash(spec)) {
+      contentText = '批准的就是现在这一版内容。'
+    } else {
+      contentText = '⚠️ 批准的不是现在这一版内容：批准之后计划内容被改过。请退回草稿后重新批准。'
+      contentChanged = true
+    }
+  }
+
   return {
-    tone: 'normal',
+    tone: contentChanged ? 'alert' : 'normal',
     headline: '批准记录',
     lines: [
       `批准人：${asString(receipt.approved_by) ?? '没有记录'}`,
       `批准时间：${whenOf(receipt.approved_at)}`,
       ...(snapshotText ? [snapshotText] : []),
+      ...(contentText ? [contentText] : []),
       dispatchLine(receipt, snapshot !== null),
     ],
   }

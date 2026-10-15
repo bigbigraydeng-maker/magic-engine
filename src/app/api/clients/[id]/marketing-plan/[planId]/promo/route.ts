@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
 import { loadGoal, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
@@ -49,10 +49,10 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function PUT(req: NextRequest, ctx: Ctx) {
-  const access = await requirePaidClientAccess(ctx.params.id)
+  const access = await requirePlanApproverAccess(ctx.params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
-    const body = (await req.json().catch(() => null)) as { promo?: unknown } | null
+    const body = (await req.json().catch(() => null)) as { promo?: unknown; expected_updated_at?: string } | null
     const parsed = parsePromoSpec(body?.promo)
     if (!parsed.ok) return NextResponse.json({ success: false, error: '推广计划结构不合法', issues: parsed.issues }, { status: 400 })
     // 人工核实记录只能由 /promo/verify 写入 generation_meta；保存请求里带的 checks 一律丢弃
@@ -60,6 +60,10 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
 
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
+    // 乐观锁：前端带上读到的 updated_at，若已被别处改过就拒绝，避免覆盖别人的修改
+    if (typeof body?.expected_updated_at === 'string' && body.expected_updated_at !== '' && body.expected_updated_at !== plan.updated_at) {
+      return NextResponse.json({ success: false, error: '这份计划刚刚在别处被改过，这次保存没有生效。请刷新页面后再试。' }, { status: 409 })
+    }
     if (isPlanContentLocked(plan.status)) {
       return NextResponse.json({ success: false, error: PLAN_CONTENT_LOCKED_MESSAGE }, { status: 409 })
     }
@@ -93,9 +97,13 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       .eq('id', ctx.params.planId)
       .eq('client_id', ctx.params.id)
       .eq('status', 'draft') // 保存瞬间计划仍是草稿（防和批准并发）
+      .eq('updated_at', plan.updated_at) // 读完到写入之间被别处改过 → 不覆盖
       .select('*')
-      .single()
+      .maybeSingle()
     if (error) throw error
+    if (!data) {
+      return NextResponse.json({ success: false, error: '这份计划刚刚在别处被改过，这次保存没有生效。请刷新页面后再试。' }, { status: 409 })
+    }
     return NextResponse.json({ success: true, plan: data })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

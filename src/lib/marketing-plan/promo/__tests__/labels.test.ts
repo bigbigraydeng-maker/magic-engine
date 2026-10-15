@@ -32,7 +32,7 @@ describe('approveButtonState', () => {
     expect(s.hint).toContain('广告不会自动投放')
   })
   it('全部通过 → 可以批，且明说广告不会自动投放', () => {
-    const approval = { can_approve: true, blockers: [], unverified: [], results: [], note: null }
+    const approval = { can_approve: true, blockers: [], unverified: [], results: [], per_phase: [], deferred_blockers: [], note: null }
     const s = approveButtonState({ plan_status: 'draft', approval, spec_valid: true })
     expect(s).toMatchObject({ visible: true, disabled: false, label: '批准计划' })
     expect(s.hint).toContain('广告不会自动投放')
@@ -50,6 +50,11 @@ describe('continueButtonVisible', () => {
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('behind')] }, reviewed_this_window: false })).toBe(false)
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('over')] }, reviewed_this_window: false })).toBe(false)
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('on_track')] }, reviewed_this_window: false })).toBe(true)
+  })
+  it('批准之后内容被改过 / 到期阶段硬门没过 → 不显示（不能对旧内容留下"没意见"）', () => {
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: false, content_changed: true })).toBe(false)
+    const approval = { can_approve: false, blockers: [{} as never], unverified: [], results: [], per_phase: [], deferred_blockers: [], note: null }
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: false, approval })).toBe(false)
   })
   it('点过了 / 草稿 / 没有对账 → 不显示', () => {
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: true })).toBe(false)

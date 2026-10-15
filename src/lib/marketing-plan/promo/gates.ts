@@ -14,6 +14,7 @@
 
 import type { PromoPlaybook, PromoEvidence } from './playbooks'
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
+import { promoContentHash } from './content-hash'
 import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
 
 export type Light = 'green' | 'yellow' | 'red' | 'gray'
@@ -47,6 +48,9 @@ export interface GateResult {
   evidence: PromoEvidence
   /** 取数时间（ISO），人工核实项为核实时间；没有 = null */
   as_of: string | null
+  /** 这条结果属于哪个阶段（批准前评估多阶段时补上） */
+  phase_id?: string
+  phase_name?: string
 }
 
 export interface AccountSnapshotFact {
@@ -172,11 +176,19 @@ function manualChecks(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateRes
     { key: 'content.wording_permission', group: 'content', label: '对外措辞已获客户同意', hard: false,
       how: '把稀缺性 / 截止日等说法发给客户确认，确认后在计划里点「已核实」。' },
   ]
+  // 核实记录绑内容版本：内容一改，旧核实自动失效（content_hash 对不上就不算数）。
+  const currentHash = promoContentHash(spec)
   return defs.map(d => {
-    const rec = f.manual_checks // 只信服务端写入的核实记录（spec.checks 是客户端可写的，不参与判定）
+    const all = f.manual_checks // 只信服务端写入的核实记录（spec.checks 是客户端可写的，不参与判定）
       .filter(c => c.phase_id === phase.id && c.check_key === d.key)
-      .sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
-    if (!rec) return make(d.key, d.group, d.label, d.hard, 'gray', '还没有人核实', d.how)
+    const valid = all.filter(c => c.content_hash === currentHash)
+    const rec = valid.sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
+    if (!rec) {
+      if (all.length > 0) {
+        return make(d.key, d.group, d.label, d.hard, 'gray', '计划内容在核实之后改过（或这条核实没有记录内容版本），需要重新核实', d.how)
+      }
+      return make(d.key, d.group, d.label, d.hard, 'gray', '还没有人核实', d.how)
+    }
     const age = ageDays(rec.verified_at, f.now)
     if (age === null || age > f.playbook.factFreshnessDays * 4) {
       return make(d.key, d.group, d.label, d.hard, 'gray', `核实记录已过期（${rec.verified_at.slice(0, 10)} 由 ${rec.verified_by} 核实）`, d.how, rec.verified_at)
@@ -222,35 +234,88 @@ export function unverified(results: readonly GateResult[]): GateResult[] {
   return results.filter(r => !blockers(results).includes(r) && (r.light === 'gray' || r.light === 'yellow'))
 }
 
-/** 时间最早的阶段 = 「第一阶段」。批准计划时只有它的硬门会阻止批准。 */
+/** 时间最早的阶段 = 「第一阶段」。 */
 export function firstPhase(spec: PromoSpec): PromoPhase {
   return [...spec.phases].sort((a, b) => a.start_date.localeCompare(b.start_date))[0]
+}
+
+/** YYYY-MM-DD 加 n 天（用 Date.UTC 计算，避免依赖 reconcile.ts 造成循环引用）。 */
+function addDaysIso(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  const t = Date.UTC(y, m - 1, d) + n * 86_400_000
+  return new Date(t).toISOString().slice(0, 10)
+}
+
+/**
+ * 批准前要评估的阶段 = 第一阶段 ∪ 所有含广告步骤的阶段。
+ * 按 start_date 升序，按 id 去重。
+ */
+export function approvalPhases(spec: PromoSpec): PromoPhase[] {
+  const first = firstPhase(spec)
+  const picked = spec.phases.filter(p => p.id === first.id || phaseAdsSteps(p).length > 0)
+  const seen = new Set<string>()
+  return picked
+    .sort((a, b) => a.start_date.localeCompare(b.start_date))
+    .filter(p => (seen.has(p.id) ? false : (seen.add(p.id), true)))
+}
+
+export interface PhaseVerdict {
+  phase_id: string
+  phase_name: string
+  /** 是否到期：第一阶段，或 start_date <= today + factFreshnessDays。只有到期阶段阻塞批准。 */
+  due: boolean
+  results: GateResult[]
 }
 
 export interface ApprovalVerdict {
   can_approve: boolean
   blockers: GateResult[]
   unverified: GateResult[]
-  /** 第一阶段的全部检查结果（含绿色通过项），供批准回执留底 */
+  /** 所有被评估阶段的全部检查结果（含绿色通过项），供批准回执留底 */
   results: GateResult[]
+  /** 每个被评估阶段一条 */
+  per_phase: PhaseVerdict[]
+  /** 未到期阶段里的硬门红 / 灰项（已带 phase_id / phase_name），开始前必须补齐 */
+  deferred_blockers: GateResult[]
   /** 计划里有广告预算却没有任何广告步骤等情况下的说明 */
   note: string | null
 }
 
 /**
- * 批准计划前的检查：只看第一阶段的硬门。
- * 后面阶段的检查清单只在每周对账页亮灯提醒——不阻止、也不是授权动作
- * （真正花钱仍要 PM 在广告审批页再点一次）。
+ * 批准计划前的检查：评估第一阶段 ∪ 所有含广告步骤的阶段。
+ *
+ * 但**只有「到期阶段」阻塞批准**：一个阶段若是第一阶段，或 start_date <= today + factFreshnessDays 天，
+ * 就算到期。更晚的阶段不阻塞，它的硬门红 / 灰项放进 deferred_blockers（开始前必须补齐）——
+ * 三个月后的素材今天不存在，若让它们阻塞，计划永远批不了。
+ *
+ * 这不是花钱授权：批准只会派出内部待办、广告只建暂停草稿，真正开投仍要 PM 在广告审批页再点一次。
  */
 export function evaluateApproval(spec: PromoSpec, f: GateFacts): ApprovalVerdict {
   const first = firstPhase(spec)
-  const results = evaluatePhaseGates(spec, first, f)
-  const b = blockers(results)
+  const dueLimit = addDaysIso(f.today, f.playbook.factFreshnessDays)
+  const phases = approvalPhases(spec)
+
+  const per_phase: PhaseVerdict[] = phases.map(phase => {
+    // 已结束的阶段（结束日早于今天）不再评估：它的核实早过期，留着只会让后面的周盖章永久卡死
+    const ended = phase.end_date < f.today
+    const due = !ended && (phase.id === first.id || phase.start_date <= dueLimit)
+    const results = evaluatePhaseGates(spec, phase, f).map(r => ({ ...r, phase_id: phase.id, phase_name: phase.name }))
+    return { phase_id: phase.id, phase_name: phase.name, due, results }
+  })
+
+  const results = per_phase.flatMap(p => p.results)
+  const dueResults = per_phase.filter(p => p.due).flatMap(p => p.results)
+  const endedIds = new Set(phases.filter(ph => ph.end_date < f.today).map(ph => ph.id))
+  const deferredResults = per_phase.filter(p => !p.due && !endedIds.has(p.phase_id)).flatMap(p => p.results)
+  const b = blockers(dueResults)
+
   return {
     can_approve: b.length === 0,
     blockers: b,
-    unverified: unverified(results),
+    unverified: unverified(dueResults),
     results,
+    per_phase,
+    deferred_blockers: blockers(deferredResults),
     note: allAdsSteps(spec).length === 0 ? '计划里没有广告步骤，只检查了社媒与内容项。' : null,
   }
 }

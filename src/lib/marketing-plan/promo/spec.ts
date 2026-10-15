@@ -73,6 +73,7 @@ const manualCheck = z.object({
   verified_by: z.string().min(1),
   verified_at: z.string().min(1),
   note: z.string().default(''),
+  content_hash: z.string().optional(),
 })
 
 const phase = z.object({
