@@ -1,12 +1,10 @@
 ---
 id: 2026-10-15-promo-plan-cut2-daily-watch
 title: 推广计划每天自己查一遍，有事推进今日待办（第二刀第一版）
-status: done
+status: decided
 owner: agent
 decided_on: 2026-10-15
 source: session:8aade036
-done_on: 2026-10-15
-done_ref: doc:docs/ledger/2026-10-15-promo-plan-cut2-daily-watch.md
 verify_by: 2026-10-20
 verify_how: 合并并在 Inngest 后台 Sync 之后，看后台任务健康页有 promo-plan-daily-watch 的运行记录；今日待办里有带 what/how/href 的推广计划条目（线上现在没有带推广结构的计划，需要先有一份草稿才会出条目）
 ---
