@@ -33,22 +33,14 @@ describe('promoContentHash', () => {
   it('checks 内容不同 → 同一指纹', () => {
     const spec = baseSpec()
     const withChecks = clone(spec)
-    withChecks.checks = [
-      {
-        id: 'c-1',
-        kind: 'manual',
-        label: '人工核实',
-        status: 'passed',
-        checked_at: '2026-10-30T00:00:00Z',
-      },
-    ] as PromoSpec['checks']
+    withChecks.checks = [{ phase_id: 'p1', check_key: 'landing.item_live', verified_by: 'x@example.com', verified_at: '2026-10-30T00:00:00Z', note: '' }]
     expect(promoContentHash(withChecks)).toBe(promoContentHash(spec))
   })
 
   it('gate_snapshot 不同 → 同一指纹', () => {
     const spec = baseSpec()
     const withSnapshot = clone(spec)
-    withSnapshot.gate_snapshot = { captured_at: '2026-10-30T00:00:00Z', passed: true } as PromoSpec['gate_snapshot']
+    withSnapshot.gate_snapshot = { captured_at: '2026-10-30T00:00:00Z', passed: true }
     expect(promoContentHash(withSnapshot)).toBe(promoContentHash(spec))
   })
 
