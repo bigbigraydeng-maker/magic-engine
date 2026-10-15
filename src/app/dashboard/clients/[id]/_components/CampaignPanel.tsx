@@ -572,7 +572,7 @@ function CampaignCard({
             href={`/dashboard/clients/${clientId}/daily-plan?campaign=${campaign.id}`}
             className="flex items-center justify-between rounded-xl border border-black/[.06] bg-me-ivory px-4 py-3 text-sm font-medium text-me-charcoal/75 transition-colors hover:bg-me-ochre/10 hover:text-me-ochre"
           >
-            <span>📅 每日计划（内容排期审核）</span>
+            <span>📅 社媒日常 · 图文帖子</span>
             <span className="text-me-charcoal/35">→</span>
           </Link>
 
