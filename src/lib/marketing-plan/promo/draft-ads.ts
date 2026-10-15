@@ -33,8 +33,11 @@ export interface AudiencePoolItem {
   ref: string
   name: string | null
   size_lower: number | null
+  /** 现在还有在投广告组挂着它时，最新快照日期；没有 = null */
   last_used_on: string | null
   as_of: string | null
+  /** Meta 的受众子类型（自定义 / 相似 / 视频观看等）；读不到 = null */
+  subtype?: string | null
 }
 
 /** 预算余量：由调用方用 computeLaunchHeadroom 算好传进来。ok:false 表示读不全，不给预算建议 */
@@ -112,6 +115,8 @@ interface WindowCost {
   cost: number | null
   /** 被剔掉的日期（用于 warnings） */
   dropped: string[]
+  /** 剔掉的天数超过一半，这个窗口不可用 */
+  tooDirty: boolean
 }
 
 /** 计算某个窗口的历史单条成本，剔除异常日 */
@@ -129,11 +134,12 @@ function windowCost(daily: DailySpendFact[], today: string, days: number): Windo
     }
   }
 
-  // 再按「追补暴冲」剔除：该日花费 >= 剔除前窗口内日花费中位数 × 2.5
-  const med = median(rows.map((r) => r.spend_cents))
+  // 再按「追补暴冲」剔除：中位数只用「账户状态正常、有花费」的日子算（断投日、零花费日会把中位数拉低，
+  // 把健康日误判成暴冲）；门槛 1.5 倍（手册 §三十三：真实追补日只有设定的 1.6–1.8 倍，2.5 倍抓不住）
+  const med = median(afterStatus.filter(r => r.spend_cents > 0).map(r => r.spend_cents))
   const kept: DailySpendFact[] = []
   for (const row of afterStatus) {
-    if (med > 0 && row.spend_cents >= med * 2.5) {
+    if (med > 0 && row.spend_cents >= med * 1.5) {
       dropped.push(row.date)
     } else {
       kept.push(row)
@@ -147,8 +153,10 @@ function windowCost(daily: DailySpendFact[], today: string, days: number): Windo
     results += row.results
   }
 
-  const cost = results < 20 ? null : spend / results
-  return { days, results, spend, cost, dropped }
+  // 剔掉的天数超过一半 = 窗口太脏，不硬算
+  const tooDirty = rows.length > 0 && dropped.length * 2 > rows.length
+  const cost = results < 20 || tooDirty || spend <= 0 ? null : spend / results
+  return { days, results, spend, cost, dropped, tooDirty }
 }
 
 /** 起草日预算建议 */
@@ -241,7 +249,7 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
       if (w.cost === null) {
         basis.push({
           label: `单条成本（${w.days} 天）`,
-          value: `样本不足（${w.results} 条结果），判不了`,
+          value: w.tooDirty ? `这个窗口里异常日子太多（剔了 ${w.dropped.length} 天），判不了` : `样本不足（${w.results} 条结果），判不了`,
           source: '广告快照',
           as_of: f.insights_as_of,
         })
@@ -258,33 +266,32 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
       }
     }
 
-    // 最近 7 天一条结果都没有 = 账户可能已经停投，历史成本只能参考更早的数据
-    if (w7.results === 0) {
-      warnings.push('最近 7 天这个账户没有结果（可能已停投），单条成本只能参考更早的数据，仅供参考。')
+    // 最近 7 天的真实情况：花钱零结果和停投是两回事，措辞要分开
+    const recent7 = windowBefore(f.daily, f.today, 7)
+    const recentSpend = recent7.reduce((n, r) => n + r.spend_cents, 0)
+    const recentResults = recent7.reduce((n, r) => n + r.results, 0)
+    if (recentResults === 0) {
+      warnings.push(recentSpend > 0
+        ? '最近 7 天这个账户在花钱但一条结果都没有——这比停投更糟，先查原因，历史成本只能当参考。'
+        : '最近 7 天这个账户没有花费也没有结果（可能已停投），单条成本只能参考更早的数据。')
     }
 
-    // 只有最近的有效窗口用来换算
+    // 用的不是最近 7 天的窗口 = 偏松方向，必须明说
     const effective = w7.cost !== null ? w7 : w14.cost !== null ? w14 : w30.cost !== null ? w30 : null
-    if (effective === null || effective.cost === null) {
-      basis.push({
-        label: '结果换算',
-        value: '没有可用的单条成本，没法换算成结果数',
-        source: '广告快照',
-        as_of: f.insights_as_of,
-      })
-    } else {
-      const n = Math.floor(suggested / effective.cost)
-      basis.push({
-        label: '结果换算',
-        value:
-          n === 0
-            ? `按 ${effective.days} 天口径，这个预算不足 1 条结果`
-            : `按 ${effective.days} 天口径，这个预算约等于每天 ${n} 条结果`,
-        source: '广告快照',
-        as_of: f.insights_as_of,
-      })
+    if (effective === null) {
+      basis.push({ label: '成本参考', value: '三个窗口都没有可用的单条成本', source: '广告快照', as_of: f.insights_as_of })
+    } else if (effective.days !== 7) {
+      warnings.push(`最近 7 天样本不足或异常日太多，单条成本用的是 ${effective.days} 天的数据，可能偏松（比现在的真实成本好看）。`)
     }
+    basis.push({
+      label: '成本口径',
+      value: '这里的「结果」是留资数加私信开聊数的合计，且包含养受众、视频观看这类不出结果的系列的花费；单条成本只作参考，不是对这个预算能出多少结果的预测',
+      source: '广告快照',
+      as_of: f.insights_as_of,
+    })
   }
+
+  warnings.push('预算调整后的前几天有爬坡期，花费和结果会偏低、波动，别拿头几天的数字下结论。')
 
   return { ok: true, value: suggested, basis: basis as [Basis, ...Basis[]] }
 }
@@ -352,8 +359,15 @@ function draftAudience(f: AdsDraftFacts): Suggestion<string> {
     as_of: chosen.as_of,
   })
   basis.push({
-    label: '最近被用过',
-    value: chosen.last_used_on === null ? '没被用过' : chosen.last_used_on,
+    label: '在投广告组还在用',
+    value: chosen.last_used_on === null ? '现在没有在投的广告组挂着它' : `是（快照 ${chosen.last_used_on}）`,
+    source: '受众快照',
+    as_of: chosen.as_of,
+  })
+
+  basis.push({
+    label: '受众类型',
+    value: chosen.subtype ?? '读不到',
     source: '受众快照',
     as_of: chosen.as_of,
   })
@@ -386,6 +400,9 @@ export function draftAdsStep(f: AdsDraftFacts): AdsDraft {
   const warnings: string[] = []
   const daily_budget_cents = draftBudget(f, warnings)
   const audience_ref = draftAudience(f)
+  if (audience_ref.ok) {
+    warnings.push('受众只是按「人数够、在投广告组还挂着」挑的；类型（重定向 / 相似 / 视频观看）和是否匹配这份计划的目标，要你自己确认。人数是下限且可能滞后。')
+  }
   const creative_refs = draftCreatives(f)
   if (f.account_status !== undefined && f.account_status !== null && f.account_status !== 1) {
     warnings.push(`这个广告账户现在不是可投放状态（状态码 ${f.account_status}），批准前的检查会亮红，先处理账户再批。`)

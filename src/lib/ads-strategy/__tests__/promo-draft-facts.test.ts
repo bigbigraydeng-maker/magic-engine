@@ -143,7 +143,7 @@ describe('buildAdsDraftFacts — 正常路径', () => {
     }
   })
 
-  it('last_used_on 取自 adset 历史行', () => {
+  it('last_used_on 只认现在在投的广告组', () => {
     const rows: EntitySnapshotRow[] = [
       mkRow({
         level: 'account',
@@ -160,13 +160,23 @@ describe('buildAdsDraftFacts — 正常路径', () => {
         level: 'adset',
         entity_id: 'as_1',
         included_audience_ids: ['aud_1'],
+        effective_status: 'ACTIVE',
         captured_at: '2026-01-05T00:00:00.000Z',
       }),
       mkRow({
         level: 'adset',
         entity_id: 'as_2',
         included_audience_ids: ['aud_1'],
+        effective_status: 'ACTIVE',
         captured_at: '2026-01-08T00:00:00.000Z',
+      }),
+      // 暂停的广告组不算「还在用」，即使它的抓取日期更新
+      mkRow({
+        level: 'adset',
+        entity_id: 'as_3',
+        included_audience_ids: ['aud_1'],
+        effective_status: 'PAUSED',
+        captured_at: '2026-01-09T00:00:00.000Z',
       }),
     ]
     const f = buildAdsDraftFacts(mkRaw({ snapshots: rows }))
@@ -317,5 +327,43 @@ describe('多账户快照：余量按客户全部账户合计，受众只认选�
     }
     expect(f.account_delivering_minor).toBe(3000)
     expect(f.audiences?.map(a => a.ref)).toEqual(['aud-mine'])
+  })
+})
+
+describe('buildAdsDraftFacts — 余量覆盖与新鲜度（客户全部账户）', () => {
+  const NOW = new Date('2026-01-10T00:00:00.000Z')
+  const campaign = (acct: string, at: string) => mkRow({
+    ad_account_id: acct, level: 'campaign', entity_id: `c-${acct}`, budget_level: 'cbo', daily_budget_minor: 1000,
+    effective_status: 'ACTIVE', captured_at: at, currency: 'USD',
+  })
+  const withOwned = (rows: EntitySnapshotRow[], owned: string[]) =>
+    mkRaw({ now: NOW, snapshots: rows, owned_account_ids: owned, config: { daily_budget_cap_cents: 10000, approved_creatives: [] } })
+
+  it('客户名下某个账户没有系列层快照（共用账户只写账户层）→ headroom ok:false，不把它当成在投 0', () => {
+    const f = buildAdsDraftFacts(withOwned([
+      campaign('act_1', '2026-01-09T12:00:00.000Z'),
+      mkRow({ ad_account_id: 'act_2', level: 'account', entity_id: 'act_2', captured_at: '2026-01-09T12:00:00.000Z' }),
+    ], ['act_1', 'act_2']))
+    expect(f.headroom.ok).toBe(false)
+    if (f.headroom.ok === false) expect(f.headroom.reason).toContain('act_2')
+  })
+  it('某个账户的快照超过 2 天没更新 → headroom ok:false（一个新鲜不能盖住另一个过期）', () => {
+    const f = buildAdsDraftFacts(withOwned([
+      campaign('act_1', '2026-01-09T12:00:00.000Z'),
+      campaign('act_2', '2025-12-01T12:00:00.000Z'),
+    ], ['act_1', 'act_2']))
+    expect(f.headroom.ok).toBe(false)
+    if (f.headroom.ok === false) expect(f.headroom.reason).toContain('没更新')
+  })
+  it('各账户都有系列层快照且够新 → 照常算，取数时间取最旧的那个账户', () => {
+    const f = buildAdsDraftFacts(withOwned([
+      campaign('act_1', '2026-01-09T12:00:00.000Z'),
+      campaign('act_2', '2026-01-08T12:00:00.000Z'),
+    ], ['act_1', 'act_2']))
+    expect(f.headroom.ok).toBe(true)
+    if (f.headroom.ok) {
+      expect(f.headroom.delivering_minor).toBe(2000)
+      expect(f.headroom.as_of).toBe('2026-01-08T12:00:00.000Z')
+    }
   })
 })

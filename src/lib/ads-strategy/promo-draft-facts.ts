@@ -16,6 +16,7 @@ import { accountDayKey } from './account-timezone'
 import { latestSnapshotsAsOf } from './portfolio/diagnostics/loader'
 import { D4_AUDIENCE_FLOOR } from './portfolio/diagnostics/thresholds'
 import { computeLaunchHeadroom } from './launch-budget-headroom'
+import { DELIVERING_STATUSES } from './portfolio/diagnostics/context'
 import type { EntitySnapshotRow } from './portfolio/snapshot'
 import type { AdsDraftFacts, HeadroomFact, DailySpendFact, AudiencePoolItem } from '@/lib/marketing-plan/promo/draft-ads'
 import type { PromoPlaybook } from '@/lib/marketing-plan/promo/playbooks'
@@ -36,6 +37,8 @@ export interface RawDraftInput {
   audience_capture: { complete: boolean; skipped_shared: boolean } | null
   captures_read_failed: boolean
   ad_account_id: string
+  /** 客户名下全部广告账户编号；传了就会逐个核对「有没有系列层快照 / 快照新不新」 */
+  owned_account_ids?: string[]
   committed_minor: number
   committed_all_minor?: number
   budget_share_of_headroom: number
@@ -68,17 +71,17 @@ function accountStatusAsOf(rows: readonly EntitySnapshotRow[], d: string): numbe
   return best === null ? null : best.account_status
 }
 
-/** 在全部历史快照里，找 level==='adset' 且 included_audience_ids 含 ref 的最新一条，取其日期。 */
-function lastUsedOn(rows: readonly EntitySnapshotRow[], ref: string): string | null {
+/** 现在还有「在投的」广告组挂着这个受众吗：只看最新态快照里在投的广告组，取其最新抓取日期；没有 = null。 */
+function lastUsedOn(latestOwn: readonly EntitySnapshotRow[], ref: string): string | null {
   let best: EntitySnapshotRow | null = null
-  for (const r of rows) {
+  for (const r of latestOwn) {
     if (r.level !== 'adset') continue
+    if (!DELIVERING_STATUSES.has(r.effective_status ?? '')) continue
     const ids = r.included_audience_ids
     if (!Array.isArray(ids) || !ids.includes(ref)) continue
     if (best === null || Date.parse(r.captured_at) > Date.parse(best.captured_at)) best = r
   }
-  if (best === null) return null
-  return dayOf(best.captured_at)
+  return best === null ? null : dayOf(best.captured_at)
 }
 
 /** 最新态快照里 captured_at 最大的时间戳；没有则 null。 */
@@ -137,7 +140,8 @@ function buildAudiences(
       ref: r.entity_id,
       name: r.entity_name,
       size_lower: r.audience_count_lower,
-      last_used_on: lastUsedOn(all, r.entity_id),
+      last_used_on: lastUsedOn(latest, r.entity_id),
+      subtype: r.audience_subtype,
       as_of: r.captured_at,
     })
   }
@@ -150,6 +154,52 @@ function resolveAudiencesComplete(raw: RawDraftInput): boolean | null {
   if (raw.audience_capture === null) return null
   if (raw.audience_capture.skipped_shared) return false
   return raw.audience_capture.complete
+}
+
+/** 每个账户最新态快照里 captured_at 最大的时间；没有行的账户不出现。 */
+function latestCapturePerAccount(latest: readonly EntitySnapshotRow[]): Map<string, string> {
+  const m = new Map<string, string>()
+  for (const r of latest) {
+    const cur = m.get(r.ad_account_id)
+    if (cur === undefined || Date.parse(r.captured_at) > Date.parse(cur)) m.set(r.ad_account_id, r.captured_at)
+  }
+  return m
+}
+
+/** 各账户里最旧的那个「最新抓取时间」（一个账户新鲜不能盖住另一个账户过期）。 */
+function oldestAccountCapture(raw: RawDraftInput, latest: readonly EntitySnapshotRow[]): string | null {
+  const ids = raw.owned_account_ids ?? [raw.ad_account_id]
+  const per = latestCapturePerAccount(latest)
+  let oldest: string | null = null
+  for (const id of ids) {
+    const t = per.get(id)
+    if (t === undefined) continue
+    if (oldest === null || Date.parse(t) < Date.parse(oldest)) oldest = t
+  }
+  return oldest
+}
+
+const STALE_SNAPSHOT_DAYS = 2
+
+/**
+ * 预算余量按「客户全部账户在投预算合计」算，所以每个账户都得读全且够新：
+ *  - 任何账户没有系列 / 广告组层快照（共用账户只写账户层，或抓取没跑）→ 它的在投预算会被当成 0，余量被高估，直接读不全；
+ *  - 任何账户的快照超过 2 天没更新 → 旧数据会被当成现在在投的预算。
+ */
+function coverageProblem(raw: RawDraftInput, latest: readonly EntitySnapshotRow[]): string | null {
+  const ids = raw.owned_account_ids
+  if (ids === undefined) return null
+  const per = latestCapturePerAccount(latest)
+  for (const id of ids) {
+    const hasEntityRows = latest.some(r => r.ad_account_id === id && (r.level === 'campaign' || r.level === 'adset'))
+    if (!hasEntityRows) return `广告账户 ${id} 没有系列层快照（共用账户只读账户层，或快照任务没跑），算不出全客户的在投预算`
+    const t = per.get(id)
+    if (t !== undefined) {
+      const ageDays = (raw.now.getTime() - Date.parse(t)) / 86_400_000
+      if (ageDays > STALE_SNAPSHOT_DAYS) return `广告账户 ${id} 的快照已 ${Math.floor(ageDays)} 天没更新，在投预算不可信`
+    }
+  }
+  return null
 }
 
 /** 纯函数：把原始行拼成起草器要的 facts。不碰数据库、不抛错。 */
@@ -184,6 +234,8 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
     headroom = { ok: false, reason: '账户日上限读不出来' }
   } else if (raw.snapshots === null) {
     headroom = { ok: false, reason: '广告快照读不出来' }
+  } else if (coverageProblem(raw, latest) !== null) {
+    headroom = { ok: false, reason: coverageProblem(raw, latest) as string }
   } else {
     const h = computeLaunchHeadroom({
       rows: latest,
@@ -199,7 +251,7 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
         delivering_minor: h.deliveringTotalMinor,
         cap_minor: h.capMinor,
         currency: h.currency,
-        as_of: latestCapturedAt(latest),
+        as_of: oldestAccountCapture(raw, latest) ?? latestCapturedAt(latest),
       }
     }
   }
@@ -420,6 +472,7 @@ export async function loadAdsDraftFacts(args: {
     audience_capture,
     captures_read_failed,
     ad_account_id: adAccountId,
+    owned_account_ids: ownedIds ?? undefined,
     committed_minor: args.committedMinor,
     committed_all_minor: args.committedAllMinor ?? args.committedMinor,
     budget_share_of_headroom: args.playbook.draftBudgetShareOfHeadroom,

@@ -71,8 +71,12 @@ export function AdsDraftPanel({ clientId, planId, adAccountId, otherSteps, onAdo
   const [draft, setDraft] = useState<AdsDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [adopted, setAdopted] = useState(false)
+  // 起草时的条件（账户 + 同阶段其它广告步骤的预算）；条件变了，旧建议就不能再采纳
+  const [draftKey, setDraftKey] = useState<string | null>(null)
 
   const hasAccount = adAccountId !== ''
+  const currentKey = JSON.stringify({ adAccountId, otherSteps })
+  const stale = draft !== null && draftKey !== currentKey
 
   const runDraft = async () => {
     setLoading(true)
@@ -101,6 +105,7 @@ export function AdsDraftPanel({ clientId, planId, adAccountId, otherSteps, onAdo
         return
       }
       setDraft(data.draft)
+      setDraftKey(currentKey)
     } catch {
       setError('读取失败，稍后重试')
     } finally {
@@ -109,7 +114,7 @@ export function AdsDraftPanel({ clientId, planId, adAccountId, otherSteps, onAdo
   }
 
   const adopt = () => {
-    if (draft === null) return
+    if (draft === null || stale) return
     const patch: { daily_budget_cents?: number; audience_ref?: string; creative_refs?: string[] } = {}
     if (draft.daily_budget_cents.ok) patch.daily_budget_cents = draft.daily_budget_cents.value
     if (draft.audience_ref.ok) patch.audience_ref = draft.audience_ref.value
@@ -144,12 +149,18 @@ export function AdsDraftPanel({ clientId, planId, adAccountId, otherSteps, onAdo
 
       {error !== null && <div className="text-xs text-red-600">{error}</div>}
 
+      {stale && (
+        <div className="rounded border border-yellow-300 bg-yellow-50 p-2 text-xs text-yellow-800">
+          广告账户或同阶段其它广告步骤的预算变了，下面的建议已经过期，请重新起草。
+        </div>
+      )}
+
       {draft !== null && (
         <div className="space-y-3">
           <SuggestionBlock
             title="预算"
             suggestion={draft.daily_budget_cents}
-            render={v => `每天 ${centsToYuan(v)} 元`}
+            render={v => `每天 ${centsToYuan(v)}（该广告账户的币种）`}
           />
           <SuggestionBlock title="受众" suggestion={draft.audience_ref} render={v => v} />
           <SuggestionBlock
@@ -170,7 +181,7 @@ export function AdsDraftPanel({ clientId, planId, adAccountId, otherSteps, onAdo
             </div>
           )}
 
-          {hasAnyOk && (
+          {hasAnyOk && !stale && (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -186,7 +197,7 @@ export function AdsDraftPanel({ clientId, planId, adAccountId, otherSteps, onAdo
       )}
 
       <div className="text-xs text-gray-500">
-        这只是系统的起草建议，不会自动生效。批准计划和真正开投仍要你本人点头；广告只会先建成暂停草稿。
+        这只是系统的起草建议，不会自动生效。采纳后还要保存，批准计划和真正开投都要你本人点头；系统不会替你动广告账户。
       </div>
     </div>
   )
