@@ -251,19 +251,16 @@ export async function generateAdCopy(params: {
       : ''
     // 2026-10-16 PM 取消「必须用 Baker Gu 第一人称/人物口吻」的要求(原 2026-07-25 决定):
     // 不再强制第一人称叙事、不再扮演 persona。保留的只有防编造红线 ——
-    // 这些是真实事故换来的(AI 会编客户引语/行程细节/政策数字),与口吻无关。
-    // 触发条件沿用原来的「简报里配了 persona」,避免改变其它客户的出稿行为。
-    const persona = (brief.brand_voice as { persona?: { name?: string } } | null)?.persona
-    const hasPersona = typeof persona?.name === 'string' && persona.name.trim() !== ''
-    const narrativeBlock = hasPersona
-      ? `\n\n🔴 **编造红线(实测 AI 会犯,逐条禁止)**:` +
+    // 这些是真实事故换来的(AI 会编客户引语/行程细节/政策数字),与口吻、与有没有 persona 都无关,
+    // 所以对所有客户无条件注入(此前只在配了 persona 时出现;CTS 的 persona 在数据源头移除后会连红线一起丢)。
+    const narrativeBlock =
+      `\n\n🔴 **编造红线(实测 AI 会犯,逐条禁止)**:` +
         `①**禁止编造任何具体客户/人名/引语/对话**(如「Margaret called me last week」「'I never thought we'd go'」)——` +
         `真实客户案例只能由人工提供,AI 一律不许虚构;情感回扣改用不指名的普遍感受。` +
         `②**禁止编造行程细节**:景点、时段、玩法、节奏(如「Great Wall sunrise」——真实行程是慕田峪全天、` +
         `缆车上滑道下、并无日出)。只能用品牌资料里明确写到的内容。` +
         `③**禁止编造政策/数字**:签证天数、价格、时长、人数一律不写,除非上方资料明确给出。` +
         `④拿不准就写得虚一点(「planning made simple」),**宁可平淡也不许编**——编造会让客户到店体验落差,是事故。`
-      : ''
     // formatBriefForPrompt 会把 persona 注入成「用第一人称讲」(全站共用,其它内容线不动);
     // 工厂文案这条线口吻要求已取消,所以只在这里把 persona 摘掉再格式化。
     const bv = (brief.brand_voice ?? null) as Record<string, unknown> | null
