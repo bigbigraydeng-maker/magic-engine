@@ -269,6 +269,14 @@ describe('诊断与超时', () => {
     expect(describeError(new Error('plain'))).toBe('plain')
   })
 
+  it('describeError 把网址和项目主机名换掉，不让项目标识进日志', () => {
+    const e = new Error('fetch failed', { cause: { code: 'ENOTFOUND', message: 'getaddrinfo ENOTFOUND abcdwxyz.supabase.co https://abcdwxyz.supabase.co/rest/v1/x' } })
+    const text = describeError(e)
+    expect(text).toContain('ENOTFOUND')
+    expect(text).not.toContain('abcdwxyz')
+    expect(text).not.toContain('https://')
+  })
+
   it('withTimeout 在按时完成时返回原值', async () => {
     await expect(withTimeout(Promise.resolve('ok'), 1000, 'run-checks')).resolves.toBe('ok')
   })

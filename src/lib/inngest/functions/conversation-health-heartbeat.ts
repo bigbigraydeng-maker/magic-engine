@@ -57,6 +57,11 @@ const RUN_CHECKS_TIMEOUT_MS = 90_000
  * 原因藏在 `cause` 里（如 `UND_ERR_SOCKET`），只打 `e.message` 会丢掉关键信息。
  * 最多往下钻 3 层，非对象 cause 直接跳过。
  */
+/** 去掉报错文字里的网址 / 项目主机名——这行字会进 Inngest 日志，项目标识不该出现在那里。 */
+function redact(text: string): string {
+  return text.replace(/https?:\/\/\S+/gi, '[url]').replace(/[a-z0-9-]+\.supabase\.(co|com|in)\b/gi, '[host]')
+}
+
 export function describeError(e: unknown): string {
   const base = e instanceof Error ? e.message : String(e)
   let out = base
@@ -69,10 +74,10 @@ export function describeError(e: unknown): string {
     out += ` <- ${code}${code && message ? ' ' : ''}${message}`
     cause = (cause as { cause?: unknown }).cause
   }
-  return out
+  return redact(out)
 }
 
-/** 给一个 promise 套上超时——超时抛错，无论成败都清掉定时器。 */
+/** 给一个 promise 套上超时——超时抛错，无论成败都清掉定时器。注意：不会取消底层查询（都是只读，叠加有上限：并发上限 1）。 */
 export async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
@@ -105,7 +110,7 @@ export function createConversationHealthHeartbeatFunction(deps: ConversationHeal
         try {
           return await withTimeout(deps.runChecks(deps.supabase, new Date()), RUN_CHECKS_TIMEOUT_MS, 'run-checks')
         } catch (e) {
-          throw new Error(`[conversation-health-heartbeat] run-checks 失败: ${describeError(e)}`, { cause: e })
+          throw new Error(`[conversation-health-heartbeat] run-checks 失败: ${describeError(e)}`)
         }
       })
 
