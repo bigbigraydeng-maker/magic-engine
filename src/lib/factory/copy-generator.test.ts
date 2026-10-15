@@ -35,6 +35,8 @@ describe('generateAdCopy', () => {
     expect(prompt).not.toContain('第一人称')
     expect(prompt).not.toContain('Some Guide')
     expect(prompt).toContain('编造红线')
+    expect(prompt).not.toMatch(/Margaret|Great Wall|慕田峪/) // 共享提示词不带客户/行业专属举例
+    expect(prompt).toContain('是事故。\\n\\n') // 红线与后文之间有分隔(JSON 转义后的换行)
     callClaudeChat.mockClear()
     await generateAdCopy({ brief: BRIEF, angle: 'floors', rationale: 'why', segmentRoles: ROLES })
     expect(JSON.stringify(callClaudeChat.mock.calls[0])).toContain('编造红线')
