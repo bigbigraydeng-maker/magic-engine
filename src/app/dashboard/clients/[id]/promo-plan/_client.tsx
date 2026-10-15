@@ -191,8 +191,7 @@ export function PromoPlanClient() {
               ? <PlanOverview phases={shownPhases} sample={showSample} onCloseSample={showSample ? () => setShowSample(false) : undefined} />
               : (
                   <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4 flex flex-wrap items-center gap-3">
-                    <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。想先看看做好是什么样？</p>
-                    <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
+                    <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。先在下面「想自己改？展开」里搭出阶段，广告那一项可以让系统起草预算、受众和素材。</p>
                   </div>
                 )}
             {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} />}
@@ -206,10 +205,13 @@ export function PromoPlanClient() {
             )}
             <div className="flex flex-col sm:flex-row gap-3">
               {!approverOnly && continueButtonVisible(board) && (
-                <button onClick={onContinue} disabled={busy === 'continue'}
-                  className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5 disabled:opacity-50">
-                  按计划继续
-                </button>
+                <details className="rounded-lg border border-gray-200 bg-white px-4 py-2">
+                  <summary className="text-xs text-gray-500 cursor-pointer">每周手动确认（想自己确认这一周时展开）</summary>
+                  <button onClick={onContinue} disabled={busy === 'continue'}
+                    className="mt-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5 disabled:opacity-50">
+                    按计划继续
+                  </button>
+                </details>
               )}
               {!approverOnly && approve?.visible && (
                 <div className="flex-1">
@@ -229,7 +231,15 @@ export function PromoPlanClient() {
 
             {selected.status === 'draft' && !approverOnly && (
               <>
-                <PromoSpecForm key={planKey(selected)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
+                <details open={!board.has_promo} className="rounded-xl border border-gray-200 bg-white">
+                  <summary className="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer">想自己改？展开（填表、加阶段、看示例）</summary>
+                  <div className="p-3 space-y-3">
+                    {!showSample && !shownPhases && (
+                      <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
+                    )}
+                    <PromoSpecForm key={planKey(selected)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
+                  </div>
+                </details>
                 <details className="rounded-xl border border-gray-200 bg-white">
                   <summary className="px-4 py-3 text-xs text-gray-500 cursor-pointer">高级：直接改结构文本（只给技术同事用）</summary>
                   <PromoSpecEditor key={planKey(selected)} clientId={clientId} plan={selected} onSaved={() => void refresh(selected.id)} />
