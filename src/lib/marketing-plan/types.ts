@@ -165,6 +165,8 @@ export interface PromoManualCheckRecord {
   verified_by: string
   verified_at: string
   note: string
+  /** 核实当时整份推广结构的内容指纹；内容改过后旧核实自动失效。*/
+  content_hash?: string
 }
 
 export interface WeeklyReviewRecord {
@@ -181,7 +183,9 @@ export interface ApprovalReceipt {
   tasks_skipped: number
   packages_created: number
   /** 批准当时第一阶段的检查清单快照（事后能说清「批的时候是什么状态」）*/
-  gate_snapshot?: { taken_at: string; results: { key: string; light: string; hard: boolean }[] }
+  gate_snapshot?: { taken_at: string; results: { key: string; light: string; hard: boolean; phase_id?: string }[] }
+  /** 批准当时 plan_data.promo 的内容指纹；旧回执没有。*/
+  content_hash?: string
 }
 
 // ─── 数据库行类型 ─────────────────────────────────────────────────────────────
@@ -209,6 +213,8 @@ export interface MarketingPlan {
     previous_approvals?: ApprovalReceipt[]
     /** FDE 在计划批准后补充的人工核实记录（plan_data 被锁，所以放这里；服务端写入）。*/
     promo_checks?: PromoManualCheckRecord[]
+    /** 退回草稿时挪过来留底的旧核实记录（内容已可能改过，不再参与判定）。*/
+    previous_promo_checks?: PromoManualCheckRecord[]
     /** PM 每周「按计划继续」的确认记录（服务端写入，按 week_start 幂等）。*/
     weekly_reviews?: WeeklyReviewRecord[]
   } | null
