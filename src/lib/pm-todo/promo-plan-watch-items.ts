@@ -128,7 +128,15 @@ export function buildPromoPlanWatchItems(
   }
   const daysSinceLatest = Math.max(0, Math.floor((now.getTime() - Date.parse(`${dayKeys[0]}T00:00:00Z`)) / 86_400_000))
 
-  for (const [planId, list] of byPlan) {
+  for (const [planId, listAll] of byPlan) {
+    let list = listAll
+    // 「读不到每日计划」是我们这边的欠账（文案本身写着「不用你动手」），走开发欠账，不进 PM 的清单
+    const infra = list.filter(it => it.code === 'daily_plan_unreadable')
+    for (const it of infra) {
+      out.push(brokenItem(it.what, it.how, it.client_id, nameOf(it.client_id), promoPlanHref(it.client_id)))
+    }
+    list = list.filter(it => it.code !== 'daily_plan_unreadable')
+    if (list.length === 0) continue
     const streak = Math.max(...list.map(it => streakOf(planId, it.code, receipts, dayKeys)))
     if (!shouldRemindToday(streak, daysSinceLatest, now)) continue
     const clientId = list[0].client_id

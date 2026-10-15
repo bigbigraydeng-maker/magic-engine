@@ -293,8 +293,10 @@ describe('detectSlotGaps', () => {
     expect(expected.error).toBeNull()
     expect(expected.counts.post).toBe(2)
 
+    // 每日计划覆盖满 7 天（到 10-22），但帖子只排了 1 条（另一天只有快拍，用来把覆盖拉到 10-22）
     const snap = mkSnap('c1', '2026-10-15T00:00:00Z', {
       '2026-10-20': ['post'],
+      '2026-10-22': ['story'],
     })
     const read: DailyPlanRead = { status: 'ok', snapshots: [snap] }
     const findings = detectSlotGaps({ title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read })
@@ -315,5 +317,49 @@ describe('detectSlotGaps', () => {
     const input = { title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read }
     expect(neverReport()).toEqual([])
     expect(detectSlotGaps(input).length).toBeGreaterThan(0)
+  })
+
+  // ── 周中常态：每日计划是一整份 7 天、每周才排一次，窗口伸到覆盖范围之外不是缺口 ──
+  it('每周一整份 7 天快照、今天是周中（只覆盖到 10-18，窗口到 10-22）：条数按覆盖天数折算，不误报', () => {
+    const spec = mkSpec(3, 0, 0)
+    // 覆盖 10-16 至 10-18 共 3 天；每周 3 条 → 3 天的下限是 floor(3*3/7)=1；排了 1 条帖子 → 够
+    const snap = mkSnap('c1', '2026-10-13T00:00:00Z', { '2026-10-16': ['post'], '2026-10-18': ['story'] })
+    const read: DailyPlanRead = { status: 'ok', snapshots: [snap] }
+    expect(detectSlotGaps({ title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read })).toEqual([])
+  })
+  it('覆盖不足 3 天时不做条数比较（太短）', () => {
+    const spec = mkSpec(3, 0, 0)
+    const snap = mkSnap('c1', '2026-10-13T00:00:00Z', { '2026-10-16': ['story'], '2026-10-17': ['story'] })
+    const read: DailyPlanRead = { status: 'ok', snapshots: [snap] }
+    expect(detectSlotGaps({ title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read })).toEqual([])
+  })
+  it('明天起一天都没覆盖才是缺口（每日计划只排到今天）', () => {
+    const spec = mkSpec(3, 0, 0)
+    const snap = mkSnap('c1', '2026-10-13T00:00:00Z', { '2026-10-15': ['post'] })
+    const read: DailyPlanRead = { status: 'ok', snapshots: [snap] }
+    const out = detectSlotGaps({ title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read })
+    expect(out).toHaveLength(1)
+    expect(out[0].what).toContain('明天起一天都没有排')
+  })
+  it('短视频不参与比较：只要求短视频时不出任何发现', () => {
+    const spec = mkSpec(0, 0, 8)
+    const read: DailyPlanRead = { status: 'ok', snapshots: [] }
+    expect(detectSlotGaps({ title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read })).toEqual([])
+  })
+  it('记录存在但全部读不懂 → 不说「没建过」，走读不到（开发欠账）', () => {
+    const spec = mkSpec(3, 0, 0)
+    const read: DailyPlanRead = { status: 'ok', snapshots: [], rows_total: 2, rows_unparseable: 2 }
+    const out = detectSlotGaps({ title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read })
+    expect(out).toHaveLength(1)
+    expect(out[0].code).toBe('daily_plan_unreadable')
+    expect(out[0].what).toContain('读不懂')
+    expect(out[0].what).not.toContain('没有建过')
+  })
+  it('文案不承诺自动补排', () => {
+    const spec = mkSpec(3, 0, 0)
+    const read: DailyPlanRead = { status: 'ok', snapshots: [] }
+    const out = detectSlotGaps({ title: '计划A', today: TODAY, spec, playbook: DEFAULT_PROMO_PLAYBOOK, read })
+    expect(out[0].how).toContain('不会自动补')
+    expect(out[0].how).not.toContain('让代理')
   })
 })

@@ -11,7 +11,7 @@
  *  - 文案里不出现星期几，不出现 phase / step 编号，不复述计划里除标题外的任何文字。
  */
 
-import { addDays } from './reconcile'
+import { addDays, daysBetween } from './reconcile'
 import type { PromoPlaybook } from './playbooks'
 import type { PromoSpec } from './spec'
 import { expandPromoSchedule } from './schedule'
@@ -102,15 +102,20 @@ function coverageNote(latestCoveredDate: string | null, snapshotsUsed: number, f
   return ''
 }
 
-/** 缺口条目的「怎么办」文案（缺口与纯形状错误共用）。 */
+/** 缺口条目的「怎么办」文案（缺口与纯形状错误共用）。不承诺任何自动补排——目前没有谁会自动补。 */
 const HOW_TEXT =
-  '打开每日计划页，让代理按推广计划补出这几类的草稿；只产草稿，仍要你审核、授权才会发。条数够只表示数量对，不代表排得对（价格屏、相邻短视频不同曲这些放行规则不在这里检查）。'
+  '打开每日计划页，按推广计划里每周的条数自己补排（这条只是提醒，不会自动补）；排出来的只是草稿，仍要你审核、授权才会发。条数够只表示数量对，不代表排得对，也不代表能发（价格屏、相邻短视频不同曲这些放行规则不在这里检查）。'
+
+/** 窗口里少于这么多天被覆盖时，不做条数比较（太短，按比例折算没意义）。 */
+const MIN_COVERED_DAYS_FOR_COUNT = 3
 
 /**
- * 未来 7 天条数够不够。
- * 计划没要求 / 排期算不出来 → []。
- * 读不到每日计划 → 一条 daily_plan_unreadable。
- * 有缺口或形状错误 → 一条 daily_plan_gap。
+ * 每日计划是「一个活动一行、整份 7 天覆盖」，代理通常每周才排一次，所以周中窗口伸到快照覆盖范围之外是常态。
+ * 因此只做两件事：
+ *  1. 明天起一天都没覆盖 → 缺口（真缺口：明天没有计划）；
+ *  2. 已覆盖的部分（≥ 3 天）里，条数低于「每周要求 × 覆盖天数 ÷ 7」取整的下限 → 缺口。
+ * 只比帖子和快拍：短视频是「每月 N 条」，窗口里的期望会 0 / 1 来回跳，不比（Reel 成片也只走视频工厂）。
+ * 计划没要求 / 排期算不出来 → []；读不到 / 读不懂每日计划 → daily_plan_unreadable（走开发欠账，不进 PM 清单）。
  */
 export function detectSlotGaps(input: {
   title: string
@@ -123,58 +128,63 @@ export function detectSlotGaps(input: {
   const { from, to } = slotWindow(today)
 
   const expected = expectedSlotCounts(spec, playbook, from, to)
-  if (expected.error !== null || allZero(expected.counts)) {
+  const want7 = { post: expected.counts.post, story: expected.counts.story }
+  if (expected.error !== null || (want7.post === 0 && want7.story === 0)) {
     return []
   }
 
+  const unreadable = (detail: string): WatchFinding[] => [
+    {
+      code: 'daily_plan_unreadable',
+      what: `推广计划《${title}》要求未来 7 天（${from} 到 ${to}）发内容，但每日计划${detail}，没法核对条数。读不到不等于够了，也不等于一条没排。`,
+      how: '这条不用你动手，是我们这边的欠账；连续几天都这样，请找开发看。',
+    },
+  ]
   if (read.status === 'read_failed') {
-    return [
-      {
-        code: 'daily_plan_unreadable',
-        what: `推广计划《${title}》要求未来 7 天（${from} 到 ${to}）发内容，但每日计划这次读不出来（${read.error}），没法核对条数。读不到不等于够了，也不等于一条没排。`,
-        how: '这条不用你动手，是我们这边的欠账；连续几天都这样，请找开发看。',
-      },
-    ]
+    return unreadable(`这次读不出来（${read.error}）`)
+  }
+  const unparsed = read.rows_unparseable ?? 0
+  if (read.snapshots.length === 0 && unparsed > 0) {
+    return unreadable(`有 ${unparsed} 份记录格式读不懂`)
   }
 
-  const planned = plannedCountsInWindow(read.snapshots, from, to)
+  const kinds = (['post', 'story'] as const).filter(k => want7[k] > 0)
+  const full = plannedCountsInWindow(read.snapshots, from, to)
+  const covered = full.latest_covered_date
 
+  // 1. 明天起一天都没覆盖
+  if (covered === null || covered < from) {
+    const wantList = kinds.map(k => `${want7[k]} 条${KIND_LABEL[k]}`).join('、')
+    const what = `推广计划《${title}》要求未来 7 天（${from} 到 ${to}）发 ${wantList}，每日计划里明天起一天都没有排。` + coverageNote(covered, full.snapshots_used, from)
+    return [{ code: 'daily_plan_gap', what, how: HOW_TEXT }]
+  }
+
+  // 2. 已覆盖的部分：条数下限（按覆盖天数折算，不比星期几）
+  const effectiveTo = covered < to ? covered : to
+  const coveredDays = daysBetween(from, effectiveTo) + 1
+  const sub = effectiveTo === to ? full : plannedCountsInWindow(read.snapshots, from, effectiveTo)
   const gaps: Array<{ kind: keyof SlotCounts; expected: number; planned: number }> = []
-  for (const kind of KIND_ORDER) {
-    const want = expected.counts[kind]
-    const got = planned[kind]
-    if (got < want) {
-      gaps.push({ kind, expected: want, planned: got })
+  if (coveredDays >= MIN_COVERED_DAYS_FOR_COUNT) {
+    for (const k of kinds) {
+      const floorWant = Math.floor((want7[k] * coveredDays) / 7)
+      if (sub[k] < floorWant) gaps.push({ kind: k, expected: floorWant, planned: sub[k] })
     }
   }
 
-  const shapeErrorDays = planned.shape_error_days
-
-  if (gaps.length === 0 && shapeErrorDays === 0) {
-    return []
-  }
+  const shapeErrorDays = sub.shape_error_days
+  if (gaps.length === 0 && shapeErrorDays === 0) return []
 
   if (gaps.length === 0) {
-    return [
-      {
-        code: 'daily_plan_gap',
-        what: `推广计划《${title}》未来 7 天条数够，但有 ${shapeErrorDays} 天的每日计划槽位标成了已排、草稿内容不全，这些天没有算进去。`,
-        how: HOW_TEXT,
-      },
-    ]
+    return [{
+      code: 'daily_plan_gap',
+      what: `推广计划《${title}》已覆盖的日子条数够，但有 ${shapeErrorDays} 天的每日计划槽位标成了已排、草稿内容不全，这些天没有算进去。`,
+      how: HOW_TEXT,
+    }]
   }
 
-  let what = `推广计划《${title}》要求未来 7 天（${from} 到 ${to}）发 ${formatGapList(gaps)}，每日计划里排好草稿的只有 ${formatPlannedList(gaps)}。`
-  what += coverageNote(planned.latest_covered_date, planned.snapshots_used, from)
+  let what = `推广计划《${title}》要求每日计划已覆盖的这 ${coveredDays} 天（${from} 到 ${effectiveTo}）至少有 ${formatGapList(gaps)}，每日计划里排好草稿的只有 ${formatPlannedList(gaps)}。`
   if (shapeErrorDays > 0) {
     what += ` 另有 ${shapeErrorDays} 天的每日计划槽位标成了已排但草稿内容不全，这些天没有算进去。`
   }
-
-  return [
-    {
-      code: 'daily_plan_gap',
-      what,
-      how: HOW_TEXT,
-    },
-  ]
+  return [{ code: 'daily_plan_gap', what, how: HOW_TEXT }]
 }

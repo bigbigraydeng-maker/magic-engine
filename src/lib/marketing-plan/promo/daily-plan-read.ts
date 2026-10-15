@@ -63,7 +63,7 @@ export interface DailyPlanSnapshotLite {
 
 // 读取结果
 export type DailyPlanRead =
-  | { status: 'ok'; snapshots: DailyPlanSnapshotLite[] }
+  | { status: 'ok'; snapshots: DailyPlanSnapshotLite[]; rows_total?: number; /** 读到了、但格式读不懂被跳过的行数（有就不能说「没建过」） */ rows_unparseable?: number }
   | { status: 'read_failed'; error: string };
 
 // 窗口内已排好的条数统计
@@ -268,22 +268,26 @@ export async function loadDailyPlanSnapshots(
 
   const snapshots: DailyPlanSnapshotLite[] = [];
   const rows: unknown[] = Array.isArray(data) ? data : [];
+  let unparseable = 0;
   for (const row of rows) {
     if (!isRecord(row)) {
+      unparseable += 1;
       continue;
     }
     const createdAt = row.created_at;
     if (!isNonEmptyString(createdAt)) {
+      unparseable += 1;
       continue;
     }
     const parsed = parseSnapshot(row.plan_data, createdAt);
     if (parsed === null) {
+      unparseable += 1;
       continue;
     }
     snapshots.push(parsed);
   }
 
-  return { status: 'ok', snapshots };
+  return { status: 'ok', snapshots, rows_total: rows.length, rows_unparseable: unparseable };
 }
 
 // 判断某天某类型在快照里是否内容齐全
