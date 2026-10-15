@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { promoContentHash } from '../content-hash'
+import { createHash } from 'node:crypto'
+import { promoContentHash, __sha256HexForTest } from '../content-hash'
 import { baseSpec } from './fixtures'
 import type { PromoSpec } from '../spec'
 
@@ -90,5 +91,11 @@ describe('promoContentHash', () => {
     const changed = clone(spec)
     changed.phases = [changed.phases[1], changed.phases[0]]
     expect(promoContentHash(changed)).not.toBe(promoContentHash(spec))
+  })
+})
+
+describe('纯 JS sha256 与标准实现一致（浏览器里也要能算）', () => {
+  it.each(['', 'abc', '推广计划 内容指纹', 'a'.repeat(1000), JSON.stringify({ x: [1, 2, { y: '中文' }] })])('输入 %#', (input) => {
+    expect(__sha256HexForTest(input)).toBe(createHash('sha256').update(input).digest('hex'))
   })
 })
