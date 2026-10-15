@@ -163,3 +163,111 @@ export function formatClock(iso: string): string {
   if (Number.isNaN(date.getTime())) return iso
   return new Intl.DateTimeFormat('zh-CN', { timeZone: NZ_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(date)
 }
+
+/** Counts of one week's Story items, per line, for the headline. */
+export interface StoryTally {
+  total: number
+  /** The database says SENT (not checked against the platform). */
+  recordedSent: number
+  /** Time has passed but nothing went out (still PENDING, or MISSED). */
+  overdue: number
+  /** Still waiting for its time. */
+  waiting: number
+  /** Blocked, failed or unsure: a person must look. */
+  blocked: number
+  /** PENDING but the week was stopped or expired: will not be sent. */
+  stopped: number
+  /** PENDING in a week nobody has authorised yet: will not be sent until someone authorises it. */
+  unauthorised: number
+}
+
+/** A Story is only called "past its time" after this grace period, so a slot that is just about to go out is not reported as missed. */
+export const OVERDUE_GRACE_MS = 10 * 60 * 1000
+
+export function tallyStoryItems(
+  items: ReadonlyArray<{ status: LiteItemStatus; slot_at: string }>,
+  packState: LitePackState,
+  now: Date,
+): StoryTally {
+  const tally: StoryTally = { total: items.length, recordedSent: 0, overdue: 0, waiting: 0, blocked: 0, stopped: 0, unauthorised: 0 }
+  const stoppedPack = packState === 'REVOKED' || packState === 'EXPIRED'
+  for (const item of items) {
+    if (item.status === 'SENT') {
+      tally.recordedSent += 1
+    } else if (item.status === 'BLOCKED' || item.status === 'FAILED' || item.status === 'UNKNOWN_OUTCOME') {
+      tally.blocked += 1
+    } else if (item.status === 'MISSED') {
+      tally.overdue += 1
+    } else if (stoppedPack) {
+      tally.stopped += 1
+    } else if (packState === 'DRAFT') {
+      tally.unauthorised += 1
+    } else {
+      const slot = new Date(item.slot_at).getTime()
+      if (!Number.isNaN(slot) && slot + OVERDUE_GRACE_MS < now.getTime()) tally.overdue += 1
+      else tally.waiting += 1
+    }
+  }
+  return tally
+}
+
+/** One line for the Story headline. Only appends the stopped part when stopped > 0. */
+export function describeStoryHeadline(tally: StoryTally): string {
+  if (tally.total === 0) return 'Story：本周没有排 Story'
+  const parts = [
+    `Story：本周 ${tally.total} 条`,
+    `库里记为已发 ${tally.recordedSent}`,
+    `已过点没发出 ${tally.overdue}`,
+    `待发 ${tally.waiting}`,
+    `被拦 ${tally.blocked}`,
+  ]
+  if (tally.stopped > 0) parts.push(`已停或授权过期不会发 ${tally.stopped}`)
+  if (tally.unauthorised > 0) parts.push(`还没授权，不会发 ${tally.unauthorised}`)
+  return parts.join(' · ')
+}
+
+/** Text for one Story item on the overview. */
+export function describeOverviewItemStatus(
+  status: LiteItemStatus,
+  packState: LitePackState,
+  slotAt: string,
+  now: Date,
+): string {
+  if (status === 'SENT') return '库里记为已发'
+  const stoppedPack = packState === 'REVOKED' || packState === 'EXPIRED'
+  if (status === 'PENDING' && !stoppedPack && packState !== 'DRAFT') {
+    const slot = new Date(slotAt).getTime()
+    if (!Number.isNaN(slot) && slot + OVERDUE_GRACE_MS < now.getTime()) return '已过点，没发出（库里仍是待发）'
+  }
+  return describeItemStatusInPack(status, packState)
+}
+
+/** Statuses whose database record says the video was uploaded; none of them has been checked against the platform. */
+const RECORDED_UPLOADED_STATUSES = ['published', 'measuring', 'closed']
+
+/** The database says this Reel was uploaded (not checked against the platform). One definition for the headline and every row. */
+export function isRecordedUploaded(reel: { status: string; published_at: string | null }): boolean {
+  return reel.published_at !== null || RECORDED_UPLOADED_STATUSES.includes(reel.status)
+}
+
+/** Reel headline. */
+export function describeReelHeadline(reels: ReadonlyArray<{ status: string; published_at: string | null }>): string {
+  if (reels.length === 0) return 'Reel：现在没有可看的 Reel'
+  const inReview = reels.filter((r) => r.status === 'in_review').length
+  const uploaded = reels.filter(isRecordedUploaded).length
+  return `Reel：在审 ${inReview} · 库里记为已上传 ${uploaded}（平台状态未核）`
+}
+
+/** The read-only variety hint line. Never blocks anything. */
+export function describeVarietyLine(variety: {
+  same_track_max: number
+  price_screen_count: number
+  total: number
+}): { text: string; warn: boolean } {
+  if (variety.total === 0) return { text: '最近的 Reel：没有 Reel，不统计', warn: false }
+  const track = variety.same_track_max > 0 ? `同一首 BGM 最多出现 ${variety.same_track_max} 次` : 'BGM 未读到'
+  // a tiny batch must not light the warning on its own: the price-screen share needs at least 4 Reels to mean anything
+  const warn = variety.same_track_max >= 2 || (variety.total >= 4 && variety.price_screen_count * 3 > variety.total)
+  const suffix = warn ? '（规则见放行规则文档）' : ''
+  return { text: `最近 ${variety.total} 条 Reel：${track}；价格屏 ${variety.price_screen_count}/${variety.total}${suffix}`, warn }
+}

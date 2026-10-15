@@ -40,6 +40,20 @@ export interface OverviewReel {
   created_at: string
   published_at: string | null
   permalink: string | null
+  music_file: string | null
+  template: string | null
+}
+
+/** Read-only variety hint for a batch of Reels. Never blocks anything. */
+export interface ReelVariety {
+  /** How many times the most-used BGM file appears in the batch (Reels without a music file are not counted); 0 when none has one. */
+  same_track_max: number
+  /** The file that appears most often; null when no Reel has a music file. */
+  same_track_file: string | null
+  /** How many Reels use the price-list template (template === 'list'). */
+  price_screen_count: number
+  /** Total number of Reels looked at. */
+  total: number
 }
 
 /** How many of each kind the client wants per day / week. A kind that is not configured is null ("not configured"), never 0. */
@@ -60,6 +74,8 @@ export interface WeekOverview {
   story_error: string | null
   reels: OverviewReel[]
   reels_error: string | null
+  /** Read-only hint about how varied the Reels are; never blocks anything. */
+  reel_variety: ReelVariety
   /** Posts have no weekly pack yet. */
   post: { connected: false }
 }
@@ -75,13 +91,15 @@ interface ReelRow {
   created_at: string
   video_path: string | null
   published_ref: unknown
+  music_file: string | null
+  template: string | null
 }
 
 /** This client's factory Reels only (filtered in the query), newest first. Throws on a database error. */
 export async function listClientReels(db: SupabaseClient, clientId: string): Promise<OverviewReel[]> {
   const { data, error } = await db
     .from('content_work_orders')
-    .select('id, status, angle, created_at, video_path:output->>video_path, published_ref')
+    .select('id, status, angle, created_at, video_path:output->>video_path, published_ref, music_file:brief->remotion->props->>musicFile, template:brief->remotion->>template')
     .eq('client_id', clientId)
     .not('status', 'in', `(${HIDDEN_REEL_STATUSES.join(',')})`)
     .not('output->>video_path', 'is', null)
@@ -99,8 +117,28 @@ export async function listClientReels(db: SupabaseClient, clientId: string): Pro
         created_at: row.created_at,
         published_at: published?.published_at ?? null,
         permalink: published?.permalink ?? null,
+        music_file: typeof row.music_file === 'string' && row.music_file.trim().length > 0 ? row.music_file.trim() : null,
+        template: typeof row.template === 'string' && row.template.length > 0 ? row.template : null,
       }
     })
+}
+
+export function summariseReelVariety(reels: ReadonlyArray<Pick<OverviewReel, 'music_file' | 'template'>>): ReelVariety {
+  const counts = new Map<string, number>()
+  for (const reel of reels) {
+    if (reel.music_file === null) continue
+    counts.set(reel.music_file, (counts.get(reel.music_file) ?? 0) + 1)
+  }
+  let same_track_max = 0
+  let same_track_file: string | null = null
+  for (const [file, count] of counts) {
+    if (count > same_track_max) {
+      same_track_max = count
+      same_track_file = file
+    }
+  }
+  const price_screen_count = reels.filter((reel) => reel.template === 'list').length
+  return { same_track_max, same_track_file, price_screen_count, total: reels.length }
 }
 
 function wholeNumber(value: unknown): number | null {
@@ -192,6 +230,7 @@ export async function buildWeekOverview(input: {
       story_error: story.status === 'rejected' ? failureText('story', story.reason) : null,
       reels: reels.status === 'fulfilled' ? reels.value : [],
       reels_error: reels.status === 'rejected' ? failureText('reels', reels.reason) : null,
+      reel_variety: summariseReelVariety(reels.status === 'fulfilled' ? reels.value : []),
       post: { connected: false },
     },
   }
