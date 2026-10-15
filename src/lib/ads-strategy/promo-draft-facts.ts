@@ -154,10 +154,12 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
   const { now, config, ad_account_id } = raw
 
   // 1. today：优先用账户快照的时区
+  // 快照可能含客户名下全部账户（预算余量要按全客户合计算）；时区 / 状态 / 受众只认选中的这个账户
+  const ownSnapshots = raw.snapshots === null ? null : raw.snapshots.filter(r => r.ad_account_id === ad_account_id)
   let tz: string | null = null
-  if (raw.snapshots !== null) {
+  if (ownSnapshots !== null) {
     let bestAccount: EntitySnapshotRow | null = null
-    for (const r of raw.snapshots) {
+    for (const r of ownSnapshots) {
       if (r.level !== 'account') continue
       if (bestAccount === null || Date.parse(r.captured_at) > Date.parse(bestAccount.captured_at)) bestAccount = r
     }
@@ -167,6 +169,7 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
 
   // 2. 最新态快照（已去掉 disappeared）
   const latest = raw.snapshots === null ? [] : latestSnapshotsAsOf(raw.snapshots, now.getTime())
+  const latestOwn = latest.filter(r => r.ad_account_id === ad_account_id)
 
   // 3. headroom
   let headroom: HeadroomFact
@@ -211,10 +214,10 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
   const account_cap_minor = raw.account_cap_read_failed ? null : raw.account_cap_minor
 
   // 5. 逐日
-  const { daily, asOf } = buildDaily(raw.insights, raw.snapshots ?? [])
+  const { daily, asOf } = buildDaily(raw.insights, ownSnapshots ?? [])
 
   // 6. 受众池
-  const audiences = raw.snapshots === null ? null : buildAudiences(latest, raw.snapshots)
+  const audiences = ownSnapshots === null ? null : buildAudiences(latestOwn, ownSnapshots)
 
   // 7. 受众层是否读全
   const audiences_complete = resolveAudiencesComplete(raw)
@@ -242,6 +245,16 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
 /** 分页读快照 / 逐日：单键排序分页会漏行，所以用多键稳定排序。 */
 const PAGE_SIZE = 1000
 const MAX_PAGES = 10
+
+/** 客户名下的广告账户编号；读失败 = null（不当成「没有账户」）。 */
+async function readOwnedAccountIds(clientId: string): Promise<string[] | null> {
+  const { data, error } = await supabaseAdmin
+    .from('client_meta_ad_accounts')
+    .select('ad_account_id')
+    .eq('client_id', clientId)
+  if (error) return null
+  return ((data ?? []) as { ad_account_id: string }[]).map(r => r.ad_account_id)
+}
 
 async function readSnapshots(
   clientId: string,
@@ -338,9 +351,18 @@ export async function loadAdsDraftFacts(args: {
     }
   }
 
-  // 快照（近 35 天）
+  // 快照（近 35 天）：预算余量按客户总上限算，所以要读客户名下**全部**广告账户的在投预算
   const sinceIso = new Date(now.getTime() - 35 * 86_400_000).toISOString()
-  const snapshots = await readSnapshots(clientId, adAccountId, sinceIso)
+  const ownedIds = await readOwnedAccountIds(clientId)
+  let snapshots: EntitySnapshotRow[] | null = null
+  if (ownedIds !== null && ownedIds.includes(adAccountId)) {
+    snapshots = []
+    for (const acctId of ownedIds) {
+      const part = await readSnapshots(clientId, acctId, sinceIso)
+      if (part === null) { snapshots = null; break }
+      snapshots.push(...part)
+    }
+  }
 
   // 逐日（近 30 天）
   const sinceDate = accountDayKey(null, new Date(now.getTime() - 30 * 86_400_000))

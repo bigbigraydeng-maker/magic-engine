@@ -300,3 +300,22 @@ describe('buildAdsDraftFacts — audiences_complete', () => {
     expect(f.audiences_complete).toBe(true)
   })
 })
+
+describe('多账户快照：余量按客户全部账户合计，受众只认选中账户', () => {
+  it('另一个账户的在投预算也计入客户余量；另一个账户的受众不出现', () => {
+    const mine = mkRow({ ad_account_id: 'act_1', level: 'campaign', entity_id: 'c-mine', budget_level: 'cbo', daily_budget_minor: 3000, effective_status: 'ACTIVE' })
+    const other = mkRow({ ad_account_id: 'act_2', level: 'campaign', entity_id: 'c-other', budget_level: 'cbo', daily_budget_minor: 4000, effective_status: 'ACTIVE' })
+    const otherAud = mkRow({ ad_account_id: 'act_2', level: 'audience', entity_id: 'aud-other', audience_count_lower: 99999 })
+    const myAud = mkRow({ ad_account_id: 'act_1', level: 'audience', entity_id: 'aud-mine', audience_count_lower: 5000 })
+    const raw = mkRaw({ snapshots: [mine, other, otherAud, myAud] })
+    raw.config = { daily_budget_cap_cents: 10000, approved_creatives: [] }
+    const f = buildAdsDraftFacts(raw)
+    expect(f.headroom.ok).toBe(true)
+    if (f.headroom.ok) {
+      expect(f.headroom.delivering_minor).toBe(7000)
+      expect(f.headroom.headroom_minor).toBe(3000)
+    }
+    expect(f.account_delivering_minor).toBe(3000)
+    expect(f.audiences?.map(a => a.ref)).toEqual(['aud-mine'])
+  })
+})

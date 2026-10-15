@@ -164,6 +164,8 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
     return { ok: false, why_empty: '预算余量已经用完（或被本计划其它广告步骤占满）' }
   }
 
+  const accountBound = f.account_cap_minor !== null && f.account_delivering_minor !== null &&
+    f.account_cap_minor - f.account_delivering_minor - f.committed_minor < headroom.headroom_minor - f.committed_minor
   let suggested = Math.floor(base * f.budget_share_of_headroom)
   if (suggested <= 0) {
     return { ok: false, why_empty: '余量太小，按比例算不出有意义的预算' }
@@ -178,6 +180,16 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
     source: '广告设置 + 广告快照',
     as_of: headroom.as_of,
   })
+
+  // 账户自己的日上限更紧时要说明：建议被账户上限卡住，不是被客户总上限卡住
+  if (accountBound && f.account_cap_minor !== null && f.account_delivering_minor !== null) {
+    basis.push({
+      label: '账户日上限',
+      value: `账户上限 ${f.account_cap_minor}，该账户在投 ${f.account_delivering_minor}，本计划其它广告步骤已占 ${f.committed_minor}——以账户余量为准`,
+      source: '广告账户设置',
+      as_of: headroom.as_of,
+    })
+  }
 
   // 采用比例依据
   basis.push({
@@ -234,6 +246,11 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
       if (w.dropped.length > 0) {
         warnings.push(`${w.days} 天窗口剔除了这些日子：${w.dropped.join('、')}`)
       }
+    }
+
+    // 最近 7 天一条结果都没有 = 账户可能已经停投，历史成本只能参考更早的数据
+    if (w7.results === 0) {
+      warnings.push('最近 7 天这个账户没有结果（可能已停投），单条成本只能参考更早的数据，仅供参考。')
     }
 
     // 只有最近的有效窗口用来换算

@@ -312,3 +312,27 @@ describe('固定提醒不依赖预算建议是否给出', () => {
     expect(r.warnings.join('')).toContain('月预算')
   })
 })
+
+describe('账户上限更紧 / 账户已停投', () => {
+  it('账户余量比客户余量更紧时，建议按账户余量算，并在依据里写明', () => {
+    const f = baseFacts()
+    f.headroom = { ok: true, headroom_minor: 10000, delivering_minor: 5000, cap_minor: 15000, currency: 'NZD', as_of: null }
+    f.account_cap_minor = 5200
+    f.account_delivering_minor = 5000
+    f.committed_minor = 0
+    const r = draftAdsStep(f)
+    expect(r.daily_budget_cents.ok).toBe(true)
+    if (r.daily_budget_cents.ok) {
+      expect(r.daily_budget_cents.value).toBeLessThanOrEqual(200)
+      expect(r.daily_budget_cents.basis.some(b => b.label === '账户日上限')).toBe(true)
+    }
+  })
+  it('最近 7 天没有任何结果 → 提醒可能已停投，成本仅供参考', () => {
+    const f = baseFacts()
+    f.today = '2026-11-20'
+    f.daily = ['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06', '2026-11-07', '2026-11-08', '2026-11-09', '2026-11-10']
+      .map(date => ({ date, spend_cents: 1000, results: 5, account_status: 1 }))
+    const r = draftAdsStep(f)
+    expect(r.warnings.join('')).toContain('可能已停投')
+  })
+})
