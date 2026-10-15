@@ -28,7 +28,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
     if (!board.reconcile) return NextResponse.json({ success: false, error: '这份计划没有推广计划结构' }, { status: 400 })
     // 与页面按钮同一条件：看不清 / 落后 / 超标的周不能留下"没意见"
     if (!continueButtonVisible({ ...board, reviewed_this_window: false })) {
-      return NextResponse.json({ success: false, error: '本周对账有异常或看不清，不能点"按计划继续"，请先处理。' }, { status: 409 })
+      return NextResponse.json({ success: false, error: '本周对账有异常或看不清，或到期阶段的检查清单还没过关，不能点"按计划继续"，请先处理。' }, { status: 409 })
     }
     const weekStart = board.reconcile.window.start
 

@@ -22,6 +22,8 @@ export interface PhaseGateView {
 export interface PromoBoard {
   plan_id: string
   plan_status: MarketingPlan['status']
+  /** 计划行的 updated_at，前端保存时当乐观锁用 */
+  updated_at: string | null
   has_promo: boolean
   spec_valid: boolean
   issues: PromoValidationIssue[]
@@ -48,7 +50,7 @@ function phaseView(spec: PromoSpec, phase: PromoPhase, results: GateResult[]): P
 }
 
 const EMPTY = (plan: MarketingPlan, has: boolean, issues: PromoValidationIssue[]): PromoBoard => ({
-  plan_id: plan.id, plan_status: plan.status, has_promo: has, spec_valid: false, issues,
+  plan_id: plan.id, plan_status: plan.status, updated_at: plan.updated_at ?? null, has_promo: has, spec_valid: false, issues,
   today: null, timezone_known: false, playbook: null, approval: null, next_phase: null,
   reconcile: null, reviewed_this_window: false,
 })
@@ -67,7 +69,7 @@ export async function buildPromoBoard(plan: MarketingPlan, now: Date = new Date(
   const reviewed = (plan.generation_meta?.weekly_reviews ?? []).some(r => r.week_start === reconcile.window.start)
 
   return {
-    plan_id: plan.id, plan_status: plan.status, has_promo: true, spec_valid: true, issues: [],
+    plan_id: plan.id, plan_status: plan.status, updated_at: plan.updated_at ?? null, has_promo: true, spec_valid: true, issues: [],
     today: facts.today, timezone_known: facts.timezone_known,
     playbook: { key: facts.playbook.key, evidence: facts.playbook.evidence },
     approval,

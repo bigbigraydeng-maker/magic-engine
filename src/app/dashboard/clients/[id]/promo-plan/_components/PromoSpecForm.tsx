@@ -96,7 +96,7 @@ export function PromoSpecForm({ clientId, plan, options, onSaved }: Props) {
     setSaving(true); setErrors([])
     try {
       const res = await fetch(`/api/clients/${clientId}/marketing-plan/${plan.id}/promo`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ promo: spec }),
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ promo: spec, expected_updated_at: plan.updated_at }),
       })
       const json = await res.json() as ApiError
       if (!json.success) {

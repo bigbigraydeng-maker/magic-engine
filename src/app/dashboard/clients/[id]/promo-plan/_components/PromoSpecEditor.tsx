@@ -25,7 +25,7 @@ export function PromoSpecEditor({ clientId, plan, onSaved }: Props) {
       let promo: unknown
       try { promo = JSON.parse(text) } catch { setErrors(['内容不是合法的 JSON，请检查逗号和引号']); return }
       const res = await fetch(`/api/clients/${clientId}/marketing-plan/${plan.id}/promo`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ promo }),
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ promo, expected_updated_at: plan.updated_at }),
       })
       const json = await res.json() as ApiError & { success: boolean }
       if (!json.success) {
