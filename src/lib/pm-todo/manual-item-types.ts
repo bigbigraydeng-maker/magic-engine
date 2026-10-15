@@ -88,6 +88,9 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'ai_tracker_all_failed_dev',
   // 待确认电话的链接是需要登录的页面，探活多半判成坏链接 —— 不能因此让「有电话没记进客人档案」静默消失。
   'phone_call_needs_review',
+  // 推广计划每日检查：链接是需要登录的页面，探活多半判成坏链接——这条里还有「检查自己没跑成」，绝不能静默消失。
+  'promo_plan_watch',
+  'promo_plan_watch_broken',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -96,6 +99,8 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  | 'promo_plan_watch'
+  | 'promo_plan_watch_broken'
   | 'blog_pr_open'
   | 'not_indexed'
   | 'meta_stuck'
