@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-10-15
 source: doc:docs/tasks/2026-10-15-documentary-series.txt
 done_on: 2026-10-15
-done_ref: doc:docs/tasks/2026-10-15-documentary-series.txt
+done_ref: pr:2694
 verify_by: 2026-10-16
 verify_how: 上线后核对有权客户的系列与已关联视频真实计数，其他客户不得显示该配置，过期编辑拒绝覆盖。
 ---
