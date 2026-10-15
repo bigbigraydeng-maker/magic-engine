@@ -11,4 +11,4 @@ verify_how: 逐条对照：广告草稿入口接阶段检查；客户员工不�
 1) 将来任何「建广告草稿」的入口都必须先过 evaluatePhaseGates（目前只在往执行看板派广告任务那一步接了）。
 2) generate / generate-focus（花 AI 钱、新增草稿）仍允许客户员工调用，要不要收紧待定。
 3) 页面按钮要靠服务端给的 viewer_can_approve 一打开就隐藏，现在是点一下被拒后才隐藏。
-4) supabase/migrations/20260524000003_marketing_plans.sql 的权限写法漏了 TO service_role（线上已修，照这份新建的库是裸的），需另开 A 级 PR 改迁移。
+4) marketing_plans 建表的那份迁移文件 的权限写法漏了 TO service_role（线上已修，照这份新建的库是裸的），需另开 A 级 PR 改迁移。
