@@ -34,7 +34,6 @@ describe('reviewGate', () => {
     autoReady: true,
     redlineHits: [],
     qualityFlags: [],
-    acceptedCategories: [],
     factSourcePrefilled: true,
   }
 
@@ -55,28 +54,12 @@ describe('reviewGate', () => {
     expect(gate.oneClick).toBe(false)
   })
 
-  it('blocks an unaccepted narrator_voice_mismatch flag but allows it once accepted', () => {
-    const flag = { category: 'narrator_voice_mismatch' }
-    const blocked = reviewGate({ ...base, qualityFlags: [flag] })
-    expect(blocked.oneClick).toBe(false)
-
-    const allowed = reviewGate({
-      ...base,
-      qualityFlags: [flag],
-      acceptedCategories: ['narrator_voice_mismatch'],
-    })
-    expect(allowed.oneClick).toBe(true)
-  })
-
   it.each(['competitor_brand', 'placeholder_caption', 'quality_check_unavailable'])(
-    'never settles a non-acceptable flag %s even if listed as accepted',
+    'blocks one-click for quality flag %s',
     (category) => {
-      const gate = reviewGate({
-        ...base,
-        qualityFlags: [{ category }],
-        acceptedCategories: [category],
-      })
+      const gate = reviewGate({ ...base, qualityFlags: [{ category }] })
       expect(gate.oneClick).toBe(false)
+      expect(gate.reasons).toEqual([`品控提示未处理:${category}`])
     },
   )
 
@@ -89,15 +72,14 @@ describe('reviewGate', () => {
     const gate = reviewGate({
       autoReady: false,
       redlineHits: ['最便宜'],
-      qualityFlags: [{ category: 'narrator_voice_mismatch' }],
-      acceptedCategories: [],
-      factSourcePrefilled: false,
+      qualityFlags: [{ category: 'competitor_brand' }],
+        factSourcePrefilled: false,
     })
     expect(gate.oneClick).toBe(false)
     expect(gate.reasons).toEqual([
       '自动媒体检测未通过',
       '文案命中品牌红线,需逐项核对',
-      '品控提示未处理:narrator_voice_mismatch',
+      '品控提示未处理:competitor_brand',
       '来源网址没有预填,需要手动填写',
     ])
   })

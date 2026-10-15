@@ -214,19 +214,12 @@ export async function completeWorkOrder(
     (typeof receiptHookSegment?.['caption'] === 'string' ? (receiptHookSegment['caption'] as string) : null) ??
     overlays.find((o): o is string => !!o) ??
     null
-  const persona = (brief?.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
-  const personaName = typeof persona?.name === 'string' ? persona.name.trim() : ''
   const brandNameForGuard = (brief?.brand_name as string | undefined) ?? ''
-  const intendedNarrator = personaName
-    ? `a single first-person narrator (a real ${brandNameForGuard || 'brand'} representative named ` +
-      `${personaName}${persona?.role ? `, ${persona.role}` : ''}, speaking about their own experience)`
-    : null
   const qualityFlags = await scanContentQualityFlags({
     brandName: brandNameForGuard,
     angleLabel: typeof wo.angle === 'string' ? (wo.angle as string) : null,
     onScreenHook,
     captions: [caption, ...overlays].filter((t): t is string => !!t),
-    intendedNarrator,
   })
 
   // ③ new_clips 幂等入库:idempotency_key 命中已有行 → 复用不重插

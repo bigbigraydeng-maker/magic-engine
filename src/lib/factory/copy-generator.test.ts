@@ -27,6 +27,16 @@ const BAD_JSON = { text: 'not valid json at all' }
 beforeEach(() => callClaudeChat.mockReset())
 
 describe('generateAdCopy', () => {
+  it('persona 简报:不再强制第一人称/扮演人物,但防编造红线仍在(2026-10-16 取消口吻要求)', async () => {
+    callClaudeChat.mockResolvedValue(BAD_JSON)
+    const withPersona = { ...BRIEF, brand_voice: { persona: { name: 'Some Guide', role: 'tour guide' } } } as unknown as MasterBrief
+    await generateAdCopy({ brief: withPersona, angle: 'floors', rationale: 'why', segmentRoles: ROLES })
+    const prompt = JSON.stringify(callClaudeChat.mock.calls[0])
+    expect(prompt).not.toContain('第一人称')
+    expect(prompt).not.toContain('Some Guide')
+    expect(prompt).toContain('编造红线')
+  })
+
   it('🔴 LLM 填了别的域名 → endcard.url 被强锁回 master_brief.website(防幻觉)', async () => {
     callClaudeChat.mockResolvedValue({
       text: JSON.stringify({
