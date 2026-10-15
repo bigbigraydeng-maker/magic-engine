@@ -22,10 +22,10 @@ import { createPauseCampaignCapability } from './ads/pause-campaign'
 import { createCutUnitBudgetCapability } from './ads/cut-unit-budget'
 import { createCutCampaignBudgetCapability } from './ads/cut-campaign-budget'
 import { createScaleUnitBudgetCapability } from './ads/scale-unit-budget'
+import { createSwapCreativeCapability } from './ads/swap-creative'
 import {
   createAddRetargetingAdsetCapability,
   createBudgetMovePlanCapability,
-  createSwapCreativeCapability,
 } from './ads/deferred-to-human'
 
 /**

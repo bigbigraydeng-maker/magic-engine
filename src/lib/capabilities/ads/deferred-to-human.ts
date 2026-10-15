@@ -4,7 +4,8 @@
  * 涉及的动作（都已在注册表里、都声明成 bounded 自治）：
  *   · ads.budget_move_plan       —— 挪预算（先减后加、总额不变、多腿事务）
  *   · ads.add_retargeting_adset  —— 新建再营销广告组（要建广告组、绑受众、绑素材）
- *   · ads.swap_creative          —— 给广告换一个已批准的素材（要建 creative、切换 ad）
+ *
+ * `ads.swap_creative` 2026-10-15 已退出本文件，走真实实现 `./swap-creative.ts`。
  *
  * 🔴 为什么先做 stub 而不是真实执行：
  *    这三个都要跨多个 Meta 对象、跨多次 API、涉及 audience/creative 域的封装
@@ -36,8 +37,6 @@ const REASON: Readonly<Record<string, string>> = {
     '挪预算涉及先减后加两腿事务，本轮先不上线自动执行；PM 手动按建议在 Ads Manager 里改',
   'ads.add_retargeting_adset':
     '新建再营销广告组要跨 audience/adset/ad 三层，本轮先不上线自动执行；PM 手动在 Ads Manager 里建',
-  'ads.swap_creative':
-    '换素材要建新 creative 再切换，本轮先不上线自动执行；PM 手动在 Ads Manager 里换',
 }
 
 function deferredStep(actionKey: ActionKey) {
@@ -103,6 +102,5 @@ export function createAddRetargetingAdsetCapability(sb: SupabaseClient): Capabil
   }
 }
 
-export function createSwapCreativeCapability(sb: SupabaseClient): CapabilityImplementation {
-  return createDeferredCapability('ads.swap_creative', sb)
-}
+// `ads.swap_creative` 的占位已退役 —— 2026-10-15 起走真实实现
+// `./swap-creative.ts`（只换成账户里已存在、素材池已批准、同主页的素材）。
