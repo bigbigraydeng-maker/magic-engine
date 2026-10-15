@@ -10,11 +10,8 @@ done_ref: pr:2694
 verify_by: 2026-10-16
 verify_how: 上线后核对有权客户的系列与已关联视频真实计数，其他客户不得显示该配置，过期编辑拒绝覆盖。
 ---
-本地实现已完成，新增Winter选题、系列筛选、成片链接和公开播放计数。
-复用内容工厂、客户配置和既有视频数据读取；不改发布或平台授权。
-本地测试与双审证据见任务说明；尚未合并部署、未写生产客户数据。
-平台数据权限及成片托管需上线时核实，不把空值报告为零播放。
-封面已补齐并接入本地卡片：沿用上海，新增常规和Winter草稿，来源授权随素材保存。
-
-2026-10-15 production evidence: original feature merged in PR #2680 and is now live; authenticated dashboard shows 12 episode plans and covers. Shanghai linked to https://www.youtube.com/watch?v=xJld_NaRQBU via existing UI, with successful actual public counter read. Local Chongqing/Zhangjiajie review files are not hosted previews.
-Follow-up cover correction: replace suspected Shanghai gazebo photo incorrectly used as Hangzhou backdrop with source-labelled Leifeng Pagoda frame (Pexels 39955168, LayG Traveller); same locked template and three image sizes. Static asset/attribution change only; no application tests/build locally. Source and image QA recorded in authoritative task.
+系列与 Winter 规划已通过 PR #2680 上线，认证后台可见 12 个选题与封面；不是 12 部成片。
+复用既有内容工厂、客户配置、平台链接与公开播放计数；上海、杭州已关联并成功读取真实计数。
+现有本地评审片尚未托管为后台播放预览；生产状态字段仍需后续同步，详见任务说明。
+本次修正杭州封面为来源标注雷峰塔的 Pexels 39955168 / LayG Traveller，沿用锁定模板及三种尺寸。
+来源、独立审查与检查证据见任务说明；本次仅静态图片、署名与记录变更，无应用逻辑改动。
