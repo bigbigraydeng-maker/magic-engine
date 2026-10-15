@@ -44,10 +44,12 @@ import {
 } from './creative-recipe.mjs'
 
 import {
+  MUSIC_VOCAL_REGISTRY_PATH,
   checkRemotionHealth,
   processRemotionOrder,
   resolveEngine,
 } from './remotion-branch.mjs'
+import { MusicVocalGateError, assertBgmFileVocalClear } from './music-vocal-gate.mjs'
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 
@@ -451,6 +453,12 @@ function assemble(wo, localPaths, copy, tmp) {
   const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
   const profile = creativeProfile(brandKit, wo)
   const bgm = resolveBgm(profile, brandKit)
+  // Fail-closed vocal gate: a file BGM must be registered vocal-free; a mood-only request lets the
+  // renderer pick a track we cannot see, so it cannot be verified and is refused.
+  if (bgm) assertBgmFileVocalClear(bgm, MUSIC_VOCAL_REGISTRY_PATH, { label: 'legacy' })
+  else if (profile.music_mood) {
+    throw new MusicVocalGateError('MUSIC_VOCAL_UNREGISTERED', 'music_mood 由出片程序自选曲，选中的文件无法在出片前核验人声；请改成指定曲目并先登记')
+  }
   const cfg = {
     output: out,
     brand_kit: brandKit,
@@ -584,6 +592,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     probeLoudnessFn,
     probeMediaEvidenceFn = () => ({}),
     hashFileFn,
+    musicVocalGateFn,
     execAssembleFn,
     completeFn,
     receiptValidator,
@@ -633,6 +642,11 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     minLoudnessLufs: minBgmInputLoudnessLufs,
   })
   logFn?.(`  BGM: ${music.portableId} (${music.source}, ${music.loudnessLufs.toFixed(1)} LUFS)`)
+  // Vocal gate on the exact file handed to the renderer (fail-closed: no gate fn = refuse).
+  if (typeof musicVocalGateFn !== 'function') {
+    throw new MusicVocalGateError('MUSIC_VOCAL_REGISTRY_INVALID', 'recipe 分支缺少音乐人声检查函数，拒绝出片')
+  }
+  musicVocalGateFn(music.absPath, { label: music.portableId })
 
   // 6. 结构化文案(禁 angle 兜底 · R9)。multicut(text_overlay_roles 含 'middle')走
   // hook+middle 校验并构建 captionsByRole;legacy 保持 hookText/ctaText 原路径不变。
@@ -845,6 +859,7 @@ async function processRecipeOrder(wo, tmp, recipe) {
       probeLoudnessFn: probeLoudnessLufs,
       probeMediaEvidenceFn: probeMediaEvidence,
       hashFileFn: sha256File,
+      musicVocalGateFn: (absPath, opts) => assertBgmFileVocalClear(absPath, MUSIC_VOCAL_REGISTRY_PATH, opts),
       execAssembleFn: ({ cfgPath, outputPath }) => {
         execFileSync(PYTHON_BIN, [MAKE_PROMO, cfgPath], { stdio: 'inherit' })
         // 30fps muxing can leave one trailing frame (12.033s for a 12.000s

@@ -4,7 +4,9 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText } from './remotion-branch.mjs'
+import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText, defaultMusicVocalGate, MUSIC_VOCAL_REGISTRY_PATH } from './remotion-branch.mjs'
+import { MusicVocalGateError } from './music-vocal-gate.mjs'
+import { createHash } from 'node:crypto'
 
 const roots = []
 afterEach(() => {
@@ -91,6 +93,7 @@ function makeDeps(env, over = {}) {
     healthFn: () => [],
     loadEngineFn: async () => makeEngine(),
     renderFn: vi.fn(async ({ outFile }) => { writeFileSync(outFile, 'video-bytes'); return { code: 0, stderrTail: '' } }),
+    musicVocalGateFn: vi.fn(async ({ label }) => ({ sha256: 'a'.repeat(64), verdict: 'none', strength: 'signed', name: label, window: [0, 1], cleanUntilSec: null })),
     heartbeatIntervalMs: 10, timeoutSec: 600,
     ...over,
   }
@@ -795,5 +798,103 @@ describe('buildRemotionText optional dateLine', () => {
     const reveal = buildRemotionText(clone).reveal
     expect(reveal).toBe('THE LIST. FROM A$12,345 PER PERSON EXAMPLE ONLY')
     expect(reveal).not.toContain('undefined')
+  })
+})
+
+describe('music vocal gate', () => {
+  const montageWo = () => {
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'montage', props: MONTAGE_PROPS }
+    return wo
+  }
+  const clientMusicDeps = (env, over = {}) => {
+    writeFileSync(join(env.lib, 'song-one.m4a'), 'client-bytes')
+    return makeDeps(env, {
+      loadEngineFn: async () => makeEngine({
+        loadTemplate: (id, p) => ({ compositionId: 'MontageReel', props: p, assetFiles: MONTAGE_FILES, totalFrames: 150 }),
+      }),
+      probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 5, audio_stream_present: true })),
+      ...over,
+    })
+  }
+
+  it('checks the STAGED music file with the used window and records the receipt', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env)
+    const res = await run(env, deps, montageWo())
+    expect(res).toEqual({ ok: true, cost: 0 })
+    const call = deps.musicVocalGateFn.mock.calls[0][0]
+    expect(call.stagedPath.endsWith('assets/song-one.m4a')).toBe(true)
+    expect(call.totalFrames).toBe(150)
+    expect(call.fps).toBe(30)
+    const segments = JSON.parse(deps.uploadSignedFn.mock.calls[1][1].toString())
+    expect(segments.music_vocal_gate.verdict).toBe('none')
+  })
+
+  it('blocks the render (non-retryable) when the gate says vocals are present', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env, {
+      musicVocalGateFn: vi.fn(async () => { throw new MusicVocalGateError('MUSIC_VOCAL_PRESENT', '音乐含人声') }),
+    })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBe(false)
+    expect(err.message).toMatch(/音乐人声检查没过.*MUSIC_VOCAL_PRESENT/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the gate itself errors', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env, { musicVocalGateFn: vi.fn(async () => { throw new Error('boom') }) })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/检查本身出错/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('does not run the gate when the order has no music', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env)
+    await run(env, deps)
+    expect(deps.musicVocalGateFn).not.toHaveBeenCalled()
+  })
+
+  describe('defaultMusicVocalGate', () => {
+    const setup = (entries) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mvg-'))
+      const music = join(dir, 'm.mp3')
+      writeFileSync(music, 'tiny-music')
+      const sha = createHash('sha256').update('tiny-music').digest('hex')
+      const reg = join(dir, 'reg.json')
+      writeFileSync(reg, JSON.stringify(entries(sha)))
+      return { music, reg, sha }
+    }
+    const base = { name: 'm', signedAt: '2026-10-16T00:00:00.000Z', evidence: 'doc:x' }
+    const args = (t, over = {}) => ({ stagedPath: t.music, props: { musicStartSec: 0 }, totalFrames: 300, fps: 30, label: 'm.mp3', registryPath: t.reg, ...over })
+
+    it('passes a signed vocal-free track', async () => {
+      const t = setup((sha) => [{ ...base, sha256: sha, verdict: 'none', signedBy: 'human:Ray' }])
+      const receipt = await defaultMusicVocalGate(args(t))
+      expect(receipt.verdict).toBe('none')
+    })
+    it('rejects an unregistered file by content hash', async () => {
+      const t = setup(() => [])
+      await expect(defaultMusicVocalGate(args(t))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_UNREGISTERED' })
+    })
+    it('rejects a vocal track and a window past cleanUntilSec', async () => {
+      const t1 = setup((sha) => [{ ...base, sha256: sha, verdict: 'present', signedBy: 'auto-scan' }])
+      await expect(defaultMusicVocalGate(args(t1))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_PRESENT' })
+      const t2 = setup((sha) => [{ ...base, sha256: sha, verdict: 'unknown', cleanUntilSec: 10, signedBy: 'PM审片@abcdef12', strength: 'approval-only' }])
+      await expect(defaultMusicVocalGate(args(t2))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_UNKNOWN' })
+    })
+    it('refuses to run when the registry is missing (never an empty table)', async () => {
+      const t = setup(() => [])
+      await expect(defaultMusicVocalGate(args(t, { registryPath: join(tmpdir(), 'nope-registry.json') }))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_REGISTRY_INVALID' })
+    })
+    it('the shipped registry parses and blocks the known vocal tracks', async () => {
+      const { loadMusicVocalRegistry } = await import('./music-vocal-gate.mjs')
+      const reg = loadMusicVocalRegistry(MUSIC_VOCAL_REGISTRY_PATH)
+      expect(reg.filter((e) => e.verdict === 'present').length).toBeGreaterThanOrEqual(3)
+    })
   })
 })

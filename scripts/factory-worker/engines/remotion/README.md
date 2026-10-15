@@ -65,6 +65,7 @@ node render.mjs --props examples/sydney-apartment.props.json --public-dir /tmp/r
 
 `catalog/music.json` 登记了可用的库乐（29 首，来自 `MagicLab_Studio/Music` 与 `MagicLab_Studio/_shared/music`；客户专属曲不入共享目录）。节拍不再手写：`src/music.ts` 的 `beatsFor(entry, itemCount)` 从目录里的 BPM / 首拍偏移 / 小节位算出 props 里的 `beats`，`stagedFileName(entry)` 给出 `props.musicFile` 要写的安全文件名（渲染时音频要以这个名字放进素材目录，原文件名带空格和中文）。
 
+- **音乐人声登记（出片前必过，2026-10-16 起）**：出片机在渲染前按**暂存后实际文件的 sha256**查 `catalog/music-vocals.json`，只有登记为「无人声」且已核验区间覆盖本次用到的 `[musicStartSec, +成片时长+1 秒]` 才出片；含人声、未登记、区间没覆盖、登记表坏了都一律拦下（旧版 legacy 与 recipe 路径同样检查，`music_mood` 由引擎自选曲的一律拒绝）。新增或换了一首曲子（包括 `_n/_q` 等派生文件，各自独立登记，不继承母曲）后，必须由**真人**听过再登记，`signedBy` 只接受 `human:<名字>` 或回填脚本生成的 `PM审片@<工单号前8位>`；转写（whisper）只能用来提名可疑，不能当作「无人声」的依据。登记表改动一律按 A 级流程。回填脚本：`node ../../tools/backfill-music-vocals.mjs --studio-root <镜像目录> --out entries.json`（只读，只认 PM 已通过的已发布工单）。
 - **新增一首**：`python3 ../../tools/analyze-music.py <音频文件>` 输出一行 JSON（时长、检测 BPM、首拍偏移、小节位），照格式补 `id / folder / file / energy / style / mood` 进 `music.json`，状态先写 `beats_unverified`（只表示节拍还没量过，与版权无关）。需要 python3 + numpy + scipy + ffmpeg（出片机已有 Python3 + ffmpeg）。
 - **检测会翻倍**：算法偏向报更快的拍，同一首曲子的两个版本测出过 199 与 100。所以检测值 > 150 一律按双倍速折半（`FOLD_ABOVE_BPM`）；**每首歌第一次渲完要量一次音画偏差**（PM 备份里的 `qa.py`），在 ±50 毫秒内才把状态改成 `ready`。
 - **`beats_unverified` 的歌先不让选器选用**（选器是后续包）——只因为节拍还没用渲后偏差量过，不是版权问题；目前只有 `pipa-trap` 量过（偏差 −10 毫秒），其余 28 首待量。
