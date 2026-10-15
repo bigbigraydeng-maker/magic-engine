@@ -231,15 +231,49 @@ describe('detectWatchFindings', () => {
     expect(blind?.what).toContain('看不清不等于正常')
   })
 
-  it('已批准 + blind=true → reconcile_blind', () => {
+  it('已批准 + 花费读不到（核心行 unknown）→ reconcile_blind', () => {
     const board = makeBoard({
       plan_status: 'approved',
-      reconcile: makeReconcile({ rows: [], blind: true }),
+      reconcile: makeReconcile({ rows: [makeRow({ key: 'spend', status: 'unknown', actual: null, reason: '广告花费读不出来' })], blind: true }),
     })
     const findings = detectWatchFindings(board, PLAN)
     const blind = findings.find(f => f.code === 'reconcile_blind')
     expect(blind).toBeDefined()
     expect(blind?.what).toContain('看不清不等于正常')
+  })
+
+  it('计划还没开始（week_index 为空）→ 不出任何对账类待办', () => {
+    const board = makeBoard({
+      plan_status: 'approved',
+      reconcile: { ...makeReconcile({ rows: [makeRow({ key: 'spend', status: 'unknown', actual: null, reason: '广告花费读不出来' }), makeRow({ status: 'behind' })], blind: true }), week_index: null },
+    })
+    expect(detectWatchFindings(board, PLAN)).toEqual([])
+  })
+
+  it('目标不适用 / 窗口里没有生效的广告步骤 → 是确定状态，不报「看不清」', () => {
+    const board = makeBoard({
+      plan_status: 'approved',
+      reconcile: makeReconcile({ rows: [
+        makeRow({ key: 'results_goal', status: 'unknown', actual: null, planned: null, reason: '目标不适用（状态：completed）' }),
+        makeRow({ key: 'spend', status: 'unknown', actual: null, reason: '这个窗口内没有生效的广告步骤（可能在暂停区间或阶段之外）' }),
+      ], blind: true }),
+    })
+    expect(detectWatchFindings(board, PLAN).find(f => f.code === 'reconcile_blind')).toBeUndefined()
+  })
+
+  it('广告平台自报结果那一行读不到，不算核心行，不报「看不清」', () => {
+    const board = makeBoard({
+      plan_status: 'approved',
+      reconcile: makeReconcile({ rows: [makeRow({ key: 'results_meta', status: 'unknown', actual: null, reason: '广告平台结果读不出来' })], blind: false }),
+    })
+    expect(detectWatchFindings(board, PLAN)).toEqual([])
+  })
+
+  it('已批准但推广结构读不出来 → plan_structure_unreadable；草稿读不出来不吵', () => {
+    const approved = makeBoard({ plan_status: 'approved', spec_valid: false })
+    expect(detectWatchFindings(approved, PLAN).map(f => f.code)).toEqual(['plan_structure_unreadable'])
+    const draft = makeBoard({ plan_status: 'draft', spec_valid: false })
+    expect(detectWatchFindings(draft, PLAN)).toEqual([])
   })
 
   it('已批准全部正常 → []', () => {

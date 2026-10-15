@@ -2,8 +2,8 @@
  * Inngest 云端消费者：推广计划每日检查，每天早上跑一次（只读）。
  *
  * 🔴 本函数只读：读 marketing_plans、跑纯函数检查，唯一的写是 cron_run_logs 回执。
- *    不发布、不扣费、不外发。回执同时进 cron_run_logs 和事件（PROMO_WATCH_EVENT），
- *    今日待办（pm-todo/promo-plan-watch-items.ts）读回执下发待办。
+ *    不发布、不扣费、不外发。回执同时进 cron_run_logs 和事件（PROMO_WATCH_EVENT）；
+ *    今日待办（pm-todo/promo-plan-watch-items.ts）读的就是 cron_run_logs 里的这份回执，不自己现算。
  * 🔴 读不到计划列表 / 单份计划算失败都不算函数失败：回执 status 带原因，
  *    今日待办会据此出一条带步骤的待办。只有函数自己抛异常才写 failed。
  * 🔴 新增函数必须有人去 Inngest 后台对 `/api/inngest` 重新 Sync 一次，不然「安静地不跑」。
@@ -20,7 +20,7 @@ import {
   type WatchReceipt,
 } from '@/lib/marketing-plan/promo/daily-watch-run'
 
-/** 新西兰时间每天 07:10（早于今日待办生成）。 */
+/** 新西兰时间每天 07:10。今日待办读的是回执，所以即使待办先生成，也只是读到前一天的回执并在过期时喊出来。 */
 export const PROMO_WATCH_CRON = '10 7 * * *'
 export const PROMO_WATCH_TZ = 'Pacific/Auckland'
 
@@ -55,7 +55,8 @@ export const promoPlanDailyWatch = inngest.createFunction(
 
     // 回执作为事件发出去：事件名业务可读，回执字段齐全。
     await step.run('emit-receipt', async () => {
-      await inngest.send({ name: PROMO_WATCH_EVENT, data: receipt })
+      // id = 回执编号：步骤重试时同一份回执不会被重复发出
+      await inngest.send({ id: receipt.request_id, name: PROMO_WATCH_EVENT, data: receipt })
     })
 
     await step.run('finish-run', async () => {

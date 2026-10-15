@@ -225,6 +225,11 @@ describe('POST verify — 人工核实', () => {
   })
 })
 
+const approvedWithFingerprint = () => planWith(baseSpec(), {
+  status: 'approved',
+  generation_meta: { approval_receipt: { content_hash: promoContentHash(baseSpec()) } },
+})
+
 describe('POST acknowledge — 按计划继续', () => {
   const onTrackSpend = () => {
     const days: Record<string, number> = {}
@@ -234,13 +239,19 @@ describe('POST acknowledge — 按计划继续', () => {
   beforeEach(() => { m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks() }), goodReconFacts({ spend_cents_by_account_day: onTrackSpend() }))) })
   it('对账落后 / 看不清时 → 409，不留"没意见"记录', async () => {
     m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts(), goodReconFacts({ spend_cents_by_account_day: { act_1: {} } })))
-    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.plan = approvedWithFingerprint()
     expect((await ACK(req({}), { params: P })).status).toBe(409)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('批准记录里没有内容版本（没法确认批的是哪一版）→ 409，不留"没意见"记录', async () => {
+    m.plan = planWith(baseSpec(), { status: 'approved' })
+    const res = await ACK(req({}), { params: P })
+    expect(res.status).toBe(409)
     expect(m.updates).toHaveLength(0)
   })
   it('到期阶段的检查清单没过关（人工核实还是灰）→ 409，不留"没意见"记录', async () => {
     m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts(), goodReconFacts({ spend_cents_by_account_day: onTrackSpend() })))
-    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.plan = approvedWithFingerprint()
     const res = await ACK(req({}), { params: P })
     expect(res.status).toBe(409)
     expect(m.updates).toHaveLength(0)
@@ -249,7 +260,7 @@ describe('POST acknowledge — 按计划继续', () => {
     m.plan = planWith(baseSpec(), { status: 'draft' })
     expect((await ACK(req({}), { params: P })).status).toBe(409)
 
-    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.plan = approvedWithFingerprint()
     const first = await (await ACK(req({}), { params: P })).json()
     expect(first.success).toBe(true)
     expect(first.record.week_start).toBe('2026-11-04')
@@ -260,7 +271,7 @@ describe('POST acknowledge — 按计划继续', () => {
     expect(m.updates).toHaveLength(1) // 没有再写
   })
   it('不改计划内容：写的只有 generation_meta', async () => {
-    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.plan = approvedWithFingerprint()
     await ACK(req({}), { params: P })
     expect(Object.keys(m.updates[0])).toEqual(['generation_meta'])
   })

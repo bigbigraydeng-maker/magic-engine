@@ -72,7 +72,9 @@ export async function buildPromoBoard(plan: MarketingPlan, now: Date = new Date(
   const reviewed = (plan.generation_meta?.weekly_reviews ?? []).some(r => r.week_start === reconcile.window.start)
 
   const receiptHash = plan.generation_meta?.approval_receipt?.content_hash
-  const contentChanged = typeof receiptHash === 'string' && receiptHash !== '' && receiptHash !== promoContentHash(spec)
+  // 已批准却没有批准指纹（绕过批准接口批的，或指纹上线前批的）按「没法确认」处理，和自动执行那边的口径一致（那边也会停）
+  const hasFingerprint = typeof receiptHash === 'string' && receiptHash !== ''
+  const contentChanged = plan.status === 'approved' && (!hasFingerprint || receiptHash !== promoContentHash(spec))
 
   return {
     plan_id: plan.id, plan_status: plan.status, updated_at: plan.updated_at ?? null, has_promo: true, spec_valid: true, issues: [],

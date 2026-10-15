@@ -79,6 +79,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   tools_wide_budget_warning: 'decide',
   // 推广计划每日检查：草稿等你批准 / 批准后内容被改 / 到期阶段检查没过 / 对账偏差——都是批准、花钱、改计划，要 PM 拍板
   promo_plan_watch: 'decide',
+  promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
@@ -270,6 +271,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   ai_gateway_broken: 'AI 调用卡在网关，今天写稿 / 起草类的东西可能都没出来',
   cron_not_running: '有自动任务没按时跑，它负责的那一栏今天可能不全',
   cron_silent_success: '有自动任务显示跑完了但一行没写，它负责的那一栏今天可能不全',
+  promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
 }
 

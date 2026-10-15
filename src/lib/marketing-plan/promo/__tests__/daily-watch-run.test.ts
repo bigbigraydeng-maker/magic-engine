@@ -14,7 +14,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 import type { PromoBoard } from '../board'
-import type { ManualItem } from '../../../pm-todo/manual-item-types'
 
 // vi.hoisted：mock 工厂和测试体共用同一份可变状态。
 const m = vi.hoisted(() => {
@@ -35,7 +34,6 @@ vi.mock('../board', () => ({
 
 // 被测模块必须在 vi.mock 之后 import。
 import { runPromoPlanWatch } from '../daily-watch-run'
-import { pushPromoPlanWatchItems } from '../../../pm-todo/promo-plan-watch-items'
 
 /** 造一份最小可用的 MarketingPlan。 */
 function makePlan(over: Partial<MarketingPlan> & Pick<MarketingPlan, 'id' | 'client_id' | 'title'>): MarketingPlan {
@@ -132,18 +130,6 @@ describe('runPromoPlanWatch', () => {
     expect(m.writes).toHaveLength(0)
   })
 
-  it('读计划列表失败：pushPromoPlanWatchItems 推一条 infra 的「没跑成」待办', async () => {
-    m.queryError = { message: '数据库连不上' }
-
-    const items: ManualItem[] = []
-    await pushPromoPlanWatchItems(makeSupabase(), items, nameOf)
-
-    expect(items).toHaveLength(1)
-    expect(items[0].client_id).toBe('infra')
-    expect(items[0].what).toContain('没跑成')
-    expect(m.writes).toHaveLength(0)
-  })
-
   it('一份草稿 + can_approve：出一条 draft_ready_to_approve，回执 ok', async () => {
     const plan = makePlan({ id: 'p1', client_id: 'c1', title: '春季推广', status: 'draft' })
     m.plans = [plan]
@@ -175,37 +161,6 @@ describe('runPromoPlanWatch', () => {
     expect(sources[0].finding.code).toBe('draft_ready_to_approve')
     expect(sources[0].client_id).toBe('c1')
     expect(sources[0].plan_id).toBe('p1')
-    expect(m.writes).toHaveLength(0)
-  })
-
-  it('一份草稿 + can_approve：pushPromoPlanWatchItems 推出对应待办', async () => {
-    const plan = makePlan({ id: 'p1', client_id: 'c1', title: '春季推广', status: 'draft' })
-    m.plans = [plan]
-    m.buildPromoBoard.mockResolvedValue(
-      makeBoard({
-        plan_id: 'p1',
-        plan_status: 'draft',
-        approval: {
-          can_approve: true,
-          blockers: [],
-          unverified: [],
-          results: [],
-          per_phase: [],
-          deferred_blockers: [],
-          note: null,
-        },
-      }),
-    )
-
-    const items: ManualItem[] = []
-    await pushPromoPlanWatchItems(makeSupabase(), items, nameOf)
-
-    expect(items).toHaveLength(1)
-    expect(items[0].kind).toBe('promo_plan_watch')
-    expect(items[0].client_id).toBe('c1')
-    expect(items[0].href.endsWith('/dashboard/clients/c1/promo-plan')).toBe(true)
-    expect(items[0].what.length).toBeGreaterThan(0)
-    expect(items[0].how.length).toBeGreaterThan(0)
     expect(m.writes).toHaveLength(0)
   })
 
@@ -253,20 +208,6 @@ describe('runPromoPlanWatch', () => {
     expect(m.writes).toHaveLength(0)
   })
 
-  it('一份计划算失败：pushPromoPlanWatchItems 推一条「每日检查没跑成」待办', async () => {
-    const bad = makePlan({ id: 'bad', client_id: 'c1', title: '坏计划', status: 'draft' })
-    m.plans = [bad]
-    m.buildPromoBoard.mockRejectedValue(new Error('看板算不出来'))
-
-    const items: ManualItem[] = []
-    await pushPromoPlanWatchItems(makeSupabase(), items, nameOf)
-
-    expect(items).toHaveLength(1)
-    expect(items[0].what).toContain('每日检查没跑成')
-    expect(items[0].client_id).toBe('c1')
-    expect(m.writes).toHaveLength(0)
-  })
-
   it('一份已批准且一切正常：0 条待办（没事不出声）', async () => {
     const plan = makePlan({ id: 'p1', client_id: 'c1', title: '已批准计划', status: 'approved' })
     m.plans = [plan]
@@ -291,9 +232,7 @@ describe('runPromoPlanWatch', () => {
     expect(sources).toEqual([])
     expect(failures).toEqual([])
 
-    const items: ManualItem[] = []
-    await pushPromoPlanWatchItems(makeSupabase(), items, nameOf)
-    expect(items).toHaveLength(0)
+    expect(receipt.items).toEqual([])
     expect(m.writes).toHaveLength(0)
   })
 
