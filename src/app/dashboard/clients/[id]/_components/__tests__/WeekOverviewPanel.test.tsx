@@ -43,8 +43,9 @@ function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
       ],
     },
     story_error: null,
-    reels: [{ id: 'r1', status: 'in_review', angle: '上海价格', created_at: '2026-10-12T00:00:00Z', published_at: null, permalink: null }],
+    reels: [{ id: 'r1', status: 'in_review', angle: '上海价格', created_at: '2026-10-12T00:00:00Z', published_at: null, permalink: null, music_file: null, template: null }],
     reels_error: null,
+    reel_variety: { same_track_max: 0, same_track_file: null, price_screen_count: 0, total: 1 },
     post: { connected: false },
     ...overrides,
   }
@@ -58,7 +59,10 @@ function mockFetch(body: unknown, status = 200) {
 }
 
 beforeEach(() => vi.unstubAllGlobals())
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('WeekOverviewPanel', () => {
   it('says rehearsal mode and the pack state in words, groups Stories by New Zealand day, marks Posts as not wired', async () => {
@@ -148,5 +152,78 @@ describe('WeekOverviewPanel', () => {
     await screen.findByText(/演练模式/)
     expect(container.textContent).toContain('名额未配置')
     expect(container.textContent).not.toMatch(/用了 \d+\/0/)
+  })
+
+  it('headline reports each line separately, Story all waiting', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-13T00:00:00Z'))
+    mockFetch({ success: true, ...overview() })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText('图文：未接入')
+    expect(screen.getByText('Story：本周 2 条 · 库里记为已发 0 · 已过点没发出 0 · 待发 2 · 被拦 0')).toBeTruthy()
+    expect(screen.getByText('Reel：在审 1 · 库里记为已上传 0（平台状态未核）')).toBeTruthy()
+  })
+
+  it('a Story whose time has passed but is still waiting says it did not go out', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-14T02:00:00Z'))
+    mockFetch({ success: true, ...overview() })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText(/已过点没发出 2/)
+    expect(screen.getAllByText(/已过点，没发出（库里仍是待发）/).length).toBe(2)
+  })
+
+  it('a recorded-as-sent Story and an uploaded Reel never use the bare word', async () => {
+    const base = overview()
+    mockFetch({
+      success: true,
+      ...overview({
+        story: { ...base.story!, items: [{ ...base.story!.items[0], status: 'SENT' }, base.story!.items[1]] },
+        reels: [
+          {
+            id: 'r9',
+            status: 'published',
+            angle: '已上传的',
+            created_at: '2026-10-12T00:00:00Z',
+            published_at: '2026-10-13T00:00:00Z',
+            permalink: 'https://example.com/reel',
+            music_file: null,
+            template: null,
+          },
+        ],
+      }),
+    })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText(/演练模式/)
+    expect(container.textContent).toContain('库里记为已发')
+    expect(container.textContent).toContain('库里记为已上传')
+    expect(container.textContent).toContain('平台状态未核')
+    expect(container.textContent).not.toMatch(/(?<!库里记为)已发/)
+  })
+
+  it('variety hint is orange with a rule pointer when a track repeats', async () => {
+    mockFetch({ success: true, ...overview({ reel_variety: { same_track_max: 3, same_track_file: 'a.mp3', price_screen_count: 2, total: 3 } }) })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    const line = await screen.findByText(/同一首 BGM 最多出现 3 次；价格屏 2\/3（规则见放行规则文档）/)
+    expect(line.className).toContain('C2570C')
+  })
+
+  it('variety hint stays plain when things look varied, and says BGM unread when no data', async () => {
+    mockFetch({ success: true, ...overview({ reel_variety: { same_track_max: 1, same_track_file: 'a.mp3', price_screen_count: 0, total: 3 } }) })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    const line = await screen.findByText('最近 3 条 Reel：同一首 BGM 最多出现 1 次；价格屏 0/3')
+    expect(line.className).not.toContain('C2570C')
+    expect(container.textContent).not.toContain('规则见放行规则文档')
+    cleanup()
+    mockFetch({ success: true, ...overview({ reel_variety: { same_track_max: 0, same_track_file: null, price_screen_count: 0, total: 3 } }) })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText(/BGM 未读到/)
+  })
+
+  it('no deadline words and no customer names', async () => {
+    mockFetch({ success: true, ...overview() })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText(/演练模式/)
+    expect(container.textContent).not.toMatch(/截止|限时|倒计时|CTS|旅游/)
   })
 })

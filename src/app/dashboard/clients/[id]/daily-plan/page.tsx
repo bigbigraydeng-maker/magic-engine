@@ -90,7 +90,7 @@ export default function DailyPlanPage() {
       </div>
 
       <div className="flex gap-2" role="tablist" aria-label="每日计划内容类型">
-        {([['overview', '发布日历'], ['post', '图文 Post'], ['reels', '视频 Reels']] as const).map(([key, label]) => (
+        {([['overview', '社媒日常'], ['post', '图文 Post'], ['reels', '视频 Reels']] as const).map(([key, label]) => (
           <button
             key={key}
             type="button"

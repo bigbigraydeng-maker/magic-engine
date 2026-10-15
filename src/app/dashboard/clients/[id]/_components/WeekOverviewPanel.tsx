@@ -10,12 +10,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { STATUS_META } from '@/app/dashboard/factory/_components/statusMeta'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import {
-  describeItemStatusInPack,
   describeMode,
   describeNzDay,
+  describeOverviewItemStatus,
   describePackState,
+  describeReelHeadline,
+  describeStoryHeadline,
+  describeVarietyLine,
   formatClock,
   nzDateKey,
+  tallyStoryItems,
   thumbnailUrl,
 } from '@/lib/social/story-lite/page-text'
 import type { LitePackState } from '@/lib/social/story-lite/service'
@@ -38,7 +42,7 @@ function usedOf(used: number, limit: number | null | undefined): string {
 
 type LoadState = 'loading' | 'ready' | 'forbidden' | 'error'
 
-function StoryRow({ item, packState }: { item: OverviewStoryItem; packState: LitePackState }) {
+function StoryRow({ item, packState, now }: { item: OverviewStoryItem; packState: LitePackState; now: Date }) {
   const [small, setSmall] = useState(true)
   return (
     <li className="flex gap-3">
@@ -61,7 +65,7 @@ function StoryRow({ item, packState }: { item: OverviewStoryItem; packState: Lit
         <p className="text-sm font-semibold leading-snug text-me-charcoal">{item.text_line}</p>
         <p className="text-xs text-me-charcoal/70">
           {formatClock(item.slot_at)}{item.media_kind === 'video' ? ' · 视频' : ''}
-          {item.role ? ` · ${ROLE_LABEL[item.role] ?? ''}` : ''} · Facebook 主页 Story · {describeItemStatusInPack(item.status, packState)}
+          {item.role ? ` · ${ROLE_LABEL[item.role] ?? ''}` : ''} · Facebook 主页 Story · {describeOverviewItemStatus(item.status, packState, item.slot_at, now)}
         </p>
       </div>
     </li>
@@ -72,13 +76,14 @@ function ReelRow({ reel, clientId }: { reel: OverviewReel; clientId: string }) {
   const meta = STATUS_META[reel.status as WorkOrderStatus]
   return (
     <li className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="rounded-full bg-me-charcoal/10 px-2 py-0.5 text-xs font-medium text-me-charcoal">{meta?.label ?? '状态未知'}</span>
+      <span className="rounded-full bg-me-charcoal/10 px-2 py-0.5 text-xs font-medium text-me-charcoal">{reel.status === 'published' ? '库里记为已上传' : meta?.label ?? '状态未知'}</span>
       <span className="text-me-charcoal">{reel.angle || '（没有写主题）'}</span>
       {reel.permalink && (
         <a href={reel.permalink} className="text-xs underline text-me-charcoal/70" target="_blank" rel="noreferrer">
-          打开已发的 Reel
+          打开 Reel 链接
         </a>
       )}
+      {reel.published_at && <span className="text-xs text-me-charcoal/70">平台状态未核</span>}
       <Link href={`/dashboard/factory?client=${clientId}`} className="text-xs underline text-me-charcoal/70">
         去视频工厂看 / 点通过
       </Link>
@@ -121,6 +126,8 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
       .map(([key, items]) => ({ key, items: items.sort((a, b) => a.slot_at.localeCompare(b.slot_at)) }))
   }, [data])
 
+  const now = useMemo(() => new Date(), [data])
+
   if (load === 'loading') return <p className="text-sm text-me-charcoal/70">正在读取…</p>
   if (load === 'forbidden') return <p className="text-sm font-medium text-[#B03A2E]">本周总览只有管理员能看。</p>
   if (load === 'error' || !data) {
@@ -129,9 +136,18 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
 
   const mode = describeMode(data.live)
   const story = data.story
+  const tally = tallyStoryItems(story?.items ?? [], story?.state ?? 'DRAFT', now)
+  const variety = describeVarietyLine(data.reel_variety)
 
   return (
     <div className="space-y-5">
+      <section className="space-y-1 rounded-xl border border-black/10 bg-white px-4 py-3">
+        <h2 className="text-lg font-bold text-me-charcoal">社媒日常：三条线分别报</h2>
+        <p className="text-sm text-me-charcoal/80">图文：未接入</p>
+        <p className="text-sm text-me-charcoal/80">{data.story_error ? 'Story：现在读不到，不知道本周情况' : describeStoryHeadline(tally)}</p>
+        <p className="text-sm text-me-charcoal/80">{data.reels_error ? 'Reel：现在读不到，不知道有几条在审' : describeReelHeadline(data.reels)}</p>
+        <p className={variety.warn ? 'text-sm font-medium text-[#C2570C]' : 'text-sm text-me-charcoal/80'}>{variety.text}</p>
+      </section>
       <div
         role="status"
         className={`rounded-xl border px-4 py-3 ${data.live ? 'border-[#B03A2E] bg-[#B03A2E]/10' : 'border-me-ochre/50 bg-me-ochre/10'}`}
@@ -172,7 +188,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
                 <p className="mb-1 text-xs font-semibold text-me-charcoal/70">Story（{usedOf(day.items.length, data.quota?.story_per_day)}）</p>
                 <ul className="space-y-2">
                   {day.items.map((item) => (
-                    <StoryRow key={item.item_id} item={item} packState={story?.state ?? 'DRAFT'} />
+                    <StoryRow key={item.item_id} item={item} packState={story?.state ?? 'DRAFT'} now={now} />
                   ))}
                 </ul>
               </div>
