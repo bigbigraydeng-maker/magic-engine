@@ -5,6 +5,7 @@ import {
   describeOverviewItemStatus,
   describeReelHeadline,
   describeVarietyLine,
+  isRecordedUploaded,
   nzDateKey,
 } from '../page-text'
 import type { LiteItemStatus } from '../types'
@@ -33,6 +34,8 @@ describe('tallyStoryItems', () => {
       waiting: 1,
       blocked: 2,
       stopped: 0,
+      unauthorised: 0,
+      unauthorised: 0,
     })
   })
 
@@ -76,6 +79,7 @@ describe('describeStoryHeadline', () => {
         waiting: 0,
         blocked: 0,
         stopped: 0,
+        unauthorised: 0,
       }),
     ).toBe('Story：本周没有排 Story')
   })
@@ -88,6 +92,7 @@ describe('describeStoryHeadline', () => {
       waiting: 1,
       blocked: 0,
       stopped: 2,
+      unauthorised: 0,
     })
     expect(text.endsWith(' · 已停或授权过期不会发 2')).toBe(true)
   })
@@ -142,6 +147,7 @@ describe('wording never claims something was sent without the recorded qualifier
         waiting: 0,
         blocked: 0,
         stopped: 0,
+        unauthorised: 0,
       }),
       describeStoryHeadline({
         total: 4,
@@ -150,6 +156,7 @@ describe('wording never claims something was sent without the recorded qualifier
         waiting: 1,
         blocked: 0,
         stopped: 2,
+        unauthorised: 0,
       }),
       describeOverviewItemStatus('SENT', 'AUTHORIZED', '2026-10-13T00:00:00Z', NOW),
       describeOverviewItemStatus('PENDING', 'AUTHORIZED', '2026-10-14T01:00:00Z', NOW),
@@ -230,5 +237,46 @@ describe('nzDateKey', () => {
   it('changes the New Zealand day at 11:00 UTC during daylight saving', () => {
     expect(nzDateKey('2026-10-18T10:59:00Z')).toBe('2026-10-18')
     expect(nzDateKey('2026-10-18T11:01:00Z')).toBe('2026-10-19')
+  })
+})
+
+describe('review fixes (draft week, grace period, one "uploaded" rule, small samples)', () => {
+  it('a week nobody has authorised is "will not be sent", never "overdue"', () => {
+    const items: Item[] = [
+      { status: 'PENDING', slot_at: '2026-10-14T00:00:00Z' },
+      { status: 'PENDING', slot_at: '2026-10-15T00:00:00Z' },
+    ]
+    const tally = tallyStoryItems(items, 'DRAFT', NOW)
+    expect(tally.unauthorised).toBe(2)
+    expect(tally.overdue).toBe(0)
+    expect(describeStoryHeadline(tally)).toContain('还没授权，不会发 2')
+    expect(describeOverviewItemStatus('PENDING', 'DRAFT', '2026-10-14T00:00:00Z', NOW)).not.toContain('已过点')
+  })
+
+  it('a slot that passed only a minute ago is not yet reported as missed (10 minute grace)', () => {
+    const justPassed = '2026-10-14T01:59:00Z'
+    expect(tallyStoryItems([{ status: 'PENDING', slot_at: justPassed }], 'AUTHORIZED', NOW).overdue).toBe(0)
+    expect(describeOverviewItemStatus('PENDING', 'AUTHORIZED', justPassed, NOW)).not.toContain('已过点')
+    const longAgo = '2026-10-14T01:00:00Z'
+    expect(tallyStoryItems([{ status: 'PENDING', slot_at: longAgo }], 'AUTHORIZED', NOW).overdue).toBe(1)
+  })
+
+  it('"recorded as uploaded" is one rule: published, measuring and closed all count, in review does not', () => {
+    expect(isRecordedUploaded({ status: 'published', published_at: null })).toBe(true)
+    expect(isRecordedUploaded({ status: 'measuring', published_at: null })).toBe(true)
+    expect(isRecordedUploaded({ status: 'closed', published_at: '2026-10-13T00:00:00Z' })).toBe(true)
+    expect(isRecordedUploaded({ status: 'in_review', published_at: null })).toBe(false)
+    expect(
+      describeReelHeadline([
+        { status: 'measuring', published_at: null },
+        { status: 'in_review', published_at: null },
+      ]),
+    ).toContain('库里记为已上传 1')
+  })
+
+  it('a single price-screen Reel does not light the warning on its own', () => {
+    expect(describeVarietyLine({ same_track_max: 1, price_screen_count: 1, total: 1 }).warn).toBe(false)
+    expect(describeVarietyLine({ same_track_max: 1, price_screen_count: 3, total: 4 }).warn).toBe(true)
+    expect(describeVarietyLine({ same_track_max: 2, price_screen_count: 0, total: 2 }).warn).toBe(true)
   })
 })

@@ -18,6 +18,7 @@ import {
   describeStoryHeadline,
   describeVarietyLine,
   formatClock,
+  isRecordedUploaded,
   nzDateKey,
   tallyStoryItems,
   thumbnailUrl,
@@ -83,7 +84,7 @@ function ReelRow({ reel, clientId }: { reel: OverviewReel; clientId: string }) {
           打开 Reel 链接
         </a>
       )}
-      {reel.published_at && <span className="text-xs text-me-charcoal/70">平台状态未核</span>}
+      {isRecordedUploaded(reel) && <span className="text-xs text-me-charcoal/70">平台状态未核</span>}
       <Link href={`/dashboard/factory?client=${clientId}`} className="text-xs underline text-me-charcoal/70">
         去视频工厂看 / 点通过
       </Link>
@@ -146,7 +147,9 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
         <p className="text-sm text-me-charcoal/80">图文：未接入</p>
         <p className="text-sm text-me-charcoal/80">{data.story_error ? 'Story：现在读不到，不知道本周情况' : describeStoryHeadline(tally)}</p>
         <p className="text-sm text-me-charcoal/80">{data.reels_error ? 'Reel：现在读不到，不知道有几条在审' : describeReelHeadline(data.reels)}</p>
-        <p className={variety.warn ? 'text-sm font-medium text-[#C2570C]' : 'text-sm text-me-charcoal/80'}>{variety.text}</p>
+        {!data.reels_error && (
+          <p className={variety.warn ? 'text-sm font-medium text-[#C2570C]' : 'text-sm text-me-charcoal/80'}>{variety.text}</p>
+        )}
       </section>
       <div
         role="status"
