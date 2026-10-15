@@ -161,11 +161,13 @@ export async function PATCH(
       // 退回草稿 = 撤销批准：清掉这份计划还没开始的待办和草稿生产包（有已开工的上面已拒绝）。
       revoked = (await revokePlanTasks(params.planId, params.id)).revoked
       // 退回草稿后，旧批准记录不再算「有效」：回执挪去留底，批准时间清空（再次批准会写新的）
-      const { approval_receipt: oldReceipt, ...restMeta } = current.generation_meta ?? {}
+      // 旧的人工核实记录同理：退回草稿后不再参与判定，只留底
+      const { approval_receipt: oldReceipt, promo_checks: oldChecks, ...restMeta } = current.generation_meta ?? {}
       updates.approved_at = null
       updates.generation_meta = {
         ...restMeta,
         ...(oldReceipt ? { previous_approvals: [...(restMeta.previous_approvals ?? []), oldReceipt].slice(-10) } : {}),
+        ...(oldChecks && oldChecks.length > 0 ? { previous_promo_checks: [...(restMeta.previous_promo_checks ?? []), ...oldChecks].slice(-50) } : {}),
       }
     }
 

@@ -37,11 +37,16 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ success: true, already_recorded: true, week_start: weekStart })
     }
     const record: WeeklyReviewRecord = { week_start: weekStart, by: access.user.email ?? null, at: new Date().toISOString() }
-    const { error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('marketing_plans')
       .update({ generation_meta: { ...(plan.generation_meta ?? {}), weekly_reviews: [...existing, record] } })
       .eq('id', params.planId).eq('client_id', params.id)
+      .eq('updated_at', plan.updated_at) // 读完到写入之间被别处改过 → 不覆盖
+      .select('id').maybeSingle()
     if (error) throw error
+    if (!data) {
+      return NextResponse.json({ success: false, error: '这份计划刚刚在别处被改过，这次确认没有记录。请刷新页面后再点一次。' }, { status: 409 })
+    }
     return NextResponse.json({ success: true, record })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

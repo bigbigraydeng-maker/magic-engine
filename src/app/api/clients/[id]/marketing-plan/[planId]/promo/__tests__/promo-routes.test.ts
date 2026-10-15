@@ -202,7 +202,22 @@ describe('POST verify — 人工核实', () => {
   })
   it('计划已批准后仍可补核实（后面阶段要用）', async () => {
     m.plan = planWith(baseSpec(), { status: 'approved' })
-    expect((await VERIFY(req({ phase_id: 'p2', check_key: 'landing.item_live' }), { params: P })).status).toBe(200)
+    expect((await VERIFY(req({ phase_id: 'p1', check_key: 'landing.item_live' }), { params: P })).status).toBe(200)
+  })
+  it('没有广告步骤的阶段不能点核实 → 400，不写库', async () => {
+    // baseSpec 的 p2 没有任何步骤
+    expect((await VERIFY(req({ phase_id: 'p2', check_key: 'landing.item_live' }), { params: P })).status).toBe(400)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('核实记录带上当时的内容指纹', async () => {
+    await VERIFY(req({ phase_id: 'p1', check_key: 'landing.item_live' }), { params: P })
+    const meta = m.updates[0].generation_meta as { promo_checks: { content_hash?: string }[] }
+    expect(meta.promo_checks[0].content_hash).toBe(promoContentHash(baseSpec()))
+  })
+  it('落库时被别处抢先改过 → 409，不当成功', async () => {
+    m.casMiss = true
+    const res = await VERIFY(req({ phase_id: 'p1', check_key: 'landing.item_live' }), { params: P })
+    expect(res.status).toBe(409)
   })
   it('归档 → 409', async () => {
     m.plan = planWith(baseSpec(), { status: 'archived' })
