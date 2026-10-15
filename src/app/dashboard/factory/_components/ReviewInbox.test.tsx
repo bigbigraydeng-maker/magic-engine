@@ -12,7 +12,6 @@ interface Order {
   id: string; client_id: string; client_name: string; status: string; angle: string; rationale_one_liner: string
   fact_source_url: string | null
   output: Record<string, unknown>
-  accepted_flags?: Array<{ category: string; accepted_at: string; accepted_by: string }>
 }
 const order: Order = { id: 'w1', client_id: 'c1', client_name: 'CTS', status: 'in_review', angle: 'a', rationale_one_liner: 'r', fact_source_url: URL_OK, output: { quality_checklist_auto: auto } }
 const click = async (el: Element | undefined) => { await act(async () => { el?.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
@@ -29,11 +28,10 @@ const mount = async (
   responses: Array<{ ok: boolean; error?: string }>,
   orderOverride: Partial<Order> = {},
   expand = false,
-  acceptedFlagsError?: string,
 ) => {
   const merged: Order = { ...order, ...orderOverride }
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
-    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged], accepted_flags_error: acceptedFlagsError ?? null }) }
+    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged] }) }
     posts.push({ url: u, body: init.body ? JSON.parse(init.body) : undefined })
     const r = responses.shift()!
     return { ok: r.ok, status: r.ok ? 200 : 422, json: async () => (r.ok ? {} : { error: r.error }) }
@@ -46,7 +44,6 @@ const mount = async (
 const MISSING = 'checklist factual_claims_have_source requires source_ref'
 
 const reviewPosts = () => posts.filter(p => p.url === '/api/factory/work-orders/w1/review')
-const acceptPosts = () => posts.filter(p => p.url === '/api/factory/work-orders/w1/accept-flag')
 const ONE_CLICK = '我已看过这条片子,同意通过'
 const FAIL_AUTO = auto.map(item => item.key === 'audio_track_present_nonsilent' ? { ...item, outcome: 'FAIL' } : item)
 
@@ -111,26 +108,27 @@ it('redline hits: no one-click, shows redline reason', async () => {
   expect(document.body.textContent).toContain('文案命中品牌红线')
 })
 
-it('acceptable quality flag: PM 已接受 button POSTs the category', async () => {
+it('legacy narrator_voice_mismatch flag is hidden and no longer blocks one-click', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'narrator_voice_mismatch', detail: 'd' }] } })
-  expect(btn(ONE_CLICK)).toBeUndefined()
-  await click(btn('PM 已接受'))
-  const sent = acceptPosts()
-  expect(sent).toHaveLength(1)
-  expect(sent[0].body).toEqual({ category: 'narrator_voice_mismatch' })
-})
-
-it('accepted flag: shows 已接受 date, no PM 已接受 button, one-click available', async () => {
-  await mount([{ ok: true }], {
-    output: { quality_checklist_auto: auto, quality_flags: [{ category: 'narrator_voice_mismatch', detail: 'd' }] },
-    accepted_flags: [{ category: 'narrator_voice_mismatch', accepted_at: '2026-10-06T00:00:00Z', accepted_by: 'pm' }],
-  })
-  expect(document.body.textContent).toContain('已接受(2026-10-06)')
+  expect(document.body.textContent).not.toContain('人称口吻')
   expect(btn('PM 已接受')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeDefined()
 })
 
-it('non-acceptable quality flag: no PM 已接受 button, no one-click', async () => {
+it('legacy narrator flag + real competitor flag: only the real one shows and it still blocks one-click', async () => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'narrator_voice_mismatch', detail: 'old-voice' }, { category: 'competitor_brand', detail: 'real-flag' }] } })
+  expect(document.body.textContent).toContain('real-flag')
+  expect(document.body.textContent).not.toContain('old-voice')
+  expect(btn(ONE_CLICK)).toBeUndefined()
+})
+
+it.each(['placeholder_caption', 'quality_check_unavailable'])('quality flag %s stays visible and blocks one-click', async (category) => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category, detail: 'shown-detail' }] } })
+  expect(document.body.textContent).toContain('shown-detail')
+  expect(btn(ONE_CLICK)).toBeUndefined()
+})
+
+it('real quality flag stays visible: no PM 已接受 button, no one-click', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'competitor_brand', detail: 'd' }] } })
   expect(btn('PM 已接受')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeUndefined()
@@ -151,12 +149,6 @@ it('one-click panel links to the prefilled source URL', async () => {
 it('quality flag with no detail at all still blocks one-click', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'competitor_brand' }] } })
   expect(btn(ONE_CLICK)).toBeUndefined()
-})
-
-it('accepted_flags_error surfaces a red notice with the message', async () => {
-  await mount([{ ok: true }], {}, false, 'boom')
-  expect(document.body.textContent).toContain('读取失败')
-  expect(document.body.textContent).toContain('boom')
 })
 
 const mountOrders = async (orders: unknown[]) => {

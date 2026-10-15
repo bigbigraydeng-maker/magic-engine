@@ -508,7 +508,7 @@ describe('completeWorkOrder — 成片文案品控(2026-09-20 Jev 评估)', () =
     expect(r.ok && r.qualityFlags.some((f) => f.category === 'placeholder_caption')).toBe(true)
   })
 
-  it('brand_name / brand_voice.persona 从 master_briefs 正确传给品控(供 A/C 检测用)', async () => {
+  it('brand_name 从 master_briefs 传给品控;persona 不再触发人称检测(2026-10-16 取消)', async () => {
     const { db } = mockSupabase([
       okClient(),
       { table: 'master_briefs', data: { excluded_topics: [], brand_name: 'CTS Tours', brand_voice: { persona: { name: 'Baker Gu', role: 'tour guide' } } }, error: null },
@@ -522,15 +522,7 @@ describe('completeWorkOrder — 成片文案品控(2026-09-20 Jev 评估)', () =
 
     const [state, questions] = callJev.mock.calls[0]
     expect(state.brand).toBe('CTS Tours')
-    expect(state.intended_voice).toContain('Baker Gu')
-    expect(questions.wrong_voice).toBeDefined() // 有 persona.name → 应该发起人称检测
-  })
-
-  it('brief 没配 persona → 不发起人称检测(不误报品牌口吻文案)', async () => {
-    const { db } = mockSupabase(happyQueue())
-    await completeWorkOrder(db, PARAMS)
-
-    const [, questions] = callJev.mock.calls[0]
+    expect(state.intended_voice).toBeUndefined()
     expect(questions.wrong_voice).toBeUndefined()
   })
 

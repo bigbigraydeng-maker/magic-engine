@@ -2,7 +2,6 @@
 // 只改展示,不碰服务端把关规则(review-apply.ts / content-review.ts 原样)。
 
 import { isValidContentSourceRef } from '@/lib/social/content-review'
-import { isAcceptableFlagCategory } from './review-flag-categories'
 
 /** 工单链接(brief.copy.endcard.url)。只有产品深链才预填:copy-generator 常把它强制写成品牌首页,首页不是「片里事实的出处」。 */
 export function defaultFactSourceRef(url: unknown): string {
@@ -29,7 +28,6 @@ export interface ReviewGateInput {
   autoReady: boolean                         // all automatic media checks PASS
   redlineHits: string[]                      // brand red-line phrases hit
   qualityFlags: Array<{ category: string }>  // yellow quality flags on this order
-  acceptedCategories: string[]               // categories the PM already accepted (from the server)
   factSourcePrefilled: boolean               // the fact-source URL prefill is non-empty
 }
 
@@ -45,11 +43,7 @@ export function reviewGate(input: ReviewGateInput): ReviewGate {
   if (!input.autoReady) reasons.push('自动媒体检测未通过')
   if (input.redlineHits.length > 0) reasons.push('文案命中品牌红线,需逐项核对')
 
-  for (const flag of input.qualityFlags) {
-    const settled =
-      isAcceptableFlagCategory(flag.category) && input.acceptedCategories.includes(flag.category)
-    if (!settled) reasons.push(`品控提示未处理:${flag.category}`)
-  }
+  for (const flag of input.qualityFlags) reasons.push(`品控提示未处理:${flag.category}`)
 
   if (!input.factSourcePrefilled) reasons.push('来源网址没有预填,需要手动填写')
 
