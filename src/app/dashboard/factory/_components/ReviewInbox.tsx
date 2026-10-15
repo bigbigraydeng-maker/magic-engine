@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import type { PublishedView } from '@/lib/factory/publish/publish-display'
-import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V2, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
 import { isAcceptableFlagCategory } from '@/lib/factory/review-flag-categories'
 import { factoryVideoUrl } from '@/lib/factory/outlets'
@@ -99,6 +99,7 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
   asset_provenance_labeled: '素材来源已标注',
   asset_provenance_matches_claim_context: '素材与主张场景相符',
   bgm_segmented_with_fades: 'BGM 分段并带淡入淡出',
+  bgm_listened_no_vocals: '我已开声音听过，背景音乐里没有人声',
   format_is_reel: '发布格式为 Reel',
   cta_in_first_comment_not_body: 'CTA 位于首评而非正文',
   first_comment_link_has_tracking_params: '首评链接含追踪参数',
@@ -107,14 +108,19 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
 type ChecklistDraft = Record<ContentCheckItemKey, { outcome: CheckItemOutcome; detail: string; source_ref: string }>
 const FACT_KEYS: readonly ContentCheckItemKey[] = ['factual_claims_have_source', 'factual_claims_source_verified']
 const emptyChecklistDraft = (factSource = ''): ChecklistDraft => Object.fromEntries(
-  REEL_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
+  REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
 ) as ChecklistDraft
 
+// The listened-to-the-audio item is never bulk-passed: it only counts if the reviewer ticks it themselves.
+const MANUAL_ONLY_KEYS: readonly ContentCheckItemKey[] = ['bgm_listened_no_vocals']
 const allPass = (draft: ChecklistDraft): ChecklistDraft =>
-  Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+  Object.fromEntries(REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, MANUAL_ONLY_KEYS.includes(key) ? draft[key] : { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+
+// One-click path: the confirm button is only enabled after the reviewer ticks "listened, no vocals".
+const markListened = (draft: ChecklistDraft): ChecklistDraft => ({ ...draft, bgm_listened_no_vocals: { ...draft.bgm_listened_no_vocals, outcome: 'PASS' } })
 
 const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
-  REEL_HUMAN_CHECK_KEYS.map(key => ({
+  REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
     key,
     judge: 'HUMAN',
     outcome: draft[key].outcome,
@@ -529,10 +535,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 return (
                   <div className="mb-4">
                     <OneClickConfirm
-                      itemLabels={REEL_HUMAN_CHECK_KEYS.map(k => HUMAN_CHECK_LABEL[k])}
+                      itemLabels={REEL_HUMAN_CHECK_KEYS_V2.map(k => HUMAN_CHECK_LABEL[k])}
                       sourceUrl={defaultFactSourceRef(confirming.fact_source_url)}
                       busy={busy === confirming.id}
-                      onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(checklistDraft)) })}
+                      onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(markListened(checklistDraft))) })}
                       onExpand={() => setShowDetails(true)}
                     />
                   </div>
@@ -555,10 +561,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址:已按这条片的链接预填,请确认这个页面确实支持片里的价格/天数/日期,不是就改成对应产品页。点「全部标为通过」前请先逐项看过。</p>
               <button
                 type="button"
-                onClick={() => setChecklistDraft(prev => Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...prev[key], outcome: 'PASS' }])) as ChecklistDraft)}
+                onClick={() => setChecklistDraft(prev => allPass(prev))}
                 className="px-3 h-8 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
-              >{REEL_HUMAN_CHECK_KEYS.length} 项全部标为通过</button>
-              {REEL_HUMAN_CHECK_KEYS.map(key => (
+              >{REEL_HUMAN_CHECK_KEYS_V2.length - MANUAL_ONLY_KEYS.length} 项全部标为通过（“已听声音”需单独勾）</button>
+              {REEL_HUMAN_CHECK_KEYS_V2.map(key => (
                 <div key={key} className="rounded-lg border border-slate-200 p-3">
                   <p className="text-sm font-medium text-slate-800">{HUMAN_CHECK_LABEL[key]}</p>
                   <div className="mt-2 flex gap-4 text-xs">
@@ -608,7 +614,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               {(showDetails || !gateOf(confirming).oneClick) && (
                 <button
                   onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
-                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS.some(key => checklistDraft[key].outcome !== 'PASS')}
+                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS_V2.some(key => checklistDraft[key].outcome !== 'PASS')}
                   className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
                 >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
               )}
