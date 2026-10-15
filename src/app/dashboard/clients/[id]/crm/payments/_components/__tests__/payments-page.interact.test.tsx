@@ -17,6 +17,13 @@ import {
 } from './payments-fixtures'
 
 vi.mock('next/navigation', async () => (await import('./nav-mock')).navigationMock)
+vi.mock('../../../_components/ContactDrawerHost', () => ({
+  ContactDrawerHost: (p: { contactId: string; name: string | null; scrollToBookings?: boolean; onClose: () => void }) => (
+    <div data-testid="drawer" data-contact={p.contactId} data-name={p.name ?? ''} data-scroll={String(p.scrollToBookings === true)}>
+      <button onClick={p.onClose}>关闭抽屉</button>
+    </div>
+  ),
+}))
 
 beforeEach(() => { resetNav(''); window.sessionStorage.clear() })
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
@@ -187,9 +194,9 @@ describe('付款总览 interactions', () => {
     })
   })
 
-  it('clicking a list row opens that guest in the drawer page and remembers the filters', async () => {
+  it('clicking a list row opens that guest in a drawer on the same page (no navigation) and keeps the filters', async () => {
     resetNav('?status=unsettled')
-    await renderReady()
+    const fetchMock = await renderReady()
 
     const link = await screen.findByRole('link', { name: 'Li & Li' })
     const row = link.closest('tr')
@@ -197,24 +204,30 @@ describe('付款总览 interactions', () => {
     const cell = within(row as HTMLTableRowElement).getAllByRole('cell')[1]
     fireEvent.click(cell)
 
-    await waitFor(() => {
-      expect(lastPush()).toBe(
-        `/dashboard/clients/${CLIENT}/crm/all?contact=${CONTACT_2}&focus=bookings`,
-      )
-    })
-    expect(window.sessionStorage.getItem(`crm-payments-return:${CLIENT}`)).toBe('?status=unsettled')
+    const drawer = await screen.findByTestId('drawer')
+    expect(drawer.getAttribute('data-contact')).toBe(CONTACT_2)
+    expect(drawer.getAttribute('data-scroll')).toBe('true')
+    expect(pushes.some((u) => u.includes('/crm/all'))).toBe(false)
+
+    // closing returns to the same filtered page and refreshes the numbers once
+    const before = overviewCalls(fetchMock).length
+    fireEvent.click(screen.getByRole('button', { name: '关闭抽屉' }))
+    await waitFor(() => expect(screen.queryByTestId('drawer')).toBeNull())
+    await waitFor(() => expect(overviewCalls(fetchMock).length).toBe(before + 1))
+    expect(pushes.some((u) => u.includes('/crm/all'))).toBe(false)
   })
 
-  it('clicking the guest name link pushes nothing twice but still remembers the filters', async () => {
+  it('clicking the guest name link opens the drawer in place; ctrl-click keeps the normal link', async () => {
     resetNav('?status=unsettled')
     await renderReady()
 
     const link = await screen.findByRole('link', { name: 'Wang M.' })
-    fireEvent.click(link)
+    fireEvent.click(link, { ctrlKey: true })
+    expect(screen.queryByTestId('drawer')).toBeNull()
 
-    await waitFor(() => {
-      expect(window.sessionStorage.getItem(`crm-payments-return:${CLIENT}`)).toBe('?status=unsettled')
-    })
+    fireEvent.click(link)
+    const drawer = await screen.findByTestId('drawer')
+    expect(drawer.getAttribute('data-name')).toBe('Wang M.')
     expect(pushes.some((u) => u.includes('/crm/all'))).toBe(false)
   })
 })

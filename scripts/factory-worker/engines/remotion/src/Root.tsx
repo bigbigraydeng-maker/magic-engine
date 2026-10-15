@@ -7,6 +7,8 @@ import { MontageReel } from './MontageReel'
 import { parseMontageReelProps, computeMontageTiming } from './montage'
 import { DataCardReel } from './DataCardReel'
 import { parseDataCardProps, computeDataCardTiming } from './datacard'
+import { PostcardReel } from './PostcardReel'
+import { parsePostcardProps, computePostcardTiming } from './postcard'
 
 const calculateMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
   const parsed = parseListReelProps(props)
@@ -23,11 +25,17 @@ const calculateDataCardMetadata: CalculateMetadataFunction<Record<string, unknow
   return { durationInFrames: computeDataCardTiming(parsed).totalFrames }
 }
 
+const calculatePostcardMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
+  const parsed = parsePostcardProps(props)
+  return { durationInFrames: computePostcardTiming(parsed).totalFrames }
+}
+
 export const Root: React.FC = () => (
   <>
     {/* durationInFrames={1} is only a placeholder; calculateMetadata overrides it. */}
     <Composition id="ListReel" component={ListReel} durationInFrames={1} fps={FPS} width={WIDTH} height={HEIGHT} calculateMetadata={calculateMetadata} />
     <Composition id="MontageReel" component={MontageReel} durationInFrames={1} fps={FPS} width={WIDTH} height={HEIGHT} calculateMetadata={calculateMontageMetadata} />
     <Composition id="DataCardReel" component={DataCardReel} durationInFrames={1} fps={FPS} width={WIDTH} height={HEIGHT} calculateMetadata={calculateDataCardMetadata} />
+    <Composition id="PostcardReel" component={PostcardReel} durationInFrames={1} fps={FPS} width={WIDTH} height={HEIGHT} calculateMetadata={calculatePostcardMetadata} />
   </>
 )

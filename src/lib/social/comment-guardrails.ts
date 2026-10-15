@@ -19,6 +19,8 @@
  * filter fails the suite.
  */
 
+import { scanOutboundClaims } from './outbound-claims'
+
 export interface ReplyContext {
   /** Client display name, e.g. "CTS Tours". */
   clientName: string
@@ -43,6 +45,7 @@ const NUMBER_WORDS =
  *
  * Deliberately aggressive: a false positive just routes to a safe template;
  * a false negative could publish a fabricated fact under the client's brand.
+ * Also runs the shared multilingual scanner (outbound-claims.ts) so Chinese wording is covered.
  */
 export function detectUnverifiableClaims(text: string): string[] {
   const flags: string[] = []
@@ -90,6 +93,10 @@ export function detectUnverifiableClaims(text: string): string[] {
     /\b(half\s?(price|off)|bogo|\d\s?for\s?\d)\b/.test(t)
   ) {
     flags.push('discount')
+  }
+
+  for (const hit of scanOutboundClaims(text)) {
+    if (!flags.includes(hit.kind)) flags.push(hit.kind)
   }
 
   return flags

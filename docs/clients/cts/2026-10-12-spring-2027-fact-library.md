@@ -16,6 +16,7 @@
 | 「免签」「visa-free」及一切入境政策承诺 | 官网横幅只到 2026-12-31，早于全部 3 月出发日；FAQ 无答案 |
 | 「max 16 / max 18 / small group / limited availability / 余位 / 仅剩 / 限人数」 | 内部配额，官网数字互相矛盾（Natural China 页写 max 16 与 Limited Availability） |
 | 「1928」「100+ Years」「25 years」「50,000+ travellers」「Kiwi-led」 | 本卡红线（并且官网自己 1928 与 100+ years 不自洽）；评价数 / 证书类不用 |
+| 「还剩几周 / 截止 / 限时 / 倒计时 / 最后机会 / 最后一周 / 早鸟 / 11 月底」及一切销售截止类说法（含 Reel 封面、首评） | PM 10-14 新口径：全是英文团，没有销售截止，售完为止；全文见 `docs/clients/cts/2026-10-14-cts-promo-rules.md` |
 | 航司名；`domestic`（只写 Flights） | CTS 未确认国内段；航司只在出团表 |
 | 「早鸟 / Early Bird / limited / last chance」 | PM 10-12：CTS 没有早鸟优惠 |
 | 官网页面里的「评价」引用 | Natural China 页的三条评价都不是这个团的 |
@@ -104,5 +105,47 @@
 
 ## 七、事实库容量与缺口（给 74 号）
 
-- 4 个团合计约 **46 条**可讲的事实角度（含备用）；每周 14 条图文 Post + 21 条 Story = 35 条，销售窗口 10/13–11/30 约 7 周共 ~245 条——**角度会重复**。每条新文案至少换「事实 + 配图 + 句式」三者之一，仍要避免同一事实在 7 天内重复发。
+- 4 个团合计约 **46 条**可讲的事实角度（含备用）；每周 14 条图文 Post + 21 条 Story = 35 条，按这个量每周都要发，几周下来共数百条——**角度会重复**（PM 10-14：没有销售截止、售完为止，「到 11/30」已作废，节奏改按各团出发日）。每条新文案至少换「事实 + 配图 + 句式」三者之一，仍要避免同一事实在 7 天内重复发。
 - **缺口，需要 CTS 提供真实素材/事实**（官网没有）：客人真实照片与授权、各班剩余席位、国内段机票书面确认、4 个团各自的真实酒店照片、导游/领队介绍、为什么选这几个团的故事、真实评价（带授权）。
+
+---
+
+## 八、5 月出发的三个 Signature 团（2026-10-14 抓取；3–5 月重点）
+
+- **来源 URL**（抓取日 2026-10-14）：Silk Road https://www.ctstours.co.nz/tours/china/signature/silk-road ｜ China Panorama https://www.ctstours.co.nz/tours/china/signature/grand-tour ｜ Legacy of China https://www.ctstours.co.nz/tours/china/signature/imperial-heritage
+- **出团表（PM 定权威）里 5 月班**：China Panorama 5/8→6/3、Silk Road 5/13→5/29（乌鲁木齐—上海，到新西兰 5/30）、Best of China 5/13→5/27、Shanghai & Surroundings 5/25→6/2、China Legacy 5/28（返程日期表里为空）、Natural China 5/28→6/12。**官网目前只挂了：Panorama 5/8、Silk Road 5/13、Legacy 5/28、Best of China 5/13；Shanghai 5/25、Natural China 5/28 官网没有** → 这两班文案只写「March 2027」或不写班期，除非 CTS 确认对外。
+- 同样的红线：不写 max 16 / small group / Limited Availability / 余位 / 1928 / 25 years / 免签 / 航司（Legacy 页写了 China Eastern，**不写**）/ domestic / 早鸟 / 价格（价格只放首评官网链接）。Silk Road 页「visa fee 另付」不写。
+
+### China Panorama（27 天，8 May 2027；PAN）
+| 编号 | 角度 | 可说的事实 | 
+|---|---|---|
+| PAN-01 | 出发/天数 | 8 May 2027 → 3 June 2027；27 天，24 晚；另有 16 Oct 2027 → 11 Nov 2027（页面） |
+| PAN-02 | 价格（只供核对，不上图不上正文）| From NZD $10,899 pp twin share；单人房差 NZD $2,555 |
+| PAN-03 | 路线 | 北京 → 西安 → 长江三峡游轮（Yichang，4 晚）→ 重庆/成都 → 大理 → 昆明 → 桂林 → 漓江 → 阳朔 → 杭州 → 苏州 → 上海 → 奥克兰 |
+| PAN-04 | 亮点 | Walk the Juyongguan Great Wall and explore the Forbidden City；Discover the Terracotta Warriors；Cruise the Yangtze River Three Gorges on a 5-star ship；Visit giant pandas at the Chengdu breeding base；Cruise the Li River to Yangshuo through karst landscapes；Experience West Lake and Longjing tea plantations；Explore the classical Humble Administrator's Garden in Suzhou；Enjoy the Huangpu River cruise and Bund；Visit the Stone Forest in Kunming；Dress in traditional Hanfu at Xinshi Ancient Town |
+| PAN-05 | 含项 | 国际与国内机票（只写 flights）、4–5 星酒店、Victoria Yangtze River Cruise（国际五星）、英语导游、行程所列门票与餐、含一等座高铁的地面交通 |
+| PAN-06 | 餐食 | 50 餐：23 早、17 午、10 晚（不上图） |
+
+### Silk Road（18 天，13 May 2027；SILK）
+| 编号 | 角度 | 可说的事实 |
+|---|---|---|
+| SILK-01 | 出发/天数 | 13 May 2027 → 30 May 2027（页面）；18 天，15 晚；另有 21 Oct → 7 Nov 2027 |
+| SILK-02 | 价格（只供核对）| From NZD $7,999 pp twin share；单人房差 NZD $1,488 |
+| SILK-03 | 路线 | 奥克兰 → 上海 → 西安 → 兰州 → 武威 → 张掖 → 嘉峪关 → 敦煌 → 吐鲁番 → 乌鲁木齐 → 上海 → 新西兰 |
+| SILK-04 | 亮点 | Visit Heavenly Lake (Tianchi) in the Tianshan Mountains；Explore Turpan's ancient Jiaohe Ruins and Karez Irrigation System；See the Flaming Mountains and Bezeklik Thousand Buddha Caves；Marvel at the Mogao Caves in Dunhuang；Experience the desert oasis of Mingsha Mountain and Crescent Spring；Walk along the Hanging Great Wall and Jiayuguan Fortress；Photograph the Zhangye Danxia rock formations；Take a boat trip to the Bingling Temple Grottoes；Visit the Terracotta Warriors in Xi'an；Enjoy a free day to explore Xi'an |
+| SILK-05 | 含项 | 机票、4–5 星酒店、英语导游、行程所列门票与餐、陆路交通；**签证费另付（不写）** |
+| SILK-06 | 餐食 | 38 餐：15 早、11 午、12 晚 |
+
+### Legacy of China（17 天，28 May 2027；LEG）
+| 编号 | 角度 | 可说的事实 |
+|---|---|---|
+| LEG-01 | 出发/天数 | 28 May 2027 → 13 June 2027；17 天，14 晚；另有 13 Aug、15 Oct 2026 |
+| LEG-02 | 价格（只供核对）| NZD $9,999 pp twin share；单人房差 NZD $2,410 |
+| LEG-03 | 路线 | 北京 → 西安（高铁一等座 G55）→ 拉萨 → 成都 → 重庆 → 长江游轮（Victoria Cruises，三峡大坝）→ 上海 |
+| LEG-04 | 亮点 | Temple of Heaven（可选太极）；Walk the Mutianyu Great Wall；Summer Palace gardens；Terracotta Warriors；Xi'an Ancient City Wall；Lhasa: Jokhang Temple, Barkhor Street, Sera Monastery debates, Potala Palace, Norbulingka；Chengdu pandas；Victoria Cruises Yangtze Three Gorges cruise；Three Gorges Dam；Yuyuan、the Bund、Huangpu River night cruise |
+| LEG-05 | 含项 | 机票、五星酒店与国际标准长江游轮、英语导游、行程所列门票与餐、含一等座高铁的陆路交通 |
+| LEG-06 | 餐食 | 31 餐：14 早、7 午、10 晚 |
+| LEG-07 | 页面内不自洽（先不用）| 亮点写「evening flight to Shanghai」，行程第 14 天写「Three Gorges Dam – Yichang – Shanghai」未写交通方式 |
+
+### 可用图（5 月团；Unsplash 带地点，2026-10-14 取，原文件在 scratchpad，周包用的已复制进 Dropbox `output/weekpack-2026-10-20/src/`）
+Li River/Yangshuo（`pBg2i0aUOec`，地点 Yangshuo, Guilin）、Zhangye Danxia（`7YJQFxwyV7I`，地点 Zhangye, Gansu）、Jiayuguan Pass（`z8wG-UUzBJk`，地点 Jiayuguan Pass Scenic Area）、Stone Forest（`087zoUOPGxo`，地点 Kunming）。**没找到合格图的**：莫高窟（只有无地点壁画）、天池（搜到的是喀纳斯）、三峡游轮、布达拉宫（只有远景小图，不用）。

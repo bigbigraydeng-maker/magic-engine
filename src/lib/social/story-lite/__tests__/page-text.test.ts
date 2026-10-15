@@ -9,6 +9,9 @@ import {
   describeRange,
   describeStopResult,
   thumbnailUrl,
+  describeNzDay,
+  formatClock,
+  nzDateKey,
   formatSlot,
 } from '../page-text'
 import type { LiteItemStatus } from '../types'
@@ -23,6 +26,7 @@ const PROBLEMS = [
   'PRICE_IN_TEXT',
   'FILE_CHANGED',
   'FILE_UNREACHABLE',
+  'VIDEO_NOT_ACCEPTABLE',
   'CLIENT_NOT_ACTIVE',
   'PACK_NOT_DRAFT',
 ]
@@ -107,5 +111,14 @@ describe('story page wording', () => {
     )
     expect(thumbnailUrl('https://cdn.example.com/a.jpg')).toBe('https://cdn.example.com/a.jpg')
     expect(thumbnailUrl('https://x.supabase.co/storage/v1/object/public/b/a.png?v=2')).toBe('https://x.supabase.co/storage/v1/object/public/b/a.png?v=2')
+  })
+
+  it('New Zealand day and clock: a late-evening UTC time lands on the next NZ day', () => {
+    expect(nzDateKey('2026-10-13T19:30:00Z')).toBe('2026-10-14')
+    expect(nzDateKey('garbage')).toBe('')
+    expect(describeNzDay('2026-10-14')).toBe('10月14日 周三')
+    expect(describeNzDay('oops')).toBe('oops')
+    expect(formatClock('2026-10-13T19:30:00Z')).toBe('08:30')
+    expect(formatClock('2026-10-14T00:00:00Z')).toBe('13:00')
   })
 })

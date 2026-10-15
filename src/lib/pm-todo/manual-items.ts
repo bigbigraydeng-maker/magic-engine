@@ -46,6 +46,8 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
+import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
@@ -91,6 +93,7 @@ import {
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 import { pushPlatformConnectionItems } from './platform-connection-items'
+import { pushWhatsappUnclaimedItems } from './whatsapp-unclaimed-items'
 import { pushLedgerItems } from './ledger-items'
 import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
@@ -180,6 +183,11 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
     (b) => pushPlatformConnectionItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
+    ),
+    // WhatsApp 收到了消息但没客户绑定这个号码 —— 消息没存下来，只有人能去设置页绑一次。
+    // 表还没上线时模块自己静默返回，不抛给这里。
+    (b) => pushWhatsappUnclaimedItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] WhatsApp 无人认领号码检查失败（不阻塞其他待办）:', e),
     ),
     // 写在 Render 里的 Meta 钥匙被 Meta 作废 —— 上面那条只查「连接 Meta」按钮存下的授权，
     // 这条补的是环境变量里的钥匙（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
@@ -379,6 +387,14 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
+    (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 推广计划每日检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 月循环目标没自动续上 —— 自动续建失败不许只写日志（铁律 3）
+    (b) => pushGoalRolloverItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 月目标续建缺口待办生成失败（不阻塞其他待办）:', e),
     ),
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>

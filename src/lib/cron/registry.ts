@@ -342,6 +342,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 日历上带日期的验证事项，每天新西兰 07:20 核对一遍（第一步：只读）。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/calendar-closure-audit.ts 的 CALENDAR_CLOSURE_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  // 推广计划每天新西兰 07:10 自己查一遍（只读：不发布、不扣费、不外发），回执写 cron_run_logs 并发事件 promo_plan.watch.checked。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/promo-plan-daily-watch.ts 的 PROMO_WATCH_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-promo-plan-daily-watch', jobName: 'promo-plan-daily-watch', schedule: '10 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-15' },
   { service: 'inngest:cloud-calendar-closure-audit', jobName: 'calendar-closure-audit', schedule: '20 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-08' },
   { service: 'inngest:cloud-lead-sheet-sync-fanout', jobName: 'lead-sheet-sync', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },

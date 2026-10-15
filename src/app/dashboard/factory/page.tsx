@@ -11,7 +11,7 @@ import { STATUS_META, STATUS_ORDER, publishedBadge, REASON_STATUSES, POST_PUBLIS
 import { ReviewInbox } from './_components/ReviewInbox'
 
 // P21.J 驾驶舱 — 看片 + 对话框 + 全局工单状态,一页搞定(PM:factory 页 = 驾驶舱)
-// 顶部审片区复用 ReviewInbox(clientId)= 视频审核(左)+ 问 Claude 对话框(右)合体屏;
+// 顶部审片区复用 ReviewInbox(clientId)= 按「待审 / 已通过 / 已打回」分段的小卡审核区;
 // 客户切换 chip 选看谁;底部折叠全局工单状态(死信复活/worker 健康)。
 
 interface WorkOrder {
@@ -105,8 +105,8 @@ export default function FactoryCockpitPage() {
   const reviewClients = useMemo(() => {
     const m = new Map<string, { id: string; name: string; count: number }>()
     for (const o of visibleOrders) {
-      // 已发布 / 已作废也要能进审片区看历史卡片(count 只计待审)
-      if (o.status !== 'in_review' && !POST_PUBLISH.includes(o.status) && o.status !== 'superseded') continue
+      // 已发布 / 已作废 / 已打回也要能进审片区看历史卡片(打回完客户不能整块消失,否则看不到理由)(count 只计待审)
+      if (o.status !== 'in_review' && !POST_PUBLISH.includes(o.status) && o.status !== 'superseded' && o.status !== 'review_rejected') continue
       const e = m.get(o.client_id) ?? { id: o.client_id, name: o.client_name, count: 0 }
       if (o.status === 'in_review') e.count += 1
       m.set(o.client_id, e)
@@ -147,8 +147,8 @@ export default function FactoryCockpitPage() {
           <p className="text-sm text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
             <span>
               {lockedClient
-                ? '只看这个客户。看片拍板 + 跟 Claude 说人话改片,都在这一页'
-                : '看片拍板 + 跟 Claude 说人话改片,都在这一页'}
+                ? '只看这个客户。看片拍板,都在这一页'
+                : '看片拍板,都在这一页'}
             </span>
             <WorkerHealth lastHeartbeat={worker.last_heartbeat_at} activeCount={worker.active_count} />
           </p>
@@ -210,7 +210,7 @@ export default function FactoryCockpitPage() {
               </div>
             )}
 
-            {/* ReviewInbox(clientId)= 视频审核(左)+ 问 Claude 对话框(右)。key 切客户时重挂,刷新历史 */}
+            {/* ReviewInbox(clientId)= 分段小卡审核区。key 切客户时重挂,刷新历史 */}
             {selectedClient && <ReviewInbox key={selectedClient} clientId={selectedClient} onReviewed={() => void load()} />}
           </>
         )}

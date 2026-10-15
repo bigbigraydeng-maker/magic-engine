@@ -1,0 +1,87 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "China Panorama postcard v2: official-wording cards (no Day N), cardTop 930, 4s cards, new BGM",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15：Silk/Panorama 画面不出价格，等 postcard 合并+出片机升级后重出；只出片到 in_review，不发布",
+  "facts_checked": "ctstours.co.nz/tours/china/signature/grand-tour, 2026-10-15：27 天/24 晚；往返国际机票+国内航班、4–5 星酒店、5 星长江游轮、英语导游；50 餐；亮点含 Forbidden City、Terracotta Warriors、Chengdu panda base、West Lake。价格只留首评链接。",
+  "note": "简报要求的第一人称 Baker Gu 叙述：做不到，不替真人编亲身经历（客户红线）；本片无旁白，质检的口吻标记按误报处理；PM 若给 Baker 认可的稿再做。"
+ },
+ "rationale_one_liner": "Panorama postcard v2：卡片改官网亮点原词（去掉 Day N）、卡片下移、每卡 4 秒片尾 4 秒、换 BGM；无价格；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "postcard",
+   "props": {
+    "brandColor": "#B61E2E",
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "musicFile": "music/horizons-call.mp3",
+    "musicStartSec": 0,
+    "scrim": 0.55,
+    "cardOpacity": 0.55,
+    "cardSide": "left",
+    "accent": "#8FD3FF",
+    "hook": {
+     "clip": "clips/c2b_chongqing_hongyadong.mp4",
+     "lines": [
+      "THE",
+      "CHINA",
+      "PANORAMA"
+     ]
+    },
+    "scenes": [
+     {
+      "clip": "clips/c1_forbiddencity_aerial.mp4",
+      "place": "Beijing",
+      "line": "The Forbidden City",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/signature/grand-tour",
+      "sourceQuote": "Juyongguan Great Wall and Forbidden City (Beijing)",
+      "placeSourceQuote": "Juyongguan Great Wall and Forbidden City (Beijing)"
+     },
+     {
+      "clip": "clips/c2b_chengdu_panda.mp4",
+      "place": "Chengdu",
+      "line": "The giant panda breeding base",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/signature/grand-tour",
+      "sourceQuote": "giant panda breeding base (Chengdu)",
+      "placeSourceQuote": "giant panda breeding base (Chengdu)"
+     },
+     {
+      "clip": "clips/c4_westlake_pavilion.mp4",
+      "place": "Hangzhou",
+      "line": "West Lake and Longjing tea plantations",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/signature/grand-tour",
+      "sourceQuote": "West Lake and Longjing tea plantations (Hangzhou)",
+      "placeSourceQuote": "West Lake and Longjing tea plantations (Hangzhou)"
+     }
+    ],
+    "price": null,
+    "end": {
+     "backdropClip": "clips/v3_bund_night_zoom.mp4",
+     "title": "27 DAYS"
+    },
+    "timing": {
+     "hookSec": 3.0,
+     "sceneSec": 4.0,
+     "priceSec": 4
+    },
+    "cardTop": 930
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Twenty-seven days from Auckland, from Beijing and Xi'an through a Yangtze River cruise, Chengdu, Guilin and Hangzhou to Shanghai. Return international and domestic flights, 4-5 star hotels, the 5-star Victoria Yangtze River Cruise, an English-speaking tour guide and the 50 meals listed in the itinerary are included. Travel insurance and tips are not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/signature/grand-tour",
+    "offer": [
+     "27 days from Auckland"
+    ]
+   }
+  }
+ }
+}

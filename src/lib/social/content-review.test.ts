@@ -6,6 +6,8 @@ import {
   type ContentCheckItemResult,
   REEL_AUTO_CHECK_KEYS,
   REEL_HUMAN_CHECK_KEYS,
+  REEL_HUMAN_CHECK_KEYS_V2,
+  humanKeysForStored,
   checklistPasses,
   isValidContentSourceRef,
   splitPostChecklist,
@@ -69,5 +71,40 @@ describe('social content review checklist', () => {
     expect(isValidContentSourceRef('client_asset:c0000000-0000-0000-0000-000000000001')).toBe(true)
     expect(isValidContentSourceRef('http://example.test/fact')).toBe(false)
     expect(isValidContentSourceRef('/private/path')).toBe(false)
+  })
+})
+
+describe('listened-to-the-BGM approval item (2026-10-16)', () => {
+  it('V2 = legacy 9 keys + bgm_listened_no_vocals, which is a plain HUMAN item without source_ref', () => {
+    expect(REEL_HUMAN_CHECK_KEYS).toHaveLength(9)
+    expect(REEL_HUMAN_CHECK_KEYS_V2).toEqual([...REEL_HUMAN_CHECK_KEYS, 'bgm_listened_no_vocals'])
+    expect(validateContentChecklist(passHuman(REEL_HUMAN_CHECK_KEYS_V2).map(i => (
+      i.key === 'factual_claims_have_source' || i.key === 'factual_claims_source_verified' ? { ...i, source_ref: 'https://example.com/x' } : i
+    )), REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN').ok).toBe(true)
+  })
+
+  it('a NEW approval without the listened item is refused (V2 requires it)', () => {
+    const legacy = passHuman(REEL_HUMAN_CHECK_KEYS).map(i => (
+      i.key === 'factual_claims_have_source' || i.key === 'factual_claims_source_verified' ? { ...i, source_ref: 'https://example.com/x' } : i
+    ))
+    const r = validateContentChecklist(legacy, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('bgm_listened_no_vocals')
+  })
+
+  it('stored receipts: legacy 9-key receipts keep validating at publish time, V2 receipts need the item', () => {
+    const withSource = (items: ContentCheckItemResult[]) => items.map(i => (
+      i.key === 'factual_claims_have_source' || i.key === 'factual_claims_source_verified' ? { ...i, source_ref: 'https://example.com/x' } : i
+    ))
+    const legacy = withSource(passHuman(REEL_HUMAN_CHECK_KEYS))
+    const v2 = withSource(passHuman(REEL_HUMAN_CHECK_KEYS_V2))
+    expect(humanKeysForStored(legacy)).toBe(REEL_HUMAN_CHECK_KEYS)
+    expect(humanKeysForStored(v2)).toBe(REEL_HUMAN_CHECK_KEYS_V2)
+    expect(validateContentChecklist(legacy, humanKeysForStored(legacy), 'HUMAN').ok).toBe(true)
+    expect(validateContentChecklist(v2, humanKeysForStored(v2), 'HUMAN').ok).toBe(true)
+    // a V2 receipt whose listened item is missing a sibling cannot sneak through as legacy
+    expect(validateContentChecklist(v2.filter(i => i.key !== 'logo_watermark_present'), humanKeysForStored(v2), 'HUMAN').ok).toBe(false)
+    expect(humanKeysForStored(null)).toBe(REEL_HUMAN_CHECK_KEYS)
+    expect(humanKeysForStored('x')).toBe(REEL_HUMAN_CHECK_KEYS)
   })
 })

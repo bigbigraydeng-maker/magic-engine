@@ -11,6 +11,10 @@
 export type LiteChannel = 'facebook_story' | 'instagram_story'
 export type LiteMediaKind = 'image' | 'video'
 
+/** What a Story is for in the day (the calendar spreads the three roles over the three time slots). */
+export type LiteRole = 'inspiration' | 'fact' | 'invite' | 'itinerary' | 'price_inclusions' | 'reason' | 'acquisition'
+export const LITE_ROLES: readonly LiteRole[] = ['inspiration', 'fact', 'invite', 'itinerary', 'price_inclusions', 'reason', 'acquisition']
+
 export const LITE_ITEM_STATUSES = [
   'PENDING', // waiting for its time (or for the next sweep after a harmless retry)
   'CLAIMED', // a sweep took it and is about to send
@@ -79,6 +83,8 @@ export interface LiteItem {
   /** What the latest dry run / pre-send check saw (for the preview and the watchdog). */
   last_check_at: string | null
   last_check_result: string | null
+  /** Optional: only present once the role column exists and is filled. Not part of the fingerprint. */
+  role?: LiteRole
 }
 
 /** What a caller supplies to create a pack with its items. */
@@ -114,3 +120,6 @@ export interface LiteSwitches {
 export function isLiveFor(switches: LiteSwitches, clientId: string): boolean {
   return switches.live && switches.clientIds.includes(clientId.trim().toLowerCase())
 }
+
+/** Result of the pre-send check of a story file. BAD_VIDEO: a video that is not the right length / shape / size. */
+export type LiteFileCheck = 'OK' | 'CHANGED' | 'UNREACHABLE' | 'BAD_VIDEO'

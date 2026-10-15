@@ -53,7 +53,7 @@ async function makeHarness(options: {
   items?: NewLiteItem[]
   clientStatus?: string | null
   pageId?: string | null
-  checkFileResult?: 'OK' | 'CHANGED' | 'UNREACHABLE'
+  checkFileResult?: 'OK' | 'CHANGED' | 'UNREACHABLE' | 'BAD_VIDEO'
   checkFileThrows?: boolean
   sendEventThrows?: boolean
 } = {}): Promise<Harness> {
@@ -280,6 +280,15 @@ describe('buildLitePreview', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.value.items.every((item) => item.problems.includes('FILE_CHANGED'))).toBe(true)
+  })
+
+  it('flags VIDEO_NOT_ACCEPTABLE (and blocks authorising) when the video is the wrong length / shape', async () => {
+    const { ports } = await makeHarness({ checkFileResult: 'BAD_VIDEO' })
+    const result = await buildLitePreview(previewInput(ports))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.items.every((item) => item.problems.includes('VIDEO_NOT_ACCEPTABLE'))).toBe(true)
+    expect(result.value.can_authorize).toBe(false)
   })
 
   it('flags FILE_UNREACHABLE when the file cannot be read', async () => {

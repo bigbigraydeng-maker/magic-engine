@@ -15,7 +15,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
+import { PLAN_NOT_APPROVED_MESSAGE, canWriteTasksToPlan } from '@/lib/marketing-plan/plan-guard'
+import type { MarketingPlan, MarketingPlanStatus } from '@/lib/marketing-plan/types'
+import { findStep, hasPromoField, readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
+import { blockers, evaluatePhaseGates } from '@/lib/marketing-plan/promo/gates'
+import { manualChecksOf } from '@/lib/marketing-plan/promo/board'
 import type {
   ExecutionItem, ExecutionLog, PrescriptionStatus,
   DiagnosticDimension, FixType, LinkedContentPost,
@@ -617,6 +623,8 @@ export async function POST(
       fix_type?: FixType
       platform?: string
       kind?: string
+      /** 推广计划（plan_data.promo）的任务必须指明属于哪个阶段的哪一步 */
+      promo_ref?: { phase_id?: string; step_id?: string }
     }
 
     const title = (body.title ?? '').trim()
@@ -639,12 +647,52 @@ export async function POST(
     if (isMarketingPlan) {
       const { data: plan, error: planErr } = await supabaseAdmin
         .from('marketing_plans')
-        .select('id')
+        .select('id, status, plan_data, generation_meta')
         .eq('id', body.marketing_plan_id!)
         .eq('client_id', clientId)
-        .single<{ id: string }>()
+        .single<{ id: string; status: MarketingPlanStatus; plan_data: unknown; generation_meta: MarketingPlan['generation_meta'] }>()
       if (planErr || !plan) {
         return NextResponse.json({ success: false, error: 'Marketing Plan 不存在' }, { status: 404 })
+      }
+      // 草稿计划不能往执行看板派活（以前只查「计划存在」，草稿也能加任务）
+      if (!canWriteTasksToPlan(plan.status)) {
+        return NextResponse.json({ success: false, error: PLAN_NOT_APPROVED_MESSAGE }, { status: 409 })
+      }
+
+      // 推广计划的任务必须带步骤引用，并且该阶段 / 步骤要存在于这份计划里；
+      // 旧版计划（没有 promo 字段）保持原行为，只查"计划已批准"。
+      let promoRef: { phase_id: string; step_id: string } | null = null
+      if (hasPromoField(plan.plan_data)) {
+        // 往已批准的推广计划挂任务 = 动计划的执行内容，只有内部账号可以（客户员工不行）
+        const approver = await requirePlanApproverAccess(clientId)
+        if (!approver.ok) {
+          return NextResponse.json({ success: false, error: approver.error, reason: approver.reason }, { status: approver.status })
+        }
+        const spec = readPromoSpec(plan.plan_data)
+        const phaseId = body.promo_ref?.phase_id ?? ''
+        const stepId = body.promo_ref?.step_id ?? ''
+        if (!spec || !findStep(spec, phaseId, stepId)) {
+          return NextResponse.json(
+            { success: false, error: '推广计划的任务必须指明属于哪个阶段的哪一步（promo_ref），且该步骤要存在于计划里' },
+            { status: 400 },
+          )
+        }
+        promoRef = { phase_id: phaseId, step_id: stepId }
+        // 阶段入口复查：广告步骤的任务落到执行看板前，重跑该阶段的硬门（红或灰 → 拒绝）。
+        // 批准时未到期阶段只做提示，这里才是它到期后真正拦住的地方。
+        const target = findStep(spec, phaseId, stepId)
+        const phaseDef = spec.phases.find(p => p.id === phaseId)
+        if (target?.kind === 'ads_campaign' && phaseDef) {
+          const facts = await loadPromoFacts(clientId, spec, manualChecksOf(plan))
+          const hard = blockers(evaluatePhaseGates(spec, phaseDef, facts.gate))
+          if (hard.length > 0) {
+            return NextResponse.json({
+              success: false,
+              error: `这个阶段的检查清单还没过关，不能往执行看板派广告任务：${hard.map(h => `${h.label}（${h.reason}）`).join('；')}`,
+              blockers: hard.map(h => ({ key: h.key, label: h.label, light: h.light, reason: h.reason, how: h.how })),
+            }, { status: 409 })
+          }
+        }
       }
 
       const { data: maxRow } = await supabaseAdmin
@@ -662,6 +710,7 @@ export async function POST(
         source: 'fde_manual_add',
         kind,
         platform,
+        ...(promoRef ? { promo_ref: promoRef } : {}),
         estimated_hours: 1,
         required_skills: kind === 'social_reel' ? ['video direction', 'social copywriting'] : ['social copywriting'],
       }
