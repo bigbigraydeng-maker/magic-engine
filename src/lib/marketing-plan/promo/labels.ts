@@ -42,7 +42,8 @@ export interface ApproveButtonState {
 const HIDDEN: ApproveButtonState = { visible: false, disabled: true, label: '', hint: '', blockers: [] }
 
 function short(r: GateResult) {
-  return { label: r.label, reason: r.reason, how: r.how }
+  const label = r.phase_name ? `${r.phase_name}：${r.label}` : r.label
+  return { label, reason: r.reason, how: r.how }
 }
 
 export function approveButtonState(board: Pick<PromoBoard, 'plan_status' | 'approval' | 'spec_valid'>): ApproveButtonState {

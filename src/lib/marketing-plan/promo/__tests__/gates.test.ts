@@ -143,3 +143,61 @@ describe('worstLight / blockers / unverified', () => {
     expect(unverified(r).some(u => u.key === 'social.cadence_scheduled')).toBe(true)
   })
 })
+
+describe('批准前评估所有含广告的阶段', () => {
+  // 把 baseSpec 里已有的 p2 改成含广告步骤的阶段，并指定开始日期（NOW=2026-10-30，新鲜度 7 天）
+  const withAdsPhase = (startDate: string): PromoSpec => {
+    const s = structuredClone(verifiedAll())
+    // 第一阶段只留社媒步骤，让红灯只可能来自 p2
+    s.phases[0].steps = s.phases[0].steps.filter(st => st.kind === 'social_cadence')
+    const p2 = s.phases.find(p => p.id === 'p2')!
+    p2.start_date = startDate
+    p2.steps = [{
+      id: 'p2-ads', kind: 'ads_campaign', settings: {
+        ad_account_id: 'act_1', daily_budget_cents: 1000, audience_ref: 'a',
+        creative_refs: ['vid-1'], placements: [], paused_ranges: [],
+      },
+    }]
+    return s
+  }
+
+  it('a. 第一阶段只有社媒、p2 有广告且到期、素材未批准 → 不能批准，blockers 里有 p2', () => {
+    const s = withAdsPhase('2026-11-02')
+    const f = goodFacts({ config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'candidate' }] } })
+    const v = evaluateApproval(s, f)
+    expect(v.can_approve).toBe(false)
+    expect(v.blockers.some(b => b.phase_id === 'p2')).toBe(true)
+  })
+
+  it('b. 同上但 p2 在三个月后开始 → 不阻塞，进 deferred_blockers', () => {
+    const s = withAdsPhase('2026-12-01')
+    const f = goodFacts({ config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'candidate' }] } })
+    const v = evaluateApproval(s, f)
+    expect(v.blockers.length).toBe(0)
+    expect(v.can_approve).toBe(true)
+    expect(v.deferred_blockers.some(b => b.phase_id === 'p2')).toBe(true)
+  })
+
+  it('c. p2 到期且素材已批准、账户快照很旧（灰）→ 不能批准', () => {
+    const s = withAdsPhase('2026-11-02')
+    const f = goodFacts({
+      config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status: 'approved' }] },
+      snapshots: { act_1: { account_status: 1, captured_at: '2026-09-01T00:00:00Z' } },
+    })
+    const v = evaluateApproval(s, f)
+    expect(v.can_approve).toBe(false)
+    expect(v.blockers.some(b => b.phase_id === 'p2' && b.key === 'ads.account_usable')).toBe(true)
+  })
+
+  it('d. results 里每条都带 phase_id；两个阶段都有广告时同一个 key 各出现一次', () => {
+    const s = withAdsPhase('2026-11-02')
+    // 给第一阶段补回一个广告步骤，让两个阶段都跑广告硬门
+    s.phases[0].steps.push({ id: 'p1-ads', kind: 'ads_campaign', settings: {
+      ad_account_id: 'act_1', daily_budget_cents: 1000, audience_ref: 'a', creative_refs: ['vid-1'], placements: [], paused_ranges: [] } })
+    const v = evaluateApproval(s, goodFacts())
+    expect(v.results.every(r => typeof r.phase_id === 'string')).toBe(true)
+    const phases = v.results.filter(r => r.key === 'ads.account_usable').map(r => r.phase_id)
+    expect(phases).toContain('p1')
+    expect(phases).toContain('p2')
+  })
+})
