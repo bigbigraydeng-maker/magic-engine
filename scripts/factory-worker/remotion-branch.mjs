@@ -313,6 +313,47 @@ export function copyWithinRoot(srcReal, rootReal, dest) {
   }
 }
 
+// Dropbox "online-only" files are placeholders: size > 0 but nothing on disk. Reading them makes the client download the file.
+const WAKE_ATTEMPTS = 2
+const WAKE_DEADLINE_MS = 60_000
+const WAKE_CHUNK_BYTES = 1 << 20
+const NOT_THERE_CODES = new Set(['ENOENT', 'ENOTDIR'])
+
+export function isCloudOnly(path) {
+  try {
+    const st = statSync(path)
+    return st.isFile() && st.size > 0 && st.blocks === 0
+  } catch {
+    return false
+  }
+}
+
+// Read a file end to end (forces a cloud download) with a hard time limit. Never throws.
+export function wakeCloudFile(path, { deadlineMs = WAKE_DEADLINE_MS, now = Date.now } = {}) {
+  const started = now()
+  let fd
+  try {
+    fd = openSync(path, constants.O_RDONLY)
+    const buf = Buffer.alloc(WAKE_CHUNK_BYTES)
+    for (;;) {
+      if (now() - started > deadlineMs) return { ok: false, reason: `超过 ${Math.round(deadlineMs / 1000)} 秒仍没读完` }
+      if (readSync(fd, buf, 0, buf.length, null) === 0) return { ok: true }
+    }
+  } catch (e) {
+    return { ok: false, reason: e.code || e.message }
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}
+
+// 'missing' = the file is not there; 'unreadable' = it is there but could not be read (cloud-only, I/O error, permissions).
+export function classifyStageError(e) {
+  if (e instanceof RemotionOrderError) return 'fatal'
+  if (e && NOT_THERE_CODES.has(e.code)) return 'missing'
+  if (e && e.code === undefined && e.message === 'bad') return 'missing'
+  return 'unreadable'
+}
+
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
   const hasLogo = typeof props.logoFile === 'string'
@@ -355,21 +396,45 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
   }
 
   const missing = []
-  for (const name of others) {
+  const unreadable = []
+  const stageOne = (name) => {
     const dest = join(stageDir, name)
+    const srcReal = realpathSync(resolve(libReal, name))
+    if (!isInside(libReal, srcReal) || !statSync(srcReal).isFile()) throw new Error('bad')
+    mkdirSync(dirname(dest), { recursive: true })
+    copyWithinRoot(srcReal, libReal, dest)
+    return srcReal
+  }
+  for (const name of others) {
+    let lastReason = ''
     try {
-      const srcReal = realpathSync(resolve(libReal, name))
-      if (!isInside(libReal, srcReal) || !statSync(srcReal).isFile()) throw new Error('bad')
-      mkdirSync(dirname(dest), { recursive: true })
-      copyWithinRoot(srcReal, libReal, dest)
+      stageOne(name)
+      continue
     } catch (e) {
-      if (e instanceof RemotionOrderError) throw e
-      missing.push(name)
+      const kind = classifyStageError(e)
+      if (kind === 'fatal') throw e
+      if (kind === 'missing') { missing.push(name); continue }
+      lastReason = e.code || e.message
     }
+    let staged = false
+    for (let attempt = 1; attempt <= WAKE_ATTEMPTS && !staged; attempt++) {
+      const woke = wakeCloudFile(resolve(libReal, name))
+      try {
+        stageOne(name)
+        staged = true
+      } catch (e) {
+        if (classifyStageError(e) === 'fatal') throw e
+        lastReason = woke.ok ? (e.code || e.message) : woke.reason
+      }
+    }
+    if (!staged) unreadable.push(`${name}（${lastReason}）`)
   }
-  if (missing.length > 0) {
-    throw new RemotionOrderError(`缺少素材文件：${missing.join(', ')}。请放到 ${assetLibDir}`)
+  const problems = []
+  if (missing.length > 0) problems.push(`缺少素材文件：${missing.join(', ')}。请放到 ${assetLibDir}`)
+  if (unreadable.length > 0) {
+    problems.push(`素材文件在目录里但读不出来（不是缺失）：${unreadable.join(', ')}。已尝试唤醒 ${WAKE_ATTEMPTS} 次（每次最多 ${WAKE_DEADLINE_MS / 1000} 秒）仍失败；多半是 Dropbox 仅云端文件没下载下来，或磁盘/权限问题`)
   }
+  if (problems.length > 0) throw new RemotionOrderError(problems.join('；'))
 }
 
 // Last 300 chars of stderr; worker.mjs truncates messages to 500 chars.
