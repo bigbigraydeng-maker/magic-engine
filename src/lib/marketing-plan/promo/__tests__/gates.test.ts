@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { blockers, firstPhase, unverified, worstLight, type GateKey } from '../gates'
 import { baseSpec, evaluateApproval, evaluatePhaseGates, goodFacts } from './fixtures'
 import type { PromoSpec } from '../spec'
+import { promoContentHash } from '../content-hash'
 
 const verifiedAll = (): PromoSpec => baseSpec({
   checks: (['landing.item_live', 'content.wording_permission'] as GateKey[]).map(k => ({
@@ -199,5 +200,35 @@ describe('批准前评估所有含广告的阶段', () => {
     const phases = v.results.filter(r => r.key === 'ads.account_usable').map(r => r.phase_id)
     expect(phases).toContain('p1')
     expect(phases).toContain('p2')
+  })
+})
+
+describe('人工核实绑内容版本', () => {
+  const rec = (hash?: string) => ({
+    phase_id: 'p1', check_key: 'landing.item_live', verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '',
+    ...(hash === undefined ? {} : { content_hash: hash }),
+  })
+  const landing = (spec: PromoSpec, records: ReturnType<typeof rec>[]) =>
+    evaluatePhaseGates(spec, spec.phases[0], goodFacts({ manual_checks: records })).find(r => r.key === 'landing.item_live')!
+
+  it('核实时的内容指纹 = 现在的指纹 → 绿', () => {
+    const spec = baseSpec()
+    expect(landing(spec, [rec(promoContentHash(spec))]).light).toBe('green')
+  })
+  it('内容在核实之后改过（指纹对不上）→ 灰，写明要重新核实', () => {
+    const spec = baseSpec()
+    const r = landing(spec, [rec('0000000000000000')])
+    expect(r.light).toBe('gray')
+    expect(r.reason).toContain('需要重新核实')
+  })
+  it('旧核实记录没有内容指纹 → 灰（fail-closed）', () => {
+    const r = landing(baseSpec(), [rec()])
+    expect(r.light).toBe('gray')
+    expect(r.reason).toContain('需要重新核实')
+  })
+  it('同一项有新旧两条：只认指纹对得上的那条', () => {
+    const spec = baseSpec()
+    const stale = { ...rec('0000000000000000'), verified_at: '2026-10-29T00:00:00Z' }
+    expect(landing(spec, [stale, rec(promoContentHash(spec))]).light).toBe('green')
   })
 })

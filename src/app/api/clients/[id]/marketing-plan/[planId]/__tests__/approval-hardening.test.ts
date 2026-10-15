@@ -218,6 +218,18 @@ describe('PATCH — 并发 / 状态 / 退回草稿留底', () => {
   })
 })
 
+describe('退回草稿作废旧核实', () => {
+  it('promo_checks 挪进 previous_promo_checks，草稿上不再留着参与判定的核实', async () => {
+    const check = { phase_id: 'p1', check_key: 'landing.item_live', verified_by: 'a@example.com', verified_at: '2026-10-20T00:00:00Z', note: '', content_hash: 'abc' }
+    m.plan = { ...m.plan, status: 'approved', approved_at: '2026-10-20T03:04:05Z', generation_meta: { model: 'x', promo_checks: [check] } }
+    const res = await PATCH(mk({ status: 'draft' }), { params: P })
+    expect(res.status).toBe(200)
+    const upd = m.updates[0] as { generation_meta: Record<string, unknown> }
+    expect(upd.generation_meta.promo_checks).toBeUndefined()
+    expect(upd.generation_meta.previous_promo_checks).toEqual([check])
+  })
+})
+
 describe('POST approve — 回执与重试', () => {
   it('草稿：派发后改成已批准，并写回执（含跳过数、操作者）', async () => {
     m.dispatch.mockResolvedValue({
