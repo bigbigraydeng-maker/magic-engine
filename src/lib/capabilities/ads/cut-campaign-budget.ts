@@ -118,7 +118,7 @@ export function createCutCampaignBudgetCapability(sb: SupabaseClient): Capabilit
         const { campaignId, adAccountId, after } = input(step)
         const { current } = await readCurrent(step, campaignId, adAccountId)
         return {
-          output: { campaign_id: campaignId, daily_budget_now: current },
+          output: { applied: true, campaign_id: campaignId, daily_budget_now: current },
           verification: makeReadbackVerification({ daily_budget: after }, { daily_budget: current }),
         }
       },
