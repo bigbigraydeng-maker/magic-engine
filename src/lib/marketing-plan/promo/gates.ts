@@ -14,6 +14,7 @@
 
 import type { PromoPlaybook, PromoEvidence } from './playbooks'
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
+import { promoContentHash } from './content-hash'
 import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
 
 export type Light = 'green' | 'yellow' | 'red' | 'gray'
@@ -175,11 +176,19 @@ function manualChecks(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateRes
     { key: 'content.wording_permission', group: 'content', label: '对外措辞已获客户同意', hard: false,
       how: '把稀缺性 / 截止日等说法发给客户确认，确认后在计划里点「已核实」。' },
   ]
+  // 核实记录绑内容版本：内容一改，旧核实自动失效（content_hash 对不上就不算数）。
+  const currentHash = promoContentHash(spec)
   return defs.map(d => {
-    const rec = f.manual_checks // 只信服务端写入的核实记录（spec.checks 是客户端可写的，不参与判定）
+    const all = f.manual_checks // 只信服务端写入的核实记录（spec.checks 是客户端可写的，不参与判定）
       .filter(c => c.phase_id === phase.id && c.check_key === d.key)
-      .sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
-    if (!rec) return make(d.key, d.group, d.label, d.hard, 'gray', '还没有人核实', d.how)
+    const valid = all.filter(c => c.content_hash === currentHash)
+    const rec = valid.sort((a, b) => b.verified_at.localeCompare(a.verified_at))[0]
+    if (!rec) {
+      if (all.length > 0) {
+        return make(d.key, d.group, d.label, d.hard, 'gray', '计划内容在核实之后改过（或这条核实没有记录内容版本），需要重新核实', d.how)
+      }
+      return make(d.key, d.group, d.label, d.hard, 'gray', '还没有人核实', d.how)
+    }
     const age = ageDays(rec.verified_at, f.now)
     if (age === null || age > f.playbook.factFreshnessDays * 4) {
       return make(d.key, d.group, d.label, d.hard, 'gray', `核实记录已过期（${rec.verified_at.slice(0, 10)} 由 ${rec.verified_by} 核实）`, d.how, rec.verified_at)

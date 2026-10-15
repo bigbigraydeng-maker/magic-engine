@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { baseSpec, goodFacts, goodReconFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 
 const m = vi.hoisted(() => ({
   access: vi.fn(),
@@ -56,7 +57,7 @@ const planWith = (promo: unknown, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 const verifiedChecks = () => ['landing.item_live', 'content.wording_permission'].map(k => ({
-  phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '' }))
+  phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '', content_hash: promoContentHash(baseSpec()) }))
 const loadedFacts = (gate = goodFacts(), recon = goodReconFacts()) => ({
   playbook: gate.playbook, today: '2026-11-12', timezone_known: true, gate, recon,
 })
