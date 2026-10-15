@@ -109,7 +109,7 @@ describe('scanContentQualityFlags — B 内部标签冒充字幕', () => {
 
 describe('scanContentQualityFlags — 人称口吻检测已取消', () => {
   it('公司口吻文案不再被标记,也不再向 Jev 提人称问题', async () => {
-    callJev.mockResolvedValue({ answers: { placeholder_leak: { noul: 0.05 } } })
+    callJev.mockResolvedValue({ answers: { placeholder_leak: { noul: 0.05 }, wrong_voice: { noul: 0.95 } } }) // 即使模型返回了高分也不应产生标记
     const flags = await scanContentQualityFlags({
       brandName: 'CTS Tours',
       angleLabel: null,

@@ -267,7 +267,8 @@ export async function generateAdCopy(params: {
     // formatBriefForPrompt 会把 persona 注入成「用第一人称讲」(全站共用,其它内容线不动);
     // 工厂文案这条线口吻要求已取消,所以只在这里把 persona 摘掉再格式化。
     const bv = (brief.brand_voice ?? null) as Record<string, unknown> | null
-    const briefForPrompt = bv && 'persona' in bv ? { ...brief, brand_voice: { ...bv, persona: undefined } } : brief
+    const { persona: _persona, ...voiceWithoutPersona } = bv ?? {}
+    const briefForPrompt = bv && 'persona' in bv ? { ...brief, brand_voice: voiceWithoutPersona } : brief
     const briefText = formatBriefForPrompt(briefForPrompt as typeof brief)
     const systemPrompt =
       `你为「${brand}」写 9:16 竖屏**信息流短视频广告**(Facebook/Instagram Reels)文案。` +

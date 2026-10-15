@@ -103,6 +103,19 @@ it('legacy narrator_voice_mismatch flag is hidden and no longer blocks one-click
   expect(btn(ONE_CLICK)).toBeDefined()
 })
 
+it('legacy narrator flag + real competitor flag: only the real one shows and it still blocks one-click', async () => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'narrator_voice_mismatch', detail: 'old-voice' }, { category: 'competitor_brand', detail: 'real-flag' }] } })
+  expect(document.body.textContent).toContain('real-flag')
+  expect(document.body.textContent).not.toContain('old-voice')
+  expect(btn(ONE_CLICK)).toBeUndefined()
+})
+
+it.each(['placeholder_caption', 'quality_check_unavailable'])('quality flag %s stays visible and blocks one-click', async (category) => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category, detail: 'shown-detail' }] } })
+  expect(document.body.textContent).toContain('shown-detail')
+  expect(btn(ONE_CLICK)).toBeUndefined()
+})
+
 it('real quality flag stays visible: no PM 已接受 button, no one-click', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'competitor_brand', detail: 'd' }] } })
   expect(btn('PM 已接受')).toBeUndefined()

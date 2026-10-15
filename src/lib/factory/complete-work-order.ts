@@ -155,11 +155,10 @@ export async function completeWorkOrder(
     }
   }
 
-  // brand_name/brand_voice 供下面的成片文案品控用(竞品角度检测要 brand_name,
-  // 人称检测要 brand_voice.persona)——同一条查询多选两列,不增加往返。
+  // brand_name 供下面的成片文案品控用(竞品角度检测)——同一条查询多选一列,不增加往返。
   const { data: brief, error: bErr } = await supabase
     .from('master_briefs')
-    .select('excluded_topics, brand_name, brand_voice')
+    .select('excluded_topics, brand_name')
     .eq('id', wo.master_brief_id as string)
     .maybeSingle()
   if (bErr) return { ok: false, status: 500, error: 'brief lookup failed' }
