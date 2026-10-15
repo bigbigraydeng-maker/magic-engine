@@ -63,10 +63,11 @@ function PinCell({ r, onTogglePin }: { r: ContactRow; onTogglePin: (row: Contact
 function NameCell({ r }: { r: ContactRow }) {
   const { text, missing, sub } = nameForDisplay(r)
   return (
-    <td className="max-w-[260px] px-4 py-2">
+    <td className="px-4 py-2">
+      <div className="max-w-[260px]">
       <div className="flex items-center gap-2">
         <span
-          title={text}
+          title={missing ? r.name || text : text}
           className={`truncate font-medium ${missing ? 'text-me-charcoal/45' : 'text-me-charcoal'}`}
         >
           {text}
@@ -88,6 +89,7 @@ function NameCell({ r }: { r: ContactRow }) {
       {sub !== null && (
         <div className="truncate text-[11px] font-normal text-me-charcoal/45">{sub}</div>
       )}
+      </div>
     </td>
   )
 }
@@ -137,14 +139,19 @@ export function ContactTableRow(props: {
       <td className="whitespace-nowrap px-4 py-2 text-me-charcoal/60">
         {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">—</span>}
       </td>
-      <td className="max-w-[220px] truncate px-4 py-2">
-        <ContactCell r={r} />
+      <td className="px-4 py-2">
+        {/* max-width 写在 td 上在 auto 布局里不生效（不会出省略号），所以放进里面的 div。 */}
+        <div className="max-w-[220px] truncate">
+          <ContactCell r={r} />
+        </div>
       </td>
       {columns.map((c) => {
         const value = r.custom[c.key]
         return (
-          <td key={c.key} className="max-w-[200px] truncate whitespace-nowrap px-4 py-2 text-me-charcoal/60">
-            {value ?? <span className="text-me-charcoal/35">—</span>}
+          <td key={c.key} className="px-4 py-2 text-me-charcoal/60">
+            <div className="max-w-[200px] truncate whitespace-nowrap" title={typeof value === 'string' ? value : undefined}>
+              {value ?? <span className="text-me-charcoal/35">—</span>}
+            </div>
           </td>
         )
       })}
