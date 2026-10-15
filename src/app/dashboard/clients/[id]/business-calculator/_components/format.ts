@@ -232,3 +232,8 @@ export function diffMetrics(
     }
   })
 }
+
+/** 字段的中文名；找不到就原样返回键名（给错误提示和对比表用，别让英文字段名露给 PM）。 */
+export function fieldLabel(key: string): string {
+  return INPUT_FIELDS.find((field) => field.key === key)?.label ?? key
+}

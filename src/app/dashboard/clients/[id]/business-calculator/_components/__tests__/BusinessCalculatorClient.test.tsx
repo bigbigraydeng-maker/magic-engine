@@ -67,7 +67,10 @@ describe('BusinessCalculatorClient', () => {
   it('价格填负数：仍照算，但不让保存并说清原因', async () => {
     render(<BusinessCalculatorClient clientId="c1" />)
     setInput('tourPrice', '-3500')
-    expect(screen.getByTestId('save-blocked').textContent).toContain('暂时不能保存')
+    const reason = screen.getByTestId('save-blocked').textContent ?? ''
+    expect(reason).toContain('暂时不能保存')
+    expect(reason).toContain('Tour 人均价格')
+    expect(reason).not.toContain('tourPrice')
     const save = screen.getByRole('button', { name: '保存当前' }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
     await waitFor(() => expect(fetch).toHaveBeenCalled())

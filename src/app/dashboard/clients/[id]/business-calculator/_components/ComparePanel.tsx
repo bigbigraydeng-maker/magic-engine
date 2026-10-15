@@ -7,7 +7,7 @@ import {
   clampNotes,
   type CalculatorInputs,
 } from '@/lib/crm/industry/travel-business-calculator'
-import { diffMetrics, formatMetric } from './format'
+import { diffMetrics, fieldLabel, formatMetric } from './format'
 
 export interface ScenarioRow {
   id: string
@@ -48,7 +48,7 @@ export function ComparePanel(props: { a: ScenarioRow; b: ScenarioRow }): JSX.Ele
   // 对比表按夹逼后的值算；场景里如果有数被夹逼，要说出来，不能让人以为按填的数算
   const clampLines = [a, b].flatMap((scenario) =>
     clampNotes({ ...DEFAULT_INPUTS, ...scenario.inputs }).map(
-      (note) => `「${scenario.name}」的 ${note.field} 填的是 ${note.entered}，已按 ${note.used} 计算`,
+      (note) => `「${scenario.name}」的「${fieldLabel(note.field)}」填的是 ${note.entered}，已按 ${note.used} 计算`,
     ),
   )
 

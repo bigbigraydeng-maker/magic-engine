@@ -28,6 +28,8 @@ describe('ComparePanel', () => {
     render(<ComparePanel a={row('甲', { commissionRate: 30 })} b={row('乙', {})} />)
     const notes = screen.getByTestId('compare-clamp-notes').textContent ?? ''
     expect(notes).toContain('甲')
+    expect(notes).toContain('Sales 佣金率')
+    expect(notes).not.toContain('commissionRate')
     expect(notes).toContain('已按 20 计算')
     expect(notes).not.toContain('乙')
   })

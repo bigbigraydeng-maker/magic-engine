@@ -12,10 +12,17 @@ import {
   type CalculatorInputs,
 } from '@/lib/crm/industry/travel-business-calculator'
 
+import { INPUT_FIELDS } from './format'
 import { InputsPanel } from './InputsPanel'
 import { ResultPanel } from './ResultPanel'
 import { ScenarioBar } from './ScenarioBar'
 import type { ScenarioRow } from './ComparePanel'
+
+/** 校验器的原话里带英文字段名，换成页面上的中文名再给 PM 看。 */
+function explainValidationError(error: string): string {
+  const field = INPUT_FIELDS.find((item) => error.includes(item.key))
+  return field ? `「${field.label}」必须是 0 到 10 亿之间的数字` : error
+}
 
 export function BusinessCalculatorClient(props: { clientId: string }): JSX.Element {
   const { clientId } = props
@@ -31,7 +38,7 @@ export function BusinessCalculatorClient(props: { clientId: string }): JSX.Eleme
   const warnings = unrealisticWarnings(inputs, result)
   // 有数字超出可保存范围（负数、超过 10 亿）时仍然照算给你看，但不允许保存，并说清原因
   const validity = useMemo(() => validateInputs(inputs), [inputs])
-  const saveBlockedReason = validity.ok ? undefined : `${validity.error}——这组数字暂时不能保存`
+  const saveBlockedReason = validity.ok ? undefined : `${explainValidationError(validity.error)}——这组数字暂时不能保存`
 
   const handleChange = (key: keyof CalculatorInputs, value: number): void => {
     setInputs((prev) => ({ ...prev, [key]: value }))
