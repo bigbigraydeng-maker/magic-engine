@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { checkAdsBudget } from '../budget-caps'
 import { draftAdsStep } from '../draft-ads'
 import type { AdsDraftFacts, DailySpendFact, AudiencePoolItem } from '../draft-ads'
 
@@ -349,5 +350,47 @@ describe('账户状态', () => {
     expect(draftAdsStep(f).warnings.join('')).not.toContain('不是可投放状态')
     f.account_status = null
     expect(draftAdsStep(f).warnings.join('')).not.toContain('不是可投放状态')
+  })
+})
+
+describe('客户总上限按「同阶段全账户」扣，账户上限按「同账户」扣', () => {
+  it('别的账户的占用只扣客户余量，不扣本账户余量', () => {
+    const f = baseFacts()
+    f.headroom = { ok: true, headroom_minor: 10000, delivering_minor: 0, cap_minor: 10000, currency: 'NZD', as_of: null }
+    f.account_cap_minor = 10000
+    f.account_delivering_minor = 0
+    f.committed_minor = 0
+    f.committed_all_minor = 8000
+    const r = draftAdsStep(f)
+    expect(r.daily_budget_cents.ok).toBe(true)
+    if (r.daily_budget_cents.ok) expect(r.daily_budget_cents.value).toBeLessThanOrEqual(1000) // 余量 2000 × 0.5
+  })
+  it('采纳后合计不超客户总上限（往返：用 checkAdsBudget 核对）', () => {
+    const f = baseFacts()
+    f.headroom = { ok: true, headroom_minor: 10000, delivering_minor: 0, cap_minor: 10000, currency: 'NZD', as_of: null }
+    f.committed_minor = 0
+    f.committed_all_minor = 8000
+    const r = draftAdsStep(f)
+    expect(r.daily_budget_cents.ok).toBe(true)
+    if (r.daily_budget_cents.ok) {
+      const verdict = checkAdsBudget(
+        [
+          { id: 'a', kind: 'ads_campaign', settings: { ad_account_id: 'act_b', daily_budget_cents: 8000, audience_ref: 'x', creative_refs: [], placements: [], paused_ranges: [] } },
+          { id: 'b', kind: 'ads_campaign', settings: { ad_account_id: 'act_a', daily_budget_cents: r.daily_budget_cents.value, audience_ref: 'x', creative_refs: [], placements: [], paused_ranges: [] } },
+        ],
+        [{ ad_account_id: 'act_a', currency: 'NZD', daily_cap_cents: null, owned_by_client: true }, { ad_account_id: 'act_b', currency: 'NZD', daily_cap_cents: null, owned_by_client: true }],
+        10000,
+      )
+      expect(verdict.verdict).not.toBe('over')
+    }
+  })
+  it('贴近上限减半后若变成 0，不给 0，直接留空', () => {
+    const f = baseFacts()
+    f.headroom = { ok: true, headroom_minor: 1, delivering_minor: 0, cap_minor: 10, currency: 'NZD', as_of: null }
+    f.budget_share_of_headroom = 1
+    f.daily = ['2026-11-05', '2026-11-06'].map(date => ({ date, spend_cents: 10, results: 1, account_status: 1 }))
+    f.today = '2026-11-10'
+    const r = draftAdsStep(f)
+    expect(r.daily_budget_cents.ok).toBe(false)
   })
 })

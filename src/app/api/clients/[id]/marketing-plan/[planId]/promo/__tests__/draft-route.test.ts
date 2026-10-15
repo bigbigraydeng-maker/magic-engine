@@ -82,8 +82,8 @@ describe('POST promo/draft — 广告起草（只读）', () => {
     expect(m.facts).not.toHaveBeenCalled()
   })
 
-  it('committed_minor 为负数 → 400', async () => {
-    const res = await POST(req({ ad_account_id: 'act_1', committed_minor: -1 }), { params: P })
+  it('other_steps 金额为负数 → 400', async () => {
+    const res = await POST(req({ ad_account_id: 'act_1', other_steps: [{ ad_account_id: 'act_1', daily_budget_cents: -1 }] }), { params: P })
     expect(res.status).toBe(400)
     expect(m.facts).not.toHaveBeenCalled()
   })
@@ -116,7 +116,7 @@ describe('POST promo/draft — 广告起草（只读）', () => {
   })
 
   it('正常：返回草稿，且绝不写库', async () => {
-    const res = await POST(req({ ad_account_id: 'act_1', committed_minor: 5000 }), { params: P })
+    const res = await POST(req({ ad_account_id: 'act_1', other_steps: [{ ad_account_id: 'act_1', daily_budget_cents: 5000 }, { ad_account_id: 'act_2', daily_budget_cents: 700 }] }), { params: P })
     expect(res.status).toBe(200)
     const json = await res.json()
     expect(json.success).toBe(true)
@@ -127,6 +127,8 @@ describe('POST promo/draft — 广告起草（只读）', () => {
       expect(json.draft).toHaveProperty(key)
     }
     expect(m.writes).toHaveLength(0)
+    // 同账户的占用扣账户上限，所有账户的占用都扣客户总上限
+    expect(m.facts).toHaveBeenCalledWith(expect.objectContaining({ committedMinor: 5000, committedAllMinor: 5700 }))
   })
 
   it('loadAdsDraftFacts 抛错 → 500', async () => {

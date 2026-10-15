@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
-import { allAdsSteps, readPromoSpec, type PromoPhase, type PromoSpec, type PromoStep } from '@/lib/marketing-plan/promo/spec'
+import { readPromoSpec, type PromoPhase, type PromoSpec, type PromoStep } from '@/lib/marketing-plan/promo/spec'
 import { buildPromoTemplate } from '@/lib/marketing-plan/promo/template'
 import {
   STEP_KIND_LABEL, addPhase, addStep, removePhase, removeStep, setGoal, updatePhase, updateStep, type StepKind,
@@ -18,20 +18,16 @@ interface ApiError { success: boolean; error?: string; issues?: { path: string; 
 
 const KINDS = Object.keys(STEP_KIND_LABEL) as StepKind[]
 
-/** 同一 spec 里、同一 ad_account_id、id 不是当前步骤的广告步骤已占用的日预算之和（分） */
-function committedCentsFor(spec: PromoSpec, step: PromoStep): number {
-  if (step.kind !== 'ads_campaign') return 0
-  let sum = 0
-  for (const { step: s } of allAdsSteps(spec)) {
-    if (s.id === step.id) continue
-    if (s.settings.ad_account_id !== step.settings.ad_account_id) continue
-    sum += s.settings.daily_budget_cents
-  }
-  return sum
+/** 同一阶段里、id 不是当前步骤的其它广告步骤（预算按阶段、按账户核对，和保存时的检查同口径） */
+function otherAdsStepsInPhase(phase: PromoPhase, step: PromoStep): { ad_account_id: string; daily_budget_cents: number }[] {
+  if (step.kind !== 'ads_campaign') return []
+  return phase.steps.flatMap(s => (s.kind === 'ads_campaign' && s.id !== step.id
+    ? [{ ad_account_id: s.settings.ad_account_id, daily_budget_cents: s.settings.daily_budget_cents }]
+    : []))
 }
 
-function StepCard({ step, options, clientId, planId, committedCents, onChange, onRemove }: {
-  step: PromoStep; options: PromoOptions | null; clientId: string; planId: string; committedCents: number
+function StepCard({ step, options, clientId, planId, otherSteps, onChange, onRemove }: {
+  step: PromoStep; options: PromoOptions | null; clientId: string; planId: string; otherSteps: { ad_account_id: string; daily_budget_cents: number }[]
   onChange: (s: PromoStep) => void; onRemove: () => void
 }) {
   return (
@@ -43,7 +39,7 @@ function StepCard({ step, options, clientId, planId, committedCents, onChange, o
       {step.kind === 'ads_campaign' && <AdsFields step={step} accounts={options?.accounts ?? null} onChange={onChange} />}
       {step.kind === 'ads_campaign' && (
         <AdsDraftPanel clientId={clientId} planId={planId} adAccountId={step.settings.ad_account_id}
-          committedCents={committedCents}
+          otherSteps={otherSteps}
           onAdopt={patch => onChange({ ...step, settings: { ...step.settings, ...patch } })} />
       )}
       {step.kind === 'social_cadence' && <SocialFields step={step} onChange={onChange} />}
@@ -73,7 +69,7 @@ function PhaseCard({ phase, index, options, spec, clientId, planId, setSpec }: {
       <ul className="space-y-3">
         {phase.steps.map(s => (
           <StepCard key={s.id} step={s} options={options} clientId={clientId} planId={planId}
-            committedCents={committedCentsFor(spec, s)}
+            otherSteps={otherAdsStepsInPhase(phase, s)}
             onChange={next => setSpec(updateStep(spec, phase.id, next))}
             onRemove={() => setSpec(removeStep(spec, phase.id, s.id))} />
         ))}

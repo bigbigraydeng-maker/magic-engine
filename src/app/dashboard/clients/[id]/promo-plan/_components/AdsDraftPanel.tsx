@@ -9,8 +9,8 @@ interface Props {
   planId: string
   /** 当前广告步骤的设定（只读用） */
   adAccountId: string
-  /** 本计划里同账户其它广告步骤已占用的日预算（分），起草时要先扣掉 */
-  committedCents: number
+  /** 同一阶段里其它广告步骤（含各账户）已占用的日预算，起草时要先扣掉 */
+  otherSteps: { ad_account_id: string; daily_budget_cents: number }[]
   /** 采纳：只传「有建议」的字段 */
   onAdopt: (patch: { daily_budget_cents?: number; audience_ref?: string; creative_refs?: string[] }) => void
 }
@@ -66,7 +66,7 @@ function SuggestionBlock<T>({
   )
 }
 
-export function AdsDraftPanel({ clientId, planId, adAccountId, committedCents, onAdopt }: Props) {
+export function AdsDraftPanel({ clientId, planId, adAccountId, otherSteps, onAdopt }: Props) {
   const [loading, setLoading] = useState(false)
   const [draft, setDraft] = useState<AdsDraft | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -83,7 +83,7 @@ export function AdsDraftPanel({ clientId, planId, adAccountId, committedCents, o
       const res = await fetch(`/api/clients/${clientId}/marketing-plan/${planId}/promo/draft`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ad_account_id: adAccountId, committed_minor: committedCents }),
+        body: JSON.stringify({ ad_account_id: adAccountId, other_steps: otherSteps }),
       })
       let data: DraftResponse
       try {

@@ -37,6 +37,7 @@ export interface RawDraftInput {
   captures_read_failed: boolean
   ad_account_id: string
   committed_minor: number
+  committed_all_minor?: number
   budget_share_of_headroom: number
   min_audience_size: number
   max_creatives: number
@@ -45,9 +46,8 @@ export interface RawDraftInput {
 /** 把可能是字符串的金额转成数字；转不出来当 0（只用于逐日汇总，读不到整段会走 null 分支）。 */
 function toNumber(v: number | string | null): number {
   if (v === null) return 0
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
-  const n = Number(v)
-  return Number.isFinite(n) ? n : 0
+  if (typeof v === 'number') return v
+  return Number(v)
 }
 
 /** 取 YYYY-MM-DD 部分；拿不到返回 null。 */
@@ -102,7 +102,10 @@ function buildDaily(
   for (const row of insights) {
     const d = row.insight_date
     const cur = byDate.get(d) ?? { spend: 0, results: 0 }
-    cur.spend += toNumber(row.spend)
+    const spendNum = toNumber(row.spend)
+    // 金额读出来不是有限数字 = 数据有问题，整段逐日当读不到（不能悄悄当成 0 花费）
+    if (!Number.isFinite(spendNum)) return { daily: null, asOf: null }
+    cur.spend += spendNum
     cur.results += row.results ?? 0
     byDate.set(d, cur)
     if (row.fetched_at !== null && (asOf === null || row.fetched_at > asOf)) asOf = row.fetched_at
@@ -242,6 +245,7 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
     account_delivering_minor,
     account_cap_minor,
     committed_minor: raw.committed_minor,
+    committed_all_minor: raw.committed_all_minor ?? raw.committed_minor,
     daily,
     insights_as_of: asOf,
     account_status,
@@ -290,9 +294,10 @@ async function readSnapshots(
     if (error) return null
     const rows = (data ?? []) as EntitySnapshotRow[]
     out.push(...rows)
-    if (rows.length < PAGE_SIZE) break
+    if (rows.length < PAGE_SIZE) return out
   }
-  return out
+  // 翻满页数仍然是满页 = 数据被截断：宁可当成读不全，也不拿一份缺了老实体的快照去算余量
+  return null
 }
 
 async function readInsights(
@@ -317,9 +322,10 @@ async function readInsights(
     if (error) return null
     const rows = (data ?? []) as NonNullable<RawDraftInput['insights']>
     out.push(...rows)
-    if (rows.length < PAGE_SIZE) break
+    if (rows.length < PAGE_SIZE) return out
   }
-  return out
+  // 同上：翻满仍是满页 = 被截断（正序读，被截掉的是最新几天），当成读不全
+  return null
 }
 
 /** 只读：把数据库里的行读出来，交给纯函数拼 facts。任何读失败都落到 null / failed，不抛错。 */
@@ -327,6 +333,7 @@ export async function loadAdsDraftFacts(args: {
   clientId: string
   adAccountId: string
   committedMinor: number
+  committedAllMinor?: number
   playbook: PromoPlaybook
   now?: Date
 }): Promise<AdsDraftFacts> {
@@ -414,6 +421,7 @@ export async function loadAdsDraftFacts(args: {
     captures_read_failed,
     ad_account_id: adAccountId,
     committed_minor: args.committedMinor,
+    committed_all_minor: args.committedAllMinor ?? args.committedMinor,
     budget_share_of_headroom: args.playbook.draftBudgetShareOfHeadroom,
     min_audience_size: D4_AUDIENCE_FLOOR,
     max_creatives: args.playbook.draftMaxCreatives,

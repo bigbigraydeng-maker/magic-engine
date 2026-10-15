@@ -58,6 +58,8 @@ export interface AdsDraftFacts {
   account_cap_minor: number | null
   /** 本计划里同账户其它广告步骤已经占用的日预算（最小货币单位），起草时要先扣掉 */
   committed_minor: number
+  /** 本计划同一阶段里**所有账户**其它广告步骤已占用的日预算（客户总上限按它扣）；不传 = 同 committed_minor */
+  committed_all_minor?: number
   /** 近 30 天逐日；null = 读不到；[] = 读到了但窗口里没有数据 */
   daily: DailySpendFact[] | null
   insights_as_of: string | null
@@ -157,7 +159,8 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
   }
 
   // 可用余量 base
-  let base = headroom.headroom_minor - f.committed_minor
+  const committedAll = f.committed_all_minor ?? f.committed_minor
+  let base = headroom.headroom_minor - committedAll
   if (f.account_cap_minor !== null && f.account_delivering_minor !== null) {
     const accountRoom = f.account_cap_minor - f.account_delivering_minor - f.committed_minor
     base = Math.min(base, accountRoom)
@@ -167,7 +170,7 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
   }
 
   const accountBound = f.account_cap_minor !== null && f.account_delivering_minor !== null &&
-    f.account_cap_minor - f.account_delivering_minor - f.committed_minor < headroom.headroom_minor - f.committed_minor
+    f.account_cap_minor - f.account_delivering_minor - f.committed_minor < headroom.headroom_minor - committedAll
   let suggested = Math.floor(base * f.budget_share_of_headroom)
   if (suggested <= 0) {
     return { ok: false, why_empty: '余量太小，按比例算不出有意义的预算' }
@@ -212,6 +215,7 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
     }
     if (maxSpend >= headroom.cap_minor * 0.95) {
       suggested = Math.floor(suggested / 2)
+      if (suggested <= 0) return { ok: false, why_empty: '最近真实日花费已经贴近上限，压低后没有可建议的预算' }
       warnings.push('最近真实日花费已经贴近上限，这个建议已经压低')
     }
   }
@@ -225,6 +229,10 @@ function draftBudget(f: AdsDraftFacts, warnings: string[]): Suggestion<number> {
       as_of: f.insights_as_of,
     })
   } else {
+    const unknownStatusDays = windowBefore(f.daily, f.today, 30).filter(r => r.account_status === null).length
+    if (unknownStatusDays > 0) {
+      warnings.push(`近 30 天里有 ${unknownStatusDays} 天没有账户状态记录，这些天按正常算（可能混进了停投 / 欠款期的数据）。`)
+    }
     const w30 = windowCost(f.daily, f.today, 30)
     const w14 = windowCost(f.daily, f.today, 14)
     const w7 = windowCost(f.daily, f.today, 7)
