@@ -44,7 +44,7 @@ export function createPauseCampaignCapability(sb: SupabaseClient): CapabilityImp
       async readback(step): Promise<CapabilityStepResult> {
         const { campaignId, accountId } = readInput(step)
         const { row } = await campaign(step, campaignId, accountId)
-        return { output: { campaign_id: campaignId, status: row.status }, verification: makeReadbackVerification({ status: 'PAUSED' }, { status: row.status }) }
+        return { output: { applied: true, campaign_id: campaignId, status: row.status }, verification: makeReadbackVerification({ status: 'PAUSED' }, { status: row.status }) }
       },
     },
     async rollback(step, outputs): Promise<OutwardRollbackResult> {
