@@ -5,7 +5,7 @@
 > 以下行号一律以动工当天的最新 main 为准重新核（本分支落后 main 很多）。
 
 ## 1. v1 被打回的原因（已吸收）
-转写对纯音乐会幻听成俄文/僧伽罗文乱码，对哼唱合唱又常常转不出东西——**「转写 = 判决」不成立**。所以：转写只用来「提名可疑」，**「确认无人声」必须有人签字**；规则按**实际用到的那一段**判，不按整首判。
+转写对纯音乐会幻听成俄文/僧伽罗文乱码，对哼唱合唱又常常转不出东西——**「转写 = 判决」不成立**。所以：转写只用来「提名可疑」，**「确认无人声」必须由真人签字（智能体不能签）**；规则按**实际用到的那一段**判，不按整首判。
 
 ## 2. 做法
 **A. 独立登记表（不碰 `music.json` 的严格校验）**：新文件 `scripts/factory-worker/engines/remotion/catalog/music-vocals.json`（平台共享、无客户信息），每条按**文件内容 sha256**登记：
@@ -22,11 +22,12 @@
 2. recipe 路径 `creative-recipe.mjs` 的 `resolveRecipeBgm`：同一函数 `assertMusicVocalClear(sha256, startSec, durSec)`（新放在共享小模块），不要两处各写一份。
 - 判定：`present` → 拒；`none` → 过；`unknown` → 看 `cleanUntilSec`；**查不到 sha → 拒**，错误写「先跑 scan-music-vocals 并签字」。回执里记录 sha256 与判定。
 
-**D. 首次回填（与代码同一个 PR，否则合并即停产）**：用整库转写表回填：
-- `present`：Analytical Scholar 及其 `_n` 派生、Jayden小弟。
-- `none`（有人签字）：Codex 三条 Shorts 已发布用过且 PM 听过并验收的 龙旗破云、Snap the Floor、Sunday Hammer（签字依据=PM 验收已发布成片，不是转写）；其余当前在用曲（founders-at-dawn、horizons-*、second-hand-sunrise(_n)、momentum(_q)、road-afar、feel-good-travel、founders-in-motion(_n)）由审片员听过后签字，**签不了的先留 unknown 不放行**，不为赶进度默认放行。
-- `unknown + cleanUntilSec`：Jade River Journey（100）、Sunlit Kitchen Window（55）。
-- 已发布/在飞工单不回改；之后新工单按上面规则走。
+**D. 签字规则（18 号转 PM 口径；苏东坡/马良是智能体，听不了音频，**不能**签「无人声」；签字人必须是真人）**
+- **第①类「PM 审片即听过」**：曲子已在 PM 点过通过、且成片带声音审过的工单里用过 → 用「该工单号 + PM 通过时间（回填时从库里读）」做证据，**按实际用到的区间登记**（如前 15 秒 → `cleanUntilSec: 15`），不需要 PM 再听。含 Codex 三条已验收 Shorts 的三首（龙旗破云、Snap the Floor、Sunday Hammer，PM 验收签字，按各自实际用到的 cue+时长区间登记）；以及已发布工单用过的在用曲（如 founders-at-dawn、horizons-*、second-hand-sunrise、sunlit-kitchen-window 前 15 秒、jade_river_journey 前 15 秒），区间同样按实际用到的算。
+- **第②类「从未经 PM 听过」**：新曲 / 库里待用曲（含 road-afar、feel-good-travel、momentum 等未被 PM 通过过的）→ **默认不放行**，需真人（PM 或 PM 指定的员工）听 20 秒后签；到那时由 18 号只问 PM 具体那一首。Founders in Motion（Tale v3 用）属本类：PM 点通过 v3 时听到即视为签字，同时登记。
+- `present`：Analytical Scholar 及其 `_n` 派生、Jayden小弟（转写出连贯歌词/广告词，永远拦）。
+- 转写只用于「提名可疑」，**不作「确认无人声」的依据**；`signedBy` 字段记真人姓名或「PM审片@工单号」。
+- 首次回填与代码**同一个 PR**，否则合并即停产；已发布/在飞工单不回改。
 
 ## 3. 验收
 - 单测（修改前后各记命令与退出码，沿用 `music.test.mjs`、`templates.test.mjs` 等现有基线）：present / none / unknown 无窗口 / unknown 窗口内外 / 查不到 sha / 同曲不同文件名同 sha / `_n` 派生 / 乱码与空转写不得自动判 none（工具层）/ `client_library` 路径 / recipe 路径。
