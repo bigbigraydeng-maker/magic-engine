@@ -35,7 +35,6 @@ describe('tallyStoryItems', () => {
       blocked: 2,
       stopped: 0,
       unauthorised: 0,
-      unauthorised: 0,
     })
   })
 
