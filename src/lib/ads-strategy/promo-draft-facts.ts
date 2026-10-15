@@ -213,6 +213,17 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
   }
   const account_cap_minor = raw.account_cap_read_failed ? null : raw.account_cap_minor
 
+  // 4b. 账户现在的状态（最新一条账户级快照）
+  let account_status: number | null = null
+  if (ownSnapshots !== null) {
+    let newest: EntitySnapshotRow | null = null
+    for (const r of ownSnapshots) {
+      if (r.level !== 'account') continue
+      if (newest === null || Date.parse(r.captured_at) > Date.parse(newest.captured_at)) newest = r
+    }
+    account_status = newest === null ? null : newest.account_status
+  }
+
   // 5. 逐日
   const { daily, asOf } = buildDaily(raw.insights, ownSnapshots ?? [])
 
@@ -233,6 +244,7 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
     committed_minor: raw.committed_minor,
     daily,
     insights_as_of: asOf,
+    account_status,
     audiences,
     audiences_complete,
     approved_creatives,

@@ -336,3 +336,18 @@ describe('账户上限更紧 / 账户已停投', () => {
     expect(r.warnings.join('')).toContain('可能已停投')
   })
 })
+
+describe('账户状态', () => {
+  it('账户不是可投放状态 → 提醒批准前检查会亮红', () => {
+    const f = baseFacts()
+    f.account_status = 3
+    expect(draftAdsStep(f).warnings.join('')).toContain('不是可投放状态')
+  })
+  it('账户状态正常或读不到 → 不加这条提醒', () => {
+    const f = baseFacts()
+    f.account_status = 1
+    expect(draftAdsStep(f).warnings.join('')).not.toContain('不是可投放状态')
+    f.account_status = null
+    expect(draftAdsStep(f).warnings.join('')).not.toContain('不是可投放状态')
+  })
+})

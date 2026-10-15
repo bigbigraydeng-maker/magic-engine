@@ -61,6 +61,8 @@ export interface AdsDraftFacts {
   /** 近 30 天逐日；null = 读不到；[] = 读到了但窗口里没有数据 */
   daily: DailySpendFact[] | null
   insights_as_of: string | null
+  /** 该广告账户最新快照的状态码（1 = 可投放）；读不到 / 没有 = null / 不传 */
+  account_status?: number | null
   /** 现有受众池（已排除「消失」的）；null = 读不到 */
   audiences: AudiencePoolItem[] | null
   /** 受众层这一轮是否读全；null = 不知道。读不全时「池子是空的」不能当成「真没有受众」 */
@@ -377,6 +379,9 @@ export function draftAdsStep(f: AdsDraftFacts): AdsDraft {
   const daily_budget_cents = draftBudget(f, warnings)
   const audience_ref = draftAudience(f)
   const creative_refs = draftCreatives(f)
+  if (f.account_status !== undefined && f.account_status !== null && f.account_status !== 1) {
+    warnings.push(`这个广告账户现在不是可投放状态（状态码 ${f.account_status}），批准前的检查会亮红，先处理账户再批。`)
+  }
   // 固定提醒：不管建议有没有给出来都要说（没有月预算口径，不能让人以为日上限守住了月度总预算）
   warnings.push('这里只按日预算上限算，库里没有月预算口径，月度总预算要另外核。')
   warnings.push('单条成本用的结果口径可能中途改过，库里没有版本记录，请自己核对。')
