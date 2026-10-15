@@ -256,6 +256,18 @@ describe('deriveEndorsement —— 营销计划这根锚', () => {
     expect(e.kind).toBe('stale_marketing_plan')
   })
 
+  it('🔴 带推广结构却没有批准指纹（绕过批准接口或指纹上线前批的）→ stale', () => {
+    const e = planItem({
+      client_id: CLIENT_ID,
+      status: 'approved',
+      approved_at: daysAgo(5),
+      end_date: null,
+      promo_hash_approved: null,
+      promo_hash_now: 'bbb',
+    })
+    expect(e.kind).toBe('stale_marketing_plan')
+  })
+
   it('指纹一致 → current，批准的就是现在这一版', () => {
     const e = planItem({
       client_id: CLIENT_ID,

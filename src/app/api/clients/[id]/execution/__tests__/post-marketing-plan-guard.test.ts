@@ -7,12 +7,15 @@ import { NextRequest } from 'next/server'
 
 const m = vi.hoisted(() => ({
   access: vi.fn(),
+  approver: vi.fn(),
+  loadPromoFacts: vi.fn(),
   planStatus: 'draft' as string | null,
   planData: {} as Record<string, unknown>,
   inserts: [] as { table: string; row: Record<string, unknown> }[],
 }))
 
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
+vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access, requirePlanApproverAccess: m.approver }))
+vi.mock('@/lib/marketing-plan/promo/facts', () => ({ loadPromoFacts: m.loadPromoFacts }))
 vi.mock('@/lib/supabase', () => {
   const from = (table: string) => {
     const c: Record<string, unknown> = {}
@@ -39,7 +42,7 @@ vi.mock('@/lib/supabase', () => {
 })
 
 import { POST } from '../route'
-import { baseSpec } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { baseSpec, goodFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
 
 const req = (body: unknown) =>
   new NextRequest('http://localhost/x', { method: 'POST', body: JSON.stringify(body) })
@@ -52,6 +55,8 @@ beforeEach(() => {
   m.planStatus = 'draft'
   m.planData = {}
   m.access.mockResolvedValue({ ok: true })
+  m.approver.mockResolvedValue({ ok: true })
+  m.loadPromoFacts.mockResolvedValue({ gate: goodFacts() })
 })
 
 describe('POST /execution — marketing_plan 来源只认已批准的计划', () => {
@@ -105,6 +110,19 @@ describe('POST /execution — 推广计划的任务必须指明属于哪一步',
     m.planData = { promo: { schema: 'promo_v1' } }
     const res = await POST(req({ ...body, promo_ref: { phase_id: 'p1', step_id: 's-soc' } }), params)
     expect(res.status).toBe(400)
+  })
+
+  it('客户员工（非内部账号）不能往已批准的推广计划挂任务 → 403，不写卡', async () => {
+    m.approver.mockResolvedValue({ ok: false, status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', reason: 'approver_only' })
+    const res = await POST(req({ ...body, promo_ref: { phase_id: 'p1', step_id: 's-soc' } }), params)
+    expect(res.status).toBe(403)
+    expect(stepRow()).toBeUndefined()
+  })
+
+  it('广告步骤所在阶段硬门没过（素材未批准）→ 409，不写卡', async () => {
+    const res = await POST(req({ ...body, promo_ref: { phase_id: 'p1', step_id: 's-ads' } }), params)
+    expect(res.status).toBe(409)
+    expect(stepRow()).toBeUndefined()
   })
 
   it('旧版计划（没有 promo）：不要求 promo_ref，行为不变', async () => {

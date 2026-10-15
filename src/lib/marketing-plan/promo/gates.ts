@@ -296,14 +296,17 @@ export function evaluateApproval(spec: PromoSpec, f: GateFacts): ApprovalVerdict
   const phases = approvalPhases(spec)
 
   const per_phase: PhaseVerdict[] = phases.map(phase => {
-    const due = phase.id === first.id || phase.start_date <= dueLimit
+    // 已结束的阶段（结束日早于今天）不再评估：它的核实早过期，留着只会让后面的周盖章永久卡死
+    const ended = phase.end_date < f.today
+    const due = !ended && (phase.id === first.id || phase.start_date <= dueLimit)
     const results = evaluatePhaseGates(spec, phase, f).map(r => ({ ...r, phase_id: phase.id, phase_name: phase.name }))
     return { phase_id: phase.id, phase_name: phase.name, due, results }
   })
 
   const results = per_phase.flatMap(p => p.results)
   const dueResults = per_phase.filter(p => p.due).flatMap(p => p.results)
-  const deferredResults = per_phase.filter(p => !p.due).flatMap(p => p.results)
+  const endedIds = new Set(phases.filter(ph => ph.end_date < f.today).map(ph => ph.id))
+  const deferredResults = per_phase.filter(p => !p.due && !endedIds.has(p.phase_id)).flatMap(p => p.results)
   const b = blockers(dueResults)
 
   return {

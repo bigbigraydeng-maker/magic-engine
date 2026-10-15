@@ -70,8 +70,10 @@ export function approveButtonState(board: Pick<PromoBoard, 'plan_status' | 'appr
  * 已批准计划上「按计划继续」是否该出现。
  * 到期阶段的检查清单没过关时，不能留下「看过、没意见」的记录。
  */
-export function continueButtonVisible(board: Pick<PromoBoard, 'plan_status' | 'reconcile' | 'reviewed_this_window'> & Partial<Pick<PromoBoard, 'approval'>>): boolean {
+export function continueButtonVisible(board: Pick<PromoBoard, 'plan_status' | 'reconcile' | 'reviewed_this_window'> & Partial<Pick<PromoBoard, 'approval' | 'content_changed'>>): boolean {
   if (board.plan_status !== 'approved' || board.reconcile === null || board.reviewed_this_window) return false
+  // 批准之后内容被改过：看的是旧版本，不能盖「没意见」
+  if (board.content_changed) return false
   // 到期阶段的硬门没过关（红/灰）时，不能留下"看过、没意见"的记录
   if (board.approval && board.approval.blockers.length > 0) return false
   // 只有对账没异常才允许"没意见"：看不清 / 落后 / 超标时点它会留下误导的"看过、没意见"记录

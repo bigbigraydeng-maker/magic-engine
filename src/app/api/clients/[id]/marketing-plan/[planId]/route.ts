@@ -132,7 +132,8 @@ export async function PATCH(
 
     const revertingToDraft = isRevertToDraft(current.status, body.status)
     // 退回草稿 = 撤销批准并清掉未开工待办，不能让客户员工做，只有内部账号可以
-    if (revertingToDraft) {
+    // 标记已完成同样会让该计划下的自动执行失去背书，和退回草稿同一档
+    if (revertingToDraft || body.status === 'completed') {
       const approver = await requirePlanApproverAccess(params.id)
       if (!approver.ok) {
         return NextResponse.json({ success: false, error: approver.error, reason: approver.reason }, { status: approver.status })
@@ -162,12 +163,13 @@ export async function PATCH(
       revoked = (await revokePlanTasks(params.planId, params.id)).revoked
       // 退回草稿后，旧批准记录不再算「有效」：回执挪去留底，批准时间清空（再次批准会写新的）
       // 旧的人工核实记录同理：退回草稿后不再参与判定，只留底
-      const { approval_receipt: oldReceipt, promo_checks: oldChecks, ...restMeta } = current.generation_meta ?? {}
+      const { approval_receipt: oldReceipt, promo_checks: oldChecks, weekly_reviews: oldReviews, ...restMeta } = current.generation_meta ?? {}
       updates.approved_at = null
       updates.generation_meta = {
         ...restMeta,
         ...(oldReceipt ? { previous_approvals: [...(restMeta.previous_approvals ?? []), oldReceipt].slice(-10) } : {}),
-        ...(oldChecks && oldChecks.length > 0 ? { previous_promo_checks: [...(restMeta.previous_promo_checks ?? []), ...oldChecks].slice(-50) } : {}),
+    ...(oldReviews && oldReviews.length > 0 ? { previous_weekly_reviews: [...(restMeta.previous_weekly_reviews ?? []), ...oldReviews].slice(-50) } : {}),
+    ...(oldChecks && oldChecks.length > 0 ? { previous_promo_checks: [...(restMeta.previous_promo_checks ?? []), ...oldChecks].slice(-50) } : {}),
       }
     }
 

@@ -51,6 +51,11 @@ describe('continueButtonVisible', () => {
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('over')] }, reviewed_this_window: false })).toBe(false)
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: { ...rec, rows: [row('on_track')] }, reviewed_this_window: false })).toBe(true)
   })
+  it('批准之后内容被改过 / 到期阶段硬门没过 → 不显示（不能对旧内容留下"没意见"）', () => {
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: false, content_changed: true })).toBe(false)
+    const approval = { can_approve: false, blockers: [{} as never], unverified: [], results: [], per_phase: [], deferred_blockers: [], note: null }
+    expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: false, approval })).toBe(false)
+  })
   it('点过了 / 草稿 / 没有对账 → 不显示', () => {
     expect(continueButtonVisible({ plan_status: 'approved', reconcile: rec, reviewed_this_window: true })).toBe(false)
     expect(continueButtonVisible({ plan_status: 'draft', reconcile: rec, reviewed_this_window: false })).toBe(false)

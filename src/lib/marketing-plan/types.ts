@@ -215,6 +215,8 @@ export interface MarketingPlan {
     promo_checks?: PromoManualCheckRecord[]
     /** 退回草稿时挪过来留底的旧核实记录（内容已可能改过，不再参与判定）。*/
     previous_promo_checks?: PromoManualCheckRecord[]
+    /** 退回草稿时挪过来留底的旧「按计划继续」记录（看的是旧内容，不再算数）。*/
+    previous_weekly_reviews?: WeeklyReviewRecord[]
     /** PM 每周「按计划继续」的确认记录（服务端写入，按 week_start 幂等）。*/
     weekly_reviews?: WeeklyReviewRecord[]
   } | null

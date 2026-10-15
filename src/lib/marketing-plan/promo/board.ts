@@ -9,6 +9,7 @@ import {
   type ApprovalVerdict, type GateResult, type Light,
 } from './gates'
 import { reconcileWeek, type Reconciliation } from './reconcile'
+import { promoContentHash } from './content-hash'
 import { hasPromoField, nextPhaseFrom, parsePromoSpec, type PromoPhase, type PromoSpec, type PromoValidationIssue } from './spec'
 
 export interface PhaseGateView {
@@ -36,6 +37,8 @@ export interface PromoBoard {
   reconcile: Reconciliation | null
   /** 本窗口 PM 是否已点过「按计划继续」 */
   reviewed_this_window: boolean
+  /** 批准之后推广内容被改过（回执指纹和现在的指纹对不上）；旧回执没有指纹时为 false */
+  content_changed: boolean
 }
 
 export function manualChecksOf(plan: Pick<MarketingPlan, 'generation_meta'>): PromoManualCheckRecord[] {
@@ -52,7 +55,7 @@ function phaseView(spec: PromoSpec, phase: PromoPhase, results: GateResult[]): P
 const EMPTY = (plan: MarketingPlan, has: boolean, issues: PromoValidationIssue[]): PromoBoard => ({
   plan_id: plan.id, plan_status: plan.status, updated_at: plan.updated_at ?? null, has_promo: has, spec_valid: false, issues,
   today: null, timezone_known: false, playbook: null, approval: null, next_phase: null,
-  reconcile: null, reviewed_this_window: false,
+  reconcile: null, reviewed_this_window: false, content_changed: false,
 })
 
 export async function buildPromoBoard(plan: MarketingPlan, now: Date = new Date()): Promise<PromoBoard> {
@@ -68,12 +71,15 @@ export async function buildPromoBoard(plan: MarketingPlan, now: Date = new Date(
   const reconcile = reconcileWeek(spec, facts.today, facts.recon, facts.playbook)
   const reviewed = (plan.generation_meta?.weekly_reviews ?? []).some(r => r.week_start === reconcile.window.start)
 
+  const receiptHash = plan.generation_meta?.approval_receipt?.content_hash
+  const contentChanged = typeof receiptHash === 'string' && receiptHash !== '' && receiptHash !== promoContentHash(spec)
+
   return {
     plan_id: plan.id, plan_status: plan.status, updated_at: plan.updated_at ?? null, has_promo: true, spec_valid: true, issues: [],
     today: facts.today, timezone_known: facts.timezone_known,
     playbook: { key: facts.playbook.key, evidence: facts.playbook.evidence },
     approval,
     next_phase: next ? phaseView(spec, next, evaluatePhaseGates(spec, next, facts.gate)) : null,
-    reconcile, reviewed_this_window: reviewed,
+    reconcile, reviewed_this_window: reviewed, content_changed: contentChanged,
   }
 }

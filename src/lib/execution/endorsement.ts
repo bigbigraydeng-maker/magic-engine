@@ -135,12 +135,13 @@ export function deriveEndorsement(input: EndorsementInput, now: Date): Endorseme
       return { kind: 'stale_marketing_plan' }
     }
     // 🔴 批准之后推广内容被改过（或现在读不出来）：批准的不是现在这一版，不能再当背书。
-    //    旧计划 / 旧回执没有 promo_hash_approved → 跳过这段，行为完全不变。
-    if (
-      typeof m.promo_hash_approved === 'string' &&
-      m.promo_hash_approved !== '' &&
-      m.promo_hash_now !== m.promo_hash_approved
-    ) {
+    //    带推广结构却没有批准指纹 = 绕过批准接口批的（或指纹上线前批的）→ 同样不认，宁可停。
+    //    没有推广结构的普通旧计划（promo_hash_now 为空且回执也无指纹）行为不变。
+    const approvedHash = typeof m.promo_hash_approved === 'string' && m.promo_hash_approved !== '' ? m.promo_hash_approved : null
+    if (approvedHash !== null && m.promo_hash_now !== approvedHash) {
+      return { kind: 'stale_marketing_plan' }
+    }
+    if (approvedHash === null && typeof m.promo_hash_now === 'string' && m.promo_hash_now !== '') {
       return { kind: 'stale_marketing_plan' }
     }
     return {
