@@ -36,3 +36,15 @@
 
 ## 4. 复用声明
 复用 sha256 习惯、`copyWithinRoot`、出片前置检查位与回执；新增只是一张平台共享的登记表和一个小判定函数；客户/行业专属内容为零。
+
+## 5. 复审后补丁（子牙 / 魏征对 v2 均「带条件通过」，2026-10-16；以本节为准）
+
+1. **接线补第三条路径**：老路径 `worker.mjs` 的 `resolveBgm`（可用绝对路径、回退 `FACTORY_BGM_PATH`/品牌包默认曲，`music_mood` 还可能交引擎自动选曲）动工前核实是否仍在用：在用 → 同样接 `assertMusicVocalClear`；已停用 → 写明并加用例证明走不到。
+2. **接线细节**：`stageRemotionAssets` 目前同步且不返回值 → 改为 catalog 曲（`copyWithinRoot`）与客户自带曲（`stageOne`）两路都返回 sha256，并把 `props.musicStartSec` 与实际总帧数/FPS 传入；判定点在渲染之前。recipe 路径 `resolveRecipeBgm` 是纯函数 → 注入 `hashFn` 与登记表（由 `worker.mjs` 传入）；命中 present 或区间越界时 `continue` 到下一首并写回执，全部被拒才抛错；**对「实际喂给 make_promo 的文件」算 sha**（先拷到 tmp 再算，避免换文件空窗）；`creative-recipe.test.mjs` 现有测试改为注入夹具登记表，不再要求「零改动」。
+3. **区间算法**：放行条件 = `musicStartSec + 成片实际时长(总帧数/FPS) + 1 秒余量 ≤ cleanUntilSec`（余量覆盖淡出与帧取整）；起点按 `excerptFor` 取整后的值算；用例：恰等于、略超、起点不为 0、起点在人声之后。
+4. **判定模块与登记表校验**：新建 `scripts/factory-worker/music-vocal-gate.mjs`（严格 zod：sha256 64 位十六进制、verdict 枚举、`cleanUntilSec` 非负、sha 不得重复；加载失败 = 整体拒绝出片，不当空表；含 `assertMusicVocalClear`），登记表放 `engines/remotion/catalog/music-vocals.json`。
+5. **派生文件各自独立签字**：`_n/_q` 是降噪/响度处理版，原曲签了不等于派生版没问题；`derivedFrom` 只作追溯，**不继承 verdict**。Analytical Scholar 母版与 `_n` 各登记一条 `present`。
+6. **签字防伪**：登记表本身就是闸 → **任何改动一律按 A 级处理**（在受保护路径里登记；PM 在对话里回「合」即等于签字；PR 必须列出表的 diff）。`signedBy` 只允许白名单真人或形如「PM审片@工单号」的由回填脚本生成的值；回填脚本必须**去库里核对**该工单存在、`review_ref.approved_by` 是 PM（排除 Airtable 同步写入的 `unknown`）、取 `approved_at`，并**从工单的 `musicStartSec` 与时长算区间**（取该曲在已通过工单里实际用到的最大区间），不靠手写；证据字段附证据文件 sha256。
+7. **在飞/周期工单不能一合并就停产**：回填清单必须覆盖已排队、未渲染工单与每日计划（`remotion-daily-plan`）会选到的全部曲目；计划阶段（网页端读不到 Dropbox 文件）至少**按曲名过滤掉未登记曲**，sha 校验仍在 worker 端做；客户自带曲同样要登记，否则合并当天会被全部拦下。
+8. **验收补**：区间边界用例；登记表被改（校验失败）必须拒绝；回填脚本只读试跑，输出「每首曲子的登记结果 + 证据来源」让人对一遍；README「新增一首音乐」流程同步更新并在验收里勾选。
+9. **待 PM 拍板（风险接受度，非技术选择）**：魏征核实审片通过清单（`REEL_HUMAN_CHECK_KEYS`，`src/lib/social/content-review.ts`）**没有「已听声音、无人声」这一项**——Tale 三条都有人审、都带着人声通过了。所以「PM 点通过」不能当作「PM 听过」。选项：A）往后在审片清单里加一项「已开声音听、背景音乐无人声」（B 级小改，之后 PM 点通过才真算听过）；已发布曲目回填时只按其实际用到区间登记并标 `strength: approval-only`（可放行但标注弱证据），PM 有空时对在用的十几首各听 20 秒一次性升级为强证据；B）回填全部按 `unknown`+实际用到区间一半保守登记。我建议 A。
