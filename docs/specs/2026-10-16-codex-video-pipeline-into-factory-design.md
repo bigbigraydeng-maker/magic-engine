@@ -77,3 +77,16 @@
 3. Arial Bold 的替代方案（出片机若换机/上云）与 Codex 是否另有字体要求。
 4. ElevenLabs 的账号/额度归属与成本（长片用）；对齐用的是什么工具（`alignment.json` 的生成脚本没找到）。
 5. 「5 Must-Try Street Foods」的素材何时到位（煎饼/肉夹馍/生煎包/biangbiang 面/糖葫芦，目前只有清单）。
+
+## 7. 校正（2026-10-16，依据 Codex 交接包 `handoff-20261016`，以本节为准，与上文冲突处以本节为准）
+
+读了 `Remotion与Shorts制作迁移交接.txt`、`Shorts发布强制规则.txt` 和源码快照里的 `approved-shorts-ffmpeg/build.py`。
+
+1. **PM 满意的是 2026-10-16 三条 Shorts**（上海 20s / 重庆 20s / 煎饼 20.5s，归档 `Dropbox/MagicLab_Studio/03_Enterprise/CTS/output/2026-10-16_three-shorts`，回执 `production-receipt.json`、`batch-receipt.json`），不是我上文猜的 `text-short`（排名牌 + 一句话条）。上文 §2 的版式参数**作废**，改按下面这套。
+2. **真实版式**（build.py）：全屏竖版、每景约 1.5–2.5 秒的**快切**（上海/重庆各 6 个独立来源；煎饼是同一过程的 12 个不同阶段）；每景左对齐大字 1–2 个词（第一行黄 `#FFD34B`、其余白，黑描边 6px，起点 x=60 y=320）；左上小 logo（144×42）+「CHINA, UP CLOSE」（33px）；最后一景底部红条 `#C82037` 写 `ctstours.co.nz`（y=1430）；每景前 0.1 秒文字层从左滑入 60px；无价格、无旁白；每条一首不同的音乐，响度 **−14 LUFS**（不是 −17）、淡入 0.04s、淡出 1.5s。
+3. **模板方向改变**：不是 `textshort`（卡片式），而是「**快切词字幕**」`cutwords`：`shots[]{clip, sourceIn, duration(1–3s), crop[w,h,x,y], words[0–2]}` + `brand{kicker}` + `endBar{text}` + `music{id, cue}`，加「单过程素材」允许同一原片多个不重叠区间（以 sha256+时间区间去重，不是文件去重）。现有 `montage` 要求至少 8 镜头、3 类镜头、≤20 秒，煎饼 20.5 秒过不了，交接包也说明应加 process 模式或单独模板。
+4. **字体**：Codex 用 macOS 的 Arial Bold，不可随仓库分发；Remotion 引擎现用 Montserrat（Google Fonts，开源可部署），验收对拍时按 Montserrat 重新核对换行与字号，字形差异进差异表由苏东坡/马良判。
+5. **来源与授权**：音乐是 PM 自己的 Suno 作品（`bigbigraydeng`，沿用 PM 的商用授权声明，哈希在回执）；煎饼素材 Flickr CC BY 2.0（作者 Franklin Rainier，必须保留作者/链接/许可/剪辑说明）；上海/重庆 Pexels。**不另行索要授权证据**。
+6. **发布不归本模板**：七项发布前检查、授权、封面、长片关联、7 天音乐去重都是 97 号的发布端；工厂只出「审片 MP4 + 竖封面 + 镜头清单 + QA 结果」，出片不触发发布。工厂侧保证项：无价格画面闸（已有）、镜头清单含来源与时间区间、音乐 id+sha256 写进回执。
+7. **旁白/强制对齐工具**：交接包没有答案，且 Shorts 无旁白；只涉及长片，暂缓（阶段 2）。
+8. 上文 §6 五个问题的答案：①满意成片=三条 Shorts（见 1）；②曲库授权=PM 自有 Suno；③字体=改用 Montserrat；④旁白/对齐=交接包未给，暂缓；⑤街头美食素材=`00_Inbox/industry-travel/2026-10-16_China_Street_Food`（煎饼已有；其余仍缺）。
