@@ -1,0 +1,107 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "China Panorama: 15-second reel (27 days Beijing to Shanghai; no dates; real website price; v1 from existing clips)",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15（转述 PM「按判断处理小事」；成本为 0 才提交）；Silk Road 另有 74 号 10/14 已批一条；只出片到 in_review，不发布、不起广告；无早鸟/截止/限时类字样",
+  "facts_checked": "ctstours.co.nz/tours/china/signature/grand-tour, 2026-10-15：27 天/24 晚；From NZD 10,899 pp twin share；单人房差 NZD 2,555；往返国际机票+国内航班、4–5 星酒店、5 星长江游轮、英语导游；50 餐；亮点含 Forbidden City、Terracotta Warriors、Chengdu panda base、West Lake。"
+ },
+ "rationale_one_liner": "Panorama 第一条：27 天北京到上海，只用官网行程里有的景点；不写日期；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.08,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.35,
+    "beats": [
+     0,
+     0.8,
+     1.6,
+     2.4,
+     3.2,
+     4.35,
+     5.5,
+     6.65,
+     7.8,
+     8.95,
+     10.1,
+     10.7,
+     11.3,
+     11.9,
+     12.5,
+     13.1,
+     13.7,
+     14.3,
+     14.9
+    ],
+    "musicFile": "music/jade_river_journey_q.mp3",
+    "musicStartSec": 0,
+    "hook": {
+     "clip": "clips/c1_greatwall_jinshanling.mp4",
+     "lines": [
+      {
+       "text": "DAYS",
+       "badge": "27"
+      },
+      {
+       "text": "BEIJING",
+       "badge": null
+      },
+      {
+       "text": "SHANGHAI",
+       "badge": null
+      }
+     ]
+    },
+    "items": [
+     {
+      "clip": "clips/c1_forbiddencity_aerial.mp4",
+      "text": "THE FORBIDDEN CITY",
+      "blurBackdrop": false
+     },
+     {
+      "clip": "clips/c2b_chengdu_panda.mp4",
+      "text": "GIANT PANDAS, CHENGDU",
+      "blurBackdrop": false
+     },
+     {
+      "clip": "clips/c4_westlake_pavilion.mp4",
+      "text": "WEST LAKE, HANGZHOU",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "YOUR 27 DAYS",
+    "revealTitle": "CHINA PANORAMA.",
+    "price": {
+     "amount": 10899,
+     "footnote": "SINGLE SUPPLEMENT NZ$2,555",
+     "fromLabel": "FROM",
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "backdropClip": "clips/v3_bund_night_zoom.mp4",
+     "footnoteSize": 50,
+     "currencyPrefix": "NZ$"
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Twenty-seven days from Auckland, from Beijing and Xi'an through a Yangtze River cruise, Chengdu, Guilin and Hangzhou to Shanghai. Return international and domestic flights, 4-5 star hotels, the 5-star Victoria Yangtze River Cruise, an English-speaking tour guide and the 50 meals listed in the itinerary are in the price. From NZD $10,899 per person, twin share; single supplement NZD $2,555. Travel insurance and tips are not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/signature/grand-tour",
+    "offer": [
+     "27 days from Auckland",
+     "From NZD $10,899 per person, twin share"
+    ]
+   }
+  }
+ }
+}
