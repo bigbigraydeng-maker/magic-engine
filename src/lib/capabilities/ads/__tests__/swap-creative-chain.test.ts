@@ -12,8 +12,14 @@ import { createFakeSupabase } from '@/lib/kernel/__tests__/fake-supabase'
 import { createSwapCreativeCapability } from '../swap-creative'
 
 vi.mock('@/lib/ads-strategy/config', () => ({
-  loadAdStrategyConfig: vi.fn(async () => ({
-    creative_pool: [{ kind: 'meta_video', ref: '2069489893713349', status: 'approved' }],
+  loadAdStrategyConfigWithSource: vi.fn(async () => ({
+    source: 'row',
+    config: {
+      creative_pool: [{
+        kind: 'meta_video', ref: '2069489893713349', status: 'approved',
+        approved_by: 'bigbigraydeng@gmail.com', approved_at: '2026-10-14T00:00:00Z',
+      }],
+    },
   })),
 }))
 vi.mock('@/lib/meta/ad-account-binding', () => ({
@@ -34,14 +40,35 @@ vi.mock('../common', async (importOriginal) => {
 
 const AD = '777000111'
 const VIDEO = '2069489893713349'
+const OLD_VIDEO = '1111111111'
 const PAGE = '1616575215312482'
 const OLD_CREATIVE = '900000000000001'
 const NEW_CREATIVE = '900000000000009'
 
+/** 两条素材的买家可见文案与落地去向必须完全一致，只有视频不同——这是本动作的语义。 */
+function creativeOf(id: string, videoId: string) {
+  return {
+    id,
+    object_story_spec: {
+      page_id: PAGE,
+      video_data: {
+        video_id: videoId,
+        message: '14 天中国深度游',
+        title: 'Best of China',
+        call_to_action: { type: 'LEARN_MORE', value: { link: 'https://ctstours.co.nz/tours' } },
+      },
+    },
+  }
+}
+
 /** 假 Graph：按请求的 URL/方法回包，并记录每一次写。 */
-function fakeGraph() {
+function fakeGraph(opts: { effectiveStatus?: string } = {}) {
   const state = { creativeOnAd: OLD_CREATIVE }
   const writes: string[] = []
+  const byId: Record<string, ReturnType<typeof creativeOf>> = {
+    [OLD_CREATIVE]: creativeOf(OLD_CREATIVE, OLD_VIDEO),
+    [NEW_CREATIVE]: creativeOf(NEW_CREATIVE, VIDEO),
+  }
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input)
     const body = (init?.method ?? 'GET') === 'POST' ? decodeURIComponent(String(init?.body ?? '')) : ''
@@ -56,14 +83,17 @@ function fakeGraph() {
     if (url.includes('/adcreatives')) {
       return new Response(JSON.stringify({
         data: [
-          { id: OLD_CREATIVE, name: '旧素材', object_story_spec: { page_id: PAGE, video_data: { video_id: '111' } } },
-          { id: NEW_CREATIVE, name: '丝路无价版', object_story_spec: { page_id: PAGE, video_data: { video_id: VIDEO } } },
+          { ...byId[OLD_CREATIVE], name: '旧素材', status: 'ACTIVE' },
+          { ...byId[NEW_CREATIVE], name: '丝路无价版', status: 'ACTIVE' },
         ],
       }), { status: 200 })
     }
     return new Response(JSON.stringify({
-      id: AD, account_id: '1234567890', effective_status: 'ACTIVE',
-      creative: { id: state.creativeOnAd, object_story_spec: { page_id: PAGE } },
+      id: AD,
+      account_id: '1234567890',
+      effective_status: opts.effectiveStatus ?? 'ACTIVE',
+      issues_info: [],
+      creative: byId[state.creativeOnAd],
     }), { status: 200 })
   })
   return { state, writes, fetchMock }
@@ -113,6 +143,20 @@ describe('swap_creative 整条链路（真实 HTTP 封装 + 假 Graph）', () =>
     const readback = await capability.steps.readback(step('readback', prior))
     expect(readback.verification?.passed).toBe(false)
     expect(readback.verification?.failure_reason).toContain('回读跟预期不符')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('换完被打回审核（不是 ACTIVE）→ 验证不通过，让 Kernel 去撤回', async () => {
+    const graph = fakeGraph({ effectiveStatus: 'DISAPPROVED' })
+    vi.stubGlobal('fetch', graph.fetchMock)
+    const capability = createSwapCreativeCapability(createFakeSupabase({}))
+
+    const applied = await capability.steps.apply(step('apply'))
+    const prior = { apply: applied.output as Record<string, unknown> }
+    const readback = await capability.steps.readback(step('readback', prior))
+    expect(readback.verification?.passed).toBe(false)
+    expect(readback.verification?.failure_reason).toContain('effective_status')
 
     vi.unstubAllGlobals()
   })
