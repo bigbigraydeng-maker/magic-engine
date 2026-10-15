@@ -200,3 +200,12 @@ describe('DailyPlanReelsPanel — factory links and header', () => {
     expect(links.length).toBeGreaterThanOrEqual(2)
   })
 })
+
+describe('DailyPlanReelsPanel — not signed in', () => {
+  it('says to sign in on 401, not "admins only"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })))
+    render(<DailyPlanReelsPanel clientId="client-1" />)
+    expect(await screen.findByText('请先登录管理员账号后刷新')).toBeTruthy()
+    expect(screen.queryByText('只有管理员能看')).toBeNull()
+  })
+})

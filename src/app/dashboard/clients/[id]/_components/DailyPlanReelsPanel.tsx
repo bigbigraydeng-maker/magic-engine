@@ -11,7 +11,7 @@ import type { WorkOrderStatus } from '@/lib/factory/types'
 import { isRecordedUploaded } from '@/lib/social/story-lite/page-text'
 import type { OverviewReel } from '@/lib/social/week-overview/build'
 
-type LoadState = 'loading' | 'ready' | 'forbidden' | 'error'
+type LoadState = 'loading' | 'ready' | 'unauthenticated' | 'forbidden' | 'error'
 
 export function DailyPlanReelsPanel({ clientId }: { clientId: string }) {
   const [load, setLoad] = useState<LoadState>('loading')
@@ -26,7 +26,8 @@ export function DailyPlanReelsPanel({ clientId }: { clientId: string }) {
       try {
         const res = await fetch(`/api/clients/${clientId}/social-overview`)
         if (cancelled) return
-        if (res.status === 401 || res.status === 403) return setLoad('forbidden')
+        if (res.status === 401) return setLoad('unauthenticated')
+        if (res.status === 403) return setLoad('forbidden')
         const json = (await res.json().catch(() => ({}))) as {
           success?: boolean
           reels?: OverviewReel[]
@@ -60,6 +61,8 @@ export function DailyPlanReelsPanel({ clientId }: { clientId: string }) {
 
       {load === 'loading' ? (
         <p className="text-xs text-me-charcoal/50">加载中…</p>
+      ) : load === 'unauthenticated' ? (
+        <p className="text-xs text-red-600">请先登录管理员账号后刷新</p>
       ) : load === 'forbidden' ? (
         <p className="text-xs text-red-600">只有管理员能看</p>
       ) : load === 'error' ? (
