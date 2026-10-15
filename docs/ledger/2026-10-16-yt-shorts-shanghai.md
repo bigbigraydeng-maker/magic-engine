@@ -4,7 +4,7 @@ title: YouTube Shorts 回执（上海）：已公开，封面没上传（自动�
 status: decided
 owner: pm
 decided_on: 2026-10-16
-source: doc:docs/sops/social-pre-publish-checklist-youtube-shorts-v1.md
+source: session:c45254ff
 verify_by: 2026-10-23
 verify_how: 看这条 Shorts 的自定义封面是否已上传并在 YouTube 上读回生效；回执里标「未核」的字段是否补上
 ---
