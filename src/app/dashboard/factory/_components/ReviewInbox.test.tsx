@@ -16,6 +16,9 @@ interface Order {
 }
 const order: Order = { id: 'w1', client_id: 'c1', client_name: 'CTS', status: 'in_review', angle: 'a', rationale_one_liner: 'r', fact_source_url: URL_OK, output: { quality_checklist_auto: auto } }
 const click = async (el: Element | undefined) => { await act(async () => { el?.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
+const tickListened = async () => { await click(document.querySelector('input[type="checkbox"]') ?? undefined) }
+// Expanded checklist: the listened item's PASS radio (first radio of that row).
+const passListenedRadio = () => document.querySelector('input[type="radio"][name$="-bgm_listened_no_vocals"]') ?? undefined
 const btn = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))
 
 afterEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals(); posts.length = 0 })
@@ -54,6 +57,8 @@ it('prefills source, one-click all PASS, shows plain-Chinese server error inside
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // 不会替 PM 默认 PASS
   expect(document.body.textContent).toContain('只存成草稿')
   await click(btn('项全部标为通过'))
+  expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // bulk pass never ticks "listened"
+  await click(passListenedRadio())
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(false)
   await click(btn('确定通过'))
   expect(document.querySelector('.fixed')?.textContent).toContain('「事实性主张有来源」这一项要填来源网址')
@@ -62,6 +67,7 @@ it('prefills source, one-click all PASS, shows plain-Chinese server error inside
 it('clears the old error when a retry succeeds (no stale red text on the page)', async () => {
   await mount([{ ok: false, error: MISSING }, { ok: true }], {}, true)
   await click(btn('项全部标为通过'))
+  await click(passListenedRadio())
   await click(btn('确定通过'))
   expect(document.body.textContent).toContain('这一项要填来源网址')
   await click(btn('确定通过'))
@@ -69,16 +75,22 @@ it('clears the old error when a retry succeeds (no stale red text on the page)',
   expect(document.body.textContent).not.toContain('这一项要填来源网址')
 })
 
-it('clean order: one-click panel, no 确定通过, sends 9 HUMAN PASS items with prefilled source', async () => {
+it('clean order: one-click panel needs the listened tick, then sends 10 HUMAN PASS items with prefilled source', async () => {
   await mount([{ ok: true }])
   expect(btn('确定通过')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeDefined()
+  expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(true) // not pre-ticked
+  await click(btn(ONE_CLICK))
+  expect(reviewPosts()).toHaveLength(0) // a disabled button posts nothing
+  await tickListened()
+  expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(false)
   await click(btn(ONE_CLICK))
   const sent = reviewPosts()
   expect(sent).toHaveLength(1)
   const body = sent[0].body as { action: string; checklist_human: Array<{ key: string; judge: string; outcome: string; source_ref: string | null }> }
   expect(body.action).toBe('approve')
-  expect(body.checklist_human).toHaveLength(9)
+  expect(body.checklist_human).toHaveLength(10)
+  expect(body.checklist_human.some(i => i.key === 'bgm_listened_no_vocals' && i.outcome === 'PASS')).toBe(true)
   expect(body.checklist_human.every(i => i.outcome === 'PASS' && i.judge === 'HUMAN')).toBe(true)
   const facts = body.checklist_human.filter(i => i.key.startsWith('factual_'))
   expect(facts.map(i => i.source_ref)).toEqual([URL_OK, URL_OK])
