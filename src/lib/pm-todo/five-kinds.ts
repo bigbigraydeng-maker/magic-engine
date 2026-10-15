@@ -77,6 +77,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // Magic Bridge 免费名额快满：加不加额度、加到多少美元由 PM 定（花钱）；不加则新客户到月底出不了报告
   magic_bridge_quota: 'decide',
   tools_wide_budget_warning: 'decide',
+  // 推广计划每日检查：草稿等你批准 / 批准后内容被改 / 到期阶段检查没过 / 对账偏差——都是批准、花钱、改计划，要 PM 拍板
+  promo_plan_watch: 'decide',
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值

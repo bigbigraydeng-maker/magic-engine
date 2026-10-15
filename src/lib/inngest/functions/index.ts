@@ -23,6 +23,7 @@ import { reelBatchRender } from './reel-batch-render'
 import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { calendarClosureAudit } from './calendar-closure-audit'
+import { promoPlanDailyWatch } from './promo-plan-daily-watch'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
@@ -40,6 +41,7 @@ import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-vo
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 
 export const cloudFunctions = [
+  promoPlanDailyWatch,
   webIntelligenceCapture,
   webIntelligenceDue,
   webIntelligenceTrafficDue,
