@@ -17,11 +17,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { dispatchPlanTasks, revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import { manualChecksOf } from '@/lib/marketing-plan/promo/board'
+import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
 import { hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
 
@@ -29,7 +30,7 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
-  const access = await requirePaidClientAccess(params.id)
+  const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   }
@@ -76,23 +77,25 @@ export async function POST(
     //     后面阶段的检查只在每周对账页亮灯提醒，不阻止、也不是授权动作。
     //     没有 promo 字段的旧版计划完全不走这一步。
     let gateSnapshot: ApprovalReceipt['gate_snapshot']
+    let contentHash: string | undefined
     if (hasPromoField(planRow.plan_data)) {
       const parsed = parsePromoSpec((planRow.plan_data as unknown as { promo: unknown }).promo)
       if (!parsed.ok) {
         return NextResponse.json({ success: false, error: '推广计划结构不合法，不能批准', issues: parsed.issues }, { status: 400 })
       }
+      contentHash = promoContentHash(parsed.spec)
       const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow))
       const verdict = evaluateApproval(parsed.spec, facts.gate)
       if (!verdict.can_approve) {
         return NextResponse.json({
           success: false,
           error: '检查清单有没过的硬门，暂时不能批准',
-          blockers: verdict.blockers.map(b => ({ key: b.key, label: b.label, light: b.light, reason: b.reason, how: b.how })),
+          blockers: verdict.blockers.map(b => ({ key: b.key, label: b.label, light: b.light, reason: b.reason, how: b.how, phase_id: b.phase_id, phase_name: b.phase_name })),
         }, { status: 409 })
       }
       gateSnapshot = {
         taken_at: new Date().toISOString(),
-        results: verdict.results.map(r => ({ key: r.key, light: r.light, hard: r.hard })),
+        results: verdict.results.map(r => ({ key: r.key, light: r.light, hard: r.hard, phase_id: r.phase_id })),
       }
     }
 
@@ -114,6 +117,7 @@ export async function POST(
       tasks_skipped: dispatchResult.tasks_skipped ?? 0,
       packages_created: dispatchResult.packages_created,
       ...(gateSnapshot ? { gate_snapshot: gateSnapshot } : {}),
+      ...(contentHash ? { content_hash: contentHash } : {}),
     }
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from('marketing_plans')

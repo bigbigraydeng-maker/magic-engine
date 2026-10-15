@@ -59,6 +59,10 @@ export interface MarketingPlanAnchor {
   status: string
   approved_at: string | null
   end_date: string | null
+  /** 批准回执里记录的推广内容指纹；没有（旧计划 / 旧回执）= undefined / null */
+  promo_hash_approved?: string | null
+  /** 计划当前 plan_data.promo 的内容指纹；推广结构缺失或不合法 = null */
+  promo_hash_now?: string | null
 }
 
 export interface EndorsementInput {
@@ -128,6 +132,16 @@ export function deriveEndorsement(input: EndorsementInput, now: Date): Endorseme
     }
     // 计划有结束日期且已经过了 → 这一期做完了，别再补作业
     if (m.end_date && Date.parse(m.end_date) < now.getTime()) {
+      return { kind: 'stale_marketing_plan' }
+    }
+    // 🔴 批准之后推广内容被改过（或现在读不出来）：批准的不是现在这一版，不能再当背书。
+    //    带推广结构却没有批准指纹 = 绕过批准接口批的（或指纹上线前批的）→ 同样不认，宁可停。
+    //    没有推广结构的普通旧计划（promo_hash_now 为空且回执也无指纹）行为不变。
+    const approvedHash = typeof m.promo_hash_approved === 'string' && m.promo_hash_approved !== '' ? m.promo_hash_approved : null
+    if (approvedHash !== null && m.promo_hash_now !== approvedHash) {
+      return { kind: 'stale_marketing_plan' }
+    }
+    if (approvedHash === null && typeof m.promo_hash_now === 'string' && m.promo_hash_now !== '') {
       return { kind: 'stale_marketing_plan' }
     }
     return {

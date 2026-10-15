@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 import { baseSpec, goodFacts, goodReconFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 
 const m = vi.hoisted(() => ({
   access: vi.fn(),
@@ -15,9 +16,10 @@ const m = vi.hoisted(() => ({
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
   updateFilters: [] as [string, unknown][],
+  casMiss: false,
 }))
 
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
+vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access, requirePlanApproverAccess: m.access }))
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({ dispatchPlanTasks: m.dispatch, revokePlanTasks: vi.fn() }))
 vi.mock('@/lib/marketing-plan/promo/facts', async () => {
   const actual = await vi.importActual<typeof import('@/lib/marketing-plan/promo/facts')>('@/lib/marketing-plan/promo/facts')
@@ -30,8 +32,12 @@ vi.mock('@/lib/supabase', () => {
     c.select = () => c
     c.eq = (col: string, val: unknown) => { m.updateFilters.push([col, val]); return c }
     c.single = async () => ({ data: m.plan, error: null })
-    c.maybeSingle = async () => ({ data: m.plan, error: null })
-    c.update = (u: Record<string, unknown>) => { m.updates.push(u); m.plan = { ...(m.plan ?? {}), ...u }; return c }
+    c.maybeSingle = async () => {
+      // 模拟落库时被别处抢先改过：update 之后返回空
+      if (m.casMiss && c.updated) return { data: null, error: null }
+      return { data: m.plan, error: null }
+    }
+    c.update = (u: Record<string, unknown>) => { c.updated = true; m.updates.push(u); m.plan = { ...(m.plan ?? {}), ...u }; return c }
     return c
   }
   return { supabaseAdmin: { from: () => chain() } }
@@ -50,15 +56,15 @@ const planWith = (promo: unknown, extra: Record<string, unknown> = {}) => ({
   plan_data: { social: {}, blog: { monthly_count: 0, topics: [] }, kpis: {}, tasks: [], ...(promo === undefined ? {} : { promo }) },
   ...extra,
 })
-const verifiedChecks = () => ['landing.item_live', 'content.wording_permission'].map(k => ({
-  phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '' }))
+const verifiedChecks = (spec = baseSpec()) => ['landing.item_live', 'content.wording_permission'].map(k => ({
+  phase_id: 'p1', check_key: k, verified_by: 'fde@example.com', verified_at: '2026-10-28T00:00:00Z', note: '', content_hash: promoContentHash(spec) }))
 const loadedFacts = (gate = goodFacts(), recon = goodReconFacts()) => ({
   playbook: gate.playbook, today: '2026-11-12', timezone_known: true, gate, recon,
 })
 
 beforeEach(() => {
   vi.clearAllMocks()
-  m.updates = []; m.updateFilters = []
+  m.updates = []; m.updateFilters = []; m.casMiss = false
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.loadGoal.mockResolvedValue({ status: 'active' })
   m.loadPromoFacts.mockResolvedValue(loadedFacts())
@@ -117,6 +123,20 @@ describe('PUT promo — 保存时服务端校验', () => {
   it('没权限 → 原样返回', async () => {
     m.access.mockResolvedValue({ ok: false, status: 403, error: 'no' })
     expect((await PUT(req({ promo: baseSpec() }, 'PUT'), { params: P })).status).toBe(403)
+  })
+  it('expected_updated_at 与库里不一致 → 409，不写库', async () => {
+    m.plan = planWith(undefined, { updated_at: '2026-11-01T00:00:00Z' })
+    const res = await PUT(req({ promo: baseSpec(), expected_updated_at: '2026-10-01T00:00:00Z' }, 'PUT'), { params: P })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain('别处被改过')
+    expect(m.updates).toHaveLength(0)
+  })
+  it('落库时 update 返回空（别处抢先改了）→ 409 而不是 500', async () => {
+    m.plan = planWith(undefined, { updated_at: '2026-11-01T00:00:00Z' })
+    m.casMiss = true
+    const res = await PUT(req({ promo: baseSpec(), expected_updated_at: '2026-11-01T00:00:00Z' }, 'PUT'), { params: P })
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain('别处被改过')
   })
 })
 
@@ -182,12 +202,32 @@ describe('POST verify — 人工核实', () => {
   })
   it('计划已批准后仍可补核实（后面阶段要用）', async () => {
     m.plan = planWith(baseSpec(), { status: 'approved' })
-    expect((await VERIFY(req({ phase_id: 'p2', check_key: 'landing.item_live' }), { params: P })).status).toBe(200)
+    expect((await VERIFY(req({ phase_id: 'p1', check_key: 'landing.item_live' }), { params: P })).status).toBe(200)
+  })
+  it('没有广告步骤的阶段不能点核实 → 400，不写库', async () => {
+    // baseSpec 的 p2 没有任何步骤
+    expect((await VERIFY(req({ phase_id: 'p2', check_key: 'landing.item_live' }), { params: P })).status).toBe(400)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('核实记录带上当时的内容指纹', async () => {
+    await VERIFY(req({ phase_id: 'p1', check_key: 'landing.item_live' }), { params: P })
+    const meta = m.updates[0].generation_meta as { promo_checks: { content_hash?: string }[] }
+    expect(meta.promo_checks[0].content_hash).toBe(promoContentHash(baseSpec()))
+  })
+  it('落库时被别处抢先改过 → 409，不当成功', async () => {
+    m.casMiss = true
+    const res = await VERIFY(req({ phase_id: 'p1', check_key: 'landing.item_live' }), { params: P })
+    expect(res.status).toBe(409)
   })
   it('归档 → 409', async () => {
     m.plan = planWith(baseSpec(), { status: 'archived' })
     expect((await VERIFY(req({ phase_id: 'p1', check_key: 'landing.item_live' }), { params: P })).status).toBe(409)
   })
+})
+
+const approvedWithFingerprint = () => planWith(baseSpec(), {
+  status: 'approved',
+  generation_meta: { approval_receipt: { content_hash: promoContentHash(baseSpec()) } },
 })
 
 describe('POST acknowledge — 按计划继续', () => {
@@ -196,18 +236,31 @@ describe('POST acknowledge — 按计划继续', () => {
     for (let d = 4; d <= 10; d++) days[`2026-11-${String(d).padStart(2, '0')}`] = 5000
     return { act_1: days }
   }
-  beforeEach(() => { m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts(), goodReconFacts({ spend_cents_by_account_day: onTrackSpend() }))) })
+  beforeEach(() => { m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks() }), goodReconFacts({ spend_cents_by_account_day: onTrackSpend() }))) })
   it('对账落后 / 看不清时 → 409，不留"没意见"记录', async () => {
     m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts(), goodReconFacts({ spend_cents_by_account_day: { act_1: {} } })))
-    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.plan = approvedWithFingerprint()
     expect((await ACK(req({}), { params: P })).status).toBe(409)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('批准记录里没有内容版本（没法确认批的是哪一版）→ 409，不留"没意见"记录', async () => {
+    m.plan = planWith(baseSpec(), { status: 'approved' })
+    const res = await ACK(req({}), { params: P })
+    expect(res.status).toBe(409)
+    expect(m.updates).toHaveLength(0)
+  })
+  it('到期阶段的检查清单没过关（人工核实还是灰）→ 409，不留"没意见"记录', async () => {
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts(), goodReconFacts({ spend_cents_by_account_day: onTrackSpend() })))
+    m.plan = approvedWithFingerprint()
+    const res = await ACK(req({}), { params: P })
+    expect(res.status).toBe(409)
     expect(m.updates).toHaveLength(0)
   })
   it('只在已批准时可点；记一条，按窗口起始日幂等', async () => {
     m.plan = planWith(baseSpec(), { status: 'draft' })
     expect((await ACK(req({}), { params: P })).status).toBe(409)
 
-    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.plan = approvedWithFingerprint()
     const first = await (await ACK(req({}), { params: P })).json()
     expect(first.success).toBe(true)
     expect(first.record.week_start).toBe('2026-11-04')
@@ -218,7 +271,7 @@ describe('POST acknowledge — 按计划继续', () => {
     expect(m.updates).toHaveLength(1) // 没有再写
   })
   it('不改计划内容：写的只有 generation_meta', async () => {
-    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.plan = approvedWithFingerprint()
     await ACK(req({}), { params: P })
     expect(Object.keys(m.updates[0])).toEqual(['generation_meta'])
   })
@@ -268,7 +321,7 @@ describe('POST approve — 推广计划批准前检查', () => {
     const spec = baseSpec()
     spec.phases[1].steps = [{ id: 'later', kind: 'ads_campaign', settings: {
       ad_account_id: 'act_none', daily_budget_cents: 100, audience_ref: 'a', creative_refs: [], placements: [], paused_ranges: [] } }]
-    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks() })))
+    m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks(spec) })))
     m.plan = planWith(spec)
     expect((await APPROVE(req({}), { params: P })).status).toBe(200)
   })

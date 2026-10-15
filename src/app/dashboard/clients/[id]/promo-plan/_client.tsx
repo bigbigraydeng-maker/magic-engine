@@ -50,6 +50,7 @@ export function PromoPlanClient() {
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [showSample, setShowSample] = useState(false)
+  const [approverOnly, setApproverOnly] = useState(false)
 
   const base = `/api/clients/${clientId}/marketing-plan`
 
@@ -88,7 +89,10 @@ export function PromoPlanClient() {
     const res = await fetch(`${base}/${selectedId}${path}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}),
     })
-    return await res.json() as { success: boolean; error?: string; blockers?: { label: string; reason: string }[] }
+    const json = await res.json() as { success: boolean; error?: string; reason?: string; blockers?: { label: string; reason: string }[] }
+    // 服务端判定当前账号不是 Magic Lab 内部账号时，隐藏需要内部权限的操作
+    if (json.reason === 'approver_only') setApproverOnly(true)
+    return json
   }
 
   const run = async (key: string, fn: () => Promise<void>) => {
@@ -173,12 +177,21 @@ export function PromoPlanClient() {
         {board && selected && (
           <>
             <Headline board={board} plan={selected} />
+            {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
+              <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
+                <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
+                <ul className="mt-2 text-xs text-yellow-800 space-y-1">
+                  {board.approval.deferred_blockers.map((b, i) => (
+                    <li key={i}>• {b.phase_name}：{b.label}——{b.reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {shownPhases
               ? <PlanOverview phases={shownPhases} sample={showSample} onCloseSample={showSample ? () => setShowSample(false) : undefined} />
               : (
                   <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4 flex flex-wrap items-center gap-3">
-                    <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。想先看看做好是什么样？</p>
-                    <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
+                    <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。先在下面「想自己改？展开」里搭出阶段，广告那一项可以让系统起草预算、受众和素材。</p>
                   </div>
                 )}
             {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} />}
@@ -187,14 +200,20 @@ export function PromoPlanClient() {
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
             {board.has_promo && !board.spec_valid && <SpecProblems board={board} />}
 
+            {approverOnly && (
+              <p className="text-xs text-gray-500">批准、核实、保存需要 Magic Lab 内部账号。</p>
+            )}
             <div className="flex flex-col sm:flex-row gap-3">
-              {continueButtonVisible(board) && (
-                <button onClick={onContinue} disabled={busy === 'continue'}
-                  className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5 disabled:opacity-50">
-                  按计划继续
-                </button>
+              {!approverOnly && continueButtonVisible(board) && (
+                <details className="rounded-lg border border-gray-200 bg-white px-4 py-2">
+                  <summary className="text-xs text-gray-500 cursor-pointer">每周手动确认（想自己确认这一周时展开）</summary>
+                  <button onClick={onContinue} disabled={busy === 'continue'}
+                    className="mt-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5 disabled:opacity-50">
+                    按计划继续
+                  </button>
+                </details>
               )}
-              {approve?.visible && (
+              {!approverOnly && approve?.visible && (
                 <div className="flex-1">
                   <button onClick={onApprove} disabled={approve.disabled || busy === 'approve'}
                     className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -210,9 +229,17 @@ export function PromoPlanClient() {
               )}
             </div>
 
-            {selected.status === 'draft' && (
+            {selected.status === 'draft' && !approverOnly && (
               <>
-                <PromoSpecForm key={planKey(selected)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
+                <details open={!board.has_promo} className="rounded-xl border border-gray-200 bg-white">
+                  <summary className="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer">想自己改？展开（填表、加阶段、看示例）</summary>
+                  <div className="p-3 space-y-3">
+                    {!showSample && !shownPhases && (
+                      <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
+                    )}
+                    <PromoSpecForm key={planKey(selected)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
+                  </div>
+                </details>
                 <details className="rounded-xl border border-gray-200 bg-white">
                   <summary className="px-4 py-3 text-xs text-gray-500 cursor-pointer">高级：直接改结构文本（只给技术同事用）</summary>
                   <PromoSpecEditor key={planKey(selected)} clientId={clientId} plan={selected} onSaved={() => void refresh(selected.id)} />
