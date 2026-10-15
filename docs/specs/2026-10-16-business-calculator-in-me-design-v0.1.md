@@ -1,4 +1,4 @@
-# ME「经营测算器」设计 v0.1（一页）· 116 号 · 2026-10-16
+# ME「经营测算器」设计 v0.2（一页，已吸收子牙一轮）· 116 号 · 2026-10-16
 
 - 决定：PM 2026-10-16 原话：「还是不要做成动态的了，不方便我们多场景模拟。你还是只把这个计算器功能做到 ME，数据先不用打通。可以保存不同的模拟场景。」→ **取代**同日的「利润监控（只读，动态）」设计（`2026-10-16-promo-plan-scale-profit-monitor-design-v0.2.md` 搁置，不删）。
 - 风险级：**A**（新增一张表 = 数据库结构；新增页面和接口，含写入）。资源优先级（§11）：频率 中（每次排广告预算都想试几套数）/ IMPACT 中 / 收入 中 → P2；PM 已明确要做。
@@ -14,10 +14,13 @@
 **不引入**任何 CTS 实测值作默认；「毛利按成交渠道分」（直接 20% / Agent 或 Sales 10%）由用户在毛利率、佣金率两格自己填。
 
 ## 3. 保存与对比（唯一的新数据）
-- 新表 `me_calculator_scenarios`：`id`、`client_id`（引用 clients）、`name`（≤80）、`inputs`（jsonb，服务端按白名单字段与数值范围校验）、`created_by`、`created_at`、`updated_at`；`(client_id, name)` 唯一；每客户最多 50 个；RLS 按仓库模板 `FOR ALL TO service_role USING (true)`，不给 anon/authenticated。
-- 接口（同一路径族，不新增定时任务）：`GET/POST /api/clients/[id]/business-calculator/scenarios`，`PATCH/DELETE …/scenarios/[scenarioId]`。**只许内部账号**（沿用 `requireGlobalAdmin` 一类，不开放客户员工：这是公司内部财务假设）。保存/改名带乐观锁（`updated_at`）。删除只删自己的模拟，不涉及任何客户数据。
-- 页面：左输入、右结果、下方「场景」栏（保存当前 / 载入 / 改名 / 删除）与「对比 A、B」两列差值表。计算全在浏览器纯函数里实时跑，**服务端只存取参数，不算数**（避免两套公式）。
-- 少按钮：只有「保存」「载入」「删除」「对比」；无导出、无自动保存。
+- **表** `public.me_calculator_scenarios`（迁移文件 `supabase/migrations/20261016100000_business_calculator_scenarios.sql`，文件头写「service-role only; apply only after explicit PM approval」）：`id uuid pk`；`client_id uuid not null references public.clients(id)`；`name text not null`，检查 trim 后长度 1–80；`inputs jsonb not null`，检查是 object 且 `pg_column_size` ≤ 8KB；`formula_version smallint not null default 1`；`created_by text not null`（非空）；`created_at / updated_at timestamptz not null default now()`；`unique (client_id, name)`（已兼作按客户列表的索引）。**每客户最多 50 个：用插入前触发器在库里强制**（数到 50 就拒绝，防两个同时请求都通过），接口把「重名」「超限」映射成不同错误码。`updated_at` 没有通用的自动更新函数，**接口每次写入时显式写**，乐观锁靠它（读时带出，写时 `eq(updated_at)`，不匹配回 409）。RLS 抄 `crm_booking_members` 的写法：`FOR ALL TO service_role USING (true) WITH CHECK (true)`，并 `revoke all … from anon, authenticated`。
+- **接口**（不新增定时任务，不碰 `render.yaml` 与 `cron/registry.ts`；纯手填、无外部副作用，不需要 Inngest）：`GET/POST /api/clients/[id]/business-calculator/scenarios`，`PATCH/DELETE …/scenarios/[scenarioId]`。鉴权用 **`requirePlanApproverAccess(clientId)`**（`src/lib/auth/client-access.ts:161`：先过付费客户门，再要求内部账号，客户员工 403）；另外校验 clientId 是真实客户，且该客户行业开关 `industryFeatureFlags(industry).business_calculator` 为真。
+- **页面入口**：在客户页「经营工具」区加入口卡（`src/app/dashboard/clients/[id]/page.tsx` 该区），**只对旅游行业客户显示**：在 `src/lib/clients/industry-features.ts` 加一个行业开关 `business_calculator`（沿用 `TRAVEL_KEYWORDS`）。页面本身**服务端也做内部账号判断**，不能只靠接口 403、也不能只用 `ServerFeatureLock`（它放行付费客户，客户员工能打开页面看到内部财务假设）。
+- **公式模块**放行业层 `src/lib/crm/industry/travel-business-calculator.ts`（纯函数，旁边是已有的 `travel-booking-rule.ts`），不放共享层；校验器按白名单字段与数值范围，**缺字段用默认值，多余字段拒绝**。
+- **公式版本**：`formula_version` 随场景存；公式将来升级时，载入旧场景带「按 v1 公式算」标记，可手动「用新公式重算」，不静默改旧数字。
+- 页面：左输入、右结果、下方「场景」栏（保存当前 / 载入 / 改名 / 删除）与「对比 A、B」两列差值表。计算全在浏览器纯函数里实时跑，**服务端只存取参数，不算数**（避免两套公式）。少按钮：只有「保存」「载入」「删除」「对比」；无导出、无自动保存。
+- **复用说明**：仓库里没有「一客户多条、用户自起名」的现成表，场景表是新建；复用的是 `crm_booking_tracker` 迁移的表结构与 RLS 写法、`requirePlanApproverAccess`、`industry-features.ts` 的行业开关。公式来源：公开计算器 `cts-business-calculator.pages.dev` 的脚本，2026-10-16 读取（监督方也独立取过脚本核验）；黄金数字同日读自线上页面。
 
 ## 4. 明确不做
 读真实花费/订单/官网价；动态监控与提醒；和推广计划、今日待办打通；多币种；非旅游行业模型；Sales 工资以外的人力模型。
