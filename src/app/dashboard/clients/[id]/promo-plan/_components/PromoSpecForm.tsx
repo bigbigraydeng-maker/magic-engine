@@ -11,14 +11,24 @@ import {
 } from '@/lib/marketing-plan/promo/form'
 import { Field, inputCls } from './Field'
 import { AdsFields, BlogFields, NewsletterFields, SocialFields } from './StepFields'
+import { AdsDraftPanel } from './AdsDraftPanel'
 
 interface Props { clientId: string; plan: MarketingPlan; options: PromoOptions | null; onSaved: () => void }
 interface ApiError { success: boolean; error?: string; issues?: { path: string; message: string }[]; problems?: string[] }
 
 const KINDS = Object.keys(STEP_KIND_LABEL) as StepKind[]
 
-function StepCard({ step, options, onChange, onRemove }: {
-  step: PromoStep; options: PromoOptions | null; onChange: (s: PromoStep) => void; onRemove: () => void
+/** 同一阶段里、id 不是当前步骤的其它广告步骤（预算按阶段、按账户核对，和保存时的检查同口径） */
+function otherAdsStepsInPhase(phase: PromoPhase, step: PromoStep): { ad_account_id: string; daily_budget_cents: number }[] {
+  if (step.kind !== 'ads_campaign') return []
+  return phase.steps.flatMap(s => (s.kind === 'ads_campaign' && s.id !== step.id
+    ? [{ ad_account_id: s.settings.ad_account_id, daily_budget_cents: s.settings.daily_budget_cents }]
+    : []))
+}
+
+function StepCard({ step, options, clientId, planId, otherSteps, onChange, onRemove }: {
+  step: PromoStep; options: PromoOptions | null; clientId: string; planId: string; otherSteps: { ad_account_id: string; daily_budget_cents: number }[]
+  onChange: (s: PromoStep) => void; onRemove: () => void
 }) {
   return (
     <li className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
@@ -27,6 +37,11 @@ function StepCard({ step, options, onChange, onRemove }: {
         <button type="button" onClick={onRemove} className="ml-auto text-xs text-red-700 underline">删除这一项</button>
       </div>
       {step.kind === 'ads_campaign' && <AdsFields step={step} accounts={options?.accounts ?? null} onChange={onChange} />}
+      {step.kind === 'ads_campaign' && (
+        <AdsDraftPanel clientId={clientId} planId={planId} adAccountId={step.settings.ad_account_id}
+          otherSteps={otherSteps}
+          onAdopt={patch => onChange({ ...step, settings: { ...step.settings, ...patch } })} />
+      )}
       {step.kind === 'social_cadence' && <SocialFields step={step} onChange={onChange} />}
       {step.kind === 'blog_article' && <BlogFields step={step} onChange={onChange} />}
       {step.kind === 'newsletter_email' && <NewsletterFields step={step} onChange={onChange} />}
@@ -34,8 +49,9 @@ function StepCard({ step, options, onChange, onRemove }: {
   )
 }
 
-function PhaseCard({ phase, index, options, spec, setSpec }: {
-  phase: PromoPhase; index: number; options: PromoOptions | null; spec: PromoSpec; setSpec: (s: PromoSpec) => void
+function PhaseCard({ phase, index, options, spec, clientId, planId, setSpec }: {
+  phase: PromoPhase; index: number; options: PromoOptions | null; spec: PromoSpec
+  clientId: string; planId: string; setSpec: (s: PromoSpec) => void
 }) {
   return (
     <li className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
@@ -52,7 +68,8 @@ function PhaseCard({ phase, index, options, spec, setSpec }: {
       </div>
       <ul className="space-y-3">
         {phase.steps.map(s => (
-          <StepCard key={s.id} step={s} options={options}
+          <StepCard key={s.id} step={s} options={options} clientId={clientId} planId={planId}
+            otherSteps={otherAdsStepsInPhase(phase, s)}
             onChange={next => setSpec(updateStep(spec, phase.id, next))}
             onRemove={() => setSpec(removeStep(spec, phase.id, s.id))} />
         ))}
@@ -115,7 +132,10 @@ export function PromoSpecForm({ clientId, plan, options, onSaved }: Props) {
       </div>
       <GoalPicker clientId={clientId} spec={spec} options={options} setSpec={setSpec} />
       <ul className="space-y-4">
-        {spec.phases.map((p, i) => <PhaseCard key={p.id} phase={p} index={i} options={options} spec={spec} setSpec={setSpec} />)}
+        {spec.phases.map((p, i) => (
+          <PhaseCard key={p.id} phase={p} index={i} options={options} spec={spec}
+            clientId={clientId} planId={plan.id} setSpec={setSpec} />
+        ))}
       </ul>
       <button type="button" onClick={() => setSpec(addPhase(spec))} className="text-sm border border-dashed border-gray-400 rounded-lg px-4 py-2 hover:bg-gray-50">+ 加一个阶段</button>
       {errors.length > 0 && (

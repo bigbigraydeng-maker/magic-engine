@@ -38,6 +38,10 @@ export interface PromoPlaybook {
   readonly scheduleMaxItems: number
   readonly scheduleMaxSpanDays: number
   readonly scheduleMaxSteps: number
+  /** 广告起草：建议日预算取「预算余量」的几成（占位默认值，没有任何行业或客户的验证）。 */
+  readonly draftBudgetShareOfHeadroom: number
+  /** 广告起草：最多建议几个素材。 */
+  readonly draftMaxCreatives: number
   readonly evidence: PromoEvidence
 }
 
@@ -63,6 +67,8 @@ export const DEFAULT_PROMO_PLAYBOOK: PromoPlaybook = {
   scheduleMaxItems: 1000,
   scheduleMaxSpanDays: 800,
   scheduleMaxSteps: 200,
+  draftBudgetShareOfHeadroom: 0.5,
+  draftMaxCreatives: 3,
   evidence: 'unvalidated_default',
 }
 
