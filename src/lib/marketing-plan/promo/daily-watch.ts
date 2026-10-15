@@ -86,11 +86,12 @@ export function detectWatchFindings(board: PromoBoard, plan: { title: string }):
     // b. 到期阶段的硬检查没过
     if (board.approval && board.approval.blockers.length > 0) {
       const blockers = board.approval.blockers
-      const first = blockers[0]
+      // 前 3 条不同的「怎么办」都带上（只带第一条会让 PM 以为只有一件事）
+      const hows = [...new Set(blockers.map(b => b.how).filter(h => h !== ''))].slice(0, 3)
       findings.push({
         code: 'phase_gate_failed',
         what: `推广计划《${title}》里，马上要开始的阶段有检查没过：${takeWithOverflow(blockers.map(blockerText), 3)}`,
-        how: first.how || '打开推广计划页，按页面上每一项后面的「怎么办」处理。',
+        how: hows.length > 0 ? hows.join('；') : '打开推广计划页，按页面上每一项后面的「怎么办」处理。',
       })
     }
 
@@ -109,7 +110,7 @@ export function detectWatchFindings(board: PromoBoard, plan: { title: string }):
       const unknown = rows.filter(r => r.status === 'unknown')
       if (unknown.length > 0 || board.reconcile.blind === true) {
         const parts = unknown.slice(0, 3).map(r => `${r.label}——${r.reason}`)
-        const detail = parts.length > 0 ? `${parts.join('；')} ` : ''
+        const detail = parts.length > 0 ? `${parts.join('；')}。` : ''
         findings.push({
           code: 'reconcile_blind',
           what: `推广计划《${title}》本周对账看不清：${detail}看不清不等于正常，也不等于 0。`,
