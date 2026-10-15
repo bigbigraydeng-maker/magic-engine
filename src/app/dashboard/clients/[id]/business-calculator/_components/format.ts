@@ -138,9 +138,9 @@ export const RESULT_METRICS: readonly MetricRow[] = [
   { key: 'salary', label: '人工成本', kind: 'money' },
   { key: 'serviceFeeCost', label: 'CTS 服务费成本', kind: 'money' },
   { key: 'annualCosts', label: '项目总成本', kind: 'money' },
-  { key: 'passengers', label: '预计出行游客', kind: 'people' },
-  { key: 'orders', label: '预计付款订单', kind: 'count' },
-  { key: 'leads', label: '预计线索', kind: 'count' },
+  { key: 'passengers', label: '按假设算出的出行游客', kind: 'people' },
+  { key: 'orders', label: '按假设算出的付款订单', kind: 'count' },
+  { key: 'leads', label: '按假设算出的线索', kind: 'count' },
   { key: 'averageParty', label: '加权平均每单人数', kind: 'people' },
   { key: 'revenuePerPassenger', label: '每位游客销售额', kind: 'money' },
   { key: 'retainedPerPassenger', label: '每位游客公司留存', kind: 'money' },
@@ -149,7 +149,7 @@ export const RESULT_METRICS: readonly MetricRow[] = [
   { key: 'breakEvenPassengers', label: '打平游客数', kind: 'people' },
   { key: 'breakEvenLeads', label: '打平线索数', kind: 'count' },
   { key: 'breakEvenAdvertising', label: '打平广告费', kind: 'money' },
-  { key: 'salesRequired', label: '线索量建议 Sales 人数', kind: 'people' },
+  { key: 'salesRequired', label: '按线索量折算的 Sales 人数', kind: 'people' },
 ]
 
 const MONEY_FORMAT = new Intl.NumberFormat('en-NZ', {

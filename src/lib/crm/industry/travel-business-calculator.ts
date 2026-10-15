@@ -238,9 +238,9 @@ export function clampNotes(input: CalculatorInputs): ClampNote[] {
   add('tourParty', input.tourParty, Math.max(0.1, input.tourParty || 0.1))
   add('tailorParty', input.tailorParty, Math.max(0.1, input.tailorParty || 0.1))
 
-  const grossMarginRate = clamp(input.grossMargin, 0, 100) / 100
-  const commissionUsed = Math.min(grossMarginRate, Math.max(0, input.commissionRate) / 100)
-  add('commissionRate', input.commissionRate, commissionUsed * 100)
+  // 全程用百分数比较，不做 /100 再 *100（7 会变成 7.000000000000001，冒出假的夹逼提示）
+  const marginPercent = clamp(input.grossMargin, 0, 100)
+  add('commissionRate', input.commissionRate, Math.min(marginPercent, Math.max(0, input.commissionRate)))
 
   const additionalSalesUsed = Math.max(0, Math.floor(input.additionalSales || 0))
   add('additionalSales', input.additionalSales, additionalSalesUsed)

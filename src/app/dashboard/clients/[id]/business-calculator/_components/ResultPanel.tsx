@@ -15,7 +15,7 @@ interface PerSalesRow {
 
 const PER_SALES_ROWS: readonly PerSalesRow[] = [
   { key: 'leadsPerSalesperson', label: '每位 Sales 的线索', kind: 'count' },
-  { key: 'ordersPerSalesperson', label: '每位 Sales 的订单', kind: 'count' },
+  { key: 'ordersPerSalesperson', label: '每位 Sales 的订单', kind: 'people' },
   { key: 'passengersPerSalesperson', label: '每位 Sales 的游客', kind: 'people' },
   { key: 'salesPerSalesperson', label: '每位 Sales 的销售额', kind: 'money' },
   { key: 'commissionPerSalesperson', label: '每位 Sales 的佣金', kind: 'money' },

@@ -3,10 +3,12 @@
 import { useMemo, useState } from 'react'
 
 import {
+  BUSINESS_CALCULATOR_FORMULA_VERSION,
   DEFAULT_INPUTS,
   calculate,
   clampNotes,
   unrealisticWarnings,
+  validateInputs,
   type CalculatorInputs,
 } from '@/lib/crm/industry/travel-business-calculator'
 
@@ -27,6 +29,9 @@ export function BusinessCalculatorClient(props: { clientId: string }): JSX.Eleme
   const result = useMemo(() => calculate(inputs), [inputs])
   const notes = useMemo(() => clampNotes(inputs), [inputs])
   const warnings = unrealisticWarnings(inputs, result)
+  // 有数字超出可保存范围（负数、超过 10 亿）时仍然照算给你看，但不允许保存，并说清原因
+  const validity = useMemo(() => validateInputs(inputs), [inputs])
+  const saveBlockedReason = validity.ok ? undefined : `${validity.error}——这组数字暂时不能保存`
 
   const handleChange = (key: keyof CalculatorInputs, value: number): void => {
     setInputs((prev) => ({ ...prev, [key]: value }))
@@ -74,10 +79,17 @@ export function BusinessCalculatorClient(props: { clientId: string }): JSX.Eleme
         </button>
       </div>
 
+      {saveBlockedReason ? (
+        <p className="text-xs text-red-700" data-testid="save-blocked">{saveBlockedReason}</p>
+      ) : null}
+
       {loaded !== null ? (
         <p className="text-xs text-me-charcoal/70">
           当前场景：{loaded.name}
           {dirty ? '（有未保存的修改）' : ''}
+          {loaded.formula_version !== BUSINESS_CALCULATOR_FORMULA_VERSION
+            ? `（这个场景按 v${loaded.formula_version} 公式保存，当前是 v${BUSINESS_CALCULATOR_FORMULA_VERSION}，数字可能不同）`
+            : ''}
         </p>
       ) : null}
 
@@ -93,6 +105,9 @@ export function BusinessCalculatorClient(props: { clientId: string }): JSX.Eleme
         loaded={loaded}
         onLoad={handleLoad}
         onSaved={handleSaved}
+        onDeleted={(id) => setLoaded((prev) => (prev?.id === id ? null : prev))}
+        onRenamed={(renamed) => setLoaded((prev) => (prev?.id === renamed.id ? renamed : prev))}
+        saveBlockedReason={saveBlockedReason}
       />
     </div>
   )

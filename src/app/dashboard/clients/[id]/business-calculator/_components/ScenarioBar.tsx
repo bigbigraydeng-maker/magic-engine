@@ -34,8 +34,14 @@ export function ScenarioBar(props: {
   loaded: ScenarioRow | null
   onLoad: (scenario: ScenarioRow) => void
   onSaved: (scenario: ScenarioRow) => void
+  /** 某个场景被删（含已被别人删）时通知上层，上层据此清掉「当前场景」 */
+  onDeleted?: (id: string) => void
+  /** 已载入的场景被改名时通知上层，换成服务端返回的新名字和新版本 */
+  onRenamed?: (scenario: ScenarioRow) => void
+  /** 非空时保存按钮不可用，并说明原因（例如有数字超出可保存范围） */
+  saveBlockedReason?: string
 }): JSX.Element {
-  const { clientId, currentInputs, dirty, loaded, onLoad, onSaved } = props
+  const { clientId, currentInputs, dirty, loaded, onLoad, onSaved, onDeleted, onRenamed, saveBlockedReason } = props
 
   const basePath = `/api/clients/${clientId}/business-calculator/scenarios`
 
@@ -48,22 +54,20 @@ export function ScenarioBar(props: {
   const [compareA, setCompareA] = useState<ScenarioRow | null>(null)
   const [compareB, setCompareB] = useState<ScenarioRow | null>(null)
 
-  const refresh = useCallback(async (): Promise<ScenarioRow[]> => {
+  const refresh = useCallback(async (): Promise<ScenarioRow[] | null> => {
     setLoading(true)
     try {
       const res = await fetch(basePath, { method: 'GET' })
       const data = await readJson<ScenarioListResponse>(res)
       if (!res.ok || !data || !data.success) {
         setMessage('读取场景失败')
-        setScenarios([])
-        return []
+        return null
       }
       setScenarios(data.scenarios)
       return data.scenarios
     } catch {
       setMessage('读取场景失败')
-      setScenarios([])
-      return []
+      return null
     } finally {
       setLoading(false)
     }
@@ -77,7 +81,49 @@ export function ScenarioBar(props: {
     setName(loaded?.name ?? '')
   }, [loaded])
 
+  // 覆盖保存：带的是「用户看到的那一版」的 updated_at（载入时的或列表里的），
+  // 不是点确认之后再取的最新版——否则别人在这期间改过，也会被静默盖掉。
+  const overwrite = useCallback(
+    async (target: ScenarioRow): Promise<void> => {
+      const patchRes = await fetch(`${basePath}/${target.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_updated_at: target.updated_at, inputs: currentInputs }),
+      })
+      if (patchRes.ok) {
+        const patchData = await readJson<ScenarioResponse>(patchRes)
+        if (patchData && patchData.success) {
+          setCompareA(null)
+          setCompareB(null)
+          onSaved(patchData.scenario)
+          await refresh()
+          setMessage('已覆盖保存')
+          return
+        }
+        setMessage('保存失败')
+        return
+      }
+      const patchErr = await readJson<ErrorResponse>(patchRes)
+      if (patchRes.status === 409 && patchErr?.code === 'stale') {
+        setMessage('这个场景刚刚在别处被改过，已刷新，请重新载入后再保存')
+        await refresh()
+        return
+      }
+      if (patchRes.status === 404) {
+        setMessage('这个场景已被别人删除')
+        await refresh()
+        return
+      }
+      setMessage(patchErr?.error ?? '保存失败')
+    },
+    [basePath, currentInputs, onSaved, refresh],
+  )
+
   const handleSave = useCallback(async (): Promise<void> => {
+    if (saveBlockedReason) {
+      setMessage(saveBlockedReason)
+      return
+    }
     const trimmed = name.trim()
     if (trimmed.length < 1 || trimmed.length > 60) {
       setMessage('场景名需要 1 到 60 个字')
@@ -86,6 +132,12 @@ export function ScenarioBar(props: {
 
     setMessage('')
     try {
+      // 已载入的场景再保存：直接按载入时的版本覆盖，不当成「同名」去问
+      if (loaded && loaded.name === trimmed) {
+        await overwrite(loaded)
+        return
+      }
+
       const res = await fetch(basePath, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -107,42 +159,16 @@ export function ScenarioBar(props: {
       const err = await readJson<ErrorResponse>(res)
 
       if (res.status === 409 && err?.code === 'duplicate_name') {
-        const confirmed = window.confirm('同名场景已存在，覆盖吗？')
-        if (!confirmed) {
-          return
-        }
-        const fresh = await refresh()
-        const existing = fresh.find((row) => row.name === trimmed)
+        const existing = scenarios.find((row) => row.name === trimmed)
         if (!existing) {
-          setMessage('保存失败')
-          return
-        }
-        const patchRes = await fetch(`${basePath}/${existing.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            expected_updated_at: existing.updated_at,
-            inputs: currentInputs,
-          }),
-        })
-        if (patchRes.ok) {
-          const patchData = await readJson<ScenarioResponse>(patchRes)
-          if (patchData && patchData.success) {
-            onSaved(patchData.scenario)
-            await refresh()
-            setMessage('已覆盖保存')
-            return
-          }
-          setMessage('保存失败')
-          return
-        }
-        const patchErr = await readJson<ErrorResponse>(patchRes)
-        if (patchRes.status === 409 && patchErr?.code === 'stale') {
-          setMessage('这个场景刚刚在别处被改过，已刷新，请再试')
+          setMessage('列表里没找到这个同名场景，已刷新，请再试')
           await refresh()
           return
         }
-        setMessage(patchErr?.error ?? '保存失败')
+        if (!window.confirm('同名场景已存在，覆盖吗？')) {
+          return
+        }
+        await overwrite(existing)
         return
       }
 
@@ -155,7 +181,7 @@ export function ScenarioBar(props: {
     } catch {
       setMessage('保存失败')
     }
-  }, [basePath, currentInputs, name, onSaved, refresh])
+  }, [basePath, currentInputs, loaded, name, onSaved, overwrite, refresh, saveBlockedReason, scenarios])
 
   const handleLoad = useCallback(
     (scenario: ScenarioRow): void => {
@@ -194,6 +220,12 @@ export function ScenarioBar(props: {
         })
 
         if (res.ok) {
+          const renamed = await readJson<ScenarioResponse>(res)
+          setCompareA(null)
+          setCompareB(null)
+          if (renamed && renamed.success) {
+            onRenamed?.(renamed.scenario)
+          }
           await refresh()
           setMessage('已改名')
           return
@@ -214,7 +246,7 @@ export function ScenarioBar(props: {
         setMessage('保存失败')
       }
     },
-    [basePath, refresh],
+    [basePath, onRenamed, refresh],
   )
 
   const handleDelete = useCallback(
@@ -228,17 +260,13 @@ export function ScenarioBar(props: {
       try {
         const res = await fetch(`${basePath}/${row.id}`, { method: 'DELETE' })
 
-        if (res.status === 404) {
-          await refresh()
-          return
-        }
-
-        if (!res.ok) {
+        if (!res.ok && res.status !== 404) {
           const err = await readJson<ErrorResponse>(res)
           setMessage(err?.error ?? '删除失败')
           return
         }
 
+        // 成功删除和「已经被别人删了（404）」都要把页面上的残留清干净
         if (selectedA === row.id) {
           setSelectedA(null)
         }
@@ -252,13 +280,14 @@ export function ScenarioBar(props: {
           setCompareB(null)
         }
 
+        onDeleted?.(row.id)
         await refresh()
-        setMessage('已删除')
+        setMessage(res.status === 404 ? '该场景已被删除' : '已删除')
       } catch {
         setMessage('删除失败')
       }
     },
-    [basePath, compareA, compareB, refresh, selectedA, selectedB],
+    [basePath, compareA, compareB, onDeleted, refresh, selectedA, selectedB],
   )
 
   const handleCompare = useCallback(async (): Promise<void> => {
@@ -268,6 +297,10 @@ export function ScenarioBar(props: {
 
     setMessage('')
     const fresh = await refresh()
+    if (fresh === null) {
+      setMessage('读取场景失败，请重试')
+      return
+    }
     const rowA = fresh.find((row) => row.id === selectedA)
     const rowB = fresh.find((row) => row.id === selectedB)
 
@@ -306,11 +339,14 @@ export function ScenarioBar(props: {
             onChange={(event) => setName(event.target.value)}
             className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-me-charcoal"
           />
+          <p className="mt-1 text-xs text-me-charcoal/60">场景名只是备忘，别写「批准」「承诺」这类字样。</p>
         </div>
         <button
           type="button"
           onClick={() => void handleSave()}
-          className="rounded-lg border border-black/10 bg-me-charcoal px-4 py-2 text-sm text-white"
+          disabled={Boolean(saveBlockedReason)}
+          title={saveBlockedReason}
+          className="rounded-lg border border-black/10 bg-me-charcoal px-4 py-2 text-sm text-white disabled:opacity-40"
         >
           保存当前
         </button>

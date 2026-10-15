@@ -63,4 +63,19 @@ describe('BusinessCalculatorClient', () => {
     expect(text).toContain('不构成预算依据')
     await waitFor(() => expect(fetch).toHaveBeenCalled())
   })
+
+  it('价格填负数：仍照算，但不让保存并说清原因', async () => {
+    render(<BusinessCalculatorClient clientId="c1" />)
+    setInput('tourPrice', '-3500')
+    expect(screen.getByTestId('save-blocked').textContent).toContain('暂时不能保存')
+    const save = screen.getByRole('button', { name: '保存当前' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+  })
+
+  it('线索量折算人数的标签不带「建议」二字', async () => {
+    render(<BusinessCalculatorClient clientId="c1" />)
+    expect(document.body.textContent ?? '').not.toContain('建议')
+    await waitFor(() => expect(fetch).toHaveBeenCalled())
+  })
 })

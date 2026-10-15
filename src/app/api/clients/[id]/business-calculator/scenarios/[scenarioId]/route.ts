@@ -60,6 +60,12 @@ export async function PATCH(
     )
   }
   const expectedUpdatedAt = body.expected_updated_at
+  if (Number.isNaN(Date.parse(expectedUpdatedAt))) {
+    return NextResponse.json(
+      { error: '版本锁格式不对', code: 'bad_lock' },
+      { status: 400 },
+    )
+  }
 
   const hasName = body.name !== undefined
   const hasInputs = body.inputs !== undefined

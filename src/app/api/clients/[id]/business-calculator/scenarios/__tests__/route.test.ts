@@ -220,6 +220,13 @@ describe('改场景 PATCH', () => {
     expect(scenario.formula_version).toBe(1)
   })
 
+  it('版本锁不是时间 → 400 bad_lock，不碰库', async () => {
+    const res = await PATCH(req({ expected_updated_at: 'abc', name: 'A2' }), ctx('s1'))
+    expect(res.status).toBe(400)
+    expect((await res.json()).code).toBe('bad_lock')
+    expect(state.tableCalls).toBe(0)
+  })
+
   it('没带版本锁 → 400 missing_lock', async () => {
     const row = seed('A')
     const res = await PATCH(req({ name: 'A2' }), ctx(String(row.id)))
@@ -240,7 +247,7 @@ describe('改场景 PATCH', () => {
 
   it('场景已被删 → 404 not_found', async () => {
     const res = await PATCH(
-      req({ expected_updated_at: 'x', name: 'A2' }),
+      req({ expected_updated_at: '2026-10-15T00:00:00.000000+00:00', name: 'A2' }),
       ctx('gone'),
     )
     expect(res.status).toBe(404)

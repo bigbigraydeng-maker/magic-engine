@@ -6,6 +6,11 @@
 -- ---------------------------------------------------------------------------
 -- 1. Scenarios: one named set of calculator inputs per client
 -- ---------------------------------------------------------------------------
+-- client_id has no ON DELETE action on purpose: a client that still has saved scenarios cannot be
+-- deleted silently (no quiet loss of data). Rollback, if ever needed:
+--   drop trigger me_calculator_scenarios_limit on public.me_calculator_scenarios;
+--   drop function public.me_calculator_scenarios_enforce_limit();
+--   drop table public.me_calculator_scenarios;
 create table public.me_calculator_scenarios (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references public.clients(id),
@@ -37,6 +42,7 @@ revoke all on public.me_calculator_scenarios from anon, authenticated;
 create function public.me_calculator_scenarios_enforce_limit()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
 declare
   v_count integer;

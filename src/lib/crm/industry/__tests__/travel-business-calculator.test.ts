@@ -139,3 +139,14 @@ describe('unrealisticWarnings', () => {
     expect(unrealisticWarnings(DEFAULT_INPUTS, calculate(DEFAULT_INPUTS))).toEqual([])
   })
 })
+
+describe('clampNotes 浮点噪音', () => {
+  it.each([7, 3, 10, 9, 0.1])('毛利 20、佣金 %s 不冒出假的夹逼提示', commissionRate => {
+    expect(clampNotes({ ...DEFAULT_INPUTS, grossMargin: 20, commissionRate })).toEqual([])
+  })
+
+  it('毛利 15、佣金 7、毛利 100 搭配佣金 7 也都没有提示', () => {
+    expect(clampNotes({ ...DEFAULT_INPUTS, grossMargin: 15, commissionRate: 7 })).toEqual([])
+    expect(clampNotes({ ...DEFAULT_INPUTS, grossMargin: 100, commissionRate: 7 })).toEqual([])
+  })
+})

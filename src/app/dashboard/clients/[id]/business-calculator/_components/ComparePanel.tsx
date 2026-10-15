@@ -4,6 +4,7 @@ import {
   BUSINESS_CALCULATOR_FORMULA_VERSION,
   DEFAULT_INPUTS,
   calculate,
+  clampNotes,
   type CalculatorInputs,
 } from '@/lib/crm/industry/travel-business-calculator'
 import { diffMetrics, formatMetric } from './format'
@@ -44,8 +45,22 @@ export function ComparePanel(props: { a: ScenarioRow; b: ScenarioRow }): JSX.Ele
     staleScenarios.push(b)
   }
 
+  // 对比表按夹逼后的值算；场景里如果有数被夹逼，要说出来，不能让人以为按填的数算
+  const clampLines = [a, b].flatMap((scenario) =>
+    clampNotes({ ...DEFAULT_INPUTS, ...scenario.inputs }).map(
+      (note) => `「${scenario.name}」的 ${note.field} 填的是 ${note.entered}，已按 ${note.used} 计算`,
+    ),
+  )
+
   return (
     <div className="rounded-xl border border-black/10 bg-white p-6 shadow-sm">
+      {clampLines.length > 0 ? (
+        <ul className="mb-3 space-y-1 text-xs text-amber-700" data-testid="compare-clamp-notes">
+          {clampLines.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
       <table data-testid="compare-table" className="w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-me-charcoal/20 text-left text-me-charcoal/70">
