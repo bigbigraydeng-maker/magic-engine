@@ -52,6 +52,7 @@ const ADMIN_SECTIONS: NavSection[] = [
   {
     title: 'Operate',
     items: [
+      { key: 'launch-hub',       label: 'Launch Hub',      mark: 'LH', href: '/dashboard/visuals' },
       { key: 'analytics',        label: 'Analytics',       mark: 'AN', href: '/dashboard/analytics' },
       { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
       { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
