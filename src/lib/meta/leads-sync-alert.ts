@@ -24,14 +24,31 @@
  * 看起来一切正常，一整个月没人看得见。它**不是**「取不到线索」，说成那样
  * 就是在日报里说假话；也**不该**把客户算进 `failed_count`（那个数的语义是
  * 「取不到线索的客户数」，见 route.ts），否则就是过度告警。
+ *
+ * Blocked vs failed
+ * -----------------
+ * A client is *blocked* when the pipeline cannot run for a reason that is not a
+ * bug on our side and that already has its own PM todo item: an expired Facebook
+ * authorisation, or a page binding that Meta has not verified yet. Those clients
+ * are surfaced through their own todo detectors, so they must not colour the run
+ * as a failure — otherwise the daily digest cries wolf every hour for something
+ * a human is already being asked to fix. Everything else that stops a client from
+ * fetching leads is *failed* and does belong in the run's error message.
  */
 
 import { isOutletGap, outletGapLabel } from '@/lib/mailchimp/outlet-tally'
+import { isFacebookAuthError } from '@/lib/pm-todo/facebook-sync-items'
 
 /** 只取这个摘要用得上的几个字段，故意不绑死 MetaLeadsSyncResult 全貌。 */
 export interface LeadsSyncOutcome {
+  clientId?: string
   clientName: string | null
   error?: string
+  /**
+   * 这一轮为什么没跑起来（如果有）。目前只有 `page_not_verified`：Meta 还没
+   * 验证这个主页的绑定，取数接口直接拒绝。跟 `error` 可以同时存在。
+   */
+  skipped?: string
   /**
    * Mailchimp 出口这一轮的结果分布，key = `subscribed` / `already_member` /
    * `skipped:<reason>` / `failed:<reason>`，value = 条数。由
@@ -44,6 +61,52 @@ export interface LeadsSyncOutcome {
 /** 单个客户的原因截断长度 —— 防一家的长报错挤掉其他家。 */
 const MAX_REASON_CHARS = 160
 
+/** 一个客户这一轮的状态：跑通了 / 被外部原因挡住 / 真的失败了。 */
+export type LeadsSyncReceiptState = 'ok' | 'blocked' | 'failed'
+
+/** 逐客户的回执，喂给 PM todo 检测器和日报。 */
+export interface LeadsSyncReceipt {
+  clientId: string | null
+  clientName: string | null
+  state: LeadsSyncReceiptState
+  detail: string | null
+}
+
+/**
+ * 把一个客户的结果归成三态之一。
+ *
+ * `blocked` 优先于 `failed`：主页没验证（`skipped === 'page_not_verified'`）
+ * 或 Facebook 授权过期（`isFacebookAuthError`）都是外部原因，各自有 PM todo
+ * 盯着，不该把整轮跑标成失败。
+ */
+export function classifyLeadsSyncOutcome(r: LeadsSyncOutcome): LeadsSyncReceipt {
+  const clientId = r.clientId ?? null
+  const clientName = r.clientName
+
+  if (!r.error && !r.skipped) {
+    return { clientId, clientName, state: 'ok', detail: null }
+  }
+
+  if (r.skipped === 'page_not_verified') {
+    return { clientId, clientName, state: 'blocked', detail: r.error ?? 'page_not_verified' }
+  }
+
+  if (r.error && isFacebookAuthError(r.error)) {
+    return { clientId, clientName, state: 'blocked', detail: r.error }
+  }
+
+  if (r.error) {
+    return { clientId, clientName, state: 'failed', detail: r.error }
+  }
+
+  return { clientId, clientName, state: 'ok', detail: null }
+}
+
+/** 逐客户回执，顺序跟入参一致。 */
+export function buildLeadsSyncReceipts(results: readonly LeadsSyncOutcome[]): LeadsSyncReceipt[] {
+  return results.map(classifyLeadsSyncOutcome)
+}
+
 /**
  * 全好时返回 undefined，`finish()` 就仍把这次跑标成 completed —— 不制造新噪音。
  *
@@ -51,7 +114,8 @@ const MAX_REASON_CHARS = 160
  * 不去重会把邮件仅有的 200 字符用同一句话刷满，真正不同的病因反而被挤掉。
  */
 export function summariseFailures(results: readonly LeadsSyncOutcome[]): string | undefined {
-  const failures = results.filter((r) => r.error)
+  // 只算 `failed`：`blocked` 的客户有自己的 PM todo 盯着，不该在这里再喊一遍。
+  const failures = results.filter((r) => classifyLeadsSyncOutcome(r).state === 'failed')
   if (failures.length === 0) return undefined
 
   const byReason = groupByReason(failures.map((f) => ({ name: f.clientName, reason: f.error ?? '' })))
