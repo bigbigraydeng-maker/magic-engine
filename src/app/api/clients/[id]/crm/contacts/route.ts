@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
-import { contactKindOf, readDomainRules } from '@/lib/crm/contact-kind'
+import { contactKindOf, isSystemAccountName, readDomainRules } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
@@ -216,10 +216,10 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
         .order('contact_id', { ascending: true })
         .range(from, to),
     ),
-    fetchAll<{ id: string; primary_email: string | null }>((from, to) =>
+    fetchAll<{ id: string; primary_email: string | null; display_name: string | null }>((from, to) =>
       supabaseAdmin
         .from('contacts')
-        .select('id, primary_email')
+        .select('id, primary_email, display_name')
         .eq('client_id', clientId)
         .order('id', { ascending: true })
         .range(from, to),
@@ -239,6 +239,8 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
 
   const tradeIds: string[] = []
   const staffIds: string[] = []
+  // 系统账号（WhatsApp Business 等）跟自己人一起从零售名单里排掉。
+  for (const c of contactsLite) if (isSystemAccountName(c.display_name)) staffIds.push(c.id)
   for (const [id, emails] of emailsByContact) {
     const kind = contactKindOf(emails, rules)
     if (kind === 'trade') tradeIds.push(id)
@@ -641,6 +643,9 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       { status: 500 },
     )
   }
+
+  // 系统账号（WhatsApp Business 等）不是客人，不进「智能」视图的任何一栏。
+  contacts = contacts.filter((c) => !isSystemAccountName(c.display_name))
 
   const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false)
   contacts = enrichedPri.contacts
