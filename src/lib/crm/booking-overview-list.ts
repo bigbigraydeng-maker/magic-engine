@@ -5,7 +5,8 @@
  * No I/O, no clock (today is a parameter), no Supabase. The status filter
  * reuses isUnsettled / isFullyPaid from booking-overview so the list and the
  * summary can never disagree about what "未收齐" means. Everything here counts
- * ORDERS, never money: no row carries an amount or a party size.
+ * ORDERS and people (party size), never money: a row carries a party size (null
+ * when unknown or cancelled) but never an amount.
  */
 
 import type {
@@ -157,6 +158,7 @@ function toRow(
     departureId: view.departureId,
     departOn: view.departOn,
     status: view.status,
+    partySize: view.status === 'cancelled' ? null : view.partySize,
     deposit: cellFor(view, 'deposit'),
     balance: cellFor(view, 'balance'),
     lastNudgedOn: lastNudgedOn(item),

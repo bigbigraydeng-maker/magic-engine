@@ -8,7 +8,7 @@ function payload(groups: ReturnType<typeof makeGroup>[]) {
   return {
     summary: {
       groups,
-      totals: { orders: 0, depositPaid: 0, balancePaid: 0, unsettled: 0, unsettledOverdue: 0, offlineHandled: 0 },
+      totals: { orders: 0, partySize: 0, partySizeMissing: 0, depositPaid: 0, balancePaid: 0, unsettled: 0, unsettledOverdue: 0, offlineHandled: 0 },
       hiddenGroupCount: 0,
       hiddenOrders: 0,
       hiddenOfflineOnlyGroups: 0,

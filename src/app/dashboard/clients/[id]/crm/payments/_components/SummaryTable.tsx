@@ -6,7 +6,7 @@
  */
 
 import type { OverviewGroup, OverviewTotals } from '@/lib/crm/booking-overview-types'
-import { dueDateText, groupTitle, ratioText, warningText } from './payments-format'
+import { dueDateText, groupTitle, partySizeText, ratioText, warningText } from './payments-format'
 
 const CELL_CLASS = 'px-3 py-2 text-right align-top tabular-nums'
 const HEAD_CLASS = 'px-3 py-2 text-right align-bottom text-xs font-black text-me-charcoal/70'
@@ -112,6 +112,7 @@ function GroupRow({ group, selected, today, onSelect }: GroupRowProps) {
     <tr onClick={() => onSelect(selected ? null : group.key)} className={rowTone(group, selected)}>
       <GroupRowLabel group={group} selected={selected} today={today} onSelect={onSelect} />
       <td className={CELL_CLASS}>{group.orders}</td>
+      <td className={CELL_CLASS}>{partySizeText(group.partySize, group.partySizeMissing)}</td>
       <td className={CELL_CLASS}>{ratioText(group.depositPaid, group.orders)}</td>
       <td className={CELL_CLASS}>{ratioText(group.balancePaid, group.orders)}</td>
       <td className={CELL_CLASS}>
@@ -134,7 +135,7 @@ export function SummaryTable(props: {
 
   return (
     <div className="overflow-x-auto rounded-xl border border-me-charcoal/15 bg-white">
-      <table className="min-w-[720px] w-full border-collapse text-sm text-me-charcoal">
+      <table className="min-w-[800px] w-full border-collapse text-sm text-me-charcoal">
         <caption className="sr-only">各出发日期的收款进度</caption>
         <thead>
           <tr className="border-b border-me-charcoal/15">
@@ -143,6 +144,9 @@ export function SummaryTable(props: {
             </th>
             <th scope="col" className={HEAD_CLASS}>
               订单
+            </th>
+            <th scope="col" className={HEAD_CLASS}>
+              人数
             </th>
             <th scope="col" className={HEAD_CLASS}>
               定金已收
@@ -182,6 +186,7 @@ export function SummaryTable(props: {
               合计（上面当前显示的这几行相加）
             </th>
             <td className={`${CELL_CLASS} font-black`}>{totals.orders}</td>
+            <td className={`${CELL_CLASS} font-black`}>{partySizeText(totals.partySize, totals.partySizeMissing)}</td>
             <td className={`${CELL_CLASS} font-black`}>{ratioText(totals.depositPaid, totals.orders)}</td>
             <td className={`${CELL_CLASS} font-black`}>{ratioText(totals.balancePaid, totals.orders)}</td>
             <td className={`${CELL_CLASS} font-black`}>

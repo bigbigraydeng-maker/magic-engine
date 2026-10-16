@@ -91,6 +91,8 @@ function emptyGroup(
     departOn: null,
     departed: false,
     orders: 0,
+    partySize: 0,
+    partySizeMissing: 0,
     depositPaid: 0,
     balancePaid: 0,
     fullyPaid: 0,
@@ -164,6 +166,8 @@ function mergeWarnings(
 /** Fold one active booking's counters into its group. */
 function addBookingToGroup(group: OverviewGroup, view: BookingView): void {
   group.orders += 1
+  if (view.partySize === null) group.partySizeMissing += 1
+  else group.partySize += view.partySize
   if (view.milestones.some((m) => m.kind === 'deposit' && isPaid(m))) {
     group.depositPaid += 1
   }
@@ -289,6 +293,8 @@ function filterVisible(
 function sumTotals(groups: OverviewGroup[]): OverviewTotals {
   const totals: OverviewTotals = {
     orders: 0,
+    partySize: 0,
+    partySizeMissing: 0,
     depositPaid: 0,
     balancePaid: 0,
     unsettled: 0,
@@ -297,6 +303,8 @@ function sumTotals(groups: OverviewGroup[]): OverviewTotals {
   }
   for (const g of groups) {
     totals.orders += g.orders
+    totals.partySize += g.partySize
+    totals.partySizeMissing += g.partySizeMissing
     totals.depositPaid += g.depositPaid
     totals.balancePaid += g.balancePaid
     totals.unsettled += g.unsettled

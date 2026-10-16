@@ -36,6 +36,13 @@ export function unitLabel(n: number): string {
   return `${n}单`
 }
 
+/** 「人数」 cell. Unknown party sizes are never counted as 0. */
+export function partySizeText(size: number, missing: number): string {
+  if (missing === 0) return String(size)
+  if (size === 0) return `未填（${missing} 单）`
+  return `${size}（另 ${missing} 单未填）`
+}
+
 const WARNING_TEXT: Partial<Record<BookingWarningCode, string>> = {
   tour_missing: '团目录里已找不到这个团',
   departure_missing: '目录里已找不到这个出发日期',

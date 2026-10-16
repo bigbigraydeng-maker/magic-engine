@@ -243,7 +243,7 @@ describe('GET overview', () => {
     seedHappyBookings()
     const res = await overviewFor(CLIENT_A)
     const text = await res.clone().text()
-    expect(text).not.toMatch(/amount|price|money|revenue|partySize|party_size/i)
+    expect(text).not.toMatch(/amount|price|money|revenue/i)
   })
 
   it('returns an empty state when there are no bookings', async () => {
