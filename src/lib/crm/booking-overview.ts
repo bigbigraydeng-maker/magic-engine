@@ -4,6 +4,8 @@
  * No I/O, no clock (today is a parameter), no Supabase. Every due date and
  * overdue flag comes from the BookingView built by buildBookingView; this
  * module never recomputes them. Everything here counts ORDERS, never money.
+ * Future catalog departures without orders can be passed in and show as rows
+ * with all counts 0.
  */
 
 import type {
@@ -14,6 +16,7 @@ import type {
   MilestoneView,
 } from './booking-types'
 import type {
+  OverviewEmptyDeparture,
   OverviewEntry,
   OverviewGroup,
   OverviewGroupKind,
@@ -343,11 +346,33 @@ function buildGroups(
   entries: OverviewEntry[],
   today: string,
   includePastPaid: boolean,
+  emptyDepartures: OverviewEmptyDeparture[],
 ): HiddenSplit {
   const map = new Map<string, OverviewGroup>()
   for (const { view } of entries) {
     if (view.status !== 'active') continue
     foldView(map, view)
+  }
+  const taken = new Set<string>()
+  for (const g of map.values()) {
+    if (g.kind === 'departure' && g.departOn !== null) {
+      taken.add(`${g.tourId}|${g.departOn}`)
+    }
+  }
+  for (const e of emptyDepartures) {
+    if (map.has(e.departureId)) continue
+    const dayKey = `${e.tourId}|${e.departOn}`
+    if (taken.has(dayKey)) continue
+    taken.add(dayKey)
+    const g = emptyGroup(
+      e.departureId,
+      'departure',
+      e.tourId,
+      e.tourName,
+      e.departureId,
+    )
+    g.departOn = e.departOn
+    map.set(e.departureId, g)
   }
   const all = [...map.values()]
   markDeparted(all, today)
@@ -360,8 +385,9 @@ export function summariseOverview(
   entries: OverviewEntry[],
   today: string,
   includePastPaid: boolean,
+  emptyDepartures: OverviewEmptyDeparture[] = [],
 ): OverviewSummary {
-  const split = buildGroups(entries, today, includePastPaid)
+  const split = buildGroups(entries, today, includePastPaid, emptyDepartures)
   return {
     groups: split.visible,
     totals: sumTotals(split.visible),

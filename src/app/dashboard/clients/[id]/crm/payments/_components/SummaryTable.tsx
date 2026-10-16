@@ -113,8 +113,8 @@ function GroupRow({ group, selected, today, onSelect }: GroupRowProps) {
       <GroupRowLabel group={group} selected={selected} today={today} onSelect={onSelect} />
       <td className={CELL_CLASS}>{group.orders}</td>
       <td className={CELL_CLASS}>{partySizeText(group.partySize, group.partySizeMissing)}</td>
-      <td className={CELL_CLASS}>{ratioText(group.depositPaid, group.orders)}</td>
-      <td className={CELL_CLASS}>{ratioText(group.balancePaid, group.orders)}</td>
+      <td className={CELL_CLASS}>{group.orders === 0 ? '—' : ratioText(group.depositPaid, group.orders)}</td>
+      <td className={CELL_CLASS}>{group.orders === 0 ? '—' : ratioText(group.balancePaid, group.orders)}</td>
       <td className={CELL_CLASS}>
         <UnsettledCell unsettled={group.unsettled} overdue={group.unsettledOverdue} />
       </td>
@@ -187,8 +187,8 @@ export function SummaryTable(props: {
             </th>
             <td className={`${CELL_CLASS} font-black`}>{totals.orders}</td>
             <td className={`${CELL_CLASS} font-black`}>{partySizeText(totals.partySize, totals.partySizeMissing)}</td>
-            <td className={`${CELL_CLASS} font-black`}>{ratioText(totals.depositPaid, totals.orders)}</td>
-            <td className={`${CELL_CLASS} font-black`}>{ratioText(totals.balancePaid, totals.orders)}</td>
+            <td className={`${CELL_CLASS} font-black`}>{totals.orders === 0 ? '—' : ratioText(totals.depositPaid, totals.orders)}</td>
+            <td className={`${CELL_CLASS} font-black`}>{totals.orders === 0 ? '—' : ratioText(totals.balancePaid, totals.orders)}</td>
             <td className={`${CELL_CLASS} font-black`}>
               <UnsettledCell unsettled={totals.unsettled} overdue={totals.unsettledOverdue} />
             </td>
