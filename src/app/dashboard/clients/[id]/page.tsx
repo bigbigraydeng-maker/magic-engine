@@ -659,7 +659,6 @@ export default function ClientDetailPage() {
                   badge="in_house"
                   links={[
                     { label: '图文帖子', href: `/dashboard/clients/${clientId}/daily-plan?tab=post` },
-                    { label: '社媒矩阵', href: `/dashboard/content?client=${clientId}` },
                     { label: '推广活动', href: `/dashboard/clients/${clientId}/campaigns` },
                     { label: '推广计划', href: `/dashboard/clients/${clientId}/promo-plan` },
                     { label: 'Marketing Plan', href: `/dashboard/clients/${clientId}/marketing-plan` },
