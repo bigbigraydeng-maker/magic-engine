@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { isAutoReply } from '@/lib/microsoft/mail-ingest'
 import { isMissingName, type ConversationHint, type OutboundEmailMsg } from './contact-enrichment'
 
 interface ConvRow {
@@ -13,6 +14,7 @@ interface ConvRow {
   contact_id: string | null
   channel: string
   participant_name: string | null
+  subject: string | null
 }
 
 interface MsgRow {
@@ -54,7 +56,7 @@ export async function loadEnrichmentInputs(
           fetchAll<ConvRow>((from, to) =>
             sb
               .from('conversations')
-              .select('id, contact_id, channel, participant_name')
+              .select('id, contact_id, channel, participant_name, subject')
               .eq('client_id', clientId)
               .in('contact_id', chunk)
               .order('id', { ascending: true })
@@ -67,7 +69,7 @@ export async function loadEnrichmentInputs(
       convs = await fetchAll<ConvRow>((from, to) =>
         sb
           .from('conversations')
-          .select('id, contact_id, channel, participant_name')
+          .select('id, contact_id, channel, participant_name, subject')
           .eq('client_id', clientId)
           .not('contact_id', 'is', null)
           .order('id', { ascending: true })
@@ -81,7 +83,8 @@ export async function loadEnrichmentInputs(
     for (const c of convs) {
       if (c.contact_id === null) continue
       hints.push({ contactId: c.contact_id, channel: c.channel, participantName: c.participant_name })
-      if (c.channel === 'email') {
+      // 「Automatic reply / 自动回复」之类的线程是机器发的，不能冒充人工跟进（2026-08-02 事故，见 automated-touch.ts）。
+      if (c.channel === 'email' && !isAutoReply(c.subject)) {
         contactOfConv.set(c.id, c.contact_id)
         emailConvIds.push(c.id)
       }

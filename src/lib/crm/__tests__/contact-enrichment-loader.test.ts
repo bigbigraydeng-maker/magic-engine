@@ -37,6 +37,21 @@ describe('loadEnrichmentInputs', () => {
     expect(r.hints.some((h) => h.participantName === 'Orphan')).toBe(false)
   })
 
+  it('「Automatic reply」之类的自动回执线程不算我们人工发出的邮件', async () => {
+    const sb = fakeSb({
+      conversations: [
+        { id: 'v1', contact_id: 'c1', channel: 'email', participant_name: 'a@x.com', subject: 'Automatic reply: your enquiry' },
+        { id: 'v2', contact_id: 'c2', channel: 'email', participant_name: 'b@x.com', subject: 'Your China tour itinerary' },
+      ],
+      conversation_messages: [
+        { id: 'm1', conversation_id: 'v1', direction: 'outbound', sender_name: null, sent_at: '2026-09-25T03:46:34Z' },
+        { id: 'm2', conversation_id: 'v2', direction: 'outbound', sender_name: null, sent_at: '2026-09-25T04:00:00Z' },
+      ],
+    })
+    const r = await loadEnrichmentInputs(sb, 'client-a')
+    expect(r.outboundEmails.map((m) => m.contactId)).toEqual(['c2'])
+  })
+
   it('只查指定的人时，空名单直接返回空，不碰数据库', async () => {
     const from = vi.fn()
     const r = await loadEnrichmentInputs({ from } as unknown as SupabaseClient, 'client-a', [])
