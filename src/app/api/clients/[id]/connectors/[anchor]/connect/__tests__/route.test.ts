@@ -98,7 +98,7 @@ describe('POST /api/clients/[id]/connectors/[anchor]/connect', () => {
     expect(mocks.upsertCalls).toHaveLength(0)
   })
 
-  it.each(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'publer', 'social'])(
+  it.each(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'social'])(
     'anchor=%s is unaffected — still connects normally',
     async (anchor) => {
       const res = await POST(makeRequest(anchor, { config: { page_url: 'https://example.com' } }), routeContext(anchor))
@@ -112,6 +112,15 @@ describe('POST /api/clients/[id]/connectors/[anchor]/connect', () => {
       expect((write!.row as { anchor: string; status: string }).status).toBe('connected')
     },
   )
+
+  it('anchor=publer is no longer a valid connector — generic 400, never touches the DB', async () => {
+    const res = await POST(makeRequest('publer', { config: { publer_account_ids: { facebook: 'x' } } }), routeContext('publer'))
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/Unknown connector/)
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
 
   it('an unknown anchor (not ga4, not in VALID_ANCHORS) still gets the generic 400 — ga4 rejection does not swallow other validation', async () => {
     const res = await POST(makeRequest('not-a-real-anchor'), routeContext('not-a-real-anchor'))
