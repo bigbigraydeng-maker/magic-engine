@@ -205,7 +205,7 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
   }
   if (view === null) return null
 
-  const launchChip = dayChip(view.countdown.daysToLaunch, '距开投', '已开投')
+  const launchChip = dayChip(view.countdown.daysToLaunch, '距计划开投日', '已过计划开投日')
   const targetChip = dayChip(view.countdown.daysToTarget, '距目标日', '已过目标日')
   const launchText = launchChip !== null && view.countdown.phaseName !== null
     ? `${launchChip} · ${view.countdown.phaseName}`
