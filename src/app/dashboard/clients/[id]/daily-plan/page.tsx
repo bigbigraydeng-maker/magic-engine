@@ -86,11 +86,11 @@ export default function DailyPlanPage() {
           ← {client?.name ?? 'Client'}
         </Link>
         <span className="text-me-charcoal/35">/</span>
-        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal">每日计划</h1>
+        <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal">社媒日常</h1>
       </div>
 
-      <div className="flex gap-2" role="tablist" aria-label="每日计划内容类型">
-        {([['overview', '社媒日常'], ['post', '图文 Post'], ['reels', '视频 Reels']] as const).map(([key, label]) => (
+      <div className="flex gap-2" role="tablist" aria-label="社媒日常内容类型">
+        {([['overview', '本周总览'], ['post', '图文帖子'], ['reels', '短视频']] as const).map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -119,7 +119,7 @@ export default function DailyPlanPage() {
           <p className="text-xs text-me-charcoal/45 mt-1">
             先去
             <Link href={`/dashboard/clients/${clientId}/campaigns`} className="text-me-ochre hover:underline mx-1">推广活动</Link>
-            新建一个活动，每日计划才有内容可审核
+            新建一个活动，社媒日常才有内容可审核
           </p>
         </div>
       ) : (

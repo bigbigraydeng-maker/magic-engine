@@ -655,10 +655,10 @@ export default function ClientDetailPage() {
                 <ToolDoorCard
                   href={`/dashboard/clients/${clientId}/daily-plan?tab=overview`}
                   title="社媒"
-                  desc="每日计划 · 这周 Post / Story / Reel 一眼看清、审核通过或打回"
+                  desc="社媒日常 · 这周 Post / Story / Reel 一眼看清、审核通过或打回"
                   badge="in_house"
                   links={[
-                    { label: '每日计划(全部)', href: `/dashboard/clients/${clientId}/daily-plan` },
+                    { label: '图文帖子', href: `/dashboard/clients/${clientId}/daily-plan?tab=post` },
                     { label: '社媒矩阵', href: `/dashboard/content?client=${clientId}` },
                     { label: '推广活动', href: `/dashboard/clients/${clientId}/campaigns` },
                     { label: '推广计划', href: `/dashboard/clients/${clientId}/promo-plan` },
