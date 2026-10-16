@@ -287,7 +287,7 @@ export interface CardContentState {
   text:       ContentStateSignal      // caption / script 有无
   image:      ContentStateSignal      // visual_assets 状态
   video:      ContentStateSignal      // reels_drafts 状态
-  publish:    ContentStateSignal      // publer_post_id / scheduled_at
+  publish:    ContentStateSignal      // scheduled_at / published_at
   priority:   CardPrioritySignal
   /** 最近一次相关状态变更时间（ISO 字符串）— 用于卡片右下角"3 分钟前" */
   last_changed_at: string | null

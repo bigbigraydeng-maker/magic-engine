@@ -173,8 +173,6 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'kpi-backfill', jobName: 'kpi-backfill', schedule: '20 6 * * *', logsRuns: true, addedAt: '2026-08-04' },
   { service: 'benchmark-accumulator', jobName: 'benchmark-accumulator', schedule: '40 7 * * 1', logsRuns: true, addedAt: '2026-08-04' },
   { service: 'keyword-snapshots-weekly', jobName: 'keyword-snapshots-weekly', schedule: '0 2 * * 1', logsRuns: true },
-  { service: 'linkedin-progress-post-mon', jobName: 'linkedin-progress-post-mon', schedule: '30 20 * * 0', logsRuns: true, addedAt: '2026-08-20' },
-  { service: 'linkedin-progress-post-thu', jobName: 'linkedin-progress-post-thu', schedule: '30 20 * * 3', logsRuns: true, addedAt: '2026-08-20' },
   // mailbox-sync-hourly 已于 2026-08-03 从 render.yaml 移除：它作为独立服务一次都没跑过
   // （新增服务要有人进 Render 点一次 Apply，而这件事不报任何错），现在挂在 messenger-hourly
   // 里跑。留在清单里会天天误报「没跑」——正是这套告警最怕的东西。

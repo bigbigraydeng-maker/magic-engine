@@ -1,9 +1,9 @@
 /**
- * POST /api/publer/quick-post
+ * POST /api/content/quick-post
  *
  * Called by SocialPlanSection → LaunchHubScheduler "交付到 Launch Hub".
  * Stages the post as a draft in content_posts so FDE can review it in
- * Launch Hub before the final Publer publish step.
+ * Launch Hub before the final publish step.
  *
  * Body: { client_id, caption, hashtags?, image_url?, platform, draft_only?, scheduled_at? }
  * draft_only=true → skip scheduled_at requirement, write pure draft
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, post_id: (inserted as { id: string }).id })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
-    console.error('[publer/quick-post]', err)
+    console.error('[content/quick-post]', err)
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
 }

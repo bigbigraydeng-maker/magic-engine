@@ -6,7 +6,7 @@
  *    而那个类型只有 `lib/kernel/authorize.ts` 造得出来。
  *    「拿到一个 supabase 客户端就能写」在这一层不成立。
  *
- * 🔴 未来所有**对外写**的 provider 模块（publer / wordpress / gbp / indexing …）
+ * 🔴 未来所有**对外写**的 provider 模块（wordpress / gbp / indexing …）
  *    只能在这个目录下被 import。ESLint 的 no-restricted-imports 和
  *    `kernel/__tests__/architecture.test.ts` 两道一起管着这条边界，
  *    后者关不掉（`// eslint-disable` 对它无效）。

@@ -7,7 +7,7 @@ import { SupabaseClient } from '@supabase/supabase-js'
 
 interface UsageLog {
   client_id: string
-  service: 'DataForSEO' | 'Semrush' | 'Publer'
+  service: 'DataForSEO' | 'Semrush'
   api_calls: number
   cost_usd: number
   month: string // YYYY-MM format
@@ -29,7 +29,7 @@ function getCurrentMonth(): string {
 export async function logServiceUsage(
   supabase: SupabaseClient,
   clientId: string,
-  service: 'DataForSEO' | 'Semrush' | 'Publer',
+  service: 'DataForSEO' | 'Semrush',
   apiCalls: number,
   costUsd: number
 ): Promise<{ success: boolean; error?: Error }> {

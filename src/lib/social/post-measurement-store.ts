@@ -104,7 +104,7 @@ export class PublishActionIdentityMismatchError extends Error {
  * 记录「这条帖子已经发出去了」这个既成事实。隔离校验通过后立刻写，**此时不检查
  * token** —— 帖子已经在 Facebook 上，令牌能不能读表现是后面的事，不该抹掉发布事实。
  *
- * 不复用 `logSocialPublishedAction`：它把 vendor 写死 `publer`、source 写死
+ * 不复用 `logSocialPublishedAction`：它（已随第三方发布通道退役删除）把 vendor 写死成第三方名、source 写死
  * `ai_factory`、还带 `expected_metric`，硬套会污染归因。
  */
 export async function recordPublishAction(

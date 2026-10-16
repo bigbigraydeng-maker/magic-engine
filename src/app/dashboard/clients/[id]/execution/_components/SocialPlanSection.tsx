@@ -1917,7 +1917,7 @@ function LaunchHubScheduler({
     setSending(true)
     setErrorMsg(null)
     try {
-      const res = await fetch('/api/publer/quick-post', {
+      const res = await fetch('/api/content/quick-post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

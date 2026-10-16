@@ -304,16 +304,16 @@ export type AdsMetricKey = (typeof ADS_METRIC_KEY)[keyof typeof ADS_METRIC_KEY]
  * Actions the Social flywheel can log in flywheel_actions.
  *
  * in_house actions  → content generated inside Magic Engine (SocialContentAdapter)
- * third_party       → published / scheduled via Publer
+ * third_party       → published / scheduled via a third-party tool (historical; that vendor was retired 2026-10)
  */
 export const SOCIAL_ACTION_TYPE = {
   /** Generate social media captions / copy for a campaign post (in_house) */
   GENERATE_CONTENT: 'social.generate_content',
 
-  /** Schedule a post to be published via Publer at a future time (third_party, publer) */
+  /** Schedule a post to be published at a future time (third_party, historical vendor tag) */
   SCHEDULE_POST: 'social.schedule_post',
 
-  /** Publish a post immediately via Publer (third_party, publer) */
+  /** Publish a post immediately (third_party, historical vendor tag) */
   PUBLISH_POST: 'social.publish_post',
 } as const
 
@@ -334,7 +334,7 @@ export const SOCIAL_METRIC_KEY = {
   /** Count of content_posts with status = 'scheduled' */
   SCHEDULED_COUNT: 'social.posts.scheduled_count',
 
-  // ── Per-post engagement (P12.C.3 — pulled from Publer daily) ─────────────
+  // ── Per-post engagement (P12.C.3 — historical rows pulled from the retired third-party feed) ─────────────
 
   /** Like / reaction count for a specific published post */
   POST_LIKES: 'social.post.likes',

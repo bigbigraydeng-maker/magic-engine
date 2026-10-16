@@ -10,8 +10,8 @@
  *     → TikTokAdapter.pullMetrics()
  *     → flywheel_metrics (social.tiktok.*)
  *
- * This adapter is read-only (no execute() — TikTok publishing is handled by
- * Publer via SocialContentAdapter). Only pullMetrics() is implemented.
+ * This adapter is read-only (no execute() — TikTok native publishing is
+ * outside this adapter). Only pullMetrics() is implemented.
  *
  * Auto-registers itself to the adapter registry on import.
  */
@@ -31,7 +31,7 @@ export class TikTokAdapter implements FlywheelAdapter {
   readonly flywheel = 'social' as const
 
   /**
-   * TikTok is analytics-only for this adapter — publishing is handled by Publer.
+   * TikTok is analytics-only for this adapter — publishing is outside this adapter.
    * Throws to satisfy the FlywheelAdapter interface contract.
    */
   async execute(_input: ExecuteActionInput): Promise<FlywheelActionRow> {
