@@ -16,7 +16,7 @@
 |---|---|---|
 | 每天一行经营视图（目标进度 + 要看的事 + 机会） | 表 `ads_growth_states`，页面 `growth-panel.tsx` | 21 天，最新 10-15，完整；最近的结论「落后线性节奏 65.7%」，1 件要看的事（挂的是旧目标，新 3 月目标还是草稿） |
 | 每条广告每天体检（点击率序列、7 天频率、处方） | 表 `ad_health_narratives`，页面 `ads-health/page.tsx` | 69 条，最新 10-15 |
-| 观众池大小与历史 | `ad_entity_snapshots`（`audience_count_lower`），每 3–6 小时一轮 | 在跑；2,775…账户停投后趋势读不出 |
+| 观众池大小与历史 | `ad_entity_snapshots`（`audience_count_lower`），每 3–6 小时一轮 | 在跑；账户 10/10 停投后，近 7 天趋势读不出 |
 | 观众池断供诊断 D11、攒了人没收割 D4 | `portfolio/diagnostics/` | 有，门槛是 CTS 一家的候选值 |
 | 频率与疲劳分类（高于 3 = 人看腻，低于 3 = 素材看腻） | `rules/fatigue.ts`（`FATIGUE_FREQUENCY_HIGH = 3`） | 有 |
 | 目标进度与「钱够不够追上」 | `goal-pace.ts` | 有（纯函数） |
