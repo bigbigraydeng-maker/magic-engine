@@ -807,8 +807,8 @@ function SaveToBoardBar({
       {isSuccess && (
         <span className="text-xs font-semibold text-cyan-800">
           Saved {savedCount} {label}.
-          <a href={`/dashboard/content?client=${clientId}`} className="underline font-medium ml-1">
-            Open content board
+          <a href={`/dashboard/clients/${clientId}/daily-plan`} className="underline font-medium ml-1">
+            Open daily plan
           </a>
         </span>
       )}

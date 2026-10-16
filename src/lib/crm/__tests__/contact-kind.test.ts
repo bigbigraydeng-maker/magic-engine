@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   contactKindOf,
+  isSystemAccountName,
   normaliseDomain,
   parseDomainList,
   readDomainRules,
@@ -232,5 +233,18 @@ describe('一行里带空格', () => {
     const r = parseDomainList('hot.co.nz\nHouse of Travel\norbit.co.nz')
     expect(r.domains).toEqual(['hot.co.nz', 'orbit.co.nz'])
     expect(r.rejected).toEqual(['House of Travel'])
+  })
+})
+
+describe('isSystemAccountName', () => {
+  it('平台自带的账号名认出来，不分大小写和空格', () => {
+    expect(isSystemAccountName('WhatsApp Business')).toBe(true)
+    expect(isSystemAccountName('  whatsapp business ')).toBe(true)
+  })
+  it('真人名字、空值、带名字的商家不误伤', () => {
+    expect(isSystemAccountName('Cindy Kapea')).toBe(false)
+    expect(isSystemAccountName('WhatsApp Business Support Ltd')).toBe(false)
+    expect(isSystemAccountName(null)).toBe(false)
+    expect(isSystemAccountName('')).toBe(false)
   })
 })

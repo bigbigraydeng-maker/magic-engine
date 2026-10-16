@@ -10,16 +10,16 @@ interface Props {
 const PRODUCTION_SHORTCUTS = [
   {
     icon: '📅',
-    label: '每日计划',
-    desc: '审核 7 日 Facebook Post 排期',
+    label: '社媒日常',
+    desc: '审核图文帖子 · 看本周 Story 和短视频',
     href: (id: string) => `/dashboard/clients/${id}/daily-plan`,
     color: 'hover:border-me-ochre/40',
   },
   {
     icon: '📋',
-    label: '内容看板',
-    desc: '审核 · 排期 · 发布所有内容',
-    href: (id: string) => `/dashboard/content?client=${id}`,
+    label: '内容工厂',
+    desc: '选题 → 备料 → 出片 → 发布 · 一条内容的流水线看板',
+    href: (id: string) => `/dashboard/clients/${id}/content-factory`,
     color: 'hover:border-me-ochre/40',
   },
 ]

@@ -155,11 +155,10 @@ export async function completeWorkOrder(
     }
   }
 
-  // brand_name/brand_voice 供下面的成片文案品控用(竞品角度检测要 brand_name,
-  // 人称检测要 brand_voice.persona)——同一条查询多选两列,不增加往返。
+  // brand_name 供下面的成片文案品控用(竞品角度检测)——同一条查询多选一列,不增加往返。
   const { data: brief, error: bErr } = await supabase
     .from('master_briefs')
-    .select('excluded_topics, brand_name, brand_voice')
+    .select('excluded_topics, brand_name')
     .eq('id', wo.master_brief_id as string)
     .maybeSingle()
   if (bErr) return { ok: false, status: 500, error: 'brief lookup failed' }
@@ -214,19 +213,12 @@ export async function completeWorkOrder(
     (typeof receiptHookSegment?.['caption'] === 'string' ? (receiptHookSegment['caption'] as string) : null) ??
     overlays.find((o): o is string => !!o) ??
     null
-  const persona = (brief?.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
-  const personaName = typeof persona?.name === 'string' ? persona.name.trim() : ''
   const brandNameForGuard = (brief?.brand_name as string | undefined) ?? ''
-  const intendedNarrator = personaName
-    ? `a single first-person narrator (a real ${brandNameForGuard || 'brand'} representative named ` +
-      `${personaName}${persona?.role ? `, ${persona.role}` : ''}, speaking about their own experience)`
-    : null
   const qualityFlags = await scanContentQualityFlags({
     brandName: brandNameForGuard,
     angleLabel: typeof wo.angle === 'string' ? (wo.angle as string) : null,
     onScreenHook,
     captions: [caption, ...overlays].filter((t): t is string => !!t),
-    intendedNarrator,
   })
 
   // ③ new_clips 幂等入库:idempotency_key 命中已有行 → 复用不重插

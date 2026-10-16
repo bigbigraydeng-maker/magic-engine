@@ -1,0 +1,87 @@
+[
+  {
+    "sha256": "e2c7220995f1a7fb85f49ef1e06182501f9072a57ba7b03ece6baddc66c113a7",
+    "name": "Analytical Scholar (MiniMax) / analytical-scholar.mp3",
+    "verdict": "present",
+    "signedBy": "auto-scan",
+    "signedAt": "2026-10-16T00:00:00.000Z",
+    "evidence": "docs/clients/cts/2026-10-16-tale-music-vocals-incident.md"
+  },
+  {
+    "sha256": "be125da5055f463d92139541b77b7d07a3d2ca286878a161c802e9c7e2b6028b",
+    "name": "analytical-scholar_n.mp3 (derived from e2c72209)",
+    "verdict": "present",
+    "derivedFrom": "e2c7220995f1a7fb85f49ef1e06182501f9072a57ba7b03ece6baddc66c113a7",
+    "signedBy": "auto-scan",
+    "signedAt": "2026-10-16T00:00:00.000Z",
+    "evidence": "docs/clients/cts/2026-10-16-tale-music-vocals-incident.md"
+  },
+  {
+    "sha256": "8a882fb706d47e29fd1bbe28dc4596ce1ebddf4eb478d230d8ff8a75850190ba",
+    "name": "Jayden小弟.mp3",
+    "verdict": "present",
+    "signedBy": "auto-scan",
+    "signedAt": "2026-10-16T00:00:00.000Z",
+    "evidence": "docs/clients/cts/2026-10-16-tale-music-vocals-incident.md"
+  },
+  {
+    "sha256": "d88e4253e41f189ff9f45637893d5392050c64870ea02d98d6482feea3a5aeb5",
+    "name": "music/founders-at-dawn.mp3",
+    "verdict": "none",
+    "cleanUntilSec": 27,
+    "strength": "approval-only",
+    "signedBy": "PM审片@e29b0986",
+    "signedAt": "2026-10-11T20:21:50.401Z",
+    "evidence": "approved published orders e8c5b66a,fa4fdd89,7ed7645b,e29b0986; machine transcripts (small + large-v3-turbo) in evidence pack 2026-10-16-tale-vocals"
+  },
+  {
+    "sha256": "5e4ef1ac304d505fefdcb46d09735fb1c2bd05e660fd2597198983b46afd2ac5",
+    "name": "music/jade_river_journey.mp3",
+    "verdict": "none",
+    "cleanUntilSec": 20,
+    "strength": "approval-only",
+    "signedBy": "PM审片@9fcb4ae6",
+    "signedAt": "2026-10-05T05:37:40.703Z",
+    "evidence": "approved published orders 9fcb4ae6; machine transcripts (small + large-v3-turbo) in evidence pack 2026-10-16-tale-vocals"
+  },
+  {
+    "sha256": "1efc49f91de4731f4cb16d94b33cbf4759fcea9d8a386c7615b778b2e7c46db4",
+    "name": "music/sunlit-kitchen-window.mp3",
+    "verdict": "none",
+    "cleanUntilSec": 17,
+    "strength": "approval-only",
+    "signedBy": "PM审片@fd7e3e5a",
+    "signedAt": "2026-10-15T04:42:42.751Z",
+    "evidence": "approved published orders fd7e3e5a; machine transcripts (small + large-v3-turbo) in evidence pack 2026-10-16-tale-vocals"
+  },
+  {
+    "sha256": "53e201d1499663b10f3e0d1e7283007520f8a590b88ea9c4e3031c0a87e7a83b",
+    "name": "music/horizons-call.mp3",
+    "verdict": "none",
+    "cleanUntilSec": 21,
+    "strength": "approval-only",
+    "signedBy": "PM审片@cb752a8f",
+    "signedAt": "2026-10-15T13:23:29.101Z",
+    "evidence": "approved published orders cb752a8f,00f23d78; machine transcripts (small + large-v3-turbo) in evidence pack 2026-10-16-tale-vocals"
+  },
+  {
+    "sha256": "493f6e4a8264612427c74a69af01fd628d86bc5e4717844b72a94bea6c3fde9c",
+    "name": "music/horizons-breath.m4a",
+    "verdict": "none",
+    "cleanUntilSec": 21,
+    "strength": "approval-only",
+    "signedBy": "PM审片@4bd78644",
+    "signedAt": "2026-10-14T21:16:39.812Z",
+    "evidence": "approved published orders 4bd78644; machine transcripts (small + large-v3-turbo) in evidence pack 2026-10-16-tale-vocals"
+  },
+  {
+    "sha256": "0a83ee7f5495ed877885d90eb7455c6fba5e4890a82be2ced19503ae968085e7",
+    "name": "music/second-hand-sunrise.mp3",
+    "verdict": "none",
+    "cleanUntilSec": 17,
+    "strength": "approval-only",
+    "signedBy": "PM审片@2ef627ff",
+    "signedAt": "2026-10-15T04:43:22.966Z",
+    "evidence": "approved published orders 2ef627ff; machine transcripts (small + large-v3-turbo) in evidence pack 2026-10-16-tale-vocals"
+  }
+]

@@ -7,6 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { CallButton } from './CallButton'
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
@@ -16,6 +17,9 @@ import { EmailReply } from './EmailReply'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
+import { BookingsBlock } from './bookings/BookingsBlock'
+import { BackToPayments } from './BackToPayments'
+import { useBodyScrollLock } from './useBodyScrollLock'
 import { drawerActions, nextStageChoices, type Channel } from '@/lib/crm/drawer-actions'
 import type { Segment } from '@/lib/crm/segments'
 import { intentNote, type NextAction } from '@/lib/crm/next-action'
@@ -99,6 +103,7 @@ export function PersonDrawer({
   onClose,
   onSaved,
   nav,
+  scrollToBookings = false,
 }: {
   clientId: string
   row: DrawerRow
@@ -113,6 +118,8 @@ export function PersonDrawer({
    * `lib/crm/drawer-nav.ts` 算出下一步该做什么，这里只管画按钮、转发点击。
    */
   nav?: DrawerNav
+  /** 一打开就滚到「订单与付款」（付款总览页原地弹出时用）。 */
+  scrollToBookings?: boolean
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
@@ -126,6 +133,8 @@ export function PersonDrawer({
   const [quickBusy, setQuickBusy] = useState(false)
   /** 记完一笔换个 key，让时间线重新拉一次 —— 刚记的那条要立刻出现在上面。 */
   const [timelineKey, setTimelineKey] = useState(0)
+  /** 刚点了拨打的时间：往来记录据此自动刷新，直到这通电话变成正式记录。 */
+  const [dialedAt, setDialedAt] = useState<number | null>(null)
   /**
    * 顶上那张「上次说到这」卡片的内容，由 `ContactTimeline` 算好回传。
    * `useCallback` 是必须的：这个函数进了那边的 `load` 依赖，每次渲染换一个新
@@ -195,6 +204,7 @@ export function PersonDrawer({
   }
 
   // 这一刻该给哪几个按钮 / 哪几个阶段 —— 判断全在 lib 里，页面不自己拍。
+  useBodyScrollLock()
   const actions = drawerActions(row.segment ?? 'stale_conversation', row.suggestedChannel ?? 'phone')
   const stageChoices = nextStageChoices(stages, row.stage)
 
@@ -210,6 +220,7 @@ export function PersonDrawer({
       <aside className="fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-me-ivory shadow-2xl sm:max-w-[580px]">
         <header className="flex items-start justify-between gap-3 border-b border-me-charcoal/10 bg-white px-4 py-3">
           <div className="min-w-0">
+            <BackToPayments key={row.contactId} clientId={clientId} />
             <h2 className="truncate text-lg font-black text-me-charcoal">{row.name}</h2>
           </div>
           <button
@@ -244,7 +255,7 @@ export function PersonDrawer({
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
           {/*
             开口前要知道的三样，摆在**第一屏**（PM 2026-08-17，CTS 销售视角）。
 
@@ -307,6 +318,16 @@ export function PersonDrawer({
               >
                 📞 {row.phone}
               </a>
+            )}
+            {row.phone && !row.phoneUnusable && !row.doNotContact && (
+              <CallButton
+                clientId={clientId}
+                contactId={row.contactId}
+                onDialed={() => {
+                  setDialedAt(Date.now())
+                  setTimelineKey((k) => k + 1)
+                }}
+              />
             )}
             {row.email && (
               <a
@@ -493,6 +514,26 @@ export function PersonDrawer({
             </div>
           )}
 
+          {/* 订单与付款：没开通这项功能或没权限的人，这一块什么都不渲染 */}
+          <BookingsBlock key={row.contactId} clientId={clientId} contactId={row.contactId} scrollIntoViewOnReady={scrollToBookings} />
+
+          {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
+          <div className="mt-5">
+            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">
+              往来记录
+            </p>
+            <ContactTimeline
+              key={timelineKey}
+              clientId={clientId}
+              contactId={row.contactId}
+              onSummary={onSummary}
+              dialedAt={dialedAt}
+            />
+          </div>
+
+          {/* 回复框放在往来记录之后（先读后回，跟聊天类产品一样）：原来它在上面，一个空的邮件回复框就有 320 像素高，
+              把往来记录整个顶到屏幕下面（PM 2026-10-14 好用性调整）。 */}
+          <div className="mt-5 space-y-3 empty:hidden" data-testid="drawer-replies">
           {/* 在这一页直接回私信 —— 没有私信线的人这里什么都不渲染。
               110 位 CTS 客人只有 Facebook 身份，卡上写着「只能在 Messenger
               回他」，之前却要跳去另一个页面才回得了。 */}
@@ -539,18 +580,6 @@ export function PersonDrawer({
               onSaved('✓ 邮件已发出', false)
             }}
           />
-
-          {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
-          <div className="mt-5">
-            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">
-              往来记录
-            </p>
-            <ContactTimeline
-              key={timelineKey}
-              clientId={clientId}
-              contactId={row.contactId}
-              onSummary={onSummary}
-            />
           </div>
         </div>
       </aside>

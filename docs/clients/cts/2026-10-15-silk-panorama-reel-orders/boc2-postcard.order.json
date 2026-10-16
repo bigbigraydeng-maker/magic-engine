@@ -1,0 +1,78 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Best of China #2 postcard: Beijing to Shanghai in 15 days, no price on screen",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15：3 月团三条按复审意见用 postcard 重出无价格版（价格只放首评，以官网当天为准）；只出片到 in_review，不发布",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/essentials, 2026-10-15：15 天/12 晚；Beijing→Xi'an→Puyuan(Tongxiang)→Hangzhou→Shanghai→Beijing；亮点 Big Wild Goose Pagoda、West Lake 等官网原词；酒店 or similar；价格与出发日只留首评链接。",
+  "note": "简报里的第一人称叙述要求不适用：本片无旁白，不替真人编亲身经历；质检口吻标记按误报处理；无 Early Bird/催单话术"
+ },
+ "rationale_one_liner": "Best of China 第二条无价版：钩子「BEIJING TO SHANGHAI」，景点=大雁塔/西湖（官网亮点原词），片尾「15 DAYS」；价格只留首评；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "postcard",
+   "props": {
+    "brandColor": "#B61E2E",
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "musicFile": "music/second-hand-sunrise.mp3",
+    "musicStartSec": 0,
+    "scrim": 0.55,
+    "cardOpacity": 0.55,
+    "cardSide": "left",
+    "accent": "#9BE3A5",
+    "hook": {
+     "clip": "clips/c4_greatwall_huairou.mp4",
+     "lines": [
+      "BEIJING TO",
+      "SHANGHAI"
+     ]
+    },
+    "scenes": [
+     {
+      "clip": "clips/c3b_bigwildgoose.mp4",
+      "place": "Xi'an",
+      "line": "Big Wild Goose Pagoda",
+      "sourceQuote": "Big Wild Goose Pagoda",
+      "placeSourceQuote": "Auckland → Beijing → Xi'an → Puyuan (Tongxiang) → Hangzhou → Shanghai → Beijing → Auckland",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/essentials"
+     },
+     {
+      "clip": "clips/c4_westlake_boats.mp4",
+      "place": "Hangzhou",
+      "line": "West Lake",
+      "sourceQuote": "West Lake",
+      "placeSourceQuote": "Auckland → Beijing → Xi'an → Puyuan (Tongxiang) → Hangzhou → Shanghai → Beijing → Auckland",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/essentials"
+     }
+    ],
+    "price": null,
+    "end": {
+     "backdropClip": "clips/item1_skylineday.mp4",
+     "title": "15 DAYS"
+    },
+    "timing": {
+     "hookSec": 3.0,
+     "sceneSec": 4.0,
+     "priceSec": 4
+    },
+    "cardTop": 870
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Fifteen days from Auckland: Beijing, Xi'an, Tongxiang, Hangzhou and Shanghai. International and domestic airfares, hotel accommodation as specified in the itinerary, an English-speaking tour guide, and the entrance fees and meals listed in the itinerary are included. Travel insurance is not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/essentials",
+    "offer": [
+     "15 days, Beijing to Shanghai"
+    ]
+   }
+  }
+ }
+}

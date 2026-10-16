@@ -12,10 +12,12 @@ interface Order {
   id: string; client_id: string; client_name: string; status: string; angle: string; rationale_one_liner: string
   fact_source_url: string | null
   output: Record<string, unknown>
-  accepted_flags?: Array<{ category: string; accepted_at: string; accepted_by: string }>
 }
 const order: Order = { id: 'w1', client_id: 'c1', client_name: 'CTS', status: 'in_review', angle: 'a', rationale_one_liner: 'r', fact_source_url: URL_OK, output: { quality_checklist_auto: auto } }
 const click = async (el: Element | undefined) => { await act(async () => { el?.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
+const tickListened = async () => { await click(document.querySelector('input[type="checkbox"]') ?? undefined) }
+// Expanded checklist: the listened item's PASS radio (first radio of that row).
+const passListenedRadio = () => document.querySelector('input[type="radio"][name$="-bgm_listened_no_vocals"]') ?? undefined
 const btn = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))
 
 afterEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals(); posts.length = 0 })
@@ -26,11 +28,10 @@ const mount = async (
   responses: Array<{ ok: boolean; error?: string }>,
   orderOverride: Partial<Order> = {},
   expand = false,
-  acceptedFlagsError?: string,
 ) => {
   const merged: Order = { ...order, ...orderOverride }
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
-    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged], accepted_flags_error: acceptedFlagsError ?? null }) }
+    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged] }) }
     posts.push({ url: u, body: init.body ? JSON.parse(init.body) : undefined })
     const r = responses.shift()!
     return { ok: r.ok, status: r.ok ? 200 : 422, json: async () => (r.ok ? {} : { error: r.error }) }
@@ -43,7 +44,6 @@ const mount = async (
 const MISSING = 'checklist factual_claims_have_source requires source_ref'
 
 const reviewPosts = () => posts.filter(p => p.url === '/api/factory/work-orders/w1/review')
-const acceptPosts = () => posts.filter(p => p.url === '/api/factory/work-orders/w1/accept-flag')
 const ONE_CLICK = '我已看过这条片子,同意通过'
 const FAIL_AUTO = auto.map(item => item.key === 'audio_track_present_nonsilent' ? { ...item, outcome: 'FAIL' } : item)
 
@@ -54,6 +54,8 @@ it('prefills source, one-click all PASS, shows plain-Chinese server error inside
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // 不会替 PM 默认 PASS
   expect(document.body.textContent).toContain('只存成草稿')
   await click(btn('项全部标为通过'))
+  expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // bulk pass never ticks "listened"
+  await click(passListenedRadio())
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(false)
   await click(btn('确定通过'))
   expect(document.querySelector('.fixed')?.textContent).toContain('「事实性主张有来源」这一项要填来源网址')
@@ -62,6 +64,7 @@ it('prefills source, one-click all PASS, shows plain-Chinese server error inside
 it('clears the old error when a retry succeeds (no stale red text on the page)', async () => {
   await mount([{ ok: false, error: MISSING }, { ok: true }], {}, true)
   await click(btn('项全部标为通过'))
+  await click(passListenedRadio())
   await click(btn('确定通过'))
   expect(document.body.textContent).toContain('这一项要填来源网址')
   await click(btn('确定通过'))
@@ -69,16 +72,22 @@ it('clears the old error when a retry succeeds (no stale red text on the page)',
   expect(document.body.textContent).not.toContain('这一项要填来源网址')
 })
 
-it('clean order: one-click panel, no 确定通过, sends 9 HUMAN PASS items with prefilled source', async () => {
+it('clean order: one-click panel needs the listened tick, then sends 10 HUMAN PASS items with prefilled source', async () => {
   await mount([{ ok: true }])
   expect(btn('确定通过')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeDefined()
+  expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(true) // not pre-ticked
+  await click(btn(ONE_CLICK))
+  expect(reviewPosts()).toHaveLength(0) // a disabled button posts nothing
+  await tickListened()
+  expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(false)
   await click(btn(ONE_CLICK))
   const sent = reviewPosts()
   expect(sent).toHaveLength(1)
   const body = sent[0].body as { action: string; checklist_human: Array<{ key: string; judge: string; outcome: string; source_ref: string | null }> }
   expect(body.action).toBe('approve')
-  expect(body.checklist_human).toHaveLength(9)
+  expect(body.checklist_human).toHaveLength(10)
+  expect(body.checklist_human.some(i => i.key === 'bgm_listened_no_vocals' && i.outcome === 'PASS')).toBe(true)
   expect(body.checklist_human.every(i => i.outcome === 'PASS' && i.judge === 'HUMAN')).toBe(true)
   const facts = body.checklist_human.filter(i => i.key.startsWith('factual_'))
   expect(facts.map(i => i.source_ref)).toEqual([URL_OK, URL_OK])
@@ -99,26 +108,27 @@ it('redline hits: no one-click, shows redline reason', async () => {
   expect(document.body.textContent).toContain('文案命中品牌红线')
 })
 
-it('acceptable quality flag: PM 已接受 button POSTs the category', async () => {
+it('legacy narrator_voice_mismatch flag is hidden and no longer blocks one-click', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'narrator_voice_mismatch', detail: 'd' }] } })
-  expect(btn(ONE_CLICK)).toBeUndefined()
-  await click(btn('PM 已接受'))
-  const sent = acceptPosts()
-  expect(sent).toHaveLength(1)
-  expect(sent[0].body).toEqual({ category: 'narrator_voice_mismatch' })
-})
-
-it('accepted flag: shows 已接受 date, no PM 已接受 button, one-click available', async () => {
-  await mount([{ ok: true }], {
-    output: { quality_checklist_auto: auto, quality_flags: [{ category: 'narrator_voice_mismatch', detail: 'd' }] },
-    accepted_flags: [{ category: 'narrator_voice_mismatch', accepted_at: '2026-10-06T00:00:00Z', accepted_by: 'pm' }],
-  })
-  expect(document.body.textContent).toContain('已接受(2026-10-06)')
+  expect(document.body.textContent).not.toContain('人称口吻')
   expect(btn('PM 已接受')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeDefined()
 })
 
-it('non-acceptable quality flag: no PM 已接受 button, no one-click', async () => {
+it('legacy narrator flag + real competitor flag: only the real one shows and it still blocks one-click', async () => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'narrator_voice_mismatch', detail: 'old-voice' }, { category: 'competitor_brand', detail: 'real-flag' }] } })
+  expect(document.body.textContent).toContain('real-flag')
+  expect(document.body.textContent).not.toContain('old-voice')
+  expect(btn(ONE_CLICK)).toBeUndefined()
+})
+
+it.each(['placeholder_caption', 'quality_check_unavailable'])('quality flag %s stays visible and blocks one-click', async (category) => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category, detail: 'shown-detail' }] } })
+  expect(document.body.textContent).toContain('shown-detail')
+  expect(btn(ONE_CLICK)).toBeUndefined()
+})
+
+it('real quality flag stays visible: no PM 已接受 button, no one-click', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'competitor_brand', detail: 'd' }] } })
   expect(btn('PM 已接受')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeUndefined()
@@ -139,12 +149,6 @@ it('one-click panel links to the prefilled source URL', async () => {
 it('quality flag with no detail at all still blocks one-click', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, quality_flags: [{ category: 'competitor_brand' }] } })
   expect(btn(ONE_CLICK)).toBeUndefined()
-})
-
-it('accepted_flags_error surfaces a red notice with the message', async () => {
-  await mount([{ ok: true }], {}, false, 'boom')
-  expect(document.body.textContent).toContain('读取失败')
-  expect(document.body.textContent).toContain('boom')
 })
 
 const mountOrders = async (orders: unknown[]) => {
@@ -171,4 +175,44 @@ it('renders the publish outlets disclosure with the outlet list', async () => {
   expect(document.body.textContent).toContain('Instagram')
   expect(document.body.textContent).toContain('未接通')
   expect(document.body.textContent).toContain('Facebook 主页 Reel')
+})
+
+const btnEq = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text)
+const openReject = async () => { await click(btnEq('再想想')); await click(btnEq('打回')) }
+
+it('打回 needs a reason, posts reject_quality, and shows the 已打回 notice', async () => {
+  await mount([{ ok: true }])
+  await openReject()
+  await click(btn('确认打回'))
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('请至少选一条打回理由')
+  expect(reviewPosts()).toHaveLength(0)
+  const chip = [...document.querySelectorAll('label')].find(l => l.textContent?.includes('字幕太长或太小'))
+  await click(chip?.querySelector('input') ?? undefined)
+  await click(btn('确认打回'))
+  expect(reviewPosts()).toHaveLength(1)
+  const body = reviewPosts()[0].body as { action: string; feedback: string }
+  expect(body.action).toBe('reject_quality')
+  expect(body.feedback).toContain('字幕太长或太小')
+  expect(document.body.textContent).toContain('已打回 #w1')
+})
+
+it('只改预算 tab posts reject_budget', async () => {
+  await mount([{ ok: true }])
+  await openReject()
+  await click(btnEq('只改预算(不打回)'))
+  const input = document.querySelector('input[type="number"]') as HTMLInputElement
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '20')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await click(btn('确认调整预算'))
+  expect(reviewPosts()[0].body).toEqual({ action: 'reject_budget', new_budget_usd: 20 })
+})
+
+it('card shows short title and hides engineering notes inside 详情; no Claude chat', async () => {
+  await mount([], { client_name: 'CTS', angle: 'Grand Tour #3: 钩子', rationale_one_liner: 'v2 loudness 74 window' })
+  expect(document.body.textContent).toContain('CTS｜Grand Tour｜第3条｜v2')
+  expect(document.body.textContent).not.toContain('问 Claude')
+  const details = [...document.querySelectorAll('details')].find(d => d.textContent?.includes('loudness 74'))
+  expect(details?.querySelector('summary')?.textContent).toBe('详情')
 })

@@ -1,0 +1,6 @@
+Source: https://www.pexels.com/fr-fr/video/vue-panoramique-de-la-pagode-leifeng-de-hangzhou-39955168/
+Author: LayG Traveller
+Licence: Source page Free license and download; https://www.pexels.com/license/
+Extracted frame at 1s. Source identifies Leifeng Pagoda, Hangzhou. Visual check: pagoda above trees, pavilion foreground.
+
+Frame used without generative scene changes. Cover uses locked China, Up Close master v1.

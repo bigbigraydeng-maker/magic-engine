@@ -12,7 +12,7 @@ import { sanitizeFailReason } from './publish-display'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { buildReelPublishedEvent } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
-import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS, checklistPasses, validateContentChecklist } from '@/lib/social/content-review'
+import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForStored, validateContentChecklist } from '@/lib/social/content-review'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 
 const MAX_PUBLISH_ATTEMPTS = 3
@@ -188,7 +188,7 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   // provider lookup/upload. This also quarantines legacy `approved` rows that
   // predate structured review checklists.
   const reviewRef = (wo['review_ref'] ?? {}) as Record<string, unknown>
-  const humanChecklist = validateContentChecklist(reviewRef['checklist_human'], REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  const humanChecklist = validateContentChecklist(reviewRef['checklist_human'], humanKeysForStored(reviewRef['checklist_human']), 'HUMAN')
   const autoChecklist = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
   if (!humanChecklist.ok || !autoChecklist.ok || !checklistPasses(humanChecklist.items) || !checklistPasses(autoChecklist.items)) {
     await markFailed(id, attempts, 'approval checklist missing, incomplete, failed, or not measured', true)

@@ -1,0 +1,7 @@
+Beyond the Skyline
+Photo: LayG Traveller
+Source: https://www.pexels.com/video/scenic-view-of-shanghai-skyline-with-skyline-33740447/
+Licence: Pexels License https://www.pexels.com/license/
+Changes: 16:9 crop, uniform dark gradient, typography and CTS brand overlay; no scene generation.
+
+

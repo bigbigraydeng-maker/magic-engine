@@ -1,136 +1,108 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+// 社媒日常页的「短视频」只读面板 —— 视频由视频工厂统一生产与审核,
+// 这里只看排期和状态,数据与「本周总览」同源(social-overview 接口,已按客户过滤)。
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+
+import { STATUS_META } from '@/app/dashboard/factory/_components/statusMeta'
 import type { WorkOrderStatus } from '@/lib/factory/types'
-import type { PublishedView } from '@/lib/factory/publish/publish-display'
-import { factoryVideoUrl } from '@/lib/factory/outlets'
-import { STATUS_META, publishedBadge } from '@/app/dashboard/factory/_components/statusMeta'
+import { isRecordedUploaded } from '@/lib/social/story-lite/page-text'
+import type { OverviewReel } from '@/lib/social/week-overview/build'
 
-// 每日计划页的「视频 Reels」只读面板 —— 视频由视频工厂统一生产与审核,
-// 这里只做查看入口,通过/发布仍走工厂审核页并经 PM 授权。
-
-interface WorkOrder {
-  id: string
-  client_id: string
-  status: WorkOrderStatus
-  angle: string
-  output?: { video_path?: string } | null
-  published: PublishedView | null
-  created_at: string
-}
-
-// 展示顺序:要拍板/在途的在前,历史/停用的在后。空组跳过。
-const REEL_STATUS_ORDER: readonly WorkOrderStatus[] = [
-  'in_review', 'approved', 'publishing', 'published', 'measuring', 'closed',
-  'review_rejected', 'publish_failed', 'rendered', 'queued', 'claimed', 'producing',
-]
-
-// 这些状态不展示:归档/被替换/失败/死信 —— 不是「可看的 Reel」。
-const HIDDEN_STATUSES: readonly WorkOrderStatus[] = ['archived', 'superseded', 'failed', 'dead_letter']
+type LoadState = 'loading' | 'ready' | 'unauthenticated' | 'forbidden' | 'error'
 
 export function DailyPlanReelsPanel({ clientId }: { clientId: string }) {
-  const [orders, setOrders] = useState<WorkOrder[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [load, setLoad] = useState<LoadState>('loading')
+  const [reels, setReels] = useState<OverviewReel[]>([])
+  const [reelsError, setReelsError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoad('loading')
+    setReelsError(null)
     void (async () => {
       try {
-        const res = await fetch('/api/factory/work-orders')
-        if (!res.ok) {
-          if (!cancelled) setError(`读不到视频工单（${res.status}），请刷新或确认管理员登录`)
-          return
-        }
-        const json = await res.json()
+        const res = await fetch(`/api/clients/${clientId}/social-overview`)
         if (cancelled) return
-        setOrders((json.orders ?? []) as WorkOrder[])
+        if (res.status === 401) return setLoad('unauthenticated')
+        if (res.status === 403) return setLoad('forbidden')
+        const json = (await res.json().catch(() => ({}))) as {
+          success?: boolean
+          reels?: OverviewReel[]
+          reels_error?: string | null
+        }
+        if (!res.ok || json.success !== true) return setLoad('error')
+        setReels(Array.isArray(json.reels) ? json.reels : [])
+        setReelsError(typeof json.reels_error === 'string' ? json.reels_error : null)
+        setLoad('ready')
       } catch {
-        if (!cancelled) setError('读不到视频工单，请刷新或确认管理员登录')
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setLoad('error')
       }
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [clientId])
-
-  const videos = useMemo(() => {
-    return orders
-      .filter((o) => o.client_id === clientId)
-      .filter((o) => typeof o.output?.video_path === 'string' && o.output.video_path.length > 0)
-      .filter((o) => !HIDDEN_STATUSES.includes(o.status))
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-  }, [orders, clientId])
-
-  const grouped = useMemo(
-    () => REEL_STATUS_ORDER
-      .map((status) => ({ status, items: videos.filter((o) => o.status === status) }))
-      .filter((g) => g.items.length > 0),
-    [videos],
-  )
 
   return (
     <section className="bg-white rounded-xl border border-black/10 p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
-        <h2 className="text-sm font-semibold text-me-charcoal">视频 Reels（共 {videos.length} 条）</h2>
+        <h2 className="text-sm font-semibold text-me-charcoal">短视频（共 {reels.length} 条）</h2>
         <Link
           href={`/dashboard/factory?client=${clientId}`}
           className="text-xs text-blue-600 underline"
-        >去视频工厂审核页</Link>
+        >去视频工厂</Link>
       </div>
       <p className="text-xs text-me-charcoal/60 mb-4">
-        视频由视频工厂统一生产与审核；这里只是查看入口，通过、发布仍要在工厂审核页操作并经 PM 授权。
+        这里只看排期和状态；审片、通过、打回、看片都在视频工厂。
       </p>
 
-      {loading ? (
+      {load === 'loading' ? (
         <p className="text-xs text-me-charcoal/50">加载中…</p>
-      ) : error ? (
-        <p className="text-xs text-red-600">{error}</p>
-      ) : videos.length === 0 ? (
-        <p className="text-xs text-me-charcoal/50">这个客户还没有可看的 Reel 视频。</p>
+      ) : load === 'unauthenticated' ? (
+        <p className="text-xs text-red-600">请先登录管理员账号后刷新</p>
+      ) : load === 'forbidden' ? (
+        <p className="text-xs text-red-600">只有管理员能看</p>
+      ) : load === 'error' ? (
+        <p className="text-xs text-red-600">读不到短视频排期，请刷新或确认管理员登录</p>
+      ) : reelsError ? (
+        <p className="text-xs text-red-600">短视频现在读不到，请刷新页面。</p>
+      ) : reels.length === 0 ? (
+        <p className="text-xs text-me-charcoal/50">这个客户还没有可看的短视频。</p>
       ) : (
-        <div className="space-y-6">
-          {grouped.map((g) => (
-            <div key={g.status}>
-              <h3 className="text-xs font-medium text-me-charcoal/60 mb-2 flex items-center gap-2">
-                <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${STATUS_META[g.status].color}`}>
-                  {STATUS_META[g.status].label}
+        <ul className="space-y-1.5">
+          {reels.map((reel) => {
+            const meta = STATUS_META[reel.status as WorkOrderStatus]
+            const uploaded = isRecordedUploaded(reel)
+            return (
+              <li key={reel.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${meta?.color ?? 'bg-me-charcoal/10 text-me-charcoal'}`}>
+                  {uploaded ? '库里记为已上传 · 平台状态未核' : meta?.label ?? '状态未知'}
                 </span>
-                <span className="text-me-charcoal/40">{g.items.length}</span>
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {g.items.map((o) => {
-                  const badge = o.published ? publishedBadge(o.published) : null
-                  return (
-                    <div key={o.id} className="border border-black/10 rounded-lg p-3 bg-white">
-                      <video
-                        controls
-                        preload="metadata"
-                        className="w-full rounded-md bg-black/5"
-                        src={factoryVideoUrl(o.output?.video_path, process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')}
-                      />
-                      <p className="text-xs text-me-charcoal mt-2 line-clamp-2">{o.angle}</p>
-                      <div className="flex items-center gap-2 flex-wrap mt-2">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${STATUS_META[o.status].color}`}>
-                          {STATUS_META[o.status].label}
-                        </span>
-                        {badge && (
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${badge.color}`}>
-                            {badge.label}
-                          </span>
-                        )}
-                        <span className="text-xs text-me-charcoal/40">工单 {o.id.slice(0, 8)}</span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
+                <span className="text-me-charcoal">{reel.angle || '（没有写主题）'}</span>
+                <span className="text-xs text-me-charcoal/40">工单 {reel.id.slice(0, 8)}</span>
+                {reel.permalink && (
+                  <a
+                    href={reel.permalink}
+                    className="text-xs underline text-me-charcoal/70"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    打开 Reel 链接
+                  </a>
+                )}
+                <Link
+                  href={`/dashboard/factory?client=${clientId}`}
+                  className="text-xs underline text-me-charcoal/70"
+                >
+                  去视频工厂
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
       )}
     </section>
   )

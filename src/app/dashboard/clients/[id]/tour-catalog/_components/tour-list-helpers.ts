@@ -58,6 +58,89 @@ export function groupTours(tours: CatalogTourView[]): TourGroup[] {
   return groups
 }
 
+export interface TourTierGroup {
+  key: string
+  title: string
+  /** Same title the flat list used ("China Signature"): what a tour name may start with. */
+  nameTitle: string
+  tours: CatalogTourView[]
+  departureCount: number
+}
+
+export interface TourRegionGroup {
+  key: string
+  title: string
+  tiers: TourTierGroup[]
+  tourCount: number
+  departureCount: number
+}
+
+const REGION_ZH: Record<string, string> = {
+  china: '中国',
+  japan: '日本',
+  vietnam: '越南',
+  'new-zealand': '新西兰',
+  'new zealand': '新西兰',
+  australia: '澳大利亚',
+  korea: '韩国',
+  thailand: '泰国',
+}
+
+/** "china" -> "中国 China"; unknown regions keep the title-cased English; empty -> '其他'. */
+export function regionTitle(destination: string): string {
+  const dest = titleCase(destination)
+  if (!dest) return '其他'
+  const zh = REGION_ZH[destination.trim().toLowerCase()]
+  return zh ? `${zh} ${dest}` : dest
+}
+
+/** "signature" -> "Signature"; empty or 'unknown' -> '未分档'. */
+export function tierTitle(tier: string): string {
+  const text = tier.trim().toLowerCase() === 'unknown' ? '' : titleCase(tier)
+  return text || '未分档'
+}
+
+/** Series (destination) -> tier -> tours, in first-appearance order, with tour and departure counts. */
+export function groupToursByRegion(
+  tours: CatalogTourView[],
+  departures: CatalogDepartureView[],
+): TourRegionGroup[] {
+  const perTour = new Map<string, number>()
+  for (const d of departures) perTour.set(d.tourId, (perTour.get(d.tourId) ?? 0) + 1)
+  const regions: TourRegionGroup[] = []
+  const regionIndex = new Map<string, TourRegionGroup>()
+  const tierIndex = new Map<string, TourTierGroup>()
+  for (const tour of tours) {
+    const dest = (tour.destination ?? '').trim().toLowerCase()
+    const tier = (tour.tier ?? '').trim().toLowerCase()
+    let region = regionIndex.get(dest)
+    if (!region) {
+      region = { key: dest, title: regionTitle(tour.destination), tiers: [], tourCount: 0, departureCount: 0 }
+      regionIndex.set(dest, region)
+      regions.push(region)
+    }
+    const tierKey = `${dest}|${tier}`
+    let tierGroup = tierIndex.get(tierKey)
+    if (!tierGroup) {
+      tierGroup = {
+        key: tierKey,
+        title: tierTitle(tour.tier),
+        nameTitle: groupTitle(tour.destination, tour.tier),
+        tours: [],
+        departureCount: 0,
+      }
+      tierIndex.set(tierKey, tierGroup)
+      region.tiers.push(tierGroup)
+    }
+    const count = perTour.get(tour.id) ?? 0
+    tierGroup.tours.push(tour)
+    tierGroup.departureCount += count
+    region.tourCount += 1
+    region.departureCount += count
+  }
+  return regions
+}
+
 const SEPARATORS = ['—', '–', '-', ':', '：', '|']
 
 /** Drop a leading "<group title>" + separator from the tour name. */
@@ -100,12 +183,16 @@ export interface TourFilterInput {
   today: string
 }
 
-/** query: case-insensitive substring of tour.name (trimmed; empty = all). */
+function searchText(tour: CatalogTourView): string {
+  return `${tour.name} ${regionTitle(tour.destination)} ${tierTitle(tour.tier)}`.toLowerCase()
+}
+
+/** query: case-insensitive substring of tour name, series or tier (trimmed; empty = all). */
 export function filterTours(tours: CatalogTourView[], input: TourFilterInput): CatalogTourView[] {
   const query = input.query.trim().toLowerCase()
   const changed = new Set(input.changedTourIds)
   return tours.filter(tour => {
-    if (query && !tour.name.toLowerCase().includes(query)) return false
+    if (query && !searchText(tour).includes(query)) return false
     if (input.filter === 'changed') return changed.has(tour.id)
     if (input.filter === 'has_departures') {
       return nextDepartOn(input.departures, tour.id, input.today) !== null
