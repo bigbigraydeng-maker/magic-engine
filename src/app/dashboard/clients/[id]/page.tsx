@@ -660,9 +660,6 @@ export default function ClientDetailPage() {
                   links={[
                     { label: '每日计划(全部)', href: `/dashboard/clients/${clientId}/daily-plan` },
                     { label: '社媒矩阵', href: `/dashboard/content?client=${clientId}` },
-                    { label: '推广活动', href: `/dashboard/clients/${clientId}/campaigns` },
-                    { label: '推广计划', href: `/dashboard/clients/${clientId}/promo-plan` },
-                    { label: 'Marketing Plan', href: `/dashboard/clients/${clientId}/marketing-plan` },
                   ]}
                 />
                 <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
@@ -670,17 +667,29 @@ export default function ClientDetailPage() {
                 <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
                 <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
                 <ToolCard href={`/dashboard/clients/${clientId}/settings?tab=connect`} title="平台连接"    desc="连接 GBP · GSC · GA4 · Meta 广告账户" badge="in_house" />
-                <ToolCard href={`/dashboard/clients/${clientId}/ads-health`}     title="广告健康"      desc="每天自动体检 · 每条广告跟自己最好一周比 · 疲劳预警" badge="in_house" />
+                <ToolDoorCard
+                  href={`/dashboard/clients/${clientId}/ads-health`}
+                  title="广告"
+                  desc="广告健康 · 每天自动体检、疲劳预警 · 花钱推广的事都从这里进"
+                  badge="in_house"
+                  links={[
+                    { label: '推广计划', href: `/dashboard/clients/${clientId}/promo-plan` },
+                    { label: '推广活动', href: `/dashboard/clients/${clientId}/campaigns` },
+                    { label: 'Marketing Plan', href: `/dashboard/clients/${clientId}/marketing-plan` },
+                    { label: '等你点头的广告', href: '/dashboard/ad-approval' },
+                    { label: '自动暂停', href: `/dashboard/clients/${clientId}/ad-health/auto-pause` },
+                    { label: 'Meta 账户连接', href: `/dashboard/clients/${clientId}/settings?tab=connect` },
+                  ]}
+                />
                 {/* 视频工厂此前只在内部导航(跨客户总览),客户维度没有入口 —— 跟紧邻的
                     「素材库」不一致,而且 PM 是按客户干活的。?client= 进去只看这个客户。 */}
                 <ToolDoorCard
                   href={`/dashboard/factory?client=${clientId}`}
                   title="出片"
-                  desc="视频工厂 · 看片、拍板、跟 Claude 说人话改片 · 只看这个客户"
+                  desc="视频工厂 · 看片审片、拍板、跟 Claude 说人话改片 · 只看这个客户"
                   badge="in_house"
                   links={[
                     { label: '素材库', href: `/dashboard/clients/${clientId}/assets` },
-                    { label: 'Launch Hub', href: `/dashboard/visuals?client=${clientId}` },
                     { label: '内容生产包', href: `/dashboard/clients/${clientId}/production` },
                     { label: '内容工厂', href: `/dashboard/clients/${clientId}/content-factory` },
                     { label: '生成单条内容', onClick: () => setGenerationOpen(true) },
