@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
+import WarMapPanel from './war-map-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
@@ -503,6 +504,33 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
+type PageTab = 'today' | 'ads' | 'settings'
+const PAGE_TABS: Array<{ key: PageTab; label: string; hint: string }> = [
+  { key: 'today', label: '今天看这里', hint: '三句话：池子、频率、今天调什么' },
+  { key: 'ads', label: '每条广告', hint: '逐条体检' },
+  { key: 'settings', label: '目标与设置', hint: '每天预算上限、自动化、可投视频' },
+]
+
+function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => void }) {
+  return (
+    <div className="mb-5 flex gap-1 border-b border-gray-200">
+      {PAGE_TABS.map(item => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => onChange(item.key)}
+          title={item.hint}
+          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            tab === item.key ? 'border-gray-800 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export default function AdsHealthPage() {
   const params = useParams()
   const clientId = params.id as string
@@ -510,6 +538,7 @@ export default function AdsHealthPage() {
   const [data, setData] = useState<AdHealthResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [tab, setTab] = useState<PageTab>('today')
 
   useEffect(() => {
     let alive = true
@@ -531,67 +560,99 @@ export default function AdsHealthPage() {
   const overallMeta = VERDICT_META[overall]
   const playbook = resolveAdsPlaybook(data?.industry ?? null)
 
+  const campaigns = latest ? [...latest.payload.campaigns].sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict]) : []
+  const live = campaigns.filter(c => c.verdict !== 'paused')
+  const stopped = campaigns.filter(c => c.verdict === 'paused')
+
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <div className="mb-6">
+    <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="mb-5">
         <Link href={`/dashboard/clients/${clientId}`} className="text-sm text-gray-400 hover:text-gray-600">
           ← 返回客户
         </Link>
         <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
-        <p className="text-sm text-gray-400">每天自动体检 · 把每条广告跟它自己最好的一周比</p>
+        <p className="text-sm text-gray-400">每天自动体检 · 先看「今天看这里」，其余按需要点开</p>
       </div>
 
-      {!loading && !error && (
-        <div className="mb-6"><GrowthPanel state={data ? data.growth : undefined} clientId={clientId} /></div>
-      )}
+      <TabBar tab={tab} onChange={setTab} />
 
-      <div className="mb-6"><AutonomySettings clientId={clientId} /></div>
-
-      {loading && <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>}
-
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          加载出错:{error}
-        </div>
-      )}
-
-      {!loading && !error && !latest && (
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center text-gray-500">
-          <p className="text-sm">广告数据还在积累中,暂时没有健康报告。</p>
-          <p className="text-xs mt-2 text-gray-400">系统每天凌晨自动体检,数据够了这里就会出现。</p>
-        </div>
-      )}
-
-      {!loading && !error && latest && (
+      {tab === 'today' && (
         <>
-          {/* One-line conclusion first (板桥: 颜色即结论) */}
-          <div className={`rounded-xl border p-5 mb-6 ${overallMeta.tint}`}>
-            <div className="flex items-center gap-2.5">
-              <span className={`inline-block w-3 h-3 rounded-full ${overallMeta.dot}`} />
-              <span className={`text-lg font-semibold ${overallMeta.text}`}>{latest.headline}</span>
+          {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
+          <WarMapPanel clientId={clientId} />
+          {loading && <div className="text-gray-400 text-sm py-8 text-center">加载中…</div>}
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">加载出错:{error}</div>
+          )}
+          {!loading && !error && !latest && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center text-gray-500">
+              <p className="text-sm">广告数据还在积累中,暂时没有健康报告。</p>
+              <p className="text-xs mt-2 text-gray-400">系统每天凌晨自动体检,数据够了这里就会出现。</p>
             </div>
-            <p className="mt-1.5 text-xs text-gray-400">
-              体检日期 {latest.insight_date} · 共 {latest.payload.evaluated} 条广告
-            </p>
-          </div>
-
-          <MoneySummary campaigns={latest.payload.campaigns} playbook={playbook} />
-
-          {/* Worst first — the engine already sorts, but re-sort as a fallback
-              so a bad cron day can't silently bury an alert below healthy cards. */}
-          <div className="space-y-3">
-            {[...latest.payload.campaigns]
-              .sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict])
-              .map(c => (
-                <CampaignCard key={c.campaign_id} clientId={clientId} c={c} playbook={playbook} />
-              ))}
-          </div>
-
-          <p className="mt-8 text-xs text-gray-300 text-center">
-            所有判断由系统每天自动生成 · 数字直接来自广告平台,可自行核对
-          </p>
+          )}
+          {!loading && !error && latest && (
+            <>
+              <div className={`rounded-xl border p-4 mb-4 ${overallMeta.tint}`}>
+                <div className="flex items-center gap-2.5">
+                  <span className={`inline-block w-3 h-3 rounded-full ${overallMeta.dot}`} />
+                  <span className={`text-base font-semibold ${overallMeta.text}`}>{latest.headline}</span>
+                </div>
+                <p className="mt-1.5 text-xs text-gray-400">
+                  体检日期 {latest.insight_date} · 共 {latest.payload.evaluated} 条广告
+                </p>
+              </div>
+              <MoneySummary campaigns={latest.payload.campaigns} playbook={playbook} />
+              {live.length > 0 && (
+                <p className="text-xs text-gray-400">在投的 {live.length} 条广告要看明细，点上面「每条广告」。</p>
+              )}
+            </>
+          )}
         </>
       )}
+
+      {tab === 'ads' && (
+        <>
+          {loading && <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>}
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">加载出错:{error}</div>
+          )}
+          {!loading && !error && !latest && (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-500">广告数据还在积累中。</div>
+          )}
+          {!loading && !error && latest && (
+            <>
+              {/* 最差的排最前：引擎已排序，这里再排一次兜底，免得坏的被健康的盖住 */}
+              <div className="grid gap-3 md:grid-cols-2">
+                {live.map(c => (
+                  <CampaignCard key={c.campaign_id} clientId={clientId} c={c} playbook={playbook} />
+                ))}
+              </div>
+              {live.length === 0 && <p className="text-sm text-gray-500">现在没有在投的广告。</p>}
+              {stopped.length > 0 && (
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-sm text-gray-500">已停投的 {stopped.length} 条（点开看）</summary>
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {stopped.map(c => (
+                      <CampaignCard key={c.campaign_id} clientId={clientId} c={c} playbook={playbook} />
+                    ))}
+                  </div>
+                </details>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {tab === 'settings' && (
+        <div className="space-y-6">
+          {!loading && !error && <GrowthPanel state={data ? data.growth : undefined} clientId={clientId} />}
+          <AutonomySettings clientId={clientId} />
+        </div>
+      )}
+
+      <p className="mt-8 text-xs text-gray-300 text-center">
+        所有判断由系统每天自动生成 · 数字直接来自广告平台,可自行核对
+      </p>
     </div>
   )
 }

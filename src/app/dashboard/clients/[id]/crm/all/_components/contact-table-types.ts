@@ -44,6 +44,8 @@ export interface ContactRow {
   /** 最新一张 AI 摘要的意向；null = 没有摘要。 */
   intent: IntentLevel | null
   custom: Record<string, string | null>
+  /** 他最早是从哪个渠道进来的（messenger / email / whatsapp / phone / fb_form / web_form），最多一项；列表在名字旁画小标签。 */
+  sources?: string[]
 }
 
 export interface CustomColumnMeta {

@@ -53,7 +53,7 @@ const ADMIN_SECTIONS: NavSection[] = [
     title: 'Operate',
     items: [
       { key: 'launch-hub',       label: 'Launch Hub',      mark: 'LH', href: '/dashboard/visuals' },
-      { key: 'analytics',        label: 'Analytics',       mark: 'AN', soon: true },
+      { key: 'analytics',        label: 'Analytics',       mark: 'AN', href: '/dashboard/analytics' },
       { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
       { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
       { key: 'mtc-overview',     label: 'MTC Overview',    mark: 'MC', href: '/dashboard/admin/mtc-overview' },
@@ -69,6 +69,11 @@ const ADMIN_SECTIONS: NavSection[] = [
       { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
       { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
       { key: 'product-map',     label: 'ME2 产品地图',    mark: 'PM', href: '/dashboard/me2/product-map' },
+      { key: 'voice',            label: '电话',           mark: 'VO', href: '/dashboard/voice' },
+      { key: 'workflows-health', label: '自动任务健康',   mark: 'WH', href: '/dashboard/workflows-health' },
+      { key: 'conversions',      label: '转化',           mark: 'CV', href: '/dashboard/conversions' },
+      { key: 'flywheel',         label: 'Flywheel',       mark: 'FW', href: '/dashboard/admin/flywheel' },
+      { key: 'mcp-keys',         label: 'MCP Keys',       mark: 'MK', href: '/dashboard/admin/mcp-keys' },
     ],
   },
 ]

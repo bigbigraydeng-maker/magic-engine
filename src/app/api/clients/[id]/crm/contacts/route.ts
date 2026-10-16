@@ -16,10 +16,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
-import { contactKindOf, readDomainRules } from '@/lib/crm/contact-kind'
+import { contactKindOf, isSystemAccountName, readDomainRules } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
+import { enrichContacts, type SourceKey } from '@/lib/crm/contact-enrichment'
+import { loadEnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
 import {
   responseRowFor,
   stageMetaOf,
@@ -214,10 +216,10 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
         .order('contact_id', { ascending: true })
         .range(from, to),
     ),
-    fetchAll<{ id: string; primary_email: string | null }>((from, to) =>
+    fetchAll<{ id: string; primary_email: string | null; display_name: string | null }>((from, to) =>
       supabaseAdmin
         .from('contacts')
-        .select('id, primary_email')
+        .select('id, primary_email, display_name')
         .eq('client_id', clientId)
         .order('id', { ascending: true })
         .range(from, to),
@@ -237,6 +239,8 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
 
   const tradeIds: string[] = []
   const staffIds: string[] = []
+  // 系统账号（WhatsApp Business 等）跟自己人一起从零售名单里排掉。
+  for (const c of contactsLite) if (isSystemAccountName(c.display_name)) staffIds.push(c.id)
   for (const [id, emails] of emailsByContact) {
     const kind = contactKindOf(emails, rules)
     if (kind === 'trade') tradeIds.push(id)
@@ -298,6 +302,16 @@ async function loadContactsByIds(clientId: string, ids: string[]): Promise<Conta
 }
 
 /**
+ * 展示层补全（只读，不改库）：名字缺失 → 从对话里找回 / 取邮箱前缀；没存的邮箱 → 从邮件对话补；
+ * 我们发出的人工邮件（只在对话里、没落触点的）→ 补成外发记录，别再判「还没联系」；顺带算每人的来源渠道。
+ * scoped=true 只查这一批人（分页），false = 整个客户（分段 / 老路径）。失败时原样返回。
+ */
+async function enrichForDisplay(clientId: string, contacts: ContactRow[], touches: TouchRow[], scoped: boolean) {
+  const inputs = await loadEnrichmentInputs(supabaseAdmin, clientId, scoped ? contacts.map((c) => c.id) : undefined)
+  return enrichContacts({ contacts, touches, hints: inputs.hints, outboundEmails: inputs.outboundEmails })
+}
+
+/**
  * `?ids=` 路径：只取指定的几位客人，组装方式与列表逐字相同（同一个 assembleRows）。
  * 付款总览页点客人名字时用它原地弹出抽屉；按 client_id 收口，别家客户的编号取不到。
  */
@@ -322,7 +336,8 @@ async function getByIds(
       loadLatestBriefByContactCached(clientId),
     ])
     timer.step('by_ids')
-    const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows, briefs)
+    const enriched = await enrichForDisplay(clientId, pageContacts, touches, true)
+    const { out, customPerContact } = assembleRows(enriched.contacts, enriched.touches, stageRows, briefs, enriched.sources)
     const res = NextResponse.json({
       total: out.length,
       page: 1,
@@ -554,7 +569,9 @@ async function getPaged(
   }
 
   timer.step('touches_briefs')
-  const { out, customPerContact } = assembleRows(pageContacts, touches, stageRows, briefs)
+  const enrichedPage = await enrichForDisplay(clientId, pageContacts, touches, true)
+  timer.step('enrich')
+  const { out, customPerContact } = assembleRows(enrichedPage.contacts, enrichedPage.touches, stageRows, briefs, enrichedPage.sources)
   timer.step('assemble')
 
   const res = NextResponse.json({
@@ -627,6 +644,13 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     )
   }
 
+  // 系统账号（WhatsApp Business 等）不是客人，不进「智能」视图的任何一栏。
+  contacts = contacts.filter((c) => !isSystemAccountName(c.display_name))
+
+  const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false)
+  contacts = enrichedPri.contacts
+  touches = enrichedPri.touches
+
   const stageMeta = stageMetaOf(stageRows)
   const byContact = new Map<string, TouchRow[]>()
   for (const t of touches) {
@@ -652,6 +676,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       const tps = byContact.get(row.id) ?? []
       const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg, briefs.get(row.id) ?? null)
       customPerContact.push(built.custom)
+      built.row.sources = enrichedPri.sources.get(row.id) ?? []
       return built.row
     },
   )
@@ -741,7 +766,8 @@ export async function GET(
     )
   }
 
-  const { out, customPerContact } = assembleRows(contacts, touches, stageRows, briefs)
+  const enrichedAll = await enrichForDisplay(clientId, contacts, touches, false)
+  const { out, customPerContact } = assembleRows(enrichedAll.contacts, enrichedAll.touches, stageRows, briefs, enrichedAll.sources)
 
   return NextResponse.json({
     totalContacts: out.length,
@@ -762,6 +788,7 @@ function assembleRows(
   touches: TouchRow[],
   stageRows: StageRow[],
   briefs: BriefByContact,
+  sources?: Map<string, SourceKey[]>,
 ): {
   out: Array<Record<string, unknown>>
   customPerContact: Array<Record<CustomColumnKey, string | null>>
@@ -790,6 +817,7 @@ function assembleRows(
     // 否则两个入口会各自长出一套字段（2026-09-26 R5b：就是在这里发现它已经被抄了第二份）。
     const built = responseRowFor(c, tps, stageMeta, model, seg, briefs.get(c.id) ?? null)
     customPerContact.push(built.custom)
+    if (sources !== undefined) built.row.sources = sources.get(c.id) ?? []
     return built.row
   })
 

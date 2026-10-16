@@ -85,8 +85,8 @@ describe('hasIndustryFeature —— 库里的真实取值', () => {
 
 describe('industryFeatureFlags', () => {
   it('一次拿全部开关', () => {
-    expect(industryFeatureFlags('real_estate')).toEqual({ listings: true, projects: true, tailor_made: false, agents: false, tour_catalog: false })
-    expect(industryFeatureFlags('travel')).toEqual({ listings: false, projects: false, tailor_made: true, agents: true, tour_catalog: true })
-    expect(industryFeatureFlags(null)).toEqual({ listings: false, projects: false, tailor_made: false, agents: false, tour_catalog: false })
+    expect(industryFeatureFlags('real_estate')).toEqual({ listings: true, projects: true, tailor_made: false, agents: false, tour_catalog: false, business_calculator: false })
+    expect(industryFeatureFlags('travel')).toEqual({ listings: false, projects: false, tailor_made: true, agents: true, tour_catalog: true, business_calculator: true })
+    expect(industryFeatureFlags(null)).toEqual({ listings: false, projects: false, tailor_made: false, agents: false, tour_catalog: false, business_calculator: false })
   })
 })
