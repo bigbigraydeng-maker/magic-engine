@@ -5,6 +5,7 @@
  *    （魏征 2026-10-16 必改 3）。
  */
 
+import { dataStaleDays, DATA_STALE_DAYS } from './frequency'
 import { diffDays, nzDay, shortDay } from './util'
 import type {
   AccountView, ActionRow, ActionSeverity, FrequencyRow, GrowthInput, Headline, PoolRow, WarMapInput,
@@ -55,12 +56,12 @@ function creativeActions(approved: number | null): ActionRow[] {
   }]
 }
 
-function frequencyActions(rows: FrequencyRow[]): ActionRow[] {
+function frequencyActions(rows: FrequencyRow[], staleNote: string): ActionRow[] {
   return rows.flatMap((r): ActionRow[] => {
     if (r.light !== 'red' || r.frequency7d === null) return []
     return [{
       key: `freq-${r.campaignId}`, severity: 'red',
-      what: `${r.campaignName} 频率 ${r.frequency7d.toFixed(2)}，高于 3`,
+      what: `${r.campaignName} 频率 ${r.frequency7d.toFixed(2)}，高于 3${staleNote}`,
       how: '先换受众（扩大或轮换），再考虑降预算；改动前先看点击率有没有在掉', owner: 'agent',
     }]
   })
@@ -128,12 +129,18 @@ export interface AdjustContext {
   upstream: Headline[]
 }
 
+function staleNote(input: WarMapInput): string {
+  const days = dataStaleDays(input)
+  const day = input.clocks.dataDay
+  return days !== null && days > DATA_STALE_DAYS && day ? `（数据停在 ${shortDay(day)}）` : ''
+}
+
 export function buildAdjust(ctx: AdjustContext): { headline: Headline; actions: ActionRow[] } {
   const unhealthy = ctx.accounts.some(a => a.statusCode !== null && a.statusCode !== 1)
   const actions = sortStable([
     ...accountActions(ctx.accounts),
     ...creativeActions(ctx.input.creativePoolApproved),
-    ...frequencyActions(ctx.frequencyRows),
+    ...frequencyActions(ctx.frequencyRows, staleNote(ctx.input)),
     ...poolActions(ctx.poolRows, ctx.videoPoolIds),
     ...growthActions(ctx.input.growth, ctx.input, unhealthy),
   ])

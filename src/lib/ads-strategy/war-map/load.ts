@@ -60,14 +60,14 @@ interface AccountRow {
 /** 「读全了却没返回它」的实体会被写一行 disappeared：最新一行是它，就整个实体不要，不能当成「读不到」。 */
 const DISAPPEARED = 'disappeared'
 
-async function loadAccounts(clientId: string): Promise<AccountInput[]> {
+async function loadAccounts(clientId: string, now: Date): Promise<AccountInput[]> {
   const rows = await fetchAll<AccountRow>((from, to) =>
     supabaseAdmin
       .from('ad_entity_snapshots')
       .select('ad_account_id, entity_name, account_status, timezone_name, capture_reason, captured_at')
       .eq('client_id', clientId)
       .eq('level', 'account')
-      .gte('captured_at', isoDaysAgo(new Date(), 14))
+      .gte('captured_at', isoDaysAgo(now, 14))
       .order('captured_at', { ascending: false })
       .order('id', { ascending: true })
       .range(from, to),
@@ -335,7 +335,7 @@ async function loadApprovedCreatives(clientId: string): Promise<number | null> {
 
 export async function loadWarMapInput(clientId: string, now: Date = new Date()): Promise<WarMapInput> {
   const [accounts, aud, adsets, clocks, growth, plan, creativePoolApproved] = await Promise.all([
-    loadAccounts(clientId),
+    loadAccounts(clientId, now),
     loadAudiences(clientId, now),
     loadAdsets(clientId, now),
     loadClocks(clientId),

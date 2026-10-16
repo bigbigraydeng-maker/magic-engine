@@ -42,13 +42,15 @@ function collapsedFrom(points: AudienceCountPoint[], days: string[], tz: string 
   return peak > 0 ? peak : null
 }
 
-function computeTrend(a: AudienceInput, input: WarMapInput, reliable: boolean): Trend {
+function computeTrend(a: AudienceInput, input: WarMapInput, size: Size): Trend {
   const tz = accountTimezone(input, a.adAccountId)
   const today = toLocalDate(input.now, tz)
   const days = windowDays(today, D11_POOL_WINDOW_DAYS)
   const points = pointsOf(input, a.id)
 
-  if (!reliable) {
+  if (!size.reliable) {
+    // 🔴 「塌了」只能在「现在这一轮读到了、而且就是 ≤ 1,000」时说；读不到、过期都只是判不了（子牙 N1）。
+    if (!size.atFloor) return { trend: 'unknown', note: '人数判不了，长没长也判不了' }
     const peak = collapsedFrom(points, days, tz)
     if (peak === null) return { trend: 'unknown', note: '人数判不了，长没长也判不了' }
     return { trend: 'shrinking', note: `近 7 天从至少 ${fmtInt(peak)} 人掉到显示下限`, light: 'red' }
@@ -62,20 +64,20 @@ function computeTrend(a: AudienceInput, input: WarMapInput, reliable: boolean): 
   return { trend: 'flat', note: '近 7 天基本没变' }
 }
 
-interface Size { sizeLower: number | null; note: string; reliable: boolean }
+interface Size { sizeLower: number | null; note: string; reliable: boolean; atFloor: boolean }
 
 function computeSize(a: AudienceInput, nowIso: string): Size {
   const count = a.countLower
-  if (count === null || count < 0) return { sizeLower: null, note: '人数读不到', reliable: false }
+  if (count === null || count < 0) return { sizeLower: null, note: '人数读不到', reliable: false, atFloor: false }
   const age = hoursSince(a.capturedAt, nowIso)
   if (age !== null && age > POOL_STALE_HOURS) {
     const day = a.capturedAt ? shortDay(a.capturedAt.slice(0, 10)) : '更早'
-    return { sizeLower: count, note: `人数是 ${day} 的，已经过期，判不了`, reliable: false }
+    return { sizeLower: count, note: `人数是 ${day} 的，已经过期，判不了`, reliable: false, atFloor: false }
   }
   if (count <= D4_AUDIENCE_FLOOR) {
-    return { sizeLower: count, note: '显示下限 1,000，真实人数判不了', reliable: false }
+    return { sizeLower: count, note: '显示下限 1,000，真实人数判不了', reliable: false, atFloor: true }
   }
-  return { sizeLower: count, note: `至少 ${fmtInt(count)} 人`, reliable: true }
+  return { sizeLower: count, note: `至少 ${fmtInt(count)} 人`, reliable: true, atFloor: false }
 }
 
 function usedByAdsets(audienceId: string, input: WarMapInput): number {
@@ -84,7 +86,7 @@ function usedByAdsets(audienceId: string, input: WarMapInput): number {
 
 function buildRow(a: AudienceInput, input: WarMapInput, names: Map<string, string>): PoolRow {
   const size = computeSize(a, input.now)
-  const trend = computeTrend(a, input, size.reliable)
+  const trend = computeTrend(a, input, size)
   let light: Light = size.reliable ? 'green' : 'unknown'
   if (trend.light) light = trend.light
   else if (trend.trend === 'shrinking') light = 'yellow'

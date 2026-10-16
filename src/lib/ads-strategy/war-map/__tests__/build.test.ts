@@ -170,6 +170,22 @@ describe('① 观众池', () => {
     expect(v.pools.rows[0]).toMatchObject({ trend: 'shrinking', light: 'red' })
     expect(v.pools.headline.light).toBe('red')
   })
+  it('人数读不到：哪怕历史上有大人数，也只是判不了，不许说塌了（子牙 N1）', () => {
+    const v = buildWarMap(baseInput({
+      audiences: [aud({ countLower: null })],
+      audienceHistory: dailyHistory('aud_1', [40000, 40000, 40000, 40000, 40000, 40000]),
+    }))
+    expect(v.pools.rows[0]).toMatchObject({ trend: 'unknown', light: 'unknown' })
+    expect(v.pools.headline.light).toBe('unknown')
+    expect(v.adjust.actions.some(a => a.key.startsWith('pool-shrink'))).toBe(false)
+  })
+  it('人数记录过期：同样只是判不了，不许说塌了', () => {
+    const v = buildWarMap(baseInput({
+      audiences: [aud({ countLower: 900, capturedAt: '2026-10-10T00:00:00.000Z' })],
+      audienceHistory: dailyHistory('aud_1', [40000, 40000, 40000, 40000, 40000, 40000]),
+    }))
+    expect(v.pools.rows[0]).toMatchObject({ trend: 'unknown', light: 'unknown' })
+  })
   it('设置里在用的池子都判不了时，不许说够用，哪怕别的池子很大', () => {
     const v = buildWarMap(baseInput({
       audiences: [aud({ id: 'big', countLower: 44500 }), aud({ id: 'used', countLower: 1000 })],
@@ -240,6 +256,13 @@ describe('② 频率', () => {
     }))
     expect(v.frequency.headline.light).toBe('red')
     expect(v.frequency.headline.sentence).toContain('停在 10/10')
+  })
+  it('数据停了且频率高于 3：今日清单里的红色事项也带「数据停在 X」', () => {
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-10', fetchedAt: null },
+      campaigns: [camp({ frequency7d: 3.5 })],
+    }))
+    expect(v.adjust.actions.find(a => a.key === 'freq-camp_1')?.what).toContain('数据停在 10/10')
   })
   it('有广告没有 7 天频率：不能整体说绿', () => {
     const v = buildWarMap(baseInput({
