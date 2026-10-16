@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
+import WarMapPanel from './war-map-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
@@ -540,6 +541,9 @@ export default function AdsHealthPage() {
         <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
         <p className="text-sm text-gray-400">每天自动体检 · 把每条广告跟它自己最好的一周比</p>
       </div>
+
+      {/* 作战地图（S1，只给内部员工；非内部人员接口回 403，面板自己不渲染）。放最上面：三句话先看。 */}
+      <WarMapPanel clientId={clientId} />
 
       {!loading && !error && (
         <div className="mb-6"><GrowthPanel state={data ? data.growth : undefined} clientId={clientId} /></div>
