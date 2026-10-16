@@ -1,5 +1,7 @@
 # HBay 新西兰 B 端企业用水：推广场景、优惠、财务预测 v0.1（草稿）
 
+> **已被取代（2026-10-17）：** 按 PM 要求，销售账不应包含我们的服务费。新版见 [销售单位经济模型](2026-10-17-hbay-b2b-sales-unit-economics-v0.1.md)。本稿只保留"推广场景"和"优惠方案"两节有效。
+
 > **这是一个"假设模型"，不是预测。** HBay 的单桶成本、送货成本、产能、真实定价我们一个都不知道。下面所有"假设"列都要 HBay 换成真实数字，结果才有意义。
 > 所有金额 NZD，不含 GST。参考价来自竞品官网（Just Water 15 升一桶 9.95 含 GST，折合不含 GST 约 8.65，16 升约 9.23）。
 > 配套：[3 个月品牌方案](2026-10-17-hbay-3month-brand-voice-plan-corporate-water-v0.1.md) · [竞品初查](2026-10-15-auckland-office-water-delivery-competitors-v0.1.md) · [关键词基线](2026-10-17-hbay-keyword-serp-ai-baseline-v0.1.md)
