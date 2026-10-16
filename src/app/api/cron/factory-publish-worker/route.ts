@@ -1,4 +1,4 @@
-// P0.1 factory-publish-worker cron — approved 成片 → 发到客户平台(FB Reel / Publer)+ 三落库。
+// P0.1 factory-publish-worker cron — approved 成片 → 发到客户平台(FB Reel)+ 三落库。
 // 一次领 1 条发(FB 上传慢,防 300s 超时)。Auth: CRON_SECRET bearer(同全部 ME crons)。
 //
 // 🔴 首发安全阀:默认**草稿模式**(video_state=DRAFT,不公开)。PM 验完草稿格式、显式 go 后,
@@ -7,14 +7,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runPublishWorker, reconcileMissingReelEvents } from '@/lib/factory/publish/publish-worker'
 import { runLecturePublishSweep, type PublishOutcome } from '@/lib/factory/lecture-publish'
-import { runInstagramCrosspost, instagramLive, instagramLiveClients, instagramEnabledClients, type InstagramCrosspostOutcome } from '@/lib/factory/publish/instagram-crosspost'
 import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
-
-/** 前面已用掉这么久(毫秒)就不再开始 Instagram 这一步(它最坏要约 160 秒(上传+排期各 20 次轮询),留给下一轮) */
-const INSTAGRAM_START_BUDGET_MS = 90_000
 
 // 🔴 必须写 cron_run_logs(2026-08-03 补):此前这条路由不留任何运行痕迹,
 // 于是「跑了但没事干」和「压根没跑」长得一模一样,监控无法分辨。
@@ -24,7 +20,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const startedAt = Date.now()
   const cronRun = await startCronRun('factory-publish-worker')
   const live = process.env.FACTORY_PUBLISH_LIVE === 'true' // 未设 = 草稿模式(安全默认)
   try {
@@ -58,25 +53,8 @@ export async function GET(req: NextRequest) {
       reel_event_reconcile = { error: e instanceof Error ? e.message : String(e) }
     }
 
-    // Instagram 交叉发布(Publer):FB Reel 发完后同一条片发到客户 IG。
-    // 同样单独 try —— IG 这条线出问题(如 Publer 账号掉线)不该把 FB 工单发布的运行记录带成失败。
-    // 真发要四样都到位:FACTORY_PUBLISH_LIVE + FACTORY_INSTAGRAM_LIVE 两个开关都是 true,该客户在 FACTORY_INSTAGRAM_LIVE_CLIENTS 名单里,且该客户在 FACTORY_INSTAGRAM_ENABLED_CLIENTS 点名的「客户:账号」里;缺一样 = 只存 Publer 草稿。
-    // 处理本身只针对 FACTORY_INSTAGRAM_ENABLED_CLIENTS 点名的「客户:账号」,没配 = 一条都不处理(连草稿也不建)。
-    // 预算:300 秒是和上面 FB 发布、讲课片共用的。IG 单条最坏要等 Publer 两轮各 3 分钟,所以前面已经用掉
-    // 大半时间就让给下一轮 —— 被硬杀会把回执停在「创建中」,15 分钟后还得人工核对,是假警报。
-    let instagram: InstagramCrosspostOutcome | { skipped: string } | { error: string }
-    if (Date.now() - startedAt > INSTAGRAM_START_BUDGET_MS) {
-      instagram = { skipped: 'time_budget' }
-    } else {
-      try {
-        instagram = await runInstagramCrosspost({ live: instagramLive(live), liveClientIds: instagramLiveClients(), enabledClients: instagramEnabledClients() })
-      } catch (e) {
-        instagram = { error: e instanceof Error ? e.message : String(e) }
-      }
-    }
-
-    await cronRun.finish({ summary: { live, ...outcome, lecture, reel_event_reconcile, instagram } })
-    return NextResponse.json({ ok: true, live, ...outcome, lecture, reel_event_reconcile, instagram })
+    await cronRun.finish({ summary: { live, ...outcome, lecture, reel_event_reconcile } })
+    return NextResponse.json({ ok: true, live, ...outcome, lecture, reel_event_reconcile })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     await cronRun.finish({ error: msg })
