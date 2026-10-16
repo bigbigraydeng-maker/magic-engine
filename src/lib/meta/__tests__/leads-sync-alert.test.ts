@@ -13,9 +13,9 @@ import {
  * 而 `error_message` 一直是 null，日报邮件只显示一个破折号）。
  */
 const TOKEN_DEAD =
-  'leadgen_forms HTTP 400: {"error":{"message":"Error validating access token: The network timeout because the user changed their password or Facebook has changed the session for security reasons.","type":"OAuthException","code":190,"error_subcode":460}}'
+  'leadgen_forms HTTP 400: {"error":{"message":"Error validating access token: The session has been invalidated because the user changed their password or Facebook has changed the session for security reasons.","type":"OAuthException","code":190,"error_subcode":460}}'
 const NO_PERMISSION =
-  'leadgen_forms HTTP 403: {"error":{"message":"(#200) Internal server error permission to manage the object","type":"OAuthException","code":200}}'
+  'leadgen_forms HTTP 403: {"error":{"message":"(#200) Requires pages_manage_ads permission to manage the object","type":"OAuthException","code":200}}'
 
 // 授权过期 / 权限不足属于 blocked（各有自己的待办盯着）；真失败用下面两种非授权报错。
 const FETCH_TIMEOUT = 'leadgen_forms fetch failed: network timeout while reading lead forms for this page'
@@ -244,6 +244,36 @@ describe('逐客户回执（blocked vs failed）', () => {
 
   it('主页绑定未核实 = blocked', () => {
     expect(classifyLeadsSyncOutcome(PAGE_BLOCKED).state).toBe('blocked')
+  })
+
+  it('同一客户授权错混着真错误 = failed，不被授权错吞掉', () => {
+    expect(
+      classifyLeadsSyncOutcome({ clientName: 'X', error: `${TOKEN_DEAD} | 表单 123 整体失败: ${SERVER_ERROR}` }).state,
+    ).toBe('failed')
+  })
+
+  it('全是授权错的多表单报错 = blocked', () => {
+    expect(classifyLeadsSyncOutcome({ clientName: 'X', error: `${TOKEN_DEAD} | ${NO_PERMISSION}` }).state).toBe('blocked')
+  })
+
+  it('OAuthException 但是限流/参数错误 = failed，不冒充授权失效', () => {
+    const e = '{"error":{"type":"OAuthException","code":100,"message":"Invalid parameter"}}'
+    expect(classifyLeadsSyncOutcome({ clientName: 'X', error: e }).state).toBe('failed')
+  })
+
+  it('被跳过但没报错（缺主页令牌）= blocked，不是 ok', () => {
+    const r = classifyLeadsSyncOutcome({ clientName: 'X', skipped: 'no_page_token' })
+    expect(r.state).toBe('blocked')
+    expect(r.detail).toBe('no_page_token')
+  })
+
+  it('一家 blocked + 另一家出口缺口：出口那句照样出，整轮仍有错误句', () => {
+    const out = summariseSyncProblems([
+      { clientName: 'Magic Lab Class', error: TOKEN_DEAD },
+      { clientName: 'CTS Tours NZ', mailchimp: { 'failed:auth': 6 } },
+    ])!
+    expect(out).toMatch(/^6 条线索进了 CRM 但没进邮件名单/)
+    expect(out).not.toContain('取不到线索')
   })
 
   it('其他报错 = failed，原话带进 detail', () => {

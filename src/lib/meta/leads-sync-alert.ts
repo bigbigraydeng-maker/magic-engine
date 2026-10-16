@@ -83,23 +83,31 @@ export function classifyLeadsSyncOutcome(r: LeadsSyncOutcome): LeadsSyncReceipt 
   const clientId = r.clientId ?? null
   const clientName = r.clientName
 
-  if (!r.error && !r.skipped) {
-    return { clientId, clientName, state: 'ok', detail: null }
-  }
-
   if (r.skipped === 'page_not_verified') {
     return { clientId, clientName, state: 'blocked', detail: r.error ?? 'page_not_verified' }
   }
 
-  if (r.error && isFacebookAuthError(r.error)) {
-    return { clientId, clientName, state: 'blocked', detail: r.error }
+  if (r.error) {
+    // leads-sync 把一个客户多个表单的报错用 ' | ' 拼成一句：只有每一段都是授权类才算
+    // blocked，混着真错误（500、代码异常）就是 failed，不能让授权错把它们一起吞掉。
+    const parts = r.error.split(' | ').filter((p) => p.trim())
+    const allAuth = parts.length > 0 && parts.every(isAuthBlockedError)
+    return { clientId, clientName, state: allAuth ? 'blocked' : 'failed', detail: r.error }
   }
 
-  if (r.error) {
-    return { clientId, clientName, state: 'failed', detail: r.error }
+  // 没报错但被跳过（缺主页 ID / 缺令牌等）：没同步 ≠ ok，回执里如实标出来。
+  if (r.skipped) {
+    return { clientId, clientName, state: 'blocked', detail: r.skipped }
   }
 
   return { clientId, clientName, state: 'ok', detail: null }
+}
+
+/** Meta 把限流 / 参数错误也标成 OAuthException：这些不是授权失效，不能算 blocked。 */
+const NON_AUTH_OAUTH_CODES = /code"?\s*[:=]\s*(?:4|17|32|100|613)\b/
+
+function isAuthBlockedError(segment: string): boolean {
+  return isFacebookAuthError(segment) && !NON_AUTH_OAUTH_CODES.test(segment)
 }
 
 /** 逐客户回执，顺序跟入参一致。 */
