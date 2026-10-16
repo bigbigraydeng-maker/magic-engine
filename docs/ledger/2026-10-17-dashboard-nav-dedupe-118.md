@@ -4,7 +4,7 @@ title: 后台侧栏补齐没入口的管理员页，客户总览把社媒和出�
 status: done
 owner: agent
 decided_on: 2026-10-17
-source: doc:docs/audits/2026-10-17-me-dashboard-structure-audit.md
+source: pr:2743
 verify_by: 2026-10-20
 verify_how: 登录后台看侧栏能点到电话、自动任务健康、转化、Flywheel、MCP Keys；打开任一客户总览的工具页，社媒和出片各只剩一张卡，次级链接都能打开
 done_on: 2026-10-17
