@@ -40,6 +40,7 @@ export function OrdersTable(props: OrdersTableProps): JSX.Element {
             <tr className="border-b border-me-charcoal/15 text-left">
               <th scope="col" className="px-3 py-2 font-black">客人</th>
               <th scope="col" className="px-3 py-2 font-black">团 · 出发日期</th>
+              <th scope="col" className="px-3 py-2 font-black">人数</th>
               <th scope="col" className="px-3 py-2 font-black">定金</th>
               <th scope="col" className="px-3 py-2 font-black">尾款</th>
               <th scope="col" className="px-3 py-2 font-black">最近催过</th>
@@ -112,6 +113,9 @@ function OrderRow(props: OrderRowProps): JSX.Element {
         <div className="text-xs text-me-charcoal/70">
           {row.departOn ? `${row.departOn} 出发` : '出发日期未定'}
         </div>
+      </td>
+      <td className="px-3 py-2">
+        {row.status === 'cancelled' ? '—' : row.partySize === null ? '未填' : row.partySize}
       </td>
       <td className="px-3 py-2">{milestoneCellText(row.deposit, props.today)}</td>
       <td className="px-3 py-2">{milestoneCellText(row.balance, props.today)}</td>

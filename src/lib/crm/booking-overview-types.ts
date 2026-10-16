@@ -1,8 +1,9 @@
 /**
  * Types for the CRM 付款总览 (payment overview) page.
  *
- * Everything here counts ORDERS, never money: the booking tracker stores no amounts,
- * so no type in this file may carry one (design §1, §8.3). Types only, no runtime code.
+ * Everything here counts ORDERS and people (party size), never money: the booking
+ * tracker stores no amounts, so no type in this file may carry one (design §1, §8.3).
+ * Types only, no runtime code.
  */
 
 import type {
@@ -37,6 +38,10 @@ export interface OverviewGroup {
   departed: boolean
   /** Active bookings in the group. */
   orders: number
+  /** Sum of party_size over the group's ACTIVE bookings whose party_size is known. Null sizes are NOT counted as 0. */
+  partySize: number
+  /** Active bookings in the group whose party_size is null (not filled in). */
+  partySizeMissing: number
   depositPaid: number
   balancePaid: number
   /** Both records exist and both are paid. Not shown as a column; used for cross-checks. */
@@ -61,6 +66,8 @@ export interface OverviewGroup {
 
 export interface OverviewTotals {
   orders: number
+  partySize: number
+  partySizeMissing: number
   depositPaid: number
   balancePaid: number
   unsettled: number
@@ -124,6 +131,8 @@ export interface OverviewListRow {
   departureId: string | null
   departOn: string | null
   status: 'active' | 'cancelled'
+  /** The booking's party_size; null when not filled in, and always null for cancelled rows. */
+  partySize: number | null
   deposit: OverviewMilestoneCell | null
   balance: OverviewMilestoneCell | null
   /** The latest nudged_on over the booking's items (最近催过). */
