@@ -1,10 +1,7 @@
 /**
  * GET /api/cron/social-engagement-pullback
  *
- * Pulls Publer post engagement (likes / comments / shares) for all published
- * content_posts and writes metrics to flywheel_metrics.
- *
- * Also pulls TikTok profile metrics (followers / posts / engagement rate) for
+ * Pulls TikTok profile metrics (followers / posts / engagement rate) for
  * all clients with a tiktok_handle configured, via TikTokAdapter.pullMetrics().
  *
  * Auth: Authorization: Bearer ${CRON_SECRET}
@@ -15,7 +12,6 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { pullbackAllEngagement } from '@/lib/publer/engagement-pullback'
 import { syncPageMetrics, type PageMetricsSyncResult } from '@/lib/social/page-metrics-sync'
 import { TikTokAdapter } from '@/lib/flywheel/adapters/TikTokAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -33,16 +29,12 @@ export async function GET(request: NextRequest) {
   const cronRun = await startCronRun('social-engagement-pullback')
 
   try {
-    // ── 1. Publer post engagement ─────────────────────────────────────────────
-    const result = await pullbackAllEngagement(supabaseAdmin)
-
-    // ── 2. TikTok profile metrics — P22.A.4 ──────────────────────────────────
+    // ── 1. TikTok profile metrics — P22.A.4 ──────────────────────────────────
     const tiktokResult = await syncTikTokProfiles()
 
-    // ── 3. FB page rollups (2026-08-01 社媒数据监控复活) ─────────────────────
+    // ── 2. FB page rollups (2026-08-01 社媒数据监控复活) ─────────────────────
     // Reads the LIVE page feed, so posts published outside ME count too —
-    // the Publer leg above had written zero metrics for weeks because manual
-    // posting never lands in content_posts. Non-blocking.
+    // manual posting never lands in content_posts. Non-blocking.
     let pageMetrics: PageMetricsSyncResult | { error: string }
     try {
       pageMetrics = await syncPageMetrics(supabaseAdmin)
@@ -52,16 +44,14 @@ export async function GET(request: NextRequest) {
       pageMetrics = { error: message }
     }
 
-    const r = result as unknown as Record<string, unknown>
     await cronRun.finish({
-      processed: typeof r.total_posts === 'number' ? r.total_posts : undefined,
-      completed: typeof r.updated === 'number' ? r.updated : undefined,
+      processed: tiktokResult.clients_processed,
+      completed: tiktokResult.tiktok_synced,
       failed: tiktokResult.failed,
-      summary: { ...r, tiktok: tiktokResult, page_metrics: pageMetrics },
+      summary: { tiktok: tiktokResult, page_metrics: pageMetrics },
     })
     return NextResponse.json({
       timestamp: new Date().toISOString(),
-      ...result,
       tiktok: tiktokResult,
       page_metrics: pageMetrics,
     })

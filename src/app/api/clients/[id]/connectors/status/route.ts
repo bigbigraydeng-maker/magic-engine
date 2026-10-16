@@ -61,19 +61,11 @@ const CONNECTOR_CATALOGUE = [
     setupHint: '通过 GA4 Data API 接入。接入后，飞轮归因直接从 GA4 拉取，不再依赖估算。',
   },
   {
-    anchor: 'publer',
-    name: 'Publer 发布器',
-    emoji: '🚀',
-    description: '社媒内容统一调度、定时发布、跨平台分发',
-    setupHint: 'Magic Engine 自有 Publer workspace 已连接。客户社媒账号需在 Publer 后台单独授权。',
-    docsUrl: 'https://publer.io',
-  },
-  {
     anchor: 'social',
     name: '客户社媒账号',
     emoji: '📱',
     description: 'Instagram Business / Facebook Page / TikTok Business 等',
-    setupHint: '客户社媒账号通过 Publer 授权后，Magic Engine 即可读取真实指标和调度发布。',
+    setupHint: '客户社媒账号接入后，Magic Engine 即可读取真实指标。',
   },
 ]
 
