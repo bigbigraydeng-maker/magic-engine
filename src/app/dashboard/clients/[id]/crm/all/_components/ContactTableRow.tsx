@@ -8,6 +8,15 @@ import {
   type CustomColumnMeta,
 } from './contact-table-types'
 
+const SOURCE_LABEL: Record<string, string> = {
+  messenger: 'FB 私信',
+  email: '邮件',
+  whatsapp: 'WhatsApp',
+  phone: '电话',
+  fb_form: 'FB 表单',
+  web_form: '网站表单',
+}
+
 export function nameForDisplay(
   r: Pick<ContactRow, 'name' | 'phone' | 'email' | 'hasMessenger'>,
 ): { text: string; missing: boolean; sub: string | null } {
@@ -72,6 +81,15 @@ function NameCell({ r }: { r: ContactRow }) {
         >
           {text}
         </span>
+        {(r.sources ?? []).slice(0, 1).map((k) => (
+          <span
+            key={k}
+            title="最早是从这个渠道进来的"
+            className="shrink-0 rounded bg-me-charcoal/[0.06] px-1.5 py-0.5 text-[10px] font-semibold text-me-charcoal/50"
+          >
+            {SOURCE_LABEL[k] ?? k}
+          </span>
+        ))}
         {r.important?.note && (
           <span
             title={r.important.note}
