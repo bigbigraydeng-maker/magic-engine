@@ -688,7 +688,7 @@ export default function ContentBoardPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">🚀 Launch Hub</h1>
-          <p className="text-sm text-me-charcoal/55 mt-1">{posts.length} 条内容 · 审批 / 排期 / 推送</p>
+          <p className="text-sm text-me-charcoal/55 mt-1">{posts.length} 条内容 · 审批 / 排期（排期只作记录，这里不会自动发布）</p>
         </div>
         <Link
           href={selectedClient ? `/dashboard/clients/${selectedClient}/execution` : '/dashboard/clients'}
@@ -1093,7 +1093,7 @@ export default function ContentBoardPage() {
                       <p className={`text-[11px] ${linkMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{linkMsg}</p>
                     )}
                     <p className="text-[10px] text-me-ochre/70 leading-relaxed">
-                      关联后：内容发布成功（→ status=published），执行项会自动 mark 完成 + 写工作日志。
+                      关联后可在执行项里查到这条内容（这里不再有自动推送）。
                     </p>
                   </div>
                 );
