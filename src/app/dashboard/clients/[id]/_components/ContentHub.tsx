@@ -17,9 +17,9 @@ const PRODUCTION_SHORTCUTS = [
   },
   {
     icon: '📋',
-    label: '内容看板',
-    desc: '审核 · 排期 · 发布所有内容',
-    href: (id: string) => `/dashboard/content?client=${id}`,
+    label: '内容工厂',
+    desc: '选题 → 备料 → 出片 → 发布 · 一条内容的流水线看板',
+    href: (id: string) => `/dashboard/clients/${id}/content-factory`,
     color: 'hover:border-me-ochre/40',
   },
 ]

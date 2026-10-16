@@ -53,7 +53,7 @@ export function ZhugeGlobalFab({ clientId }: { clientId: string }) {
   const quickLinks = [
     { label: '概览',         href: `/dashboard/clients/${clientId}` },
     { label: '执行看板',     href: `/dashboard/clients/${clientId}/execution` },
-    { label: 'Launch Hub',   href: `/dashboard/content?client=${clientId}` },
+    { label: '每日计划',     href: `/dashboard/clients/${clientId}/daily-plan` },
     { label: '诊断',         href: `/dashboard/clients/${clientId}/diagnostic` },
     { label: '内容策略',     href: `/dashboard/clients/${clientId}/strategy` },
     { label: 'AI 可见度',    href: `/dashboard/ai-visibility/${clientId}` },
