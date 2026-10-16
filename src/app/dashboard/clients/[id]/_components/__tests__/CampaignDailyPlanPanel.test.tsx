@@ -101,7 +101,7 @@ describe('CampaignDailyPlanPanel — date selection shows that day\'s three form
 
     await screen.findByText('Day 3 hook text')
     expect(screen.queryByText('Day 1 hook text')).not.toBeInTheDocument()
-    expect(screen.getByText('Day 3 frame')).toBeInTheDocument()
+    expect(screen.queryByText('Day 3 frame')).not.toBeInTheDocument()
   })
 })
 
@@ -221,40 +221,6 @@ describe('CampaignDailyPlanPanel — seven distinct Post thumbnails + clickable 
   })
 })
 
-describe('CampaignDailyPlanPanel — complete route must not omit Chongqing/Guangzhou', () => {
-  it('renders the full 5-city route text on the recap day without dropping Chongqing or Guangzhou', async () => {
-    const recapStory = 'The full journey: Shanghai → Beijing → Xi\'an → Chongqing → Guangzhou'
-    mockFetchOnce({
-      success: true,
-      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
-      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
-      days: daysGrid(['2026-08-30']),
-      bundles: [
-        {
-          date: '2026-08-30',
-          post: { hook: 'Final stop: Guangzhou', body: 'Journey recap', cta: 'Enquire Now' },
-          story: { frames: [{ order: 3, copy: recapStory }] },
-          reel: { brief: 'recap', script: 's', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
-          readiness: readiness(),
-          provenance: [],
-        },
-      ],
-      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
-      ad_candidate: null,
-    })
-
-    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
-
-    await screen.findByText(/The full journey/)
-    const recap = screen.getByText(/The full journey/)
-    expect(recap.textContent).toContain('Chongqing')
-    expect(recap.textContent).toContain('Guangzhou')
-    expect(recap.textContent).toContain('Shanghai')
-    expect(recap.textContent).toContain('Beijing')
-  })
-})
-
-
 describe('CampaignDailyPlanPanel — Reel readiness is script-only, media_status stays separate (Build Control TRUTHFUL READINESS)', () => {
   it('shows "Reel 脚本草稿完整" (not "Reel 草稿完整") AND still shows 暂无成片 for a NO_MEDIA Reel', async () => {
     mockFetchOnce({
@@ -283,8 +249,8 @@ describe('CampaignDailyPlanPanel — Reel readiness is script-only, media_status
     expect(screen.queryByText('Reel 草稿完整')).not.toBeInTheDocument()
     // The Reel script is no longer shown in the Post view; the card only
     // points to the dedicated Reels tab.
-    expect(screen.getByText('Reel 视频不在这里管理。')).toBeInTheDocument()
-    const reelsLink = screen.getByRole('link', { name: '去「视频 Reels」页看成片 →' })
+    expect(screen.getByText(/Story 和 Reel 不在这里看/)).toBeInTheDocument()
+    const reelsLink = screen.getByRole('link', { name: '短视频' })
     expect(reelsLink).toHaveAttribute('href', '?tab=reels')
     expect(screen.queryByText(/暂无成片/)).not.toBeInTheDocument()
   })
@@ -313,11 +279,13 @@ describe('CampaignDailyPlanPanel — Reel card points to the Reels tab only', ()
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    await screen.findByText('Reel 视频不在这里管理。')
+    await screen.findByText(/Story 和 Reel 不在这里看/)
     expect(screen.queryByText('SECRET SCRIPT TEXT')).not.toBeInTheDocument()
     expect(screen.queryByText('SECRET BRIEF TEXT')).not.toBeInTheDocument()
-    const reelsLink = screen.getByRole('link', { name: '去「视频 Reels」页看成片 →' })
+    const reelsLink = screen.getByRole('link', { name: '短视频' })
     expect(reelsLink).toHaveAttribute('href', '?tab=reels')
+    expect(screen.getByRole('link', { name: '本周总览' })).toHaveAttribute('href', '?tab=overview')
+    expect(screen.queryByText('f1')).not.toBeInTheDocument()
   })
 })
 
