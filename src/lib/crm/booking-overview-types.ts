@@ -148,6 +148,14 @@ export interface OverviewListPage {
   total: number
 }
 
+/** A future, bookable catalog departure to show as a row even when it has no orders yet. Identity and date only, no counts, no money. */
+export interface OverviewEmptyDeparture {
+  departureId: string
+  tourId: string
+  tourName: string | null
+  departOn: string
+}
+
 export const OVERVIEW_PAGE_SIZE = 50
 /** Same ceiling the nudge readers use; reaching it makes fetchAll throw and the page refuse to render numbers. */
 export const OVERVIEW_HARD_CAP = 20000

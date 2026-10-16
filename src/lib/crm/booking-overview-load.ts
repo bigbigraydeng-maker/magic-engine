@@ -5,10 +5,11 @@
  * this file only loads rows and wires them together. Read-only: it never
  * writes, and the Supabase client is always passed in, never imported.
  *
- * The three top-level reads run in parallel. If any of them throws — including
- * the fetchAll hard-cap error — the error propagates: no try/catch, no partial
- * result, no fallback. The page refuses to render numbers rather than show
- * half a book.
+ * The three top-level reads — bookings, milestones/paid-without-booking, and
+ * the bookable catalog — run in parallel. If any of them throws — including
+ * the fetchAll hard-cap error or a failed catalog read — the error propagates:
+ * no try/catch, no partial result, no fallback. The page refuses to render
+ * numbers rather than show half a book or silently drop catalog rows.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -32,6 +33,8 @@ import {
   listPaidStageContactsWithoutBooking,
 } from './booking-overview-reads'
 import { loadCatalogFacts } from './booking-store-reads'
+import { loadBookingOptions } from './booking-options'
+import { emptyDeparturesFor } from './booking-overview-empty'
 import { buildOverviewEntries, summariseOverview } from './booking-overview'
 import {
   selectOverviewListPage,
@@ -145,15 +148,21 @@ export async function loadBookingOverview(
   req: OverviewRequest,
 ): Promise<OverviewPayload> {
   const bookings = await listBookingsForOverview(db, clientId)
-  const [milestones, paidWithoutBooking] = await Promise.all([
+  const [milestones, paidWithoutBooking, options] = await Promise.all([
     listMilestonesForClient(db, clientId),
     listPaidStageContactsWithoutBooking(db, clientId, bookings),
+    loadBookingOptions(db, clientId, today),
   ])
 
   const items = groupMilestones(bookings, milestones)
   const facts = await loadFacts(db, clientId, bookings)
   const entries = buildOverviewEntries(items, facts, rule, today)
-  const summary = summariseOverview(entries, today, req.includePastPaid)
+  const summary = summariseOverview(
+    entries,
+    today,
+    req.includePastPaid,
+    emptyDeparturesFor(options, today),
+  )
 
   const page = selectOverviewListPage(entries, listQueryOf(req), today)
   const names = await listContactNamesForClient(

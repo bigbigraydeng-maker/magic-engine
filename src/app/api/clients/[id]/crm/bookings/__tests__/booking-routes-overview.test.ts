@@ -251,7 +251,9 @@ describe('GET overview', () => {
     expect(res.status).toBe(200)
     const body = overviewOf(await jsonOf(res))
     expect(body.hasBookings).toBe(false)
-    expect(body.summary.groups).toEqual([])
+    // future catalog departures may still be listed, but only as rows with no orders
+    expect(body.summary.groups.length).toBeGreaterThan(0)
+    expect(body.summary.groups.every((g) => g.orders === 0)).toBe(true)
     expect(body.summary.totals.orders).toBe(0)
     expect(body.list.rows).toEqual([])
     expect(body.paidWithoutBooking.total).toBe(0)
