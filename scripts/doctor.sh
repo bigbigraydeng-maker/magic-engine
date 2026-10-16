@@ -138,7 +138,6 @@ check_env GOOGLE_ADS_DEVELOPER_TOKEN  optional "Google Ads API（等审核，ROA
 check_env TIKTOK_ADS_ACCESS_TOKEN     optional "TikTok Ads"
 
 head1 "发布 / 计费 / 安全"; tblhead
-check_env PUBLER_API_KEY        optional "多平台排期发布"
 check_env RESEND_API_KEY        optional "全部事务邮件"
 check_env STRIPE_SECRET_KEY     optional "MTC 充值"
 check_env STRIPE_WEBHOOK_SECRET optional "Stripe webhook 签名校验"
@@ -212,11 +211,6 @@ fi
   && probe "Perplexity" "https://api.perplexity.ai/chat/completions" "400,401,422" \
        -H "Authorization: Bearer ${PERPLEXITY_API_KEY}" \
   || row "$WARN" "Perplexity" "跳过 — 缺 PERPLEXITY_API_KEY"
-
-[ -n "${PUBLER_API_KEY:-}" ] \
-  && probe "Publer" "https://app.publer.io/api/v1/users/me" "200" \
-       -H "Authorization: Bearer-API ${PUBLER_API_KEY}" \
-  || row "$WARN" "Publer" "跳过 — 缺 PUBLER_API_KEY"
 
 [ -n "${RESEND_API_KEY:-}" ] \
   && probe "Resend" "https://api.resend.com/domains" "200" -H "Authorization: Bearer ${RESEND_API_KEY}" \

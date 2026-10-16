@@ -48,7 +48,7 @@ bash scripts/doctor.sh   # 系统自检：环境变量 / 外部 API / cron 调�
 
 Next.js 14 App Router · TypeScript 5 strict · Tailwind CSS 3.4 · Supabase (PostgreSQL + Storage) ·
 OpenAI GPT-4o-mini · Anthropic Claude Sonnet · Muapi / Atlas Cloud（图 / 视频）· HeyGen（头像）·
-DataForSEO（关键词主数据源）· Publer（发布）· Stripe（MTC 计费）· Resend（邮件）· Render（部署）。
+DataForSEO（关键词主数据源）· Stripe（MTC 计费）· Resend（邮件）· Render（部署）。
 
 外部服务全表见 [docs/STATE.md §5](./docs/STATE.md)。
 
