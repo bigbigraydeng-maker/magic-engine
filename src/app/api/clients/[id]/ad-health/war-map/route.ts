@@ -38,6 +38,7 @@ export async function GET(
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
     console.warn('[api/ad-health/war-map] 读取失败', { clientId, error: message })
-    return NextResponse.json({ error: message }, { status: 500 })
+    // 🔴 原始报错（可能带表名、列名）只进日志，不回浏览器。
+    return NextResponse.json({ error: '读不到作战地图，稍后再试；持续读不出来找开发' }, { status: 500 })
   }
 }

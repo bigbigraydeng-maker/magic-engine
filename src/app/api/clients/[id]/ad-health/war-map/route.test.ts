@@ -79,7 +79,9 @@ describe('GET /api/clients/[id]/ad-health/war-map', () => {
     const res = await call()
     expect(res.status).toBe(500)
     const body = (await res.json()) as { error?: string; view?: unknown }
-    expect(body.error).toContain('读账户状态失败')
+    expect(body.error).toContain('读不到作战地图')
+    // 原始报错（可能带表名、列名）只进日志，不回浏览器
+    expect(JSON.stringify(body)).not.toContain('boom')
     expect(body.view).toBeUndefined()
   })
 })

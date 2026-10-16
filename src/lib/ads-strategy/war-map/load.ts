@@ -52,29 +52,41 @@ interface AccountRow {
   ad_account_id: string
   entity_name: string | null
   account_status: number | null
+  timezone_name: string | null
+  capture_reason: string | null
   captured_at: string
 }
 
+/** 「读全了却没返回它」的实体会被写一行 disappeared：最新一行是它，就整个实体不要，不能当成「读不到」。 */
+const DISAPPEARED = 'disappeared'
+
 async function loadAccounts(clientId: string): Promise<AccountInput[]> {
-  const { data, error } = await supabaseAdmin
-    .from('ad_entity_snapshots')
-    .select('ad_account_id, entity_name, account_status, captured_at')
-    .eq('client_id', clientId)
-    .eq('level', 'account')
-    .order('captured_at', { ascending: false })
-    .limit(200)
-  if (error) throw new Error(`读账户状态失败：${error.message}`)
-  const seen = new Map<string, AccountInput>()
-  for (const r of (data ?? []) as AccountRow[]) {
+  const rows = await fetchAll<AccountRow>((from, to) =>
+    supabaseAdmin
+      .from('ad_entity_snapshots')
+      .select('ad_account_id, entity_name, account_status, timezone_name, capture_reason, captured_at')
+      .eq('client_id', clientId)
+      .eq('level', 'account')
+      .gte('captured_at', isoDaysAgo(new Date(), 14))
+      .order('captured_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
+  const seen = new Set<string>()
+  const out: AccountInput[] = []
+  for (const r of rows) {
     if (seen.has(r.ad_account_id)) continue // 已按时间倒序，第一条就是最新
-    seen.set(r.ad_account_id, {
+    seen.add(r.ad_account_id)
+    if (r.capture_reason === DISAPPEARED) continue
+    out.push({
       adAccountId: r.ad_account_id,
       name: r.entity_name,
       statusCode: r.account_status,
       capturedAt: r.captured_at,
+      timezoneName: r.timezone_name,
     })
   }
-  return Array.from(seen.values())
+  return out
 }
 
 // ── 观众池：最新人数 + 近 9 天历史（同一次查询）──────────────────────────────
@@ -83,6 +95,9 @@ interface AudienceRow {
   entity_name: string | null
   ad_account_id: string
   audience_count_lower: number | null
+  audience_subtype: string | null
+  audience_rule_events: string[] | null
+  capture_reason: string | null
   captured_at: string
 }
 
@@ -93,7 +108,7 @@ async function loadAudiences(
   const rows = await fetchAll<AudienceRow>((from, to) =>
     supabaseAdmin
       .from('ad_entity_snapshots')
-      .select('entity_id, entity_name, ad_account_id, audience_count_lower, captured_at')
+      .select('entity_id, entity_name, ad_account_id, audience_count_lower, audience_subtype, audience_rule_events, capture_reason, captured_at')
       .eq('client_id', clientId)
       .eq('level', 'audience')
       .gte('captured_at', isoDaysAgo(now, AUDIENCE_LOOKBACK_DAYS))
@@ -102,19 +117,27 @@ async function loadAudiences(
       .order('id', { ascending: true })
       .range(from, to),
   )
-  const latest = new Map<string, AudienceInput>()
+  const seen = new Set<string>()
+  const audiences: AudienceInput[] = []
   const history: AudienceHistoryPoint[] = []
   for (const r of rows) {
-    history.push({ audienceId: r.entity_id, capturedAt: r.captured_at, countLower: r.audience_count_lower })
-    if (latest.has(r.entity_id)) continue
-    latest.set(r.entity_id, {
+    if (r.capture_reason !== DISAPPEARED) {
+      history.push({ audienceId: r.entity_id, capturedAt: r.captured_at, countLower: r.audience_count_lower })
+    }
+    if (seen.has(r.entity_id)) continue
+    seen.add(r.entity_id)
+    if (r.capture_reason === DISAPPEARED) continue // 已被删掉的池子不显示
+    audiences.push({
       id: r.entity_id,
       name: r.entity_name,
       adAccountId: r.ad_account_id,
       countLower: r.audience_count_lower,
+      capturedAt: r.captured_at,
+      subtype: r.audience_subtype,
+      ruleEvents: r.audience_rule_events ?? [],
     })
   }
-  return { audiences: Array.from(latest.values()), history }
+  return { audiences, history }
 }
 
 // ── 广告组：谁在用哪个池子 ───────────────────────────────────────────────────
@@ -122,13 +145,14 @@ interface AdsetRow {
   entity_id: string
   effective_status: string | null
   included_audience_ids: string[] | null
+  capture_reason: string | null
 }
 
 async function loadAdsets(clientId: string, now: Date): Promise<AdsetInput[]> {
   const rows = await fetchAll<AdsetRow>((from, to) =>
     supabaseAdmin
       .from('ad_entity_snapshots')
-      .select('entity_id, effective_status, included_audience_ids')
+      .select('entity_id, effective_status, included_audience_ids, capture_reason')
       .eq('client_id', clientId)
       .eq('level', 'adset')
       .gte('captured_at', isoDaysAgo(now, 2))
@@ -139,6 +163,10 @@ async function loadAdsets(clientId: string, now: Date): Promise<AdsetInput[]> {
   const seen = new Map<string, AdsetInput>()
   for (const r of rows) {
     if (seen.has(r.entity_id)) continue
+    if (r.capture_reason === DISAPPEARED) {
+      seen.set(r.entity_id, { id: r.entity_id, effectiveStatus: 'NOT_RETURNED', includedAudienceIds: [] })
+      continue
+    }
     seen.set(r.entity_id, {
       id: r.entity_id,
       effectiveStatus: r.effective_status,
@@ -264,7 +292,18 @@ async function loadGrowth(clientId: string): Promise<GrowthInput | null> {
   }
 }
 
-// ── 推广计划：第一阶段的开始日和结束日（倒计时用）──────────────────────────────
+// ── 推广计划：阶段日期（倒计时用）+ 它挂的目标标题（判断目标进度对不对得上）──────
+async function loadGoalTitle(clientId: string, goalId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('goals')
+    .select('title')
+    .eq('id', goalId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (error) throw new Error(`读计划目标失败：${error.message}`)
+  return str((data as { title?: unknown } | null)?.title)
+}
+
 async function loadPlan(clientId: string): Promise<PlanInput | null> {
   const { data, error } = await supabaseAdmin
     .from('marketing_plans')
@@ -274,12 +313,14 @@ async function loadPlan(clientId: string): Promise<PlanInput | null> {
     .order('updated_at', { ascending: false })
     .limit(10)
   if (error) throw new Error(`读推广计划失败：${error.message}`)
-  for (const row of (data ?? []) as Array<{ plan_data: unknown }>) {
+  for (const row of (data ?? []) as Array<{ plan_data: unknown; status: string }>) {
     const spec = readPromoSpec(row.plan_data)
     if (!spec) continue
-    const first = [...spec.phases].sort((a, b) => a.start_date.localeCompare(b.start_date))[0]
-    if (!first) continue
-    return { launchDate: first.start_date, targetDate: first.end_date, phaseName: first.name }
+    return {
+      status: row.status === 'approved' ? 'approved' : 'draft',
+      phases: spec.phases.map(p => ({ name: p.name, startDate: p.start_date, endDate: p.end_date })),
+      goalTitle: await loadGoalTitle(clientId, spec.goal_id),
+    }
   }
   return null
 }

@@ -73,7 +73,7 @@ function PoolList({ view }: { view: WarMapView }) {
             <span className="text-xs text-gray-500">（{row.accountName}）</span>
           </span>
           <span className="text-xs text-gray-500">
-            {row.sizeNote} · {row.trendNote} · {row.usedByActiveAdsets} 个在投广告组在用
+            {row.sizeNote} · {row.trendNote} · {row.usedByAdsets} 个广告组设置里在用
           </span>
         </div>
       ))}
@@ -103,7 +103,7 @@ function FrequencyList({ view }: { view: WarMapView }) {
           </span>
         </div>
       ))}
-      <p className="mt-2 text-xs text-gray-400">7 天不重复频率；红线是 3。</p>
+      <p className="mt-2 text-xs text-gray-400">7 天不重复频率；红线是 3。{view.frequency.windowLabel !== null ? `花费和频率对应的是 ${view.frequency.windowLabel}（数据日往前 7 天）。` : ''}</p>
     </div>
   )
 }
@@ -171,14 +171,15 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
     const load = async () => {
       try {
         const response = await fetch(`/api/clients/${clientId}/ad-health/war-map`, { signal: controller.signal })
-        if (response.status === 403) {
+        // 4xx（没权限、没登录等）一律静默：这是内部页面，非内部人员不该看到任何报错框。
+        if (response.status >= 400 && response.status < 500) {
           setForbidden(true)
           setLoading(false)
           return
         }
         const json = await response.json() as { success?: boolean; view?: WarMapView; error?: string }
         if (!response.ok || json.success !== true || !json.view) {
-          setError(json.error ?? '请求失败')
+          setError(json.error ?? '请求失败，稍后再试')
           setLoading(false)
           return
         }
@@ -186,7 +187,7 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
         setLoading(false)
       } catch (err) {
         if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : '请求失败')
+        setError('网络出错，稍后再试')
         setLoading(false)
       }
     }
@@ -207,8 +208,9 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
 
   const launchChip = dayChip(view.countdown.daysToLaunch, '距计划开投日', '已过计划开投日')
   const targetChip = dayChip(view.countdown.daysToTarget, '距目标日', '已过目标日')
+  const draftTag = view.countdown.planStatus === 'draft' ? '（计划还是草稿）' : ''
   const launchText = launchChip !== null && view.countdown.phaseName !== null
-    ? `${launchChip} · ${view.countdown.phaseName}`
+    ? `${launchChip} · ${view.countdown.phaseName}${draftTag}`
     : launchChip
 
   return (
