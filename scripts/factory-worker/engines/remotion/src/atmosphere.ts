@@ -16,11 +16,11 @@ export const TEXT_TOP_MIN = 480;
 /** Largest allowed text top position (px). */
 export const TEXT_TOP_MAX = 1100;
 /** Default fade-in length (seconds). */
-export const FADE_IN_DEFAULT_SEC = 1.0;
+export const FADE_IN_DEFAULT_SEC = 0.8;
 /** Default fade-out length (seconds). */
 export const FADE_OUT_DEFAULT_SEC = 1.5;
 /** Black cover opacity at frame 0, so the first frame is not fully black. */
-export const FADE_START_OPACITY = 0.75;
+export const FADE_START_OPACITY = 0.6;
 
 const LINE = z
   .object({
@@ -147,16 +147,6 @@ export const AtmospherePropsSchema = z
           message: '出处片段里找不到这句话的主要词',
         });
       }
-    }
-
-    const fadeIn = val.fadeInSec ?? FADE_IN_DEFAULT_SEC;
-    const fadeOut = val.fadeOutSec ?? FADE_OUT_DEFAULT_SEC;
-    if (fadeIn + fadeOut >= val.durationSec / 2) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['fadeInSec'],
-        message: '淡入加淡出必须小于成片时长的一半',
-      });
     }
   });
 

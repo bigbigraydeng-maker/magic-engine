@@ -161,5 +161,5 @@ RUN_REMOTION_RENDER=1 npm run test:render   # 真渲染冒烟（本机，需要 
 
 
 ## atmosphere（单镜头氛围片，2026-10-18）
-一个素材铺满 1080×1920、不切镜、可选 1 行字（有字必须带 `sourceUrl` + `sourceQuote`，沿用 postcard 的出处闸与禁词/价格闸）、库乐、无价格、12–20 秒。props 见 `src/atmosphere.ts`：`clip`、`sourceIn`、`crop`（源画面的比例 `{x,y,w,h}`，用来把 16:9 原片裁成竖版，裁出的像素区域必须是 9:16）、`durationSec`、`fadeInSec`/`fadeOutSec`、`push`（≤1.04）、`line`（可为 `null`=无字）、`textTop`（480–1100，避开 Logo）、`musicFile`（可为 `null`）。第 0 帧不是黑屏（黑色遮罩从 75% 淡入），**封面请取淡入结束后的帧**。
+一个素材铺满 1080×1920、不切镜、可选一句话（最多折成两行；有字必须带 `sourceUrl` + `sourceQuote`，沿用 postcard 的出处闸与禁词/价格闸）、库乐、无价格、12–20 秒。props 见 `src/atmosphere.ts`：`clip`、`sourceIn`、`crop`（源画面的比例 `{x,y,w,h}`，用来把 16:9 原片裁成竖版，裁出的像素区域必须是 9:16）、`durationSec`、`fadeInSec`/`fadeOutSec`、`push`（≤1.04）、`line`（可为 `null`=无字）、`textTop`（480–1100，避开 Logo）、`musicFile`（可为 `null`）。第 0 帧不是黑屏（黑色遮罩从 60% 淡入，默认淡入 0.8 秒——出片机的封面亮度体检在 0.5 秒取样，遮罩要在那之前褪得足够多），**封面请取淡入结束后的帧**。
 出片机在渲染前用 ffprobe 查暂存素材的真实时长与分辨率（素材不够 `sourceIn + durationSec` 就拒单，不循环不定格；回执 `atmosphere_preflight` 记放大倍数，放大 >1.05 倍标「weak: upscaled」）；音乐走人声闸；未接线的模板一律拒单，不再回落到 montage。配方缺口「真人背影/真人出镜」随每次出片写进 `recipe_gaps`。本地冒烟：`node render.mjs --template atmosphere --props <json> --public-dir <素材目录> --out <mp4>`。

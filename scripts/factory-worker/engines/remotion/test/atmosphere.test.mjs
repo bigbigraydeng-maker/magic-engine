@@ -71,9 +71,9 @@ describe('fixture', () => {
     assert.equal(MAX_PUSH, 1.04)
     assert.equal(TEXT_TOP_MIN, 480)
     assert.equal(TEXT_TOP_MAX, 1100)
-    assert.equal(FADE_IN_DEFAULT_SEC, 1.0)
+    assert.equal(FADE_IN_DEFAULT_SEC, 0.8)
     assert.equal(FADE_OUT_DEFAULT_SEC, 1.5)
-    assert.equal(FADE_START_OPACITY, 0.75)
+    assert.equal(FADE_START_OPACITY, 0.6)
   })
 })
 
@@ -246,15 +246,6 @@ describe('fades', () => {
     }, '淡入时长必须在 0.6 到 1.5 秒之间')
   })
 
-  test('the largest allowed fades always stay under half of the shortest allowed duration', () => {
-    // 1.5 + 2.0 = 3.5 s < 6 s, so the sum guard in the schema cannot trigger for in-range inputs
-    const props = validProps()
-    props.durationSec = 12
-    props.fadeInSec = 1.5
-    props.fadeOutSec = 2
-    assert.doesNotThrow(() => parseAtmosphereProps(props))
-  })
-
   test('resolveFades applies the defaults', () => {
     const fades = resolveFades(parseAtmosphereProps(validProps()))
     assert.equal(fades.fadeInSec, FADE_IN_DEFAULT_SEC)
@@ -269,7 +260,7 @@ describe('timing', () => {
     props.sourceIn = 2.5
     const timing = computeAtmosphereTiming(parseAtmosphereProps(props))
     assert.equal(timing.totalFrames, 450)
-    assert.equal(timing.fadeInFrames, 30)
+    assert.equal(timing.fadeInFrames, 24)
     assert.equal(timing.fadeOutFrames, 45)
     assert.equal(timing.sourceInFrames, 75)
   })
@@ -297,5 +288,13 @@ describe('error text', () => {
     const text = formatZodIssues(result.error)
     assert.ok(text.split('\n').length >= 1)
     assert.ok(text.includes('字段 '))
+  })
+})
+
+describe('source quote promo scan', () => {
+  test('a promotional phrase inside the source quote is rejected', () => {
+    const props = validProps()
+    props.line = { text: 'A calm main view', sourceUrl: 'https://example.com/page', sourceQuote: 'A calm main view of the place. Book now' }
+    assert.throws(() => parseAtmosphereProps(props), /促销词/)
   })
 })

@@ -989,6 +989,15 @@ describe('atmosphere template wiring', () => {
     expect(() => assertAtmosphereClipUsable({ sourceIn: 0, durationSec: 15 }, { durationSec: NaN, width: 1080, height: 1920 })).toThrow(/读不出/)
   })
 
+  it('defaultProbeClip swaps width and height for a sideways (rotated 90) clip', () => {
+    const exec = vi.fn(() => JSON.stringify({ streams: [{ width: 1920, height: 1080, side_data_list: [{ rotation: -90 }] }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', exec)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
+    const old = vi.fn(() => JSON.stringify({ streams: [{ width: 1920, height: 1080, tags: { rotate: '270' } }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', old)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
+    const flat = vi.fn(() => JSON.stringify({ streams: [{ width: 1920, height: 1080, side_data_list: [{ rotation: 180 }] }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', flat)).toEqual({ durationSec: 14, width: 1920, height: 1080 })
+  })
+
   it('defaultProbeClip parses ffprobe json', () => {
     const exec = vi.fn(() => JSON.stringify({ streams: [{ width: 1080, height: 1920 }], format: { duration: '14.0' } }))
     expect(defaultProbeClip('/x.mp4', exec)).toEqual({ durationSec: 14, width: 1080, height: 1920 })

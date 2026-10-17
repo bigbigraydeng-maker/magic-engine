@@ -274,12 +274,17 @@ export function buildAtmosphereSrt(props, timing, fps) {
 export function defaultProbeClip(path, execFn = execFileSync) {
   const out = execFn(process.env.FFPROBE_BIN || 'ffprobe', [
     '-v', 'error', '-select_streams', 'v:0',
-    '-show_entries', 'stream=width,height:format=duration',
+    '-show_entries', 'stream=width,height:stream_tags=rotate:stream_side_data=rotation:format=duration',
     '-of', 'json', path,
-  ], { encoding: 'utf8' })
+  ], { encoding: 'utf8', timeout: 30000 })
   const j = JSON.parse(out)
   const st = (j.streams ?? [])[0] ?? {}
-  return { durationSec: Number(j.format?.duration), width: Number(st.width), height: Number(st.height) }
+  // A phone clip is often stored sideways with a rotation flag; the displayed size swaps width and height.
+  const rot = Math.abs(Number(st.side_data_list?.find((d) => d.rotation !== undefined)?.rotation ?? st.tags?.rotate ?? 0)) % 180
+  const sideways = rot === 90
+  const w = Number(st.width)
+  const h = Number(st.height)
+  return { durationSec: Number(j.format?.duration), width: sideways ? h : w, height: sideways ? w : h }
 }
 
 // Refuse before rendering when the staged clip cannot honour the props: too short for sourceIn + durationSec,
