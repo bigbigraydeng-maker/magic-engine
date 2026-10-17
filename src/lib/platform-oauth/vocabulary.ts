@@ -32,6 +32,8 @@ export const PLATFORM_PROVIDERS = {
   GOOGLE_GTM: 'google_gtm',
   /** WhatsApp Business number: one row per (client, phone_number_id); access token is the number's own token. */
   WHATSAPP: 'whatsapp',
+  /** YouTube channel publishing: one row per (client, channel_id); account_id = channel id. */
+  GOOGLE_YOUTUBE: 'google_youtube',
 } as const
 
 export type PlatformProvider = (typeof PLATFORM_PROVIDERS)[keyof typeof PLATFORM_PROVIDERS]
