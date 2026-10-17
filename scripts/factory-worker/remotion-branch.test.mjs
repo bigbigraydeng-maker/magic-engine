@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText, defaultMusicVocalGate, MUSIC_VOCAL_REGISTRY_PATH } from './remotion-branch.mjs'
+import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText, defaultMusicVocalGate, MUSIC_VOCAL_REGISTRY_PATH, buildAtmosphereText, buildAtmosphereCaption, buildAtmosphereSrt, assertAtmosphereTextVisible, assertAtmosphereClipUsable, defaultProbeClip } from './remotion-branch.mjs'
 import { MusicVocalGateError } from './music-vocal-gate.mjs'
 import { createHash } from 'node:crypto'
 
@@ -905,5 +905,92 @@ describe('music vocal gate', () => {
       const reg = loadMusicVocalRegistry(MUSIC_VOCAL_REGISTRY_PATH)
       expect(reg.filter((e) => e.verdict === 'present').length).toBeGreaterThanOrEqual(3)
     })
+  })
+})
+
+describe('atmosphere template wiring', () => {
+  const PROPS_ATMOS = { logoFile: 'logo.png', musicFile: null, clip: 'clips/a.mp4', durationSec: 15, line: null }
+  const atmosEngine = (over = {}) => makeEngine({
+    isTemplateId: (id) => ['atmosphere', 'weird'].includes(id),
+    loadTemplate: (id, p) => ({ compositionId: 'AtmosphereReel', props: p, assetFiles: ['clips/a.mp4', 'logo.png'], totalFrames: 450, recipeGaps: [{ column: '真人背影/真人出镜', status: '未满足', reason: 'x' }] }),
+    computeAtmosphereTiming: () => ({ totalFrames: 450 }),
+    ...over,
+  })
+  const atmosWo = (props = PROPS_ATMOS, template = 'atmosphere') => {
+    const wo = makeWo()
+    wo.brief.remotion = { template, props }
+    return wo
+  }
+  const probe = (over = {}) => vi.fn(() => ({ durationSec: 20, width: 1080, height: 1920, ...over }))
+  const mk = (env, over = {}) => makeDeps(env, {
+    loadEngineFn: async () => atmosEngine(),
+    probeClipFn: probe(),
+    probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 15, audio_stream_present: true })),
+    ...over,
+  })
+
+  it('a reel with no text renders, gets a neutral sidecar cue, an empty caption and a preflight receipt', async () => {
+    const env = makeEnv()
+    const deps = mk(env)
+    const res = await run(env, deps, atmosWo())
+    expect(res).toEqual({ ok: true, cost: 0 })
+    const segments = JSON.parse(deps.uploadSignedFn.mock.calls[1][1].toString())
+    expect(segments.atmosphere_preflight).toMatchObject({ upscale: 1, quality: 'ok' })
+    expect(segments.recipe_gaps[0].column).toBe('真人背影/真人出镜')
+    expect(deps.uploadSignedFn.mock.calls[2][1].toString()).toContain('♪')
+    expect(deps.completeFn.mock.calls[0][0].caption).toBe('')
+  })
+
+  it('refuses before rendering when the staged clip is shorter than sourceIn + durationSec', async () => {
+    const env = makeEnv()
+    const deps = mk(env, { probeClipFn: probe({ durationSec: 9 }) })
+    const err = await errOf(run(env, deps, atmosWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/素材不够长/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses when ffprobe itself fails (fail-closed)', async () => {
+    const env = makeEnv()
+    const deps = mk(env, { probeClipFn: vi.fn(() => { throw new Error('ffprobe missing') }) })
+    const err = await errOf(run(env, deps, atmosWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/素材检查本身出错/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('a template the engine knows but the worker has no text wiring for is refused, never rendered as montage', async () => {
+    const env = makeEnv()
+    const deps = mk(env)
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'weird')))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/没有.*模板的文字复扫接线/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('builders: no line -> empty text and caption; invisible characters are refused', () => {
+    expect(buildAtmosphereText({ line: null })).toBe('')
+    expect(buildAtmosphereCaption({ line: { text: '  A calm view ' } })).toBe('A calm view')
+    expect(() => assertAtmosphereTextVisible({ line: null })).not.toThrow()
+    expect(() => assertAtmosphereTextVisible({ line: { text: 'A calm view' } })).not.toThrow()
+    expect(() => assertAtmosphereTextVisible({ line: { text: 'A calm\u200b view' } })).toThrow(RemotionOrderError)
+    expect(buildAtmosphereSrt({ line: null }, { totalFrames: 450 }, 30)).toMatch(/^1\n00:00:00,000 --> 00:00:14,9\d\d\n♪\n/)
+  })
+
+  it('clip preflight: crop must be 9:16, upscale is reported, weak quality is flagged', () => {
+    const p4k = { durationSec: 20, width: 3840, height: 2160 }
+    expect(() => assertAtmosphereClipUsable({ sourceIn: 0, durationSec: 15, crop: { x: 0, y: 0, w: 0.5, h: 1 } }, p4k)).toThrow(/9:16/)
+    const ok = assertAtmosphereClipUsable({ sourceIn: 2, durationSec: 15, crop: { x: 0.3, y: 0, w: 0.31640625, h: 1 } }, p4k)
+    expect(ok).toMatchObject({ regionPx: { width: 1215, height: 2160 }, quality: 'ok' })
+    const weak = assertAtmosphereClipUsable({ sourceIn: 0, durationSec: 15, crop: { x: 0.3, y: 0, w: 0.31640625, h: 1 } }, { durationSec: 20, width: 1920, height: 1080 })
+    expect(weak.quality).toBe('weak: upscaled')
+    expect(weak.upscale).toBeGreaterThan(1.5)
+    expect(() => assertAtmosphereClipUsable({ sourceIn: 6, durationSec: 15 }, p4k)).toThrow(/素材不够长/)
+    expect(() => assertAtmosphereClipUsable({ sourceIn: 0, durationSec: 15 }, { durationSec: NaN, width: 1080, height: 1920 })).toThrow(/读不出/)
+  })
+
+  it('defaultProbeClip parses ffprobe json', () => {
+    const exec = vi.fn(() => JSON.stringify({ streams: [{ width: 1080, height: 1920 }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', exec)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
   })
 })

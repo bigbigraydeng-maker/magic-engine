@@ -1,5 +1,5 @@
 // Remotion render branch for the factory worker. All IO is injected through `deps`.
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import {
   existsSync, copyFileSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
   openSync, closeSync, fstatSync, readSync, writeSync, constants,
@@ -88,6 +88,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const music = await import(pathToFileURL(join(engineDir, 'src', 'music.ts')).href)
     const datacard = await import(pathToFileURL(join(engineDir, 'src', 'datacard.ts')).href)
     const postcard = await import(pathToFileURL(join(engineDir, 'src', 'postcard.ts')).href)
+    const atmosphere = await import(pathToFileURL(join(engineDir, 'src', 'atmosphere.ts')).href)
     let catalog = null
     return {
       computeTimingFromProps: timing.computeTimingFromProps,
@@ -97,6 +98,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       montageFrameOf: montage.montageFrameOf,
       computeDataCardTiming: datacard.computeDataCardTiming,
       computePostcardTiming: postcard.computePostcardTiming,
+      computeAtmosphereTiming: atmosphere.computeAtmosphereTiming,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
           JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
@@ -241,6 +243,64 @@ export function buildPostcardSrt(props, timing, fps) {
     .join('')
 }
 
+// Atmosphere reel: at most one on-screen line. No line is a valid reel (no text at all).
+export function buildAtmosphereText(props) {
+  return props.line == null ? '' : clean(props.line.text)
+}
+
+// The line (or nothing) joined for the server-side red-line rescan.
+export function buildAtmosphereCaption(props) {
+  return buildAtmosphereText(props)
+}
+
+// Text that cleans to nothing or differs once invisible characters are dropped must be refused (only when a line exists).
+export function assertAtmosphereTextVisible(props) {
+  if (props.line == null) return
+  const t = props.line.text
+  if (clean(t) === '') throw new RemotionOrderError('氛围片文字清理后是空的（只含不可见字符）')
+  if (clean(t) !== String(t).trim().normalize('NFKC')) {
+    throw new RemotionOrderError('氛围片文字含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符')
+  }
+}
+
+// One cue spanning the whole reel. A reel without text still gets a neutral sidecar cue so the subtitle-timing
+// check can be measured; the cue is not burned into the picture.
+export function buildAtmosphereSrt(props, timing, fps) {
+  const text = buildAtmosphereText(props) || '♪'
+  return `1\n${fmtTime(0)} --> ${fmtTime(timing.totalFrames / fps - 0.1)}\n${text}\n\n`
+}
+
+// ffprobe the staged clip (real duration + pixel size). Injected in tests.
+export function defaultProbeClip(path, execFn = execFileSync) {
+  const out = execFn(process.env.FFPROBE_BIN || 'ffprobe', [
+    '-v', 'error', '-select_streams', 'v:0',
+    '-show_entries', 'stream=width,height:format=duration',
+    '-of', 'json', path,
+  ], { encoding: 'utf8' })
+  const j = JSON.parse(out)
+  const st = (j.streams ?? [])[0] ?? {}
+  return { durationSec: Number(j.format?.duration), width: Number(st.width), height: Number(st.height) }
+}
+
+// Refuse before rendering when the staged clip cannot honour the props: too short for sourceIn + durationSec,
+// or a crop whose pixel region is not 9:16. Reports the upscale factor so weak picture quality is visible.
+export function assertAtmosphereClipUsable(props, probe) {
+  const { durationSec, width, height } = probe
+  if (![durationSec, width, height].every((n) => Number.isFinite(n) && n > 0)) {
+    throw new RemotionOrderError('氛围片素材读不出时长或分辨率（ffprobe 失败），拒绝出片')
+  }
+  const need = (props.sourceIn ?? 0) + props.durationSec
+  if (need > durationSec + 0.05) {
+    throw new RemotionOrderError(`氛围片素材不够长：需要从 ${props.sourceIn ?? 0}s 起连续 ${props.durationSec}s（共 ${need}s），素材只有 ${durationSec.toFixed(2)}s；不循环、不定格`)
+  }
+  const cw = width * (props.crop?.w ?? 1)
+  const ch = height * (props.crop?.h ?? 1)
+  if (props.crop && Math.abs(cw / ch - 9 / 16) > 0.03) {
+    throw new RemotionOrderError(`氛围片裁剪区域不是 9:16（${cw.toFixed(0)}×${ch.toFixed(0)} 像素），画面会变形`)
+  }
+  return { source: { durationSec, width, height }, regionPx: { width: Math.round(cw), height: Math.round(ch) }, upscale: Number((1920 / ch).toFixed(2)), quality: 1920 / ch > 1.05 ? 'weak: upscaled' : 'ok' }
+}
+
 // Build the SRT captions for the data card: hook, one cue per row, disclaimer held with the last row.
 export function buildDatacardSrt(props, timing, fps) {
   const { hook, rows, disclaimer } = buildDatacardText(props)
@@ -370,6 +430,9 @@ export async function defaultMusicVocalGate({ stagedPath, props, totalFrames, fp
   const { startSec, durationSec } = usedWindowFromProps({ musicStartSec: props.musicStartSec, totalFrames, fps })
   return assertMusicVocalClear({ registry, sha256, startSec, durationSec, label })
 }
+
+// Templates whose on-screen text, caption and SRT the worker can rescan (see textBuilders below).
+export const TEXT_WIRED_TEMPLATES = ['list', 'montage', 'datacard', 'postcard', 'atmosphere']
 
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
@@ -625,6 +688,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       `UNKNOWN_TEMPLATE: 不认识的模板 ${JSON.stringify(String(template)).slice(0, 40)}：出片机的模板注册表里没有它。先升级出片机，或检查工单 brief.remotion.template`,
     )
   }
+  // Refuse a template the worker has no text/red-line wiring for BEFORE any staging or rendering.
+  if (!TEXT_WIRED_TEMPLATES.includes(template)) {
+    throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)
+  }
   let props
   let files
   let timing
@@ -648,6 +715,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   if (template === 'postcard') {
     assertPostcardTextVisible(props)
     timing = eng.computePostcardTiming(props)
+  }
+  if (template === 'atmosphere') {
+    assertAtmosphereTextVisible(props)
+    timing = eng.computeAtmosphereTiming(props)
   }
 
   const hb = startHeartbeats({
@@ -706,6 +777,16 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       hb.assertAlive()
     }
 
+    let atmospherePreflight = null
+    if (template === 'atmosphere') {
+      try {
+        atmospherePreflight = assertAtmosphereClipUsable(props, (deps.probeClipFn ?? defaultProbeClip)(join(stageDir, props.clip)))
+      } catch (e) {
+        if (e instanceof RemotionOrderError) throw e
+        throw new RemotionOrderError('氛围片素材检查本身出错：' + e.message)
+      }
+    }
+
     const propsFile = join(root, 'props.json')
     writeFileSync(propsFile, JSON.stringify(props, null, 2))
     const finalPath = join(outDir, 'final.mp4')
@@ -743,18 +824,18 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     if (!stat.isFile() || stat.size <= 0) {
       throw new RemotionOrderError('成片体检没过：渲染产物不存在或为空')
     }
-    const srtText = template === 'list'
-      ? buildRemotionSrt(props, timing, eng.FPS)
-      : template === 'datacard'
-        ? buildDatacardSrt(props, timing, eng.FPS)
-        : template === 'postcard'
-          ? buildPostcardSrt(props, timing, eng.FPS)
-          : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
-    const caption = template === 'list'
-      ? buildRemotionCaption(props)
-      : template === 'datacard'
-        ? buildDatacardCaption(props)
-        : template === 'postcard' ? buildPostcardCaption(props) : buildMontageCaption(props)
+    // Every known template is listed explicitly; an unknown one is refused instead of falling through to montage.
+    const textBuilders = {
+      list: [() => buildRemotionSrt(props, timing, eng.FPS), () => buildRemotionCaption(props)],
+      datacard: [() => buildDatacardSrt(props, timing, eng.FPS), () => buildDatacardCaption(props)],
+      postcard: [() => buildPostcardSrt(props, timing, eng.FPS), () => buildPostcardCaption(props)],
+      atmosphere: [() => buildAtmosphereSrt(props, timing, eng.FPS), () => buildAtmosphereCaption(props)],
+      montage: [() => buildMontageSrt(props, eng.montageFrameOf, eng.FPS), () => buildMontageCaption(props)],
+    }
+    const builders = Object.hasOwn(textBuilders, template) ? textBuilders[template] : null
+    if (builders === null) throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)
+    const srtText = builders[0]()
+    const caption = builders[1]()
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
     const expected = totalFrames / eng.FPS
     if (evidence.width !== 1080 || evidence.height !== 1920) {
@@ -780,6 +861,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
           : (props.musicFile ? { source: 'client_library', file: props.musicFile } : null),
         props,
         music_vocal_gate: vocalGate,
+        atmosphere_preflight: atmospherePreflight,
         recipe_gaps: recipeGaps,
         render: { attempts, elapsed_s },
       }, null, 2),
