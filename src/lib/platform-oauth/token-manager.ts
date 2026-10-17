@@ -69,13 +69,16 @@ interface RefreshResult {
   refreshToken?: string
 }
 
-async function refreshGoogleToken(refreshTokenPlain: string): Promise<RefreshResult> {
+async function refreshGoogleToken(
+  refreshTokenPlain: string,
+  provider: PlatformProvider = PLATFORM_PROVIDERS.GOOGLE_GBP,
+): Promise<RefreshResult> {
   const clientId     = process.env.GOOGLE_CLIENT_ID
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET
 
   if (!clientId || !clientSecret) {
     throw new PlatformTokenRefreshError(
-      PLATFORM_PROVIDERS.GOOGLE_GBP,
+      provider,
       'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured',
     )
   }
@@ -95,7 +98,7 @@ async function refreshGoogleToken(refreshTokenPlain: string): Promise<RefreshRes
 
   if (!res.ok) {
     const text = await res.text().catch(() => '(unreadable body)')
-    throw new PlatformTokenRefreshError(PLATFORM_PROVIDERS.GOOGLE_GBP, `HTTP ${res.status}: ${text}`)
+    throw new PlatformTokenRefreshError(provider, `HTTP ${res.status}: ${text}`)
   }
 
   const data = (await res.json()) as {
@@ -107,7 +110,7 @@ async function refreshGoogleToken(refreshTokenPlain: string): Promise<RefreshRes
 
   if (!data.access_token) {
     const detail = data.error_description ?? data.error ?? 'missing access_token in response'
-    throw new PlatformTokenRefreshError(PLATFORM_PROVIDERS.GOOGLE_GBP, detail)
+    throw new PlatformTokenRefreshError(provider, detail)
   }
 
   const expiresAt = new Date(Date.now() + (data.expires_in ?? 3600) * 1000)
@@ -195,7 +198,7 @@ async function callProviderRefresh(
   refreshTokenPlain: string,
 ): Promise<RefreshResult> {
   if (isGoogleProvider(provider)) {
-    return refreshGoogleToken(refreshTokenPlain)
+    return refreshGoogleToken(refreshTokenPlain, provider)
   }
   if (provider === PLATFORM_PROVIDERS.MICROSOFT_MAIL) {
     return refreshMicrosoftToken(refreshTokenPlain)

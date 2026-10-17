@@ -5,7 +5,7 @@
 
 import { upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
-import { ChannelLockError, lockChannel } from './client'
+import { ChannelLockError, YOUTUBE_PUBLISH_SCOPES, lockChannel } from './client'
 
 export const YOUTUBE_STATE_COOKIE = 'youtube_oauth_state'
 export const YOUTUBE_STATE_TTL_SECS = 600
@@ -27,13 +27,18 @@ export interface YoutubePersistInput {
 
 export type YoutubePersistResult =
   | { ok: true; channelTitle: string }
-  | { ok: false; reason: 'channel_mismatch' | 'channel_lookup_failed' }
+  | { ok: false; reason: 'channel_mismatch' | 'channel_lookup_failed' | 'scope_missing' }
 
 /** Stores the connection only if the authorised account manages the expected channel. */
 export async function persistYoutubeConnection(
   input: YoutubePersistInput,
   fetchImpl: typeof fetch = fetch,
 ): Promise<YoutubePersistResult> {
+  // Google lets the user untick individual permissions on the consent page.
+  const granted = new Set(input.scope.split(/\s+/))
+  if (!YOUTUBE_PUBLISH_SCOPES.every((s) => granted.has(s))) {
+    return { ok: false, reason: 'scope_missing' }
+  }
   let channel
   try {
     channel = await lockChannel(input.accessToken, input.expectedChannelId, fetchImpl)

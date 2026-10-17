@@ -44,6 +44,14 @@ describe('persistYoutubeConnection', () => {
     expect(mocks.upsertConnection).not.toHaveBeenCalled()
   })
 
+  it('stores nothing when the user unticked the upload permission', async () => {
+    const f = vi.fn()
+    const input = { ...base, scope: 'https://www.googleapis.com/auth/youtube.readonly' }
+    await expect(persistYoutubeConnection(input, f)).resolves.toEqual({ ok: false, reason: 'scope_missing' })
+    expect(f).not.toHaveBeenCalled()
+    expect(mocks.upsertConnection).not.toHaveBeenCalled()
+  })
+
   it('stores nothing when the channel lookup itself fails', async () => {
     const f = vi.fn().mockResolvedValue(new Response('nope', { status: 403 }))
     await expect(persistYoutubeConnection(base, f)).resolves.toEqual({ ok: false, reason: 'channel_lookup_failed' })

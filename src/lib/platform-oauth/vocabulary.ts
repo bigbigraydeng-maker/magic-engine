@@ -32,7 +32,11 @@ export const PLATFORM_PROVIDERS = {
   GOOGLE_GTM: 'google_gtm',
   /** WhatsApp Business number: one row per (client, phone_number_id); access token is the number's own token. */
   WHATSAPP: 'whatsapp',
-  /** YouTube channel publishing: one row per (client, channel_id); account_id = channel id. */
+  /**
+   * YouTube channel publishing: account_id = channel id. getValidToken() picks the newest row
+   * per client, so treat it as ONE channel per client until a caller uses
+   * getValidTokenForConnection (every write re-checks the channel id anyway).
+   */
   GOOGLE_YOUTUBE: 'google_youtube',
 } as const
 
