@@ -62,6 +62,7 @@ import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-a
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
+import { probeClientCircuit, type ClientProbe } from '@/lib/ads-strategy/circuit-probe'
 import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
@@ -122,6 +123,12 @@ interface ClientResult {
   ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
   /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
   autonomy_sync?: { sent: boolean; events: number; error?: string }
+  /**
+   * A0 只读熔断探针（观察期）：五条判据在真实数据上判出了什么。
+   * **只读、不写任何表**；这一项会被汇总进 `cron_run_logs.summary`，
+   * 因为 HTTP 响应体 Render 直接丢掉（`render.yaml` 那条 curl 不留 body）。
+   */
+  circuit_probe?: ClientProbe | { error: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -570,6 +577,22 @@ export async function GET(req: NextRequest) {
           result.autonomy_sync = await reconcileAutonomyMode(supabaseAdmin, client.client_id).catch(
             (e: unknown) => ({ sent: false, events: 0, error: e instanceof Error ? e.message : String(e) }),
           )
+
+          /**
+           * A0 只读熔断探针（观察期，PM 2026-10-18 批「先走只读版」）。
+           *
+           * 放这道 `=== 'row'` 闸里面：没有配置行的客户不观察。
+           * 探针自己还会再查一次 `autonomy_mode`，只对 `bounded_auto` 的客户出结论
+           * （`observe` 的客户本来不会自动动手，给它们记结论只是噪音）。
+           *
+           * 🔴 **它不写任何表**，连 `ads_circuit_events` 都不写 —— 这一点由
+           * `circuit-probe` 自己的测试扫源码钉住，不是靠这里的注释。
+           * best-effort：探针失败不影响上面已经完成的拉数 / 诊断 / 巡察。
+           */
+          result.circuit_probe = await probeClientCircuit(supabaseAdmin, {
+            clientId: client.client_id,
+            autonomyMode: adStrategyConfig.autonomy_mode,
+          }).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
         }
       } else {
         // Client has a Meta ad account but no usable token — surface it as a
@@ -678,12 +701,23 @@ export async function GET(req: NextRequest) {
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
 
+  /**
+   * A0 观察期的回执：只留有结论的（跳过的客户不占地方），落进 `cron_run_logs.summary`。
+   * 观察期 7–10 天 = 7–10 行，够按天读；**不建新表**。
+   */
+  const circuitProbes = results
+    .map((r) => r.circuit_probe)
+    .filter((p): p is NonNullable<ClientProbe | { error: string }> => {
+      if (!p) return false
+      return 'error' in p || p.skipped === null
+    })
+
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes },
   })
   return NextResponse.json({
     success:           true,
