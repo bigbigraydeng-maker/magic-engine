@@ -8,7 +8,7 @@ done_on: 2026-10-18
 done_ref: doc:docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md
 source: session:c668eb35
 verify_by: 2026-10-28
-verify_how: 打开 9-24 自治计划，看 §4.4 是否存在且名单上每个人一行；打开 docs/agents/00-architecture.md 看 §二顶上是否有「已过时，以 9-24 §4 为准」。另看「叫醒登记在哪」「兼审查」两列：本次只填了说明，逐个 Agent 的值标「未核」，下次大改该 Agent 时补齐
+verify_how: 打开 9-24 自治计划，看 §4.4 表是否覆盖 §4.1 每个运行时 Agent 加诸葛亮、五列（代码入口 / 叫醒登记 / 调不调模型 / 兼审查 / 实际在做）每格有值或写「未核」；叫醒登记一列的任务名能在 src/lib/cron/registry.ts 或 inngest/functions/index.ts 里找到；00-architecture.md §二顶上有「已过时」。审查团不在本表范围（产品里没有代码）
 ---
 统筹 18 号 10-18 转达 PM「先把基础设置搭好」，本块是地基清单第 1 块（docs/specs/2026-10-18-me-agent-standard-process-v1.0.md）。
 只加列、不改 9-24 §4.1–§4.3 PM 已认的内容。谁留谁撤谁改名由 PM 定，已列进给 18 号的问题清单（孙子收不收、司马徽留不留）。
