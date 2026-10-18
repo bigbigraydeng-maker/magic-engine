@@ -199,7 +199,7 @@ describe('meta-ads/execute POST — campaign belonging to another client', () =>
     expect(m.queueBudget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       clientId: CLIENT_A,
       campaignId: '120210000000000001',
-      adAccountId: '1111111111',
+      adAccountId: 'act_1111111111',
       afterCents: 4_000,
       access: expect.objectContaining({ ok: true }),
     }))

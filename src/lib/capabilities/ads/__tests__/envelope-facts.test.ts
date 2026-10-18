@@ -811,3 +811,77 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect(r.unavailable.startsWith('facts:')).toBe(true)
   })
 })
+
+describe('🔴 ads.pause_campaign · 账户号必须是 act_ 形式（stop-loss 路由 503 缺陷的下一步）', () => {
+  const account = (id: string, level: string, entity: string, budget: number | null, over: Row = {}) => snap({
+    id: `snapshot:${id}:${level}:${entity}`,
+    ad_account_id: id, level, entity_id: entity, adset_id: level === 'adset' ? entity : null,
+    campaign_id: level === 'adset' ? `cmp-${id}` : null,
+    budget_level: level === 'adset' ? 'abo' : null,
+    daily_budget_minor: budget, currency: 'NZD', effective_status: 'ACTIVE',
+    capture_reason: 'daily', captured_at: new Date(NOW.getTime() - 60_000).toISOString(), ...over,
+  })
+  const completeCaptures = (id: string) => ['account', 'campaign', 'adset'].map(level => ({
+    client_id: CLIENT, ad_account_id: id, level, captured_at: new Date(NOW.getTime() - 60_000).toISOString(), capture_reason: 'scheduled',
+    complete: true, skipped_shared: false,
+  }))
+  const tables = () => ({
+    ad_entity_snapshots: [
+      account(ACCOUNT, 'account', ACCOUNT, null),
+      account(ACCOUNT, 'campaign', '456', 5_000, { budget_level: 'cbo' }),
+      account(ACCOUNT, 'adset', ADSET, null, { campaign_id: '456', budget_level: 'cbo' }),
+    ],
+    ad_strategy_configs: { daily_budget_cap_cents: 10_000 },
+    client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+    ad_snapshot_captures: completeCaptures(ACCOUNT),
+  })
+
+  it('ad_account_id 用 act_ 形式 → 能读出事实', async () => {
+    const r = await resolve(tables(), log(), 'authorize', 'ads.pause_campaign', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, campaign_id: '456',
+    })
+    expect('facts' in r).toBe(true)
+  })
+
+  it('ad_account_id 用纯数字 → 读不出事实（fail-closed）', async () => {
+    // 这条证明为什么路由入口必须规范化——内核不会替它补 act_ 前缀。
+    const r = await resolve(tables(), log(), 'authorize', 'ads.pause_campaign', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT.replace(/^act_/, ''), campaign_id: '456',
+    })
+    expect('unavailable' in r).toBe(true)
+    // 实测原因：按纯数字账户号去库里找，快照（存的是 act_ 形式）一行都对不上。
+    if ('unavailable' in r) expect(r.unavailable).toContain('快照里查不到')
+  })
+
+  // 子牙复审：止损路由还有「降预算」两条路（系列级 / 广告组级），只证明了暂停的事实链能读通不够。
+  it('ads.cut_campaign_budget · act_ 形式 → 能读出事实，减预算的目标金额带进去', async () => {
+    const r = await resolve(tables(), log(), 'authorize', 'ads.cut_campaign_budget', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, campaign_id: '456', after_cents: 4_000,
+    })
+    expect('facts' in r).toBe(true)
+    if ('facts' in r) expect(r.request).toMatchObject({ kind: 'budget_change', afterCents: 4_000 })
+  })
+
+  it('ads.cut_unit_budget · act_ 形式 → 能读出事实', async () => {
+    const r = await resolve({
+      ...tables(),
+      ad_entity_snapshots: [
+        account(ACCOUNT, 'account', ACCOUNT, null),
+        account(ACCOUNT, 'campaign', 'cmp-abo', null, { budget_level: 'abo' }),
+        account(ACCOUNT, 'adset', ADSET, 500),
+      ],
+    }, log(), 'authorize', 'ads.cut_unit_budget', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, adset_id: ADSET, after_cents: 400,
+    })
+    expect('facts' in r).toBe(true)
+  })
+
+  it.each(['ads.cut_campaign_budget', 'ads.cut_unit_budget'])('%s · 纯数字账户号 → 读不出事实（fail-closed）', async (actionKey) => {
+    const digits = ACCOUNT.replace(/^act_/, '')
+    const input = actionKey === 'ads.cut_campaign_budget'
+      ? { cycle_date: '2026-09-27', ad_account_id: digits, campaign_id: '456', after_cents: 4_000 }
+      : { cycle_date: '2026-09-27', ad_account_id: digits, adset_id: ADSET, after_cents: 400 }
+    const r = await resolve(tables(), log(), 'authorize', actionKey, input)
+    expect('unavailable' in r).toBe(true)
+  })
+})
