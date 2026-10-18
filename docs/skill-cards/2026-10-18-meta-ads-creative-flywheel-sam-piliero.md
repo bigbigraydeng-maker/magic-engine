@@ -91,8 +91,8 @@
   {
    "key": "dont-fear-learning",
    "text": "不要怕学习期",
-   "state": "not_applicable",
-   "note": "复核更正后：部分成立；到期撤下限撞 C-06/B-04"
+   "state": "learning",
+   "note": "复核更正后：部分成立（每批新素材另建新组一致）；到期撤下限撞 C-06/B-04"
   }
  ]
 }

@@ -64,17 +64,28 @@
 {
  "points": [
   {
-   "key": "basics",
-   "text": "落地页、盈亏单个成本、别突然猛加预算、合规",
+   "key": "no-sudden-budget-jump",
+   "text": "别突然猛加预算",
    "state": "already_in_me",
-   "rule": "B-04",
-   "note": "复核更正后：「产品页优于首页」一项存疑"
+   "rule": "B-04"
+  },
+  {
+   "key": "landing-product-page",
+   "text": "落地页用具体产品页，不用首页",
+   "state": "learning",
+   "note": "复核更正后：手册没写「具体页优于首页」，存疑"
+  },
+  {
+   "key": "breakeven-cpa",
+   "text": "以单个成本为准、算出盈亏线、素材合规",
+   "state": "learning",
+   "note": "原判已有一致，但没找到对应规则编号"
   },
   {
    "key": "keep-advantage-plus",
    "text": "保持 Advantage+ 受众开启、只控地区",
    "state": "learning",
-   "note": "复核更正后：ME 方向审计同意开启，代码仍强制关闭，待 119 号定"
+   "note": "复核更正后：ME 方向审计同意开启，但代码仍强制关闭；还没派人验证"
   },
   {
    "key": "metric-tier-numbers",

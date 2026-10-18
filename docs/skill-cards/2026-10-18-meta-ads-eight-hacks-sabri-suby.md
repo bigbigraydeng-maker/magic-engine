@@ -103,8 +103,8 @@
   {
    "key": "broad-targeting",
    "text": "宽泛定向，不钻兴趣词",
-   "state": "already_in_me",
-   "rule": "CT§3-受众"
+   "state": "learning",
+   "note": "原判已有一致；对应的 CTS 方案条目仍待 PM 点头，不算 ME 规则"
   },
   {
    "key": "zombie-campaign",

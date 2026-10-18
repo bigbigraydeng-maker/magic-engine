@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBoard, digestTags, findRuleRow, ownerFromTitle, type BoardInput } from '../board'
+import { buildBoard, digestTags, findRuleRow, ownerFromTitle, rowMentionsCard, type BoardInput } from '../board'
 import type { SkillCard, SkillPoint } from '../types'
 import type { LedgerEntry } from '@/lib/ledger/types'
 
@@ -195,7 +195,7 @@ describe('buildBoard 校验', () => {
     const board = buildBoard(input([card], [entry('h-1', 'decided', '2026-12-01')]))
     const errors = board.issues.filter((i) => i.level === 'error')
     expect(errors).toHaveLength(1)
-    expect(errors[0].message).toContain('没验完')
+    expect(errors[0].message).toContain('failed')
   })
 
   it('adopted 的规则行没写本卡文件名时报错', () => {
@@ -333,5 +333,45 @@ describe('buildBoard 未整理卡', () => {
     })
     expect(board.unorganized).toHaveLength(1)
     expect(board.fatal).toBeNull()
+  })
+})
+
+describe('评审补丁（子牙/魏征实施后审）', () => {
+  it('规则行里的卡名整名匹配：-foo 不得命中 -foo-bar', () => {
+    expect(rowMentionsCard('| **C-1** | 来自 2026-01-01-foo-bar.md |', '2026-01-01-foo')).toBe(false)
+    expect(rowMentionsCard('| **C-1** | 来自 2026-01-01-foo.md |', '2026-01-01-foo')).toBe(true)
+    expect(rowMentionsCard('| **C-1** | 来自 2026-01-01-foo，见上 |', '2026-01-01-foo')).toBe(true)
+  })
+
+  it('同一编号出现多行时，任一行写了卡名即算 adopted', () => {
+    const card = makeCard('2026-01-01-card-b', [point({ key: 'a', state: 'adopted', rule: 'E-13' })])
+    const rulebook = '| **E-13** | 旧行 |\n| **E-13** | 新行 来自 2026-01-01-card-b.md |'
+    const board = buildBoard({ ...input([card]), rulebookText: rulebook })
+    expect(board.issues).toEqual([])
+    expect(board.counts.adopted).toBe(1)
+  })
+
+  it('tried_failed 只认台账 failed；台账 verified 也要报错', () => {
+    const card = makeCard('2026-01-01-card-a', [point({ key: 't', state: 'tried_failed', handoff: 'h-1', note: '不成立' })])
+    const board = buildBoard(input([card], [entry('h-1', 'verified', null)]))
+    expect(board.issues.filter((i) => i.level === 'error')).toHaveLength(1)
+  })
+
+  it('台账判失败的孤儿交接卡进 pass，不算待验证', () => {
+    const card = makeCard('2026-01-01-card-a', [point({ key: 'l', state: 'learning' })])
+    const board = buildBoard(input([card], [entry('2026-10-18-skill-handoff-74-y', 'failed', null)]))
+    expect(board.counts.verifying).toBe(0)
+    expect(board.groups.passed.map((i) => i.key)).toContain('2026-10-18-skill-handoff-74-y')
+  })
+
+  it('台账读不出的文件进红区，不被吞掉', () => {
+    const card = makeCard('2026-01-01-card-a', [point({ key: 'l', state: 'learning' })])
+    const board = buildBoard({ ...input([card]), ledgerErrors: [{ file: 'bad.md', reason: '缺字段' }] })
+    expect(board.issues.some((i) => i.level === 'error' && i.message.includes('bad.md'))).toBe(true)
+  })
+
+  it('页面显示读到的卡数', () => {
+    const card = makeCard('2026-01-01-card-a', [point({ key: 'l', state: 'learning' })])
+    expect(buildBoard(input([card])).cardCount).toBe(1)
   })
 })

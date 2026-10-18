@@ -141,6 +141,7 @@ export function BoardView({ board }: { board: Board }) {
   return (
     <div className="space-y-4">
       <StatTiles counts={board.counts} />
+      <p className="text-xs text-slate-500">共读到 {board.cardCount} 张学习笔记。</p>
       <ProblemZone issues={board.issues} unorganized={board.unorganized} />
       <Section title="学习中">
         <ItemList items={board.groups.learning} />

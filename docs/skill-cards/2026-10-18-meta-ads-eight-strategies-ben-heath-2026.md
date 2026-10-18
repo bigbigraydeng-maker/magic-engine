@@ -108,7 +108,7 @@
    "key": "merge-data",
    "text": "冷热合并，数据不切碎",
    "state": "learning",
-   "note": "部分吸收：只有「别把数据切碎」一致"
+   "note": "原判「已有一致」；待合并的复核更正（PR 2852）改为只有「别把数据切碎」一致，ME 仍分收割/拉新"
   },
   {
    "key": "entry-price",
@@ -119,8 +119,8 @@
   {
    "key": "whatsapp-funnel",
    "text": "广告直接进 WhatsApp",
-   "state": "already_in_me",
-   "rule": "PL§三"
+   "state": "learning",
+   "note": "只在 NAL 一个客户验证过（候选）"
   }
  ]
 }

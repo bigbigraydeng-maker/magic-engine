@@ -16,6 +16,8 @@ function loadBoard(): { board: Board } | { fatal: string } {
   try {
     const cards = loadSkillCards()
     const ledger = loadLedger()
+    if (ledger.entries.length === 0) return { fatal: '台账（docs/ledger）读不到或为空，没法核对「待验证」' }
+    if (cards.digestText.trim() === '') return { fatal: '广告规则摘要（ME-ADS-RULES-DIGEST.md）读不到或为空，没法核对「ME 早已在做」' }
     return {
       board: buildBoard({
         cards: cards.cards,
@@ -24,6 +26,7 @@ function loadBoard(): { board: Board } | { fatal: string } {
         rulebookText: cards.rulebookText,
         digestText: cards.digestText,
         today: nzToday(new Date()),
+        ledgerErrors: ledger.errors,
       }),
     }
   } catch (error) {

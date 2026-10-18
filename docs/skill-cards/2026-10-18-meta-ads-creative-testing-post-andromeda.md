@@ -68,7 +68,7 @@
    "key": "pick-right-metric",
    "text": "比较指标选成留资/成交成本，别用默认互动成本",
    "state": "already_in_me",
-   "rule": "PG§十二"
+   "rule": "AT§1a"
   },
   {
    "key": "similar-merged",

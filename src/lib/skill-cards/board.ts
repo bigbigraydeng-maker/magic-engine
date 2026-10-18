@@ -9,6 +9,8 @@ export interface BoardInput {
   digestText: string
   /** YYYY-MM-DD, NZ date */
   today: string
+  /** 台账里解析失败的文件：必须显示，不能让「找不到交接卡」盖住真实原因 */
+  ledgerErrors?: { file: string; reason: string }[]
 }
 
 export type BoardGroupKey = 'learning' | 'pm_decision' | 'verifying' | 'adopted' | 'passed' | 'already_in_me'
@@ -53,6 +55,8 @@ export interface Board {
   issues: BoardIssue[]
   /** cards with no / broken 机器索引 */
   unorganized: SkillCardError[]
+  /** 读到并解析成功的学习笔记张数，页面显示给 PM 核对 */
+  cardCount: number
 }
 
 export const RULE_ID_RE = /^(RL|S|C|E|B)-\d+$/
@@ -72,13 +76,19 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-export function findRuleRow(rulebookText: string, ruleId: string): string | null {
+/** 规则手册里以该编号开头的所有表格行（同一编号可能出现在多处） */
+export function findRuleRows(rulebookText: string, ruleId: string): string[] {
   const re = new RegExp('^\\|\\s*(?:\\*\\*)?' + escapeRegExp(ruleId) + '(?![0-9A-Za-z])')
-  const lines = rulebookText.split('\n')
-  for (const line of lines) {
-    if (re.test(line)) return line
-  }
-  return null
+  return rulebookText.split('\n').filter((line) => re.test(line))
+}
+
+export function findRuleRow(rulebookText: string, ruleId: string): string | null {
+  return findRuleRows(rulebookText, ruleId)[0] ?? null
+}
+
+/** 规则行里是否写了本卡文件名（整名匹配，-foo 不得命中 -foo-bar） */
+export function rowMentionsCard(row: string, cardId: string): boolean {
+  return new RegExp(escapeRegExp(cardId) + '(?:\\.md)?(?![0-9A-Za-z-])').test(row)
 }
 
 export function digestTags(digestText: string): Set<string> {
@@ -113,7 +123,7 @@ function zeroCounts(): BoardCounts {
 }
 
 function fatalBoard(message: string, errors: SkillCardError[]): Board {
-  return { fatal: message, groups: emptyGroups(), counts: zeroCounts(), issues: [], unorganized: errors }
+  return { fatal: message, groups: emptyGroups(), counts: zeroCounts(), issues: [], unorganized: errors, cardCount: 0 }
 }
 
 function groupOf(state: PointState): BoardGroupKey | null {
@@ -210,12 +220,12 @@ function checkTriedFailed(
   item.owner = ownerFromTitle(entry.title)
   item.verifyBy = entry.verifyBy
   item.ledgerStatus = entry.status
-  if (entry.status !== 'verified' && entry.status !== 'failed') {
+  if (entry.status !== 'failed') {
     issues.push({
       level: 'error',
       cardId: card.id,
       pointKey: point.key,
-      message: '台账还没验完，不能算「试过不成立」',
+      message: '台账没判「不成立」（failed），不能算「试过不成立」',
     })
   }
 }
@@ -236,12 +246,12 @@ function checkAdopted(
     })
     return
   }
-  const row = findRuleRow(rulebookText, rule)
-  if (row === null) {
+  const rows = findRuleRows(rulebookText, rule)
+  if (rows.length === 0) {
     issues.push({ level: 'error', cardId: card.id, pointKey: point.key, message: `规则手册里找不到 ${rule}` })
     return
   }
-  if (!row.includes(card.id)) {
+  if (!rows.some((row) => rowMentionsCard(row, card.id))) {
     issues.push({
       level: 'error',
       cardId: card.id,
@@ -304,6 +314,7 @@ function correctionWarnings(cards: SkillCard[], issues: BoardIssue[]): void {
   }
 }
 
+/** 没有任何点引用的交接卡：在验的进「待验证」，台账判失败的进「pass」 */
 function orphanItems(
   ledgerEntries: LedgerEntry[],
   referenced: Set<string>,
@@ -319,14 +330,14 @@ function orphanItems(
       key: entry.id,
       text: entry.title,
       state: null,
-      note: '还没挂到学习笔记（来源笔记可能未合并）',
+      note: null,
       rule: null,
       handoff: entry.id,
       owner: ownerFromTitle(entry.title),
       verifyBy: entry.verifyBy,
       ledgerStatus: entry.status,
       overdue: isOverdue(entry, today),
-      verifiedPending: false,
+      verifiedPending: entry.status === 'verified',
       orphan: true,
     })
   }
@@ -401,7 +412,13 @@ export function buildBoard(input: BoardInput): Board {
   correctionWarnings(input.cards, issues)
 
   const orphans = orphanItems(input.ledgerEntries, referenced, input.today)
-  for (const item of orphans) groups.verifying.push(item)
+  for (const item of orphans) {
+    if (item.ledgerStatus === 'failed') groups.passed.push(item)
+    else groups.verifying.push(item)
+  }
+  for (const err of input.ledgerErrors ?? []) {
+    issues.push({ level: 'error', cardId: '', pointKey: null, message: `台账文件读不出：${err.file}（${err.reason}）` })
+  }
 
   return {
     fatal: null,
@@ -409,5 +426,6 @@ export function buildBoard(input: BoardInput): Board {
     counts: countGroups(groups),
     issues,
     unorganized: input.errors,
+    cardCount: input.cards.length,
   }
 }
