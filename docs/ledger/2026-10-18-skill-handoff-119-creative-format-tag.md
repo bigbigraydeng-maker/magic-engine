@@ -4,7 +4,7 @@ title: 交 119 号：素材记录除了「讲的是哪个卖点」，再加一�
 status: decided
 owner: agent
 decided_on: 2026-10-18
-source: session:9c4ac99a
+source: doc:docs/skill-cards/2026-10-18-meta-ads-cbo-batches-jared-robinson.md
 verify_by: 2026-11-01
 verify_how: AD-LINK-1 设计稿里有没有素材形式这一维；成=设计稿写入该字段或写明不加的理由
 ---

@@ -4,7 +4,7 @@ title: 交 74 号：查 CTS 广告的钱有多少花在新人、多少花在看�
 status: decided
 owner: agent
 decided_on: 2026-10-18
-source: session:9c4ac99a
+source: doc:docs/skill-cards/2026-10-18-meta-ads-eight-strategies-ben-heath-2026.md
 verify_by: 2026-11-07
 verify_how: 用 Meta 只读报表按「新受众 / 互动过 / 老客户」拆 10/22 起官方账户拉新组与收割组的花费与留资占比（至少 14 天数据）；成=写出两组各自的三层占比与结论（收割/拉新分开值不值）；接口拿不到这个拆分=写明拿不到并判 failed
 ---

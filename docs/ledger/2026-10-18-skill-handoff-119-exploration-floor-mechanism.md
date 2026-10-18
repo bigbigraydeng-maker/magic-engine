@@ -4,7 +4,7 @@ title: 交 119 号：给「每条测试广告保底曝光」选实现办法—�
 status: decided
 owner: agent
 decided_on: 2026-10-18
-source: session:9c4ac99a
+source: doc:docs/skill-cards/2026-10-18-meta-ads-small-budget-cut-fat-sergio-c.md
 verify_by: 2026-11-01
 verify_how: 119 号查 Meta 官方文档/接口回读：①广告组能否设日最低花费；②单条广告暂停是否让所在组重新进学习期；③平台原生 A/B 测试是否更合适；成=在 AD-EXPL-1 设计里写出选哪种及理由
 ---
