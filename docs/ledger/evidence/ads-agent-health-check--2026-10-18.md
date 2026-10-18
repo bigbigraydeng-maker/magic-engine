@@ -14,7 +14,7 @@
 | 自动程序今天跑没跑 | `google-data-pullback-daily` 06:01、`ad-entity-snapshot` 19:31、`ad-readback-sweep` 09:40、`winner-reel-sync-daily` 04:01、`conversion-daily-pipeline` 06:00、`promo-plan-daily-watch` 07:10、`goal-current-value-refresh` 06:31，**近 7 天各自 0 次失败** | ✅ 正常 |
 | 数据新不新鲜 | 7 个账户的快照今天都更新（最晚 19:31，最早 01:30）；NAL 花费最近一天 10-17 | ✅ 正常 |
 | 花费有没有 | NAL 近 7 天 $349.90。**CTS 两个账户近 7 天为零**：个人账户状态码 3（欠款未结，10-10 起）、官方账户本来就没投（计划 10/22 开投）。Magic Picks 状态码 9、花费停在 9-22；East International、NM Medspa 从无花费 | ✅ 与已知一致；⚠️ Magic Picks 的 9 之前没人提过 |
-| 账户异常有没有人盯 | PR 2805 的待办对「状态不是 1 且超过 24 小时」都会报，覆盖 CTS 个人账户（3）和 Magic Picks（9） | ✅ 代码在；**今天待办里实际下发了没有，我没核**（`pm-daily-todo` 最后一次在 10-16） |
+| 账户异常有没有人盯 | PR 2805 的待办对「状态不是 1 且超过 24 小时」都会报，覆盖 CTS 个人账户（3）和 Magic Picks（9） | ✅ 代码在。`pm-daily-todo` 近 8 次全是新西兰周一至周五早上 8 点、全部 completed；今天是周日所以没有新的——**下一次是周一（10-19）早上 8 点**，那时应出现这两个账户的异常待办，届时核 |
 | 诊断 | 增长状态表 137 行，最新一天 10-17，5 个客户数据完整度全是 `complete` | ✅ 正常 |
 | 自动暂停（D3） | `autopilot_enabled`：仅 CTS=true；`autopilot_dry_run`：4 个客户全 true。飞轮里没有一条 `ads.auto_pause_on_d3` | ✅ 演练中，符合设计 |
 | 授权内核 | `action_runs` 全表 2 行（8-22），**`ads.*` 为 0**；`ads_circuit_events` **0 行** | 🔴 内核从没跑过广告动作；熔断不存在（已知，设计如此） |
@@ -36,6 +36,6 @@
 
 ## 我没验的
 
-- 今日待办里实际有没有下发账户异常（需读待办内容，`pm-daily-todo` 10-16 后无新行，原因没查）。
+- 今日待办里实际有没有下发账户异常：今天周日不发，要等周一 08:00 之后才能核（`pm-daily-todo` 只在新西兰周一至周五跑）。
 - 状态码 9 在 Meta 的确切含义（代码里只定义了 1、3 和 2/100/101）。
 - 环境变量类的开关（日计划发帖等），Render 后台。
