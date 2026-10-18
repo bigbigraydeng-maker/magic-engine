@@ -14,17 +14,20 @@ import { PlatformConnectionPanel } from './PlatformConnectionPanel'
 
 const CHANNEL_PATTERN = /^UC[A-Za-z0-9_-]{22}$/
 
-export function YoutubePanel({ clientId }: { clientId: string }) {
+export function YoutubePanel({ clientId, configurationOnly = false }: { clientId: string; configurationOnly?: boolean }) {
   const [channelId, setChannelId] = useState<string | null | undefined>(undefined)
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [canEdit, setCanEdit] = useState(false)
+  const [saved, setSaved] = useState(false)
 
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/clients/${clientId}/youtube-channel`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as { channel_id: string | null }
+      const data = (await res.json()) as { channel_id: string | null; can_edit?: boolean }
+      setCanEdit(data.can_edit === true)
       setChannelId(data.channel_id)
       setDraft(data.channel_id ?? '')
     } catch (err) {
@@ -37,6 +40,7 @@ export function YoutubePanel({ clientId }: { clientId: string }) {
   const save = async () => {
     setSaving(true)
     setError(null)
+    setSaved(false)
     try {
       const res = await fetch(`/api/clients/${clientId}/youtube-channel`, {
         method: 'PATCH',
@@ -46,6 +50,7 @@ export function YoutubePanel({ clientId }: { clientId: string }) {
       const data = (await res.json().catch(() => ({}))) as { error?: string; channel_id?: string | null }
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
       setChannelId(data.channel_id ?? null)
+      setSaved(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -54,6 +59,14 @@ export function YoutubePanel({ clientId }: { clientId: string }) {
   }
 
   const draftValid = CHANNEL_PATTERN.test(draft.trim())
+
+  if (channelId === undefined) return <p role={error ? 'alert' : 'status'} className="text-sm text-slate-600">
+    {error ? '暂时无法读取频道配置，请重新打开此配置页。' : '正在读取频道配置…'}
+  </p>
+
+  if (!canEdit) return (
+    <p className="text-sm text-slate-600">此频道配置需由团队核实。授权状态请看「社媒授权与连接」。</p>
+  )
 
   return (
     <div className="space-y-3">
@@ -78,9 +91,13 @@ export function YoutubePanel({ clientId }: { clientId: string }) {
           </button>
         </div>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        {configurationOnly && saved && <a className="mt-3 inline-block text-sm font-semibold text-cyan-800"
+          href={`/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=connect&section=social-connections`}>
+          已保存频道，继续核对并授权 →
+        </a>}
       </div>
 
-      {channelId ? (
+      {!configurationOnly && channelId ? (
         <PlatformConnectionPanel
           clientId={clientId}
           apiPath="youtube"
@@ -92,7 +109,7 @@ export function YoutubePanel({ clientId }: { clientId: string }) {
           disconnectConfirmMessage="确认断开 YouTube 连接？"
           errorFallbackMessage="YouTube 授权已失效，需要重新授权。"
         />
-      ) : channelId === null ? (
+      ) : !configurationOnly && channelId === null ? (
         <p className="text-sm text-slate-500">先填写并保存频道编号，才能连接 YouTube。</p>
       ) : null}
     </div>

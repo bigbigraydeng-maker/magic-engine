@@ -25,10 +25,28 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.requireGlobalAdmin.mockResolvedValue({ ok: true })
   mocks.getClientChannelId.mockResolvedValue(CONFIGURED)
+  vi.stubEnv('NEXT_PUBLIC_APP_URL', 'https://example.test')
   vi.stubGlobal('fetch', vi.fn())
 })
 
 describe('GET youtube callback', () => {
+  it('returns a trusted cancellation to client settings and clears state without exchanging tokens', async () => {
+    const response = await GET(new NextRequest('https://example.test/cb?error=access_denied&state=n', {
+      headers: { cookie: `${YOUTUBE_STATE_COOKIE}=n:c1:${CONFIGURED}` },
+    }))
+    expect(response.headers.get('location')).toContain('/clients/c1/settings?youtube=error&reason=authorization_cancelled')
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=0')
+    expect(fetch).not.toHaveBeenCalled()
+    expect(mocks.persist).not.toHaveBeenCalled()
+  })
+  it('does not use a forged cancellation state to redirect into a customer', async () => {
+    const response = await GET(new NextRequest('https://example.test/cb?error=access_denied&state=forged', {
+      headers: { cookie: `${YOUTUBE_STATE_COOKIE}=n:c1:${CONFIGURED}` },
+    }))
+    expect(response.status).toBe(400)
+    expect(mocks.requireGlobalAdmin).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
   it('refuses non-admins before any token exchange', async () => {
     mocks.requireGlobalAdmin.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' })
     expect((await GET(req(CONFIGURED))).status).toBe(403)

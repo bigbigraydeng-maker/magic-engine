@@ -44,12 +44,6 @@ const ANCHORS: Record<string, AnchorMeta> = {
     description: '当前张骞通过 Jina/Apify 抓取公开数据，无需额外授权。此处可标记为已确认配置。',
     fields: [],
   },
-  social: {
-    name: '客户社媒账号',
-    emoji: '📱',
-    description: '客户社媒账号接入后，在此标记为已连接。',
-    fields: [],
-  },
 }
 
 interface StatusRow {
@@ -75,6 +69,10 @@ export function OtherDataSourcesPanel({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-2">
+      <a className="block rounded-xl border border-slate-200 bg-white p-4 text-sm font-semibold text-cyan-800"
+        href={`/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=connect&section=social-connections`}>
+        查看社媒授权与连接 →
+      </a>
       {Object.entries(ANCHORS).map(([anchor, meta]) => (
         <AnchorRow
           key={anchor}
