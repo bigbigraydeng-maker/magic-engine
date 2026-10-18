@@ -81,17 +81,57 @@ jobs:
     env:
       PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
     steps:
+      - name: Detect docs-only change (heavy steps are skipped, job still reports success)
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
+        run: |
+          set -uo pipefail
+          # Fail-safe: anything unexpected leaves docs_only=false, i.e. the full checks run.
+          docs_only=false
+          if meta=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '[.changed_files, .head.sha] | @tsv' 2>/dev/null) \
+            && listing=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | "F:" + .filename, (if .previous_filename then "P:" + .previous_filename else empty end)' 2>/dev/null); then
+            changed_files="${meta%%$'	'*}"
+            live_head="${meta#*$'	'}"
+            listed=$(grep -c '^F:' <<<"${listing}" || true)
+            # The files API stops at 3000 entries and a newer push may have moved the head:
+            # either way the list cannot be trusted, so run everything.
+            if [[ "${live_head}" == "${PR_HEAD_SHA}" && "${changed_files}" =~ ^[0-9]+$ && "${changed_files}" -lt 3000 && "${listed}" -eq "${changed_files}" && "${listed}" -gt 0 ]]; then
+              docs_only=true
+              while IFS= read -r line; do
+                f="${line:2}"
+                case "${f}" in
+                  *.js|*.mjs|*.cjs|*.ts|*.tsx|*.jsx|*package.json|*package-lock.json) docs_only=false; break ;;
+                  docs/*) ;;
+                  .claude/*.md|.claude/*/*.md|.claude/*/*/*.md) ;;
+                  */*) docs_only=false; break ;;
+                  *.md) ;;
+                  *) docs_only=false; break ;;
+                esac
+              done <<<"${listing}"
+            fi
+          else
+            echo "::warning::docs-only scope lookup failed; running the full checks."
+          fi
+          echo "docs_only=${docs_only}" >> "${GITHUB_OUTPUT}"
+          echo "- Scope: docs_only=${docs_only}" >> "${GITHUB_STEP_SUMMARY}"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        if: steps.scope.outputs.docs_only != 'true'
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.scope.outputs.docs_only != 'true'
         with:
           node-version: '22'
           cache: npm
       - name: Install dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         run: npm ci
       - name: Run #1009 CRM decision-list tests when present
+        if: steps.scope.outputs.docs_only != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -121,18 +161,58 @@ jobs:
     env:
       PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
     steps:
+      - name: Detect docs-only change (heavy steps are skipped, job still reports success)
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
+        run: |
+          set -uo pipefail
+          # Fail-safe: anything unexpected leaves docs_only=false, i.e. the full checks run.
+          docs_only=false
+          if meta=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '[.changed_files, .head.sha] | @tsv' 2>/dev/null) \
+            && listing=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | "F:" + .filename, (if .previous_filename then "P:" + .previous_filename else empty end)' 2>/dev/null); then
+            changed_files="${meta%%$'	'*}"
+            live_head="${meta#*$'	'}"
+            listed=$(grep -c '^F:' <<<"${listing}" || true)
+            # The files API stops at 3000 entries and a newer push may have moved the head:
+            # either way the list cannot be trusted, so run everything.
+            if [[ "${live_head}" == "${PR_HEAD_SHA}" && "${changed_files}" =~ ^[0-9]+$ && "${changed_files}" -lt 3000 && "${listed}" -eq "${changed_files}" && "${listed}" -gt 0 ]]; then
+              docs_only=true
+              while IFS= read -r line; do
+                f="${line:2}"
+                case "${f}" in
+                  *.js|*.mjs|*.cjs|*.ts|*.tsx|*.jsx|*package.json|*package-lock.json) docs_only=false; break ;;
+                  docs/*) ;;
+                  .claude/*.md|.claude/*/*.md|.claude/*/*/*.md) ;;
+                  */*) docs_only=false; break ;;
+                  *.md) ;;
+                  *) docs_only=false; break ;;
+                esac
+              done <<<"${listing}"
+            fi
+          else
+            echo "::warning::docs-only scope lookup failed; running the full checks."
+          fi
+          echo "docs_only=${docs_only}" >> "${GITHUB_OUTPUT}"
+          echo "- Scope: docs_only=${docs_only}" >> "${GITHUB_STEP_SUMMARY}"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        if: steps.scope.outputs.docs_only != 'true'
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.scope.outputs.docs_only != 'true'
         with:
           node-version: '22'
           cache: npm
       - name: Install dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         run: npm ci
       - name: Run baseline-aware repository type-check
+        if: steps.scope.outputs.docs_only != 'true'
         shell: bash
         env:
           NODE_OPTIONS: --max-old-space-size=4096
@@ -213,7 +293,11 @@ jobs:
             echo '## Type-check'
             echo
             echo "- PR head: \`${PR_HEAD_SHA}\`"
-            echo "- Result: \`${{ job.status }}\`"
+            if [[ "${{ steps.scope.outputs.docs_only }}" == 'true' ]]; then
+              echo '- Result: SKIPPED (docs-only change; no code was type-checked)'
+            else
+              echo "- Result: \`${{ job.status }}\`"
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
   application-build:
@@ -225,17 +309,57 @@ jobs:
     env:
       PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
     steps:
+      - name: Detect docs-only change (heavy steps are skipped, job still reports success)
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
+        run: |
+          set -uo pipefail
+          # Fail-safe: anything unexpected leaves docs_only=false, i.e. the full checks run.
+          docs_only=false
+          if meta=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '[.changed_files, .head.sha] | @tsv' 2>/dev/null) \
+            && listing=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | "F:" + .filename, (if .previous_filename then "P:" + .previous_filename else empty end)' 2>/dev/null); then
+            changed_files="${meta%%$'	'*}"
+            live_head="${meta#*$'	'}"
+            listed=$(grep -c '^F:' <<<"${listing}" || true)
+            # The files API stops at 3000 entries and a newer push may have moved the head:
+            # either way the list cannot be trusted, so run everything.
+            if [[ "${live_head}" == "${PR_HEAD_SHA}" && "${changed_files}" =~ ^[0-9]+$ && "${changed_files}" -lt 3000 && "${listed}" -eq "${changed_files}" && "${listed}" -gt 0 ]]; then
+              docs_only=true
+              while IFS= read -r line; do
+                f="${line:2}"
+                case "${f}" in
+                  *.js|*.mjs|*.cjs|*.ts|*.tsx|*.jsx|*package.json|*package-lock.json) docs_only=false; break ;;
+                  docs/*) ;;
+                  .claude/*.md|.claude/*/*.md|.claude/*/*/*.md) ;;
+                  */*) docs_only=false; break ;;
+                  *.md) ;;
+                  *) docs_only=false; break ;;
+                esac
+              done <<<"${listing}"
+            fi
+          else
+            echo "::warning::docs-only scope lookup failed; running the full checks."
+          fi
+          echo "docs_only=${docs_only}" >> "${GITHUB_OUTPUT}"
+          echo "- Scope: docs_only=${docs_only}" >> "${GITHUB_STEP_SUMMARY}"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        if: steps.scope.outputs.docs_only != 'true'
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.scope.outputs.docs_only != 'true'
         with:
           node-version: '22'
           cache: npm
       - name: Install dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         run: npm ci
       - name: Build application
+        if: steps.scope.outputs.docs_only != 'true'
         env:
           # Non-secret, non-routable placeholders used only while Next.js
           # statically evaluates modules. This job performs no deployment.
@@ -250,6 +374,10 @@ jobs:
             echo '## Application build'
             echo
             echo "- PR head: \`${PR_HEAD_SHA}\`"
-            echo "- Result: \`${{ job.status }}\`"
-            echo '- Environment: non-secret, non-routable build placeholders; no deployment.' 
+            if [[ "${{ steps.scope.outputs.docs_only }}" == 'true' ]]; then
+              echo '- Result: SKIPPED (docs-only change; nothing was built)'
+            else
+              echo "- Result: \`${{ job.status }}\`"
+              echo '- Environment: non-secret, non-routable build placeholders; no deployment.'
+            fi
           } >> "${GITHUB_STEP_SUMMARY}"
