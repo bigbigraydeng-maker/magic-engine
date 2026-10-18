@@ -541,7 +541,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
             <p className="text-sm text-slate-600 mb-5">
               通过 = 标记这条合格、<span className="font-medium text-slate-900">排入发布队列</span>。
               发布程序每小时自动跑一次,队列里的片子会自动发到客户主页;
-              <span className="font-medium text-slate-900">全局发布开关没开时只存成草稿、不公开</span>(看板会标「发布时存为草稿」)。请按「已经会发出去」的标准把关。确定通过?
+              <span className="font-medium text-slate-900">全局发布开关没开时只存成草稿、不公开</span>(看板会标「Facebook 草稿，未公开」)。请按「已经会发出去」的标准把关。确定通过?
             </p>
             {error && <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
             <div className="flex gap-3">

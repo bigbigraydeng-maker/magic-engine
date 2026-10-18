@@ -21,6 +21,7 @@ interface ReelFixture {
   angle: string
   created_at: string
   published_at: string | null
+  video_state?: 'DRAFT' | 'PUBLISHED' | null
   permalink: string | null
   music_file: string | null
   template: string | null
@@ -93,6 +94,26 @@ describe('DailyPlanReelsPanel — recorded-uploaded chip', () => {
 
     await screen.findByText('短视频（共 1 条）')
     expect(screen.getByText('库里记为已上传 · 平台状态未核')).toBeInTheDocument()
+  })
+})
+
+describe('DailyPlanReelsPanel — platform video state chip', () => {
+  it('shows Facebook 草稿，未公开 for a draft Reel and 已公开（Facebook）for a public one, not the unverified note', async () => {
+    mockFetchOnce({
+      success: true,
+      reels: [
+        reel({ id: 'aaaaaaaa-0000-0000-0000-000000000001', status: 'published', angle: '草稿片', published_at: '2026-09-02T00:00:00.000Z', video_state: 'DRAFT' }),
+        reel({ id: 'bbbbbbbb-0000-0000-0000-000000000002', status: 'published', angle: '公开片', published_at: '2026-09-02T00:00:00.000Z', video_state: 'PUBLISHED' }),
+      ],
+      reels_error: null,
+    })
+
+    render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+
+    await screen.findByText('短视频（共 2 条）')
+    expect(screen.getByText('Facebook 草稿，未公开')).toBeInTheDocument()
+    expect(screen.getByText('已公开（Facebook）')).toBeInTheDocument()
+    expect(screen.queryByText('库里记为已上传 · 平台状态未核')).not.toBeInTheDocument()
   })
 })
 
