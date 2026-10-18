@@ -37,7 +37,7 @@ const MAX_VIDEO_BYTES = 512 * 1024 * 1024
 export async function fetchFactoryVideo(url: string, fetchImpl: typeof fetch = fetch): Promise<Blob> {
   const allowedHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://invalid.invalid').hostname
   const u = new URL(url)
-  if (u.protocol !== 'https:' || u.hostname !== allowedHost || !u.pathname.startsWith(FACTORY_PATH_PREFIX)) {
+  if (u.protocol !== 'https:' || u.hostname !== allowedHost || u.port !== '' || u.username || u.password || !u.pathname.startsWith(FACTORY_PATH_PREFIX)) {
     throw new Error('video host not allowed')
   }
   const res = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(120_000) })

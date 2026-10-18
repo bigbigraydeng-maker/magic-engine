@@ -38,6 +38,12 @@ describe('runStaging', () => {
     expect(f).not.toHaveBeenCalled()
   })
 
+  it('a throw while loading config still leaves a failed receipt', async () => {
+    const { deps, saved } = stagingDeps({ getWorkOrder: async () => { throw new Error('db down') } })
+    expect(await runStaging(ev, deps)).toMatchObject({ status: 'failed', reason: 'preflight_error', noPublish: true })
+    expect(saved).toHaveLength(1)
+  })
+
   it('blocks on channel mismatch and never uploads', async () => {
     const f = vi.fn().mockResolvedValueOnce(json({ items: [{ id: 'UCother', snippet: {} }] }))
     const { deps, saved } = stagingDeps({ fetchImpl: f })
@@ -130,6 +136,12 @@ describe('runPublicStep', () => {
     const { deps } = publicDeps({ getChannelId: async () => 'UCsomethingElseElseElse12', fetchImpl: f })
     expect(await runPublicStep({ clientId: 'c1', nonce: 'n' }, deps)).toMatchObject({ reason: 'channel_config_changed', noPublish: true })
     expect(f).not.toHaveBeenCalled()
+  })
+
+  it('a transient failure after the grant is consumed still leaves a failed receipt', async () => {
+    const { deps, saved } = publicDeps({ getStaged: async () => { throw new Error('db down') }, fetchImpl: vi.fn() })
+    expect(await runPublicStep({ clientId: 'c1', nonce: 'n' }, deps)).toMatchObject({ status: 'failed', reason: 'public_step_error', noPublish: true })
+    expect(saved).toHaveLength(1)
   })
 
   it('missing gate evidence blocks (staging records no passing gates)', async () => {

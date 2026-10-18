@@ -55,12 +55,18 @@ export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promi
     return row
   }
 
-  const channelId = await deps.getChannelId(ev.clientId)
-  if (!channelId) return finish({ status: 'blocked', reason: 'channel_not_configured', noPublish: true })
-  const wo = await deps.getWorkOrder(ev.clientId, ev.workOrderId)
-  if (!wo) return finish({ channelId, status: 'blocked', reason: 'work_order_not_approved', noPublish: true })
-  if (await deps.alreadyStaged(ev.clientId, ev.workOrderId)) {
-    return finish({ channelId, status: 'blocked', reason: 'already_staged', noPublish: true })
+  let channelId: string | null
+  let wo: ApprovedWorkOrder | null
+  try {
+    channelId = await deps.getChannelId(ev.clientId)
+    if (!channelId) return finish({ status: 'blocked', reason: 'channel_not_configured', noPublish: true })
+    wo = await deps.getWorkOrder(ev.clientId, ev.workOrderId)
+    if (!wo) return finish({ channelId, status: 'blocked', reason: 'work_order_not_approved', noPublish: true })
+    if (await deps.alreadyStaged(ev.clientId, ev.workOrderId)) {
+      return finish({ channelId, status: 'blocked', reason: 'already_staged', noPublish: true })
+    }
+  } catch (err) {
+    return finish({ status: 'failed', reason: 'preflight_error', noPublish: true, detail: { error: err instanceof Error ? err.message.slice(0, 300) : 'unknown' } })
   }
 
   try {
@@ -134,16 +140,17 @@ export async function runPublicStep(ev: PublicAuthorizedEventData, deps: PublicS
   if (!grant || grant.clientId !== ev.clientId) {
     return save({ status: 'blocked', reason: 'authorization_invalid', channelId: grant?.channelId ?? 'unknown' })
   }
-  const staged = await deps.getStaged(grant.clientId, grant.videoId)
-  if (!staged || staged.channelId !== grant.channelId) {
-    return save({ status: 'blocked', reason: 'video_not_staged', channelId: grant.channelId, videoId: grant.videoId })
-  }
-  // A grant issued before the client's channel was reconfigured must not apply to the new setup.
-  if ((await deps.getChannelId(grant.clientId)) !== grant.channelId) {
-    return save({ status: 'blocked', reason: 'channel_config_changed', channelId: grant.channelId, videoId: grant.videoId })
-  }
   let receipt: PublishReceipt
+  let staged: Awaited<ReturnType<PublicStepDeps['getStaged']>>
   try {
+    staged = await deps.getStaged(grant.clientId, grant.videoId)
+    if (!staged || staged.channelId !== grant.channelId) {
+      return await save({ status: 'blocked', reason: 'video_not_staged', channelId: grant.channelId, videoId: grant.videoId })
+    }
+    // A grant issued before the client's channel was reconfigured must not apply to the new setup.
+    if ((await deps.getChannelId(grant.clientId)) !== grant.channelId) {
+      return await save({ status: 'blocked', reason: 'channel_config_changed', channelId: grant.channelId, videoId: grant.videoId })
+    }
     const token = await deps.getToken(grant.clientId)
     receipt = await publishStagedVideo(
       {

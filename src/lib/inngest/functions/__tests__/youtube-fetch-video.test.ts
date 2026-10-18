@@ -6,7 +6,7 @@ const video = (over: ResponseInit = {}) =>
   new Response('xx', { status: 200, headers: { 'content-type': 'video/mp4' }, ...over })
 
 describe('fetchFactoryVideo', () => {
-  it.each(['http://proj.supabase.co/a.mp4', 'https://proj.supabase.co/storage/v1/object/public/other-bucket/a.mp4', 'https://evil.example.com/a.mp4', 'https://169.254.169.254/x'])(
+  it.each(['http://proj.supabase.co/a.mp4', 'https://proj.supabase.co:8443/storage/v1/object/public/content-factory/a.mp4', 'https://u:p@proj.supabase.co/storage/v1/object/public/content-factory/a.mp4', 'https://proj.supabase.co/storage/v1/object/public/other-bucket/a.mp4', 'https://evil.example.com/a.mp4', 'https://169.254.169.254/x'])(
     'refuses %s without fetching',
     async (url) => {
       const f = vi.fn()

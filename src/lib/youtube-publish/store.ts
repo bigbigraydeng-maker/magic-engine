@@ -99,18 +99,24 @@ export async function findStagedReceipt(
   return { videoId: row.video_id, channelId: row.channel_id, gates: row.detail?.gates ?? [] }
 }
 
-/** True if staging for this work order has started (pending) or finished (staged): never upload twice. */
+/**
+ * True if another upload for this work order must not start: something is staged, a failed attempt
+ * left a video on the channel, or the newest attempt is still `pending` (crashed or in flight).
+ * A definite failure with no video (e.g. quota) is superseded by its `failed` row, so a retry works.
+ */
 export async function hasStagingAttempt(clientId: string, workOrderId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin
     .from('youtube_publish_receipts')
-    .select('id')
+    .select('status, video_id, created_at')
     .eq('client_id', clientId)
     .eq('work_order_id', workOrderId)
     .eq('stage', 'staging')
-    .in('status', ['pending', 'staged'])
-    .limit(1)
+    .in('status', ['pending', 'staged', 'failed'])
+    .order('created_at', { ascending: false })
   if (error) throw error
-  return (data ?? []).length > 0
+  const rows = (data ?? []) as Array<{ status: string; video_id: string | null }>
+  if (rows.some((r) => r.status === 'staged' || (r.status === 'failed' && r.video_id))) return true
+  return rows[0]?.status === 'pending'
 }
 
 export async function insertAuthorization(a: {
