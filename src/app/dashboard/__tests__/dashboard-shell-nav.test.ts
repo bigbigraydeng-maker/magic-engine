@@ -7,10 +7,10 @@ import { ADMIN_SECTIONS } from '../dashboard-shell'
 // and regrouping must never make a page lose its entrance.
 const APP_ROOT = join(__dirname, '..', '..')
 
-/** The admin sidebar links before the 5-group regrouping (plus the ad-approval entry kept in group 1), minus /dashboard/analytics (dead page, link dropped on purpose). */
+/** The admin sidebar links before the 5-group regrouping (plus the ad-approval entry kept in group 1), minus /dashboard/analytics and /dashboard/admin/billing-monitor (retired candidates: link hidden on purpose, page files kept). */
 const PREVIOUS_HREFS = [
   '/dashboard', '/dashboard/today', '/dashboard/clients', '/dashboard/factory', '/dashboard/reports',
-  '/dashboard/admin/billing-monitor', '/dashboard/admin/mtc-overview', '/dashboard/admin/ai-gateway',
+  '/dashboard/admin/mtc-overview', '/dashboard/admin/ai-gateway',
   '/dashboard/admin/viral-references', '/dashboard/admin/users', '/dashboard/admin/prospecting',
   '/dashboard/industry-baselines', '/dashboard/admin/cron-health', '/dashboard/commerce', '/dashboard/ad-engine',
   '/dashboard/kernel-approvals', '/dashboard/team-memory', '/dashboard/me2/product-map', '/dashboard/voice',
@@ -50,7 +50,9 @@ describe('admin sidebar', () => {
     expect(first).toContain('/dashboard/kernel-approvals')
   })
 
-  it('the dead analytics page is no longer linked', () => {
-    expect(items.some((i) => i.href === '/dashboard/analytics')).toBe(false)
+  it('retired-candidate pages are no longer linked (files kept, links can come back)', () => {
+    const hrefs = items.map((i) => i.href)
+    expect(hrefs).not.toContain('/dashboard/analytics')
+    expect(hrefs).not.toContain('/dashboard/admin/billing-monitor')
   })
 })

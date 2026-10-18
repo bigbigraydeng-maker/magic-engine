@@ -65,7 +65,6 @@ export const ADMIN_SECTIONS: NavSection[] = [
     collapsed: true,
     items: [
       { key: 'mtc-overview',     label: 'MTC Overview',    mark: 'MC', href: '/dashboard/admin/mtc-overview' },
-      { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
       { key: 'prospecting',      label: 'Prospecting',     mark: 'PS', href: '/dashboard/admin/prospecting' },
       { key: 'user-console',     label: 'User Console',    mark: 'UC', href: '/dashboard/admin/users' },
       { key: 'commerce',        label: '选品工作台',       mark: 'PI', href: '/dashboard/commerce' },
