@@ -90,3 +90,14 @@ npm test -- 'src/lib/platform-oauth' 'src/lib/meta-oauth/__tests__/client.test.t
 - `git diff --check`：退出 0。独立比较原 HEAD 与现文：kernel `verify_how` 解析值逐字相同、D3 原正文完整转录且除 `done_ref` 外原字段不变。
 - 子牙、魏征实施复核通过，无 blocker/P1/P2；魏征独立复跑相同 14 文件、223 测试，退出 0。
 - 未重跑 build/E2E/全仓 Vitest：追加改动仅测试和文档，无生产代码或构建配置变更；上轮应用构建证据不冒充本轮全量测试。未访问生产、合并或部署。
+
+## 合并前检查点（2026-10-19 11:36 NZ）
+
+用户已明确授权合并。PR 已转为待审并通过 GitHub update-branch 合入当时最新 main；本地干净工作树快进到同一版本。检查版本：HEAD `c2d891c8b08c1d109b7500fb10de9bb928f2d1f9`，base `ae35bcaff91428cc5e1932633292accc9b85f1a1`。相比已审修复提交仅增加上游两份广告文档。子牙、魏征确认源码审查可继承，但下列真实失败出现后，不再代表可以合并。
+
+- `npm run type-check`：退出 0。`./node_modules/.bin/tsc -p tools/ai-orchestrator/tsconfig.json`：退出 0。
+- 社媒原定向回归 + `tools/ops-review-loop/tests` + `tools/ai-orchestrator/tests` + `src/lib/ledger`：63 文件、1728 测试通过，退出 0；日志 `/private/tmp/celine-merge-tests.log`。
+- `./node_modules/.bin/vitest run --config src/lib/kernel/__tests__/vitest.architecture.config.ts`：退出 1，202 通过 / 1 失败。`src/lib/factory/publish/promote/books-port.ts` 直接写入 execution_items，不在架构允许范围；PR 未改该文件。对 base SHA 使用 `git archive` 建独立目录 `/private/tmp/celine-merge-main-baseline`，同依赖/同命令复现相同失败。只能证明为主干既有问题，不能当通过。
+- `BASE_SHA=<上述base> HEAD_SHA=<上述head> node --import tsx scripts/ledger-check-frozen-runner.ts`：退出 1。kernel 旧卡 verify_how 虽解析值相同，但治理检查明确比较原始字段，块标量包装构成冻结冲突。前轮仅核对语义，遗漏实际冻结检查；子牙已撤回对此格式修正的放行。
+- GitHub Actions 在该 head 返回 startup_failure、没有启动检查步骤，`gh run view` 仅提示可能为工作流问题，具体原因未确认。Cloudflare Pages 成功不能替代必过检查。
+- 停止合并：不扩大执行写入白名单、不修改 Kernel 运行语义、不放宽冻结规则、不伪造远端绿。上述两项需受控修复后复验；本轮未执行 merge、未触发 main 部署。上轮“无 blocker”结论由此检查点更新。
