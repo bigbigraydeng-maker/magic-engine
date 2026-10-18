@@ -45,6 +45,10 @@
 | [2026-10-19 公开评论选题信号](2026-10-19-social-comment-led-ideas.md) | candidate | 评论回流选题已有 ME 设计；不建新 Agent、不读私信 |
 | [2026-10-19 趋势与原生叙事](2026-10-19-social-native-storytelling.md) | candidate | 趋势只作选题线索，需核相关性与素材真实性 |
 | [2026-10-19 Shorts 指标口径](2026-10-19-social-short-video-metrics.md) | candidate | 分开 Shorts views/engaged views；ME 字段可见性未验证 |
+| [2026-10-19 TikTok 搜索需求选题](2026-10-19-social-tiktok-search-insights.md) | candidate | 站内搜索主题/内容缺口作选题线索；功能与效果待查 |
+| [2026-10-19 Instagram Trial Reels](2026-10-19-social-instagram-trial-reels.md) | candidate | 面向非关注者试探新主题；不默认自动分享 |
+| [2026-10-19 Instagram Best Practices](2026-10-19-social-instagram-best-practices.md) | candidate | 账号级站内建议作复盘线索，不当固定规则 |
+| [2026-10-19 Threads Insights](2026-10-19-social-threads-insights.md) | candidate | 周报并列看帖子、views、关注与回复，不推断因果 |
 
 外部来源与 ME 数据尚未完成验证，机器状态统一为 `learning`；本轮不标 `adopted` / `verified`。
 
