@@ -110,6 +110,7 @@ export interface PublicStepDeps {
     grantedAt: string
   } | null>
   getStaged: (clientId: string, videoId: string) => Promise<{ gates: GateResult[]; channelId: string } | null>
+  getChannelId: (clientId: string) => Promise<string | null>
   getToken: (clientId: string) => Promise<string>
   saveReceipt: (r: ReceiptRow) => Promise<void>
   fetchImpl?: typeof fetch
@@ -136,6 +137,10 @@ export async function runPublicStep(ev: PublicAuthorizedEventData, deps: PublicS
   const staged = await deps.getStaged(grant.clientId, grant.videoId)
   if (!staged || staged.channelId !== grant.channelId) {
     return save({ status: 'blocked', reason: 'video_not_staged', channelId: grant.channelId, videoId: grant.videoId })
+  }
+  // A grant issued before the client's channel was reconfigured must not apply to the new setup.
+  if ((await deps.getChannelId(grant.clientId)) !== grant.channelId) {
+    return save({ status: 'blocked', reason: 'channel_config_changed', channelId: grant.channelId, videoId: grant.videoId })
   }
   let receipt: PublishReceipt
   try {

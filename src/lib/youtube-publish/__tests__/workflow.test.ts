@@ -96,6 +96,7 @@ function publicDeps(over: Partial<PublicStepDeps> = {}) {
   const deps: PublicStepDeps = {
     consume: async (_n: string, _c: string) => ({ clientId: 'c1', channelId: CHANNEL, videoId: 'v1', grantedBy: 'ray', grantedAt }),
     getStaged: async () => ({ gates: allPass, channelId: CHANNEL }),
+    getChannelId: async () => CHANNEL,
     getToken: async () => 'tok',
     saveReceipt: async (r) => void saved.push(r),
     ...over,
@@ -122,6 +123,13 @@ describe('runPublicStep', () => {
   it('a video without a staging receipt is refused', async () => {
     const { deps } = publicDeps({ getStaged: async () => null, fetchImpl: vi.fn() })
     expect(await runPublicStep({ clientId: 'c1', nonce: 'n' }, deps)).toMatchObject({ reason: 'video_not_staged' })
+  })
+
+  it('a grant is void if the client channel was reconfigured after it was issued', async () => {
+    const f = vi.fn()
+    const { deps } = publicDeps({ getChannelId: async () => 'UCsomethingElseElseElse12', fetchImpl: f })
+    expect(await runPublicStep({ clientId: 'c1', nonce: 'n' }, deps)).toMatchObject({ reason: 'channel_config_changed', noPublish: true })
+    expect(f).not.toHaveBeenCalled()
   })
 
   it('missing gate evidence blocks (staging records no passing gates)', async () => {

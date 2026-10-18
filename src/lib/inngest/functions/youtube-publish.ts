@@ -29,13 +29,17 @@ import {
 
 const getToken = (clientId: string) => getValidToken(clientId, PLATFORM_PROVIDERS.GOOGLE_YOUTUBE)
 
+/** The factory's own storage bucket (see src/lib/factory/evaluate.ts). */
+const FACTORY_PATH_PREFIX = '/storage/v1/object/public/content-factory/'
 const MAX_VIDEO_BYTES = 512 * 1024 * 1024
 
 /** Only the factory's own storage host, no redirects, bounded size and time, video content only. */
 export async function fetchFactoryVideo(url: string, fetchImpl: typeof fetch = fetch): Promise<Blob> {
   const allowedHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://invalid.invalid').hostname
   const u = new URL(url)
-  if (u.protocol !== 'https:' || u.hostname !== allowedHost) throw new Error('video host not allowed')
+  if (u.protocol !== 'https:' || u.hostname !== allowedHost || !u.pathname.startsWith(FACTORY_PATH_PREFIX)) {
+    throw new Error('video host not allowed')
+  }
   const res = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(120_000) })
   if (!res.ok) throw new Error(`video download failed (${res.status})`)
   if (!(res.headers.get('content-type') ?? '').startsWith('video/')) throw new Error('not a video')
@@ -95,6 +99,7 @@ export const youtubePublicStep = inngest.createFunction(
       runPublicStep(data, {
         consume: (nonce, clientId) => consumeAuthorization(nonce, clientId),
         getStaged: (c, v) => findStagedReceipt(c, { videoId: v }),
+        getChannelId: getClientChannelId,
         getToken,
         saveReceipt: insertReceipt,
       }),
