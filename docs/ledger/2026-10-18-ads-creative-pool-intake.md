@@ -4,6 +4,8 @@ title: 已发布成片自动登记成广告素材候选（不再手填），批�
 status: done
 owner: agent
 decided_on: 2026-10-18
+done_on: 2026-10-18
+done_ref: pr:2812
 source: session:c668eb35
 verify_by: 2026-10-21
 verify_how: 看 CTS 的 ad_strategy_configs.creative_pool 是否从 3 条变成 15 条、新增的都是 status=candidate 且无 approved_by；再看那天 cron_run_logs 里 google-data-pullback-daily 的 creative_pool_intake 回执 added=12。East International 应仍为 blocked=facts:no_ad_strategy_config_row
