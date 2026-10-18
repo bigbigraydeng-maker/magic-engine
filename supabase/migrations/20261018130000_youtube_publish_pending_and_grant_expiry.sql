@@ -12,5 +12,10 @@ alter table public.youtube_publish_receipts
 alter table public.youtube_publish_authorizations
   add column if not exists expires_at timestamptz not null default (now() + interval '30 minutes');
 
+-- Grants that already exist expire 30 minutes after they were granted, not after this migration.
+update public.youtube_publish_authorizations
+  set expires_at = granted_at + interval '30 minutes'
+  where consumed_at is null;
+
 -- Reversible: drop the expires_at column; delete 'pending' rows, then restore the old
 -- check without 'pending'.
