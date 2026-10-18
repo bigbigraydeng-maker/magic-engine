@@ -347,6 +347,81 @@ describe('「等你点头」标签', () => {
     expect(JSON.parse(String(decide!.init?.body))).toEqual({ resolution: 'approve', expectedDecisionId: 'dec-1' })
   })
 
+  /**
+   * 🔴 下面三条补的是面板顶部红字点名、却一条测试都没有的分支（独立审查 2026-10-18 指出）。
+   * 这些行有史以来第一次被搬动，是补测试最便宜的时刻；删掉任何一条分支，原来全都照绿。
+   */
+  function panelFetch(decideReply: Record<string, unknown>, status = 200) {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const fn = vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.includes('/ad-health/auto-pause/')) {
+        return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(decideReply) })
+      }
+      if (url.includes('/ad-health/auto-pause')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            items: [{
+              runId: 'run-1', expectedDecisionId: 'dec-1', adsetId: '123', adsetName: '物流组',
+              adAccountId: 'act_1', diagnosisTitle: '花钱没结果', insightDate: '2026-10-17',
+              createdAt: '2026-10-17T00:00:00Z',
+            }],
+            hasMore: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(respond([])) })
+    })
+    return { fn, calls }
+  }
+
+  async function openPanel() {
+    render(<AdsHealthPage />)
+    await userEvent.click(await screen.findByText('等你点头'))
+    await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
+  }
+
+  it('签了但没停成（200 + ok:false）必须说出来——不许让人以为广告停了', async () => {
+    const { fn } = panelFetch({ ok: false, humanReason: '广告组已被别处改过' })
+    vi.stubGlobal('fetch', fn)
+    await openPanel()
+
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+
+    await waitFor(() => expect(screen.getByText(/没暂停成：广告组已被别处改过——广告还在投/)).toBeTruthy())
+  })
+
+  it('409（你看的不是最新的）要提示重看，不许自己换个 id 再提交', async () => {
+    const { fn, calls } = panelFetch({ error: '这条已经变了' }, 409)
+    vi.stubGlobal('fetch', fn)
+    await openPanel()
+
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+
+    await waitFor(() => expect(screen.getByText(/列表已刷新，请再看一遍/)).toBeTruthy())
+    // 只提交过一次，没有拿新 id 重试
+    expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(1)
+  })
+
+  it('驳回必须带理由；理由留空就不发请求', async () => {
+    const { fn, calls } = panelFetch({ ok: true, kind: 'done' })
+    vi.stubGlobal('fetch', fn)
+    vi.stubGlobal('prompt', vi.fn(() => ''))
+    await openPanel()
+
+    await userEvent.click(screen.getByText('驳回'))
+    expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(0)
+
+    vi.stubGlobal('prompt', vi.fn(() => '这个组我要留着'))
+    await userEvent.click(screen.getByText('驳回'))
+
+    await waitFor(() => expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(1))
+    const body = JSON.parse(String(calls.find((c) => c.url.includes('/decision'))!.init?.body))
+    expect(body).toEqual({ resolution: 'reject', expectedDecisionId: 'dec-1', reason: '这个组我要留着' })
+  })
+
+
   it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
     searchParamsValue = new URLSearchParams('tab=approvals')
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))

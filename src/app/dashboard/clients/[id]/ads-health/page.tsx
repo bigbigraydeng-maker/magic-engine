@@ -19,6 +19,7 @@ import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
 import AutoPausePanel from './auto-pause-panel'
+import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
@@ -505,20 +506,6 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
-type PageTab = 'today' | 'ads' | 'approvals' | 'settings'
-const PAGE_TABS: Array<{ key: PageTab; label: string; hint: string }> = [
-  { key: 'today', label: '今天看这里', hint: '三句话：池子、频率、今天调什么' },
-  { key: 'ads', label: '每条广告', hint: '逐条体检' },
-  { key: 'approvals', label: '等你点头', hint: '这个客户等人点头的广告动作' },
-  { key: 'settings', label: '目标与设置', hint: '每天预算上限、自动化、可投视频' },
-]
-
-/** 网址里 `?tab=` 认的值；认不出的一律落回「今天看这里」，不报错。 */
-function tabFromQuery(raw: string | null): PageTab {
-  return PAGE_TABS.some(t => t.key === raw) ? (raw as PageTab) : 'today'
-}
-
-
 function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => void }) {
   return (
     <div className="mb-5 flex gap-1 border-b border-gray-200">
@@ -658,28 +645,22 @@ export default function AdsHealthPage() {
       )}
 
       {/*
-        「等你点头」标签 —— 第一步只放门牌和直达链接，真内容下一步才搬进来
+        「等你点头」标签 —— 这个客户等人点头的广告动作，就在这一页批
         （设计稿 `docs/specs/2026-10-18-ads-door-merge-design-v0.1.md` §5 步 1/2）。
 
-        为什么先立这个标签而不是一次搬完：批准那条链路一个字都不能碰错，
-        所以把「加标签」和「搬批准页」拆成两刀，第二刀单独过一次审查。
-        这一刀不取任何数据、不渲染任何按钮，所以它不可能影响批准行为。
+        🔴 **这个标签就在批准链路上**：它取待批准列表、渲染「批准（立刻暂停）」按钮，
+        点下去直接走 `POST .../ad-health/auto-pause/[runId]/decision`。
+        改这一块等于改批准入口 —— 要过「请求的网址、方法、请求体一个字没变」那道审查。
+        （第一步只立了门牌、不取数据；那句话从第二步搬进真内容起就不成立了。）
 
-        🔴 这里**不要**自己拼批准页的网址：它只有一个来源，就是
-        `kernel/dedicated-approval-entries.ts` 那张登记表（待办的链接也从它取）。
-        搬完之后改那张表的 `path()` 一处，待办和这里会一起跟着走。
+        介绍文案在面板自己里头，这里不要再写一遍（两段同话会在屏幕上出现两遍）。
       */}
       {tab === 'approvals' && (
         <div className="space-y-4">
-          <div className="rounded-lg border border-gray-200 bg-white p-5">
-            <p className="mb-1 text-sm text-gray-700">
-              系统发现这些广告组连续花钱没结果，建议暂停。点「批准」立刻暂停（不用去 Meta 后台）。
-            </p>
-            <p className="text-xs text-gray-400">
-              通用审批页对这类动作只签字、不执行（那边是批不了的），要批就在这里。
-            </p>
-          </div>
-          {/* 这一块是从旧的专属页整段搬过来的；两个接口的网址、方法、请求体一个字没动。 */}
+          <p className="text-xs text-gray-400">
+            通用审批页对这类动作只签字、不执行（那边是批不了的），要批就在这里。
+          </p>
+          {/* 从旧的专属页整段搬来；两个接口的网址、方法、请求体一个字没动。 */}
           <AutoPausePanel clientId={clientId} />
         </div>
       )}
