@@ -50,3 +50,40 @@
 ## 复核更正（独立复核 2026-10-18）
 - **引用错误：** 「手册 §27 记录新广告组在同一 CBO 里抢走花费」不成立。§27 讲的是 NAL 无效链接事故；抢钱案例在 **§十八**（CTS 9-24），而且新增的是「广告」不是「广告组」，在已有广告组里吃了约 85%。RL-05 引的也是 §十八。
 - **「合并冷热」与 CTS 方案同向改为存疑：** 「不特意缩窄年龄」不等于「合并冷热」；CTS v3.1 恰恰把收割与拉新拆成两组。
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "scale-and-test-campaigns",
+   "text": "放量 + 测试两个系列",
+   "state": "learning",
+   "note": "复核更正后：引用位置已更正，结论不变"
+  },
+  {
+   "key": "ten-hooks",
+   "text": "一条视频配 10 个开头",
+   "state": "merged",
+   "merged_into": "2026-10-18-meta-ads-creative-testing-post-andromeda#hook-test"
+  },
+  {
+   "key": "creators",
+   "text": "用创作者/网红做广告",
+   "state": "pm_decision"
+  },
+  {
+   "key": "creator-marketplace",
+   "text": "平台免费的创作者市场",
+   "state": "pm_decision"
+  },
+  {
+   "key": "eighty-pct-scale",
+   "text": "结果好时 80% 预算给放量",
+   "state": "not_applicable",
+   "note": "无数据"
+  }
+ ]
+}
+```

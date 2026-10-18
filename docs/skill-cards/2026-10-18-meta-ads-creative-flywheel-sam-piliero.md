@@ -52,3 +52,48 @@
 - **「不要怕学习期」冲突改为部分成立：** 手册 §13 的教训是「反复改动已有广告组」；ME 自己的 §27/RL-05 主张每批新素材另建新组，与 Sam 一致。真正冲突的是「到期撤下限」这类改动在投组的动作。
 - **新增遗漏冲突：** Sam 的「7 天后撤下限」属于改在投组预算，撞 **C-06（冻结 7 天）与 B-04（72 小时一次、±20%）**。
 - **「ME 已有广告资料库只读工具」存疑：** 当前 `src` 搜不到，仅 2026-07 归档路线图有 Apify Ads Collector；是否可用没读到原文。
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "adset-min-spend",
+   "text": "广告组设日最低花费，保证新素材有曝光",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-119-exploration-floor-mechanism"
+  },
+  {
+   "key": "ads-library-long-running",
+   "text": "去广告资料库找同行投放最久的广告",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-competitor-long-running-ads"
+  },
+  {
+   "key": "new-adset-per-batch",
+   "text": "新素材每批放一个新广告组",
+   "state": "already_in_me",
+   "rule": "RL-05"
+  },
+  {
+   "key": "keep-above-breakeven",
+   "text": "多个概念并存，高于盈亏线就保留",
+   "state": "learning",
+   "note": "原判已有一致，但没找到对应规则编号"
+  },
+  {
+   "key": "incremental-roas",
+   "text": "增量归因对比、按回报倍数排序",
+   "state": "not_applicable",
+   "note": "电商口径"
+  },
+  {
+   "key": "dont-fear-learning",
+   "text": "不要怕学习期",
+   "state": "learning",
+   "note": "复核更正后：部分成立（每批新素材另建新组一致）；到期撤下限撞 C-06/B-04"
+  }
+ ]
+}
+```

@@ -60,3 +60,54 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "impression-cap",
+   "text": "每条广告到一定曝光就关，逼平台分钱给别的",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-119-exploration-floor-mechanism"
+  },
+  {
+   "key": "no-split",
+   "text": "小预算别拆多系列",
+   "state": "already_in_me",
+   "rule": "S-01"
+  },
+  {
+   "key": "small-steps",
+   "text": "放量小步走",
+   "state": "already_in_me",
+   "rule": "B-04"
+  },
+  {
+   "key": "ctr-pick-winner",
+   "text": "用点击率/千次成本直接选赢家",
+   "state": "not_applicable",
+   "note": "只能预筛（AT§1a）"
+  },
+  {
+   "key": "lp-equal-budget",
+   "text": "等额预算比落地页",
+   "state": "not_applicable",
+   "note": "等额预算不等于公平分流"
+  },
+  {
+   "key": "ecom-thresholds",
+   "text": "加购率、结账掉幅、回报倍数阈值",
+   "state": "not_applicable",
+   "note": "电商口径"
+  },
+  {
+   "key": "self-claims",
+   "text": "「营收涨 45%」等自述",
+   "state": "not_applicable",
+   "note": "自述无报表"
+  }
+ ]
+}
+```
