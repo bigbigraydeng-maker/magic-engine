@@ -63,3 +63,65 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "warm-spend-split",
+   "text": "拉新组有多少钱花到已互动/老客户身上",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-new-vs-warm-spend-split",
+   "note": "初步：按系列冷暖各约一半，核心问题未验"
+  },
+  {
+   "key": "value-rules",
+   "text": "价值规则：给某类人群出价加成",
+   "state": "learning"
+  },
+  {
+   "key": "three-tier-report",
+   "text": "标出新人/互动过/老客户三层并按层看报表",
+   "state": "learning"
+  },
+  {
+   "key": "twenty-per-adset",
+   "text": "每组放 20 条素材",
+   "state": "not_applicable",
+   "note": "与 SOP §0 实测冲突"
+  },
+  {
+   "key": "creator-ads",
+   "text": "和创作者合作投广告",
+   "state": "pm_decision",
+   "note": "外部执行方、花钱"
+  },
+  {
+   "key": "creative-test-tool",
+   "text": "平台创意测试功能",
+   "state": "merged",
+   "merged_into": "2026-10-18-meta-ads-creative-testing-post-andromeda#native-creative-test"
+  },
+  {
+   "key": "merge-data",
+   "text": "冷热合并，数据不切碎",
+   "state": "learning",
+   "note": "部分吸收：只有「别把数据切碎」一致"
+  },
+  {
+   "key": "entry-price",
+   "text": "入口产品要么很便宜要么很贵",
+   "state": "not_applicable",
+   "note": "个人经验无数据"
+  },
+  {
+   "key": "whatsapp-funnel",
+   "text": "广告直接进 WhatsApp",
+   "state": "already_in_me",
+   "rule": "PL§三"
+  }
+ ]
+}
+```

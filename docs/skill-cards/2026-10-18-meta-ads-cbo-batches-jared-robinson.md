@@ -58,3 +58,54 @@
 ## 复核更正（独立复核 2026-10-18）
 - **「真人出镜要客户和 PM 同意」存疑：** CLAUDE.md 第 8 条只规定视频走视频工厂与配方对账，没有这句；规则 C-10⑥ 反而要求前 2 秒有真人，ME 自己偏好真人。
 - **「CBO 给每条同等机会」忽略的依据保持，但「与 ME 实测相反」的证据位置需 74 号核对。**
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "angle-format-tag",
+   "text": "每条素材记两层标签：卖点角度 + 素材形式",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-119-creative-format-tag"
+  },
+  {
+   "key": "cbo-equal-chance",
+   "text": "CBO 给每条广告同等机会",
+   "state": "not_applicable",
+   "note": "与 ME 实测相反（SOP §4 一条吃掉 64.9%）"
+  },
+  {
+   "key": "many-per-adset",
+   "text": "每组放 15–30 条素材",
+   "state": "not_applicable",
+   "note": "素材产能与预算量级不适用"
+  },
+  {
+   "key": "batch-adsets",
+   "text": "按批建广告组、排除老客户、7 天后再看",
+   "state": "already_in_me",
+   "rule": "RL-05"
+  },
+  {
+   "key": "founder-video",
+   "text": "创始人出镜长视频、故事型长视频",
+   "state": "pm_decision",
+   "note": "复核更正后：ME 偏好真人出镜（C-10），但无效果数据"
+  },
+  {
+   "key": "testimonial-images",
+   "text": "客户评价配产品图",
+   "state": "learning",
+   "note": "须用客户真实评价"
+  },
+  {
+   "key": "bnpl-offer",
+   "text": "用「先买后付」等优惠消除价格顾虑",
+   "state": "pm_decision",
+   "note": "涉及客户定价与支付方式"
+  }
+ ]
+}
+```

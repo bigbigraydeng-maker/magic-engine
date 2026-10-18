@@ -57,3 +57,48 @@
 - **「ME 按行业剧本设基线」不成立：** `playbooks/` 只放 3 个措辞字段，`thresholds.ts` 写明行业先验本阶段不做。电商数字不搬的真正依据是规则 **E-06「不借用无出处数字」**。
 - **落地页「产品页非首页」改为存疑：** 手册 §八 只说去查落地页/报价，没写「具体页优于首页」。
 - **点击率×点击成本矩阵：** 手册 §八 是 CTR×频次，没有点击成本这一维，只是部分重叠。
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "basics",
+   "text": "落地页、盈亏单个成本、别突然猛加预算、合规",
+   "state": "already_in_me",
+   "rule": "B-04",
+   "note": "复核更正后：「产品页优于首页」一项存疑"
+  },
+  {
+   "key": "keep-advantage-plus",
+   "text": "保持 Advantage+ 受众开启、只控地区",
+   "state": "learning",
+   "note": "复核更正后：ME 方向审计同意开启，代码仍强制关闭，待 119 号定"
+  },
+  {
+   "key": "metric-tier-numbers",
+   "text": "3 秒播放率/点击率/单个成本的分档数字",
+   "state": "not_applicable",
+   "note": "电商数字无出处，不借用（E-06）"
+  },
+  {
+   "key": "ctr-cpc-matrix",
+   "text": "点击率×点击成本组合判断",
+   "state": "learning",
+   "note": "复核更正后：手册只有点击率×频次，部分重叠"
+  },
+  {
+   "key": "start-next-midnight",
+   "text": "开始时间设次日 0 点，避免当天烧完预算",
+   "state": "learning"
+  },
+  {
+   "key": "min-daily-budget",
+   "text": "日预算至少 25–30 美元",
+   "state": "not_applicable",
+   "note": "数字无出处，不借用（E-06）"
+  }
+ ]
+}
+```

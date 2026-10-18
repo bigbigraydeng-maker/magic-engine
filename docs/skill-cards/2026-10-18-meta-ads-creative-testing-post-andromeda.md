@@ -58,3 +58,55 @@
 - **「全仓检索不到 Andromeda」不成立：** 仓库 8 处命中，2026-08-14 方向审计整份按 Andromeda 时代展开。只有「相似创意被合并只投一条」这一细点确实没有记录。原卡把范围说成「全仓」是我检索范围太窄（只搜了 docs/sops、docs/specs、src/lib/ads-strategy 与记忆）。
 - **「先测大差异、后测细节与 ME 一致」改为存疑：** SOP 里没有这条。
 - **「CTS 3 条候选是同格式」未在所读 ME 文档里得到支持：** 来自我对池内素材的印象，需 74 号核对；这也是它验证的第一件事。
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "pick-right-metric",
+   "text": "比较指标选成留资/成交成本，别用默认互动成本",
+   "state": "already_in_me",
+   "rule": "PG§十二"
+  },
+  {
+   "key": "similar-merged",
+   "text": "长得像的素材会被平台合并只投一条",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-similar-creatives-merged",
+   "note": "初步：分钱极不均但不是只投一条，10/21 正式核实"
+  },
+  {
+   "key": "native-creative-test",
+   "text": "用平台自带的创意测试/A/B 做公平比较",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-119-exploration-floor-mechanism"
+  },
+  {
+   "key": "hook-test",
+   "text": "少做完整视频，多做不同开头，分流测试",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-106-74-hook-variants"
+  },
+  {
+   "key": "no-20-creatives",
+   "text": "不必一次做 20 条，选能坚持的节奏",
+   "state": "learning",
+   "note": "原判已有一致，但没找到对应规则编号"
+  },
+  {
+   "key": "big-diff-first",
+   "text": "先测大差异，后测细节",
+   "state": "learning",
+   "note": "复核更正后：SOP 无此条，存疑"
+  },
+  {
+   "key": "hyros",
+   "text": "用 Hyros 做归因",
+   "state": "not_applicable",
+   "note": "第三方工具推广"
+  }
+ ]
+}
+```

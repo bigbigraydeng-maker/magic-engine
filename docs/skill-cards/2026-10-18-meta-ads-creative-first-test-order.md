@@ -58,3 +58,40 @@
 
 ## 复核更正（独立复核 2026-10-18）
 - **遗漏冲突（S-12）：** 规则 S-12 要求测试用 ABO；而 CTS 自己的方案（v3 动作 2）是在 CBO 下同时跑前两周测试。本卡「测素材用 ABO、放量用 CBO 吸收（已有一致）」应改为「与 S-12 一致，但 CTS 方案本身与 S-12 有出入，需 74 号确认」。
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "test-vs-scale",
+   "text": "测试和放量是两回事，测试好成绩不等于能放量",
+   "state": "learning"
+  },
+  {
+   "key": "creative-before-audience",
+   "text": "先测素材、后测人群",
+   "state": "learning"
+  },
+  {
+   "key": "one-four-one",
+   "text": "4 个组共用 1 条素材测人群（1:4:1）",
+   "state": "not_applicable",
+   "note": "对 CTS 预算和受众量级不适用"
+  },
+  {
+   "key": "ctr-pick-winner",
+   "text": "用点击率/点击成本选素材赢家",
+   "state": "not_applicable",
+   "note": "判定信号须与目标一致（AT§1a）"
+  },
+  {
+   "key": "abo-test-cbo-scale",
+   "text": "测素材用 ABO、放量用 CBO",
+   "state": "learning",
+   "note": "复核更正后：与 S-12 一致，但 CTS 方案在 CBO 下测，需 74 号确认"
+  }
+ ]
+}
+```
