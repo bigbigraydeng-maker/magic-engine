@@ -999,3 +999,62 @@ describe('按客户点名真发(Publer 绑了账号 ≠ 客户同意自动跟发
     expect(instagramLiveClients({}).size).toBe(0)
   })
 })
+
+describe('ig_crosspost_blocked:受控转公开动作盖章的工单不进 Instagram 跟发', () => {
+  const blocked = (c: CrosspostCandidate): CrosspostCandidate => ({ ...c, published_ref: { ...c.published_ref, ig_crosspost_blocked: true } })
+
+  it('决策:本来会存草稿的工单带标记 → 什么都不发,不调 Publer', async () => {
+    const { store } = makeStore([blocked(makeCandidate({ fbVideoState: 'PUBLISHED' }))])
+    const { adapter, publishCalls, findExistingCalls } = makeAdapter()
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter }))
+    expect(out.result).toBe('no_candidate')
+    expect(publishCalls).toHaveLength(0)
+    expect(findExistingCalls).toHaveLength(0)
+  })
+
+  it('对账:卡在 creating 的工单带标记 → 不去 Publer 对账,回执原样不动', async () => {
+    const candidate = blocked(makeCandidate())
+    candidate.output = {
+      ...candidate.output,
+      instagram_publish: {
+        schema_version: 1, status: 'creating', work_order_id: WO_ID, client_id: CLIENT_ID, publer_account_id: 'acct_12345678',
+        request_id: 'aaaaaaaa-0000-4000-8000-000000000000', attempts: 0, media_id: 'media-0000-old', first_comment_requested: true,
+        no_publish: false, authorization: 'AUTHORIZED', cost_usd: 0,
+        created_at: '2024-01-01T00:00:00.000Z', updated_at: '2024-01-01T00:00:00.000Z',
+      },
+    }
+    const { store, rows } = makeStore([candidate])
+    const { adapter, publishCalls, findExistingCalls } = makeAdapter({ existing: null })
+    const now = new Date('2024-01-01T00:20:00.000Z')
+    const out = await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter, now: () => now }))
+    expect(out.result).toBe('no_candidate')
+    expect(findExistingCalls).toHaveLength(0)
+    expect(publishCalls).toHaveLength(0)
+    expect(readReceipt(rows.get(WO_ID)?.output)?.status).toBe('creating')
+  })
+
+  it('补发事件:已有 scheduled 回执但没事件的工单带标记 → 不补发', async () => {
+    const plain = makeCandidate()
+    const { store: seedStore, rows: seedRows } = makeStore([plain])
+    const { adapter } = makeAdapter()
+    const seedDeps = makeDeps({ store: seedStore, adapter, emit: makeEmit(async () => { throw new Error('inngest down') }).emit })
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, seedDeps)
+    const seeded = seedRows.get(WO_ID)
+    expect(readReceipt(seeded?.output)?.event_ids).toBeUndefined()
+
+    const { store } = makeStore([blocked(seeded as CrosspostCandidate)])
+    const { emit, calls } = makeEmit()
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter, emit }))
+    expect(calls).toHaveLength(0)
+  })
+
+  it('对照:同样的工单没带标记 → 补发会发出(证明上面的 0 次不是夹具问题)', async () => {
+    const { store: seedStore, rows: seedRows } = makeStore([makeCandidate()])
+    const { adapter } = makeAdapter()
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store: seedStore, adapter, emit: makeEmit(async () => { throw new Error('inngest down') }).emit }))
+    const { store } = makeStore([seedRows.get(WO_ID) as CrosspostCandidate])
+    const { emit, calls } = makeEmit()
+    await runInstagramCrosspost({ live: true, liveClientIds: LIVE_CLIENTS, enabledClients: ENABLED }, makeDeps({ store, adapter, emit }))
+    expect(calls).toHaveLength(1)
+  })
+})
