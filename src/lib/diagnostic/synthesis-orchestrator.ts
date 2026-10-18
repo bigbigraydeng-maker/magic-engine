@@ -139,7 +139,7 @@ export async function runSynthesis(
 
   // Rate limit (auto-run only — manual /synthesize sets force=true)
   if (!input.force) {
-    const allowed = await isAutoRunAllowed(supabase, input.clientId)
+    const allowed = await isAutoRunAllowed(supabase, input.clientId, input.runId)
     if (!allowed) {
       return { ...emptyResult, skipped_reason: 'rate_limited_24h' }
     }
@@ -285,19 +285,88 @@ export async function runSynthesis(
 }
 
 // ---------------------------------------------------------------------------
+// Receipt summariser — compact status for the manual endpoint / logs
+// ---------------------------------------------------------------------------
+
+export type SynthesisReceiptState = 'ok' | 'partial' | 'failed' | 'skipped'
+
+export interface SynthesisReceipt {
+  state: SynthesisReceiptState
+  failed_modules: string[]
+  errors: string[]
+  skipped_reason?: string
+  total_cost_usd: number
+}
+
+const MAX_ERROR_LEN = 200
+
+export function summarizeSynthesis(result: OrchestratorResult): SynthesisReceipt {
+  if (!result.ran) {
+    return {
+      state: 'skipped',
+      failed_modules: [],
+      errors: [],
+      skipped_reason: result.skipped_reason,
+      total_cost_usd: result.total_cost_usd,
+    }
+  }
+
+  const failedModules: string[] = []
+  const errors: string[] = []
+  let okCount = 0
+
+  // Iterate in the modules object's own order for stable output.
+  for (const [key, status] of Object.entries(result.modules)) {
+    if (status.state === 'failed') {
+      failedModules.push(key)
+      const msg = `${key}: ${status.error}`
+      errors.push(msg.length > MAX_ERROR_LEN ? msg.slice(0, MAX_ERROR_LEN) : msg)
+    } else if (status.state === 'ok') {
+      okCount += 1
+    }
+  }
+
+  const state: SynthesisReceiptState =
+    failedModules.length === 0 ? 'ok'
+    : okCount === 0 ? 'failed'
+    : 'partial'
+
+  return {
+    state,
+    failed_modules: failedModules,
+    errors,
+    total_cost_usd: result.total_cost_usd,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Rate limit: at most one auto-run per client per 24h
 // ---------------------------------------------------------------------------
 
+/**
+ * Counts ATTEMPTS, not narrative rows.
+ *
+ * The old check looked for rows in `diagnostic_narratives` written in the
+ * last 24h. That table was empty for a long time (persistence was failing),
+ * so the limiter never fired and every weekly diagnostic spent LLM money.
+ * Instead we treat "a completed diagnostic run with findings for this client
+ * in the last 24h" as proof that synthesis was already attempted — that
+ * signal is written by runner.persistResult regardless of synthesis success.
+ */
 async function isAutoRunAllowed(
   supabase: SupabaseClient,
   clientId: string,
+  currentRunId: string,
 ): Promise<boolean> {
   const cutoff = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString()
   const { data, error } = await supabase
-    .from('diagnostic_narratives')
-    .select('id, generated_at')
+    .from('diagnostic_runs')
+    .select('id')
     .eq('client_id', clientId)
-    .gte('generated_at', cutoff)
+    .neq('id', currentRunId)
+    .eq('status', 'completed')
+    .gt('findings_count', 0)
+    .gte('created_at', cutoff)
     .limit(1)
 
   if (error) {
@@ -307,8 +376,8 @@ async function isAutoRunAllowed(
     // safer default is to skip this auto-run; FDE can force-rerun via the
     // manual endpoint if they genuinely need narratives now.
     console.warn(
-      `[synthesis-orchestrator] rate-limit check failed for client ${clientId}, ` +
-      `fail-closed (no auto-synthesis this run):`,
+      `[synthesis-orchestrator] rate-limit check failed for client ${clientId} ` +
+      `(diagnostic_runs), fail-closed (no auto-synthesis this run):`,
       error.message,
     )
     return false

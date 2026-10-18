@@ -187,6 +187,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 同 ai_tracker_all_failed 的 how 原文就写「这条不用你动手」，不该进 PM 动手栏
   // （Codex 复审 2026-09-28）。
   ai_tracker_all_failed_dev: 'dev',
+  diagnostic_synthesis_failing: 'dev', // 体检叙事没写成：我们的欠账，不用 PM 动手
   ai_gateway_broken: 'dev',
   playbook_reference_stale: 'dev',
   platform_connection_pipeline_down: 'dev',

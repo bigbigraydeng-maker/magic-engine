@@ -99,6 +99,8 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  /** 体检的 AI 文字叙事没写成（保存失败/模型失败）—— 开发欠账，不用 PM 动手（2026-10-18）。 */
+  | 'diagnostic_synthesis_failing'
   | 'promo_plan_watch'
   | 'promo_plan_watch_broken'
   | 'blog_pr_open'
