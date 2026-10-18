@@ -31,18 +31,19 @@ type NavItem = {
   /** Feature label shown in the upsell modal when self_serve clicks this. */
   paidOnlyFeature?: string
 }
-type NavSection = { title?: string; items: NavItem[] }
+type NavSection = { title?: string; items: NavItem[]; /** Folded by default; opens by itself when it holds the current page. */ collapsed?: boolean }
 
-const ADMIN_SECTIONS: NavSection[] = [
+export const ADMIN_SECTIONS: NavSection[] = [
   {
     items: [
       { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
       { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
+      { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],
   },
   {
-    title: 'Create',
+    title: '出片与内容',
     items: [
       // 每天高频入口:看片 + 拍板。页面早就存在,但此前全站没有任何链接指向它,
       // 只能手敲 URL —— 等于不存在。排在本组第一位是因为它是日常最常来的地方。
@@ -50,28 +51,38 @@ const ADMIN_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Operate',
+    title: '广告与客人',
     items: [
-      { key: 'analytics',        label: 'Analytics',       mark: 'AN', href: '/dashboard/analytics' },
-      { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
-      { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
-      { key: 'mtc-overview',     label: 'MTC Overview',    mark: 'MC', href: '/dashboard/admin/mtc-overview' },
-      { key: 'ai-gateway',       label: 'AI Gateway',      mark: 'AG', href: '/dashboard/admin/ai-gateway' },
-      { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
-      { key: 'user-console',     label: 'User Console',    mark: 'UC', href: '/dashboard/admin/users' },
-      { key: 'prospecting',      label: 'Prospecting',     mark: 'PS', href: '/dashboard/admin/prospecting' },
-      { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
-      { key: 'cron-health',     label: 'Cron Health',     mark: 'CH', href: '/dashboard/admin/cron-health' },
-      { key: 'commerce',        label: '选品工作台',       mark: 'PI', href: '/dashboard/commerce' },
       { key: 'ad-engine',       label: '广告',             mark: 'AE', href: '/dashboard/ad-engine' },
-      { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
+      { key: 'voice',            label: '电话',           mark: 'VO', href: '/dashboard/voice' },
+      { key: 'conversions',      label: '转化',           mark: 'CV', href: '/dashboard/conversions' },
+      { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
+    ],
+  },
+  {
+    title: '账务与客户管理',
+    collapsed: true,
+    items: [
+      { key: 'mtc-overview',     label: 'MTC Overview',    mark: 'MC', href: '/dashboard/admin/mtc-overview' },
+      { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
+      { key: 'prospecting',      label: 'Prospecting',     mark: 'PS', href: '/dashboard/admin/prospecting' },
+      { key: 'user-console',     label: 'User Console',    mark: 'UC', href: '/dashboard/admin/users' },
+      { key: 'commerce',        label: '选品工作台',       mark: 'PI', href: '/dashboard/commerce' },
+    ],
+  },
+  {
+    title: '系统与诊断',
+    collapsed: true,
+    items: [
+      { key: 'workflows-health', label: '自动任务健康',   mark: 'WH', href: '/dashboard/workflows-health' },
+      { key: 'cron-health',     label: 'Cron Health',     mark: 'CH', href: '/dashboard/admin/cron-health' },
+      { key: 'ai-gateway',       label: 'AI Gateway',      mark: 'AG', href: '/dashboard/admin/ai-gateway' },
+      { key: 'mcp-keys',         label: 'MCP Keys',       mark: 'MK', href: '/dashboard/admin/mcp-keys' },
+      { key: 'flywheel',         label: 'Flywheel',       mark: 'FW', href: '/dashboard/admin/flywheel' },
+      { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
+      { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
       { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
       { key: 'product-map',     label: 'ME2 产品地图',    mark: 'PM', href: '/dashboard/me2/product-map' },
-      { key: 'voice',            label: '电话',           mark: 'VO', href: '/dashboard/voice' },
-      { key: 'workflows-health', label: '自动任务健康',   mark: 'WH', href: '/dashboard/workflows-health' },
-      { key: 'conversions',      label: '转化',           mark: 'CV', href: '/dashboard/conversions' },
-      { key: 'flywheel',         label: 'Flywheel',       mark: 'FW', href: '/dashboard/admin/flywheel' },
-      { key: 'mcp-keys',         label: 'MCP Keys',       mark: 'MK', href: '/dashboard/admin/mcp-keys' },
     ],
   },
 ]
@@ -311,18 +322,29 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
             />
           ) : (
             ADMIN_SECTIONS.map((section, i) => (
-              <div key={i} className="mb-4">
-                {section.title && (
-                  <p className="mb-1.5 px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22">
-                    {section.title}
-                  </p>
-                )}
-                <div className="space-y-[2px]">
-                  {section.items.map(item => (
-                    <NavLink key={item.key} item={item} active={item.key === activeKey} />
-                  ))}
+              section.collapsed ? (
+                <details key={i} className="mb-4" open={section.items.some(item => item.key === activeKey)}>
+                  <summary className="mb-1.5 cursor-pointer select-none px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22 hover:text-white/40">{section.title} ▾</summary>
+                  <div className="space-y-[2px]">
+                    {section.items.map(item => (
+                      <NavLink key={item.key} item={item} active={item.key === activeKey} />
+                    ))}
+                  </div>
+                </details>
+              ) : (
+                <div key={i} className="mb-4">
+                  {section.title && (
+                    <p className="mb-1.5 px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22">
+                      {section.title}
+                    </p>
+                  )}
+                  <div className="space-y-[2px]">
+                    {section.items.map(item => (
+                      <NavLink key={item.key} item={item} active={item.key === activeKey} />
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )
             ))
           )}
         </nav>
