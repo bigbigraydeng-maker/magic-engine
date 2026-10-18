@@ -226,6 +226,22 @@ fi
   && probe "Meta Graph" "https://graph.facebook.com/v21.0/me?access_token=${META_SYSTEM_USER_TOKEN}" "200" \
   || row "$WARN" "Meta Graph" "跳过 — 缺 META_SYSTEM_USER_TOKEN"
 
+# 每客户一把的 Meta 令牌（META_SYSTEM_USER_TOKEN_*）：只读 debug_token 自检。
+# 只打印变量名和结论，**永不打印令牌值**；令牌走 curl 配置的 stdin，不出现在进程参数里。
+# 失效（常见：线上换了钥匙但本机副本没跟上）→ 跑 npx tsx scripts/sync-meta-keys.ts 从线上同步。
+for name in $(compgen -e | grep '^META_SYSTEM_USER_TOKEN_' | sort); do
+  tok="${!name}"
+  [ -n "$tok" ] || continue
+  resp=$(printf 'data-urlencode = "input_token=%s"\ndata-urlencode = "access_token=%s"\n' "$tok" "$tok" \
+    | curl -s --max-time 12 -G -K - "https://graph.facebook.com/v21.0/debug_token" 2>/dev/null || true)
+  verdict=$(printf '%s' "$resp" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);const d=j.data||{};const e=d.error||j.error||{};if(d.is_valid===true){console.log("valid")}else if(d.is_valid===false||e.code===190){console.log("invalid:"+(e.code??"?")+"/"+(e.subcode??"-"))}else{console.log("unreadable")}}catch(e){console.log("unreadable")}})' 2>/dev/null || echo unreadable)
+  case "$verdict" in
+    valid)       row "$OK" "Meta 令牌 $name" "未过期（debug_token）" ;;
+    invalid:*)   row "$BAD" "Meta 令牌 $name" "已失效（${verdict#invalid:}）— 跑 npx tsx scripts/sync-meta-keys.ts 从线上同步" ;;
+    *)           row "$WARN" "Meta 令牌 $name" "读不出结果（网络或接口异常）" ;;
+  esac
+done
+
 [ -n "${UNSPLASH_ACCESS_KEY:-}" ] \
   && probe "Unsplash" "https://api.unsplash.com/photos?per_page=1" "200" \
        -H "Authorization: Client-ID ${UNSPLASH_ACCESS_KEY}" \
