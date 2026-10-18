@@ -22,6 +22,21 @@ beforeEach(() => {
   mocks.exchange.mockResolvedValue({ accessToken: 'test', refreshToken: 'test', openId: 'test-account', expiresIn: 100, scopes: ['user.info.basic', 'video.publish'] })
 })
 describe('TikTok OAuth callback safeguards', () => {
+  it('returns a trusted cancellation to the same client without exchange or persistence', async () => {
+    const response = await GET(new NextRequest('https://example.test/api/auth/tiktok/callback?error=access_denied&state=test-state', {
+      headers: { cookie: 'me_tiktok_oauth_state=test-state' },
+    }))
+    expect(response.headers.get('location')).toContain('/clients/test-client/settings?tab=connect&tiktok=denied')
+    expect(mocks.exchange).not.toHaveBeenCalled()
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(response.headers.get('set-cookie')).toContain('Max-Age=0')
+  })
+  it('does not trust cancellation without its browser state cookie', async () => {
+    const response = await GET(new NextRequest('https://example.test/api/auth/tiktok/callback?error=access_denied&state=test-state'))
+    expect(response.headers.get('location')).not.toContain('/clients/test-client/')
+    expect(mocks.access).not.toHaveBeenCalled()
+    expect(mocks.exchange).not.toHaveBeenCalled()
+  })
   it('rejects another browser before exchanging a code', async () => {
     const response = await GET(request(false))
     expect(response.headers.get('location')).toContain('bad_state')

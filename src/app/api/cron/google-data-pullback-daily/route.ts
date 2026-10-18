@@ -62,6 +62,7 @@ import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-a
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
+import { probeClientCircuit, type ClientProbe } from '@/lib/ads-strategy/circuit-probe'
 import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
@@ -122,6 +123,12 @@ interface ClientResult {
   ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
   /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
   autonomy_sync?: { sent: boolean; events: number; error?: string }
+  /**
+   * A0 只读熔断探针（观察期）：五条判据在真实数据上判出了什么。
+   * **只读、不写任何表**；这一项会被汇总进 `cron_run_logs.summary`，
+   * 因为 HTTP 响应体 Render 直接丢掉（`render.yaml` 那条 curl 不留 body）。
+   */
+  circuit_probe?: ClientProbe | { error: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -303,6 +310,15 @@ export async function GET(req: NextRequest) {
   // `clients` scan for EACH client carrying a scoped env var; sharing one
   // snapshot for the whole run avoids that per-client cost (chatgpt-codex-
   // connector review, 2026-09-21).
+  /**
+   * 熔断探针整轮用同一个「现在」（魏征复审 2026-10-18）。
+   *
+   * 客户是串行跑的，这一轮实测 104–150 秒。如果让每个客户各自 `new Date()`，
+   * 哪天拉数变慢，不同客户的「账户时区的昨天」可能落在不同日期上 ——
+   * 观察期统计时那是静默的口径漂移。取一次传下去，整轮一个口径。
+   */
+  const probeNow = new Date()
+
   let tokenOwnerPeers: TokenOwnerRow[] | null | undefined
   async function getTokenOwnerPeers(): Promise<TokenOwnerRow[] | null> {
     if (tokenOwnerPeers === undefined) tokenOwnerPeers = await loadTokenOwnerPeers(supabaseAdmin)
@@ -570,6 +586,23 @@ export async function GET(req: NextRequest) {
           result.autonomy_sync = await reconcileAutonomyMode(supabaseAdmin, client.client_id).catch(
             (e: unknown) => ({ sent: false, events: 0, error: e instanceof Error ? e.message : String(e) }),
           )
+
+          /**
+           * A0 只读熔断探针（观察期，PM 2026-10-18 批「先走只读版」）。
+           *
+           * 放这道 `=== 'row'` 闸里面：没有配置行的客户不观察。
+           * 探针自己还会再查一次 `autonomy_mode`，只对 `bounded_auto` 的客户出结论
+           * （`observe` 的客户本来不会自动动手，给它们记结论只是噪音）。
+           *
+           * 🔴 **它不写任何表**，连 `ads_circuit_events` 都不写 —— 这一点由
+           * `circuit-probe` 自己的测试扫源码钉住，不是靠这里的注释。
+           * best-effort：探针失败不影响上面已经完成的拉数 / 诊断 / 巡察。
+           */
+          result.circuit_probe = await probeClientCircuit(supabaseAdmin, {
+            clientId: client.client_id,
+            autonomyMode: adStrategyConfig.autonomy_mode,
+            now: probeNow,
+          }).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
         }
       } else {
         // Client has a Meta ad account but no usable token — surface it as a
@@ -631,7 +664,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -644,6 +677,14 @@ export async function GET(req: NextRequest) {
     if (r.ad_config?.success === false) out.push({ client_id: r.client_id, source: 'ad_config', error: r.ad_config.error })
     if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
     if (r.ads_growth_state?.error) out.push({ client_id: r.client_id, source: 'ads_growth_state', error: r.ads_growth_state.error })
+    // 2026-10-18（魏征复审）：探针的异常原先只落在 summary.circuit_probe 里，
+    // 而那个键**没有任何代码在读** —— 它可以连抛十天，失败邮件写「0 failed」、
+    // 待办一个字不提，等观察期结束有人手点开 jsonb 才发现十天全是 error。
+    // 正是铁律 3 下半「发现不许死在日志里」要防的形状。
+    // 跟 ad_level 一样 best-effort，不进 `failed`、不当邮件头条，但必须在这里出现。
+    if (r.circuit_probe && 'error' in r.circuit_probe && r.circuit_probe.error) {
+      out.push({ client_id: r.client_id, source: 'circuit_probe', error: r.circuit_probe.error })
+    }
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
     // completely invisible — not in `failed`, not here, not console.error'd —
     // the exact "looks fine, actually never worked" shape this whole PR is
@@ -673,17 +714,28 @@ export async function GET(req: NextRequest) {
   // 常年 meta 报错盖住、没人注意到（2026-09-25 事故）。
   const headlineError =
     errors.find(e => e.source === 'ad_config') ??
-    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
+    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
+
+  /**
+   * A0 观察期的回执：只留有结论的（跳过的客户不占地方），落进 `cron_run_logs.summary`。
+   * 观察期 7–10 天 = 7–10 行，够按天读；**不建新表**。
+   */
+  const circuitProbes = results
+    .map((r) => r.circuit_probe)
+    .filter((p): p is NonNullable<ClientProbe | { error: string }> => {
+      if (!p) return false
+      return 'error' in p || p.skipped === null
+    })
 
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes },
   })
   return NextResponse.json({
     success:           true,

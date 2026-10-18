@@ -9,6 +9,7 @@ import type { PublishedView } from '@/lib/factory/publish/publish-display'
 import { factoryVideoUrl } from '@/lib/factory/outlets'
 import { STATUS_META, STATUS_ORDER, publishedBadge, REASON_STATUSES, POST_PUBLISH } from './_components/statusMeta'
 import { ReviewInbox } from './_components/ReviewInbox'
+import { PromoteReelButton, promoteEntry } from './_components/PromoteReelButton'
 
 // P21.J 驾驶舱 — 看片 + 对话框 + 全局工单状态,一页搞定(PM:factory 页 = 驾驶舱)
 // 顶部审片区复用 ReviewInbox(clientId)= 按「待审 / 已通过 / 已打回」分段的小卡审核区;
@@ -263,6 +264,9 @@ export default function FactoryCockpitPage() {
                               </p>
                             )
                           })()}
+                          {promoteEntry(o) && (
+                            <div className="mt-2"><PromoteReelButton orderId={o.id} commentOnly={promoteEntry(o) === 'comment'} onDone={() => { void load() }} /></div>
+                          )}
                           <p className="text-xs text-slate-400 mt-1">
                             成本 ${Number(o.actual_cost_usd).toFixed(2)} / 上限 ${Number(o.budget_cap_usd).toFixed(2)}
                             {o.attempt_count > 0 ? ` · 尝试 ${o.attempt_count}` : ''}

@@ -6,7 +6,8 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { getClientChannelId } from '@/lib/youtube-publish/store'
 import {
   YOUTUBE_STATE_COOKIE,
   isValidChannelId,
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest) {
   }
   const [nonce, clientId, channelId] = rawCookie.split(':')
   const code = req.nextUrl.searchParams.get('code')
-  if (!code) {
+  if (!code && !req.nextUrl.searchParams.get('error')) {
     return NextResponse.json({ error: 'Authorization code missing from callback' }, { status: 400 })
   }
   if (req.nextUrl.searchParams.get('state') !== nonce) {
@@ -44,12 +45,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'State cookie malformed' }, { status: 400 })
   }
 
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requireGlobalAdmin()
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
+  // The cookie is only a CSRF nonce carrier: the channel to lock comes from client configuration,
+  // so a hand-built cookie cannot choose which channel gets connected.
+  const configuredChannel = await getClientChannelId(clientId)
+  if (!configuredChannel || configuredChannel !== channelId) {
+    return NextResponse.json({ error: 'Channel does not match client configuration' }, { status: 400 })
+  }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? ''
+  // Validate browser state, staff access and target before using clientId on cancellation.
+  if (req.nextUrl.searchParams.get('error')) return destination(appUrl, clientId, 'error', 'authorization_cancelled')
+  if (!code) return destination(appUrl, clientId, 'error', 'token_exchange_failed')
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

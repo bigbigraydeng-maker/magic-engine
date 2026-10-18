@@ -239,7 +239,12 @@ export async function runInstagramCrosspost(
   deps?: Partial<CrosspostDeps>,
 ): Promise<InstagramCrosspostOutcome> {
   const d = resolveDeps(deps)
-  const candidates = await d.store.listCandidates(CANDIDATE_LIMIT)
+  // 受控转公开动作盖了 ig_crosspost_blocked 的工单一律不碰:在最源头剔除,
+  // 一次覆盖逐条决策(decideSweep)、对账(reconcileExisting)、末尾补发事件(emitMissingEvents)三处。
+  // Publer 删除 PR(2756)合并后整条 Instagram 交叉发布代码被删,本过滤随之消失(本过滤只在这一处,可整体撤掉)。
+  const candidates = (await d.store.listCandidates(CANDIDATE_LIMIT)).filter(
+    (c) => c.published_ref.ig_crosspost_blocked !== true,
+  )
   const now = d.now()
   const targets = new Map<string, TargetLookup>() // 同一客户一轮只查一次
   const stats = { configErrors: 0 }

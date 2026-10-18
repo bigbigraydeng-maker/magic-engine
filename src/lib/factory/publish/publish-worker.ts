@@ -64,7 +64,7 @@ async function claimOne(workerId: string): Promise<Record<string, unknown> | nul
 }
 
 // ── 防误发三断言 + 视频 URL 校验 ──────────────────────────────────────────────
-async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
+export async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
   const { data: client } = await supabaseAdmin
     .from('clients')
     .select('factory_config')
@@ -328,6 +328,39 @@ async function recordPublished(
   )
 }
 
+/** Completed Reel projection shared by initial publish and promote receipts. No provider calls. */
+export async function projectPublishedReelExecutionItem(input: {
+  clientId: string
+  existingItemId: string | null
+  title: string
+  description: string
+}): Promise<string> {
+  const nowIso = new Date().toISOString()
+  if (input.existingItemId) {
+    const { data, error } = await supabaseAdmin
+      .from('execution_items')
+      .update({ status: 'completed', completed_at: nowIso, updated_at: nowIso })
+      .eq('id', input.existingItemId)
+      .eq('client_id', input.clientId)
+      .select('id')
+    if (error) throw error
+    if (!Array.isArray(data) || data.length !== 1) throw new Error('执行事项更新没有命中任何行')
+    return input.existingItemId
+  }
+  const { data, error } = await supabaseAdmin
+    .from('execution_items')
+    .insert({
+      client_id: input.clientId, title: input.title.slice(0, 200), description: input.description,
+      dimension: 'social', status: 'completed', fix_type: 'me_auto', source: 'proactive_signal',
+      completed_at: nowIso, created_at: nowIso, updated_at: nowIso,
+    })
+    .select('id')
+    .maybeSingle()
+  if (error) throw error
+  if (typeof data?.id !== 'string' || !data.id) throw new Error('执行事项创建后没有返回 id')
+  return data.id
+}
+
 // 三落库:CLAUDE.md 强约束——外部执行动作必落 fde_work_logs + execution_items + flywheel_actions + 归因链
 export async function writeThreeBooks(
   id: string,
@@ -350,30 +383,20 @@ export async function writeThreeBooks(
   const actionType = opts.actionType ?? 'factory_reel_publish'
   const channel = opts.channelLabel ?? vendor // 给人看的渠道名(待办/日志里显示);vendor 仍是机器标签
 
-  const nowIso = new Date().toISOString()
-  // 三张表各自独立写:一张挂不拖累另两张(魏征 P1-3),尤其 fde_work_logs(PM 主看板)必须落。
+  // Each receipt is independent: a board failure must not suppress the work log.
   let execId: string | null = null
   // draft is not a completed action; flywheel row below stays so the promote-to-public step can find it.
   if (!isDraft) {
-    // source 用 'proactive_signal'(系统主动信号→自动发布);'factory_auto' 撞 CHECK(魏征 P1-3)
-    const { data, error } = await supabaseAdmin
-      .from('execution_items')
-      .insert({
-        client_id: clientId,
-        title: `【社媒 ${today}】工厂自动发布 Reel — ${angle}`.slice(0, 200),
+    try {
+      execId = await projectPublishedReelExecutionItem({
+        clientId, existingItemId: null,
+        title: `【社媒 ${today}】工厂自动发布 Reel — ${angle}`,
         description: `工厂自动发布 Reel「${angle}」→ ${channel}(${ref.permalink ?? ref.post_id})`,
-        dimension: 'social',
-        status: 'completed',
-        fix_type: 'me_auto',
-        source: 'proactive_signal',
-        completed_at: nowIso,
-        created_at: nowIso,
-        updated_at: nowIso,
       })
-      .select('id')
-      .maybeSingle()
-    if (error) console.error(`[publish-worker] execution_items 落库失败 ${id}: ${error.message}`)
-    else execId = data?.id ?? null
+    } catch (error) {
+      const message = error && typeof error === 'object' && 'message' in error ? error.message : error
+      console.error(`[publish-worker] execution_items 落库失败 ${id}: ${sanitizeFailReason(String(message))}`)
+    }
   }
   {
     const { error } = await supabaseAdmin.from('flywheel_actions').insert({

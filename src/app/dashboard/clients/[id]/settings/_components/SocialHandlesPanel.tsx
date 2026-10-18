@@ -132,7 +132,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-start justify-between gap-4">
         <p className="text-xs text-slate-500">
-          配置后驱动诊断引擎的「社媒」维度评分。至少配置一个平台才能让 social 维度产出真实分数。
+          这些资料用于识别客户的公开账号；保存不会授予发帖、消息或广告权限。授权状态请看上方「社媒授权与连接」。
         </p>
         <span
           className={[
@@ -142,7 +142,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
               : 'border border-emerald-200 bg-emerald-50 text-emerald-700',
           ].join(' ')}
         >
-          {configuredCount} / 3 已配置
+          {configuredCount} / 3 资料已登记
         </span>
       </div>
 
@@ -213,7 +213,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
           disabled={!isDirty || saving}
           className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {saving ? '保存中…' : '保存'}
+          {saving ? '保存中…' : '保存账号资料'}
         </button>
       </div>
     </div>

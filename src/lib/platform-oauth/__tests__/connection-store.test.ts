@@ -21,6 +21,7 @@ vi.mock('../vocabulary', async (importOriginal) => {
 import {
   upsertConnection,
   listConnections,
+  listSocialConnectionFacts,
   getConnectionById,
   revokeConnection,
 } from '../connection-store'
@@ -83,6 +84,31 @@ function chainResolving(result: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+describe('listSocialConnectionFacts', () => {
+  it('queries only safe columns, exact client, legacy purpose and supported providers', async () => {
+    const chain = { select: vi.fn(), eq: vi.fn(), in: vi.fn() }
+    chain.select.mockReturnValue(chain)
+    chain.eq.mockReturnValue(chain)
+    chain.in.mockResolvedValue({ data: [], error: null })
+    mocks.from.mockReturnValue(chain)
+    expect(await listSocialConnectionFacts('client-xyz')).toEqual([])
+    expect(mocks.from).toHaveBeenCalledWith('platform_oauth_connections')
+    expect(chain.select).toHaveBeenCalledWith('id,provider,purpose,account_id,display_name,status,scopes,token_expiry,last_synced_at')
+    expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-xyz')
+    expect(chain.eq).toHaveBeenCalledWith('purpose', 'legacy')
+    expect(chain.in).toHaveBeenCalledWith('provider', ['meta', 'tiktok', 'google_youtube'])
+    expect(mocks.encryptToken).not.toHaveBeenCalled()
+  })
+  it('does not collapse database failure into an empty disconnected list', async () => {
+    const chain = { select: vi.fn(), eq: vi.fn(), in: vi.fn() }
+    chain.select.mockReturnValue(chain)
+    chain.eq.mockReturnValue(chain)
+    chain.in.mockResolvedValue({ data: null, error: { message: 'private database detail' } })
+    mocks.from.mockReturnValue(chain)
+    await expect(listSocialConnectionFacts('client-xyz')).rejects.toThrow('Social connection facts unavailable')
+  })
 })
 
 // ─── upsertConnection ─────────────────────────────────────────────────────────

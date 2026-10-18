@@ -43,7 +43,7 @@ function toManualItem(p: PendingAdsAutoPause, nameOf: (id: string) => string): M
   return {
     ...base,
     what: `${p.diagnosisTitle ?? `「${adsetLabel}」连续花钱没结果`}——系统建议暂停，等你点头。`,
-    how: '打开广告健康页的「自动暂停待批准」，点「批准」立刻暂停（不用去 Meta 后台），点「驳回」就不停。',
+    how: '打开广告健康页的「等你点头」标签，点「批准」立刻暂停（不用去 Meta 后台），点「驳回」就不停。',
     href: entryHref(p.clientId),
   }
 }
