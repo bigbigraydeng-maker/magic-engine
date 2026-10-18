@@ -66,6 +66,17 @@ interface ConfigResponse {
   error?: string
 }
 
+interface AccountCapRow {
+  ad_account_id: string
+  daily_budget_cap_cents: number | null
+}
+
+interface AccountCapsResponse {
+  accounts?: AccountCapRow[]
+  client_total_cap_cents?: number | null
+  error?: string
+}
+
 // ─── Sub-components (each kept small and single-purpose) ──────────────────────
 
 function CapField({
@@ -240,6 +251,178 @@ function CreativePoolList({
   )
 }
 
+/**
+ * 清空一个账户的上限**不等于**"不设上限"——真正的判据
+ * （`src/lib/capabilities/ads/envelope-facts.ts` 里 `perAccountCaps` 那段）分两种：
+ *   · 这个客户只绑了 1 个账户 → 回落成**客户总闸**，等于把这个账户的额度抬到总闸
+ *   · 绑了 2 个及以上 → 这个账户直接不许自动动钱
+ * 第一种是放宽钱闸，所以清空必须二次确认，文案也要分开说（魏征复审 2026-10-19）。
+ */
+function clearConfirmText(accountCount: number, totalCap: number | null): string {
+  if (accountCount <= 1) {
+    const ceiling = totalCap == null ? '客户总闸（现在也没设）' : `客户总闸 $${centsToDisplay(totalCap)} / 天`
+    return `清空后这个账户不是"没有上限"：因为这个客户只绑了一个广告账户，判据会回落成${ceiling}，等于把它的额度放宽。确定清空吗？`
+  }
+  return '清空后这个账户将不允许自动动钱（这个客户绑了 2 个及以上账户时的规则）。确定清空吗？'
+}
+
+function AccountCapRowEditor({
+  row,
+  draft,
+  busy,
+  onDraftChange,
+  onSave,
+}: {
+  row: AccountCapRow
+  draft: string
+  busy: boolean
+  onDraftChange: (v: string) => void
+  onSave: () => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="tabular-nums text-gray-800">{row.ad_account_id}</span>
+      <input
+        type="number"
+        min={0.01}
+        step="0.01"
+        value={draft}
+        onChange={e => onDraftChange(e.target.value)}
+        placeholder="未设"
+        className="w-32 rounded-lg border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
+      />
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onSave}
+        className="rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+      >
+        保存
+      </button>
+      <span className="text-xs text-gray-400">
+        当前：
+        <span className="tabular-nums text-gray-600">
+          {row.daily_budget_cap_cents == null ? '未设' : `$${centsToDisplay(row.daily_budget_cap_cents)} / 天`}
+        </span>
+      </span>
+    </div>
+  )
+}
+
+/** 留空（null）是合法的「清空」；NaN 或 <= 0 不是。 */
+function capDraftIsUsable(parsed: number | null): boolean {
+  return !Number.isNaN(parsed) && (parsed === null || parsed > 0)
+}
+
+async function fetchAccountCaps(clientId: string): Promise<AccountCapsResponse> {
+  const res = await fetch(`/api/clients/${clientId}/ad-accounts`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return (await res.json()) as AccountCapsResponse
+}
+
+/** 账户级上限的读取与保存都收在这里，`AccountCapList` 只负责画。 */
+function useAccountCaps(clientId: string) {
+  const [rows, setRows] = useState<AccountCapRow[] | null>(null)
+  const [totalCap, setTotalCap] = useState<number | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    fetchAccountCaps(clientId)
+      .then(j => {
+        if (!alive) return
+        const list = j.accounts ?? []
+        setRows(list)
+        setTotalCap(j.client_total_cap_cents ?? null)
+        setDrafts(Object.fromEntries(list.map(r => [r.ad_account_id, centsToDisplay(r.daily_budget_cap_cents)])))
+      })
+      .catch(() => { if (alive) setLoadFailed(true) })
+    return () => { alive = false }
+  }, [clientId])
+
+  const save = async (adAccountId: string) => {
+    const parsed = displayToCents(drafts[adAccountId] ?? '')
+    if (!capDraftIsUsable(parsed)) {
+      setMessage('每天上限要填大于 0 的金额；留空表示清空这个账户的上限（清空会二次确认）')
+      return
+    }
+    // 清空是放宽钱闸的一种（单账户客户会回落成客户总闸），所以要二次确认。
+    if (parsed === null && !window.confirm(clearConfirmText(rows?.length ?? 0, totalCap))) {
+      return
+    }
+    setBusyId(adAccountId)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-accounts/${adAccountId}/daily-cap`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daily_budget_cap_cents: parsed }),
+      })
+      const json = (await res.json()) as { daily_budget_cap_cents?: number | null; error?: string }
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      const saved = typeof json.daily_budget_cap_cents === 'number' ? json.daily_budget_cap_cents : null
+      setRows(prev => prev?.map(r => (r.ad_account_id === adAccountId ? { ...r, daily_budget_cap_cents: saved } : r)) ?? prev)
+      setDrafts(prev => ({ ...prev, [adAccountId]: centsToDisplay(saved) }))
+      setMessage('已保存')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  return { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save }
+}
+
+function AccountCapList({ clientId }: { clientId: string }) {
+  const { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save } = useAccountCaps(clientId)
+
+  if (loadFailed) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        读不到各账户的每天上限，没有显示输入框（怕把真实值存成空白）
+      </div>
+    )
+  }
+
+  if (rows === null) {
+    return <div className="text-sm text-gray-400 py-4">加载中…</div>
+  }
+
+  if (rows.length === 0) {
+    return <p className="text-xs text-gray-400">这个客户还没绑定广告账户</p>
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {rows.map(row => (
+        <AccountCapRowEditor
+          key={row.ad_account_id}
+          row={row}
+          draft={drafts[row.ad_account_id] ?? ''}
+          busy={busyId !== null}
+          onDraftChange={v => setDrafts(prev => ({ ...prev, [row.ad_account_id]: v }))}
+          onSave={() => void save(row.ad_account_id)}
+        />
+      ))}
+      {message && <p className="text-xs text-gray-500">{message}</p>}
+      <p className="text-xs text-gray-400">
+        客户总闸：
+        <span className="tabular-nums text-gray-600">
+          {totalCap == null ? '未设' : `$${centsToDisplay(totalCap)} / 天`}
+        </span>
+      </p>
+      <p className="text-xs text-gray-400">各账户加起来不能超过客户总闸；超了保存会被拒绝</p>
+      <p className="text-xs text-gray-400">
+        清空某个账户的上限不等于「不设上限」：这个客户只绑 1 个账户时，判据会回落成客户总闸（等于放宽）；绑了 2 个及以上时，没填上限的账户不许自动动钱。
+      </p>
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AutonomySettings({ clientId }: { clientId: string }) {
@@ -354,6 +537,16 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
         <CapField draftCap={draftCap} currentCap={config.daily_budget_cap_cents} onChange={setDraftCap} />
 
         <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
+
+        <div>
+          <span className="block text-sm font-medium text-gray-700">每个广告账户各自每天最多花多少</span>
+          <p className="mt-1 text-xs text-gray-400">
+            上面那个是这个客户所有账户加起来的总闸；下面是每个账户各自的上限。客户绑了 2 个及以上账户时，没填自己上限的账户不允许自动动钱。
+          </p>
+          <div className="mt-1.5">
+            <AccountCapList clientId={clientId} />
+          </div>
+        </div>
 
         <div>
           <span className="block text-sm font-medium text-gray-700">可用于广告的视频</span>

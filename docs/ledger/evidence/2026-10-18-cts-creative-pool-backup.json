@@ -1,0 +1,18 @@
+{
+  "what": "CTS ad_strategy_configs.creative_pool 备份（换池子前的原值）与回滚方法",
+  "client_id": "c0000000-0000-0000-0000-000000000000",
+  "taken_at_utc": "2026-10-18",
+  "original_updated_at": "2026-10-11 21:09:57.714123+00",
+  "original_creative_pool": [
+    { "ref": "2309146606576700", "kind": "meta_video", "status": "candidate" },
+    { "ref": "2069489893713349", "kind": "meta_video", "status": "candidate" },
+    { "ref": "2532417540577458", "kind": "meta_video", "status": "candidate" }
+  ],
+  "new_creative_pool": [
+    { "ref": "1475967442256169", "kind": "meta_video", "status": "candidate" },
+    { "ref": "1843766369956984", "kind": "meta_video", "status": "candidate" },
+    { "ref": "4468928836700019", "kind": "meta_video", "status": "candidate" }
+  ],
+  "reason": "旧 3 条是主页 Reel 视频 ID；在官方账户 act_2202695063810470 建创意时 Meta 返回 could not be found or accessed。官方账户只能用上传进账户视频库的片，新 3 条已在官方账户建创意验证通过。换前池子里没有任何 approved。",
+  "rollback": "UPDATE ad_strategy_configs SET creative_pool = <original_creative_pool> WHERE client_id = <client_id>;"
+}
