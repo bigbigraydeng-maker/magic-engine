@@ -72,6 +72,32 @@ describe('probeClientCircuit', () => {
     // 🔴 跳过的客户不许被记成「没超」——那会让「没观察」和「观察过没事」长得一样
     expect(out.clientCapKind).toBe('undeterminable')
     expect(out.clientCapReason).toBe('skipped:not_bounded_auto')
+    expect(out.clientReferenceDate).toBeNull()
+  })
+})
+
+describe('🔴 零写入要扫到传递依赖，不能只扫自己这一个文件', () => {
+  /**
+   * 子牙复审指出的口子：原先只扫 `circuit-probe.ts`。而 `loadClientCapFacts`
+   * 与 `resolveAccountTimezone` **都不接 `sb`、内部直接用 `supabaseAdmin` 单例**，
+   * 也就是说探针生产路径上大半的读是走它们的。哪天有人往 `circuit-cap-facts.ts`
+   * 加一行「把算好的事实缓存进表」（它只有探针一个生产调用方，改起来看着很安全），
+   * 原先那条测试照绿 —— 「零写入由测试钉住」这句话就空了一半。
+   */
+  const DEPS = [
+    'src/lib/ads-strategy/circuit-cap-facts.ts',
+    'src/lib/ads-strategy/circuit-spend-window.ts',
+    'src/lib/ads-strategy/account-timezone.ts',
+    'src/lib/ads-strategy/circuit-detectors.ts',
+  ]
+
+  it.each(DEPS)('%s 里也没有写操作', (rel) => {
+    const src = readFileSync(join(process.cwd(), rel), 'utf8')
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')
+    for (const writeCall of ['.insert(', '.upsert(', '.update(', '.delete(', '.rpc(']) {
+      expect(code, `${rel} 出现了 ${writeCall}`).not.toContain(writeCall)
+    }
+    expect(code).not.toContain('ads_circuit_events')
   })
 })
 

@@ -310,6 +310,15 @@ export async function GET(req: NextRequest) {
   // `clients` scan for EACH client carrying a scoped env var; sharing one
   // snapshot for the whole run avoids that per-client cost (chatgpt-codex-
   // connector review, 2026-09-21).
+  /**
+   * 熔断探针整轮用同一个「现在」（魏征复审 2026-10-18）。
+   *
+   * 客户是串行跑的，这一轮实测 104–150 秒。如果让每个客户各自 `new Date()`，
+   * 哪天拉数变慢，不同客户的「账户时区的昨天」可能落在不同日期上 ——
+   * 观察期统计时那是静默的口径漂移。取一次传下去，整轮一个口径。
+   */
+  const probeNow = new Date()
+
   let tokenOwnerPeers: TokenOwnerRow[] | null | undefined
   async function getTokenOwnerPeers(): Promise<TokenOwnerRow[] | null> {
     if (tokenOwnerPeers === undefined) tokenOwnerPeers = await loadTokenOwnerPeers(supabaseAdmin)
@@ -592,6 +601,7 @@ export async function GET(req: NextRequest) {
           result.circuit_probe = await probeClientCircuit(supabaseAdmin, {
             clientId: client.client_id,
             autonomyMode: adStrategyConfig.autonomy_mode,
+            now: probeNow,
           }).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }))
         }
       } else {
@@ -654,7 +664,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -667,6 +677,14 @@ export async function GET(req: NextRequest) {
     if (r.ad_config?.success === false) out.push({ client_id: r.client_id, source: 'ad_config', error: r.ad_config.error })
     if (r.ad_diagnostics?.error) out.push({ client_id: r.client_id, source: 'ad_diagnostics', error: r.ad_diagnostics.error })
     if (r.ads_growth_state?.error) out.push({ client_id: r.client_id, source: 'ads_growth_state', error: r.ads_growth_state.error })
+    // 2026-10-18（魏征复审）：探针的异常原先只落在 summary.circuit_probe 里，
+    // 而那个键**没有任何代码在读** —— 它可以连抛十天，失败邮件写「0 failed」、
+    // 待办一个字不提，等观察期结束有人手点开 jsonb 才发现十天全是 error。
+    // 正是铁律 3 下半「发现不许死在日志里」要防的形状。
+    // 跟 ad_level 一样 best-effort，不进 `failed`、不当邮件头条，但必须在这里出现。
+    if (r.circuit_probe && 'error' in r.circuit_probe && r.circuit_probe.error) {
+      out.push({ client_id: r.client_id, source: 'circuit_probe', error: r.circuit_probe.error })
+    }
     // 2026-09-13 (魏征 review): a secondary account's sync failure used to be
     // completely invisible — not in `failed`, not here, not console.error'd —
     // the exact "looks fine, actually never worked" shape this whole PR is
@@ -696,7 +714,7 @@ export async function GET(req: NextRequest) {
   // 常年 meta 报错盖住、没人注意到（2026-09-25 事故）。
   const headlineError =
     errors.find(e => e.source === 'ad_config') ??
-    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary')
+    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined

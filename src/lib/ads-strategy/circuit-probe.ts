@@ -88,11 +88,14 @@ export interface AccountProbe {
    * 🔴 **分层记「在不在投」—— 这是 A0 要暴露的一处共享层缺陷**（74 号 10-18 给的实证）。
    *
    * `circuit-cap-facts.ts:147,181` 对系列与广告组做 `.some(isDelivering)`，
-   * **只要有一个系列 ACTIVE 就算这个账户在投**。而 CTS 官方账户的实情是：
-   * 3 个系列开关开着、名下广告组**全部暂停**，预算在广告组层 → **实际不投放**
+   * **只要有一个系列 ACTIVE 就算这个账户在投**。而 CTS 的**次账户**（结尾 0470）实情是：
+   * 系列开关开着、名下广告组**全部暂停**，预算在广告组层 → **实际不投放**
    * （手册 §29：系列 ACTIVE + 广告组 PAUSED 是最常见的「假在投」）。
-   * 后果：该账户被当成「在投但数据落后」→ `facts:account_data_stale`
-   * → **判据 #2 对 CTS 永远判不了**。
+   * 2026-10-18 生产库实查：次账户 48h 内 ACTIVE 广告组 0 条、抓到 16 条；
+   * 而**主账户**（结尾 7274）同期有 ACTIVE 广告组，是真在投 —— 两个账户形状不同，
+   * 所以这条缺陷的证据在次账户上，别拿主账户的数字说它（复审第 6 节纠正了原注释）。
+   * 后果：次账户被当成「在投但数据落后」→ `facts:account_data_stale`
+   * → **判据 #2 对 CTS 判不了**。
    *
    * A0 只把两层分开记下来，**不改共享层** —— 改它会改变熔断判什么，
    * 要单独立项过审。这两个数就是那次改动的证据。
@@ -107,10 +110,25 @@ export interface AccountProbe {
   readonly adsetsSeen: number | null
   /**
    * 各候选倍数下，绝对硬顶会不会判 trip。
-   * `null` = 判不了（上限未配 / 花费读不到），**不是** false。
+   *
+   * 🔴 判不了的时候**记原因码，不记 null**。复审第 2 节在生产库里证明：
+   * 当前三个被观察账户里，CTS 两个有上限没花费、NAL 有花费没上限，
+   * 所以这一栏开头会**每天、每个账户、每个倍数全是判不了** ——
+   * 这时候「为什么判不了」就是这份回执的全部信息量，不能让四种原因都长成 null。
    */
-  readonly absoluteWouldTrip: Readonly<Record<string, boolean | null>>
+  readonly absoluteWouldTrip: Readonly<Record<string, AbsoluteCapOutcome>>
 }
+
+/**
+ * 绝对硬顶在某个候选倍数下的结论。
+ * `true`/`false` = 真判过；字符串 = 判不了，且说清缺的是哪一样。
+ */
+export type AbsoluteCapOutcome =
+  | boolean
+  | 'cap_missing'
+  | 'spend_missing'
+  | 'target_date_unknown'
+  | 'spend_window_unusable'
 
 /** 一个客户这一天的观察结果。 */
 export interface ClientProbe {
@@ -123,6 +141,12 @@ export interface ClientProbe {
   /** 判据 #2（客户全部账户合计 > 客户总闸 × 1.2） */
   readonly clientCapKind: DetectorVerdict['kind']
   readonly clientCapReason: string | null
+  /**
+   * 判据 #2 用的**客户级**参考日（各账户时区昨天里最早那个）。
+   * 它跟 `AccountProbe.targetDate`（本账户时区的昨天）可以不是同一天 ——
+   * 这是两条判据各自的正确口径，不是错，但回执里不记下来读的人会以为对不上。
+   */
+  readonly clientReferenceDate: string | null
   readonly accounts: readonly AccountProbe[]
 }
 
@@ -230,14 +254,18 @@ async function probeAccount(
 
   const base = { adAccountId, timezone, targetDate, accountCapCents: capCents, hasDeliveringEntity }
   const noLevels = { deliveringCampaigns: null, deliveringAdsets: null, adsetsSeen: null }
-  const noneTried: Record<string, boolean | null> = {}
-  for (const m of CANDIDATE_ABSOLUTE_CAP_MULTIPLES) noneTried[String(m)] = null
+  /** 四个候选倍数全判不了，原因一致。 */
+  const allUndeterminable = (why: AbsoluteCapOutcome): Record<string, AbsoluteCapOutcome> =>
+    Object.fromEntries(CANDIDATE_ABSOLUTE_CAP_MULTIPLES.map((m) => [String(m), why]))
 
   if (targetDate === null) {
     return {
+      // 🔴 nonZeroDays 这里是「没读过库」不是「零天」——有 relativeReason 兜着，
+      //    但别把它当统计口径用。
       ...base, ...noLevels, spendCents: null, medianCents: null, nonZeroDays: 0, truncated: false,
       queryError: null, relativeKind: 'undeterminable',
-      relativeReason: 'facts:account_target_date_unknown', absoluteWouldTrip: noneTried,
+      relativeReason: 'facts:account_target_date_unknown',
+      absoluteWouldTrip: allUndeterminable('target_date_unknown'),
     }
   }
 
@@ -253,7 +281,7 @@ async function probeAccount(
       truncated: window.truncated, queryError: window.queryError,
       relativeKind: 'undeterminable',
       relativeReason: window.queryError !== null ? 'facts:spend_window_read_failed' : 'facts:spend_window_truncated',
-      absoluteWouldTrip: noneTried,
+      absoluteWouldTrip: allUndeterminable('spend_window_unusable'),
     }
   }
 
@@ -264,11 +292,17 @@ async function probeAccount(
     absoluteCapCents: ABSOLUTE_BRANCH_OFF,
   })
 
-  const absoluteWouldTrip: Record<string, boolean | null> = {}
+  const absoluteWouldTrip: Record<string, AbsoluteCapOutcome> = {}
   for (const m of CANDIDATE_ABSOLUTE_CAP_MULTIPLES) {
-    // 上限未配（null）或当天花费读不到 → 判不了，不是「没超」
-    if (capCents === null || window.targetSpendCents === null) {
-      absoluteWouldTrip[String(m)] = null
+    // 🔴 上限未配 / 当天花费读不到 → 判不了，不是「没超」；而且两者要分得开：
+    //    前者是 FDE 少填了一个字段（去 Settings 补），后者是取数那一侧断了。
+    //    观察期开头全是这两种，分不开就等于这份回执什么都没说。
+    if (capCents === null) {
+      absoluteWouldTrip[String(m)] = 'cap_missing'
+      continue
+    }
+    if (window.targetSpendCents === null) {
+      absoluteWouldTrip[String(m)] = 'spend_missing'
       continue
     }
     const v = detectSpendSpike({
@@ -323,7 +357,7 @@ export async function probeClientCircuit(
     return {
       clientId, autonomyMode, skipped: 'not_bounded_auto',
       dataCompleteness: 'unknown', clientCapKind: 'undeterminable',
-      clientCapReason: 'skipped:not_bounded_auto', accounts: [],
+      clientCapReason: 'skipped:not_bounded_auto', clientReferenceDate: null, accounts: [],
     }
   }
 
@@ -373,6 +407,7 @@ export async function probeClientCircuit(
     dataCompleteness: completeness,
     clientCapKind: clientCap.kind,
     clientCapReason: reasonOf(clientCap),
+    clientReferenceDate: capFacts.clientReferenceDate,
     accounts,
   }
 }
