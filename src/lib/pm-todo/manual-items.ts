@@ -51,6 +51,7 @@ import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
+import { pushDiagnosticSynthesisItems } from './diagnostic-synthesis-items'
 import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
@@ -310,6 +311,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
     (b) => pushAdsAutoPauseItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
+    ),
+    // 体检的 AI 文字叙事没写成 —— 保存必报错被吞了三个多月没人知道（2026-10-18）。
+    (b) => pushDiagnosticSynthesisItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 体检叙事回执检查失败（不阻塞其他待办）:', e),
     ),
     // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
     // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。

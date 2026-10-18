@@ -42,9 +42,14 @@ vi.mock('../collectors/ads-collector', () => ({
 // it out and only assert whether it was invoked.
 // NOTE: the factory is hoisted above the `const` declarations, so it must
 // reference mockRunSynthesis lazily — binding it directly throws a TDZ error.
-vi.mock('../synthesis-orchestrator', () => ({
-  runSynthesis: (...args: unknown[]) => mockRunSynthesis(...args),
-}))
+// summarizeSynthesis is a pure helper the runner uses to build its receipt — keep the real one.
+vi.mock('../synthesis-orchestrator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../synthesis-orchestrator')>()
+  return {
+    ...actual,
+    runSynthesis: (...args: unknown[]) => mockRunSynthesis(...args),
+  }
+})
 
 // ---------------------------------------------------------------------------
 // Imports after mocks
@@ -405,6 +410,33 @@ describe('executeDiagnosticRun() — full module', () => {
     const updates = (supabase as unknown as { _updates: unknown[] })._updates
     expect(completedUpdate(supabase)).toBeDefined()
     expect(updates.some(u => (u as Record<string, unknown>)?.status === 'failed')).toBe(false)
+  })
+
+  it('returns a receipt so the scheduler can record a swallowed synthesis failure', async () => {
+    mockRunSynthesis.mockResolvedValue({
+      ran: true,
+      modules: {
+        score_explanations: { state: 'failed', error: 'persist failed' },
+        dimension_narratives: { state: 'ok', rows_written: 3, cost_usd: 0.1 },
+        competitor_analysis: { state: 'skipped', reason: 'x' },
+        market_context: { state: 'skipped', reason: 'x' },
+      },
+      total_cost_usd: 0.1,
+    })
+    const receipt = await executeDiagnosticRun(makeSupabase(), 'run-test-123', 'client-1', 'full')
+    expect(receipt).toMatchObject({ state: 'partial', failed_modules: ['score_explanations'] })
+  })
+
+  it('returns a failed receipt (not null) when synthesis throws', async () => {
+    mockRunSynthesis.mockRejectedValue(new Error('LLM down'))
+    const receipt = await executeDiagnosticRun(makeSupabase(), 'run-test-123', 'client-1', 'full')
+    expect(receipt?.state).toBe('failed')
+    expect(receipt?.errors[0]).toContain('LLM down')
+  })
+
+  it('returns null for a single-dimension run (synthesis not attempted)', async () => {
+    const receipt = await executeDiagnosticRun(makeSupabase(), 'run-test-123', 'client-1', 'seo')
+    expect(receipt).toBeNull()
   })
 })
 
