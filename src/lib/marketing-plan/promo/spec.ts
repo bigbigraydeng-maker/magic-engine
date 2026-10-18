@@ -16,6 +16,36 @@ const dateStr = z.string().regex(DATE, '日期格式应为 YYYY-MM-DD')
 /** 暂停区间（含两端）：对账时这些天不算计划花费。 */
 const pausedRange = z.object({ from: dateStr, to: dateStr })
 
+/**
+ * 结构化定向：不走「已保存受众」时，直接说清投哪儿、投多大年龄。
+ * 执行层早就支持这些（`src/lib/ads-strategy/ad-draft.ts` 的
+ * geoCountries / geoCityKeys / ageMin / ageMax），这里只是让计划层能表达它。
+ *
+ * ⚠️ 这里**表达不了** Meta 的「语言」定向。Meta 的语言定向指的是
+ * 「这个人界面设的什么语言」，跟「广告文案用什么语言写」是两回事；
+ * 有客户把两者当成一回事删掉了语言定向，受众失控 11 小时烧了 $57、0 转化。
+ * 所以这个块不是「完整定向」，别当成全部。
+ */
+const adsTargeting = z.object({
+  /**
+   * ISO 两位国家码，大写，例如 NZ / AU。
+   * **不设任何默认国家** —— 给一个默认值就等于把首个客户的市场写进了平台规则。
+   */
+  countries: z.array(z.string().regex(/^[A-Z]{2}$/, '国家要填两位大写国家码，例如 NZ')).default([]),
+  /**
+   * Meta 的城市 key。给了城市就只按城市投：
+   * 国家和城市同时塞进 geo_locations 时 Meta 按**并集**生效（NZ ∪ 北岸10km = 整个 NZ），
+   * 城市半径会形同虚设（2026-08-04 事故：北岸房源投给了整个新西兰）。
+   */
+  city_keys: z.array(z.string().min(1)).default([]),
+  /** 年龄下限。Meta 不允许投给 18 岁以下。 */
+  age_min: z.number().int().min(18).max(65).optional(),
+  /** 年龄上限。 */
+  age_max: z.number().int().min(18).max(65).optional(),
+  /** 要排除的已保存受众，例如已付定金的客人。 */
+  excluded_audience_refs: z.array(z.string().min(1)).default([]),
+})
+
 const adsStep = z.object({
   id: z.string().min(1),
   kind: z.literal('ads_campaign'),
@@ -24,12 +54,23 @@ const adsStep = z.object({
     ad_account_id: z.string().min(1),
     /** 日预算，账户币种的「分」。 */
     daily_budget_cents: z.number().int().positive(),
-    /** 引用现有受众池 / 配置，不复制。 */
-    audience_ref: z.string().min(1),
+    /**
+     * 引用现有受众池 / 配置，不复制。
+     * 允许为空字符串 —— 空的时候必须填 `targeting`（二选一，在 crossFieldIssues 里查）。
+     * **类型保持 string 不改成 optional**：有四处下游在读它
+     * （overview.ts、schedule.ts、AdsDraftPanel.tsx、draft-ads.ts），改成可选会连带全炸。
+     */
+    audience_ref: z.string(),
     /** 引用素材池里已批准素材的 ref。 */
     creative_refs: z.array(z.string().min(1)).default([]),
     placements: z.array(z.string().min(1)).default([]),
     paused_ranges: z.array(pausedRange).default([]),
+    /**
+     * 结构化定向，可选。
+     * **用 optional，绝对不许用 default** —— default 会被写进每一份旧计划的解析结果，
+     * 让已批准计划的内容指纹变一次、被判成「内容变过了」，人工核实记录跟着作废。
+     */
+    targeting: adsTargeting.optional(),
   }),
 })
 
@@ -172,6 +213,7 @@ export type PromoSpec = z.infer<typeof PromoSpecSchema>
 export type PromoPhase = z.infer<typeof phase>
 export type PromoStep = z.infer<typeof step>
 export type AdsStep = z.infer<typeof adsStep>
+export type AdsTargeting = z.infer<typeof adsTargeting>
 export type SocialStep = z.infer<typeof socialStep>
 export type ManualCheck = z.infer<typeof manualCheck>
 export type BusinessCase = z.infer<typeof businessCase>
@@ -233,6 +275,28 @@ function crossFieldIssues(spec: PromoSpec): PromoValidationIssue[] {
             issues.push({ path: `phases.${pi}.steps.${si}.settings.paused_ranges.${ri}`, message: '暂停区间结束日早于开始日' })
           }
         })
+        const t = s.settings.targeting
+        const base = `phases.${pi}.steps.${si}.settings`
+        // 二选一：要么指一个已保存受众，要么说清投哪儿。两样都空 = 没说投给谁。
+        const hasPlace = t !== undefined && (t.countries.length > 0 || t.city_keys.length > 0)
+        if (s.settings.audience_ref.trim() === '' && !hasPlace) {
+          issues.push({
+            path: `${base}.audience_ref`,
+            message: '广告步骤要么填已保存受众的编号，要么填投放地区（国家或城市）——两样都空等于没说投给谁',
+          })
+        }
+        if (t !== undefined) {
+          // 城市和国家不能同时给：Meta 按并集生效，城市半径会形同虚设。
+          if (t.countries.length > 0 && t.city_keys.length > 0) {
+            issues.push({
+              path: `${base}.targeting.city_keys`,
+              message: '国家和城市不能同时填：Meta 按并集生效（整个国家 ∪ 某城10km = 整个国家），城市范围会失效。要按城市投就只填城市',
+            })
+          }
+          if (t.age_min !== undefined && t.age_max !== undefined && t.age_min > t.age_max) {
+            issues.push({ path: `${base}.targeting.age_max`, message: '年龄下限比上限还大' })
+          }
+        }
       }
     })
   })
