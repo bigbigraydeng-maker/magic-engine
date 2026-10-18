@@ -36,7 +36,7 @@ export function BusinessCaseFields({ card, onChange }: { card: BusinessCase; onC
       <Field label="还剩多少座">
         <LocalInput value={card.seats_remaining} format={show} parse={num} onValue={n => set({ seats_remaining: n })} />
       </Field>
-      <Field label="这个座位数客户确认过了吗" hint="没确认的座位数不能用来批准开投">
+      <Field label="这个座位数客户确认过了吗" hint="没确认的就选「还没确认」。注意：现在还没有任何检查会因此挡住批准，这里只是如实记下来">
         <select className={inputCls} value={card.seats_confirmed ? 'yes' : 'no'} onChange={e => set({ seats_confirmed: e.target.value === 'yes' })}>
           <option value="yes">已确认</option>
           <option value="no">还没确认</option>
@@ -105,7 +105,7 @@ export function BusinessCaseMathNote({ card, actualLeadCostCents }: { card: Busi
       </div>
       <div>
         按实际线索成本算，保本至少要
-        {math.breakeven_rate === null ? '未知（还没有实际线索成本）' : `${rateToPercent(math.breakeven_rate)}%`}
+        {math.breakeven_rate === null ? '算不出：实际线索成本这根线还没接上（不是「过几天就有」）' : `${rateToPercent(math.breakeven_rate)}%`}
       </div>
     </div>
   )
