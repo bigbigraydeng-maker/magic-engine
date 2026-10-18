@@ -32,7 +32,7 @@ import {
 import { sanitizeFailReason } from './publish-display'
 import {
   REEL_AUTO_CHECK_KEYS,
-  REEL_HUMAN_CHECK_KEYS,
+  humanKeysForStored,
   validateContentChecklist,
   checklistPasses,
 } from '@/lib/social/content-review'
@@ -474,7 +474,7 @@ async function recordSubmitted(
 function checkApproval(candidate: CrosspostCandidate): string | null {
   const human = validateContentChecklist(
     candidate.review_ref.checklist_human,
-    REEL_HUMAN_CHECK_KEYS,
+    humanKeysForStored(candidate.review_ref.checklist_human),
     'HUMAN',
   )
   const auto = validateContentChecklist(

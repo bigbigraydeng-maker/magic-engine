@@ -96,7 +96,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   const customer = normalisePhone(contact.primary_phone, conn.default_country === 'AU' ? 'AU' : 'NZ')
   if (!customer) return NextResponse.json({ error: '这位客人的号码认不出，不能拨' }, { status: 422 })
 
-  // 只放行配置的国家（默认新西兰 / 澳洲），高价号段一律不拨：防止建一个假联系人替我们打国际 / 付费号码。
+  // 只放行配置的国家（默认只有新西兰），高价号段一律不拨：防止建一个假联系人替我们打国际 / 付费号码。
   if (!outboundNumberAllowed(customer, parseAllowedPrefixes(process.env.TELEPHONY_OUTBOUND_COUNTRIES))) {
     return NextResponse.json({ error: '这个号码所在地区暂不支持外呼' }, { status: 422 })
   }

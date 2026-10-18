@@ -63,6 +63,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  goal_rollover_missing: 'dev', // 月循环目标没自动续上：广告自治/日报失去目标口径，是系统没跑通，转开发
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
   outcome_rows_orphaned: 'decide', // 旧效果数据删还是留（删了撤不回）
@@ -76,6 +77,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // Magic Bridge 免费名额快满：加不加额度、加到多少美元由 PM 定（花钱）；不加则新客户到月底出不了报告
   magic_bridge_quota: 'decide',
   tools_wide_budget_warning: 'decide',
+  // 推广计划每日检查：草稿等你批准 / 批准后内容被改 / 到期阶段检查没过 / 对账偏差——都是批准、花钱、改计划，要 PM 拍板
+  promo_plan_watch: 'decide',
+  promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
@@ -111,6 +115,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
   instagram_publish_failed: 'dev', // 同步 Instagram 重试都失败：开发看原因，不占 PM 的清单
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
+  whatsapp_number_unclaimed: 'one_click', // 号码在发消息但没客户绑定它，去设置页绑一次
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
   // 主干合进去的代码没上线（各窗口说的「已上线」不算数）：看上线记录，催修复 PR 尽快合、或回一句
   // 「修上线」。主干明确要它留在 PM 可见栏（进了 NEVER_DROP_KINDS），不进开发欠账被埋掉。
@@ -266,6 +271,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   ai_gateway_broken: 'AI 调用卡在网关，今天写稿 / 起草类的东西可能都没出来',
   cron_not_running: '有自动任务没按时跑，它负责的那一栏今天可能不全',
   cron_silent_success: '有自动任务显示跑完了但一行没写，它负责的那一栏今天可能不全',
+  promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
 }
 

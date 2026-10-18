@@ -86,6 +86,7 @@ function goalRow(overrides: Partial<GoalRow> = {}): GoalRow {
     verdict: null,
     verdict_at: null,
     verdict_summary: null,
+    recurrence: null,
     fde_reasoning: null,
     is_beta: true,
     current_value: null,

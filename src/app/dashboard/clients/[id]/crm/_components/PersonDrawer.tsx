@@ -103,6 +103,7 @@ export function PersonDrawer({
   onClose,
   onSaved,
   nav,
+  scrollToBookings = false,
 }: {
   clientId: string
   row: DrawerRow
@@ -117,6 +118,8 @@ export function PersonDrawer({
    * `lib/crm/drawer-nav.ts` 算出下一步该做什么，这里只管画按钮、转发点击。
    */
   nav?: DrawerNav
+  /** 一打开就滚到「订单与付款」（付款总览页原地弹出时用）。 */
+  scrollToBookings?: boolean
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
@@ -511,6 +514,26 @@ export function PersonDrawer({
             </div>
           )}
 
+          {/* 订单与付款：没开通这项功能或没权限的人，这一块什么都不渲染 */}
+          <BookingsBlock key={row.contactId} clientId={clientId} contactId={row.contactId} scrollIntoViewOnReady={scrollToBookings} />
+
+          {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
+          <div className="mt-5">
+            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">
+              往来记录
+            </p>
+            <ContactTimeline
+              key={timelineKey}
+              clientId={clientId}
+              contactId={row.contactId}
+              onSummary={onSummary}
+              dialedAt={dialedAt}
+            />
+          </div>
+
+          {/* 回复框放在往来记录之后（先读后回，跟聊天类产品一样）：原来它在上面，一个空的邮件回复框就有 320 像素高，
+              把往来记录整个顶到屏幕下面（PM 2026-10-14 好用性调整）。 */}
+          <div className="mt-5 space-y-3 empty:hidden" data-testid="drawer-replies">
           {/* 在这一页直接回私信 —— 没有私信线的人这里什么都不渲染。
               110 位 CTS 客人只有 Facebook 身份，卡上写着「只能在 Messenger
               回他」，之前却要跳去另一个页面才回得了。 */}
@@ -557,22 +580,6 @@ export function PersonDrawer({
               onSaved('✓ 邮件已发出', false)
             }}
           />
-
-          {/* 订单与付款：没开通这项功能或没权限的人，这一块什么都不渲染 */}
-          <BookingsBlock key={row.contactId} clientId={clientId} contactId={row.contactId} />
-
-          {/* 往来记录：表单 / 电话 / 私信 / 邮件（以后是外呼），一条线倒序 */}
-          <div className="mt-5">
-            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">
-              往来记录
-            </p>
-            <ContactTimeline
-              key={timelineKey}
-              clientId={clientId}
-              contactId={row.contactId}
-              onSummary={onSummary}
-              dialedAt={dialedAt}
-            />
           </div>
         </div>
       </aside>

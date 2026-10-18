@@ -83,3 +83,33 @@ export async function fetchYouTubeMetadata(url: string): Promise<YouTubeMetadata
     return EMPTY
   }
 }
+
+export interface YouTubeObservation {
+  status: 'ok' | 'missing_key' | 'unavailable' | 'upstream_error'
+  views: number | null
+  likes: number | null
+  observedAt: string | null
+}
+
+/** Typed public lifetime counters; does not request Analytics scopes or publish. */
+export async function fetchYouTubeObservation(videoId: string): Promise<YouTubeObservation> {
+  const empty = { views: null, likes: null, observedAt: null }
+  if (!/^[a-zA-Z0-9_-]{11}$/.test(videoId)) return { ...empty, status: 'unavailable' }
+  if (!process.env.YOUTUBE_API_KEY) return { ...empty, status: 'missing_key' }
+  try {
+    const query = new URLSearchParams({ part: 'statistics', id: videoId, key: process.env.YOUTUBE_API_KEY })
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${query}`, {
+      cache: 'no-store', signal: AbortSignal.timeout(10000),
+    })
+    if (!res.ok) return { ...empty, status: 'upstream_error' }
+    const data = await res.json() as { items?: Array<{ statistics?: { viewCount?: unknown; likeCount?: unknown } }> }
+    if (!Array.isArray(data.items) || !data.items[0]?.statistics) return { ...empty, status: 'unavailable' }
+    const count = (v: unknown): number | null => {
+      if (typeof v !== 'number' && (typeof v !== 'string' || !/^\d+$/.test(v))) return null
+      const n = Number(v)
+      return Number.isSafeInteger(n) && n >= 0 ? n : null
+    }
+    const stats = data.items[0].statistics
+    return { status: 'ok', views: count(stats.viewCount), likes: count(stats.likeCount), observedAt: new Date().toISOString() }
+  } catch { return { ...empty, status: 'upstream_error' } }
+}

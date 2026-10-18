@@ -223,12 +223,10 @@ describe('toOverviewListRows', () => {
     expect(r4.note).toBe('changed plans')
   })
 
-  it('carries no money and no party size', () => {
+  it('carries no money', () => {
     const page = selectOverviewListPage(ENTRIES, q({ status: 'all' }), TODAY)
     const rows = toOverviewListRows(page.entries, new Map())
-    expect(JSON.stringify(rows)).not.toMatch(
-      /amount|price|money|revenue|partySize|party_size/i,
-    )
+    expect(JSON.stringify(rows)).not.toMatch(/amount|price|money|revenue/i)
     const first = rows[0]
     if (first === undefined) throw new Error('missing first row')
     expect(Object.keys(first).sort()).toEqual(
@@ -243,6 +241,7 @@ describe('toOverviewListRows', () => {
         'status',
         'deposit',
         'balance',
+        'partySize',
         'lastNudgedOn',
         'warnings',
         'note',

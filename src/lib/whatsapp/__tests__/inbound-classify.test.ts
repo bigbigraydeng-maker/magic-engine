@@ -207,6 +207,10 @@ describe('classifyInboundChanges — history field', () => {
         phoneNumberId: VALID_ID,
         displayNumber: '+15550000000',
         itemCount: 2,
+        // Unrecognised chunk shapes (no `threads`) are counted but NOT forwarded: the route refuses
+        // them loudly instead of acknowledging data it cannot read.
+        chunks: [],
+        mediaFollowUps: 0,
       },
     ])
   })
@@ -219,7 +223,76 @@ describe('classifyInboundChanges — history field', () => {
       }),
     )
     expect(classifyInboundChanges(payload)).toEqual([
-      { kind: 'history', phoneNumberId: VALID_ID, itemCount: 1 },
+      { kind: 'history', phoneNumberId: VALID_ID, itemCount: 1, chunks: [], mediaFollowUps: 1 },
+    ])
+  })
+
+  it('returns chunks with thread data intact', () => {
+    const payload = wrap(
+      change('history', {
+        metadata: { phone_number_id: VALID_ID },
+        history: [
+          {
+            metadata: { phase: 1, chunk_order: 0, progress: 50 },
+            threads: [
+              {
+                id: 't1',
+                messages: [
+                  { id: 'hm1', from: '1', to: '2', type: 'text', history_context: { status: 'read' } },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    )
+    expect(classifyInboundChanges(payload)).toEqual([
+      {
+        kind: 'history',
+        phoneNumberId: VALID_ID,
+        itemCount: 1,
+        chunks: [
+          {
+            metadata: { phase: 1, chunk_order: 0, progress: 50 },
+            threads: [
+              {
+                id: 't1',
+                messages: [
+                  { id: 'hm1', from: '1', to: '2', type: 'text', history_context: { status: 'read' } },
+                ],
+              },
+            ],
+          },
+        ],
+        mediaFollowUps: 0,
+      },
+    ])
+  })
+
+  it('counts media follow-ups and returns no chunks', () => {
+    const payload = wrap(
+      change('history', {
+        metadata: { phone_number_id: VALID_ID },
+        messages: [
+          { id: 'm1', from: '1', type: 'image', image: { id: 'media1' } },
+          { id: 'm2', from: '1', type: 'video', video: { id: 'media2' } },
+        ],
+      }),
+    )
+    expect(classifyInboundChanges(payload)).toEqual([
+      { kind: 'history', phoneNumberId: VALID_ID, itemCount: 2, chunks: [], mediaFollowUps: 2 },
+    ])
+  })
+
+  it('a chunk without threads and without errors is unrecognised: counted, not forwarded (so it is refused, never silently acknowledged)', () => {
+    const payload = wrap(
+      change('history', {
+        metadata: { phone_number_id: VALID_ID },
+        history: [{ metadata: { phase: 1 } }],
+      }),
+    )
+    expect(classifyInboundChanges(payload)).toEqual([
+      { kind: 'history', phoneNumberId: VALID_ID, itemCount: 1, chunks: [], mediaFollowUps: 0 },
     ])
   })
 
@@ -312,7 +385,7 @@ describe('classifyInboundChanges — ordering across entries and changes', () =>
     expect(classifyInboundChanges(payload)).toEqual([
       { kind: 'customer_messages', phoneNumberId: '111', messages: [{ id: 'a' }] },
       { kind: 'ignored', field: 'smb_app_state_sync' },
-      { kind: 'history', phoneNumberId: '222', itemCount: 1 },
+      { kind: 'history', phoneNumberId: '222', itemCount: 1, chunks: [], mediaFollowUps: 0 },
       { kind: 'statuses', phoneNumberId: '222', statuses: [{ id: 's' }] },
     ])
   })

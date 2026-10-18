@@ -18,6 +18,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { normalisePhone } from '@/lib/crm/identity'
+import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
 
 interface RouteParams {
   params: { id: string; cid: string }
@@ -408,7 +409,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
-  entries.sort((a, b) => ts(a.at) - ts(b.at))
+  // 同一封邮件的触点卡片和正文气泡说同一句话时只留气泡（见 timeline-dedupe）。
+  const deduped = dropEmailTouchesDuplicatedByMessage(entries)
+  deduped.sort((a, b) => ts(a.at) - ts(b.at))
 
   return NextResponse.json({
     contact: {
@@ -419,7 +422,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       stage: contact.stage,
       stageLabel: contact.stage ? (stageLabel.get(contact.stage) ?? contact.stage) : null,
     },
-    timeline: entries,
+    timeline: deduped,
     omittedMessages,
   })
 }

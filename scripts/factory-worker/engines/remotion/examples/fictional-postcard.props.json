@@ -1,0 +1,50 @@
+{
+  "brandColor": "#B61E2E",
+  "logoFile": "logo.png",
+  "logoMode": "always",
+  "musicFile": null,
+  "scrim": 0.35,
+  "cardOpacity": 0.45,
+  "cardSide": "left",
+  "accent": "#FFD27A",
+  "hook": {
+    "clip": "clips/hook.mp4",
+    "lines": [
+      "QUIET",
+      "HARBOUR"
+    ]
+  },
+  "scenes": [
+    {
+      "clip": "clips/item1.mp4",
+      "place": "Fictional Harbour",
+      "line": "The harbour wakes slowly each morning",
+      "sourceUrl": "https://example.com/tour",
+      "sourceQuote": "The harbour wakes slowly each morning, say locals.",
+      "placeSourceQuote": "Fictional Harbour is the first stop."
+    },
+    {
+      "clip": "clips/item2.mp4",
+      "place": "Fictional Pier",
+      "line": "Boats drift past the old pier",
+      "sourceUrl": "https://example.com/tour",
+      "sourceQuote": "Boats drift past the old pier at noon.",
+      "placeSourceQuote": "Fictional Pier appears on day two."
+    }
+  ],
+  "price": {
+    "backdropClip": "clips/price.mp4",
+    "fromLabel": "FROM",
+    "currencyPrefix": "$",
+    "amount": 4999,
+    "qualifier": "PER PERSON \u00b7 TWIN SHARE",
+    "footnote": "EXAMPLE ONLY",
+    "footnoteSize": 40
+  },
+  "timing": {
+    "hookSec": 3.2,
+    "sceneSec": 3.6,
+    "priceSec": 6
+  },
+  "end": null
+}

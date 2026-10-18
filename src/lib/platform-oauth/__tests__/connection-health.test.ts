@@ -57,7 +57,7 @@ describe('每个平台都必须逐个表态，不许漏', () => {
       (p) => HEARTBEAT_POLICY[p as PlatformProvider].refreshable,
     )
     expect(refreshable.sort()).toEqual(
-      ['google_ads', 'google_ga4', 'google_gbp', 'google_gsc', 'google_gtm', 'microsoft_mail'].sort(),
+      ['google_ads', 'google_ga4', 'google_gbp', 'google_gsc', 'google_gtm', 'google_youtube', 'microsoft_mail'].sort(),
     )
   })
 

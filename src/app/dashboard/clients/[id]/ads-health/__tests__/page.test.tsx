@@ -100,6 +100,13 @@ function mockFetch(routes: Record<string, unknown>) {
 beforeEach(() => { vi.stubGlobal('confirm', vi.fn(() => true)) })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
+/** 逐条广告卡片在「每条广告」标签里，先点过去 */
+async function renderAdsTab() {
+  const result = render(<AdsHealthPage />)
+  await userEvent.click(await screen.findByText('每条广告'))
+  return result
+}
+
 describe('the money question is answered before any diagnosis', () => {
   it('opens with what the week actually cost, and names the worst payer', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT, HEALTHY]) }))
@@ -128,7 +135,7 @@ describe('the money question is answered before any diagnosis', () => {
     // The headline compares a typical DAY (median); this is total ÷ total. Both
     // are correct and they differ — unlabelled they read as a contradiction.
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText(/实付每个结果/)).toBeTruthy())
   })
 
@@ -137,9 +144,11 @@ describe('the money question is answered before any diagnosis', () => {
       '/ad-health': { ...respond([OZTOP_ALERT, HEALTHY]), industry: 'travel' },
     }))
     render(<AdsHealthPage />)
-    await waitFor(() => expect(screen.getAllByText(/实付每个咨询/).length).toBe(2))
+    await waitFor(() => expect(screen.getByText(/过去 7 天花了/)).toBeTruthy())
     expect(screen.getByText(/过去 7 天花了/).textContent).toContain('个咨询')
     expect(screen.getByText(/最贵的是/).textContent).toContain('一个咨询')
+    await userEvent.click(screen.getByText('每条广告'))
+    await waitFor(() => expect(screen.getAllByText(/实付每个咨询/).length).toBe(2))
     expect(screen.getAllByText(/近 7 天咨询/).length).toBeGreaterThan(0)
     expect(screen.queryByText(/实付每个询盘|实付每个结果/)).toBeNull()
   })
@@ -148,7 +157,7 @@ describe('the money question is answered before any diagnosis', () => {
 describe('every card that is burning money offers a way to stop it', () => {
   it('shows the stop-loss controls on an alert, ABOVE the creative prescription', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
-    const { container } = render(<AdsHealthPage />)
+    const { container } = await renderAdsTab()
 
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
     expect(screen.getByText('先全停')).toBeTruthy()
@@ -162,14 +171,14 @@ describe('every card that is burning money offers a way to stop it', () => {
 
   it('does NOT offer stop-loss on a healthy card', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([HEALTHY]) }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText(/表现正常/)).toBeTruthy())
     expect(screen.queryByText('预算降 20%')).toBeNull()
   })
 
   it('"先不动" is a real choice, not a no-op — it says what happens next', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('先不动')).toBeTruthy())
 
     await userEvent.click(screen.getByText('先不动'))
@@ -184,7 +193,7 @@ describe('every card that is burning money offers a way to stop it', () => {
       '/ad-health': respond([OZTOP_ALERT]),
     })
     vi.stubGlobal('fetch', fetch)
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
@@ -201,7 +210,7 @@ describe('every card that is burning money offers a way to stop it', () => {
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true, executed: true, action: 'cut', ok: true, new_daily: 48, warnings: ['广告系列状态已变化，未自动重新开启，请检查。'] },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
@@ -215,7 +224,7 @@ describe('every card that is burning money offers a way to stop it', () => {
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: null, cuttable: false, pausable: true },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
@@ -234,7 +243,7 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
       '/execute-prescription': { __status: 409, no_supply: true, reason: 'recycle_pool_not_connected' },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
@@ -252,7 +261,7 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
       '/execute-prescription': { adsAdded: [] },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
@@ -267,7 +276,7 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
       '/execute-prescription': { adsAdded: [{ name: 'a' }, { name: 'b' }] },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))

@@ -2,15 +2,15 @@
 id: 2026-09-26-pm-todo-five-kinds
 title: 今日待办（邮件和后台页面）只给 PM 留五类事：拍板、点一次、转给客户、发前看一眼、认真假
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-26
 source: session:dba1f247
 verify_by: 2026-09-29
 verify_how: 上线后第一个工作日早上的今日待办邮件：①只有五类栏目，没有「SEO 巡逻 / 系统欠账 / 本周新建议卡 / 系统替你做了什么」栏；②标题件数跟后台今日待办页一致；③推销信和 ME 自测信不再一封一条（合成一行「陌生地址来信」或不出现）；④底部那行小字点进去，后台自动任务健康页的「开发欠账」栏能打开。四项全对算成
 done_on: 2026-09-26
 done_ref: pr:2065
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-17
+check_note: PR 2065 已于 2026-09-27 合并；四项要对照真实待办邮件原文，夜巡读不到邮件；连续两晚判不了，交人对 10-16/10-17 早上那封邮件逐项核
 ---
 PM 2026-09-26 拍板（记忆 project-pm-todo-only-five-kinds-2026-09-26）：9-25 那封 166 件，真要 PM 管的约 10 件。
 按 9-25 组成重建的夹具：旧口径 166 → 新口径 25 件，全部落在五类里（src/lib/pm-todo/__tests__/fixtures/todo-2026-09-25.ts）。

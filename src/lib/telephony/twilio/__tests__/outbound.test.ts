@@ -62,9 +62,9 @@ describe('findCallerNumber / startOutboundCall', () => {
 })
 
 describe('号码放行名单', () => {
-  it('默认只放新西兰 / 澳洲，其余国家与高价号段都不放', () => {
+  it('默认只放新西兰，澳洲等其余国家与高价号段都不放', () => {
     expect(outboundNumberAllowed('+6421841210')).toBe(true)
-    expect(outboundNumberAllowed('+61412345678')).toBe(true)
+    expect(outboundNumberAllowed('+61412345678')).toBe(false)
     expect(outboundNumberAllowed('+8613800138000')).toBe(false)
     expect(outboundNumberAllowed('+882123456789')).toBe(false)
     expect(outboundNumberAllowed('+64900123456')).toBe(false)
@@ -73,7 +73,9 @@ describe('号码放行名单', () => {
   })
   it('环境变量可加国家；写坏了回到默认', () => {
     expect(outboundNumberAllowed('+8613800138000', parseAllowedPrefixes('+86, +64'))).toBe(true)
-    expect(parseAllowedPrefixes('86;;abc')).toEqual(['+64', '+61'])
-    expect(parseAllowedPrefixes(undefined)).toEqual(['+64', '+61'])
+    expect(parseAllowedPrefixes('86;;abc')).toEqual(['+64'])
+    expect(parseAllowedPrefixes(undefined)).toEqual(['+64'])
+    // 环境变量仍可显式加回澳洲
+    expect(outboundNumberAllowed('+61412345678', parseAllowedPrefixes('+64,+61'))).toBe(true)
   })
 })

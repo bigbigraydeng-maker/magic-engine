@@ -1,0 +1,7 @@
+Summer Here, Winter There
+Photo: SEASON YU
+Source: https://unsplash.com/photos/red-and-white-temple-under-white-sky-during-daytime-HQ1mq29Q8gc?utm_source=magic_engine&utm_medium=referral
+Licence: Unsplash License (https://unsplash.com/license) - free commercial use, no permission or attribution required
+Changes: 16:9 crop, uniform dark gradient, typography and CTS brand overlay; no scene generation.
+
+

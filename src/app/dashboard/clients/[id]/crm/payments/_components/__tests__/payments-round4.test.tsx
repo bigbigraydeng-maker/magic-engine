@@ -16,6 +16,13 @@ import {
 } from './payments-fixtures'
 
 vi.mock('next/navigation', async () => (await import('./nav-mock')).navigationMock)
+vi.mock('../../../_components/ContactDrawerHost', () => ({
+  ContactDrawerHost: (p: { contactId: string; name: string | null; scrollToBookings?: boolean; onClose: () => void }) => (
+    <div data-testid="drawer" data-contact={p.contactId} data-name={p.name ?? ''} data-scroll={String(p.scrollToBookings === true)}>
+      <button onClick={p.onClose}>关闭抽屉</button>
+    </div>
+  ),
+}))
 
 beforeEach(() => {
   resetNav('')
@@ -130,7 +137,7 @@ describe('付款总览 round 4', () => {
   })
 
   describe('row clicks', () => {
-    it('selecting text does not navigate, a plain click does', async () => {
+    it('selecting text does not open the drawer, a plain click does', async () => {
       stubFetch(() => json(200, makePayload()))
       render(<CrmPaymentsPage />)
       await screen.findByRole('table', { name: '全部订单' })
@@ -140,10 +147,11 @@ describe('付款总览 round 4', () => {
       window.getSelection()?.removeAllRanges()
       window.getSelection()?.addRange(range)
       fireEvent.click(noteCell)
-      expect(pushes.some((u) => u.includes('/crm/all'))).toBe(false)
+      expect(screen.queryByTestId('drawer')).toBeNull()
       window.getSelection()?.removeAllRanges()
       fireEvent.click(noteCell)
-      expect(pushes.some((u) => u.includes('/crm/all'))).toBe(true)
+      expect(screen.getByTestId('drawer')).not.toBeNull()
+      expect(pushes.some((u) => u.includes('/crm/all'))).toBe(false)
     })
   })
 

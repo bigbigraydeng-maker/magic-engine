@@ -37,6 +37,8 @@ vi.mock('@/lib/platform-oauth/vocabulary', () => ({
     return v.replace(/^enc:/, '')
   }),
 }))
+vi.mock('@/lib/whatsapp/history-intake', () => ({ storeHistoryChunks: vi.fn() }))
+vi.mock('@/lib/whatsapp/unclaimed', () => ({ recordUnclaimedNumber: vi.fn() }))
 // The three inbound handlers are spies here: this file tests dispatch, not
 // handler internals.
 vi.mock('@/lib/whatsapp/inbound-handlers', () => ({
@@ -51,6 +53,8 @@ import { resolveContact } from '@/lib/crm/identity'
 import { recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
 import { inngest } from '@/lib/inngest/client'
 import { storeEcho, applyFailedStatus } from '@/lib/whatsapp/inbound-handlers'
+import { storeHistoryChunks } from '@/lib/whatsapp/history-intake'
+import { recordUnclaimedNumber, type UnclaimedKind } from '@/lib/whatsapp/unclaimed'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockResolveContact = vi.mocked(resolveContact)
@@ -58,6 +62,8 @@ const mockRecordOptOutKeywordTouch = vi.mocked(recordOptOutKeywordTouch)
 const mockInngestSend = vi.mocked(inngest.send)
 const mockStoreEcho = vi.mocked(storeEcho)
 const mockApplyFailedStatus = vi.mocked(applyFailedStatus)
+const mockStoreHistoryChunks = vi.mocked(storeHistoryChunks)
+const mockRecordUnclaimedNumber = vi.mocked(recordUnclaimedNumber)
 
 const SECRET = 'test-app-secret'
 const PHONE_NUMBER_ID = '999888777'
@@ -219,6 +225,8 @@ beforeEach(() => {
   mockInngestSend.mockResolvedValue({ ids: ['evt-1'] } as never)
   mockStoreEcho.mockResolvedValue('stored')
   mockApplyFailedStatus.mockResolvedValue('updated')
+  mockStoreHistoryChunks.mockResolvedValue({ stored: 1, skipped: 0 })
+  mockRecordUnclaimedNumber.mockResolvedValue(undefined)
 })
 
 describe('POST — echo dispatch (smb_message_echoes)', () => {
@@ -324,40 +332,81 @@ describe('POST — receipts and declined history', () => {
     )
     expect(res.status).toBe(200)
     expect(mockStoreEcho).not.toHaveBeenCalled()
+    expect(mockStoreHistoryChunks).not.toHaveBeenCalled()
   })
 })
 
 describe('POST — history dispatch', () => {
-  it('history → 503, no handler spies, nothing stored, clients not even queried', async () => {
+  it('history with a threads chunk and a mapped client → 200, storeHistoryChunks called once, no customer-path side effects', async () => {
     const captured = stubDb()
-    const res = await POST(
-      makePost(
-        change('history', {
-          history: [{ metadata: { phase: 0, chunk_order: 0, progress: 10 }, threads: [] }],
-        }),
-      ),
-    )
+    const chunk = { metadata: { phase: 0, chunk_order: 0, progress: 10 }, threads: [] }
+    const res = await POST(makePost(change('history', { history: [chunk] })))
 
-    expect(res.status).toBe(503)
-    expect(mockStoreEcho).not.toHaveBeenCalled()
-    expect(mockApplyFailedStatus).not.toHaveBeenCalled()
+    expect(res.status).toBe(200)
+    expect(mockStoreHistoryChunks).toHaveBeenCalledTimes(1)
+    expect(mockStoreHistoryChunks).toHaveBeenCalledWith(
+      CLIENT_ID,
+      { phoneNumberId: PHONE_NUMBER_ID, displayNumber: DISPLAY_NUMBER },
+      [chunk],
+    )
     expect(mockInngestSend).not.toHaveBeenCalled()
     expect(mockRecordOptOutKeywordTouch).not.toHaveBeenCalled()
+    expect(mockResolveContact).not.toHaveBeenCalled()
     expectNoCustomerTables(captured)
-    // History is refused before any client lookup.
-    expect(captured.touchedTables).not.toContain('clients')
   })
 
-  it('history media follow-up shape (messages[] under value) → 503, no inngest, no opt-out touch', async () => {
+  it('history intake throws → 503', async () => {
+    mockStoreHistoryChunks.mockRejectedValue(new Error('intake blew up'))
+    stubDb()
+    const chunk = { metadata: { phase: 0, chunk_order: 0, progress: 10 }, threads: [] }
+    const res = await POST(makePost(change('history', { history: [chunk] })))
+    expect(res.status).toBe(503)
+  })
+
+  it('history for an unmapped number → 503, recordUnclaimedNumber called with (number, "history"), intake NOT called', async () => {
+    stubDb({ clientMapped: false })
+    const chunk = { metadata: { phase: 0, chunk_order: 0, progress: 10 }, threads: [] }
+    const res = await POST(makePost(change('history', { history: [chunk] })))
+
+    expect(res.status).toBe(503)
+    expect(mockRecordUnclaimedNumber).toHaveBeenCalledWith(PHONE_NUMBER_ID, 'history')
+    expect(mockStoreHistoryChunks).not.toHaveBeenCalled()
+  })
+
+  it('chunk with no threads and no errors → 503, intake not called', async () => {
+    stubDb()
+    const res = await POST(makePost(change('history', { history: [{ metadata: { phase: 0 } }] })))
+
+    expect(res.status).toBe(503)
+    expect(mockStoreHistoryChunks).not.toHaveBeenCalled()
+  })
+
+  it('history media follow-up only (messages[] under field history) → 200, intake not called, no inngest, no opt-out', async () => {
     const captured = stubDb()
     const res = await POST(
       makePost(change('history', { messages: [textMessage({ id: 'wamid.HIST' })] })),
     )
 
-    expect(res.status).toBe(503)
+    expect(res.status).toBe(200)
+    expect(mockStoreHistoryChunks).not.toHaveBeenCalled()
     expect(mockInngestSend).not.toHaveBeenCalled()
     expect(mockRecordOptOutKeywordTouch).not.toHaveBeenCalled()
     expectNoCustomerTables(captured)
+  })
+
+  it('a delivery mixing a valid chunk and an unrecognised chunk → 503 but intake still called for the valid chunk', async () => {
+    stubDb()
+    const valid = { metadata: { phase: 0, chunk_order: 0, progress: 10 }, threads: [] }
+    const unrecognised = { metadata: { phase: 0 } }
+    const res = await POST(makePost(change('history', { history: [valid, unrecognised] })))
+
+    expect(res.status).toBe(503)
+    expect(mockStoreHistoryChunks).toHaveBeenCalledTimes(1)
+    expect(mockStoreHistoryChunks).toHaveBeenCalledWith(
+      CLIENT_ID,
+      { phoneNumberId: PHONE_NUMBER_ID, displayNumber: DISPLAY_NUMBER },
+      [valid],
+    )
   })
 })
 
@@ -444,6 +493,41 @@ describe('POST — client resolution for non-customer deliveries', () => {
 
     expect(res.status).toBe(503)
     expect(mockStoreEcho).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST — unclaimed-number registry', () => {
+  it('unmapped echo → recordUnclaimedNumber(number, "echoes"), still 200', async () => {
+    stubDb({ clientMapped: false })
+    const res = await POST(makePost(change('smb_message_echoes', { message_echoes: [echoMessage()] })))
+
+    expect(res.status).toBe(200)
+    expect(mockRecordUnclaimedNumber).toHaveBeenCalledWith(PHONE_NUMBER_ID, 'echoes')
+  })
+
+  it('unmapped customer message → recordUnclaimedNumber(number, "customer_messages"), still 200', async () => {
+    stubDb({ clientMapped: false })
+    const res = await POST(makePost(change('messages', { messages: [textMessage()] })))
+
+    expect(res.status).toBe(200)
+    expect(mockRecordUnclaimedNumber).toHaveBeenCalledWith(PHONE_NUMBER_ID, 'customer_messages')
+  })
+
+  it('unmapped failed status → recordUnclaimedNumber(number, "statuses"), still 200', async () => {
+    stubDb({ clientMapped: false })
+    const status = { id: 'wamid.STATUS', status: 'failed', recipient_id: WA_ID }
+    const res = await POST(makePost(change('messages', { statuses: [status] })))
+
+    expect(res.status).toBe(200)
+    expect(mockRecordUnclaimedNumber).toHaveBeenCalledWith(PHONE_NUMBER_ID, 'statuses')
+  })
+
+  it('client lookup failure does NOT call recordUnclaimedNumber', async () => {
+    stubDb({ clientLookupFails: true })
+    const res = await POST(makePost(change('messages', { messages: [textMessage()] })))
+
+    expect(res.status).toBe(503)
+    expect(mockRecordUnclaimedNumber).not.toHaveBeenCalled()
   })
 })
 

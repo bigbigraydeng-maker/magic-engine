@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { approveBudgetWithinCap } from './review-actions'
 import {
   REEL_AUTO_CHECK_KEYS,
-  REEL_HUMAN_CHECK_KEYS,
+  REEL_HUMAN_CHECK_KEYS_V2,
   checklistPasses,
   hasChecklistFailure,
   isValidContentSourceRef,
@@ -74,7 +74,7 @@ export async function applyApprove(
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
-  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
   if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
   if (!checklistPasses(checkedHuman.items)) return { ok: false, status: 422, error: 'all human checklist items must PASS' }
   const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
@@ -113,7 +113,7 @@ export async function applyQualityReject(
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
-  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS, 'HUMAN')
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
   if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
   if (!hasChecklistFailure(checkedHuman.items)) return { ok: false, status: 400, error: 'quality rejection requires a failed checklist item' }
   const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)

@@ -23,6 +23,7 @@ import { reelBatchRender } from './reel-batch-render'
 import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { calendarClosureAudit } from './calendar-closure-audit'
+import { promoPlanDailyWatch } from './promo-plan-daily-watch'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
@@ -35,11 +36,13 @@ import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
 import { gscQueryPageDailyFanOut, gscQueryPageDailyPull } from './gsc-query-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
+import { youtubeStaging, youtubePublicStep } from './youtube-publish'
 import { storyLitePublish } from './story-lite-publish'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 
 export const cloudFunctions = [
+  promoPlanDailyWatch,
   webIntelligenceCapture,
   webIntelligenceDue,
   webIntelligenceTrafficDue,
@@ -88,6 +91,8 @@ export const cloudFunctions = [
   toolsLabLeadFollowUp,
   toolsLabReportEmailReceipt,
   dailyPlanAutoPublish,
+  youtubeStaging,
+  youtubePublicStep,
   storyLitePublish,
   telephonyVoiplineProcess,
   telephonyVoiplineSweep,

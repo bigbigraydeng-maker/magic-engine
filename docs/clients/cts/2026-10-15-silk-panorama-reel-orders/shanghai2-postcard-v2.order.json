@@ -1,0 +1,78 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Shanghai & Surroundings #2 postcard v2: hook trimmed/cropped to clear the logo, day Bund end backdrop",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15：3 月团三条按复审意见用 postcard 重出无价格版（价格只放首评，以官网当天为准）；只出片到 in_review，不发布",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/shanghai-surroundings, 2026-10-15：10 天；7 晚 sample hotels or similar；亮点 The Bund、Master of the Nets Garden…Suzhou 官网原词；价格与出发日只留首评链接。",
+  "note": "简报里的第一人称叙述要求不适用：本片无旁白，不替真人编亲身经历；质检口吻标记按误报处理；无 Early Bird/催单话术"
+ },
+ "rationale_one_liner": "Shanghai v2：钩子片段去掉压 logo 的绿招牌、片尾换白天外滩、音乐响度微调；苏州画面保持泛称；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "postcard",
+   "props": {
+    "brandColor": "#B61E2E",
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "musicFile": "music/sunlit-kitchen-window_n.mp3",
+    "musicStartSec": 0,
+    "scrim": 0.55,
+    "cardOpacity": 0.55,
+    "cardSide": "left",
+    "accent": "#FFD27A",
+    "hook": {
+     "clip": "clips/item5_nanjingroad_b.mp4",
+     "lines": [
+      "SHANGHAI",
+      "10 DAYS"
+     ]
+    },
+    "scenes": [
+     {
+      "clip": "clips/item3_bund.mp4",
+      "place": "Shanghai",
+      "line": "The Bund",
+      "sourceQuote": "The Bund, City God Temple quarter, World Cultural Heritage Art Exhibition Centre, and Nanjing Road",
+      "placeSourceQuote": "Auckland → Shanghai → Suzhou → Wuxi → Xinshi Ancient Town → Hangzhou → Shanghai → Auckland",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings"
+     },
+     {
+      "clip": "clips/v2b_suzhou_garden.mp4",
+      "place": "Suzhou",
+      "line": "A garden in Suzhou",
+      "sourceQuote": "Master of the Nets Garden, Panmen, and Shantang Street in Suzhou",
+      "placeSourceQuote": "Auckland → Shanghai → Suzhou → Wuxi → Xinshi Ancient Town → Hangzhou → Shanghai → Auckland",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings"
+     }
+    ],
+    "price": null,
+    "end": {
+     "backdropClip": "clips/item1_skylineday.mp4",
+     "title": "7 NIGHTS"
+    },
+    "timing": {
+     "hookSec": 3.0,
+     "sceneSec": 4.0,
+     "priceSec": 4
+    },
+    "cardTop": 870
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Ten days from Auckland: Shanghai, Suzhou, Wuxi, Xinshi Ancient Town and Hangzhou. International and domestic airfares, seven hotel nights (sample hotels or similar, confirmed at booking), an English-speaking tour guide, and the entrance fees and meals as specified in the itinerary are included. Travel insurance is not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings",
+    "offer": [
+     "10 days, 7 hotel nights"
+    ]
+   }
+  }
+ }
+}

@@ -273,6 +273,7 @@ export default function ContentFactoryBoardPage() {
     <div className="p-6 max-w-[1400px] mx-auto text-me-charcoal">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-display font-bold">内容工厂</h1>
+        {clientId && <Link href={`/dashboard/clients/${clientId}/content-factory/series`} className="text-xs border border-me-stone rounded-full px-3 py-1 hover:border-me-ochre">系列视频与播放数据</Link>}
         {clientId && (
           <Link href={`/dashboard/clients/${clientId}/content-factory/settings`}
             className="text-xs text-me-charcoal border border-me-stone rounded-full px-3 py-1 hover:border-me-ochre">

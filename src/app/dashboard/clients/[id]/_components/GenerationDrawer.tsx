@@ -311,13 +311,13 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
                 ✓ 已保存 {savedCount} 条内容草稿
               </p>
               <p className="text-xs text-[#5C8A4A]">
-                前往内容板批量检查和审批
+                前往每日计划检查和审批
               </p>
               <a
-                href={`/dashboard/content?client=${clientId}`}
+                href={`/dashboard/clients/${clientId}/daily-plan`}
                 className="inline-block text-xs bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white px-4 py-2 rounded-lg font-medium transition-colors"
               >
-                前往内容板 →
+                前往每日计划 →
               </a>
             </div>
           )}

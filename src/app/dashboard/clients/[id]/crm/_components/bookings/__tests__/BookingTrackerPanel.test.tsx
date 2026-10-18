@@ -85,6 +85,21 @@ describe('BookingTrackerPanel does not own the members card', () => {
   })
 })
 
+describe('BookingTrackerPanel compact strip', () => {
+  it('shrinks to a slim strip when there is nothing new to chase (the guest list stays the star of the page)', async () => {
+    setup({ nudge: () => makeNudgeList({ rows: [] }) })
+    const section = await screen.findByTestId('payment-nudge-section')
+    expect(section.className).toContain('py-1.5')
+    expect(section.className).not.toContain('p-4')
+  })
+
+  it('keeps the roomy card when there are rows to chase', async () => {
+    setup({ nudge: () => makeNudgeList({ rows: [makeNudgeRow(1)] }) })
+    const section = await screen.findByTestId('payment-nudge-section')
+    expect(section.className).toContain('p-4')
+  })
+})
+
 describe('BookingTrackerPanel', () => {
   it('renders nothing when the tracker is not enabled', async () => {
     const { calls } = setup({

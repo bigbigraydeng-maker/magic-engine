@@ -201,7 +201,10 @@ describe('number_claim_semantic — catches a spelled-out price/date the digit r
       }),
     )
     expect(result.semantic_flags.some((r) => r.startsWith('number_claim_semantic:'))).toBe(false)
-    expect(result.ok).toBe(true)
+    // The semantic layer stays silent, but the deterministic content_claims gate now blocks a
+    // spelled-out price that matches no confirmed fact (this used to be the gap Jev only flagged).
+    expect(result.ok).toBe(false)
+    expect(result.blocked_reasons.some((r) => r.startsWith('content_claims:'))).toBe(true)
   })
 })
 
@@ -226,6 +229,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
       'provenance',
       'length',
       'url_allowlist',
+      'content_claims',
     ])
     expect(withSemantic.semantic_flags).toEqual([])
   })
@@ -274,6 +278,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
       'provenance',
       'length',
       'url_allowlist',
+      'content_claims',
     ])
   })
 
@@ -304,7 +309,7 @@ describe('fail-open — Jev outage never blocks a reply that the regex gates alr
 // ─── checked_gate_ids — the honest per-draft record drafts/route.ts reads ────
 
 describe('checked_gate_ids — what the human-review portal trusts', () => {
-  it('a fully successful run claims all nine gate ids, not a static constant', async () => {
+  it('a fully successful run claims all ten gate ids, not a static constant', async () => {
     callJev.mockResolvedValueOnce({ answers: { brand_redline_semantic: { noul: 0.01 } } })
     callJev.mockResolvedValueOnce({ answers: { number_claim_semantic: { noul: 0.01 } } })
     const result = await verifyCtsReplyWithSemanticChecks(baseContext())
@@ -316,6 +321,7 @@ describe('checked_gate_ids — what the human-review portal trusts', () => {
       'provenance',
       'length',
       'url_allowlist',
+      'content_claims',
       'brand_redline_semantic',
       'number_claim_semantic',
     ])

@@ -283,6 +283,29 @@ describe('GET contacts — 分页形状', () => {
       expect(rpcCalls[0]).toMatchObject({ p_stages: null, p_q: null, p_in_ids: null, p_not_in_ids: null })
     })
 
+    it('响应带 Server-Timing：各步耗时（只有步骤名和毫秒数）', async () => {
+      rpcRows = [{ id: 'a1', total: 3 }]
+      const req = new NextRequest('http://localhost/api/clients/client-a/crm/contacts?page=1&perPage=100')
+      const res = await GET(req, { params: { id: 'client-a' } })
+      const h = res.headers.get('Server-Timing') ?? ''
+      for (const step of ['gate', 'rpc_stages', 'page_rows', 'page_ready', 'touches_briefs', 'assemble', 'total']) {
+        expect(h).toContain(`${step};dur=`)
+      }
+      expect(h).not.toMatch(/a1|client-a|@/)
+    })
+
+    it('函数给出这一页的 id 后，取触点和取资料同时开始（触点查询先发出，不排在资料之后）', async () => {
+      rpcRows = [{ id: 'a1', total: 3 }, { id: 'a3', total: 3 }]
+      await get('client-a', '?page=1&perPage=2')
+      const touchIdx = recorded.findIndex((r) => r.table === 'contact_touchpoints' && r.ins.some(([c]) => c === 'contact_id'))
+      const rowsIdx = recorded.findIndex((r) => r.table === 'contacts' && r.ins.some(([c]) => c === 'id'))
+      expect(touchIdx).toBeGreaterThanOrEqual(0)
+      expect(rowsIdx).toBeGreaterThanOrEqual(0)
+      expect(touchIdx).toBeLessThan(rowsIdx)
+      // 只读这一页的触点一次，不重复读
+      expect(recorded.filter((r) => r.table === 'contact_touchpoints' && r.ins.some(([c]) => c === 'contact_id'))).toHaveLength(1)
+    })
+
     it('函数还没装上（报错）→ 退回老路径，页面照样 200 且按触点排序', async () => {
       rpcRows = null
       scanRows = [{ contact_id: 'a1', occurred_at: '2026-10-14T01:00:00.000Z' }]
@@ -712,5 +735,32 @@ describe('GET contacts — kind 筛选（WP-B3）', () => {
     expect(status).toBe(200)
     expect(body.total).toBe(0)
     expect(body.items).toEqual([])
+  })
+})
+
+describe('GET contacts — ?ids= 只取指定的客人', () => {
+  const ID_A = 'a1a1a1a1-0000-4000-8000-000000000001'
+
+  it('只按这几个编号取人和触点，按客户收口，不走排序扫描也不调数据库函数', async () => {
+    const { status, body } = await get('c-1', `?ids=${ID_A}`)
+    expect(status).toBe(200)
+    expect(Array.isArray(body.items)).toBe(true)
+    expect(body.viewerEmail).toBe('roman@example.com')
+
+    const contactsQ = recorded.find((r) => r.table === 'contacts')
+    expect(contactsQ?.eqs).toContainEqual(['client_id', 'c-1'])
+    expect(contactsQ?.ins).toContainEqual(['id', [ID_A]])
+    const touchQ = recorded.filter((r) => r.table === 'contact_touchpoints')
+    expect(touchQ).toHaveLength(1)
+    expect(touchQ[0].ins).toContainEqual(['contact_id', [ID_A]])
+    expect(touchQ[0].eqs).toContainEqual(['client_id', 'c-1'])
+    expect(rpcCalls).toHaveLength(0)
+  })
+
+  it('编号不是 uuid、为空或超过 20 个 → 400', async () => {
+    expect((await get('c-1', '?ids=not-a-uuid')).status).toBe(400)
+    expect((await get('c-1', '?ids=')).status).toBe(400)
+    const many = Array.from({ length: 21 }, (_, i) => `a1a1a1a1-0000-4000-8000-${String(i).padStart(12, '0')}`).join(',')
+    expect((await get('c-1', `?ids=${many}`)).status).toBe(400)
   })
 })

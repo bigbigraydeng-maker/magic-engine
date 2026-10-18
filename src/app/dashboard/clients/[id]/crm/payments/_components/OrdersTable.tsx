@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { MUTED_TEXT, SECONDARY_BUTTON } from '../../_components/bookings/booking-styles'
-import { stashContactName } from '../../_components/bookings/payments-return'
 import { dateLabel, milestoneCellText } from './payments-format'
 import type { OverviewListRow } from '@/lib/crm/booking-overview-types'
 
@@ -17,7 +16,6 @@ interface OrdersTableProps {
   refreshing: boolean
   onPage: (page: number) => void
   onOpenRow: (row: OverviewListRow) => void
-  onLeave: () => void
 }
 
 export function OrdersTable(props: OrdersTableProps): JSX.Element {
@@ -42,6 +40,7 @@ export function OrdersTable(props: OrdersTableProps): JSX.Element {
             <tr className="border-b border-me-charcoal/15 text-left">
               <th scope="col" className="px-3 py-2 font-black">客人</th>
               <th scope="col" className="px-3 py-2 font-black">团 · 出发日期</th>
+              <th scope="col" className="px-3 py-2 font-black">人数</th>
               <th scope="col" className="px-3 py-2 font-black">定金</th>
               <th scope="col" className="px-3 py-2 font-black">尾款</th>
               <th scope="col" className="px-3 py-2 font-black">最近催过</th>
@@ -56,7 +55,6 @@ export function OrdersTable(props: OrdersTableProps): JSX.Element {
                 clientId={props.clientId}
                 today={props.today}
                 onOpenRow={props.onOpenRow}
-                onLeave={props.onLeave}
               />
             ))}
           </tbody>
@@ -77,7 +75,6 @@ interface OrderRowProps {
   clientId: string
   today: string
   onOpenRow: (row: OverviewListRow) => void
-  onLeave: () => void
 }
 
 function OrderRow(props: OrderRowProps): JSX.Element {
@@ -97,8 +94,10 @@ function OrderRow(props: OrderRowProps): JSX.Element {
           className="inline-flex min-h-[40px] items-center font-bold underline focus-visible:ring-2 focus-visible:ring-me-ochre"
           onClick={(e) => {
             e.stopPropagation()
-            stashContactName(props.clientId, row.contactId, row.contactName)
-            props.onLeave()
+            // 按住 Ctrl / Cmd / Shift 点（想在新标签页开）照旧走链接；普通点击原地弹出抽屉。
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+            e.preventDefault()
+            props.onOpenRow(row)
           }}
         >
           {row.contactName ?? '（没有姓名）'}
@@ -114,6 +113,9 @@ function OrderRow(props: OrderRowProps): JSX.Element {
         <div className="text-xs text-me-charcoal/70">
           {row.departOn ? `${row.departOn} 出发` : '出发日期未定'}
         </div>
+      </td>
+      <td className="px-3 py-2">
+        {row.status === 'cancelled' ? '—' : row.partySize === null ? '未填' : row.partySize}
       </td>
       <td className="px-3 py-2">{milestoneCellText(row.deposit, props.today)}</td>
       <td className="px-3 py-2">{milestoneCellText(row.balance, props.today)}</td>

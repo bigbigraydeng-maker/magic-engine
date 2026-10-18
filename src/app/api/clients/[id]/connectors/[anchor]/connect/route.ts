@@ -36,7 +36,7 @@ import { startAdvancedDiscovery } from '@/lib/zhangqian/start-advanced-discovery
 // verifies live GA4 Data API access before ever writing 'connected'. No
 // other anchor currently needs that guarantee — see the explicit 400 below
 // if this ever gets called with anchor=ga4 again.
-const VALID_ANCHORS = new Set(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'publer', 'social'])
+const VALID_ANCHORS = new Set(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'social'])
 
 // Anchors that unlock advanced discovery when connected.
 const ADVANCED_DISCOVERY_TRIGGERS = new Set(['meta-ads', 'gbp', 'gsc', 'google-ads'])

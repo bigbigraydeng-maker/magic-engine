@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+
 interface OneClickConfirmProps {
   itemLabels: string[]
   sourceUrl: string
@@ -9,6 +11,8 @@ interface OneClickConfirmProps {
 }
 
 export function OneClickConfirm({ itemLabels, sourceUrl, busy, onConfirm, onExpand }: OneClickConfirmProps) {
+  // Never pre-ticked: the reviewer must say they actually listened with sound on.
+  const [listened, setListened] = useState(false)
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-600">
@@ -29,11 +33,16 @@ export function OneClickConfirm({ itemLabels, sourceUrl, busy, onConfirm, onExpa
         <a href={sourceUrl} target="_blank" rel="noreferrer" className="underline break-all">{sourceUrl}</a>
       </p>
 
+      <label className="flex items-start gap-2 text-sm text-slate-800">
+        <input type="checkbox" checked={listened} onChange={e => setListened(e.target.checked)} className="mt-1" />
+        <span>我已开声音听过，背景音乐里没有人声</span>
+      </label>
+
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={onConfirm}
-          disabled={busy}
+          disabled={busy || !listened}
           className="h-10 rounded-lg px-5 bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
         >{busy ? '处理中…' : '我已看过这条片子,同意通过'}</button>
         <button

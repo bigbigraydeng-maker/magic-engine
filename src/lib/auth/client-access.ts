@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireSession } from '@/lib/auth/require-session'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { getUserPermissions, type UserRole } from '@/lib/auth/whitelist'
 import {
   ACCESS_TYPES_DASHBOARD,
@@ -28,7 +29,7 @@ export type ClientAccessResult =
       status: 401 | 402 | 403 | 500
       error: string
       /** Machine-readable failure reason for frontend dispatch. */
-      reason?: 'unauthorized' | 'forbidden' | 'paid_only' | 'lookup_failed'
+      reason?: 'unauthorized' | 'forbidden' | 'paid_only' | 'approver_only' | 'lookup_failed'
     }
 
 export async function requireDashboardClientAccess(
@@ -148,6 +149,30 @@ export async function requirePaidClientAccess(
   }
 
   return result
+}
+
+/**
+ * 批准推广计划这类「带钱」的动作：先过付费客户门（保留 401/402/403 语义），
+ * 再要求是 Magic Lab 内部账号（requireGlobalAdmin：拒绝受限管理员，与素材批准同一档）。
+ * 为什么不是 requirePaidClientAccess：paid_client 档包含客户自己的员工 —— 客户不该批准自己的预算。
+ * 为什么不用 ADMIN_EMAILS 精确名单：那张名单同时是「开投广告花钱 / 每日计划真发」的唯一授权，
+ * 日常的计划批准不该挂在它上面（会逼人把员工加进去，顺带给了花钱权）。
+ */
+export async function requirePlanApproverAccess(clientId: string): Promise<ClientAccessResult> {
+  const paid = await requirePaidClientAccess(clientId)
+  if (!paid.ok) return paid
+
+  const admin = await requireGlobalAdmin()
+  if (!admin.ok) {
+    return {
+      ok: false,
+      status: 403,
+      error: '批准和修改推广计划需要 Magic Lab 内部账号',
+      reason: 'approver_only',
+    }
+  }
+
+  return paid
 }
 
 // ── DB lookup ─────────────────────────────────────────────────────────────────

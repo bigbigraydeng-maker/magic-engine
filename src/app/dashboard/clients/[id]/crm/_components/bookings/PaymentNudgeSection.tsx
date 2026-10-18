@@ -49,26 +49,32 @@ export function PaymentNudgeSection({
   const { nudge } = list.state
   const count = nudge.rows.length
   const countText = nudge.more ? `共 ${count} 单以上` : `共 ${count} 单`
+  // 没有要催的新款时，这块缩成一条细条：这一页的主角是客人名单，别让一张空卡片把名单往下顶 150 像素。
+  const compact = count === 0
 
   return (
     <section
       data-testid="payment-nudge-section"
       aria-labelledby={headingId}
-      className="rounded-xl border border-me-charcoal/15 bg-white p-4"
+      className={
+        compact
+          ? 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-me-charcoal/10 bg-white px-3 py-1.5 text-xs'
+          : 'rounded-xl border border-me-charcoal/15 bg-white p-4'
+      }
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id={headingId} className="text-lg font-black text-me-charcoal">
+      <div className={compact ? 'flex items-baseline gap-2' : 'flex flex-wrap items-baseline justify-between gap-2'}>
+        <h2 id={headingId} className={compact ? 'text-xs font-black text-me-charcoal' : 'text-lg font-black text-me-charcoal'}>
           付款要催
         </h2>
         <span className={MUTED_TEXT}>{countText}</span>
       </div>
 
-      <div className="mt-3">
+      <div className={compact ? '' : 'mt-3'}>
         <BookingNotice message={list.notice} onDismiss={list.clearNotice} />
       </div>
 
       {count === 0 && nudge.collapsedOverdue === 0 ? (
-        <p className={`mt-3 ${MUTED_TEXT}`}>现在没有要催的款。</p>
+        <p className={MUTED_TEXT}>现在没有要催的款。</p>
       ) : null}
 
       {count > 0 ? (
@@ -96,13 +102,19 @@ export function PaymentNudgeSection({
       ) : null}
 
       {nudge.collapsedOverdue > 0 ? (
-        <div className="mt-3">
-          <p className={MUTED_TEXT}>{`逾期很久（${nudge.collapsedOverdue} 单）`}</p>
-          <p className={MUTED_TEXT}>已逾期超过 14 天，不再逐条列出。</p>
+        <div className={compact ? 'flex flex-wrap items-center gap-x-3 gap-y-1' : 'mt-3'}>
+          {compact ? (
+            <p className={MUTED_TEXT}>{`逾期很久（${nudge.collapsedOverdue} 单）· 超过 14 天不逐条列出`}</p>
+          ) : (
+            <>
+              <p className={MUTED_TEXT}>{`逾期很久（${nudge.collapsedOverdue} 单）`}</p>
+              <p className={MUTED_TEXT}>已逾期超过 14 天，不再逐条列出。</p>
+            </>
+          )}
           {nudge.collapsedRows.length > 0 ? (
             <button
               type="button"
-              className={`mt-2 ${SECONDARY_BUTTON}`}
+              className={`${compact ? '' : 'mt-2 '}${SECONDARY_BUTTON}`}
               aria-expanded={collapsedOpen}
               aria-controls={collapsedListId}
               onClick={() => setCollapsedOpen((open) => !open)}

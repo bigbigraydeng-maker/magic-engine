@@ -1,0 +1,107 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Silk Road: 15-second reel (18 days Xi'an to Urumqi; no dates; real website price; v2: item overlay darkened 0.08->0.22 for white-text contrast; same footage as f236c2e3)",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15（转述 PM「按判断处理小事」；成本为 0 才提交）；Silk Road 另有 74 号 10/14 已批一条；只出片到 in_review，不发布、不起广告；无早鸟/截止/限时类字样",
+  "facts_checked": "ctstours.co.nz/tours/china/signature/silk-road, 2026-10-15：18 天/15 晚；NZD 7,999 pp twin share；单人房差 NZD 1,488；国际+国内机票、4–5 星酒店、英语导游；38 餐；行程含 Zhangye、Jiayuguan、Dunhuang、Turpan、Urumqi。班期页写 13–30 May 与出发表 5/29 差一天，故片内与文案都不写日期。"
+ },
+ "rationale_one_liner": "丝路第一条 v2：仅把条目压暗 0.08→0.22 提高白字对比度，素材不变，与 f236c2e3 并排比较；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.22,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.35,
+    "beats": [
+     0,
+     0.8,
+     1.6,
+     2.4,
+     3.2,
+     4.35,
+     5.5,
+     6.65,
+     7.8,
+     8.95,
+     10.1,
+     10.7,
+     11.3,
+     11.9,
+     12.5,
+     13.1,
+     13.7,
+     14.3,
+     14.9
+    ],
+    "musicFile": "music/momentum_q.mp3",
+    "musicStartSec": 0,
+    "hook": {
+     "clip": "clips/s1_zhangye_danxia.mp4",
+     "lines": [
+      {
+       "text": "DAYS",
+       "badge": "18"
+      },
+      {
+       "text": "XI'AN TO",
+       "badge": null
+      },
+      {
+       "text": "URUMQI",
+       "badge": null
+      }
+     ]
+    },
+    "items": [
+     {
+      "clip": "clips/s2_jiayuguan.mp4",
+      "text": "JIAYUGUAN PASS",
+      "blurBackdrop": false
+     },
+     {
+      "clip": "clips/c1b_terracotta.mp4",
+      "text": "TERRACOTTA WARRIORS, XI'AN",
+      "blurBackdrop": false
+     },
+     {
+      "clip": "clips/s1b_zhangye_ridges.mp4",
+      "text": "ZHANGYE DANXIA",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "YOUR 18 DAYS",
+    "revealTitle": "THE SILK ROAD.",
+    "price": {
+     "amount": 7999,
+     "footnote": "SINGLE SUPPLEMENT NZ$1,488",
+     "fromLabel": "FROM",
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "backdropClip": "clips/s2_jiayuguan.mp4",
+     "footnoteSize": 50,
+     "currencyPrefix": "NZ$"
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Eighteen days from Auckland along the Silk Road, from Xi'an through Jiayuguan, Dunhuang and Turpan to Urumqi. International and domestic flights, 4-5 star hotels, an English-speaking tour guide and the 38 meals listed in the itinerary are in the price. NZD $7,999 per person, twin share; single supplement NZD $1,488. Travel insurance, visa fee if required, and tips are not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/signature/silk-road",
+    "offer": [
+     "18 days from Auckland",
+     "NZD $7,999 per person, twin share"
+    ]
+   }
+  }
+ }
+}

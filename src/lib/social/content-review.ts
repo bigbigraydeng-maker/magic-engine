@@ -12,6 +12,7 @@ export const CONTENT_CHECK_KEYS = [
   'asset_provenance_labeled',
   'asset_provenance_matches_claim_context',
   'bgm_segmented_with_fades',
+  'bgm_listened_no_vocals',
   'format_is_reel',
   'cta_in_first_comment_not_body',
   'first_comment_link_has_tracking_params',
@@ -60,6 +61,23 @@ export const REEL_HUMAN_CHECK_KEYS = [
   'asset_provenance_matches_claim_context',
   'bgm_segmented_with_fades',
 ] as const satisfies readonly ContentCheckItemKey[]
+
+// Approval-time checklist (2026-10-16): adds an explicit "listened with sound on, no vocals in the
+// BGM" item, because a plain approval never proved the reviewer heard the audio.
+// REEL_HUMAN_CHECK_KEYS above stays as the legacy 9-key set so receipts stored before this item
+// existed still validate at publish time (see humanKeysForStored).
+export const REEL_HUMAN_CHECK_KEYS_V2 = [
+  ...REEL_HUMAN_CHECK_KEYS,
+  'bgm_listened_no_vocals',
+] as const satisfies readonly ContentCheckItemKey[]
+
+// Which human key set a STORED approval receipt was made under: V2 when it carries the new item,
+// otherwise the legacy set. New approvals always carry it (all approve/reject entry points use V2).
+export function humanKeysForStored(value: unknown): readonly ContentCheckItemKey[] {
+  const hasListened = Array.isArray(value)
+    && value.some(item => !!item && typeof item === 'object' && (item as Record<string, unknown>).key === 'bgm_listened_no_vocals')
+  return hasListened ? REEL_HUMAN_CHECK_KEYS_V2 : REEL_HUMAN_CHECK_KEYS
+}
 
 export const POST_HUMAN_CHECK_KEYS = [
   'factual_claims_have_source',

@@ -79,7 +79,7 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
   }
 
   // ── Save 编辑 ────────────────────────────────────────────────────────────
-  const saveDraft = async () => {
+  const saveDraft = async (): Promise<boolean> => {
     setSaving(true)
     try {
       const res = await fetch(`/api/clients/${clientId}/marketing-plan/${plan.id}`, {
@@ -92,8 +92,10 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
       onUpdated(json.plan)
       setDirty(false)
       setMessage('✓ 已保存', true)
+      return true
     } catch (err) {
       setMessage(`✗ ${(err as Error).message}`, false)
+      return false
     } finally {
       setSaving(false)
     }
@@ -110,7 +112,7 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
     setApproving(true)
     try {
       // 先保存最新编辑
-      if (dirty) await saveDraft()
+      if (dirty && !(await saveDraft())) return // 保存没成功就不批准：否则批准的是旧内容
       // 然后批准
       const res = await fetch(`/api/clients/${clientId}/marketing-plan/${plan.id}/approve`, {
         method: 'POST',

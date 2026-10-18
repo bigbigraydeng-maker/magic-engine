@@ -1052,10 +1052,10 @@ function TaskDetailDrawer({
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-black text-green-700 uppercase tracking-wide">✓ 内容已生成</span>
                   <a
-                    href={`/dashboard/content?client=${clientId}`}
+                    href={`/dashboard/clients/${clientId}/daily-plan`}
                     className="text-[11px] font-bold text-cyan-600 hover:text-cyan-800 underline"
                   >
-                    打开工作台 →
+                    打开每日计划 →
                   </a>
                 </div>
               </div>
@@ -1159,7 +1159,7 @@ function TaskDetailDrawer({
               href={
                 factoryResult.packageId
                   ? `/dashboard/clients/${clientId}/production/${factoryResult.packageId}`
-                  : `/dashboard/content?client=${clientId}`
+                  : `/dashboard/clients/${clientId}/daily-plan`
               }
               className="ml-1 underline hover:text-green-900"
             >

@@ -1,0 +1,7 @@
+When the Mountains Change
+Photo: Chengbo Zheng
+Source: https://unsplash.com/photos/snow-covered-peaks-in-a-majestic-mountain-landscape-27kOkjtO7tg?utm_source=magic_engine&utm_medium=referral
+Licence: Unsplash License (https://unsplash.com/license) - free commercial use, no permission or attribution required
+Changes: 16:9 crop, uniform dark gradient, typography and CTS brand overlay; no scene generation.
+
+

@@ -134,6 +134,8 @@ export interface PlanTask {
    *   'client_info'  — 需要客户提供信息（产品数据、案例等）
    */
   requires?: PlanTaskRequires | null
+  /** 推广计划（plan_data.promo）下的任务必须指明所属阶段 / 步骤，批准时校验。 */
+  promo_ref?: { phase_id: string; step_id: string } | null
 }
 
 // ─── 完整 Plan 数据 ────────────────────────────────────────────────────────────
@@ -155,6 +157,37 @@ export interface MarketingPlanData {
   executive_summary?: string | null
 }
 
+// ─── 批准回执 ──────────────────────────────────────────────────────────────────
+
+export interface PromoManualCheckRecord {
+  phase_id: string
+  check_key: string
+  verified_by: string
+  verified_at: string
+  note: string
+  /** 核实当时整份推广结构的内容指纹；内容改过后旧核实自动失效。*/
+  content_hash?: string
+}
+
+export interface WeeklyReviewRecord {
+  week_start: string
+  by: string | null
+  at: string
+}
+
+export interface ApprovalReceipt {
+  request_id: string
+  approved_by: string | null
+  approved_at: string
+  tasks_created: number
+  tasks_skipped: number
+  packages_created: number
+  /** 批准当时第一阶段的检查清单快照（事后能说清「批的时候是什么状态」）*/
+  gate_snapshot?: { taken_at: string; results: { key: string; light: string; hard: boolean; phase_id?: string }[] }
+  /** 批准当时 plan_data.promo 的内容指纹；旧回执没有。*/
+  content_hash?: string
+}
+
 // ─── 数据库行类型 ─────────────────────────────────────────────────────────────
 
 export interface MarketingPlan {
@@ -174,6 +207,18 @@ export interface MarketingPlan {
     generated_at?: string
     /** true = 生成时撞到输出上限被截断，tasks/email 等数组可能不完整，需要人工核对再批准。 */
     truncated?: boolean
+    /** 批准回执：每次批准成功后由服务端写入（保存接口不接受这一列，所以不会被覆盖）。*/
+    approval_receipt?: ApprovalReceipt
+    /** 计划被退回草稿时，把当时的批准回执挪到这里留底（服务端写入），草稿上不再留着「有效」的批准记录。*/
+    previous_approvals?: ApprovalReceipt[]
+    /** FDE 在计划批准后补充的人工核实记录（plan_data 被锁，所以放这里；服务端写入）。*/
+    promo_checks?: PromoManualCheckRecord[]
+    /** 退回草稿时挪过来留底的旧核实记录（内容已可能改过，不再参与判定）。*/
+    previous_promo_checks?: PromoManualCheckRecord[]
+    /** 退回草稿时挪过来留底的旧「按计划继续」记录（看的是旧内容，不再算数）。*/
+    previous_weekly_reviews?: WeeklyReviewRecord[]
+    /** PM 每周「按计划继续」的确认记录（服务端写入，按 week_start 幂等）。*/
+    weekly_reviews?: WeeklyReviewRecord[]
   } | null
   approved_at: string | null
   created_at: string
@@ -200,6 +245,8 @@ export interface GeneratePlanRequest {
 export interface DispatchResult {
   marketing_plan_id: string
   tasks_created: number
+  /** 这次因为已经派发过而跳过的任务数（批准重试 / 并发点两次时 > 0）*/
+  tasks_skipped?: number
   task_ids: string[]
   packages_created: number
   package_ids: string[]

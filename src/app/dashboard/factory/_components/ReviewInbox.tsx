@@ -1,18 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
 import type { PublishedView } from '@/lib/factory/publish/publish-display'
-import { REEL_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V2, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
-import { isAcceptableFlagCategory } from '@/lib/factory/review-flag-categories'
 import { factoryVideoUrl } from '@/lib/factory/outlets'
-import { FactoryChat } from './FactoryChat'
 import { OneClickConfirm } from './OneClickConfirm'
 import { OrderNo } from './OrderNo'
 import { PublishOutlets } from './PublishOutlets'
 import { publishedBadge, POST_PUBLISH } from './statusMeta'
 import { PendingCardHead, ReadOnlyTile } from './OrderTile'
+import { RejectDialog } from './RejectDialog'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
@@ -28,6 +27,7 @@ interface WorkOrder {
   angle: string
   rationale_one_liner: string
   created_at?: string
+  reject_reason?: string | null
   published?: PublishedView | null
   // redline_hits:交付时服务端复扫命中的品牌红线词(complete-work-order.ts)。
   // 设计是「命中不打回,标红让人审有的放矢」——但此前唯一的「标红」实现在 Airtable 审核卡里,
@@ -41,16 +41,19 @@ interface WorkOrder {
     quality_flags?: Array<{ category: string; detail: string }>
     quality_checklist_auto?: ContentCheckItemResult[]
   } | null
-  accepted_flags?: Array<{ category: string; accepted_at: string; accepted_by: string }>
 }
 
 const redlineHitsOf = (o: WorkOrder): string[] =>
   Array.isArray(o.output?.redline_hits) ? o.output.redline_hits.filter((h) => typeof h === 'string' && h) : []
 
+// 「人称口吻不符简报」检测已于 2026-10-16 取消;历史工单里残留的这类标记只在展示层过滤,不改库。
+const RETIRED_FLAG_CATEGORIES = ['narrator_voice_mismatch']
+
 const qualityFlagsOf = (o: WorkOrder): Array<{ category: string; detail: string }> =>
   Array.isArray(o.output?.quality_flags)
     ? o.output.quality_flags
         .filter((f) => f && typeof f === 'object')
+        .filter((f) => !RETIRED_FLAG_CATEGORIES.includes((f as { category?: string }).category ?? ''))
         .map((f) => ({
           category: typeof f.category === 'string' && f.category ? f.category : 'unknown',
           detail: typeof f.detail === 'string' ? f.detail : '',
@@ -62,25 +65,16 @@ const autoChecklistOf = (o: WorkOrder): ContentCheckItemResult[] =>
 const autoChecklistReady = (o: WorkOrder): boolean =>
   autoChecklistOf(o).length > 0 && autoChecklistOf(o).every(item => item.judge === 'AUTO' && item.outcome === 'PASS')
 
-const acceptedCategoriesOf = (o: WorkOrder): string[] => (o.accepted_flags ?? []).map(f => f.category)
-
-const acceptedDateOf = (o: WorkOrder, category: string): string | null => {
-  const entry = (o.accepted_flags ?? []).find(f => f.category === category)
-  return entry ? entry.accepted_at.slice(0, 10) : null
-}
-
 const gateOf = (o: WorkOrder) => reviewGate({
   autoReady: autoChecklistReady(o),
   redlineHits: redlineHitsOf(o),
   qualityFlags: qualityFlagsOf(o),
-  acceptedCategories: acceptedCategoriesOf(o),
   factSourcePrefilled: defaultFactSourceRef(o.fact_source_url) !== '',
 })
 
 const QUALITY_FLAG_LABEL: Record<string, string> = {
   competitor_brand: '⚠️ 疑似把竞品品牌当自己卖点',
   placeholder_caption: '⚠️ 字幕疑似内部标签冒充文案',
-  narrator_voice_mismatch: '⚠️ 人称口吻疑似不符简报要求',
   quality_check_unavailable: '⚠️ 品控检测暂不可用,请重点人工复核',
 }
 
@@ -98,6 +92,7 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
   asset_provenance_labeled: '素材来源已标注',
   asset_provenance_matches_claim_context: '素材与主张场景相符',
   bgm_segmented_with_fades: 'BGM 分段并带淡入淡出',
+  bgm_listened_no_vocals: '我已开声音听过，背景音乐里没有人声',
   format_is_reel: '发布格式为 Reel',
   cta_in_first_comment_not_body: 'CTA 位于首评而非正文',
   first_comment_link_has_tracking_params: '首评链接含追踪参数',
@@ -106,20 +101,43 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
 type ChecklistDraft = Record<ContentCheckItemKey, { outcome: CheckItemOutcome; detail: string; source_ref: string }>
 const FACT_KEYS: readonly ContentCheckItemKey[] = ['factual_claims_have_source', 'factual_claims_source_verified']
 const emptyChecklistDraft = (factSource = ''): ChecklistDraft => Object.fromEntries(
-  REEL_HUMAN_CHECK_KEYS.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
+  REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
 ) as ChecklistDraft
 
+// The listened-to-the-audio item is never bulk-passed: it only counts if the reviewer ticks it themselves.
+const MANUAL_ONLY_KEYS: readonly ContentCheckItemKey[] = ['bgm_listened_no_vocals']
 const allPass = (draft: ChecklistDraft): ChecklistDraft =>
-  Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+  Object.fromEntries(REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, MANUAL_ONLY_KEYS.includes(key) ? draft[key] : { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+
+// One-click path: the confirm button is only enabled after the reviewer ticks "listened, no vocals".
+const markListened = (draft: ChecklistDraft): ChecklistDraft => ({ ...draft, bgm_listened_no_vocals: { ...draft.bgm_listened_no_vocals, outcome: 'PASS' } })
 
 const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
-  REEL_HUMAN_CHECK_KEYS.map(key => ({
+  REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
     key,
     judge: 'HUMAN',
     outcome: draft[key].outcome,
     detail: draft[key].detail.trim() || null,
     source_ref: draft[key].source_ref.trim() || null,
   }))
+
+type Seg = 'pending' | 'done' | 'rejected'
+
+// 品控提示:有就显示黄框(只读;没有「接受」按钮,提示本身就该被处理)
+function QualityFlagsBlock({ o }: { o: WorkOrder }) {
+  const flags = qualityFlagsOf(o)
+  if (flags.length === 0) return null
+  return (
+    <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 space-y-1">
+      {flags.map((f, i) => (
+        <p key={i} className="text-xs text-amber-800">
+          <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+          <span className="block text-amber-700 mt-0.5">{f.detail}</span>
+        </p>
+      ))}
+    </div>
+  )
+}
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 const publicUrl = (path?: string) =>
@@ -130,12 +148,16 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [published, setPublished] = useState<WorkOrder[]>([]) // 只读展示:已发布
   const [superseded, setSuperseded] = useState<WorkOrder[]>([]) // 只读展示:已作废,折叠在页面底部
+  const [rejected, setRejected] = useState<WorkOrder[]>([]) // 只读展示:已打回(带理由)
+  const [rejecting, setRejecting] = useState<{ order: WorkOrder; mode: 'quality' | 'budget' } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [seg, setSeg] = useState<Seg>('pending')
+  const inFlight = useRef(false) // 同一帧连点也只发一次
   const [groupFilter, setGroupFilter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [hasShown, setHasShown] = useState(false) // 显示过一次就常驻,刷新不卸载(防对话框丢历史)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [acceptedFlagsError, setAcceptedFlagsError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<WorkOrder | null>(null)
   const [checklistDraft, setChecklistDraft] = useState<ChecklistDraft>(emptyChecklistDraft)
   const [showDetails, setShowDetails] = useState(false)
@@ -155,10 +177,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       setPublished(mine.filter((o: WorkOrder) => POST_PUBLISH.includes(o.status)))
       const old = mine.filter((o: WorkOrder) => o.status === 'superseded')
       setSuperseded(old)
+      setRejected(mine.filter((o: WorkOrder) => o.status === 'review_rejected'))
       // 只剩历史卡的客户也算「显示过」:否则对话框触发刷新时整块被加载提示替换,对话历史丢失
-      if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
+      if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => o.status === 'review_rejected') || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
       setError(null)
-      setAcceptedFlagsError(typeof json.accepted_flags_error === 'string' && json.accepted_flags_error ? json.accepted_flags_error : null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -173,9 +195,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
     if (groupFilter && !groupCounts([...orders, ...published].map((o) => o.angle)).some((g) => g.group === groupFilter)) setGroupFilter(null)
   }, [groupFilter, orders, published])
 
-  const act = useCallback(async (id: string, payload: Record<string, unknown>) => {
+  const act = useCallback(async (id: string, payload: Record<string, unknown>, okNotice?: string) => {
+    if (inFlight.current) return
+    inFlight.current = true
     setBusy(id)
     setError(null)
+    setNotice(null)
     try {
       const res = await fetch(`/api/factory/work-orders/${id}/review`, {
         method: 'POST',
@@ -188,33 +213,17 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       }
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
+      setRejecting(null)
+      if (okNotice) setNotice(okNotice)
       onReviewed?.() // 通知父页刷新工单,待审数才会变,自动切客户才会触发
+      if (okNotice) void load() // 打回后本区的「已打回」列表要立刻出现
     } catch (e) {
       setError(e instanceof Error ? reviewErrorZh(e.message, k => HUMAN_CHECK_LABEL[k as ContentCheckItemKey] ?? k) : '操作失败')
     } finally {
+      inFlight.current = false
       setBusy(null)
     }
-  }, [onReviewed])
-
-  const acceptFlag = useCallback(async (id: string, category: string) => {
-    setBusy(id)
-    setError(null)
-    try {
-      const res = await fetch(`/api/factory/work-orders/${id}/accept-flag`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category }),
-      })
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}))
-        setError(`没接受成功:${j.error ?? res.status}`)
-        return
-      }
-      await load()
-    } finally {
-      setBusy(null)
-    }
-  }, [load])
+  }, [onReviewed, load])
 
   // 只在「从没显示过 + 当前也没待审」时隐藏。一旦显示过就常驻——刷新时绝不整体卸载,
   // 否则右侧对话框(ReviewInbox 的子组件)会被连带卸载,历史 + 正在输入的指令全丢(PM 报的 bug)。
@@ -224,140 +233,129 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   const activeGroup = groupFilter && groups.some((g) => g.group === groupFilter) ? groupFilter : null
   if (!hasShown && loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
 
+  const inGroup = (o: WorkOrder) => !activeGroup || parseAngle(o.angle).group === activeGroup
+  const shownPending = orders.filter(inGroup)
+  const shownDone = published.filter(inGroup)
+  const shownRejected = rejected.filter(inGroup)
+  const shownOld = superseded.filter(inGroup)
+  const segs: Array<{ key: Seg; label: string; count: number }> = [
+    { key: 'pending', label: '待审', count: shownPending.length },
+    { key: 'done', label: '已通过/已发布', count: shownDone.length },
+    { key: 'rejected', label: '已打回', count: shownRejected.length },
+  ]
+  const gridCls = 'grid gap-3 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]'
+
   return (
     <section className="mb-8">
-      <h2 className="text-sm font-medium text-slate-600 mb-3">
-        待审 {orders.length > 0 ? <span className="text-amber-600">· 今天 {orders.length} 条等你</span> : <span className="text-slate-400">· 都审完了,去忙别的</span>}
-      </h2>
-
-      {error && !confirming && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
-      {acceptedFlagsError && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">「已接受」记录读取失败,已接受的提醒可能显示不准:{acceptedFlagsError}</div>}
-
-      <div className={clientId ? 'grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start' : ''}>
-      <div>
-        {(() => {
-          if (groups.length <= 1) return null
-          return (
-            <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
-              {[{ group: null as string | null, count: orders.length + published.length }, ...groups].map((g) => (
-                <button
-                  key={g.group ?? 'all'}
-                  type="button"
-                  onClick={() => setGroupFilter(g.group)}
-                  aria-pressed={activeGroup === g.group}
-                  className={`px-3 h-8 rounded-full text-xs font-medium border ${activeGroup === g.group ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-                >{g.group ?? '全部'} · {g.count}</button>
-              ))}
-            </div>
-          )
-        })()}
-        <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-        {orders.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup).map((o) => (
-          <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-3 flex flex-col">
-            <PendingCardHead
-              id={o.id}
-              angle={o.angle}
-              rationale={o.rationale_one_liner}
-              clientName={o.client_name}
-              createdAt={o.created_at}
-              videoSrc={publicUrl(o.output?.video_path)}
-            />
-
-            <div className="flex-1 min-w-0 flex flex-col">
-              {redlineHitsOf(o).length > 0 && (
-                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                  <p className="text-sm font-medium text-red-800">⚠️ 文案命中品牌红线,请逐字核对后再通过</p>
-                  <p className="mt-1 flex flex-wrap gap-1.5">
-                    {redlineHitsOf(o).map((h) => (
-                      <span key={h} className="text-xs bg-red-100 text-red-800 rounded px-1.5 py-0.5 font-mono">{h}</span>
-                    ))}
-                  </p>
-                </div>
-              )}
-
-              {qualityFlagsOf(o).length > 0 && (
-                <div className="mb-4 space-y-1">
-                  {qualityFlagsOf(o).filter(f => isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(o).includes(f.category)).map((f, i) => (
-                    <p key={`accepted-${i}`} className="text-sm text-slate-500">
-                      已接受({acceptedDateOf(o, f.category)}) · {QUALITY_FLAG_LABEL[f.category]?.replace('⚠️ ', '') ?? '品控提示'}
-                    </p>
-                  ))}
-                  {qualityFlagsOf(o).some(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(o).includes(f.category))) && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
-                      {qualityFlagsOf(o).filter(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(o).includes(f.category))).map((f, i) => (
-                        <div key={i}>
-                          <p className="text-sm text-amber-800">
-                            <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-                            <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
-                          </p>
-                          {isAcceptableFlagCategory(f.category) && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => void acceptFlag(o.id, f.category)}
-                                disabled={busy === o.id}
-                                title="接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒"
-                                className="mt-1 px-2 h-7 rounded border border-amber-300 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-                              >PM 已接受</button>
-                              <p className="mt-1 text-xs text-amber-700">接受 = 这份简报下以后同类口吻提醒不再挡路;改了人设会重新提醒</p>
-                            </>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {!autoChecklistReady(o) && (
-                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                  <p className="text-sm font-medium text-red-800">自动媒体检测未完成，服务端会阻断通过</p>
-                  <p className="mt-1 text-xs text-red-700">
-                    {autoChecklistOf(o).length > 0
-                      ? autoChecklistOf(o).filter(item => item.outcome !== 'PASS').map(item => `${HUMAN_CHECK_LABEL[item.key] ?? item.key}：${item.detail ?? '未测'}`).join('；')
-                      : '自动检查清单缺失'}
-                  </p>
-                </div>
-              )}
-
-              <div className="flex flex-wrap items-center gap-2 mb-2">
-                <button
-                  onClick={() => { setError(null); setConfirming(o); setShowDetails(false); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
-                  disabled={busy === o.id}
-                  className="w-full sm:w-auto px-5 h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
-                >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
-                {o.output?.video_path && (
-                  <a
-                    href={factoryVideoUrl(o.output.video_path, SUPABASE_URL, `${o.id.slice(0, 8)}.mp4`)}
-                    download
-                    className="ml-3 text-sm text-blue-600 underline"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >下载成片</a>
-                )}
-              </div>
-
-              <PublishOutlets />
-
-              <p className="text-xs text-slate-400">要改画面或调预算?在右边跟 Claude 说人话即可。</p>
-            </div>
-          </div>
+      <div className="flex flex-wrap gap-2 mb-3" role="tablist" aria-label="审核状态">
+        {segs.map((g) => (
+          <button
+            key={g.key}
+            type="button"
+            role="tab"
+            aria-selected={seg === g.key}
+            onClick={() => setSeg(g.key)}
+            className={`px-3 h-9 rounded-lg text-sm font-medium border ${seg === g.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+          >{g.label} · {g.count}</button>
         ))}
-        </div>
+      </div>
 
-        {(() => {
-          const shown = published.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup)
-          if (shown.length === 0) return null
-          return (
-            <div className="mt-8">
-              <h2 className="text-sm font-medium text-slate-600 mb-3">已发布 · {shown.length} 条</h2>
-              <div className="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-                {shown.map((o) => {
-                  const b = publishedBadge(o.published ?? null)
-                  const tone = b.color.includes('green') ? 'green' : b.color.includes('slate') ? 'slate' : 'amber'
-                  return (
-                  <div key={o.id}><ReadOnlyTile
-                    key={o.id}
+      {error && !confirming && !rejecting && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
+      {notice && <div role="status" className="mb-3 px-4 py-2 rounded-lg bg-orange-50 text-orange-800 text-sm">{notice}</div>}
+
+      {groups.length > 1 && (
+        <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
+          {[{ group: null as string | null, count: orders.length + published.length }, ...groups].map((g) => (
+            <button
+              key={g.group ?? 'all'}
+              type="button"
+              onClick={() => setGroupFilter(g.group)}
+              aria-pressed={activeGroup === g.group}
+              className={`px-3 h-8 rounded-full text-xs font-medium border ${activeGroup === g.group ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+            >{g.group ?? '全部'} · {g.count}</button>
+          ))}
+        </div>
+      )}
+
+      {seg === 'pending' && (
+        <>
+          {shownPending.length === 0 && <p className="text-sm text-slate-400">都审完了,去忙别的。</p>}
+          <div className={gridCls}>
+            {shownPending.map((o) => (
+              <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-3 flex flex-col">
+                <PendingCardHead
+                  id={o.id}
+                  angle={o.angle}
+                  rationale={o.rationale_one_liner}
+                  clientName={o.client_name}
+                  createdAt={o.created_at}
+                  videoSrc={publicUrl(o.output?.video_path)}
+                />
+
+                {redlineHitsOf(o).length > 0 && (
+                  <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
+                    <p className="text-xs font-medium text-red-800">⚠️ 文案命中品牌红线,请逐字核对后再通过</p>
+                    <p className="mt-1 flex flex-wrap gap-1">
+                      {redlineHitsOf(o).map((h) => (
+                        <span key={h} className="text-xs bg-red-100 text-red-800 rounded px-1.5 py-0.5 font-mono">{h}</span>
+                      ))}
+                    </p>
+                  </div>
+                )}
+
+                <QualityFlagsBlock o={o} />
+
+                {!autoChecklistReady(o) && (
+                  <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
+                    <p className="text-xs font-medium text-red-800">自动媒体检测未完成,服务端会阻断通过</p>
+                    <p className="mt-1 text-xs text-red-700">
+                      {autoChecklistOf(o).length > 0
+                        ? autoChecklistOf(o).filter(item => item.outcome !== 'PASS').map(item => `${HUMAN_CHECK_LABEL[item.key] ?? item.key}：${item.detail ?? '未测'}`).join('；')
+                        : '自动检查清单缺失'}
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-auto flex flex-col gap-2">
+                  <button
+                    onClick={() => { setError(null); setConfirming(o); setShowDetails(false); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
+                    disabled={busy === o.id}
+                    className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
+                  >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
+                  <button
+                    type="button"
+                    onClick={() => { setError(null); setRejecting({ order: o, mode: 'quality' }) }}
+                    disabled={busy === o.id}
+                    className="w-full h-11 rounded-lg border border-orange-300 text-orange-800 text-sm font-medium hover:bg-orange-50 disabled:opacity-50"
+                  >打回</button>
+                  {o.output?.video_path && (
+                    <a
+                      href={factoryVideoUrl(o.output.video_path, SUPABASE_URL, `${o.id.slice(0, 8)}.mp4`)}
+                      download
+                      className="w-full h-11 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium grid place-items-center hover:bg-slate-50"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >下载成片</a>
+                  )}
+                  {!o.output?.video_path && <span className="w-full h-11 rounded-lg border border-slate-200 text-slate-400 text-sm grid place-items-center">无成片</span>}
+                  <PublishOutlets />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {seg === 'done' && (
+        <>
+          {shownDone.length === 0 && <p className="text-sm text-slate-400">还没有已通过/已发布的片子。</p>}
+          <div className={gridCls}>
+            {shownDone.map((o) => {
+              const b = publishedBadge(o.published ?? null)
+              const tone = b.color.includes('green') ? 'green' : b.color.includes('slate') ? 'slate' : 'amber'
+              return (
+                <div key={o.id}>
+                  <ReadOnlyTile
                     id={o.id}
                     angle={o.angle}
                     rationale={o.rationale_one_liner}
@@ -367,41 +365,72 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                     status={{ label: b.label, tone }}
                     link={b.href ? { href: b.href, label: '在 Facebook 查看' } : null}
                   />
-                  {o.output?.video_path && <a className="mt-2 inline-block text-sm text-blue-600 underline" href={`/dashboard/clients/${o.client_id}/tiktok/${o.id}`}>发布到 TikTok（需单独确认）</a>}</div>
-                  )
-                })}
+                  {o.output?.video_path && <a className="mt-2 inline-block text-sm text-blue-600 underline" href={`/dashboard/clients/${o.client_id}/tiktok/${o.id}`}>发布到 TikTok（需单独确认）</a>}
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {seg === 'rejected' && (
+        <>
+          {shownRejected.length === 0 && <p className="text-sm text-slate-400">还没有被打回的片子。</p>}
+          <div className={gridCls}>
+            {shownRejected.map((o) => (
+              <ReadOnlyTile
+                key={o.id}
+                id={o.id}
+                angle={o.angle}
+                rationale={o.rationale_one_liner}
+                clientName={o.client_name}
+                createdAt={o.created_at}
+                videoSrc={publicUrl(o.output?.video_path)}
+                status={{ label: '已打回', tone: 'orange' }}
+                note={o.reject_reason ? `打回理由:${o.reject_reason}` : '打回理由:未记录'}
+              />
+            ))}
+          </div>
+          {shownOld.length > 0 && (
+            <details className="mt-6 group">
+              <summary className="cursor-pointer select-none text-sm font-medium text-slate-500">已作废 · {shownOld.length} 条(旧版,已被新版替换,默认收起)</summary>
+              <div className={`mt-3 ${gridCls}`}>
+                {shownOld.map((o) => (
+                  <ReadOnlyTile
+                    key={o.id}
+                    id={o.id}
+                    angle={o.angle}
+                    rationale={o.rationale_one_liner}
+                    clientName={o.client_name}
+                    createdAt={o.created_at}
+                    videoSrc={publicUrl(o.output?.video_path)}
+                    status={{ label: '已作废', tone: 'slate' }}
+                    dim
+                  />
+                ))}
               </div>
-            </div>
-          )
-        })()}
+            </details>
+          )}
+        </>
+      )}
 
-        {(() => {
-          const oldShown = superseded.filter((o) => !activeGroup || parseAngle(o.angle).group === activeGroup)
-          return oldShown.length > 0 && (
-          <details className="mt-8 group">
-            <summary className="cursor-pointer select-none text-sm font-medium text-slate-500">已作废 · {oldShown.length} 条(旧版,已被新版替换,默认收起)</summary>
-            <div className="mt-3 grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-              {oldShown.map((o) => (
-                <ReadOnlyTile
-                  key={o.id}
-                  id={o.id}
-                  angle={o.angle}
-                  rationale={o.rationale_one_liner}
-                  clientName={o.client_name}
-                  createdAt={o.created_at}
-                  videoSrc={publicUrl(o.output?.video_path)}
-                  status={{ label: '已作废', tone: 'slate' }}
-                  dim
-                />
-              ))}
-            </div>
-          </details>
-          )
-        })()}
-      </div>
-
-        {clientId && <FactoryChat clientId={clientId} onActed={load} />}
-      </div>
+      {rejecting && (
+        <RejectDialog
+          mode={rejecting.mode}
+          orderNo={rejecting.order.id.slice(0, 8)}
+          busy={busy === rejecting.order.id}
+          error={error}
+          onClose={() => { setRejecting(null); setError(null) }}
+          onModeChange={(mode) => { setError(null); setRejecting({ order: rejecting.order, mode }) }}
+          onSubmit={(payload) => void act(
+            rejecting.order.id,
+            payload,
+            rejecting.mode === 'quality'
+              ? `已打回 #${rejecting.order.id.slice(0, 8)}:${String(payload.feedback ?? '')}`
+              : `已调整预算 #${rejecting.order.id.slice(0, 8)}:$${String(payload.new_budget_usd ?? '')}(片子仍在待审,没有发布)`,
+          )}
+        />
+      )}
 
       {confirming && (
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
@@ -423,22 +452,13 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
             )}
 
             {qualityFlagsOf(confirming).length > 0 && (
-              <div className="mb-3 space-y-1">
-                {qualityFlagsOf(confirming).filter(f => isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category)).map((f, i) => (
-                  <p key={`accepted-${i}`} className="text-sm text-slate-500">
-                    已接受({acceptedDateOf(confirming, f.category)}) · {QUALITY_FLAG_LABEL[f.category]?.replace('⚠️ ', '') ?? '品控提示'}
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                {qualityFlagsOf(confirming).map((f, i) => (
+                  <p key={i} className="text-sm text-amber-800">
+                    <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
+                    <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
                   </p>
                 ))}
-                {qualityFlagsOf(confirming).some(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category))) && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
-                    {qualityFlagsOf(confirming).filter(f => !(isAcceptableFlagCategory(f.category) && acceptedCategoriesOf(confirming).includes(f.category))).map((f, i) => (
-                      <p key={i} className="text-sm text-amber-800">
-                        <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-                        <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
-                      </p>
-                    ))}
-                  </div>
-                )}
               </div>
             )}
 
@@ -449,10 +469,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 return (
                   <div className="mb-4">
                     <OneClickConfirm
-                      itemLabels={REEL_HUMAN_CHECK_KEYS.map(k => HUMAN_CHECK_LABEL[k])}
+                      itemLabels={REEL_HUMAN_CHECK_KEYS_V2.map(k => HUMAN_CHECK_LABEL[k])}
                       sourceUrl={defaultFactSourceRef(confirming.fact_source_url)}
                       busy={busy === confirming.id}
-                      onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(checklistDraft)) })}
+                      onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(markListened(checklistDraft))) })}
                       onExpand={() => setShowDetails(true)}
                     />
                   </div>
@@ -475,10 +495,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址:已按这条片的链接预填,请确认这个页面确实支持片里的价格/天数/日期,不是就改成对应产品页。点「全部标为通过」前请先逐项看过。</p>
               <button
                 type="button"
-                onClick={() => setChecklistDraft(prev => Object.fromEntries(REEL_HUMAN_CHECK_KEYS.map(key => [key, { ...prev[key], outcome: 'PASS' }])) as ChecklistDraft)}
+                onClick={() => setChecklistDraft(prev => allPass(prev))}
                 className="px-3 h-8 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
-              >{REEL_HUMAN_CHECK_KEYS.length} 项全部标为通过</button>
-              {REEL_HUMAN_CHECK_KEYS.map(key => (
+              >{REEL_HUMAN_CHECK_KEYS_V2.length - MANUAL_ONLY_KEYS.length} 项全部标为通过（“已听声音”需单独勾）</button>
+              {REEL_HUMAN_CHECK_KEYS_V2.map(key => (
                 <div key={key} className="rounded-lg border border-slate-200 p-3">
                   <p className="text-sm font-medium text-slate-800">{HUMAN_CHECK_LABEL[key]}</p>
                   <div className="mt-2 flex gap-4 text-xs">
@@ -528,7 +548,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               {(showDetails || !gateOf(confirming).oneClick) && (
                 <button
                   onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
-                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS.some(key => checklistDraft[key].outcome !== 'PASS')}
+                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS_V2.some(key => checklistDraft[key].outcome !== 'PASS')}
                   className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
                 >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
               )}

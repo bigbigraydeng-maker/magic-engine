@@ -63,11 +63,11 @@ description: 为新客户在 Magic Engine Business Manager 下开设 Meta 广告
 
 ### 步骤 2 · 把账户 ID 录入 ME 系统
 
-账户 ID 格式：`act_XXXXXXXXXX`（去掉 `act_` 前缀后是纯数字，就是要录进数据库的那串）
+账户 ID 格式：`act_XXXXXXXXXX`。系统规范存储形就是带 `act_` 前缀（`parseAdAccountInput` 会把纯数字自动补成 `act_<digits>`；比对时才去前缀）
 
 ```sql
 UPDATE clients
-SET meta_ad_account_id = '<广告账户ID，纯数字，不含act_前缀>'
+SET meta_ad_account_id = 'act_<广告账户ID纯数字>'
 WHERE id = '<客户ID>';
 ```
 

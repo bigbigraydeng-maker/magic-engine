@@ -23,77 +23,26 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
 import { type StageOption } from '../_components/ComposeNote'
-import { PersonDrawer, type DrawerRow } from '../_components/PersonDrawer'
-import { BatchEmail, type BatchEmailBucket } from '../_components/BatchEmail'
+import { PersonDrawer } from '../_components/PersonDrawer'
 import { PrioritySectionHeader } from './_components/PrioritySection'
 import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
 import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
 import { takeContactName } from '../_components/bookings/payments-return'
 import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
-import type { Segment } from '@/lib/crm/segments'
 import { type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
 import { DAILY_QUOTA } from '@/lib/crm/next-action'
-import {
-  LIST_CLS,
-  fmtDate,
-  relTime,
-  ts,
-  type ContactRow,
-  type CustomColumnMeta,
-} from './_components/contact-table-types'
-
-// SectionKey 从 drawer-nav.ts 引，不在本文件另声明一份同样的字面量联合类型——
-// 只有一处定义，谁改了 lib/crm/list-sections.ts 的两张名单（hot / cold）的名字，这里跟着变，不用记得改两处。
-interface PrioritySectionData {
-  key: SectionKey
-  title: string
-  hint: string
-  total: number
-  open: boolean
-  page: number
-  items: ContactRow[] | null
-}
+import { ts, type ContactRow, type CustomColumnMeta } from './_components/contact-table-types'
+import { ContactTableRow } from './_components/ContactTableRow'
+import { ContactTableHead } from './_components/ContactTableHead'
+import { ListFilters, TradeBatchPanel } from './_components/ListFilters'
+import { FlatPagination, SectionPagerRow } from './_components/ListPagination'
+import { isToday, toDrawerRow, sectionRange, type PrioritySectionData } from './_components/list-helpers'
 
 /** 抽屉打开时正在等下一页数据 —— 拿到之后打开这一页的首个/末个。 */
 type PendingNav =
   | { mode: 'segment'; sectionKey: SectionKey; openFirst: boolean }
   | { mode: 'flat'; openFirst: boolean }
-
-/**
- * 今天有没有碰过这个人——"全部客人"的 ContactRow 没有「今天要联系」那页专属的
- * `doneToday` 标记（那边是按日重置的行动队列，这页不是），用「最近联系是不是今天」
- * 当替代信号，跟 contact-table-types.ts 的 `relTime()`「今天/昨天」判断同一个口径
- * （2026-09-28 WP-B5）。
- */
-function isToday(iso: string | null): boolean {
-  if (!iso) return false
-  const d = new Date(iso)
-  return d.toDateString() === new Date().toDateString()
-}
-
-function toDrawerRow(r: ContactRow): DrawerRow {
-  return {
-    contactId: r.contactId,
-    name: r.name,
-    phone: r.phone,
-    email: r.email,
-    stage: r.stage,
-    stageLabel: r.stageLabel,
-    reason: r.reason,
-    // 「该做什么」三行卡的内容 —— 跟列表那一格同一个对象，两处不会说两套话。
-    nextAction: r.nextAction,
-    // 只给抽屉显示一行「AI 初判（未校准）」小字，不参与任何判断。
-    intent: r.intent,
-    // 后端 segmentContact() 的枚举值原样传下来，这里的 ContactRow.segment 类型是
-    // string（跨接口共用的宽类型），值域跟 Segment 一致，不重新校验。
-    segment: r.segment as Segment,
-    important: r.important,
-    suggestedChannel: r.suggestedChannel,
-    phoneUnusable: r.phoneUnusable,
-    doNotContact: r.doNotContact,
-  }
-}
 
 export default function CrmAllContactsPage() {
   const params = useParams()
@@ -580,20 +529,6 @@ export default function CrmAllContactsPage() {
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
-  /**
-   * 这一段现在显示的是第几个到第几个。
-   *
-   * ⚠️ 服务端是**翻页不是累加**：`list-sections.ts` 用 `bucket.slice(start, start + perPage)`，
-   * 所以 `p_<段>=2` 拿到的是第 101–200 个、**第 1–100 个会消失**。
-   * 第一版我按「累加」写，按钮叫「再看 100 个」——那会让前 100 个人凭空不见，
-   * 正是这一轮要修的那个毛病换个方向再犯一次。查了 slice 才改成老实的翻页。
-   */
-  const sectionRange = (s: PrioritySectionData): { from: number; to: number; pages: number } => {
-    const page = sectionPages[s.key] ?? 1
-    const from = s.total === 0 ? 0 : (page - 1) * perPage + 1
-    return { from, to: (page - 1) * perPage + (s.items?.length ?? 0), pages: Math.max(1, Math.ceil(s.total / perPage)) }
-  }
-
   /** 这一段翻到第 n 页。改了 sectionPages 会触发 loadList 重新拉。 */
   const goSectionPage = (key: SectionKey, n: number) => {
     setSectionPages((prev) => ({ ...prev, [key]: Math.max(1, n) }))
@@ -606,83 +541,17 @@ export default function CrmAllContactsPage() {
     })
   }
 
-  const renderRow = (r: ContactRow) => {
-    const active = drawerContactId === r.contactId
-    const contactCell =
-      r.phone || r.email ? (
-        <span className="text-me-charcoal/70">{r.phone ?? r.email}</span>
-      ) : r.hasMessenger ? (
-        <span className="text-me-charcoal/45">仅 FB 私信</span>
-      ) : (
-        <span className="text-me-charcoal/35">没留联系方式</span>
-      )
-    return (
-      <tr
-        key={r.contactId}
-        // 直达链接靠它定位（?contact=<id> 打开对应抽屉）
-        id={`contact-${r.contactId}`}
-        onClick={() => toggleDetail(r.contactId)}
-        className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${active ? 'bg-me-ivory/50' : ''}`}
-      >
-        <td className="px-2 py-3">
-          {/* 点星星不能顺带打开抽屉 —— 两个动作是分开的。 */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              void togglePin(r)
-            }}
-            title={r.pinnedAt ? '取消置顶' : '置顶'}
-            aria-label={r.pinnedAt ? '取消置顶' : '置顶'}
-            className={`p-1 text-base leading-none ${
-              r.pinnedAt ? 'text-yellow-500' : 'text-me-charcoal/40 hover:text-me-charcoal'
-            }`}
-          >
-            {r.pinnedAt ? '⭐' : '☆'}
-          </button>
-        </td>
-        <td className="px-4 py-3 font-medium text-me-charcoal">
-          {r.name}
-          {r.important?.note && (
-            <span
-              title={r.important.note}
-              className="ml-2 rounded bg-me-gold/20 px-1.5 py-0.5 text-[10px] font-bold text-me-charcoal/70"
-            >
-              ⭐ {r.important.note.length > 12 ? `${r.important.note.slice(0, 12)}…` : r.important.note}
-            </span>
-          )}
-          {r.important?.dueAt && new Date(r.important.dueAt) < new Date() && (
-            <span className="ml-1 rounded bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
-              到期
-            </span>
-          )}
-        </td>
-        <td className="px-4 py-3 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
-        <td className="px-4 py-3 text-me-charcoal/60">
-          {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">还没联系过</span>}
-        </td>
-        <td className="px-4 py-3">{contactCell}</td>
-        {columns.map((c) => (
-          <td key={c.key} className="px-4 py-3 text-me-charcoal/60">
-            {r.custom[c.key] ?? <span className="text-me-charcoal/35">还没聊到</span>}
-          </td>
-        ))}
-        <td className="px-4 py-3">
-          {grouped ? (
-            <>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}>
-                {r.nextAction.verbLabel}
-              </span>
-              <span className="ml-2 text-xs text-me-charcoal/60">{r.nextAction.reason}</span>
-            </>
-          ) : r.stageLabel ? (
-            <span className="text-me-charcoal/70">{r.stageLabel}</span>
-          ) : (
-            <span className="text-me-charcoal/35">还没标</span>
-          )}
-        </td>
-      </tr>
-    )
-  }
+  const renderRow = (r: ContactRow) => (
+    <ContactTableRow
+      key={r.contactId}
+      row={r}
+      active={drawerContactId === r.contactId}
+      grouped={grouped}
+      columns={columns}
+      onToggle={toggleDetail}
+      onTogglePin={togglePin}
+    />
+  )
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 p-6">
@@ -735,109 +604,29 @@ export default function CrmAllContactsPage() {
 
       {!error && !loading && (
         <>
-          {stages.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-me-charcoal/45">到哪一步了：</span>
-              {stages.map((s) => {
-                const on = stageFilter.includes(s.stageKey)
-                return (
-                  <button
-                    key={s.stageKey}
-                    onClick={() =>
-                      setStageFilter((prev) =>
-                        on ? prev.filter((k) => k !== s.stageKey) : [...prev, s.stageKey],
-                      )
-                    }
-                    className={`rounded-full border border-black/10 px-3 py-1 text-xs font-semibold ${
-                      on ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'
-                    }`}
-                  >
-                    {s.label}
-                  </button>
-                )
-              })}
-            </div>
-          )}
+          {/* 切到智能分段视图时把筛选收回「全部」：分段视图服务端还没接 ?kind=，不留一个选了但悄悄不生效的筛选条件 */}
+          <ListFilters
+            stages={stages}
+            stageFilter={stageFilter}
+            onStageFilterChange={setStageFilter}
+            grouped={grouped}
+            onToggleGrouped={() => {
+              setGrouped((v) => !v)
+              setKindFilter('all')
+            }}
+            kindFilter={kindFilter}
+            onKindFilterChange={setKindFilter}
+          />
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                setGrouped((v) => !v)
-                // 分段视图的服务端还没接 ?kind=（B3 只接了平铺路径）——切过去时把筛选
-                // 收回「全部」，不留一个选了但悄悄不生效的筛选条件（见上面状态定义处的注）。
-                setKindFilter('all')
-              }}
-              className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
-            >
-              {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
-            </button>
-            {grouped && (
-              <span className="text-xs text-me-charcoal/45">
-                系统读完往来记录和 AI 摘要，告诉你今天该先联系谁、做什么；段内按紧急程度排，点表头不改顺序
-              </span>
-            )}
-            {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
-            {!grouped && (
-              <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
-                {(
-                  [
-                    ['all', '全部'],
-                    ['retail', '终端客户'],
-                    ['trade', '🤝 同行'],
-                  ] as const
-                ).map(([k, label]) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setKindFilter(k)}
-                    className={`rounded-md px-3 py-1 text-xs font-bold transition ${
-                      kindFilter === k ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60 hover:text-me-charcoal'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* 批量发邮件——只在「🤝 同行」筛选下出现。人从当前已加载的 rows 来：
-              同行通常是一小撮人（CTS 约 20 人），一页（100）装得下，不需要额外拉全量。
-              doneToday 恒 false——"全部客人"没有"今天处理过"这个每日重置的概念，
-              跟"今天要联系"那页的批次语义不是一回事，批量发送面向的是"这批同行"
-              整体，不是"今天还没联系过的同行"。
-              🔴 魏征 2026-09-28 复审 B3 查出：同行超过一页（100 人）时，这个面板只会
-              发给当前这一页，且原来没有任何提示——容易被当成"已经是全部同行"。
-              生产唯一客户 CTS 目前约 20 人不会触发，但这是结构性缺口，先在这里挡一句、
-              不让人无声漏发；真要支持大批量同行客户，需要另开一条不分页的批量取数接口。 */}
           {!grouped && kindFilter === 'trade' && rows.length > 0 && (
-            <>
-              {total > rows.length && (
-                <p className="rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/8 px-3 py-2 text-xs font-semibold text-[#C2453A]">
-                  ⚠️ 同行一共 {total} 人，这一页只装得下 {rows.length} 人——批量发邮件现在只会发给这一页看到的人，翻页分批发，别当成已经发给了全部同行。
-                </p>
-              )}
-              <BatchEmail
-                clientId={clientId}
-                bucket={
-                  {
-                    batch: 'send_email',
-                    people: rows.map((r) => ({ contactId: r.contactId, email: r.email, kind: 'trade', doneToday: false })),
-                    batchEmails: [],
-                    total: rows.length,
-                  } satisfies BatchEmailBucket
-                }
-                onLogged={(msg) => afterWrite(msg)}
-              />
-            </>
+            <TradeBatchPanel clientId={clientId} rows={rows} total={total} onLogged={(msg) => afterWrite(msg)} />
           )}
 
           <div className="flex items-center justify-between">
             <p className="text-xs font-bold text-me-charcoal/50">
               {grouped ? `共 ${total} 位客人` : `第 ${page} 页，共 ${total} 位客人`}
             </p>
-            {!grouped && <p className="text-xs text-me-charcoal/40">排序只对当前页生效</p>}
+            {!grouped && <p className="text-xs text-me-charcoal/40">默认按最近有来往排序；点表头只在本页内重排</p>}
           </div>
 
           {/* 刚搬过来时安抚一句，别让「全空的跟进阶段」像没做完的作业 */}
@@ -852,35 +641,12 @@ export default function CrmAllContactsPage() {
 
           <div className="overflow-x-auto rounded-xl border border-me-charcoal/10 bg-white">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">
-                  <th className="px-2 py-3">⭐</th>
-                  <th className="px-4 py-3">客人</th>
-                  {/*
-                    分段模式下**不给**排序入口：行来自服务端各段的顺序，点了也不会重排。
-                    留着一个点了会变箭头、却一行都不动的按钮，等于告诉人「你排过了」。
-                    魏征 B2 实测：箭头会变、顺序一字不动，而平铺那句「排序只对当前页生效」
-                    的提示在分段下反而被藏起来了。
-                  */}
-                  <th
-                    className={grouped ? 'px-4 py-3' : 'cursor-pointer select-none px-4 py-3'}
-                    onClick={grouped ? undefined : () => toggleSort('firstSeenAt')}
-                  >
-                    进线时间{grouped ? '' : sortArrow('firstSeenAt')}
-                  </th>
-                  <th
-                    className={grouped ? 'px-4 py-3' : 'cursor-pointer select-none px-4 py-3'}
-                    onClick={grouped ? undefined : () => toggleSort('lastTouchAt')}
-                  >
-                    最近联系{grouped ? '' : sortArrow('lastTouchAt')}
-                  </th>
-                  <th className="px-4 py-3">联系方式</th>
-                  {columns.map((c) => (
-                    <th key={c.key} className="px-4 py-3">{c.label}</th>
-                  ))}
-                  <th className="px-4 py-3">{grouped ? '该做什么' : '到哪一步了'}</th>
-                </tr>
-              </thead>
+              <ContactTableHead
+                grouped={grouped}
+                columns={columns}
+                sortArrow={sortArrow}
+                onToggleSort={toggleSort}
+              />
               <tbody>
                 {!grouped && sorted.length === 0 && (
                   <tr>
@@ -936,40 +702,17 @@ export default function CrmAllContactsPage() {
                           </td>
                         </tr>
                       ),
-                      /*
-                       * 🔴 段里还有人没显示出来，必须说出来 + 给得出下一步。
-                       *
-                       * 服务端一段只下发 100 行。少了这一块的那一版：段头写「217 人」、
-                       * 表里 100 行、**剩下 117 个人没有任何入口**。两个复审都判 BLOCKER，
-                       * 形状就是 2026-08-02「33 个人凭空消失」——人数对、人不在。
-                       */
                       open &&
                         s.items !== null &&
                         s.total > perPage && (
-                          <tr key={`section-${s.key}-more`}>
-                            <td colSpan={colCount} className="px-4 py-3 text-center text-xs">
-                              <span className="text-me-charcoal/45">
-                                这一段共 {s.total} 人，正在看第 {sectionRange(s).from}–{sectionRange(s).to} 个
-                                （第 {sectionPages[s.key] ?? 1} / {sectionRange(s).pages} 页）
-                              </span>
-                              <button
-                                type="button"
-                                disabled={(sectionPages[s.key] ?? 1) <= 1}
-                                onClick={() => goSectionPage(s.key, (sectionPages[s.key] ?? 1) - 1)}
-                                className="ml-3 rounded-lg border border-me-charcoal/15 px-2.5 py-1 font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
-                              >
-                                上一页
-                              </button>
-                              <button
-                                type="button"
-                                disabled={(sectionPages[s.key] ?? 1) >= sectionRange(s).pages}
-                                onClick={() => goSectionPage(s.key, (sectionPages[s.key] ?? 1) + 1)}
-                                className="ml-2 rounded-lg border border-me-charcoal/15 px-2.5 py-1 font-bold text-me-charcoal hover:bg-me-ivory disabled:opacity-40"
-                              >
-                                下一页
-                              </button>
-                            </td>
-                          </tr>
+                          <SectionPagerRow
+                            key={`section-${s.key}-more`}
+                            total={s.total}
+                            range={sectionRange(s, sectionPages, perPage)}
+                            currentPage={sectionPages[s.key] ?? 1}
+                            colSpan={colCount}
+                            onGoPage={(n) => goSectionPage(s.key, n)}
+                          />
                         ),
                     ]
                   })}
@@ -978,27 +721,13 @@ export default function CrmAllContactsPage() {
           </div>
 
           {!grouped && (
-            <div className="mt-4 flex items-center justify-between text-sm">
-              <span className="text-me-charcoal/50">
-                共 {total} 人 · 第 {page} / {Math.max(1, Math.ceil(total / flatPerPage))} 页
-              </span>
-              <div className="flex gap-2">
-                <button
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
-                >
-                  上一页
-                </button>
-                <button
-                  disabled={page >= Math.ceil(total / flatPerPage)}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="rounded-lg border border-black/10 px-3 py-1.5 disabled:opacity-40"
-                >
-                  下一页
-                </button>
-              </div>
-            </div>
+            <FlatPagination
+              total={total}
+              page={page}
+              perPage={flatPerPage}
+              onPrev={() => setPage((p) => p - 1)}
+              onNext={() => setPage((p) => p + 1)}
+            />
           )}
         </>
       )}

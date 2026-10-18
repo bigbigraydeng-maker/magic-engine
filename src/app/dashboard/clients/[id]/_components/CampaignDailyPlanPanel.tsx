@@ -97,6 +97,7 @@ const POST_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
   asset_provenance_labeled: '素材来源已标注',
   asset_provenance_matches_claim_context: '素材与主张场景相符',
   bgm_segmented_with_fades: 'BGM 分段并带淡入淡出',
+  bgm_listened_no_vocals: '已开声音听过，背景音乐无人声',
   format_is_reel: '发布格式为 Reel',
   cta_in_first_comment_not_body: 'CTA 位于首评而非正文',
   first_comment_link_has_tracking_params: '首评链接含追踪参数',
@@ -311,7 +312,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
   }, [campaignId, clientId, data, load])
 
   if (loading) {
-    return <p className="text-xs text-me-charcoal/45 animate-pulse py-3">加载每日计划…</p>
+    return <p className="text-xs text-me-charcoal/45 animate-pulse py-3">加载图文帖子…</p>
   }
   if (error) {
     return <p className="text-xs text-[#C2453A] py-3">✗ {error}</p>
@@ -349,7 +350,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
   return (
     <div className="border border-black/[.06] rounded-xl overflow-hidden">
       <div className="bg-me-ivory px-4 py-3 flex items-center justify-between flex-wrap gap-2">
-        <p className="text-xs font-semibold text-me-charcoal/75 uppercase tracking-wide">每日计划（Daily Plan）</p>
+        <p className="text-xs font-semibold text-me-charcoal/75 uppercase tracking-wide">图文帖子（社媒日常）</p>
         <div className="flex items-center gap-2">
           <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-me-charcoal/[.06] text-me-charcoal/65">
             Post 已通过 {reviewSummary.passed}/{reviewSummary.total}
@@ -583,21 +584,10 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
                 ) : <EmptySlot />}
               </BundleCard>
 
-              <BundleCard title="🎬 Story">
-                {selectedBundle.story ? (
-                  <ol className="space-y-1">
-                    {selectedBundle.story.frames.map(f => (
-                      <li key={f.order} className="text-xs text-me-charcoal/70">
-                        <span className="text-me-charcoal/40">#{f.order}</span> {f.copy}
-                      </li>
-                    ))}
-                  </ol>
-                ) : <EmptySlot />}
-              </BundleCard>
-
-              <BundleCard title="🎥 Reel（视频）">
-                <p className="text-xs text-me-charcoal/60">Reel 视频不在这里管理。</p>
-                <a href="?tab=reels" className="mt-1 inline-block text-xs text-me-ochre hover:underline">去「视频 Reels」页看成片 →</a>
+              <BundleCard title="Story 和 Reel">
+                <p className="text-xs text-me-charcoal/60">
+                  Story 和 Reel 不在这里看：Story 在<a href="?tab=overview" className="mx-0.5 text-me-ochre hover:underline">本周总览</a>，Reel 在<a href="?tab=reels" className="mx-0.5 text-me-ochre hover:underline">短视频</a>。
+                </p>
               </BundleCard>
             </div>
           )}
