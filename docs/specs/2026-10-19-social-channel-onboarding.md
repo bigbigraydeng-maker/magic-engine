@@ -68,3 +68,25 @@ npm test -- 'src/lib/platform-oauth' 'src/lib/meta-oauth/__tests__/client.test.t
 - Chrome 使用合成资料检查六卡、刷新操作及无横向溢出；Jev 因 DNS 无法决策，原生操作完成独立核验。浏览器观察记录已保存；没有上传真实客户页面。临时预览路由随后删除，不进入提交。
 - 子牙、魏征/狄仁杰、板桥设计与实施复核完成；撤销回调回归单独复验通过。无未解决 blocker/P1/P2。
 - 未运行：生产 OAuth、真实撤销/发布、全仓 Vitest、平台审核验证。没有部署或生产数据变更。
+
+## 用户追加范围：修复基线错误（2026-10-19）
+
+此段替代上轮“既有红项不在本轮修复范围”的限制。用户已明确要求修复基线错误；唯一写入者仍为本 Codex 根会话，其余审查者只读。
+
+- 验收：消除已复现的 17 条类型错误及 4 张卡格式错误，完整 type-check 与 ledger 检查通过，六个相关测试文件断言保持并通过。
+- 写入范围：auto-dev/pick、ads-health/autonomy-settings、messenger/send、meta/ai/metrics、ops-review-loop/merge-decision 与 workflow-guards 六个测试文件；四张失败旧卡、明确标注历史转录的 D3 证据文档、本说明和本次台账卡。
+- 不做：生产逻辑、工作流/检查规则、依赖、数据库、真实账号授权/发布、合并或部署。本次仅测试/文档维护，但涉及 ops-review-loop 受保护测试路径，按 A 级控制面审查；整张 PR 原有 A 级不降低。复用现有测试与台账解析器，无新能力、框架或客户特供逻辑。
+- 基线：目录 `/private/tmp/magic-engine-social-channel-onboarding`；分支 `codex/social-channel-onboarding`；HEAD `f917e629fa32615cec2f9d5ddecb090ca95b2056`，开工工作树干净。fetch 后 origin/main `ae35bcaff91428cc5e1932633292accc9b85f1a1`，未合并/更新工作分支，目标文件无上游改动。Node 26.7.0、既有 node_modules；无生产凭据。
+- 修改前真实验证：`npm run type-check` 退出 2（17 条错误）；`npm test -- src/lib/ledger` 退出 1（99 通过 / 1 失败，涉及四卡）。命令运行于本目录同一 HEAD，日志在本机 `/private/tmp/baseline-repair-before-{types,ledger}.log`。
+- 方案：补 mock 签名/人工发送参数；对象断言保留原键和值；移除失效抑制；补测试 YAML 类型。不改运行时契约。台账仅修语法/指针，不改历史结论；D3 历史转录不算生产复验。
+- 已读 `playbook-social-general.md`；本轮不生产或发布内容。按 §11：频率高 / IMPACT 中 / 收入中 → P2。
+- 子牙与魏征已完成只读设计复核，无 blocker；实施后复核同一 diff。
+
+### 基线修复结果（11:31 NZ，同目录/分支、HEAD 加本轮未提交 diff）
+
+- `npm run type-check`：退出 0，原 17 条错误已消除；日志 `/private/tmp/baseline-repair-after-types.log`。
+- `npm test -- src/lib/ledger scripts/auto-dev/__tests__/pick.test.ts 'src/app/dashboard/clients/[id]/ads-health/__tests__/autonomy-settings.test.tsx' src/lib/messenger/__tests__/send.test.ts src/lib/meta/ai/__tests__/metrics.test.ts tools/ops-review-loop/tests/merge-decision.test.ts tools/ops-review-loop/tests/workflow-guards.test.ts`：最终退出 0，14 文件、223 测试通过；日志 `/private/tmp/baseline-repair-final-tests.log`。含整仓台账格式检查；首次修复后原卡另暴露 6 行正文超限，已保留完整原文移入历史文档，未删业务结论。
+- 六个修改测试文件传给 `./node_modules/.bin/next lint --file ...`：退出 0，无警告/错误；日志 `/private/tmp/baseline-repair-lint.log`。
+- `git diff --check`：退出 0。独立比较原 HEAD 与现文：kernel `verify_how` 解析值逐字相同、D3 原正文完整转录且除 `done_ref` 外原字段不变。
+- 子牙、魏征实施复核通过，无 blocker/P1/P2；魏征独立复跑相同 14 文件、223 测试，退出 0。
+- 未重跑 build/E2E/全仓 Vitest：追加改动仅测试和文档，无生产代码或构建配置变更；上轮应用构建证据不冒充本轮全量测试。未访问生产、合并或部署。

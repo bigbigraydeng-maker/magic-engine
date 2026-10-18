@@ -6,7 +6,8 @@ owner: agent
 decided_on: 2026-10-19
 source: session:c668eb35
 verify_by: 2026-11-03
-verify_how: 查两件：①全仓是否出现 captureClientSnapshots(..., reason: 'kernel_post') 的生产调用方（现在零个）②若出现，先核它写出来的行是不是只覆盖本次动作的实体；以及 diagnostics/loader.ts 判「真改动」时还认不认它。两件都满足才算修好。
+verify_how: |-
+  查两件：①全仓是否出现 captureClientSnapshots(..., reason: 'kernel_post') 的生产调用方（现在零个）②若出现，先核它写出来的行是不是只覆盖本次动作的实体；以及 diagnostics/loader.ts 判「真改动」时还认不认它。两件都满足才算修好。
 ---
 实查 `src/lib/ads-strategy/portfolio/snapshot.ts:363-365`：`reason` 传 `kernel_post` 时，当前所有实体一律写一行，**不看设置有没有变**。
 所以这个原因码代表「这一轮抓过它」，不代表「它变了」。谁把它当真改动，任何一次动作之后该客户每个实体都会显示「刚改过」。
