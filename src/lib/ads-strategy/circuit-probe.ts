@@ -33,6 +33,12 @@ import {
 import { loadClientCapFacts } from './circuit-cap-facts'
 import { readSpendWindow } from './circuit-spend-window'
 import { accountYesterday, resolveAccountTimezone } from './account-timezone'
+import { isDelivering } from './portfolio/diagnostics/context'
+import type { EntitySnapshotRow } from './portfolio/snapshot'
+
+/** 快照回看窗口：照 `circuit-cap-facts.ts` 的 48 小时与行数上限，不另定一套。 */
+const SNAPSHOT_LOOKBACK_MS = 48 * 60 * 60 * 1000
+const SNAPSHOT_ROW_LIMIT = 2000
 
 /**
  * 观察期要试的几个「绝对硬顶 = 账户上限 × N」候选。
@@ -77,6 +83,23 @@ export interface AccountProbe {
    * 否则它会每天产出一条 `facts:account_data_stale` 把待办刷满）；`null` = 拿不到快照。
    */
   readonly hasDeliveringEntity: boolean | null
+  /**
+   * 🔴 **分层记「在不在投」—— 这是 A0 要暴露的一处共享层缺陷**（74 号 10-18 给的实证）。
+   *
+   * `circuit-cap-facts.ts:147,181` 对系列与广告组做 `.some(isDelivering)`，
+   * **只要有一个系列 ACTIVE 就算这个账户在投**。而 CTS 官方账户的实情是：
+   * 3 个系列开关开着、名下广告组**全部暂停**，预算在广告组层 → **实际不投放**
+   * （手册 §29：系列 ACTIVE + 广告组 PAUSED 是最常见的「假在投」）。
+   * 后果：该账户被当成「在投但数据落后」→ `facts:account_data_stale`
+   * → **判据 #2 对 CTS 永远判不了**。
+   *
+   * A0 只把两层分开记下来，**不改共享层** —— 改它会改变熔断判什么，
+   * 要单独立项过审。这两个数就是那次改动的证据。
+   */
+  readonly deliveringCampaigns: number | null
+  readonly deliveringAdsets: number | null
+  /** 快照里抓到的广告组条数。0 = 压根没抓广告组级（共用账户），那时「没有在投的组」说明不了问题 */
+  readonly adsetsSeen: number | null
   /**
    * 各候选倍数下，绝对硬顶会不会判 trip。
    * `null` = 判不了（上限未配 / 花费读不到），**不是** false。
@@ -126,6 +149,57 @@ async function readCompleteness(
     : 'partial'
 }
 
+/**
+ * 分层数「在投的系列」与「在投的广告组」。只读。
+ *
+ * 读法照抄 `circuit-cap-facts.ts:142-150`（同一张表、同一个 48 小时回看窗口），
+ * 区别只在**不把两层折叠成一个布尔**。
+ */
+async function readDeliveringByLevel(
+  sb: SupabaseClient,
+  clientId: string,
+  adAccountId: string,
+  now: Date,
+): Promise<{
+  deliveringCampaigns: number | null
+  deliveringAdsets: number | null
+  adsetsSeen: number | null
+}> {
+  const since = new Date(now.getTime() - SNAPSHOT_LOOKBACK_MS).toISOString()
+  const { data, error } = await sb
+    .from('ad_entity_snapshots')
+    .select('entity_id, level, effective_status, captured_at')
+    .eq('client_id', clientId)
+    .eq('ad_account_id', adAccountId)
+    .in('level', ['campaign', 'adset'])
+    .gte('captured_at', since)
+    .order('captured_at', { ascending: false })
+    .limit(SNAPSHOT_ROW_LIMIT)
+
+  if (error || !Array.isArray(data)) {
+    return { deliveringCampaigns: null, deliveringAdsets: null, adsetsSeen: null }
+  }
+
+  // 同一实体可能有多行快照，只认最新那行（已按 captured_at 倒序）
+  const latest = new Map<string, { level: string; effective_status: string | null }>()
+  for (const row of data as Array<{ entity_id: string; level: string; effective_status: string | null }>) {
+    if (!latest.has(row.entity_id)) latest.set(row.entity_id, row)
+  }
+
+  let deliveringCampaigns = 0
+  let deliveringAdsets = 0
+  let adsetsSeen = 0
+  for (const row of latest.values()) {
+    const live = isDelivering({ effective_status: row.effective_status } as EntitySnapshotRow)
+    if (row.level === 'campaign' && live) deliveringCampaigns += 1
+    if (row.level === 'adset') {
+      adsetsSeen += 1
+      if (live) deliveringAdsets += 1
+    }
+  }
+  return { deliveringCampaigns, deliveringAdsets, adsetsSeen }
+}
+
 /** 一个账户的观察。只读。 */
 async function probeAccount(
   sb: SupabaseClient,
@@ -141,24 +215,26 @@ async function probeAccount(
   const targetDate = accountYesterday(timezone, now)
 
   const base = { adAccountId, timezone, targetDate, accountCapCents: capCents, hasDeliveringEntity }
+  const noLevels = { deliveringCampaigns: null, deliveringAdsets: null, adsetsSeen: null }
   const noneTried: Record<string, boolean | null> = {}
   for (const m of CANDIDATE_ABSOLUTE_CAP_MULTIPLES) noneTried[String(m)] = null
 
   if (targetDate === null) {
     return {
-      ...base, spendCents: null, medianCents: null, nonZeroDays: 0, truncated: false,
+      ...base, ...noLevels, spendCents: null, medianCents: null, nonZeroDays: 0, truncated: false,
       queryError: null, relativeKind: 'undeterminable',
       relativeReason: 'facts:account_target_date_unknown', absoluteWouldTrip: noneTried,
     }
   }
 
+  const delivering = await readDeliveringByLevel(sb, clientId, adAccountId, now)
   const window = await readSpendWindow(sb, { clientId, adAccountId, targetDate })
 
   // 🔴 读失败或被截断 = 这份数据不完整，一律判不了。
   //    拿可能缺行的窗口去算中位数、去比阈值，方向是放行（fail-open）。
   if (window.queryError !== null || window.truncated) {
     return {
-      ...base, spendCents: window.targetSpendCents, medianCents: null,
+      ...base, ...delivering, spendCents: window.targetSpendCents, medianCents: null,
       nonZeroDays: window.previousDays.filter((d) => d.spendCents > 0).length,
       truncated: window.truncated, queryError: window.queryError,
       relativeKind: 'undeterminable',
@@ -195,6 +271,7 @@ async function probeAccount(
 
   return {
     ...base,
+    ...delivering,
     spendCents: window.targetSpendCents,
     medianCents: median,
     nonZeroDays: nonZero,
