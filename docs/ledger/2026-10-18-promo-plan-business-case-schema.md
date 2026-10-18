@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-18
 done_on: 2026-10-18
-done_ref: pr:PENDING
+done_ref: pr:2781
 source: session:579d2d02
 verify_by: 2026-10-25
 verify_how: 在真实推广计划页填一张经营判断卡并保存成功，再读库确认 plan_data.promo.phases[].business_case 有值；且已批准的旧计划的「批准记录」仍显示「批准的就是现在这一版内容」（没有因为加字段被判成内容变过）
