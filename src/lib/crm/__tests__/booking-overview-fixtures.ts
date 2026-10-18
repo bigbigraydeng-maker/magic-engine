@@ -47,6 +47,7 @@ export interface BookingSpec {
   bookedOn?: string
   status?: 'active' | 'cancelled'
   contactN?: number
+  partySize?: number | null
   deposit?: MsSpec | null
   balance?: MsSpec | null
   note?: string | null
@@ -81,7 +82,7 @@ export function bookingOf(spec: BookingSpec): BookingRow {
     departureId: spec.departureId === undefined ? DEFAULT_DEP : spec.departureId,
     departureDepartOn: spec.snapshot === undefined ? '2027-03-12' : spec.snapshot,
     bookedOn: spec.bookedOn ?? '2026-09-01',
-    partySize: null,
+    partySize: spec.partySize === undefined ? null : spec.partySize,
     isCruise: false,
     status: spec.status ?? 'active',
     cancelNote: spec.status === 'cancelled' ? 'changed plans' : null,

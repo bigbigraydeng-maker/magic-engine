@@ -139,6 +139,12 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
     refreshScope: 'per_connection',
     why: '同 meta，token-manager 里也还没有 TikTok 的刷新实现',
   },
+  [PLATFORM_PROVIDERS.GOOGLE_YOUTUBE]: {
+    refreshable: true,
+    staleHours: null,
+    refreshScope: 'per_connection',
+    why: '只在有人上传视频 / 读回时才刷令牌，没有固定节奏的调用方；接上定时发布任务之后再回来填这个数',
+  },
   [PLATFORM_PROVIDERS.WHATSAPP]: {
     refreshable: false,
     staleHours: null,
@@ -172,6 +178,7 @@ export const SCOPE_REPLAYED_ON_REFRESH: Record<PlatformProvider, readonly string
   [PLATFORM_PROVIDERS.META]: null,
   [PLATFORM_PROVIDERS.TIKTOK]: null,
   [PLATFORM_PROVIDERS.WHATSAPP]: null,
+  [PLATFORM_PROVIDERS.GOOGLE_YOUTUBE]: null,
 }
 
 // ─── 输入 / 输出 ──────────────────────────────────────────────────────────────

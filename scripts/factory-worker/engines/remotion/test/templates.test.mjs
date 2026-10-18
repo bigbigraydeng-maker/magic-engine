@@ -62,7 +62,7 @@ function montageProps() {
 }
 
 test('TEMPLATE_IDS lists the supported templates', () => {
-  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage', 'datacard', 'postcard'])
+  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage', 'datacard', 'postcard', 'atmosphere'])
 })
 
 test('isTemplateId accepts known ids and rejects others', () => {
@@ -189,4 +189,22 @@ test('loadTemplate postcard returns PostcardReel metadata', () => {
 
 test('isTemplateId accepts postcard', () => {
   assert.equal(isTemplateId('postcard'), true)
+})
+
+test('loadTemplate atmosphere returns AtmosphereReel metadata and reports the missing person column', () => {
+  const loaded = loadTemplate('atmosphere', {
+    logoFile: 'logo.png',
+    musicFile: null,
+    clip: 'clips/main.mp4',
+    durationSec: 15,
+    line: null,
+  })
+  assert.equal(loaded.compositionId, 'AtmosphereReel')
+  assert.equal(loaded.totalFrames, 450)
+  assert.deepEqual(loaded.assetFiles, ['clips/main.mp4', 'logo.png'])
+  assert.deepEqual(loaded.recipeGaps.map((g) => g.column), ['真人背影/真人出镜'])
+})
+
+test('loadTemplate refuses an unknown template id instead of falling back to montage', () => {
+  assert.throws(() => loadTemplate('nope', {}), /未知模板/)
 })

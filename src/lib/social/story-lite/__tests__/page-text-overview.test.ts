@@ -4,6 +4,7 @@ import {
   describeStoryHeadline,
   describeOverviewItemStatus,
   describeReelHeadline,
+  describeReelUploadState,
   describeVarietyLine,
   isRecordedUploaded,
   nzDateKey,
@@ -193,7 +194,7 @@ describe('describeReelHeadline', () => {
         { status: 'in_review', published_at: null },
         { status: 'published', published_at: '2026-10-13T00:00:00Z' },
       ]),
-    ).toBe('Reel：在审 2 · 库里记为已上传 1（平台状态未核）')
+    ).toBe('Reel：在审 2 · Facebook 草稿 0 · 已公开 0 · 库里记为已上传但平台状态未核 1')
   })
 })
 
@@ -270,12 +271,34 @@ describe('review fixes (draft week, grace period, one "uploaded" rule, small sam
         { status: 'measuring', published_at: null },
         { status: 'in_review', published_at: null },
       ]),
-    ).toContain('库里记为已上传 1')
+    ).toContain('库里记为已上传但平台状态未核 1')
   })
 
   it('a single price-screen Reel does not light the warning on its own', () => {
     expect(describeVarietyLine({ same_track_max: 1, price_screen_count: 1, total: 1 }).warn).toBe(false)
     expect(describeVarietyLine({ same_track_max: 1, price_screen_count: 3, total: 4 }).warn).toBe(true)
     expect(describeVarietyLine({ same_track_max: 2, price_screen_count: 0, total: 2 }).warn).toBe(true)
+  })
+})
+
+describe('describeReelUploadState / headline with the platform video state', () => {
+  it('says draft / public / unknown in plain words and stays silent for a Reel that was never uploaded', () => {
+    expect(describeReelUploadState({ status: 'in_review', published_at: null, video_state: null })).toBeNull()
+    expect(describeReelUploadState({ status: 'published', published_at: '2026-10-13T00:00:00Z', video_state: 'DRAFT' })).toBe('Facebook 草稿，未公开')
+    expect(describeReelUploadState({ status: 'published', published_at: '2026-10-13T00:00:00Z', video_state: 'PUBLISHED' })).toBe('已公开（Facebook）')
+    expect(describeReelUploadState({ status: 'published', published_at: '2026-10-13T00:00:00Z', video_state: null })).toBe('库里记为已上传 · 平台状态未核')
+    expect(describeReelUploadState({ status: 'published', published_at: null })).toBe('库里记为已上传 · 平台状态未核')
+  })
+
+  it('headline splits drafts, public reels and unknown ones so drafts are never counted as published', () => {
+    expect(
+      describeReelHeadline([
+        { status: 'in_review', published_at: null, video_state: null },
+        { status: 'published', published_at: '2026-10-13T00:00:00Z', video_state: 'DRAFT' },
+        { status: 'published', published_at: '2026-10-12T00:00:00Z', video_state: 'DRAFT' },
+        { status: 'published', published_at: '2026-10-11T00:00:00Z', video_state: 'PUBLISHED' },
+        { status: 'published', published_at: '2026-10-10T00:00:00Z', video_state: null },
+      ]),
+    ).toBe('Reel：在审 1 · Facebook 草稿 2 · 已公开 1 · 库里记为已上传但平台状态未核 1')
   })
 })

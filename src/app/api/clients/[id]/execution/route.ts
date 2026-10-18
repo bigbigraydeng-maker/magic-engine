@@ -267,7 +267,7 @@ export async function GET(
 //   - text   : caption / script 有无 → ready / pending
 //   - image  : visual_assets 状态 → ready / generating / failed / pending
 //   - video  : reels_drafts 状态 → ready / generating / failed / pending / na
-//   - publish: publer_post_id / scheduled_at → ready (published) / generating (scheduled) / pending
+//   - publish: status / scheduled_at → ready (published) / generating (scheduled) / pending
 //   - priority: 推导边框色（failed > stale > generating > published > normal）
 //   - package_progress: 量产包多帖任务的 X/Y 进度
 //
@@ -342,17 +342,16 @@ async function buildContentStatesByItem(
     }
   }
 
-  // 4. publer_post_id + scheduled_at：从 content_posts 拿
-  const publishStatusByPostId: Record<string, { has_publer: boolean; scheduled_at: string | null; status: string }> = {}
+  // 4. scheduled_at + status：从 content_posts 拿
+  const publishStatusByPostId: Record<string, { scheduled_at: string | null; status: string }> = {}
   if (postIds.length > 0) {
     const { data: postRows } = await supabaseAdmin
       .from('content_posts')
-      .select('id, publer_post_id, scheduled_at, status')
+      .select('id, scheduled_at, status')
       .in('id', postIds)
 
-    for (const row of (postRows ?? []) as { id: string; publer_post_id: string | null; scheduled_at: string | null; status: string }[]) {
+    for (const row of (postRows ?? []) as { id: string; scheduled_at: string | null; status: string }[]) {
       publishStatusByPostId[row.id] = {
-        has_publer:   !!row.publer_post_id,
         scheduled_at: row.scheduled_at,
         status:       row.status,
       }
@@ -433,13 +432,13 @@ function computeVideoSignal(
 
 function computePublishSignal(
   item: BaseItemForState,
-  publishByPostId: Record<string, { has_publer: boolean; scheduled_at: string | null; status: string }>,
+  publishByPostId: Record<string, { scheduled_at: string | null; status: string }>,
 ): ContentStateSignal {
   if (!item.content_post_id) return 'pending'
   const info = publishByPostId[item.content_post_id]
   if (!info) return 'pending'
   if (info.status === 'published') return 'ready'
-  if (info.status === 'scheduled' || info.has_publer) return 'generating'  // 已推 Publer 等待发布
+  if (info.status === 'scheduled') return 'generating'  // 已排期等待发布
   return 'pending'
 }
 

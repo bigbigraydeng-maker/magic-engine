@@ -35,6 +35,7 @@ import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-reque
 import { pushAutoPublishItems } from './auto-publish-items'
 import { pushStoryLiteItems } from './story-lite-items'
 import { pushEmailReplyItems } from './email-reply-items'
+import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
@@ -419,6 +420,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 客人来信超过一天没人回 + 公司邮箱同步哑了（后者会让前者假装成零条），见 email-reply-items.ts
     (b) => pushEmailReplyItems(supabase, b, ids, now, nameOf).catch((e) =>
       console.warn('[manual-items] 客人来信没回待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 客人填了表超过 24 小时没人回 —— 汇总信的开关一直关着，没有任何人被指派（CTS 积压 170 条）。
+    (b) => pushLeadFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 线索没人回待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户交了广告账户号等核实 —— 客户以为交上去了，不下发就没人知道（AD-SEC-3）
     (b) => pushBindingRequestItems(supabase, b, ids, now, nameOf).catch((e) =>

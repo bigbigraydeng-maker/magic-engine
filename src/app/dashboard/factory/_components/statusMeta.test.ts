@@ -8,7 +8,7 @@ const view = (o: Partial<{ video_state: 'DRAFT' | 'PUBLISHED' | null; permalink:
 describe('publishedBadge', () => {
   it('draft is labelled non-public and has no link', () => {
     const b = publishedBadge(view({ video_state: 'DRAFT', permalink: 'https://www.facebook.com/reel/1/' }))
-    expect(b.label).toContain('草稿')
+    expect(b.label).toBe('Facebook 草稿，未公开')
     expect(b.href).toBeNull()
   })
   it('public carries the permalink', () => {

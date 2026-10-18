@@ -8,7 +8,7 @@ function payload(groups: ReturnType<typeof makeGroup>[]) {
   return {
     summary: {
       groups,
-      totals: { orders: 0, depositPaid: 0, balancePaid: 0, unsettled: 0, unsettledOverdue: 0, offlineHandled: 0 },
+      totals: { orders: 0, partySize: 0, partySizeMissing: 0, depositPaid: 0, balancePaid: 0, unsettled: 0, unsettledOverdue: 0, offlineHandled: 0 },
       hiddenGroupCount: 0,
       hiddenOrders: 0,
       hiddenOfflineOnlyGroups: 0,
@@ -50,6 +50,16 @@ describe('TourSalesLine', () => {
     expect(screen.getByText(/2027-05-21：2 单/)).toBeTruthy()
     expect(screen.queryByText(/99/)).toBeNull()
     expect(document.body.textContent).not.toMatch(/\$|NZD|AUD|金额：/)
+  })
+
+  it('does not list departures that have no orders yet', async () => {
+    stub(200, payload([
+      makeGroup({ key: DEP_A, tourId: TOUR_A, departOn: '2027-03-19', orders: 3, depositPaid: 1, balancePaid: 0, unsettled: 3 }),
+      makeGroup({ key: DEP_B, tourId: TOUR_A, departOn: '2027-03-26', orders: 0 }),
+    ]))
+    render(<TourSalesLine clientId={CLIENT} tourId={TOUR_A} />)
+    await waitFor(() => expect(screen.getByText(/2027-03-19：3 单/)).toBeTruthy())
+    expect(screen.queryByText(/2027-03-26/)).toBeNull()
   })
 
   it('says so when the tour has no orders', async () => {

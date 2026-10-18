@@ -43,7 +43,7 @@ function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
       ],
     },
     story_error: null,
-    reels: [{ id: 'r1', status: 'in_review', angle: '上海价格', created_at: '2026-10-12T00:00:00Z', published_at: null, permalink: null, music_file: null, template: null }],
+    reels: [{ id: 'r1', status: 'in_review', angle: '上海价格', created_at: '2026-10-12T00:00:00Z', published_at: null, permalink: null, video_state: null, music_file: null, template: null }],
     reels_error: null,
     reel_variety: { same_track_max: 0, same_track_file: null, price_screen_count: 0, total: 1 },
     post: { connected: false },
@@ -161,7 +161,7 @@ describe('WeekOverviewPanel', () => {
     render(<WeekOverviewPanel clientId={CLIENT} />)
     await screen.findByText('图文：未接入')
     expect(screen.getByText('Story：本周 2 条 · 库里记为已发 0 · 已过点没发出 0 · 待发 2 · 被拦 0')).toBeTruthy()
-    expect(screen.getByText('Reel：在审 1 · 库里记为已上传 0（平台状态未核）')).toBeTruthy()
+    expect(screen.getByText('Reel：在审 1 · Facebook 草稿 0 · 已公开 0 · 库里记为已上传但平台状态未核 0')).toBeTruthy()
   })
 
   it('a Story whose time has passed but is still waiting says it did not go out', async () => {
@@ -171,6 +171,26 @@ describe('WeekOverviewPanel', () => {
     render(<WeekOverviewPanel clientId={CLIENT} />)
     await screen.findByText(/已过点没发出 2/)
     expect(screen.getAllByText(/已过点，没发出（库里仍是待发）/).length).toBe(2)
+  })
+
+  it('a Reel whose platform state is known says draft / public and drops the unverified note', async () => {
+    const base = overview()
+    mockFetch({
+      success: true,
+      ...overview({
+        story: base.story,
+        reels: [
+          { id: 'd1', status: 'published', angle: '草稿', created_at: '2026-10-12T00:00:00Z', published_at: '2026-10-13T00:00:00Z', permalink: null, video_state: 'DRAFT', music_file: null, template: null },
+          { id: 'p1', status: 'published', angle: '公开', created_at: '2026-10-12T00:00:00Z', published_at: '2026-10-13T00:00:00Z', permalink: 'https://example.com/reel', video_state: 'PUBLISHED', music_file: null, template: null },
+        ],
+      }),
+    })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText(/演练模式/)
+    expect(container.textContent).toContain('Facebook 草稿，未公开')
+    expect(container.textContent).toContain('已公开（Facebook）')
+    expect(container.textContent).not.toContain('库里记为已上传 · 平台状态未核')
+    expect(container.textContent).not.toContain('库里记为已上传，平台状态未核')
   })
 
   it('a recorded-as-sent Story and an uploaded Reel never use the bare word', async () => {
@@ -187,6 +207,7 @@ describe('WeekOverviewPanel', () => {
             created_at: '2026-10-12T00:00:00Z',
             published_at: '2026-10-13T00:00:00Z',
             permalink: 'https://example.com/reel',
+            video_state: null,
             music_file: null,
             template: null,
           },

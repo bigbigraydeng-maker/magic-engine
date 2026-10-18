@@ -25,6 +25,8 @@ export function makeGroup(over: Partial<OverviewGroup> = {}): OverviewGroup {
     departOn: '2027-03-19',
     departed: false,
     orders: 6,
+    partySize: 0,
+    partySizeMissing: 0,
     depositPaid: 5,
     balancePaid: 2,
     fullyPaid: 2,
@@ -50,6 +52,7 @@ export function makeRow(over: Partial<OverviewListRow> = {}): OverviewListRow {
     departureId: DEP_A,
     departOn: '2027-03-19',
     status: 'active',
+    partySize: null,
     deposit: {
       kind: 'deposit', label: '定金', state: 'paid', paidOn: '2026-10-08',
       dueOn: '2026-10-10', dueNote: null, overdue: false, quiet: false,
@@ -83,7 +86,7 @@ export function makePayload(over: Partial<OverviewPayload> = {}): OverviewPayloa
   return {
     summary: {
       groups,
-      totals: { orders: 10, depositPaid: 8, balancePaid: 3, unsettled: 6, unsettledOverdue: 3, offlineHandled: 2 },
+      totals: { orders: 10, partySize: 0, partySizeMissing: 0, depositPaid: 8, balancePaid: 3, unsettled: 6, unsettledOverdue: 3, offlineHandled: 2 },
       hiddenGroupCount: 2,
       hiddenOrders: 3,
       hiddenOfflineOnlyGroups: 0,
@@ -112,7 +115,7 @@ export function makeEmptyPayload(): OverviewPayload {
     hasBookings: false,
     summary: {
       groups: [],
-      totals: { orders: 0, depositPaid: 0, balancePaid: 0, unsettled: 0, unsettledOverdue: 0, offlineHandled: 0 },
+      totals: { orders: 0, partySize: 0, partySizeMissing: 0, depositPaid: 0, balancePaid: 0, unsettled: 0, unsettledOverdue: 0, offlineHandled: 0 },
       hiddenGroupCount: 0,
       hiddenOrders: 0,
       hiddenOfflineOnlyGroups: 0,

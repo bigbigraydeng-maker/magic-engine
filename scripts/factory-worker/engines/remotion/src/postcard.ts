@@ -320,7 +320,7 @@ function relevanceTokens(s: string): string[] {
  * text must occur in the quote; otherwise at least half (rounded up) of the
  * tokens must occur in the quote.
  */
-function quoteSupports(text: string, quote: string): boolean {
+export function quoteSupports(text: string, quote: string): boolean {
   const tokens = relevanceTokens(text);
   const haystack = normalizeForScan(quote).toLowerCase();
   if (tokens.length === 0) {
@@ -335,7 +335,7 @@ function quoteSupports(text: string, quote: string): boolean {
 }
 
 /** True when the URL is a plain http(s) URL with a real host (not localhost / IPv4 / IPv6 / reserved TLD). */
-function isAcceptableSourceUrl(url: string): boolean {
+export function isAcceptableSourceUrl(url: string): boolean {
   if (!/^https?:\/\/[^\s/]+\.[^\s/]+(\/\S*)?$/.test(url)) return false;
   let parsed: URL;
   try {

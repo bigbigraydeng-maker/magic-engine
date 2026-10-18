@@ -203,6 +203,8 @@ describe('payments-format wording', () => {
       departOn: '2027-03-19',
       departed: false,
       orders: 0,
+      partySize: 0,
+      partySizeMissing: 0,
       depositPaid: 0,
       balancePaid: 0,
       fullyPaid: 0,
