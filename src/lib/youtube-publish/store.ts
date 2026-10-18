@@ -6,6 +6,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { isValidChannelId } from './oauth'
 import type { GateResult } from './gates'
+import { checkTopicAlignment } from '@/lib/factory/topic-alignment-store'
 
 export type ReceiptStage = 'staging' | 'public_step'
 export type ReceiptStatus = 'pending' | 'blocked' | 'staged' | 'dry_run_ok' | 'published' | 'failed'
@@ -18,6 +19,7 @@ export interface ReceiptRow {
   status: ReceiptStatus
   reason?: string
   workOrderId?: string
+  contentPostId?: string
   videoId?: string
   noPublish: boolean
   authorizationNonce?: string
@@ -63,6 +65,27 @@ export async function getApprovedWorkOrder(
   return { id: row.id, videoUrl: url, title: row.angle.slice(0, 100), description: caption }
 }
 
+/** Organic factory output only: a scheduled YouTube post with an https final video. Read-only. */
+export async function getApprovedContentPost(
+  clientId: string,
+  contentPostId: string,
+): Promise<ApprovedWorkOrder | null> {
+  const { data, error } = await supabaseAdmin
+    .from('content_posts')
+    .select('id, status, title, caption, source_video_url, platforms')
+    .eq('id', contentPostId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (error) throw error
+  if (!data || data.status !== 'scheduled') return null
+  const row = data as { id: string; title: string | null; caption: string | null; source_video_url: string | null; platforms: string[] | null }
+  const hasYouTubePlatform = (row.platforms ?? []).some((p) => ['youtube', 'youtube_shorts', 'youtube-shorts'].includes(p.toLowerCase()))
+  if (!hasYouTubePlatform || !row.source_video_url?.startsWith('https://') || !row.title?.trim()) return null
+  const alignment = await checkTopicAlignment(clientId, contentPostId)
+  if (!alignment.ready) return null
+  return { id: row.id, videoUrl: row.source_video_url, title: row.title.slice(0, 100), description: row.caption ?? '' }
+}
+
 export async function insertReceipt(r: ReceiptRow): Promise<void> {
   const { error } = await supabaseAdmin.from('youtube_publish_receipts').insert({
     request_id: r.requestId,
@@ -72,6 +95,7 @@ export async function insertReceipt(r: ReceiptRow): Promise<void> {
     status: r.status,
     reason: r.reason ?? null,
     work_order_id: r.workOrderId ?? null,
+    content_post_id: r.contentPostId ?? null,
     video_id: r.videoId ?? null,
     no_publish: r.noPublish,
     authorization_nonce: r.authorizationNonce ?? null,
@@ -83,7 +107,7 @@ export async function insertReceipt(r: ReceiptRow): Promise<void> {
 
 export async function findStagedReceipt(
   clientId: string,
-  match: { workOrderId: string } | { videoId: string },
+  match: { workOrderId: string } | { contentPostId: string } | { videoId: string },
 ): Promise<{ videoId: string; channelId: string; gates: GateResult[] } | null> {
   let q = supabaseAdmin
     .from('youtube_publish_receipts')
@@ -91,7 +115,11 @@ export async function findStagedReceipt(
     .eq('client_id', clientId)
     .eq('stage', 'staging')
     .eq('status', 'staged')
-  q = 'workOrderId' in match ? q.eq('work_order_id', match.workOrderId) : q.eq('video_id', match.videoId)
+  q = 'workOrderId' in match
+    ? q.eq('work_order_id', match.workOrderId)
+    : 'contentPostId' in match
+      ? q.eq('content_post_id', match.contentPostId)
+      : q.eq('video_id', match.videoId)
   const { data, error } = await q.order('created_at', { ascending: false }).limit(1).maybeSingle()
   if (error) throw error
   if (!data) return null
@@ -104,15 +132,20 @@ export async function findStagedReceipt(
  * left a video on the channel, or the newest attempt is still `pending` (crashed or in flight).
  * A definite failure with no video (e.g. quota) is superseded by its `failed` row, so a retry works.
  */
-export async function hasStagingAttempt(clientId: string, workOrderId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin
+export async function hasStagingAttempt(
+  clientId: string,
+  source: { workOrderId: string } | { contentPostId: string },
+): Promise<boolean> {
+  const base = supabaseAdmin
     .from('youtube_publish_receipts')
     .select('status, video_id, created_at')
     .eq('client_id', clientId)
-    .eq('work_order_id', workOrderId)
     .eq('stage', 'staging')
     .in('status', ['pending', 'staged', 'failed'])
     .order('created_at', { ascending: false })
+  const { data, error } = await ('workOrderId' in source
+    ? base.eq('work_order_id', source.workOrderId)
+    : base.eq('content_post_id', source.contentPostId))
   if (error) throw error
   const rows = (data ?? []) as Array<{ status: string; video_id: string | null }>
   if (rows.some((r) => r.status === 'staged' || (r.status === 'failed' && r.video_id))) return true

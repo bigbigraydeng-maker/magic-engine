@@ -14,6 +14,7 @@ function stagingDeps(over: Partial<StagingDeps> = {}) {
   const deps: StagingDeps = {
     getChannelId: async () => CHANNEL,
     getWorkOrder: async () => ({ id: 'w1', videoUrl: 'https://cdn/x.mp4', title: 'T', description: 'D' }),
+    getContentPost: async () => ({ id: 'p1', videoUrl: 'https://cdn/x.mp4', title: 'T', description: 'D' }),
     alreadyStaged: async () => false,
     getToken: async () => 'tok',
     fetchVideo: async () => new Blob(['x'], { type: 'video/mp4' }),
@@ -67,6 +68,35 @@ describe('runStaging', () => {
     expect(initBody.status.privacyStatus).toBe('private')
     expect(saved.map((x) => x.status)).toEqual(['pending', 'staged'])
     expect(saved[0].requestId).not.toBe(saved[1].requestId)
+  })
+
+  it('stages an approved organic content post and records its source id', async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(channelsOk())
+      .mockResolvedValueOnce(new Response('', { status: 200, headers: { location: 'https://up/1' } }))
+      .mockResolvedValueOnce(json({ id: 'v1' }))
+      .mockResolvedValueOnce(videoBack('private'))
+    const { deps, saved } = stagingDeps({
+      getContentPost: async () => ({ id: 'p1', videoUrl: 'https://cdn/x.mp4', title: 'T', description: 'D' }),
+      alreadyStaged: async (_clientId, source) => {
+        expect(source).toEqual({ contentPostId: 'p1' })
+        return false
+      },
+      fetchImpl: f,
+    })
+    const r = await runStaging({ requestId: 'r2', clientId: 'c1', contentPostId: 'p1' }, deps)
+    expect(r).toMatchObject({ status: 'staged', contentPostId: 'p1', videoId: 'v1', noPublish: true })
+    expect(saved.map((x) => x.status)).toEqual(['pending', 'staged'])
+    expect(saved.every((x) => x.contentPostId === 'p1')).toBe(true)
+  })
+
+  it('rejects an event with both source ids before upload', async () => {
+    const f = vi.fn()
+    const { deps } = stagingDeps({ fetchImpl: f })
+    expect(await runStaging({ requestId: 'r3', clientId: 'c1', workOrderId: 'w1', contentPostId: 'p1' }, deps))
+      .toMatchObject({ status: 'blocked', reason: 'invalid_source' })
+    expect(f).not.toHaveBeenCalled()
   })
 
   it('records failed (not staged) when read-back is not private', async () => {

@@ -21,6 +21,7 @@ import {
 import {
   consumeAuthorization,
   findStagedReceipt,
+  getApprovedContentPost,
   getApprovedWorkOrder,
   hasStagingAttempt,
   getClientChannelId,
@@ -76,6 +77,7 @@ export const youtubeStaging = inngest.createFunction(
       runStaging(data, {
         getChannelId: getClientChannelId,
         getWorkOrder: getApprovedWorkOrder,
+        getContentPost: getApprovedContentPost,
         alreadyStaged: hasStagingAttempt,
         getToken,
         fetchVideo: fetchFactoryVideo,

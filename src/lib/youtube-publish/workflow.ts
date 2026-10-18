@@ -26,7 +26,8 @@ export const YOUTUBE_PUBLIC_AUTHORIZED_EVENT = 'youtube.public.authorized' as co
 export interface StagingEventData {
   requestId: string
   clientId: string
-  workOrderId: string
+  workOrderId?: string
+  contentPostId?: string
 }
 
 export interface PublicAuthorizedEventData {
@@ -37,7 +38,8 @@ export interface PublicAuthorizedEventData {
 export interface StagingDeps {
   getChannelId: (clientId: string) => Promise<string | null>
   getWorkOrder: (clientId: string, id: string) => Promise<ApprovedWorkOrder | null>
-  alreadyStaged: (clientId: string, workOrderId: string) => Promise<boolean>
+  getContentPost: (clientId: string, id: string) => Promise<ApprovedWorkOrder | null>
+  alreadyStaged: (clientId: string, source: { workOrderId: string } | { contentPostId: string }) => Promise<boolean>
   getToken: (clientId: string) => Promise<string>
   fetchVideo: (url: string) => Promise<Blob>
   saveReceipt: (r: ReceiptRow) => Promise<void>
@@ -47,7 +49,13 @@ export interface StagingDeps {
 export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promise<ReceiptRow> {
   let pendingWritten = false
   let finalRequestId: string = ev.requestId
-  const base = { requestId: ev.requestId, clientId: ev.clientId, workOrderId: ev.workOrderId, stage: 'staging' as const }
+  const base = {
+    requestId: ev.requestId,
+    clientId: ev.clientId,
+    ...(ev.workOrderId ? { workOrderId: ev.workOrderId } : {}),
+    ...(ev.contentPostId ? { contentPostId: ev.contentPostId } : {}),
+    stage: 'staging' as const,
+  }
   const finish = async (r: Omit<ReceiptRow, keyof typeof base | 'channelId'> & { channelId?: string }) => {
     const row: ReceiptRow = { ...base, channelId: r.channelId ?? 'unknown', ...r }
     if (pendingWritten) row.requestId = finalRequestId
@@ -57,12 +65,22 @@ export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promi
 
   let channelId: string | null
   let wo: ApprovedWorkOrder | null
+  const hasWorkOrder = Boolean(ev.workOrderId)
+  const hasContentPost = Boolean(ev.contentPostId)
+  const source = hasWorkOrder ? { workOrderId: ev.workOrderId! } : { contentPostId: ev.contentPostId! }
   try {
     channelId = await deps.getChannelId(ev.clientId)
     if (!channelId) return finish({ status: 'blocked', reason: 'channel_not_configured', noPublish: true })
-    wo = await deps.getWorkOrder(ev.clientId, ev.workOrderId)
-    if (!wo) return finish({ channelId, status: 'blocked', reason: 'work_order_not_approved', noPublish: true })
-    if (await deps.alreadyStaged(ev.clientId, ev.workOrderId)) {
+    if (hasWorkOrder === hasContentPost) {
+      return finish({ channelId, status: 'blocked', reason: 'invalid_source', noPublish: true })
+    }
+    wo = hasWorkOrder
+      ? await deps.getWorkOrder(ev.clientId, ev.workOrderId!)
+      : await deps.getContentPost(ev.clientId, ev.contentPostId!)
+    if (!wo) {
+      return finish({ channelId, status: 'blocked', reason: hasWorkOrder ? 'work_order_not_approved' : 'content_post_not_ready', noPublish: true })
+    }
+    if (await deps.alreadyStaged(ev.clientId, source)) {
       return finish({ channelId, status: 'blocked', reason: 'already_staged', noPublish: true })
     }
   } catch (err) {
