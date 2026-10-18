@@ -59,3 +59,43 @@
 ## 9. 待 PM 决定
 1. 氛围片走哪条：**A 加内容 / B 降格素材 / A+B 并行**（利弊见 §4）。
 2. 人工项措辞是否就用「这条单独发给粉丝，他们能看懂在讲什么吗」。
+
+## 10. 子牙 / 魏征首轮复核后的修订（子牙「带条件通过」、魏征「打回，改完再审」；已采纳，与上文冲突处以本节为准）
+
+### 10.1 判据加固（魏征 1、2）
+- **按「单个元素连续可见」算，不再累计相加**：每个文字元素必须**连续可见 ≥ 2 秒**才计入；同类元素按**时间区间并集**算，防止 30 个 0.1 秒闪字凑数（list 条目最短 1 帧、montage 词最短约 0.25 秒都够不上）。
+- **文字要实质**：`clean()` 之后（去零宽/不可见字符）长度 ≥ 3 个字符（中文 ≥ 2 个字）且含字母/汉字；`place`/`line` 填 "a"、空格、纯符号一律不计。
+- **扣掉淡出**：atmosphere 的文字在淡出遮罩开始后不计可见时间（`AtmosphereReel.tsx` 淡出区间）。
+- **各模板映射（写死，逐一）**：
+  - list：`hook.lines` + `items[].text`（地名）→ `place_or_tour`；`revealTitle` 或价格卡 → `selling_line`/`brand_card` 视内容（价格卡不算 `brand_card`，只有 `revealTitle`≥2s 且非纯价格才算）。
+  - postcard：`scenes[].place` → `place_or_tour`；`scenes[].line`（带出处）→ `selling_line`；`end.title` ≥2s → `brand_card`；价格卡不算 `brand_card`。
+  - datacard：文字卡的 `hook`/`rows` → `selling_line`（带「仅数字补充，非主力片」标记，仍需过人工项）。
+  - montage：`words` 是 10–30 个节奏词（如 "GO"），**不属于任何一类** → 单靠 montage 的词不满足；montage 要过闸必须额外带 `place` 标签或片尾品牌卡（**需要给 montage 加这两个可选字段，或明确 montage 不是「对外成片」模板、只能 `asset_only`**——交 PM/子牙定，我倾向后者，因为现网 montage 近 30 天 0 单）。
+  - atmosphere：默认空；路 A 加 `place`/`endCard`，路 B 标 `asset_only`。
+- **诚实的局限（必须在给 PM 的汇报里写明）**：闸只能保证「有字、有出处、有时长」，**挡不住「标签齐全但内容仍薄」**（一个 16 秒单镜头 + 「Shanghai」+ 品牌卡也能过机器闸）。「薄不薄」只能靠人工项。品牌卡内容不做语义核对。`line` 的出处检查是词重叠 + http 网址，较弱，已知。
+- 新增字段全部 **optional**（旧 props 才能重放）。
+
+### 10.2 服务端复核改为「自己重算」，并有开关（子牙 1、2）
+- 服务端**不信出片机自报的 verdict**：用 `wo.brief.remotion.props`（下单方写、出片机改不了）在 `src/lib/factory/` 里用一份**纯函数 `contentSubstanceOf`（TS）**自己重算；引擎是 .ts 但不进运行时（`engine-loader.ts` 注释），所以**两份实现 + 对拍测试**（先例 `montage-contract.test.ts`）：同一批 props 夹具，引擎版与服务端版结果必须一致。
+- 完成回执白名单（`complete/route.ts:58-90`）要显式加 `content_substance`（作为审计字段与对拍依据，不作判决依据）。
+- **过渡**：出片机回执带 `capabilities: ['content_substance_v1']`；服务端用开关（环境变量/`factory_config`）控制「缺失/不合格 → 拒收」，**默认先只告警**，确认出片机已升级（读回 capabilities）后再翻开关，避免旧出片机白渲后 dead_letter。
+
+### 10.3 `asset_only` 不可发布：堵三处 + 严格枚举（子牙 3、4、5）
+- `deliverable` 严格枚举（`'asset_only'` 或缺省）；拼错一律按成片处理（走内容闸），不放行。
+- 三处拦截：`review-apply.ts` 的 `applyApprove` → 409；`review-sync.ts` 的 Airtable 通过路径（休眠但路由在）→ 加判断；`publish-worker.ts` 的 `processOne` 兜底：`brief.remotion.deliverable==='asset_only'` 一律失败。
+- `archived` 已在数据库 CHECK 与 `types.ts` 内，**无需新迁移**，但目前没有写入方、看板把它当「发布后归档」→ 审片页用 `output.deliverable` 单独分区「素材（不单独发布）」，不混进归档统计。
+- **「收入素材库」落地方式（修正）**：素材的真正落点是出片机本机素材目录（`<STUDIO_ROOT>/<客户>/remotion-assets/`），工单状态改 `archived` 并不会把文件放进去。本设计**删掉「收入素材库」这个说法**，改为：`asset_only` 工单审通过 = 记 `review_ref.asset_accepted_by/at` 并置 `archived`，**文件由出片机侧入库脚本/人工搬运到素材目录**（另立小任务，不在本闸内）；本闸只负责「标了 asset_only 才放行、且不可能被发布」。
+
+### 10.4 V3 清单：存版本号，堵降级（魏征 4）
+- `review_ref.checklist_version`（`'v3'`）与清单一同存；`humanKeysForStored` 先读 `checklist_version`，缺省才按键推断（兼容旧回执）；**含 v3 版本号却缺新键 = 无效**（防降级）。
+- 同步改动清单补全：`review-actions.ts`（35、49 行）、`rejectPayload.ts`（理由标签加新键）、`ReviewInbox.tsx`（HUMAN_CHECK_LABEL 穷尽 Record、一键面板、批量通过）、`content-review.ts`（`CONTENT_CHECK_KEYS`）、`chat.ts` 工具枚举。
+- 出路说明：「看不懂」FAIL 打回后，系统会重开一张同 props 的新单（`reopened_from` 对 remotion 单直接拒绝，见 `remotion-branch.mjs`），所以**打回理由必须引导改下单参数（加内容或改标素材）**，打回面板对该项给出专门提示，而不是重跑原参数。
+
+### 10.5 风险级别与拆 PR（魏征 5、子牙 6）
+- **整体按 A**：PR-2 改的是审批与发布授权语义（`review-apply`/`complete-work-order`/发布兜底），属「状态字段当发布授权」老坑，虽 `risk.mjs` 按文件只判 B，**一律草稿 + 正文「风险级别：A」+ PM 回「合」**（不靠 risk.mjs 自报）。
+- **拆 3 个 PR**：PR-1（先合，服务端安全面）：V3 常量+`checklist_version`、`asset_only` 三处拦截、发布兜底、完成回执白名单（此时无 `asset_only` 工单，不起作用，先合安全）；PR-2（A，出片机侧）：引擎 `contentSubstanceOf` + 出片机渲染前拒单 + 回执 + capabilities；PR-3：服务端重算复核（默认只告警）+ 审片页分区/人工项 UI，之后翻开关。
+
+### 10.6 验收：只读重放，不往生产队列写（魏征 3）
+- **17419d99 的重放**：props 取自 `content_work_orders.brief.remotion.props`（只读调查 PM 已常规授权）或存储 `segments.json` 的 `props`；脱敏后存成**测试夹具**，用 `processRemotionOrder` 的依赖注入（`healthFn`/`loadEngineFn`/`renderFn` 可替换）重放：期望 `RemotionOrderError('内容闸…')` 且 `renderFn` 未调用；同夹具加 `deliverable:'asset_only'` → 放行；服务端侧对同 props 的重算 verdict = fail。**不再提交整链测试单**（会写生产、会污染 PM 的审片队列）；翻开关前再做一次**升级后的只读冒烟**即可。
+- 正例夹具：7049d162、cc876dc3（list）、00f23d78、cb752a8f（postcard）的真实 props → 全部 pass。
+- 回执计数：dead_letter 可被一键复活会反复被拦刷屏 → 拦截原因标注「需改下单参数，复活无效」。
