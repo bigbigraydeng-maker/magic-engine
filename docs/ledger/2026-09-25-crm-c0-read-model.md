@@ -9,7 +9,7 @@ verify_by: 2026-09-30
 verify_how: PR 合并后 all/page.tsx 无改动仍能拿到老响应；带 ?page=1&perPage=100 调用能拿到 paged 响应；对 CTS 客户 stage=quoted 筛选人数与 Supabase Studio 上直查一致
 done_on: 2026-09-25
 done_ref: pr:2001
-last_checked: 2026-10-17
-check_note: PR 2001 已于 2026-09-24 合并；需带参数调用线上 CRM 接口并与 Supabase 直查比人数，夜巡无登录态；owner 本就是 pm
+last_checked: 2026-10-18
+check_note: 10-18 复核：PR 2001 状态 MERGED（2026-09-24T14:47Z）；需带参数调线上 CRM 接口并与 Supabase 直查比人数，夜巡无登录态，仍判不了，owner 已是 pm
 ---
 CRM 升级 6 轮（方案 pr:2000）第一轮，DeepSeek 1 轮 $0.02，Fable 窗口出提示词 + 复审 + 修类型错。
