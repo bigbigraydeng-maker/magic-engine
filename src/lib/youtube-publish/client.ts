@@ -155,6 +155,8 @@ export interface VideoReadback {
   privacyStatus: string | null
   publishAt: string | null
   thumbnailUrl: string | null
+  /** Whole status object as YouTube returned it, so callers can merge instead of overwrite. */
+  rawStatus: Record<string, unknown>
 }
 
 export async function readBackVideo(
@@ -175,7 +177,7 @@ export async function readBackVideo(
         title?: string
         thumbnails?: Record<string, { url?: string }>
       }
-      status?: { privacyStatus?: string; publishAt?: string }
+      status?: Record<string, unknown> & { privacyStatus?: string; publishAt?: string }
     }>
   }
   const item = data.items?.[0]
@@ -187,6 +189,7 @@ export async function readBackVideo(
     title: item.snippet?.title ?? null,
     privacyStatus: item.status?.privacyStatus ?? null,
     publishAt: item.status?.publishAt ?? null,
+    rawStatus: item.status ?? {},
     thumbnailUrl: (thumbs.maxres ?? thumbs.high ?? thumbs.default)?.url ?? null,
   }
 }
