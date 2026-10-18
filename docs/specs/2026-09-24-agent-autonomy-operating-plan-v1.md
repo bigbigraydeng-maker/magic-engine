@@ -92,7 +92,7 @@ Tier Classification：把广告支柱已落地的「信封内自治 + PM 日检�
 | 华佗 | `src/lib/huatuo/` | **无闹钟**：处方生成 / refine 接口触发 | 是 | 否 | 名单写「6 支柱打分」，代码是开处方；6 维打分实际在 `src/lib/diagnostic/runner.ts` |
 | 鲁班 | `src/lib/luban/`（入口 `execution/[itemId]/luban`、`clients/[id]/luban`） | **无闹钟**：人在执行项页面对话触发 | 是 | 否 | 名单写「只做已授权的」不准确：大模型可直接调 `publish_to_gbp` 发谷歌商家帖子，绕过内核（台账 `2026-10-18-luban-gbp-publish-bypasses-kernel`；目前无授权、零调用） |
 | 马良 | `src/lib/maliang/render-check.ts`、`src/lib/assets/vision-analyzer.ts`、`storyboard-generator.ts`、`case-library/` | `maliang-render-check`（Inngest，`:436-438`） | 是（出片检查 Gemini，视觉分析 GPT-4o-mini） | **是** | 名单一致 |
-| 李白 | `src/lib/blog/`、`src/lib/geo/`、`content/prompt-library-audit.ts` | 未核（月度提示词巡检的任务名没按名字查到） | 是 | 否 | 待扩展 |
+| 李白 | `src/lib/blog/`、`src/lib/geo/`、`content/prompt-library-audit.ts` | `libai-prompt-library-monthly`（Inngest 定时，每月，`registry.ts:362`） | 是 | 否 | 待扩展 |
 | 诸葛亮（常驻） | `src/lib/zhuge/` | `zhuge-weekly-recalculate`（`:271`）；另有 conduct 接口 | 是 | 否 | 两条路径：conduct 带记忆与工具，每周重算两样都不带 |
 
 **名单上没有、代码里有**：孙子（`src/lib/seo-agent/`，只被 `seo-agent/plan` 接口调）——收不收由 PM 定。**CLAUDE.md 里有、名单和代码都没有**：司马徽（DAPE「发现」段）——留不留由 PM 定。
