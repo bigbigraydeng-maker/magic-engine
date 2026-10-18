@@ -23,6 +23,7 @@ function loadBoard(): { board: Board } | { fatal: string } {
         cards: cards.cards,
         errors: cards.errors,
         ledgerEntries: ledger.entries,
+        resourcesByPillar: cards.resourcesByPillar,
         rulebookText: cards.rulebookText,
         digestText: cards.digestText,
         today: nzToday(new Date()),
@@ -36,7 +37,11 @@ function loadBoard(): { board: Board } | { fatal: string } {
   }
 }
 
-export default async function LearningBoardPage() {
+export default async function LearningBoardPage({
+  searchParams,
+}: {
+  searchParams?: { pillar?: string }
+}) {
   const h = await headers()
   if (
     h.get('x-user-role') !== 'admin' ||
@@ -47,6 +52,9 @@ export default async function LearningBoardPage() {
   }
 
   const result = loadBoard()
+  const selectedPillar = searchParams?.pillar === 'ads' || searchParams?.pillar === 'social'
+    ? searchParams.pillar
+    : 'all'
 
   return (
     <div className="mx-auto max-w-5xl space-y-4 p-6">
@@ -56,7 +64,7 @@ export default async function LearningBoardPage() {
       ) : result.board.fatal !== null ? (
         <FatalBox message={result.board.fatal} />
       ) : (
-        <BoardView board={result.board} />
+        <BoardView board={result.board} selectedPillar={selectedPillar} />
       )}
     </div>
   )

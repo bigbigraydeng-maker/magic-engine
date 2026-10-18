@@ -34,8 +34,24 @@
 ## 对账用的规则摘要
 [ME-ADS-RULES-DIGEST.md](ME-ADS-RULES-DIGEST.md)：ME 广告规则索引（约 134 条，每条带来源位置）。每日学习任务先读它，**只有疑似冲突时才读来源原文**，不再每天通读手册。16 行标「待核」；摘要只是索引，下「忽略/冲突」结论前必须读来源原文并引出原文位置。
 
+## 社媒支柱（首轮候选）
+
+规则摘要：[ME-SOCIAL-RULES-DIGEST.md](ME-SOCIAL-RULES-DIGEST.md)；A 级草案：[2026-10-19 社媒 Agent 操作手册](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md)，须 PM 单独批准后才生效。
+
+| 卡 | 状态 | 裁决摘要 |
+|---|---|---|
+| [2026-10-19 开场与首帧钩子](2026-10-19-social-hook-first-frame.md) | candidate | 部分吸收为单变量候选；不采外部秒数/百分比 |
+| [2026-10-19 可持续固定栏目](2026-10-19-social-recurring-series.md) | candidate | 栏目作为内容分类候选；效果、频率待 ME 验证 |
+| [2026-10-19 公开评论选题信号](2026-10-19-social-comment-led-ideas.md) | candidate | 评论回流选题已有 ME 设计；不建新 Agent、不读私信 |
+| [2026-10-19 趋势与原生叙事](2026-10-19-social-native-storytelling.md) | candidate | 趋势只作选题线索，需核相关性与素材真实性 |
+| [2026-10-19 Shorts 指标口径](2026-10-19-social-short-video-metrics.md) | candidate | 分开 Shorts views/engaged views；ME 字段可见性未验证 |
+
+外部来源与 ME 数据尚未完成验证，机器状态统一为 `learning`；本轮不标 `adopted` / `verified`。
+
 ## 机器索引（给 ME 后台「Agent 学习库」页读）
 每张卡末尾必须有一节 `## 机器索引`，下面一个 ```json 块：`{"points":[{"key","text","state",...}]}`。一个点只能有一个 state，以复核更正后的结论为准（note 里写「复核更正后」）。没有这一节的卡会在页面上进「还没整理」红区。
+
+可选顶层字段 `pillar` 标记支柱，取值为 `seo`、`ai_visibility`、`ads`、`social`、`reputation` 或 `competitor`。为兼容旧卡，缺省时按 `ads` 处理；新增社媒卡显式填写 `"pillar":"social"`。支柱字段不得改变点状态的原有裁决语义。
 
 | state | 页面分组 | 必填 | 什么时候用 |
 |---|---|---|---|
