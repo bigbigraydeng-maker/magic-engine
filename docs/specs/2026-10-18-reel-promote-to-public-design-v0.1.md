@@ -67,7 +67,8 @@
 ## 8. 与其他工作的边界
 - 106 号只做定位、不做修；其结论（转正要同步流量记录、事件 id 去重、`event_ids` 短路、T+72 已过）已全部并入本稿。
 - 后续 B 级「表现回执接进下一轮计划」依赖本动作先把数据跑起来，另开。
-- Instagram 交叉发布：`video_state=PUBLISHED` 也会让工单变成 IG 候选，但只对 `FACTORY_INSTAGRAM_ENABLED_CLIENTS` 点名客户生效；实现时要确认 CTS 不在名单内，或明确是否要同时交叉发（未验证，待查）。
+- **Instagram 不变量（统筹 10-18 要求）**：「转公开」只做 Facebook。动作代码不得 import 或调用任何 Instagram 交叉发布模块，也不得读写 `FACTORY_INSTAGRAM_*` 开关。查证：origin/main 上 IG 交叉发布走 Publer，须同时满足 `FACTORY_PUBLISH_LIVE`、`FACTORY_INSTAGRAM_LIVE`、`FACTORY_INSTAGRAM_LIVE_CLIENTS` 点名、`FACTORY_INSTAGRAM_ENABLED_CLIENTS` 点名四样才真发，缺一样只存草稿，未配则一条都不处理（`cron/factory-publish-worker/route.ts:63-64`、`ENV.md:196,201,202`）。CTS 是否在名单里：Render 变量读不到，**未验证**；按 fail-closed 处理，即使在名单里本动作也不触发它。另外 Publer 删除 PR 2756 合并后，整条 IG 交叉发布代码被删除，这个风险随之消失。测试：断言动作模块不引用 instagram-*，且转公开后不产生任何 Publer/IG 调用。
+- **首版范围（统筹 10-18 定）**：首版只含单条转公开动作。存量 3 条补登记、缺首评补发**不在首版上线范围**，另走一次 PM 点头；补首评是对外可见动作单列。第 2 节第 8 步「补首评」在首版只对**本次新转的这一条**执行（授权预览里写明会补首评），存量不动。
 
 ## 9. 没验证到的
 Meta 对重复 `published=true` 的真实行为（代码已绕开）；Inngest 控制台是否能看到 10-11/12/13 适配器拒绝记录；74 号实际用哪个页面操作；11 张 DRAFT 在 Facebook 上的真实状态；Render 上 `FACTORY_INSTAGRAM_ENABLED_CLIENTS` 的值。
