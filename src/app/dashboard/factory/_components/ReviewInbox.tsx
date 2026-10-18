@@ -12,6 +12,7 @@ import { PublishOutlets } from './PublishOutlets'
 import { publishedBadge, POST_PUBLISH } from './statusMeta'
 import { PendingCardHead, ReadOnlyTile } from './OrderTile'
 import { RejectDialog } from './RejectDialog'
+import { PromoteReelButton, promoteEntry } from './PromoteReelButton'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
@@ -366,6 +367,9 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                     link={b.href ? { href: b.href, label: '在 Facebook 查看' } : null}
                   />
                   {o.output?.video_path && <a className="mt-2 inline-block text-sm text-blue-600 underline" href={`/dashboard/clients/${o.client_id}/tiktok/${o.id}`}>发布到 TikTok（需单独确认）</a>}
+                  {promoteEntry(o) && (
+                    <div className="mt-2"><PromoteReelButton orderId={o.id} commentOnly={promoteEntry(o) === 'comment'} onDone={() => { void load() }} /></div>
+                  )}
                 </div>
               )
             })}

@@ -30,6 +30,9 @@ vi.mock('@/lib/factory/render-queue', () => ({ enqueueRenderJob: (...a: unknown[
 const sendInngestEvent = vi.fn()
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: (...a: unknown[]) => sendInngestEvent(...a) }))
 
+const checkTopicAlignment = vi.fn()
+vi.mock('@/lib/factory/topic-alignment-store', () => ({ checkTopicAlignment: (...a: unknown[]) => checkTopicAlignment(...a) }))
+
 import { PATCH } from '../route'
 
 const CLIENT_ID = '377468af-b103-45f0-984a-b353febb56a1'
@@ -42,6 +45,7 @@ function makeReq(body: unknown) {
 /** 记录每次 update() 的 patch 内容，其余链式调用直接照抄这条路由真实调用顺序建假件。 */
 function fakeSupabase(opts: {
   peekSource?: string | null
+  platforms?: string[]
   currentSnapshot?: Record<string, unknown> | null
   updatedRow?: Record<string, unknown> | null
   clientFactoryConfig?: unknown
@@ -53,8 +57,11 @@ function fakeSupabase(opts: {
         return {
           select: (cols: string) => {
             // 三种 select 各自对应路由里三次不同的读：source 预读 / offer_key 合并前读 /（不会命中，因为 update().select() 走 update 分支）
-            if (cols === 'source') {
-              return { eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.peekSource != null ? { source: opts.peekSource } : null, error: null }) }) }) }
+            if (cols === 'source, platforms') {
+              return { eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { source: opts.peekSource ?? null, platforms: opts.platforms ?? [] }, error: null }) }) }) }
+            }
+            if (cols === 'platforms') {
+              return { eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { platforms: opts.platforms ?? [] }, error: null }) }) }) }
             }
             if (cols === 'generation_context_snapshot') {
               // 双重限定：.eq('client_id',...).eq('id',...).single()，跟真实路由改动后的调用链一致。
@@ -89,6 +96,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.requireAccess.mockResolvedValue({ ok: true })
   enqueueRenderJob.mockResolvedValue({ jobId: null, created: false })
+  checkTopicAlignment.mockResolvedValue({ ready: true, gaps: [] })
 })
 
 describe('PATCH content-factory/[postId] — offer_key（2026-09-13 新增）', () => {
@@ -177,5 +185,17 @@ describe('PATCH content-factory/[postId] — offer_key（2026-09-13 新增）', 
     await PATCH(makeReq({ action: 'reject', offer_key: 'best_of_china' }), { params: { id: CLIENT_ID, postId: POST_ID } })
 
     expect(updates).toEqual([{ status: 'rejected' }])
+  })
+
+  it('YouTube topic without cross-channel evidence is blocked before confirmation', async () => {
+    const updates: Record<string, unknown>[] = []
+    mocks.from.mockImplementation(fakeSupabase({ updates, platforms: ['youtube'] }).from)
+    checkTopicAlignment.mockResolvedValue({ ready: false, gaps: ['官网页面未在近 7 天读回核对'] })
+
+    const res = await PATCH(makeReq({ action: 'confirm' }), { params: { id: CLIENT_ID, postId: POST_ID } })
+
+    expect(res.status).toBe(409)
+    expect(updates).toEqual([])
+    expect(checkTopicAlignment).toHaveBeenCalledWith(CLIENT_ID, POST_ID)
   })
 })

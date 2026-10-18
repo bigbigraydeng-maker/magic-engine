@@ -9,6 +9,7 @@
 
 import { type NextRequest, NextResponse } from 'next/server'
 import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import {
   listConnections,
   getConnectionById,
@@ -51,7 +52,7 @@ export async function DELETE(req: NextRequest, { params }: RouteContext) {
     )
   }
 
-  const access = await requireOnboardingClientAccess(clientId)
+  const access = await requireGlobalAdmin()
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

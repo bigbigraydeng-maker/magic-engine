@@ -6,7 +6,8 @@
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { getClientChannelId } from '@/lib/youtube-publish/store'
 import {
   YOUTUBE_STATE_COOKIE,
   isValidChannelId,
@@ -44,9 +45,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'State cookie malformed' }, { status: 400 })
   }
 
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requireGlobalAdmin()
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+  // The cookie is only a CSRF nonce carrier: the channel to lock comes from client configuration,
+  // so a hand-built cookie cannot choose which channel gets connected.
+  const configuredChannel = await getClientChannelId(clientId)
+  if (!configuredChannel || configuredChannel !== channelId) {
+    return NextResponse.json({ error: 'Channel does not match client configuration' }, { status: 400 })
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? ''
