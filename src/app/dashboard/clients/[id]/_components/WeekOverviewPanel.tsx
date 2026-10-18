@@ -15,6 +15,7 @@ import {
   describeOverviewItemStatus,
   describePackState,
   describeReelHeadline,
+  describeReelUploadState,
   describeStoryHeadline,
   describeVarietyLine,
   formatClock,
@@ -77,14 +78,14 @@ function ReelRow({ reel, clientId }: { reel: OverviewReel; clientId: string }) {
   const meta = STATUS_META[reel.status as WorkOrderStatus]
   return (
     <li className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="rounded-full bg-me-charcoal/10 px-2 py-0.5 text-xs font-medium text-me-charcoal">{reel.status === 'published' ? '库里记为已上传' : meta?.label ?? '状态未知'}</span>
+      <span className="rounded-full bg-me-charcoal/10 px-2 py-0.5 text-xs font-medium text-me-charcoal">{describeReelUploadState(reel) ?? meta?.label ?? '状态未知'}</span>
       <span className="text-me-charcoal">{reel.angle || '（没有写主题）'}</span>
       {reel.permalink && (
         <a href={reel.permalink} className="text-xs underline text-me-charcoal/70" target="_blank" rel="noreferrer">
           打开 Reel 链接
         </a>
       )}
-      {isRecordedUploaded(reel) && <span className="text-xs text-me-charcoal/70">平台状态未核</span>}
+      {reel.video_state == null && isRecordedUploaded(reel) && <span className="text-xs text-me-charcoal/70">平台状态未核</span>}
       <Link href={`/dashboard/factory?client=${clientId}`} className="text-xs underline text-me-charcoal/70">
         去视频工厂看 / 点通过
       </Link>

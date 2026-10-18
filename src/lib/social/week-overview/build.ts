@@ -40,6 +40,7 @@ export interface OverviewReel {
   created_at: string
   published_at: string | null
   permalink: string | null
+  video_state: 'DRAFT' | 'PUBLISHED' | null
   music_file: string | null
   template: string | null
 }
@@ -117,6 +118,7 @@ export async function listClientReels(db: SupabaseClient, clientId: string): Pro
         created_at: row.created_at,
         published_at: published?.published_at ?? null,
         permalink: published?.permalink ?? null,
+        video_state: published?.video_state === 'DRAFT' || published?.video_state === 'PUBLISHED' ? published.video_state : null,
         music_file: typeof row.music_file === 'string' && row.music_file.trim().length > 0 ? row.music_file.trim() : null,
         template: typeof row.template === 'string' && row.template.length > 0 ? row.template : null,
       }
