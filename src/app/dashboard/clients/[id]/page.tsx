@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { GenerationDrawer } from './_components/GenerationDrawer';
@@ -293,6 +295,15 @@ function ToolCard({
 }
 
 type SubLink = { label: string; href?: string; onClick?: () => void }
+
+/**
+ * 「自动暂停」那条次级链接的网址 —— 只认登记表，不在这里拼。
+ * 登记表查不到（入口被撤）时退回广告健康页，不猜一个可能 404 的网址。
+ */
+function autoPauseHref(clientId: string): string {
+  const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
+  return entry ? entry.path(clientId) : `/dashboard/clients/${encodeURIComponent(clientId)}/ads-health`
+}
 
 function ToolDoorCard({ href, onClick, title, desc, badge, links }: {
   href?: string; onClick?: () => void; title: string; desc: string; badge: ToolBadge; links: SubLink[]
@@ -676,7 +687,9 @@ export default function ClientDetailPage() {
                     { label: '推广活动', href: `/dashboard/clients/${clientId}/campaigns` },
                     { label: 'Marketing Plan', href: `/dashboard/clients/${clientId}/marketing-plan` },
                     { label: '等你点头的广告', href: '/dashboard/ad-approval' },
-                    { label: '自动暂停', href: `/dashboard/clients/${clientId}/ad-health/auto-pause` },
+                    // 🔴 网址从登记表取，不写死：入口搬动时（2026-10-18 搬进广告门标签）
+                    //    改 `dedicated-approval-entries.ts` 一处，这里和待办的链接一起跟着走。
+                    { label: '自动暂停', href: autoPauseHref(clientId) },
                     { label: 'Meta 账户连接', href: `/dashboard/clients/${clientId}/settings?tab=connect` },
                   ]}
                 />
