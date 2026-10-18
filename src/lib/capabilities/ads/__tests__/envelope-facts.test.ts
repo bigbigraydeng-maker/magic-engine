@@ -520,14 +520,15 @@ describe('🔴 #1994 缺陷 2 · 冷却期判据不受账户窗口影响', () =>
   })
 })
 
-describe('🔴 冷却期 · kernel_post 也算真改动（与 diagnostics/loader.ts:89 同口径）', () => {
-  it('只有 kernel_post 快照、没有 changed 快照 → 冷却小时数算得出来，不是 MAX_SAFE_INTEGER', async () => {
+describe('🔴 冷却期 · 故意不认 kernel_post（它是按客户全量写的，代表不了这个实体变了）', () => {
+  it('只有 kernel_post 快照、没有 changed → 仍然算「从没变过」，不许当成刚改过', async () => {
+    // snapshot.ts:363-365：reason=kernel_post 时该客户所有实体一律写一行，不看设置有没有变。
+    // 认它就会让任何一次动作冻死整个客户 72 小时（魏征复审查实）。
     const post = snap({ capture_reason: 'kernel_post', captured_at: new Date(NOW.getTime() - 2 * 3_600_000).toISOString() })
     const r = await resolve({ ad_entity_snapshots: [snap(), post] }, log())
     expect('facts' in r).toBe(true)
     if (!('facts' in r)) return
-    expect(r.facts.hoursSinceLastChange).toBeCloseTo(2, 1)
-    expect(r.facts.hoursSinceLastChange).not.toBe(Number.MAX_SAFE_INTEGER)
+    expect(r.facts.hoursSinceLastChange).toBe(Number.MAX_SAFE_INTEGER)
   })
 })
 
@@ -543,7 +544,7 @@ describe('🔴 冷却期 · 内核自己的执行记录（hoursSinceOwnLastActio
 
   it('input.adset_id 命中 → 算出小时数', async () => {
     const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [run()] } as unknown as Tables, log()), {
-      clientId: CLIENT, entityId: ADSET, now: NOW,
+      clientId: CLIENT, entityIds: [ADSET], now: NOW,
     })
     expect(r).toEqual({ ok: true, hours: 1 })
   })
@@ -551,14 +552,14 @@ describe('🔴 冷却期 · 内核自己的执行记录（hoursSinceOwnLastActio
   it('input.campaign_id 命中 → 算出小时数', async () => {
     const r = await hoursSinceOwnLastAction(makeSb({
       action_runs: [run({ action_key: 'ads.cut_campaign_budget', input: { ad_account_id: ACCOUNT, campaign_id: '456' } })],
-    } as unknown as Tables, log()), { clientId: CLIENT, entityId: '456', now: NOW })
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: ['456'], now: NOW })
     expect(r).toEqual({ ok: true, hours: 1 })
   })
 
   it('没有任何记录命中 → { ok: true, hours: null }', async () => {
     const r = await hoursSinceOwnLastAction(makeSb({
       action_runs: [run({ input: { ad_account_id: ACCOUNT, adset_id: 'other' } })],
-    } as unknown as Tables, log()), { clientId: CLIENT, entityId: ADSET, now: NOW })
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
     expect(r).toEqual({ ok: true, hours: null })
   })
 
@@ -566,7 +567,7 @@ describe('🔴 冷却期 · 内核自己的执行记录（hoursSinceOwnLastActio
     const l = log()
     l.errors.action_runs = 'boom'
     const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [] } as unknown as Tables, l), {
-      clientId: CLIENT, entityId: ADSET, now: NOW,
+      clientId: CLIENT, entityIds: [ADSET], now: NOW,
     })
     expect(r.ok).toBe(false)
     expect(r).not.toEqual({ ok: true, hours: null })
@@ -574,11 +575,50 @@ describe('🔴 冷却期 · 内核自己的执行记录（hoursSinceOwnLastActio
     expect(r.error).toContain('boom')
   })
 
-  it('状态是 rolled_back 的记录也算（撤回也是真改过设置）', async () => {
+  it.each(['dead_letter', 'failed'])('状态是 %s 的记录也算（撤回的终态是 dead_letter；写进 Meta 后失败落 failed）', async (status) => {
+    // 🔴 不要写 rolled_back：action_runs.status 没有这个取值（kernel/types.ts 的 RunStatus
+    //    与建表 CHECK），第一版写了它等于筛零行，两位复审都抓到了。
     const r = await hoursSinceOwnLastAction(makeSb({
-      action_runs: [run({ status: 'rolled_back', finished_at: new Date(NOW.getTime() - 5 * 3_600_000).toISOString() })],
-    } as unknown as Tables, log()), { clientId: CLIENT, entityId: ADSET, now: NOW })
+      action_runs: [run({ status, finished_at: new Date(NOW.getTime() - 5 * 3_600_000).toISOString() })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
     expect(r).toEqual({ ok: true, hours: 5 })
+  })
+
+  it('🔴 状态是 denied / queued 的记录不算（还没走到动手那一步）', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ status: 'denied' }), run({ status: 'queued' })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
+    expect(r).toEqual({ ok: true, hours: null })
+  })
+
+  it('🔴 有记录但完成时间读不懂 → ok:false，不许跟「没有记录」同一个出口', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ finished_at: '不是时间' })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
+    expect(r.ok).toBe(false)
+    expect(r).not.toEqual({ ok: true, hours: null })
+  })
+
+  it('🔴 换素材那类动作：input 里只有 ad_id，也要能命中', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ action_key: 'ads.swap_creative', input: { ad_account_id: ACCOUNT, ad_id: '789' } })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET, '789'], now: NOW })
+    expect(r).toEqual({ ok: true, hours: 1 })
+  })
+
+  it('🔴 实体编号形状不认识 → 拒，不拼进查询', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [run()] } as unknown as Tables, log()), {
+      clientId: CLIENT, entityIds: ['1,2)or(true'], now: NOW,
+    })
+    expect(r.ok).toBe(false)
+  })
+
+  it('🔴 快照一条都没有时保持 null（读不到就拒），不许被一条很旧的执行记录改写成数字', async () => {
+    const r = await resolve({
+      ad_entity_snapshots: [],
+      action_runs: [run({ finished_at: new Date(NOW.getTime() - 500 * 3_600_000).toISOString() })],
+    }, log())
+    expect('unavailable' in r).toBe(true)
   })
 
   it('🔴 执行记录比快照更近时，最终冷却小时数取更近的那个', async () => {
