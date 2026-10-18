@@ -326,6 +326,18 @@ export function summarizeSynthesis(result: OrchestratorResult): SynthesisReceipt
     }
   }
 
+  // ran=true but not one module produced or failed anything: nothing was attempted, so
+  // reporting 'ok' would be a false all-clear (魏征 2026-10-18).
+  if (failedModules.length === 0 && okCount === 0) {
+    return {
+      state: 'skipped',
+      failed_modules: [],
+      errors: [],
+      skipped_reason: 'no_module_attempted',
+      total_cost_usd: result.total_cost_usd,
+    }
+  }
+
   const state: SynthesisReceiptState =
     failedModules.length === 0 ? 'ok'
     : okCount === 0 ? 'failed'
@@ -349,24 +361,44 @@ export function summarizeSynthesis(result: OrchestratorResult): SynthesisReceipt
  * The old check looked for rows in `diagnostic_narratives` written in the
  * last 24h. That table was empty for a long time (persistence was failing),
  * so the limiter never fired and every weekly diagnostic spent LLM money.
- * Instead we treat "a completed diagnostic run with findings for this client
- * in the last 24h" as proof that synthesis was already attempted — that
+ * Instead we treat "an earlier completed diagnostic run with findings for this
+ * client in the last 24h" as proof that synthesis was already attempted — that
  * signal is written by runner.persistResult regardless of synthesis success.
+ *
+ * Only runs created BEFORE the current one count: if two runs finish
+ * collecting at the same time, each seeing the other as "completed" would block
+ * both (子牙 review 2026-10-18); with the ordering the earlier one still runs.
+ * Fails closed when the current run cannot be read.
  */
 async function isAutoRunAllowed(
   supabase: SupabaseClient,
   clientId: string,
   currentRunId: string,
 ): Promise<boolean> {
+  const { data: current, error: currentError } = await supabase
+    .from('diagnostic_runs')
+    .select('created_at')
+    .eq('id', currentRunId)
+    .maybeSingle()
+  const currentCreatedAt = (current as { created_at?: string } | null)?.created_at
+  if (currentError || !currentCreatedAt) {
+    console.warn(
+      `[synthesis-orchestrator] cannot read current run ${currentRunId} for rate limit ` +
+      `(diagnostic_runs), fail-closed (no auto-synthesis this run):`,
+      currentError?.message ?? 'run not found',
+    )
+    return false
+  }
+
   const cutoff = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString()
   const { data, error } = await supabase
     .from('diagnostic_runs')
     .select('id')
     .eq('client_id', clientId)
-    .neq('id', currentRunId)
     .eq('status', 'completed')
     .gt('findings_count', 0)
     .gte('created_at', cutoff)
+    .lt('created_at', currentCreatedAt)
     .limit(1)
 
   if (error) {

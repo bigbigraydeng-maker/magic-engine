@@ -166,3 +166,21 @@ describe('pushDiagnosticSynthesisItems', () => {
     ).rejects.toThrow('cron_run_logs query failed: boom')
   })
 })
+
+describe('review fixes 2026-10-18', () => {
+  it('a newer skipped receipt (rate-limited / disabled) does NOT cancel an older failure', () => {
+    const failed = { state: 'failed', failed_modules: ['market_context'], errors: ['boom'], total_cost_usd: 0.4 }
+    const skipped = { state: 'skipped', failed_modules: [], errors: [], total_cost_usd: 0 }
+    const out = extractSynthesisFailures([
+      { summary: { outcomes: [{ clientId: 'c1', clientName: 'C1', synthesis: skipped }] } },
+      { summary: { outcomes: [{ clientId: 'c1', clientName: 'C1', synthesis: failed }] } },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].receipt.state).toBe('failed')
+  })
+
+  it('the item kind is never dropped by the dead-link filter (its link needs a login)', async () => {
+    const { NEVER_DROP_KINDS } = await import('../manual-item-types')
+    expect(NEVER_DROP_KINDS.has('diagnostic_synthesis_failing')).toBe(true)
+  })
+})

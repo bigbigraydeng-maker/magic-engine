@@ -93,7 +93,9 @@ export function extractSynthesisFailures(logs: Array<{ summary: unknown }>): Syn
       const receipt = parseReceipt(outcome.synthesis)
       if (!receipt) continue
 
-      // 这个客户最新一条带回执的 outcome 就是它 —— 之后更旧的都不看了。
+      // 'skipped'（限流/关闭）说明这轮没尝试叙事，不能抵消更早的失败 —— 继续往旧的看。
+      if (receipt.state === 'skipped') continue
+      // 这个客户最新一条真正尝试过叙事的 outcome 就是它 —— 之后更旧的都不看了。
       seen.add(clientId)
       if (receipt.state !== 'failed' && receipt.state !== 'partial') continue
 

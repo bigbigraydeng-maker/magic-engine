@@ -13,7 +13,7 @@ import {
 // ---------------------------------------------------------------------------
 
 interface RecordedFilter {
-  method: 'eq' | 'neq' | 'gt' | 'gte'
+  method: 'eq' | 'neq' | 'gt' | 'gte' | 'lt'
   column: string
   value: string | number
 }
@@ -33,7 +33,17 @@ interface FakeSupabase {
   limitCalls: number
 }
 
-function makeFakeSupabase(response: FakeResponse): FakeSupabase {
+const CURRENT_CREATED_AT = '2026-10-18T10:00:00.000Z'
+
+interface CurrentRunResponse {
+  data: { created_at: string } | null
+  error: { message: string } | null
+}
+
+function makeFakeSupabase(
+  response: FakeResponse,
+  currentRun: CurrentRunResponse = { data: { created_at: CURRENT_CREATED_AT }, error: null },
+): FakeSupabase {
   const fake: FakeSupabase = {
     tables: [],
     filters: [],
@@ -64,6 +74,14 @@ function makeFakeSupabase(response: FakeResponse): FakeSupabase {
         gte(column: string, value: string | number) {
           fake.filters.push({ method: 'gte', column, value })
           return builder
+        },
+        lt(column: string, value: string | number) {
+          fake.filters.push({ method: 'lt', column, value })
+          return builder
+        },
+        // Current-run lookup (created_at of this run) — a different query from the limiter's.
+        maybeSingle() {
+          return Promise.resolve(currentRun)
         },
         limit(_n: number) {
           fake.limitCalls += 1
@@ -113,9 +131,11 @@ describe('runSynthesis — auto-run rate limiter', () => {
     expect(result.ran).toBe(false)
     expect(result.skipped_reason).toBe('rate_limited_24h')
 
-    // Query shape: client_id, neq id, status completed, findings_count > 0, created_at >= cutoff.
+    // Query shape: client_id, status completed, findings_count > 0, created_at >= cutoff,
+    // and only runs created BEFORE the current one (two simultaneous runs must not block each other).
+    expect(findFilter(fake, 'eq', 'id')?.value).toBe('run-2')
     expect(findFilter(fake, 'eq', 'client_id')?.value).toBe('client-1')
-    expect(findFilter(fake, 'neq', 'id')?.value).toBe('run-2')
+    expect(findFilter(fake, 'lt', 'created_at')?.value).toBe(CURRENT_CREATED_AT)
     expect(findFilter(fake, 'eq', 'status')?.value).toBe('completed')
     expect(findFilter(fake, 'gt', 'findings_count')?.value).toBe(0)
 
@@ -140,7 +160,8 @@ describe('runSynthesis — auto-run rate limiter', () => {
 
     // Passed the limiter (no prior run) and stopped at the findings check.
     expect(result.skipped_reason).toBe('no_findings_at_all')
-    expect(fake.tables).toEqual(['diagnostic_runs'])
+    // Only diagnostic_runs is ever touched (current-run lookup + limiter query).
+    expect(new Set(fake.tables)).toEqual(new Set(['diagnostic_runs']))
   })
 
   it('fails closed when the limiter query errors', async () => {
@@ -155,6 +176,23 @@ describe('runSynthesis — auto-run rate limiter', () => {
 
     expect(result.ran).toBe(false)
     expect(result.skipped_reason).toBe('rate_limited_24h')
+  })
+
+  it('fails closed when the current run cannot be read (no limiter query is attempted)', async () => {
+    const fake = makeFakeSupabase(
+      { data: [], error: null },
+      { data: null, error: { message: 'gone' } },
+    )
+
+    const result = await runSynthesis(asClient(fake), {
+      runId: 'run-2',
+      clientId: 'client-1',
+      resultMap: {},
+      overallScore: 50,
+    })
+
+    expect(result.skipped_reason).toBe('rate_limited_24h')
+    expect(findFilter(fake, 'eq', 'client_id')).toBeUndefined()
   })
 
   it('force bypasses the limiter', async () => {
@@ -291,6 +329,14 @@ describe('summarizeSynthesis', () => {
 
     expect(receipt.state).toBe('failed')
     expect(receipt.failed_modules).toEqual(['score_explanations', 'dimension_narratives'])
+  })
+
+  it('does NOT report ok when ran=true but every module was skipped (nothing attempted)', () => {
+    const receipt = summarizeSynthesis(makeResult({}))
+
+    expect(receipt.state).toBe('skipped')
+    expect(receipt.skipped_reason).toBe('no_module_attempted')
+    expect(receipt.failed_modules).toEqual([])
   })
 
   it('truncates error strings to 200 chars', () => {
