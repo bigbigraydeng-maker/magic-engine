@@ -16,8 +16,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
+/** 页面读 `?tab=` 定初始标签，所以这个 mock 要能被各用例换掉。 */
+let searchParamsValue = new URLSearchParams()
+
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84' }),
+  useSearchParams: () => searchParamsValue,
 }))
 
 vi.mock('next/link', () => ({
@@ -25,6 +29,8 @@ vi.mock('next/link', () => ({
 }))
 
 import AdsHealthPage from '../page'
+import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 
 /** Oztop's real 2026-07-23 alert, the one card that mattered. */
 const OZTOP_ALERT = {
@@ -97,7 +103,7 @@ function mockFetch(routes: Record<string, unknown>) {
   })
 }
 
-beforeEach(() => { vi.stubGlobal('confirm', vi.fn(() => true)) })
+beforeEach(() => { vi.stubGlobal('confirm', vi.fn(() => true)); searchParamsValue = new URLSearchParams() })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
 /** 逐条广告卡片在「每条广告」标签里，先点过去 */
@@ -284,5 +290,52 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     const msg = screen.getByText(/已补 2 条新素材/).textContent ?? ''
     expect(msg).toContain('一分钱不花')
     expect(msg).not.toContain('团队')
+  })
+})
+
+/**
+ * 「等你点头」标签（设计稿 2026-10-18-ads-door-merge-design §5 步 1）。
+ * 这一步只立门牌 + 给直达链接，所以用例盯三件：标签在、点开有链接、链接来自登记表而不是写死的网址。
+ */
+describe('「等你点头」标签', () => {
+  it('标签在，点开给出专属批准页的链接', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+
+    await userEvent.click(await screen.findByText('等你点头'))
+
+    const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
+    expect(entry).not.toBeNull()
+    expect(screen.getByText(`去「${entry!.label}」处理`)).toBeTruthy()
+  })
+
+  it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
+    searchParamsValue = new URLSearchParams('tab=approvals')
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+
+    await waitFor(() =>
+      expect(screen.getByText(/这个客户等人点头的广告动作/)).toBeTruthy(),
+    )
+  })
+
+  /**
+   * 🔴 这条用例第一版是空的：只断言「等你点头」那段**不在**。
+   * 可是给一个认不出的标签名时，那段本来就不会渲染 —— 无论 `tabFromQuery`
+   * 落不落回 'today'，断言都成立。变异验证（把判据改成「什么值都认」）
+   * 16 条全绿，才发现它什么都没测。
+   * 所以改成**正向**断言：必须真的落在「今天看这里」上，看到那个标签的内容。
+   */
+  it('?tab= 给了认不出的值，落回「今天看这里」而不是空白', async () => {
+    searchParamsValue = new URLSearchParams('tab=nonsense')
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+
+    // 断言「哪个标签是选中态」，而不是断言某块面板的文字 ——
+    // 选中态是这条用例真正要测的事，而面板内容会随取数结果变。
+    const active = await screen.findByTitle('三句话：池子、频率、今天调什么')
+    expect(active.className).toContain('border-gray-800')
+    expect(screen.getByTitle('这个客户等人点头的广告动作').className).toContain('border-transparent')
+    expect(screen.queryByText(/这个客户等人点头的广告动作，下一步/)).toBeNull()
   })
 })

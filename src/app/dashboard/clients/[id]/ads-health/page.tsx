@@ -11,7 +11,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
@@ -19,6 +19,8 @@ import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
+import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -504,12 +506,24 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
-type PageTab = 'today' | 'ads' | 'settings'
+type PageTab = 'today' | 'ads' | 'approvals' | 'settings'
 const PAGE_TABS: Array<{ key: PageTab; label: string; hint: string }> = [
   { key: 'today', label: '今天看这里', hint: '三句话：池子、频率、今天调什么' },
   { key: 'ads', label: '每条广告', hint: '逐条体检' },
+  { key: 'approvals', label: '等你点头', hint: '这个客户等人点头的广告动作' },
   { key: 'settings', label: '目标与设置', hint: '每天预算上限、自动化、可投视频' },
 ]
+
+/** 网址里 `?tab=` 认的值；认不出的一律落回「今天看这里」，不报错。 */
+function tabFromQuery(raw: string | null): PageTab {
+  return PAGE_TABS.some(t => t.key === raw) ? (raw as PageTab) : 'today'
+}
+
+/**
+ * 「等你点头」标签里那个链接的来源 —— 只认登记表，不在这里拼网址。
+ * 搬完之后改登记表的 `path()` 一处，待办里的链接和这里会一起跟着走。
+ */
+const autoPauseEntry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
 
 function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => void }) {
   return (
@@ -534,11 +548,17 @@ function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => voi
 export default function AdsHealthPage() {
   const params = useParams()
   const clientId = params.id as string
+  const searchParams = useSearchParams()
 
   const [data, setData] = useState<AdHealthResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<PageTab>('today')
+  /**
+   * 初值从网址 `?tab=` 取，这样待办和书签能直接落到某个标签上
+   * （`…/ads-health?tab=approvals`）。之后由用户点击接管，不再跟着网址变 ——
+   * 页面没有把标签写回网址，所以这里只读一次就够。
+   */
+  const [tab, setTab] = useState<PageTab>(() => tabFromQuery(searchParams.get('tab')))
 
   useEffect(() => {
     let alive = true
@@ -641,6 +661,40 @@ export default function AdsHealthPage() {
             </>
           )}
         </>
+      )}
+
+      {/*
+        「等你点头」标签 —— 第一步只放门牌和直达链接，真内容下一步才搬进来
+        （设计稿 `docs/specs/2026-10-18-ads-door-merge-design-v0.1.md` §5 步 1/2）。
+
+        为什么先立这个标签而不是一次搬完：批准那条链路一个字都不能碰错，
+        所以把「加标签」和「搬批准页」拆成两刀，第二刀单独过一次审查。
+        这一刀不取任何数据、不渲染任何按钮，所以它不可能影响批准行为。
+
+        🔴 这里**不要**自己拼批准页的网址：它只有一个来源，就是
+        `kernel/dedicated-approval-entries.ts` 那张登记表（待办的链接也从它取）。
+        搬完之后改那张表的 `path()` 一处，待办和这里会一起跟着走。
+      */}
+      {tab === 'approvals' && (
+        <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-5">
+          <p className="text-sm text-gray-700">
+            这个客户等人点头的广告动作，下一步会收到这里。现在还在它自己的页面上。
+          </p>
+          {autoPauseEntry ? (
+            <Link
+              href={autoPauseEntry.path(clientId)}
+              className="inline-block text-sm font-medium text-gray-900 underline"
+            >
+              去「{autoPauseEntry.label}」处理
+            </Link>
+          ) : (
+            // 登记表里查不到 = 那个专属入口被撤了。不猜网址，如实说一句。
+            <p className="text-sm text-gray-500">这类动作现在没有登记专属批准入口，回我一句我去查。</p>
+          )}
+          <p className="text-xs text-gray-400">
+            通用审批页对这类动作只签字、不执行（那边是批不了的），要批得在上面这个页面。
+          </p>
+        </div>
       )}
 
       {tab === 'settings' && (
