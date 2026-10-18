@@ -6,7 +6,8 @@ import {
 } from '@/lib/pm-todo/lead-followup-items'
 import type { LeadDueResult, LeadBacklogResult } from '@/lib/crm/lead-followup-due'
 import type { LeadDueItem } from '@/lib/crm/lead-followup-due'
-import type { ManualItem } from '@/lib/pm-todo/manual-item-types'
+import { NEVER_DROP_KINDS, type ManualItem } from '@/lib/pm-todo/manual-item-types'
+import { BLIND_SPOT_NOTE } from '@/lib/pm-todo/five-kinds'
 
 const NOW = new Date('2026-10-18T00:00:00Z')
 const NAL = 'client-nal'
@@ -179,5 +180,34 @@ describe('pushLeadFollowupItems', () => {
     expect(items[0].href).toBe(
       `https://app.magicengine.com.au/dashboard/clients/${NAL}/crm/all`,
     )
+  })
+})
+
+describe('魏征审查补充', () => {
+  it('窗口内只有被封顶丢弃的（items 为空、dropped>0）→ 仍出一条，按 1 天算', async () => {
+    const items: ManualItem[] = []
+    await pushLeadFollowupItems({} as SupabaseClient, items, [NAL], NOW, () => 'NAL', deps({
+      findDue: async () => due([], 4),
+    }))
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('4 个客人')
+    expect(items[0].what).toContain('1 天')
+  })
+
+  it('失败条目只带错误类别，不带报错原文', async () => {
+    const items: ManualItem[] = []
+    await pushLeadFollowupItems({} as SupabaseClient, items, [NAL], NOW, () => 'NAL', deps({
+      findDue: async () => {
+        throw new Error('relation "x" filter value=secret@example.com')
+      },
+    }))
+    expect(items[0].kind).toBe('lead_followup_check_failed')
+    expect(items[0].what).not.toContain('secret@example.com')
+  })
+
+  it('两个新类型都登记了：不会被探活丢掉、读失败时 PM 那栏有提示', () => {
+    expect(NEVER_DROP_KINDS.has('lead_followup_due')).toBe(true)
+    expect(NEVER_DROP_KINDS.has('lead_followup_check_failed')).toBe(true)
+    expect(BLIND_SPOT_NOTE.lead_followup_check_failed).toBeTruthy()
   })
 })

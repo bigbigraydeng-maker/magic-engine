@@ -274,6 +274,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   cron_not_running: '有自动任务没按时跑，它负责的那一栏今天可能不全',
   cron_silent_success: '有自动任务显示跑完了但一行没写，它负责的那一栏今天可能不全',
   promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
+  lead_followup_check_failed: '「填了表没人回」今天没算出来，哪个客户有人在等看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
 }
 

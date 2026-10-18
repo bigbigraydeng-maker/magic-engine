@@ -62,12 +62,9 @@ function allContactsHref(clientId: string): string {
   return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/crm/all`
 }
 
-/** 报错信息截断 —— 太长的堆栈塞进待办里没人看，还会把一行撑成一屏。 */
-const ERROR_SNIPPET_MAX = 120
-
 function errorSnippet(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.length > ERROR_SNIPPET_MAX ? `${msg.slice(0, ERROR_SNIPPET_MAX)}…` : msg
+  // 只写错误类别，不带报错原文：原文会进汇总信和日志，偶尔会回显查询里的值。
+  return err instanceof Error && err.name ? err.name : '未知错误'
 }
 
 /**
@@ -134,11 +131,9 @@ export async function pushLeadFollowupItems(
           `${name} 有 ${total} 个客人填了表、超过 24 小时没有真人回过` +
           `（最久已等 ${oldestDays} 天）${note}。晚一天跟，这个人就更可能去选别家`,
         how:
-          '请转给客户的销售：点链接打开「全部客人」，看「今天要联系」里排前面、从表单进来的人，' +
-          '逐个打电话（打不通也算打过）。处理完在他页面上记一笔，没打通也要记一句，否则这条会一直在。' +
-          '注意：这里只把电话、手写记录和真人回复算作「回过」；Facebook 私信的外发整类不算' +
-          '（里面混着 Meta 自家 AI 客服的自动回复），所以「今天要联系」页里显示已联系的人，' +
-          '这里可能仍然列着。客户在表格里记的电话要先同步进系统，没同步时这个数会偏高',
+          '请转给客户的销售：点链接打开「全部客人」，逐个打电话或回消息；' +
+          '处理完在他页面上记一笔（没打通也要记一句），否则这条会一直在。' +
+          '注意：Facebook 私信里的自动回复不算「回过」，这里的数可能比销售看到的多',
         href: allContactsHref(id),
       })
     } catch (err) {
