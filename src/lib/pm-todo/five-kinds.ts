@@ -63,6 +63,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  ads_account_not_active: 'one_click', // 去 Meta 付款设置结清欠款、补备用卡（系统进不去）
+  ads_account_status_unreadable: 'dev', // 账户状态读不到：快照任务的问题，开发看，不占 PM 的清单
+  ads_account_closed_weekly: 'decide', // 账户已关闭：要不要从客户名下解绑，由 PM 定（每周一提醒）
   goal_rollover_missing: 'dev', // 月循环目标没自动续上：广告自治/日报失去目标口径，是系统没跑通，转开发
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置
@@ -185,6 +188,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 同 ai_tracker_all_failed 的 how 原文就写「这条不用你动手」，不该进 PM 动手栏
   // （Codex 复审 2026-09-28）。
   ai_tracker_all_failed_dev: 'dev',
+  diagnostic_synthesis_failing: 'dev', // 体检叙事没写成：我们的欠账，不用 PM 动手
   ai_gateway_broken: 'dev',
   playbook_reference_stale: 'dev',
   platform_connection_pipeline_down: 'dev',

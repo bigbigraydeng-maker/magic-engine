@@ -8,7 +8,7 @@ import { readPromoSpec, type PromoPhase, type PromoSpec, type PromoStep } from '
 import { buildPromoTemplate } from '@/lib/marketing-plan/promo/template'
 import {
   STEP_KIND_LABEL, addPhase, addStep, newBusinessCase, newExperiment, newSalesHandover,
-  removePhase, removeStep, setBusinessCase, setExperiment, setGoal, setSalesHandover,
+  removePhase, removeStep, setBusinessCase, setExperiment, setGoal, setIsExperiment, setSalesHandover,
   updatePhase, updateStep, type StepKind,
 } from '@/lib/marketing-plan/promo/form'
 import { Field, inputCls } from './Field'
@@ -90,7 +90,7 @@ function PhaseCard({ phase, index, options, spec, clientId, planId, setSpec }: {
       </div>
       <CardBlock
         title="经营判断卡"
-        hint="这笔钱对准哪个团期、剩多少座、每座留给公司多少、能承受多贵的线索。没有这张卡，开投前的检查过不了。"
+        hint="这笔钱对准哪个团期、剩多少座、每座留给公司多少、能承受多贵的线索。现在它只是记录和显示：开投前的检查还没有读这张卡，填不填都不会挡住批准。"
         present={phase.business_case !== undefined}
         onAdd={() => setSpec(setBusinessCase(spec, phase.id, newBusinessCase()))}
         onRemove={() => setSpec(setBusinessCase(spec, phase.id, undefined))}
@@ -103,14 +103,14 @@ function PhaseCard({ phase, index, options, spec, clientId, planId, setSpec }: {
 
       <label className="flex items-center gap-2 text-xs text-gray-700">
         <input type="checkbox" checked={phase.is_experiment === true}
-          onChange={e => setSpec(updatePhase(spec, phase.id, { is_experiment: e.target.checked }))} />
+          onChange={e => setSpec(setIsExperiment(spec, phase.id, e.target.checked))} />
         这个阶段是一次实验（要先说清楚验证什么、最多亏多少、什么情况下停）
       </label>
 
       {phase.is_experiment === true && (
         <CardBlock
           title="实验设计卡"
-          hint="标了「这是一次实验」就必须填，不填保存不了。"
+          hint="标了「这是一次实验」就必须填，不填保存不了（这条是真的，保存时会拦）。"
           present={phase.experiment !== undefined}
           onAdd={() => setSpec(setExperiment(spec, phase.id, newExperiment()))}
           onRemove={() => setSpec(setExperiment(spec, phase.id, undefined))}
@@ -163,7 +163,7 @@ function SalesHandoverBlock({ spec, setSpec }: { spec: PromoSpec; setSpec: (s: P
   return (
     <CardBlock
       title="销售承接"
-      hint="广告带来的客人谁接、多久之内联系上、没人接怎么办。填了只是写下来，开投前还要有人在检查清单里点「我已核实」。"
+      hint="广告带来的客人谁接、多久之内联系上、没人接怎么办。现在它只是写下来：开投前的检查还没有读它，也还没有「我已核实」这一项。"
       present={spec.sales_handover !== undefined}
       onAdd={() => setSpec(setSalesHandover(spec, newSalesHandover()))}
       onRemove={() => setSpec(setSalesHandover(spec, undefined))}

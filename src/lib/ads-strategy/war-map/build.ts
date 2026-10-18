@@ -9,6 +9,7 @@
  */
 
 import { buildAdjust, ACCOUNT_STALE_HOURS } from './actions'
+import { accountStatusHint, ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_UNSETTLED } from '@/lib/ads-strategy/account-status'
 import { buildFrequency } from './frequency'
 import { buildPools } from './pools'
 import { diffDays, hoursSince, nzDay, shortDay } from './util'
@@ -49,8 +50,10 @@ function accountView(a: WarMapInput['accounts'][number], nowIso: string): Accoun
     const day = a.capturedAt ? shortDay(nzDay(a.capturedAt)) : '更早'
     return { ...base, light: 'unknown', sentence: `状态是 ${day} 的，已经过期，判不了` }
   }
-  if (a.statusCode === 1) return { ...base, light: 'green', sentence: '正常' }
-  if (a.statusCode === 3) return { ...base, light: 'red', sentence: '状态码 3（一般是欠款未结）' }
+  if (a.statusCode === ACCOUNT_STATUS_ACTIVE) return { ...base, light: 'green', sentence: '正常' }
+  if (a.statusCode === ACCOUNT_STATUS_UNSETTLED) {
+    return { ...base, light: 'red', sentence: `状态码 ${a.statusCode}（${accountStatusHint(a.statusCode)}）` }
+  }
   return { ...base, light: 'red', sentence: `状态码 ${a.statusCode}，广告可能被限制` }
 }
 
