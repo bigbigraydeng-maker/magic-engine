@@ -1,4 +1,5 @@
 import { POINT_STATES, REQUIRED_FIELDS, type PointState, type SkillCardParseResult, type SkillPoint } from './types'
+import { DEFAULT_PILLAR } from './pillars'
 
 const KEY_RE = /^[a-z0-9][a-z0-9-]*$/
 const URL_RE = /https?:\/\/[^\s|）)]+/
@@ -103,6 +104,15 @@ function badOptionalField(raw: Record<string, unknown>): string | null {
   return null
 }
 
+/** 读取顶层 pillar 字段；缺失或空白回落到 DEFAULT_PILLAR，类型不对返回 null */
+function readAgent(raw: Record<string, unknown>): string | null {
+  const value = raw.pillar
+  if (value === undefined) return DEFAULT_PILLAR
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed === '' ? DEFAULT_PILLAR : trimmed
+}
+
 export function parseSkillCard(file: string, text: string): SkillCardParseResult {
   const normalised = text.replace(/\r\n/g, '\n')
   const lines = normalised.split('\n')
@@ -132,6 +142,9 @@ export function parseSkillCard(file: string, text: string): SkillCardParseResult
     return fail(file, '机器索引里没有 points 列表')
   }
 
+  const pillar = readAgent(raw)
+  if (pillar === null) return fail(file, 'pillar 不是字符串')
+
   const points: SkillPoint[] = []
   const seen = new Set<string>()
 
@@ -150,6 +163,6 @@ export function parseSkillCard(file: string, text: string): SkillCardParseResult
 
   return {
     ok: true,
-    card: { id, file, title, sourceUrl, hasCorrection, points },
+    card: { id, file, title, sourceUrl, hasCorrection, pillar, points },
   }
 }

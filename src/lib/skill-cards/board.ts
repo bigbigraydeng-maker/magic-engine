@@ -1,5 +1,6 @@
 import type { LedgerEntry, LedgerStatus } from '@/lib/ledger/types'
 import type { BoardIssue, PointState, SkillCard, SkillCardError } from './types'
+import { DEFAULT_PILLAR, pillarLabel } from './pillars'
 
 export interface BoardInput {
   cards: SkillCard[]
@@ -35,6 +36,8 @@ export interface BoardItem {
   verifiedPending: boolean
   /** ledger handoff card that no point references */
   orphan: boolean
+  /** which Agent owns this item */
+  pillar: string
 }
 
 export interface BoardCounts {
@@ -47,6 +50,35 @@ export interface BoardCounts {
   alreadyInMe: number
 }
 
+export const ATTENTION_LIMIT = 5
+
+export interface AttentionList {
+  /** at most ATTENTION_LIMIT items */
+  shown: BoardItem[]
+  /** how many more were cut off */
+  more: number
+}
+
+export interface PillarCounts {
+  /** state === 'learning' only (pm_decision is counted separately) */
+  learning: number
+  verifying: number
+  pmDecision: number
+  passed: number
+  adopted: number
+}
+
+export interface PillarBlock {
+  pillar: string
+  /** display name, unmapped pillars keep their raw key */
+  label: string
+  counts: PillarCounts
+  /** points waiting for the PM to decide (state pm_decision) */
+  decisions: AttentionList
+  /** verifying items whose ledger verify date has passed (item.overdue) */
+  overdue: AttentionList
+}
+
 export interface Board {
   /** non-null = whole page must show only this red error */
   fatal: string | null
@@ -57,6 +89,8 @@ export interface Board {
   unorganized: SkillCardError[]
   /** 读到并解析成功的学习笔记张数，页面显示给 PM 核对 */
   cardCount: number
+  /** per-Agent summary blocks */
+  pillars: PillarBlock[]
 }
 
 export const RULE_ID_RE = /^(RL|S|C|E|B)-\d+$/
@@ -123,7 +157,15 @@ function zeroCounts(): BoardCounts {
 }
 
 function fatalBoard(message: string, errors: SkillCardError[]): Board {
-  return { fatal: message, groups: emptyGroups(), counts: zeroCounts(), issues: [], unorganized: errors, cardCount: 0 }
+  return {
+    fatal: message,
+    groups: emptyGroups(),
+    counts: zeroCounts(),
+    issues: [],
+    unorganized: errors,
+    cardCount: 0,
+    pillars: [],
+  }
 }
 
 function groupOf(state: PointState): BoardGroupKey | null {
@@ -163,6 +205,7 @@ function baseItem(card: SkillCard, point: SkillCard['points'][number]): BoardIte
     overdue: false,
     verifiedPending: false,
     orphan: false,
+    pillar: card.pillar,
   }
 }
 
@@ -339,6 +382,7 @@ function orphanItems(
       overdue: isOverdue(entry, today),
       verifiedPending: entry.status === 'verified',
       orphan: true,
+      pillar: DEFAULT_PILLAR,
     })
   }
   return items
@@ -353,6 +397,62 @@ function countGroups(groups: Record<BoardGroupKey, BoardItem[]>): BoardCounts {
     adopted: groups.adopted.length,
     alreadyInMe: groups.already_in_me.length,
   }
+}
+
+function toAttention(items: BoardItem[]): AttentionList {
+  const shown = items.slice(0, ATTENTION_LIMIT)
+  return { shown, more: items.length - shown.length }
+}
+
+const PILLAR_GROUP_KEYS: readonly BoardGroupKey[] = ['learning', 'pm_decision', 'verifying', 'adopted', 'passed']
+
+function collectPillarKeys(groups: Record<BoardGroupKey, BoardItem[]>): Set<string> {
+  const keys = new Set<string>()
+  for (const groupKey of PILLAR_GROUP_KEYS) {
+    for (const item of groups[groupKey]) keys.add(item.pillar)
+  }
+  return keys
+}
+
+function itemsOfPillar(items: BoardItem[], pillar: string): BoardItem[] {
+  return items.filter((item) => item.pillar === pillar)
+}
+
+function buildPillarBlock(groups: Record<BoardGroupKey, BoardItem[]>, pillar: string): PillarBlock {
+  const learning = itemsOfPillar(groups.learning, pillar)
+  const pmDecision = itemsOfPillar(groups.pm_decision, pillar)
+  const verifying = itemsOfPillar(groups.verifying, pillar)
+  const passed = itemsOfPillar(groups.passed, pillar)
+  const adopted = itemsOfPillar(groups.adopted, pillar)
+  const overdue = verifying.filter((item) => item.overdue)
+  return {
+    pillar,
+    label: pillarLabel(pillar),
+    counts: {
+      learning: learning.length,
+      verifying: verifying.length,
+      pmDecision: pmDecision.length,
+      passed: passed.length,
+      adopted: adopted.length,
+    },
+    decisions: toAttention(pmDecision),
+    overdue: toAttention(overdue),
+  }
+}
+
+function sortPillarBlocks(blocks: PillarBlock[]): PillarBlock[] {
+  return blocks.sort((a, b) => {
+    if (a.pillar === DEFAULT_PILLAR) return b.pillar === DEFAULT_PILLAR ? 0 : -1
+    if (b.pillar === DEFAULT_PILLAR) return 1
+    return a.pillar.localeCompare(b.pillar)
+  })
+}
+
+export function buildPillarBlocks(groups: Record<BoardGroupKey, BoardItem[]>): PillarBlock[] {
+  const keys = collectPillarKeys(groups)
+  const blocks: PillarBlock[] = []
+  for (const pillar of keys) blocks.push(buildPillarBlock(groups, pillar))
+  return sortPillarBlocks(blocks)
 }
 
 interface CheckContext {
@@ -427,5 +527,6 @@ export function buildBoard(input: BoardInput): Board {
     issues,
     unorganized: input.errors,
     cardCount: input.cards.length,
+    pillars: buildPillarBlocks(groups),
   }
 }
