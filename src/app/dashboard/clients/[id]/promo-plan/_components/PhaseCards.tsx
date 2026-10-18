@@ -104,8 +104,9 @@ export function BusinessCaseMathNote({ card, actualLeadCostCents }: { card: Busi
           : `${centsToYuan(math.acceptable_lead_cost_cents)} 元`}
       </div>
       <div>
-        按实际线索成本算，保本至少要
-        {math.breakeven_rate === null ? '算不出：实际线索成本这根线还没接上（不是「过几天就有」）' : `${rateToPercent(math.breakeven_rate)}%`}
+        {math.breakeven_rate === null
+          ? '保本至少要多少成交率：算不出——实际线索成本这根线还没接上（不是「过几天就有」）'
+          : `按实际线索成本算，保本至少要 ${rateToPercent(math.breakeven_rate)}%`}
       </div>
     </div>
   )
