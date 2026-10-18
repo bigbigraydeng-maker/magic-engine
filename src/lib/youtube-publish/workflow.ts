@@ -47,6 +47,8 @@ export interface StagingDeps {
 }
 
 export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promise<ReceiptRow> {
+  let pendingWritten = false
+  let finalRequestId: string = ev.requestId
   const base = {
     requestId: ev.requestId,
     clientId: ev.clientId,
@@ -56,30 +58,45 @@ export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promi
   }
   const finish = async (r: Omit<ReceiptRow, keyof typeof base | 'channelId'> & { channelId?: string }) => {
     const row: ReceiptRow = { ...base, channelId: r.channelId ?? 'unknown', ...r }
+    if (pendingWritten) row.requestId = finalRequestId
     await deps.saveReceipt(row)
     return row
   }
 
-  const channelId = await deps.getChannelId(ev.clientId)
-  if (!channelId) return finish({ status: 'blocked', reason: 'channel_not_configured', noPublish: true })
+  let channelId: string | null
+  let wo: ApprovedWorkOrder | null
   const hasWorkOrder = Boolean(ev.workOrderId)
   const hasContentPost = Boolean(ev.contentPostId)
-  if (hasWorkOrder === hasContentPost) {
-    return finish({ channelId, status: 'blocked', reason: 'invalid_source', noPublish: true })
-  }
   const source = hasWorkOrder ? { workOrderId: ev.workOrderId! } : { contentPostId: ev.contentPostId! }
-  const wo = hasWorkOrder
-    ? await deps.getWorkOrder(ev.clientId, ev.workOrderId!)
-    : await deps.getContentPost(ev.clientId, ev.contentPostId!)
-  if (!wo) return finish({ channelId, status: 'blocked', reason: hasWorkOrder ? 'work_order_not_approved' : 'content_post_not_ready', noPublish: true })
-  if (await deps.alreadyStaged(ev.clientId, source)) {
-    return finish({ channelId, status: 'blocked', reason: 'already_staged', noPublish: true })
+  try {
+    channelId = await deps.getChannelId(ev.clientId)
+    if (!channelId) return finish({ status: 'blocked', reason: 'channel_not_configured', noPublish: true })
+    if (hasWorkOrder === hasContentPost) {
+      return finish({ channelId, status: 'blocked', reason: 'invalid_source', noPublish: true })
+    }
+    wo = hasWorkOrder
+      ? await deps.getWorkOrder(ev.clientId, ev.workOrderId!)
+      : await deps.getContentPost(ev.clientId, ev.contentPostId!)
+    if (!wo) {
+      return finish({ channelId, status: 'blocked', reason: hasWorkOrder ? 'work_order_not_approved' : 'content_post_not_ready', noPublish: true })
+    }
+    if (await deps.alreadyStaged(ev.clientId, source)) {
+      return finish({ channelId, status: 'blocked', reason: 'already_staged', noPublish: true })
+    }
+  } catch (err) {
+    return finish({ status: 'failed', reason: 'preflight_error', noPublish: true, detail: { error: err instanceof Error ? err.message.slice(0, 300) : 'unknown' } })
   }
 
   try {
     const token = await deps.getToken(ev.clientId)
     await lockChannel(token, channelId, deps.fetchImpl)
     const video = await deps.fetchVideo(wo.videoUrl)
+    // Written immediately BEFORE the upload (not before the token/download steps, which cannot
+    // leave anything on the channel): if the process dies mid-upload this row blocks a blind
+    // re-upload; a failure before this point leaves no row, so a retry stays possible.
+    await deps.saveReceipt({ ...base, channelId, status: 'pending', noPublish: true })
+    finalRequestId = randomUUID()
+    pendingWritten = true
     const uploaded = await uploadStagingVideo(
       token,
       channelId,
@@ -109,7 +126,7 @@ export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promi
 }
 
 export interface PublicStepDeps {
-  consume: (nonce: string) => Promise<{
+  consume: (nonce: string, clientId: string) => Promise<{
     clientId: string
     channelId: string
     videoId: string
@@ -117,6 +134,7 @@ export interface PublicStepDeps {
     grantedAt: string
   } | null>
   getStaged: (clientId: string, videoId: string) => Promise<{ gates: GateResult[]; channelId: string } | null>
+  getChannelId: (clientId: string) => Promise<string | null>
   getToken: (clientId: string) => Promise<string>
   saveReceipt: (r: ReceiptRow) => Promise<void>
   fetchImpl?: typeof fetch
@@ -124,7 +142,7 @@ export interface PublicStepDeps {
 
 export async function runPublicStep(ev: PublicAuthorizedEventData, deps: PublicStepDeps): Promise<ReceiptRow> {
   const requestId = randomUUID()
-  const grant = await deps.consume(ev.nonce)
+  const grant = await deps.consume(ev.nonce, ev.clientId)
   const save = async (r: Partial<ReceiptRow> & Pick<ReceiptRow, 'status' | 'channelId'>): Promise<ReceiptRow> => {
     const row: ReceiptRow = {
       requestId,
@@ -140,12 +158,17 @@ export async function runPublicStep(ev: PublicAuthorizedEventData, deps: PublicS
   if (!grant || grant.clientId !== ev.clientId) {
     return save({ status: 'blocked', reason: 'authorization_invalid', channelId: grant?.channelId ?? 'unknown' })
   }
-  const staged = await deps.getStaged(grant.clientId, grant.videoId)
-  if (!staged || staged.channelId !== grant.channelId) {
-    return save({ status: 'blocked', reason: 'video_not_staged', channelId: grant.channelId, videoId: grant.videoId })
-  }
   let receipt: PublishReceipt
+  let staged: Awaited<ReturnType<PublicStepDeps['getStaged']>>
   try {
+    staged = await deps.getStaged(grant.clientId, grant.videoId)
+    if (!staged || staged.channelId !== grant.channelId) {
+      return await save({ status: 'blocked', reason: 'video_not_staged', channelId: grant.channelId, videoId: grant.videoId })
+    }
+    // A grant issued before the client's channel was reconfigured must not apply to the new setup.
+    if ((await deps.getChannelId(grant.clientId)) !== grant.channelId) {
+      return await save({ status: 'blocked', reason: 'channel_config_changed', channelId: grant.channelId, videoId: grant.videoId })
+    }
     const token = await deps.getToken(grant.clientId)
     receipt = await publishStagedVideo(
       {

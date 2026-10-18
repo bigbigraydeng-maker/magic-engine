@@ -9,7 +9,7 @@ import type { GateResult } from './gates'
 import { checkTopicAlignment } from '@/lib/factory/topic-alignment-store'
 
 export type ReceiptStage = 'staging' | 'public_step'
-export type ReceiptStatus = 'blocked' | 'staged' | 'dry_run_ok' | 'published' | 'failed'
+export type ReceiptStatus = 'pending' | 'blocked' | 'staged' | 'dry_run_ok' | 'published' | 'failed'
 
 export interface ReceiptRow {
   requestId: string
@@ -127,6 +127,31 @@ export async function findStagedReceipt(
   return { videoId: row.video_id, channelId: row.channel_id, gates: row.detail?.gates ?? [] }
 }
 
+/**
+ * True if another upload for this work order must not start: something is staged, a failed attempt
+ * left a video on the channel, or the newest attempt is still `pending` (crashed or in flight).
+ * A definite failure with no video (e.g. quota) is superseded by its `failed` row, so a retry works.
+ */
+export async function hasStagingAttempt(
+  clientId: string,
+  source: { workOrderId: string } | { contentPostId: string },
+): Promise<boolean> {
+  const base = supabaseAdmin
+    .from('youtube_publish_receipts')
+    .select('status, video_id, created_at')
+    .eq('client_id', clientId)
+    .eq('stage', 'staging')
+    .in('status', ['pending', 'staged', 'failed'])
+    .order('created_at', { ascending: false })
+  const { data, error } = await ('workOrderId' in source
+    ? base.eq('work_order_id', source.workOrderId)
+    : base.eq('content_post_id', source.contentPostId))
+  if (error) throw error
+  const rows = (data ?? []) as Array<{ status: string; video_id: string | null }>
+  if (rows.some((r) => r.status === 'staged' || (r.status === 'failed' && r.video_id))) return true
+  return rows[0]?.status === 'pending'
+}
+
 export async function insertAuthorization(a: {
   nonce: string
   clientId: string
@@ -149,12 +174,15 @@ export async function insertAuthorization(a: {
 /** Atomic one-time consume: returns the grant only for the first caller. */
 export async function consumeAuthorization(
   nonce: string,
+  clientId: string,
 ): Promise<{ clientId: string; channelId: string; videoId: string; grantedBy: string; grantedAt: string } | null> {
   const { data, error } = await supabaseAdmin
     .from('youtube_publish_authorizations')
     .update({ consumed_at: new Date().toISOString() })
     .eq('nonce', nonce)
+    .eq('client_id', clientId)
     .is('consumed_at', null)
+    .gt('expires_at', new Date().toISOString())
     .select('client_id, channel_id, video_id, granted_by, granted_at')
     .maybeSingle()
   if (error) throw error
