@@ -44,6 +44,27 @@ async function resolveToken(clientId: string): Promise<string | null> {
   return getMetaTokenForClient(clientId)
 }
 
+/**
+ * Meta 返回的 campaign.account_id 是纯数字；库里和内核都用 act_ 形式。
+ *
+ * 生产 503 `timezone_unreadable` 的根因：`resolveAccountTimezone` 按
+ * `ad_entity_snapshots.ad_account_id = <传入值>` 查，库里存的是 `act_…`，
+ * 纯数字永远查不到；内核信封事实也拿 `input.ad_account_id` 去匹配
+ * `client_meta_ad_accounts.ad_account_id`（同样是 `act_` 形式）。
+ *
+ * 规范化只放在这一个入口，下游一律假定拿到的是 `act_` 形式。
+ * 形状不认识就返回 null，由调用方 fail-closed —— 绝不回落成空串：
+ * 空串会带着一个「看起来像账户号」的值继续往下走，把「读不到」伪装成
+ * 「读到了但没数据」，错误被吞进 503 之外的路径里。
+ */
+function toActAccountId(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const compact = raw.replace(/\s+/g, '')
+  if (/^act_[1-9]\d{9,24}$/.test(compact)) return compact
+  if (/^[1-9]\d{9,24}$/.test(compact)) return `act_${compact}`
+  return null
+}
+
 export async function GET(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const access = await requirePaidClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
@@ -148,10 +169,12 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     goalId = goal.id
   }
 
-  const timezone = await resolveAccountTimezone(ownership.campaign.account_id ?? '')
+  const adAccountId = toActAccountId(ownership.campaign.account_id)
+  if (!adAccountId) return NextResponse.json({ error: 'account_id_unreadable' }, { status: 503 })
+  const timezone = await resolveAccountTimezone(adAccountId)
   if (!timezone) return NextResponse.json({ error: 'timezone_unreadable' }, { status: 503 })
   const submitted = await submitStopLossThroughKernel(createKernel(supabaseAdmin), {
-    clientId, access, goalId, campaignId, adAccountId: ownership.campaign.account_id ?? '', requestId,
+    clientId, access, goalId, campaignId, adAccountId, requestId,
     cycleDate: accountDayKey(timezone, new Date()), action: kernelAction, targets,
   })
   const kinds = submitted.runs.map(run => run.kind)
