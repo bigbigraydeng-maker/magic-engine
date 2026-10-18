@@ -86,7 +86,7 @@ Tier Classification：把广告支柱已落地的「信封内自治 + PM 日检�
 | 卫青 | `src/lib/ads-strategy/` | `google-data-pullback-daily`（定时，`registry.ts:157`）；D3 自动暂停为 Inngest 事件函数 `adsD3AutoPause`（不在登记表） | 不调（全目录零个文件调模型） | 否 | 名单目标一致；手册 `11-weiqing.md` 开头写用 Sonnet / Haiku，与代码不符 |
 | 孔子 | `src/lib/seo-meta/` 等 | `seo-patrol-daily`（`:254`）；标题周循环 `seo-meta-cycle-step6-completed`（Inngest 定时，`:329`） | 未核 | 否 | 代码里不出现这个名字 |
 | 孟子 | `src/lib/ai-tracker/` 等 | `ai-tracker-weekly`（`:121`） | 未核 | 否 | 同上 |
-| 苏东坡 | `src/lib/factory/`、社媒 | `factory-publish-sweeper` / `factory-publish-worker`（`:147-148`）；日计划自动发帖为 Inngest 事件函数 `dailyPlanAutoPublish`（不在登记表） | 未核 | **是** | 社媒发布全在内核外 |
+| 苏东坡 | `src/lib/factory/`、社媒 | `factory-publish-sweeper` / `factory-publish-worker`（`:147-148`）；日计划自动发帖 `cloud-daily-plan-auto-publish`（Inngest 定时，新西兰时间每小时第 20 分；不在定时登记表） | 未核 | **是** | 社媒发布全在内核外 |
 | 司马迁 | `src/lib/inngest/functions/simaqian-reputation-weekly.ts` | `simaqian-reputation-weekly`（Inngest 定时，`:366`） | 未核 | 否 | — |
 | 张骞 | `src/lib/zhangqian/` | `zhangqian-sweeper`（`:270`）；另有 discover / public-scan / register 接口触发 | 是 | 否 | 一致 |
 | 华佗 | `src/lib/huatuo/` | **无闹钟**：处方生成 / refine 接口触发 | 是 | 否 | 名单写「6 支柱打分」，代码是开处方；6 维打分实际在 `src/lib/diagnostic/runner.ts` |
