@@ -4,6 +4,8 @@
  * No I/O, no clock (today is a parameter), no Supabase. Every due date and
  * overdue flag comes from the BookingView built by buildBookingView; this
  * module never recomputes them. Everything here counts ORDERS, never money.
+ * Future catalog departures without orders can be passed in and show as rows
+ * with all counts 0.
  */
 
 import type {
@@ -14,6 +16,7 @@ import type {
   MilestoneView,
 } from './booking-types'
 import type {
+  OverviewEmptyDeparture,
   OverviewEntry,
   OverviewGroup,
   OverviewGroupKind,
@@ -91,6 +94,8 @@ function emptyGroup(
     departOn: null,
     departed: false,
     orders: 0,
+    partySize: 0,
+    partySizeMissing: 0,
     depositPaid: 0,
     balancePaid: 0,
     fullyPaid: 0,
@@ -164,6 +169,8 @@ function mergeWarnings(
 /** Fold one active booking's counters into its group. */
 function addBookingToGroup(group: OverviewGroup, view: BookingView): void {
   group.orders += 1
+  if (view.partySize === null) group.partySizeMissing += 1
+  else group.partySize += view.partySize
   if (view.milestones.some((m) => m.kind === 'deposit' && isPaid(m))) {
     group.depositPaid += 1
   }
@@ -289,6 +296,8 @@ function filterVisible(
 function sumTotals(groups: OverviewGroup[]): OverviewTotals {
   const totals: OverviewTotals = {
     orders: 0,
+    partySize: 0,
+    partySizeMissing: 0,
     depositPaid: 0,
     balancePaid: 0,
     unsettled: 0,
@@ -297,6 +306,8 @@ function sumTotals(groups: OverviewGroup[]): OverviewTotals {
   }
   for (const g of groups) {
     totals.orders += g.orders
+    totals.partySize += g.partySize
+    totals.partySizeMissing += g.partySizeMissing
     totals.depositPaid += g.depositPaid
     totals.balancePaid += g.balancePaid
     totals.unsettled += g.unsettled
@@ -335,11 +346,33 @@ function buildGroups(
   entries: OverviewEntry[],
   today: string,
   includePastPaid: boolean,
+  emptyDepartures: OverviewEmptyDeparture[],
 ): HiddenSplit {
   const map = new Map<string, OverviewGroup>()
   for (const { view } of entries) {
     if (view.status !== 'active') continue
     foldView(map, view)
+  }
+  const taken = new Set<string>()
+  for (const g of map.values()) {
+    if (g.kind === 'departure' && g.departOn !== null) {
+      taken.add(`${g.tourId}|${g.departOn}`)
+    }
+  }
+  for (const e of emptyDepartures) {
+    if (map.has(e.departureId)) continue
+    const dayKey = `${e.tourId}|${e.departOn}`
+    if (taken.has(dayKey)) continue
+    taken.add(dayKey)
+    const g = emptyGroup(
+      e.departureId,
+      'departure',
+      e.tourId,
+      e.tourName,
+      e.departureId,
+    )
+    g.departOn = e.departOn
+    map.set(e.departureId, g)
   }
   const all = [...map.values()]
   markDeparted(all, today)
@@ -352,8 +385,9 @@ export function summariseOverview(
   entries: OverviewEntry[],
   today: string,
   includePastPaid: boolean,
+  emptyDepartures: OverviewEmptyDeparture[] = [],
 ): OverviewSummary {
-  const split = buildGroups(entries, today, includePastPaid)
+  const split = buildGroups(entries, today, includePastPaid, emptyDepartures)
   return {
     groups: split.visible,
     totals: sumTotals(split.visible),

@@ -49,6 +49,12 @@ function strOrNull(v: unknown): string | null | undefined {
   return typeof v === 'string' ? v : undefined
 }
 
+/** A finite number or an explicit null; undefined and other types are malformed (undefined). */
+function numOrNull(v: unknown): number | null | undefined {
+  if (v === null) return null
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
+
 /** A boolean, or null when the value is anything else. */
 function bool(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null
@@ -96,6 +102,8 @@ function parseGroup(value: unknown): OverviewGroup | null {
   const departOn = strOrNull(value.departOn)
   const departed = bool(value.departed)
   const orders = num(value.orders)
+  const partySize = num(value.partySize)
+  const partySizeMissing = num(value.partySizeMissing)
   const depositPaid = num(value.depositPaid)
   const balancePaid = num(value.balancePaid)
   const fullyPaid = num(value.fullyPaid)
@@ -114,6 +122,8 @@ function parseGroup(value: unknown): OverviewGroup | null {
     departOn === undefined ||
     departed === null ||
     orders === null ||
+    partySize === null ||
+    partySizeMissing === null ||
     depositPaid === null ||
     balancePaid === null ||
     fullyPaid === null ||
@@ -142,6 +152,8 @@ function parseGroup(value: unknown): OverviewGroup | null {
     departOn,
     departed,
     orders,
+    partySize,
+    partySizeMissing,
     depositPaid,
     balancePaid,
     fullyPaid,
@@ -159,6 +171,8 @@ function parseGroup(value: unknown): OverviewGroup | null {
 function parseTotals(value: unknown): OverviewSummary['totals'] | null {
   if (!isRecord(value)) return null
   const orders = num(value.orders)
+  const partySize = num(value.partySize)
+  const partySizeMissing = num(value.partySizeMissing)
   const depositPaid = num(value.depositPaid)
   const balancePaid = num(value.balancePaid)
   const unsettled = num(value.unsettled)
@@ -166,6 +180,8 @@ function parseTotals(value: unknown): OverviewSummary['totals'] | null {
   const offlineHandled = num(value.offlineHandled)
   if (
     orders === null ||
+    partySize === null ||
+    partySizeMissing === null ||
     depositPaid === null ||
     balancePaid === null ||
     unsettled === null ||
@@ -174,7 +190,7 @@ function parseTotals(value: unknown): OverviewSummary['totals'] | null {
   ) {
     return null
   }
-  return { orders, depositPaid, balancePaid, unsettled, unsettledOverdue, offlineHandled }
+  return { orders, partySize, partySizeMissing, depositPaid, balancePaid, unsettled, unsettledOverdue, offlineHandled }
 }
 
 function parseNotes(value: unknown): OverviewSummary['notes'] | null {
@@ -225,6 +241,7 @@ function parseRow(value: unknown): OverviewListRow | null {
   const departOn = strOrNull(value.departOn)
   const status = value.status
   if (status !== 'active' && status !== 'cancelled') return null
+  const partySize = numOrNull(value.partySize)
   const deposit = parseCell(value.deposit)
   const balance = parseCell(value.balance)
   // parseCell answers null for both "no cell" and "malformed cell": only a real null may stay null.
@@ -239,6 +256,7 @@ function parseRow(value: unknown): OverviewListRow | null {
     tourName === undefined ||
     departureId === undefined ||
     departOn === undefined ||
+    partySize === undefined ||
     lastNudgedOn === undefined ||
     note === undefined
   ) {
@@ -262,6 +280,7 @@ function parseRow(value: unknown): OverviewListRow | null {
     departureId,
     departOn,
     status,
+    partySize,
     deposit,
     balance,
     lastNudgedOn,

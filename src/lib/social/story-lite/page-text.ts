@@ -250,12 +250,23 @@ export function isRecordedUploaded(reel: { status: string; published_at: string 
   return reel.published_at !== null || RECORDED_UPLOADED_STATUSES.includes(reel.status)
 }
 
+/** What the database says about a Reel's upload state, in plain words; null when it was never uploaded. */
+export function describeReelUploadState(reel: { status: string; published_at: string | null; video_state?: 'DRAFT' | 'PUBLISHED' | null }): string | null {
+  if (!isRecordedUploaded(reel)) return null
+  if (reel.video_state === 'DRAFT') return 'Facebook 草稿，未公开'
+  if (reel.video_state === 'PUBLISHED') return '已公开（Facebook）'
+  return '库里记为已上传 · 平台状态未核'
+}
+
 /** Reel headline. */
-export function describeReelHeadline(reels: ReadonlyArray<{ status: string; published_at: string | null }>): string {
+export function describeReelHeadline(reels: ReadonlyArray<{ status: string; published_at: string | null; video_state?: 'DRAFT' | 'PUBLISHED' | null }>): string {
   if (reels.length === 0) return 'Reel：现在没有可看的 Reel'
   const inReview = reels.filter((r) => r.status === 'in_review').length
-  const uploaded = reels.filter(isRecordedUploaded).length
-  return `Reel：在审 ${inReview} · 库里记为已上传 ${uploaded}（平台状态未核）`
+  const uploaded = reels.filter(isRecordedUploaded)
+  const drafts = uploaded.filter((r) => r.video_state === 'DRAFT').length
+  const published = uploaded.filter((r) => r.video_state === 'PUBLISHED').length
+  const unknown = uploaded.length - drafts - published
+  return `Reel：在审 ${inReview} · Facebook 草稿 ${drafts} · 已公开 ${published} · 库里记为已上传但平台状态未核 ${unknown}`
 }
 
 /** The read-only variety hint line. Never blocks anything. */

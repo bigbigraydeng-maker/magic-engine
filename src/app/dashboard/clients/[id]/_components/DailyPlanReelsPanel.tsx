@@ -8,7 +8,7 @@ import Link from 'next/link'
 
 import { STATUS_META } from '@/app/dashboard/factory/_components/statusMeta'
 import type { WorkOrderStatus } from '@/lib/factory/types'
-import { isRecordedUploaded } from '@/lib/social/story-lite/page-text'
+import { describeReelUploadState } from '@/lib/social/story-lite/page-text'
 import type { OverviewReel } from '@/lib/social/week-overview/build'
 
 type LoadState = 'loading' | 'ready' | 'unauthenticated' | 'forbidden' | 'error'
@@ -75,11 +75,10 @@ export function DailyPlanReelsPanel({ clientId }: { clientId: string }) {
         <ul className="space-y-1.5">
           {reels.map((reel) => {
             const meta = STATUS_META[reel.status as WorkOrderStatus]
-            const uploaded = isRecordedUploaded(reel)
             return (
               <li key={reel.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${meta?.color ?? 'bg-me-charcoal/10 text-me-charcoal'}`}>
-                  {uploaded ? '库里记为已上传 · 平台状态未核' : meta?.label ?? '状态未知'}
+                  {describeReelUploadState(reel) ?? meta?.label ?? '状态未知'}
                 </span>
                 <span className="text-me-charcoal">{reel.angle || '（没有写主题）'}</span>
                 <span className="text-xs text-me-charcoal/40">工单 {reel.id.slice(0, 8)}</span>

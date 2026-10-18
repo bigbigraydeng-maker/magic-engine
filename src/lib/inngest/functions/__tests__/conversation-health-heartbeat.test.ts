@@ -14,6 +14,8 @@ import { describe, it, expect, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   createConversationHealthHeartbeatFunction,
+  describeError,
+  withTimeout,
   type ConversationHealthHeartbeatDeps,
 } from '../conversation-health-heartbeat'
 import type { HealthCheckResult } from '@/lib/messenger-agent/health-heartbeat'
@@ -122,12 +124,12 @@ function makeDeps(overrides: Partial<ConversationHealthHeartbeatDeps> = {}): Con
 }
 
 describe('装配契约', () => {
-  it('函数 id 带 CLOUD_FN_PREFIX，cron 每 6 小时一次，retries=1，并发上限 1', () => {
+  it('函数 id 带 CLOUD_FN_PREFIX，cron 每 6 小时一次（错开整点），retries=3，并发上限 1', () => {
     const fn = createConversationHealthHeartbeatFunction(makeDeps())
     expect(fn.id()).toBe(`${CLOUD_FN_PREFIX}conversation-health-heartbeat`)
     const opts = optsOf(fn)
-    expect(opts.triggers?.[0]?.cron).toBe('0 */6 * * *')
-    expect(opts.retries).toBe(1)
+    expect(opts.triggers?.[0]?.cron).toBe('7 */6 * * *')
+    expect(opts.retries).toBe(3)
     expect(opts.concurrency?.limit).toBe(1)
   })
 })
@@ -248,5 +250,49 @@ describe('关键路径：两个 step 都被调用，且各自产生正确的副�
     }
 
     expect(receipt).toEqual({ total_checks: 3, unhealthy_count: 1, healthy_count: 2, no_publish: true })
+  })
+})
+
+describe('诊断与超时', () => {
+  it('describeError 展开 cause 链，带上 code 与 message', () => {
+    const e = new Error('fetch failed', {
+      cause: { code: 'UND_ERR_SOCKET', message: 'other side closed' },
+    })
+    const text = describeError(e)
+    expect(text).toContain('fetch failed')
+    expect(text).toContain('UND_ERR_SOCKET')
+    expect(text).toContain('other side closed')
+  })
+
+  it('describeError 对非 Error 值返回 String(e)，对无 cause 的 Error 返回其 message', () => {
+    expect(describeError('boom')).toBe('boom')
+    expect(describeError(new Error('plain'))).toBe('plain')
+  })
+
+  it('describeError 把网址和项目主机名换掉，不让项目标识进日志', () => {
+    const e = new Error('fetch failed', { cause: { code: 'ENOTFOUND', message: 'getaddrinfo ENOTFOUND abcdwxyz.supabase.co https://abcdwxyz.supabase.co/rest/v1/x' } })
+    const text = describeError(e)
+    expect(text).toContain('ENOTFOUND')
+    expect(text).not.toContain('abcdwxyz')
+    expect(text).not.toContain('https://')
+  })
+
+  it('withTimeout 在按时完成时返回原值', async () => {
+    await expect(withTimeout(Promise.resolve('ok'), 1000, 'run-checks')).resolves.toBe('ok')
+  })
+
+  it('withTimeout 在超时后拒绝，消息含 label 与「超过」', async () => {
+    await expect(withTimeout(new Promise(() => undefined), 20, 'run-checks')).rejects.toThrow(/run-checks.*超过/)
+  })
+
+  it('run-checks 步骤失败时，handler 拒绝并带上 describeError 展开的 cause', async () => {
+    const { supabase } = makeFakeAlertsSupabase()
+    const runChecks = vi.fn(async () => {
+      throw new Error('fetch failed', { cause: { code: 'ETIMEDOUT', message: 'connect timed out' } })
+    })
+    const fn = createConversationHealthHeartbeatFunction({ runChecks, supabase })
+    const step = fakeStep()
+
+    await expect(handlerOf(fn)({ step })).rejects.toThrow(/\[conversation-health-heartbeat\] run-checks 失败.*ETIMEDOUT/)
   })
 })
