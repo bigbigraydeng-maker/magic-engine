@@ -88,7 +88,10 @@ const rateSource = z.enum(['measured', 'assumed'])
  * 客户数字（留存比例、每单人数、剩余座位）只出现在这里，不进共享常量、不进剧本。
  */
 const businessCase = z.object({
-  /** 目标团期：`tour_catalog_departures.id` 或人看得懂的「团名 + 出发日」。不校验存在性。 */
+  /**
+   * 目标团期：团目录里的班期编号，或人看得懂的「团名 + 出发日」。不校验存在性。
+   * 这里故意不写出团目录的表名——跨目录提到它会被团目录的边界测试拦下，也不该在这里耦合。
+   */
   departure_ref: z.string().min(1),
   seats_remaining: z.number().int().min(0),
   /** 这个座位数是不是客户确认过的。false → 检查清单判灰。 */
