@@ -291,13 +291,66 @@ function latestOf(rows: readonly SnapRow[]): SnapRow | null {
  *    才写的一行，所以**人工在 Ads Manager 里改的也算**（§14 K12：72 小时按真实
  *    变化算，不是只算 ME 自己的动作）。`daily` 那种例行抓取不算变化。
  *    完全没有快照 = 读不到（null）；有快照但没有一条 changed = 确实从没变过。
+ *
+ * 🔴 也认 `kernel_post`（与 `diagnostics/loader.ts:89` 同口径）：那是内核执行完
+ *    这个动作后立刻抓的那一份，代表「我们自己刚改过」。只认 `changed` 的话，
+ *    内核改完到下一次定期对账之间，冷却期闸读到的还是旧数字 —— 等于没有。
  */
 function hoursSinceLastRealChange(rows: readonly SnapRow[], now: Date): number | null {
   if (rows.length === 0) return null
-  const changed = rows.filter(r => r.capture_reason === 'changed')
+  const changed = rows.filter(r => r.capture_reason === 'changed' || r.capture_reason === 'kernel_post')
   if (changed.length === 0) return Number.MAX_SAFE_INTEGER
   const ms = now.getTime() - Date.parse(latestOf(changed)!.captured_at)
   return Number.isFinite(ms) ? ms / 3_600_000 : null
+}
+
+/**
+ * 内核自己上次成功改过这个实体是多久以前（小时）。读不到任何记录返回 null。
+ *
+ * 🔴 **为什么不靠快照**：内核执行完一个动作后，没有任何地方会立刻补写一条
+ *    `changed` 快照 —— 那要等下一次定期对账。所以同一个实体连续两次自治动作
+ *    之间，快照里可能一条「刚改过」的痕迹都没有，冷却期闸读到的还是旧数字。
+ *    内核自己的执行记录（`action_runs`）是唯一当场就知道「我们刚动过它」的来源。
+ *
+ * 🔴 **为什么撤回也算**：`rolled_back` 意味着我们确实改过设置、又改回去了 ——
+ *    设置被碰过就是被碰过，学习期照样重置，不能因为最后撤回了就当没发生。
+ *
+ * 🔴 **为什么读失败必须报错而不是当成没动过**：把查询失败当成「从没动过」，
+ *    等于一次数据库抖动就静默放行一次本该被冷却期挡下的动作 —— fail-open。
+ *    调用方拿到 `ok: false` 必须拒绝，不能拿 `hours: null` 凑合。
+ */
+export async function hoursSinceOwnLastAction(
+  sb: SupabaseClient,
+  args: {
+    readonly clientId: string
+    readonly entityId: string
+    readonly now: Date
+  },
+): Promise<{ ok: true; hours: number | null } | { ok: false; error: string }> {
+  // 🔴 **按实体在服务端精确筛，不许「拉最近 N 条再在内存里找」**：那样一旦这个客户
+  //    的动作条数超过 N，目标实体最后一次动作就掉出窗口 → 返回 null（= 从没动过）
+  //    → 冷却期闸静默失效。这正是同文件上面那段注释记下的 4000 行截断事故
+  //    （#1994 缺陷 2）的同一种坑，不能再踩一遍。
+  if (!/^[A-Za-z0-9_-]+$/.test(args.entityId)) {
+    return { ok: false, error: `实体编号形状不认识，不敢拿去查内核执行记录：${args.entityId}` }
+  }
+  const { data, error } = await sb
+    .from('action_runs')
+    .select('finished_at')
+    .eq('client_id', args.clientId)
+    .like('action_key', 'ads.%')
+    .in('status', ['succeeded', 'rolled_back'])
+    .not('finished_at', 'is', null)
+    .or(`input->>adset_id.eq.${args.entityId},input->>campaign_id.eq.${args.entityId}`)
+    .order('finished_at', { ascending: false })
+    .limit(1)
+  if (error) return { ok: false, error: '读内核执行记录失败：' + error.message }
+
+  const rows = (data ?? []) as Array<{ finished_at: string | null }>
+  const finishedAt = rows[0]?.finished_at ?? null
+  if (!finishedAt) return { ok: true, hours: null }
+  const ms = args.now.getTime() - Date.parse(finishedAt)
+  return { ok: true, hours: Number.isFinite(ms) ? ms / 3_600_000 : null }
 }
 
 /** 这次动作的「跟钱和学习期相关的那个实体」解析结果。 */
@@ -618,7 +671,25 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       .order('captured_at', { ascending: false })
       .limit(200)
     if (cooldownErr) return cantRead(`读这个单位的变动历史失败：${cooldownErr.message}`)
-    const cooldownHours = hoursSinceLastRealChange((cooldownRows ?? []) as SnapRow[], now())
+    const snapshotCooldownHours = hoursSinceLastRealChange((cooldownRows ?? []) as SnapRow[], now())
+
+    // 🔴 **两个来源各看见一半，取更近的那个**：
+    //    · 快照（`changed` / `kernel_post`）看见「设置真的变了」，包括人在 Ads Manager 里改的
+    //    · 内核执行记录（`action_runs`）看见「我们自己刚动过」，哪怕还没轮到下一次对账
+    //    只用一个都会漏：只靠快照会漏掉内核刚改完、还没对账的那一段；只靠执行记录
+    //    会漏掉人工在 Ads Manager 里改的。取小时数更小的那个（= 更近）才不会漏。
+    //    两个都是 null 时保持 null（下游语义不变）；只有一个有数就用那个。
+    const ownAction = await hoursSinceOwnLastAction(deps.sb, {
+      clientId,
+      entityId: subject.entityId,
+      now: now(),
+    })
+    if (!ownAction.ok) return cantRead(ownAction.error)
+    const cooldownHours = snapshotCooldownHours === null
+      ? ownAction.hours
+      : ownAction.hours === null
+        ? snapshotCooldownHours
+        : Math.min(snapshotCooldownHours, ownAction.hours)
 
     // 新建的单位改动前没有预算（0）；其余类型必须真读到，读不到就是 null → 拒绝。
     const beforeCents = kind === 'new_spend'

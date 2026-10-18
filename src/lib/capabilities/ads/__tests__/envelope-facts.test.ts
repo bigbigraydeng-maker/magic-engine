@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createAdsEnvelopeFactsResolver } from '../envelope-facts'
+import { createAdsEnvelopeFactsResolver, hoursSinceOwnLastAction } from '../envelope-facts'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
 
 const CLIENT = 'c-1'
@@ -57,6 +57,8 @@ interface Tables {
   client_meta_ad_accounts: Row[]
   ad_snapshot_captures: Row[]
   clients: Row | null
+  /** 内核自己的执行记录（`hoursSinceOwnLastAction` 读这张表）。默认空数组 = 从没动过。 */
+  action_runs: Row[]
 }
 
 interface Log {
@@ -89,6 +91,8 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             eq(col: string, val: unknown) { f[col] = val; return chain },
             in(col: string, vals: unknown[]) { f[col] = vals; return chain },
             gte(col: string, val: unknown) { f[`gte:${col}`] = val; return chain },
+            like(col: string, pattern: string) { f[`like:${col}`] = pattern; return chain },
+            not(col: string, op: string, val: unknown) { f[`not:${col}`] = op; f[`notval:${col}`] = val; return chain },
             or(expr: string) { f.__or = expr; return chain },
             order(col: string, opts?: { ascending?: boolean }) {
               const orders = (f.__orders as Array<{ col: string; ascending?: boolean }> | undefined) ?? []
@@ -106,6 +110,40 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             if (err) return { data: null, error: { message: err } }
             if (key === 'ad_strategy_configs') return { data: t.ad_strategy_configs, error: null }
             if (key === 'clients') return { data: t.clients, error: null }
+            if (key === 'action_runs') {
+              let rows = t.action_runs
+              if (typeof f.client_id === 'string') rows = rows.filter((r) => r.client_id === f.client_id)
+              if (Array.isArray(f.status)) rows = rows.filter((r) => (f.status as unknown[]).includes(r.status))
+              if (typeof f['like:action_key'] === 'string') {
+                const prefix = (f['like:action_key'] as string).replace(/%$/, '')
+                rows = rows.filter((r) => String(r.action_key).startsWith(prefix))
+              }
+              if (f['not:finished_at'] === 'is') rows = rows.filter((r) => r.finished_at !== null && r.finished_at !== undefined)
+              // 真实查询按实体在服务端筛（`input->>adset_id.eq.X,input->>campaign_id.eq.X`），
+              // 替身必须照着筛 —— 不筛的话「没有记录命中」这类用例会永远绿（假测试）。
+              if (typeof f.__or === 'string') {
+                const wanted = (f.__or as string).split(',').map((clause) => {
+                  const m = /^input->>([a-z_]+)\.eq\.(.+)$/.exec(clause)
+                  return m ? { key: m[1], value: m[2] } : null
+                }).filter((x): x is { key: string; value: string } => x !== null)
+                if (wanted.length > 0) {
+                  rows = rows.filter((r) => {
+                    const input = (r.input ?? {}) as Record<string, unknown>
+                    return wanted.some((w) => input[w.key] === w.value)
+                  })
+                }
+              }
+              const orders = (f.__orders as Array<{ col: string; ascending?: boolean }> | undefined) ?? []
+              if (orders.length) rows = [...rows].sort((a, b) => {
+                for (const order of orders) {
+                  const compared = String(a[order.col]).localeCompare(String(b[order.col])) * (order.ascending === false ? -1 : 1)
+                  if (compared) return compared
+                }
+                return 0
+              })
+              if (typeof f.__limit === 'number') rows = rows.slice(0, f.__limit)
+              return { data: rows, error: null }
+            }
             if (key === 'ad_snapshot_captures') {
               let rows = t.ad_snapshot_captures
               for (const [col, val] of Object.entries(f)) {
@@ -213,6 +251,7 @@ function resolve(
     client_meta_ad_accounts: [],
     ad_snapshot_captures: [],
     clients: null,
+    action_runs: [],
     ...t,
   }
   const resolver = createAdsEnvelopeFactsResolver({
@@ -478,6 +517,88 @@ describe('🔴 #1994 缺陷 2 · 冷却期判据不受账户窗口影响', () =>
     expect('facts' in r).toBe(true)
     if (!('facts' in r)) return
     expect(r.facts.hoursSinceLastChange).toBeCloseTo(1, 1)
+  })
+})
+
+describe('🔴 冷却期 · kernel_post 也算真改动（与 diagnostics/loader.ts:89 同口径）', () => {
+  it('只有 kernel_post 快照、没有 changed 快照 → 冷却小时数算得出来，不是 MAX_SAFE_INTEGER', async () => {
+    const post = snap({ capture_reason: 'kernel_post', captured_at: new Date(NOW.getTime() - 2 * 3_600_000).toISOString() })
+    const r = await resolve({ ad_entity_snapshots: [snap(), post] }, log())
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.hoursSinceLastChange).toBeCloseTo(2, 1)
+    expect(r.facts.hoursSinceLastChange).not.toBe(Number.MAX_SAFE_INTEGER)
+  })
+})
+
+describe('🔴 冷却期 · 内核自己的执行记录（hoursSinceOwnLastAction）', () => {
+  const run = (over: Row = {}): Row => ({
+    client_id: CLIENT,
+    action_key: 'ads.cut_unit_budget',
+    status: 'succeeded',
+    finished_at: new Date(NOW.getTime() - 3_600_000).toISOString(),
+    input: { ad_account_id: ACCOUNT, adset_id: ADSET },
+    ...over,
+  })
+
+  it('input.adset_id 命中 → 算出小时数', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [run()] } as unknown as Tables, log()), {
+      clientId: CLIENT, entityId: ADSET, now: NOW,
+    })
+    expect(r).toEqual({ ok: true, hours: 1 })
+  })
+
+  it('input.campaign_id 命中 → 算出小时数', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ action_key: 'ads.cut_campaign_budget', input: { ad_account_id: ACCOUNT, campaign_id: '456' } })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityId: '456', now: NOW })
+    expect(r).toEqual({ ok: true, hours: 1 })
+  })
+
+  it('没有任何记录命中 → { ok: true, hours: null }', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ input: { ad_account_id: ACCOUNT, adset_id: 'other' } })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityId: ADSET, now: NOW })
+    expect(r).toEqual({ ok: true, hours: null })
+  })
+
+  it('🔴 查询报错 → { ok: false }，绝不能塌成 { ok: true, hours: null }（fail-open）', async () => {
+    const l = log()
+    l.errors.action_runs = 'boom'
+    const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [] } as unknown as Tables, l), {
+      clientId: CLIENT, entityId: ADSET, now: NOW,
+    })
+    expect(r.ok).toBe(false)
+    expect(r).not.toEqual({ ok: true, hours: null })
+    if (r.ok) return
+    expect(r.error).toContain('boom')
+  })
+
+  it('状态是 rolled_back 的记录也算（撤回也是真改过设置）', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ status: 'rolled_back', finished_at: new Date(NOW.getTime() - 5 * 3_600_000).toISOString() })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityId: ADSET, now: NOW })
+    expect(r).toEqual({ ok: true, hours: 5 })
+  })
+
+  it('🔴 执行记录比快照更近时，最终冷却小时数取更近的那个', async () => {
+    const changed = snap({ capture_reason: 'changed', captured_at: new Date(NOW.getTime() - 10 * 3_600_000).toISOString() })
+    const r = await resolve({
+      ad_entity_snapshots: [snap(), changed],
+      action_runs: [run({ finished_at: new Date(NOW.getTime() - 3_600_000).toISOString() })],
+    }, log())
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.hoursSinceLastChange).toBeCloseTo(1, 1)
+  })
+
+  it('🔴 读执行记录失败 → 拒，前缀是 facts:', async () => {
+    const l = log()
+    l.errors.action_runs = 'boom'
+    const r = await resolve({ ad_entity_snapshots: [snap()] }, l)
+    expect('unavailable' in r).toBe(true)
+    if (!('unavailable' in r)) return
+    expect(r.unavailable.startsWith('facts:')).toBe(true)
   })
 })
 
