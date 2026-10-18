@@ -5,11 +5,34 @@ import type { PromoSpec } from './spec'
  * 推广结构的内容指纹：同样的内容永远同一个值，改了任何一处金额 / 受众 / 素材 / 日期 / 目标就变。
  * 序列化复用 plan-guard 的 stableStringify（键排序、数组保序），和「推广结构是否被改动」用同一把尺。
  * 剔除 checks（客户端可写、保存时被清空、判定不参与）与 gate_snapshot（服务端留底，不属于被批准的内容）。
+ *
+ * 还剔除经营判断卡里的「剩余座位」三项（子牙 2026-10-18 复审必改项 1）：
+ * 座位数是天天变的事实，不是「这笔钱该不该批」的内容。把它算进指纹的话，
+ * 客户今天报一个新座位数，整份计划的人工核实记录就全部作废、硬门一起变红，
+ * 而计划一旦批准内容就锁死、座位数反而再也改不了。
  */
+const VOLATILE_BUSINESS_CASE_KEYS = ['seats_remaining', 'seats_confirmed', 'seats_as_of'] as const
+
+/** 去掉卡里会常变、又不影响「该不该批」的字段。 */
+function stripVolatile(spec: PromoSpec): PromoSpec {
+  return {
+    ...spec,
+    phases: spec.phases.map(phase => {
+      if (phase.business_case === undefined) return phase
+      const kept: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(phase.business_case)) {
+        if ((VOLATILE_BUSINESS_CASE_KEYS as readonly string[]).includes(key)) continue
+        kept[key] = value
+      }
+      return { ...phase, business_case: kept as PromoSpec['phases'][number]['business_case'] }
+    }),
+  }
+}
+
 export function promoContentHash(spec: PromoSpec): string {
   // 用 Object.entries 过滤，避免解构出未使用变量触发 lint 报错。
   const content: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(spec)) {
+  for (const [key, value] of Object.entries(stripVolatile(spec))) {
     if (key === 'checks' || key === 'gate_snapshot') continue
     content[key] = value
   }

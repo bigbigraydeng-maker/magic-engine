@@ -39,6 +39,7 @@ import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { AdsAccountStatusItemKind } from './ads-account-status-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
@@ -61,6 +62,8 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // diagnostic_synthesis_failing：链接是需要登录的后台页，探活大概率判成坏链接 —— 这条正是要消灭「静默」的，不能被探活悄悄丢掉（魏征 2026-10-18）。
+  'diagnostic_synthesis_failing',
   'cross_client_leak',
   'facebook_page_binding_unverified',
   // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
@@ -103,6 +106,8 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  /** 体检的 AI 文字叙事没写成（保存失败/模型失败）—— 开发欠账，不用 PM 动手（2026-10-18）。 */
+  | 'diagnostic_synthesis_failing'
   | 'promo_plan_watch'
   | 'promo_plan_watch_broken'
   | 'blog_pr_open'
@@ -253,6 +258,8 @@ export type ManualItemKind =
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
   | AdsCircuitItemKind
+  /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
+  | AdsAccountStatusItemKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
   | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */

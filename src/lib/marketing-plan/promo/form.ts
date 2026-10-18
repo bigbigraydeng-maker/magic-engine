@@ -63,7 +63,12 @@ export function updateStep(spec: PromoSpec, phaseId: string, step: PromoStep): P
 export function updatePhase(
   spec: PromoSpec,
   phaseId: string,
-  patch: Partial<Pick<PromoPhase, 'name' | 'start_date' | 'end_date' | 'is_experiment'>>,
+  /**
+   * 不含 `is_experiment`：它只能走 `setIsExperiment`。
+   * 从这里写进来的 `false` 会被算进内容指纹，等于「什么都没改却改了内容」，
+   * 已点过的人工核实记录会被作废（子牙 2026-10-18 复审必改项 2：把洞用类型堵住，不靠人记得）。
+   */
+  patch: Partial<Pick<PromoPhase, 'name' | 'start_date' | 'end_date'>>,
 ): PromoSpec {
   return { ...spec, phases: spec.phases.map(p => (p.id === phaseId ? { ...p, ...patch } : p)) }
 }
@@ -126,6 +131,27 @@ export function newExperiment(): ExperimentCard {
 /** 空白的销售承接。 */
 export function newSalesHandover(): SalesHandover {
   return { owner: '', response_sla_hours: 24, channels: [], fallback: '' }
+}
+
+/**
+ * 标记 / 取消某个阶段是不是实验。
+ * 取消时**把这个键整个删掉**，不是写 false —— 写 false 会被算进内容指纹，
+ * 等于「什么都没改却改了内容」，已点过的人工核实记录会被作废（魏征 2026-10-18 复审必改项 3）。
+ */
+export function setIsExperiment(spec: PromoSpec, phaseId: string, on: boolean): PromoSpec {
+  return {
+    ...spec,
+    phases: spec.phases.map(p => {
+      if (p.id !== phaseId) return p
+      if (on) return { ...p, is_experiment: true }
+      const rest: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(p)) {
+        if (key === 'is_experiment') continue
+        rest[key] = value
+      }
+      return rest as PromoPhase
+    }),
+  }
 }
 
 /** 改某个阶段的经营判断卡；传 undefined 表示删掉这张卡。 */
