@@ -1,5 +1,6 @@
 import type { LedgerEntry, LedgerStatus } from '@/lib/ledger/types'
 import type { BoardIssue, PointState, SkillCard, SkillCardError } from './types'
+import { DEFAULT_AGENT, agentLabel } from './agents'
 
 export interface BoardInput {
   cards: SkillCard[]
@@ -35,6 +36,8 @@ export interface BoardItem {
   verifiedPending: boolean
   /** ledger handoff card that no point references */
   orphan: boolean
+  /** which Agent owns this item */
+  agent: string
 }
 
 export interface BoardCounts {
@@ -47,6 +50,35 @@ export interface BoardCounts {
   alreadyInMe: number
 }
 
+export const ATTENTION_LIMIT = 5
+
+export interface AttentionList {
+  /** at most ATTENTION_LIMIT items */
+  shown: BoardItem[]
+  /** how many more were cut off */
+  more: number
+}
+
+export interface AgentCounts {
+  /** state === 'learning' only (pm_decision is counted separately) */
+  learning: number
+  verifying: number
+  pmDecision: number
+  passed: number
+  adopted: number
+}
+
+export interface AgentBlock {
+  agent: string
+  /** display name, unmapped agents keep their raw key */
+  label: string
+  counts: AgentCounts
+  /** points waiting for the PM to decide (state pm_decision) */
+  decisions: AttentionList
+  /** verifying items whose ledger verify date has passed (item.overdue) */
+  overdue: AttentionList
+}
+
 export interface Board {
   /** non-null = whole page must show only this red error */
   fatal: string | null
@@ -57,6 +89,8 @@ export interface Board {
   unorganized: SkillCardError[]
   /** 读到并解析成功的学习笔记张数，页面显示给 PM 核对 */
   cardCount: number
+  /** per-Agent summary blocks */
+  agents: AgentBlock[]
 }
 
 export const RULE_ID_RE = /^(RL|S|C|E|B)-\d+$/
@@ -123,7 +157,15 @@ function zeroCounts(): BoardCounts {
 }
 
 function fatalBoard(message: string, errors: SkillCardError[]): Board {
-  return { fatal: message, groups: emptyGroups(), counts: zeroCounts(), issues: [], unorganized: errors, cardCount: 0 }
+  return {
+    fatal: message,
+    groups: emptyGroups(),
+    counts: zeroCounts(),
+    issues: [],
+    unorganized: errors,
+    cardCount: 0,
+    agents: [],
+  }
 }
 
 function groupOf(state: PointState): BoardGroupKey | null {
@@ -163,6 +205,7 @@ function baseItem(card: SkillCard, point: SkillCard['points'][number]): BoardIte
     overdue: false,
     verifiedPending: false,
     orphan: false,
+    agent: card.agent,
   }
 }
 
@@ -339,6 +382,7 @@ function orphanItems(
       overdue: isOverdue(entry, today),
       verifiedPending: entry.status === 'verified',
       orphan: true,
+      agent: DEFAULT_AGENT,
     })
   }
   return items
@@ -353,6 +397,62 @@ function countGroups(groups: Record<BoardGroupKey, BoardItem[]>): BoardCounts {
     adopted: groups.adopted.length,
     alreadyInMe: groups.already_in_me.length,
   }
+}
+
+function toAttention(items: BoardItem[]): AttentionList {
+  const shown = items.slice(0, ATTENTION_LIMIT)
+  return { shown, more: items.length - shown.length }
+}
+
+const AGENT_GROUP_KEYS: readonly BoardGroupKey[] = ['learning', 'pm_decision', 'verifying', 'adopted', 'passed']
+
+function collectAgentKeys(groups: Record<BoardGroupKey, BoardItem[]>): Set<string> {
+  const keys = new Set<string>()
+  for (const groupKey of AGENT_GROUP_KEYS) {
+    for (const item of groups[groupKey]) keys.add(item.agent)
+  }
+  return keys
+}
+
+function itemsOfAgent(items: BoardItem[], agent: string): BoardItem[] {
+  return items.filter((item) => item.agent === agent)
+}
+
+function buildAgentBlock(groups: Record<BoardGroupKey, BoardItem[]>, agent: string): AgentBlock {
+  const learning = itemsOfAgent(groups.learning, agent)
+  const pmDecision = itemsOfAgent(groups.pm_decision, agent)
+  const verifying = itemsOfAgent(groups.verifying, agent)
+  const passed = itemsOfAgent(groups.passed, agent)
+  const adopted = itemsOfAgent(groups.adopted, agent)
+  const overdue = verifying.filter((item) => item.overdue)
+  return {
+    agent,
+    label: agentLabel(agent),
+    counts: {
+      learning: learning.length,
+      verifying: verifying.length,
+      pmDecision: pmDecision.length,
+      passed: passed.length,
+      adopted: adopted.length,
+    },
+    decisions: toAttention(pmDecision),
+    overdue: toAttention(overdue),
+  }
+}
+
+function sortAgentBlocks(blocks: AgentBlock[]): AgentBlock[] {
+  return blocks.sort((a, b) => {
+    if (a.agent === DEFAULT_AGENT) return b.agent === DEFAULT_AGENT ? 0 : -1
+    if (b.agent === DEFAULT_AGENT) return 1
+    return a.agent.localeCompare(b.agent)
+  })
+}
+
+export function buildAgentBlocks(groups: Record<BoardGroupKey, BoardItem[]>): AgentBlock[] {
+  const keys = collectAgentKeys(groups)
+  const blocks: AgentBlock[] = []
+  for (const agent of keys) blocks.push(buildAgentBlock(groups, agent))
+  return sortAgentBlocks(blocks)
 }
 
 interface CheckContext {
@@ -427,5 +527,6 @@ export function buildBoard(input: BoardInput): Board {
     issues,
     unorganized: input.errors,
     cardCount: input.cards.length,
+    agents: buildAgentBlocks(groups),
   }
 }

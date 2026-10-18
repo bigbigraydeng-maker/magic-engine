@@ -8,7 +8,7 @@ function point(over: Partial<SkillPoint> & Pick<SkillPoint, 'key' | 'state'>): S
 }
 
 function makeCard(id: string, points: SkillPoint[], hasCorrection = false): SkillCard {
-  return { id, file: id + '.md', title: '卡 ' + id, sourceUrl: null, hasCorrection, points }
+  return { id, file: id + '.md', title: '卡 ' + id, sourceUrl: null, hasCorrection, agent: 'ads', points }
 }
 
 function entry(
