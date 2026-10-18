@@ -852,4 +852,36 @@ describe('🔴 ads.pause_campaign · 账户号必须是 act_ 形式（stop-loss 
     // 实测原因：按纯数字账户号去库里找，快照（存的是 act_ 形式）一行都对不上。
     if ('unavailable' in r) expect(r.unavailable).toContain('快照里查不到')
   })
+
+  // 子牙复审：止损路由还有「降预算」两条路（系列级 / 广告组级），只证明了暂停的事实链能读通不够。
+  it('ads.cut_campaign_budget · act_ 形式 → 能读出事实，减预算的目标金额带进去', async () => {
+    const r = await resolve(tables(), log(), 'authorize', 'ads.cut_campaign_budget', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, campaign_id: '456', after_cents: 4_000,
+    })
+    expect('facts' in r).toBe(true)
+    if ('facts' in r) expect(r.request).toMatchObject({ kind: 'budget_change', afterCents: 4_000 })
+  })
+
+  it('ads.cut_unit_budget · act_ 形式 → 能读出事实', async () => {
+    const r = await resolve({
+      ...tables(),
+      ad_entity_snapshots: [
+        account(ACCOUNT, 'account', ACCOUNT, null),
+        account(ACCOUNT, 'campaign', 'cmp-abo', null, { budget_level: 'abo' }),
+        account(ACCOUNT, 'adset', ADSET, 500),
+      ],
+    }, log(), 'authorize', 'ads.cut_unit_budget', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, adset_id: ADSET, after_cents: 400,
+    })
+    expect('facts' in r).toBe(true)
+  })
+
+  it.each(['ads.cut_campaign_budget', 'ads.cut_unit_budget'])('%s · 纯数字账户号 → 读不出事实（fail-closed）', async (actionKey) => {
+    const digits = ACCOUNT.replace(/^act_/, '')
+    const input = actionKey === 'ads.cut_campaign_budget'
+      ? { cycle_date: '2026-09-27', ad_account_id: digits, campaign_id: '456', after_cents: 4_000 }
+      : { cycle_date: '2026-09-27', ad_account_id: digits, adset_id: ADSET, after_cents: 400 }
+    const r = await resolve(tables(), log(), 'authorize', actionKey, input)
+    expect('unavailable' in r).toBe(true)
+  })
 })
