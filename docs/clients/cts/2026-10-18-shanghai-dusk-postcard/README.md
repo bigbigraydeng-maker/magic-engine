@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 钩子（2 行大字） | `SHANGHAI` / `AT DUSK` | 钩子文字不要求出处；只描述画面（上海、黄昏），不含任何产品/价格/时效断言 | 钩子过禁词/价格闸 |
 | 场景1 地名 | `Shanghai` | shanghai-surroundings 路线原文：「Auckland → Shanghai → Suzhou → Wuxi → Xinshi Ancient Town → Hangzhou → Shanghai → Auckland」 | 与既往 Shanghai 工单同一出处 |
-| 场景1 一句话 | `The Bund` | https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings Day 08：「The Bund and City God Temple area」；亮点原文：「The Bund, City God Temple quarter, World Cultural Heritage Art Exhibition Centre, and Nanjing Road」 | ⚠️ **画面是否就是外滩**：我目视是黄浦江对岸的历史建筑群，Pexels 标签含 Shanghai、作者自称上海人，但**页面没写「The Bund」**——不是 100% 证实。保守替代：把这句改成 `Along the river` 之类无出处的就不行（一句话必须有出处），所以保守方案=场景1 一句话也用「The Shanghai skyline」。**请 18 号/PM 定：用「The Bund」（官网有原词，画面我判断是）还是保守** |
+| 场景1 一句话（**最终：改用保守**） | `The Shanghai skyline`（见下方「最终」）；~~`The Bund`~~ | https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings Day 08：「The Bund and City God Temple area」；亮点原文：「The Bund, City God Temple quarter, World Cultural Heritage Art Exhibition Centre, and Nanjing Road」 | ⚠️ **画面是否就是外滩**：我目视是黄浦江对岸的历史建筑群，Pexels 标签含 Shanghai、作者自称上海人，但**页面没写「The Bund」**——不是 100% 证实。保守替代：把这句改成 `Along the river` 之类无出处的就不行（一句话必须有出处），所以保守方案=场景1 一句话也用「The Shanghai skyline」。**请 18 号/PM 定：用「The Bund」（官网有原词，画面我判断是）还是保守** |
 | 场景2 地名 | `Shanghai` | 同上 | |
 | 场景2 一句话 | `The Shanghai skyline` | shanghai-surroundings 原文：「Water towns, gardens and the Shanghai skyline.」；Best of China 页另有「Lujiazui skyline corridor」 | 东方明珠航拍日落，画面与 skyline 吻合；**官网没写「Oriental Pearl」，所以不写塔名** |
 | 片尾卡标题 | `CTS TOURS` | 品牌名，无断言 | 不放价格/团名/日期 |
@@ -30,3 +30,9 @@
 | 地点真实可溯 | 上海（官网路线原词）；是否「外滩」见上 ⚠️ | 部分（待定） |
 | 时长 | 17s | 满足 |
 | 与 NC v4 同曲 | 都用 jade：不要同一天公开，是否同发由 PM 定 | 需 PM 定 |
+
+## 最终文案与结果（2026-10-18，18 号过目后）
+- 场景1：`Shanghai` + `The Shanghai skyline`（出处原句「Water towns, gardens and the Shanghai skyline.」，shanghai-surroundings）；场景2：`Shanghai` + `Lujiazui skyline corridor`（出处原句「Shanghai: Yuyuan Garden, Bund, Nanjing Road, Lujiazui skyline corridor, World Cultural Heritage Art Exhibition Centre」，essentials 页「Highlights」）；塔名与「The Bund」都不写。
+- 衍生片：`pc1_tower_sunset_hook`(atm2[0:4])、`pc1_huangpu_sunset_a`(atm1[2:7])、`pc1_tower_sunset_b`(atm2[8:13])、`pc1_huangpu_sunset_end`(atm1[24:28.5])，1080×1920 30fps。
+- 工单 **49fe022e-6a06-4a14-8db2-eeaf738eb31c**（v2，到待审）；v1 56bf495c 因首评文案与 CTA 重复导致「CTA 在首评」体检 FAIL，已 superseded（画面相同）。
+- 自检：17.0s、1080×1920、−16.5 LUFS、封面 0.5s 亮度 109.5/范围 230、**7 项自动体检全 PASS**；人声闸回执 jade_river_journey 窗口 [0.133,17.133]、登记到 20s ✓。**品控标记 1 条（AI 判）`placeholder_caption`「字幕疑似内部内容分类标签冒充真文案」**——屏幕文字全是短地名标签，AI 觉得像分类标签；如实保留，不压制。9 宫格 `49fe022e-self-check-grid.jpg`：钩子（东方明珠黄昏航拍 + SHANGHAI AT DUSK）→ 场景1 黄浦江日落（SHANGHAI / The Shanghai skyline）→ 场景2 东方明珠（SHANGHAI / Lujiazui skyline corridor）→ 片尾卡 CTS TOURS；无人像、无价格、Logo 完整；文字清晰。
