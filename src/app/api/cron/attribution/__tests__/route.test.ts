@@ -148,6 +148,21 @@ describe('POST /api/cron/attribution', () => {
     expect(body.deferred).toBe(4)
   })
 
+  it('surfaces not_evaluable suggestions in the response without counting them as failures', async () => {
+    // A suggestion with no execution evidence is a reported gap, not a run
+    // failure — it must be visible in the response and the cron log must stay
+    // green.
+    mockRunAttributionJob.mockResolvedValue({ processed: 4, written: 1, skipped: 0, failed: 0, deferred: 0, pass2ClientIds: [], unattributable: 0, unattributableSamples: [], reconcileErrors: 0, reconcileErrorSamples: [], not_evaluable: 3 })
+
+    const res = await POST(makeRequest({ authorization: 'Bearer test-secret' }))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.not_evaluable).toBe(3)
+    expect(body.failed).toBe(0)
+    expect(cronLogUpdate?.failed_count).toBe(0)
+  })
+
   it('refuses a custom pass-1 window while the gate is off, and says so', async () => {
     // Pass 1 accepts a window too. On main a re-run at a different window
     // REPLACED the previous rows; the natural key now appends, so this is a
