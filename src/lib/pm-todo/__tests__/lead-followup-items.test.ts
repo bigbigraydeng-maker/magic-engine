@@ -142,7 +142,8 @@ describe('pushLeadFollowupItems', () => {
     expect(failed).toBeDefined()
     expect(failed?.client_id).toBe(NAL)
     expect(failed?.href).toBe('')
-    expect(failed?.what).toContain('query timeout')
+    expect(failed?.what).toContain('这一栏今天没算出来')
+    expect(failed?.what).not.toContain('query timeout')
     expect(failed?.what).toContain('没有结果不等于没有人在等')
 
     const ok = items.find((i) => i.kind === 'lead_followup_due')
