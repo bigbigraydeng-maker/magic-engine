@@ -52,3 +52,48 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "extra-step-after-form",
+   "text": "表单最后一页给再走一步（致电/预约/私聊）",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates"
+  },
+  {
+   "key": "turn-off-enhancements",
+   "text": "建广告时关掉多数创意增强",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-119-test-ads-auto-creative-off"
+  },
+  {
+   "key": "form-one-two-questions",
+   "text": "表单只问 1–2 题",
+   "state": "already_in_me",
+   "rule": "C-13"
+  },
+  {
+   "key": "collect-address",
+   "text": "表单收地址",
+   "state": "learning",
+   "note": "只对上门服务类成立，行业候选；对 CTS 与 C-13 不收地址冲突"
+  },
+  {
+   "key": "interest-words-audience-size",
+   "text": "兴趣词 + 受众 ≥20 万",
+   "state": "not_applicable",
+   "note": "无出处数字，不借用（E-06）"
+  },
+  {
+   "key": "lock-placements-lead",
+   "text": "留资目标也锁版位",
+   "state": "learning",
+   "note": "ME 只对播放目标有规定，可只读查"
+  }
+ ]
+}
+```

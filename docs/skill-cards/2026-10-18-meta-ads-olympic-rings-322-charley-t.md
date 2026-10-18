@@ -58,3 +58,42 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "can-we-spend-more-diagnosis",
+   "text": "收口阶段先问「能不能多花」两问诊断",
+   "state": "already_in_me",
+   "rule": "B-04"
+  },
+  {
+   "key": "always-cbo",
+   "text": "始终用 CBO",
+   "state": "not_applicable",
+   "note": "与测试用 ABO（S-12）冲突"
+  },
+  {
+   "key": "flexible-322-as-test",
+   "text": "322 灵活广告当测试",
+   "state": "not_applicable",
+   "note": "给不出逐组合成绩；放量阶段可作候选格式"
+  },
+  {
+   "key": "five-rings-structure",
+   "text": "五环：3 条拉新 + 2 条收口，每条有任务",
+   "state": "learning",
+   "note": "无数据；可并入素材形式标签"
+  },
+  {
+   "key": "frequency-numbers",
+   "text": "频次 1.6、3–4 个月一爆款等数字",
+   "state": "not_applicable",
+   "note": "未核实，不借用（E-06）"
+  }
+ ]
+}
+```

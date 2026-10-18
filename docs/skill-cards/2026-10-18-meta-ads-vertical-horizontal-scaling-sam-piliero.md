@@ -55,3 +55,42 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "spend-by-tier",
+   "text": "放量时按新/互动/老客户拆花费",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-new-vs-warm-spend-split"
+  },
+  {
+   "key": "raise-20-30-or-double",
+   "text": "一次加预算 20–30% 或翻倍",
+   "state": "not_applicable",
+   "note": "与单次上限 ±20% 冲突（B-04）"
+  },
+  {
+   "key": "trim-intro-new-version",
+   "text": "赢家剪掉开头出新版本",
+   "state": "learning",
+   "note": "部分吸收：开头仍须真人并走视频工厂（C-10）"
+  },
+  {
+   "key": "funnel-mid-metrics",
+   "text": "看漏斗中间指标判断后面会不会来",
+   "state": "already_in_me",
+   "rule": "E-02"
+  },
+  {
+   "key": "incremental-attribution",
+   "text": "增量归因栏",
+   "state": "not_applicable",
+   "note": "ME 读不出归因窗口，前卡已判忽略"
+  }
+ ]
+}
+```

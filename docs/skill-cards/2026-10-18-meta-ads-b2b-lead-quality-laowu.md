@@ -53,3 +53,42 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "required-text-questions",
+   "text": "表单加必填手写题换精准",
+   "state": "not_applicable",
+   "note": "与 C-13 及 ME 实测冲突（填表率 15.1% 掉到 3.0%）"
+  },
+  {
+   "key": "single-choice-question",
+   "text": "加一道单选：想要哪款产品/团",
+   "state": "already_in_me",
+   "rule": "PG§二十"
+  },
+  {
+   "key": "thank-you-private-chat",
+   "text": "提交后给私聊入口",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates"
+  },
+  {
+   "key": "state-threshold-in-copy",
+   "text": "文案里先写清门槛来筛人",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates"
+  },
+  {
+   "key": "sales-management",
+   "text": "销售别天天催、老板先接、提成挂钩",
+   "state": "pm_decision",
+   "note": "客户自己的销售管理"
+  }
+ ]
+}
+```

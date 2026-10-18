@@ -59,3 +59,48 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "competitor-library-long-running",
+   "text": "去广告资料库找同行投得久的广告",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-competitor-long-running-ads"
+  },
+  {
+   "key": "organic-reel-to-ad",
+   "text": "有机反响好的短视频转广告",
+   "state": "learning",
+   "note": "现有同步任务被手册列为缺口，存疑"
+  },
+  {
+   "key": "few-changes-focus",
+   "text": "少改、集中、算清客户价值",
+   "state": "already_in_me",
+   "rule": "C-06"
+  },
+  {
+   "key": "significance-calculator",
+   "text": "显著性计算器作为事前判据",
+   "state": "learning",
+   "note": "ME 小样本多数到不了 90% 显著"
+  },
+  {
+   "key": "skip-awareness",
+   "text": "不做认知/互动类广告",
+   "state": "learning",
+   "note": "部分吸收：对普通留资成立，高客单旅游保留 ThruPlay 供血"
+  },
+  {
+   "key": "only-most-valuable-people",
+   "text": "只对最值钱人群说话",
+   "state": "learning",
+   "note": "讲他们关心的利益可以，不点名个人属性（S-13）"
+  }
+ ]
+}
+```

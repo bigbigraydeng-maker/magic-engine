@@ -51,3 +51,30 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "tier-report",
+   "text": "账户里标出互动/老客户并按层看花费",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-new-vs-warm-spend-split"
+  },
+  {
+   "key": "cancel-retargeting",
+   "text": "取消单独再营销、冷热合并",
+   "state": "learning",
+   "note": "依赖上一条结果；改受众要 PM 本人"
+  },
+  {
+   "key": "merge-same-goal",
+   "text": "目标相同就合并，不同才拆",
+   "state": "already_in_me",
+   "rule": "S-01"
+  }
+ ]
+}
+```

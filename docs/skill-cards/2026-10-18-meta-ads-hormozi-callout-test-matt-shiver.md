@@ -54,3 +54,48 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "turn-off-related-media",
+   "text": "测试时关「相关媒体」与创意增强",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-119-test-ads-auto-creative-off"
+  },
+  {
+   "key": "one-audience-many-angles",
+   "text": "一个人群多个角度、记角度",
+   "state": "already_in_me",
+   "rule": "AT§6"
+  },
+  {
+   "key": "separate-test-scale",
+   "text": "测试系列与放量系列分开",
+   "state": "already_in_me",
+   "rule": "C-08"
+  },
+  {
+   "key": "pick-winner-by-spend",
+   "text": "按花费/结果挑赢家",
+   "state": "not_applicable",
+   "note": "同组让平台分配不构成测试（AT§4）"
+  },
+  {
+   "key": "identity-callout-copy",
+   "text": "文案点名身份人群",
+   "state": "learning",
+   "note": "B2B 点名行业可以；个人属性不行（S-13）"
+  },
+  {
+   "key": "hundred-dollar-numbers",
+   "text": "日预算 100 美元、年龄 25 等数字",
+   "state": "not_applicable",
+   "note": "无出处个人数字（E-06）"
+  }
+ ]
+}
+```

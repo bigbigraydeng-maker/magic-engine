@@ -54,3 +54,48 @@
 
 ## 效果回写
 （空）
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "similar-merged",
+   "text": "长得像的素材会被平台当成一条",
+   "state": "merged",
+   "merged_into": "2026-10-18-meta-ads-creative-testing-post-andromeda#similar-merged"
+  },
+  {
+   "key": "lp-consistency",
+   "text": "广告和落地页说同一件事",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates"
+  },
+  {
+   "key": "twentyfive-creatives",
+   "text": "素材至少 25 条",
+   "state": "not_applicable",
+   "note": "小预算做不到，且无数据"
+  },
+  {
+   "key": "cost-up-fatigue",
+   "text": "成本上升先怀疑素材疲劳",
+   "state": "already_in_me",
+   "rule": "PG§十八"
+  },
+  {
+   "key": "awareness-stage-ads",
+   "text": "按认知阶段补教育类广告",
+   "state": "learning",
+   "note": "需出片能力，交 106 号评估"
+  },
+  {
+   "key": "hide-rate",
+   "text": "用隐藏率当广告质量信号",
+   "state": "learning",
+   "note": "接口能否读到未核"
+  }
+ ]
+}
+```
