@@ -149,6 +149,7 @@ export const ACTION_BRIDGE_FORBIDDEN_IMPORTS = [
   '@/lib/execution',
   '@/lib/zhuge',
   '@/lib/cms/',
+  // 目录已删除（2026-10 Publer 退役），此条保留为防止回归。
   '@/lib/publer/',
   '@/lib/gbp/',
   '@/lib/gsc/',
@@ -181,6 +182,7 @@ export const ACTION_SUBMISSION_FORBIDDEN_IMPORTS = [
   '@/lib/growth',
   '@/lib/geo-module',
   '@/lib/cms/',
+  // 目录已删除（2026-10 Publer 退役），此条保留为防止回归。
   '@/lib/publer/',
   '@/lib/gbp/',
   '@/lib/gsc/',

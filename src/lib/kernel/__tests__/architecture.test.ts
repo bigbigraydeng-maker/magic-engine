@@ -314,7 +314,7 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
    * 多放一个允许目录，整个目录都能直接对外写。模块清单两个方向都冻：新加模块是好事，
    * 但要同步进冻结清单，下限才会跟着涨——不涨的话，以后有人再把它删掉，这里看不出来。
    *
-   * 2026-09-27：历史 23 条（Publer 退役删 6 条后现状）+ seo-meta 三条临时豁免（子牙拍板，SEO 3b · B7 迁走后删）。
+   * 2026-09-27：seo-meta 三条为临时豁免（子牙拍板，SEO 3b · B7 迁走后删）；2026-10 Publer 退役删 6 条后，现状共 23 条（含 seo-meta 3 条）。
    */
   const PROVIDER_WRITE_GRANDFATHERED_FROZEN: readonly string[] = [
     'src/app/api/clients/[id]/cms/github/update-page/route.ts',

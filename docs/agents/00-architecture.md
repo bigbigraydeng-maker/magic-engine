@@ -182,10 +182,10 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 | Agent | 可用 Plugin | 权限 |
 |-------|------------|------|
 | 子牙 | Supabase / Cloudflare / GitHub | 读写 |
-| 诸葛亮 | Meta Ads / SEMrush / GA4 / Airtable / Publer / 所有 ME API | 读写 |
+| 诸葛亮 | Meta Ads / SEMrush / GA4 / Airtable / Publer / 所有 ME API | 读写（Publer 已于 2026-10 删除） |
 | 张骞 | Jina.ai / SEMrush / DataForSEO / AI Tracker | 只读 |
 | 华佗 | Supabase（内部数据）| 只读 |
-| 鲁班 | Publer / Meta Ads / Google Ads / Airtable / Atlas / Seedance | 读写 |
+| 鲁班 | Publer / Meta Ads / Google Ads / Airtable / Atlas / Seedance | 读写（Publer 已于 2026-10 删除） |
 | 马良 | Higgsfield AI / Seedance / WaveSpeed / Meta Insights / TikTok Insights | 只读+写 Memory |
 | 李白 | SEMrush / DataForSEO / Jina.ai | 只读+写 Memory |
 | 魏征 | Bash/shell / 代码仓库 | 读写（仅代码层）|
