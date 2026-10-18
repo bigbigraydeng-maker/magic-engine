@@ -39,6 +39,10 @@ interface World {
   redlineWord: string
   seq: number
   afterPromoteDescription: string | null
+  onPromote: (() => void) | null
+  onComment: (() => Promise<void>) | null
+  failCas: number
+  promoteEstimated: boolean
 }
 
 function makeWorld(): World {
@@ -55,6 +59,7 @@ function makeWorld(): World {
     target: { platform: 'facebook', page_id: PAGE, expect_brand: 'Acme', client_id: CLIENT_ID },
     log: [], alerts: [], orderWriteFails: 0, promoteError: null, commentError: null, readError: null,
     redlineWord: 'badword', seq: 0, afterPromoteDescription: null,
+    onPromote: null, onComment: null, failCas: 0, promoteEstimated: false,
   }
 }
 
@@ -69,6 +74,7 @@ function makeDeps(w: World): PromoteDeps {
       async loadTrafficRow() { return w.row ? structuredClone(w.row) : null },
       async casPayload(_id, _c, expected, next) {
         const cur = w.row?.payload['promote_rev'] ?? null
+        if (w.failCas > 0 && w.log.includes('meta.promote')) { w.failCas -= 1; return false }
         if (!w.row || cur !== expected) return false
         w.row.payload = structuredClone(next)
         w.log.push('traffic')
@@ -93,10 +99,12 @@ function makeDeps(w: World): PromoteDeps {
         if (w.promoteError) throw w.promoteError
         w.meta.published = true
         if (w.afterPromoteDescription !== null) w.meta.description = w.afterPromoteDescription
-        return { platform: 'facebook', page_id: PAGE, post_id: VIDEO, video_id: VIDEO, published_at: new Date(w.now).toISOString(), permalink: '/reel/2222222222/', video_state: 'PUBLISHED' }
+        w.onPromote?.()
+        return { platform: 'facebook', page_id: PAGE, post_id: VIDEO, video_id: VIDEO, published_at: new Date(w.now).toISOString(), permalink: '/reel/2222222222/', video_state: 'PUBLISHED', ...(w.promoteEstimated ? { published_at_estimated: true } : {}) }
       },
       async ensureFirstComment() {
         w.log.push('comment')
+        if (w.onComment) await w.onComment()
         if (w.commentError) throw w.commentError
         return 'comment-1'
       },
@@ -357,27 +365,144 @@ describe('时间取值与重入', () => {
     expect(w.log.filter((x) => x === 'meta.promote').length).toBe(1)
   })
 
-  it('工单已写成公开但收尾没做完:只补首评和回执,不再调 Meta', async () => {
+  it('已完成(consumed)且首评已发好 → 再点 409', async () => {
     await confirm(await tokenOf())
-    const rid = w.order.published_ref['promote_request_id']
-    w.row!.payload['promote_authorization'] = { ...auth(), status: 'meta_published_db_pending', request_id: rid }
+    const r = await runPromote(deps, { orderId: ORDER_ID, adminEmail: ADMIN, confirm: false })
+    expect(!r.ok && r.status).toBe(409)
+  })
+
+  it('7.2 失败后租约立刻释放:不用等 5 分钟就能重试', async () => {
+    w.orderWriteFails = 3
+    expect((await confirm(await tokenOf())).ok).toBe(false)
+    expect(auth().status).toBe('meta_published_db_pending')
+    expect((await confirm(await tokenOf())).ok).toBe(true) // 时间没往后拨
+  })
+
+  it('7.1 写库失败:租约释放为 failed,真实 published_at 留在回执里,重入沿用而不重取', async () => {
+    w.failCas = 3
+    const first = await confirm(await tokenOf())
+    expect(!first.ok && first.status).toBe(500)
+    expect(auth().status).toBe('failed')
+    expect(auth().published_at).toBe(new Date(T0).toISOString())
+    w.now += 3_600_000
+    w.meta.updatedTime = '2026-10-20T00:30:00.000Z'
+    const second = await confirm(await tokenOf())
+    expect(second.ok).toBe(true)
+    expect(w.order.published_ref['published_at']).toBe(new Date(T0).toISOString())
+    expect(w.row?.payload['published_at']).toBe(new Date(T0).toISOString())
+    expect(w.log.filter((x) => x === 'meta.promote').length).toBe(1)
+  })
+
+  it('Meta 调用失败后 promote_called_at 被清掉(下次不会拿旧尝试的时间当估算)', async () => {
+    w.promoteError = new Error('boom')
+    await confirm(await tokenOf())
+    expect(auth().promote_called_at).toBeUndefined()
+  })
+
+  it('适配器说这次是「已公开」的估算时间 → 标 estimated / late_backfill', async () => {
+    w.promoteEstimated = true
+    await confirm(await tokenOf())
+    expect(w.order.published_ref['published_at_estimated']).toBe(true)
+    expect(auth().late_backfill).toBe(true)
+  })
+})
+
+describe('首评失败后补发 / 已公开后的收尾', () => {
+  async function promoteWithFailedComment(): Promise<void> {
+    w.commentError = new Error('comment boom')
+    await confirm(await tokenOf())
+    w.commentError = null
+  }
+
+  it('首评失败:收尾标 consumed + failed,工单带「首评待补」标记供页面显示入口', async () => {
+    await promoteWithFailedComment()
+    expect(auth().status).toBe('consumed')
+    expect(auth().first_comment_status).toBe('failed')
+    expect(w.order.published_ref['first_comment_pending']).toBe(true)
+  })
+
+  it('可以补发首评:要预览+令牌;预览不发评论;确认只发评论、不再调 Meta 转公开', async () => {
+    await promoteWithFailedComment()
     w.log.length = 0
-    const r = await runPromote(deps, { orderId: ORDER_ID, adminEmail: ADMIN, confirm: true })
+    const noToken = await runPromote(deps, { orderId: ORDER_ID, adminEmail: ADMIN, confirm: true })
+    expect(!noToken.ok && noToken.status).toBe(403)
+    const pv = await preview()
+    expect(pv.ok && pv.kind === 'preview' ? pv.data.mode : '').toBe('comment_only')
+    expect(w.log).not.toContain('comment')
+    const r = await confirm(pv.ok && pv.kind === 'preview' ? pv.data.preview_token : undefined)
+    expect(r.ok && r.kind).toBe('synced')
+    expect(w.log).toContain('comment')
+    expect(w.log).not.toContain('meta.promote')
+    expect(auth().first_comment_status).toBe('ok')
+    expect(w.order.published_ref).not.toHaveProperty('first_comment_pending')
+    expect(w.order.published_ref['video_state']).toBe('PUBLISHED')
+  })
+
+  it('工单已写成公开但收尾没做完:预览只发令牌,确认才补首评和回执', async () => {
+    await confirm(await tokenOf())
+    w.row!.payload['promote_authorization'] = { ...auth(), status: 'meta_published_db_pending' }
+    w.log.length = 0
+    const token = await tokenOf()
+    expect(w.log).not.toContain('comment')
+    const r = await confirm(token)
     expect(r.ok && r.kind).toBe('synced')
     expect(w.log).not.toContain('meta.promote')
     expect(auth().status).toBe('consumed')
   })
+})
 
-  it('已完成(consumed)的工单再点 → 409', async () => {
-    await confirm(await tokenOf())
-    const r = await runPromote(deps, { orderId: ORDER_ID, adminEmail: ADMIN, confirm: true })
-    expect(!r.ok && r.status).toBe(409)
+describe('租约与 request 栅栏', () => {
+  it('收尾(补首评)期间租约不放:别的管理员此时预览/确认都被拒,只有一次评论', async () => {
+    let rivalPreview: PromoteResult | null = null
+    let rivalConfirm: PromoteResult | null = null
+    w.onComment = async () => {
+      w.onComment = null
+      rivalPreview = await preview('b@example.com')
+      rivalConfirm = await runPromote(deps, { orderId: ORDER_ID, adminEmail: 'b@example.com', confirm: true, previewToken: 'guess' })
+    }
+    const r = await confirm(await tokenOf())
+    expect(r.ok).toBe(true)
+    expect((rivalPreview as PromoteResult | null)?.ok).toBe(false)
+    expect((rivalConfirm as PromoteResult | null)?.ok).toBe(false)
+    expect(w.log.filter((x) => x === 'comment').length).toBe(1)
+    expect(w.log.filter((x) => x === 'meta.promote').length).toBe(1)
   })
 
-  it('补发任务清 event_ids 后能补发:published_ref 保持 PUBLISHED 且无 event_ids,ig 标记还在', async () => {
-    await confirm(await tokenOf())
-    expect(w.order.published_ref['video_state']).toBe('PUBLISHED')
-    expect(w.order.published_ref['event_ids']).toBeUndefined()
-    expect(w.order.published_ref['ig_crosspost_blocked']).toBe(true)
+  it('调 Meta 之后被别的请求接管:写流量记录被栅栏挡住,工单不被写', async () => {
+    w.onPromote = () => { w.row!.payload['promote_authorization'] = { ...auth(), attempt_id: 'someone-else' } }
+    const r = await confirm(await tokenOf())
+    expect(!r.ok && r.status).toBe(409)
+    expect(w.log).not.toContain('order')
+    expect(w.row?.payload['video_state']).toBe('DRAFT')
+  })
+
+  it('收尾期间被接管:收尾回执不会覆盖对方,返回 409', async () => {
+    w.onComment = async () => { w.row!.payload['promote_authorization'] = { ...auth(), attempt_id: 'someone-else', status: 'claimed' } }
+    const r = await confirm(await tokenOf())
+    expect(!r.ok && r.status).toBe(409)
+    expect(auth().status).toBe('claimed')
+    expect(auth().attempt_id).toBe('someone-else')
+  })
+})
+
+describe('首评发出前无条件过红线', () => {
+  it('已被人手公开的分支:首评命中红线 → 不发,标 failed + needs_attention', async () => {
+    w.meta.published = true
+    w.redlineWord = 'book now'
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind === 'synced' ? r.data.first_comment_status : '').toBe('failed')
+    expect(w.log).not.toContain('comment')
+    expect(auth().needs_attention).toBe(true)
+    expect(w.alerts.join('|')).toContain('首评命中红线')
+  })
+
+  it('首评红线检查本身出错 → 保守不发', async () => {
+    w.meta.published = true
+    const ok = deps.scanRedline
+    let calls = 0
+    deps.scanRedline = async (...a) => { calls += 1; if (calls >= 1) throw new Error('db down'); return ok(...a) }
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind === 'synced' ? r.data.first_comment_status : '').toBe('failed')
+    expect(w.log).not.toContain('comment')
   })
 })

@@ -47,3 +47,14 @@ export function withAuth(
 ): Record<string, unknown> {
   return { ...payload, promote_authorization: { ...readAuth(payload), ...patch } }
 }
+
+/**
+ * request 栅栏:包装 mutatePayload 的合并函数,授权回执里的 attempt_id 不是自己就拒绝(不写库)。
+ * 抢占后到收尾期间租约一直保持 claimed,即便租约过期被别人重抢,旧请求的后续写入也会被这里挡住。
+ */
+export function fenced(
+  attemptId: string,
+  fn: (cur: Record<string, unknown>) => Record<string, unknown>,
+): (cur: Record<string, unknown>) => Record<string, unknown> | string {
+  return (cur) => (readAuth(cur).attempt_id === attemptId ? fn(cur) : '这条已被另一个请求接管,本次操作中止')
+}

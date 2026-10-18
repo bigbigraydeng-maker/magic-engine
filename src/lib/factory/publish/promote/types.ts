@@ -32,7 +32,10 @@ export interface PromoteAuthorization {
   video_id: string
   page_id: string
   fingerprint: string
+  /** 工单侧 promote_request_id 指向它:标识「这次转公开」。 */
   request_id: string
+  /** 栅栏:每次抢占换新值,之后所有写入都要核对它仍是自己,被别的请求接管就中止。 */
+  attempt_id: string
   status: AuthorizationStatus
   claimed_at: string
   promote_called_at?: string
@@ -117,7 +120,7 @@ export type PromoteResult =
 export interface PreviewData {
   preview_token: string
   expires_at: string
-  mode: 'promote' | 'sync_only'
+  mode: 'promote' | 'sync_only' | 'comment_only'
   page_id: string
   video_id: string
   caption: string

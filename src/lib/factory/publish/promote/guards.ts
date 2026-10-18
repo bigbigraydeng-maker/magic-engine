@@ -16,12 +16,15 @@ import type { PromoteOrder, TrafficRow } from './types'
 // ── 文本归一化 ────────────────────────────────────────────────────────────────
 
 /**
- * 去掉零宽/不可见字符。红线绕过最常见的手法就是往词里塞零宽字符,
+ * 去掉不可见/组合类字符。红线绕过最常见的手法就是往词里塞不可见字符,
  * 让「品牌名」在肉眼看来一模一样、在字符串比较里却不同。
- * 覆盖:U+200B-U+200F、U+2060-U+2064、U+FEFF、U+00AD、U+2066-U+2069。
+ * 覆盖:
+ *  - \p{Cf} 格式字符(零宽空格/连接符、方向控制符、U+FEFF、U+00AD 等);
+ *  - \p{Mn} 非间距组合标记(如 U+034F 组合用字形连接符、变体选择符等);
+ *  - 韩文填充字符(U+3164、U+115F、U+1160、U+FFA0),肉眼不可见但会破坏比较。
  */
 export function stripInvisible(s: string): string {
-  return s.replace(/[\u200B-\u200F\u2060-\u2064\uFEFF\u00AD\u2066-\u2069]/g, '')
+  return s.replace(/[\p{Cf}\p{Mn}\u3164\u115F\u1160\uFFA0]/gu, '')
 }
 
 /**
@@ -102,23 +105,19 @@ function nonEmptyString(v: unknown): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v : null
 }
 
-/**
- * 转公开前的全部前置检查。fail-closed:任何一项拿不准都拒绝。
- * 顺序刻意从「配置」到「状态」到「内容」到「数据一致性」,让报错尽量指向根因。
- */
-export function checkOrderPrechecks(input: {
-  order: PromoteOrder
-  rows: TrafficRow[]
-  target: PublishTarget | null
-}): PrecheckResult {
-  const { order, rows, target } = input
-
+/** 发布目标:必须是 Facebook 主页,且配置了防误发品牌名。 */
+function checkTarget(target: PublishTarget | null): PrecheckResult | null {
   if (!target || target.platform !== 'facebook' || !nonEmptyString(target.page_id)) {
     return { ok: false, status: 422, error: '发布目标未配置或不是 Facebook 主页,不能转公开' }
   }
   if (!nonEmptyString(target.expect_brand)) {
     return { ok: false, status: 422, error: '防误发品牌名缺失,不能转公开' }
   }
+  return null
+}
+
+/** 工单状态:已发布、Reel 处于 DRAFT、且带 master_brief_id。 */
+function checkOrderState(order: PromoteOrder): PrecheckResult | null {
   if (order.status !== 'published') {
     return { ok: false, status: 409, error: '工单状态不是已发布,不能转公开' }
   }
@@ -130,7 +129,11 @@ export function checkOrderPrechecks(input: {
   if (!nonEmptyString(order.master_brief_id)) {
     return { ok: false, status: 422, error: '工单缺少 master_brief_id,不能转公开' }
   }
+  return null
+}
 
+/** 审片清单:人工清单与自动清单都必须存在、完整且全部通过。 */
+function checkChecklists(order: PromoteOrder): PrecheckResult | null {
   const reviewRef = asRecord(order.review_ref)
   const output = asRecord(order.output)
   const humanChecklist = validateContentChecklist(
@@ -151,16 +154,32 @@ export function checkOrderPrechecks(input: {
   ) {
     return { ok: false, status: 409, error: '审片清单缺失、未完成或未通过,不能转公开' }
   }
+  return null
+}
 
+/** 流量记录:必须恰好一条,否则无法确定转哪一条。 */
+function checkRows(rows: TrafficRow[]): PrecheckResult | null {
   if (rows.length === 0) {
     return { ok: false, status: 409, error: '找不到该工单的发布流量记录,不能转公开' }
   }
   if (rows.length > 1) {
     return { ok: false, status: 409, error: '该工单有多条发布流量记录,无法确定转哪一条,不能转公开' }
   }
+  return null
+}
 
-  const row = rows[0]
+/**
+ * 数据一致性:工单、流量记录、发布目标三方的视频 id / 主页 id 必须一致,
+ * 且工单带有审片通过时间。成功时返回收窄后的成功结果。
+ */
+function checkIds(
+  order: PromoteOrder,
+  row: TrafficRow,
+  target: PublishTarget,
+): PrecheckResult {
+  const publishedRef = asRecord(order.published_ref)
   const payload = asRecord(row.payload)
+
   const orderVideoId = nonEmptyString(publishedRef['video_id'])
   const rowVideoId = nonEmptyString(payload['video_id'])
   if (!orderVideoId || !rowVideoId || orderVideoId !== rowVideoId) {
@@ -173,10 +192,38 @@ export function checkOrderPrechecks(input: {
     return { ok: false, status: 409, error: '工单、流量记录与发布目标的主页 id 不一致,不能转公开' }
   }
 
+  const reviewRef = asRecord(order.review_ref)
   const approvedAt = nonEmptyString(reviewRef['approved_at'])
   if (!approvedAt) {
     return { ok: false, status: 409, error: '工单缺少审片通过时间,不能转公开' }
   }
 
   return { ok: true, row, videoId: orderVideoId, pageId: orderPageId, approvedAt }
+}
+
+/**
+ * 转公开前的全部前置检查。fail-closed:任何一项拿不准都拒绝。
+ * 顺序刻意从「配置」到「状态」到「内容」到「数据一致性」,让报错尽量指向根因。
+ */
+export function checkOrderPrechecks(input: {
+  order: PromoteOrder
+  rows: TrafficRow[]
+  target: PublishTarget | null
+}): PrecheckResult {
+  const { order, rows, target } = input
+
+  const targetFailure = checkTarget(target)
+  if (targetFailure) return targetFailure
+
+  const stateFailure = checkOrderState(order)
+  if (stateFailure) return stateFailure
+
+  const checklistFailure = checkChecklists(order)
+  if (checklistFailure) return checklistFailure
+
+  const rowsFailure = checkRows(rows)
+  if (rowsFailure) return rowsFailure
+
+  // 到这里 target 已通过 checkTarget 收窄,rows 恰好一条。
+  return checkIds(order, rows[0], target as PublishTarget)
 }

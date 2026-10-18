@@ -259,6 +259,8 @@ export interface PublishedRef {
   promote_request_id?: string
   /** true = published_at 是估算值(人手已转公开、Meta 读不到真实时间时),不是转公开成功的那一刻。 */
   published_at_estimated?: boolean
+  /** 转公开已完成但首评没发成功:工厂页据此显示「补发首评」入口。 */
+  first_comment_pending?: boolean
 }
 
 /**

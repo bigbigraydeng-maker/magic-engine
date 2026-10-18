@@ -53,86 +53,92 @@ function asRows(data: unknown): Record<string, unknown>[] {
   return rows
 }
 
+async function loadOrder(id: string): Promise<PromoteOrder | null> {
+  const { data, error } = await supabaseAdmin
+    .from('content_work_orders')
+    .select(
+      'id, client_id, status, master_brief_id, brief, output, review_ref, published_ref, updated_at',
+    )
+    .eq('id', id)
+    .maybeSingle()
+  if (error) throw error
+  const row = asPlainObject(data)
+  if (row === null) return null
+  return rowToOrder(row)
+}
+
+async function loadTrafficRows(orderId: string, clientId: string): Promise<TrafficRow[]> {
+  const { data, error } = await supabaseAdmin
+    .from('flywheel_actions')
+    .select('id, client_id, payload')
+    .eq('client_id', clientId)
+    .eq('action_type', TRAFFIC_ACTION_TYPE)
+    .eq('payload->>work_order_id', orderId)
+  if (error) throw error
+  return asRows(data).map(rowToTraffic)
+}
+
+async function loadTrafficRow(id: string, clientId: string): Promise<TrafficRow | null> {
+  const { data, error } = await supabaseAdmin
+    .from('flywheel_actions')
+    .select('id, client_id, payload')
+    .eq('id', id)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (error) throw error
+  const row = asPlainObject(data)
+  if (row === null) return null
+  return rowToTraffic(row)
+}
+
+async function casPayload(
+  id: string,
+  clientId: string,
+  expectedRev: string | null,
+  nextPayload: Record<string, unknown>,
+): Promise<boolean> {
+  // promote_rev 版本号就是乐观锁:任何其他写这一行 payload 的代码如果不带 promote_rev,
+  // 就会绕过这把锁 —— 所以所有写 payload 的路径都必须维护 promote_rev。
+  const base = supabaseAdmin
+    .from('flywheel_actions')
+    .update({ payload: nextPayload })
+    .eq('id', id)
+    .eq('client_id', clientId)
+  const guarded =
+    expectedRev === null
+      ? base.is('payload->>promote_rev', null)
+      : base.eq('payload->>promote_rev', expectedRev)
+  const { data, error } = await guarded.select('id')
+  if (error) throw error
+  return asRows(data).length === 1
+}
+
+async function writeOrderPublishedRef(
+  id: string,
+  expectedUpdatedAt: string,
+  nextRef: Record<string, unknown>,
+): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('content_work_orders')
+    .update({ published_ref: nextRef, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('updated_at', expectedUpdatedAt)
+    .eq('status', 'published')
+    .select('id')
+  if (error) throw error
+  return asRows(data).length === 1
+}
+
 /**
  * 生产 store：薄封装 supabaseAdmin。supabaseAdmin 只在函数体内引用，
  * 避免在模块导入时触发副作用。
  */
 export function createSupabasePromoteStore(): PromoteStore {
   return {
-    async loadOrder(id: string): Promise<PromoteOrder | null> {
-      const { data, error } = await supabaseAdmin
-        .from('content_work_orders')
-        .select(
-          'id, client_id, status, master_brief_id, brief, output, review_ref, published_ref, updated_at',
-        )
-        .eq('id', id)
-        .maybeSingle()
-      if (error) throw error
-      const row = asPlainObject(data)
-      if (row === null) return null
-      return rowToOrder(row)
-    },
-
-    async loadTrafficRows(orderId: string, clientId: string): Promise<TrafficRow[]> {
-      const { data, error } = await supabaseAdmin
-        .from('flywheel_actions')
-        .select('id, client_id, payload')
-        .eq('client_id', clientId)
-        .eq('action_type', TRAFFIC_ACTION_TYPE)
-        .eq('payload->>work_order_id', orderId)
-      if (error) throw error
-      return asRows(data).map(rowToTraffic)
-    },
-
-    async loadTrafficRow(id: string, clientId: string): Promise<TrafficRow | null> {
-      const { data, error } = await supabaseAdmin
-        .from('flywheel_actions')
-        .select('id, client_id, payload')
-        .eq('id', id)
-        .eq('client_id', clientId)
-        .maybeSingle()
-      if (error) throw error
-      const row = asPlainObject(data)
-      if (row === null) return null
-      return rowToTraffic(row)
-    },
-
-    async casPayload(
-      id: string,
-      clientId: string,
-      expectedRev: string | null,
-      nextPayload: Record<string, unknown>,
-    ): Promise<boolean> {
-      // promote_rev 版本号就是乐观锁:任何其他写这一行 payload 的代码如果不带 promote_rev,
-      // 就会绕过这把锁 —— 所以所有写 payload 的路径都必须维护 promote_rev。
-      const base = supabaseAdmin
-        .from('flywheel_actions')
-        .update({ payload: nextPayload })
-        .eq('id', id)
-        .eq('client_id', clientId)
-      const guarded =
-        expectedRev === null
-          ? base.is('payload->>promote_rev', null)
-          : base.eq('payload->>promote_rev', expectedRev)
-      const { data, error } = await guarded.select('id')
-      if (error) throw error
-      return asRows(data).length === 1
-    },
-
-    async writeOrderPublishedRef(
-      id: string,
-      expectedUpdatedAt: string,
-      nextRef: Record<string, unknown>,
-    ): Promise<boolean> {
-      const { data, error } = await supabaseAdmin
-        .from('content_work_orders')
-        .update({ published_ref: nextRef, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .eq('updated_at', expectedUpdatedAt)
-        .eq('status', 'published')
-        .select('id')
-      if (error) throw error
-      return asRows(data).length === 1
-    },
+    loadOrder,
+    loadTrafficRows,
+    loadTrafficRow,
+    casPayload,
+    writeOrderPublishedRef,
   }
 }

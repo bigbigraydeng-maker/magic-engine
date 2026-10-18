@@ -2,6 +2,7 @@
 
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 import type { PublishTarget } from '../../types'
+import { sanitizeFailReason } from '../publish-display'
 import {
   asRecord, checkOrderPrechecks, computeFingerprint, normalizeForCompare, redlineSurface,
 } from './guards'
@@ -35,7 +36,7 @@ async function readView(deps: PromoteDeps, target: PublishTarget, videoId: strin
     return view
   } catch (e) {
     if (e instanceof PromoteMetaError && e.kind === 'video_missing') return fail(404, '这条视频在 Facebook 上已经不存在(可能被删了)')
-    return fail(502, `读取 Facebook 视频失败: ${e instanceof Error ? e.message : String(e)}`)
+    return fail(502, `读取 Facebook 视频失败: ${sanitizeFailReason(e instanceof Error ? e.message : String(e))}`)
   }
 }
 

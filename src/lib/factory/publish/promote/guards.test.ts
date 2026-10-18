@@ -397,3 +397,17 @@ describe('checkOrderPrechecks', () => {
     if (!res.ok) expect(res.status).toBe(409)
   })
 })
+
+describe('stripInvisible 覆盖 Unicode 格式/组合类绕过', () => {
+  it.each([
+    ['U+034F 组合用字形连接符', 'a\u034Fb'],
+    ['U+180E 蒙古文元音分隔符', 'a\u180Eb'],
+    ['U+3164 韩文填充', 'a\u3164b'],
+    ['U+FE0F 变体选择符', 'a\uFE0Fb'],
+    ['U+061C 阿拉伯字母标记', 'a\u061Cb'],
+    ['U+E0020 标签空格', 'a\u{E0020}b'],
+  ])('%s 被剥掉', (_name, input) => {
+    expect(stripInvisible(input)).toBe('ab')
+  })
+})
+

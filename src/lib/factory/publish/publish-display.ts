@@ -6,6 +6,8 @@ export interface PublishedView {
   published_at: string | null
   /** true = upload started but never confirmed (interrupted run); no final receipt yet */
   provisional: boolean
+  /** true = 已公开但首评没发成功,需要补发(只在为 true 时出现)。 */
+  first_comment_pending?: boolean
 }
 
 /** Plain, token-free failure reason for content_work_orders.reject_reason. */
@@ -58,5 +60,8 @@ export function toPublishedView(ref: unknown): PublishedView | null {
     }
   }
 
-  return { video_state, permalink, published_at, provisional: source.provisional === true }
+  return {
+    video_state, permalink, published_at, provisional: source.provisional === true,
+    ...(source.first_comment_pending === true ? { first_comment_pending: true } : {}),
+  }
 }

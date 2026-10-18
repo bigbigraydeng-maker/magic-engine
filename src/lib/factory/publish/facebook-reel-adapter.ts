@@ -268,6 +268,8 @@ export async function promoteReelToPublished(params: {
       post_id: params.videoId,
       video_id: params.videoId,
       published_at: new Date().toISOString(),
+      // 视频早已被人手公开:这里的 now 不是真实发布时间,调用方不得拿它当 T0(标估算)。
+      published_at_estimated: true,
       permalink: typeof j['permalink_url'] === 'string' ? (j['permalink_url'] as string) : undefined,
       video_state: 'PUBLISHED',
     }

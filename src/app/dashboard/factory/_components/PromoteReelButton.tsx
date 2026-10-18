@@ -12,19 +12,40 @@ interface PromotePreview {
 }
 
 interface PromoteResult {
+  kind?: string
   first_comment_status?: string
 }
 
 interface PromoteReelButtonProps {
   orderId: string
   onDone?: () => void
+  commentOnly?: boolean
 }
 
-export function PromoteReelButton({ orderId, onDone }: PromoteReelButtonProps) {
+export function promoteEntry(o: {
+  status: string
+  published?: {
+    video_state: 'DRAFT' | 'PUBLISHED' | null
+    first_comment_pending?: boolean
+  } | null
+}): 'promote' | 'comment' | null {
+  if (o.status !== 'published') return null
+  const published = o.published
+  if (!published) return null
+  if (published.video_state === 'DRAFT') return 'promote'
+  if (published.video_state === 'PUBLISHED' && published.first_comment_pending === true) {
+    return 'comment'
+  }
+  return null
+}
+
+export function PromoteReelButton({ orderId, onDone, commentOnly }: PromoteReelButtonProps) {
   const [preview, setPreview] = useState<PromotePreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+
+  const idleLabel = commentOnly ? '补发首评' : '转为公开发布(单条)'
 
   const reset = () => {
     setPreview(null)
@@ -79,7 +100,8 @@ export function PromoteReelButton({ orderId, onDone }: PromoteReelButtonProps) {
         return
       }
       const warning = json.first_comment_status === 'failed' ? '首评没发成功,请联系开发处理' : null
-      setDone(warning ? `已转为公开。${warning}` : '已转为公开')
+      const base = json.kind === 'synced' ? '已同步记录' : '已转为公开'
+      setDone(warning ? `${base}。${warning}` : base)
       reset()
       onDone?.()
     } catch {
@@ -91,6 +113,8 @@ export function PromoteReelButton({ orderId, onDone }: PromoteReelButtonProps) {
   const cancel = () => {
     reset()
   }
+
+  const isCommentOnly = preview?.mode === 'comment_only'
 
   return (
     <div className="space-y-3">
@@ -108,7 +132,7 @@ export function PromoteReelButton({ orderId, onDone }: PromoteReelButtonProps) {
           onClick={start}
           disabled={busy}
           className="h-10 rounded-lg px-5 bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
-        >{busy ? '处理中…' : '转为公开发布(单条)'}</button>
+        >{busy ? '处理中…' : idleLabel}</button>
       )}
 
       {preview && (
@@ -123,17 +147,23 @@ export function PromoteReelButton({ orderId, onDone }: PromoteReelButtonProps) {
               <dt className="inline text-slate-500">视频 ID:</dt>
               <dd className="inline break-all">{preview.video_id}</dd>
             </div>
-            <div>
-              <dt className="text-slate-500">文案:</dt>
-              <dd className="whitespace-pre-wrap break-words">{preview.caption}</dd>
-            </div>
+            {!isCommentOnly && (
+              <div>
+                <dt className="text-slate-500">文案:</dt>
+                <dd className="whitespace-pre-wrap break-words">{preview.caption}</dd>
+              </div>
+            )}
             <div>
               <dt className="text-slate-500">首评:</dt>
               <dd className="whitespace-pre-wrap break-words">{preview.first_comment}</dd>
             </div>
           </dl>
 
-          <p className="text-xs text-amber-800">确认后这条 Reel 会立刻对外公开,不能改回草稿(只能删帖)</p>
+          {isCommentOnly ? (
+            <p className="text-xs text-amber-800">这条已经公开了,这里只补发首评,不会再发布一次</p>
+          ) : (
+            <p className="text-xs text-amber-800">确认后这条 Reel 会立刻对外公开,不能改回草稿(只能删帖)</p>
+          )}
           {preview.mode === 'sync_only' && (
             <p className="text-xs text-amber-800">这条在 Facebook 上已经是公开的,只会同步记录,不会再发布一次</p>
           )}

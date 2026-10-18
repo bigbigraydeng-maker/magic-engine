@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { PromoteReelButton } from './PromoteReelButton'
+import { PromoteReelButton, promoteEntry } from './PromoteReelButton'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -25,6 +25,7 @@ const PREVIEW = {
 const mount = async (
   responses: Array<{ ok: boolean; json: Record<string, unknown> }>,
   onDone?: () => void,
+  commentOnly?: boolean,
 ) => {
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
     posts.push({ url: u, body: init?.body ? JSON.parse(init.body) : undefined })
@@ -32,12 +33,18 @@ const mount = async (
     return { ok: r.ok, status: r.ok ? 200 : 422, json: async () => r.json }
   }))
   const div = document.body.appendChild(document.createElement('div'))
-  await act(async () => { createRoot(div).render(<PromoteReelButton orderId="w1" onDone={onDone} />) })
+  await act(async () => { createRoot(div).render(<PromoteReelButton orderId="w1" onDone={onDone} commentOnly={commentOnly} />) })
 }
 
 it('idle render shows the promote button', async () => {
   await mount([])
   expect(btn('转为公开发布(单条)')).toBeDefined()
+})
+
+it('commentOnly shows the 补发首评 label', async () => {
+  await mount([], undefined, true)
+  expect(btn('补发首评')).toBeDefined()
+  expect(btn('转为公开发布(单条)')).toBeUndefined()
 })
 
 it('click triggers the first POST with confirm:false', async () => {
@@ -97,4 +104,42 @@ it('first_comment_status failed warning appears', async () => {
   await click(btn('确认公开'))
   expect(document.body.textContent).toContain('已转为公开')
   expect(document.body.textContent).toContain('首评没发成功,请联系开发处理')
+})
+
+it('comment_only mode shows the note and hides the caption and draft warning', async () => {
+  await mount([{ ok: true, json: { ...PREVIEW, mode: 'comment_only', caption: '' } }])
+  await click(btn('转为公开发布(单条)'))
+  expect(document.body.textContent).toContain('这条已经公开了,这里只补发首评,不会再发布一次')
+  expect(document.body.textContent).not.toContain('不能改回草稿')
+  expect(document.body.textContent).not.toContain('文案:')
+})
+
+it('synced kind shows 已同步记录', async () => {
+  await mount([{ ok: true, json: PREVIEW }, { ok: true, json: { kind: 'synced' } }])
+  await click(btn('转为公开发布(单条)'))
+  await click(btn('确认公开'))
+  expect(document.body.textContent).toContain('已同步记录')
+  expect(document.body.textContent).not.toContain('已转为公开')
+})
+
+it('promoteEntry returns promote for a published draft', () => {
+  expect(promoteEntry({ status: 'published', published: { video_state: 'DRAFT' } })).toBe('promote')
+})
+
+it('promoteEntry returns comment for a published reel with pending first comment', () => {
+  expect(promoteEntry({
+    status: 'published',
+    published: { video_state: 'PUBLISHED', first_comment_pending: true },
+  })).toBe('comment')
+})
+
+it('promoteEntry returns null for a published reel without pending first comment', () => {
+  expect(promoteEntry({
+    status: 'published',
+    published: { video_state: 'PUBLISHED', first_comment_pending: false },
+  })).toBeNull()
+})
+
+it('promoteEntry returns null when status is not published', () => {
+  expect(promoteEntry({ status: 'draft', published: { video_state: 'DRAFT' } })).toBeNull()
 })
