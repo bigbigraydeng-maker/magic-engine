@@ -57,8 +57,6 @@ export interface AttributionCronResponse {
   unattributable?: number
   /** A bounded sample of those action ids, for diagnosis. */
   unattributableSamples?: string[]
-  /** Actions never executed (suggestions), counted but not scored; no rows written or deleted for them. */
-  not_evaluable?: number
   /** Pass-1 reconciliation failures (claim / retire). Counted into cron `failed`. */
   reconcileErrors?: number
   /** A bounded sample of those messages, for diagnosis. */
