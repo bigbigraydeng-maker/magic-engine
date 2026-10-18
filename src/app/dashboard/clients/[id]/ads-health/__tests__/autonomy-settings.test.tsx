@@ -79,6 +79,56 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
     expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ daily_budget_cap_cents: 10000 })
   })
 
+  it('回填用的是后端返回的值，不是我们请求的值', async () => {
+    // 后端故意回一个与请求不同的数（真实路由会夹紧 / 改写），界面必须显示后端那个。
+    stubFetchWithAccounts(() => Response.json({ ad_account_id: 'act_222', daily_budget_cap_cents: 7000 }))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('act_222')).toBeTruthy())
+    const inputs = screen.getAllByPlaceholderText('未设')
+    fireEvent.change(inputs[inputs.length - 1], { target: { value: '100' } })
+    fireEvent.click(screen.getAllByText('保存')[1])
+    await waitFor(() => expect(screen.getByText(/\$70 \/ 天/)).toBeTruthy())
+    expect(screen.queryByText(/\$100 \/ 天/)).toBeNull()
+  })
+
+  it('清空上限要二次确认；点取消就不发请求', async () => {
+    const fn = stubFetchWithAccounts(() => Response.json({ daily_budget_cap_cents: null }))
+    const confirmSpy = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirmSpy)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('act_111')).toBeTruthy())
+    fireEvent.change(screen.getByDisplayValue('40'), { target: { value: '' } })
+    fireEvent.click(screen.getAllByText('保存')[0])
+    // 这个替身绑了 2 个账户，所以走的是「不许自动动钱」那条，不是单账户的「回落」
+    expect(String(confirmSpy.mock.calls[0]?.[0] ?? '')).toContain('不允许自动动钱')
+    expect(fn.mock.calls.some(c => String(c[0]).includes('/daily-cap'))).toBe(false)
+  })
+
+  it('只绑 1 个账户时，清空的确认话要说明会回落成客户总闸（这是放宽）', async () => {
+    const fn = vi.fn(async (url: string) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (url.endsWith('/ad-accounts')) {
+        return Response.json({
+          accounts: [{ ad_account_id: 'act_111', daily_budget_cap_cents: 4000 }],
+          client_total_cap_cents: 15000,
+        })
+      }
+      return Response.json({ success: true, config })
+    })
+    vi.stubGlobal('fetch', fn)
+    const confirmSpy = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirmSpy)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('act_111')).toBeTruthy())
+    fireEvent.change(screen.getByDisplayValue('40'), { target: { value: '' } })
+    // 页面底部主面板也有一个「保存」，账户行那个在前面
+    fireEvent.click(screen.getAllByText('保存')[0])
+    const asked = String(confirmSpy.mock.calls[0]?.[0] ?? '')
+    expect(asked).toContain('回落成客户总闸 $150 / 天')
+    expect(asked).toContain('放宽')
+    expect(fn.mock.calls.some(c => String(c[0]).includes('/daily-cap'))).toBe(false)
+  })
+
   it('后端拒绝时原文照显示，不换成自己的话术', async () => {
     const backendError = '这个客户所有账户的日上限加起来会变成 20000 分，超过客户总闸 15000 分（其它账户合计 4000 分）。先降低这个账户或其它账户的上限，或者先把客户总闸调大。'
     stubFetchWithAccounts(() => Response.json({ error: backendError }, { status: 400 }))
