@@ -337,6 +337,39 @@ async function probeAccount(
  * 只观察 `bounded_auto` 的客户：`observe` 的客户本来就不会自动动手，
  * 给它们记结论只是噪音（复审建议）。跳过的如实记原因，不静默忽略。
  */
+export interface RegisteredCapRow {
+  readonly ad_account_id: string
+  readonly daily_budget_cap_cents: number | null
+}
+
+/**
+ * 这个账户该按多少钱当日上限看 —— 🔴 **照抄真正的授权判据**
+ * （`src/lib/capabilities/ads/envelope-facts.ts` 里的 `perAccountCaps`）：
+ *
+ *   · 客户只登记了 **1 个**账户、且它没填自己的上限 → 回落成客户总闸
+ *   · 其余情况（多账户，或这个账户填了上限）→ 原样，不回落
+ *
+ * 为什么必须同源：不做这个回落，探针会对「单账户 + 没填上限」的客户报
+ * 「没填上限」，而真正的闸其实回落成客户总闸、照常放行 —— 报的是**假阻塞**
+ * （2026-10-19 实跑在一个真实客户上踩到过）。
+ *
+ * ⚠️ **改这里就要同时核对那边**：判据变了（比如改成多账户也回落），这里必须
+ *    跟着改。本轮不把两边抽成公共函数，那要动判据文件、属 A 级。
+ *
+ * 单独导出是为了能被变异验证钉住：`probeClientCircuit` 内部的账户清单来自
+ * `supabaseAdmin` 单例，替身注入不进去，在它上面写的用例会变成空跑也绿。
+ */
+export function resolveProbeAccountCapCents(
+  registeredRows: readonly RegisteredCapRow[],
+  adAccountId: string,
+  clientCapCents: number | null,
+): number | null {
+  const own = registeredRows.find((row) => row.ad_account_id === adAccountId)?.daily_budget_cap_cents ?? null
+  if (own !== null) return own
+  const singleAccountNoCap = registeredRows.length === 1 && registeredRows[0]?.daily_budget_cap_cents == null
+  return singleAccountNoCap ? clientCapCents : null
+}
+
 export async function probeClientCircuit(
   sb: SupabaseClient,
   args: {
@@ -386,6 +419,8 @@ export async function probeClientCircuit(
     caps.set(row.ad_account_id, row.daily_budget_cap_cents)
   }
 
+  const registeredCapRows = (capRows ?? []) as readonly RegisteredCapRow[]
+
   const accounts: AccountProbe[] = []
   for (const account of capFacts.accounts) {
     accounts.push(
@@ -393,7 +428,7 @@ export async function probeClientCircuit(
         sb,
         clientId,
         account.adAccountId,
-        caps.get(account.adAccountId) ?? null,
+        resolveProbeAccountCapCents(registeredCapRows, account.adAccountId, capFacts.capCents),
         account.hasDeliveringEntity,
         now,
       ),

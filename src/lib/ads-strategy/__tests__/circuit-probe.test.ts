@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   probeClientCircuit,
   readDeliveringByLevel,
+  resolveProbeAccountCapCents,
   CANDIDATE_ABSOLUTE_CAP_MULTIPLES,
 } from '../circuit-probe'
 
@@ -169,6 +170,46 @@ describe('分层数「在不在投」：判不了必须是 null，不许记成 0
       deliveringAdsets: 0,
       adsetsSeen: 2,
     })
+  })
+})
+
+describe('🔴 单账户回落：跟真正的授权判据同源（envelope-facts.ts 的 perAccountCaps）', () => {
+  /**
+   * 钉的是纯函数 `resolveProbeAccountCapCents`，不是 `probeClientCircuit`。
+   * 原因（实测）：`probeClientCircuit` 里的账户清单来自 `supabaseAdmin` 单例，
+   * 替身注入不进去，所以在它上面写的用例会**空跑也绿** —— 把回落判据故意改坏
+   * （永不回落）跑一遍，那种用例照样全过，等于没测。换成纯函数后，同样的
+   * 变异会把下面第一条判红。
+   */
+  const clientCap = 10_000
+
+  it('只登记 1 个账户且上限为空 → 回落成客户总闸', () => {
+    const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    expect(resolveProbeAccountCapCents(rows, 'act_1', clientCap)).toBe(clientCap)
+  })
+
+  it('只登记 1 个账户但客户总闸也没设 → 还是 null，不许编一个数', () => {
+    const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    expect(resolveProbeAccountCapCents(rows, 'act_1', null)).toBeNull()
+  })
+
+  it('只登记 1 个账户且填了自己的上限 → 用它自己的，不看总闸', () => {
+    const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: 4_000 }]
+    expect(resolveProbeAccountCapCents(rows, 'act_1', clientCap)).toBe(4_000)
+  })
+
+  it('登记 2 个账户、其中一个上限为空 → 那个仍是 null（不回落，缺口要暴露出来）', () => {
+    const rows = [
+      { ad_account_id: 'act_1', daily_budget_cap_cents: null },
+      { ad_account_id: 'act_2', daily_budget_cap_cents: 5_000 },
+    ]
+    expect(resolveProbeAccountCapCents(rows, 'act_1', clientCap)).toBeNull()
+    expect(resolveProbeAccountCapCents(rows, 'act_2', clientCap)).toBe(5_000)
+  })
+
+  it('问的账户根本不在登记清单里 → null（不拿别人的上限顶）', () => {
+    const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: 4_000 }]
+    expect(resolveProbeAccountCapCents(rows, 'act_other', clientCap)).toBeNull()
   })
 })
 
