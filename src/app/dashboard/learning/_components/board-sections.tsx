@@ -1,4 +1,4 @@
-import type { AgentBlock, AttentionList, Board, BoardItem } from '@/lib/skill-cards/board'
+import type { PillarBlock, AttentionList, Board, BoardItem } from '@/lib/skill-cards/board'
 import type { BoardIssue, SkillCardError } from '@/lib/skill-cards/types'
 import { LEDGER_ENTRY_URL } from '@/lib/pm-todo/ledger-items'
 import { SKILL_CARD_URL } from '@/lib/skill-cards/load'
@@ -110,7 +110,7 @@ function BigNumber({ value, label }: { value: number; label: string }) {
   )
 }
 
-function AgentSection({ block }: { block: AgentBlock }) {
+function PillarSection({ block }: { block: PillarBlock }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4">
       <h2 className="text-base font-black text-slate-900">{block.label}</h2>
@@ -142,8 +142,8 @@ export function BoardView({ board }: { board: Board }) {
   return (
     <div className="space-y-4">
       <ProblemLine issues={board.issues} unorganized={board.unorganized} />
-      {board.agents.map((block) => (
-        <AgentSection key={block.agent} block={block} />
+      {board.pillars.map((block) => (
+        <PillarSection key={block.pillar} block={block} />
       ))}
     </div>
   )

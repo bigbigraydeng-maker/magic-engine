@@ -57,8 +57,8 @@ export interface SkillCard {
   title: string
   sourceUrl: string | null
   hasCorrection: boolean
-  /** which Agent owns this card; defaults to DEFAULT_AGENT when the index has no "agent" */
-  agent: string
+  /** which Agent owns this card; defaults to DEFAULT_PILLAR when the index has no "pillar" */
+  pillar: string
   points: SkillPoint[]
 }
 

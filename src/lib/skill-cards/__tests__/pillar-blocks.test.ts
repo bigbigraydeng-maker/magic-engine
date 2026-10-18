@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildBoard, type BoardInput } from '../board'
-import { agentLabel } from '../agents'
+import { pillarLabel } from '../pillars'
 import { parseSkillCard } from '../parse'
 import type { SkillCard, SkillPoint } from '../types'
 import type { LedgerEntry } from '@/lib/ledger/types'
@@ -9,8 +9,8 @@ function point(over: Partial<SkillPoint> & Pick<SkillPoint, 'key' | 'state'>): S
   return { text: '点 ' + over.key, handoff: null, rule: null, note: null, mergedInto: null, ...over }
 }
 
-function makeCard(id: string, points: SkillPoint[], hasCorrection = false, agent = 'ads'): SkillCard {
-  return { id, file: id + '.md', title: '卡 ' + id, sourceUrl: null, hasCorrection, agent, points }
+function makeCard(id: string, points: SkillPoint[], hasCorrection = false, pillar = 'ads'): SkillCard {
+  return { id, file: id + '.md', title: '卡 ' + id, sourceUrl: null, hasCorrection, pillar, points }
 }
 
 function entry(
@@ -57,56 +57,56 @@ function input(cards: SkillCard[], ledgerEntries: LedgerEntry[] = []): BoardInpu
   }
 }
 
-describe('agentLabel', () => {
+describe('pillarLabel', () => {
   it('ads 映射为「广告 Agent」', () => {
-    expect(agentLabel('ads')).toBe('广告 Agent')
+    expect(pillarLabel('ads')).toBe('广告 Agent')
   })
 
   it('seo 映射为「SEO Agent」', () => {
-    expect(agentLabel('seo')).toBe('SEO Agent')
+    expect(pillarLabel('seo')).toBe('SEO Agent')
   })
 
-  it('未映射的 agent 原样返回', () => {
-    expect(agentLabel('foo-agent')).toBe('foo-agent')
+  it('未映射的 pillar 原样返回', () => {
+    expect(pillarLabel('foo-pillar')).toBe('foo-pillar')
   })
 
   it('constructor 不被原型链吞掉', () => {
-    expect(agentLabel('constructor')).toBe('constructor')
+    expect(pillarLabel('constructor')).toBe('constructor')
   })
 })
 
-describe('parseSkillCard agent 字段', () => {
+describe('parseSkillCard pillar 字段', () => {
   function parseWith(obj: unknown) {
     const text = '# 标题\n\n## 机器索引\n```json\n' + JSON.stringify(obj) + '\n```\n'
     return parseSkillCard('2026-01-01-card-a.md', text)
   }
 
-  it('没写 agent 时默认 ads', () => {
+  it('没写 pillar 时默认 ads', () => {
     const result = parseWith({ points: [{ key: 'a', text: 't', state: 'learning' }] })
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.card.agent).toBe('ads')
+    if (result.ok) expect(result.card.pillar).toBe('ads')
   })
 
-  it('agent 为 seo 时保留 seo', () => {
-    const result = parseWith({ agent: 'seo', points: [{ key: 'a', text: 't', state: 'learning' }] })
+  it('pillar 为 seo 时保留 seo', () => {
+    const result = parseWith({ pillar: 'seo', points: [{ key: 'a', text: 't', state: 'learning' }] })
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.card.agent).toBe('seo')
+    if (result.ok) expect(result.card.pillar).toBe('seo')
   })
 
-  it('agent 前后空白被去掉', () => {
-    const result = parseWith({ agent: '  seo  ', points: [{ key: 'a', text: 't', state: 'learning' }] })
+  it('pillar 前后空白被去掉', () => {
+    const result = parseWith({ pillar: '  seo  ', points: [{ key: 'a', text: 't', state: 'learning' }] })
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.card.agent).toBe('seo')
+    if (result.ok) expect(result.card.pillar).toBe('seo')
   })
 
-  it('agent 为空串时默认 ads', () => {
-    const result = parseWith({ agent: '', points: [{ key: 'a', text: 't', state: 'learning' }] })
+  it('pillar 为空串时默认 ads', () => {
+    const result = parseWith({ pillar: '', points: [{ key: 'a', text: 't', state: 'learning' }] })
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.card.agent).toBe('ads')
+    if (result.ok) expect(result.card.pillar).toBe('ads')
   })
 
-  it('agent 不是字符串时解析失败', () => {
-    const result = parseWith({ agent: 5, points: [{ key: 'a', text: 't', state: 'learning' }] })
+  it('pillar 不是字符串时解析失败', () => {
+    const result = parseWith({ pillar: 5, points: [{ key: 'a', text: 't', state: 'learning' }] })
     expect(result.ok).toBe(false)
   })
 })
@@ -115,9 +115,9 @@ describe('buildBoard 按 Agent 分组', () => {
   it('默认只有 ads 一个 Agent 块', () => {
     const card = makeCard('2026-01-01-card-a', [point({ key: 'l', state: 'learning' })])
     const board = buildBoard(input([card]))
-    expect(board.agents).toHaveLength(1)
-    expect(board.agents[0].agent).toBe('ads')
-    expect(board.agents[0].label).toBe('广告 Agent')
+    expect(board.pillars).toHaveLength(1)
+    expect(board.pillars[0].pillar).toBe('ads')
+    expect(board.pillars[0].label).toBe('广告 Agent')
   })
 
   it('按 Agent 分组并统计各状态数量', () => {
@@ -138,9 +138,9 @@ describe('buildBoard 按 Agent 分组', () => {
       'seo',
     )
     const board = buildBoard(input([card1, card2]))
-    expect(board.agents.map((b) => b.agent)).toEqual(['ads', 'seo'])
-    const ads = board.agents[0]
-    const seo = board.agents[1]
+    expect(board.pillars.map((b) => b.pillar)).toEqual(['ads', 'seo'])
+    const ads = board.pillars[0]
+    const seo = board.pillars[1]
     expect(ads.counts).toEqual({ learning: 2, verifying: 0, pmDecision: 1, passed: 1, adopted: 0 })
     expect(seo.counts).toEqual({ learning: 1, verifying: 0, pmDecision: 2, passed: 0, adopted: 0 })
   })
@@ -148,7 +148,7 @@ describe('buildBoard 按 Agent 分组', () => {
   it('只有 learning 时 decisions 与 overdue 都为空', () => {
     const card = makeCard('2026-01-01-card-a', [point({ key: 'l', state: 'learning' })])
     const board = buildBoard(input([card]))
-    const block = board.agents[0]
+    const block = board.pillars[0]
     expect(block.decisions.shown).toEqual([])
     expect(block.decisions.more).toBe(0)
     expect(block.overdue.shown).toEqual([])
@@ -160,7 +160,7 @@ describe('buildBoard 按 Agent 分组', () => {
     for (let i = 0; i < 7; i++) points.push(point({ key: 'p' + i, state: 'pm_decision' }))
     const card = makeCard('2026-01-01-card-a', points)
     const board = buildBoard(input([card]))
-    const block = board.agents[0]
+    const block = board.pillars[0]
     expect(block.decisions.shown).toHaveLength(5)
     expect(block.decisions.more).toBe(2)
     expect(block.counts.pmDecision).toBe(7)
@@ -175,7 +175,7 @@ describe('buildBoard 按 Agent 分组', () => {
     const board = buildBoard(
       input([card], [entry('h-a', 'decided', '2026-10-01'), entry('h-b', 'decided', '2026-12-01')]),
     )
-    const block = board.agents[0]
+    const block = board.pillars[0]
     expect(block.counts.verifying).toBe(2)
     expect(block.overdue.shown).toHaveLength(1)
     expect(block.overdue.shown[0].key).toBe('v-a')
@@ -191,8 +191,8 @@ describe('buildBoard 按 Agent 分组', () => {
     )
     const cardAds = makeCard('2026-01-01-card-ads', [point({ key: 'l', state: 'learning' })])
     const board = buildBoard(input([cardNew, cardAds]))
-    expect(board.agents.map((b) => b.agent)).toEqual(['ads', 'new-thing'])
-    const block = board.agents[1]
+    expect(board.pillars.map((b) => b.pillar)).toEqual(['ads', 'new-thing'])
+    const block = board.pillars[1]
     expect(block.label).toBe('new-thing')
   })
 
@@ -202,7 +202,7 @@ describe('buildBoard 按 Agent 分组', () => {
       point({ key: 'l', state: 'learning' }),
     ])
     const board = buildBoard(input([card]))
-    const block = board.agents[0]
+    const block = board.pillars[0]
     expect(block.counts).toEqual({ learning: 1, verifying: 0, pmDecision: 0, passed: 0, adopted: 0 })
   })
 
@@ -211,8 +211,8 @@ describe('buildBoard 按 Agent 分组', () => {
     const board = buildBoard(
       input([card], [entry('x-skill-handoff-1', 'decided', '2026-10-01')]),
     )
-    const block = board.agents[0]
-    expect(block.agent).toBe('ads')
+    const block = board.pillars[0]
+    expect(block.pillar).toBe('ads')
     expect(block.counts.verifying).toBe(1)
     expect(block.overdue.shown).toHaveLength(1)
     expect(block.overdue.shown[0].orphan).toBe(true)

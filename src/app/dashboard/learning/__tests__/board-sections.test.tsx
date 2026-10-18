@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { BoardView, FatalBox, PageHeader } from '../_components/board-sections'
-import type { AgentBlock, Board, BoardItem } from '@/lib/skill-cards/board'
+import type { PillarBlock, Board, BoardItem } from '@/lib/skill-cards/board'
 
 function item(over: Partial<BoardItem>): BoardItem {
   return {
@@ -19,14 +19,14 @@ function item(over: Partial<BoardItem>): BoardItem {
     overdue: false,
     verifiedPending: false,
     orphan: false,
-    agent: 'ads',
+    pillar: 'ads',
     ...over,
   }
 }
 
-function block(over: Partial<AgentBlock>): AgentBlock {
+function block(over: Partial<PillarBlock>): PillarBlock {
   return {
-    agent: 'ads',
+    pillar: 'ads',
     label: '广告 Agent',
     counts: { learning: 39, verifying: 21, pmDecision: 6, passed: 27, adopted: 0 },
     decisions: { shown: [], more: 0 },
@@ -35,7 +35,7 @@ function block(over: Partial<AgentBlock>): AgentBlock {
   }
 }
 
-function board(agents: AgentBlock[], over?: Partial<Board>): Board {
+function board(pillars: PillarBlock[], over?: Partial<Board>): Board {
   return {
     fatal: null,
     groups: {
@@ -50,7 +50,7 @@ function board(agents: AgentBlock[], over?: Partial<Board>): Board {
     issues: [],
     unorganized: [],
     cardCount: 3,
-    agents,
+    pillars,
     ...over,
   }
 }
@@ -69,10 +69,10 @@ describe('PageHeader', () => {
 })
 
 describe('BoardView', () => {
-  it('renders both agent blocks in order with their numbers', () => {
+  it('renders both pillar blocks in order with their numbers', () => {
     const ads = block({})
     const seo = block({
-      agent: 'seo',
+      pillar: 'seo',
       label: 'SEO Agent',
       counts: { learning: 2, verifying: 0, pmDecision: 0, passed: 0, adopted: 0 },
     })
