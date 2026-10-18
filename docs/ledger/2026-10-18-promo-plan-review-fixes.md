@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-18
 done_on: 2026-10-18
-done_ref: pr:PENDING
+done_ref: pr:2798
 source: session:579d2d02
 verify_by: 2026-10-25
 verify_how: 线上推广计划页看三处：①经营判断卡的提示写的是「现在只是记录和显示、不会挡住批准」而不是「检查过不了」；②保本成交率那行写「这根线还没接上」；③勾上再取消「这是一次实验」后，已点过的人工核实记录没有作废（批准记录仍显示「批准的就是现在这一版」）
