@@ -4,7 +4,7 @@ title: Reel 转公开出现首评失败或公开后命中红线时，目前只�
 status: decided
 owner: agent
 decided_on: 2026-10-18
-source: doc:docs/specs/2026-10-18-reel-promote-to-public-design-v0.2.md
+source: session:c45254ff
 verify_by: 2026-10-25
 verify_how: 在今日待办里新增一类条目，读转公开回执里需要人看的标记（首评失败、公开后命中红线、写库没写完），说明问题、怎么处理、直达链接；接好后用一条测试回执当场触发一次看到待办出现。
 ---
