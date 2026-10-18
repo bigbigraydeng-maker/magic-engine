@@ -81,6 +81,9 @@ export async function submitItemResult(deps: ServiceDeps, actor: Actor, input: I
   }
   const checklist = checklistFor(input.featureKey)
   const item = itemFor(checklist, input.itemKey)
+  if (item.exception) {
+    throw new LaunchSignoffError('exception_item', 409, `${item.key} 是已知例外（${item.exception.label}），本轮不接受回执`)
+  }
   if (deps.commit === null) throw new LaunchSignoffError('no_commit', 409, '无法确认线上版本，不能记录回执')
   const { state, events } = await snapshotForWrite(deps, checklist)
   if (state.halted) throw new LaunchSignoffError('locked', 409, '清单已锁定，需带原因解锁')
@@ -90,12 +93,13 @@ export async function submitItemResult(deps: ServiceDeps, actor: Actor, input: I
     const check = await verifyEvidence(deps.db, checklist, item, input.evidenceRef)
     if (!check.ok) throw new LaunchSignoffError('evidence_rejected', 422, check.reason)
     snapshot = check.snapshot
-    if (check.manual) {
+    if (check.manual && check.snapshot['recordRef'] !== undefined) {
       const rec = JSON.stringify(check.snapshot['recordRef'])
       const reused = state.items.some((v) => {
         if (v.key === item.key || !v.manual) return false
         const ev = events.find((e) => e.id === v.resultEventId)
-        return JSON.stringify(ev?.evidenceSnapshot?.['recordRef']) === rec
+        const other = ev?.evidenceSnapshot?.['recordRef']
+        return other !== undefined && JSON.stringify(other) === rec
       })
       if (reused) throw new LaunchSignoffError('evidence_reused', 422, '这条记录已经被另一项人工确认用过了，每项要有自己的证据')
     }
@@ -248,7 +252,7 @@ export async function signChecklist(deps: ServiceDeps, actor: Actor, input: Sign
     actorRole: 'human',
     commitSha: deps.commit,
     checklistHash: state.checklistHash,
-    evidenceSnapshot: { watermark: state.watermark, items: frozen },
+    evidenceSnapshot: { watermark: state.watermark, items: frozen, exceptions: state.exceptions },
   })
 
   // 补偿校验（检查后使用的缝）：水位校验和写入之间可能有别的窗口抢先写了事件。

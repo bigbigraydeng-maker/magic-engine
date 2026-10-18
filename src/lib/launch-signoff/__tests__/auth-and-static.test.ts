@@ -59,8 +59,10 @@ describe('authenticate', () => {
 describe('checklist definition', () => {
   it('has the same T-keys as the human-readable checklist document', () => {
     const doc = readFileSync(join(process.cwd(), ADS_AGENT_CHECKLIST.docPath), 'utf8')
-    const docKeys = Array.from(doc.matchAll(/^\| (T\d+) \|/gm)).map((m) => m[1])
-    expect(ADS_AGENT_CHECKLIST.items.map((i) => i.key)).toEqual(docKeys)
+    // 人读文档里的 T 编号（T1…T7）= 定义里去掉字母后缀后的编号（T5a/T5b 都对应文档的 T5）
+    const docKeys = Array.from(new Set(Array.from(doc.matchAll(/^\| (T\d+[a-z]?) \|/gm)).map((m) => String(m[1]).replace(/[a-z]$/, ''))))
+    const defKeys = Array.from(new Set(ADS_AGENT_CHECKLIST.items.map((i) => i.key.replace(/[a-z]$/, ''))))
+    expect(defKeys).toEqual(docKeys)
   })
 
   it('the fingerprint changes when any criterion text changes', () => {

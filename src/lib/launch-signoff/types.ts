@@ -44,6 +44,19 @@ export interface ChecklistItem {
   readonly sameRunAs?: string
   /** 人工确认项的 recordRef.table 只许是这些表（把证据和具体哪一项绑上） */
   readonly evidenceTables?: readonly string[]
+  /**
+   * 人工确认项的证据形态：record = 回读生产库记录（默认）；
+   * readonly_eval = 只读评估（证据是一份评估结论+PR 编号，没有生产记录可回读，页面标“只读评估”）。
+   */
+  readonly manualEvidence?: 'record' | 'readonly_eval'
+  /** 该项的固定证据等级标签（会随回执一起显示，例：内核回执 / 只读评估） */
+  readonly grade?: string
+  /**
+   * 已知例外：本轮**不测**或**无法在生产上测**的项，状态固定为“没测/未验证”，不接受任何回执；
+   * 不阻止签字，但必须在页面以明确例外清单显示，并写进签字快照 —— 签字=知情带例外签字。
+   * 例外只能写在清单定义里（A 级评审、进指纹），执行方不能自行声明。
+   */
+  readonly exception?: { readonly label: string; readonly reason: string }
 }
 
 /** 证据回读的“对的那一行”约束：哪个客户、本轮从什么时候开始（更早的历史记录不算）。随指纹一起，改了旧签作废。 */
@@ -75,6 +88,11 @@ export interface ItemView {
   /** 人工确认（没有机器回读）的项 */
   readonly manual: boolean
   /** 人工确认项：执行方写的原文 + 指向的库表记录，签字人要看到 */
+  /** 证据等级标签：定义里的固定等级，或回读时自动标的“空操作成功”等 */
+  readonly grades: readonly string[]
+  /** 已知例外项（固定“没测/未验证”，不阻止签字，但必须显示） */
+  readonly isException: boolean
+  readonly exceptionLabel: string | null
   readonly manualDescription: string | null
   readonly manualRecord: string | null
   readonly resultNote: string | null
@@ -103,6 +121,8 @@ export interface DerivedState {
   readonly haltNote: string | null
   readonly items: readonly ItemView[]
   /** 能不能点“签字上线” */
+  /** 已知例外清单（来自清单定义）；签字=知情带例外签字 */
+  readonly exceptions: readonly { readonly key: string; readonly title: string; readonly label: string; readonly reason: string }[]
   readonly signable: boolean
   /** 为什么不能（人话，已排好）；signable 时为空 */
   readonly blockers: readonly string[]

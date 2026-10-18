@@ -13,7 +13,7 @@ import {
   unlockChecklist,
   type ServiceDeps,
 } from '../service'
-import { ALLOW_DECISION_ID, DECISION_ID, DECISION_ID_2, NARRATIVE_ID, OTHER_RUN_ID, ROUND_OLD, RUN_ID, fakeProd, healthyProdTables } from './helpers'
+import { DECISION_ID, NARRATIVE_ID, OTHER_RUN_ID, ROUND_OLD, RUN_ID, fakeProd, healthyProdTables } from './helpers'
 
 const FEATURE = ADS_AGENT_FEATURE_KEY
 const COMMIT = 'abc1234def5678'
@@ -27,9 +27,9 @@ const evidence = {
   T2: { description: '2026-10-20 ad_health_narratives 该行判断为 hit，不是 not_comparable', recordRef: { table: 'ad_health_narratives', id: NARRATIVE_ID } },
   T3: { runId: RUN_ID },
   T4: { runId: RUN_ID },
-  T5: { runId: RUN_ID },
-  T6: { description: '2026-10-21 被拒绝，拒绝原因文本含「距上次设置变动只过了 3 小时，不足 72 小时」', recordRef: { table: 'authorization_decisions', id: DECISION_ID } },
-  T7: { description: '2026-10-21 加预算请求被拒，原因：超过客户总闸 100 纽币，可在 O1 页面看到', recordRef: { table: 'authorization_decisions', id: DECISION_ID_2 } },
+  T5a: { runId: RUN_ID },
+  T6: { description: '只读评估：对 AI 信封同一对象刚有执行记录后被拒，原文含「距上次设置变动只过了 0.02 小时，不足 72 小时」', prNumber: 2892 },
+  T7: { description: '只读评估：超过客户总闸会被拒，原文指向账户每天上限；事实手工拼，解析器在真实数据上未验证', prNumber: 2892 },
 } as const
 
 function setup(commit: string | null = COMMIT) {
@@ -41,6 +41,7 @@ function setup(commit: string | null = COMMIT) {
 async function recordAll(deps: ServiceDeps, only?: string[]) {
   const written: Record<string, number> = {}
   for (const item of ADS_AGENT_CHECKLIST.items) {
+    if (item.exception) continue
     if (only && !only.includes(item.key)) continue
     const ev = await submitItemResult(deps, executor, {
       featureKey: FEATURE, itemKey: item.key, status: 'pass', evidenceRef: { ...evidence[item.key as keyof typeof evidence] },
@@ -68,7 +69,7 @@ describe('happy path', () => {
     const written = await recordAll(deps)
     await reviewAll(deps, written)
     const state = await readState(deps, FEATURE)
-    expect(state.items.every((i) => i.status === 'passed')).toBe(true)
+    expect(state.items.filter((i) => !i.isException).every((i) => i.status === 'passed')).toBe(true)
     expect(state.signable).toBe(true)
     expect(state.items.find((i) => i.key === 'T2')?.manual).toBe(true) // machine-unverifiable items are flagged
 
@@ -184,26 +185,32 @@ describe('evidence is read back from production', () => {
     expect((await reject(submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: 'T4', status: 'pass', evidenceRef: { ...evidence.T4 } }))).code).toBe('depends_on')
   })
 
-  it('a manual-confirm item needs a real description AND a record that exists, is the target client\'s and is from this round', async () => {
+  it('a record-based manual item (T2) needs a real description AND a record that exists, is the target client\'s and is from this round', async () => {
     const { deps, prod } = setup()
-    const base = { featureKey: FEATURE, itemKey: 'T6', status: 'pass' as const }
+    const base = { featureKey: FEATURE, itemKey: 'T2', status: 'pass' as const }
     expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { description: '过了' } }))).code).toBe('evidence_rejected')
-    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { description: evidence.T6.description } }))).code).toBe('evidence_rejected') // no recordRef
-    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { ...evidence.T6, recordRef: { table: 'clients', id: DECISION_ID } } }))).code).toBe('evidence_rejected') // table not allowed
-    for (const row of prod.data['authorization_decisions'] ?? []) row['created_at'] = ROUND_OLD
-    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { ...evidence.T6 } }))).code).toBe('evidence_rejected') // older than the round
+    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { description: evidence.T2.description } }))).code).toBe('evidence_rejected') // no recordRef
+    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { ...evidence.T2, recordRef: { table: 'clients', id: NARRATIVE_ID } } }))).code).toBe('evidence_rejected') // table not allowed
+    for (const row of prod.data['ad_health_narratives'] ?? []) row['created_at'] = ROUND_OLD
+    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { ...evidence.T2 } }))).code).toBe('evidence_rejected') // older than the round
   })
 
-  it('manual evidence is tied to its own item: right table, not an "allow", not reused', async () => {
+  it('a read-only-evaluation item (T6/T7) needs a description and the PR number it lives in', async () => {
+    const { deps } = setup()
+    const base = { featureKey: FEATURE, itemKey: 'T6', status: 'pass' as const }
+    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { description: evidence.T6.description } }))).code).toBe('evidence_rejected')
+    expect((await reject(submitItemResult(deps, executor, { ...base, evidenceRef: { description: evidence.T6.description, prNumber: 'abc' } }))).code).toBe('evidence_rejected')
+    const ok = await submitItemResult(deps, executor, { ...base, evidenceRef: { ...evidence.T6 } })
+    expect(ok.evidenceSnapshot?.['prNumber']).toBe(2892)
+    expect((await readState(deps, FEATURE)).items.find((i) => i.key === 'T6')?.grades).toContain('只读评估')
+  })
+
+  it('record-based manual evidence is tied to its own item: right table and not reused', async () => {
     const { deps } = setup()
     const base = { featureKey: FEATURE, status: 'pass' as const }
-    // T7 must come from authorization_decisions, not from the health narratives
-    expect((await reject(submitItemResult(deps, executor, { ...base, itemKey: 'T7', evidenceRef: { ...evidence.T2 } }))).code).toBe('evidence_rejected')
-    // an "allow" decision is not a refusal
-    expect((await reject(submitItemResult(deps, executor, { ...base, itemKey: 'T6', evidenceRef: { ...evidence.T6, recordRef: { table: 'authorization_decisions', id: ALLOW_DECISION_ID } } }))).code).toBe('evidence_rejected')
-    await submitItemResult(deps, executor, { ...base, itemKey: 'T6', evidenceRef: { ...evidence.T6 } })
-    // the same decision cannot back a second item
-    expect((await reject(submitItemResult(deps, executor, { ...base, itemKey: 'T7', evidenceRef: { ...evidence.T7, recordRef: evidence.T6.recordRef } }))).code).toBe('evidence_reused')
+    // T2 must come from ad_health_narratives, not from the decisions table
+    expect((await reject(submitItemResult(deps, executor, { ...base, itemKey: 'T2', evidenceRef: { ...evidence.T2, recordRef: { table: 'authorization_decisions', id: DECISION_ID } } }))).code).toBe('evidence_rejected')
+    await submitItemResult(deps, executor, { ...base, itemKey: 'T2', evidenceRef: { ...evidence.T2 } })
   })
 
   it('evidence must be the right row: old rows, other clients and a failed readback are refused', async () => {
@@ -214,7 +221,7 @@ describe('evidence is read back from production', () => {
     expect((await reject(submitItemResult(deps, executor, { ...t3, evidenceRef: { runId: RUN_ID } }))).code).toBe('evidence_rejected') // before the round
     for (const row of prod.data['action_runs'] ?? []) if (row['id'] === RUN_ID) row['finished_at'] = '2026-10-20T03:00:00Z'
     await submitItemResult(deps, executor, { ...t3, evidenceRef: { runId: RUN_ID } })
-    for (const row of prod.data['action_run_steps'] ?? []) row['verification'] = { passed: false }
+    for (const row of prod.data['action_run_steps'] ?? []) if (row['step_key'] === 'readback') row['verification'] = { passed: false }
     expect((await reject(submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: 'T4', status: 'pass', evidenceRef: { runId: RUN_ID } }))).code).toBe('evidence_rejected')
   })
 
@@ -227,13 +234,54 @@ describe('evidence is read back from production', () => {
   })
 })
 
+describe('evidence grades and kernel receipt', () => {
+  it('T3 must be a human-triggered run; an apply step that did nothing is flagged as a no-op success', async () => {
+    const { deps, prod } = setup()
+    const t3 = { featureKey: FEATURE, itemKey: 'T3', status: 'pass' as const, evidenceRef: { runId: RUN_ID } }
+    for (const row of prod.data['action_runs'] ?? []) if (row['id'] === RUN_ID) row['triggered_by'] = 'agent'
+    expect((await reject(submitItemResult(deps, executor, t3))).code).toBe('evidence_rejected')
+    for (const row of prod.data['action_runs'] ?? []) if (row['id'] === RUN_ID) row['triggered_by'] = 'human'
+    for (const row of prod.data['action_run_steps'] ?? []) if (row['step_key'] === 'apply') row['output'] = { applied: false }
+    const ev = await submitItemResult(deps, executor, t3)
+    expect(ev.evidenceSnapshot?.['grades']).toEqual(['空操作成功：写入 Meta 那一步未被检验'])
+    const view = (await readState(deps, FEATURE)).items.find((i) => i.key === 'T3')
+    expect(view?.grades).toContain('空操作成功：写入 Meta 那一步未被检验')
+  })
+
+  it('T4 needs all three steps; T5a needs the kernel authorization decision (verdict allow)', async () => {
+    const { deps, prod } = setup()
+    await submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: 'T3', status: 'pass', evidenceRef: { ...evidence.T3 } })
+    prod.data['authorization_decisions'] = (prod.data['authorization_decisions'] ?? []).filter((d) => d['action_run_id'] !== RUN_ID)
+    expect((await reject(submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: 'T5a', status: 'pass', evidenceRef: { ...evidence.T5a } }))).code).toBe('evidence_rejected')
+    prod.data['action_run_steps'] = (prod.data['action_run_steps'] ?? []).filter((s) => s['step_key'] !== 'snapshot_pre')
+    expect((await reject(submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: 'T4', status: 'pass', evidenceRef: { ...evidence.T4 } }))).code).toBe('evidence_rejected')
+  })
+})
+
+describe('known exceptions', () => {
+  it('exception items take no receipts, never block signing, are listed on the page state and frozen into the signature', async () => {
+    const { deps } = setup()
+    for (const key of ['T5b', 'T6b']) {
+      expect((await reject(submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: key, status: 'pass', evidenceRef: { description: '想硬塞一个通过的回执进去，应该被拒绝' } }))).code).toBe('exception_item')
+    }
+    const written = await recordAll(deps)
+    await reviewAll(deps, written)
+    const state = await readState(deps, FEATURE)
+    expect(state.exceptions.map((e) => e.key)).toEqual(['T5b', 'T6b'])
+    expect(state.items.filter((i) => i.isException).every((i) => i.status === 'untested')).toBe(true)
+    expect(state.signable).toBe(true)
+    const sig = await signChecklist(deps, pm, { featureKey: FEATURE, watermark: state.watermark, checklistHash: state.checklistHash })
+    expect(JSON.stringify(sig.evidenceSnapshot?.['exceptions'])).toContain('T6b')
+  })
+})
+
 describe('halt on failure', () => {
   it('a failed T3 locks the whole list; nothing can be recorded until someone unlocks it with a reason', async () => {
     const { deps } = setup()
     await submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: 'T3', status: 'fail', evidenceRef: { note: 'x' }, note: '误动了别的系列' })
     const locked = await readState(deps, FEATURE)
     expect(locked.halted).toBe(true)
-    expect(locked.items.every((i) => i.status === 'locked')).toBe(true)
+    expect(locked.items.filter((i) => !i.isException).every((i) => i.status === 'locked')).toBe(true)
     expect((await reject(submitItemResult(deps, executor, { featureKey: FEATURE, itemKey: 'T3', status: 'pass', evidenceRef: { ...evidence.T3 } }))).code).toBe('locked')
     for (const who of [executor, reviewer, otherAdmin]) {
       expect((await reject(unlockChecklist(deps, who, FEATURE, '想重试一次试试，换个目标'))).code).toBe('not_signer')

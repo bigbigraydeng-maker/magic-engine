@@ -68,15 +68,19 @@ export function healthyProdTables(): Record<string, Row[]> {
       { id: NARRATIVE_ID, client_id: CLIENT_ID, insight_date: '2026-10-20', overall_verdict: 'healthy', created_at: ROUND_OK },
     ],
     action_runs: [
-      { id: RUN_ID, client_id: CLIENT_ID, action_key: 'ads.pause_campaign', status: 'succeeded', created_at: ROUND_OK, finished_at: ROUND_OK },
+      { id: RUN_ID, client_id: CLIENT_ID, action_key: 'ads.pause_campaign', status: 'succeeded', triggered_by: 'human', created_at: ROUND_OK, finished_at: ROUND_OK },
       { id: OTHER_RUN_ID, client_id: OTHER_CLIENT_ID, action_key: 'ads.pause_campaign', status: 'succeeded', created_at: ROUND_OK, finished_at: ROUND_OK },
     ],
-    action_run_steps: [{ run_id: RUN_ID, step_key: 'readback_campaign', status: 'succeeded', verification: { passed: true, method: 'meta_readback', checks: [] } }],
+    action_run_steps: [
+      { run_id: RUN_ID, step_key: 'snapshot_pre', status: 'succeeded', verification: null, output: {} },
+      { run_id: RUN_ID, step_key: 'apply', status: 'succeeded', verification: null, output: { applied: true } },
+      { run_id: RUN_ID, step_key: 'readback', status: 'succeeded', verification: { passed: true, method: 'meta_readback', checks: [] }, output: {} },
+    ],
     flywheel_actions: [{ id: 'f1', client_id: CLIENT_ID, action_run_id: RUN_ID, action_type: 'pause', executed_at: ROUND_OK }],
     authorization_decisions: [
       { id: DECISION_ID, client_id: CLIENT_ID, created_at: ROUND_OK, verdict: 'deny' },
       { id: DECISION_ID_2, client_id: CLIENT_ID, created_at: ROUND_OK, verdict: 'deny' },
-      { id: ALLOW_DECISION_ID, client_id: CLIENT_ID, created_at: ROUND_OK, verdict: 'allow' },
+      { id: ALLOW_DECISION_ID, client_id: CLIENT_ID, created_at: ROUND_OK, verdict: 'allow', action_run_id: RUN_ID },
     ],
   }
 }

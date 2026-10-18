@@ -34,6 +34,13 @@ function isManual(event: LaunchEvent | undefined): boolean {
   return event?.evidenceSnapshot?.['manual'] === true
 }
 
+function gradesOf(fixed: string | undefined, result: LaunchEvent | undefined): string[] {
+  const out = fixed ? [fixed] : []
+  const extra = result?.evidenceSnapshot?.['grades']
+  if (Array.isArray(extra)) for (const g of extra) if (typeof g === 'string' && !out.includes(g)) out.push(g)
+  return out
+}
+
 function recordLabel(event: LaunchEvent | undefined): string | null {
   const rec = event?.evidenceSnapshot?.['recordRef']
   if (rec && typeof rec === 'object') {
@@ -86,6 +93,27 @@ export function deriveState(
 
   // —— 每一项
   const items: ItemView[] = checklist.items.map((def) => {
+    // 已知例外：状态固定“没测/未验证”，不接受任何回执（也忽略库里意外出现的事件）
+    if (def.exception) {
+      return {
+        key: def.key,
+        status: 'untested' as ItemStatus,
+        resultEventId: null,
+        reviewEventId: null,
+        commitSha: null,
+        manual: false,
+        grades: def.grade ? [def.grade] : [],
+        isException: true,
+        exceptionLabel: def.exception.label,
+        manualDescription: null,
+        manualRecord: null,
+        resultNote: null,
+        reviewNote: null,
+        resultActor: null,
+        reviewActor: null,
+        at: null,
+      }
+    }
     // 回执只认执行方钥匙写的、复核只认复核方钥匙写的（第二道防线，服务层也强制）
     const results = current.filter(
       (e) => e.eventType === 'item_result' && e.itemKey === def.key && e.actorRole === 'executor',
@@ -117,6 +145,9 @@ export function deriveState(
       reviewEventId: review?.id ?? null,
       commitSha: result?.commitSha ?? null,
       manual: isManual(result),
+      grades: gradesOf(def.grade, result),
+      isException: false,
+      exceptionLabel: null,
       manualDescription: isManual(result) && typeof result?.evidenceSnapshot?.['description'] === 'string' ? String(result.evidenceSnapshot['description']) : null,
       manualRecord: isManual(result) ? recordLabel(result) : null,
       resultNote: result?.note ?? null,
@@ -169,7 +200,8 @@ export function deriveState(
 
   // —— 能不能签 + 差什么
   const blockers: string[] = []
-  const names = (pick: (i: ItemView) => boolean): string => items.filter(pick).map((i) => i.key).join('、')
+  const required = items.filter((i) => !i.isException)
+  const names = (pick: (i: ItemView) => boolean): string => required.filter(pick).map((i) => i.key).join('、')
 
   if (halted) blockers.push(`清单已锁定（${haltNote ?? '已触发停止条件'}），需带原因解锁后重新复核`)
   const untested = names((i) => i.status === 'untested')
@@ -203,7 +235,10 @@ export function deriveState(
 
   if (signature?.valid) blockers.push('已签字')
 
-  const signable = blockers.length === 0 && items.every((i) => i.status === 'passed')
+  const signable = blockers.length === 0 && required.every((i) => i.status === 'passed')
+  const exceptions = checklist.items
+    .filter((i) => i.exception)
+    .map((i) => ({ key: i.key, title: i.title, label: i.exception?.label ?? '', reason: i.exception?.reason ?? '' }))
 
   return {
     featureKey: checklist.featureKey,
@@ -212,6 +247,7 @@ export function deriveState(
     halted,
     haltNote,
     items,
+    exceptions,
     signable,
     blockers,
     signature,

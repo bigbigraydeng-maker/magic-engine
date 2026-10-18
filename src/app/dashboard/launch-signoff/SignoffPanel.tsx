@@ -224,8 +224,16 @@ export default function SignoffPanel(props: SignoffPanelProps) {
                         <span
                           className={`inline-block rounded-full border px-2 py-0.5 text-xs ${statusChipClass(status)}`}
                         >
-                          {STATUS_LABEL[status]}
+                          {view?.isException ? `例外：${view.exceptionLabel ?? '没测'}` : STATUS_LABEL[status]}
                         </span>
+                        {(view?.grades ?? []).map((g) => (
+                          <span
+                            key={g}
+                            className="ml-1 inline-block rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800"
+                          >
+                            证据等级：{g}
+                          </span>
+                        ))}
                         {view?.manual && (
                           <span className="ml-1 inline-block rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800">
                             人工确认（无机器核对）
@@ -248,6 +256,20 @@ export default function SignoffPanel(props: SignoffPanelProps) {
               </tbody>
             </table>
           </div>
+
+          {/* 已知例外：不阻止签字，但签字=知情带例外签字 */}
+          {state.exceptions.length > 0 && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-1">
+              <p className="font-semibold text-amber-900">已知例外（没测 / 未验证，不阻止签字，但签字即表示你知情）</p>
+              <ul className="list-disc pl-5 text-sm text-amber-900 space-y-0.5">
+                {state.exceptions.map((e) => (
+                  <li key={e.key}>
+                    {e.key} {e.title}：{e.label} —— {e.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* 阻塞原因 */}
           {!state.signable && state.blockers.length > 0 && (
@@ -309,7 +331,7 @@ export default function SignoffPanel(props: SignoffPanelProps) {
             {confirming && (
               <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 space-y-2">
                 <p className="text-sm text-slate-700">
-                  确认签字？记下：你的邮箱、现在的时间、线上提交号 {commit8}。其中 {state.items.filter((i) => i.manual).length} 项是人工确认（无机器核对），你已经读过上面的原文。这不是上线许可
+                  确认签字？记下：你的邮箱、现在的时间、线上提交号 {commit8}。其中 {state.items.filter((i) => i.manual).length} 项是人工确认（无机器核对），另有 {state.exceptions.length} 项是已知例外（没测/未验证），你已经读过上面的原文和例外清单。这不是上线许可
                   。签字不会翻任何开关。
                 </p>
                 <div className="flex gap-2">

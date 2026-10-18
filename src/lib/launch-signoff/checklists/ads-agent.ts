@@ -1,9 +1,17 @@
 /**
- * 广告 Agent 机器验证 —— 上线签字清单（T1–T7）。
+ * 广告 Agent 机器验证 —— 上线签字清单。
  *
- * 人读版：docs/specs/2026-10-19-ads-agent-test-checklist.md（一致性由测试核对 key）。
- * 这里是**结构化的权威定义**：判据文字改了 = 清单指纹变 = 已有签字自动作废，
+ * 人读版：docs/specs/2026-10-19-ads-agent-test-checklist.md（T 编号一致性由测试核对）。
+ * 这里是**结构化的权威定义**：判据文字改了 = 清单指纹变 = 已有回执/复核/签字自动作废，
  * 且判据变更本身须 A 级评审（设计稿第 5 节）。
+ *
+ * 2026-10-19 统筹 18 号定稿（实查后修正）：
+ *  · 内核对 NAL/CTS 全部 ads.* 动作是 auto_approve —— 经信封提交即直接执行；演练开关只管 D3 一条路径；
+ *    人按止损走另一套人工止损信封，不受 72 小时冷却约束（冷却只约束 AI 信封）。
+ *  · T5 拆成 T5a（本轮，人工止损路径：内核自身回执）和 T5b（AI 路径：飞轮回执，本轮没有 AI 提交路径 → 已知例外）。
+ *  · T6 冷却期只能对 AI 信封做“只读评估”；生产记录验证（T6b）本轮不测 → 已知例外。
+ *  · T7 钱闸为只读评估；评估所用事实是手工按生产真数字拼的，解析器在真实数据上能否算出：未验证（写在判据里）。
+ *  · 已知例外不阻止签字，但必须在页面明确显示并写进签字快照 —— PM 签字 = 知情带例外签字。
  */
 
 import type { Checklist } from '../types'
@@ -48,7 +56,8 @@ export const ADS_AGENT_CHECKLIST: Checklist = {
       key: 'T3',
       title: '开：第一条真实执行',
       goal: '证明 PM 点一下，机器能真的执行一条动作（只动一条已经停着的系列）',
-      passCriteria: 'action_runs 出现 1 条 ads.* 动作，status 为 succeeded，且只动了目标系列',
+      passCriteria:
+        'action_runs 出现 1 条 ads.* 动作，status 为 succeeded 且 triggered_by 为 human；若 apply 步骤 applied:false，证据自动标「空操作成功：写入 Meta 那一步未被检验」',
       how: 'PM 在广告健康页点一次「止损」→ 选「暂停」；目标选一条已经停着的系列，不得使用 CTS 10/22 的两个系列',
       owner: 'PM 点一下；119 选目标并告诉 PM 点哪里',
       machineVerifiable: true,
@@ -58,7 +67,8 @@ export const ADS_AGENT_CHECKLIST: Checklist = {
       key: 'T4',
       title: '验：执行后回读确认',
       goal: '证明执行后系统自己回读确认了结果',
-      passCriteria: 'action_run_steps 里 readback 步骤 succeeded，且 verification 判过；Meta 端该系列实际为暂停',
+      passCriteria:
+        '同一 run 的 snapshot_pre / apply / readback 三步都 succeeded，readback 的 verification（ads_readback_integrity）passed 为 true；同样自动标空操作等级',
       how: '看 T3 那条记录',
       owner: '119 读，18 复核',
       machineVerifiable: true,
@@ -66,37 +76,65 @@ export const ADS_AGENT_CHECKLIST: Checklist = {
       sameRunAs: 'T3',
     },
     {
-      key: 'T5',
-      title: '回：结果写回',
-      goal: '证明结果写回了飞轮',
-      passCriteria: 'flywheel_actions 有对应 T3 那条动作的回执行，status 非空',
+      key: 'T5a',
+      title: '回（人工止损路径）：内核自身回执齐全',
+      goal: '证明人工止损这条路径，内核自己的回执是完整的',
+      passCriteria:
+        '同一 run 的 action_runs + 三步 action_run_steps + authorization_decisions（verdict=allow）由服务端回读核对',
       how: '看 T3 那条记录',
       owner: '119 读，18 复核',
       machineVerifiable: true,
       haltOnFail: false,
       sameRunAs: 'T3',
+      grade: '内核回执',
+    },
+    {
+      key: 'T5b',
+      title: '回（AI 路径）：飞轮回执',
+      goal: '证明 AI 信封执行后结果写回飞轮',
+      passCriteria: 'flywheel_actions 有该次动作的回执行',
+      how: '本轮没有 AI 提交路径；止损按钮路径设计上不写飞轮（见台账卡 2026-10-19-stop-loss-route-writes-no-flywheel-row）',
+      owner: '另案',
+      machineVerifiable: false,
+      haltOnFail: false,
+      exception: { label: '没测', reason: '本轮没有 AI 提交路径；止损按钮路径设计上不写飞轮行' },
     },
     {
       key: 'T6',
-      title: '冷却期闸：72 小时内同一条不能再动',
-      goal: '证明冷却期闸真的会拒绝',
-      passCriteria: '被拒绝，拒绝原因文本含冷却期；「已经是暂停状态」等其他原因不算通过',
-      how: 'T3 之后，对同一条再提交同样的动作',
+      title: '冷却期闸：72 小时内同一对象不能再动（AI 信封）',
+      goal: '证明冷却期闸会拒绝 AI 信封',
+      passCriteria:
+        '对 AI 信封（triggered_by=agent）用真代码+真生产数据做只读评估：同一对象刚有内核执行记录后被拒，且拒绝原文含「距上次设置变动只过了 N 小时，不足 72 小时」。人工止损路径设计上不受 72 小时约束，不得用人工路径再提交来验证',
+      how: '只读评估，证据 = 评估结论原文 + 所在 PR 编号（119 的 PR 2892：hoursSinceLastChange=0.0239，agent 判拒、human 判放行）',
       owner: '119',
       machineVerifiable: false,
       haltOnFail: false,
-      evidenceTables: ['authorization_decisions'],
+      manualEvidence: 'readonly_eval',
+      grade: '只读评估',
+    },
+    {
+      key: 'T6b',
+      title: '冷却期闸：生产记录验证',
+      goal: '证明冷却期闸在生产上真的拒绝过一次 AI 信封',
+      passCriteria: '生产库里有被冷却期拒绝的 AI 信封记录',
+      how: '需要 AI 路径真提交，本轮没有',
+      owner: '另案',
+      machineVerifiable: false,
+      haltOnFail: false,
+      exception: { label: '没测', reason: '需要 AI 路径真提交一次才有生产记录；本轮没有 AI 提交路径' },
     },
     {
       key: 'T7',
       title: '钱闸：超过客户总闸必须被拒',
       goal: '证明超过客户总预算闸的加预算请求会被拒绝',
-      passCriteria: '被拒绝，拒绝原因看得见（只测拒绝，不得真执行，批准环节不点批准）',
-      how: '故意提交一个会超总闸的加预算请求（走 O1「加预算」那条需人批准的路）',
+      passCriteria:
+        '只读评估：会被拒，且拒绝原文指向账户上限/客户总闸。注明：评估所用事实是按生产真数字手工拼的，解析器在真实数据上能否算出：未验证',
+      how: '只读评估，不得真执行，批准环节不点批准；证据 = 评估结论原文 + 所在 PR 编号',
       owner: '119',
       machineVerifiable: false,
       haltOnFail: false,
-      evidenceTables: ['authorization_decisions'],
+      manualEvidence: 'readonly_eval',
+      grade: '只读评估（事实手工拼，解析器在真实数据上未验证）',
     },
   ],
 }
