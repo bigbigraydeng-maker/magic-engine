@@ -185,7 +185,7 @@ describe('both writers targeting the same (action, metric, window)', () => {
       deferred: 1,
       pass2ClientIds: [CLIENT_ID], // pass 2 uses this to know whom to visit
       unattributable: 0, // the bridge can load this flywheel, so it is reachable
-      unattributableSamples: [], reconcileErrors: 0, reconcileErrorSamples: [],
+      unattributableSamples: [], not_evaluable: 0, reconcileErrors: 0, reconcileErrorSamples: [],
     })
     expect(db.outcomes()).toHaveLength(0)
   })
