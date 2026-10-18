@@ -181,6 +181,11 @@ async function markCommentPending(deps: PromoteDeps, orderId: string, pending: b
   deps.alert(`首评待补标记写入失败 order=${orderId}`)
 }
 
+/** 回执写入没写全:有错误记录,或有占位却没盖「写完」章(commentRetry 之后仍沿用,直到人处理)。 */
+function booksIncomplete(auth: ReturnType<typeof readAuth>): boolean {
+  return Boolean(auth.books_error) || (Boolean(auth.books_work_order_id) && !auth.books_written_at)
+}
+
 /** 补首评(永远执行,自带幂等;先过红线)→ 转公开后回读重扫红线 → 收尾回执。失败都不回滚公开。 */
 export async function finishStage(deps: PromoteDeps, f: FinishInput, attemptId: string): Promise<FinishOutcome> {
   const blocked = await firstCommentBlocked(deps, f)
@@ -190,7 +195,7 @@ export async function finishStage(deps: PromoteDeps, f: FinishInput, attemptId: 
   const closed = await mutatePayload(deps, { id: f.rowId, client_id: f.clientId }, fenced(attemptId, (cur) => ({
     ...withAuth(cur, {
       status: 'consumed', first_comment_status: status, fail_reason: blocked ?? undefined,
-      needs_attention: status === 'failed' || redlineHit !== undefined || Boolean(readAuth(cur).books_error),
+      needs_attention: status === 'failed' || redlineHit !== undefined || booksIncomplete(readAuth(cur)),
       post_publish_redline_hit: redlineHit,
     }),
     ...(commentId ? { first_comment_id: commentId } : {}),

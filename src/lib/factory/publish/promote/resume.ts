@@ -3,6 +3,7 @@
 
 import { buildReelFirstComment } from '@/lib/social/reel-publishing'
 import { asRecord, computeFingerprint, redlineSurface } from './guards'
+import { writeCompletionBooks } from './books'
 import { finishStage, type FinishInput } from './publish-steps'
 import { readAuth } from './payload-lock'
 import type { ClaimIds, ClaimTarget } from './action'
@@ -16,6 +17,7 @@ const fail = (status: number, error: string): Fail => ({ ok: false, status, erro
 
 export interface ResumeContext {
   ok: true
+  order: PromoteOrder
   claimTarget: ClaimTarget
   finish: FinishInput
   approvedAt: string
@@ -61,7 +63,7 @@ async function buildResume(deps: PromoteDeps, order: PromoteOrder, row: ResumeCo
   if (hit) return fail(422, `首评命中红线,不能发送: ${hit}`)
   const fingerprint = computeFingerprint({ videoId, description: '', firstComment: first.text, approvedAt })
   return {
-    ok: true, claimTarget: { orderId: order.id, row, fingerprint, videoId, pageId }, approvedAt, requestId, commentRetry,
+    ok: true, order, claimTarget: { orderId: order.id, row, fingerprint, videoId, pageId }, approvedAt, requestId, commentRetry,
     finish: { orderId: order.id, clientId: order.client_id, masterBriefId: order.master_brief_id, target, videoId, firstComment: first.text, rowId: row.id },
     publishedAt: String(ref['published_at'] ?? ''), estimated: ref['published_at_estimated'] === true,
     permalink: typeof ref['permalink'] === 'string' ? ref['permalink'] : null,
@@ -73,6 +75,10 @@ type Claim = (deps: PromoteDeps, input: PromoteInput, t: ClaimTarget, ids: Claim
 export async function runResumeConfirm(deps: PromoteDeps, input: PromoteInput, rc: ResumeContext, claim: Claim, attemptId: string): Promise<PromoteResult> {
   const claimed = await claim(deps, input, rc.claimTarget, { requestId: rc.requestId, attemptId, allowCommentRetry: rc.commentRetry })
   if ('ok' in claimed) return claimed
+  // 只有「公开后补收尾」才补两笔回执(去重占位保证不重复);「仅补首评」不写
+  if (!rc.commentRetry) {
+    await writeCompletionBooks(deps, { order: rc.order, row: rc.claimTarget.row, target: rc.finish.target, videoId: rc.claimTarget.videoId, permalink: rc.permalink }, attemptId)
+  }
   const done = await finishStage(deps, rc.finish, attemptId)
   if (done.closed === 'fenced') return fail(409, '收尾被另一个请求接管了,请刷新页面查看结果')
   const data: PromotedData = {

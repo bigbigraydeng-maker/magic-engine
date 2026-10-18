@@ -591,3 +591,68 @@ describe('公开后的两笔回执(工作日志 + 执行事项)', () => {
     expect(String(auth().books_error)).toContain('执行事项')
   })
 })
+
+describe('公开后补收尾也补两笔回执(窗口 B:写完工单后、占位前崩溃)', () => {
+  /** 模拟崩溃现场:工单已是 PUBLISHED、回执还停在 claimed 且租约过期,两笔回执没写也没占位。 */
+  async function crashAfterOrderWrite(): Promise<void> {
+    await confirm(await tokenOf())
+    const a = { ...auth() }
+    delete a['books_work_order_id']; delete a['books_written_at']; delete a['first_comment_status']
+    w.row!.payload['promote_authorization'] = { ...a, status: 'claimed', claimed_at: new Date(w.now - 6 * 60_000).toISOString() }
+    w.items.length = 0; w.workLogs.length = 0; w.log.length = 0
+  }
+
+  it('补收尾写一次两笔回执,且不再调 Meta 转公开', async () => {
+    await crashAfterOrderWrite()
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind).toBe('synced')
+    expect(w.workLogs).toHaveLength(1)
+    expect(w.items).toHaveLength(1)
+    expect(w.log).not.toContain('meta.promote')
+    expect(auth().books_written_at).toBeTruthy()
+  })
+
+  it('已占位(上次其实写过)的再次补收尾不重复写', async () => {
+    await crashAfterOrderWrite()
+    w.row!.payload['promote_authorization'] = { ...auth(), books_work_order_id: ORDER_ID, books_written_at: new Date(T0).toISOString() }
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(0)
+    expect(w.items).toHaveLength(0)
+  })
+
+  it('仅补首评(commentRetry)不写回执', async () => {
+    w.commentError = new Error('boom')
+    await confirm(await tokenOf())
+    w.commentError = null
+    const a = { ...auth() }; delete a['books_work_order_id']; delete a['books_written_at'] // 去掉占位,证明不写是分支决定的而不只是去重
+    w.row!.payload['promote_authorization'] = a
+    w.items.length = 0; w.workLogs.length = 0
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(0)
+    expect(w.items).toHaveLength(0)
+  })
+})
+
+describe('books_written_at 章', () => {
+  it('两笔都成功:盖章,收尾不标 needs_attention', async () => {
+    await confirm(await tokenOf())
+    expect(auth().books_written_at).toBe(new Date(T0).toISOString())
+    expect(auth().needs_attention).toBe(false)
+  })
+
+  it('有占位却没盖章(上次中途崩了):收尾标 needs_attention,不重复写', async () => {
+    w.row!.payload['promote_authorization'] = { books_work_order_id: ORDER_ID }
+    await confirm(await tokenOf())
+    expect(auth().needs_attention).toBe(true)
+    expect(w.workLogs).toHaveLength(0)
+  })
+
+  it('命中 0 行的更新(端口抛错)视为失败:不盖章,标 books_error + needs_attention,公开不回滚', async () => {
+    w.itemError = { message: '执行事项更新没有命中任何行' } as unknown as Error
+    const r = await confirm(await tokenOf())
+    expect(r.ok).toBe(true)
+    expect(auth().books_written_at).toBeUndefined()
+    expect(String(auth().books_error)).toContain('没有命中任何行')
+    expect(auth().needs_attention).toBe(true)
+  })
+})

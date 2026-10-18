@@ -6,6 +6,9 @@
  * 以及 insert 的字段(status/dimension/fix_type/source/title 截断)、
  * 回挂时的 `.is('execution_item_id', null)`、工作日志的作者/日期,
  * 删掉哪一条主流程测试都不会红。这里直接盯真实实现发出的查询。
+ *
+ * 另外:两条 update 都带 `.select('id')` 并检查命中行数,
+ * 零行视为失败(否则「更新了 0 行」会被静默吞掉)。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -23,7 +26,7 @@ function builder(table: string) {
   for (const m of ['select', 'eq', 'is', 'update', 'insert']) b[m] = record(m)
   const settle = () => {
     const q = results[table] ?? []
-    return Promise.resolve(q.shift() ?? { data: null, error: null })
+    return Promise.resolve(q.shift() ?? { data: [{ id: 'x' }], error: null })
   }
   b.maybeSingle = () => settle()
   b.then = (resolve: (v: unknown) => unknown) => settle().then(resolve)
@@ -47,7 +50,7 @@ const callsOn = (table: string, method: string) =>
 
 describe('completeExecutionItem', () => {
   it('有 existingItemId → 只 update execution_items,按 id + client_id 过滤,不 insert', async () => {
-    results.execution_items = [{ data: null, error: null }]
+    results.execution_items = [{ data: [{ id: 'item-1' }], error: null }]
     await createPromoteBooks().completeExecutionItem({
       clientId: 'c1',
       rowId: 'a1',
@@ -63,13 +66,29 @@ describe('completeExecutionItem', () => {
     expect(typeof patch.updated_at).toBe('string')
     expect(has('execution_items', 'eq', 'id', 'item-1')).toBe(true)
     expect(has('execution_items', 'eq', 'client_id', 'c1')).toBe(true)
+    expect(has('execution_items', 'select', 'id')).toBe(true)
+    expect(callsOn('execution_items', 'insert')).toHaveLength(0)
+    expect(callsOn('flywheel_actions', 'update')).toHaveLength(0)
+  })
+
+  it('有 existingItemId 但 update 命中 0 行 → 抛「执行事项更新没有命中任何行」', async () => {
+    results.execution_items = [{ data: [], error: null }]
+    await expect(
+      createPromoteBooks().completeExecutionItem({
+        clientId: 'c1',
+        rowId: 'a1',
+        existingItemId: 'item-1',
+        title: 't',
+        description: 'd',
+      }),
+    ).rejects.toThrow('执行事项更新没有命中任何行')
     expect(callsOn('execution_items', 'insert')).toHaveLength(0)
     expect(callsOn('flywheel_actions', 'update')).toHaveLength(0)
   })
 
   it('没有 existingItemId → insert completed 执行事项,再回挂 flywheel_actions', async () => {
     results.execution_items = [{ data: { id: 'item-new' }, error: null }]
-    results.flywheel_actions = [{ data: null, error: null }]
+    results.flywheel_actions = [{ data: [{ id: 'a1' }], error: null }]
     const longTitle = 'x'.repeat(250)
     await createPromoteBooks().completeExecutionItem({
       clientId: 'c1',
@@ -98,6 +117,21 @@ describe('completeExecutionItem', () => {
     expect(has('flywheel_actions', 'eq', 'id', 'a1')).toBe(true)
     expect(has('flywheel_actions', 'eq', 'client_id', 'c1')).toBe(true)
     expect(has('flywheel_actions', 'is', 'execution_item_id', null)).toBe(true)
+    expect(has('flywheel_actions', 'select', 'id')).toBe(true)
+  })
+
+  it('回挂 flywheel_actions 命中 0 行 → 抛「执行事项回挂流量记录没有命中任何行」', async () => {
+    results.execution_items = [{ data: { id: 'item-new' }, error: null }]
+    results.flywheel_actions = [{ data: [], error: null }]
+    await expect(
+      createPromoteBooks().completeExecutionItem({
+        clientId: 'c1',
+        rowId: 'a1',
+        existingItemId: null,
+        title: 't',
+        description: 'd',
+      }),
+    ).rejects.toThrow('执行事项回挂流量记录没有命中任何行')
   })
 
   it('insert 没返回 id → 抛', async () => {
@@ -125,6 +159,20 @@ describe('completeExecutionItem', () => {
         description: 'd',
       }),
     ).rejects.toBeTruthy()
+  })
+
+  it('update 报错是普通对象 → 原样抛出该对象', async () => {
+    const boom = { message: 'boom' }
+    results.execution_items = [{ data: null, error: boom }]
+    await expect(
+      createPromoteBooks().completeExecutionItem({
+        clientId: 'c1',
+        rowId: 'a1',
+        existingItemId: 'item-1',
+        title: 't',
+        description: 'd',
+      }),
+    ).rejects.toBe(boom)
   })
 
   it('insert 报错 → 抛', async () => {

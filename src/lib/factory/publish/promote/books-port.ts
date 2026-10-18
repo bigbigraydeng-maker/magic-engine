@@ -12,12 +12,14 @@ const FACTORY_AUTHOR = 'factory@magicengine.com.au'
 async function completeExecutionItem(a: Parameters<PromoteBooks['completeExecutionItem']>[0]): Promise<void> {
   const nowIso = new Date().toISOString()
   if (a.existingItemId) {
-    const { error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('execution_items')
       .update({ status: 'completed', completed_at: nowIso, updated_at: nowIso })
       .eq('id', a.existingItemId)
       .eq('client_id', a.clientId)
+      .select('id')
     if (error) throw error
+    if (!Array.isArray(data) || data.length < 1) throw new Error('执行事项更新没有命中任何行')
     return
   }
   const { data, error } = await supabaseAdmin
@@ -39,7 +41,9 @@ async function completeExecutionItem(a: Parameters<PromoteBooks['completeExecuti
     .eq('id', a.rowId)
     .eq('client_id', a.clientId)
     .is('execution_item_id', null)
+    .select('id')
   if (link.error) throw link.error
+  if (!Array.isArray(link.data) || link.data.length < 1) throw new Error('执行事项回挂流量记录没有命中任何行')
 }
 
 async function writeWorkLog(a: Parameters<PromoteBooks['writeWorkLog']>[0]): Promise<void> {

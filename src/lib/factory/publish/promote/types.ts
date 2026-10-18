@@ -50,6 +50,8 @@ export interface PromoteAuthorization {
   needs_attention?: boolean
   /** 「Reel 已公开」两笔回执(工作日志 + 执行事项)的去重标记:已为该工单写过。 */
   books_work_order_id?: string
+  /** 两笔回执都写成功的时间;有占位却无此值 = 没写全。 */
+  books_written_at?: string
   /** 两笔回执写入失败的人话原因(不回滚公开,只让回执标 needs_attention)。 */
   books_error?: string
 }
