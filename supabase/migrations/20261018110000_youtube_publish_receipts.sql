@@ -12,7 +12,7 @@ create table public.youtube_publish_receipts (
   client_id uuid not null references public.clients(id),
   channel_id text not null,
   stage text not null check (stage in ('staging', 'public_step')),
-  status text not null check (status in ('pending', 'blocked', 'staged', 'dry_run_ok', 'published', 'failed')),
+  status text not null check (status in ('blocked', 'staged', 'dry_run_ok', 'published', 'failed')),
   reason text,
   -- the factory work order the video came from; staging refuses anything else
   work_order_id uuid references public.content_work_orders(id),
@@ -36,8 +36,6 @@ create table public.youtube_publish_authorizations (
   video_id text not null,
   granted_by text not null,
   granted_at timestamptz not null default now(),
-  -- a grant is only consumable inside this window (checked atomically in the consume update)
-  expires_at timestamptz not null default (now() + interval '30 minutes'),
   consumed_at timestamptz
 );
 
