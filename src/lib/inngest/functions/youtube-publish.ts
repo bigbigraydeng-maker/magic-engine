@@ -40,9 +40,22 @@ export async function fetchFactoryVideo(url: string, fetchImpl: typeof fetch = f
   if (!res.ok) throw new Error(`video download failed (${res.status})`)
   if (!(res.headers.get('content-type') ?? '').startsWith('video/')) throw new Error('not a video')
   if (Number(res.headers.get('content-length') ?? '0') > MAX_VIDEO_BYTES) throw new Error('video too large')
-  const blob = await res.blob()
-  if (blob.size > MAX_VIDEO_BYTES) throw new Error('video too large')
-  return blob
+  // Stream with a byte cap: content-length may be absent (chunked) or wrong.
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('empty video body')
+  const parts: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > MAX_VIDEO_BYTES) {
+      await reader.cancel()
+      throw new Error('video too large')
+    }
+    parts.push(value)
+  }
+  return new Blob(parts as BlobPart[], { type: res.headers.get('content-type') ?? 'video/mp4' })
 }
 
 export const youtubeStaging = inngest.createFunction(

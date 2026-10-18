@@ -63,15 +63,16 @@ export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promi
     return finish({ channelId, status: 'blocked', reason: 'already_staged', noPublish: true })
   }
 
-  // Written BEFORE any upload: if the process dies mid-upload, this row blocks a blind re-upload
-  // (a duplicate private video) and tells a human to check the channel.
-  await deps.saveReceipt({ ...base, channelId, status: 'pending', noPublish: true })
-  finalRequestId = randomUUID()
-  pendingWritten = true
   try {
     const token = await deps.getToken(ev.clientId)
     await lockChannel(token, channelId, deps.fetchImpl)
     const video = await deps.fetchVideo(wo.videoUrl)
+    // Written immediately BEFORE the upload (not before the token/download steps, which cannot
+    // leave anything on the channel): if the process dies mid-upload this row blocks a blind
+    // re-upload; a failure before this point leaves no row, so a retry stays possible.
+    await deps.saveReceipt({ ...base, channelId, status: 'pending', noPublish: true })
+    finalRequestId = randomUUID()
+    pendingWritten = true
     const uploaded = await uploadStagingVideo(
       token,
       channelId,

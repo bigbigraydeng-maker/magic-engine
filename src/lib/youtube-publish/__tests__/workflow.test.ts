@@ -74,6 +74,12 @@ describe('runStaging', () => {
     expect(await runStaging(ev, deps)).toMatchObject({ status: 'failed', reason: 'readback_mismatch' })
   })
 
+  it('a failure before the upload leaves no pending row, so a retry stays possible', async () => {
+    const { deps, saved } = stagingDeps({ fetchVideo: async () => { throw new Error('download timeout') }, fetchImpl: vi.fn().mockResolvedValueOnce(channelsOk()) })
+    expect(await runStaging(ev, deps)).toMatchObject({ status: 'failed', reason: 'staging_error' })
+    expect(saved.map((x) => x.status)).toEqual(['failed'])
+  })
+
   it('turns an upload error into a failed receipt instead of throwing', async () => {
     const f = vi.fn().mockResolvedValueOnce(channelsOk()).mockResolvedValueOnce(new Response('quota', { status: 403 }))
     const { deps, saved } = stagingDeps({ fetchImpl: f })
