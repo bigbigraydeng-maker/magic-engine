@@ -11,7 +11,7 @@ import { getStoredPageToken } from '@/lib/meta/token-manager'
 import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
-const GRAPH = 'https://graph.facebook.com/v25.0'
+export const GRAPH = 'https://graph.facebook.com/v25.0'
 const RUPLOAD = 'https://rupload.facebook.com/video-upload/v25.0'
 
 // 零宽幂等标记:wo_id 前 8 位 hex 编成不可见字符,埋 caption 末尾。ANCHOR 打头方便扫描。
@@ -62,7 +62,7 @@ async function ensurePageFirstComment(args: {
 // 先库后 env:已经按老路配好的客户(CTS)一行不用改,新客户点一下按钮就通。
 //
 // 页名同时做防误发第三重断言(魏征 B9):页名必须 ~ 该客户品牌,否则绝不发(防把 A 客户片发到 B 页)。
-async function resolveToken(target: PublishTarget): Promise<{ accessToken: string; pageId: string; pageName: string }> {
+export async function resolveToken(target: PublishTarget): Promise<{ accessToken: string; pageId: string; pageName: string }> {
   if (!target.page_id) throw new Error('publish_target.page_id 缺失')
 
   let accessToken: string | null = null

@@ -253,6 +253,12 @@ export interface PublishedRef {
    * 有值 = 已喊过下游;空/缺 = 还没喊成 → 补发对账会重发(仅当 video_state=PUBLISHED)。
    */
   event_ids?: string[]
+  /** 受控转公开动作盖的戳:Instagram 跟发循环见到它一律跳过(Publer 删除 PR 合并后可撤)。 */
+  ig_crosspost_blocked?: boolean
+  /** 受控转公开动作的请求编号(流量记录里 promote_authorization 的引用)。 */
+  promote_request_id?: string
+  /** true = published_at 是估算值(人手已转公开、Meta 读不到真实时间时),不是转公开成功的那一刻。 */
+  published_at_estimated?: boolean
 }
 
 /**
