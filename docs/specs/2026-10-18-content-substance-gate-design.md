@@ -99,3 +99,21 @@
 - **17419d99 的重放**：props 取自 `content_work_orders.brief.remotion.props`（只读调查 PM 已常规授权）或存储 `segments.json` 的 `props`；脱敏后存成**测试夹具**，用 `processRemotionOrder` 的依赖注入（`healthFn`/`loadEngineFn`/`renderFn` 可替换）重放：期望 `RemotionOrderError('内容闸…')` 且 `renderFn` 未调用；同夹具加 `deliverable:'asset_only'` → 放行；服务端侧对同 props 的重算 verdict = fail。**不再提交整链测试单**（会写生产、会污染 PM 的审片队列）；翻开关前再做一次**升级后的只读冒烟**即可。
 - 正例夹具：7049d162、cc876dc3（list）、00f23d78、cb752a8f（postcard）的真实 props → 全部 pass。
 - 回执计数：dead_letter 可被一键复活会反复被拦刷屏 → 拦截原因标注「需改下单参数，复活无效」。
+
+## 11. 第二轮复核后的补丁（子牙「带条件通过」、魏征「带条件通过」；已采纳，与上文冲突处以本节为准）
+
+**判据（魏征 1–4，写死）**
+- **每个文字元素自己必须连续可见 ≥ 2 秒才计入；时间区间并集只用来去掉重叠，不用来凑够 2 秒**（30 个紧挨着的 0.25 秒词不算）。
+- list 的条目/hook 行按 `ITEM_BEATS=2` 拍约 1 秒，**达不到 2 秒，不计**；list 只靠 `revealTitle`（非纯价格文字、8 拍 reveal 段内连续显示）过闸，**固定归为 `brand_card`**，不做语义分类；list 没有 `sourceUrl`，不套 `selling_line` 的出处要求。postcard 带价格卡时没有 `end`，品牌卡走不通 → postcard 以 `scene.place`（≥3 秒的 `sceneSec`）满足 `place_or_tour`。
+- atmosphere 的文字可见时间 = **自 `fadeInFrames + 18 帧` 起、至 `总长 − fadeOut` 止**。
+- **如实写进给 PM 的汇报**：这道闸对 list / postcard / datacard 基本是「空转」——它们在 schema 层就必填文字；**真正有牙的只有 atmosphere（`line` 可为 null）和 montage**。所以验收里「正例全 pass」只能证明没误伤，不能证明闸有效；有效性只能由 17419d99 重放被拦来证明。闸挡的是「空」，挡不住「乱填」（"aaa"）。
+
+**服务端与发布（子牙 1–5）**
+- **PR-1 不能让服务端先「必填 V3」**：`review-apply.ts:77/116`、`ReviewInbox.tsx`、`rejectPayload.ts`、`chat.ts:44` 现都是 V2，PR-1 若先必填 V3，通过/打回全部报 400。**PR-1 只做：版本号读写、`asset_only` 拦截、完成回执白名单、「V2/V3 都收」**；必填 V3 与界面**同一个 PR** 一起上。
+- `humanKeysForStored` 改签名读 `review_ref.checklist_version`，**4 个调用点**：`publish-worker.ts:191`、`instagram-crosspost.ts:477`（首轮漏了它）、`review-sync.ts:214`、`:242`；`applyApprove` 写 `review_ref` 时补写 `checklist_version`。**切换日之后批准的回执必须带版本号才放行**（魏征 5，防降级）；`review-sync.ts` 的通过路径按同一规则强制。
+- `asset_only` 补四点：①`publish-worker` 兜底用 `markFailed(..., forceTerminal=true)`（否则落成 `publish_failed` 排重试）；②「审通过置 `archived`」需要一个**新接口**：仅管理员、仅 `asset_only`、仅 `in_review` 条件更新；③`review-sync` 通过路径同样拦 `asset_only`；④`week-overview/build.ts:84` 只隐藏 `archived` 等状态，`in_review` 的 `asset_only` 会混进周概览 → 加标注/过滤。已核实无其它入口能把工单推到 `approved`（仅 `review-apply.ts:93`、`review-sync.ts:222`；sweeper/revive/TikTok 路由都过不去）。
+- **闸的位置钉死**：`remotion-branch.mjs` 里放在 `TEXT_WIRED_TEMPLATES` 检查**之后**、素材 ffprobe 预检与音乐人声检查**之前**——这样用 17419d99 的 props 重放时不依赖本机素材文件，且能证明 `renderFn` 未被调用。
+- 回执 `capabilities`：`parseMediaEvidence` 现会丢未知键，**先加白名单**才能读回；**下单入口是否放行 `brief.remotion.deliverable` 未核实**（仓库里目前没有任何 `deliverable` 实现），实施 PR 第一件事就是核。
+- 「默认只告警」期间服务端没有防线 → 台账卡写明**翻开关的条件**（读回 capabilities=content_substance_v1 且 0 张旧回执在飞）并**加日历提醒**。服务端重算 list 要复制 `HOOK_BEATS/ITEM_BEATS/REVEAL_BEATS` 与 `fb()` 取整，夹具覆盖 beats 边界；montage 若定为只能 `asset_only`，服务端只需「非 `asset_only` 一律 fail」。
+
+**打回（魏征 6）**：remotion 单「看不懂」FAIL 打回时**不再重开新单**（新单带 `reopened_from` 会被 `remotion-branch.mjs:623` 直接拒绝成死单），与 `chat.ts:119` 现有行为对齐；打回面板提示「改下单参数：加内容或改标素材」。
