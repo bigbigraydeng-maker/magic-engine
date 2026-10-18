@@ -6,6 +6,8 @@ export interface BoardInput {
   cards: SkillCard[]
   errors: SkillCardError[]
   ledgerEntries: LedgerEntry[]
+  resourcesByPillar?: Record<string, { rulebookText: string; digestText: string }>
+  /** Legacy ads fields retained for existing callers and focused tests. */
   rulebookText: string
   digestText: string
   /** YYYY-MM-DD, NZ date */
@@ -93,7 +95,7 @@ export interface Board {
   pillars: PillarBlock[]
 }
 
-export const RULE_ID_RE = /^(RL|S|C|E|B)-\d+$/
+export const RULE_ID_RE = /^(RL|SO|S|C|E|B)-\d+$/
 
 const OWNER_RE = /交\s*(\d+)\s*号(?:和\s*(\d+)\s*号)?/
 
@@ -457,10 +459,18 @@ export function buildPillarBlocks(groups: Record<BoardGroupKey, BoardItem[]>): P
 
 interface CheckContext {
   ledger: Map<string, LedgerEntry>
-  tags: Set<string>
   allKeys: Set<string>
   issues: BoardIssue[]
   input: BoardInput
+}
+
+function resourcesFor(input: BoardInput, pillar: string): { rulebookText: string; digestText: string } {
+  const configured = input.resourcesByPillar?.[pillar]
+  if (configured) return configured
+  if (pillar === DEFAULT_PILLAR) {
+    return { rulebookText: input.rulebookText, digestText: input.digestText }
+  }
+  return { rulebookText: '', digestText: '' }
 }
 
 /** 按 state 做一致性校验；merged 不进任何分组，返回 null */
@@ -471,10 +481,13 @@ function checkPoint(card: SkillCard, point: SkillCard['points'][number], ctx: Ch
   }
   const item = baseItem(card, point)
   const { input, issues } = ctx
+  const resources = resourcesFor(input, card.pillar)
   if (point.state === 'verifying') checkVerifying(card, point, item, ctx.ledger, input.today, issues)
   if (point.state === 'tried_failed') checkTriedFailed(card, point, item, ctx.ledger, issues)
-  if (point.state === 'adopted') checkAdopted(card, point, input.rulebookText, issues)
-  if (point.state === 'already_in_me') checkAlreadyInMe(card, point, input.rulebookText, ctx.tags, issues)
+  if (point.state === 'adopted') checkAdopted(card, point, resources.rulebookText, issues)
+  if (point.state === 'already_in_me') {
+    checkAlreadyInMe(card, point, resources.rulebookText, digestTags(resources.digestText), issues)
+  }
   return item
 }
 
@@ -485,11 +498,9 @@ export function buildBoard(input: BoardInput): Board {
   if (input.rulebookText.trim() === '') {
     return fatalBoard('广告规则手册读不到或为空，没法核对「已合并进 ME」', input.errors)
   }
-
   const ledger = new Map<string, LedgerEntry>()
   for (const entry of input.ledgerEntries) ledger.set(entry.id, entry)
 
-  const tags = digestTags(input.digestText)
   const groups = emptyGroups()
   const issues: BoardIssue[] = []
 
@@ -499,7 +510,7 @@ export function buildBoard(input: BoardInput): Board {
   }
 
   const referenced = new Set<string>()
-  const ctx: CheckContext = { ledger, tags, allKeys, issues, input }
+  const ctx: CheckContext = { ledger, allKeys, issues, input }
   for (const card of input.cards) {
     for (const point of card.points) {
       if (point.handoff) referenced.add(point.handoff)

@@ -9,6 +9,8 @@ describe('仓库里的真实技能卡', () => {
     expect(loaded.errors, JSON.stringify(loaded.errors)).toEqual([])
     expect(loaded.cards.length).toBeGreaterThanOrEqual(9)
     expect(loaded.rulebookText.length).toBeGreaterThan(0)
+    expect(loaded.resourcesByPillar.social.rulebookText.length).toBeGreaterThan(0)
+    expect(loaded.resourcesByPillar.social.digestText.length).toBeGreaterThan(0)
   })
 
   it('零 error 级数据对不上、无致命错误', () => {
@@ -17,6 +19,7 @@ describe('仓库里的真实技能卡', () => {
       cards: loaded.cards,
       errors: loaded.errors,
       ledgerEntries: loadLedger().entries,
+      resourcesByPillar: loaded.resourcesByPillar,
       rulebookText: loaded.rulebookText,
       digestText: loaded.digestText,
       today: '2026-10-19',
@@ -35,6 +38,7 @@ describe('仓库里的真实技能卡', () => {
       cards: loaded.cards,
       errors: loaded.errors,
       ledgerEntries: loadLedger().entries,
+      resourcesByPillar: loaded.resourcesByPillar,
       rulebookText: loaded.rulebookText,
       digestText: loaded.digestText,
       today: '2026-10-19',

@@ -7,8 +7,8 @@ function point(over: Partial<SkillPoint> & Pick<SkillPoint, 'key' | 'state'>): S
   return { text: '点 ' + over.key, handoff: null, rule: null, note: null, mergedInto: null, ...over }
 }
 
-function makeCard(id: string, points: SkillPoint[], hasCorrection = false): SkillCard {
-  return { id, file: id + '.md', title: '卡 ' + id, sourceUrl: null, hasCorrection, pillar: 'ads', points }
+function makeCard(id: string, points: SkillPoint[], hasCorrection = false, pillar = 'ads'): SkillCard {
+  return { id, file: id + '.md', title: '卡 ' + id, sourceUrl: null, hasCorrection, pillar, points }
 }
 
 function entry(
@@ -317,10 +317,61 @@ describe('buildBoard 致命错误', () => {
     expect(board.issues).toEqual([])
   })
 
-  it('规则手册为空时整页报致命错误', () => {
+  it('广告规则手册读不到时整页报致命错误', () => {
     const card = makeCard('2026-01-01-card-a', [point({ key: 'l', state: 'learning' })])
     const board = buildBoard({ ...input([card]), rulebookText: '  ' })
     expect(board.fatal).not.toBeNull()
+  })
+})
+
+describe('按 pillar 隔离规则校验', () => {
+  it('社媒点只用社媒手册/摘要，广告规则不能让社媒点误通过', () => {
+    const ads = makeCard('2026-01-01-ads-card', [
+      point({ key: 'a', state: 'adopted', rule: 'C-1' }),
+      point({ key: 'tag', state: 'already_in_me', rule: 'CT§3-受众' }),
+    ])
+    const social = makeCard(
+      '2026-01-01-social-card',
+      [
+        point({ key: 's', state: 'adopted', rule: 'SO-01' }),
+        point({ key: 'missing', state: 'adopted', rule: 'C-1' }),
+        point({ key: 'tag', state: 'already_in_me', rule: 'SO-01' }),
+      ],
+      false,
+      'social',
+    )
+    const board = buildBoard({
+      ...input([ads, social]),
+      resourcesByPillar: {
+        ads: {
+          rulebookText: RULEBOOK + '\n| **C-1** | 广告规则 来自 2026-01-01-ads-card.md |',
+          digestText: DIGEST,
+        },
+        social: {
+          rulebookText: '| **SO-01** | 社媒规则 来自 2026-01-01-social-card.md |',
+          digestText: '- [SO-01] 已有社媒规则',
+        },
+      },
+    })
+    expect(board.fatal).toBeNull()
+    expect(board.issues, JSON.stringify(board.issues)).toHaveLength(1)
+    expect(board.issues[0].cardId).toBe('2026-01-01-social-card')
+    expect(board.issues[0].pointKey).toBe('missing')
+  })
+
+  it('社媒 handoff 的 adopted 校验不会回退到广告手册', () => {
+    const social = makeCard(
+      '2026-01-01-social-card',
+      [point({ key: 's', state: 'adopted', rule: 'C-1' })],
+      false,
+      'social',
+    )
+    const board = buildBoard({
+      ...input([social]),
+      resourcesByPillar: { social: { rulebookText: '', digestText: '' } },
+    })
+    expect(board.fatal).toBeNull()
+    expect(board.issues.some((issue) => issue.message.includes('找不到 C-1'))).toBe(true)
   })
 })
 

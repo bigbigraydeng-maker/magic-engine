@@ -1,7 +1,7 @@
 import { POINT_STATES, REQUIRED_FIELDS, type PointState, type SkillCardParseResult, type SkillPoint } from './types'
 import { DEFAULT_PILLAR } from './pillars'
 
-const KEY_RE = /^[a-z0-9][a-z0-9-]*$/
+const KEY_RE = /^[a-z0-9][a-z0-9_-]*$/
 const URL_RE = /https?:\/\/[^\s|）)]+/
 const CORRECTION_RE = /^## 复核更正/m
 const INDEX_HEADING = '## 机器索引'

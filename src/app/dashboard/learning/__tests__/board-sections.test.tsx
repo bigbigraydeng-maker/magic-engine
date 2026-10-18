@@ -69,6 +69,25 @@ describe('PageHeader', () => {
 })
 
 describe('BoardView', () => {
+  it('offers ads/social/all filters and shows only the selected pillar', () => {
+    const ads = block({})
+    const social = block({ pillar: 'social', label: '社媒 Agent' })
+    const allHtml = renderToStaticMarkup(<BoardView board={board([ads, social])} />)
+    expect(allHtml).toContain('aria-label="学习支柱"')
+    expect(allHtml).toContain('全部')
+    expect(allHtml).toContain('href="/dashboard/learning?pillar=ads"')
+    expect(allHtml).toContain('href="/dashboard/learning?pillar=social"')
+    expect(allHtml).toContain('广告 Agent')
+    expect(allHtml).toContain('社媒 Agent')
+
+    const socialHtml = renderToStaticMarkup(
+      <BoardView board={board([ads, social])} selectedPillar="social" />,
+    )
+    expect(socialHtml).toContain('aria-current="page"')
+    expect(socialHtml).toContain('社媒 Agent')
+    expect(socialHtml).not.toContain('广告 Agent')
+  })
+
   it('renders both pillar blocks in order with their numbers', () => {
     const ads = block({})
     const seo = block({

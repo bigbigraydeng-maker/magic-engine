@@ -138,11 +138,38 @@ function PillarSection({ block }: { block: PillarBlock }) {
   )
 }
 
-export function BoardView({ board }: { board: Board }) {
+const PILLAR_FILTERS = [
+  { key: 'all', label: '全部', href: '/dashboard/learning' },
+  { key: 'ads', label: '广告', href: '/dashboard/learning?pillar=ads' },
+  { key: 'social', label: '社媒', href: '/dashboard/learning?pillar=social' },
+] as const
+
+export function BoardView({ board, selectedPillar = 'all' }: { board: Board; selectedPillar?: string }) {
+  const visiblePillars = selectedPillar === 'all'
+    ? board.pillars
+    : board.pillars.filter((block) => block.pillar === selectedPillar)
+
   return (
     <div className="space-y-4">
+      <nav aria-label="学习支柱" className="flex flex-wrap gap-2">
+        {PILLAR_FILTERS.map((filter) => {
+          const selected = filter.key === selectedPillar
+          return (
+            <a
+              key={filter.key}
+              href={filter.href}
+              aria-current={selected ? 'page' : undefined}
+              className={selected
+                ? 'rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white'
+                : 'rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50'}
+            >
+              {filter.label}
+            </a>
+          )
+        })}
+      </nav>
       <ProblemLine issues={board.issues} unorganized={board.unorganized} />
-      {board.pillars.map((block) => (
+      {visiblePillars.map((block) => (
         <PillarSection key={block.pillar} block={block} />
       ))}
     </div>
