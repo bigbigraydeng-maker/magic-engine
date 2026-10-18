@@ -163,6 +163,15 @@ export default function SignoffPanel(props: SignoffPanelProps) {
           </ul>
         )}
         <p className="text-sm text-slate-600">签字不会翻任何开关；翻开关仍是单独一步。</p>
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 space-y-1">
+          <p className="font-semibold">怎么真正刹车（统筹 18 号 10-19 实查，请勿写成“关演练开关即停”）</p>
+          <ul className="list-disc pl-5 space-y-0.5">
+            <li>演练开关只管 D3 一条路径，<strong>关/开它都不会停掉内核执行</strong>。</li>
+            <li>NAL、CTS 的 ads.* 动作策略目前都是 auto_approve：经内核提交信封后<strong>直接执行</strong>。</li>
+            <li>人在止损页点的是另一套人工止损信封，<strong>不受 72 小时冷却约束</strong>；冷却只约束 AI 信封。</li>
+            <li>真正停内核执行 = 把客户的 autonomy_mode 改回 observe。</li>
+          </ul>
+        </div>
       </div>
 
       {/* 读取失败：只显示这一块 */}
