@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   }
   const [nonce, clientId, channelId] = rawCookie.split(':')
   const code = req.nextUrl.searchParams.get('code')
-  if (!code) {
+  if (!code && !req.nextUrl.searchParams.get('error')) {
     return NextResponse.json({ error: 'Authorization code missing from callback' }, { status: 400 })
   }
   if (req.nextUrl.searchParams.get('state') !== nonce) {
@@ -57,6 +57,9 @@ export async function GET(req: NextRequest) {
   }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? ''
+  // Validate browser state, staff access and target before using clientId on cancellation.
+  if (req.nextUrl.searchParams.get('error')) return destination(appUrl, clientId, 'error', 'authorization_cancelled')
+  if (!code) return destination(appUrl, clientId, 'error', 'token_exchange_failed')
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

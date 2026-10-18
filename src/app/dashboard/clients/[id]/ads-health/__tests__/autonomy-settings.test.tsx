@@ -93,7 +93,7 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
 
   it('清空上限要二次确认；点取消就不发请求', async () => {
     const fn = stubFetchWithAccounts(() => Response.json({ daily_budget_cap_cents: null }))
-    const confirmSpy = vi.fn(() => false)
+    const confirmSpy = vi.fn<typeof window.confirm>(() => false)
     vi.stubGlobal('confirm', confirmSpy)
     render(<AutonomySettings clientId="c1" />)
     await waitFor(() => expect(screen.getByText('act_111')).toBeTruthy())
@@ -116,7 +116,7 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
       return Response.json({ success: true, config })
     })
     vi.stubGlobal('fetch', fn)
-    const confirmSpy = vi.fn(() => false)
+    const confirmSpy = vi.fn<typeof window.confirm>(() => false)
     vi.stubGlobal('confirm', confirmSpy)
     render(<AutonomySettings clientId="c1" />)
     await waitFor(() => expect(screen.getByText('act_111')).toBeTruthy())

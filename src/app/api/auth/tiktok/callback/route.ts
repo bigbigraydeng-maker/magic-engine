@@ -27,11 +27,9 @@ function back(clientId: string | null, outcome: Outcome): NextResponse {
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const params = req.nextUrl.searchParams
 
-  if (params.get('error')) return back(null, 'denied')
-
   const code = params.get('code')
   const state = params.get('state')
-  if (!code || !state || req.cookies.get(TIKTOK_STATE_COOKIE)?.value !== state) {
+  if (!state || req.cookies.get(TIKTOK_STATE_COOKIE)?.value !== state) {
     return back(null, 'bad_state')
   }
 
@@ -40,6 +38,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { clientId } = verified
   const access = await requireDashboardClientAccess(clientId)
   if (!access.ok) return back(null, 'bad_state')
+  // Cancellation still belongs to this customer only after both checks pass.
+  if (params.get('error')) return back(clientId, 'denied')
+  if (!code) return back(clientId, 'bad_state')
 
   const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'}/api/auth/tiktok/callback`
   const tokens = await exchangeCode(code, redirectUri)

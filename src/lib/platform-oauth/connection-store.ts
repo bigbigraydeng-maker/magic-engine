@@ -13,6 +13,7 @@
  */
 
 import { supabaseAdmin } from '../supabase'
+import type { SocialConnectionFact } from './social-onboarding'
 import {
   encryptToken,
   toConnectionSummary,
@@ -89,11 +90,19 @@ export async function revokeConnection(id: string): Promise<void> {
 
 // ─── Read operations ─────────────────────────────────────────────────────────
 
-/**
- * List all connections for a client — safe for frontend consumption.
- * Returns PlatformConnectionSummary[] (no encrypted token fields).
- * Non-throwing: returns [] on DB error.
- */
+/** Narrow, fail-closed read for social onboarding; never selects credentials or provider errors. */
+export async function listSocialConnectionFacts(clientId: string): Promise<SocialConnectionFact[]> {
+  const { data, error } = await supabaseAdmin
+    .from('platform_oauth_connections')
+    .select('id,provider,purpose,account_id,display_name,status,scopes,token_expiry,last_synced_at')
+    .eq('client_id', clientId)
+    .eq('purpose', 'legacy')
+    .in('provider', ['meta', 'tiktok', 'google_youtube'])
+  if (error || !data) throw new Error('Social connection facts unavailable')
+  return data as SocialConnectionFact[]
+}
+
+/** Legacy summary contract: returns [] on DB error. New onboarding uses the strict narrow read above. */
 export async function listConnections(clientId: string): Promise<PlatformConnectionSummary[]> {
   const { data, error } = await supabaseAdmin
     .from('platform_oauth_connections')

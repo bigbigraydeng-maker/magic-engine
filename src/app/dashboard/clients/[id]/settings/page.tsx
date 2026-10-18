@@ -46,6 +46,7 @@ import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
 import { BrandGeoAnchorsPanel } from './_components/BrandGeoAnchorsPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
+import { SocialConnectionsPanel } from './_components/SocialConnectionsPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
 import { WeeklyBlogPanel } from './_components/WeeklyBlogPanel'
@@ -109,17 +110,14 @@ function TabBody({
     case 'connect':
       return (
         <>
-          <SettingsSection first icon="🚦" title="真客户 / 调研档案">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚦" title="真客户 / 调研档案">
             <ClientStatusPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🎵" title="TikTok" defaultOpen={callbacks.tiktok}>
-            <p className="mb-3 text-sm text-slate-600">连接此客户的 TikTok 账号。发布视频前需要单独确认视频和可见范围。</p>
-            <a href={`/api/auth/tiktok/connect?client_id=${encodeURIComponent(clientId)}`} className="inline-block rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
-              连接 TikTok
-            </a>
-          </SettingsSection>
-          <SettingsSection icon="▶️" title="YouTube（频道与授权）">
-            <YoutubePanel clientId={clientId} />
+          <SettingsSection icon="▶️" title="YouTube 频道配置" id="youtube-channel" defaultOpen={focusSection === 'youtube-channel'}>
+            <YoutubePanel clientId={clientId} configurationOnly />
           </SettingsSection>
           <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）" defaultOpen={callbacks.mail}>
             <MailboxPanel clientId={clientId} />
@@ -221,7 +219,10 @@ function TabBody({
     case 'content':
       return (
         <>
-          <SettingsSection first icon="📱" title="社媒账号（Instagram · Facebook · TikTok）">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🏷️" title="社媒资料登记（不授予发布权限）" id="social-profiles" defaultOpen={focusSection === 'social-profiles'}>
             <SocialHandlesPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
@@ -273,6 +274,7 @@ export default function ClientSettingsPage() {
   // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
   const mailStatus = searchParams.get('mail')
   const tiktokStatus = searchParams.get('tiktok')
+  const youtubeStatus = searchParams.get('youtube')
   const tiktokMessage: Record<string, string> = {
     connected: 'TikTok 授权已完成。发布视频前请确认目标账号。',
     denied: 'TikTok 授权已取消，可以重新连接。',
@@ -305,6 +307,14 @@ export default function ClientSettingsPage() {
         {tiktokStatus && tiktokMessage[tiktokStatus] && (
           <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
             {tiktokMessage[tiktokStatus]}
+          </div>
+        )}
+
+        {youtubeStatus && (
+          <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
+            {youtubeStatus === 'connected'
+              ? 'YouTube 授权记录已保存。请在下方核对频道；此连接用于私享上传及核对，不代表已公开发布。'
+              : 'YouTube 授权未完成，请核实频道配置与管理权限后重试。'}
           </div>
         )}
 
