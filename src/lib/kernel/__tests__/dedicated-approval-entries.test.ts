@@ -27,15 +27,23 @@ const D3 = 'ads.auto_pause_on_d3'
 //    这里不能跟着悄悄变成「登记动作」而让测试失去意义。
 const OTHER = 'seo.build_publish_package'
 
-/** `/dashboard/clients/<id>/…` → `src/app/dashboard/clients/[id]/…/page.tsx` */
+/**
+ * `/dashboard/clients/<id>/…` → `src/app/dashboard/clients/[id]/…/page.tsx`
+ *
+ * 🔴 先砍掉 `?query`（2026-10-18）：入口搬进广告门的标签之后，登记的路径带了
+ * `?tab=approvals`。页面是问号**前面**那一段，带着 query 去拼文件名会拼出
+ * `ads-health?tab=approvals/page.tsx` 这种不存在的路径，把这道守卫搞红。
+ * 守卫要守的是「登记的入口有真实页面」，不是「路径里不许有 query」。
+ */
 function pageFileFor(path: string): string {
-  const routed = path.replace(/^\/dashboard\/clients\/[^/]+\//, 'dashboard/clients/[id]/')
+  const withoutQuery = path.split('?')[0]
+  const routed = withoutQuery.replace(/^\/dashboard\/clients\/[^/]+\//, 'dashboard/clients/[id]/')
   return join(ROOT, 'src', 'app', routed.replace(/^\//, ''), 'page.tsx')
 }
 
 describe('登记表守卫：不许登记假入口', () => {
   it('至少登记了广告自动暂停', () => {
-    expect(dedicatedApprovalEntryFor(D3)?.label).toBe('广告自动暂停待批准页')
+    expect(dedicatedApprovalEntryFor(D3)?.label).toBe('广告门 ·「等你点头」')
   })
 
   it.each(DEDICATED_APPROVAL_ENTRIES.map((e) => [e.actionKey, e]))('%s 在动作注册表里', (_k, e) => {

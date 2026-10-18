@@ -29,8 +29,6 @@ vi.mock('next/link', () => ({
 }))
 
 import AdsHealthPage from '../page'
-import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
-import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 
 /** Oztop's real 2026-07-23 alert, the one card that mattered. */
 const OZTOP_ALERT = {
@@ -298,15 +296,55 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
  * 这一步只立门牌 + 给直达链接，所以用例盯三件：标签在、点开有链接、链接来自登记表而不是写死的网址。
  */
 describe('「等你点头」标签', () => {
-  it('标签在，点开给出专属批准页的链接', async () => {
-    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+  it('标签在，点开就是真的批准面板（没有待批准时如实说没有）', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+      '/ad-health/auto-pause': { items: [], hasMore: false },
+    }))
     render(<AdsHealthPage />)
 
     await userEvent.click(await screen.findByText('等你点头'))
 
-    const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
-    expect(entry).not.toBeNull()
-    expect(screen.getByText(`去「${entry!.label}」处理`)).toBeTruthy()
+    // 面板自己去取待批准列表，取到空就如实说没有 —— 不是一个指向别处的链接
+    await waitFor(() => expect(screen.getByText('目前没有等你点头的暂停建议。')).toBeTruthy())
+    expect(screen.queryByText(/去「.*」处理/)).toBeNull()
+  })
+
+  it('有待批准时列出来，且批准按钮打的是原来那个接口、请求体一个字没变', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.includes('/ad-health/auto-pause/')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, kind: 'done' }) })
+      }
+      if (url.includes('/ad-health/auto-pause')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            items: [{
+              runId: 'run-1', expectedDecisionId: 'dec-1', adsetId: '123', adsetName: '物流组',
+              adAccountId: 'act_1', diagnosisTitle: '花钱没结果', insightDate: '2026-10-17',
+              createdAt: '2026-10-17T00:00:00Z',
+            }],
+            hasMore: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(respond([])) })
+    }))
+    render(<AdsHealthPage />)
+
+    await userEvent.click(await screen.findByText('等你点头'))
+    await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
+
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+
+    // 🔴 这一刀的全部红线：接口网址、方法、请求体一个字都不许变
+    const decide = calls.find((c) => c.url.includes('/decision'))
+    expect(decide).toBeTruthy()
+    expect(decide!.url).toBe('/api/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/ad-health/auto-pause/run-1/decision')
+    expect(decide!.init?.method).toBe('POST')
+    expect(JSON.parse(String(decide!.init?.body))).toEqual({ resolution: 'approve', expectedDecisionId: 'dec-1' })
   })
 
   it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
@@ -315,7 +353,7 @@ describe('「等你点头」标签', () => {
     render(<AdsHealthPage />)
 
     await waitFor(() =>
-      expect(screen.getByText(/这个客户等人点头的广告动作/)).toBeTruthy(),
+      expect(screen.getByText(/系统发现这些广告组连续花钱没结果/)).toBeTruthy(),
     )
   })
 
@@ -336,6 +374,6 @@ describe('「等你点头」标签', () => {
     const active = await screen.findByTitle('三句话：池子、频率、今天调什么')
     expect(active.className).toContain('border-gray-800')
     expect(screen.getByTitle('这个客户等人点头的广告动作').className).toContain('border-transparent')
-    expect(screen.queryByText(/这个客户等人点头的广告动作，下一步/)).toBeNull()
+    expect(screen.queryByText(/系统发现这些广告组连续花钱没结果/)).toBeNull()
   })
 })

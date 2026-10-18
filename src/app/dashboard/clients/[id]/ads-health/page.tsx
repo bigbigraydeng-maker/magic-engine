@@ -18,9 +18,8 @@ import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playboo
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
+import AutoPausePanel from './auto-pause-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
-import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
-import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -519,11 +518,6 @@ function tabFromQuery(raw: string | null): PageTab {
   return PAGE_TABS.some(t => t.key === raw) ? (raw as PageTab) : 'today'
 }
 
-/**
- * 「等你点头」标签里那个链接的来源 —— 只认登记表，不在这里拼网址。
- * 搬完之后改登记表的 `path()` 一处，待办里的链接和这里会一起跟着走。
- */
-const autoPauseEntry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
 
 function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => void }) {
   return (
@@ -676,24 +670,17 @@ export default function AdsHealthPage() {
         搬完之后改那张表的 `path()` 一处，待办和这里会一起跟着走。
       */}
       {tab === 'approvals' && (
-        <div className="space-y-3 rounded-lg border border-gray-200 bg-white p-5">
-          <p className="text-sm text-gray-700">
-            这个客户等人点头的广告动作，下一步会收到这里。现在还在它自己的页面上。
-          </p>
-          {autoPauseEntry ? (
-            <Link
-              href={autoPauseEntry.path(clientId)}
-              className="inline-block text-sm font-medium text-gray-900 underline"
-            >
-              去「{autoPauseEntry.label}」处理
-            </Link>
-          ) : (
-            // 登记表里查不到 = 那个专属入口被撤了。不猜网址，如实说一句。
-            <p className="text-sm text-gray-500">这类动作现在没有登记专属批准入口，回我一句我去查。</p>
-          )}
-          <p className="text-xs text-gray-400">
-            通用审批页对这类动作只签字、不执行（那边是批不了的），要批得在上面这个页面。
-          </p>
+        <div className="space-y-4">
+          <div className="rounded-lg border border-gray-200 bg-white p-5">
+            <p className="mb-1 text-sm text-gray-700">
+              系统发现这些广告组连续花钱没结果，建议暂停。点「批准」立刻暂停（不用去 Meta 后台）。
+            </p>
+            <p className="text-xs text-gray-400">
+              通用审批页对这类动作只签字、不执行（那边是批不了的），要批就在这里。
+            </p>
+          </div>
+          {/* 这一块是从旧的专属页整段搬过来的；两个接口的网址、方法、请求体一个字没动。 */}
+          <AutoPausePanel clientId={clientId} />
         </div>
       )}
 
