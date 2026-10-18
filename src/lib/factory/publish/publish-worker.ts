@@ -342,6 +342,8 @@ export async function writeThreeBooks(
   opts: { actionType?: string; channelLabel?: string } = {},
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10)
+  // A Facebook draft is uploaded but not public, so it must not be booked as sent.
+  const isDraft = ref.video_state === 'DRAFT'
   const execMode = ref.platform === 'facebook' ? 'in_house' : 'third_party'
   const vendor = ref.platform === 'facebook' ? 'meta_graph' : 'publer' // channel (same label as reel-measurement adapter), not customer: client_id is already on every row
 
@@ -351,7 +353,8 @@ export async function writeThreeBooks(
   const nowIso = new Date().toISOString()
   // 三张表各自独立写:一张挂不拖累另两张(魏征 P1-3),尤其 fde_work_logs(PM 主看板)必须落。
   let execId: string | null = null
-  {
+  // draft is not a completed action; flywheel row below stays so the promote-to-public step can find it.
+  if (!isDraft) {
     // source 用 'proactive_signal'(系统主动信号→自动发布);'factory_auto' 撞 CHECK(魏征 P1-3)
     const { data, error } = await supabaseAdmin
       .from('execution_items')
@@ -387,10 +390,13 @@ export async function writeThreeBooks(
     if (error) console.error(`[publish-worker] flywheel_actions 落库失败 ${id}: ${error.message}`)
   }
   {
+    const summary = isDraft
+      ? `【社媒｜工厂自动发布】Reel「${angle}」草稿已上传到 ${channel}，未公开。${ref.permalink ?? ref.post_id}`
+      : `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${channel}。${ref.permalink ?? ref.post_id}`
     const { error } = await supabaseAdmin.from('fde_work_logs').insert({
       client_id: clientId,
       log_date: today,
-      summary: `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${channel}。${ref.permalink ?? ref.post_id}`,
+      summary,
       author_email: 'factory@magicengine.com.au',
     })
     if (error) console.error(`[publish-worker] fde_work_logs 落库失败 ${id}: ${error.message}`)
