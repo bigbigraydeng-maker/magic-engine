@@ -76,12 +76,81 @@ const manualCheck = z.object({
   content_hash: z.string().optional(),
 })
 
+/** 每座留存扣掉了哪些成本。至少选一项；「都没扣」用 'none'。 */
+const retentionBasis = z.enum(['commission', 'ad_cost', 'fixed_cost', 'none'])
+
+/** 成交率从哪来：measured = 有样本；assumed = 假设（页面标黄，不拦）。 */
+const rateSource = z.enum(['measured', 'assumed'])
+
+/**
+ * 经营判断卡：每笔广告预算一张，阶段级。
+ * 这里只存**填进来的事实**，算出来的（可承受线索成本、保本成交率）不存，由页面按公式现算。
+ * 客户数字（留存比例、每单人数、剩余座位）只出现在这里，不进共享常量、不进剧本。
+ */
+const businessCase = z.object({
+  /** 目标团期：`tour_catalog_departures.id` 或人看得懂的「团名 + 出发日」。不校验存在性。 */
+  departure_ref: z.string().min(1),
+  seats_remaining: z.number().int().min(0),
+  /** 这个座位数是不是客户确认过的。false → 检查清单判灰。 */
+  seats_confirmed: z.boolean(),
+  /** 座位数的取数日期。 */
+  seats_as_of: dateStr,
+  /** 每座公司留存，账户币种的「分」。 */
+  retained_per_seat_cents: z.number().int().positive(),
+  /** 这个留存扣掉了什么；至少一项。 */
+  retention_basis: z.array(retentionBasis).min(1),
+  /** 每单几座（小数，例如 1.74）。 */
+  pax_per_booking: z.number().positive(),
+  /** 线索→预订成交率，小数（0–1）。 */
+  lead_to_booking_rate: z.number().min(0).max(1),
+  rate_source: rateSource,
+  /** rate_source = 'measured' 时的样本量；assumed 时为 null。 */
+  rate_sample_n: z.number().int().min(0).nullable().default(null),
+  /** 素材缺口的人工补充说明。 */
+  creative_gap_note: z.string().default(''),
+  owner: z.string().min(1),
+})
+
+/** 实验设计卡：只有 `phase.is_experiment = true` 的阶段才需要。 */
+const experimentCard = z.object({
+  /** 这一轮要验证什么。 */
+  hypothesis: z.string().min(1),
+  /** 为了验证它，哪些东西固定不变。 */
+  held_constant: z.array(z.string().min(1)).default([]),
+  /** 主指标。'qualified_enquiry' 目前系统里没有口径，只当文字记录，算不出数。 */
+  primary_metric: z.enum(['enquiry', 'qualified_enquiry', 'booking']),
+  /** 最大可承受损失，账户币种的「分」。 */
+  max_loss_cents: z.number().int().positive(),
+  stop_rule: z.string().min(1),
+  continue_rule: z.string().min(1),
+  owner: z.string().min(1),
+})
+
+/** 销售承接就绪：计划级。填了只是声明，真不真要人在计划里点「已核实」。 */
+const salesHandover = z.object({
+  owner: z.string().min(1),
+  /** 多久之内要有人接触客人（小时）。 */
+  response_sla_hours: z.number().int().positive(),
+  channels: z.array(z.enum(['phone', 'email', 'dm'])).min(1),
+  /** 没人接手时怎么办。 */
+  fallback: z.string().min(1),
+})
+
 const phase = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   start_date: dateStr,
   end_date: dateStr,
   steps: z.array(step).default([]),
+  /**
+   * 这个阶段是不是一次实验；true 时 experiment 必填（在 crossFieldIssues 里查）。
+   * 用 optional 不用 default(false)：default 会被写进解析结果，
+   * 让每一份旧计划的内容指纹都变一次 —— 已批准的计划会被判成「内容变过了」，
+   * 人工核实记录也会跟着作废。没填就是没标过实验，按 `=== true` 读。
+   */
+  is_experiment: z.boolean().optional(),
+  business_case: businessCase.optional(),
+  experiment: experimentCard.optional(),
 })
 
 export const PromoSpecSchema = z.object({
@@ -89,6 +158,8 @@ export const PromoSpecSchema = z.object({
   /** 目标真相源：goals.id，必须属于同一个客户（保存时服务端校验）。 */
   goal_id: z.string().min(1),
   phases: z.array(phase).min(1),
+  /** 销售承接就绪，计划级。 */
+  sales_handover: salesHandover.optional(),
   checks: z.array(manualCheck).default([]),
   /** 批准当时的检查清单快照，事后能说清「批的时候是什么状态」。服务端写入。 */
   gate_snapshot: z.unknown().optional(),
@@ -100,6 +171,9 @@ export type PromoStep = z.infer<typeof step>
 export type AdsStep = z.infer<typeof adsStep>
 export type SocialStep = z.infer<typeof socialStep>
 export type ManualCheck = z.infer<typeof manualCheck>
+export type BusinessCase = z.infer<typeof businessCase>
+export type ExperimentCard = z.infer<typeof experimentCard>
+export type SalesHandover = z.infer<typeof salesHandover>
 
 export interface PromoValidationIssue {
   path: string
@@ -137,6 +211,9 @@ function crossFieldIssues(spec: PromoSpec): PromoValidationIssue[] {
     phaseIds.add(p.id)
     if (p.end_date < p.start_date) {
       issues.push({ path: `phases.${pi}.end_date`, message: '阶段结束日早于开始日' })
+    }
+    if (p.is_experiment && p.experiment === undefined) {
+      issues.push({ path: `phases.${pi}.experiment`, message: '这个阶段标了「做实验」，必须填实验设计卡' })
     }
     p.steps.forEach((s, si) => {
       if (stepIds.has(s.id)) issues.push({ path: `phases.${pi}.steps.${si}.id`, message: `步骤编号重复：${s.id}` })
