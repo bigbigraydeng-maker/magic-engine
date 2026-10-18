@@ -101,3 +101,27 @@ npm test -- 'src/lib/platform-oauth' 'src/lib/meta-oauth/__tests__/client.test.t
 - `BASE_SHA=<上述base> HEAD_SHA=<上述head> node --import tsx scripts/ledger-check-frozen-runner.ts`：退出 1。kernel 旧卡 verify_how 虽解析值相同，但治理检查明确比较原始字段，块标量包装构成冻结冲突。前轮仅核对语义，遗漏实际冻结检查；子牙已撤回对此格式修正的放行。
 - GitHub Actions 在该 head 返回 startup_failure、没有启动检查步骤，`gh run view` 仅提示可能为工作流问题，具体原因未确认。Cloudflare Pages 成功不能替代必过检查。
 - 停止合并：不扩大执行写入白名单、不修改 Kernel 运行语义、不放宽冻结规则、不伪造远端绿。上述两项需受控修复后复验；本轮未执行 merge、未触发 main 部署。上轮“无 blocker”结论由此检查点更新。
+
+## 用户追加授权：修复合并阻塞后再次上线
+
+用户已授权修复上述两项后重试合并与上线。唯一写入者为本 Codex 根会话；子牙和魏征只读审查。目录和分支不变，起始 HEAD `bde334fba9c67f9a6a37b61fc6b2d64c054b2be2`，工作树干净；刷新远端仍为上述 main。风险 A；按 §11：频率高 / IMPACT 高 / 收入中 → P0。
+
+Tier Classification / Reuse：既有社媒 L3 发布完成回执与 L1 治理实现修复，不新增 Capability、支柱、行业版本或候选。正常发布与转公开共用现有发布完成投影；客户身份继续参数化且不注入客户/行业判断，换 CTS、Roman 或旅游/地产不需改语义。台账默认原文字节冻结继续有效，仅限无效 YAML 的 verify_how 原样规范包装；不接受实际内容变动。无需新 Inngest 事件：既有转公开工作流与栅栏仍负责外部副作用，本轮只合并其同步完成投影。
+
+写入范围：publish-worker.ts、promote/books-port.ts 及相关测试；ledger/frozen.ts 及单元/真实 Git 集成测试；本说明与本轮台账。禁止改架构白名单、降低必过检查、引入新依赖/数据库结构、重放真实社媒发布或修改生产客户数据。允许本地验证、提交/推送、合并本 PR 并核验部署；不使用生产密钥补测试环境。
+
+设计已由子牙与魏征只读核查：提取已有严格 completed 投影，两个原调用方共享；冻结例外必须满足 base 真 YAML 语法错误、唯一单行 plain 字段、head 精确规范块包装、修正该字段后 base 语法完全有效、head 完整合法、原文字逐字保留。其余字段仍原文冻结。验收：相关回归、类型、lint、build、Kernel architecture、台账格式/冻结/指针检查均通过，再复核并尝试合并；远端不可用不能冒充通过。
+
+### 修复实施验证（2026-10-19 11:50 NZ）
+
+本节更新上一检查点中的两项代码阻塞：已修复，远端合并/部署结果须另行核验。目录/分支同上，起始 HEAD 加本轮 diff。未使用生产数据库或真实发布作为测试。
+
+- 从既有 writeThreeBooks 提取固定 completed 投影，两个原调用方共用；删除 promote 重复 SQL，架构白名单、Kernel 运行逻辑、claim/fence 均未改。投影失败仍独立写流量/工作日志，保留普通数据库错误信息。
+- 冻结默认 raw 比较不变；规范包装例外仅修无效 verify_how 的原文，新增改字、重复键、注释截断、续行、有效旧 YAML 及同时改其他字段的拒绝测试，并真实 Git 提交对照验证。
+- `npm test --` 原社媒定向路径、tools/ops-review-loop、tools/ai-orchestrator、src/lib/ledger、promote、两个 publish-worker 测试及六个基线修复测试：退出 0，75 文件、1977 测试通过，完整输出 `/private/tmp/celine-unblock-final-tests.log`。
+- 原架构命令 `./node_modules/.bin/vitest run --config src/lib/kernel/__tests__/vitest.architecture.config.ts`：退出 0，203/203 通过；输出 `/private/tmp/celine-unblock-kernel.log`。没有改架构测试或扩大许可。
+- `npm run type-check` 与 `./node_modules/.bin/tsc -p tools/ai-orchestrator/tsconfig.json` 均退出 0；六个变更 TS 文件的 `next lint --file` 退出 0，无警告/错误。
+- 最终代码 `npm run build`（回环 Supabase URL 和假 key）退出 0，输出 `/private/tmp/celine-unblock-final-build.log`；没有访问生产补凭据。构建不代替独立类型检查。
+- 四项 mutation 均被测试捕获：删投影客户过滤、删回挂客户过滤、允许有效 YAML 重写、放过验收文字改写。每次退出 1；逐项 finally 恢复并比较 SHA256，未留变体。
+- 子牙、魏征设计/实施复核无 blocker/P1/P2；魏征独立 8 个攻击/正例符合预期，四文件 62 测试通过。子牙指出的普通错误对象日志信息丢失已修并补精确消息断言，最终回归覆盖。
+- `git diff --check` 退出 0。提交后必须执行真实 base..head 的台账冻结/引用脚本；合并时固定经审查的 head。没有新增能力线、依赖、表、外部授权或客户事实；本轮只复用已有完成投影与治理解析器。
