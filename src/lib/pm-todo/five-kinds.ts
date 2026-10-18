@@ -63,6 +63,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  ads_account_not_active: 'one_click', // 去 Meta 付款设置结清欠款、补备用卡（系统进不去）
+  ads_account_status_unreadable: 'dev', // 账户状态读不到：快照任务的问题，开发看，不占 PM 的清单
+  ads_account_closed_weekly: 'decide', // 账户已关闭：要不要从客户名下解绑，由 PM 定（每周一提醒）
   goal_rollover_missing: 'dev', // 月循环目标没自动续上：广告自治/日报失去目标口径，是系统没跑通，转开发
   ads_rule_finding: 'decide', // 改不改在投的广告
   ad_readback_blocker: 'decide', // 正在花钱的广告组撞上已知坑，要改设置

@@ -12,6 +12,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
+import { loadAccountStatusRows, latestPerAccount } from '@/lib/ads-strategy/account-status'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type {
   AccountInput,
@@ -48,35 +49,13 @@ function str(v: unknown): string | null {
 }
 
 // ── 账户状态 ────────────────────────────────────────────────────────────────
-interface AccountRow {
-  ad_account_id: string
-  entity_name: string | null
-  account_status: number | null
-  timezone_name: string | null
-  capture_reason: string | null
-  captured_at: string
-}
-
 /** 「读全了却没返回它」的实体会被写一行 disappeared：最新一行是它，就整个实体不要，不能当成「读不到」。 */
 const DISAPPEARED = 'disappeared'
 
 async function loadAccounts(clientId: string, now: Date): Promise<AccountInput[]> {
-  const rows = await fetchAll<AccountRow>((from, to) =>
-    supabaseAdmin
-      .from('ad_entity_snapshots')
-      .select('ad_account_id, entity_name, account_status, timezone_name, capture_reason, captured_at')
-      .eq('client_id', clientId)
-      .eq('level', 'account')
-      .gte('captured_at', isoDaysAgo(now, 14))
-      .order('captured_at', { ascending: false })
-      .order('id', { ascending: true })
-      .range(from, to),
-  )
-  const seen = new Set<string>()
+  const rows = await loadAccountStatusRows(clientId, isoDaysAgo(now, 14))
   const out: AccountInput[] = []
-  for (const r of rows) {
-    if (seen.has(r.ad_account_id)) continue // 已按时间倒序，第一条就是最新
-    seen.add(r.ad_account_id)
+  for (const r of latestPerAccount(rows)) {
     if (r.capture_reason === DISAPPEARED) continue
     out.push({
       adAccountId: r.ad_account_id,
