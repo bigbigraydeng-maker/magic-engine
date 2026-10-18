@@ -34,6 +34,8 @@ cron / 批量 / 基础设施                 随时被 FDE / 客户调用
 
 ## 二、9 Agent 职责表
 
+> ⚠️ **本表已过时（6 月版），不再维护。** Agent 名单以 `docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md` §4（PM 已认）为准，代码对照见同文件 §4.4；新 Agent 怎么立项、上线、体检见 `docs/specs/2026-10-18-me-agent-standard-process-v1.0.md`。（2026-10-18）
+
 | Agent | 模型 | 职责 | 代码 | 状态 |
 |-------|------|------|------|------|
 | **子牙** | Claude Opus | 技术大脑：架构/安全/后台统筹 | `src/lib/ziya/` | 待建 |

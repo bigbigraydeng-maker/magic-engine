@@ -1,9 +1,11 @@
 ---
 id: 2026-10-18-agent-standard-process-v01
-title: ME 后台 Agent 标准化流程定到 v0.2——五关，不另起名单问卷巡检，只把已有的串起来，新增两条硬规矩；等 PM 认可
-status: decided
-owner: pm
+title: ME 后台 Agent 标准化流程 v0.2 已由 PM 10-18 认可并合并（PR 2848），随后收为 v1.0、开头加地基清单
+status: done
+owner: agent
 decided_on: 2026-10-18
+done_on: 2026-10-18
+done_ref: pr:2848
 source: session:c668eb35
 verify_by: 2026-10-28
 verify_how: 看三件：①PM 是否认可五关和「PM 只在预算/审核/授权三处出现」的七件事清单 ②立项卡的机器检查（方案第 8 节第 5 条，扩展 ledger-check.yml）是否按第 11 节打分后立项——没有它第 1 关形同虚设 ③下一个新 Agent 需求是否完整走了一遍五关、卡在哪一关
