@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-18
 done_on: 2026-10-18
-done_ref: pr:PENDING
+done_ref: pr:2787
 source: session:579d2d02
 verify_by: 2026-10-25
 verify_how: 合并上线后在真实推广计划页加一张经营判断卡、填满、保存成功，再读库确认 plan_data.promo.phases[].business_case 有值；并确认页面上「可承受的每条线索成本」那块显示的是算式 + 数字，没填的项显示「未知」而不是 0
