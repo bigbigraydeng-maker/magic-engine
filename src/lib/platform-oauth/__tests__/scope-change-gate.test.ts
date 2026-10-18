@@ -98,6 +98,7 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
     expect([...YOUTUBE_PUBLISH_SCOPES]).toEqual([
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/youtube.readonly',
+      'https://www.googleapis.com/auth/youtube.force-ssl',
     ])
   })
 })

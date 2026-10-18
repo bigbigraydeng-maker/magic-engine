@@ -3,9 +3,9 @@
  * below must pass before anything is written, and the default mode is a dry run
  * that never calls a write endpoint.
  *
- * Known gap: videos.update needs a broader OAuth scope than the upload+readonly
- * pair stored today, so `execute` mode will be refused by Google until the
- * connection is re-authorised with that scope (a separate, reviewed change).
+ * videos.update needs youtube.force-ssl (now requested by the OAuth flow). Connections
+ * authorised before that scope was added lack it, so `execute` is refused by Google
+ * until the channel account re-authorises.
  */
 
 import { randomUUID } from 'node:crypto'
