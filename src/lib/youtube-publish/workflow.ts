@@ -45,9 +45,12 @@ export interface StagingDeps {
 }
 
 export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promise<ReceiptRow> {
+  let pendingWritten = false
+  let finalRequestId: string = ev.requestId
   const base = { requestId: ev.requestId, clientId: ev.clientId, workOrderId: ev.workOrderId, stage: 'staging' as const }
   const finish = async (r: Omit<ReceiptRow, keyof typeof base | 'channelId'> & { channelId?: string }) => {
     const row: ReceiptRow = { ...base, channelId: r.channelId ?? 'unknown', ...r }
+    if (pendingWritten) row.requestId = finalRequestId
     await deps.saveReceipt(row)
     return row
   }
@@ -60,6 +63,11 @@ export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promi
     return finish({ channelId, status: 'blocked', reason: 'already_staged', noPublish: true })
   }
 
+  // Written BEFORE any upload: if the process dies mid-upload, this row blocks a blind re-upload
+  // (a duplicate private video) and tells a human to check the channel.
+  await deps.saveReceipt({ ...base, channelId, status: 'pending', noPublish: true })
+  finalRequestId = randomUUID()
+  pendingWritten = true
   try {
     const token = await deps.getToken(ev.clientId)
     await lockChannel(token, channelId, deps.fetchImpl)
@@ -93,7 +101,7 @@ export async function runStaging(ev: StagingEventData, deps: StagingDeps): Promi
 }
 
 export interface PublicStepDeps {
-  consume: (nonce: string) => Promise<{
+  consume: (nonce: string, clientId: string) => Promise<{
     clientId: string
     channelId: string
     videoId: string
@@ -108,7 +116,7 @@ export interface PublicStepDeps {
 
 export async function runPublicStep(ev: PublicAuthorizedEventData, deps: PublicStepDeps): Promise<ReceiptRow> {
   const requestId = randomUUID()
-  const grant = await deps.consume(ev.nonce)
+  const grant = await deps.consume(ev.nonce, ev.clientId)
   const save = async (r: Partial<ReceiptRow> & Pick<ReceiptRow, 'status' | 'channelId'>): Promise<ReceiptRow> => {
     const row: ReceiptRow = {
       requestId,

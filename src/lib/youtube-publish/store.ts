@@ -8,7 +8,7 @@ import { isValidChannelId } from './oauth'
 import type { GateResult } from './gates'
 
 export type ReceiptStage = 'staging' | 'public_step'
-export type ReceiptStatus = 'blocked' | 'staged' | 'dry_run_ok' | 'published' | 'failed'
+export type ReceiptStatus = 'pending' | 'blocked' | 'staged' | 'dry_run_ok' | 'published' | 'failed'
 
 export interface ReceiptRow {
   requestId: string
@@ -99,6 +99,20 @@ export async function findStagedReceipt(
   return { videoId: row.video_id, channelId: row.channel_id, gates: row.detail?.gates ?? [] }
 }
 
+/** True if staging for this work order has started (pending) or finished (staged): never upload twice. */
+export async function hasStagingAttempt(clientId: string, workOrderId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from('youtube_publish_receipts')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('work_order_id', workOrderId)
+    .eq('stage', 'staging')
+    .in('status', ['pending', 'staged'])
+    .limit(1)
+  if (error) throw error
+  return (data ?? []).length > 0
+}
+
 export async function insertAuthorization(a: {
   nonce: string
   clientId: string
@@ -121,12 +135,15 @@ export async function insertAuthorization(a: {
 /** Atomic one-time consume: returns the grant only for the first caller. */
 export async function consumeAuthorization(
   nonce: string,
+  clientId: string,
 ): Promise<{ clientId: string; channelId: string; videoId: string; grantedBy: string; grantedAt: string } | null> {
   const { data, error } = await supabaseAdmin
     .from('youtube_publish_authorizations')
     .update({ consumed_at: new Date().toISOString() })
     .eq('nonce', nonce)
+    .eq('client_id', clientId)
     .is('consumed_at', null)
+    .gt('expires_at', new Date().toISOString())
     .select('client_id, channel_id, video_id, granted_by, granted_at')
     .maybeSingle()
   if (error) throw error

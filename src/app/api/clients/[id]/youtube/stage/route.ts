@@ -22,7 +22,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const requestId = randomUUID()
   try {
     await sendInngestEvent({
-      id: `youtube-staging:${params.id}:${body.workOrderId}`,
+      id: `youtube-staging:${requestId}`,
       name: YOUTUBE_STAGING_REQUESTED_EVENT,
       data: { requestId, clientId: params.id, workOrderId: body.workOrderId },
     })

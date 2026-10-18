@@ -22,16 +22,27 @@ import {
   consumeAuthorization,
   findStagedReceipt,
   getApprovedWorkOrder,
+  hasStagingAttempt,
   getClientChannelId,
   insertReceipt,
 } from '@/lib/youtube-publish/store'
 
 const getToken = (clientId: string) => getValidToken(clientId, PLATFORM_PROVIDERS.GOOGLE_YOUTUBE)
 
-async function fetchVideo(url: string): Promise<Blob> {
-  const res = await fetch(url)
+const MAX_VIDEO_BYTES = 512 * 1024 * 1024
+
+/** Only the factory's own storage host, no redirects, bounded size and time, video content only. */
+export async function fetchFactoryVideo(url: string, fetchImpl: typeof fetch = fetch): Promise<Blob> {
+  const allowedHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://invalid.invalid').hostname
+  const u = new URL(url)
+  if (u.protocol !== 'https:' || u.hostname !== allowedHost) throw new Error('video host not allowed')
+  const res = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(120_000) })
   if (!res.ok) throw new Error(`video download failed (${res.status})`)
-  return res.blob()
+  if (!(res.headers.get('content-type') ?? '').startsWith('video/')) throw new Error('not a video')
+  if (Number(res.headers.get('content-length') ?? '0') > MAX_VIDEO_BYTES) throw new Error('video too large')
+  const blob = await res.blob()
+  if (blob.size > MAX_VIDEO_BYTES) throw new Error('video too large')
+  return blob
 }
 
 export const youtubeStaging = inngest.createFunction(
@@ -48,9 +59,9 @@ export const youtubeStaging = inngest.createFunction(
       runStaging(data, {
         getChannelId: getClientChannelId,
         getWorkOrder: getApprovedWorkOrder,
-        alreadyStaged: async (c, w) => (await findStagedReceipt(c, { workOrderId: w })) !== null,
+        alreadyStaged: hasStagingAttempt,
         getToken,
-        fetchVideo,
+        fetchVideo: fetchFactoryVideo,
         saveReceipt: insertReceipt,
       }),
     )
@@ -69,7 +80,7 @@ export const youtubePublicStep = inngest.createFunction(
     const data = event.data as PublicAuthorizedEventData
     return step.run('public-step', () =>
       runPublicStep(data, {
-        consume: consumeAuthorization,
+        consume: (nonce, clientId) => consumeAuthorization(nonce, clientId),
         getStaged: (c, v) => findStagedReceipt(c, { videoId: v }),
         getToken,
         saveReceipt: insertReceipt,

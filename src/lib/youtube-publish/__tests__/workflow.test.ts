@@ -59,7 +59,8 @@ describe('runStaging', () => {
     expect(r).toMatchObject({ status: 'staged', videoId: 'v1', noPublish: true })
     const initBody = JSON.parse(f.mock.calls[1][1].body as string) as { status: { privacyStatus: string } }
     expect(initBody.status.privacyStatus).toBe('private')
-    expect(saved).toHaveLength(1)
+    expect(saved.map((x) => x.status)).toEqual(['pending', 'staged'])
+    expect(saved[0].requestId).not.toBe(saved[1].requestId)
   })
 
   it('records failed (not staged) when read-back is not private', async () => {
@@ -77,7 +78,7 @@ describe('runStaging', () => {
     const f = vi.fn().mockResolvedValueOnce(channelsOk()).mockResolvedValueOnce(new Response('quota', { status: 403 }))
     const { deps, saved } = stagingDeps({ fetchImpl: f })
     expect(await runStaging(ev, deps)).toMatchObject({ status: 'failed', reason: 'staging_error', noPublish: true })
-    expect(saved).toHaveLength(1)
+    expect(saved.map((x) => x.status)).toEqual(['pending', 'failed'])
   })
 })
 
@@ -87,7 +88,7 @@ const allPass: GateResult[] = PUBLISH_GATE_IDS.map((id) => ({ id, videoId: 'v1',
 function publicDeps(over: Partial<PublicStepDeps> = {}) {
   const saved: ReceiptRow[] = []
   const deps: PublicStepDeps = {
-    consume: async () => ({ clientId: 'c1', channelId: CHANNEL, videoId: 'v1', grantedBy: 'ray', grantedAt }),
+    consume: async (_n: string, _c: string) => ({ clientId: 'c1', channelId: CHANNEL, videoId: 'v1', grantedBy: 'ray', grantedAt }),
     getStaged: async () => ({ gates: allPass, channelId: CHANNEL }),
     getToken: async () => 'tok',
     saveReceipt: async (r) => void saved.push(r),
@@ -99,7 +100,7 @@ function publicDeps(over: Partial<PublicStepDeps> = {}) {
 describe('runPublicStep', () => {
   it('an unknown or already-consumed nonce blocks with no network', async () => {
     const f = vi.fn()
-    const { deps, saved } = publicDeps({ consume: async () => null, fetchImpl: f })
+    const { deps, saved } = publicDeps({ consume: async (_n: string, _c: string) => null, fetchImpl: f })
     expect(await runPublicStep({ clientId: 'c1', nonce: 'n' }, deps)).toMatchObject({ status: 'blocked', reason: 'authorization_invalid' })
     expect(saved).toHaveLength(1)
     expect(f).not.toHaveBeenCalled()
