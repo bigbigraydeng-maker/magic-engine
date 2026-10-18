@@ -142,3 +142,29 @@ describe('算不出来的一律是未知，不是 0', () => {
     expect(businessCaseMath(BC, Number.NaN).breakeven_rate).toBeNull()
   })
 })
+
+describe('防无穷大那一层（> 0 守卫拦不住的，必须由 finiteOrNull 拦）', () => {
+  // 魏征 2026-10-18 复审：NaN 走 `> 0` 比较就已经是 false，根本到不了 finiteOrNull，
+  // 所以只有「能通过 > 0 守卫、却算出非有限数」的值，才真正守着这一层。
+  it('每座留存无穷大 → 每单留存未知', () => {
+    const r = businessCaseMath({ ...BC, retained_per_seat_cents: Number.POSITIVE_INFINITY }, 1000)
+    expect(r.retained_per_booking_cents).toBeNull()
+    expect(r.acceptable_lead_cost_cents).toBeNull()
+  })
+
+  it('每单座数无穷大 → 每单留存未知', () => {
+    const r = businessCaseMath({ ...BC, pax_per_booking: Number.POSITIVE_INFINITY }, 1000)
+    expect(r.retained_per_booking_cents).toBeNull()
+  })
+
+  it('成交率无穷大 → 可承受成本未知，但每单留存照常算得出', () => {
+    const r = businessCaseMath({ ...BC, lead_to_booking_rate: Number.POSITIVE_INFINITY }, null)
+    expect(r.acceptable_lead_cost_cents).toBeNull()
+    expect(r.retained_per_booking_cents).toBe(100000)
+  })
+
+  it('实际线索成本无穷大 → 保本成交率未知', () => {
+    expect(businessCaseMath(BC, Number.POSITIVE_INFINITY).breakeven_rate).toBeNull()
+  })
+})
+

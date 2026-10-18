@@ -63,7 +63,12 @@ export function updateStep(spec: PromoSpec, phaseId: string, step: PromoStep): P
 export function updatePhase(
   spec: PromoSpec,
   phaseId: string,
-  patch: Partial<Pick<PromoPhase, 'name' | 'start_date' | 'end_date' | 'is_experiment'>>,
+  /**
+   * 不含 `is_experiment`：它只能走 `setIsExperiment`。
+   * 从这里写进来的 `false` 会被算进内容指纹，等于「什么都没改却改了内容」，
+   * 已点过的人工核实记录会被作废（子牙 2026-10-18 复审必改项 2：把洞用类型堵住，不靠人记得）。
+   */
+  patch: Partial<Pick<PromoPhase, 'name' | 'start_date' | 'end_date'>>,
 ): PromoSpec {
   return { ...spec, phases: spec.phases.map(p => (p.id === phaseId ? { ...p, ...patch } : p)) }
 }

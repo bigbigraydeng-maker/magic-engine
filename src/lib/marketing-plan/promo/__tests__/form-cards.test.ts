@@ -3,7 +3,7 @@ import { parsePromoSpec, type PromoSpec } from '../spec'
 import {
   newBusinessCase, newExperiment, newSalesHandover,
   percentToRate, rateToPercent,
-  setBusinessCase, setExperiment, setSalesHandover, updatePhase,
+  setBusinessCase, setExperiment, setIsExperiment, setSalesHandover, updatePhase,
 } from '../form'
 
 function base(): PromoSpec {
@@ -44,10 +44,16 @@ describe('加卡、删卡', () => {
     expect(removed.sales_handover).toBeUndefined()
   })
 
-  it('改阶段时不碰别的阶段', () => {
-    const spec = updatePhase(base(), 'phase-1', { is_experiment: true })
+  it('改阶段名只碰指定的那个阶段', () => {
+    const spec = updatePhase(base(), 'phase-1', { name: '改过的名字' })
+    expect(spec.phases[0].name).toBe('改过的名字')
+    expect(spec.phases[1].name).toBe('阶段 2')
+  })
+
+  it('标实验只能走 setIsExperiment，不碰别的阶段', () => {
+    const spec = setIsExperiment(base(), 'phase-1', true)
     expect(spec.phases[0].is_experiment).toBe(true)
-    expect(spec.phases[1].is_experiment).toBeUndefined()
+    expect('is_experiment' in spec.phases[1]).toBe(false)
   })
 })
 
