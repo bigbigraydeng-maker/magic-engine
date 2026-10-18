@@ -2,6 +2,7 @@
 
 import { randomBytes, randomUUID } from 'node:crypto'
 import { resolveTarget, scanPublishCaption } from '../publish-worker'
+import { createPromoteBooks } from './books-port'
 import { createPromoteMeta } from './meta-port'
 import { createSupabasePromoteStore } from './store'
 import type { PromoteDeps } from './types'
@@ -10,6 +11,7 @@ export function createProductionPromoteDeps(): PromoteDeps {
   return {
     store: createSupabasePromoteStore(),
     meta: createPromoteMeta(),
+    books: createPromoteBooks(),
     resolveTarget,
     scanRedline: (clientId, masterBriefId, text) => scanPublishCaption(clientId, masterBriefId, text),
     now: () => new Date(),

@@ -38,6 +38,7 @@ function rowToTraffic(row: Record<string, unknown>): TrafficRow {
   return {
     id: String(row.id),
     client_id: String(row.client_id),
+    execution_item_id: typeof row.execution_item_id === 'string' ? row.execution_item_id : null,
     payload: asPlainObject(row.payload) ?? {},
   }
 }
@@ -70,7 +71,7 @@ async function loadOrder(id: string): Promise<PromoteOrder | null> {
 async function loadTrafficRows(orderId: string, clientId: string): Promise<TrafficRow[]> {
   const { data, error } = await supabaseAdmin
     .from('flywheel_actions')
-    .select('id, client_id, payload')
+    .select('id, client_id, execution_item_id, payload')
     .eq('client_id', clientId)
     .eq('action_type', TRAFFIC_ACTION_TYPE)
     .eq('payload->>work_order_id', orderId)
@@ -81,7 +82,7 @@ async function loadTrafficRows(orderId: string, clientId: string): Promise<Traff
 async function loadTrafficRow(id: string, clientId: string): Promise<TrafficRow | null> {
   const { data, error } = await supabaseAdmin
     .from('flywheel_actions')
-    .select('id, client_id, payload')
+    .select('id, client_id, execution_item_id, payload')
     .eq('id', id)
     .eq('client_id', clientId)
     .maybeSingle()

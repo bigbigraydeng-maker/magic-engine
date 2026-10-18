@@ -54,7 +54,7 @@ export function withAuth(
  */
 export function fenced(
   attemptId: string,
-  fn: (cur: Record<string, unknown>) => Record<string, unknown>,
+  fn: (cur: Record<string, unknown>) => Record<string, unknown> | string,
 ): (cur: Record<string, unknown>) => Record<string, unknown> | string {
   return (cur) => (readAuth(cur).attempt_id === attemptId ? fn(cur) : '这条已被另一个请求接管,本次操作中止')
 }

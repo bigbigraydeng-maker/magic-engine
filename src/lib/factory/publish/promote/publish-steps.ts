@@ -190,7 +190,7 @@ export async function finishStage(deps: PromoteDeps, f: FinishInput, attemptId: 
   const closed = await mutatePayload(deps, { id: f.rowId, client_id: f.clientId }, fenced(attemptId, (cur) => ({
     ...withAuth(cur, {
       status: 'consumed', first_comment_status: status, fail_reason: blocked ?? undefined,
-      needs_attention: status === 'failed' || redlineHit !== undefined,
+      needs_attention: status === 'failed' || redlineHit !== undefined || Boolean(readAuth(cur).books_error),
       post_publish_redline_hit: redlineHit,
     }),
     ...(commentId ? { first_comment_id: commentId } : {}),

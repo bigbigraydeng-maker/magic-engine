@@ -6,6 +6,7 @@
 import { sanitizeFailReason } from '../publish-display'
 import { asRecord, emailSlot, hashToken, hashesEqual } from './guards'
 import { buildContext, type PromoteContext } from './context'
+import { writeCompletionBooks } from './books'
 import { decidePublished, finishStage, writeOrder, writeTraffic } from './publish-steps'
 import { mutatePayload, readAuth, withAuth } from './payload-lock'
 import { resumeContext, runResumeConfirm, type ResumeContext } from './resume'
@@ -121,6 +122,7 @@ async function confirmStage(deps: PromoteDeps, input: PromoteInput, ctx: Promote
   if (trafficFail) return trafficFail
   const orderFail = await writeOrder(deps, ctx, facts, requestId, requestId)
   if (orderFail) return orderFail
+  await writeCompletionBooks(deps, ctx, facts, requestId) // 回执类:失败不回滚公开,记 needs_attention
   const done = await finishStage(deps, {
     orderId: ctx.order.id, clientId: ctx.order.client_id, masterBriefId: ctx.order.master_brief_id ?? '',
     target: ctx.target, videoId: ctx.videoId, firstComment: ctx.firstComment, rowId: ctx.row.id,

@@ -8,6 +8,8 @@ import type { PublishTarget, PublishedRef } from '../../types'
 export interface TrafficRow {
   id: string
   client_id: string
+  /** 草稿期若已建过执行事项则有值(PR 2817 之后草稿期不再建,为 null)。 */
+  execution_item_id?: string | null
   payload: Record<string, unknown>
 }
 
@@ -46,6 +48,10 @@ export interface PromoteAuthorization {
   post_publish_redline_hit?: string
   fail_reason?: string
   needs_attention?: boolean
+  /** 「Reel 已公开」两笔回执(工作日志 + 执行事项)的去重标记:已为该工单写过。 */
+  books_work_order_id?: string
+  /** 两笔回执写入失败的人话原因(不回滚公开,只让回执标 needs_attention)。 */
+  books_error?: string
 }
 
 export interface PreviewSlot {
@@ -91,8 +97,16 @@ export interface PromoteMeta {
   ensureFirstComment(args: { target: PublishTarget; videoId: string; idempotencyTag: string; message: string }): Promise<string>
 }
 
+/** 公开后的回执类写入端口(失败不回滚公开)。 */
+export interface PromoteBooks {
+  /** 草稿期已有执行事项 -> 标 completed;没有 -> 新建 completed 并回挂到流量记录。 */
+  completeExecutionItem(a: { clientId: string; rowId: string; existingItemId: string | null; title: string; description: string }): Promise<void>
+  writeWorkLog(a: { clientId: string; summary: string }): Promise<void>
+}
+
 export interface PromoteDeps {
   store: PromoteStore
+  books: PromoteBooks
   meta: PromoteMeta
   resolveTarget(clientId: string): Promise<PublishTarget | null>
   /** 红线闸:返回 null = 放行,字符串 = 拦截原因(fail-closed)。 */

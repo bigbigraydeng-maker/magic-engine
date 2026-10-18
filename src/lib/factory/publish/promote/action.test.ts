@@ -43,6 +43,10 @@ interface World {
   onComment: (() => Promise<void>) | null
   failCas: number
   promoteEstimated: boolean
+  items: Array<{ existingItemId: string | null; title: string }>
+  workLogs: string[]
+  itemError: Error | null
+  logError: Error | null
 }
 
 function makeWorld(): World {
@@ -60,6 +64,7 @@ function makeWorld(): World {
     log: [], alerts: [], orderWriteFails: 0, promoteError: null, commentError: null, readError: null,
     redlineWord: 'badword', seq: 0, afterPromoteDescription: null,
     onPromote: null, onComment: null, failCas: 0, promoteEstimated: false,
+    items: [], workLogs: [], itemError: null, logError: null,
   }
 }
 
@@ -87,6 +92,16 @@ function makeDeps(w: World): PromoteDeps {
         w.order.updated_at = `u${++w.seq + 1}`
         w.log.push('order')
         return true
+      },
+    },
+    books: {
+      async completeExecutionItem(a) {
+        if (w.itemError) throw w.itemError
+        w.items.push({ existingItemId: a.existingItemId, title: a.title })
+      },
+      async writeWorkLog(a) {
+        if (w.logError) throw w.logError
+        w.workLogs.push(a.summary)
       },
     },
     meta: {
@@ -504,5 +519,75 @@ describe('首评发出前无条件过红线', () => {
     const r = await confirm(await tokenOf())
     expect(r.ok && r.kind === 'synced' ? r.data.first_comment_status : '').toBe('failed')
     expect(w.log).not.toContain('comment')
+  })
+})
+
+describe('公开后的两笔回执(工作日志 + 执行事项)', () => {
+  it('新转公开:各写一次;字段沿用 writeThreeBooks(factory 账号文案、进行中改 completed 的标题)', async () => {
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(1)
+    expect(w.workLogs[0]).toContain('已公开')
+    expect(w.items).toHaveLength(1)
+    expect(w.items[0].existingItemId).toBeNull() // 2817 之后草稿期没有这行 -> 新建
+    expect(w.items[0].title).toContain('工厂自动发布 Reel')
+    expect(auth().books_work_order_id).toBe(ORDER_ID)
+  })
+
+  it('草稿期已有执行事项(2817 之前):用它标 completed,而不是再建一条', async () => {
+    w.row!.execution_item_id = 'item-1'
+    await confirm(await tokenOf())
+    expect(w.items).toEqual([expect.objectContaining({ existingItemId: 'item-1' })])
+  })
+
+  it('只同步(人手已公开):也写一次', async () => {
+    w.meta.published = true
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(1)
+    expect(w.items).toHaveLength(1)
+  })
+
+  it('补首评分支不写', async () => {
+    w.commentError = new Error('boom')
+    await confirm(await tokenOf())
+    w.commentError = null
+    expect(w.workLogs).toHaveLength(1)
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(1)
+    expect(w.items).toHaveLength(1)
+  })
+
+  it('重入(7.2 失败后重来)不重复写:全程各一次', async () => {
+    w.orderWriteFails = 3
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(0) // 工单还没写成公开,不记「已公开」
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(1)
+    expect(w.items).toHaveLength(1)
+  })
+
+  it('去重:回执里已有该工单的占位 → 不再写(去掉去重判断此条变红)', async () => {
+    w.row!.payload['promote_authorization'] = { books_work_order_id: ORDER_ID }
+    await confirm(await tokenOf())
+    expect(w.workLogs).toHaveLength(0)
+    expect(w.items).toHaveLength(0)
+  })
+
+  it('写入失败不回滚公开:回执 needs_attention + books_error + 告警,请求仍成功', async () => {
+    w.logError = new Error('db down')
+    const r = await confirm(await tokenOf())
+    expect(r.ok).toBe(true)
+    expect(w.order.published_ref['video_state']).toBe('PUBLISHED')
+    expect(auth().status).toBe('consumed')
+    expect(auth().needs_attention).toBe(true)
+    expect(String(auth().books_error)).toContain('工作日志')
+    expect(w.alerts.join('|')).toContain('公开回执')
+  })
+
+  it('执行事项写入失败同样不回滚公开,工作日志仍照写', async () => {
+    w.itemError = new Error('db down')
+    const r = await confirm(await tokenOf())
+    expect(r.ok).toBe(true)
+    expect(w.workLogs).toHaveLength(1)
+    expect(String(auth().books_error)).toContain('执行事项')
   })
 })
