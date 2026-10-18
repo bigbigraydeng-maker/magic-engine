@@ -62,6 +62,7 @@ import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-a
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
+import { runCreativePoolIntake } from '@/lib/ads-strategy/creative-pool-intake'
 import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone'
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
@@ -122,6 +123,11 @@ interface ClientResult {
   ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
   /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
   autonomy_sync?: { sent: boolean; events: number; error?: string }
+  /**
+   * 已发布成片 → 广告素材候选的自动登记（只写 `status:'candidate'`，批准仍只认人点）。
+   * `blocked` 非空 = 这一轮什么都没写，原因带 `facts:` 前缀。best-effort，不进 failed。
+   */
+  creative_pool_intake?: { added: number; alreadyInPool: number; considered: number; blocked: string | null; error?: string }
   /**
    * 2026-09-13: `ad_daily`/`ad_level` above stay the PRIMARY account's result
    * (unchanged shape, unchanged tallying). Any additional registered accounts
@@ -570,6 +576,34 @@ export async function GET(req: NextRequest) {
           result.autonomy_sync = await reconcileAutonomyMode(supabaseAdmin, client.client_id).catch(
             (e: unknown) => ({ sent: false, events: 0, error: e instanceof Error ? e.message : String(e) }),
           )
+
+          /**
+           * 已发布成片 → 广告素材候选的自动登记。放在这道 `=== 'row'` 闸里面，
+           * 跟上面的 reconcile 同一个理由：没有配置行的客户一个字都不写
+           * （intake 自己也再查一次 source，这里不是它唯一的保护）。
+           *
+           * 为什么放在这条 cron 而不是另开一条：它只读 `content_work_orders` 和配置、
+           * 只写 `creative_pool` 的候选项，没有任何对外副作用，按铁律 3 的例外不必上 Inngest；
+           * 另开 cron 要动 `render.yaml`，而冻结令让「少加东西」优先。
+           *
+           * best-effort：这一步失败不影响上面已经完成的拉数 / 诊断 / 巡察。
+           */
+          result.creative_pool_intake = await runCreativePoolIntake(supabaseAdmin, client.client_id, {
+            dryRun: false,
+          })
+            .then(r => ({
+              added: r.added.length,
+              alreadyInPool: r.alreadyInPool,
+              considered: r.considered,
+              blocked: r.blocked,
+            }))
+            .catch((e: unknown) => ({
+              added: 0,
+              alreadyInPool: 0,
+              considered: 0,
+              blocked: null,
+              error: e instanceof Error ? e.message : String(e),
+            }))
         }
       } else {
         // Client has a Meta ad account but no usable token — surface it as a
