@@ -1,17 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
 import { readPromoSpec, type PromoPhase, type PromoSpec, type PromoStep } from '@/lib/marketing-plan/promo/spec'
 import { buildPromoTemplate } from '@/lib/marketing-plan/promo/template'
 import {
-  STEP_KIND_LABEL, addPhase, addStep, removePhase, removeStep, setGoal, updatePhase, updateStep, type StepKind,
+  STEP_KIND_LABEL, addPhase, addStep, newBusinessCase, newExperiment, newSalesHandover,
+  removePhase, removeStep, setBusinessCase, setExperiment, setGoal, setSalesHandover,
+  updatePhase, updateStep, type StepKind,
 } from '@/lib/marketing-plan/promo/form'
 import { Field, inputCls } from './Field'
 import { AdsFields, BlogFields, NewsletterFields, SocialFields } from './StepFields'
 import { AdsDraftPanel } from './AdsDraftPanel'
+import { BusinessCaseFields, ExperimentFields, SalesHandoverFields } from './PhaseCards'
 
 interface Props { clientId: string; plan: MarketingPlan; options: PromoOptions | null; onSaved: () => void }
 interface ApiError { success: boolean; error?: string; issues?: { path: string; message: string }[]; problems?: string[] }
@@ -49,6 +52,25 @@ function StepCard({ step, options, clientId, planId, otherSteps, onChange, onRem
   )
 }
 
+/** 一张可加可删的卡的外壳：没加时只显示一个「+ 加上」按钮，加了之后显示内容和「删掉」。 */
+function CardBlock({ title, hint, present, onAdd, onRemove, children }: {
+  title: string; hint: string; present: boolean
+  onAdd: () => void; onRemove: () => void; children: ReactNode
+}) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-semibold text-gray-900">{title}</p>
+        {present
+          ? <button type="button" onClick={onRemove} className="ml-auto text-xs text-red-700 underline">删掉这张卡</button>
+          : <button type="button" onClick={onAdd} className="ml-auto text-xs border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50">+ 加上</button>}
+      </div>
+      <p className="text-[11px] text-gray-500">{hint}</p>
+      {children}
+    </div>
+  )
+}
+
 function PhaseCard({ phase, index, options, spec, clientId, planId, setSpec }: {
   phase: PromoPhase; index: number; options: PromoOptions | null; spec: PromoSpec
   clientId: string; planId: string; setSpec: (s: PromoSpec) => void
@@ -66,6 +88,39 @@ function PhaseCard({ phase, index, options, spec, clientId, planId, setSpec }: {
         <Field label="开始日期"><input type="date" className={inputCls} value={phase.start_date} onChange={e => setSpec(updatePhase(spec, phase.id, { start_date: e.target.value }))} /></Field>
         <Field label="结束日期"><input type="date" className={inputCls} value={phase.end_date} onChange={e => setSpec(updatePhase(spec, phase.id, { end_date: e.target.value }))} /></Field>
       </div>
+      <CardBlock
+        title="经营判断卡"
+        hint="这笔钱对准哪个团期、剩多少座、每座留给公司多少、能承受多贵的线索。没有这张卡，开投前的检查过不了。"
+        present={phase.business_case !== undefined}
+        onAdd={() => setSpec(setBusinessCase(spec, phase.id, newBusinessCase()))}
+        onRemove={() => setSpec(setBusinessCase(spec, phase.id, undefined))}
+      >
+        {phase.business_case !== undefined && (
+          <BusinessCaseFields card={phase.business_case}
+            onChange={c => setSpec(setBusinessCase(spec, phase.id, c))} />
+        )}
+      </CardBlock>
+
+      <label className="flex items-center gap-2 text-xs text-gray-700">
+        <input type="checkbox" checked={phase.is_experiment === true}
+          onChange={e => setSpec(updatePhase(spec, phase.id, { is_experiment: e.target.checked }))} />
+        这个阶段是一次实验（要先说清楚验证什么、最多亏多少、什么情况下停）
+      </label>
+
+      {phase.is_experiment === true && (
+        <CardBlock
+          title="实验设计卡"
+          hint="标了「这是一次实验」就必须填，不填保存不了。"
+          present={phase.experiment !== undefined}
+          onAdd={() => setSpec(setExperiment(spec, phase.id, newExperiment()))}
+          onRemove={() => setSpec(setExperiment(spec, phase.id, undefined))}
+        >
+          {phase.experiment !== undefined && (
+            <ExperimentFields card={phase.experiment}
+              onChange={c => setSpec(setExperiment(spec, phase.id, c))} />
+          )}
+        </CardBlock>
+      )}
       <ul className="space-y-3">
         {phase.steps.map(s => (
           <StepCard key={s.id} step={s} options={options} clientId={clientId} planId={planId}
@@ -103,6 +158,23 @@ function GoalPicker({ clientId, spec, options, setSpec }: { clientId: string; sp
   )
 }
 
+/** 销售承接：计划级，一份计划一张。 */
+function SalesHandoverBlock({ spec, setSpec }: { spec: PromoSpec; setSpec: (s: PromoSpec) => void }) {
+  return (
+    <CardBlock
+      title="销售承接"
+      hint="广告带来的客人谁接、多久之内联系上、没人接怎么办。填了只是写下来，开投前还要有人在检查清单里点「我已核实」。"
+      present={spec.sales_handover !== undefined}
+      onAdd={() => setSpec(setSalesHandover(spec, newSalesHandover()))}
+      onRemove={() => setSpec(setSalesHandover(spec, undefined))}
+    >
+      {spec.sales_handover !== undefined && (
+        <SalesHandoverFields card={spec.sales_handover} onChange={c => setSpec(setSalesHandover(spec, c))} />
+      )}
+    </CardBlock>
+  )
+}
+
 /** PM / FDE 用：用表格填推广计划（阶段 + 每步设定）。保存走原来的保存接口，服务端照旧校验。只有草稿能改。 */
 export function PromoSpecForm({ clientId, plan, options, onSaved }: Props) {
   const [spec, setSpec] = useState<PromoSpec>(() => readPromoSpec(plan.plan_data) ?? buildPromoTemplate(plan))
@@ -131,6 +203,7 @@ export function PromoSpecForm({ clientId, plan, options, onSaved }: Props) {
         <p className="text-xs text-gray-500 mt-0.5">分阶段写清楚：每个阶段投多少广告、发多少社媒、写什么博客和邮件。保存后上面的卡片会立刻更新；批准之前什么都不会发生。</p>
       </div>
       <GoalPicker clientId={clientId} spec={spec} options={options} setSpec={setSpec} />
+      <SalesHandoverBlock spec={spec} setSpec={setSpec} />
       <ul className="space-y-4">
         {spec.phases.map((p, i) => (
           <PhaseCard key={p.id} phase={p} index={i} options={options} spec={spec}
