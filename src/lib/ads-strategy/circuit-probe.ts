@@ -31,6 +31,7 @@ import {
   type DetectorVerdict,
 } from './circuit-detectors'
 import { loadClientCapFacts } from './circuit-cap-facts'
+import type { AutonomyMode } from './config'
 import { readSpendWindow } from './circuit-spend-window'
 import { accountYesterday, resolveAccountTimezone } from './account-timezone'
 import { isDelivering } from './portfolio/diagnostics/context'
@@ -98,7 +99,11 @@ export interface AccountProbe {
    */
   readonly deliveringCampaigns: number | null
   readonly deliveringAdsets: number | null
-  /** 快照里抓到的广告组条数。0 = 压根没抓广告组级（共用账户），那时「没有在投的组」说明不了问题 */
+  /**
+   * 快照里抓到的广告组条数。
+   * `null` = 判不了（读失败 / 窗口里零行 / 撞行数上限）；
+   * `0` = 快照有行但没有广告组级（共用账户），那时「没有在投的组」说明不了问题。
+   */
   readonly adsetsSeen: number | null
   /**
    * 各候选倍数下，绝对硬顶会不会判 trip。
@@ -110,7 +115,7 @@ export interface AccountProbe {
 /** 一个客户这一天的观察结果。 */
 export interface ClientProbe {
   readonly clientId: string
-  readonly autonomyMode: string
+  readonly autonomyMode: AutonomyMode
   /** 非 `bounded_auto` 的客户本来就不会自动动手，不观察，如实记原因 */
   readonly skipped: string | null
   /** 判据 #5：当天 `ads_growth_states`。`missing`（没有行）与 `partial`（有行但不全）分开记 */
@@ -154,8 +159,11 @@ async function readCompleteness(
  *
  * 读法照抄 `circuit-cap-facts.ts:142-150`（同一张表、同一个 48 小时回看窗口），
  * 区别只在**不把两层折叠成一个布尔**。
+ *
+ * 导出只为让测试能直接钉住那两道「判不了」闸：到它的生产路径要先过
+ * `loadClientCapFacts`，而那个函数用 `supabaseAdmin` 单例、注入不进替身（复审 C 条）。
  */
-async function readDeliveringByLevel(
+export async function readDeliveringByLevel(
   sb: SupabaseClient,
   clientId: string,
   adAccountId: string,
@@ -176,9 +184,15 @@ async function readDeliveringByLevel(
     .order('captured_at', { ascending: false })
     .limit(SNAPSHOT_ROW_LIMIT)
 
-  if (error || !Array.isArray(data)) {
-    return { deliveringCampaigns: null, deliveringAdsets: null, adsetsSeen: null }
-  }
+  const nothingKnown = { deliveringCampaigns: null, deliveringAdsets: null, adsetsSeen: null }
+
+  if (error || !Array.isArray(data)) return nothingKnown
+  // 🔴 下面两道闸照抄 `circuit-cap-facts.ts:163-170`，一道都不许省 ——
+  //    省掉就会把「判不了」记成 0，而 A0 的全部价值在于这几个数是真的。
+  //    回看窗口里连一行快照都没有：连快照都拿不到，不是「没有在投的」。
+  if (data.length === 0) return nothingKnown
+  //    撞到行数上限：可能漏了没扫到的实体，数出来的只会偏小且看不出被截断。
+  if (data.length === SNAPSHOT_ROW_LIMIT) return nothingKnown
 
   // 同一实体可能有多行快照，只认最新那行（已按 captured_at 倒序）
   const latest = new Map<string, { level: string; effective_status: string | null }>()
@@ -293,7 +307,12 @@ export async function probeClientCircuit(
   sb: SupabaseClient,
   args: {
     readonly clientId: string
-    readonly autonomyMode: string
+    /**
+     * 🔴 收成 `AutonomyMode` 而不是 `string`：下面那句 `!== 'bounded_auto'` 是
+     * **唯一**决定观不观察的闸，拼错一个字母会让所有客户静默跳过、回执全是 skipped。
+     * 用枚举类型让编译器替这件事把关。
+     */
+    readonly autonomyMode: AutonomyMode
     readonly now?: Date
   },
 ): Promise<ClientProbe> {
