@@ -3,7 +3,7 @@
  * 草稿允许暂时不完整（空日期、空主题），保存时由服务端统一校验。
  */
 
-import type { PromoPhase, PromoSpec, PromoStep } from './spec'
+import type { BusinessCase, ExperimentCard, PromoPhase, PromoSpec, PromoStep, SalesHandover } from './spec'
 
 export type StepKind = PromoStep['kind']
 
@@ -60,7 +60,11 @@ export function updateStep(spec: PromoSpec, phaseId: string, step: PromoStep): P
   return { ...spec, phases: spec.phases.map(p => (p.id === phaseId ? { ...p, steps: p.steps.map(s => (s.id === step.id ? step : s)) } : p)) }
 }
 
-export function updatePhase(spec: PromoSpec, phaseId: string, patch: Partial<Pick<PromoPhase, 'name' | 'start_date' | 'end_date'>>): PromoSpec {
+export function updatePhase(
+  spec: PromoSpec,
+  phaseId: string,
+  patch: Partial<Pick<PromoPhase, 'name' | 'start_date' | 'end_date' | 'is_experiment'>>,
+): PromoSpec {
   return { ...spec, phases: spec.phases.map(p => (p.id === phaseId ? { ...p, ...patch } : p)) }
 }
 
@@ -83,4 +87,79 @@ export function setGoal(spec: PromoSpec, goalId: string): PromoSpec {
 /** 逗号 / 换行分隔的文本拆成列表，去空去重。 */
 export function splitList(text: string): string[] {
   return Array.from(new Set(text.split(/[,\n，]/).map(s => s.trim()).filter(Boolean)))
+}
+
+/**
+ * 空白的经营判断卡：数字留 0、文字留空，让人填。
+ * 草稿允许不完整，保存时服务端统一拒绝不合格的卡。
+ */
+export function newBusinessCase(): BusinessCase {
+  return {
+    departure_ref: '',
+    seats_remaining: 0,
+    seats_confirmed: false,
+    seats_as_of: '',
+    retained_per_seat_cents: 0,
+    retention_basis: [],
+    pax_per_booking: 0,
+    lead_to_booking_rate: 0,
+    rate_source: 'assumed',
+    rate_sample_n: null,
+    creative_gap_note: '',
+    owner: '',
+  }
+}
+
+/** 空白的实验设计卡。 */
+export function newExperiment(): ExperimentCard {
+  return {
+    hypothesis: '',
+    held_constant: [],
+    primary_metric: 'enquiry',
+    max_loss_cents: 0,
+    stop_rule: '',
+    continue_rule: '',
+    owner: '',
+  }
+}
+
+/** 空白的销售承接。 */
+export function newSalesHandover(): SalesHandover {
+  return { owner: '', response_sla_hours: 24, channels: [], fallback: '' }
+}
+
+/** 改某个阶段的经营判断卡；传 undefined 表示删掉这张卡。 */
+export function setBusinessCase(spec: PromoSpec, phaseId: string, card: BusinessCase | undefined): PromoSpec {
+  return {
+    ...spec,
+    phases: spec.phases.map(p => (p.id === phaseId ? { ...p, business_case: card } : p)),
+  }
+}
+
+/** 改某个阶段的实验设计卡；传 undefined 表示删掉这张卡。 */
+export function setExperiment(spec: PromoSpec, phaseId: string, card: ExperimentCard | undefined): PromoSpec {
+  return {
+    ...spec,
+    phases: spec.phases.map(p => (p.id === phaseId ? { ...p, experiment: card } : p)),
+  }
+}
+
+/** 改计划级的销售承接；传 undefined 表示删掉。 */
+export function setSalesHandover(spec: PromoSpec, handover: SalesHandover | undefined): PromoSpec {
+  return { ...spec, sales_handover: handover }
+}
+
+/**
+ * 页面输入的百分数转成小数：`'2.6'` → `0.026`。
+ * 空或非法返回 0（保存时会因为成交率必须大于 0 被判成「可承受成本未知」）。
+ */
+export function percentToRate(percent: string): number {
+  const n = Number(percent)
+  return Number.isFinite(n) && n > 0 ? n / 100 : 0
+}
+
+/** 小数转百分数给页面显示：`0.026` → `'2.6'`；0 显示空。 */
+export function rateToPercent(rate: number): string {
+  if (!Number.isFinite(rate) || rate <= 0) return ''
+  return String(Math.round(rate * 10000) / 100)
 }
