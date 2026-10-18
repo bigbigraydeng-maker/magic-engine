@@ -66,6 +66,17 @@ interface ConfigResponse {
   error?: string
 }
 
+interface AccountCapRow {
+  ad_account_id: string
+  daily_budget_cap_cents: number | null
+}
+
+interface AccountCapsResponse {
+  accounts?: AccountCapRow[]
+  client_total_cap_cents?: number | null
+  error?: string
+}
+
 // ─── Sub-components (each kept small and single-purpose) ──────────────────────
 
 function CapField({
@@ -240,6 +251,116 @@ function CreativePoolList({
   )
 }
 
+function AccountCapList({ clientId }: { clientId: string }) {
+  const [rows, setRows] = useState<AccountCapRow[] | null>(null)
+  const [totalCap, setTotalCap] = useState<number | null>(null)
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    fetch(`/api/clients/${clientId}/ad-accounts`)
+      .then(r => (r.ok ? (r.json() as Promise<AccountCapsResponse>) : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(j => {
+        if (!alive) return
+        const list = j.accounts ?? []
+        setRows(list)
+        setTotalCap(j.client_total_cap_cents ?? null)
+        const next: Record<string, string> = {}
+        for (const row of list) next[row.ad_account_id] = centsToDisplay(row.daily_budget_cap_cents)
+        setDrafts(next)
+      })
+      .catch(() => { if (alive) setLoadFailed(true) })
+    return () => { alive = false }
+  }, [clientId])
+
+  const save = async (adAccountId: string) => {
+    const parsed = displayToCents(drafts[adAccountId] ?? '')
+    if (Number.isNaN(parsed) || (parsed !== null && parsed <= 0)) {
+      setMessage('每天上限要填大于 0 的金额，或清空表示不设上限')
+      return
+    }
+    setBusyId(adAccountId)
+    setMessage(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-accounts/${adAccountId}/daily-cap`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daily_budget_cap_cents: parsed }),
+      })
+      const json = (await res.json()) as { daily_budget_cap_cents?: number | null; error?: string }
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      const saved = typeof json.daily_budget_cap_cents === 'number' ? json.daily_budget_cap_cents : null
+      setRows(prev => prev?.map(r => (r.ad_account_id === adAccountId ? { ...r, daily_budget_cap_cents: saved } : r)) ?? prev)
+      setDrafts(prev => ({ ...prev, [adAccountId]: centsToDisplay(saved) }))
+      setMessage('已保存')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (loadFailed) {
+    return (
+      <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        读不到各账户的每天上限，没有显示输入框（怕把真实值存成空白）
+      </div>
+    )
+  }
+
+  if (rows === null) {
+    return <div className="text-sm text-gray-400 py-4">加载中…</div>
+  }
+
+  if (rows.length === 0) {
+    return <p className="text-xs text-gray-400">这个客户还没绑定广告账户</p>
+  }
+
+  return (
+    <div className="space-y-2.5">
+      {rows.map(row => (
+        <div key={row.ad_account_id} className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="tabular-nums text-gray-800">{row.ad_account_id}</span>
+          <input
+            type="number"
+            min={0.01}
+            step="0.01"
+            value={drafts[row.ad_account_id] ?? ''}
+            onChange={e => setDrafts(prev => ({ ...prev, [row.ad_account_id]: e.target.value }))}
+            placeholder="未设"
+            className="w-32 rounded-lg border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
+          />
+          <button
+            type="button"
+            disabled={busyId !== null}
+            onClick={() => save(row.ad_account_id)}
+            className="rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+          >
+            {busyId === row.ad_account_id ? '保存中…' : '保存'}
+          </button>
+          <span className="text-xs text-gray-400">
+            当前：
+            <span className="tabular-nums text-gray-600">
+              {row.daily_budget_cap_cents == null ? '未设' : `$${centsToDisplay(row.daily_budget_cap_cents)} / 天`}
+            </span>
+          </span>
+        </div>
+      ))}
+      {message && <p className="text-xs text-gray-500">{message}</p>}
+      <p className="text-xs text-gray-400">
+        客户总闸：
+        <span className="tabular-nums text-gray-600">
+          {totalCap == null ? '未设' : `$${centsToDisplay(totalCap)} / 天`}
+        </span>
+      </p>
+      <p className="text-xs text-gray-400">各账户加起来不能超过客户总闸；超了保存会被拒绝</p>
+    </div>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AutonomySettings({ clientId }: { clientId: string }) {
@@ -354,6 +475,16 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
         <CapField draftCap={draftCap} currentCap={config.daily_budget_cap_cents} onChange={setDraftCap} />
 
         <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
+
+        <div>
+          <span className="block text-sm font-medium text-gray-700">每个广告账户各自每天最多花多少</span>
+          <p className="mt-1 text-xs text-gray-400">
+            上面那个是这个客户所有账户加起来的总闸；下面是每个账户各自的上限。客户绑了两个以上账户时，没填自己上限的账户不允许自动动钱。
+          </p>
+          <div className="mt-1.5">
+            <AccountCapList clientId={clientId} />
+          </div>
+        </div>
 
         <div>
           <span className="block text-sm font-medium text-gray-700">可用于广告的视频</span>
