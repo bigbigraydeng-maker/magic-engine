@@ -410,6 +410,7 @@ export async function processD3Hit(
     await recordFlywheelAction(deps.supabase, args.clientId, {
       ...basePayload,
       status: 'awaiting_approval' satisfies string,
+      reason: '花钱没结果：已提交，等你批准后才会暂停这个广告组',
       action_run_id: result.runId,
       authorization_decision_id: result.authorizationDecisionId,
     })
