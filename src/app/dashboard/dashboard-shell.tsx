@@ -38,6 +38,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
     items: [
       { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
       { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
+      { key: 'ad-approval',     label: '等你点头的广告',    mark: 'OK', href: '/dashboard/ad-approval' },
       { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],

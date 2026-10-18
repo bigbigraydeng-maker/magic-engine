@@ -7,7 +7,7 @@ import { ADMIN_SECTIONS } from '../dashboard-shell'
 // and regrouping must never make a page lose its entrance.
 const APP_ROOT = join(__dirname, '..', '..')
 
-/** The admin sidebar links before the 5-group regrouping, minus /dashboard/analytics (dead page, link dropped on purpose). */
+/** The admin sidebar links before the 5-group regrouping (plus the ad-approval entry kept in group 1), minus /dashboard/analytics (dead page, link dropped on purpose). */
 const PREVIOUS_HREFS = [
   '/dashboard', '/dashboard/today', '/dashboard/clients', '/dashboard/factory', '/dashboard/reports',
   '/dashboard/admin/billing-monitor', '/dashboard/admin/mtc-overview', '/dashboard/admin/ai-gateway',
@@ -15,6 +15,7 @@ const PREVIOUS_HREFS = [
   '/dashboard/industry-baselines', '/dashboard/admin/cron-health', '/dashboard/commerce', '/dashboard/ad-engine',
   '/dashboard/kernel-approvals', '/dashboard/team-memory', '/dashboard/me2/product-map', '/dashboard/voice',
   '/dashboard/workflows-health', '/dashboard/conversions', '/dashboard/admin/flywheel', '/dashboard/admin/mcp-keys',
+  '/dashboard/ad-approval',
 ]
 
 const items = ADMIN_SECTIONS.flatMap((s) => s.items)
@@ -41,6 +42,12 @@ describe('admin sidebar', () => {
   it('no page lost its entrance in the regrouping', () => {
     const hrefs = new Set(items.map((i) => i.href))
     for (const href of PREVIOUS_HREFS) expect(hrefs.has(href), href).toBe(true)
+  })
+
+  it('both approval pages sit in the always-open first group', () => {
+    const first = (ADMIN_SECTIONS[0]?.items ?? []).map((i) => i.href)
+    expect(first).toContain('/dashboard/ad-approval')
+    expect(first).toContain('/dashboard/kernel-approvals')
   })
 
   it('the dead analytics page is no longer linked', () => {
