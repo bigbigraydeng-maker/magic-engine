@@ -50,7 +50,19 @@
 | [2026-10-19 Instagram Best Practices](2026-10-19-social-instagram-best-practices.md) | candidate | 账号级站内建议作复盘线索，不当固定规则 |
 | [2026-10-19 Threads Insights](2026-10-19-social-threads-insights.md) | candidate | 周报并列看帖子、views、关注与回复，不推断因果 |
 
-外部来源与 ME 数据尚未完成验证，机器状态统一为 `learning`；本轮不标 `adopted` / `verified`。
+| [2026-10-19 Kallaway：先定这个账号图什么](2026-10-19-social-five-content-games-kallaway.md) | candidate | **待验证（优先）**：账号目标要有记录、对标只看中小号（交 97）；ME 早已在做：不用虚荣指标判好坏（SO-09）；忽略：头 30–50 条照抄、8 分就发 |
+| [2026-10-19 Alex Cattoni：简介写清服务谁 + 评论区挖选题](2026-10-19-social-human-framework-trust-cattoni.md) | candidate | **待验证（优先）**：简介写清服务谁（交 97）、从同行评论区挖选题（挂已有社媒交接卡）；ME 早已在做：不刷假互动（SO-11）；PM 拍板项：以客户账号主动去别人内容下留评论 |
+| [2026-10-19 Mike Yanda：TikTok 怎么决定推不推 + 3–4 个固定栏目](2026-10-19-social-tiktok-algorithm-pillars-yanda.md) | candidate | **待验证（优先）**：固定栏目（挂已有社媒交接卡）、发布时段到底有没有影响（交 97，n<5 记 cannot_check）；忽略：只看播放量当记分板（撞 SO-09） |
+| [2026-10-19 Ethan Shaw：招牌系列 + 一个主题拆成一长十短](2026-10-19-social-signature-series-and-repurposing-shaw.md) | candidate | **待验证（优先）**：一稿多发/同主题多钩子、模板一致但配乐与内容类型要轮换（交 97，出片部分带 106）；忽略：冲刺期每天发 |
+
+| [2026-10-19 Kallaway：平台先算「该给谁看」，主题跑偏会连累后面几条](2026-10-19-social-algorithm-fit-score-kallaway.md) | candidate | **待验证（优先）**：跑偏一条会不会连累紧接着那几条（交 97）；查不了：互动率要除以播放量，而 ME 读不到播放量；忽略：靠制造对立和情绪催评论（撞 §3.4③、SO-11、SO-04）；去重：前 200 人试水、发布时段不重要（并入 Yanda 卡） |
+| [2026-10-19 Windy 有风：新账号头一个月别转给熟人](2026-10-19-social-cold-start-no-friend-promo-windy.md) | candidate | **待验证（优先）**：新号冷启动能不能跨发给熟人/自家其他渠道（交 97；ME 现无冷启动规则，是真空）；查不了：35% 观看时长 / 4% 推荐点击率（ME 读不到）；忽略：对照算例里的各档百分比（作者自述是假设） |
+| [2026-10-19 氪學家：短视频会隔几周才火 + 静音可懂](2026-10-19-social-shorts-late-pickup-kexuejia.md) | candidate | **待验证（优先）**：72 小时之后还会不会继续涨（交 97；挑战现在用 T+72h 判好坏的口径）、静音可懂进出片自检（交 106，带「不替代真播一遍确认有声音」的护栏）；ME 早已在做：判断要去掉最高一条（SO-09）；忽略：点标签挖同类（ME 有配方库）、批量养号与指纹浏览器（撞 SO-04/SO-05） |
+| [2026-10-19 Kallaway（TikTok）：子题材 × 格式排一个月](2026-10-19-social-six-by-five-content-grid-kallaway.md) | candidate | 待验证：排产多记一个「子题材」维度（97 号试排一周，流程类不开卡）；ME 早已在做：内容按维度组合排产（SO-06）；忽略：一天一条排满 30 天（发布量属 PM）；查不了：作者说的「二十种形式」清单在「评论换资料」门后，没去索取 |
+| [2026-10-19 Levi Powe（TikTok）：先降低做一条的麻烦，不是先谈发几条](2026-10-19-social-lower-friction-fixed-framing-levi-powe.md) | candidate | 待验证：把 ME 从排产到发出的四段耗时量出来，看卡在哪段（97 号，流程计时）；部分吸收：制作参数固定可以，但不得据此连续两天同版式同首帧；忽略：能发多少发多少（SO-10、§7.2 R7） |
+| [2026-10-19 TikTok「起号」高播放内容是互动链式操纵](2026-10-19-social-engagement-bait-chain-not-applicable.md) | candidate | 全部忽略（留档防重复评估）：互点互关互评、叫别人照做（撞 SO-11/SO-05）；**本月实测结论：播放量高不等于来源可信，不能单独当筛源门槛（SO-01）** |
+
+外部来源与 ME 数据尚未完成验证，文章来源那 9 张卡的机器状态统一为 `learning`。视频来源的 4 张（本页上面 4 行）另有两类：补对摘要后确认 ME 早已在做的标 `already_in_me` 并挂了 SO 编号；已开交接卡派出去的标 `verifying`。本轮仍不标 `adopted` / `verified`。
 
 ## 机器索引（给 ME 后台「Agent 学习库」页读）
 每张卡末尾必须有一节 `## 机器索引`，下面一个 ```json 块：`{"points":[{"key","text","state",...}]}`。一个点只能有一个 state，以复核更正后的结论为准（note 里写「复核更正后」）。没有这一节的卡会在页面上进「还没整理」红区。
