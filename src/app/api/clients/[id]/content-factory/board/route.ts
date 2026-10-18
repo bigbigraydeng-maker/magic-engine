@@ -47,6 +47,27 @@ export async function GET(
     // 课程分组：source 以「系列课」开头的成体系内容，收进课程区（不混进平铺看板）。
     const courseMap = new Map<string, { name: string; source: string; lessons: unknown[] }>()
 
+    const contentPostIds = (data ?? []).map((p) => p.id)
+    const youtubeStageByPostId = new Map<string, { status: string; videoId: string | null; createdAt: string }>()
+    if (contentPostIds.length > 0) {
+      const { data: receipts, error: receiptsError } = await supabaseAdmin
+        .from('youtube_publish_receipts')
+        .select('content_post_id, status, video_id, created_at')
+        .eq('client_id', params.id)
+        .eq('stage', 'staging')
+        .in('content_post_id', contentPostIds)
+        .order('created_at', { ascending: false })
+      if (receiptsError) throw receiptsError
+      for (const receipt of receipts ?? []) {
+        if (!receipt.content_post_id || youtubeStageByPostId.has(receipt.content_post_id)) continue
+        youtubeStageByPostId.set(receipt.content_post_id, {
+          status: receipt.status,
+          videoId: receipt.video_id,
+          createdAt: receipt.created_at,
+        })
+      }
+    }
+
     const cardOf = (p: (typeof data)[number], status: ContentPostStatus, stage: FactoryStage) => ({
       id: p.id,
       title: p.title || '(无标题)',
@@ -63,6 +84,7 @@ export async function GET(
       script: p.script ?? '',
       pillar: p.pillar_id ?? '',
       visualBrief: p.visual_brief ?? '',
+      youtubeStage: youtubeStageByPostId.get(p.id) ?? null,
     })
 
     for (const p of data ?? []) {

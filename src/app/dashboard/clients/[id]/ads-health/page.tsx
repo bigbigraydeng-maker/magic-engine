@@ -11,13 +11,15 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
+import AutoPausePanel from './auto-pause-panel'
+import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
@@ -504,13 +506,6 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
-type PageTab = 'today' | 'ads' | 'settings'
-const PAGE_TABS: Array<{ key: PageTab; label: string; hint: string }> = [
-  { key: 'today', label: '今天看这里', hint: '三句话：池子、频率、今天调什么' },
-  { key: 'ads', label: '每条广告', hint: '逐条体检' },
-  { key: 'settings', label: '目标与设置', hint: '每天预算上限、自动化、可投视频' },
-]
-
 function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => void }) {
   return (
     <div className="mb-5 flex gap-1 border-b border-gray-200">
@@ -534,11 +529,17 @@ function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => voi
 export default function AdsHealthPage() {
   const params = useParams()
   const clientId = params.id as string
+  const searchParams = useSearchParams()
 
   const [data, setData] = useState<AdHealthResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<PageTab>('today')
+  /**
+   * 初值从网址 `?tab=` 取，这样待办和书签能直接落到某个标签上
+   * （`…/ads-health?tab=approvals`）。之后由用户点击接管，不再跟着网址变 ——
+   * 页面没有把标签写回网址，所以这里只读一次就够。
+   */
+  const [tab, setTab] = useState<PageTab>(() => tabFromQuery(searchParams.get('tab')))
 
   useEffect(() => {
     let alive = true
@@ -641,6 +642,27 @@ export default function AdsHealthPage() {
             </>
           )}
         </>
+      )}
+
+      {/*
+        「等你点头」标签 —— 这个客户等人点头的广告动作，就在这一页批
+        （设计稿 `docs/specs/2026-10-18-ads-door-merge-design-v0.1.md` §5 步 1/2）。
+
+        🔴 **这个标签就在批准链路上**：它取待批准列表、渲染「批准（立刻暂停）」按钮，
+        点下去直接走 `POST .../ad-health/auto-pause/[runId]/decision`。
+        改这一块等于改批准入口 —— 要过「请求的网址、方法、请求体一个字没变」那道审查。
+        （第一步只立了门牌、不取数据；那句话从第二步搬进真内容起就不成立了。）
+
+        介绍文案在面板自己里头，这里不要再写一遍（两段同话会在屏幕上出现两遍）。
+      */}
+      {tab === 'approvals' && (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-400">
+            通用审批页对这类动作只签字、不执行（那边是批不了的），要批就在这里。
+          </p>
+          {/* 从旧的专属页整段搬来；两个接口的网址、方法、请求体一个字没动。 */}
+          <AutoPausePanel clientId={clientId} />
+        </div>
       )}
 
       {tab === 'settings' && (

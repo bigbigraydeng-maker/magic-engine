@@ -72,7 +72,7 @@ describe('通用面：有专属入口的动作不给批、给链接', () => {
       canApprove: false,
       canReject: true,
       approveBlockedReason: 'dedicated_entry',
-      dedicatedEntry: { label: '广告自动暂停待批准页', path: `/dashboard/clients/${CLIENT}/ad-health/auto-pause` },
+      dedicatedEntry: { label: '广告门 ·「等你点头」', path: `/dashboard/clients/${CLIENT}/ads-health?tab=approvals` },
     })
   })
 
@@ -81,7 +81,7 @@ describe('通用面：有专属入口的动作不给批、给链接', () => {
     expect(err).toBeInstanceOf(ApprovalError)
     expect(err.code).toBe('forbidden_tier')
     expect(err.detail?.reason).toBe('dedicated_entry')
-    expect(err.humanReason).toContain('广告自动暂停待批准页')
+    expect(err.humanReason).toContain('广告门 ·「等你点头」')
   })
 
   it('没登记的动作 → 通用面照常能批，dedicatedEntry 为 null', () => {

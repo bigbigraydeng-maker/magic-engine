@@ -63,7 +63,7 @@ async function claimOne(workerId: string): Promise<Record<string, unknown> | nul
 }
 
 // ── 防误发三断言 + 视频 URL 校验 ──────────────────────────────────────────────
-async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
+export async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
   const { data: client } = await supabaseAdmin
     .from('clients')
     .select('factory_config')

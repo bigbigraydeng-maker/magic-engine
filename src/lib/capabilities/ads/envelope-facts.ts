@@ -343,6 +343,15 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     /**
      * 🔴 **熔断检查 —— 这是熔断真正生效的那一刀**（v2.2 §6.1）。
      *
+     * ⚠️ **但今天这一刀永远放行，因为没有人写 trip 行**（2026-10-18 查实，别误以为这道防线在工作）：
+     *    写 trip 的是韩信 step 1（设计稿 `2026-09-25-ads-impact-wp3-design-v1.md` §2.2 第 1 行
+     *    「#1/#2/#4 的 trip 在这里写」），韩信属 **WP3.2，尚未开工**（ROADMAP「WP3.2 链条」那条）。
+     *    现状：`circuit-detectors.ts` 五条判据零调用方、生产库 `ads_circuit_events` **0 行**、
+     *    因此下面的 `readCircuitState` 恒返回 `tripped: false`，`pm-todo/ads-circuit-items.ts` 恒为空。
+     *    **这不是这段代码的 bug**（读侧按 WP3.1b 的范围已交付且正确），是写侧还在 WP3.2。
+     *    WP3.2 落地后这段不需要改，自然开始真拦。工作量估算见
+     *    `docs/specs/2026-10-18-ads-agent-whole-design-and-code-gaps-v0.1.md` §6.5。
+     *
      *    熔断不写 `ad_strategy_configs`、不改任何状态列；它就是在这里让信封事实
      *    「读不到」，于是 Kernel 两层各拒一次：
      *      · authorize 层   → `deny(outside_autonomy_envelope)`，可恢复

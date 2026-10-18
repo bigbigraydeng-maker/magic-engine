@@ -5,6 +5,7 @@ import { enqueueRenderJob } from '@/lib/factory/render-queue'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { CREATOMATE_RENDER_REQUESTED_EVENT } from '@/lib/creatomate/events'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
+import { checkTopicAlignment } from '@/lib/factory/topic-alignment-store'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,6 +33,23 @@ export async function PATCH(
       : null
     if (!status) {
       return NextResponse.json({ error: "action 必须是 'confirm' / 'reject' / 'schedule'" }, { status: 400 })
+    }
+
+    // YouTube 卡在确认/进发布列时必须过选题对齐闸（主干新增）；Publer/LinkedIn 自动发布已删除。
+    const enforceTopicIfYouTube = async (platforms: string[] | null | undefined) => {
+      if (!(platforms ?? []).some((p) => ['youtube', 'youtube_shorts', 'youtube-shorts'].includes(p.toLowerCase()))) return null
+      const topic = await checkTopicAlignment(params.id, params.postId)
+      return topic.ready ? null : NextResponse.json(
+        { error: `选题对齐未通过：${topic.gaps.join('；')}`, gaps: topic.gaps }, { status: 409 })
+    }
+
+    if (body.action === 'confirm' || body.action === 'schedule') {
+      const { data: peek, error: peekErr } = await supabaseAdmin
+        .from('content_posts').select('platforms').eq('client_id', params.id).eq('id', params.postId).maybeSingle()
+      // fail closed：预读失败不能当成"不是 YouTube"往下走。
+      if (peekErr) throw peekErr
+      const topicBlocked = await enforceTopicIfYouTube(peek?.platforms)
+      if (topicBlocked) return topicBlocked
     }
 
     // 只在确认做片时才需要读客户配置——一次读拿两件事用：①这条视频指定的
