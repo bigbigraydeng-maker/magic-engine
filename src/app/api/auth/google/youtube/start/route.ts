@@ -1,34 +1,40 @@
 /**
- * GET /api/auth/google/youtube/start?clientId={meClientId}&channelId={UC...}
+ * GET /api/auth/google/youtube/start?clientId={meClientId}
  *
  * Starts the Google OAuth flow for YouTube publishing. The expected channel id
- * travels in the httpOnly state cookie; the callback refuses to store tokens
- * unless the authorised account manages exactly that channel.
+ * is read from client configuration (clients.youtube_channel_id), never from
+ * the request, and travels in the httpOnly state cookie; the callback refuses
+ * to store tokens unless the authorised account manages exactly that channel.
+ * Internal admins only.
  */
 
 import { type NextRequest, NextResponse } from 'next/server'
 import * as nodeCrypto from 'crypto'
-import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { getClientChannelId } from '@/lib/youtube-publish/store'
 import { YOUTUBE_PUBLISH_SCOPES } from '@/lib/youtube-publish/client'
 import {
   YOUTUBE_STATE_COOKIE,
   YOUTUBE_STATE_TTL_SECS,
-  isValidChannelId,
 } from '@/lib/youtube-publish/oauth'
 
 export async function GET(req: NextRequest) {
   const clientId = req.nextUrl.searchParams.get('clientId')
-  const channelId = req.nextUrl.searchParams.get('channelId')
   if (!clientId) {
     return NextResponse.json({ error: 'clientId query param is required' }, { status: 400 })
   }
-  if (!isValidChannelId(channelId)) {
-    return NextResponse.json({ error: 'channelId must be a YouTube channel id (UC...)' }, { status: 400 })
-  }
 
-  const access = await requireDashboardClientAccess(clientId)
+  const access = await requireGlobalAdmin()
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
+  const channelId = await getClientChannelId(clientId)
+  if (!channelId) {
+    return NextResponse.json(
+      { error: 'This client has no YouTube channel id configured (Settings > Connect)' },
+      { status: 409 },
+    )
   }
 
   const googleClientId = process.env.GOOGLE_CLIENT_ID

@@ -26,6 +26,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { FACTORY_CONFIG_SECTION } from '@/lib/factory/config-link'
 import { ClientStatusPanel } from './_components/ClientStatusPanel'
+import { YoutubePanel } from './_components/YoutubePanel'
 import { GbpPanel } from './_components/GbpPanel'
 import { GbpLocationPanel } from './_components/GbpLocationPanel'
 import { GscPanel } from './_components/GscPanel'
@@ -116,6 +117,9 @@ function TabBody({
             <a href={`/api/auth/tiktok/connect?client_id=${encodeURIComponent(clientId)}`} className="inline-block rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
               连接 TikTok
             </a>
+          </SettingsSection>
+          <SettingsSection icon="▶️" title="YouTube（频道与授权）">
+            <YoutubePanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）" defaultOpen={callbacks.mail}>
             <MailboxPanel clientId={clientId} />
