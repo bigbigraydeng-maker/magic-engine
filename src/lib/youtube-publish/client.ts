@@ -16,6 +16,9 @@ const UPLOAD_API = 'https://www.googleapis.com/upload/youtube/v3'
 export const YOUTUBE_PUBLISH_SCOPES = [
   'https://www.googleapis.com/auth/youtube.upload',
   'https://www.googleapis.com/auth/youtube.readonly',
+  // videos.update (change visibility) accepts youtube, youtube.force-ssl or youtubepartner
+  // (developers.google.com/youtube/v3/docs/videos/update). force-ssl is the narrowest of the three.
+  'https://www.googleapis.com/auth/youtube.force-ssl',
 ]
 
 export type StagingPrivacy = 'private' | 'unlisted'

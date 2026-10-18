@@ -12,7 +12,7 @@ const base = {
   accessToken: 'a',
   refreshToken: 'r',
   expiresInSec: 3600,
-  scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+  scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/youtube.force-ssl',
 }
 
 function channelsResponse(id: string): Response {
@@ -49,6 +49,16 @@ describe('persistYoutubeConnection', () => {
     const input = { ...base, scope: 'https://www.googleapis.com/auth/youtube.readonly' }
     await expect(persistYoutubeConnection(input, f)).resolves.toEqual({ ok: false, reason: 'scope_missing' })
     expect(f).not.toHaveBeenCalled()
+    expect(mocks.upsertConnection).not.toHaveBeenCalled()
+  })
+
+  it('stores nothing when the user unticked the change-visibility permission', async () => {
+    const f = vi.fn()
+    const input = {
+      ...base,
+      scope: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+    }
+    await expect(persistYoutubeConnection(input, f)).resolves.toEqual({ ok: false, reason: 'scope_missing' })
     expect(mocks.upsertConnection).not.toHaveBeenCalled()
   })
 
