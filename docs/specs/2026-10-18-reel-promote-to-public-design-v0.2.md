@@ -22,12 +22,12 @@
    - **流量记录必须恰好 1 行**（按 `work_order_id` + `client_id`），0 行或多行都拒绝。
    - `expect_brand` 为空 → 拒绝；Meta 不返回视频 `from` → 拒绝；工单无 `master_brief_id` → 拒绝（三处原代码是 fail-open，实现必须改成缺失就拒）。
 3. **读回 Meta 并扫红线（狄仁杰 H1）**：读回草稿视频的 `description`、`published` 状态与真实发布时间。红线闸 `scanPublishCaption` **扫读回的 Meta 实际文案**（先剥零宽字符、NFKC 归一化、去标点再匹配），同时与 `buildReelPostCaption(brief.copy)` 比对，不一致 409「草稿文案与库不一致」。读回文案本身可被有主页权限者改，所以指纹（第 4 步）把它纳入，确认时再读一次比对。
-4. **预览（`confirm:false`）**：返回客户、页面、视频 id、读回文案、首评文本、清单通过时间，**服务端生成一次性 `preview_token`**。令牌只存哈希，存放在流量记录行 `payload.promote_preview`（不新建表）：`{token_hash, admin_email, work_order_id, fingerprint, expires_at(5 分钟), used:false}`；绑定管理员邮箱，别的管理员拿不到、用不了。指纹 = hash(video_id + 读回文案 + 首评文本 + `review_ref.approved_at` + 工单 `updated_at`)。预览不写任何业务字段（只写这个预览记录）。
+4. **预览（`confirm:false`）**：返回客户、页面、视频 id、读回文案、首评文本、清单通过时间，**服务端生成一次性 `preview_token`**。令牌只存哈希，存放在流量记录行 `payload.promote_preview`（不新建表；写入同样在第 3 节的互斥锁内做读-改-写，避免两个管理员同时预览互相覆盖，被覆盖者重新预览即可）：`{token_hash, admin_email, work_order_id, fingerprint, expires_at(5 分钟), used:false}`；绑定管理员邮箱，别的管理员拿不到、用不了。指纹 = hash(video_id + 读回文案 + 首评文本 + `review_ref.approved_at`)（子牙复审：不放工单 `updated_at`，审片预算修改等无关写入会刷新它造成误报 409；`updated_at` 只留给互斥锁）。预览不写任何业务字段（只写这个预览记录）。
 5. **确认（`confirm:true`）**：校验 `preview_token`（哈希匹配、邮箱一致、未过期、未用过），**重读工单、流量记录与 Meta 并重算指纹**，不一致 409。通过后抢占授权（第 3 节）并把令牌标 `used`。
 6. 若 Meta 回读已是公开（人手已转过）→ 不调转公开，进「只同步」分支（第 5 节）。否则调 `promoteReelToPublished({target, videoId})`，复用 `resolveTarget`（需从 `publish-worker.ts:67` 导出，实现 PR 里说明是对既有文件的小改动）。
 7. **写库（顺序固定，三审 H3/M3）**：
    1. 先写 `flywheel_actions`：按 `id + client_id` 更新并**校验命中行数恰好 1**，否则中止进 `db_pending`；字段 `video_state`、`published_at`、`permalink`、`first_comment_id`。**必须是读-改-写合并，不得整体覆盖 payload**（以免冲掉授权回执和 `promote_preview`）。
-   2. 再写工单 `published_ref`：`video_state='PUBLISHED'`、`published_at`（与上一步**同一个值**）、`permalink`、`ig_crosspost_blocked:true`（第 6 节），清掉旧 `event_ids`；**用 `updated_at` 乐观锁**，不一致则重读重试一次，仍不一致报错。
+   2. 再写工单 `published_ref`：`video_state='PUBLISHED'`、`published_at`（与上一步**同一个值**）、`permalink`、`ig_crosspost_blocked:true`（第 6 节），清掉旧 `event_ids`；仍受第 3 节工单互斥锁保护（写入时带 `.eq('updated_at', 持锁时的值)`）。
    理由：补发任务（每小时 05 分）只看工单；先写流量记录再写工单，补发任务看到 PUBLISHED 时流量记录一定已对齐，事件不会被适配器以 `not_published` 拒绝（拒绝后不重试，且事件 id 24 小时内去重，测量会永久无声丢失）。
 8. 补首评：`facebookReelAdapter.ensureFirstComment({target, videoId, idempotencyTag: woId, message})`，文案 `buildReelFirstComment(brief.copy.endcard, id)`；**重入时第 8 步永远执行**（自带幂等）。失败不回滚公开，回执 `first_comment_status='failed'` + 待办。
 9. 信号：**交给现有每小时补发任务发**（它筛 `video_state='PUBLISHED'` 且无 `event_ids`），动作本身不直接发，避免与它抢写 `published_ref`（魏征 M3）。如要更快，实现可把 `emitReelPublishedEvent` 改成条件更新后在动作里调，但必须保持 7→9 的先后。
@@ -38,7 +38,8 @@
 ## 3. 授权怎么按条记录（不新建表；三审改位置）
 - **只存一份，放流量记录**：`flywheel_actions.payload.promote_authorization`（该行只有发布/转公开流程写，冲突面小）。工单侧不复制第二份授权数据（避免两份不一致、被覆盖），`published_ref` 只带 `promote_request_id` 一个引用。**不放 `review_ref`**：它是审片回执，`publish-worker.ts:190-196` 每次发布前重验，且 `review-apply.ts`、`review-sync.ts`、`revive/route.ts` 都是读后整体写回，会互相覆盖。
 - 内容：`{authorized_by, authorized_at, work_order_id, video_id, page_id, fingerprint, request_id, status: claimed|consumed|failed|meta_published_db_pending, claimed_at}`。
-- **抢占不用 jsonb 子键条件**（PostgREST 无法原子 `jsonb_set`）：读行取 `updated_at`，写时 `.eq('updated_at', 旧值)` 并 `.select()`，命中 0 行→409「已被处理」。同一套做法在 `instagram-crosspost-store.ts` 的 `writeOutput` 已有先例，不需迁移。**风险**：`writeThreeBooks` 等写手若整体覆盖 payload 会冲掉回执——实现必须只对本行做合并式更新，并加测试；`flywheel_actions.updated_at` 是否存在并被刷新：**未验证，实现者第一件事先核**，不满足就报告，不自行迁移。
+- **互斥锁放在工单上，不放流量记录（子牙复审高危）**：`flywheel_actions` 建表只有 `executed_at`/`created_at`，**没有 `updated_at` 列**（`20260517000001_flywheel_data_skeleton.sql:18-30`），后续迁移也未加，无法做乐观锁。改用 `content_work_orders.updated_at`（NOT NULL，各写手自己刷新，无数据库触发器；`instagram-crosspost-store.ts:137-141` 已有同款先例）：先对工单做一次 CAS 触碰——`update {updated_at: 新值}` 加 `.eq('updated_at', 旧值)` 再 `.select()`，命中 0 行→409「已被处理」，命中才继续。
+- 授权回执和 `promote_preview` 仍存 `flywheel_actions.payload`，在这把工单互斥锁内做**合并式读-改-写**（不得整体覆盖 payload）。前提成立：`factory_reel_publish` 行目前只被 `publish-worker.ts:348-367` 插入一次，promote 是该行 payload 的唯一后续写手；实现仍须加测试，防止以后别的写手冲掉回执。不需要迁移，**新表也不做**。
 - **租约**：`claimed` 超过 5 分钟视为过期，可重新抢占，但**重新抢占只能走「先读回 Meta 状态」分支**，不能盲发；若读回仍是草稿则按正常流程继续（授权已重新校验令牌），已公开则只同步。`failed` 与 `meta_published_db_pending` 均可重入。
 - 若乐观锁不可行，才考虑数据库函数（需迁移，A 级，另报）。**新表仍不做。**
 
@@ -73,14 +74,14 @@
 - 数据回滚：授权回执与对齐字段是同一行的 jsonb 合并更新；回滚前先导出旧值清单留档，按条还原。
 
 ## 9. 验证与当场试跑（实现 PR 必须）
-- 单元测试：演示账号被拒；不在 `ADMIN_EMAILS` 名单被拒；跳过预览直接 confirm 被拒；令牌过期/复用/换管理员被拒；指纹不一致 409；预览后文案被改 409；Meta 草稿文案含红线词被拒（含零宽字符绕过用例）；并发乐观锁只一个成功；租约过期可恢复且只走读回分支；已公开跳过 Meta 且不用 `now`；流量记录 0 行/多行被拒；`expect_brand`/`from`/`master_brief_id` 缺失被拒；页面三方 id 不一致被拒；写库顺序（先流量记录后工单）；其他写手不冲掉授权回执；清 `event_ids` 后补发任务补发；不引用 instagram 模块且不进 IG 候选，`recordPublished` 不清除 `ig_crosspost_blocked`；失败原因脱敏。
+- 单元测试：演示账号被拒；不在 `ADMIN_EMAILS` 名单被拒；跳过预览直接 confirm 被拒；令牌过期/复用/换管理员被拒；指纹不一致 409；预览后文案被改 409；Meta 草稿文案含红线词被拒（含零宽字符绕过用例）；并发 CAS 工单锁只一个成功；租约过期可恢复且只走读回分支；已公开跳过 Meta 且不用 `now`；流量记录 0 行/多行被拒；`expect_brand`/`from`/`master_brief_id` 缺失被拒；页面三方 id 不一致被拒；写库顺序（先流量记录后工单）；其他写手不冲掉授权回执；清 `event_ids` 后补发任务补发；不引用 instagram 模块且不进 IG 候选，`recordPublished` 与 `emitReelPublishedEvent` 写回后 `ig_crosspost_blocked` 仍在；失败原因脱敏。
 - 当场试跑：用**测试页面/测试视频的草稿**（不是客户页面）走完整链路，看到工单与流量记录对齐、补发任务发信号、适配器登记 `social.publish_post` 并展开 T+4/T+72；拿不到测试页面则写明原因并开台账卡 `verify_by` = 首条真转公开当天。**不得借试跑公开客户真实 Reel。**
 - 写代码走 DeepSeek（CLAUDE.md §5）；Reuse Statement：动作平台共享，适用于任何配了 `publish_target` 的客户，实现代码里不出现客户名或工单 id。
 
 ## 10. 三审意见处理对照
 | 来源 | 意见 | 本稿处理 |
 |---|---|---|
-| 子牙 H1 / 魏征 M1 / 狄仁杰 M2 | 授权抢占不原子、放 review_ref 会被覆盖 | 第 3 节：只存一份在流量记录 + `updated_at` 乐观锁 + 租约 |
+| 子牙 H1 / 魏征 M1 / 狄仁杰 M2 | 授权抢占不原子、放 review_ref 会被覆盖 | 第 3 节：只存一份在流量记录；**互斥锁改用工单 `updated_at` CAS（子牙复审：流量记录表无该列）** + 租约 |
 | 三人 | 转公开触发 IG 跟发 | 第 6 节：跳过标记 + 留证据 + 测试 |
 | 子牙 H3 / 魏征 M3 / 狄仁杰 M3 | 写库顺序与补发任务抢写，事件被拒后永久丢 | 第 2 节第 7 步：先流量记录后工单，同一 `published_at`，信号交补发任务 |
 | 魏征 H2 / 狄仁杰 H2 同类 | 已公开分支 `published_at` 用 `now` | 第 5 节 |
@@ -98,4 +99,4 @@
 **复审点**：子牙 + 魏征 + 狄仁杰各复审一轮，只看上表是否闭合、有无新漏洞；通过后才派 DeepSeek 写代码。
 
 ## 11. 没验证到的
-CTS 是否在 `FACTORY_INSTAGRAM_*` 名单（Render 变量读不到）；Meta 能否读到视频真实发布时间（`created_time` vs `updated_time`）；`flywheel_actions.updated_at` 是否存在且被刷新；`flywheel_actions.payload` 是否原本有 `first_comment_id`；`recordPublished` 等写手是否会清除 `ig_crosspost_blocked` 或整体覆盖 payload；存量工单现状（沿用 10-18 实查）；74 号实际用哪个页面（已覆盖两处）。
+CTS 是否在 `FACTORY_INSTAGRAM_*` 名单（Render 变量读不到）；Meta 能否读到视频真实发布时间（`created_time` vs `updated_time`）；工单 `updated_at` 在所有写手处是否确实刷新（已有 IG 先例，实现者全量 grep 核对）；`flywheel_actions.payload` 是否原本有 `first_comment_id`；`recordPublished` 等写手是否会清除 `ig_crosspost_blocked` 或整体覆盖 payload；存量工单现状（沿用 10-18 实查）；74 号实际用哪个页面（已覆盖两处）。
