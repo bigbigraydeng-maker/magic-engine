@@ -19,6 +19,8 @@ export type GateStatus = 'pass' | 'fail' | 'unknown'
 
 export interface GateResult {
   id: PublishGateId
+  /** Gate evidence belongs to one video; evidence for another video never counts. */
+  videoId: string
   status: GateStatus
   /** Where the evidence lives (url / receipt id / doc path). Required for pass. */
   evidence?: string
@@ -29,15 +31,18 @@ export interface GateVerdict {
   blocking: Array<{ id: PublishGateId; reason: string }>
 }
 
-export function evaluatePublishGates(results: GateResult[]): GateVerdict {
-  const byId = new Map(results.map((r) => [r.id, r]))
+export function evaluatePublishGates(results: GateResult[], videoId: string): GateVerdict {
   const blocking: GateVerdict['blocking'] = []
   for (const id of PUBLISH_GATE_IDS) {
-    const r = byId.get(id)
+    const entries = results.filter((r) => r.id === id)
+    const r = entries[0]
     if (!r) blocking.push({ id, reason: 'missing' })
-    else if (r.status === 'fail') blocking.push({ id, reason: 'fail' })
-    else if (r.status === 'unknown') blocking.push({ id, reason: 'unknown' })
-    else if (!r.evidence?.trim()) blocking.push({ id, reason: 'pass without evidence' })
+    else if (entries.length > 1) blocking.push({ id, reason: 'duplicate entries' })
+    else if (r.videoId !== videoId) blocking.push({ id, reason: 'evidence is for another video' })
+    else if (r.status !== 'pass') blocking.push({ id, reason: r.status === 'fail' ? 'fail' : 'unknown' })
+    else if (typeof r.evidence !== 'string' || !r.evidence.trim()) {
+      blocking.push({ id, reason: 'pass without evidence' })
+    }
   }
   return { canGoPublic: blocking.length === 0, blocking }
 }

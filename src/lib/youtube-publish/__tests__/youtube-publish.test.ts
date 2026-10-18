@@ -102,21 +102,29 @@ describe('readBackVideo', () => {
 })
 
 describe('evaluatePublishGates', () => {
-  const allPass: GateResult[] = PUBLISH_GATE_IDS.map((id) => ({ id, status: 'pass', evidence: 'doc:x' }))
+  const allPass: GateResult[] = PUBLISH_GATE_IDS.map((id) => ({ id, videoId: 'v1', status: 'pass', evidence: 'doc:x' }))
 
   it('allows only when all seven gates pass with evidence', () => {
-    expect(evaluatePublishGates(allPass).canGoPublic).toBe(true)
+    expect(evaluatePublishGates(allPass, 'v1').canGoPublic).toBe(true)
   })
 
   it('blocks on fail, unknown, missing and evidence-less pass', () => {
     const results: GateResult[] = [
-      { id: PUBLISH_GATE_IDS[0], status: 'fail', evidence: 'x' },
-      { id: PUBLISH_GATE_IDS[1], status: 'unknown' },
-      { id: PUBLISH_GATE_IDS[2], status: 'pass' },
+      { id: PUBLISH_GATE_IDS[0], videoId: 'v1', status: 'fail', evidence: 'x' },
+      { id: PUBLISH_GATE_IDS[1], videoId: 'v1', status: 'unknown' },
+      { id: PUBLISH_GATE_IDS[2], videoId: 'v1', status: 'pass' },
       ...allPass.slice(4),
     ]
-    const v = evaluatePublishGates(results)
+    const v = evaluatePublishGates(results, 'v1')
     expect(v.canGoPublic).toBe(false)
     expect(v.blocking.map((b) => b.reason).sort()).toEqual(['fail', 'missing', 'pass without evidence', 'unknown'])
+  })
+
+  it('blocks unexpected statuses, duplicates and evidence for another video', () => {
+    const odd = { ...allPass[0], status: 'skipped' as never }
+    expect(evaluatePublishGates([odd, ...allPass.slice(1)], 'v1').blocking[0].reason).toBe('unknown')
+    const dup = [{ ...allPass[0], status: 'fail' as const }, ...allPass]
+    expect(evaluatePublishGates(dup, 'v1').blocking[0].reason).toBe('duplicate entries')
+    expect(evaluatePublishGates(allPass, 'other').blocking).toHaveLength(PUBLISH_GATE_IDS.length)
   })
 })

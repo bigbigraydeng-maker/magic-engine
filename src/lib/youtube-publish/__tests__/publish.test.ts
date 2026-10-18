@@ -4,14 +4,14 @@ import { publishStagedVideo, type PublishAuthorization, type PublishInput } from
 
 const CHANNEL = 'UCmJJDRx88y0IuZXJJQuGNFw'
 const NOW = Date.parse('2026-10-18T01:00:00Z')
-const allPass: GateResult[] = PUBLISH_GATE_IDS.map((id) => ({ id, status: 'pass', evidence: 'doc:x' }))
+const allPass: GateResult[] = PUBLISH_GATE_IDS.map((id) => ({ id, videoId: 'v1', status: 'pass', evidence: 'doc:x' }))
 
 function auth(over: Partial<PublishAuthorization> = {}): PublishAuthorization {
-  return { videoId: 'v1', channelId: CHANNEL, grantedBy: 'pm', grantedAt: '2026-10-18T00:50:00Z', ...over }
+  return { videoId: 'v1', channelId: CHANNEL, grantedBy: 'pm', nonce: 'n-1', grantedAt: '2026-10-18T00:50:00Z', ...over }
 }
 
 function input(over: Partial<PublishInput> = {}): PublishInput {
-  return { accessToken: 't', channelId: CHANNEL, videoId: 'v1', gates: allPass, authorization: auth(), ...over }
+  return { accessToken: 't', clientId: 'client-1', channelId: CHANNEL, videoId: 'v1', gates: allPass, authorization: auth(), ...over }
 }
 
 function json(body: unknown): Response {
@@ -25,7 +25,7 @@ function videoOk(privacy = 'private', thumb: string | null = 'https://t/x.jpg', 
       {
         id: 'v1',
         snippet: { channelId, title: 'T', thumbnails: thumb ? { high: { url: thumb } } : {} },
-        status: { privacyStatus: privacy },
+        status: { privacyStatus: privacy, license: 'creativeCommon', embeddable: false, publishAt: '2027-01-01T00:00:00Z' },
       },
     ],
   })
@@ -38,6 +38,7 @@ describe('publishStagedVideo blocks (no network write)', () => {
     ['authorization for another channel', { authorization: auth({ channelId: 'UCother' }) }],
     ['stale authorization', { authorization: auth({ grantedAt: '2026-10-18T00:00:00Z' }) }],
     ['future-dated authorization', { authorization: auth({ grantedAt: '2026-10-18T02:00:00Z' }) }],
+    ['authorization without nonce', { authorization: auth({ nonce: ' ' }) }],
     ['garbage authorization time', { authorization: auth({ grantedAt: 'nope' }) }],
   ])('%s', async (_n, over) => {
     const f = vi.fn()
@@ -66,6 +67,7 @@ describe('publishStagedVideo blocks (no network write)', () => {
     ['no thumbnail', () => videoOk('private', null), 'thumbnail_missing'],
     ['video on another channel', () => videoOk('private', 'x', 'UCother'), 'video_on_other_channel'],
     ['video missing', () => json({ items: [] }), 'video_not_found'],
+    ['status missing', () => json({ items: [{ id: 'v1', snippet: { channelId: CHANNEL, thumbnails: { high: { url: 'x' } } } }] }), 'status_unknown'],
   ])('blocks when staged video is %s', async (_n, video, reason) => {
     const f = vi.fn().mockResolvedValueOnce(channelsOk()).mockResolvedValueOnce(video())
     const r = await publishStagedVideo(input(), f, () => NOW)
@@ -78,7 +80,7 @@ describe('publishStagedVideo ok paths', () => {
   it('dry run (default) validates everything and writes nothing', async () => {
     const f = vi.fn().mockResolvedValueOnce(channelsOk()).mockResolvedValueOnce(videoOk())
     const r = await publishStagedVideo(input(), f, () => NOW)
-    expect(r).toMatchObject({ status: 'dry_run_ok', noPublish: true, authorizedBy: 'pm' })
+    expect(r).toMatchObject({ status: 'dry_run_ok', noPublish: true, authorizedBy: 'pm', authorizationNonce: 'n-1' })
     expect(f.mock.calls.every(([, init]) => (init?.method ?? 'GET') === 'GET')).toBe(true)
   })
 
@@ -95,13 +97,40 @@ describe('publishStagedVideo ok paths', () => {
     expect(JSON.parse(put?.[1].body as string).status.privacyStatus).toBe('public')
   })
 
-  it('execute throws when read-back is not public', async () => {
+  it('execute keeps existing status fields and drops only the schedule', async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(channelsOk())
+      .mockResolvedValueOnce(videoOk())
+      .mockResolvedValueOnce(json({}))
+      .mockResolvedValueOnce(videoOk('public'))
+    await publishStagedVideo(input({ mode: 'execute' }), f, () => NOW)
+    const put = f.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(JSON.parse(put?.[1].body as string).status).toEqual({
+      privacyStatus: 'public',
+      license: 'creativeCommon',
+      embeddable: false,
+    })
+  })
+
+  it('execute returns a failed receipt with noPublish=true when the update is rejected', async () => {
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(channelsOk())
+      .mockResolvedValueOnce(videoOk())
+      .mockResolvedValueOnce(new Response('insufficient scope', { status: 403 }))
+    const r = await publishStagedVideo(input({ mode: 'execute' }), f, () => NOW)
+    expect(r).toMatchObject({ status: 'failed', reason: 'update_failed', noPublish: true, clientId: 'client-1' })
+  })
+
+  it('execute returns failed with noPublish=false when the write is accepted but read-back is not public', async () => {
     const f = vi
       .fn()
       .mockResolvedValueOnce(channelsOk())
       .mockResolvedValueOnce(videoOk())
       .mockResolvedValueOnce(json({}))
       .mockResolvedValueOnce(videoOk('private'))
-    await expect(publishStagedVideo(input({ mode: 'execute' }), f, () => NOW)).rejects.toThrow(/read-back/)
+    const r = await publishStagedVideo(input({ mode: 'execute' }), f, () => NOW)
+    expect(r).toMatchObject({ status: 'failed', reason: 'status_unknown', noPublish: false })
   })
 })
