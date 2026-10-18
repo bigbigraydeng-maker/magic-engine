@@ -211,6 +211,40 @@ describe('🔴 单账户回落：跟真正的授权判据同源（envelope-facts
     const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: 4_000 }]
     expect(resolveProbeAccountCapCents(rows, 'act_other', clientCap)).toBeNull()
   })
+
+  it('🔴 一行都没登记（legacy 客户）→ 回落成客户总闸，跟真闸第一层回落一致', () => {
+    // envelope-facts.ts:113-123：零行时改用 clients.meta_ad_account_id 建账户、上限 = 客户总闸。
+    // 探针的账户清单也走同一条回落，所以这里不回落就会对 legacy 客户报假阻塞（子牙/魏征复审）。
+    expect(resolveProbeAccountCapCents([], 'act_legacy', clientCap)).toBe(clientCap)
+  })
+
+  it('🔴 清单里只有一个账户、但问的是清单外的账户 → null，不许拿总闸顶', () => {
+    // 这一条是「低报」风险：比假阻塞更危险。真闸对清单外账户直接 unavailable。
+    const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    expect(resolveProbeAccountCapCents(rows, 'act_other', clientCap)).toBeNull()
+  })
+
+  it.each([0, -1, 1.5, Number.NaN])('上限是 %s 这种无效值 → 当没有上限，不拿它去算硬顶', (bad) => {
+    // 真闸要求安全整数且 > 0（envelope-facts.ts:122-124）。0 会让所有倍数恒判超限。
+    const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: bad }]
+    expect(resolveProbeAccountCapCents(rows, 'act_1', clientCap)).toBe(clientCap)
+  })
+
+  it('客户总闸是 0 这种无效值 → 回落也不生效，返回 null', () => {
+    const rows = [{ ad_account_id: 'act_1', daily_budget_cap_cents: null }]
+    expect(resolveProbeAccountCapCents(rows, 'act_1', 0)).toBeNull()
+  })
+
+  it('🔴 接线钉死：probeClientCircuit 真的把这个函数的结果传给 probeAccount', () => {
+    // 为什么用扫源码的方式：probeClientCircuit 的账户清单来自 supabaseAdmin 单例，
+    // 替身注入不进去，唯一那条用例走 observe 分支提前返回，到不了调用点（魏征复审指出）。
+    // 所以「判据对不对」有用例钉，「有没有接上」只能钉源码。
+    const probeSource = readFileSync(PROBE_FILE, 'utf8')
+    const callSite = /probeAccount\(\s*sb,\s*clientId,\s*account\.adAccountId,\s*resolveProbeAccountCapCents\(/
+    expect(probeSource).toMatch(callSite)
+    // 旧的那份口径（caps Map）必须已经删掉，不许留第二处
+    expect(probeSource).not.toContain('caps.get(')
+  })
 })
 
 describe('候选倍数清单', () => {

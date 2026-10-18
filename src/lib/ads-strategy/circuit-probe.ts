@@ -331,30 +331,34 @@ async function probeAccount(
   }
 }
 
-/**
- * 观察一个客户这一天的熔断判据。**只读，不写任何表。**
- *
- * 只观察 `bounded_auto` 的客户：`observe` 的客户本来就不会自动动手，
- * 给它们记结论只是噪音（复审建议）。跳过的如实记原因，不静默忽略。
- */
 export interface RegisteredCapRow {
   readonly ad_account_id: string
   readonly daily_budget_cap_cents: number | null
 }
 
+/** 真闸认的「有效上限」：安全整数且大于 0，否则一律当没有（`envelope-facts.ts:122-124`）。 */
+function usableCapCents(value: number | null): number | null {
+  return value !== null && Number.isSafeInteger(value) && value > 0 ? value : null
+}
+
 /**
  * 这个账户该按多少钱当日上限看 —— 🔴 **照抄真正的授权判据**
- * （`src/lib/capabilities/ads/envelope-facts.ts` 里的 `perAccountCaps`）：
+ * （`src/lib/capabilities/ads/envelope-facts.ts` 的 `perAccountCaps` 那一段，
+ * 连它上面两层回落一起抄，三条都要在）：
  *
- *   · 客户只登记了 **1 个**账户、且它没填自己的上限 → 回落成客户总闸
- *   · 其余情况（多账户，或这个账户填了上限）→ 原样，不回落
+ *   1. 账户清单**一行都没有** → 真闸改用 `clients.meta_ad_account_id` 建一个账户、
+ *      上限直接等于客户总闸（`envelope-facts.ts:113-123`）。探针的账户清单也走同一条
+ *      回落（`client-ad-accounts.ts:66-68`），所以这里也要回落，否则 legacy 客户照旧报假阻塞
+ *   2. 这个账户**不在清单里** → 真闸是 `unavailable`（`envelope-facts.ts:127`），
+ *      这里如实记「没有可用上限」。**绝不能拿别人的上限或客户总闸顶**
+ *   3. 清单里只有这 **1 个**账户、且它没填自己的上限 → 回落成客户总闸；
+ *      多账户不回落（缺口要暴露出来）
  *
- * 为什么必须同源：不做这个回落，探针会对「单账户 + 没填上限」的客户报
- * 「没填上限」，而真正的闸其实回落成客户总闸、照常放行 —— 报的是**假阻塞**
- * （2026-10-19 实跑在一个真实客户上踩到过）。
+ * 为什么必须同源：不做回落，探针会对这些客户报「没填上限」，而真正的闸其实有数、
+ * 照常放行 —— 报的是**假阻塞**（2026-10-19 实跑在一个真实客户上踩到过）。
+ * 反过来，回落得比真闸宽（比如给清单外的账户发一个上限）就是**低报**，更危险。
  *
- * ⚠️ **改这里就要同时核对那边**：判据变了（比如改成多账户也回落），这里必须
- *    跟着改。本轮不把两边抽成公共函数，那要动判据文件、属 A 级。
+ * ⚠️ **改这里就要同时核对那边**。本轮不把两边抽成公共函数，那要动判据文件、属 A 级。
  *
  * 单独导出是为了能被变异验证钉住：`probeClientCircuit` 内部的账户清单来自
  * `supabaseAdmin` 单例，替身注入不进去，在它上面写的用例会变成空跑也绿。
@@ -364,12 +368,24 @@ export function resolveProbeAccountCapCents(
   adAccountId: string,
   clientCapCents: number | null,
 ): number | null {
-  const own = registeredRows.find((row) => row.ad_account_id === adAccountId)?.daily_budget_cap_cents ?? null
+  const clientCap = usableCapCents(clientCapCents)
+  // 回落 1：一行都没登记（legacy 单账户）
+  if (registeredRows.length === 0) return clientCap
+  const row = registeredRows.find((r) => r.ad_account_id === adAccountId)
+  // 回落 2：不在清单里 —— 不顶，如实记没有
+  if (!row) return null
+  const own = usableCapCents(row.daily_budget_cap_cents)
   if (own !== null) return own
-  const singleAccountNoCap = registeredRows.length === 1 && registeredRows[0]?.daily_budget_cap_cents == null
-  return singleAccountNoCap ? clientCapCents : null
+  // 回落 3：只有这一个账户且它没填
+  return registeredRows.length === 1 ? clientCap : null
 }
 
+/**
+ * 观察一个客户这一天的熔断判据。**只读，不写任何表。**
+ *
+ * 只观察 `bounded_auto` 的客户：`observe` 的客户本来就不会自动动手，
+ * 给它们记结论只是噪音（复审建议）。跳过的如实记原因，不静默忽略。
+ */
 export async function probeClientCircuit(
   sb: SupabaseClient,
   args: {
@@ -408,17 +424,13 @@ export async function probeClientCircuit(
 
   /**
    * 每账户的日上限要自己读 —— `AccountSpendFact` 里**没有**这一列
-   * （它只装花费事实）。取不到就当「未配上限」那一类，不当 0。
+   * （它只装花费事实）。怎么算这个上限全部交给 `resolveProbeAccountCapCents`，
+   * 这里**不要**再留第二份口径，免得将来两处分家。
    */
-  const caps = new Map<string, number | null>()
   const { data: capRows } = await sb
     .from('client_meta_ad_accounts')
     .select('ad_account_id, daily_budget_cap_cents')
     .eq('client_id', clientId)
-  for (const row of (capRows ?? []) as Array<{ ad_account_id: string; daily_budget_cap_cents: number | null }>) {
-    caps.set(row.ad_account_id, row.daily_budget_cap_cents)
-  }
-
   const registeredCapRows = (capRows ?? []) as readonly RegisteredCapRow[]
 
   const accounts: AccountProbe[] = []
