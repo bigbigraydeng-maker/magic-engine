@@ -1,4 +1,4 @@
-# 网站表单咨询邮件 → CRM 客人（定稿 v1.0：第一期已上线，第二期待样本）
+# 网站表单咨询邮件 → CRM 客人（v1.1：第一期已上线，第二期 Tour enquiry 在 PR 2923）
 
 状态：设计稿，只写文档，未写代码。风险级别：**B**（碰 CRM 入库和客人个人信息，按规矩视同两审）。
 起因（2026-10-19）：PM 要「info 邮箱里最新的 Enquiry 同步进 CRM」；CTS 员工提交测试表单（姓名 Baker）后 CRM 里看不到。查下来不是同步慢，是系统按规则把表单通知邮件当「公司内部邮件」跳过了。统筹已定为 P0。
@@ -146,9 +146,12 @@ B 级（碰 CRM 入库与客人个人信息，视同两审）。流程：本稿 
 - **已知并接受的风险**：别人在公开表单里填了老客人的邮箱，咨询会挂到那位老客人名下并刷新其最后出现时间（不改姓名、不合并）；员工在该会话里回信前要看一眼收件人。是否加「表单未验证」标记，待 PM 另定。
 - **历史回补**（未执行，等 PM 点头）：近 45 天 12 封表单通知全部解析成功；员工测试 1（不补）、邮箱已在 CRM 的 3（只补 web_form 触点）、需新建联系人 8；另有 16 个没挂联系人的 Contact form / Tour enquiry 老会话要另判。写库前出样例名单（不含内容）给 PM。
 
-## 十二、第二期：Tour enquiry（团页表单）—— 待样本，不现在做
+## 十二、第二期：Tour enquiry（团页表单）—— PR 2923（2026-10-20）
 
-- **为什么没做**：第一期只有 Contact form 的真实样本。`Tour enquiry:`（团页/活动页表单）的发件人、正文格式、Reply-To 是否同 Contact form **一律没验证**，不假设同格式。CRM 里这类邮件会话 52 个，其中 7 个没挂联系人（员工回复过、没人档案）。
-- **第二期的步骤**：①拿到一封 `Tour enquiry:` 通知的真实样本（只读从 info@ 取，只看结构，不打印其它客人内容）；②确认发件人是否同为「本邮箱自发自收」、认证头、Reply-To、标记行、字段标签；③在 `mail-form-notice.ts` 里按标记行分派解析（Contact form / Tour enquiry 各一个解析函数，认证与 Reply-To 校验共用）；主题前缀加 `tour enquiry:`；④同样的限流、回执、测试；⑤再决定是否回补那 7 个孤儿会话。
-- **与官网窗口的约定**：官网要在通知邮件里新增 fbclid 等字段时，请**追加成新的一行「Label<tab>值」放在「Message」行之前**，不改已有标签名和顺序；解析只读固定标签、忽略未知标签，不会被打断。之后要把 fbclid 带进客人的广告来源，另开小 PR 在 `mirrorWebFormLead` 里加字段（字段名由官网窗口定，到时互相引用 PR 号）。
-- **Tailor-made enquiry**：这类走 `/api/tailor-made-enquiry`，14 个会话里发件人本身就是客人邮箱，已经能正常进，不在本方案范围。
+- **为什么必须做**：广告落地页是官网团详情页，页面上的表单走 TourEnquiry → `/api/tour-enquiry`，邮件主题 `Tour enquiry: <团名> — <姓名>`。第一期只认 `Contact form`，所以**广告来的真实线索在 CRM 里仍然收不进**。
+- **真实结构（只读核实，2026-10-20）**：近 45 天 32 封，全部「info@ 发给 info@」，发信服务 Resend，Reply-To 恰好一个，dmarc=pass、dkim=pass、选择器 resend；标记行「New tour enquiry — CTS website」；标签 Name / Email / Phone / Tour / URL / Source / Ad source / Submitted（官网 PR 252 新增 Facebook click ID）；有 Message 行。所以认证与 Reply-To 校验与第一期**完全通用**。
+- **改动**：初筛主题前缀加 `tour enquiry:`；解析按标记行分派 kind（contact_form / tour_enquiry）；兴趣取 Tour 行；URL 取 URL 行；已知标签后只有一个空格也能取到；兴趣截 200 字；改写后的主题 `Tour enquiry: 团名`、摘要「网站团页表单 · 团名」。变异验证 5 项，4 项被测试抓住，1 项（多词标签）经魏征复审确认是等价变异，已用单空格写法补测试。
+- **限制（追踪检查的「CRM 门」必读）**：现在 Contact form 通了之后，「最近一条 web_form 触点 ≤ 48 小时」这类判据会因为 Contact form（含内部测试）变绿；但**广告真实路径是 Tour enquiry，第二期合并部署之前它不会产生 web_form 触点**。所以在 PR 2923 部署并读回验证之前，该门的绿色是**假绿**，不能当作「广告线索能进 CRM」的证据；要等部署后用内部测试团页表单读回。
+- **仍未做**：`Facebook click ID` / `Ad source` 不入库（`mirrorWebFormLead` 调用没有传 utm，团页表单的 web_form 触点目前没有广告归因；字段名由官网窗口定，另开小 PR 加）；历史回补（写生产库，等 PM 点头）；`isFormEnquirySubject` 同步加 tour 只是冗余防线（新客人靠 web_form 触点已被算作打过交道），不做。
+- **与官网窗口的约定**：新增字段请追加成新的一行「标签 + 值」放在「Message」行之前，不改已有标签名与顺序。
+- **Tailor-made enquiry**：走 `/api/tailor-made-enquiry`，发件人本身就是客人邮箱，已经能正常进，不在本方案范围。
