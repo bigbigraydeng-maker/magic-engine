@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { instagramOutcomeMessage } from '@/lib/instagram-oauth/identity'
+import { instagramOutcomeMessage, normalizeInstagramHandle } from '@/lib/instagram-oauth/identity'
 import { factoryConfigHref } from '@/lib/factory/config-link'
 import type { SocialAuthorization, SocialChannelStatus, SocialConnectionsSnapshot } from '@/lib/platform-oauth/social-onboarding'
 
@@ -34,26 +34,53 @@ function youtubeOutcomeMessage(value: string | null): string | null {
 
 function nextAction(channel: SocialChannelStatus, clientId: string, canManage: boolean) {
   const base = `/dashboard/clients/${encodeURIComponent(clientId)}`
+  if (channel.authorization === 'saved' || channel.authorization === 'refresh_pending') return null
   if (channel.platform === 'facebook') {
     if (!channel.targetAccountId) return canManage
       ? { label: '配置 Facebook 发布主页', href: factoryConfigHref(clientId) } : null
-    return { label: '核实 Facebook 主页与权限', href: `${base}?settings=platform` }
+    if (channel.authorization === 'ambiguous' || channel.authorization === 'unknown') return {
+      label: '核实 Facebook 主页与权限', href: `${base}?settings=platform`,
+    }
+    return {
+      label: channel.identity ? '重新授权 Facebook 发布主页' : '授权 Facebook 发布主页',
+      href: `/api/auth/facebook/connect?client_id=${encodeURIComponent(clientId)}&intent=publishing`,
+    }
   }
-  if (channel.platform === 'tiktok' && channel.authorization !== 'ambiguous') {
+  if (channel.platform === 'tiktok' && channel.authorization !== 'ambiguous' && channel.authorization !== 'unknown') {
     return { label: channel.identity ? '重新授权 TikTok' : '连接 TikTok',
       href: `/api/auth/tiktok/connect?client_id=${encodeURIComponent(clientId)}` }
   }
-  if (channel.platform === 'youtube' && channel.authorization !== 'ambiguous') {
+  if (channel.platform === 'youtube' && channel.authorization !== 'ambiguous' && channel.authorization !== 'unknown') {
     return { label: channel.identity ? '重新连接 YouTube' : '连接 YouTube',
       href: `/api/auth/google/youtube/start?clientId=${encodeURIComponent(clientId)}` }
   }
   if (channel.platform === 'instagram') {
-    if (channel.authorization === 'ambiguous') return null
+    if (channel.authorization === 'ambiguous' || channel.authorization === 'unknown') return null
     if (channel.connectAvailable) return {
       label: channel.identity ? '重新连接 Instagram 专业账号' : '连接 Instagram 专业账号',
       href: `/api/auth/instagram/connect?client_id=${encodeURIComponent(clientId)}`,
     }
-    return { label: '登记 Instagram 账号', href: `${base}/settings?tab=content&section=social-profiles` }
+    return normalizeInstagramHandle(channel.profile) ? null
+      : { label: '登记 Instagram 账号', href: `${base}/settings?tab=content&section=social-profiles` }
+  }
+  return null
+}
+
+function savedGrantAction(channel: SocialChannelStatus, clientId: string) {
+  if (!channel.identity) return null
+  const encodedId = encodeURIComponent(clientId)
+  if (channel.platform === 'facebook' && channel.targetAccountId) return {
+    label: '重新授权 Facebook 发布主页',
+    href: `/api/auth/facebook/connect?client_id=${encodedId}&intent=publishing`,
+  }
+  if (channel.platform === 'tiktok') return {
+    label: '重新授权 TikTok', href: `/api/auth/tiktok/connect?client_id=${encodedId}`,
+  }
+  if (channel.platform === 'youtube') return {
+    label: '重新连接 YouTube', href: `/api/auth/google/youtube/start?clientId=${encodedId}`,
+  }
+  if (channel.platform === 'instagram' && channel.connectAvailable) return {
+    label: '重新连接 Instagram 专业账号', href: `/api/auth/instagram/connect?client_id=${encodedId}`,
   }
   return null
 }
@@ -94,6 +121,8 @@ function ChannelCard({ channel, clientId, canManage, onChanged }: {
 }) {
   const action = nextAction(channel, clientId, canManage)
   const saved = channel.authorization === 'saved'
+  const grantRecorded = saved || channel.authorization === 'refresh_pending'
+  const manageAction = grantRecorded ? savedGrantAction(channel, clientId) : null
   return (
     <article aria-label={channel.name} className="flex flex-col rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -110,14 +139,20 @@ function ChannelCard({ channel, clientId, canManage, onChanged }: {
       </dl>
       <p className="mt-3 text-sm text-slate-700">{channel.detail}</p>
       <p className="mt-2 text-xs leading-relaxed text-slate-500">{channel.publishing}</p>
-      {channel.platform === 'facebook' && <p className="mt-2 text-xs text-amber-800">现有 Meta 授权还包含消息、评论和线索权限；请先核对权限范围。</p>}
+      {grantRecorded && <p className="mt-3 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-900">✓ 此账号已有授权记录。平台连接与发布资格尚未实时核验，无需重复连接。</p>}
+      {channel.platform === 'facebook' && !grantRecorded && <p className="mt-2 text-xs text-amber-800">Meta 授权还会请求消息、评论和线索权限；请先核对权限范围。授权成功后仍需单独核验能否发布。</p>}
       {!canManage && channel.platform === 'facebook' && !channel.targetAccountId && (
         <p className="mt-3 text-xs text-amber-800">{saved || channel.authorization === 'refresh_pending' ? '频道配置由团队维护。' : '请团队核实发布目标并完成此平台连接。'}</p>
       )}
-      {channel.platform === 'instagram' && channel.connectAvailable && <p className="mt-3 text-xs text-slate-600">使用 Instagram 专业账号登录，此次仅读取基本资料。需使用企业或创作者账号；能否连接还取决于平台审核或测试资格。</p>}
-      {channel.platform === 'youtube' && <p className="mt-3 text-xs text-slate-600">请使用拥有目标频道的 Google 账号授权。连接仅用于私享上传与核对；这一步不会上传视频或公开发布。{!channel.targetAccountId && '首次连接仅在账号恰有一个频道时自动确认目标。'}</p>}
+      {channel.platform === 'instagram' && channel.connectAvailable && !grantRecorded && <p className="mt-3 text-xs text-slate-600">使用 Instagram 专业账号登录，此次仅读取基本资料。需使用企业或创作者账号；能否连接还取决于平台审核或测试资格。</p>}
+      {channel.platform === 'youtube' && !grantRecorded && <p className="mt-3 text-xs text-slate-600">请使用拥有目标频道的 Google 账号授权。连接仅用于私享上传与核对；这一步不会上传视频或公开发布。{!channel.targetAccountId && '首次连接仅在账号恰有一个频道时自动确认目标。'}</p>}
       {channel.platform === 'youtube' && canManage && !channel.targetAccountId && <a className="mt-2 text-xs font-semibold text-cyan-800" href={`/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=connect&section=youtube-channel`}>由团队手动配置频道</a>}
       {action && <a href={action.href} className="mt-4 self-start rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white">{action.label}</a>}
+      {grantRecorded && manageAction && <details className="mt-3 text-xs text-slate-600">
+        <summary className="cursor-pointer font-semibold text-cyan-800">管理授权</summary>
+        <p className="mt-2">仅在更换账号或当前授权失效时重新授权；授权不会自动发布内容。</p>
+        <a href={manageAction.href} className="mt-2 inline-block font-semibold text-cyan-800">{manageAction.label}</a>
+      </details>}
       {canManage && (channel.platform === 'youtube' || channel.platform === 'instagram') && Boolean(channel.managedAccounts?.length) && <DisconnectConnection channel={channel} clientId={clientId} onChanged={onChanged} />}
     </article>
   )
@@ -158,7 +193,7 @@ export function SocialConnectionsPanel({ clientId }: { clientId: string }) {
     <div className="space-y-4">
       {instagramOutcome && <p role="status" className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950">{instagramOutcome}</p>}
       {youtubeOutcome && <p role="status" className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950">{youtubeOutcome}</p>}
-      <p className="text-sm text-slate-600">请在平台官方页面登录并授权，无需向团队提供密码。登记主页链接与账号名称后，仍需完成平台授权。连接授权不会公开发布内容。</p>
+      <p className="text-sm text-slate-600">各平台分别显示登记资料、已保存的授权和发布资格。尚未授权时，请在平台官方页面登录；已有授权记录时无需重复连接。无需向团队提供密码，连接授权不会公开发布内容。</p>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
         <span>{snapshot ? `本次读取：${new Date(snapshot.readAt).toLocaleString('zh-CN')} · 以下为保存记录，未实时验证平台` : '读取账号授权记录'}</span>
         <button type="button" onClick={() => void load()} disabled={loading} className="font-semibold text-cyan-800 disabled:opacity-40">刷新授权记录</button>
