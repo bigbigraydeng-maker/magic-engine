@@ -1,0 +1,108 @@
+{
+  "schema": "promo_v1",
+  "goal_id": "27fc80bd-b2d8-4cac-8ef4-9f6c574dd6ff",
+  "checks": [],
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "主攻（10/20–11/14）：Natural China 拉新为主、收割为辅",
+      "start_date": "2026-10-20",
+      "end_date": "2026-11-14",
+      "steps": [
+        {
+          "id": "ads-harvest-1",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 2500,
+            "audience_ref": "52551185747273",
+            "creative_refs": ["28843889985273791"],
+            "placements": ["facebook_feed", "facebook_reels", "facebook_stories"],
+            "paused_ranges": []
+          }
+        },
+        {
+          "id": "ads-prospect-1",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 11500,
+            "audience_ref": "52549838527273",
+            "creative_refs": ["3626096160888481"],
+            "placements": ["facebook_feed", "facebook_reels", "facebook_stories"],
+            "paused_ranges": []
+          }
+        },
+        {
+          "id": "social-1",
+          "kind": "social_cadence",
+          "settings": { "posts_per_week": 7, "stories_per_week": 7, "reels_per_month": 12 }
+        },
+        {
+          "id": "email-1",
+          "kind": "newsletter_email",
+          "settings": {
+            "topic": "Early Bird 通知：2027 年 3 月四个中国团（只写 11 月 30 日截止日期，不写倒计时）",
+            "due_date": "2026-10-26",
+            "requires_link": true
+          }
+        },
+        {
+          "id": "email-2",
+          "kind": "newsletter_email",
+          "settings": {
+            "topic": "Natural China 3/26 专题（发给打开过第一封的人）",
+            "due_date": "2026-11-06",
+            "requires_link": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "收尾（11/15–11/30）：不放量，只把在途线索接住",
+      "start_date": "2026-11-15",
+      "end_date": "2026-11-30",
+      "steps": [
+        {
+          "id": "ads-harvest-2",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 1400,
+            "audience_ref": "52551185747273",
+            "creative_refs": ["28843889985273791"],
+            "placements": ["facebook_feed", "facebook_reels", "facebook_stories"],
+            "paused_ranges": []
+          }
+        },
+        {
+          "id": "ads-prospect-2",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 5600,
+            "audience_ref": "52549838527273",
+            "creative_refs": ["3626096160888481"],
+            "placements": ["facebook_feed", "facebook_reels", "facebook_stories"],
+            "paused_ranges": []
+          }
+        },
+        {
+          "id": "social-2",
+          "kind": "social_cadence",
+          "settings": { "posts_per_week": 7, "stories_per_week": 7, "reels_per_month": 12 }
+        },
+        {
+          "id": "email-3",
+          "kind": "newsletter_email",
+          "settings": {
+            "topic": "Early Bird 截止提醒：Book by 30 November 2026（只写日期，不写倒计时）",
+            "due_date": "2026-11-25",
+            "requires_link": true
+          }
+        }
+      ]
+    }
+  ]
+}
