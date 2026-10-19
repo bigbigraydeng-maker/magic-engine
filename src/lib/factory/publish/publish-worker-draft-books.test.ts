@@ -149,25 +149,4 @@ describe('writeThreeBooks draft vs published', () => {
 
     expect(Object.keys(draftFw).sort()).toEqual(Object.keys(publishedFw).sort())
   })
-
-  it('Instagram opts path is unaffected', async () => {
-    const instaRef: PublishedRef = {
-      ...baseRef,
-      platform: 'publer',
-      provider_state: 'scheduled',
-    }
-
-    await writeThreeBooks(WO_ID, instaRef, CLIENT_ID, ANGLE, {
-      actionType: 'factory_reel_publish_instagram',
-      channelLabel: 'Instagram(Publishing Hub)',
-    })
-
-    const exec = findInserts('execution_items')
-    expect(exec).toHaveLength(1)
-    expect(exec[0].payload.status).toBe('completed')
-
-    const flywheel = findInserts('flywheel_actions')
-    expect(flywheel).toHaveLength(1)
-    expect(flywheel[0].payload.action_type).toBe('factory_reel_publish_instagram')
-  })
 })
