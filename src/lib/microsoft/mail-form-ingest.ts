@@ -8,7 +8,7 @@
  * （2026-10-19 CTS，Baker 测试单暴露；设计稿 docs/specs/2026-10-19-crm-web-form-enquiry-email-ingest-design.md）。
  *
  * ## 这一层做什么
- *  1. 初筛：收件箱方向 + 发件人就是本邮箱 + 主题以 `contact form:` 开头。
+ *  1. 初筛：收件箱方向 + 发件人就是本邮箱 + 主题以 `contact form:` 或 `tour enquiry:` 开头。
  *  2. 对候选**逐封单读**全文 / Reply-To / 邮件头（不加进每小时的列表读取），过
  *     `parseFormNotice`（认证头、Reply-To 与正文 Email 一致、只读头部区块）。
  *  3. 成功：把这封信的「对方」改写成客人，打上 `formLead`，**摘要换成不含电话/邮箱的一句话**
@@ -76,14 +76,15 @@ const defaultDeps: FormIngestDeps = {
 
 /** 入库用的一句话摘要：不含电话、不含邮箱。 */
 function redactedPreview(lead: FormNoticeLead): string {
-  return `网站联系表单${lead.interest ? ` · ${lead.interest}` : ''}`
+  const label = lead.kind === 'tour_enquiry' ? '网站团页表单' : '网站联系表单'
+  return `${label}${lead.interest ? ` · ${lead.interest}` : ''}`
 }
 
 /** 改写成客人来信：对方是客人；摘要和主题都不含电话/邮箱/客人名。 */
 function rewritten(m: MailMessage, lead: FormNoticeLead): MailMessage {
   return {
     ...m,
-    subject: `Contact form${lead.interest ? `: ${lead.interest}` : ''}`,
+    subject: `${lead.kind === 'tour_enquiry' ? 'Tour enquiry' : 'Contact form'}${lead.interest ? `: ${lead.interest}` : ''}`,
     counterparty: { address: lead.email, name: lead.name },
     formLead: lead,
     preview: redactedPreview(lead),

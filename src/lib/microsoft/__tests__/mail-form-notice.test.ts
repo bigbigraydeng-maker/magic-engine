@@ -125,6 +125,7 @@ describe('parseFormNotice', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.lead).toEqual({
+      kind: 'contact_form',
       email: 'jane.test@example.com',
       name: 'Jane Test',
       phone: '0211234567',
@@ -334,5 +335,54 @@ describe('魏征 R1：DKIM 必须是验证通过的', () => {
         : h,
     )
     expect(parseFormNotice({ ...base, headers })).toEqual({ ok: false, reason: 'auth_failed' })
+  })
+})
+
+describe('第二期：Tour enquiry 通知', () => {
+  const tourBody =
+    'New tour enquiry — Example website\nName\tJane Test\nEmail\tjane.test@example.com\nPhone\t0211234567\nTour\tBest of China — 15 Days\nURL\t/tours/china/signature/example\nSource\ttour-page\nAd source\tfacebook\nFacebook click ID\tfb.1.123.abc\nSubmitted\t2026-10-20T01:00:00.000Z\n\nMessage\n\nhello'
+
+  it('isFormNoticeCandidate：Tour enquiry 主题通过；Re:/Fwd: 开头仍不通过', () => {
+    const base = { direction: 'inbound' as const, fromAddress: 'info@example.co.nz', mailbox: 'info@example.co.nz' }
+    expect(isFormNoticeCandidate({ ...base, subject: 'Tour enquiry: Best of China — Jane' })).toBe(true)
+    expect(isFormNoticeCandidate({ ...base, subject: 'Re: Tour enquiry: Best of China — Jane' })).toBe(false)
+    expect(isFormNoticeCandidate({ ...base, subject: 'Fwd: Tour enquiry: X' })).toBe(false)
+    expect(isFormNoticeCandidate({ ...base, subject: 'Tour enquiries weekly digest' })).toBe(false)
+  })
+
+  it('解析：kind、兴趣取 Tour 行、URL 取 formUrl', () => {
+    const r = parseFormNotice({ ...goodInput(), body: tourBody })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.kind).toBe('tour_enquiry')
+      expect(r.lead.interest).toBe('Best of China — 15 Days')
+      expect(r.lead.formUrl).toBe('/tours/china/signature/example')
+      expect(r.lead.name).toBe('Jane Test')
+    }
+  })
+
+  it('Contact form 仍解析为 contact_form，且不会误把 Tour 行当兴趣', () => {
+    const r = parseFormNotice(goodInput())
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.kind).toBe('contact_form')
+  })
+
+  it('标记行既不是联系表单也不是团页表单 → bad_marker', () => {
+    expect(parseFormNotice({ ...goodInput(), body: tourBody.replace('New tour enquiry', 'New tour quote') })).toEqual({ ok: false, reason: 'bad_marker' })
+  })
+
+  it('团页通知同样必须过认证：dkim 伪造 → auth_failed', () => {
+    const base = goodInput()
+    const headers = base.headers.map((h) =>
+      h.name === 'Authentication-Results' ? { ...h, value: 'mx 1; dmarc=pass header.from=example.co.nz' } : h,
+    )
+    expect(parseFormNotice({ ...base, headers, body: tourBody })).toEqual({ ok: false, reason: 'auth_failed' })
+  })
+
+  it('留言里伪造「Email」行骗不过（只读 Message 之前）', () => {
+    const body = tourBody.replace('hello', 'Email\tvictim@example.org')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.email).toBe('jane.test@example.com')
   })
 })

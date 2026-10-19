@@ -118,7 +118,7 @@ describe('表单通知的线程', () => {
 })
 
 describe('mirrorFormThread / formLeadRaw', () => {
-  const lead = { email: 'jane@example.com', name: 'Jane', phone: '0211234567', interest: 'Custom Itinerary', message: 'hello', submittedAt: null, formUrl: '/contact' }
+  const lead = { kind: 'contact_form' as const, email: 'jane@example.com', name: 'Jane', phone: '0211234567', interest: 'Custom Itinerary', message: 'hello', submittedAt: null, formUrl: '/contact' }
 
   it('raw 只含兴趣和留言，不含电话和邮箱', () => {
     const raw = formLeadRaw(lead)
@@ -181,5 +181,34 @@ describe('魏征复审补充（429 / 重复邮箱 / 系统地址）', () => {
     const { out } = await run([msg('p1')], deps({ p1: 'jane@example.com' }))
     expect(out[0].subject).toBe('Contact form: Custom Itinerary')
     expect(out[0].subject).not.toContain('Jane')
+  })
+})
+
+describe('第二期：Tour enquiry（团页表单）', () => {
+  function tourBody(email: string): string {
+    return `New tour enquiry — Example website\nName\tJane Test\nEmail\t${email}\nPhone\t0211234567\nTour\tBest of China — 15 Days\nURL\t/tours/china/signature/example\nSource\ttour-page\nAd source\tfacebook\nFacebook click ID\tfb.1.123.abc\nSubmitted\t2026-10-20T01:00:00.000Z\n\nMessage\n\nwhen is the next departure`
+  }
+  const tourDeps = (email: string): FormIngestDeps => ({
+    fetchSource: async () => ({ ok: true, source: { body: tourBody(email), replyTo: [email], headers: GOOD_HEADERS } }),
+    findContactByEmail: async () => null,
+  })
+  const tourMsg = () => msg('t1', { subject: 'Tour enquiry: Best of China — 15 Days — Jane' })
+
+  it('团页表单通知 → 识别为 tour_enquiry、兴趣取 Tour 行、主题和摘要改写且不含客人信息', async () => {
+    const { out, stats } = await run([tourMsg()], tourDeps('jane@example.com'))
+    expect(out).toHaveLength(1)
+    expect(out[0].formLead?.kind).toBe('tour_enquiry')
+    expect(out[0].formLead?.interest).toBe('Best of China — 15 Days')
+    expect(out[0].formLead?.formUrl).toBe('/tours/china/signature/example')
+    expect(out[0].subject).toBe('Tour enquiry: Best of China — 15 Days')
+    expect(out[0].preview).toBe('网站团页表单 · Best of China — 15 Days')
+    expect(out[0].preview).not.toContain('0211234567')
+    expect(stats).toMatchObject({ recognised: 1, parsed: 1, created: 1, failed: 0 })
+  })
+
+  it('「Facebook click ID」「Ad source」这类多词标签不会被当成留言或抢走字段', async () => {
+    const { out } = await run([tourMsg()], tourDeps('jane@example.com'))
+    expect(out[0].formLead?.message).toBe('when is the next departure')
+    expect(out[0].formLead?.email).toBe('jane@example.com')
   })
 })
