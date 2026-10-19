@@ -50,7 +50,7 @@
 | [2026-10-19 Instagram Best Practices](2026-10-19-social-instagram-best-practices.md) | candidate | 账号级站内建议作复盘线索，不当固定规则 |
 | [2026-10-19 Threads Insights](2026-10-19-social-threads-insights.md) | candidate | 周报并列看帖子、views、关注与回复，不推断因果 |
 
-外部来源与 ME 数据尚未完成验证，机器状态统一为 `learning`；本轮不标 `adopted` / `verified`。
+2026-10-19 首轮只读验证已完成（记录：[docs/audits/2026-10-19-social-learning-first-verification.md](../audits/2026-10-19-social-learning-first-verification.md)）：9 个点中 8 个 `cannot_check`（缺单条表现数据或平台接入）、1 个 `not_applicable`（Instagram 暂无发布能力）；没有点进入 `verifying` / `adopted`。卡内状态以各卡机器索引为准，上表“candidate”是卡的裁决阶段。
 
 ## 机器索引（给 ME 后台「Agent 学习库」页读）
 每张卡末尾必须有一节 `## 机器索引`，下面一个 ```json 块：`{"points":[{"key","text","state",...}]}`。一个点只能有一个 state，以复核更正后的结论为准（note 里写「复核更正后」）。没有这一节的卡会在页面上进「还没整理」红区。

@@ -27,9 +27,9 @@ Creator Search Insights 显示 TikTok 上常见搜索主题，并可按类别、
 并入既有选题发现流程候选；97 号只读核实功能/数据可见性，PM 决定规则变更。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 cannot_check。TikTok 连接 1 条：权限 user.info.basic + video.publish，访问令牌 2026-10-14 已过期，last_synced 为空；该功能是 TikTok 应用内工具，ME 没有接口，且按卡内说明只在部分地区可用。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"tiktok_search_demand","text":"TikTok Creator Search Insights 可提供站内搜索主题与内容缺口作为选题候选；对 ME 增长效果未验证。","state":"learning","note":"功能只在部分地区可用；不得从分数推断推荐权重或转粉。"}]}
+{"pillar":"social","points":[{"key":"tiktok_search_demand","text":"TikTok Creator Search Insights 可提供站内搜索主题与内容缺口作为选题候选；对 ME 增长效果未验证。","state":"cannot_check","note":"TikTok 连接只有基本信息+发布权限，令牌已过期且从未同步；Creator Search Insights 是应用内工具，ME 读不到。"}]}
 ```
