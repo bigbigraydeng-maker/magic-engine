@@ -1,10 +1,11 @@
 // @vitest-environment node
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
-const mocks = vi.hoisted(() => ({ access: vi.fn(), from: vi.fn(), single: vi.fn(), eq: vi.fn(), select: vi.fn(), upsert: vi.fn() }))
+const mocks = vi.hoisted(() => ({ access: vi.fn(), from: vi.fn(), single: vi.fn(), eq: vi.fn(), select: vi.fn(), upsert: vi.fn(), confirm: vi.fn() }))
 vi.mock('@/lib/auth/client-access', () => ({ requireOnboardingClientAccess: mocks.access }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: mocks.from } }))
-vi.mock('@/lib/platform-oauth/connection-store', () => ({ upsertConnection: mocks.upsert }))
+vi.mock('@/lib/platform-oauth/connection-store', () => ({ upsertConnection: mocks.upsert,
+  confirmSocialConnectionWrite: mocks.confirm }))
 import { GET as start } from '../connect/route'
 import { GET as callback } from '../callback/route'
 import { INSTAGRAM_STATE_COOKIE, buildInstagramState } from '@/lib/instagram-oauth/client'
@@ -29,6 +30,7 @@ beforeEach(() => {
   mocks.eq.mockReturnValue({ maybeSingle: mocks.single })
   mocks.single.mockResolvedValue({ data: { instagram_handle: ' @Example ' }, error: null })
   mocks.upsert.mockResolvedValue(undefined)
+  mocks.confirm.mockResolvedValue(true)
   fetcher = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ access_token: 'short-test', user_id: '123456', permissions: 'instagram_business_basic' }] }) })
     .mockResolvedValueOnce({ ok: true, json: async () => ({ access_token: 'long-test', token_type: 'bearer', expires_in: 5184000 }) })
@@ -54,6 +56,18 @@ describe('Instagram actual handlers / state and cookie boundary', () => {
     expect(mocks.upsert).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ clientId, provider: 'instagram', purpose: 'legacy',
       accountId: '987654321098765432', locationName: 'example', displayName: '@example', accessToken: 'long-test', refreshToken: '',
       authorizingPrincipalId: userId, scopes: ['instagram_business_basic'] }))
+    expect(mocks.confirm).toHaveBeenCalledWith(expect.objectContaining({ clientId, provider: 'instagram',
+      accountId: '987654321098765432', locationName: 'example' }))
+  })
+  it('does not return connected when this grant is not readable after the write', async () => {
+    mocks.confirm.mockResolvedValueOnce(false)
+    expect(outcome(await callback(consent()))).toBe('save_failed')
+  })
+  it('does not expose a database readback error', async () => {
+    mocks.confirm.mockRejectedValueOnce(new Error('private database detail'))
+    const response = await callback(consent())
+    expect(outcome(response)).toBe('save_failed')
+    expect(response.headers.get('location')).not.toContain('private')
   })
   it.each([401, 403, 500])('denies unauthorised start %s before DB/network', async status => {
     mocks.access.mockResolvedValue({ ok: false, status, error: 'Access denied' })

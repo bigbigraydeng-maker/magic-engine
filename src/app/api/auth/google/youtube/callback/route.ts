@@ -102,7 +102,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     })
     if (!persisted.ok) return back(clientId, persisted.reason === 'scope_missing' ? 'scope_missing'
       : persisted.reason === 'channel_mismatch' ? 'channel_mismatch'
-        : persisted.reason === 'context_changed' ? 'target_changed' : 'verify_failed')
+        : persisted.reason === 'context_changed' ? 'target_changed'
+          : persisted.reason === 'save_unverified' ? 'save_failed' : 'verify_failed')
     return back(clientId, 'connected')
   } catch {
     // A successful target CAS followed by a failed grant write stays configured,

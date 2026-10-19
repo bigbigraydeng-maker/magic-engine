@@ -22,6 +22,54 @@ describe('client social connections centre', () => {
     expect(await screen.findByText(/登记账号在连接期间发生变化/)).toBeInTheDocument()
     expect(screen.getByText(/本次授权的频道与已登记频道不同/)).toBeInTheDocument()
   })
+  it('never calls a callback URL success when this client has no saved grants', async () => {
+    router.params = new URLSearchParams({ instagram: 'connected', youtube: 'connected' })
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    await screen.findByRole('article', { name: 'YouTube Shorts' })
+    expect(screen.getAllByText(/尚未找到与此客户匹配的可用授权/)).toHaveLength(2)
+    expect(screen.queryByText(/ME 已核对并找到/)).not.toBeInTheDocument()
+  })
+  it('shows success only after the current client snapshot contains matching saved identities', async () => {
+    router.params = new URLSearchParams({ instagram: 'connected', youtube: 'connected' })
+    const linked = channels.map(row => row.platform === 'youtube'
+      ? { ...row, targetAccountId: 'UCmJJDRx88y0IuZXJJQuGNFw', authorization: 'saved' as const,
+          identity: { accountId: 'UCmJJDRx88y0IuZXJJQuGNFw', displayName: 'Celine', verifiedAt: now.toISOString() } }
+      : row.platform === 'instagram'
+        ? { ...row, authorization: 'saved' as const,
+            identity: { accountId: '987654321', displayName: '@example', verifiedAt: now.toISOString() } } : row)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ ...snapshot(), channels: linked }) } as Response)
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findAllByText(/ME 已核对并找到/)).toHaveLength(2)
+  })
+  it('does not trust a success URL when the saved channel differs or the lookup fails', async () => {
+    router.params = new URLSearchParams({ youtube: 'connected' })
+    const mismatched = channels.map(row => row.platform === 'youtube'
+      ? { ...row, targetAccountId: 'UCmJJDRx88y0IuZXJJQuGNFw', authorization: 'saved' as const,
+          identity: { accountId: 'UCzJJDRx88y0IuZXJJQuGNFw', displayName: 'Other', verifiedAt: now.toISOString() } } : row)
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ ...snapshot(), channels: mismatched }) } as Response)
+    const view = render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByText(/尚未找到与此客户匹配的可用授权/)).toBeInTheDocument()
+    view.unmount()
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: false } as Response)
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByText(/ME 暂时无法核对保存记录/)).toBeInTheDocument()
+    expect(screen.queryByText(/ME 已核对并找到/)).not.toBeInTheDocument()
+  })
+  it('drops a prior client success notice while loading another client', async () => {
+    router.params = new URLSearchParams({ youtube: 'connected' })
+    const linked = channels.map(row => row.platform === 'youtube'
+      ? { ...row, targetAccountId: 'channel-a', authorization: 'saved' as const,
+          identity: { accountId: 'channel-a', displayName: 'A', verifiedAt: now.toISOString() } } : row)
+    vi.mocked(fetch).mockResolvedValueOnce({ ok: true, json: async () => ({ ...snapshot(), channels: linked }) } as Response)
+    const { rerender } = render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByText(/ME 已核对并找到该频道/)).toBeInTheDocument()
+    let finishNext: (value: Response) => void = () => { throw new Error('request not started') }
+    vi.mocked(fetch).mockImplementationOnce(() => new Promise(resolve => { finishNext = resolve }))
+    rerender(<SocialConnectionsPanel clientId="client-b" />)
+    expect(screen.queryByText(/ME 已核对并找到该频道/)).not.toBeInTheDocument()
+    await act(async () => { finishNext({ ok: true, json: async () => snapshot() } as Response) })
+    expect(await screen.findByText(/尚未找到与此客户匹配的可用授权/)).toBeInTheDocument()
+  })
   it.each(['__proto__', 'constructor', 'unexpected'])('ignores unrecognised YouTube outcome %s', async value => {
     router.params = new URLSearchParams({ youtube: value })
     render(<SocialConnectionsPanel clientId="client-a" />)
@@ -83,6 +131,14 @@ describe('client social connections centre', () => {
       expect(screen.queryByRole('link', { name: /授权 Facebook 发布主页/ })).not.toBeInTheDocument()
       view.unmount()
     }
+  })
+  it('keeps TikTok reauthorisation available when its token cannot be refreshed', async () => {
+    const expired = channels.map(row => row.platform === 'tiktok'
+      ? { ...row, authorization: 'needs_attention' as const,
+          identity: { accountId: 'open-id', displayName: 'Celine', verifiedAt: now.toISOString() } } : row)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ ...snapshot(), channels: expired }) } as Response)
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByRole('link', { name: '重新授权 TikTok' })).toHaveAttribute('href', '/api/auth/tiktok/connect?client_id=client-a')
   })
   it.each(['saved', 'refresh_pending'] as const)('shows %s as an existing grant without a primary connect action', async authorization => {
     const linked = channels.map(row => ['facebook', 'instagram', 'tiktok', 'youtube'].includes(row.platform)

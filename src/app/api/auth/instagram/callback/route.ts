@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { upsertConnection } from '@/lib/platform-oauth/connection-store'
+import { confirmSocialConnectionWrite, upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { normalizeInstagramHandle, type InstagramOutcome } from '@/lib/instagram-oauth/identity'
 import { getInstagramConfig, instagramReturnUrl, readInstagramIdentity, verifyInstagramState,
   INSTAGRAM_STATE_COOKIE, INSTAGRAM_STATE_PATH } from '@/lib/instagram-oauth/client'
@@ -47,10 +47,17 @@ export async function GET(req: NextRequest) {
     if (!finalConfig || finalConfig.appId !== config.appId || finalConfig.secret !== config.secret
       || finalConfig.redirectUri !== config.redirectUri) return back(clientId, 'unavailable')
     if (!verifyInstagramState(state, finalConfig.secret) || identity.tokenExpiry.getTime() <= Date.now()) return back(clientId, 'bad_state')
+    const verifiedAt = new Date()
     await upsertConnection({ clientId, provider: 'instagram', purpose: 'legacy',
       accessToken: identity.accessToken, refreshToken: '', tokenExpiry: identity.tokenExpiry,
       accountId: identity.accountId, locationName: identity.username, displayName: `@${identity.username}`,
-      scopes: identity.scopes, authorizingPrincipalId: userId, lastSyncedAt: new Date() })
+      scopes: identity.scopes, authorizingPrincipalId: userId, lastSyncedAt: verifiedAt })
+    try {
+      const confirmed = await confirmSocialConnectionWrite({ clientId, provider: 'instagram',
+        accountId: identity.accountId, locationName: identity.username,
+        requiredScopes: identity.scopes, tokenExpiry: identity.tokenExpiry, verifiedAt })
+      if (!confirmed) return back(clientId, 'save_failed')
+    } catch { return back(clientId, 'save_failed') }
     return back(clientId, 'connected')
   } catch { return back(clientId, 'verify_failed') }
 }
