@@ -14,7 +14,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { readCrmFacts } from './crm-reader'
+import { adLandingPathsFromTargets, readCrmFacts } from './crm-reader'
 import { readEnvFacts, type EnvReadDeps } from './env-reader'
 import { readGa4Facts, type Ga4ReadDeps } from './ga4-reader'
 import { judgePostLaunch, judgePreflightGates } from './judge'
@@ -113,7 +113,8 @@ export async function collectCrmFacts(clientId: string, cfg: TrackingClientConfi
       errors: [],
     }
   }
-  const out = await readCrmFacts(deps.supabase, clientId, deps.now, deps.sleep)
+  // 落地页配置同时决定「哪一页算广告落地页」：官网表单线索必须有从这些页面提交的，CRM 那道门才判绿
+  const out = await readCrmFacts(deps.supabase, clientId, deps.now, deps.sleep, adLandingPathsFromTargets(cfg.landing_targets))
   return { facts: out.facts, errors: tag('crm', out.errors) }
 }
 
