@@ -253,7 +253,7 @@ export interface PublishedRef {
    * 有值 = 已喊过下游;空/缺 = 还没喊成 → 补发对账会重发(仅当 video_state=PUBLISHED)。
    */
   event_ids?: string[]
-  /** 受控转公开动作盖的戳:Instagram 跟发循环见到它一律跳过(Publer 删除 PR 合并后可撤)。 */
+  /** 受控转公开动作盖的戳:Instagram 跟发已下线,此标记保留无害。 */
   ig_crosspost_blocked?: boolean
   /** 受控转公开动作的请求编号(流量记录里 promote_authorization 的引用)。 */
   promote_request_id?: string

@@ -52,7 +52,6 @@ import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushDiagnosticSynthesisItems } from './diagnostic-synthesis-items'
-import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
@@ -358,11 +357,6 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
     (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
-    ),
-    // 工厂把 Facebook Reel 同步到客户 Instagram(Publer):账号掉线 / 重试都失败的，只有人能修 ——
-    // 回执只写在工单里没人读 = 发现死在库里。拉模式读回执,修好后这条自己消失
-    (b) => pushInstagramPublishItems(supabase, b, now, nameOf).catch((e) =>
-      console.warn('[manual-items] Instagram 同步待办读取失败（不阻塞其他待办）:', e),
     ),
     // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
     // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
