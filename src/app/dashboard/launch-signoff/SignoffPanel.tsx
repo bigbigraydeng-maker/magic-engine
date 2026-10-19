@@ -169,7 +169,10 @@ export default function SignoffPanel(props: SignoffPanelProps) {
             <li>演练开关只管 D3 一条路径，<strong>关/开它都不会停掉内核执行</strong>。</li>
             <li>NAL、CTS 的 ads.* 动作策略目前都是 auto_approve：经内核提交信封后<strong>直接执行</strong>。</li>
             <li>人在止损页点的是另一套人工止损信封，<strong>不受 72 小时冷却约束</strong>；冷却只约束 AI 信封。</li>
-            <li>真正停内核执行 = 把客户的 autonomy_mode 改回 observe。</li>
+            <li>
+              <strong>急停：</strong>设置页改为观察模式（autonomy_mode = observe）的生效时间<strong>没有真实样本</strong>，最坏可能要等每日 06:00 对账；
+              <strong>真正的紧急刹车是 PM 在 Meta 广告管理器直接暂停</strong>。
+            </li>
           </ul>
         </div>
       </div>
