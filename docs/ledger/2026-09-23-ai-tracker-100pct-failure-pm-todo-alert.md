@@ -9,8 +9,8 @@ verify_by: 2026-09-30
 verify_how: "查 PR 1943 是否已合并；合并后到了下周一 AI 体检跑完，找一个探测全挂的客户（或人为制造一次），确认待办邮件里真的出现了这条提醒，而不是一片空白"
 done_on: 2026-09-28
 done_ref: pr:2199
-last_checked: 2026-10-17
-check_note: PR 2199 已于 2026-10-10 合并；需出现探测全挂的客户才能看到真实告警邮件，目前无此事件；owner 本就是 pm
+last_checked: 2026-10-19
+check_note: 10-19：PR 2199 已合并(10-10)；主干存在 src/lib/pm-todo/ai-tracker-failure-items.ts；需出现探测全挂的客户才能看到真实告警，目前无此事件，判不了；owner 已是 pm
 ---
 真实事故：2026-09-20 East International 24/24 探测全挂，看起来跟「没被提到」一模一样，三天没人发现。
 改动：新增 `ai_tracker_all_failed` 待办项自动报警（分供应商给修复指引，不用你操心的原因单独归开发栏）
