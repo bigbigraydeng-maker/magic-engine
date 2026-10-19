@@ -233,18 +233,18 @@ describe('readPostLaunchFacts · 只看本次投放的广告系列（审查整�
   it('编号变了也认得出来：名字里同时含全部关键词的系列同样算（草稿发布后编号可能变，名字不会）', async () => {
     const { fetcher } = accountFetcher(() => ok({
       data: [
-        row('555555555555', 'CTS · 官网点击 · 20261022', '8', '10', '9', '1'),
-        row('555555555556', 'CTS · 拉新 · 表单 · 20261022', '50', '60', '0', '12'),
+        row('555555555555', '示例店 · 官网点击 · 20260101', '8', '10', '9', '1'),
+        row('555555555556', '示例店 · 拉新 · 表单 · 20260101', '50', '60', '0', '12'),
         row('555555555557', '官网点击 · 20250101', '70', '80', '70', '3'),
       ],
     }))
-    const out = await readPostLaunchFacts({ ...base(fetcher), campaignIds: [CAMPAIGN_A], campaignNameContains: ['官网点击', '20261022'] })
+    const out = await readPostLaunchFacts({ ...base(fetcher), campaignIds: [CAMPAIGN_A], campaignNameContains: ['官网点击', '20260101'] })
     expect(out.facts).toMatchObject({ read: true, spend_cents: 800, link_clicks: 10, landing_page_views: 9, leads: 1 })
   })
 
   it('编号和名字任意一条对上就算，两条都对上也只算一次', async () => {
     const { fetcher } = accountFetcher(() => ok({
-      data: [row(CAMPAIGN_A, '官网点击 · 20261022', '10', '20', '15', '1')],
+      data: [row(CAMPAIGN_A, '官网点击 · 20260101', '10', '20', '15', '1')],
     }))
     const out = await readPostLaunchFacts({ ...base(fetcher), campaignIds: [CAMPAIGN_A], campaignNameContains: ['官网点击'] })
     expect(out.facts).toMatchObject({ spend_cents: 1000, link_clicks: 20 })
@@ -340,14 +340,14 @@ describe('readCampaignPresence · 本次投放的系列在账户里有没有（�
   })
 
   it('编号变了但名字里同时含全部关键词 → 照样 found true', async () => {
-    const { fetcher } = campaignsFetcher(() => ok({ data: [{ id: '555555555555', name: 'CTS · 官网点击 · 20261022' }] }))
-    const out = await readCampaignPresence({ ...base(fetcher), campaignIds: [CAMPAIGN_A], campaignNameContains: ['官网点击', '20261022'] })
+    const { fetcher } = campaignsFetcher(() => ok({ data: [{ id: '555555555555', name: '示例店 · 官网点击 · 20260101' }] }))
+    const out = await readCampaignPresence({ ...base(fetcher), campaignIds: [CAMPAIGN_A], campaignNameContains: ['官网点击', '20260101'] })
     expect(out.found).toBe(true)
   })
 
   it('编号和名字都对不上（比如系列还是未发布的草稿，线上读不到）→ read 为 true、found 为 false', async () => {
     const { fetcher } = campaignsFetcher(() => ok({ data: [{ id: '999999999999', name: '官网点击 · 20250101' }] }))
-    const out = await readCampaignPresence({ ...base(fetcher), campaignNameContains: ['官网点击', '20261022'] })
+    const out = await readCampaignPresence({ ...base(fetcher), campaignNameContains: ['官网点击', '20260101'] })
     expect(out).toEqual({ read: true, found: false, error: null })
   })
 

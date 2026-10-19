@@ -867,6 +867,58 @@ describe('环境读取器 · 瞬时故障重试一次', () => {
     expect(db.queries.filter(q => q.table === 'clients')).toHaveLength(2)
   })
 
+  // 🔴 第二轮审查整改：探活把网络层失败包成 ok:false 的返回值（不抛错），重试要看返回值的形状
+  it('探活令牌那一步没拿到回应（返回 ok:false + token_error，没有 token_valid）→ 重试一次，第二次通过就算通过', async () => {
+    const db = makeEnvDb()
+    const calls: number[] = []
+    const spy = makeEnvDeps(db.supabase, {
+      capiPreflight: async () => {
+        calls.push(calls.length)
+        return calls.length === 1
+          ? { ok: false, detail: { pixel_id: '1', token_error: 'fetch failed' } }
+          : { ok: true, detail: { token_valid: true, pixel_visible: true } }
+      },
+    })
+    const { facts, errors } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(spy.preflightCalls).toHaveLength(2)
+    expect(facts.capi_preflight).toMatchObject({ ok: true, token_valid: true, pixel_visible: true })
+    expect(errors).toEqual([])
+  })
+
+  it('探活像素那一步没拿到回应（令牌已验证、只有 pixel_error）→ 同样重试一次', async () => {
+    const db = makeEnvDb()
+    const spy = makeEnvDeps(db.supabase, {
+      capiPreflight: async () => (spy_calls++ === 0
+        ? { ok: false, detail: { token_valid: true, pixel_error: 'timeout' } }
+        : { ok: true, detail: { token_valid: true, pixel_visible: true } }),
+    })
+    let spy_calls = 0
+    const { facts } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(spy.preflightCalls).toHaveLength(2)
+    expect(facts.capi_preflight?.ok).toBe(true)
+  })
+
+  it('连着两次没拿到回应 → 最终就是 ok:false（回执里是「探活没通过」），只试两次', async () => {
+    const db = makeEnvDb()
+    const spy = makeEnvDeps(db.supabase, { capiPreflight: async () => ({ ok: false, detail: { token_error: 'fetch failed' } }) })
+    const { facts } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(spy.preflightCalls).toHaveLength(2)
+    expect(facts.capi_preflight).toMatchObject({ ok: false, token_valid: null })
+  })
+
+  it('永久性的失败不重试：配置阶段的失败 / 令牌失效 / 看不到像素', async () => {
+    for (const detail of [
+      { stage: 'config', error: '没配回传令牌' },
+      { token_valid: false, token_error: '令牌已失效' },
+      { token_valid: true, pixel_visible: false, pixel_error: '这把令牌看不到该 pixel' },
+    ]) {
+      const db = makeEnvDb()
+      const spy = makeEnvDeps(db.supabase, { capiPreflight: async () => ({ ok: false, detail }) })
+      await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+      expect(spy.preflightCalls, JSON.stringify(detail)).toHaveLength(1)
+    }
+  })
+
   it('「没有令牌」「预检说失败」这类正常返回的结果不算瞬时故障：不重试', async () => {
     const db = makeEnvDb()
     const spy = makeEnvDeps(db.supabase, {

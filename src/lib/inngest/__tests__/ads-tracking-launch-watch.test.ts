@@ -319,10 +319,10 @@ describe('readLaunchSpend · 花费只按本次投放的广告系列算（不是
       data: [
         { campaign_id: '123456789012', campaign_name: '官网点击 A', spend: '12.5', inline_link_clicks: '3' },
         { campaign_id: '999999999999', campaign_name: '账户里本来就在花钱的别的系列', spend: '300', inline_link_clicks: '900' },
-        { campaign_id: '555555555555', campaign_name: '换了编号的 官网点击 20261022', spend: '7.5', inline_link_clicks: '1' },
+        { campaign_id: '555555555555', campaign_name: '换了编号的 官网点击 20260101', spend: '7.5', inline_link_clicks: '1' },
       ],
     })
-    const watch = { ...(CONFIG.launch_watch ?? { from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland', campaign_ids: [] }), campaign_name_contains: ['官网点击', '20261022'] }
+    const watch = { ...(CONFIG.launch_watch ?? { from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland', campaign_ids: [] }), campaign_name_contains: ['官网点击', '20260101'] }
     const out = await readLaunchSpend('c1', CONFIG, watch, NOW)
     expect(out).toEqual({ read: true, spend_cents: 2000, error: null, series_found: true })
     const url = new URL(urls.find(u => u.includes('/insights')) ?? '')

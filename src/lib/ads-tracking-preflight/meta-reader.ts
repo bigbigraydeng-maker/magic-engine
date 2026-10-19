@@ -180,8 +180,11 @@ function extractError(body: unknown): GraphErrorBody | null {
   return err as GraphErrorBody
 }
 
-/** Meta 自己标的瞬时错误码：限流 / 服务暂时不可用 / 用户请求过多 / 未知错误。 */
-const TRANSIENT_GRAPH_CODES: ReadonlySet<number> = new Set([1, 2, 4, 17, 32, 613])
+/**
+ * Meta 自己标的瞬时错误码：未知错误（1）/ 服务暂时不可用（2）。
+ * 限流码（4 / 17 / 32 / 613）不在里面：限流一般要等几分钟才解，等 0.8 秒再试没有意义。
+ */
+const TRANSIENT_GRAPH_CODES: ReadonlySet<number> = new Set([1, 2])
 
 /**
  * 这个响应值得再试一次吗？只认瞬时故障：429 / 5xx / Meta 自己标了 is_transient / 瞬时错误码。

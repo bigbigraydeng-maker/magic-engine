@@ -99,13 +99,28 @@ function asBooleanOrNull(v: unknown): boolean | null {
   return typeof v === 'boolean' ? v : null
 }
 
+/**
+ * 转化 API 探活自己把网络层的失败也包成了「ok: false」的返回值（不抛错），
+ * 所以光靠「抛错就重试」永远触发不了——要看返回值：令牌那一步或像素那一步「根本没拿到回应」
+ * （只有 token_error / pixel_error，没有 token_valid / pixel_visible）才算瞬时故障。
+ * 配置阶段的失败、令牌失效、看不到像素，都是永久性的，不重试。
+ */
+function isTransientPreflight(r: { ok: boolean; detail: Record<string, unknown> }): boolean {
+  if (r.ok) return false
+  const d = r.detail ?? {}
+  if (d.stage === 'config') return false
+  const tokenStepNoResponse = typeof d.token_error === 'string' && typeof d.token_valid !== 'boolean'
+  const pixelStepNoResponse = typeof d.pixel_error === 'string' && typeof d.pixel_visible !== 'boolean'
+  return tokenStepNoResponse || pixelStepNoResponse
+}
+
 async function readCapiPreflight(
   clientId: string,
   deps: EnvReadDeps,
   errors: string[],
 ): Promise<CapiPreflight> {
   try {
-    const r = await retryOnce(() => deps.capiPreflight(clientId), { sleep: deps.sleep })
+    const r = await retryOnce(() => deps.capiPreflight(clientId), { sleep: deps.sleep, retryResult: isTransientPreflight })
     const detail = r.detail ?? {}
     return {
       ok: r.ok,

@@ -60,6 +60,16 @@ describe('共享代码不点名任何客户（客户差异只进 client-config.t
     expect(files.length).toBeGreaterThan(10)
   })
 
+  // 客户简称是短词，直接做子串匹配会误伤 Facts / effects 这类词：按「整词、区分大小写」查
+  const SHORT_NAMES = [j('C', 'TS')]
+  for (const name of SHORT_NAMES) {
+    it(`没有任何共享文件把客户简称「${name.slice(0, 1)}…」当成独立的词写出来`, () => {
+      const word = new RegExp(`\\b${name}\\b`)
+      const hits = files.filter(f => word.test(readFileSync(f, 'utf8')))
+      expect(hits.map(f => path.relative(ROOT, f))).toEqual([])
+    })
+  }
+
   for (const needle of FORBIDDEN) {
     it(`没有任何共享文件含有「${needle.slice(0, 4)}…」`, () => {
       const hits = files.filter(f => readFileSync(f, 'utf8').toLowerCase().includes(needle.toLowerCase()))

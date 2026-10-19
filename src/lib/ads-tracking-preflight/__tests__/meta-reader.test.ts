@@ -651,6 +651,20 @@ describe('readMetaFacts · 瞬时故障重试一次', () => {
     expect(result.facts.datasets.find((d) => d.id === FOCUS_PIXEL)?.events_7d).not.toBeNull()
   })
 
+  it('Graph 限流码（4 / 17 / 32 / 613，状态 400）不重试：限流要等几分钟，等 0.8 秒没有意义', async () => {
+    for (const code of [4, 17, 32, 613]) {
+      const { fetcher } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [
+        () => jsonResponse({ error: { message: 'rate limited', code } }, 400),
+        () => jsonResponse({ error: { message: 'rate limited', code } }, 400),
+      ])
+      const rec = sleepRecorder([])
+      await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: rec.sleep })
+      const statsCalls = recordCalls(fetcher).filter((c) => pathOf(c.url) === `${FOCUS_PIXEL}/stats`)
+      expect(statsCalls, `code ${code}`).toHaveLength(1)
+      expect(rec.sleeps, `code ${code}`).toEqual([])
+    }
+  })
+
   it('没标 is_transient、状态 400、错误码 100 → 永久性错误，不重试', async () => {
     const { fetcher } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [
       () => jsonResponse({ error: { message: 'invalid parameter', code: 100 } }, 400),
