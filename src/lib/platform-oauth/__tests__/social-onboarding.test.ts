@@ -39,10 +39,10 @@ describe('social authorisation facts', () => {
   it.each([null, 'not-a-date'])('treats invalid expiry %s as unknown', token_expiry => {
     expect(status([{ ...connection, token_expiry }]).authorization).toBe('unknown')
   })
-  it('expired Meta and TikTok require reauthorisation; refreshable YouTube remains pending refresh', () => {
+  it('expired Meta requires reauthorisation but refreshable platforms (TikTok, YouTube) remain pending refresh', () => {
     const past = { ...connection, token_expiry: '2026-10-18T00:00:00Z' }
     expect(status([past]).authorization).toBe('needs_attention')
-    expect(status([{ ...past, provider: 'tiktok', scopes: ['user.info.basic', 'video.publish'] }], 'tiktok').authorization).toBe('needs_attention')
+    expect(status([{ ...past, provider: 'tiktok', scopes: ['user.info.basic', 'video.publish'] }], 'tiktok').authorization).toBe('refresh_pending')
     expect(status([{ ...past, provider: 'google_youtube', account_id: channelId, scopes: YOUTUBE_PUBLISH_SCOPES }], 'youtube').authorization).toBe('refresh_pending')
   })
   it('does not claim a TikTok handle matches an openId and keeps public review unverified', () => {

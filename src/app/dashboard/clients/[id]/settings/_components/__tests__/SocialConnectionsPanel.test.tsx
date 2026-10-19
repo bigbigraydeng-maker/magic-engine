@@ -132,7 +132,7 @@ describe('client social connections centre', () => {
       view.unmount()
     }
   })
-  it('keeps TikTok reauthorisation available when its token cannot be refreshed', async () => {
+  it('keeps TikTok reauthorisation available when its grant needs attention', async () => {
     const expired = channels.map(row => row.platform === 'tiktok'
       ? { ...row, authorization: 'needs_attention' as const,
           identity: { accountId: 'open-id', displayName: 'Celine', verifiedAt: now.toISOString() } } : row)

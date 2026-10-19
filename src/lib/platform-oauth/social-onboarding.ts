@@ -80,7 +80,7 @@ function assessGrant(row: SocialConnectionFact, required: readonly string[], now
     return { authorization: 'needs_attention', identity, detail: '已保存账号授权，但缺少该连接所需的权限，请重新授权。' }
   }
   if (Date.parse(expiry) <= now.getTime()) {
-    return (row.provider === 'meta' || row.provider === 'instagram' || row.provider === 'tiktok')
+    return (row.provider === 'meta' || row.provider === 'instagram')
       ? { authorization: 'needs_attention', identity, detail: '保存的授权已到期，需要重新授权。' }
       : { authorization: 'refresh_pending', identity, detail: '已保存授权；访问凭据待使用时刷新，当前未实时核验。' }
   }
