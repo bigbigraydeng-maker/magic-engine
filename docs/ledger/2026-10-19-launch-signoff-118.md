@@ -12,3 +12,4 @@ done_ref: doc:src/lib/launch-signoff/service.ts
 ---
 PM 10-19 经统筹 18 号转述：「允许」新建 launch_signoff_events，且只有 PM 本人邮箱能签。设计稿 docs/specs/2026-10-19-launch-signoff-design-v0.2.md（PR 2885）。
 A 级草稿 PR；迁移未 apply、环境变量未配、未在真实库跑过——这些都要 PM 另点头。已知缺口见 PR 正文（签字不接任何开关；Inngest 留痕与今日待办提醒未做；提交号检查取严）。
+PM 本人 2026-10-20 认可「已知例外（T5b、T6b：没测/未验证）不阻止签字，签字即表示知情」。合并仍需 PM 回「合 2888」。
