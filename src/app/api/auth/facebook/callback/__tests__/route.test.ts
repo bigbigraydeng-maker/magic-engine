@@ -14,6 +14,8 @@ import type { NextResponse } from 'next/server'
 
 const mocks = vi.hoisted(() => ({
   verifyState:                vi.fn(),
+  requireDashboardClientAccess: vi.fn(),
+  queryError: null as { message: string } | null,
   exchangeCode:               vi.fn(),
   exchangeForLongLivedToken:  vi.fn(),
   listPagesWithTokens:        vi.fn(),
@@ -36,6 +38,8 @@ vi.mock('@/lib/meta-oauth/client', async (importOriginal) => {
   }
 })
 
+vi.mock('@/lib/auth/client-access', () => ({ requireDashboardClientAccess: mocks.requireDashboardClientAccess }))
+
 vi.mock('@/lib/platform-oauth/connection-store', () => ({
   upsertConnection: (input: Record<string, unknown>) => {
     mocks.upsertCalls.push(input)
@@ -51,7 +55,7 @@ vi.mock('@/lib/supabase', () => ({
           maybeSingle: vi.fn(() =>
             Promise.resolve({
               data: { facebook_page_id: mocks.boundPageId, factory_config: mocks.factoryConfig },
-              error: null,
+              error: mocks.queryError,
             }),
           ),
         })),
@@ -63,18 +67,23 @@ vi.mock('@/lib/supabase', () => ({
 // ─── Import after mocks ────────────────────────────────────────────────────────
 
 import { GET } from '../route'
+import { META_STATE_COOKIE } from '@/lib/meta-oauth/client'
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const PAGE_ID = '1616575215312482'
+const BINDING = { clientId: CLIENT_ID, userId: 'operator-one', targetPageId: PAGE_ID, nonce: 'a'.repeat(32) }
 
-function makeRequest(params: { code?: string; state?: string; error?: string }) {
+function makeRequest(params: { code?: string; state?: string; error?: string; cookie?: string | null }) {
   const url = new URL('http://localhost:3001/api/auth/facebook/callback')
   if (params.code)  url.searchParams.set('code', params.code)
   if (params.state) url.searchParams.set('state', params.state)
   if (params.error) url.searchParams.set('error', params.error)
-  return new NextRequest(url)
+  const req = new NextRequest(url)
+  const cookie = params.cookie === undefined ? params.state : params.cookie
+  if (cookie) req.cookies.set(META_STATE_COOKIE, cookie)
+  return req
 }
 
 function locationOf(res: NextResponse): URL {
@@ -99,11 +108,13 @@ function landsOnMetaPanel(res: NextResponse, clientId: string): boolean {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.upsertCalls.length = 0
+  mocks.queryError = null
+  mocks.requireDashboardClientAccess.mockResolvedValue({ ok: true, user: { id: BINDING.userId } })
   mocks.boundPageId = PAGE_ID
   mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: PAGE_ID } }
   process.env.NEXT_PUBLIC_APP_URL = 'https://app.magic-engine.com'
   process.env.FACEBOOK_APP_SECRET = 'app-secret-456'
-  mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID })
+  mocks.verifyState.mockReturnValue({ ...BINDING })
   mocks.exchangeCode.mockResolvedValue('short-token')
   mocks.exchangeForLongLivedToken.mockResolvedValue('long-token')
   mocks.listPagesWithTokens.mockResolvedValue([
@@ -168,7 +179,7 @@ describe('scope persistence — provider-authoritative, never the requested cons
 
 describe('publishing reauthorisation fails closed (#1152)', () => {
   it('reports publish_ready only when the provider authoritatively granted pages_manage_posts', async () => {
-    mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'publishing' })
+    mocks.verifyState.mockReturnValue({ ...BINDING, intent: 'publishing' })
     mocks.listGrantedScopes.mockResolvedValue([
       'pages_show_list',
       'pages_manage_posts',
@@ -180,7 +191,7 @@ describe('publishing reauthorisation fails closed (#1152)', () => {
   })
 
   it('reports publish_not_granted AND stores scopes without pages_manage_posts when Meta declines it', async () => {
-    mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'publishing' })
+    mocks.verifyState.mockReturnValue({ ...BINDING, intent: 'publishing' })
     mocks.listGrantedScopes.mockResolvedValue([
       'pages_show_list',
       'pages_messaging',
@@ -195,7 +206,7 @@ describe('publishing reauthorisation fails closed (#1152)', () => {
   })
 
   it('a publishing reauth with a failed permissions read is not-ready AND writes nothing — no false success or timestamp', async () => {
-    mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'publishing' })
+    mocks.verifyState.mockReturnValue({ ...BINDING, intent: 'publishing' })
     mocks.listGrantedScopes.mockResolvedValue(null)
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
@@ -214,7 +225,7 @@ describe('publishing reauth binds to factory_config.publish_target, not the inbo
   const PUBLISH_PAGE = '999888777'
 
   beforeEach(() => {
-    mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'publishing' })
+    mocks.verifyState.mockReturnValue({ ...BINDING, targetPageId: PUBLISH_PAGE, intent: 'publishing' })
   })
 
   it('stores the token for the publish target when it differs from the inbox Page', async () => {
@@ -249,6 +260,7 @@ describe('publishing reauth binds to factory_config.publish_target, not the inbo
 
   it('when publish target equals the inbox Page, still binds to that Page', async () => {
     mocks.boundPageId = PAGE_ID
+    mocks.verifyState.mockReturnValue({ ...BINDING, intent: 'publishing' })
     mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: PAGE_ID } }
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
@@ -298,7 +310,7 @@ describe('every outcome returns to the surface that renders FacebookPagePanel (#
     ]
 
     for (const c of cases) {
-      mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'publishing' })
+      mocks.verifyState.mockReturnValue({ ...BINDING, intent: 'publishing' })
       mocks.listGrantedScopes.mockResolvedValue(c.granted)
 
       const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
@@ -317,7 +329,7 @@ describe('every outcome returns to the surface that renders FacebookPagePanel (#
 
   it('the redirect client id is the one from the verified signed state, never a raw request param', async () => {
     const stateClient = '22222222-2222-2222-2222-222222222222'
-    mocks.verifyState.mockReturnValue({ clientId: stateClient, intent: 'publishing' })
+    mocks.verifyState.mockReturnValue({ ...BINDING, clientId: stateClient, intent: 'publishing' })
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
 
@@ -339,13 +351,113 @@ describe('guards — a rejected callback must write nothing and leak nothing', (
   })
 
   it('a cancelled consent lands on denied without any exchange', async () => {
-    const res = await GET(makeRequest({ error: 'access_denied' }))
+    const res = await GET(makeRequest({ error: 'access_denied', state: 'sig.state' }))
     expect(outcomeOf(res)).toBe('denied')
+    expect(mocks.exchangeCode).not.toHaveBeenCalled()
+    expect(landsOnMetaPanel(res, CLIENT_ID)).toBe(true)
+    expect(res.cookies.get(META_STATE_COOKIE)?.value).toBe('')
+    expect(res.headers.get('set-cookie')).toContain('Max-Age=0')
+    expect(res.headers.get('set-cookie')).toContain('Path=/api/auth/facebook')
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it.each([null, 'another-browser-state'])('rejects a missing or mismatched browser cookie %s', async cookie => {
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state', cookie }))
+    expect(outcomeOf(res)).toBe('bad_state')
+    expect(locationOf(res).pathname).toBe('/dashboard')
+    expect(mocks.verifyState).not.toHaveBeenCalled()
+    expect(mocks.exchangeCode).not.toHaveBeenCalled()
+    expect(mocks.upsertCalls).toHaveLength(0)
+    expect(res.cookies.get(META_STATE_COOKIE)).toBeUndefined()
+  })
+
+  it('untrusted cancellation cannot choose a customer or bypass state checks', async () => {
+    const res = await GET(makeRequest({ error: 'access_denied' }))
+    expect(outcomeOf(res)).toBe('bad_state')
+    expect(locationOf(res).pathname).toBe('/dashboard')
     expect(mocks.exchangeCode).not.toHaveBeenCalled()
   })
 
+  it('an old attempt cannot erase the newer attempt in the same browser', async () => {
+    const old = await GET(makeRequest({ code: 'old-code', state: 'old-state', cookie: 'sig.state' }))
+    expect(outcomeOf(old)).toBe('bad_state')
+    expect(old.headers.get('set-cookie')).toBeNull()
+    const current = await GET(makeRequest({ code: 'current-code', state: 'sig.state' }))
+    expect(outcomeOf(current)).toBe('connected')
+    expect(mocks.exchangeCode).toHaveBeenCalledExactlyOnceWith('current-code', expect.any(String))
+  })
+
+  it.each([401, 403, 500])('rejects a missing or revoked customer session (%s)', async status => {
+    mocks.requireDashboardClientAccess.mockResolvedValue({ ok: false, status, error: 'private guard detail' })
+    for (const params of [{ code: 'auth-code' }, { error: 'access_denied' }]) {
+      const res = await GET(makeRequest({ ...params, state: 'sig.state' }))
+      expect(outcomeOf(res)).toBe('bad_state')
+      expect(locationOf(res).pathname).toBe('/dashboard')
+      expect(res.headers.get('location')).not.toContain('private guard detail')
+    }
+    expect(mocks.exchangeCode).not.toHaveBeenCalled()
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it('rejects an operator switch even if both operators can access the client', async () => {
+    mocks.requireDashboardClientAccess.mockResolvedValue({ ok: true, user: { id: 'operator-two' } })
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+    expect(outcomeOf(res)).toBe('bad_state')
+    expect(mocks.exchangeCode).not.toHaveBeenCalled()
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it('rejects a changed publishing Page even when the grant includes both Pages', async () => {
+    mocks.verifyState.mockReturnValue({ ...BINDING, intent: 'publishing' })
+    mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: '999888777' } }
+    mocks.listPagesWithTokens.mockResolvedValue([
+      { pageId: PAGE_ID, pageName: 'Original', pageToken: 'original-token' },
+      { pageId: '999888777', pageName: 'Replacement', pageToken: 'replacement-token' },
+    ])
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+    expect(outcomeOf(res)).toBe('verify_failed')
+    expect(mocks.exchangeCode).not.toHaveBeenCalled()
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it('rejects a changed inbox target and a failed target lookup before any exchange', async () => {
+    mocks.boundPageId = '999888777'
+    const changed = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+    expect(outcomeOf(changed)).toBe('verify_failed')
+    mocks.boundPageId = PAGE_ID
+    mocks.queryError = { message: 'private target lookup error' }
+    const failed = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+    expect(outcomeOf(failed)).toBe('verify_failed')
+    expect(failed.headers.get('location')).not.toContain('private target lookup error')
+    expect(mocks.exchangeCode).not.toHaveBeenCalled()
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it.each(['target', 'revoked', 'actor', 'lookup'])('rejects %s changes during provider calls before persistence', async change => {
+    mocks.listGrantedScopes.mockImplementationOnce(async () => {
+      if (change === 'target') mocks.boundPageId = '999888777'
+      if (change === 'revoked') mocks.requireDashboardClientAccess.mockResolvedValue({ ok: false, status: 403 })
+      if (change === 'actor') mocks.requireDashboardClientAccess.mockResolvedValue({ ok: true, user: { id: 'operator-two' } })
+      if (change === 'lookup') mocks.queryError = { message: 'private query failure' }
+      return ['pages_show_list', 'pages_manage_posts']
+    })
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+    expect(outcomeOf(res)).toBe(['revoked', 'actor'].includes(change) ? 'bad_state' : 'verify_failed')
+    expect(res.cookies.get(META_STATE_COOKIE)?.value).toBe('')
+    expect(mocks.upsertCalls).toHaveLength(0)
+  })
+
+  it('returns a safe failure and consumes this attempt when persistence throws', async () => {
+    mocks.upsertConnection.mockRejectedValueOnce(new Error('private database detail with page-token-xyz'))
+    const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+    expect(outcomeOf(res)).toBe('verify_failed')
+    expect(res.cookies.get(META_STATE_COOKIE)?.value).toBe('')
+    expect(res.headers.get('location')).not.toContain('page-token-xyz')
+    expect(res.headers.get('location')).not.toContain('private database detail')
+  })
+
   it('never puts a token or secret in the redirect the browser follows', async () => {
-    mocks.verifyState.mockReturnValue({ clientId: CLIENT_ID, intent: 'publishing' })
+    mocks.verifyState.mockReturnValue({ ...BINDING, intent: 'publishing' })
 
     const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
     const loc = res.headers.get('location') ?? ''
