@@ -36,7 +36,7 @@
 - **`ad_entity_snapshots`**：每天抓 4–5 次，`capture_reason` 有 `first_seen / changed / daily / kernel_pre`
 - **`ad_health_narratives.payload.portfolio_diagnoses.diagnoses[]`**：每天一行，含 D3 / D7 等判据结论
 - **熔断探针**：`cron_run_logs` 里 `job_name='google-data-pullback-daily'` 的 `summary->'circuit_probe'`（**只读，不是刹车**）
-- **追踪就绪**：读 `cloud-ads-tracking-preflight` 的回执（形状 `{overall, gates[{key,status,reason,evidence,as_of,hard}], no_publish:true}`，见 [预检设计稿](./2026-10-19-ads-tracking-preflight-workflow.md) §3）。**"数据在流"这一项直接引它，不重复造**；回执落在哪、字段是否如设计，**待该函数上线后我第一次读时核实，不提前假设**
+- **追踪就绪（已核实位置与字段，2026-10-20）**：读 `cron_run_logs` 里 `job_name='ads-tracking-preflight'` 的最新一行；结构 `summary.clients[]`（按客户一项，CTS 的 `client_id=c0000000-…`），每项含 `overall`（green/yellow/red）、`preconditions_met`、`no_publish`、`checked_at`、`gates[]`（每个门：`key / status / hard / reason / evidence / as_of / how`）、`items[]`（红灯变成的待办：`what / how / href / gate_key / hard`）、`read_errors[]`。首条真实回执：id `9ff03d27-e8eb-4c3a-893c-6a74d38b54b9`，2026-10-19 20:00Z，`overall=red`、`preconditions_met=false`。**「数据在流」这一项直接引它，不重复造**
 
 ## 3. 逐日观测表
 
@@ -50,7 +50,7 @@
 | D0-2 | `ad_entity_snapshots`（`level in (campaign, adset)`，`ad_account_id='act_2202695063810470'`）下一轮抓取是否出现 A 系列及其子实体 | 开投后 ≤ 1 个抓取周期（约 6 小时）内出现，`effective_status` 与 Meta 一致 | 超时仍无 / 状态不一致 → **缺陷**（T1） |
 | D0-3 | 3 个旧 ACTIVE 系列 | **已核（2026-10-19，两个来源）**：系列开着、名下广告组**全是 PAUSED**、近 14 天花费 0——所以不会自己花钱，原因是广告组被人暂停。来源：①我读 Meta 官方连接（官方账户广告组清单，全部 PAUSED，含 Shanghai Always-on、圣诞、Golden China LAL 各组）②18 号同日读 Meta 官方接口，结论一致 | **不处理、不要动它们**。风险只有一条：开投前后若有人把这些广告组重新打开就会花钱——观测时留意它们的 `effective_status` 是否变化 |
 | D0-4 | `action_runs` 里 CTS 的 `ads.*` | 仍为 0 条（Agent 没自己动手） | 出现任何非人点的新记录＝**缺陷 P0**，立刻停 |
-| D0-5 | 追踪就绪回执 `overall` | 无硬门红灯；有红灯由预检工作流出待办 | 引用其结论；红灯＝开投阻塞，**不算 Agent 缺陷** |
+| D0-5 | 追踪就绪回执：`summary.clients[]`（CTS）的 `overall`、`preconditions_met`、`gates[]` | 开投前 `preconditions_met=true`、无硬门红灯。首条回执（2026-10-19 20:00Z）读到：**红 1 条硬门** `tracking.lead_reaches_crm`（网站近 7 天 8 个留资信号，CRM 里 0 条官网表单线索）；**黄 1 条硬门** `tracking.account_dataset_aligned`（ME 的回传目标不是官网在发的官方数据集，需改生产环境变量，要先取得 PM 同意）；绿：`pixel_alive`（官方数据集 24h 内有 PageView）、`lead_event_seen`（7 天 7 条 Lead）、`landing_ok`、`capi_ready`、`ga4_events`、`env.token_and_crons`、`env.account_billing`（账户正常、日预算 $101 ≤ 上限 $110） | 引用其结论；红灯＝开投阻塞，**不算 Agent 缺陷**。我独立核对一致的一项：`env.account_billing` 的上限 11000、计划日预算 10100 与我读的基线相同 |
 
 ### 开投当天的两次实时读（10/20，PM 点开投后）
 
