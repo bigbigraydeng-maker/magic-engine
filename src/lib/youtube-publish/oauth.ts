@@ -3,7 +3,7 @@
  * The expected channel id is client configuration supplied by the caller.
  */
 
-import { upsertConnection } from '@/lib/platform-oauth/connection-store'
+import { confirmSocialConnectionWrite, upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
 import { ChannelLockError, YOUTUBE_PUBLISH_SCOPES, lockChannel } from './client'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
@@ -66,7 +66,7 @@ export interface YoutubePersistInput {
 
 export type YoutubePersistResult =
   | { ok: true; channelTitle: string }
-  | { ok: false; reason: 'channel_mismatch' | 'channel_lookup_failed' | 'scope_missing' | 'context_changed' }
+  | { ok: false; reason: 'channel_mismatch' | 'channel_lookup_failed' | 'scope_missing' | 'context_changed' | 'save_unverified' }
 
 /** Stores the connection only if the authorised account manages the expected channel. */
 export async function persistYoutubeConnection(
@@ -91,6 +91,7 @@ export async function persistYoutubeConnection(
   if (!Number.isFinite(input.tokenExpiry.getTime()) || input.tokenExpiry.getTime() <= Date.now()) {
     return { ok: false, reason: 'context_changed' }
   }
+  const verifiedAt = new Date()
   await upsertConnection({
     clientId: input.clientId,
     provider: PLATFORM_PROVIDERS.GOOGLE_YOUTUBE,
@@ -100,7 +101,12 @@ export async function persistYoutubeConnection(
     accountId: channel.id,
     displayName: channel.title || channel.id,
     scopes: input.scope.split(/\s+/).filter(Boolean),
-    lastSyncedAt: new Date(),
+    lastSyncedAt: verifiedAt,
   })
+  if (!(await confirmSocialConnectionWrite({ clientId: input.clientId,
+    provider: PLATFORM_PROVIDERS.GOOGLE_YOUTUBE, accountId: channel.id,
+    requiredScopes: YOUTUBE_PUBLISH_SCOPES, tokenExpiry: input.tokenExpiry, verifiedAt }))) {
+    return { ok: false, reason: 'save_unverified' }
+  }
   return { ok: true, channelTitle: channel.title }
 }

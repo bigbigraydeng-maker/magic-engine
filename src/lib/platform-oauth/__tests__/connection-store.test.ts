@@ -22,6 +22,7 @@ import {
   upsertConnection,
   listConnections,
   listSocialConnectionFacts,
+  confirmSocialConnectionWrite,
   getConnectionById,
   revokeConnection,
 } from '../connection-store'
@@ -108,6 +109,49 @@ describe('listSocialConnectionFacts', () => {
     chain.in.mockResolvedValue({ data: null, error: { message: 'private database detail' } })
     mocks.from.mockReturnValue(chain)
     await expect(listSocialConnectionFacts('client-xyz')).rejects.toThrow('Social connection facts unavailable')
+  })
+})
+
+describe('confirmSocialConnectionWrite', () => {
+  const verifiedAt = new Date('2026-10-19T00:00:00.123Z')
+  const tokenExpiry = new Date('2100-01-01T00:00:00.000Z')
+  const input = { clientId: 'client-xyz', provider: 'google_youtube' as const,
+    accountId: 'UCmJJDRx88y0IuZXJJQuGNFw', requiredScopes: ['youtube.upload'], tokenExpiry, verifiedAt }
+  const row = { id: 'grant', provider: 'google_youtube', purpose: 'legacy', account_id: input.accountId,
+    status: 'active', scopes: ['youtube.upload'], token_expiry: tokenExpiry.toISOString(),
+    last_synced_at: verifiedAt.toISOString() }
+  function withRows(data: unknown, error: unknown = null) {
+    const chain = { select: vi.fn(), eq: vi.fn(), in: vi.fn() }
+    chain.select.mockReturnValue(chain); chain.eq.mockReturnValue(chain)
+    chain.in.mockResolvedValue({ data, error }); mocks.from.mockReturnValue(chain)
+    return chain
+  }
+  it('reads back this exact client and this write without selecting credentials', async () => {
+    const chain = withRows([row])
+    expect(await confirmSocialConnectionWrite(input)).toBe(true)
+    expect(chain.eq).toHaveBeenCalledWith('client_id', input.clientId)
+    expect(chain.select).toHaveBeenCalledWith('id,provider,purpose,account_id,location_name,display_name,status,scopes,token_expiry,last_synced_at')
+  })
+  it.each([
+    ['no row', []],
+    ['another account', [{ ...row, account_id: 'another' }]],
+    ['an older write', [{ ...row, last_synced_at: '2026-10-18T00:00:00Z' }]],
+    ['missing scope', [{ ...row, scopes: [] }]],
+    ['malformed scope array', [{ ...row, scopes: ['youtube.upload', 42] }]],
+    ['expired token', [{ ...row, token_expiry: '2026-01-01T00:00:00Z' }]],
+    ['ambiguous rows', [row, { ...row, account_id: 'other' }]],
+  ])('does not confirm %s', async (_label, rows) => {
+    withRows(rows)
+    expect(await confirmSocialConnectionWrite(input)).toBe(false)
+  })
+  it('checks the Instagram username as well as its account ID', async () => {
+    withRows([{ ...row, provider: 'instagram', account_id: '987654321', location_name: 'other' }])
+    expect(await confirmSocialConnectionWrite({ ...input, provider: 'instagram',
+      accountId: '987654321', locationName: 'example' })).toBe(false)
+  })
+  it('fails closed when the read itself fails', async () => {
+    withRows(null, { message: 'private database detail' })
+    await expect(confirmSocialConnectionWrite(input)).rejects.toThrow('Social connection facts unavailable')
   })
 })
 
