@@ -1,6 +1,6 @@
 /**
- * 开投后「自动补排」：每小时看一眼官方账户有没有开始花钱，花了就自己补排
- * T+1h / T+24h 读回，不靠人记得发事件。
+ * 开投后「自动补排」：每小时看一眼本次投放的广告系列有没有开始花钱，
+ * 第一次看到花费后满 1 小时补排 T+1h，满 24 小时补排 T+24h 读回，不靠人记得发事件。
  *
  * 本文件是纯判定逻辑：不读网络、不读时钟、不读环境变量。
  * 窗口按广告账户自己的时区算日期（和 post-launch 读回一致）。
@@ -29,6 +29,12 @@ export interface WatchDecision {
 }
 
 const DAY_MS = 86_400_000
+
+/**
+ * T+1h 要等「第一次看到花费」之后满这么久才读。每小时盯一次有几分钟的调度误差，
+ * 所以差 5 分钟以内也算满 1 小时（55 分钟）。
+ */
+export const T1H_WAIT_MS = 55 * 60_000
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
 
@@ -72,14 +78,21 @@ function earliestLaunch(states: readonly PostLaunchReceiptState[]): string | nul
   return best
 }
 
-/** 纯判定：这一小时要不要补排读回。结果最多一条，不会同时给两个阶段。 */
+/**
+ * 纯判定：这一小时要不要补排读回。结果最多一条，不会同时给两个阶段。
+ *
+ * firstSpendSeenAt：盯盘函数自己的运行记录里「第一次看到花费」的那一次盯盘时刻（取不到 = null，
+ * 也就是这一小时是第一次看到）。T+1h 要等它之后满 1 小时才读——不能在发现花费的当小时就读，
+ * 那时候刚开投，数字什么都说明不了。
+ */
 export function decideLaunchWatch(input: {
   watch: LaunchWatchConfig
   now: Date
   spendSeen: boolean
   receipts: readonly PostLaunchReceiptState[]
+  firstSpendSeenAt: string | null
 }): WatchDecision[] {
-  const { watch, now, spendSeen, receipts } = input
+  const { watch, now, spendSeen, receipts, firstSpendSeenAt } = input
   if (!isWatchActive(watch, now)) return []
   if (!spendSeen) return []
 
@@ -87,7 +100,11 @@ export function decideLaunchWatch(input: {
   const validT24h = receipts.filter(r => r.phase === 'post_t24h' && r.valid)
 
   if (validT1h.length === 0) {
-    return [{ phase: 't1h', launched_at: now.toISOString() }]
+    if (firstSpendSeenAt === null) return []
+    const seenMs = Date.parse(firstSpendSeenAt)
+    if (Number.isNaN(seenMs)) return []
+    if (now.getTime() - seenMs < T1H_WAIT_MS) return []
+    return [{ phase: 't1h', launched_at: firstSpendSeenAt }]
   }
 
   const launch = earliestLaunch(validT1h)
@@ -135,6 +152,53 @@ export function postLaunchStatesFromRows(
     }
   }
   return out
+}
+
+interface WatchSummaryLike {
+  checked_at: string
+  clients: readonly unknown[]
+}
+
+function asWatchSummary(summary: unknown): WatchSummaryLike | null {
+  if (typeof summary !== 'object' || summary === null) return null
+  const s = summary as Record<string, unknown>
+  if (typeof s.checked_at !== 'string' || !Array.isArray(s.clients)) return null
+  return { checked_at: s.checked_at, clients: s.clients }
+}
+
+function sawSpend(clients: readonly unknown[], clientId: string): boolean {
+  return clients.some(c => {
+    if (typeof c !== 'object' || c === null) return false
+    const entry = c as Record<string, unknown>
+    return entry.client_id === clientId && entry.spend_seen === true
+  })
+}
+
+/**
+ * 从盯盘函数自己的运行记录（cron_run_logs，任务名 ads-tracking-launch-watch）里找：
+ * 这个客户最早一次「看到花费」（摘要里 spend_seen 为 true）的盯盘时刻。
+ * 没看到过 / 还在跑 / 读不懂 / 早于窗口开始的，都不算；记录的顺序不重要，取最早的。
+ */
+export function firstSpendSeenFromRows(
+  rows: readonly { status: string | null; started_at: string; summary: unknown }[],
+  clientId: string,
+  sinceIso: string,
+): string | null {
+  const sinceMs = Date.parse(sinceIso)
+  let best: string | null = null
+  let bestMs = Number.POSITIVE_INFINITY
+  for (const row of rows) {
+    if (row.status === 'running') continue
+    const summary = asWatchSummary(row.summary)
+    if (summary === null || !sawSpend(summary.clients, clientId)) continue
+    const ms = Date.parse(summary.checked_at)
+    if (Number.isNaN(ms) || ms < sinceMs) continue
+    if (ms < bestMs) {
+      bestMs = ms
+      best = summary.checked_at
+    }
+  }
+  return best
 }
 
 /** 自动补排发出的事件编号：同一小时同一客户同一阶段相同（去重），换小时就换编号（重试）。 */

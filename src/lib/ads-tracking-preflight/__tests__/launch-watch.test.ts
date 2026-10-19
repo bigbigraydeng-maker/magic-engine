@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   decideLaunchWatch,
+  firstSpendSeenFromRows,
   isWatchActive,
   postLaunchStatesFromRows,
   watchEventId,
@@ -11,7 +12,7 @@ import { HARD_GATE, type LaunchWatchConfig, type TrackingGateReceipt } from '../
 
 // 开投后「自动补排」：每小时看一眼，开投有花费且没做过读回，就自己补排 T+1h / T+24h。
 // 窗口按广告账户的时区算日期；全部用虚构数据。
-const WATCH: LaunchWatchConfig = { from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland' }
+const WATCH: LaunchWatchConfig = { from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland', campaign_ids: ['123456789012'] }
 const NOW = new Date('2026-10-22T20:30:00.000Z') // 新西兰 10-23 09:30（+13:00）
 
 const iso = (ms: number): string => new Date(ms).toISOString()
@@ -44,7 +45,7 @@ describe('isWatchActive · 现在在不在盯的窗口里（按账户时区算�
 
 describe('decideLaunchWatch', () => {
   const decide = (over: Partial<Parameters<typeof decideLaunchWatch>[0]> = {}) =>
-    decideLaunchWatch({ watch: WATCH, now: NOW, spendSeen: true, receipts: [], ...over })
+    decideLaunchWatch({ watch: WATCH, now: NOW, spendSeen: true, receipts: [], firstSpendSeenAt: null, ...over })
 
   it('不在窗口里 → 什么都不做', () => {
     expect(decide({ now: new Date('2026-10-30T00:00:00Z') })).toEqual([])
@@ -54,8 +55,29 @@ describe('decideLaunchWatch', () => {
     expect(decide({ spendSeen: false })).toEqual([])
   })
 
-  it('有花费、一次开投后读回都没做过 → 补排 T+1h，开投时刻记为「现在发现的时刻」', () => {
-    expect(decide()).toEqual([{ phase: 't1h', launched_at: NOW.toISOString() }])
+  // 🔴 审查整改：T+1h 要在「第一次看到花费」之后满 1 小时才读，不能在发现花费的当小时就读
+  it('有花费、一次读回都没做过，但这是第一次看到花费（之前的盯盘记录里没有）→ 先不读：等满 1 小时再补排 T+1h', () => {
+    expect(decide()).toEqual([])
+  })
+
+  it('第一次看到花费已经过了 1 小时 → 补排 T+1h，开投时刻记为「第一次看到花费的那个时刻」', () => {
+    const seen = hoursBefore(1)
+    expect(decide({ firstSpendSeenAt: seen })).toEqual([{ phase: 't1h', launched_at: seen }])
+    expect(decide({ firstSpendSeenAt: hoursBefore(5) })).toEqual([{ phase: 't1h', launched_at: hoursBefore(5) }])
+  })
+
+  it('每小时的盯盘有几分钟的调度误差：差 55 分钟就算满 1 小时，54 分钟还不算', () => {
+    const minutesBefore = (m: number): string => iso(NOW.getTime() - m * 60_000)
+    expect(decide({ firstSpendSeenAt: minutesBefore(55) })).toEqual([{ phase: 't1h', launched_at: minutesBefore(55) }])
+    expect(decide({ firstSpendSeenAt: minutesBefore(54) })).toEqual([])
+  })
+
+  it('第一次看到花费的时间读不懂 → 不发（不去猜）', () => {
+    expect(decide({ firstSpendSeenAt: 'garbage' })).toEqual([])
+  })
+
+  it('这一小时没看到花费 → 哪怕以前看到过也不发（花费读不到 / 为 0 时不能凭记忆补排）', () => {
+    expect(decide({ spendSeen: false, firstSpendSeenAt: hoursBefore(3) })).toEqual([])
   })
 
   it('T+1h 做过但还没满 24 小时 → 等', () => {
@@ -78,7 +100,8 @@ describe('decideLaunchWatch', () => {
   })
 
   it('读回做过但没读到数（灰，valid 为 false）→ 不算做过，下一小时接着补', () => {
-    expect(decide({ receipts: [state({ valid: false })] })).toEqual([{ phase: 't1h', launched_at: NOW.toISOString() }])
+    const seen = hoursBefore(3)
+    expect(decide({ receipts: [state({ valid: false })], firstSpendSeenAt: seen })).toEqual([{ phase: 't1h', launched_at: seen }])
     const launched = hoursBefore(30)
     const t24Gray = [
       state({ launched_at: launched, checked_at: launched }),
@@ -147,6 +170,45 @@ describe('postLaunchStatesFromRows · 从运行记录里挑出这个客户的开
       row([postReceipt('c1', 'post_t1h', 'green', '2026-10-01T09:00:00Z', null)], '2026-10-01T09:00:00Z'),
     ]
     expect(postLaunchStatesFromRows(rows, 'c1', SINCE)).toEqual([])
+  })
+})
+
+describe('firstSpendSeenFromRows · 从盯盘函数自己的运行记录里找「第一次看到花费」的时刻', () => {
+  const SINCE = '2026-10-21T00:00:00.000Z'
+  const entry = (clientId: string, spendSeen: boolean | null) => ({ client_id: clientId, active: true, spend_seen: spendSeen, sent: [], error: null })
+  const row = (checkedAt: string, clients: unknown[], status: string | null = 'completed') => ({
+    status, started_at: checkedAt, summary: { checked_at: checkedAt, no_publish: true, clients },
+  })
+
+  it('取这个客户最早一次「看到花费」的盯盘时刻（记录是新的在前，也一样取最早）', () => {
+    const rows = [
+      row('2026-10-22T11:20:00.000Z', [entry('c1', true)]),
+      row('2026-10-22T09:20:00.000Z', [entry('c1', true)]),
+      row('2026-10-22T08:20:00.000Z', [entry('c1', false)]),
+    ]
+    expect(firstSpendSeenFromRows(rows, 'c1', SINCE)).toBe('2026-10-22T09:20:00.000Z')
+  })
+
+  it('没看到花费（false）/ 没读到（null）/ 别的客户 / 还在跑的 / 读不懂的 / 窗口开始之前的，都不算', () => {
+    const rows = [
+      row('2026-10-22T08:20:00.000Z', [entry('c1', false)]),
+      row('2026-10-22T09:20:00.000Z', [entry('c1', null)]),
+      row('2026-10-22T10:20:00.000Z', [entry('c2', true)]),
+      row('2026-10-22T11:20:00.000Z', [entry('c1', true)], 'running'),
+      { status: 'completed', started_at: '2026-10-22T12:20:00.000Z', summary: { nonsense: true } },
+      { status: 'completed', started_at: '2026-10-22T12:30:00.000Z', summary: null },
+      row('2026-10-01T09:20:00.000Z', [entry('c1', true)]),
+    ]
+    expect(firstSpendSeenFromRows(rows, 'c1', SINCE)).toBeNull()
+  })
+
+  it('一条记录都没有 → null', () => {
+    expect(firstSpendSeenFromRows([], 'c1', SINCE)).toBeNull()
+  })
+
+  it('记录里的盯盘时刻读不懂 → 跳过那一条，不抛错', () => {
+    const rows = [row('garbage', [entry('c1', true)]), row('2026-10-22T10:20:00.000Z', [entry('c1', true)])]
+    expect(firstSpendSeenFromRows(rows, 'c1', SINCE)).toBe('2026-10-22T10:20:00.000Z')
   })
 })
 

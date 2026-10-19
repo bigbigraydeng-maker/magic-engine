@@ -339,8 +339,11 @@ describe('tracking.landing_ok', () => {
     expect(gate(judge(i => { i.landing.probes[0].utm_preserved = null }), KEY).status).toBe('green')
   })
 
-  it('页面里一个像素标记都没找到 → 红', () => {
-    expect(gate(judge(i => { i.landing.probes[0].pixel_ids = [] }), KEY).status).toBe('red')
+  it('页面里一个像素标记都没找到 → 红，原因是「没找到像素标记」（不是「不是官方像素」）', () => {
+    const g = gate(judge(i => { i.landing.probes[0].pixel_ids = [] }), KEY)
+    expect(g.status).toBe('red')
+    expect(g.reason).toContain('没找到')
+    expect(g.reason).not.toContain('都不是官方')
   })
 
   it('没连上（超时）→ 灰，不是红也不是绿', () => {
@@ -368,6 +371,45 @@ describe('tracking.landing_ok', () => {
     const g = gate(judge(i => { i.config.landing_targets = []; i.landing.probes = [] }), KEY)
     expect(g.status).toBe('gray')
     expect(g.how).toContain('配置')
+  })
+
+  // 🔴 审查整改（子牙 + 魏征）：每一个落地页都必须挂着官方数据集的像素，
+  //    不能把所有页面的像素凑成一个并集，让「别的页面有官方像素」替这一页顶罪。
+  const pageB = (pixelIds: string[]): JudgeInput['landing']['probes'][number] => ({
+    label: '落地页 B', url: 'https://www.example-shop.test/q?utm_content=b', http_status: 200,
+    final_url: 'https://www.example-shop.test/q?utm_content=b', redirects: 0,
+    utm_preserved: true, pixel_ids: pixelIds, error: null,
+  })
+
+  it('页 A 挂着官方像素、页 B 只有旧像素（不在官方账户里）→ 红，点出是页 B，证据里列出页 B', () => {
+    const g = gate(judge(i => { i.landing.probes.push(pageB([SITE_ONLY])) }), KEY)
+    expect(g.status).toBe('red')
+    expect(g.hard).toBe(true)
+    expect(g.reason).toContain('落地页 B')
+    expect(g.reason).not.toContain('落地页 A')
+    expect(g.evidence.pages_without_official_pixel).toEqual(['落地页 B'])
+  })
+
+  it('每一页都挂着官方像素（各挂各的官方数据集也行）→ 绿，证据里没有缺官方像素的页', () => {
+    const g = gate(judge(i => { i.landing.probes.push(pageB([OTHER_OFFICIAL])) }), KEY)
+    expect(g.status).toBe('green')
+    expect(g.evidence.pages_without_official_pixel).toEqual([])
+  })
+
+  it('单页：页面上只有旧像素、没有任何官方像素 → 红', () => {
+    const g = gate(judge(i => { i.landing.probes[0].pixel_ids = [SITE_ONLY] }), KEY)
+    expect(g.status).toBe('red')
+    expect(g.reason).toContain('官方')
+  })
+
+  it('官方账户的数据集没读到、没法核对「是不是官方像素」→ 黄（不是绿）：原因里说清楚没核对', () => {
+    const g = gate(judge(i => {
+      i.meta.read = false
+      i.meta.account_dataset_ids = []
+      i.landing.probes[0].pixel_ids = [SITE_ONLY]
+    }), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('没核对')
   })
 })
 
@@ -399,6 +441,31 @@ describe('tracking.lead_reaches_crm', () => {
 
   it('CRM 没读到 → 灰', () => {
     expect(gate(judge(i => { i.crm.read = false; i.crm.error = 'boom' }), KEY).status).toBe('gray')
+  })
+
+  // 🔴 审查整改：绿灯判据缩到「48 小时内进过一条」（设计稿是「试跑线索 1 小时内进 CRM」，被动看 48 小时是近似）
+  it('最近一条官网表单线索在 48 小时内 → 绿；刚好 48 小时也算', () => {
+    expect(gate(judge(i => { i.crm.latest_web_form_at = hoursAgo(47) }), KEY).status).toBe('green')
+    expect(gate(judge(i => { i.crm.latest_web_form_at = hoursAgo(48) }), KEY).status).toBe('green')
+  })
+
+  it('近 7 天有线索，但最近一条已超过 48 小时 → 黄（不是绿）：写明几小时前，怎么办里让人做一次试跑提交', () => {
+    const g = gate(judge(i => { i.crm.web_form_touchpoints_7d = 6; i.crm.latest_web_form_at = hoursAgo(48 + 1 / 60) }), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.hard).toBe(true)
+    expect(g.reason).toContain('48')
+    expect(g.how).toContain('试')
+    expect(g.evidence.crm_web_form_touchpoints_7d).toBe(6)
+  })
+
+  it('近 7 天有线索，却读不出最近一条的时间 → 黄（没法确认新鲜度，不能当绿）', () => {
+    expect(gate(judge(i => { i.crm.latest_web_form_at = null }), KEY).status).toBe('yellow')
+    expect(gate(judge(i => { i.crm.latest_web_form_at = 'garbage' }), KEY).status).toBe('yellow')
+  })
+
+  it('48 小时内有线索时，哪怕网站留资信号很多也是绿（红只留给「一条都没有」）', () => {
+    const g = gate(judge(i => { i.crm.web_form_touchpoints_7d = 1; i.crm.latest_web_form_at = hoursAgo(1) }), KEY)
+    expect(g.status).toBe('green')
   })
 
   it('该客户没有官网表单 → 不适用：标 na、非硬门，不计入总灯和前置条件', () => {
@@ -468,6 +535,29 @@ describe('env.token_and_crons', () => {
 
   it('令牌有、但没做过有效性验证 → 黄', () => {
     expect(gate(judge(i => { i.env.capi_preflight = null }), KEY).status).toBe('yellow')
+  })
+
+  // 🔴 审查整改：探活走到一半就停了（配置不全等），令牌有效性是 null（未知）——不能因为「没发现坏」就判绿
+  it('探活没走到验证令牌那一步（token_valid 是 null）→ 黄，不是绿；怎么办里说清楚', () => {
+    const stopped = gate(judge(i => { i.env.capi_preflight = { ok: false, stage: 'config', token_valid: null, pixel_visible: null } }), KEY)
+    expect(stopped.status).toBe('yellow')
+    expect(stopped.hard).toBe(true)
+    expect(stopped.reason).toContain('验证')
+    expect(stopped.how.length).toBeGreaterThan(0)
+  })
+
+  it('探活通过但没给出令牌有效性（token_valid 是 null）→ 同样是黄', () => {
+    expect(gate(judge(i => { i.env.capi_preflight = { ok: true, stage: null, token_valid: null, pixel_visible: true } }), KEY).status).toBe('yellow')
+  })
+
+  it('令牌有效性明确为 true 才是绿', () => {
+    expect(gate(judge(i => { i.env.capi_preflight = { ok: true, stage: null, token_valid: true, pixel_visible: true } }), KEY).status).toBe('green')
+  })
+
+  it('已经确定令牌失效 / 没有令牌 / 定时任务有问题时仍是红，不被「未知 → 黄」盖住', () => {
+    expect(gate(judge(i => { i.env.capi_preflight = { ok: false, stage: 'token', token_valid: false, pixel_visible: null } }), KEY).status).toBe('red')
+    expect(gate(judge(i => { i.env.capi_preflight = null; i.env.meta_token_resolved = false }), KEY).status).toBe('red')
+    expect(gate(judge(i => { i.env.capi_preflight = { ok: false, stage: 'config', token_valid: null, pixel_visible: null }; i.env.jobs[0].last_status = 'failed' }), KEY).status).toBe('red')
   })
 })
 
@@ -616,9 +706,26 @@ describe('judgePostLaunch', () => {
     expect(judgePostLaunch('post_t24h', facts({ link_clicks: 0, landing_page_views: 0 })).status).toBe('red')
   })
 
-  it('点击 ≥ 10 但落地页浏览为 0 → 红；9 个点击还不够下结论', () => {
+  it('点击 ≥ 10 但落地页浏览为 0 → 红', () => {
     expect(judgePostLaunch('post_t1h', facts({ link_clicks: 10, landing_page_views: 0 })).status).toBe('red')
-    expect(judgePostLaunch('post_t1h', facts({ link_clicks: 9, landing_page_views: 0 })).status).toBe('green')
+  })
+
+  // 🔴 审查整改：点击不到 10 次，样本太小，什么都看不出来——不能判绿，改黄「样本不足」
+  it('点击 1–9 次：样本不足 → 黄（1 小时、24 小时读回都一样），原因点明点击数和阈值，怎么办里让人再看下一份', () => {
+    for (const phase of ['post_t1h', 'post_t24h'] as const) {
+      for (const clicks of [1, 9]) {
+        const g = judgePostLaunch(phase, facts({ link_clicks: clicks, landing_page_views: 0, leads: 0 }))
+        expect(g.status, `${phase} ${clicks}`).toBe('yellow')
+        expect(g.reason).toContain('样本不足')
+        expect(g.reason).toContain(String(clicks))
+        expect(g.how.length).toBeGreaterThan(0)
+        expect(g.hard).toBe(false)
+      }
+    }
+  })
+
+  it('点击刚好 10 次就够判断落地页浏览了（不再是样本不足）', () => {
+    expect(judgePostLaunch('post_t1h', facts({ link_clicks: 10, landing_page_views: 9, leads: 0 })).status).toBe('green')
   })
 
   it('点击 ≥ 10 且浏览/点击 < 0.5 → 黄；刚好 0.5 → 绿', () => {
@@ -626,9 +733,22 @@ describe('judgePostLaunch', () => {
     expect(judgePostLaunch('post_t1h', facts({ link_clicks: 20, landing_page_views: 10 })).status).toBe('green')
   })
 
-  it('24 小时读回：点击 ≥ 50 却一条留资都没有 → 黄；49 个点击不判；1 小时读回不看留资', () => {
-    expect(judgePostLaunch('post_t24h', facts({ link_clicks: 50, landing_page_views: 45, leads: 0 })).status).toBe('yellow')
-    expect(judgePostLaunch('post_t24h', facts({ link_clicks: 49, landing_page_views: 45, leads: 0 })).status).toBe('green')
+  it('24 小时读回：点击 ≥ 50 却一条留资都没有 → 黄；1 小时读回不看留资', () => {
+    const enough = judgePostLaunch('post_t24h', facts({ link_clicks: 50, landing_page_views: 45, leads: 0 }))
+    expect(enough.status).toBe('yellow')
+    // 够样本了才说「一条留资都没有」，不是「样本不足」
+    expect(enough.reason).toContain('一条留资都没有')
+    expect(enough.reason).not.toContain('样本不足')
     expect(judgePostLaunch('post_t1h', facts({ link_clicks: 50, landing_page_views: 45, leads: 0 })).status).toBe('green')
+  })
+
+  it('24 小时读回：点击 10–49 次且一条留资都没有 → 黄「样本不足」（还看不出留资有没有在记），不是绿；有留资就是绿', () => {
+    const g = judgePostLaunch('post_t24h', facts({ link_clicks: 49, landing_page_views: 45, leads: 0 }))
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('样本不足')
+    expect(g.reason).toContain('49')
+    expect(judgePostLaunch('post_t24h', facts({ link_clicks: 49, landing_page_views: 45, leads: 1 })).status).toBe('green')
+    // 1 小时读回本来就不看留资
+    expect(judgePostLaunch('post_t1h', facts({ link_clicks: 49, landing_page_views: 45, leads: 0 })).status).toBe('green')
   })
 })

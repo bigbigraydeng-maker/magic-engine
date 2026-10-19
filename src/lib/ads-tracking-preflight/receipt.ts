@@ -206,8 +206,13 @@ export function isTrackingRunReceiptLike(value: unknown): value is TrackingRunRe
   )
 }
 
-// ─── 从 cron_run_logs 里挑最新一份含该客户的回执 ─────────────────────────────
+// ─── 从 cron_run_logs 里挑最新一份含该客户的「开投前」回执 ─────────────────────
 
+/**
+ * 🔴 只认开投前体检（phase === 'preflight'）。开投后读回（post_t1h / post_t24h）和体检写在同一个
+ * 任务名下，但它只有一道门：不挑阶段的话，读回会把早上的红灯待办顶掉、推广计划看板的十道门全灰，
+ * 36 小时「回执过期」的判据也会被读回刷新。
+ */
 export function pickLatestClientReceipt(
   rows: readonly { status: string | null; started_at: string; summary: unknown }[],
   clientId: string,
@@ -215,7 +220,7 @@ export function pickLatestClientReceipt(
   for (const row of rows) {
     if (row.status === 'running') continue
     if (!isTrackingRunReceiptLike(row.summary)) continue
-    const receipt = row.summary.clients.find(c => c.client_id === clientId)
+    const receipt = row.summary.clients.find(c => c.client_id === clientId && c.phase === 'preflight')
     if (receipt) return { receipt, started_at: row.started_at }
   }
   return null

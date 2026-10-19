@@ -115,6 +115,8 @@ function makeDeps(opts: DepsOpts = {}) {
       loadPropertyId: async () => (opts.propertyId === undefined ? '111' : opts.propertyId),
       fetchEventCounts: async () => ({ generate_lead: 8, enquiry_thank_you: 5 }),
     },
+    // 测试里不真等：失败重试前的等待直接略过
+    sleep: async () => undefined,
   }
   return { deps, ...net, ...db }
 }
@@ -282,5 +284,66 @@ describe('开投后读回', () => {
     expect(receipt.gates.map(g => g.key)).toEqual(['post.t24h'])
     expect(receipt.items.map(i => i.gate_key)).toEqual(['post.t24h'])
     expect(receipt.items[0].href).toBe(`${APP_BASE}/dashboard/clients/c1/promo-plan`)
+  })
+})
+
+describe('收集函数 · 瞬时故障重试一次 + 广告系列范围（审查整改）', () => {
+  it('找 Meta 令牌第一次抛错、第二次正常 → 照常读 Meta，没有「找令牌出错」', async () => {
+    let n = 0
+    const world = makeDeps()
+    world.deps.resolveMetaToken = async () => { n += 1; if (n === 1) throw new Error('db blip'); return SECRET }
+    const out = await collectMetaFacts('c1', CONFIG, [OFFICIAL], world.deps)
+    expect(out.facts.read).toBe(true)
+    expect(out.errors.some(e => e.error.includes('令牌'))).toBe(false)
+    expect(n).toBe(2)
+  })
+
+  it('开投后读回：找令牌第一次抛错、第二次正常 → 照常发请求', async () => {
+    let n = 0
+    const world = makeDeps()
+    world.deps.resolveMetaToken = async () => { n += 1; if (n === 1) throw new Error('db blip'); return SECRET }
+    await collectPostLaunchFacts('c1', CONFIG, '2026-10-19T09:00:00.000Z', world.deps)
+    expect(world.urls.some(u => u.includes('/insights'))).toBe(true)
+  })
+
+  it('落地页第一次连接失败 → 用 deps 里的 sleep 等一下再试，第二次成功就是正常的', async () => {
+    const sleeps: number[] = []
+    let hits = 0
+    const world = makeDeps()
+    const inner = world.deps.fetcher
+    world.deps.fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(String(input)).hostname === 'www.example-shop.test') { hits += 1; if (hits === 1) throw new Error('reset') }
+      return inner(input, init)
+    }) as typeof fetch
+    world.deps.sleep = async ms => { sleeps.push(ms) }
+    const out = await collectLandingFacts(CONFIG, world.deps)
+    expect(out.facts.probes[0].http_status).toBe(200)
+    expect(out.errors).toEqual([])
+    expect(sleeps).toHaveLength(1)
+  })
+
+  it('开投后读回按配置里本次投放的广告系列过滤（配置里没有盯盘窗口时看整个账户）', async () => {
+    const withWatch: TrackingClientConfig = {
+      ...CONFIG,
+      launch_watch: { from: '2026-10-19', days: 4, timezone: 'Pacific/Auckland', campaign_ids: ['123456789012'] },
+    }
+    const scoped = makeDeps()
+    await collectPostLaunchFacts('c1', withWatch, '2026-10-19T09:00:00.000Z', scoped.deps)
+    const scopedUrl = new URL(scoped.urls.find(u => u.includes('/insights')) ?? '')
+    expect(scopedUrl.searchParams.get('level')).toBe('campaign')
+    expect(scopedUrl.searchParams.get('fields')).toContain('campaign_name')
+
+    // 只给名字关键词（编号为空）也要按系列读
+    const namesOnly: TrackingClientConfig = {
+      ...CONFIG,
+      launch_watch: { from: '2026-10-19', days: 4, timezone: 'Pacific/Auckland', campaign_ids: [], campaign_name_contains: ['官网点击'] },
+    }
+    const byName = makeDeps()
+    await collectPostLaunchFacts('c1', namesOnly, '2026-10-19T09:00:00.000Z', byName.deps)
+    expect(new URL(byName.urls.find(u => u.includes('/insights')) ?? '').searchParams.get('level')).toBe('campaign')
+
+    const whole = makeDeps()
+    await collectPostLaunchFacts('c1', CONFIG, '2026-10-19T09:00:00.000Z', whole.deps)
+    expect(new URL(whole.urls.find(u => u.includes('/insights')) ?? '').searchParams.get('level')).toBe('account')
   })
 })

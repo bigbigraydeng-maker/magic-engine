@@ -6,6 +6,10 @@ import {
   probeLanding,
   utmPreserved,
 } from '../landing-probe'
+import { RETRY_DELAY_MS } from '../retry'
+
+/** 测试里不真等：失败重试前的等待直接略过。 */
+const noSleep = async (): Promise<void> => undefined
 
 // 全部用虚构的域名和编号：平台通用代码的测试里不许出现真实客户的域名 / 编号。
 const SITE = 'https://www.example-shop.test'
@@ -55,6 +59,31 @@ describe('extractPixelIds · 页面 HTML 里的 Meta 像素编号', () => {
   it('两个像素同时出现', () => {
     const html = `<img src="https://www.facebook.com/tr?id=${PX1}&ev=PageView"><img src="https://www.facebook.com/tr?id=${PX2}&ev=PageView">`
     expect(extractPixelIds(html)).toEqual([PX1, PX2])
+  })
+
+  it('id 不是紧跟 facebook.com/tr? 的第一个参数也认；id= 前面必须是参数边界（xid=、pid= 不算）', () => {
+    expect(extractPixelIds(`https://www.facebook.com/tr?ev=PageView&noscript=1&id=${PX1}`)).toEqual([PX1])
+    expect(extractPixelIds(`https://www.facebook.com/tr?xid=${PX1}&pid=${PX2}`)).toEqual([])
+  })
+
+  it('查询串在引号 / 尖括号处结束：引号后面的 id= 不算这个 tr? 的', () => {
+    expect(extractPixelIds(`<a href="https://www.facebook.com/tr?ev=PageView">x</a> <p id=${PX1}>`)).toEqual([])
+  })
+
+  // 🔴 审查整改（魏征实测）：恶意大页面里堆很多「facebook.com/tr?」再接一大片没有引号的字符，
+  //    旧写法对每个起点都扫到页尾，二次方级别，能把进程卡住。新写法每个起点只看一小段。
+  it('大量 "facebook.com/tr?" 后面跟一大片没有引号的字符 → 线性时间内返回（旧写法要好几秒）', () => {
+    const html = 'facebook.com/tr?'.repeat(10_000) + 'a'.repeat(300_000)
+    const started = Date.now()
+    expect(extractPixelIds(html)).toEqual([])
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
+  it('同样的恶意页面末尾有一个真像素 → 照样认出来，而且很快', () => {
+    const html = 'facebook.com/tr?'.repeat(10_000) + 'a'.repeat(300_000) + `<img src="https://www.facebook.com/tr?id=${PX1}&ev=PageView">`
+    const started = Date.now()
+    expect(extractPixelIds(html)).toEqual([PX1])
+    expect(Date.now() - started).toBeLessThan(500)
   })
 })
 
@@ -193,9 +222,10 @@ describe('probeLanding', () => {
     expect(fact.pixel_ids).toEqual([])
   })
 
-  it('网络错误：状态码为空，错误文案里不带令牌', async () => {
-    const { fetcher } = scripted([new Error('fetch failed access_token=SECRET_TOKEN_VALUE_123')])
-    const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher })
+  it('网络错误：状态码为空，错误文案里不带令牌（先重试了一次，两次都失败才算）', async () => {
+    const { fetcher, calls } = scripted([new Error('fetch failed access_token=SECRET_TOKEN_VALUE_123')])
+    const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher, sleep: noSleep })
+    expect(calls).toHaveLength(2)
     expect(fact.http_status).toBeNull()
     expect(fact.final_url).toBeNull()
     expect(fact.pixel_ids).toEqual([])
@@ -228,5 +258,98 @@ describe('probeLanding', () => {
     const { fetcher } = scripted([{ status: 200, body: HTML }])
     const fact = await probeLanding({ label: 'A', url: `${SITE}/p` }, { siteUrl: SITE, fetcher })
     expect(fact.utm_preserved).toBeNull()
+  })
+})
+
+describe('probeLanding · 正文读取有上限（审查整改：恶意大页面不能把内存读爆）', () => {
+  it('对方一直发数据 → 只读到上限就停手并取消，上限之前的像素标记照样认', async () => {
+    let pulled = 0
+    const head = new TextEncoder().encode(HTML)
+    const chunk = new TextEncoder().encode('x'.repeat(256 * 1024))
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1
+        if (pulled === 1) { controller.enqueue(head); return }
+        if (pulled > 400) { controller.close(); return }
+        controller.enqueue(chunk)
+      },
+    })
+    const fetcher = vi.fn(async () => new Response(stream, { status: 200 }))
+    const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher, timeoutMs: 5000 })
+    expect(fact.http_status).toBe(200)
+    expect(fact.pixel_ids).toEqual([PX1])
+    expect(pulled).toBeLessThan(40)
+  })
+
+  it('页面比上限小 → 照常读完', async () => {
+    const { fetcher } = scripted([{ status: 200, body: HTML }])
+    const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher })
+    expect(fact.pixel_ids).toEqual([PX1])
+  })
+})
+
+describe('probeLanding · 瞬时故障重试一次（审查整改）', () => {
+  it('第一次连接失败（超时 / 网络错误）→ 等一下再试一次，第二次成功就当没发生过', async () => {
+    const sleeps: number[] = []
+    const { fetcher, calls } = scripted([new Error('network down'), { status: 200, body: HTML }])
+    const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher, sleep: async ms => { sleeps.push(ms) } })
+    expect(fact.http_status).toBe(200)
+    expect(fact.error).toBeNull()
+    expect(fact.pixel_ids).toEqual([PX1])
+    expect(calls).toHaveLength(2)
+    expect(sleeps).toEqual([RETRY_DELAY_MS])
+  })
+
+  it('502 / 503 / 504 / 429 → 再试一次；第二次 200 就用第二次的', async () => {
+    for (const status of [502, 503, 504, 429]) {
+      const { fetcher, calls } = scripted([{ status }, { status: 200, body: HTML }])
+      const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher, sleep: noSleep })
+      expect(fact.http_status, String(status)).toBe(200)
+      expect(calls, String(status)).toHaveLength(2)
+    }
+  })
+
+  it('连着两次 503 → 最终就是 503（落地页红），一共只发两次', async () => {
+    const { fetcher, calls } = scripted([{ status: 503 }])
+    const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher, sleep: noSleep })
+    expect(fact.http_status).toBe(503)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('404 和跳转不重试（它们不是瞬时故障）', async () => {
+    const notFound = scripted([{ status: 404 }])
+    await probeLanding(TARGET, { siteUrl: SITE, fetcher: notFound.fetcher, sleep: noSleep })
+    expect(notFound.calls).toHaveLength(1)
+
+    const redirect = scripted([{ status: 301, location: 'https://evil.test/x' }])
+    await probeLanding(TARGET, { siteUrl: SITE, fetcher: redirect.fetcher, sleep: noSleep })
+    expect(redirect.calls).toHaveLength(1)
+  })
+
+  it('两次都抛错 → 没连上（状态码空），错误文案不带令牌，一共只发两次', async () => {
+    const { fetcher, calls } = scripted([new Error('down access_token=SECRET_TOKEN_VALUE_123')])
+    const fact = await probeLanding(TARGET, { siteUrl: SITE, fetcher, sleep: noSleep })
+    expect(fact.http_status).toBeNull()
+    expect(calls).toHaveLength(2)
+    expect(JSON.stringify(fact)).not.toContain('SECRET_TOKEN_VALUE_123')
+  })
+
+  it('跳转链上的某一跳瞬时失败 → 只重试那一跳，不从头再来', async () => {
+    const { fetcher, calls } = scripted([
+      { status: 308, location: '/p?utm_source=facebook&utm_content=a' },
+      { status: 503 },
+      { status: 200, body: HTML },
+    ])
+    const fact = await probeLanding(
+      { label: 'A', url: `${SITE}/p/?utm_source=facebook&utm_content=a` },
+      { siteUrl: SITE, fetcher, sleep: noSleep },
+    )
+    expect(fact.http_status).toBe(200)
+    expect(fact.redirects).toBe(1)
+    expect(calls.map(c => c.url)).toEqual([
+      `${SITE}/p/?utm_source=facebook&utm_content=a`,
+      `${SITE}/p?utm_source=facebook&utm_content=a`,
+      `${SITE}/p?utm_source=facebook&utm_content=a`,
+    ])
   })
 })

@@ -10,6 +10,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pixelEnvVar } from '@/lib/meta/capi/config'
 import type { CronJobFact, EnvFacts } from './types'
+import { retryOnce, type Sleep } from './retry'
 import { sanitizeError } from './sanitize'
 
 /** 默认要盯的定时任务：两个同步任务，各 3 小时。 */
@@ -23,6 +24,8 @@ export interface EnvReadDeps {
   env: Record<string, string | undefined>
   capiPreflight(clientId: string): Promise<{ ok: boolean; detail: Record<string, unknown> }>
   resolveMetaToken(clientId: string): Promise<string | null>
+  /** 单测里换成不真等的版本；不传就真等 */
+  sleep?: Sleep
 }
 
 export interface EnvReadInput {
@@ -52,11 +55,17 @@ async function readCapiTarget(
 ): Promise<CapiTarget> {
   const unreadable: CapiTarget = { status: 'unreadable', pixel_id: null }
 
-  const { data, error } = await deps.supabase
-    .from('clients')
-    .select('domain')
-    .eq('id', clientId)
-    .maybeSingle()
+  const { data, error } = await retryOnce(
+    async () => {
+      const r = await deps.supabase
+        .from('clients')
+        .select('domain')
+        .eq('id', clientId)
+        .maybeSingle()
+      return { data: r.data, error: r.error ? { message: r.error.message } : null }
+    },
+    { sleep: deps.sleep, retryResult: r => r.error !== null },
+  )
 
   if (error) {
     errors.push(sanitizeError(error.message))
@@ -96,7 +105,7 @@ async function readCapiPreflight(
   errors: string[],
 ): Promise<CapiPreflight> {
   try {
-    const r = await deps.capiPreflight(clientId)
+    const r = await retryOnce(() => deps.capiPreflight(clientId), { sleep: deps.sleep })
     const detail = r.detail ?? {}
     return {
       ok: r.ok,
@@ -120,12 +129,18 @@ async function readCapiEvents(
 ): Promise<CapiEvents> {
   const sinceIso = new Date(now.getTime() - SEVEN_DAYS_MS).toISOString()
 
-  const { data, error } = await deps.supabase
-    .from('me_conversion_writebacks')
-    .select('status, me_sale_outcomes!inner(client_id)')
-    .eq('destination', 'meta_capi')
-    .eq('me_sale_outcomes.client_id', clientId)
-    .gte('created_at', sinceIso)
+  const { data, error } = await retryOnce(
+    async () => {
+      const r = await deps.supabase
+        .from('me_conversion_writebacks')
+        .select('status, me_sale_outcomes!inner(client_id)')
+        .eq('destination', 'meta_capi')
+        .eq('me_sale_outcomes.client_id', clientId)
+        .gte('created_at', sinceIso)
+      return { data: r.data, error: r.error ? { message: r.error.message } : null }
+    },
+    { sleep: deps.sleep, retryResult: r => r.error !== null },
+  )
 
   if (error) {
     errors.push(sanitizeError(error.message))
@@ -151,7 +166,7 @@ async function readMetaTokenResolved(
   errors: string[],
 ): Promise<boolean> {
   try {
-    const token = await deps.resolveMetaToken(clientId)
+    const token = await retryOnce(() => deps.resolveMetaToken(clientId), { sleep: deps.sleep })
     return Boolean(token)
   } catch (err) {
     errors.push(sanitizeError(err))
@@ -173,13 +188,19 @@ async function readOneJob(
     last_status: null,
   }
 
-  const { data, error } = await deps.supabase
-    .from('cron_run_logs')
-    .select('status, finished_at, started_at')
-    .eq('job_name', job.job)
-    .neq('status', 'running')
-    .order('started_at', { ascending: false })
-    .limit(1)
+  const { data, error } = await retryOnce(
+    async () => {
+      const r = await deps.supabase
+        .from('cron_run_logs')
+        .select('status, finished_at, started_at')
+        .eq('job_name', job.job)
+        .neq('status', 'running')
+        .order('started_at', { ascending: false })
+        .limit(1)
+      return { data: r.data, error: r.error ? { message: r.error.message } : null }
+    },
+    { sleep: deps.sleep, retryResult: r => r.error !== null },
+  )
 
   if (error) {
     errors.push(sanitizeError(error.message))

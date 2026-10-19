@@ -38,7 +38,7 @@ function buildCandidate(kind: 'preflight' | 'postlaunch', body: Record<string, u
   }
 }
 
-export function buildTriggerEvent(body: unknown, configuredClientIds: readonly string[]): TriggerResult {
+export function buildTriggerEvent(body: unknown, configuredClientIds: readonly string[], now: Date): TriggerResult {
   const d = asRecord(body)
   if (!d) return fail('请求内容必须是 JSON 对象')
   if (d.kind !== 'preflight' && d.kind !== 'postlaunch') return fail('kind 只能是 preflight 或 postlaunch')
@@ -50,7 +50,7 @@ export function buildTriggerEvent(body: unknown, configuredClientIds: readonly s
   const dryRun = d.dry_run !== false
   const candidate = buildCandidate(d.kind, d)
 
-  const plan = planRun({ eventName: candidate.name, data: candidate.data, configuredClientIds })
+  const plan = planRun({ eventName: candidate.name, data: candidate.data, configuredClientIds, now })
   if (typeof plan.error === 'string' || plan.clientIds.length !== 1) {
     return fail(plan.error ?? '没有可查的客户')
   }

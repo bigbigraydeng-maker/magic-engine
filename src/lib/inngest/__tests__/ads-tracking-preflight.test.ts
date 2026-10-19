@@ -113,6 +113,20 @@ describe('装配', () => {
     expect(failOpenCronRuns.mock.calls[0][1]).toContain('炸了')
   })
 
+  // 🔴 审查整改：写进运行记录的失败原因要过 sanitizeError——报错文字里可能回显令牌
+  it('onFailure 写进运行记录的原因里不能带令牌：access_token=… 和 40 位以上的长串都要被抹掉', async () => {
+    failOpenCronRuns.mockClear()
+    const leaked = 'EAAB' + 'x'.repeat(60)
+    await optsOf(adsTrackingPreflight).onFailure?.({
+      event: { ts: NOW.getTime(), data: {} },
+      error: new Error(`Meta 400 access_token=SECRETVALUE123 bearer ${leaked}`),
+    })
+    const written = String(failOpenCronRuns.mock.calls[0][1])
+    expect(written).not.toContain('SECRETVALUE123')
+    expect(written).not.toContain(leaked)
+    expect(written).toContain('重试耗尽后仍失败')
+  })
+
   it('可以用假依赖造一个函数（单测入口）', () => {
     expect(createAdsTrackingPreflightFunction(makeDeps().deps).id()).toBe(`${CLOUD_FN_PREFIX}ads-tracking-preflight`)
   })
@@ -277,6 +291,18 @@ describe('编排 · 开投后读回', () => {
     expect(run.clients[0]).toMatchObject({ phase: 'post_t24h', trigger: 'postlaunch', overall: 'green', launched_at: '2026-10-18T10:00:00Z' })
     expect(run.clients[0].gates.map(g => g.key)).toEqual(['post.t24h'])
     expect(sent).toHaveLength(1)
+  })
+
+  it('开投时间不合理（晚于现在 / 早于 7 天前）→ 不读，回执 partial 写明原因', async () => {
+    for (const launched_at of ['2026-10-19T12:00:00Z', '2026-10-01T00:00:00Z']) {
+      const { deps, collectorCalls } = makeDeps()
+      const { ids, step } = fakeStep()
+      const run = await runTrackingPreflight(step, { name: ADS_TRACKING_POSTLAUNCH_REQUESTED, data: { client_id: 'c1', phase: 't1h', launched_at } }, deps)
+      expect(ids, launched_at).toEqual(['start-run', 'finish-run'])
+      expect(collectorCalls, launched_at).toEqual([])
+      expect(run, launched_at).toMatchObject({ status: 'partial', trigger: 'postlaunch' })
+      expect(run.error, launched_at).toBeTruthy()
+    }
   })
 
   it('事件内容不对（阶段写错）→ 不读，回执 partial 写明原因', async () => {

@@ -3,12 +3,16 @@
  *
  * 为什么要有它：开投后 1 小时 / 24 小时的追踪读回（ads.tracking_postlaunch.requested）
  * 原本要靠人在点开投那一刻记得发事件——靠人记会漏。这个函数每小时看一眼：
- * 在客户配置的盯盘窗口里，官方广告账户一旦开始花钱、又没做过 T+1h 读回，就自己发 T+1h；
+ * 在客户配置的盯盘窗口里，本次投放的广告系列一旦开始花钱，就记下「第一次看到花费」的时刻；
+ * 满 1 小时、又没做过 T+1h 读回，就自己发 T+1h（不在发现花费的当小时就读，那时候刚开投，数字说明不了什么）；
  * T+1h 做过且满 24 小时、没做过 T+24h，就自己发 T+24h。
  * 它发的是跟人手一样的事件（走同一个入口、同一套内容校验、同一个读回函数），
  * 人手先发了也行：读回过的就不会再补（读回的数全是空 = 没读到，不算做过）。
  *
- * 「开投时刻」说明：自动补排看不到点开投的真实时刻，T+1h 的开投时刻记为「第一次看到有花费的那个小时」
+ * 花费只按客户配置里的广告系列（campaign_ids）算，不是整个官方账户——账户里别的系列早就在花钱，
+ * 按账户算会把「开投」误判在窗口第一天。
+ *
+ * 「开投时刻」说明：自动补排看不到点开投的真实时刻，T+1h 的开投时刻记为「第一次看到有花费的那次盯盘」
  * （误差不超过 1 小时）；人手带着真实开投时刻发的读回会被优先采用（取最早的开投时刻）。
  *
  * 🔴 本函数只读：读 Meta 花费、读运行记录、发事件；唯一的写是 cron_run_logs 的运行记录。
@@ -25,6 +29,7 @@ import { resolveMetaToken } from '@/lib/meta/token-selection'
 import { getTrackingClientConfig, listTrackingClientIds } from '@/lib/ads-tracking-preflight/client-config'
 import {
   decideLaunchWatch,
+  firstSpendSeenFromRows,
   isWatchActive,
   postLaunchStatesFromRows,
   watchEventId,
@@ -32,6 +37,7 @@ import {
 } from '@/lib/ads-tracking-preflight/launch-watch'
 import { readPostLaunchFacts } from '@/lib/ads-tracking-preflight/post-launch'
 import { TRACKING_PREFLIGHT_JOB } from '@/lib/ads-tracking-preflight/receipt'
+import { sanitizeError } from '@/lib/ads-tracking-preflight/sanitize'
 import type { LaunchWatchConfig, TrackingClientConfig } from '@/lib/ads-tracking-preflight/types'
 
 export const LAUNCH_WATCH_JOB = 'ads-tracking-launch-watch'
@@ -54,9 +60,11 @@ export interface LaunchWatchDeps {
   readonly now: () => Date
   readonly configuredClientIds: () => string[]
   readonly getConfig: (clientId: string) => TrackingClientConfig | null
-  /** 盯盘窗口开始以来官方账户的累计花费；读不到返回 read=false，永不 reject。 */
+  /** 盯盘窗口开始以来、本次投放的广告系列的累计花费；读不到返回 read=false，永不 reject。 */
   readonly readSpend: (clientId: string, cfg: TrackingClientConfig, watch: LaunchWatchConfig, now: Date) => Promise<LaunchWatchSpend>
   readonly loadReceiptStates: (clientId: string, sinceIso: string) => Promise<PostLaunchReceiptState[]>
+  /** 盯盘自己的运行记录里「第一次看到花费」的那次盯盘时刻；没有 = null。读库出错会抛错（由步骤重试）。 */
+  readonly loadFirstSpendSeenAt: (clientId: string, sinceIso: string) => Promise<string | null>
   readonly sendEvent: (event: { id: string; data: AdsTrackingPostLaunchRequestedData }) => Promise<void>
   readonly startRun: () => Promise<string>
   readonly finishRun: (runId: string, startedAt: number, summary: LaunchWatchSummary) => Promise<void>
@@ -86,11 +94,19 @@ function sinceIsoOf(watch: LaunchWatchConfig): string {
 
 // ─── 真依赖 ─────────────────────────────────────────────────────────────────
 
-async function realReadSpend(clientId: string, cfg: TrackingClientConfig, watch: LaunchWatchConfig, now: Date): Promise<LaunchWatchSpend> {
+/** 真读花费：只按配置里本次投放的广告系列（编号或名字）算（导出给单测用）。 */
+export async function readLaunchSpend(clientId: string, cfg: TrackingClientConfig, watch: LaunchWatchConfig, now: Date): Promise<LaunchWatchSpend> {
   const token = (await resolveMetaToken(supabaseAdmin, clientId, process.env))?.token ?? null
   if (!token) return { read: false, spend_cents: 0, error: '没有可用的 Meta 令牌' }
   const out = await readPostLaunchFacts({
-    adAccountId: cfg.ad_account_id, token, fetcher: fetch, now, launchedAt: now.toISOString(), sinceDate: watch.from,
+    adAccountId: cfg.ad_account_id,
+    token,
+    fetcher: fetch,
+    now,
+    launchedAt: now.toISOString(),
+    sinceDate: watch.from,
+    campaignIds: watch.campaign_ids,
+    campaignNameContains: watch.campaign_name_contains,
   })
   return { read: out.facts.read, spend_cents: out.facts.spend_cents, error: out.facts.error }
 }
@@ -107,6 +123,19 @@ async function realLoadReceiptStates(clientId: string, sinceIso: string): Promis
   return postLaunchStatesFromRows((data ?? []) as { status: string | null; started_at: string; summary: unknown }[], clientId, sinceIso)
 }
 
+/** 盯盘自己的运行记录（每小时一行）里找「第一次看到花费」的时刻。回看 120 行 ≈ 5 天，够盖住 4 天的窗口。 */
+async function realLoadFirstSpendSeenAt(clientId: string, sinceIso: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from('cron_run_logs')
+    .select('status, started_at, summary')
+    .eq('job_name', LAUNCH_WATCH_JOB)
+    .gte('started_at', sinceIso)
+    .order('started_at', { ascending: false })
+    .limit(120)
+  if (error) throw new Error(`读不到盯盘自己的运行记录：${error.message}`.slice(0, 160))
+  return firstSpendSeenFromRows((data ?? []) as { status: string | null; started_at: string; summary: unknown }[], clientId, sinceIso)
+}
+
 /** 自动补排发出的事件：事件名就是人手入口用的那个，编号由盯盘按小时算好（同一小时重复触发只算一次）。 */
 export function postLaunchEvent(event: { id: string; data: AdsTrackingPostLaunchRequestedData }) {
   return { id: event.id, name: ADS_TRACKING_POSTLAUNCH_REQUESTED, data: { ...event.data } }
@@ -117,8 +146,9 @@ function realDeps(): LaunchWatchDeps {
     now: () => new Date(),
     configuredClientIds: listTrackingClientIds,
     getConfig: getTrackingClientConfig,
-    readSpend: realReadSpend,
+    readSpend: readLaunchSpend,
     loadReceiptStates: realLoadReceiptStates,
+    loadFirstSpendSeenAt: realLoadFirstSpendSeenAt,
     sendEvent: async event => {
       await inngest.send(postLaunchEvent(event))
     },
@@ -146,8 +176,12 @@ async function watchOneClient(
   const spend = await step.run(`spend:${clientId}`, () => deps.readSpend(clientId, cfg, watch, now))
   const receipts = await step.run(`state:${clientId}`, () => deps.loadReceiptStates(clientId, sinceIsoOf(watch)))
   const spendSeen = spend.read ? spend.spend_cents > 0 : null
+  // 只有看到花费时才需要知道「第一次看到是什么时候」（T+1h 要等它之后满 1 小时）
+  const firstSpendSeenAt = spendSeen === true
+    ? await step.run(`first-seen:${clientId}`, () => deps.loadFirstSpendSeenAt(clientId, sinceIsoOf(watch)))
+    : null
 
-  const decisions = decideLaunchWatch({ watch, now, spendSeen: spendSeen === true, receipts })
+  const decisions = decideLaunchWatch({ watch, now, spendSeen: spendSeen === true, receipts, firstSpendSeenAt })
   const sent: LaunchWatchClientSummary['sent'] = []
   for (const d of decisions) {
     const eventId = watchEventId(clientId, d.phase, now)
@@ -195,7 +229,8 @@ export function createAdsTrackingLaunchWatchFunction(deps: LaunchWatchDeps = rea
           '未知错误'
         const ts = (event as { ts?: number }).ts
         const startedBefore = new Date(typeof ts === 'number' ? ts : Date.now())
-        await failOpenCronRuns(LAUNCH_WATCH_JOB, `重试耗尽后仍失败：${message}`, { startedBefore })
+        // 🔴 报错文字里可能回显令牌，写进运行记录前先过 sanitizeError
+        await failOpenCronRuns(LAUNCH_WATCH_JOB, `重试耗尽后仍失败：${sanitizeError(message)}`, { startedBefore })
       },
     },
     [{ cron: `TZ=${LAUNCH_WATCH_TZ} ${LAUNCH_WATCH_CRON}` }],

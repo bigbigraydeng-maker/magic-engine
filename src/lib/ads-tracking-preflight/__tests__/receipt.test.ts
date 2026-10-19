@@ -220,6 +220,26 @@ describe('pickLatestClientReceipt', () => {
     expect(pickLatestClientReceipt(rows, 'c1')).toBeNull()
     expect(pickLatestClientReceipt([], 'c1')).toBeNull()
   })
+
+  // 🔴 审查整改（子牙 + 魏征都抓到）：开投后读回的回执和开投前体检写在同一个任务名下。
+  //    不挑阶段的话，开投后读回会把早上的红灯待办顶掉、看板十道门全灰、36 小时判据被读回刷新。
+  it('开投后读回的回执不算「开投前回执」：混在最新位置时，仍取更早的那份开投前回执', () => {
+    const rows = [
+      run([clientReceipt('c1', { request_id: 'post', phase: 'post_t1h', trigger: 'postlaunch' })], '2026-10-19T09:30:00Z'),
+      run([clientReceipt('c1', { request_id: 'pre' })], '2026-10-19T07:00:00Z'),
+    ]
+    const picked = pickLatestClientReceipt(rows, 'c1')
+    expect(picked?.receipt.request_id).toBe('pre')
+    expect(picked?.started_at).toBe('2026-10-19T07:00:00Z')
+  })
+
+  it('只有开投后读回的回执（t1h / t24h）→ null，它不是开投前的体检，不能拿来代替', () => {
+    const rows = [
+      run([clientReceipt('c1', { phase: 'post_t24h', trigger: 'postlaunch' })], '2026-10-20T09:30:00Z'),
+      run([clientReceipt('c1', { phase: 'post_t1h', trigger: 'postlaunch' })], '2026-10-19T09:30:00Z'),
+    ]
+    expect(pickLatestClientReceipt(rows, 'c1')).toBeNull()
+  })
 })
 
 describe('receiptAgeHours', () => {

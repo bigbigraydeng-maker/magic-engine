@@ -36,8 +36,19 @@ const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
     planned_daily_budget_cents: 10100,
     official_daily_cap_cents: 11000,
     currency: 'NZD',
-    // 10-22 起投：开投后每小时看一眼官方账户，一开始花钱就自动补排 T+1h / T+24h 读回（盯 4 天）
-    launch_watch: { from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland' },
+    // 10-22 起投：开投后每小时看一眼本次投放的广告系列，一开始花钱、满 1 小时就自动补排 T+1h / T+24h 读回（盯 4 天）。
+    // 花费只按本次投放的广告系列算——官方账户里别的系列早就在花钱，按整个账户算会把「开投」误判在第一天。
+    // 认系列有两条（任意一条对上就算）：编号（A 系列·官网点击），或名字里同时含「官网点击」和「20261022」。
+    // 第二条是保险：这个系列现在还是未发布的草稿，发布之后编号会不会变没法事先验证，名字不会变。
+    // 名字里不含「官网点击」的两个表单系列（拉新 / 收割）不算——它们的留资走 Meta 表单，不走官网像素。
+    // 下一次开投换日期时，系列编号和名字关键词也要一起换。
+    launch_watch: {
+      from: '2026-10-22',
+      days: 4,
+      timezone: 'Pacific/Auckland',
+      campaign_ids: ['52558131445673'],
+      campaign_name_contains: ['官网点击', '20261022'],
+    },
   },
 }
 

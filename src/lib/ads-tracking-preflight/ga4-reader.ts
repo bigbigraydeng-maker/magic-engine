@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Ga4Facts } from './types'
+import { retryOnce, type Sleep } from './retry'
 import { sanitizeError } from './sanitize'
 
 export interface Ga4ReadDeps {
@@ -10,6 +11,8 @@ export interface Ga4ReadDeps {
     eventNames: readonly string[],
     periodDays: number,
   ): Promise<Record<string, number> | null>
+  /** 单测里换成不真等的版本；不传就真等 */
+  sleep?: Sleep
 }
 
 const NOT_CONNECTED = 'GA4 还没有连接属性：这个客户没有已连接的 GA4'
@@ -22,7 +25,7 @@ export async function readGa4Facts(
   const asOf = input.now.toISOString()
 
   try {
-    const propertyId = await deps.loadPropertyId(input.clientId)
+    const propertyId = await retryOnce(() => deps.loadPropertyId(input.clientId), { sleep: deps.sleep })
     if (propertyId === null) {
       return {
         facts: { read: false, error: NOT_CONNECTED, events_7d: {}, as_of: asOf },
@@ -30,7 +33,10 @@ export async function readGa4Facts(
       }
     }
 
-    const counts = await deps.fetchEventCounts(propertyId, input.clientId, input.eventNames, 7)
+    const counts = await retryOnce(
+      () => deps.fetchEventCounts(propertyId, input.clientId, input.eventNames, 7),
+      { sleep: deps.sleep },
+    )
     if (counts === null) {
       return {
         facts: { read: false, error: NO_AUTH, events_7d: {}, as_of: asOf },

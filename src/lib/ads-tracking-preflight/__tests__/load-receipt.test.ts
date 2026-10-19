@@ -65,6 +65,36 @@ describe('loadTrackingGateFacts · 给推广计划检查清单读最近一份回
     await expect(loadTrackingGateFacts(supabase, 'c1')).resolves.toEqual({ receipt: null })
   })
 
+  // 🔴 审查整改：开投后读回的回执和体检写在同一个任务名下，不挑阶段会让看板十道门全灰
+  const postRunFor = (clientId: string, checkedAt: string) => buildRunReceipt({
+    requestId: 'run-post', checkedAt, trigger: 'postlaunch',
+    clients: [buildClientReceipt({
+      requestId: `r-post-${clientId}`, clientId, checkedAt, trigger: 'postlaunch', phase: 'post_t1h', launchedAt: AT,
+      gates: [{ key: 'post.t1h', status: 'green', reason: 'ok', how: '', evidence: {}, as_of: checkedAt, hard: HARD_GATE['post.t1h'] }],
+      readErrors: [], links: { fallback: 'https://app.example.test/plan' },
+    })],
+  })
+
+  it('更新的一轮是开投后读回（只有 post.t1h 一道门）→ 仍读更早的开投前回执，不被读回顶掉', async () => {
+    const pre = buildRunReceipt({ requestId: 'run-pre', checkedAt: AT, trigger: 'cron', clients: [receiptFor('c1')] })
+    const laterAt = '2026-10-19T09:30:00.000Z'
+    const { supabase } = fakeDb({
+      data: [
+        { status: 'completed', started_at: laterAt, summary: postRunFor('c1', laterAt) },
+        { status: 'completed', started_at: AT, summary: pre },
+      ],
+      error: null,
+    })
+    const out = await loadTrackingGateFacts(supabase, 'c1')
+    expect(out?.receipt?.checked_at).toBe(AT)
+    expect(out?.receipt?.gates.map(g => g.key)).toEqual(['tracking.pixel_alive'])
+  })
+
+  it('最近几轮里只有开投后读回 → receipt 为 null（全灰），不拿读回当体检', async () => {
+    const { supabase } = fakeDb({ data: [{ status: 'completed', started_at: AT, summary: postRunFor('c1', AT) }], error: null })
+    await expect(loadTrackingGateFacts(supabase, 'c1')).resolves.toEqual({ receipt: null })
+  })
+
   it('读库报错 / 直接抛错 → receipt 为 null（读不到就灰，不当成没问题）', async () => {
     await expect(loadTrackingGateFacts(fakeDb({ data: null, error: { message: 'boom' } }).supabase, 'c1')).resolves.toEqual({ receipt: null })
     await expect(loadTrackingGateFacts(fakeDb('throw').supabase, 'c1')).resolves.toEqual({ receipt: null })

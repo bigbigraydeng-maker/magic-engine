@@ -48,7 +48,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: '请求内容不是合法的 JSON' }, { status: 400 })
   }
 
-  const built = buildTriggerEvent(body, listTrackingClientIds())
+  const built = buildTriggerEvent(body, listTrackingClientIds(), new Date())
   if (!built.ok) return NextResponse.json({ ok: false, error: built.error }, { status: built.status })
 
   if (built.dry_run) {

@@ -9,6 +9,7 @@
 import { GRAPH_BASE } from '@/lib/meta/graph-base'
 import type { MetaAccountFact, MetaDatasetFact, MetaFacts } from './types'
 import { sanitizeError } from './sanitize'
+import { retryOnce, type Sleep } from './retry'
 
 /** 事件统计分页的硬上限：防止游标永不结束。 */
 export const MAX_STATS_PAGES = 6
@@ -28,6 +29,8 @@ export interface MetaReadInput {
   token: string
   fetcher: typeof fetch
   now: Date
+  /** 单测里换成不真等的版本；不传就真等 */
+  sleep?: Sleep
 }
 
 export interface MetaReadResult {
@@ -167,6 +170,7 @@ type GraphParams = Record<string, string>
 interface GraphErrorBody {
   message?: unknown
   code?: unknown
+  is_transient?: unknown
 }
 
 function extractError(body: unknown): GraphErrorBody | null {
@@ -174,6 +178,21 @@ function extractError(body: unknown): GraphErrorBody | null {
   const err = (body as Record<string, unknown>).error
   if (typeof err !== 'object' || err === null) return null
   return err as GraphErrorBody
+}
+
+/** Meta 自己标的瞬时错误码：限流 / 服务暂时不可用 / 用户请求过多 / 未知错误。 */
+const TRANSIENT_GRAPH_CODES: ReadonlySet<number> = new Set([1, 2, 4, 17, 32, 613])
+
+/**
+ * 这个响应值得再试一次吗？只认瞬时故障：429 / 5xx / Meta 自己标了 is_transient / 瞬时错误码。
+ * 永久性错误（令牌失效 190、参数错 100、没权限 200 等）返回 false，不重试。
+ */
+function isTransientGraphResult(result: { status: number; body: unknown }): boolean {
+  if (result.status === 429 || result.status >= 500) return true
+  const err = extractError(result.body)
+  if (err === null) return false
+  if (err.is_transient === true) return true
+  return typeof err.code === 'number' && TRANSIENT_GRAPH_CODES.has(err.code)
 }
 
 function buildUrl(path: string, params: GraphParams): string {
@@ -208,7 +227,7 @@ async function doFetch(
   }
 }
 
-export function makeGraphGet(fetcher: typeof fetch, token: string) {
+export function makeGraphGet(fetcher: typeof fetch, token: string, sleep?: Sleep) {
   return async function graphGet(path: string, params: GraphParams): Promise<unknown> {
     // 🔴 这里抛出的任何错误（包括 Meta 把令牌原样回显在报错里的情况）都先用「已知令牌」精确抹一遍，
     //    下游再怎么 catch / 拼接 / 截断，都拿不到令牌。
@@ -216,7 +235,11 @@ export function makeGraphGet(fetcher: typeof fetch, token: string) {
       if (!PATH_ALLOWLIST_RE.test(path)) {
         throw new Error(`不允许的 Graph 路径：${path}`)
       }
-      const { status, body } = await doFetch(fetcher, buildUrl(path, params), token)
+      // 瞬时故障（网络错误 / 429 / 5xx / Meta 标的瞬时错误）多试一次；永久性错误原样抛出。
+      const { status, body } = await retryOnce(
+        () => doFetch(fetcher, buildUrl(path, params), token),
+        { sleep, retryResult: isTransientGraphResult },
+      )
       const err = extractError(body)
       if (!status || status < 200 || status >= 300 || err) {
         const message = typeof err?.message === 'string' ? err.message : '请求失败'
@@ -408,7 +431,7 @@ export async function readMetaFacts(input: MetaReadInput): Promise<MetaReadResul
     return { facts: emptyFacts(now), errors: ['广告账户编号格式不对'] }
   }
 
-  const graphGet = makeGraphGet(fetcher, token)
+  const graphGet = makeGraphGet(fetcher, token, input.sleep)
 
   let rows: DatasetRow[] = []
   let read = true

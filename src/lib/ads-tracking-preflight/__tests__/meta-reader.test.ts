@@ -8,6 +8,7 @@ import {
   readMetaFacts,
   type MetaReadInput,
 } from '../meta-reader'
+import { RETRY_DELAY_MS } from '../retry'
 import type { MetaAccountFact } from '../types'
 import adspixelsFixture from './fixtures/graph-adspixels.json'
 import statsPage1Fixture from './fixtures/graph-stats-page1.json'
@@ -43,6 +44,9 @@ function concatBuckets(): Bucket[] {
   return [...page1, ...page2]
 }
 
+/** 测试里不真等：失败重试前的等待在这里直接略过（要看等待的用例自己传记录器）。 */
+const noSleep = async (): Promise<void> => undefined
+
 function makeInput(fetcher: typeof fetch): MetaReadInput {
   return {
     adAccountId: ACCOUNT_ID,
@@ -50,6 +54,7 @@ function makeInput(fetcher: typeof fetch): MetaReadInput {
     token: TOKEN,
     fetcher,
     now: NOW,
+    sleep: noSleep,
   }
 }
 
@@ -560,5 +565,134 @@ describe('readMetaFacts', () => {
     expect(fetcher).not.toHaveBeenCalled()
     expect(result.facts.read).toBe(false)
     expect(result.errors.length).toBeGreaterThan(0)
+  })
+})
+
+// ─── 瞬时故障重试一次 ────────────────────────────────────────────────────────
+// 审查整改：读取器永不 reject，函数级的 retries: 2 救不了一次超时。
+// 每个 Graph 请求在读取器内部多试一次（只对瞬时故障：网络错误 / 429 / 5xx / Meta 自己标的瞬时错误），
+// 永久性错误（令牌失效、权限、参数错）不重试。
+
+type Fail = () => Response | Error
+
+/** 在 happy 路径之上，让指定路径的前 N 次请求按剧本失败，之后恢复正常。 */
+function flakyFetcher(failPath: string, failures: Fail[]) {
+  const happy = makeHappyFetcher()
+  let used = 0
+  const order: string[] = []
+  const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const path = pathOf(String(input))
+    if (path === failPath && used < failures.length) {
+      const next = failures[used]
+      used += 1
+      order.push('fetch:fail')
+      const failure = next()
+      if (failure instanceof Error) throw failure
+      return failure
+    }
+    if (path === failPath) order.push('fetch:ok')
+    return happy(input, init)
+  })
+  return { fetcher, order }
+}
+
+function sleepRecorder(order: string[]) {
+  const sleeps: number[] = []
+  return { sleeps, sleep: async (ms: number): Promise<void> => { sleeps.push(ms); order.push('sleep') } }
+}
+
+describe('readMetaFacts · 瞬时故障重试一次', () => {
+  it('stats 第一次返回 503、第二次正常 → 读到完整事件统计，没有错误；中间等了一次，且是先等再发第二次', async () => {
+    const { fetcher, order } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [
+      () => jsonResponse({ error: { message: 'Service Unavailable', code: 2 } }, 503),
+    ])
+    const rec = sleepRecorder(order)
+    const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: rec.sleep })
+
+    expect(result.errors).toEqual([])
+    const focused = result.facts.datasets.find((d) => d.id === FOCUS_PIXEL)
+    expect(focused?.events_7d).toEqual({ PageView: 73, Lead: 6 })
+    expect(rec.sleeps).toEqual([RETRY_DELAY_MS])
+    expect(order.slice(0, 3)).toEqual(['fetch:fail', 'sleep', 'fetch:ok'])
+  })
+
+  it('adspixels 第一次抛网络错误、第二次正常 → read 为 true，数据集读到', async () => {
+    const { fetcher } = flakyFetcher(`${ACCOUNT_ID}/adspixels`, [() => new Error('socket hang up')])
+    const rec = sleepRecorder([])
+    const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: rec.sleep })
+    expect(result.facts.read).toBe(true)
+    expect(result.facts.account_dataset_ids).toEqual([FOCUS_PIXEL, OTHER_PIXEL])
+    expect(result.errors).toEqual([])
+    expect(rec.sleeps).toEqual([RETRY_DELAY_MS])
+  })
+
+  it('账户读取第一次返回 429 限流 → 再试一次就拿到账户状态', async () => {
+    const { fetcher } = flakyFetcher(ACCOUNT_ID, [() => jsonResponse({ error: { message: 'rate', code: 4 } }, 429)])
+    const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: noSleep })
+    expect(result.facts.account).toEqual(parseAccountBody(accountFixture))
+    expect(result.errors).toEqual([])
+  })
+
+  it('Meta 自己标了 is_transient（哪怕 HTTP 状态是 400、错误码平时是永久性的 100）→ 当作瞬时故障重试', async () => {
+    const { fetcher } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [
+      () => jsonResponse({ error: { message: 'try later', code: 100, is_transient: true } }, 400),
+    ])
+    const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: noSleep })
+    expect(result.errors).toEqual([])
+    expect(result.facts.datasets.find((d) => d.id === FOCUS_PIXEL)?.events_7d).not.toBeNull()
+  })
+
+  it('5xx（哪怕错误码不在瞬时清单里）→ 当作瞬时故障重试一次', async () => {
+    const { fetcher } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [
+      () => jsonResponse({ error: { message: 'internal', code: 99999 } }, 500),
+    ])
+    const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: noSleep })
+    expect(result.errors).toEqual([])
+    expect(result.facts.datasets.find((d) => d.id === FOCUS_PIXEL)?.events_7d).not.toBeNull()
+  })
+
+  it('没标 is_transient、状态 400、错误码 100 → 永久性错误，不重试', async () => {
+    const { fetcher } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [
+      () => jsonResponse({ error: { message: 'invalid parameter', code: 100 } }, 400),
+      () => jsonResponse({ error: { message: 'invalid parameter', code: 100 } }, 400),
+    ])
+    const rec = sleepRecorder([])
+    await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: rec.sleep })
+    const statsCalls = recordCalls(fetcher).filter((c) => pathOf(c.url) === `${FOCUS_PIXEL}/stats`)
+    expect(statsCalls).toHaveLength(1)
+    expect(rec.sleeps).toEqual([])
+  })
+
+  it('返回的不是 JSON（网关错误页）→ 当作瞬时故障重试', async () => {
+    const { fetcher } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [() => new Response('<html>Bad Gateway</html>', { status: 502 })])
+    const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: noSleep })
+    expect(result.errors).toEqual([])
+  })
+
+  it('永久性错误（令牌失效 190 / 参数错 100 / 没权限 200）不重试：只发一次，也不等待', async () => {
+    for (const [status, code] of [[400, 190], [400, 100], [403, 200]] as const) {
+      const { fetcher } = flakyFetcher(`${ACCOUNT_ID}/adspixels`, [
+        () => jsonResponse({ error: { message: `permanent ${code}`, code } }, status),
+        () => jsonResponse({ error: { message: `permanent ${code}`, code } }, status),
+      ])
+      const rec = sleepRecorder([])
+      const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: rec.sleep })
+      const pixelCalls = recordCalls(fetcher).filter((c) => pathOf(c.url) === `${ACCOUNT_ID}/adspixels`)
+      expect(pixelCalls, `code ${code}`).toHaveLength(1)
+      expect(rec.sleeps, `code ${code}`).toEqual([])
+      expect(result.facts.read, `code ${code}`).toBe(false)
+    }
+  })
+
+  it('连着两次瞬时故障 → 放弃（该数据集事件为 null，错误里不含令牌），一个请求只发两次', async () => {
+    const boom = () => jsonResponse({ error: { message: `down ${TOKEN}`, code: 2 } }, 503)
+    const { fetcher } = flakyFetcher(`${FOCUS_PIXEL}/stats`, [boom, boom, boom, boom, boom, boom])
+    const result = await readMetaFacts({ ...makeInput(fetcher as unknown as typeof fetch), sleep: noSleep })
+    const focused = result.facts.datasets.find((d) => d.id === FOCUS_PIXEL)
+    expect(focused?.events_7d).toBeNull()
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(JSON.stringify(result)).not.toContain(TOKEN)
+    const statsCalls = recordCalls(fetcher).filter((c) => pathOf(c.url) === `${FOCUS_PIXEL}/stats`)
+    expect(statsCalls).toHaveLength(2)
   })
 })

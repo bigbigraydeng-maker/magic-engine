@@ -21,6 +21,7 @@ const FORBIDDEN = [
   j('AW-', '17984232872'),
   j('G-SB9', 'EYP2X1L'),
   j('532503', '727'),
+  j('5255813', '1445673'),
 ]
 
 /** 共享文件：整个模块目录（除了配置本身和专测配置的那份测试）+ 接线到别处的共享文件。 */
@@ -39,6 +40,7 @@ function sharedFiles(): string[] {
   walk(dir)
   for (const rel of [
     'src/lib/inngest/functions/ads-tracking-preflight.ts',
+    'src/lib/inngest/functions/ads-tracking-launch-watch.ts',
     'src/lib/pm-todo/ads-tracking-preflight-items.ts',
   ]) {
     try {

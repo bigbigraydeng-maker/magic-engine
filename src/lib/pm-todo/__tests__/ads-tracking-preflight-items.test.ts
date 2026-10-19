@@ -142,6 +142,31 @@ describe('红灯 → 待办三件套（问题和影响 / 怎么做 / 直达链�
     expect(out[0].href).toBeTruthy()
   })
 
+  // 🔴 审查整改：开投后读回把早上的红灯待办顶掉、让 36 小时判据被读回刷新
+  const postRow = (clientId: string, checkedAt: string): Row => {
+    const post = buildClientReceipt({
+      requestId: `post-${clientId}`, clientId, checkedAt, trigger: 'postlaunch', phase: 'post_t1h', launchedAt: checkedAt,
+      gates: [gate('post.t1h', 'green')], readErrors: [], links: LINKS,
+    })
+    return okRow(buildRunReceipt({ requestId: 'run-post', checkedAt, trigger: 'postlaunch', clients: [post] }), checkedAt)
+  }
+
+  it('更新的一轮是开投后读回 → 早上那份回执里的红灯待办仍然在（不被读回顶掉）', async () => {
+    const morning = clientReceipt('c1', [gate('tracking.pixel_alive', 'red')], '2026-10-19T18:00:00Z')
+    const out = await run([postRow('c1', '2026-10-19T19:30:00Z'), okRow(runReceipt([morning]), '2026-10-19T18:00:00Z')])
+    expect(out.filter(i => i.kind === 'ads_tracking_preflight_fix')).toHaveLength(1)
+    expect(out.find(i => i.kind === 'ads_tracking_preflight_fix')?.what).toContain('像素在线')
+  })
+
+  it('开投前回执已经超过 36 小时，只有开投后读回是新的 → 照样报「回执没更新」（读回不能刷新这个判据）', async () => {
+    const stale = '2026-10-18T05:00:00Z'
+    const out = await run([
+      postRow('c1', '2026-10-19T19:30:00Z'),
+      okRow(runReceipt([clientReceipt('c1', [gate('tracking.pixel_alive', 'green')], stale)], stale), stale),
+    ])
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_broken' && i.client_id === 'c1')).toBe(true)
+  })
+
   it('全绿 → 一条待办都没有（没事就是空，不出「一切正常」）', async () => {
     const out = await run([okRow(runReceipt([clientReceipt('c1', [gate('tracking.pixel_alive', 'green')])]))])
     expect(out).toEqual([])

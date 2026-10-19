@@ -13,8 +13,11 @@
  * （事件 id = 回执编号，重试时不会重复发）。今日待办（pm-todo/ads-tracking-preflight-items.ts）
  * 与推广计划看板（promo/gates.ts）读的都是这份回执，不自己现算。
  *
- * 🔴 本函数只读：读 Meta / GA4 / 官网 / 库，唯一的写是 cron_run_logs 回执。
+ * 🔴 本函数只读：读 Meta / GA4 / 官网 / 库，本模块自己唯一的写是 cron_run_logs 回执。
  *    不写 Meta、GA4、官网，不发布，不扣费。回执里 no_publish 恒为 true。
+ *    例外（既有行为，不是本模块新增的写）：读 GA4 时如果 Google 授权令牌已过期，
+ *    ga4/client 沿用的 OAuth 公共流程会换新令牌并写回库（platform_oauth_connections）；
+ *    刷新失败时也会把那条连接标成出错。
  *    绿灯只是「该做的检查都过了」，不是发布 / 扣费授权。
  * 🔴 读不到不算函数失败：回执带原因，对应的门判灰；只有函数自己抛异常才写 failed（onFailure 收口）。
  * 🔴 新增函数必须有人去 Inngest 后台对 `/api/inngest` 重新 Sync 一次，不然「安静地不跑」。
@@ -48,6 +51,7 @@ import {
 import { makeSupabasePropertyLoader } from '@/lib/ads-tracking-preflight/ga4-reader'
 import { planRun, type RunPlan } from '@/lib/ads-tracking-preflight/plan-run'
 import { TRACKING_PREFLIGHT_JOB, buildRunReceipt } from '@/lib/ads-tracking-preflight/receipt'
+import { sanitizeError } from '@/lib/ads-tracking-preflight/sanitize'
 import type {
   TrackingClientConfig,
   TrackingClientReceipt,
@@ -200,7 +204,7 @@ export async function runTrackingPreflight(
     startedAt: deps.now().getTime(),
   }))
   const now = new Date(started.startedAt)
-  const plan = planRun({ eventName: event.name, data: event.data, configuredClientIds: deps.configuredClientIds() })
+  const plan = planRun({ eventName: event.name, data: event.data, configuredClientIds: deps.configuredClientIds(), now })
 
   const clients: TrackingClientReceipt[] = []
   for (const clientId of plan.clientIds) {
@@ -241,7 +245,8 @@ export function createAdsTrackingPreflightFunction(deps: TrackingRunDeps = realD
           '未知错误'
         const ts = (event as { ts?: number }).ts
         const startedBefore = new Date(typeof ts === 'number' ? ts : Date.now())
-        await failOpenCronRuns(TRACKING_PREFLIGHT_JOB, `重试耗尽后仍失败：${message}`, { startedBefore })
+        // 🔴 报错文字里可能回显令牌，写进运行记录前先过 sanitizeError
+        await failOpenCronRuns(TRACKING_PREFLIGHT_JOB, `重试耗尽后仍失败：${sanitizeError(message)}`, { startedBefore })
       },
     },
     [

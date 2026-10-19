@@ -154,6 +154,16 @@ export interface LaunchWatchConfig {
   days: number
   /** 广告账户的时区（IANA 名字） */
   timezone: string
+  /**
+   * 本次投放的广告系列编号（至少一个）。花费、点击这些数只按这几个系列算，
+   * 不是整个官方账户——账户里别的系列早就在花钱，按账户算会把「开投」误判在窗口第一天。
+   */
+  campaign_ids: readonly string[]
+  /**
+   * 第二条认广告系列的办法：名字里同时含有这些关键词（全部含有）。和编号任意一条对上就算本次投放。
+   * 为什么要有：用接口建出来的系列先躺在未发布草稿里，发布之后编号会不会变没法事先验证；名字不会跟着变。
+   */
+  campaign_name_contains?: readonly string[]
 }
 
 export interface TrackingClientConfig {

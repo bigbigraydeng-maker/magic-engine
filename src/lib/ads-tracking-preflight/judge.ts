@@ -27,6 +27,8 @@ export const MIN_LEAD_MATCH_QUALITY = 7
 export const MIN_POST_CLICKS_FOR_RATIO = 10
 export const MIN_POST_LPV_RATIO = 0.5
 export const MIN_POST_CLICKS_FOR_LEAD_CHECK = 50
+/** 官网表单线索进 CRM：最近一条必须在这么多小时内，才算「管道现在是通的」。 */
+export const CRM_FRESH_WINDOW_HOURS = 48
 
 export const GATE_LABELS: Record<TrackingGateKey, string> = {
   'tracking.account_dataset_aligned': '数据集对齐（广告账户 / 官网像素 / 回传目标）',
@@ -285,7 +287,15 @@ function judgeLandingOk(input: JudgeInput): TrackingGateReceipt {
   const key: PreflightGateKey = 'tracking.landing_ok'
   const as_of = input.landing.as_of
   const probes = input.landing.probes
-  const evidence: Record<string, EvidenceValue> = { probes: probes.length }
+  const official = new Set(input.meta.account_dataset_ids)
+  // 官方账户的数据集读到了，才有资格核对「每一页挂的是不是官方像素」
+  const officialKnown = input.meta.read && official.size > 0
+  const withoutOfficial: string[] = []
+  const evidence: Record<string, EvidenceValue> = {
+    probes: probes.length,
+    official_pixel_checked: officialKnown,
+    pages_without_official_pixel: withoutOfficial,
+  }
 
   if (probes.length === 0) {
     return receipt(key, 'gray', '客户配置里没有任何落地页', '在客户配置里补上落地页地址', evidence, as_of)
@@ -301,7 +311,13 @@ function judgeLandingOk(input: JudgeInput): TrackingGateReceipt {
     const problems: string[] = []
     if (p.http_status !== 200) problems.push(`HTTP ${p.http_status}`)
     if (p.utm_preserved === false) problems.push('跳转后 UTM 丢了')
-    if (p.pixel_ids.length === 0) problems.push('页面里没找到 Meta 像素标记')
+    // 🔴 每一页都要自己挂着官方数据集的像素：不能拿「别的页面有官方像素」替这一页顶罪
+    if (officialKnown && !p.pixel_ids.some(id => official.has(id))) withoutOfficial.push(p.label)
+    if (p.pixel_ids.length === 0) {
+      problems.push('页面里没找到 Meta 像素标记')
+    } else if (officialKnown && !p.pixel_ids.some(id => official.has(id))) {
+      problems.push('页面上的像素都不是官方广告账户的数据集')
+    }
     if (problems.length > 0) bad.push(`${p.label}：${problems.join('、')}`)
   }
 
@@ -311,10 +327,45 @@ function judgeLandingOk(input: JudgeInput): TrackingGateReceipt {
   if (unknown.length > 0) {
     return receipt(key, 'gray', `没连上：${unknown.join('、')}`, '确认这些落地页能访问，再重跑一次探测', evidence, as_of)
   }
-  return receipt(key, 'green', '落地页都能打开、UTM 保留、页面里有像素标记', '', evidence, as_of)
+  if (!officialKnown) {
+    return receipt(
+      key, 'yellow',
+      '落地页都能打开、UTM 保留、页面里有像素标记；但官方数据集没读到，没核对这些像素是不是官方的',
+      '先让「数据集对齐」那道门读到官方数据集，再重跑一次检查',
+      evidence, as_of,
+    )
+  }
+  return receipt(key, 'green', '落地页都能打开、UTM 保留、每一页都挂着官方数据集的像素', '', evidence, as_of)
 }
 
 // ─── 7. 官网线索进 CRM ──────────────────────────────────────────────────────
+
+/**
+ * 近 7 天有线索：只有最近一条在 48 小时内才判绿（设计稿的标准是「试跑线索 1 小时内进 CRM」，
+ * 被动地看 48 小时是它的近似）。更早的、或读不出时间的，只能说「以前通过」，不能说「现在是通的」→ 黄。
+ */
+function judgeCrmFreshness(
+  input: JudgeInput,
+  evidence: Record<string, EvidenceValue>,
+  as_of: string | null,
+): TrackingGateReceipt {
+  const key: PreflightGateKey = 'tracking.lead_reaches_crm'
+  const total = input.crm.web_form_touchpoints_7d
+  const latest = input.crm.latest_web_form_at
+  const age = latest === null ? null : ageHours(latest, input.now)
+  if (age !== null && Number.isFinite(age) && age <= CRM_FRESH_WINDOW_HOURS) {
+    return receipt(key, 'green', `官网表单线索在进 CRM：最近一条是 ${Math.round(age)} 小时前，近 7 天共 ${total} 条`, '', evidence, as_of)
+  }
+  const ageText = age === null || !Number.isFinite(age)
+    ? '读不出最近一条的时间'
+    : `最近一条是 ${Math.round(age)} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时`
+  return receipt(
+    key, 'yellow',
+    `近 7 天 CRM 里有 ${total} 条官网表单线索，但${ageText}，没法确认现在还是通的`,
+    '请人在官网提交一次试跑线索，确认 1 小时内进 CRM；进不来就检查官网表单入库',
+    evidence, as_of,
+  )
+}
 
 function judgeLeadReachesCrm(input: JudgeInput): TrackingGateReceipt {
   const key: PreflightGateKey = 'tracking.lead_reaches_crm'
@@ -341,8 +392,9 @@ function judgeLeadReachesCrm(input: JudgeInput): TrackingGateReceipt {
   if (!input.crm.read) {
     return receipt(key, 'gray', 'CRM 没读到', '确认 CRM 能读到', evidence, as_of)
   }
+  evidence.crm_fresh_window_hours = CRM_FRESH_WINDOW_HOURS
   if (input.crm.web_form_touchpoints_7d >= 1) {
-    return receipt(key, 'green', `近 7 天 CRM 里有 ${input.crm.web_form_touchpoints_7d} 条官网表单线索`, '', evidence, as_of)
+    return judgeCrmFreshness(input, evidence, as_of)
   }
   if (leadSignal > 0) {
     return receipt(
@@ -414,8 +466,19 @@ function judgeTokenAndCrons(input: JudgeInput): TrackingGateReceipt {
   if (problems.length > 0) {
     return receipt(key, 'red', problems.join('；'), '修好令牌 / 定时任务再开投', evidence, as_of)
   }
-  if (input.env.capi_preflight === null) {
+  // 🔴 令牌「有效」必须被明确验证过（token_valid 为 true）才判绿：
+  //    探活没跑成、或走到配置那一步就停了（token_valid 是 null）= 有效性未知，不能因为「没发现坏」就当好
+  const preflight = input.env.capi_preflight
+  if (preflight === null) {
     return receipt(key, 'yellow', '令牌有，但这次没验证有效性', '重跑一次转化 API 探活来验证令牌', evidence, as_of)
+  }
+  if (preflight.token_valid !== true) {
+    return receipt(
+      key, 'yellow',
+      '令牌有，但转化 API 探活没走到验证令牌那一步，有效性没验证出来',
+      '先把转化 API 的配置补齐再重跑探活；或确认 Meta 令牌能读该账户',
+      evidence, as_of,
+    )
   }
   return receipt(key, 'green', '令牌可用、定时任务都在期', '', evidence, as_of)
 }
@@ -515,14 +578,31 @@ export function judgePostLaunch(phase: 'post_t1h' | 'post_t24h', f: PostLaunchFa
     const status: Light = phase === 'post_t1h' ? 'yellow' : 'red'
     return receipt(key, status, '花了钱但一次点击都没有', '检查广告是否在投、落地页是否可达', evidence, f.as_of)
   }
+  // 🔴 点击太少，样本小到什么都看不出来：不能因为「没发现坏」就判绿
+  if (f.link_clicks < MIN_POST_CLICKS_FOR_RATIO) {
+    return receipt(
+      key, 'yellow',
+      `样本不足：点击只有 ${f.link_clicks} 次（不足 ${MIN_POST_CLICKS_FOR_RATIO} 次），还看不出落地页浏览和留资是否正常`,
+      '过几个小时再看下一份读回；点击一直上不去就检查广告是否在正常投放',
+      evidence, f.as_of,
+    )
+  }
   if (f.link_clicks >= MIN_POST_CLICKS_FOR_RATIO && f.landing_page_views === 0) {
     return receipt(key, 'red', `点击 ${f.link_clicks} 次但落地页浏览为 0`, '检查落地页是否可达、像素是否在加载', evidence, f.as_of)
   }
   if (f.link_clicks >= MIN_POST_CLICKS_FOR_RATIO && f.landing_page_views / f.link_clicks < MIN_POST_LPV_RATIO) {
     return receipt(key, 'yellow', `落地页浏览 / 点击 = ${(f.landing_page_views / f.link_clicks).toFixed(2)}，低于 ${MIN_POST_LPV_RATIO}`, '检查落地页加载速度与跳转', evidence, f.as_of)
   }
-  if (phase === 'post_t24h' && f.link_clicks >= MIN_POST_CLICKS_FOR_LEAD_CHECK && f.leads === 0) {
-    return receipt(key, 'yellow', `点击 ${f.link_clicks} 次却一条留资都没有`, '检查表单与留资事件是否还在触发', evidence, f.as_of)
+  if (phase === 'post_t24h' && f.leads === 0) {
+    if (f.link_clicks >= MIN_POST_CLICKS_FOR_LEAD_CHECK) {
+      return receipt(key, 'yellow', `点击 ${f.link_clicks} 次却一条留资都没有`, '检查表单与留资事件是否还在触发', evidence, f.as_of)
+    }
+    return receipt(
+      key, 'yellow',
+      `样本不足：点击 ${f.link_clicks} 次（不足 ${MIN_POST_CLICKS_FOR_LEAD_CHECK} 次），还看不出留资事件有没有在记`,
+      '等点击累计到 50 次再看；或让人在官网提交一次试跑线索',
+      evidence, f.as_of,
+    )
   }
   return receipt(key, 'green', '点击、落地页浏览、留资都正常', '', evidence, f.as_of)
 }

@@ -22,7 +22,6 @@ vi.mock('@/lib/ads-tracking-preflight/client-config', () => ({
 import { POST } from '../route'
 
 const SECRET = 'cron-secret-value-0123456789'
-const LAUNCHED = '2026-10-22T01:00:00.000Z'
 
 function req(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('https://app.example.test/api/admin/ads-tracking-preflight/trigger', {
@@ -113,10 +112,21 @@ describe('dry_run: false 才真发', () => {
   })
 
   it('开投后读回：发 ads.tracking_postlaunch.requested，带阶段和开投时刻', async () => {
-    await call(req({ kind: 'postlaunch', client_id: 'c1', phase: 't1h', launched_at: LAUNCHED, dry_run: false }))
+    // 开投时间必须是合理的（不晚于现在、不早于 7 天前），所以用相对「现在」的时间，不写死日期
+    const launchedAt = new Date(Date.now() - 3_600_000).toISOString()
+    await call(req({ kind: 'postlaunch', client_id: 'c1', phase: 't1h', launched_at: launchedAt, dry_run: false }))
     const sent = sendInngestEvent.mock.calls[0][0]
     expect(sent.name).toBe('ads.tracking_postlaunch.requested')
-    expect(sent.data).toEqual({ client_id: 'c1', phase: 't1h', launched_at: LAUNCHED })
+    expect(sent.data).toEqual({ client_id: 'c1', phase: 't1h', launched_at: launchedAt })
+  })
+
+  it('开投后读回：开投时间晚于现在 / 早于 7 天前 → 400，一个事件都不发（哪怕写了 dry_run: false）', async () => {
+    for (const offsetMs of [86_400_000, -8 * 86_400_000]) {
+      const launchedAt = new Date(Date.now() + offsetMs).toISOString()
+      const res = await call(req({ kind: 'postlaunch', client_id: 'c1', phase: 't1h', launched_at: launchedAt, dry_run: false }))
+      expect(res.status, launchedAt).toBe(400)
+    }
+    expect(sendInngestEvent).not.toHaveBeenCalled()
   })
 
   it('发送失败 → 502，错误里没有任何令牌 / 事件密钥', async () => {

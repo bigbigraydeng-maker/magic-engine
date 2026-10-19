@@ -49,6 +49,11 @@ describe('客户配置（L4）', () => {
       expect(Number.isNaN(Date.parse(`${watch.from}T00:00:00Z`))).toBe(false)
       expect(Number.isInteger(watch.days) && watch.days >= 1 && watch.days <= 14).toBe(true)
       expect(() => new Intl.DateTimeFormat('en-CA', { timeZone: watch.timezone })).not.toThrow()
+      // 🔴 审查整改：花费只按本次投放的广告系列算，所以配了盯盘窗口就必须写清是哪几个系列
+      expect(watch.campaign_ids.length, `${id} 盯盘必须写明广告系列`).toBeGreaterThan(0)
+      for (const campaignId of watch.campaign_ids) expect(campaignId).toMatch(/^\d{6,20}$/)
+      expect(new Set(watch.campaign_ids).size).toBe(watch.campaign_ids.length)
+      for (const token of watch.campaign_name_contains ?? []) expect(token.length).toBeGreaterThan(0)
     }
   })
 
@@ -65,7 +70,13 @@ describe('客户配置（L4）', () => {
     expect(cfg?.planned_daily_budget_cents).toBe(10100)
     expect(cfg?.official_daily_cap_cents).toBe(11000)
     expect(cfg?.currency).toBe('NZD')
-    expect(cfg?.launch_watch).toEqual({ from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland' })
+    expect(cfg?.launch_watch).toEqual({
+      from: '2026-10-22',
+      days: 4,
+      timezone: 'Pacific/Auckland',
+      campaign_ids: ['52558131445673'],
+      campaign_name_contains: ['官网点击', '20261022'],
+    })
     expect(cfg?.known_issues).toBeUndefined()
   })
 })

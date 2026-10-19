@@ -14,11 +14,15 @@ import type { CrmFacts, EnvFacts, Ga4Facts } from '../types'
 import { makeSupabasePropertyLoader, readGa4Facts, type Ga4ReadDeps } from '../ga4-reader'
 import { readCrmFacts } from '../crm-reader'
 import { REQUIRED_JOBS, readEnvFacts, type EnvReadDeps } from '../env-reader'
+import { RETRY_DELAY_MS } from '../retry'
 
 const NOW = new Date('2026-10-19T10:30:00.000Z')
 const NOW_ISO = NOW.toISOString()
 const SEVEN_DAYS_AGO_ISO = '2026-10-12T10:30:00.000Z'
 const SECRET = 'SECRET_TOKEN_VALUE_123'
+
+/** 测试里不真等：失败重试前的等待直接略过（要看等待的用例自己传记录器）。 */
+const noSleep = async (): Promise<void> => undefined
 
 // ─── 假 Supabase ────────────────────────────────────────────────────────────
 
@@ -140,6 +144,7 @@ function makeGa4Deps(over: Partial<Ga4ReadDeps> = {}): Ga4DepsSpy {
         ? over.fetchEventCounts(propertyId, clientId, eventNames, periodDays)
         : { generate_lead: 8 }
     },
+    sleep: over.sleep ?? noSleep,
   }
   return { deps, loadCalls, fetchCalls }
 }
@@ -295,7 +300,7 @@ describe('CRM 读取器（读 contact_touchpoints）', () => {
 
   it('Supabase 报错 → read false，error 带原因，计数 0', async () => {
     const db = makeFakeDb(() => fail('boom'))
-    const { facts, errors } = await readCrmFacts(db.supabase, 'c1', NOW)
+    const { facts, errors } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep)
 
     expect(facts.read).toBe(false)
     expect(facts.error).toContain('boom')
@@ -323,6 +328,7 @@ interface EnvDepsOverrides {
   capiPreflight?: EnvReadDeps['capiPreflight']
   resolveMetaToken?: EnvReadDeps['resolveMetaToken']
   env?: Record<string, string | undefined>
+  sleep?: EnvReadDeps['sleep']
 }
 
 function makeEnvDeps(supabase: SupabaseClient, over: EnvDepsOverrides = {}): EnvDepsSpy {
@@ -341,6 +347,7 @@ function makeEnvDeps(supabase: SupabaseClient, over: EnvDepsOverrides = {}): Env
       tokenCalls.push(clientId)
       return over.resolveMetaToken ? over.resolveMetaToken(clientId) : null
     },
+    sleep: over.sleep ?? noSleep,
   }
   return { deps, preflightCalls, tokenCalls }
 }
@@ -713,5 +720,161 @@ describe('环境读取器：默认任务清单', () => {
       { job: 'meta-leads-sync', max_age_hours: 3 },
       { job: 'messenger-sync-hourly', max_age_hours: 3 },
     ])
+  })
+})
+
+// ─── 瞬时故障重试一次（审查整改）─────────────────────────────────────────────
+// 读取器永不 reject，函数级的 retries: 2 救不了一次抖动；每个读取在读取器内部多试一次。
+
+function sleepLog() {
+  const sleeps: number[] = []
+  return { sleeps, sleep: async (ms: number): Promise<void> => { sleeps.push(ms) } }
+}
+
+describe('GA4 读取器 · 瞬时故障重试一次', () => {
+  it('读属性编号第一次抛错、第二次正常 → 读到事件次数，没有错误；中间等了一次', async () => {
+    const log = sleepLog()
+    let n = 0
+    const spy = makeGa4Deps({
+      sleep: log.sleep,
+      loadPropertyId: async () => { n += 1; if (n === 1) throw new Error('socket hang up'); return '111' },
+    })
+    const { facts, errors } = await readGa4Facts({ clientId: 'c1', eventNames: ['generate_lead'], now: NOW }, spy.deps)
+    expect(facts.read).toBe(true)
+    expect(facts.events_7d).toEqual({ generate_lead: 8 })
+    expect(errors).toEqual([])
+    expect(log.sleeps).toEqual([RETRY_DELAY_MS])
+  })
+
+  it('取事件第一次抛错、第二次正常 → read 为 true', async () => {
+    let n = 0
+    const spy = makeGa4Deps({ fetchEventCounts: async () => { n += 1; if (n === 1) throw new Error('timeout'); return { generate_lead: 3 } } })
+    const { facts } = await readGa4Facts({ clientId: 'c1', eventNames: ['generate_lead'], now: NOW }, spy.deps)
+    expect(facts).toMatchObject({ read: true, events_7d: { generate_lead: 3 } })
+    expect(spy.fetchCalls).toHaveLength(2)
+  })
+
+  it('取事件连着两次抛错 → read 为 false，只试两次，令牌不外泄，errors 只有一条', async () => {
+    const spy = makeGa4Deps({ fetchEventCounts: async () => { throw new Error(`HTTP 503 access_token=${SECRET}`) } })
+    const { facts, errors } = await readGa4Facts({ clientId: 'c1', eventNames: ['generate_lead'], now: NOW }, spy.deps)
+    expect(facts.read).toBe(false)
+    expect(spy.fetchCalls).toHaveLength(2)
+    expect(errors).toHaveLength(1)
+    expect(JSON.stringify({ facts, errors })).not.toContain(SECRET)
+  })
+
+  it('没有可用的 Google 授权（返回 null）/ 没连 GA4（属性为 null）不是瞬时故障：不重试', async () => {
+    const noAuth = makeGa4Deps({ fetchEventCounts: async () => null })
+    await readGa4Facts({ clientId: 'c1', eventNames: ['generate_lead'], now: NOW }, noAuth.deps)
+    expect(noAuth.fetchCalls).toHaveLength(1)
+
+    const notConnected = makeGa4Deps({ loadPropertyId: async () => null })
+    await readGa4Facts({ clientId: 'c1', eventNames: ['generate_lead'], now: NOW }, notConnected.deps)
+    expect(notConnected.loadCalls).toHaveLength(1)
+  })
+})
+
+describe('CRM 读取器 · 瞬时故障重试一次', () => {
+  it('第一次查库报错、第二次正常 → read 为 true，没有错误；中间等了一次', async () => {
+    const log = sleepLog()
+    let n = 0
+    const db = makeFakeDb(() => { n += 1; return n === 1 ? fail('connection reset') : ok([{ occurred_at: '2026-10-19T05:00:00Z' }], 4) })
+    const { facts, errors } = await readCrmFacts(db.supabase, 'c1', NOW, log.sleep)
+    expect(facts).toMatchObject({ read: true, web_form_touchpoints_7d: 4, latest_web_form_at: '2026-10-19T05:00:00Z' })
+    expect(errors).toEqual([])
+    expect(log.sleeps).toEqual([RETRY_DELAY_MS])
+  })
+
+  it('第一次查库直接抛错、第二次正常 → 照样读到', async () => {
+    let n = 0
+    const db = makeFakeDb(() => { n += 1; if (n === 1) throw new Error('socket hang up'); return ok([], 0) })
+    const { facts } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep)
+    expect(facts.read).toBe(true)
+  })
+
+  it('连着两次报错 → read 为 false，errors 只记一条（不是每次尝试一条），一共只查两次', async () => {
+    const db = makeFakeDb(() => fail('boom'))
+    const { facts, errors } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep)
+    expect(facts.read).toBe(false)
+    expect(errors).toHaveLength(1)
+    expect(db.queries.filter(q => q.table === 'contact_touchpoints')).toHaveLength(2)
+  })
+})
+
+describe('环境读取器 · 瞬时故障重试一次', () => {
+  it('读 clients 第一次报错、第二次正常 → 回传目标读到，没有错误', async () => {
+    let n = 0
+    const real = makeEnvDb({ clientRow: { domain: 'shop.example.test' } })
+    const flaky = { from(table: string) { if (table === 'clients') { n += 1; if (n === 1) throw new Error('reset') } return real.supabase.from(table) } } as SupabaseClient
+    const spy = makeEnvDeps(flaky, { env: { [PIXEL_ENV_KEY]: '1234567890' } })
+    const { facts, errors } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(facts.capi_target).toEqual({ status: 'configured', pixel_id: '1234567890' })
+    expect(errors).toEqual([])
+  })
+
+  it('读 clients 返回 error 对象第一次、第二次正常 → 同样读到', async () => {
+    let n = 0
+    const db = makeFakeDb(q => {
+      if (q.table === 'clients') { n += 1; return n === 1 ? fail('boom') : ok({ domain: 'shop.example.test' }) }
+      if (q.table === 'me_conversion_writebacks') return ok([])
+      return ok([])
+    })
+    const spy = makeEnvDeps(db.supabase, { env: { [PIXEL_ENV_KEY]: '1234567890' } })
+    const { facts, errors } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(facts.capi_target.status).toBe('configured')
+    expect(errors.some(e => e.includes('boom'))).toBe(false)
+  })
+
+  it('回传表和 cron_run_logs 第一次报错、第二次正常 → 照常读到', async () => {
+    const seen: Record<string, number> = {}
+    const db = makeFakeDb(q => {
+      const key = q.table === 'cron_run_logs' ? `cron:${String(filterValue(q, 'job_name'))}` : q.table
+      seen[key] = (seen[key] ?? 0) + 1
+      if (seen[key] === 1) return fail('blip')
+      if (q.table === 'clients') return ok({ domain: 'shop.example.test' })
+      if (q.table === 'me_conversion_writebacks') return ok([{ status: 'confirmed' }])
+      return ok([{ status: 'completed', finished_at: '2026-10-19T09:30:00Z', started_at: '2026-10-19T09:25:00Z' }])
+    })
+    const spy = makeEnvDeps(db.supabase, { env: { [PIXEL_ENV_KEY]: '1234567890' } })
+    const { facts, errors } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(facts.capi_events_7d).toEqual({ confirmed: 1, in_doubt: 0, failed: 0 })
+    expect(facts.jobs.every(j => j.last_status === 'completed')).toBe(true)
+    expect(errors).toEqual([])
+  })
+
+  it('capiPreflight / resolveMetaToken 第一次抛错、第二次正常 → 都读到，没有错误', async () => {
+    const db = makeEnvDb()
+    let pre = 0
+    let tok = 0
+    const spy = makeEnvDeps(db.supabase, {
+      capiPreflight: async () => { pre += 1; if (pre === 1) throw new Error('timeout'); return { ok: true, detail: { token_valid: true } } },
+      resolveMetaToken: async () => { tok += 1; if (tok === 1) throw new Error('db blip'); return 'tok' },
+    })
+    const { facts, errors } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(facts.capi_preflight).toMatchObject({ ok: true, token_valid: true })
+    expect(facts.meta_token_resolved).toBe(true)
+    expect(errors).toEqual([])
+    expect(spy.preflightCalls).toHaveLength(2)
+    expect(spy.tokenCalls).toHaveLength(2)
+  })
+
+  it('连着两次失败 → 降级，而且每个读取只记一条错误', async () => {
+    const db = makeEnvDb({ clientError: 'boom' })
+    const spy = makeEnvDeps(db.supabase, { env: { [PIXEL_ENV_KEY]: '1234567890' } })
+    const { facts, errors } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(facts.capi_target).toEqual({ status: 'unreadable', pixel_id: null })
+    expect(errors.filter(e => e.includes('boom'))).toHaveLength(1)
+    expect(db.queries.filter(q => q.table === 'clients')).toHaveLength(2)
+  })
+
+  it('「没有令牌」「预检说失败」这类正常返回的结果不算瞬时故障：不重试', async () => {
+    const db = makeEnvDb()
+    const spy = makeEnvDeps(db.supabase, {
+      capiPreflight: async () => ({ ok: false, detail: { stage: 'config' } }),
+      resolveMetaToken: async () => null,
+    })
+    await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(spy.preflightCalls).toHaveLength(1)
+    expect(spy.tokenCalls).toHaveLength(1)
   })
 })

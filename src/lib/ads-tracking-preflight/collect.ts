@@ -22,6 +22,7 @@ import { probeLanding } from './landing-probe'
 import { readMetaFacts } from './meta-reader'
 import { readPostLaunchFacts } from './post-launch'
 import { buildClientReceipt, type ItemLinks } from './receipt'
+import { retryOnce, type Sleep } from './retry'
 import { sanitizeError } from './sanitize'
 import type {
   CrmFacts,
@@ -47,6 +48,8 @@ export interface CollectDeps {
   resolveMetaToken(clientId: string): Promise<string | null>
   capiPreflight: EnvReadDeps['capiPreflight']
   ga4: Ga4ReadDeps
+  /** 单测里换成不真等的版本；不传就真等 */
+  sleep?: Sleep
 }
 
 export interface Collected<T> {
@@ -64,7 +67,7 @@ function tag(source: TrackingReadSource, errors: readonly string[]): TrackingRea
 export async function collectLandingFacts(cfg: TrackingClientConfig, deps: CollectDeps): Promise<Collected<LandingFacts>> {
   const probes: LandingProbeFact[] = []
   for (const target of cfg.landing_targets) {
-    probes.push(await probeLanding(target, { siteUrl: cfg.site_url, fetcher: deps.fetcher }))
+    probes.push(await probeLanding(target, { siteUrl: cfg.site_url, fetcher: deps.fetcher, sleep: deps.sleep }))
   }
   const errors = probes.filter(p => p.error !== null).map(p => `${p.label}：${p.error}`)
   return { facts: { probes, as_of: deps.now.toISOString() }, errors: tag('landing', errors) }
@@ -84,18 +87,21 @@ export async function collectMetaFacts(
 
   let token: string | null
   try {
-    token = await deps.resolveMetaToken(clientId)
+    token = await retryOnce(() => deps.resolveMetaToken(clientId), { sleep: deps.sleep })
   } catch (err) {
     return unread(`找 Meta 令牌时出错：${sanitizeError(err)}`)
   }
   if (!token) return unread('没有可用的 Meta 令牌，Meta 相关的检查都没法读')
 
-  const out = await readMetaFacts({ adAccountId: cfg.ad_account_id, focusPixelIds, token, fetcher: deps.fetcher, now: deps.now })
+  const out = await readMetaFacts({ adAccountId: cfg.ad_account_id, focusPixelIds, token, fetcher: deps.fetcher, now: deps.now, sleep: deps.sleep })
   return { facts: out.facts, errors: tag('meta', out.errors) }
 }
 
 export async function collectGa4Facts(clientId: string, cfg: TrackingClientConfig, deps: CollectDeps): Promise<Collected<Ga4Facts>> {
-  const out = await readGa4Facts({ clientId, eventNames: cfg.ga4_lead_events, now: deps.now }, deps.ga4)
+  const out = await readGa4Facts(
+    { clientId, eventNames: cfg.ga4_lead_events, now: deps.now },
+    { ...deps.ga4, sleep: deps.ga4.sleep ?? deps.sleep },
+  )
   return { facts: out.facts, errors: tag('ga4', out.errors) }
 }
 
@@ -107,14 +113,14 @@ export async function collectCrmFacts(clientId: string, cfg: TrackingClientConfi
       errors: [],
     }
   }
-  const out = await readCrmFacts(deps.supabase, clientId, deps.now)
+  const out = await readCrmFacts(deps.supabase, clientId, deps.now, deps.sleep)
   return { facts: out.facts, errors: tag('crm', out.errors) }
 }
 
 export async function collectEnvFacts(clientId: string, deps: CollectDeps): Promise<Collected<EnvFacts>> {
   const out = await readEnvFacts(
     { clientId, now: deps.now },
-    { supabase: deps.supabase, env: deps.env, capiPreflight: deps.capiPreflight, resolveMetaToken: deps.resolveMetaToken },
+    { supabase: deps.supabase, env: deps.env, capiPreflight: deps.capiPreflight, resolveMetaToken: deps.resolveMetaToken, sleep: deps.sleep },
   )
   return { facts: out.facts, errors: tag('env', out.errors) }
 }
@@ -245,13 +251,22 @@ export async function collectPostLaunchFacts(
 
   let token: string | null
   try {
-    token = await deps.resolveMetaToken(clientId)
+    token = await retryOnce(() => deps.resolveMetaToken(clientId), { sleep: deps.sleep })
   } catch (err) {
     return unread(`找 Meta 令牌时出错：${sanitizeError(err)}`)
   }
   if (!token) return unread('没有可用的 Meta 令牌，开投后的数据没法读')
 
-  const out = await readPostLaunchFacts({ adAccountId: cfg.ad_account_id, token, fetcher: deps.fetcher, now: deps.now, launchedAt })
+  const out = await readPostLaunchFacts({
+    adAccountId: cfg.ad_account_id,
+    token,
+    fetcher: deps.fetcher,
+    now: deps.now,
+    launchedAt,
+    sleep: deps.sleep,
+    campaignIds: cfg.launch_watch?.campaign_ids,
+    campaignNameContains: cfg.launch_watch?.campaign_name_contains,
+  })
   return { facts: out.facts, errors: tag('insights', out.errors) }
 }
 
