@@ -1,5 +1,33 @@
 # 社媒客户接入：真实状态与统一入口
 
+## 当前追加任务：浏览器实测后的授权修复
+
+本节替代下文已经完成的实现范围。唯一写入者为本 Codex 根会话，子牙和魏征只读审查。
+
+- 目标/验收：Meta Page 的成功及取消回调均绑定发起浏览器、用户、客户访问权和最初服务端目标；可信取消回原客户可见面板；不可信回调零平台请求、零写入。
+- 范围：meta-oauth/client.ts、Facebook connect/callback、三处对应测试、本说明与新台账。其余平台后台仅检查和准备，不访问生产密钥。
+- 基线：UTC 2026-10-18 已 fetch；工作区 `/private/tmp/magic-engine-social-channel-onboarding`，分支 `codex/social-oauth-remediation`，干净起点 HEAD/origin/main `9b9c68548a559ca5d8d3d25b3cc7b7b156d8828f`。Node/依赖沿用现有工作区。
+- 风险 A；频率高 / IMPACT 高 / 收入中 → P0。本地实现、测试、提交、推送 PR 在范围内；本轮不合并、部署、发帖、开自动化、扩大 scope 或接受新授权。
+- Tier / Reuse：既有社媒 L3 Connector 安全修复，账号目标 L4；CTS/Roman 和旅游/地产使用相同校验，无客户或行业语义。复用原 HMAC、客户 guard、连接存储与 FacebookPagePanel；不新增框架、表、依赖、能力线或 Inngest 事件。
+- 双审设计：随机 nonce、发起人及服务端目标签入 state；短期 HttpOnly cookie 绑定浏览器；先验证后处理取消/交换；当前尝试结束清 cookie，旧窗口错配不得清新尝试。旧 state 缺少新字段要求重新连接，不做兼容绕过。结果仍回真正显示 meta 提示的面板。
+- 基线验证：相同三处定向 Vitest 退出 0，3 文件 59 测试通过。后续扩展取消、cookie、切换身份、撤权、目标变化及读失败回归，再跑类型、lint、假配置 build、冻结代码 mutation 和双审。
+- 现场条件：ME TikTok 主应用已 In review；另建 Celine 应用是空草稿，不重复接入。Sandbox 目前只有 CTS 目标，新增 Celine 需要登录和具体授权。Google 原项目仍需验证；不绕过未验证提示。Facebook 当前身份没有列出 Celine，不能绑定其他客户 Page。IG/Threads/X 原生缺口单列，不伪造接通。
+
+类型基线追加：沿用用户此前“修复基线错误”的要求，仅允许修正 `src/lib/capabilities/ads/__tests__/envelope-facts.test.ts` 的测试辅助函数参数类型；不改广告生产代码或断言。未改动主干归档在相同依赖与 8GB Node 上执行 `npm run type-check` 也出现同一四条错误；该测试修改前 51 例通过。实际 resolver 契约接受字符串 actionKey，测试 helper 误限三个旧动作；从真实契约派生类型即可保留新旧动作测试，无须 any、强转或抑制。不是扩大广告业务范围。
+
+台账基线追加：同一未改动主干的 entries 检查也因 `2026-10-19-stop-loss-route-503-account-id-shape.md` 正文含两个完整账户号失败；仅将这两个正文示例替换为 `<account-id>`，前置字段及验收文字逐字不动，不更改台账检查或冻结规则。
+
+### 当前追加任务的验证与现场回执
+
+- 基线三文件 59 测试通过；实施后覆盖成功、取消、cookie/HMAC、切换用户、撤权、服务端目标变化、平台等待期间变更与写失败。新增四例真实 handler/HMAC/NextRequest 和响应 cookie 交接；外部平台与数据库用替身，不宣称真实平台授权成功。
+- 最终定向命令：`npm test -- src/lib/meta-oauth src/app/api/auth/facebook src/lib/platform-oauth src/lib/auth/__tests__/client-access.test.ts src/lib/capabilities/ads/__tests__/envelope-facts.test.ts src/lib/ledger`，退出 0，22 文件 412 测试通过，日志 `/private/tmp/celine-oauth-final-tests.log`。
+- 默认 type-check 因 Node 4GB 堆耗尽退出 134；同命令加 `NODE_OPTIONS=--max-old-space-size=8192`，修正上述测试类型后退出 0，日志 `/private/tmp/celine-oauth-final-types.log`。没有跳过或抑制类型检查。
+- 八个变更 TS 文件显式传入 `next lint --file`，退出 0。使用回环 Supabase URL/假 key 的 `npm run build` 退出 0，日志 `/private/tmp/celine-oauth-build.log`；未使用生产凭据。`git diff --check` 退出 0。
+- 子牙/魏征 Round 1 提出的落库前重查、持久化异常和旧回调擦新 cookie 均已修；Round 2 无新增 blocker/P1/P2。测试 helper 类型由子牙单独核对真实契约，通过。不是服务端严格单次 state 消费，也不声称外部授权与数据库配置跨系统原子。
+- Chrome 已将 Celine 登记的新 Facebook Page 配为发布目标，并刷新读回“发布目标已配”；自动出片关闭、收件箱未绑定、无发帖。当前 Facebook 身份的可管理主页搜索仍没有 Celine。TikTok 主应用审核中，添加沙盒目标要求重新登录，已保留用户登录窗口；未新增 grant。Google 审核准备页缺用途说明及 demo，已配置权限不含当前运行时请求的 YouTube 三项，需单独核对重提范围，未改全局项目。
+- 浏览器使用原生控制检查私有授权页面，未向外部决策服务传页面；一条纯元数据观察记录已保存。截屏/客户现场回执仅保存在用户本地输出目录，不提交仓库。
+- 本轮尚未合并/部署或完成任一新平台授权；后续 commit/PR、mutation 和发布决定以实际回执为准。
+
 ## 本轮权威任务说明
 
 - 目标：让客户与团队在同一入口识别六个平台的登记、授权记录、目标账户与下一步；复用已有授权及配置流程。
