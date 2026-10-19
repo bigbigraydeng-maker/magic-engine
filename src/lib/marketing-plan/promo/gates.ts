@@ -16,6 +16,9 @@ import type { PromoPlaybook, PromoEvidence } from './playbooks'
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
 import { promoContentHash } from './content-hash'
 import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
+import { GATE_LABELS } from '@/lib/ads-tracking-preflight/judge'
+import { TRACKING_RECEIPT_STALE_HOURS, receiptAgeHours } from '@/lib/ads-tracking-preflight/receipt'
+import { HARD_GATE, PREFLIGHT_GATE_KEYS, type TrackingGateReceipt } from '@/lib/ads-tracking-preflight/types'
 
 export type Light = 'green' | 'yellow' | 'red' | 'gray'
 export type GateGroup = 'tool' | 'rhythm' | 'content'
@@ -29,6 +32,8 @@ export const GATE_KEYS = [
   'landing.item_live',
   'social.cadence_scheduled',
   'content.wording_permission',
+  // 开投前「追踪与环境就绪」十道门：灯来自 ads-tracking-preflight 函数的回执（见 trackingChecks）
+  ...PREFLIGHT_GATE_KEYS,
 ] as const
 export type GateKey = (typeof GATE_KEYS)[number]
 
@@ -85,6 +90,12 @@ export interface GateFacts {
    * 这里与计划里自带的 checks 合并，同一项取最近一次。
    */
   manual_checks: ManualCheck[]
+  /**
+   * 开投前追踪检查（ads-tracking-preflight）为这个客户留下的最近一份回执。
+   * undefined = 这个客户没配置追踪检查：不适用，清单里不出现追踪那十道门（老客户的批准流程不变）；
+   * receipt = null = 配置了但还没有回执 / 读不到：十道门全灰（硬门灰 = 不能批准），绝不当成绿。
+   */
+  tracking?: { receipt: { checked_at: string; gates: readonly TrackingGateReceipt[] } | null }
 }
 
 const EVIDENCE: PromoEvidence = 'unvalidated_default'
@@ -207,6 +218,33 @@ function cadenceCheck(phase: PromoPhase, f: GateFacts): GateResult[] {
   return [make('social.cadence_scheduled', 'rhythm', '社媒节奏已排', false, 'yellow', `每日计划只排到往后 ${days} 天，少于 ${min} 天`, how)]
 }
 
+const TRACKING_HOW_WAIT = '等每天新西兰早上 7 点的自动检查；超过一天还没有，请找开发看那个定时任务有没有在跑。'
+
+/**
+ * 追踪与环境就绪：把开投前追踪检查的回执翻成检查清单里的灯。
+ * 只在有广告步骤的阶段出现；客户没配置追踪检查就一道都不出（不适用，不是灰）。
+ * 没回执 / 回执超过 36 小时没更新 / 回执里缺这一项 → 灰，绝不当成绿；「不适用」的门不出现。
+ */
+function trackingChecks(phase: PromoPhase, f: GateFacts): GateResult[] {
+  if (phaseAdsSteps(phase).length === 0 || f.tracking === undefined) return []
+  const receipt = f.tracking.receipt
+  const age = receipt ? receiptAgeHours(receipt.checked_at, f.now) : null
+  const gray = (key: (typeof PREFLIGHT_GATE_KEYS)[number], reason: string, as_of: string | null): GateResult =>
+    make(key, 'tool', GATE_LABELS[key], HARD_GATE[key], 'gray', reason, TRACKING_HOW_WAIT, as_of)
+
+  return PREFLIGHT_GATE_KEYS.flatMap((key): GateResult[] => {
+    if (receipt === null) return [gray(key, '开投前追踪检查还没有回执（每天新西兰早上 7 点自动跑一次）', null)]
+    if (age === null || age > TRACKING_RECEIPT_STALE_HOURS) {
+      const hours = age === null ? '未知' : String(Math.round(age))
+      return [gray(key, `开投前追踪检查已 ${hours} 小时没更新（本该每天一次），现在的状态不可信`, receipt.checked_at)]
+    }
+    const g = receipt.gates.find(x => x.key === key)
+    if (g === undefined) return [gray(key, '这次追踪检查的回执里没有这一项', receipt.checked_at)]
+    if (g.na === true) return []
+    return [make(key, 'tool', GATE_LABELS[key], HARD_GATE[key], g.status, g.reason, g.how, g.as_of ?? receipt.checked_at)]
+  })
+}
+
 /** 某一阶段的全部检查项（只包含这个阶段用得上的）。 */
 export function evaluatePhaseGates(spec: PromoSpec, phase: PromoPhase, f: GateFacts): GateResult[] {
   return [
@@ -215,6 +253,7 @@ export function evaluatePhaseGates(spec: PromoSpec, phase: PromoPhase, f: GateFa
     ...budgetCheck(phase, f),
     ...manualChecks(spec, phase, f),
     ...cadenceCheck(phase, f),
+    ...trackingChecks(phase, f),
   ]
 }
 

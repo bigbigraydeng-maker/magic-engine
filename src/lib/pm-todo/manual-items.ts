@@ -49,6 +49,7 @@ import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
+import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushDiagnosticSynthesisItems } from './diagnostic-synthesis-items'
@@ -390,6 +391,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
     (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 推广计划每日检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 广告开投前「追踪与环境就绪」检查：红灯怎么修（开发欠账）+ 检查自己没跑成。读每日函数的回执，不自己现算
+    (b) => pushAdsTrackingPreflightItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 开投前追踪检查待办生成失败（不阻塞其他待办）:', e),
     ),
     // 月循环目标没自动续上 —— 自动续建失败不许只写日志（铁律 3）
     (b) => pushGoalRolloverItems(supabase, b, nameOf).catch((e) =>

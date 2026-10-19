@@ -344,6 +344,14 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/promo-plan-daily-watch.ts 的 PROMO_WATCH_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
   { service: 'inngest:cloud-promo-plan-daily-watch', jobName: 'promo-plan-daily-watch', schedule: '10 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-15' },
+  // 广告开投前「追踪与环境就绪」检查：每天新西兰 07:00 查一遍（只读：不写 Meta / GA4 / 官网，不发布，不扣费），
+  // 回执写 cron_run_logs 并发事件 ads.tracking_preflight.checked。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-preflight.ts 的 TRACKING_PREFLIGHT_CRON。
+  { service: 'inngest:cloud-ads-tracking-preflight', jobName: 'ads-tracking-preflight', schedule: '0 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-20' },
+  // 开投后「自动补排」读回：每小时看一眼，窗口里官方账户一开始花钱就自己补排 T+1h / T+24h 读回（只读）。
+  // 窗口外的整点也留一行运行记录（processed=0），它自己哪天停了才看得出来。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-launch-watch.ts 的 LAUNCH_WATCH_CRON。
+  { service: 'inngest:cloud-ads-tracking-launch-watch', jobName: 'ads-tracking-launch-watch', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-20' },
   { service: 'inngest:cloud-calendar-closure-audit', jobName: 'calendar-closure-audit', schedule: '20 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-08' },
   { service: 'inngest:cloud-lead-sheet-sync-fanout', jobName: 'lead-sheet-sync', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
