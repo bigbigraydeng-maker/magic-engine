@@ -229,17 +229,21 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
   return sb as unknown as SupabaseClient
 }
 
-const withRollback: Readonly<Record<string, CapabilityImplementation>> = {
+const withRollback = {
   'ads.pause_unit': { actionKey: 'ads.pause_unit', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
+  'ads.pause_campaign': { actionKey: 'ads.pause_campaign', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
+  'ads.cut_unit_budget': { actionKey: 'ads.cut_unit_budget', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
   'ads.cut_campaign_budget': { actionKey: 'ads.cut_campaign_budget', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
   'ads.scale_unit_budget': { actionKey: 'ads.scale_unit_budget', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
-}
+} satisfies Readonly<Record<string, CapabilityImplementation>>
+
+type TestActionKey = keyof typeof withRollback
 
 function resolve(
   t: Partial<Tables>,
   log: Log,
   at: 'authorize' | 'pre_provider' = 'authorize',
-  actionKey: 'ads.pause_unit' | 'ads.cut_campaign_budget' | 'ads.scale_unit_budget' = 'ads.pause_unit',
+  actionKey: TestActionKey = 'ads.pause_unit',
   input: Record<string, unknown> = { ad_account_id: ACCOUNT, adset_id: ADSET, cycle_date: '2026-09-27' },
 ) {
   const tables: Tables = {
@@ -876,7 +880,7 @@ describe('🔴 ads.pause_campaign · 账户号必须是 act_ 形式（stop-loss 
     expect('facts' in r).toBe(true)
   })
 
-  it.each(['ads.cut_campaign_budget', 'ads.cut_unit_budget'])('%s · 纯数字账户号 → 读不出事实（fail-closed）', async (actionKey) => {
+  it.each(['ads.cut_campaign_budget', 'ads.cut_unit_budget'] as const)('%s · 纯数字账户号 → 读不出事实（fail-closed）', async (actionKey) => {
     const digits = ACCOUNT.replace(/^act_/, '')
     const input = actionKey === 'ads.cut_campaign_budget'
       ? { cycle_date: '2026-09-27', ad_account_id: digits, campaign_id: '456', after_cents: 4_000 }
