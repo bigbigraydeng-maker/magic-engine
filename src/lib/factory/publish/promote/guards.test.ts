@@ -249,7 +249,7 @@ describe('checkOrderPrechecks', () => {
     const res = checkOrderPrechecks({
       order: makeOrder(),
       rows: [makeRow()],
-      target: makeTarget({ platform: 'publer' }),
+      target: makeTarget({ platform: 'other' as unknown as 'facebook' }),
     })
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.status).toBe(422)
