@@ -1,11 +1,14 @@
-# 广告 Agent 观测清单 · CTS 10/22–10/28 真实投放（119 号 · 2026-10-19）
+# 广告 Agent 观测清单 · CTS 10/20–10/26 真实投放（119 号 · 2026-10-19）
 
-依据：18 号统筹裁定（2026-10-19）。承接 [测试清单](./2026-10-19-ads-agent-test-checklist.md)（T1–T7）的 T1 / T2 / 回执读回，用 **CTS 10/22 这套真实投放** 当测试案例，**不另起一套、不另花钱**。
+> **日期更新（2026-10-19，18 号转 PM 令）**：CTS 投放**提前到 10/20（NZ）**，本清单窗口由 10/22–10/28 改为 **10/20–10/26**。文件名里的 `1022-1028` 沿用不改。下文所有「D0/D1/…」日期按新窗口读：**D0＝10/19 晚到开投前，D1＝10/20，D2–D3＝10/21–10/22，D4–D7＝10/23–10/26**。系列名里的 `20261022` 只是 74 号起的名字，不是日期。
+> 其余裁定不变：`autopilot_dry_run` 保持 true、不重置、不改上限、投放由 PM 本人开、我只读。
+
+依据：18 号统筹裁定（2026-10-19）。承接 [测试清单](./2026-10-19-ads-agent-test-checklist.md)（T1–T7）的 T1 / T2 / 回执读回，用 **CTS 这套真实投放（原定 10/22，现提前到 10/20）** 当测试案例，**不另起一套、不另花钱**。
 风险级别：C（只写文档；观测全部只读）。
 
 ## 0. 边界（先看这一节）
 
-- **建 / 开由人**：74 号已建好两个系列的草稿，PM 本人 10/21 晚开。我负责 **看 → 判 → 验 → 回**
+- **建 / 开由人**：74 号已建好两个系列的草稿，PM 本人开（现定 10/20）。我负责 **看 → 判 → 验 → 回**
 - **不碰**：74 号建的两个 `20261022` 系列和 A 草稿；NAL；不翻 `autopilot_dry_run`（保持 true）；不改任何设置
 - **D3 自动暂停、止损只测"人点止损"这条路，不让 Agent 自己动手**（没有可靠急停，见 `docs/ledger/evidence/emergency-stop-and-cost-cap--2026-10-19.md`）
 - **没有新功能**。本清单只规定"读什么、期望什么、不符怎么算缺陷"
@@ -17,11 +20,13 @@
 | 官方账户 | `act_2202695063810470`，`account_status=1`（正常），时区 Pacific/Auckland，账户日上限 11000 分（$110），客户总闸 $150 |
 | 个人账户 | `act_2775766642787274`，`account_status=3`（欠款），**不用、不碰** |
 | 近 14 天官方账户花费 | **0**（最后一笔 2026-09-22） |
-| 10/22 系列 ① | `CTS · 拉新 · 表单 · 20261022`，id `52557922885873`，OUTCOME_LEADS，日预算 **$81**，**PAUSED** |
-| 10/22 系列 ② | `CTS · 收割 · 表单 · 20261022`，id `52557922870873`，OUTCOME_LEADS，日预算 **$20**，**PAUSED** |
+| 原定 10/22、现提前 10/20 的系列 ① | `CTS · 拉新 · 表单 · 20261022`，id `52557922885873`，OUTCOME_LEADS，日预算 **$81**，**PAUSED** |
+| 原定 10/22、现提前 10/20 的系列 ② | `CTS · 收割 · 表单 · 20261022`，id `52557922870873`，OUTCOME_LEADS，日预算 **$20**，**PAUSED** |
 | 合计日预算 | **$101**（≤ 账户上限 $110，≤ 客户总闸 $150） |
 | 草稿（未发布） | `CTS · 官网点击 · Natural China 3/26 · 20261022`（LINK_CLICKS，EDITING，校验通过） |
 | 官方账户里另有 3 个 **ACTIVE** 的旧系列 | `GC · 再营销收割测试`×2、`GC · 顶层认知 · 视频观看`；**但近 14 天零花费**——开投前要先弄清它们为什么 ACTIVE 却不花钱（见 D0-3） |
+| ⚠️ **两个 `20261022` 系列下面有没有广告组** | **截至 2026-10-19 晚我读到：没有。** 库里最新快照（10-18 12:31Z）只有这两个系列行、没有以它们为父的广告组；Meta 实时按名字含 `20261022` 查广告组返回空，且官方账户 ACTIVE/PAUSED 的广告组清单里也没有归属它们的。**可能是还没建、或建了但状态不在我查的范围——需要 74 号 / 18 号确认**。没有广告组就花不出钱 |
+| 3 个旧 ACTIVE 系列为什么零花费（D0-3 **已核**） | 它们**下面的广告组全是 PAUSED**（再营销收割×2、顶层认知各一组，Meta 实时读），所以系列显示 ACTIVE 但不会投放。风险：谁把这些广告组重新打开就会花钱——开投前后要盯 |
 | 素材池 | 5 条，过审 2 条（`28843889985273791`、`3626096160888481`）、候选 3 条 |
 | 目标成本 | 主结果 `lead`，`target_cost_per_primary = 11` |
 | 开关 | `autonomy_mode=bounded_auto`，`autopilot_enabled=true`，`autopilot_dry_run=true`；9 个 `ads.*` 策略全是 `auto_approve` |
@@ -29,7 +34,7 @@
 
 ## 2. 数据怎么来的（读的时候别搞混）
 
-- **`ad_daily_insights`（花费 / 线索 / 频次）**：每天 NZ 06:00 左右（`google-data-pullback-daily`，17:00Z）写入**前一天**。所以 **10/22 当天的数，10/23 早上才进库**。当天想看，只能读 Meta 官方连接（`ads_get_ad_entities`，实时）
+- **`ad_daily_insights`（花费 / 线索 / 频次）**：每天 NZ 06:00 左右（`google-data-pullback-daily`，17:00Z）写入**前一天**。所以 **10/20 当天的数，10/21 早上才进库**。当天想看，只能读 Meta 官方连接（`ads_get_ad_entities`，实时）
 - **`ad_entity_snapshots`**：每天抓 4–5 次，`capture_reason` 有 `first_seen / changed / daily / kernel_pre`
 - **`ad_health_narratives.payload.portfolio_diagnoses.diagnoses[]`**：每天一行，含 D3 / D7 等判据结论
 - **熔断探针**：`cron_run_logs` 里 `job_name='google-data-pullback-daily'` 的 `summary->'circuit_probe'`（**只读，不是刹车**）
@@ -39,28 +44,36 @@
 
 > 读法统一：先读 Meta 官方连接实时值作为"真相"，再读库里 ME 看到的值；**两边对不上才算缺陷**。"期望"是我定的合理区间，不是 Meta 保证。
 
-### D0 · 10/21 晚（PM 开投前后）
+### D0 · 10/19 晚到开投前（PM 开投前后）
 
 | # | 读什么 | 期望 | 不符怎么算 |
 |---|---|---|---|
 | D0-1 | 两个 `20261022` 系列 `effective_status`（Meta 实时） | PM 开投前 `PAUSED`；开投后两个都 `ACTIVE`，**且没有别的系列被误开** | 开投后仍 PAUSED 属人为未操作，**不算缺陷**；多出未授权的 ACTIVE 系列＝**缺陷 P0** |
 | D0-2 | `ad_entity_snapshots`（`level in (campaign, adset)`，`ad_account_id='act_2202695063810470'`）下一轮抓取是否出现这两个系列 | 开投后 ≤ 1 个抓取周期（约 6 小时）内出现，`effective_status` 与 Meta 一致 | 超时仍无 / 状态不一致 → **缺陷**（T1） |
-| D0-3 | 3 个旧 ACTIVE 系列：它们下面广告组 / 广告的 `effective_status`、预算 | 能说清"为什么 ACTIVE 却零花费"（例如广告组已停、无预算、账户曾欠款）；**若它们会在 10/22 随账户一起开始花钱，必须在开投前告诉 18 号** | 无法解释＝**记为风险，不算缺陷**，写进当日观测记录 |
+| D0-3 | 3 个旧 ACTIVE 系列 | **已核（2026-10-19，两个来源）**：系列开着、名下广告组**全是 PAUSED**、近 14 天花费 0——所以不会自己花钱，原因是广告组被人暂停。来源：①我读 Meta 官方连接（官方账户广告组清单，全部 PAUSED，含 Shanghai Always-on、圣诞、Golden China LAL 各组）②18 号同日读 Meta 官方接口，结论一致 | **不处理、不要动它们**。风险只有一条：开投前后若有人把这些广告组重新打开就会花钱——观测时留意它们的 `effective_status` 是否变化 |
 | D0-4 | `action_runs` 里 CTS 的 `ads.*` | 仍为 0 条（Agent 没自己动手） | 出现任何非人点的新记录＝**缺陷 P0**，立刻停 |
 | D0-5 | 追踪就绪回执 `overall` | 无硬门红灯；有红灯由预检工作流出待办 | 引用其结论；红灯＝开投阻塞，**不算 Agent 缺陷** |
 
-### D1 · 10/22（开投首日）—— 当天读实时，次日早读库
+### 开投当天的两次实时读（10/20，PM 点开投后）
+
+| 时点 | 读什么 | 期望 |
+|---|---|---|
+| **T+1 小时** | Meta 实时：两系列 `effective_status`、`amount_spent`、广告组与广告的审核状态（是否 `PENDING_REVIEW` / `DISAPPROVED`） | 两系列 ACTIVE；无拒审；花费 ≥ 0；**没有别的系列被误开** |
+| **当晚（NZ 20:00 前后）** | 同上 + 当日累计花费、`frequency`、`results` | 花费 ≤ 日预算 × 1.3；账户当日合计 ≤ $110 |
+读完当场给 18 号一句话结论；任何一项不符，按第 4 节处理。
+
+### D1 · 10/20（开投首日）—— **开投后 T+1 小时和当晚各读一次 Meta 实时**，次日（10/21）早读库
 
 | # | 读什么 | 期望 | 不符怎么算 |
 |---|---|---|---|
 | D1-1 | Meta 实时：两系列当日花费 | 各系列 0 < 花费 ≤ **日预算 × 1.3**（实测 Meta 可超投到约 1.31 倍；首日常常花不满） | 超过 1.3 倍＝**风险**，记观测；超过账户日上限 $110＝**缺陷 P1** |
-| D1-2 | 次日（10/23）`ad_daily_insights`（`level='campaign'`，`insight_date='2026-10-22'`）两系列各一行 | 有行，且 `spend` 与 Meta 实时的 10/22 数据差 ≤ 1% | 缺行 / 差距大＝**缺陷**（T2 取数） |
-| D1-3 | 10/23 `ad_health_narratives`（`insight_date='2026-10-22'`）CTS 一行 | 有；`payload.portfolio_diagnoses` 列出 D 系列结论；**D7（授权 / 数据体检）无"账户异常"** | 缺行＝**缺陷**；D7 报账户欠款而 Meta `account_status=1`＝**缺陷**（误报） |
+| D1-2 | 次日（10/21）`ad_daily_insights`（`level='campaign'`，`insight_date='2026-10-20'`）两系列各一行 | 有行，且 `spend` 与 Meta 实时的 10/20 数据差 ≤ 1% | 缺行 / 差距大＝**缺陷**（T2 取数） |
+| D1-3 | 10/21 `ad_health_narratives`（`insight_date='2026-10-20'`）CTS 一行 | 有；`payload.portfolio_diagnoses` 列出 D 系列结论；**D7（授权 / 数据体检）无"账户异常"** | 缺行＝**缺陷**；D7 报账户欠款而 Meta `account_status=1`＝**缺陷**（误报） |
 | D1-4 | D3「花钱没结果」 | 首日花费很少，**预期 `not_comparable` 或无命中**（它看近 7 天，需花费 ≥ 2×$11=$22 才可能命中） | 首日就 hit＝**核对是否合理**（见 D3 判据，下） |
 | D1-5 | 频次 `frequency`（广告级 / 系列级） | 首日 ≤ 3（后台红线 3） | > 3 且系统没提示＝**缺陷** |
 | D1-6 | 熔断探针 `circuit_probe` | CTS 官方账户的 `accountCapCents=11000`，**不再是 `cap_missing`**；`spendCents` 有值 | 仍 `cap_missing` / `spend_missing` 超过 1 天＝**缺陷** |
 
-### D2–D3 · 10/23–10/24（读 T2 的主要窗口）
+### D2–D3 · 10/21–10/22（读 T2 的主要窗口）
 
 | # | 读什么 | 期望 | 不符怎么算 |
 |---|---|---|---|
@@ -70,15 +83,15 @@
 | D2-4 | 人是否被提示 | 如果 D3 hit，`flywheel_actions` 出现 `dry_run_logged` 行（演练模式，不动手）；今日待办有"需要你动手" | hit 但无记录 / 无待办＝**缺陷**（发现死在日志里） |
 | D2-5 | `action_runs` 的 CTS `ads.*` | 仍只有人点止损产生的记录（若 PM 没点则 0 条） | 出现非人点记录＝**缺陷 P0** |
 
-### D4–D7 · 10/25–10/28（稳定性与周结论）
+### D4–D7 · 10/23–10/26（稳定性与周结论）
 
 | # | 读什么 | 期望 | 不符怎么算 |
 |---|---|---|---|
 | D4-1 | `cron_run_logs` `google-data-pullback-daily` 每天 `status=completed` | 连续 7 天 completed；`summary.errors` 里 CTS 相关错误 ≤ 0 | 任一天 failed＝**缺陷**；有 CTS 错误＝**缺陷** |
-| D4-2 | `ad_health_narratives` 连续不断档 | 10/22–10/28 每天一行 | 断档＝**缺陷** |
+| D4-2 | `ad_health_narratives` 连续不断档 | 10/20–10/26 每天一行 | 断档＝**缺陷** |
 | D4-3 | 账户状态 | `account_status` 全程 = 1 | 变成 3 / 其它，系统**必须**当天提示（D7 / 待办）；没提示＝**缺陷 P1** |
 | D4-4 | 人点止损（如 PM 点了） | 该次 `action_runs` + 三步 + `authorization_decisions` 齐；**注意：止损按钮不写 `flywheel_actions`（已登记 P3 缺口，不重复算缺陷）** | 记录不齐＝**缺陷** |
-| D4-5 | 周小结（10/28） | 我出一页：开投后每天花费 / 线索 / 线索价 / 频次 / D 系列结论 / Agent 提示了什么 / 漏了什么 | — |
+| D4-5 | 周小结（10/26） | 我出一页：开投后每天花费 / 线索 / 线索价 / 频次 / D 系列结论 / Agent 提示了什么 / 漏了什么 | — |
 
 ## 4. 缺陷怎么记
 
@@ -96,13 +109,13 @@ select insight_date, entity_name, spend, leads, results, cost_per_result, freque
 from ad_daily_insights
 where client_id = 'c0000000-0000-0000-0000-000000000000'
   and ad_account_id = 'act_2202695063810470' and level = 'campaign'
-  and insight_date >= '2026-10-22' order by insight_date, entity_name;
+  and insight_date >= '2026-10-20' order by insight_date, entity_name;
 
 -- D1-3 / D2-3：当天体检里的 D 系列结论
 select insight_date, d->>'code' as code, d->>'status' as status
 from ad_health_narratives n,
      jsonb_array_elements(n.payload->'portfolio_diagnoses'->'diagnoses') d
-where n.client_id = 'c0000000-0000-0000-0000-000000000000' and n.insight_date >= '2026-10-22'
+where n.client_id = 'c0000000-0000-0000-0000-000000000000' and n.insight_date >= '2026-10-20'
 order by insight_date, code;
 
 -- D0-4 / D2-5：是否有不该有的 ads.* 执行记录
@@ -117,5 +130,5 @@ order by created_at;
 
 1. 追踪预检回执的存放位置与字段，待 `cloud-ads-tracking-preflight` 上线后第一次读时核实
 2. 「首日花费 ≤ 日预算 × 1.3」的系数来自 NAL / CTS 过去的观察（最高 1.31，样本小，见 `2026-10-19-ads-cross-account-daily-spend-gate-v0.2.md`），**是观测阈值，不是规则**
-3. 3 个旧 ACTIVE 系列为什么零花费，我还没查清（D0-3 要先弄清）
+3. （已解决）3 个旧 ACTIVE 系列零花费的原因已核，见 D0-3
 4. 全程只读：不能证明"Agent 自己动手"这一段，那一段本轮不测
