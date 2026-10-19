@@ -68,7 +68,7 @@ Magic Engine是一个 AI 驱动的社媒内容运营平台，面向代理公司�
 | 关键词数据 | SEMrush REST API |
 | 关键词数据（补充） | DataForSEO REST API（排名追踪 / 竞品缺口 / SERP 分析，替代 SEMrush 高成本场景） |
 | 网页抓取 | Jina.ai Reader（免费，URL→Markdown） |
-| 内容发布 | Publer API（排期、账户管理） |
+| 内容发布 | Publer API（排期、账户管理）（Publer 已于 2026-10 删除） |
 | 数据同步 | Airtable REST API（双向同步） |
 | 部署 | Render（**main** 分支自动部署，读 `render.yaml` Blueprint） |
 
@@ -336,7 +336,7 @@ flywheel_actions          ← 执行动作记录
 ├── flywheel: 'seo' | 'geo' | 'ads' | 'social'         ← flywheel_name enum
 ├── action_type (TEXT)       ← 动作分类，如 'geo.deploy_directive', 'blog_publish'
 ├── execution_mode: 'in_house' | 'third_party' | 'external_manual'
-├── vendor (TEXT, nullable)  ← 第三方供应商代号，如 'publer'（in_house 时为 null）
+├── vendor (TEXT, nullable)  ← 第三方供应商代号，如 'publer'（in_house 时为 null）（Publer 已于 2026-10 删除）
 ├── payload (JSONB)          ← 动作参数
 ├── expected_metric (TEXT)   ← 预期影响的指标 key（app 层校验，无 DB FK）
 ├── expected_delta (NUMERIC) ← 预期变化量（正值 = 改善）
@@ -383,7 +383,7 @@ INDEX: (action_id), (client_id), (computed_at DESC)
 
 **执行形态三分法**：
 - `in_house`：Magic Engine 内自研工作台（SEO 内容、GEO Composer、社媒内容制作）
-- `third_party`：编排第三方平台（如 Publer、Meta Ads Manager）
+- `third_party`：编排第三方平台（如 Publer、Meta Ads Manager）（Publer 已于 2026-10 删除）
 - `external_manual`：FDE 完全外部完成（reputation、newsletter 等），只记录不自动执行
 
 **`execution_items` 扩展**（同一 migration）：新增 `execution_target JSONB` 列，编码执行路由 `{flywheel, mode, vendor?, action_type?}`，已对所有历史行按 dimension 反推回填。
@@ -453,8 +453,6 @@ competitor-keywords / keyword-gap）连同 `/dashboard/keywords` 工作台，**2
 
 ### 发布 & 同步
 ```
-GET    /api/publer/draft/[assetId]            → 获取 Publer 草稿预览
-POST   /api/publer/schedule                   → 排期发布到 Publer
 POST   /api/airtable/pull-content             → 从 Airtable 拉取内容
 POST   /api/airtable/sync-content             → 将帖子推送到 Airtable
 ```
@@ -479,7 +477,6 @@ POST   /api/cron/attribution                  → 每 6h：飞轮归因运算（
 POST   /api/cron/flywheel-seo-weekly          → 每周：SEO 飞轮快照（keyword 排名写入 flywheel_metrics）← Phase 12.I 新增
 POST   /api/cron/keyword-snapshots-weekly     → 每周：DataForSEO 关键词排名快照 ← Phase 12.I 新增
 POST   /api/webhooks/airtable-approved        → Zapier → ME：Airtable 批准触发
-POST   /api/webhooks/publer-published         → Publer 发布后回调
 ```
 
 ---
@@ -492,7 +489,7 @@ POST   /api/webhooks/publer-published         → Publer 发布后回调
 | `/dashboard/clients` | Clients | 客户列表，新建客户 |
 | `/dashboard/clients/[id]` | Client Detail | 含 4 个 Tab 面板 |
 | `/dashboard/content` | Content Board | 帖子列表视图 + 月历日历视图；批量审批；模态框编辑+生成预览图 |
-| `/dashboard/visuals` | Launch Hub 🚀 | 电子表格视图，图片/视频 AI 生成 or 手动上传，Publer 排期 |
+| `/dashboard/visuals` | Launch Hub 🚀 | 电子表格视图，图片/视频 AI 生成 or 手动上传，Publer 排期（Publer 已于 2026-10 删除） |
 | `/dashboard/airtable` | Airtable Views | 各 Airtable 视图嵌入 |
 | `/dashboard/analytics` | Analytics | 数据分析（占位） |
 
@@ -607,7 +604,7 @@ Launch Hub 表格
   │         ├─ ready → 显示缩略图，更新 Airtable Image_URL
   │         └─ failed → 显示错误 + 重试按钮
   ├─ 点"⬆ Upload" → 手动上传图片/视频 → Supabase Storage
-  └─ 点"→ Publer" → 选账户 + 时间 + Caption → POST /api/publer/schedule
+  └─ 点"→ Publer" → 选账户 + 时间 + Caption → POST /api/publer/schedule（Publer 已于 2026-10 删除）
 ```
 
 ### 6.5 Airtable 双向同步
@@ -621,7 +618,7 @@ Airtable 编辑 ──→ 手动点"↓ Sync Airtable" ──→ /api/airtable/p
 Airtable Webhook（via Zapier）──→ /api/webhooks/airtable-approved
                                    └─ 更新 Supabase status
 
-Publer 发布 ──→ /api/webhooks/publer-published
+Publer 发布 ──→ /api/webhooks/publer-published（Publer 已于 2026-10 删除）
                 └─ 更新 status='published'
 ```
 
@@ -685,7 +682,7 @@ Step 5: 内容生成（携带上下文）
     ▼
 Step 6: 发布 + 追踪
     ├─ 博客发布 → 更新 blog_posts.status = 'published'
-    ├─ 社媒排期 → Publishing Hub → Publer
+    ├─ 社媒排期 → Publishing Hub → Publer（Publer 已于 2026-10 删除）
     └─ 2-4 周后 AI Tracker 复测 → 更新策略优先级
 ```
 
@@ -705,7 +702,7 @@ Step 6: 发布 + 追踪
 | **SEMrush** | Keyword Intelligence | 关键词数据（量/难度/CPC/竞品） | Per API unit |
 | **Jina.ai Reader** | Site Analyzer | 网页抓取 URL→Markdown | 免费 |
 | **Airtable** | Content Workspace | 内容数据库（双向同步底座） | 按行数/功能 |
-| **Publer** | Publishing Hub | 社媒排期发布 | 按订阅 |
+| **Publer** | Publishing Hub | 社媒排期发布 | 按订阅（Publer 已于 2026-10 删除） |
 | **Perplexity API** ⭐ | （AI Visibility Tracker 内部） | AI 引擎排名查询 | Per query |
 | **TypeSafe Jev** | Compliance Engine | 内容工厂成片文案品控判断（竞品品牌/占位字幕/人称口吻） | Per query |
 | **Supabase** | （内部，不暴露） | 数据库 + 文件存储 | 按用量 |
@@ -736,9 +733,6 @@ AIRTABLE_API_KEY=
 SEMRUSH_API_KEY=
 SEMRUSH_DB=au                      # 默认 AU 数据库
 
-# Publishing
-PUBLER_API_KEY=
-PUBLER_WORKSPACE_ID=
 
 # Security
 CRON_SECRET=                       # Cron job 鉴权
@@ -769,10 +763,9 @@ magic-engine/
 │   │   │   ├── posts/batch/       # 批量状态更新
 │   │   │   ├── visual/            # 图片/视频/上传/状态轮询
 │   │   │   ├── semrush/           # 4 个关键词端点
-│   │   │   ├── publer/            # 排期发布
 │   │   │   ├── airtable/          # 双向同步
 │   │   │   ├── cron/              # 后台轮询任务
-│   │   │   └── webhooks/          # Zapier + Publer 回调
+│   │   │   └── webhooks/          # Zapier + Publer 回调（Publer 已于 2026-10 删除）
 │   │   └── dashboard/             # 前端页面
 │   │       ├── clients/[id]/
 │   │       │   ├── _components/   # BriefPanel, CampaignPanel 等
@@ -792,7 +785,6 @@ magic-engine/
 │       ├── visual/                # WaveSpeed / Seedance / HeyGen 客户端
 │       ├── semrush/               # SEMrush API 封装
 │       ├── airtable/              # Airtable API 封装
-│       ├── publer/                # Publer API 封装
 │       └── supabase.ts            # Supabase 客户端（启动时校验 service key）
 └── ARCHITECTURE.md                # 本文档
 ```
@@ -806,7 +798,7 @@ magic-engine/
 - [x] Master Brief 生成（Jina + PDF + SEMrush + Claude）
 - [x] Campaign Brief + 批量生成（Route A + C，并发5，安全校验）
 - [x] Content Board：列表视图 + 日历视图 + 批量审批 + 模态编辑
-- [x] Launch Hub：图片生成 + 手动上传 + Publer 发布
+- [x] Launch Hub：图片生成 + 手动上传 + Publer 发布（Publer 已于 2026-10 删除）
 - [x] 视觉生成队列（最多2并发，60分钟超时，指数退避重试）
 - [x] Airtable 写回（PATCH → Supabase + Airtable 同步）
 - [x] SEMrush 关键词拉取（种子词 + 数据库选择）

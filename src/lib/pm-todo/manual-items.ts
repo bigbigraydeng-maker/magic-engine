@@ -64,12 +64,10 @@ import {
   type ManualItemPusher,
   type NotIndexedRow,
 } from './manual-item-types'
-import { pushLinkedinProgressItems } from './manual-linkedin-items'
 import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
-export { pushLinkedinProgressItems } from './manual-linkedin-items'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
@@ -278,10 +276,6 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 日历上带日期的验证事项每天核对一遍 —— 读不到日历 / 巡检没跑成 / 没法自动核对都要摆到人眼前
     (b) => pushCalendarClosureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 日历到期事项巡检待办检查失败（不阻塞其他待办）:', e),
-    ),
-    // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
-    (b) => pushLinkedinProgressItems(supabase, b, now).catch((e) =>
-      console.warn('[manual-items] LinkedIn 进度贴待办检查失败（不阻塞其他待办）:', e),
     ),
     // 客人说他付款了但没法自动确认 —— 只有人能对银行流水，不许机器自己打 paid 标签
     (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>

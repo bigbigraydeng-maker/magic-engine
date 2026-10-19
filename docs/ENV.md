@@ -116,7 +116,6 @@
 
 | 变量 | 用途 | 配在哪 | 登记 |
 |---|---|---|---|
-| `PUBLER_API_KEY` / `PUBLER_WORKSPACE_ID` | 多平台排期发布 | Render-web | ✅ |
 | `CMS_TOKEN_ENCRYPTION_KEY` | 客户 WordPress / CMS token 加密 | Render-web | ✅ |
 | `CLOUDFLARE_MGMT_TOKEN` | 客户站点 DNS / Pages 管理 | Render-web | ✅ |
 | `GITHUB_TOKEN` / `GITHUB_WEBHOOK_SECRET` | GitHub CMS 执行闭环（P12.H） | Render-web | ✅ |
@@ -204,7 +203,6 @@
 | `SOCIAL_COMMENT_AUTOREPLY_KILL` | 社媒评论自动回复紧急关停 | Render-web |
 | `EMAIL_REPLY_DIGEST_ENABLED` | 🔴「客人来信没人回」汇总信总闸，默认 **关**（未配 = 不发，安全态）。开关在 `/api/cron/email-reply-digest` 路由里读 —— 是 web 进程，配到 cron job 自己身上不生效。2026-09-03 上线当天即由 PM 拍板暂停：现有排除只挡「自己人域名」和「同行域名」，挡不住陌生公司群发的推销，CTS 当天 32 条候选里噪音占七成，而排序按「等最久」，前 10 条有 8 条是营销邮件。**加好噪音过滤并用生产数据验证准确率之后才可开**；开的时候 `render.yaml` 里那段调度也要一起取消注释（两道闸） | Render-web |
 | `LEAD_FOLLOWUP_DIGEST_ENABLED` | 🔴「客人填了表还没人回」每日汇总信总闸，默认 **关**（未配 = 只挑名单不发信，安全态）。开关在 Inngest 云端函数 `cloud-crm-lead-followup-digest` 里读 —— **不是** Render cron 路由，配在 Inngest 跑得到的那份环境里。关着的时候名单照挑、回执照记（`sent:false` + `reason:'未启用'`），可以先看名单准不准再打开。**收件人没有环境变量，也不许有**：写死成函数文件里的字面量 `DIGEST_RECIPIENT = 'hello@magicengine.cloud'`（PM 2026-09-24 拍板第一步只发给 ME 自己），要改成发给客户的销售必须走一次代码改动 + 复审。🔴 **刻意不用 `ME_MAIL_TO_ADDRESS`** —— 那个常量读 `ME_MAIL_TO` 这个**全站共用**的环境变量（联系表单、cron 摘要、今日待办都读它），用它就等于「改一行配置就能把每个客户的客人名单发到任意地址」 | Render-web |
-| `LINKEDIN_PROGRESS_POST_ENABLED` | 🔴 ME 产品动态自动发 LinkedIn 总闸，默认关（未配 = 禁用，不用配才是安全态）。开关在 `/api/cron/linkedin-progress-post-{mon,thu}` 路由里读——那是 web 进程，两条 cron 只负责 `curl`；配到 cron job 自己的环境变量上不会生效。上线前提：PM 已在 Publer 连好个人 LinkedIn 账号，并在 Magic Lab Class 客户的 connectors 设置页把账号 ID 填进 Publer 绑定 | Render-web |
 | `SWEEP_CITIES` / `SWEEP_INDUSTRIES` | 线索扫描城市 / 行业范围。`src/lib/prospecting/sweep.ts` 里读（走 `envList('SWEEP_CITIES', …)`，变量名是字符串传进去的），调用方是 web 路由 `/api/cron/prospecting-sweep` | Render-web |
 | `ENABLE_REAL_GENERATION` | `.env.example` 有，代码 0 引用 | ⚠️ 待清理 |
 | `FACTORY_QUALITY_GUARD_DISABLED` | 内容工厂成片文案品控（竞品品牌/占位字幕/人称口吻）总闸，设 `true` 临时全局关停 Jev 调用（确定性的字幕重复检测不受影响，照常跑）。默认开 | Render-web |

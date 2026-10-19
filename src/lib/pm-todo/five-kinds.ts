@@ -105,8 +105,6 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
-  linkedin_progress_needs_setup: 'one_click',
-  linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
@@ -141,7 +139,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
   blog_pr_open: 'review',
-  linkedin_progress_needs_review: 'review',
+  linkedin_progress_needs_review: 'review', // 历史：LinkedIn 自动发帖已下线，仅夹具使用
   maliang_render_passed: 'review',
   libai_copy_unverified: 'review',
   simaqian_review_drafts: 'review',
