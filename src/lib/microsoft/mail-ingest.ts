@@ -36,6 +36,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microsoft/mail-graph'
 import { classifySender } from '@/lib/microsoft/mail-sender'
+import { applyFormNotices, emptyFormStats, mirrorFormThread, type FormEnquiryStats } from '@/lib/microsoft/mail-form-ingest'
+import type { FormNoticeLead } from '@/lib/microsoft/mail-form-notice'
 import { resolveContact } from '@/lib/crm/identity'
 import { contactKindOf, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
 import { extractAgentCustomers } from '@/lib/crm/travel-agent-customer-extract'
@@ -53,6 +55,8 @@ export interface PlannedMessage {
   receivedAt: string
   /** 这封是自动回复（不算「有人跟过他」）。 */
   automated: boolean
+  /** 网站表单通知里提取出的客人（见 mail-form-ingest）。有它时对方已被改写成这位客人。 */
+  formLead?: FormNoticeLead
 }
 
 export interface PlannedThread {
@@ -117,6 +121,8 @@ export function isAutoReply(subject: string | null): boolean {
  * conversations 表和同一个 (client_id, conversation_id) 唯一键。
  */
 export function threadKey(m: MailMessage): string {
+  // 网站表单通知每封自成一条线程：同主题的两位客人不能被 Exchange 的会话分组并到一起。
+  if (m.formLead) return `mail-form:${m.id}`
   return m.conversationId ? `mail:${m.conversationId}` : `mail-msg:${m.id}`
 }
 
@@ -193,6 +199,7 @@ export function planMailIngest(messages: MailMessage[], opts: PlanOptions): Mail
       // 只有出站才可能是自动回执；客人那边发来的自动回复不归我们管，
       // 而且把它标成 automated 会让一条真的来信从「他回话了」里消失。
       automated: m.direction === 'outbound' && isAutoReply(m.subject),
+      formLead: m.formLead,
     })
     if (m.direction === 'inbound') thread.hasInbound = true
     // 主题以**最新一封**为准 —— 线程标题跟着最后一次来回走，跟邮箱里看到的一致。
@@ -273,6 +280,8 @@ export interface MailSyncResult {
    * 进 CRM，而 cron 还记这次成功。宁可这一轮少读一点，下一轮重来。
    */
   stoppedEarly?: string
+  /** 网站表单通知的处理结果（只有这个邮箱出现过表单通知才有）。 */
+  formEnquiries?: FormEnquiryStats
   error?: string
 }
 
@@ -525,7 +534,8 @@ async function emitNewInboundMessageEvents(
 ): Promise<void> {
   if (insertedMessageIds.length === 0) return
   const insertedIds = new Set(insertedMessageIds)
-  const newInbound = thread.messages.filter((m) => m.direction === 'inbound' && insertedIds.has(m.id))
+  // 网站表单通知默认不触发自动回复相关事件（客人之后的真回复不带 formLead，仍正常触发）。
+  const newInbound = thread.messages.filter((m) => m.direction === 'inbound' && insertedIds.has(m.id) && !m.formLead)
 
   for (const m of newInbound) {
     try {
@@ -679,9 +689,20 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     truncated = truncated || res.truncated
   }
 
-  const plan = planMailIngest(all, {
-    ownDomains: ownDomainsOf(target.mailbox, target.domain, target.ownDomains ?? []),
+  const ownDomains = ownDomainsOf(target.mailbox, target.domain, target.ownDomains ?? [])
+
+  // 网站表单通知（发件人是本邮箱自己）：识别 → 提取客人 → 改写对方。认不出的丢掉并计数。
+  const formStats = emptyFormStats()
+  const readable = await applyFormNotices({
+    token,
+    mailbox: target.mailbox,
+    clientId: target.clientId,
+    ownDomains,
+    messages: all,
+    stats: formStats,
   })
+
+  const plan = planMailIngest(readable, { ownDomains })
 
   // **从旧到新处理**，配合下面「一条失败就停」。
   //
@@ -702,7 +723,21 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
       messages += stored.newMessages
 
       let contactId = stored.contactId
-      if (!contactId) {
+      const hasFormLead = thread.messages.some((m) => m.formLead)
+      if (hasFormLead) {
+        // 网站表单：走 mirrorWebFormLead（reject 策略、不覆盖老客人姓名、写 web_form 触点），
+        // 不走下面默认的 resolveContact。放在 `!contactId` 判断之外：线程可能已被员工回复挂到老联系人上，
+        // 放里面会漏写 web_form 触点（写入靠 source_ref 幂等）。
+        const formContact = await mirrorFormThread({ clientId: target.clientId, messages: thread.messages })
+        contactId = contactId ?? formContact
+        if (contactId && !stored.contactId) {
+          await supabaseAdmin
+            .from('conversations')
+            .update({ contact_id: contactId, updated_at: new Date().toISOString() })
+            .eq('id', stored.conversationId)
+            .is('contact_id', null)
+        }
+      } else if (!contactId) {
         if (thread.hasInbound) {
           // 客人自己开过口 —— 认人，认不到就按邮箱新建（判断②）。
           // 只带**一个**身份，所以结构上不可能触发两个真人的不可逆合并。
@@ -742,8 +777,10 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
       )
 
       if (contactId) {
-        touchpoints += await writeTouchpoints(target.clientId, contactId, thread)
-        await runAgentCustomerHook(target.clientId, contactId, thread, stored.conversationId, domainRules)
+        // 表单通知只写 web_form 触点（上面已写），不再写一条邮件触点 —— 同一封信不重复计数。
+        const emailThread = { ...thread, messages: thread.messages.filter((m) => !m.formLead) }
+        touchpoints += await writeTouchpoints(target.clientId, contactId, emailThread)
+        await runAgentCustomerHook(target.clientId, contactId, emailThread, stored.conversationId, domainRules)
       }
       done += 1
     } catch (err) {
@@ -765,6 +802,7 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     skipped: plan.skipped,
     truncated,
     stoppedEarly,
+    ...(formStats.recognised > 0 ? { formEnquiries: formStats } : {}),
   }
 }
 
