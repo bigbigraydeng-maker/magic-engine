@@ -1,4 +1,5 @@
 /** Persisted authorisation facts only: no provider calls, refreshes or publishing. */
+import { INSTAGRAM_SCOPES, isInstagramAccountId, normalizeInstagramHandle } from '@/lib/instagram-oauth/identity'
 import { META_PUBLISH_SCOPE } from '@/lib/meta-oauth/client'
 import { TIKTOK_SCOPES } from '@/lib/tiktok-oauth/client'
 import { YOUTUBE_PUBLISH_SCOPES } from '@/lib/youtube-publish/client'
@@ -8,6 +9,7 @@ export interface SocialConnectionFact {
   provider: string
   purpose: string
   account_id: string
+  location_name?: string | null
   display_name: string | null
   status: string
   scopes: unknown
@@ -35,6 +37,7 @@ export interface SocialChannelStatus {
   identity: { accountId: string; displayName: string; verifiedAt: string | null } | null
   detail: string
   publishing: string
+  connectAvailable?: boolean
   managedAccounts?: Array<{ connectionId: string; accountId: string; displayName: string }>
 }
 
@@ -77,8 +80,8 @@ function assessGrant(row: SocialConnectionFact, required: readonly string[], now
     return { authorization: 'needs_attention', identity, detail: '已保存账号授权，但缺少该连接所需的权限，请重新授权。' }
   }
   if (Date.parse(expiry) <= now.getTime()) {
-    return row.provider === 'meta'
-      ? { authorization: 'needs_attention', identity, detail: '保存的 Meta 授权已到期，需要重新授权。' }
+    return (row.provider === 'meta' || row.provider === 'instagram')
+      ? { authorization: 'needs_attention', identity, detail: '保存的授权已到期，需要重新授权。' }
       : { authorization: 'refresh_pending', identity, detail: '已保存授权；访问凭据待使用时刷新，当前未实时核验。' }
   }
   return { authorization: 'saved', identity, detail: '已保存授权记录，当前未实时核验平台连接。' }
@@ -97,7 +100,7 @@ function resolveGrant(rows: SocialConnectionFact[], target: string | null, requi
   return assessGrant(row, required, now)
 }
 
-export function buildSocialConnections(client: SocialClientFacts, rows: SocialConnectionFact[], now: Date): SocialChannelStatus[] {
+export function buildSocialConnections(client: SocialClientFacts, rows: SocialConnectionFact[], now: Date, instagramAvailable = false): SocialChannelStatus[] {
   // Never inherit the principal-scoped Meta Ads pilot's identity or grant.
   const legacy = rows.filter(row => row.purpose === 'legacy')
   const page = text(client.facebookPublishPageId)
@@ -121,10 +124,35 @@ export function buildSocialConnections(client: SocialClientFacts, rows: SocialCo
     managedAccounts: legacy.filter(row => row.provider === 'google_youtube' && row.status !== 'revoked' && text(row.id) && text(row.account_id))
       .map(row => ({ connectionId: row.id, accountId: row.account_id, displayName: text(row.display_name) ?? row.account_id })),
   }
-  const unavailable = (platform: 'instagram' | 'threads' | 'x', name: string, profile: string | null): SocialChannelStatus => ({
+  const igRows = legacy.filter(row => row.provider === 'instagram')
+  const igHandle = normalizeInstagramHandle(client.instagram_handle)
+  const igLive = igRows.filter(row => row.status !== 'revoked')
+  let igGrant: Grant
+  if (!igHandle) igGrant = { authorization: 'target_missing', identity: null, detail: '请先登记有效的 Instagram 用户名。' }
+  else if (igLive.length > 1) igGrant = { authorization: 'ambiguous', identity: null, detail: '存在多个 Instagram 授权记录，需要团队核实后再继续连接。' }
+  else {
+    const igRow = igRows.find(row => row.status !== 'revoked') ?? igRows[0]
+    if (!igRow) igGrant = { authorization: 'not_connected', identity: null, detail: '尚未保存此 Instagram 账号的授权。' }
+    else if (igRow.status === 'revoked') igGrant = assessGrant(igRow, INSTAGRAM_SCOPES, now)
+    else if (!isInstagramAccountId(igRow.account_id) || !normalizeInstagramHandle(igRow.location_name)) {
+      igGrant = { authorization: 'unknown', identity: null, detail: '保存的账号身份不完整，请重新核实。' }
+    } else if (normalizeInstagramHandle(igRow.location_name) !== igHandle) {
+      igGrant = { authorization: 'account_mismatch', identity: null, detail: '保存的 Instagram 授权与登记用户名不一致，请核实后重新连接。' }
+    } else igGrant = assessGrant(igRow, INSTAGRAM_SCOPES, now)
+  }
+  const instagram: SocialChannelStatus = {
+    platform: 'instagram', name: 'Instagram', profile: text(client.instagram_handle), targetAccountId: null,
+    ...igGrant, connectAvailable: instagramAvailable && Boolean(igHandle),
+    ...(!instagramAvailable && !igRows.length ? { authorization: 'not_available' as const,
+      detail: 'Instagram 原生授权暂未开放，登记账号资料不代表已接通。' } : {}),
+    publishing: '当前仅连接账号资料，尚不支持发布。',
+    managedAccounts: igLive.map(row => ({ connectionId: row.id, accountId: row.account_id,
+      displayName: text(row.display_name) ?? row.account_id })),
+  }
+  const unavailable = (platform: 'threads' | 'x', name: string, profile: string | null): SocialChannelStatus => ({
     platform, name, profile: text(profile), targetAccountId: null, authorization: 'not_available', identity: null,
     detail: '原生授权暂未开放，登记账号资料不代表已接通。', publishing: '当前入口暂不支持此平台的原生发布。',
   })
-  return [facebook, unavailable('instagram', 'Instagram', client.instagram_handle), unavailable('threads', 'Threads', null),
+  return [facebook, instagram, unavailable('threads', 'Threads', null),
     unavailable('x', 'X', null), tiktok, youtube]
 }

@@ -68,3 +68,32 @@ describe('social authorisation facts', () => {
     expect(result).not.toHaveProperty('href')
   })
 })
+
+
+describe('Instagram saved facts remain identity-only', () => {
+  const ig = { ...connection, provider: 'instagram', account_id: '987654321098765432', location_name: 'Example', scopes: ['instagram_business_basic'] }
+  const inspect = (rows: SocialConnectionFact[], available = true, handle: string | null = '@example') => buildSocialConnections({ ...client, instagram_handle: handle }, rows, now, available)[1]
+  it('requires professional ID and exact canonical username, not profile registration alone', () => {
+    expect(inspect([]).authorization).toBe('not_connected')
+    expect(inspect([ig]).authorization).toBe('saved')
+    expect(inspect([ig]).publishing).toContain('尚不支持发布')
+    expect(inspect([ig], true, 'different').authorization).toBe('account_mismatch')
+    expect(inspect([{ ...ig, location_name: null }]).authorization).toBe('unknown')
+    expect(inspect([{ ...ig, account_id: 'not-professional-id' }]).authorization).toBe('unknown')
+    expect(inspect([ig], true, 'invalid-handle').authorization).toBe('target_missing')
+  })
+  it('expires to needs-attention, never automatic refresh', () => {
+    expect(inspect([{ ...ig, token_expiry: now.toISOString() }]).authorization).toBe('needs_attention')
+    expect(inspect([{ ...ig, scopes: [] }]).authorization).toBe('needs_attention')
+    expect(inspect([{ ...ig, status: 'revoked' }]).identity).toBeNull()
+  })
+  it('does not select among multiple rows or inherit other purposes', () => {
+    expect(inspect([ig, { ...ig, id: 'other', account_id: '123456' }]).authorization).toBe('ambiguous')
+    expect(inspect([{ ...ig, purpose: 'meta_ads_read' }]).authorization).toBe('not_connected')
+  })
+  it('disables consent without hiding an existing saved or expired identity', () => {
+    expect(inspect([], false).authorization).toBe('not_available')
+    expect(inspect([ig], false).authorization).toBe('saved')
+    expect(inspect([ig], false).connectAvailable).toBe(false)
+  })
+})

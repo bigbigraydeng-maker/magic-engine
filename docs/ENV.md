@@ -262,3 +262,19 @@
 bash scripts/doctor.sh          # 全量：env + 外部 API + cron
 bash scripts/doctor.sh --env    # 只查 env（掩码输出，不打印值）
 ```
+
+
+## Instagram Login — 账号资料连接（默认关闭）
+
+此入口独立于 Facebook Login，**不能复用 Facebook App ID/Secret**。只申请 `instagram_business_basic`，不授予发布、评论、消息能力，也没有后台刷新。已有 Meta scope 和客户连接不变；新 provider 暂无既有客户需重连。
+
+| 变量 | 用途 |
+| --- | --- |
+| `INSTAGRAM_LOGIN_ENABLED` | 必须精确为 `true` 才显示/接受原生连接。默认缺省或 false；迁移和应用配置核实前保持关闭。 |
+| `INSTAGRAM_APP_ID` | Meta 应用中 Instagram product 的 App ID，服务端读取。 |
+| `INSTAGRAM_APP_SECRET` | 同一 Instagram product 的 Secret，仅存既有服务端秘密配置，不放客户端或仓库。 |
+| `NEXT_PUBLIC_APP_URL` | 规范 HTTPS 站点 origin；回调固定 `/api/auth/instagram/callback`，须在该 product 后台精确登记。 |
+
+上线顺序：审查并应用 `platform_oauth_add_instagram` 迁移 → 配置独立 product、回调及必要审核/测试账号资格 → 配置服务端变量 → 才打开开关。此文档不表示这些生产步骤已经执行。专业账号须为企业/创作者；标准访问仅适用合资格测试/自有账号，客户推广需平台批准相应访问级别。
+
+在客户设置「内容与社媒」登记 Instagram 用户名，再回「社媒授权与连接」点击连接；同意后必须与登记用户名精确对应。保存 `account_id = /me.user_id` 字符串，`location_name = verified username`；不是 exchange user_id 或 app-scoped id。保存实际授予权限及真实 token 期限；过期提示重新连接，不显示待自动刷新。管理员的断开只将 ME 内此客户/Instagram/legacy 记录标为 revoked，不宣称撤销平台端应用许可。完成连接尚不能发布。

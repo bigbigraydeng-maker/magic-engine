@@ -94,10 +94,10 @@ export async function revokeConnection(id: string): Promise<void> {
 export async function listSocialConnectionFacts(clientId: string): Promise<SocialConnectionFact[]> {
   const { data, error } = await supabaseAdmin
     .from('platform_oauth_connections')
-    .select('id,provider,purpose,account_id,display_name,status,scopes,token_expiry,last_synced_at')
+    .select('id,provider,purpose,account_id,location_name,display_name,status,scopes,token_expiry,last_synced_at')
     .eq('client_id', clientId)
     .eq('purpose', 'legacy')
-    .in('provider', ['meta', 'tiktok', 'google_youtube'])
+    .in('provider', ['meta', 'instagram', 'tiktok', 'google_youtube'])
   if (error || !data) throw new Error('Social connection facts unavailable')
   return data as SocialConnectionFact[]
 }
