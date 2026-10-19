@@ -285,6 +285,43 @@ describe('开投后读回', () => {
     expect(receipt.items.map(i => i.gate_key)).toEqual(['post.t24h'])
     expect(receipt.items[0].href).toBe(`${APP_BASE}/dashboard/clients/c1/promo-plan`)
   })
+
+  // 🔴 第三轮整改：读回「没读到」= 灰灯 + 一条开发欠账；「还没花钱」= 灰灯但没有欠账。
+  //    这条走真实的收集 → 判灯 → 组装回执，证明「读取错误」真的一路传到了欠账。
+  it('端到端：没令牌 / 范围被拒 → 灰灯 + 一条欠账（带原因）；读到了但还没花钱 → 灰灯、没有欠账', async () => {
+    const withSeries: TrackingClientConfig = {
+      ...CONFIG,
+      launch_watch: { from: '2026-10-19', days: 4, timezone: 'Pacific/Auckland', campaign_ids: ['123456789012'] },
+    }
+    const assemble = async (cfg: TrackingClientConfig, world: ReturnType<typeof makeDeps>) =>
+      assemblePostLaunchReceipt({
+        requestId: 'req-e2e', clientId: 'c1', cfg, phase: 'post_t1h', appBase: APP_BASE, now: NOW, launchedAt: LAUNCHED_AT,
+        insights: await collectPostLaunchFacts('c1', cfg, LAUNCHED_AT, world.deps),
+      })
+
+    const noToken = await assemble(withSeries, makeDeps({ token: null }))
+    expect(noToken.gates.map(g => g.status)).toEqual(['gray'])
+    expect(noToken.items.map(i => i.gate_key)).toEqual(['post.t1h'])
+    expect(noToken.items[0].what).toContain('令牌')
+    expect(noToken.read_errors.some(e => e.source === 'insights')).toBe(true)
+
+    const scopeRefused = await assemble(CONFIG, makeDeps()) // 配置里没有盯盘窗口 / 广告系列
+    expect(scopeRefused.gates.map(g => g.status)).toEqual(['gray'])
+    expect(scopeRefused.items).toHaveLength(1)
+    expect(scopeRefused.items[0].what).toContain('广告系列')
+
+    const noSpend = makeDeps()
+    const inner = noSpend.deps.fetcher
+    noSpend.deps.fetcher = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname.endsWith('/insights')
+        ? new Response(JSON.stringify({ data: [] }), { status: 200 })
+        : inner(input, init)) as typeof fetch
+    const notSpendingYet = await assemble(withSeries, noSpend)
+    expect(notSpendingYet.gates.map(g => g.status)).toEqual(['gray'])
+    expect(notSpendingYet.gates[0].reason).toContain('还没开始花钱')
+    expect(notSpendingYet.read_errors).toEqual([])
+    expect(notSpendingYet.items).toEqual([])
+  })
 })
 
 describe('收集函数 · 瞬时故障重试一次 + 广告系列范围（审查整改）', () => {
