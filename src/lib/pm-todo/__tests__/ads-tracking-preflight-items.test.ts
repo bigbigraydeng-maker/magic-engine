@@ -266,9 +266,90 @@ describe('开投后读回的红灯 / 黄灯也要出待办（不能只落日志�
     expect(out).toHaveLength(2)
   })
 
-  it('开投后读回是灰灯（没读到 / 还没花钱）→ 不出待办', async () => {
-    const gray = postReceipt('c1', 'post_t1h', 'gray', '2026-10-19T19:00:00Z')
+  it('开投后读回是灰灯、因为还没花钱（读取没报错，没数据可判）→ 不出待办', async () => {
+    const gray = postReceipt('c1', 'post_t1h', 'gray', '2026-10-19T19:00:00Z', '还没开始花钱，没法判断')
     expect(await run([postRow(gray), preRow([gate('tracking.pixel_alive', 'green')])])).toEqual([])
+  })
+
+  // 🔴 第三轮整改：读回「没读到」（令牌失效 / 接口出错 / 范围被拒）= 检查自己没做成，要出一条开发欠账，不能静默
+  describe('读回没读到（灰灯 + 读取报错）→ 一条开发欠账；最新一份灰灯不得盖住更早的真红 / 黄灯', () => {
+    const unreadReceipt = (phase: 'post_t1h' | 'post_t24h', checkedAt: string, error = '令牌失效') =>
+      buildClientReceipt({
+        requestId: `unread-${phase}`, clientId: 'c1', checkedAt, trigger: 'postlaunch', phase, launchedAt: '2026-10-18T10:00:00Z',
+        gates: [{ ...gate(phase === 'post_t1h' ? 'post.t1h' : 'post.t24h', 'gray'), reason: `开投后读回没读到：${error}` }],
+        readErrors: [{ source: 'insights', error }], links: LINKS,
+      })
+    const greenPre = () => preRow([gate('tracking.pixel_alive', 'green')])
+
+    it('最新（也是唯一）一份读回没读到 → 一条开发待办：说清没读到、原因、怎么办、链接', async () => {
+      const out = await run([postRow(unreadReceipt('post_t1h', '2026-10-19T19:00:00Z', '令牌失效')), greenPre()])
+      expect(out).toHaveLength(1)
+      expect(out[0]).toMatchObject({ kind: 'ads_tracking_preflight_fix', client_id: 'c1', client_name: '客户甲' })
+      expect(out[0].what).toContain('开投后 1 小时读回')
+      expect(out[0].what).toContain('没读到')
+      expect(out[0].what).toContain('令牌失效')
+      expect(out[0].how).toBeTruthy()
+      expect(out[0].href).toBeTruthy()
+    })
+
+    it('最新一份没读到、更早的一份是红灯 → 两条都出：更早的真红灯不被盖住，读不到的欠账也不被盖住', async () => {
+      const older = postReceipt('c1', 'post_t1h', 'red', '2026-10-19T09:00:00Z', '点击 40 次但落地页浏览为 0')
+      const out = await run([postRow(unreadReceipt('post_t24h', '2026-10-19T19:00:00Z')), postRow(older), greenPre()])
+      expect(out).toHaveLength(2)
+      expect(out.some(i => i.what.includes('落地页浏览为 0'))).toBe(true)
+      expect(out.some(i => i.what.includes('没读到'))).toBe(true)
+    })
+
+    it('最新一份没读到、更早的一份是黄灯 → 同样两条都出', async () => {
+      const older = postReceipt('c1', 'post_t1h', 'yellow', '2026-10-19T09:00:00Z', '样本不足：点击只有 3 次')
+      const out = await run([postRow(unreadReceipt('post_t24h', '2026-10-19T19:00:00Z')), postRow(older), greenPre()])
+      expect(out.map(i => i.what).join('|')).toContain('样本不足')
+      expect(out.map(i => i.what).join('|')).toContain('没读到')
+      expect(out).toHaveLength(2)
+    })
+
+    it('最新一份只是「还没花钱」的灰灯（读取没报错）、更早的一份是红灯 → 只出更早的红灯，不额外喊', async () => {
+      const older = postReceipt('c1', 'post_t1h', 'red', '2026-10-19T09:00:00Z', '点击 40 次但落地页浏览为 0')
+      const noSpend = postReceipt('c1', 'post_t24h', 'gray', '2026-10-19T19:00:00Z', '还没开始花钱，没法判断')
+      const out = await run([postRow(noSpend), postRow(older), greenPre()])
+      expect(out).toHaveLength(1)
+      expect(out[0].what).toContain('落地页浏览为 0')
+    })
+
+    it('更新的一份读回已经读到了（绿灯）→ 更早那份没读到的欠账不再出（只看最新的一份）', async () => {
+      const older = unreadReceipt('post_t1h', '2026-10-19T09:00:00Z')
+      const newer = postReceipt('c1', 'post_t1h', 'green', '2026-10-19T19:00:00Z')
+      expect(await run([postRow(newer), postRow(older), greenPre()])).toEqual([])
+    })
+
+    it('更早的真红灯已经超过 72 小时、最新一份没读到仍在 72 小时内 → 只出没读到的欠账', async () => {
+      const oldRed = postReceipt('c1', 'post_t1h', 'red', '2026-10-15T09:00:00Z', '点击 40 次但落地页浏览为 0')
+      const out = await run([postRow(unreadReceipt('post_t24h', '2026-10-19T19:00:00Z')), postRow(oldRed), greenPre()])
+      expect(out).toHaveLength(1)
+      expect(out[0].what).toContain('没读到')
+    })
+
+    it('没读到的读回已经超过 72 小时 → 不再挂', async () => {
+      // 行是新的在前：最新一轮是今天的开投前体检（全绿），没读到的读回在它后面
+      expect(await run([greenPre(), postRow(unreadReceipt('post_t1h', '2026-10-15T19:00:00Z'))])).toEqual([])
+      expect(await run([greenPre(), postRow(unreadReceipt('post_t1h', '2026-10-16T20:00:00Z'))])).toHaveLength(1) // 刚好 72 小时还挂
+    })
+
+    it('更早的真红灯和最新一份没读到的读回都已经超过 72 小时 → 一条都不挂', async () => {
+      const oldRed = postReceipt('c1', 'post_t1h', 'red', '2026-10-14T09:00:00Z', '点击 40 次但落地页浏览为 0')
+      const out = await run([greenPre(), postRow(unreadReceipt('post_t24h', '2026-10-15T19:00:00Z')), postRow(oldRed)])
+      expect(out).toEqual([])
+    })
+
+    it('连续两份都没读到 → 只出最新那份的一条欠账（不叠）', async () => {
+      const out = await run([
+        postRow(unreadReceipt('post_t24h', '2026-10-19T19:00:00Z', '接口报错')),
+        postRow(unreadReceipt('post_t1h', '2026-10-19T09:00:00Z', '令牌失效')),
+        greenPre(),
+      ])
+      expect(out).toHaveLength(1)
+      expect(out[0].what).toContain('接口报错')
+    })
   })
 })
 
@@ -378,6 +459,38 @@ describe('盯盘一直找不到本次投放的系列（series_not_found）：只
     clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
     const unknown = Array.from({ length: 30 }, (_, i) => tick(new Date(NOW.getTime() - (40 + i * 60) * 60_000).toISOString(), null))
     expect(await run([okPre()], null, unknown)).toEqual([])
+  })
+
+  // 🔴 第三轮整改：读不出来的盯盘不是「找不到」，不能凑进「≥ 20 次」的次数里
+  it('一半的盯盘读不出来（series_found 为 null），明确找不到的只有 15 次 → 不够 20 次，不出', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    // 30 次盯盘，最新一次在 40 分钟前且明确找不到；奇数位读不出来 → 明确找不到的 15 次
+    const mixed = Array.from({ length: 30 }, (_, i) =>
+      tick(new Date(NOW.getTime() - (40 + i * 60) * 60_000).toISOString(), i % 2 === 0 ? false : null))
+    expect(await run([okPre()], null, mixed)).toEqual([])
+  })
+
+  it('明确找不到的盯盘够 20 次、中间夹着几次读不出来 → 照样出（读不出来的只是不算数）', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    // 30 次盯盘里 7 次读不出来（i = 3, 7, …, 27）→ 明确找不到的 23 次
+    const mixed = Array.from({ length: 30 }, (_, i) =>
+      tick(new Date(NOW.getTime() - (40 + i * 60) * 60_000).toISOString(), i % 4 === 3 ? null : false))
+    const out = await run([okPre()], null, mixed)
+    expect(out.some(i => i.what.includes('没找到本次投放的系列'))).toBe(true)
+  })
+
+  it('最新一次盯盘读不出来，但 1 小时前那次明确找不到、前面也一直找不到 → 照样出（以最近一次读得出结果的为准）', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const rows = [tick(new Date(NOW.getTime() - 10 * 60_000).toISOString(), null), ...notFoundTicks()]
+    const out = await run([okPre()], null, rows)
+    expect(out.some(i => i.what.includes('没找到本次投放的系列'))).toBe(true)
+  })
+
+  it('最近读得出结果的盯盘已经是 3 小时以前（后面全是读不出来）→ 不出：读不出来既不是找得到也不是找不到', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const recentUnknown = [0, 1, 2, 3].map(i => tick(new Date(NOW.getTime() - (10 + i * 60) * 60_000).toISOString(), null))
+    const olderNotFound = Array.from({ length: 30 }, (_, i) => tick(new Date(NOW.getTime() - (250 + i * 60) * 60_000).toISOString(), false))
+    expect(await run([okPre()], null, [...recentUnknown, ...olderNotFound])).toEqual([])
   })
 
   it('盯盘记录读不出来（库报错 / 格式不对）→ 不出这条（也不抛错）', async () => {

@@ -46,6 +46,12 @@ export const GATE_IMPACT: Record<TrackingGateKey, string> = {
 const FALLBACK_HOW = '打开推广计划页，按页面上每一项后面的「怎么办」处理。'
 const MAX_WHAT_LENGTH = 300
 
+/**
+ * 开投后读回「没读到」时的影响说明：这不是「数据不对」（GATE_IMPACT 那句），而是「没人知道对不对」。
+ * 不写「会自动重试」——自动补排只在盯盘窗口里才有，手动叫醒的读回没有。
+ */
+const POST_UNREAD_IMPACT = '读回没读到，开投后的追踪有没有问题现在没人知道；要尽快查原因，修好后补一次读回'
+
 export interface ItemLinks {
   fallback: string
   byGate?: Partial<Record<TrackingGateKey, string>>
@@ -55,27 +61,36 @@ function isPostLaunchGate(key: TrackingGateKey): boolean {
   return key === 'post.t1h' || key === 'post.t24h'
 }
 
-function needsItem(gate: TrackingGateReceipt): boolean {
+function needsItem(gate: TrackingGateReceipt, readFailed: boolean): boolean {
   if (gate.na) return false
   if (gate.status === 'red') return true
   // 开投后读回是「发现」的唯一出口（没有看板位置）：黄灯（比如样本不足）也要变成待办，不能只落日志
   if (gate.status === 'yellow') return isPostLaunchGate(gate.key)
-  return gate.status === 'gray' && gate.hard === true
+  if (gate.status !== 'gray') return false
+  // 开投后读回的灰灯分两种：读取报了错（令牌失效 / 接口出错 / 范围被拒）= 检查自己没做成，要下发；
+  // 读取没报错、只是还没花钱 = 没数据可判，不下发
+  if (isPostLaunchGate(gate.key)) return readFailed
+  return gate.hard === true
 }
 
 function itemWhat(gate: TrackingGateReceipt): string {
-  const text = `${GATE_LABELS[gate.key]}：${gate.reason}。${GATE_IMPACT[gate.key]}`
+  const impact = isPostLaunchGate(gate.key) && gate.status === 'gray' ? POST_UNREAD_IMPACT : GATE_IMPACT[gate.key]
+  const text = `${GATE_LABELS[gate.key]}：${gate.reason}。${impact}`
   return text.length <= MAX_WHAT_LENGTH ? text : text.slice(0, MAX_WHAT_LENGTH)
 }
 
+/**
+ * readFailed：这份回执的读取有没有报过错。只对开投后读回的灰灯有意义（开投后读回只有一道门，读取错误就是它的）。
+ */
 export function buildReceiptItems(
   clientId: string,
   gates: readonly TrackingGateReceipt[],
   links: ItemLinks,
+  readFailed = false,
 ): TrackingReceiptItem[] {
   const items: TrackingReceiptItem[] = []
   for (const gate of gates) {
-    if (!needsItem(gate)) continue
+    if (!needsItem(gate, readFailed)) continue
     items.push({
       client_id: clientId,
       gate_key: gate.key,
@@ -110,7 +125,7 @@ export function buildClientReceipt(input: {
     overall: overallLight(input.gates),
     preconditions_met: preconditionsMet(input.gates),
     gates: input.gates,
-    items: buildReceiptItems(input.clientId, input.gates, input.links),
+    items: buildReceiptItems(input.clientId, input.gates, input.links, input.readErrors.length > 0),
     read_errors: input.readErrors,
     no_publish: true,
   }
@@ -232,21 +247,49 @@ export function pickLatestClientReceipt(
   return null
 }
 
-/**
- * 每个客户最新的一份「开投后读回」回执（post_t1h / post_t24h）。
- * 开投后读回只有一道门、不进推广计划看板，所以它的红灯 / 黄灯只能靠今日待办被人看见。
- */
-export function pickLatestPostLaunchReceipt(
+type PickedReceipt = { receipt: TrackingClientReceipt; started_at: string }
+
+/** 这份回执的门全是灰的：没读到数，或者还没花钱、没数据可判。 */
+export function isGrayReceipt(receipt: TrackingClientReceipt): boolean {
+  return !receipt.gates.some(g => g.status !== 'gray')
+}
+
+/** 这个客户的全部「开投后读回」回执（post_t1h / post_t24h），保持传入顺序（新的在前）；跳过还在跑的、读不懂的。 */
+function postLaunchReceipts(
   rows: readonly { status: string | null; started_at: string; summary: unknown }[],
   clientId: string,
-): { receipt: TrackingClientReceipt; started_at: string } | null {
+): PickedReceipt[] {
+  const out: PickedReceipt[] = []
   for (const row of rows) {
     if (row.status === 'running') continue
     if (!isTrackingRunReceiptLike(row.summary)) continue
     const receipt = row.summary.clients.find(c => c.client_id === clientId && (c.phase === 'post_t1h' || c.phase === 'post_t24h'))
-    if (receipt) return { receipt, started_at: row.started_at }
+    if (receipt) out.push({ receipt, started_at: row.started_at })
   }
-  return null
+  return out
+}
+
+/**
+ * 每个客户「该拿来看」的那一份开投后读回回执（post_t1h / post_t24h）：优先取最新的**非灰**，只有全是灰才取最新的灰。
+ * 开投后读回只有一道门、不进推广计划看板，所以它的红灯 / 黄灯只能靠今日待办被人看见。
+ *
+ * 🔴 为什么不直接取最新一份：最新一份如果是灰灯（没读到 / 还没花钱），会把更早的真红灯、黄灯顶掉，
+ *    开投后真有问题的信号就从待办里消失了。
+ */
+export function pickLatestPostLaunchReceipt(
+  rows: readonly { status: string | null; started_at: string; summary: unknown }[],
+  clientId: string,
+): PickedReceipt | null {
+  const all = postLaunchReceipts(rows, clientId)
+  return all.find(p => !isGrayReceipt(p.receipt)) ?? all[0] ?? null
+}
+
+/** 不管灯色，最新的一份开投后读回回执：用来看「最新一次读回有没有读失败」。 */
+export function pickNewestPostLaunchReceipt(
+  rows: readonly { status: string | null; started_at: string; summary: unknown }[],
+  clientId: string,
+): PickedReceipt | null {
+  return postLaunchReceipts(rows, clientId)[0] ?? null
 }
 
 export function receiptAgeHours(checkedAt: string, now: Date): number | null {

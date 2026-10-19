@@ -7,7 +7,8 @@
  *
  * 两种待办：
  *   · ads_tracking_preflight_fix    回执里的红灯（或硬门灰）原样下发，告诉开发怎么修；
- *                                   开投后读回的红灯 / 黄灯（样本不足等）也在这里下发——它没有看板位置，只落日志就是死在日志里；
+ *                                   开投后读回的红灯 / 黄灯（样本不足等）、以及「没读到」的灰灯（令牌失效 / 接口出错 /
+ *                                   范围被拒）也在这里下发——它没有看板位置，只落日志就是死在日志里；
  *                                   预计开投日过了 24 小时盯盘还是找不到本次系列，也在这里喊一声
  *   · ads_tracking_preflight_broken 检查自己没跑成（开发欠账，不占 PM 的清单；PM 那一栏会留一句「今天没查成」）
  *
@@ -26,9 +27,10 @@ import {
   isTrackingRunReceiptLike,
   pickLatestClientReceipt,
   pickLatestPostLaunchReceipt,
+  pickNewestPostLaunchReceipt,
   receiptAgeHours,
 } from '@/lib/ads-tracking-preflight/receipt'
-import type { TrackingClientConfig, TrackingReceiptItem } from '@/lib/ads-tracking-preflight/types'
+import type { TrackingClientConfig, TrackingClientReceipt, TrackingReceiptItem } from '@/lib/ads-tracking-preflight/types'
 
 const INFRA_CLIENT_ID = 'infra'
 const INFRA_CLIENT_NAME = 'Magic Engine 后台'
@@ -195,9 +197,24 @@ function pushClientItems(
   for (const item of picked.receipt.items) items.push(fixItem(item, nameOf))
 }
 
+/** 一份开投后读回回执里的待办原样下发；超过 3 天的不再挂。 */
+function pushFreshPostLaunchItems(
+  picked: { receipt: TrackingClientReceipt },
+  nameOf: (id: string) => string,
+  now: Date,
+  items: ManualItem[],
+): void {
+  const age = receiptAgeHours(picked.receipt.checked_at, now)
+  if (age === null || age > POST_LAUNCH_ITEM_WINDOW_HOURS) return
+  for (const item of picked.receipt.items) items.push(fixItem(item, nameOf))
+}
+
 /**
- * 开投后读回：每个客户只看最新的一份，红灯 / 黄灯（样本不足等）下发成待办。
+ * 开投后读回：每个客户看「该看的那一份」（最新的非灰，全灰才取最新的灰），红灯 / 黄灯（样本不足等）下发成待办。
  * 它不进推广计划看板，所以这里是它唯一的出口；超过 3 天的读回不再挂。
+ *
+ * 🔴 最新一份如果是「没读到」的灰灯（令牌失效 / 接口出错 / 范围被拒），它自带一条开发欠账，不能被更早的真红 / 黄灯盖住：
+ *    更早的真信号和这条欠账一起出。最新一份只是「还没花钱」的灰灯（没有待办）则什么都不多出。
  */
 function pushPostLaunchItems(
   rows: RunRow[],
@@ -208,9 +225,11 @@ function pushPostLaunchItems(
 ): void {
   const picked = pickLatestPostLaunchReceipt(rows, clientId)
   if (picked === null) return
-  const age = receiptAgeHours(picked.receipt.checked_at, now)
-  if (age === null || age > POST_LAUNCH_ITEM_WINDOW_HOURS) return
-  for (const item of picked.receipt.items) items.push(fixItem(item, nameOf))
+  pushFreshPostLaunchItems(picked, nameOf, now, items)
+
+  // 最新一份和「该看的那一份」不是同一份 = 最新一份是灰灯（它若不是灰，「该看的那一份」就是它自己）
+  const newest = pickNewestPostLaunchReceipt(rows, clientId)
+  if (newest !== null && newest.receipt !== picked.receipt) pushFreshPostLaunchItems(newest, nameOf, now, items)
 }
 
 // ─── 盯盘一直找不到本次系列 ─────────────────────────────────────────────────────

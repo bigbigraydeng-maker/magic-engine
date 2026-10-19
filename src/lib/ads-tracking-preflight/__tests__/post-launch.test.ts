@@ -283,6 +283,24 @@ describe('readPostLaunchFacts · 只看本次投放的广告系列（审查整�
     }
   })
 
+  // 🔴 第三轮整改（同一类问题）：200 但读不懂的洞察响应不能当成「还没花钱」的全 0
+  it('洞察响应是 200 但没有 data 数组 → 读不懂：read false、写明原因（不能当成「还没花钱」的全 0）', async () => {
+    for (const body of [{}, { data: null }, { data: 'oops' }, { data: {} }, [], 'text', null]) {
+      const { fetcher } = accountFetcher(() => ok(body))
+      const out = await readPostLaunchFacts({ ...base(fetcher), campaignIds: [CAMPAIGN_A] })
+      expect(out.facts.read, JSON.stringify(body)).toBe(false)
+      expect(out.facts.error, JSON.stringify(body)).toContain('读不懂')
+      expect(out.errors.length, JSON.stringify(body)).toBeGreaterThan(0)
+      expect(out.facts.spend_cents, JSON.stringify(body)).toBe(0)
+    }
+  })
+
+  it('洞察的 data 是空数组 → 读到了，全 0（账户里这段时间还没有任何花费行）', async () => {
+    const { fetcher } = accountFetcher(() => ok({ data: [] }))
+    const out = await readPostLaunchFacts({ ...base(fetcher), campaignIds: [CAMPAIGN_A] })
+    expect(out.facts).toMatchObject({ read: true, error: null, spend_cents: 0, link_clicks: 0, landing_page_views: 0, leads: 0 })
+  })
+
   it('洞察结果还有下一页（系列太多读不全）→ read false，不把半截数字当完整结果', async () => {
     const { fetcher } = accountFetcher(() => ok({
       data: [row(CAMPAIGN_A, '官网点击', '10', '20')],
@@ -349,6 +367,21 @@ describe('readCampaignPresence · 本次投放的系列在账户里有没有（�
     const { fetcher } = campaignsFetcher(() => ok({ data: [{ id: '999999999999', name: '官网点击 · 20250101' }] }))
     const out = await readCampaignPresence({ ...base(fetcher), campaignNameContains: ['官网点击', '20260101'] })
     expect(out).toEqual({ read: true, found: false, error: null })
+  })
+
+  // 🔴 第三轮整改：返回 200 但读不懂（没有 data 数组）不是「账户里一个系列都没有」——读不懂 = found 为 null
+  it('响应是 200 但没有 data 数组（缺失 / null / 不是数组 / 整个响应不是对象）→ 读不懂：read false、found 为 null，不当成「找不到」', async () => {
+    for (const body of [{}, { data: null }, { data: 'oops' }, { data: {} }, { error_free: true }, [], 'text', null]) {
+      const { fetcher } = campaignsFetcher(() => ok(body))
+      const out = await readCampaignPresence(base(fetcher))
+      expect(out, JSON.stringify(body)).toMatchObject({ read: false, found: null })
+      expect(out.error, JSON.stringify(body)).toContain('读不懂')
+    }
+  })
+
+  it('data 是空数组 → 读到了：账户里一个系列都没有 → found 为 false（这是真的「找不到」）', async () => {
+    const { fetcher } = campaignsFetcher(() => ok({ data: [] }))
+    expect(await readCampaignPresence(base(fetcher))).toEqual({ read: true, found: false, error: null })
   })
 
   it('范围为空（编号和名字关键词都没有）→ 拒绝：read false，一个请求都不发', async () => {

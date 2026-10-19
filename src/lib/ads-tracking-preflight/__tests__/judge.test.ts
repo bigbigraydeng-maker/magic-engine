@@ -712,6 +712,23 @@ describe('judgePostLaunch', () => {
     expect(judgePostLaunch('post_t1h', facts({ spend_cents: 0 })).status).toBe('gray')
   })
 
+  // 第三轮整改：「没读到」的灰灯会变成开发欠账，它的「怎么办」要让开发照着做（令牌 / 接口 / 范围配置 / 手动补读回）
+  it('没读到的灰灯：原因带上读取错误，「怎么办」说清令牌、接口、系列配置和手动补读回', () => {
+    const g = judgePostLaunch('post_t24h', facts({ read: false, error: '令牌失效' }))
+    expect(g.reason).toContain('开投后读回没读到')
+    expect(g.reason).toContain('令牌失效')
+    expect(g.how).toContain('令牌')
+    expect(g.how).toContain('client-config')
+    expect(g.how).toContain('管理员')
+    expect(judgePostLaunch('post_t1h', facts({ read: false, error: null })).reason).toBe('开投后读回没读到')
+  })
+
+  it('还没花钱的灰灯：不是读取失败，「怎么办」仍是等有花费后再读', () => {
+    const g = judgePostLaunch('post_t1h', facts({ spend_cents: 0 }))
+    expect(g.reason).toContain('还没开始花钱')
+    expect(g.how).toBe('等有花费后再读回')
+  })
+
   it('花了钱一次点击都没有：1 小时读回是黄，24 小时读回是红', () => {
     expect(judgePostLaunch('post_t1h', facts({ link_clicks: 0, landing_page_views: 0 })).status).toBe('yellow')
     expect(judgePostLaunch('post_t24h', facts({ link_clicks: 0, landing_page_views: 0 })).status).toBe('red')

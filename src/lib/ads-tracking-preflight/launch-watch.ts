@@ -221,19 +221,31 @@ export function firstSpendSeenFromRows(
 }
 
 export interface SeriesWatchStatus {
-  /** 窗口里这个客户有多少次有效的盯盘 */
+  /** 窗口里这个客户有多少次「读得出结论」的盯盘（找到了 / 明确找不到）；读不出来的不算 */
   ticks: number
-  /** 最新一次盯盘的时刻；一次都没有 = null */
+  /** 最近一次读得出结论的盯盘的时刻；一次都没有 = null */
   latest_at: string | null
-  /** 最新一次盯盘有没有找到本次系列；那一次没读出来 / 没这个字段 = null */
+  /** 最近一次读得出结论的盯盘有没有找到本次系列；一次都没有 = null */
   latest_found: boolean | null
   /** 这些盯盘里，有没有哪怕一次找到过系列或见到过花费 */
   ever_found: boolean
 }
 
 /**
+ * 这一次盯盘读出的结论：见到花费 = 系列肯定在（true）；series_found 为 true / false 就是它；
+ * 都没有（series_found 为 null / 缺失，也没见到花费）= 读不出来（null）。
+ */
+function seriesFoundOf(entry: Record<string, unknown>): boolean | null {
+  if (entry.spend_seen === true) return true
+  return typeof entry.series_found === 'boolean' ? entry.series_found : null
+}
+
+/**
  * 从盯盘自己的运行记录里看「本次系列找到过没有」：今日待办用它判断「预计开投日过了 24 小时还是找不到」。
  * 只数这个客户、窗口内（active=true）、已收尾、读得懂的盯盘；记录的顺序不重要。
+ *
+ * 🔴 读不出来的盯盘（令牌失效 / 接口出错 / 响应读不懂，series_found 为 null）既不是「找到」也不是「找不到」：
+ *    不算进次数，也不当「最近一次」——否则一堆读不出来的盯盘会被凑成「一直找不到」，把读取故障说成系列没发布。
  */
 export function seriesWatchStatusFromRows(
   rows: readonly { status: string | null; started_at: string; summary: unknown }[],
@@ -251,12 +263,14 @@ export function seriesWatchStatusFromRows(
     if (entry === undefined || entry.active !== true) continue
     const ms = Date.parse(summary.checked_at)
     if (Number.isNaN(ms)) continue
+    const found = seriesFoundOf(entry)
+    if (found === null) continue
     out.ticks += 1
-    if (entry.series_found === true || entry.spend_seen === true) out.ever_found = true
+    if (found) out.ever_found = true
     if (ms > latestMs) {
       latestMs = ms
       out.latest_at = summary.checked_at
-      out.latest_found = typeof entry.series_found === 'boolean' ? entry.series_found : null
+      out.latest_found = found
     }
   }
   return out

@@ -135,6 +135,14 @@ function unread(now: Date, message: string): { facts: PostLaunchFacts; errors: s
   return { facts: { read: false, error: message, as_of: now.toISOString(), ...ZERO }, errors: [message] }
 }
 
+/**
+ * 响应里有 data 数组吗？Meta 正常返回一定有（没有数据时是空数组）。
+ * 🔴 没有 = 返回了 200 但我们读不懂，不能当成「账户里什么都没有」——那会把读不懂说成「还没花钱 / 系列找不到」。
+ */
+function hasDataArray(body: unknown): body is { data: unknown[] } {
+  return typeof body === 'object' && body !== null && Array.isArray((body as Record<string, unknown>).data)
+}
+
 /** 响应里还有下一页吗（paging.next 是字符串）？有 = 我们没读全。 */
 function hasNextPage(body: unknown): boolean {
   const paging = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).paging : undefined
@@ -179,6 +187,7 @@ export async function readPostLaunchFacts(input: PostLaunchReadInput): Promise<{
   }
   try {
     const body = await graphGet(`${adAccountId}/insights`, params)
+    if (!hasDataArray(body)) return unread(now, '洞察响应读不懂（里面没有 data 数组），不当成「还没花钱」')
     if (hasNextPage(body)) {
       return unread(now, '洞察结果有下一页（广告系列太多，读不全），不当成完整结果')
     }
@@ -211,7 +220,8 @@ export interface CampaignPresence {
 /**
  * 本次投放的系列在不在广告账户里（不管花没花钱）。
  * 用来分清「系列在、还没花钱」和「一个系列都没找到」（比如还是未发布的草稿，线上读不到）。
- * 永不 reject；范围为空 / 读不到 / 读不全 都是 found=null，绝不当成「找不到」。
+ * 永不 reject；范围为空 / 读不到 / 读不全 / 读不懂（200 但没有 data 数组）都是 found=null，绝不当成「找不到」。
+ * 只有读懂了、列表里确实没有（含空数组）才是 found=false。
  */
 export async function readCampaignPresence(input: CampaignPresenceInput): Promise<CampaignPresence> {
   const unreadPresence = (error: string): CampaignPresence => ({ read: false, found: null, error })
@@ -224,10 +234,9 @@ export async function readCampaignPresence(input: CampaignPresenceInput): Promis
   const graphGet = makeGraphGet(fetcher, token, input.sleep)
   try {
     const body = await graphGet(`${adAccountId}/campaigns`, { fields: 'id,name', limit: '500' })
+    if (!hasDataArray(body)) return unreadPresence('系列列表响应读不懂（里面没有 data 数组），不当成「找不到」')
     if (hasNextPage(body)) return unreadPresence('系列列表有下一页（系列太多，读不全），不当成完整结果')
-    const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).data : undefined
-    const rows = Array.isArray(data) ? data : []
-    const found = rows.some((raw) => {
+    const found = body.data.some((raw) => {
       if (typeof raw !== 'object' || raw === null) return false
       const row = raw as Record<string, unknown>
       return rowInScope({ campaign_id: row.id, campaign_name: row.name }, scope)

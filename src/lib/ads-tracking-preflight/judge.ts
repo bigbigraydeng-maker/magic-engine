@@ -561,6 +561,11 @@ export function judgePreflightGates(input: JudgeInput): TrackingGateReceipt[] {
 
 // ─── 开投后读回 ─────────────────────────────────────────────────────────────
 
+const POST_UNREAD_HOW =
+  '先看上面写的原因：令牌失效或没配 → 换令牌；接口报错 → 查 Meta 状态后重试；' +
+  '提示广告系列没配或格式不对 → 改 src/lib/ads-tracking-preflight/client-config.ts 里 launch_watch 的广告系列；' +
+  '修好后用管理员触发入口手动补一次读回'
+
 export function judgePostLaunch(phase: 'post_t1h' | 'post_t24h', f: PostLaunchFacts): TrackingGateReceipt {
   const key: TrackingGateKey = phase === 'post_t1h' ? 'post.t1h' : 'post.t24h'
   const evidence: Record<string, EvidenceValue> = {
@@ -572,7 +577,8 @@ export function judgePostLaunch(phase: 'post_t1h' | 'post_t24h', f: PostLaunchFa
 
   if (!f.read) {
     const reason = f.error ? `开投后读回没读到：${f.error}` : '开投后读回没读到'
-    return receipt(key, 'gray', reason, '确认 Meta 洞察能读到', evidence, f.as_of)
+    // 这条灰灯会变成开发欠账（receipt.ts），所以「怎么办」要让开发照着做
+    return receipt(key, 'gray', reason, POST_UNREAD_HOW, evidence, f.as_of)
   }
   if (f.spend_cents <= 0) {
     return receipt(key, 'gray', '还没开始花钱，没法判断', '等有花费后再读回', evidence, f.as_of)
