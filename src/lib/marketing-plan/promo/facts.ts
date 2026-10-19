@@ -12,6 +12,7 @@ import { parseCreativePool } from '@/lib/ads-strategy/config'
 import type { AccountCapFacts } from './budget-caps'
 import type { AccountSnapshotFact, GateFacts } from './gates'
 import { resolvePromoPlaybook, type PromoPlaybook } from './playbooks'
+import { loadTrackingGateFacts } from '@/lib/ads-tracking-preflight/load-receipt'
 import { addDays, plannedSpendCents, reconcileWindow, type GoalFact, type ReconcileFacts } from './reconcile'
 import { allAdsSteps, type ManualCheck, type PromoSpec } from './spec'
 
@@ -229,12 +230,14 @@ export async function loadPromoFacts(
   const { today, known } = resolveToday(accountTimezones, now)
   const win = reconcileWindow(today, playbook.insightsUnstableDays)
 
-  const [config, coverage, goal, insights, published] = await Promise.all([
+  const [config, coverage, goal, insights, published, tracking] = await Promise.all([
     loadStrategyConfig(clientId),
     loadDailyPlanCoverage(clientId, today),
     loadGoal(clientId, spec.goal_id),
     loadInsights(clientId, planAccountIds, Object.keys(plannedSpendCents(spec, win)), win, playbook.factFreshnessDays, now),
     loadPublishedCount(clientId, win, accountTimezones),
+    // 开投前追踪检查的最近回执；没配置追踪检查的客户是 undefined（清单里不出现追踪门）
+    loadTrackingGateFacts(supabaseAdmin, clientId),
   ])
 
   const ownedSet = new Map((owned ?? []).map(a => [a.id, a]))
@@ -257,6 +260,7 @@ export async function loadPromoFacts(
       today, now, playbook, accounts, snapshots: snapFacts, config,
       daily_plan_coverage_days: coverage,
       manual_checks: [...manualChecks],
+      tracking,
     },
     recon: {
       spend_cents_by_account_day: insights.spend,
