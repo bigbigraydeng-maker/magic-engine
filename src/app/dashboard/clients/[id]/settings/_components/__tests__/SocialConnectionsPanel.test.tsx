@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+const router = vi.hoisted(() => ({ params: new URLSearchParams() }))
+vi.mock('next/navigation', () => ({ useSearchParams: () => router.params }))
 import { SocialConnectionsPanel } from '../SocialConnectionsPanel'
 import { buildSocialConnections } from '@/lib/platform-oauth/social-onboarding'
 
@@ -8,9 +10,24 @@ const now = new Date('2026-10-19T00:00:00Z')
 const channels = buildSocialConnections({ instagram_handle: 'example', facebook_page_url: 'javascript:alert(1)', tiktok_handle: 'example',
   facebookPublishPageId: null, youtubeChannelId: null }, [], now)
 const snapshot = (canManageConfiguration = false) => ({ channels, readAt: now.toISOString(), canManageConfiguration })
-beforeEach(() => vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => snapshot() })))
+beforeEach(() => {
+  router.params = new URLSearchParams()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => snapshot() }))
+})
 
 describe('client social connections centre', () => {
+  it('keeps Instagram and YouTube callback notices visible together', async () => {
+    router.params = new URLSearchParams({ instagram: 'target_changed', youtube: 'channel_mismatch' })
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByText(/登记账号在连接期间发生变化/)).toBeInTheDocument()
+    expect(screen.getByText(/本次授权的频道与已登记频道不同/)).toBeInTheDocument()
+  })
+  it.each(['__proto__', 'constructor', 'unexpected'])('ignores unrecognised YouTube outcome %s', async value => {
+    router.params = new URLSearchParams({ youtube: value })
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    await screen.findByRole('article', { name: 'YouTube Shorts' })
+    expect(screen.queryByText(String(value))).not.toBeInTheDocument()
+  })
   it('distinguishes registered profiles from authorisation, offers only usable actions and renders URLs as text', async () => {
     render(<SocialConnectionsPanel clientId="client-a" />)
     await screen.findByRole('article', { name: 'Facebook Page' })
@@ -18,6 +35,7 @@ describe('client social connections centre', () => {
     expect(screen.getByRole('link', { name: '连接 TikTok' })).toHaveAttribute('href', '/api/auth/tiktok/connect?client_id=client-a')
     expect(screen.queryByRole('link', { name: '配置 Facebook 发布主页' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '配置 YouTube 频道' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '连接 YouTube' })).toHaveAttribute('href', '/api/auth/google/youtube/start?clientId=client-a')
     expect(screen.getByText('javascript:alert(1)')).not.toHaveAttribute('href')
     expect(within(screen.getByRole('article', { name: 'Instagram' })).getByText('原生授权暂未开放')).toBeInTheDocument()
     expect(screen.queryByText('已连接')).not.toBeInTheDocument()
@@ -26,7 +44,7 @@ describe('client social connections centre', () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => snapshot(true) } as Response)
     render(<SocialConnectionsPanel clientId="client-a" />)
     expect(await screen.findByRole('link', { name: '配置 Facebook 发布主页' })).toHaveAttribute('href', expect.stringContaining('section=factory-config'))
-    expect(screen.getByRole('link', { name: '配置 YouTube 频道' })).toHaveAttribute('href', expect.stringContaining('section=youtube-channel'))
+    expect(screen.getByRole('link', { name: '由团队手动配置频道' })).toHaveAttribute('href', expect.stringContaining('section=youtube-channel'))
   })
   it('shows lookup failure and can retry instead of claiming the accounts are disconnected', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false } as Response)
@@ -92,4 +110,53 @@ describe('client social connections centre', () => {
     expect(fetch).toHaveBeenCalledTimes(countBeforeCompletion)
     expect(screen.getAllByText('current-client-b')).toHaveLength(6)
   })
+})
+
+
+describe('Instagram native connection UX', () => {
+  const ready = () => channels.map(row => row.platform === 'instagram' ? { ...row, authorization: 'not_connected' as const, connectAvailable: true } : row)
+  it('shows professional-account eligibility and the basic-only action', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ ...snapshot(), channels: ready() }) } as Response)
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByRole('link', { name: '连接 Instagram 专业账号' })).toHaveAttribute('href', '/api/auth/instagram/connect?client_id=client-a')
+    expect(screen.getByText(/此次仅读取基本资料/)).toHaveTextContent('企业或创作者账号')
+  })
+  it('does not offer native consent when feature config is unavailable', async () => {
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByRole('link', { name: '登记 Instagram 账号' })).toHaveAttribute('href', expect.stringContaining('section=social-profiles'))
+    expect(screen.queryByRole('link', { name: '连接 Instagram 专业账号' })).not.toBeInTheDocument()
+  })
+  it('renders only known finite callback messages, never raw provider text', async () => {
+    router.params = new URLSearchParams({ instagram: 'target_changed' })
+    const { unmount } = render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByText(/登记账号在连接期间发生变化/)).toBeInTheDocument()
+    unmount(); router.params = new URLSearchParams({ instagram: 'private-provider-error' })
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    await screen.findByRole('article', { name: 'Instagram' })
+    expect(screen.queryByText('private-provider-error')).not.toBeInTheDocument()
+  })
+  it('scopes admin disconnection to Instagram and preserves cancellation', async () => {
+    const linked = ready().map(row => row.platform === 'instagram' ? { ...row, managedAccounts: [
+      { connectionId: 'grant-ig', accountId: '123456', displayName: '@example' },
+    ] } : row)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ ...snapshot(true), channels: linked }) } as Response)
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    await userEvent.click(await screen.findByRole('button', { name: '从 ME 断开此 Instagram 授权' }))
+    expect(vi.mocked(fetch).mock.calls.every(call => call[1]?.method !== 'DELETE')).toBe(true)
+    vi.mocked(window.confirm).mockReturnValue(true)
+    await userEvent.click(screen.getByRole('button', { name: '从 ME 断开此 Instagram 授权' }))
+    expect(fetch).toHaveBeenCalledWith('/api/clients/client-a/platform/instagram?connectionId=grant-ig', { method: 'DELETE' })
+  })
+})
+
+
+it('asks the team to resolve multiple Instagram grants without sending the customer back to registration', async () => {
+  const multiple = channels.map(row => row.platform === 'instagram' ? { ...row, authorization: 'ambiguous' as const, connectAvailable: true,
+    detail: '存在多个 Instagram 授权记录，需要团队核实后再继续连接。' } : row)
+  vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ ...snapshot(), channels: multiple }) } as Response)
+  render(<SocialConnectionsPanel clientId="client-a" />)
+  const card = await screen.findByRole('article', { name: 'Instagram' })
+  expect(within(card).getByText(/需要团队核实/)).toBeInTheDocument()
+  expect(within(card).queryByRole('link')).not.toBeInTheDocument()
 })

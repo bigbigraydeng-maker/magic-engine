@@ -314,7 +314,7 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
    * 多放一个允许目录，整个目录都能直接对外写。模块清单两个方向都冻：新加模块是好事，
    * 但要同步进冻结清单，下限才会跟着涨——不涨的话，以后有人再把它删掉，这里看不出来。
    *
-   * 2026-09-27：历史 26 条 + seo-meta 三条临时豁免（子牙拍板，SEO 3b · B7 迁走后删）。
+   * 2026-09-27：seo-meta 三条为临时豁免（子牙拍板，SEO 3b · B7 迁走后删）；2026-10 Publer 退役删 6 条后，现状共 23 条（含 seo-meta 3 条）。
    */
   const PROVIDER_WRITE_GRANDFATHERED_FROZEN: readonly string[] = [
     'src/app/api/clients/[id]/cms/github/update-page/route.ts',
@@ -331,16 +331,10 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     'src/app/api/clients/[id]/cms/wordpress/update-post/route.ts',
     'src/app/api/clients/[id]/cms/wordpress/yoast-probe/route.ts',
     'src/app/api/clients/[id]/gsc/index-request/route.ts',
-    'src/app/api/clients/[id]/reels/[draftId]/publish/route.ts',
     'src/app/api/cms/github/webhook/route.ts',
     'src/app/api/cron/cms-connection-retest/route.ts',
-    'src/app/api/publer/accounts/route.ts',
-    'src/app/api/publer/create-post/route.ts',
-    'src/app/api/publer/draft/[assetId]/route.ts',
-    'src/app/api/publer/schedule/route.ts',
     'src/lib/blog/pr-sync.ts',
     'src/lib/cms/page-upgrade-pr-sync.ts',
-    'src/lib/flywheel/social-post-publish.ts',
     'src/lib/luban/tools.ts',
     'src/lib/seo-meta/cts-meta-pr.ts',
     'src/lib/inngest/functions/seo-meta-cycle.ts',
@@ -348,7 +342,6 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     'src/lib/seo-meta/cycle/pr-guard.ts',
   ]
   const PROVIDER_WRITE_MODULES_FROZEN: readonly string[] = [
-    '@/lib/publer/client',
     '@/lib/cms/wordpress-client',
     '@/lib/cms/shopify-client',
     '@/lib/cms/github-client',

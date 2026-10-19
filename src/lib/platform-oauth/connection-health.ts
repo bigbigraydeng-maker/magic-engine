@@ -132,6 +132,10 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
     refreshScope: 'per_connection',
     why: 'token-manager 没有实现 Meta 的刷新（长期令牌），last_synced_at 只在授权那一刻盖过一次，不是心跳',
   },
+  [PLATFORM_PROVIDERS.INSTAGRAM]: {
+    refreshable: false, staleHours: null, refreshScope: 'per_connection',
+    why: '仅账号资料授权；本轮没有刷新调用方或定时心跳，过期需重新连接',
+  },
   [PLATFORM_PROVIDERS.TIKTOK]: {
     refreshable: false,
     staleHours: null,
@@ -177,6 +181,7 @@ export const SCOPE_REPLAYED_ON_REFRESH: Record<PlatformProvider, readonly string
   [PLATFORM_PROVIDERS.GOOGLE_GTM]: null,
   [PLATFORM_PROVIDERS.META]: null,
   [PLATFORM_PROVIDERS.TIKTOK]: null,
+  [PLATFORM_PROVIDERS.INSTAGRAM]: null,
   [PLATFORM_PROVIDERS.WHATSAPP]: null,
   [PLATFORM_PROVIDERS.GOOGLE_YOUTUBE]: null,
 }

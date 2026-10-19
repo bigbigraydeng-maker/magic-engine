@@ -64,6 +64,7 @@ const CONNECT_PARAMS = ['mail', 'gbp', 'tiktok', 'youtube'] as const
  * 授权回跳排最前，因为那一刻人不是来挑页签的，是来看结果的。
  */
 export function pickInitialTab(get: (key: string) => string | null): SettingsTab {
+  if (get('instagram')) return 'content'
   if (CONNECT_PARAMS.some((p) => get(p))) return 'connect'
   const asked = get('tab')
   return SETTINGS_TABS.find((t) => t.key === asked)?.key ?? 'connect'

@@ -377,8 +377,8 @@ services:
         sync: false
 
   # Daily social engagement pullback — every day at 4am UTC
-  # Pulls Publer post likes/comments/shares into flywheel_metrics.
-  # Reference: ROADMAP.md P12.C.3
+  # Pulls TikTok profile metrics + Facebook page rollups into flywheel_metrics.
+  # (Per-post leg removed 2026-10.) Reference: ROADMAP.md P12.C.3
   # healthchecks.io: social-engagement-pullback (01c469cc-4e77-4e88-bba4-7f17cbec91bc)
   - type: cron
     name: social-engagement-pullback
@@ -1300,48 +1300,6 @@ services:
   #   envVars:
   #     - key: CRON_SECRET
   #       sync: false
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # ME product progress → LinkedIn — Monday + Thursday, ~9am NZ time
-  #
-  # No-ops unless LINKEDIN_PROGRESS_POST_ENABLED=true — this repo's web
-  # service isn't Blueprint-managed (real prod is `crazycontent`, created by
-  # hand in the Render dashboard), so this flag can't be declared here.
-  # Absent = undefined !== 'true' = disabled by default, no dashboard action
-  # needed to ship dark. PM sets LINKEDIN_PROGRESS_POST_ENABLED=true directly
-  # on crazycontent's Environment tab when ready to turn it on.
-  #
-  # Schedule note: NZ is UTC+12/+13 (DST), so "Monday/Thursday 9am NZ" falls on
-  # the PREVIOUS UTC calendar day (Sunday/Wednesday). 20:30 UTC lands at
-  # roughly 8:30am NZDT–9:30am NZST year-round — good enough for a personal
-  # LinkedIn post, not worth DST-exact scheduling for this.
-  - type: cron
-    name: linkedin-progress-post-mon
-    env: node
-    schedule: "30 20 * * 0"
-    buildCommand: ""
-    buildFilter:
-      ignoredPaths:
-        - "**/*"
-    startCommand: |
-      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/linkedin-progress-post-mon
-    envVars:
-      - fromGroup: me-shared-cron-secret
-
-  - type: cron
-    name: linkedin-progress-post-thu
-    env: node
-    schedule: "30 20 * * 3"
-    buildCommand: ""
-    buildFilter:
-      ignoredPaths:
-        - "**/*"
-    startCommand: |
-      curl -fsS --max-time 60 -H "Authorization: Bearer $CRON_SECRET" \
-        https://app.magicengine.com.au/api/cron/linkedin-progress-post-thu
-    envVars:
-      - fromGroup: me-shared-cron-secret
 
   # Magic Insight（内部代号 market-intel）—— PM 每日全球 AI / 数字营销资讯雷达。
   #
