@@ -239,6 +239,8 @@
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` / `NEXT_PUBLIC_META_PIXEL_ID` | ME 自家营销页的 GA4 / Meta 像素 | Render-web |
 | `META_CAPI_VERSION` | Meta 转化回传用的 Graph 版本，默认 `v19.0` | Render-web（可不配） |
 | `META_SYSTEM_USER_TOKEN_<域名>` | 🔴 **每客户一把的 Meta 广告令牌，名字运行时拼出来**（`domainToEnvKey`，`src/lib/meta/token-selection.ts`），静态扫描扫不到，完整清单只在 Render 面板上 | Render-web |
+| `LAUNCH_SIGNOFF_SIGNERS` | 「上线签字」页能签字/撤销的人的邮箱（逗号分隔，大小写不敏感）。**未配 = 谁都不能签**（fail-closed）；只认真人登录会话，服务钥匙一律不行（`src/lib/launch-signoff/auth.ts`） | Render-web |
+| `LAUNCH_SIGNOFF_EXECUTOR_KEY` / `LAUNCH_SIGNOFF_REVIEWER_KEY` | 上线签字接口给「执行窗口 / 复核窗口」各一把**不同**的钥匙（请求头 `x-launch-signoff-key`）；角色由钥匙决定，所以「复核人≠执行人」由服务端强制。未配 = 对应窗口不能写（fail-closed） | Render-web |
 | `META_PIXEL_ID_<域名>` | 每客户像素 ID，同样是运行时拼名（`src/lib/meta/capi/config.ts`） | Render-web |
 | `CRM_NOTE_MODEL` / `CRM_STAGE_INFER_MODEL` / `MESSENGER_BRIEF_MODEL` / `MARKET_INTEL_MODEL` | 各功能的模型名覆盖，默认都是 `gpt-4o-mini` | Render-web（可不配） |
 | `CRM_FACTS_CLIENT_IDS` | 「AI 读对话存事实」要给哪些客户跑（逗号分隔的客户 UUID），**未配 = 全关**（fail-closed）。目前只该配 NAL；提示词里「具体货物」是物流语义，别的行业先别开 | Render-web |
