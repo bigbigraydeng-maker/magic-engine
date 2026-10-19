@@ -95,10 +95,10 @@ describe('listSocialConnectionFacts', () => {
     mocks.from.mockReturnValue(chain)
     expect(await listSocialConnectionFacts('client-xyz')).toEqual([])
     expect(mocks.from).toHaveBeenCalledWith('platform_oauth_connections')
-    expect(chain.select).toHaveBeenCalledWith('id,provider,purpose,account_id,display_name,status,scopes,token_expiry,last_synced_at')
+    expect(chain.select).toHaveBeenCalledWith('id,provider,purpose,account_id,location_name,display_name,status,scopes,token_expiry,last_synced_at')
     expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-xyz')
     expect(chain.eq).toHaveBeenCalledWith('purpose', 'legacy')
-    expect(chain.in).toHaveBeenCalledWith('provider', ['meta', 'tiktok', 'google_youtube'])
+    expect(chain.in).toHaveBeenCalledWith('provider', ['meta', 'instagram', 'tiktok', 'google_youtube'])
     expect(mocks.encryptToken).not.toHaveBeenCalled()
   })
   it('does not collapse database failure into an empty disconnected list', async () => {

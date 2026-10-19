@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import { instagramOutcomeMessage } from '@/lib/instagram-oauth/identity'
 import { factoryConfigHref } from '@/lib/factory/config-link'
 import type { SocialAuthorization, SocialChannelStatus, SocialConnectionsSnapshot } from '@/lib/platform-oauth/social-onboarding'
 
@@ -46,25 +47,34 @@ function nextAction(channel: SocialChannelStatus, clientId: string, canManage: b
     return { label: channel.identity ? '重新连接 YouTube' : '连接 YouTube',
       href: `/api/auth/google/youtube/start?clientId=${encodeURIComponent(clientId)}` }
   }
-  if (channel.platform === 'instagram') return { label: '登记账号资料', href: `${base}/settings?tab=content&section=social-profiles` }
+  if (channel.platform === 'instagram') {
+    if (channel.authorization === 'ambiguous') return null
+    if (channel.connectAvailable) return {
+      label: channel.identity ? '重新连接 Instagram 专业账号' : '连接 Instagram 专业账号',
+      href: `/api/auth/instagram/connect?client_id=${encodeURIComponent(clientId)}`,
+    }
+    return { label: '登记 Instagram 账号', href: `${base}/settings?tab=content&section=social-profiles` }
+  }
   return null
 }
 
-function DisconnectYoutube({ channel, clientId, onChanged }: {
+function DisconnectConnection({ channel, clientId, onChanged }: {
   channel: SocialChannelStatus; clientId: string; onChanged: () => void
 }) {
+  const platform = channel.platform === 'instagram' ? 'instagram' : 'youtube'
+  const name = platform === 'instagram' ? 'Instagram' : 'YouTube'
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const generation = useRef(0)
   const invalidate = useCallback(() => { generation.current++ }, [])
   useEffect(() => { invalidate(); return invalidate }, [clientId, invalidate])
   const disconnect = async (connectionId: string) => {
-    if (!window.confirm('确认断开这条 YouTube 授权？需要使用时可以重新授权。')) return
+    if (!window.confirm(platform === 'instagram' ? '确认从 ME 断开此 Instagram 授权？这不会撤销 Instagram 端的应用许可。' : '确认断开这条 YouTube 授权？需要使用时可以重新授权。')) return
     const version = generation.current
     setBusy(true)
     setFailed(false)
     try {
-      const response = await fetch(`/api/clients/${encodeURIComponent(clientId)}/platform/youtube?connectionId=${encodeURIComponent(connectionId)}`, { method: 'DELETE' })
+      const response = await fetch(`/api/clients/${encodeURIComponent(clientId)}/platform/${platform}?connectionId=${encodeURIComponent(connectionId)}`, { method: 'DELETE' })
       if (!response.ok) throw new Error('unavailable')
       if (version === generation.current) onChanged()
     } catch { if (version === generation.current) setFailed(true) }
@@ -73,7 +83,7 @@ function DisconnectYoutube({ channel, clientId, onChanged }: {
   return <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">
     {channel.managedAccounts?.map(account => <div key={account.connectionId} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
       <span className="break-all">{account.displayName}（{account.accountId}）</span>
-      <button disabled={busy} onClick={() => void disconnect(account.connectionId)} className="font-semibold text-red-700 disabled:opacity-40">断开此 YouTube 授权</button>
+      <button disabled={busy} onClick={() => void disconnect(account.connectionId)} className="font-semibold text-red-700 disabled:opacity-40">{platform === 'instagram' ? '从 ME 断开此 Instagram 授权' : `断开此 ${name} 授权`}</button>
     </div>)}
     {failed && <p role="alert" className="text-xs text-red-700">断开未完成，请重试或让团队核实权限。</p>}
   </div>
@@ -104,16 +114,18 @@ function ChannelCard({ channel, clientId, canManage, onChanged }: {
       {!canManage && channel.platform === 'facebook' && !channel.targetAccountId && (
         <p className="mt-3 text-xs text-amber-800">{saved || channel.authorization === 'refresh_pending' ? '频道配置由团队维护。' : '请团队核实发布目标并完成此平台连接。'}</p>
       )}
+      {channel.platform === 'instagram' && channel.connectAvailable && <p className="mt-3 text-xs text-slate-600">使用 Instagram 专业账号登录，此次仅读取基本资料。需使用企业或创作者账号；能否连接还取决于平台审核或测试资格。</p>}
       {channel.platform === 'youtube' && <p className="mt-3 text-xs text-slate-600">请使用拥有目标频道的 Google 账号授权。连接仅用于私享上传与核对；这一步不会上传视频或公开发布。{!channel.targetAccountId && '首次连接仅在账号恰有一个频道时自动确认目标。'}</p>}
       {channel.platform === 'youtube' && canManage && !channel.targetAccountId && <a className="mt-2 text-xs font-semibold text-cyan-800" href={`/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=connect&section=youtube-channel`}>由团队手动配置频道</a>}
       {action && <a href={action.href} className="mt-4 self-start rounded-lg bg-slate-950 px-3 py-2 text-xs font-semibold text-white">{action.label}</a>}
-      {canManage && channel.platform === 'youtube' && Boolean(channel.managedAccounts?.length) && <DisconnectYoutube channel={channel} clientId={clientId} onChanged={onChanged} />}
+      {canManage && (channel.platform === 'youtube' || channel.platform === 'instagram') && Boolean(channel.managedAccounts?.length) && <DisconnectConnection channel={channel} clientId={clientId} onChanged={onChanged} />}
     </article>
   )
 }
 
 export function SocialConnectionsPanel({ clientId }: { clientId: string }) {
   const params = useSearchParams()
+  const instagramOutcome = instagramOutcomeMessage(params?.get('instagram') ?? null)
   const youtubeOutcome = youtubeOutcomeMessage(params?.get('youtube') ?? null)
   const [loaded, setLoaded] = useState<{ clientId: string; data: SocialConnectionsSnapshot } | null>(null)
   const snapshot = loaded?.clientId === clientId ? loaded.data : null
@@ -144,6 +156,7 @@ export function SocialConnectionsPanel({ clientId }: { clientId: string }) {
   }, [load, invalidate])
   return (
     <div className="space-y-4">
+      {instagramOutcome && <p role="status" className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950">{instagramOutcome}</p>}
       {youtubeOutcome && <p role="status" className="rounded-lg bg-cyan-50 p-3 text-sm text-cyan-950">{youtubeOutcome}</p>}
       <p className="text-sm text-slate-600">请在平台官方页面登录并授权，无需向团队提供密码。登记主页链接与账号名称后，仍需完成平台授权。连接授权不会公开发布内容。</p>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">

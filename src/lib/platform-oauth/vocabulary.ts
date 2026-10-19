@@ -22,6 +22,8 @@ export const PLATFORM_PROVIDERS = {
   GOOGLE_GSC: 'google_gsc',
   META:       'meta',
   TIKTOK:     'tiktok',
+  /** Instagram Login professional ID; location_name stores the verified username. */
+  INSTAGRAM:  'instagram',
   GOOGLE_ADS: 'google_ads',
   /**
    * 客户自己的邮箱（Microsoft Graph —— 同一套接口既服务 Outlook.com
