@@ -919,6 +919,19 @@ describe('环境读取器 · 瞬时故障重试一次', () => {
     }
   })
 
+  // 配置阶段的失败是永久的：哪怕返回里同时带着 token_error（没拿到回应的样子），也不能被当成瞬时故障去重试
+  it('配置阶段的失败即使同时带着 token_error / pixel_error 也不重试', async () => {
+    for (const detail of [
+      { stage: 'config', token_error: 'fetch failed' },
+      { stage: 'config', pixel_error: 'fetch failed' },
+    ]) {
+      const db = makeEnvDb()
+      const spy = makeEnvDeps(db.supabase, { capiPreflight: async () => ({ ok: false, detail }) })
+      await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+      expect(spy.preflightCalls, JSON.stringify(detail)).toHaveLength(1)
+    }
+  })
+
   it('「没有令牌」「预检说失败」这类正常返回的结果不算瞬时故障：不重试', async () => {
     const db = makeEnvDb()
     const spy = makeEnvDeps(db.supabase, {

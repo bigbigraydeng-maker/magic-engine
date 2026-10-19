@@ -293,7 +293,8 @@ async function pushSeriesNotFoundItems(
   }
   for (const { clientId, cfg, expectedOn } of candidates) {
     const status = seriesWatchStatusFromRows(rows, clientId)
-    if (status.ticks < SERIES_ALARM_MIN_TICKS || status.ever_found || status.latest_found !== false) continue
+    // ever_found 为 false = 每一次读得出结论的盯盘都说「找不到」，最近一次自然也是；读不出来的盯盘不算次数
+    if (status.ticks < SERIES_ALARM_MIN_TICKS || status.ever_found) continue
     const latestMs = status.latest_at === null ? Number.NaN : Date.parse(status.latest_at)
     if (!Number.isFinite(latestMs) || now.getTime() - latestMs > SERIES_ALARM_MAX_TICK_AGE_MS) continue
     items.push({

@@ -225,9 +225,10 @@ export interface SeriesWatchStatus {
   ticks: number
   /** 最近一次读得出结论的盯盘的时刻；一次都没有 = null */
   latest_at: string | null
-  /** 最近一次读得出结论的盯盘有没有找到本次系列；一次都没有 = null */
-  latest_found: boolean | null
-  /** 这些盯盘里，有没有哪怕一次找到过系列或见到过花费 */
+  /**
+   * 这些读得出结论的盯盘里，有没有哪怕一次找到过系列或见到过花费。
+   * false = 每一次读得出结论的盯盘都说「找不到」（所以最近一次自然也是「找不到」）。
+   */
   ever_found: boolean
 }
 
@@ -251,7 +252,7 @@ export function seriesWatchStatusFromRows(
   rows: readonly { status: string | null; started_at: string; summary: unknown }[],
   clientId: string,
 ): SeriesWatchStatus {
-  const out: SeriesWatchStatus = { ticks: 0, latest_at: null, latest_found: null, ever_found: false }
+  const out: SeriesWatchStatus = { ticks: 0, latest_at: null, ever_found: false }
   let latestMs = Number.NEGATIVE_INFINITY
   for (const row of rows) {
     if (row.status === 'running') continue
@@ -270,7 +271,6 @@ export function seriesWatchStatusFromRows(
     if (ms > latestMs) {
       latestMs = ms
       out.latest_at = summary.checked_at
-      out.latest_found = found
     }
   }
   return out

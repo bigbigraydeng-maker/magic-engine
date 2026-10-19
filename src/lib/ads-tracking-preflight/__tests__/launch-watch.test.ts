@@ -243,32 +243,32 @@ describe('seriesWatchStatusFromRows · 盯盘记录里「本次系列找到过�
     status, started_at: checkedAt, summary: { checked_at: checkedAt, no_publish: true, clients },
   })
 
-  it('数出这个客户有多少次盯盘、最新一次的时间和结论、期间有没有找到过', () => {
+  it('数出这个客户有多少次盯盘、最新一次的时间、期间有没有找到过', () => {
     const rows = [
       row('2026-10-19T19:20:00.000Z', [entry('c1', false)]),
       row('2026-10-19T18:20:00.000Z', [entry('c1', false)]),
       row('2026-10-19T17:20:00.000Z', [entry('c2', true)]),
     ]
     expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({
-      ticks: 2, latest_at: '2026-10-19T19:20:00.000Z', latest_found: false, ever_found: false,
+      ticks: 2, latest_at: '2026-10-19T19:20:00.000Z', ever_found: false,
     })
   })
 
   it('哪怕只有一次 series_found 为 true、或见到过花费（spend_seen 为 true）→ ever_found 为 true', () => {
     const a = seriesWatchStatusFromRows([row('2026-10-19T19:20:00.000Z', [entry('c1', false)]), row('2026-10-19T09:20:00.000Z', [entry('c1', true)])], 'c1')
     expect(a.ever_found).toBe(true)
-    expect(a.latest_found).toBe(false)
+    expect(a.latest_at).toBe('2026-10-19T19:20:00.000Z')
     const b = seriesWatchStatusFromRows([row('2026-10-19T19:20:00.000Z', [entry('c1', null, true)])], 'c1')
     expect(b.ever_found).toBe(true)
   })
 
   it('记录的顺序不重要：最新一次按盯盘时刻取', () => {
     const rows = [row('2026-10-19T09:20:00.000Z', [entry('c1', true)]), row('2026-10-19T19:20:00.000Z', [entry('c1', false)])]
-    expect(seriesWatchStatusFromRows(rows, 'c1').latest_found).toBe(false)
+    expect(seriesWatchStatusFromRows(rows, 'c1').latest_at).toBe('2026-10-19T19:20:00.000Z')
   })
 
   // 🔴 第三轮整改：读不出来的盯盘（series_found 和 spend_seen 都是 null）不是「找不到」，不能算进次数，也不能当「最新一次」
-  it('读不出来的盯盘不算一次盯盘，也不顶掉「最新一次读得出结果」的结论', () => {
+  it('读不出来的盯盘不算一次盯盘，也不顶掉「最新一次读得出结果」的时间', () => {
     const rows = [
       row('2026-10-19T20:20:00.000Z', [entry('c1', null)]),
       row('2026-10-19T19:20:00.000Z', [entry('c1', false)]),
@@ -276,19 +276,19 @@ describe('seriesWatchStatusFromRows · 盯盘记录里「本次系列找到过�
       row('2026-10-19T17:20:00.000Z', [entry('c1', false)]),
     ]
     expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({
-      ticks: 2, latest_at: '2026-10-19T19:20:00.000Z', latest_found: false, ever_found: false,
+      ticks: 2, latest_at: '2026-10-19T19:20:00.000Z', ever_found: false,
     })
   })
 
   it('全是读不出来的盯盘 → 一次也不算，没有「最新一次」', () => {
     const rows = [row('2026-10-19T19:20:00.000Z', [entry('c1', null)]), row('2026-10-19T18:20:00.000Z', [entry('c1', null)])]
-    expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({ ticks: 0, latest_at: null, latest_found: null, ever_found: false })
+    expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({ ticks: 0, latest_at: null, ever_found: false })
   })
 
   it('只有 spend_seen 为 true、没写 series_found（手工 / 旧记录）→ 算一次读得出结果的盯盘，等于找到了', () => {
     const rows = [row('2026-10-19T19:20:00.000Z', [{ client_id: 'c1', active: true, spend_seen: true, sent: [], error: null }])]
     expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({
-      ticks: 1, latest_at: '2026-10-19T19:20:00.000Z', latest_found: true, ever_found: true,
+      ticks: 1, latest_at: '2026-10-19T19:20:00.000Z', ever_found: true,
     })
   })
 
@@ -310,7 +310,7 @@ describe('seriesWatchStatusFromRows · 盯盘记录里「本次系列找到过�
       row('2026-10-19T15:20:00.000Z', [entry('c2', true)]),
       row('garbage', [entry('c1', true)]),
     ]
-    expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({ ticks: 0, latest_at: null, latest_found: null, ever_found: false })
+    expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({ ticks: 0, latest_at: null, ever_found: false })
   })
 })
 
