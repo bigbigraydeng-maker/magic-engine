@@ -29,6 +29,8 @@ export const MIN_POST_LPV_RATIO = 0.5
 export const MIN_POST_CLICKS_FOR_LEAD_CHECK = 50
 /** 官网表单线索进 CRM：最近一条必须在这么多小时内，才算「管道现在是通的」。 */
 export const CRM_FRESH_WINDOW_HOURS = 48
+/** 线索时间比「现在」晚多少以内算时钟误差（5 分钟）；更晚就是未来的时间，是脏数据 / 时钟偏差，不能判绿。 */
+export const CRM_CLOCK_SKEW_HOURS = 5 / 60
 
 export const GATE_LABELS: Record<TrackingGateKey, string> = {
   'tracking.account_dataset_aligned': '数据集对齐（广告账户 / 官网像素 / 回传目标）',
@@ -353,12 +355,13 @@ function judgeCrmFreshness(
   const total = input.crm.web_form_touchpoints_7d
   const latest = input.crm.latest_web_form_at
   const age = latest === null ? null : ageHours(latest, input.now)
-  if (age !== null && Number.isFinite(age) && age <= CRM_FRESH_WINDOW_HOURS) {
-    return receipt(key, 'green', `官网表单线索在进 CRM：最近一条是 ${Math.round(age)} 小时前，近 7 天共 ${total} 条`, '', evidence, as_of)
+  if (age !== null && Number.isFinite(age) && age >= -CRM_CLOCK_SKEW_HOURS && age <= CRM_FRESH_WINDOW_HOURS) {
+    return receipt(key, 'green', `官网表单线索在进 CRM：最近一条是 ${Math.max(0, Math.round(age))} 小时前，近 7 天共 ${total} 条`, '', evidence, as_of)
   }
-  const ageText = age === null || !Number.isFinite(age)
-    ? '读不出最近一条的时间'
-    : `最近一条是 ${Math.round(age)} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时`
+  let ageText: string
+  if (age === null || !Number.isFinite(age)) ageText = '读不出最近一条的时间'
+  else if (age < -CRM_CLOCK_SKEW_HOURS) ageText = '最近一条的时间在未来（时钟偏差或脏数据）'
+  else ageText = `最近一条是 ${Math.round(age)} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时`
   return receipt(
     key, 'yellow',
     `近 7 天 CRM 里有 ${total} 条官网表单线索，但${ageText}，没法确认现在还是通的`,

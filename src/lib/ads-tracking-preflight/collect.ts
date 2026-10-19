@@ -234,7 +234,11 @@ export async function runClientPreflight(args: {
 
 // ─── 开投后读回 ─────────────────────────────────────────────────────────────
 
-/** 读自开投时刻起的账户级洞察。没有令牌就一个请求都不发。 */
+/**
+ * 读自开投时刻起、本次投放的广告系列（客户配置里的编号或名字关键词对得上的那些）的洞察。
+ * 🔴 没配系列（没有盯盘窗口，或窗口里编号和名字关键词都没写）就拒绝，绝不退回整个账户的口径。
+ * 没有令牌就一个请求都不发。
+ */
 export async function collectPostLaunchFacts(
   clientId: string,
   cfg: TrackingClientConfig,

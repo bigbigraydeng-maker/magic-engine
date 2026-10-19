@@ -114,7 +114,7 @@ describe('装配', () => {
 
 interface World {
   config?: TrackingClientConfig | null
-  spend?: { read: boolean; spend_cents: number; error: string | null }
+  spend?: { read: boolean; spend_cents: number; error: string | null; series_found?: boolean | null }
   states?: PostLaunchReceiptState[]
   /** 之前的盯盘记录里「第一次看到花费」的时刻；不给 = 这是第一次看到 */
   firstSeen?: string | null
@@ -128,7 +128,10 @@ function makeDeps(world: World = {}) {
     now: () => NOW,
     configuredClientIds: () => ['c1'],
     getConfig: () => (world.config === undefined ? CONFIG : world.config),
-    readSpend: async () => { calls.readSpend += 1; return world.spend ?? { read: true, spend_cents: 2500, error: null } },
+    readSpend: async () => {
+      calls.readSpend += 1
+      return { series_found: true, ...(world.spend ?? { read: true, spend_cents: 2500, error: null }) }
+    },
     loadReceiptStates: async () => { calls.loadStates += 1; return world.states ?? [] },
     loadFirstSpendSeenAt: async () => { calls.loadFirstSeen += 1; return world.firstSeen ?? null },
     sendEvent: async event => { sent.push(event) },
@@ -171,7 +174,7 @@ describe('编排', () => {
     expect(calls).toEqual({ readSpend: 0, loadStates: 0, loadFirstSeen: 0 })
     expect(sent).toEqual([])
     expect(out).toMatchObject({ no_publish: true, checked_at: NOW.toISOString() })
-    expect(out.clients).toEqual([{ client_id: 'c1', active: false, spend_seen: null, sent: [], error: null }])
+    expect(out.clients).toEqual([{ client_id: 'c1', active: false, spend_seen: null, series_found: null, sent: [], error: null }])
     expect(finished).toHaveLength(1)
   })
 
@@ -190,11 +193,41 @@ describe('编排', () => {
     expect(out.clients[0]).toMatchObject({ active: true, spend_seen: false, sent: [], error: null })
   })
 
+  // 🔴 第二轮审查整改：「读到了、没花钱」和「一个系列都没找到」是两回事，后者记灰，不是安静的 0
+  it('读到了、系列在、没花钱 → spend_seen=false，series_found=true', async () => {
+    const { deps, sent } = makeDeps({ spend: { read: true, spend_cents: 0, error: null, series_found: true } })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    expect(sent).toEqual([])
+    expect(out.clients[0]).toMatchObject({ spend_seen: false, series_found: true, error: null })
+  })
+
+  it('本次投放的系列一个都没找到（编号和名字都对不上，比如还是未发布的草稿）→ 记灰：spend_seen=null、series_found=false；不发，也不去翻「第一次看到花费」', async () => {
+    const { deps, sent, calls } = makeDeps({ spend: { read: true, spend_cents: 0, error: null, series_found: false } })
+    const { ids, step } = fakeStep()
+    const out = await runLaunchWatch(step, deps)
+    expect(sent).toEqual([])
+    expect(calls.loadFirstSeen).toBe(0)
+    expect(ids).toEqual(['start-run', 'spend:c1', 'state:c1', 'finish-run'])
+    expect(out.clients[0]).toMatchObject({ active: true, spend_seen: null, series_found: false, error: null })
+  })
+
+  it('系列有没有读不出来（series_found 为 null）、花费读到是 0 → spend_seen=false，series_found=null（不当成找不到）', async () => {
+    const { deps } = makeDeps({ spend: { read: true, spend_cents: 0, error: null, series_found: null } })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    expect(out.clients[0]).toMatchObject({ spend_seen: false, series_found: null })
+  })
+
+  it('花了钱 → series_found=true（花钱就说明系列在）', async () => {
+    const { deps } = makeDeps()
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    expect(out.clients[0]).toMatchObject({ spend_seen: true, series_found: true })
+  })
+
   it('花费读不到 → 不发，原因记进摘要（不当成「没花钱」）', async () => {
     const { deps, sent } = makeDeps({ spend: { read: false, spend_cents: 0, error: '没有可用的 Meta 令牌' } })
     const out = await runLaunchWatch(fakeStep().step, deps)
     expect(sent).toEqual([])
-    expect(out.clients[0]).toMatchObject({ active: true, spend_seen: null, error: '没有可用的 Meta 令牌' })
+    expect(out.clients[0]).toMatchObject({ active: true, spend_seen: null, series_found: null, error: '没有可用的 Meta 令牌' })
   })
 
   // 🔴 审查整改：T+1h 要在「第一次看到花费」之后满 1 小时才读，不能在发现花费的当小时就读
@@ -266,7 +299,7 @@ describe('编排', () => {
 describe('readLaunchSpend · 花费只按本次投放的广告系列算（不是整个官方账户）', () => {
   afterEach(() => { vi.unstubAllGlobals() })
 
-  function stubFetch(insights: unknown) {
+  function stubFetch(insights: unknown, campaigns: unknown = { data: [] }) {
     const urls: string[] = []
     const fetcher = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
       const url = String(input)
@@ -274,6 +307,7 @@ describe('readLaunchSpend · 花费只按本次投放的广告系列算（不是
       const path = new URL(url).pathname.replace(/^\/v\d+\.\d+\//, '')
       if (path === 'act_1111111111') return new Response(JSON.stringify({ timezone_name: 'Pacific/Auckland' }), { status: 200 })
       if (path === 'act_1111111111/insights') return new Response(JSON.stringify(insights), { status: 200 })
+      if (path === 'act_1111111111/campaigns') return new Response(JSON.stringify(campaigns), { status: 200 })
       return new Response('{}', { status: 404 })
     })
     vi.stubGlobal('fetch', fetcher)
@@ -290,16 +324,50 @@ describe('readLaunchSpend · 花费只按本次投放的广告系列算（不是
     })
     const watch = { ...(CONFIG.launch_watch ?? { from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland', campaign_ids: [] }), campaign_name_contains: ['官网点击', '20261022'] }
     const out = await readLaunchSpend('c1', CONFIG, watch, NOW)
-    expect(out).toEqual({ read: true, spend_cents: 2000, error: null })
+    expect(out).toEqual({ read: true, spend_cents: 2000, error: null, series_found: true })
     const url = new URL(urls.find(u => u.includes('/insights')) ?? '')
     expect(url.searchParams.get('level')).toBe('campaign')
     expect(JSON.parse(url.searchParams.get('time_range') ?? '{}').since).toBe('2026-10-22')
+    // 已经花钱了，系列肯定在：不用再多发一次「系列列表」请求
+    expect(urls.some(u => u.includes('/campaigns'))).toBe(false)
   })
 
-  it('本次投放的系列一个都没在花钱（比如还是草稿）→ 读到了，花费为 0（不是读不到）', async () => {
-    stubFetch({ data: [{ campaign_id: '999999999999', campaign_name: '别的系列', spend: '300', inline_link_clicks: '900' }] })
+  const OTHER_ROWS = { data: [{ campaign_id: '999999999999', campaign_name: '别的系列', spend: '300', inline_link_clicks: '900' }] }
+
+  it('系列在账户里（已发布、没开始花钱）→ 读到了，花费为 0，series_found=true', async () => {
+    stubFetch(OTHER_ROWS, { data: [{ id: '123456789012', name: '官网点击 A' }] })
     const watch = CONFIG.launch_watch
     if (!watch) throw new Error('测试配置里应有盯盘窗口')
-    await expect(readLaunchSpend('c1', CONFIG, watch, NOW)).resolves.toEqual({ read: true, spend_cents: 0, error: null })
+    await expect(readLaunchSpend('c1', CONFIG, watch, NOW)).resolves.toEqual({ read: true, spend_cents: 0, error: null, series_found: true })
+  })
+
+  it('系列不在账户里（编号和名字都对不上，比如还是未发布的草稿）→ 读到了，花费为 0，series_found=false（记灰，不是安静的 0）', async () => {
+    stubFetch(OTHER_ROWS, { data: [{ id: '999999999999', name: '别的系列' }] })
+    const watch = CONFIG.launch_watch
+    if (!watch) throw new Error('测试配置里应有盯盘窗口')
+    await expect(readLaunchSpend('c1', CONFIG, watch, NOW)).resolves.toEqual({ read: true, spend_cents: 0, error: null, series_found: false })
+  })
+
+  it('系列列表读不出来 → 花费照样读到，series_found 为 null（不当成找不到）', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const path = new URL(String(input)).pathname.replace(/^\/v\d+\.\d+\//, '')
+      if (path === 'act_1111111111') return new Response(JSON.stringify({ timezone_name: 'Pacific/Auckland' }), { status: 200 })
+      if (path === 'act_1111111111/insights') return new Response(JSON.stringify(OTHER_ROWS), { status: 200 })
+      return new Response(JSON.stringify({ error: { message: 'nope', code: 100 } }), { status: 400 })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const watch = CONFIG.launch_watch
+    if (!watch) throw new Error('测试配置里应有盯盘窗口')
+    await expect(readLaunchSpend('c1', CONFIG, watch, NOW)).resolves.toEqual({ read: true, spend_cents: 0, error: null, series_found: null })
+  })
+
+  // 🔴 第二轮审查整改：配了盯盘却没配系列 → 运行时拒绝，不退回整个账户
+  it('盯盘窗口没配系列（编号和名字关键词都没有）→ 拒绝：read false、写明原因，一个请求都不发', async () => {
+    const { fetcher } = stubFetch(OTHER_ROWS)
+    const watch = { from: '2026-10-22', days: 4, timezone: 'Pacific/Auckland', campaign_ids: [] as string[], campaign_name_contains: [] as string[] }
+    const out = await readLaunchSpend('c1', CONFIG, watch, NOW)
+    expect(out).toMatchObject({ read: false, spend_cents: 0, series_found: null })
+    expect(out.error).toContain('广告系列')
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

@@ -28,7 +28,16 @@ export interface WatchDecision {
   launched_at: string
 }
 
+/** 盯盘函数在 cron_run_logs 里的任务名（函数、待办都按它读自己的运行记录）。 */
+export const LAUNCH_WATCH_JOB = 'ads-tracking-launch-watch'
+
 const DAY_MS = 86_400_000
+
+/**
+ * 从「第一次见到本次系列有花费」起，自动补排最多盯这么久（96 小时）。
+ * 盯盘窗口在开投日未定时会配得很长，所以必须有这条上限：不然一个一直读不到数的读回，会在整个窗口里每小时重发。
+ */
+export const WATCH_AFTER_FIRST_SPEND_MS = 96 * 3_600_000
 
 /**
  * T+1h 要等「第一次看到花费」之后满这么久才读。每小时盯一次有几分钟的调度误差，
@@ -61,6 +70,12 @@ function isPostPhase(phase: unknown): phase is 'post_t1h' | 'post_t24h' {
 /** 一次读回「算数」的时刻：有开投时刻就用它，没有就退用检查时间。 */
 function effectiveLaunch(state: PostLaunchReceiptState): string {
   return state.launched_at ?? state.checked_at
+}
+
+/** 两个时刻里更早的那个（读不懂的忽略）；都读不出来 = null。 */
+function earlierMs(a: string | null, b: string | null): number | null {
+  const times = [a, b].map(t => (t === null ? Number.NaN : Date.parse(t))).filter(Number.isFinite)
+  return times.length === 0 ? null : Math.min(...times)
 }
 
 function earliestLaunch(states: readonly PostLaunchReceiptState[]): string | null {
@@ -98,6 +113,10 @@ export function decideLaunchWatch(input: {
 
   const validT1h = receipts.filter(r => r.phase === 'post_t1h' && r.valid)
   const validT24h = receipts.filter(r => r.phase === 'post_t24h' && r.valid)
+
+  // 🔴 盯满 96 小时就停：以「第一次见到花费」和已有 T+1h 回执里的开投时刻里更早的那个为准
+  const anchorMs = earlierMs(firstSpendSeenAt, validT1h.length > 0 ? earliestLaunch(validT1h) : null)
+  if (anchorMs !== null && now.getTime() - anchorMs > WATCH_AFTER_FIRST_SPEND_MS) return []
 
   if (validT1h.length === 0) {
     if (firstSpendSeenAt === null) return []
@@ -199,6 +218,48 @@ export function firstSpendSeenFromRows(
     }
   }
   return best
+}
+
+export interface SeriesWatchStatus {
+  /** 窗口里这个客户有多少次有效的盯盘 */
+  ticks: number
+  /** 最新一次盯盘的时刻；一次都没有 = null */
+  latest_at: string | null
+  /** 最新一次盯盘有没有找到本次系列；那一次没读出来 / 没这个字段 = null */
+  latest_found: boolean | null
+  /** 这些盯盘里，有没有哪怕一次找到过系列或见到过花费 */
+  ever_found: boolean
+}
+
+/**
+ * 从盯盘自己的运行记录里看「本次系列找到过没有」：今日待办用它判断「预计开投日过了 24 小时还是找不到」。
+ * 只数这个客户、窗口内（active=true）、已收尾、读得懂的盯盘；记录的顺序不重要。
+ */
+export function seriesWatchStatusFromRows(
+  rows: readonly { status: string | null; started_at: string; summary: unknown }[],
+  clientId: string,
+): SeriesWatchStatus {
+  const out: SeriesWatchStatus = { ticks: 0, latest_at: null, latest_found: null, ever_found: false }
+  let latestMs = Number.NEGATIVE_INFINITY
+  for (const row of rows) {
+    if (row.status === 'running') continue
+    const summary = asWatchSummary(row.summary)
+    if (summary === null) continue
+    const entry = summary.clients.find(c => typeof c === 'object' && c !== null && (c as Record<string, unknown>).client_id === clientId) as
+      | Record<string, unknown>
+      | undefined
+    if (entry === undefined || entry.active !== true) continue
+    const ms = Date.parse(summary.checked_at)
+    if (Number.isNaN(ms)) continue
+    out.ticks += 1
+    if (entry.series_found === true || entry.spend_seen === true) out.ever_found = true
+    if (ms > latestMs) {
+      latestMs = ms
+      out.latest_at = summary.checked_at
+      out.latest_found = typeof entry.series_found === 'boolean' ? entry.series_found : null
+    }
+  }
+  return out
 }
 
 /** 自动补排发出的事件编号：同一小时同一客户同一阶段相同（去重），换小时就换编号（重试）。 */

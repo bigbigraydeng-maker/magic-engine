@@ -47,7 +47,12 @@ describe('客户配置（L4）', () => {
       if (!watch) continue
       expect(watch.from).toMatch(/^\d{4}-\d{2}-\d{2}$/)
       expect(Number.isNaN(Date.parse(`${watch.from}T00:00:00Z`))).toBe(false)
-      expect(Number.isInteger(watch.days) && watch.days >= 1 && watch.days <= 14).toBe(true)
+      // 开投日未定时窗口要配得足够长，所以上限放宽到 60 天；开投后实际盯的时间从「第一次见到花费」起另算 96 小时
+      expect(Number.isInteger(watch.days) && watch.days >= 1 && watch.days <= 60).toBe(true)
+      if (watch.expected_launch_on !== undefined) {
+        expect(watch.expected_launch_on).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+        expect(Number.isNaN(Date.parse(`${watch.expected_launch_on}T00:00:00Z`))).toBe(false)
+      }
       expect(() => new Intl.DateTimeFormat('en-CA', { timeZone: watch.timezone })).not.toThrow()
       // 🔴 审查整改：花费只按本次投放的广告系列算，所以配了盯盘窗口就必须写清是哪几个系列
       expect(watch.campaign_ids.length, `${id} 盯盘必须写明广告系列`).toBeGreaterThan(0)
@@ -70,9 +75,10 @@ describe('客户配置（L4）', () => {
     expect(cfg?.planned_daily_budget_cents).toBe(10100)
     expect(cfg?.official_daily_cap_cents).toBe(11000)
     expect(cfg?.currency).toBe('NZD')
+    // 开投日未定（等 122 / 119 做完再发布）：窗口从 10-20 配到 11-30，没设预计开投日；T+1h / T+24h 和 96 小时从「第一次见到花费」起算
     expect(cfg?.launch_watch).toEqual({
-      from: '2026-10-22',
-      days: 4,
+      from: '2026-10-20',
+      days: 42,
       timezone: 'Pacific/Auckland',
       campaign_ids: ['52558131445673'],
       campaign_name_contains: ['官网点击', '20261022'],

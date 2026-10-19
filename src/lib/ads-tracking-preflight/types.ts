@@ -148,9 +148,12 @@ export interface KnownIssue {
  * 窗口里每小时看一眼官方账户有没有开始花钱，花了就自己补排 T+1h / T+24h 读回，不靠人记得发事件。
  */
 export interface LaunchWatchConfig {
-  /** 开始盯的那天（YYYY-MM-DD，按下面的时区算日期） */
+  /**
+   * 开始「守着」的那天（YYYY-MM-DD，按下面的时区算日期）。开投日没定的时候，这里写今天、天数配得足够长，
+   * 别让窗口在真正开投前过期；T+1h / T+24h 和 96 小时的盯盘从「第一次见到本次系列有花费」起算，不看这里的日期。
+   */
   from: string
-  /** 一共盯几天（含 from 当天） */
+  /** 窗口一共几天（含 from 当天）。开投日未定时配长一点 */
   days: number
   /** 广告账户的时区（IANA 名字） */
   timezone: string
@@ -164,6 +167,11 @@ export interface LaunchWatchConfig {
    * 为什么要有：用接口建出来的系列先躺在未发布草稿里，发布之后编号会不会变没法事先验证；名字不会跟着变。
    */
   campaign_name_contains?: readonly string[]
+  /**
+   * 预计开投日（YYYY-MM-DD，账户时区）。设了、且已过这一天 24 小时、盯盘一直找不到本次系列，才会出开发待办；
+   * 没设（开投日未定）就只在盯盘回执里记灰（series_found=false），不出待办。
+   */
+  expected_launch_on?: string
 }
 
 export interface TrackingClientConfig {
@@ -294,7 +302,7 @@ export interface JudgeInput {
   env: EnvFacts
 }
 
-/** 开投后读回的事实（Meta 账户级洞察，自开投时刻起）。 */
+/** 开投后读回的事实（本次投放的广告系列的洞察，自开投时刻起）。 */
 export interface PostLaunchFacts {
   read: boolean
   error: string | null

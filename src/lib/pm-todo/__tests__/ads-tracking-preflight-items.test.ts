@@ -2,12 +2,14 @@
  * 今日待办里的「开投前追踪检查」：读每日函数留下的回执，不自己现算。
  * 假的 cron_run_logs；只读（假库没有任何写方法，调用就会抛错）。
  */
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+// 配置可以按用例换：默认没有盯盘窗口（null），要测「系列一直找不到」的用例自己放一份
+const clientConfig = vi.hoisted(() => ({ get: vi.fn((_id: string): unknown => null) }))
 vi.mock('@/lib/ads-tracking-preflight/client-config', () => ({
   listTrackingClientIds: () => ['c1'],
-  getTrackingClientConfig: () => null,
+  getTrackingClientConfig: (id: string) => clientConfig.get(id),
 }))
 
 import type { ManualItem } from '../manual-item-types'
@@ -34,20 +36,30 @@ function runReceipt(clients: TrackingClientReceipt[], checkedAt = '2026-10-19T18
 }
 
 interface Row { status: string | null; started_at: string; error_message: string | null; summary: unknown }
-function fakeSupabase(rows: Row[] | null, queryError: string | null = null): SupabaseClient {
-  const chain: Record<string, unknown> = {}
-  chain.select = () => chain
-  chain.eq = () => chain
-  chain.gte = () => chain
-  chain.order = () => chain
-  chain.limit = async () => (queryError ? { data: null, error: { message: queryError } } : { data: rows, error: null })
+const WATCH_JOB = 'ads-tracking-launch-watch'
+function fakeSupabase(rows: Row[] | null, queryError: string | null = null, watchRows: Row[] = []): SupabaseClient {
+  const chain = (): Record<string, unknown> => {
+    let job = ''
+    const c: Record<string, unknown> = {}
+    c.select = () => c
+    c.eq = (column: string, value: unknown) => { if (column === 'job_name') job = String(value); return c }
+    c.gte = () => c
+    c.order = () => c
+    c.limit = async () => {
+      if (job === WATCH_JOB) return { data: watchRows, error: null }
+      return queryError ? { data: null, error: { message: queryError } } : { data: rows, error: null }
+    }
+    return c
+  }
   // 假库只实现被测代码真会调用的链式方法（已跑：每条用例都走过它），和 promo-plan-watch-items.test.ts 同款写法
-  return { from: (t: string) => { if (t !== 'cron_run_logs') throw new Error(`不该读这张表：${t}`); return chain } } as unknown as SupabaseClient
+  return { from: (t: string) => { if (t !== 'cron_run_logs') throw new Error(`不该读这张表：${t}`); return chain() } } as unknown as SupabaseClient
 }
 
-const run = async (rows: Row[] | null, err: string | null = null): Promise<ManualItem[]> => {
+beforeEach(() => { clientConfig.get.mockReset(); clientConfig.get.mockReturnValue(null) })
+
+const run = async (rows: Row[] | null, err: string | null = null, watchRows: Row[] = []): Promise<ManualItem[]> => {
   const items: ManualItem[] = []
-  await pushAdsTrackingPreflightItems(fakeSupabase(rows, err), items, nameOf, NOW)
+  await pushAdsTrackingPreflightItems(fakeSupabase(rows, err, watchRows), items, nameOf, NOW)
   return items
 }
 const run_ = run
@@ -197,5 +209,180 @@ describe('车道与登记', () => {
 
   it('读的就是这个任务名', () => {
     expect(TRACKING_PREFLIGHT_JOB).toBe('ads-tracking-preflight')
+  })
+})
+
+// ─── 第二轮审查整改 ─────────────────────────────────────────────────────────────
+
+describe('开投后读回的红灯 / 黄灯也要出待办（不能只落日志）', () => {
+  const postReceipt = (clientId: string, phase: 'post_t1h' | 'post_t24h', status: TrackingGateReceipt['status'], checkedAt: string, reason = '原因-读回') =>
+    buildClientReceipt({
+      requestId: `post-${clientId}-${phase}`, clientId, checkedAt, trigger: 'postlaunch', phase, launchedAt: '2026-10-18T10:00:00Z',
+      gates: [{ ...gate(phase === 'post_t1h' ? 'post.t1h' : 'post.t24h', status), reason }], readErrors: [], links: LINKS,
+    })
+  const postRow = (receipt: TrackingClientReceipt): Row =>
+    okRow(buildRunReceipt({ requestId: 'run-post', checkedAt: receipt.checked_at, trigger: 'postlaunch', clients: [receipt] }), receipt.checked_at)
+  const preRow = (gates: TrackingGateReceipt[], checkedAt = '2026-10-19T18:00:00Z'): Row =>
+    okRow(runReceipt([clientReceipt('c1', gates, checkedAt)], checkedAt), checkedAt)
+
+  it('最新一份开投后读回是红灯 → 一条待办（问题和影响 / 怎么做 / 链接），归开发欠账那一类', async () => {
+    const red = postReceipt('c1', 'post_t24h', 'red', '2026-10-19T19:00:00Z', '点击 40 次但落地页浏览为 0')
+    const out = await run([postRow(red), preRow([gate('tracking.pixel_alive', 'green')])])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ kind: 'ads_tracking_preflight_fix', client_id: 'c1', client_name: '客户甲' })
+    expect(out[0].what).toContain('开投后 24 小时读回')
+    expect(out[0].what).toContain('落地页浏览为 0')
+    expect(out[0].how).toBeTruthy()
+    expect(out[0].href).toBeTruthy()
+  })
+
+  it('最新一份开投后读回是黄灯（样本不足）→ 同样出待办', async () => {
+    const yellow = postReceipt('c1', 'post_t1h', 'yellow', '2026-10-19T19:00:00Z', '样本不足：点击只有 3 次')
+    const out = await run([postRow(yellow), preRow([gate('tracking.pixel_alive', 'green')])])
+    expect(out).toHaveLength(1)
+    expect(out[0].what).toContain('样本不足')
+  })
+
+  it('更新的一份读回是绿灯 → 旧读回的黄灯不再出（只看每个客户最新的一份）', async () => {
+    const early = postReceipt('c1', 'post_t1h', 'yellow', '2026-10-19T09:00:00Z', '样本不足：点击只有 3 次')
+    const late = postReceipt('c1', 'post_t24h', 'green', '2026-10-19T19:00:00Z')
+    const out = await run([postRow(late), postRow(early), preRow([gate('tracking.pixel_alive', 'green')])])
+    expect(out).toEqual([])
+  })
+
+  it('读回已经是 3 天（72 小时）以前的 → 不再出待办，免得开投那一次的黄灯永远挂着', async () => {
+    const old = postReceipt('c1', 'post_t24h', 'red', '2026-10-16T19:00:00Z')
+    const preFresh = preRow([gate('tracking.pixel_alive', 'green')])
+    expect(await run([preFresh, postRow(old)])).toEqual([])
+    const justInside = postReceipt('c1', 'post_t24h', 'red', '2026-10-16T20:00:00Z') // 刚好 72 小时
+    expect(await run([preFresh, postRow(justInside)])).toHaveLength(1)
+  })
+
+  it('开投前红灯和开投后红灯同时存在 → 两条都出', async () => {
+    const red = postReceipt('c1', 'post_t24h', 'red', '2026-10-19T19:00:00Z')
+    const out = await run([postRow(red), preRow([gate('tracking.pixel_alive', 'red')])])
+    expect(out.map(i => i.what).join('|')).toContain('像素在线')
+    expect(out.map(i => i.what).join('|')).toContain('开投后 24 小时读回')
+    expect(out).toHaveLength(2)
+  })
+
+  it('开投后读回是灰灯（没读到 / 还没花钱）→ 不出待办', async () => {
+    const gray = postReceipt('c1', 'post_t1h', 'gray', '2026-10-19T19:00:00Z')
+    expect(await run([postRow(gray), preRow([gate('tracking.pixel_alive', 'green')])])).toEqual([])
+  })
+})
+
+describe('最新一轮是失败 / 卡住 / 在跑的读回或手动轮时，不得把客户开投前的红灯整份跳过', () => {
+  const red = (): Row => okRow(runReceipt([clientReceipt('c1', [gate('tracking.pixel_alive', 'red')])]), '2026-10-19T18:00:00Z')
+
+  it('最新一轮是失败的 → 出「没跑成」欠账，同时客户开投前的红灯照样在', async () => {
+    const out = await run([
+      { status: 'failed', started_at: '2026-10-19T19:30:00Z', error_message: '重试耗尽后仍失败：炸了', summary: null },
+      red(),
+    ])
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_broken' && i.what.includes('炸了'))).toBe(true)
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_fix' && i.what.includes('像素在线'))).toBe(true)
+  })
+
+  it('最新一轮卡在「在跑」超过 2 小时 → 出欠账，客户开投前的红灯照样在', async () => {
+    const out = await run([okRow(null, '2026-10-19T17:00:00Z', 'running'), red()])
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_broken')).toBe(true)
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_fix')).toBe(true)
+  })
+
+  it('最新一轮还在跑（2 小时内）→ 不吵，客户开投前的红灯照样在', async () => {
+    const out = await run([okRow(null, '2026-10-19T19:30:00Z', 'running'), red()])
+    expect(out.filter(i => i.kind === 'ads_tracking_preflight_broken')).toEqual([])
+    expect(out.filter(i => i.kind === 'ads_tracking_preflight_fix')).toHaveLength(1)
+  })
+
+  it('最新一轮的回执读不懂 → 出欠账，客户开投前的红灯照样在', async () => {
+    const out = await run([okRow({ nonsense: true }, '2026-10-19T19:30:00Z'), red()])
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_broken')).toBe(true)
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_fix')).toBe(true)
+  })
+
+  it('最新一轮已经超过一天（最近一次运行就是 36 小时前）→ 一条「超过一天没跑」欠账，不再叠一条客户级的过期欠账', async () => {
+    const old = '2026-10-18T05:00:00Z'
+    const out = await run([okRow(runReceipt([clientReceipt('c1', [gate('tracking.pixel_alive', 'red')], old)], old), old)])
+    expect(out.filter(i => i.kind === 'ads_tracking_preflight_broken')).toHaveLength(1)
+    expect(out[0].what).toContain('超过一天')
+  })
+})
+
+describe('盯盘一直找不到本次投放的系列（series_not_found）：只有设了预计开投日、且已过 24 小时才出开发待办', () => {
+  const WATCH = {
+    from: '2026-10-01', days: 60, timezone: 'Pacific/Auckland', campaign_ids: ['123456789012'],
+  }
+  const config = (over: Record<string, unknown> = {}) => ({
+    ad_account_id: 'act_1111111111', launch_watch: { ...WATCH, ...over },
+  })
+  const tick = (iso: string, found: boolean | null, spendSeen: boolean | null = null): Row => ({
+    status: 'completed', started_at: iso, error_message: null,
+    summary: {
+      checked_at: iso, no_publish: true,
+      clients: [{ client_id: 'c1', active: true, spend_seen: spendSeen, series_found: found, sent: [], error: null }],
+    },
+  })
+  /** 最近 30 个小时，每小时一次盯盘，最新一次是 NOW 之前 40 分钟；都找不到 */
+  const notFoundTicks = (): Row[] =>
+    Array.from({ length: 30 }, (_, i) => tick(new Date(NOW.getTime() - (40 + i * 60) * 60_000).toISOString(), false))
+  const okPre = (): Row => okRow(runReceipt([clientReceipt('c1', [gate('tracking.pixel_alive', 'green')])]), '2026-10-19T18:00:00Z')
+
+  it('设了预计开投日（NZ 10-18）、早已过去 24 小时、盯盘一直找不到系列 → 一条开发待办，说清「没发布就是正常的」和怎么改配置', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const out = await run([okPre()], null, notFoundTicks())
+    const item = out.find(i => i.what.includes('没找到本次投放的系列'))
+    expect(item).toMatchObject({ kind: 'ads_tracking_preflight_fix', client_id: 'c1', client_name: '客户甲' })
+    expect(item?.what).toContain('2026-10-18')
+    expect(item?.what).toContain('还没发布')
+    expect(item?.how).toContain('client-config')
+    expect(item?.href).toContain('1111111111')
+  })
+
+  it('没设预计开投日 → 不出待办（只记灰回执）', async () => {
+    clientConfig.get.mockReturnValue(config())
+    expect(await run([okPre()], null, notFoundTicks())).toEqual([])
+  })
+
+  it('预计开投日还没过 24 小时（今天还是预计开投日当天）→ 不出', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-20' })) // NOW = NZ 10-20
+    expect(await run([okPre()], null, notFoundTicks())).toEqual([])
+  })
+
+  it('这期间哪怕只有一次找到过系列（或见到过花费）→ 不出', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const rows = notFoundTicks()
+    rows[10] = tick(new Date(NOW.getTime() - 650 * 60_000).toISOString(), true, false)
+    expect(await run([okPre()], null, rows)).toEqual([])
+  })
+
+  it('最新一次盯盘已经找到系列 → 不出', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const rows = [tick(new Date(NOW.getTime() - 40 * 60_000).toISOString(), true, true), ...notFoundTicks().slice(1)]
+    expect(await run([okPre()], null, rows)).toEqual([])
+  })
+
+  it('盯盘记录太少（不到一天的量）→ 不出，免得刚部署就喊', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    expect(await run([okPre()], null, notFoundTicks().slice(0, 5))).toEqual([])
+  })
+
+  it('最新一次盯盘已经过了 3 小时（盯盘函数自己没在跑）→ 不在这里喊，免得把「函数没跑」说成「系列找不到」', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const stale = Array.from({ length: 30 }, (_, i) => tick(new Date(NOW.getTime() - (200 + i * 60) * 60_000).toISOString(), false))
+    expect(await run([okPre()], null, stale)).toEqual([])
+  })
+
+  it('读不出系列有没有（series_found 为 null）算「不知道」，不当成找不到', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const unknown = Array.from({ length: 30 }, (_, i) => tick(new Date(NOW.getTime() - (40 + i * 60) * 60_000).toISOString(), null))
+    expect(await run([okPre()], null, unknown)).toEqual([])
+  })
+
+  it('盯盘记录读不出来（库报错 / 格式不对）→ 不出这条（也不抛错）', async () => {
+    clientConfig.get.mockReturnValue(config({ expected_launch_on: '2026-10-18' }))
+    const garbage: Row[] = [{ status: 'completed', started_at: '2026-10-19T19:00:00Z', error_message: null, summary: { nonsense: true } }]
+    expect(await run([okPre()], null, garbage)).toEqual([])
   })
 })

@@ -28,6 +28,7 @@ import { cronRunHandle, failOpenCronRuns, startCronRunId } from '@/lib/cron/run-
 import { resolveMetaToken } from '@/lib/meta/token-selection'
 import { getTrackingClientConfig, listTrackingClientIds } from '@/lib/ads-tracking-preflight/client-config'
 import {
+  LAUNCH_WATCH_JOB,
   decideLaunchWatch,
   firstSpendSeenFromRows,
   isWatchActive,
@@ -35,12 +36,13 @@ import {
   watchEventId,
   type PostLaunchReceiptState,
 } from '@/lib/ads-tracking-preflight/launch-watch'
-import { readPostLaunchFacts } from '@/lib/ads-tracking-preflight/post-launch'
+import { readCampaignPresence, readPostLaunchFacts } from '@/lib/ads-tracking-preflight/post-launch'
 import { TRACKING_PREFLIGHT_JOB } from '@/lib/ads-tracking-preflight/receipt'
 import { sanitizeError } from '@/lib/ads-tracking-preflight/sanitize'
 import type { LaunchWatchConfig, TrackingClientConfig } from '@/lib/ads-tracking-preflight/types'
 
-export const LAUNCH_WATCH_JOB = 'ads-tracking-launch-watch'
+// 任务名只在 launch-watch.ts 里定义一次（今日待办也要按它读盯盘自己的运行记录）
+export { LAUNCH_WATCH_JOB }
 /** 新西兰时间每小时的第 20 分钟。 */
 export const LAUNCH_WATCH_CRON = '20 * * * *'
 export const LAUNCH_WATCH_TZ = 'Pacific/Auckland'
@@ -54,6 +56,11 @@ export interface LaunchWatchSpend {
   read: boolean
   spend_cents: number
   error: string | null
+  /**
+   * 本次投放的系列在不在账户里（不管花没花钱）。花了钱 = true；没读到 / 读不出 = null（不是「找不到」）。
+   * false = 编号和名字都对不上（比如还是未发布的草稿，线上读不到）：记灰，不是安静的 0。
+   */
+  series_found: boolean | null
 }
 
 export interface LaunchWatchDeps {
@@ -73,8 +80,10 @@ export interface LaunchWatchDeps {
 export interface LaunchWatchClientSummary {
   client_id: string
   active: boolean
-  /** 窗口里读到的是否有花费；没读到 = null（不是 false） */
+  /** 窗口里读到的是否有花费；没读到、或本次系列一个都没找到 = null（灰，不是 false） */
   spend_seen: boolean | null
+  /** 本次系列在不在账户里；读不出 = null；false = 一个都没找到（记灰） */
+  series_found: boolean | null
   sent: { phase: 't1h' | 't24h'; launched_at: string; event_id: string }[]
   error: string | null
 }
@@ -94,10 +103,15 @@ function sinceIsoOf(watch: LaunchWatchConfig): string {
 
 // ─── 真依赖 ─────────────────────────────────────────────────────────────────
 
-/** 真读花费：只按配置里本次投放的广告系列（编号或名字）算（导出给单测用）。 */
+/**
+ * 真读花费：只按配置里本次投放的广告系列（编号或名字）算（导出给单测用）。
+ * 🔴 配了盯盘却没配系列 → 拒绝（read=false），绝不退回整个账户的口径。
+ * 没花钱时再多读一次系列列表，分清「系列在、还没花钱」和「一个系列都没找到」。
+ */
 export async function readLaunchSpend(clientId: string, cfg: TrackingClientConfig, watch: LaunchWatchConfig, now: Date): Promise<LaunchWatchSpend> {
   const token = (await resolveMetaToken(supabaseAdmin, clientId, process.env))?.token ?? null
-  if (!token) return { read: false, spend_cents: 0, error: '没有可用的 Meta 令牌' }
+  if (!token) return { read: false, spend_cents: 0, error: '没有可用的 Meta 令牌', series_found: null }
+  const scope = { campaignIds: watch.campaign_ids, campaignNameContains: watch.campaign_name_contains }
   const out = await readPostLaunchFacts({
     adAccountId: cfg.ad_account_id,
     token,
@@ -105,10 +119,12 @@ export async function readLaunchSpend(clientId: string, cfg: TrackingClientConfi
     now,
     launchedAt: now.toISOString(),
     sinceDate: watch.from,
-    campaignIds: watch.campaign_ids,
-    campaignNameContains: watch.campaign_name_contains,
+    ...scope,
   })
-  return { read: out.facts.read, spend_cents: out.facts.spend_cents, error: out.facts.error }
+  if (!out.facts.read) return { read: false, spend_cents: 0, error: out.facts.error, series_found: null }
+  if (out.facts.spend_cents > 0) return { read: true, spend_cents: out.facts.spend_cents, error: null, series_found: true }
+  const presence = await readCampaignPresence({ adAccountId: cfg.ad_account_id, token, fetcher: fetch, ...scope })
+  return { read: true, spend_cents: 0, error: null, series_found: presence.found }
 }
 
 async function realLoadReceiptStates(clientId: string, sinceIso: string): Promise<PostLaunchReceiptState[]> {
@@ -175,7 +191,9 @@ async function watchOneClient(
 ): Promise<LaunchWatchClientSummary> {
   const spend = await step.run(`spend:${clientId}`, () => deps.readSpend(clientId, cfg, watch, now))
   const receipts = await step.run(`state:${clientId}`, () => deps.loadReceiptStates(clientId, sinceIsoOf(watch)))
-  const spendSeen = spend.read ? spend.spend_cents > 0 : null
+  // 读到了：系列在 → 花没花钱；系列一个都没找到 → 记灰（null），不能当成「没花钱」
+  let spendSeen: boolean | null = null
+  if (spend.read) spendSeen = spend.series_found === false ? null : spend.spend_cents > 0
   // 只有看到花费时才需要知道「第一次看到是什么时候」（T+1h 要等它之后满 1 小时）
   const firstSpendSeenAt = spendSeen === true
     ? await step.run(`first-seen:${clientId}`, () => deps.loadFirstSpendSeenAt(clientId, sinceIsoOf(watch)))
@@ -190,7 +208,14 @@ async function watchOneClient(
     )
     sent.push({ phase: d.phase, launched_at: d.launched_at, event_id: eventId })
   }
-  return { client_id: clientId, active: true, spend_seen: spendSeen, sent, error: spend.read ? null : spend.error ?? '花费没读到' }
+  return {
+    client_id: clientId,
+    active: true,
+    spend_seen: spendSeen,
+    series_found: spend.read ? spend.series_found : null,
+    sent,
+    error: spend.read ? null : spend.error ?? '花费没读到',
+  }
 }
 
 /** 整轮编排。导出给单测用（注入假 step 和假依赖）。 */
@@ -204,7 +229,7 @@ export async function runLaunchWatch(step: LaunchWatchStep, deps: LaunchWatchDep
     const cfg = deps.getConfig(clientId)
     const watch = cfg?.launch_watch
     if (!cfg || !watch || !isWatchActive(watch, now)) {
-      clients.push({ client_id: clientId, active: false, spend_seen: null, sent: [], error: null })
+      clients.push({ client_id: clientId, active: false, spend_seen: null, series_found: null, sent: [], error: null })
       continue
     }
     clients.push(await watchOneClient(step, deps, clientId, cfg, watch, now))

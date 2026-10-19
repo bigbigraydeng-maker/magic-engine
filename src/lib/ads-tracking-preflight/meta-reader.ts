@@ -21,7 +21,7 @@ const MAX_DATASET_PAGES = 3
 const MISSING_EVENT = '__missing_event'
 
 const ACCOUNT_ID_RE = /^act_\d{6,20}$/
-const PATH_ALLOWLIST_RE = /^(act_\d{6,20}(\/(adspixels|insights))?|\d{6,20}\/stats|dataset_quality)$/
+const PATH_ALLOWLIST_RE = /^(act_\d{6,20}(\/(adspixels|insights|campaigns))?|\d{6,20}\/stats|dataset_quality)$/
 
 export interface MetaReadInput {
   adAccountId: string

@@ -6,7 +6,9 @@
  * 只有一个真相源；每日函数挂了 / 没同步 / 回执读不懂，这里也会喊出来，不会静默。
  *
  * 两种待办：
- *   · ads_tracking_preflight_fix    回执里的红灯（或硬门灰）原样下发，告诉开发怎么修
+ *   · ads_tracking_preflight_fix    回执里的红灯（或硬门灰）原样下发，告诉开发怎么修；
+ *                                   开投后读回的红灯 / 黄灯（样本不足等）也在这里下发——它没有看板位置，只落日志就是死在日志里；
+ *                                   预计开投日过了 24 小时盯盘还是找不到本次系列，也在这里喊一声
  *   · ads_tracking_preflight_broken 检查自己没跑成（开发欠账，不占 PM 的清单；PM 那一栏会留一句「今天没查成」）
  *
  * 🔴 本文件一行写库都没有。
@@ -15,14 +17,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { APP_BASE } from './binding-request-items'
-import { listTrackingClientIds } from '@/lib/ads-tracking-preflight/client-config'
+import { getTrackingClientConfig, listTrackingClientIds } from '@/lib/ads-tracking-preflight/client-config'
+import { LAUNCH_WATCH_JOB, isWatchActive, seriesWatchStatusFromRows } from '@/lib/ads-tracking-preflight/launch-watch'
+import { dateInTimezone } from '@/lib/ads-tracking-preflight/post-launch'
 import {
   TRACKING_PREFLIGHT_JOB,
   TRACKING_RECEIPT_STALE_HOURS,
   isTrackingRunReceiptLike,
   pickLatestClientReceipt,
+  pickLatestPostLaunchReceipt,
   receiptAgeHours,
 } from '@/lib/ads-tracking-preflight/receipt'
+import type { TrackingClientConfig, TrackingReceiptItem } from '@/lib/ads-tracking-preflight/types'
 
 const INFRA_CLIENT_ID = 'infra'
 const INFRA_CLIENT_NAME = 'Magic Engine 后台'
@@ -32,6 +38,14 @@ const INNGEST_URL = 'https://app.inngest.com'
 const RUNNING_STUCK_MS = 2 * 60 * 60 * 1000
 /** 回看多久的运行记录。 */
 const LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000
+/** 开投后读回的待办挂多久：读回是一次性的，超过这么久（3 天）就不再挂，免得开投那一次的黄灯永远在。 */
+const POST_LAUNCH_ITEM_WINDOW_HOURS = 72
+/** 盯盘记录回看多少次（每小时一次，约 40 小时）。 */
+const WATCH_LOOKBACK_ROWS = 40
+/** 不到这么多次盯盘（约一天的量）不喊「找不到系列」，免得刚部署就喊。 */
+const SERIES_ALARM_MIN_TICKS = 20
+/** 最新一次盯盘超过这么久（3 小时）= 盯盘函数自己没在跑，不在这里把它说成「系列找不到」。 */
+const SERIES_ALARM_MAX_TICK_AGE_MS = 3 * 60 * 60 * 1000
 
 interface RunRow {
   status: string | null
@@ -67,24 +81,33 @@ async function loadRows(supabase: SupabaseClient, now: Date): Promise<RunRow[]> 
   return (data ?? []) as RunRow[]
 }
 
+interface RunVerdict {
+  /** 最近一轮本身出了问题、已经出了一条欠账（客户级的「没回执 / 回执过期」就不再重复叠一条） */
+  brokeRun: boolean
+  /** 整份别往下翻了：最近一次运行就已经超过一天，下面的客户回执只会更旧 */
+  stop: boolean
+}
+
 /**
- * 看最近一轮本身有没有问题（卡死 / 失败 / 过期 / 回执读不懂 / 整轮自报有问题）。
- * 返回 true = 已经出了待办、不该再往下翻客户回执。
+ * 看最近一轮本身有没有问题（卡死 / 失败 / 过期 / 回执读不懂）。
+ *
+ * 🔴 最近一轮不分种类（每天的体检、开投后读回、手动叫醒都写在同一个任务名下），它出了问题只出自己的一条欠账，
+ *    不得把客户「更早的、还新鲜的」开投前红灯整份跳过——只有「最近一次运行就已经超过一天」才整份不翻。
  */
-function checkLatestRun(latest: RunRow, now: Date, items: ManualItem[]): boolean {
+function checkLatestRun(latest: RunRow, now: Date, items: ManualItem[]): RunVerdict {
   const age = now.getTime() - Date.parse(latest.started_at)
 
   if (latest.status === 'running') {
-    if (age <= RUNNING_STUCK_MS) return true
+    if (age <= RUNNING_STUCK_MS) return { brokeRun: false, stop: false }
     items.push(brokenItem('「开投前追踪检查」最近一轮开了头却超过 2 小时没收尾——多半是中途被中断了。', INFRA_HOW))
-    return true
+    return { brokeRun: true, stop: false }
   }
   if (latest.status === 'failed' || latest.error_message) {
     items.push(brokenItem(
       `「开投前追踪检查」最近一轮没跑成：${truncate(latest.error_message ?? '没留原因', 160)}。`,
       INFRA_HOW,
     ))
-    return true
+    return { brokeRun: true, stop: false }
   }
   if (Number.isFinite(age) && age > TRACKING_RECEIPT_STALE_HOURS * 3_600_000) {
     items.push(brokenItem(
@@ -92,13 +115,13 @@ function checkLatestRun(latest: RunRow, now: Date, items: ManualItem[]): boolean
       INFRA_HOW,
       INFRA_CLIENT_ID, INFRA_CLIENT_NAME, INNGEST_URL,
     ))
-    return true
+    return { brokeRun: true, stop: true }
   }
   if (!isTrackingRunReceiptLike(latest.summary)) {
     items.push(brokenItem('「开投前追踪检查」最近一轮的回执读不出来（格式不对）——这一栏空着不等于没事。', INFRA_HOW))
-    return true
+    return { brokeRun: true, stop: false }
   }
-  return false
+  return { brokeRun: false, stop: false }
 }
 
 /**
@@ -118,46 +141,149 @@ function reportRunSelfError(latest: RunRow, items: ManualItem[]): void {
   ))
 }
 
-/** 一个客户：没回执 / 回执过期 → 欠账；否则把回执里的红灯原样下发。 */
+function fixItem(item: TrackingReceiptItem, nameOf: (id: string) => string): ManualItem {
+  return {
+    kind: 'ads_tracking_preflight_fix',
+    client_id: item.client_id,
+    client_name: nameOf(item.client_id),
+    what: item.what,
+    how: item.how,
+    href: item.href,
+  }
+}
+
+/**
+ * 一个客户的开投前体检：没回执 / 回执过期 → 欠账（最近一轮自己已经出了欠账时不再叠一条，过期的回执里的红灯也不再下发）；
+ * 回执新鲜 → 把里面的红灯原样下发，哪怕最近一轮是别的种类（读回 / 手动）的失败轮。
+ */
 function pushClientItems(
   rows: RunRow[],
   clientId: string,
   nameOf: (id: string) => string,
   now: Date,
   items: ManualItem[],
+  runAlreadyBroken: boolean,
 ): void {
   const picked = pickLatestClientReceipt(rows, clientId)
   const clientName = nameOf(clientId)
   const href = promoPlanHref(clientId)
 
   if (picked === null) {
-    items.push(brokenItem(
-      `「开投前追踪检查」最近几轮里还没有 ${clientName} 的回执——这个客户的追踪现在没人在查。`,
-      INFRA_HOW,
-      clientId, clientName, href,
-    ))
+    if (!runAlreadyBroken) {
+      items.push(brokenItem(
+        `「开投前追踪检查」最近几轮里还没有 ${clientName} 的回执——这个客户的追踪现在没人在查。`,
+        INFRA_HOW,
+        clientId, clientName, href,
+      ))
+    }
     return
   }
 
   const age = receiptAgeHours(picked.receipt.checked_at, now)
   if (age === null || age > TRACKING_RECEIPT_STALE_HOURS) {
-    const ageText = age === null ? '未知' : String(Math.round(age))
-    items.push(brokenItem(
-      `「开投前追踪检查」里 ${clientName} 的回执已 ${ageText} 小时没更新——追踪现在没人在查。`,
-      INFRA_HOW,
-      clientId, clientName, href,
-    ))
+    if (!runAlreadyBroken) {
+      const ageText = age === null ? '未知' : String(Math.round(age))
+      items.push(brokenItem(
+        `「开投前追踪检查」里 ${clientName} 的回执已 ${ageText} 小时没更新——追踪现在没人在查。`,
+        INFRA_HOW,
+        clientId, clientName, href,
+      ))
+    }
     return
   }
 
-  for (const item of picked.receipt.items) {
+  for (const item of picked.receipt.items) items.push(fixItem(item, nameOf))
+}
+
+/**
+ * 开投后读回：每个客户只看最新的一份，红灯 / 黄灯（样本不足等）下发成待办。
+ * 它不进推广计划看板，所以这里是它唯一的出口；超过 3 天的读回不再挂。
+ */
+function pushPostLaunchItems(
+  rows: RunRow[],
+  clientId: string,
+  nameOf: (id: string) => string,
+  now: Date,
+  items: ManualItem[],
+): void {
+  const picked = pickLatestPostLaunchReceipt(rows, clientId)
+  if (picked === null) return
+  const age = receiptAgeHours(picked.receipt.checked_at, now)
+  if (age === null || age > POST_LAUNCH_ITEM_WINDOW_HOURS) return
+  for (const item of picked.receipt.items) items.push(fixItem(item, nameOf))
+}
+
+// ─── 盯盘一直找不到本次系列 ─────────────────────────────────────────────────────
+
+interface SeriesAlarmCandidate {
+  clientId: string
+  cfg: TrackingClientConfig
+  expectedOn: string
+}
+
+/** 设了预计开投日、窗口还开着、且已过预计开投日 24 小时（按账户时区的日历日：今天的日期晚于预计开投日）的客户。 */
+function seriesAlarmCandidates(clientIds: readonly string[], now: Date): SeriesAlarmCandidate[] {
+  const out: SeriesAlarmCandidate[] = []
+  for (const clientId of clientIds) {
+    const cfg = getTrackingClientConfig(clientId)
+    const watch = cfg?.launch_watch
+    const expectedOn = watch?.expected_launch_on
+    if (!cfg || !watch || !expectedOn) continue
+    if (!isWatchActive(watch, now)) continue
+    if (!(dateInTimezone(now, watch.timezone) > expectedOn)) continue
+    out.push({ clientId, cfg, expectedOn })
+  }
+  return out
+}
+
+async function loadWatchRows(supabase: SupabaseClient, now: Date): Promise<RunRow[]> {
+  const { data, error } = await supabase
+    .from('cron_run_logs')
+    .select('status, started_at, error_message, summary')
+    .eq('job_name', LAUNCH_WATCH_JOB)
+    .gte('started_at', new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString())
+    .order('started_at', { ascending: false })
+    .limit(WATCH_LOOKBACK_ROWS)
+  if (error) throw new Error(error.message)
+  return (data ?? []) as RunRow[]
+}
+
+function adsManagerHref(adAccountId: string): string {
+  return `https://adsmanager.facebook.com/adsmanager/manage/campaigns?act=${adAccountId.replace(/^act_/, '')}`
+}
+
+/**
+ * 预计开投日已过 24 小时，盯盘一直找不到本次投放的系列（编号和名字关键词都对不上）→ 一条开发待办。
+ * 没设预计开投日（开投日未定）不出：只在盯盘回执里记灰。读盯盘记录出任何问题都不出这条（也不抛错）——
+ * 「盯盘函数自己没在跑」是另一回事，不能被说成「系列找不到」。
+ */
+async function pushSeriesNotFoundItems(
+  supabase: SupabaseClient,
+  clientIds: readonly string[],
+  nameOf: (id: string) => string,
+  now: Date,
+  items: ManualItem[],
+): Promise<void> {
+  const candidates = seriesAlarmCandidates(clientIds, now)
+  if (candidates.length === 0) return
+  let rows: RunRow[]
+  try {
+    rows = await loadWatchRows(supabase, now)
+  } catch {
+    return
+  }
+  for (const { clientId, cfg, expectedOn } of candidates) {
+    const status = seriesWatchStatusFromRows(rows, clientId)
+    if (status.ticks < SERIES_ALARM_MIN_TICKS || status.ever_found || status.latest_found !== false) continue
+    const latestMs = status.latest_at === null ? Number.NaN : Date.parse(status.latest_at)
+    if (!Number.isFinite(latestMs) || now.getTime() - latestMs > SERIES_ALARM_MAX_TICK_AGE_MS) continue
     items.push({
       kind: 'ads_tracking_preflight_fix',
-      client_id: item.client_id,
-      client_name: nameOf(item.client_id),
-      what: item.what,
-      how: item.how,
-      href: item.href,
+      client_id: clientId,
+      client_name: nameOf(clientId),
+      what: `开投后自动补排的盯盘：预计 ${expectedOn} 开投，已过 24 小时，在广告账户里一直没找到本次投放的系列（编号和名字关键词都对不上）——开投后的追踪读回不会自动排上。如果其实还没发布，这条是正常的，发布后会自动消失。`,
+      how: '到广告管理工具看这个系列发布了没有：发布了，就把 src/lib/ads-tracking-preflight/client-config.ts 里 launch_watch 的 campaign_ids / campaign_name_contains 改成新的编号或名字关键词；还没发布，就把 expected_launch_on 改成新的预计开投日。',
+      href: adsManagerHref(cfg.ad_account_id),
     })
   }
 }
@@ -193,12 +319,18 @@ export async function pushAdsTrackingPreflightItems(
   }
 
   const latest = rows[0]
-  if (checkLatestRun(latest, now, items)) return
+  const verdict = checkLatestRun(latest, now, items)
+  if (verdict.stop) return
 
   reportRunSelfError(latest, items)
 
+  // 只有「还在跑」的记录：一轮都还没收尾，不去喊「没有回执」
   const usable = rows.filter(r => r.status !== 'running')
+  if (usable.length === 0) return
+
   for (const clientId of clientIds) {
-    pushClientItems(usable, clientId, nameOf, now, items)
+    pushClientItems(usable, clientId, nameOf, now, items, verdict.brokeRun)
+    pushPostLaunchItems(usable, clientId, nameOf, now, items)
   }
+  await pushSeriesNotFoundItems(supabase, clientIds, nameOf, now, items)
 }

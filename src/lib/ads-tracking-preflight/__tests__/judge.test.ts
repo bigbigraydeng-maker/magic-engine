@@ -463,6 +463,17 @@ describe('tracking.lead_reaches_crm', () => {
     expect(gate(judge(i => { i.crm.latest_web_form_at = 'garbage' }), KEY).status).toBe('yellow')
   })
 
+  // 🔴 第二轮审查整改：线索时间不能是「未来」。时钟偏差 / 脏数据不能让绿灯自己造出来
+  it('最近一条线索的时间晚于现在（时钟偏差 / 脏数据）→ 黄，不是绿；晚 5 分钟以内的时钟误差仍算正常', () => {
+    const at = (offsetMin: number) => new Date(NOW.getTime() + offsetMin * 60_000).toISOString()
+    const future = gate(judge(i => { i.crm.latest_web_form_at = at(6) }), KEY)
+    expect(future.status).toBe('yellow')
+    expect(future.reason).toContain('未来')
+    expect(gate(judge(i => { i.crm.latest_web_form_at = at(5) }), KEY).status).toBe('green')
+    expect(gate(judge(i => { i.crm.latest_web_form_at = at(4) }), KEY).status).toBe('green')
+    expect(gate(judge(i => { i.crm.latest_web_form_at = at(60 * 24 * 365) }), KEY).status).toBe('yellow')
+  })
+
   it('48 小时内有线索时，哪怕网站留资信号很多也是绿（红只留给「一条都没有」）', () => {
     const g = gate(judge(i => { i.crm.web_form_touchpoints_7d = 1; i.crm.latest_web_form_at = hoursAgo(1) }), KEY)
     expect(g.status).toBe('green')

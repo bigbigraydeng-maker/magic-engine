@@ -302,7 +302,11 @@ describe('收集函数 · 瞬时故障重试一次 + 广告系列范围（审查
     let n = 0
     const world = makeDeps()
     world.deps.resolveMetaToken = async () => { n += 1; if (n === 1) throw new Error('db blip'); return SECRET }
-    await collectPostLaunchFacts('c1', CONFIG, '2026-10-19T09:00:00.000Z', world.deps)
+    const withSeries: TrackingClientConfig = {
+      ...CONFIG,
+      launch_watch: { from: '2026-10-19', days: 4, timezone: 'Pacific/Auckland', campaign_ids: ['123456789012'] },
+    }
+    await collectPostLaunchFacts('c1', withSeries, '2026-10-19T09:00:00.000Z', world.deps)
     expect(world.urls.some(u => u.includes('/insights'))).toBe(true)
   })
 
@@ -342,8 +346,17 @@ describe('收集函数 · 瞬时故障重试一次 + 广告系列范围（审查
     await collectPostLaunchFacts('c1', namesOnly, '2026-10-19T09:00:00.000Z', byName.deps)
     expect(new URL(byName.urls.find(u => u.includes('/insights')) ?? '').searchParams.get('level')).toBe('campaign')
 
-    const whole = makeDeps()
-    await collectPostLaunchFacts('c1', CONFIG, '2026-10-19T09:00:00.000Z', whole.deps)
-    expect(new URL(whole.urls.find(u => u.includes('/insights')) ?? '').searchParams.get('level')).toBe('account')
+    // 🔴 第二轮审查整改：没配盯盘窗口 / 配了窗口没配系列 → 拒绝，绝不退回整个账户
+    for (const cfg of [
+      CONFIG,
+      { ...CONFIG, launch_watch: { from: '2026-10-19', days: 4, timezone: 'Pacific/Auckland', campaign_ids: [] } },
+      { ...CONFIG, launch_watch: { from: '2026-10-19', days: 4, timezone: 'Pacific/Auckland', campaign_ids: [], campaign_name_contains: [] } },
+    ] as TrackingClientConfig[]) {
+      const rejected = makeDeps()
+      const out = await collectPostLaunchFacts('c1', cfg, '2026-10-19T09:00:00.000Z', rejected.deps)
+      expect(out.facts.read).toBe(false)
+      expect(out.errors.some(e => e.source === 'insights' && e.error.includes('广告系列'))).toBe(true)
+      expect(rejected.urls.filter(u => u.includes('/insights'))).toEqual([])
+    }
   })
 })

@@ -51,9 +51,15 @@ export interface ItemLinks {
   byGate?: Partial<Record<TrackingGateKey, string>>
 }
 
+function isPostLaunchGate(key: TrackingGateKey): boolean {
+  return key === 'post.t1h' || key === 'post.t24h'
+}
+
 function needsItem(gate: TrackingGateReceipt): boolean {
   if (gate.na) return false
   if (gate.status === 'red') return true
+  // 开投后读回是「发现」的唯一出口（没有看板位置）：黄灯（比如样本不足）也要变成待办，不能只落日志
+  if (gate.status === 'yellow') return isPostLaunchGate(gate.key)
   return gate.status === 'gray' && gate.hard === true
 }
 
@@ -221,6 +227,23 @@ export function pickLatestClientReceipt(
     if (row.status === 'running') continue
     if (!isTrackingRunReceiptLike(row.summary)) continue
     const receipt = row.summary.clients.find(c => c.client_id === clientId && c.phase === 'preflight')
+    if (receipt) return { receipt, started_at: row.started_at }
+  }
+  return null
+}
+
+/**
+ * 每个客户最新的一份「开投后读回」回执（post_t1h / post_t24h）。
+ * 开投后读回只有一道门、不进推广计划看板，所以它的红灯 / 黄灯只能靠今日待办被人看见。
+ */
+export function pickLatestPostLaunchReceipt(
+  rows: readonly { status: string | null; started_at: string; summary: unknown }[],
+  clientId: string,
+): { receipt: TrackingClientReceipt; started_at: string } | null {
+  for (const row of rows) {
+    if (row.status === 'running') continue
+    if (!isTrackingRunReceiptLike(row.summary)) continue
+    const receipt = row.summary.clients.find(c => c.client_id === clientId && (c.phase === 'post_t1h' || c.phase === 'post_t24h'))
     if (receipt) return { receipt, started_at: row.started_at }
   }
   return null

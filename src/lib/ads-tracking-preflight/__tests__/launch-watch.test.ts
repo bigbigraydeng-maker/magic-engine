@@ -4,6 +4,7 @@ import {
   firstSpendSeenFromRows,
   isWatchActive,
   postLaunchStatesFromRows,
+  seriesWatchStatusFromRows,
   watchEventId,
   type PostLaunchReceiptState,
 } from '../launch-watch'
@@ -78,6 +79,29 @@ describe('decideLaunchWatch', () => {
 
   it('这一小时没看到花费 → 哪怕以前看到过也不发（花费读不到 / 为 0 时不能凭记忆补排）', () => {
     expect(decide({ spendSeen: false, firstSpendSeenAt: hoursBefore(3) })).toEqual([])
+  })
+
+  // 🔴 第二轮审查整改：盯盘窗口配得很长（开投日未定），T+1h / T+24h 和 96 小时的盯盘从「第一次看到花费」起算，
+  //    不能让一个一直读不到数的读回在整个窗口里每小时重发。
+  it('第一次看到花费已经过了 96 小时 → 不再补排任何读回（T+1h 和 T+24h 都是）', () => {
+    expect(decide({ firstSpendSeenAt: hoursBefore(97) })).toEqual([])
+    const launched = hoursBefore(100)
+    expect(decide({ receipts: [state({ launched_at: launched, checked_at: launched })], firstSpendSeenAt: hoursBefore(100) })).toEqual([])
+  })
+
+  it('96 小时之内照常补排：第 95 小时还没做过 T+1h → 补；T+1h 做过、T+24h 没做 → 补', () => {
+    expect(decide({ firstSpendSeenAt: hoursBefore(95) })).toEqual([{ phase: 't1h', launched_at: hoursBefore(95) }])
+    const launched = hoursBefore(95)
+    expect(decide({ receipts: [state({ launched_at: launched, checked_at: launched })], firstSpendSeenAt: launched })).toEqual([{ phase: 't24h', launched_at: launched }])
+  })
+
+  it('刚好 96 小时还算在盯（超过才停）', () => {
+    expect(decide({ firstSpendSeenAt: hoursBefore(96) })).toEqual([{ phase: 't1h', launched_at: hoursBefore(96) }])
+  })
+
+  it('第一次看到花费的时间取不到（盯盘记录被挤掉了），但 T+1h 回执里的开投时刻已经超过 96 小时 → 同样不再补排', () => {
+    const launched = hoursBefore(97)
+    expect(decide({ receipts: [state({ launched_at: launched, checked_at: launched })], firstSpendSeenAt: null })).toEqual([])
   })
 
   it('T+1h 做过但还没满 24 小时 → 等', () => {
@@ -209,6 +233,50 @@ describe('firstSpendSeenFromRows · 从盯盘函数自己的运行记录里找�
   it('记录里的盯盘时刻读不懂 → 跳过那一条，不抛错', () => {
     const rows = [row('garbage', [entry('c1', true)]), row('2026-10-22T10:20:00.000Z', [entry('c1', true)])]
     expect(firstSpendSeenFromRows(rows, 'c1', SINCE)).toBe('2026-10-22T10:20:00.000Z')
+  })
+})
+
+describe('seriesWatchStatusFromRows · 盯盘记录里「本次系列找到过没有」', () => {
+  const entry = (clientId: string, found: boolean | null, spendSeen: boolean | null = null, active = true) =>
+    ({ client_id: clientId, active, spend_seen: spendSeen, series_found: found, sent: [], error: null })
+  const row = (checkedAt: string, clients: unknown[], status: string | null = 'completed') => ({
+    status, started_at: checkedAt, summary: { checked_at: checkedAt, no_publish: true, clients },
+  })
+
+  it('数出这个客户有多少次盯盘、最新一次的时间和结论、期间有没有找到过', () => {
+    const rows = [
+      row('2026-10-19T19:20:00.000Z', [entry('c1', false)]),
+      row('2026-10-19T18:20:00.000Z', [entry('c1', false)]),
+      row('2026-10-19T17:20:00.000Z', [entry('c2', true)]),
+    ]
+    expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({
+      ticks: 2, latest_at: '2026-10-19T19:20:00.000Z', latest_found: false, ever_found: false,
+    })
+  })
+
+  it('哪怕只有一次 series_found 为 true、或见到过花费（spend_seen 为 true）→ ever_found 为 true', () => {
+    const a = seriesWatchStatusFromRows([row('2026-10-19T19:20:00.000Z', [entry('c1', false)]), row('2026-10-19T09:20:00.000Z', [entry('c1', true)])], 'c1')
+    expect(a.ever_found).toBe(true)
+    expect(a.latest_found).toBe(false)
+    const b = seriesWatchStatusFromRows([row('2026-10-19T19:20:00.000Z', [entry('c1', null, true)])], 'c1')
+    expect(b.ever_found).toBe(true)
+  })
+
+  it('记录的顺序不重要：最新一次按盯盘时刻取', () => {
+    const rows = [row('2026-10-19T09:20:00.000Z', [entry('c1', true)]), row('2026-10-19T19:20:00.000Z', [entry('c1', false)])]
+    expect(seriesWatchStatusFromRows(rows, 'c1').latest_found).toBe(false)
+  })
+
+  it('窗口外的盯盘（active 为 false）、还在跑的、读不懂的、没有这个客户的，都不算一次盯盘', () => {
+    const rows = [
+      row('2026-10-19T19:20:00.000Z', [entry('c1', false, null, false)]),
+      row('2026-10-19T18:20:00.000Z', [entry('c1', false)], 'running'),
+      { status: 'completed', started_at: '2026-10-19T17:20:00.000Z', summary: { nonsense: true } },
+      { status: 'completed', started_at: '2026-10-19T16:20:00.000Z', summary: null },
+      row('2026-10-19T15:20:00.000Z', [entry('c2', true)]),
+      row('garbage', [entry('c1', true)]),
+    ]
+    expect(seriesWatchStatusFromRows(rows, 'c1')).toEqual({ ticks: 0, latest_at: null, latest_found: null, ever_found: false })
   })
 })
 

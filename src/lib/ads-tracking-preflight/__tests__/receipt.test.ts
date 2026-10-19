@@ -8,6 +8,7 @@ import {
   buildRunReceipt,
   isTrackingRunReceiptLike,
   pickLatestClientReceipt,
+  pickLatestPostLaunchReceipt,
   receiptAgeHours,
 } from '../receipt'
 import { GATE_LABELS } from '../judge'
@@ -100,6 +101,20 @@ describe('buildReceiptItems · 红灯变待办三件套（问题和影响 / 怎�
     const [item] = buildReceiptItems('c1', [gate('post.t24h', 'red', { reason: '很长'.repeat(300) })], LINKS)
     expect(item.gate_key).toBe('post.t24h')
     expect(item.what.length).toBeLessThanOrEqual(300)
+  })
+
+  // 🔴 审查整改（第二轮）：开投后读回只落日志 = 发现死在日志里。黄灯（样本不足等）也要出待办，灰灯不出。
+  it('开投后读回的黄灯（比如样本不足）也出待办；灰灯（没读到 / 还没花钱）不出', () => {
+    const yellow = buildReceiptItems('c1', [gate('post.t1h', 'yellow', { reason: '样本不足：点击只有 3 次' })], LINKS)
+    expect(yellow).toHaveLength(1)
+    expect(yellow[0]).toMatchObject({ gate_key: 'post.t1h', hard: false, how: '怎么办-post.t1h' })
+    expect(yellow[0].what).toContain('样本不足')
+    expect(buildReceiptItems('c1', [gate('post.t1h', 'gray')], LINKS)).toEqual([])
+    expect(buildReceiptItems('c1', [gate('post.t24h', 'green')], LINKS)).toEqual([])
+  })
+
+  it('开投前体检的黄灯仍然不出待办（只有开投后读回的黄灯出）', () => {
+    expect(buildReceiptItems('c1', [gate('tracking.pixel_alive', 'yellow'), gate('env.token_and_crons', 'yellow')], LINKS)).toEqual([])
   })
 })
 
@@ -239,6 +254,48 @@ describe('pickLatestClientReceipt', () => {
       run([clientReceipt('c1', { phase: 'post_t1h', trigger: 'postlaunch' })], '2026-10-19T09:30:00Z'),
     ]
     expect(pickLatestClientReceipt(rows, 'c1')).toBeNull()
+  })
+})
+
+describe('pickLatestPostLaunchReceipt · 每个客户最新的一份开投后读回', () => {
+  const run = (clients: TrackingClientReceipt[], startedAt: string, status: string | null = 'completed') => ({
+    status, started_at: startedAt,
+    summary: buildRunReceipt({ requestId: `run-${startedAt}`, checkedAt: startedAt, trigger: 'postlaunch', clients }),
+  })
+  const post = (clientId: string, phase: 'post_t1h' | 'post_t24h', id: string) =>
+    clientReceipt(clientId, { request_id: id, phase, trigger: 'postlaunch' })
+
+  it('取最新一份含该客户的开投后读回（T+24h 比 T+1h 新就取 T+24h）', () => {
+    const rows = [
+      run([post('c1', 'post_t24h', 'late')], '2026-10-23T09:00:00Z'),
+      run([post('c1', 'post_t1h', 'early')], '2026-10-22T09:00:00Z'),
+    ]
+    const picked = pickLatestPostLaunchReceipt(rows, 'c1')
+    expect(picked?.receipt.request_id).toBe('late')
+    expect(picked?.started_at).toBe('2026-10-23T09:00:00Z')
+  })
+
+  it('开投前体检不算；只有开投前体检 → null', () => {
+    const rows = [run([clientReceipt('c1', { request_id: 'pre' })], '2026-10-23T07:00:00Z')]
+    expect(pickLatestPostLaunchReceipt(rows, 'c1')).toBeNull()
+  })
+
+  it('开投前体检在最新位置时，照样往后找到开投后读回', () => {
+    const rows = [
+      run([clientReceipt('c1', { request_id: 'pre' })], '2026-10-23T07:00:00Z'),
+      run([post('c1', 'post_t1h', 'early')], '2026-10-22T09:00:00Z'),
+    ]
+    expect(pickLatestPostLaunchReceipt(rows, 'c1')?.receipt.request_id).toBe('early')
+  })
+
+  it('别的客户的读回不算；还在跑的、读不懂的跳过；全都没有 → null', () => {
+    const rows = [
+      run([post('c1', 'post_t1h', 'running-one')], '2026-10-23T09:00:00Z', 'running'),
+      run([post('c2', 'post_t1h', 'other')], '2026-10-22T09:00:00Z'),
+      { status: 'completed', started_at: '2026-10-21T09:00:00Z', summary: { nonsense: true } },
+    ]
+    expect(pickLatestPostLaunchReceipt(rows, 'c1')).toBeNull()
+    expect(pickLatestPostLaunchReceipt([], 'c1')).toBeNull()
   })
 })
 

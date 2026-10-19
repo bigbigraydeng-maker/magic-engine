@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { dateInTimezone, parseInsightsBody, readPostLaunchFacts } from '../post-launch'
+import { dateInTimezone, parseInsightsBody, readCampaignPresence, readPostLaunchFacts } from '../post-launch'
 import { RETRY_DELAY_MS } from '../retry'
 
 const NOW = new Date('2026-10-22T10:30:00.000Z') // 新西兰时间 2026-10-22 23:30
@@ -94,7 +94,7 @@ describe('readPostLaunchFacts', () => {
       const path = new URL(url).pathname.replace(/^\/v\d+\.\d+\//, '')
       if (path === 'act_1111111111') return new Response(JSON.stringify({ timezone_name: 'Pacific/Auckland' }), { status: 200 })
       if (path === 'act_1111111111/insights') {
-        return new Response(JSON.stringify(opts.insights ?? { data: [{ spend: '10', inline_link_clicks: '20', actions: [{ action_type: 'landing_page_view', value: '15' }] }] }), { status: opts.insightsStatus ?? 200 })
+        return new Response(JSON.stringify(opts.insights ?? { data: [{ campaign_id: '123456789012', campaign_name: '本次投放', spend: '10', inline_link_clicks: '20', actions: [{ action_type: 'landing_page_view', value: '15' }] }] }), { status: opts.insightsStatus ?? 200 })
       }
       return new Response('{}', { status: 404 })
     })
@@ -104,16 +104,17 @@ describe('readPostLaunchFacts', () => {
   const input = (fetcher: typeof fetch) => ({
     adAccountId: 'act_1111111111', token: TOKEN, fetcher, now: NOW, launchedAt: '2026-10-21T21:00:00.000Z', // 新西兰 10-22 10:00
     sleep: async (): Promise<void> => undefined,
+    campaignIds: ['123456789012'],
   })
 
-  it('用账户时区算「开投那天 → 今天」的日期区间去读账户级洞察', async () => {
+  it('用账户时区算「开投那天 → 今天」的日期区间，按系列读洞察', async () => {
     const { fetcher, urls } = makeFetcher()
     const out = await readPostLaunchFacts(input(fetcher))
 
     expect(out.errors).toEqual([])
     expect(out.facts).toMatchObject({ read: true, error: null, spend_cents: 1000, link_clicks: 20, landing_page_views: 15, leads: 0, as_of: NOW.toISOString() })
     const insightsUrl = new URL(urls.find(u => u.includes('/insights')) ?? '')
-    expect(insightsUrl.searchParams.get('level')).toBe('account')
+    expect(insightsUrl.searchParams.get('level')).toBe('campaign')
     expect(insightsUrl.searchParams.get('fields')).toContain('inline_link_clicks')
     expect(JSON.parse(insightsUrl.searchParams.get('time_range') ?? '{}')).toEqual({ since: '2026-10-22', until: '2026-10-22' })
   })
@@ -255,14 +256,16 @@ describe('readPostLaunchFacts · 只看本次投放的广告系列（审查整�
     expect(out.facts).toMatchObject({ read: true, spend_cents: 0, link_clicks: 0, landing_page_views: 0, leads: 0 })
   })
 
-  it('不给编号也不给名字关键词（或都给空数组）→ 看整个账户，请求和以前一样（level=account）', async () => {
-    for (const input of [{}, { campaignIds: [], campaignNameContains: [] }]) {
-      const { fetcher, urls } = accountFetcher(() => ok({ data: [{ spend: '10', inline_link_clicks: '20' }] }))
+  // 🔴 第二轮审查整改：范围为空时不得静默退回整个账户（账户里别的系列早就在花钱，会把「没开投」读成「已开投」）
+  it('不给编号也不给名字关键词（或都给空数组）→ 拒绝：read false、写明原因，一个请求都不发，绝不退回整个账户', async () => {
+    for (const input of [{}, { campaignIds: [], campaignNameContains: [] }, { campaignIds: undefined, campaignNameContains: undefined }]) {
+      const { fetcher } = accountFetcher(() => ok({ data: [{ spend: '10', inline_link_clicks: '20' }] }))
       const out = await readPostLaunchFacts({ ...base(fetcher), ...input })
-      expect(out.facts.spend_cents).toBe(1000)
-      const url = new URL(urls.find(u => u.includes('/insights')) ?? '')
-      expect(url.searchParams.get('level')).toBe('account')
-      expect(url.searchParams.get('fields')).not.toContain('campaign_name')
+      expect(out.facts.read, JSON.stringify(input)).toBe(false)
+      expect(out.facts.spend_cents, JSON.stringify(input)).toBe(0)
+      expect(out.facts.error, JSON.stringify(input)).toContain('广告系列')
+      expect(out.errors.length, JSON.stringify(input)).toBeGreaterThan(0)
+      expect(fetcher, JSON.stringify(input)).not.toHaveBeenCalled()
     }
   })
 
@@ -301,5 +304,105 @@ describe('readPostLaunchFacts · 只看本次投放的广告系列（审查整�
     const out = await readPostLaunchFacts({ ...base(fetcher), campaignIds: [CAMPAIGN_A], sleep: async ms => { sleeps.push(ms) } })
     expect(out.facts).toMatchObject({ read: true, spend_cents: 1000, link_clicks: 20 })
     expect(sleeps).toEqual([RETRY_DELAY_MS])
+  })
+})
+
+describe('readCampaignPresence · 本次投放的系列在账户里有没有（不管花没花钱）', () => {
+  const CAMPAIGN_A = '123456789012'
+  const noSleep = async (): Promise<void> => undefined
+  const base = (fetcher: typeof fetch) => ({
+    adAccountId: 'act_1111111111', token: TOKEN, fetcher, sleep: noSleep, campaignIds: [CAMPAIGN_A] as readonly string[],
+  })
+  const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
+  function campaignsFetcher(respond: (n: number) => Response) {
+    const urls: string[] = []
+    const calls: RequestInit[] = []
+    let n = 0
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      urls.push(String(input))
+      if (init) calls.push(init)
+      n += 1
+      return respond(n)
+    })
+    return { fetcher, urls, calls }
+  }
+
+  it('按编号找到 → found true；请求是只读的 GET，只要编号和名字，令牌只在 Authorization 头里', async () => {
+    const { fetcher, urls, calls } = campaignsFetcher(() => ok({ data: [{ id: CAMPAIGN_A, name: '官网点击 A' }, { id: '999999999999', name: '别的' }] }))
+    const out = await readCampaignPresence(base(fetcher))
+    expect(out).toEqual({ read: true, found: true, error: null })
+    const url = new URL(urls[0])
+    expect(url.pathname.replace(/^\/v\d+\.\d+\//, '')).toBe('act_1111111111/campaigns')
+    expect(url.searchParams.get('fields')).toBe('id,name')
+    expect(urls[0]).not.toContain(TOKEN)
+    expect(calls[0].method === undefined || calls[0].method === 'GET').toBe(true)
+    expect((calls[0].headers as Record<string, string>).Authorization).toBe(`Bearer ${TOKEN}`)
+  })
+
+  it('编号变了但名字里同时含全部关键词 → 照样 found true', async () => {
+    const { fetcher } = campaignsFetcher(() => ok({ data: [{ id: '555555555555', name: 'CTS · 官网点击 · 20261022' }] }))
+    const out = await readCampaignPresence({ ...base(fetcher), campaignIds: [CAMPAIGN_A], campaignNameContains: ['官网点击', '20261022'] })
+    expect(out.found).toBe(true)
+  })
+
+  it('编号和名字都对不上（比如系列还是未发布的草稿，线上读不到）→ read 为 true、found 为 false', async () => {
+    const { fetcher } = campaignsFetcher(() => ok({ data: [{ id: '999999999999', name: '官网点击 · 20250101' }] }))
+    const out = await readCampaignPresence({ ...base(fetcher), campaignNameContains: ['官网点击', '20261022'] })
+    expect(out).toEqual({ read: true, found: false, error: null })
+  })
+
+  it('范围为空（编号和名字关键词都没有）→ 拒绝：read false，一个请求都不发', async () => {
+    const { fetcher } = campaignsFetcher(() => ok({ data: [] }))
+    const out = await readCampaignPresence({ ...base(fetcher), campaignIds: [], campaignNameContains: [] })
+    expect(out.read).toBe(false)
+    expect(out.found).toBeNull()
+    expect(out.error).toContain('广告系列')
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('编号 / 名字关键词格式不对 → 拒绝，一个请求都不发', async () => {
+    const { fetcher } = campaignsFetcher(() => ok({ data: [] }))
+    expect((await readCampaignPresence({ ...base(fetcher), campaignIds: ['abc'] })).read).toBe(false)
+    expect((await readCampaignPresence({ ...base(fetcher), campaignIds: [], campaignNameContains: [''] })).read).toBe(false)
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('还有下一页（系列太多读不全）→ read false、found 为 null（不当成「找不到」），也不外带 paging.next', async () => {
+    const { fetcher } = campaignsFetcher(() => ok({
+      data: [{ id: '999999999999', name: 'x' }],
+      paging: { cursors: { after: 'A' }, next: 'https://graph.example.test/next?access_token=LEAKY' },
+    }))
+    const out = await readCampaignPresence(base(fetcher))
+    expect(out.read).toBe(false)
+    expect(out.found).toBeNull()
+    expect(JSON.stringify(out)).not.toContain('LEAKY')
+  })
+
+  it('接口报错 / 网络直接抛错 → read false、found 为 null，原因里没有令牌', async () => {
+    const bad = campaignsFetcher(() => new Response(JSON.stringify({ error: { message: `bad ${TOKEN}`, code: 190 } }), { status: 400 }))
+    const out = await readCampaignPresence(base(bad.fetcher))
+    expect(out).toMatchObject({ read: false, found: null })
+    expect(JSON.stringify(out)).not.toContain(TOKEN)
+    const boom = vi.fn(async (): Promise<Response> => { throw new Error(`boom access_token=${TOKEN}`) })
+    const out2 = await readCampaignPresence(base(boom as unknown as typeof fetch))
+    expect(out2).toMatchObject({ read: false, found: null })
+    expect(JSON.stringify(out2)).not.toContain(TOKEN)
+  })
+
+  it('第一次 503、第二次正常 → 读到；中间等了一次', async () => {
+    const sleeps: number[] = []
+    const { fetcher } = campaignsFetcher(n => n === 1
+      ? new Response(JSON.stringify({ error: { message: 'down', code: 2 } }), { status: 503 })
+      : ok({ data: [{ id: CAMPAIGN_A, name: 'x' }] }))
+    const out = await readCampaignPresence({ ...base(fetcher), sleep: async ms => { sleeps.push(ms) } })
+    expect(out).toEqual({ read: true, found: true, error: null })
+    expect(sleeps).toEqual([RETRY_DELAY_MS])
+  })
+
+  it('账户编号格式不对 → 拒绝，一个请求都不发', async () => {
+    const { fetcher } = campaignsFetcher(() => ok({ data: [] }))
+    const out = await readCampaignPresence({ ...base(fetcher), adAccountId: '../me' })
+    expect(out.read).toBe(false)
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

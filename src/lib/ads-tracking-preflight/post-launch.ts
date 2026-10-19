@@ -72,7 +72,7 @@ function rowInScope(row: Record<string, unknown>, scope: CampaignScope): boolean
  * Meta 洞察响应 → 开投后的数字。
  * 给了 scope（按广告系列读）时 Meta 按系列分行返回：只留编号 / 名字对得上的行，每一行各自
  * 「汇总 lead 优先、没有才退用像素留资」，再把各行加起来，免得同一行的两个留资字段重复相加。
- * 不给 scope = 账户级（只有一行）。一行都没有 = 还没花钱 = 全 0。
+ * 不给 scope = 把所有行都加起来（只给纯解析用，读回本身一定带 scope）。一行都没有 = 还没花钱 = 全 0。
  */
 export function parseInsightsBody(body: unknown, scope?: CampaignScope): PostLaunchNumbers {
   const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).data : undefined
@@ -100,12 +100,35 @@ export interface PostLaunchReadInput {
   launchedAt: string
   /** 直接指定起始日期（YYYY-MM-DD，广告账户时区）；给了就不再用 launchedAt 去推 */
   sinceDate?: string
-  /** 本次投放的广告系列编号；和下面的名字关键词任意一条对上就算本次投放。都不给 = 看整个账户 */
+  /**
+   * 本次投放的广告系列编号；和下面的名字关键词任意一条对上就算本次投放。
+   * 🔴 编号和名字关键词至少要给一个：都不给就拒绝，绝不退回整个账户的口径
+   * （账户里别的系列早就在花钱，会把「还没开投」读成「已经开投」）。
+   */
   campaignIds?: readonly string[]
   /** 广告系列名字里必须同时含有的关键词（全部含有才算）；草稿发布后编号可能变，名字不会 */
   campaignNameContains?: readonly string[]
   /** 单测里换成不真等的版本；不传就真等 */
   sleep?: Sleep
+}
+
+/** 把调用方给的编号 / 名字关键词洗成一个范围；都没给或格式不对 = 给出原因，不去读。 */
+function resolveScope(
+  campaignIds: readonly string[] | undefined,
+  campaignNameContains: readonly string[] | undefined,
+): { scope: CampaignScope } | { error: string } {
+  const ids = campaignIds ?? []
+  const nameContains = campaignNameContains ?? []
+  if (ids.length === 0 && nameContains.length === 0) {
+    return { error: '没有配置本次投放的广告系列（编号或名字关键词），开投后的读回不去读整个账户' }
+  }
+  if (!ids.every((id) => CAMPAIGN_ID_RE.test(id))) {
+    return { error: '广告系列编号格式不对（要 6–20 位纯数字）' }
+  }
+  if (!nameContains.every((t) => t.length > 0 && t.length <= MAX_NAME_TOKEN_CHARS && !CONTROL_CHARS_RE.test(t))) {
+    return { error: '广告系列名称关键词格式不对（不能为空、不超过 60 字）' }
+  }
+  return { scope: { ids, nameContains } }
 }
 
 function unread(now: Date, message: string): { facts: PostLaunchFacts; errors: string[] } {
@@ -128,16 +151,9 @@ export async function readPostLaunchFacts(input: PostLaunchReadInput): Promise<{
   if (input.sinceDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(input.sinceDate)) {
     return unread(now, '起始日期格式不对（要 YYYY-MM-DD）')
   }
-  const campaignIds = input.campaignIds ?? []
-  const nameContains = input.campaignNameContains ?? []
-  if (!campaignIds.every((id) => CAMPAIGN_ID_RE.test(id))) {
-    return unread(now, '广告系列编号格式不对（要 6–20 位纯数字）')
-  }
-  if (!nameContains.every((t) => t.length > 0 && t.length <= MAX_NAME_TOKEN_CHARS && !CONTROL_CHARS_RE.test(t))) {
-    return unread(now, '广告系列名称关键词格式不对（不能为空、不超过 60 字）')
-  }
-  const scope: CampaignScope | undefined =
-    campaignIds.length > 0 || nameContains.length > 0 ? { ids: campaignIds, nameContains } : undefined
+  const resolved = resolveScope(input.campaignIds, input.campaignNameContains)
+  if ('error' in resolved) return unread(now, resolved.error)
+  const { scope } = resolved
 
   const graphGet = makeGraphGet(fetcher, token, input.sleep)
 
@@ -155,18 +171,12 @@ export async function readPostLaunchFacts(input: PostLaunchReadInput): Promise<{
     until: dateInTimezone(now, timezone),
   })
   // 按广告系列读：不在服务端过滤（过滤语法没法保证对每种命名都行），拿回按系列分行的结果，在这里按编号 / 名字挑
-  const params: Record<string, string> = scope !== undefined
-    ? {
-        level: 'campaign',
-        fields: 'campaign_id,campaign_name,spend,inline_link_clicks,actions',
-        time_range: range,
-        limit: '500',
-      }
-    : {
-        level: 'account',
-        fields: 'spend,inline_link_clicks,actions',
-        time_range: range,
-      }
+  const params: Record<string, string> = {
+    level: 'campaign',
+    fields: 'campaign_id,campaign_name,spend,inline_link_clicks,actions',
+    time_range: range,
+    limit: '500',
+  }
   try {
     const body = await graphGet(`${adAccountId}/insights`, params)
     if (hasNextPage(body)) {
@@ -175,5 +185,55 @@ export async function readPostLaunchFacts(input: PostLaunchReadInput): Promise<{
     return { facts: { read: true, error: null, as_of: now.toISOString(), ...parseInsightsBody(body, scope) }, errors: [] }
   } catch (err) {
     return unread(now, `开投后读回失败：${sanitizeError(err, [token])}`)
+  }
+}
+
+// ─── 本次投放的系列在账户里有没有 ───────────────────────────────────────────────
+
+export interface CampaignPresenceInput {
+  adAccountId: string
+  token: string
+  fetcher: typeof fetch
+  campaignIds?: readonly string[]
+  campaignNameContains?: readonly string[]
+  /** 单测里换成不真等的版本；不传就真等 */
+  sleep?: Sleep
+}
+
+export interface CampaignPresence {
+  /** 系列列表读到了吗 */
+  read: boolean
+  /** 本次投放的系列在不在账户里（不管花没花钱）；没读到 = null，不是「没有」 */
+  found: boolean | null
+  error: string | null
+}
+
+/**
+ * 本次投放的系列在不在广告账户里（不管花没花钱）。
+ * 用来分清「系列在、还没花钱」和「一个系列都没找到」（比如还是未发布的草稿，线上读不到）。
+ * 永不 reject；范围为空 / 读不到 / 读不全 都是 found=null，绝不当成「找不到」。
+ */
+export async function readCampaignPresence(input: CampaignPresenceInput): Promise<CampaignPresence> {
+  const unreadPresence = (error: string): CampaignPresence => ({ read: false, found: null, error })
+  const { adAccountId, token, fetcher } = input
+  if (!ACCOUNT_ID_RE.test(adAccountId)) return unreadPresence('广告账户编号格式不对')
+  const resolved = resolveScope(input.campaignIds, input.campaignNameContains)
+  if ('error' in resolved) return unreadPresence(resolved.error)
+  const { scope } = resolved
+
+  const graphGet = makeGraphGet(fetcher, token, input.sleep)
+  try {
+    const body = await graphGet(`${adAccountId}/campaigns`, { fields: 'id,name', limit: '500' })
+    if (hasNextPage(body)) return unreadPresence('系列列表有下一页（系列太多，读不全），不当成完整结果')
+    const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).data : undefined
+    const rows = Array.isArray(data) ? data : []
+    const found = rows.some((raw) => {
+      if (typeof raw !== 'object' || raw === null) return false
+      const row = raw as Record<string, unknown>
+      return rowInScope({ campaign_id: row.id, campaign_name: row.name }, scope)
+    })
+    return { read: true, found, error: null }
+  } catch (err) {
+    return unreadPresence(`系列列表读取失败：${sanitizeError(err, [token])}`)
   }
 }
