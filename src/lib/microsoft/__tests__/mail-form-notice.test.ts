@@ -125,6 +125,7 @@ describe('parseFormNotice', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.lead).toEqual({
+      kind: 'contact_form',
       email: 'jane.test@example.com',
       name: 'Jane Test',
       phone: '0211234567',
@@ -334,5 +335,98 @@ describe('魏征 R1：DKIM 必须是验证通过的', () => {
         : h,
     )
     expect(parseFormNotice({ ...base, headers })).toEqual({ ok: false, reason: 'auth_failed' })
+  })
+})
+
+describe('第二期：Tour enquiry 通知', () => {
+  const tourBody =
+    'New tour enquiry — Example website\nName\tJane Test\nEmail\tjane.test@example.com\nPhone\t0211234567\nTour\tBest of China — 15 Days\nURL\t/tours/china/signature/example\nSource\ttour-page\nAd source\tfacebook\nFacebook click ID\tfb.1.123.abc\nSubmitted\t2026-10-20T01:00:00.000Z\n\nMessage\n\nhello'
+
+  it('isFormNoticeCandidate：Tour enquiry 主题通过；Re:/Fwd: 开头仍不通过', () => {
+    const base = { direction: 'inbound' as const, fromAddress: 'info@example.co.nz', mailbox: 'info@example.co.nz' }
+    expect(isFormNoticeCandidate({ ...base, subject: 'Tour enquiry: Best of China — Jane' })).toBe(true)
+    expect(isFormNoticeCandidate({ ...base, subject: 'Re: Tour enquiry: Best of China — Jane' })).toBe(false)
+    expect(isFormNoticeCandidate({ ...base, subject: 'Fwd: Tour enquiry: X' })).toBe(false)
+    expect(isFormNoticeCandidate({ ...base, subject: 'Tour enquiries weekly digest' })).toBe(false)
+  })
+
+  it('解析：kind、兴趣取 Tour 行、URL 取 formUrl', () => {
+    const r = parseFormNotice({ ...goodInput(), body: tourBody })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.kind).toBe('tour_enquiry')
+      expect(r.lead.interest).toBe('Best of China — 15 Days')
+      expect(r.lead.formUrl).toBe('/tours/china/signature/example')
+      expect(r.lead.name).toBe('Jane Test')
+    }
+  })
+
+  it('Contact form 仍解析为 contact_form，且不会误把 Tour 行当兴趣', () => {
+    const r = parseFormNotice(goodInput())
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.kind).toBe('contact_form')
+  })
+
+  it('标记行既不是联系表单也不是团页表单 → bad_marker', () => {
+    expect(parseFormNotice({ ...goodInput(), body: tourBody.replace('New tour enquiry', 'New tour quote') })).toEqual({ ok: false, reason: 'bad_marker' })
+  })
+
+  it('团页通知同样必须过认证：dkim 伪造 → auth_failed', () => {
+    const base = goodInput()
+    const headers = base.headers.map((h) =>
+      h.name === 'Authentication-Results' ? { ...h, value: 'mx 1; dmarc=pass header.from=example.co.nz' } : h,
+    )
+    expect(parseFormNotice({ ...base, headers, body: tourBody })).toEqual({ ok: false, reason: 'auth_failed' })
+  })
+
+  it('留言里伪造「Email」行骗不过（只读 Message 之前）', () => {
+    const body = tourBody.replace('hello', 'Email\tvictim@example.org')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.email).toBe('jane.test@example.com')
+  })
+})
+
+describe('魏征第二期复审补充', () => {
+  const single =
+    'New tour enquiry — Example website\nName Jane Test\nEmail jane.test@example.com\nPhone 0211234567\nTour Best of China — 15 Days\nURL /tours/china/example\nSource tour-page\nAd source facebook\nFacebook click ID fb.1.123.abc\nSubmitted 2026-10-20T01:00:00.000Z\n\nMessage\n\nhello'
+
+  it('标签后只有一个空格（真实写法之一）：Tour / URL / Name / Email 仍能取到', () => {
+    const r = parseFormNotice({ ...goodInput(), body: single })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.interest).toBe('Best of China — 15 Days')
+      expect(r.lead.formUrl).toBe('/tours/china/example')
+      expect(r.lead.name).toBe('Jane Test')
+      expect(r.lead.email).toBe('jane.test@example.com')
+    }
+  })
+
+  it('"Tour pages viewed" 不会被 "Tour" 抢走成兴趣', () => {
+    const body = single.replace('Source tour-page', 'Tour pages viewed /tours/a, /tours/b')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Best of China — 15 Days')
+  })
+
+  it('联系表单正文里即使有 Tour 行，兴趣仍取 Travel interest', () => {
+    const base = goodInput()
+    const body = base.body.replace('Travel interest\tCustom Itinerary', 'Travel interest\tCustom Itinerary\nTour\tSomething Else')
+    const r = parseFormNotice({ ...base, body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Custom Itinerary')
+  })
+
+  it('兴趣超过 200 字被截断', () => {
+    const body = single.replace('Best of China — 15 Days', 'x'.repeat(500))
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toHaveLength(200)
+  })
+
+  it('主题写 Contact form 但正文标记是 Tour enquiry：按正文标记判 kind（认证仍必须通过）', () => {
+    const r = parseFormNotice({ ...goodInput(), body: single })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.kind).toBe('tour_enquiry')
   })
 })

@@ -1,7 +1,7 @@
 /**
- * 识别并解析「网站联系表单通知邮件」。
+ * 识别并解析「网站表单通知邮件」（联系表单 Contact form、团页表单 Tour enquiry）。
  *
- * 场景：网站把客户提交的联系表单，从公司邮箱发到公司邮箱自己。
+ * 场景：网站把客户提交的表单，从公司邮箱发到公司邮箱自己。
  * 本模块只包含纯函数，不依赖 supabase / 网络。
  */
 
@@ -12,13 +12,13 @@ export interface FormNoticeCandidateArgs {
   mailbox: string // 已连接的邮箱地址
 }
 
-const CONTACT_FORM_SUBJECT_RE = /^contact form:/i
+const FORM_SUBJECT_RE = /^(?:contact form|tour enquiry):/i
 
 /**
  * 判断一封邮件是否可能是联系表单通知：
  * - 必须是 inbound
  * - 发件人地址（去空格、小写）必须等于已连接邮箱（去空格、小写）
- * - 主题（去空格）必须以 "contact form:" 开头
+ * - 主题（去空格）必须以 "contact form:" 或 "tour enquiry:" 开头
  *
  * 因此 "Re: Contact form: ..." / "Fwd: ..." / "回复: ..." 都会返回 false。
  */
@@ -31,7 +31,7 @@ export function isFormNoticeCandidate(a: FormNoticeCandidateArgs): boolean {
   if (from !== mailbox) return false
 
   const subject = (a.subject ?? '').trim()
-  return CONTACT_FORM_SUBJECT_RE.test(subject)
+  return FORM_SUBJECT_RE.test(subject)
 }
 
 export interface FormNoticeInput {
@@ -42,7 +42,11 @@ export interface FormNoticeInput {
   allowedDkimSelectors?: string[] // 默认 ['resend']
 }
 
+export type FormNoticeKind = 'contact_form' | 'tour_enquiry'
+
 export interface FormNoticeLead {
+  /** 哪一类表单：联系表单 / 团页表单。 */
+  kind: FormNoticeKind
   email: string
   name: string | null
   phone: string | null
@@ -63,7 +67,8 @@ export type FormNoticeParse =
   | { ok: true; lead: FormNoticeLead }
   | { ok: false; reason: FormNoticeReason }
 
-const MARKER_RE = /^New message\s*[—–-]\s*Contact form/i
+const CONTACT_MARKER_RE = /^New message\s*[—–-]\s*Contact form/i
+const TOUR_MARKER_RE = /^New tour enquiry\s*[—–-]/i
 const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/
 const DMARC_PASS_RE = /\bdmarc=pass\b/
 const HEADER_FROM_RE = /header\.from=([a-z0-9.-]+)/i
@@ -117,7 +122,8 @@ function parseHeaderBlock(body: string): {
   const labelRe = /^([A-Za-z][A-Za-z ]*?)(?:\t| {2,})(.*)$/
   // 真实通知里多词标签后面只有一个空格（"Travel interest Custom Itinerary"），单词标签才是多空格/制表符。
   // 已知的多词标签单独认，不放宽通用规则（放宽会把留言里的句子当标签）。
-  const multiWordRe = /^(Travel interest|Form URL|First landing page|Submitted from|Arrived via|Tour pages viewed)\s+(.*)$/i
+  // 已知标签（单词或多词）后面可能只有一个空格：长的写前面，免得 'Tour' 抢走 'Tour pages viewed'。
+  const multiWordRe = /^(Travel interest|Form URL|First landing page|Submitted from|Arrived via|Tour pages viewed|Ad source|Facebook click ID|Tour|URL|Source|Submitted|Name|Email|Phone)\s+(.*)$/i
 
   let messageStart = -1
   for (let i = 0; i < lines.length; i++) {
@@ -215,7 +221,12 @@ export function parseFormNotice(input: FormNoticeInput): FormNoticeParse {
 
   // 1. 标记行
   const markerLine = firstNonEmptyLine(input.body)
-  if (!MARKER_RE.test(markerLine)) {
+  const kind: FormNoticeKind | null = CONTACT_MARKER_RE.test(markerLine)
+    ? 'contact_form'
+    : TOUR_MARKER_RE.test(markerLine)
+      ? 'tour_enquiry'
+      : null
+  if (!kind) {
     return { ok: false, reason: 'bad_marker' }
   }
 
@@ -238,9 +249,13 @@ export function parseFormNotice(input: FormNoticeInput): FormNoticeParse {
   const bodyEmailRaw = fields.get('email')
   const name = fields.get('name') ?? null
   const phone = fields.get('phone') ?? null
-  const interest = fields.get('travel interest') ?? null
+  // 联系表单的兴趣在「Travel interest」行；团页表单在「Tour」行。
+  // 兴趣内容可被客人控制，会进主题/摘要/触点：截到 200 字（与留言上限一致）。
+  const interestRaw =
+    (kind === 'tour_enquiry' ? fields.get('tour') : fields.get('travel interest')) ?? null
+  const interest = interestRaw === null ? null : interestRaw.slice(0, 200)
   const submittedAt = fields.get('submitted') ?? null
-  const formUrl = extractFormUrl(fields.get('form url'))
+  const formUrl = extractFormUrl(fields.get('form url') ?? fields.get('url'))
 
   // 5. 邮箱合法性
   if (bodyEmailRaw === undefined) {
@@ -261,6 +276,7 @@ export function parseFormNotice(input: FormNoticeInput): FormNoticeParse {
   return {
     ok: true,
     lead: {
+      kind,
       email: bodyEmail,
       name,
       phone,
