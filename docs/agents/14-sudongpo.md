@@ -38,7 +38,7 @@
 | 数据 / 工具 | 权限 | 用途 |
 |---|---|---|
 | Meta 主页（发帖、评论、私信） | 写（**目标：只经 Kernel**） | 发布、回评、私信 |
-| Publer（封装名 Publishing Hub） | 写（**目标：只经 Kernel**） | 排期发布 |
+| Publer（封装名 Publishing Hub） | 写（**目标：只经 Kernel**） | 排期发布（Publer 已于 2026-10 删除） |
 | Visual Studio / Video Studio（封装名） | 调用 | 出图、出片（AI 媒体只走 Muapi） |
 | `viral_reference_library` | 只读 | 爆款配方 |
 | Supabase `social_plans` / 工厂工单 / `flywheel_actions` | 读写 | 本 agent 的数据资产 |
@@ -48,7 +48,7 @@
 
 | ✅ 苏东坡可自主做 | 🔴 必须人点头 |
 |---|---|
-| 生成候选、配方对账、分镜自检 | **任何发布**（帖子、Reel、讲课片、Publer 排期） |
+| 生成候选、配方对账、分镜自检 | **任何发布**（帖子、Reel、讲课片、Publer 排期）（Publer 已于 2026-10 删除） |
 | 评论：隐藏明显垃圾、按已审模板公开回复——**仅当**该客户已授权 `bounded`、content-guard 通过、未超每帖 / 每人频率上限 | 模板外的回复、涉及价格 / 售后 / 投诉的回复 |
 | 私信：固定安抚话术一条（已审模板、按人限频） | AI 起草的私信（人审后发） |
 | 4h / 72h 回看 | 加钱推广、建广告（不归本 agent） |
@@ -104,7 +104,7 @@
 ## 十一、现状缺口（2026-09-28 调研，设计 §4.3）
 
 1. Kernel 注册表里**零个**社媒动作；发帖、Reel、回评、隐藏评论、私信、加钱推广、建广告都在 Kernel 外直写。
-2. `boundaries.ts` 只拦了 `publer/client`，`meta/page-posts`、`meta/comments`、`messenger/send`、`factory/publish/*` 都没登记。
+2. `boundaries.ts` 只拦了 `publer/client`，`meta/page-posts`、`meta/comments`、`messenger/send`、`factory/publish/*` 都没登记。（Publer 已于 2026-10 删除）
 3. 发布授权是请求字段 / 状态字段 / 环境变量，不是 Kernel 回执（「状态字段当发布授权」反模式）。
 4. 单帖成绩进不了记忆；效果判断结论不落库；工厂生成不读记忆和成绩。
 5. 部分定时任务名实不符（评论自动回复注释写 30 分钟、实际每小时；「爆款发现」每天跑却叫 weekly），winner-reel 无漏跑报警。

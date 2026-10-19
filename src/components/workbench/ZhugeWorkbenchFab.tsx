@@ -163,13 +163,13 @@ function buildSuggestions({
     suggestions.push({
       id: 'social-publish',
       key: makeKey('social-publish', summary.social.ready_to_publish),
-      title: `安排 ${summary.social.ready_to_publish} 条可推送内容`,
+      title: `安排 ${summary.social.ready_to_publish} 条待排期内容`,
       detail:
         currentAreaLabel === 'Launch Hub'
-          ? '这些帖子已经具备发布条件，下一步最值钱的是排期或推送到 Publishing Hub。'
-          : '当前已有可推送内容，不用再等生成；先把它们排期或推送，最能带来真实进度。',
+          ? '这些帖子已经具备发布条件，下一步最值钱的是把它们排期（排期只作记录，发布请走每日计划）。'
+          : '当前已有待排期内容，不用再等生成；先把它们排期，最能带来真实进度。',
       href: launchHubHref,
-      ctaLabel: currentAreaLabel === 'Launch Hub' ? '去排期 / 推送' : '去安排发布',
+      ctaLabel: currentAreaLabel === 'Launch Hub' ? '去排期' : '去安排排期',
       tone: 'emerald',
     })
   }

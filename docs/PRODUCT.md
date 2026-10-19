@@ -70,7 +70,7 @@
 - **Visual Studio**：AI 图片生成（WaveSpeed Flux-dev）
 - **Video Studio**：AI 视频生成（Seedance 2.0）
 - **Avatar Studio**：AI 头像视频（HeyGen）
-- **Publishing Hub**：多平台排期发布（Publer）
+- **Publishing Hub**：多平台排期发布（Publer）（Publer 已于 2026-10 删除）
 
 ### 模块三：广告 🔄 建设中（Meta 广告数据已接入，Google Ads 申请中）
 **对外封装名：Ads Intelligence**

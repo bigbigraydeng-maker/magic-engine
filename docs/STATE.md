@@ -43,7 +43,7 @@
 
 技术栈：Next.js 14 App Router · TypeScript 5 strict · Tailwind 3.4 · Supabase(PG + Storage) ·
 OpenAI GPT-4o-mini · Anthropic Claude Sonnet · Muapi/Atlas Cloud(图/视频) · HeyGen(头像) ·
-DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(邮件)。
+DataForSEO(关键词主源) · Stripe(MTC 计费) · Resend(邮件)。
 
 **数据访问模型**：全部走 `supabaseAdmin`（service-role key）+ Bearer-token API，**不用 end-user RLS**。
 新建表的 RLS policy 一律 service-role 模板，见 [DECISIONS.md](./DECISIONS.md)。
@@ -54,7 +54,7 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 |---|---|---|---|
 | **SEO 内容引擎** | ✅ 成熟 | `lib/{blog,keywords,seo-gap,seo-intelligence,seo-patrol,site-audit,page-rewriter,dataforseo,gsc}` · `api/clients/[id]/{blog,site-audit,strategy}` | `blog_posts` `keyword_snapshots` `client_site_pages` `content_strategy_items` `gsc_performance_snapshots` |
 | **GEO / AI 可见度** | ✅ 成熟 | `lib/{geo,ai-tracker,industry-ai-visibility}` · `api/ai-tracker` · `api/baselines` | `geo_directives` `geo_deployments` `ai_visibility_{queries,runs,snapshots}` `industry_ai_visibility_*` `baseline_domains` |
-| **社媒内容矩阵** | ✅ 成熟 | `lib/{brief,content,social,reels,visual,images,publer,scheduling}` · `api/clients/[id]/{brief,campaign}` · `api/content/route-{a,b,c}` · `api/visual` | `master_briefs` `campaign_briefs` `content_posts` `visual_assets` `reels_drafts` |
+| **社媒内容矩阵** | ✅ 成熟 | `lib/{brief,content,social,reels,visual,images,scheduling}` · `api/clients/[id]/{brief,campaign}` · `api/content/route-{a,b,c}` · `api/visual` | `master_briefs` `campaign_briefs` `content_posts` `visual_assets` `reels_drafts` |
 | **AI Content Factory** (P21) | 🔄 建设中 | `lib/{factory,ai-factory,winner-reel-sync}` · `api/factory` · `scripts/factory-worker/` | `content_work_orders` `content_work_order_clips` `factory_balance_ledger` `factory_angle_blocklist` |
 | **Ads Intelligence** | 🔄 建设中 | `lib/{meta,google-ads,tiktok-ads,ads-strategy}` · `api/clients/[id]/ad-health` | `ad_daily_insights` `ad_strategy_configs` `ad_health_narratives` |
 | **Leads 营销中心**（多渠道私信 / CRM） | 🔄 建设中 | `lib/{messaging,messenger,whatsapp,crm}` · `api/clients/[id]/{messenger,crm,business-inbox}` · **`api/webhooks/whatsapp`**（对外 endpoint，Meta 推送入口） | `conversations` `conversation_messages` `conversation_briefs` `conversation_outbound_log` `contacts` `contact_identities` `contact_touchpoints` |
@@ -199,7 +199,6 @@ DataForSEO(关键词主源) · Publer(发布) · Stripe(MTC 计费) · Resend(�
 | HeyGen | 数字人头像视频 | **Avatar Studio** | `src/lib/mcp/vendor-filter.ts`（仅过滤，无直调封装） |
 | DataForSEO | 关键词 / SERP / 外链（**主数据源**） | **Keyword Intelligence** | **`src/lib/dataforseo/`**（9 模块：search-volume / serp / labs / onpage / business-data …） |
 | SerpAPI | SERP / Google AI Overviews | — | `src/lib/dataforseo/search-volume.ts` 内混用 |
-| Publer | 多平台排期发布 | **Publishing Hub** | `src/lib/publer/` |
 | Stripe | MTC 充值 | — | `src/lib/mtc/` |
 | Resend | 全部事务邮件 | — | `src/lib/market-intel/pipeline.ts` 等按需引用 |
 | Cloudflare AI Gateway | OpenAI / Anthropic 代理 | — | （代理层，无独立封装） |
