@@ -2,7 +2,7 @@
 // 状态机:approved →(原子领取)→ publishing → published / publish_failed。
 // 护栏(子牙 B8 + 魏征 B9):原子领取防双发 · 幂等对账防"发了没记上" · 防误发三断言 · 视频 URL 校验 ·
 //   published_ref 硬事务(先落回执再三落库,三落库尽力而为可后补)。
-// P0.1a 只实现 FacebookReelAdapter(Oztop);加 CTS = 多注册个 PublerAdapter,主体不改。
+// P0.1a 只实现 FacebookReelAdapter(Oztop);加新平台 = 多注册个 adapter,主体不改。
 
 import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -20,7 +20,6 @@ const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
 
 const ADAPTERS: Record<string, PublishAdapter> = {
   facebook: facebookReelAdapter,
-  // publer: publerAdapter,  // P0.1b
 }
 
 interface PublishOptions {
@@ -74,7 +73,7 @@ export async function resolveTarget(clientId: string): Promise<PublishTarget | n
   const raw = cfg['publish_target']
   if (!raw || typeof raw !== 'object') return null
   const t = raw as PublishTarget
-  if (t.platform !== 'facebook' && t.platform !== 'publer') return null
+  if (t.platform !== 'facebook') return null
   // 防误发(魏征 B9):带上客户真实品牌名,adapter 校验 FB 页名 ~ 此值。品牌名取权威源 master_briefs。
   if (!t.expect_brand) {
     const { data: mb } = await supabaseAdmin
@@ -367,19 +366,13 @@ export async function writeThreeBooks(
   ref: PublishedRef,
   clientId: string,
   angle: string,
-  /**
-   * 默认 = Facebook 路径(行为不变)。Instagram 交叉发布传独立的 actionType 和人话渠道名:
-   * 测量那边(factory-reel-measurement-adapter)按 (action_type, work_order_id) 唯一回读 Facebook 那一行,
-   * 同一工单再写一行同 action_type 会让它 maybeSingle 报「多行」。
-   */
-  opts: { actionType?: string; channelLabel?: string } = {},
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10)
-  const execMode = ref.platform === 'facebook' ? 'in_house' : 'third_party'
-  const vendor = ref.platform === 'facebook' ? 'meta_graph' : 'publer' // channel (same label as reel-measurement adapter), not customer: client_id is already on every row
+  const execMode = 'in_house'
+  const vendor = 'meta_graph' // channel (same label as reel-measurement adapter), not customer: client_id is already on every row
 
-  const actionType = opts.actionType ?? 'factory_reel_publish'
-  const channel = opts.channelLabel ?? vendor // 给人看的渠道名(待办/日志里显示);vendor 仍是机器标签
+  const actionType = 'factory_reel_publish'
+  const channel = vendor // 给人看的渠道名(待办/日志里显示);vendor 仍是机器标签
 
   // Each receipt is independent: a board failure must not suppress the work log.
   let execId: string | null = null

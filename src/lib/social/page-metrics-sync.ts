@@ -1,9 +1,9 @@
 /**
  * FB Page metrics rollup (2026-08-01 · 社媒数据监控复活).
  *
- * The Publer engagement pullback had run for weeks writing ZERO metrics:
- * it only reads content_posts rows, but real posting happens straight on
- * the Facebook page (manual Publer line) and never lands there. Meanwhile
+ * The former per-post engagement pullback had run for weeks writing ZERO
+ * metrics: it only read content_posts rows, but real posting happens straight
+ * on the Facebook page and never lands there. Meanwhile
  * the comment-autoreply engine reads the SAME page's real posts daily via
  * the Graph API — proof the read path works.
  *
@@ -14,8 +14,7 @@
  *   social.fb.top_post_score         (best-performer signal)
  *
  * Source of truth = the live page feed, so posts published by ANY channel
- * (Publer, Business Suite, by hand) all count. Per-post attribution stays
- * with the Publer pullback for ME-scheduled posts.
+ * (Business Suite, by hand, ME) all count.
  *
  * Page mapping: social_comment_config.fb_page_id (same table the autoreply
  * engine trusts), falling back to factory_config.publish_target.page_id.
