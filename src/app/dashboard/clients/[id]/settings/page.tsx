@@ -274,7 +274,6 @@ export default function ClientSettingsPage() {
   // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
   const mailStatus = searchParams.get('mail')
   const tiktokStatus = searchParams.get('tiktok')
-  const youtubeStatus = searchParams.get('youtube')
   const tiktokMessage: Record<string, string> = {
     connected: 'TikTok 授权已完成。发布视频前请确认目标账号。',
     denied: 'TikTok 授权已取消，可以重新连接。',
@@ -307,14 +306,6 @@ export default function ClientSettingsPage() {
         {tiktokStatus && tiktokMessage[tiktokStatus] && (
           <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
             {tiktokMessage[tiktokStatus]}
-          </div>
-        )}
-
-        {youtubeStatus && (
-          <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
-            {youtubeStatus === 'connected'
-              ? 'YouTube 授权记录已保存。请在下方核对频道；此连接用于私享上传及核对，不代表已公开发布。'
-              : 'YouTube 授权未完成，请核实频道配置与管理权限后重试。'}
           </div>
         )}
 
