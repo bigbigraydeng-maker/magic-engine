@@ -122,7 +122,8 @@ function parseHeaderBlock(body: string): {
   const labelRe = /^([A-Za-z][A-Za-z ]*?)(?:\t| {2,})(.*)$/
   // 真实通知里多词标签后面只有一个空格（"Travel interest Custom Itinerary"），单词标签才是多空格/制表符。
   // 已知的多词标签单独认，不放宽通用规则（放宽会把留言里的句子当标签）。
-  const multiWordRe = /^(Travel interest|Form URL|First landing page|Submitted from|Arrived via|Tour pages viewed|Ad source|Facebook click ID)\s+(.*)$/i
+  // 已知标签（单词或多词）后面可能只有一个空格：长的写前面，免得 'Tour' 抢走 'Tour pages viewed'。
+  const multiWordRe = /^(Travel interest|Form URL|First landing page|Submitted from|Arrived via|Tour pages viewed|Ad source|Facebook click ID|Tour|URL|Source|Submitted|Name|Email|Phone)\s+(.*)$/i
 
   let messageStart = -1
   for (let i = 0; i < lines.length; i++) {
@@ -249,8 +250,10 @@ export function parseFormNotice(input: FormNoticeInput): FormNoticeParse {
   const name = fields.get('name') ?? null
   const phone = fields.get('phone') ?? null
   // 联系表单的兴趣在「Travel interest」行；团页表单在「Tour」行。
-  const interest =
+  // 兴趣内容可被客人控制，会进主题/摘要/触点：截到 200 字（与留言上限一致）。
+  const interestRaw =
     (kind === 'tour_enquiry' ? fields.get('tour') : fields.get('travel interest')) ?? null
+  const interest = interestRaw === null ? null : interestRaw.slice(0, 200)
   const submittedAt = fields.get('submitted') ?? null
   const formUrl = extractFormUrl(fields.get('form url') ?? fields.get('url'))
 

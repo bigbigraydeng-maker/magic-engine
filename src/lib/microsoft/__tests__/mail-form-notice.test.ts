@@ -386,3 +386,47 @@ describe('第二期：Tour enquiry 通知', () => {
     if (r.ok) expect(r.lead.email).toBe('jane.test@example.com')
   })
 })
+
+describe('魏征第二期复审补充', () => {
+  const single =
+    'New tour enquiry — Example website\nName Jane Test\nEmail jane.test@example.com\nPhone 0211234567\nTour Best of China — 15 Days\nURL /tours/china/example\nSource tour-page\nAd source facebook\nFacebook click ID fb.1.123.abc\nSubmitted 2026-10-20T01:00:00.000Z\n\nMessage\n\nhello'
+
+  it('标签后只有一个空格（真实写法之一）：Tour / URL / Name / Email 仍能取到', () => {
+    const r = parseFormNotice({ ...goodInput(), body: single })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.interest).toBe('Best of China — 15 Days')
+      expect(r.lead.formUrl).toBe('/tours/china/example')
+      expect(r.lead.name).toBe('Jane Test')
+      expect(r.lead.email).toBe('jane.test@example.com')
+    }
+  })
+
+  it('"Tour pages viewed" 不会被 "Tour" 抢走成兴趣', () => {
+    const body = single.replace('Source tour-page', 'Tour pages viewed /tours/a, /tours/b')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Best of China — 15 Days')
+  })
+
+  it('联系表单正文里即使有 Tour 行，兴趣仍取 Travel interest', () => {
+    const base = goodInput()
+    const body = base.body.replace('Travel interest\tCustom Itinerary', 'Travel interest\tCustom Itinerary\nTour\tSomething Else')
+    const r = parseFormNotice({ ...base, body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Custom Itinerary')
+  })
+
+  it('兴趣超过 200 字被截断', () => {
+    const body = single.replace('Best of China — 15 Days', 'x'.repeat(500))
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toHaveLength(200)
+  })
+
+  it('主题写 Contact form 但正文标记是 Tour enquiry：按正文标记判 kind（认证仍必须通过）', () => {
+    const r = parseFormNotice({ ...goodInput(), body: single })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.kind).toBe('tour_enquiry')
+  })
+})
