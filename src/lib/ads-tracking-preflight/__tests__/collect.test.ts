@@ -198,13 +198,20 @@ describe('runClientPreflight · 整条链路（假网络 + 假库 + 真实形状
   })
 
   // 🔴 第四轮：官网表单线索必须有从广告落地页（配置里的 /p）提交的，才算「广告这条路通了」
-  it('CRM 里的官网表单线索全是联系页（/contact）提交的、没有一条来自广告落地页 → 黄「只验证了联系页表单」，不是绿', async () => {
+  it('CRM 里的官网表单线索全是联系页（/contact）提交的、没有一条来自广告落地页 → 灰「只验证了联系页表单」：挡前置条件，并出一条硬门灰的待办（带测试步骤和直达链接）', async () => {
     const { receipt } = await run({ touchpointRows: [{ occurred_at: '2026-10-19T09:00:00Z', metadata: { source_url: '/contact' } }] })
     const gate = receipt.gates.find(g => g.key === 'tracking.lead_reaches_crm')
-    expect(gate?.status).toBe('yellow')
+    expect(gate?.status).toBe('gray')
+    expect(gate?.hard).toBe(true)
     expect(gate?.reason).toContain('只验证了')
     expect(gate?.evidence).toMatchObject({ ad_landing_form_touchpoints_7d: 0, ad_landing_paths: ['/p'] })
-    expect(receipt.preconditions_met).toBe(true)
+    expect(receipt.preconditions_met).toBe(false)
+    const item = receipt.items.find(i => i.gate_key === 'tracking.lead_reaches_crm')
+    expect(item).toBeDefined()
+    expect(item?.hard).toBe(true)
+    expect(item?.what).toContain('只验证了')
+    expect(item?.how).toContain('内部测试表单')
+    expect(item?.href).toBe(`${APP_BASE}/dashboard/clients/c1/crm`)
   })
 
   it('有一条从广告落地页（/p）提交的线索、时间在 48 小时内 → 绿；联系页那条不影响', async () => {

@@ -490,7 +490,7 @@ describe('tracking.lead_reaches_crm', () => {
   })
 })
 
-describe('tracking.lead_reaches_crm · 只认广告落地页上提交的表单（只验证了联系页表单 = 黄）', () => {
+describe('tracking.lead_reaches_crm · 只认广告落地页上提交的表单（只验证了联系页表单 = 灰，挡开投）', () => {
   const KEY = 'tracking.lead_reaches_crm'
   /** 按广告落地页分过类的 CRM 事实：近 7 天官网表单共 6 条（基线），其中从广告落地页提交的由 over 决定 */
   const classified = (over: Partial<CrmFacts> = {}) => (i: JudgeInput): void => {
@@ -510,9 +510,9 @@ describe('tracking.lead_reaches_crm · 只认广告落地页上提交的表单�
     })
   })
 
-  it('官网表单线索一直在进（联系页，5 小时前），但近 7 天没有一条来自广告落地页 → 黄「只验证了联系页等其它表单」，怎么办是可照做的测试步骤', () => {
+  it('官网表单线索一直在进（联系页，5 小时前），但近 7 天没有一条来自广告落地页 → 灰「只验证了联系页等其它表单」（没有广告路径的证据），怎么办是可照做的测试步骤', () => {
     const g = gate(judge(classified(noAdLanding)), KEY)
-    expect(g.status).toBe('yellow')
+    expect(g.status).toBe('gray')
     expect(g.hard).toBe(true)
     expect(g.reason).toContain('只验证了')
     expect(g.reason).toContain('联系页')
@@ -522,15 +522,20 @@ describe('tracking.lead_reaches_crm · 只认广告落地页上提交的表单�
     expect(g.evidence).toMatchObject({ ad_landing_form_touchpoints_7d: 0, crm_web_form_touchpoints_7d: 6, ad_landing_paths: ['/p'] })
   })
 
-  it('这种黄灯是硬门黄：不挡「前置条件」（只有红 / 灰挡），但总灯是黄、不是绿', () => {
+  it('这种灰灯是硬门灰：挡「前置条件」（广告落地页上的表单没有证据，不能显示「满足」），总灯是灰、不是绿也不是黄', () => {
     const gates = judge(classified(noAdLanding))
-    expect(overallLight(gates)).toBe('yellow')
-    expect(preconditionsMet(gates)).toBe(true)
+    expect(overallLight(gates)).toBe('gray')
+    expect(preconditionsMet(gates)).toBe(false)
   })
 
-  it('其它表单线索再新也换不来绿：联系页刚进了一条（1 小时前），广告落地页那边 0 条 → 仍是黄', () => {
+  it('广告落地页上有证据（绿）时不挡；广告落地页的线索只是过期（黄）时也不挡——挡的只有「一点证据都没有」', () => {
+    expect(preconditionsMet(judge(classified()))).toBe(true)
+    expect(preconditionsMet(judge(classified({ latest_ad_landing_form_at: hoursAgo(60) })))).toBe(true)
+  })
+
+  it('其它表单线索再新也换不来绿：联系页刚进了一条（1 小时前），广告落地页那边 0 条 → 仍是灰', () => {
     const g = gate(judge(i => { i.crm.latest_web_form_at = hoursAgo(1); classified(noAdLanding)(i) }), KEY)
-    expect(g.status).toBe('yellow')
+    expect(g.status).toBe('gray')
   })
 
   it('广告落地页的线索有，但最近一条超过 48 小时 → 黄（以前通过，不能说现在通），写明几小时前；刚好 48 小时仍是绿', () => {

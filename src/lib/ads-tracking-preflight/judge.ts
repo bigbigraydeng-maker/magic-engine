@@ -387,6 +387,10 @@ const AD_LANDING_TEST_HOW =
  * 回执按广告落地页给线索分过类：官网表单线索必须有从广告落地页提交的，这道门才对「广告这条路」判绿。
  * 为什么：联系页（/contact）等其它表单的线索进得来，只证明了那些表单走得通——广告点进去的是另一页、另一个表单，
  * 它们的通知邮件格式 / 解析可能不一样，不能拿联系页的线索替广告落地页作证（否则是假绿）。
+ *
+ * 近 7 天一条来自广告落地页的线索都没有 → **灰**（没证据，不是黄）：这道门的意义就是证明「广告点进去那一页的表单真能进 CRM」，
+ * 在没证据之前显示「前置条件满足」会误导开投决定——灰是硬门灰，会挡 preconditions_met，也会出今日待办（统筹 18 号 2026-10-20 定）。
+ * 有证据但过期 / 读不出时间 / 在未来 → 仍是黄（以前通过，不能说现在通）。
  */
 function judgeAdLandingFreshness(
   input: JudgeInput,
@@ -398,8 +402,8 @@ function judgeAdLandingFreshness(
   const adCount = input.crm.ad_landing_form_touchpoints_7d ?? 0
   if (adCount === 0) {
     return receipt(
-      key, 'yellow',
-      `官网表单线索在进 CRM（近 7 天 ${total} 条），但没有一条是从广告落地页提交的——只验证了联系页等其它表单，广告落地页上的表单还没被证明走得通`,
+      key, 'gray',
+      `官网表单线索在进 CRM（近 7 天 ${total} 条），但没有一条是从广告落地页提交的——只验证了联系页等其它表单，广告落地页上的表单没有证据证明走得通`,
       AD_LANDING_TEST_HOW,
       evidence, as_of,
     )
