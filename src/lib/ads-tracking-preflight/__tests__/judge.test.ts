@@ -11,6 +11,7 @@ import {
   HARD_GATE,
   POST_GATE_KEYS,
   PREFLIGHT_GATE_KEYS,
+  type CrmFacts,
   type JudgeInput,
   type PostLaunchFacts,
   type PreflightGateKey,
@@ -486,6 +487,99 @@ describe('tracking.lead_reaches_crm', () => {
     expect(g.hard).toBe(false)
     expect(overallLight(gates)).toBe('green')
     expect(preconditionsMet(gates)).toBe(true)
+  })
+})
+
+describe('tracking.lead_reaches_crm · 只认广告落地页上提交的表单（只验证了联系页表单 = 黄）', () => {
+  const KEY = 'tracking.lead_reaches_crm'
+  /** 按广告落地页分过类的 CRM 事实：近 7 天官网表单共 6 条（基线），其中从广告落地页提交的由 over 决定 */
+  const classified = (over: Partial<CrmFacts> = {}) => (i: JudgeInput): void => {
+    i.crm = { ...i.crm, ad_landing_paths: ['/p'], ad_landing_form_touchpoints_7d: 2, latest_ad_landing_form_at: hoursAgo(3), ...over }
+  }
+  const noAdLanding = { ad_landing_form_touchpoints_7d: 0, latest_ad_landing_form_at: null }
+
+  it('近 48 小时有从广告落地页提交的线索 → 绿；证据里把「全部官网表单」和「广告落地页上的」分开写，并写出认的页面路径', () => {
+    const g = gate(judge(classified()), KEY)
+    expect(g.status).toBe('green')
+    expect(g.reason).toContain('广告落地页')
+    expect(g.evidence).toMatchObject({
+      crm_web_form_touchpoints_7d: 6,
+      ad_landing_form_touchpoints_7d: 2,
+      latest_ad_landing_form_at: hoursAgo(3),
+      ad_landing_paths: ['/p'],
+    })
+  })
+
+  it('官网表单线索一直在进（联系页，5 小时前），但近 7 天没有一条来自广告落地页 → 黄「只验证了联系页等其它表单」，怎么办是可照做的测试步骤', () => {
+    const g = gate(judge(classified(noAdLanding)), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.hard).toBe(true)
+    expect(g.reason).toContain('只验证了')
+    expect(g.reason).toContain('联系页')
+    expect(g.how).toContain('非本公司邮箱')
+    expect(g.how).toContain('广告落地页')
+    expect(g.how).toContain('内部测试')
+    expect(g.evidence).toMatchObject({ ad_landing_form_touchpoints_7d: 0, crm_web_form_touchpoints_7d: 6, ad_landing_paths: ['/p'] })
+  })
+
+  it('这种黄灯是硬门黄：不挡「前置条件」（只有红 / 灰挡），但总灯是黄、不是绿', () => {
+    const gates = judge(classified(noAdLanding))
+    expect(overallLight(gates)).toBe('yellow')
+    expect(preconditionsMet(gates)).toBe(true)
+  })
+
+  it('其它表单线索再新也换不来绿：联系页刚进了一条（1 小时前），广告落地页那边 0 条 → 仍是黄', () => {
+    const g = gate(judge(i => { i.crm.latest_web_form_at = hoursAgo(1); classified(noAdLanding)(i) }), KEY)
+    expect(g.status).toBe('yellow')
+  })
+
+  it('广告落地页的线索有，但最近一条超过 48 小时 → 黄（以前通过，不能说现在通），写明几小时前；刚好 48 小时仍是绿', () => {
+    const stale = gate(judge(classified({ latest_ad_landing_form_at: hoursAgo(48 + 1 / 60) })), KEY)
+    expect(stale.status).toBe('yellow')
+    expect(stale.reason).toContain('广告落地页')
+    expect(stale.reason).toContain('48')
+    expect(stale.how).toContain('广告落地页')
+    expect(gate(judge(classified({ latest_ad_landing_form_at: hoursAgo(48) })), KEY).status).toBe('green')
+  })
+
+  it('广告落地页的线索读不出时间 / 时间在未来 → 黄，不是绿；晚 5 分钟以内的时钟误差仍算正常', () => {
+    expect(gate(judge(classified({ latest_ad_landing_form_at: null })), KEY).status).toBe('yellow')
+    expect(gate(judge(classified({ latest_ad_landing_form_at: 'garbage' })), KEY).status).toBe('yellow')
+    const at = (offsetMin: number) => new Date(NOW.getTime() + offsetMin * 60_000).toISOString()
+    const future = gate(judge(classified({ latest_ad_landing_form_at: at(6) })), KEY)
+    expect(future.status).toBe('yellow')
+    expect(future.reason).toContain('未来')
+    expect(gate(judge(classified({ latest_ad_landing_form_at: at(5) })), KEY).status).toBe('green')
+  })
+
+  it('回执里没有 ad_landing_paths（没配落地页 / 老回执）或是空数组 → 不分类，和以前完全一样：任何官网表单线索 48 小时内就绿', () => {
+    const plain = gate(judge(), KEY)
+    expect(plain.status).toBe('green')
+    expect(plain.evidence).not.toHaveProperty('ad_landing_paths')
+    expect(gate(judge(i => { i.crm.ad_landing_paths = [] }), KEY).status).toBe('green')
+    // 路径是空的、计数却有（0 条）也不分类：不能因为「广告落地页 0 条」把没配落地页的客户判黄
+    expect(gate(judge(i => { i.crm.ad_landing_paths = []; i.crm.ad_landing_form_touchpoints_7d = 0; i.crm.latest_ad_landing_form_at = null }), KEY).status).toBe('green')
+    // 有路径却没有计数（读取器没给）也当不分类，不拿「没有」去判黄
+    expect(gate(judge(i => { i.crm.ad_landing_paths = ['/p'] }), KEY).status).toBe('green')
+  })
+
+  it('CRM 里一条官网表单线索都没有：红 / 灰不受影响；红灯的怎么办写成可照做的测试步骤（分类与否都一样）', () => {
+    const zero = (i: JudgeInput): void => { i.crm.web_form_touchpoints_7d = 0; i.crm.latest_web_form_at = null }
+    for (const mutate of [zero, (i: JudgeInput) => { classified(noAdLanding)(i); zero(i) }]) {
+      const red = gate(judge(mutate), KEY)
+      expect(red.status).toBe('red')
+      expect(red.how).toContain('formEnquiries')
+      expect(red.how).toContain('非本公司邮箱')
+      expect(red.how).toContain('广告落地页')
+      expect(red.how).toContain('内部测试')
+    }
+    expect(gate(judge(i => { classified()(i); i.crm.read = false; i.crm.error = 'boom' }), KEY).status).toBe('gray')
+  })
+
+  it('该客户没有官网表单 → 仍然不适用，哪怕回执里带着落地页分类', () => {
+    const g = gate(judge(i => { classified()(i); i.config.web_form_to_crm = false }), KEY)
+    expect(g.na).toBe(true)
+    expect(g.hard).toBe(false)
   })
 })
 

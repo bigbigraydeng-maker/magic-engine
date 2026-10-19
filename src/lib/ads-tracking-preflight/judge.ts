@@ -342,6 +342,19 @@ function judgeLandingOk(input: JudgeInput): TrackingGateReceipt {
 
 // ─── 7. 官网线索进 CRM ──────────────────────────────────────────────────────
 
+/** 一条线索的新鲜度：最近一条在 48 小时内（容 5 分钟时钟误差）才算「现在是通的」；读不出时间 / 在未来 / 太早都不算。 */
+function crmFreshness(latest: string | null, now: Date): { fresh: boolean; hours: number; problem: string } {
+  const age = latest === null ? null : ageHours(latest, now)
+  if (age !== null && Number.isFinite(age) && age >= -CRM_CLOCK_SKEW_HOURS && age <= CRM_FRESH_WINDOW_HOURS) {
+    return { fresh: true, hours: Math.max(0, Math.round(age)), problem: '' }
+  }
+  let problem: string
+  if (age === null || !Number.isFinite(age)) problem = '读不出最近一条的时间'
+  else if (age < -CRM_CLOCK_SKEW_HOURS) problem = '最近一条的时间在未来（时钟偏差或脏数据）'
+  else problem = `最近一条是 ${Math.round(age)} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时`
+  return { fresh: false, hours: 0, problem }
+}
+
 /**
  * 近 7 天有线索：只有最近一条在 48 小时内才判绿（设计稿的标准是「试跑线索 1 小时内进 CRM」，
  * 被动地看 48 小时是它的近似）。更早的、或读不出时间的，只能说「以前通过」，不能说「现在是通的」→ 黄。
@@ -353,19 +366,56 @@ function judgeCrmFreshness(
 ): TrackingGateReceipt {
   const key: PreflightGateKey = 'tracking.lead_reaches_crm'
   const total = input.crm.web_form_touchpoints_7d
-  const latest = input.crm.latest_web_form_at
-  const age = latest === null ? null : ageHours(latest, input.now)
-  if (age !== null && Number.isFinite(age) && age >= -CRM_CLOCK_SKEW_HOURS && age <= CRM_FRESH_WINDOW_HOURS) {
-    return receipt(key, 'green', `官网表单线索在进 CRM：最近一条是 ${Math.max(0, Math.round(age))} 小时前，近 7 天共 ${total} 条`, '', evidence, as_of)
+  const f = crmFreshness(input.crm.latest_web_form_at, input.now)
+  if (f.fresh) {
+    return receipt(key, 'green', `官网表单线索在进 CRM：最近一条是 ${f.hours} 小时前，近 7 天共 ${total} 条`, '', evidence, as_of)
   }
-  let ageText: string
-  if (age === null || !Number.isFinite(age)) ageText = '读不出最近一条的时间'
-  else if (age < -CRM_CLOCK_SKEW_HOURS) ageText = '最近一条的时间在未来（时钟偏差或脏数据）'
-  else ageText = `最近一条是 ${Math.round(age)} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时`
   return receipt(
     key, 'yellow',
-    `近 7 天 CRM 里有 ${total} 条官网表单线索，但${ageText}，没法确认现在还是通的`,
+    `近 7 天 CRM 里有 ${total} 条官网表单线索，但${f.problem}，没法确认现在还是通的`,
     '请人在官网提交一次试跑线索，确认 1 小时内进 CRM；进不来就检查官网表单入库',
+    evidence, as_of,
+  )
+}
+
+/** 怎么用一条内部测试把「广告落地页上的表单 → CRM」这条路验通（红灯和黄灯共用）。 */
+const AD_LANDING_TEST_HOW =
+  '先看每小时同步回执里 formEnquiries 的识别 / 建档计数；再用非本公司邮箱在广告落地页（落地页配置里的页面）上提交一条内部测试表单，' +
+  '下一轮每小时同步（目前是每小时 :10）后看 CRM 里是否出现来源为网站表单的联系人'
+
+/**
+ * 回执按广告落地页给线索分过类：官网表单线索必须有从广告落地页提交的，这道门才对「广告这条路」判绿。
+ * 为什么：联系页（/contact）等其它表单的线索进得来，只证明了那些表单走得通——广告点进去的是另一页、另一个表单，
+ * 它们的通知邮件格式 / 解析可能不一样，不能拿联系页的线索替广告落地页作证（否则是假绿）。
+ */
+function judgeAdLandingFreshness(
+  input: JudgeInput,
+  evidence: Record<string, EvidenceValue>,
+  as_of: string | null,
+): TrackingGateReceipt {
+  const key: PreflightGateKey = 'tracking.lead_reaches_crm'
+  const total = input.crm.web_form_touchpoints_7d
+  const adCount = input.crm.ad_landing_form_touchpoints_7d ?? 0
+  if (adCount === 0) {
+    return receipt(
+      key, 'yellow',
+      `官网表单线索在进 CRM（近 7 天 ${total} 条），但没有一条是从广告落地页提交的——只验证了联系页等其它表单，广告落地页上的表单还没被证明走得通`,
+      AD_LANDING_TEST_HOW,
+      evidence, as_of,
+    )
+  }
+  const f = crmFreshness(input.crm.latest_ad_landing_form_at ?? null, input.now)
+  if (f.fresh) {
+    return receipt(
+      key, 'green',
+      `广告落地页上的表单线索在进 CRM：最近一条是 ${f.hours} 小时前，近 7 天共 ${adCount} 条（官网表单线索合计 ${total} 条）`,
+      '', evidence, as_of,
+    )
+  }
+  return receipt(
+    key, 'yellow',
+    `近 7 天 CRM 里有 ${adCount} 条从广告落地页提交的表单线索，但${f.problem}，没法确认现在还是通的`,
+    AD_LANDING_TEST_HOW,
     evidence, as_of,
   )
 }
@@ -391,19 +441,27 @@ function judgeLeadReachesCrm(input: JudgeInput): TrackingGateReceipt {
     lead_signal_7d: leadSignal,
     latest_web_form_at: input.crm.latest_web_form_at,
   }
+  // 回执按广告落地页分过类（有路径、也有条数）才分；否则和以前一样，任何官网表单线索都算数
+  const adPaths = input.crm.ad_landing_paths ?? []
+  const classified = adPaths.length > 0 && typeof input.crm.ad_landing_form_touchpoints_7d === 'number'
+  if (classified) {
+    evidence.ad_landing_paths = [...adPaths]
+    evidence.ad_landing_form_touchpoints_7d = input.crm.ad_landing_form_touchpoints_7d ?? 0
+    evidence.latest_ad_landing_form_at = input.crm.latest_ad_landing_form_at ?? null
+  }
 
   if (!input.crm.read) {
     return receipt(key, 'gray', 'CRM 没读到', '确认 CRM 能读到', evidence, as_of)
   }
   evidence.crm_fresh_window_hours = CRM_FRESH_WINDOW_HOURS
   if (input.crm.web_form_touchpoints_7d >= 1) {
-    return judgeCrmFreshness(input, evidence, as_of)
+    return classified ? judgeAdLandingFreshness(input, evidence, as_of) : judgeCrmFreshness(input, evidence, as_of)
   }
   if (leadSignal > 0) {
     return receipt(
       key, 'red',
       `网站近 7 天有 ${leadSignal} 个留资信号，但 CRM 里 0 条官网表单线索`,
-      '检查官网表单提交后是否真的写进 CRM',
+      `官网表单线索进 CRM 靠每小时的邮件同步：${AD_LANDING_TEST_HOW}`,
       evidence, as_of,
     )
   }
