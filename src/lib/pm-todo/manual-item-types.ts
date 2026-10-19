@@ -286,9 +286,8 @@ export type ManualItemKind =
   | 'knowledge_fact_expiring_soon'
   | AttributionItemKind
   | ClientRosterItemKind
+  /** 历史：LinkedIn 自动发帖已于 2026-10 下线，不再有产出方；保留成员只为让 2026-09-25 的待办夹具继续成立 */
   | 'linkedin_progress_needs_review'
-  | 'linkedin_progress_needs_setup'
-  | 'linkedin_progress_failed'
   | EmailReplyItemKind
   /** 客户在自助向导里交了广告账户号，只有内部员工能核实后接上（AD-SEC-3）*/
   | BindingRequestItemKind
@@ -319,10 +318,6 @@ export type ManualItemKind =
   | FacebookSyncItemKind
   /** 客人填了表超过 24 小时没人回 / 这一栏没算出来 */
   | LeadFollowupItemKind
-  /** 工厂把 Facebook Reel 同步到客户 Instagram(Publer)时,Publer 里的 Instagram 账号掉线 —— 只有人能去 Publer 重新连接 */
-  | 'instagram_account_disconnected'
-  /** 同步到 Instagram 自动重试都失败、已放弃 —— 要开发看原因 */
-  | 'instagram_publish_failed'
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
@@ -504,7 +499,7 @@ export const NOT_INDEXED_REPORT_ORDER: readonly IndexClass[] = [
  * 谷歌没收录的页面 —— **一个客户汇总成一条，不是一页一条**。
  *
  * 🔴 实测 oztop 一家就 116 个未收录页面（PM 2026-09-04 fix闭环），一页一条会把
- * 今日待办正文淹掉 122 行 —— 跟 pushDiagnosticItems / pushLinkedinProgressItems
+ * 今日待办正文淹掉 122 行 —— 跟 pushDiagnosticItems 等
  * 早就立下的「别把待办刷屏」是同一条纪律，唯独这条线之前漏了。逐条的网址和单独
  * 深链没意义（谁也不会点 116 个链接），价值全在「哪个客户、几个、什么原因、去哪
  * 看全部」。

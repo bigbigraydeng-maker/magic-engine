@@ -120,6 +120,7 @@ export function buildSocialConnections(client: SocialClientFacts, rows: SocialCo
   const youtube: SocialChannelStatus = {
     platform: 'youtube', name: 'YouTube Shorts', profile: channel, targetAccountId: youtubeTarget,
     ...resolveGrant(legacy.filter(row => row.provider === 'google_youtube'), youtubeTarget, YOUTUBE_PUBLISH_SCOPES, now, true),
+    ...(!youtubeTarget && !channel ? { detail: '尚未确认频道。连接拥有单个频道的 Google 账号后，可自动登记目标频道。' } : {}),
     publishing: PUBLICATION.youtube,
     managedAccounts: legacy.filter(row => row.provider === 'google_youtube' && row.status !== 'revoked' && text(row.id) && text(row.account_id))
       .map(row => ({ connectionId: row.id, accountId: row.account_id, displayName: text(row.display_name) ?? row.account_id })),

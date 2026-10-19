@@ -105,8 +105,6 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
-  linkedin_progress_needs_setup: 'one_click',
-  linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
@@ -116,8 +114,6 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
-  instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
-  instagram_publish_failed: 'dev', // 同步 Instagram 重试都失败：开发看原因，不占 PM 的清单
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   whatsapp_number_unclaimed: 'one_click', // 号码在发消息但没客户绑定它，去设置页绑一次
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
@@ -143,7 +139,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
   blog_pr_open: 'review',
-  linkedin_progress_needs_review: 'review',
+  linkedin_progress_needs_review: 'review', // 历史：LinkedIn 自动发帖已下线，仅夹具使用
   maliang_render_passed: 'review',
   libai_copy_unverified: 'review',
   simaqian_review_drafts: 'review',

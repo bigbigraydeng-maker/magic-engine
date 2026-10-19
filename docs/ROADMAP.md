@@ -999,18 +999,18 @@ Codex 复审又挖出 6 个「落地页存在，但操作的东西跟待办要�
 第三轮挑出的 1 条回归（原子认领误伤视频内容重新确认）已修；另 4 条（下方 ⚠️ 清单）功能默认关闭时不触发，
 按 PM 决策登记成"开启前必关"的后续任务，不阻塞本次合并。
 
-- [ ] **上线前 PM 必做的一次性动作**：① 去 Publer 后台用自己的 LinkedIn 账号做一次性授权连接
+- [x] 【已作废（Publer 已删除）】**上线前 PM 必做的一次性动作**：① 去 Publer 后台用自己的 LinkedIn 账号做一次性授权连接
       ② 打开 ME 后台「Magic Lab Class」客户的 connectors 设置页，把出现的 LinkedIn 账号 ID 填进 Publer 绑定
       ③ 在 Render 的 `crazycontent` 服务（不是 render.yaml 里那个不对外服务的 `magic-engine`）Environment 页手动加
       `LINKEDIN_PROGRESS_POST_ENABLED=true`（未配置=默认禁用，这三步没做完之前功能保持休眠，不会误发）
-- [ ] 上线后先跑一次人工验证：确认 Publer 的 schedule 接口对 `provider='linkedin'` 真的认（目前只有代码推断，没有已连账号可实测），
+- [x] 【已作废（Publer 已删除）】上线后先跑一次人工验证：确认 Publer 的 schedule 接口对 `provider='linkedin'` 真的认（目前只有代码推断，没有已连账号可实测），
       建议先手工发 1-2 条真实验证一次发布路径，再考虑打开 cron 开关
 
 **⚠️ 打开开关（第③步 `LINKEDIN_PROGRESS_POST_ENABLED=true`）之前必须先关掉的 4 条（Codex 第三轮复审，功能默认关闭时不会触发，所以不阻塞合并，但是"开启前"的硬门槛）：**
 
 - [ ] **[P1] 匿名客户业务数字漏过滤**（`src/lib/linkedin-progress/run.ts` 敏感过滤）：CHANGELOG 若只用匿名方式写客户指标（如「2099 条消息 / 658 个会话」），`findSensitiveMatches` 只认客户名/域名/代号/术语，完全不认运营数字，这类稿会绕过"不点名也不得披露客户数字"的要求自动发。要加代码级数字/联系方式检测，或含此类数据一律转人审。
-- [ ] **[P1] 人工确认路径没处理"发布成功但数据库没同步"**（`content-factory/[postId]/route.ts` LinkedIn 分支）：cron 的 `run.ts` 已消费 `dbSyncError` 并写 `published_but_db_sync_failed` 对账标记，但看板手工 confirm 这条分支还没有——Publer 已发但回写失败时，界面会误报失败稿，可能被当失败重发。要把 run.ts 那套对账逻辑同样接到这条分支。
-- [ ] **[P1] 发布失败后 approved 状态卡死、无重试入口**（同上文件 LinkedIn 分支）：Publer 调度超时/报错时，帖子已被原子认领改成 approved，这里只返 500 不回滚；无视频的 approved 帖子归"备料"段，确认按钮只在"选题"段显示，PM 修好连接后无法再确认，稿件永久卡住。要在确认外部未接受时回滚为 draft，或给 approved 提供幂等重试入口。
+- [x] 【已作废（Publer 已删除）】**[P1] 人工确认路径没处理"发布成功但数据库没同步"**（`content-factory/[postId]/route.ts` LinkedIn 分支）：cron 的 `run.ts` 已消费 `dbSyncError` 并写 `published_but_db_sync_failed` 对账标记，但看板手工 confirm 这条分支还没有——Publer 已发但回写失败时，界面会误报失败稿，可能被当失败重发。要把 run.ts 那套对账逻辑同样接到这条分支。
+- [x] 【已作废（Publer 已删除）】**[P1] 发布失败后 approved 状态卡死、无重试入口**（同上文件 LinkedIn 分支）：Publer 调度超时/报错时，帖子已被原子认领改成 approved，这里只返 500 不回滚；无视频的 approved 帖子归"备料"段，确认按钮只在"选题"段显示，PM 修好连接后无法再确认，稿件永久卡住。要在确认外部未接受时回滚为 draft，或给 approved 提供幂等重试入口。
 - [ ] **[P2] 待办查询失败被当成"零条记录"**（`src/lib/pm-todo/manual-items.ts` `pushLinkedinProgressItems`）：那次 `content_posts` 查询若失败，Supabase 返回 `{data:null,error}` 不抛异常，这里只取 `data` 再 `?? []`，账号未连/敏感稿/已发未同步等卡点会全部静默从今日待办消失。要检查并抛 `error`。
 
 ### 广告引擎中心 — 已上线部分的收尾（2026-08-05）
@@ -1272,7 +1272,7 @@ chunked 绕过 OOM 闸 · 闸门没接在花钱那条线上 · 归档入口（�
 - [ ] **P35.10** 外呼专用域名（PM 已拍板不用主域）：候选近似域名查询 → PM 选定注册 → SPF/DKIM/DMARC 配置 → 2-3 周预热计划。主域只收回复，保 magic link 通道信誉
 - [ ] **P35.11 邮箱深挖（治本，PM 拍板 2026-07-13）⭐**：**「假邮箱」≠「没邮箱」** —— 诊断 9 个被判无邮箱的商家（Maddren Homes / Clinic 1 / ETF Electrical / Roofing Excellence / Space Air / The Cosmetic Store / Factory Carpets / Voltsy / Moore Quality），**全部有真实官网 + 电话，4 家还有在线询盘表单**。根因 = 抓取器只读首页 HTML、抓到主题占位符（`user@domain.com`/Wix `mysite.com`）就当邮箱、漏了真邮箱。三条深挖路径（PM 全部同意）：
 - [ ] **P35.12 $19.90 Tripwire Onboarding（获客漏斗第一钩，PM 拍板 2026-07-13）⭐⭐**：一次性 $19.90「onboarding 数字优化」当 tripwire → 建联建信任 → 上钩 $990 套餐（GEO / FB 代运营 / newsletter+WhatsApp）。**设计原则**：每个 $19.9 交付物 = 一个 $990 套餐的「种子」，展示价值同时暴露只有 $990 能补的缺口。
-- [ ] **P35.13 社媒内容引擎升级（IG 原生 + 品牌套件，为 $990 代运营铺路）**：现输出主打 FB 文字帖、太粗不符 IG。三支柱：① IG 原生格式模板库（轮播/Reel/精修图/Story）② **每客户品牌套件**（从 logo/官网抽主色+2 字体+滤镜，治「粗犷」根因，精致来自模板不是原始 AI）③ 视频优先（Higgsfield shorts_studio/Seedance 出竖版 Reel + virality_predictor 筛）。能力已有（Atlas/Higgsfield/HeyGen/Publer），缺模板+品牌系统。医美 before/after 有 Meta+NZ 合规限制 → 主打不需临床照的科普/团队/FAQ。**先建一套医美 IG 样板跑通一家再产品化**。此项是「医美 Wave 2」的前置。
+- [ ] **P35.13 社媒内容引擎升级（IG 原生 + 品牌套件，为 $990 代运营铺路）**：现输出主打 FB 文字帖、太粗不符 IG。三支柱：① IG 原生格式模板库（轮播/Reel/精修图/Story）② **每客户品牌套件**（从 logo/官网抽主色+2 字体+滤镜，治「粗犷」根因，精致来自模板不是原始 AI）③ 视频优先（Higgsfield shorts_studio/Seedance 出竖版 Reel + virality_predictor 筛）。能力已有（Atlas/Higgsfield/HeyGen/Publer），缺模板+品牌系统。医美 before/after 有 Meta+NZ 合规限制 → 主打不需临床照的科普/团队/FAQ。**先建一套医美 IG 样板跑通一家再产品化**。此项是「医美 Wave 2」的前置。（Publer 已于 2026-10 删除）
 
 ## Phase 7 — 遗留尾项 ⚠️ 计划执行日期已过期，需判断是否作废
 
@@ -1604,7 +1604,7 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] **P21.J.M3 闭环**(≈1-2 周):发布($50 绝对硬顶 + publish_intent 幂等 + publish_failed 收敛)+ UTM 沿用 + 表现回流单链路 + winner 判定拆片入库 + 工厂内部自发疲劳信号。验收:真实成片上 CTS Meta 账户(**PM 显式 go 后才首发**,$10/天×3 天)+ 回流数据落 `flywheel_metrics` + 工作日志人话叙事无"工厂"字眼
 - [ ] **开放项**:信号契约与 34.A 对齐冻结(M1 前置)· asset_gap 信号归属 · MTC 计费触点(v1 占位不扣)· Airtable 观测层↔ME 真值同步(M2 起)
 - [ ] **P21.J.SEC 接口安全完整审计**:狄仁杰三审报"26 个 `/api/clients/[id]/*` 无鉴权",逐个核实后发现多数(ads 执行/cms 发布)其实已有锁、是误报,真裸奔仅 5 个已补。**需一次系统性复核**:grep 全部 access 守卫关键词 + 逐个确认,把"真裸奔"与"已有锁被误报"彻底分开,补齐真缺的。今天只是止血
-- [ ] **P21.J.SEC-2 `/api/publer/create-post` 至今无鉴权**:任何人拿一个 `post_id` 就能把该客户的成片发到他的社媒账号。**不能像 schedule/draft 那样直接加登录鉴权** —— 这条同时被 Zapier/Airtable webhook 调用(仅 body 带 `post_id`,没有会话),加了就当场打断线上自动化。正解是 Bearer Token,而 token 要同时配到 Zapier 那边 = 需要 PM 动手一次。此项 2025 年就登记过(`docs/archive/AUTOMATION_SPEC.md` D-2),躺在 archive 里没人看,2026-08-05 补进主线。同批的 `/api/publer/schedule` 与 `/api/publer/draft/[assetId]` 只有后台一个调用方,已直接补上鉴权
+- [x] 【已作废（Publer 已删除）】**P21.J.SEC-2 `/api/publer/create-post` 至今无鉴权**:任何人拿一个 `post_id` 就能把该客户的成片发到他的社媒账号。**不能像 schedule/draft 那样直接加登录鉴权** —— 这条同时被 Zapier/Airtable webhook 调用(仅 body 带 `post_id`,没有会话),加了就当场打断线上自动化。正解是 Bearer Token,而 token 要同时配到 Zapier 那边 = 需要 PM 动手一次。此项 2025 年就登记过(`docs/archive/AUTOMATION_SPEC.md` D-2),躺在 archive 里没人看,2026-08-05 补进主线。同批的 `/api/publer/schedule` 与 `/api/publer/draft/[assetId]` 只有后台一个调用方,已直接补上鉴权
   🔄 **2026-08-19 代码已写完,PR [#1081](https://github.com/bigbigraydeng-maker/magic-engine/pull/1081) 待复审,未合并**:读 `PUBLER_CREATE_POST_TOKEN` 环境变量做 Bearer 比对。**合并前需要 PM 配合两步,顺序不能反**:①先在 Render 生产环境变量加 `PUBLER_CREATE_POST_TOKEN` ②再去 Zapier 那个触发 create-post 的 webhook 步骤配上同一个密钥,两边都配完才能合并 PR——反过来的话线上自动发布会先被打断。
 - [ ] **P21.J.UP 上传链接两取舍**:①无单条吊销(作废靠换 `UPLOAD_LINK_SECRET`,所有链接一起失效)②无速率限制(有真链接者可刷存储/烧 Vision 额度)。规模化前需补 per-client 限流 + 单链接吊销
 - [ ] **本地 worker 没在认领**:今天 00:18 有 CTS 新工单卡在 `queued` 没人做 = 那台 Mac 的 worker 没跑/没连。工厂要真转,先确认 worker 进程在跑(仓库无 launchd/pm2 配置,`ps`/`pm2 list` 上机看)且已在 07-24 后重启(否则风格下发用旧逻辑)
@@ -1878,7 +1878,7 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 
 **§11 打分**：频率中（每次发布都过）· IMPACT 关键度高（Act 外发出口）· 收入关联度高（错价 = 客户投诉）→ 以下为本 PR 审查中**未并入**的次要意见，记入待认领，不现在动。
 
-- [ ] **[P2] Publer 三条发布路由（`/api/publer/create-post` `schedule` `quick-post`）没接价格数字核对**，只有旧的图来源闸。
+- [x] 【已作废（Publer 已删除）】**[P2] Publer 三条发布路由（`/api/publer/create-post` `schedule` `quick-post`）没接价格数字核对**，只有旧的图来源闸。
 - [ ] **[P2] 资料包由人手填，官网改价后会过期。** 官网事实快照（PR 2270）合并后，让核对改为对官网快照自动对账，并给资料加「核对日期」。
 - [ ] **[P3] 资料包里任意字段里的数字都算事实**（过期早鸟价、单人房加价可被当团价放行）。收紧成只认带语义的价格字段。
 - [ ] **[P3] 共享代码默认团名放在 `tour` 字段、破折号和括号出发地写法**，对旅游以外行业不通用；应改成 Industry Profile 或显式声明团名字段。没填资料包又写了价格的非旅游客户目前会被整批拦（待查哪些客户走每日计划发布）。

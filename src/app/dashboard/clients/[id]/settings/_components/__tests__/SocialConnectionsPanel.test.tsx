@@ -1,19 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+const router = vi.hoisted(() => ({ params: new URLSearchParams() }))
+vi.mock('next/navigation', () => ({ useSearchParams: () => router.params }))
 import { SocialConnectionsPanel } from '../SocialConnectionsPanel'
 import { buildSocialConnections } from '@/lib/platform-oauth/social-onboarding'
-
-const params = vi.hoisted(() => ({ outcome: null as string | null }))
-vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(params.outcome ? { instagram: params.outcome } : {}) }))
 
 const now = new Date('2026-10-19T00:00:00Z')
 const channels = buildSocialConnections({ instagram_handle: 'example', facebook_page_url: 'javascript:alert(1)', tiktok_handle: 'example',
   facebookPublishPageId: null, youtubeChannelId: null }, [], now)
 const snapshot = (canManageConfiguration = false) => ({ channels, readAt: now.toISOString(), canManageConfiguration })
-beforeEach(() => { params.outcome = null; vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => snapshot() })) })
+beforeEach(() => {
+  router.params = new URLSearchParams()
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => snapshot() }))
+})
 
 describe('client social connections centre', () => {
+  it('keeps Instagram and YouTube callback notices visible together', async () => {
+    router.params = new URLSearchParams({ instagram: 'target_changed', youtube: 'channel_mismatch' })
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    expect(await screen.findByText(/登记账号在连接期间发生变化/)).toBeInTheDocument()
+    expect(screen.getByText(/本次授权的频道与已登记频道不同/)).toBeInTheDocument()
+  })
+  it.each(['__proto__', 'constructor', 'unexpected'])('ignores unrecognised YouTube outcome %s', async value => {
+    router.params = new URLSearchParams({ youtube: value })
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    await screen.findByRole('article', { name: 'YouTube Shorts' })
+    expect(screen.queryByText(String(value))).not.toBeInTheDocument()
+  })
   it('distinguishes registered profiles from authorisation, offers only usable actions and renders URLs as text', async () => {
     render(<SocialConnectionsPanel clientId="client-a" />)
     await screen.findByRole('article', { name: 'Facebook Page' })
@@ -21,6 +35,7 @@ describe('client social connections centre', () => {
     expect(screen.getByRole('link', { name: '连接 TikTok' })).toHaveAttribute('href', '/api/auth/tiktok/connect?client_id=client-a')
     expect(screen.queryByRole('link', { name: '配置 Facebook 发布主页' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '配置 YouTube 频道' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '连接 YouTube' })).toHaveAttribute('href', '/api/auth/google/youtube/start?clientId=client-a')
     expect(screen.getByText('javascript:alert(1)')).not.toHaveAttribute('href')
     expect(within(screen.getByRole('article', { name: 'Instagram' })).getByText('原生授权暂未开放')).toBeInTheDocument()
     expect(screen.queryByText('已连接')).not.toBeInTheDocument()
@@ -29,7 +44,7 @@ describe('client social connections centre', () => {
     vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => snapshot(true) } as Response)
     render(<SocialConnectionsPanel clientId="client-a" />)
     expect(await screen.findByRole('link', { name: '配置 Facebook 发布主页' })).toHaveAttribute('href', expect.stringContaining('section=factory-config'))
-    expect(screen.getByRole('link', { name: '配置 YouTube 频道' })).toHaveAttribute('href', expect.stringContaining('section=youtube-channel'))
+    expect(screen.getByRole('link', { name: '由团队手动配置频道' })).toHaveAttribute('href', expect.stringContaining('section=youtube-channel'))
   })
   it('shows lookup failure and can retry instead of claiming the accounts are disconnected', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({ ok: false } as Response)
@@ -112,10 +127,10 @@ describe('Instagram native connection UX', () => {
     expect(screen.queryByRole('link', { name: '连接 Instagram 专业账号' })).not.toBeInTheDocument()
   })
   it('renders only known finite callback messages, never raw provider text', async () => {
-    params.outcome = 'target_changed'
+    router.params = new URLSearchParams({ instagram: 'target_changed' })
     const { unmount } = render(<SocialConnectionsPanel clientId="client-a" />)
     expect(await screen.findByText(/登记账号在连接期间发生变化/)).toBeInTheDocument()
-    unmount(); params.outcome = 'private-provider-error'
+    unmount(); router.params = new URLSearchParams({ instagram: 'private-provider-error' })
     render(<SocialConnectionsPanel clientId="client-a" />)
     await screen.findByRole('article', { name: 'Instagram' })
     expect(screen.queryByText('private-provider-error')).not.toBeInTheDocument()

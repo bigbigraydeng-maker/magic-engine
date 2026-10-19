@@ -52,7 +52,6 @@ import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushDiagnosticSynthesisItems } from './diagnostic-synthesis-items'
-import { pushInstagramPublishItems } from './instagram-publish-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
@@ -65,12 +64,10 @@ import {
   type ManualItemPusher,
   type NotIndexedRow,
 } from './manual-item-types'
-import { pushLinkedinProgressItems } from './manual-linkedin-items'
 import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
-export { pushLinkedinProgressItems } from './manual-linkedin-items'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
@@ -280,10 +277,6 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushCalendarClosureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 日历到期事项巡检待办检查失败（不阻塞其他待办）:', e),
     ),
-    // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
-    (b) => pushLinkedinProgressItems(supabase, b, now).catch((e) =>
-      console.warn('[manual-items] LinkedIn 进度贴待办检查失败（不阻塞其他待办）:', e),
-    ),
     // 客人说他付款了但没法自动确认 —— 只有人能对银行流水，不许机器自己打 paid 标签
     (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 待确认付款读取失败（不阻塞其他待办）:', e),
@@ -358,11 +351,6 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
     (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
-    ),
-    // 工厂把 Facebook Reel 同步到客户 Instagram(Publer):账号掉线 / 重试都失败的，只有人能修 ——
-    // 回执只写在工单里没人读 = 发现死在库里。拉模式读回执,修好后这条自己消失
-    (b) => pushInstagramPublishItems(supabase, b, now, nameOf).catch((e) =>
-      console.warn('[manual-items] Instagram 同步待办读取失败（不阻塞其他待办）:', e),
     ),
     // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
     // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
