@@ -30,6 +30,9 @@ import { isFormNoticeCandidate, parseFormNotice, type FormNoticeLead } from '@/l
 /** 单轮最多新建几个联系人（防机器人批量提交）。 */
 export const FORM_NEW_PEOPLE_CAP = 20
 
+/** 单轮最多对几封候选单读全文（防伪造邮件灌满邮箱后每小时串行打几千次 Graph）。 */
+export const FORM_FETCH_CAP = 50
+
 export interface FormEnquiryStats {
   /** 初筛命中几封。 */
   recognised: number
@@ -37,7 +40,7 @@ export interface FormEnquiryStats {
   parsed: number
   /** 预计新建几个联系人（邮箱在系统里还不存在）。 */
   created: number
-  /** 邮箱已属于已有联系人，只往他名下挂咨询（不改任何字段）。 */
+  /** 邮箱已属于已有联系人，只往他名下挂咨询（不改姓名；会刷新他的最后出现时间）。 */
   matched: number
   /** 表单里填的是自家域邮箱（员工测试单）—— 按「同事不建人」规则跳过。 */
   staffTest: number
@@ -76,6 +79,17 @@ function redactedPreview(lead: FormNoticeLead): string {
   return `网站联系表单${lead.interest ? ` · ${lead.interest}` : ''}`
 }
 
+/** 改写成客人来信：对方是客人；摘要和主题都不含电话/邮箱/客人名。 */
+function rewritten(m: MailMessage, lead: FormNoticeLead): MailMessage {
+  return {
+    ...m,
+    subject: `Contact form${lead.interest ? `: ${lead.interest}` : ''}`,
+    counterparty: { address: lead.email, name: lead.name },
+    formLead: lead,
+    preview: redactedPreview(lead),
+  }
+}
+
 function bump(stats: FormEnquiryStats, reason: string): void {
   stats.failed += 1
   stats.failedReasons[reason] = (stats.failedReasons[reason] ?? 0) + 1
@@ -97,6 +111,11 @@ export async function applyFormNotices(args: {
   const deps = args.deps ?? defaultDeps
   const out: MailMessage[] = []
   let newPeople = 0
+  let fetched = 0
+  /** 被 Graph 限流（429/503）后本轮不再读剩余候选。 */
+  let halted = false
+  /** 本轮已经预估要新建的邮箱 —— 同一邮箱的第二封通知不再占名额。 */
+  const newEmails = new Set<string>()
 
   for (const m of args.messages) {
     const candidate = isFormNoticeCandidate({
@@ -111,9 +130,16 @@ export async function applyFormNotices(args: {
     }
     args.stats.recognised += 1
 
+    if (halted || fetched >= FORM_FETCH_CAP) {
+      // 不读、不丢：原信仍在邮箱里，6 小时回看窗口内下一轮会再试。
+      bump(args.stats, halted ? 'rate_limited_deferred' : 'fetch_cap_deferred')
+      continue
+    }
+    fetched += 1
     const src = await deps.fetchSource(args.token, m.id)
     if (!src.ok) {
-      bump(args.stats, 'fetch_error')
+      bump(args.stats, src.status === 429 || src.status === 503 ? 'rate_limited' : 'fetch_error')
+      if (src.status === 429 || src.status === 503) halted = true
       continue
     }
     const parsed = parseFormNotice({
@@ -132,13 +158,21 @@ export async function applyFormNotices(args: {
     // 表单里填的是自家域邮箱 = 员工测试单：改写后交给 planMailIngest 按「同事不建人」跳过。
     const verdict = classifySender({ address: lead.email, ownDomains: args.ownDomains })
     if (verdict.kind === 'skip') {
-      args.stats.staffTest += 1
-      out.push({ ...m, counterparty: { address: lead.email, name: lead.name }, formLead: lead, preview: redactedPreview(lead) })
+      if (verdict.why === '公司内部邮箱') {
+        args.stats.staffTest += 1
+        out.push(rewritten(m, lead))
+      } else {
+        // 系统 / 机器人类地址（accounts@、noreply@ 等）：不是员工测试，单独计数。
+        bump(args.stats, 'system_address')
+      }
       continue
     }
 
     const existing = await deps.findContactByEmail(args.clientId, lead.email)
     if (existing) {
+      args.stats.matched += 1
+    } else if (newEmails.has(lead.email)) {
+      // 同一邮箱本轮第二封：不重复计数，也不占名额。
       args.stats.matched += 1
     } else {
       if (newPeople >= FORM_NEW_PEOPLE_CAP) {
@@ -146,9 +180,10 @@ export async function applyFormNotices(args: {
         continue
       }
       newPeople += 1
+      newEmails.add(lead.email)
       args.stats.created += 1
     }
-    out.push({ ...m, counterparty: { address: lead.email, name: lead.name }, formLead: lead, preview: redactedPreview(lead) })
+    out.push(rewritten(m, lead))
   }
   return out
 }

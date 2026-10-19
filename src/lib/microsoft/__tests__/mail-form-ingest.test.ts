@@ -146,3 +146,40 @@ describe('mirrorFormThread / formLeadRaw', () => {
     ).rejects.toThrow()
   })
 })
+
+describe('魏征复审补充（429 / 重复邮箱 / 系统地址）', () => {
+  it('Graph 返回 429 → 本轮不再读剩余候选，记 rate_limited 与 deferred，不抛出', async () => {
+    let calls = 0
+    const d: FormIngestDeps = {
+      fetchSource: async () => { calls += 1; return { ok: false, error: 'HTTP 429', status: 429 } },
+      findContactByEmail: async () => null,
+    }
+    const { out, stats } = await run([msg('r1'), msg('r2', { conversationId: 'c2' }), msg('r3', { conversationId: 'c3' })], d)
+    expect(calls).toBe(1)
+    expect(out).toHaveLength(0)
+    expect(stats.failedReasons.rate_limited).toBe(1)
+    expect(stats.failedReasons.rate_limited_deferred).toBe(2)
+  })
+
+  it('同一新邮箱本轮两封通知：只算一次新建，不重复占名额', async () => {
+    const { stats } = await run(
+      [msg('d1'), msg('d2', { conversationId: 'c2' })],
+      deps({ d1: 'same@example.com', d2: 'same@example.com' }),
+    )
+    expect(stats.created).toBe(1)
+    expect(stats.matched).toBe(1)
+  })
+
+  it('表单里填的是系统地址（accounts@…）→ 不算员工测试，计 system_address 并丢弃', async () => {
+    const { out, stats } = await run([msg('s1')], deps({ s1: 'accounts@gmail.com' }))
+    expect(out).toHaveLength(0)
+    expect(stats.staffTest).toBe(0)
+    expect(stats.failedReasons.system_address).toBe(1)
+  })
+
+  it('改写后的主题和摘要不含客人名、电话、邮箱', async () => {
+    const { out } = await run([msg('p1')], deps({ p1: 'jane@example.com' }))
+    expect(out[0].subject).toBe('Contact form: Custom Itinerary')
+    expect(out[0].subject).not.toContain('Jane')
+  })
+})

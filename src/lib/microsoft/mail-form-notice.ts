@@ -180,6 +180,15 @@ function checkAuth(
   const headerFromDomain = normaliseDomain(headerFromMatch[1])
   if (!ownDomains.includes(headerFromDomain)) return false
 
+  // 🔴 DKIM 必须是**收件服务器验证通过**的：Authentication-Results 里要有 `dkim=pass ... header.d=<自家域>`。
+  // 只看 DKIM-Signature 头不够 —— 那一行是发件人自己写的，可以原样伪造（魏征 2026-10-19 复审 R1）。
+  const dkimPassRe = /dkim=pass[^;]*?header\.d=([a-z0-9.-]+)/gi
+  let dkimVerified = false
+  for (let m = dkimPassRe.exec(authValue); m; m = dkimPassRe.exec(authValue)) {
+    if (ownDomains.includes(normaliseDomain(m[1]))) dkimVerified = true
+  }
+  if (!dkimVerified) return false
+
   // 至少一个 DKIM-Signature，其 d= 属于自有域名，s= 在允许列表中
   const dkimOk = input.headers.some((h) => {
     if (h.name.trim().toLowerCase() !== 'dkim-signature') return false

@@ -728,14 +728,24 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
         // 网站表单：走 mirrorWebFormLead（reject 策略、不覆盖老客人姓名、写 web_form 触点），
         // 不走下面默认的 resolveContact。放在 `!contactId` 判断之外：线程可能已被员工回复挂到老联系人上，
         // 放里面会漏写 web_form 触点（写入靠 source_ref 幂等）。
-        const formContact = await mirrorFormThread({ clientId: target.clientId, messages: thread.messages })
-        contactId = contactId ?? formContact
-        if (contactId && !stored.contactId) {
-          await supabaseAdmin
-            .from('conversations')
-            .update({ contact_id: contactId, updated_at: new Date().toISOString() })
-            .eq('id', stored.conversationId)
-            .is('contact_id', null)
+        // 只在这条会话还没挂上联系人时做：表单线程每小时都会被重读，对已挂好的会话再 mirror 一次
+        // 会把已有联系人的 last_seen_at 回退到旧通知的时间（魏征 2026-10-19 复审 R2）。
+        // mirror 失败（抛错）→ 会话没挂人 → 下一轮自然重试。
+        if (!stored.contactId) {
+          const formContact = await mirrorFormThread({ clientId: target.clientId, messages: thread.messages })
+          contactId = formContact
+          if (contactId) {
+            await supabaseAdmin
+              .from('conversations')
+              .update({ contact_id: contactId, updated_at: new Date().toISOString() })
+              .eq('id', stored.conversationId)
+              .is('contact_id', null)
+          } else {
+            // 识别成功却没认到人（邮箱被身份规则拒绝）：不静默 —— 记日志并计入回执。
+            console.error('[mail-form] 表单通知识别成功但没能挂上联系人:', thread.key)
+            formStats.failed += 1
+            formStats.failedReasons.no_contact = (formStats.failedReasons.no_contact ?? 0) + 1
+          }
         }
       } else if (!contactId) {
         if (thread.hasInbound) {

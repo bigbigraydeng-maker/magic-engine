@@ -314,3 +314,25 @@ describe('真实通知的单空格多词标签', () => {
     if (r.ok) expect(r.lead.interest).toBe('Custom Itinerary')
   })
 })
+
+describe('魏征 R1：DKIM 必须是验证通过的', () => {
+  it('Authentication-Results 里没有 dkim=pass，只有手写的 DKIM-Signature 头 → auth_failed', () => {
+    const base = goodInput()
+    const headers = base.headers.map((h) =>
+      h.name === 'Authentication-Results'
+        ? { ...h, value: 'mx 1; spf=pass smtp.mailfrom=example.co.nz; dmarc=pass action=none header.from=example.co.nz' }
+        : h,
+    )
+    expect(parseFormNotice({ ...base, headers })).toEqual({ ok: false, reason: 'auth_failed' })
+  })
+
+  it('dkim=pass 但 header.d 是别人的域名 → auth_failed', () => {
+    const base = goodInput()
+    const headers = base.headers.map((h) =>
+      h.name === 'Authentication-Results'
+        ? { ...h, value: 'mx 1; dkim=pass header.d=amazonses.com; dmarc=pass header.from=example.co.nz' }
+        : h,
+    )
+    expect(parseFormNotice({ ...base, headers })).toEqual({ ok: false, reason: 'auth_failed' })
+  })
+})

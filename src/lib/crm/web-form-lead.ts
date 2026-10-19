@@ -91,7 +91,7 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       listingId: input.listingId ?? null,
     })
 
-    await supabaseAdmin.from('contact_touchpoints').upsert(
+    const { error: touchError } = await supabaseAdmin.from('contact_touchpoints').upsert(
       {
         client_id: input.clientId,
         contact_id: contactId,
@@ -108,6 +108,8 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       },
       { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true },
     )
+    // supabase 的写失败不会抛，只放在返回的 error 里；不检查就是「联系人建了、触点永远缺」。
+    if (touchError) throw touchError
 
     return { contactId, skipped: null }
   } catch (err) {
