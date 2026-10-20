@@ -10,8 +10,8 @@
 
 import { buildAdjust, ACCOUNT_STALE_HOURS } from './actions'
 import { accountStatusHint, ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_UNSETTLED } from '@/lib/ads-strategy/account-status'
-import { buildFrequency } from './frequency'
-import { buildPools } from './pools'
+import { buildFrequency, dataStaleDays } from './frequency'
+import { buildAccountSummaries, buildPools, unusableAccountNote } from './pools'
 import { diffDays, hoursSince, nzDay, shortDay } from './util'
 import type {
   AccountView, CountdownView, GoalNote, PlanPhaseInput, WarMapInput, WarMapView,
@@ -29,8 +29,18 @@ export function pickPhase(phases: PlanPhaseInput[], today: string): PlanPhaseInp
 function buildCountdown(input: WarMapInput, today: string): CountdownView {
   const phase = input.plan ? pickPhase(input.plan.phases, today) : null
   if (!input.plan || !phase) {
-    return { planStatus: null, phaseName: null, launchDate: null, targetDate: null, daysToLaunch: null, daysToTarget: null }
+    return {
+      planStatus: null, phaseName: null, launchDate: null, targetDate: null, daysToLaunch: null, daysToTarget: null,
+      actualLaunchDay: null, planStale: false,
+    }
   }
+  // 🔴 「计划过时」＝计划写完**之后**才有广告开始跑，而且比计划写的开投日更早。
+  //    只比「开投日」会把「一直在跑的常驻广告 + 未来的新阶段计划」误判成「已开投」；
+  //    所以实际起跑日必须晚于计划记录最后更新的那天（读不到更新日才退回只比开投日）。
+  const updated = input.plan.recordUpdatedDay
+  const stale = input.runningSince !== null
+    && phase.startDate > input.runningSince
+    && (updated === null || input.runningSince > updated)
   return {
     planStatus: input.plan.status,
     phaseName: phase.name,
@@ -38,12 +48,15 @@ function buildCountdown(input: WarMapInput, today: string): CountdownView {
     targetDate: phase.endDate,
     daysToLaunch: diffDays(today, phase.startDate),
     daysToTarget: diffDays(today, phase.endDate),
+    actualLaunchDay: stale ? input.runningSince : null,
+    planStale: stale,
   }
 }
 
 function accountView(a: WarMapInput['accounts'][number], nowIso: string): AccountView {
   const name = a.name ?? a.adAccountId
   const base = { adAccountId: a.adAccountId, name, statusCode: a.statusCode, capturedAt: a.capturedAt }
+  if (a.statusCode === null && a.capturedAt === null) return { ...base, light: 'unknown', sentence: '已绑定，暂无数据' }
   if (a.statusCode === null) return { ...base, light: 'unknown', sentence: '读不到账户状态' }
   const age = hoursSince(a.capturedAt, nowIso)
   if (age === null || age > ACCOUNT_STALE_HOURS) {
@@ -80,12 +93,27 @@ function videoPoolIds(input: WarMapInput): Set<string> {
   return new Set(ids)
 }
 
+/** 在用账户（状态正常或读不到）的 id；欠款/关闭的账户不参与频率和新鲜度判断 */
+function usableAccountIds(input: WarMapInput): Set<string> {
+  return new Set(input.accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId))
+}
+
+/** 最旧的数据日：整体数据日和每个在用账户各自的数据日里取最早，避免一个新鲜账户把另一个停更的账户盖成绿灯 */
+function oldestDataDay(input: WarMapInput, usable: Set<string>): string | null {
+  const days = [input.clocks.dataDay, ...[...usable].map(id => input.accountDataDays[id] ?? null)]
+  const known = days.filter((d): d is string => d !== null)
+  return known.length > 0 ? known.reduce((a, b) => (b < a ? b : a)) : null
+}
+
 export function buildWarMap(input: WarMapInput): WarMapView {
   const today = nzDay(input.now)
   const accounts = input.accounts.map(a => accountView(a, input.now))
   const names = new Map(accounts.map(a => [a.adAccountId, a.name]))
-  const pools = buildPools(input, names)
-  const frequency = buildFrequency(input, names)
+  const usable = usableAccountIds(input)
+  const oldestDay = oldestDataDay(input, usable)
+  const staleDays = oldestDay ? diffDays(oldestDay, today) : dataStaleDays(input)
+  const pools = buildPools(input, names, accounts, staleDays, oldestDay)
+  const frequency = buildFrequency({ ...input, campaigns: input.campaigns.filter(c => usable.has(c.adAccountId)) }, names)
   const adjust = buildAdjust({
     input,
     accounts,
@@ -97,9 +125,10 @@ export function buildWarMap(input: WarMapInput): WarMapView {
   return {
     generatedAt: input.now,
     countdown: buildCountdown(input, today),
-    clocks: input.clocks,
+    clocks: { ...input.clocks, staleDays },
     accounts,
-    pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount },
+    accountSummaries: buildAccountSummaries(input, accounts, pools.everyRow, today),
+    pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount, unusableRows: pools.unusableRows },
     frequency,
     adjust,
     goalNote: buildGoalNote(input),
