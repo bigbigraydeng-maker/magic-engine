@@ -150,6 +150,7 @@ function makeDeps(overrides: Partial<ConversationInboundDraftDeps> = {}): Conver
   return {
     isOptedOut: vi.fn(async () => false),
     isEnabled: vi.fn(async () => true),
+    hasRecentOutbound: vi.fn(async () => false),
     classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
     loadIndustry: vi.fn(async () => null),
     loadContext: vi.fn(async () => fakeContext()),
@@ -603,6 +604,38 @@ describe(
         timeout: '5m',
         if: `async.data.conversation_id == "${CONVERSATION_ID}"`,
       })
+    })
+
+    it('🔴 6 小时内已有成功出站（F1 会跳过、不 emit autoack.sent）→ 不等 wait-autoack，直接起草，不白等 5 分钟', async () => {
+      const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => true) })
+      const fn = createConversationInboundDraftFunction(deps)
+      const step = fakeStep([{ ok: true }])
+      await invoke(fn, step)
+      expect(step.waitForEvent).toHaveBeenCalledTimes(1)
+      expect(step.waitForEvent).toHaveBeenNthCalledWith(1, 'await-approval', expect.anything())
+      expect(deps.hasRecentOutbound).toHaveBeenCalledWith(CONVERSATION_ID, expect.any(String))
+    })
+
+    it('最近没有出站（F1 会发安抚）→ 照常等 wait-autoack', async () => {
+      const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => false) })
+      const fn = createConversationInboundDraftFunction(deps)
+      const step = fakeStep()
+      await invoke(fn, step)
+      expect(step.waitForEvent).toHaveBeenNthCalledWith(1, 'wait-autoack', expect.anything())
+    })
+
+    it('读最近出站失败 → 不拦起草，退回照常等（这一步只是排序不是闸）', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const deps = makeDeps({
+        hasRecentOutbound: vi.fn(async () => {
+          throw new Error('db down')
+        }),
+      })
+      const fn = createConversationInboundDraftFunction(deps)
+      const step = fakeStep()
+      await invoke(fn, step)
+      expect(step.waitForEvent).toHaveBeenNthCalledWith(1, 'wait-autoack', expect.anything())
+      warn.mockRestore()
     })
 
     it(

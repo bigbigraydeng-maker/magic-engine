@@ -84,3 +84,11 @@ describe('hasRecentOutbound', () => {
     ).rejects.toThrow(/read failed/)
   })
 })
+
+describe('hasRecentOutbound — 响应不认识时不放行', () => {
+  it('🔴 没报错但 data 不是数组（null）→ 抛错，不当成「最近没回过」', async () => {
+    state.result = { data: null, error: null }
+    await expect(hasRecentOutbound('conv-9', '2026-01-01T00:00:00.000Z')).rejects.toThrow(/read failed/)
+  })
+})
+

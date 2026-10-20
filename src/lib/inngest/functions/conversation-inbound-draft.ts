@@ -110,7 +110,8 @@ import {
   type MessengerAgentChannel,
   type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
-import { isKnownAutoAckChannel } from './conversation-inbound-autoack'
+import { isKnownAutoAckChannel, AUTOACK_COOLDOWN_HOURS } from './conversation-inbound-autoack'
+import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
 import {
   classifyConversation,
   resolvePostSaleClassificationPolicy,
@@ -353,6 +354,8 @@ type ChannelSendFn = (input: {
 export interface ConversationInboundDraftDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
+  /** F1 的 6 小时限频用同一个判断：命中就说明 F1 不会再发安抚、也不会 emit autoack.sent。 */
+  hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
   classify: (conversationId: string, policy: PostSaleClassificationPolicy) => Promise<ConversationClass>
   loadIndustry: (clientId: string) => Promise<string | null>
   loadContext: (clientId: string, conversationId: string) => Promise<LoadedDraftContext>
@@ -441,12 +444,30 @@ export function createConversationInboundDraftFunction(deps: ConversationInbound
       // 它。如果照样等，每一封邮件的起草都会被这个已知永远不会来的事件白白
       // 拖慢 5 分钟。直接跳过这一步，不是"缩短超时"，是这个 wait 对这个渠道
       // 根本不该存在。
+      //
+      // F1 有 6 小时限频（`AUTOACK_COOLDOWN_HOURS`）：窗口内已有成功出站时 F1 直接
+      // 跳过、不发安抚也不 emit `autoack.sent`——照样等就是白等 5 分钟。所以等之前用
+      // 同一个判断（同一个常量）先问一句：F1 会跳过就不等。读失败不拦起草，退回原来的
+      // 「照常等」（这一步只是排序，不是闸）。
       if (isKnownAutoAckChannel(channel)) {
-        await step.waitForEvent('wait-autoack', {
-          event: CONVERSATION_AUTOACK_SENT_EVENT,
-          timeout: '5m',
-          if: `async.data.conversation_id == "${conversation_id}"`,
+        const f1WillSkip = await step.run('check-autoack-cooldown', async () => {
+          try {
+            const sinceIso = new Date(Date.now() - AUTOACK_COOLDOWN_HOURS * 3_600_000).toISOString()
+            return await deps.hasRecentOutbound(conversation_id, sinceIso)
+          } catch (err) {
+            console.warn(
+              `[conversation-inbound-draft] 读最近出站失败，按「F1 会发」照常等：${err instanceof Error ? err.message : String(err)}`,
+            )
+            return false
+          }
         })
+        if (!f1WillSkip) {
+          await step.waitForEvent('wait-autoack', {
+            event: CONVERSATION_AUTOACK_SENT_EVENT,
+            timeout: '5m',
+            if: `async.data.conversation_id == "${conversation_id}"`,
+          })
+        }
       }
 
       const context = await step.run('load-context', () => deps.loadContext(client_id, conversation_id))
@@ -707,6 +728,7 @@ export function createConversationInboundDraftFunction(deps: ConversationInbound
 export const conversationInboundDraft = createConversationInboundDraftFunction({
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
+  hasRecentOutbound,
   classify: classifyConversation,
   loadIndustry: async (clientId: string) => {
     const { data, error } = await supabaseAdmin.from('clients').select('industry').eq('id', clientId).maybeSingle()

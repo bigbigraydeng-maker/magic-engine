@@ -489,3 +489,42 @@ describe('6 小时限频', () => {
     expect(deps.hasRecentOutbound).not.toHaveBeenCalled()
   })
 })
+
+describe('6 小时限频 — 独立于常量的边界', () => {
+  it('🔴 常量就是 6（别人把它改成 0/1/60，用同一个常量算期望的测试发现不了）', () => {
+    expect(AUTOACK_COOLDOWN_HOURS).toBe(6)
+  })
+
+  it('查询起点是「现在往前整整 6 小时」，用字面量算，不用常量', async () => {
+    const T = new Date('2026-10-21T12:00:00.000Z').getTime()
+    vi.useFakeTimers()
+    vi.setSystemTime(T)
+    try {
+      const deps = makeDeps()
+      const fn = createConversationInboundAutoAckFunction(deps)
+      await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step: fakeStep() })
+      expect(deps.hasRecentOutbound).toHaveBeenCalledWith(CONVERSATION_ID, new Date(T - 6 * 3_600_000).toISOString())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('用「上一次出站时间」模拟：5 小时 59 分前回过 → 不安抚；6 小时 1 分前回过 → 会再安抚', async () => {
+    const T = new Date('2026-10-21T12:00:00.000Z').getTime()
+    vi.useFakeTimers()
+    vi.setSystemTime(T)
+    try {
+      const run = async (lastSentMsAgo: number) => {
+        const lastSentAt = new Date(T - lastSentMsAgo).toISOString()
+        const deps = makeDeps({ hasRecentOutbound: vi.fn(async (_c: string, since: string) => lastSentAt >= since) })
+        const fn = createConversationInboundAutoAckFunction(deps)
+        return handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step: fakeStep() })
+      }
+      expect(await run(5 * 3_600_000 + 59 * 60_000)).toMatchObject({ outcome: 'skipped_recently_replied' })
+      expect(await run(6 * 3_600_000 + 60_000)).toMatchObject({ outcome: 'sent' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
