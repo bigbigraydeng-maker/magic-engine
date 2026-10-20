@@ -6,6 +6,7 @@
 ## 索引（每张卡的裁决一眼看）
 | 卡 | 状态 | 裁决摘要 |
 |---|---|---|
+| [2026-10-20 Meta 事件管理工具追踪体检](2026-10-20-meta-events-manager-tracking-health.md) | candidate | 吸收：四屏只读体检、同一事件名至多一条服务器来源；不吸收：Meta 宣传数字、经向导再加第三条回传（只限 CTS）；待验证：接口读诊断警告 / 集成清单（目前读不到）、11-12 设备端衡量通知 |
 | [2026-10-18 Facebook 素材先行测试顺序](2026-10-18-meta-ads-creative-first-test-order.md) | candidate | 部分吸收（待验证）：测试≠放量；忽略：1:4:1（对 CTS）、点击率选赢家；吸收：ABO 测/CBO 放量（已有） |
 | [2026-10-18 Facebook 广告入门六步与指标线](2026-10-18-meta-ads-beginner-setup-and-metrics.md) | candidate | 吸收（已有一致）：落地页/盈亏CPA/加预算幅度；~~忽略：Advantage+开启~~（已更正为吸收，见卡内复核更正）；忽略：电商数字线（依据是 E-06）；待验证：开始时间次日0点、点击率×点击成本矩阵 |
 | [2026-10-18 Meta 创意测试工具（Post Andromeda）](2026-10-18-meta-ads-creative-testing-post-andromeda.md) | candidate | **待验证（优先）**：相似创意被合并只投一条（该细点 ME 无记录；Andromeda 本身 ME 审计已展开）、后台「创意测试」可否成为可执行测试路径、钩子测试；吸收（已有一致）：指标要选对、别硬做 20 条；忽略：Hyros 推广 |
