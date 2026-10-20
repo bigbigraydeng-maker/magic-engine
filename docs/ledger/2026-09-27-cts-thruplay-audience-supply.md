@@ -9,8 +9,8 @@ done_on: 2026-09-27
 done_ref: doc:docs/ledger/2026-09-27-cts-thruplay-audience-supply.md
 verify_by: 2026-09-28
 verify_how: 三项全查。①版位干净：拉该广告组昨天的花费按版位拆（breakdowns=publisher_platform），audience_network 花费必须约等于 0，不为 0 立刻暂停该组并记事故。②池子开始涨：查 ad_entity_snapshots 里「看完视频的人」「看过 50% 的人」两个受众的人数下限，要比 9/26 的 2.22 万 / 3.78 万有上升；持平说明供血没生效，回头查视频有没有真进池。③真实完播成本：拉该组完播数和花费，算每次完播成本，跟历史被污染期的数字区别开（污染期完播率虚高到 90%+）。三项任一不达标就写进 check_note 并把结论交回 PM，不要自动加预算
-last_checked: 2026-10-19
-check_note: 六轮判不了：10-19 查生产库 ad_daily_insights，全库最新 10-18，CTS 最新一天仍是 2026-10-10，CTS 取数断了 9 天，版位/池子/完播成本无数据可算；owner 已是 pm
+last_checked: 2026-10-20
+check_note: 七轮判不了：10-20 查生产库 ad_daily_insights，全库最新 10-19，CTS 最新一天仍是 2026-10-10（断11天）；10-20 待办邮件写 CTS 广告账户状态码3(欠款未结)已9天、不花钱，版位/池子/完播成本无数据可算；owner 已是 pm
 ---
 PM 2026-09-27「$15 先跑」。
 
