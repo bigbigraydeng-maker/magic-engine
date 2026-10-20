@@ -221,6 +221,28 @@ describe('官网表单 lead → CRM', () => {
     })
   })
 
+  it('附加 metadata 合并进触点 metadata，且 lead_id / source_url 不被覆盖（不传则与之前一致）', async () => {
+    mockDb([])
+    await mirrorWebFormLead({
+      clientId: CLIENT,
+      leadId: 'lead-meta',
+      name: 'Chris',
+      phone: null,
+      email: 'chris@example.com',
+      sourceUrl: '/tours/x',
+      metadata: { form_travel_window: 'mar_may_2027', form_budget_band: '3000_5000', lead_id: 'EVIL' },
+    })
+    expect(touchpointUpserts[0].metadata).toEqual({
+      form_travel_window: 'mar_may_2027',
+      form_budget_band: '3000_5000',
+      lead_id: 'lead-meta',
+      source_url: '/tours/x',
+    })
+    mockDb([])
+    await mirrorWebFormLead({ clientId: CLIENT, leadId: 'lead-plain', name: 'Chris', phone: null, email: 'chris@example.com' })
+    expect(touchpointUpserts[0].metadata).toEqual({ lead_id: 'lead-plain', source_url: null })
+  })
+
   it('电话邮箱都不成形 → 不建人（否则垃圾提交会灌满联系人表）', async () => {
     mockDb([])
     const r = await mirrorWebFormLead({

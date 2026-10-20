@@ -453,6 +453,22 @@ describe('⑤ 网站表单通知（发件人是本邮箱自己）', () => {
     expect(res.stoppedEarly).toBeUndefined()
   })
 
+  it('出发时间/预算选项映射不到代码 → 回执计 unknownExtras，并留一条日志（不含客人信息）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    ;(fetchFormNoticeSource as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      source: { body: FORM_BODY.replace('Form URL\t/contact', 'Form URL\t/contact\nTravel window\tEarly 2028'), replyTo: ['jane@example.com'], headers: GOOD_HEADERS },
+    })
+    ;(mirrorWebFormLead as ReturnType<typeof vi.fn>).mockResolvedValue({ contactId: 'contact-form', skipped: null })
+    inbox([formNotice()])
+    const res = await syncMailbox(TARGET)
+    expect(res.formEnquiries?.unknownExtras).toBe(1)
+    const msg = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('[mail-form]'))
+    expect(msg).toBeTruthy()
+    expect(msg).not.toContain('jane@example.com')
+    warn.mockRestore()
+  })
+
   it('读不到全文 → 不入库、不建人、不拦后面的邮件，只计数', async () => {
     ;(fetchFormNoticeSource as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: 'HTTP 429' })
     inbox([formNotice(), inboundFrom('real@gmail.com', '2026-10-19T02:00:00.000Z', 'cv-real')])
