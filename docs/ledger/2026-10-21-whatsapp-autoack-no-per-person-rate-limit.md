@@ -1,12 +1,15 @@
 ---
 id: 2026-10-21-whatsapp-autoack-no-per-person-rate-limit
 title: WhatsApp 自动安抚消息只有按会话 30 秒合并，没有按人限频，客人隔几分钟再发一条会再收一遍；线上开关已开，改法是发送逻辑变更（A 级），要 PM 先定口径
-status: decided
+status: done
 owner: pm
 decided_on: 2026-10-21
 source: session:ec90bb17
 verify_by: 2026-10-28
 verify_how: PM 定下口径后（同一位客人多久内只自动安抚一次；员工或 AI 草稿已回复过是否不再安抚）改代码上线；验证：同一位客人 N 小时内连发两次，只收到一次安抚；员工已回复后客人再发，不再收到安抚；N 小时后再发，会再收一次；30 秒内连发仍合并为一次
+done_on: 2026-10-21
+done_ref: pr:2972
+check_note: 口径 6 小时已落地：PR 2972 合并上线（PM 在 76 号窗口说了合 2972）。上线后的读回由 2026-10-21-autoack-cooldown-pm-phone-test 一次手机测试承担
 ---
 2026-10-21 76 号查代码：安抚话术是固定的中英双语常量（不含客户事实），限频只有 Inngest 的 30 秒防抖（按会话），只合并同一波连发；没有「员工已回过就不再自动安抚」的判断。作者注释写明这是已知的刻意范围边界（理由是 WhatsApp 每次回复会续 72 小时免费窗口）。
 CTS 的 WhatsApp AI 起草开关 10-21 已由 PM 点头打开，所以这个行为已经在线上；CTS 近 14 天 WhatsApp 会话约 9 个，量很小。
