@@ -80,6 +80,9 @@ const PRICE = z
     dateLine: text(40).optional(),
     footnote: text(80),
     footnoteSize: z.number().int().min(30, { message: '脚注字号必须在 30 到 60 之间' }).max(60, { message: '脚注字号必须在 30 到 60 之间' }).optional(),
+    layout: z.enum(['center', 'corner']).optional(),
+    qualifierSize: z.number().int().min(30, { message: '限定语字号必须在 30 到 60 之间' }).max(60, { message: '限定语字号必须在 30 到 60 之间' }).optional(),
+    footnoteBackdrop: z.boolean().optional(),
   })
   .strict();
 
@@ -119,6 +122,7 @@ export const ListReelPropsSchema = z
       .min(MIN_ITEMS, { message: '条目数量最少 3 个' })
       .max(MAX_ITEMS, { message: '条目数量最多 7 个' }),
     itemLabel: text(24),
+    itemLabelSize: z.number().int().min(30, { message: '条目标签字号必须在 30 到 64 之间' }).max(64, { message: '条目标签字号必须在 30 到 64 之间' }).optional(),
     revealTitle: text(40),
     price: PRICE,
   })

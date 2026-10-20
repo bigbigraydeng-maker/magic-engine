@@ -40,7 +40,7 @@ const Item: React.FC<{ props: ListReelProps; index: number; dur: number }> = ({ 
       <AbsoluteFill style={{ transform: `scale(${punch})`, filter: props.items[index].blurBackdrop ? 'blur(14px)' : 'none' }}><Footage src={props.items[index].clip} zoomTo={1.08} scrim={props.footageScrim} /></AbsoluteFill>
       {props.itemOverlayOpacity > 0 ? <AbsoluteFill style={{ background: `rgba(0,0,0,${props.itemOverlayOpacity})` }} /> : null}
       <div style={{ position: 'absolute', left: 90, top: 640, width: 870, fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.85)' }}>
-        <div style={{ fontSize: 40, fontWeight: 900, letterSpacing: 4, opacity: 0.95 }}>{props.itemLabel} {index + 1}/{props.items.length}</div>
+        <div style={{ fontSize: props.itemLabelSize ?? 40, fontWeight: 900, letterSpacing: 4, opacity: 0.95 }}>{props.itemLabel} {index + 1}/{props.items.length}</div>
         <div style={{ display: 'flex', alignItems: 'center', marginTop: 18 }}>
           <div style={{ width: 150, height: 150, flex: '0 0 150px', borderRadius: 28, background: props.brandColor, color: '#fff', fontSize: 110, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: `scale(${0.4 + 0.6 * stamp}) rotate(${(1 - stamp) * 18}deg)`, boxShadow: '0 10px 30px rgba(0,0,0,0.5)', textShadow: 'none' }}>✓</div>
           <div style={{ fontSize: 66, fontWeight: 900, lineHeight: 1.08, marginLeft: 28, opacity: Math.min(1, text * 2), transform: `translateX(${(1 - text) * 80}px)` }}>{props.items[index].text}</div>
@@ -66,8 +66,8 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <Sequence key={i} from={timing.itemFrom[i]} durationInFrames={timing.itemDur[i]}><Item props={props} index={i} dur={timing.itemDur[i]} />{flash ? <CutFlash /> : null}</Sequence>
       ))}
       <Sequence from={timing.revealFrom} durationInFrames={timing.totalFrames - timing.revealFrom}>
-        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} footnoteSize={props.price.footnoteSize} top={700} scrim={props.footageScrim} />
-        <div style={{ position: 'absolute', left: 90, top: 596, fontFamily, color: '#fff', fontSize: 60, fontWeight: 900, textShadow: '0 4px 24px rgba(0,0,0,0.6)' }}><Reveal delay={0}><div>{props.revealTitle}</div></Reveal></div>
+        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} footnoteSize={props.price.footnoteSize} top={700} scrim={props.footageScrim} layout={props.price.layout} qualifierSize={props.price.qualifierSize} footnoteBackdrop={props.price.footnoteBackdrop} />
+        <div style={{ position: 'absolute', left: 90, top: 596, width: 900, fontFamily, color: '#fff', fontSize: 60, fontWeight: 900, textShadow: '0 4px 24px rgba(0,0,0,0.6)' }}><Reveal delay={0}><div>{props.revealTitle}</div></Reveal></div>
         {flash ? <CutFlash /> : null}
       </Sequence>
       <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>

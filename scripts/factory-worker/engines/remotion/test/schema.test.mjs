@@ -732,3 +732,48 @@ describe('footageScrim', () => {
   })
 })
 import './datacard.test.mjs'
+
+describe('price/label layout options', () => {
+  test('corner layout, qualifierSize, footnoteBackdrop and itemLabelSize are accepted', () => {
+    const props = valid()
+    props.price.layout = 'corner'
+    props.price.qualifierSize = 56
+    props.price.footnoteBackdrop = true
+    props.itemLabelSize = 52
+    const parsed = parseListReelProps(props)
+    assert.equal(parsed.price.layout, 'corner')
+    assert.equal(parsed.price.qualifierSize, 56)
+    assert.equal(parsed.price.footnoteBackdrop, true)
+    assert.equal(parsed.itemLabelSize, 52)
+  })
+
+  test("price.layout 'left' is rejected", () => {
+    rejects((props) => {
+      props.price.layout = 'left'
+    })
+  })
+
+  for (const bad of [29, 61]) {
+    test(`qualifierSize ${bad} is rejected`, () => {
+      rejects((props) => {
+        props.price.qualifierSize = bad
+      })
+    })
+  }
+
+  for (const bad of [29, 65]) {
+    test(`itemLabelSize ${bad} is rejected`, () => {
+      rejects((props) => {
+        props.itemLabelSize = bad
+      })
+    })
+  }
+
+  test('the unmodified fixture still parses (defaults)', () => {
+    const parsed = parseListReelProps(valid())
+    assert.equal(parsed.price.layout, undefined)
+    assert.equal(parsed.price.qualifierSize, undefined)
+    assert.equal(parsed.price.footnoteBackdrop, undefined)
+    assert.equal(parsed.itemLabelSize, undefined)
+  })
+})
