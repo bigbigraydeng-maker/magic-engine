@@ -1,8 +1,9 @@
-# CTS 每日计划文案（10/20–10/26，7 天快照稿）
+# CTS 每日计划文案（10/22–10/28，7 天快照稿；10/20、10/21 两天已过，不提交）
 
 > 75 号 · 2026-10-19 · 依据：97 号转来的写入契约 `src/lib/campaign/daily-plan.ts`（bundleSchema，每天一个 bundle：Post 1 + Story 4 帧 + Reel 脚本 1）。
 > 我只出文案，由 97 号转成快照 JSON、走管理员会话提交；我没有写任何数据库。
 > 规则：全英文；不写截止/限时/倒计时/最后机会/最后一周；价格只放首评、不进 Post 正文；事实只用事实库与官网（编号见每条）；Reel 只给脚本，不出片，`media_status = NO_MEDIA`。
+> **窗口已改为 10/22–10/28**（74 号 10/21 定）；10/27、10/28 两天为新增，10/20、10/21 小节保留但**不提交**。Post 图 7 张（10/22–10/28）各不相同：10/27 用库里已有的苏州园林图（文件 `2026-10-26_P1_sh.png`，上次误传、状态 error，97 号用它的素材 id），10/28 用新图 `2026-10-28_P1_tale_greatwall.png`（已传，待分析）。链接：所有 Post 的 cta_url 用通用页 https://www.ctstours.co.nz/tours/china（97 号 10/21 补充，utm 在 campaign 层），文案里不放各团页面链接、不写 utm。
 > 7 张 Post 图各不相同。10/20–10/25 六张已传 ME 后台素材库（分析中）；10/26 改用外滩新图（`2026-10-26_P1_sh_bund.png`），上传后再回读。库里另有一张误传的 `2026-10-26_P1_sh.png`（苏州园林，不用）。
 > 苏东坡一轮意见已采纳：删 availability 画面句、warship/horse battle/to the desert 自译措辞、Mogao/Leifeng 无图条目；景点重复（Terracotta、West Lake、Great Wall）已削减，同日 Story/Reel 不再同景点。**未决**：本稿 Post/Story/Reel 与周包 w4 的同日内容是否并行发布，等 97 号确认。
 > **`cta_url` 全部留空，由 97 号统一填**（挂靠 campaign 的官网链接）。
@@ -217,6 +218,66 @@
 - `source_asset_ids`: []
 - `media_status`: NO_MEDIA
 - 事实 ID：SH-03/04/05/06, SH-02
+
+## 2026-10-27（Tue 周二）
+
+### Post
+- `hook`: A garden in Suzhou
+- `body`: On Day 2, Shanghai & Surroundings visits the Master of the Nets Garden, Panmen and Shantang Street in Suzhou. Departing 25 March 2027.
+- `cta`: See the full itinerary in the first comment.
+- `cta_url`: （留空，97 号填通用页）
+- `image_asset_id`: （待入库后由 97 号对接）；图片文件：`2026-10-26_P1_sh.png`（Suzhou 园林，已在库，status=error 待重跑分析）
+- 事实 ID：SH-04, SH-02
+
+### Story（4 帧，1→4 连播）
+1. `order`: 1 · `copy`: Suzhou: Panmen and Shantang Street
+2. `order`: 2 · `copy`: Wuxi: the Purple Sand Museum and Nanchang Ancient Street
+3. `order`: 3 · `copy`: Xinshi Town: afternoon tea in a thousand-year-old town
+4. `order`: 4 · `copy`: Shanghai & Surroundings, 10 days. Departing 25 March 2027.
+- 事实 ID：SH-04/05/06, SH-02；官网 10/14（Xinshi "afternoon tea in thousand-year-old Xinshi Town"）
+
+### Reel 脚本（只要文字）
+- `brief`: What is included in Shanghai & Surroundings, no price on screen.
+- `script`:
+  - [0–3s] Suzhou garden pavilion or canal, clean frame, logo only, no text overlay.
+  - [3–6s] Text: FLIGHTS · HOTELS AS SPECIFIED · ENGLISH-SPEAKING TOUR GUIDE. (official-page wording only)
+  - [6–9s] Text: ENTRANCE FEES AND MEALS AS SPECIFIED.
+  - [9–12s] Text: THE BUND · CITY GOD TEMPLE QUARTER · NANJING ROAD.
+  - [12–15s] End card: SHANGHAI & SURROUNDINGS · 10 DAYS · DEPARTS 25 MARCH 2027.
+- `caption`: What is included on Shanghai & Surroundings: flights, hotel accommodation as specified, an English-speaking tour guide, and the entrance fees and meals listed in the itinerary. Travel insurance and personal expenses are not included. Ten days from Auckland, departing 25 March 2027. Full itinerary and inclusions in the first comment.
+- `source_asset_ids`: []
+- `media_status`: NO_MEDIA
+- 事实 ID：官网 10/14 含/不含项（`2026-10-14-website-fact-sheet-march-tours-v1.md`），SH-02/08
+
+## 2026-10-28（Wed 周三）
+
+### Post
+- `hook`: Walk the Great Wall
+- `body`: Day 4 of A Tale of Two Cities is the Great Wall. Ten days from Auckland, departing 18 March 2027.
+- `cta`: See the full itinerary in the first comment.
+- `cta_url`: （留空，97 号填通用页）
+- `image_asset_id`: （待入库后由 97 号对接）；图片文件：`2026-10-28_P1_tale_greatwall.png`（Tale 长城，新图，已传，待分析）
+- 事实 ID：TALE-06, TALE-03, TALE-02
+
+### Story（4 帧，1→4 连播）
+1. `order`: 1 · `copy`: A Tale of Two Cities: walk the Great Wall
+2. `order`: 2 · `copy`: Beihai Park and Tian'anmen Square
+3. `order`: 3 · `copy`: Small Wild Goose Pagoda Museum and Huimin Street
+4. `order`: 4 · `copy`: 10 days from Auckland. Departing 18 March 2027.
+- 事实 ID：TALE-05/06/10, TALE-02
+
+### Reel 脚本（只要文字）
+- `brief`: Beijing to Xi'an by high-speed train, no price on screen.
+- `script`:
+  - [0–3s] Forbidden City aerial, clean frame, logo only, no text overlay.
+  - [3–6s] Text: BEIJING · FOUR NIGHTS.
+  - [6–9s] High-speed train. Text: HIGH-SPEED TRAIN TO XI'AN.
+  - [9–12s] Xi'an City Wall or Big Wild Goose Pagoda. Text: XI'AN · THREE NIGHTS.
+  - [12–15s] End card: A TALE OF TWO CITIES · 10 DAYS · DEPARTS 18 MARCH 2027.
+- `caption`: Four nights in Beijing, a high-speed train, and three nights in Xi'an. Ten days from Auckland, departing 18 March 2027. Full itinerary and inclusions in the first comment.
+- `source_asset_ids`: []
+- `media_status`: NO_MEDIA
+- 事实 ID：TALE-03/08/10, TALE-02
 
 ## 自查（每份必做）
 1. 截止类字样（还剩几周/截止/限时/倒计时/最后机会/最后一周/早鸟/11 月底）：正文、Story 帧、Reel 画面文字、caption 全文扫过，没有。
