@@ -101,15 +101,15 @@ function savedGrantAction(channel: SocialChannelStatus, clientId: string) {
 function DisconnectConnection({ channel, clientId, onChanged }: {
   channel: SocialChannelStatus; clientId: string; onChanged: () => void
 }) {
-  const platform = channel.platform === 'instagram' ? 'instagram' : 'youtube'
-  const name = platform === 'instagram' ? 'Instagram' : 'YouTube'
+  const platform = channel.platform === 'instagram' ? 'instagram' : channel.platform === 'tiktok' ? 'tiktok' : 'youtube'
+  const name = platform === 'instagram' ? 'Instagram' : platform === 'tiktok' ? 'TikTok' : 'YouTube'
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const generation = useRef(0)
   const invalidate = useCallback(() => { generation.current++ }, [])
   useEffect(() => { invalidate(); return invalidate }, [clientId, invalidate])
   const disconnect = async (connectionId: string) => {
-    if (!window.confirm(platform === 'instagram' ? '确认从 ME 断开此 Instagram 授权？这不会撤销 Instagram 端的应用许可。' : '确认断开这条 YouTube 授权？需要使用时可以重新授权。')) return
+    if (!window.confirm(platform === 'instagram' ? '确认从 ME 断开此 Instagram 授权？这不会撤销 Instagram 端的应用许可。' : platform === 'tiktok' ? '确认从 ME 断开此 TikTok 授权？这不会撤销 TikTok 端的应用许可，需要时可以重新连接。' : '确认断开这条 YouTube 授权？需要使用时可以重新授权。')) return
     const version = generation.current
     setBusy(true)
     setFailed(false)
@@ -166,7 +166,7 @@ function ChannelCard({ channel, clientId, canManage, onChanged }: {
         <p className="mt-2">仅在更换账号或当前授权失效时重新授权；授权不会自动发布内容。</p>
         <a href={manageAction.href} className="mt-2 inline-block font-semibold text-cyan-800">{manageAction.label}</a>
       </details>}
-      {canManage && (channel.platform === 'youtube' || channel.platform === 'instagram') && Boolean(channel.managedAccounts?.length) && <DisconnectConnection channel={channel} clientId={clientId} onChanged={onChanged} />}
+      {canManage && (channel.platform === 'youtube' || channel.platform === 'instagram' || channel.platform === 'tiktok') && Boolean(channel.managedAccounts?.length) && <DisconnectConnection channel={channel} clientId={clientId} onChanged={onChanged} />}
     </article>
   )
 }

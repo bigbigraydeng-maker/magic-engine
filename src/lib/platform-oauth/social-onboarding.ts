@@ -116,6 +116,8 @@ export function buildSocialConnections(client: SocialClientFacts, rows: SocialCo
     platform: 'tiktok', name: 'TikTok', profile: text(client.tiktok_handle), targetAccountId: null,
     ...resolveGrant(legacy.filter(row => row.provider === 'tiktok'), null, TIKTOK_SCOPES, now, false),
     publishing: PUBLICATION.tiktok,
+    managedAccounts: legacy.filter(row => row.provider === 'tiktok' && row.status !== 'revoked' && text(row.id) && text(row.account_id))
+      .map(row => ({ connectionId: row.id, accountId: row.account_id, displayName: text(row.display_name) ?? row.account_id })),
   }
   const youtube: SocialChannelStatus = {
     platform: 'youtube', name: 'YouTube Shorts', profile: channel, targetAccountId: youtubeTarget,

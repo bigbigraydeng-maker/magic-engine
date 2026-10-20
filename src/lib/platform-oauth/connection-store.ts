@@ -65,7 +65,7 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
     )
 
   if (error) {
-    throw new Error(`Failed to upsert connection: ${error.message}`)
+    throw Object.assign(new Error(`Failed to upsert connection: ${error.message}`), { code: error.code })
   }
 }
 
