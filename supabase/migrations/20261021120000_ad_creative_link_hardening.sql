@@ -604,6 +604,11 @@ BEGIN
     PERFORM public.ad_link_check_attestation_v1(
       p_client_id, p_attestation_id, p_creative_ref, p_source_video_id
     );
+  ELSE
+    -- 非强绑定不得带签字/视频 id：否则会留下「看起来有签字」的假绑定。
+    IF p_attestation_id IS NOT NULL OR p_source_video_id IS NOT NULL THEN
+      RAISE EXCEPTION 'link_ad_at_creation_v1: 非强绑定不得带 attestation_id / source_video_id';
+    END IF;
   END IF;
 
   INSERT INTO public.ad_creative_links (
@@ -709,6 +714,11 @@ BEGIN
     PERFORM public.ad_link_check_attestation_v1(
       p_client_id, p_attestation_id, p_creative_ref, p_source_video_id
     );
+  ELSE
+    -- 非强绑定不得带签字/视频 id：否则会留下「看起来有签字」的假绑定。
+    IF p_attestation_id IS NOT NULL OR p_source_video_id IS NOT NULL THEN
+      RAISE EXCEPTION 'link_ad_registration_v1: 非强绑定不得带 attestation_id / source_video_id';
+    END IF;
   END IF;
 
   INSERT INTO public.ad_creative_links (
@@ -811,6 +821,11 @@ BEGIN
     PERFORM public.ad_link_check_attestation_v1(
       p_client_id, p_attestation_id, p_creative_ref, p_source_video_id
     );
+  ELSE
+    -- 非强绑定不得带签字/视频 id：否则会留下「看起来有签字」的假绑定。
+    IF p_attestation_id IS NOT NULL OR p_source_video_id IS NOT NULL THEN
+      RAISE EXCEPTION 'link_ad_backfill_v1: 非强绑定不得带 attestation_id / source_video_id';
+    END IF;
   END IF;
 
   INSERT INTO public.ad_creative_links (
