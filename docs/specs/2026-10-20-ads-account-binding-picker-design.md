@@ -12,7 +12,7 @@ PM 诉求：能给一个客户绑多个广告户，不必手输账户号。
 1. 列候选账户（只读）。**为此需要抽出一个只管分页读 `adaccounts` 的读取函数**（§3），属于本项必要组成，不另算范围。
 2. 给**已有主账户且已在登记表里有行**的客户加一个**副账户**（带币种、日上限、立即抓快照）。
 3. 单独改副账户标签。
-4. 附带一个文案修正（§9）：待办里「去客户设置里解绑」的提示，本期没有解绑功能，改写。
+4. 附带一个文案修正（§7）：待办里「去客户设置里解绑」的提示，本期没有解绑功能，改写。
 
 ### 后续（不在本期，各自另出设计稿）
 解绑；换主账户（设主）；收紧旧 PATCH（`meta-ad-account/route.ts:133`）；把「只有旧列」的客户迁入登记表的入口；审计与预览里去掉 BM 号 / 他客户名（既有代码 `binding-service:133`、`:152`）；「移除在投旧主即拒」类规则（它会卡住纠正误绑，见 `registry-write.ts:5-11`，需单独权衡）；员工配置专属令牌的界面。
@@ -58,7 +58,7 @@ PM 诉求：能给一个客户绑多个广告户，不必手输账户号。
 
 ### 5.1 前置校验（全部 fail closed，任何一条不过都不写库）
 1. 内部员工；令牌来源 §3。
-2. 规范化 `parseAdAccountInput`。**Graph 核实该账户可读**（用 §3 读取函数 + 专属令牌取该账户的名称/状态/币种；读不到即拒）。
+2. 规范化 `parseAdAccountInput`。**Graph 核实该账户可读**：复用现成的 `verifyAdAccountAccessible`（`ad-account-binding.ts:126`，用专属令牌直读 `act_<id>`），并在 `:132` 处补返回币种；**不用候选列表函数来核实**（那等于变相「必须在清单里」，且列表分页截断会误拒，也与 §3 矛盾）。读不到即拒。
 3. 该客户必须已有主账户且**登记表里有行**。零行 / 只有旧列 → **拒绝（报错，不是放行）**：「该客户尚未迁入账户登记表，请联系开发」，并写 outcome=`blocked_legacy_only`。
 4. **冲突查重**：用现成的 `meta_ads_account_conflict(tenant, account)`（`20260920064556:99`，**同时查登记表、`clients` 旧列、读授权表**），命中 → 拒，只回「该账户已被占用」，不泄露客户名。另与本客户已有行比对（含 `123` vs `act_123`）。
 5. 币种：读不到 → 拒；与现有账户币种不一致 → 拒（理由同 daily-cap 币种闸）。
@@ -72,7 +72,7 @@ PM 诉求：能给一个客户绑多个广告户，不必手输账户号。
 |---|---|---|
 | ① | 单事务 RPC：插入登记行（副账户，`daily_budget_cap_cents` 先为空）+ 写审计（outcome=`authorized`→成功后 `applied` 在⑤）。RPC 返回**新行 id** | 失败：事务整体回滚，什么都没留下；23505（唯一索引）→ 回「已被占用」 |
 | ② | 一次抓**全部**账户的快照（含现有账户，否则 `envelope-facts.ts:165` 判「非同一轮」，加预算被拒） | 失败：进入补偿（§5.3）。**补偿判据不看「全部抓取是否 success」**：任一旧账户抓失败不得误删新户（`snapshot-sync.ts:254`）；只看**新账户自己的快照是否存在** |
-| ③ | 确认新账户的账户级快照已存在（含币种） | 不存在：进入补偿 |
+| ③ | 确认新账户的账户级快照**是本次抓取产生的**（`captured_at` 晚于步骤①的时间，且该轮抓取 complete，含币种） | 不满足：进入补偿。补偿不清快照，所以必须限定「本次」，否则重试时会拿旧快照「空过」 |
 | ④ | 写日上限（走 `daily-cap` PATCH 逻辑，以其返回为准） | 失败（409/校验不过）：进入补偿 |
 | ⑤ | 审计 outcome 更新为 `applied` | 失败：不影响数据；记日志 + 生成人工待办（审计缺口） |
 
@@ -81,11 +81,13 @@ PM 诉求：能给一个客户绑多个广告户，不必手输账户号。
 - 补偿成功：审计 outcome=`compensated`，向员工报错并说明原因。
 - 补偿失败：审计 outcome=`compensation_failed`，**同时生成人工待办**（见 §5.4），并向员工报「留下了半成品，已通知处理」，不假装成功。
 
-### 5.4 补偿失败的人工待办设计（what / how / href 三件套）
-- 来源：POST 路由在补偿失败时调用现有人工待办入口（参照 `src/lib/pm-todo/manual-items.ts`），不新建管道。
-- key：`ads_account_bind_incomplete:{clientId}:{规范化账户号}`（同一账户不重复生成）。
-- what：「给 {客户名} 加第二个广告账户 {脱敏号} 时中途失败，库里留了一条不完整的记录；这个账户现在可能被当成已登记，但没有日上限，会让整个客户的加预算被拒。」
-- how：「联系开发：按审计记录里的行 id 删掉这条不完整记录（或补齐上限），然后重新添加。」
+### 5.4 未走完 / 补偿失败的人工待办（拉模式，不是路由里「创建」）
+待办在本系统是**拉模式**：由各 pusher 定期读数据生成（参照 `src/lib/pm-todo/manual-items.ts`），没有路由能直接创建待办；种类须登记进 `LANE_OF_KIND` 穷举表（`five-kinds.ts:56`）。因此：
+- 新增一个 pusher `ads_account_bind_incomplete`：读审计表 `client_binding_audit`，命中以下两类行就生成待办：① outcome=`compensation_failed` 且对应登记行仍在、日上限仍为空；② outcome 长期停在 `authorized`（超过一个约定时限未走到 `applied` / `compensated`）。②同时覆盖「①后⑤前进程被打断，既不补偿也无告警」的缺口。
+- 在 `LANE_OF_KIND` 登记该 kind，归 dev 车道。
+- key：`ads_account_bind_incomplete:{clientId}:{规范化账户号}`（同账户不重复）。
+- what：「给 {客户名} 加第二个广告账户 {脱敏号} 时中途失败，库里留了一条不完整的记录；它没有日上限，会让整个客户的加预算被拒。」
+- how：「联系开发：按审计记录里的行 id 删掉这条不完整记录（或补齐上限），再重新添加。」
 - href：该客户广告健康页（同 `ads-account-status-items.ts` 的 `adsHealthHref(clientId)`）。
 
 ### 5.5 审计
@@ -94,7 +96,7 @@ PM 诉求：能给一个客户绑多个广告户，不必手输账户号。
 ## 6. 数据库（A 级迁移）
 
 1. **唯一索引**：格式 CHECK（`^act_[1-9][0-9]{9,24}$`）+ `ad_account_id` 普通唯一索引。不重造归一化。迁移前置检查：存量里不符合格式或已重复的行，**只列出不自动改**。
-2. **与旧 PATCH 的关系（更正 v3 的说法）**：全局唯一索引会让旧 PATCH 的「共用账户覆盖」在登记表层报 **23505**（`registry-write.ts:62`），不是不受影响。本期不改旧 PATCH，所以：旧 PATCH 遇 23505 会报错失败（这是**有意**的收紧——共用同一账户号的登记本来就不该并存于登记表）；风险与应对见 §8。
+2. **与旧 PATCH 的关系（更正 v3 的说法）**：全局唯一索引会让旧 PATCH 的「共用账户覆盖」在登记表层报 **23505**（`registry-write.ts:62`），不是不受影响。本期不改旧 PATCH，所以：旧 PATCH 的「覆盖共用」在全局唯一后会报 23505、失败。这是**有意**的收紧，但由此带来的已知问题与应对写在 §8。
 3. **审计枚举扩值**：表 **`client_binding_audit`**（`20260913120000`）。
    - `action` CHECK（:29）新增：`add_secondary`、`relabel`。
    - `outcome` CHECK（:32）新增：`blocked_legacy_only`、`compensated`、`compensation_failed`。（`blocked_legacy_only` 是 outcome，不是 action。）
@@ -104,11 +106,18 @@ PM 诉求：能给一个客户绑多个广告户，不必手输账户号。
 
 ## 7. 待办文案修正（第一刀附带）
 
-`src/lib/pm-todo/ads-account-status-items.ts:178` 的 how 现在写「在客户设置里把它解绑」，但本期没有解绑功能。改为：「确认这个账户确实不用了，就联系开发把它从登记里移除；还要用就去 Meta 后台申诉恢复。这条每周一提醒一次。」同步更新 `ads-account-status-items.test.ts` 里对该文案的断言。
+`src/lib/pm-todo/ads-account-status-items.ts:178` 的 how 现在写「在客户设置里把它解绑」，但本期没有解绑功能。改为：「确认这个账户确实不用了，就联系开发把它从登记里移除；还要用就去 Meta 后台申诉恢复。这条每周一提醒一次。」并在 `ads-account-status-items.test.ts` 里**新增**对该文案的断言（目前没有）。
 
-## 8. 本期不动旧 PATCH：风险明说
+## 8. 本期不动旧 PATCH：风险与已知问题
 
-旧 PATCH 仍接受共享令牌（`binding-service:78`），可以：把死户设为主、覆盖共用、移除在投旧主；改主后草稿（`draft:46`）、同步（`sync:64`）、评论回复（`comment-autoreply-posts:63`）、日 cron（`pullback:422`）仍只认主账户；CTS 迁移计划 §1.6 写明「暂不翻主账户」。本设计**不放大也不修复**这些：第一刀的新接口不触碰「谁是主账户」。风险由现有的内部员工限定 + 审计兜底；收紧旧 PATCH 在「后续」。
+旧 PATCH 仍接受共享令牌（`binding-service:78`），可以：把死户设为主、移除在投旧主；改主后草稿（`draft:46`）、同步（`sync:64`）、评论回复（`comment-autoreply-posts:63`）、日 cron（`pullback:422`）仍只认主账户；CTS 迁移计划 §1.6 写明「暂不翻主账户」。本设计**不放大也不修复**这些：第一刀的新接口不触碰「谁是主账户」。风险由现有的内部员工限定 + 审计兜底；收紧旧 PATCH 在「后续」。
+
+**全局唯一索引带来的已知问题（本期接受，写明）：**
+1. 旧 PATCH 的「覆盖共用」（共用账户的员工显式覆盖）在全局唯一后会在登记表层报 23505 而失败——有意收紧，应对：路由把 23505 映射成清晰错误「该账户已登记在别的客户名下，登记表不再允许共用」，并在员工界面说明。
+2. 旧路由遇 23505 目前会显示成「可以重试」（`binding-service:118`）：这是不准确的提示，列为已知问题，随旧 PATCH 收紧一并改（后续）。
+3. 旧 PATCH 失败时的回滚会按写前快照整体恢复，**可能删掉并发新增的副户行**（`registry-write:100`）：与本期 POST 同时操作同一客户时才会发生，概率低；应对：员工在同一客户上不并行操作；彻底解决需把旧 PATCH 也改成单事务（后续）。
+
+**待 PM 确认的问题（不替他定）：** 是否**永久禁止**两个客户共用同一个广告账户？全局唯一索引会把这条变成硬规则；如果业务上存在合法共用（例如代运营共用一个账户），需要另设计「共用账户」的表达方式，而不是靠覆盖。本期按现有数据（无合法共用的已知案例）先上全局唯一，但这一条要 PM 点头后才进迁移。
 
 ## 9. 敏感信息（范围说明）
 
@@ -133,9 +142,15 @@ SELECT regexp_replace(lower(ad_account_id),'^act_0*','') AS acct, count(DISTINCT
 FROM client_meta_ad_accounts GROUP BY 1 HAVING count(DISTINCT client_id) > 1;
 -- 存量格式不合 CHECK 的行
 SELECT id, client_id, ad_account_id FROM client_meta_ad_accounts WHERE ad_account_id !~ '^act_[1-9][0-9]{9,24}$';
--- 登记表与旧列漂移 / 只有旧列的客户
+-- 零行客户 / 只有旧列的客户
 SELECT c.id FROM clients c LEFT JOIN client_meta_ad_accounts a ON a.client_id=c.id
 WHERE c.meta_ad_account_id IS NOT NULL AND a.id IS NULL;
+-- 旧列与登记表不一致（旧列有值，但登记表里没有这个账户；或主账户标记对不上）
+SELECT c.id, c.meta_ad_account_id FROM clients c
+WHERE c.meta_ad_account_id IS NOT NULL
+  AND EXISTS (SELECT 1 FROM client_meta_ad_accounts a WHERE a.client_id=c.id)
+  AND NOT EXISTS (SELECT 1 FROM client_meta_ad_accounts a WHERE a.client_id=c.id
+                  AND regexp_replace(lower(a.ad_account_id),'^act_0*','') = regexp_replace(lower(c.meta_ad_account_id),'^act_0*','') AND a.is_primary);
 ```
 有结果则迁移前先由开发人工处理，不自动改。
 
