@@ -67,6 +67,7 @@ export interface EvaluateOverspendInput {
   capMinor?: number | null;
 }
 
+// 'yellow' is also used for a visible-but-non-alarming result (currency mismatch).
 export type OverspendSeverity = 'yellow' | 'red' | 'none';
 
 export interface EvaluateOverspendResult {
@@ -79,6 +80,8 @@ export interface StatusSample {
   effectiveStatus: string | null;
   accountStatus?: number | null;
   pendingReviewSinceIso?: string | null;
+  /** ISO timestamp of when this sample was taken (used to judge "over 24h" at its own time). */
+  sampledAtIso?: string | null;
 }
 
 export type StatusChangeType =

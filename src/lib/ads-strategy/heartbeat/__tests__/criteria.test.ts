@@ -10,6 +10,7 @@ import {
   diffStatus,
   dedupeKey,
   capAlarms,
+  parseIsoMs,
 } from '../criteria'
 
 describe('classifyRead', () => {
@@ -200,6 +201,64 @@ describe('evaluateZeroSpend', () => {
     expect(r.alarm).toBe(false)
     expect(r.code).toBe('report_lag')
   })
+
+  it('garbage activeSinceIso → activation_unknown', () => {
+    const r = evaluateZeroSpend({ ...base(), activeSinceIso: 'not-a-date' })
+    expect(r.alarm).toBe(false)
+    expect(r.code).toBe('activation_unknown')
+  })
+
+  it('empty activeSinceIso → activation_unknown', () => {
+    const r = evaluateZeroSpend({ ...base(), activeSinceIso: '' })
+    expect(r.alarm).toBe(false)
+    expect(r.code).toBe('activation_unknown')
+  })
+
+  it('garbage nowIso → data_missing', () => {
+    const r = evaluateZeroSpend({ ...base(), nowIso: 'not-a-date' })
+    expect(r.alarm).toBe(false)
+    expect(r.code).toBe('data_missing')
+  })
+
+  it.each([
+    'spendTodayMinor',
+    'impressionsToday',
+    'dailyBudgetMinor',
+    'expectedCpmMinor',
+  ] as const)('data_missing when %s is NaN', (field) => {
+    const r = evaluateZeroSpend({ ...base(), [field]: NaN })
+    expect(r.alarm).toBe(false)
+    expect(r.code).toBe('data_missing')
+  })
+
+  it('data_missing when spendTodayMinor is Infinity', () => {
+    const r = evaluateZeroSpend({ ...base(), spendTodayMinor: Infinity })
+    expect(r.alarm).toBe(false)
+    expect(r.code).toBe('data_missing')
+  })
+
+  it.each([NaN, Infinity, 0, -3])(
+    'invalid reportLagHours override %s falls back to default',
+    (v) => {
+      // active + 3h: default reportLag (2h) → report_lag
+      const r = evaluateZeroSpend(
+        { ...base(), nowIso: '2026-10-21T03:00:00Z' },
+        { reportLagHours: v },
+      )
+      expect(r.code).toBe('report_lag')
+    },
+  )
+
+  it.each([NaN, Infinity, 0, -3])(
+    'invalid zeroSpendMinEffectiveHours override %s falls back to default',
+    (v) => {
+      const r = evaluateZeroSpend(
+        { ...base(), nowIso: '2026-10-21T01:00:00Z' },
+        { zeroSpendMinEffectiveHours: v },
+      )
+      expect(r.code).toBe('too_fresh')
+    },
+  )
 })
 
 describe('evaluateOverspend', () => {
@@ -275,14 +334,62 @@ describe('evaluateOverspend', () => {
     expect(r.reason).toBe('within_cap')
   })
 
-  it('account currency mismatch → currency_mismatch', () => {
+  it('account currency mismatch → visible yellow, no alarm', () => {
     const r = evaluateOverspend({
       ...accountBase(),
       currency: 'AUD',
       spendTodayMinor: 20000,
     })
     expect(r.alarm).toBe(false)
+    expect(r.severity).toBe('yellow')
     expect(r.reason).toBe('currency_mismatch')
+  })
+
+  it('account currency comparison is case/space insensitive', () => {
+    const r = evaluateOverspend({
+      ...accountBase(),
+      currency: ' nzd ',
+      capCurrency: 'NZD',
+      spendTodayMinor: 15001,
+    })
+    expect(r.alarm).toBe(true)
+    expect(r.severity).toBe('red')
+  })
+
+  it('adset zero budget → not_applicable_zero_budget', () => {
+    const r = evaluateOverspend({ ...adsetBase(), dailyBudgetMinor: 0 })
+    expect(r.alarm).toBe(false)
+    expect(r.reason).toBe('not_applicable_zero_budget')
+  })
+
+  it('adset NaN budget → data_missing', () => {
+    const r = evaluateOverspend({ ...adsetBase(), dailyBudgetMinor: NaN })
+    expect(r.alarm).toBe(false)
+    expect(r.reason).toBe('data_missing')
+  })
+
+  it('adset Infinity spend → data_missing', () => {
+    const r = evaluateOverspend({ ...adsetBase(), spendTodayMinor: Infinity })
+    expect(r.alarm).toBe(false)
+    expect(r.reason).toBe('data_missing')
+  })
+
+  it('account zero cap → not_applicable_zero_cap', () => {
+    const r = evaluateOverspend({ ...accountBase(), capMinor: 0 })
+    expect(r.alarm).toBe(false)
+    expect(r.reason).toBe('not_applicable_zero_cap')
+  })
+
+  it('account NaN cap → data_missing', () => {
+    const r = evaluateOverspend({ ...accountBase(), capMinor: NaN })
+    expect(r.alarm).toBe(false)
+    expect(r.reason).toBe('data_missing')
+  })
+
+  it('account Infinity spend → data_missing', () => {
+    const r = evaluateOverspend({ ...accountBase(), spendTodayMinor: Infinity })
+    expect(r.alarm).toBe(false)
+    expect(r.reason).toBe('data_missing')
   })
 
   it('account capMinor missing → data_missing', () => {
@@ -308,6 +415,18 @@ describe('evaluateOverspend', () => {
     expect(r.alarm).toBe(true)
     expect(r.severity).toBe('yellow')
   })
+
+  it.each([NaN, Infinity, 0, -3])(
+    'invalid overspendFactor override %s falls back to default (1.2x no alarm)',
+    (v) => {
+      const r = evaluateOverspend(
+        { ...adsetBase(), spendTodayMinor: 12000 },
+        { overspendFactor: v },
+      )
+      expect(r.alarm).toBe(false)
+      expect(r.reason).toBe('within_budget')
+    },
+  )
 })
 
 describe('diffStatus', () => {
@@ -390,6 +509,44 @@ describe('diffStatus', () => {
     expect(changes[0].type).toBe('pending_review_over_24h')
   })
 
+  it('real sequence: reported once when crossing, not again', () => {
+    const t = '2026-10-21T10:00:00Z'
+    const sample1 = {
+      effectiveStatus: 'PENDING_REVIEW',
+      pendingReviewSinceIso: '2026-10-20T11:00:00Z', // 23h before t
+      sampledAtIso: t,
+    }
+    const sample2 = {
+      effectiveStatus: 'PENDING_REVIEW',
+      pendingReviewSinceIso: '2026-10-20T11:00:00Z', // 25h before t+2h
+      sampledAtIso: '2026-10-21T12:00:00Z',
+    }
+    const sample3 = {
+      effectiveStatus: 'PENDING_REVIEW',
+      pendingReviewSinceIso: '2026-10-20T11:00:00Z',
+      sampledAtIso: '2026-10-21T13:00:00Z',
+    }
+
+    const first = diffStatus(sample1, sample2, '2026-10-21T12:00:00Z')
+    expect(first).toHaveLength(1)
+    expect(first[0].type).toBe('pending_review_over_24h')
+
+    const second = diffStatus(sample2, sample3, '2026-10-21T13:00:00Z')
+    expect(second).toEqual([])
+  })
+
+  it('garbage pendingReviewSinceIso → no event', () => {
+    const changes = diffStatus(
+      { effectiveStatus: 'PENDING_REVIEW', pendingReviewSinceIso: null },
+      {
+        effectiveStatus: 'PENDING_REVIEW',
+        pendingReviewSinceIso: 'not-a-date',
+      },
+      now,
+    )
+    expect(changes).toEqual([])
+  })
+
   it('already over 24h and still over → [] (reported once)', () => {
     const changes = diffStatus(
       {
@@ -438,6 +595,32 @@ describe('diffStatus', () => {
       now,
     )
     expect(changes).toEqual([])
+  })
+
+  it('accountStatus recovery 3 → 1 is also reported', () => {
+    const changes = diffStatus(
+      { effectiveStatus: 'ACTIVE', accountStatus: 3 },
+      { effectiveStatus: 'ACTIVE', accountStatus: 1 },
+      now,
+    )
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toEqual({
+      type: 'account_status_changed',
+      from: '3',
+      to: '1',
+    })
+  })
+})
+
+describe('parseIsoMs', () => {
+  it('parses a valid ISO string', () => {
+    expect(parseIsoMs('2026-10-21T00:00:00Z')).toBe(
+      Date.UTC(2026, 9, 21, 0, 0, 0),
+    )
+  })
+
+  it.each(['', 'not-a-date'])('returns null for %p', (s) => {
+    expect(parseIsoMs(s)).toBeNull()
   })
 })
 
@@ -489,6 +672,17 @@ describe('dedupeKey', () => {
     const a = key({ accountId: 'act_1' })
     const b = key({ accountId: 'act_2' })
     expect(a).not.toBe(b)
+  })
+
+  it('ids containing "|" cannot collide', () => {
+    const a = key({ accountId: 'act|1', objectId: 'x' })
+    const b = key({ accountId: 'act', objectId: '1|x' })
+    expect(a).not.toBe(b)
+  })
+
+  it('invalid timezone falls back to UTC day', () => {
+    const k = key({ timezone: 'Not/AZone' })
+    expect(k).toContain('2026-10-21')
   })
 })
 
@@ -555,5 +749,39 @@ describe('capAlarms', () => {
     const r = capAlarms(alarms, 'act_1', { maxAlarmsPerAccountPerDay: 50 })
     expect(r.kept).toHaveLength(5)
     expect(r.mergedSummary).toBe('账户 act_1 另有 2 个问题')
+  })
+
+  it.each([NaN, Infinity, 0, -3])(
+    'invalid maxAlarmsPerAccountPerDay override %s falls back to default 5',
+    (v) => {
+      const alarms = [
+        alarm(1, 'red'),
+        alarm(2, 'red'),
+        alarm(3, 'yellow'),
+        alarm(4, 'yellow'),
+        alarm(5, 'yellow'),
+        alarm(6, 'yellow'),
+        alarm(7, 'yellow'),
+      ]
+      const r = capAlarms(alarms, 'act_1', { maxAlarmsPerAccountPerDay: v })
+      expect(r.kept).toHaveLength(5)
+      expect(r.mergedSummary).toBe('账户 act_1 另有 2 个问题')
+    },
+  )
+
+  it('reds are never merged away (6 reds + 1 yellow → 6 kept, 1 merged)', () => {
+    const alarms = [
+      alarm(1, 'red'),
+      alarm(2, 'red'),
+      alarm(3, 'red'),
+      alarm(4, 'red'),
+      alarm(5, 'red'),
+      alarm(6, 'red'),
+      alarm(7, 'yellow'),
+    ]
+    const r = capAlarms(alarms, 'act_1')
+    expect(r.kept).toHaveLength(6)
+    expect(r.kept.every((a) => a.severity === 'red')).toBe(true)
+    expect(r.mergedSummary).toBe('账户 act_1 另有 1 个问题')
   })
 })

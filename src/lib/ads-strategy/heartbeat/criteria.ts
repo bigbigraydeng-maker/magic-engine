@@ -52,11 +52,15 @@ interface ResolvedThresholds {
   maxAlarmsPerAccountPerDay: number;
 }
 
+function isValidOverride(v: number | undefined): v is number {
+  return v !== undefined && Number.isFinite(v) && v > 0;
+}
+
 function resolveThresholds(t?: HeartbeatThresholds): ResolvedThresholds {
   const pickMin = (v: number | undefined, def: number) =>
-    v === undefined ? def : Math.max(v, def);
+    isValidOverride(v) ? Math.max(v, def) : def;
   const pickMax = (v: number | undefined, def: number) =>
-    v === undefined ? def : Math.min(v, def);
+    isValidOverride(v) ? Math.min(v, def) : def;
   return {
     reportLagHours: pickMin(t?.reportLagHours, REPORT_LAG_HOURS),
     zeroSpendMinEffectiveHours: pickMin(
@@ -124,8 +128,88 @@ const IN_REVIEW_SUBSTRINGS = [
   'PREAPPROVED',
 ];
 
-function hoursBetween(fromIso: string, toIso: string): number {
-  return (new Date(toIso).getTime() - new Date(fromIso).getTime()) / HOUR_MS;
+export function parseIsoMs(iso: string): number | null {
+  const ms = new Date(iso).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function hoursBetween(fromIso: string, toIso: string): number | null {
+  const from = parseIsoMs(fromIso);
+  const to = parseIsoMs(toIso);
+  if (from === null || to === null) return null;
+  return (to - from) / HOUR_MS;
+}
+
+function isFiniteNumber(v: number | null | undefined): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function zeroSpendResult(
+  alarm: boolean,
+  reason: string,
+  code: EvaluateZeroSpendResult['code'],
+): EvaluateZeroSpendResult {
+  return { alarm, reason, code };
+}
+
+function passesTimingGates(
+  input: EvaluateZeroSpendInput,
+  t: ResolvedThresholds,
+): EvaluateZeroSpendResult | null {
+  const { effectiveStatus, deliverySubStatus, activeSinceIso, nowIso } = input;
+
+  if (effectiveStatus !== 'ACTIVE') {
+    return zeroSpendResult(false, 'not_active', 'not_active');
+  }
+
+  if (deliverySubStatus) {
+    const upper = deliverySubStatus.toUpperCase();
+    if (IN_REVIEW_SUBSTRINGS.some((s) => upper.includes(s))) {
+      return zeroSpendResult(
+        false,
+        'in_review_or_learning',
+        'in_review_or_learning',
+      );
+    }
+  }
+
+  if (activeSinceIso === null || parseIsoMs(activeSinceIso) === null) {
+    return zeroSpendResult(false, 'activation_unknown', 'activation_unknown');
+  }
+
+  const hoursSinceActive = hoursBetween(activeSinceIso, nowIso);
+  if (hoursSinceActive === null) {
+    return zeroSpendResult(false, 'data_missing', 'data_missing');
+  }
+
+  if (hoursSinceActive < t.zeroSpendMinEffectiveHours) {
+    return zeroSpendResult(false, 'too_fresh', 'too_fresh');
+  }
+
+  if (hoursSinceActive < t.zeroSpendMinEffectiveHours + t.reportLagHours) {
+    return zeroSpendResult(false, 'report_lag', 'report_lag');
+  }
+
+  if (input.effectiveDeliveryHours < t.zeroSpendMinEffectiveHours) {
+    return zeroSpendResult(
+      false,
+      'night_low_traffic_or_schedule',
+      'night_low_traffic_or_schedule',
+    );
+  }
+
+  return null;
+}
+
+function computeExpectedImpressions(
+  dailyBudgetMinor: number,
+  expectedCpmMinor: number,
+  effectiveDeliveryHours: number,
+): number {
+  return (
+    (dailyBudgetMinor / (expectedCpmMinor / 1000)) *
+    (effectiveDeliveryHours / 24)
+  );
 }
 
 export function evaluateZeroSpend(
@@ -133,149 +217,122 @@ export function evaluateZeroSpend(
   thresholds?: HeartbeatThresholds,
 ): EvaluateZeroSpendResult {
   const t = resolveThresholds(thresholds);
+
+  const gate = passesTimingGates(input, t);
+  if (gate) return gate;
+
   const {
-    effectiveStatus,
-    deliverySubStatus,
-    activeSinceIso,
-    nowIso,
-    effectiveDeliveryHours,
     spendTodayMinor,
     impressionsToday,
     dailyBudgetMinor,
     expectedCpmMinor,
-    hasDeliverySchedule,
+    effectiveDeliveryHours,
   } = input;
 
-  if (effectiveStatus !== 'ACTIVE') {
-    return { alarm: false, reason: 'not_active', code: 'not_active' };
-  }
-
-  if (deliverySubStatus) {
-    const upper = deliverySubStatus.toUpperCase();
-    if (IN_REVIEW_SUBSTRINGS.some((s) => upper.includes(s))) {
-      return {
-        alarm: false,
-        reason: 'in_review_or_learning',
-        code: 'in_review_or_learning',
-      };
-    }
-  }
-
-  if (activeSinceIso === null) {
-    return {
-      alarm: false,
-      reason: 'activation_unknown',
-      code: 'activation_unknown',
-    };
-  }
-
-  const hoursSinceActive = hoursBetween(activeSinceIso, nowIso);
-
-  if (hoursSinceActive < t.zeroSpendMinEffectiveHours) {
-    return { alarm: false, reason: 'too_fresh', code: 'too_fresh' };
-  }
-
-  if (hoursSinceActive < t.zeroSpendMinEffectiveHours + t.reportLagHours) {
-    return { alarm: false, reason: 'report_lag', code: 'report_lag' };
-  }
-
   if (
-    effectiveDeliveryHours < t.zeroSpendMinEffectiveHours ||
-    (hasDeliverySchedule && effectiveDeliveryHours === 0)
+    !isFiniteNumber(spendTodayMinor) ||
+    !isFiniteNumber(impressionsToday) ||
+    !isFiniteNumber(dailyBudgetMinor) ||
+    !isFiniteNumber(expectedCpmMinor) ||
+    !isFiniteNumber(effectiveDeliveryHours) ||
+    expectedCpmMinor <= 0
   ) {
-    return {
-      alarm: false,
-      reason: 'night_low_traffic_or_schedule',
-      code: 'night_low_traffic_or_schedule',
-    };
+    return zeroSpendResult(false, 'data_missing', 'data_missing');
   }
 
-  if (
-    spendTodayMinor === null ||
-    impressionsToday === null ||
-    dailyBudgetMinor === null ||
-    expectedCpmMinor === null
-  ) {
-    return { alarm: false, reason: 'data_missing', code: 'data_missing' };
-  }
-
-  if (expectedCpmMinor <= 0) {
-    // Cannot compute expected impressions; treat as missing data.
-    return { alarm: false, reason: 'data_missing', code: 'data_missing' };
-  }
-
-  const expectedImpressions =
-    (dailyBudgetMinor / (expectedCpmMinor / 1000)) *
-    (effectiveDeliveryHours / 24);
+  const expectedImpressions = computeExpectedImpressions(
+    dailyBudgetMinor,
+    expectedCpmMinor,
+    effectiveDeliveryHours,
+  );
 
   if (expectedImpressions < 1) {
-    return { alarm: false, reason: 'micro_budget', code: 'micro_budget' };
+    return zeroSpendResult(false, 'micro_budget', 'micro_budget');
   }
 
   if (
     spendTodayMinor === 0 &&
     impressionsToday < t.zeroSpendImpressionFraction * expectedImpressions
   ) {
-    return { alarm: true, reason: 'zero_spend', code: 'alarm' };
+    return zeroSpendResult(true, 'zero_spend', 'alarm');
   }
 
-  return { alarm: false, reason: 'delivering', code: 'delivering' };
+  return zeroSpendResult(false, 'delivering', 'delivering');
 }
 
 // ---------------------------------------------------------------------------
 // D) evaluateOverspend
 // ---------------------------------------------------------------------------
 
+function overspendResult(
+  alarm: boolean,
+  severity: EvaluateOverspendResult['severity'],
+  reason: string,
+): EvaluateOverspendResult {
+  return { alarm, severity, reason };
+}
+
+function overspendForAdset(
+  input: EvaluateOverspendInput,
+  t: ResolvedThresholds,
+): EvaluateOverspendResult {
+  const { budgetLevel, dailyBudgetMinor, spendTodayMinor } = input;
+
+  if (budgetLevel === 'campaign' || dailyBudgetMinor === null) {
+    return overspendResult(false, 'none', 'cbo_not_applicable');
+  }
+  if (!isFiniteNumber(dailyBudgetMinor) || !isFiniteNumber(spendTodayMinor)) {
+    return overspendResult(false, 'none', 'data_missing');
+  }
+  if (dailyBudgetMinor <= 0) {
+    return overspendResult(false, 'none', 'not_applicable_zero_budget');
+  }
+  if (spendTodayMinor > dailyBudgetMinor * t.overspendFactor) {
+    // First version: adset overspend is yellow only, never red, never a todo.
+    return overspendResult(true, 'yellow', 'adset_overspend');
+  }
+  return overspendResult(false, 'none', 'within_budget');
+}
+
+function normalizeCurrency(c: string | null | undefined): string | null {
+  if (c === null || c === undefined) return null;
+  const trimmed = c.trim().toUpperCase();
+  return trimmed === '' ? null : trimmed;
+}
+
+function overspendForAccount(
+  input: EvaluateOverspendInput,
+): EvaluateOverspendResult {
+  const { spendTodayMinor, currency, capCurrency, capMinor } = input;
+
+  if (!isFiniteNumber(capMinor) || !isFiniteNumber(spendTodayMinor)) {
+    return overspendResult(false, 'none', 'data_missing');
+  }
+  if (capMinor <= 0) {
+    return overspendResult(false, 'none', 'not_applicable_zero_cap');
+  }
+  const cur = normalizeCurrency(currency);
+  const capCur = normalizeCurrency(capCurrency);
+  if (cur === null || capCur === null) {
+    return overspendResult(false, 'none', 'data_missing');
+  }
+  if (cur !== capCur) {
+    // Visible but non-alarming: surfaced as yellow, never a todo.
+    return overspendResult(false, 'yellow', 'currency_mismatch');
+  }
+  if (spendTodayMinor > capMinor) {
+    return overspendResult(true, 'red', 'account_overspend');
+  }
+  return overspendResult(false, 'none', 'within_cap');
+}
+
 export function evaluateOverspend(
   input: EvaluateOverspendInput,
   thresholds?: HeartbeatThresholds,
 ): EvaluateOverspendResult {
   const t = resolveThresholds(thresholds);
-  const {
-    budgetLevel,
-    objectKind,
-    dailyBudgetMinor,
-    spendTodayMinor,
-    currency,
-    capCurrency,
-    capMinor,
-  } = input;
-
-  if (objectKind === 'adset') {
-    if (budgetLevel === 'campaign' || dailyBudgetMinor === null) {
-      return {
-        alarm: false,
-        severity: 'none',
-        reason: 'cbo_not_applicable',
-      };
-    }
-    if (spendTodayMinor === null) {
-      return { alarm: false, severity: 'none', reason: 'data_missing' };
-    }
-    if (spendTodayMinor > dailyBudgetMinor * t.overspendFactor) {
-      // First version: adset overspend is yellow only, never red, never a todo.
-      return { alarm: true, severity: 'yellow', reason: 'adset_overspend' };
-    }
-    return { alarm: false, severity: 'none', reason: 'within_budget' };
-  }
-
-  // objectKind === 'account'
-  if (capMinor === null || capMinor === undefined) {
-    return { alarm: false, severity: 'none', reason: 'data_missing' };
-  }
-  if (spendTodayMinor === null) {
-    return { alarm: false, severity: 'none', reason: 'data_missing' };
-  }
-  if (capCurrency === null || capCurrency === undefined) {
-    return { alarm: false, severity: 'none', reason: 'data_missing' };
-  }
-  if (currency !== capCurrency) {
-    return { alarm: false, severity: 'none', reason: 'currency_mismatch' };
-  }
-  if (spendTodayMinor > capMinor) {
-    return { alarm: true, severity: 'red', reason: 'account_overspend' };
-  }
-  return { alarm: false, severity: 'none', reason: 'within_cap' };
+  if (input.objectKind === 'adset') return overspendForAdset(input, t);
+  return overspendForAccount(input);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,13 +341,67 @@ export function evaluateOverspend(
 
 function isOverPendingReview(
   sample: StatusSample,
-  nowIso: string,
+  referenceIso: string,
   maxHours: number,
 ): boolean {
   if (sample.effectiveStatus !== 'PENDING_REVIEW') return false;
   if (!sample.pendingReviewSinceIso) return false;
-  const hours = hoursBetween(sample.pendingReviewSinceIso, nowIso);
+  const hours = hoursBetween(sample.pendingReviewSinceIso, referenceIso);
+  // Unparsable times mean "not over 24h" (no event).
+  if (hours === null) return false;
   return hours > maxHours;
+}
+
+function statusTransitionChange(
+  prev: StatusSample,
+  next: StatusSample,
+): StatusChange | null {
+  const prevStatus = prev.effectiveStatus;
+  const nextStatus = next.effectiveStatus;
+
+  if (prevStatus === nextStatus) return null;
+  if (nextStatus === 'DISAPPROVED') {
+    return { type: 'disapproved', from: prevStatus, to: nextStatus };
+  }
+  if (nextStatus === 'WITH_ISSUES') {
+    return { type: 'with_issues', from: prevStatus, to: nextStatus };
+  }
+  return null;
+}
+
+// pending_review_over_24h: report once when it first crosses.
+// prev is judged at ITS OWN sampled time, next at nowIso.
+function pendingReviewChange(
+  prev: StatusSample,
+  next: StatusSample,
+  nowIso: string,
+  maxHours: number,
+): StatusChange | null {
+  const prevRef = prev.sampledAtIso ?? nowIso;
+  const prevOver = isOverPendingReview(prev, prevRef, maxHours);
+  const nextOver = isOverPendingReview(next, nowIso, maxHours);
+  if (prevOver || !nextOver) return null;
+  return {
+    type: 'pending_review_over_24h',
+    from: prev.effectiveStatus,
+    to: next.effectiveStatus,
+  };
+}
+
+// Any account status change is reported, including recovery (e.g. 3 → 1).
+function accountStatusChange(
+  prev: StatusSample,
+  next: StatusSample,
+): StatusChange | null {
+  const prevAccount = prev.accountStatus ?? null;
+  const nextAccount = next.accountStatus ?? null;
+  if (prevAccount === null || nextAccount === null) return null;
+  if (prevAccount === nextAccount) return null;
+  return {
+    type: 'account_status_changed',
+    from: String(prevAccount),
+    to: String(nextAccount),
+  };
 }
 
 export function diffStatus(
@@ -302,53 +413,13 @@ export function diffStatus(
   if (prev === null) return [];
 
   const t = resolveThresholds(thresholds);
-  const changes: StatusChange[] = [];
+  const candidates = [
+    statusTransitionChange(prev, next),
+    pendingReviewChange(prev, next, nowIso, t.pendingReviewMaxHours),
+    accountStatusChange(prev, next),
+  ];
 
-  const prevStatus = prev.effectiveStatus;
-  const nextStatus = next.effectiveStatus;
-
-  if (prevStatus !== nextStatus) {
-    if (nextStatus === 'DISAPPROVED') {
-      changes.push({
-        type: 'disapproved',
-        from: prevStatus,
-        to: nextStatus,
-      });
-    } else if (nextStatus === 'WITH_ISSUES') {
-      changes.push({
-        type: 'with_issues',
-        from: prevStatus,
-        to: nextStatus,
-      });
-    }
-  }
-
-  // pending_review_over_24h: report once when it first crosses.
-  const prevOver = isOverPendingReview(prev, nowIso, t.pendingReviewMaxHours);
-  const nextOver = isOverPendingReview(next, nowIso, t.pendingReviewMaxHours);
-  if (!prevOver && nextOver) {
-    changes.push({
-      type: 'pending_review_over_24h',
-      from: prevStatus,
-      to: nextStatus,
-    });
-  }
-
-  const prevAccount = prev.accountStatus ?? null;
-  const nextAccount = next.accountStatus ?? null;
-  if (
-    prevAccount !== null &&
-    nextAccount !== null &&
-    prevAccount !== nextAccount
-  ) {
-    changes.push({
-      type: 'account_status_changed',
-      from: String(prevAccount),
-      to: String(nextAccount),
-    });
-  }
-
-  return changes;
+  return candidates.filter((c): c is StatusChange => c !== null);
 }
 
 // ---------------------------------------------------------------------------
@@ -362,13 +433,23 @@ const ACCOUNT_LEVEL_TYPES = new Set([
   'heartbeat_stalled',
 ]);
 
+function safeAccountDayKey(timezone: string | null, now: Date): string {
+  try {
+    return accountDayKey(timezone, now);
+  } catch (err) {
+    if (err instanceof RangeError) return accountDayKey(null, now);
+    throw err;
+  }
+}
+
 export function dedupeKey(input: DedupeKeyInput): string {
   const { clientId, accountId, objectId, type, timezone, now } = input;
-  const day = accountDayKey(timezone, now);
+  const day = safeAccountDayKey(timezone, now);
+  const enc = encodeURIComponent;
   if (ACCOUNT_LEVEL_TYPES.has(type)) {
-    return `${clientId}|${accountId}|${type}|${day}`;
+    return `${enc(clientId)}|${enc(accountId)}|${enc(type)}|${enc(day)}`;
   }
-  return `${clientId}|${accountId}|${objectId ?? ''}|${type}|${day}`;
+  return `${enc(clientId)}|${enc(accountId)}|${enc(objectId ?? '')}|${enc(type)}|${enc(day)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -383,18 +464,20 @@ export function capAlarms<T extends AlarmLike>(
   const t = resolveThresholds(thresholds);
   const limit = t.maxAlarmsPerAccountPerDay;
 
-  if (alarms.length <= limit) {
-    return { kept: alarms.slice(), mergedSummary: null };
-  }
-
-  // Stable sort: red first, preserving original order within each severity.
+  // NOTE: the "≤5 per account per day" limit only holds if the caller passes
+  // the whole day's alarms for the account. Reds are never merged away.
   const reds = alarms.filter((a) => a.severity === 'red');
   const yellows = alarms.filter((a) => a.severity === 'yellow');
-  const ordered = [...reds, ...yellows];
 
-  const kept = ordered.slice(0, limit);
-  const mergedCount = ordered.length - limit;
-  const mergedSummary = `账户 ${accountId} 另有 ${mergedCount} 个问题`;
+  if (alarms.length <= limit) {
+    return { kept: [...reds, ...yellows], mergedSummary: null };
+  }
 
-  return { kept, mergedSummary };
+  const remaining = Math.max(0, limit - reds.length);
+  const keptYellows = yellows.slice(0, remaining);
+  const mergedCount = yellows.length - keptYellows.length;
+  const mergedSummary =
+    mergedCount > 0 ? `账户 ${accountId} 另有 ${mergedCount} 个问题` : null;
+
+  return { kept: [...reds, ...keptYellows], mergedSummary };
 }
