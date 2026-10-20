@@ -124,6 +124,7 @@ export const ListReelPropsSchema = z
     itemLabel: text(24),
     itemLabelSize: z.number().int().min(30, { message: '条目标签字号必须在 30 到 64 之间' }).max(64, { message: '条目标签字号必须在 30 到 64 之间' }).optional(),
     revealTitle: text(40),
+    revealTitleSize: z.number().int().min(36, { message: '片尾标题字号必须在 36 到 60 之间' }).max(60, { message: '片尾标题字号必须在 36 到 60 之间' }).optional(),
     price: PRICE,
   })
   .strict()
