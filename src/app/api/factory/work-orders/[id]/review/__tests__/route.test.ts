@@ -196,6 +196,8 @@ describe('review route — client scope + approve permission', () => {
   })
 
   it('会话邮箱为空 → 403，不调用任何 apply', async () => {
+    // ADMIN_EMAILS 末尾多一个逗号：getUserPermissions('') 会把没有邮箱的登录当成全局管理员，守卫必须自己拦住
+    process.env.ADMIN_EMAILS = 'fde@magiclab.test,'
     h.email = ''
 
     const res = await callRoute()

@@ -103,6 +103,14 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
     expect(inserts).toEqual([])
   })
 
+  it('别家客户 + 状态不是 in_review → 403（先核客户再核状态，不泄露别家工单的状态）', async () => {
+    const { db, updates } = mockSupabase([{ data: { ...IN_REVIEW_WO, status: 'approved' }, error: null }])
+    const r = await approve(db, 'wo-1', 'me@x.com', 'other-client')
+    expect(r.status).toBe(403)
+    expect(String(r.error)).not.toContain('status=')
+    expect(updates).toEqual([])
+  })
+
   it('update 0 行(被 sweeper 抢) → 409', async () => {
     const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }, { data: [], error: null }])
     expect((await approve(db)).status).toBe(409)

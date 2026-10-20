@@ -1,22 +1,24 @@
 // P21.J M2 — POST /api/factory/work-orders/[id]/revive(spec §6.1 dead_letter 复活)
 // dead_letter 工单一键复活回 queued:清 claim 痕迹 + attempt_count 归零(人工判断值得重试),
-// 记 reclaim_count+1 + revived_by 留痕。仅内部员工(requireGlobalAdmin)：复活 = 重新排产会再花钱，唯一入口是跨客户总览 /dashboard/factory；限定客户的管理员一律 403。非 dead_letter 状态拒。
+// 记 reclaim_count+1 + revived_by 留痕。仅内部员工(requireAdminScope 且范围为 global，邮箱为空一律拒)：唯一入口是跨客户总览 /dashboard/factory；限定客户的管理员一律 403。非 dead_letter 状态拒。
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { requireAdminScope } from '@/lib/auth/require-admin'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireGlobalAdmin()
-  if (!admin.ok) {
-    console.warn(`[factory scope] revive denied (${admin.status})`)
-    return NextResponse.json({ error: admin.error }, { status: admin.status })
-  }
+  const admin = await requireAdminScope()
+  if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
   const reviver = admin.user.email ?? 'admin'
 
   const { id } = await params
+
+  if (admin.scope.kind !== 'global') {
+    console.warn(`[factory scope] revive denied: ${reviver} is limited to client ${admin.scope.clientId}, work order ${id}`)
+    return NextResponse.json({ error: 'Forbidden — only internal staff can revive a work order' }, { status: 403 })
+  }
 
   const { data: wo, error: loadErr } = await supabaseAdmin
     .from('content_work_orders')

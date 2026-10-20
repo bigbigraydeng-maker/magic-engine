@@ -115,6 +115,9 @@ export type ScopedAdminResult =
  * 邮箱为空一律拒：`getUserPermissions('')` 在 ADMIN_EMAILS 多一个逗号时会返回全局管理员。
  *
  * 客户 id 统一转小写、去首尾空白再比较（见 scopeAllowsClient）。
+ *
+ * ⚠️ 只看 ok、不看 scope，效果就等于 guardAdmin：按客户操作的接口必须用 scopeAllowsClient 核客户，
+ *    或把限定客户的 id 传给下游（看 scope.kind，只有 'global' 才可以不限客户）。
  */
 export async function requireAdminScope(): Promise<ScopedAdminResult> {
   const session = await requireSession()

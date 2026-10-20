@@ -26,7 +26,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const admin = await requireAdminScope()
   if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
   const reviewer = admin.user.email ?? 'admin'
-  const scopedClientId = admin.scope.kind === 'client' ? admin.scope.clientId : undefined
+  const scopedClientId = admin.scope.kind === 'global' ? undefined : admin.scope.clientId
 
   const { id } = await params
 
@@ -40,7 +40,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
   if (parsed.action === 'approve' && admin.scope.kind !== 'global') {
-    console.warn(`[factory scope] approve denied: ${reviewer} is limited to client ${scopedClientId}, approving publishes for real`)
+    console.warn(`[factory scope] approve denied: ${reviewer} is limited to client ${scopedClientId}, approving publishes for real, work order ${id}`)
     return NextResponse.json({ error: 'Forbidden — only internal staff can approve a work order for publishing' }, { status: 403 })
   }
 
@@ -54,6 +54,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer, scopedClientId, parsed.checklistHuman)
         : await applyBudgetUpdate(supabaseAdmin, id, parsed.newBudget, reviewer, scopedClientId)
 
+  if (!result.ok && result.status === 403 && scopedClientId) {
+    console.warn(`[factory scope] ${parsed.action} denied: ${reviewer} is limited to client ${scopedClientId}, work order ${id}`)
+  }
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
   return NextResponse.json({ ok: true, ...result.data })
 }

@@ -102,6 +102,8 @@ describe('POST /api/factory/chat — scope', () => {
     const res = await call({ client_id: CLIENT_A.toUpperCase(), message: 'hello' })
     expect(res.status).toBe(200)
     expect(h.chatWithFactory).toHaveBeenCalledTimes(1)
+    // 往下游传的是统一后的小写 id（下游 loadInReview 是严格比较）
+    expect(h.chatWithFactory.mock.calls[0][1]).toBe(CLIENT_A)
   })
 
   it('没登录 → 401，什么都不调', async () => {
@@ -121,6 +123,8 @@ describe('POST /api/factory/chat — scope', () => {
   })
 
   it('session 邮箱为空 → 403，什么都不调', async () => {
+    // ADMIN_EMAILS 末尾多一个逗号：getUserPermissions('') 会把没有邮箱的登录当成全局管理员，守卫必须自己拦住
+    process.env.ADMIN_EMAILS = 'fde@magiclab.test,'
     h.email = ''
     const res = await call({ client_id: CLIENT_A, message: 'hello' })
     expect(res.status).toBe(403)

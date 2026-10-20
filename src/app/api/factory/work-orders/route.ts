@@ -18,7 +18,7 @@ export async function GET() {
     .select(
       'id, client_id, status, order_type, angle, rationale_one_liner, actual_cost_usd, budget_cap_usd, attempt_count, reclaim_count, reject_reason, source_ad_id, review_ref, output, published_ref, heartbeat_at, created_at, updated_at, fact_source_url:brief->copy->endcard->>url',
     )
-  const scoped = admin.scope.kind === 'client' ? base.eq('client_id', admin.scope.clientId) : base
+  const scoped = admin.scope.kind === 'global' ? base : base.eq('client_id', admin.scope.clientId)
   const { data, error } = await scoped.order('created_at', { ascending: false }).limit(100)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

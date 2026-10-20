@@ -1,5 +1,5 @@
 // P21.J P2 — POST /api/factory/chat(spec me-native-design v0.2)
-// 客户页嵌入的内容工厂对话助手。审核动作层前脸②(打回/调预算走对话,通过仍走 UI 按钮)。
+// 内容工厂对话助手(原客户页嵌入的面板 2026-10-15 已删，目前没有页面调用，只剩接口)。审核动作层前脸②(打回/调预算走对话,通过仍走 UI 按钮)。
 // authz=requireAdminScope(限定客户的管理员只能用自己客户的 client_id);client-scoped(工具只操作 body.client_id 的工单)。stateless(history 前端传)。
 
 import { NextResponse } from 'next/server'
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 })
   }
 
-  const clientId = typeof body.client_id === 'string' ? body.client_id : ''
+  const clientId = typeof body.client_id === 'string' ? body.client_id.trim().toLowerCase() : ''
   const message = typeof body.message === 'string' ? body.message : ''
   if (!UUID_RE.test(clientId)) return NextResponse.json({ error: 'client_id must be a uuid' }, { status: 400 })
   if (!message.trim()) return NextResponse.json({ error: 'message required' }, { status: 400 })

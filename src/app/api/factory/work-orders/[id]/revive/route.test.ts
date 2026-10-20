@@ -117,6 +117,8 @@ describe('POST /api/factory/work-orders/[id]/revive', () => {
   })
 
   it('refuses a session with an empty email with 403 and never touches the database', async () => {
+    // ADMIN_EMAILS 末尾多一个逗号：getUserPermissions('') 会把没有邮箱的登录当成全局管理员，守卫必须自己拦住
+    process.env.ADMIN_EMAILS = 'fde@magiclab.test,'
     h.email = ''
 
     const res = await callPost()
