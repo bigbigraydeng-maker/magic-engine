@@ -5,16 +5,35 @@
   "phases": [
     {
       "id": "phase-1",
-      "name": "主攻（10/20–11/14）：Natural China 拉新为主、收割为辅",
-      "start_date": "2026-10-20",
-      "end_date": "2026-11-14",
+      "name": "v5 养池 + WhatsApp 暖跑（10/21–11/30）：播放量养池 34 + WhatsApp 暖 25 + WhatsApp 名单相似 75 = 134",
+      "start_date": "2026-10-21",
+      "end_date": "2026-11-30",
       "steps": [
         {
-          "id": "ads-harvest-1",
+          "id": "ads-seed-1",
           "kind": "ads_campaign",
           "settings": {
             "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 1500,
+            "daily_budget_cents": 3400,
+            "audience_ref": "新西兰 45–65 岁（ThruPlay 养池；排除名单 52558282065673 在 Meta 里设，计划无排除字段）",
+            "creative_refs": [
+              "28843889985273791",
+              "3626096160888481"
+            ],
+            "placements": [
+              "facebook_feed",
+              "facebook_reels",
+              "facebook_stories"
+            ],
+            "paused_ranges": []
+          }
+        },
+        {
+          "id": "ads-wa-warm-1",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 2500,
             "audience_ref": "52551185747273",
             "creative_refs": [
               "28843889985273791"
@@ -28,11 +47,11 @@
           }
         },
         {
-          "id": "ads-prospect-1",
+          "id": "ads-wa-lookalike-1",
           "kind": "ads_campaign",
           "settings": {
             "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 4500,
+            "daily_budget_cents": 7500,
             "audience_ref": "52549838527273",
             "creative_refs": [
               "3626096160888481"
@@ -43,420 +62,16 @@
               "facebook_stories"
             ],
             "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-shanghai-1",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 5000,
-            "audience_ref": "52549838527273",
-            "creative_refs": [
-              "1475967442256169"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-tale-1",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 3000,
-            "audience_ref": "新西兰 · 45 岁以上 · 不加兴趣（冷启动新定向，不是已保存受众）",
-            "creative_refs": [
-              "4468928836700019"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-boc-1",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 1000,
-            "audience_ref": "52551185747273",
-            "creative_refs": [
-              "1843766369956984"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "social-1",
-          "kind": "social_cadence",
-          "settings": {
-            "posts_per_week": 7,
-            "stories_per_week": 7,
-            "reels_per_month": 12
-          }
-        },
-        {
-          "id": "email-1",
-          "kind": "newsletter_email",
-          "settings": {
-            "topic": "2027 年 3 月四个中国团介绍（只讲团本身，不带任何优惠）",
-            "due_date": "2026-10-26",
-            "requires_link": true
-          }
-        },
-        {
-          "id": "email-2",
-          "kind": "newsletter_email",
-          "settings": {
-            "topic": "Natural China 3/26 专题（发给打开过第一封的人）",
-            "due_date": "2026-11-06",
-            "requires_link": true
           }
         }
       ]
     },
     {
       "id": "phase-2",
-      "name": "收尾第一步（11/15–11/17）：按规矩每步最多降 20%",
-      "start_date": "2026-11-15",
-      "end_date": "2026-11-17",
-      "steps": [
-        {
-          "id": "ads-harvest-2",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 1200,
-            "audience_ref": "52551185747273",
-            "creative_refs": [
-              "28843889985273791"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-prospect-2",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 3600,
-            "audience_ref": "52549838527273",
-            "creative_refs": [
-              "3626096160888481"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-shanghai-2",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 4000,
-            "audience_ref": "52549838527273",
-            "creative_refs": [
-              "1475967442256169"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-tale-2",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 2400,
-            "audience_ref": "新西兰 · 45 岁以上 · 不加兴趣（冷启动新定向，不是已保存受众）",
-            "creative_refs": [
-              "4468928836700019"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-boc-2",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 800,
-            "audience_ref": "52551185747273",
-            "creative_refs": [
-              "1843766369956984"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "social-2",
-          "kind": "social_cadence",
-          "settings": {
-            "posts_per_week": 7,
-            "stories_per_week": 7,
-            "reels_per_month": 12
-          }
-        }
-      ]
-    },
-    {
-      "id": "phase-3",
-      "name": "收尾第二步（11/18–11/20）",
-      "start_date": "2026-11-18",
-      "end_date": "2026-11-20",
-      "steps": [
-        {
-          "id": "ads-harvest-3",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 1000,
-            "audience_ref": "52551185747273",
-            "creative_refs": [
-              "28843889985273791"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-prospect-3",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 2900,
-            "audience_ref": "52549838527273",
-            "creative_refs": [
-              "3626096160888481"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-shanghai-3",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 3200,
-            "audience_ref": "52549838527273",
-            "creative_refs": [
-              "1475967442256169"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-tale-3",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 2000,
-            "audience_ref": "新西兰 · 45 岁以上 · 不加兴趣（冷启动新定向，不是已保存受众）",
-            "creative_refs": [
-              "4468928836700019"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-boc-3",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 700,
-            "audience_ref": "52551185747273",
-            "creative_refs": [
-              "1843766369956984"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "social-3",
-          "kind": "social_cadence",
-          "settings": {
-            "posts_per_week": 7,
-            "stories_per_week": 7,
-            "reels_per_month": 12
-          }
-        }
-      ]
-    },
-    {
-      "id": "phase-4",
-      "name": "收尾第三步（11/21–11/30）：只把在途线索接住",
-      "start_date": "2026-11-21",
-      "end_date": "2026-11-30",
-      "steps": [
-        {
-          "id": "ads-harvest-4",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 800,
-            "audience_ref": "52551185747273",
-            "creative_refs": [
-              "28843889985273791"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-prospect-4",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 2400,
-            "audience_ref": "52549838527273",
-            "creative_refs": [
-              "3626096160888481"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-shanghai-4",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 2600,
-            "audience_ref": "52549838527273",
-            "creative_refs": [
-              "1475967442256169"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-tale-4",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 1600,
-            "audience_ref": "新西兰 · 45 岁以上 · 不加兴趣（冷启动新定向，不是已保存受众）",
-            "creative_refs": [
-              "4468928836700019"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "ads-boc-4",
-          "kind": "ads_campaign",
-          "settings": {
-            "ad_account_id": "act_2202695063810470",
-            "daily_budget_cents": 600,
-            "audience_ref": "52551185747273",
-            "creative_refs": [
-              "1843766369956984"
-            ],
-            "placements": [
-              "facebook_feed",
-              "facebook_reels",
-              "facebook_stories"
-            ],
-            "paused_ranges": []
-          }
-        },
-        {
-          "id": "social-4",
-          "kind": "social_cadence",
-          "settings": {
-            "posts_per_week": 7,
-            "stories_per_week": 7,
-            "reels_per_month": 12
-          }
-        },
-        {
-          "id": "email-3",
-          "kind": "newsletter_email",
-          "settings": {
-            "topic": "3 月团最新情况与行程提醒（只讲团本身，不带任何优惠）",
-            "due_date": "2026-11-25",
-            "requires_link": true
-          }
-        }
-      ]
+      "name": "【等 Meta 放开】留资表单层（日期待定，放开后重排）：上海 30 起 → Natural China → Tale → BoC；以「新建带表单广告组不再报 1815089」为准",
+      "start_date": "2026-12-01",
+      "end_date": "2026-12-01",
+      "steps": []
     }
   ]
 }
