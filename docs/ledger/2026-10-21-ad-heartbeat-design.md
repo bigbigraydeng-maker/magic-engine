@@ -4,7 +4,7 @@ title: 广告心跳：每小时只读 Meta 的准实时监控与报警（零消�
 status: decided
 owner: agent
 decided_on: 2026-10-21
-source: pr:3026
+source: pr:3027
 verify_by: 2026-10-28
 verify_how: 子牙+魏征审过设计后才进实现；实现后先 dry_run 当场试跑：对 CTS 官方账户只读一轮，打印本来会触发的报警，不写待办；确认读调用次数与限流表现后再开写待办。
 ---
