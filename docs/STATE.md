@@ -92,6 +92,8 @@ DataForSEO(关键词主源) · Stripe(MTC 计费) · Resend(邮件)。
 
 ### 4.1 Render Cron（**47 个在跑 + 1 个已暂停 factory-stock-refill**，全部 curl `https://app.magicengine.com.au/api/cron/*`，带 `CRON_SECRET` Bearer）
 
+> ⚠️ 2026-10-21 Render 只读对账：下表里标「已暂停」的任务，有几个只是 render.yaml 里被注释掉了，服务器上的服务并没有因此消失、仍在跑。是否真停以 Render 读回为准，见台账卡 `2026-10-21-render-orphan-cron-services-9`。
+
 | Cron 名 | 调度 (UTC) | 端点 |
 |---|---|---|
 | vision-analyzer | `*/10 * * * *` | `/api/cron/vision-analyzer` |
@@ -101,17 +103,17 @@ DataForSEO(关键词主源) · Stripe(MTC 计费) · Resend(邮件)。
 | zhangqian-sweeper | `*/15 * * * *` | `/api/cron/zhangqian-sweeper` |
 | blog-stuck-generating-sweeper | `*/15 * * * *` | `/api/cron/blog-stuck-generating` |
 | factory-publish-sweeper | `*/15 * * * *` | `/api/cron/factory-publish-sweeper` |
-| prospecting-sweep | `*/30 * * * *` | `/api/cron/prospecting-sweep` |
+| prospecting-sweep | `0 * * * *` | `/api/cron/prospecting-sweep` |
 | ~~team-memory-sweeper~~ | `*/30 * * * *` | `/api/cron/team-memory-sweeper` —— **2026-10-07 已暂停**（没人读的空跑，见 docs/audits/2026-10-07-cron-data-readers-audit.md；render.yaml 已注释，恢复条件见其注释） |
-| social-comment-autoreply | `*/30 * * * *` | `/api/cron/social-comment-autoreply` |
+| social-comment-autoreply | `0 * * * *` | `/api/cron/social-comment-autoreply` |
 | messenger-hourly | `10 * * * *` | `/api/cron/messenger-sync-hourly` |
-| meta-leads-hourly | `25 * * * *` | `/api/cron/meta-leads-sync` |
+| meta-leads-hourly | `25 */2 * * *` | `/api/cron/meta-leads-sync` |
 | ~~mailbox-sync-hourly~~ | 跟 `messenger-hourly` 一起，`10 * * * *` | **不再是独立服务**，2026-08-03 并入 `messenger-hourly`：每小时第 10 分钟跑完私信同步后，同一次请求里接着把已连的公司邮箱也同步一遍（见 `/api/cron/messenger-sync-hourly` 路由文件头注释、`render.yaml` 同位置注释）。邮箱同步是活的，不是没人跑；独立路由 `/api/cron/mailbox-sync` 保留只作手动补触发用。目前接了这条邮箱管道的只有 CTS Tours NZ 一个客户（`platform_oauth_connections` 表 `provider='microsoft_mail'`，2026-08-02 上线） |
 | viral-discovery-weekly | `0 0 * * *` | `/api/cron/viral-discovery-weekly` |
 | site-audit-cron | `0 2 * * *` | `/api/cron/site-audit-jobs` |
 | industry-ai-visibility-daily | `30 16 * * 1` | `/api/cron/ai-visibility-weekly` —— **2026-10-07 由每天降为每周一**（审计同上） |
-| goal-current-value-refresh | `0 3 * * *` | `/api/cron/goal-current-value-refresh` |
-| google-data-pullback-daily | `0 3 * * *` | `/api/cron/google-data-pullback-daily` |
+| goal-current-value-refresh | `30 17 * * *` | `/api/cron/goal-current-value-refresh` |
+| google-data-pullback-daily | `0 17 * * *` | `/api/cron/google-data-pullback-daily` |
 | social-engagement-pullback | `0 4 * * *` | `/api/cron/social-engagement-pullback` |
 | seo-patrol-daily | `0 4 * * *` | `/api/cron/seo-patrol-daily` |
 | mailchimp-activity-daily | `40 4 * * *` | `/api/cron/mailchimp-activity-sync` |
@@ -126,7 +128,7 @@ DataForSEO(关键词主源) · Stripe(MTC 计费) · Resend(邮件)。
 | pm-daily-todo | `0 19 * * 0-4` | `/api/cron/pm-daily-todo` |
 | site-audit-weekly | `0 1 * * 0` | `/api/cron/site-audit-weekly` |
 | weekly-seo-report | `30 18 * * 0` | `/api/cron/weekly-seo-report` |
-| ai-tracker-weekly | `0 1 * * 1` | `/api/cron/ai-tracker-weekly` |
+| ai-tracker-weekly | `0 18 * * 0` | `/api/cron/ai-tracker-weekly` |
 | ~~job-boards-weekly~~ | `0 2 * * 1` | `/api/cron/job-boards-weekly` —— **2026-10-07 已暂停**（没人读的空跑，见 docs/audits/2026-10-07-cron-data-readers-audit.md；render.yaml 已注释，恢复条件见其注释） |
 | keyword-snapshots-weekly | `0 2 * * 1` | `/api/cron/keyword-snapshots-weekly` |
 | zhuge-weekly-recalculate | `0 3 * * 1` | `/api/cron/zhuge-recalculate` |

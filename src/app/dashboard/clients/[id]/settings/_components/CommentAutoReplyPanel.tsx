@@ -245,7 +245,7 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
         <span className="min-w-0">
           <span className="block text-sm font-black text-slate-800">全自动评论回复</span>
           <span className="block text-xs text-slate-500">
-            开启后每 30 分钟自动拉取该客户 FB 主页评论并回复。AI 只对「夸赞」自由发挥，问题一律走安全话术不作答。
+            开启后每小时自动拉取该客户 FB 主页评论并回复。AI 只对「夸赞」自由发挥，问题一律走安全话术不作答。
           </span>
         </span>
         <button
