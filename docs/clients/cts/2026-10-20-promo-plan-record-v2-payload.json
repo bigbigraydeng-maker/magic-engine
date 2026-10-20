@@ -46,6 +46,24 @@
           }
         },
         {
+          "id": "ads-shanghai-1",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 1000,
+            "audience_ref": "52549838527273",
+            "creative_refs": [
+              "1475967442256169"
+            ],
+            "placements": [
+              "facebook_feed",
+              "facebook_reels",
+              "facebook_stories"
+            ],
+            "paused_ranges": []
+          }
+        },
+        {
           "id": "social-1",
           "kind": "social_cadence",
           "settings": {
@@ -117,6 +135,24 @@
           }
         },
         {
+          "id": "ads-shanghai-2",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 1000,
+            "audience_ref": "52549838527273",
+            "creative_refs": [
+              "1475967442256169"
+            ],
+            "placements": [
+              "facebook_feed",
+              "facebook_reels",
+              "facebook_stories"
+            ],
+            "paused_ranges": []
+          }
+        },
+        {
           "id": "social-2",
           "kind": "social_cadence",
           "settings": {
@@ -170,6 +206,24 @@
           }
         },
         {
+          "id": "ads-shanghai-3",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 1000,
+            "audience_ref": "52549838527273",
+            "creative_refs": [
+              "1475967442256169"
+            ],
+            "placements": [
+              "facebook_feed",
+              "facebook_reels",
+              "facebook_stories"
+            ],
+            "paused_ranges": []
+          }
+        },
+        {
           "id": "social-3",
           "kind": "social_cadence",
           "settings": {
@@ -213,6 +267,24 @@
             "audience_ref": "52549838527273",
             "creative_refs": [
               "3626096160888481"
+            ],
+            "placements": [
+              "facebook_feed",
+              "facebook_reels",
+              "facebook_stories"
+            ],
+            "paused_ranges": []
+          }
+        },
+        {
+          "id": "ads-shanghai-4",
+          "kind": "ads_campaign",
+          "settings": {
+            "ad_account_id": "act_2202695063810470",
+            "daily_budget_cents": 1000,
+            "audience_ref": "52549838527273",
+            "creative_refs": [
+              "1475967442256169"
             ],
             "placements": [
               "facebook_feed",
