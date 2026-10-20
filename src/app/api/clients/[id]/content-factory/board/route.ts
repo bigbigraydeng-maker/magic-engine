@@ -12,6 +12,19 @@ import {
   type FactoryStage,
 } from '@/lib/factory/content-stages'
 
+/** Postgrest 错误是普通对象、不是 Error 实例；直接 `instanceof Error` 会丢掉真实原因（曾被吞成 "Unknown error"）。 */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as { message?: unknown; code?: unknown }
+    if (typeof e.message === 'string' && e.message !== '') {
+      return typeof e.code === 'string' && e.code !== '' ? `${e.message} (${e.code})` : e.message
+    }
+    try { return JSON.stringify(err) } catch { /* fall through */ }
+  }
+  return String(err)
+}
+
 export const dynamic = 'force-dynamic'
 
 // GET /api/clients/[id]/content-factory/board
@@ -57,14 +70,17 @@ export async function GET(
         .eq('stage', 'staging')
         .in('content_post_id', contentPostIds)
         .order('created_at', { ascending: false })
-      if (receiptsError) throw receiptsError
-      for (const receipt of receipts ?? []) {
-        if (!receipt.content_post_id || youtubeStageByPostId.has(receipt.content_post_id)) continue
-        youtubeStageByPostId.set(receipt.content_post_id, {
-          status: receipt.status,
-          videoId: receipt.video_id,
-          createdAt: receipt.created_at,
-        })
+      if (receiptsError) {
+        console.warn('[content-factory/board] youtube_publish_receipts 读取失败，按没有 YouTube 阶段处理', { clientId: params.id, error: describeError(receiptsError) })
+      } else {
+        for (const receipt of receipts ?? []) {
+          if (!receipt.content_post_id || youtubeStageByPostId.has(receipt.content_post_id)) continue
+          youtubeStageByPostId.set(receipt.content_post_id, {
+            status: receipt.status,
+            videoId: receipt.video_id,
+            createdAt: receipt.created_at,
+          })
+        }
       }
     }
 
@@ -168,7 +184,7 @@ export async function GET(
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'CDN-Cache-Control': 'no-store' },
     })
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
+    const message = describeError(err)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }
