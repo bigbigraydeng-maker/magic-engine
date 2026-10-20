@@ -4,7 +4,7 @@
 
 **产品定义必读**：[ME Product Definition](./docs/strategy/ME_PRODUCT_DEFINITION.md) —— **产品定位、IMPACT、DAPE、Connector、Build vs Connect 与行业版本的最高优先级定义；冲突时以它为准。**
 **每次开新会话先读**：[docs/STATE.md](./docs/STATE.md)（系统现状）→ [docs/ROADMAP.md](./docs/ROADMAP.md)（要做什么）。
-**碰 6 大支柱任一件活先读对应手册**：广告 / SEO / GEO（AI 可见度）/ 社媒 / 口碑，各有一份跨客户经验手册存在 Claude 持久记忆里（不在这个代码仓库中），路径 `~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-<支柱>-*.md`。开工前必读对应那份，并在回复里明确说出"读了哪份"——说不出来 = 没读。行业层手册（文件名带 `-industry-`）目前多数只有单客户证据，当"候选参考"用，不当"已验证定论"套用；竞品支柱目前没有可用手册，不用去找。
+**碰 6 大支柱任一件活先读对应手册**：手册已搬进仓库 `docs/playbooks/<支柱>/`，每个支柱有 `general.md`（通用规则）和可选的 `industry-<行业>.md`（行业层）。读 `docs/playbooks/<支柱>/*.md`（`inbox.md` 除外，候选区不当规则）。开工前必读对应那份，并在回复里明确说出"读了哪份"——说不出来 = 没读。行业层手册目前多数只有单客户证据，当"候选参考"用，不当"已验证定论"套用；竞品支柱目前没有可用手册，不用去找。开发侧记忆 `~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-<支柱>-*.md` 仍保留作为过渡参考，以仓库版为准。
 **平台化必读**：[ME2 Reuse & Platformization Principle](./docs/roadmap/2026-08-19-me2-platformization-principle.md) —— **所有开发窗口、Work Package、Claude Code/Codex 会话都受它约束。**
 **平台层级门必挂 skill**：[`.claude/skills/me-platform-tier-gate/`](./.claude/skills/me-platform-tier-gate/SKILL.md) —— **Claude Code 会话每次开工前必先调用 `Skill me-platform-tier-gate` 加载**（`Skill` 调用接口仅 Claude Code 提供）；**Codex 会话没有 `Skill` 调用接口，改为直接阅读 `SKILL.md` 全文并遵循其判据 / 红线 / 输出格式**。两种入口下，任何提议新增能力线 / 支柱 / capability / 智能层 / 分析层 / Build vs Connect vs Buy 决策 / 客户新需求判断"ME 要不要自己做"，都必须先输出 Tier Classification Report 再继续。跳过 = 治理失职。
 **必读规则**：[`~/.claude/rules/coding-style.md`](~/.claude/rules/coding-style.md) · [`~/.claude/rules/development-workflow.md`](~/.claude/rules/development-workflow.md)

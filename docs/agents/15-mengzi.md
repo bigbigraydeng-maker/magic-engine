@@ -41,7 +41,7 @@
 | DataForSEO（封装名 Keyword Intelligence） | 只读 | 行业层采样 |
 | Supabase `ai_visibility_runs` / `ai_visibility_snapshots` / 新版 GEO 测量表 | 读写 | 本 agent 的数据资产 |
 | 客户网站 | **只读**（robots / llms.txt 是否屏蔽 AI 爬虫） | 诊断 |
-| 经验手册 `docs/playbooks/geo/`（迁移前在开发侧记忆 `playbook-geo-general.md`、`playbook-geo-industry-realestate.md`） | 读；学习任务只写候选区 | 规则先验 |
+| 经验手册 `docs/playbooks/geo/*.md`（`inbox.md` 除外，候选区不当规则） | 读；学习任务只写候选区 | 规则先验 |
 
 ## 四、Fix vs Talk to Us 边界（强制）
 

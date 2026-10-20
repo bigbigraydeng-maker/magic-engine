@@ -42,7 +42,7 @@
 | Visual Studio / Video Studio（封装名） | 调用 | 出图、出片（AI 媒体只走 Muapi） |
 | `viral_reference_library` | 只读 | 爆款配方 |
 | Supabase `social_plans` / 工厂工单 / `flywheel_actions` | 读写 | 本 agent 的数据资产 |
-| 经验手册 `docs/playbooks/social/`（迁移前在开发侧记忆 `playbook-social-general.md`） | 读；学习任务只写候选区 | 规则先验 |
+| 经验手册 `docs/playbooks/social/*.md`（`inbox.md` 除外，候选区不当规则） | 读；学习任务只写候选区 | 规则先验 |
 
 ## 四、Fix vs Talk to Us 边界（强制）
 
