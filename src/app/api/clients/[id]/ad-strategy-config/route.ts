@@ -20,6 +20,9 @@ import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
 
+/** 推广期相关的素材池键：只许 /creative-pool/promo-window 写。 */
+const PROMO_ENTRY_KEYS = ['promo_window', 'alias_refs', 'promo_window_set_by', 'promo_window_set_at', 'promo_window_changed_at']
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } },
@@ -119,11 +122,31 @@ export async function PATCH(
     if (tainted) {
       return NextResponse.json({ error: 'creative_pool approval must go through /creative-pool/approve' }, { status: 400 })
     }
+    // 推广期、别名及其时间戳只能走 /creative-pool/promo-window（它记录是谁、什么时候设的）。
+    // 这条通用路由既不接受客户端带这些键，也不能在重写素材池时把已有的抹掉。
+    const promoTainted = body.creative_pool.some(e =>
+      typeof e === 'object' && e !== null && PROMO_ENTRY_KEYS.some(k => k in e))
+    if (promoTainted) {
+      return NextResponse.json({ error: 'promo_window / alias_refs must go through /creative-pool/promo-window' }, { status: 400 })
+    }
     const parsed = parseCreativePool(body.creative_pool)
     if (parsed.length !== body.creative_pool.length) {
       return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref, status=candidate)' }, { status: 400 })
     }
-    update.creative_pool = parsed.map((e): CreativePoolEntry => ({ kind: e.kind, ref: e.ref, status: 'candidate' }))
+    // 读不出现有素材池就没法保住已有的推广期 —— 拒绝重写素材池，其它设置照常能存。
+    if (before === null) {
+      return NextResponse.json({ error: 'creative_pool_existing_unreadable' }, { status: 503 })
+    }
+    update.creative_pool = parsed.map((e): CreativePoolEntry => {
+      const next: CreativePoolEntry = { kind: e.kind, ref: e.ref, status: 'candidate' }
+      const existing = before.creative_pool.find(x => x.ref === e.ref)
+      if (existing?.promo_window !== undefined) next.promo_window = existing.promo_window
+      if (existing?.alias_refs !== undefined) next.alias_refs = existing.alias_refs
+      if (existing?.promo_window_set_by !== undefined) next.promo_window_set_by = existing.promo_window_set_by
+      if (existing?.promo_window_set_at !== undefined) next.promo_window_set_at = existing.promo_window_set_at
+      if (existing?.promo_window_changed_at !== undefined) next.promo_window_changed_at = existing.promo_window_changed_at
+      return next
+    })
   }
 
   const { error } = await supabaseAdmin

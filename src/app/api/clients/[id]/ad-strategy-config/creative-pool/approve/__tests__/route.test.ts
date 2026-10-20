@@ -90,7 +90,7 @@ function signedInAs(email: string) {
 }
 
 const SEED_POOL = [
-  { kind: 'meta_video', ref: 'v1', status: 'candidate' },
+  { kind: 'meta_video', ref: 'v1', status: 'candidate', promo_window: { kind: 'dated', start: '2026-01-01', end: '2099-12-31' } },
   { kind: 'work_order', ref: 'wo-9', status: 'approved', approved_by: 'earlier@staff.test', approved_at: '2026-09-01T00:00:00.000Z' },
 ]
 
@@ -186,6 +186,86 @@ describe('creative-pool/approve — 非内部员工批不动', () => {
     const res = await POST(postRequest({ ref: 'v1' }), params())
 
     expect(res.status).toBe(401)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('creative-pool/approve — 推广期闸', () => {
+  function seedWith(entry: Record<string, unknown>): Row {
+    return { client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [entry] }
+  }
+
+  it('条目没有 promo_window → 422 promo_window_undeclared，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([seedWith({ kind: 'meta_video', ref: 'v1', status: 'candidate' })])
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(422)
+    expect(json.error).toBe('promo_window_undeclared')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('条目推广期已过 → 422 promo_window_expired，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([
+      seedWith({
+        kind: 'meta_video',
+        ref: 'v1',
+        status: 'candidate',
+        promo_window: { kind: 'dated', start: '2020-01-01', end: '2020-12-31' },
+      }),
+    ])
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(422)
+    expect(json.error).toBe('promo_window_expired')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('条目 evergreen → 200，写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([
+      seedWith({ kind: 'meta_video', ref: 'v1', status: 'candidate', promo_window: { kind: 'evergreen' } }),
+    ])
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+  })
+
+  it('条目 dated 且 start 在未来 → 200（未开始允许批准）', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([
+      seedWith({
+        kind: 'meta_video',
+        ref: 'v1',
+        status: 'candidate',
+        promo_window: { kind: 'dated', start: '2099-01-01', end: '2099-12-31' },
+      }),
+    ])
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+  })
+
+  it('已批准的条目即使没有 promo_window → 200 idempotent，不写库（存量不被误伤）', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([
+      seedWith({ kind: 'meta_video', ref: 'v1', status: 'approved', approved_by: 'earlier@staff.test', approved_at: '2026-09-01T00:00:00.000Z' }),
+    ])
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.idempotent).toBe(true)
     expect(upsert).not.toHaveBeenCalled()
   })
 })
