@@ -199,4 +199,19 @@ describe('loadWarMapInput · 真实形状的行（CTS 2026-10-20 08:50Z）', () 
     const { input } = await run()
     expect(input.accounts[0]).toMatchObject({ adAccountId: OFFICIAL, name: 'CTS', statusCode: 1 })
   })
+
+  it('G. hidden_from_ad_health on the personal account -> only the official account is listed', async () => {
+    db.tables.client_meta_ad_accounts = (db.tables.client_meta_ad_accounts ?? []).map(r =>
+      r.ad_account_id === PERSONAL ? { ...r, hidden_from_ad_health: true } : { ...r, hidden_from_ad_health: false },
+    )
+    const { input } = await run()
+    expect(input.accounts).toHaveLength(1)
+    expect(input.accounts[0]).toMatchObject({ adAccountId: OFFICIAL, name: 'CTS', statusCode: 1 })
+  })
+
+  it('H. all bound accounts hidden -> no accounts, no fallback to the legacy column', async () => {
+    db.tables.client_meta_ad_accounts = (db.tables.client_meta_ad_accounts ?? []).map(r => ({ ...r, hidden_from_ad_health: true }))
+    const { input } = await run()
+    expect(input.accounts).toHaveLength(0)
+  })
 })
