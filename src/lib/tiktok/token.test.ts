@@ -10,11 +10,18 @@ const mocks = vi.hoisted(() => ({
 
 function builder() {
   const b: Record<string, unknown> = {}
+  let accountFilter: string | null = null
   for (const m of ['select', 'eq', 'order', 'limit', 'update']) {
-    b[m] = (...args: unknown[]) => { mocks.calls.push([m, ...args]); return b }
+    b[m] = (...args: unknown[]) => {
+      mocks.calls.push([m, ...args])
+      if (m === 'eq' && args[0] === 'account_id') accountFilter = String(args[1])
+      return b
+    }
   }
-  b.then = (resolve: (v: unknown) => unknown) =>
-    Promise.resolve({ data: mocks.error ? null : mocks.rows, error: mocks.error }).then(resolve)
+  b.then = (resolve: (v: unknown) => unknown) => {
+    const rows = accountFilter === null ? mocks.rows : mocks.rows.filter((r) => r.account_id === accountFilter)
+    return Promise.resolve({ data: mocks.error ? null : rows, error: mocks.error }).then(resolve)
+  }
   return b
 }
 
@@ -97,3 +104,27 @@ describe('getValidTikTokToken', () => {
     expect(mocks.calls.some(([m, k, v]) => m === 'eq' && k === 'id' && v === 'a')).toBe(true)
   })
 })
+
+describe('getValidTikTokToken —— 已知账号时按账号精确取(已发出任务的状态轮询)', () => {
+  it('🔴 指定账号恰好一条有效授权 → 用它,即使该客户还有别的有效授权(不把已发出的任务卡死)', async () => {
+    mocks.rows = [row('a', 'open-a'), row('b', 'open-b')]
+    expect(await getValidTikTokToken('c1', { accountId: 'open-b' })).toEqual({ accessToken: 'access-b', openId: 'open-b' })
+    expect(mocks.calls.some(([m, k, v]) => m === 'eq' && k === 'account_id' && v === 'open-b')).toBe(true)
+  })
+
+  it('指定账号对不上、只有一条有效授权 → 返回那条,由调用方比对并报「目标账号已改变」', async () => {
+    mocks.rows = [row('a', 'open-a')]
+    expect(await getValidTikTokToken('c1', { accountId: 'open-zzz' })).toEqual({ accessToken: 'access-a', openId: 'open-a' })
+  })
+
+  it('🔴 指定账号对不上、且有效授权多于一条 → 仍然拒绝(不挑一条凑合)', async () => {
+    mocks.rows = [row('a', 'open-a'), row('b', 'open-b')]
+    await expect(getValidTikTokToken('c1', { accountId: 'open-zzz' })).rejects.toBeInstanceOf(TikTokAmbiguousConnectionError)
+  })
+
+  it('不指定账号 → 多条仍然拒绝(发布起点不能挑账号)', async () => {
+    mocks.rows = [row('a', 'open-a'), row('b', 'open-b')]
+    await expect(getValidTikTokToken('c1')).rejects.toBeInstanceOf(TikTokAmbiguousConnectionError)
+  })
+})
+

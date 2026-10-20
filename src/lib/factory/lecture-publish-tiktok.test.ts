@@ -50,6 +50,13 @@ describe('TikTok durable publish task',()=>{
     expect(vi.mocked(setPublishRequest).mock.lastCall?.[0].request).toMatchObject({status:'failed',error:message})
     expect(checkTikTokStatus).not.toHaveBeenCalled()
   })
+  it('an already-sent task keeps processing (never failed, never re-sent) if authorisations become ambiguous mid-flight',async()=>{
+    load({...request,status:'processing',tiktokPublishId:'existing',tiktokAccountId:'account'})
+    vi.mocked(checkTikTokStatus).mockRejectedValue(new TikTokAmbiguousConnectionError())
+    expect(await runOneLecturePublish({clientId:'c',postId:'p'})).toMatchObject({ok:false})
+    expect(vi.mocked(setPublishRequest).mock.lastCall?.[0].request).toMatchObject({status:'processing',tiktokPublishId:'existing'})
+    expect(publishToTikTok).not.toHaveBeenCalled();expect(recordPublished).not.toHaveBeenCalled()
+  })
   it('does not automatically repeat an uncertain initialization',()=>{
     const rows=[{id:'p',client_id:'c',generation_context_snapshot:{lecture_publish_request:{platform:'tiktok',status:'sending',startedAt:'2026-01-01'}}}]
     expect(selectPendingPublishes(rows,Date.now(),1)).toEqual([])

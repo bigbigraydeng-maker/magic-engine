@@ -102,3 +102,14 @@
 - TikTok:`getValidTikTokToken` 改为查该客户全部 `active`(`limit(2)`);0 条返回 null、1 条正常、**≥2 条抛 `TikTokAmbiguousConnectionError`**(文案不含 token 字样);报错翻译与讲课发布分支单独处理该提示。保持 `getValidTikTokToken` 签名不变,调用方无需改。
 - YouTube:新增 `youtube-publish/token.ts`,**按目标频道精确选**授权(`account_id = youtube_channel_id`),不改通用 `getValidToken`。**与上文规则 4 字面的差异**:YouTube 有真实的目标频道,多条授权时只要其中恰好一条对应目标频道就能发(不拒绝);对不上目标频道、或没配目标频道则拒绝。理由:YouTube 的目标频道本来就被客户配置锁定,按目标取比按条数拒绝更精确,也不会让「留着旧频道授权」的客户停发。发布前 workflow 里的 `lockChannel` 仍会再用令牌核对一次频道。
 - 未处理(已知,另记):TikTok 刷新成功后写库的 `update` 未检查 error、刷新失败不标 `error`(魏征 I6 指出的既有问题),不在 G1 范围。
+
+### G1 实施后复审(子牙+魏征,均无阻塞项)后的调整与已知缺口
+- **采纳(两人共同建议)**:`getValidTikTokToken(clientId, { accountId? })`。已发出任务的状态轮询(`checkTikTokStatus`)带着原账号编号:该账号恰好一条有效授权就用它,即使客户还有别的有效授权——账号一致性不降低,只是不让无关授权把已发出的任务卡死(轮询只读、本就比对 `expectedAccountId`)。指定账号对不上时按默认规则(1 条返回由调用方比对、≥2 条拒绝)。**发布起点不能挑账号,多条仍拒绝。**
+- **补测试**:真实 adapter 透传多授权错误且不向 TikTok 发请求;状态轮询带/不带账号;讲课发布「已有发布编号+多授权」保持 `processing`、不记失败、不重发;YouTube 真实查询条件(client_id/provider/status/purpose)与 inngest 接线断言。
+- **已知缺口(未在 G1 处理,已记入 G2 范围或另开)**:
+  1. **多授权没有自助解除手段**:TikTok 没有断开接口,重新授权不同账号只会新增一行。G2 的「替换」流程与 TikTok 断开(管理员)就是修复入口;在此之前如出现多授权,只能人工改库。普查显示目前无此情况。
+  2. 多授权的提示只是文字,**未进「今日待办」人工任务管道**(待 G2 的待办一并做,避免现在新增 kind)。
+  3. TikTok 刷新失败只返回 null、不标 `error`,且刷新成功后写库未检查 error——已失效的旧账号行会一直 `active` 并与新授权一起触发拒绝(魏征 I3/I6)。另开卡。
+  4. 订单发布 POST 在「已占用工单、尚未向 TikTok 发起」之间若遇到多授权,工单停在 `sending`(现有对所有发起前失败的统一处理),窗口极小,先记录。
+  5. YouTube 目标频道的授权被标 `error` 后,提示会写成「不是目标频道」而非「已失效」(次要)。
+  6. `social-onboarding` 对 TikTok 用「所有未撤销行 >1」判多账号,发布用「有效行 >1」;方向安全,口径不同,G2 统一。

@@ -11,3 +11,4 @@ done_on: 2026-10-20
 done_ref: pr:2951
 ---
 普查显示 tiktok / google_youtube / instagram 没有同客户多条有效授权的存量,所以无停发风险。YouTube 对不上目标频道也会拒绝。
+已知缺口(G2 处理):多授权无自助解除入口(TikTok 无断开接口)、提示未进今日待办、TikTok 刷新失败不标 error。详见设计文档「G1 实施后复审」。

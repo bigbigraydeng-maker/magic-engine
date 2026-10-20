@@ -29,28 +29,40 @@ export class TikTokAmbiguousConnectionError extends Error {
   }
 }
 
-/**
- * @returns 令牌;没有授权返回 null。
- * @throws {TikTokAmbiguousConnectionError} 有效授权多于一条。以前这里「取最新创建的一条」,
- *   但重新授权旧账号不会更新 created_at,最新的未必是刚授权的那条,有取错账号发布的风险。
- */
-export async function getValidTikTokToken(clientId: string): Promise<TikTokToken | null> {
-  const { data, error } = await supabaseAdmin
+type ActiveRow = {
+  id: string
+  access_token_enc?: string
+  refresh_token_enc?: string
+  token_expiry?: string
+  account_id?: string
+}
+
+/** 取该客户有效的 TikTok 授权;最多取 2 条,够判断「是不是多条」就行。accountId 给定时只取那个账号。 */
+async function fetchActiveRows(clientId: string, accountId?: string): Promise<{ rows: ActiveRow[]; failed: boolean }> {
+  let query = supabaseAdmin
     .from('platform_oauth_connections')
     .select('id, access_token_enc, refresh_token_enc, token_expiry, account_id')
     .eq('client_id', clientId)
     .eq('provider', PLATFORM_PROVIDERS.TIKTOK)
     .eq('status', 'active')
-    .limit(2)
+  if (accountId) query = query.eq('account_id', accountId)
+  const { data, error } = await query.limit(2)
+  return { rows: error ? [] : ((data ?? []) as ActiveRow[]), failed: Boolean(error) }
+}
 
-  const rows = (data ?? []) as Array<{
-    id: string
-    access_token_enc?: string
-    refresh_token_enc?: string
-    token_expiry?: string
-    account_id?: string
-  }>
-  if (error || rows.length === 0) return null
+/**
+ * @param opts.accountId 已知要用哪个账号时传入(例如已发出任务的状态轮询带着原账号):
+ *   这个账号恰好有一条有效授权就用它,即使该客户还有别的有效授权;找不到则按默认规则处理。
+ *   账号一致性不降低,只是不让一条无关的授权把已发出的任务卡死。
+ * @returns 令牌;没有授权(或查库出错)返回 null。
+ * @throws {TikTokAmbiguousConnectionError} 没指定账号、或指定账号没匹配上,且有效授权多于一条。
+ *   以前这里「取最新创建的一条」,但重新授权旧账号不会更新 created_at,最新的未必是刚授权的那条,
+ *   有取错账号发布的风险。
+ */
+export async function getValidTikTokToken(clientId: string, opts?: { accountId?: string }): Promise<TikTokToken | null> {
+  let { rows, failed } = opts?.accountId ? await fetchActiveRows(clientId, opts.accountId) : { rows: [], failed: false }
+  if (rows.length !== 1) ({ rows, failed } = await fetchActiveRows(clientId))
+  if (failed || rows.length === 0) return null
   if (rows.length > 1) throw new TikTokAmbiguousConnectionError()
   const row = rows[0]
 

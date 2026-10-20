@@ -168,7 +168,8 @@ export async function checkTikTokStatus(
   publishId: string,
   expectedAccountId?: string,
 ): Promise<{ status: TikTokPostStatus; detail?: string }> {
-  const token = await getValidTikTokToken(clientId)
+  // 已发出的任务带着原账号:有别的授权并存时,按原账号精确取,让它能照常收尾
+  const token = await getValidTikTokToken(clientId, expectedAccountId ? { accountId: expectedAccountId } : undefined)
   if (!token) throw new Error('这个客户还没连过 TikTok(access_token 取不到)')
   if (expectedAccountId && token.openId !== expectedAccountId) throw new Error('TikTok 目标账号已改变，无法核验原发布任务')
   const json = await post('/post/publish/status/fetch/', token.accessToken, { publish_id: publishId })
