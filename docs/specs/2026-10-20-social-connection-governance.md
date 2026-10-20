@@ -56,7 +56,7 @@
 - **上线前置**:先做**只读普查**(各社媒 provider 同客户 ≥2 条 active 的客户清单),并配「停发了谁」的人工待办与修复入口——修复入口即 B 的替换流程,所以 **D 排在 B 之后**,除非普查显示零存量问题。
 
 ### E. G0(独立最小修复,C 级,不改库结构)
-- `cross-client-audit.ts` 读 `platform_oauth_connections` 时加 `status='active'`(占用类问题再含 error/expired)与 `purpose='legacy'`,让撤销真正能让告警消失;补测试。
+- `cross-client-audit.ts` 读 `platform_oauth_connections` 时**只排除 `status='revoked'`**(过期/出错但没撤销的仍算挂在客户名下,只有撤销才是释放;读不到状态的行照常比对)。**不加 `purpose` 过滤**(避免改变 Meta 只读授权等既有行为),与原稿不同;补 6 条测试。
 - 顺带记账(不在本任务内做):`/api/workbench/today` 用 `requireAdmin`,`DEMO_ADMINS` 可读到全部客户待办;若某待办写两个客户名则越界——另开卡。
 
 ### F. YouTube / Instagram(G4 收窄)
@@ -91,3 +91,9 @@
 - 技术(自拍):独立 pending 表;原子函数;不改 `getValidToken` 通用函数。
 - 待评审再确认:撤销时覆写令牌密文的列约束;清理挂靠哪个已有每日任务;展示头像字段。
 - 待 PM:只读普查授权;迁移应用授权(G2 完成后)。
+
+## 普查结果(2026-10-20,生产库只读,未读任何令牌)
+- 社媒平台里**同一客户有 ≥2 条未撤销授权**:只有 CTS 的 `meta` 两条(「CTS Tours」页面授权 + 「Meta Ads read-only」只读授权),是设计如此的合法并存;**tiktok / google_youtube / instagram 为零**。
+- **跨客户同一账号(未撤销,排除我们自己的登录邮箱)**:无。撤销 CTS 名下那条之后,TikTok 的重复已清零。
+- 各平台行数:tiktok 有效 2(2 个客户)+已撤销 1;google_youtube 有效 2(2 个客户);instagram 0 行;meta 有效 4 + error 3。
+- 结论:**G1(发布取凭据多条即拒绝)没有存量停发风险**,按设计里的判断规则可以排在 G2 之前。

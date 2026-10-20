@@ -177,15 +177,19 @@ export async function auditCrossClientLeaks(
     ),
   )
 
-  const oauth = await supabase.from('platform_oauth_connections').select('client_id, provider, account_id')
+  const oauth = await supabase.from('platform_oauth_connections').select('client_id, provider, account_id, status')
   if (oauth.error) throw new Error(`platform_oauth_connections 查询失败: ${oauth.error.message}`)
   findings.push(
     ...findSharedIdentifiers(
       '平台授权（platform_oauth_connections.account_id）',
-      ((oauth.data ?? []) as Array<{ client_id: string; account_id: string | null }>).map((r) => ({
-        client_id: r.client_id,
-        value: r.account_id,
-      })),
+      ((oauth.data ?? []) as Array<{ client_id: string; account_id: string | null; status?: string | null }>)
+        // 已撤销的行只是留着备查，不再算「挂在这个客户名下」。过期/出错但没撤销的仍算：
+        // 只有撤销才是释放。读不到状态的行照常参与比对，不能因为缺字段就放过。
+        .filter((r) => r.status !== 'revoked')
+        .map((r) => ({
+          client_id: r.client_id,
+          value: r.account_id,
+        })),
       nameOf,
       { ignore: OUR_OWN_LOGINS },
     ),
