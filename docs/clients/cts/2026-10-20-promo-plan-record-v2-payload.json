@@ -58,7 +58,7 @@
           "id": "email-1",
           "kind": "newsletter_email",
           "settings": {
-            "topic": "Early Bird 通知：2027 年 3 月四个中国团（只写 11 月 30 日截止日期，不写倒计时）",
+            "topic": "2027 年 3 月四个中国团介绍（只讲团本身，不带任何优惠）",
             "due_date": "2026-10-26",
             "requires_link": true
           }
@@ -235,7 +235,7 @@
           "id": "email-3",
           "kind": "newsletter_email",
           "settings": {
-            "topic": "Early Bird 截止提醒：book by 30 November 2026（只写日期，不写倒计时）",
+            "topic": "3 月团最新情况与行程提醒（只讲团本身，不带任何优惠）",
             "due_date": "2026-11-25",
             "requires_link": true
           }
