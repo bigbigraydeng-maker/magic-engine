@@ -6,8 +6,8 @@ owner: pm
 decided_on: 2026-10-20
 source: session:ccc90b3d
 verify_by: 2026-10-23
-verify_how: 打开 CTS 的 /dashboard/clients/<id>/promo-plan，选未批准计划：应显示红字「现在 Meta 里已有 N 个广告组在花钱…」并链到作战地图；没有在跑广告的客户显示新文案「批准之前，ME 的自动动作都不会发生」；读不到时显示「读不到广告花费」
+verify_how: 内部账号打开未批准计划的 /dashboard/clients/<id>/promo-plan：近 2 天确认有花费的账户显示红字（手动开的广告、ME 没有批准记录，要么补走批准流程要么到 Meta 暂停）；花费数据没跟上（新开投的花费次日才到）显示黄字「可能已经在花钱，请到 Meta 核对」；欠款停摆账户显示灰字「不会出广告」；快照 2 天没更新显示灰字；付费客户账号看不到这块。注意：开投当天页面只会出黄字，红字最早第二天
 done_on: 2026-10-20
 done_ref: pr:2945
 ---
-PM 10-20 疑问「表里没看到批准的推广计划，怎么已经开始花费了？」（CTS 广告 10-20 15:26 起手动开投，不经 ME 计划）。只读 ad_entity_snapshots / ad_daily_insights，不新增 Meta 读取。当场试跑：对 CTS 生产数据跑 loadLiveAds 得到 5 个在跑广告组、币种 NZD；NAL 3 个；今日花费数据还没同步时显示「还没同步过来」而不是假装 0。
+PM 10-20 疑问「表里没看到批准的推广计划，怎么已经开始花费了？」（CTS 官方账户 10-20 手动开投，不经 ME 计划）。只读 ad_entity_snapshots / ad_daily_insights / ad_snapshot_captures，不新增 Meta 读取。终版口径：红字只给「近 2 天确认有花费」的账户；花费数据没跟上只出黄字且明说可能已在花钱；CTS 现在出黄字（官方账户当天花费行次日才到，主账户欠款停摆），不会出红字。仅内部账号可见。

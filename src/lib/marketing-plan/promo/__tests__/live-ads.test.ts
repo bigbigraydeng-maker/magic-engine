@@ -1,127 +1,78 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
-import { describeLiveAds, summarizeLiveAds } from '../live-ads'
+import { summarizeLiveAds } from '../live-ads'
+import { describeLiveAds } from '../live-ads-message'
+import type { LiveAdsFact } from '../live-ads-message'
+
+const adset = (id: string, acct: string, status = 'ACTIVE', at = '2026-10-20T06:00:00Z') =>
+  ({ entity_id: id, ad_account_id: acct, effective_status: status, capture_reason: 'daily', captured_at: at })
+const labels = { act_1: '官方账户', act_2: '主账户' }
+const mk = (
+  accountInsights: Record<string, { last_day: string | null; spend_2d: number }>,
+  accountFacts: Record<string, { currency: string | null; status_code: number | null }> = {},
+  snapshotAgeDays: number | null = 0,
+) => summarizeLiveAds({
+  adsets: [adset('a', 'act_1'), adset('b', 'act_2', 'ACTIVE', '2026-10-19T12:00:00Z'), adset('c', 'act_2', 'PAUSED')],
+  accountLabels: labels, accountInsights, accountFacts, today: '2026-10-20', snapshotAgeDays,
+})
+const ok = (f: LiveAdsFact) => { if (!f.ok) throw new Error('expected ok'); return f }
 
 describe('summarizeLiveAds', () => {
-  it('counts only ACTIVE adsets and ignores disappeared', () => {
-    const fact = summarizeLiveAds({
-      adsets: [
-        { entity_id: 'a1', effective_status: 'ACTIVE', capture_reason: 'scheduled', captured_at: '2024-06-01T10:00:00Z' },
-        { entity_id: 'a2', effective_status: 'ACTIVE', capture_reason: 'disappeared', captured_at: '2024-06-01T11:00:00Z' },
-        { entity_id: 'a3', effective_status: 'PAUSED', capture_reason: 'scheduled', captured_at: '2024-06-01T12:00:00Z' },
-        { entity_id: 'a4', effective_status: 'ACTIVE', capture_reason: null, captured_at: '2024-06-01T09:00:00Z' },
-      ],
-      insights: [],
-      currency: 'USD',
-      today: '2024-06-01',
-    })
-    expect(fact.ok).toBe(true)
-    if (!fact.ok) return
-    expect(fact.live_adsets).toBe(2)
-    expect(fact.as_of).toBe('2024-06-01T12:00:00Z')
-    expect(fact.currency).toBe('USD')
+  it('只数 ACTIVE 且没消失的广告组，按账户分开', () => {
+    const f = ok(mk({}))
+    expect(f.live_adsets).toBe(2)
+    expect(f.by_account.map(a => [a.ad_account_id, a.live_adsets])).toEqual([['act_1', 1], ['act_2', 1]])
   })
-
-  it('sums spend_today when latest insight_date equals today', () => {
-    const fact = summarizeLiveAds({
-      adsets: [],
-      insights: [
-        { insight_date: '2024-06-01', spend: 10 },
-        { insight_date: '2024-06-01', spend: 5.5 },
-        { insight_date: '2024-05-31', spend: 100 },
-      ],
-      currency: 'USD',
-      today: '2024-06-01',
-    })
-    expect(fact.ok).toBe(true)
-    if (!fact.ok) return
-    expect(fact.spend_day).toBe('2024-06-01')
-    expect(fact.spend_today).toBe(15.5)
+  it('消失的广告组不算', () => {
+    const f = ok(summarizeLiveAds({ adsets: [{ ...adset('a', 'act_1'), capture_reason: 'disappeared' }], today: '2026-10-20' }))
+    expect(f.live_adsets).toBe(0)
   })
-
-  it('returns spend_today null when latest day is yesterday', () => {
-    const fact = summarizeLiveAds({
-      adsets: [],
-      insights: [
-        { insight_date: '2024-05-31', spend: 42 },
-        { insight_date: '2024-05-30', spend: 7 },
-      ],
-      currency: 'USD',
-      today: '2024-06-01',
-    })
-    expect(fact.ok).toBe(true)
-    if (!fact.ok) return
-    expect(fact.spend_day).toBe('2024-05-31')
-    expect(fact.spend_today).toBeNull()
-  })
-
-  it('handles empty inputs', () => {
-    const fact = summarizeLiveAds({
-      adsets: [],
-      insights: [],
-      currency: null,
-      today: '2024-06-01',
-    })
-    expect(fact.ok).toBe(true)
-    if (!fact.ok) return
-    expect(fact.live_adsets).toBe(0)
-    expect(fact.spend_today).toBeNull()
-    expect(fact.spend_day).toBeNull()
-    expect(fact.as_of).toBeNull()
-    expect(fact.currency).toBeNull()
-  })
-
-  it('分账户列出在跑广告组，带账户标签与快照时间', () => {
-    const fact = summarizeLiveAds({
-      adsets: [
-        { entity_id: 'a', ad_account_id: 'act_1', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-20T06:00:00Z' },
-        { entity_id: 'b', ad_account_id: 'act_2', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-19T12:00:00Z' },
-        { entity_id: 'c', ad_account_id: 'act_2', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-19T12:00:00Z' },
-      ],
-      insights: [],
-      currency: 'NZD',
-      today: '2026-10-20',
-      accountLabels: { act_1: '官方账户', act_2: '主账户' },
-    })
-    if (!fact.ok) throw new Error('expected ok')
-    expect(fact.live_adsets).toBe(3)
-    expect(fact.by_account).toEqual([
-      { ad_account_id: 'act_1', label: '官方账户', live_adsets: 1, as_of: '2026-10-20T06:00:00Z', state: 'no_spend_data', last_insight_day: null, spend_3d: 0 },
-      { ad_account_id: 'act_2', label: '主账户', live_adsets: 2, as_of: '2026-10-19T12:00:00Z', state: 'no_spend_data', last_insight_day: null, spend_3d: 0 },
-    ])
-  })
-
-  const mk = (accountInsights: Record<string, { last_day: string | null; spend_3d: number }>) => summarizeLiveAds({
-    adsets: [
-      { entity_id: 'a', ad_account_id: 'act_1', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-20T06:00:00Z' },
-      { entity_id: 'b', ad_account_id: 'act_2', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-19T12:00:00Z' },
-    ],
-    insights: [], currency: 'NZD', today: '2026-10-20', accountLabels: { act_1: '官方账户', act_2: '主账户' }, accountInsights,
-  })
-  it('三种状态：有花费=spending，花费数据过旧/缺失=no_spend_data，新数据且 0=idle', () => {
-    const f = mk({ act_1: { last_day: '2026-10-20', spend_3d: 156.01 }, act_2: { last_day: '2026-10-10', spend_3d: 0 } })
-    if (!f.ok) throw new Error('ok')
-    expect(f.by_account.map(a => a.state)).toEqual(['spending', 'no_spend_data'])
+  it('四种状态：2 天内有花费=spending；花费数据没跟上/缺失=no_spend_data；新数据且 0=idle；欠款=unusable', () => {
+    const f = ok(mk({ act_1: { last_day: '2026-10-20', spend_2d: 156.01 }, act_2: { last_day: '2026-10-10', spend_2d: 0 } }, { act_2: { currency: 'NZD', status_code: 3 } }))
+    expect(f.by_account.map(a => a.state)).toEqual(['spending', 'unusable'])
     expect(f.spending_adsets).toBe(1)
-    const g = mk({ act_1: { last_day: '2026-10-20', spend_3d: 0 } })
-    if (!g.ok) throw new Error('ok')
-    expect(g.by_account.map(a => a.state)).toEqual(['idle', 'no_spend_data'])
+    expect(ok(mk({ act_1: { last_day: '2026-10-20', spend_2d: 0 } })).by_account.map(a => a.state)).toEqual(['idle', 'no_spend_data'])
+    expect(ok(mk({ act_1: { last_day: '2026-10-18', spend_2d: 99 } })).by_account[0].state).toBe('no_spend_data') // 2 天前的数据不算「近 2 天」
   })
-  it('描述：只有确认有花费才红字；花费数据过旧是黄字且不说「在花钱」；全 0 灰字', () => {
-    const red = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_3d: 156.01 }, act_2: { last_day: '2026-10-10', spend_3d: 0 } }))
-    expect(red?.level).toBe('red')
-    expect(red?.text).toContain('官方账户 1 个')
-    expect(red?.text).not.toContain('主账户')
-    const amber = describeLiveAds(mk({}))
-    expect(amber?.level).toBe('amber')
-    expect(amber?.text).not.toContain('⚠️')
-    expect(amber?.text).toContain('没法确认')
-    expect(amber?.text).toContain('可能已经在花钱')
-    expect(amber?.text).toContain('不要当成「没事」')
-    const grey = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_3d: 0 }, act_2: { last_day: '2026-10-20', spend_3d: 0 } }))
-    expect(grey?.level).toBe('grey')
+})
+
+describe('describeLiveAds', () => {
+  it('红字：只列确认有花费的账户，说清「手动开的、ME 没有批准记录」，不再说「请先批准」', () => {
+    const m = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_2d: 156.01 }, act_2: { last_day: '2026-10-10', spend_2d: 0 } }, { act_1: { currency: 'NZD', status_code: 1 }, act_2: { currency: 'NZD', status_code: 3 } }))
+    expect(m?.level).toBe('red')
+    expect(m?.text).toContain('手动开的广告')
+    expect(m?.text).toContain('NZ$156.01')
+    expect(m?.text).toContain('补走批准流程')
+    expect(m?.text).not.toContain('联系统筹')
+    expect(m?.text).not.toContain('UTC')
+    expect(m?.text).toContain('主账户') // 欠款账户以灰字另说
+    expect(m?.text).toContain('不会出广告')
+  })
+  it('黄字：花费数据没跟上，明说可能已经在花钱，不说「停在」，不当成没事', () => {
+    const m = describeLiveAds(mk({ act_1: { last_day: '2026-09-22', spend_2d: 0 } }, { act_2: { currency: 'NZD', status_code: 3 } }))
+    expect(m?.level).toBe('amber')
+    expect(m?.text).toContain('从 2026-09-22 起没有花费记录')
+    expect(m?.text).toContain('可能已经在花钱')
+    expect(m?.text).toContain('别当成没事')
+    expect(m?.text).not.toContain('停在')
+    expect(m?.text).toContain('欠款')
+  })
+  it('只有欠款账户 → 灰字「不会出广告」', () => {
+    const f = summarizeLiveAds({ adsets: [adset('b', 'act_2')], accountLabels: labels, accountFacts: { act_2: { currency: null, status_code: 3 } }, today: '2026-10-20', snapshotAgeDays: 0 })
+    expect(describeLiveAds(f)?.level).toBe('grey')
+  })
+  it('近 2 天没花费 → 灰字', () => {
+    const m = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_2d: 0 }, act_2: { last_day: '2026-10-20', spend_2d: 0 } }))
+    expect(m?.level).toBe('grey')
+  })
+  it('快照停摆：0 个在跑但最近一次抓取已 ≥2 天 → 灰字，不读成没事；新鲜时 0 个 → 不出声', () => {
+    const stale = ok(summarizeLiveAds({ adsets: [], today: '2026-10-20', snapshotAgeDays: 5 }))
+    expect(describeLiveAds(stale)?.text).toContain('已 5 天没更新')
+    expect(describeLiveAds(ok(summarizeLiveAds({ adsets: [], today: '2026-10-20', snapshotAgeDays: 0 })))).toBeNull()
+  })
+  it('读不到 / null → 不出提示', () => {
     expect(describeLiveAds(null)).toBeNull()
     expect(describeLiveAds({ ok: false, reason: 'x' })).toBeNull()
   })

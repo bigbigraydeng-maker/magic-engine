@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   loadGoal: vi.fn(),
   loadPromoFacts: vi.fn(),
   loadOptions: vi.fn(),
+  liveAds: vi.fn(),
   dispatch: vi.fn(),
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
@@ -26,6 +27,7 @@ vi.mock('@/lib/marketing-plan/promo/facts', async () => {
   return { ...actual, loadGoal: m.loadGoal, loadPromoFacts: m.loadPromoFacts }
 })
 vi.mock('@/lib/marketing-plan/promo/options', () => ({ loadPromoOptions: m.loadOptions }))
+vi.mock('@/lib/marketing-plan/promo/live-ads', () => ({ loadLiveAds: m.liveAds }))
 vi.mock('@/lib/supabase', () => {
   const chain = (): Record<string, unknown> => {
     const c: Record<string, unknown> = {}
@@ -137,6 +139,31 @@ describe('PUT promo — 保存时服务端校验', () => {
     const res = await PUT(req({ promo: baseSpec(), expected_updated_at: '2026-11-01T00:00:00Z' }, 'PUT'), { params: P })
     expect(res.status).toBe(409)
     expect((await res.json()).error).toContain('别处被改过')
+  })
+})
+
+describe('GET promo — 在跑广告提示只给内部账号', () => {
+  beforeEach(() => { m.liveAds.mockResolvedValue({ ok: true, live_adsets: 1, spending_adsets: 1, by_account: [], currency: 'NZD', as_of: null, snapshot_age_days: 0 }) })
+  it('内部账号（admin）：草稿计划返回 live_ads', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.live_ads_visible).toBe(true)
+    expect(json.live_ads.ok).toBe(true)
+    expect(m.liveAds).toHaveBeenCalledWith('client-1')
+  })
+  it('付费客户账号：不读也不返回 live_ads', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'paid_client', user: { email: 'boss@client.example' } })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.live_ads_visible).toBe(false)
+    expect(json.live_ads).toBeNull()
+    expect(m.liveAds).not.toHaveBeenCalled()
+  })
+  it('已批准的计划：内部账号也不读', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
+    m.plan = planWith(undefined, { status: 'approved' })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.live_ads).toBeNull()
+    expect(m.liveAds).not.toHaveBeenCalled()
   })
 })
 

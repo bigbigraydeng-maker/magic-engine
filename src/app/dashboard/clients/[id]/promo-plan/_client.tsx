@@ -22,8 +22,8 @@ import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
-import { describeLiveAds } from '@/lib/marketing-plan/promo/live-ads'
-import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads'
+import { describeLiveAds } from '@/lib/marketing-plan/promo/live-ads-message'
+import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
@@ -48,6 +48,7 @@ export function PromoPlanClient() {
   const [board, setBoard] = useState<PromoBoard | null>(null)
   const [options, setOptions] = useState<PromoOptions | null>(null)
   const [liveAds, setLiveAds] = useState<LiveAdsFact | null>(null)
+  const [liveAdsVisible, setLiveAdsVisible] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -67,11 +68,12 @@ export function PromoPlanClient() {
 
   const loadBoard = useCallback(async (planId: string) => {
     const res = await fetch(`${base}/${planId}/promo`)
-    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; live_ads?: LiveAdsFact | null; error?: string }
+    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; live_ads?: LiveAdsFact | null; live_ads_visible?: boolean; error?: string }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
     setOptions(json.options ?? null)
     setLiveAds(json.live_ads ?? null)
+    setLiveAdsVisible(json.live_ads_visible === true)
   }, [base])
 
   const refresh = useCallback(async (keepId?: string | null) => {
@@ -180,7 +182,7 @@ export function PromoPlanClient() {
 
         {board && selected && (
           <>
-            <Headline board={board} plan={selected} liveAds={liveAds} clientId={clientId} />
+            <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
@@ -257,18 +259,20 @@ export function PromoPlanClient() {
   )
 }
 
-function Headline({ board, plan, liveAds, clientId }: { board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; clientId: string }) {
+function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: { board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveAdsVisible: boolean; clientId: string }) {
   const draft = plan.status === 'draft'
   const live = draft ? describeLiveAds(liveAds) : null
   const text = draft
-    ? live?.level === 'red' ? '还没批准——但系统里显示广告已经在花钱' : '还没批准——批准之前，ME 的自动动作都不会发生'
+    ? live?.level === 'red' ? '还没批准——但系统里显示广告已经在花钱'
+      : live?.level === 'amber' ? '还没批准——Meta 里的广告可能已经在花钱'
+      : '还没批准——批准之前，ME 的自动动作都不会发生'
     : board.reconcile?.headline ?? (board.has_promo ? '推广计划的内容有问题，先改好' : '这份计划还没有推广计划的阶段')
   const blind = !draft && !!board.reconcile?.blind
   return (
     <div className={`rounded-xl border px-5 py-4 ${blind ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200'}`}>
       <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
       <p className="text-lg font-bold text-gray-900">{text}</p>
-      {draft && <LiveAdsNotice fact={liveAds} message={live} clientId={clientId} />}
+      {draft && liveAdsVisible && <LiveAdsNotice fact={liveAds} message={live} clientId={clientId} />}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (
         <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>
