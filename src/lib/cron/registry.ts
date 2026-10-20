@@ -112,13 +112,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   //    按本字段自己的约定：老任务不补 addedAt。（Codex thread：registry.ts L41）
   { service: 'ad-readback-sweep-daily', jobName: 'ad-readback-sweep', schedule: '40 20 * * *', logsRuns: true },
   // ads IMPACT 阶段 1：广告设置快照，只在设置变化时记一行、另每天一次（只读 Meta）。
-  { service: 'ad-entity-snapshot', jobName: 'ad-entity-snapshot', schedule: '30 */3 * * *', logsRuns: true, addedAt: '2026-09-14' },
+  // 每 6 小时一轮：2026-09-16 降频（commit 2a17a85f2，3 小时 → 6 小时）。此前这里和 render.yaml 的注释一直写“每 3 小时”，
+  // 登记表因此按 3 小时算逾期；2026-10-21 对账测试抓出（docs/ledger/2026-10-21-cron-registry-drift-schedules-and-unowned-writers.md）。
+  { service: 'ad-entity-snapshot', jobName: 'ad-entity-snapshot', schedule: '30 */6 * * *', logsRuns: true, addedAt: '2026-09-14' },
   { service: 'agent-learning-rollup', jobName: 'agent-learning-rollup', schedule: '0 7 * * 1', logsRuns: true },
   // IMPACT 的 Tune 段。路由早就写好了，但从 Phase 23.C 起**一直没登记调度** ——
   // cron_run_logs 里零条运行记录，而 Check 段 2026-08~09 产出了 285 条结论。
   // 「没通电」和「一切正常」在监控里长得一模一样，正是这张表要解决的那个病。
   { service: 'memory-extractor', jobName: 'memory-extractor', schedule: '30 6 * * *', logsRuns: true, addedAt: '2026-09-06' },
-  { service: 'ai-tracker-weekly', jobName: 'ai-tracker-weekly', schedule: '0 1 * * 1', logsRuns: true },
+  // 周日 UTC 18:00 = 周一新西兰 06:00（NZST）。PM 2026-09-16 拍板“新西兰早晨窗口”，从周一 01:00 UTC 挪过来，登记表此前没跟着改。
+  { service: 'ai-tracker-weekly', jobName: 'ai-tracker-weekly', schedule: '0 18 * * 0', logsRuns: true },
   { service: 'anomaly-detector-daily', jobName: 'anomaly-detector-daily', schedule: '0 5 * * *', logsRuns: true },
   { service: 'attribution-cron', jobName: 'attribution-cron', schedule: '0 */6 * * *', logsRuns: true },
   { service: 'blog-stuck-generating-sweeper', jobName: 'blog-stuck-generating-sweeper', schedule: '45 * * * *', logsRuns: true },
@@ -149,12 +152,14 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },
-  { service: 'goal-current-value-refresh', jobName: 'goal-current-value-refresh', schedule: '0 3 * * *', logsRuns: true },
+  // 每天 UTC 17:30（新西兰早 05:30）。PM 2026-09-16 “新西兰早晨窗口”，从 03:00 UTC 挪过来，登记表此前没跟着改。
+  { service: 'goal-current-value-refresh', jobName: 'goal-current-value-refresh', schedule: '30 17 * * *', logsRuns: true },
   // 2026-09-23 事故防御：这个任务负责每天写 ad_daily_insights + ad_health_narratives，
   // 但 9/20-9/23 三天 status='completed' 却一行没写（上游数据源断了，写下游被跳过），
   // 现有 judgeJob 只看 cron_run_logs 状态放行——outputTables 声明就是补这个缝：
   // 26h 没新行就算 silent_success，红灯喊出来。日 cron × 2.5 宽限 ≈ 26h（同 overdue 逻辑）。
-  { service: 'google-data-pullback-daily', jobName: 'google-data-pullback-daily', schedule: '0 3 * * *', logsRuns: true,
+  // 2026-09-16 起每天 UTC 17:00（此前 03:00，PM “新西兰早晨窗口”）；下面 26h 的新鲜度阈值对日 cron 不变。
+  { service: 'google-data-pullback-daily', jobName: 'google-data-pullback-daily', schedule: '0 17 * * *', logsRuns: true,
     outputTables: [
       { table: 'ad_daily_insights', freshnessHours: 26 },
       { table: 'ad_health_narratives', freshnessHours: 26 },
@@ -237,7 +242,8 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
       // 的 `run.finish({ processed: due.list.length })`），语义对得上，可以当判据。
       emptyRoundsAreLegitimate: true,
     }] },
-  { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 * * * *', logsRuns: true },
+  // 服务名叫 hourly，但 2026-09-16（commit 2a17a85f2）起实际是每 2 小时一轮（偶数 UTC 小时的第 25 分）。
+  { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 */2 * * *', logsRuns: true },
   { service: 'oztop-seo-optimizer', jobName: 'oztop-seo-optimizer', schedule: '0 5 * * 1', logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
   { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '15 * * * *', logsRuns: true },
@@ -247,13 +253,15 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'prescription-weekly', jobName: 'prescription-weekly', schedule: '0 8 * * 2', logsRuns: true, addedAt: '2026-08-04' },
   { service: 'cms-connection-retest', jobName: 'cms-connection-retest', schedule: '10 6 * * *', logsRuns: true, addedAt: '2026-08-05' },
   { service: 'proposal-view-digest', jobName: 'proposal-view-digest', schedule: '0 19 * * *', logsRuns: true },
-  { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '*/30 * * * *', logsRuns: true },
+  // 2026-09-16 降频（commit 2a17a85f2）：每小时整点；此前登记的是每 30 分钟。
+  { service: 'prospecting-sweep', jobName: 'prospecting-sweep', schedule: '0 * * * *', logsRuns: true },
   { service: 'reputation-snapshots-weekly', jobName: 'reputation-snapshots-weekly', schedule: '30 3 * * 1', logsRuns: true },
   { service: 'seo-patrol-daily', jobName: 'seo-patrol-daily', schedule: '0 4 * * *', logsRuns: true },
   { service: 'seo-weekly-list', jobName: 'seo-weekly-list', schedule: '30 4 * * 1', logsRuns: true, addedAt: '2026-10-04' },
   { service: 'site-audit-cron', jobName: 'site-audit-cron', schedule: '0 2 * * *', logsRuns: true },
   { service: 'site-audit-weekly', jobName: 'site-audit-weekly', schedule: '0 1 * * 0', logsRuns: true },
-  { service: 'social-comment-autoreply', jobName: 'social-comment-autoreply', schedule: '*/30 * * * *', logsRuns: true },
+  // 2026-09-16 降频（commit 2a17a85f2）：每小时整点；此前登记的是每 30 分钟。
+  { service: 'social-comment-autoreply', jobName: 'social-comment-autoreply', schedule: '0 * * * *', logsRuns: true },
   { service: 'social-engagement-pullback', jobName: 'social-engagement-pullback', schedule: '0 4 * * *', logsRuns: true },
   // 补登记（2026-09-05 对账测试抓出）：Tailor-made 导入/提取改成异步后加的扫尾任务，
   // 2026-08-28 进 render.yaml，清单里一直没有。老任务不补 addedAt（理由同上）。
@@ -401,6 +409,18 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
     outputTables: [{ table: 'gsc_query_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' }] },
   // The pull orders of the chain above, under their own job name (same reasons as gsc-page-daily-pull).
   { service: 'inngest:cloud-gsc-query-page-daily-pull', jobName: 'gsc-query-page-daily-pull', schedule: '0 19 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-13' },
+  // 每日计划图文 Post 自动发 Facebook 的每小时扫一遍：新西兰每小时第 20 分（默认只演练，真发要 Ray 授权），
+  // 每一轮（含空轮）都写一行运行记录。设计稿 docs/specs/2026-10-10-daily-plan-auto-publish-design.md。
+  // 2026-10-21 才补登记：此前这个会对外发布的函数不在任何名单里，「没通电」和「一切正常」在告警里长得一样。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/daily-plan-auto-publish.ts 的 DAILY_PLAN_AUTO_PUBLISH_CRON
+  //    （带 TZ=Pacific/Auckland 前缀；每小时第 20 分在任何整小时偏移的时区里是同一个周期，所以这里写不带时区的 20 * * * *，
+  //    该函数的测试断言两边一致）。
+  // 🔴 故意不写 addedAt：它早就在跑（生产库近 48 小时 48 行运行记录），不是新函数；哪天停了要立刻喊。
+  { service: 'inngest:cloud-daily-plan-auto-publish', jobName: 'daily-plan-auto-publish', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest' },
+  // Story 轻量发布每 10 分钟扫一遍（新西兰时区；默认只演练，真发要 STORY_AUTO_PUBLISH_LIVE=true 且客户在名单里），
+  // 每一轮都写一行运行记录。设计稿 docs/specs/2026-10-12-story-lite-design.md。2026-10-21 补登记，理由同上一条。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/story-lite-publish.ts 的 STORY_LITE_PUBLISH_CRON（该函数的测试断言两边一致）。
+  { service: 'inngest:cloud-story-lite-publish', jobName: 'story-lite-publish', schedule: '*/10 * * * *', logsRuns: true, scheduler: 'inngest' },
 ] as const
 
 /**
@@ -447,6 +467,11 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // content-factory/generate 每写一条候选就发一次事件，一天 0 到 N 次，不排班。回执
   // job_name 恒为 'libai-copy-provenance'，哪条文案由 summary.source_record_id 区分。
   'libai-copy-provenance': '按需事件触发（每篇文案生成后），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+
+  // Reel 批量渲染工作流（src/lib/inngest/functions/reel-batch-render.ts）：由事件 reel/batch.render.started 触发，
+  // 再等 reel/batch.preview.approved（PM 审批小样，最长等 48 小时），一次 0 到 N 轮，不是周期任务，不排班。
+  // 回执 job_name 恒为 'reel-batch-render'。生产库实测（2026-10-21）：近 48 小时 0 行，最近一次是 2026-09-22。
+  'reel-batch-render': '按需事件触发（reel/batch.render.started，等 PM 审批小样），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
   // cts-seo-optimizer 于 2026-09-20 退役（PM 拍板）：render.yaml 那条定时任务已删，
   // 换成 Inngest 原生的 cloud-seo-meta-cycle-fanout（同目录 seo-meta-cycle 的对账测试
