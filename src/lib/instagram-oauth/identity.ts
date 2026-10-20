@@ -3,7 +3,8 @@ export const INSTAGRAM_SCOPES = ['instagram_business_basic'] as const
 /** Read-only scope plus Reels publishing. Only requested/required while the publish switch is on. */
 export const INSTAGRAM_PUBLISH_SCOPES = ['instagram_business_basic', 'instagram_business_content_publish'] as const
 
-/** Server-side switch (default off). Exactly "true" turns it on; never import this into client components. */
+/** Server-side switch (default off). Exactly "true" turns it on. Reads a non-public env var, so calling it from a
+ * client component silently yields false: call it only in server code (routes, lib). */
 export function isInstagramPublishEnabled(): boolean {
   return process.env.INSTAGRAM_PUBLISH_ENABLED === 'true'
 }

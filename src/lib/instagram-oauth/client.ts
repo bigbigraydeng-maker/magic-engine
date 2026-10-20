@@ -134,7 +134,7 @@ export async function refreshInstagramToken(accessToken: string): Promise<{ acce
     const body = oneRecord(await providerJson(url.toString()))
     if (!body || !token(body.access_token) || typeof body.token_type !== 'string' || body.token_type.toLowerCase() !== 'bearer'
       || typeof body.expires_in !== 'number' || !Number.isSafeInteger(body.expires_in)
-      || body.expires_in <= 0 || body.expires_in > 60 * 24 * 60 * 60) return null
+      || body.expires_in < 24 * 60 * 60 || body.expires_in > 60 * 24 * 60 * 60) return null // a tiny value would self-expire a healthy grant
     return { accessToken: body.access_token, expiresIn: body.expires_in }
   } catch { return null }
 }

@@ -148,7 +148,7 @@ describe('refreshInstagramToken (official ig_refresh_token)', () => {
     expect(Object.fromEntries(u.searchParams)).toEqual({ grant_type: 'ig_refresh_token', access_token: 'old-test' })
     expect(init).toMatchObject({ redirect: 'error', cache: 'no-store' })
   })
-  it.each([{ ...ok, token_type: 'basic' }, { ...ok, expires_in: 0 }, { ...ok, expires_in: 5184001 },
+  it.each([{ ...ok, token_type: 'basic' }, { ...ok, expires_in: 0 }, { ...ok, expires_in: 5184001 }, { ...ok, expires_in: 86399 },
     { ...ok, expires_in: '5184000' }, { ...ok, access_token: '' }, { error: { message: 'x' } }, { data: [ok, ok] }])(
     'rejects an unusable response %j', async bad => {
       replies(bad)
