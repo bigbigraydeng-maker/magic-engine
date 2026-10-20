@@ -105,7 +105,7 @@ async function writeOrderOnce(deps: PromoteDeps, ctx: PromoteContext, facts: Pub
     if (cur['video_state'] === 'PUBLISHED' && cur['promote_request_id'] === requestId) return null
     if (cur['video_state'] !== 'DRAFT') return fail(409, '工单已不是草稿状态,请核对')
     const next: Record<string, unknown> = {
-      ...cur, video_state: 'PUBLISHED', published_at: facts.publishedAt, ig_crosspost_blocked: true,
+      ...cur, video_state: 'PUBLISHED', published_at: facts.publishedAt, ...ctx.port.publishedRefExtras(),
       promote_request_id: requestId,
       ...(facts.permalink ? { permalink: facts.permalink } : {}),
       ...(facts.estimated ? { published_at_estimated: true } : {}),
