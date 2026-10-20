@@ -118,6 +118,8 @@ describe('summarizeLiveAds', () => {
     expect(amber?.level).toBe('amber')
     expect(amber?.text).not.toContain('⚠️')
     expect(amber?.text).toContain('没法确认')
+    expect(amber?.text).toContain('可能已经在花钱')
+    expect(amber?.text).toContain('不要当成「没事」')
     const grey = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_3d: 0 }, act_2: { last_day: '2026-10-20', spend_3d: 0 } }))
     expect(grey?.level).toBe('grey')
     expect(describeLiveAds(null)).toBeNull()

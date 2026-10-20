@@ -287,7 +287,7 @@ export function describeLiveAds(fact: LiveAdsFact | null): LiveAdsMessage | null
   const unknown = fact.by_account.filter(a => a.state === 'no_spend_data')
   if (unknown.length > 0) {
     const where = unknown.map(a => `${nameOf(a)} ${a.live_adsets} 个（花费数据${a.last_insight_day ? `停在 ${a.last_insight_day}` : '一条都没有'}，${snapTime(a.as_of)}）`).join('；')
-    return { level: 'amber', text: `ℹ️ 快照显示这些广告组状态是「开着」：${where}。系统里的花费数据太旧，没法确认是否真在花钱；本计划还没批准，请到 Meta 核对。` }
+    return { level: 'amber', text: `ℹ️ 快照显示这些广告组状态是「开着」：${where}。这些广告可能已经在花钱：新开投的广告，花费数据要等下一次每日拉取才会到（通常次日）；系统里现在的花费数据太旧，没法确认。本计划还没批准，请到 Meta 核对，不要当成「没事」。` }
   }
   const where = fact.by_account.map(a => `${nameOf(a)} ${a.live_adsets} 个`).join('、')
   return { level: 'grey', text: `有广告组状态是「开着」（${where}），但近 3 天花费为 0，没有在花钱。` }
