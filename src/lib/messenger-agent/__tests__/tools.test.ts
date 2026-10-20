@@ -172,7 +172,7 @@ describe('query_customer_facing_facts — clientId 越权轴锁死', () => {
     expect(out.omitted_facts).toBeGreaterThan(0)
     expect(out.facts.length + out.omitted_facts).toBe(200)
     expect(out.omitted_note).toMatch(/intent_keywords/)
-    expect(raw.length).toBeLessThanOrEqual(CUSTOMER_FACTS_TOOL_MAX_CHARS + 400)
+    expect(raw.length).toBeLessThanOrEqual(CUSTOMER_FACTS_TOOL_MAX_CHARS)
   })
 
   it('sensitivity=general 的事实不出现在结果里(留给 query_client_brand_facts)', async () => {

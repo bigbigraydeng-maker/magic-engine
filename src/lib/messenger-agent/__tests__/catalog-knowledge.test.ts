@@ -116,6 +116,23 @@ describe('buildCatalogKnowledgeEntries — Pacific/Auckland date cutoff', () => 
 // 3. Inactive / sold-out tours
 // ---------------------------------------------------------------------------
 
+describe('alias from the short tour name', () => {
+  it('"China Signature — Silk Road" gets alias "Silk Road"; a name without a dash gets none', () => {
+    const entries = buildCatalogKnowledgeEntries({
+      clientId: 'client-1',
+      tours: [
+        makeTour({ id: 't1', name: 'China Signature — Silk Road', departure_dates: ['1 November 2026'] }),
+        makeTour({ id: 't2', slug: 'plain', name: 'Plain Name', departure_dates: ['1 November 2026'] }),
+      ],
+      now: new Date('2026-10-21T01:00:00Z'),
+    })
+    const aliasesOf = (n: string) =>
+      (entries.find((e) => (e.structuredValue as { name: string }).name === n)!.structuredValue as { aliases: string[] }).aliases
+    expect(aliasesOf('China Signature — Silk Road')).toEqual(['Silk Road'])
+    expect(aliasesOf('Plain Name')).toEqual([])
+  })
+})
+
 describe('buildCatalogKnowledgeEntries — tour eligibility', () => {
   it('produces no entries for inactive or sold-out tours', () => {
     const tours = [
@@ -357,9 +374,13 @@ describe('getClientKnowledgeWithCatalog', () => {
   beforeEach(() => {
     mocks.getClientKnowledge.mockReset()
     mocks.loadPublishedProducts.mockReset()
+    // The wrapper reads the real clock; pin it so the fixtures' dates never go stale (no time bomb).
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-21T01:00:00Z'))
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -403,6 +424,23 @@ describe('getClientKnowledgeWithCatalog', () => {
     expect(result.entries[0]).toBe(baseEntry)
     expect(result.entries[1].factKey.startsWith('tour.active.')).toBe(true)
     expect(result.forbiddenFactKeys).toEqual([])
+    // 🔴 隔离：两层都必须用调用方给的 clientId（把包装层改传别家 id 这里会红）
+    expect(mocks.getClientKnowledge).toHaveBeenCalledWith('client-1', { purpose: 'customer_reply' })
+    expect(mocks.loadPublishedProducts).toHaveBeenCalledWith({ __opaque: 'supabaseAdmin' }, 'client-1', '2026-10-21')
+    expect(result.entries[1].clientId).toBe('client-1')
+  })
+
+  it('passes the base forbiddenFactKeys through untouched', async () => {
+    mocks.getClientKnowledge.mockResolvedValue({ entries: [], forbiddenFactKeys: ['tour.retired.some-other-tour'] })
+    mocks.loadPublishedProducts.mockResolvedValue({
+      published: true,
+      tours: [makeTour({ departure_dates: ['1 November 2026'] })],
+    })
+
+    const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' })
+
+    expect(result.forbiddenFactKeys).toEqual(['tour.retired.some-other-tour'])
+    expect(result.entries).toHaveLength(1)
   })
 
   it('drops catalog entries for a retired key that uses the .alias. convention', async () => {

@@ -101,6 +101,13 @@ function normalizeCodePart(part: string): string {
   return part.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
+/** "China Signature — Silk Road" → ["Silk Road"]: customers say the short name, and the name check matches aliases. */
+function shortNameAliases(name: string): string[] {
+  const parts = name.split(/\s[—–-]\s/)
+  const short = parts.length > 1 ? parts[parts.length - 1].trim() : ''
+  return short !== '' && short !== name ? [short] : []
+}
+
 function buildCode(tour: FirstPartyTour): string {
   const parts = [tour.destination, tour.tier, tour.slug]
     .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
@@ -176,7 +183,7 @@ export function buildCatalogKnowledgeEntries(input: {
         structuredValue: {
           code,
           name: tour.name,
-          aliases: [],
+          aliases: shortNameAliases(tour.name),
           price_nzd: price,
           departure_dates: sortedDates,
           itinerary_url: '',
