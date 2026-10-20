@@ -108,6 +108,12 @@ describe('PUT promo — 保存时服务端校验', () => {
     m.loadPromoFacts.mockResolvedValue(loadedFacts(gate))
     expect((await PUT(req({ promo: baseSpec() }, 'PUT'), { params: P })).status).toBe(400)
   })
+  it('保存只做归属和确定的超限检查，不现读预算门（不去打 Meta）', async () => {
+    m.plan = planWith(undefined)
+    await PUT(req({ promo: baseSpec() }, 'PUT'), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalled()
+    expect(m.loadPromoFacts.mock.calls[0][4]).toBeUndefined()
+  })
   it('上限读不到只是未核实：允许保存（批准时由检查清单挡）', async () => {
     const gate = goodFacts({ config: null })
     m.loadPromoFacts.mockResolvedValue(loadedFacts(gate))
@@ -204,6 +210,12 @@ describe('GET promo — 一页纸', () => {
     expect(json.board.next_phase.phase.id).toBe('p1')
     expect(typeof json.board.reconcile.headline).toBe('string')
   })
+  it('🔴 看板读事实时要求现读预算门（页面上「批准」按钮可不可点由这份清单决定，存档过期就永远灰）', async () => {
+    m.plan = planWith(baseSpec())
+    await GET(req(null, 'GET'), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: true })
+  })
   it('计划不存在 → 404', async () => {
     m.plan = null
     expect((await GET(req(null, 'GET'), { params: P })).status).toBe(404)
@@ -283,6 +295,12 @@ describe('POST acknowledge — 按计划继续', () => {
     expect(res.status).toBe(409)
     expect(m.updates).toHaveLength(0)
   })
+  it('读事实时不现读预算（留“没意见”记录不是授权动作，不去打 Meta）', async () => {
+    m.plan = approvedWithFingerprint()
+    await ACK(req({}), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalled()
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({})
+  })
   it('只在已批准时可点；记一条，按窗口起始日幂等', async () => {
     m.plan = planWith(baseSpec(), { status: 'draft' })
     expect((await ACK(req({}), { params: P })).status).toBe(409)
@@ -318,6 +336,12 @@ describe('POST approve — 推广计划批准前检查', () => {
     expect(json.blockers[0].how.length).toBeGreaterThan(0)
     expect(m.dispatch).not.toHaveBeenCalled()
     expect(m.updates).toHaveLength(0)
+  })
+  it('🔴 批准是授权动作：读事实时要求现读预算门（存档过期 / 没过时现读一次最新的在投预算）', async () => {
+    m.plan = planWith(baseSpec())
+    await APPROVE(req({}), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: true })
   })
   it('全部过关 → 批准，并把批准当时的灯快照写进回执', async () => {
     const spec = baseSpec()

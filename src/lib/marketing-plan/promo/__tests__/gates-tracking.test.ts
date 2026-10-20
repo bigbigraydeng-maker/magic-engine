@@ -139,3 +139,82 @@ describe('只在有广告步骤的阶段出现', () => {
     expect(trackingResults(results)).toEqual([])
   })
 })
+
+describe('批准 / 看板现读的预算门（facts.tracking.live_budget）', () => {
+  const KEY = 'env.account_billing'
+  const liveGate = (status: TrackingGateReceipt['status'], over: Partial<TrackingGateReceipt> = {}): TrackingGateReceipt =>
+    receiptGate(KEY, status, { as_of: NOW.toISOString(), reason: '现读-原因', how: '现读-怎么办', ...over })
+  const budgetOf = (tracking: ReturnType<typeof goodFacts>['tracking']) => trackingResults(run(tracking)).find(r => r.key === KEY)
+  const staleReceipt = { checked_at: hoursBefore(20), gates: allGreen() }
+
+  it('🔴 存档过期、但现读到了 → 用现读的这一份（灯、原因、怎么办、读取时间都是现读的），晚上不再永远灰；别的门仍按存档', () => {
+    const tracking = { receipt: staleReceipt, client_id: 'client-1', live_budget: liveGate('green') }
+    expect(budgetOf(tracking)).toMatchObject({ light: 'green', reason: '现读-原因', how: '现读-怎么办', as_of: NOW.toISOString(), hard: true })
+    // 存档 20 小时：别的门没到 36 小时，照存档
+    for (const r of trackingResults(run(tracking)).filter(x => x.key !== KEY)) expect(r.light, r.key).toBe('green')
+    expect(evaluateApproval(baseSpec(), goodFacts({ tracking })).blockers.map(b => b.key)).not.toContain(KEY)
+  })
+
+  it('现读到的是红 / 灰 → 照现读的灯，会挡批准（现读不是放行通道）', () => {
+    for (const status of ['red', 'gray'] as const) {
+      const tracking = { receipt: staleReceipt, live_budget: liveGate(status) }
+      expect(budgetOf(tracking)?.light, status).toBe(status)
+      expect(evaluateApproval(baseSpec(), goodFacts({ tracking })).blockers.map(b => b.key), status).toContain(KEY)
+    }
+  })
+
+  it('完全没有存档（receipt 为 null）也能用现读的预算门；别的九道门仍是灰', () => {
+    const results = trackingResults(run({ receipt: null, live_budget: liveGate('green') }))
+    expect(results.find(r => r.key === KEY)?.light).toBe('green')
+    for (const r of results.filter(x => x.key !== KEY)) expect(r.light, r.key).toBe('gray')
+  })
+
+  it('🔴 现读的读取时间不新鲜 / 没写读取时间 → 不采用（回到存档的判法），不会被一份旧的“现读”骗过', () => {
+    for (const asOf of [hoursBefore(13), null]) {
+      const tracking = { receipt: staleReceipt, live_budget: liveGate('green', { as_of: asOf }) }
+      const r = budgetOf(tracking)
+      expect(r?.light, String(asOf)).toBe('gray')
+      expect(r?.reason, String(asOf)).toContain('20')
+    }
+  })
+
+  it('🔴 想现读但没读成（live_budget 为 null）+ 存档过期 / 没有存档 → 灰，写明“刚才试过现读也没读成”，怎么办带客户编号和触发接口', () => {
+    const stale = budgetOf({ receipt: staleReceipt, client_id: 'client-1', live_budget: null })
+    expect(stale).toMatchObject({ light: 'gray', hard: true })
+    expect(stale?.reason).toContain('20')
+    expect(stale?.reason).toContain('现读')
+    expect(stale?.reason).toContain('没读成')
+    expect(stale?.how).toContain('client-1')
+    expect(stale?.how).toContain('/api/admin/ads-tracking-preflight/trigger')
+
+    const none = budgetOf({ receipt: null, client_id: 'client-1', live_budget: null })
+    expect(none?.light).toBe('gray')
+    expect(none?.reason).toContain('没读成')
+    expect(none?.how).toContain('client-1')
+  })
+
+  it('现读没读成、但存档够新 → 仍按存档的灯（存档里的红不会因为这次没读成就消失）', () => {
+    const red = { checked_at: hoursBefore(2), gates: allGreen().map(g => (g.key === KEY ? receiptGate(KEY, 'red') : g)) }
+    const r = budgetOf({ receipt: red, live_budget: null })
+    expect(r).toMatchObject({ light: 'red', reason: `原因-${KEY}` })
+  })
+
+  it('没要求现读（live_budget 不存在）+ 存档过期 → 老样子灰；提示里带上客户编号，开发拿去就能用', () => {
+    const r = budgetOf({ receipt: staleReceipt, client_id: 'client-1' })
+    expect(r?.light).toBe('gray')
+    expect(r?.reason).not.toContain('现读也没读成')
+    expect(r?.how).toContain('client-1')
+    expect(r?.how).toContain('/api/admin/ads-tracking-preflight/trigger')
+    // 没有客户编号时给占位，不写 undefined
+    const anon = budgetOf({ receipt: staleReceipt })
+    expect(anon?.how).toContain('<本客户编号>')
+    expect(anon?.how).not.toContain('undefined')
+  })
+
+  it('现读结果只影响预算这一道：其它门的灯不会被它改动', () => {
+    const tracking = { receipt: { checked_at: hoursBefore(2), gates: allGreen() }, live_budget: liveGate('red') }
+    const results = trackingResults(run(tracking))
+    expect(results.find(r => r.key === KEY)?.light).toBe('red')
+    expect(results.filter(r => r.key !== KEY).every(r => r.light === 'green')).toBe(true)
+  })
+})

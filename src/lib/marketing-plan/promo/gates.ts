@@ -17,7 +17,7 @@ import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
 import { promoContentHash } from './content-hash'
 import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
 import { GATE_LABELS } from '@/lib/ads-tracking-preflight/judge'
-import { BUDGET_RECEIPT_STALE_HOURS, TRACKING_RECEIPT_STALE_HOURS, receiptAgeHours } from '@/lib/ads-tracking-preflight/receipt'
+import { BUDGET_RECEIPT_STALE_HOURS, TRACKING_RECEIPT_STALE_HOURS, receiptAgeHours, receiptIsStale } from '@/lib/ads-tracking-preflight/receipt'
 import { HARD_GATE, PREFLIGHT_GATE_KEYS, type TrackingGateReceipt } from '@/lib/ads-tracking-preflight/types'
 
 export type Light = 'green' | 'yellow' | 'red' | 'gray'
@@ -95,7 +95,16 @@ export interface GateFacts {
    * undefined = 这个客户没配置追踪检查：不适用，清单里不出现追踪那十道门（老客户的批准流程不变）；
    * receipt = null = 配置了但还没有回执 / 读不到：十道门全灰（硬门灰 = 不能批准），绝不当成绿。
    */
-  tracking?: { receipt: { checked_at: string; gates: readonly TrackingGateReceipt[] } | null }
+  tracking?: {
+    receipt: { checked_at: string; gates: readonly TrackingGateReceipt[] } | null
+    /** 这个客户的编号：提示里写“找开发手动触发”时带上，开发不用再问是哪个客户 */
+    client_id?: string
+    /**
+     * 批准 / 看板在存档的预算门缺失、过期或没过（红 / 灰）时现读的那一份（见 ads-tracking-preflight/live-budget.ts）：
+     * undefined = 没要求现读，或存档够新够好直接用存档；null = 想读但没读成；有值 = 刚读到的预算门，优先于存档。
+     */
+    live_budget?: TrackingGateReceipt | null
+  }
 }
 
 const EVIDENCE: PromoEvidence = 'unvalidated_default'
@@ -219,30 +228,51 @@ function cadenceCheck(phase: PromoPhase, f: GateFacts): GateResult[] {
 }
 
 const TRACKING_HOW_WAIT = '等每天新西兰早上 7 点的自动检查；超过一天还没有，请找开发看那个定时任务有没有在跑。'
-const TRACKING_HOW_BUDGET_STALE =
-  '预算要现读：请找开发手动触发一次开投前追踪检查（后台接口 POST /api/admin/ads-tracking-preflight/trigger，kind=preflight、dry_run=false），读到最新的在投预算后再批准。'
+
+/** 手动触发一次检查的说明：带上客户编号，开发拿去就能用。 */
+function manualTriggerHow(clientId: string | undefined): string {
+  const who = clientId ? `"client_id":"${clientId}"` : '"client_id":"<本客户编号>"'
+  return `手动触发一次开投前追踪检查（后台接口 POST /api/admin/ads-tracking-preflight/trigger，内容 {"kind":"preflight",${who},"dry_run":false}）`
+}
+
+const budgetStaleHow = (clientId: string | undefined): string =>
+  `预算要现读：请找开发${manualTriggerHow(clientId)}，读到最新的在投预算后再批准。`
+const budgetLiveFailedHow = (clientId: string | undefined): string =>
+  `稍后刷新页面再试一次；仍然不行，请找开发看读取日志，或${manualTriggerHow(clientId)}。`
 
 /**
  * 追踪与环境就绪：把开投前追踪检查的回执翻成检查清单里的灯。
  * 只在有广告步骤的阶段出现；客户没配置追踪检查就一道都不出（不适用，不是灰）。
  * 没回执 / 回执超过 36 小时没更新（「广告账户与付款」读的是现在在投的预算，要现读，超过 12 小时就算过期）/ 回执里缺这一项
  * → 灰，绝不当成绿；「不适用」的门不出现。
+ * 批准 / 看板在存档的预算门不可用时会现读一次（f.tracking.live_budget）：刚读到的优先于存档；
+ * 现读没读成又没有可用的存档 → 灰，并说明刚才试过现读。
  */
 function trackingChecks(phase: PromoPhase, f: GateFacts): GateResult[] {
   if (phaseAdsSteps(phase).length === 0 || f.tracking === undefined) return []
-  const receipt = f.tracking.receipt
+  const { receipt, client_id: clientId, live_budget: live } = f.tracking
   const age = receipt ? receiptAgeHours(receipt.checked_at, f.now) : null
   const gray = (key: (typeof PREFLIGHT_GATE_KEYS)[number], reason: string, as_of: string | null, how = TRACKING_HOW_WAIT): GateResult =>
     make(key, 'tool', GATE_LABELS[key], HARD_GATE[key], 'gray', reason, how, as_of)
 
   return PREFLIGHT_GATE_KEYS.flatMap((key): GateResult[] => {
-    if (receipt === null) return [gray(key, '开投前追踪检查还没有回执（每天新西兰早上 7 点自动跑一次）', null)]
     const budgetKey = key === 'env.account_billing'
+    // 刚现读到的预算门（读取时间不新鲜 / 没写读取时间的不算）优先于存档
+    if (budgetKey && live && !receiptIsStale(live.as_of ?? '', f.now, BUDGET_RECEIPT_STALE_HOURS)) {
+      return [make(key, 'tool', GATE_LABELS[key], HARD_GATE[key], live.status, live.reason, live.how, live.as_of)]
+    }
+    const liveFailed = budgetKey && live === null
+    if (receipt === null) {
+      return [liveFailed
+        ? gray(key, '开投前追踪检查还没有回执，刚才想现读最新的在投预算也没读成（超时或读取出错）', null, budgetLiveFailedHow(clientId))
+        : gray(key, '开投前追踪检查还没有回执（每天新西兰早上 7 点自动跑一次）', null)]
+    }
     if (age === null || age > (budgetKey ? BUDGET_RECEIPT_STALE_HOURS : TRACKING_RECEIPT_STALE_HOURS)) {
       const hours = age === null ? '未知' : String(Math.round(age))
-      return [budgetKey
-        ? gray(key, `预算数据已 ${hours} 小时没更新（预算要现读，超过 ${BUDGET_RECEIPT_STALE_HOURS} 小时就不可信）`, receipt.checked_at, TRACKING_HOW_BUDGET_STALE)
-        : gray(key, `开投前追踪检查已 ${hours} 小时没更新（本该每天一次），现在的状态不可信`, receipt.checked_at)]
+      if (!budgetKey) return [gray(key, `开投前追踪检查已 ${hours} 小时没更新（本该每天一次），现在的状态不可信`, receipt.checked_at)]
+      return [liveFailed
+        ? gray(key, `预算数据已 ${hours} 小时没更新，刚才想现读最新的在投预算也没读成（超时或读取出错）`, receipt.checked_at, budgetLiveFailedHow(clientId))
+        : gray(key, `预算数据已 ${hours} 小时没更新（预算要现读，超过 ${BUDGET_RECEIPT_STALE_HOURS} 小时就不可信）`, receipt.checked_at, budgetStaleHow(clientId))]
     }
     const g = receipt.gates.find(x => x.key === key)
     if (g === undefined) return [gray(key, '这次追踪检查的回执里没有这一项', receipt.checked_at)]

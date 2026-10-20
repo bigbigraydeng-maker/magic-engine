@@ -54,6 +54,9 @@ export interface CollectDeps {
   sleep?: Sleep
 }
 
+/** 只读 Meta 账户 + 预算门要的最小依赖（批准时现读预算用，不需要 GA4 / 环境检查那几样）。 */
+export type LiveReadDeps = Pick<CollectDeps, 'now' | 'fetcher' | 'supabase' | 'resolveMetaToken' | 'sleep'>
+
 export interface Collected<T> {
   facts: T
   errors: TrackingReadError[]
@@ -80,7 +83,7 @@ export async function collectMetaFacts(
   clientId: string,
   cfg: TrackingClientConfig,
   focusPixelIds: readonly string[],
-  deps: CollectDeps,
+  deps: Pick<CollectDeps, 'now' | 'fetcher' | 'resolveMetaToken' | 'sleep'>,
 ): Promise<Collected<MetaFacts>> {
   const unread = (message: string): Collected<MetaFacts> => ({
     facts: { read: false, as_of: deps.now.toISOString(), account_dataset_ids: [], datasets: [], account: null },
@@ -135,7 +138,7 @@ export async function collectEnvFacts(clientId: string, deps: CollectDeps): Prom
 export async function collectBudgetFacts(
   clientId: string,
   cfg: TrackingClientConfig,
-  deps: CollectDeps,
+  deps: LiveReadDeps,
 ): Promise<Collected<BudgetFacts>> {
   let token: string | null = null
   let tokenError: string | null = null

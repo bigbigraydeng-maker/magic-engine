@@ -107,7 +107,14 @@ async function readAccountCaps(supabase: SupabaseClient, clientId: string, adAcc
   } catch (err) {
     return { ok: false, error: `读 ${table} 失败：${sanitizeError(err)}` }
   }
-  const list = Array.isArray(rows) ? rows.map(asRecord).filter((r): r is Record<string, unknown> => r !== null) : []
+  // 回落只认「读成功、而且确实是一个空列表」：返回的不是列表 / 列表里有看不懂的行，都是读坏了，不是「没有登记行」
+  if (!Array.isArray(rows)) return { ok: false, error: `读 ${table} 失败：返回的不是行列表，上限没法读` }
+  const list: Record<string, unknown>[] = []
+  for (const row of rows) {
+    const rec = asRecord(row)
+    if (rec === null) return { ok: false, error: `读 ${table} 失败：返回里有看不懂的行，上限没法读` }
+    list.push(rec)
+  }
   const notRegistered = `广告账户 ${adAccountId} 没登记在这个客户名下（${table} 里找不到），上限没法读`
 
   if (list.length === 0) {

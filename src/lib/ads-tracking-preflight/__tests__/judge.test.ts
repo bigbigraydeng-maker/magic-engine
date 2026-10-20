@@ -753,6 +753,31 @@ describe('env.account_billing', () => {
     expect(gate(judge(budget({ account_cap_cents: null, registered_account_count: 2, client_cap_cents: 12000 })), KEY).status).toBe('red')
   })
 
+  it('账户级、客户级是同一个数（老客户回落时必然如此）：绿 / 红的文案只说一遍，不重复；两个数不同才分开说；多账户时只声明账户级', () => {
+    const count = (text: string, needle: string): number => text.split(needle).length - 1
+
+    const green = gate(judge(budget({ account_cap_cents: 15000, client_cap_cents: 15000 })), KEY)
+    expect(green.status).toBe('green')
+    expect(green.reason).toContain('账户级与客户级日上限')
+    expect(count(green.reason, '150.00')).toBe(1)
+
+    const red = gate(judge(budget({ account_cap_cents: 15000, client_cap_cents: 15000, live_daily_budget_cents: 16000 })), KEY)
+    expect(red.status).toBe('red')
+    expect(count(red.reason, '超过库里的')).toBe(1)
+    expect(red.reason).toContain('账户级与客户级日上限')
+
+    const different = gate(judge(budget({ account_cap_cents: 20000, client_cap_cents: 25000 })), KEY)
+    expect(different.status).toBe('green')
+    expect(different.reason).toContain('账户级日上限')
+    expect(different.reason).toContain('客户级日上限')
+    expect(different.reason).not.toContain('账户级与客户级')
+
+    const multi = gate(judge(budget({ account_cap_cents: 15000, client_cap_cents: 15000, registered_account_count: 2 })), KEY)
+    expect(multi.status).toBe('yellow')
+    expect(multi.reason).toContain('没超库里的账户级日上限')
+    expect(multi.reason).not.toContain('账户级与客户级')
+  })
+
   it('🔴 写死的配置数字再也不能让它变绿：配置说「计划 10100 ≤ 上限 11000」，但库里上限 15000、Meta 现读在投 16000 → 红', () => {
     const g = gate(judge(i => {
       i.config.planned_daily_budget_cents = 10100

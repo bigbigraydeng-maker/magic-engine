@@ -13,6 +13,8 @@ import type { AccountCapFacts } from './budget-caps'
 import type { AccountSnapshotFact, GateFacts } from './gates'
 import { resolvePromoPlaybook, type PromoPlaybook } from './playbooks'
 import { loadTrackingGateFacts } from '@/lib/ads-tracking-preflight/load-receipt'
+import { readLiveBudgetGateCached } from '@/lib/ads-tracking-preflight/live-budget'
+import { resolveMetaToken } from '@/lib/meta/token-selection'
 import { addDays, plannedSpendCents, reconcileWindow, type GoalFact, type ReconcileFacts } from './reconcile'
 import { allAdsSteps, type ManualCheck, type PromoSpec } from './spec'
 
@@ -215,11 +217,30 @@ export function resolveToday(timezones: (string | null)[], now: Date): { today: 
   return { today: days[0], known: true }
 }
 
+/** 现读预算门用的真依赖（只读）。SDK / 数据库客户端都在调用时才用，不在模块顶层建。 */
+function liveReadDeps(now: Date) {
+  return {
+    now,
+    fetcher: fetch,
+    supabase: supabaseAdmin,
+    resolveMetaToken: async (id: string) => (await resolveMetaToken(supabaseAdmin, id, process.env))?.token ?? null,
+  }
+}
+
+export interface LoadPromoFactsOptions {
+  /**
+   * 批准 / 看板 / 派广告任务前的复查传 true：追踪检查存档里的「广告账户与付款（含在投预算）」缺失、过期或没过时，
+   * 现读一次（只读库和 Meta，不写运行记录）。不传 = 只读存档，后台任务不去打 Meta。
+   */
+  liveBudget?: boolean
+}
+
 export async function loadPromoFacts(
   clientId: string,
   spec: PromoSpec,
   manualChecks: readonly ManualCheck[],
   now: Date = new Date(),
+  options: LoadPromoFactsOptions = {},
 ): Promise<LoadedPromoFacts> {
   const playbook = resolvePromoPlaybook(await loadIndustry(clientId).catch(() => null))
   const planAccountIds = [...new Set(allAdsSteps(spec).map(s => s.step.settings.ad_account_id))]
@@ -237,7 +258,12 @@ export async function loadPromoFacts(
     loadInsights(clientId, planAccountIds, Object.keys(plannedSpendCents(spec, win)), win, playbook.factFreshnessDays, now),
     loadPublishedCount(clientId, win, accountTimezones),
     // 开投前追踪检查的最近回执；没配置追踪检查的客户是 undefined（清单里不出现追踪门）
-    loadTrackingGateFacts(supabaseAdmin, clientId),
+    loadTrackingGateFacts(supabaseAdmin, clientId, {
+      now,
+      ...(options.liveBudget === true && planAccountIds.length > 0
+        ? { readLiveBudget: (id: string) => readLiveBudgetGateCached(id, liveReadDeps(now)) }
+        : {}),
+    }),
   ])
 
   const ownedSet = new Map((owned ?? []).map(a => [a.id, a]))

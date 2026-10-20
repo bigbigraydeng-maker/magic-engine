@@ -303,3 +303,9 @@ export function receiptAgeHours(checkedAt: string, now: Date): number | null {
   if (Number.isNaN(ms)) return null
   return (now.getTime() - ms) / 3_600_000
 }
+
+/** 回执是不是已经太旧：读不出时间也算太旧（宁可当过期，不当新鲜）。 */
+export function receiptIsStale(checkedAt: string, now: Date, limitHours: number): boolean {
+  const age = receiptAgeHours(checkedAt, now)
+  return age === null || age > limitHours
+}

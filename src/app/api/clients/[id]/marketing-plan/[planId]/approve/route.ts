@@ -84,7 +84,8 @@ export async function POST(
         return NextResponse.json({ success: false, error: '推广计划结构不合法，不能批准', issues: parsed.issues }, { status: 400 })
       }
       contentHash = promoContentHash(parsed.spec)
-      const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow))
+      // 批准是授权动作：预算门的存档过期 / 没过时现读一次最新的在投预算再判（只读）
+      const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow), new Date(), { liveBudget: true })
       const verdict = evaluateApproval(parsed.spec, facts.gate)
       if (!verdict.can_approve) {
         return NextResponse.json({

@@ -21,7 +21,8 @@ const noSleep = async (): Promise<void> => {}
 type CapRow = { daily_budget_cap_cents: unknown }
 type AccountRow = CapRow & { ad_account_id: string }
 type World = {
-  accounts?: AccountRow[] | 'error'
+  /** { raw } = 库没报错、但返回的内容原样就是 raw（用来模拟读回来的形状不对） */
+  accounts?: AccountRow[] | 'error' | { raw: unknown }
   /** ad_strategy_configs 那一行；'multiple' = 配置行有多条（maybeSingle 报错） */
   client?: CapRow | null | 'error' | 'multiple'
   /** clients.meta_ad_account_id（老客户没有登记行时的回落）；'error' = 读失败 */
@@ -37,6 +38,7 @@ function fakeDb(world: World) {
       const finish = () => {
         if (table === 'client_meta_ad_accounts') {
           if (world.accounts === 'error') return { data: null, error: { message: `读 ${table} 失败` } }
+          if (world.accounts !== undefined && !Array.isArray(world.accounts)) return { data: world.accounts.raw, error: null }
           return { data: world.accounts ?? [], error: null }
         }
         if (table === 'clients') {
@@ -350,6 +352,21 @@ describe('readBudgetFacts · 读不到就是读不到（绝不当成 0 或当成
     const failed = await read({ db: { accounts: [], legacy: 'error', client: { daily_budget_cap_cents: 15000 } } }).result
     expect(failed.facts.read).toBe(false)
     expect(failed.facts.error).toContain('clients')
+  })
+
+  it('🔴 登记表读回来的不是列表 / 列表里有看不懂的行 = 读坏了，读不到——绝不当成「一行都没有」去回落老字段（回落只认读成功的空列表）', async () => {
+    const good = { ad_account_id: ACCOUNT, daily_budget_cap_cents: 15000 }
+    for (const raw of [null, {}, 'oops', 42, [null], ['oops'], [good, 42]]) {
+      const label = JSON.stringify(raw)
+      const { result, db } = read({ db: { accounts: { raw }, legacy: 'act_1111111111', client: { daily_budget_cap_cents: 15000 } } })
+      const { facts } = await result
+      expect(facts, label).toMatchObject({ read: false, account_cap_cents: null, client_cap_cents: null })
+      expect(facts.error, label).toContain('client_meta_ad_accounts')
+      expect(db.queries.some(q => q.table === 'clients'), label).toBe(false)
+    }
+    // 对照：真的是空列表才回落（读成功、确实一行都没有）
+    const empty = await read({ db: { accounts: { raw: [] }, legacy: 'act_1111111111', client: { daily_budget_cap_cents: 15000 } } }).result
+    expect(empty.facts).toMatchObject({ read: true, account_cap_cents: 15000, registered_account_count: 1 })
   })
 
   it('登记表里有别的账户的行时，不再回落到老字段（只有一行都没有才回落）', async () => {

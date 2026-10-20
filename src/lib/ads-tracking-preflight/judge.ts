@@ -586,6 +586,13 @@ function presentCaps(b: BudgetFacts): CapInfo[] {
   return caps
 }
 
+/** 账户级、客户级是同一个数（老客户回落时必然如此）就合成一条说，别把同一句话说两遍。 */
+function dedupeCaps(caps: readonly CapInfo[]): CapInfo[] {
+  const [first, second] = caps
+  if (caps.length === 2 && first.cents === second.cents) return [{ cents: first.cents, label: '账户级与客户级' }]
+  return [...caps]
+}
+
 interface Finding {
   reason: string
   how: string
@@ -606,7 +613,7 @@ interface Finding {
  *     客户配置里的数字跟库 / 线上对不上。
  * 绿：以上都没有。
  */
-function judgeAccountBilling(input: JudgeInput): TrackingGateReceipt {
+export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 'budget'>): TrackingGateReceipt {
   const key: PreflightGateKey = 'env.account_billing'
   const as_of = input.meta.as_of
   const acc = input.meta.account
@@ -648,7 +655,7 @@ function judgeAccountBilling(input: JudgeInput): TrackingGateReceipt {
   }
   if (live !== null) {
     // 多账户时客户总上限是各账户加起来比的，这里只有一个账户的合计——但一个账户就已经超过客户总上限，那必然是超了
-    for (const cap of caps) {
+    for (const cap of dedupeCaps(caps)) {
       if (live > cap.cents) {
         problems.push(`在投日预算合计 ${money(live, currency)} 超过库里的${cap.label}日上限 ${money(cap.cents, currency)}`)
       }
@@ -718,7 +725,7 @@ function judgeAccountBilling(input: JudgeInput): TrackingGateReceipt {
   }
   // 已核对的部分照实写：多账户时客户总上限是各账户加起来比的，这里只有一个账户，所以只声明「没超账户级上限」
   const claimedCaps = multiAccount ? caps.filter(c => c.label === '账户级') : caps
-  const capText = claimedCaps.map(c => `${c.label}日上限 ${money(c.cents, currency)}`).join('、')
+  const capText = dedupeCaps(claimedCaps).map(c => `${c.label}日上限 ${money(c.cents, currency)}`).join('、')
   const verified = `账户正常、有付款方式；本账户现在在投的日预算合计 ${money(live, currency)}，没超库里的${capText}（不含本次要新开的计划预算）`
   if (notes.length > 0) {
     return receipt(key, 'yellow', `${verified}；但：${notes.map(f => f.reason).join('；')}`, notes.map(f => f.how).join('；'), evidence, as_of)
