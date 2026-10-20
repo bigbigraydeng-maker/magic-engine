@@ -1,16 +1,33 @@
 import { supabaseAdmin } from '@/lib/supabase'
 
 export type LiveAdsFact =
-  | { ok: true; live_adsets: number; spend_today: number | null; spend_day: string | null; currency: string | null; as_of: string | null }
+  | { ok: true; live_adsets: number; by_account: LiveAdsAccount[]; spend_today: number | null; spend_day: string | null; currency: string | null; as_of: string | null }
   | { ok: false; reason: string }
+
+export interface LiveAdsAccount { ad_account_id: string; label: string | null; live_adsets: number; as_of: string | null }
 
 export interface LiveAdsInput {
   /** latest snapshot row per adset (already de-duplicated by entity, newest first-wins) */
-  adsets: { entity_id: string; effective_status: string | null; capture_reason: string | null; captured_at: string }[]
+  adsets: { entity_id: string; ad_account_id?: string; effective_status: string | null; capture_reason: string | null; captured_at: string }[]
+  /** 账户标签（来自绑定表），用于分账户显示；没有就显示账户编号 */
+  accountLabels?: Record<string, string | null>
   /** campaign-level insight rows for the most recent insight_date that exists */
   insights: { insight_date: string; spend: number | null }[]
   currency: string | null
   today: string // YYYY-MM-DD in the account timezone (caller supplies)
+}
+
+function byAccount(input: LiveAdsInput): LiveAdsAccount[] {
+  const map = new Map<string, LiveAdsAccount>()
+  for (const a of input.adsets) {
+    if (a.effective_status !== 'ACTIVE' || a.capture_reason === 'disappeared') continue
+    const id = a.ad_account_id ?? '未知账户'
+    const cur = map.get(id) ?? { ad_account_id: id, label: input.accountLabels?.[id] ?? null, live_adsets: 0, as_of: null }
+    cur.live_adsets += 1
+    if (cur.as_of === null || a.captured_at > cur.as_of) cur.as_of = a.captured_at
+    map.set(id, cur)
+  }
+  return Array.from(map.values())
 }
 
 export function summarizeLiveAds(input: LiveAdsInput): LiveAdsFact {
@@ -46,6 +63,7 @@ export function summarizeLiveAds(input: LiveAdsInput): LiveAdsFact {
   return {
     ok: true,
     live_adsets,
+    by_account: byAccount(input),
     spend_today,
     spend_day,
     currency: input.currency,
@@ -64,17 +82,22 @@ function toNumberOrNull(v: unknown): number | null {
   return Number.isFinite(n) ? n : null
 }
 
-async function loadAccountIds(clientId: string): Promise<string[] | null> {
+async function loadAccountIds(clientId: string): Promise<{ ids: string[]; labels: Record<string, string | null> } | null> {
   const { data, error } = await supabaseAdmin
     .from('client_meta_ad_accounts')
-    .select('ad_account_id')
+    .select('ad_account_id, label')
     .eq('client_id', clientId)
   if (error) return null
-  const rows = (data ?? []) as { ad_account_id: string | null }[]
-  const ids = rows
-    .map((r) => r.ad_account_id)
-    .filter((v): v is string => typeof v === 'string' && v.length > 0)
-  if (ids.length > 0) return ids.map(normalizeAccountId)
+  const rows = (data ?? []) as { ad_account_id: string | null; label: string | null }[]
+  const labels: Record<string, string | null> = {}
+  const ids: string[] = []
+  for (const r of rows) {
+    if (typeof r.ad_account_id !== 'string' || r.ad_account_id.length === 0) continue
+    const id = normalizeAccountId(r.ad_account_id)
+    ids.push(id)
+    labels[id] = r.label
+  }
+  if (ids.length > 0) return { ids, labels }
 
   const fallback = await supabaseAdmin
     .from('clients')
@@ -83,12 +106,13 @@ async function loadAccountIds(clientId: string): Promise<string[] | null> {
     .maybeSingle()
   if (fallback.error) return null
   const single = (fallback.data as { meta_ad_account_id: string | null } | null)?.meta_ad_account_id
-  if (typeof single === 'string' && single.length > 0) return [normalizeAccountId(single)]
-  return []
+  if (typeof single === 'string' && single.length > 0) return { ids: [normalizeAccountId(single)], labels: {} }
+  return { ids: [], labels: {} }
 }
 
 interface AdsetRow {
   entity_id: string
+  ad_account_id: string
   effective_status: string | null
   capture_reason: string | null
   captured_at: string
@@ -97,7 +121,7 @@ interface AdsetRow {
 async function loadAdsets(clientId: string, accounts: string[], since: string): Promise<AdsetRow[] | null> {
   const { data, error } = await supabaseAdmin
     .from('ad_entity_snapshots')
-    .select('entity_id, effective_status, capture_reason, captured_at')
+    .select('entity_id, ad_account_id, effective_status, capture_reason, captured_at')
     .eq('client_id', clientId)
     .eq('level', 'adset')
     .in('ad_account_id', accounts)
@@ -165,8 +189,9 @@ function minusDays(d: Date, days: number): Date {
 
 export async function loadLiveAds(clientId: string, now: Date = new Date()): Promise<LiveAdsFact> {
   try {
-    const accounts = await loadAccountIds(clientId)
-    if (accounts === null) return { ok: false, reason: '读不到广告花费' }
+    const bound = await loadAccountIds(clientId)
+    if (bound === null) return { ok: false, reason: '读不到广告花费' }
+    const accounts = bound.ids
     if (accounts.length === 0) return { ok: false, reason: '这个客户没有绑定广告账户' }
 
     const today = isoDate(now)
@@ -181,7 +206,7 @@ export async function loadLiveAds(clientId: string, now: Date = new Date()): Pro
 
     const currency = await loadCurrency(clientId, accounts)
 
-    return summarizeLiveAds({ adsets, insights, currency, today })
+    return summarizeLiveAds({ adsets, insights, currency, today, accountLabels: bound.labels })
   } catch {
     return { ok: false, reason: '读不到广告花费' }
   }

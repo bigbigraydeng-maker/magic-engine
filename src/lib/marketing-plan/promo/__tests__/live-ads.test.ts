@@ -72,4 +72,24 @@ describe('summarizeLiveAds', () => {
     expect(fact.as_of).toBeNull()
     expect(fact.currency).toBeNull()
   })
+
+  it('分账户列出在跑广告组，带账户标签与快照时间', () => {
+    const fact = summarizeLiveAds({
+      adsets: [
+        { entity_id: 'a', ad_account_id: 'act_1', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-20T06:00:00Z' },
+        { entity_id: 'b', ad_account_id: 'act_2', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-19T12:00:00Z' },
+        { entity_id: 'c', ad_account_id: 'act_2', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-19T12:00:00Z' },
+      ],
+      insights: [],
+      currency: 'NZD',
+      today: '2026-10-20',
+      accountLabels: { act_1: '官方账户', act_2: '主账户' },
+    })
+    if (!fact.ok) throw new Error('expected ok')
+    expect(fact.live_adsets).toBe(3)
+    expect(fact.by_account).toEqual([
+      { ad_account_id: 'act_1', label: '官方账户', live_adsets: 1, as_of: '2026-10-20T06:00:00Z' },
+      { ad_account_id: 'act_2', label: '主账户', live_adsets: 2, as_of: '2026-10-19T12:00:00Z' },
+    ])
+  })
 })

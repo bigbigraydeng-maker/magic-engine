@@ -296,7 +296,9 @@ function liveAdsWarning(fact: LiveAdsFact | null): string | null {
   const spend = fact.spend_today !== null
     ? `今天已花 ${prefix}${fact.spend_today.toFixed(2)}`
     : fact.spend_day ? `最近一天（${fact.spend_day}）的花费还没出今天的数` : '今天的花费数据还没同步过来'
-  return `⚠️ 现在 Meta 里已有 ${fact.live_adsets} 个广告组在花钱（${spend}），但本计划还没批准——计划记录与实际不一致，请先批准或联系统筹`
+  const snap = (iso: string | null) => (iso ? `，快照 ${iso.slice(5, 16).replace('T', ' ')} UTC` : '')
+  const where = fact.by_account.map(a => `${a.label ?? a.ad_account_id} ${a.live_adsets} 个${snap(a.as_of)}`).join('；')
+  return `⚠️ 现在 Meta 里已有 ${fact.live_adsets} 个广告组在花钱（${where}；${spend}），但本计划还没批准——计划记录与实际不一致，请先批准或联系统筹`
 }
 
 function LiveAdsNotice({ fact, warning, clientId }: { fact: LiveAdsFact | null; warning: string | null; clientId: string }) {
