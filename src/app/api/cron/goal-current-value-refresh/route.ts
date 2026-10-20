@@ -4,9 +4,9 @@
  * A2.1-γ daily cron — refresh all active Goals' current_value column
  * by calling autoFetchMetricValue(goal.primary_metric_key).
  *
- * Schedule: 03:00 UTC daily (Render cron) — after the 02:30 UTC
- * industry-ai-visibility-daily cron, so ai_visibility_score reads
- * today's snapshots (not yesterday's).
+ * Schedule: 17:30 UTC daily (Render cron; moved from 03:00 UTC on 2026-09-16,
+ * PM "NZ morning window") — after the 16:30 UTC industry-ai-visibility-daily
+ * cron, so ai_visibility_score reads today's snapshots (not yesterday's).
  *
  * Auth: Authorization: Bearer ${CRON_SECRET}
  *

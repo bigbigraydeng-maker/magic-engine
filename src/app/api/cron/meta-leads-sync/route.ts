@@ -1,7 +1,7 @@
 /**
  * GET/POST /api/cron/meta-leads-sync
  *
- * 每小时把 Facebook 即时表单里的新人搬进 CRM。
+ * 每 2 小时（偶数 UTC 小时的第 25 分；2026-09-16 起，此前每小时）把 Facebook 即时表单里的新人搬进 CRM。
  *
  * 在这之前这条路**只有人手一条**：导 CSV → 跑 `scripts/import-cts-fb-leads.ts`。
  * 2026-07-30 查 CTS 的实测后果：CRM 里最后一个新人停在 7/25，Meta 后台 7/26–7/30

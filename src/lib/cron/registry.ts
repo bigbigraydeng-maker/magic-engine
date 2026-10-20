@@ -137,19 +137,19 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'daily-cron-digest', jobName: 'daily-cron-digest', schedule: '0 6 * * *', logsRuns: true },
   { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true, addedAt: '2026-08-03' },
   // 客人来信没人回 → 每天早上给销售发一封汇总信。UTC 20:00 = 次日 NZ 08:00（NZST=UTC+12）。
-  // email-reply-digest 于 2026-09-03 暂停（PM 拍板，上线当天，一封都没发出去过）：
+  // email-reply-digest 于 2026-09-03 被 PM 叫停（上线当天，一封都没发出去过；仓库里已注释，服务器上是否真停见台账卡 2026-10-21-render-orphan-cron-services-9）：
   // 名单里噪音占七成 —— 现有排除只挡「自己人域名」和「同行域名」，挡不住陌生公司
   // 群发的推销，而排序按「等最久」，等最久的恰好是没人理的营销邮件。
   // render.yaml 里那段已注释掉，这里同步摘掉登记：留着会天天误报「没跑」，
   // 正是这套告警最怕的东西（跟 mailbox-sync-hourly 同一个理由）。
   // 恢复时三件一起做：render.yaml 取消注释 + 本行加回来 + EMAIL_REPLY_DIGEST_ENABLED=true。
   // DAPE E 段：看板上的动作真正被跑掉的那一步。上线时挂着 ?dry_run=1 只选不做。
-  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // 🔴 仓库里已暂停(2026-10-07,PM 没人读就关审计;服务器上是否真停见台账卡 2026-10-21-render-orphan-cron-services-9;恢复三件套见 render.yaml 对应注释)
   // { service: 'execution-auto-run', jobName: 'execution-auto-run', schedule: '30 9 * * *', logsRuns: true, addedAt: '2026-08-06' },
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '25 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '5 * * * *', logsRuns: true },
-  // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
+  // 🔴 仓库里已暂停(2026-09-08,PM「停抓图」;服务器上是否真停见台账卡 2026-10-21-render-orphan-cron-services-9):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },
   // 每天 UTC 17:30（新西兰早 05:30）。PM 2026-09-16 “新西兰早晨窗口”，从 03:00 UTC 挪过来，登记表此前没跟着改。
@@ -171,7 +171,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
       { table: 'ads_growth_states', freshnessHours: 26 },
     ] },
   { service: 'industry-ai-visibility-daily', jobName: 'industry-ai-visibility-daily', schedule: '30 16 * * 1', logsRuns: true },
-  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // 🔴 仓库里已暂停(2026-10-07,PM 没人读就关审计;服务器上是否真停见台账卡 2026-10-21-render-orphan-cron-services-9;恢复三件套见 render.yaml 对应注释)
   // { service: 'job-boards-weekly', jobName: 'job-boards-weekly', schedule: '0 2 * * 1', logsRuns: true },
   // 效果回流两条 —— 2026-08-04 补接线：代码早就有，但从没进过 render.yaml，
   // 于是 prescription_outcomes 一条记录都没有（「方案有没有用」从没被回答过）。
@@ -266,7 +266,7 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 补登记（2026-09-05 对账测试抓出）：Tailor-made 导入/提取改成异步后加的扫尾任务，
   // 2026-08-28 进 render.yaml，清单里一直没有。老任务不补 addedAt（理由同上）。
   { service: 'tailor-made-jobs-sweeper', jobName: 'tailor-made-jobs-sweeper', schedule: '*/30 * * * *', logsRuns: true },
-  // 🔴 已暂停(2026-10-07,PM 没人读就关审计;恢复三件套见 render.yaml 对应注释)
+  // 🔴 仓库里已暂停(2026-10-07,PM 没人读就关审计;服务器上是否真停见台账卡 2026-10-21-render-orphan-cron-services-9;恢复三件套见 render.yaml 对应注释)
   // { service: 'team-memory-sweeper', jobName: 'team-memory-sweeper', schedule: '*/30 * * * *', logsRuns: true },
   { service: 'viral-analyzer-worker', jobName: 'viral-analyzer-worker', schedule: '*/10 * * * *', logsRuns: true },
   { service: 'viral-discovery-weekly', jobName: 'viral-discovery-weekly', schedule: '0 0 * * *', logsRuns: true },
@@ -445,12 +445,12 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 「客人来信没回 → 每天一封汇总信」，2026-09-03 上线当天被 PM 叫停（名单里噪音占七成，
   // 一封都没发出去过）。render.yaml 里那段整段注释掉了，清单里也同步摘掉 ——
   // 留着会天天误报「没跑」。恢复时三件一起做，见 CRON_REGISTRY 里那段注释。
-  'email-reply-digest': '2026-09-03 PM 叫停，render.yaml 那段已注释掉，恢复条件写在 CRON_REGISTRY 的注释里',
+  'email-reply-digest': '2026-09-03 PM 叫停；仓库里 render.yaml 那段已注释掉（2026-10-21 核）；服务器上是否真停以 Render 读回为准，见台账卡 2026-10-21-render-orphan-cron-services-9；恢复条件写在 CRON_REGISTRY 的注释里',
 
   // 素材抓取,2026-09-08 PM「停抓图」叫停:抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   // render.yaml + CRON_REGISTRY 那行都注释掉了;路由留着并加了 FACTORY_STOCK_REFILL_ENABLED
   // 开关兜底(默认关)。恢复条件见 CRON_REGISTRY 里那段注释。
-  'factory-stock-refill': '2026-09-08 PM 停抓图,render.yaml/registry 已注释,恢复条件见 CRON_REGISTRY 注释',
+  'factory-stock-refill': '2026-09-08 PM 叫停抓图；仓库里 render.yaml 与登记行已注释（2026-10-21 核）；服务器上是否真停以 Render 读回为准，见台账卡 2026-10-21-render-orphan-cron-services-9；恢复条件见 CRON_REGISTRY 注释',
 
   // Creatomate 渲染工作流（src/lib/inngest/functions/factory-creatomate-render.ts）不是
   // 周期任务——它由客户内容"确认"按钮按需触发（一天可能 0 次也可能 N 次），设计上就不该
@@ -481,13 +481,13 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
 
   // 2026-10-07 PM 拍板暂停：没人读的空跑。render.yaml 那段已整块注释掉，
   // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
-  'execution-auto-run': '2026-10-07 暂停（没人读的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+  'execution-auto-run': '2026-10-07 PM 决定暂停（没人读的空跑）；仓库里 render.yaml 与登记行已注释（2026-10-21 核）；服务器上是否真停以 Render 读回为准，见台账卡 2026-10-21-render-orphan-cron-services-9；恢复条件见 render.yaml 注释',
 
   // 2026-10-07 PM 拍板暂停：开关没开的空转。render.yaml 那段已整块注释掉，
   // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
-  'job-boards-weekly': '2026-10-07 暂停（开关没开的空转），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+  'job-boards-weekly': '2026-10-07 PM 决定暂停（开关没开的空转）；仓库里 render.yaml 与登记行已注释（2026-10-21 核）；服务器上是否真停以 Render 读回为准，见台账卡 2026-10-21-render-orphan-cron-services-9；恢复条件见 render.yaml 注释',
 
   // 2026-10-07 PM 拍板暂停：上游已停 6 周的空跑。render.yaml 那段已整块注释掉，
   // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
-  'team-memory-sweeper': '2026-10-07 暂停（上游已停 6 周的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+  'team-memory-sweeper': '2026-10-07 PM 决定暂停（上游已停 6 周的空跑）；仓库里 render.yaml 与登记行已注释（2026-10-21 核）；服务器上是否真停以 Render 读回为准，见台账卡 2026-10-21-render-orphan-cron-services-9；恢复条件见 render.yaml 注释',
 }

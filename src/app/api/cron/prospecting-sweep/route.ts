@@ -6,10 +6,11 @@
  *
  *   audit (5)  →  analyze (2)  →  draft (5)  →  discover 1 seed (~25)
  *
- * Priority drains existing work before pulling more businesses in. Over a day
- * of ~5-min fires it discovers every industry × NZ-city seed, audits, analyses
- * the qualified, and leaves ready-to-review email drafts in the queue. Sending
- * stays 100% human — a person approves every outreach email.
+ * Priority drains existing work before pulling more businesses in. Over many
+ * fires (hourly since 2026-09-16, more often before) it works through every
+ * industry × NZ-city seed, audits, analyses the qualified, and leaves
+ * ready-to-review email drafts in the queue. Sending stays 100% human — a
+ * person approves every outreach email.
  *
  * Safety:
  *   - Auth: Authorization: Bearer ${CRON_SECRET}

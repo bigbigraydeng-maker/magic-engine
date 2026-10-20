@@ -1,10 +1,10 @@
 /**
  * GET /api/cron/social-comment-autoreply
  *
- * Every 30 min — for each client with social_comment_config.enabled=true, pull
- * recent Facebook Page comments and auto-reply (public + optional DM) / hide spam.
- * Runs every 30 min (not daily) so DM private_replies stay inside Meta's 7-day
- * window and replies feel timely.
+ * Hourly (reduced from every 30 min on 2026-09-16) — for each client with
+ * social_comment_config.enabled=true, pull recent Facebook Page comments and
+ * auto-reply (public + optional DM) / hide spam. Runs hourly (not daily) so DM
+ * private_replies stay inside Meta's 7-day window and replies feel timely.
  *
  * Auth: Bearer ${CRON_SECRET}
  * Global kill switch: SOCIAL_COMMENT_AUTOREPLY_KILL=1

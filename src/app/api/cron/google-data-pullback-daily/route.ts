@@ -5,7 +5,7 @@
  * Upserts into gsc_performance_snapshots, ga4_traffic_snapshots,
  * meta_ads_snapshots, and writes Google Ads aggregates into flywheel_metrics.
  *
- * Schedule: daily at 3am UTC (~3pm NZST)
+ * Schedule: daily at 17:00 UTC (~5am NZST / 6am NZDT; moved from 03:00 UTC on 2026-09-16, PM "NZ morning window")
  * Auth: Bearer ${CRON_SECRET}
  * Max duration: 15 min (Render standard plan)
  *
