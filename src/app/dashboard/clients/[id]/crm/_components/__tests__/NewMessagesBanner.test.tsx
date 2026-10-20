@@ -46,6 +46,19 @@ afterEach(() => {
 })
 
 describe('新消息提示条', () => {
+  it('卸载时标题已被别的页面改写 → 不许盖掉它（只在还是我们设的值时才还原）', async () => {
+    stubFetch({ count: 2, byChannel: { whatsapp: 2 }, latestAt: null })
+    const { unmount } = render(<NewMessagesBanner clientId={CLIENT} intervalMs={INTERVAL} />)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(INTERVAL)
+    })
+    expect(document.title.startsWith('(2) ')).toBe(true)
+
+    document.title = '别的页面自己的标题 | Magic Engine'
+    unmount()
+    expect(document.title).toBe('别的页面自己的标题 | Magic Engine')
+  })
+
   it('刚挂载不摆条、也不问 —— 要等第一个间隔', async () => {
     const f = stubFetch({ count: 0, byChannel: {}, latestAt: null })
     const { container } = render(<NewMessagesBanner clientId={CLIENT} intervalMs={INTERVAL} />)
@@ -68,11 +81,11 @@ describe('新消息提示条', () => {
 
     expect(f).toHaveBeenCalledTimes(1)
     const url = String(f.mock.calls[0][0])
-    expect(url).toContain('/crm/inbound-pulse')
+    expect(url).toContain(`/api/clients/${CLIENT}/crm/inbound-pulse`)
     expect(url).toContain('since=')
 
     const banner = screen.getByTestId('new-messages-banner')
-    expect(banner.textContent).toContain('有 3 位客人发来新消息')
+    expect(banner.textContent).toContain('有 3 个对话收到客人新消息')
     expect(banner.textContent).toContain('WhatsApp 2')
     expect(banner.textContent).toContain('私信 1')
     expect(document.title.startsWith('(3) ')).toBe(true)
@@ -148,7 +161,7 @@ describe('新消息提示条', () => {
       await vi.advanceTimersByTimeAsync(INTERVAL)
     })
 
-    screen.getByText('刷新').click()
+    screen.getByText('刷新页面').click()
     expect(reload).toHaveBeenCalledTimes(1)
   })
 })

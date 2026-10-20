@@ -18,6 +18,7 @@ function mockRows(rows: Array<{ channel: string | null; last_message_at: string 
       select: () => chain,
       eq: (c: string, v: unknown) => { filters[c] = v; return chain },
       gt: (c: string, v: unknown) => { filters[`gt:${c}`] = v; return chain },
+      in: (c: string, v: unknown) => { filters[`in:${c}`] = v; return chain },
       order: () => chain,
       limit: async () => (error ? { data: null, error: { message: error } } : { data: rows, error: null }),
     }
@@ -42,6 +43,8 @@ describe('GET inbound-pulse', () => {
     expect(body).toEqual({ count: 4, byChannel: { whatsapp: 2, messenger: 1, other: 1 }, latestAt: '2026-10-20T10:00:00Z' })
     expect(filters.client_id).toBe('client-a')
     expect(filters.last_message_from).toBe('customer')
+    // 只数 WhatsApp 和私信，邮件不进来（入库慢 + 简报/推销多，会把数字刷高）
+    expect(filters['in:channel']).toEqual(['whatsapp', 'messenger'])
     expect(filters['gt:last_message_at']).toBe(since)
   })
 

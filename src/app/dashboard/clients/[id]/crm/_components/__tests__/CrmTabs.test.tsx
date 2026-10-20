@@ -195,7 +195,7 @@ describe('CrmTabs 挂了「新消息提醒」', () => {
       render(<CrmTabs clientId={ID} active="all" />)
       expect(screen.queryByTestId('new-messages-banner')).toBeNull()
       await vi.advanceTimersByTimeAsync(31_000)
-      expect(await screen.findByTestId('new-messages-banner')).toHaveTextContent('有 2 位客人发来新消息')
+      expect(await screen.findByTestId('new-messages-banner')).toHaveTextContent('有 2 个对话收到客人新消息')
     } finally {
       vi.useRealTimers()
     }

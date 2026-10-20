@@ -30,7 +30,6 @@ interface Pulse {
 const CHANNEL_LABELS: Record<string, string> = {
   whatsapp: 'WhatsApp',
   messenger: '私信',
-  email: '邮件',
 }
 
 const labelOf = (channel: string) => CHANNEL_LABELS[channel] ?? '其它'
@@ -54,6 +53,8 @@ export function NewMessagesBanner({
   const baselineRef = useRef<string>(new Date().toISOString())
   // 原始标题，卸载时要还回去。
   const originalTitleRef = useRef<string>('')
+  /** 我们最后一次写进 document.title 的值（用来判断卸载时标题还是不是我们的）。 */
+  const ourTitleRef = useRef<string>('')
 
   useEffect(() => {
     originalTitleRef.current = document.title
@@ -82,14 +83,17 @@ export function NewMessagesBanner({
     return () => {
       alive = false
       clearInterval(timer)
-      document.title = originalTitleRef.current
+      // 只在标题仍是我们设的那个值时才还原：别的页面可能已经写了自己的标题，无条件还原会盖掉它。
+      if (document.title === ourTitleRef.current) document.title = originalTitleRef.current
     }
   }, [clientId, intervalMs])
 
   // 标题上的数字跟着 count 走；count 归零就还回原标题。
   useEffect(() => {
     const count = pulse?.count ?? 0
-    document.title = count > 0 ? `(${count}) ${originalTitleRef.current}` : originalTitleRef.current
+    const next = count > 0 ? `(${count}) ${originalTitleRef.current}` : originalTitleRef.current
+    ourTitleRef.current = next
+    document.title = next
   }, [pulse])
 
   if (!pulse || pulse.count <= 0) return null
@@ -101,14 +105,14 @@ export function NewMessagesBanner({
       className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-me-ochre/15 px-3 py-2 text-sm font-semibold text-me-charcoal"
     >
       <span>
-        有 {pulse.count} 位客人发来新消息（{formatParts(pulse.byChannel)}）
+        有 {pulse.count} 个对话收到客人新消息（{formatParts(pulse.byChannel)}）
       </span>
       <button
         type="button"
         onClick={() => window.location.reload()}
         className="rounded-md bg-me-charcoal px-3 py-1 text-xs font-bold text-white"
       >
-        刷新
+        刷新页面
       </button>
     </div>
   )

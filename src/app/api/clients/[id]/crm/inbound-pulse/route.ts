@@ -3,10 +3,16 @@
  *
  * 「有没有客人发来新消息」的轻量脉搏，给 CRM 页面的「新消息提醒」条轮询用。
  *
- * 为什么需要（PM 2026-10-20）：WhatsApp / 私信 / 邮件的消息 2–8 秒就入库了，
- * 但 CRM 页面不会自动刷新、也没有任何提醒 —— 不开页面就看不到，广告带来的咨询会堆着没人回。
+ * 为什么需要（PM 2026-10-20）：CRM 页面不会自动刷新、也没有任何提醒 —— 不开页面就看不到，
+ * 广告带来的 WhatsApp 咨询会堆着没人回。
  *
- * 只数「`since` 之后、最后一句话是客人说的」的会话数，按渠道分组。一个会话算一位客人，
+ * 🔴 只数 WhatsApp 和私信（独立审查 2026-10-21）：邮件不进来 —— 邮件同步挂在每小时任务里（入库延迟
+ * 中位约 25 分钟、最长约 1 小时），而且「最后一句是客人说的」里夹着大量简报 / 推销 / 自动回复 / 系统通知
+ * （近 14 天邮件会话约 35%），直接数会把提醒数字刷高、让销售整体忽略这条提示。邮件要等按
+ * `lib/crm/email-reply-due.ts` 的口径过滤后再加。
+ * 入库速度：WhatsApp 约几秒（webhook）；私信中位约 3 分钟、最长约 1 小时（有同步）。
+ *
+ * 只数「`since` 之后、最后一句话是客人说的」的会话数，按渠道分组。**一个会话算一条**（同一位客人在两个渠道各说话会算两条，N 是会话数不是人数），
  * 不返回任何姓名、内容、邮箱电话（轮询频繁，响应越小越好，也不让它成为个人信息的出口）。
  * 隔离：requirePaidClientAccess + 查询带 client_id。
  *
@@ -21,6 +27,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 
 const MAX_LOOKBACK_MS = 24 * 3_600_000
+
+/** 提醒只覆盖这两个渠道（邮件见上面的说明）。 */
+const PULSE_CHANNELS = ['whatsapp', 'messenger']
 
 export async function GET(
   req: NextRequest,
@@ -43,6 +52,7 @@ export async function GET(
     .from('conversations')
     .select('channel, last_message_at')
     .eq('client_id', clientId)
+    .in('channel', PULSE_CHANNELS)
     .eq('last_message_from', 'customer')
     .gt('last_message_at', since)
     .order('last_message_at', { ascending: false })
