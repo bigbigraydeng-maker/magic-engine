@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
+  baseSpec as basePlanSpec,
+  evaluateApproval as evaluatePlanApproval,
+  goodFacts as goodPlanFacts,
+  NOW as PLAN_NOW,
+} from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import {
   assemblePostLaunchReceipt,
   buildItemLinks,
   collectBudgetFacts,
@@ -355,12 +361,13 @@ describe('预算门 · 读库读线上（假网络 + 假库）', () => {
     expect(receipt.preconditions_met).toBe(false)
   })
 
-  it('🔴 库读失败 → 黄，哪怕客户配置里写死的数字看起来都对；错误记进读取错误（来源 budget）', async () => {
+  it('🔴 库读失败 → 灰（硬门的灰会挡批准，黄不挡），哪怕客户配置里写死的数字看起来都对；错误记进读取错误（来源 budget）', async () => {
     const cfgLooksFine: TrackingClientConfig = { ...CONFIG, planned_daily_budget_cents: 10100, official_daily_cap_cents: 11000 }
     const { receipt } = await run({ capsError: 'boom' }, cfgLooksFine)
-    expect(billing(receipt)?.status).toBe('yellow')
+    expect(billing(receipt)?.status).toBe('gray')
     expect(billing(receipt)?.reason).toContain('没读到')
     expect(receipt.read_errors.some(e => e.source === 'budget' && e.error.includes('boom'))).toBe(true)
+    expect(receipt.preconditions_met).toBe(false)
   })
 
   it('🔴 客户配置里被人重新写死的旧数字（计划 10100 / 官方上限 11000）再也变不成绿：跟库 / 线上对不上 → 黄', async () => {
@@ -393,6 +400,60 @@ describe('预算门 · 读库读线上（假网络 + 假库）', () => {
     const out = await collectBudgetFacts('c1', CONFIG, broken.deps)
     expect(out.facts.read).toBe(false)
     expect(out.errors.some(e => e.error.includes('找 Meta 令牌时出错'))).toBe(true)
+  })
+})
+
+// 🔴 魏征独立审查 #1（最严重）：读不到判黄但黄不拦批准 = 读不到当绿。
+//    这一组把「真实的收集 → 真实的判灯 → 推广计划批准清单里的 blockers」整条接起来：
+//    红 / 灰必须拦住批准，黄 / 绿不拦；每一种「读不到 / 没设 / 算不全」都必须落在会拦的那一边。
+describe('预算门 · 判灯一路到批准拦截（端到端）', () => {
+  const budgetBlocks = async (opts: DepsOpts, cfg: TrackingClientConfig = CONFIG) => {
+    const { receipt } = await run(opts, cfg)
+    const gates = receipt.gates
+    const plan = evaluatePlanApproval(
+      basePlanSpec(),
+      goodPlanFacts({ tracking: { receipt: { checked_at: new Date(PLAN_NOW.getTime() - 2 * 3_600_000).toISOString(), gates } } }),
+    )
+    return {
+      status: gates.find(g => g.key === 'env.account_billing')?.status,
+      blocked: plan.blockers.some(b => b.key === 'env.account_billing'),
+      listedAsUnverified: plan.unverified.some(b => b.key === 'env.account_billing'),
+    }
+  }
+
+  it('健康（读全了、没超上限）→ 绿，不拦', async () => {
+    expect(await budgetBlocks({})).toEqual({ status: 'green', blocked: false, listedAsUnverified: false })
+  })
+
+  it('超上限 → 红，拦', async () => {
+    const r = await budgetBlocks({ adsets: [{ id: '6001', campaign_id: '5001', effective_status: 'ACTIVE', daily_budget: '16000' }] })
+    expect(r).toMatchObject({ status: 'red', blocked: true })
+  })
+
+  it('🔴 读不到 / 没设 / 算不全 → 灰，拦（每一种都试一遍）', async () => {
+    const cases: [string, DepsOpts][] = [
+      ['库读失败', { capsError: 'boom' }],
+      ['没有令牌', { token: null }],
+      ['账户级和客户级上限都没设', { accountCap: null, clientCap: null }],
+      ['账户级上限是 0（配置无效）', { accountCap: 0 }],
+      ['客户级上限是 0（配置无效）', { clientCap: 0 }],
+      ['有终身预算折不出日预算', { adsets: [{ id: '6001', campaign_id: '5001', effective_status: 'ACTIVE', daily_budget: '0', lifetime_budget: '90000' }] }],
+      ['广告组预算乱码', { adsets: [{ id: '6001', campaign_id: '5001', effective_status: 'ACTIVE', daily_budget: 'abc' }] }],
+    ]
+    for (const [name, opts] of cases) {
+      const r = await budgetBlocks(opts)
+      expect(r, name).toMatchObject({ status: 'gray', blocked: true })
+    }
+  })
+
+  it('🔴 账户里一个在投的都没有（空返回）→ 黄，不出绿；黄不拦，但会列在「未核实」里提醒', async () => {
+    const r = await budgetBlocks({ adsets: [] })
+    expect(r).toEqual({ status: 'yellow', blocked: false, listedAsUnverified: true })
+  })
+
+  it('客户配置里的数字跟库 / 线上对不上 → 黄，不拦（读到的事实本身没问题，只是配置过期了）', async () => {
+    const stale: TrackingClientConfig = { ...CONFIG, planned_daily_budget_cents: 10100, official_daily_cap_cents: 11000 }
+    expect(await budgetBlocks({}, stale)).toEqual({ status: 'yellow', blocked: false, listedAsUnverified: true })
   })
 })
 

@@ -17,7 +17,7 @@ import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
 import { promoContentHash } from './content-hash'
 import { allAdsSteps, type ManualCheck, type PromoPhase, type PromoSpec } from './spec'
 import { GATE_LABELS } from '@/lib/ads-tracking-preflight/judge'
-import { TRACKING_RECEIPT_STALE_HOURS, receiptAgeHours } from '@/lib/ads-tracking-preflight/receipt'
+import { BUDGET_RECEIPT_STALE_HOURS, TRACKING_RECEIPT_STALE_HOURS, receiptAgeHours } from '@/lib/ads-tracking-preflight/receipt'
 import { HARD_GATE, PREFLIGHT_GATE_KEYS, type TrackingGateReceipt } from '@/lib/ads-tracking-preflight/types'
 
 export type Light = 'green' | 'yellow' | 'red' | 'gray'
@@ -219,24 +219,30 @@ function cadenceCheck(phase: PromoPhase, f: GateFacts): GateResult[] {
 }
 
 const TRACKING_HOW_WAIT = '等每天新西兰早上 7 点的自动检查；超过一天还没有，请找开发看那个定时任务有没有在跑。'
+const TRACKING_HOW_BUDGET_STALE =
+  '预算要现读：请找开发手动触发一次开投前追踪检查（后台接口 POST /api/admin/ads-tracking-preflight/trigger，kind=preflight、dry_run=false），读到最新的在投预算后再批准。'
 
 /**
  * 追踪与环境就绪：把开投前追踪检查的回执翻成检查清单里的灯。
  * 只在有广告步骤的阶段出现；客户没配置追踪检查就一道都不出（不适用，不是灰）。
- * 没回执 / 回执超过 36 小时没更新 / 回执里缺这一项 → 灰，绝不当成绿；「不适用」的门不出现。
+ * 没回执 / 回执超过 36 小时没更新（「广告账户与付款」读的是现在在投的预算，要现读，超过 12 小时就算过期）/ 回执里缺这一项
+ * → 灰，绝不当成绿；「不适用」的门不出现。
  */
 function trackingChecks(phase: PromoPhase, f: GateFacts): GateResult[] {
   if (phaseAdsSteps(phase).length === 0 || f.tracking === undefined) return []
   const receipt = f.tracking.receipt
   const age = receipt ? receiptAgeHours(receipt.checked_at, f.now) : null
-  const gray = (key: (typeof PREFLIGHT_GATE_KEYS)[number], reason: string, as_of: string | null): GateResult =>
-    make(key, 'tool', GATE_LABELS[key], HARD_GATE[key], 'gray', reason, TRACKING_HOW_WAIT, as_of)
+  const gray = (key: (typeof PREFLIGHT_GATE_KEYS)[number], reason: string, as_of: string | null, how = TRACKING_HOW_WAIT): GateResult =>
+    make(key, 'tool', GATE_LABELS[key], HARD_GATE[key], 'gray', reason, how, as_of)
 
   return PREFLIGHT_GATE_KEYS.flatMap((key): GateResult[] => {
     if (receipt === null) return [gray(key, '开投前追踪检查还没有回执（每天新西兰早上 7 点自动跑一次）', null)]
-    if (age === null || age > TRACKING_RECEIPT_STALE_HOURS) {
+    const budgetKey = key === 'env.account_billing'
+    if (age === null || age > (budgetKey ? BUDGET_RECEIPT_STALE_HOURS : TRACKING_RECEIPT_STALE_HOURS)) {
       const hours = age === null ? '未知' : String(Math.round(age))
-      return [gray(key, `开投前追踪检查已 ${hours} 小时没更新（本该每天一次），现在的状态不可信`, receipt.checked_at)]
+      return [budgetKey
+        ? gray(key, `预算数据已 ${hours} 小时没更新（预算要现读，超过 ${BUDGET_RECEIPT_STALE_HOURS} 小时就不可信）`, receipt.checked_at, TRACKING_HOW_BUDGET_STALE)
+        : gray(key, `开投前追踪检查已 ${hours} 小时没更新（本该每天一次），现在的状态不可信`, receipt.checked_at)]
     }
     const g = receipt.gates.find(x => x.key === key)
     if (g === undefined) return [gray(key, '这次追踪检查的回执里没有这一项', receipt.checked_at)]

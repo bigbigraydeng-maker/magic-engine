@@ -27,6 +27,12 @@ export const TRACKING_PREFLIGHT_JOB = 'ads-tracking-preflight'
 /** 回执超过这么多小时就算过期，页面上要提示重跑。 */
 export const TRACKING_RECEIPT_STALE_HOURS = 36
 
+/**
+ * 「广告账户与付款」那一道门读的是现在在投的预算，要现读：回执超过这么多小时，这一道门就不可信（出灰），
+ * 其余门仍按上面的 36 小时算。预算被人在 Ads Manager 里改了，要等下一次检查才看得到，所以不能和别的门一个口径。
+ */
+export const BUDGET_RECEIPT_STALE_HOURS = 12
+
 /** 每道门「不处理会怎样」：给非技术的产品经理看，一句话说清代价。 */
 export const GATE_IMPACT: Record<TrackingGateKey, string> = {
   'tracking.account_dataset_aligned': '广告账户、官网和 ME 回传各记各的数据集，转化会记到别处，广告优化拿不到',
@@ -38,7 +44,7 @@ export const GATE_IMPACT: Record<TrackingGateKey, string> = {
   'tracking.lead_reaches_crm': '客人填了表但 CRM 里没有，没人跟进',
   'tracking.capi_ready': 'ME 往 Meta 回传成交会失败，广告学不到谁真买了',
   'env.token_and_crons': '令牌或同步任务出问题，线索和数据读不进来',
-  'env.account_billing': '广告账户或付款有问题，投不出去或半路被停',
+  'env.account_billing': '广告账户、付款或预算有问题：投不出去、半路被停，或在投预算超了上限 / 没法核对',
   'post.t1h': '开投 1 小时后数据不对，可能一直在白花钱',
   'post.t24h': '开投一天后数据不对，要尽快查',
 }

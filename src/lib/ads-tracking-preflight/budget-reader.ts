@@ -8,8 +8,10 @@
  * 口径跟信封 / 诊断保持一致（capabilities/ads/envelope-facts.ts、ads-strategy 诊断，两处各写一份必然分家）：
  *   · 「在投」的状态集合复用 DELIVERING_STATUSES；
  *   · 系列级预算（成组预算）：在投系列有日预算就算系列的，它下面的广告组不再单独计入——钱在系列那一层，重复加就翻倍；
- *   · 上限：账户级读 client_meta_ad_accounts（按这个账户自己那一行），客户级读 ad_strategy_configs；
- *     多个登记账户时账户级没设就是没设，客户总上限顶替不了（带回登记账户数，由判灯去判）。
+ *   · 上限：账户级读 client_meta_ad_accounts（按这个账户自己那一行，账户编号带不带 act_ 都认），客户级读 ad_strategy_configs；
+ *     多个登记账户时账户级没设就是没设，客户总上限顶替不了（带回登记账户数，由判灯去判）；
+ *     老客户没有登记行时回落 clients.meta_ad_account_id + 客户级上限（跟信封一样）；
+ *   · 上限不是正整数（0 / 负数 / 乱码）= 配置无效，读不到——不当作「没设」，更不当作 0（信封里这种配置会被拒）。
  *
  * 🔴 只读：库只 select；Meta 只发 GET（makeGraphGet：路径白名单、令牌只进 Authorization 头）。
  * 🔴 永不 reject：读不到就带着已清洗的原因返回；读不到的数是 null，绝不当成 0，也绝不当成「没设」。
@@ -26,6 +28,7 @@ import type { BudgetFacts } from './types'
 
 const PAGE_LIMIT = '500'
 const IN_PLAY_FILTER = JSON.stringify([{ field: 'effective_status', operator: 'IN', value: [...DELIVERING_STATUSES] }])
+// 🔴 要哪些字段是写死的常量，别做成可配置项：Graph 读取的白名单（meta-reader.ts）只管路径，字段不能变成外部可传的东西。
 const CAMPAIGN_FIELDS = 'id,effective_status,daily_budget,lifetime_budget'
 const ADSET_FIELDS = 'id,campaign_id,effective_status,daily_budget,lifetime_budget'
 
@@ -52,21 +55,49 @@ type Caps =
   | { ok: true; account: number | null; client: number | null; registered: number }
   | { ok: false; error: string }
 
-/** 库里的上限：正整数才算；没设 / 0 / 乱码都当「没设」（null），不是 0。 */
-function parseCap(value: unknown): number | null {
+type CapParse = { kind: 'unset' } | { kind: 'value'; cents: number } | { kind: 'invalid' }
+
+/**
+ * 库里的上限：正整数才算数；没设（null）= 没设；0 / 负数 / 小数 / 乱码 = 配置无效（不是「没设」，更不是 0）。
+ * 信封里这种配置会被拒（capabilities/ads/envelope-facts.ts），所以这里也不能悄悄放过。
+ */
+function parseCap(value: unknown): CapParse {
+  if (value === null || value === undefined) return { kind: 'unset' }
   const n = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value
-  return typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? n : null
+  return typeof n === 'number' && Number.isSafeInteger(n) && n > 0 ? { kind: 'value', cents: n } : { kind: 'invalid' }
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null
 }
 
-async function readAccountCaps(
+/** 账户编号带不带 act_ 前缀都认（库里两种写法都见过）；比较前两边都去掉。 */
+function normalizeAccountId(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/^act_/i, '') : ''
+}
+
+type AccountCaps =
+  | { ok: true; cap: number | null | 'use_client_cap'; registered: number }
+  | { ok: false; error: string }
+
+/** 登记表里一行都没有时，老客户的广告账户记在 clients.meta_ad_account_id（信封同样回落到它）。 */
+async function legacyAccountMatches(
   supabase: SupabaseClient,
   clientId: string,
   adAccountId: string,
-): Promise<{ ok: true; cap: number | null; registered: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; matches: boolean } | { ok: false; error: string }> {
+  const table = 'clients'
+  try {
+    const res = await supabase.from(table).select('meta_ad_account_id').eq('id', clientId).maybeSingle()
+    if (res.error) return { ok: false, error: `读 ${table} 失败：${sanitizeError(res.error.message)}` }
+    const legacy = normalizeAccountId(asRecord(res.data)?.meta_ad_account_id)
+    return { ok: true, matches: legacy !== '' && legacy === normalizeAccountId(adAccountId) }
+  } catch (err) {
+    return { ok: false, error: `读 ${table} 失败：${sanitizeError(err)}` }
+  }
+}
+
+async function readAccountCaps(supabase: SupabaseClient, clientId: string, adAccountId: string): Promise<AccountCaps> {
   const table = 'client_meta_ad_accounts'
   let rows: unknown
   try {
@@ -77,9 +108,22 @@ async function readAccountCaps(
     return { ok: false, error: `读 ${table} 失败：${sanitizeError(err)}` }
   }
   const list = Array.isArray(rows) ? rows.map(asRecord).filter((r): r is Record<string, unknown> => r !== null) : []
-  const mine = list.find(r => r.ad_account_id === adAccountId)
-  if (!mine) return { ok: false, error: `广告账户 ${adAccountId} 没登记在这个客户名下（${table} 里找不到），上限没法读` }
-  return { ok: true, cap: parseCap(mine.daily_budget_cap_cents), registered: list.length }
+  const notRegistered = `广告账户 ${adAccountId} 没登记在这个客户名下（${table} 里找不到），上限没法读`
+
+  if (list.length === 0) {
+    // 老客户没有登记行：回落到 clients.meta_ad_account_id，单账户，账户级上限 = 客户级上限（跟信封一致）
+    const legacy = await legacyAccountMatches(supabase, clientId, adAccountId)
+    if (!legacy.ok) return legacy
+    return legacy.matches ? { ok: true, cap: 'use_client_cap', registered: 1 } : { ok: false, error: notRegistered }
+  }
+
+  const mine = list.find(r => normalizeAccountId(r.ad_account_id) === normalizeAccountId(adAccountId))
+  if (!mine) return { ok: false, error: notRegistered }
+  const cap = parseCap(mine.daily_budget_cap_cents)
+  if (cap.kind === 'invalid') {
+    return { ok: false, error: `库里该广告账户的日预算上限配置无效（不是正整数，${table}），上限没法读` }
+  }
+  return { ok: true, cap: cap.kind === 'value' ? cap.cents : null, registered: list.length }
 }
 
 async function readClientCap(
@@ -90,14 +134,16 @@ async function readClientCap(
   try {
     const res = await supabase.from(table).select('daily_budget_cap_cents').eq('client_id', clientId).maybeSingle()
     if (res.error) return { ok: false, error: `读 ${table} 失败：${sanitizeError(res.error.message)}` }
-    // 没有这一行 = 客户级上限没设（不是读失败）
-    return { ok: true, cap: parseCap(asRecord(res.data)?.daily_budget_cap_cents) }
+    // 没有这一行 = 客户级上限没设（不是读失败）；有这一行但值不是正整数 = 配置无效
+    const cap = parseCap(asRecord(res.data)?.daily_budget_cap_cents)
+    if (cap.kind === 'invalid') return { ok: false, error: `库里该客户的日预算总上限配置无效（不是正整数，${table}），上限没法读` }
+    return { ok: true, cap: cap.kind === 'value' ? cap.cents : null }
   } catch (err) {
     return { ok: false, error: `读 ${table} 失败：${sanitizeError(err)}` }
   }
 }
 
-/** 两张表各读一次；任何一张读失败，两个上限一律 null（不拿读到一半的数去判）。 */
+/** 两张表各读一次；任何一张读失败 / 配置无效，两个上限一律 null（不拿读到一半的数去判）。 */
 async function readCaps(supabase: SupabaseClient, clientId: string, adAccountId: string): Promise<Caps> {
   const account = await readAccountCaps(supabase, clientId, adAccountId)
   const client = await readClientCap(supabase, clientId)
@@ -105,7 +151,7 @@ async function readCaps(supabase: SupabaseClient, clientId: string, adAccountId:
     const problems = [account.ok ? null : account.error, client.ok ? null : client.error].filter((m): m is string => m !== null)
     return { ok: false, error: problems.join('；') }
   }
-  return { ok: true, account: account.cap, client: client.cap, registered: account.registered }
+  return { ok: true, account: account.cap === 'use_client_cap' ? client.cap : account.cap, client: client.cap, registered: account.registered }
 }
 
 // ─── Meta：在投的系列 / 广告组日预算 ────────────────────────────────────────

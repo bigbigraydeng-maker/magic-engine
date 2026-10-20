@@ -20,7 +20,13 @@ const noSleep = async (): Promise<void> => {}
 
 type CapRow = { daily_budget_cap_cents: unknown }
 type AccountRow = CapRow & { ad_account_id: string }
-type World = { accounts?: AccountRow[] | 'error'; client?: CapRow | null | 'error' }
+type World = {
+  accounts?: AccountRow[] | 'error'
+  /** ad_strategy_configs 那一行；'multiple' = 配置行有多条（maybeSingle 报错） */
+  client?: CapRow | null | 'error' | 'multiple'
+  /** clients.meta_ad_account_id（老客户没有登记行时的回落）；'error' = 读失败 */
+  legacy?: string | null | 'error'
+}
 
 function fakeDb(world: World) {
   const queries: { table: string; filters: [string, string][] }[] = []
@@ -33,7 +39,12 @@ function fakeDb(world: World) {
           if (world.accounts === 'error') return { data: null, error: { message: `读 ${table} 失败` } }
           return { data: world.accounts ?? [], error: null }
         }
+        if (table === 'clients') {
+          if (world.legacy === 'error') return { data: null, error: { message: `读 ${table} 失败` } }
+          return { data: { meta_ad_account_id: world.legacy ?? null }, error: null }
+        }
         if (world.client === 'error') return { data: null, error: { message: `读 ${table} 失败` } }
+        if (world.client === 'multiple') return { data: null, error: { message: 'JSON object requested, multiple (or no) rows returned' } }
         return { data: world.client ?? null, error: null }
       }
       const chain = {
@@ -142,6 +153,12 @@ describe('readBudgetFacts · 读到了', () => {
       const filtering = JSON.parse(c.url.searchParams.get('filtering') ?? '[]') as { field: string; operator: string; value: string[] }[]
       expect(filtering).toEqual([{ field: 'effective_status', operator: 'IN', value: [...DELIVERING_STATUSES] }])
     }
+    // 🔴 要哪些字段是写死的常量（不是可配置项）：路径白名单只管路径，字段不能变成外部可传的东西
+    const fieldsByPath = Object.fromEntries(net.calls.map(c => [c.url.pathname.replace(/^\/v\d+\.\d+\//, ''), c.url.searchParams.get('fields')]))
+    expect(fieldsByPath).toEqual({
+      [`${ACCOUNT}/campaigns`]: 'id,effective_status,daily_budget,lifetime_budget',
+      [`${ACCOUNT}/adsets`]: 'id,campaign_id,effective_status,daily_budget,lifetime_budget',
+    })
     expect(db.queries.find(q => q.table === 'client_meta_ad_accounts')?.filters).toEqual([['client_id', CLIENT]])
     expect(db.queries.find(q => q.table === 'ad_strategy_configs')?.filters).toEqual([['client_id', CLIENT]])
   })
@@ -289,9 +306,62 @@ describe('readBudgetFacts · 读不到就是读不到（绝不当成 0 或当成
     }
   })
 
-  it('库里的上限不是正整数（0 / 乱码）→ 当作没设（null）', async () => {
-    const { facts } = await read({ db: { accounts: [{ ad_account_id: ACCOUNT, daily_budget_cap_cents: 0 }], client: { daily_budget_cap_cents: 'x' } } }).result
-    expect(facts).toMatchObject({ read: true, account_cap_cents: null, client_cap_cents: null })
+  it('🔴 库里的上限不是正整数（0 / 负数 / 小数 / 乱码）= 配置无效，读不到——不当作「没设」，更不当作 0（信封里这种配置会被拒）', async () => {
+    for (const bad of [0, -5, 1.5, 'x', '0', '-3', '12.5', {}, true]) {
+      const account = await read({ db: { accounts: [{ ad_account_id: ACCOUNT, daily_budget_cap_cents: bad }], client: { daily_budget_cap_cents: 15000 } } }).result
+      expect(account.facts, `账户级 ${JSON.stringify(bad)}`).toMatchObject({ read: false, account_cap_cents: null, client_cap_cents: null })
+      expect(account.facts.error, `账户级 ${JSON.stringify(bad)}`).toContain('配置无效')
+      const client = await read({ db: { accounts: [{ ad_account_id: ACCOUNT, daily_budget_cap_cents: 15000 }], client: { daily_budget_cap_cents: bad } } }).result
+      expect(client.facts, `客户级 ${JSON.stringify(bad)}`).toMatchObject({ read: false, account_cap_cents: null, client_cap_cents: null })
+      expect(client.facts.error, `客户级 ${JSON.stringify(bad)}`).toContain('配置无效')
+    }
+  })
+
+  it('客户级配置行有多条（maybeSingle 报错）→ 读不到，不当作「没设」', async () => {
+    const { facts } = await read({ db: { accounts: [{ ad_account_id: ACCOUNT, daily_budget_cap_cents: 15000 }], client: 'multiple' } }).result
+    expect(facts).toMatchObject({ read: false, client_cap_cents: null })
+    expect(facts.error).toContain('ad_strategy_configs')
+  })
+
+  it('账户编号带不带 act_ 前缀都认（登记表里两种写法都见过）；对不上才是「没登记」', async () => {
+    for (const registered of ['1111111111', 'act_1111111111', 'ACT_1111111111', ' act_1111111111 ']) {
+      const { facts } = await read({ db: { accounts: [{ ad_account_id: registered, daily_budget_cap_cents: 15000 }], client: { daily_budget_cap_cents: 15000 } } }).result
+      expect(facts, registered).toMatchObject({ read: true, account_cap_cents: 15000, registered_account_count: 1 })
+    }
+    const other = await read({ db: { accounts: [{ ad_account_id: '2222222222', daily_budget_cap_cents: 15000 }], client: { daily_budget_cap_cents: 15000 } } }).result
+    expect(other.facts.read).toBe(false)
+    expect(other.facts.error).toContain('没登记')
+  })
+
+  it('老客户登记表里一行都没有：回落到 clients.meta_ad_account_id（账户级上限 = 客户级上限，单账户），跟信封一致；对不上 / 没有 / 读失败 → 读不到', async () => {
+    const hit = await read({ db: { accounts: [], legacy: 'act_1111111111', client: { daily_budget_cap_cents: 15000 } } }).result
+    expect(hit.facts).toMatchObject({ read: true, account_cap_cents: 15000, client_cap_cents: 15000, registered_account_count: 1 })
+    const hitNoPrefix = await read({ db: { accounts: [], legacy: '1111111111', client: { daily_budget_cap_cents: 15000 } } }).result
+    expect(hitNoPrefix.facts).toMatchObject({ read: true, account_cap_cents: 15000, registered_account_count: 1 })
+    // 回落时客户级上限没设 → 账户级也是没设（null），由判灯判成「没设」
+    const noClientCap = await read({ db: { accounts: [], legacy: 'act_1111111111', client: null } }).result
+    expect(noClientCap.facts).toMatchObject({ read: true, account_cap_cents: null, client_cap_cents: null })
+
+    for (const legacy of ['act_9999999999', null] as const) {
+      const miss = await read({ db: { accounts: [], legacy, client: { daily_budget_cap_cents: 15000 } } }).result
+      expect(miss.facts.read, String(legacy)).toBe(false)
+      expect(miss.facts.error, String(legacy)).toContain('没登记')
+    }
+    const failed = await read({ db: { accounts: [], legacy: 'error', client: { daily_budget_cap_cents: 15000 } } }).result
+    expect(failed.facts.read).toBe(false)
+    expect(failed.facts.error).toContain('clients')
+  })
+
+  it('登记表里有别的账户的行时，不再回落到老字段（只有一行都没有才回落）', async () => {
+    const { result, db } = read({ db: { accounts: [{ ad_account_id: OTHER_ACCOUNT, daily_budget_cap_cents: 15000 }], legacy: 'act_1111111111', client: { daily_budget_cap_cents: 15000 } } })
+    const { facts } = await result
+    expect(facts.read).toBe(false)
+    expect(db.queries.some(q => q.table === 'clients')).toBe(false)
+  })
+
+  it('系列列表有下一页、广告组列表没有 → 同样读不到（两个列表各自判分页，不能只判一个）', async () => {
+    const paged = await read({ routes: { [`${ACCOUNT}/campaigns`]: listRoute(ACTIVE_ABO_CAMPAIGNS, { paging: { next: 'https://graph.example.test/next' } }) } }).result
+    expect(paged.facts).toMatchObject({ read: false, live_daily_budget_cents: null })
   })
 
   it('广告账户编号格式不对 → 直接读不到，库和 Meta 一个请求都不发', async () => {

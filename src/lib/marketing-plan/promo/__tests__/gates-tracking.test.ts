@@ -59,7 +59,7 @@ describe('配置了追踪检查，但还没有可用回执', () => {
     )
   })
 
-  it('回执超过 36 小时 → 全灰，写明已经多少小时没更新；刚好 36 小时还算新鲜', () => {
+  it('回执超过 36 小时 → 全灰，写明已经多少小时没更新；刚好 36 小时：除「广告账户与付款」外还算新鲜（预算那道门另算，见下）', () => {
     const stale = trackingResults(run({ receipt: { checked_at: hoursBefore(37), gates: allGreen() } }))
     for (const r of stale) {
       expect(r.light, r.key).toBe('gray')
@@ -67,7 +67,23 @@ describe('配置了追踪检查，但还没有可用回执', () => {
       expect(r.reason).toContain('没更新')
     }
     const edge = trackingResults(run({ receipt: { checked_at: hoursBefore(36), gates: allGreen() } }))
-    for (const r of edge) expect(r.light, r.key).toBe('green')
+    for (const r of edge.filter(x => x.key !== 'env.account_billing')) expect(r.light, r.key).toBe('green')
+  })
+
+  it('🔴 「广告账户与付款」读的是现在在投的预算，要现读：回执超过 12 小时这一道就灰（别的门仍按 36 小时）；刚好 12 小时还算新鲜；灰会挡住批准', () => {
+    const at13 = trackingResults(run({ receipt: { checked_at: hoursBefore(13), gates: allGreen() } }))
+    const budget13 = at13.find(r => r.key === 'env.account_billing')
+    expect(budget13).toMatchObject({ light: 'gray', hard: true })
+    expect(budget13?.reason).toContain('13')
+    expect(budget13?.reason).toContain('预算')
+    expect(budget13?.how).toContain('trigger')
+    for (const r of at13.filter(x => x.key !== 'env.account_billing')) expect(r.light, r.key).toBe('green')
+
+    const at12 = trackingResults(run({ receipt: { checked_at: hoursBefore(12), gates: allGreen() } }))
+    for (const r of at12) expect(r.light, r.key).toBe('green')
+
+    const verdict = evaluateApproval(baseSpec(), goodFacts({ tracking: { receipt: { checked_at: hoursBefore(13), gates: allGreen() } } }))
+    expect(verdict.blockers.map(b => b.key)).toContain('env.account_billing')
   })
 
   it('回执时间读不懂 → 当作过期（灰），不当成新鲜', () => {
