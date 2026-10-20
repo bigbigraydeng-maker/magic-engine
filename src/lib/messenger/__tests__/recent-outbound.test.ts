@@ -84,3 +84,13 @@ describe('hasRecentOutbound', () => {
     ).rejects.toThrow(/read failed/)
   })
 })
+
+describe('hasRecentOutbound — 只认成功发出的行', () => {
+  it('🔴 查询带 status=sent 过滤（失败/待发的行不算已回复；把过滤去掉这条会红）', async () => {
+    state.result = { data: [], error: null }
+    state.calls = []
+    await hasRecentOutbound('conv-9', '2026-01-01T00:00:00.000Z')
+    expect(state.calls).toContainEqual({ method: 'eq', column: 'status', value: 'sent' })
+    expect(state.calls.some((c) => c.column === 'status' && c.value !== 'sent')).toBe(false)
+  })
+})
