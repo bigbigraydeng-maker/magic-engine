@@ -682,7 +682,7 @@ export async function POST(
         const target = findStep(spec, phaseId, stepId)
         const phaseDef = spec.phases.find(p => p.id === phaseId)
         if (target?.kind === 'ads_campaign' && phaseDef) {
-          const facts = await loadPromoFacts(clientId, spec, manualChecksOf(plan), new Date(), { liveBudget: true })
+          const facts = await loadPromoFacts(clientId, spec, manualChecksOf(plan), new Date(), { liveBudget: 'if_needed' })
           const hard = blockers(evaluatePhaseGates(spec, phaseDef, facts.gate))
           if (hard.length > 0) {
             return NextResponse.json({

@@ -163,19 +163,26 @@ describe('批准 / 看板现读的预算门（facts.tracking.live_budget）', ()
     }
   })
 
+  it('🔴 预算门用的是哪份证据，随结果带出去（批准记录要留底）：现读 → live；存档 → receipt；想现读没读成而用存档 → receipt_after_live_failed；别的门没有这个字段', () => {
+    const SRC = (tracking: ReturnType<typeof goodFacts>['tracking']) => trackingResults(run(tracking)).map(r => [r.key, r.source] as const)
+    const fresh = { checked_at: hoursBefore(2), gates: allGreen() }
+    const live = SRC({ receipt: staleReceipt, live_budget: liveGate('green') })
+    expect(live.find(([k]) => k === KEY)?.[1]).toBe('live')
+    const stored = SRC({ receipt: fresh })
+    expect(stored.find(([k]) => k === KEY)?.[1]).toBe('receipt')
+    const failedButFresh = SRC({ receipt: fresh, live_budget: null })
+    expect(failedButFresh.find(([k]) => k === KEY)?.[1]).toBe('receipt_after_live_failed')
+    for (const rows of [live, stored, failedButFresh]) {
+      for (const [k, src] of rows.filter(([k]) => k !== KEY)) expect(src, k).toBeUndefined()
+    }
+    // 存档过期 + 现读没读成 → 灰，没有证据可用，也就没有来源
+    expect(SRC({ receipt: staleReceipt, live_budget: null }).find(([k]) => k === KEY)?.[1]).toBeUndefined()
+  })
+
   it('完全没有存档（receipt 为 null）也能用现读的预算门；别的九道门仍是灰', () => {
     const results = trackingResults(run({ receipt: null, live_budget: liveGate('green') }))
     expect(results.find(r => r.key === KEY)?.light).toBe('green')
     for (const r of results.filter(x => x.key !== KEY)) expect(r.light, r.key).toBe('gray')
-  })
-
-  it('🔴 现读的读取时间不新鲜 / 没写读取时间 → 不采用（回到存档的判法），不会被一份旧的“现读”骗过', () => {
-    for (const asOf of [hoursBefore(13), null]) {
-      const tracking = { receipt: staleReceipt, live_budget: liveGate('green', { as_of: asOf }) }
-      const r = budgetOf(tracking)
-      expect(r?.light, String(asOf)).toBe('gray')
-      expect(r?.reason, String(asOf)).toContain('20')
-    }
   })
 
   it('🔴 想现读但没读成（live_budget 为 null）+ 存档过期 / 没有存档 → 灰，写明“刚才试过现读也没读成”，怎么办带客户编号和触发接口', () => {
@@ -191,6 +198,22 @@ describe('批准 / 看板现读的预算门（facts.tracking.live_budget）', ()
     expect(none?.light).toBe('gray')
     expect(none?.reason).toContain('没读成')
     expect(none?.how).toContain('client-1')
+  })
+
+  it('🔴 授权动作要求现读（live_required）：现读没读成 → 灰，不回落存档，哪怕存档才 2 小时、是绿；写明原因并带客户编号', () => {
+    const fresh = { checked_at: hoursBefore(2), gates: allGreen() }
+    const r = budgetOf({ receipt: fresh, client_id: 'client-1', live_budget: null, live_required: true })
+    expect(r).toMatchObject({ light: 'gray', hard: true })
+    expect(r?.reason).toContain('批准要现读')
+    expect(r?.reason).toContain('不拿存档顶替')
+    expect(r?.how).toContain('client-1')
+    expect(r?.source).toBeUndefined()
+    expect(evaluateApproval(baseSpec(), goodFacts({ tracking: { receipt: fresh, live_budget: null, live_required: true } })).blockers.map(b => b.key)).toContain(KEY)
+    // 没有存档也一样是灰；读到了就用读到的
+    expect(budgetOf({ receipt: null, live_budget: null, live_required: true })?.light).toBe('gray')
+    expect(budgetOf({ receipt: fresh, live_budget: liveGate('green'), live_required: true })?.light).toBe('green')
+    // 只是展示（没有 live_required）→ 存档还新就照存档
+    expect(budgetOf({ receipt: fresh, live_budget: null })?.light).toBe('green')
   })
 
   it('现读没读成、但存档够新 → 仍按存档的灯（存档里的红不会因为这次没读成就消失）', () => {

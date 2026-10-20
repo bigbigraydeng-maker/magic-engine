@@ -84,8 +84,8 @@ export async function POST(
         return NextResponse.json({ success: false, error: '推广计划结构不合法，不能批准', issues: parsed.issues }, { status: 400 })
       }
       contentHash = promoContentHash(parsed.spec)
-      // 批准是授权动作：预算门的存档过期 / 没过时现读一次最新的在投预算再判（只读）
-      const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow), new Date(), { liveBudget: true })
+      // 批准是授权动作：预算门每次都现读最新的在投预算再判（只读；60 秒缓存使成本很小），不信最多 12 小时前的存档
+      const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow), new Date(), { liveBudget: 'always' })
       const verdict = evaluateApproval(parsed.spec, facts.gate)
       if (!verdict.can_approve) {
         return NextResponse.json({
@@ -96,7 +96,11 @@ export async function POST(
       }
       gateSnapshot = {
         taken_at: new Date().toISOString(),
-        results: verdict.results.map(r => ({ key: r.key, light: r.light, hard: r.hard, phase_id: r.phase_id })),
+        results: verdict.results.map(r => ({
+          key: r.key, light: r.light, hard: r.hard, phase_id: r.phase_id,
+          // 预算那一道用的是现读还是存档、证据读于何时，事后要能说清（魏征：批准后没留「用的是哪份预算证据」）
+          ...(r.source ? { source: r.source, as_of: r.as_of } : {}),
+        })),
       }
     }
 

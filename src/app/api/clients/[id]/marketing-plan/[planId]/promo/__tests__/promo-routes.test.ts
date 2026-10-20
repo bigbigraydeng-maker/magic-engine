@@ -4,7 +4,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
-import { baseSpec, goodFacts, goodReconFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { baseSpec, goodFacts, goodReconFacts, NOW as FIXTURE_NOW } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { HARD_GATE, PREFLIGHT_GATE_KEYS } from '@/lib/ads-tracking-preflight/types'
 import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 
 const m = vi.hoisted(() => ({
@@ -214,7 +215,7 @@ describe('GET promo — 一页纸', () => {
     m.plan = planWith(baseSpec())
     await GET(req(null, 'GET'), { params: P })
     expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
-    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: true })
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: 'if_needed' })
   })
   it('计划不存在 → 404', async () => {
     m.plan = null
@@ -337,11 +338,39 @@ describe('POST approve — 推广计划批准前检查', () => {
     expect(m.dispatch).not.toHaveBeenCalled()
     expect(m.updates).toHaveLength(0)
   })
-  it('🔴 批准是授权动作：读事实时要求现读预算门（存档过期 / 没过时现读一次最新的在投预算）', async () => {
+  it('🔴 批准是授权动作：读事实时要求每次都现读预算门（always），不信最多 12 小时前的存档', async () => {
     m.plan = planWith(baseSpec())
     await APPROVE(req({}), { params: P })
     expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
-    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: true })
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: 'always' })
+  })
+  it('🔴 批准回执里留底预算证据的来源和读取时间（现读 → live；存档 → receipt）；别的追踪门不带这两个字段', async () => {
+    const greenGates = PREFLIGHT_GATE_KEYS.map(key => ({
+      key, status: 'green' as const, reason: 'ok', how: '', evidence: {}, as_of: FIXTURE_NOW.toISOString(), hard: HARD_GATE[key],
+    }))
+    const snapshotOf = async (tracking: Record<string, unknown>) => {
+      m.updates.length = 0
+      m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks(), tracking: tracking as never })))
+      m.plan = planWith(baseSpec())
+      const res = await APPROVE(req({}), { params: P })
+      expect(res.status).toBe(200)
+      const meta = m.updates[0].generation_meta as { approval_receipt: { gate_snapshot: { results: { key: string; source?: string; as_of?: string | null }[] } } }
+      return meta.approval_receipt.gate_snapshot.results
+    }
+    const liveAt = new Date(FIXTURE_NOW.getTime() - 30_000).toISOString()
+    const live = await snapshotOf({
+      receipt: { checked_at: FIXTURE_NOW.toISOString(), gates: greenGates },
+      client_id: 'client-1', live_required: true,
+      live_budget: { ...greenGates.find(g => g.key === 'env.account_billing')!, as_of: liveAt },
+    })
+    expect(live.find(r => r.key === 'env.account_billing')).toMatchObject({ source: 'live', as_of: liveAt })
+    const pixel = live.find(r => r.key === 'tracking.pixel_alive')
+    expect(pixel).toBeDefined()
+    expect(pixel && 'source' in pixel).toBe(false)
+    expect(pixel && 'as_of' in pixel).toBe(false)
+
+    const stored = await snapshotOf({ receipt: { checked_at: FIXTURE_NOW.toISOString(), gates: greenGates } })
+    expect(stored.find(r => r.key === 'env.account_billing')).toMatchObject({ source: 'receipt', as_of: FIXTURE_NOW.toISOString() })
   })
   it('全部过关 → 批准，并把批准当时的灯快照写进回执', async () => {
     const spec = baseSpec()

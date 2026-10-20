@@ -158,6 +158,33 @@ describe('loadTrackingGateFacts · 存档的预算门不可用时现读', () => 
     }
   })
 
+  it('🔴 always（批准这类授权动作）：存档再新、再绿也现读——存档里的绿 / 黄最多能用 12 小时，期间有人在广告后台加了广告', async () => {
+    for (const status of ['green', 'yellow'] as const) {
+      const readLiveBudget = vi.fn(async () => LIVE)
+      const out = await loadTrackingGateFacts(dbWith(hoursAgo(1), [budgetGate(status, hoursAgo(1))]), 'c1', { now: NOW, readLiveBudget, liveMode: 'always' })
+      expect(readLiveBudget, status).toHaveBeenCalledTimes(1)
+      expect(out?.live_budget, status).toEqual(LIVE)
+    }
+  })
+
+  it('always 时带上 live_required（授权动作：现读没读成不许回落存档）；if_needed 不带', async () => {
+    const stale = dbWith(hoursAgo(20), [budgetGate('green', hoursAgo(20))])
+    const always = await loadTrackingGateFacts(stale, 'c1', { now: NOW, readLiveBudget: async () => null, liveMode: 'always' })
+    expect(always).toMatchObject({ live_budget: null, live_required: true })
+    const display = await loadTrackingGateFacts(stale, 'c1', { now: NOW, readLiveBudget: async () => null, liveMode: 'if_needed' })
+    expect(display?.live_budget).toBeNull()
+    expect(display && 'live_required' in display).toBe(false)
+  })
+
+  it('liveMode 写 if_needed 与不写等价；always 但没传现读函数 → 照样只读存档，不会凭空现读', async () => {
+    const fresh = dbWith(hoursAgo(1), [budgetGate('green', hoursAgo(1))])
+    const skipped = vi.fn(async () => LIVE)
+    await loadTrackingGateFacts(fresh, 'c1', { now: NOW, readLiveBudget: skipped, liveMode: 'if_needed' })
+    expect(skipped).not.toHaveBeenCalled()
+    const out = await loadTrackingGateFacts(fresh, 'c1', { now: NOW, liveMode: 'always' })
+    expect(out && 'live_budget' in out).toBe(false)
+  })
+
   it('没有存档 / 存档里缺预算这一项 → 现读', async () => {
     const none = vi.fn(async () => LIVE)
     const noReceipt = await loadTrackingGateFacts(fakeDb({ data: [], error: null }).supabase, 'c1', { now: NOW, readLiveBudget: none })

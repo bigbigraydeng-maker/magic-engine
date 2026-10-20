@@ -7,9 +7,12 @@
  *   · { receipt: {...} } —— 最近一份回执（新鲜不新鲜由 gates.ts 按 36 小时判；预算那一道按 12 小时）
  *
  * 🔴 读库出任何问题都是 { receipt: null }——读不到就灰，绝不当成没问题。
- * 🔴 现读预算（可选）：调用方传了 readLiveBudget（批准 / 看板 / 派广告任务前的复查），而存档里的预算门
- *    缺失、过期或没过（红 / 灰）时，现读一次放进 live_budget（见 live-budget.ts）；
- *    没传就只读存档，后台任务不去打 Meta。现读失败 = live_budget 为 null，由 gates.ts 判灰。
+ * 🔴 现读预算（可选）：调用方传了 readLiveBudget（批准 / 看板 / 派广告任务前的复查）时，现读一次放进 live_budget
+ *    （见 live-budget.ts）。liveMode：'if_needed'（默认）= 存档里的预算门缺失、过期或没过（红 / 灰）才读；
+ *    'always' = 授权动作（批准）每次都读，不看存档多新——存档里的绿 / 黄最多能用 12 小时，期间有人在
+ *    广告后台加了广告，批准时仍会看到旧的绿。没传 readLiveBudget 就只读存档，后台任务不去打 Meta。
+ *    现读失败 = live_budget 为 null：'if_needed'（只是展示）存档还新时照存档；'always'（授权）带上
+ *    live_required，gates.ts 一律判灰，不拿存档顶替（读不到就不放行）。
  * 🔴 平台通用：不点名任何客户；配置在 client-config.ts。
  */
 
@@ -36,8 +39,10 @@ type StoredReceipt = TrackingFacts['receipt']
 export interface TrackingLoadOptions {
   /** 判「存档过期」用的当前时间；不传 = 现在 */
   now?: Date
-  /** 传了 = 存档的预算门缺失 / 过期 / 没过时现读一次；不传 = 只读存档 */
+  /** 传了 = 现读预算门（读多频繁看 liveMode）；不传 = 只读存档 */
   readLiveBudget?: (clientId: string) => Promise<TrackingGateReceipt | null>
+  /** 'if_needed'（默认）：存档里的预算门缺失 / 过期 / 没过才读；'always'：每次都读（批准这类授权动作） */
+  liveMode?: 'if_needed' | 'always'
 }
 
 async function loadStoredReceipt(supabase: SupabaseClient, clientId: string): Promise<StoredReceipt> {
@@ -73,7 +78,11 @@ export async function loadTrackingGateFacts(
   const facts: TrackingFacts = { receipt, client_id: clientId }
 
   const { readLiveBudget } = options
-  if (readLiveBudget !== undefined && !storedBudgetGateUsable(receipt, options.now ?? new Date())) {
+  const always = options.liveMode === 'always'
+  const needLive = always || !storedBudgetGateUsable(receipt, options.now ?? new Date())
+  if (readLiveBudget !== undefined && needLive) {
+    // 授权动作要求现读：现读没读成时不许回落存档（gates.ts 据此一律判灰）
+    if (always) facts.live_required = true
     try {
       facts.live_budget = await readLiveBudget(clientId)
     } catch {

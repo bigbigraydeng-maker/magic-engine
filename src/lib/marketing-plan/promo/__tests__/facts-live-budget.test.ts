@@ -34,7 +34,7 @@ import { baseSpec } from './fixtures'
 
 const NOW = new Date('2026-11-12T03:00:00Z')
 
-type LoadOptions = { now?: Date; readLiveBudget?: (clientId: string) => Promise<unknown> }
+type LoadOptions = { now?: Date; readLiveBudget?: (clientId: string) => Promise<unknown>; liveMode?: string }
 
 const optionsPassed = (): LoadOptions => m.loadTracking.mock.calls[0][2]
 
@@ -53,13 +53,23 @@ describe('loadPromoFacts · liveBudget 开关', () => {
     expect(optionsPassed().readLiveBudget).toBeUndefined()
   })
 
-  it('liveBudget: false → 同样不现读', async () => {
-    await loadPromoFacts('client-1', baseSpec(), [], NOW, { liveBudget: false })
+  it('liveBudget 传空对象 → 同样不现读', async () => {
+    await loadPromoFacts('client-1', baseSpec(), [], NOW, {})
     expect(optionsPassed().readLiveBudget).toBeUndefined()
+    expect(optionsPassed().liveMode).toBeUndefined()
   })
 
-  it('🔴 liveBudget: true 且计划里有广告步骤 → 给现读回调；回调用当前时间、全局 fetch、库去读', async () => {
-    await loadPromoFacts('client-1', baseSpec(), [], NOW, { liveBudget: true })
+  it('🔴 两种现读模式原样交给追踪回执读取函数：if_needed（看板 / 派任务前复查）与 always（批准每次都读）', async () => {
+    for (const mode of ['if_needed', 'always'] as const) {
+      m.loadTracking.mockClear()
+      await loadPromoFacts('client-1', baseSpec(), [], NOW, { liveBudget: mode })
+      expect(optionsPassed().liveMode, mode).toBe(mode)
+      expect(typeof optionsPassed().readLiveBudget, mode).toBe('function')
+    }
+  })
+
+  it('🔴 liveBudget 有值且计划里有广告步骤 → 给现读回调；回调用当前时间、全局 fetch、库去读', async () => {
+    await loadPromoFacts('client-1', baseSpec(), [], NOW, { liveBudget: 'if_needed' })
     const { readLiveBudget } = optionsPassed()
     expect(typeof readLiveBudget).toBe('function')
 
@@ -73,7 +83,7 @@ describe('loadPromoFacts · liveBudget 开关', () => {
   })
 
   it('现读回调里的令牌解析：只往外给令牌字符串；解析不出来 = null（读取函数据此一个 Meta 请求都不发）', async () => {
-    await loadPromoFacts('client-1', baseSpec(), [], NOW, { liveBudget: true })
+    await loadPromoFacts('client-1', baseSpec(), [], NOW, { liveBudget: 'if_needed' })
     await optionsPassed().readLiveBudget?.('client-1')
     const { resolveMetaToken } = m.readLive.mock.calls[0][1]
 
@@ -89,7 +99,7 @@ describe('loadPromoFacts · liveBudget 开关', () => {
   it('计划里没有广告步骤 → 不需要预算门，传了 liveBudget 也不现读', async () => {
     const spec = baseSpec()
     const noAds = { ...spec, phases: spec.phases.map(p => ({ ...p, steps: p.steps.filter(s => s.kind !== 'ads_campaign') })) }
-    await loadPromoFacts('client-1', noAds, [], NOW, { liveBudget: true })
+    await loadPromoFacts('client-1', noAds, [], NOW, { liveBudget: 'always' })
     expect(optionsPassed().readLiveBudget).toBeUndefined()
   })
 })

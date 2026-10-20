@@ -229,10 +229,12 @@ function liveReadDeps(now: Date) {
 
 export interface LoadPromoFactsOptions {
   /**
-   * 批准 / 看板 / 派广告任务前的复查传 true：追踪检查存档里的「广告账户与付款（含在投预算）」缺失、过期或没过时，
-   * 现读一次（只读库和 Meta，不写运行记录）。不传 = 只读存档，后台任务不去打 Meta。
+   * 现读「广告账户与付款（含在投预算）」那一道门（只读库和 Meta，不写运行记录）：
+   *   · 'always'    —— 授权动作（批准）每次都读，不看存档多新；
+   *   · 'if_needed' —— 看板 / 派广告任务前的复查：存档里的这一道缺失、过期或没过（红 / 灰）才读；
+   *   · 不传        —— 只读存档，后台任务（每日对账等）不去打 Meta。
    */
-  liveBudget?: boolean
+  liveBudget?: 'if_needed' | 'always'
 }
 
 export async function loadPromoFacts(
@@ -260,8 +262,8 @@ export async function loadPromoFacts(
     // 开投前追踪检查的最近回执；没配置追踪检查的客户是 undefined（清单里不出现追踪门）
     loadTrackingGateFacts(supabaseAdmin, clientId, {
       now,
-      ...(options.liveBudget === true && planAccountIds.length > 0
-        ? { readLiveBudget: (id: string) => readLiveBudgetGateCached(id, liveReadDeps(now)) }
+      ...(options.liveBudget !== undefined && planAccountIds.length > 0
+        ? { readLiveBudget: (id: string) => readLiveBudgetGateCached(id, liveReadDeps(now)), liveMode: options.liveBudget }
         : {}),
     }),
   ])
