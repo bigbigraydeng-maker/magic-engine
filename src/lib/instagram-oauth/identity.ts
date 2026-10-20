@@ -21,6 +21,7 @@ export const INSTAGRAM_OUTCOMES = {
   target_missing: '请先登记有效的 Instagram 用户名，再开始连接。',
   target_changed: '登记账号在连接期间发生变化，本次未保存。请核对后重新开始。',
   account_mismatch: '本次登录账号与登记账号不一致，因此未保存。请切换至登记账号重试；登记有误请先更正资料。',
+  save_failed: '平台已返回授权，但 ME 未能核实保存记录。请刷新授权状态；若仍未连接，再重新授权。',
   verify_failed: '暂时未能完成连接，已保存的资料未改变。请重试或让团队核实。',
 } as const
 export type InstagramOutcome = keyof typeof INSTAGRAM_OUTCOMES

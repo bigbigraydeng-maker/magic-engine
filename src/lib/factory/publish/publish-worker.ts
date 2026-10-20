@@ -14,6 +14,7 @@ import { buildReelPublishedEvent } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForStored, validateContentChecklist } from '@/lib/social/content-review'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
+import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from '../deliverable'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -182,6 +183,11 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   const attempts = Number(wo['publish_attempts'] ?? 0)
   const brief = (wo['brief'] ?? {}) as Record<string, unknown>
   const output = (wo['output'] ?? {}) as Record<string, unknown>
+
+  if (isAssetOnly(brief)) {
+    await markFailed(id, attempts, ASSET_ONLY_NOT_PUBLISHABLE, true)
+    return { order_id: id, result: 'failed', detail: 'asset_only_not_publishable' }
+  }
 
   // Re-check the approval receipt at the last server boundary before any
   // provider lookup/upload. This also quarantines legacy `approved` rows that
