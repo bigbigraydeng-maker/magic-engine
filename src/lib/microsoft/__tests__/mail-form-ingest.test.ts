@@ -218,8 +218,8 @@ describe('出发时间 / 预算进触点 metadata', () => {
   const lead = { kind: 'tour_enquiry' as const, email: 'jane@example.com', name: 'Jane', phone: '0211234567', interest: 'X', message: 'hi', submittedAt: null, formUrl: '/t' }
 
   it('formLeadMetadata：只含有值的稳定代码；都缺 → null（不写 null、不当 0）', () => {
-    expect(formLeadMetadata({ ...lead, travelWindow: 'mar_may_2027', budgetBand: '3000_5000' })).toEqual({ travel_window: 'mar_may_2027', budget_band: '3000_5000' })
-    expect(formLeadMetadata({ ...lead, travelWindow: 'not_sure', budgetBand: null })).toEqual({ travel_window: 'not_sure' })
+    expect(formLeadMetadata({ ...lead, travelWindow: 'mar_may_2027', budgetBand: '3000_5000' })).toEqual({ form_travel_window: 'mar_may_2027', form_budget_band: '3000_5000' })
+    expect(formLeadMetadata({ ...lead, travelWindow: 'not_sure', budgetBand: null })).toEqual({ form_travel_window: 'not_sure' })
     expect(formLeadMetadata({ ...lead, travelWindow: null, budgetBand: null })).toBeNull()
     expect(formLeadMetadata(lead)).toBeNull()
   })
@@ -231,7 +231,7 @@ describe('出发时间 / 预算进触点 metadata', () => {
       messages: [{ id: 'mid-9', receivedAt: '2026-10-20T01:00:00Z', formLead: { ...lead, travelWindow: 'jun_sep_2027', budgetBand: 'above_8000' } }],
       mirror: async (i) => { calls.push(i as unknown as Record<string, unknown>); return { contactId: 'ct-9', skipped: null } },
     })
-    expect(calls[0].metadata).toEqual({ travel_window: 'jun_sep_2027', budget_band: 'above_8000' })
+    expect(calls[0].metadata).toEqual({ form_travel_window: 'jun_sep_2027', form_budget_band: 'above_8000' })
   })
 
   it('两项缺失时 metadata 为 null（与改动前一致）', async () => {

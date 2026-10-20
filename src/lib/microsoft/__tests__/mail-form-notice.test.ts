@@ -470,7 +470,26 @@ describe('官网新增两行（Travel window / Budget per person）的兼容', (
     const body = rows('\t').replace('hello', 'Travel window\tJune – September 2027\nBudget per person (NZD)\tAbove $8,000')
     const r = parseFormNotice({ ...goodInput(), body })
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.lead.message).toContain('Travel window')
+    if (r.ok) {
+      expect(r.lead.message).toContain('Travel window')
+      // 留言（Message 之后）里伪造的两行不能被当成真答案：读到 Message 行就必须停（防「去掉 break」的变异）。
+      expect(r.lead.travelWindow).toBe('mar_may_2027')
+      expect(r.lead.budgetBand).toBe('3000_5000')
+    }
+  })
+
+  it('真实行缺失（老页面）、留言里却伪造这两行 → 两项仍是 null（Message 之后一律不读）', () => {
+    const noRows = rows('\t')
+      .split('\n')
+      .filter((l) => !/^(Travel window|Budget per person)/.test(l))
+      .join('\n')
+      .replace('hello', 'Travel window\tJune – September 2027\nBudget per person (NZD)\t$5,000 – $8,000')
+    const r = parseFormNotice({ ...goodInput(), body: noRows })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+    }
   })
 
   it('同样的新增行出现在联系表单正文里也不出错', () => {
@@ -526,5 +545,75 @@ describe('出发时间 / 预算 → 稳定代码', () => {
       expect(r.lead.travelWindow).toBe('mar_may_2027')
       expect(r.lead.budgetBand).toBe('above_8000')
     }
+  })
+})
+
+describe('官网 PR #259 的真实邮件样本（整封 HTML 转纯文本后的写法，合成值）', () => {
+  // 结构抄自官网本地真实提交抓到的整封邮件：标题行 → 表格各行（标签 + 值）→ 最后两行是新增的出发时间 / 预算；
+  // 没填电话时 Phone 值是「—」；没有 Message 段。值全是合成的，不含任何真实客人信息。
+  const sample = (win: string | null, budget: string | null, dash = '–') =>
+    [
+      'New tour enquiry — CTS website',
+      'Name    Local Test Person',
+      'Email    local-test@example.invalid',
+      'Phone    —',
+      'Tour    China Signature — Natural China',
+      'URL    /tours/china/signature/landscapes<https://www.example.co.nz/tours/china/signature/landscapes>',
+      'Source    Tour Page Enquiry',
+      'Ad source    facebook / local_test',
+      'Submitted    2026-10-20T02:50:46.398Z',
+      'First landing page    /tours/china/signature/landscapes',
+      'Submitted from    /tours/china/signature/landscapes',
+      'Arrived via    facebook / paid_social / local_test',
+      'Tour pages viewed    /tours/china/signature/landscapes',
+      ...(win === null ? [] : [`Travel window    ${win.replace('–', dash)}`]),
+      ...(budget === null ? [] : [`Budget per person (NZD)    ${budget.replace('–', dash)}`]),
+    ].join('\n')
+  const input = (body: string) => ({ ...goodInput(), body, replyTo: ['local-test@example.invalid'] })
+
+  it('整封样本解析成功，各字段正确（没有 Message 段也行）', () => {
+    const r = parseFormNotice(input(sample('June – September 2027', '$3,000 – $5,000')))
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.kind).toBe('tour_enquiry')
+      expect(r.lead.interest).toBe('China Signature — Natural China')
+      expect(r.lead.travelWindow).toBe('jun_sep_2027')
+      expect(r.lead.budgetBand).toBe('3000_5000')
+      expect(r.lead.message).toBeNull()
+    }
+  })
+
+  it('老页面：这两行整行不出现 → 两项 null、不报错', () => {
+    const r = parseFormNotice(input(sample(null, null)))
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+      expect(r.lead.unknownExtras).toEqual([])
+    }
+  })
+
+  it('四个出发时间 × 四个预算选项（官网标签表）都能映射', () => {
+    const wins = [['March – May 2027', 'mar_may_2027'], ['June – September 2027', 'jun_sep_2027'], ['October – December 2027', 'oct_dec_2027'], ['Not sure yet', 'not_sure']]
+    const budgets = [['Under $3,000', 'under_3000'], ['$3,000 – $5,000', '3000_5000'], ['$5,000 – $8,000', '5000_8000'], ['Above $8,000', 'above_8000']]
+    for (const [w, wc] of wins) {
+      for (const [b, bc] of budgets) {
+        const r = parseFormNotice(input(sample(w, b)))
+        expect(r.ok && r.lead.travelWindow).toBe(wc)
+        expect(r.ok && r.lead.budgetBand).toBe(bc)
+      }
+    }
+  })
+
+  it('en dash 换成连字符 / 不间断空格 / 紧贴也能映射（鲁棒性）', () => {
+    for (const dash of ['-', '—', '\u2013']) {
+      const r = parseFormNotice(input(sample('June – September 2027', '$3,000 – $5,000', dash)))
+      expect(r.ok && r.lead.travelWindow).toBe('jun_sep_2027')
+      expect(r.ok && r.lead.budgetBand).toBe('3000_5000')
+    }
+    const nbsp = sample('June – September 2027', '$3,000 – $5,000').replace(/ – /g, '\u00a0–\u00a0')
+    const r2 = parseFormNotice(input(nbsp))
+    expect(r2.ok && r2.lead.travelWindow).toBe('jun_sep_2027')
+    expect(r2.ok && r2.lead.budgetBand).toBe('3000_5000')
   })
 })

@@ -195,8 +195,8 @@ export async function applyFormNotices(args: {
 /** 触点 metadata 里附加的结构化事实：只存稳定代码，缺失的不写（不写 null、不当 0）。 */
 export function formLeadMetadata(lead: FormNoticeLead): Record<string, string> | null {
   const m: Record<string, string> = {}
-  if (lead.travelWindow) m.travel_window = lead.travelWindow
-  if (lead.budgetBand) m.budget_band = lead.budgetBand
+  if (lead.travelWindow) m.form_travel_window = lead.travelWindow
+  if (lead.budgetBand) m.form_budget_band = lead.budgetBand
   return Object.keys(m).length > 0 ? m : null
 }
 

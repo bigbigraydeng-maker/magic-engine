@@ -145,6 +145,13 @@ type TimelineEntry =
       note: string | null
     }
 
+/** 新西兰时区的「M月D日」。 */
+function nzMonthDay(iso: string): string {
+  const parts = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', month: 'numeric', day: 'numeric' }).formatToParts(new Date(iso))
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  return `${get('month')}月${get('day')}日`
+}
+
 export async function GET(_req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const clientId = params.id
   const contactId = params.cid
@@ -417,11 +424,12 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   for (const t of (touches ?? []) as { channel: string; occurred_at: string; metadata: Record<string, unknown> | null }[]) {
     if (t.channel !== 'web_form' || !t.metadata) continue
     const line = formFactsLine({
-      travelWindow: typeof t.metadata.travel_window === 'string' ? t.metadata.travel_window : null,
-      budgetBand: typeof t.metadata.budget_band === 'string' ? t.metadata.budget_band : null,
+      travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
+      budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
     })
     if (line && t.occurred_at >= formFactsAt) {
-      formFacts = line
+      // 带上提交日期：客人后来再填一次没带这两项的表单时，抽屉不会把旧答案当成现在的说法。
+      formFacts = `${line}（${nzMonthDay(t.occurred_at)}提交）`
       formFactsAt = t.occurred_at
     }
   }
