@@ -121,4 +121,30 @@ describe('parseCreativePool — promo_window / alias_refs', () => {
       },
     ])
   })
+
+  it('时间戳必须是合法 ISO：乱写的字符串不保留', () => {
+    const out = parseCreativePool([{
+      kind: 'meta_video', ref: 'v1', status: 'candidate',
+      promo_window_set_at: 'Oct 21, 2026', promo_window_changed_at: '2026-10-21T00:00:00.000Z',
+      promo_window_set_by: 'fde@staff.test',
+    }])
+    expect(out[0]).not.toHaveProperty('promo_window_set_at')
+    expect(out[0].promo_window_changed_at).toBe('2026-10-21T00:00:00.000Z')
+    expect(out[0].promo_window_set_by).toBe('fde@staff.test')
+  })
+
+  it('库里有 promo_window 但读不懂：按未声明处理，并留一条警告（不静默丢）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const out = parseCreativePool([{ kind: 'meta_video', ref: 'v1', status: 'candidate', promo_window: { kind: 'dated', start: '2026-12-01', end: '2026-11-01' } }])
+    expect(out[0]).not.toHaveProperty('promo_window')
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it('没有 promo_window 键的条目不产生警告', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    parseCreativePool([{ kind: 'meta_video', ref: 'v1', status: 'candidate' }])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
 })

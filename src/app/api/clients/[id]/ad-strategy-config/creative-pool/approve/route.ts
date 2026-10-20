@@ -4,10 +4,9 @@
  * 只内部员工（guardGlobalAdmin 判据）。
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { promoVerdict, nzToday } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
@@ -54,6 +53,9 @@ export async function POST(
   const parsed = parseApproveBody(raw)
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
+  // 先读版本再读内容：整数组读改写，写的时候带版本比较，防并发保存互相覆盖。
+  const loadedVersion = await loadConfigVersion(clientId)
+  if (!loadedVersion.ok) return NextResponse.json({ error: loadedVersion.error }, { status: 503 })
   const config = await loadAdStrategyConfig(clientId)
   const entry = config.creative_pool.find(e => e.ref === parsed.ref)
   if (!entry) return NextResponse.json({ error: 'ref not in creative_pool' }, { status: 404 })
@@ -76,14 +78,13 @@ export async function POST(
       : e,
   )
 
-  const { error } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .upsert(
-      { client_id: clientId, creative_pool: nextPool, updated_at: new Date().toISOString() },
-      { onConflict: 'client_id' },
-    )
-
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  const written = await writeConfigCas(clientId, { creative_pool: nextPool }, loadedVersion.version)
+  if (!written.ok) {
+    if (written.kind === 'conflict') {
+      return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新后重试。' }, { status: 409 })
+    }
+    return NextResponse.json({ error: written.message }, { status: 500 })
+  }
 
   return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId) })
 }

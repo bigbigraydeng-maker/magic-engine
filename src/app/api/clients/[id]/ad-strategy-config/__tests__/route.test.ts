@@ -46,7 +46,8 @@ const PORTAL_MEMBER = 'owner@client.test'
 
 type Row = Record<string, unknown>
 
-function fakeTable(initial: Row[] = []) {
+function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
+  let selectCount = 0
   const rows = new Map<string, Row>(initial.map(r => [String(r.client_id), r]))
   const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
     const key = String(row[opts.onConflict])
@@ -56,15 +57,38 @@ function fakeTable(initial: Row[] = []) {
   mockFrom.mockImplementation(((table: string) => {
     if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
     return {
-      select: () => ({
-        eq: (col: string, val: string) => ({
-          maybeSingle: async () => ({
-            data: [...rows.values()].find(r => r[col] === val) ?? null,
-            error: null,
+      select: () => {
+        selectCount += 1
+        onSelect?.(selectCount)
+        return {
+          eq: (col: string, val: string) => ({
+            maybeSingle: async () => ({
+              data: [...rows.values()].find(r => r[col] === val) ?? null,
+              error: null,
+            }),
           }),
-        }),
-      }),
+        }
+      },
       upsert,
+      // 乐观锁写法（writeConfigCas）：update().eq().eq()/is().select() 与 insert()
+      update: (row: Row) => {
+        const filters: Array<(r: Row) => boolean> = []
+        const chain = {
+          eq: (col: string, val: unknown) => { filters.push(r => r[col] === val); return chain },
+          is: (col: string, val: unknown) => { filters.push(r => (r[col] ?? null) === val); return chain },
+          select: async () => {
+            const hit = [...rows.values()].filter(r => filters.every(f => f(r)))
+            for (const r of hit) await upsert({ ...r, ...row }, { onConflict: 'client_id' })
+            return { data: hit.map(r => ({ client_id: r.client_id })), error: null }
+          },
+        }
+        return chain
+      },
+      insert: async (row: Row) => {
+        if (rows.has(String(row.client_id))) return { error: { code: '23505', message: 'duplicate key' } }
+        await upsert(row, { onConflict: 'client_id' })
+        return { error: null }
+      },
     }
   }) as never)
   return { rows, upsert }
@@ -389,6 +413,55 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     )
 
     expect(res.status).toBe(503)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('界面保存素材池（带回旧条目）：已批准的保持 approved 和批准人/时间，新加的才是候选', async () => {
+    signedInAs(STAFF)
+    const approvedEntry = {
+      kind: 'meta_video', ref: 'v1', status: 'approved', approved_by: 'boss@x.test', approved_at: '2026-10-18T00:00:00.000Z',
+      promo_window: { kind: 'dated', start: '2026-10-21', end: '2026-11-30' },
+    }
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [approvedEntry] }])
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'v9', status: 'candidate' }] }),
+      params(),
+    )
+    expect(res.status).toBe(200)
+    const [written] = upsert.mock.calls[0]
+    const pool = written.creative_pool as Array<Record<string, unknown>>
+    const v1 = pool.find(e => e.ref === 'v1')!
+    expect(v1.status).toBe('approved')
+    expect(v1.approved_by).toBe('boss@x.test')
+    expect(v1.approved_at).toBe('2026-10-18T00:00:00.000Z')
+    const v9 = pool.find(e => e.ref === 'v9')!
+    expect(v9.status).toBe('candidate')
+    expect(v9).not.toHaveProperty('approved_by')
+  })
+
+  it('新加的素材 id 恰好是别的素材的别名 → 400，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [
+      { kind: 'meta_video', ref: 'v1', status: 'candidate', alias_refs: ['alias-1'] },
+    ] }])
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'alias-1', status: 'candidate' }] }),
+      params(),
+    )
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('ref_conflicts_with_existing_alias')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('读完版本之后有人改了设置行 → 409，不覆盖（整数组读改写的并发保护）', async () => {
+    signedInAs(STAFF)
+    // 第 1 次 select = 读版本；第 2 次 = 读内容。两次之间模拟别处写了设置行。
+    const table = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [] }], nth => {
+      if (nth === 2) table.rows.get(CLIENT)!.updated_at = '2026-10-21T00:00:01.000Z'
+    })
+    const { upsert } = table
+    const res = await PATCH(patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }), params())
+    expect(res.status).toBe(409)
     expect(upsert).not.toHaveBeenCalled()
   })
 

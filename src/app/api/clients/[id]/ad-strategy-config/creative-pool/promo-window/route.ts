@@ -4,15 +4,25 @@
  * 只内部员工（guardGlobalAdmin 判据）。
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { parsePromoWindow, nzToday, type PromoWindow } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
 
 const MAX_ALIASES = 20
+const MAX_PROMO_MONTHS = 12
+
+/** YYYY-MM-DD 往后推 n 个月（日期超出当月天数时取当月最后一天）。纯日期运算，不涉及时区。 */
+function addMonthsNz(day: string, months: number): string {
+  const y = Number(day.slice(0, 4))
+  const m = Number(day.slice(5, 7)) - 1 + months
+  const d = Number(day.slice(8, 10))
+  const lastDay = new Date(Date.UTC(y + Math.floor(m / 12), (m % 12) + 1, 0)).getUTCDate()
+  const out = new Date(Date.UTC(y + Math.floor(m / 12), m % 12, Math.min(d, lastDay)))
+  return out.toISOString().slice(0, 10)
+}
 
 type ParsedBody =
   | { ok: true; ref: string; promoWindow: PromoWindow; aliasRefs: string[] | undefined }
@@ -72,6 +82,21 @@ function samePromoWindow(a: PromoWindow | undefined, b: PromoWindow): boolean {
   return false
 }
 
+/** 两组别名是否是同一集合（不看顺序）。 */
+function sameAliasSet(a: readonly string[] | undefined, b: readonly string[]): boolean {
+  const left = [...(a ?? [])].sort()
+  const right = [...b].sort()
+  return left.length === right.length && left.every((v, i) => v === right[i])
+}
+
+/** 新的推广期是不是比原来「放宽」了（长期有效 / 结束日延后 / 开始日提前）。放宽 = 已批准的结论不再成立。 */
+function widensWindow(prev: PromoWindow | undefined, next: PromoWindow): boolean {
+  if (prev === undefined) return false // 首次声明：补登记，不算放宽
+  if (prev.kind === 'evergreen') return false
+  if (next.kind === 'evergreen') return true
+  return next.end > prev.end || next.start < prev.start
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
@@ -106,7 +131,13 @@ export async function POST(
   if (parsed.promoWindow.kind === 'dated' && parsed.promoWindow.end < today) {
     return NextResponse.json({ error: 'promo_window_end_in_past' }, { status: 422 })
   }
+  // 自我声明没有第二道核对，所以给个上限：结束日不得晚于今天往后 12 个月（防止写成 9999-12-31 变相长期有效）。
+  if (parsed.promoWindow.kind === 'dated' && parsed.promoWindow.end > addMonthsNz(today, MAX_PROMO_MONTHS)) {
+    return NextResponse.json({ error: 'promo_window_end_too_far', message: `推广期结束日不能晚于今天往后 ${MAX_PROMO_MONTHS} 个月；真的长期有效请明确选择「长期有效」。` }, { status: 422 })
+  }
 
+  const loadedVersion = await loadConfigVersion(clientId)
+  if (!loadedVersion.ok) return NextResponse.json({ error: loadedVersion.error }, { status: 503 })
   const config = await loadAdStrategyConfig(clientId)
   const entry = config.creative_pool.find(e => e.ref === parsed.ref)
   if (!entry) return NextResponse.json({ error: 'ref not in creative_pool' }, { status: 404 })
@@ -133,15 +164,27 @@ export async function POST(
   const hadWindow = entry.promo_window !== undefined
   const windowChanged = !samePromoWindow(entry.promo_window, parsed.promoWindow)
 
+  // 已批准的素材把推广期放宽了：原来的批准是按旧推广期给的，不再成立 → 降回候选，需要重新批准。
+  // 别名变化也一样：别名决定「哪些广告受这条素材的推广期管」，已批准的素材增减别名都要重新过一遍批准（第二双眼睛）。
+  const aliasesChanged = nextAliasRefs !== undefined && !sameAliasSet(entry.alias_refs, nextAliasRefs)
+  const demote = entry.status === 'approved' && (widensWindow(entry.promo_window, parsed.promoWindow) || aliasesChanged)
+
   const nextPool: CreativePoolEntry[] = config.creative_pool.map(e => {
     if (e.ref !== parsed.ref) return e
     const next: CreativePoolEntry = {
       ...e,
       promo_window: parsed.promoWindow,
-      promo_window_set_by: setBy,
     }
-    if (!hadWindow) next.promo_window_set_at = nowIso
-    if (windowChanged) next.promo_window_changed_at = nowIso
+    if (demote) {
+      next.status = 'candidate'
+      delete next.approved_by
+      delete next.approved_at
+    }
+    if (!hadWindow) {
+      next.promo_window_set_by = setBy
+      next.promo_window_set_at = nowIso
+    }
+    if (windowChanged || aliasesChanged) next.promo_window_changed_at = nowIso
     if (nextAliasRefs !== undefined) {
       if (nextAliasRefs.length > 0) next.alias_refs = nextAliasRefs
       else delete next.alias_refs
@@ -149,14 +192,13 @@ export async function POST(
     return next
   })
 
-  const { error } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .upsert(
-      { client_id: clientId, creative_pool: nextPool, updated_at: nowIso },
-      { onConflict: 'client_id' },
-    )
+  const written = await writeConfigCas(clientId, { creative_pool: nextPool, updated_at: nowIso }, loadedVersion.version)
+  if (!written.ok) {
+    if (written.kind === 'conflict') {
+      return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新后重试。' }, { status: 409 })
+    }
+    return NextResponse.json({ error: written.message }, { status: 500 })
+  }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId) })
+  return NextResponse.json({ success: true, demoted_to_candidate: demote, config: await loadAdStrategyConfig(clientId) })
 }

@@ -15,7 +15,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, loadAdStrategyConfigWithSource, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import {
+  loadAdStrategyConfig, loadAdStrategyConfigWithSource, loadConfigVersion, parseCreativePool, writeConfigCas,
+  type ConfigVersion, type CreativePoolEntry,
+} from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
@@ -74,6 +77,13 @@ export async function PATCH(
   //    会被判成「没变」、不发收紧事件（魏征复审）。也不拒绝保存：设置表持续读不出时，
   //    收紧（调低上限 / 改回 observe）正是最需要能存进去的操作（卫青复审）。
   //    before = null 表示「不知道改之前是什么」，下面一律按「变了」发叫醒铃。
+  // 改素材池是整数组读改写：先读版本、再读内容，写的时候带版本比较（并发保存会得到 409，不会互相覆盖）。
+  let poolVersion: ConfigVersion | null = null
+  if (body.creative_pool !== undefined) {
+    const v = await loadConfigVersion(clientId)
+    if (!v.ok) return NextResponse.json({ error: v.error }, { status: 503 })
+    poolVersion = v.version
+  }
   const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
   const before = loadedBefore.source === 'fallback' ? null : loadedBefore.config
 
@@ -137,9 +147,20 @@ export async function PATCH(
     if (before === null) {
       return NextResponse.json({ error: 'creative_pool_existing_unreadable' }, { status: 503 })
     }
+    // 新加的素材 id 不得恰好是别的素材已登记的别名（否则同一个视频会同时属于两条素材）。
+    const aliasOwner = parsed.find(e =>
+      !before.creative_pool.some(x => x.ref === e.ref) &&
+      before.creative_pool.some(x => x.alias_refs?.includes(e.ref)))
+    if (aliasOwner) {
+      return NextResponse.json({ error: 'ref_conflicts_with_existing_alias', ref: aliasOwner.ref }, { status: 400 })
+    }
     update.creative_pool = parsed.map((e): CreativePoolEntry => {
-      const next: CreativePoolEntry = { kind: e.kind, ref: e.ref, status: 'candidate' }
       const existing = before.creative_pool.find(x => x.ref === e.ref)
+      // 已存在的素材保持原有批准状态（界面保存素材池时会把旧条目一起提交，不能因此把已批准的全降回候选）；
+      // 新加的素材一律是候选。这里只是「保留服务端已有的」，客户端带 approved 仍然在上面被拒。
+      const next: CreativePoolEntry = { kind: e.kind, ref: e.ref, status: existing?.status ?? 'candidate' }
+      if (existing?.approved_by !== undefined) next.approved_by = existing.approved_by
+      if (existing?.approved_at !== undefined) next.approved_at = existing.approved_at
       if (existing?.promo_window !== undefined) next.promo_window = existing.promo_window
       if (existing?.alias_refs !== undefined) next.alias_refs = existing.alias_refs
       if (existing?.promo_window_set_by !== undefined) next.promo_window_set_by = existing.promo_window_set_by
@@ -149,11 +170,21 @@ export async function PATCH(
     })
   }
 
-  const { error } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .upsert(update, { onConflict: 'client_id' })
+  if (poolVersion !== null) {
+    const written = await writeConfigCas(clientId, update, poolVersion)
+    if (!written.ok) {
+      if (written.kind === 'conflict') {
+        return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '设置刚被别处改过，请刷新后重试。' }, { status: 409 })
+      }
+      return NextResponse.json({ error: written.message }, { status: 500 })
+    }
+  } else {
+    const { error } = await supabaseAdmin
+      .from('ad_strategy_configs')
+      .upsert(update, { onConflict: 'client_id' })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   // 意向真的变了才发叫醒铃（spec §4.4）；发送失败不影响保存，每日 reconcile 会追上。
   const envelopeChanged =

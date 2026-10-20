@@ -202,4 +202,17 @@ describe('nzToday', () => {
   it('UTC 11/29 12:00 = 新西兰 11/30 01:00', () => {
     expect(nzToday(Date.UTC(2026, 10, 29, 12, 0, 0))).toBe('2026-11-30')
   })
+
+  it('endOfNzDayMs 夏令时切换日也是当天 23:59:59（新西兰本地）', () => {
+    // 2026-09-27 02:00 夏令时开始；2027-04-04 03:00 夏令时结束
+    expect(endOfNzDayMs('2026-09-26')).toBe(Date.UTC(2026, 8, 26, 11, 59, 59)) // 仍是 +12
+    expect(endOfNzDayMs('2026-09-27')).toBe(Date.UTC(2026, 8, 27, 10, 59, 59)) // 已是 +13
+    expect(endOfNzDayMs('2027-04-03')).toBe(Date.UTC(2027, 3, 3, 10, 59, 59))  // 仍是 +13
+    expect(endOfNzDayMs('2027-04-04')).toBe(Date.UTC(2027, 3, 4, 11, 59, 59))  // 已是 +12
+    for (const day of ['2026-09-26', '2026-09-27', '2027-04-03', '2027-04-04']) {
+      const ms = endOfNzDayMs(day)
+      expect(nzToday(ms)).toBe(day)          // 这一刻还在当天
+      expect(nzToday(ms + 1000)).not.toBe(day) // 再过一秒就是第二天
+    }
+  })
 })

@@ -64,6 +64,8 @@ interface ConfigResponse {
   success?: boolean
   config?: AdStrategyConfig
   error?: string
+  /** 给员工看的中文说明（比 error 代码好懂）；有就优先显示 */
+  message?: string
 }
 
 interface AccountCapRow {
@@ -211,7 +213,7 @@ function CreativePoolList({
         body: JSON.stringify({ ref }),
       })
       const json = (await res.json()) as ConfigResponse
-      if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
+      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
       onApproved(json.config)
     } catch (err) {
       setError(err instanceof Error ? err.message : '批准失败')
