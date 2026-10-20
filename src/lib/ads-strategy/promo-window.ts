@@ -178,24 +178,32 @@ function parseOffsetMinutes(offset: string): number {
   return sign * (hours * 60 + minutes)
 }
 
-/** 该新西兰日期 23:59:59 对应的 epoch 毫秒。 */
+const NZ_OFFSET_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Pacific/Auckland',
+  timeZoneName: 'longOffset',
+})
+
+/** 某个时刻新西兰相对 UTC 的偏移（分钟）。 */
+function nzOffsetMinutesAt(ms: number): number {
+  let offset = 'GMT'
+  for (const part of NZ_OFFSET_FMT.formatToParts(new Date(ms))) {
+    if (part.type === 'timeZoneName') offset = part.value
+  }
+  return parseOffsetMinutes(offset)
+}
+
+/**
+ * 该新西兰日期 23:59:59 对应的 epoch 毫秒。
+ * 🔴 偏移要取「那个本地时刻」的，不是 UTC 当天 23:59:59 那一刻的：夏令时切换日两者差一小时，
+ *    所以先用 UTC 时刻估一次，再用估出的时刻重取一次偏移。
+ */
 export function endOfNzDayMs(day: string): number {
   const year = Number(day.slice(0, 4))
   const month = Number(day.slice(5, 7))
   const date = Number(day.slice(8, 10))
   const naive = Date.UTC(year, month - 1, date, 23, 59, 59)
-
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Pacific/Auckland',
-    timeZoneName: 'longOffset',
-  })
-  const parts = fmt.formatToParts(new Date(naive))
-  let offset = 'GMT'
-  for (const part of parts) {
-    if (part.type === 'timeZoneName') offset = part.value
-  }
-  const offsetMinutes = parseOffsetMinutes(offset)
-  return naive - offsetMinutes * 60 * 1000
+  const first = naive - nzOffsetMinutesAt(naive) * 60 * 1000
+  return naive - nzOffsetMinutesAt(first) * 60 * 1000
 }
 
 /** 所有命中且为 dated 的视频里，最早的 end 对应的 endOfNzDayMs；没有 dated 返回 null。 */
