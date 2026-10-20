@@ -3,7 +3,7 @@
 // 三动作:approve(通过并投放)/ reject_quality(打回·画面,一键理由)/ reject_budget(打回·预算)。
 
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
-import { REEL_HUMAN_CHECK_KEYS_V2, validateContentChecklist, type ContentCheckItemResult } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3, validateContentChecklist, type ContentCheckItemResult } from '@/lib/social/content-review'
 
 export type ReviewAction = 'approve' | 'reject_quality' | 'reject_budget'
 
@@ -32,7 +32,7 @@ export function parseReviewBody(body: Record<string, unknown>): ParsedReview {
   if (action === 'reject_quality') {
     const feedback = asString(body.feedback)
     if (!feedback) return { ok: false, error: 'reject_quality requires feedback' }
-    const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+    const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
     if (!checklist.ok) return { ok: false, error: checklist.error }
     return { ok: true, action, feedback: feedback.slice(0, 2000), checklistHuman: checklist.items }
   }
@@ -46,7 +46,7 @@ export function parseReviewBody(body: Record<string, unknown>): ParsedReview {
     }
     return { ok: true, action, newBudget: n }
   }
-  const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+  const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
   if (!checklist.ok) return { ok: false, error: checklist.error }
   return { ok: true, action: 'approve', checklistHuman: checklist.items }
 }

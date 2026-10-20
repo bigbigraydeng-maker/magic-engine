@@ -6,7 +6,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { approveBudgetWithinCap } from './review-actions'
 import {
   REEL_AUTO_CHECK_KEYS,
-  REEL_HUMAN_CHECK_KEYS_V2,
+  REEL_HUMAN_CHECK_KEYS_V3,
+  CHECKLIST_VERSION_V3,
   checklistPasses,
   hasChecklistFailure,
   isValidContentSourceRef,
@@ -15,6 +16,7 @@ import {
 } from '@/lib/social/content-review'
 import { computeReviewFeedbackDigest, RecipeConfigError, winnerRecipeFromBrief } from './recipe'
 import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from './deliverable'
+import { isRemotionBrief } from './render-mode'
 import type { ReviewRejectCategory } from './types'
 
 export interface ReviewApplyResult {
@@ -84,7 +86,7 @@ export async function applyApprove(
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
   if (isAssetOnly(wo!.brief)) return { ok: false, status: 409, error: ASSET_ONLY_NOT_PUBLISHABLE }
-  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
   if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
   if (!checklistPasses(checkedHuman.items)) return { ok: false, status: 422, error: 'all human checklist items must PASS' }
   const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
@@ -110,6 +112,7 @@ export async function applyApprove(
         approved_by: reviewer,
         approved_at: new Date().toISOString(),
         checklist_human: checkedHuman.items,
+        checklist_version: CHECKLIST_VERSION_V3,
         ...(marker ? { approval_source: marker.approval_source, approver_scope: marker.approver_scope } : {}),
       },
       updated_at: new Date().toISOString(),
@@ -120,6 +123,36 @@ export async function applyApprove(
   if (error) return { ok: false, status: 500, error: error.message }
   if (!upd || upd.length === 0) return { ok: false, status: 409, error: 'work order no longer in_review' }
   return { ok: true, status: 200, data: { status: 'approved', budget_usd: gate.budget } }
+}
+
+/**
+ * 素材（asset_only）验收入库：in_review → archived，记 review_ref.asset_accepted_by/at。
+ * 只对 asset_only 工单、只对 in_review 生效；**不是发布授权**（发布只认 approved，而 asset_only 永远批不了）。
+ * 成片文件由出片机侧/人工搬进素材目录（本接口不搬文件）。
+ */
+export async function applyAssetAccept(
+  supabase: SupabaseClient,
+  id: string,
+  reviewer: string,
+  clientId?: string,
+): Promise<ReviewApplyResult> {
+  const { wo, err } = await loadInReview(supabase, id, clientId)
+  if (err) return err
+  if (!isAssetOnly(wo!.brief)) return { ok: false, status: 409, error: 'only asset_only work orders can be accepted as material' }
+  const reviewRef = (wo!.review_ref ?? {}) as Record<string, unknown>
+  const { data: upd, error } = await supabase
+    .from('content_work_orders')
+    .update({
+      status: 'archived',
+      review_ref: { ...reviewRef, asset_accepted_by: reviewer, asset_accepted_at: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('status', 'in_review')
+    .select('id')
+  if (error) return { ok: false, status: 500, error: error.message }
+  if (!upd || upd.length === 0) return { ok: false, status: 409, error: 'work order no longer in_review' }
+  return { ok: true, status: 200, data: { status: 'archived' } }
 }
 
 /** 打回·画面质量:老单 review_rejected + 重开新单,意见进新 brief */
@@ -133,7 +166,7 @@ export async function applyQualityReject(
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
-  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
   if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
   if (!hasChecklistFailure(checkedHuman.items)) return { ok: false, status: 400, error: 'quality rejection requires a failed checklist item' }
   const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
@@ -154,6 +187,11 @@ export async function applyQualityReject(
   if (!upd || upd.length === 0) return { ok: false, status: 409, error: 'work order no longer in_review' }
 
   const brief = (wo!.brief ?? {}) as Record<string, unknown>
+  // remotion 单被打回:出片机不支持「同参数重渲」(reopened_from 会被拒成死单),所以只标 review_rejected,
+  // 不重开新单;打回理由要引导改下单参数(加内容 / 改标素材),由下单方另提新单。
+  if (isRemotionBrief(brief)) {
+    return { ok: true, status: 200, data: { status: 'review_rejected', reopened_work_order_id: null } }
+  }
   // recipe 单被打回:清掉 stale creative_recipe/plan,打上结构化 replan-required marker。
   // worker 遇到 marker 会在任何 provider 之前 fail-closed,直到服务端产出新的合法 plan(合同 R3/R4)。
   // 无 recipe 的普通单:继承 review_feedback 直接进 queued,legacy 行为不变。

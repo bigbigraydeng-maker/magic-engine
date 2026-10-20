@@ -13,6 +13,7 @@ export const CONTENT_CHECK_KEYS = [
   'asset_provenance_matches_claim_context',
   'bgm_segmented_with_fades',
   'bgm_listened_no_vocals',
+  'standalone_understandable',
   'format_is_reel',
   'cta_in_first_comment_not_body',
   'first_comment_link_has_tracking_params',
@@ -71,12 +72,40 @@ export const REEL_HUMAN_CHECK_KEYS_V2 = [
   'bgm_listened_no_vocals',
 ] as const satisfies readonly ContentCheckItemKey[]
 
-// Which human key set a STORED approval receipt was made under: V2 when it carries the new item,
-// otherwise the legacy set. New approvals always carry it (all approve/reject entry points use V2).
+// Approval-time checklist V3 (2026-10-21): adds "this reel on its own tells the fans what it is about" because
+// every machine check can pass on a reel with no content at all (the 17419d99 atmosphere sample did).
+export const REEL_HUMAN_CHECK_KEYS_V3 = [
+  ...REEL_HUMAN_CHECK_KEYS_V2,
+  'standalone_understandable',
+] as const satisfies readonly ContentCheckItemKey[]
+
+export const CHECKLIST_VERSION_V3 = 'v3'
+// Approvals made on or after this instant MUST carry checklist_version (anti-downgrade): without it a V2-shaped
+// receipt would still pass at publish time. Chosen well after the V3 entry points are deployed.
+export const CHECKLIST_V3_REQUIRED_FROM = '2026-10-23T00:00:00.000Z'
+
+const hasKey = (value: unknown, key: string): boolean =>
+  Array.isArray(value) && value.some(item => !!item && typeof item === 'object' && (item as Record<string, unknown>).key === key)
+
+// Which human key set a STORED approval receipt was made under (receipt = review_ref, pass the whole object).
+//  - checklist_version present (any value) -> V3 and the new item is required: a v3 receipt missing the new key is
+//    invalid, never silently downgraded;
+//  - the new item present without a version -> V3;
+//  - approved on/after the cutover without a version -> V3 (so it fails validation instead of passing as V2);
+//  - otherwise the historical inference: V2 when it carries the listened item, else the legacy nine.
+export function humanKeysForReviewRef(reviewRef: unknown): readonly ContentCheckItemKey[] {
+  const ref = reviewRef && typeof reviewRef === 'object' ? (reviewRef as Record<string, unknown>) : {}
+  const checklist = ref['checklist_human']
+  if (ref['checklist_version'] !== undefined && ref['checklist_version'] !== null) return REEL_HUMAN_CHECK_KEYS_V3
+  if (hasKey(checklist, 'standalone_understandable')) return REEL_HUMAN_CHECK_KEYS_V3
+  const approvedAt = typeof ref['approved_at'] === 'string' ? Date.parse(ref['approved_at']) : NaN
+  if (Number.isFinite(approvedAt) && approvedAt >= Date.parse(CHECKLIST_V3_REQUIRED_FROM)) return REEL_HUMAN_CHECK_KEYS_V3
+  return hasKey(checklist, 'bgm_listened_no_vocals') ? REEL_HUMAN_CHECK_KEYS_V2 : REEL_HUMAN_CHECK_KEYS
+}
+
+// Legacy helper kept for callers/tests that only have the checklist array (no version, no approval time).
 export function humanKeysForStored(value: unknown): readonly ContentCheckItemKey[] {
-  const hasListened = Array.isArray(value)
-    && value.some(item => !!item && typeof item === 'object' && (item as Record<string, unknown>).key === 'bgm_listened_no_vocals')
-  return hasListened ? REEL_HUMAN_CHECK_KEYS_V2 : REEL_HUMAN_CHECK_KEYS
+  return humanKeysForReviewRef({ checklist_human: value })
 }
 
 export const POST_HUMAN_CHECK_KEYS = [

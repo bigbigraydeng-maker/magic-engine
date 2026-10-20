@@ -2,9 +2,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { approveBudgetWithinCap, parseReviewBody } from './review-actions'
-import { REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
-const passChecklist = REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
+const passChecklist = REEL_HUMAN_CHECK_KEYS_V3.map(key => ({
   key,
   judge: 'HUMAN',
   outcome: 'PASS',

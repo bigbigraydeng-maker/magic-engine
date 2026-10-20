@@ -9,7 +9,7 @@ import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
 import { isAssetOnly } from './deliverable'
 import {
   REEL_AUTO_CHECK_KEYS,
-  humanKeysForStored,
+  humanKeysForReviewRef,
   checklistPasses,
   hasChecklistFailure,
   isValidContentSourceRef,
@@ -213,7 +213,7 @@ export async function applyApprove(wo: Record<string, unknown>, rec: AirtableRec
   if (isAssetOnly(wo.brief)) return false
   const ref = (wo.review_ref ?? {}) as Record<string, unknown>
   const output = (wo.output ?? {}) as Record<string, unknown>
-  const human = validateContentChecklist(ref['checklist_human'], humanKeysForStored(ref['checklist_human']), 'HUMAN')
+  const human = validateContentChecklist(ref['checklist_human'], humanKeysForReviewRef(ref), 'HUMAN')
   const auto = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
   if (!human.ok || !auto.ok || !checklistPasses(human.items) || !checklistPasses(auto.items)) return false
   if (human.items.some(item => item.source_ref && !isValidContentSourceRef(item.source_ref))) return false
@@ -247,7 +247,7 @@ async function applyQualityReject(
   // Airtable's retired review form has no structured checklist field. Refuse
   // rather than letting this legacy synchronizer bypass the ME review API.
   const ref = (wo.review_ref ?? {}) as Record<string, unknown>
-  const human = validateContentChecklist(ref['checklist_human'], humanKeysForStored(ref['checklist_human']), 'HUMAN')
+  const human = validateContentChecklist(ref['checklist_human'], humanKeysForReviewRef(ref), 'HUMAN')
   if (!human.ok || !hasChecklistFailure(human.items)) return false
   const { data: upd, error } = await supabaseAdmin
     .from('content_work_orders')

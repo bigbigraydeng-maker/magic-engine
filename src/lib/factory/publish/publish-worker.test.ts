@@ -43,6 +43,8 @@ interface Scenario {
   interrupted?: boolean
   /** brief.remotion.deliverable 取值;'asset_only' = 素材,绝不可发布 */
   deliverable?: string
+  /** review_ref.checklist_version(防降级用例:带 v3 版本号但清单是旧的) */
+  checklistVersion?: string
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
@@ -73,7 +75,7 @@ function installMocks(s: Scenario) {
                 master_brief_id: 'mb-1',
                 publish_attempts: 0,
               published_ref: s.interrupted ? { provisional: true, video_id: 'v1' } : null,
-                review_ref: s.checklistReady === false ? {} : { checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
+                review_ref: s.checklistReady === false ? {} : { ...(s.checklistVersion === undefined ? {} : { checklist_version: s.checklistVersion }), checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
                   key, judge: 'HUMAN', outcome: 'PASS', detail: null,
                   source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
                 })) },
@@ -215,6 +217,15 @@ describe('发布正文红线闸', () => {
     await run()
 
     expect(mockPublish).toHaveBeenCalled()
+  })
+
+  it('🔴 防降级:带 v3 版本号的批准回执缺「单独看得懂」一项 → 不发布，置终态', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, checklistVersion: 'v3' })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('approval_checklist_incomplete')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
   })
 
   it('正文使用分镜文案,CTA 与追踪链接放首评', async () => {

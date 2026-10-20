@@ -15,9 +15,12 @@ interface Order {
 }
 const order: Order = { id: 'w1', client_id: 'c1', client_name: 'CTS', status: 'in_review', angle: 'a', rationale_one_liner: 'r', fact_source_url: URL_OK, output: { quality_checklist_auto: auto } }
 const click = async (el: Element | undefined) => { await act(async () => { el?.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
-const tickListened = async () => { await click(document.querySelector('input[type="checkbox"]') ?? undefined) }
+const checkboxes = () => [...document.querySelectorAll('input[type="checkbox"]')]
+const tickListened = async () => { await click(checkboxes()[0]) }
+const tickStandalone = async () => { await click(checkboxes()[1]) }
 // Expanded checklist: the listened item's PASS radio (first radio of that row).
 const passListenedRadio = () => document.querySelector('input[type="radio"][name$="-bgm_listened_no_vocals"]') ?? undefined
+const passStandaloneRadio = () => document.querySelector('input[type="radio"][name$="-standalone_understandable"]') ?? undefined
 const btn = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))
 
 afterEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals(); posts.length = 0 })
@@ -56,6 +59,8 @@ it('prefills source, one-click all PASS, shows plain-Chinese server error inside
   await click(btn('项全部标为通过'))
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // bulk pass never ticks "listened"
   await click(passListenedRadio())
+  expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // "能看懂" is also never bulk-passed
+  await click(passStandaloneRadio())
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(false)
   await click(btn('确定通过'))
   expect(document.querySelector('.fixed')?.textContent).toContain('「事实性主张有来源」这一项要填来源网址')
@@ -65,6 +70,7 @@ it('clears the old error when a retry succeeds (no stale red text on the page)',
   await mount([{ ok: false, error: MISSING }, { ok: true }], {}, true)
   await click(btn('项全部标为通过'))
   await click(passListenedRadio())
+  await click(passStandaloneRadio())
   await click(btn('确定通过'))
   expect(document.body.textContent).toContain('这一项要填来源网址')
   await click(btn('确定通过'))
@@ -72,7 +78,7 @@ it('clears the old error when a retry succeeds (no stale red text on the page)',
   expect(document.body.textContent).not.toContain('这一项要填来源网址')
 })
 
-it('clean order: one-click panel needs the listened tick, then sends 10 HUMAN PASS items with prefilled source', async () => {
+it('clean order: one-click panel needs the listened tick, then sends 11 HUMAN PASS items with prefilled source', async () => {
   await mount([{ ok: true }])
   expect(btn('确定通过')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeDefined()
@@ -80,14 +86,17 @@ it('clean order: one-click panel needs the listened tick, then sends 10 HUMAN PA
   await click(btn(ONE_CLICK))
   expect(reviewPosts()).toHaveLength(0) // a disabled button posts nothing
   await tickListened()
+  expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(true) // listened alone is not enough
+  await tickStandalone()
   expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(false)
   await click(btn(ONE_CLICK))
   const sent = reviewPosts()
   expect(sent).toHaveLength(1)
   const body = sent[0].body as { action: string; checklist_human: Array<{ key: string; judge: string; outcome: string; source_ref: string | null }> }
   expect(body.action).toBe('approve')
-  expect(body.checklist_human).toHaveLength(10)
+  expect(body.checklist_human).toHaveLength(11)
   expect(body.checklist_human.some(i => i.key === 'bgm_listened_no_vocals' && i.outcome === 'PASS')).toBe(true)
+  expect(body.checklist_human.some(i => i.key === 'standalone_understandable' && i.outcome === 'PASS')).toBe(true)
   expect(body.checklist_human.every(i => i.outcome === 'PASS' && i.judge === 'HUMAN')).toBe(true)
   const facts = body.checklist_human.filter(i => i.key.startsWith('factual_'))
   expect(facts.map(i => i.source_ref)).toEqual([URL_OK, URL_OK])
@@ -215,4 +224,26 @@ it('card shows short title and hides engineering notes inside 详情; no Claude 
   expect(document.body.textContent).not.toContain('问 Claude')
   const details = [...document.querySelectorAll('details')].find(d => d.textContent?.includes('loudness 74'))
   expect(details?.querySelector('summary')?.textContent).toBe('详情')
+})
+
+it('asset_only material gets its own section: no 通过 button, only 收入素材库, and it posts to asset-accept', async () => {
+  const assetOrder = { ...order, id: 'a1', angle: 'asset', deliverable: 'asset_only' }
+  const normal = { ...order, id: 'w1' }
+  vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
+    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [normal, assetOrder] }) }
+    posts.push({ url: u, body: undefined })
+    return { ok: true, status: 200, json: async () => ({}) }
+  }))
+  const div = document.body.appendChild(document.createElement('div'))
+  await act(async () => { createRoot(div).render(<ReviewInbox />) })
+  const section = document.querySelector('[data-testid="asset-only-section"]')
+  expect(section).not.toBeNull()
+  expect(section?.textContent).toContain('素材（不单独发布）')
+  expect(section?.textContent).not.toContain('通过·待发布')
+  const accept = [...(section?.querySelectorAll('button') ?? [])].find(b => b.textContent?.includes('收入素材库'))
+  expect(accept).toBeDefined()
+  await click(accept)
+  expect(posts.map(p => p.url)).toContain('/api/factory/work-orders/a1/asset-accept')
+  // the normal card is still in the pending list with its approve button
+  expect(btn('通过·待发布')).toBeDefined()
 })
