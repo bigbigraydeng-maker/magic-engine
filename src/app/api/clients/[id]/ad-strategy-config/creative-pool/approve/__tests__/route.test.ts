@@ -45,6 +45,7 @@ type Row = Record<string, unknown>
 
 function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
   let selectCount = 0
+  const selects: string[] = []
   const rows = new Map<string, Row>(initial.map(r => [String(r.client_id), r]))
   const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
     const key = String(row[opts.onConflict])
@@ -54,8 +55,9 @@ function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
   mockFrom.mockImplementation(((table: string) => {
     if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
     return {
-      select: () => {
+      select: (cols?: string) => {
         selectCount += 1
+        selects.push(cols ?? '*')
         onSelect?.(selectCount)
         return {
           eq: (col: string, val: string) => ({
@@ -88,7 +90,7 @@ function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
       },
     }
   }) as never)
-  return { rows, upsert }
+  return { rows, upsert, selects }
 }
 
 function params() {
@@ -330,5 +332,24 @@ describe('creative-pool/approve — 日期边界与并发（固定时钟）', ()
     expect(res.status).toBe(409)
     expect((await res.json()).error).toBe('creative_pool_changed_concurrently')
     expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('creative-pool/approve — 幂等分支的版本与读取顺序', () => {
+  it('已批准：响应里的 version 等于种子行的 updated_at，且先读版本再读内容', async () => {
+    signedInAs(STAFF)
+    const { selects } = fakeTable([
+      { client_id: CLIENT, enabled: true, digest_recipients: [], updated_at: '2026-10-20T00:00:00.000Z', creative_pool: [
+        { kind: 'work_order', ref: 'wo-9', status: 'approved', approved_by: 'earlier@staff.test', approved_at: '2026-09-01T00:00:00.000Z' },
+      ] },
+    ])
+
+    const res = await POST(postRequest({ ref: 'wo-9' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.idempotent).toBe(true)
+    expect(json.version).toBe('2026-10-20T00:00:00.000Z')
+    expect(selects[0]).toBe('updated_at')
   })
 })

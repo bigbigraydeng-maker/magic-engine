@@ -80,7 +80,7 @@ describe('writeConfigCas — updated_at 在写入那一刻取', () => {
 
     const res = await writeConfigCas(CLIENT, { updated_at: '2000-01-01T00:00:00.000Z', enabled: false }, version)
 
-    expect(res).toEqual({ ok: true })
+    expect(res).toEqual({ ok: true, updatedAt: NOW_ISO })
     expect(table.updateCalls).toHaveLength(1)
     expect(table.updateCalls[0].updated_at).toBe(NOW_ISO)
     expect(table.updateCalls[0].enabled).toBe(false)
@@ -93,7 +93,8 @@ describe('writeConfigCas — updated_at 在写入那一刻取', () => {
 
     const res = await writeConfigCas(CLIENT, { enabled: false }, version)
 
-    expect(res).toEqual({ ok: true })
+    expect(res.ok).toBe(true)
+    if (res.ok) expect(res.updatedAt).toBe(new Date(Date.parse(future) + 1).toISOString())
     expect(table.updateCalls).toHaveLength(1)
     const written = table.updateCalls[0].updated_at as string
     expect(Date.parse(written)).toBe(Date.parse(future) + 1)
@@ -106,7 +107,7 @@ describe('writeConfigCas — updated_at 在写入那一刻取', () => {
 
     const res = await writeConfigCas(CLIENT, { enabled: false }, version)
 
-    expect(res).toEqual({ ok: true })
+    expect(res).toEqual({ ok: true, updatedAt: NOW_ISO })
     expect(table.insertCalls).toHaveLength(1)
     expect(table.insertCalls[0].client_id).toBe(CLIENT)
     expect(table.insertCalls[0].updated_at).toBe(NOW_ISO)

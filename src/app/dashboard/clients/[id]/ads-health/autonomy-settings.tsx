@@ -65,6 +65,8 @@ interface ConfigResponse {
   config?: AdStrategyConfig
   /** 素材池的乐观锁版本；缺省表示服务端没给 */
   version?: string | null
+  /** 服务端读不到版本时置 true（此时没有 version 键） */
+  version_unreadable?: boolean
   error?: string
   /** 给员工看的中文说明（比 error 代码好懂）；有就优先显示 */
   message?: string
@@ -223,7 +225,8 @@ function CreativePoolList({
         return
       }
       if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
-      onApproved(json.config, json.version)
+      // version_unreadable 时没有 version 键：传 undefined，让上层去刷新版本。
+      onApproved(json.config, json.version_unreadable === true ? undefined : json.version)
     } catch (err) {
       setError(err instanceof Error ? err.message : '批准失败')
     } finally {
@@ -464,6 +467,24 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
     }
   }
 
+  /**
+   * 只刷新 config 和 version，**不碰**用户正在编辑的草稿。
+   * 409 之后用它：服务端值变了，但用户没保存的上限/模式不能被冲掉。
+   */
+  const refreshFromServer = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`)
+      const json = (await res.json()) as ConfigResponse
+      if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
+      setConfig(json.config)
+      if (json.version !== undefined) setVersion(json.version)
+      return true
+    } catch {
+      setMessage('读不到最新设置，请刷新页面。')
+      return false
+    }
+  }
+
   useEffect(() => {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -481,8 +502,21 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
     return <div className="text-sm text-gray-400 py-4">加载中…</div>
   }
 
+  /** 批准成功：先套用新配置；服务端读不到版本时再刷一次版本。 */
+  const handleApproved = (c: AdStrategyConfig, v?: string | null) => {
+    applyConfig(c, v)
+    if (v === undefined) {
+      void refreshFromServer().then(ok => {
+        // 读不到版本就置为未知，下次保存不带 expected_version。
+        if (!ok) setVersion(undefined)
+      })
+    }
+  }
+
   const capUnset = draftCap.trim() === '' && config.daily_budget_cap_cents == null
   const newRefs = draftRefs.split('\n').map(r => r.trim()).filter(Boolean)
+  const existingRefs = new Set(config.creative_pool.map(e => e.ref))
+  const freshRefs = [...new Set(newRefs)].filter(r => !existingRefs.has(r))
 
   const save = async () => {
     setSaving(true)
@@ -501,9 +535,14 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       // 只在提交新候选时才动素材池。服务端会保留已有素材的批准状态，但会带上
       // 页面加载时的版本；页面太旧时服务端返回 409，界面刷新后让用户重做。
       if (newRefs.length > 0) {
+        // 全是重复 / 已存在的编号：不发请求，也不清空输入框，让用户自己改。
+        if (freshRefs.length === 0) {
+          setMessage('这些视频编号已经在列表里了，没有需要添加的')
+          return
+        }
         body.creative_pool = [
           ...config.creative_pool.map(e => ({ kind: e.kind, ref: e.ref, status: 'candidate' })),
-          ...newRefs.map(ref => ({ kind: 'meta_video', ref, status: 'candidate' })),
+          ...freshRefs.map(ref => ({ kind: 'meta_video', ref, status: 'candidate' })),
         ]
         if (version !== undefined) body.expected_version = version
       }
@@ -522,7 +561,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       if (res.status === 409) {
         // 素材池被别处改过：刷新到最新配置和版本，但保留用户填的编号，方便直接再点保存。
         setMessage(json.message ?? '素材池刚被别处改过，请刷新页面后再保存。')
-        await load()
+        await refreshFromServer()
         return
       }
       if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
@@ -530,6 +569,11 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       applyConfig(json.config, json.version)
       setDraftRefs('')
       setMessage('已保存')
+      // 服务端读不到版本：先把版本刷回来，读不到就置为未知，下次保存不带 expected_version。
+      if (json.version_unreadable === true) {
+        const ok = await refreshFromServer()
+        if (!ok) setVersion(undefined)
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '保存失败')
     } finally {
@@ -576,8 +620,8 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
             <CreativePoolList
               clientId={clientId}
               entries={config.creative_pool}
-              onApproved={applyConfig}
-              onConflict={() => { void load() }}
+              onApproved={handleApproved}
+              onConflict={() => { void refreshFromServer() }}
             />
           </div>
           <textarea

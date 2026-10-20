@@ -16,8 +16,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import {
-  loadAdStrategyConfig, loadAdStrategyConfigWithSource, loadConfigVersion, parseCreativePool, writeConfigCas,
-  currentConfigVersion,
+  loadAdStrategyConfig, loadAdStrategyConfigWithSource, loadConfigVersion, loadConfigWithVersion, parseCreativePool, writeConfigCas,
   type ConfigVersion, type CreativePoolEntry,
 } from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
@@ -35,9 +34,14 @@ export async function GET(
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
-  const config = await loadAdStrategyConfig(clientId)
-  const version = await currentConfigVersion(clientId)
-  return NextResponse.json({ success: true, config, version })
+  const loaded = await loadConfigWithVersion(clientId)
+  if (!loaded.ok) {
+    return NextResponse.json(
+      { error: 'config_version_unreadable', message: '读不到设置版本，请稍后再试。' },
+      { status: 503 },
+    )
+  }
+  return NextResponse.json({ success: true, config: loaded.config, version: loaded.version })
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -103,6 +107,11 @@ export async function PATCH(
       )
     }
   }
+  // 老客户端不带 expected_version 也照常保存（兼容），但要留痕：没有版本比较的整数组重写
+  // 在并发下会互相覆盖，日志里能看出是哪个客户在走老路径。
+  if (body.creative_pool !== undefined && body.expected_version === undefined) {
+    console.warn('[ad-strategy-config] creative_pool saved without expected_version', { clientId })
+  }
   const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
   const before = loadedBefore.source === 'fallback' ? null : loadedBefore.config
 
@@ -164,7 +173,10 @@ export async function PATCH(
     }
     // 同一个 ref 在请求体里出现两次：无法判断哪条是「真身」，整请求拒绝（不静默取其一）。
     if (new Set(parsed.map(e => e.ref)).size !== parsed.length) {
-      return NextResponse.json({ error: 'creative_pool_duplicate_ref' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'creative_pool_duplicate_ref', message: '请求里有重复的视频编号，已拒绝保存。' },
+        { status: 400 },
+      )
     }
     // 读不出现有素材池就没法保住已有的推广期 —— 拒绝重写素材池，其它设置照常能存。
     if (before === null) {
@@ -177,14 +189,20 @@ export async function PATCH(
       return existing !== undefined && existing.kind !== e.kind
     })
     if (kindMismatch) {
-      return NextResponse.json({ error: 'creative_pool_kind_mismatch', ref: kindMismatch.ref }, { status: 400 })
+      return NextResponse.json(
+        { error: 'creative_pool_kind_mismatch', ref: kindMismatch.ref, message: '素材类型和库里不一致，已拒绝保存。' },
+        { status: 400 },
+      )
     }
     // 新加的素材 id 不得恰好是别的素材已登记的别名（否则同一个视频会同时属于两条素材）。
     const aliasOwner = parsed.find(e =>
       !before.creative_pool.some(x => x.ref === e.ref) &&
       before.creative_pool.some(x => x.alias_refs?.includes(e.ref)))
     if (aliasOwner) {
-      return NextResponse.json({ error: 'ref_conflicts_with_existing_alias', ref: aliasOwner.ref }, { status: 400 })
+      return NextResponse.json(
+        { error: 'ref_conflicts_with_existing_alias', ref: aliasOwner.ref, message: '这个视频编号已经是别的素材登记的别名，不能当成新素材添加。' },
+        { status: 400 },
+      )
     }
     update.creative_pool = parsed.map((e): CreativePoolEntry => {
       const existing = before.creative_pool.find(x => x.ref === e.ref)
@@ -202,6 +220,9 @@ export async function PATCH(
     })
   }
 
+  // 通知用的时间戳：素材池路径走 writeConfigCas，实际写入的 updated_at 由它决定（可能被顶到
+  // version.updatedAt + 1ms），所以要用它返回的 updatedAt；非素材池路径走 upsert，用 update.updated_at。
+  let notifyUpdatedAt = updatedAt
   if (poolVersion !== null) {
     const written = await writeConfigCas(clientId, update, poolVersion)
     if (!written.ok) {
@@ -210,6 +231,7 @@ export async function PATCH(
       }
       return NextResponse.json({ error: written.message }, { status: 500 })
     }
+    notifyUpdatedAt = written.updatedAt
   } else {
     const { error } = await supabaseAdmin
       .from('ad_strategy_configs')
@@ -224,10 +246,18 @@ export async function PATCH(
     (update.daily_budget_cap_cents !== undefined &&
       (before === null || update.daily_budget_cap_cents !== before.daily_budget_cap_cents))
   const syncEvents = envelopeChanged
-    ? await notifyAutonomyModeChanged(clientId, updatedAt, { relaxed: true })
+    ? await notifyAutonomyModeChanged(clientId, notifyUpdatedAt, { relaxed: true })
     : { sent: false, events: 0 }
 
-  const config = await loadAdStrategyConfig(clientId)
-  const version = await currentConfigVersion(clientId)
-  return NextResponse.json({ success: true, config, version, sync_events: syncEvents })
+  const loaded = await loadConfigWithVersion(clientId)
+  if (!loaded.ok) {
+    // 保存已经成功，只是读回版本失败：仍返回 200，让界面自己重新加载（不带 version 键）。
+    return NextResponse.json({
+      success: true,
+      config: await loadAdStrategyConfig(clientId),
+      version_unreadable: true,
+      sync_events: syncEvents,
+    })
+  }
+  return NextResponse.json({ success: true, config: loaded.config, version: loaded.version, sync_events: syncEvents })
 }

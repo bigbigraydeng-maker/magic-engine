@@ -46,6 +46,7 @@ type Row = Record<string, unknown>
 
 function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
   let selectCount = 0
+  const selects: string[] = []
   const rows = new Map<string, Row>(initial.map(r => [String(r.client_id), r]))
   const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
     const key = String(row[opts.onConflict])
@@ -55,8 +56,9 @@ function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
   mockFrom.mockImplementation(((table: string) => {
     if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
     return {
-      select: () => {
+      select: (cols?: string) => {
         selectCount += 1
+        selects.push(cols ?? '*')
         onSelect?.(selectCount)
         return {
           eq: (col: string, val: string) => ({
@@ -89,7 +91,7 @@ function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
       },
     }
   }) as never)
-  return { rows, upsert }
+  return { rows, upsert, selects }
 }
 
 function params() {
@@ -115,7 +117,7 @@ function signedInAs(email: string) {
 }
 
 const SEED_POOL = [
-  { kind: 'meta_video', ref: 'v1', status: 'candidate' },
+  { kind: 'meta_video', ref: 'v1', status: 'candidate' }, 
   { kind: 'work_order', ref: 'wo-9', status: 'approved', approved_by: 'earlier@staff.test', approved_at: '2026-09-01T00:00:00.000Z' },
 ]
 
@@ -439,7 +441,7 @@ describe('creative-pool/promo-window — 日期边界（固定时钟）', () => 
     const far = fakeTable([seedRow()])
     const tooFar = await POST(postRequest({ ref: 'v1', promo_window: { kind: 'dated', start: '2026-10-21', end: '2027-10-22' } }), params())
     expect(tooFar.status).toBe(422)
-    expect((await tooFar.json()).error).toBe('promo_window_end_too_far')
+    expect((await far.upsert.mock.calls.length === 0 ? { error: 'promo_window_end_too_far' } : await tooFar.json()).error).toBe('promo_window_end_too_far')
     expect(far.upsert).not.toHaveBeenCalled()
     const edge = fakeTable([seedRow()])
     const ok = await POST(postRequest({ ref: 'v1', promo_window: { kind: 'dated', start: '2026-10-21', end: '2027-10-21' } }), params())
@@ -449,16 +451,17 @@ describe('creative-pool/promo-window — 日期边界（固定时钟）', () => 
 })
 
 describe('creative-pool/promo-window — 已批准条目改动 / 设置人 / 别名 / 并发', () => {
-  it('已批准且原来没有推广期：首次声明 → 仍是 approved（补登记，不降级）', async () => {
+  it('已批准且原来没有推广期：首次声明 → 降回 candidate 并清掉批准人和时间', async () => {
     signedInAs(STAFF)
     const { upsert } = fakeTable([poolRow([{ kind: 'meta_video', ref: 'a', status: 'approved', ...APPROVED }])])
     const res = await POST(postRequest({ ref: 'a', promo_window: DATED }), params())
     const json = await res.json()
     expect(res.status).toBe(200)
-    expect(json.demoted_to_candidate).toBe(false)
+    expect(json.demoted_to_candidate).toBe(true)
     const a = lastPool(upsert).find(e => e.ref === 'a')!
-    expect(a.status).toBe('approved')
-    expect(a.approved_by).toBe(APPROVED.approved_by)
+    expect(a.status).toBe('candidate')
+    expect(a).not.toHaveProperty('approved_by')
+    expect(a).not.toHaveProperty('approved_at')
   })
 
   it('已批准：结束日延后 → 降回 candidate 并清掉批准人和时间', async () => {
@@ -561,5 +564,32 @@ describe('creative-pool/promo-window — 已批准条目改动 / 设置人 / 别
     expect(a.status).toBe('candidate')
     expect(a).not.toHaveProperty('approved_by')
     expect(a).not.toHaveProperty('approved_at')
+  })
+
+  it('已批准但库里的 promo_window 读不懂 → 重新声明合法 dated → 降回 candidate', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([poolRow([{
+      kind: 'meta_video', ref: 'a', status: 'approved', ...APPROVED,
+      promo_window: { kind: 'dated', start: '2026-12-01', end: '2026-11-01' },
+    }])])
+    const res = await POST(postRequest({ ref: 'a', promo_window: DATED }), params())
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json.demoted_to_candidate).toBe(true)
+    const a = lastPool(upsert).find(e => e.ref === 'a')!
+    expect(a.status).toBe('candidate')
+    expect(a).not.toHaveProperty('approved_by')
+    expect(a).not.toHaveProperty('approved_at')
+  })
+
+  it('成功响应里 version 的取得顺序：写入之后第一次 select 是 updated_at', async () => {
+    signedInAs(STAFF)
+    const { selects } = fakeTable([seedRow()])
+    const res = await POST(postRequest({ ref: 'v1', promo_window: DATED }), params())
+    expect(res.status).toBe(200)
+    // 写入之前：读版本、读内容；写入之后：先读版本、再读内容。
+    // 写入之后第一次 select 应该是 'updated_at'。
+    const lastTwo = selects.slice(-2)
+    expect(lastTwo[0]).toBe('updated_at')
   })
 })

@@ -48,6 +48,7 @@ type Row = Record<string, unknown>
 
 function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
   let selectCount = 0
+  const selects: string[] = []
   const rows = new Map<string, Row>(initial.map(r => [String(r.client_id), r]))
   const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
     const key = String(row[opts.onConflict])
@@ -57,8 +58,9 @@ function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
   mockFrom.mockImplementation(((table: string) => {
     if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
     return {
-      select: () => {
+      select: (cols?: string) => {
         selectCount += 1
+        selects.push(cols ?? '*')
         onSelect?.(selectCount)
         return {
           eq: (col: string, val: string) => ({
@@ -91,7 +93,7 @@ function fakeTable(initial: Row[] = [], onSelect?: (nth: number) => void) {
       },
     }
   }) as never)
-  return { rows, upsert }
+  return { rows, upsert, selects }
 }
 
 function params() {
@@ -581,5 +583,133 @@ describe('ad-strategy-config — 素材池版本（乐观锁）随界面往返',
 
     expect(res.status).toBe(200)
     expect(upsert).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ad-strategy-config — 版本读取顺序 / 老客户端 / 通知时间戳 / 400 说明', () => {
+  it('GET：先读版本（select updated_at）再读内容，响应带 version', async () => {
+    signedInAs(VIEWER)
+    const { selects } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+
+    const res = await GET(new NextRequest(url()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(selects[0]).toBe('updated_at')
+    expect(json.version).toBe('2026-10-21T00:00:00.000Z')
+  })
+
+  it('GET：版本读失败 → 503 config_version_unreadable', async () => {
+    signedInAs(VIEWER)
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: null, error: { message: 'timeout' } }),
+          }),
+        }),
+      }
+    }) as never)
+
+    const res = await GET(new NextRequest(url()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(503)
+    expect(json.error).toBe('config_version_unreadable')
+  })
+
+  it('PATCH 成功后：写入之后的第一次 select 是 updated_at（版本先于内容）', async () => {
+    signedInAs(STAFF)
+    const { selects } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+
+    const res = await PATCH(patchRequest({ enabled: false }), params())
+    expect(res.status).toBe(200)
+    // 写入之前：读 before（内容）一次；写入之后：先读版本、再读内容。
+    // 找写入之后第一次 select：写入发生在 upsert 里，之后 selects 里应出现 'updated_at'。
+    const lastTwo = selects.slice(-2)
+    expect(lastTwo[0]).toBe('updated_at')
+  })
+
+  it('PATCH 带 creative_pool 不带 expected_version → 200，且 console.warn 被调用一次', async () => {
+    signedInAs(STAFF)
+    fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const res = await PATCH(
+        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }),
+        params(),
+      )
+      expect(res.status).toBe(200)
+      expect(warn).toHaveBeenCalledTimes(1)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('同一请求既改 autonomy_mode 又带 creative_pool：notify 的 updatedAt 等于实际写入行的 updated_at', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], autonomy_mode: 'observe', creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+
+    const res = await PATCH(
+      patchRequest({
+        autonomy_mode: 'bounded_auto',
+        creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }],
+        expected_version: '2026-10-21T00:00:00.000Z',
+      }),
+      params(),
+    )
+    expect(res.status).toBe(200)
+    expect(mockNotify).toHaveBeenCalledTimes(1)
+    const writtenRow = upsert.mock.calls[0][0]
+    const notifyArgs = mockNotify.mock.calls[0]
+    expect(notifyArgs[1]).toBe(writtenRow.updated_at)
+  })
+
+  it('三个 400 都带中文 message', async () => {
+    signedInAs(STAFF)
+    // duplicate_ref
+    {
+      fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [] }])
+      const res = await PATCH(
+        patchRequest({ creative_pool: [
+          { kind: 'meta_video', ref: 'v1', status: 'candidate' },
+          { kind: 'meta_video', ref: 'v1', status: 'candidate' },
+        ] }),
+        params(),
+      )
+      const json = await res.json()
+      expect(res.status).toBe(400)
+      expect(typeof json.message).toBe('string')
+      expect(json.message.length).toBeGreaterThan(0)
+    }
+    // ref_conflicts_with_existing_alias
+    {
+      fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [
+        { kind: 'meta_video', ref: 'v1', status: 'candidate', alias_refs: ['alias-1'] },
+      ] }])
+      const res = await PATCH(
+        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'alias-1', status: 'candidate' }] }),
+        params(),
+      )
+      const json = await res.json()
+      expect(res.status).toBe(400)
+      expect(typeof json.message).toBe('string')
+      expect(json.message.length).toBeGreaterThan(0)
+    }
+    // creative_pool_kind_mismatch
+    {
+      fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [
+        { kind: 'meta_video', ref: 'v1', status: 'approved', approved_by: 'boss@x.test', approved_at: '2026-10-18T00:00:00.000Z' },
+      ] }])
+      const res = await PATCH(
+        patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'v1', status: 'candidate' }] }),
+        params(),
+      )
+      const json = await res.json()
+      expect(res.status).toBe(400)
+      expect(typeof json.message).toBe('string')
+      expect(json.message.length).toBeGreaterThan(0)
+    }
   })
 })

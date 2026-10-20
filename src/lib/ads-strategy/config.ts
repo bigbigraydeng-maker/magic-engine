@@ -207,16 +207,23 @@ export async function loadConfigVersion(
   return { ok: true, version: { exists: true, updatedAt: typeof updatedAt === 'string' ? updatedAt : null } }
 }
 
-/** 当前设置行的版本字符串（updated_at）；null = 还没有这一行；undefined = 读失败。给界面带回服务端比较用。 */
-export async function currentConfigVersion(clientId: string): Promise<string | null | undefined> {
-  const loaded = await loadConfigVersion(clientId)
-  if (!loaded.ok) return undefined
-  if (!loaded.version.exists) return null
-  return loaded.version.updatedAt
+/**
+ * 一次读出「内容 + 版本」，顺序必须是先版本、后内容。
+ * 反过来（先内容、后版本）会拿到「旧内容 + 新版本号」：别人在这两步之间写入，
+ * 我们却以为版本没变，后续保存会静默覆盖别人的改动。
+ */
+export async function loadConfigWithVersion(
+  clientId: string,
+): Promise<{ ok: true; config: AdStrategyConfig; version: string | null } | { ok: false; error: string }> {
+  const loadedVersion = await loadConfigVersion(clientId)
+  if (!loadedVersion.ok) return { ok: false, error: loadedVersion.error }
+  const config = await loadAdStrategyConfig(clientId)
+  const version = loadedVersion.version.exists ? loadedVersion.version.updatedAt : null
+  return { ok: true, config, version }
 }
 
 export type ConfigWriteResult =
-  | { ok: true }
+  | { ok: true; updatedAt: string }
   | { ok: false; kind: 'conflict' | 'error'; message: string }
 
 /** 只在版本没变时写；没有行就插入（并发插入撞唯一键 = 冲突）。 */
@@ -237,7 +244,7 @@ export async function writeConfigCas(
   const row = { ...fields, updated_at: stamp }
   if (!version.exists) {
     const { error } = await supabaseAdmin.from('ad_strategy_configs').insert({ client_id: clientId, ...row })
-    if (!error) return { ok: true }
+    if (!error) return { ok: true, updatedAt: stamp }
     if ((error as { code?: string }).code === '23505') return { ok: false, kind: 'conflict', message: error.message }
     return { ok: false, kind: 'error', message: error.message }
   }
@@ -246,5 +253,5 @@ export async function writeConfigCas(
   const { data, error } = await guarded.select('client_id')
   if (error) return { ok: false, kind: 'error', message: error.message }
   if (!data || data.length !== 1) return { ok: false, kind: 'conflict', message: 'creative_pool changed concurrently' }
-  return { ok: true }
+  return { ok: true, updatedAt: stamp }
 }

@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, currentConfigVersion, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadConfigVersion, loadConfigWithVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { parsePromoWindow, nzToday, type PromoWindow } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
@@ -91,13 +91,12 @@ function sameAliasSet(a: readonly string[] | undefined, b: readonly string[]): b
 
 /**
  * 新的推广期是不是比原来「放宽」了（长期有效 / 结束日延后 / 开始日提前）。放宽 = 已批准的结论不再成立。
- * 首次声明（原来没有推广期）：
- *   - 声明 dated：只是补登记一个有限期，不算放宽，已批准的保持 approved；
- *   - 声明 evergreen：这是最宽的声明（无期限），等于把「已批准」的结论扩到无限期，
- *     必须重新过一遍批准（第二双眼睛），所以按放宽处理、降回候选。
+ * 已批准但库里没有（或读不懂）推广期的素材（历史遗留），补登记 / 重新声明推广期也要重新批准——
+ * 批准是按「当时没有推广期」给的，声明后需要再过一遍。`prev` 为 undefined 同时覆盖
+ * 「库里的推广期读不懂，被解析成未声明」的情形，不用另写分支。
  */
 function widensWindow(prev: PromoWindow | undefined, next: PromoWindow): boolean {
-  if (prev === undefined) return next.kind === 'evergreen'
+  if (prev === undefined) return true
   if (prev.kind === 'evergreen') return false
   if (next.kind === 'evergreen') return true
   return next.end > prev.end || next.start < prev.start
@@ -206,5 +205,14 @@ export async function POST(
     return NextResponse.json({ error: written.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, demoted_to_candidate: demote, config: await loadAdStrategyConfig(clientId), version: await currentConfigVersion(clientId) })
+  const loaded = await loadConfigWithVersion(clientId)
+  if (!loaded.ok) {
+    return NextResponse.json({
+      success: true,
+      demoted_to_candidate: demote,
+      config: await loadAdStrategyConfig(clientId),
+      version_unreadable: true,
+    })
+  }
+  return NextResponse.json({ success: true, demoted_to_candidate: demote, config: loaded.config, version: loaded.version })
 }

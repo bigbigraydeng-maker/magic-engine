@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, currentConfigVersion, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadConfigVersion, loadConfigWithVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { promoVerdict, nzToday } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
@@ -61,7 +61,9 @@ export async function POST(
   if (!entry) return NextResponse.json({ error: 'ref not in creative_pool' }, { status: 404 })
 
   if (entry.status === 'approved') {
-    return NextResponse.json({ success: true, config, idempotent: true, version: await currentConfigVersion(clientId) })
+    // 幂等分支：用已经读到的版本，不再读一次（读完 config 之后再读版本会拿到「旧内容 + 新版本号」）。
+    const version = loadedVersion.version.exists ? loadedVersion.version.updatedAt : null
+    return NextResponse.json({ success: true, config, idempotent: true, version })
   }
 
   const verdict = promoVerdict(entry.promo_window, nzToday(Date.now()))
@@ -86,5 +88,13 @@ export async function POST(
     return NextResponse.json({ error: written.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId), version: await currentConfigVersion(clientId) })
+  const loaded = await loadConfigWithVersion(clientId)
+  if (!loaded.ok) {
+    return NextResponse.json({
+      success: true,
+      config: await loadAdStrategyConfig(clientId),
+      version_unreadable: true,
+    })
+  }
+  return NextResponse.json({ success: true, config: loaded.config, version: loaded.version })
 }
