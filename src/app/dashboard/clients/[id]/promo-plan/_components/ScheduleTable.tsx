@@ -76,7 +76,7 @@ export function ScheduleTable({ schedule, mode, today, phases, adsRunning = 'unk
         <p className="text-xs text-gray-500 mt-0.5">{MODE_NOTE[mode]}</p>
         {!schedule.error && <p className="text-xs font-medium text-gray-800 mt-1">{summaryOf(schedule)}</p>}
         {!schedule.error && <p className="text-[11px] text-gray-600 mt-0.5">{view.routine}</p>}
-        {!schedule.error && view.adsNote && adsRunning === 'none' && <p className="text-[11px] text-gray-600 mt-0.5">{view.adsNote}</p>}
+        {!schedule.error && view.adsNote && adsRunning === 'none' && <p className="text-[11px] text-gray-600 mt-0.5">{view.adsNote}（以 Meta 为准）</p>}
         <details className="mt-1">
           <summary className="text-[11px] text-gray-500 cursor-pointer">说明（点开看）</summary>
           <p className="text-[11px] text-gray-500 mt-0.5">以上是计划原文，未经官网核实，发布前必须核对。</p>

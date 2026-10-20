@@ -13,6 +13,7 @@ import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/c
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
 import { loadGoal, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
+import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
 import { allAdsSteps, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketing-plan/plan-guard'
@@ -37,11 +38,14 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
     // 下拉选项只有草稿填表才用；读不到时页面照常显示（选项为空，表格里会提示）
-    const [board, options] = await Promise.all([
+    const [board, options, liveAds] = await Promise.all([
       buildPromoBoard(plan),
       plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
+      // 只在计划还没批准、且是管理员账号时才读（FDE 按付费客户处理，不返回）：账户编号、标签、花费是内部口径，付费客户账号不给。
+      // 数据来自快照表（每 6 小时抓一次）和日花费表（次日才到），读不到时回 ok:false。
+      plan.status === 'draft' && access.tier === 'admin' ? loadLiveAds(ctx.params.id) : Promise.resolve(null),
     ])
-    return NextResponse.json({ success: true, board, options })
+    return NextResponse.json({ success: true, board, options, live_ads: liveAds, live_ads_visible: access.tier === 'admin' })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })
