@@ -57,6 +57,14 @@
 -- · content_work_orders.final_mp4_sha256 由本迁移新增，但本迁移不写入它。
 --   出片管道渲染完成时写入是后续块的工作；在接线之前该列恒为 NULL，
 --   因此所有签字一律视为无效（creative_binding_is_valid 返回 false）。
+--   写入入口已在本迁移建好：work_order_set_final_hash_v1（只授 ad_link_hash_rw），
+--   并配 BEFORE UPDATE 触发器：不经该函数（会话标志 app.ad_link_fn='hash_write'）
+--   改 final_mp4_sha256 一律拒。调用它的出片管道接线是后续块。
+-- · link_touch_checked_v1 在关联行 meta_creative_id 为 NULL 时一律返回 false、
+--   不写任何列。meta_creative_id 的写入者是登记/回填函数
+--   （link_ad_registration_v1 / link_ad_backfill_v1 的 p_meta_creative_id）。
+--   因此在该列被写入之前，每日扫描的「已确认」路径不会生效 —— 这是设计如此，
+--   不是缺陷；但接线方必须知道：先有 meta_creative_id，才有 touch。
 -- · 未在带 supautils 的 Supabase 分支库试跑；应用线上前必须先在 Supabase
 --   分支库验证（OWNER TO / GRANT role TO CURRENT_USER 在非超级用户下的行为）。
 -- =============================================================================
@@ -71,7 +79,7 @@ SET LOCAL statement_timeout = '60s';
 -- =============================================================================
 -- 0. 角色（NOLOGIN，无凭据）
 -- =============================================================================
--- 六个写入角色 + 一个函数属主。全部 NOLOGIN：本迁移不创建任何登录凭据。
+-- 七个写入角色 + 一个函数属主。全部 NOLOGIN：本迁移不创建任何登录凭据。
 -- 凭据落点是单独的、未核实的步骤（见文件头「未核实」）。
 DO $$
 DECLARE
@@ -84,6 +92,7 @@ BEGIN
     'ad_link_backfill_rw',
     'ad_link_retract_rw',
     'ad_link_stale_rw',
+    'ad_link_hash_rw',
     'ad_link_fn_owner'
   ] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
@@ -178,9 +187,7 @@ BEGIN
 END $$;
 
 COMMENT ON COLUMN public.content_work_orders.final_mp4_sha256 IS
-  '最终成片 mp4 的 sha256;由出片管道渲染完成时写入(后续块接线,本迁移不写);NULL = 未记录,签字一律视为无效';
-COMMENT ON COLUMN public.content_work_orders.final_mp4_sha256 IS
-  '写入者是后续块(出片管道);content_work_orders 的 RLS 对 service_role 全开,后续块须把此列的写入收紧到专用函数';
+  '最终成片 mp4 的 sha256。唯一写入入口 = work_order_set_final_hash_v1（只授 ad_link_hash_rw）；BEFORE UPDATE 触发器拒绝任何不经该函数的改写。NULL = 未记录，签字一律视为无效。调用它的出片管道接线是后续块。';
 
 -- =============================================================================
 -- 2. 追加式表
@@ -259,6 +266,25 @@ CREATE INDEX IF NOT EXISTS link_stale_reasons_link_idx
 COMMENT ON TABLE public.link_stale_reasons IS
   'stale 原因追加表：只增不改。后来发现别的问题可追加，不覆盖。只有 link_mark_stale_v1 能写（列入权限矩阵断言）。';
 
+-- 2.4 工单最终哈希写入历史（追加式；只经 work_order_set_final_hash_v1 写）
+CREATE TABLE IF NOT EXISTS public.content_work_order_hash_history (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  work_order_id uuid NOT NULL,
+  sha256        text NOT NULL,
+  set_by        text NOT NULL,
+  set_at        timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT content_work_order_hash_history_sha256_fmt
+    CHECK (sha256 ~ '^[0-9a-f]{64}$')
+);
+
+CREATE INDEX IF NOT EXISTS content_work_order_hash_history_wo_idx
+  ON public.content_work_order_hash_history (work_order_id, set_at DESC);
+
+COMMENT ON TABLE public.content_work_order_hash_history IS
+  '工单最终 mp4 哈希的每次写入留痕（追加式，只增不改）。写入者 = work_order_set_final_hash_v1。用于回答「这个哈希是谁、何时写的」，以及重渲后旧签字为何失效。';
+COMMENT ON COLUMN public.content_work_order_hash_history.set_by IS
+  '写入人/服务标识（调用方传入）。数据库函数无法自验此值。';
+
 -- =============================================================================
 -- 3. RLS + REVOKE
 -- =============================================================================
@@ -275,6 +301,7 @@ ALTER TABLE public.ad_creative_links              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.creative_binding_attestations  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.link_swap_intents              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.link_stale_reasons             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.content_work_order_hash_history ENABLE ROW LEVEL SECURITY;
 
 DO $$
 BEGIN
@@ -314,7 +341,23 @@ BEGIN
     CREATE POLICY "service_role_full" ON public.link_stale_reasons
       FOR ALL TO service_role USING (true);
   END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'content_work_order_hash_history'
+      AND policyname = 'service_role_full'
+  ) THEN
+    CREATE POLICY "service_role_full" ON public.content_work_order_hash_history
+      FOR ALL TO service_role USING (true);
+  END IF;
 END $$;
+
+-- 修正 20260801000001 留下的策略缺陷：ad_creative_links 上的 "service_role_full"
+-- 当时写成 FOR ALL USING (true) 而没写 TO service_role，等于对 PUBLIC 生效
+-- （anon / authenticated 可读整表）。这里 DROP 后按 TO service_role 重建。
+DROP POLICY IF EXISTS "service_role_full" ON public.ad_creative_links;
+CREATE POLICY "service_role_full" ON public.ad_creative_links
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- 函数属主策略：ad_link_fn_owner 是唯一写入者（DEFINER 函数以它的身份执行）。
 -- RLS 保持开启；这条策略只给属主放行，不给任何其他角色放行。
@@ -335,13 +378,18 @@ DROP POLICY IF EXISTS ad_link_fn_owner_full ON public.link_stale_reasons;
 CREATE POLICY ad_link_fn_owner_full ON public.link_stale_reasons
   FOR ALL TO ad_link_fn_owner USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS ad_link_fn_owner_full ON public.content_work_order_hash_history;
+CREATE POLICY ad_link_fn_owner_full ON public.content_work_order_hash_history
+  FOR ALL TO ad_link_fn_owner USING (true) WITH CHECK (true);
+
 -- REVOKE 写权限：service_role / anon / authenticated / PUBLIC 一律无写。
 -- 注意：REVOKE 在 RLS 之上生效 —— 即使策略允许，表级权限被收回后直写仍被拒。
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE
   ON public.ad_creative_links,
      public.creative_binding_attestations,
      public.link_swap_intents,
-     public.link_stale_reasons
+     public.link_stale_reasons,
+     public.content_work_order_hash_history
   FROM service_role, anon, authenticated, PUBLIC;
 
 -- service_role 只保留 SELECT（读归因、读台账）。
@@ -349,17 +397,19 @@ GRANT SELECT
   ON public.ad_creative_links,
      public.creative_binding_attestations,
      public.link_swap_intents,
-     public.link_stale_reasons
+     public.link_stale_reasons,
+     public.content_work_order_hash_history
   TO service_role;
 
--- 六个写入角色对表无直接写权限（写只能经各自函数）。
+-- 七个写入角色对表无直接写权限（写只能经各自函数）。
 REVOKE ALL
   ON public.ad_creative_links,
      public.creative_binding_attestations,
      public.link_swap_intents,
-     public.link_stale_reasons
+     public.link_stale_reasons,
+     public.content_work_order_hash_history
   FROM ad_link_creation_rw, ad_link_registration_rw, ad_link_attest_rw,
-       ad_link_backfill_rw, ad_link_retract_rw, ad_link_stale_rw;
+       ad_link_backfill_rw, ad_link_retract_rw, ad_link_stale_rw, ad_link_hash_rw;
 
 -- -----------------------------------------------------------------------------
 -- 3.1 函数属主 ad_link_fn_owner 的表权限
@@ -378,13 +428,19 @@ GRANT SELECT, INSERT, UPDATE, DELETE
      public.link_swap_intents,
      public.link_stale_reasons
   TO ad_link_fn_owner;
+-- 哈希历史表：追加式，函数属主只需 INSERT + SELECT（UPDATE/DELETE 由触发器无条件拒）。
+GRANT SELECT, INSERT ON public.content_work_order_hash_history TO ad_link_fn_owner;
 -- content_work_orders 只读（签字函数读工单校验 client_id / 哈希）。
 -- 上面的 ALTER TABLE 已要求该表存在，这里不再用 IF EXISTS 兜底。
 GRANT SELECT ON public.content_work_orders TO ad_link_fn_owner;
--- 列级 UPDATE 仅授 updated_at：唯一目的是让 creative_binding_attest_v1 里的
--- SELECT ... FOR SHARE 能拿到行锁（PostgreSQL 要求对表有 UPDATE 权限才能
--- 加 FOR SHARE 锁）。不授 final_mp4_sha256 列 —— 函数属主不得改写哈希。
-GRANT UPDATE (updated_at) ON public.content_work_orders TO ad_link_fn_owner;
+-- 列级 UPDATE 授两列：
+--   · updated_at —— 唯一目的是让 creative_binding_attest_v1 里的
+--     SELECT ... FOR SHARE 能拿到行锁（PostgreSQL 要求对表有 UPDATE 权限才能
+--     加 FOR SHARE 锁）。
+--   · final_mp4_sha256 —— 唯一写入入口 work_order_set_final_hash_v1 需要它；
+--     该函数同时受 BEFORE UPDATE 触发器约束（会话标志 app.ad_link_fn='hash_write'），
+--     所以「有列权限」不等于「可随意改哈希」。
+GRANT UPDATE (updated_at, final_mp4_sha256) ON public.content_work_orders TO ad_link_fn_owner;
 
 -- =============================================================================
 -- 4. SECURITY DEFINER 函数
@@ -797,6 +853,22 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'link_retract_v1: 关联行不存在或已撤回（%）', p_link_id;
   END IF;
+
+  -- 撤回关联行时，连带撤回它引用的签字（若存在且尚未撤回）。
+  -- 理由：关联行撤回后，其签字不应再被任何新关联引用；留着有效签字
+  -- 等于留了一条可被重新挂上的「有效」凭据。已撤回的签字静默跳过。
+  PERFORM set_config('app.ad_link_fn', 'retract_attestation', true);
+
+  UPDATE public.creative_binding_attestations
+     SET retracted_at   = now(),
+         retracted_by   = p_retracted_by,
+         retract_reason = 'link_retract_v1: ' || p_reason
+   WHERE id = (
+           SELECT attestation_id
+             FROM public.ad_creative_links
+            WHERE id = p_link_id
+         )
+     AND retracted_at IS NULL;
 END;
 $$;
 
@@ -1031,6 +1103,47 @@ REVOKE ALL ON FUNCTION public.attestation_retract_v1(uuid,text,text) FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public.attestation_retract_v1(uuid,text,text) TO ad_link_retract_rw;
 
 -- -----------------------------------------------------------------------------
+-- 4.13 work_order_set_final_hash_v1 —— 工单最终 mp4 哈希的唯一写入入口
+-- -----------------------------------------------------------------------------
+-- 出片管道渲染完成时调用（接线是后续块）。本迁移只建入口与守卫。
+-- 写入 = 更新 content_work_orders.final_mp4_sha256 + 追加一行历史。
+-- BEFORE UPDATE 触发器（见 6.2）只放行会话标志 app.ad_link_fn='hash_write' 的改写。
+CREATE OR REPLACE FUNCTION public.work_order_set_final_hash_v1(
+  p_work_order_id uuid,
+  p_sha256        text,
+  p_by            text
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF p_work_order_id IS NULL OR p_sha256 IS NULL OR p_by IS NULL OR p_by = '' THEN
+    RAISE EXCEPTION 'work_order_set_final_hash_v1: work_order_id / sha256 / set_by 必填';
+  END IF;
+  IF p_sha256 !~ '^[0-9a-f]{64}$' THEN
+    RAISE EXCEPTION 'work_order_set_final_hash_v1: sha256 必须是 64 位小写十六进制';
+  END IF;
+
+  PERFORM set_config('app.ad_link_fn', 'hash_write', true);
+
+  UPDATE public.content_work_orders
+     SET final_mp4_sha256 = p_sha256
+   WHERE id = p_work_order_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'work_order_set_final_hash_v1: 工单不存在（%）', p_work_order_id;
+  END IF;
+
+  INSERT INTO public.content_work_order_hash_history (work_order_id, sha256, set_by)
+  VALUES (p_work_order_id, p_sha256, p_by);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text) TO ad_link_hash_rw;
+
+-- -----------------------------------------------------------------------------
 -- 4.11 link_swap_intent_open_v1 —— 写换创意意图（调 Meta 之前）
 -- -----------------------------------------------------------------------------
 -- 先写意图再调 Meta（s1 §3）：意图是追加式的，不置 stale_at。
@@ -1186,6 +1299,7 @@ ALTER FUNCTION public.creative_link_has_pending_swap(uuid)                      
 ALTER FUNCTION public.attestation_retract_v1(uuid,text,text)                                             OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.link_swap_intent_open_v1(uuid,text,text)                                           OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.link_swap_intent_resolve_v1(uuid,text,text)                                        OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.work_order_set_final_hash_v1(uuid,text,text)                                       OWNER TO ad_link_fn_owner;
 
 -- =============================================================================
 -- 6. ad_creative_links 触发器：已解析行只放行受审写入
@@ -1518,6 +1632,83 @@ ALTER FUNCTION public.link_swap_intents_guard_update()               OWNER TO ad
 ALTER FUNCTION public.link_swap_intents_guard_delete()               OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.link_swap_intents_guard_truncate()             OWNER TO ad_link_fn_owner;
 
+-- =============================================================================
+-- 6.2 content_work_orders.final_mp4_sha256 写入守卫
+-- =============================================================================
+-- 只拦 final_mp4_sha256 的改写；其他列（updated_at 等）原样放行。
+-- 放行条件：会话标志 app.ad_link_fn = 'hash_write'（只由
+-- work_order_set_final_hash_v1 设置，事务内局部）。
+-- 与其余守卫同一原则：不检查 current_user / session_user，不对属主放行。
+CREATE OR REPLACE FUNCTION public.content_work_orders_guard_hash_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_fn text := current_setting('app.ad_link_fn', true);
+BEGIN
+  IF NEW.final_mp4_sha256 IS DISTINCT FROM OLD.final_mp4_sha256 THEN
+    IF v_fn IS DISTINCT FROM 'hash_write' THEN
+      RAISE EXCEPTION 'content_work_orders: final_mp4_sha256 只经 work_order_set_final_hash_v1 写（work_order_id=%）', OLD.id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS content_work_orders_guard_hash_update ON public.content_work_orders;
+CREATE TRIGGER content_work_orders_guard_hash_update
+  BEFORE UPDATE ON public.content_work_orders
+  FOR EACH ROW EXECUTE FUNCTION public.content_work_orders_guard_hash_update();
+
+ALTER FUNCTION public.content_work_orders_guard_hash_update() OWNER TO ad_link_fn_owner;
+
+-- 哈希历史表守卫：追加式，只增不改。
+CREATE OR REPLACE FUNCTION public.content_work_order_hash_history_guard_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'content_work_order_hash_history: 只增不改，禁止 UPDATE';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.content_work_order_hash_history_guard_delete()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'content_work_order_hash_history: 只增不改，禁止 DELETE';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.content_work_order_hash_history_guard_truncate()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'content_work_order_hash_history: 禁止 TRUNCATE（无条件拒绝，含函数属主与表属主）';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS content_work_order_hash_history_guard_update ON public.content_work_order_hash_history;
+CREATE TRIGGER content_work_order_hash_history_guard_update
+  BEFORE UPDATE ON public.content_work_order_hash_history
+  FOR EACH ROW EXECUTE FUNCTION public.content_work_order_hash_history_guard_update();
+
+DROP TRIGGER IF EXISTS content_work_order_hash_history_guard_delete ON public.content_work_order_hash_history;
+CREATE TRIGGER content_work_order_hash_history_guard_delete
+  BEFORE DELETE ON public.content_work_order_hash_history
+  FOR EACH ROW EXECUTE FUNCTION public.content_work_order_hash_history_guard_delete();
+
+DROP TRIGGER IF EXISTS content_work_order_hash_history_guard_truncate ON public.content_work_order_hash_history;
+CREATE TRIGGER content_work_order_hash_history_guard_truncate
+  BEFORE TRUNCATE ON public.content_work_order_hash_history
+  FOR EACH STATEMENT EXECUTE FUNCTION public.content_work_order_hash_history_guard_truncate();
+
+ALTER FUNCTION public.content_work_order_hash_history_guard_update()   OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.content_work_order_hash_history_guard_delete()   OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.content_work_order_hash_history_guard_truncate() OWNER TO ad_link_fn_owner;
+
 -- 收回第 5 节临时授予的成员资格与 CREATE 权限（改属主已完成）。
 -- 超级用户下 REVOKE role FROM CURRENT_USER 同样合法（幂等）。
 REVOKE CREATE ON SCHEMA public FROM ad_link_fn_owner;
@@ -1545,7 +1736,7 @@ BEGIN
     FROM information_schema.role_table_grants
    WHERE grantee = 'service_role'
      AND table_schema = 'public'
-     AND table_name IN ('ad_creative_links','creative_binding_attestations','link_swap_intents','link_stale_reasons')
+     AND table_name IN ('ad_creative_links','creative_binding_attestations','link_swap_intents','link_stale_reasons','content_work_order_hash_history')
      AND privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE');
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: service_role 仍有写权限: %', v_bad;
@@ -1561,7 +1752,8 @@ BEGIN
        'link_ad_at_creation_v1','link_ad_registration_v1','link_ad_backfill_v1',
        'creative_binding_attest_v1','link_retract_v1','link_mark_stale_v1',
        'link_touch_checked_v1','creative_binding_is_valid','creative_link_has_pending_swap',
-       'attestation_retract_v1','link_swap_intent_open_v1','link_swap_intent_resolve_v1'
+       'attestation_retract_v1','link_swap_intent_open_v1','link_swap_intent_resolve_v1',
+       'work_order_set_final_hash_v1'
      )
      AND has_function_privilege('public', p.oid, 'EXECUTE');
   IF v_bad IS NOT NULL THEN
@@ -1586,30 +1778,36 @@ BEGIN
        'creative_binding_attestations_guard_update','creative_binding_attestations_guard_delete',
        'creative_binding_attestations_guard_truncate',
        'link_stale_reasons_guard_update','link_stale_reasons_guard_delete','link_stale_reasons_guard_truncate',
-       'link_swap_intents_guard_update','link_swap_intents_guard_delete','link_swap_intents_guard_truncate'
+       'link_swap_intents_guard_update','link_swap_intents_guard_delete','link_swap_intents_guard_truncate',
+       'work_order_set_final_hash_v1','content_work_orders_guard_hash_update',
+       'content_work_order_hash_history_guard_update','content_work_order_hash_history_guard_delete',
+       'content_work_order_hash_history_guard_truncate'
      )
      AND r.rolname <> 'ad_link_fn_owner';
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: 函数属主不是 ad_link_fn_owner: %', v_bad;
   END IF;
 
-  -- 4) 六个写入角色对四张表不得有直接写权限
+  -- 4) 七个写入角色对五张表不得有直接写权限
   SELECT string_agg(format('%s.%s:%s:%s', table_schema, table_name, grantee, privilege_type), ', ')
     INTO v_bad
     FROM information_schema.role_table_grants
    WHERE grantee IN ('ad_link_creation_rw','ad_link_registration_rw','ad_link_attest_rw',
-                     'ad_link_backfill_rw','ad_link_retract_rw','ad_link_stale_rw')
+                     'ad_link_backfill_rw','ad_link_retract_rw','ad_link_stale_rw','ad_link_hash_rw')
      AND table_schema = 'public'
-     AND table_name IN ('ad_creative_links','creative_binding_attestations','link_swap_intents','link_stale_reasons')
+     AND table_name IN ('ad_creative_links','creative_binding_attestations','link_swap_intents','link_stale_reasons','content_work_order_hash_history')
      AND privilege_type IN ('INSERT','UPDATE','DELETE','TRUNCATE');
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: 写入角色有直接写权限: %', v_bad;
   END IF;
 
-  -- 5) 除 ad_link_fn_owner 与超级用户外，任何角色都不得对四张表有
+  -- 5) 除 ad_link_fn_owner 与超级用户外，任何角色都不得对五张表有
   --    INSERT/UPDATE/DELETE/TRUNCATE。用 has_table_privilege 逐角色逐表逐权限扫，
   --    覆盖直接授权、角色继承、PUBLIC 授权等所有路径。
-  --    跳过内置角色（pg_*）与超级用户：前者是系统角色，后者本就绕过权限检查。
+  --    跳过：超级用户（本就绕过权限检查）、内置角色（pg_*）、
+  --    Supabase 平台角色（postgres / supabase_admin / supabase_auth_admin /
+  --    supabase_storage_admin / dashboard_user）—— 它们是平台运维身份，
+  --    不属于本迁移的权限矩阵。
   SELECT string_agg(format('%s:%s:%s', r.rolname, t.tbl, p.priv), ', ')
     INTO v_bad
     FROM pg_roles r
@@ -1617,11 +1815,14 @@ BEGIN
       ('ad_creative_links'),
       ('creative_binding_attestations'),
       ('link_swap_intents'),
-      ('link_stale_reasons')
+      ('link_stale_reasons'),
+      ('content_work_order_hash_history')
     ) AS t(tbl)
     CROSS JOIN (VALUES ('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE')) AS p(priv)
    WHERE NOT r.rolsuper
      AND r.rolname NOT LIKE 'pg\_%'
+     AND r.rolname NOT IN ('postgres','supabase_admin','supabase_auth_admin',
+                           'supabase_storage_admin','dashboard_user')
      AND r.rolname <> 'ad_link_fn_owner'
      AND has_table_privilege(r.oid, format('public.%I', t.tbl), p.priv);
   IF v_bad IS NOT NULL THEN
@@ -1635,11 +1836,40 @@ BEGIN
       ('ad_creative_links'),
       ('creative_binding_attestations'),
       ('link_swap_intents'),
-      ('link_stale_reasons')
+      ('link_stale_reasons'),
+      ('content_work_order_hash_history')
     ) AS t(tbl)
    WHERE has_table_privilege('ad_link_fn_owner', format('public.%I', t.tbl), 'TRUNCATE');
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: ad_link_fn_owner 有 TRUNCATE 权限: %', v_bad;
+  END IF;
+
+  -- 6.1) 四张（+哈希历史）表上的策略不得对 PUBLIC / anon / authenticated 生效。
+  --      20260801000001 的 "service_role_full" 漏写 TO service_role 就是这类缺陷。
+  SELECT string_agg(format('%s.%s:%s', schemaname, tablename, policyname), ', ')
+    INTO v_bad
+    FROM pg_policies
+   WHERE schemaname = 'public'
+     AND tablename IN ('ad_creative_links','creative_binding_attestations',
+                       'link_swap_intents','link_stale_reasons',
+                       'content_work_order_hash_history')
+     AND (
+       roles IS NULL
+       OR roles && ARRAY['public','anon','authenticated']::name[]
+     );
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: 策略对 PUBLIC/anon/authenticated 生效: %', v_bad;
+  END IF;
+
+  -- 6.2) 哈希写入入口只授 ad_link_hash_rw（不得授给其他写入角色）
+  SELECT string_agg(r.rolname, ', ')
+    INTO v_bad
+    FROM pg_roles r
+   WHERE r.rolname IN ('ad_link_creation_rw','ad_link_registration_rw','ad_link_attest_rw',
+                       'ad_link_backfill_rw','ad_link_retract_rw','ad_link_stale_rw')
+     AND has_function_privilege(r.oid, 'public.work_order_set_final_hash_v1(uuid,text,text)', 'EXECUTE');
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: 非哈希角色可执行 work_order_set_final_hash_v1: %', v_bad;
   END IF;
 
   -- 7) 补链函数不得残留旧签名重载（只允许 17 参版本）
