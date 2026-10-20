@@ -8,7 +8,7 @@ source: session:ec90bb17
 verify_by: 2026-11-02
 verify_how: 读 Meta 与 ME：累计花费约 1,960 纽币是否在预期内、点击价与填表比例相对第 7 天的走势、CRM 广告线索累计条数与回电情况；累计成交满 3 单或累计花费满 1,500 才允许动用止损；结论写给 PM：加钱、维持还是收
 done_on: 2026-10-21
-done_ref: doc:docs/ledger/evidence/2026-10-21-cts-v5-supersedes-old-review-cards.md
+done_ref: pr:2976
 verified_ref: doc:docs/ledger/evidence/2026-10-21-cts-v5-supersedes-old-review-cards.md
 last_checked: 2026-10-21
 check_note: 被 PM 批的 v5 方案取代，不再执行，新核对见 2026-10-21-cts-v5-funnel-reviews

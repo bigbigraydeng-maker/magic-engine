@@ -8,7 +8,7 @@ source: session:ec90bb17
 verify_by: 2026-10-26
 verify_how: 读 Meta 与 ME：累计花费是否在预期内（约 980 纽币）、每次点击价是否不超过 0.68、点击后填表的比例是否不低于头三天的基准、CRM 里来自广告落地页的线索有几条、有没有被拒审或掉量；成交要 3–4 周才看得出，第 7 天没成交不算失败
 done_on: 2026-10-21
-done_ref: doc:docs/ledger/evidence/2026-10-21-cts-v5-supersedes-old-review-cards.md
+done_ref: pr:2976
 verified_ref: doc:docs/ledger/evidence/2026-10-21-cts-v5-supersedes-old-review-cards.md
 last_checked: 2026-10-21
 check_note: 被 PM 批的 v5 方案取代，不再执行，新核对见 2026-10-21-cts-v5-funnel-reviews
