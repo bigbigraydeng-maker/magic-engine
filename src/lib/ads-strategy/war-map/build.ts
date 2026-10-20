@@ -125,7 +125,8 @@ export function buildWarMap(input: WarMapInput): WarMapView {
   return {
     generatedAt: input.now,
     countdown: buildCountdown(input, today),
-    clocks: { ...input.clocks, staleDays },
+    // 表头的「数据日」和「已 N 天」必须同一口径：都取最旧的在用账户数据日
+    clocks: { ...input.clocks, dataDay: oldestDay ?? input.clocks.dataDay, staleDays },
     accounts,
     accountSummaries: buildAccountSummaries(input, accounts, pools.everyRow, today),
     pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount, unusableRows: pools.unusableRows },

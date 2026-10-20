@@ -553,4 +553,13 @@ describe('审查补断言 · 账户清单、新鲜度、频率按账户过滤', 
     expect(s8?.note).not.toContain('不可用')
     expect(s2?.note).toContain('已关闭')
   })
+
+  it('表头「数据日」和「已 N 天」同一口径：都是最旧的那个账户', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_2', name: '二号' })],
+      accountDataDays: { act_1: '2026-10-15', act_2: '2026-10-10' },
+    }))
+    expect(v.clocks.dataDay).toBe('2026-10-10')
+    expect(v.clocks.staleDays).toBe(6)
+  })
 })
