@@ -322,6 +322,76 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     expect(json.config.creative_pool[0]).not.toHaveProperty('approved_by')
   })
 
+  it('素材池重写时保住已有素材的推广期、别名和时间戳（通用 PATCH 不能把它们抹掉）', async () => {
+    signedInAs(STAFF)
+    const existing = {
+      kind: 'meta_video', ref: 'v1', status: 'approved',
+      promo_window: { kind: 'dated', start: '2026-10-01', end: '2026-11-30' },
+      alias_refs: ['a1'],
+      promo_window_set_by: 'fde@staff.test',
+      promo_window_set_at: '2026-10-21T00:00:00.000Z',
+      promo_window_changed_at: '2026-10-21T00:00:00.000Z',
+    }
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [existing] }])
+
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'v2', status: 'candidate' }] }),
+      params(),
+    )
+
+    expect(res.status).toBe(200)
+    const [written] = upsert.mock.calls[0]
+    const pool = written.creative_pool as Array<Record<string, unknown>>
+    const v1 = pool.find(e => e.ref === 'v1')!
+    expect(v1.promo_window).toEqual(existing.promo_window)
+    expect(v1.alias_refs).toEqual(['a1'])
+    expect(v1.promo_window_set_by).toBe('fde@staff.test')
+    expect(v1.promo_window_set_at).toBe(existing.promo_window_set_at)
+    expect(v1.promo_window_changed_at).toBe(existing.promo_window_changed_at)
+    const v2 = pool.find(e => e.ref === 'v2')!
+    expect(v2).not.toHaveProperty('promo_window')
+  })
+
+  it('creative_pool 带 promo_window / alias_refs / 推广期时间戳 → 400 指向 promo-window 接口，不写库', async () => {
+    signedInAs(STAFF)
+    for (const extra of [
+      { promo_window: { kind: 'evergreen' } },
+      { alias_refs: ['x'] },
+      { promo_window_set_by: 'x' },
+      { promo_window_changed_at: '2026-01-01T00:00:00.000Z' },
+    ]) {
+      const { upsert } = fakeTable()
+      const res = await PATCH(
+        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate', ...extra }] }),
+        params(),
+      )
+      const json = await res.json()
+      expect(res.status).toBe(400)
+      expect(json.error).toContain('promo-window')
+      expect(upsert).not.toHaveBeenCalled()
+    }
+  })
+
+  it('改素材池时读不出现有素材池 → 503，不写库（不能在看不见的情况下抹掉推广期）', async () => {
+    signedInAs(STAFF)
+    const upsert = vi.fn(async () => ({ error: null }))
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: 'timeout' } }) }) }),
+        upsert,
+      }
+    }) as never)
+
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }),
+      params(),
+    )
+
+    expect(res.status).toBe(503)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
   it('付费客户门户成员改自治模式 → 403，不写库', async () => {
     signedInAs(PORTAL_MEMBER)
     const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [] }])
