@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildSocialConnections, type SocialClientFacts, type SocialConnectionFact } from '../social-onboarding'
 import { YOUTUBE_PUBLISH_SCOPES } from '@/lib/youtube-publish/client'
 
@@ -87,6 +87,13 @@ describe('Instagram saved facts remain identity-only', () => {
     expect(inspect([{ ...ig, location_name: null }]).authorization).toBe('unknown')
     expect(inspect([{ ...ig, account_id: 'not-professional-id' }]).authorization).toBe('unknown')
     expect(inspect([ig], true, 'invalid-handle').authorization).toBe('target_missing')
+  })
+  it('🔴 switch on: an old read-only grant must be re-authorised; a publish-capable one is saved', () => {
+    vi.stubEnv('INSTAGRAM_PUBLISH_ENABLED', 'true')
+    try {
+      expect(inspect([ig]).authorization).toBe('needs_attention')
+      expect(inspect([{ ...ig, scopes: ['instagram_business_basic', 'instagram_business_content_publish'] }]).authorization).toBe('saved')
+    } finally { vi.unstubAllEnvs() }
   })
   it('expires to needs-attention, never automatic refresh', () => {
     expect(inspect([{ ...ig, token_expiry: now.toISOString() }]).authorization).toBe('needs_attention')

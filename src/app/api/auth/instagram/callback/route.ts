@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { confirmSocialConnectionWrite, upsertConnection } from '@/lib/platform-oauth/connection-store'
-import { normalizeInstagramHandle, type InstagramOutcome } from '@/lib/instagram-oauth/identity'
+import { normalizeInstagramHandle, requiredInstagramScopes, type InstagramOutcome } from '@/lib/instagram-oauth/identity'
 import { getInstagramConfig, instagramReturnUrl, readInstagramIdentity, verifyInstagramState,
   INSTAGRAM_STATE_COOKIE, INSTAGRAM_STATE_PATH } from '@/lib/instagram-oauth/client'
 
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     try {
       const confirmed = await confirmSocialConnectionWrite({ clientId, provider: 'instagram',
         accountId: identity.accountId, locationName: identity.username,
-        requiredScopes: identity.scopes, tokenExpiry: identity.tokenExpiry, verifiedAt })
+        requiredScopes: requiredInstagramScopes(), tokenExpiry: identity.tokenExpiry, verifiedAt })
       if (!confirmed) return back(clientId, 'save_failed')
     } catch { return back(clientId, 'save_failed') }
     return back(clientId, 'connected')
