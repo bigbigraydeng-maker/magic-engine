@@ -113,3 +113,11 @@
   4. 订单发布 POST 在「已占用工单、尚未向 TikTok 发起」之间若遇到多授权,工单停在 `sending`(现有对所有发起前失败的统一处理),窗口极小,先记录。
   5. YouTube 目标频道的授权被标 `error` 后,提示会写成「不是目标频道」而非「已失效」(次要)。
   6. `social-onboarding` 对 TikTok 用「所有未撤销行 >1」判多账号,发布用「有效行 >1」;方向安全,口径不同,G2 统一。
+
+## G2-lite 实施记录(2026-10-20,PM 选「精简版」)
+- 新增 `src/lib/platform-oauth/connection-guard.ts`:授权入库前两道拒绝 —— 账号已在**别的客户**名下未撤销(含过期/出错)→ `needs_team_check`;本客户已有**另一个账号**的未撤销授权 → `has_other_account`;查库出错/账号编号为空 → 抛出,回调映射 `save_failed`(fail-closed)。同客户重授权同一账号照常放行。
+- TikTok 回调:守卫在 `upsertConnection` 前;入库异常(含唯一索引冲突)不再 500,统一回设置页横幅。提示语不含对方客户信息。
+- 管理员 TikTok 断开:`DELETE /api/clients/[id]/platform/tiktok`(同 Instagram 模式,只改状态为 revoked,不读令牌);面板 `managedAccounts` 扩到 TikTok。
+- 数据库兜底:唯一索引迁移文件已写,**未应用**(需 PM `go apply`;文件内置重复检查,有重复会中止不改库)。
+- 刻意不做:拦截时自动生成今日待办;「确认并替换」流程;TikTok 刷新失败标 error。
+

@@ -53,6 +53,12 @@ describe('social authorisation facts', () => {
     expect(result.publishing).toContain('尚未实时核实')
     expect(status([row, { ...row, account_id: 'another-open-id' }], 'tiktok').authorization).toBe('ambiguous')
   })
+  it('lists live TikTok grants (including expired) for admin disconnect, never revoked ones', () => {
+    const row = { ...connection, provider: 'tiktok', account_id: 'open-1', display_name: 'Creator', scopes: ['user.info.basic', 'video.publish'] }
+    expect(status([row], 'tiktok').managedAccounts).toEqual([{ connectionId: 'grant-a', accountId: 'open-1', displayName: 'Creator' }])
+    expect(status([{ ...row, status: 'expired' }], 'tiktok').managedAccounts).toHaveLength(1)
+    expect(status([{ ...row, status: 'revoked' }], 'tiktok').managedAccounts).toEqual([])
+  })
   it('matches the YouTube channel, preserves private staging, and refuses ambiguous active rows', () => {
     const row = { ...connection, provider: 'google_youtube', account_id: channelId, scopes: YOUTUBE_PUBLISH_SCOPES }
     expect(status([row], 'youtube').authorization).toBe('saved')
