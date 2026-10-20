@@ -470,7 +470,7 @@ describe('readObjectiveSeries · 真读（假 fetch）', () => {
 
   it('用配置里的广告账户和系列编号，令牌只进 Authorization 头；读不到的东西不抛错', async () => {
     const calls: { path: string; auth: string | null }[] = []
-    const node = { id: AWARENESS_ID, name: '系列', objective: 'OUTCOME_AWARENESS', status: 'ACTIVE', effective_status: 'ACTIVE', created_time: '2026-10-21T10:00:00+0000', updated_time: '2026-10-21T11:00:00+0000' }
+    const node = { id: AWARENESS_ID, account_id: '1111111111', name: '系列', objective: 'OUTCOME_AWARENESS', status: 'ACTIVE', effective_status: 'ACTIVE', created_time: '2026-10-21T10:00:00+0000', updated_time: '2026-10-21T11:00:00+0000' }
     const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = new URL(String(input))
       const path = url.pathname.replace(/^\/v\d+\.\d+\//, '')

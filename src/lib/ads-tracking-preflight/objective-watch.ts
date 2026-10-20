@@ -19,6 +19,7 @@ import {
   frequencyText,
   meNotReceivingText,
   readFailedText,
+  scheduledHeadline,
   stoppedHeadline,
   unreadHeadline,
   waitingHeadline,
@@ -72,6 +73,11 @@ export interface EntityFact {
   status: string | null
   effective_status: string | null
   updated_at: string | null
+  /** 广告组：定时开始 / 结束时间（ISO，UTC）；没设或读不出 = 缺省 */
+  start_at?: string | null
+  end_at?: string | null
+  /** 广告组：投放目的地（WHATSAPP / MESSENGER …）；读不出 = 缺省 */
+  destination_type?: string | null
 }
 
 /** 一行洞察数字。钱：spend_cents 是分；cost_* 是币种单位（元），Meta 报什么就是什么，没报 = null（不是 0）。 */
@@ -124,7 +130,7 @@ export interface ObjectiveAlert {
   href: string
 }
 
-export type SeriesState = 'stopped' | 'waiting_first_spend' | 'delivering' | 'unread'
+export type SeriesState = 'stopped' | 'scheduled' | 'waiting_first_spend' | 'delivering' | 'unread'
 
 /** 按广告组 / 广告拆开的一行：在投的都列（没数据也列），停掉的只在有花费时列。 */
 export interface SplitView extends MetricsRow {
@@ -196,27 +202,72 @@ function positiveOr(value: number | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback
 }
 
+/**
+ * 黄线 / 红线成对解析：红线必须比黄线高。只配了黄线时（默认红线可能比它还低）、
+ * 或配出来的红线不高于黄线时，红线取「黄线 + 1」——不会出现黄线 5、红线 4 这种红线反而更低的怪事。
+ */
+function resolvePair(yellow: number | undefined, red: number | undefined, defaults: { yellow: number; red: number }): { yellow: number; red: number } {
+  const y = positiveOr(yellow, defaults.yellow)
+  const r = positiveOr(red, defaults.red)
+  return { yellow: y, red: r > y ? r : y + 1 }
+}
+
 function timeMs(iso: string | null): number {
   return iso === null ? Number.NaN : Date.parse(iso)
 }
 
 interface Live {
   stopped: boolean
+  /** 在投的（含定时还没到点的）广告组 / 广告 */
   adsets: EntityFact[]
   ads: EntityFact[]
+  /** 已经到点在跑的广告组 / 广告（定时还没到点的不算） */
+  runningAdsets: EntityFact[]
+  runningAds: EntityFact[]
 }
 
-/** 还在投的广告组和广告。系列停了、或没有在投的广告（广告组空着不会花钱）= stopped。 */
-function liveStructure(facts: SeriesFacts): Live {
-  const adsets = facts.adsets.filter(e => isInPlay(e.effective_status))
-  const ads = facts.ads.filter(e => isInPlay(e.effective_status))
+type AdsetPhase = 'ended' | 'scheduled' | 'running'
+
+/** 广告组的时间阶段：结束时间已过 = ended；开始时间还没到 = scheduled；其余 = running。 */
+function adsetPhase(e: EntityFact, nowMs: number): AdsetPhase {
+  const end = timeMs(e.end_at ?? null)
+  if (!Number.isNaN(end) && end <= nowMs) return 'ended'
+  const start = timeMs(e.start_at ?? null)
+  if (!Number.isNaN(start) && start > nowMs) return 'scheduled'
+  return 'running'
+}
+
+/**
+ * 还在投的广告组和广告。系列停了、或没有在投的广告（广告组空着不会花钱）= stopped。
+ * 广告组结束时间已过的当作已停；定时还没到点的算「在投」但不算「在跑」（不盯、不提醒）。
+ * 广告挂的广告组读不到时（列表里没有）保守地算在投。
+ */
+function liveStructure(facts: SeriesFacts, nowMs: number): Live {
+  const adsets = facts.adsets.filter(e => isInPlay(e.effective_status) && adsetPhase(e, nowMs) !== 'ended')
+  const runningAdsets = adsets.filter(e => adsetPhase(e, nowMs) === 'running')
+  const known = new Set(facts.adsets.map(e => e.id))
+  const liveIds = new Set(adsets.map(e => e.id))
+  const runningIds = new Set(runningAdsets.map(e => e.id))
+  const orphan = (e: EntityFact): boolean => e.parent_id === null || !known.has(e.parent_id)
+  const ads = facts.ads.filter(e => isInPlay(e.effective_status) && (orphan(e) || liveIds.has(e.parent_id as string)))
+  const runningAds = ads.filter(e => orphan(e) || runningIds.has(e.parent_id as string))
   const campaignStopped = !isInPlay(facts.campaign.effective_status)
-  return { stopped: campaignStopped || ads.length === 0, adsets, ads }
+  return { stopped: campaignStopped || ads.length === 0, adsets, ads, runningAdsets, runningAds }
 }
 
-/** 「最近一次改动」：系列 + 在投的广告组 + 在投的广告里最晚的修改时间；都读不出才退用系列创建时间。 */
+/**
+ * 「现在在投的广告」累计花了多少钱（分）。按广告那一层的洞察算——旧版本花过钱不能替新版本证明「在花钱」。
+ * 按广告读不到任何行（空）时退回整个系列的累计花费（没法区分，不冤枉）。
+ */
+function liveSpendCents(facts: SeriesFacts, live: Live): number {
+  if (facts.by_ad.length === 0) return facts.total?.spend_cents ?? 0
+  const ids = new Set(live.ads.map(a => a.id))
+  return facts.by_ad.filter(r => ids.has(r.id)).reduce((sum, r) => sum + r.spend_cents, 0)
+}
+
+/** 「最近一次改动」：系列 + 在跑的广告组 + 在跑的广告里最晚的修改时间；都读不出才退用系列创建时间。 */
 function anchorOf(facts: SeriesFacts, live: Live): string | null {
-  const times = [facts.campaign.updated_at, ...live.adsets.map(e => e.updated_at), ...live.ads.map(e => e.updated_at)]
+  const times = [facts.campaign.updated_at, ...live.runningAdsets.map(e => e.updated_at), ...live.runningAds.map(e => e.updated_at)]
   let best: string | null = null
   let bestMs = Number.NEGATIVE_INFINITY
   for (const t of times) {
@@ -265,8 +316,16 @@ function buildSplits(entities: readonly EntityFact[], rows: readonly MetricsRow[
   return out
 }
 
-function meSummary(input: JudgeSeriesInput, metaConversations: number | null): SeriesVerdict['me'] {
+const ME_NOT_APPLICABLE = '系列里有非 WhatsApp 目的地的广告组，Meta 报的聊天数里含别的渠道，ME 收件比对不适用'
+
+/** 在投的广告组里有明确标了非 WhatsApp 目的地（Messenger / Instagram 私信 …）的 → 比对不适用；没标 / 读不出按适用算。 */
+function whatsappOnly(live: Live): boolean {
+  return live.adsets.every(a => a.destination_type === undefined || a.destination_type === null || a.destination_type === 'WHATSAPP')
+}
+
+function meSummary(input: JudgeSeriesInput, metaConversations: number | null, applicable: boolean): SeriesVerdict['me'] {
   if (input.series.kind !== 'whatsapp' || input.me === null) return null
+  if (!applicable) return { read: false, count: null, meta_conversations: metaConversations, since: null, error: ME_NOT_APPLICABLE }
   if (!input.me.read) return { read: false, count: null, meta_conversations: metaConversations, since: null, error: input.me.error }
   return { read: true, count: input.me.count, meta_conversations: metaConversations, since: input.me.since, error: null }
 }
@@ -278,16 +337,20 @@ function alert(code: AlertCode, level: AlertLevel, text: { what: string; how: st
 }
 
 function zeroSpendAlert(input: JudgeSeriesInput, live: Live, hours: number): ObjectiveAlert | null {
-  const yellow = positiveOr(input.watch.zero_spend_yellow_hours, DEFAULT_ZERO_SPEND_YELLOW_HOURS)
-  const red = positiveOr(input.watch.zero_spend_red_hours, DEFAULT_ZERO_SPEND_RED_HOURS)
+  const { yellow, red } = resolvePair(input.watch.zero_spend_yellow_hours, input.watch.zero_spend_red_hours, {
+    yellow: DEFAULT_ZERO_SPEND_YELLOW_HOURS,
+    red: DEFAULT_ZERO_SPEND_RED_HOURS,
+  })
   if (hours < yellow) return null
-  const text = zeroSpendText({ label: input.series.label, hours, ads: live.ads.map(a => ({ name: a.name, effective_status: a.effective_status })) })
-  return alert('zero_spend', hours >= red ? 'red' : 'yellow', text, input.links.ads_manager)
+  const ads = live.runningAds.map(a => ({ name: a.name, effective_status: a.effective_status }))
+  return alert('zero_spend', hours >= red ? 'red' : 'yellow', zeroSpendText({ label: input.series.label, hours, ads }), input.links.ads_manager)
 }
 
 function frequencyAlert(input: JudgeSeriesInput, facts: SeriesFacts, live: Live): ObjectiveAlert | null {
-  const yellow = positiveOr(input.series.frequency_yellow, DEFAULT_FREQUENCY_YELLOW)
-  const red = positiveOr(input.series.frequency_red, DEFAULT_FREQUENCY_RED)
+  const { yellow, red } = resolvePair(input.series.frequency_yellow, input.series.frequency_red, {
+    yellow: DEFAULT_FREQUENCY_YELLOW,
+    red: DEFAULT_FREQUENCY_RED,
+  })
   const over = (r: MetricsRow): r is MetricsRow & { frequency: number } =>
     r.frequency !== null && r.reach !== null && r.reach >= FREQUENCY_MIN_REACH && r.frequency > yellow
   const offenders: { display: string; frequency: number }[] = []
@@ -348,12 +411,22 @@ function unreadVerdict(input: JudgeSeriesInput, error: string, objective: string
   })
 }
 
+/** 定时还没到点：不盯、不提醒，回执里写还要多久开始。 */
+function scheduledVerdict(input: JudgeSeriesInput, facts: SeriesFacts, live: Live, common: Partial<SeriesVerdict>): SeriesVerdict {
+  const starts = live.adsets.map(a => timeMs(a.start_at ?? null)).filter(ms => !Number.isNaN(ms))
+  const hoursToStart = starts.length === 0 ? null : (Math.min(...starts) - input.now.getTime()) / HOUR_MS
+  return baseVerdict(input, {
+    ...common, state: 'scheduled', objective: facts.campaign.objective,
+    headline: scheduledHeadline({ label: input.series.label, hoursToStart }),
+  })
+}
+
 /** 判一个系列。永不抛错。 */
 export function judgeSeries(input: JudgeSeriesInput): SeriesVerdict {
   const { facts, series, now, currency } = input
   if (!facts.read) return unreadVerdict(input, facts.error, null)
 
-  const live = liveStructure(facts)
+  const live = liveStructure(facts, now.getTime())
   const common = {
     objective: facts.campaign.objective,
     by_adset: buildSplits(facts.adsets, facts.by_adset),
@@ -362,25 +435,30 @@ export function judgeSeries(input: JudgeSeriesInput): SeriesVerdict {
     ad_status_counts: statusCounts(live.ads),
   }
   if (live.stopped) return baseVerdict(input, { ...common, state: 'stopped', headline: stoppedHeadline(series.label) })
+  if (live.runningAds.length === 0) return scheduledVerdict(input, facts, live, common)
 
   const total = facts.total
   const anchor = anchorOf(facts, live)
   const hours = anchor === null ? null : Math.max(0, (now.getTime() - Date.parse(anchor)) / HOUR_MS)
   const hoursRounded = hours === null ? null : Math.round(hours * 10) / 10
+  const applicable = whatsappOnly(live)
 
-  if (total === null || total.spend_cents <= 0) {
+  if (liveSpendCents(facts, live) <= 0) {
     if (anchor === null || hours === null) return unreadVerdict(input, '读不到系列的最后修改时间，没法算没花钱多久了', facts.campaign.objective)
     const zero = zeroSpendAlert(input, live, hours)
+    const earlierSpend = total !== null && total.spend_cents > 0 ? total.spend_cents : null
     return baseVerdict(input, {
       ...common, state: 'waiting_first_spend', anchor_at: anchor, hours_since_anchor: hoursRounded,
-      me: meSummary(input, total?.conversations ?? null),
-      headline: waitingHeadline({ label: series.label, hours, statusCounts: common.ad_status_counts }),
+      me: meSummary(input, total?.conversations ?? null, applicable),
+      headline: waitingHeadline({ label: series.label, hours, statusCounts: common.ad_status_counts, earlierSpendCents: earlierSpend, currency }),
       alerts: zero === null ? [] : [zero],
     })
   }
+  if (total === null) return unreadVerdict(input, '按广告读到了花费，但整个系列那一行没读到，数字对不上', facts.campaign.objective)
 
-  const me = meSummary(input, total.conversations)
-  const found = series.kind === 'awareness' ? frequencyAlert(input, facts, live) : meAlert(input, total.conversations)
+  const me = meSummary(input, total.conversations, applicable)
+  const meFound = applicable ? meAlert(input, total.conversations) : null
+  const found = series.kind === 'awareness' ? frequencyAlert(input, facts, live) : meFound
   return baseVerdict(input, {
     ...common, state: 'delivering', anchor_at: anchor, hours_since_anchor: hoursRounded, me,
     headline: series.kind === 'awareness'

@@ -256,7 +256,10 @@ describe('judgeSeries · 播放量系列的频次', () => {
       facts: facts({
         ads: [ad('a1', 's1'), ad('old', 's1', { effective_status: 'ADSET_PAUSED' })],
         total: spending({ frequency: 2 }),
-        by_ad: [row('old', { name: '旧版本', spend_cents: 100, reach: 900, frequency: 6 })],
+        by_ad: [
+          row('a1', { name: '新版本', spend_cents: 4900, reach: 800, frequency: 2 }),
+          row('old', { name: '旧版本', spend_cents: 100, reach: 900, frequency: 6 }),
+        ],
       }),
     })
     expect(stopped.alerts).toEqual([])
@@ -372,6 +375,129 @@ describe('judgeSeries · 回执里的数字与一句话摘要', () => {
   it('回执里不带任何令牌样子的东西（只有数字和名字）', () => {
     const v = judge({ facts: facts({ total: spending() }) })
     expect(JSON.stringify(v)).not.toMatch(/access_token|Bearer|EAAB/)
+  })
+})
+
+describe('judgeSeries · 审查整改（旧版本花过钱 / 定时开投 / 阈值只配一半 / 目的地）', () => {
+  const longAgo = (h: number) => ({
+    campaign: campaign({ updated_at: ago(h) }),
+    adsets: [adset('s1', { updated_at: ago(h) })],
+    ads: [ad('a1', 's1', { updated_at: ago(h) })],
+  })
+
+  it('旧版本花过钱、新版本（在投的广告）一直没花过钱 → 仍按「没花钱」提醒，不被系列累计花费盖住', () => {
+    const v = judge({
+      facts: facts({
+        ...longAgo(30),
+        ads: [
+          ad('old', 's0', { name: '旧版本', effective_status: 'ADSET_PAUSED', updated_at: ago(40) }),
+          ad('new', 's1', { name: '新版本', effective_status: 'PENDING_REVIEW', updated_at: ago(30) }),
+        ],
+        adsets: [adset('s0', { effective_status: 'PAUSED', updated_at: ago(40) }), adset('s1', { updated_at: ago(30) })],
+        total: spending({ spend_cents: 350 }),
+        by_ad: [row('old', { name: '旧版本', spend_cents: 350, reach: 120, frequency: 1.1 })],
+      }),
+    })
+    expect(v.state).toBe('waiting_first_spend')
+    expect(v.alerts.map(a => [a.code, a.level])).toEqual([['zero_spend', 'red']])
+    expect(v.headline).toContain('旧版本')
+    expect(v.headline).toContain('NZ$3.50')
+  })
+
+  it('在投的广告花过钱（哪怕是改动前花的）→ 不提醒；按广告读不到行（空）时退回看整个系列的累计花费', () => {
+    const spent = judge({ facts: facts({ ...longAgo(30), total: spending({ spend_cents: 350 }), by_ad: [row('a1', { spend_cents: 350, reach: 50, frequency: 1 })] }) })
+    expect(spent.state).toBe('delivering')
+    expect(spent.alerts).toEqual([])
+    const noAdRows = judge({ facts: facts({ ...longAgo(30), total: spending({ spend_cents: 350 }), by_ad: [] }) })
+    expect(noAdRows.state).toBe('delivering')
+  })
+
+  it('广告组设了定时开始、还没到点 → scheduled，不盯、不提醒（哪怕最后修改很久以前）', () => {
+    const v = judge({
+      facts: facts({
+        campaign: campaign({ updated_at: ago(50) }),
+        adsets: [adset('s1', { updated_at: ago(50), start_at: new Date(NOW.getTime() + 5 * 3_600_000).toISOString() })],
+        ads: [ad('a1', 's1', { updated_at: ago(50) })],
+      }),
+    })
+    expect(v.state).toBe('scheduled')
+    expect(v.alerts).toEqual([])
+    expect(v.headline).toContain('定时')
+    expect(v.headline).toContain('5')
+  })
+
+  it('一个已到点在跑、一个还没到点：只按在跑的算「最近一次改动」', () => {
+    const v = judge({
+      facts: facts({
+        campaign: campaign({ updated_at: ago(20) }),
+        adsets: [
+          adset('s1', { updated_at: ago(9) }),
+          adset('s2', { updated_at: ago(1), start_at: new Date(NOW.getTime() + 3_600_000).toISOString() }),
+        ],
+        ads: [ad('a1', 's1', { updated_at: ago(9) }), ad('a2', 's2', { updated_at: ago(1) })],
+      }),
+    })
+    expect(v.state).toBe('waiting_first_spend')
+    expect(v.anchor_at).toBe(ago(9))
+    expect(v.alerts.map(a => a.level)).toEqual(['yellow'])
+  })
+
+  it('广告组的结束时间已过 → 当作已停（全部结束 = stopped，不再喊频次 / 没花钱）', () => {
+    const ended = { end_at: ago(2) }
+    const v = judge({
+      facts: facts({
+        adsets: [adset('s1', { ...ended, updated_at: ago(80) })],
+        ads: [ad('a1', 's1', { updated_at: ago(80) })],
+        total: spending({ frequency: 7, reach: 900 }),
+        by_ad: [row('a1', { spend_cents: 4000, reach: 900, frequency: 7 })],
+      }),
+    })
+    expect(v.state).toBe('stopped')
+    expect(v.alerts).toEqual([])
+  })
+
+  it('只配了黄线、没配红线：红线自动取比黄线高的值（不会黄线 5 红线 4）', () => {
+    const series: ObjectiveWatchSeries = { ...AWARENESS, frequency_yellow: 5 }
+    const at = (f: number) => judge({ series, facts: facts({ total: spending({ frequency: f, reach: 1000 }) }) })
+    expect(at(5.1).alerts.map(a => a.level)).toEqual(['yellow'])
+    expect(at(6.01).alerts.map(a => a.level)).toEqual(['red'])
+    const watch: ObjectiveWatchConfig = { series: [AWARENESS], zero_spend_yellow_hours: 30 }
+    const hoursAt = (h: number) => judge({ watch, facts: facts({ ...longAgo(h) }) })
+    expect(hoursAt(30).alerts.map(a => a.level)).toEqual(['yellow'])
+    expect(hoursAt(31).alerts.map(a => a.level)).toEqual(['red'])
+  })
+
+  it('WhatsApp 系列里有非 WhatsApp 目的地的广告组 → ME 收件比对不适用（不出红 / 黄灯，回执写明原因）', () => {
+    const withMessenger = facts({
+      adsets: [adset('s1', { destination_type: 'WHATSAPP' }), adset('s2', { destination_type: 'MESSENGER' })],
+      ads: [ad('a1', 's1'), ad('a2', 's2')],
+      total: spending({ conversations: 6, cost_per_conversation: 3 }),
+    })
+    const v = judge({ series: MESSAGING, facts: withMessenger, me: { read: true, count: 0, since: ago(30) } })
+    expect(v.alerts).toEqual([])
+    expect(v.me).toMatchObject({ read: false, meta_conversations: 6 })
+    expect(v.me?.error).toContain('不适用')
+    const whatsappOnly = facts({
+      adsets: [adset('s1', { destination_type: 'WHATSAPP' })],
+      ads: [ad('a1', 's1')],
+      total: spending({ conversations: 6, cost_per_conversation: 3 }),
+    })
+    expect(judge({ series: MESSAGING, facts: whatsappOnly, me: { read: true, count: 0, since: ago(30) } }).alerts.map(a => a.level)).toEqual(['red'])
+  })
+
+  it('连通：真 judgeSeries 的输出写进回执后，今日待办用的 latestObjectiveAlerts 原样取得出来', () => {
+    const v = judge({ facts: facts({ ...longAgo(30) }) })
+    expect(v.alerts).toHaveLength(1)
+    const row_ = {
+      status: 'completed', started_at: NOW.toISOString(),
+      summary: {
+        checked_at: NOW.toISOString(), no_publish: true,
+        clients: [{ client_id: 'c1', active: false, spend_seen: null, series_found: null, sent: [], error: null, objective_watch: { as_of: NOW.toISOString(), series: [JSON.parse(JSON.stringify(v))] } }],
+      },
+    }
+    const out = latestObjectiveAlerts([row_], 'c1', NOW)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ code: v.alerts[0].code, level: v.alerts[0].level, what: v.alerts[0].what, how: v.alerts[0].how, href: v.alerts[0].href, campaign_id: v.campaign_id, label: v.label })
   })
 })
 

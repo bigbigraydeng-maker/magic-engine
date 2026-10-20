@@ -27,8 +27,9 @@ const CAMPAIGN_ID_RE = /^\d{6,20}$/
 const LIST_LIMIT = '100'
 const VIDEO_VIEW = ['video_view']
 
-const CAMPAIGN_FIELDS = 'id,name,objective,status,effective_status,created_time,updated_time'
-const ADSET_FIELDS = 'id,name,status,effective_status,updated_time'
+/** 读系列节点只许要这些字段（meta-reader 的白名单也认这一份）。 */
+export const CAMPAIGN_FIELDS = 'id,name,objective,status,effective_status,created_time,updated_time,account_id'
+const ADSET_FIELDS = 'id,name,status,effective_status,updated_time,start_time,end_time,destination_type'
 const AD_FIELDS = 'id,name,adset_id,status,effective_status,updated_time'
 const METRIC_FIELDS = 'spend,impressions,reach,frequency,actions,cost_per_action_type,video_thruplay_watched_actions,cost_per_thruplay'
 
@@ -81,7 +82,7 @@ function parseEntity(raw: unknown, withParent: boolean): EntityFact | null {
   if (!isRecord(raw)) return null
   const id = str(raw.id)
   if (id === null) return null
-  return {
+  const base: EntityFact = {
     id,
     name: str(raw.name) ?? id,
     parent_id: withParent ? str(raw.adset_id) : null,
@@ -89,6 +90,10 @@ function parseEntity(raw: unknown, withParent: boolean): EntityFact | null {
     effective_status: str(raw.effective_status),
     updated_at: parseGraphTime(raw.updated_time),
   }
+  // 广告组才有定时开始 / 结束时间和投放目的地
+  return withParent
+    ? base
+    : { ...base, start_at: parseGraphTime(raw.start_time), end_at: parseGraphTime(raw.end_time), destination_type: str(raw.destination_type) }
 }
 
 /** 广告组 / 广告列表 → 实体；没有 data 数组 = null（读不懂）。 */
@@ -121,13 +126,17 @@ function parseMetricsRow(raw: unknown, level: InsightLevel): MetricsRow | null {
   }
 }
 
-/** 洞察响应 → 行；没有 data 数组 = null（读不懂，不是「没数据」）。 */
+/**
+ * 洞察响应 → 行；没有 data 数组、或有任何一行读不懂（不是对象 / 缺编号）= null（读不懂，不是「没数据」）。
+ * 🔴 不悄悄丢行：丢了行会把「有数据」说成「还没花钱」。
+ */
 export function parseMetricsRows(body: unknown, level: InsightLevel): MetricsRow[] | null {
   if (!hasDataArray(body)) return null
   const out: MetricsRow[] = []
   for (const raw of body.data) {
     const row = parseMetricsRow(raw, level)
-    if (row !== null) out.push(row)
+    if (row === null) return null
+    out.push(row)
   }
   return out
 }
@@ -148,9 +157,9 @@ async function readTimezone(graphGet: GraphGet, adAccountId: string): Promise<st
   try {
     const body = await graphGet(adAccountId, { fields: 'timezone_name' })
     const tz = isRecord(body) ? body.timezone_name : null
-    return typeof tz === 'string' ? tz : null
+    return typeof tz === 'string' && tz.length > 0 ? tz : null
   } catch {
-    return null // 查不到账户时区就退用 UTC 日期，不因此放弃读数
+    return null
   }
 }
 
@@ -178,9 +187,15 @@ async function readInsights(graphGet: GraphGet, campaignId: string, level: Insig
 
 async function readSeries(graphGet: GraphGet, input: SeriesReadInput): Promise<SeriesFacts> {
   const { adAccountId, campaignId, now } = input
+  // 🔴 账户时区读不到就读不到：悄悄退回 UTC 日期，新西兰早上会少算一天，当天才开始花钱的系列会被误报「没花钱」
   const timezone = await readTimezone(graphGet, adAccountId)
-  const campaign = parseCampaignNode(await graphGet(campaignId, { fields: CAMPAIGN_FIELDS }))
+  if (timezone === null) throw new Error('读不到广告账户的时区，没法定数据的日期范围')
+  const nodeBody = await graphGet(campaignId, { fields: CAMPAIGN_FIELDS })
+  const campaign = parseCampaignNode(nodeBody)
   if (campaign === null || campaign.id !== campaignId) throw new Error('系列节点响应读不懂（编号对不上）')
+  // 🔴 系列必须属于配置的广告账户：编号抄错会读到别家的数据
+  const owner = isRecord(nodeBody) ? str(nodeBody.account_id) : null
+  if (owner !== adAccountId.replace(/^act_/, '')) throw new Error('这个系列不属于配置的广告账户（或读不到它所属的账户），不读它的数据')
   const adsets = await readEntities(graphGet, `${campaignId}/adsets`, ADSET_FIELDS, false, '广告组')
   const ads = await readEntities(graphGet, `${campaignId}/ads`, AD_FIELDS, true, '广告')
   const created = campaign.created_at === null ? now : new Date(campaign.created_at)

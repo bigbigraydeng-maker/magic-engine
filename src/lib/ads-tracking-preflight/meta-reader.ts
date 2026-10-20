@@ -232,6 +232,17 @@ async function doFetch(
   }
 }
 
+/** 直接读数字编号节点（系列）时只许要这些字段：不能借这条口子读 Page / 用户节点上的 access_token 之类。 */
+const BARE_NODE_RE = /^\d{6,20}$/
+export const NODE_FIELDS_ALLOWED: ReadonlySet<string> = new Set([
+  'id', 'name', 'objective', 'status', 'effective_status', 'created_time', 'updated_time', 'account_id',
+])
+
+function nodeFieldsAllowed(params: GraphParams): boolean {
+  const fields = (params.fields ?? '').split(',').filter(f => f.length > 0)
+  return fields.length > 0 && fields.every(f => NODE_FIELDS_ALLOWED.has(f))
+}
+
 export function makeGraphGet(fetcher: typeof fetch, token: string, sleep?: Sleep) {
   return async function graphGet(path: string, params: GraphParams): Promise<unknown> {
     // 🔴 这里抛出的任何错误（包括 Meta 把令牌原样回显在报错里的情况）都先用「已知令牌」精确抹一遍，
@@ -239,6 +250,9 @@ export function makeGraphGet(fetcher: typeof fetch, token: string, sleep?: Sleep
     try {
       if (!PATH_ALLOWLIST_RE.test(path)) {
         throw new Error(`不允许的 Graph 路径：${path}`)
+      }
+      if (BARE_NODE_RE.test(path) && !nodeFieldsAllowed(params)) {
+        throw new Error(`不允许读取这个节点的这些字段：${path}`)
       }
       // 瞬时故障（网络错误 / 429 / 5xx / Meta 标的瞬时错误）多试一次；永久性错误原样抛出。
       const { status, body } = await retryOnce(

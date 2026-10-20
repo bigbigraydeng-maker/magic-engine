@@ -135,9 +135,24 @@ export function unreadHeadline(label: string, error: string): string {
   return `「${label}」没读到：${error}`
 }
 
-export function waitingHeadline(input: { label: string; hours: number; statusCounts: Readonly<Record<string, number>> }): string {
+export function waitingHeadline(input: {
+  label: string
+  hours: number
+  statusCounts: Readonly<Record<string, number>>
+  /** 系列累计已经花过的钱（旧版本花的）；没有 = null */
+  earlierSpendCents?: number | null
+  currency?: string
+}): string {
   const counts = Object.entries(input.statusCounts).map(([s, n]) => `${statusLabel(s)} ${n}`).join('、')
-  return `「${input.label}」还没花钱（最近一次改动在 ${formatHours(input.hours)} 小时前${counts ? `；广告：${counts}` : ''}）`
+  const earlier = input.earlierSpendCents != null && input.earlierSpendCents > 0 && input.currency
+    ? `；旧版本花过 ${formatCents(input.earlierSpendCents, input.currency)}，现在在投的广告还没花过钱`
+    : ''
+  return `「${input.label}」还没花钱（最近一次改动在 ${formatHours(input.hours)} 小时前${counts ? `；广告：${counts}` : ''}${earlier}）`
+}
+
+export function scheduledHeadline(input: { label: string; hoursToStart: number | null }): string {
+  const when = input.hoursToStart === null ? '' : `（约 ${formatHours(Math.max(0, input.hoursToStart))} 小时后开始）`
+  return `「${input.label}」已排好定时开投${when}，还没到点，不盯`
 }
 
 export function awarenessHeadline(input: { label: string; total: MetricsRow; currency: string }): string {
