@@ -4,7 +4,7 @@ import type { Schedule, ScheduleKind } from '@/lib/marketing-plan/promo/schedule
 import { addDays } from '@/lib/marketing-plan/promo/reconcile'
 import { weekStartOf } from '@/lib/marketing-plan/promo/schedule'
 import { buildScheduleView } from '@/lib/marketing-plan/promo/schedule-view'
-import type { ViewDayLine, ViewWeek } from '@/lib/marketing-plan/promo/schedule-view'
+import type { ViewDayLine, ViewPhase, ViewWeek } from '@/lib/marketing-plan/promo/schedule-view'
 
 export type ScheduleMode = 'preview' | 'approved' | 'sample'
 
@@ -36,8 +36,11 @@ function summaryOf(s: Schedule): string {
 
 function DayRow({ line }: { line: ViewDayLine }) {
   return (
-    <li className={`py-2 flex flex-wrap gap-x-3 gap-y-0.5 ${line.past ? 'opacity-50' : ''}`}>
-      <p className="text-xs text-gray-700">{line.date.slice(5)} {WEEKDAY[line.weekday]}{line.past ? '（已过，是否完成未核对）' : ''}</p>
+    <li className={`py-2 flex flex-wrap gap-x-3 gap-y-0.5 ${line.past ? 'opacity-50' : ''} ${line.isToday ? 'bg-yellow-50 -mx-2 px-2 rounded' : ''}`}>
+      <p className="text-xs text-gray-700">
+        {line.isToday && <span className="mr-1 rounded bg-yellow-200 px-1 text-[11px] font-bold text-yellow-900">今天</span>}
+        {line.date.slice(5)} {WEEKDAY[line.weekday]}{line.past ? '（已过，是否完成未核对）' : ''}
+      </p>
       <p className="text-xs text-gray-900">
         {line.kinds.map(k => <span key={k} className="mr-1">{KIND_META[k].icon}</span>)}
         {line.text}
@@ -46,19 +49,23 @@ function DayRow({ line }: { line: ViewDayLine }) {
   )
 }
 
-function WeekHeading({ week, label }: { week: ViewWeek; label: string | null }) {
+function WeekHeading({ week, label, quietToday }: { week: ViewWeek; label: string | null; quietToday: string | null }) {
   return (
     <p className="px-4 pt-3 text-xs font-semibold text-gray-600">
-      {week.weekStart.slice(5)} 周起{label ? `（${label}）` : ''}
+      {week.weekStart} 周起{label ? `（${label}）` : ''}{quietToday ? ` · 今天 ${quietToday.slice(5)} 没有特别要做的事` : ''}
     </p>
   )
 }
 
 /** 排期表：按周列出每天要做什么。只读，不写任何数据，不派任何待办。 */
-export function ScheduleTable({ schedule, mode, today, phaseNames }: { schedule: Schedule; mode: ScheduleMode; today: string; phaseNames?: Record<string, string> }) {
-  const view = buildScheduleView(schedule, today, phaseNames)
-  const w0 = weekStartOf(today)
+/** adsRunning：页面读到的「Meta 里有没有在跑的广告」。只有确认「没有」时才显示「目前广告没有投」，其它情况一律不写这句。 */
+export function ScheduleTable({ schedule, mode, today, phases, adsRunning = 'unknown' }: {
+  schedule: Schedule; mode: ScheduleMode; today: string; phases?: ViewPhase[]; adsRunning?: 'none' | 'running' | 'unknown'
+}) {
+  const view = buildScheduleView(schedule, today, phases)
+  const w0 = weekStartOf(view.today)
   const next = addDays(w0, 7)
+  const todayHasLine = view.weeks.some(w => w.days.some(d => d.isToday))
   const weekLabel = (weekStart: string): string | null =>
     weekStart === w0 ? '本周' : weekStart === next ? '下周' : null
 
@@ -68,10 +75,13 @@ export function ScheduleTable({ schedule, mode, today, phaseNames }: { schedule:
         <h2 className="text-sm font-bold text-gray-900">排期表 · 每天做什么</h2>
         <p className="text-xs text-gray-500 mt-0.5">{MODE_NOTE[mode]}</p>
         {!schedule.error && <p className="text-xs font-medium text-gray-800 mt-1">{summaryOf(schedule)}</p>}
-        <p className="text-[11px] text-gray-500 mt-0.5">以上是计划原文，未经官网核实，发布前必须核对。</p>
-        <p className="text-[11px] text-gray-500 mt-0.5">这里按具体日期落点，只列落在计划阶段内的日子；每周对账按「每周条数」折算，首尾不足一周的周和短视频的月度条数会和这里差几条。做事以本表逐日为准，对账只看整体进度。</p>
-        {!schedule.error && <p className="text-[11px] text-gray-500 mt-0.5">{view.routine}</p>}
-        {!schedule.error && view.adsNote && <p className="text-[11px] text-gray-500 mt-0.5">{view.adsNote}</p>}
+        {!schedule.error && <p className="text-[11px] text-gray-600 mt-0.5">{view.routine}</p>}
+        {!schedule.error && view.adsNote && adsRunning === 'none' && <p className="text-[11px] text-gray-600 mt-0.5">{view.adsNote}</p>}
+        <details className="mt-1">
+          <summary className="text-[11px] text-gray-500 cursor-pointer">说明（点开看）</summary>
+          <p className="text-[11px] text-gray-500 mt-0.5">以上是计划原文，未经官网核实，发布前必须核对。</p>
+          <p className="text-[11px] text-gray-500 mt-0.5">这里按具体日期落点，只列落在计划阶段内的日子；每周对账按「每周条数」折算，首尾不足一周的周和短视频的月度条数会和这里差几条。做事以本表逐日为准，对账只看整体进度。</p>
+        </details>
       </div>
       {schedule.error && <p className="px-4 py-3 text-sm text-red-700 bg-red-50">{schedule.error}</p>}
       {schedule.too_dense && (
@@ -84,7 +94,7 @@ export function ScheduleTable({ schedule, mode, today, phaseNames }: { schedule:
         <div key={w.weekStart} className="border-t border-gray-100">
           {w.expanded ? (
             <>
-              <WeekHeading week={w} label={weekLabel(w.weekStart)} />
+              <WeekHeading week={w} label={weekLabel(w.weekStart)} quietToday={w.weekStart === w0 && !todayHasLine ? view.today : null} />
               {w.days.length === 0 ? (
                 <p className="px-4 pb-3 pt-1 text-xs text-gray-500">这周没有要特别做的事</p>
               ) : (
