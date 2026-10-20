@@ -35,3 +35,10 @@
 - 依赖顺序：**2990 先**，2999 随后，2998 等 121 的 landing-state 接口。
 - 2990 实现分块（每块一个小 PR，DeepSeek 写、我审）：①迁移（表、触发器、角色、函数、断言，**只写文件不应用，应用须 PM 授权**）；②读取函数与架构测试；③建广告处与自动登记接线；④签字路由与页面；⑤每日对账扫描。
 - 当场试跑：迁移不能在生产应用前试跑，用本地/一次性库验证触发器与权限矩阵；对账扫描用 dry_run。
+
+## 5. 与台账（122 v0.9）的接口对齐（追加）
+- **`creative_checked_at`**：关联行新增列。建行时 = 建行时刻；每日扫描读 Meta、`meta_creative_id` 对上后刷新。只经窄函数 `link_touch_checked_v1` 写（加入角色×函数矩阵，归「对账扫描」角色 `ad_link_stale_rw` 同一写入方，常驻断言覆盖）。台账要求其距今 ≤ 30 小时。
+- **只读函数 `creative_link_has_pending_swap(link_id)`**：返回该关联行此刻有无未了结换创意意图（`swap_pending`/结果未知）。与 `creative_binding_is_valid` 一并 EXECUTE 授给台账函数属主（只读，不授写）。
+- **改写 v0.4 §4 / v0.5 §3 的「核验时实时读 Meta」**：库函数读不了 Meta。改为「**每日扫描读 Meta，台账核 `creative_checked_at ≤ 30 小时`**」；启用闸那一刻的实时读 Meta 仍由应用层（不是库函数）完成。
+- 请求类型→生产者映射（由合同目录定稿）：creative=video_agent、page=website_agent、seo=seo_agent、budget/audience=ad_agent。
+- 「抓全」口径：`complete=true ∧ skipped_shared=false`，不看 `capture_reason`（kernel_pre/kernel_post 轮同样适用）。
