@@ -616,6 +616,31 @@ describe(
       expect(deps.hasRecentOutbound).toHaveBeenCalledWith(CONVERSATION_ID, expect.any(String))
     })
 
+    it('🔴 查询起点用字面量「现在往前整整 6 小时」（不用常量算；窗口改 1 秒或改常量这条会红），并包在 step.run 里', async () => {
+      const T = new Date('2026-10-21T12:00:00.000Z').getTime()
+      vi.useFakeTimers()
+      vi.setSystemTime(T)
+      try {
+        const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => true) })
+        const fn = createConversationInboundDraftFunction(deps)
+        const step = fakeStep([{ ok: true }])
+        await invoke(fn, step)
+        expect(deps.hasRecentOutbound).toHaveBeenCalledWith(CONVERSATION_ID, new Date(T - 6 * 3_600_000).toISOString())
+        expect(step.run).toHaveBeenCalledWith('check-autoack-cooldown', expect.any(Function))
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('🔴 生产实例接了真实的 hasRecentOutbound（删掉接线类型检查可能抓不到）', async () => {
+      const { readFileSync } = await import('node:fs')
+      const { join } = await import('node:path')
+      const source = readFileSync(join(process.cwd(), 'src/lib/inngest/functions/conversation-inbound-draft.ts'), 'utf8')
+      expect(source).toMatch(/import \{ hasRecentOutbound \} from '@\/lib\/messenger\/recent-outbound'/)
+      const prod = source.slice(source.indexOf('export const conversationInboundDraft = '))
+      expect(prod).toMatch(/hasRecentOutbound,/)
+    })
+
     it('最近没有出站（F1 会发安抚）→ 照常等 wait-autoack', async () => {
       const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => false) })
       const fn = createConversationInboundDraftFunction(deps)
