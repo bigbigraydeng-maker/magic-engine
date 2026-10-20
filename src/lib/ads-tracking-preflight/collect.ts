@@ -14,6 +14,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readBudgetFacts } from './budget-reader'
 import { adLandingPathsFromTargets, readCrmFacts } from './crm-reader'
 import { readEnvFacts, type EnvReadDeps } from './env-reader'
 import { readGa4Facts, type Ga4ReadDeps } from './ga4-reader'
@@ -25,6 +26,7 @@ import { buildClientReceipt, type ItemLinks } from './receipt'
 import { retryOnce, type Sleep } from './retry'
 import { sanitizeError } from './sanitize'
 import type {
+  BudgetFacts,
   CrmFacts,
   EnvFacts,
   Ga4Facts,
@@ -52,6 +54,9 @@ export interface CollectDeps {
   sleep?: Sleep
 }
 
+/** 只读 Meta 账户 + 预算门要的最小依赖（批准时现读预算用，不需要 GA4 / 环境检查那几样）。 */
+export type LiveReadDeps = Pick<CollectDeps, 'now' | 'fetcher' | 'supabase' | 'resolveMetaToken' | 'sleep'>
+
 export interface Collected<T> {
   facts: T
   errors: TrackingReadError[]
@@ -78,7 +83,7 @@ export async function collectMetaFacts(
   clientId: string,
   cfg: TrackingClientConfig,
   focusPixelIds: readonly string[],
-  deps: CollectDeps,
+  deps: Pick<CollectDeps, 'now' | 'fetcher' | 'resolveMetaToken' | 'sleep'>,
 ): Promise<Collected<MetaFacts>> {
   const unread = (message: string): Collected<MetaFacts> => ({
     facts: { read: false, as_of: deps.now.toISOString(), account_dataset_ids: [], datasets: [], account: null },
@@ -124,6 +129,34 @@ export async function collectEnvFacts(clientId: string, deps: CollectDeps): Prom
     { supabase: deps.supabase, env: deps.env, capiPreflight: deps.capiPreflight, resolveMetaToken: deps.resolveMetaToken, sleep: deps.sleep },
   )
   return { facts: out.facts, errors: tag('env', out.errors) }
+}
+
+/**
+ * 读预算门要的事实：库里的日预算上限 + Meta 现读的在投日预算合计。
+ * 库和 Meta 各读各的；没有令牌时 Meta 那一半一个请求都不发（库里的上限照读）。
+ */
+export async function collectBudgetFacts(
+  clientId: string,
+  cfg: TrackingClientConfig,
+  deps: LiveReadDeps,
+): Promise<Collected<BudgetFacts>> {
+  let token: string | null = null
+  let tokenError: string | null = null
+  try {
+    token = await retryOnce(() => deps.resolveMetaToken(clientId), { sleep: deps.sleep })
+  } catch (err) {
+    tokenError = `找 Meta 令牌时出错：${sanitizeError(err)}`
+  }
+  const out = await readBudgetFacts({
+    supabase: deps.supabase,
+    clientId,
+    adAccountId: cfg.ad_account_id,
+    token,
+    fetcher: deps.fetcher,
+    now: deps.now,
+    sleep: deps.sleep,
+  })
+  return { facts: out.facts, errors: tag('budget', tokenError === null ? out.errors : [tokenError, ...out.errors]) }
 }
 
 // ─── 红灯直达链接 ───────────────────────────────────────────────────────────
@@ -177,6 +210,7 @@ export interface PreflightAssembly {
   ga4: Collected<Ga4Facts>
   crm: Collected<CrmFacts>
   env: Collected<EnvFacts>
+  budget: Collected<BudgetFacts>
 }
 
 /** 纯函数：把收集到的事实判成十道门，再包成一个客户的回执。 */
@@ -189,6 +223,7 @@ export function assemblePreflightReceipt(a: PreflightAssembly): TrackingClientRe
     ga4: a.ga4.facts,
     crm: a.crm.facts,
     env: a.env.facts,
+    budget: a.budget.facts,
   })
   return buildClientReceipt({
     requestId: a.requestId,
@@ -197,12 +232,12 @@ export function assemblePreflightReceipt(a: PreflightAssembly): TrackingClientRe
     trigger: a.trigger,
     phase: 'preflight',
     gates,
-    readErrors: [...a.landing.errors, ...a.meta.errors, ...a.ga4.errors, ...a.crm.errors, ...a.env.errors],
+    readErrors: [...a.landing.errors, ...a.meta.errors, ...a.ga4.errors, ...a.crm.errors, ...a.env.errors, ...a.budget.errors],
     links: buildItemLinks(a.clientId, a.cfg, { appBase: a.appBase, datasetId: pickDatasetId(a.meta.facts, a.landing.facts) }),
   })
 }
 
-/** 一口气跑完整条链路（顺序：落地页 → Meta → GA4 → CRM → 环境）。 */
+/** 一口气跑完整条链路（顺序：落地页 → Meta → GA4 → CRM → 环境 → 预算）。 */
 export async function runClientPreflight(args: {
   clientId: string
   cfg: TrackingClientConfig
@@ -218,6 +253,7 @@ export async function runClientPreflight(args: {
   const ga4 = await collectGa4Facts(clientId, cfg, deps)
   const crm = await collectCrmFacts(clientId, cfg, deps)
   const env = await collectEnvFacts(clientId, deps)
+  const budget = await collectBudgetFacts(clientId, cfg, deps)
   return assemblePreflightReceipt({
     requestId: args.requestId,
     clientId,
@@ -230,6 +266,7 @@ export async function runClientPreflight(args: {
     ga4,
     crm,
     env,
+    budget,
   })
 }
 

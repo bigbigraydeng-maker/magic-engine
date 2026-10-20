@@ -8,7 +8,7 @@
  *       ③事件 ads.tracking_postlaunch.requested（开投后 T+1h、T+24h 读回；开投时刻只有点开投那一刻才知道）。
  *
  * 一个客户一组步骤，各自 step.run、各自重试（函数级 retries: 2）：
- *   落地页 → Meta 数据集 → GA4 → CRM → 环境 → 判灯 → 发回执事件。
+ *   落地页 → Meta 数据集 → GA4 → CRM → 环境 → 预算 → 判灯 → 发回执事件。
  * 回执（机器可读）写 cron_run_logs.summary，并以事件 ads.tracking_preflight.checked 发出
  * （事件 id = 回执编号，重试时不会重复发）。今日待办（pm-todo/ads-tracking-preflight-items.ts）
  * 与推广计划看板（promo/gates.ts）读的都是这份回执，不自己现算。
@@ -40,6 +40,7 @@ import { getTrackingClientConfig, listTrackingClientIds } from '@/lib/ads-tracki
 import {
   assemblePostLaunchReceipt,
   assemblePreflightReceipt,
+  collectBudgetFacts,
   collectCrmFacts,
   collectEnvFacts,
   collectGa4Facts,
@@ -78,6 +79,7 @@ export interface TrackingCollectors {
   ga4: typeof collectGa4Facts
   crm: typeof collectCrmFacts
   env: typeof collectEnvFacts
+  budget: typeof collectBudgetFacts
   postLaunch: typeof collectPostLaunchFacts
 }
 
@@ -105,6 +107,7 @@ const REAL_COLLECTORS: TrackingCollectors = {
   ga4: collectGa4Facts,
   crm: collectCrmFacts,
   env: collectEnvFacts,
+  budget: collectBudgetFacts,
   postLaunch: collectPostLaunchFacts,
 }
 
@@ -164,11 +167,12 @@ async function preflightOneClient(
   const ga4 = await step.run(`ga4:${clientId}`, () => collect.ga4(clientId, cfg, collectDeps))
   const crm = await step.run(`crm:${clientId}`, () => collect.crm(clientId, cfg, collectDeps))
   const env = await step.run(`env:${clientId}`, () => collect.env(clientId, collectDeps))
+  const budget = await step.run(`budget:${clientId}`, () => collect.budget(clientId, cfg, collectDeps))
 
   return step.run(`judge:${clientId}`, async () =>
     assemblePreflightReceipt({
       requestId: `${runId}:${clientId}`, clientId, cfg, trigger: plan.trigger, appBase: deps.appBase, now,
-      landing, meta, ga4, crm, env,
+      landing, meta, ga4, crm, env, budget,
     }),
   )
 }

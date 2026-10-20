@@ -3,7 +3,7 @@
  */
 
 import type { MarketingPlan, PromoManualCheckRecord } from '../types'
-import { loadPromoFacts } from './facts'
+import { loadPromoFacts, type LoadPromoFactsOptions } from './facts'
 import {
   blockers, evaluateApproval, evaluatePhaseGates, unverified, worstLight,
   type ApprovalVerdict, type GateResult, type Light,
@@ -58,14 +58,14 @@ const EMPTY = (plan: MarketingPlan, has: boolean, issues: PromoValidationIssue[]
   reconcile: null, reviewed_this_window: false, content_changed: false,
 })
 
-export async function buildPromoBoard(plan: MarketingPlan, now: Date = new Date()): Promise<PromoBoard> {
+export async function buildPromoBoard(plan: MarketingPlan, now: Date = new Date(), options: LoadPromoFactsOptions = {}): Promise<PromoBoard> {
   const raw = (plan.plan_data as unknown as { promo?: unknown } | null)?.promo
   if (!hasPromoField(plan.plan_data)) return EMPTY(plan, false, [])
   const parsed = parsePromoSpec(raw)
   if (!parsed.ok) return EMPTY(plan, true, parsed.issues) // 畸形 = 不放行
 
   const spec = parsed.spec
-  const facts = await loadPromoFacts(plan.client_id, spec, manualChecksOf(plan), now)
+  const facts = await loadPromoFacts(plan.client_id, spec, manualChecksOf(plan), now, options)
   const approval = evaluateApproval(spec, facts.gate)
   const next = nextPhaseFrom(spec, facts.today)
   const reconcile = reconcileWeek(spec, facts.today, facts.recon, facts.playbook)
