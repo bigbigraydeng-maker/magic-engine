@@ -11,7 +11,7 @@
 // 同时记录 update/insert 的 payload 与 eq/in 过滤条件 —— 不记过滤条件的话,把
 // `.eq('claimed_by')` / `.in('status', ACTIVE_STATUSES)` 这两道防抢占条件删掉,测试不会报警。
 
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { completeWorkOrder } from './complete-work-order'
 import { resolveRecipe } from './recipe'
@@ -564,7 +564,12 @@ describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
   const savedOutput = (m: ReturnType<typeof mockSupabase>) =>
     m.updates.find((u) => u.table === 'content_work_orders')!.payload.output as Record<string, unknown>
 
+  const savedEnforce = process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE
   beforeEach(() => { delete process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE })
+  afterEach(() => {
+    if (savedEnforce === undefined) delete process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE
+    else process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = savedEnforce
+  })
 
   it('non-remotion orders are untouched by the gate', async () => {
     const { r, m } = await run(WO as Record<string, unknown>)
@@ -616,6 +621,25 @@ describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
     const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY, { deliverable: 'Asset_Only' }), mediaEvidence: CAP as never })
     expect(r).toMatchObject({ ok: false, status: 422 })
     expect((r as { error: string }).error).toMatch(/^content_substance_failed/)
+  })
+
+  it('enforce: a worker self-report of pass cannot override the server verdict', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const lying = { content_substance: { verdict: 'pass', kinds: ['selling_line'], textSeconds: 9, reason: 'x' }, ...CAP }
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY), mediaEvidence: lying as never })
+    expect(r).toMatchObject({ ok: false, status: 422 })
+    expect(m.consumed()).toBe(0)
+  })
+
+  it('enforce: engine=remotion with a missing or malformed brief.remotion is refused, never skipped', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    for (const brief of [{ engine: 'remotion' }, { engine: 'remotion', remotion: [] }, { engine: 'remotion', remotion: { template: 5, props: {} } }, { remotion: 'x' }]) {
+      const m = mockSupabase([])
+      const r = await completeWorkOrder(m.db, { ...PARAMS, wo: { ...WO, brief } as Record<string, unknown>, mediaEvidence: CAP as never })
+      expect(r).toMatchObject({ ok: false, status: 422 })
+      expect((r as { error: string }).error).toMatch(/^content_substance_failed/)
+    }
   })
 
   it('a worker that reports pass while the server computes fail is flagged as a mismatch', async () => {

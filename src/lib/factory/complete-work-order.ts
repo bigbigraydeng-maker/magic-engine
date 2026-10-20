@@ -316,7 +316,7 @@ export async function completeWorkOrder(
           // Server recompute is the verdict; the worker's report is audit only.
           content_substance: {
             server: substance.server
-              ? { verdict: substance.server.verdict, kinds: substance.server.kinds, textSeconds: substance.server.textSeconds, reason: substance.server.reason }
+              ? { verdict: substance.server.verdict, kinds: substance.server.kinds, textSeconds: substance.server.textSeconds, reason: substance.server.reason.slice(0, 500) }
               : null,
             reported: substance.reported,
             capable: substance.capable,

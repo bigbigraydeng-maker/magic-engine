@@ -530,9 +530,24 @@ export function assessRemotionContentSubstance(
   brief: unknown,
   evidence: { content_substance?: RemotionSubstanceAssessment['reported']; capabilities?: string[] } | null | undefined,
 ): RemotionSubstanceAssessment {
-  const remotion = asRec(asRec(brief)?.remotion)
-  if (!remotion || typeof remotion.template !== 'string' || asRec(remotion.props) === null) {
+  const briefRec = asRec(brief)
+  const remotion = asRec(briefRec?.remotion)
+  const claimsRemotion = briefRec?.engine === 'remotion' || (briefRec !== null && briefRec.remotion !== undefined && briefRec.remotion !== null)
+  if (!claimsRemotion) {
     return { applicable: false, assetOnly: false, server: null, reported: null, capable: false, mismatch: false }
+  }
+  const reportedEarly = evidence?.content_substance ?? null
+  const capableEarly = Array.isArray(evidence?.capabilities) && evidence.capabilities.includes(CONTENT_SUBSTANCE_CAPABILITY)
+  if (!remotion || typeof remotion.template !== 'string' || asRec(remotion.props) === null) {
+    // A remotion order whose brief.remotion is missing or malformed must never skip the gate.
+    return {
+      applicable: true,
+      assetOnly: false,
+      server: { verdict: 'fail', kinds: [], textSeconds: 0, reason: '工单的 brief.remotion 缺失或畸形，内容闸不放行', texts: [] },
+      reported: reportedEarly,
+      capable: capableEarly,
+      mismatch: false,
+    }
   }
   const assetOnly = remotion.deliverable === 'asset_only'
   const server = contentSubstanceOf(remotion.template, remotion.props)
