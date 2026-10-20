@@ -1,80 +1,97 @@
-# Instagram 原生发布（Reel）设计说明 — 待复审
+# Instagram 原生发布（Reel）设计说明 v2 — 待第二轮复审
 
 权威任务说明：本文件。写入者：本 Claude Code 会话（分支 `claude/codex-social-media-handoff-a3b7bb-x9mowj`）。状态：**设计阶段，未写代码，未碰任何真实账号。**
+修订记录：v1 经子牙（架构）+ 魏征（挑刺）复审，两人一致结论「不能开工」；本版吸收全部阻塞项，范围收窄为第一期。
 
 ## 判定与优先级
-- **Tier**：L3 Connector（发布适配器），挂在既有「社媒」支柱和 `PublishAdapter` 契约下；不新增能力线，不登记候选。
+- **Tier**：L3 Connector（发布适配器），挂在既有「社媒」支柱下；不新增能力线，不登记候选。
 - **风险级别**：A（对外发布、不可撤销、OAuth 权限升级）。
-- **§11**：频率 高（每条社媒内容都要经发布）/ IMPACT 高（Act 段缺口，目前 Instagram 无任何发布路径）/ 收入 中 → 无低项、两项高 → P0。
-- **IMPACT 位置**：Act（发布）；回执进入 Check（T+N 监控）沿用现有 `reel.published` 事件，不新建学习层。
+- **§11**：频率 高 / IMPACT 高（Act 段缺口）/ 收入 中 → 无低项、两项高 → P0。
+- **IMPACT 位置**：Act。第一期**不接 Check（效果监测）**，见下「第一期的已知缺口」。
 
 ## 目标 / 验收 / 不做
-- 目标：已授权的 Instagram 专业账号，能通过 ME 视频工厂的发布工单发出 Reel，回执与 Facebook Reel 同等（幂等、可对账、事件）。
-- 验收：①`draft=true` 能创建并校验媒体容器、不公开；②获授权后能把同一容器发布并写回执（media id、permalink、`video_state`）；③任一步失败不伪造成功、不双发；④未授权/未开开关/权限不足时 fail-closed；⑤既有 Facebook 发布行为与测试不变。
-- 不做（本轮）：Stories/轮播/图文、评论与首评、私信、Threads/X、多账号选择器、给其他客户开通、广告投放。
+- 目标：已授权的 Instagram 专业账号，经视频工厂工单，由 PM 逐条点击授权后发出 Reel。
+- 验收：①工单到「容器就绪（未公开）」不会公开；②只有 PM 点击授权才会 `media_publish`；③任一步失败不伪造成功、不双发、不卡死无人知；④开关关闭、权限不足、账号对不上 → fail-closed；⑤既有 Facebook 发布行为与测试不变。
+- 不做（第一期）：效果监测事件、Stories/轮播/图文、评论与首评、私信、Threads/X、同客户同时发 Facebook+Instagram、给其他客户开通、定时直发。
+
+## 复审后确认的事实（均有文件行号，来自两份复审）
+- 转公开（promote）整套写死 Facebook：`guards.ts:110`、`resume.ts:56,282`、`context.ts:28-35,181-193`、`meta-port.ts:37-45`；且 `promote/boundary.test.ts:17` 禁止该目录 import 名含 instagram 的模块。
+- promote 假定 `video_id` 在草稿→公开前后不变（`publish-steps.ts:281-282,336-340`、`guards.ts:183-186`）。Instagram 容器 id ≠ 发布后 media id。
+- 工单到 `published/DRAFT` 后无任何路径重建（`claimOne` 只领 approved/publish_failed，`publish-worker.ts:38-47`）。
+- worker 对账只调 `findExisting(target, tag)`，无按容器 id 对账钩子（`publish-worker.ts:229-246`）；`onStarted` 不检查写库错误（`:291-297`）。
+- `reel.published` 事件、补发、测量对非 Facebook 静默跳过（`publish-worker.ts:428,473`、`reel-published-event.ts:56`、`factory-reel-measurement-adapter.ts:96`）。
+- cron 直发的唯一闸是全局 `FACTORY_PUBLISH_LIVE`（`cron/factory-publish-worker/route.ts:24`），不分客户/平台。
+- 设置页与配置投影只认 `facebook`+`page_id`（`client-config.ts:29,126,226-234`）。
+- 权限读回校验用的是常量 `INSTAGRAM_SCOPES`（`social-onboarding.ts:137,142`、`client.ts:73,107`），打开发布权限后旧只读连接仍会显示「已保存」。
+- TikTok 取令牌不按账号取、无并发保护（`tiktok/token.ts:21-29,59-71`）。
 
 ## 复用声明（Reuse Statement 草稿）
-- 复用：`PublishAdapter` 契约与 `publish-worker`（状态机、三落库、红线闸 `scanPublishCaption`、幂等锚 `onStarted`）；`promote` 受控转公开动作的授权与租约；`platform-oauth/connection-store` 加密连接表；`instagram-oauth` 授权与读回校验；`reel.published` 事件。
-- 新增（platform-shared，provider 逻辑封在 adapter 内）：`instagram-reel-adapter.ts`、Instagram 令牌按需续期。
-- 行业专属：无。客户专属：无（客户只通过 `publish_target` 配置与连接记录注入）。
-- 不把客户名/ID 写进共享代码；换成 CTS 或地产客户，adapter 无需改动。
+- 复用：`publish-worker` 状态机与红线闸；`promote` 的授权/租约/回读/所批即所发框架（**改造为按平台分发，不复制第二套**）；`connection-store`；`instagram-oauth` 授权。
+- 新增 platform-shared：promote 平台端口（接口）、`instagram-reel-adapter`、Instagram 令牌取用。行业专属：无。客户专属：无（只经 `publish_target` 配置与连接记录注入）。
+- 换成 CTS 或地产客户，共享代码无需改动。**已知限制**：一个客户只有一个 `publish_target`，切到 Instagram 会停掉该客户的 Facebook 发布（Celine 的 Facebook 本就在等公司认证，可接受）。
 
-## 现状事实（已核对代码）
-- `PublishAdapter`/`PublishTarget`/`PublishedRef` 的 `platform` 现在类型写死 `'facebook'`（`src/lib/factory/types.ts`），`publish-worker.ts` 的 `ADAPTERS` 与 `resolveTarget` 只认 facebook。
-- Instagram 授权现为只读资料：`INSTAGRAM_SCOPES = ['instagram_business_basic']`，且默认关闭（`INSTAGRAM_LOGIN_ENABLED`）。令牌为长期令牌，目前无续期。
-- 旧的第三方跟发路径已在 2026-10 删除，无可复用的旧 Instagram 发布代码。
-- Facebook 的「草稿 → 受控转公开」靠平台原生 `DRAFT` 状态；Instagram Reel 没有同款草稿状态。
+## 设计（第一期）
 
-## 设计
+### 1. 协议（编码前必须对照官方文档实读核实；实读属外网读取，需 PM 授权）
+Instagram API with Instagram Login，`graph.instagram.com`：建容器（`media_type=REELS`、`video_url`、`caption`）→ 轮询容器状态 → `media_publish`。需要 `instagram_business_content_publish`；容器约 24h 过期；有每日发布上限。以下**待官方文档核实**，设计不依赖记忆：容器状态取值与是否返回 media id、`media_publish` 超时后的可对账方式、caption 不可变、长期令牌续期规则与最短间隔、发布条数预检端点。
 
-### 1. 协议（**编码前必须对照官方文档实读核实**；实读属外网读取，需你授权）
-Instagram API with Instagram Login 内容发布，主机 `graph.instagram.com`：
-1. `POST /{ig-user-id}/media`（`media_type=REELS`、`video_url`、`caption`）→ 返回容器 id。`video_url` 由 Instagram 自己去拉（沿用「ME 不下载」）。
-2. 轮询 `GET /{container-id}?fields=status_code` 直到 `FINISHED`（`ERROR`/`EXPIRED` 即失败）。
-3. `POST /{ig-user-id}/media_publish`（`creation_id=容器 id`）→ media id。再 `GET /{media-id}?fields=permalink` 取链接（尽力，失败不阻塞）。
-需要权限 `instagram_business_content_publish`；容器约 24 小时过期；账号有每日发布条数上限。以上细节都以官方文档为准，设计不依赖我的记忆。
+### 2. 流程：容器就绪 → PM 授权发布（不开放 cron 直发）
+1. worker 处理 Instagram 工单：红线闸照常 → 建容器 → 轮询。**轮询在 cron 预算内做完；未完成则存 `pending` 并下一轮用容器 id 接着查**，不进「人工核对」终态。容器就绪后工单进入「草稿（容器就绪、未公开）」，`published_ref` 记 `container_id`、`container_expires_at`、`caption_sha256`。
+2. 发布只经 PM 点击的受控动作（沿用 promote 的授权、租约、栅栏）：重查开关与账号 → 确认容器仍就绪 → `media_publish` → 取 media id 与 permalink → **用 `media_id` 覆盖工单与流量记录的 `video_id`/`post_id`，`container_id` 另存作审计**。
+3. **Instagram 永不走 cron 直发**（`draft=false` 在 Instagram 平台上被拒绝）。这样 `FACTORY_PUBLISH_LIVE` 误开不会误发 Instagram。
 
-### 2. 草稿与发布的对应（关键设计点）
-- `draft=true`：只做第 1、2 步（容器建好并 `FINISHED`），**不调用 `media_publish`**。把容器 id 作为 `video_id` 通过 `onStarted` 落库当幂等锚；回执 `video_state='DRAFT'`。
-- 受控转公开：沿用 `promote` 的授权/租约/回读流程，新增 Instagram 版 `meta.promote(target, containerId)` = 再确认容器仍 `FINISHED` → `media_publish`。**容器过期或状态异常 → fail-closed**，提示「草稿已过期，请重新预览」，不自动重建后直接公开。
-- 直接发布（`draft=false`）：同一 adapter 内顺序 1→2→3，仍由 worker 的授权闸放行。
+### 3. promote 改成平台端口（不复制）
+- 抽出 `PromotePlatformPort`：`checkTarget`、`readView`、`promote`、`ensureFirstComment?`（可选）、`idsAfterPromote`。Facebook 实现 = 现有代码原样搬入，行为与测试不变；Instagram 实现新增。
+- `readView` 对 Instagram：容器读不到 caption，**所批即所发改由「建容器时存 `caption_sha256` + 容器不可变」担保**，转公开前用库里工单文案重算比对；`from/page` 归属改为核对 `/me.user_id` 与连接记录。
+- `boundary.test.ts` 同步调整：允许 `promote/` 通过端口按平台选择实现，但 Instagram 模块只能被端口注册处引用，不得被其他目录直接 import。
+- `finishStage` 不再无条件补首评：Instagram 无首评，端口声明即跳过，不产生 `first_comment_pending`/`needs_attention`；不写 `ig_crosspost_blocked`（该字段仅指「Facebook 转公开后禁止跟发」，与本功能无关）。
 
-### 3. 幂等与防双发
-- 主锚：容器 id（`onStarted` 在创建后立即落库）。重试时先查容器状态：`PUBLISHED` → 补记回执，不再发布；`FINISHED` 且未发布 → 可继续；其余 → 终止并推人工核对。`media_publish` 对同一容器重复调用会被平台拒绝，作为第二道保险。
-- 副锚：把 `encodeIdemTag` 零宽标记放 caption，`findExisting` 扫最近 25 条媒体。**风险：Instagram 可能剥掉零宽字符**，所以它只当辅助，不能是唯一防线（需在草稿阶段实测，不是通过发布实测）。
-- 防误发：`publish_target` 增加 `platform:'instagram'` 与 `ig_user_id`；发布前用令牌读 `/me` 的 `user_id` 与 `username`，必须同时匹配连接记录和品牌，不符不发（对应 Facebook 的页名断言）。
+### 4. 幂等、对账与过期（补管道断头）
+- `onStarted` 必须检查写库错误，失败即抛出并**不再继续调用 `media_publish`**；同时修 Facebook 路径同一漏洞（外科手术式，属同一函数）。
+- `PublishAdapter` 加可选 `reconcile({ target, priorRef })`，worker 对 provisional 工单优先调用：容器 `PUBLISHED` → 补记 media id；`FINISHED` 未发布 → 回到「容器就绪」；处理中 → 保持 pending；`ERROR/EXPIRED` → 终止并出人工任务。
+- **不在 Instagram caption 里放零宽标记**（会污染公开文案，且被红线扫描的文本与实际发出的不是同一串）。主锚 = 容器 id。「发布成功但响应丢失」无法自动认领时，**不静默**：终态必须同时下发人工任务（what: 这条 Reel 可能已发出，影响: 可能重复；how: 打开账号核对并在工单上标记；href: 工单页与 Instagram 主页）。
+- 容器过期：`container_expires_at` 前 4 小时用现有「今日待办·需要你动手」管道（`pm-todo/manual-items.ts`）提醒；过期后工单显示「草稿已过期」并提供**重新生成**动作（把工单退回 `approved`、换新幂等序号），不是死胡同。
 
-### 4. 授权与令牌
-- 新增权限只在 `INSTAGRAM_PUBLISH_ENABLED=true`（新开关，默认关）时申请；未开则维持只读，现有连接不受影响。已有只读授权在开关打开后会因缺权限显示「需要重新授权」（读回校验已覆盖），Celine 需重新授权一次。
-- 过期行为：长期令牌约 60 天；采用**使用时续期**（仿 TikTok `getValidTikTokToken`：快到期且满足平台最短间隔时续期并写回，写回新到期时间），不新增定时任务。久未发布导致整条失效 → 面板已按「Instagram 到期要重新授权」处理。续期接口细节同样以官方文档为准。
-- 令牌读取只走服务端加密连接表，不日志、不入回执、不入错误文案（沿用 `instagram-oauth/client.ts` 的「绝不记录请求/响应」规则）。
+### 5. 目标配置与账号绑定
+- `publish_target` 增 `platform:'instagram'`，**不存 `ig_user_id`**；账号以连接表 `account_id` 为唯一来源，发布前用令牌读 `/me`，`user_id` 必须等于该连接的 `account_id`，用户名只作辅助显示。
+- 同客户存在多条 active Instagram 连接 → 直接拒绝（与面板 `ambiguous` 一致）。`expect_brand` 与 `/me` 任一缺失 → 拒绝（不沿用 Facebook 「缺了就放行」的行为）。
+- 设置页（`client-config.ts` 与 `FactoryConfigPanel.tsx`）一并支持 `instagram`，不要求 FDE 直写库。
 
-### 5. 接线改动清单（外科手术式）
-- `types.ts`：`platform` 放宽为 `'facebook' | 'instagram'`；`PublishTarget` 加 `ig_user_id?`；`PublishedRef` 沿用字段，不加平台私有字段。
-- `publish-worker.ts`：`ADAPTERS` 注册；`resolveTarget` 放行 instagram；Instagram 无首评，`ensureFirstComment` 不实现（契约里已是可选）。
-- `identity.ts`：新增 `INSTAGRAM_PUBLISH_SCOPES`；connect 路由按开关选择权限集；面板与 `INSTAGRAM_OUTCOMES` 文案从「尚不支持发布」改为按开关显示。
-- 新文件：`instagram-reel-adapter.ts`（+测试）、`instagram-oauth/token.ts`（使用时续期，+测试）。
-- 不新增表、迁移（`instagram` provider 已在 CHECK 里）、依赖、cron。
+### 6. 授权与令牌
+- 新开关 `INSTAGRAM_PUBLISH_ENABLED`（默认关）。**每次发布与每次授权都重查**，关闭即全部拒绝（含已有带发布权限的连接）。
+- `INSTAGRAM_PUBLISH_SCOPES`：connect 路由按开关选权限集；`assessGrant`/`client.ts` 的 `requiredScopes` 按开关取值，使旧只读连接在开关打开后显示「需要重新授权」；`INSTAGRAM_OUTCOMES.connected` 文案按开关区分；`scope-change-gate.test.ts` 与 `connection-health.ts`（「无刷新调用方」口径）同步更新。
+- Celine 重新授权下发成人工任务（what/how/href 三件套），不只写在文档里。
+- 令牌取用：**按 `account_id` 取**；续期用 `token_expiry` 乐观锁（`UPDATE … WHERE token_expiry=<读到的值>`），写库失败必须报错不静默；续期放在发布步骤开头，不在 `media_publish` 前后同一次调用里再续；续期规则待官方文档核实。错误文案一律经 `sanitizeFailReason`，并核实 Instagram 令牌形态被覆盖，cron 的 `finish({error})` 也要脱敏。
 
-### 6. Inngest / 回执
-- 沿用 `publish-worker` 现有路径：发布成功后 `reel.published` 事件与 `event_ids` 回写，补发对账任务不变。
-- 每个阶段的机器可读回执：工单 id、client id、容器 id/media id、`video_state`、授权状态、`created_at`；没有授权事件与平台回执，不得显示完成。未使用 Inngest 的新增面：无（无新的跨步骤异步）。
+### 7. 视频只走工厂的结构性保证
+`instagram-reel-adapter` 只导出给 worker 与 promote 端口，边界测试禁止其他目录 import；adapter 内不做任何生成。发布前对视频 URL 做规格预检（比例/时长上限，待官方文档核实具体数值），不合格不建容器。
+
+### 8. 回执与可见性
+- 第一期机器可读回执（存 `published_ref`）：`platform`、`container_id`、`media_id`（发布后）、`container_expires_at`、`caption_sha256`、`video_state`、`promote_request_id`、`created_at`；授权事件沿用 promote 的授权记录。
+- 展示：`publish-display.ts` 放行 Instagram 域名的 permalink；工厂页状态文案按平台区分（`statusMeta.ts`、`page-text.ts`）；`creative-pool-labels.ts`、`ads/creative-link.ts` 对非 Facebook 的 `post_id` 不再拼 `facebook.com`。
+- **效果监测第一期不做，但不静默**：`published_ref` 记 `event_skipped_reason:'instagram_measurement_not_built'`，工厂页显示「暂无效果监测」，并开台账卡（`verify_by` = 第二期开工日）。
+
+### 9. 第一期的已知缺口（诚实声明）
+- 没有 Check 段：Instagram Reel 发出后系统不会自动追踪效果，IMPACT 闭环在 Act 后暂断。第二期补：`reel.published` 事件放宽平台、Instagram 指标读取、测量适配器。
+- Instagram 容器在 App 里看不到画面，「草稿」只验证转码与格式，**不能代替人工看片**：PM 授权前仍以工厂预览成片为准。
+- Instagram 正文链接不可点：首评 CTA 与追踪链接这一产品选择第一期不做，caption 用不带链接的结尾文案；`publish-worker.ts:215-219` 对首评 CTA 的强制要求对 Instagram 跳过。是否改用「主页链接」等做法留给 PM 后续决定。
+- 并发上限预检、同视频 Facebook 跟发造成的重复内容（`ig_crosspost_blocked` 的历史背景）：本期只做文档提示。
 
 ## 验证计划
-- 单测（全部用平台替身）：创建→轮询→发布的成功路径；容器 `ERROR`/`EXPIRED`；轮询超时；`media_publish` 失败后重试不双发；容器已 `PUBLISHED` 的对账；账号/品牌不符拦截；令牌续期与写回；开关关闭/权限缺失 fail-closed；Facebook 既有测试全绿。
-- 变异探针（A 级冻结后跑一次）：去掉账号匹配、去掉授权闸、去掉容器状态检查，各应让对应测试失败。
-- **当场试跑**：沿用「不外发」原则——只对 Celine 自己的测试授权跑 `draft=true`（建容器、不公开），记录触发方式、时间、输出摘要；**绝不在试跑里发正式帖**。真发由你另行授权。需要你先完成 Meta 后台与 Render 配置（见下）。
+- 单测（平台替身）：建容器→轮询→就绪；轮询超时→pending→下轮接续；`ERROR/EXPIRED`；`onStarted` 写库失败不再前进；发布后 media id 覆盖 `video_id` 且监测/事件不读容器 id；响应丢失→人工任务；同客户两条连接拒绝；`/me` 对不上拒绝；`expect_brand` 缺失拒绝；开关关闭拒绝（含已有连接）；`FACTORY_PUBLISH_LIVE=true` 时 Instagram 工单不被直发；旧只读连接在开关打开后显示需重授权；实际发出文本与被红线扫描文本一致；Facebook 既有 promote/worker 测试全绿；边界测试与 scope-change-gate 同步通过。
+- 变异探针（A 级冻结后跑一次）：去掉账号匹配、去掉开关重查、去掉容器就绪检查、去掉 `onStarted` 错误检查、去掉 media id 覆盖，各应令对应测试失败。
+- **当场试跑**：只对 Celine 测试授权跑「建容器到就绪」，**不点发布**；记录触发方式、时间、输出摘要。真发由 PM 另行逐条授权。能验证：授权、容器创建、转码状态；不能验证：画面内容与真实发布后的行为。
 
 ## 你需要做的（云端做不了）
-1. 把 `platform_oauth_add_instagram` 迁移应用到生产库（生产写入，需你明确授权）。
-2. Meta 后台：独立 Instagram 产品；登记回调 `<站点>/api/auth/instagram/callback`；给 Celine 的账号测试资格（企业/创作者账号 + 应用测试用户）；开启 `instagram_business_content_publish`。
-3. Render 环境变量：`INSTAGRAM_APP_ID`、`INSTAGRAM_APP_SECRET`、`INSTAGRAM_LOGIN_ENABLED=true`、`INSTAGRAM_PUBLISH_ENABLED=true`、正式 https 的 `NEXT_PUBLIC_APP_URL`。
-4. 对其他客户使用：开发模式只对应用角色里的账号有效，需走 Meta 应用审核（单独的工作，不在本轮）。
+1. 授权我对照官方文档实读上述待核实项（外网读取）。
+2. 把 `platform_oauth_add_instagram` 迁移应用到生产库（生产写入，需明确授权）。
+3. Meta 后台：独立 Instagram 产品；登记回调；Celine 账号测试资格（企业/创作者账号 + 应用测试用户）；开启 `instagram_business_content_publish`。
+4. Render 环境变量：`INSTAGRAM_APP_ID`、`INSTAGRAM_APP_SECRET`、`INSTAGRAM_LOGIN_ENABLED`、`INSTAGRAM_PUBLISH_ENABLED`、正式 https `NEXT_PUBLIC_APP_URL`。
+5. 其他客户使用：开发模式只对应用角色账号有效，需走 Meta 应用审核（单独工作，不在本轮）。
 
 ## 复审安排
-- 设计复审：子牙（架构）+ 魏征（挑刺）；涉及授权与不可逆外发，实施后补狄仁杰（攻击验证）。面向 C 端客户暂不涉及。
-- 复审重点：①草稿/转公开语义是否安全；②幂等是否可能双发；③权限升级对现有连接的影响；④令牌续期的并发与写回。
+- v2 设计送第二轮：子牙 + 魏征（不带结论，只给文档与代码）；涉及授权与不可逆外发，实施后补狄仁杰。
+- 重点：promote 平台端口是否真的保住 Facebook 行为；容器过期与响应丢失的人工任务是否闭环；开关与授权闸是否可被绕过。
 
-## 待决定（技术项我自拍，业务项抛给你）
-- 技术（自拍）：使用时续期 vs 定时续期 → 选前者；零宽标记只作辅助。
-- 业务（需你）：①是否先只做草稿（容器预览）验证，再另行授权真发；②Celine 重新授权的时间窗口。
+## 第二期（本文不承诺时间）
+`reel.published` 事件与测量适配器放宽到 Instagram；指标读取；并发上限预检；首评/CTA 产品决定；多客户审核路径。
