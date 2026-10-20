@@ -41,7 +41,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     const [board, options, liveAds] = await Promise.all([
       buildPromoBoard(plan),
       plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
-      // 只在计划还没批准、且是内部账号（管理员/FDE）时才读：账户编号、标签、花费是内部口径，付费客户账号不给。
+      // 只在计划还没批准、且是管理员账号时才读（FDE 按付费客户处理，不返回）：账户编号、标签、花费是内部口径，付费客户账号不给。
       // 数据来自快照表（每 6 小时抓一次）和日花费表（次日才到），读不到时回 ok:false。
       plan.status === 'draft' && access.tier === 'admin' ? loadLiveAds(ctx.params.id) : Promise.resolve(null),
     ])

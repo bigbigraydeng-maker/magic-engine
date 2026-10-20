@@ -30,8 +30,8 @@ export type LiveAdsFact =
       by_account: LiveAdsAccount[]
       currency: string | null
       as_of: string | null
-      /** 最近一次广告快照抓取距今天数；读不到 = null */
-      snapshot_age_days: number | null
+      /** 最近一次「完整」广告快照抓取距今小时数；读不到 = null */
+      snapshot_age_hours: number | null
     }
   | { ok: false; reason: string }
 
@@ -42,12 +42,14 @@ const MONEY_PREFIX: Record<string, string> = { NZD: 'NZ$', AUD: 'A$', USD: 'US$'
 const nameOf = (a: LiveAdsAccount): string => a.label ?? a.ad_account_id
 const REFRESH_NOTE = '（页面数据每 6 小时更新一次，以 Meta 为准）'
 /** 快照抓取停摆多久算「没更新」：每 6 小时抓一次，超过 2 天一定是出问题了 */
-export const SNAPSHOT_STALE_DAYS = 2
+export const SNAPSHOT_STALE_HOURS = 48
+/** 「确认没有在跑的广告」要求快照新到什么程度：抓取每 6 小时一次，留 2 小时余量 */
+export const SNAPSHOT_FRESH_HOURS = 8
 
 function redSentence(spending: LiveAdsAccount[], currency: string | null): string {
   const prefix = currency ? (MONEY_PREFIX[currency] ?? `${currency} `) : ''
   const items = spending.map(a => `${nameOf(a)} 近 2 天已花 ${prefix}${a.spend_2d.toFixed(2)}（${a.live_adsets} 个广告组开着）`)
-  return `⚠️ 这是手动开的广告，ME 里没有它的批准记录：${items.join('；')}。要么补走批准流程，要么到 Meta 暂停。${REFRESH_NOTE}`
+  return `⚠️ ME 里没有这些广告的批准记录，但 Meta 里它们在花钱：${items.join('；')}。要么补走批准流程，要么到 Meta 暂停。${REFRESH_NOTE}`
 }
 
 function amberSentence(unknown: LiveAdsAccount[]): string {
@@ -71,9 +73,9 @@ function greySentences(fact: Extract<LiveAdsFact, { ok: true }>): string[] {
 export function describeLiveAds(fact: LiveAdsFact | null): LiveAdsMessage | null {
   if (!fact || !fact.ok) return null
   if (fact.live_adsets <= 0) {
-    const age = fact.snapshot_age_days
-    return age !== null && age >= SNAPSHOT_STALE_DAYS
-      ? { level: 'grey', text: `广告快照已 ${age} 天没更新，没法判断 Meta 里有没有在跑的广告，请到 Meta 核对。` }
+    const age = fact.snapshot_age_hours
+    return age !== null && age >= SNAPSHOT_STALE_HOURS
+      ? { level: 'grey', text: `广告快照已 ${Math.floor(age / 24)} 天没更新，没法判断 Meta 里有没有在跑的广告，请到 Meta 核对。` }
       : null
   }
   const spending = fact.by_account.filter(a => a.state === 'spending')
@@ -85,4 +87,14 @@ export function describeLiveAds(fact: LiveAdsFact | null): LiveAdsMessage | null
   if (parts.length === 0) return null
   const level: LiveAdsLevel = spending.length > 0 ? 'red' : unknown.length > 0 ? 'amber' : 'grey'
   return { level, text: parts.join(' ') }
+}
+
+/**
+ * 排期表头那句「目前广告没有投」只在确认没有在跑的广告时才写：
+ * 读不到 / 非内部账号（传 null）/ 快照不够新 → unknown（不写）。快照每 6 小时抓一次，所以新鲜度只给 8 小时。
+ */
+export function adsRunningFrom(fact: LiveAdsFact | null): 'none' | 'running' | 'unknown' {
+  if (!fact || !fact.ok) return 'unknown'
+  if (fact.live_adsets > 0) return 'running'
+  return fact.snapshot_age_hours !== null && fact.snapshot_age_hours < SNAPSHOT_FRESH_HOURS ? 'none' : 'unknown'
 }

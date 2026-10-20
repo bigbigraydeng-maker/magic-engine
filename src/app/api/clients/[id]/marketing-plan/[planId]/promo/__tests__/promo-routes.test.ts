@@ -143,7 +143,7 @@ describe('PUT promo — 保存时服务端校验', () => {
 })
 
 describe('GET promo — 在跑广告提示只给内部账号', () => {
-  beforeEach(() => { m.liveAds.mockResolvedValue({ ok: true, live_adsets: 1, spending_adsets: 1, by_account: [], currency: 'NZD', as_of: null, snapshot_age_days: 0 }) })
+  beforeEach(() => { m.liveAds.mockResolvedValue({ ok: true, live_adsets: 1, spending_adsets: 1, by_account: [], currency: 'NZD', as_of: null, snapshot_age_hours: 0 }) })
   it('内部账号（admin）：草稿计划返回 live_ads', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()

@@ -21,7 +21,7 @@ export interface LiveAdsInput {
   /** 每个账户的状态码 / 币种（账户级快照） */
   accountFacts?: Record<string, AccountFact>
   today: string // YYYY-MM-DD（调用方给）
-  snapshotAgeDays?: number | null
+  snapshotAgeHours?: number | null
 }
 
 export function dayMinus(day: string, n: number): string {
@@ -65,7 +65,7 @@ export function summarizeLiveAds(input: LiveAdsInput): LiveAdsFact {
     by_account: accounts,
     currency,
     as_of,
-    snapshot_age_days: input.snapshotAgeDays ?? null,
+    snapshot_age_hours: input.snapshotAgeHours ?? null,
   }
 }
 
@@ -141,14 +141,17 @@ async function loadAccountFacts(clientId: string, accounts: string[]): Promise<R
   return out
 }
 
-/** 最近一次广告快照抓取距今天数；读不到 = null。快照表最近 2 天一行都没有时，靠它区分「真没有」和「抓取停摆」。 */
-async function loadSnapshotAgeDays(clientId: string, accounts: string[], now: Date): Promise<number | null> {
+/**
+ * 最近一次「完整」广告快照抓取距今小时数；读不到 = null。靠它区分「真没有在跑」和「抓取停摆」。
+ * 🔴 必须只认 complete=true：Meta 授权失效时抓取每 6 小时照样写一行 complete=false，不筛的话记录永远是「新」的，停摆就检测不出来。
+ */
+async function loadSnapshotAgeHours(clientId: string, accounts: string[], now: Date): Promise<number | null> {
   const { data, error } = await supabaseAdmin.from('ad_snapshot_captures').select('captured_at')
-    .eq('client_id', clientId).in('ad_account_id', accounts).eq('level', 'adset')
+    .eq('client_id', clientId).in('ad_account_id', accounts).eq('level', 'adset').eq('complete', true)
     .order('captured_at', { ascending: false }).limit(1)
   const at = (data as { captured_at: string }[] | null)?.[0]?.captured_at
   if (error || !at) return null
-  return Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 86_400_000))
+  return Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 3_600_000))
 }
 
 export async function loadLiveAds(clientId: string, now: Date = new Date()): Promise<LiveAdsFact> {
@@ -160,10 +163,10 @@ export async function loadLiveAds(clientId: string, now: Date = new Date()): Pro
     const adsets = await loadAdsets(clientId, bound.ids, new Date(now.getTime() - 2 * 86_400_000).toISOString())
     const accountInsights = await loadAccountInsights(clientId, bound.ids, today)
     if (adsets === null || accountInsights === null) return FAIL
-    const [accountFacts, snapshotAgeDays] = await Promise.all([
-      loadAccountFacts(clientId, bound.ids), loadSnapshotAgeDays(clientId, bound.ids, now),
+    const [accountFacts, snapshotAgeHours] = await Promise.all([
+      loadAccountFacts(clientId, bound.ids), loadSnapshotAgeHours(clientId, bound.ids, now),
     ])
-    return summarizeLiveAds({ adsets, accountLabels: bound.labels, accountInsights, accountFacts, today, snapshotAgeDays })
+    return summarizeLiveAds({ adsets, accountLabels: bound.labels, accountInsights, accountFacts, today, snapshotAgeHours })
   } catch {
     return FAIL
   }
