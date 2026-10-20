@@ -43,7 +43,7 @@ import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { TRACKING_PREFLIGHT_JOB } from '@/lib/ads-tracking-preflight/receipt'
 import type { Collected } from '@/lib/ads-tracking-preflight/collect'
 import type {
-  CrmFacts, EnvFacts, Ga4Facts, LandingFacts, MetaFacts, PostLaunchFacts,
+  BudgetFacts, CrmFacts, EnvFacts, Ga4Facts, LandingFacts, MetaFacts, PostLaunchFacts,
   TrackingClientConfig, TrackingClientReceipt, TrackingRunReceipt,
 } from '@/lib/ads-tracking-preflight/types'
 
@@ -57,8 +57,9 @@ const CONFIG: TrackingClientConfig = {
   landing_targets: [{ label: '落地页 A', url: 'https://www.example-shop.test/p?utm_content=a' }],
   ga4_lead_events: ['generate_lead'],
   web_form_to_crm: true,
-  planned_daily_budget_cents: 10100,
-  official_daily_cap_cents: 11000,
+  // 预算数字不再写死：上限读库、在投预算读 Meta（这里的收集函数是替身）
+  planned_daily_budget_cents: null,
+  official_daily_cap_cents: null,
   currency: 'NZD',
 }
 
@@ -162,6 +163,14 @@ const env: Collected<EnvFacts> = {
   },
   errors: [],
 }
+const budget: Collected<BudgetFacts> = {
+  facts: {
+    read: true, error: null, as_of: AS_OF,
+    account_cap_cents: 15000, client_cap_cents: 15000, registered_account_count: 1,
+    live_daily_budget_cents: 13400, live_lifetime_budget_count: 0, live_entity_count: 3,
+  },
+  errors: [],
+}
 const insights: Collected<PostLaunchFacts> = {
   facts: { read: true, error: null, as_of: AS_OF, spend_cents: 2500, link_clicks: 40, landing_page_views: 32, leads: 1 },
   errors: [],
@@ -177,6 +186,7 @@ function makeDeps(over: Partial<TrackingRunDeps> = {}) {
     ga4: vi.fn(async () => { collectorCalls.push('ga4'); return ga4 }),
     crm: vi.fn(async () => { collectorCalls.push('crm'); return crm }),
     env: vi.fn(async () => { collectorCalls.push('env'); return env }),
+    budget: vi.fn(async () => { collectorCalls.push('budget'); return budget }),
     postLaunch: vi.fn(async (_c, _cfg, launchedAt) => { collectorCalls.push(`postLaunch(${launchedAt})`); return insights }),
   }
   const now = vi.fn(() => NOW)
@@ -224,14 +234,14 @@ describe('回执事件', () => {
 })
 
 describe('编排 · 每日定时', () => {
-  it('一个客户：落地页 → Meta（只读页面上出现的数据集）→ GA4 → CRM → 环境 → 判灯 → 发回执事件 → 收尾', async () => {
+  it('一个客户：落地页 → Meta（只读页面上出现的数据集）→ GA4 → CRM → 环境 → 预算 → 判灯 → 发回执事件 → 收尾', async () => {
     const { deps, sent, finished, collectorCalls } = makeDeps()
     const { ids, step } = fakeStep()
 
     const run = await runTrackingPreflight(step, { name: 'inngest/scheduled.timer' }, deps)
 
-    expect(ids).toEqual(['start-run', 'landing:c1', 'meta:c1', 'ga4:c1', 'crm:c1', 'env:c1', 'judge:c1', 'emit:c1', 'finish-run'])
-    expect(collectorCalls).toEqual([`landing`, `meta(${OFFICIAL})`, 'ga4', 'crm', 'env'])
+    expect(ids).toEqual(['start-run', 'landing:c1', 'meta:c1', 'ga4:c1', 'crm:c1', 'env:c1', 'budget:c1', 'judge:c1', 'emit:c1', 'finish-run'])
+    expect(collectorCalls).toEqual([`landing`, `meta(${OFFICIAL})`, 'ga4', 'crm', 'env', 'budget'])
     expect(run).toMatchObject({ request_id: 'req-1', checked_at: AS_OF, status: 'ok', error: null, no_publish: true, trigger: 'cron' })
     expect(run.clients).toHaveLength(1)
     expect(run.clients[0]).toMatchObject({ client_id: 'c1', request_id: 'req-1:c1', overall: 'green', phase: 'preflight', trigger: 'cron' })

@@ -36,9 +36,15 @@ function baseInput(): JudgeInput {
       landing_targets: [{ label: '落地页 A', url: 'https://www.example-shop.test/p?utm_content=a' }],
       ga4_lead_events: ['generate_lead', 'enquiry_thank_you'],
       web_form_to_crm: true,
-      planned_daily_budget_cents: 10100,
-      official_daily_cap_cents: 11000,
+      planned_daily_budget_cents: null,
+      official_daily_cap_cents: null,
       currency: 'NZD',
+    },
+    // 预算事实：库里的日上限（账户级 + 客户级）+ Meta 现读的在投日预算合计（虚构数字，凑一个“在上限内”的基线）
+    budget: {
+      read: true, error: null, as_of: NOW.toISOString(),
+      account_cap_cents: 15000, client_cap_cents: 15000, registered_account_count: 1,
+      live_daily_budget_cents: 13400, live_lifetime_budget_count: 0, live_entity_count: 3,
     },
     meta: {
       read: true,
@@ -707,9 +713,17 @@ describe('env.token_and_crons', () => {
 
 describe('env.account_billing', () => {
   const KEY = 'env.account_billing'
+  const budget = (patch: Partial<JudgeInput['budget']>) => (i: JudgeInput): void => { Object.assign(i.budget, patch) }
 
-  it('账户正常、有付款方式、日上限不低于计划日预算 → 绿', () => {
-    expect(gate(judge(), KEY).status).toBe('green')
+  it('账户正常、有付款方式、库里有日上限、Meta 现读的在投合计没超 → 绿，写明两个数', () => {
+    const g = gate(judge(), KEY)
+    expect(g.status).toBe('green')
+    expect(g.reason).toContain('134.00')
+    expect(g.reason).toContain('150.00')
+    expect(g.evidence).toMatchObject({
+      account_cap_cents: 15000, client_cap_cents: 15000, registered_account_count: 1, live_daily_budget_cents: 13400,
+      live_lifetime_budget_count: 0, budget_read: true,
+    })
   })
 
   it('账户不是正常状态 / 被停用 / 没有付款方式 → 红', () => {
@@ -720,19 +734,101 @@ describe('env.account_billing', () => {
     }
   })
 
-  it('计划日预算比官方日上限高 → 红；刚好相等 → 绿', () => {
-    expect(gate(judge(i => { i.config.planned_daily_budget_cents = 11001 }), KEY).status).toBe('red')
-    expect(gate(judge(i => { i.config.planned_daily_budget_cents = 11000 }), KEY).status).toBe('green')
+  it('🔴 在投日预算合计超过库里的账户级日上限 → 红；刚好等于 → 绿', () => {
+    const over = gate(judge(budget({ live_daily_budget_cents: 15001 })), KEY)
+    expect(over.status).toBe('red')
+    expect(over.reason).toContain('150.01')
+    expect(gate(judge(budget({ live_daily_budget_cents: 15000 })), KEY).status).toBe('green')
   })
 
-  it('账户自己设了花费上限，剩余额度不够一天的计划预算 → 红', () => {
-    const g = gate(judge(i => { Object.assign(i.meta.account!, { spend_cap_minor: 50000, amount_spent_minor: 45000 }) }), KEY)
+  it('🔴 超过客户级日上限也是红（客户只有一个登记账户、账户级没设时，客户级顶上）', () => {
+    expect(gate(judge(budget({ account_cap_cents: null, client_cap_cents: 12000 })), KEY).status).toBe('red')
+    expect(gate(judge(budget({ account_cap_cents: null, client_cap_cents: 13400 })), KEY).status).toBe('green')
+    expect(gate(judge(budget({ account_cap_cents: 20000, client_cap_cents: 13000 })), KEY).status).toBe('red')
+  })
+
+  it('多个登记账户时，账户级上限没设 → 黄：客户总上限顶替不了账户上限（跟信封的取法一致）；但已经超过客户总上限照样红', () => {
+    const noAccountCap = gate(judge(budget({ account_cap_cents: null, registered_account_count: 2, client_cap_cents: 30000 })), KEY)
+    expect(noAccountCap.status).toBe('yellow')
+    expect(noAccountCap.reason).toContain('2 个')
+    expect(noAccountCap.reason).toContain('账户')
+    expect(gate(judge(budget({ account_cap_cents: null, registered_account_count: 2, client_cap_cents: 12000 })), KEY).status).toBe('red')
+    // 账户自己有上限的多账户客户：正常按账户上限判
+    expect(gate(judge(budget({ registered_account_count: 2, client_cap_cents: 30000 })), KEY).status).toBe('green')
+  })
+
+  it('🔴 写死的配置数字再也不能让它变绿：配置说「计划 10100 ≤ 上限 11000」，但库里上限 15000、Meta 现读在投 16000 → 红', () => {
+    const g = gate(judge(i => {
+      i.config.planned_daily_budget_cents = 10100
+      i.config.official_daily_cap_cents = 11000
+      Object.assign(i.budget, { live_daily_budget_cents: 16000 })
+    }), KEY)
     expect(g.status).toBe('red')
   })
 
-  it('没配计划日预算或官方日上限 → 黄（没法核对）', () => {
-    expect(gate(judge(i => { i.config.planned_daily_budget_cents = null }), KEY).status).toBe('yellow')
-    expect(gate(judge(i => { i.config.official_daily_cap_cents = null }), KEY).status).toBe('yellow')
+  it('🔴 库里的上限 / Meta 现读的在投预算没读到 → 黄（哪怕配置里写死的数字看起来都对），不判绿', () => {
+    const configLooksFine = (i: JudgeInput): void => {
+      i.config.planned_daily_budget_cents = 10100
+      i.config.official_daily_cap_cents = 11000
+    }
+    const dbFail = gate(judge(i => {
+      configLooksFine(i)
+      budget({ read: false, error: '读库里的账户级日上限失败', account_cap_cents: null, client_cap_cents: null, registered_account_count: null })(i)
+    }), KEY)
+    expect(dbFail.status).toBe('yellow')
+    expect(dbFail.reason).toContain('没读到')
+    expect(dbFail.reason).toContain('读库里的账户级日上限失败')
+    const metaFail = gate(judge(i => { configLooksFine(i); budget({ read: false, error: '没有可用的 Meta 令牌', live_daily_budget_cents: null })(i) }), KEY)
+    expect(metaFail.status).toBe('yellow')
+  })
+
+  it('库里账户级和客户级上限都没设 → 黄（没有可比的上限）', () => {
+    const g = gate(judge(budget({ account_cap_cents: null, client_cap_cents: null })), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('没设')
+  })
+
+  it('配置里的官方日上限跟库里不一致 → 黄（要求以库为准）；一致 → 不因此变黄；配置没写 → 不比', () => {
+    const mismatch = gate(judge(i => { i.config.official_daily_cap_cents = 11000 }), KEY)
+    expect(mismatch.status).toBe('yellow')
+    expect(mismatch.reason).toContain('110.00')
+    expect(mismatch.reason).toContain('150.00')
+    expect(gate(judge(i => { i.config.official_daily_cap_cents = 15000 }), KEY).status).toBe('green')
+    expect(gate(judge(i => { i.config.official_daily_cap_cents = null }), KEY).status).toBe('green')
+    // 账户级没设、只有客户级时，配置跟客户级比
+    expect(gate(judge(i => { budget({ account_cap_cents: null })(i); i.config.official_daily_cap_cents = 15000 }), KEY).status).toBe('green')
+    expect(gate(judge(i => { budget({ account_cap_cents: null })(i); i.config.official_daily_cap_cents = 11000 }), KEY).status).toBe('yellow')
+  })
+
+  it('配置里的计划日预算跟 Meta 现读的在投合计不一致 → 黄；相等 → 绿；没写 → 不比', () => {
+    const mismatch = gate(judge(i => { i.config.planned_daily_budget_cents = 10100 }), KEY)
+    expect(mismatch.status).toBe('yellow')
+    expect(mismatch.reason).toContain('101.00')
+    expect(mismatch.reason).toContain('134.00')
+    expect(gate(judge(i => { i.config.planned_daily_budget_cents = 13400 }), KEY).status).toBe('green')
+  })
+
+  it('有用终身预算的在投广告组（日预算折不出来）→ 黄，写明个数', () => {
+    const g = gate(judge(budget({ live_lifetime_budget_count: 2 })), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('2')
+    expect(g.reason).toContain('终身')
+  })
+
+  it('账户自己设了花费上限，剩余额度不够「在投日预算合计」→ 红', () => {
+    const g = gate(judge(i => { Object.assign(i.meta.account!, { spend_cap_minor: 50000, amount_spent_minor: 45000 }) }), KEY)
+    expect(g.status).toBe('red')
+    // 在投合计没读到时不拿它去比（留给黄灯），不是红
+    const unknownLive = gate(judge(i => {
+      Object.assign(i.meta.account!, { spend_cap_minor: 50000, amount_spent_minor: 45000 })
+      budget({ read: false, error: 'x', live_daily_budget_cents: null })(i)
+    }), KEY)
+    expect(unknownLive.status).toBe('yellow')
+  })
+
+  it('红灯优先于黄灯：既超上限又配置不一致 → 红', () => {
+    const g = gate(judge(i => { i.config.official_daily_cap_cents = 11000; budget({ live_daily_budget_cents: 16000 })(i) }), KEY)
+    expect(g.status).toBe('red')
   })
 
   it('账户信息没读到 → 灰；有没有付款方式没读到 → 灰', () => {

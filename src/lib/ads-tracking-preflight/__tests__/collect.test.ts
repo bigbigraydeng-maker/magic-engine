@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   assemblePostLaunchReceipt,
   buildItemLinks,
+  collectBudgetFacts,
   collectCrmFacts,
   collectPostLaunchFacts,
   collectLandingFacts,
@@ -31,8 +32,9 @@ const CONFIG: TrackingClientConfig = {
   landing_targets: [{ label: '落地页 A', url: LANDING_URL }],
   ga4_lead_events: ['generate_lead', 'enquiry_thank_you'],
   web_form_to_crm: true,
-  planned_daily_budget_cents: 10100,
-  official_daily_cap_cents: 11000,
+  // 预算数字不再写死：上限读库、在投预算读 Meta；这两个配置字段只用来跟库 / 线上对一对（null = 不对）
+  planned_daily_budget_cents: null,
+  official_daily_cap_cents: null,
   currency: 'NZD',
 }
 
@@ -40,7 +42,7 @@ const HTML = `<noscript><img src="https://www.facebook.com/tr?id=${OFFICIAL}&ev=
 
 // ─── 假网络：官网页面 + Meta Graph ───────────────────────────────────────────
 
-interface NetOpts { landingStatus?: number; graphThrows?: boolean }
+interface NetOpts { landingStatus?: number; graphThrows?: boolean; adsets?: unknown[] }
 
 function makeFetcher(opts: NetOpts = {}) {
   const urls: string[] = []
@@ -58,6 +60,11 @@ function makeFetcher(opts: NetOpts = {}) {
     if (path === 'act_1111111111') return json(accountFixture)
     if (path === `${OFFICIAL}/stats`) return json(parsed.searchParams.get('after') === 'AFTER1' ? statsPage2Fixture : statsPage1Fixture)
     if (path === 'dataset_quality') return json(datasetQualityFixture)
+    // 在投的系列 / 广告组（预算门现读）：默认一个 ABO 系列 + 一个日预算 NZ$134 的广告组
+    if (path === 'act_1111111111/campaigns') return json({ data: [{ id: '5001', effective_status: 'ACTIVE' }] })
+    if (path === 'act_1111111111/adsets') {
+      return json({ data: opts.adsets ?? [{ id: '6001', campaign_id: '5001', effective_status: 'ACTIVE', daily_budget: '13400' }] })
+    }
     return new Response('{}', { status: 404 })
   })
   return { fetcher, urls }
@@ -70,6 +77,10 @@ interface DbOpts {
   crmError?: string
   /** 自己指定 contact_touchpoints 返回哪些行（带 metadata.source_url）；不给 = 一条从广告落地页（/p）提交的线索 */
   touchpointRows?: { occurred_at: string; metadata: unknown }[]
+  /** 预算门读库：库里的账户级 / 客户级日上限（分）；不给 = 15000；capsError = 两张上限表都读失败 */
+  accountCap?: number | null
+  clientCap?: number | null
+  capsError?: string
 }
 
 function makeDb(opts: DbOpts = {}) {
@@ -80,6 +91,11 @@ function makeDb(opts: DbOpts = {}) {
       const finish = () => {
         if (table === 'clients') return { data: { domain: 'shop.example.test' }, error: null }
         if (table === 'me_conversion_writebacks') return { data: [], error: null }
+        if (table === 'client_meta_ad_accounts' || table === 'ad_strategy_configs') {
+          if (opts.capsError) return { data: null, error: { message: opts.capsError } }
+          if (table === 'ad_strategy_configs') return { data: { daily_budget_cap_cents: opts.clientCap === undefined ? 15000 : opts.clientCap }, error: null }
+          return { data: [{ ad_account_id: 'act_1111111111', daily_budget_cap_cents: opts.accountCap === undefined ? 15000 : opts.accountCap }], error: null }
+        }
         if (table === 'cron_run_logs') return { data: [{ status: 'completed', finished_at: '2026-10-19T09:30:00Z', started_at: '2026-10-19T09:25:00Z' }], error: null }
         if (table === 'contact_touchpoints') {
           if (opts.crmError) return { data: null, count: null, error: { message: opts.crmError } }
@@ -305,6 +321,78 @@ describe('分步收集函数（Inngest 每一步各调一个）', () => {
     const out = await collectCrmFacts('c1', { ...CONFIG, web_form_to_crm: false }, deps)
     expect(tables).toEqual([])
     expect(out.errors).toEqual([])
+  })
+})
+
+describe('预算门 · 读库读线上（假网络 + 假库）', () => {
+  const billing = (receipt: Awaited<ReturnType<typeof runClientPreflight>>) => receipt.gates.find(g => g.key === 'env.account_billing')
+
+  it('collectBudgetFacts：账户级 + 客户级上限读库，在投日预算合计现读 Meta；错误标 budget 且不带令牌', async () => {
+    const { deps, urls } = makeDeps()
+    const out = await collectBudgetFacts('c1', CONFIG, deps)
+    expect(out.errors).toEqual([])
+    expect(out.facts).toMatchObject({
+      read: true, account_cap_cents: 15000, client_cap_cents: 15000, registered_account_count: 1,
+      live_daily_budget_cents: 13400, live_entity_count: 1,
+    })
+    expect(urls.some(u => u.includes('act_1111111111/campaigns'))).toBe(true)
+    expect(urls.some(u => u.includes('act_1111111111/adsets'))).toBe(true)
+    expect(urls.some(u => u.includes(SECRET))).toBe(false)
+  })
+
+  it('整条链路：在投合计 NZ$134 ≤ 库里上限 NZ$150 → 预算门绿，证据里写明库里的上限和现读的合计', async () => {
+    const { receipt } = await run()
+    expect(billing(receipt)).toMatchObject({
+      status: 'green',
+      evidence: { account_cap_cents: 15000, client_cap_cents: 15000, live_daily_budget_cents: 13400, budget_read: true },
+    })
+  })
+
+  it('🔴 在投合计超过库里的上限 → 红（以前拿写死的旧数字互相比，这种情况是假绿）', async () => {
+    const { receipt } = await run({ adsets: [{ id: '6001', campaign_id: '5001', effective_status: 'ACTIVE', daily_budget: '16000' }] })
+    expect(billing(receipt)?.status).toBe('red')
+    expect(billing(receipt)?.reason).toContain('160.00')
+    expect(receipt.preconditions_met).toBe(false)
+  })
+
+  it('🔴 库读失败 → 黄，哪怕客户配置里写死的数字看起来都对；错误记进读取错误（来源 budget）', async () => {
+    const cfgLooksFine: TrackingClientConfig = { ...CONFIG, planned_daily_budget_cents: 10100, official_daily_cap_cents: 11000 }
+    const { receipt } = await run({ capsError: 'boom' }, cfgLooksFine)
+    expect(billing(receipt)?.status).toBe('yellow')
+    expect(billing(receipt)?.reason).toContain('没读到')
+    expect(receipt.read_errors.some(e => e.source === 'budget' && e.error.includes('boom'))).toBe(true)
+  })
+
+  it('🔴 客户配置里被人重新写死的旧数字（计划 10100 / 官方上限 11000）再也变不成绿：跟库 / 线上对不上 → 黄', async () => {
+    const reHardcoded: TrackingClientConfig = { ...CONFIG, planned_daily_budget_cents: 10100, official_daily_cap_cents: 11000 }
+    const { receipt } = await run({}, reHardcoded)
+    const g = billing(receipt)
+    expect(g?.status).toBe('yellow')
+    expect(g?.reason).toContain('110.00')
+    expect(g?.reason).toContain('150.00')
+    expect(g?.reason).toContain('101.00')
+    expect(g?.reason).toContain('134.00')
+  })
+
+  it('没有可用的 Meta 令牌 → 预算那半边一个 Graph 请求都不发；库里的上限照读；读取错误里有 budget 一笔', async () => {
+    const { deps, urls } = makeDeps({ token: null })
+    const out = await collectBudgetFacts('c1', CONFIG, deps)
+    expect(urls.filter(u => u.includes('graph.facebook.com'))).toEqual([])
+    expect(out.facts).toMatchObject({ read: false, account_cap_cents: 15000, live_daily_budget_cents: null })
+    expect(out.errors.some(e => e.source === 'budget' && e.error.includes('令牌'))).toBe(true)
+  })
+
+  it('找令牌第一次抛错、第二次正常 → 照常读；一直抛错 → 记「找 Meta 令牌时出错」', async () => {
+    let n = 0
+    const flaky = makeDeps()
+    flaky.deps.resolveMetaToken = async () => { n += 1; if (n === 1) throw new Error('db blip'); return SECRET }
+    expect((await collectBudgetFacts('c1', CONFIG, flaky.deps)).facts.read).toBe(true)
+
+    const broken = makeDeps()
+    broken.deps.resolveMetaToken = async () => { throw new Error('db down') }
+    const out = await collectBudgetFacts('c1', CONFIG, broken.deps)
+    expect(out.facts.read).toBe(false)
+    expect(out.errors.some(e => e.error.includes('找 Meta 令牌时出错'))).toBe(true)
   })
 })
 

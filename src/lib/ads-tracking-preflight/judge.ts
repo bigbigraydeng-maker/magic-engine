@@ -12,6 +12,7 @@ import type { Light } from '@/lib/marketing-plan/promo/gates'
 import {
   HARD_GATE,
   PREFLIGHT_GATE_KEYS,
+  type BudgetFacts,
   type EvidenceValue,
   type JudgeInput,
   type KnownIssue,
@@ -572,21 +573,59 @@ function judgeTokenAndCrons(input: JudgeInput): TrackingGateReceipt {
 
 // ─── 10. 广告账户与付款 ─────────────────────────────────────────────────────
 
+interface CapInfo {
+  cents: number
+  label: string
+}
+
+/** 库里设了的日预算上限（账户级、客户级各一个）。 */
+function presentCaps(b: BudgetFacts): CapInfo[] {
+  const caps: CapInfo[] = []
+  if (b.account_cap_cents !== null) caps.push({ cents: b.account_cap_cents, label: '账户级' })
+  if (b.client_cap_cents !== null) caps.push({ cents: b.client_cap_cents, label: '客户级' })
+  return caps
+}
+
+interface Finding {
+  reason: string
+  how: string
+}
+
+/**
+ * 广告账户与付款 + 预算在不在上限内。
+ *
+ * 🔴 上限读库、在投预算读线上（BudgetFacts）；客户配置里写死的「计划日预算 / 官方日上限」只用来跟库对一对，
+ *    读不到时绝不能拿它顶替（2026-10-21 事故：写死 NZ$101 / NZ$110 互相比，库里上限 NZ$150、在投合计 NZ$134，假绿）。
+ * 红：账户不正常 / 没付款方式 / 在投合计超过库里任一上限 / 账户花费上限的剩余额度不够一天的在投预算。
+ * 黄：预算没读到、上限都没设、多账户下账户级没设、有终身预算折不出日预算、配置里的数字跟库 / 线上对不上。
+ */
 function judgeAccountBilling(input: JudgeInput): TrackingGateReceipt {
   const key: PreflightGateKey = 'env.account_billing'
   const as_of = input.meta.as_of
   const acc = input.meta.account
   const cfg = input.config
+  const b = input.budget
   const evidence: Record<string, EvidenceValue> = {
     account_status: acc ? acc.status : null,
     has_funding_source: acc ? acc.has_funding_source : null,
-    planned_daily_budget_cents: cfg.planned_daily_budget_cents,
-    official_daily_cap_cents: cfg.official_daily_cap_cents,
+    budget_read: b.read,
+    account_cap_cents: b.account_cap_cents,
+    client_cap_cents: b.client_cap_cents,
+    registered_account_count: b.registered_account_count,
+    live_daily_budget_cents: b.live_daily_budget_cents,
+    live_lifetime_budget_count: b.live_lifetime_budget_count,
+    live_entity_count: b.live_entity_count,
+    config_planned_daily_budget_cents: cfg.planned_daily_budget_cents,
+    config_official_daily_cap_cents: cfg.official_daily_cap_cents,
   }
 
   if (!input.meta.read || acc === null) {
     return receipt(key, 'gray', '广告账户信息没读到', '确认 Meta 令牌能读该账户', evidence, as_of)
   }
+
+  const currency = acc.currency ?? cfg.currency
+  const live = b.live_daily_budget_cents
+  const caps = presentCaps(b)
 
   const problems: string[] = []
   if (acc.status !== 1) problems.push(`账户状态码 ${acc.status ?? '未知'}，不是正常状态`)
@@ -594,32 +633,67 @@ function judgeAccountBilling(input: JudgeInput): TrackingGateReceipt {
     problems.push(`账户被停用（原因码 ${acc.disable_reason}）`)
   }
   if (acc.has_funding_source === false) problems.push('账户没有付款方式')
-  if (
-    acc.spend_cap_minor !== null && acc.spend_cap_minor > 0 &&
-    cfg.planned_daily_budget_cents !== null &&
-    acc.spend_cap_minor - (acc.amount_spent_minor ?? 0) < cfg.planned_daily_budget_cents
-  ) {
-    problems.push('账户花费上限的剩余额度不够一天的计划预算')
+  // 以下两条都要先读到在投合计才能比；没读到的留给下面的黄灯，不在这里凭空判红
+  if (live !== null && acc.spend_cap_minor !== null && acc.spend_cap_minor > 0 && acc.spend_cap_minor - (acc.amount_spent_minor ?? 0) < live) {
+    problems.push('账户花费上限的剩余额度不够一天的在投日预算')
   }
-  if (
-    cfg.planned_daily_budget_cents !== null && cfg.official_daily_cap_cents !== null &&
-    cfg.planned_daily_budget_cents > cfg.official_daily_cap_cents
-  ) {
-    problems.push(
-      `计划日预算 ${money(cfg.planned_daily_budget_cents, cfg.currency)} 超过官方日上限 ${money(cfg.official_daily_cap_cents, cfg.currency)}`,
-    )
+  if (live !== null) {
+    for (const cap of caps) {
+      if (live > cap.cents) {
+        problems.push(`在投日预算合计 ${money(live, currency)} 超过库里的${cap.label}日上限 ${money(cap.cents, currency)}`)
+      }
+    }
   }
 
   if (problems.length > 0) {
-    return receipt(key, 'red', problems.join('；'), '修好账户 / 付款 / 预算再开投', evidence, as_of)
+    return receipt(key, 'red', problems.join('；'), '修好账户 / 付款 / 预算再开投；超上限的先把在投预算降到上限内（或经 PM 同意调上限）', evidence, as_of)
   }
   if (acc.has_funding_source === null) {
     return receipt(key, 'gray', '有没有付款方式没读到', '确认 Meta 能读到付款方式', evidence, as_of)
   }
-  if (cfg.planned_daily_budget_cents === null || cfg.official_daily_cap_cents === null) {
-    return receipt(key, 'yellow', '没配置计划日预算或官方日上限，没法核对', '在客户配置里补上计划日预算和官方日上限', evidence, as_of)
+  if (!b.read || live === null) {
+    return receipt(
+      key, 'yellow',
+      `预算没读到：${b.error ?? '原因不明'}`,
+      '先修好读取（Meta 令牌 / 库查询）再重跑一次检查；没读到之前不能说「预算在上限内」',
+      evidence, as_of,
+    )
   }
-  return receipt(key, 'green', '账户正常、有付款方式、预算在上限内', '', evidence, as_of)
+
+  const findings: Finding[] = []
+  if (caps.length === 0) {
+    findings.push({ reason: '库里该账户和该客户的日预算上限都没设，没法核对在投预算在不在上限内', how: '在后台给该账户 / 客户设日预算上限' })
+  } else if (b.account_cap_cents === null && (b.registered_account_count ?? 0) >= 2) {
+    findings.push({
+      reason: `客户登记了 ${b.registered_account_count} 个广告账户，但这个账户自己的日预算上限没设（客户总上限顶替不了账户上限）`,
+      how: '在后台给这个广告账户设它自己的日预算上限',
+    })
+  }
+  if (b.live_lifetime_budget_count > 0) {
+    findings.push({
+      reason: `有 ${b.live_lifetime_budget_count} 个在投的系列 / 广告组用的是终身预算，折不出日预算，上面的合计不含它们`,
+      how: '确认这些终身预算的花费节奏，或改成日预算再核对',
+    })
+  }
+  const dbCap = b.account_cap_cents ?? b.client_cap_cents
+  if (cfg.official_daily_cap_cents !== null && dbCap !== null && cfg.official_daily_cap_cents !== dbCap) {
+    findings.push({
+      reason: `客户配置里写的官方日上限 ${money(cfg.official_daily_cap_cents, currency)} 跟库里的 ${money(dbCap, currency)} 对不上`,
+      how: '以库为准：把客户配置里的数字改对，或直接删掉（上限已经读库，不需要在配置里再写一份）',
+    })
+  }
+  if (cfg.planned_daily_budget_cents !== null && cfg.planned_daily_budget_cents !== live) {
+    findings.push({
+      reason: `客户配置里写的计划日预算 ${money(cfg.planned_daily_budget_cents, currency)} 跟 Meta 现读的在投合计 ${money(live, currency)} 对不上`,
+      how: '以线上为准：把客户配置里的数字改对，或直接删掉（在投预算已经现读，不需要在配置里再写一份）',
+    })
+  }
+  if (findings.length > 0) {
+    return receipt(key, 'yellow', findings.map(f => f.reason).join('；'), findings.map(f => f.how).join('；'), evidence, as_of)
+  }
+
+  const capText = caps.map(c => `${c.label}日上限 ${money(c.cents, currency)}`).join('、')
+  return receipt(key, 'green', `账户正常、有付款方式；在投日预算合计 ${money(live, currency)}，没超库里的${capText}`, '', evidence, as_of)
 }
 
 // ─── 汇总 ───────────────────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ PM 要求（10-19）：本次广告投放前，检查官网 Meta 数据集/像�
 | tracking.lead_reaches_crm 线索进 CRM | 官网表单提交→CRM 可见（依赖 CRM 网站表单入库；未上线前记红并说明） | 试跑线索 1 小时内进 CRM | 硬 |
 | tracking.capi_ready 回传可用 | 复用 CAPI preflight（令牌有效、像素可见）+ 近 7 天成功/不明/失败数 | preflight 绿且失败率可解释 | 软 |
 | env.token_and_crons 环境 | 令牌健康；meta-leads-hourly、mailbox-sync 最近回执 ≤3h；Inngest 函数已登记 | 全部在期 | 硬 |
-| env.account_billing 广告账户 | 账户状态、付款方式、花费上限 vs 计划日预算 | ACTIVE、有付款方式、上限≥计划 | 硬 |
+| env.account_billing 广告账户 | 账户状态、付款方式、账户花费上限；**日预算上限读库**（账户级 `client_meta_ad_accounts` + 客户级 `ad_strategy_configs`），**在投日预算合计现读 Meta**（2026-10-21 起；客户配置里写死的「计划日预算 / 官方日上限」只用来跟库 / 线上对一对，读不到时不顶替） | ACTIVE、有付款方式、在投合计不超库里任一上限；红=超上限 / 花费上限剩余不够一天；黄=预算读不到、上限没设、多账户没设账户级、有终身预算、配置数字对不上 | 硬 |
 | post.t1h / post.t24h 开投后读回 | 点击数 vs 落地页浏览数（比例）、留资数、花费 | 比例≥合理下限、无零事件 | 开投后 |
 灰灯（没读到/没证据）永不等于绿，也不等于 0。
 

@@ -218,7 +218,7 @@ describe('readSeriesFacts · 读不全 / 读不懂都不当成「没数据」', 
   })
 })
 
-describe('Graph 路径白名单 · 只多放开了「系列节点 + 广告组 / 广告 / 洞察」', () => {
+describe('Graph 路径白名单 · 只多放开了「系列节点 + 广告组 / 广告 / 洞察」和账户的广告组列表', () => {
   const get = makeGraphGet(async () => new Response('{}', { status: 200 }), TOKEN, noSleep)
 
   it('放行：系列节点及其 adsets / ads / insights', async () => {
@@ -235,8 +235,15 @@ describe('Graph 路径白名单 · 只多放开了「系列节点 + 广告组 / 
     await expect(get(CAMPAIGN, {})).rejects.toThrow('不允许')
   })
 
+  it('账户的广告组列表（预算门现读在投预算用）也放行；账户上别的边照样拒绝', async () => {
+    await expect(get('act_1234567890/adsets', { fields: 'id' })).resolves.toEqual({})
+    for (const path of ['act_1234567890/ads', 'act_1234567890/adcreatives', 'act_1234567890/users', 'act_1234567890/subscribed_apps']) {
+      await expect(get(path, {})).rejects.toThrow('不允许的 Graph 路径')
+    }
+  })
+
   it('照样拒绝别的路径（用户自己的节点、订阅应用、写操作常用的边）', async () => {
-    for (const path of ['me/accounts', `${CAMPAIGN}/subscribed_apps`, `${CAMPAIGN}/copies`, 'act_1234567890/adsets', `${CAMPAIGN}/../me`]) {
+    for (const path of ['me/accounts', `${CAMPAIGN}/subscribed_apps`, `${CAMPAIGN}/copies`, `${CAMPAIGN}/../me`]) {
       await expect(get(path, {})).rejects.toThrow('不允许的 Graph 路径')
     }
   })

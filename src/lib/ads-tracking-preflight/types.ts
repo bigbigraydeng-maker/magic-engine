@@ -78,7 +78,7 @@ export interface TrackingReceiptItem {
   href: string
 }
 
-export type TrackingReadSource = 'meta' | 'ga4' | 'landing' | 'env' | 'crm' | 'insights'
+export type TrackingReadSource = 'meta' | 'ga4' | 'landing' | 'env' | 'crm' | 'insights' | 'budget'
 
 export interface TrackingReadError {
   source: TrackingReadSource
@@ -333,6 +333,31 @@ export interface EnvFacts {
   as_of: string
 }
 
+/**
+ * 预算门要用的事实：库里的日预算上限 + Meta 现读的「在投」日预算合计。
+ * 上限读库、在投预算读线上，客户配置里写死的数字只剩「跟库对一对」的作用（读不到也不能拿它顶替）。
+ * 金额一律是 Meta / 库里的最小货币单位（分），不换算。
+ */
+export interface BudgetFacts {
+  /** 库里的上限 和 Meta 的在投预算 两半都读到了吗（任何一半没读到 = false） */
+  read: boolean
+  /** 没读到的原因（已清洗，不含令牌）；两半都读到 = null */
+  error: string | null
+  as_of: string
+  /** 库里该广告账户自己的日预算上限；没设 / 没读到 = null（不是 0） */
+  account_cap_cents: number | null
+  /** 库里该客户的日预算总上限；没设 / 没读到 = null（不是 0） */
+  client_cap_cents: number | null
+  /** 该客户在库里登记了几个 Meta 广告账户（多账户时不能拿客户总上限顶替账户上限）；没读到 = null */
+  registered_account_count: number | null
+  /** Meta 现读的在投日预算合计；没读到 = null（不是 0） */
+  live_daily_budget_cents: number | null
+  /** 在投、但用终身预算（折不出日预算）的个数；只在读到时有意义 */
+  live_lifetime_budget_count: number
+  /** 参与日预算合计的在投实体数（系列级预算的系列 + 不在这种系列下的广告组）；只在读到时有意义 */
+  live_entity_count: number
+}
+
 export interface JudgeInput {
   config: TrackingClientConfig
   now: Date
@@ -341,6 +366,7 @@ export interface JudgeInput {
   ga4: Ga4Facts
   crm: CrmFacts
   env: EnvFacts
+  budget: BudgetFacts
 }
 
 /** 开投后读回的事实（本次投放的广告系列的洞察，自开投时刻起）。 */
