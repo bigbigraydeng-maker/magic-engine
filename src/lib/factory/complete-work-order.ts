@@ -136,7 +136,7 @@ export async function completeWorkOrder(
   const enforceSubstance = process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE === '1'
   if (substance.applicable) {
     if (enforceSubstance && !substance.assetOnly && substance.server?.verdict !== 'pass') {
-      return { ok: false, status: 422, error: 'content_substance_failed' }
+      return { ok: false, status: 422, error: `content_substance_failed: ${substance.server?.reason ?? ''}`.slice(0, 300) }
     }
     if (enforceSubstance && !substance.capable) {
       return { ok: false, status: 422, error: 'content_substance_missing' }
@@ -323,6 +323,7 @@ export async function completeWorkOrder(
             mismatch: substance.mismatch,
             enforced: enforceSubstance,
           },
+          // Audit mark only: the approve/publish guards read brief.remotion.deliverable (see deliverable.ts), not this.
           ...(substance.assetOnly ? { deliverable: 'asset_only' } : {}),
         }
       : {}),

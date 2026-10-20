@@ -582,7 +582,8 @@ describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
     process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
     const m = mockSupabase([])
     const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY), mediaEvidence: CAP as never })
-    expect(r).toMatchObject({ ok: false, status: 422, error: 'content_substance_failed' })
+    expect(r).toMatchObject({ ok: false, status: 422 })
+    expect((r as { error: string }).error).toMatch(/^content_substance_failed: .+/)
     expect(m.consumed()).toBe(0)
     expect(m.updates).toHaveLength(0)
   })
@@ -613,7 +614,8 @@ describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
     process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
     const m = mockSupabase([])
     const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY, { deliverable: 'Asset_Only' }), mediaEvidence: CAP as never })
-    expect(r).toMatchObject({ ok: false, status: 422, error: 'content_substance_failed' })
+    expect(r).toMatchObject({ ok: false, status: 422 })
+    expect((r as { error: string }).error).toMatch(/^content_substance_failed/)
   })
 
   it('a worker that reports pass while the server computes fail is flagged as a mismatch', async () => {

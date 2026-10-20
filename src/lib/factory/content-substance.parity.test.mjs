@@ -48,6 +48,10 @@ function variants() {
   const shortRows = clone(datacard)
   shortRows.rowSec = 0.5
   out.push(['datacard fast rows', 'datacard', shortRows])
+  const tooShort = clone(list)
+  tooShort.beats = tooShort.beats.map((b, i) => b * 0.01)
+  out.push(['list too short', 'list', tooShort])
+  out.push(['postcard missing timing', 'postcard', { scenes: [], hook: { lines: ['x'] }, end: null }])
   out.push(['unknown template', 'weird', {}])
   out.push(['malformed list', 'list', { beats: 'nope', items: 3 }])
   return out

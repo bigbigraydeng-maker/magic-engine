@@ -1,6 +1,6 @@
 // Server-side twin of scripts/factory-worker/engines/remotion/src/contentSubstance.ts.
 // This file MUST stay in lockstep with the engine file: same behaviour, same Chinese reason strings,
-// same kinds, same thresholds. src/lib/factory/content-substance.parity.test.ts compares both.
+// same kinds, same thresholds. src/lib/factory/content-substance.parity.test.mjs compares both.
 // The engine is not part of the Next runtime, so nothing here may import from it.
 
 export type SubstanceKind =
@@ -150,6 +150,10 @@ function computeListTiming(props: Record<string, unknown>): ListTiming {
   const totalFrames = fb(beats, HOOK_BEATS + ITEM_BEATS * itemCount + REVEAL_BEATS);
   if (totalFrames - revealFrom < 1) {
     throw new Error('list timing: reveal duration < 1');
+  }
+  // Same floor as the engine (MIN_TOTAL_FRAMES = 60): a shorter reel is refused there too.
+  if (totalFrames < 60) {
+    throw new Error('list timing: total frames < 60');
   }
   return { hookFrames, itemFrom, itemDur, revealFrom, totalFrames };
 }
