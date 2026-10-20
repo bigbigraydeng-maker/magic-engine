@@ -134,7 +134,7 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
   },
   [PLATFORM_PROVIDERS.INSTAGRAM]: {
     refreshable: false, staleHours: null, refreshScope: 'per_connection',
-    why: '仅账号资料授权；本轮没有刷新调用方或定时心跳，过期需重新连接',
+    why: '没有定时心跳；仅在发布前由 getInstagramPublishToken 按需续期(距到期 7 天内,开关打开时)。长期不发布会过期,须重新连接',
   },
   [PLATFORM_PROVIDERS.TIKTOK]: {
     refreshable: false,

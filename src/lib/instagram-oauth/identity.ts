@@ -1,5 +1,17 @@
 /** Client-safe Instagram identity rules, shared by consent and saved-fact projection. */
 export const INSTAGRAM_SCOPES = ['instagram_business_basic'] as const
+/** Read-only scope plus Reels publishing. Only requested/required while the publish switch is on. */
+export const INSTAGRAM_PUBLISH_SCOPES = ['instagram_business_basic', 'instagram_business_content_publish'] as const
+
+/** Server-side switch (default off). Exactly "true" turns it on; never import this into client components. */
+export function isInstagramPublishEnabled(): boolean {
+  return process.env.INSTAGRAM_PUBLISH_ENABLED === 'true'
+}
+
+/** The permission set a saved grant must contain to count as usable right now. */
+export function requiredInstagramScopes(): readonly string[] {
+  return isInstagramPublishEnabled() ? INSTAGRAM_PUBLISH_SCOPES : INSTAGRAM_SCOPES
+}
 
 export function normalizeInstagramHandle(value: unknown): string | null {
   if (typeof value !== 'string') return null
