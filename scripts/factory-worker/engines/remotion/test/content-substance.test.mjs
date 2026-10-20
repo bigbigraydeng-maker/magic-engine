@@ -204,3 +204,54 @@ test('unknown template fails', () => {
   assert.equal(result.verdict, 'fail');
   assert.equal(result.reason, '未知模板：内容闸不放行');
 });
+
+test('datacard: rows stay visible until the end, the hook alone never counts', () => {
+  const base = {
+    hookSec: 1,
+    rowSec: 0.6,
+    holdSec: 1,
+    hook: { lines: ['TOP FACTS'] },
+    rows: [
+      { label: 'Alpha row', value: '1', sublabel: null, bar: null },
+      { label: 'Beta row', value: '2', sublabel: null, bar: null },
+      { label: 'Gamma row', value: '3', sublabel: null, bar: null },
+    ],
+  }
+  const ok = contentSubstanceOf('datacard', base)
+  assert.equal(ok.verdict, 'pass')
+  assert.ok(ok.kinds.includes('selling_line'))
+  assert.ok(!ok.kinds.includes('hook_text'))
+  // hook only (no substantive rows) must fail
+  const hookOnly = contentSubstanceOf('datacard', { ...base, rows: [{ label: 'a', value: '1', sublabel: null, bar: null }, { label: 'b', value: '2', sublabel: null, bar: null }, { label: 'c', value: '3', sublabel: null, bar: null }] })
+  assert.equal(hookOnly.verdict, 'fail')
+})
+
+test('invisible filler characters never count as content (Hangul fillers, soft hyphen, combining marks)', () => {
+  assert.equal(isSubstantive('ㅤㅤㅤ'), false)
+  assert.equal(isSubstantive('ﾠﾠﾠ'), false)
+  assert.equal(isSubstantive('a­­'), false)
+  assert.equal(isSubstantive('á́'), false)
+  assert.equal(isSubstantive('1a2'), false)
+  assert.equal(isSubstantive('a-b'), false)
+  assert.equal(isSubstantive('中!'), false)
+  assert.equal(isSubstantive('中文'), true)
+  assert.equal(isSubstantive('Tour'), true)
+})
+
+test('real list template: a blank reveal title and one-second items fail the gate', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { loadTemplate } = await import('../src/templates.ts')
+  const raw = JSON.parse(readFileSync(new URL('../examples/sydney-apartment.props.json', import.meta.url), 'utf8'))
+  const good = loadTemplate('list', raw).props
+  assert.equal(contentSubstanceOf('list', good).verdict, 'pass')
+  const blank = structuredClone(raw)
+  blank.revealTitle = 'ㅤㅤㅤ'
+  const parsed = loadTemplate('list', blank).props
+  const r = contentSubstanceOf('list', parsed)
+  assert.equal(r.verdict, 'fail')
+  assert.ok(!r.kinds.includes('brand_card'))
+})
+
+test('NaN timelines are dropped, so the gate refuses instead of passing', () => {
+  assert.equal(unionSeconds([[0, Number.NaN], [Number.NaN, 3]]), 0)
+})

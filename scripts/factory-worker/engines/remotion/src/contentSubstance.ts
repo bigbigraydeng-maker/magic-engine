@@ -28,14 +28,16 @@ export interface ContentSubstance {
 }
 
 // Removes zero-width / bidi / control characters, collapses whitespace, trims.
+const INVISIBLE_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u206f\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0]/g;
+
 export function cleanText(s: string): string {
   if (typeof s !== 'string') return '';
+  // The worker's own clean() invisible/bidi/control set, widened with the Hangul/Khmer/Mongolian fillers that NFKC
+  // produces, applied before and after NFKC normalisation, so text that renders as blanks never counts as content.
   return s
-    .replace(/[\u0000-\u001F\u007F]/g, '')
-    .replace(/[\u200B-\u200F]/g, '')
-    .replace(/[\u202A-\u202E]/g, '')
-    .replace(/[\u2060-\u2064]/g, '')
-    .replace(/\uFEFF/g, '')
+    .replace(INVISIBLE_RE, '')
+    .normalize('NFKC')
+    .replace(INVISIBLE_RE, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -43,19 +45,16 @@ export function cleanText(s: string): string {
 const LETTER_RE = /\p{L}/u;
 const HAN_LETTER_RE = /\p{Script=Han}/u;
 
-// After cleanText: must contain at least one Unicode letter; length >= 3 chars,
-// or >= 2 if every letter is Han script. Price-like text (only currency
-// symbols / digits / punctuation / spaces) is not substantive.
+// After cleanText: counts LETTERS (not characters): at least 3 letters, or at least 2 when every letter is Han script.
+// Price-like text (currency symbols / digits / punctuation / spaces only) therefore never counts, and neither do
+// strings padded with digits, punctuation or combining marks.
 export function isSubstantive(s: string): boolean {
   const t = cleanText(s);
   if (t.length === 0) return false;
-  if (!LETTER_RE.test(t)) return false;
-  const chars = Array.from(t);
-  const len = chars.length;
-  const letters = chars.filter((c) => LETTER_RE.test(c));
-  const allHan = letters.length > 0 && letters.every((c) => HAN_LETTER_RE.test(c));
-  if (allHan) return len >= 2;
-  return len >= 3;
+  const letters = Array.from(t).filter((c) => LETTER_RE.test(c));
+  if (letters.length === 0) return false;
+  const allHan = letters.every((c) => HAN_LETTER_RE.test(c));
+  return allHan ? letters.length >= 2 : letters.length >= 3;
 }
 
 // Total length of the union of intervals, rounded to 2 decimals.
@@ -193,16 +192,16 @@ function collectDataCard(props: Record<string, unknown>): SubstanceElement[] {
   const hookEnd = timing.hookFrames / FPS;
   for (const raw of hookLines) {
     const text = typeof raw === 'string' ? raw : '';
-    out.push({ kind: 'selling_line', text, startSec: 0, endSec: hookEnd });
+    out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
   }
   const rows = asArray(props.rows);
-  const last = rows.length - 1;
   for (let i = 0; i < rows.length; i++) {
     const row = asRecord(rows[i]);
     if (!row) continue;
     const from = timing.rowFrom[i];
     if (from === undefined) continue;
-    const endFrame = i === last ? timing.totalFrames : from + timing.rowFrames;
+    // Rows stay on screen from their reveal until the end (DataCardReel keeps every row's Sequence to totalFrames).
+    const endFrame = timing.totalFrames;
     const label = typeof row.label === 'string' ? row.label : '';
     out.push({
       kind: 'selling_line',

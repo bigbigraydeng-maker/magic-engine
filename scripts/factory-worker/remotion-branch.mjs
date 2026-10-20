@@ -448,7 +448,13 @@ export function assessContentSubstance(eng, template, remotion, props) {
   if (typeof eng.contentSubstanceOf !== 'function') {
     throw new RemotionOrderError('出片机缺少内容闸（contentSubstanceOf），拒绝出片：请先升级出片机')
   }
-  const result = eng.contentSubstanceOf(template, props)
+  let result
+  try {
+    result = eng.contentSubstanceOf(template, props)
+  } catch (e) {
+    // A malformed shape must never turn into a retryable generic error: refuse the order.
+    throw new RemotionOrderError(`内容闸检查本身出错，拒绝出片：${String(e?.message ?? e).slice(0, 200)}`)
+  }
   if (remotion.deliverable === 'asset_only') {
     return { ...result, verdict: 'asset_only' }
   }
