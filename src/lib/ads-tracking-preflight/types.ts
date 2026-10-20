@@ -264,6 +264,15 @@ export interface CrmFacts {
   error: string | null
   web_form_touchpoints_7d: number
   latest_web_form_at: string | null
+  /**
+   * 本次拿来认「广告落地页」的页面路径（来自落地页配置，已规范化）。
+   * 没有这一项 = 没按页面分类（客户没配落地页 / 老回执）：任何官网表单线索都算数。
+   */
+  ad_landing_paths?: readonly string[]
+  /** 近 7 天里来源页就是广告落地页的官网表单线索条数（按读回来的最近 200 条算）；没分类 / 没读到 = 没有这一项 */
+  ad_landing_form_touchpoints_7d?: number
+  /** 其中最近一条的时间；一条都没有 / 时间读不出来 = null */
+  latest_ad_landing_form_at?: string | null
   as_of: string
 }
 

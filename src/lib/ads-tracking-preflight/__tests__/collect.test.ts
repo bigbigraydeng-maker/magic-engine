@@ -65,7 +65,12 @@ function makeFetcher(opts: NetOpts = {}) {
 
 // ─── 假库 ──────────────────────────────────────────────────────────────────
 
-interface DbOpts { touchpoints?: number; crmError?: string }
+interface DbOpts {
+  touchpoints?: number
+  crmError?: string
+  /** 自己指定 contact_touchpoints 返回哪些行（带 metadata.source_url）；不给 = 一条从广告落地页（/p）提交的线索 */
+  touchpointRows?: { occurred_at: string; metadata: unknown }[]
+}
 
 function makeDb(opts: DbOpts = {}) {
   const tables: string[] = []
@@ -79,7 +84,8 @@ function makeDb(opts: DbOpts = {}) {
         if (table === 'contact_touchpoints') {
           if (opts.crmError) return { data: null, count: null, error: { message: opts.crmError } }
           const n = opts.touchpoints ?? 6
-          return { data: n > 0 ? [{ occurred_at: '2026-10-19T05:00:00Z' }] : [], count: n, error: null }
+          const rows = opts.touchpointRows ?? (n > 0 ? [{ occurred_at: '2026-10-19T05:00:00Z', metadata: { source_url: '/p' } }] : [])
+          return { data: rows, count: opts.touchpointRows ? opts.touchpointRows.length : n, error: null }
         }
         return { data: null, error: { message: `不该读这张表：${table}` } }
       }
@@ -191,6 +197,33 @@ describe('runClientPreflight · 整条链路（假网络 + 假库 + 真实形状
     expect(receipt.preconditions_met).toBe(false)
   })
 
+  // 🔴 第四轮：官网表单线索必须有从广告落地页（配置里的 /p）提交的，才算「广告这条路通了」
+  it('CRM 里的官网表单线索全是联系页（/contact）提交的、没有一条来自广告落地页 → 灰「只验证了联系页表单」：挡前置条件，并出一条硬门灰的待办（带测试步骤和直达链接）', async () => {
+    const { receipt } = await run({ touchpointRows: [{ occurred_at: '2026-10-19T09:00:00Z', metadata: { source_url: '/contact' } }] })
+    const gate = receipt.gates.find(g => g.key === 'tracking.lead_reaches_crm')
+    expect(gate?.status).toBe('gray')
+    expect(gate?.hard).toBe(true)
+    expect(gate?.reason).toContain('只验证了')
+    expect(gate?.evidence).toMatchObject({ ad_landing_form_touchpoints_7d: 0, ad_landing_paths: ['/p'] })
+    expect(receipt.preconditions_met).toBe(false)
+    const item = receipt.items.find(i => i.gate_key === 'tracking.lead_reaches_crm')
+    expect(item).toBeDefined()
+    expect(item?.hard).toBe(true)
+    expect(item?.what).toContain('只验证了')
+    expect(item?.how).toContain('内部测试表单')
+    expect(item?.href).toBe(`${APP_BASE}/dashboard/clients/c1/crm`)
+  })
+
+  it('有一条从广告落地页（/p）提交的线索、时间在 48 小时内 → 绿；联系页那条不影响', async () => {
+    const { receipt } = await run({
+      touchpointRows: [
+        { occurred_at: '2026-10-19T09:30:00Z', metadata: { source_url: '/contact' } },
+        { occurred_at: '2026-10-19T08:00:00Z', metadata: { source_url: 'https://www.example-shop.test/p?utm_content=a' } },
+      ],
+    })
+    expect(statusOf(receipt, 'tracking.lead_reaches_crm')).toBe('green')
+  })
+
   it('该客户没有官网表单 → 一次 CRM 都不查，那道门标「不适用」', async () => {
     const { receipt, tables } = await run({}, { ...CONFIG, web_form_to_crm: false })
     expect(tables).not.toContain('contact_touchpoints')
@@ -207,6 +240,44 @@ describe('runClientPreflight · 整条链路（假网络 + 假库 + 真实形状
   it('探活返回的像素编号和权限列表不进回执（只比对，不外带）', async () => {
     const { receipt } = await run()
     expect(JSON.stringify(receipt)).not.toContain('ads_management')
+  })
+})
+
+describe('collectCrmFacts · 广告落地页路径来自落地页配置', () => {
+  it('把配置里每个落地页的路径（规范化、去重）交给读取器，事实里带回认的路径和广告落地页上的条数', async () => {
+    const cfg: TrackingClientConfig = {
+      ...CONFIG,
+      landing_targets: [
+        { label: 'A', url: `${SITE}/p?utm_content=a` },
+        { label: 'B', url: `${SITE}/P/?utm_content=b` },
+        { label: 'C', url: `${SITE}/q` },
+      ],
+    }
+    const { deps } = makeDeps({
+      touchpointRows: [
+        { occurred_at: '2026-10-19T09:00:00Z', metadata: { source_url: '/contact' } },
+        { occurred_at: '2026-10-19T08:00:00Z', metadata: { source_url: '/q' } },
+      ],
+    })
+    const out = await collectCrmFacts('c1', cfg, deps)
+    expect(out.facts).toMatchObject({
+      read: true, web_form_touchpoints_7d: 2, ad_landing_paths: ['/p', '/q'],
+      ad_landing_form_touchpoints_7d: 1, latest_ad_landing_form_at: '2026-10-19T08:00:00Z',
+    })
+  })
+
+  it('没配落地页 → 不分类：事实里没有广告落地页那三项', async () => {
+    const { deps } = makeDeps()
+    const out = await collectCrmFacts('c1', { ...CONFIG, landing_targets: [] }, deps)
+    expect(out.facts).not.toHaveProperty('ad_landing_paths')
+    expect(out.facts.read).toBe(true)
+  })
+
+  it('没有官网表单的客户 → 不查库，事实里也没有分类项', async () => {
+    const { deps, tables } = makeDeps()
+    const out = await collectCrmFacts('c1', { ...CONFIG, web_form_to_crm: false }, deps)
+    expect(tables).not.toContain('contact_touchpoints')
+    expect(out.facts).not.toHaveProperty('ad_landing_paths')
   })
 })
 

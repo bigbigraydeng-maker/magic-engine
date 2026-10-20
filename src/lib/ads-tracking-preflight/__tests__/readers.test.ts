@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CrmFacts, EnvFacts, Ga4Facts } from '../types'
 import { makeSupabasePropertyLoader, readGa4Facts, type Ga4ReadDeps } from '../ga4-reader'
-import { readCrmFacts } from '../crm-reader'
+import { adLandingPathsFromTargets, classifyAdLandingForms, normalizePagePath, readCrmFacts } from '../crm-reader'
 import { REQUIRED_JOBS, readEnvFacts, type EnvReadDeps } from '../env-reader'
 import { RETRY_DELAY_MS } from '../retry'
 
@@ -295,7 +295,9 @@ describe('CRM 读取器（读 contact_touchpoints）', () => {
     expect(filterValue(q, 'channel')).toBe('web_form')
     expect(filterValue(q, 'occurred_at')).toBe(SEVEN_DAYS_AGO_ISO)
     expect(q.order).toEqual({ column: 'occurred_at', ascending: false })
-    expect(q.limit).toBe(1)
+    // 要看每条线索是从哪一页提交的（metadata.source_url），所以多读一些行，而不是只读最近 1 条
+    expect(q.select).toBe('occurred_at, metadata')
+    expect(q.limit).toBe(200)
   })
 
   it('Supabase 报错 → read false，error 带原因，计数 0', async () => {
@@ -313,6 +315,125 @@ describe('CRM 读取器（读 contact_touchpoints）', () => {
     const db = makeFakeDb(() => ok([], 0))
     const { facts } = await readCrmFacts(db.supabase, 'c1', NOW)
     expect(facts.as_of).toBe(NOW_ISO)
+  })
+})
+
+describe('CRM 读取器 · 按广告落地页给官网表单线索分类', () => {
+  describe('normalizePagePath · 页面路径规范化', () => {
+    it('相对路径原样（小写、去结尾斜杠）；整条网址只取路径，网址参数和 # 都去掉', () => {
+      expect(normalizePagePath('/tours/china/signature/landscapes')).toBe('/tours/china/signature/landscapes')
+      expect(normalizePagePath('https://www.example-shop.test/tours/china?utm_content=a#top')).toBe('/tours/china')
+      expect(normalizePagePath('/Tours/China/')).toBe('/tours/china')
+      expect(normalizePagePath('/contact?x=1')).toBe('/contact')
+      expect(normalizePagePath('/')).toBe('/')
+      expect(normalizePagePath('https://www.example-shop.test')).toBe('/')
+      expect(normalizePagePath('//other.example.test/p/')).toBe('/p')
+    })
+
+    it('读不懂的一律 null（不猜）：空串 / 不是字符串 / 既不是路径也不是网址', () => {
+      for (const bad of ['', '   ', null, undefined, 42, {}, 'contact', 'not a url', 'ftp://x.test/p', 'javascript:alert(1)']) {
+        expect(normalizePagePath(bad), String(bad)).toBeNull()
+      }
+    })
+  })
+
+  describe('adLandingPathsFromTargets · 从落地页配置得到「广告落地页」路径集合', () => {
+    it('取每个落地页网址的路径，规范化、去重，读不懂的网址跳过', () => {
+      const paths = adLandingPathsFromTargets([
+        { label: 'A', url: 'https://www.example-shop.test/p?utm_content=a' },
+        { label: 'B', url: 'https://www.example-shop.test/P/?utm_content=b' },
+        { label: 'C', url: 'https://www.example-shop.test/other' },
+        { label: '坏的', url: 'not a url' },
+      ])
+      expect(paths).toEqual(['/p', '/other'])
+    })
+
+    it('没配落地页 → 空数组（不分类）', () => {
+      expect(adLandingPathsFromTargets([])).toEqual([])
+    })
+  })
+
+  describe('classifyAdLandingForms · 近 7 天的官网表单线索里，哪些是从广告落地页提交的', () => {
+    const row = (occurred_at: unknown, source_url: unknown) => ({ occurred_at, metadata: source_url === undefined ? null : { source_url } })
+
+    it('来源页路径（规范化后）等于广告落地页路径才算；联系页等其它页面、没有来源页的都不算', () => {
+      const out = classifyAdLandingForms([
+        row('2026-10-19T08:00:00Z', '/contact'),
+        row('2026-10-19T06:00:00Z', '/p?utm=1'),
+        row('2026-10-18T06:00:00Z', 'https://www.example-shop.test/P/'),
+        row('2026-10-17T06:00:00Z', undefined),
+        { occurred_at: '2026-10-17T05:00:00Z', metadata: {} },
+        { occurred_at: '2026-10-17T04:00:00Z' },
+        row('2026-10-17T03:00:00Z', 42),
+      ], ['/p'])
+      expect(out).toEqual({ count: 2, latest: '2026-10-19T06:00:00Z' })
+    })
+
+    it('最近一条按时间取最大，不看传进来的顺序；匹配的线索时间读不出来也算一条，但不当最近一条', () => {
+      expect(classifyAdLandingForms([row('2026-10-17T06:00:00Z', '/p'), row('2026-10-19T06:00:00Z', '/p')], ['/p']).latest).toBe('2026-10-19T06:00:00Z')
+      expect(classifyAdLandingForms([row('garbage', '/p'), row(null, '/p')], ['/p'])).toEqual({ count: 2, latest: null })
+    })
+
+    it('没有一条匹配 → 0 条、最近时间 null；传进来不是数组 → 同样 0 条', () => {
+      expect(classifyAdLandingForms([row('2026-10-19T08:00:00Z', '/contact')], ['/p'])).toEqual({ count: 0, latest: null })
+      expect(classifyAdLandingForms(null, ['/p'])).toEqual({ count: 0, latest: null })
+    })
+  })
+
+  describe('readCrmFacts 带广告落地页路径', () => {
+    const rows = [
+      { occurred_at: '2026-10-19T08:00:00Z', metadata: { source_url: '/contact' } },
+      { occurred_at: '2026-10-19T06:00:00Z', metadata: { source_url: '/tours/x?utm=1' } },
+      { occurred_at: '2026-10-18T06:00:00Z', metadata: { source_url: '/Tours/X/' } },
+      { occurred_at: '2026-10-17T06:00:00Z', metadata: null },
+    ]
+
+    it('总数用库里数出来的精确条数（比读回来的行多也不影响），最近一条取全部线索里最新的；另给广告落地页上的条数和最近时间', async () => {
+      const db = makeFakeDb(() => ok(rows, 9))
+      const { facts, errors } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep, ['/tours/x'])
+      expect(facts).toEqual<CrmFacts>({
+        read: true,
+        error: null,
+        web_form_touchpoints_7d: 9,
+        latest_web_form_at: '2026-10-19T08:00:00Z',
+        ad_landing_paths: ['/tours/x'],
+        ad_landing_form_touchpoints_7d: 2,
+        latest_ad_landing_form_at: '2026-10-19T06:00:00Z',
+        as_of: NOW_ISO,
+      })
+      expect(errors).toEqual([])
+    })
+
+    it('传进来的路径没规范化（大小写 / 结尾斜杠 / 整条网址 / 重复 / 读不懂的）→ 读取器自己规范化、去重，事实里写规范化后的', async () => {
+      const db = makeFakeDb(() => ok(rows, 4))
+      const { facts } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep, ['/Tours/X/', 'https://www.example-shop.test/tours/x?utm=1', 'bad path'])
+      expect(facts.ad_landing_paths).toEqual(['/tours/x'])
+      expect(facts.ad_landing_form_touchpoints_7d).toBe(2)
+    })
+
+    it('带了路径、但一条都没匹配 → 广告落地页上 0 条、最近时间 null（读到了，不是没读到）', async () => {
+      const db = makeFakeDb(() => ok(rows, 4))
+      const { facts } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep, ['/nowhere'])
+      expect(facts).toMatchObject({ read: true, ad_landing_paths: ['/nowhere'], ad_landing_form_touchpoints_7d: 0, latest_ad_landing_form_at: null })
+    })
+
+    it('不带路径（或带空数组）→ 事实里没有广告落地页那三项，和以前一样', async () => {
+      for (const paths of [undefined, [] as string[]]) {
+        const db = makeFakeDb(() => ok(rows, 4))
+        const { facts } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep, paths)
+        expect(facts).not.toHaveProperty('ad_landing_paths')
+        expect(facts).not.toHaveProperty('ad_landing_form_touchpoints_7d')
+        expect(facts).not.toHaveProperty('latest_ad_landing_form_at')
+        expect(facts.web_form_touchpoints_7d).toBe(4)
+      }
+    })
+
+    it('查库报错 → read false，没有广告落地页那三项（读不到不当成「0 条」）', async () => {
+      const db = makeFakeDb(() => fail('boom'))
+      const { facts } = await readCrmFacts(db.supabase, 'c1', NOW, noSleep, ['/tours/x'])
+      expect(facts.read).toBe(false)
+      expect(facts).not.toHaveProperty('ad_landing_form_touchpoints_7d')
+    })
   })
 })
 
