@@ -84,6 +84,38 @@ describe('客户配置（L4）', () => {
     expect(cfg?.known_issues).toBeUndefined()
   })
 
+  it('按目标盯盘（如果配了）：系列编号是纯数字且不重复、类型只能是播放量 / WhatsApp、名字非空、阈值合理', () => {
+    for (const id of listTrackingClientIds()) {
+      const watch = getTrackingClientConfig(id)?.objective_watch
+      if (!watch) continue
+      expect(watch.series.length, `${id} 按目标盯盘至少要有一个系列`).toBeGreaterThan(0)
+      const ids = watch.series.map(s => s.campaign_id)
+      for (const campaignId of ids) expect(campaignId).toMatch(/^\d{6,20}$/)
+      expect(new Set(ids).size).toBe(ids.length)
+      for (const s of watch.series) {
+        expect(['awareness', 'whatsapp']).toContain(s.kind)
+        expect(s.label.trim().length).toBeGreaterThan(0)
+        if (s.frequency_yellow !== undefined || s.frequency_red !== undefined) {
+          expect(s.frequency_yellow, `${s.label} 频次黄线`).toBeGreaterThan(0)
+          expect(s.frequency_red, `${s.label} 频次红线`).toBeGreaterThan(s.frequency_yellow ?? Number.POSITIVE_INFINITY)
+        }
+      }
+      if (watch.zero_spend_yellow_hours !== undefined || watch.zero_spend_red_hours !== undefined) {
+        expect(watch.zero_spend_yellow_hours).toBeGreaterThan(0)
+        expect(watch.zero_spend_red_hours).toBeGreaterThan(watch.zero_spend_yellow_hours ?? Number.POSITIVE_INFINITY)
+      }
+    }
+  })
+
+  it('CTS 按目标盯盘：本期的播放量系列和 WhatsApp 系列在盯；上一期已暂停的「官网点击」系列不在', () => {
+    const watch = getTrackingClientConfig('c0000000-0000-0000-0000-000000000000')?.objective_watch
+    expect(watch?.series.map(s => [s.campaign_id, s.kind, s.label])).toEqual([
+      ['52558359035473', 'awareness', '播放量系列'],
+      ['52558367358873', 'whatsapp', 'WhatsApp 系列'],
+    ])
+    expect(watch?.series.some(s => s.campaign_id === '52558131445673')).toBe(false)
+  })
+
   it('盯盘窗口（如果配了预计开投日）：预计开投日必须落在窗口里（不然「找不到系列」的待办永远不会出，或开投当天就在窗口外）', () => {
     for (const id of listTrackingClientIds()) {
       const watch = getTrackingClientConfig(id)?.launch_watch

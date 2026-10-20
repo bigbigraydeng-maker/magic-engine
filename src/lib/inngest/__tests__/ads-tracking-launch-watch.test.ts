@@ -30,16 +30,20 @@ import {
   createAdsTrackingLaunchWatchFunction,
   postLaunchEvent,
   readLaunchSpend,
+  readObjectiveSeries,
   runLaunchWatch,
+  summarizeRunCounts,
   type LaunchWatchDeps,
   type LaunchWatchStep,
+  type LaunchWatchSummary,
 } from '../functions/ads-tracking-launch-watch'
 import { cloudFunctions } from '../functions'
 import { CLOUD_FN_PREFIX } from '../client'
 import { ADS_TRACKING_POSTLAUNCH_REQUESTED } from '../ads-events'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { watchEventId, type PostLaunchReceiptState } from '@/lib/ads-tracking-preflight/launch-watch'
-import type { TrackingClientConfig } from '@/lib/ads-tracking-preflight/types'
+import type { MeInboundFact, MetricsRow, SeriesFacts, SeriesUnread } from '@/lib/ads-tracking-preflight/objective-watch'
+import type { ObjectiveWatchSeries, TrackingClientConfig } from '@/lib/ads-tracking-preflight/types'
 
 const NOW = new Date('2026-10-22T20:30:00.000Z') // 新西兰 10-23 09:30
 const hoursBefore = (h: number): string => new Date(NOW.getTime() - h * 3_600_000).toISOString()
@@ -118,12 +122,17 @@ interface World {
   states?: PostLaunchReceiptState[]
   /** 之前的盯盘记录里「第一次看到花费」的时刻；不给 = 这是第一次看到 */
   firstSeen?: string | null
+  /** 按目标盯盘：每个系列读到的结构和数字（按系列编号）；不给 = 一个还没花钱的普通系列 */
+  objectiveFacts?: Record<string, SeriesFacts | SeriesUnread>
+  /** 按目标盯盘：ME 收到的 WhatsApp 会话数；不给 = 读到 0 个 */
+  me?: MeInboundFact
 }
 
 function makeDeps(world: World = {}) {
   const sent: { id: string; data: { client_id: string; phase: 't1h' | 't24h'; launched_at: string } }[] = []
   const finished: { runId: string; startedAt: number; summary: unknown }[] = []
   const calls = { readSpend: 0, loadStates: 0, loadFirstSeen: 0 }
+  const objectiveCalls = { read: [] as string[], me: [] as { clientId: string; since: string }[] }
   const deps: LaunchWatchDeps = {
     now: () => NOW,
     configuredClientIds: () => ['c1'],
@@ -135,10 +144,19 @@ function makeDeps(world: World = {}) {
     loadReceiptStates: async () => { calls.loadStates += 1; return world.states ?? [] },
     loadFirstSpendSeenAt: async () => { calls.loadFirstSeen += 1; return world.firstSeen ?? null },
     sendEvent: async event => { sent.push(event) },
+    readObjectiveSeries: async (_clientId, _cfg, series) => {
+      objectiveCalls.read.push(series.campaign_id)
+      return world.objectiveFacts?.[series.campaign_id] ?? seriesFacts(series.campaign_id)
+    },
+    countMeInbound: async (clientId, since) => {
+      objectiveCalls.me.push({ clientId, since })
+      return world.me ?? { read: true, count: 0, since }
+    },
+    appBase: 'https://app.example.test',
     startRun: async () => 'run-1',
     finishRun: async (runId, startedAt, summary) => { finished.push({ runId, startedAt, summary }) },
   }
-  return { deps, sent, finished, calls }
+  return { deps, sent, finished, calls, objectiveCalls }
 }
 
 function fakeStep() {
@@ -291,6 +309,186 @@ describe('编排', () => {
 
   it('发给的事件名就是人手入口用的那个', () => {
     expect(ADS_TRACKING_POSTLAUNCH_REQUESTED).toBe('ads.tracking_postlaunch.requested')
+  })
+})
+
+// ─── 按目标盯盘 ──────────────────────────────────────────────────────────────
+
+const AWARENESS_ID = '111111111111'
+const WHATSAPP_ID = '222222222222'
+const OBJECTIVE_WATCH = {
+  series: [
+    { campaign_id: AWARENESS_ID, kind: 'awareness', label: '播放量系列' },
+    { campaign_id: WHATSAPP_ID, kind: 'whatsapp', label: '聊天系列' },
+  ],
+} satisfies { series: ObjectiveWatchSeries[] }
+const OBJECTIVE_CONFIG: TrackingClientConfig = { ...CONFIG, launch_watch: undefined, objective_watch: OBJECTIVE_WATCH }
+
+/** 一个刚改过 2 小时、在投、还没花钱的系列（默认读到的样子）。 */
+function seriesFacts(campaignId: string, over: Partial<SeriesFacts> = {}): SeriesFacts {
+  const updated = hoursBefore(2)
+  return {
+    read: true,
+    as_of: NOW.toISOString(),
+    campaign: { id: campaignId, name: '系列', objective: null, status: 'ACTIVE', effective_status: 'ACTIVE', created_at: hoursBefore(30), updated_at: updated },
+    adsets: [{ id: 's1', name: '广告组', parent_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', updated_at: updated }],
+    ads: [{ id: 'a1', name: '广告', parent_id: 's1', status: 'ACTIVE', effective_status: 'ACTIVE', updated_at: updated }],
+    total: null,
+    by_adset: [],
+    by_ad: [],
+    ...over,
+  }
+}
+
+const spendRow = (id: string, over: Partial<MetricsRow> = {}): MetricsRow => ({
+  id, name: id, spend_cents: 5000, impressions: 4000, reach: 1000, frequency: 1.2,
+  thruplays: 0, cost_per_thruplay: null, conversations: 0, cost_per_conversation: null, ...over,
+})
+
+describe('按目标盯盘', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('配了按目标盯盘、没配开投后盯盘：每个系列各读一遍，汇总里带逐系列结论；开投后那一套不动（不读花费、不发事件）', async () => {
+    const { deps, sent, calls, objectiveCalls } = makeDeps({ config: OBJECTIVE_CONFIG })
+    const { ids, step } = fakeStep()
+    const out = await runLaunchWatch(step, deps)
+    expect(ids).toEqual(['start-run', `objective:c1:${AWARENESS_ID}`, `objective:c1:${WHATSAPP_ID}`, 'finish-run'])
+    expect(objectiveCalls.read).toEqual([AWARENESS_ID, WHATSAPP_ID])
+    expect(calls).toEqual({ readSpend: 0, loadStates: 0, loadFirstSeen: 0 })
+    expect(sent).toEqual([])
+    expect(out.clients[0]).toMatchObject({ client_id: 'c1', active: false, error: null })
+    expect(out.clients[0].objective_watch?.as_of).toBe(NOW.toISOString())
+    expect(out.clients[0].objective_watch?.series.map(s => [s.campaign_id, s.kind, s.state])).toEqual([
+      [AWARENESS_ID, 'awareness', 'waiting_first_spend'],
+      [WHATSAPP_ID, 'whatsapp', 'waiting_first_spend'],
+    ])
+    expect(out.no_publish).toBe(true)
+  })
+
+  it('没配按目标盯盘的客户：汇总里没有 objective_watch 这个字段（老格式不变）', async () => {
+    const { deps } = makeDeps()
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    expect('objective_watch' in out.clients[0]).toBe(false)
+  })
+
+  it('两件事都配了：开投后补排照旧发事件，按目标盯盘同时出结论，互不影响', async () => {
+    const seen = new Date(NOW.getTime() - 3_600_000).toISOString()
+    const { deps, sent, objectiveCalls } = makeDeps({ config: { ...CONFIG, objective_watch: OBJECTIVE_WATCH }, firstSeen: seen })
+    const { ids, step } = fakeStep()
+    const out = await runLaunchWatch(step, deps)
+    expect(ids).toEqual([
+      'start-run', 'spend:c1', 'state:c1', 'first-seen:c1', 'send:c1:t1h',
+      `objective:c1:${AWARENESS_ID}`, `objective:c1:${WHATSAPP_ID}`, 'finish-run',
+    ])
+    expect(sent).toHaveLength(1)
+    expect(objectiveCalls.read).toEqual([AWARENESS_ID, WHATSAPP_ID])
+    expect(out.clients[0]).toMatchObject({ active: true, spend_seen: true })
+    expect(out.clients[0].objective_watch?.series).toHaveLength(2)
+  })
+
+  it('WhatsApp 系列：Meta 报了聊天数才去数 ME 收到几个（起点 = 系列创建时刻）；ME 一个都没收到 → 红灯，链接指向 CRM', async () => {
+    const created = hoursBefore(30)
+    const { deps, objectiveCalls } = makeDeps({
+      config: OBJECTIVE_CONFIG,
+      objectiveFacts: { [WHATSAPP_ID]: seriesFacts(WHATSAPP_ID, { total: spendRow(WHATSAPP_ID, { conversations: 5, cost_per_conversation: 3.2 }) }) },
+      me: { read: true, count: 0, since: created },
+    })
+    const { ids, step } = fakeStep()
+    const out = await runLaunchWatch(step, deps)
+    expect(ids).toContain(`me-inbound:c1:${WHATSAPP_ID}`)
+    expect(objectiveCalls.me).toEqual([{ clientId: 'c1', since: created }])
+    const whatsapp = out.clients[0].objective_watch?.series.find(s => s.campaign_id === WHATSAPP_ID)
+    expect(whatsapp?.alerts.map(a => [a.code, a.level])).toEqual([['me_not_receiving', 'red']])
+    expect(whatsapp?.alerts[0].href).toBe('https://app.example.test/dashboard/clients/c1/crm')
+    expect(whatsapp?.me).toMatchObject({ read: true, count: 0, meta_conversations: 5 })
+  })
+
+  it('Meta 还没有聊天数、或是播放量系列 → 不去数 ME（用不上）', async () => {
+    const { deps, objectiveCalls } = makeDeps({
+      config: OBJECTIVE_CONFIG,
+      objectiveFacts: { [AWARENESS_ID]: seriesFacts(AWARENESS_ID, { total: spendRow(AWARENESS_ID, { conversations: 7 }) }) },
+    })
+    const { ids, step } = fakeStep()
+    await runLaunchWatch(step, deps)
+    expect(objectiveCalls.me).toEqual([])
+    expect(ids.some(id => id.startsWith('me-inbound'))).toBe(false)
+  })
+
+  it('读到了聊天数、但读不出系列创建时刻 → 不去数，记「读不到」，不当成 ME 没收到', async () => {
+    const facts = seriesFacts(WHATSAPP_ID, { total: spendRow(WHATSAPP_ID, { conversations: 4 }) })
+    facts.campaign.created_at = null
+    const { deps, objectiveCalls } = makeDeps({ config: OBJECTIVE_CONFIG, objectiveFacts: { [WHATSAPP_ID]: facts } })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    const whatsapp = out.clients[0].objective_watch?.series.find(s => s.campaign_id === WHATSAPP_ID)
+    expect(objectiveCalls.me).toEqual([])
+    expect(whatsapp?.alerts).toEqual([])
+    expect(whatsapp?.me).toMatchObject({ read: false, count: null, meta_conversations: 4 })
+  })
+
+  it('系列读不到 → 该系列 state=unread 并出一条「读不到」提醒；这一轮在运行记录里算失败，不静默', async () => {
+    const { deps } = makeDeps({ config: OBJECTIVE_CONFIG, objectiveFacts: { [AWARENESS_ID]: { read: false, error: '令牌过期' } } })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    const awareness = out.clients[0].objective_watch?.series[0]
+    expect(awareness).toMatchObject({ state: 'unread', error: '令牌过期' })
+    expect(awareness?.alerts.map(a => a.code)).toEqual(['read_failed'])
+    expect(summarizeRunCounts(out)).toEqual({ processed: 1, completed: 0, failed: 1 })
+  })
+
+  it('按目标盯盘的结论过一遍记忆化（JSON 来回）也不丢', async () => {
+    const { deps } = makeDeps({ config: OBJECTIVE_CONFIG })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    expect(JSON.parse(JSON.stringify(out))).toEqual(out)
+  })
+})
+
+describe('summarizeRunCounts · 运行记录里的 processed / completed / failed', () => {
+  const entry = (over: Partial<LaunchWatchSummary['clients'][number]>): LaunchWatchSummary['clients'][number] => ({
+    client_id: 'c1', active: false, spend_seen: null, series_found: null, sent: [], error: null, ...over,
+  })
+  const summary = (clients: LaunchWatchSummary['clients']): LaunchWatchSummary => ({ checked_at: NOW.toISOString(), no_publish: true, clients })
+  const objective = (state: 'delivering' | 'unread') => ({
+    as_of: NOW.toISOString(),
+    series: [{ campaign_id: AWARENESS_ID, label: 'x', kind: 'awareness' as const, state, objective: null, anchor_at: null, hours_since_anchor: null, total: null, by_adset: [], by_ad: [], ad_status_counts: {}, me: null, headline: '', alerts: [], error: null }],
+  })
+
+  it('盯盘窗口里的客户算干了活；窗口外又没配按目标盯盘的不算', () => {
+    expect(summarizeRunCounts(summary([entry({ active: true }), entry({ client_id: 'c2' })]))).toEqual({ processed: 1, completed: 1, failed: 0 })
+  })
+
+  it('花费没读到算失败', () => {
+    expect(summarizeRunCounts(summary([entry({ active: true, error: '没有可用的 Meta 令牌' })]))).toEqual({ processed: 1, completed: 0, failed: 1 })
+  })
+
+  it('配了按目标盯盘的客户即使窗口外也算干了活；有系列读不到算失败', () => {
+    expect(summarizeRunCounts(summary([entry({ objective_watch: objective('delivering') })]))).toEqual({ processed: 1, completed: 1, failed: 0 })
+    expect(summarizeRunCounts(summary([entry({ objective_watch: objective('unread') })]))).toEqual({ processed: 1, completed: 0, failed: 1 })
+  })
+})
+
+describe('readObjectiveSeries · 真读（假 fetch）', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('用配置里的广告账户和系列编号，令牌只进 Authorization 头；读不到的东西不抛错', async () => {
+    const calls: { path: string; auth: string | null }[] = []
+    const node = { id: AWARENESS_ID, name: '系列', objective: 'OUTCOME_AWARENESS', status: 'ACTIVE', effective_status: 'ACTIVE', created_time: '2026-10-21T10:00:00+0000', updated_time: '2026-10-21T11:00:00+0000' }
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = new URL(String(input))
+      const path = url.pathname.replace(/^\/v\d+\.\d+\//, '')
+      calls.push({ path, auth: new Headers(init?.headers).get('authorization') })
+      if (path === 'act_1111111111') return new Response(JSON.stringify({ timezone_name: 'Pacific/Auckland' }), { status: 200 })
+      if (path === AWARENESS_ID) return new Response(JSON.stringify(node), { status: 200 })
+      return new Response(JSON.stringify({ data: [] }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const series = OBJECTIVE_WATCH.series[0] as ObjectiveWatchSeries
+    const out = await readObjectiveSeries('c1', OBJECTIVE_CONFIG, series, NOW)
+    expect(out.read).toBe(true)
+    expect(calls.map(c => c.path)).toContain(`${AWARENESS_ID}/insights`)
+    expect(calls.every(c => c.auth === 'Bearer FAKE_TOKEN_VALUE_123')).toBe(true)
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { message: 'boom', code: 100 } }), { status: 400 })))
+    const failed = await readObjectiveSeries('c1', OBJECTIVE_CONFIG, series, NOW)
+    expect(failed.read).toBe(false)
   })
 })
 

@@ -9,7 +9,9 @@
  *   · ads_tracking_preflight_fix    回执里的红灯（或硬门灰）原样下发，告诉开发怎么修；
  *                                   开投后读回的红灯 / 黄灯（样本不足等）、以及「没读到」的灰灯（令牌失效 / 接口出错 /
  *                                   范围被拒）也在这里下发——它没有看板位置，只落日志就是死在日志里；
- *                                   预计开投日过了 24 小时盯盘还是找不到本次系列，也在这里喊一声
+ *                                   预计开投日过了 24 小时盯盘还是找不到本次系列，也在这里喊一声；
+ *                                   按目标盯盘（播放量 / WhatsApp 系列）的提醒——改动后一直没花钱、频次偏高、
+ *                                   ME 没收到 WhatsApp 会话、系列读不到——也走这里：只读盯盘函数最近一次的回执，不自己现算
  *   · ads_tracking_preflight_broken 检查自己没跑成（开发欠账，不占 PM 的清单；PM 那一栏会留一句「今天没查成」）
  *
  * 🔴 本文件一行写库都没有。
@@ -20,6 +22,7 @@ import type { ManualItem } from './manual-item-types'
 import { APP_BASE } from './binding-request-items'
 import { getTrackingClientConfig, listTrackingClientIds } from '@/lib/ads-tracking-preflight/client-config'
 import { LAUNCH_WATCH_JOB, isWatchActive, seriesWatchStatusFromRows } from '@/lib/ads-tracking-preflight/launch-watch'
+import { latestObjectiveAlerts } from '@/lib/ads-tracking-preflight/objective-watch'
 import { dateInTimezone } from '@/lib/ads-tracking-preflight/post-launch'
 import {
   TRACKING_PREFLIGHT_JOB,
@@ -308,6 +311,45 @@ async function pushSeriesNotFoundItems(
   }
 }
 
+// ─── 按目标盯盘的提醒 ───────────────────────────────────────────────────────────
+
+const LEVEL_ICON = { red: '🔴', yellow: '🟡' } as const
+
+/**
+ * 按目标盯盘（播放量 / WhatsApp 系列）：盯盘函数每小时把每个系列的提醒（什么 / 怎么办 / 链接）写进自己的运行记录，
+ * 这里只取最新一次翻成待办——问题消了下一小时就没了，不需要谁去关。
+ * 和开投前体检互相独立（体检没跑成也照样出）；读盯盘记录出任何问题都不出（也不抛错）——
+ * 「盯盘函数自己没在跑」由运行记录健康检查管，不能被说成「系列有事」。
+ */
+async function pushObjectiveWatchItems(
+  supabase: SupabaseClient,
+  clientIds: readonly string[],
+  nameOf: (id: string) => string,
+  now: Date,
+  items: ManualItem[],
+): Promise<void> {
+  const watched = clientIds.filter(id => getTrackingClientConfig(id)?.objective_watch !== undefined)
+  if (watched.length === 0) return
+  let rows: RunRow[]
+  try {
+    rows = await loadWatchRows(supabase, now)
+  } catch {
+    return
+  }
+  for (const clientId of watched) {
+    for (const alert of latestObjectiveAlerts(rows, clientId, now)) {
+      items.push({
+        kind: 'ads_tracking_preflight_fix',
+        client_id: clientId,
+        client_name: nameOf(clientId),
+        what: `${LEVEL_ICON[alert.level]} ${alert.what}`,
+        how: alert.how,
+        href: alert.href,
+      })
+    }
+  }
+}
+
 /** 从最近几轮开投前追踪检查的回执生成待办。读失败 / 没跑 / 过期都要出一条，不能静默。 */
 export async function pushAdsTrackingPreflightItems(
   supabase: SupabaseClient,
@@ -317,6 +359,9 @@ export async function pushAdsTrackingPreflightItems(
 ): Promise<void> {
   const clientIds = listTrackingClientIds()
   if (clientIds.length === 0) return
+
+  // 按目标盯盘的提醒不依赖开投前体检有没有跑成，先出，免得下面的提前返回把它漏掉
+  await pushObjectiveWatchItems(supabase, clientIds, nameOf, now, items)
 
   let rows: RunRow[]
   try {

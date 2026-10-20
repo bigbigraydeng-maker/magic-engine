@@ -21,7 +21,9 @@ const MAX_DATASET_PAGES = 3
 const MISSING_EVENT = '__missing_event'
 
 const ACCOUNT_ID_RE = /^act_\d{6,20}$/
-const PATH_ALLOWLIST_RE = /^(act_\d{6,20}(\/(adspixels|insights|campaigns))?|\d{6,20}\/stats|dataset_quality)$/
+// 只读路径白名单：广告账户及其数据集 / 洞察 / 系列列表；数据集统计；数据集质量；
+// 以及按目标盯盘用的「系列节点 + 它的广告组 / 广告 / 洞察」（数字编号 + 固定的这几条边）。
+const PATH_ALLOWLIST_RE = /^(act_\d{6,20}(\/(adspixels|insights|campaigns))?|\d{6,20}(\/(stats|adsets|ads|insights))?|dataset_quality)$/
 
 export interface MetaReadInput {
   adAccountId: string
