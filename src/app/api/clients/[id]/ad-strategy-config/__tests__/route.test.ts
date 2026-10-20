@@ -506,6 +506,24 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     expect(pool.find(e => e.ref === 'v1')!.status).toBe('candidate')
   })
 
+  it('库里已有 testing 的素材：界面按惯例用 candidate 整数组提交后，库里状态仍是 testing（含批准字段不被凭空加上）', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [
+      { kind: 'meta_video', ref: 'v1', status: 'testing' },
+    ] }])
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }], expected_version: null }),
+      params(),
+    )
+    expect(res.status).toBe(200)
+    const [written] = upsert.mock.calls[0]
+    const pool = written.creative_pool as Array<Record<string, unknown>>
+    const v1 = pool.find(e => e.ref === 'v1')!
+    expect(v1.status).toBe('testing')
+    expect(v1).not.toHaveProperty('approved_by')
+    expect(v1).not.toHaveProperty('approved_at')
+  })
+
   it('请求体里同一个 ref 出现两次 → 400 creative_pool_duplicate_ref，不写库', async () => {
     signedInAs(STAFF)
     const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [] }])
