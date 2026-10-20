@@ -32,6 +32,16 @@
 --    库内版本以 supabase_migrations.schema_migrations 为准。
 --    本文件只写文件，不应用；应用须 PM 明确授权（风险级 A）。
 --
+-- 上线顺序（硬性）
+-- ----------------
+-- 代码必须先切到新函数（link_ad_at_creation_v1 / link_ad_registration_v1 /
+-- link_ad_backfill_v1 的新签名），再 apply 本迁移。
+-- 反序（先 apply 再切代码）= 旧代码仍走 service_role 直写 upsert，而本迁移已
+-- REVOKE 掉 service_role 的写权限 → 建广告处的补链写入会静默失败（PostgREST
+-- 返回权限错误，业务侧若未检查则表现为「广告建了但没关联」）。
+-- 因此：先发代码（新函数已存在前会报函数不存在，属显式失败，可回滚代码），
+-- 再 apply 迁移。
+--
 -- ROLLBACK（仅 PM 授权迁移可执行，单向原则不变）
 -- ------------------------------------------------
 -- 回滚 = 另写一条 PM 授权的迁移，按相反顺序：
@@ -67,6 +77,10 @@
 --   不是缺陷；但接线方必须知道：先有 meta_creative_id，才有 touch。
 -- · 未在带 supautils 的 Supabase 分支库试跑；应用线上前必须先在 Supabase
 --   分支库验证（OWNER TO / GRANT role TO CURRENT_USER 在非超级用户下的行为）。
+-- · 表属主（Supabase 上是 postgres）仍可直写这些表；数据库层只防
+--   service_role / anon / authenticated 等非属主角色。属主直写不在本迁移的
+--   防护范围内（属主可绕过 RLS、可 DROP 触发器），这是平台层面的残余风险，
+--   只能靠「属主凭据不落到应用」的运维约束兜底。
 -- =============================================================================
 
 BEGIN;
@@ -219,6 +233,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS creative_binding_attestations_active_key
 CREATE INDEX IF NOT EXISTS creative_binding_attestations_work_order_idx
   ON public.creative_binding_attestations (client_id, work_order_id);
 
+-- attestation_id 外键：指向签字表。幂等（已存在同名约束则跳过）。
+-- 注意：签字表是追加式（不删行），因此 ON DELETE 行为实际不会被触发；
+-- 写 RESTRICT 是为了「万一有人绕过触发器删签字」时立刻报错，而不是静默置空。
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'ad_creative_links_attestation_id_fkey'
+      AND conrelid = 'public.ad_creative_links'::regclass
+  ) THEN
+    ALTER TABLE public.ad_creative_links
+      ADD CONSTRAINT ad_creative_links_attestation_id_fkey
+      FOREIGN KEY (attestation_id)
+      REFERENCES public.creative_binding_attestations(id)
+      ON DELETE RESTRICT;
+  END IF;
+END $$;
+
 COMMENT ON TABLE public.creative_binding_attestations IS
   'PM 对「这条片子的最终 mp4」的签字。追加式：撤回只置 retracted_*，不删行。有效 = 哈希等于工单此刻文件哈希 ∧ retracted_at 为空（唯一定义在 creative_binding_is_valid）。';
 COMMENT ON COLUMN public.creative_binding_attestations.final_mp4_sha256 IS
@@ -244,12 +276,18 @@ CREATE TABLE IF NOT EXISTS public.link_swap_intents (
 CREATE INDEX IF NOT EXISTS link_swap_intents_link_idx
   ON public.link_swap_intents (link_id, state);
 
+-- 同一关联行最多一条未了结意图（swap_pending / result_unknown）。
+-- 与 link_swap_intent_open_v1 里的显式检查互为兜底：并发双写时由索引报唯一冲突。
+CREATE UNIQUE INDEX IF NOT EXISTS link_swap_intents_one_open_per_link
+  ON public.link_swap_intents (link_id)
+  WHERE state IN ('swap_pending','result_unknown');
+
 COMMENT ON TABLE public.link_swap_intents IS
   '换创意意图（追加式，不置 stale_at）。先写意图再调 Meta。state: swap_pending | result_unknown | resolved。只有换创意被确认成功才置关联行 stale_at（s1 §3）。';
 COMMENT ON COLUMN public.link_swap_intents.state IS
-  'swap_pending（调 Meta 前）/ result_unknown（超时/崩溃/网络断）/ resolved（对账或明确结果后）。读取方见 s1 §3 状态机。';
+  'swap_pending（调 Meta 前）/ result_unknown（超时/崩溃/网络断，意图保持未了结）/ resolved（对账或明确结果后）。读取方见 s1 §3 状态机。';
 COMMENT ON COLUMN public.link_swap_intents.resolution IS
-  'resolved 时的结论：confirmed_success | confirmed_failure | reconciled_old | reconciled_new | reconciled_third_party。只经 link_mark_stale_v1 写。';
+  'resolved 时的结论：confirmed_success | explicit_failure | reconciled_old | reconciled_new | reconciled_third。只经 link_swap_intent_resolve_v1 写。';
 
 -- 2.3 stale 原因追加表（只增不改，只有 link_mark_stale_v1 能写）
 CREATE TABLE IF NOT EXISTS public.link_stale_reasons (
@@ -449,11 +487,72 @@ GRANT UPDATE (updated_at, final_mp4_sha256) ON public.content_work_orders TO ad_
 -- SET search_path = public, pg_temp 钉死。REVOKE ALL FROM PUBLIC，只授对应角色。
 
 -- -----------------------------------------------------------------------------
+-- 4.0 ad_link_check_attestation_v1 —— 内部校验助手（不授任何角色）
+-- -----------------------------------------------------------------------------
+-- 强绑定（asset_binding）的唯一校验入口。三个补链函数都调它，避免校验逻辑漂移。
+-- 校验项（任一不满足即 RAISE）：
+--   · 签字存在
+--   · 签字 client_id == p_client_id
+--   · creative_binding_is_valid（未撤回 ∧ 哈希 == 工单此刻哈希）
+--   · 签字 work_order_id::text == p_creative_ref（creative_ref 即工单 id）
+--   · 签字 video_id == p_source_video_id
+-- 只授 EXECUTE 给 ad_link_fn_owner 自己（其余函数以属主身份调用它）。
+CREATE OR REPLACE FUNCTION public.ad_link_check_attestation_v1(
+  p_client_id       uuid,
+  p_attestation_id  uuid,
+  p_creative_ref    text,
+  p_source_video_id text
+) RETURNS void
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_client   uuid;
+  v_wo_id    uuid;
+  v_video_id text;
+BEGIN
+  IF p_attestation_id IS NULL THEN
+    RAISE EXCEPTION 'ad_link_check_attestation_v1: attestation_id 必填';
+  END IF;
+  IF p_creative_ref IS NULL OR p_creative_ref = '' THEN
+    RAISE EXCEPTION 'ad_link_check_attestation_v1: creative_ref 必填（asset_binding 的 creative_ref 必须是工单 id）';
+  END IF;
+
+  SELECT client_id, work_order_id, video_id
+    INTO v_client, v_wo_id, v_video_id
+    FROM public.creative_binding_attestations
+   WHERE id = p_attestation_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ad_link_check_attestation_v1: 签字不存在（%）', p_attestation_id;
+  END IF;
+  IF v_client IS DISTINCT FROM p_client_id THEN
+    RAISE EXCEPTION 'ad_link_check_attestation_v1: 签字 client_id 不一致（签字=%, 入参=%）', v_client, p_client_id;
+  END IF;
+  IF NOT public.creative_binding_is_valid(p_attestation_id) THEN
+    RAISE EXCEPTION 'ad_link_check_attestation_v1: 签字无效（attestation_id=%）', p_attestation_id;
+  END IF;
+  IF v_wo_id::text IS DISTINCT FROM p_creative_ref THEN
+    RAISE EXCEPTION 'ad_link_check_attestation_v1: 签字 work_order_id 与 creative_ref 不一致（签字=%, creative_ref=%）', v_wo_id, p_creative_ref;
+  END IF;
+  IF v_video_id IS DISTINCT FROM p_source_video_id THEN
+    RAISE EXCEPTION 'ad_link_check_attestation_v1: 签字 video_id 与 source_video_id 不一致（签字=%, 入参=%）', v_video_id, p_source_video_id;
+  END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.ad_link_check_attestation_v1(uuid,uuid,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.ad_link_check_attestation_v1(uuid,uuid,text,text) TO ad_link_fn_owner;
+
+-- -----------------------------------------------------------------------------
 -- 4.1 link_ad_at_creation_v1 —— 建广告处（winner_reel_sync / publishDraftPaused 后）
 -- -----------------------------------------------------------------------------
--- 签名由 10 参扩为 13 参（尾部三个 play 列，带默认值）。旧签名先 DROP，
+-- 签名由 10 参扩为 15 参（尾部三个 play 列 + 两个补链列，带默认值）。旧签名先 DROP，
 -- 否则 CREATE OR REPLACE 会因参数列表不同而留下两个重载。
 DROP FUNCTION IF EXISTS public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text);
+DROP FUNCTION IF EXISTS public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb);
 
 CREATE OR REPLACE FUNCTION public.link_ad_at_creation_v1(
   p_client_id        uuid,
@@ -468,7 +567,9 @@ CREATE OR REPLACE FUNCTION public.link_ad_at_creation_v1(
   p_created_by       text,
   p_play             text DEFAULT NULL,
   p_play_source      text DEFAULT NULL,
-  p_play_context     jsonb DEFAULT NULL
+  p_play_context     jsonb DEFAULT NULL,
+  p_attestation_id   uuid DEFAULT NULL,
+  p_source_video_id  text DEFAULT NULL
 ) RETURNS uuid
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -494,16 +595,25 @@ BEGIN
     RAISE EXCEPTION 'link_ad_at_creation_v1: play_source 只能在 play 非空时写入';
   END IF;
 
+  -- 强绑定必须引用有效签字（与登记/回填同一校验助手）。
+  IF p_link_method = 'asset_binding' THEN
+    PERFORM public.ad_link_check_attestation_v1(
+      p_client_id, p_attestation_id, p_creative_ref, p_source_video_id
+    );
+  END IF;
+
   INSERT INTO public.ad_creative_links (
     client_id, platform, ad_id, page_id, post_id,
     creative_ref, creative_source, link_method, unresolved_reason,
     created_by, link_source,
-    play, play_source, play_context
+    play, play_source, play_context,
+    attestation_id, source_video_id
   ) VALUES (
     p_client_id, COALESCE(p_platform,'meta'), p_ad_id, p_page_id, p_post_id,
     p_creative_ref, p_creative_source, p_link_method, p_unresolved_reason,
     p_created_by, 'ad_creation_path',
-    p_play, p_play_source, p_play_context
+    p_play, p_play_source, p_play_context,
+    p_attestation_id, p_source_video_id
   )
   ON CONFLICT (client_id, platform, ad_id) DO UPDATE
     SET page_id           = EXCLUDED.page_id,
@@ -513,9 +623,15 @@ BEGIN
         link_method       = EXCLUDED.link_method,
         unresolved_reason = EXCLUDED.unresolved_reason,
         link_source       = EXCLUDED.link_source,
-        play              = EXCLUDED.play,
-        play_source       = CASE WHEN EXCLUDED.play IS NOT NULL THEN EXCLUDED.play_source ELSE NULL END,
-        play_context      = EXCLUDED.play_context
+        -- play 三列：入参为 NULL 时保留旧值，绝不用 NULL 覆盖已有 play。
+        play              = COALESCE(EXCLUDED.play, public.ad_creative_links.play),
+        play_source       = CASE
+                              WHEN EXCLUDED.play IS NOT NULL THEN EXCLUDED.play_source
+                              ELSE public.ad_creative_links.play_source
+                            END,
+        play_context      = COALESCE(EXCLUDED.play_context, public.ad_creative_links.play_context),
+        attestation_id    = COALESCE(EXCLUDED.attestation_id, public.ad_creative_links.attestation_id),
+        source_video_id   = COALESCE(EXCLUDED.source_video_id, public.ad_creative_links.source_video_id)
     -- 已解析行不允许被覆盖回 unresolved（触发器也会拦，这里显式拒绝更早报错）
     WHERE public.ad_creative_links.link_method = 'unresolved'
        OR public.ad_creative_links.link_method = EXCLUDED.link_method
@@ -528,8 +644,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb) TO ad_link_creation_rw;
+REVOKE ALL ON FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb,uuid,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb,uuid,text) TO ad_link_creation_rw;
 
 -- -----------------------------------------------------------------------------
 -- 4.2 link_ad_registration_v1 —— 每日自动登记 + 补登路由
@@ -564,9 +680,7 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_id            uuid;
-  v_att_client    uuid;
-  v_att_video_id  text;
+  v_id uuid;
 BEGIN
   IF p_client_id IS NULL OR p_ad_id IS NULL OR p_post_id IS NULL THEN
     RAISE EXCEPTION 'link_ad_registration_v1: client_id/ad_id/post_id 必填';
@@ -585,24 +699,12 @@ BEGIN
   END IF;
 
   -- 强绑定（asset_binding）必须引用一条有效签字，且签字属于同一 client、
-  -- source_video_id 与签字记录的 video_id 一致。provisional 不要求签字。
+  -- work_order_id 与 creative_ref 一致、source_video_id 与签字记录的 video_id 一致。
+  -- provisional 不要求签字。校验逻辑集中在 ad_link_check_attestation_v1。
   IF p_link_method = 'asset_binding' THEN
-    IF p_attestation_id IS NULL THEN
-      RAISE EXCEPTION 'link_ad_registration_v1: asset_binding 必须带 attestation_id';
-    END IF;
-    IF NOT public.creative_binding_is_valid(p_attestation_id) THEN
-      RAISE EXCEPTION 'link_ad_registration_v1: 签字无效（attestation_id=%）', p_attestation_id;
-    END IF;
-    SELECT client_id, video_id
-      INTO v_att_client, v_att_video_id
-      FROM public.creative_binding_attestations
-     WHERE id = p_attestation_id;
-    IF v_att_client IS DISTINCT FROM p_client_id THEN
-      RAISE EXCEPTION 'link_ad_registration_v1: 签字 client_id 不一致（签字=%, 入参=%）', v_att_client, p_client_id;
-    END IF;
-    IF p_source_video_id IS NULL OR p_source_video_id IS DISTINCT FROM v_att_video_id THEN
-      RAISE EXCEPTION 'link_ad_registration_v1: asset_binding 的 source_video_id 必须等于签字记录的 video_id（签字=%, 入参=%）', v_att_video_id, p_source_video_id;
-    END IF;
+    PERFORM public.ad_link_check_attestation_v1(
+      p_client_id, p_attestation_id, p_creative_ref, p_source_video_id
+    );
   END IF;
 
   INSERT INTO public.ad_creative_links (
@@ -698,6 +800,13 @@ BEGIN
   END IF;
   IF p_play IS NULL AND p_play_source IS NOT NULL THEN
     RAISE EXCEPTION 'link_ad_backfill_v1: play_source 只能在 play 非空时写入';
+  END IF;
+
+  -- 强绑定必须引用有效签字（与登记/建广告同一校验助手）。
+  IF p_link_method = 'asset_binding' THEN
+    PERFORM public.ad_link_check_attestation_v1(
+      p_client_id, p_attestation_id, p_creative_ref, p_source_video_id
+    );
   END IF;
 
   INSERT INTO public.ad_creative_links (
@@ -1108,15 +1217,27 @@ GRANT EXECUTE ON FUNCTION public.attestation_retract_v1(uuid,text,text) TO ad_li
 -- 出片管道渲染完成时调用（接线是后续块）。本迁移只建入口与守卫。
 -- 写入 = 更新 content_work_orders.final_mp4_sha256 + 追加一行历史。
 -- BEFORE UPDATE 触发器（见 6.2）只放行会话标志 app.ad_link_fn='hash_write' 的改写。
+--
+-- 重渲规则（单向）：
+--   · 工单当前哈希为 NULL → 直接写入（首次记录）。
+--   · 工单当前哈希非 NULL 且与 p_sha256 相同 → 幂等，不写历史（无变化）。
+--   · 工单当前哈希非 NULL 且不同 → 只有 p_rerender = true 才允许改写；
+--     否则 RAISE。重渲 = 旧签字全部失效（creative_binding_is_valid 现场比对）。
+-- 历史行：每次实际改写（含首次写入）都追加一行。
+DROP FUNCTION IF EXISTS public.work_order_set_final_hash_v1(uuid,text,text);
+
 CREATE OR REPLACE FUNCTION public.work_order_set_final_hash_v1(
   p_work_order_id uuid,
   p_sha256        text,
-  p_by            text
+  p_by            text,
+  p_rerender      boolean DEFAULT false
 ) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_current text;
 BEGIN
   IF p_work_order_id IS NULL OR p_sha256 IS NULL OR p_by IS NULL OR p_by = '' THEN
     RAISE EXCEPTION 'work_order_set_final_hash_v1: work_order_id / sha256 / set_by 必填';
@@ -1125,23 +1246,40 @@ BEGIN
     RAISE EXCEPTION 'work_order_set_final_hash_v1: sha256 必须是 64 位小写十六进制';
   END IF;
 
+  -- 锁住工单行，避免并发写入互相覆盖。
+  SELECT final_mp4_sha256
+    INTO v_current
+    FROM public.content_work_orders
+   WHERE id = p_work_order_id
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'work_order_set_final_hash_v1: 工单不存在（%）', p_work_order_id;
+  END IF;
+
+  -- 已有哈希且不同：只有显式重渲才允许改写。
+  IF v_current IS NOT NULL AND v_current <> p_sha256 AND p_rerender IS NOT TRUE THEN
+    RAISE EXCEPTION 'work_order_set_final_hash_v1: 工单已有最终哈希（%），改写必须显式 p_rerender=true（work_order_id=%）', v_current, p_work_order_id;
+  END IF;
+
+  -- 无变化：幂等返回，不写历史。
+  IF v_current IS NOT DISTINCT FROM p_sha256 THEN
+    RETURN;
+  END IF;
+
   PERFORM set_config('app.ad_link_fn', 'hash_write', true);
 
   UPDATE public.content_work_orders
      SET final_mp4_sha256 = p_sha256
    WHERE id = p_work_order_id;
 
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'work_order_set_final_hash_v1: 工单不存在（%）', p_work_order_id;
-  END IF;
-
   INSERT INTO public.content_work_order_hash_history (work_order_id, sha256, set_by)
   VALUES (p_work_order_id, p_sha256, p_by);
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text) TO ad_link_hash_rw;
+REVOKE ALL ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text,boolean) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text,boolean) TO ad_link_hash_rw;
 
 -- -----------------------------------------------------------------------------
 -- 4.11 link_swap_intent_open_v1 —— 写换创意意图（调 Meta 之前）
@@ -1250,6 +1388,15 @@ BEGIN
   -- 会话标志：只在本事务内有效（set_config(..., true)）。
   PERFORM set_config('app.ad_link_fn', 'swap_resolve', true);
 
+  -- result_unknown = 仍未了结：只把 state 记为 result_unknown，不置 resolved_at、
+  -- 不写 resolution，意图保持开放（后续对账再了结）。
+  IF p_state = 'result_unknown' THEN
+    UPDATE public.link_swap_intents
+       SET state = 'result_unknown'
+     WHERE id = p_intent_id;
+    RETURN;
+  END IF;
+
   UPDATE public.link_swap_intents
      SET state       = p_state,
          resolved_at = now(),
@@ -1287,7 +1434,8 @@ GRANT EXECUTE ON FUNCTION public.link_swap_intent_resolve_v1(uuid,text,text) TO 
 GRANT ad_link_fn_owner TO CURRENT_USER;
 GRANT CREATE ON SCHEMA public TO ad_link_fn_owner;
 
-ALTER FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb) OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.ad_link_check_attestation_v1(uuid,uuid,text,text)                                  OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb,uuid,text) OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.link_ad_registration_v1(uuid,text,text,text,text,text,text,text,text,text,timestamptz,text,text,jsonb,text,uuid,text) OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.link_ad_backfill_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,text,jsonb,text,uuid,text) OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.creative_binding_attest_v1(uuid,uuid,text,text,numeric,text)                       OWNER TO ad_link_fn_owner;
@@ -1299,7 +1447,7 @@ ALTER FUNCTION public.creative_link_has_pending_swap(uuid)                      
 ALTER FUNCTION public.attestation_retract_v1(uuid,text,text)                                             OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.link_swap_intent_open_v1(uuid,text,text)                                           OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.link_swap_intent_resolve_v1(uuid,text,text)                                        OWNER TO ad_link_fn_owner;
-ALTER FUNCTION public.work_order_set_final_hash_v1(uuid,text,text)                                       OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.work_order_set_final_hash_v1(uuid,text,text,boolean)                               OWNER TO ad_link_fn_owner;
 
 -- =============================================================================
 -- 6. ad_creative_links 触发器：已解析行只放行受审写入
@@ -1774,6 +1922,7 @@ BEGIN
        'creative_binding_attest_v1','link_retract_v1','link_mark_stale_v1',
        'link_touch_checked_v1','creative_binding_is_valid','creative_link_has_pending_swap',
        'attestation_retract_v1','link_swap_intent_open_v1','link_swap_intent_resolve_v1',
+       'ad_link_check_attestation_v1',
        'ad_creative_links_guard_update','ad_creative_links_guard_delete','ad_creative_links_guard_truncate',
        'creative_binding_attestations_guard_update','creative_binding_attestations_guard_delete',
        'creative_binding_attestations_guard_truncate',
@@ -1801,11 +1950,12 @@ BEGIN
     RAISE EXCEPTION 'ASSERTION FAILED: 写入角色有直接写权限: %', v_bad;
   END IF;
 
-  -- 5) 除 ad_link_fn_owner 与超级用户外，任何角色都不得对五张表有
+  -- 5) 除 ad_link_fn_owner、表属主与超级用户外，任何角色都不得对五张表有
   --    INSERT/UPDATE/DELETE/TRUNCATE。用 has_table_privilege 逐角色逐表逐权限扫，
   --    覆盖直接授权、角色继承、PUBLIC 授权等所有路径。
-  --    跳过：超级用户（本就绕过权限检查）、内置角色（pg_*）、
-  --    Supabase 平台角色（postgres / supabase_admin / supabase_auth_admin /
+  --    跳过：超级用户（本就绕过权限检查）、表属主（Supabase 上是 postgres，
+  --    非超级用户，但属主天然可直写 —— 这是平台层面的残余风险，见文件头）、
+  --    内置角色（pg_*）、Supabase 平台角色（supabase_admin / supabase_auth_admin /
   --    supabase_storage_admin / dashboard_user）—— 它们是平台运维身份，
   --    不属于本迁移的权限矩阵。
   SELECT string_agg(format('%s:%s:%s', r.rolname, t.tbl, p.priv), ', ')
@@ -1821,9 +1971,13 @@ BEGIN
     CROSS JOIN (VALUES ('INSERT'),('UPDATE'),('DELETE'),('TRUNCATE')) AS p(priv)
    WHERE NOT r.rolsuper
      AND r.rolname NOT LIKE 'pg\_%'
-     AND r.rolname NOT IN ('postgres','supabase_admin','supabase_auth_admin',
+     AND r.rolname NOT IN ('supabase_admin','supabase_auth_admin',
                            'supabase_storage_admin','dashboard_user')
      AND r.rolname <> 'ad_link_fn_owner'
+     AND r.rolname IS DISTINCT FROM (
+           SELECT tableowner FROM pg_tables
+            WHERE schemaname = 'public' AND tablename = t.tbl
+         )
      AND has_table_privilege(r.oid, format('public.%I', t.tbl), p.priv);
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: 非属主角色仍有写权限: %', v_bad;
@@ -1867,7 +2021,7 @@ BEGIN
     FROM pg_roles r
    WHERE r.rolname IN ('ad_link_creation_rw','ad_link_registration_rw','ad_link_attest_rw',
                        'ad_link_backfill_rw','ad_link_retract_rw','ad_link_stale_rw')
-     AND has_function_privilege(r.oid, 'public.work_order_set_final_hash_v1(uuid,text,text)', 'EXECUTE');
+     AND has_function_privilege(r.oid, 'public.work_order_set_final_hash_v1(uuid,text,text,boolean)', 'EXECUTE');
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: 非哈希角色可执行 work_order_set_final_hash_v1: %', v_bad;
   END IF;
@@ -1882,6 +2036,31 @@ BEGIN
      AND p.pronargs <> 17;
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: 补链函数存在非 17 参重载: %', v_bad;
+  END IF;
+
+  -- 8) 建广告函数只允许 15 参版本；哈希写入函数只允许 4 参版本
+  SELECT string_agg(format('%s(%s)', p.proname, pg_get_function_identity_arguments(p.oid)), ', ')
+    INTO v_bad
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public'
+     AND (
+       (p.proname = 'link_ad_at_creation_v1' AND p.pronargs <> 15)
+       OR (p.proname = 'work_order_set_final_hash_v1' AND p.pronargs <> 4)
+     );
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: 函数存在非预期参数个数的重载: %', v_bad;
+  END IF;
+
+  -- 9) 内部校验助手不得授给任何写入角色（只授属主自己）
+  SELECT string_agg(r.rolname, ', ')
+    INTO v_bad
+    FROM pg_roles r
+   WHERE r.rolname IN ('ad_link_creation_rw','ad_link_registration_rw','ad_link_attest_rw',
+                       'ad_link_backfill_rw','ad_link_retract_rw','ad_link_stale_rw','ad_link_hash_rw')
+     AND has_function_privilege(r.oid, 'public.ad_link_check_attestation_v1(uuid,uuid,text,text)', 'EXECUTE');
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: 写入角色可执行内部校验助手: %', v_bad;
   END IF;
 
   RAISE NOTICE 'ASSERTIONS PASSED: 权限矩阵符合 s1 §2 / v0.6 §2';

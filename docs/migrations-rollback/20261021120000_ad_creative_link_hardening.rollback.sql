@@ -15,11 +15,14 @@
 --             link_stale_reasons ×3、link_swap_intents ×3、
 --             content_work_orders_guard_hash_update ×1、
 --             content_work_order_hash_history ×3
---   · 函数：13 个业务/只读函数 + 13 个触发器函数（含 work_order_set_final_hash_v1）
+--   · 函数：14 个业务/只读函数（含内部校验助手 ad_link_check_attestation_v1）
+--           + 13 个触发器函数（含 work_order_set_final_hash_v1）
 --   · 表：creative_binding_attestations、link_swap_intents、link_stale_reasons、
 --         content_work_order_hash_history
 --   · 列：ad_creative_links 新增 10 列、content_work_orders.final_mp4_sha256
---   · 约束：content_work_orders_final_mp4_sha256_fmt
+--   · 约束：content_work_orders_final_mp4_sha256_fmt、
+--           ad_creative_links_attestation_id_fkey
+--   · 索引：link_swap_intents_one_open_per_link（随表 DROP 一起消失）
 --   · 策略：ad_link_fn_owner_full ×5、service_role_full ×5（ad_creative_links 恢复原状）
 --   · 角色：ad_link_creation_rw / registration_rw / attest_rw / backfill_rw /
 --           retract_rw / stale_rw / hash_rw / fn_owner
@@ -31,6 +34,12 @@ BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
+
+-- 迁移第 5 节把函数属主改成了 ad_link_fn_owner。非超级用户下 DROP FUNCTION
+-- 要求当前用户是函数属主的成员（或超级用户），否则报 "must be owner of function"。
+-- 这里临时把 ad_link_fn_owner 授给当前用户，全部 DROP 完成后再收回（见第 8 节末）。
+-- 超级用户下 GRANT role TO CURRENT_USER 同样合法（幂等）。
+GRANT ad_link_fn_owner TO CURRENT_USER;
 
 -- =============================================================================
 -- 1) 触发器（先于函数与表）
@@ -59,11 +68,12 @@ DROP TRIGGER IF EXISTS link_swap_intents_guard_update   ON public.link_swap_inte
 -- =============================================================================
 -- 2) 业务 / 只读函数（先收回 EXECUTE 授权，再 DROP）
 -- =============================================================================
-REVOKE ALL ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.work_order_set_final_hash_v1(uuid,text,text,boolean) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.attestation_retract_v1(uuid,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.link_swap_intent_open_v1(uuid,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.link_swap_intent_resolve_v1(uuid,text,text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.ad_link_check_attestation_v1(uuid,uuid,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb,uuid,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.link_ad_registration_v1(uuid,text,text,text,text,text,text,text,text,text,timestamptz,text,text,jsonb,text,uuid,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.link_ad_backfill_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,text,jsonb,text,uuid,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.creative_binding_attest_v1(uuid,uuid,text,text,numeric,text) FROM PUBLIC;
@@ -73,11 +83,12 @@ REVOKE ALL ON FUNCTION public.link_touch_checked_v1(uuid,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.creative_binding_is_valid(uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.creative_link_has_pending_swap(uuid) FROM PUBLIC;
 
-DROP FUNCTION IF EXISTS public.work_order_set_final_hash_v1(uuid,text,text);
+DROP FUNCTION IF EXISTS public.work_order_set_final_hash_v1(uuid,text,text,boolean);
 DROP FUNCTION IF EXISTS public.attestation_retract_v1(uuid,text,text);
 DROP FUNCTION IF EXISTS public.link_swap_intent_open_v1(uuid,text,text);
 DROP FUNCTION IF EXISTS public.link_swap_intent_resolve_v1(uuid,text,text);
-DROP FUNCTION IF EXISTS public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb);
+DROP FUNCTION IF EXISTS public.ad_link_check_attestation_v1(uuid,uuid,text,text);
+DROP FUNCTION IF EXISTS public.link_ad_at_creation_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,jsonb,uuid,text);
 DROP FUNCTION IF EXISTS public.link_ad_registration_v1(uuid,text,text,text,text,text,text,text,text,text,timestamptz,text,text,jsonb,text,uuid,text);
 DROP FUNCTION IF EXISTS public.link_ad_backfill_v1(uuid,text,text,text,text,text,text,text,text,text,text,text,text,jsonb,text,uuid,text);
 DROP FUNCTION IF EXISTS public.creative_binding_attest_v1(uuid,uuid,text,text,numeric,text);
@@ -114,6 +125,11 @@ DROP FUNCTION IF EXISTS public.content_work_order_hash_history_guard_truncate();
 -- =============================================================================
 -- 4) 新表（策略随表一起走；数据一并销毁）
 -- =============================================================================
+-- ad_creative_links.attestation_id 的外键依赖 creative_binding_attestations，
+-- 必须先删约束，否则 DROP TABLE 报 "depends on table"。
+ALTER TABLE public.ad_creative_links
+  DROP CONSTRAINT IF EXISTS ad_creative_links_attestation_id_fkey;
+
 DROP TABLE IF EXISTS public.content_work_order_hash_history;
 DROP TABLE IF EXISTS public.link_stale_reasons;
 DROP TABLE IF EXISTS public.link_swap_intents;
@@ -130,6 +146,7 @@ CREATE POLICY "service_role_full" ON public.ad_creative_links
   FOR ALL USING (true);
 
 ALTER TABLE public.ad_creative_links
+  DROP CONSTRAINT IF EXISTS ad_creative_links_attestation_id_fkey,
   DROP COLUMN IF EXISTS retract_reason,
   DROP COLUMN IF EXISTS retracted_by,
   DROP COLUMN IF EXISTS retracted_at,
@@ -155,9 +172,8 @@ ALTER TABLE public.content_work_orders
 REVOKE UPDATE (updated_at) ON public.content_work_orders FROM ad_link_fn_owner;
 REVOKE SELECT ON public.content_work_orders FROM ad_link_fn_owner;
 REVOKE USAGE ON SCHEMA public FROM ad_link_fn_owner;
--- 迁移第 5 节临时授予的成员资格与 CREATE 权限（迁移末尾已收回，这里幂等再收一次）。
+-- 迁移第 5 节临时授予的 CREATE 权限（迁移末尾已收回，这里幂等再收一次）。
 REVOKE CREATE ON SCHEMA public FROM ad_link_fn_owner;
-REVOKE ad_link_fn_owner FROM CURRENT_USER;
 
 -- =============================================================================
 -- 8) 角色（先收回授权，再 DROP ROLE）
