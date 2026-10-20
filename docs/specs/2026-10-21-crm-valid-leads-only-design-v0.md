@@ -49,7 +49,7 @@ ME CRM 里「今天要联系谁」判断得不准；这里应只自动提取「�
   保证不会改已有阶段 → 我们改成「非咨询」后它不会改回去。**实现时必须有测试钉住这一点。**
 - **`actors.ts`**：机器身份约定 `ai:` / `system:` 前缀 + `describeStageActor`（`actors.ts:56-78`）。
 
-`travel-agent-customer-extract.ts` 是「邮件内容交给大模型」的先例（gpt-4o-mini，对外封装名 Content Engine；
+`travel-agent-customer-extract.ts` 是「邮件内容交给大模型」的先例（gpt-4o-mini，对外封装名 Content Engine；**注意：OpenAI 账户 2026-10-21 实测余额为 0，调用返回 429**；
 把邮件当数据不当指令的提示词写法可参考）。
 
 ## 4. 「合格线索」口径（白纸黑字，先于代码）
@@ -105,15 +105,14 @@ PM 2026-10-05 已定：**表单发来关于旅游的真实问询 = 合格；私�
 ### 5.2 两层判断，宁可漏筛
 
 - **第一层（确定性规则，不花钱）**：自动回复主题（复用 `isAutoReply`）；通用群发服务中转域名。命中 → 判不是咨询并写原因。
-- **第二层（大模型，仅对第一层没判掉、且过了 5.1 的人）**：Content Engine（gpt-4o-mini，同
-  `travel-agent-customer-extract.ts`）。输入：主题 + 已存的前 255 字预览（`raw`，库里本来就有）。
+- **第二层（大模型，仅对第一层没判掉、且过了 5.1 的人）**：平台已有的 Claude Haiku（`src/lib/anthropic/client.ts`，对外叫 Strategy Engine；因 OpenAI 余额为 0 改用它）。输入：主题 + 已存的前 255 字预览（`raw`，库里本来就有）。
   输出：类别（5 类 / enquiry / unsure）、confidence、一句原因、依据原文的短引文。
   **只有「类别 ∈ 5 类」且「confidence ≥ 阈值（可配，默认 0.9）」且「引文真的在原文里」才判不是咨询；
   其余（unsure、解析失败、调用失败、超时）一律不筛。** 邮件内容当数据不当指令；
   **引文校验只防幻觉、不防注入，所以 5.1 第 6 条的确定性硬否决才是兜底。**
 - **外发边界**：每封只把「主题 + 255 字预览」发给大模型供应商——和现有 `travel-agent-customer-extract.ts`
   对同行邮件做的一样，不新增数据类型。
-- **费用**（估算，**未对账单核实**）：每封约 400 词元进 + 80 出，约 $0.0001/封；一次干跑（18 人 + 校准集约 150 封）不到 $0.02。
+- **费用**（估算，**未对账单核实**）：每封约 500 词元进 + 80 出，Haiku 定价（$1/$5 每百万词元，见 `anthropic/client.ts`）约 $0.001/封；一次干跑（十几人 + 金标准约 280 封）约 $0.3 以内。
 
 ### 5.3 判完怎么办：不让人凭空消失；仍只有「今天要联系」「先放着」两张名单
 
@@ -222,7 +221,7 @@ PM 原话：页面上新增一个按钮，遇到不正确的 leads 可以点击�
 
 ## 9. 待定 / 风险
 
-- **未验证**：gpt-4o-mini 对中文 / 混合语言抗议信、只给 255 字预览的判断力 —— 校准集回答。
+- **未验证**：Claude Haiku 对中文 / 混合语言抗议信、只给 255 字预览的判断力 —— 校准集回答。
 - **已核对的「改阶段会连带触发什么」**（统筹 18 ②）：代码里读 `marketing_action / stageSuppressesWorklist` 的只有
   `segments.ts`（移出今天名单）、`lead-followup-due.ts`（跟进提醒同样挡掉）、`crm/today` 与 `crm/contacts` 路由、
   `pipeline-stages` 配置路由；`dnc` 路由既读（`stageSuppressesWorklist`）也写阶段，`nal-mark-won` 只写。实现时在 PR 正文贴 `grep -rn "client_pipeline_stages|stage_key|\.stage\b"` 的命中文件清单，不只写结论。我 grep 全仓**没有找到**把阶段导出给
