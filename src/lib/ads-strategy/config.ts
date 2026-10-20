@@ -11,7 +11,26 @@ import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 import { parsePromoWindow, type PromoWindow } from './promo-window'
 
 export type AutonomyMode = 'observe' | 'bounded_auto'
-export type CreativePoolStatus = 'candidate' | 'approved'
+
+/**
+ * 数据驱动素材流程（spec 2026-10-21-ad-creative-data-driven-flow-v0.2.md §2）里
+ * 素材会经过的状态。**只为「读」而容忍**：
+ *   - 它们都不是 'approved'；所有「允许拿去投」的判据都显式写 `=== 'approved'`，必须继续这么写；
+ *   - 目前没有任何入口会写入这些状态（写入尚未启用）；
+ *   - 读的时候保留这些条目，免得旧代码把新状态的行静默丢掉、下次整数组写回时抹掉。
+ */
+export const CREATIVE_POOL_EXTENDED_STATUSES = [
+  'pending_qc',
+  'test_queue',
+  'testing',
+  'scaling',
+  'rejected',
+  'inconclusive',
+  'retired',
+  'manual_approved',
+] as const
+
+export type CreativePoolStatus = 'candidate' | 'approved' | (typeof CREATIVE_POOL_EXTENDED_STATUSES)[number]
 export interface CreativePoolEntry {
   kind: 'meta_video' | 'work_order'
   ref: string
@@ -70,6 +89,10 @@ export function defaultConfig(clientId: string): AdStrategyConfig {
 
 const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/
 
+function isExtendedStatus(value: unknown): value is (typeof CREATIVE_POOL_EXTENDED_STATUSES)[number] {
+  return typeof value === 'string' && (CREATIVE_POOL_EXTENDED_STATUSES as readonly string[]).includes(value)
+}
+
 /** 素材池解析：只保留形状合法的条目，其余静默丢弃（坏数据不能让引擎投出没批准的素材）。 */
 export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
   if (!Array.isArray(raw)) return []
@@ -85,7 +108,8 @@ export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
     if (typeof ref !== 'string' || ref.length === 0) continue
 
     const status = 'status' in item ? item.status : undefined
-    if (status !== 'candidate' && status !== 'approved') continue
+    // 扩展状态只为读而容忍（见 CREATIVE_POOL_EXTENDED_STATUSES 的注释）；未知字符串仍然丢弃。
+    if (status !== 'candidate' && status !== 'approved' && !isExtendedStatus(status)) continue
 
     const entry: CreativePoolEntry = { kind, ref, status }
 

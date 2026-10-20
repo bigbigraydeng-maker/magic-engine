@@ -493,6 +493,19 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     expect(upsert).not.toHaveBeenCalled()
   })
 
+  it('新 ref 带扩展状态（testing）→ 存成 candidate（写入扩展状态尚未启用）', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [] }])
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'testing' }], expected_version: null }),
+      params(),
+    )
+    expect(res.status).toBe(200)
+    const [written] = upsert.mock.calls[0]
+    const pool = written.creative_pool as Array<Record<string, unknown>>
+    expect(pool.find(e => e.ref === 'v1')!.status).toBe('candidate')
+  })
+
   it('请求体里同一个 ref 出现两次 → 400 creative_pool_duplicate_ref，不写库', async () => {
     signedInAs(STAFF)
     const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [] }])
