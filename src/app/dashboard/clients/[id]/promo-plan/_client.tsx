@@ -18,6 +18,7 @@ import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
 import { ScheduleTable } from './_components/ScheduleTable'
 import { expandPromoSchedule } from '@/lib/marketing-plan/promo/schedule'
+import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
 import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
@@ -131,8 +132,8 @@ export function PromoPlanClient() {
   }
 
   const approve = board ? approveButtonState(board) : null
-  // 「今天」按悉尼日期（澳新客户的日历日），不用 UTC，免得早上少算一天
-  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date())
+  // 「今天」按新西兰日期（页面是 NZ 的），不用 UTC，免得凌晨少算一天
+  const todayIso = todayInNz()
   // 展示用的推广结构：示例开着看示例，否则看这份计划自己的
   const shownSpec = useMemo(
     () => (showSample ? buildPromoSample(todayIso) : selected ? readPromoSpec(selected.plan_data) : null),
@@ -142,6 +143,7 @@ export function PromoPlanClient() {
   // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
   const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
   const approvedLike = selected?.status === 'approved' || selected?.status === 'completed'
+  const viewPhases = useMemo(() => (shownSpec?.phases ?? []).map(p => ({ id: p.id, name: p.name, start_date: p.start_date })), [shownSpec])
   const scheduleMode = showSample ? 'sample' : approvedLike ? 'approved' : 'preview'
 
   return (
@@ -200,7 +202,7 @@ export function PromoPlanClient() {
                     <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。先在下面「想自己改？展开」里搭出阶段，广告那一项可以让系统起草预算、受众和素材。</p>
                   </div>
                 )}
-            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} />}
+            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
