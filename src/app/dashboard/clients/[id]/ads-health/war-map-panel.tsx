@@ -10,6 +10,7 @@
 
 import React, { useEffect, useState } from 'react'
 import type { Light, WarMapView } from '@/lib/ads-strategy/war-map/types'
+import { DATA_STALE_DAYS } from '@/lib/ads-strategy/war-map/frequency'
 
 const LIGHT_META: Record<Light, { dot: string; tint: string; text: string; label: string }> = {
   green:   { dot: 'bg-emerald-500', tint: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: '正常' },
@@ -131,7 +132,7 @@ function AccountSummaryList({ view }: { view: WarMapView }) {
           )}
           <span>
             {s.dataDay === null ? '没有数据' : `数据日 ${fmtDay(s.dataDay)}`}
-            {s.staleDays !== null && s.staleDays > 2 && (
+            {s.staleDays !== null && s.staleDays > DATA_STALE_DAYS && (
               <span className="ml-1 text-amber-700">已 {s.staleDays} 天没更新</span>
             )}
           </span>
@@ -346,7 +347,7 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
         <h2 className="text-base font-semibold text-gray-800">广告作战地图</h2>
         <p className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
           <span>数据日 {fmtDay(view.clocks.dataDay)} · 取数 {fmtNz(view.clocks.fetchedAt)}（新西兰时间）</span>
-          {view.clocks.staleDays !== null && view.clocks.staleDays > 2 && (
+          {view.clocks.staleDays !== null && view.clocks.staleDays > DATA_STALE_DAYS && (
             <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
               数据已 {view.clocks.staleDays} 天没更新
             </span>

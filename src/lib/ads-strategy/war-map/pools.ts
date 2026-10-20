@@ -11,6 +11,7 @@ import { windowDays } from '../portfolio/diagnostics/context'
 import { toLocalDate } from '../portfolio/diagnostics/d2-d10-ad-rules'
 import { D11_MAX_WEEKLY_SHRINK, dailyCounts, poolFlat } from '../portfolio/diagnostics/d11-audience-pool-starved'
 import type { AudienceCountPoint } from '../portfolio/diagnostics/types'
+import { ACCOUNT_STATUS_CLOSED_CODES } from '@/lib/ads-strategy/account-status'
 import { DATA_STALE_DAYS } from './frequency'
 import { diffDays, fmtInt, hoursSince, shortDay } from './util'
 import type {
@@ -91,7 +92,8 @@ function usedByAdsets(audienceId: string, input: WarMapInput): number {
 export function unusableAccountNote(statusCode: number | null): string | null {
   if (statusCode === null || statusCode === 1) return null
   if (statusCode === 3) return '欠款停用·不可用'
-  return `账户状态异常（状态码 ${statusCode}）·不可用`
+  if (ACCOUNT_STATUS_CLOSED_CODES.has(statusCode)) return `账户已关闭或停用（状态码 ${statusCode}）·不可用`
+  return `账户状态异常（状态码 ${statusCode}）·暂不计入判断`
 }
 
 function buildRow(a: AudienceInput, input: WarMapInput, names: Map<string, string>, accountNote: string | null): PoolRow {

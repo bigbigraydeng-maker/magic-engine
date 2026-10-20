@@ -12,6 +12,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
+import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 import { loadAccountStatusRows, latestPerAccount } from '@/lib/ads-strategy/account-status'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { unusableAccountNote } from './pools'
@@ -55,20 +56,49 @@ function str(v: unknown): string | null {
 /** 「读全了却没返回它」的实体会被写一行 disappeared：最新一行是它，就整个实体不要，不能当成「读不到」。 */
 const DISAPPEARED = 'disappeared'
 
+interface BoundAccount { adAccountId: string; label: string | null }
+
+/** 账户清单以「绑定表」为准（读不到就抛错）；绑定表一行都没有时退回客户表上的旧单值列，和其它读取方一致。 */
+async function loadBoundAccounts(clientId: string): Promise<BoundAccount[]> {
+  const { data, error } = await supabaseAdmin
+    .from('client_meta_ad_accounts')
+    .select('ad_account_id, label')
+    .eq('client_id', clientId)
+  if (error) throw new Error(`读绑定广告账户失败：${error.message}`)
+  const rows = (data ?? []) as Array<{ ad_account_id: string; label: string | null }>
+  if (rows.length > 0) return rows.map(r => ({ adAccountId: toActId(r.ad_account_id), label: r.label }))
+  const { data: client, error: clientErr } = await supabaseAdmin
+    .from('clients').select('meta_ad_account_id').eq('id', clientId).maybeSingle()
+  if (clientErr) throw new Error(`读客户主广告账户失败：${clientErr.message}`)
+  const legacy = str((client as { meta_ad_account_id?: unknown } | null)?.meta_ad_account_id)
+  return legacy ? [{ adAccountId: toActId(legacy), label: null }] : []
+}
+
+/** 快照里存的是 act_ 形式；绑定表可能不带前缀，统一成 act_ 再比。 */
+function toActId(raw: string): string {
+  return `act_${canonicalAccountDigits(raw)}`
+}
+
 async function loadAccounts(clientId: string, now: Date): Promise<AccountInput[]> {
-  const rows = await loadAccountStatusRows(clientId, isoDaysAgo(now, 14))
-  const out: AccountInput[] = []
+  const [bound, rows] = await Promise.all([
+    loadBoundAccounts(clientId),
+    loadAccountStatusRows(clientId, isoDaysAgo(now, 14)),
+  ])
+  const snap = new Map<string, (typeof rows)[number]>()
   for (const r of latestPerAccount(rows)) {
-    if (r.capture_reason === DISAPPEARED) continue
-    out.push({
-      adAccountId: r.ad_account_id,
-      name: r.entity_name,
-      statusCode: r.account_status,
-      capturedAt: r.captured_at,
-      timezoneName: r.timezone_name,
-    })
+    if (r.capture_reason !== DISAPPEARED) snap.set(toActId(r.ad_account_id), r)
   }
-  return out
+  return bound.map(b => {
+    const r = snap.get(b.adAccountId)
+    // 绑了但没有快照：照样列出来（名字用标签），状态和读取时间都是 null，页面写「已绑定，暂无数据」
+    return {
+      adAccountId: r?.ad_account_id ?? b.adAccountId,
+      name: r?.entity_name ?? b.label,
+      statusCode: r?.account_status ?? null,
+      capturedAt: r?.captured_at ?? null,
+      timezoneName: r?.timezone_name ?? null,
+    }
+  })
 }
 
 // ── 观众池：最新人数 + 近 9 天历史（同一次查询）──────────────────────────────

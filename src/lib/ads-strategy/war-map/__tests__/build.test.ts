@@ -498,3 +498,59 @@ describe('目标进度那一行只陈述事实', () => {
     expect(JSON.stringify(note)).not.toMatch(/停投|3 月四团/)
   })
 })
+
+describe('审查补断言 · 账户清单、新鲜度、频率按账户过滤', () => {
+  it('绑了但没有快照的账户：照样列出，写「已绑定，暂无数据」', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_2', name: '备用户', statusCode: null, capturedAt: null })],
+    }))
+    const row = v.accounts.find(a => a.adAccountId === 'act_2')
+    expect(row?.sentence).toBe('已绑定，暂无数据')
+    expect(row?.light).toBe('unknown')
+  })
+
+  it('读过快照却读不到状态：仍是「读不到账户状态」，不是「暂无数据」', () => {
+    const v = buildWarMap(baseInput({ accounts: [acct({ statusCode: null })] }))
+    expect(v.accounts[0]?.sentence).toBe('读不到账户状态')
+  })
+
+  it('两个在用账户数据日不同：以最旧的为准，总览不绿', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_2', name: '二号' })],
+      audiences: [aud(), aud({ id: 'aud_2', adAccountId: 'act_2' })],
+      audienceHistory: dailyHistory('aud_1', [44000, 44100, 44200, 44300, 44400, 44500]),
+      clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-15T17:00:00.000Z' },
+      accountDataDays: { act_1: '2026-10-15', act_2: '2026-10-10' },
+    }))
+    expect(v.clocks.staleDays).toBe(6)
+    expect(v.pools.headline.light).toBe('unknown')
+    expect(v.pools.headline.sentence).toContain('停在 10/10')
+  })
+
+  it('数据日落后正好 2 天不算停，3 天才算（边界）', () => {
+    const two = buildWarMap(baseInput({ clocks: { dataDay: '2026-10-14', fetchedAt: null }, accountDataDays: { act_1: '2026-10-14' }, audiences: [aud()] }))
+    const three = buildWarMap(baseInput({ clocks: { dataDay: '2026-10-13', fetchedAt: null }, accountDataDays: { act_1: '2026-10-13' }, audiences: [aud()] }))
+    expect(two.clocks.staleDays).toBe(2)
+    expect(two.pools.headline.sentence).not.toContain('没更新')
+    expect(three.pools.headline.sentence).toContain('没更新')
+  })
+
+  it('欠款账户下的广告系列不进频率卡', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_9', name: '个人号', statusCode: 3 })],
+      campaigns: [camp(), camp({ campaignId: 'camp_9', adAccountId: 'act_9', frequency7d: 5 })],
+    }))
+    expect(v.frequency.rows.map(r => r.campaignId)).toEqual(['camp_1'])
+  })
+
+  it('状态码 8/9 不写成「不可用」，关闭类（2）写已关闭', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct({ statusCode: 8 }), acct({ adAccountId: 'act_2', statusCode: 2 })],
+    }))
+    const s8 = v.accountSummaries.find(s => s.adAccountId === 'act_1')
+    const s2 = v.accountSummaries.find(s => s.adAccountId === 'act_2')
+    expect(s8?.note).toContain('暂不计入判断')
+    expect(s8?.note).not.toContain('不可用')
+    expect(s2?.note).toContain('已关闭')
+  })
+})

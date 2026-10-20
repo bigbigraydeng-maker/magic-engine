@@ -36,19 +36,24 @@ function isRunning(row: SnapRowLite | undefined): boolean {
   return row !== undefined && row.captureReason !== DISAPPEARED && row.effectiveStatus === ACTIVE
 }
 
-/** 这个广告组历史里最近一次「first_seen 或 changed 且当时是 ACTIVE」的时间；找不到退回窗口内最早一行 */
+/**
+ * 这个广告组「这一段连续开着」的起点：从最新一行往回走，一直是 ACTIVE 就继续，碰到非 ACTIVE（暂停等）或 disappeared 就停。
+ * 🔴 不能取「最近一次 changed 且 ACTIVE」：那是最后一次改设置的时间（调预算也算），不是开投日。
+ * 窗口内一直开着就退回窗口内最早一行。
+ */
 function startOf(rows: SnapRowLite[]): string | null {
-  const sorted = [...rows].sort(byCapturedDesc)
-  const started = sorted.find(r => (r.captureReason === 'first_seen' || r.captureReason === 'changed') && r.effectiveStatus === ACTIVE)
-  if (started) return started.capturedAt
-  return sorted.length > 0 ? sorted[sorted.length - 1]!.capturedAt : null
+  let start: string | null = null
+  for (const r of [...rows].sort(byCapturedDesc)) {
+    if (r.captureReason === DISAPPEARED || r.effectiveStatus !== ACTIVE) break
+    start = r.capturedAt
+  }
+  return start
 }
 
 /**
  * 实际已经在跑的最早日子（新西兰日期）。
  * 「在跑」＝广告组最新一行是 ACTIVE，且它所属系列最新一行也是 ACTIVE。
- * 起算时间＝这个广告组历史里最近一次「first_seen 或 changed 且当时是 ACTIVE」那行的时间；
- * 窗口内找不到就退回窗口内最早一行。返回所有在跑广告组里最早的那个新西兰日；没有在跑的 = null。
+ * 起算时间＝这个广告组「连续开着」那一段的第一行（见 startOf）。返回所有在跑广告组里最早的那个新西兰日；没有在跑的 = null。
  */
 export function computeRunningSince(adsetRows: SnapRowLite[], campaignRows: SnapRowLite[]): string | null {
   const campaigns = latestPerEntity(campaignRows)

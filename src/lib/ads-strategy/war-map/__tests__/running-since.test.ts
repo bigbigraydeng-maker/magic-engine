@@ -69,4 +69,24 @@ describe('computeRunningSince', () => {
   it('空输入 → null', () => {
     expect(computeRunningSince([], [])).toBeNull()
   })
+
+  it('10/20 开投、10/21 调预算（changed 且仍 ACTIVE）→ 开投日仍是 10/20，不是最后一次改设置的日子', () => {
+    const adsets = [
+      adset({ entityId: 'a1', capturedAt: '2026-10-20T03:26:00.000Z' }),
+      adset({ entityId: 'a1', capturedAt: '2026-10-21T01:00:00.000Z', captureReason: 'changed' }),
+      adset({ entityId: 'a1', capturedAt: '2026-10-21T20:00:00.000Z', captureReason: 'daily' }),
+    ]
+    const campaigns = [campaign({ entityId: 'c1', capturedAt: '2026-10-19T00:00:00.000Z' })]
+    expect(computeRunningSince(adsets, campaigns)).toBe('2026-10-20')
+  })
+
+  it('先暂停再重新开：起点是重新开的那一行，不是更早的第一次开', () => {
+    const adsets = [
+      adset({ entityId: 'a1', capturedAt: '2026-10-10T03:00:00.000Z' }),
+      adset({ entityId: 'a1', capturedAt: '2026-10-12T03:00:00.000Z', captureReason: 'changed', effectiveStatus: 'PAUSED' }),
+      adset({ entityId: 'a1', capturedAt: '2026-10-20T03:00:00.000Z', captureReason: 'changed' }),
+    ]
+    const campaigns = [campaign({ entityId: 'c1', capturedAt: '2026-10-09T00:00:00.000Z' })]
+    expect(computeRunningSince(adsets, campaigns)).toBe('2026-10-20')
+  })
 })

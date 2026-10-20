@@ -11,7 +11,7 @@
 import { buildAdjust, ACCOUNT_STALE_HOURS } from './actions'
 import { accountStatusHint, ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_UNSETTLED } from '@/lib/ads-strategy/account-status'
 import { buildFrequency, dataStaleDays } from './frequency'
-import { buildAccountSummaries, buildPools } from './pools'
+import { buildAccountSummaries, buildPools, unusableAccountNote } from './pools'
 import { diffDays, hoursSince, nzDay, shortDay } from './util'
 import type {
   AccountView, CountdownView, GoalNote, PlanPhaseInput, WarMapInput, WarMapView,
@@ -56,6 +56,7 @@ function buildCountdown(input: WarMapInput, today: string): CountdownView {
 function accountView(a: WarMapInput['accounts'][number], nowIso: string): AccountView {
   const name = a.name ?? a.adAccountId
   const base = { adAccountId: a.adAccountId, name, statusCode: a.statusCode, capturedAt: a.capturedAt }
+  if (a.statusCode === null && a.capturedAt === null) return { ...base, light: 'unknown', sentence: '已绑定，暂无数据' }
   if (a.statusCode === null) return { ...base, light: 'unknown', sentence: '读不到账户状态' }
   const age = hoursSince(a.capturedAt, nowIso)
   if (age === null || age > ACCOUNT_STALE_HOURS) {
@@ -92,13 +93,27 @@ function videoPoolIds(input: WarMapInput): Set<string> {
   return new Set(ids)
 }
 
+/** 在用账户（状态正常或读不到）的 id；欠款/关闭的账户不参与频率和新鲜度判断 */
+function usableAccountIds(input: WarMapInput): Set<string> {
+  return new Set(input.accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId))
+}
+
+/** 最旧的数据日：整体数据日和每个在用账户各自的数据日里取最早，避免一个新鲜账户把另一个停更的账户盖成绿灯 */
+function oldestDataDay(input: WarMapInput, usable: Set<string>): string | null {
+  const days = [input.clocks.dataDay, ...[...usable].map(id => input.accountDataDays[id] ?? null)]
+  const known = days.filter((d): d is string => d !== null)
+  return known.length > 0 ? known.reduce((a, b) => (b < a ? b : a)) : null
+}
+
 export function buildWarMap(input: WarMapInput): WarMapView {
   const today = nzDay(input.now)
   const accounts = input.accounts.map(a => accountView(a, input.now))
   const names = new Map(accounts.map(a => [a.adAccountId, a.name]))
-  const staleDays = dataStaleDays(input)
-  const pools = buildPools(input, names, accounts, staleDays, input.clocks.dataDay)
-  const frequency = buildFrequency(input, names)
+  const usable = usableAccountIds(input)
+  const oldestDay = oldestDataDay(input, usable)
+  const staleDays = oldestDay ? diffDays(oldestDay, today) : dataStaleDays(input)
+  const pools = buildPools(input, names, accounts, staleDays, oldestDay)
+  const frequency = buildFrequency({ ...input, campaigns: input.campaigns.filter(c => usable.has(c.adAccountId)) }, names)
   const adjust = buildAdjust({
     input,
     accounts,
