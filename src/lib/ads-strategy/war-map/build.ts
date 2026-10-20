@@ -10,8 +10,8 @@
 
 import { buildAdjust, ACCOUNT_STALE_HOURS } from './actions'
 import { accountStatusHint, ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_UNSETTLED } from '@/lib/ads-strategy/account-status'
-import { buildFrequency } from './frequency'
-import { buildPools } from './pools'
+import { buildFrequency, dataStaleDays } from './frequency'
+import { buildAccountSummaries, buildPools } from './pools'
 import { diffDays, hoursSince, nzDay, shortDay } from './util'
 import type {
   AccountView, CountdownView, GoalNote, PlanPhaseInput, WarMapInput, WarMapView,
@@ -29,8 +29,18 @@ export function pickPhase(phases: PlanPhaseInput[], today: string): PlanPhaseInp
 function buildCountdown(input: WarMapInput, today: string): CountdownView {
   const phase = input.plan ? pickPhase(input.plan.phases, today) : null
   if (!input.plan || !phase) {
-    return { planStatus: null, phaseName: null, launchDate: null, targetDate: null, daysToLaunch: null, daysToTarget: null }
+    return {
+      planStatus: null, phaseName: null, launchDate: null, targetDate: null, daysToLaunch: null, daysToTarget: null,
+      actualLaunchDay: null, planStale: false,
+    }
   }
+  // 🔴 「计划过时」＝计划写完**之后**才有广告开始跑，而且比计划写的开投日更早。
+  //    只比「开投日」会把「一直在跑的常驻广告 + 未来的新阶段计划」误判成「已开投」；
+  //    所以实际起跑日必须晚于计划记录最后更新的那天（读不到更新日才退回只比开投日）。
+  const updated = input.plan.recordUpdatedDay
+  const stale = input.runningSince !== null
+    && phase.startDate > input.runningSince
+    && (updated === null || input.runningSince > updated)
   return {
     planStatus: input.plan.status,
     phaseName: phase.name,
@@ -38,6 +48,8 @@ function buildCountdown(input: WarMapInput, today: string): CountdownView {
     targetDate: phase.endDate,
     daysToLaunch: diffDays(today, phase.startDate),
     daysToTarget: diffDays(today, phase.endDate),
+    actualLaunchDay: stale ? input.runningSince : null,
+    planStale: stale,
   }
 }
 
@@ -84,7 +96,8 @@ export function buildWarMap(input: WarMapInput): WarMapView {
   const today = nzDay(input.now)
   const accounts = input.accounts.map(a => accountView(a, input.now))
   const names = new Map(accounts.map(a => [a.adAccountId, a.name]))
-  const pools = buildPools(input, names)
+  const staleDays = dataStaleDays(input)
+  const pools = buildPools(input, names, accounts, staleDays, input.clocks.dataDay)
   const frequency = buildFrequency(input, names)
   const adjust = buildAdjust({
     input,
@@ -97,9 +110,10 @@ export function buildWarMap(input: WarMapInput): WarMapView {
   return {
     generatedAt: input.now,
     countdown: buildCountdown(input, today),
-    clocks: input.clocks,
+    clocks: { ...input.clocks, staleDays },
     accounts,
-    pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount },
+    accountSummaries: buildAccountSummaries(input, accounts, pools.everyRow, today),
+    pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount, unusableRows: pools.unusableRows },
     frequency,
     adjust,
     goalNote: buildGoalNote(input),

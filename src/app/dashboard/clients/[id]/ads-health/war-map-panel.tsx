@@ -97,6 +97,54 @@ function PoolBars({ view }: { view: WarMapView }) {
       })}
       {view.pools.hiddenCount > 0 && <p className="text-xs text-gray-400">另有 {view.pools.hiddenCount} 个池子没列出</p>}
       <p className="text-[11px] text-gray-400">人数是 Meta 给的下限；↑在长 →没变 ↓在缩 ?判不了</p>
+      {view.pools.unusableRows.length > 0 && (
+        <div className="mt-2 space-y-1">
+          <p className="text-[11px] text-gray-500">不可用账户的池子（不计入上面的判断）</p>
+          {view.pools.unusableRows.map(r => (
+            <div key={r.id} className="flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
+              <span className="truncate">{r.name}</span>
+              <span>{r.accountName}</span>
+              <span>{r.accountNote}</span>
+              <span>{r.sizeLower === null ? '判不了' : `≥${fmtBig(r.sizeLower)}`}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AccountSummaryList({ view }: { view: WarMapView }) {
+  const rows = view.accountSummaries
+  if (rows.length === 0) return null
+  return (
+    <div className="mt-3 space-y-1">
+      <p className="text-xs font-medium text-gray-700">每个广告账户</p>
+      {rows.map(s => (
+        <div key={s.adAccountId} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-600">
+          <span className={`h-2 w-2 rounded-full ${LIGHT_META[s.light].dot}`} />
+          <span className="font-medium">{s.name}</span>
+          {s.usable ? (
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-gray-500">可用</span>
+          ) : (
+            <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-red-700">{s.note}</span>
+          )}
+          <span>
+            {s.dataDay === null ? '没有数据' : `数据日 ${fmtDay(s.dataDay)}`}
+            {s.staleDays !== null && s.staleDays > 2 && (
+              <span className="ml-1 text-amber-700">已 {s.staleDays} 天没更新</span>
+            )}
+          </span>
+          {s.biggestPoolSize !== null ? (
+            <span className={s.usable ? '' : 'line-through text-gray-400'}>
+              最大池 ≥{fmtBig(s.biggestPoolSize)}（{s.biggestPoolName}）
+            </span>
+          ) : (
+            <span className={s.usable ? '' : 'line-through text-gray-400'}>最大池 判不了</span>
+          )}
+          {!s.usable && <span className="text-gray-400">不计入上面的判断</span>}
+        </div>
+      ))}
     </div>
   )
 }
@@ -174,6 +222,14 @@ function ActionCards({ view }: { view: WarMapView }) {
 function Timeline({ view }: { view: WarMapView }) {
   const c = view.countdown
   if (c.daysToLaunch === null || c.daysToTarget === null || c.launchDate === null || c.targetDate === null) return null
+  if (c.planStale && c.actualLaunchDay !== null) {
+    return (
+      <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+        <p className="text-lg font-bold text-gray-800">已开投（实际 {fmtDay(c.actualLaunchDay)}）</p>
+        <p className="mt-1 text-xs text-amber-700">计划记录待更新（计划写的开投日是 {fmtDay(c.launchDate)}）</p>
+      </div>
+    )
+  }
   const total = c.daysToTarget - c.daysToLaunch
   const done = Math.min(total, Math.max(0, -c.daysToLaunch))
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
@@ -216,9 +272,10 @@ function GoalNoteBox({ view }: { view: WarMapView }) {
 /** 大数字：灯是「判不了」时不显示数，避免假绿 */
 function poolBig(view: WarMapView): { big: string; unit: string } {
   if (view.pools.headline.light === 'unknown') return { big: '判不了', unit: '' }
-  const sizes = view.pools.rows.filter(r => r.light !== 'unknown' && r.sizeLower !== null).map(r => r.sizeLower ?? 0)
-  if (sizes.length === 0) return { big: '判不了', unit: '' }
-  return { big: `≥${fmtBig(Math.max(...sizes))}`, unit: '人（最大池）' }
+  const reliable = view.pools.rows.filter(r => r.light !== 'unknown' && r.sizeLower !== null)
+  if (reliable.length === 0) return { big: '判不了', unit: '' }
+  const row = reliable.reduce((a, b) => ((b.sizeLower ?? 0) > (a.sizeLower ?? 0) ? b : a))
+  return { big: `≥${fmtBig(row.sizeLower ?? 0)}`, unit: `人（${row.accountName} · 最大池）` }
 }
 
 function freqBig(view: WarMapView): { big: string; unit: string } {
@@ -287,8 +344,13 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
     <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-semibold text-gray-800">广告作战地图</h2>
-        <p className="text-xs text-gray-500">
-          数据日 {fmtDay(view.clocks.dataDay)} · 取数 {fmtNz(view.clocks.fetchedAt)}（新西兰时间）
+        <p className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+          <span>数据日 {fmtDay(view.clocks.dataDay)} · 取数 {fmtNz(view.clocks.fetchedAt)}（新西兰时间）</span>
+          {view.clocks.staleDays !== null && view.clocks.staleDays > 2 && (
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+              数据已 {view.clocks.staleDays} 天没更新
+            </span>
+          )}
         </p>
       </div>
 
@@ -305,6 +367,8 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
           <details className="mt-3" open={view.adjust.actions.some(a => a.severity !== 'info')}><summary className="cursor-pointer text-xs text-gray-500">看清单</summary><ActionCards view={view} /></details>
         </BigCard>
       </div>
+
+      <AccountSummaryList view={view} />
 
       <div className="mt-3 flex flex-wrap gap-2">
         {view.accounts.map(a => (
