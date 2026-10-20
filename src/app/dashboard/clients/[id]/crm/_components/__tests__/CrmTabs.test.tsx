@@ -178,3 +178,26 @@ describe('CrmTabs', () => {
     expect(screen.getByRole('link', { name: '全部客人' })).toBeInTheDocument()
   })
 })
+
+describe('CrmTabs 挂了「新消息提醒」', () => {
+  it('隔一轮询问后，有新消息就在导航上方出现提示条（所有 CRM 页面共用）', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const mock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/crm/inbound-pulse')) {
+          return new Response(JSON.stringify({ count: 2, byChannel: { whatsapp: 2 }, latestAt: null }), { status: 200 })
+        }
+        if (url.includes('/crm/bookings/access')) return res(403)
+        return new Response(JSON.stringify({ client: { industry: 'travel' } }), { status: 200 })
+      })
+      vi.stubGlobal('fetch', mock)
+      render(<CrmTabs clientId={ID} active="all" />)
+      expect(screen.queryByTestId('new-messages-banner')).toBeNull()
+      await vi.advanceTimersByTimeAsync(31_000)
+      expect(await screen.findByTestId('new-messages-banner')).toHaveTextContent('有 2 位客人发来新消息')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
