@@ -16,6 +16,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 import { GET } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { ctsVerifierGates } from '@/lib/messenger-agent/verifier/policies/cts'
 
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockFrom = vi.mocked(supabaseAdmin.from)
@@ -57,6 +58,7 @@ function stubTables({ owned, drafts }: { owned: boolean; drafts: DraftRow[] }) {
   const conversations = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    in: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue({ data: owned ? { id: CONVO } : null }),
   }
   const draftsQuery = {
@@ -114,6 +116,17 @@ describe('GET drafts — authorisation', () => {
   })
 })
 
+describe('GET drafts — channels', () => {
+  it('thread ownership check accepts messenger AND whatsapp (WhatsApp drafts need an approval surface)', async () => {
+    allow()
+    const { conversations } = stubTables({ owned: true, drafts: [] })
+
+    await GET(request(), params())
+
+    expect(conversations.in).toHaveBeenCalledWith('channel', ['messenger', 'whatsapp'])
+  })
+})
+
 describe('GET drafts — only the approval queue', () => {
   it('filters the query to verifier_status=pending', async () => {
     allow()
@@ -168,7 +181,8 @@ describe('GET drafts — only the approval queue', () => {
     // CTS 是 c0000000-…（params() 默认值）——这条历史行的 verifier_output_json 里没有
     // `checked_gate_ids`（2026-09-20 语义闸上线前写入的行），回退到只声称七道正则闸
     // 过了，不假装 Jev 语义闸也跑过（子牙+魏征复审：不能用静态清单冒充实际执行记录）。
-    expect(json.drafts[0].passedGateIds.length).toBe(7)
+    // 回退到「静态正则闸清单」的长度（原来写死 7，主干新增一道闸后这条就红了，跟本次改动无关）。
+    expect(json.drafts[0].passedGateIds).toEqual(ctsVerifierGates.map((g) => g.id))
   })
 
   it('reads the real per-draft checked_gate_ids when the row records it (Jev semantic layer actually ran)', async () => {
@@ -314,6 +328,7 @@ describe('GET drafts — only the approval queue', () => {
     const conversations = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: { id: CONVO } }),
     }
     const draftsQuery = {
@@ -328,5 +343,23 @@ describe('GET drafts — only the approval queue', () => {
     const res = await GET(request(), params())
 
     expect(res.status).toBe(500)
+  })
+})
+
+describe('GET drafts — 越权（WhatsApp 放开后仍按客户隔离）', () => {
+  it('A 客户账号读 B 客户的 WhatsApp 草稿 → 403，不碰库', async () => {
+    mockAccess.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' } as never)
+    const res = await GET(request(), params(OZTOP))
+    expect(res.status).toBe(403)
+    expect(mockFrom).not.toHaveBeenCalled()
+  })
+
+  it('会话属于别的客户（即使是 whatsapp 渠道）→ 404，且查询同时带 client_id', async () => {
+    allow()
+    const { conversations, draftsQuery } = stubTables({ owned: false, drafts: [{ id: 'leak', draft_body: 'secret', agent_confidence: 1, quoted_offering_names: [], verifier_output_json: null, created_at: 'x' }] })
+    const res = await GET(request(), params())
+    expect(res.status).toBe(404)
+    expect(conversations.eq).toHaveBeenCalledWith('client_id', CTS)
+    expect(draftsQuery.order).not.toHaveBeenCalled()
   })
 })

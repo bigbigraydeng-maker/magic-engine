@@ -22,13 +22,18 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { DraftApprovalPanel } from '../../messenger/_components/DraftApprovalPanel'
 import { ReplyBox } from '../../messenger/_components/ReplyBox'
-import type { ReplyWindow } from '../../messenger/types'
+import type { PendingDraft, ReplyWindow, ThreadMessage } from '../../messenger/types'
 
 interface Payload {
   conversationId: string | null
   participantName?: string | null
   replyWindow?: ReplyWindow
+  /** 客人最后一条入站消息（给草稿面板的「客户原消息」用）。 */
+  lastInbound?: { body: string; sentAt: string } | null
+  /** AI 起草了但被安全检查拦下的最新一条（客人最后一句话之后）。 */
+  blockedDraft?: { reasons: string[]; createdAt: string } | null
 }
 
 /** 窗口关了之后那一行话 —— 说清为什么发不了，别让人对着一个灰按钮猜。 */
@@ -54,6 +59,9 @@ export function WhatsAppReply({
 }) {
   const [data, setData] = useState<Payload | null>(null)
   const [failed, setFailed] = useState(false)
+  /** 待批准的 AI 草稿（通过了全部安全检查的）。null = 还没读到。 */
+  const [drafts, setDrafts] = useState<PendingDraft[] | null>(null)
+  const [draftsError, setDraftsError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setFailed(false)
@@ -69,6 +77,26 @@ export function WhatsAppReply({
   useEffect(() => {
     void load()
   }, [load])
+
+  const conversationId = data?.conversationId ?? null
+  const loadDrafts = useCallback(async () => {
+    if (!conversationId) return
+    setDraftsError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/messenger/conversations/${conversationId}/drafts`)
+      const json = (await res.json()) as { drafts?: PendingDraft[]; error?: string }
+      if (!res.ok) throw new Error(json.error ?? 'drafts failed')
+      setDrafts(json.drafts ?? [])
+    } catch {
+      // 读不到草稿不挡手写回复：草稿是锦上添花，立一块红色报错反而吓人。
+      setDraftsError(null)
+      setDrafts([])
+    }
+  }, [clientId, conversationId])
+
+  useEffect(() => {
+    void loadDrafts()
+  }, [loadDrafts])
 
   // 查不到就当没有 WhatsApp 线：这一块是「多一个能回他的地方」，读失败不该在抽屉里
   // 立一块红色报错，挡住记一笔和往来记录（同 MessengerReply 的取舍）。
@@ -92,13 +120,43 @@ export function WhatsAppReply({
   return (
     <div className="mt-4 rounded-xl border border-me-charcoal/10 bg-me-ivory/40 p-3">
       <p className="mb-2 text-[13px] font-black text-me-charcoal/70">📱 在这里直接回他的 WhatsApp</p>
+      {drafts && drafts.length > 0 && (
+        <div className="mb-3" data-testid="whatsapp-draft-panel">
+          <p className="mb-1 text-[12px] font-black text-me-ochre">AI 起草了回复，等你批准（批准后系统自动发给客人）</p>
+          <DraftApprovalPanel
+            clientId={clientId}
+            conversationId={data.conversationId as string}
+            customerName={data.participantName?.trim() || customerName}
+            drafts={drafts}
+            draftsError={draftsError}
+            lastCustomerMessage={
+              data.lastInbound
+                ? ({ direction: 'inbound', senderName: null, body: data.lastInbound.body, sentAt: data.lastInbound.sentAt } as ThreadMessage)
+                : null
+            }
+            onDecided={() => {
+              void loadDrafts()
+              void load()
+              onSent()
+            }}
+            onRejected={() => {
+              void loadDrafts()
+            }}
+          />
+        </div>
+      )}
+      {(!drafts || drafts.length === 0) && data.blockedDraft && (
+        <p className="mb-2 text-[12px] text-me-charcoal/60" data-testid="whatsapp-draft-blocked">
+          AI 起草了一条回复，但被安全检查拦下（{data.blockedDraft.reasons.length > 0 ? data.blockedDraft.reasons.join('；') : '原因未记录'}），请手写。
+        </p>
+      )}
       <ReplyBox
         clientId={clientId}
         conversationId={data.conversationId}
         customerName={data.participantName?.trim() || customerName}
         channel="whatsapp"
-        // CRM 这一侧没有 AI 草稿 —— PM 定的是「AI 只写草稿、人按发送」，这里本来
-        // 就没草稿，就老实空着，不去别处凑一个塞给顾问。
+        // 待批准的 AI 草稿走上面的 DraftApprovalPanel（批准后由系统发出）；手写框保持空着，
+        // 不把草稿塞进输入框绕过批准流程（PM：AI 只写草稿、人批准才发）。
         draft={null}
         window={data.replyWindow ?? null}
         viewerEmail={viewerEmail}
