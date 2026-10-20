@@ -89,6 +89,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const datacard = await import(pathToFileURL(join(engineDir, 'src', 'datacard.ts')).href)
     const postcard = await import(pathToFileURL(join(engineDir, 'src', 'postcard.ts')).href)
     const atmosphere = await import(pathToFileURL(join(engineDir, 'src', 'atmosphere.ts')).href)
+    const substance = await import(pathToFileURL(join(engineDir, 'src', 'contentSubstance.ts')).href)
     let catalog = null
     return {
       computeTimingFromProps: timing.computeTimingFromProps,
@@ -99,6 +100,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       computeDataCardTiming: datacard.computeDataCardTiming,
       computePostcardTiming: postcard.computePostcardTiming,
       computeAtmosphereTiming: atmosphere.computeAtmosphereTiming,
+      contentSubstanceOf: substance.contentSubstanceOf,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
           JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
@@ -437,6 +439,27 @@ export async function defaultMusicVocalGate({ stagedPath, props, totalFrames, fp
 }
 
 // Templates whose on-screen text, caption and SRT the worker can rescan (see textBuilders below).
+export const CONTENT_SUBSTANCE_CAPABILITY = 'content_substance_v1'
+
+// Content-substance gate (fail-closed): a finished video must put real words on screen long enough to stand on
+// its own. `deliverable: 'asset_only'` (strict equality, case-sensitive) marks material that is never published;
+// anything else, including a mistyped value, is treated as a normal deliverable and must pass.
+export function assessContentSubstance(eng, template, remotion, props) {
+  if (typeof eng.contentSubstanceOf !== 'function') {
+    throw new RemotionOrderError('出片机缺少内容闸（contentSubstanceOf），拒绝出片：请先升级出片机')
+  }
+  const result = eng.contentSubstanceOf(template, props)
+  if (remotion.deliverable === 'asset_only') {
+    return { ...result, verdict: 'asset_only' }
+  }
+  if (result.verdict !== 'pass') {
+    throw new RemotionOrderError(
+      `内容闸：整条片屏幕上没有连续可见 ≥2 秒的团名/地点/卖点/品牌卡，不是能单独发布的成片（需改下单参数：加内容，或明确标 deliverable=asset_only 作素材；复活原单无效）。${result.reason}`,
+    )
+  }
+  return result
+}
+
 export const TEXT_WIRED_TEMPLATES = ['list', 'montage', 'datacard', 'postcard', 'atmosphere']
 
 // Copy the referenced assets into the staging directory.
@@ -725,6 +748,8 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     assertAtmosphereTextVisible(props)
     timing = eng.computeAtmosphereTiming(props)
   }
+  // After the text checks, before any staging, probing, vocal gate or rendering.
+  const contentSubstance = assessContentSubstance(eng, template, remotion, props)
 
   const hb = startHeartbeats({
     woId: wo.work_order_id,
@@ -866,6 +891,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
           : (props.musicFile ? { source: 'client_library', file: props.musicFile } : null),
         props,
         music_vocal_gate: vocalGate,
+        content_substance: contentSubstance,
         atmosphere_preflight: atmospherePreflight,
         recipe_gaps: recipeGaps,
         render: { attempts, elapsed_s },
@@ -886,7 +912,16 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       caption,
       actual_cost_usd: 0,
       new_clips: [],
-      media_evidence: evidence,
+      media_evidence: {
+        ...evidence,
+        content_substance: {
+          verdict: contentSubstance.verdict,
+          kinds: contentSubstance.kinds,
+          textSeconds: contentSubstance.textSeconds,
+          reason: contentSubstance.reason,
+        },
+        capabilities: [CONTENT_SUBSTANCE_CAPABILITY],
+      },
     })
     if (!r.ok) {
       const message = `complete ${r.status}: ${JSON.stringify(r.json)}`
