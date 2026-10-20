@@ -30,11 +30,12 @@ PM 在事件管理工具里依次看了四处：数据集总览（各数据集�
 | 2026-11-12 设备端转化衡量通知 | 待验证 | 生效满 7 天后（11-19）看报表口径 | 日历提醒 |
 
 ## 验证（怎么验、结果、日期）
-2026-10-20 只读实测（工具：Meta Ads MCP `ads_get_dataset_details`、`ads_get_dataset_quality`；Graph v19.0 `GET /{数据集}/da_checks`；用 某客户 系统用户令牌只读，未发任何事件）：①`ads_get_dataset_details` 能读名称、是否活跃、最近触发时间、服务器事件最近触发时间、网关状态；②`ads_get_dataset_quality` 能读逐事件的匹配质量分、匹配键覆盖率、上传频率；③Graph `GET /{数据集}/da_checks` 返回 200，但只有目录 / 动态广告类 2 项检查，**读不到**录屏里的 3 条诊断警告；④页面显示网关「已连接」而接口返回「未接入」：122 号同晚只读查清；另据魏征复核，集成工具页是商业账号级、接口是数据集级，本来就不是同一层（某客户一例）——「2 个应用」是 2 个数据集，网关指向另一个从未收到事件的数据集，与官方数据集上的服务器事件无关；官方数据集上的服务器事件是 Meta 自动开启的「转化 API（仅限网页）」镜像（去重在事件详情页看，符合最佳实践）。另验证（魏征复核）：按来源拆分的事件量可由 `ads_get_dataset_stats` 读到；去重覆盖率可由 Graph `dataset_quality` 读到（`dedupe_key_feedback`）；`openbridge_configurations` 可读；`server_last_fired_time` 在 Graph v19/v21/v25 都报不存在，换版本号没用。集成清单与诊断警告接口：未找到。
+2026-10-20 只读实测（工具：Meta Ads MCP `ads_get_dataset_details`、`ads_get_dataset_quality`；Graph v19.0 `GET /{数据集}/da_checks`；用该客户的系统用户令牌只读，未发任何事件）：①`ads_get_dataset_details` 能读名称、是否活跃、最近触发时间、服务器事件最近触发时间、网关状态；②`ads_get_dataset_quality` 能读逐事件的匹配质量分、匹配键覆盖率、上传频率；③Graph `GET /{数据集}/da_checks` 返回 200，但只有目录 / 动态广告类 2 项检查，**读不到**录屏里的 3 条诊断警告；④页面显示网关「已连接」而接口返回「未接入」：**未查清**。122 号页面所见：网关指向另一个从未收到事件的数据集；魏征用接口未能印证（两个数据集都读到未接入、`openbridge_configurations` 为空）；集成页是商业账号级、接口是数据集级，可能并不矛盾。官方数据集上的服务器事件，122 号判断是 Meta 自动开启的「转化 API（仅限网页）」镜像（去重在事件详情页看，符合最佳实践），魏征用二手来源只能印证该功能存在。另验证（魏征复核）：按来源拆分的事件量可由 `ads_get_dataset_stats` 读到；去重覆盖率可由 Graph `dataset_quality` 读到（`dedupe_key_feedback`）；`openbridge_configurations` 能调用（只见过空列表）；`server_last_fired_time` 在 Graph v19/v21/v25 都报不存在，换版本号没用。集成清单与诊断警告接口：未找到。
 
 ## 落点
 - skill：`.claude/skills/me-meta-tracking-health/SKILL.md`（新）；并入 `me-ads-launch-flow` 第 6 条与复盘模板；卫青手册 `docs/agents/11-weiqing.md` 职责 / 工具 / 判据 / 停手条件。
 - capability 代码（读诊断警告 / 集成清单 / 自动回执）：台账 `2026-10-20-ads-agent-read-meta-events-manager-health`，P2，另走 tier-gate 与 Build Gate，派 DeepSeek。
+- 备选验收（接口确实读不到诊断警告和集成清单时）：页面只读读取（PM 登录态）+ 广告总控每周读一次并写体检回执，并在台账卡 `2026-10-20-ads-agent-read-meta-events-manager-health` 里写明放弃代码化的理由；读取代码化时并入平台候选「Meta 广告数据地基健康诊断」，不另起一套。
 - 客户层：具体数据集、警告、匹配质量在各客户目录（`docs/clients/<客户>/` 下的追踪体检发现），不进共享位置。
 
 ## 效果回写

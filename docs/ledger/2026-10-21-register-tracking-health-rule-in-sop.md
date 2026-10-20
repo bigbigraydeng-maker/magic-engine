@@ -1,0 +1,11 @@
+---
+id: 2026-10-21-register-tracking-health-rule-in-sop
+title: 把「追踪体检红或没法证明不开投，除非 PM 书面接受风险」登记进广告规则库，并把技能卡对应点标为已合并进规则
+status: decided
+owner: agent
+decided_on: 2026-10-21
+source: session:ec90bb17
+verify_by: 2026-11-04
+verify_how: 规则库 docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md 里新增一条 E 号规则（开投前读事件管理工具，红或灰不开投，除非 PM 书面接受风险；每周与改设置前后也要跑），该行写明技能卡文件名；技能卡机器索引里「红或灰不开投」一点由等 PM 拍板改为已合并并填规则编号；技能与手册引用的规则编号一致
+---
+追踪体检技能（PR 2952）新增了一条挡开投规则，规则库里目前只有 E-07（转化回传，季度体检）。PM 合并 PR 2952 即视为拍板，规则库登记晚于技能，登记前以该 PR 为准；登记是改文档，属 B 或 C 级，另开小 PR。
