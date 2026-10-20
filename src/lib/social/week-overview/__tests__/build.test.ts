@@ -30,6 +30,7 @@ function fakeDb(rows: Row[], options: { fail?: boolean } = {}) {
     select: (...a: unknown[]) => { calls.push(['select', a]); return chain },
     eq: (...a: unknown[]) => { calls.push(['eq', a]); return chain },
     not: (...a: unknown[]) => { calls.push(['not', a]); return chain },
+    or: (...a: unknown[]) => { calls.push(['or', a]); return chain },
     order: (...a: unknown[]) => { calls.push(['order', a]); return chain },
     limit: async (...a: unknown[]) => {
       calls.push(['limit', a])

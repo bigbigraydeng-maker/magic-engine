@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAssetOnly } from '@/lib/factory/deliverable'
 import { isValidChannelId } from './oauth'
 import type { GateResult } from './gates'
 import { checkTopicAlignment } from '@/lib/factory/topic-alignment-store'
@@ -75,13 +76,15 @@ export async function getApprovedWorkOrder(
 ): Promise<ApprovedWorkOrder | null> {
   const { data, error } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, status, angle, output')
+    .select('id, status, angle, output, brief')
     .eq('id', workOrderId)
     .eq('client_id', clientId)
     .maybeSingle()
   if (error) throw error
   if (!data || (data as { status: string }).status !== 'approved') return null
-  const row = data as { id: string; angle: string; output: Record<string, unknown> | null }
+  const row = data as { id: string; angle: string; output: Record<string, unknown> | null; brief: unknown }
+  // asset_only material must never leave the factory, even if it was somehow marked approved.
+  if (isAssetOnly(row.brief)) return null
   const url = row.output?.['video_path']
   if (typeof url !== 'string' || !url.startsWith('https://')) return null
   const caption = typeof row.output?.['caption'] === 'string' ? (row.output['caption'] as string) : ''
