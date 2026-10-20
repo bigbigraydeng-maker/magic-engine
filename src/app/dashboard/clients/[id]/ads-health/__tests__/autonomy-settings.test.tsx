@@ -171,6 +171,28 @@ describe('AutonomySettings', () => {
     expect(document.body.textContent).not.toContain('信封')
   })
 
+  it('自动流程状态的素材显示中文状态、没有批准按钮', async () => {
+    const fn = vi.fn(async (url: string) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      return Response.json({
+        success: true,
+        config: {
+          ...config,
+          creative_pool: [
+            { kind: 'meta_video', ref: '111', status: 'testing' },
+            { kind: 'meta_video', ref: '222', status: 'candidate' },
+          ],
+        },
+      })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('自动流程：测试中')).toBeTruthy())
+    // 只有 candidate 那条有批准按钮
+    expect(screen.getAllByText('批准')).toHaveLength(1)
+    expect(screen.queryByText('待批准')).toBeTruthy()
+  })
+
   it('asks for confirmation before approving and does not call approve when declined', async () => {
     const fn = stubFetch()
     vi.stubGlobal('confirm', vi.fn(() => false))

@@ -174,7 +174,7 @@ export async function PATCH(
     }
     const parsed = parseCreativePool(body.creative_pool)
     if (parsed.length !== body.creative_pool.length) {
-      return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref, status=candidate)' }, { status: 400 })
+      return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref and a recognised status)' }, { status: 400 })
     }
     // 同一个 ref 在请求体里出现两次：无法判断哪条是「真身」，整请求拒绝（不静默取其一）。
     if (new Set(parsed.map(e => e.ref)).size !== parsed.length) {

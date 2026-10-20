@@ -219,6 +219,27 @@ describe('creative-pool/approve — 非内部员工批不动', () => {
   })
 })
 
+describe('creative-pool/approve — 自动流程状态不能手动批准', () => {
+  it.each(['pending_qc', 'test_queue', 'testing', 'scaling', 'rejected', 'inconclusive', 'retired', 'manual_approved'])(
+    'status=%s → 409 status_not_approvable，不写库',
+    async status => {
+      signedInAs(STAFF)
+      const { upsert } = fakeTable([{
+        client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [
+          { kind: 'meta_video', ref: 'v1', status, promo_window: { kind: 'evergreen' } },
+        ],
+      }])
+
+      const res = await POST(postRequest({ ref: 'v1' }), params())
+      const json = await res.json()
+
+      expect(res.status).toBe(409)
+      expect(json.error).toBe('status_not_approvable')
+      expect(upsert).not.toHaveBeenCalled()
+    },
+  )
+})
+
 describe('creative-pool/approve — 推广期闸', () => {
   function seedWith(entry: Record<string, unknown>): Row {
     return { client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [entry] }
