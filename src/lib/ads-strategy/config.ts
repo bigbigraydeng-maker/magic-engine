@@ -8,6 +8,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
+import { parsePromoWindow, type PromoWindow } from './promo-window'
 
 export type AutonomyMode = 'observe' | 'bounded_auto'
 export type CreativePoolStatus = 'candidate' | 'approved'
@@ -17,6 +18,14 @@ export interface CreativePoolEntry {
   status: CreativePoolStatus
   approved_by?: string
   approved_at?: string
+  /** 推广期。缺失 = 未声明（不是长期有效）；未声明的素材不得批准入池、不得启用。 */
+  promo_window?: PromoWindow
+  /** 该素材在 Meta 上被广告实际引用的衍生视频 id / 帖子 id；匹配只认精确相等，不按名字或时长猜。 */
+  alias_refs?: string[]
+  /** 推广期是谁在什么时候设的 / 最后一次改动时间（ISO）。断路器用它区分「计划内到期」和「刚被改过」。 */
+  promo_window_set_by?: string
+  promo_window_set_at?: string
+  promo_window_changed_at?: string
 }
 
 export interface AdStrategyConfig {
@@ -83,6 +92,20 @@ export function parseCreativePool(raw: unknown): CreativePoolEntry[] {
 
     const approvedAt = 'approved_at' in item ? item.approved_at : undefined
     if (typeof approvedAt === 'string') entry.approved_at = approvedAt
+
+    const promoWindow = 'promo_window' in item ? parsePromoWindow(item.promo_window) : null
+    if (promoWindow !== null) entry.promo_window = promoWindow
+
+    for (const key of ['promo_window_set_by', 'promo_window_set_at', 'promo_window_changed_at'] as const) {
+      const v = key in item ? item[key] : undefined
+      if (typeof v === 'string' && v.length > 0) entry[key] = v
+    }
+
+    const aliasRefs = 'alias_refs' in item ? item.alias_refs : undefined
+    if (Array.isArray(aliasRefs)) {
+      const cleaned = [...new Set(aliasRefs.filter((a): a is string => typeof a === 'string' && a.length > 0))]
+      if (cleaned.length > 0) entry.alias_refs = cleaned
+    }
 
     entries.push(entry)
   }

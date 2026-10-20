@@ -8,6 +8,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { loadAdStrategyConfig, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { promoVerdict, nzToday } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -59,6 +60,14 @@ export async function POST(
 
   if (entry.status === 'approved') {
     return NextResponse.json({ success: true, config, idempotent: true })
+  }
+
+  const verdict = promoVerdict(entry.promo_window, nzToday(Date.now()))
+  if (verdict === 'undeclared') {
+    return NextResponse.json({ error: 'promo_window_undeclared', message: '这条素材还没有声明推广期，不能批准：请先声明起止日期，或明确声明长期有效。' }, { status: 422 })
+  }
+  if (verdict === 'expired') {
+    return NextResponse.json({ error: 'promo_window_expired', message: '这条素材的推广期已经过了，不能批准入池。' }, { status: 422 })
   }
 
   const nextPool: CreativePoolEntry[] = config.creative_pool.map(e =>
