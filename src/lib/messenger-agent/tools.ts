@@ -175,11 +175,22 @@ export const queryCustomerFacingFacts: MessengerAgentToolModule = {
         .filter((e) => CUSTOMER_FACING_SENSITIVITIES.has(e.sensitivity))
         .filter((e) => keywords.length === 0 || factMatchesAnyKeyword(e, keywords))
 
-      return truncateToolOutput(JSON.stringify({
+      // Never cut the JSON mid-way: add whole facts until the size budget is used, and say how many were left out
+      // (the agent is told to narrow with intent_keywords) — a silently half-cut list would hide tours.
+      const summarized = facts.map(summarizeFact)
+      const shown: ReturnType<typeof summarizeFact>[] = []
+      const envelope = (n: number) => ({
         fact_layer: 'client_knowledge_base',
         matched_by_keywords: keywords.length > 0 ? keywords : null,
-        facts: facts.map(summarizeFact),
-      }), CUSTOMER_FACTS_TOOL_MAX_CHARS)
+        omitted_facts: n,
+        ...(n > 0 ? { omitted_note: 'Too many facts to list; call again with intent_keywords to narrow. Treat omitted facts as NOT seen.' } : {}),
+      })
+      for (const fact of summarized) {
+        const candidate = JSON.stringify({ ...envelope(summarized.length - shown.length - 1), facts: [...shown, fact] })
+        if (candidate.length > CUSTOMER_FACTS_TOOL_MAX_CHARS) break
+        shown.push(fact)
+      }
+      return JSON.stringify({ ...envelope(summarized.length - shown.length), facts: shown })
     } catch (err) {
       return JSON.stringify({
         error: `Knowledge base lookup failed — treat every commercial fact as UNKNOWN, do not guess: ${err instanceof Error ? err.message : String(err)}`,

@@ -1,15 +1,17 @@
 /**
  * Catalog-backed knowledge entries for the AI customer-service reply agent.
  *
- * Appends `KnowledgeEntry` rows built from the client's tour catalog
- * (`tour_catalog_tours` / `tour_catalog_departures`) to the knowledge base
- * read, so the reply agent and the CTS verifier (which consumes entries whose
- * `factKey` starts with `tour.active.`) can see real tours, prices and
- * departure dates.
+ * Appends `KnowledgeEntry` rows built from the client's PUBLISHED tour catalog
+ * to the knowledge base read, so the reply agent and the CTS verifier (which
+ * consumes entries whose `factKey` starts with `tour.active.`) can see real
+ * tours, prices and departure dates. Only the published catalog is read: an
+ * unpublished catalog yields no entries, so drafts that need prices are
+ * blocked.
  *
  * 🔴 No remaining-seat / availability information may appear anywhere in the
  * produced entries — a verifier gate blocks any availability claim, so seat
- * data must never be placed into `statement` or `structuredValue`.
+ * data must never be placed into `statement` or `structuredValue`. Entries
+ * carry no confirmer fields.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -20,25 +22,8 @@ import {
   type KnowledgeReadResult,
 } from '@/lib/knowledge'
 import { supabaseAdmin } from '@/lib/supabase'
-
-export interface CatalogTourRow {
-  id: string
-  slug: string
-  destination: string
-  tier: string
-  name: string
-  display_price_text: string | null
-  is_active: boolean
-  sold_out: boolean | null
-}
-
-export interface CatalogDepartureRow {
-  tour_id: string
-  /** 'YYYY-MM-DD' */
-  depart_on: string
-  status: string
-  price_text_override: string | null
-}
+import { loadPublishedProducts } from '@/lib/tour-catalog/store-publish'
+import type { FirstPartyTour } from '@/lib/web-intelligence/first-party-tours'
 
 /** Today's date in Pacific/Auckland as 'YYYY-MM-DD'. */
 export function nzToday(date: Date): string {
@@ -70,14 +55,57 @@ export function parsePriceNzd(text: string | null | undefined): number | null {
   return Number.isFinite(amount) && amount >= MIN_PLAUSIBLE_PRICE_NZD ? amount : null
 }
 
-const COUNTED_DEPARTURE_STATUSES: ReadonlySet<string> = new Set(['open', 'limited'])
+const MONTHS: Readonly<Record<string, number>> = {
+  january: 1,
+  february: 2,
+  march: 3,
+  april: 4,
+  may: 5,
+  june: 6,
+  july: 7,
+  august: 8,
+  september: 9,
+  october: 10,
+  november: 11,
+  december: 12,
+}
+
+const DISPLAY_DATE_RE = /^(\d{1,2}) ([A-Za-z]+) (\d{4})$/
+
+/**
+ * Parse a "D Month YYYY" display date (e.g. "13 May 2027", full English month
+ * names, case-insensitive) into an ISO 'YYYY-MM-DD' string. Returns `null`
+ * when the text does not match, the month is unknown, or the date is not a
+ * real calendar date.
+ */
+export function parseDisplayDate(text: string): string | null {
+  const match = DISPLAY_DATE_RE.exec(text.trim())
+  if (!match) return null
+  const day = Number(match[1])
+  const month = MONTHS[match[2].toLowerCase()]
+  const year = Number(match[3])
+  if (month === undefined) return null
+  const utc = new Date(Date.UTC(year, month - 1, day))
+  if (
+    utc.getUTCFullYear() !== year ||
+    utc.getUTCMonth() !== month - 1 ||
+    utc.getUTCDate() !== day
+  ) {
+    return null
+  }
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  return `${year}-${pad(month)}-${pad(day)}`
+}
 
 function normalizeCodePart(part: string): string {
   return part.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
-function buildCode(tour: CatalogTourRow): string {
-  return [tour.destination, tour.tier, tour.slug].map(normalizeCodePart).join('-')
+function buildCode(tour: FirstPartyTour): string {
+  const parts = [tour.destination, tour.tier, tour.slug]
+    .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
+    .map(normalizeCodePart)
+  return parts.join('-')
 }
 
 interface PricedDeparture {
@@ -87,36 +115,31 @@ interface PricedDeparture {
 
 export function buildCatalogKnowledgeEntries(input: {
   clientId: string
-  tours: CatalogTourRow[]
-  departures: CatalogDepartureRow[]
+  tours: FirstPartyTour[]
   now: Date
 }): KnowledgeEntry[] {
-  const { clientId, tours, departures, now } = input
+  const { clientId, tours, now } = input
   const today = nzToday(now)
   const nowIso = now.toISOString()
 
-  const toursById = new Map<string, CatalogTourRow>()
-  for (const tour of tours) {
-    if (tour.is_active !== true) continue
-    if (tour.sold_out === true) continue
-    toursById.set(tour.id, tour)
-  }
+  const activeTours = tours.filter((tour) => tour.is_active === true && tour.sold_out !== true)
 
   // Group counted departures per tour, then per price.
   const pricedByTour = new Map<string, PricedDeparture[]>()
-  for (const dep of departures) {
-    if (!COUNTED_DEPARTURE_STATUSES.has(dep.status)) continue
-    if (dep.depart_on < today) continue
-    const tour = toursById.get(dep.tour_id)
-    if (!tour) continue
-    const override = dep.price_text_override
-    const priceText =
-      typeof override === 'string' && override.trim() !== '' ? override : tour.display_price_text
-    const price = parsePriceNzd(priceText)
-    if (price === null) continue
-    const list = pricedByTour.get(tour.id)
-    if (list) list.push({ departOn: dep.depart_on, price })
-    else pricedByTour.set(tour.id, [{ departOn: dep.depart_on, price }])
+  for (const tour of activeTours) {
+    for (const displayDate of tour.departure_dates) {
+      const iso = parseDisplayDate(displayDate)
+      if (iso === null) continue
+      if (iso < today) continue
+      const override = tour.departure_pricing[displayDate]
+      const priceText =
+        typeof override === 'string' && override.trim() !== '' ? override : tour.price
+      const price = parsePriceNzd(priceText)
+      if (price === null) continue
+      const list = pricedByTour.get(tour.id)
+      if (list) list.push({ departOn: iso, price })
+      else pricedByTour.set(tour.id, [{ departOn: iso, price }])
+    }
   }
 
   interface Draft {
@@ -127,7 +150,7 @@ export function buildCatalogKnowledgeEntries(input: {
   const drafts: Draft[] = []
 
   for (const [tourId, priced] of pricedByTour) {
-    const tour = toursById.get(tourId)
+    const tour = activeTours.find((t) => t.id === tourId)
     if (!tour) continue
     const code = buildCode(tour)
 
@@ -187,28 +210,9 @@ export async function loadCatalogKnowledgeEntries(
   clientId: string,
   now: Date,
 ): Promise<KnowledgeEntry[]> {
-  const toursResult = await db
-    .from('tour_catalog_tours')
-    .select('id, slug, destination, tier, name, display_price_text, is_active, sold_out')
-    .eq('client_id', clientId)
-    .eq('is_active', true)
-  if (toursResult.error) {
-    throw new Error(`[catalog-knowledge] read failed: ${toursResult.error.message}`)
-  }
-
-  const departuresResult = await db
-    .from('tour_catalog_departures')
-    .select('tour_id, depart_on, status, price_text_override')
-    .eq('client_id', clientId)
-    .gte('depart_on', nzToday(now))
-  if (departuresResult.error) {
-    throw new Error(`[catalog-knowledge] read failed: ${departuresResult.error.message}`)
-  }
-
-  const tours = (toursResult.data ?? []) as CatalogTourRow[]
-  const departures = (departuresResult.data ?? []) as CatalogDepartureRow[]
-
-  return buildCatalogKnowledgeEntries({ clientId, tours, departures, now })
+  const read = await loadPublishedProducts(db, clientId, nzToday(now))
+  if (!read.published) return []
+  return buildCatalogKnowledgeEntries({ clientId, tours: read.tours, now })
 }
 
 function catalogEntryCode(entry: KnowledgeEntry): string | null {

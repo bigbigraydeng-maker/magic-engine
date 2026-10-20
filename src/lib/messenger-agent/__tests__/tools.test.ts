@@ -16,12 +16,21 @@ import type { MasterBrief } from '@/types/magic-engine'
 import type { KnowledgeEntry, KnowledgeReadResult } from '@/lib/knowledge'
 
 vi.mock('@/lib/knowledge', () => ({ getClientKnowledge: vi.fn() }))
+// The catalog wrapper would otherwise reach a real database; here it is a pass-through to the knowledge mock.
+vi.mock('@/lib/messenger-agent/catalog-knowledge', async () => {
+  const knowledge = await import('@/lib/knowledge')
+  return {
+    getClientKnowledgeWithCatalog: (clientId: string, options: { purpose: string }) =>
+      (knowledge.getClientKnowledge as unknown as (c: string, o: unknown) => unknown)(clientId, options),
+  }
+})
 vi.mock('@/lib/content/brief-injector', () => ({ getActiveBrief: vi.fn() }))
 
 import { getClientKnowledge } from '@/lib/knowledge'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import {
   queryCustomerFacingFacts,
+  CUSTOMER_FACTS_TOOL_MAX_CHARS,
   queryConversationHistory,
   queryClientBrandFacts,
   buildMessengerAgentTools,
@@ -150,6 +159,20 @@ describe('query_customer_facing_facts — clientId 越权轴锁死', () => {
     const raw = await queryCustomerFacingFacts.handler({}, realCtx())
     expect(raw).not.toContain('[truncated')
     expect(JSON.parse(raw).facts).toHaveLength(40)
+    expect(JSON.parse(raw).omitted_facts).toBe(0)
+  })
+
+  it('🔴 事实多到装不下 → 整条整条地少列并写明 omitted_facts，JSON 永远是完整的（不会截成半条坏 JSON）', async () => {
+    const huge = Array.from({ length: 200 }, (_, i) =>
+      fact({ factKey: `tour.active.t-${i}`, sensitivity: 'price', statement: `Tour ${i} ${'x'.repeat(400)}` }),
+    )
+    mockGetClientKnowledge.mockResolvedValue(knowledgeResult(huge))
+    const raw = await queryCustomerFacingFacts.handler({}, realCtx())
+    const out = JSON.parse(raw)
+    expect(out.omitted_facts).toBeGreaterThan(0)
+    expect(out.facts.length + out.omitted_facts).toBe(200)
+    expect(out.omitted_note).toMatch(/intent_keywords/)
+    expect(raw.length).toBeLessThanOrEqual(CUSTOMER_FACTS_TOOL_MAX_CHARS + 400)
   })
 
   it('sensitivity=general 的事实不出现在结果里(留给 query_client_brand_facts)', async () => {

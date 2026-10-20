@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KnowledgeEntry, KnowledgeReadResult } from '@/lib/knowledge'
+import type { FirstPartyTour } from '@/lib/web-intelligence/first-party-tours'
 
 const mocks = vi.hoisted(() => {
   return {
     getClientKnowledge: vi.fn(),
-    supabaseFrom: vi.fn(),
+    loadPublishedProducts: vi.fn(),
   }
 })
 
@@ -14,58 +15,46 @@ vi.mock('@/lib/knowledge', () => ({
 }))
 
 vi.mock('@/lib/supabase', () => ({
-  supabaseAdmin: {
-    from: mocks.supabaseFrom,
-  },
+  supabaseAdmin: { __opaque: 'supabaseAdmin' },
+}))
+
+vi.mock('@/lib/tour-catalog/store-publish', () => ({
+  loadPublishedProducts: mocks.loadPublishedProducts,
 }))
 
 import {
   buildCatalogKnowledgeEntries,
   loadCatalogKnowledgeEntries,
   getClientKnowledgeWithCatalog,
+  parseDisplayDate,
   parsePriceNzd,
   nzToday,
-  type CatalogTourRow,
-  type CatalogDepartureRow,
 } from '../catalog-knowledge'
 
 const FIXED_NOW = new Date('2026-10-21T01:00:00Z')
 
-function makeTour(overrides: Partial<CatalogTourRow> = {}): CatalogTourRow {
+function makeTour(overrides: Partial<FirstPartyTour> = {}): FirstPartyTour {
   return {
     id: 'tour-1',
     slug: 'silk-road',
     destination: 'china',
     tier: 'signature',
     name: 'China Signature Silk Road',
-    display_price_text: 'From NZD $3,480 per person',
+    price: 'From NZD $3,480 per person',
     is_active: true,
-    sold_out: false,
+    updated_at: '2026-10-19',
+    departure_dates: [],
+    departure_pricing: {},
+    tour_cities: [],
+    itinerary: [],
+    inclusions: [],
+    exclusions: [],
     ...overrides,
   }
 }
 
-function makeDeparture(overrides: Partial<CatalogDepartureRow> = {}): CatalogDepartureRow {
-  return {
-    tour_id: 'tour-1',
-    depart_on: '2026-11-01',
-    status: 'open',
-    price_text_override: null,
-    ...overrides,
-  }
-}
-
-function build(
-  tours: CatalogTourRow[],
-  departures: CatalogDepartureRow[],
-  now: Date = FIXED_NOW,
-): KnowledgeEntry[] {
-  return buildCatalogKnowledgeEntries({
-    clientId: 'client-1',
-    tours,
-    departures,
-    now,
-  })
+function build(tours: FirstPartyTour[], now: Date = FIXED_NOW): KnowledgeEntry[] {
+  return buildCatalogKnowledgeEntries({ clientId: 'client-1', tours, now })
 }
 
 function structured(entry: KnowledgeEntry): Record<string, unknown> {
@@ -75,30 +64,20 @@ function structured(entry: KnowledgeEntry): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Departure status / past-date filtering
+// 1. parseDisplayDate
 // ---------------------------------------------------------------------------
 
-describe('buildCatalogKnowledgeEntries — departure filtering', () => {
-  it('ignores past-dated departures and closed/cancelled/sold_out statuses', () => {
-    const tours = [makeTour()]
-    const departures: CatalogDepartureRow[] = [
-      makeDeparture({ depart_on: '2026-10-01', status: 'open' }), // past
-      makeDeparture({ depart_on: '2026-11-01', status: 'closed' }),
-      makeDeparture({ depart_on: '2026-11-02', status: 'cancelled' }),
-      makeDeparture({ depart_on: '2026-11-03', status: 'sold_out' }),
-    ]
-    expect(build(tours, departures)).toEqual([])
+describe('parseDisplayDate', () => {
+  it('parses "D Month YYYY" into ISO', () => {
+    expect(parseDisplayDate('13 May 2027')).toBe('2027-05-13')
+    expect(parseDisplayDate('1 January 2027')).toBe('2027-01-01')
   })
 
-  it('includes open and limited departures', () => {
-    const tours = [makeTour()]
-    const departures: CatalogDepartureRow[] = [
-      makeDeparture({ depart_on: '2026-11-01', status: 'open' }),
-      makeDeparture({ depart_on: '2026-11-02', status: 'limited' }),
-    ]
-    const entries = build(tours, departures)
-    expect(entries).toHaveLength(1)
-    expect(structured(entries[0]).departure_dates).toEqual(['2026-11-01', '2026-11-02'])
+  it('returns null for impossible or non-matching dates', () => {
+    expect(parseDisplayDate('31 February 2027')).toBeNull()
+    expect(parseDisplayDate('May 13 2027')).toBeNull()
+    expect(parseDisplayDate('2027-05-13')).toBeNull()
+    expect(parseDisplayDate('13 Foo 2027')).toBeNull()
   })
 })
 
@@ -111,32 +90,166 @@ describe('buildCatalogKnowledgeEntries — Pacific/Auckland date cutoff', () => 
     const now = new Date('2026-10-20T12:30:00Z')
     expect(nzToday(now)).toBe('2026-10-21')
 
-    const tours = [makeTour()]
-    const departures: CatalogDepartureRow[] = [
-      makeDeparture({ depart_on: '2026-10-20', status: 'open' }),
-      makeDeparture({ depart_on: '2026-10-21', status: 'open' }),
+    const tours = [
+      makeTour({
+        departure_dates: ['20 October 2026', '21 October 2026'],
+      }),
     ]
-    const entries = build(tours, departures, now)
+    const entries = build(tours, now)
     expect(entries).toHaveLength(1)
     expect(structured(entries[0]).departure_dates).toEqual(['2026-10-21'])
   })
 
-  it('treats 2026-10-20T10:30:00Z as still 2026-10-20 in Auckland', () => {
-    const now = new Date('2026-10-20T10:30:00Z')
-    expect(nzToday(now)).toBe('2026-10-20')
-
-    const tours = [makeTour()]
-    const departures: CatalogDepartureRow[] = [
-      makeDeparture({ depart_on: '2026-10-20', status: 'open' }),
+  it('excludes past dates and includes today (NZ) at the fixed now', () => {
+    const tours = [
+      makeTour({
+        departure_dates: ['20 October 2026', '21 October 2026', '22 October 2026'],
+      }),
     ]
-    const entries = build(tours, departures, now)
+    const entries = build(tours)
     expect(entries).toHaveLength(1)
-    expect(structured(entries[0]).departure_dates).toEqual(['2026-10-20'])
+    expect(structured(entries[0]).departure_dates).toEqual(['2026-10-21', '2026-10-22'])
   })
 })
 
 // ---------------------------------------------------------------------------
-// 3. parsePriceNzd
+// 3. Inactive / sold-out tours
+// ---------------------------------------------------------------------------
+
+describe('buildCatalogKnowledgeEntries — tour eligibility', () => {
+  it('produces no entries for inactive or sold-out tours', () => {
+    const tours = [
+      makeTour({
+        id: 'tour-inactive',
+        slug: 'inactive',
+        is_active: false,
+        departure_dates: ['1 November 2026'],
+      }),
+      makeTour({
+        id: 'tour-soldout',
+        slug: 'soldout',
+        sold_out: true,
+        departure_dates: ['1 November 2026'],
+      }),
+    ]
+    expect(build(tours)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. Price overrides → separate entries
+// ---------------------------------------------------------------------------
+
+describe('buildCatalogKnowledgeEntries — price overrides', () => {
+  it('splits departures by price and keeps factKeys unique', () => {
+    const tours = [
+      makeTour({
+        departure_dates: ['1 November 2026', '2 November 2026', '15 November 2026'],
+        departure_pricing: {
+          '15 November 2026': 'NZD $4,080 per person',
+        },
+      }),
+    ]
+    const entries = build(tours)
+    expect(entries).toHaveLength(2)
+
+    const byPrice = new Map<number, KnowledgeEntry>()
+    for (const e of entries) {
+      const price = structured(e).price_nzd
+      expect(typeof price).toBe('number')
+      byPrice.set(price as number, e)
+    }
+
+    const base = byPrice.get(3480)
+    const override = byPrice.get(4080)
+    expect(base).toBeDefined()
+    expect(override).toBeDefined()
+
+    expect(structured(base as KnowledgeEntry).departure_dates).toEqual([
+      '2026-11-01',
+      '2026-11-02',
+    ])
+    expect(structured(override as KnowledgeEntry).departure_dates).toEqual(['2026-11-15'])
+
+    const factKeys = entries.map((e) => e.factKey)
+    expect(new Set(factKeys).size).toBe(factKeys.length)
+
+    const names = new Set(entries.map((e) => structured(e).name))
+    const codes = new Set(entries.map((e) => structured(e).code))
+    expect(names.size).toBe(1)
+    expect(codes.size).toBe(1)
+  })
+
+  it('skips dates whose price text is unparsable (no fallback to the tour price)', () => {
+    const tours = [
+      makeTour({
+        departure_dates: ['1 November 2026', '2 November 2026'],
+        departure_pricing: {
+          '2 November 2026': 'From NZD $TBC per person',
+        },
+      }),
+    ]
+    const entries = build(tours)
+    expect(entries).toHaveLength(1)
+    expect(structured(entries[0]).price_nzd).toBe(3480)
+    expect(structured(entries[0]).departure_dates).toEqual(['2026-11-01'])
+  })
+
+  it('skips dates whose override is a per-couple price', () => {
+    const tours = [
+      makeTour({
+        departure_dates: ['1 November 2026', '2 November 2026'],
+        departure_pricing: {
+          '2 November 2026': 'NZD $900 per couple',
+        },
+      }),
+    ]
+    const entries = build(tours)
+    expect(entries).toHaveLength(1)
+    expect(structured(entries[0]).departure_dates).toEqual(['2026-11-01'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5. Entry shape / no availability leakage
+// ---------------------------------------------------------------------------
+
+describe('buildCatalogKnowledgeEntries — entry shape', () => {
+  it('produces approved, customer-ok, price-sensitive entries with the expected structuredValue', () => {
+    const entries = build([makeTour({ departure_dates: ['1 November 2026'] })])
+    expect(entries).toHaveLength(1)
+    const entry = entries[0]
+
+    expect(entry.sensitivity).toBe('price')
+    expect(entry.status).toBe('approved')
+    expect(entry.visibility).toBe('customer_ok')
+    expect(entry.clientConfirmedByEmail).toBeNull()
+    expect(entry.clientConfirmedAt).toBeNull()
+    expect(entry.approvedByEmail).toBeNull()
+    expect(entry.approvedAt).toBeNull()
+
+    const sv = structured(entry)
+    expect(sv.code).toBe('china-signature-silk-road')
+    expect(sv.name).toBe('China Signature Silk Road')
+    expect(typeof sv.price_nzd).toBe('number')
+    expect(Array.isArray(sv.departure_dates)).toBe(true)
+    expect(typeof sv.itinerary_url).toBe('string')
+  })
+
+  it('never mentions availability / remaining seats', () => {
+    const entries = build([
+      makeTour({ departure_dates: ['1 November 2026', '2 November 2026'] }),
+    ])
+    const forbidden = /seat|remaining|places left|名额|余位|仅剩/i
+    for (const entry of entries) {
+      expect(entry.statement).not.toMatch(forbidden)
+      expect(JSON.stringify(entry.structuredValue)).not.toMatch(forbidden)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 6. parsePriceNzd
 // ---------------------------------------------------------------------------
 
 describe('parsePriceNzd', () => {
@@ -168,139 +281,49 @@ describe('parsePriceNzd', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 4. Inactive / sold-out tours
+// 7. loadCatalogKnowledgeEntries
 // ---------------------------------------------------------------------------
-
-describe('buildCatalogKnowledgeEntries — tour eligibility', () => {
-  it('produces no entries for inactive or sold-out tours', () => {
-    const tours = [
-      makeTour({ id: 'tour-inactive', is_active: false }),
-      makeTour({ id: 'tour-soldout', sold_out: true }),
-    ]
-    const departures: CatalogDepartureRow[] = [
-      makeDeparture({ tour_id: 'tour-inactive', depart_on: '2026-11-01' }),
-      makeDeparture({ tour_id: 'tour-soldout', depart_on: '2026-11-01' }),
-    ]
-    expect(build(tours, departures)).toEqual([])
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 5. Price override → separate entry
-// ---------------------------------------------------------------------------
-
-describe('buildCatalogKnowledgeEntries — price overrides', () => {
-  it('splits departures by price and keeps factKeys unique', () => {
-    const tours = [makeTour()]
-    const departures: CatalogDepartureRow[] = [
-      makeDeparture({ depart_on: '2026-11-01', price_text_override: null }),
-      makeDeparture({ depart_on: '2026-11-02', price_text_override: null }),
-      makeDeparture({
-        depart_on: '2026-11-15',
-        price_text_override: 'NZD $4,080 per person',
-      }),
-    ]
-    const entries = build(tours, departures)
-    expect(entries).toHaveLength(2)
-
-    const byPrice = new Map<number, KnowledgeEntry>()
-    for (const e of entries) {
-      const price = structured(e).price_nzd
-      expect(typeof price).toBe('number')
-      byPrice.set(price as number, e)
-    }
-
-    const base = byPrice.get(3480)
-    const override = byPrice.get(4080)
-    expect(base).toBeDefined()
-    expect(override).toBeDefined()
-
-    expect(structured(base as KnowledgeEntry).departure_dates).toEqual([
-      '2026-11-01',
-      '2026-11-02',
-    ])
-    expect(structured(override as KnowledgeEntry).departure_dates).toEqual(['2026-11-15'])
-
-    const factKeys = entries.map((e) => e.factKey)
-    expect(new Set(factKeys).size).toBe(factKeys.length)
-
-    const names = new Set(entries.map((e) => structured(e).name))
-    const codes = new Set(entries.map((e) => structured(e).code))
-    expect(names.size).toBe(1)
-    expect(codes.size).toBe(1)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 6. Entry shape / no availability leakage
-// ---------------------------------------------------------------------------
-
-describe('buildCatalogKnowledgeEntries — entry shape', () => {
-  it('produces approved, customer-ok, price-sensitive entries with the expected structuredValue', () => {
-    const entries = build(
-      [makeTour()],
-      [makeDeparture({ depart_on: '2026-11-01', status: 'open' })],
-    )
-    expect(entries).toHaveLength(1)
-    const entry = entries[0]
-
-    expect(entry.sensitivity).toBe('price')
-    expect(entry.status).toBe('approved')
-    expect(entry.visibility).toBe('customer_ok')
-    expect(entry.clientConfirmedByEmail).toBeNull()
-    expect(entry.clientConfirmedAt).toBeNull()
-    expect(entry.approvedByEmail).toBeNull()
-
-    const sv = structured(entry)
-    expect(typeof sv.code).toBe('string')
-    expect(typeof sv.price_nzd).toBe('number')
-    expect(Array.isArray(sv.departure_dates)).toBe(true)
-    expect(typeof sv.itinerary_url).toBe('string')
-  })
-
-  it('never mentions availability / remaining seats', () => {
-    const entries = build(
-      [makeTour()],
-      [
-        makeDeparture({ depart_on: '2026-11-01', status: 'open' }),
-        makeDeparture({ depart_on: '2026-11-02', status: 'limited' }),
-      ],
-    )
-    const forbidden = /seat|remaining|places left|名额|余位|仅剩/i
-    for (const entry of entries) {
-      expect(entry.statement).not.toMatch(forbidden)
-      expect(JSON.stringify(entry.structuredValue)).not.toMatch(forbidden)
-    }
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 7. loadCatalogKnowledgeEntries — error propagation
-// ---------------------------------------------------------------------------
-
-interface FakeQuery {
-  select: () => FakeQuery
-  eq: () => FakeQuery
-  gte: () => Promise<{ data: null; error: { message: string } }>
-}
-
-function makeErrorDb(): SupabaseClient {
-  const query: FakeQuery = {
-    select: () => query,
-    eq: () => query,
-    gte: () => Promise.resolve({ data: null, error: { message: 'boom' } }),
-  }
-  const db = {
-    from: () => query,
-  }
-  return db as unknown as SupabaseClient
-}
 
 describe('loadCatalogKnowledgeEntries', () => {
-  it('throws when a query returns an error', async () => {
-    await expect(
-      loadCatalogKnowledgeEntries(makeErrorDb(), 'client-1', FIXED_NOW),
-    ).rejects.toThrow(/boom/)
+  beforeEach(() => {
+    mocks.loadPublishedProducts.mockReset()
+  })
+
+  it('calls loadPublishedProducts with (db, clientId, NZ-today)', async () => {
+    const db = { __opaque: 'db' } as unknown as SupabaseClient
+    mocks.loadPublishedProducts.mockResolvedValue({ published: false, tours: [] })
+
+    await loadCatalogKnowledgeEntries(db, 'client-1', FIXED_NOW)
+
+    expect(mocks.loadPublishedProducts).toHaveBeenCalledTimes(1)
+    expect(mocks.loadPublishedProducts).toHaveBeenCalledWith(db, 'client-1', '2026-10-21')
+  })
+
+  it('returns [] when the catalog is not published', async () => {
+    const db = { __opaque: 'db' } as unknown as SupabaseClient
+    mocks.loadPublishedProducts.mockResolvedValue({ published: false, tours: [] })
+
+    const entries = await loadCatalogKnowledgeEntries(db, 'client-1', FIXED_NOW)
+    expect(entries).toEqual([])
+  })
+
+  it('builds entries from the published tours', async () => {
+    const db = { __opaque: 'db' } as unknown as SupabaseClient
+    mocks.loadPublishedProducts.mockResolvedValue({
+      published: true,
+      tours: [makeTour({ departure_dates: ['1 November 2026'] })],
+    })
+
+    const entries = await loadCatalogKnowledgeEntries(db, 'client-1', FIXED_NOW)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].factKey.startsWith('tour.active.')).toBe(true)
+  })
+
+  it('rejects when loadPublishedProducts rejects', async () => {
+    const db = { __opaque: 'db' } as unknown as SupabaseClient
+    mocks.loadPublishedProducts.mockRejectedValue(new Error('boom'))
+
+    await expect(loadCatalogKnowledgeEntries(db, 'client-1', FIXED_NOW)).rejects.toThrow(/boom/)
   })
 })
 
@@ -330,44 +353,17 @@ function makeBaseEntry(): KnowledgeEntry {
   }
 }
 
-interface CatalogQueryResult {
-  data: unknown
-  error: { message: string } | null
-}
-
-interface CatalogQuery {
-  select: () => CatalogQuery
-  eq: () => CatalogQuery
-  gte: () => Promise<CatalogQueryResult>
-}
-
-function makeCatalogDb(tours: CatalogTourRow[], departures: CatalogDepartureRow[]): SupabaseClient {
-  const builderFor = (rows: unknown[]) => {
-    const q: Record<string, unknown> = {}
-    q.select = () => q
-    q.eq = () => q
-    q.gte = () => q
-    // Awaiting the chain resolves like a Supabase query: { data, error }.
-    q.then = (resolve: (v: { data: unknown[]; error: null }) => unknown) => resolve({ data: rows, error: null })
-    return q
-  }
-  const db = {
-    from: (table: string) => builderFor(table === 'tour_catalog_tours' ? tours : departures),
-  }
-  return db as unknown as SupabaseClient
-}
-
 describe('getClientKnowledgeWithCatalog', () => {
   beforeEach(() => {
     mocks.getClientKnowledge.mockReset()
-    mocks.supabaseFrom.mockReset()
+    mocks.loadPublishedProducts.mockReset()
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('returns base unchanged for internal_brief and never touches supabase', async () => {
+  it('returns base unchanged for internal_brief and never reads the catalog', async () => {
     const baseEntry = makeBaseEntry()
     const base: KnowledgeReadResult = { entries: [baseEntry], forbiddenFactKeys: [] }
     mocks.getClientKnowledge.mockResolvedValue(base)
@@ -375,20 +371,14 @@ describe('getClientKnowledgeWithCatalog', () => {
     const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'internal_brief' })
 
     expect(result).toBe(base)
-    expect(mocks.supabaseFrom).not.toHaveBeenCalled()
+    expect(mocks.loadPublishedProducts).not.toHaveBeenCalled()
   })
 
   it('returns base unchanged when the catalog read throws (customer_reply)', async () => {
     const baseEntry = makeBaseEntry()
     const base: KnowledgeReadResult = { entries: [baseEntry], forbiddenFactKeys: [] }
     mocks.getClientKnowledge.mockResolvedValue(base)
-
-    const failingQuery: CatalogQuery = {
-      select: () => failingQuery,
-      eq: () => failingQuery,
-      gte: () => Promise.resolve({ data: null, error: { message: 'boom' } }),
-    }
-    mocks.supabaseFrom.mockReturnValue(failingQuery)
+    mocks.loadPublishedProducts.mockRejectedValue(new Error('boom'))
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
@@ -402,11 +392,10 @@ describe('getClientKnowledgeWithCatalog', () => {
     const baseEntry = makeBaseEntry()
     const base: KnowledgeReadResult = { entries: [baseEntry], forbiddenFactKeys: [] }
     mocks.getClientKnowledge.mockResolvedValue(base)
-
-    const tours = [makeTour()]
-    const departures = [makeDeparture({ depart_on: '2026-11-01', status: 'open' })]
-    const catalogDb = makeCatalogDb(tours, departures)
-    mocks.supabaseFrom.mockImplementation((table: string) => (catalogDb as unknown as { from: (t: string) => unknown }).from(table))
+    mocks.loadPublishedProducts.mockResolvedValue({
+      published: true,
+      tours: [makeTour({ departure_dates: ['1 November 2026'] })],
+    })
 
     const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' })
 
@@ -417,9 +406,14 @@ describe('getClientKnowledgeWithCatalog', () => {
   })
 
   it('drops catalog entries for a retired key that uses the .alias. convention', async () => {
-    mocks.getClientKnowledge.mockResolvedValue({ entries: [], forbiddenFactKeys: ['tour.retired.old-name.alias.silk-road'] })
-    const catalogDb = makeCatalogDb([makeTour()], [makeDeparture({ depart_on: '2026-11-01', status: 'open' })])
-    mocks.supabaseFrom.mockImplementation((table: string) => (catalogDb as unknown as { from: (t: string) => unknown }).from(table))
+    mocks.getClientKnowledge.mockResolvedValue({
+      entries: [],
+      forbiddenFactKeys: ['tour.retired.old-name.alias.silk-road'],
+    })
+    mocks.loadPublishedProducts.mockResolvedValue({
+      published: true,
+      tours: [makeTour({ departure_dates: ['1 November 2026'] })],
+    })
 
     const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' })
 
@@ -427,32 +421,18 @@ describe('getClientKnowledgeWithCatalog', () => {
   })
 
   it('drops catalog entries when the retired key carries only the short tour slug', async () => {
-    mocks.getClientKnowledge.mockResolvedValue({ entries: [], forbiddenFactKeys: ['tour.retired.silk-road'] })
-    const catalogDb = makeCatalogDb([makeTour()], [makeDeparture({ depart_on: '2026-11-01', status: 'open' })])
-    mocks.supabaseFrom.mockImplementation((table: string) => (catalogDb as unknown as { from: (t: string) => unknown }).from(table))
+    mocks.getClientKnowledge.mockResolvedValue({
+      entries: [],
+      forbiddenFactKeys: ['tour.retired.silk-road'],
+    })
+    mocks.loadPublishedProducts.mockResolvedValue({
+      published: true,
+      tours: [makeTour({ departure_dates: ['1 November 2026'] })],
+    })
 
     const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' })
 
     expect(result.entries).toEqual([])
-  })
-
-  it('drops catalog entries whose code appears in forbiddenFactKeys', async () => {
-    const baseEntry = makeBaseEntry()
-    const base: KnowledgeReadResult = {
-      entries: [baseEntry],
-      forbiddenFactKeys: ['tour.retired.china-signature-silk-road'],
-    }
-    mocks.getClientKnowledge.mockResolvedValue(base)
-
-    const tours = [makeTour()]
-    const departures = [makeDeparture({ depart_on: '2026-11-01', status: 'open' })]
-    const catalogDb = makeCatalogDb(tours, departures)
-    mocks.supabaseFrom.mockImplementation((table: string) => (catalogDb as unknown as { from: (t: string) => unknown }).from(table))
-
-    const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' })
-
-    expect(result.entries).toEqual([baseEntry])
-    expect(result.forbiddenFactKeys).toEqual(['tour.retired.china-signature-silk-road'])
   })
 
   it('propagates a rejection from getClientKnowledge', async () => {
@@ -461,5 +441,29 @@ describe('getClientKnowledgeWithCatalog', () => {
     await expect(
       getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' }),
     ).rejects.toThrow(/base read failed/)
+  })
+
+  it('returns base unchanged when the catalog is not published', async () => {
+    const baseEntry = makeBaseEntry()
+    const base: KnowledgeReadResult = { entries: [baseEntry], forbiddenFactKeys: [] }
+    mocks.getClientKnowledge.mockResolvedValue(base)
+    mocks.loadPublishedProducts.mockResolvedValue({ published: false, tours: [] })
+
+    const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' })
+
+    expect(result.entries).toEqual([baseEntry])
+    expect(result.forbiddenFactKeys).toEqual([])
+  })
+})
+
+describe('接线：起草读资料和 customer-facing 工具都走带团目录的包装函数', () => {
+  it('🔴 conversation-inbound-draft-store 和 tools.ts 的 query_customer_facing_facts 用 getClientKnowledgeWithCatalog（漏接类型检查抓不到）', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const read = (rel: string) => readFileSync(join(process.cwd(), rel), 'utf8')
+    const store = read('src/lib/inngest/functions/conversation-inbound-draft-store.ts')
+    const tools = read('src/lib/messenger-agent/tools.ts')
+    expect(store).toMatch(/getClientKnowledgeWithCatalog\(clientId, \{ purpose: 'customer_reply' \}\)/)
+    expect(tools).toMatch(/const result = await getClientKnowledgeWithCatalog\(ctx\.clientId, \{ purpose: 'customer_reply' \}\)/)
   })
 })
