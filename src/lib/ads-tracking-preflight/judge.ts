@@ -342,17 +342,26 @@ function judgeLandingOk(input: JudgeInput): TrackingGateReceipt {
 
 // ─── 7. 官网线索进 CRM ──────────────────────────────────────────────────────
 
-/** 一条线索的新鲜度：最近一条在 48 小时内（容 5 分钟时钟误差）才算「现在是通的」；读不出时间 / 在未来 / 太早都不算。 */
-function crmFreshness(latest: string | null, now: Date): { fresh: boolean; hours: number; problem: string } {
+/**
+ * 一条线索的新鲜度：最近一条在 48 小时内（容 5 分钟时钟误差）才算「现在是通的」；读不出时间 / 在未来 / 太早都不算。
+ * kind：fresh 新鲜；stale 太早（超过 48 小时，数据本身没问题）；unreadable 读不出时间；future 时间在未来（这两种是数据问题）。
+ */
+function crmFreshness(
+  latest: string | null,
+  now: Date,
+): { fresh: boolean; kind: 'fresh' | 'stale' | 'unreadable' | 'future'; hours: number; problem: string } {
   const age = latest === null ? null : ageHours(latest, now)
   if (age !== null && Number.isFinite(age) && age >= -CRM_CLOCK_SKEW_HOURS && age <= CRM_FRESH_WINDOW_HOURS) {
-    return { fresh: true, hours: Math.max(0, Math.round(age)), problem: '' }
+    return { fresh: true, kind: 'fresh', hours: Math.max(0, Math.round(age)), problem: '' }
   }
-  let problem: string
-  if (age === null || !Number.isFinite(age)) problem = '读不出最近一条的时间'
-  else if (age < -CRM_CLOCK_SKEW_HOURS) problem = '最近一条的时间在未来（时钟偏差或脏数据）'
-  else problem = `最近一条是 ${Math.round(age)} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时`
-  return { fresh: false, hours: 0, problem }
+  if (age === null || !Number.isFinite(age)) {
+    return { fresh: false, kind: 'unreadable', hours: 0, problem: '读不出最近一条的时间' }
+  }
+  if (age < -CRM_CLOCK_SKEW_HOURS) {
+    return { fresh: false, kind: 'future', hours: 0, problem: '最近一条的时间在未来（时钟偏差或脏数据）' }
+  }
+  const hours = Math.round(age)
+  return { fresh: false, kind: 'stale', hours, problem: `最近一条是 ${hours} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时` }
 }
 
 /**
@@ -391,6 +400,8 @@ const AD_LANDING_TEST_HOW =
  * 近 7 天一条来自广告落地页的线索都没有 → **灰**（没证据，不是黄）：这道门的意义就是证明「广告点进去那一页的表单真能进 CRM」，
  * 在没证据之前显示「前置条件满足」会误导开投决定——灰是硬门灰，会挡 preconditions_met，也会出今日待办（统筹 18 号 2026-10-20 定）。
  * 有证据但过期 / 读不出时间 / 在未来 → 仍是黄（以前通过，不能说现在通）。
+ * 其中「过期」（数据没问题，只是 48 小时内没有新线索）的说法是「多半在等真实线索」，并教怎么分辨是不是通路坏了（74 号 2026-10-20 要求）；
+ * 读不出时间 / 在未来是数据问题，仍按「没法确认」说。
  */
 function judgeAdLandingFreshness(
   input: JudgeInput,
@@ -414,6 +425,17 @@ function judgeAdLandingFreshness(
       key, 'green',
       `广告落地页上的表单线索在进 CRM：最近一条是 ${f.hours} 小时前，近 7 天共 ${adCount} 条（官网表单线索合计 ${total} 条）`,
       '', evidence, as_of,
+    )
+  }
+  // 太早（数据没问题，只是 48 小时内没有新线索）：开投后多半只是还没有新的真实线索，不能一上来就说成故障
+  if (f.kind === 'stale') {
+    const events = input.config.ga4_lead_events.length > 0 ? input.config.ga4_lead_events.join(' / ') : '留资事件'
+    return receipt(
+      key, 'yellow',
+      `近 7 天 CRM 里有 ${adCount} 条从广告落地页提交的表单线索，最近一条是 ${f.hours} 小时前（超过 ${CRM_FRESH_WINDOW_HOURS} 小时），现在没有新线索——多半是在等真实线索进来，也可能是通路坏了`,
+      `不一定是故障。先看网站统计（GA4：${events}）近 ${CRM_FRESH_WINDOW_HOURS} 小时有没有人在广告落地页提交表单：没有 → 在等真实线索，不用处理；` +
+        `有提交但 CRM 里没有新线索 → 通路坏了，按下面排查：${AD_LANDING_TEST_HOW}`,
+      evidence, as_of,
     )
   }
   return receipt(

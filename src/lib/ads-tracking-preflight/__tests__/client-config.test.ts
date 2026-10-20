@@ -75,14 +75,24 @@ describe('客户配置（L4）', () => {
     expect(cfg?.planned_daily_budget_cents).toBe(10100)
     expect(cfg?.official_daily_cap_cents).toBe(11000)
     expect(cfg?.currency).toBe('NZD')
-    // 开投日未定（等 122 / 119 做完再发布）：窗口从 10-20 配到 11-30，没设预计开投日；T+1h / T+24h 和 96 小时从「第一次见到花费」起算
+    // 已于 2026-10-20 15:25（新西兰）真实开投：系列编号发布后没变；预计开投日写 10-20，窗口从 10-20 配到 11-30；
+    // T+1h / T+24h 和 96 小时从「第一次见到花费」起算。后面往同一个系列下新增的广告组，花费按系列汇总，自动算进来。
     expect(cfg?.launch_watch).toEqual({
       from: '2026-10-20',
       days: 42,
       timezone: 'Pacific/Auckland',
       campaign_ids: ['52558131445673'],
       campaign_name_contains: ['官网点击', '20261022'],
+      expected_launch_on: '2026-10-20',
     })
     expect(cfg?.known_issues).toBeUndefined()
+  })
+
+  it('CTS：预计开投日落在盯盘窗口里（不然「找不到系列」的待办永远不会出，或开投当天就在窗口外）', () => {
+    const watch = getTrackingClientConfig('c0000000-0000-0000-0000-000000000000')?.launch_watch
+    expect(watch?.expected_launch_on).toBe('2026-10-20')
+    const last = new Date(Date.parse(`${watch?.from}T00:00:00Z`) + ((watch?.days ?? 0) - 1) * 86_400_000).toISOString().slice(0, 10)
+    expect((watch?.expected_launch_on ?? '') >= (watch?.from ?? '9999')).toBe(true)
+    expect((watch?.expected_launch_on ?? '9999') <= last).toBe(true)
   })
 })
