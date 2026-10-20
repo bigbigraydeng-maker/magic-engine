@@ -22,7 +22,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { DraftApprovalPanel } from '../../messenger/_components/DraftApprovalPanel'
+import { DraftApprovalPanel, blockedReasonLabel } from '../../messenger/_components/DraftApprovalPanel'
 import { ReplyBox } from '../../messenger/_components/ReplyBox'
 import type { PendingDraft, ReplyWindow, ThreadMessage } from '../../messenger/types'
 
@@ -55,7 +55,8 @@ export function WhatsAppReply({
   /** 窗口关了时还能走的两条路 —— 没电话 / 没邮箱就不给那一条。 */
   phone?: string | null
   email?: string | null
-  onSent: () => void
+  /** 'approved' = 草稿刚批准、系统还在发；'sent' = 手写的这条已发出。 */
+  onSent: (kind: 'approved' | 'sent') => void
 }) {
   const [data, setData] = useState<Payload | null>(null)
   const [failed, setFailed] = useState(false)
@@ -137,7 +138,7 @@ export function WhatsAppReply({
             onDecided={() => {
               void loadDrafts()
               void load()
-              onSent()
+              onSent('approved')
             }}
             onRejected={() => {
               void loadDrafts()
@@ -147,7 +148,7 @@ export function WhatsAppReply({
       )}
       {(!drafts || drafts.length === 0) && data.blockedDraft && (
         <p className="mb-2 text-[12px] text-me-charcoal/60" data-testid="whatsapp-draft-blocked">
-          AI 起草了一条回复，但被安全检查拦下（{data.blockedDraft.reasons.length > 0 ? data.blockedDraft.reasons.join('；') : '原因未记录'}），请手写。
+          AI 起草了一条回复，但被安全检查拦下（{data.blockedDraft.reasons.length > 0 ? [...new Set(data.blockedDraft.reasons.map(blockedReasonLabel))].join('；') : '原因未记录'}），请手写。
         </p>
       )}
       <ReplyBox
@@ -158,13 +159,20 @@ export function WhatsAppReply({
         // 待批准的 AI 草稿走上面的 DraftApprovalPanel（批准后由系统发出）；手写框保持空着，
         // 不把草稿塞进输入框绕过批准流程（PM：AI 只写草稿、人批准才发）。
         draft={null}
+        noDraftHint={
+          drafts && drafts.length > 0
+            ? '上面有 AI 草稿等你批准；也可以不用它，自己手写一条。'
+            : data.blockedDraft
+              ? '自己手写一条。'
+              : undefined
+        }
         window={data.replyWindow ?? null}
         viewerEmail={viewerEmail}
         onSent={() => {
           // 发完重新问一次窗口 —— 我们这条不会重新开窗（WhatsApp 的 24 小时从客人
           // 说话算起），但客人可能在这期间又说了话，剩余时间要跟着变。
           void load()
-          onSent()
+          onSent('sent')
         }}
       />
     </div>

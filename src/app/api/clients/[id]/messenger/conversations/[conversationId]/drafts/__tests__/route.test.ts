@@ -179,7 +179,7 @@ describe('GET drafts — only the approval queue', () => {
       },
     ])
     // CTS 是 c0000000-…（params() 默认值）——这条历史行的 verifier_output_json 里没有
-    // `checked_gate_ids`（2026-09-20 语义闸上线前写入的行），回退到只声称七道正则闸
+    // `checked_gate_ids`（2026-09-20 语义闸上线前写入的行），回退到只声称静态正则闸清单（随主干闸门数变化，不写死数字）
     // 过了，不假装 Jev 语义闸也跑过（子牙+魏征复审：不能用静态清单冒充实际执行记录）。
     // 回退到「静态正则闸清单」的长度（原来写死 7，主干新增一道闸后这条就红了，跟本次改动无关）。
     expect(json.drafts[0].passedGateIds).toEqual(ctsVerifierGates.map((g) => g.id))

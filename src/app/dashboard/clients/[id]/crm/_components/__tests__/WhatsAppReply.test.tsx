@@ -15,7 +15,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { WhatsAppReply } from '../WhatsAppReply'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
@@ -184,7 +184,13 @@ describe('AI 草稿面板（WhatsApp）', () => {
     draw()
 
     await waitFor(() => expect(screen.getByTestId('whatsapp-draft-blocked')).toBeInTheDocument())
-    expect(screen.getByTestId('whatsapp-draft-blocked').textContent).toContain('unverified claim')
+    // 给 PM 看的是中文闸门名，不露英文技术串
+    const note = screen.getByTestId('whatsapp-draft-blocked').textContent ?? ''
+    expect(note).toContain('承诺/未核实说法')
+    expect(note).not.toMatch(/unverified|content_claims/)
+    // 手写框不预填被拦原因，也不再说"还没有 AI 草稿"自相矛盾
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('')
+    expect(screen.queryByText(/还没有 AI 草稿/)).toBeNull()
     expect(screen.queryByText('批准发送')).toBeNull()
     expect(screen.queryByTestId('whatsapp-draft-panel')).toBeNull()
   })
@@ -218,5 +224,47 @@ describe('AI 草稿面板（WhatsApp）', () => {
 
     await waitFor(() => expect(screen.getByRole('textbox')).toBeInTheDocument())
     expect(screen.queryByText(/boom/)).toBeNull()
+  })
+
+  it('待批草稿和被拦提示同时存在 → 只摆草稿面板，被拦提示隐藏；手写框不预填、提示不自相矛盾', async () => {
+    stubByUrl(
+      {
+        conversationId: 'convo-wa-1',
+        participantName: 'Kam',
+        replyWindow: OPEN,
+        lastInbound: { body: 'q', sentAt: '2026-10-20T23:00:00Z' },
+        blockedDraft: { reasons: ['content_claims: x'], createdAt: '2026-10-20T23:01:00Z' },
+      },
+      { drafts: [PENDING] },
+    )
+    draw()
+
+    await waitFor(() => expect(screen.getByTestId('whatsapp-draft-panel')).toBeInTheDocument())
+    expect(screen.queryByTestId('whatsapp-draft-blocked')).toBeNull()
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('')
+    expect(screen.queryByText(/还没有 AI 草稿/)).toBeNull()
+    expect(screen.getByText(/上面有 AI 草稿等你批准/)).toBeInTheDocument()
+  })
+
+  it('点「批准发送」→ POST 到这个会话的 reply 接口，带 draft_id 和 approve；回调说"已批准"而不是"已发出"', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const lookup = { conversationId: 'convo-wa-1', participantName: 'Kam', replyWindow: OPEN, lastInbound: { body: 'q', sentAt: '2026-10-20T23:00:00Z' }, blockedDraft: null }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      const body = init?.method === 'POST' ? { ok: true } : url.includes('/drafts') ? { drafts: [PENDING] } : lookup
+      return { ok: true, status: 200, json: async () => body } as Response
+    }))
+    vi.stubGlobal('confirm', () => true)
+    const onSent = vi.fn()
+    render(<WhatsAppReply clientId={CLIENT} contactId={CONTACT} customerName="Kam" viewerEmail="bdm@ctstours.co.nz" onSent={onSent} />)
+
+    await waitFor(() => expect(screen.getByText('批准发送')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('批准发送'))
+
+    await waitFor(() => expect(onSent).toHaveBeenCalledWith('approved'))
+    const post = calls.find((c) => c.init?.method === 'POST')
+    expect(post?.url).toBe(`/api/clients/${CLIENT}/messenger/conversations/convo-wa-1/reply`)
+    expect(JSON.parse(String(post?.init?.body))).toMatchObject({ draft_id: 'draft-1', action: 'approve' })
   })
 })

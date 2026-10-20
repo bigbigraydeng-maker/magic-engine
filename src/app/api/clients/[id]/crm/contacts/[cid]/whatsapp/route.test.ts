@@ -14,6 +14,8 @@ const NOW = Date.now()
 const iso = (msAgo: number) => new Date(NOW - msAgo).toISOString()
 
 let draftFilters: Record<string, unknown>
+let convoFilters: Record<string, unknown>
+let inboundFilters: Record<string, unknown>
 function mockDb(opts: {
   convo?: { id: string; participant_name: string | null } | null
   lastInbound?: { sent_at: string; body: string } | null
@@ -21,12 +23,17 @@ function mockDb(opts: {
   blockedThrows?: boolean
 }) {
   draftFilters = {}
+  convoFilters = {}
+  inboundFilters = {}
   const convo = opts.convo === undefined ? { id: 'conv-1', participant_name: 'Kam' } : opts.convo
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     if (table === 'conversations') {
       const c = {
         select: () => c,
-        eq: () => c,
+        eq: (col: string, v: unknown) => {
+          convoFilters[col] = v
+          return c
+        },
         order: () => c,
         limit: () => c,
         maybeSingle: async () => ({ data: convo, error: null }),
@@ -36,7 +43,10 @@ function mockDb(opts: {
     if (table === 'conversation_messages') {
       const c = {
         select: () => c,
-        eq: () => c,
+        eq: (col: string, v: unknown) => {
+          inboundFilters[col] = v
+          return c
+        },
         order: () => c,
         limit: () => c,
         maybeSingle: async () => ({ data: opts.lastInbound ?? null }),
@@ -93,6 +103,15 @@ describe('GET crm/contacts/[cid]/whatsapp', () => {
     expect(body.blockedDraft.reasons).toEqual(['content_claims: reply makes unverified claim(s): promise'])
     expect(draftFilters.verifier_status).toBe('blocked')
     expect(draftFilters.client_id).toBe('client-a')
+    // 🔴 被拦原因只能取「这个会话」的，不能串到别的客人身上
+    expect(draftFilters.conversation_id).toBe('conv-1')
+  })
+
+  it('🔴 查会话时同时按客户、联系人、WhatsApp 渠道过滤；客人消息按会话号取', async () => {
+    mockDb({ lastInbound: { sent_at: iso(600_000), body: 'hi' } })
+    await call()
+    expect(convoFilters).toMatchObject({ client_id: 'client-a', contact_id: 'contact-1', channel: 'whatsapp' })
+    expect(inboundFilters).toMatchObject({ conversation_id: 'conv-1', direction: 'inbound' })
   })
 
   it('被拦下的草稿比客人最后一句话还早 → 不提示（那是上一轮的）', async () => {
