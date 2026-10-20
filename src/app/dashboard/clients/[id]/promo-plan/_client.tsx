@@ -136,6 +136,7 @@ export function PromoPlanClient() {
   // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
   const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
   const approvedLike = selected?.status === 'approved' || selected?.status === 'completed'
+  const phaseNames = useMemo(() => Object.fromEntries((shownSpec?.phases ?? []).map(p => [p.id, p.name])), [shownSpec])
   const scheduleMode = showSample ? 'sample' : approvedLike ? 'approved' : 'preview'
 
   return (
@@ -194,7 +195,7 @@ export function PromoPlanClient() {
                     <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。先在下面「想自己改？展开」里搭出阶段，广告那一项可以让系统起草预算、受众和素材。</p>
                   </div>
                 )}
-            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} />}
+            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phaseNames={phaseNames} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
