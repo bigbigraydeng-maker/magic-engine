@@ -10,4 +10,4 @@ verify_how: 合并部署后在测试客户上:①用同一个 TikTok 账号连�
 done_on: 2026-10-20
 done_ref: branch:claude/codex-social-media-handoff-a3b7bb-x9mowj
 ---
-精简版,不做:拦截时自动进今日待办、「确认并替换」卡片。已知缺口:被拦的尝试只在设置页横幅可见,没有自动待办;TikTok 刷新失败仍不标 error;唯一索引文件已写未应用(supabase/migrations/20261020120000_*)。
+精简版,不做:拦截时自动进今日待办、「确认并替换」卡片。已知缺口:被拦的尝试只在设置页横幅可见,没有自动待办;TikTok 刷新失败仍不标 error;唯一索引文件已写未应用(supabase/pending/20261020120000_*)。 同一客户并发授权两个不同账号的窗口,唯一索引不兜底(不会串台,接受)。

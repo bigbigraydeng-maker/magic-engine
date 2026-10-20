@@ -3,7 +3,9 @@
 -- authorisations of the same account can both pass the pre-check; the index makes the second fail,
 -- and the callback maps that failure to "needs_team_check".
 -- Revoked rows are excluded, so disconnecting an account releases it.
--- NOT auto-applied. Apply only after PM approval; it aborts (no change) if duplicates already exist.
+-- PENDING: kept out of supabase/migrations/ on purpose, so a routine `db push` cannot run it (and cannot
+-- block later migrations when duplicates exist). After PM `go apply`, resolve duplicates, then move this
+-- file into supabase/migrations/ (or apply it once) -- it aborts without changes if duplicates remain.
 
 DO $$
 BEGIN
@@ -12,7 +14,11 @@ BEGIN
     WHERE provider = 'tiktok' AND status <> 'revoked' AND account_id <> ''
     GROUP BY account_id HAVING COUNT(*) > 1
   ) THEN
-    RAISE EXCEPTION 'duplicate live TikTok account_id rows exist; resolve (revoke one) before creating the index';
+    RAISE EXCEPTION 'duplicate live TikTok account_id rows exist (%); revoke one before creating the index',
+      (SELECT string_agg(account_id, ', ') FROM (
+         SELECT account_id FROM platform_oauth_connections
+         WHERE provider = 'tiktok' AND status <> 'revoked' AND account_id <> ''
+         GROUP BY account_id HAVING COUNT(*) > 1) d);
   END IF;
 END $$;
 

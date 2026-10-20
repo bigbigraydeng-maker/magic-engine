@@ -18,7 +18,8 @@ type Outcome =
 
 // The partial unique index (one live connection per platform account) rejects a lost race with this text.
 const isDuplicateAccount = (err: unknown): boolean =>
-  err instanceof Error && /duplicate key|unique constraint|23505/i.test(err.message)
+  (err as { code?: string } | null)?.code === '23505'
+  || (err instanceof Error && /duplicate key value violates unique constraint/i.test(err.message))
 
 function back(clientId: string | null, outcome: Outcome): NextResponse {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
@@ -56,6 +57,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return back(clientId, 'missing_scopes')
   }
 
+  const displayName = await fetchDisplayName(tokens.accessToken)
+
   // 授权回来先问一句:这个账号是不是已经是别的客户的 / 这个客户是不是已经有另一个账号。
   // 提示语不带对方客户信息,避免把别的客户的存在泄露给当前页面。
   try {
@@ -65,8 +68,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   } catch {
     return back(clientId, 'save_failed')
   }
-
-  const displayName = await fetchDisplayName(tokens.accessToken)
 
   try {
     await upsertConnection({

@@ -88,9 +88,13 @@ describe('TikTok OAuth callback safeguards', () => {
     expect(mocks.save).not.toHaveBeenCalled()
   })
   it('maps a unique-index race (23505) to needs_team_check', async () => {
-    mocks.save.mockRejectedValue(Object.assign(new Error('duplicate key value violates unique constraint'), { code: '23505' }))
+    mocks.save.mockRejectedValue(new Error('Failed to upsert connection: duplicate key value violates unique constraint "uq_x"'))
     const response = await GET(request())
     expect(response.headers.get('location')).toContain('tiktok=needs_team_check')
+  })
+  it('also recognises the duplicate by Postgres code alone, the shape upsertConnection throws', async () => {
+    mocks.save.mockRejectedValue(Object.assign(new Error('Failed to upsert connection: x'), { code: '23505' }))
+    expect((await GET(request())).headers.get('location')).toContain('tiktok=needs_team_check')
   })
   it('maps any other save error to save_failed instead of a 500', async () => {
     mocks.save.mockRejectedValue(new Error('boom'))

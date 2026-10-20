@@ -82,6 +82,16 @@ describe('checkSocialAccountAvailable', () => {
     expect(await checkSocialAccountAvailable('c1', 'tiktok', 'open-a')).toBe('ok')
   })
 
+  it('别的客户有另一个账号(不是这个账号)→ 不算占用', async () => {
+    mocks.rows = [row('c2', 'open-b')]
+    expect(await checkSocialAccountAvailable('c1', 'tiktok', 'open-a')).toBe('ok')
+  })
+
+  it('这个客户只有空白账号编号的旧行 → 不挡新账号(面板上看不到、没法断开)', async () => {
+    mocks.rows = [row('c1', '  ')]
+    expect(await checkSocialAccountAvailable('c1', 'tiktok', 'open-a')).toBe('ok')
+  })
+
   it('🔴 查库出错 → 抛出(不能把「查不到」当成「可以放行」)', async () => {
     mocks.error = { message: 'db down' }
     await expect(checkSocialAccountAvailable('c1', 'tiktok', 'open-a')).rejects.toThrow(/授权占用检查失败/)

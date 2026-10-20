@@ -41,8 +41,8 @@ export async function checkSocialAccountAvailable(
     .neq('status', 'revoked')
     .eq('client_id', clientId)
   if (sameClient.error) throw new Error('授权占用检查失败')
-  const rowsOfClient = (sameClient.data ?? []) as Array<{ account_id: string }>
-  if (rowsOfClient.some(r => r.account_id !== accountId)) return 'has_other_account'
+  const rowsOfClient = (sameClient.data ?? []) as Array<{ account_id: string }>  // blank-id rows are invisible in the panel, so they must not lock the client out
+  if (rowsOfClient.some(r => r.account_id.trim() && r.account_id !== accountId)) return 'has_other_account'
 
   return 'ok'
 }
