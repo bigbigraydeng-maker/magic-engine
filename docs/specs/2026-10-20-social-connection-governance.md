@@ -97,3 +97,8 @@
 - **跨客户同一账号(未撤销,排除我们自己的登录邮箱)**:无。撤销 CTS 名下那条之后,TikTok 的重复已清零。
 - 各平台行数:tiktok 有效 2(2 个客户)+已撤销 1;google_youtube 有效 2(2 个客户);instagram 0 行;meta 有效 4 + error 3。
 - 结论:**G1(发布取凭据多条即拒绝)没有存量停发风险**,按设计里的判断规则可以排在 G2 之前。
+
+## G1 实施记录(2026-10-20)
+- TikTok:`getValidTikTokToken` 改为查该客户全部 `active`(`limit(2)`);0 条返回 null、1 条正常、**≥2 条抛 `TikTokAmbiguousConnectionError`**(文案不含 token 字样);报错翻译与讲课发布分支单独处理该提示。保持 `getValidTikTokToken` 签名不变,调用方无需改。
+- YouTube:新增 `youtube-publish/token.ts`,**按目标频道精确选**授权(`account_id = youtube_channel_id`),不改通用 `getValidToken`。**与上文规则 4 字面的差异**:YouTube 有真实的目标频道,多条授权时只要其中恰好一条对应目标频道就能发(不拒绝);对不上目标频道、或没配目标频道则拒绝。理由:YouTube 的目标频道本来就被客户配置锁定,按目标取比按条数拒绝更精确,也不会让「留着旧频道授权」的客户停发。发布前 workflow 里的 `lockChannel` 仍会再用令牌核对一次频道。
+- 未处理(已知,另记):TikTok 刷新成功后写库的 `update` 未检查 error、刷新失败不标 `error`(魏征 I6 指出的既有问题),不在 G1 范围。

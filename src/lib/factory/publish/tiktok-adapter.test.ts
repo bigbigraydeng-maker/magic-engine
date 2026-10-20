@@ -71,3 +71,12 @@ describe('humanTikTokError', () => {
 it('explains private-account restriction separately from video visibility', () => {
   expect(humanTikTokError('unaudited_client_can_only_post_to_private_accounts')).toContain('账号本身需设为私密')
 })
+
+describe('humanTikTokError — 多个授权', () => {
+  it('🔴 不能被翻成「去重新点连接 TikTok」(此时连接按钮是隐藏的)', () => {
+    const msg = '存在多个 TikTok 授权,已暂停发布,请联系团队核实'
+    expect(humanTikTokError(msg)).toBe(msg)
+    expect(humanTikTokError(msg)).not.toMatch(/重新点/)
+  })
+})
+

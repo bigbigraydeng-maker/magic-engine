@@ -4,6 +4,7 @@ vi.mock('./publish/tiktok-adapter', () => ({publishToTikTok:vi.fn(),checkTikTokS
 import { loadLecturePost,claimLecturePublish,recordPublished,setPublishRequest } from './lecture-post'
 import { publishToTikTok,checkTikTokStatus } from './publish/tiktok-adapter'
 import {runOneLecturePublish,selectPendingPublishes} from './lecture-publish'
+import {TikTokAmbiguousConnectionError} from '@/lib/tiktok/token'
 const request={platform:'tiktok' as const,status:'pending' as const,requestedAt:'2026-10-13',tiktokReview:{privacy:'SELF_ONLY'}}
 function load(req:unknown=request,published:unknown[]=[]) {
   vi.mocked(loadLecturePost).mockResolvedValue({post:{updated_at:'revision',source_video_url:'https://example.com/video.mp4',generation_context_snapshot:{lecture_publish_request:req}},lecture:{title:'Test'},publishRequest:req,published} as never)
@@ -41,6 +42,13 @@ describe('TikTok durable publish task',()=>{
     vi.stubEnv('FACTORY_PUBLISH_LIVE','true');load(request,[{platform:'tiktok',draft:true}])
     expect(await runOneLecturePublish({clientId:'c',postId:'p'})).toMatchObject({alreadyPublished:true})
     expect(publishToTikTok).not.toHaveBeenCalled()
+  })
+  it('multiple TikTok authorisations: records the explicit reason, not "result unconfirmed" (nothing was ever initialised)',async()=>{
+    vi.mocked(publishToTikTok).mockRejectedValue(new TikTokAmbiguousConnectionError())
+    const message='存在多个 TikTok 授权,已暂停发布,请联系团队核实'
+    expect(await runOneLecturePublish({clientId:'c',postId:'p'})).toMatchObject({ok:false,error:message})
+    expect(vi.mocked(setPublishRequest).mock.lastCall?.[0].request).toMatchObject({status:'failed',error:message})
+    expect(checkTikTokStatus).not.toHaveBeenCalled()
   })
   it('does not automatically repeat an uncertain initialization',()=>{
     const rows=[{id:'p',client_id:'c',generation_context_snapshot:{lecture_publish_request:{platform:'tiktok',status:'sending',startedAt:'2026-01-01'}}}]

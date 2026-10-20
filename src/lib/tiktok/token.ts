@@ -17,6 +17,23 @@ export interface TikTokToken {
   openId: string
 }
 
+/**
+ * 这个客户有不止一条有效的 TikTok 授权:不知道该用哪个账号发,所以一律不发。
+ * 文案刻意不含 token 字样 —— 报错翻译里凡是带 token 的都会被翻成「去重新连接 TikTok」,
+ * 而存在多个授权时连接按钮是隐藏的,会把人指到一个不存在的入口。
+ */
+export class TikTokAmbiguousConnectionError extends Error {
+  constructor() {
+    super('存在多个 TikTok 授权,已暂停发布,请联系团队核实')
+    this.name = 'TikTokAmbiguousConnectionError'
+  }
+}
+
+/**
+ * @returns 令牌;没有授权返回 null。
+ * @throws {TikTokAmbiguousConnectionError} 有效授权多于一条。以前这里「取最新创建的一条」,
+ *   但重新授权旧账号不会更新 created_at,最新的未必是刚授权的那条,有取错账号发布的风险。
+ */
 export async function getValidTikTokToken(clientId: string): Promise<TikTokToken | null> {
   const { data, error } = await supabaseAdmin
     .from('platform_oauth_connections')
@@ -24,19 +41,18 @@ export async function getValidTikTokToken(clientId: string): Promise<TikTokToken
     .eq('client_id', clientId)
     .eq('provider', PLATFORM_PROVIDERS.TIKTOK)
     .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .limit(2)
 
-  if (error || !data) return null
-
-  const row = data as {
+  const rows = (data ?? []) as Array<{
     id: string
     access_token_enc?: string
     refresh_token_enc?: string
     token_expiry?: string
     account_id?: string
-  }
+  }>
+  if (error || rows.length === 0) return null
+  if (rows.length > 1) throw new TikTokAmbiguousConnectionError()
+  const row = rows[0]
 
   const expiry = row.token_expiry ? new Date(row.token_expiry) : null
   if (!needsRefresh(expiry, Date.now())) {
