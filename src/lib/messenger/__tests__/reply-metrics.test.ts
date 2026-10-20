@@ -8,7 +8,7 @@ import {
   type ReplyMetricsOptions,
 } from '../reply-metrics'
 import type { ThreadMessage } from '../automation'
-import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from '../autoack-identity'
+import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE, LEGACY_AUTOACK_TEMPLATE } from '../autoack-identity'
 
 const now = new Date('2026-10-05T00:00:00Z')
 const opts: ReplyMetricsOptions = {
@@ -94,6 +94,21 @@ describe('computeReplyMetrics', () => {
     )
     expect(result.automatedOnly).toBe(1)
     expect(result.humanReplied).toBe(0)
+  })
+
+  it('still recognises the OLD bilingual auto-acknowledgement already stored in history (not a human reply)', () => {
+    const rows: ReplyMetricRow[] = [
+      { conversationId: 'c1', direction: 'inbound', body: 'Hello', senderName: null, sentAt: '2026-09-10T10:00:00Z' },
+      { conversationId: 'c1', direction: 'outbound', body: LEGACY_AUTOACK_TEMPLATE, senderName: AUTOACK_SENT_BY_EMAIL, sentAt: '2026-09-10T10:02:00Z' },
+    ]
+    const result = computeReplyMetrics([{ conversationId: 'c1', messages: rows.map(rowToThreadMessage) }], opts)
+    expect(result.meAutoAck).toBe(1)
+    expect(result.humanReplied).toBe(0)
+  })
+
+  it('the auto-acknowledgement that is sent now contains no Chinese characters', () => {
+    expect(/[\u3400-\u9fff]/.test(AUTOACK_TEMPLATE)).toBe(false)
+    expect(AUTOACK_TEMPLATE.length).toBeGreaterThan(20)
   })
 
   it('recognises the ME auto-acknowledgement from a stored row', () => {
