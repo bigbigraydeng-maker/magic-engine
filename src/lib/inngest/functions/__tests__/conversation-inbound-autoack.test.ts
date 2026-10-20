@@ -528,3 +528,14 @@ describe('6 小时限频 — 独立于常量的边界', () => {
   })
 })
 
+
+describe('6 小时限频 — 生产接线', () => {
+  it('🔴 生产实例的依赖里接的是真实的 hasRecentOutbound（漏接线类型检查不一定抓得到）', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const source = readFileSync(join(process.cwd(), 'src/lib/inngest/functions/conversation-inbound-autoack.ts'), 'utf8')
+    expect(source).toMatch(/import \{ hasRecentOutbound \} from '@\/lib\/messenger\/recent-outbound'/)
+    const prod = source.slice(source.indexOf('export const conversationInboundAutoAck = '))
+    expect(prod).toMatch(/hasRecentOutbound,/)
+  })
+})
