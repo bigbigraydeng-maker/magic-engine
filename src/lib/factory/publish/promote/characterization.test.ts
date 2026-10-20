@@ -37,6 +37,7 @@ interface World {
   seq: number
   commentError: Error | null
   readError: Error | null
+  orderWriteFails: number
   items: string[]
   workLogs: string[]
 }
@@ -53,7 +54,7 @@ function makeWorld(): World {
     extraRows: [],
     meta: { published: false, fromId: PAGE, description: `${CAPTION}⁣​‌`, updatedTime: '2026-10-19T12:00:00.000Z', permalink: '/reel/2222222222/' },
     target: { platform: 'facebook', page_id: PAGE, expect_brand: 'Acme', client_id: CLIENT_ID },
-    log: [], alerts: [], seq: 0, commentError: null, readError: null, items: [], workLogs: [],
+    log: [], alerts: [], seq: 0, commentError: null, readError: null, orderWriteFails: 0, items: [], workLogs: [],
   }
 }
 
@@ -74,6 +75,7 @@ function makeDeps(w: World): PromoteDeps {
         return true
       },
       async writeOrderPublishedRef(_id, expectedUpdatedAt, nextRef) {
+        if (w.orderWriteFails > 0) { w.orderWriteFails -= 1; w.log.push('store.order.conflict'); return false }
         if (expectedUpdatedAt !== w.order.updated_at) return false
         w.order.published_ref = structuredClone(nextRef)
         w.order.updated_at = `u${++w.seq + 1}`
@@ -515,5 +517,254 @@ describe('特征化:补收尾分支的目标校验', () => {
         },
       }
     `)
+  })
+})
+
+describe('特征化:多个问题同时出现时先报哪一个', () => {
+  const cases: Array<[string, (x: World) => void]> = [
+    ['目标缺 page_id 且缺品牌', (x) => { x.target = { platform: 'facebook' } }],
+    ['目标 page_id 纯空格', (x) => { x.target = { platform: 'facebook', page_id: '   ', expect_brand: 'Acme' } }],
+    ['目标不合格且工单也不是 published', (x) => { x.order.status = 'approved'; x.target = { platform: 'facebook', page_id: PAGE } }],
+    ['不是 DRAFT 且缺 master_brief_id', (x) => { x.order.published_ref['video_state'] = 'X'; x.order.master_brief_id = null }],
+    ['缺 master_brief_id 且 0 条流量记录', (x) => { x.order.master_brief_id = null; x.row = null }],
+    ['2 条流量记录且视频 id 不一致', (x) => { x.extraRows = [{ id: 'r2', client_id: CLIENT_ID, payload: {} }]; if (x.row) x.row.payload['video_id'] = '9' }],
+    ['视频 id 与主页 id 都不一致', (x) => { if (x.row) { x.row.payload['video_id'] = '9'; x.row.payload['page_id'] = '9' } }],
+    ['视频 id 不一致且缺审片通过时间', (x) => { if (x.row) x.row.payload['video_id'] = '9'; x.order.review_ref['approved_at'] = '' }],
+    ['主页 id 不一致且缺审片通过时间', (x) => { x.order.published_ref['page_id'] = '9'; x.order.review_ref['approved_at'] = '' }],
+    ['工单与记录视频 id 都是纯空格', (x) => { x.order.published_ref['video_id'] = '  '; if (x.row) x.row.payload['video_id'] = '  ' }],
+    ['工单主页 id 纯空格', (x) => { x.order.published_ref['page_id'] = '  ' }],
+    ['缺审片时间且 Meta 不返回 from', (x) => { x.order.review_ref['approved_at'] = ''; x.meta.fromId = null }],
+    ['Meta 不返回 from 且文案被改', (x) => { x.meta.fromId = null; x.meta.description = 'changed' }],
+  ]
+
+  it('每种组合的状态码与文案(预览阶段)', async () => {
+    const out: Record<string, unknown> = {}
+    for (const [name, mutate] of cases) {
+      w = makeWorld(); mutate(w); deps = makeDeps(w)
+      out[name] = brief(await preview())
+    }
+    expect(out).toMatchInlineSnapshot(`
+      {
+        "2 条流量记录且视频 id 不一致": {
+          "error": "该工单有多条发布流量记录,无法确定转哪一条,不能转公开",
+          "status": 409,
+        },
+        "Meta 不返回 from 且文案被改": {
+          "error": "Meta 没有返回视频所属主页,保守拒绝",
+          "status": 422,
+        },
+        "不是 DRAFT 且缺 master_brief_id": {
+          "error": "只有草稿(DRAFT)状态的 Reel 才能转公开",
+          "status": 409,
+        },
+        "主页 id 不一致且缺审片通过时间": {
+          "error": "工单、流量记录与发布目标的主页 id 不一致,不能转公开",
+          "status": 409,
+        },
+        "工单与记录视频 id 都是纯空格": {
+          "error": "工单与流量记录的视频 id 不一致,不能转公开",
+          "status": 409,
+        },
+        "工单主页 id 纯空格": {
+          "error": "工单、流量记录与发布目标的主页 id 不一致,不能转公开",
+          "status": 409,
+        },
+        "目标 page_id 纯空格": {
+          "error": "发布目标未配置或不是 Facebook 主页,不能转公开",
+          "status": 422,
+        },
+        "目标不合格且工单也不是 published": {
+          "error": "防误发品牌名缺失,不能转公开",
+          "status": 422,
+        },
+        "目标缺 page_id 且缺品牌": {
+          "error": "发布目标未配置或不是 Facebook 主页,不能转公开",
+          "status": 422,
+        },
+        "缺 master_brief_id 且 0 条流量记录": {
+          "error": "工单缺少 master_brief_id,不能转公开",
+          "status": 422,
+        },
+        "缺审片时间且 Meta 不返回 from": {
+          "error": "工单缺少审片通过时间,不能转公开",
+          "status": 409,
+        },
+        "视频 id 不一致且缺审片通过时间": {
+          "error": "工单与流量记录的视频 id 不一致,不能转公开",
+          "status": 409,
+        },
+        "视频 id 与主页 id 都不一致": {
+          "error": "工单与流量记录的视频 id 不一致,不能转公开",
+          "status": 409,
+        },
+      }
+    `)
+  })
+})
+
+describe('特征化:视频已被人手公开(sync_only)', () => {
+  it('预览与确认后的最终内容、调用顺序', async () => {
+    w.meta.published = true
+    const p = await preview()
+    expect(p).toMatchInlineSnapshot(`
+      {
+        "data": {
+          "caption": "Great Acme tour deal⁣​‌",
+          "checklist_passed_at": "2026-10-19T01:00:00.000Z",
+          "expires_at": "2026-10-20T00:05:00.000Z",
+          "first_comment": "Book now
+      https://example.com/tour?utm_source=facebook&utm_medium=organic_social&utm_campaign=me_factory_reel&utm_content=c0000000-0000-4000-8000-0000000000a1",
+          "mode": "sync_only",
+          "page_id": "1111111111",
+          "preview_token": "tok-1",
+          "video_id": "2222222222",
+        },
+        "kind": "preview",
+        "ok": true,
+      }
+    `)
+    w.log.length = 0
+    const r = await confirm(p.ok && p.kind === 'preview' ? p.data.preview_token : undefined)
+    expect(r).toMatchInlineSnapshot(`
+      {
+        "data": {
+          "first_comment_status": "ok",
+          "permalink": "/reel/2222222222/",
+          "published_at": "2026-10-19T12:00:00.000Z",
+          "published_at_estimated": true,
+          "request_id": "00000000-0000-4000-8000-000000000003",
+          "video_id": "2222222222",
+        },
+        "kind": "synced",
+        "ok": true,
+      }
+    `)
+    expect(w.log).toMatchInlineSnapshot(`
+      [
+        "meta.read",
+        "store.traffic",
+        "store.traffic",
+        "store.order",
+        "store.traffic",
+        "books.item",
+        "books.log",
+        "store.traffic",
+        "redline",
+        "meta.comment",
+        "meta.read",
+        "redline",
+        "store.traffic",
+      ]
+    `)
+    expect(w.order.published_ref).toMatchInlineSnapshot(`
+      {
+        "ig_crosspost_blocked": true,
+        "page_id": "1111111111",
+        "permalink": "/reel/2222222222/",
+        "platform": "facebook",
+        "promote_request_id": "00000000-0000-4000-8000-000000000003",
+        "published_at": "2026-10-19T12:00:00.000Z",
+        "published_at_estimated": true,
+        "video_id": "2222222222",
+        "video_state": "PUBLISHED",
+      }
+    `)
+    expect(w.row?.payload['promote_authorization']).toMatchInlineSnapshot(`
+      {
+        "attempt_id": "00000000-0000-4000-8000-000000000003",
+        "authorized_at": "2026-10-20T00:00:00.000Z",
+        "authorized_by": "boss@example.com",
+        "books_work_order_id": "c0000000-0000-4000-8000-0000000000a1",
+        "books_written_at": "2026-10-20T00:00:00.000Z",
+        "claimed_at": "2026-10-20T00:00:00.000Z",
+        "fail_reason": undefined,
+        "fingerprint": "220670c469715419890cf75bf7fd15a5ea7eac269dfa4b9a01ec27728d309977",
+        "first_comment_status": "ok",
+        "late_backfill": true,
+        "needs_attention": false,
+        "page_id": "1111111111",
+        "post_publish_redline_hit": undefined,
+        "promote_called_at": undefined,
+        "published_at": "2026-10-19T12:00:00.000Z",
+        "published_at_estimated": true,
+        "request_id": "00000000-0000-4000-8000-000000000003",
+        "status": "consumed",
+        "video_id": "2222222222",
+        "work_order_id": "c0000000-0000-4000-8000-0000000000a1",
+      }
+    `)
+  })
+})
+
+describe('特征化:写工单时发生冲突后的重试', () => {
+  it('第一次写工单被抢先改了:重试后平台标记仍在,最终内容不变', async () => {
+    w.orderWriteFails = 1
+    const r = await confirm(await tokenOf())
+    expect(r).toMatchInlineSnapshot(`
+      {
+        "data": {
+          "first_comment_status": "ok",
+          "permalink": "/reel/2222222222/",
+          "published_at": "2026-10-20T00:00:00.000Z",
+          "published_at_estimated": false,
+          "request_id": "00000000-0000-4000-8000-000000000003",
+          "video_id": "2222222222",
+        },
+        "kind": "promoted",
+        "ok": true,
+      }
+    `)
+    expect(w.log).toMatchInlineSnapshot(`
+      [
+        "meta.read",
+        "redline",
+        "store.traffic",
+        "meta.read",
+        "redline",
+        "store.traffic",
+        "store.traffic",
+        "meta.promote",
+        "store.traffic",
+        "store.order.conflict",
+        "store.order",
+        "store.traffic",
+        "books.item",
+        "books.log",
+        "store.traffic",
+        "redline",
+        "meta.comment",
+        "meta.read",
+        "redline",
+        "store.traffic",
+      ]
+    `)
+    expect(w.order.published_ref).toMatchInlineSnapshot(`
+      {
+        "ig_crosspost_blocked": true,
+        "page_id": "1111111111",
+        "permalink": "/reel/2222222222/",
+        "platform": "facebook",
+        "promote_request_id": "00000000-0000-4000-8000-000000000003",
+        "published_at": "2026-10-20T00:00:00.000Z",
+        "video_id": "2222222222",
+        "video_state": "PUBLISHED",
+      }
+    `)
+  })
+})
+
+describe('特征化:补首评分支不改工单上的平台标记', () => {
+  it('补首评前后 published_ref 除「首评待补」外一致', async () => {
+    w.commentError = new Error('boom')
+    await confirm(await tokenOf())
+    const before = structuredClone(w.order.published_ref)
+    w.commentError = null
+    await confirm(await tokenOf())
+    const after = structuredClone(w.order.published_ref)
+    const { first_comment_pending: pendingBefore, ...beforeRest } = before
+    expect(pendingBefore).toBe(true)
+    expect(after).not.toHaveProperty('first_comment_pending')
+    expect(after).toEqual(beforeRest)
+    expect(after['ig_crosspost_blocked']).toBe(true)
   })
 })
