@@ -14,10 +14,12 @@ interface QueryResult {
 const state: {
   table: string | null
   calls: QueryCall[]
+  limit: number | null
   result: QueryResult
 } = {
   table: null,
   calls: [],
+  limit: null,
   result: { data: [], error: null },
 }
 
@@ -32,7 +34,10 @@ vi.mock('@/lib/supabase', () => {
       state.calls.push({ method: 'gte', column, value })
       return builder
     },
-    limit: () => Promise.resolve(state.result),
+    limit: (n: number) => {
+      state.limit = n
+      return Promise.resolve(state.result)
+    },
   }
 
   return {
@@ -51,6 +56,7 @@ describe('hasRecentOutbound', () => {
   beforeEach(() => {
     state.table = null
     state.calls = []
+    state.limit = null
     state.result = { data: [], error: null }
   })
 
@@ -61,6 +67,8 @@ describe('hasRecentOutbound', () => {
 
     expect(result).toBe(true)
     expect(state.table).toBe('conversation_outbound_log')
+    // 🔴 只取 1 行：把 limit 改成 0 会让线上永远判「没回过」、限频失效
+    expect(state.limit).toBe(1)
     expect(state.calls).toEqual([
       { method: 'eq', column: 'conversation_id', value: 'conv-123' },
       { method: 'eq', column: 'status', value: 'sent' },
@@ -84,6 +92,14 @@ describe('hasRecentOutbound', () => {
     ).rejects.toThrow(/read failed/)
   })
 })
+
+describe('hasRecentOutbound — 响应不认识时不放行', () => {
+  it('🔴 没报错但 data 不是数组（null）→ 抛错，不当成「最近没回过」', async () => {
+    state.result = { data: null, error: null }
+    await expect(hasRecentOutbound('conv-9', '2026-01-01T00:00:00.000Z')).rejects.toThrow(/read failed/)
+  })
+})
+
 
 describe('hasRecentOutbound — 只认成功发出的行', () => {
   it('🔴 查询带 status=sent 过滤（失败/待发的行不算已回复；把过滤去掉这条会红）', async () => {

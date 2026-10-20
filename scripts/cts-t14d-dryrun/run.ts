@@ -295,6 +295,8 @@ async function loadTriggerMessage(conversationId: string): Promise<{ message_id:
 const deps: ConversationInboundDraftDeps = {
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
+  // Dry run: pretend F1 will send the acknowledgement, so the drafting step waits as before.
+  hasRecentOutbound: async () => false,
   classify: classifyConversation,
   loadIndustry,
   loadContext: loadDraftContext,

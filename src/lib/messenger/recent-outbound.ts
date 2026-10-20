@@ -25,5 +25,9 @@ export async function hasRecentOutbound(
     throw new Error(`[recent-outbound] read failed: ${error.message}`)
   }
 
-  return Array.isArray(data) && data.length > 0
+  // 没报错却没有数组 = 读到了不认识的东西，宁可抛错重试，也不当成「最近没回过」而多发。
+  if (!Array.isArray(data)) {
+    throw new Error('[recent-outbound] read failed: unexpected empty response')
+  }
+  return data.length > 0
 }
