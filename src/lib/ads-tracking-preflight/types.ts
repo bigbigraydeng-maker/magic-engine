@@ -334,6 +334,31 @@ export interface EnvFacts {
 }
 
 /**
+ * 客户另外登记的广告账户（不是本次核对的这一个）的事实。全部读自库里的快照，不调 Meta；
+ * 完整账户编号不进回执，只留尾号。金额是最小货币单位（分）。
+ */
+export interface OtherAccountFact {
+  /** 账户编号尾号 4 位 */
+  tail: string
+  /** 绑定表里的账户标签；没有 = null */
+  label: string | null
+  /** 绑定表里 hidden_from_ad_health = true：只管「广告健康页不显示」，不代表没有预算 */
+  hidden: boolean
+  /** 快照里的 Meta 账户状态码（1 正常、3 欠款…）；没读到 = null */
+  account_status: number | null
+  /** 快照里的账户币种（大写）；没读到 = null */
+  currency: string | null
+  /** 开着的系列个数（effective_status 在 DELIVERING_STATUSES 里、没被标成 disappeared） */
+  open_campaign_count: number
+  /** 开着的预算：日预算合计 / 终身预算个数 / 参与日预算合计的实体数；口径同 BudgetFacts 的 live_* */
+  live_daily_budget_cents: number
+  live_lifetime_budget_count: number
+  live_entity_count: number
+  /** 用的是哪一轮抓全的快照（ISO；账户、系列、广告组三个层级里最早的一轮） */
+  snapshot_at: string
+}
+
+/**
  * 预算门要用的事实：库里的日预算上限 + Meta 现读的「在投」日预算合计。
  * 上限读库、在投预算读线上，客户配置里写死的数字只剩「跟库对一对」的作用（读不到也不能拿它顶替）。
  * 金额一律是 Meta / 库里的最小货币单位（分），不换算。
@@ -356,6 +381,10 @@ export interface BudgetFacts {
   live_lifetime_budget_count: number
   /** 参与日预算合计的在投实体数（系列级预算的系列 + 不在这种系列下的广告组）；只在读到时有意义 */
   live_entity_count: number
+  /** 其它登记账户的事实：[] = 只有这一个账户；null = 有其它账户但没读成功（判灯回到「只核对这一个账户」的黄） */
+  other_accounts: readonly OtherAccountFact[] | null
+  /** other_accounts 没读成功的原因（已清洗，不含令牌）；读成功或不需要读 = null */
+  other_accounts_error: string | null
 }
 
 export interface JudgeInput {

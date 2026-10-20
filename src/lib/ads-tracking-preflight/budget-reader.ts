@@ -12,6 +12,7 @@
  *     多个登记账户时账户级没设就是没设，客户总上限顶替不了（带回登记账户数，由判灯去判）；
  *     老客户没有登记行时回落 clients.meta_ad_account_id + 客户级上限（跟信封一样）；
  *   · 上限不是正整数（0 / 负数 / 乱码）= 配置无效，读不到——不当作「没设」，更不当作 0（信封里这种配置会被拒）。
+ *   · 多个登记账户时，其它账户（含被隐藏的）的在投预算读库里的快照（other-accounts.ts），读不成功就是 null，由判灯回到「只核对这一个账户」。
  *
  * 🔴 只读：库只 select；Meta 只发 GET（makeGraphGet：路径白名单、令牌只进 Authorization 头）。
  * 🔴 永不 reject：读不到就带着已清洗的原因返回；读不到的数是 null，绝不当成 0，也绝不当成「没设」。
@@ -24,7 +25,9 @@ import { ACCOUNT_ID_RE, makeGraphGet, type GraphGet } from './meta-reader'
 import { hasDataArray, hasNextPage } from './post-launch'
 import type { Sleep } from './retry'
 import { sanitizeError } from './sanitize'
-import type { BudgetFacts } from './types'
+import type { BudgetFacts, OtherAccountFact } from './types'
+import { totalLive, type LiveEntity, type LiveTotals } from './live-totals'
+import { readOtherAccounts } from './other-accounts'
 
 const PAGE_LIMIT = '500'
 const IN_PLAY_FILTER = JSON.stringify([{ field: 'effective_status', operator: 'IN', value: [...DELIVERING_STATUSES] }])
@@ -163,13 +166,6 @@ async function readCaps(supabase: SupabaseClient, clientId: string, adAccountId:
 
 // ─── Meta：在投的系列 / 广告组日预算 ────────────────────────────────────────
 
-interface LiveEntity {
-  id: string
-  campaignId: string | null
-  daily: number
-  lifetime: number
-}
-
 /** Meta 的预算是整数字符串（最小货币单位）；缺 / null = 没有（0）；其它写法 = 乱码（null）。 */
 function parseBudget(value: unknown): number | null {
   if (value === undefined || value === null) return 0
@@ -212,40 +208,6 @@ function collectLive(raws: readonly unknown[], label: string): LiveEntity[] {
   return out
 }
 
-interface LiveTotals {
-  daily: number
-  lifetime: number
-  entities: number
-}
-
-/** 系列级预算（日预算或终身预算）的系列，旗下广告组不再单独算；其余在投广告组用自己的预算。 */
-function totalLive(campaigns: readonly LiveEntity[], adsets: readonly LiveEntity[]): LiveTotals {
-  const totals: LiveTotals = { daily: 0, lifetime: 0, entities: 0 }
-  const campaignBudgeted = new Set<string>()
-  for (const c of campaigns) {
-    if (c.daily > 0) {
-      totals.daily += c.daily
-      totals.entities += 1
-      campaignBudgeted.add(c.id)
-    } else if (c.lifetime > 0) {
-      totals.lifetime += 1
-      campaignBudgeted.add(c.id)
-    }
-  }
-  for (const a of adsets) {
-    if (a.campaignId !== null && campaignBudgeted.has(a.campaignId)) continue
-    if (a.daily > 0) {
-      totals.daily += a.daily
-      totals.entities += 1
-    } else if (a.lifetime > 0) {
-      totals.lifetime += 1
-    } else {
-      throw new Error(`在投的广告组 ${a.id} 一个预算都没读到，合计会漏算`)
-    }
-  }
-  return totals
-}
-
 type Live = ({ ok: true } & LiveTotals) | { ok: false; error: string }
 
 async function readLive(adAccountId: string, input: BudgetReadInput): Promise<Live> {
@@ -269,6 +231,7 @@ function unread(now: Date, error: string): BudgetReadResult {
       read: false, error, as_of: now.toISOString(),
       account_cap_cents: null, client_cap_cents: null, registered_account_count: null,
       live_daily_budget_cents: null, live_lifetime_budget_count: 0, live_entity_count: 0,
+      other_accounts: null, other_accounts_error: null,
     },
     errors: [error],
   }
@@ -282,6 +245,18 @@ export async function readBudgetFacts(input: BudgetReadInput): Promise<BudgetRea
   const caps = await readCaps(supabase, clientId, adAccountId)
   const live = await readLive(adAccountId, input)
 
+  // 其它登记账户（只读库里的快照，不调 Meta）：只有一个登记账户就没有"其它"；读不成功只让这一项为 null，不连累整份预算事实
+  let otherAccounts: readonly OtherAccountFact[] | null = null
+  let otherAccountsError: string | null = null
+  if (caps.ok && caps.registered <= 1) {
+    otherAccounts = []
+  } else if (caps.ok) {
+    const others = await readOtherAccounts({ supabase, clientId, adAccountId, now })
+    if (others.ok && others.accounts.length > 0) otherAccounts = others.accounts
+    else if (others.ok) otherAccountsError = '登记了多个广告账户，却在登记表里找不到其它账户'
+    else otherAccountsError = others.error
+  }
+
   const errors = [caps.ok ? null : caps.error, live.ok ? null : live.error].filter((m): m is string => m !== null)
   return {
     facts: {
@@ -294,6 +269,8 @@ export async function readBudgetFacts(input: BudgetReadInput): Promise<BudgetRea
       live_daily_budget_cents: live.ok ? live.daily : null,
       live_lifetime_budget_count: live.ok ? live.lifetime : 0,
       live_entity_count: live.ok ? live.entities : 0,
+      other_accounts: otherAccounts,
+      other_accounts_error: otherAccountsError,
     },
     errors,
   }
