@@ -432,13 +432,20 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     loadRunningSince(clientId, now, accounts),
   ])
   const campaigns = await loadCampaigns(clientId, clocks.dataDay)
+  // 账户清单是「哪些账户算数」的唯一来源：被隐藏的账户，它的池子/池子历史/系列频率也不能漏进来。
+  // accounts 为空（没绑定）时不过滤，保持原行为。
+  const visible = accounts.length > 0 ? new Set(accounts.map(a => toActId(a.adAccountId))) : null
+  const audiences = visible ? aud.audiences.filter(a => visible.has(toActId(a.adAccountId))) : aud.audiences
+  const audienceIds = visible ? new Set(audiences.map(a => a.id)) : null
+  const audienceHistory = audienceIds ? aud.history.filter(h => audienceIds.has(h.audienceId)) : aud.history
+  const visibleCampaigns = visible ? campaigns.filter(c => visible.has(toActId(c.adAccountId))) : campaigns
   return {
     now: now.toISOString(),
     accounts,
-    audiences: aud.audiences,
-    audienceHistory: aud.history,
+    audiences,
+    audienceHistory,
     adsets,
-    campaigns,
+    campaigns: visibleCampaigns,
     clocks,
     growth,
     plan,

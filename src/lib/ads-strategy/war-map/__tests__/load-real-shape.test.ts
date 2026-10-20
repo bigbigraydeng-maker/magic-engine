@@ -214,4 +214,31 @@ describe('loadWarMapInput · 真实形状的行（CTS 2026-10-20 08:50Z）', () 
     const { input } = await run()
     expect(input.accounts).toHaveLength(0)
   })
+
+  it('I. hidden personal account -> its pools, pool history and campaign rows are dropped too', async () => {
+    db.tables.client_meta_ad_accounts = (db.tables.client_meta_ad_accounts ?? []).map(r =>
+      r.ad_account_id === PERSONAL ? { ...r, hidden_from_ad_health: true } : { ...r, hidden_from_ad_health: false },
+    )
+    const { input } = await run()
+    expect(input.accounts.map(a => a.adAccountId)).toEqual([OFFICIAL])
+    // 44,500 的大池子、8,400 的对照实验池子都在 PERSONAL 上，必须消失
+    expect(input.audiences.length).toBeGreaterThan(0)
+    expect(input.audiences.every(a => a.adAccountId === OFFICIAL)).toBe(true)
+    expect(input.audiences.some(a => a.id === '120248216748520307')).toBe(false)
+    expect(input.audiences.some(a => a.id === '120249785429270307')).toBe(false)
+    const personalAudienceIds = new Set(pools.filter(p => p[2] === PERSONAL).map(p => p[0]))
+    expect(input.audienceHistory.length).toBeGreaterThan(0)
+    expect(input.audienceHistory.some(h => personalAudienceIds.has(h.audienceId))).toBe(false)
+    expect(input.campaigns.length).toBeGreaterThan(0)
+    expect(input.campaigns.every(c => c.adAccountId === OFFICIAL)).toBe(true)
+  })
+
+  it('J. control: nothing hidden -> pools and campaigns from both accounts are present', async () => {
+    const { input } = await run()
+    expect(input.accounts).toHaveLength(2)
+    expect(new Set(input.audiences.map(a => a.adAccountId))).toEqual(new Set([PERSONAL, OFFICIAL]))
+    expect(new Set(input.campaigns.map(c => c.adAccountId))).toEqual(new Set([PERSONAL, OFFICIAL]))
+    const personalAudienceIds = new Set(pools.filter(p => p[2] === PERSONAL).map(p => p[0]))
+    expect(input.audienceHistory.some(h => personalAudienceIds.has(h.audienceId))).toBe(true)
+  })
 })
