@@ -77,10 +77,14 @@
 --   不是缺陷；但接线方必须知道：先有 meta_creative_id，才有 touch。
 -- · 未在带 supautils 的 Supabase 分支库试跑；应用线上前必须先在 Supabase
 --   分支库验证（OWNER TO / GRANT role TO CURRENT_USER 在非超级用户下的行为）。
--- · 表属主（Supabase 上是 postgres）仍可直写这些表；数据库层只防
---   service_role / anon / authenticated 等非属主角色。属主直写不在本迁移的
---   防护范围内（属主可绕过 RLS、可 DROP 触发器），这是平台层面的残余风险，
---   只能靠「属主凭据不落到应用」的运维约束兜底。
+-- · 表属主（Supabase 上是 postgres）与超级用户（supabase_admin）仍可直写这些表；
+--   数据库层只防 service_role / anon / authenticated 等非属主角色。属主/超级用户
+--   可绕过 RLS、可 ALTER TABLE ... DISABLE TRIGGER、可自行 set_config 伪造会话标志，
+--   这是平台层面的残余风险，只能靠「属主/超级用户凭据不落到应用」的运维约束兜底。
+--   末尾 ASSERTIONS 显式排除属主与超级用户，不假装能拦住它们。
+-- · content_work_orders 的 service_role 权限已从表级 INSERT/UPDATE 收窄为
+--   列级（除 final_mp4_sha256 外的所有列）。今后给该表新增列时，必须显式补一条
+--   列级 GRANT 给 service_role，否则 service_role 写新列会报权限错误。
 -- =============================================================================
 
 BEGIN;
@@ -963,9 +967,11 @@ BEGIN
     RAISE EXCEPTION 'link_retract_v1: 关联行不存在或已撤回（%）', p_link_id;
   END IF;
 
-  -- 撤回关联行时，连带撤回它引用的签字（若存在且尚未撤回）。
-  -- 理由：关联行撤回后，其签字不应再被任何新关联引用；留着有效签字
-  -- 等于留了一条可被重新挂上的「有效」凭据。已撤回的签字静默跳过。
+  -- 撤回关联行时，连带撤回它引用的签字（若存在且尚未撤回）—— 但仅当没有
+  -- 其他未撤回的关联行仍引用同一条签字时。一条签字可被多条广告共享（同一支片子
+  -- 投多个广告），撤回其中一条关联行不应让其余广告的签字失效。
+  -- 理由：关联行撤回后，其签字不应再被任何新关联引用；但若仍有别的关联行
+  -- 依赖它，则保留。已撤回的签字静默跳过。
   PERFORM set_config('app.ad_link_fn', 'retract_attestation', true);
 
   UPDATE public.creative_binding_attestations
@@ -977,7 +983,14 @@ BEGIN
              FROM public.ad_creative_links
             WHERE id = p_link_id
          )
-     AND retracted_at IS NULL;
+     AND retracted_at IS NULL
+     AND NOT EXISTS (
+           SELECT 1
+             FROM public.ad_creative_links other
+            WHERE other.attestation_id = public.creative_binding_attestations.id
+              AND other.id <> p_link_id
+              AND other.retracted_at IS NULL
+         );
 END;
 $$;
 
@@ -1262,19 +1275,28 @@ BEGIN
     RAISE EXCEPTION 'work_order_set_final_hash_v1: 工单已有最终哈希（%），改写必须显式 p_rerender=true（work_order_id=%）', v_current, p_work_order_id;
   END IF;
 
+  -- 重渲改写必须写明操作人（p_by 已在函数入口校验非空，这里再显式断言一次，
+  -- 因为重渲是破坏性操作：旧签字全部失效，历史必须能回答「谁改的」）。
+  IF v_current IS NOT NULL AND v_current <> p_sha256 AND p_rerender IS TRUE
+     AND (p_by IS NULL OR p_by = '') THEN
+    RAISE EXCEPTION 'work_order_set_final_hash_v1: 重渲改写必须写明 set_by（work_order_id=%）', p_work_order_id;
+  END IF;
+
   -- 无变化：幂等返回，不写历史。
   IF v_current IS NOT DISTINCT FROM p_sha256 THEN
     RETURN;
   END IF;
 
+  -- 会话标志：hash_write 放行 BEFORE UPDATE 守卫；hash_set_by 供 AFTER UPDATE
+  -- 历史触发器记录操作人。两者都只在本事务内有效（set_config(..., true)）。
   PERFORM set_config('app.ad_link_fn', 'hash_write', true);
+  PERFORM set_config('app.hash_set_by', p_by, true);
 
+  -- 历史行由 AFTER UPDATE 触发器写入（见 6.2），本函数不再自己 INSERT，
+  -- 避免重复留痕。
   UPDATE public.content_work_orders
      SET final_mp4_sha256 = p_sha256
    WHERE id = p_work_order_id;
-
-  INSERT INTO public.content_work_order_hash_history (work_order_id, sha256, set_by)
-  VALUES (p_work_order_id, p_sha256, p_by);
 END;
 $$;
 
@@ -1787,6 +1809,7 @@ ALTER FUNCTION public.link_swap_intents_guard_truncate()             OWNER TO ad
 -- 放行条件：会话标志 app.ad_link_fn = 'hash_write'（只由
 -- work_order_set_final_hash_v1 设置，事务内局部）。
 -- 与其余守卫同一原则：不检查 current_user / session_user，不对属主放行。
+-- 注意：属主/超级用户可 ALTER TABLE ... DISABLE TRIGGER 绕过，属平台残余风险。
 CREATE OR REPLACE FUNCTION public.content_work_orders_guard_hash_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -1798,6 +1821,10 @@ BEGIN
     IF v_fn IS DISTINCT FROM 'hash_write' THEN
       RAISE EXCEPTION 'content_work_orders: final_mp4_sha256 只经 work_order_set_final_hash_v1 写（work_order_id=%）', OLD.id;
     END IF;
+    -- 哈希一旦记录，永不回退为 NULL（NULL = 未记录，会让所有签字静默失效）。
+    IF OLD.final_mp4_sha256 IS NOT NULL AND NEW.final_mp4_sha256 IS NULL THEN
+      RAISE EXCEPTION 'content_work_orders: final_mp4_sha256 不可回退为 NULL（work_order_id=%）', OLD.id;
+    END IF;
   END IF;
   RETURN NEW;
 END;
@@ -1808,7 +1835,56 @@ CREATE TRIGGER content_work_orders_guard_hash_update
   BEFORE UPDATE ON public.content_work_orders
   FOR EACH ROW EXECUTE FUNCTION public.content_work_orders_guard_hash_update();
 
+-- 新行必须从 NULL 开始：哈希只能经 work_order_set_final_hash_v1 在渲染完成后写入，
+-- 不允许 INSERT 时直接带哈希（否则可绕过 BEFORE UPDATE 守卫与历史留痕）。
+CREATE OR REPLACE FUNCTION public.content_work_orders_guard_hash_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.final_mp4_sha256 IS NOT NULL THEN
+    RAISE EXCEPTION 'content_work_orders: 新行 final_mp4_sha256 必须为 NULL（只经 work_order_set_final_hash_v1 写入）';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS content_work_orders_guard_hash_insert ON public.content_work_orders;
+CREATE TRIGGER content_work_orders_guard_hash_insert
+  BEFORE INSERT ON public.content_work_orders
+  FOR EACH ROW EXECUTE FUNCTION public.content_work_orders_guard_hash_insert();
+
+-- 历史留痕由触发器负责（不再依赖函数自己 INSERT）：只要 final_mp4_sha256 实际变化，
+-- 就追加一行。set_by 取函数设置的 app.hash_set_by，缺省回落到 session_user。
+-- 由于 BEFORE 守卫已拒绝「非 NULL → NULL」，这里 NEW.final_mp4_sha256 必非 NULL。
+CREATE OR REPLACE FUNCTION public.content_work_orders_record_hash_history()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.final_mp4_sha256 IS DISTINCT FROM OLD.final_mp4_sha256 THEN
+    IF NEW.final_mp4_sha256 IS NULL THEN
+      RAISE EXCEPTION 'content_work_orders: final_mp4_sha256 不可回退为 NULL（work_order_id=%）', OLD.id;
+    END IF;
+    INSERT INTO public.content_work_order_hash_history (work_order_id, sha256, set_by)
+    VALUES (
+      NEW.id,
+      NEW.final_mp4_sha256,
+      COALESCE(current_setting('app.hash_set_by', true), session_user::text)
+    );
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS content_work_orders_record_hash_history ON public.content_work_orders;
+CREATE TRIGGER content_work_orders_record_hash_history
+  AFTER UPDATE ON public.content_work_orders
+  FOR EACH ROW EXECUTE FUNCTION public.content_work_orders_record_hash_history();
+
 ALTER FUNCTION public.content_work_orders_guard_hash_update() OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.content_work_orders_guard_hash_insert() OWNER TO ad_link_fn_owner;
+ALTER FUNCTION public.content_work_orders_record_hash_history() OWNER TO ad_link_fn_owner;
 
 -- 哈希历史表守卫：追加式，只增不改。
 CREATE OR REPLACE FUNCTION public.content_work_order_hash_history_guard_update()
@@ -1856,6 +1932,64 @@ CREATE TRIGGER content_work_order_hash_history_guard_truncate
 ALTER FUNCTION public.content_work_order_hash_history_guard_update()   OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.content_work_order_hash_history_guard_delete()   OWNER TO ad_link_fn_owner;
 ALTER FUNCTION public.content_work_order_hash_history_guard_truncate() OWNER TO ad_link_fn_owner;
+
+-- =============================================================================
+-- 6.3 所有守卫触发器 ENABLE ALWAYS
+-- =============================================================================
+-- ENABLE ALWAYS：会话设置 session_replication_role = replica（逻辑复制/部分
+-- 运维工具会设）时触发器仍然生效。默认的 ENABLE（origin）在该模式下会被跳过。
+-- 属主/超级用户仍可 ALTER TABLE ... DISABLE TRIGGER 绕过 —— 平台残余风险。
+ALTER TABLE public.ad_creative_links               ENABLE ALWAYS TRIGGER ad_creative_links_guard_update;
+ALTER TABLE public.ad_creative_links               ENABLE ALWAYS TRIGGER ad_creative_links_guard_delete;
+ALTER TABLE public.ad_creative_links               ENABLE ALWAYS TRIGGER ad_creative_links_guard_truncate;
+
+ALTER TABLE public.creative_binding_attestations   ENABLE ALWAYS TRIGGER creative_binding_attestations_guard_update;
+ALTER TABLE public.creative_binding_attestations   ENABLE ALWAYS TRIGGER creative_binding_attestations_guard_delete;
+ALTER TABLE public.creative_binding_attestations   ENABLE ALWAYS TRIGGER creative_binding_attestations_guard_truncate;
+
+ALTER TABLE public.link_stale_reasons              ENABLE ALWAYS TRIGGER link_stale_reasons_guard_update;
+ALTER TABLE public.link_stale_reasons              ENABLE ALWAYS TRIGGER link_stale_reasons_guard_delete;
+ALTER TABLE public.link_stale_reasons              ENABLE ALWAYS TRIGGER link_stale_reasons_guard_truncate;
+
+ALTER TABLE public.link_swap_intents               ENABLE ALWAYS TRIGGER link_swap_intents_guard_update;
+ALTER TABLE public.link_swap_intents               ENABLE ALWAYS TRIGGER link_swap_intents_guard_delete;
+ALTER TABLE public.link_swap_intents               ENABLE ALWAYS TRIGGER link_swap_intents_guard_truncate;
+
+ALTER TABLE public.content_work_order_hash_history ENABLE ALWAYS TRIGGER content_work_order_hash_history_guard_update;
+ALTER TABLE public.content_work_order_hash_history ENABLE ALWAYS TRIGGER content_work_order_hash_history_guard_delete;
+ALTER TABLE public.content_work_order_hash_history ENABLE ALWAYS TRIGGER content_work_order_hash_history_guard_truncate;
+
+ALTER TABLE public.content_work_orders             ENABLE ALWAYS TRIGGER content_work_orders_guard_hash_insert;
+ALTER TABLE public.content_work_orders             ENABLE ALWAYS TRIGGER content_work_orders_guard_hash_update;
+ALTER TABLE public.content_work_orders             ENABLE ALWAYS TRIGGER content_work_orders_record_hash_history;
+
+-- =============================================================================
+-- 6.4 content_work_orders：service_role 收窄为列级 INSERT/UPDATE
+-- =============================================================================
+-- 表级 INSERT/UPDATE 会让 service_role 能直写 final_mp4_sha256（绕过函数与历史）。
+-- 这里收回表级权限，再按列逐条授予「除 final_mp4_sha256 外的所有列」。
+-- ⚠️ 今后给 content_work_orders 新增列时，必须显式补一条列级 GRANT 给
+--    service_role，否则 service_role 写新列会报权限错误。
+REVOKE INSERT, UPDATE ON public.content_work_orders FROM service_role;
+
+DO $$
+DECLARE
+  v_cols text;
+BEGIN
+  SELECT string_agg(format('%I', column_name), ', ' ORDER BY ordinal_position)
+    INTO v_cols
+    FROM information_schema.columns
+   WHERE table_schema = 'public'
+     AND table_name = 'content_work_orders'
+     AND column_name <> 'final_mp4_sha256';
+
+  IF v_cols IS NULL THEN
+    RAISE EXCEPTION 'content_work_orders 列清单为空，无法授予 service_role 列级权限';
+  END IF;
+
+  EXECUTE format('GRANT INSERT (%s) ON public.content_work_orders TO service_role', v_cols);
+  EXECUTE format('GRANT UPDATE (%s) ON public.content_work_orders TO service_role', v_cols);
+END $$;
 
 -- 收回第 5 节临时授予的成员资格与 CREATE 权限（改属主已完成）。
 -- 超级用户下 REVOKE role FROM CURRENT_USER 同样合法（幂等）。
@@ -1929,6 +2063,7 @@ BEGIN
        'link_stale_reasons_guard_update','link_stale_reasons_guard_delete','link_stale_reasons_guard_truncate',
        'link_swap_intents_guard_update','link_swap_intents_guard_delete','link_swap_intents_guard_truncate',
        'work_order_set_final_hash_v1','content_work_orders_guard_hash_update',
+       'content_work_orders_guard_hash_insert','content_work_orders_record_hash_history',
        'content_work_order_hash_history_guard_update','content_work_order_hash_history_guard_delete',
        'content_work_order_hash_history_guard_truncate'
      )
@@ -2050,6 +2185,17 @@ BEGIN
      );
   IF v_bad IS NOT NULL THEN
     RAISE EXCEPTION 'ASSERTION FAILED: 函数存在非预期参数个数的重载: %', v_bad;
+  END IF;
+
+  -- 8.1) service_role 对 content_work_orders 不得有表级 INSERT/UPDATE，
+  --      也不得对 final_mp4_sha256 有列级 INSERT/UPDATE。
+  IF has_table_privilege('service_role', 'public.content_work_orders', 'INSERT')
+     OR has_table_privilege('service_role', 'public.content_work_orders', 'UPDATE') THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: service_role 对 content_work_orders 仍有表级 INSERT/UPDATE';
+  END IF;
+  IF has_column_privilege('service_role', 'public.content_work_orders', 'final_mp4_sha256', 'INSERT')
+     OR has_column_privilege('service_role', 'public.content_work_orders', 'final_mp4_sha256', 'UPDATE') THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: service_role 对 content_work_orders.final_mp4_sha256 有列级写权限';
   END IF;
 
   -- 9) 内部校验助手不得授给任何写入角色（只授属主自己）

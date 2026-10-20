@@ -13,10 +13,14 @@
 -- 覆盖清单（迁移创建的每一个对象都必须在这里被 DROP / REVOKE）：
 --   · 触发器：ad_creative_links ×3、creative_binding_attestations ×3、
 --             link_stale_reasons ×3、link_swap_intents ×3、
+--             content_work_orders_guard_hash_insert ×1、
 --             content_work_orders_guard_hash_update ×1、
+--             content_work_orders_record_hash_history ×1、
 --             content_work_order_hash_history ×3
 --   · 函数：14 个业务/只读函数（含内部校验助手 ad_link_check_attestation_v1）
---           + 13 个触发器函数（含 work_order_set_final_hash_v1）
+--           + 15 个触发器函数（含 work_order_set_final_hash_v1）
+--   · content_work_orders 的 service_role 列级 INSERT/UPDATE 授权
+--     （回滚恢复为表级 INSERT, UPDATE）
 --   · 表：creative_binding_attestations、link_swap_intents、link_stale_reasons、
 --         content_work_order_hash_history
 --   · 列：ad_creative_links 新增 10 列、content_work_orders.final_mp4_sha256
@@ -47,7 +51,9 @@ GRANT ad_link_fn_owner TO CURRENT_USER;
 DROP TRIGGER IF EXISTS content_work_order_hash_history_guard_truncate ON public.content_work_order_hash_history;
 DROP TRIGGER IF EXISTS content_work_order_hash_history_guard_delete   ON public.content_work_order_hash_history;
 DROP TRIGGER IF EXISTS content_work_order_hash_history_guard_update   ON public.content_work_order_hash_history;
+DROP TRIGGER IF EXISTS content_work_orders_record_hash_history        ON public.content_work_orders;
 DROP TRIGGER IF EXISTS content_work_orders_guard_hash_update          ON public.content_work_orders;
+DROP TRIGGER IF EXISTS content_work_orders_guard_hash_insert          ON public.content_work_orders;
 
 DROP TRIGGER IF EXISTS ad_creative_links_guard_truncate ON public.ad_creative_links;
 DROP TRIGGER IF EXISTS ad_creative_links_guard_delete   ON public.ad_creative_links;
@@ -117,7 +123,9 @@ DROP FUNCTION IF EXISTS public.link_swap_intents_guard_update();
 DROP FUNCTION IF EXISTS public.link_swap_intents_guard_delete();
 DROP FUNCTION IF EXISTS public.link_swap_intents_guard_truncate();
 
+DROP FUNCTION IF EXISTS public.content_work_orders_record_hash_history();
 DROP FUNCTION IF EXISTS public.content_work_orders_guard_hash_update();
+DROP FUNCTION IF EXISTS public.content_work_orders_guard_hash_insert();
 DROP FUNCTION IF EXISTS public.content_work_order_hash_history_guard_update();
 DROP FUNCTION IF EXISTS public.content_work_order_hash_history_guard_delete();
 DROP FUNCTION IF EXISTS public.content_work_order_hash_history_guard_truncate();
@@ -165,6 +173,10 @@ ALTER TABLE public.content_work_orders
   DROP CONSTRAINT IF EXISTS content_work_orders_final_mp4_sha256_fmt;
 ALTER TABLE public.content_work_orders
   DROP COLUMN IF EXISTS final_mp4_sha256;
+
+-- 恢复 service_role 对 content_work_orders 的表级 INSERT/UPDATE
+-- （迁移把它收窄成了列级授权；回滚即回到表级）。
+GRANT INSERT, UPDATE ON public.content_work_orders TO service_role;
 
 -- =============================================================================
 -- 7) ad_link_fn_owner 的授权（表已删，只剩 schema 与 content_work_orders 上的）
