@@ -32,8 +32,19 @@
 --    库内版本以 supabase_migrations.schema_migrations 为准。
 --    本文件只写文件，不应用；应用须 PM 明确授权（风险级 A）。
 --
--- 上线顺序（硬性）
+-- 应用顺序（硬性）
 -- ----------------
+-- 1) 本迁移必须在兄弟迁移 20261021100000（content_work_orders 的
+--    agent_request_id / agent_request_prev_id 两列）之后应用。
+--    原因：6.4 节给 service_role 的列级 GRANT 是在执行时从
+--    information_schema.columns 动态生成的 —— 只覆盖「执行那一刻已存在」的列。
+--    若先应用本迁移、后加列，新列不会自动获得 service_role 写权限，
+--    必须另写一条显式 GRANT。时间戳顺序已把 20261021100000 排在前，
+--    不要调换文件名或重排。
+-- 2) 代码先切新函数再应用本迁移（见下）。
+--
+-- 代码先切新函数再应用本迁移
+-- --------------------------
 -- 代码必须先切到新函数（link_ad_at_creation_v1 / link_ad_registration_v1 /
 -- link_ad_backfill_v1 的新签名），再 apply 本迁移。
 -- 反序（先 apply 再切代码）= 旧代码仍走 service_role 直写 upsert，而本迁移已
@@ -82,6 +93,11 @@
 --   可绕过 RLS、可 ALTER TABLE ... DISABLE TRIGGER、可自行 set_config 伪造会话标志，
 --   这是平台层面的残余风险，只能靠「属主/超级用户凭据不落到应用」的运维约束兜底。
 --   末尾 ASSERTIONS 显式排除属主与超级用户，不假装能拦住它们。
+--   一句话：表属主/超级用户可 DISABLE TRIGGER 或 set_config 绕过（数据库层只防
+--   service_role / 匿名）。
+-- · OWNER TO 在 Supabase 非超级用户下必须先在分支库实测：第 5 节用
+--   GRANT ad_link_fn_owner TO CURRENT_USER 再 ALTER FUNCTION ... OWNER TO，
+--   在带 supautils 的分支库上行为未验证；实测通过前不得应用到线上。
 -- · content_work_orders 的 service_role 权限已从表级 INSERT/UPDATE 收窄为
 --   列级（除 final_mp4_sha256 外的所有列）。今后给该表新增列时，必须显式补一条
 --   列级 GRANT 给 service_role，否则 service_role 写新列会报权限错误。
@@ -2211,6 +2227,34 @@ BEGIN
   IF has_column_privilege('service_role', 'public.content_work_orders', 'final_mp4_sha256', 'INSERT')
      OR has_column_privilege('service_role', 'public.content_work_orders', 'final_mp4_sha256', 'UPDATE') THEN
     RAISE EXCEPTION 'ASSERTION FAILED: service_role 对 content_work_orders.final_mp4_sha256 有列级写权限';
+  END IF;
+
+  -- 8.2) content_work_orders 的每一列（final_mp4_sha256 除外）都必须对
+  --      service_role 有列级 INSERT 与 UPDATE。6.4 节的 GRANT 是执行时按
+  --      information_schema.columns 动态生成的，之后新增的列不会自动获得权限；
+  --      这里逐列断言，漏授即红，提示补显式 GRANT。
+  SELECT string_agg(format('%s(INSERT=%s,UPDATE=%s)',
+                           c.column_name,
+                           has_column_privilege('service_role', 'public.content_work_orders', c.column_name, 'INSERT'),
+                           has_column_privilege('service_role', 'public.content_work_orders', c.column_name, 'UPDATE')),
+                    ', ' ORDER BY c.ordinal_position)
+    INTO v_bad
+    FROM information_schema.columns c
+   WHERE c.table_schema = 'public'
+     AND c.table_name = 'content_work_orders'
+     AND c.column_name <> 'final_mp4_sha256'
+     AND (
+       NOT has_column_privilege('service_role', 'public.content_work_orders', c.column_name, 'INSERT')
+       OR NOT has_column_privilege('service_role', 'public.content_work_orders', c.column_name, 'UPDATE')
+     );
+  IF v_bad IS NOT NULL THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: 新增列未授权给 service_role,需显式 GRANT: %', v_bad;
+  END IF;
+
+  -- 8.3) final_mp4_sha256 必须对 service_role 不可写（列级 INSERT/UPDATE 均无）。
+  IF has_column_privilege('service_role', 'public.content_work_orders', 'final_mp4_sha256', 'INSERT')
+     OR has_column_privilege('service_role', 'public.content_work_orders', 'final_mp4_sha256', 'UPDATE') THEN
+    RAISE EXCEPTION 'ASSERTION FAILED: service_role 对 content_work_orders.final_mp4_sha256 可写（必须不可写）';
   END IF;
 
   -- 9) 内部校验助手不得授给任何写入角色（只授属主自己）
