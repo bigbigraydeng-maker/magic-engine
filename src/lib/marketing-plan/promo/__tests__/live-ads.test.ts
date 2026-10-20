@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
-import { summarizeLiveAds } from '../live-ads'
+import { describeLiveAds, summarizeLiveAds } from '../live-ads'
 
 describe('summarizeLiveAds', () => {
   it('counts only ACTIVE adsets and ignores disappeared', () => {
@@ -88,8 +88,39 @@ describe('summarizeLiveAds', () => {
     if (!fact.ok) throw new Error('expected ok')
     expect(fact.live_adsets).toBe(3)
     expect(fact.by_account).toEqual([
-      { ad_account_id: 'act_1', label: '官方账户', live_adsets: 1, as_of: '2026-10-20T06:00:00Z' },
-      { ad_account_id: 'act_2', label: '主账户', live_adsets: 2, as_of: '2026-10-19T12:00:00Z' },
+      { ad_account_id: 'act_1', label: '官方账户', live_adsets: 1, as_of: '2026-10-20T06:00:00Z', state: 'no_spend_data', last_insight_day: null, spend_3d: 0 },
+      { ad_account_id: 'act_2', label: '主账户', live_adsets: 2, as_of: '2026-10-19T12:00:00Z', state: 'no_spend_data', last_insight_day: null, spend_3d: 0 },
     ])
+  })
+
+  const mk = (accountInsights: Record<string, { last_day: string | null; spend_3d: number }>) => summarizeLiveAds({
+    adsets: [
+      { entity_id: 'a', ad_account_id: 'act_1', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-20T06:00:00Z' },
+      { entity_id: 'b', ad_account_id: 'act_2', effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-19T12:00:00Z' },
+    ],
+    insights: [], currency: 'NZD', today: '2026-10-20', accountLabels: { act_1: '官方账户', act_2: '主账户' }, accountInsights,
+  })
+  it('三种状态：有花费=spending，花费数据过旧/缺失=no_spend_data，新数据且 0=idle', () => {
+    const f = mk({ act_1: { last_day: '2026-10-20', spend_3d: 156.01 }, act_2: { last_day: '2026-10-10', spend_3d: 0 } })
+    if (!f.ok) throw new Error('ok')
+    expect(f.by_account.map(a => a.state)).toEqual(['spending', 'no_spend_data'])
+    expect(f.spending_adsets).toBe(1)
+    const g = mk({ act_1: { last_day: '2026-10-20', spend_3d: 0 } })
+    if (!g.ok) throw new Error('ok')
+    expect(g.by_account.map(a => a.state)).toEqual(['idle', 'no_spend_data'])
+  })
+  it('描述：只有确认有花费才红字；花费数据过旧是黄字且不说「在花钱」；全 0 灰字', () => {
+    const red = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_3d: 156.01 }, act_2: { last_day: '2026-10-10', spend_3d: 0 } }))
+    expect(red?.level).toBe('red')
+    expect(red?.text).toContain('官方账户 1 个')
+    expect(red?.text).not.toContain('主账户')
+    const amber = describeLiveAds(mk({}))
+    expect(amber?.level).toBe('amber')
+    expect(amber?.text).not.toContain('⚠️')
+    expect(amber?.text).toContain('没法确认')
+    const grey = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_3d: 0 }, act_2: { last_day: '2026-10-20', spend_3d: 0 } }))
+    expect(grey?.level).toBe('grey')
+    expect(describeLiveAds(null)).toBeNull()
+    expect(describeLiveAds({ ok: false, reason: 'x' })).toBeNull()
   })
 })

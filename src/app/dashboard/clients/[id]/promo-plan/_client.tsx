@@ -22,7 +22,8 @@ import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
-import type { LiveAdsFact } from '@/lib/marketing-plan/promo/live-ads'
+import { describeLiveAds } from '@/lib/marketing-plan/promo/live-ads'
+import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
@@ -258,16 +259,16 @@ export function PromoPlanClient() {
 
 function Headline({ board, plan, liveAds, clientId }: { board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; clientId: string }) {
   const draft = plan.status === 'draft'
-  const live = draft ? liveAdsWarning(liveAds) : null
+  const live = draft ? describeLiveAds(liveAds) : null
   const text = draft
-    ? live ? '还没批准——但广告其实已经在花钱' : '还没批准——批准之前，ME 的自动动作都不会发生'
+    ? live?.level === 'red' ? '还没批准——但系统里显示广告已经在花钱' : '还没批准——批准之前，ME 的自动动作都不会发生'
     : board.reconcile?.headline ?? (board.has_promo ? '推广计划的内容有问题，先改好' : '这份计划还没有推广计划的阶段')
   const blind = !draft && !!board.reconcile?.blind
   return (
     <div className={`rounded-xl border px-5 py-4 ${blind ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200'}`}>
       <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
       <p className="text-lg font-bold text-gray-900">{text}</p>
-      {draft && <LiveAdsNotice fact={liveAds} warning={live} clientId={clientId} />}
+      {draft && <LiveAdsNotice fact={liveAds} message={live} clientId={clientId} />}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (
         <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>
@@ -287,25 +288,13 @@ function SpecProblems({ board }: { board: PromoBoard }) {
   )
 }
 
-const MONEY_PREFIX: Record<string, string> = { NZD: 'NZ$', AUD: 'A$', USD: 'US$' }
-
-/** 有在跑的广告组 → 返回红字文案；没有或读不到 → null。 */
-function liveAdsWarning(fact: LiveAdsFact | null): string | null {
-  if (!fact || !fact.ok || fact.live_adsets <= 0) return null
-  const prefix = fact.currency ? (MONEY_PREFIX[fact.currency] ?? `${fact.currency} `) : ''
-  const spend = fact.spend_today !== null
-    ? `今天已花 ${prefix}${fact.spend_today.toFixed(2)}`
-    : fact.spend_day ? `最近一天（${fact.spend_day}）的花费还没出今天的数` : '今天的花费数据还没同步过来'
-  const snap = (iso: string | null) => (iso ? `，快照 ${iso.slice(5, 16).replace('T', ' ')} UTC` : '')
-  const where = fact.by_account.map(a => `${a.label ?? a.ad_account_id} ${a.live_adsets} 个${snap(a.as_of)}`).join('；')
-  return `⚠️ 现在 Meta 里已有 ${fact.live_adsets} 个广告组在花钱（${where}；${spend}），但本计划还没批准——计划记录与实际不一致，请先批准或联系统筹`
-}
-
-function LiveAdsNotice({ fact, warning, clientId }: { fact: LiveAdsFact | null; warning: string | null; clientId: string }) {
-  if (warning) {
+function LiveAdsNotice({ fact, message, clientId }: { fact: LiveAdsFact | null; message: LiveAdsMessage | null; clientId: string }) {
+  if (message) {
+    const tone = message.level === 'red' ? 'border-red-300 bg-red-50 text-red-800'
+      : message.level === 'amber' ? 'border-yellow-300 bg-yellow-50 text-yellow-900' : 'border-gray-200 bg-gray-50 text-gray-700'
     return (
-      <p className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-        {warning}{' '}
+      <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone}`}>
+        {message.text}{' '}
         <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
       </p>
     )
