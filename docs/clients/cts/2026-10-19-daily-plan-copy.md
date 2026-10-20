@@ -226,28 +226,28 @@
 - `body`: On Day 2, Shanghai & Surroundings visits the Master of the Nets Garden, Panmen and Shantang Street in Suzhou. Departing 25 March 2027.
 - `cta`: See the full itinerary in the first comment.
 - `cta_url`: （留空，97 号填通用页）
-- `image_asset_id`: （待入库后由 97 号对接）；图片文件：`2026-10-26_P1_sh.png`（Suzhou 园林，已在库，status=error 待重跑分析）
+- `image_asset_id`: （待入库后由 97 号对接）；图片文件：`2026-10-26_P1_sh.png`（Suzhou 园林，已在库，status=error，充值后重跑分析；与周包 10/19 P2 同图、文案不同）
 - 事实 ID：SH-04, SH-02
 
 ### Story（4 帧，1→4 连播）
-1. `order`: 1 · `copy`: Suzhou: Panmen and Shantang Street
+1. `order`: 1 · `copy`: Hangzhou: Six Harmonies Pagoda and Longjing tea tasting at Meijiawu
 2. `order`: 2 · `copy`: Wuxi: the Purple Sand Museum and Nanchang Ancient Street
-3. `order`: 3 · `copy`: Xinshi Town: afternoon tea in a thousand-year-old town
+3. `order`: 3 · `copy`: Xinshi Town: Hanfu dress-up for photos and afternoon tea in a thousand-year-old town
 4. `order`: 4 · `copy`: Shanghai & Surroundings, 10 days. Departing 25 March 2027.
-- 事实 ID：SH-04/05/06, SH-02；官网 10/14（Xinshi "afternoon tea in thousand-year-old Xinshi Town"）
+- 事实 ID：SH-07/05/06, SH-02；Xinshi 一句出自官网原文 "Hanfu dress-up for photos and afternoon tea in thousand-year-old Xinshi Town"（2026-10-14 抓取，见官网事实表）
 
 ### Reel 脚本（只要文字）
-- `brief`: What is included in Shanghai & Surroundings, no price on screen.
+- `brief`: Natural China in 15 seconds: the Three Gorges, Chongqing by night and Zhangjiajie, no price on screen. (Shanghai & Surroundings is not repeated: it already has Post, Story and Reel on 10/26.)
 - `script`:
-  - [0–3s] Suzhou garden pavilion or canal, clean frame, logo only, no text overlay.
-  - [3–6s] Text: FLIGHTS · HOTELS AS SPECIFIED · ENGLISH-SPEAKING TOUR GUIDE. (official-page wording only)
-  - [6–9s] Text: ENTRANCE FEES AND MEALS AS SPECIFIED.
-  - [9–12s] Text: THE BUND · CITY GOD TEMPLE QUARTER · NANJING ROAD.
-  - [12–15s] End card: SHANGHAI & SURROUNDINGS · 10 DAYS · DEPARTS 25 MARCH 2027.
-- `caption`: What is included on Shanghai & Surroundings: flights, hotel accommodation as specified, an English-speaking tour guide, and the entrance fees and meals listed in the itinerary. Travel insurance and personal expenses are not included. Ten days from Auckland, departing 25 March 2027. Full itinerary and inclusions in the first comment.
+  - [0–3s] Yangtze Three Gorges, clean frame, logo only, no text overlay.
+  - [3–6s] Text: CRUISE THE YANGTZE · YICHANG TO CHONGQING.
+  - [6–9s] Chongqing at night. Text: HONGYADONG · CHONGQING AT NIGHT.
+  - [9–12s] Zhangjiajie stone pillar. Text: ZHANGJIAJIE NATIONAL FOREST PARK.
+  - [12–15s] End card: NATURAL CHINA · 16 DAYS · DEPARTS 26 MARCH 2027.
+- `caption`: The Yangtze Three Gorges, Chongqing by night and Zhangjiajie National Forest Park. Natural China takes 16 days from Auckland, departing 26 March 2027. Full itinerary and inclusions in the first comment.
 - `source_asset_ids`: []
 - `media_status`: NO_MEDIA
-- 事实 ID：官网 10/14 含/不含项（`2026-10-14-website-fact-sheet-march-tours-v1.md`），SH-02/08
+- 事实 ID：NAT-03/04/05/07, NAT-02
 
 ## 2026-10-28（Wed 周三）
 
@@ -260,19 +260,19 @@
 - 事实 ID：TALE-06, TALE-03, TALE-02
 
 ### Story（4 帧，1→4 连播）
-1. `order`: 1 · `copy`: A Tale of Two Cities: walk the Great Wall
+1. `order`: 1 · `copy`: A Tale of Two Cities: a pedi-cab Hutong tour with a family visit
 2. `order`: 2 · `copy`: Beihai Park and Tian'anmen Square
 3. `order`: 3 · `copy`: Small Wild Goose Pagoda Museum and Huimin Street
 4. `order`: 4 · `copy`: 10 days from Auckland. Departing 18 March 2027.
-- 事实 ID：TALE-05/06/10, TALE-02
+- 事实 ID：TALE-07/05/10, TALE-02
 
 ### Reel 脚本（只要文字）
 - `brief`: Beijing to Xi'an by high-speed train, no price on screen.
 - `script`:
-  - [0–3s] Forbidden City aerial, clean frame, logo only, no text overlay.
-  - [3–6s] Text: BEIJING · FOUR NIGHTS.
-  - [6–9s] High-speed train. Text: HIGH-SPEED TRAIN TO XI'AN.
-  - [9–12s] Xi'an City Wall or Big Wild Goose Pagoda. Text: XI'AN · THREE NIGHTS.
+  - [0–3s] Big Wild Goose Pagoda, clean frame, logo only, no text overlay.
+  - [3–6s] Beijing. Text: BEIJING · FOUR NIGHTS.
+  - [6–9s] High-speed train (must be a Chinese high-speed train image). Text: HIGH-SPEED TRAIN TO XI'AN.
+  - [9–12s] Big Wild Goose Pagoda. Text: XI'AN · THREE NIGHTS.
   - [12–15s] End card: A TALE OF TWO CITIES · 10 DAYS · DEPARTS 18 MARCH 2027.
 - `caption`: Four nights in Beijing, a high-speed train, and three nights in Xi'an. Ten days from Auckland, departing 18 March 2027. Full itinerary and inclusions in the first comment.
 - `source_asset_ids`: []
