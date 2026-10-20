@@ -50,23 +50,24 @@ export function nzToday(date: Date): string {
   }).format(date)
 }
 
-const PRICE_AMOUNT_RE = /NZD\s*\$?\s*([0-9][0-9,]*)/i
-const PRICE_UNKNOWN_RE = /TBC|POA|on request/i
+// Strict on purpose: only "NZD $3,480", "From NZD $4,080" and "... per person" shapes are trusted.
+// Anything else ("per couple", "Was ... now ...", ranges, decimals, TBC/POA, other currencies) is skipped,
+// because the entry later states the amount as a per-person price.
+const PRICE_TEXT_RE = /^(?:from\s+)?NZD\s*\$?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\s+per\s+person)?$/i
+const MIN_PLAUSIBLE_PRICE_NZD = 100
 
 /**
  * Parse an integer NZD amount out of a display price string. Returns `null`
- * for empty/whitespace input, for TBC/POA/on-request text, or when no amount
- * is found. A leading "From" is accepted (it is a per-person from-price).
+ * unless the whole text is a plain per-person amount (see PRICE_TEXT_RE).
  */
 export function parsePriceNzd(text: string | null | undefined): number | null {
   if (text === null || text === undefined) return null
   const trimmed = text.trim()
   if (trimmed === '') return null
-  if (PRICE_UNKNOWN_RE.test(trimmed)) return null
-  const match = PRICE_AMOUNT_RE.exec(trimmed)
+  const match = PRICE_TEXT_RE.exec(trimmed)
   if (!match) return null
   const amount = Number(match[1].replace(/,/g, ''))
-  return Number.isFinite(amount) ? amount : null
+  return Number.isFinite(amount) && amount >= MIN_PLAUSIBLE_PRICE_NZD ? amount : null
 }
 
 const COUNTED_DEPARTURE_STATUSES: ReadonlySet<string> = new Set(['open', 'limited'])
@@ -140,9 +141,8 @@ export function buildCatalogKnowledgeEntries(input: {
     for (const [price, dates] of datesByPrice) {
       const sortedDates = [...dates].sort()
       const statement =
-        `${tour.name}: NZD ${price.toLocaleString('en-NZ')} per person ` +
-        `(from-price, twin share; single supplement extra). ` +
-        `Departures: ${sortedDates.join(', ')}. Source: tour catalog. ` +
+        `${tour.name}: NZD ${price.toLocaleString('en-NZ')} per person, twin share. ` +
+        `Departures: ${sortedDates.join(', ')}. ` +
         `Do not comment on how full a departure is; hand such questions to a consultant.`
       const entry: KnowledgeEntry = {
         id: `catalog:${tour.id}:${price}`,
@@ -237,10 +237,17 @@ export async function getClientKnowledgeWithCatalog(
   }
 
   // Retired-tour protection: `tour.retired.<slug>` keys carry the short tour slug, our code is
-  // `<destination>-<tier>-<slug>`, so match either direction on word boundaries (drop when unsure).
+  // `<destination>-<tier>-<slug>`, so match either direction on word boundaries. Drops when unsure
+  // (a shared slug such as 'highlights' may hide a live tour — the safe direction). Retired tours are
+  // also `is_active=false` in the catalog, which is the primary filter.
   const retiredSlugs = base.forbiddenFactKeys
     .filter((key) => key.startsWith('tour.retired.'))
-    .map((key) => normalizeCodePart(key.slice('tour.retired.'.length)))
+    .map((key) => {
+      // Same convention as the CTS verifier: `tour.retired.<name>[.alias.<slug>]` — match on the slug part.
+      const rest = key.slice('tour.retired.'.length)
+      const aliasAt = rest.indexOf('.alias.')
+      return normalizeCodePart(aliasAt === -1 ? rest : rest.slice(aliasAt + '.alias.'.length))
+    })
     .filter((slug) => slug !== '')
   const kept = catalogEntries.filter((entry) => {
     const code = catalogEntryCode(entry)

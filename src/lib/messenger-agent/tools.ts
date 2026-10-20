@@ -94,6 +94,9 @@ export function warnOnResourceIds(input: unknown, toolName: string): void {
   }
 }
 
+/** Catalog-backed facts add one entry per tour/price (dozens of rows): give the facts tool more room than the 6000 default so rows are never silently cut. */
+export const CUSTOMER_FACTS_TOOL_MAX_CHARS = 30000
+
 function truncateToolOutput(s: string, maxChars = 6000): string {
   return s.length <= maxChars ? s : `${s.slice(0, maxChars)}\n…[truncated ${s.length - maxChars} chars]`
 }
@@ -176,7 +179,7 @@ export const queryCustomerFacingFacts: MessengerAgentToolModule = {
         fact_layer: 'client_knowledge_base',
         matched_by_keywords: keywords.length > 0 ? keywords : null,
         facts: facts.map(summarizeFact),
-      }))
+      }), CUSTOMER_FACTS_TOOL_MAX_CHARS)
     } catch (err) {
       return JSON.stringify({
         error: `Knowledge base lookup failed — treat every commercial fact as UNKNOWN, do not guess: ${err instanceof Error ? err.message : String(err)}`,

@@ -154,6 +154,16 @@ describe('parsePriceNzd', () => {
     expect(parsePriceNzd('')).toBeNull()
     expect(parsePriceNzd(null)).toBeNull()
     expect(parsePriceNzd('call us')).toBeNull()
+    // 🔴 Only plain per-person amounts are trusted (the entry states "per person").
+    expect(parsePriceNzd('NZD $900 per couple')).toBeNull()
+    expect(parsePriceNzd('Was NZD $4,000 now NZD $3,480')).toBeNull()
+    expect(parsePriceNzd('NZD $3,480 - $3,680')).toBeNull()
+    expect(parsePriceNzd('NZD $3,480.50')).toBeNull()
+    expect(parsePriceNzd('NZD $0')).toBeNull()
+    expect(parsePriceNzd('NZD $12')).toBeNull()
+    expect(parsePriceNzd('AUD $3,480')).toBeNull()
+    expect(parsePriceNzd('NZD $3,480 (dates TBC)')).toBeNull()
+    expect(parsePriceNzd('  from nzd $4,080  ')).toBe(4080)
   })
 })
 
@@ -404,6 +414,16 @@ describe('getClientKnowledgeWithCatalog', () => {
     expect(result.entries[0]).toBe(baseEntry)
     expect(result.entries[1].factKey.startsWith('tour.active.')).toBe(true)
     expect(result.forbiddenFactKeys).toEqual([])
+  })
+
+  it('drops catalog entries for a retired key that uses the .alias. convention', async () => {
+    mocks.getClientKnowledge.mockResolvedValue({ entries: [], forbiddenFactKeys: ['tour.retired.old-name.alias.silk-road'] })
+    const catalogDb = makeCatalogDb([makeTour()], [makeDeparture({ depart_on: '2026-11-01', status: 'open' })])
+    mocks.supabaseFrom.mockImplementation((table: string) => (catalogDb as unknown as { from: (t: string) => unknown }).from(table))
+
+    const result = await getClientKnowledgeWithCatalog('client-1', { purpose: 'customer_reply' })
+
+    expect(result.entries).toEqual([])
   })
 
   it('drops catalog entries when the retired key carries only the short tour slug', async () => {

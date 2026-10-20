@@ -138,6 +138,20 @@ describe('query_customer_facing_facts — clientId 越权轴锁死', () => {
     expect(out.matched_by_keywords).toBeNull()
   })
 
+  it('目录条目很多（40 条）时工具输出不被截断，仍是可解析的完整 JSON', async () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      fact({
+        factKey: `tour.active.china-signature-tour-${i}.p${7000 + i}`,
+        sensitivity: 'price',
+        statement: `China Signature — Tour ${i}: NZD ${(7000 + i).toLocaleString('en-NZ')} per person, twin share. Departures: 2027-05-13, 2027-06-14, 2027-08-08. Do not comment on how full a departure is; hand such questions to a consultant.`,
+      }),
+    )
+    mockGetClientKnowledge.mockResolvedValue(knowledgeResult(many))
+    const raw = await queryCustomerFacingFacts.handler({}, realCtx())
+    expect(raw).not.toContain('[truncated')
+    expect(JSON.parse(raw).facts).toHaveLength(40)
+  })
+
   it('sensitivity=general 的事实不出现在结果里(留给 query_client_brand_facts)', async () => {
     mockGetClientKnowledge.mockResolvedValue(
       knowledgeResult([fact({ factKey: 'company.years_operating', sensitivity: 'general' })]),
