@@ -294,13 +294,15 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
       draft: opts.draft,
       // 上传前把 video_id 落本地当幂等锚(魏征 B9):中途崩后重来靠它判断,不盲目重发
       onStarted: async (videoId) => {
-        await supabaseAdmin
+        const { error } = await supabaseAdmin
           .from('content_work_orders')
           .update({
             published_ref: { provisional: true, platform: target.platform, page_id: target.page_id, video_id: videoId },
             updated_at: new Date().toISOString(),
           })
           .eq('id', id)
+        // 锚没落下就不许继续:否则崩溃后重来既没有本地锚、平台侧又可能已有这条,等于盲发。
+        if (error) throw new Error('幂等锚写入失败')
       },
     })
   } catch (e) {
