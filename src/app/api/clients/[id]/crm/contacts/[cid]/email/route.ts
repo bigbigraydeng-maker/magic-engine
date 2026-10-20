@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   // client_id 一起进 where —— 会话 id 虽然是我们自己查出来的，但隔离不靠
   // 「上游查对了」这种假设成立（见 mail-send.ts 的同款复核）。
-  const { data: convo, error } = await supabaseAdmin
+  const { data: convos, error } = await supabaseAdmin
     .from('conversations')
     .select('id, participant_name')
     .eq('client_id', clientId)
@@ -40,14 +40,30 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 只认邮件。这条路由的结果直接决定卡片上给不给「在这里回邮件」的框——
     // 拿到一条私信线程，销售会对着一个从没收过他邮件的人打字。
     .eq('channel', 'email')
-    // 同一个人可能连了不止一条邮件线程——回最新的那条，那才是他还在说话的地方。
-    .order('last_message_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    // 同一个人可能连了不止一条邮件线程——最新的在前，那才是他还在说话的地方。
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(10)
 
   if (error) {
     return NextResponse.json({ error: '读取失败' }, { status: 500 })
   }
+  const candidates = (convos as Array<{ id: string; participant_name: string | null }> | null) ?? []
+  if (candidates.length === 0) {
+    return NextResponse.json({ conversationId: null })
+  }
+
+  // 只有「客人真的来过信」的线程才算可回复：`sendMailReply` 回的是客人最后一封入站信，
+  // 一条只有我们发出（或发送失败遗留）的线程回不了，不能让抽屉误显示回复框。
+  const { data: inbound, error: inboundError } = await supabaseAdmin
+    .from('conversation_messages')
+    .select('conversation_id')
+    .in('conversation_id', candidates.map((c) => c.id))
+    .eq('direction', 'inbound')
+  if (inboundError) {
+    return NextResponse.json({ error: '读取失败' }, { status: 500 })
+  }
+  const withInbound = new Set(((inbound as Array<{ conversation_id: string }> | null) ?? []).map((m) => m.conversation_id))
+  const convo = candidates.find((c) => withInbound.has(c.id))
   if (!convo) {
     return NextResponse.json({ conversationId: null })
   }

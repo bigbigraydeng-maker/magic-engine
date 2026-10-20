@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EmailComposeLimits } from './config';
+import type { EmailComposeLimits } from '../config';
 import { evaluateQuota, quotaMessage } from '../quota';
 
 const limits: EmailComposeLimits = {

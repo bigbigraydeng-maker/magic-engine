@@ -29,9 +29,15 @@ import { GET } from './route'
 let convoFilters: Record<string, unknown>
 let convoOrder: { column: string; ascending: boolean } | null
 
-function mockDb(opts: { convo?: { id: string; participant_name: string | null } | null }) {
+function mockDb(opts: {
+  convo?: { id: string; participant_name: string | null } | null
+  convos?: Array<{ id: string; participant_name: string | null }>
+  /** 有入站消息的会话 id；默认 = 所有候选会话都有（老用例的语义）。 */
+  inboundIds?: string[]
+}) {
   convoFilters = {}
   convoOrder = null
+  const list = opts.convos ?? (opts.convo ? [opts.convo] : [])
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     if (table === 'conversations') {
       const chain = {
@@ -43,8 +49,15 @@ function mockDb(opts: { convo?: { id: string; participant_name: string | null } 
           convoOrder = { column, ascending: o.ascending }
           return chain
         },
-        limit: () => chain,
-        maybeSingle: async () => ({ data: opts.convo ?? null, error: null }),
+        limit: async () => ({ data: list, error: null }),
+      }
+      return { select: () => chain }
+    }
+    if (table === 'conversation_messages') {
+      const ids = opts.inboundIds ?? list.map((c) => c.id)
+      const chain = {
+        in: () => chain,
+        eq: async () => ({ data: ids.map((conversation_id) => ({ conversation_id })), error: null }),
       }
       return { select: () => chain }
     }
@@ -73,7 +86,7 @@ describe('有没有邮件线', () => {
   it('一个人连了不止一条邮件线程 → 取最新的那条（他还在说话的地方）', async () => {
     mockDb({ convo: { id: 'cv-new', participant_name: null } })
     await call()
-    expect(convoOrder).toEqual({ column: 'last_message_at', ascending: false })
+    expect(convoOrder).toMatchObject({ column: 'last_message_at', ascending: false })
   })
 
   it('只查邮件渠道，不能把私信线程当成邮件塞回去', async () => {
@@ -86,6 +99,20 @@ describe('有没有邮件线', () => {
     mockDb({ convo: { id: 'cv-1', participant_name: null } })
     const json = await (await call()).json()
     expect(json.replyWindow).toBeUndefined()
+  })
+})
+
+describe('只有客人来过信的线程才算可回复（发送失败 / 只有我们发出的线程不能让抽屉误显示回复框）', () => {
+  it('唯一的线程没有入站消息 → 回 null（抽屉显示写邮件框而不是一个发不出去的回复框）', async () => {
+    mockDb({ convos: [{ id: 'cv-out', participant_name: null }], inboundIds: [] })
+    const json = await (await call()).json()
+    expect(json.conversationId).toBeNull()
+  })
+
+  it('最新的线程只有出站、更早的线程有客人来信 → 回更早那条', async () => {
+    mockDb({ convos: [{ id: 'cv-new-out', participant_name: null }, { id: 'cv-old-in', participant_name: 'Amy' }], inboundIds: ['cv-old-in'] })
+    const json = await (await call()).json()
+    expect(json).toMatchObject({ conversationId: 'cv-old-in', participantName: 'Amy' })
   })
 })
 
