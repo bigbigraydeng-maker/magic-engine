@@ -211,15 +211,23 @@ export async function loadConfigVersion(
  * 一次读出「内容 + 版本」，顺序必须是先版本、后内容。
  * 反过来（先内容、后版本）会拿到「旧内容 + 新版本号」：别人在这两步之间写入，
  * 我们却以为版本没变，后续保存会静默覆盖别人的改动。
+ *
+ * 🔴 内容读失败必须报错，不能悄悄回落默认配置：默认配置的素材池是空数组，
+ * 配上合法的版本号，界面会显示「还没有视频」；用户随手加一个编号保存，
+ * 就会按整数组替换把已批准的素材全删光——不可逆。所以这里用
+ * loadAdStrategyConfigWithSource 区分「读成功」和「读失败回落」。
  */
 export async function loadConfigWithVersion(
   clientId: string,
 ): Promise<{ ok: true; config: AdStrategyConfig; version: string | null } | { ok: false; error: string }> {
   const loadedVersion = await loadConfigVersion(clientId)
   if (!loadedVersion.ok) return { ok: false, error: loadedVersion.error }
-  const config = await loadAdStrategyConfig(clientId)
+  const loaded = await loadAdStrategyConfigWithSource(clientId)
+  if (loaded.source === 'fallback') {
+    return { ok: false, error: loaded.error ?? '读设置失败' }
+  }
   const version = loadedVersion.version.exists ? loadedVersion.version.updatedAt : null
-  return { ok: true, config, version }
+  return { ok: true, config: loaded.config, version }
 }
 
 export type ConfigWriteResult =

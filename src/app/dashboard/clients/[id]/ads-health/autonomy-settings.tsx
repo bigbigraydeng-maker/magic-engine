@@ -502,9 +502,14 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
     return <div className="text-sm text-gray-400 py-4">加载中…</div>
   }
 
-  /** 批准成功：先套用新配置；服务端读不到版本时再刷一次版本。 */
+  /**
+   * 批准成功：只套用新配置和版本，**不碰**用户正在编辑的草稿
+   * （同一页上没保存的上限/模式不能被冲掉）。
+   * 服务端读不到版本时再刷一次版本。
+   */
   const handleApproved = (c: AdStrategyConfig, v?: string | null) => {
-    applyConfig(c, v)
+    setConfig(c)
+    if (v !== undefined) setVersion(v)
     if (v === undefined) {
       void refreshFromServer().then(ok => {
         // 读不到版本就置为未知，下次保存不带 expected_version。
@@ -534,21 +539,27 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
 
       // 只在提交新候选时才动素材池。服务端会保留已有素材的批准状态，但会带上
       // 页面加载时的版本；页面太旧时服务端返回 409，界面刷新后让用户重做。
-      if (newRefs.length > 0) {
-        // 全是重复 / 已存在的编号：不发请求，也不清空输入框，让用户自己改。
-        if (freshRefs.length === 0) {
-          setMessage('这些视频编号已经在列表里了，没有需要添加的')
-          return
-        }
+      // 素材池只是这次保存的一部分：它有问题时不能连带取消预算/模式的修改。
+      const skippedExisting = newRefs.length > 0 && freshRefs.length === 0
+      const versionUnknown = newRefs.length > 0 && freshRefs.length > 0 && version === undefined
+      if (freshRefs.length > 0 && version !== undefined) {
         body.creative_pool = [
           ...config.creative_pool.map(e => ({ kind: e.kind, ref: e.ref, status: 'candidate' })),
           ...freshRefs.map(ref => ({ kind: 'meta_video', ref, status: 'candidate' })),
         ]
-        if (version !== undefined) body.expected_version = version
+        // version 可能是 null（库里还没有设置行），也必须带上。
+        body.expected_version = version
       }
 
       if (Object.keys(body).length === 0) {
-        setMessage('没有改动')
+        // 全是重复 / 已存在的编号：不发请求，也不清空输入框，让用户自己改。
+        if (skippedExisting) {
+          setMessage('这些视频编号已经在列表里了，没有需要添加的')
+        } else if (versionUnknown) {
+          setMessage('读不到页面版本，请刷新页面后再添加素材')
+        } else {
+          setMessage('没有改动')
+        }
         return
       }
 
@@ -567,8 +578,15 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
 
       applyConfig(json.config, json.version)
-      setDraftRefs('')
-      setMessage('已保存')
+      if (skippedExisting) {
+        // 编号已存在：预算/模式照常保存，但不清空输入框，让用户自己改。
+        setMessage('编号已存在，预算/模式已保存')
+      } else if (versionUnknown) {
+        setMessage('预算/模式已保存；素材没有添加：读不到页面版本，请刷新页面后再添加')
+      } else {
+        setDraftRefs('')
+        setMessage('已保存')
+      }
       // 服务端读不到版本：先把版本刷回来，读不到就置为未知，下次保存不带 expected_version。
       if (json.version_unreadable === true) {
         const ok = await refreshFromServer()
@@ -634,6 +652,9 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
           <p className="mt-1 text-xs text-amber-700">
             添加新视频不会影响已批准的视频。如果这个页面打开很久了，保存时会提示「已被别处改过」，按提示刷新后再保存即可。
           </p>
+          {version === undefined && newRefs.length > 0 && (
+            <p className="mt-1 text-xs text-amber-700">读不到页面版本，请刷新页面后再添加素材。</p>
+          )}
         </div>
       </div>
 

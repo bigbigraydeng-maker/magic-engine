@@ -353,3 +353,71 @@ describe('creative-pool/approve — 幂等分支的版本与读取顺序', () =>
     expect(selects[0]).toBe('updated_at')
   })
 })
+
+describe('creative-pool/approve — 写入成功后读回内容失败', () => {
+  it('写入成功但读回内容失败 → 200，version_unreadable=true，无 version 键', async () => {
+    signedInAs(STAFF)
+    // 写入之前：读版本（updated_at）、读内容（config）。写入之后：读版本成功、读内容失败。
+    // 用 select 的列名区分：updated_at 永远成功；内容列在写入之后（第 2 次及以后）失败。
+    let contentSelects = 0
+    const rows = new Map<string, Row>([[CLIENT, {
+      client_id: CLIENT, enabled: true, digest_recipients: [], updated_at: '2026-10-20T00:00:00.000Z',
+      creative_pool: [
+        { kind: 'meta_video', ref: 'v1', status: 'candidate', promo_window: { kind: 'evergreen' } },
+      ],
+    }]])
+    const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
+      const key = String(row[opts.onConflict])
+      rows.set(key, { ...(rows.get(key) ?? {}), ...row })
+      return { error: null }
+    })
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: (cols?: string) => ({
+          eq: (col: string, val: string) => ({
+            maybeSingle: async () => {
+              if (cols === 'updated_at') {
+                const row = [...rows.values()].find(r => r[col] === val)
+                return { data: row ? { updated_at: row.updated_at } : null, error: null }
+              }
+              contentSelects += 1
+              // 第 1 次内容读 = 写入之前的 config；第 2 次 = 写入之后的读回 → 失败。
+              if (contentSelects >= 2) {
+                return { data: null, error: { message: 'timeout' } }
+              }
+              const row = [...rows.values()].find(r => r[col] === val)
+              return { data: row ?? null, error: null }
+            },
+          }),
+        }),
+        upsert,
+        update: (row: Row) => {
+          const filters: Array<(r: Row) => boolean> = []
+          const chain = {
+            eq: (col: string, val: unknown) => { filters.push(r => r[col] === val); return chain },
+            is: (col: string, val: unknown) => { filters.push(r => (r[col] ?? null) === val); return chain },
+            select: async () => {
+              const hit = [...rows.values()].filter(r => filters.every(f => f(r)))
+              for (const r of hit) await upsert({ ...r, ...row }, { onConflict: 'client_id' })
+              return { data: hit.map(r => ({ client_id: r.client_id })), error: null }
+            },
+          }
+          return chain
+        },
+        insert: async (row: Row) => {
+          if (rows.has(String(row.client_id))) return { error: { code: '23505', message: 'duplicate key' } }
+          await upsert(row, { onConflict: 'client_id' })
+          return { error: null }
+        },
+      }
+    }) as never)
+
+    const res = await POST(postRequest({ ref: 'v1' }), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.version_unreadable).toBe(true)
+    expect(json).not.toHaveProperty('version')
+  })
+})

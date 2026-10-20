@@ -309,7 +309,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     const { upsert } = fakeTable()
 
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'approved' }] }),
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'approved' }], expected_version: null }),
       params(),
     )
     const json = await res.json()
@@ -324,7 +324,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     const { upsert } = fakeTable()
 
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate', approved_by: 'x' }] }),
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate', approved_by: 'x' }], expected_version: null }),
       params(),
     )
 
@@ -337,7 +337,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [] }])
 
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'wo-1', status: 'candidate' }] }),
+      patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'wo-1', status: 'candidate' }], expected_version: null }),
       params(),
     )
     const json = await res.json()
@@ -361,7 +361,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [existing] }])
 
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'v2', status: 'candidate' }] }),
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'v2', status: 'candidate' }], expected_version: null }),
       params(),
     )
 
@@ -388,7 +388,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     ]) {
       const { upsert } = fakeTable()
       const res = await PATCH(
-        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate', ...extra }] }),
+        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate', ...extra }], expected_version: null }),
         params(),
       )
       const json = await res.json()
@@ -410,7 +410,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     }) as never)
 
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }),
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }], expected_version: null }),
       params(),
     )
 
@@ -426,7 +426,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     }
     const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [approvedEntry] }])
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'v9', status: 'candidate' }] }),
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'v9', status: 'candidate' }], expected_version: null }),
       params(),
     )
     expect(res.status).toBe(200)
@@ -447,7 +447,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
       { kind: 'meta_video', ref: 'v1', status: 'candidate', alias_refs: ['alias-1'] },
     ] }])
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'alias-1', status: 'candidate' }] }),
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'alias-1', status: 'candidate' }], expected_version: null }),
       params(),
     )
     expect(res.status).toBe(400)
@@ -462,7 +462,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
       if (nth === 2) table.rows.get(CLIENT)!.updated_at = '2026-10-21T00:00:01.000Z'
     })
     const { upsert } = table
-    const res = await PATCH(patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }), params())
+    const res = await PATCH(patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }], expected_version: null }), params())
     expect(res.status).toBe(409)
     expect(upsert).not.toHaveBeenCalled()
   })
@@ -483,7 +483,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
       { kind: 'meta_video', ref: 'v1', status: 'approved', approved_by: 'boss@x.test', approved_at: '2026-10-18T00:00:00.000Z' },
     ] }])
     const res = await PATCH(
-      patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'v1', status: 'candidate' }] }),
+      patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'v1', status: 'candidate' }], expected_version: null }),
       params(),
     )
     const json = await res.json()
@@ -500,7 +500,7 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
       patchRequest({ creative_pool: [
         { kind: 'meta_video', ref: 'v1', status: 'candidate' },
         { kind: 'meta_video', ref: 'v1', status: 'candidate' },
-      ] }),
+      ], expected_version: null }),
       params(),
     )
     const json = await res.json()
@@ -572,7 +572,7 @@ describe('ad-strategy-config — 素材池版本（乐观锁）随界面往返',
     expect(upsert).not.toHaveBeenCalled()
   })
 
-  it('不带 expected_version 的老请求（带 creative_pool）仍然 200（行为不变）', async () => {
+  it('PATCH 带 creative_pool 不带 expected_version → 428 expected_version_required，message 含「刷新」，不写库', async () => {
     signedInAs(STAFF)
     const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z' }])
 
@@ -580,6 +580,19 @@ describe('ad-strategy-config — 素材池版本（乐观锁）随界面往返',
       patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }),
       params(),
     )
+    const json = await res.json()
+
+    expect(res.status).toBe(428)
+    expect(json.error).toBe('expected_version_required')
+    expect(json.message).toContain('刷新')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('PATCH 只改 daily_budget_cap_cents（不带 creative_pool、不带 expected_version）→ 仍 200', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [] }])
+
+    const res = await PATCH(patchRequest({ daily_budget_cap_cents: 5000 }), params())
 
     expect(res.status).toBe(200)
     expect(upsert).toHaveBeenCalledTimes(1)
@@ -619,6 +632,31 @@ describe('ad-strategy-config — 版本读取顺序 / 老客户端 / 通知时�
     expect(json.error).toBe('config_version_unreadable')
   })
 
+  it('GET：版本读成功、内容读失败 → 503 config_version_unreadable（不能悄悄返回空素材池 + 合法版本）', async () => {
+    signedInAs(VIEWER)
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: (cols?: string) => ({
+          eq: () => ({
+            maybeSingle: async () => {
+              if (cols === 'updated_at') {
+                return { data: { updated_at: '2026-10-21T00:00:00.000Z' }, error: null }
+              }
+              return { data: null, error: { message: 'timeout' } }
+            },
+          }),
+        }),
+      }
+    }) as never)
+
+    const res = await GET(new NextRequest(url()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(503)
+    expect(json.error).toBe('config_version_unreadable')
+  })
+
   it('PATCH 成功后：写入之后的第一次 select 是 updated_at（版本先于内容）', async () => {
     signedInAs(STAFF)
     const { selects } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], updated_at: '2026-10-21T00:00:00.000Z' }])
@@ -631,20 +669,73 @@ describe('ad-strategy-config — 版本读取顺序 / 老客户端 / 通知时�
     expect(lastTwo[0]).toBe('updated_at')
   })
 
-  it('PATCH 带 creative_pool 不带 expected_version → 200，且 console.warn 被调用一次', async () => {
+  it('PATCH 带 creative_pool + 正确 expected_version，写入成功但写入之后读内容失败 → 200，version_unreadable=true，无 version 键', async () => {
     signedInAs(STAFF)
-    fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z' }])
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const res = await PATCH(
-        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }),
-        params(),
-      )
-      expect(res.status).toBe(200)
-      expect(warn).toHaveBeenCalledTimes(1)
-    } finally {
-      warn.mockRestore()
-    }
+    // 写入之前：读版本（updated_at）、读内容（before）。写入之后：读版本（updated_at）成功、读内容失败。
+    // 用 select 的列名区分：updated_at 永远成功；内容列在写入之后（第 3 次及以后）失败。
+    let contentSelects = 0
+    const rows = new Map<string, Row>([[CLIENT, {
+      client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z',
+    }]])
+    const upsert = vi.fn(async (row: Row, opts: { onConflict: string }) => {
+      const key = String(row[opts.onConflict])
+      rows.set(key, { ...(rows.get(key) ?? {}), ...row })
+      return { error: null }
+    })
+    mockFrom.mockImplementation(((table: string) => {
+      if (table !== 'ad_strategy_configs') throw new Error(`unexpected table ${table}`)
+      return {
+        select: (cols?: string) => ({
+          eq: (col: string, val: string) => ({
+            maybeSingle: async () => {
+              if (cols === 'updated_at') {
+                const row = [...rows.values()].find(r => r[col] === val)
+                return { data: row ? { updated_at: row.updated_at } : null, error: null }
+              }
+              contentSelects += 1
+              // 第 1 次内容读 = 写入之前的 before；第 2 次 = 写入之后的读回 → 失败。
+              if (contentSelects >= 2) {
+                return { data: null, error: { message: 'timeout' } }
+              }
+              const row = [...rows.values()].find(r => r[col] === val)
+              return { data: row ?? null, error: null }
+            },
+          }),
+        }),
+        upsert,
+        update: (row: Row) => {
+          const filters: Array<(r: Row) => boolean> = []
+          const chain = {
+            eq: (col: string, val: unknown) => { filters.push(r => r[col] === val); return chain },
+            is: (col: string, val: unknown) => { filters.push(r => (r[col] ?? null) === val); return chain },
+            select: async () => {
+              const hit = [...rows.values()].filter(r => filters.every(f => f(r)))
+              for (const r of hit) await upsert({ ...r, ...row }, { onConflict: 'client_id' })
+              return { data: hit.map(r => ({ client_id: r.client_id })), error: null }
+            },
+          }
+          return chain
+        },
+        insert: async (row: Row) => {
+          if (rows.has(String(row.client_id))) return { error: { code: '23505', message: 'duplicate key' } }
+          await upsert(row, { onConflict: 'client_id' })
+          return { error: null }
+        },
+      }
+    }) as never)
+
+    const res = await PATCH(
+      patchRequest({
+        creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }],
+        expected_version: '2026-10-21T00:00:00.000Z',
+      }),
+      params(),
+    )
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.version_unreadable).toBe(true)
+    expect(json).not.toHaveProperty('version')
   })
 
   it('同一请求既改 autonomy_mode 又带 creative_pool：notify 的 updatedAt 等于实际写入行的 updated_at', async () => {
@@ -675,7 +766,7 @@ describe('ad-strategy-config — 版本读取顺序 / 老客户端 / 通知时�
         patchRequest({ creative_pool: [
           { kind: 'meta_video', ref: 'v1', status: 'candidate' },
           { kind: 'meta_video', ref: 'v1', status: 'candidate' },
-        ] }),
+        ], expected_version: null }),
         params(),
       )
       const json = await res.json()
@@ -689,7 +780,7 @@ describe('ad-strategy-config — 版本读取顺序 / 老客户端 / 通知时�
         { kind: 'meta_video', ref: 'v1', status: 'candidate', alias_refs: ['alias-1'] },
       ] }])
       const res = await PATCH(
-        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'alias-1', status: 'candidate' }] }),
+        patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }, { kind: 'meta_video', ref: 'alias-1', status: 'candidate' }], expected_version: null }),
         params(),
       )
       const json = await res.json()
@@ -703,7 +794,7 @@ describe('ad-strategy-config — 版本读取顺序 / 老客户端 / 通知时�
         { kind: 'meta_video', ref: 'v1', status: 'approved', approved_by: 'boss@x.test', approved_at: '2026-10-18T00:00:00.000Z' },
       ] }])
       const res = await PATCH(
-        patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'v1', status: 'candidate' }] }),
+        patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'v1', status: 'candidate' }], expected_version: null }),
         params(),
       )
       const json = await res.json()

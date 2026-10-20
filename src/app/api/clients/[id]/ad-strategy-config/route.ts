@@ -83,6 +83,16 @@ export async function PATCH(
     return NextResponse.json({ error: 'expected_version must be a string or null' }, { status: 400 })
   }
 
+  // 带 creative_pool 却没带 expected_version：没有版本比较的整数组重写，并发下会互相覆盖，
+  // 而且界面拿不到版本时可能是在「内容读失败回落默认配置」的页面上操作——那样保存会把已批准素材删光。
+  // 所以直接拒绝，让用户刷新页面拿到版本再保存。只改上限/模式等（不带 creative_pool）的请求不受影响。
+  if (body.creative_pool !== undefined && body.expected_version === undefined) {
+    return NextResponse.json(
+      { error: 'expected_version_required', message: '页面版本信息缺失，请刷新页面后再保存素材。' },
+      { status: 428 },
+    )
+  }
+
   const update: Record<string, unknown> = { client_id: clientId, updated_at: new Date().toISOString() }
   const updatedAt = String(update.updated_at)
   // 🔴 读不出改之前的设置时，不拿默认值（observe）当「改之前」：那样把自动模式改回 observe
@@ -106,11 +116,6 @@ export async function PATCH(
         { status: 409 },
       )
     }
-  }
-  // 老客户端不带 expected_version 也照常保存（兼容），但要留痕：没有版本比较的整数组重写
-  // 在并发下会互相覆盖，日志里能看出是哪个客户在走老路径。
-  if (body.creative_pool !== undefined && body.expected_version === undefined) {
-    console.warn('[ad-strategy-config] creative_pool saved without expected_version', { clientId })
   }
   const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
   const before = loadedBefore.source === 'fallback' ? null : loadedBefore.config
