@@ -10,17 +10,19 @@ import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/con
 type Resp = { data: unknown; error: unknown }
 
 /** 每个 await 的查询链消费队列里下一个响应(按调用顺序)。 */
-function mockSupabase(queue: Resp[]): { db: SupabaseClient; inserts: unknown[] } {
+function mockSupabase(queue: Resp[]): { db: SupabaseClient; inserts: unknown[]; updates: unknown[] } {
   let i = 0
   const inserts: unknown[] = []
+  const updates: unknown[] = []
   const builder: Record<string, unknown> = {}
-  const passthrough = ['select', 'eq', 'in', 'order', 'limit', 'update', 'maybeSingle', 'single']
+  const passthrough = ['select', 'eq', 'in', 'order', 'limit', 'maybeSingle', 'single']
   for (const m of passthrough) builder[m] = () => builder
+  builder.update = (row: unknown) => { updates.push(row); return builder }
   builder.insert = (rows: unknown) => { inserts.push(rows); return builder }
   ;(builder as { then: unknown }).then = (resolve: (r: Resp) => unknown) =>
     resolve(queue[i++] ?? { data: null, error: null })
   const db = { from: () => builder } as unknown as SupabaseClient
-  return { db, inserts }
+  return { db, inserts, updates }
 }
 
 const IN_REVIEW_WO = {
@@ -94,9 +96,19 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
     expect((await approve(db, 'wo-x')).status).toBe(404)
   })
 
-  it('clientId 不匹配 → 403(跨客户越权)', async () => {
-    const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+  it('clientId 不匹配 → 403(跨客户越权),且没有写库', async () => {
+    const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
     expect((await approve(db, 'wo-1', 'me@x.com', 'other-client')).status).toBe(403)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
+  it('别家客户 + 状态不是 in_review → 403（先核客户再核状态，不泄露别家工单的状态）', async () => {
+    const { db, updates } = mockSupabase([{ data: { ...IN_REVIEW_WO, status: 'approved' }, error: null }])
+    const r = await approve(db, 'wo-1', 'me@x.com', 'other-client')
+    expect(r.status).toBe(403)
+    expect(String(r.error)).not.toContain('status=')
+    expect(updates).toEqual([])
   })
 
   it('update 0 行(被 sweeper 抢) → 409', async () => {
@@ -126,6 +138,15 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
 })
 
 describe('applyQualityReject — 打回重开', () => {
+  it('clientId 不匹配 → 403(跨客户越权),老单不动、不重开新单', async () => {
+    const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+    const r = await reject(db, 'wo-1', '画面太慢', 'me@x.com', 'other-client')
+    expect(r.ok).toBe(false)
+    expect(r.status).toBe(403)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
   it('老单 review_rejected + 重开新单(意见进新 brief)', async () => {
     const { db, inserts } = mockSupabase([
       { data: IN_REVIEW_WO, error: null },       // load
@@ -236,5 +257,14 @@ describe('applyBudgetUpdate — 只改预算不重生产', () => {
     const r = await applyBudgetUpdate(db, 'wo-1', 20, 'me@x.com')
     expect(r.ok).toBe(true)
     expect(r.data?.publish_budget_usd).toBe(20)
+  })
+
+  it('clientId 不匹配 → 403(跨客户越权),预算不动、没有写库', async () => {
+    const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+    const r = await applyBudgetUpdate(db, 'wo-1', 20, 'me@x.com', 'other-client')
+    expect(r.ok).toBe(false)
+    expect(r.status).toBe(403)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
   })
 })
