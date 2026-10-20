@@ -5,8 +5,9 @@
  * (`.opts` / `.fn` bridging is the same one the other function tests use.)
  */
 import { describe, expect, it, vi } from 'vitest'
-import { createDailyPlanAutoPublishFunction, DAILY_PLAN_AUTO_PUBLISH_CRON } from '../daily-plan-auto-publish'
+import { createDailyPlanAutoPublishFunction, DAILY_PLAN_AUTO_PUBLISH_CRON, DAILY_PLAN_AUTO_PUBLISH_FUNCTION_ID, DAILY_PLAN_AUTO_PUBLISH_JOB } from '../daily-plan-auto-publish'
 import { CLOUD_FN_PREFIX } from '../../client'
+import { CRON_REGISTRY } from '@/lib/cron/registry'
 import type { AutoPublishWorkerDeps, SweepSummary } from '@/lib/campaign/daily-plan-auto-publish-worker'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
@@ -51,6 +52,12 @@ describe('daily-plan-auto-publish function', () => {
     expect(DAILY_PLAN_AUTO_PUBLISH_CRON).toBe('TZ=Pacific/Auckland 20 * * * *')
     expect(opts.retries).toBe(0)
     expect(opts.concurrency?.limit).toBe(1)
+  })
+
+  it('🔴 cron 登记表里有它：由 Inngest 调度、写运行记录，周期跟上面的常量是同一个（去掉 TZ 前缀）——没登记 = 它哪天安静地不跑时没人喊', () => {
+    const entry = CRON_REGISTRY.find(e => e.jobName === DAILY_PLAN_AUTO_PUBLISH_JOB)
+    expect(entry).toMatchObject({ scheduler: 'inngest', logsRuns: true, service: `inngest:${DAILY_PLAN_AUTO_PUBLISH_FUNCTION_ID}` })
+    expect(entry?.schedule).toBe(DAILY_PLAN_AUTO_PUBLISH_CRON.replace(/^TZ=\S+\s+/, ''))
   })
 
   it('runs the sweep inside steps and closes the run log with the summary', async () => {

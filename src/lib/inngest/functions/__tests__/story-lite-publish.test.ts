@@ -4,8 +4,9 @@
  * retries and the run log are on trial.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { createStoryLitePublishFunction, STORY_LITE_PUBLISH_CRON } from '../story-lite-publish'
+import { createStoryLitePublishFunction, STORY_LITE_PUBLISH_CRON, STORY_LITE_PUBLISH_FUNCTION_ID, STORY_LITE_PUBLISH_JOB } from '../story-lite-publish'
 import { CLOUD_FN_PREFIX } from '../../client'
+import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { InMemoryLiteStore } from '@/lib/social/story-lite/in-memory-store'
 import { DEFAULT_SWEEP_CONFIG, type SenderDeps, type SweepSummary } from '@/lib/social/story-lite/sender'
 
@@ -51,6 +52,12 @@ describe('story-lite-publish function', () => {
     expect(STORY_LITE_PUBLISH_CRON).toBe('TZ=Pacific/Auckland */10 * * * *')
     expect(opts.retries).toBe(0)
     expect(opts.concurrency?.limit).toBe(1)
+  })
+
+  it('🔴 cron 登记表里有它：由 Inngest 调度、写运行记录，周期跟上面的常量是同一个（去掉 TZ 前缀）——没登记 = 它哪天安静地不跑时没人喊', () => {
+    const entry = CRON_REGISTRY.find(e => e.jobName === STORY_LITE_PUBLISH_JOB)
+    expect(entry).toMatchObject({ scheduler: 'inngest', logsRuns: true, service: `inngest:${STORY_LITE_PUBLISH_FUNCTION_ID}` })
+    expect(entry?.schedule).toBe(STORY_LITE_PUBLISH_CRON.replace(/^TZ=\S+\s+/, ''))
   })
 
   it('runs the sweep inside steps and closes the run log with the summary', async () => {

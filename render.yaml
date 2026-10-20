@@ -147,7 +147,7 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Prospecting auto-sweep — every 10 minutes (Phase 35)
+  # Prospecting auto-sweep — every hour, on the hour (Phase 35; reduced to hourly on 2026-09-16, commit 2a17a85f2)
   # Advances the outbound conveyor one bounded step per fire:
   #   audit -> analyze -> draft -> discover next industry x NZ-city seed.
   # No-ops unless PROSPECTING_SWEEP_ENABLED=true on the web service (this cron only
@@ -934,9 +934,9 @@ services:
       - key: CRON_SECRET
         sync: false
 
-  # Social comment auto-reply — every 30 min for enabled clients.
+  # Social comment auto-reply — every hour, on the hour, for enabled clients (reduced from every 30 min on 2026-09-16, commit 2a17a85f2).
   # Pulls recent FB Page comments → classify → guardrailed auto reply (public +
-  # optional DM) / hide spam. 30-min cadence keeps DM private_replies inside
+  # optional DM) / hide spam. Hourly cadence still keeps DM private_replies inside
   # Meta's 7-day window. Kill switch: SOCIAL_COMMENT_AUTOREPLY_KILL=1
   # Reference: ROADMAP.md P20.D (social pillar / DAPE Execution)
   - type: cron
@@ -1118,7 +1118,7 @@ services:
   #
   # 只同步 clients.facebook_page_id 有值的客户(跟私信同步同一个开关),
   # 所以新增客户不需要动这里。
-  # 跑在每小时第 25 分钟:避开整点那一堆日更 cron,也避开第 10 分钟的私信同步
+  # 跑在每 2 小时的第 25 分钟（2026-09-16 起由每小时降为每 2 小时，commit 2a17a85f2）:避开整点那一堆日更 cron,也避开第 10 分钟的私信同步
   # ——两条都会调 Meta Graph,岔开跑不容易撞上 Meta 的限流。
   - type: cron
     name: meta-leads-hourly
@@ -1162,7 +1162,7 @@ services:
     envVars:
       - fromGroup: me-shared-cron-secret
 
-  # 广告设置快照（ads IMPACT 阶段 1，设计 §2.1 / §14 M1）—— 每 3 小时只读抓一次 Meta
+  # 广告设置快照（ads IMPACT 阶段 1，设计 §2.1 / §14 M1）—— 每 6 小时只读抓一次 Meta（2026-09-16 起由每 3 小时降为每 6 小时，commit 2a17a85f2）
   # 账户/系列/广告组/广告/受众设置，只在设置变化时记一行、另每天一次。
   # 只读 Meta，不花钱（Graph 读接口免费，只占 API 配额）。共用账户只记账户级。
   # 依赖 migration 20260914000001（ad_entity_snapshots 表）先 apply；表不在时每轮写入失败、
