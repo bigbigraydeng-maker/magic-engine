@@ -202,7 +202,7 @@ export function PromoPlanClient() {
                     <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。先在下面「想自己改？展开」里搭出阶段，广告那一项可以让系统起草预算、受众和素材。</p>
                   </div>
                 )}
-            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} />}
+            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} adsRunning={adsRunningOf(liveAdsVisible ? liveAds : null)} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
@@ -307,4 +307,11 @@ function LiveAdsNotice({ fact, message, clientId }: { fact: LiveAdsFact | null; 
   }
   if (!fact || !fact.ok) return <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
   return null
+}
+
+/** 排期表头那句「目前广告没有投」只在确认没有在跑的广告时才写：读不到 / 非内部账号 / 快照太旧 → unknown（不写）。 */
+function adsRunningOf(fact: LiveAdsFact | null): 'none' | 'running' | 'unknown' {
+  if (!fact || !fact.ok) return 'unknown'
+  if (fact.live_adsets > 0) return 'running'
+  return fact.snapshot_age_days !== null && fact.snapshot_age_days < 2 ? 'none' : 'unknown'
 }
