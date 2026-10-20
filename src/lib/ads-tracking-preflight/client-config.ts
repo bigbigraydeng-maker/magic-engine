@@ -17,7 +17,7 @@ import type { TrackingClientConfig } from './types'
 const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 
 const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
-  // CTS Tours（新西兰）· 2026-10-22 起投的中国团广告
+  // CTS Tours（新西兰）· 中国团广告（2026-10-20 15:25 新西兰时间已发布并启用）
   [CTS_CLIENT_ID]: {
     ad_account_id: 'act_2202695063810470',
     site_url: 'https://www.ctstours.co.nz',
@@ -34,27 +34,21 @@ const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
     // 官网的统一询盘事件叫 enquiry_thank_you（见 ga4/landing-class-config.ts），表单提交时另有 generate_lead
     ga4_lead_events: ['generate_lead', 'enquiry_thank_you'],
     web_form_to_crm: true,
-    // 计划日预算 NZ$101；官方日上限 NZ$110（单位：分）
-    planned_daily_budget_cents: 10100,
-    official_daily_cap_cents: 11000,
+    // 🔴 预算数字不再写死（2026-10-21）：这里曾写「计划日预算 NZ$101 / 官方日上限 NZ$110」（10-18 那版），
+    // 而库里官方账户上限早已是 NZ$150、实际在投合计 NZ$134——预算门拿这两个旧常量互相比，
+    // 「预算在上限内」成了假绿。写死的数字会天天过期（计划重排期间尤其），所以留 null：
+    // 预算门如实判黄「没配置计划日预算或官方日上限，没法核对」，不再假绿。
+    // 根本修复 = 这道门读库读线上（上限读 client_meta_ad_accounts / ad_strategy_configs，在投日预算现读 Meta），
+    // 上线之前不要在这里再填数字。
+    planned_daily_budget_cents: null,
+    official_daily_cap_cents: null,
     currency: 'NZD',
-    // 开投日还没定（等 122 / 119 做完再发布），所以盯盘窗口配得很长：从 10-20 守到 11-30（共 42 天），别在真正开投前过期。
-    // 窗口只是「守着」：T+1h / T+24h 和 96 小时的盯盘，都从「第一次见到本次系列有花费」那一刻起算，
-    // 不看这里的日期；系列名字里的 20261022 只是名字，不代表开投日。
-    // 开投日定下来后，在下面加一行 expected_launch_on: 'YYYY-MM-DD'（预计开投日）：
-    // 过了那天 24 小时、盯盘还是找不到本次系列，才会出开发待办；没设就只在盯盘回执里记灰，不吵。
-    // 花费只按本次投放的广告系列算——官方账户里别的系列早就在花钱，按整个账户算会把「没开投」读成「已开投」。
-    // 认系列有两条（任意一条对上就算）：编号（A 系列·官网点击），或名字里同时含「官网点击」和「20261022」。
-    // 第二条是保险：这个系列现在还是未发布的草稿，发布之后编号会不会变没法事先验证，名字不会变。
-    // 名字里不含「官网点击」的两个表单系列（拉新 / 收割）不算——它们的留资走 Meta 表单，不走官网像素。
-    // 下一次开投时，窗口、系列编号和名字关键词也要一起换。
-    launch_watch: {
-      from: '2026-10-20',
-      days: 42,
-      timezone: 'Pacific/Auckland',
-      campaign_ids: ['52558131445673'],
-      campaign_name_contains: ['官网点击', '20261022'],
-    },
+    // 开投后盯盘（launch_watch）：本期不适用（2026-10-21）。
+    // 上一期「官网点击」系列（编号 52558131445673）于 10-20 15:25（新西兰）开投，当晚 22:24 起按 PM「全停并重排」暂停；
+    // 本期新系列的目标是播放量 / WhatsApp 对话（系列 52558359035473 / 52558367358873），
+    // 现有的开投后读回判的是点击 / 落地页浏览 / 留资，对它们会天天误报，要按目标另设计「该看什么数」后再配。
+    // 留着旧系列的配置只会让 T+24h 读回去读一个已暂停的系列、出没意义的待办，所以整段拿掉；
+    // 下一次开投时再配：窗口（from / days）、系列编号和名字关键词、预计开投日（expected_launch_on）。
   },
 }
 

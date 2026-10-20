@@ -547,6 +547,40 @@ describe('tracking.lead_reaches_crm · 只认广告落地页上提交的表单�
     expect(gate(judge(classified({ latest_ad_landing_form_at: hoursAgo(48) })), KEY).status).toBe('green')
   })
 
+  // 第五轮（74 号）：开投后，落地页上的内部测试线索 48 小时后过期变黄——这时多半只是还没有新的真实线索，不能写成故障
+  it('广告落地页的线索超过 48 小时 → 黄，说成「多半在等真实线索」而不是故障；怎么办先教怎么分辨，再给测试步骤；GA4 事件名取自客户配置', () => {
+    const g = gate(judge(classified({ latest_ad_landing_form_at: hoursAgo(60) })), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('等真实线索')
+    expect(g.reason).toContain('60 小时前')
+    expect(g.reason).not.toContain('没法确认')
+    expect(g.how).toContain('不一定是故障')
+    expect(g.how).toContain('generate_lead')
+    expect(g.how).toContain('enquiry_thank_you')
+    expect(g.how).toContain('非本公司邮箱')
+    expect(preconditionsMet(judge(classified({ latest_ad_landing_form_at: hoursAgo(60) })))).toBe(true)
+    // 事件名不写死：换一套配置，文案跟着变
+    const other = gate(judge(i => { classified({ latest_ad_landing_form_at: hoursAgo(60) })(i); i.config.ga4_lead_events = ['purchase_x'] }), KEY)
+    expect(other.how).toContain('purchase_x')
+    expect(other.how).not.toContain('enquiry_thank_you')
+  })
+
+  it('读不出时间 / 时间在未来是数据问题，仍按原来的说法（没法确认），不说成「等真实线索」', () => {
+    for (const latest of [null, 'garbage', new Date(NOW.getTime() + 6 * 60_000).toISOString()]) {
+      const g = gate(judge(classified({ latest_ad_landing_form_at: latest })), KEY)
+      expect(g.status).toBe('yellow')
+      expect(g.reason).toContain('没法确认')
+      expect(g.reason).not.toContain('等真实线索')
+    }
+  })
+
+  it('没按落地页分类的老路径（配置里没落地页）过期仍是原来的说法，不受影响', () => {
+    const g = gate(judge(i => { i.crm.latest_web_form_at = hoursAgo(60) }), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('没法确认')
+    expect(g.reason).not.toContain('等真实线索')
+  })
+
   it('广告落地页的线索读不出时间 / 时间在未来 → 黄，不是绿；晚 5 分钟以内的时钟误差仍算正常', () => {
     expect(gate(judge(classified({ latest_ad_landing_form_at: null })), KEY).status).toBe('yellow')
     expect(gate(judge(classified({ latest_ad_landing_form_at: 'garbage' })), KEY).status).toBe('yellow')

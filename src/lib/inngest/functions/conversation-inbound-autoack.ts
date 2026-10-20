@@ -73,6 +73,7 @@ import {
 } from '@/lib/messenger-agent/classify'
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
 import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from '@/lib/messenger/autoack-identity'
+import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
 
 export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent'
 
@@ -93,10 +94,14 @@ export { AUTOACK_SENT_BY_EMAIL }
  */
 export { AUTOACK_TEMPLATE }
 
+/** 同一会话最多每 6 小时自动安抚一次；6 小时内已有任何成功出站（含人工回复）则不发。 */
+export const AUTOACK_COOLDOWN_HOURS = 6
+
 export type AutoAckOutcome =
   | 'sent'
   | 'skipped_opted_out'
   | 'skipped_channel_disabled'
+  | 'skipped_recently_replied'
   | 'skipped_post_sale'
   | 'skipped_invalid_payload'
   | 'send_failed'
@@ -205,6 +210,7 @@ type ChannelSendFn = (input: {
 export interface ConversationInboundAutoAckDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
+  hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
   classify: (conversationId: string, policy: PostSaleClassificationPolicy) => Promise<ConversationClass>
   loadIndustry: (clientId: string) => Promise<string | null>
   send: Record<MessengerAgentChannel, ChannelSendFn>
@@ -219,16 +225,8 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
       retries: 1,
       // v3 补丁#2：Meta 的 webhook 是至少一次投递，客人连发几条消息也会拆成
       // 几个独立事件——30 秒内合并成一次安抚，不是每条消息各回一遍。
-      //
-      // 🔴 已知、刻意的范围边界（Codex 复审 2026-09-15 提问，非 blocker）：
-      // 这个 30 秒 debounce 只合并"同一波连发"，不是"整段对话只回一次"——
-      // 客户隔几分钟又发一条（哪怕还在同一个 lead_intake 对话里）会再收到
-      // 一遍这句安抚。issue #1584 原文只要求"客户消息进来先发一条"，没有要求
-      // "整段对话生命周期只发一次"；对 WhatsApp 而言重复发反而有用（每次都
-      // 会重新打开/续上 72 小时免费窗口）。做成"整段对话只发一次"需要新增一
-      // 个持久化状态（比如查 `conversation_outbound_log` 有没有已经发过这条
-      // 模板，或者新增一列），是比这次范围更大的改动，留作后续单独评估，不
-      // 在这次范围内顺手做。
+      // 这只是"合并一波连发"；跨波次的重复由下面的 6 小时限频
+      // （`check-recent-outbound`）兜住。
       debounce: { period: '30s', key: 'event.data.conversation_id' },
     },
     { event: CONVERSATION_MESSAGE_RECEIVED_EVENT },
@@ -282,6 +280,17 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
       const enabled = await step.run('check-channel-enabled', () => deps.isEnabled(client_id, channel))
       if (!enabled) {
         return { ...base, outcome: 'skipped_channel_disabled', detail: null }
+      }
+
+      // Step 0.6：6 小时限频——同一会话 6 小时内已有任何成功出站（自动安抚 /
+      // 员工回复 / 人工批准的 AI 草稿）就不再发。读失败必须抛出去让 Inngest
+      // 重试，绝不能把"读不出来"当成"最近没回过"而多发一条。
+      const recentlyReplied = await step.run('check-recent-outbound', () => {
+        const sinceIso = new Date(Date.now() - AUTOACK_COOLDOWN_HOURS * 3_600_000).toISOString()
+        return deps.hasRecentOutbound(conversation_id, sinceIso)
+      })
+      if (recentlyReplied) {
+        return { ...base, outcome: 'skipped_recently_replied', detail: `within_${AUTOACK_COOLDOWN_HOURS}h` }
       }
 
       // Step 0.8：售前/售后分类——判据按行业注入，本函数不写死任何客户/行业。
@@ -365,6 +374,7 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
 export const conversationInboundAutoAck = createConversationInboundAutoAckFunction({
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
+  hasRecentOutbound,
   classify: classifyConversation,
   loadIndustry: loadClientIndustry,
   send: CHANNEL_SEND,
