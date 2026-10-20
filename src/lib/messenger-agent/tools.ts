@@ -42,6 +42,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getClientKnowledge, type KnowledgeEntry } from '@/lib/knowledge'
+import { getClientKnowledgeWithCatalog } from '@/lib/messenger-agent/catalog-knowledge'
 
 // ─── ctx + 越权轴守卫(照抄 agent-tools/readonly/types.ts 的 pattern)──────────
 
@@ -166,7 +167,7 @@ export const queryCustomerFacingFacts: MessengerAgentToolModule = {
     const keywords = optStringArray(args.intent_keywords)
 
     try {
-      const result = await getClientKnowledge(ctx.clientId, { purpose: 'customer_reply' })
+      const result = await getClientKnowledgeWithCatalog(ctx.clientId, { purpose: 'customer_reply' })
       const facts = result.entries
         .filter((e) => CUSTOMER_FACING_SENSITIVITIES.has(e.sensitivity))
         .filter((e) => keywords.length === 0 || factMatchesAnyKeyword(e, keywords))
