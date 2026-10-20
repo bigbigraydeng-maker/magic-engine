@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   POST_AUTO_CHECK_KEYS,
   POST_HUMAN_CHECK_KEYS,
@@ -139,6 +139,22 @@ describe('listened-to-the-BGM approval item (2026-10-16)', () => {
       const ref = { checklist_human: items(REEL_HUMAN_CHECK_KEYS_V2), approved_at: AFTER }
       expect(humanKeysForReviewRef(ref)).toBe(REEL_HUMAN_CHECK_KEYS_V3)
       expect(validateContentChecklist(ref.checklist_human, humanKeysForReviewRef(ref), 'HUMAN').ok).toBe(false)
+    })
+
+    it('once the cutover has passed, a missing or unreadable approval time cannot prove an old receipt (fail-closed)', () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(new Date(Date.parse(CHECKLIST_V3_REQUIRED_FROM) + 60_000))
+        for (const approved_at of [undefined, null, 'garbage', 12345]) {
+          const ref = { checklist_human: items(REEL_HUMAN_CHECK_KEYS_V2), approved_at }
+          expect(humanKeysForReviewRef(ref)).toBe(REEL_HUMAN_CHECK_KEYS_V3)
+          expect(validateContentChecklist(ref.checklist_human, humanKeysForReviewRef(ref), 'HUMAN').ok).toBe(false)
+        }
+        vi.setSystemTime(new Date(Date.parse(CHECKLIST_V3_REQUIRED_FROM) - 60_000))
+        expect(humanKeysForReviewRef({ checklist_human: items(REEL_HUMAN_CHECK_KEYS_V2) })).toBe(REEL_HUMAN_CHECK_KEYS_V2)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('a checklist that already carries the new item counts as V3 even without a version', () => {

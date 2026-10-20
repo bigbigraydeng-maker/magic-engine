@@ -222,10 +222,13 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
         const j = await res.json().catch(() => ({}))
         throw new Error(j.error ?? `操作失败 (${res.status})`)
       }
+      const resJson = (await res.json().catch(() => ({}))) as { reopened_work_order_id?: string | null }
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
       setRejecting(null)
-      if (okNotice) setNotice(okNotice)
+      // 模板出片（remotion）的单被打回后系统不会自动重做：提醒要改下单参数后另提新单
+      const noRedo = payload.action === 'reject_quality' && resJson.reopened_work_order_id === null
+      if (okNotice || noRedo) setNotice([okNotice, noRedo ? '模板出片的单不会自动重做：请改下单参数（加内容，或明确标成素材）后另提新单。' : ''].filter(Boolean).join(' '))
       onReviewed?.() // 通知父页刷新工单,待审数才会变,自动切客户才会触发
       if (okNotice) void load() // 打回后本区的「已打回」列表要立刻出现
     } catch (e) {

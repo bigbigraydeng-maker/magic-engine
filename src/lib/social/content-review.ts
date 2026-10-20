@@ -98,8 +98,12 @@ export function humanKeysForReviewRef(reviewRef: unknown): readonly ContentCheck
   const checklist = ref['checklist_human']
   if (ref['checklist_version'] !== undefined && ref['checklist_version'] !== null) return REEL_HUMAN_CHECK_KEYS_V3
   if (hasKey(checklist, 'standalone_understandable')) return REEL_HUMAN_CHECK_KEYS_V3
+  const cutover = Date.parse(CHECKLIST_V3_REQUIRED_FROM)
   const approvedAt = typeof ref['approved_at'] === 'string' ? Date.parse(ref['approved_at']) : NaN
-  if (Number.isFinite(approvedAt) && approvedAt >= Date.parse(CHECKLIST_V3_REQUIRED_FROM)) return REEL_HUMAN_CHECK_KEYS_V3
+  if (Number.isFinite(approvedAt) && approvedAt >= cutover) return REEL_HUMAN_CHECK_KEYS_V3
+  // A missing / unreadable approval time cannot prove the receipt predates the cutover: once the cutover has passed
+  // such a receipt must be V3 (fail-closed), before it the historical inference below still applies.
+  if (!Number.isFinite(approvedAt) && Date.now() >= cutover) return REEL_HUMAN_CHECK_KEYS_V3
   return hasKey(checklist, 'bgm_listened_no_vocals') ? REEL_HUMAN_CHECK_KEYS_V2 : REEL_HUMAN_CHECK_KEYS
 }
 
