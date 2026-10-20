@@ -26,6 +26,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
+import { NewMessagesBanner } from './NewMessagesBanner'
 
 const PROBE_TTL_MS = 5 * 60 * 1000
 const probeCache = new Map<string, { ok: boolean; at: number }>()
@@ -93,6 +94,9 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
   }, [clientId])
 
   return (
+    <>
+      {/* 新消息提醒：页面不会自己刷新，隔 30 秒问一次有没有客人发来新消息（读失败什么都不做）。 */}
+      <NewMessagesBanner clientId={clientId} />
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
         <Link href={`${base}/all`} className={cls(active === 'all')}>全部客人</Link>
@@ -125,5 +129,6 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
         )}
       </div>
     </div>
+    </>
   )
 }
