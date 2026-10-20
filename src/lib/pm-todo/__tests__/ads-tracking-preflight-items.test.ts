@@ -499,3 +499,93 @@ describe('盯盘一直找不到本次投放的系列（series_not_found）：只
     expect(await run([okPre()], null, garbage)).toEqual([])
   })
 })
+
+describe('按目标盯盘的提醒：盯盘函数最近一次回执里的提醒，原样翻成开发待办', () => {
+  const CAMPAIGN_ID = '111111111111'
+  const config = () => ({
+    ad_account_id: 'act_1111111111',
+    objective_watch: { series: [{ campaign_id: CAMPAIGN_ID, kind: 'awareness', label: '播放量系列' }] },
+  })
+  const okPre = (): Row => okRow(runReceipt([clientReceipt('c1', [gate('tracking.pixel_alive', 'green')])]), '2026-10-19T18:00:00Z')
+  const alert = (tag: string, level: 'yellow' | 'red', code = 'zero_spend') => ({
+    code, level, what: `什么-${tag}`, how: `怎么办-${tag}`, href: `https://ads.example.test/${tag}`,
+  })
+  const iso = (minutesAgo: number): string => new Date(NOW.getTime() - minutesAgo * 60_000).toISOString()
+  const objTick = (minutesAgo: number, alerts: unknown[], status: string | null = 'completed', clientId = 'c1'): Row => ({
+    status, started_at: iso(minutesAgo), error_message: null,
+    summary: {
+      checked_at: iso(minutesAgo), no_publish: true,
+      clients: [{
+        client_id: clientId, active: false, spend_seen: null, series_found: null, sent: [], error: null,
+        objective_watch: { as_of: iso(minutesAgo), series: [{ campaign_id: CAMPAIGN_ID, label: '播放量系列', alerts }] },
+      }],
+    },
+  })
+
+  it('最新一次盯盘有提醒 → 每条一个待办：什么 / 怎么办 / 链接原样，什么前面标灯号；kind 是开发待办那一种', async () => {
+    clientConfig.get.mockReturnValue(config())
+    const out = await run([okPre()], null, [objTick(30, [alert('甲', 'red'), alert('乙', 'yellow', 'frequency')])])
+    expect(out).toHaveLength(2)
+    expect(out[0]).toMatchObject({
+      kind: 'ads_tracking_preflight_fix', client_id: 'c1', client_name: '客户甲',
+      what: '🔴 什么-甲', how: '怎么办-甲', href: 'https://ads.example.test/甲',
+    })
+    expect(out[1]).toMatchObject({ what: '🟡 什么-乙', how: '怎么办-乙', href: 'https://ads.example.test/乙' })
+    expect(LANE_OF_KIND.ads_tracking_preflight_fix).toBe('dev')
+    expect(NEVER_DROP_KINDS.has('ads_tracking_preflight_fix')).toBe(true)
+  })
+
+  it('只看最新一次：更早那次有提醒、最新这次没有 → 不出（问题已经消了）', async () => {
+    clientConfig.get.mockReturnValue(config())
+    expect(await run([okPre()], null, [objTick(20, []), objTick(80, [alert('甲', 'red')])])).toEqual([])
+  })
+
+  it('最新一次盯盘已经超过 3 小时（盯盘函数自己没在跑）→ 不出，免得把「函数没跑」说成「系列有事」', async () => {
+    clientConfig.get.mockReturnValue(config())
+    expect(await run([okPre()], null, [objTick(181, [alert('甲', 'red')])])).toEqual([])
+    expect(await run([okPre()], null, [objTick(179, [alert('甲', 'red')])])).toHaveLength(1)
+  })
+
+  it('还在跑的那一行不算；别的客户的提醒不算', async () => {
+    clientConfig.get.mockReturnValue(config())
+    expect(await run([okPre()], null, [objTick(5, [alert('甲', 'red')], 'running')])).toEqual([])
+    expect(await run([okPre()], null, [objTick(30, [alert('甲', 'red')], 'completed', 'other')])).toEqual([])
+  })
+
+  it('这个客户没配按目标盯盘 → 盯盘回执里即使带着提醒也不出', async () => {
+    clientConfig.get.mockReturnValue({ ad_account_id: 'act_1111111111' })
+    expect(await run([okPre()], null, [objTick(30, [alert('甲', 'red')])])).toEqual([])
+  })
+
+  it('盯盘记录读不出来（格式不对）→ 不出这条，也不抛错', async () => {
+    clientConfig.get.mockReturnValue(config())
+    const garbage: Row[] = [{ status: 'completed', started_at: iso(10), error_message: null, summary: { nonsense: true } }]
+    expect(await run([okPre()], null, garbage)).toEqual([])
+  })
+
+  it('读盯盘记录时库报错 → 不出这条，也不抛错；开投前体检那边不受影响', async () => {
+    clientConfig.get.mockReturnValue(config())
+    const preRows = [okPre()]
+    const chain = (): Record<string, unknown> => {
+      let job = ''
+      const c: Record<string, unknown> = {}
+      c.select = () => c
+      c.eq = (column: string, value: unknown) => { if (column === 'job_name') job = String(value); return c }
+      c.gte = () => c
+      c.order = () => c
+      c.limit = async () => (job === WATCH_JOB ? { data: null, error: { message: '库炸了' } } : { data: preRows, error: null })
+      return c
+    }
+    const failing = { from: () => chain() } as unknown as SupabaseClient
+    const items: ManualItem[] = []
+    await expect(pushAdsTrackingPreflightItems(failing, items, nameOf, NOW)).resolves.toBeUndefined()
+    expect(items).toEqual([])
+  })
+
+  it('开投前体检一轮都没跑过（两周内没有运行记录）时，按目标盯盘的提醒照样出，不被提前返回漏掉', async () => {
+    clientConfig.get.mockReturnValue(config())
+    const out = await run([], null, [objTick(30, [alert('甲', 'red')])])
+    expect(out.some(i => i.what === '🔴 什么-甲')).toBe(true)
+    expect(out.some(i => i.kind === 'ads_tracking_preflight_broken')).toBe(true)
+  })
+})

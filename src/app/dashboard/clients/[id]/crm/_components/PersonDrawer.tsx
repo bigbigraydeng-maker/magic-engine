@@ -567,9 +567,9 @@ export function PersonDrawer({
             viewerEmail={viewerEmail}
             phone={row.phoneUnusable ? null : row.phone}
             email={row.email}
-            onSent={() => {
+            onSent={(kind) => {
               setTimelineKey((k) => k + 1)
-              onSaved('✓ WhatsApp 已发出', false)
+              onSaved(kind === 'approved' ? '✓ 已批准，系统正在发送' : '✓ WhatsApp 已发出', false)
             }}
           />
 

@@ -51,6 +51,8 @@ interface Props {
   window: ReplyWindow | null
   viewerEmail: string | null
   onSent: () => void
+  /** 没有"原稿"时输入框下面那句提示；调用方已经有草稿/被拦原因时用它换掉默认的"还没有 AI 草稿"。 */
+  noDraftHint?: string
   /** Which line this goes out on. Defaults to messenger — the only channel this box originally spoke. */
   channel?: ReplyChannel
 }
@@ -121,6 +123,7 @@ export function ReplyBox({
   window: replyWindow,
   viewerEmail,
   onSent,
+  noDraftHint,
   channel = 'messenger',
 }: Props) {
   const original = (draft ?? '').trim()
@@ -193,7 +196,7 @@ export function ReplyBox({
           ? usedAiDraft
             ? '这是 AI 原话。你可以直接改，改完再发。'
             : '你已经改过 AI 的稿子。'
-          : '还没有 AI 草稿 —— 手写一条。'}
+          : (noDraftHint ?? '还没有 AI 草稿 —— 手写一条。')}
         {viewerEmail && <> 发出去会记在 {viewerEmail} 名下。</>}
       </p>
 

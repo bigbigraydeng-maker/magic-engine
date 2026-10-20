@@ -139,12 +139,12 @@ function unread(now: Date, message: string): { facts: PostLaunchFacts; errors: s
  * 响应里有 data 数组吗？Meta 正常返回一定有（没有数据时是空数组）。
  * 🔴 没有 = 返回了 200 但我们读不懂，不能当成「账户里什么都没有」——那会把读不懂说成「还没花钱 / 系列找不到」。
  */
-function hasDataArray(body: unknown): body is { data: unknown[] } {
+export function hasDataArray(body: unknown): body is { data: unknown[] } {
   return typeof body === 'object' && body !== null && Array.isArray((body as Record<string, unknown>).data)
 }
 
 /** 响应里还有下一页吗（paging.next 是字符串）？有 = 我们没读全。 */
-function hasNextPage(body: unknown): boolean {
+export function hasNextPage(body: unknown): boolean {
   const paging = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).paging : undefined
   if (typeof paging !== 'object' || paging === null) return false
   return typeof (paging as Record<string, unknown>).next === 'string'
