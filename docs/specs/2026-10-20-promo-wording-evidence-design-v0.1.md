@@ -21,7 +21,7 @@
 |---|---|---|---|
 | `content.wording_permission` 对外措辞已获客户同意 | 人工核实 | 一句话「把稀缺性/截止日发给客户确认」，看不到措辞 | 上面的文案块 + 读取时间 |
 | `social.cadence_scheduled` 社媒节奏已排 | 工具（每日计划覆盖天数） | 「已排到往后 N 天」 | 可以加：覆盖到哪一天、缺哪几天（读每日计划，已有数据） |
-| 开投前追踪检查里 `HARD_GATE=false` 的几项（读 `ads-tracking-preflight/types.ts`） | 回执 | 每项一句原因 | 回执里已有 `reason/how/as_of`；缺的是把「检查了什么」展开成可点开的明细（后续，不在本稿） |
+| 开投前追踪检查里 hard:false 的五项：`tracking.lead_event_quality`、`tracking.ga4_events`、`tracking.capi_ready`、`post.t1h`、`post.t24h` | 回执 | 每项一句原因 | 回执里已有 `reason/how/as_of`；缺的是把「检查了什么」展开成可点开的明细（后续，不在本稿） |
 （硬闸 `landing.item_live` 同样是「让人核实却看不到落地页内容」，同一类问题；本稿不动，留给后续同构方案：展示落地页标题+价格+日期的读取快照。）
 
 ## 不做
