@@ -62,7 +62,7 @@ describe('客户配置（L4）', () => {
     }
   })
 
-  it('CTS 这次开投的配置：官方账户、官网、两个落地页、预算数字', () => {
+  it('CTS 的配置：官方账户、官网、两个落地页；预算数字不写死；盯盘本期不适用', () => {
     const cfg = getTrackingClientConfig('c0000000-0000-0000-0000-000000000000')
     expect(cfg).not.toBeNull()
     expect(cfg?.ad_account_id).toBe('act_2202695063810470')
@@ -72,17 +72,57 @@ describe('客户配置（L4）', () => {
       'nc_b3_web_20261022',
     ])
     expect(cfg?.landing_targets.every(t => new URL(t.url).pathname === '/tours/china/signature/landscapes')).toBe(true)
-    expect(cfg?.planned_daily_budget_cents).toBe(10100)
-    expect(cfg?.official_daily_cap_cents).toBe(11000)
+    // 🔴 预算数字不许写死（2026-10-21 事故：写死的 NZ$101 / NZ$110 与库里 NZ$150 的上限、NZ$134 的在投合计都不符，
+    // 预算门拿两个旧常量互相比，「预算在上限内」成了假绿）。读库读线上的根本修复上线之前必须保持 null，
+    // 门会如实判黄「没法核对」；谁把数字写回来，这里先红。
+    expect(cfg?.planned_daily_budget_cents, 'CTS 计划日预算不许写死数字').toBeNull()
+    expect(cfg?.official_daily_cap_cents, 'CTS 官方日上限不许写死数字').toBeNull()
     expect(cfg?.currency).toBe('NZD')
-    // 开投日未定（等 122 / 119 做完再发布）：窗口从 10-20 配到 11-30，没设预计开投日；T+1h / T+24h 和 96 小时从「第一次见到花费」起算
-    expect(cfg?.launch_watch).toEqual({
-      from: '2026-10-20',
-      days: 42,
-      timezone: 'Pacific/Auckland',
-      campaign_ids: ['52558131445673'],
-      campaign_name_contains: ['官网点击', '20261022'],
-    })
+    // 开投后盯盘本期不适用（上一期系列已暂停；本期目标是播放量 / WhatsApp，现有读回不适用）。
+    // 没配 = 盯盘函数、今日待办都不盯，不会去读一个已暂停的系列。
+    expect(cfg?.launch_watch).toBeUndefined()
     expect(cfg?.known_issues).toBeUndefined()
+  })
+
+  it('按目标盯盘（如果配了）：系列编号是纯数字且不重复、类型只能是播放量 / WhatsApp、名字非空、阈值合理', () => {
+    for (const id of listTrackingClientIds()) {
+      const watch = getTrackingClientConfig(id)?.objective_watch
+      if (!watch) continue
+      expect(watch.series.length, `${id} 按目标盯盘至少要有一个系列`).toBeGreaterThan(0)
+      const ids = watch.series.map(s => s.campaign_id)
+      for (const campaignId of ids) expect(campaignId).toMatch(/^\d{6,20}$/)
+      expect(new Set(ids).size).toBe(ids.length)
+      for (const s of watch.series) {
+        expect(['awareness', 'whatsapp']).toContain(s.kind)
+        expect(s.label.trim().length).toBeGreaterThan(0)
+        if (s.frequency_yellow !== undefined || s.frequency_red !== undefined) {
+          expect(s.frequency_yellow, `${s.label} 频次黄线`).toBeGreaterThan(0)
+          expect(s.frequency_red, `${s.label} 频次红线`).toBeGreaterThan(s.frequency_yellow ?? Number.POSITIVE_INFINITY)
+        }
+      }
+      if (watch.zero_spend_yellow_hours !== undefined || watch.zero_spend_red_hours !== undefined) {
+        expect(watch.zero_spend_yellow_hours).toBeGreaterThan(0)
+        expect(watch.zero_spend_red_hours).toBeGreaterThan(watch.zero_spend_yellow_hours ?? Number.POSITIVE_INFINITY)
+      }
+    }
+  })
+
+  it('CTS 按目标盯盘：本期的播放量系列和 WhatsApp 系列在盯；上一期已暂停的「官网点击」系列不在', () => {
+    const watch = getTrackingClientConfig('c0000000-0000-0000-0000-000000000000')?.objective_watch
+    expect(watch?.series.map(s => [s.campaign_id, s.kind, s.label])).toEqual([
+      ['52558359035473', 'awareness', '播放量系列'],
+      ['52558367358873', 'whatsapp', 'WhatsApp 系列'],
+    ])
+    expect(watch?.series.some(s => s.campaign_id === '52558131445673')).toBe(false)
+  })
+
+  it('盯盘窗口（如果配了预计开投日）：预计开投日必须落在窗口里（不然「找不到系列」的待办永远不会出，或开投当天就在窗口外）', () => {
+    for (const id of listTrackingClientIds()) {
+      const watch = getTrackingClientConfig(id)?.launch_watch
+      if (!watch || watch.expected_launch_on === undefined) continue
+      const last = new Date(Date.parse(`${watch.from}T00:00:00Z`) + (watch.days - 1) * 86_400_000).toISOString().slice(0, 10)
+      expect(watch.expected_launch_on >= watch.from, `${id} 预计开投日早于窗口起点`).toBe(true)
+      expect(watch.expected_launch_on <= last, `${id} 预计开投日晚于窗口终点`).toBe(true)
+    }
   })
 })

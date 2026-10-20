@@ -78,7 +78,7 @@ export interface TrackingReceiptItem {
   href: string
 }
 
-export type TrackingReadSource = 'meta' | 'ga4' | 'landing' | 'env' | 'crm' | 'insights'
+export type TrackingReadSource = 'meta' | 'ga4' | 'landing' | 'env' | 'crm' | 'insights' | 'budget'
 
 export interface TrackingReadError {
   source: TrackingReadSource
@@ -174,6 +174,36 @@ export interface LaunchWatchConfig {
   expected_launch_on?: string
 }
 
+/**
+ * 按目标盯盘的系列类型：awareness = 播放量；whatsapp = 点广告进 WhatsApp 聊天
+ * （「ME 有没有收到」比对的就是 WhatsApp 会话；以后有 Messenger 等再加新类型，不混用）。
+ */
+export type ObjectiveWatchKind = 'awareness' | 'whatsapp'
+
+/** 按目标盯盘的一个广告系列（只读，不动广告）。 */
+export interface ObjectiveWatchSeries {
+  /** Meta 广告系列编号 */
+  campaign_id: string
+  kind: ObjectiveWatchKind
+  /** 待办 / 回执里给人看的名字，例如「播放量系列」 */
+  label: string
+  /** 播放量系列：同一个人平均看到几次算黄灯 / 红灯（严格大于）；不配 = 3 / 4 */
+  frequency_yellow?: number
+  frequency_red?: number
+}
+
+/**
+ * 按目标盯盘（每小时盯盘函数的第二件事，和 launch_watch 互相独立）：
+ * 播放量系列看完整播放 / 触达 / 频次，聊天系列看开始聊天数 / 单个成本 / ME 有没有收到；
+ * 所有系列都盯「改动后一直没花钱」。系列停了就自动不盯。
+ */
+export interface ObjectiveWatchConfig {
+  series: readonly ObjectiveWatchSeries[]
+  /** 改动后一直没花钱：多少小时黄灯 / 红灯；不配 = 6 / 24 */
+  zero_spend_yellow_hours?: number
+  zero_spend_red_hours?: number
+}
+
 export interface TrackingClientConfig {
   /** Meta 官方广告账户，带 act_ 前缀 */
   ad_account_id: string
@@ -194,6 +224,8 @@ export interface TrackingClientConfig {
   known_issues?: KnownIssue[]
   /** 开投后读回的自动补排窗口；不配 = 不自动补排（只能人手发事件） */
   launch_watch?: LaunchWatchConfig
+  /** 按目标盯盘的系列清单；不配 = 不盯 */
+  objective_watch?: ObjectiveWatchConfig
 }
 
 // ─── 事实（各个读取器的输出，也是判定函数的输入）──────────────────────────────
@@ -301,6 +333,31 @@ export interface EnvFacts {
   as_of: string
 }
 
+/**
+ * 预算门要用的事实：库里的日预算上限 + Meta 现读的「在投」日预算合计。
+ * 上限读库、在投预算读线上，客户配置里写死的数字只剩「跟库对一对」的作用（读不到也不能拿它顶替）。
+ * 金额一律是 Meta / 库里的最小货币单位（分），不换算。
+ */
+export interface BudgetFacts {
+  /** 库里的上限 和 Meta 的在投预算 两半都读到了吗（任何一半没读到 = false） */
+  read: boolean
+  /** 没读到的原因（已清洗，不含令牌）；两半都读到 = null */
+  error: string | null
+  as_of: string
+  /** 库里该广告账户自己的日预算上限；没设 / 没读到 = null（不是 0） */
+  account_cap_cents: number | null
+  /** 库里该客户的日预算总上限；没设 / 没读到 = null（不是 0） */
+  client_cap_cents: number | null
+  /** 该客户在库里登记了几个 Meta 广告账户（多账户时不能拿客户总上限顶替账户上限）；没读到 = null */
+  registered_account_count: number | null
+  /** Meta 现读的在投日预算合计；没读到 = null（不是 0） */
+  live_daily_budget_cents: number | null
+  /** 在投、但用终身预算（折不出日预算）的个数；只在读到时有意义 */
+  live_lifetime_budget_count: number
+  /** 参与日预算合计的在投实体数（系列级预算的系列 + 不在这种系列下的广告组）；只在读到时有意义 */
+  live_entity_count: number
+}
+
 export interface JudgeInput {
   config: TrackingClientConfig
   now: Date
@@ -309,6 +366,7 @@ export interface JudgeInput {
   ga4: Ga4Facts
   crm: CrmFacts
   env: EnvFacts
+  budget: BudgetFacts
 }
 
 /** 开投后读回的事实（本次投放的广告系列的洞察，自开投时刻起）。 */

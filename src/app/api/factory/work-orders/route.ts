@@ -1,25 +1,25 @@
 // P21.J M2 — GET /api/factory/work-orders(spec §6.1 Factory Ops 后台可视 + dead_letter 面板数据源)
-// 返回近 100 条工单(按 created_at desc),供 Factory Ops 页分组展示 + dead_letter 复活。仅 admin。
+// 返回近 100 条工单(按 created_at desc),供 Factory Ops 页分组展示 + dead_letter 复活。管理员可看；限定客户的管理员只返回他自己客户的工单。
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin } from '@/lib/auth/require-admin'
+import { requireAdminScope } from '@/lib/auth/require-admin'
 import { toPublishedView } from '@/lib/factory/publish/publish-display'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const guard = await guardAdmin()
-  if (guard) return guard
+  const admin = await requireAdminScope()
+  if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
 
-  const { data, error } = await supabaseAdmin
+  const base = supabaseAdmin
     .from('content_work_orders')
     // 单个字面量(不能用 + 拼接):Supabase 客户端靠字面量类型解析列名,拼接后变成 string 就推不出行类型
     .select(
       'id, client_id, status, order_type, angle, rationale_one_liner, actual_cost_usd, budget_cap_usd, attempt_count, reclaim_count, reject_reason, source_ad_id, review_ref, output, published_ref, heartbeat_at, created_at, updated_at, fact_source_url:brief->copy->endcard->>url',
     )
-    .order('created_at', { ascending: false })
-    .limit(100)
+  const scoped = admin.scope.kind === 'global' ? base : base.eq('client_id', admin.scope.clientId)
+  const { data, error } = await scoped.order('created_at', { ascending: false }).limit(100)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   // worker 活性:生产中工单的最新心跳(魏征:worker 挂了 UI 别一片"生产中"假象)

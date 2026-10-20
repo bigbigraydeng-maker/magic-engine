@@ -19,7 +19,7 @@ const config = {
 }
 
 function stubFetch() {
-  const fn = vi.fn(async (url: string) => {
+  const fn = vi.fn(async (url: string, _init?: RequestInit) => {
     if (url.endsWith('/labels')) {
       return Response.json({
         labels: { '111': { title: 'Best of China', subtitle: '15-second reel', publishedAt: '2026-10-11T08:05:56Z', url: 'https://www.facebook.com/reel/111' } },
@@ -171,6 +171,28 @@ describe('AutonomySettings', () => {
     expect(document.body.textContent).not.toContain('信封')
   })
 
+  it('自动流程状态的素材显示中文状态、没有批准按钮', async () => {
+    const fn = vi.fn(async (url: string) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      return Response.json({
+        success: true,
+        config: {
+          ...config,
+          creative_pool: [
+            { kind: 'meta_video', ref: '111', status: 'testing' },
+            { kind: 'meta_video', ref: '222', status: 'candidate' },
+          ],
+        },
+      })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('自动流程：测试中')).toBeTruthy())
+    // 只有 candidate 那条有批准按钮
+    expect(screen.getAllByText('批准')).toHaveLength(1)
+    expect(screen.queryByText('待批准')).toBeTruthy()
+  })
+
   it('asks for confirmation before approving and does not call approve when declined', async () => {
     const fn = stubFetch()
     vi.stubGlobal('confirm', vi.fn(() => false))
@@ -179,5 +201,328 @@ describe('AutonomySettings', () => {
     fireEvent.click(screen.getAllByText('批准')[0])
     expect(window.confirm).toHaveBeenCalledWith('批准后这条视频才允许用于广告。不会自动开广告、不花钱。')
     expect(fn.mock.calls.some(c => String(c[0]).includes('/approve'))).toBe(false)
+  })
+
+  it('保存新视频时带上页面加载时的版本（expected_version）', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') return Response.json({ success: true, config, version: 'v2' })
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
+    expect(patch).toBeTruthy()
+    const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
+    expect(body.expected_version).toBe('v1')
+  })
+
+  it('保存遇到 409 时显示中文提示、重新加载，并保留输入框里的编号', async () => {
+    const conflictMessage = '素材池刚被别处改过，请刷新页面后再保存。'
+    // 只数对配置本身的 GET，别的接口（如账户上限清单）不计数，免得「重新加载」的断言被别的请求蒙混过关
+    let getCount = 0
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') {
+        return Response.json({ error: 'creative_pool_changed_concurrently', message: conflictMessage }, { status: 409 })
+      }
+      if (url.endsWith('/ad-strategy-config') && (init?.method === undefined || init.method === 'GET')) {
+        getCount += 1
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    // 初次加载恰好读一次配置
+    await waitFor(() => expect(getCount).toBe(1))
+    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
+    fireEvent.change(textarea, { target: { value: '333' } })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText(conflictMessage)).toBeTruthy())
+    expect(screen.queryByText('creative_pool_changed_concurrently')).toBeNull()
+    // 409 之后恰好重新加载一次
+    await waitFor(() => expect(getCount).toBe(2))
+    expect((textarea as HTMLTextAreaElement).value).toBe('333')
+  })
+
+  it('批准遇到 409 时显示中文提示并重新加载', async () => {
+    const conflictMessage = '素材池刚被别处改过，请刷新页面后再试。'
+    // 只数对配置本身的 GET，别的接口（如账户上限清单）不计数，免得「重新加载」的断言被别的请求蒙混过关
+    let getCount = 0
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (url.endsWith('/approve') && init?.method === 'POST') {
+        return Response.json({ error: 'creative_pool_changed_concurrently', message: conflictMessage }, { status: 409 })
+      }
+      if (url.endsWith('/ad-strategy-config') && (init?.method === undefined || init.method === 'GET')) {
+        getCount += 1
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getAllByText('批准').length).toBe(2))
+    // 初次加载恰好读一次配置
+    await waitFor(() => expect(getCount).toBe(1))
+    fireEvent.click(screen.getAllByText('批准')[0])
+    await waitFor(() => expect(screen.getByText(conflictMessage)).toBeTruthy())
+    // 409 之后恰好重新加载一次
+    await waitFor(() => expect(getCount).toBe(2))
+  })
+
+  it('不再说「已批准的视频会全部变回」，改成说明不影响已批准的视频', async () => {
+    stubFetch()
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    expect(screen.queryByText(/已批准的视频会全部变回/)).toBeNull()
+    expect(screen.getByText(/添加新视频不会影响已批准的视频/)).toBeTruthy()
+  })
+
+  it('同页改了上限后，添加新视频保存遇 409：刷新不冲掉未保存的上限', async () => {
+    const conflictMessage = '素材池刚被别处改过，请刷新页面后再保存。'
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') {
+        return Response.json({ error: 'creative_pool_changed_concurrently', message: conflictMessage }, { status: 409 })
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    // 用户改了上限但没保存
+    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText(conflictMessage)).toBeTruthy())
+    // 刷新后上限输入框仍是用户改的值，不是服务端的 150
+    expect(screen.getByDisplayValue('200')).toBeTruthy()
+    expect(screen.queryByDisplayValue('150')).toBeNull()
+  })
+
+  it('批准遇 409：刷新不冲掉未保存的上限', async () => {
+    const conflictMessage = '素材池刚被别处改过，请刷新页面后再试。'
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (url.endsWith('/approve') && init?.method === 'POST') {
+        return Response.json({ error: 'creative_pool_changed_concurrently', message: conflictMessage }, { status: 409 })
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getAllByText('批准').length).toBe(2))
+    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    fireEvent.click(screen.getAllByText('批准')[0])
+    await waitFor(() => expect(screen.getByText(conflictMessage)).toBeTruthy())
+    expect(screen.getByDisplayValue('200')).toBeTruthy()
+    expect(screen.queryByDisplayValue('150')).toBeNull()
+  })
+
+  it('新编号去重并过滤已存在的：333 只出现一次，已存在的 111 不重复添加', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') return Response.json({ success: true, config, version: 'v2' })
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333\n333\n111' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
+    expect(patch).toBeTruthy()
+    const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as {
+      creative_pool: { kind: string; ref: string; status: string }[]
+    }
+    const refs = body.creative_pool.map(e => e.ref)
+    // 333 重复输入只算一次；已存在的 111 不会被当成新候选重复添加；原有的 222 仍保留
+    expect(refs.filter(r => r === '333')).toHaveLength(1)
+    expect(refs.filter(r => r === '111')).toHaveLength(1)
+    expect(refs.filter(r => r === '222')).toHaveLength(1)
+    expect(refs).toHaveLength(3)
+  })
+
+  it('输入的编号全是已存在的：不发 PATCH，提示中文，输入框内容还在', async () => {
+    const fn = stubFetch()
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
+    fireEvent.change(textarea, { target: { value: '111\n222' } })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText('这些视频编号已经在列表里了，没有需要添加的')).toBeTruthy())
+    expect(fn.mock.calls.some(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')).toBe(false)
+    expect((textarea as HTMLTextAreaElement).value).toBe('111\n222')
+  })
+
+  it('保存成功但 version_unreadable：之后会再 GET 一次配置来刷新版本', async () => {
+    let getCount = 0
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') {
+        return Response.json({ success: true, config, version_unreadable: true })
+      }
+      if (url.endsWith('/ad-strategy-config') && (init?.method === undefined || init.method === 'GET')) {
+        getCount += 1
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    await waitFor(() => expect(getCount).toBe(1))
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    await waitFor(() => expect(getCount).toBe(2))
+  })
+
+  it('保存时服务端返回 400 带中文 message：显示中文，不显示英文错误代码', async () => {
+    const backendMessage = '这些视频编号已经在列表里了，没有需要添加的'
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') {
+        return Response.json({ error: 'duplicate_creative_ref', message: backendMessage }, { status: 400 })
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText(backendMessage)).toBeTruthy())
+    expect(screen.queryByText('duplicate_creative_ref')).toBeNull()
+  })
+
+  it('GET 没返回 version 时，保存新视频不发带 creative_pool 的 PATCH，并提示刷新', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') return Response.json({ success: true, config })
+      return Response.json({ success: true, config })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText('读不到页面版本，请刷新页面后再添加素材')).toBeTruthy())
+    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
+    expect(patch).toBeFalsy()
+  })
+
+  it('版本未知 + 改了上限 + 输入新编号：只保存上限，不带 creative_pool，编号还在', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') return Response.json({ success: true, config })
+      return Response.json({ success: true, config })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
+    fireEvent.change(textarea, { target: { value: '333' } })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText(/预算\/模式已保存/)).toBeTruthy())
+    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
+    expect(patch).toBeTruthy()
+    const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
+    expect(body.daily_budget_cap_cents).toBe(20000)
+    expect('creative_pool' in body).toBe(false)
+    expect((textarea as HTMLTextAreaElement).value).toBe('333')
+  })
+
+  it('版本已知 + 编号全是已存在的 + 改了上限：只保存上限，提示编号已存在，输入框还在', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') return Response.json({ success: true, config, version: 'v2' })
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    const textarea = screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）')
+    fireEvent.change(textarea, { target: { value: '111\n222' } })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText('编号已存在，预算/模式已保存')).toBeTruthy())
+    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
+    expect(patch).toBeTruthy()
+    const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
+    expect(body.daily_budget_cap_cents).toBe(20000)
+    expect('creative_pool' in body).toBe(false)
+    expect((textarea as HTMLTextAreaElement).value).toBe('111\n222')
+  })
+
+  it('版本为 null 时，保存新视频仍带上 expected_version: null', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') return Response.json({ success: true, config, version: 'v2' })
+      return Response.json({ success: true, config, version: null })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333' },
+    })
+    fireEvent.click(screen.getByText('保存'))
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
+    expect(patch).toBeTruthy()
+    const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
+    expect('expected_version' in body).toBe(true)
+    expect(body.expected_version).toBeNull()
+  })
+
+  it('批准成功后，同页未保存的上限修改不会被冲掉', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (url.endsWith('/approve') && init?.method === 'POST') {
+        return Response.json({ success: true, config, version: 'v2' })
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getAllByText('批准').length).toBe(2))
+    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    fireEvent.click(screen.getAllByText('批准')[0])
+    await waitFor(() => expect(fn.mock.calls.some(c => String(c[0]).includes('/approve'))).toBe(true))
+    await waitFor(() => expect(screen.getByDisplayValue('200')).toBeTruthy())
+    expect(screen.queryByDisplayValue('150')).toBeNull()
+  })
+
+  it('版本未知且输入了新编号时，显示「读不到页面版本」的提示', async () => {
+    stubFetch()
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
+    expect(screen.queryByText('读不到页面版本，请刷新页面后再添加素材。')).toBeNull()
+    fireEvent.change(screen.getByPlaceholderText('添加待批准的视频（每行填一个 Facebook 视频编号）'), {
+      target: { value: '333' },
+    })
+    expect(screen.getByText('读不到页面版本，请刷新页面后再添加素材。')).toBeTruthy()
   })
 })

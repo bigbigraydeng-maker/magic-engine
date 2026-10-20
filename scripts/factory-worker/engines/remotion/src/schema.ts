@@ -80,6 +80,9 @@ const PRICE = z
     dateLine: text(40).optional(),
     footnote: text(80),
     footnoteSize: z.number().int().min(30, { message: '脚注字号必须在 30 到 60 之间' }).max(60, { message: '脚注字号必须在 30 到 60 之间' }).optional(),
+    layout: z.enum(['center', 'corner']).optional(),
+    qualifierSize: z.number().int().min(30, { message: '限定语字号必须在 30 到 60 之间' }).max(60, { message: '限定语字号必须在 30 到 60 之间' }).optional(),
+    footnoteBackdrop: z.boolean().optional(),
   })
   .strict();
 
@@ -119,11 +122,27 @@ export const ListReelPropsSchema = z
       .min(MIN_ITEMS, { message: '条目数量最少 3 个' })
       .max(MAX_ITEMS, { message: '条目数量最多 7 个' }),
     itemLabel: text(24),
+    itemLabelSize: z.number().int().min(30, { message: '条目标签字号必须在 30 到 64 之间' }).max(64, { message: '条目标签字号必须在 30 到 64 之间' }).optional(),
     revealTitle: text(40),
+    revealTitleSize: z.number().int().min(36, { message: '片尾标题字号必须在 36 到 60 之间' }).max(60, { message: '片尾标题字号必须在 36 到 60 之间' }).optional(),
     price: PRICE,
   })
   .strict()
   .superRefine((val, ctx) => {
+    // The corner card sits in the lower right (x 270-960, from y=820) and must stay inside the 1248 safe-zone
+    // floor and the 960 right edge, so its text blocks are capped to one line each.
+    if (val.price.layout === 'corner') {
+      const p = val.price;
+      const tooBig = (p.qualifierSize ?? 40) > 48 || (p.footnoteSize ?? 30) > 40;
+      const tooLong = p.qualifier.length > 26 || p.footnote.length > 26 || (p.dateLine ?? '').length > 24;
+      if (tooBig || tooLong) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['price', 'layout'],
+          message: '右下小卡版式：限定语≤26字且字号≤48、脚注≤26字且字号≤40、日期行≤24字（否则会超出安全区）',
+        });
+      }
+    }
     const beats = val.beats;
     for (let i = 1; i < beats.length; i++) {
       if (beats[i] <= beats[i - 1]) {

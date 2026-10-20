@@ -274,3 +274,28 @@ it('asks the team to resolve multiple Instagram grants without sending the custo
   expect(within(card).getByText(/需要团队核实/)).toBeInTheDocument()
   expect(within(card).queryByRole('link')).not.toBeInTheDocument()
 })
+
+describe('TikTok admin disconnect', () => {
+  it('lets an admin revoke the TikTok grant via the TikTok endpoint, only after confirming', async () => {
+    const linked = channels.map(row => row.platform === 'tiktok' ? { ...row, managedAccounts: [
+      { connectionId: 'grant-tt', accountId: 'open-id', displayName: 'Creator' },
+    ] } : row)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ ...snapshot(true), channels: linked }) } as Response)
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    await userEvent.click(await screen.findByRole('button', { name: '断开此 TikTok 授权' }))
+    expect(vi.mocked(fetch).mock.calls.every(call => call[1]?.method !== 'DELETE')).toBe(true)
+    vi.mocked(window.confirm).mockReturnValue(true)
+    await userEvent.click(screen.getByRole('button', { name: '断开此 TikTok 授权' }))
+    expect(fetch).toHaveBeenCalledWith('/api/clients/client-a/platform/tiktok?connectionId=grant-tt', { method: 'DELETE' })
+  })
+  it('hides the TikTok disconnect from non-admins', async () => {
+    const linked = channels.map(row => row.platform === 'tiktok' ? { ...row, managedAccounts: [
+      { connectionId: 'grant-tt', accountId: 'open-id', displayName: 'Creator' },
+    ] } : row)
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ ...snapshot(false), channels: linked }) } as Response)
+    render(<SocialConnectionsPanel clientId="client-a" />)
+    await screen.findByRole('article', { name: 'TikTok' })
+    expect(screen.queryByRole('button', { name: '断开此 TikTok 授权' })).not.toBeInTheDocument()
+  })
+})

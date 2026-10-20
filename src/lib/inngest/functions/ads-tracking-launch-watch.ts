@@ -15,8 +15,13 @@
  * 「开投时刻」说明：自动补排看不到点开投的真实时刻，T+1h 的开投时刻记为「第一次看到有花费的那次盯盘」
  * （误差不超过 1 小时）；人手带着真实开投时刻发的读回会被优先采用（取最早的开投时刻）。
  *
- * 🔴 本函数只读：读 Meta 花费、读运行记录、发事件；唯一的写是 cron_run_logs 的运行记录。
- *    不写 Meta / GA4 / 官网，不发布，不扣费。
+ * 第二件事（按目标盯盘，和上面互相独立）：客户配置里列了 objective_watch 的系列，每小时按目标读一遍——
+ * 播放量系列看完整播放 / 触达 / 频次，WhatsApp 系列看开始聊天数 / 单个成本并核对 ME 有没有收到，
+ * 所有系列都盯「最近一次改动后一直没花钱」。结论（含每条提醒的 什么 / 怎么办 / 链接）写进本函数的运行记录，
+ * 今日待办只读这份记录翻成待办。系列停了就自动不盯。
+ *
+ * 🔴 本函数只读：读 Meta 花费 / 洞察、读 ME 的会话计数、读运行记录、发事件；唯一的写是 cron_run_logs 的运行记录。
+ *    不写 Meta / GA4 / 官网，不发布，不扣费，从不动广告。
  * 🔴 窗口外的整点也留一行运行记录（processed=0）——不留的话，这个函数自己哪天停了没人看得出来。
  * 🔴 新增函数必须有人去 Inngest 后台对 `/api/inngest` 重新 Sync 一次，不然「安静地不跑」。
  */
@@ -26,6 +31,7 @@ import { ADS_TRACKING_POSTLAUNCH_REQUESTED, type AdsTrackingPostLaunchRequestedD
 import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, failOpenCronRuns, startCronRunId } from '@/lib/cron/run-logger'
 import { resolveMetaToken } from '@/lib/meta/token-selection'
+import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { getTrackingClientConfig, listTrackingClientIds } from '@/lib/ads-tracking-preflight/client-config'
 import {
   LAUNCH_WATCH_JOB,
@@ -36,10 +42,27 @@ import {
   watchEventId,
   type PostLaunchReceiptState,
 } from '@/lib/ads-tracking-preflight/launch-watch'
+import { countMeWhatsappInbound } from '@/lib/ads-tracking-preflight/me-inbound-reader'
+import {
+  adsManagerCampaignUrl,
+  crmUrl,
+  judgeSeries,
+  type MeInboundFact,
+  type ObjectiveWatchSummary,
+  type SeriesFacts,
+  type SeriesUnread,
+  type SeriesVerdict,
+} from '@/lib/ads-tracking-preflight/objective-watch'
+import { readSeriesFacts } from '@/lib/ads-tracking-preflight/objective-watch-read'
 import { readCampaignPresence, readPostLaunchFacts } from '@/lib/ads-tracking-preflight/post-launch'
 import { TRACKING_PREFLIGHT_JOB } from '@/lib/ads-tracking-preflight/receipt'
 import { sanitizeError } from '@/lib/ads-tracking-preflight/sanitize'
-import type { LaunchWatchConfig, TrackingClientConfig } from '@/lib/ads-tracking-preflight/types'
+import type {
+  LaunchWatchConfig,
+  ObjectiveWatchConfig,
+  ObjectiveWatchSeries,
+  TrackingClientConfig,
+} from '@/lib/ads-tracking-preflight/types'
 
 // 任务名只在 launch-watch.ts 里定义一次（今日待办也要按它读盯盘自己的运行记录）
 export { LAUNCH_WATCH_JOB }
@@ -73,6 +96,12 @@ export interface LaunchWatchDeps {
   /** 盯盘自己的运行记录里「第一次看到花费」的那次盯盘时刻；没有 = null。读库出错会抛错（由步骤重试）。 */
   readonly loadFirstSpendSeenAt: (clientId: string, sinceIso: string) => Promise<string | null>
   readonly sendEvent: (event: { id: string; data: AdsTrackingPostLaunchRequestedData }) => Promise<void>
+  /** 按目标盯盘：读一个系列的结构和三层洞察；读不到返回 read=false，永不 reject。 */
+  readonly readObjectiveSeries: (clientId: string, cfg: TrackingClientConfig, series: ObjectiveWatchSeries, now: Date) => Promise<SeriesFacts | SeriesUnread>
+  /** 按目标盯盘：数 ME 自某时刻起收到的 WhatsApp 会话；读不到返回 read=false，永不 reject。 */
+  readonly countMeInbound: (clientId: string, sinceIso: string) => Promise<MeInboundFact>
+  /** 后台网址前缀（提醒里的 CRM 链接用）。 */
+  readonly appBase: string
   readonly startRun: () => Promise<string>
   readonly finishRun: (runId: string, startedAt: number, summary: LaunchWatchSummary) => Promise<void>
 }
@@ -86,6 +115,8 @@ export interface LaunchWatchClientSummary {
   series_found: boolean | null
   sent: { phase: 't1h' | 't24h'; launched_at: string; event_id: string }[]
   error: string | null
+  /** 按目标盯盘的逐系列结论（含每条提醒的 什么 / 怎么办 / 链接）；客户没配按目标盯盘 = 没有这个字段 */
+  objective_watch?: ObjectiveWatchSummary
 }
 
 export interface LaunchWatchSummary {
@@ -125,6 +156,13 @@ export async function readLaunchSpend(clientId: string, cfg: TrackingClientConfi
   if (out.facts.spend_cents > 0) return { read: true, spend_cents: out.facts.spend_cents, error: null, series_found: true }
   const presence = await readCampaignPresence({ adAccountId: cfg.ad_account_id, token, fetcher: fetch, ...scope })
   return { read: true, spend_cents: 0, error: null, series_found: presence.found }
+}
+
+/** 按目标盯盘：真读一个系列（永不 reject；没有可用令牌 = 读不到）。导出给单测用。 */
+export async function readObjectiveSeries(clientId: string, cfg: TrackingClientConfig, series: ObjectiveWatchSeries, now: Date): Promise<SeriesFacts | SeriesUnread> {
+  const token = (await resolveMetaToken(supabaseAdmin, clientId, process.env))?.token ?? null
+  if (!token) return { read: false, error: '没有可用的 Meta 令牌' }
+  return readSeriesFacts({ adAccountId: cfg.ad_account_id, campaignId: series.campaign_id, token, fetcher: fetch, now })
 }
 
 async function realLoadReceiptStates(clientId: string, sinceIso: string): Promise<PostLaunchReceiptState[]> {
@@ -168,18 +206,56 @@ function realDeps(): LaunchWatchDeps {
     sendEvent: async event => {
       await inngest.send(postLaunchEvent(event))
     },
+    readObjectiveSeries,
+    countMeInbound: (clientId, sinceIso) => countMeWhatsappInbound(supabaseAdmin, clientId, sinceIso),
+    appBase: APP_BASE,
     startRun: () => startCronRunId(LAUNCH_WATCH_JOB),
     finishRun: async (runId, startedAt, summary) => {
-      const active = summary.clients.filter(c => c.active)
-      const failed = active.filter(c => c.error !== null).length
-      await cronRunHandle(LAUNCH_WATCH_JOB, runId, startedAt).finish({
-        processed: active.length, completed: active.length - failed, failed, summary: { ...summary },
-      })
+      const counts = summarizeRunCounts(summary)
+      await cronRunHandle(LAUNCH_WATCH_JOB, runId, startedAt).finish({ ...counts, summary: { ...summary } })
     },
   }
 }
 
+/**
+ * 运行记录里的 processed / completed / failed：开投后盯盘窗口里的客户 + 配了按目标盯盘的客户都算「干了活」；
+ * 花费没读到、或有系列读不到（state=unread）算失败——失败要让运行记录看得出来，不能静默。导出给单测用。
+ */
+export function summarizeRunCounts(summary: LaunchWatchSummary): { processed: number; completed: number; failed: number } {
+  const worked = summary.clients.filter(c => c.active || c.objective_watch !== undefined)
+  const failed = worked.filter(c => c.error !== null || (c.objective_watch?.series.some(s => s.state === 'unread') ?? false)).length
+  return { processed: worked.length, completed: worked.length - failed, failed }
+}
+
 // ─── 编排 ───────────────────────────────────────────────────────────────────
+
+/**
+ * 按目标盯盘：一个客户配置里的每个系列读一遍、判一遍。
+ * WhatsApp 系列只有在 Meta 报了聊天数时，才去数 ME 自系列创建起收到几个会话（没聊天数没什么可比）。
+ */
+async function watchObjectives(
+  step: LaunchWatchStep,
+  deps: LaunchWatchDeps,
+  clientId: string,
+  cfg: TrackingClientConfig,
+  watch: ObjectiveWatchConfig,
+  now: Date,
+): Promise<ObjectiveWatchSummary> {
+  const series: SeriesVerdict[] = []
+  for (const s of watch.series) {
+    const facts = await step.run(`objective:${clientId}:${s.campaign_id}`, () => deps.readObjectiveSeries(clientId, cfg, s, now))
+    let me: MeInboundFact | null = null
+    if (s.kind === 'whatsapp' && facts.read && (facts.total?.conversations ?? 0) > 0) {
+      const since = facts.campaign.created_at
+      me = since === null
+        ? { read: false, error: '读不到系列创建时间，没法数 ME 收到的会话' }
+        : await step.run(`me-inbound:${clientId}:${s.campaign_id}`, () => deps.countMeInbound(clientId, since))
+    }
+    const links = { ads_manager: adsManagerCampaignUrl(cfg.ad_account_id, s.campaign_id), crm: crmUrl(deps.appBase, clientId) }
+    series.push(judgeSeries({ watch, series: s, facts, me, now, currency: cfg.currency, links }))
+  }
+  return { as_of: now.toISOString(), series }
+}
 
 async function watchOneClient(
   step: LaunchWatchStep,
@@ -228,11 +304,12 @@ export async function runLaunchWatch(step: LaunchWatchStep, deps: LaunchWatchDep
   for (const clientId of deps.configuredClientIds()) {
     const cfg = deps.getConfig(clientId)
     const watch = cfg?.launch_watch
-    if (!cfg || !watch || !isWatchActive(watch, now)) {
-      clients.push({ client_id: clientId, active: false, spend_seen: null, series_found: null, sent: [], error: null })
-      continue
-    }
-    clients.push(await watchOneClient(step, deps, clientId, cfg, watch, now))
+    const entry: LaunchWatchClientSummary = !cfg || !watch || !isWatchActive(watch, now)
+      ? { client_id: clientId, active: false, spend_seen: null, series_found: null, sent: [], error: null }
+      : await watchOneClient(step, deps, clientId, cfg, watch, now)
+    // 按目标盯盘和开投后自动补排互相独立：只要客户配了，窗口外也照盯
+    if (cfg?.objective_watch) entry.objective_watch = await watchObjectives(step, deps, clientId, cfg, cfg.objective_watch, now)
+    clients.push(entry)
   }
 
   const summary: LaunchWatchSummary = { checked_at: now.toISOString(), no_publish: true, clients }

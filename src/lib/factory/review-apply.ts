@@ -24,6 +24,12 @@ export interface ReviewApplyResult {
   data?: Record<string, unknown>
 }
 
+/** Which code path wrote the approval into review_ref, and whether the approver passed requireGlobalAdmin(). */
+export interface ApprovalMarker {
+  approval_source: 'me_review_route'
+  approver_scope: 'internal_staff' | 'scoped_admin'
+}
+
 type WO = Record<string, unknown>
 
 async function validateChecklistSources(
@@ -70,8 +76,10 @@ export async function applyApprove(
   supabase: SupabaseClient,
   id: string,
   reviewer: string,
-  clientId?: string,
+  clientId: string | undefined,
   checklistHuman: unknown = null,
+  /** Required on purpose: every caller must decide. null = write no marker (the ledger will then refuse this approval). */
+  marker: ApprovalMarker | null,
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
@@ -89,11 +97,21 @@ export async function applyApprove(
   const gate = approveBudgetWithinCap(reviewRef)
   if (!gate.ok) return { ok: false, status: 422, error: gate.error }
 
+  const nextReviewRef: Record<string, unknown> = { ...reviewRef }
+  delete nextReviewRef.approval_source
+  delete nextReviewRef.approver_scope
+
   const { data: upd, error } = await supabase
     .from('content_work_orders')
     .update({
       status: 'approved',
-      review_ref: { ...reviewRef, approved_by: reviewer, approved_at: new Date().toISOString(), checklist_human: checkedHuman.items },
+      review_ref: {
+        ...nextReviewRef,
+        approved_by: reviewer,
+        approved_at: new Date().toISOString(),
+        checklist_human: checkedHuman.items,
+        ...(marker ? { approval_source: marker.approval_source, approver_scope: marker.approver_scope } : {}),
+      },
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)

@@ -12,6 +12,7 @@ import type { Light } from '@/lib/marketing-plan/promo/gates'
 import {
   HARD_GATE,
   PREFLIGHT_GATE_KEYS,
+  type BudgetFacts,
   type EvidenceValue,
   type JudgeInput,
   type KnownIssue,
@@ -342,17 +343,26 @@ function judgeLandingOk(input: JudgeInput): TrackingGateReceipt {
 
 // ─── 7. 官网线索进 CRM ──────────────────────────────────────────────────────
 
-/** 一条线索的新鲜度：最近一条在 48 小时内（容 5 分钟时钟误差）才算「现在是通的」；读不出时间 / 在未来 / 太早都不算。 */
-function crmFreshness(latest: string | null, now: Date): { fresh: boolean; hours: number; problem: string } {
+/**
+ * 一条线索的新鲜度：最近一条在 48 小时内（容 5 分钟时钟误差）才算「现在是通的」；读不出时间 / 在未来 / 太早都不算。
+ * kind：fresh 新鲜；stale 太早（超过 48 小时，数据本身没问题）；unreadable 读不出时间；future 时间在未来（这两种是数据问题）。
+ */
+function crmFreshness(
+  latest: string | null,
+  now: Date,
+): { fresh: boolean; kind: 'fresh' | 'stale' | 'unreadable' | 'future'; hours: number; problem: string } {
   const age = latest === null ? null : ageHours(latest, now)
   if (age !== null && Number.isFinite(age) && age >= -CRM_CLOCK_SKEW_HOURS && age <= CRM_FRESH_WINDOW_HOURS) {
-    return { fresh: true, hours: Math.max(0, Math.round(age)), problem: '' }
+    return { fresh: true, kind: 'fresh', hours: Math.max(0, Math.round(age)), problem: '' }
   }
-  let problem: string
-  if (age === null || !Number.isFinite(age)) problem = '读不出最近一条的时间'
-  else if (age < -CRM_CLOCK_SKEW_HOURS) problem = '最近一条的时间在未来（时钟偏差或脏数据）'
-  else problem = `最近一条是 ${Math.round(age)} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时`
-  return { fresh: false, hours: 0, problem }
+  if (age === null || !Number.isFinite(age)) {
+    return { fresh: false, kind: 'unreadable', hours: 0, problem: '读不出最近一条的时间' }
+  }
+  if (age < -CRM_CLOCK_SKEW_HOURS) {
+    return { fresh: false, kind: 'future', hours: 0, problem: '最近一条的时间在未来（时钟偏差或脏数据）' }
+  }
+  const hours = Math.round(age)
+  return { fresh: false, kind: 'stale', hours, problem: `最近一条是 ${hours} 小时前，超过 ${CRM_FRESH_WINDOW_HOURS} 小时` }
 }
 
 /**
@@ -391,6 +401,8 @@ const AD_LANDING_TEST_HOW =
  * 近 7 天一条来自广告落地页的线索都没有 → **灰**（没证据，不是黄）：这道门的意义就是证明「广告点进去那一页的表单真能进 CRM」，
  * 在没证据之前显示「前置条件满足」会误导开投决定——灰是硬门灰，会挡 preconditions_met，也会出今日待办（统筹 18 号 2026-10-20 定）。
  * 有证据但过期 / 读不出时间 / 在未来 → 仍是黄（以前通过，不能说现在通）。
+ * 其中「过期」（数据没问题，只是 48 小时内没有新线索）的说法是「多半在等真实线索」，并教怎么分辨是不是通路坏了（74 号 2026-10-20 要求）；
+ * 读不出时间 / 在未来是数据问题，仍按「没法确认」说。
  */
 function judgeAdLandingFreshness(
   input: JudgeInput,
@@ -414,6 +426,17 @@ function judgeAdLandingFreshness(
       key, 'green',
       `广告落地页上的表单线索在进 CRM：最近一条是 ${f.hours} 小时前，近 7 天共 ${adCount} 条（官网表单线索合计 ${total} 条）`,
       '', evidence, as_of,
+    )
+  }
+  // 太早（数据没问题，只是 48 小时内没有新线索）：开投后多半只是还没有新的真实线索，不能一上来就说成故障
+  if (f.kind === 'stale') {
+    const events = input.config.ga4_lead_events.length > 0 ? input.config.ga4_lead_events.join(' / ') : '留资事件'
+    return receipt(
+      key, 'yellow',
+      `近 7 天 CRM 里有 ${adCount} 条从广告落地页提交的表单线索，最近一条是 ${f.hours} 小时前（超过 ${CRM_FRESH_WINDOW_HOURS} 小时），现在没有新线索——多半是在等真实线索进来，也可能是通路坏了`,
+      `不一定是故障。先看网站统计（GA4：${events}）近 ${CRM_FRESH_WINDOW_HOURS} 小时有没有人在广告落地页提交表单：没有 → 在等真实线索，不用处理；` +
+        `有提交但 CRM 里没有新线索 → 通路坏了，按下面排查：${AD_LANDING_TEST_HOW}`,
+      evidence, as_of,
     )
   }
   return receipt(
@@ -550,54 +573,164 @@ function judgeTokenAndCrons(input: JudgeInput): TrackingGateReceipt {
 
 // ─── 10. 广告账户与付款 ─────────────────────────────────────────────────────
 
-function judgeAccountBilling(input: JudgeInput): TrackingGateReceipt {
+interface CapInfo {
+  cents: number
+  label: string
+}
+
+/** 库里设了的日预算上限（账户级、客户级各一个）。 */
+function presentCaps(b: BudgetFacts): CapInfo[] {
+  const caps: CapInfo[] = []
+  if (b.account_cap_cents !== null) caps.push({ cents: b.account_cap_cents, label: '账户级' })
+  if (b.client_cap_cents !== null) caps.push({ cents: b.client_cap_cents, label: '客户级' })
+  return caps
+}
+
+/** 账户级、客户级是同一个数（老客户回落时必然如此）就合成一条说，别把同一句话说两遍。 */
+function dedupeCaps(caps: readonly CapInfo[]): CapInfo[] {
+  const [first, second] = caps
+  if (caps.length === 2 && first.cents === second.cents) return [{ cents: first.cents, label: '账户级与客户级' }]
+  return [...caps]
+}
+
+interface Finding {
+  reason: string
+  how: string
+}
+
+/**
+ * 广告账户与付款 + 「现在在投的预算」在不在上限内。
+ *
+ * 🔴 上限读库、在投预算读线上（BudgetFacts）；客户配置里写死的「计划日预算 / 官方日上限」只用来跟库对一对，
+ *    读不到时绝不能拿它顶替（2026-10-21 事故：写死 NZ$101 / NZ$110 互相比，库里上限 NZ$150、在投合计 NZ$134，假绿）。
+ * 🔴 这道门是硬门：硬门的红、灰会挡住计划批准，黄不挡。所以「读不到 / 没设 / 算不全」一律出**灰**，不出黄
+ *    （信封里这几种都是 unavailable）；黄只留给「读全了、算得对，但还有不放心的地方」。
+ * 🔴 它只核对**现在已经在投**的预算，不含本次要新开的计划预算——文案里写明；计划自己的预算由「日预算不超上限」那道门核对。
+ *
+ * 红：账户不正常 / 没付款方式 / 在投合计超过库里任一上限 / 账户花费上限的剩余额度不够一天的在投预算。
+ * 灰：账户或付款读不到；预算没读到（库 / Meta / 令牌 / 上限配置无效）；上限都没设；多账户下这个账户自己的上限没设；有终身预算折不出日预算。
+ * 黄：读全了，但账户里一个在投的都没有（合计 0，没东西可核）、客户有多个登记账户（客户总上限是各账户加起来比的，这里没算）、
+ *     客户配置里的数字跟库 / 线上对不上。
+ * 绿：以上都没有。
+ */
+export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 'budget'>): TrackingGateReceipt {
   const key: PreflightGateKey = 'env.account_billing'
   const as_of = input.meta.as_of
   const acc = input.meta.account
   const cfg = input.config
+  const b = input.budget
   const evidence: Record<string, EvidenceValue> = {
     account_status: acc ? acc.status : null,
     has_funding_source: acc ? acc.has_funding_source : null,
-    planned_daily_budget_cents: cfg.planned_daily_budget_cents,
-    official_daily_cap_cents: cfg.official_daily_cap_cents,
+    budget_read: b.read,
+    account_cap_cents: b.account_cap_cents,
+    client_cap_cents: b.client_cap_cents,
+    registered_account_count: b.registered_account_count,
+    live_daily_budget_cents: b.live_daily_budget_cents,
+    live_lifetime_budget_count: b.live_lifetime_budget_count,
+    live_entity_count: b.live_entity_count,
+    config_planned_daily_budget_cents: cfg.planned_daily_budget_cents,
+    config_official_daily_cap_cents: cfg.official_daily_cap_cents,
   }
 
   if (!input.meta.read || acc === null) {
     return receipt(key, 'gray', '广告账户信息没读到', '确认 Meta 令牌能读该账户', evidence, as_of)
   }
 
+  const currency = acc.currency ?? cfg.currency
+  const live = b.live_daily_budget_cents
+  const caps = presentCaps(b)
+  const multiAccount = (b.registered_account_count ?? 0) >= 2
+
+  // ── 红 ──
   const problems: string[] = []
   if (acc.status !== 1) problems.push(`账户状态码 ${acc.status ?? '未知'}，不是正常状态`)
   if (typeof acc.disable_reason === 'number' && acc.disable_reason !== 0) {
     problems.push(`账户被停用（原因码 ${acc.disable_reason}）`)
   }
   if (acc.has_funding_source === false) problems.push('账户没有付款方式')
-  if (
-    acc.spend_cap_minor !== null && acc.spend_cap_minor > 0 &&
-    cfg.planned_daily_budget_cents !== null &&
-    acc.spend_cap_minor - (acc.amount_spent_minor ?? 0) < cfg.planned_daily_budget_cents
-  ) {
-    problems.push('账户花费上限的剩余额度不够一天的计划预算')
+  // 以下两条都要先读到在投合计才能比；没读到的留给下面的灰灯，不在这里凭空判红
+  if (live !== null && acc.spend_cap_minor !== null && acc.spend_cap_minor > 0 && acc.spend_cap_minor - (acc.amount_spent_minor ?? 0) < live) {
+    problems.push('账户花费上限的剩余额度不够一天的在投日预算')
   }
-  if (
-    cfg.planned_daily_budget_cents !== null && cfg.official_daily_cap_cents !== null &&
-    cfg.planned_daily_budget_cents > cfg.official_daily_cap_cents
-  ) {
-    problems.push(
-      `计划日预算 ${money(cfg.planned_daily_budget_cents, cfg.currency)} 超过官方日上限 ${money(cfg.official_daily_cap_cents, cfg.currency)}`,
-    )
+  if (live !== null) {
+    // 多账户时客户总上限是各账户加起来比的，这里只有一个账户的合计——但一个账户就已经超过客户总上限，那必然是超了
+    for (const cap of dedupeCaps(caps)) {
+      if (live > cap.cents) {
+        problems.push(`在投日预算合计 ${money(live, currency)} 超过库里的${cap.label}日上限 ${money(cap.cents, currency)}`)
+      }
+    }
+  }
+  if (problems.length > 0) {
+    return receipt(key, 'red', problems.join('；'), '修好账户 / 付款 / 预算再开投；超上限的先把在投预算降到上限内（或经 PM 同意调上限）', evidence, as_of)
   }
 
-  if (problems.length > 0) {
-    return receipt(key, 'red', problems.join('；'), '修好账户 / 付款 / 预算再开投', evidence, as_of)
-  }
+  // ── 灰：读不到 / 没设 / 算不全（硬门灰会挡批准，绝不当成绿）──
   if (acc.has_funding_source === null) {
     return receipt(key, 'gray', '有没有付款方式没读到', '确认 Meta 能读到付款方式', evidence, as_of)
   }
-  if (cfg.planned_daily_budget_cents === null || cfg.official_daily_cap_cents === null) {
-    return receipt(key, 'yellow', '没配置计划日预算或官方日上限，没法核对', '在客户配置里补上计划日预算和官方日上限', evidence, as_of)
+  if (!b.read || live === null) {
+    return receipt(
+      key, 'gray',
+      `预算没读到：${b.error ?? '原因不明'}`,
+      '先修好读取（Meta 令牌 / 库查询 / 上限配置）再重跑一次检查；没读到之前不能说「预算在上限内」',
+      evidence, as_of,
+    )
   }
-  return receipt(key, 'green', '账户正常、有付款方式、预算在上限内', '', evidence, as_of)
+  const gaps: Finding[] = []
+  if (caps.length === 0) {
+    gaps.push({ reason: '库里该账户和该客户的日预算上限都没设，没法核对在投预算在不在上限内', how: '在后台给该账户 / 客户设日预算上限' })
+  } else if (b.account_cap_cents === null && multiAccount) {
+    gaps.push({
+      reason: `客户登记了 ${b.registered_account_count} 个广告账户，但这个账户自己的日预算上限没设（客户总上限顶替不了账户上限）`,
+      how: '在后台给这个广告账户设它自己的日预算上限',
+    })
+  }
+  if (b.live_lifetime_budget_count > 0) {
+    gaps.push({
+      reason: `有 ${b.live_lifetime_budget_count} 个在投的系列 / 广告组用的是终身预算，折不出日预算，上面的合计不全，没法核对`,
+      how: '确认这些终身预算的花费节奏，或改成日预算再核对',
+    })
+  }
+  if (gaps.length > 0) {
+    return receipt(key, 'gray', gaps.map(f => f.reason).join('；'), gaps.map(f => f.how).join('；'), evidence, as_of)
+  }
+
+  // ── 黄：读全了、算得对，但还有不放心的地方（不挡批准）──
+  const notes: Finding[] = []
+  if (b.live_entity_count === 0) {
+    notes.push({
+      reason: '账户里现在一个在投的系列 / 广告组都没有（在投日预算合计 0），这道门只核对已在投的预算，没东西可核；本次要新开的计划预算由「日预算不超上限」那道门核对',
+      how: '确认账户里确实没有在投的广告；如果明明有在投的却看到这一条，说明读取有问题，找开发',
+    })
+  }
+  if (multiAccount) {
+    notes.push({
+      reason: `客户登记了 ${b.registered_account_count} 个广告账户，这里只核对这一个账户；客户总上限是各账户加起来比的，这里没算`,
+      how: '动预算时由内核信封核对客户总上限；批准前如需确认，人工看各账户合计',
+    })
+  }
+  const dbCap = b.account_cap_cents ?? b.client_cap_cents
+  if (cfg.official_daily_cap_cents !== null && dbCap !== null && cfg.official_daily_cap_cents !== dbCap) {
+    notes.push({
+      reason: `客户配置里写的官方日上限 ${money(cfg.official_daily_cap_cents, currency)} 跟库里的 ${money(dbCap, currency)} 对不上`,
+      how: '以库为准：把客户配置里的数字改对，或直接删掉（上限已经读库，不需要在配置里再写一份）',
+    })
+  }
+  if (cfg.planned_daily_budget_cents !== null && cfg.planned_daily_budget_cents !== live) {
+    notes.push({
+      reason: `客户配置里写的计划日预算 ${money(cfg.planned_daily_budget_cents, currency)} 跟 Meta 现读的在投合计 ${money(live, currency)} 对不上`,
+      how: '以线上为准：把客户配置里的数字改对，或直接删掉（在投预算已经现读，不需要在配置里再写一份）',
+    })
+  }
+  // 已核对的部分照实写：多账户时客户总上限是各账户加起来比的，这里只有一个账户，所以只声明「没超账户级上限」
+  const claimedCaps = multiAccount ? caps.filter(c => c.label === '账户级') : caps
+  const capText = dedupeCaps(claimedCaps).map(c => `${c.label}日上限 ${money(c.cents, currency)}`).join('、')
+  const verified = `账户正常、有付款方式；本账户现在在投的日预算合计 ${money(live, currency)}，没超库里的${capText}（不含本次要新开的计划预算）`
+  if (notes.length > 0) {
+    return receipt(key, 'yellow', `${verified}；但：${notes.map(f => f.reason).join('；')}`, notes.map(f => f.how).join('；'), evidence, as_of)
+  }
+  return receipt(key, 'green', verified, '', evidence, as_of)
 }
 
 // ─── 汇总 ───────────────────────────────────────────────────────────────────

@@ -126,6 +126,9 @@ describe('parseFormNotice', () => {
     if (!result.ok) return
     expect(result.lead).toEqual({
       kind: 'contact_form',
+      travelWindow: null,
+      budgetBand: null,
+      unknownExtras: [],
       email: 'jane.test@example.com',
       name: 'Jane Test',
       phone: '0211234567',
@@ -428,5 +431,189 @@ describe('魏征第二期复审补充', () => {
     const r = parseFormNotice({ ...goodInput(), body: single })
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.lead.kind).toBe('tour_enquiry')
+  })
+})
+
+describe('官网新增两行（Travel window / Budget per person）的兼容', () => {
+  // 官网 PM 要求加两个必填问题；通知邮件表格会新增这两行，已有行与主题不变。旧页面提交的邮件缺这两行，也必须正常解析。
+  const rows = (sep: string) =>
+    `New tour enquiry — Example website\nName${sep}Jane Test\nEmail${sep}jane.test@example.com\nPhone${sep}0211234567\nTour${sep}Best of China — 15 Days\nURL${sep}/tours/china/example\nSource${sep}tour-page\nAd source${sep}facebook\nFacebook click ID${sep}fb.1.123.abc\nTravel window${sep}March – May 2027\nBudget per person (NZD)${sep}$3,000 – $5,000\nSubmitted${sep}2026-10-20T01:00:00.000Z\n\nMessage\n\nhello`
+
+  for (const [label, sep] of [['制表符分隔', '\t'], ['多空格分隔', '    '], ['单空格分隔', ' ']] as const) {
+    it(`新增两行（${label}）→ 不报错，其它字段不受影响`, () => {
+      const r = parseFormNotice({ ...goodInput(), body: rows(sep) })
+      expect(r.ok).toBe(true)
+      if (r.ok) {
+        expect(r.lead.kind).toBe('tour_enquiry')
+        expect(r.lead.email).toBe('jane.test@example.com')
+        expect(r.lead.name).toBe('Jane Test')
+        expect(r.lead.phone).toBe('0211234567')
+        expect(r.lead.interest).toBe('Best of China — 15 Days')
+        expect(r.lead.formUrl).toBe('/tours/china/example')
+        expect(r.lead.submittedAt).toBe('2026-10-20T01:00:00.000Z')
+        expect(r.lead.message).toBe('hello')
+      }
+    })
+  }
+
+  it('旧页面（缺这两行）仍正常解析', () => {
+    const body = rows('\t')
+      .split('\n')
+      .filter((l) => !/^(Travel window|Budget per person)/.test(l))
+      .join('\n')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Best of China — 15 Days')
+  })
+
+  it('留言里伪造这两行不会影响任何字段（只读 Message 之前）', () => {
+    const body = rows('\t').replace('hello', 'Travel window\tJune – September 2027\nBudget per person (NZD)\tAbove $8,000')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.message).toContain('Travel window')
+      // 留言（Message 之后）里伪造的两行不能被当成真答案：读到 Message 行就必须停（防「去掉 break」的变异）。
+      expect(r.lead.travelWindow).toBe('mar_may_2027')
+      expect(r.lead.budgetBand).toBe('3000_5000')
+    }
+  })
+
+  it('真实行缺失（老页面）、留言里却伪造这两行 → 两项仍是 null（Message 之后一律不读）', () => {
+    const noRows = rows('\t')
+      .split('\n')
+      .filter((l) => !/^(Travel window|Budget per person)/.test(l))
+      .join('\n')
+      .replace('hello', 'Travel window\tJune – September 2027\nBudget per person (NZD)\t$5,000 – $8,000')
+    const r = parseFormNotice({ ...goodInput(), body: noRows })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+    }
+  })
+
+  it('同样的新增行出现在联系表单正文里也不出错', () => {
+    const base = goodInput()
+    const body = base.body.replace('Submitted\t', 'Travel window\tNot sure yet\nBudget per person (NZD)\tUnder $3,000\nSubmitted\t')
+    const r = parseFormNotice({ ...base, body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Custom Itinerary')
+  })
+})
+
+describe('出发时间 / 预算 → 稳定代码', () => {
+  const body = (win: string | null, budget: string | null) =>
+    `New tour enquiry — Example website\nName\tJane Test\nEmail\tjane.test@example.com\nTour\tX\n${win === null ? '' : `Travel window\t${win}\n`}${budget === null ? '' : `Budget per person (NZD)\t${budget}\n`}Submitted\t2026-10-20T01:00:00.000Z\n\nMessage\n\nhi`
+
+  it('四个出发时间选项 + 四个预算选项都映射到约定代码', () => {
+    const wins: Array<[string, string]> = [['March – May 2027', 'mar_may_2027'], ['June – September 2027', 'jun_sep_2027'], ['October – December 2027', 'oct_dec_2027'], ['Not sure yet', 'not_sure']]
+    for (const [text, code] of wins) {
+      const r = parseFormNotice({ ...goodInput(), body: body(text, null) })
+      expect(r.ok && r.lead.travelWindow).toBe(code)
+    }
+    const budgets: Array<[string, string]> = [['Under $3,000', 'under_3000'], ['$3,000 – $5,000', '3000_5000'], ['$5,000 – $8,000', '5000_8000'], ['Above $8,000', 'above_8000']]
+    for (const [text, code] of budgets) {
+      const r = parseFormNotice({ ...goodInput(), body: body(null, text) })
+      expect(r.ok && r.lead.budgetBand).toBe(code)
+    }
+  })
+
+  it('缺这两行（旧页面）→ 两项 null，unknownExtras 为空', () => {
+    const r = parseFormNotice({ ...goodInput(), body: body(null, null) })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+      expect(r.lead.unknownExtras).toEqual([])
+    }
+  })
+
+  it('映射不到的值 → 存 null 并记入 unknownExtras，不乱存原文', () => {
+    const r = parseFormNotice({ ...goodInput(), body: body('Early 2028', '$12,000 – $15,000') })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+      expect(r.lead.unknownExtras).toEqual(['travel_window', 'budget_band'])
+    }
+  })
+
+  it('单空格分隔的真实写法也能取到', () => {
+    const r = parseFormNotice({ ...goodInput(), body: body('March – May 2027', 'Above $8,000').replace(/\t/g, ' ') })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBe('mar_may_2027')
+      expect(r.lead.budgetBand).toBe('above_8000')
+    }
+  })
+})
+
+describe('官网 PR #259 的真实邮件样本（整封 HTML 转纯文本后的写法，合成值）', () => {
+  // 结构抄自官网本地真实提交抓到的整封邮件：标题行 → 表格各行（标签 + 值）→ 最后两行是新增的出发时间 / 预算；
+  // 没填电话时 Phone 值是「—」；没有 Message 段。值全是合成的，不含任何真实客人信息。
+  const sample = (win: string | null, budget: string | null, dash = '–') =>
+    [
+      'New tour enquiry — CTS website',
+      'Name    Local Test Person',
+      'Email    local-test@example.invalid',
+      'Phone    —',
+      'Tour    China Signature — Natural China',
+      'URL    /tours/china/signature/landscapes<https://www.example.co.nz/tours/china/signature/landscapes>',
+      'Source    Tour Page Enquiry',
+      'Ad source    facebook / local_test',
+      'Submitted    2026-10-20T02:50:46.398Z',
+      'First landing page    /tours/china/signature/landscapes',
+      'Submitted from    /tours/china/signature/landscapes',
+      'Arrived via    facebook / paid_social / local_test',
+      'Tour pages viewed    /tours/china/signature/landscapes',
+      ...(win === null ? [] : [`Travel window    ${win.replace('–', dash)}`]),
+      ...(budget === null ? [] : [`Budget per person (NZD)    ${budget.replace('–', dash)}`]),
+    ].join('\n')
+  const input = (body: string) => ({ ...goodInput(), body, replyTo: ['local-test@example.invalid'] })
+
+  it('整封样本解析成功，各字段正确（没有 Message 段也行）', () => {
+    const r = parseFormNotice(input(sample('June – September 2027', '$3,000 – $5,000')))
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.kind).toBe('tour_enquiry')
+      expect(r.lead.interest).toBe('China Signature — Natural China')
+      expect(r.lead.travelWindow).toBe('jun_sep_2027')
+      expect(r.lead.budgetBand).toBe('3000_5000')
+      expect(r.lead.message).toBeNull()
+    }
+  })
+
+  it('老页面：这两行整行不出现 → 两项 null、不报错', () => {
+    const r = parseFormNotice(input(sample(null, null)))
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+      expect(r.lead.unknownExtras).toEqual([])
+    }
+  })
+
+  it('四个出发时间 × 四个预算选项（官网标签表）都能映射', () => {
+    const wins = [['March – May 2027', 'mar_may_2027'], ['June – September 2027', 'jun_sep_2027'], ['October – December 2027', 'oct_dec_2027'], ['Not sure yet', 'not_sure']]
+    const budgets = [['Under $3,000', 'under_3000'], ['$3,000 – $5,000', '3000_5000'], ['$5,000 – $8,000', '5000_8000'], ['Above $8,000', 'above_8000']]
+    for (const [w, wc] of wins) {
+      for (const [b, bc] of budgets) {
+        const r = parseFormNotice(input(sample(w, b)))
+        expect(r.ok && r.lead.travelWindow).toBe(wc)
+        expect(r.ok && r.lead.budgetBand).toBe(bc)
+      }
+    }
+  })
+
+  it('en dash 换成连字符 / 不间断空格 / 紧贴也能映射（鲁棒性）', () => {
+    for (const dash of ['-', '—', '\u2013']) {
+      const r = parseFormNotice(input(sample('June – September 2027', '$3,000 – $5,000', dash)))
+      expect(r.ok && r.lead.travelWindow).toBe('jun_sep_2027')
+      expect(r.ok && r.lead.budgetBand).toBe('3000_5000')
+    }
+    const nbsp = sample('June – September 2027', '$3,000 – $5,000').replace(/ – /g, '\u00a0–\u00a0')
+    const r2 = parseFormNotice(input(nbsp))
+    expect(r2.ok && r2.lead.travelWindow).toBe('jun_sep_2027')
+    expect(r2.ok && r2.lead.budgetBand).toBe('3000_5000')
   })
 })
