@@ -60,7 +60,7 @@ PM 在事件管理工具里依次看了四处：数据集总览（各数据集�
   },
   {
    "key": "block-launch-on-red-or-gray",
-   "text": "体检红或没法证明不开投，除非 PM 书面接受风险（回执 risk_acceptance）",
+   "text": "体检红或灰不开投（灰 = 影响硬规则的没法证明），除非 PM 书面接受风险（回执 risk_acceptance）",
    "state": "pm_decision",
    "note": "新增挡开投规则，规则库 E-07 只写季度体检"
   },
