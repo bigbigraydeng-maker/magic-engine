@@ -46,6 +46,7 @@ export interface FakeOpts {
   pending?: PendingDraft[]
   usage?: { userLastHour: number; userLastDay: number; mailboxLastDay: number }
   lockAvailable?: boolean
+  recentToContact?: number
   claim?: 'claimed' | 'taken' | 'error'
   auditInsertFails?: boolean
   rekeyOk?: boolean
@@ -86,6 +87,7 @@ export function makeFakes(o: FakeOpts = {}) {
     findPriorSend: vi.fn(async () => o.prior ?? null),
     listPendingDrafts: vi.fn(async () => o.pending ?? []),
     countUsage: vi.fn(async () => o.usage ?? { userLastHour: 0, userLastDay: 0, mailboxLastDay: 0 }),
+    countRecentEmailsToContact: vi.fn(async () => o.recentToContact ?? 0),
     acquireContactLock: vi.fn(async () => {
       calls.push('acquireLock')
       return o.lockAvailable ?? true

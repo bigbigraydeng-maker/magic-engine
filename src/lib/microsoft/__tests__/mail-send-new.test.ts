@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { sendMailNew } from '../mail-send-new'
+import { previewCompose, sendMailNew } from '../mail-send-new'
 import { baseInput, makeFakes, ENABLED, REQUEST_ID } from './mail-send-new-fakes'
 
 describe('sendMailNew', () => {
@@ -550,5 +550,32 @@ describe('sendMailNew', () => {
     expect(f.graph.createDraft).toHaveBeenCalledTimes(1)
     const args = vi.mocked(f.graph.createDraft).mock.calls[0][1]
     expect(args.subject).toBe('Hi Bcc: x@y.com')
+  })
+})
+
+describe('previewCompose（抽屉打开时的只读预览：和真发同一套判断，不碰 Graph）', () => {
+  it('能发：回收件人、邮箱、最近 7 天已发给他几封；没调 whoAmI / 没写任何东西', async () => {
+    const f = makeFakes({ recentToContact: 2 })
+    const r = await previewCompose({ clientId: 'client-a', contactId: 'contact-1' }, f.deps)
+    expect(r).toEqual({ canCompose: true, recipient: 'amy@gmail.com', mailbox: 'info@client.co.nz', sentToContactLast7Days: 2 })
+    expect(f.graph.whoAmI).not.toHaveBeenCalled()
+    expect(f.store.claimConversation).not.toHaveBeenCalled()
+    expect(f.store.insertAudit).not.toHaveBeenCalled()
+  })
+
+  it('开关没开 / 没咨询过 / 别再联系 / 没邮箱 / 找不到人 → 不能发，并带原因', async () => {
+    const cases: Array<[Parameters<typeof makeFakes>[0], string]> = [
+      [{ leadsConfig: {} }, 'disabled'],
+      [{ touchKinds: [{ channel: 'email', source: 'mailchimp', direction: 'inbound' }] }, 'not_enquirer'],
+      [{ dnc: { blocked: true, status: 403, reason: 'do_not_contact', error: 'x' } }, 'do_not_contact'],
+      [{ contact: { id: 'contact-1', primaryEmail: null } }, 'no_recipient'],
+      [{ contact: null }, 'not_found'],
+      [{ mailboxes: [] }, 'no_mailbox'],
+    ]
+    for (const [opts, reason] of cases) {
+      const f = makeFakes(opts)
+      const r = await previewCompose({ clientId: 'client-a', contactId: 'contact-1' }, f.deps)
+      expect(r).toMatchObject({ canCompose: false, reason })
+    }
   })
 })

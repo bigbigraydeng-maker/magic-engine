@@ -104,6 +104,17 @@ export function createMailNewStore(): MailNewStore {
       ])
       return { userLastHour, userLastDay, mailboxLastDay }
     },
+    async countRecentEmailsToContact(clientId, contactId, days) {
+      const { count } = await db
+        .from('contact_touchpoints')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', clientId)
+        .eq('contact_id', contactId)
+        .eq('channel', 'email')
+        .eq('direction', 'outbound')
+        .gte('occurred_at', new Date(Date.now() - days * 86_400_000).toISOString())
+      return count ?? 0
+    },
     async acquireContactLock(clientId, contactId, mailbox) {
       await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', lockKey(contactId)).lt('created_at', new Date(Date.now() - LOCK_STALE_MS).toISOString())
       const { error } = await db.from('conversations').insert({ client_id: clientId, channel: 'email', page_id: mailbox, conversation_id: lockKey(contactId) })

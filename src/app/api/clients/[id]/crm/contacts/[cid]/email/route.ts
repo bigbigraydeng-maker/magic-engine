@@ -11,16 +11,31 @@
  *
  * Responses:
  *   200  { conversationId, participantName } —— 能回
- *   200  { conversationId: null }            —— 这个人没有邮件线
+ *   200  { conversationId: null, compose }   —— 这个人没有可回复的邮件线；compose 说明能不能写第一封
+ *        compose = { canCompose: true, recipient, mailbox, sentToContactLast7Days }
+ *                | { canCompose: false, reason, message }
  *   401 / 403 / 500
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { previewCompose } from '@/lib/microsoft/mail-send-new'
+import { createMailNewDeps } from '@/lib/microsoft/mail-send-new-prod'
 
 interface RouteParams {
   params: { id: string; cid: string }
+}
+
+/** 没有可回复的线程：顺带告诉前端能不能写第一封（读失败就当不能写，不让界面猜）。 */
+async function noThread(clientId: string, contactId: string): Promise<NextResponse> {
+  try {
+    const compose = await previewCompose({ clientId, contactId }, createMailNewDeps())
+    return NextResponse.json({ conversationId: null, compose })
+  } catch (err) {
+    console.error('[crm/email] compose 预览失败:', err instanceof Error ? err.message : err)
+    return NextResponse.json({ conversationId: null, compose: { canCompose: false, reason: 'config_unreadable', message: '系统暂时读不到发信设置。' } })
+  }
 }
 
 export async function GET(_req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
@@ -49,7 +64,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   }
   const candidates = (convos as Array<{ id: string; participant_name: string | null }> | null) ?? []
   if (candidates.length === 0) {
-    return NextResponse.json({ conversationId: null })
+    return noThread(clientId, contactId)
   }
 
   // 只有「客人真的来过信」的线程才算可回复：`sendMailReply` 回的是客人最后一封入站信，
@@ -65,7 +80,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const withInbound = new Set(((inbound as Array<{ conversation_id: string }> | null) ?? []).map((m) => m.conversation_id))
   const convo = candidates.find((c) => withInbound.has(c.id))
   if (!convo) {
-    return NextResponse.json({ conversationId: null })
+    return noThread(clientId, contactId)
   }
 
   return NextResponse.json({

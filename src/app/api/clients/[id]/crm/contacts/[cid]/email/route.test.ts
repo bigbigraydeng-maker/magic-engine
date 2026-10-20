@@ -21,6 +21,10 @@ vi.mock('@/lib/auth/client-access', () => ({
 }))
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+vi.mock('@/lib/microsoft/mail-send-new-prod', () => ({ createMailNewDeps: vi.fn(() => ({})) }))
+vi.mock('@/lib/microsoft/mail-send-new', () => ({
+  previewCompose: vi.fn(async () => ({ canCompose: true, recipient: 'amy@gmail.com', mailbox: 'info@x.co.nz', sentToContactLast7Days: 0 })),
+}))
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { GET } from './route'
@@ -75,6 +79,16 @@ describe('有没有邮件线', () => {
     mockDb({ convo: null })
     const json = await (await call()).json()
     expect(json.conversationId).toBeNull()
+    expect(json.compose).toMatchObject({ canCompose: true, recipient: 'amy@gmail.com' })
+  })
+
+  it('预览本身出错 → 不报 500，明确说「不能写」让界面不猜', async () => {
+    mockDb({ convo: null })
+    const { previewCompose } = await import('@/lib/microsoft/mail-send-new')
+    ;(previewCompose as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'))
+    const json = await (await call()).json()
+    expect(json.conversationId).toBeNull()
+    expect(json.compose).toMatchObject({ canCompose: false })
   })
 
   it('有会话 → 回会话 id 和邮件里的显示名', async () => {

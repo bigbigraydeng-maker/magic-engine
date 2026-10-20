@@ -89,6 +89,8 @@ export interface MailNewStore {
   findPriorSend(clientId: string, requestId: string): Promise<PriorSend | null>
   listPendingDrafts(clientId: string, contactId: string): Promise<PendingDraft[]>
   countUsage(clientId: string, sentByEmail: string, mailbox: string): Promise<EmailUsage>
+  /** 最近 N 天我们发给这个人的邮件封数（只用于抽屉上的提示，不拦）。 */
+  countRecentEmailsToContact(clientId: string, contactId: string, days: number): Promise<number>
   acquireContactLock(clientId: string, contactId: string, mailbox: string): Promise<boolean>
   releaseContactLock(clientId: string, contactId: string): Promise<void>
   claimConversation(args: { clientId: string; contactId: string; requestId: string; mailbox: string; subject: string }): Promise<ClaimResult>
@@ -138,6 +140,7 @@ interface Resolved {
 async function resolveSend(
   input: SendMailNewInput,
   deps: MailNewDeps,
+  verifyMailbox = true,
 ): Promise<Resolved | SendMailNewResult> {
   const { store } = deps
   let leadsConfig: unknown
@@ -170,7 +173,7 @@ async function resolveSend(
   const dnc = await checkDnc(input, deps)
   if (dnc) return dnc
 
-  const mailbox = await chooseMailbox(input.clientId, config, deps)
+  const mailbox = await chooseMailbox(input.clientId, config, deps, verifyMailbox)
   if ('ok' in mailbox) return mailbox
   return { config, to: pick.email, mailbox }
 }
@@ -179,12 +182,14 @@ async function chooseMailbox(
   clientId: string,
   config: EmailComposeConfig,
   deps: MailNewDeps,
+  verify = true,
 ): Promise<MailboxChoice | SendMailNewResult> {
   const boxes = await deps.store.listActiveMailboxes(clientId)
   let chosen: MailboxChoice | undefined
   if (boxes.length === 1) chosen = boxes[0]
   else if (boxes.length > 1 && config.sendMailbox) chosen = boxes.find((b) => b.account === config.sendMailbox)
   if (!chosen) return fail(424, 'no_mailbox', '没有可用的发信邮箱（未连接，或连接了多个但没有指定发信邮箱）。')
+  if (!verify) return chosen
   const actual = await deps.graph.whoAmI(chosen.connectionId)
   if (!actual || actual !== chosen.account.toLowerCase()) {
     return fail(424, 'mailbox_mismatch', '邮箱授权对应的地址和登记的不一致，请找 Magic Lab 团队核实。')
@@ -341,4 +346,42 @@ async function finishSend(args: {
     console.error('[mail-send-new] 信发出去了，但补记录失败:', draftId, err)
   }
   return { ok: true, messageId: draftId, conversationId }
+}
+
+export type ComposePreview =
+  | { canCompose: true; recipient: string; mailbox: string; sentToContactLast7Days: number }
+  | { canCompose: false; reason: SendMailNewReason; message: string }
+
+/**
+ * 抽屉打开时问「这个人现在能不能写第一封邮件、发给谁、从哪个邮箱」。
+ * 走的是和 `sendMailNew` 同一套判断（`resolveSend`），只是**不碰 Graph、不写任何东西**——
+ * 所以界面上的「能不能发」和真发那一刻的判断不会各说各话。
+ */
+export async function previewCompose(
+  args: { clientId: string; contactId: string },
+  deps: MailNewDeps,
+): Promise<ComposePreview> {
+  const probe: SendMailNewInput = {
+    clientId: args.clientId,
+    contactId: args.contactId,
+    subject: '',
+    body: '',
+    sentByEmail: '',
+    requestId: '',
+    expectedRecipient: undefined,
+  }
+  // expectedRecipient 在预览里没有意义：先取收件人，再用它去过 resolveSend 的比对。
+  const contact = await deps.store.loadContact(args.clientId, args.contactId)
+  if (!contact) return { canCompose: false, reason: 'not_found', message: '找不到这个客人。' }
+  const pick = pickRecipient(contact.primaryEmail, await deps.store.loadIdentityEmails(args.clientId, args.contactId))
+  if (!pick.ok) return { canCompose: false, reason: 'no_recipient', message: '这个客人没有可用的邮箱。' }
+
+  const resolved = await resolveSend({ ...probe, expectedRecipient: pick.email }, deps, false)
+  if ('ok' in resolved) {
+    return resolved.ok
+      ? { canCompose: false, reason: 'invalid_input', message: '内部错误：预览不应走到发送结果。' }
+      : { canCompose: false, reason: resolved.reason, message: resolved.error }
+  }
+  const recent = await deps.store.countRecentEmailsToContact(args.clientId, args.contactId, 7).catch(() => 0)
+  return { canCompose: true, recipient: resolved.to, mailbox: resolved.mailbox.account, sentToContactLast7Days: recent }
 }
