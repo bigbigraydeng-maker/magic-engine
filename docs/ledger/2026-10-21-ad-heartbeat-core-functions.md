@@ -4,7 +4,7 @@ title: 广告心跳第①块：纯判断函数（零消耗/超限/状态变化/�
 status: decided
 owner: agent
 decided_on: 2026-10-21
-source: pr:3028
+source: pr:3031
 verify_by: 2026-10-28
 verify_how: 设计（PR 3027）过审后再进下一块（读取+定时函数+迁移）。本块只有纯函数与测试，合并后全仓行为不变。
 ---
