@@ -22,6 +22,7 @@ import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
+import type { LiveAdsFact } from '@/lib/marketing-plan/promo/live-ads'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
@@ -45,6 +46,7 @@ export function PromoPlanClient() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [board, setBoard] = useState<PromoBoard | null>(null)
   const [options, setOptions] = useState<PromoOptions | null>(null)
+  const [liveAds, setLiveAds] = useState<LiveAdsFact | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -64,10 +66,11 @@ export function PromoPlanClient() {
 
   const loadBoard = useCallback(async (planId: string) => {
     const res = await fetch(`${base}/${planId}/promo`)
-    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; error?: string }
+    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; live_ads?: LiveAdsFact | null; error?: string }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
     setOptions(json.options ?? null)
+    setLiveAds(json.live_ads ?? null)
   }, [base])
 
   const refresh = useCallback(async (keepId?: string | null) => {
@@ -176,7 +179,7 @@ export function PromoPlanClient() {
 
         {board && selected && (
           <>
-            <Headline board={board} plan={selected} />
+            <Headline board={board} plan={selected} liveAds={liveAds} clientId={clientId} />
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
@@ -253,16 +256,18 @@ export function PromoPlanClient() {
   )
 }
 
-function Headline({ board, plan }: { board: PromoBoard; plan: MarketingPlan }) {
+function Headline({ board, plan, liveAds, clientId }: { board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; clientId: string }) {
   const draft = plan.status === 'draft'
+  const live = draft ? liveAdsWarning(liveAds) : null
   const text = draft
-    ? '还没批准——批准之前什么都不会发生'
+    ? live ? '还没批准——但广告其实已经在花钱' : '还没批准——批准之前，ME 的自动动作都不会发生'
     : board.reconcile?.headline ?? (board.has_promo ? '推广计划的内容有问题，先改好' : '这份计划还没有推广计划的阶段')
   const blind = !draft && !!board.reconcile?.blind
   return (
     <div className={`rounded-xl border px-5 py-4 ${blind ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200'}`}>
       <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
       <p className="text-lg font-bold text-gray-900">{text}</p>
+      {draft && <LiveAdsNotice fact={liveAds} warning={live} clientId={clientId} />}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (
         <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>
@@ -280,4 +285,29 @@ function SpecProblems({ board }: { board: PromoBoard }) {
       </ul>
     </div>
   )
+}
+
+const MONEY_PREFIX: Record<string, string> = { NZD: 'NZ$', AUD: 'A$', USD: 'US$' }
+
+/** 有在跑的广告组 → 返回红字文案；没有或读不到 → null。 */
+function liveAdsWarning(fact: LiveAdsFact | null): string | null {
+  if (!fact || !fact.ok || fact.live_adsets <= 0) return null
+  const prefix = fact.currency ? (MONEY_PREFIX[fact.currency] ?? `${fact.currency} `) : ''
+  const spend = fact.spend_today !== null
+    ? `今天已花 ${prefix}${fact.spend_today.toFixed(2)}`
+    : fact.spend_day ? `最近一天（${fact.spend_day}）的花费还没出今天的数` : '今天的花费数据还没同步过来'
+  return `⚠️ 现在 Meta 里已有 ${fact.live_adsets} 个广告组在花钱（${spend}），但本计划还没批准——计划记录与实际不一致，请先批准或联系统筹`
+}
+
+function LiveAdsNotice({ fact, warning, clientId }: { fact: LiveAdsFact | null; warning: string | null; clientId: string }) {
+  if (warning) {
+    return (
+      <p className="mt-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+        {warning}{' '}
+        <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
+      </p>
+    )
+  }
+  if (!fact || !fact.ok) return <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
+  return null
 }

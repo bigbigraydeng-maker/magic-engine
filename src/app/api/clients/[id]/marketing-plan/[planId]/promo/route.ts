@@ -13,6 +13,7 @@ import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/c
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
 import { loadGoal, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
+import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
 import { allAdsSteps, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketing-plan/plan-guard'
@@ -37,11 +38,13 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
     // 下拉选项只有草稿填表才用；读不到时页面照常显示（选项为空，表格里会提示）
-    const [board, options] = await Promise.all([
+    const [board, options, liveAds] = await Promise.all([
       buildPromoBoard(plan),
       plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
+      // 只在计划还没批准时才需要：对照 Meta 里是否其实已经有广告在花钱（只读快照表，读不到时回 ok:false）
+      plan.status === 'draft' ? loadLiveAds(ctx.params.id) : Promise.resolve(null),
     ])
-    return NextResponse.json({ success: true, board, options })
+    return NextResponse.json({ success: true, board, options, live_ads: liveAds })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })
