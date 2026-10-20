@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { applyApprove, applyBudgetUpdate, applyQualityReject } from './review-apply'
+import { ASSET_ONLY_NOT_PUBLISHABLE } from './deliverable'
 import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/content-review'
 
 type Resp = { data: unknown; error: unknown }
@@ -101,6 +102,26 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
   it('update 0 行(被 sweeper 抢) → 409', async () => {
     const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }, { data: [], error: null }])
     expect((await approve(db)).status).toBe(409)
+  })
+
+  it('asset_only 工单 → 409,不尝试 update', async () => {
+    const assetOnly = { ...IN_REVIEW_WO, brief: { remotion: { deliverable: 'asset_only' } } }
+    // Only the load response is queued: any further query would get the default
+    // { data: null } and the happy path would fail, so a 409 proves no update ran.
+    const { db } = mockSupabase([{ data: assetOnly, error: null }])
+    const r = await approve(db)
+    expect(r.ok).toBe(false)
+    expect(r.status).toBe(409)
+    // The guard's own message, not the generic "no longer in_review" a missing update would also give.
+    expect(r.error).toBe(ASSET_ONLY_NOT_PUBLISHABLE)
+  })
+
+  it('deliverable 拼错(typo) → 走正常路径', async () => {
+    const typo = { ...IN_REVIEW_WO, brief: { remotion: { deliverable: 'typo' } } }
+    const { db } = mockSupabase([{ data: typo, error: null }, { data: [{ id: 'wo-1' }], error: null }])
+    const r = await approve(db)
+    expect(r.ok).toBe(true)
+    expect(r.status).toBe(200)
   })
 })
 

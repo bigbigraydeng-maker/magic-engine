@@ -63,6 +63,7 @@ interface FakeChain {
   select: (columns: string) => FakeChain
   eq: (column: string, value: string) => FakeChain
   not: (column: string, operator: string, value: string) => FakeChain
+  or: (filter: string) => FakeChain
   order: (column: string, options: { ascending: boolean }) => FakeChain
   limit: (count: number) => Promise<{ data: unknown[]; error: null }>
 }
@@ -76,6 +77,7 @@ function makeFakeDb(rows: unknown[]): { db: { from: (table: string) => FakeChain
     },
     eq: () => chain,
     not: () => chain,
+    or: () => chain,
     order: () => chain,
     limit: () => Promise.resolve({ data: rows, error: null }),
   }
@@ -119,5 +121,19 @@ describe('listClientReels', () => {
     expect(result[0].template).toBe('list')
     expect(result[1].music_file).toBeNull()
     expect(result[1].template).toBeNull()
+  })
+  it('hides asset_only material but keeps a mistyped deliverable as a normal Reel', async () => {
+    const base = { status: 'in_review', angle: 'x', created_at: '2026-10-12T00:00:00Z', published_ref: null, music_file: null, template: null }
+    const rows = [
+      { ...base, id: 'a', video_path: 'v/a.mp4', deliverable: 'asset_only' },
+      { ...base, id: 'b', video_path: 'v/b.mp4', deliverable: 'asset-only' },
+      { ...base, id: 'c', video_path: 'v/c.mp4', deliverable: null },
+    ]
+    const { db, selects } = makeFakeDb(rows)
+
+    const result = await listClientReels(db as never, 'client-1')
+
+    expect(selects[0]).toContain('brief->remotion->>deliverable')
+    expect(result.map((r) => r.id)).toEqual(['b', 'c'])
   })
 })
