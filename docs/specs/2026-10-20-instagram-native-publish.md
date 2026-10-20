@@ -129,3 +129,50 @@ Instagram API with Instagram Login，`graph.instagram.com`：建容器（`media_
 | 7 | 展示与监测占位、台账卡 | C |
 
 PR5 合并后即可做「只建容器、不发布」的当场试跑；发布能力只在 PR6 出现。
+
+---
+
+# PR 0 结果:官方文档实读(2026-10-20,Meta for Developers)
+
+来源(均为 Meta 官方文档页,下载后只提取文本,未执行页面脚本):
+- Content Publishing(更新 2026-06-30)`…/instagram-api-with-instagram-login/content-publishing`
+- Get started(更新 2024-12-02)`…/get-started`;Business Login for Instagram `…/business-login`
+- Refresh Access Token(更新 2025-07-17)`…/reference/refresh_access_token`
+- Graph API 参考:`ig-container`、`ig-user/media`、`ig-user/media_publish`(更新 2026-09-28)、`ig-user/content_publishing_limit`(均在 `…/instagram-graph-api/reference/` 下)
+
+## 已核实(可作为设计依据)
+| 项 | 官方说法 |
+|---|---|
+| 主机与权限 | Instagram Login 用 `graph.instagram.com`;权限 `instagram_business_basic` + `instagram_business_content_publish` |
+| 建容器 | `POST /<IG_ID>/media`,`media_type=REELS`,`video_url`(Instagram 会自己 cURL 这个地址,**必须是发布时公开可访问的服务器**),可选 `caption`、`share_to_feed`、`cover_url`、`thumb_offset`、`is_ai_generated` 等;成功返回 `{"id": "<容器id>"}` |
+| 容器状态 | `GET /<容器id>?fields=status_code`;取值 `EXPIRED`(24 小时内未发布)、`ERROR`、`FINISHED`、`IN_PROGRESS`、`PUBLISHED`;`status` 在出错时给子错误码。官方建议**每分钟查一次、最多 5 分钟** |
+| 容器过期 | 容器 24 小时过期;账号 24 小时内最多建 400 个容器 |
+| 发布 | `POST /<IG_ID>/media_publish`,参数 `creation_id`;成功返回 `{"id": "<媒体id>"}` |
+| 发布恢复路径 | 官方原话大意:建了容器但 `media_publish` 没返回媒体 id 时,用 `status_code` 查询容器发布状态——`PUBLISHED` 即已发布 |
+| 部分成功 | `media_publish` 响应可带 `config_issue`(如 `CAPTION_NOT_ATTACHED` = **帖子已发出但没有文案**);官方说这是「部分成功,应当对账而不是当错误」 |
+| 条数上限 | 参考页写 24 小时 50 条;Content Publishing 指南写 100 条(两页不一致)→ **设计按 50 条保守处理**;可用 `GET /<IG_ID>/content_publishing_limit` 查 `quota_usage`/`config.quota_total` 预检 |
+| Reel 规格 | 视频 H.264 或 HEVC、逐行扫描、闭合 GOP、4:2:0;音频 AAC、最高 48kHz、单/双声道;帧率 23–60;码率 VBR 最高 25Mbps;**时长 3 秒–15 分钟;文件最大 300MB**;宽高比允许 0.01:1–10:1,推荐 9:16;封面图最大 8MB |
+| 文案规格 | caption 最多 2200 字符、30 个话题标签、20 个 @ 提及 |
+| 令牌 | 登录流程得到的是 1 小时短期令牌;用 `grant_type=ig_exchange_token` 换 60 天长期令牌(须服务器端,含 app secret);**续期**:`GET https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=…`,条件是令牌**至少已存在 24 小时且未过期**,续期后再有 60 天;过期后不能再续,须重新授权;续期只需 `instagram_business_basic` |
+| `/me` | `GET graph.instagram.com/me?fields=user_id,username`,返回形态是 `{"data":[{"user_id":…,"username":…}]}`;`id` 是 app-scoped,`user_id` 才是专业账号 id |
+| 访问级别 | **Standard Access** 仅用于「你自己拥有/管理且已在应用后台加入的」专业账号;服务**不属于你的客户账号需要 Advanced Access(要过 App Review)** |
+| 分块续传 | `upload_type=resumable` **只给实现了 Facebook Login for Business 的应用**;我们走 Instagram Login,所以只能用 `video_url` 方式 |
+| 页面授权限制 | 若账号关联的 Facebook 主页需要 Page Publishing Authorization 或双重验证,未完成时请求会失败(需把该错误映射成可读的人工任务) |
+
+## 官方文档**没有**写明(仍需试跑验证,不能当事实)
+1. `media_publish` 对同一容器重复调用会发生什么(文档不保证幂等)。→ 设计继续把「请求已发出但结果未知」当粘性状态,发布前不再依赖重试安全。
+2. 发布成功后容器 `status_code` 多久变成 `PUBLISHED`;`media_publish` 响应丢失时,如何拿到媒体 id(文档只给了「用 `status_code` 判断是否已发布」,没给「用容器查到媒体 id」)。→ 候选办法:`GET /<IG_ID>/media` 列出最近媒体并按时间、文案匹配。**媒体字段(`permalink`、`timestamp`、`caption`)的参考页是脚本渲染的,未能抓到正文,待补读或试跑确认。**
+3. 容器 `status_code` 在视频还在 Instagram 侧拉取时的实际耗时(官方只说每分钟查、最多 5 分钟)。
+4. 开发模式下测试账号的行为是否与 Standard Access 的描述完全一致。
+→ 以上由 PR 6 前的**一次性测试账号完整演练**(含注入「响应丢失」)验证;未验证前不对客户账号调用 `media_publish`。
+
+## 对 v3 设计的修订(由实读结果触发)
+1. **`config_issue` 必须处理**(新增):`media_publish` 返回 `CAPTION_NOT_ATTACHED` 时帖子已公开但没有文案。这属于「发出去了、但内容不对」,**不是失败也不是成功**:回执必须记录 `config_issue`,工单标红,并立即下发人工任务(what:这条 Reel 已公开但缺文案;影响:客户主页上是一条没有文案的帖子;how:在 Instagram App 里补文案或删除重发;href:该帖链接)。测试要覆盖。
+2. **轮询与 cron 预算**:官方建议每分钟查、最多 5 分钟,而 `factory-publish-worker` 每小时一次、预算 300 秒。→ 不在 cron 内长时间轮询:建容器后最多在预算内轮询一两次,其余交给下一轮的 pending 接续(与 v3 第 9 条一致)。
+3. **条数预检**:发布前读 `content_publishing_limit`,按 50 条保守;接近上限直接拒绝并出人工任务。已从「待办」升为第一期必做(接口已确认存在)。
+4. **视频来源**:Instagram 自己 cURL `video_url`,所以必须是发布时可公开访问的地址(例如足够长有效期的签名链接);建容器前由 adapter 自检该地址可访问,过期则重新签名。**不能**用「ME 上传文件」的分块方式。
+5. **规格预检数值定稿**:时长 3 秒–15 分钟、≤300MB、H.264/HEVC + AAC、23–60fps、推荐 9:16;不合格不建容器(工厂成片本就是 9:16,主要预检文件大小与编码)。
+6. **文案预检**:≤2200 字符、≤30 话题标签、≤20 个 @。
+7. **令牌续期规则定稿**:每次发布前若令牌存在 ≥24 小时且距到期少于约 7 天则续期;续期用乐观锁;长期未发布(>60 天)的令牌失效后只能重新授权,待办里要提前(例如到期前 10 天)提醒。
+8. **新的产品决定(需你拍板)**:官方有 `is_ai_generated` 参数,用于自我声明内容含 AI 生成。ME 的视频含 AI 生成素材。是否默认勾上?这是合规与品牌取舍,不是技术选择——在 PR 6 前请你定。
+9. **访问级别**:Celine 的账号需先作为被管理账号加进应用后台(Standard Access);给**其他客户**开通要先过 Advanced Access 的 App Review。这条已在「你需要做的」里,补充为 PR 4 的前置。
