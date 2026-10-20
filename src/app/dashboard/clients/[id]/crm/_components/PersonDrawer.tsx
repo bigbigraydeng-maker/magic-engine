@@ -266,6 +266,11 @@ export function PersonDrawer({
             这三样都来自往来记录本身，不额外拉一次接口：`ContactTimeline`
             算好之后回传（判据只有一份）。
           */}
+          {summary?.formFactsLine && (
+            <p className="mb-2 text-[12px] font-bold text-me-charcoal/70" data-testid="form-facts-line">
+              {summary.formFactsLine}
+            </p>
+          )}
           {summary && (summary.lastText || summary.tour || summary.travelWindow) && (
             <div className="mb-3 rounded-xl border border-me-ochre/25 bg-me-ochre/[0.06] px-3 py-2.5">
               {summary.lastText && (
