@@ -430,3 +430,51 @@ describe('魏征第二期复审补充', () => {
     if (r.ok) expect(r.lead.kind).toBe('tour_enquiry')
   })
 })
+
+describe('官网新增两行（Travel window / Budget per person）的兼容', () => {
+  // 官网 PM 要求加两个必填问题；通知邮件表格会新增这两行，已有行与主题不变。旧页面提交的邮件缺这两行，也必须正常解析。
+  const rows = (sep: string) =>
+    `New tour enquiry — Example website\nName${sep}Jane Test\nEmail${sep}jane.test@example.com\nPhone${sep}0211234567\nTour${sep}Best of China — 15 Days\nURL${sep}/tours/china/example\nSource${sep}tour-page\nAd source${sep}facebook\nFacebook click ID${sep}fb.1.123.abc\nTravel window${sep}March – May 2027\nBudget per person (NZD)${sep}$3,000 – $5,000\nSubmitted${sep}2026-10-20T01:00:00.000Z\n\nMessage\n\nhello`
+
+  for (const [label, sep] of [['制表符分隔', '\t'], ['多空格分隔', '    '], ['单空格分隔', ' ']] as const) {
+    it(`新增两行（${label}）→ 不报错，其它字段不受影响`, () => {
+      const r = parseFormNotice({ ...goodInput(), body: rows(sep) })
+      expect(r.ok).toBe(true)
+      if (r.ok) {
+        expect(r.lead.kind).toBe('tour_enquiry')
+        expect(r.lead.email).toBe('jane.test@example.com')
+        expect(r.lead.name).toBe('Jane Test')
+        expect(r.lead.phone).toBe('0211234567')
+        expect(r.lead.interest).toBe('Best of China — 15 Days')
+        expect(r.lead.formUrl).toBe('/tours/china/example')
+        expect(r.lead.submittedAt).toBe('2026-10-20T01:00:00.000Z')
+        expect(r.lead.message).toBe('hello')
+      }
+    })
+  }
+
+  it('旧页面（缺这两行）仍正常解析', () => {
+    const body = rows('\t')
+      .split('\n')
+      .filter((l) => !/^(Travel window|Budget per person)/.test(l))
+      .join('\n')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Best of China — 15 Days')
+  })
+
+  it('留言里伪造这两行不会影响任何字段（只读 Message 之前）', () => {
+    const body = rows('\t').replace('hello', 'Travel window\tJune – September 2027\nBudget per person (NZD)\tAbove $8,000')
+    const r = parseFormNotice({ ...goodInput(), body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.message).toContain('Travel window')
+  })
+
+  it('同样的新增行出现在联系表单正文里也不出错', () => {
+    const base = goodInput()
+    const body = base.body.replace('Submitted\t', 'Travel window\tNot sure yet\nBudget per person (NZD)\tUnder $3,000\nSubmitted\t')
+    const r = parseFormNotice({ ...base, body })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.lead.interest).toBe('Custom Itinerary')
+  })
+})
