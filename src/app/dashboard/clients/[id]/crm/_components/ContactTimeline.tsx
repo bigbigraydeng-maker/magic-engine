@@ -79,6 +79,8 @@ interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
   omittedMessages?: number
+  /** 官网表单里「预计出发时间 / 每人预算」的一行人话；缺失 null（不显示）。 */
+  formFactsLine?: string | null
   error?: string
 }
 
@@ -186,6 +188,8 @@ export interface TimelineSummary {
    * 'order_system' 是给将来订单系统留的口子，今天没有任何代码会产生它。
    */
   stageSource: StageSource | null
+  /** 官网表单里「预计出发时间 · 每人预算」一行人话；只是事实，不参与冷热/阶段判断。 */
+  formFactsLine: string | null
 }
 
 /** changedBy → 来源。只认得出的才说；认不出的机器身份返回 null（宁可不显示，不许说错）。 */
@@ -199,8 +203,8 @@ export function stageSourceOf(changedBy: string | null | undefined): StageSource
 }
 
 /** 从整条线里提炼摘要。线是从旧到新的，所以后面的覆盖前面的。 */
-function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
-  if (timeline.length === 0) return null
+function summarise(timeline: TimelineEntry[], formFactsLine: string | null = null): TimelineSummary | null {
+  if (timeline.length === 0 && !formFactsLine) return null
   const s: TimelineSummary = {
     lastText: null,
     lastWho: null,
@@ -208,6 +212,7 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
     tour: null,
     travelWindow: null,
     stageSource: null,
+    formFactsLine,
   }
   for (const e of timeline) {
     if (e.tour) s.tour = e.tour
@@ -220,7 +225,7 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
       s.lastAt = e.at
     }
   }
-  return s.lastText || s.tour || s.travelWindow || s.stageSource ? s : null
+  return s.lastText || s.tour || s.travelWindow || s.stageSource || s.formFactsLine ? s : null
 }
 
 /**
@@ -472,7 +477,7 @@ function useTimeline(
         if (!alive.current) return
         dataRef.current = json
         setData(json)
-        onSummary?.(summarise(json.timeline ?? []))
+        onSummary?.(summarise(json.timeline ?? [], json.formFactsLine ?? null))
       } catch (e) {
         // 被自己 abort 掉的不是失败，什么都别改 —— 改了就是替一个已经作废的
         // 请求说话，而它说的正好是旧的。
