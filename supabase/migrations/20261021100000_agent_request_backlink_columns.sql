@@ -11,6 +11,13 @@
 -- 触发器同时拒绝：删除已绑定请求的工单；修改已绑定行的主键 id；
 --   插入时带 agent_request_prev_id 的工单（prev 只能经由唯一一次重绑出现）。
 --   删除 execution_items 故意保持允许（调度器会删除待处理项）。
+--
+-- 依赖与边界（独立审查补充）：
+--   · 后继接手这一步，数据库层只核「prev = 旧回链值 + 会话标记 + 表属主角色」，不核新值是不是一条真请求、是不是同一个客户——这完全依赖后面的台账函数 ad_agent_apply_receipt_v1 去核。
+--   · 属主判断取的是表属主（relowner），设计稿 §3.3 写的是台账函数的属主（proowner），两者是同一角色时等价。会话标记任何角色都能设，防线只有「属主角色」；
+--     所以台账迁移合并前必须先做「属主名下引用这两张表的函数集合 + md5 基线核对」（设计稿 §3.3 第三层）。
+--   · 已绑定请求的工单永久删不掉、也不能 TRUNCATE；清理（客户数据删除请求 / 清测试卡）要先由属主 DISABLE 对应触发器，需 PM 授权，做完立刻 ENABLE。
+--   · 回滚办法见文件末尾的注释块。
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -167,10 +174,50 @@ CREATE TRIGGER content_work_orders_agent_request_insert_guard
   WHEN (NEW.agent_request_prev_id IS NOT NULL)
   EXECUTE FUNCTION public.content_work_orders_agent_request_insert_guard();
 
+-- TRUNCATE 不触发行级 DELETE 触发器，所以单独加语句级守卫；表里没有已绑定行时仍允许 TRUNCATE。
+CREATE OR REPLACE FUNCTION public.content_work_orders_agent_request_no_truncate()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.content_work_orders WHERE agent_request_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'content_work_orders has rows bound to an agent request and cannot be truncated'
+      USING ERRCODE = 'integrity_constraint_violation';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS content_work_orders_agent_request_no_truncate ON public.content_work_orders;
+CREATE TRIGGER content_work_orders_agent_request_no_truncate
+  BEFORE TRUNCATE ON public.content_work_orders
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION public.content_work_orders_agent_request_no_truncate();
+
 -- 触发器函数从不被直接调用，按本仓库其他触发器的做法收回执行权限。
 REVOKE EXECUTE ON FUNCTION public.execution_items_agent_request_write_once() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.content_work_orders_agent_request_write_once() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.content_work_orders_agent_request_no_delete() FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.content_work_orders_agent_request_insert_guard() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.content_work_orders_agent_request_no_truncate() FROM PUBLIC, anon, authenticated;
 
 COMMIT;
+
+-- 回滚（仅限台账上线之前；须由表属主在产品负责人批准后执行；回滚会丢失已写入的回链值）：
+-- BEGIN;
+-- DROP TRIGGER IF EXISTS execution_items_agent_request_write_once ON public.execution_items;
+-- DROP TRIGGER IF EXISTS content_work_orders_agent_request_write_once ON public.content_work_orders;
+-- DROP TRIGGER IF EXISTS content_work_orders_agent_request_no_delete ON public.content_work_orders;
+-- DROP TRIGGER IF EXISTS content_work_orders_agent_request_insert_guard ON public.content_work_orders;
+-- DROP TRIGGER IF EXISTS content_work_orders_agent_request_no_truncate ON public.content_work_orders;
+-- DROP FUNCTION IF EXISTS public.execution_items_agent_request_write_once();
+-- DROP FUNCTION IF EXISTS public.content_work_orders_agent_request_write_once();
+-- DROP FUNCTION IF EXISTS public.content_work_orders_agent_request_no_delete();
+-- DROP FUNCTION IF EXISTS public.content_work_orders_agent_request_insert_guard();
+-- DROP FUNCTION IF EXISTS public.content_work_orders_agent_request_no_truncate();
+-- DROP INDEX IF EXISTS public.execution_items_agent_request_idx;
+-- DROP INDEX IF EXISTS public.content_work_orders_agent_request_idx;
+-- ALTER TABLE public.execution_items DROP COLUMN IF EXISTS agent_request_id;
+-- ALTER TABLE public.content_work_orders DROP COLUMN IF EXISTS agent_request_prev_id, DROP COLUMN IF EXISTS agent_request_id;
+-- COMMIT;

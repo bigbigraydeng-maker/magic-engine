@@ -685,4 +685,35 @@ RUN('真 PostgreSQL 集成 —— agent_request 回链列 write-once 语义', ()
       )
     })
   })
+
+  describe('TRUNCATE 守卫（第二位审查补强：TRUNCATE 不触发行级 DELETE 触发器）', () => {
+    beforeAll(async () => {
+      // 前面的用例已经留下了已绑定的行：重建 fixture 和迁移，让这一组从干净状态开始。
+      await pg.query(SETUP_SQL)
+      await pg.query(MIGRATION_SQL)
+      await pg.query(GRANT_SQL)
+    }, 30_000)
+
+    it('表里没有已绑定的行时允许 TRUNCATE', async () => {
+      await newRow('content_work_orders')
+      await pg.query('TRUNCATE public.content_work_orders')
+      const left = await pg.query('SELECT count(*)::int AS n FROM public.content_work_orders')
+      expect(left.rows[0].n).toBe(0)
+    })
+
+    it('有已绑定的行时 TRUNCATE 被拒，行都还在', async () => {
+      const bound = await newRow('content_work_orders')
+      const free = await newRow('content_work_orders')
+      await pg.query('UPDATE public.content_work_orders SET agent_request_id = $1 WHERE id = $2', [
+        randomUUID(),
+        bound,
+      ])
+      await rejectedWith(pg.query('TRUNCATE public.content_work_orders'), 'cannot be truncated')
+      const left = await pg.query(
+        'SELECT count(*)::int AS n FROM public.content_work_orders WHERE id = ANY($1::uuid[])',
+        [[bound, free]],
+      )
+      expect(left.rows[0].n).toBe(2)
+    })
+  })
 })
