@@ -825,3 +825,18 @@ describe('corner layout safe-zone guard', () => {
     assert.doesNotThrow(() => parseListReelProps(b))
   })
 })
+
+describe('revealTitleSize', () => {
+  test('accepts 36..60 and rejects outside', () => {
+    for (const ok of [36, 48, 60]) {
+      const p = valid()
+      p.revealTitleSize = ok
+      assert.equal(parseListReelProps(p).revealTitleSize, ok)
+    }
+    for (const bad of [35, 61, 47.5]) {
+      const p = valid()
+      p.revealTitleSize = bad
+      assert.throws(() => parseListReelProps(p))
+    }
+  })
+})
