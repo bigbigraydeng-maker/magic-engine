@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ upsertConnection: vi.fn() }))
-vi.mock('@/lib/platform-oauth/connection-store', () => ({ upsertConnection: mocks.upsertConnection }))
+const mocks = vi.hoisted(() => ({ upsertConnection: vi.fn(), confirmSocialConnectionWrite: vi.fn() }))
+vi.mock('@/lib/platform-oauth/connection-store', () => ({ upsertConnection: mocks.upsertConnection,
+  confirmSocialConnectionWrite: mocks.confirmSocialConnectionWrite }))
 
 import { buildYoutubeState, isValidChannelId, persistYoutubeConnection, verifyYoutubeState } from '../oauth'
 
@@ -21,7 +22,7 @@ function channelsResponse(id: string): Response {
   return new Response(JSON.stringify({ items: [{ id, snippet: { title: 'T' } }] }), { status: 200 })
 }
 
-beforeEach(() => vi.clearAllMocks())
+beforeEach(() => { vi.clearAllMocks(); mocks.confirmSocialConnectionWrite.mockResolvedValue(true) })
 
 describe('isValidChannelId', () => {
   it('accepts a UC id and rejects handles and junk', () => {
@@ -52,6 +53,15 @@ describe('persistYoutubeConnection', () => {
     expect(mocks.upsertConnection).toHaveBeenCalledWith(
       expect.objectContaining({ provider: 'google_youtube', accountId: CHANNEL, clientId: 'client-1', tokenExpiry: base.tokenExpiry }),
     )
+    expect(mocks.confirmSocialConnectionWrite).toHaveBeenCalledWith(expect.objectContaining({
+      provider: 'google_youtube', accountId: CHANNEL, clientId: 'client-1', tokenExpiry: base.tokenExpiry,
+    }))
+  })
+
+  it('does not report success when the write cannot be read back', async () => {
+    mocks.confirmSocialConnectionWrite.mockResolvedValueOnce(false)
+    const f = vi.fn().mockResolvedValue(channelsResponse(CHANNEL))
+    await expect(persistYoutubeConnection(base, f)).resolves.toEqual({ ok: false, reason: 'save_unverified' })
   })
 
   it('stores nothing when the account manages a different channel', async () => {

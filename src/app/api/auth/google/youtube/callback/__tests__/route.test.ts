@@ -192,4 +192,10 @@ describe('YouTube customer OAuth callback', () => {
     expect(outcome(response)).toBe('connected')
     expect(mocks.claim).toHaveBeenCalledTimes(1)
   })
+
+  it('does not return connected when the grant write cannot be read back', async () => {
+    target = { kind: 'configured', channelId: CHANNEL }
+    mocks.persist.mockResolvedValueOnce({ ok: false, reason: 'save_unverified' })
+    expect(outcome(await GET(request(CHANNEL)))).toBe('save_failed')
+  })
 })

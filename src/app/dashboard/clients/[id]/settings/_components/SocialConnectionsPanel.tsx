@@ -13,7 +13,6 @@ const LABELS: Record<SocialAuthorization, string> = {
 }
 
 const YOUTUBE_OUTCOMES: Record<string, string> = {
-  connected: 'YouTube 频道授权已保存。请核对下方频道名称和编号；公开发布仍需单独授权。',
   cancelled: '你已取消 YouTube 连接，现有配置未改变。',
   no_channel: '此 Google 账号没有返回可连接的 YouTube 频道，请换用拥有目标频道的账号。',
   multiple_channels: '检测到多个频道，本次未建立新连接。请团队核实并配置目标频道后重新连接。',
@@ -30,6 +29,20 @@ const YOUTUBE_OUTCOMES: Record<string, string> = {
 function youtubeOutcomeMessage(value: string | null): string | null {
   return value && Object.prototype.hasOwnProperty.call(YOUTUBE_OUTCOMES, value)
     ? YOUTUBE_OUTCOMES[value] : null
+}
+
+function connectedNotice(platform: 'youtube' | 'instagram', snapshot: SocialConnectionsSnapshot | null, error: boolean) {
+  if (!snapshot) return error
+    ? '平台授权页面已返回，但 ME 暂时无法核对保存记录。请刷新授权记录；不要把回跳视为连接成功。'
+    : '平台授权页面已返回，ME 正在核对保存记录…'
+  const channel = snapshot.channels.find(item => item.platform === platform)
+  const matches = channel?.authorization === 'saved' && Boolean(channel.identity)
+    && (platform !== 'youtube' || Boolean(channel.targetAccountId
+      && channel.identity?.accountId === channel.targetAccountId))
+  if (!matches) return '平台授权页面已返回，但 ME 尚未找到与此客户匹配的可用授权。请刷新授权记录；仍未连接再重新授权。'
+  return platform === 'youtube'
+    ? 'ME 已核对并找到该频道的授权记录。请核对下方账号；公开发布仍需单独确认。'
+    : 'ME 已核对并找到此 Instagram 账号的授权记录。当前仅连接账号资料，尚不支持发布。'
 }
 
 function nextAction(channel: SocialChannelStatus, clientId: string, canManage: boolean) {
@@ -160,14 +173,18 @@ function ChannelCard({ channel, clientId, canManage, onChanged }: {
 
 export function SocialConnectionsPanel({ clientId }: { clientId: string }) {
   const params = useSearchParams()
-  const instagramOutcome = instagramOutcomeMessage(params?.get('instagram') ?? null)
-  const youtubeOutcome = youtubeOutcomeMessage(params?.get('youtube') ?? null)
+  const instagramResult = params?.get('instagram') ?? null
+  const youtubeResult = params?.get('youtube') ?? null
   const [loaded, setLoaded] = useState<{ clientId: string; data: SocialConnectionsSnapshot } | null>(null)
   const snapshot = loaded?.clientId === clientId ? loaded.data : null
   const requestVersion = useRef(0)
   const invalidate = useCallback(() => { requestVersion.current++ }, [])
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(true)
+  const instagramOutcome = instagramResult === 'connected'
+    ? connectedNotice('instagram', snapshot, error) : instagramOutcomeMessage(instagramResult)
+  const youtubeOutcome = youtubeResult === 'connected'
+    ? connectedNotice('youtube', snapshot, error) : youtubeOutcomeMessage(youtubeResult)
   const load = useCallback(async (signal?: AbortSignal) => {
     const version = ++requestVersion.current
     setLoading(true)

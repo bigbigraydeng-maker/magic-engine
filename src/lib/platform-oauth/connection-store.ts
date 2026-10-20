@@ -102,6 +102,36 @@ export async function listSocialConnectionFacts(clientId: string): Promise<Socia
   return data as SocialConnectionFact[]
 }
 
+/** Confirm that the grant just written is the one this client can actually use.
+ * The timestamp checks prevent an older grant for the same account from passing a new callback.
+ * Reads only the credential-free onboarding projection.
+ */
+export async function confirmSocialConnectionWrite(input: {
+  clientId: string
+  provider: 'google_youtube' | 'instagram'
+  accountId: string
+  requiredScopes: readonly string[]
+  tokenExpiry: Date
+  verifiedAt: Date
+  locationName?: string
+}): Promise<boolean> {
+  const rows = (await listSocialConnectionFacts(input.clientId))
+    .filter(row => row.provider === input.provider && row.purpose === 'legacy' && row.status !== 'revoked')
+  if (rows.length !== 1) return false
+  const row = rows[0]
+  const scopes = row.scopes
+  return row.account_id === input.accountId && row.status === 'active'
+    && (input.locationName === undefined || row.location_name === input.locationName)
+    && Array.isArray(scopes)
+    && scopes.every(scope => typeof scope === 'string')
+    && input.requiredScopes.every(scope => scopes.includes(scope))
+    && typeof row.token_expiry === 'string'
+    && Date.parse(row.token_expiry) === input.tokenExpiry.getTime()
+    && input.tokenExpiry.getTime() > Date.now()
+    && typeof row.last_synced_at === 'string'
+    && Date.parse(row.last_synced_at) === input.verifiedAt.getTime()
+}
+
 /** Legacy summary contract: returns [] on DB error. New onboarding uses the strict narrow read above. */
 export async function listConnections(clientId: string): Promise<PlatformConnectionSummary[]> {
   const { data, error } = await supabaseAdmin
