@@ -66,7 +66,7 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <Sequence key={i} from={timing.itemFrom[i]} durationInFrames={timing.itemDur[i]}><Item props={props} index={i} dur={timing.itemDur[i]} />{flash ? <CutFlash /> : null}</Sequence>
       ))}
       <Sequence from={timing.revealFrom} durationInFrames={timing.totalFrames - timing.revealFrom}>
-        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} footnoteSize={props.price.footnoteSize} top={660} scrim={props.footageScrim} layout={props.price.layout} qualifierSize={props.price.qualifierSize} footnoteBackdrop={props.price.footnoteBackdrop} left={90} />
+        <PriceScene backdrop={props.price.backdropClip} brandColor={props.brandColor} fromLabel={props.price.fromLabel} currencyPrefix={props.price.currencyPrefix} amount={props.price.amount} qualifier={props.price.qualifier} dateLine={props.price.dateLine} footnote={props.price.footnote} footnoteSize={props.price.footnoteSize ?? 40} fastReveal top={660} scrim={props.footageScrim} layout={props.price.layout} qualifierSize={props.price.qualifierSize} footnoteBackdrop={props.price.footnoteBackdrop} left={90} />
         <div style={{ position: 'absolute', left: 90, top: 556, width: 900, fontFamily, color: '#fff', fontSize: props.revealTitleSize ?? 60, fontWeight: 900, textShadow: '0 4px 24px rgba(0,0,0,0.6)' }}><Reveal delay={0}><div>{props.revealTitle}</div></Reveal></div>
         {flash ? <CutFlash /> : null}
       </Sequence>
