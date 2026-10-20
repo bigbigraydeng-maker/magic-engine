@@ -1,6 +1,6 @@
-# 应用说明：给 YouTube 回执表加一列（待 PM 本人说 go apply）
+# 应用说明：给 YouTube 回执表加一列（已应用，2026-10-21）
 
-状态：**未应用**。写于 2026-10-21，只读核对过生产库，没有任何写入。
+状态：**已应用**（2026-10-21 约 09:20 新西兰时间，PM 本人回「go apply」后由统管 18 号应用并读回，证据见 docs/ledger/evidence/2026-10-21-youtube-receipts-column-applied--2026-10-21.md）。下面是应用前写的说明，留作记录。
 
 ## 一句话
 内容工厂页（CTS）打不开，是因为页面读 `youtube_publish_receipts.content_post_id`，生产库这张表还没有这一列。应用下面这份迁移就好，`supabase/migrations/20261018130000_youtube_receipts_content_posts.sql`，来自 PR #2864，一直没应用。
