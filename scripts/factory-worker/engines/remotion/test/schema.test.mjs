@@ -737,12 +737,15 @@ describe('price/label layout options', () => {
   test('corner layout, qualifierSize, footnoteBackdrop and itemLabelSize are accepted', () => {
     const props = valid()
     props.price.layout = 'corner'
-    props.price.qualifierSize = 56
+    props.price.qualifier = 'FLIGHTS INCLUDED'
+    props.price.footnote = 'PER PERSON'
+    delete props.price.dateLine
+    props.price.qualifierSize = 48
     props.price.footnoteBackdrop = true
     props.itemLabelSize = 52
     const parsed = parseListReelProps(props)
     assert.equal(parsed.price.layout, 'corner')
-    assert.equal(parsed.price.qualifierSize, 56)
+    assert.equal(parsed.price.qualifierSize, 48)
     assert.equal(parsed.price.footnoteBackdrop, true)
     assert.equal(parsed.itemLabelSize, 52)
   })
@@ -775,5 +778,50 @@ describe('price/label layout options', () => {
     assert.equal(parsed.price.qualifierSize, undefined)
     assert.equal(parsed.price.footnoteBackdrop, undefined)
     assert.equal(parsed.itemLabelSize, undefined)
+  })
+})
+
+describe('corner layout safe-zone guard', () => {
+  test('corner layout rejects oversized qualifier/footnote text', () => {
+    const a = valid()
+    a.price.layout = 'corner'
+    a.price.qualifierSize = 49
+    assert.throws(() => parseListReelProps(a), /右下小卡/)
+    const b = valid()
+    b.price.layout = 'corner'
+    b.price.footnoteSize = 41
+    assert.throws(() => parseListReelProps(b), /右下小卡/)
+    const c = valid()
+    c.price.layout = 'corner'
+    c.price.footnote = 'X'.repeat(27)
+    assert.throws(() => parseListReelProps(c), /右下小卡/)
+    const d = valid()
+    d.price.layout = 'corner'
+    d.price.dateLine = 'Y'.repeat(25)
+    assert.throws(() => parseListReelProps(d), /右下小卡/)
+  })
+  test('corner layout accepts the boundary sizes; centre layout keeps the full range', () => {
+    const a = valid()
+    a.price.layout = 'corner'
+    a.price.qualifierSize = 48
+    a.price.footnoteSize = 40
+    a.price.footnote = 'F'.repeat(26)
+    a.price.qualifier = 'Q'.repeat(26)
+    a.price.dateLine = 'D'.repeat(24)
+    assert.doesNotThrow(() => parseListReelProps(a))
+    const b = valid()
+    b.price.layout = 'center'
+    b.price.qualifierSize = 60
+    b.price.footnoteSize = 60
+    assert.doesNotThrow(() => parseListReelProps(b))
+  })
+  test('footnoteBackdrop must be a boolean; size boundaries 30/60/64 are accepted', () => {
+    const a = valid()
+    a.price.footnoteBackdrop = 'yes'
+    assert.throws(() => parseListReelProps(a))
+    const b = valid()
+    b.price.qualifierSize = 30
+    b.itemLabelSize = 64
+    assert.doesNotThrow(() => parseListReelProps(b))
   })
 })

@@ -3,7 +3,7 @@ import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig } from 'remotion'
 import { Footage, Reveal } from './components'
 import { fontFamily } from './theme'
 
-export const PriceScene: React.FC<{ backdrop: string; brandColor: string; fromLabel: string; currencyPrefix: string; amount: number; qualifier: string; dateLine?: string; footnote: string; footnoteSize?: number; top: number; scrim?: number; layout?: 'center' | 'corner'; qualifierSize?: number; footnoteBackdrop?: boolean }> = ({ backdrop, brandColor, fromLabel, currencyPrefix, amount, qualifier, dateLine, footnote, footnoteSize, top, scrim, layout, qualifierSize, footnoteBackdrop }) => {
+export const PriceScene: React.FC<{ backdrop: string; brandColor: string; fromLabel: string; currencyPrefix: string; amount: number; qualifier: string; dateLine?: string; footnote: string; footnoteSize?: number; top: number; scrim?: number; layout?: 'center' | 'corner'; qualifierSize?: number; footnoteBackdrop?: boolean; left?: number }> = ({ backdrop, brandColor, fromLabel, currencyPrefix, amount, qualifier, dateLine, footnote, footnoteSize, top, scrim, layout, qualifierSize, footnoteBackdrop, left }) => {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   // Long price strings shrink so they stay inside the 960px safe width (9 chars or fewer keep the base size).
@@ -12,8 +12,8 @@ export const PriceScene: React.FC<{ backdrop: string; brandColor: string; fromLa
   const pop = spring({ frame: frame - 4, fps, config: { damping: 11, stiffness: 160, mass: 0.7 } })
   const corner = layout === 'corner'
   const containerStyle: React.CSSProperties = corner
-    ? { position: 'absolute', left: 300, width: 690, top: top + 170, textAlign: 'right', fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.55)' }
-    : { position: 'absolute', left: 60, width: 960, top, textAlign: 'center', fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.55)' }
+    ? { position: 'absolute', left: 270, width: 690, top: top + 120, textAlign: 'right', fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.55)' }
+    : { position: 'absolute', left: left ?? 0, width: left === undefined ? 960 : 1080 - 2 * left, top, textAlign: 'center', fontFamily, color: '#fff', textShadow: '0 4px 24px rgba(0,0,0,0.55)' }
   const footnoteStyle: React.CSSProperties = footnoteBackdrop
     ? { display: 'inline-block', background: 'rgba(0,0,0,0.55)', padding: '6px 20px', borderRadius: 8, opacity: 1, fontSize: footnoteSize ?? 30, fontWeight: 600, letterSpacing: 1 }
     : { fontSize: footnoteSize ?? 30, fontWeight: 600, opacity: 0.92, letterSpacing: 1 }

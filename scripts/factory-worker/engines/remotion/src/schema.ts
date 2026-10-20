@@ -128,6 +128,20 @@ export const ListReelPropsSchema = z
   })
   .strict()
   .superRefine((val, ctx) => {
+    // The corner card sits in the lower right (x 270-960, from y=820) and must stay inside the 1248 safe-zone
+    // floor and the 960 right edge, so its text blocks are capped to one line each.
+    if (val.price.layout === 'corner') {
+      const p = val.price;
+      const tooBig = (p.qualifierSize ?? 40) > 48 || (p.footnoteSize ?? 30) > 40;
+      const tooLong = p.qualifier.length > 26 || p.footnote.length > 26 || (p.dateLine ?? '').length > 24;
+      if (tooBig || tooLong) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['price', 'layout'],
+          message: '右下小卡版式：限定语≤26字且字号≤48、脚注≤26字且字号≤40、日期行≤24字（否则会超出安全区）',
+        });
+      }
+    }
     const beats = val.beats;
     for (let i = 1; i < beats.length; i++) {
       if (beats[i] <= beats[i - 1]) {
