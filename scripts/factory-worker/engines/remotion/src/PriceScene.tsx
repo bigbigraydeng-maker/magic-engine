@@ -2,13 +2,12 @@ import React from 'react'
 import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig } from 'remotion'
 import { Footage, Reveal } from './components'
 import { fontFamily } from './theme'
+import { priceFontSizeFor } from './priceSize'
 
 export const PriceScene: React.FC<{ backdrop: string; brandColor: string; fromLabel: string; currencyPrefix: string; amount: number; qualifier: string; dateLine?: string; footnote: string; footnoteSize?: number; top: number; scrim?: number; layout?: 'center' | 'corner'; qualifierSize?: number; footnoteBackdrop?: boolean; left?: number; fastReveal?: boolean }> = ({ backdrop, brandColor, fromLabel, currencyPrefix, amount, qualifier, dateLine, footnote, footnoteSize, top, scrim, layout, qualifierSize, footnoteBackdrop, left, fastReveal }) => {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
-  // Long price strings shrink so they stay inside the 960px safe width (9 chars or fewer keep the base size).
-  const priceChars = currencyPrefix.length + amount.toLocaleString('en-US').length
-  const priceFontSize = Math.floor((amount >= 10000 ? 146 : 170) * Math.min(1, 9 / priceChars))
+  const priceFontSize = priceFontSizeFor(currencyPrefix, amount, fastReveal === true)
   const pop = spring({ frame: frame - (fastReveal ? 2 : 4), fps, config: { damping: 11, stiffness: 160, mass: 0.7 } })
   const corner = layout === 'corner'
   const containerStyle: React.CSSProperties = corner
