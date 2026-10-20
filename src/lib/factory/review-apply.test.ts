@@ -39,7 +39,7 @@ const FAIL_HUMAN = PASS_HUMAN.map(item => item.key === 'viral_recipe_hook_matche
   ? { ...item, outcome: 'FAIL' as const, detail: 'Hook did not match recipe' }
   : { ...item, outcome: 'NOT_MEASURED' as const })
 const approve = (db: SupabaseClient, id = 'wo-1', reviewer = 'me@x.com', clientId?: string) =>
-  applyApprove(db, id, reviewer, clientId, PASS_HUMAN)
+  applyApprove(db, id, reviewer, clientId, PASS_HUMAN, null)
 const reject = (db: SupabaseClient, id = 'wo-1', feedback = '画面太慢', reviewer = 'me@x.com', clientId?: string) =>
   applyQualityReject(db, id, feedback, reviewer, clientId, FAIL_HUMAN)
 

@@ -4,11 +4,23 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
+import { guardAdmin, requireAdmin, requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { parseReviewBody } from '@/lib/factory/review-actions'
-import { applyApprove, applyBudgetUpdate, applyQualityReject } from '@/lib/factory/review-apply'
+import { applyApprove, applyBudgetUpdate, applyQualityReject, type ApprovalMarker } from '@/lib/factory/review-apply'
 
 export const dynamic = 'force-dynamic'
+
+/**
+ * Marker stored in review_ref so a later ledger check can tell this code path from the Airtable sync path.
+ * Only a 403 (signed in, but not internal staff) is recorded as scoped_admin. An unreadable session (401) is
+ * refused instead: a wrong marker could never be corrected afterwards, because only in_review orders can be approved.
+ */
+async function approvalMarker(): Promise<ApprovalMarker | NextResponse> {
+  const globalAdmin = await requireGlobalAdmin()
+  if (globalAdmin.ok) return { approval_source: 'me_review_route', approver_scope: 'internal_staff' }
+  if (globalAdmin.status === 403) return { approval_source: 'me_review_route', approver_scope: 'scoped_admin' }
+  return NextResponse.json({ error: globalAdmin.error }, { status: globalAdmin.status })
+}
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const guard = await guardAdmin()
@@ -27,9 +39,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = parseReviewBody(body)
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
+  const marker = parsed.action === 'approve' ? await approvalMarker() : null
+  if (marker instanceof NextResponse) return marker
+
   const result =
     parsed.action === 'approve'
-      ? await applyApprove(supabaseAdmin, id, reviewer, undefined, parsed.checklistHuman)
+      ? await applyApprove(supabaseAdmin, id, reviewer, undefined, parsed.checklistHuman, marker)
       : parsed.action === 'reject_quality'
         ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer, undefined, parsed.checklistHuman)
         : await applyBudgetUpdate(supabaseAdmin, id, parsed.newBudget, reviewer)
