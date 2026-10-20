@@ -174,6 +174,36 @@ export interface LaunchWatchConfig {
   expected_launch_on?: string
 }
 
+/**
+ * 按目标盯盘的系列类型：awareness = 播放量；whatsapp = 点广告进 WhatsApp 聊天
+ * （「ME 有没有收到」比对的就是 WhatsApp 会话；以后有 Messenger 等再加新类型，不混用）。
+ */
+export type ObjectiveWatchKind = 'awareness' | 'whatsapp'
+
+/** 按目标盯盘的一个广告系列（只读，不动广告）。 */
+export interface ObjectiveWatchSeries {
+  /** Meta 广告系列编号 */
+  campaign_id: string
+  kind: ObjectiveWatchKind
+  /** 待办 / 回执里给人看的名字，例如「播放量系列」 */
+  label: string
+  /** 播放量系列：同一个人平均看到几次算黄灯 / 红灯（严格大于）；不配 = 3 / 4 */
+  frequency_yellow?: number
+  frequency_red?: number
+}
+
+/**
+ * 按目标盯盘（每小时盯盘函数的第二件事，和 launch_watch 互相独立）：
+ * 播放量系列看完整播放 / 触达 / 频次，聊天系列看开始聊天数 / 单个成本 / ME 有没有收到；
+ * 所有系列都盯「改动后一直没花钱」。系列停了就自动不盯。
+ */
+export interface ObjectiveWatchConfig {
+  series: readonly ObjectiveWatchSeries[]
+  /** 改动后一直没花钱：多少小时黄灯 / 红灯；不配 = 6 / 24 */
+  zero_spend_yellow_hours?: number
+  zero_spend_red_hours?: number
+}
+
 export interface TrackingClientConfig {
   /** Meta 官方广告账户，带 act_ 前缀 */
   ad_account_id: string
@@ -194,6 +224,8 @@ export interface TrackingClientConfig {
   known_issues?: KnownIssue[]
   /** 开投后读回的自动补排窗口；不配 = 不自动补排（只能人手发事件） */
   launch_watch?: LaunchWatchConfig
+  /** 按目标盯盘的系列清单；不配 = 不盯 */
+  objective_watch?: ObjectiveWatchConfig
 }
 
 // ─── 事实（各个读取器的输出，也是判定函数的输入）──────────────────────────────
