@@ -1,10 +1,10 @@
 // P21.J P2 — POST /api/factory/chat(spec me-native-design v0.2)
 // 客户页嵌入的内容工厂对话助手。审核动作层前脸②(打回/调预算走对话,通过仍走 UI 按钮)。
-// authz=guardAdmin;client-scoped(工具只操作 body.client_id 的工单)。stateless(history 前端传)。
+// authz=requireAdminScope(限定客户的管理员只能用自己客户的 client_id);client-scoped(工具只操作 body.client_id 的工单)。stateless(history 前端传)。
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
+import { requireAdminScope, scopeAllowsClient } from '@/lib/auth/require-admin'
 import { chatWithFactory } from '@/lib/factory/chat'
 
 export const dynamic = 'force-dynamic'
@@ -13,10 +13,9 @@ export const maxDuration = 180
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function POST(req: Request) {
-  const guard = await guardAdmin()
-  if (guard) return guard
-  const admin = await requireAdmin()
-  const reviewer = admin.ok ? (admin.user.email ?? 'admin') : 'admin'
+  const admin = await requireAdminScope()
+  if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
+  const reviewer = admin.user.email ?? 'admin'
 
   let body: Record<string, unknown>
   try {
@@ -29,6 +28,11 @@ export async function POST(req: Request) {
   const message = typeof body.message === 'string' ? body.message : ''
   if (!UUID_RE.test(clientId)) return NextResponse.json({ error: 'client_id must be a uuid' }, { status: 400 })
   if (!message.trim()) return NextResponse.json({ error: 'message required' }, { status: 400 })
+
+  if (!scopeAllowsClient(admin.scope, clientId)) {
+    console.warn(`[factory scope] chat denied: ${reviewer} is limited to client ${admin.scope.kind === 'client' ? admin.scope.clientId : 'n/a'}, asked for ${clientId}`)
+    return NextResponse.json({ error: 'Forbidden — you can only use the assistant for your own client' }, { status: 403 })
+  }
 
   const history = Array.isArray(body.history)
     ? (body.history as unknown[])

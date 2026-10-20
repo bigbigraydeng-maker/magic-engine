@@ -1,10 +1,10 @@
 // P21.J ME 原生化 — POST /api/factory/work-orders/[id]/review
 // 审核动作层前脸①(UI 按钮)。前脸②=嵌入 Claude 对话框(/api/factory/chat),两者共用
-// review-apply.ts 同一实现。authz=guardAdmin(点击前 403);花钱闸在 applyApprove 内服务端强制。
+// review-apply.ts 同一实现。authz=requireAdminScope(点击前 403;限定客户的管理员只能审自己客户的工单,批准只给内部员工);花钱闸在 applyApprove 内服务端强制。
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin, requireAdmin, requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { requireAdminScope, requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { parseReviewBody } from '@/lib/factory/review-actions'
 import { applyApprove, applyBudgetUpdate, applyQualityReject, type ApprovalMarker } from '@/lib/factory/review-apply'
 
@@ -23,10 +23,10 @@ async function approvalMarker(): Promise<ApprovalMarker | NextResponse> {
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await guardAdmin()
-  if (guard) return guard
-  const admin = await requireAdmin()
-  const reviewer = admin.ok ? (admin.user.email ?? 'admin') : 'admin'
+  const admin = await requireAdminScope()
+  if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
+  const reviewer = admin.user.email ?? 'admin'
+  const scopedClientId = admin.scope.kind === 'client' ? admin.scope.clientId : undefined
 
   const { id } = await params
 
@@ -39,15 +39,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = parseReviewBody(body)
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
+  if (parsed.action === 'approve' && admin.scope.kind !== 'global') {
+    console.warn(`[factory scope] approve denied: ${reviewer} is limited to client ${scopedClientId}, approving publishes for real`)
+    return NextResponse.json({ error: 'Forbidden — only internal staff can approve a work order for publishing' }, { status: 403 })
+  }
+
   const marker = parsed.action === 'approve' ? await approvalMarker() : null
   if (marker instanceof NextResponse) return marker
 
   const result =
     parsed.action === 'approve'
-      ? await applyApprove(supabaseAdmin, id, reviewer, undefined, parsed.checklistHuman, marker)
+      ? await applyApprove(supabaseAdmin, id, reviewer, scopedClientId, parsed.checklistHuman, marker)
       : parsed.action === 'reject_quality'
-        ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer, undefined, parsed.checklistHuman)
-        : await applyBudgetUpdate(supabaseAdmin, id, parsed.newBudget, reviewer)
+        ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer, scopedClientId, parsed.checklistHuman)
+        : await applyBudgetUpdate(supabaseAdmin, id, parsed.newBudget, reviewer, scopedClientId)
 
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
   return NextResponse.json({ ok: true, ...result.data })

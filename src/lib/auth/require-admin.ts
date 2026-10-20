@@ -59,8 +59,9 @@ export async function guardAdmin(): Promise<NextResponse | null> {
  *
  * 判据很简单：`allowedClientId` 有值 = 这个人被限定在某一个客户里 = 不该碰平台级开关。
  *
- * 用在**影响多个客户**的写接口上（跨客户经验开关、全局配置…）；
- * 只动单个客户数据的接口继续用 `guardAdmin`。
+ * 用在**影响多个客户**的写接口、花钱 / 对外发布 / 运维类动作上；
+ * 按客户操作的接口用 `requireAdminScope` + `scopeAllowsClient` 核客户 ——
+ * 只套 `guardAdmin` 会放行限定客户的管理员去碰别的客户。
  */
 export async function guardGlobalAdmin(): Promise<NextResponse | null> {
   const result = await requireGlobalAdmin()
@@ -93,4 +94,54 @@ export async function requireGlobalAdmin(): Promise<AdminResult> {
     }
   }
   return { ok: true, user: session.user }
+}
+
+/** 管理员的客户范围：全局（内部员工），或被限定在某一个客户（DEMO_ADMINS）。 */
+export type AdminScope = { kind: 'global' } | { kind: 'client'; clientId: string }
+
+export type ScopedAdminResult =
+  | { ok: true; user: User; scope: AdminScope }
+  | { ok: false; status: 401 | 403; error: string }
+
+/**
+ * 一次读取同时给出「是不是管理员」和「被限定在哪个客户」。
+ *
+ * 范围和授权必须来自同一次读取。读不到身份一律拒，不会退成全局管理员 ——
+ * 原来 guardAdmin + 第二次 requireAdmin 的写法，第二次读失败时会被当成没有限定。
+ *
+ * 只认环境变量里的管理员，和 requireAdmin / requireGlobalAdmin 同一个判据；
+ * 库里 scoped_admin=true 的账号这里仍然是 403。
+ *
+ * 邮箱为空一律拒：`getUserPermissions('')` 在 ADMIN_EMAILS 多一个逗号时会返回全局管理员。
+ *
+ * 客户 id 统一转小写、去首尾空白再比较（见 scopeAllowsClient）。
+ */
+export async function requireAdminScope(): Promise<ScopedAdminResult> {
+  const session = await requireSession()
+  if (!session.ok) return session
+
+  const email = (session.user.email ?? '').trim()
+  if (!email) {
+    return { ok: false, status: 403, error: 'Forbidden' }
+  }
+
+  const perms = getUserPermissions(email)
+  if (!perms || perms.role !== 'admin') {
+    return { ok: false, status: 403, error: 'Forbidden' }
+  }
+
+  if (perms.allowedClientId === null) {
+    return { ok: true, user: session.user, scope: { kind: 'global' } }
+  }
+
+  return {
+    ok: true,
+    user: session.user,
+    scope: { kind: 'client', clientId: perms.allowedClientId.trim().toLowerCase() },
+  }
+}
+
+/** 全局管理员恒可；被限定在某个客户的管理员只能碰自己那一个（比较时不区分大小写、忽略首尾空白）。 */
+export function scopeAllowsClient(scope: AdminScope, clientId: string): boolean {
+  return scope.kind === 'global' || scope.clientId === clientId.trim().toLowerCase()
 }
