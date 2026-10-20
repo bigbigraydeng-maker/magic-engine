@@ -547,3 +547,78 @@ describe('completeWorkOrder — 并发', () => {
     expect(!r.ok && r.status).toBe(409)
   })
 })
+
+describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
+  const ATMOS_PASS = { durationSec: 15, fadeInSec: 1, fadeOutSec: 1.5, line: { text: 'The skyline at dusk', sourceUrl: 'https://example.test/a', sourceQuote: 'The skyline at dusk.' } }
+  const ATMOS_EMPTY = { durationSec: 15, line: null }
+  const woWith = (props: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    ...WO,
+    brief: { segments: [], remotion: { template: 'atmosphere', props, ...extra } },
+  }) as Record<string, unknown>
+  const CAP = { capabilities: ['content_substance_v1'] }
+
+  const run = (wo: Record<string, unknown>, evidence: Record<string, unknown> | null = null) => {
+    const m = mockSupabase(happyQueue())
+    return completeWorkOrder(m.db, { ...PARAMS, wo, mediaEvidence: evidence as never }).then((r) => ({ r, m }))
+  }
+  const savedOutput = (m: ReturnType<typeof mockSupabase>) =>
+    m.updates.find((u) => u.table === 'content_work_orders')!.payload.output as Record<string, unknown>
+
+  beforeEach(() => { delete process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE })
+
+  it('non-remotion orders are untouched by the gate', async () => {
+    const { r, m } = await run(WO as Record<string, unknown>)
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toBeUndefined()
+  })
+
+  it('warn mode (default): a text-less reel still completes, with the server verdict kept for audit', async () => {
+    const { r, m } = await run(woWith(ATMOS_EMPTY))
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toMatchObject({ server: { verdict: 'fail' }, enforced: false, capable: false })
+  })
+
+  it('enforce: a text-less reel is refused with 422 before any database write', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY), mediaEvidence: CAP as never })
+    expect(r).toMatchObject({ ok: false, status: 422, error: 'content_substance_failed' })
+    expect(m.consumed()).toBe(0)
+    expect(m.updates).toHaveLength(0)
+  })
+
+  it('enforce: a passing reel from a worker without the capability is refused (old worker)', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_PASS), mediaEvidence: null })
+    expect(r).toMatchObject({ ok: false, status: 422, error: 'content_substance_missing' })
+    expect(m.consumed()).toBe(0)
+  })
+
+  it('enforce: a passing reel with the capability completes and records enforced=true', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const { r, m } = await run(woWith(ATMOS_PASS), CAP)
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toMatchObject({ server: { verdict: 'pass' }, enforced: true, capable: true })
+  })
+
+  it('enforce: asset_only material passes the gate and is marked output.deliverable', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const { r, m } = await run(woWith(ATMOS_EMPTY, { deliverable: 'asset_only' }), CAP)
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).deliverable).toBe('asset_only')
+  })
+
+  it('enforce: a mistyped deliverable is not material (still refused)', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY, { deliverable: 'Asset_Only' }), mediaEvidence: CAP as never })
+    expect(r).toMatchObject({ ok: false, status: 422, error: 'content_substance_failed' })
+  })
+
+  it('a worker that reports pass while the server computes fail is flagged as a mismatch', async () => {
+    const { r, m } = await run(woWith(ATMOS_EMPTY), { content_substance: { verdict: 'pass', kinds: ['selling_line'], textSeconds: 5, reason: 'x' }, ...CAP })
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toMatchObject({ mismatch: true })
+  })
+})
