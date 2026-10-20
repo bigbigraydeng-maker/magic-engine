@@ -57,29 +57,33 @@ type Items = Schedule['days'][number]['items']
 
 const fmtMoney = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2))
 
-function adsParts(items: Items): { budgets: number[]; pause: string | null; raw: string[] } {
+function adsParts(items: Items): { budgets: number[]; pauses: string[]; raw: string[] } {
   const budgets: number[] = []
   const raw: string[] = []
-  let pause: string | null = null
+  const pauses: string[] = []
   for (const it of items) {
     if (it.kind !== 'ads_start') continue
     const m = /日预算 ([\d.]+)/.exec(it.text)
     if (m) budgets.push(Number(m[1]))
     else raw.push(it.text.split(ADS_APPROVAL_PAREN).join(''))
     const at = it.text.indexOf(PAUSE_MARK)
-    if (at >= 0 && pause === null) pause = it.text.slice(at + PAUSE_MARK.length)
+    if (at >= 0) {
+      const p = it.text.slice(at + PAUSE_MARK.length)
+      if (!pauses.includes(p)) pauses.push(p)
+    }
   }
-  return { budgets, pause, raw }
+  return { budgets, pauses, raw }
 }
 
 /** 同一天的广告合成一句：每天预算合计（逐条相加）；不再写受众（库里只有数字编号，PM 看不懂）。 */
 function adsSentence(items: Items, lead: string): string | null {
-  const { budgets, pause, raw } = adsParts(items)
+  const { budgets, pauses, raw } = adsParts(items)
   const parts: string[] = []
   if (budgets.length > 0) {
     const total = budgets.reduce((a, b) => a + b, 0)
     const each = budgets.length > 1 ? `（${budgets.map(fmtMoney).join(' + ')}）` : ''
-    parts.push(`${lead}每天预算合计 ${fmtMoney(total)}${each}${pause ? `；暂停区间 ${pause}` : ''}`)
+    const pause = pauses.length > 0 ? `；其中有广告在计划里写了暂停区间：${pauses.join('；另有 ')}` : ''
+    parts.push(`${lead}每天预算合计 ${fmtMoney(total)}${each}，币种以广告账户为准${pause}`)
   }
   parts.push(...raw)
   return parts.length > 0 ? parts.join('；') : null
@@ -96,8 +100,8 @@ function dayParts(items: Items, ctx: { firstStart: boolean; phase: ViewPhase | n
     if (it.kind === 'reel') reels++
     else if (it.kind === 'blog' || it.kind === 'newsletter') parts.push(it.text)
   }
-  if (reels === 1) parts.push('短视频')
-  else if (reels > 1) parts.push(`短视频 ×${reels}`)
+  if (reels === 1) parts.push('短视频（走视频工厂）')
+  else if (reels > 1) parts.push(`短视频 ×${reels}（走视频工厂）`)
   return parts
 }
 
@@ -114,7 +118,8 @@ function dayKinds(items: Items): ScheduleKind[] {
 }
 
 function buildLines(schedule: Schedule, today: string, phases: ViewPhase[]): ViewDayLine[] {
-  const sorted = [...phases].sort((a, b) => a.start_date.localeCompare(b.start_date))
+  // 阶段开始日不是真实日期时（页面上会显示红字「起止日期不是真实日期」）不参与算日期，免得整页崩
+  const sorted = phases.filter(p => isRealDate(p.start_date)).sort((a, b) => a.start_date.localeCompare(b.start_date))
   const startOf = new Map(sorted.map(p => [p.start_date, p]))
   const byDate = new Map(schedule.days.map(d => [d.date, d.items]))
   const dates = Array.from(new Set([...byDate.keys(), ...sorted.slice(1).map(p => p.start_date)])).sort()
@@ -159,14 +164,16 @@ function routineLine(schedule: Schedule): string {
 }
 
 const SUMMARY_ORDER: { kind: ScheduleKind; label: string }[] = [
-  { kind: 'ads_start', label: '广告' }, { kind: 'newsletter', label: '邮件' },
+  { kind: 'ads_start', label: '广告预算变动' }, { kind: 'newsletter', label: '邮件' },
   { kind: 'blog', label: '博客' }, { kind: 'reel', label: '短视频' },
 ]
 
 function weekSummary(weekStart: string, counts: Partial<Record<ScheduleKind, number>>, hasSwitch: boolean, past: boolean): string {
-  const head = `${weekStart.slice(5).replace('-', '/')} 周`
-  const parts = SUMMARY_ORDER.filter(k => (counts[k.kind] ?? 0) > 0).map(k => `${k.label} ${counts[k.kind]}`)
-  const body = parts.length > 0 ? `${head} · ${parts.join(' · ')}` : hasSwitch ? `${head} · 阶段切换` : head
+  const head = `${weekStart} 周`
+  const parts = SUMMARY_ORDER.filter(k => (counts[k.kind] ?? 0) > 0)
+    .map(k => (k.kind === 'ads_start' ? k.label : `${k.label} ${counts[k.kind]}`))
+  if (hasSwitch) parts.unshift('阶段切换')
+  const body = parts.length > 0 ? `${head} · ${parts.join(' · ')}` : head
   return past ? `${body}（已过）` : body
 }
 

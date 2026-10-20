@@ -34,14 +34,14 @@ describe('buildScheduleView', () => {
   })
   it('只有第一阶段第一天写「开投」，同一天多条广告合成一句、不带数字受众', () => {
     const first = lines.find(d => d.date === '2026-10-19')
-    expect(first?.text).toBe('开投：每天预算合计 60（15 + 45）')
+    expect(first?.text).toBe('开投：每天预算合计 60（15 + 45），币种以广告账户为准')
     expect(first?.text).not.toContain('52551185747273')
     expect(lines.filter(d => d.text.includes('开投：'))).toHaveLength(1)
   })
   it('后面阶段首日写进入阶段（用阶段开始日，不是该阶段第一件事的日子）', () => {
     const d = lines.find(l => l.phaseSwitch === '收割')
     expect(d?.date).toBe('2026-11-02')
-    expect(d?.text).toBe('进入阶段：收割，每天预算合计 20')
+    expect(d?.text).toBe('进入阶段：收割，每天预算合计 20，币种以广告账户为准')
     expect(d?.text).not.toContain('开投')
   })
   it('阶段只有每周 1 帖时，阶段切换日也不会被挪到第一个帖子的日子', () => {
@@ -66,6 +66,50 @@ describe('buildScheduleView', () => {
     const v = buildScheduleView(expandPromoSchedule(reels, PB), today, phases)
     const total = v.weeks.reduce((n, w) => n + (w.counts.reel ?? 0), 0)
     expect(total).toBe(expandPromoSchedule(reels, PB).totals.reel)
+  })
+  it('两个社媒步骤同一天各排一条短视频 → 「短视频 ×2」，折叠小结总数仍与逐日相加一致', () => {
+    const two: PromoSpec = { ...spec, phases: [{ ...spec.phases[0], steps: [social(3, 4, 's1'), social(3, 4, 's2')] }] }
+    const sch = expandPromoSchedule(two, PB)
+    const v = buildScheduleView(sch, today, phases)
+    expect(v.weeks.flatMap(w => w.days).some(d => d.text.includes('短视频 ×2'))).toBe(true)
+    expect(v.weeks.reduce((n, w) => n + (w.counts.reel ?? 0), 0)).toBe(sch.totals.reel)
+  })
+  it('折叠周标题：广告不写数字、带年份、有阶段切换直接写「阶段切换」', () => {
+    const folded = view.weeks.filter(w => !w.expanded)
+    expect(folded.every(w => !/广告 \d/.test(w.summary))).toBe(true)
+    expect(folded[0].summary).toMatch(/^\d{4}-\d{2}-\d{2} 周/)
+    expect(view.weeks.find(w => w.weekStart === '2026-11-02')?.summary).toContain('阶段切换')
+  })
+  it('多条广告的不同暂停区间都显示，且保留「币种以广告账户为准」', () => {
+    const paused = (id: string, from: string, to: string): PromoStep => {
+      const a = ads(id, 1000) as unknown as { settings: { paused_ranges: { from: string; to: string }[] } }
+      a.settings.paused_ranges = [{ from, to }]
+      return a as unknown as PromoStep
+    }
+    const two: PromoSpec = { ...spec, phases: [{ ...spec.phases[0], steps: [paused('x1', '2026-10-22', '2026-10-23'), paused('x2', '2026-10-25', '2026-10-26')] }] }
+    const v = buildScheduleView(expandPromoSchedule(two, PB), today, phases)
+    const text = v.weeks.flatMap(w => w.days).find(d => d.date === '2026-10-19')?.text ?? ''
+    expect(text).toContain('2026-10-22 至 2026-10-23')
+    expect(text).toContain('2026-10-25 至 2026-10-26')
+    expect(text).toContain('币种以广告账户为准')
+  })
+  it('短视频保留「走视频工厂」提醒', () => {
+    expect(lines.some(d => d.text.includes('短视频（走视频工厂）') || d.text.includes('走视频工厂'))).toBe(true)
+  })
+  it('阶段开始日不是真实日期（月13/日32/11-31/02-30）不崩，页面仍显示红字提示', () => {
+    for (const bad of ['2026-13-01', '2026-10-32', '2026-11-31', '2026-02-30']) {
+      const badSpec: PromoSpec = { ...spec, phases: [{ ...spec.phases[0], start_date: bad }, spec.phases[1]] }
+      const sch = expandPromoSchedule(badSpec, PB)
+      const bp = badSpec.phases.map(p => ({ id: p.id, name: p.name, start_date: p.start_date }))
+      expect(() => buildScheduleView(sch, today, bp)).not.toThrow()
+      const html = renderToStaticMarkup(createElement(ScheduleTable, { schedule: sch, mode: 'preview', today, phases: bp }))
+      expect(sch.error).not.toBeNull()
+      expect(html).toContain('起止日期不是真实日期')
+    }
+  })
+  it('今天没有要做的事时，本周标题写明「今天 MM-DD 没有特别要做的事」', () => {
+    const html = renderToStaticMarkup(createElement(ScheduleTable, { schedule: sched, mode: 'preview', today: '2026-10-23', phases }))
+    expect(html).toContain('今天 10-23 没有特别要做的事')
   })
   it('每天最多一行', () => {
     const dates = lines.map(d => d.date)

@@ -126,7 +126,7 @@ export function PromoPlanClient() {
   }
 
   const approve = board ? approveButtonState(board) : null
-  // 「今天」按悉尼日期（澳新客户的日历日），不用 UTC，免得早上少算一天
+  // 「今天」按新西兰日期（页面是 NZ 的），不用 UTC，免得凌晨少算一天
   const todayIso = todayInNz()
   // 展示用的推广结构：示例开着看示例，否则看这份计划自己的
   const shownSpec = useMemo(

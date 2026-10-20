@@ -6,7 +6,7 @@ owner: pm
 decided_on: 2026-10-20
 source: session:ccc90b3d
 verify_by: 2026-10-23
-verify_how: 打开 /dashboard/clients/<id>/promo-plan：排期表默认只展开本周和下周，更远的按周折叠成一行小结；帖子/快拍不逐日列，「需要 PM 另行批准」只在表头出现一次；手机宽度不横向滚动
+verify_how: 打开 /dashboard/clients/<id>/promo-plan：排期表默认只展开本周和下周，更远的按周折叠成一行小结；帖子/快拍不逐日列（表头写每周几条）；「目前广告没有投」只在页面确认没有在跑广告时才显示；今天那行有黄色「今天」标记；说明默认收起；手机宽度不横向滚动
 done_on: 2026-10-20
 done_ref: pr:2942
 ---
