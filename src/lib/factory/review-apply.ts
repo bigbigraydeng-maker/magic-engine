@@ -76,9 +76,10 @@ export async function applyApprove(
   supabase: SupabaseClient,
   id: string,
   reviewer: string,
-  clientId?: string,
+  clientId: string | undefined,
   checklistHuman: unknown = null,
-  marker?: ApprovalMarker,
+  /** Required on purpose: every caller must decide. null = write no marker (the ledger will then refuse this approval). */
+  marker: ApprovalMarker | null,
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
@@ -109,7 +110,7 @@ export async function applyApprove(
         approved_by: reviewer,
         approved_at: new Date().toISOString(),
         checklist_human: checkedHuman.items,
-        ...(marker ?? {}),
+        ...(marker ? { approval_source: marker.approval_source, approver_scope: marker.approver_scope } : {}),
       },
       updated_at: new Date().toISOString(),
     })

@@ -10,10 +10,16 @@ import { applyApprove, applyBudgetUpdate, applyQualityReject, type ApprovalMarke
 
 export const dynamic = 'force-dynamic'
 
-/** Marker stored in review_ref so a later ledger check can tell this code path from the Airtable sync path. */
-async function approvalMarker(): Promise<ApprovalMarker> {
+/**
+ * Marker stored in review_ref so a later ledger check can tell this code path from the Airtable sync path.
+ * Only a 403 (signed in, but not internal staff) is recorded as scoped_admin. An unreadable session (401) is
+ * refused instead: a wrong marker could never be corrected afterwards, because only in_review orders can be approved.
+ */
+async function approvalMarker(): Promise<ApprovalMarker | NextResponse> {
   const globalAdmin = await requireGlobalAdmin()
-  return { approval_source: 'me_review_route', approver_scope: globalAdmin.ok ? 'internal_staff' : 'scoped_admin' }
+  if (globalAdmin.ok) return { approval_source: 'me_review_route', approver_scope: 'internal_staff' }
+  if (globalAdmin.status === 403) return { approval_source: 'me_review_route', approver_scope: 'scoped_admin' }
+  return NextResponse.json({ error: globalAdmin.error }, { status: globalAdmin.status })
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -33,7 +39,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = parseReviewBody(body)
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
-  const marker: ApprovalMarker | undefined = parsed.action === 'approve' ? await approvalMarker() : undefined
+  const marker = parsed.action === 'approve' ? await approvalMarker() : null
+  if (marker instanceof NextResponse) return marker
 
   const result =
     parsed.action === 'approve'

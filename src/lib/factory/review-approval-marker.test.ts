@@ -94,11 +94,23 @@ describe('applyApprove — approval marker', () => {
       { data: wo, error: null },
       { data: [{ id: 'wo-1' }], error: null },
     ])
-    const r = await applyApprove(db, 'wo-1', 'me@x.com', undefined, PASS_HUMAN)
+    const r = await applyApprove(db, 'wo-1', 'me@x.com', undefined, PASS_HUMAN, null)
     expect(r.ok).toBe(true)
     const ref = written(updates).review_ref ?? {}
     expect('approval_source' in ref).toBe(false)
     expect('approver_scope' in ref).toBe(false)
+  })
+
+  it('extra keys on a marker object can never override approved_by', async () => {
+    const { db, updates } = mockSupabase([
+      { data: IN_REVIEW_WO, error: null },
+      { data: [{ id: 'wo-1' }], error: null },
+    ])
+    const sneaky = { approval_source: 'me_review_route', approver_scope: 'internal_staff', approved_by: 'someone-else@x.com' } as const
+    const marker: ApprovalMarker = sneaky
+    const r = await applyApprove(db, 'wo-1', 'me@x.com', undefined, PASS_HUMAN, marker)
+    expect(r.ok).toBe(true)
+    expect(written(updates).review_ref?.approved_by).toBe('me@x.com')
   })
 
   it('budget gate refuses before any update even with a marker', async () => {

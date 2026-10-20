@@ -93,6 +93,15 @@ describe('review route — approval marker', () => {
     )
   })
 
+  it('会话读不到（requireGlobalAdmin 401）→ 返回 401，不批准、不写错误标记', async () => {
+    mocks.requireGlobalAdmin.mockResolvedValue({ ok: false, status: 401, error: 'Unauthorized' })
+
+    const res = await callRoute()
+
+    expect(res.status).toBe(401)
+    expect(mocks.applyApprove).not.toHaveBeenCalled()
+  })
+
   it('reject_quality 不查全站管理员、不走 applyApprove', async () => {
     mocks.parseReviewBody.mockReturnValue({
       ok: true,
