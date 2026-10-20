@@ -3,6 +3,7 @@ import {
   applyFormNotices,
   emptyFormStats,
   formLeadRaw,
+  formLeadMetadata,
   mirrorFormThread,
   FORM_NEW_PEOPLE_CAP,
   type FormIngestDeps,
@@ -210,5 +211,52 @@ describe('第二期：Tour enquiry（团页表单）', () => {
     const { out } = await run([tourMsg()], tourDeps('jane@example.com'))
     expect(out[0].formLead?.message).toBe('when is the next departure')
     expect(out[0].formLead?.email).toBe('jane@example.com')
+  })
+})
+
+describe('出发时间 / 预算进触点 metadata', () => {
+  const lead = { kind: 'tour_enquiry' as const, email: 'jane@example.com', name: 'Jane', phone: '0211234567', interest: 'X', message: 'hi', submittedAt: null, formUrl: '/t' }
+
+  it('formLeadMetadata：只含有值的稳定代码；都缺 → null（不写 null、不当 0）', () => {
+    expect(formLeadMetadata({ ...lead, travelWindow: 'mar_may_2027', budgetBand: '3000_5000' })).toEqual({ form_travel_window: 'mar_may_2027', form_budget_band: '3000_5000' })
+    expect(formLeadMetadata({ ...lead, travelWindow: 'not_sure', budgetBand: null })).toEqual({ form_travel_window: 'not_sure' })
+    expect(formLeadMetadata({ ...lead, travelWindow: null, budgetBand: null })).toBeNull()
+    expect(formLeadMetadata(lead)).toBeNull()
+  })
+
+  it('mirrorFormThread 把稳定代码作为 metadata 传给 mirrorWebFormLead', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    await mirrorFormThread({
+      clientId: 'c1',
+      messages: [{ id: 'mid-9', receivedAt: '2026-10-20T01:00:00Z', formLead: { ...lead, travelWindow: 'jun_sep_2027', budgetBand: 'above_8000' } }],
+      mirror: async (i) => { calls.push(i as unknown as Record<string, unknown>); return { contactId: 'ct-9', skipped: null } },
+    })
+    expect(calls[0].metadata).toEqual({ form_travel_window: 'jun_sep_2027', form_budget_band: 'above_8000' })
+  })
+
+  it('两项缺失时 metadata 为 null（与改动前一致）', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    await mirrorFormThread({
+      clientId: 'c1',
+      messages: [{ id: 'mid-10', receivedAt: 'x', formLead: lead }],
+      mirror: async (i) => { calls.push(i as unknown as Record<string, unknown>); return { contactId: 'ct-10', skipped: null } },
+    })
+    expect(calls[0].metadata).toBeNull()
+  })
+
+  it('applyFormNotices：映射不到的值计 unknownExtras', async () => {
+    const d: FormIngestDeps = {
+      fetchSource: async () => ({
+        ok: true,
+        source: {
+          body: `New tour enquiry — Example website\nName\tJane\nEmail\tu@example.com\nTour\tX\nTravel window\tEarly 2028\nSubmitted\t2026-10-20T01:00:00Z\n\nMessage\n\nhi`,
+          replyTo: ['u@example.com'],
+          headers: GOOD_HEADERS,
+        },
+      }),
+      findContactByEmail: async () => null,
+    }
+    const { stats } = await run([msg('u1', { subject: 'Tour enquiry: X — Jane' })], d)
+    expect(stats.unknownExtras).toBe(1)
   })
 })

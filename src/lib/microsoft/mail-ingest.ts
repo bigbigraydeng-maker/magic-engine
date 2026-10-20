@@ -702,6 +702,13 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     stats: formStats,
   })
 
+  // 官网改了出发时间/预算的选项文案 → 映射不到稳定代码（已存空）：不能静默，留一条日志（不含任何客人信息）。
+  if (formStats.unknownExtras > 0) {
+    console.warn(
+      `[mail-form] ${formStats.unknownExtras} 封网站表单的出发时间/预算选项映射不到稳定代码（官网可能改了选项），已存空；邮箱 ${target.mailbox}`,
+    )
+  }
+
   const plan = planMailIngest(readable, { ownDomains })
 
   // **从旧到新处理**，配合下面「一条失败就停」。

@@ -5,6 +5,8 @@
  * 本模块只包含纯函数，不依赖 supabase / 网络。
  */
 
+import { budgetBandCode, travelWindowCode, type BudgetBandCode, type TravelWindowCode } from '@/lib/crm/form-facts'
+
 export interface FormNoticeCandidateArgs {
   direction: 'inbound' | 'outbound'
   subject: string | null
@@ -54,6 +56,12 @@ export interface FormNoticeLead {
   message: string | null
   submittedAt: string | null
   formUrl: string | null
+  /** 官网「预计出发时间」答案的稳定代码；缺失 / 映射不到为 null（映射不到会进 unknownExtras）。 */
+  travelWindow?: TravelWindowCode | null
+  /** 官网「每人预算」答案的稳定代码。 */
+  budgetBand?: BudgetBandCode | null
+  /** 填了但映射不到代码的项（'travel_window' / 'budget_band'）—— 回执计 unknown，不乱存原文。 */
+  unknownExtras?: string[]
 }
 
 export type FormNoticeReason =
@@ -123,7 +131,7 @@ function parseHeaderBlock(body: string): {
   // 真实通知里多词标签后面只有一个空格（"Travel interest Custom Itinerary"），单词标签才是多空格/制表符。
   // 已知的多词标签单独认，不放宽通用规则（放宽会把留言里的句子当标签）。
   // 已知标签（单词或多词）后面可能只有一个空格：长的写前面，免得 'Tour' 抢走 'Tour pages viewed'。
-  const multiWordRe = /^(Travel interest|Form URL|First landing page|Submitted from|Arrived via|Tour pages viewed|Ad source|Facebook click ID|Tour|URL|Source|Submitted|Name|Email|Phone)\s+(.*)$/i
+  const multiWordRe = /^(Travel interest|Form URL|First landing page|Submitted from|Arrived via|Tour pages viewed|Ad source|Facebook click ID|Travel window|Budget per person \(NZD\)|Tour|URL|Source|Submitted|Name|Email|Phone)\s+(.*)$/i
 
   let messageStart = -1
   for (let i = 0; i < lines.length; i++) {
@@ -273,10 +281,22 @@ export function parseFormNotice(input: FormNoticeInput): FormNoticeParse {
     return { ok: false, reason: 'email_mismatch' }
   }
 
+  // 新增的两个必填问题（旧页面提交的邮件没有这两行 → 缺失就是 null，不当 0、不报错）。
+  const rawWindow = fields.get('travel window') ?? null
+  const rawBudget = fields.get('budget per person (nzd)') ?? null
+  const travelWindow = travelWindowCode(rawWindow)
+  const budgetBand = budgetBandCode(rawBudget)
+  const unknownExtras: string[] = []
+  if (rawWindow && rawWindow.trim() && !travelWindow) unknownExtras.push('travel_window')
+  if (rawBudget && rawBudget.trim() && !budgetBand) unknownExtras.push('budget_band')
+
   return {
     ok: true,
     lead: {
       kind,
+      travelWindow,
+      budgetBand,
+      unknownExtras,
       email: bodyEmail,
       name,
       phone,

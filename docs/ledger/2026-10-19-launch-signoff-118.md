@@ -6,7 +6,7 @@ owner: pm
 decided_on: 2026-10-19
 source: session:ccc90b3d
 verify_by: 2026-10-23
-verify_how: PM 点头后：①apply 迁移 20261019120000_launch_signoff_events.sql；②Render 配 LAUNCH_SIGNOFF_SIGNERS（PM 邮箱）、LAUNCH_SIGNOFF_EXECUTOR_KEY、LAUNCH_SIGNOFF_REVIEWER_KEY（两把不同）；③打开 /dashboard/launch-signoff 应显示 7 项「没测」且签字按钮灰着；④119 用执行钥匙写 T1 回执 → 18 用复核钥匙复核 → 页面 T1 变「通过」；⑤匿名访问该表应读到 0 行
+verify_how: PM 点头后：①apply 迁移 launch_signoff_events 迁移（10-19 那份）；②Render 配 LAUNCH_SIGNOFF_SIGNERS（PM 邮箱）、LAUNCH_SIGNOFF_EXECUTOR_KEY、LAUNCH_SIGNOFF_REVIEWER_KEY（两把不同）；③打开 /dashboard/launch-signoff 应显示 7 项「没测」且签字按钮灰着；④119 用执行钥匙写 T1 回执 → 18 用复核钥匙复核 → 页面 T1 变「通过」；⑤匿名访问该表应读到 0 行
 done_on: 2026-10-19
 done_ref: doc:src/lib/launch-signoff/service.ts
 ---
