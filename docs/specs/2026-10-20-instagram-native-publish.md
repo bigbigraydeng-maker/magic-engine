@@ -95,3 +95,37 @@ Instagram API with Instagram Login，`graph.instagram.com`：建容器（`media_
 
 ## 第二期（本文不承诺时间）
 `reel.published` 事件与测量适配器放宽到 Instagram；指标读取；并发上限预检；首评/CTA 产品决定；多客户审核路径。
+
+---
+
+# v3 修订（第二轮复审后）— 与上文冲突处以本节为准
+
+第二轮复审（子牙+魏征）结论：v2 仍不能整体开工；下列决定写入设计。事实均有行号，见两份复审原文（PR 评论/会话记录）。
+
+## 硬决定
+1. **转公开结果三态（魏征 B1）**：确定没发（调用前的开关/令牌/账号/容器状态检查失败）｜确定已发｜请求已发出但结果未知。第三态**粘性**：保留 `promote_called_at`、禁止再次 `media_publish`，只允许对账或人工解除，并下发人工任务。调用前先持久化「即将发布」。
+2. **id 状态机（B2 + 子牙4）**：容器期 `published_ref` 只存 `container_id`，**不写 `video_id/post_id`**（同时避免下游拼出错误的 Facebook 链接）。`media_publish` 一返回，先单独做一次带栅栏的写入，把 `media_id` 记入 `promote_authorization`，再对齐工单与流量记录。`checkIds`/`resumeContext` 识别「容器已转为 media」的中间态；`finishStage` 用新 id。账号校验改为平台无关的 `target_account_id`。
+3. **重新生成（B3 + 子牙5）**：先现读旧容器状态，只有 `EXPIRED/ERROR/404` 才放行；用 `status+updated_at` 做 CAS；旧流量记录归档或复用（不新插第二条，否则 `checkRows` 永久 409）；旧回执追加进 `previous_refs[]`，不覆盖。
+4. **通知闭环（B4）**：不新增 cron，容器监控挂在现有 `factory-publish-worker` 里（独立 try，仿 `reconcileMissingReelEvents`）。容器就绪即进待办并即时通知（不等工作日邮件）；过期提醒窗口覆盖周末；新 manual kind 登记 `LANE_OF_KIND` 与 `NEVER_DROP_KINDS`；「已核对」提供真实的 API+UI 入口，三件套 href 用探活稳定的工厂页链接。
+5. **强制草稿（B5 + 子牙2）**：`processOne` 里 Instagram 一律 `draft=true`（不是拒绝）；adapter 的 `publish` 里根本没有 `media_publish` 代码；返回后断言 `video_state==='DRAFT'`；边界测试 grep 全库，`media_publish` 只能出现在一个文件；`graph.instagram.com` 的 fetch 只能出现在一个客户端模块。
+6. **caption 与指纹（I1/I2）**：`buildInstagramCaption` 纯函数产出最终发给接口的原始字符串，`caption_sha256` 对它计算，不做归一化；指纹纳入 `container_id`、`caption_sha256`、视频路径与大小/etag；预览与红线扫描用库内重算的 caption，公开后按 `media_id` 读回再扫一遍。
+7. **账号锚点（I3/I4/I5）**：回执记 `ig_account_id`；promote 时 `/me.user_id` 必须等于回执，`/me.username` 归一化后必须等于 `clients.instagram_handle`；Instagram 的 `publish_target` 不填 `page_id`；`lecture-publish.ts:133-134` 加平台断言。
+8. **令牌（I6/I8）**：唯一出口 `getInstagramPublishToken()`，内部检查开关、权限、状态、唯一连接；续期要提前很多天（不用 5 分钟缓冲）；乐观锁用 `.select('id')` 数行，0 行命中视为失败；临近过期进待办，不靠把 `refreshable` 改成 true；金丝雀令牌测试证明不出现在日志/库/响应。
+9. **pending（I7）**：独立字段，有总时限与上限，超限转终态并出人工任务；不得堵住 `claimOne` 队列（含别的客户的 Facebook 工单）；reconcile 只作用于容器就绪前的 provisional 工单，且覆盖 401/限流/404/`PUBLISHED` 读不到 media id。
+10. **回执措辞（I9）**：Instagram 容器期不写「已发到 meta_graph」的工作日志与完成事项，用专用文案；审片清单 `cta_in_first_comment_not_body` 等对 Instagram 平台感知。
+11. **抽端口先写特征测试（I10）**：抽 `PromotePlatformPort` 前，先给 Facebook 路径补特征化快照测试（错误文案顺序、指纹值、payload 形状），重构后须逐字相同；保留 `deps.meta` 名称与签名；端口声明「跳过首评」的默认值是「不跳过」；`ig_crosspost_blocked` 在 `publish-steps.ts:108` 处理；端口注册表放在 `promote/` 目录之外以满足 `boundary.test.ts`。
+12. **当场试跑升级**：合并 PR6 前，用**一次性 Instagram 专业测试账号**做完整演练（含注入「响应丢失」），不对客户账号调用 `media_publish`。
+
+## PR 切分（顺序即依赖）
+| PR | 内容 | 级别 |
+|---|---|---|
+| 0 | 官方协议实读，回填待核实清单，更新本文 | 文档（需 PM 授权外网读取） |
+| 1 | Facebook 行为不变的端口抽取 + 先补的特征测试 | A |
+| 2 | `onStarted` 写库错误检查 + `reconcile?` 钩子 + `platform` 类型放宽 | B |
+| 3 | 设置页防回归与 `client-config` 支持 instagram | B/C |
+| 4 | 开关 + 发布权限集 + `assessGrant` 按开关 + 令牌唯一出口与续期 + `scope-change-gate` | A |
+| 5 | Instagram adapter **只建容器到就绪**，含 pending、过期提醒、重新生成、强制草稿；此 PR 无 `media_publish` 代码 | A |
+| 6 | `media_publish` 与 Instagram 端口、三态、id 状态机、人工任务；实施后狄仁杰攻击验证 | A |
+| 7 | 展示与监测占位、台账卡 | C |
+
+PR5 合并后即可做「只建容器、不发布」的当场试跑；发布能力只在 PR6 出现。
