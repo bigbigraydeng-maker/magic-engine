@@ -474,4 +474,112 @@ describe('ad-strategy-config — 自治三列（spec 2026-09-24 G1）', () => {
     expect(res.status).toBe(403)
     expect(upsert).not.toHaveBeenCalled()
   })
+
+  it('已存在素材的 kind 被改（meta_video → work_order）→ 400 creative_pool_kind_mismatch，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [
+      { kind: 'meta_video', ref: 'v1', status: 'approved', approved_by: 'boss@x.test', approved_at: '2026-10-18T00:00:00.000Z' },
+    ] }])
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'work_order', ref: 'v1', status: 'candidate' }] }),
+      params(),
+    )
+    const json = await res.json()
+    expect(res.status).toBe(400)
+    expect(json.error).toBe('creative_pool_kind_mismatch')
+    expect(json.ref).toBe('v1')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('请求体里同一个 ref 出现两次 → 400 creative_pool_duplicate_ref，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [] }])
+    const res = await PATCH(
+      patchRequest({ creative_pool: [
+        { kind: 'meta_video', ref: 'v1', status: 'candidate' },
+        { kind: 'meta_video', ref: 'v1', status: 'candidate' },
+      ] }),
+      params(),
+    )
+    const json = await res.json()
+    expect(res.status).toBe(400)
+    expect(json.error).toBe('creative_pool_duplicate_ref')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('ad-strategy-config — 素材池版本（乐观锁）随界面往返', () => {
+  it('GET 返回 version（= 库里 updated_at）', async () => {
+    signedInAs(VIEWER)
+    fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+
+    const res = await GET(new NextRequest(url()), params())
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.version).toBe('2026-10-21T00:00:00.000Z')
+  })
+
+  it('PATCH 带 creative_pool 且 expected_version 与库里一致 → 200，响应里有 version', async () => {
+    signedInAs(STAFF)
+    fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+
+    const res = await PATCH(
+      patchRequest({
+        creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }],
+        expected_version: '2026-10-21T00:00:00.000Z',
+      }), params(),
+    )
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json).toHaveProperty('version')
+    expect(typeof json.version).toBe('string')
+  })
+
+  it('expected_version 与库里不同 → 409 creative_pool_changed_concurrently，message 含「刷新」，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+
+    const res = await PATCH(
+      patchRequest({
+        creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }],
+        expected_version: '2026-10-20T00:00:00.000Z',
+      }), params(),
+    )
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json.error).toBe('creative_pool_changed_concurrently')
+    expect(json.message).toContain('刷新')
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('expected_version 是数字 → 400，不写库', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [] }])
+
+    const res = await PATCH(
+      patchRequest({
+        creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }],
+        expected_version: 123,
+      }), params(),
+    )
+
+    expect(res.status).toBe(400)
+    expect(upsert).not.toHaveBeenCalled()
+  })
+
+  it('不带 expected_version 的老请求（带 creative_pool）仍然 200（行为不变）', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([{ client_id: CLIENT, enabled: true, digest_recipients: [], creative_pool: [], updated_at: '2026-10-21T00:00:00.000Z' }])
+
+    const res = await PATCH(
+      patchRequest({ creative_pool: [{ kind: 'meta_video', ref: 'v1', status: 'candidate' }] }),
+      params(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(upsert).toHaveBeenCalledTimes(1)
+  })
 })

@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, currentConfigVersion, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { parsePromoWindow, nzToday, type PromoWindow } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
@@ -89,9 +89,15 @@ function sameAliasSet(a: readonly string[] | undefined, b: readonly string[]): b
   return left.length === right.length && left.every((v, i) => v === right[i])
 }
 
-/** 新的推广期是不是比原来「放宽」了（长期有效 / 结束日延后 / 开始日提前）。放宽 = 已批准的结论不再成立。 */
+/**
+ * 新的推广期是不是比原来「放宽」了（长期有效 / 结束日延后 / 开始日提前）。放宽 = 已批准的结论不再成立。
+ * 首次声明（原来没有推广期）：
+ *   - 声明 dated：只是补登记一个有限期，不算放宽，已批准的保持 approved；
+ *   - 声明 evergreen：这是最宽的声明（无期限），等于把「已批准」的结论扩到无限期，
+ *     必须重新过一遍批准（第二双眼睛），所以按放宽处理、降回候选。
+ */
 function widensWindow(prev: PromoWindow | undefined, next: PromoWindow): boolean {
-  if (prev === undefined) return false // 首次声明：补登记，不算放宽
+  if (prev === undefined) return next.kind === 'evergreen'
   if (prev.kind === 'evergreen') return false
   if (next.kind === 'evergreen') return true
   return next.end > prev.end || next.start < prev.start
@@ -192,7 +198,7 @@ export async function POST(
     return next
   })
 
-  const written = await writeConfigCas(clientId, { creative_pool: nextPool, updated_at: nowIso }, loadedVersion.version)
+  const written = await writeConfigCas(clientId, { creative_pool: nextPool }, loadedVersion.version)
   if (!written.ok) {
     if (written.kind === 'conflict') {
       return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新后重试。' }, { status: 409 })
@@ -200,5 +206,5 @@ export async function POST(
     return NextResponse.json({ error: written.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, demoted_to_candidate: demote, config: await loadAdStrategyConfig(clientId) })
+  return NextResponse.json({ success: true, demoted_to_candidate: demote, config: await loadAdStrategyConfig(clientId), version: await currentConfigVersion(clientId) })
 }

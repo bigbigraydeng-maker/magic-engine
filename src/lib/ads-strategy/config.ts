@@ -207,6 +207,14 @@ export async function loadConfigVersion(
   return { ok: true, version: { exists: true, updatedAt: typeof updatedAt === 'string' ? updatedAt : null } }
 }
 
+/** 当前设置行的版本字符串（updated_at）；null = 还没有这一行；undefined = 读失败。给界面带回服务端比较用。 */
+export async function currentConfigVersion(clientId: string): Promise<string | null | undefined> {
+  const loaded = await loadConfigVersion(clientId)
+  if (!loaded.ok) return undefined
+  if (!loaded.version.exists) return null
+  return loaded.version.updatedAt
+}
+
 export type ConfigWriteResult =
   | { ok: true }
   | { ok: false; kind: 'conflict' | 'error'; message: string }
@@ -217,7 +225,16 @@ export async function writeConfigCas(
   fields: Record<string, unknown>,
   version: ConfigVersion,
 ): Promise<ConfigWriteResult> {
-  const row = { ...fields, updated_at: typeof fields.updated_at === 'string' ? fields.updated_at : new Date().toISOString() }
+  // updated_at 一律在写入这一刻取，调用方传的一律忽略（防止调用方传旧时间让版本倒退）。
+  // 且必须严格大于读到的版本：时钟回拨时把 stamp 顶到 version.updatedAt + 1ms，保证单调递增。
+  let stamp = new Date().toISOString()
+  if (version.updatedAt !== null) {
+    const prev = Date.parse(version.updatedAt)
+    if (!Number.isNaN(prev) && Date.parse(stamp) <= prev) {
+      stamp = new Date(prev + 1).toISOString()
+    }
+  }
+  const row = { ...fields, updated_at: stamp }
   if (!version.exists) {
     const { error } = await supabaseAdmin.from('ad_strategy_configs').insert({ client_id: clientId, ...row })
     if (!error) return { ok: true }

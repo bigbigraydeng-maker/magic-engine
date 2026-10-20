@@ -549,4 +549,17 @@ describe('creative-pool/promo-window — 已批准条目改动 / 设置人 / 别
     expect((await res.json()).error).toBe('creative_pool_changed_concurrently')
     expect(upsert).not.toHaveBeenCalled()
   })
+
+  it('已批准且原来没有推广期：首次声明长期有效 → 降回 candidate 并清掉批准人和时间', async () => {
+    signedInAs(STAFF)
+    const { upsert } = fakeTable([poolRow([{ kind: 'meta_video', ref: 'a', status: 'approved', ...APPROVED }])])
+    const res = await POST(postRequest({ ref: 'a', promo_window: { kind: 'evergreen' } }), params())
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json.demoted_to_candidate).toBe(true)
+    const a = lastPool(upsert).find(e => e.ref === 'a')!
+    expect(a.status).toBe('candidate')
+    expect(a).not.toHaveProperty('approved_by')
+    expect(a).not.toHaveProperty('approved_at')
+  })
 })

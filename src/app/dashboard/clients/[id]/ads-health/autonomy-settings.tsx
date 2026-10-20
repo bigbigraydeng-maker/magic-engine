@@ -63,6 +63,8 @@ function formatDate(iso: string | null): string {
 interface ConfigResponse {
   success?: boolean
   config?: AdStrategyConfig
+  /** 素材池的乐观锁版本；缺省表示服务端没给 */
+  version?: string | null
   error?: string
   /** 给员工看的中文说明（比 error 代码好懂）；有就优先显示 */
   message?: string
@@ -182,10 +184,12 @@ function CreativePoolList({
   clientId,
   entries,
   onApproved,
+  onConflict,
 }: {
   clientId: string
   entries: CreativePoolEntry[]
-  onApproved: (config: AdStrategyConfig) => void
+  onApproved: (config: AdStrategyConfig, version?: string | null) => void
+  onConflict: () => void
 }) {
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -213,8 +217,13 @@ function CreativePoolList({
         body: JSON.stringify({ ref }),
       })
       const json = (await res.json()) as ConfigResponse
+      if (res.status === 409) {
+        setError(json.message ?? '素材池刚被别处改过，请刷新页面后再试。')
+        onConflict()
+        return
+      }
       if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
-      onApproved(json.config)
+      onApproved(json.config, json.version)
     } catch (err) {
       setError(err instanceof Error ? err.message : '批准失败')
     } finally {
@@ -435,11 +444,13 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
   const [draftCap, setDraftCap] = useState('')
   const [draftMode, setDraftMode] = useState<AutonomyMode>('observe')
   const [draftRefs, setDraftRefs] = useState('')
+  const [version, setVersion] = useState<string | null | undefined>(undefined)
 
-  const applyConfig = (c: AdStrategyConfig) => {
+  const applyConfig = (c: AdStrategyConfig, v?: string | null) => {
     setConfig(c)
     setDraftCap(centsToDisplay(c.daily_budget_cap_cents))
     setDraftMode(c.autonomy_mode)
+    if (v !== undefined) setVersion(v)
   }
 
   const load = async () => {
@@ -447,7 +458,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`)
       const json = (await res.json()) as ConfigResponse
       if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
-      applyConfig(json.config)
+      applyConfig(json.config, json.version)
     } catch {
       setLoadError('读不到广告自治配置，稍后再试')
     }
@@ -487,14 +498,14 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       if (parsedCap !== config.daily_budget_cap_cents) body.daily_budget_cap_cents = parsedCap
       if (draftMode !== config.autonomy_mode) body.autonomy_mode = draftMode
 
-      // Only touch the pool when new candidates are being submitted. The PATCH
-      // route REPLACES the pool, so sending it back would demote approvals —
-      // the warning under the textarea tells the user this is the v1 behaviour.
+      // 只在提交新候选时才动素材池。服务端会保留已有素材的批准状态，但会带上
+      // 页面加载时的版本；页面太旧时服务端返回 409，界面刷新后让用户重做。
       if (newRefs.length > 0) {
         body.creative_pool = [
           ...config.creative_pool.map(e => ({ kind: e.kind, ref: e.ref, status: 'candidate' })),
           ...newRefs.map(ref => ({ kind: 'meta_video', ref, status: 'candidate' })),
         ]
+        if (version !== undefined) body.expected_version = version
       }
 
       if (Object.keys(body).length === 0) {
@@ -508,9 +519,15 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
         body: JSON.stringify(body),
       })
       const json = (await res.json()) as ConfigResponse
-      if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
+      if (res.status === 409) {
+        // 素材池被别处改过：刷新到最新配置和版本，但保留用户填的编号，方便直接再点保存。
+        setMessage(json.message ?? '素材池刚被别处改过，请刷新页面后再保存。')
+        await load()
+        return
+      }
+      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
 
-      applyConfig(json.config)
+      applyConfig(json.config, json.version)
       setDraftRefs('')
       setMessage('已保存')
     } catch (err) {
@@ -556,7 +573,12 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
             只有在这里批准过的视频，广告自动化才允许拿去投。批准本身不会开广告、不花钱。
           </p>
           <div className="mt-1.5">
-            <CreativePoolList clientId={clientId} entries={config.creative_pool} onApproved={applyConfig} />
+            <CreativePoolList
+              clientId={clientId}
+              entries={config.creative_pool}
+              onApproved={applyConfig}
+              onConflict={() => { void load() }}
+            />
           </div>
           <textarea
             value={draftRefs}
@@ -566,7 +588,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
             className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-gray-400 focus:outline-none"
           />
           <p className="mt-1 text-xs text-amber-700">
-            注意：添加新视频后，上面已批准的视频会全部变回「待批准」，需要重新点批准。
+            添加新视频不会影响已批准的视频。如果这个页面打开很久了，保存时会提示「已被别处改过」，按提示刷新后再保存即可。
           </p>
         </div>
       </div>

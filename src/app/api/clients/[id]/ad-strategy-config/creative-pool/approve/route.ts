@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadConfigVersion, writeConfigCas, currentConfigVersion, type CreativePoolEntry } from '@/lib/ads-strategy/config'
 import { promoVerdict, nzToday } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
@@ -61,7 +61,7 @@ export async function POST(
   if (!entry) return NextResponse.json({ error: 'ref not in creative_pool' }, { status: 404 })
 
   if (entry.status === 'approved') {
-    return NextResponse.json({ success: true, config, idempotent: true })
+    return NextResponse.json({ success: true, config, idempotent: true, version: await currentConfigVersion(clientId) })
   }
 
   const verdict = promoVerdict(entry.promo_window, nzToday(Date.now()))
@@ -86,5 +86,5 @@ export async function POST(
     return NextResponse.json({ error: written.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId) })
+  return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId), version: await currentConfigVersion(clientId) })
 }

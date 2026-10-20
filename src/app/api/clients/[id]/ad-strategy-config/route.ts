@@ -17,6 +17,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import {
   loadAdStrategyConfig, loadAdStrategyConfigWithSource, loadConfigVersion, parseCreativePool, writeConfigCas,
+  currentConfigVersion,
   type ConfigVersion, type CreativePoolEntry,
 } from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
@@ -35,7 +36,8 @@ export async function GET(
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config })
+  const version = await currentConfigVersion(clientId)
+  return NextResponse.json({ success: true, config, version })
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -64,11 +66,17 @@ export async function PATCH(
     daily_budget_cap_cents?: unknown
     autonomy_mode?: unknown
     creative_pool?: unknown
+    expected_version?: unknown
   }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  // expected_version 是界面带回的乐观锁版本：只接受 string 或 null，其它一律拒（放在其它校验之前，不写库）。
+  if (body.expected_version !== undefined && body.expected_version !== null && typeof body.expected_version !== 'string') {
+    return NextResponse.json({ error: 'expected_version must be a string or null' }, { status: 400 })
   }
 
   const update: Record<string, unknown> = { client_id: clientId, updated_at: new Date().toISOString() }
@@ -83,6 +91,17 @@ export async function PATCH(
     const v = await loadConfigVersion(clientId)
     if (!v.ok) return NextResponse.json({ error: v.error }, { status: 503 })
     poolVersion = v.version
+  }
+  // 界面带回的版本与当前版本比较：不一致说明别处已经改过，拒绝保存（不写库）。
+  // 没带 expected_version 时行为完全不变（老客户端照常保存）。
+  if (body.expected_version !== undefined && poolVersion !== null) {
+    const currentVersion = poolVersion.exists ? poolVersion.updatedAt : null
+    if (body.expected_version !== currentVersion) {
+      return NextResponse.json(
+        { error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新页面后再保存。' },
+        { status: 409 },
+      )
+    }
   }
   const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
   const before = loadedBefore.source === 'fallback' ? null : loadedBefore.config
@@ -143,9 +162,22 @@ export async function PATCH(
     if (parsed.length !== body.creative_pool.length) {
       return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref, status=candidate)' }, { status: 400 })
     }
+    // 同一个 ref 在请求体里出现两次：无法判断哪条是「真身」，整请求拒绝（不静默取其一）。
+    if (new Set(parsed.map(e => e.ref)).size !== parsed.length) {
+      return NextResponse.json({ error: 'creative_pool_duplicate_ref' }, { status: 400 })
+    }
     // 读不出现有素材池就没法保住已有的推广期 —— 拒绝重写素材池，其它设置照常能存。
     if (before === null) {
       return NextResponse.json({ error: 'creative_pool_existing_unreadable' }, { status: 503 })
+    }
+    // 已存在的素材，kind 以库里为准：客户端把 meta_video 写成 work_order（或反过来）会让
+    // 同一条素材的推广期/别名挂到错误的类型上，整请求拒绝。
+    const kindMismatch = parsed.find(e => {
+      const existing = before.creative_pool.find(x => x.ref === e.ref)
+      return existing !== undefined && existing.kind !== e.kind
+    })
+    if (kindMismatch) {
+      return NextResponse.json({ error: 'creative_pool_kind_mismatch', ref: kindMismatch.ref }, { status: 400 })
     }
     // 新加的素材 id 不得恰好是别的素材已登记的别名（否则同一个视频会同时属于两条素材）。
     const aliasOwner = parsed.find(e =>
@@ -174,7 +206,7 @@ export async function PATCH(
     const written = await writeConfigCas(clientId, update, poolVersion)
     if (!written.ok) {
       if (written.kind === 'conflict') {
-        return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '设置刚被别处改过，请刷新后重试。' }, { status: 409 })
+        return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新页面后再保存。' }, { status: 409 })
       }
       return NextResponse.json({ error: written.message }, { status: 500 })
     }
@@ -196,5 +228,6 @@ export async function PATCH(
     : { sent: false, events: 0 }
 
   const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config, sync_events: syncEvents })
+  const version = await currentConfigVersion(clientId)
+  return NextResponse.json({ success: true, config, version, sync_events: syncEvents })
 }
