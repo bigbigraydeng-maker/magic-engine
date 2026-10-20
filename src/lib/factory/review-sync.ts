@@ -218,11 +218,20 @@ export async function applyApprove(wo: Record<string, unknown>, rec: AirtableRec
   if (!human.ok || !auto.ok || !checklistPasses(human.items) || !checklistPasses(auto.items)) return false
   if (human.items.some(item => item.source_ref && !isValidContentSourceRef(item.source_ref))) return false
   const reviewer = (rec.fields[F.reviewer] as { email?: string } | undefined)?.email ?? 'unknown'
+  const nextRef: Record<string, unknown> = { ...ref }
+  delete nextRef.approval_source
+  delete nextRef.approver_scope
   const { data: upd, error } = await supabaseAdmin
     .from('content_work_orders')
     .update({
       status: 'approved',
-      review_ref: { ...ref, approved_by: reviewer, approved_at: new Date().toISOString() },
+      review_ref: {
+        ...nextRef,
+        approved_by: reviewer,
+        approved_at: new Date().toISOString(),
+        approval_source: 'airtable_sync',
+        approver_scope: 'unverified',
+      },
       updated_at: new Date().toISOString(),
     })
     .eq('id', wo.id as string)
