@@ -1,7 +1,7 @@
 # CRM 里给客人发「第一封」邮件 — 设计稿 v0（2026-10-21）
 
 窗口 76 起草。状态：**设计稿，待子牙 + 魏征审；未写代码。**
-风险级：**A**（客户可见的外发、撤不回）。PR 保持草稿 + 风险级别：A + 二审 + PM「合 N」。
+风险级：**A**（客户可见的外发、撤不回）。PR 保持草稿 + 风险级别：A + 二审（子牙 + 魏征，设计稿已审两轮）+ PM「合 N」。本稿 v0.2 吸收了两轮审查：6 个 BLOCK 全部处理，且**不需要数据库迁移**。
 PM 2026-10-21 原话：「我们其实已经给客户在 Outlook 里面做了应用，所以能读取到他的邮件信息……在这个页面里，我们是要具备能对外打电话、对外发邮件、对外发短信、对外回 WhatsApp 的种种功能，否则这个 CRM 就是一个摆设。」并回复「先邮件」。
 所属闭环环节：**Act**（CRM 里的人工外联）；顺序：邮件 → WhatsApp 模板 → 短信（各自另立设计稿）。
 
@@ -33,24 +33,28 @@ PM 2026-10-21 原话：「我们其实已经给客户在 Outlook 里面做了应
 
 ### 3.1 后端：`sendMailNew`（`src/lib/microsoft/mail-send-new.ts`，新文件）
 
-入参：`{ clientId, contactId, subject, body, sentByEmail, requestId }`。顺序**与 `sendMailReply` 一致：先会话 + 审计，再碰 Graph**（子牙 B1/B2：
-`conversation_outbound_log.conversation_id` 是 NOT NULL 外键指向 `conversations`，审计必须先有会话行；这样「审计插不进去」时还没有草稿，不用新增失败分支）。**任何一步失败都不发**：
+入参：`{ clientId, contactId, subject, body, sentByEmail, requestId, expectedRecipient }`。**不加表、不加列、不做迁移**（魏征 B1 要求的唯一约束，改用现有 `conversations` 的唯一键 `(client_id, conversation_id)` 做原子「抢占」，见第 7 步）。顺序与 `sendMailReply` 一致：先会话 + 审计，再碰 Graph。**任何一步失败都不发**：
 
-1. **校验**：主题/正文 trim 后非空，长度上限（主题 200、正文 10000）；去掉主题里的换行和控制字符；`requestId` 是 UUID。
-2. **开关**：`readEmailComposeConfig(leadsConfig)`（`src/lib/crm/` 下纯函数，宽容读取，**读失败或不是 `true` 一律当关**——外发开关的方向和 `mail-ingest` 里「读不到就当没配」相反，魏征/子牙 N6）。
-3. **人和收件人**：按 `contactId + clientId` 取联系人。**收件人 = 联系人的 `primary_email`**，没有则退到 `contact_identities` 里 kind=email 的**唯一**一个（多于一个且无主邮箱 → 拒发）。收件人必须通过严格的单个邮箱地址校验（不含逗号/分号/空白/尖括号，防止 `a@x.com,b@y.com` 或头注入）。不接受外部传入的地址。
-4. **别再联系闸（fail-closed，按联系人）**：在 `manual-send-dnc-gate.ts` 新增 `checkManualSendDncForContact`，和现有会话版**共用 `lib/crm/dnc.ts` 的 `isDoNotContact`**，并补上子牙 B3 指出的两处：`contacts.do_not_contact` 列 + 触点判词（含人工纠正 `dnc_cleared`），**以及这个联系人名下任何会话 `optout_unlinked=true`**（别的渠道说过 STOP 但当时没挂上人）。查询失败一律拒发。号码不通 / 先放着 / 阶段已推进不是「别再联系」，不拦邮件。
-5. **选邮箱**：该客户 `status=active` 的 `microsoft_mail` 连接。**恰好一个** → 用它；多个 → 读 `leads_config.email_compose.send_mailbox`，没配或对不上 → 拒发；零个 → 拒发。
-6. **先建会话 + 先写审计（pending）**：`upsert conversations`（`channel='email'`，`page_id=邮箱`，`contact_id`，`subject`，**临时键** `conversation_id='mail-pending:<requestId>'`，**不写 `last_message_at`**，避免一条没发出去的会话成为同步水位线，`mail-ingest.ts:268-283`）；插 `conversation_outbound_log(status='pending', messaging_type='email', used_ai_draft=false, sent_by_email, meta_message_id='req:<requestId>')`。**审计插不进去 → 拒发**（此时还没有草稿）。
-   **幂等（子牙 B4，尽力而为，不加列、不做迁移）**：先查 `meta_message_id='req:<requestId>'` 的审计行，有就返回上次结果；同一联系人 60 秒内已有 pending/sent 的邮件审计行（经 `conversations.contact_id` 联）→ 409。**这是尽力而为的保护，不是数据库层强保证**：两个并发请求仍可能同时读到「没有 pending」；剩余窗口压到毫秒级，并靠前端发送中按钮置灰。要硬保证需要唯一约束迁移（A 级），本稿不做，风险如实交给 PM。
-7. **建草稿**（Graph `POST /me/messages`，`Prefer: IdType="ImmutableId"`，`toRecipients` 仅一个，`body.contentType=Text`）。拿到真实 `id` 和 `conversationId`；把会话临时键改成 `mail:<conversationId>`（与 `mail-ingest` 的 `threadKey` 同一格式，下次每小时同步落进同一条线程；若这个键已被占用 → 拒发并回滚）。失败 → 审计回填 failed。
-8. **发送**（`POST /me/messages/{id}/send`；建草稿和发送是两次独立调用，各自包一次 `callWithRetry` 的 401 重试，同 `mail-send.ts:307/314`）。失败 → 审计 failed + 尽力删草稿（新增 `deleteDraft`）。
-9. **发出之后**（任何一步失败只记日志，**不能**判失败，否则会让人重发）：审计回填 sent 并把 `meta_message_id` 换成真实消息 id；写 `conversation_messages`；更新会话 `last_message_at/last_message_from`；写 `contact_touchpoints`（`channel=email, direction=outbound, source=microsoft_mail, source_ref=消息 id, metadata.automated=false`）。
-10. **失败遗留的会话**：第 6–8 步失败会留下一条「只有出站、没有任何消息」的会话。为避免它让抽屉误判「这个人有可回复的线程」（子牙 B1：`email/route.ts` 现在只按 `contact_id+channel=email` 取最新一条），**`/crm/contacts/[cid]/email` 路由改成只把「至少有一条入站消息」的会话当作可回复线程**。
+1. **校验**：主题/正文 trim 后非空，长度上限（主题 200、正文 10000）；主题剥掉 CR/LF 和控制字符；`requestId` 是 UUID（前端每个「写邮件」框生成一次，双击/重试用同一个）。
+2. **开关**：`readEmailComposeConfig(leadsConfig: unknown)`（`src/lib/crm/` 纯函数，宽容读取，**读失败或不是 `true` 一律当关**）。
+3. **人和收件人**：按 `contactId + clientId` 取联系人。**收件人 = `primary_email`**，没有则退到 `contact_identities` 里 kind=email 的**唯一**一个（多于一个且无主邮箱 → 拒发）。严格校验：单个邮箱、≤254 字符、不含逗号/分号/空白/尖括号；复用 `classifySender` 拒掉 noreply/自己域名/同事地址。**请求里带 `expectedRecipient`（抽屉上显示的那个地址），和服务端最终取的不一致 → 拒发**（合并联系人发生在页面渲染之后）。
+4. **只发给「咨询过我们」的人（合规默认，魏征 B5；PM 可改）**：这个人名下至少有一条**入站咨询记录**（Facebook/网站表单、私信、WhatsApp、来信、来电打进来）才允许；**只在 Mailchimp 名单里、或只有旧表格导入记录的人 → 拒发**并提示「他没咨询过我们，系统不允许发第一封」。配置 `email_compose.allow_unsolicited=true` 才放开（默认没有，放开须 PM 一句话）。可选落款/退订句：`email_compose.footer`（客户配置，默认空；是否需要由 PM/客户按新西兰《未经请求的电子信息法》定，我不是律师，**未核实具体条款**）。
+5. **别再联系闸（fail-closed，按联系人，魏征 B4 / 子牙 B3）**：把 `optout.ts` 里「按联系人判」的那段抽成共用函数（现有会话版改为调它，行为不变），新函数 `checkManualSendDncForContact` 放进 `manual-send-dnc-gate.ts`：`contacts.do_not_contact` 列 + 触点判词（含人工纠正）**+ 这个联系人名下任何会话 `optout_unlinked=true`**。查询失败一律拒发。号码不通 / 先放着 / 阶段已推进不拦。
+6. **选邮箱并核对**：该客户 `status=active` 的 `microsoft_mail` 连接；恰好一个 → 用它；多个 → 读 `email_compose.send_mailbox`，没配或对不上 → 拒发；零个 → 拒发。发送前用 Graph `/me` 读一次令牌实际对应的地址，和连接的 `account_id` 不一致 → 拒发（别名/共享邮箱）。
+7. **原子抢占 + 先写审计（魏征 B1）**：`INSERT conversations`（`channel='email'`，`page_id=邮箱`，`contact_id`，`subject`，**临时键 `mail-pending:<requestId>`**，**不写 `last_message_at`**——不推高同步水位线，魏征 N5）。**唯一键冲突 = 同一个 `requestId` 已被处理 → 读出上次结果返回，不再往下走**。同一联系人另设一把锁行 `mail-lock:<contactId>`（同样 INSERT 抢占，发完删除，超过 5 分钟的旧锁可被清掉）：抢不到 → 409「正在发送」。然后插 `conversation_outbound_log(status='pending', messaging_type='email', used_ai_draft=false, sent_by_email)`。**审计插不进去 → 释放锁并拒发**（此时还没有草稿）。
+8. **配额（魏征 B3）**：按审计表数 `messaging_type='email'` 的行——每用户每小时 ≤30、每天 ≤100，每邮箱每天 ≤200（默认值，`email_compose` 可调）；超限 → 429，并在日志里打告警。（被盗账号也只能发这么多。）
+9. **建草稿**（Graph `POST /me/messages`，`Prefer: IdType="ImmutableId"`，`toRecipients` 仅一个，`body.contentType=Text`）。拿到真实 `id` 和 `conversationId`，**立刻把草稿 id 写进审计行 `meta_message_id='draft:<id>'`**（以便崩溃后对账），会话临时键改成 `mail:<conversationId>`（与 `mail-ingest` 的 `threadKey` 同格式；键已被占用 → 删草稿并拒发）。
+10. **发送**（`POST /me/messages/{id}/send`；建草稿和发送各自一次 `callWithRetry`）。**结果有三种**（魏征 B2）：
+    - 202 → 成功；
+    - Graph 明确拒绝（4xx/5xx 带响应）→ `failed` + 尽力删草稿；
+    - **超时/网络错误（status 0，信可能已经发出）→ 不记 failed**：审计保持 `pending`（带草稿 id），响应给销售「发送状态不明，请稍等 1 分钟再看时间线，**先别重发**」。表的 `status` 约束只有三个值，不改约束，用「pending + 带 draft 前缀的 id + 超过 2 分钟」表示「结果不明」。
+11. **对账（不明态的出口）**：同一联系人下一次发送前、以及每次打开该联系人的发送框时，先对账所有带 `draft:` 的 pending 行：Graph `GET /me/messages/{id}` → `isDraft=false` 说明已发出 → 回填 `sent`；仍是草稿 → 删草稿、回填 `failed`；查不到 → 保持 pending 并继续拒绝重发。**对账期间同一联系人一律拒发。**
+12. **发出之后**（任何一步失败只记日志，**不能**判失败）：审计回填 sent 并把 `meta_message_id` 换成真实消息 id；写 `conversation_messages`；写 `contact_touchpoints`（`channel=email, direction=outbound, source=microsoft_mail, source_ref=消息 id, metadata.automated=false`）；释放锁。
+13. **失败遗留的会话**：第 7–10 步失败会留下「只有出站、没有任何消息」的会话。**`/crm/contacts/[cid]/email` 路由改成只把「至少有一条入站消息」的会话当可回复线程**（否则抽屉会误显示回复框，而 `sendMailReply` 对这种会话会 409，销售再也重发不了）。同时 `ComposeEmail` 显式区分「确认没有可回复线程」和「读取失败」，读取失败时不渲染（网络抖动不能把有线程的人当成没往来）。
 
-> **未核实、必须靠试跑回答**：Graph 对「新建草稿」返回的 `conversationId`，与发送后在已发送文件夹里被同步读到的 `conversationId` 是否一致（仓库里没有任何代码或测试佐证；`createReply` 继承父线程，不能类比）。若不一致：同步会为同一封信新建第二条线程。保险做法是发送成功后用真实已发送邮件重读一次 `conversationId` 再改会话键（多一次 Graph 读）——**试跑必须打印并比对两个值，不一致就加这一步。**
+> **未核实、必须靠试跑回答**：Graph 对「新建草稿」返回的 `conversationId`，与发送后在已发送文件夹里被同步读到的 `conversationId` 是否一致；发送后消息 id 是否保持不变（仓库里没有佐证；`createReply` 继承父线程，不能类比）。若不一致，同步会为同一封信新建第二条线程，现有「方向 + 秒」指纹兜底也不可靠（发送时我们写 `new Date()`，和 Graph 的 `receivedDateTime` 通常差几秒）。**所以试跑里「真发 PM 自己邮箱 → 等同步 → 线程里只有这一封」是打开开关的硬条件，不是可选项**；不一致就加「发送成功后重读已发送邮件的 conversationId 再改会话键」。干跑（建草稿后删除）验不出这件事。
 
-> **复用 vs 新增**：`callWithRetry`、`findConnectionForMailbox`、`writeTouchpoint`、`sendDraft` 从 `mail-send.ts` **只加 `export`、不改行为**（所以 `mail-send.ts` 有一行级别的改动，不是「不动」）；新增 `createNewDraft`、`deleteDraft`。`sendMailReply` 本身不动。
+> **复用 vs 新增**：`callWithRetry`、`findConnectionForMailbox`、`writeTouchpoint`、`sendDraft` 从 `mail-send.ts` **只加 `export`、不改行为**；新增 `createNewDraft`、`deleteDraft`、`getMessageIsDraft`。`sendMailReply` 本身不动。
 
 ### 3.2 路由
 `POST /api/clients/[id]/crm/contacts/[cid]/email/compose`，Body `{ subject, body, requestId }`。
@@ -72,7 +76,8 @@ PM 2026-10-21 原话：「我们其实已经给客户在 Outlook 里面做了应
 | 发了没记录 | 审计先于发送，插不进去不发；发出后的写库失败不影响「已发」结论 |
 | 误群发 | 只有单人、人工点击；没有批量接口 |
 | 误开 | 开关默认关，PM 一句话才开；上线前只在 hello@magicengine.cloud 这类 PM 自己的地址上试 |
-| 新西兰《未经请求的电子信息法》 | 一对一的人工邮件，给的是客人自己通过表单/咨询留下的邮箱，属回应咨询。**待 PM 确认**：是否允许对「只在 Mailchimp 名单里、从没咨询过」的人发第一封？默认实现**不区分**来源，只在框里显示这个人的来源（来源字段现有）供销售判断 |
+| 被盗账号群发垃圾邮件 | 每用户/每邮箱/每小时/每天配额（§3.1 第 8 步）；开关谁能改：`leads_config` 的编辑权限**未核实**，实现前先查，paid_client 若能改则开关形同虚设 |
+| 新西兰《未经请求的电子信息法》（澳洲适用 Spam Act 2003，稿未涉及） | 一对一的人工邮件，给的是客人自己通过表单/咨询留下的邮箱，属回应咨询。**待 PM 确认**：是否允许对「只在 Mailchimp 名单里、从没咨询过」的人发第一封？**默认只允许发给咨询过我们的人**（§3.1 第 4 步）；框里显示「最近 7 天已发给他几封」（不拦，仅提示）；「同一客人 7 天内不超过 2 封」目前只是规矩、代码里没找到执行点，是否覆盖人工一对一待 PM 定 |
 
 ## 5. 当场试跑（上线前，不许借试跑真发给客人）
 
