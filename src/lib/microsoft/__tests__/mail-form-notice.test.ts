@@ -126,6 +126,9 @@ describe('parseFormNotice', () => {
     if (!result.ok) return
     expect(result.lead).toEqual({
       kind: 'contact_form',
+      travelWindow: null,
+      budgetBand: null,
+      unknownExtras: [],
       email: 'jane.test@example.com',
       name: 'Jane Test',
       phone: '0211234567',
@@ -476,5 +479,52 @@ describe('官网新增两行（Travel window / Budget per person）的兼容', (
     const r = parseFormNotice({ ...base, body })
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.lead.interest).toBe('Custom Itinerary')
+  })
+})
+
+describe('出发时间 / 预算 → 稳定代码', () => {
+  const body = (win: string | null, budget: string | null) =>
+    `New tour enquiry — Example website\nName\tJane Test\nEmail\tjane.test@example.com\nTour\tX\n${win === null ? '' : `Travel window\t${win}\n`}${budget === null ? '' : `Budget per person (NZD)\t${budget}\n`}Submitted\t2026-10-20T01:00:00.000Z\n\nMessage\n\nhi`
+
+  it('四个出发时间选项 + 四个预算选项都映射到约定代码', () => {
+    const wins: Array<[string, string]> = [['March – May 2027', 'mar_may_2027'], ['June – September 2027', 'jun_sep_2027'], ['October – December 2027', 'oct_dec_2027'], ['Not sure yet', 'not_sure']]
+    for (const [text, code] of wins) {
+      const r = parseFormNotice({ ...goodInput(), body: body(text, null) })
+      expect(r.ok && r.lead.travelWindow).toBe(code)
+    }
+    const budgets: Array<[string, string]> = [['Under $3,000', 'under_3000'], ['$3,000 – $5,000', '3000_5000'], ['$5,000 – $8,000', '5000_8000'], ['Above $8,000', 'above_8000']]
+    for (const [text, code] of budgets) {
+      const r = parseFormNotice({ ...goodInput(), body: body(null, text) })
+      expect(r.ok && r.lead.budgetBand).toBe(code)
+    }
+  })
+
+  it('缺这两行（旧页面）→ 两项 null，unknownExtras 为空', () => {
+    const r = parseFormNotice({ ...goodInput(), body: body(null, null) })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+      expect(r.lead.unknownExtras).toEqual([])
+    }
+  })
+
+  it('映射不到的值 → 存 null 并记入 unknownExtras，不乱存原文', () => {
+    const r = parseFormNotice({ ...goodInput(), body: body('Early 2028', '$12,000 – $15,000') })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBeNull()
+      expect(r.lead.budgetBand).toBeNull()
+      expect(r.lead.unknownExtras).toEqual(['travel_window', 'budget_band'])
+    }
+  })
+
+  it('单空格分隔的真实写法也能取到', () => {
+    const r = parseFormNotice({ ...goodInput(), body: body('March – May 2027', 'Above $8,000').replace(/\t/g, ' ') })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.lead.travelWindow).toBe('mar_may_2027')
+      expect(r.lead.budgetBand).toBe('above_8000')
+    }
   })
 })

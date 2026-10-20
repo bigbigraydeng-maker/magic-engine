@@ -162,3 +162,37 @@ describe('AI 摘要不再从时间线接口出（2026-10-10 并进列表接口�
     expect(tables).not.toContain('conversation_briefs')
   })
 })
+
+describe('官网表单的「出发时间 / 每人预算」一行人话', () => {
+  const FORM = (at: string, meta: Record<string, unknown>) => ({
+    channel: 'web_form',
+    direction: 'inbound',
+    occurred_at: at,
+    summary: '官网表单 · /tours/x',
+    metadata: meta,
+  })
+
+  it('web_form 触点带稳定代码 → 返回一行人话（只是事实）', async () => {
+    mockDb({ touches: [FORM('2026-10-20T00:00:00Z', { travel_window: 'mar_may_2027', budget_band: '3000_5000' })] })
+    const body = await (await call()).json()
+    expect(body.formFactsLine).toBe('预计 2027 年 3–5 月出发 · 预算 3,000–5,000/人')
+  })
+
+  it('多条 web_form 取最新一条带代码的', async () => {
+    mockDb({
+      touches: [
+        FORM('2026-10-01T00:00:00Z', { travel_window: 'oct_dec_2027' }),
+        FORM('2026-10-20T00:00:00Z', { travel_window: 'jun_sep_2027', budget_band: 'above_8000' }),
+      ],
+    })
+    const body = await (await call()).json()
+    expect(body.formFactsLine).toBe('预计 2027 年 6–9 月出发 · 预算 8,000 以上/人')
+  })
+
+  it('缺失 / 映射不到的代码 → null（不显示、不当 0）；其它渠道的触点不算', async () => {
+    mockDb({ touches: [FORM('2026-10-20T00:00:00Z', {}), FORM('2026-10-21T00:00:00Z', { travel_window: 'early_2028' })] })
+    expect((await (await call()).json()).formFactsLine).toBeNull()
+    mockDb({ touches: [{ ...FORM('2026-10-20T00:00:00Z', { travel_window: 'mar_may_2027' }), channel: 'email' }] })
+    expect((await (await call()).json()).formFactsLine).toBeNull()
+  })
+})

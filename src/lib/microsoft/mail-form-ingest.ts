@@ -47,10 +47,12 @@ export interface FormEnquiryStats {
   /** 没能入库几封（认证不过 / 提取失败 / 读取失败 / 超上限）。 */
   failed: number
   failedReasons: Record<string, number>
+  /** 表单里填了出发时间/预算但映射不到稳定代码的封数（存 null，不乱存原文）。 */
+  unknownExtras: number
 }
 
 export function emptyFormStats(): FormEnquiryStats {
-  return { recognised: 0, parsed: 0, created: 0, matched: 0, staffTest: 0, failed: 0, failedReasons: {} }
+  return { recognised: 0, parsed: 0, created: 0, matched: 0, staffTest: 0, failed: 0, failedReasons: {}, unknownExtras: 0 }
 }
 
 export interface FormIngestDeps {
@@ -155,6 +157,7 @@ export async function applyFormNotices(args: {
     }
     const lead = parsed.lead
     args.stats.parsed += 1
+    if (lead.unknownExtras && lead.unknownExtras.length > 0) args.stats.unknownExtras += 1
 
     // 表单里填的是自家域邮箱 = 员工测试单：改写后交给 planMailIngest 按「同事不建人」跳过。
     const verdict = classifySender({ address: lead.email, ownDomains: args.ownDomains })
@@ -189,6 +192,14 @@ export async function applyFormNotices(args: {
   return out
 }
 
+/** 触点 metadata 里附加的结构化事实：只存稳定代码，缺失的不写（不写 null、不当 0）。 */
+export function formLeadMetadata(lead: FormNoticeLead): Record<string, string> | null {
+  const m: Record<string, string> = {}
+  if (lead.travelWindow) m.travel_window = lead.travelWindow
+  if (lead.budgetBand) m.budget_band = lead.budgetBand
+  return Object.keys(m).length > 0 ? m : null
+}
+
 /** 触点 raw 里放什么：兴趣 + 留言前 200 字。**不放电话、不放邮箱。** */
 export function formLeadRaw(lead: FormNoticeLead): string {
   const parts = [lead.interest ? `兴趣: ${lead.interest}` : null, lead.message ? `留言: ${lead.message}` : null]
@@ -219,6 +230,7 @@ export async function mirrorFormThread(args: {
       message: formLeadRaw(m.formLead),
       sourceUrl: m.formLead.formUrl,
       submittedAt: m.receivedAt,
+      metadata: formLeadMetadata(m.formLead),
     })
     if (res.skipped === 'error') throw new Error('网站表单咨询写入 CRM 失败')
     contactId = contactId ?? res.contactId
