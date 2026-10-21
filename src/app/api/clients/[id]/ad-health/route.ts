@@ -28,6 +28,7 @@ import {
   toClientGrowthView,
   type GrowthRowForClient,
 } from '@/lib/ads-strategy/agents/growth-client-view'
+import { overlayLiveGoal } from '@/lib/ads-strategy/agents/growth-live-goal'
 
 export const dynamic = 'force-dynamic'
 
@@ -90,10 +91,12 @@ export async function GET(
   }
 
   const growthRows = (growthRes.data ?? []) as GrowthRowForClient[]
+  // 目标卡读当前生效的目标（员工版）：每日缓存行里的目标最多晚一天，目标刚改/刚换时会显示旧的。
+  // 今天还没有缓存行（null）时不覆盖——页面照旧说「今天还没巡察」。
   const growth = growthRes.error
     ? undefined
     : fullView
-      ? (growthRows[0] ?? null)
+      ? (growthRows[0] ? await overlayLiveGoal(clientId, growthRows[0]) : null)
       : toClientGrowthView(growthRows, new Date())
 
   return NextResponse.json({
