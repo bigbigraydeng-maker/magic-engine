@@ -12,6 +12,7 @@
  * 平台通用：不含客户名 / 行业词；阈值来自 PromoPlaybook。
  */
 
+import type { CreativePoolStatus } from '@/lib/ads-strategy/config'
 import type { PromoPlaybook, PromoEvidence } from './playbooks'
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
 import { promoContentHash } from './content-hash'
@@ -72,7 +73,7 @@ export interface AccountSnapshotFact {
 
 export interface CreativePoolFact {
   ref: string
-  status: 'candidate' | 'approved'
+  status: CreativePoolStatus
 }
 
 /** 事实快照。任何 null 都表示「没读到」，不是 0。 */
