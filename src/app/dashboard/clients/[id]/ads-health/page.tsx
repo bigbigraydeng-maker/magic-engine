@@ -18,6 +18,7 @@ import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playboo
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
+import LiveTodayPanel from './live-today-panel'
 import AutoPausePanel from './auto-pause-panel'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -580,6 +581,7 @@ export default function AdsHealthPage() {
       {tab === 'today' && (
         <>
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
+          <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />
           {loading && <div className="text-gray-400 text-sm py-8 text-center">加载中…</div>}
           {error && (
@@ -613,6 +615,7 @@ export default function AdsHealthPage() {
 
       {tab === 'ads' && (
         <>
+          <LiveTodayPanel clientId={clientId} part="new" />
           {loading && <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>}
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">加载出错:{error}</div>
