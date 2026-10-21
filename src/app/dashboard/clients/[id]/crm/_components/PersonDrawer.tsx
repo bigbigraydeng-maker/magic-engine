@@ -14,6 +14,7 @@ import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary, type StageSource } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
+import { ComposeEmail } from './ComposeEmail'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
@@ -336,12 +337,16 @@ export function PersonDrawer({
               />
             )}
             {row.email && (
-              <a
-                href={`mailto:${row.email}`}
-                className="break-all rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
-              >
-                ✉️ {row.email}
-              </a>
+              <>
+                <a
+                  href={`mailto:${row.email}`}
+                  className="break-all rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
+                >
+                  ✉️ {row.email}
+                </a>
+                {/* mailto 靠电脑里设好的邮件程序，没设就没反应——旁边永远有一个有反馈的「复制」。 */}
+                <CopyEmailButton email={row.email} />
+              </>
             )}
             {row.doNotContact && (
               <DncBanner clientId={clientId} contactId={row.contactId} name={row.name} onSaved={onSaved} />
@@ -597,6 +602,15 @@ export function PersonDrawer({
               onSaved('✓ 邮件已发出', false)
             }}
           />
+          {/* 没有邮件往来的人：EmailReply 什么都不渲染，这里补「写第一封」。两者互斥，判断在服务端。 */}
+          <ComposeEmail
+            clientId={clientId}
+            contactId={row.contactId}
+            onSent={() => {
+              setTimelineKey((k) => k + 1)
+              onSaved('✓ 邮件已发出', false)
+            }}
+          />
           </div>
         </div>
       </aside>
@@ -604,3 +618,23 @@ export function PersonDrawer({
   )
 }
 
+function CopyEmailButton({ email }: { email: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard
+          ?.writeText(email)
+          .then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1500)
+          })
+          .catch(() => undefined)
+      }}
+      className="rounded-lg border border-me-stone bg-white px-3 py-2 text-xs font-semibold text-me-charcoal/70"
+    >
+      {copied ? '已复制' : '复制'}
+    </button>
+  )
+}
