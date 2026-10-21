@@ -59,29 +59,40 @@
 | SH-20270325-R1 Reel LeadForm | "10 days … Shanghai, Suzhou, Wuxi, Xinshi Ancient Town and Hangzhou. **International and domestic flights**, 7 nights' hotels and 13 meals included. From NZD $2,699 … Departs 25 March 2027. Visa requirements as per policy at time of departure." | 同上，是清单；**含 "domestic flights"，违反「只写 flights」红线（这条在线上，建议 74 号处理）**；"Visa requirements as per policy…" 是模糊免责。 |
 | 旧账户遗留素材（Golden China 11 月团、Christmas 圣诞团，仍标 ACTIVE） | 含 Small group max 12 / Since 1928 / Last Chance / visa-free / China Southern / Max 12 guests | 全部带红线词，74 号已知；我只是确认它们**仍在 ACTIVE**。 |
 
-## 八、3 月四团各 1 条软文案草稿（不提交任何系统，给 97 作动态、给 106 做成片参考；74 号看过再给 PM）
+## 八、3 月四团各 1 条软文案草稿（v2：已按苏东坡一轮意见改；不提交任何系统，给 97 作动态、给 106 做成片参考；74 号看过再给 PM）
 
-规则：40–70 词、≤1 个 emoji（本组 0 个）、问句收尾、无价格/日期/限量/截止词；事实只用事实库、官网团页或上面 §六 的 CTS 指南页。
+规则：40–70 词、≤1 个 emoji（本组 0 个）、无价格/日期/限量/截止词；事实只用事实库、官网团页或 §六 的 CTS 指南页。收尾不全用问句（两条问句、两条陈述，避免一周发出像模板）。
 
-**1) Best of China（3/11）** · 事实 BOC-03/04/06/07/08
-> Walk the Great Wall. See the Forbidden City. Stand in front of the Terracotta Warriors, cross West Lake by boat, then finish on the Bund. Beijing, Xi'an, Hangzhou and Shanghai in fifteen days from Auckland, with a high-speed train from Beijing to Xi'an. Which of the four would you start with?
+**官网原文留底（2026-10-22 现场抓取）**：
+- SH 团页 Highlights：`"Hanfu dress-up for photos and afternoon tea in thousand-year-old Xinshi Town"`；Day 05：`"Xinshi — waterside ancient town; Hanfu photos; afternoon tea (coffee, snacks, ice cream)."`；Day 02：`"Visit Master of the Nets Garden."`
+- CTS 指南页 beijing-xian-discovery-guide：`"No two are the same."` / `"Each figure was individually modelled — different hairstyles, different expressions, different armour configurations."`（软文案只用前一句和「不同发型、表情」，不用 "individually modelled" 这个学界有争议的说法）。
 
-（约 52 词）
+**1) Best of China（3/11）** · 事实 BOC-03/04/05/06/07/08
+> See the Great Wall and the Forbidden City. Stand in front of the Terracotta Warriors, take a boat on West Lake, then walk the Bund in Shanghai. Beijing, Xi'an, Hangzhou and Shanghai in fifteen days from Auckland, with a high-speed train from Beijing to Xi'an. Which of the four would you most want to see?
 
-**2) A Tale of Two Cities（3/18）** · 事实 TALE-03/05/06/08/09；Terracotta 句出自 CTS 官网指南页（§六）
-> The eternal debate: Beijing or Xi'an? Beijing has the Forbidden City and the Great Wall. Xi'an has the Terracotta Warriors, and no two of them are the same: each figure was individually modelled, with different hairstyles and expressions. Honestly, you need both. Four nights in Beijing, three in Xi'an, one high-speed train between them. Which city calls to you more?
+（约 55 词；问句收尾）
 
-（约 63 词）
+**2) A Tale of Two Cities（3/18）** · 事实 TALE-03/05/06/08/09；Terracotta 一句出自 CTS 官网指南页
+> The eternal debate: Beijing or Xi'an? Beijing has the Forbidden City and the Great Wall. Xi'an has the Terracotta Warriors, and no two of them are the same: every face has its own hairstyle and expression. Honestly, you need both. Four nights in Beijing, three in Xi'an, one high-speed train between them. Which city calls to you more?
 
-**3) Shanghai & Surroundings（3/25，10/26 主推周）** · 事实 SH-04/05/07/08；Xinshi 句为官网团页原文
-> POV: your morning is a classical garden in Suzhou. Your afternoon is tea in a thousand-year-old water town, Hanfu photos if you like. By the end of the trip you are standing on the Bund. Suzhou, Wuxi, Hangzhou and Shanghai, ten days from Auckland. Which stop would you linger at longest?
+（约 60 词；问句收尾）
 
-（约 52 词）
+**3) Shanghai & Surroundings（3/25，10/26 主推周）** · 事实 SH-03/04/05/07/08；Xinshi 为官网团页原文
+> POV: you wander through the Master of the Nets Garden in Suzhou. Another day, you sit down to afternoon tea in thousand-year-old Xinshi Town and try on Hanfu for photos. Later, Hangzhou's West Lake, and then the Bund. Suzhou, Wuxi, Hangzhou and Shanghai: ten days from Auckland. Ask us for the full itinerary.
+
+（约 55 词；陈述收尾。苏东坡指出的「同一天早晚」时序错已改成「Another day」；"if you like"、"classical" 已删）
 
 **4) Natural China（3/26）** · 事实 NAT-03/04/05/06/07
-> Hongyadong lit up over the river in Chongqing. A Yangtze cruise through the Three Gorges on the way. Giant pandas in Chengdu, and the stone pillars of Zhangjiajie. Sixteen days from Auckland, one trip, four very different scenes. Which one would you want to see first?
+> Hongyadong glowing at night in Chongqing. A Yangtze cruise through the Three Gorges on the way. Giant pandas in Chengdu, and Zhangjiajie National Forest Park. Sixteen days from Auckland, one trip, four very different scenes. Ask us for the full itinerary.
 
-（约 45 词）
+（约 40 词；陈述收尾。"stone pillars" 已改成官网名称）
 
-**红线核对（逐项）**：①无人数上限/小团 ✓ ②无航司名、无 domestic ✓ ③无 1928/25 years ✓ ④无余位/早鸟/限时/倒计时/截止/最后机会/available dates ✓ ⑤无价格、无出发日期（天数可有）✓ ⑥正文无链接 ✓ ⑦事实均可溯（编号见各条；Terracotta「各不相同」= CTS 官网指南页原文）✓ ⑧问句收尾 ✓ ⑨emoji 0 个 ✓。
-**还没做**：苏东坡审（事实 + 值不值得发）；画面（106 做片时前 3 秒干净、无占位价）；真人账号会不会这样发的判断请 74 号定。
+**红线核对（逐项）**：①无人数上限/小团 ✓ ②无航司名、无 domestic ✓ ③无 1928/25 years ✓ ④无余位/早鸟/限时/倒计时/截止/最后机会/available dates ✓ ⑤无价格、无出发日期（天数可有）✓ ⑥正文无链接 ✓ ⑦事实均可溯（官网/CTS 指南页原文见上）✓ ⑧emoji 0 个 ✓。
+**苏东坡 一轮结论**：Tale、Natural China 可用；BoC、SH 改完措辞可用（已改）。**未再审第二轮**。
+**还没做**：画面（106 做片时前 3 秒干净、无占位价）；真人账号会不会这样发请 74 号定。
+
+## 九、苏东坡补充发现（请 74 号处理，不属于我的活）
+
+1. **新账户在线 Natural China 素材**还写了 "a four-night Three Gorges cruise"：事实库 §一 写明 Natural China 两个官网页的游轮晚数不一致、**不写晚数**；加上前面的 "available dates"，建议一并改。
+2. **SH LeadForm 在线素材**含 "International and domestic flights"，违反「只写 flights」。
+3. **旧账户遗留素材仍是 ACTIVE**（Golden China、Christmas 等，含 Max 12 / Since 1928 / Last Chance / visa-free / 航司名）：比所有文案问题都紧急。
