@@ -99,6 +99,8 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.ad_heartbeat_alarms_touch_updated_at() FROM PUBLIC, anon, authenticated;
+
 DROP TRIGGER IF EXISTS ad_heartbeat_alarms_touch_updated_at
     ON public.ad_heartbeat_alarms;
 
@@ -219,8 +221,8 @@ BEGIN
        AND EXISTS (
            SELECT 1
              FROM unnest(p.polroles) AS r(role_oid)
-            WHERE r.role_oid <> 0
-              AND r.role_oid <> (SELECT oid FROM pg_roles WHERE rolname = 'service_role')
+            -- role_oid = 0 means TO PUBLIC: that is a violation too, so it is NOT excluded.
+            WHERE r.role_oid <> (SELECT oid FROM pg_roles WHERE rolname = 'service_role')
        )
      LIMIT 1;
 
