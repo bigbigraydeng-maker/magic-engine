@@ -12,6 +12,8 @@
  *   - AD_HEARTBEAT_MODE defaults to 'dry' (no alarm writes).
  *   - AD_HEARTBEAT_CLIENT_IDS defaults to empty → NO clients are sampled.
  *   - AD_HEARTBEAT_MODE=live is what actually writes alarm rows.
+ *   - dry is NOT write-free: every hour it upserts one state row per account into ad_heartbeat_alarms
+ *     (no alarm rows, nothing outward). The state rows are what let the first live round diff correctly.
  *   - 🔴 Do NOT switch to live until design block ⑤ (write-todo exit + "heartbeat stopped" check) ships:
  *     without it, alarm rows are written but nobody is told, and a dead heartbeat is silent.
  *
@@ -28,7 +30,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
+import { cronRunHandle, failOpenCronRuns, startCronRunId } from '@/lib/cron/run-logger'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { createSupabaseStore } from '@/lib/ads-strategy/heartbeat/store'
@@ -111,6 +113,10 @@ export function runProblem(
   emitError?: string,
 ): string | null {
   const parts: string[] = [...receipt.problems]
+  // dry may run before the table exists (that is the point of dry); live without the table is a fault.
+  if (receipt.mode === 'live' && receipt.table_missing) {
+    parts.push('ad_heartbeat_alarms 表不存在，live 模式什么都没写')
+  }
   if (receipt.accounts_checked > 0 && completed === 0 && failed > 0) {
     parts.push('所有被检查的账户都读失败')
   } else if (receipt.mode === 'live' && failed > 0) {
@@ -127,6 +133,13 @@ export function createAdHeartbeatFunction(fnDeps: AdHeartbeatFnDeps) {
       name: 'Ad heartbeat — hourly read-only Meta sampling',
       retries: 0,
       concurrency: { limit: 1 },
+      // Whatever happens, never leave the run log stuck at "running".
+      onFailure: async ({ event, error }) => {
+        const message = error?.message || '未知错误'
+        const ts = (event as { ts?: number }).ts
+        const startedBefore = new Date(typeof ts === 'number' ? ts : Date.now())
+        await failOpenCronRuns(AD_HEARTBEAT_JOB, `心跳函数失败：${message}`, { startedBefore })
+      },
     },
     { cron: AD_HEARTBEAT_CRON },
     async ({ step }) => {

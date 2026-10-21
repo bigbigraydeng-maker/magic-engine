@@ -446,9 +446,12 @@ describe('runAdHeartbeat — errors', () => {
   it('detects table-missing errors from raw error shapes', () => {
     expect(isTableMissingError({ code: '42P01' })).toBe(true)
     expect(
-      isTableMissingError({ message: 'relation "x" does not exist' }),
+      isTableMissingError({ message: 'relation "public.ad_heartbeat_alarms" does not exist' }),
     ).toBe(true)
     expect(isTableMissingError({ code: '23505' })).toBe(false)
+    // Other "does not exist" errors (Graph object, missing column, other tables) are real faults.
+    expect(isTableMissingError({ message: 'Object with ID 123 does not exist' })).toBe(false)
+    expect(isTableMissingError({ message: 'column "x" of relation "ad_entity_snapshots" does not exist' })).toBe(false)
     expect(isTableMissingError(null)).toBe(false)
   })
 

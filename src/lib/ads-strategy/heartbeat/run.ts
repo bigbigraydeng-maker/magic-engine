@@ -7,7 +7,6 @@ import { readHeartbeatAccount } from './read';
 import { evaluateAccountRound, type AlarmCandidate, type EvaluateContext, type HeartbeatState } from './evaluate';
 import {
   HeartbeatTableMissingError,
-  isTableMissingError,
   type BoundAccount,
   type HeartbeatStore,
   type OpenAlarm,
@@ -115,6 +114,8 @@ export interface HeartbeatReceipt {
   clients_checked: number;
   accounts_checked: number;
   table_missing: boolean;
+  /** Top-level receipt time (same as finished_at); explicit so a reader needs no field aliasing. */
+  created_at: string;
   rounds: Array<{ client_id: string; accounts: AccountRoundReceipt[] }>;
   purged: number;
   /** Configuration / coverage problems that must turn the run record red (empty = none). */
@@ -153,6 +154,7 @@ function emptyReceipt(
     mode,
     started_at: startedAt,
     finished_at: finishedAt,
+    created_at: finishedAt,
     cost_usd: 0,
     no_publish: true,
     clients_checked: 0,
@@ -196,12 +198,9 @@ function tableMissingReceipt(adAccountId: string): AccountRoundReceipt {
   return baseAccountReceipt(adAccountId, 'table_missing');
 }
 
+// Only the store's own typed error counts: a bare message match would hide Graph / column errors.
 function isTableMissing(err: unknown): boolean {
-  if (err instanceof HeartbeatTableMissingError) return true;
-  if (err instanceof Error) {
-    return isTableMissingError({ message: err.message });
-  }
-  return false;
+  return err instanceof HeartbeatTableMissingError;
 }
 
 function toAlarmReceipt(a: AlarmCandidate): AccountRoundReceipt['alarms'][number] {
@@ -567,13 +566,15 @@ export async function runAdHeartbeat(
   }
 
   const purge = await purgeIfLive(deps, opts.mode, now);
+  const finishedAt = deps.now().toISOString();
 
   return {
     request_id: requestId,
     job: AD_HEARTBEAT_JOB,
     mode: opts.mode,
     started_at: startedAt,
-    finished_at: deps.now().toISOString(),
+    finished_at: finishedAt,
+    created_at: finishedAt,
     cost_usd: 0,
     no_publish: true,
     clients_checked: rounds.length,

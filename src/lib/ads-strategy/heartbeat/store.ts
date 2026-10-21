@@ -83,7 +83,10 @@ export function isTableMissingError(
 ): boolean {
   if (!err) return false;
   if (err.code === '42P01' || err.code === 'PGRST205') return true;
+  // Message fallback only when it names OUR table. A bare "does not exist" also appears in Graph
+  // errors ("Object with ID ... does not exist") and for missing columns: those are real faults.
   const msg = err.message ?? '';
+  if (!msg.includes('ad_heartbeat_alarms')) return false;
   return (
     msg.includes('does not exist') || msg.includes('Could not find the table')
   );
@@ -167,6 +170,8 @@ interface AlarmRow {
 // Reads
 // ---------------------------------------------------------------------------
 
+// Not getClientAdAccounts (src/lib/meta/client-ad-accounts.ts): that one swallows read errors into
+// an empty list (a monitor must see the failure) and does not carry hidden_from_ad_health / the cap.
 async function listAccountsImpl(
   supabase: SupabaseClient,
   clientId: string,
@@ -371,7 +376,7 @@ async function insertAlarm(
   adAccountId: string,
   alarm: AlarmCandidate,
   now: Date,
-): Promise<void> {
+): Promise<'inserted' | 'conflict'> {
   const nowIso = now.toISOString();
   const { error } = await supabase.from(TABLE).insert({
     client_id: clientId,
@@ -390,8 +395,10 @@ async function insertAlarm(
   });
   if (error) {
     throwIfTableMissing(error);
+    if (error.code === '23505') return 'conflict';
     throw new Error(error.message);
   }
+  return 'inserted';
 }
 
 async function updateAlarmOpen(
@@ -447,14 +454,19 @@ async function upsertAlarmImpl(
   now: Date,
 ): Promise<'inserted' | 'updated'> {
   const existing = await findAlarmRow(supabase, clientId, alarm.key);
-  if (existing === null) {
-    await insertAlarm(supabase, clientId, adAccountId, alarm, now);
-    return 'inserted';
+  let row = existing;
+  if (row === null) {
+    const inserted = await insertAlarm(supabase, clientId, adAccountId, alarm, now);
+    if (inserted === 'inserted') return 'inserted';
+    // Unique-key race (23505): another writer inserted between our read and insert. Update that row.
+    row = await findAlarmRow(supabase, clientId, alarm.key);
+    if (row === null) throw new Error('alarm insert conflicted but the row cannot be read back');
   }
-  if (existing.resolved_at === null) {
-    await updateAlarmOpen(supabase, existing, alarm, now);
+  const existingRow: AlarmRow = row;
+  if (existingRow.resolved_at === null) {
+    await updateAlarmOpen(supabase, existingRow, alarm, now);
   } else {
-    await updateAlarmReopen(supabase, existing, alarm, now);
+    await updateAlarmReopen(supabase, existingRow, alarm, now);
   }
   return 'updated';
 }

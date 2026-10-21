@@ -72,6 +72,7 @@ function makeReceipt(overrides: Partial<HeartbeatReceipt> = {}): HeartbeatReceip
       },
     ],
     purged: 0,
+    created_at: '2026-10-21T00:00:01.000Z',
     problems: [],
     ...overrides,
   }
@@ -147,6 +148,8 @@ describe('ad-heartbeat function', () => {
     expect(runProblem(makeReceipt({ accounts_checked: 2 }), 0, 2)).toContain('所有被检查的账户都读失败')
     expect(runProblem(makeReceipt({ mode: 'live' }), 1, 1)).toContain('live 模式')
     expect(runProblem(makeReceipt({ mode: 'dry' }), 1, 1)).toBeNull()
+    expect(runProblem(makeReceipt({ mode: 'live', table_missing: true }), 2, 0)).toContain('表不存在')
+    expect(runProblem(makeReceipt({ mode: 'dry', table_missing: true }), 2, 0)).toBeNull()
     expect(runProblem(makeReceipt({ problems: ['cfg bad'] }), 2, 0)).toContain('cfg bad')
     expect(runProblem(makeReceipt(), 2, 0, 'EMIT_FAILED: x')).toContain('EMIT_FAILED')
   })
