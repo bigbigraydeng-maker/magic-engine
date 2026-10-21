@@ -14,6 +14,7 @@ import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary, type StageSource } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
+import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
@@ -379,6 +380,17 @@ export function PersonDrawer({
                 {summary?.stageSource ? ` · ${STAGE_SOURCE_LABEL[summary.stageSource]}` : ''}
               </p>
             )}
+            {/* 不是有效咨询 → 退回（系统从原因里学）；已退回的人 → 一键拉回。客户没配「非咨询」阶段时不渲染。 */}
+            <ReturnLeadPanel
+              clientId={clientId}
+              contactId={row.contactId}
+              currentStage={row.stage}
+              stages={stages}
+              onDone={(msg) => {
+                setTimelineKey((k) => k + 1)
+                onSaved(msg, true)
+              }}
+            />
           </div>
 
           {/* 现在该做什么 —— 最多两个按钮，措辞按他能被联系到的渠道走。
