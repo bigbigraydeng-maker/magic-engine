@@ -131,7 +131,8 @@ $$;
 REVOKE ALL ON public.ad_heartbeat_alarms FROM anon, authenticated, PUBLIC;
 
 -- Supabase 默认权限通常已覆盖 service_role，但这里显式声明，避免依赖环境默认值。
--- 注意：不授予 TRUNCATE。
+-- 注意：不授予 TRUNCATE，并显式收回（Supabase 默认权限可能已给 service_role 全权限）。
+REVOKE TRUNCATE, REFERENCES, TRIGGER ON public.ad_heartbeat_alarms FROM service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.ad_heartbeat_alarms TO service_role;
 
 -- -----------------------------------------------------------------------------
@@ -270,6 +271,29 @@ BEGIN
 
     IF v_missing_priv IS NOT NULL THEN
         RAISE EXCEPTION 'ad_heartbeat_alarms: service_role 缺少 % 权限', v_missing_priv;
+    END IF;
+
+    -- 5) service_role 不得拥有 TRUNCATE（迁移说明与实际必须一致）
+    IF has_table_privilege('service_role', 'public.ad_heartbeat_alarms', 'TRUNCATE') THEN
+        RAISE EXCEPTION 'ad_heartbeat_alarms: service_role 仍拥有 TRUNCATE 权限';
+    END IF;
+
+    -- 6) 本表的 service_role_full 策略必须确为 FOR ALL USING (true) WITH CHECK (true)
+    --    （同名但定义不同的旧策略会被 duplicate_object 吞掉，这里核实）
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_policy p
+          JOIN pg_class c ON c.oid = p.polrelid
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'public'
+           AND c.relname = 'ad_heartbeat_alarms'
+           AND p.polname = 'service_role_full'
+           AND p.polcmd = '*'
+           AND pg_get_expr(p.polqual, p.polrelid) = 'true'
+           AND pg_get_expr(p.polwithcheck, p.polrelid) = 'true'
+           AND p.polroles = ARRAY[(SELECT oid FROM pg_roles WHERE rolname = 'service_role')]
+    ) THEN
+        RAISE EXCEPTION 'ad_heartbeat_alarms: service_role_full 策略缺失或定义不是 FOR ALL TO service_role USING (true) WITH CHECK (true)';
     END IF;
 END;
 $$;
