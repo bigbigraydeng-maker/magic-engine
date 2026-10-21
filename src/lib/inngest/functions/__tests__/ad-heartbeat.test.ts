@@ -9,6 +9,7 @@ import {
   AD_HEARTBEAT_CRON,
   AD_HEARTBEAT_FUNCTION_ID,
   createAdHeartbeatFunction,
+  runProblem,
 } from '../ad-heartbeat'
 import { CLOUD_FN_PREFIX } from '../../client'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
@@ -71,6 +72,7 @@ function makeReceipt(overrides: Partial<HeartbeatReceipt> = {}): HeartbeatReceip
       },
     ],
     purged: 0,
+    problems: [],
     ...overrides,
   }
 }
@@ -78,7 +80,7 @@ function makeReceipt(overrides: Partial<HeartbeatReceipt> = {}): HeartbeatReceip
 function build(run: () => Promise<HeartbeatReceipt>) {
   const startRun = vi.fn(async () => 'run-1')
   const finishRun = vi.fn(
-    async (_input: { runId: string; startedAt: number; receipt?: HeartbeatReceipt; error?: string }) => undefined,
+    async (_input: { runId: string; startedAt: number; receipt?: HeartbeatReceipt; error?: string; emitError?: string }) => undefined,
   )
   const emit = vi.fn(async (_receipt: HeartbeatReceipt) => undefined)
   const fn = createAdHeartbeatFunction({ run, startRun, finishRun, emit })
@@ -130,6 +132,23 @@ describe('ad-heartbeat function', () => {
     expect(finishRun).toHaveBeenCalledTimes(1)
     expect(finishRun.mock.calls[0][0]).toMatchObject({ runId: 'run-1', error: 'boom' })
     expect(finishRun.mock.calls[0][0].receipt).toBeUndefined()
+  })
+
+  it('🔴 a failing receipt emit still closes the run log (no run stuck at "running"), flagged as emit failure', async () => {
+    const { fn, finishRun, emit } = build(async () => makeReceipt())
+    emit.mockRejectedValueOnce(new Error('inngest down'))
+    await handlerOf(fn)({ step: fakeStep() })
+    expect(finishRun).toHaveBeenCalledTimes(1)
+    expect(finishRun.mock.calls[0][0].emitError).toContain('EMIT_FAILED')
+  })
+
+  it('🔴 runProblem: all-failed, live with failures, config problems and emit errors all turn the run red; a healthy run does not', () => {
+    expect(runProblem(makeReceipt(), 2, 0)).toBeNull()
+    expect(runProblem(makeReceipt({ accounts_checked: 2 }), 0, 2)).toContain('所有被检查的账户都读失败')
+    expect(runProblem(makeReceipt({ mode: 'live' }), 1, 1)).toContain('live 模式')
+    expect(runProblem(makeReceipt({ mode: 'dry' }), 1, 1)).toBeNull()
+    expect(runProblem(makeReceipt({ problems: ['cfg bad'] }), 2, 0)).toContain('cfg bad')
+    expect(runProblem(makeReceipt(), 2, 0, 'EMIT_FAILED: x')).toContain('EMIT_FAILED')
   })
 
   it('🔴 is registered in cloudFunctions — an unregistered function never runs and nobody notices', async () => {

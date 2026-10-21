@@ -177,6 +177,19 @@ function buildNextState(
       ? prev?.accountStatus ?? null
       : read.accountStatus;
 
+  // An aborted round or a failed adsets read knows nothing about adsets. Carry the previous
+  // adset states and sample time forward: wiping them would lose a status change that happened
+  // during the outage and restart every pending-review timer; advancing sampledAtIso would let a
+  // future "heartbeat stopped" check treat a failed read as a fresh sample.
+  if (prev && (read.abortedBy !== null || failedOutcomeKinds(read).has('adsets'))) {
+    return {
+      sampledAtIso: prev.sampledAtIso,
+      accountStatus,
+      consecutiveReadFailures,
+      adsets: prev.adsets,
+    };
+  }
+
   const adsets: HeartbeatState['adsets'] = {};
   for (const a of read.adsets) {
     const prevAdset = prev?.adsets[a.adsetId];

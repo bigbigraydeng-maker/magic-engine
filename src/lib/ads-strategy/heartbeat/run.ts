@@ -38,6 +38,21 @@ export function resolveHeartbeatMode(raw: string | undefined): HeartbeatMode {
   return 'off';
 }
 
+/** Why the env config cannot do what the operator probably meant (null = fine). A typo must be loud, not silent. */
+export function heartbeatConfigProblem(
+  rawMode: string | undefined,
+  clientIds: string[],
+): string | null {
+  const trimmed = rawMode === undefined ? '' : rawMode.trim().toLowerCase();
+  if (trimmed !== '' && trimmed !== 'off' && trimmed !== 'dry' && trimmed !== 'live') {
+    return `AD_HEARTBEAT_MODE 值无法识别（${truncate(rawMode ?? '')}），已按 off 处理`;
+  }
+  if (trimmed === 'live' && clientIds.length === 0) {
+    return 'AD_HEARTBEAT_MODE=live 但 AD_HEARTBEAT_CLIENT_IDS 为空，没有任何客户被检查';
+  }
+  return null;
+}
+
 export function parseHeartbeatClientIds(raw: string | undefined): string[] {
   if (raw === undefined) return [];
   const seen = new Set<string>();
@@ -102,6 +117,8 @@ export interface HeartbeatReceipt {
   table_missing: boolean;
   rounds: Array<{ client_id: string; accounts: AccountRoundReceipt[] }>;
   purged: number;
+  /** Configuration / coverage problems that must turn the run record red (empty = none). */
+  problems: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +160,7 @@ function emptyReceipt(
     table_missing: false,
     rounds: [],
     purged: 0,
+    problems: [],
   };
 }
 
@@ -291,11 +309,13 @@ function keysToResolve(
 }
 
 async function persistRound(args: PersistArgs): Promise<PersistResult> {
-  const wroteState = await persistState(args);
   if (args.mode !== 'live') {
+    const wroteState = await persistState(args);
     return { wroteState, inserted: 0, updated: 0, resolved: 0 };
   }
 
+  // Alarms first, state second. If an alarm write throws, the state is NOT advanced, so the
+  // next round still sees the same status change (diffStatus) and raises the alarm again.
   const { inserted, updated } = await persistAlarms(args);
 
   let resolved = 0;
@@ -315,6 +335,7 @@ async function persistRound(args: PersistArgs): Promise<PersistResult> {
     }
   }
 
+  const wroteState = await persistState(args);
   return { wroteState, inserted, updated, resolved };
 }
 
@@ -509,20 +530,33 @@ function anyTableMissing(rounds: ClientRound[]): boolean {
   return false;
 }
 
+function coverageProblems(rounds: ClientRound[]): string[] {
+  const out: string[] = [];
+  for (const r of rounds) {
+    if (r.accounts.length === 0) {
+      out.push(`客户 ${r.client_id} 没有绑定的广告账户，什么都没检查`);
+    }
+  }
+  return out;
+}
+
 export async function runAdHeartbeat(
   deps: HeartbeatDeps,
-  opts: { mode: HeartbeatMode; clientIds: string[] },
+  opts: { mode: HeartbeatMode; clientIds: string[]; configProblem?: string | null },
 ): Promise<HeartbeatReceipt> {
   const requestId = deps.newRequestId();
   const startedAt = deps.now().toISOString();
+  const configProblems = opts.configProblem ? [opts.configProblem] : [];
 
   if (opts.mode === 'off' || opts.clientIds.length === 0) {
-    return emptyReceipt(
+    const idle = emptyReceipt(
       requestId,
       opts.mode,
       startedAt,
       deps.now().toISOString(),
     );
+    idle.problems = configProblems;
+    return idle;
   }
 
   const now = deps.now();
@@ -547,5 +581,6 @@ export async function runAdHeartbeat(
     table_missing: anyTableMissing(rounds) || purge.tableMissing,
     rounds,
     purged: purge.purged,
+    problems: [...configProblems, ...coverageProblems(rounds)],
   };
 }

@@ -12,6 +12,8 @@
  *   - AD_HEARTBEAT_MODE defaults to 'dry' (no alarm writes).
  *   - AD_HEARTBEAT_CLIENT_IDS defaults to empty → NO clients are sampled.
  *   - AD_HEARTBEAT_MODE=live is what actually writes alarm rows.
+ *   - 🔴 Do NOT switch to live until design block ⑤ (write-todo exit + "heartbeat stopped" check) ships:
+ *     without it, alarm rows are written but nobody is told, and a dead heartbeat is silent.
  *
  * Ops notes:
  *   - Render env changes require a manual redeploy to take effect.
@@ -34,6 +36,7 @@ import { readHeartbeatAccount } from '@/lib/ads-strategy/heartbeat/read'
 import {
   AD_HEARTBEAT_EVENT,
   AD_HEARTBEAT_JOB,
+  heartbeatConfigProblem,
   parseHeartbeatClientIds,
   resolveHeartbeatMode,
   runAdHeartbeat,
@@ -52,6 +55,7 @@ export interface AdHeartbeatFnDeps {
     startedAt: number
     receipt?: HeartbeatReceipt
     error?: string
+    emitError?: string
   }) => Promise<void>
   emit: (receipt: HeartbeatReceipt) => Promise<void>
 }
@@ -96,6 +100,26 @@ function countAccountsByStatus(
   return { completed, failed }
 }
 
+/**
+ * A run is red when it could not do its job: config problems, every checked account failed,
+ * a live run with any failed account, or the receipt event could not be sent.
+ */
+export function runProblem(
+  receipt: HeartbeatReceipt,
+  completed: number,
+  failed: number,
+  emitError?: string,
+): string | null {
+  const parts: string[] = [...receipt.problems]
+  if (receipt.accounts_checked > 0 && completed === 0 && failed > 0) {
+    parts.push('所有被检查的账户都读失败')
+  } else if (receipt.mode === 'live' && failed > 0) {
+    parts.push(`live 模式下有 ${failed} 个账户读失败或没写成`)
+  }
+  if (emitError) parts.push(emitError)
+  return parts.length > 0 ? parts.join('；').slice(0, 500) : null
+}
+
 export function createAdHeartbeatFunction(fnDeps: AdHeartbeatFnDeps) {
   return inngest.createFunction(
     {
@@ -115,8 +139,19 @@ export function createAdHeartbeatFunction(fnDeps: AdHeartbeatFnDeps) {
         runHeartbeatStep(fnDeps.run),
       )
 
+      // A failed emit must not stop the run log from closing (it would stay "running" forever).
+      let emitError: string | undefined
       if (result.ok) {
-        await step.run('emit-receipt', () => fnDeps.emit(result.receipt))
+        // Returns '' (not undefined/null) on success: Inngest JSON-serialises step results.
+        const emitResult = await step.run('emit-receipt', async () => {
+          try {
+            await fnDeps.emit(result.receipt)
+            return ''
+          } catch (error: unknown) {
+            return `EMIT_FAILED: ${error instanceof Error ? error.message.slice(0, 200) : 'UNKNOWN_ERROR'}`
+          }
+        })
+        emitError = emitResult || undefined
       }
 
       await step.run('finish-run', () =>
@@ -124,7 +159,7 @@ export function createAdHeartbeatFunction(fnDeps: AdHeartbeatFnDeps) {
           runId: started.runId,
           startedAt: started.startedAt,
           ...(result.ok
-            ? { receipt: result.receipt }
+            ? { receipt: result.receipt, ...(emitError ? { emitError } : {}) }
             : { error: result.error }),
         }),
       )
@@ -156,10 +191,14 @@ export const adHeartbeat = createAdHeartbeatFunction({
         // Read env vars inside `run` (never at module top level) so a redeploy picks up changes.
         mode: resolveHeartbeatMode(process.env.AD_HEARTBEAT_MODE),
         clientIds: parseHeartbeatClientIds(process.env.AD_HEARTBEAT_CLIENT_IDS),
+        configProblem: heartbeatConfigProblem(
+          process.env.AD_HEARTBEAT_MODE,
+          parseHeartbeatClientIds(process.env.AD_HEARTBEAT_CLIENT_IDS),
+        ),
       },
     ),
   startRun: () => startCronRunId(AD_HEARTBEAT_JOB),
-  finishRun: async ({ runId, startedAt, receipt, error }) => {
+  finishRun: async ({ runId, startedAt, receipt, error, emitError }) => {
     const run = cronRunHandle(AD_HEARTBEAT_JOB, runId, startedAt)
     if (error) {
       await run.finish({ failed: 1, error })
@@ -170,6 +209,11 @@ export const adHeartbeat = createAdHeartbeatFunction({
       return
     }
     const { completed, failed } = countAccountsByStatus(receipt)
+    const problem = runProblem(receipt, completed, failed, emitError)
+    if (problem) {
+      await run.finish({ processed: receipt.accounts_checked, completed, failed, error: problem, summary: { ...receipt } })
+      return
+    }
     await run.finish({
       processed: receipt.accounts_checked,
       completed,

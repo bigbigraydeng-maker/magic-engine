@@ -4,6 +4,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 import {
   AD_HEARTBEAT_PURGE_DAYS,
+  heartbeatConfigProblem,
   parseHeartbeatClientIds,
   resolveHeartbeatMode,
   runAdHeartbeat,
@@ -520,5 +521,101 @@ describe('runAdHeartbeat — expected CPM', () => {
 
     const alarms = receipt.rounds[0].accounts[0].alarms
     expect(alarms.some((a) => a.type === 'zero_spend')).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Review fixes (3037 round 1)
+// ---------------------------------------------------------------------------
+
+describe('persistence order and config problems', () => {
+  it('🔴 live: an alarm write failure leaves the state NOT advanced (so the change is seen again next round)', async () => {
+    const store = makeStore({
+      upsertAlarmImpl: async () => {
+        throw new Error('db down')
+      },
+    })
+    const read = vi.fn(async () =>
+      makeRead({ adsets: [healthyAdset({ effectiveStatus: 'DISAPPROVED' })] }),
+    )
+    const prev: HeartbeatState = {
+      sampledAtIso: '2026-10-21T11:30:00.000Z',
+      accountStatus: 1,
+      consecutiveReadFailures: 0,
+      adsets: { adset_1: { effectiveStatus: 'ACTIVE', pendingReviewSinceIso: null } },
+    }
+    const s2 = makeStore({
+      getState: prev,
+      upsertAlarmImpl: async () => {
+        throw new Error('db down')
+      },
+    })
+    const receipt = await run(makeDeps(s2, read), 'live')
+    expect(receipt.rounds[0].accounts[0].status).toBe('error')
+    expect(s2.calls.upsertState).toHaveLength(0)
+    expect(store.calls.upsertState).toHaveLength(0)
+  })
+
+  it('🔴 live: alarms are written before the state', async () => {
+    const order: string[] = []
+    const store = makeStore({
+      getState: {
+        sampledAtIso: '2026-10-21T11:30:00.000Z',
+        accountStatus: 1,
+        consecutiveReadFailures: 0,
+        adsets: { adset_1: { effectiveStatus: 'ACTIVE', pendingReviewSinceIso: null } },
+      },
+      upsertAlarmImpl: async () => {
+        order.push('alarm')
+        return 'inserted'
+      },
+      upsertStateImpl: async () => {
+        order.push('state')
+      },
+    })
+    const read = vi.fn(async () =>
+      makeRead({ adsets: [healthyAdset({ effectiveStatus: 'DISAPPROVED' })] }),
+    )
+    await run(makeDeps(store, read), 'live')
+    expect(order[0]).toBe('alarm')
+    expect(order[order.length - 1]).toBe('state')
+  })
+
+  it('🔴 aborted round keeps the previous adset states and sample time', async () => {
+    const prev: HeartbeatState = {
+      sampledAtIso: '2026-10-21T11:30:00.000Z',
+      accountStatus: 1,
+      consecutiveReadFailures: 0,
+      adsets: { adset_1: { effectiveStatus: 'PENDING_REVIEW', pendingReviewSinceIso: '2026-10-20T09:00:00.000Z' } },
+    }
+    const store = makeStore({ getState: prev })
+    const read = vi.fn(async () =>
+      makeRead({
+        adsets: [],
+        abortedBy: 'token_expired',
+        anyFailure: true,
+        outcomes: [{ kind: 'account', verdict: 'token_expired', reason: 'x', errorCode: 190 }],
+      }),
+    )
+    await run(makeDeps(store, read), 'dry')
+    const written = store.calls.upsertState[0].state
+    expect(written.adsets).toEqual(prev.adsets)
+    expect(written.sampledAtIso).toBe(prev.sampledAtIso)
+  })
+
+  it('config problems: typo mode, live with no clients, client with no accounts', async () => {
+    expect(heartbeatConfigProblem('lvie', ['a'])).toContain('无法识别')
+    expect(heartbeatConfigProblem('live', [])).toContain('为空')
+    expect(heartbeatConfigProblem('live', ['a'])).toBeNull()
+    expect(heartbeatConfigProblem(undefined, [])).toBeNull()
+    const store = makeStore({ accounts: [] })
+    const receipt = await run(makeDeps(store, vi.fn(async () => makeRead())), 'dry')
+    expect(receipt.problems.join(' ')).toContain('没有绑定的广告账户')
+    const idle = await runAdHeartbeat(makeDeps(makeStore(), vi.fn(async () => makeRead())), {
+      mode: 'off',
+      clientIds: [],
+      configProblem: 'bad',
+    })
+    expect(idle.problems).toEqual(['bad'])
   })
 })
