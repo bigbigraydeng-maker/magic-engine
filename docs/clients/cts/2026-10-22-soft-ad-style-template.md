@@ -40,3 +40,48 @@
 1. 这页是否够 106 开做；106 做片前请优先看 §三 的红线与出处缺口。
 2. 想法 3 里「每个都有不同的脸」要不要先让我找出处。
 3. 我没法替你判断「旧账户 CTR 高 ≠ 新账户能复制」：旧帖是 Boost 的自有帖子，受众和预算结构不同，且最高 CTR 那条只花了 NZ$34。
+
+## 六、「兵马俑每个脸不同 / 8,000」的出处（74 号 10/22 要求查）
+
+- **有出处，是 CTS 自己的官网指南页**（不是旧广告的说法）：`https://www.ctstours.co.nz/beijing-xian-discovery-guide`，第 6 节 Terracotta Warriors，**2026-10-22 实抓原文**："No two are the same." / "Each figure was individually modelled — different hairstyles, different expressions, different armour configurations." / "more than 8,000 soldiers, 130 chariots, and 150 cavalry horses, across three pits"（该页脚注引用 Liverpool Museums 的数字）。
+- **团页本身没写**：Tale 与 BoC 的团页只写 "the Terracotta Warriors, a vast underground army of more than 2,000-year-old life-size soldiers"、"Circle Vision film and Bronze Chariot"，**没有** 8,000 / unique / no two（两页 2026-10-22 实抓，原文已查）。
+- **使用规则**：可以写「每个都不一样（不同发型、表情、盔甲）」，出处注明「CTS 官网指南页 beijing-xian-discovery-guide」；「8,000」是该指南页引用的外部数字，写的时候用 "more than 8,000"，不要写成团的卖点承诺。旧广告里的「3,000 年」「Qin Dynasty 全部各不相同」之类**不在**该页，不能用。
+
+## 七、补充：旧账户画面、新账户 v2 原文（74 号 10/22 要求）
+
+**1) 旧账户最好那几条的画面：取不到，如实说。** 我用 Chrome 打开了「8,000 兵马俑」那条的预览链接，Facebook 返回「此广告的动态不可预览，可能不存在或你没有权限查看」（帖子可能已删或无权限），其余几条同类。所以**开头镜头是什么、字幕、有没有人脸特写，我没法判断，也不会猜**。要看得有主页权限的人在 Ads Manager 里打开这几个 ad id：120247394826860307（8,000 兵马俑）、120246240489590307 / 120246284948650307 / 120242863011880307（Stand in front）。
+
+**2) 新账户（act_2202695063810470）正在用的素材原文，逐条对照：**
+
+| 新账户素材 | 文案要点 | 和「软风格」差在哪 |
+|---|---|---|
+| Natural China × 8 条（WhatsApp / Messenger / 网站点击） | "Shanghai, a four-night Three Gorges cruise, Chongqing, Chengdu and Zhangjiajie — 16 days from Auckland. From NZ$7,349 per person twin share. Departs 26 March 2027. Message us … for the itinerary and available dates." | 第一句就是路线清单；价格和日期紧跟；没有一个「想知道」的钩子，也没有问句。**另：几条写了 "available dates"，贴近「余位」红线，建议请 苏东坡 判。** |
+| SH-20270325-R1 Reel LeadForm | "10 days … Shanghai, Suzhou, Wuxi, Xinshi Ancient Town and Hangzhou. **International and domestic flights**, 7 nights' hotels and 13 meals included. From NZD $2,699 … Departs 25 March 2027. Visa requirements as per policy at time of departure." | 同上，是清单；**含 "domestic flights"，违反「只写 flights」红线（这条在线上，建议 74 号处理）**；"Visa requirements as per policy…" 是模糊免责。 |
+| 旧账户遗留素材（Golden China 11 月团、Christmas 圣诞团，仍标 ACTIVE） | 含 Small group max 12 / Since 1928 / Last Chance / visa-free / China Southern / Max 12 guests | 全部带红线词，74 号已知；我只是确认它们**仍在 ACTIVE**。 |
+
+## 八、3 月四团各 1 条软文案草稿（不提交任何系统，给 97 作动态、给 106 做成片参考；74 号看过再给 PM）
+
+规则：40–70 词、≤1 个 emoji（本组 0 个）、问句收尾、无价格/日期/限量/截止词；事实只用事实库、官网团页或上面 §六 的 CTS 指南页。
+
+**1) Best of China（3/11）** · 事实 BOC-03/04/06/07/08
+> Walk the Great Wall. See the Forbidden City. Stand in front of the Terracotta Warriors, cross West Lake by boat, then finish on the Bund. Beijing, Xi'an, Hangzhou and Shanghai in fifteen days from Auckland, with a high-speed train from Beijing to Xi'an. Which of the four would you start with?
+
+（约 52 词）
+
+**2) A Tale of Two Cities（3/18）** · 事实 TALE-03/05/06/08/09；Terracotta 句出自 CTS 官网指南页（§六）
+> The eternal debate: Beijing or Xi'an? Beijing has the Forbidden City and the Great Wall. Xi'an has the Terracotta Warriors, and no two of them are the same: each figure was individually modelled, with different hairstyles and expressions. Honestly, you need both. Four nights in Beijing, three in Xi'an, one high-speed train between them. Which city calls to you more?
+
+（约 63 词）
+
+**3) Shanghai & Surroundings（3/25，10/26 主推周）** · 事实 SH-04/05/07/08；Xinshi 句为官网团页原文
+> POV: your morning is a classical garden in Suzhou. Your afternoon is tea in a thousand-year-old water town, Hanfu photos if you like. By the end of the trip you are standing on the Bund. Suzhou, Wuxi, Hangzhou and Shanghai, ten days from Auckland. Which stop would you linger at longest?
+
+（约 52 词）
+
+**4) Natural China（3/26）** · 事实 NAT-03/04/05/06/07
+> Hongyadong lit up over the river in Chongqing. A Yangtze cruise through the Three Gorges on the way. Giant pandas in Chengdu, and the stone pillars of Zhangjiajie. Sixteen days from Auckland, one trip, four very different scenes. Which one would you want to see first?
+
+（约 45 词）
+
+**红线核对（逐项）**：①无人数上限/小团 ✓ ②无航司名、无 domestic ✓ ③无 1928/25 years ✓ ④无余位/早鸟/限时/倒计时/截止/最后机会/available dates ✓ ⑤无价格、无出发日期（天数可有）✓ ⑥正文无链接 ✓ ⑦事实均可溯（编号见各条；Terracotta「各不相同」= CTS 官网指南页原文）✓ ⑧问句收尾 ✓ ⑨emoji 0 个 ✓。
+**还没做**：苏东坡审（事实 + 值不值得发）；画面（106 做片时前 3 秒干净、无占位价）；真人账号会不会这样发的判断请 74 号定。
