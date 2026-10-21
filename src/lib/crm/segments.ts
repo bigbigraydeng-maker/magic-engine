@@ -135,10 +135,8 @@ export interface TouchpointLike {
    * 要判「我们今天最后一次**真人**出手是几点」—— 拿一封 16:00 的群发当
    * 「我们出手了」，会把 15:00 客人的回信整个盖住，当天最热的线索被折叠掉。
    *
-   * ⚠️ **本文件的 `segmentContact` 目前不读它**（ROADMAP M2.7f）—— 一封群发
-   * 照样被它当成「我们最后一次出站」，于是「客人回话了」那条规则不成立，
-   * 人掉进别的桶。这里写明，是因为**一个只接了一半的概念会坑下一个人**，
-   * 而这个字段本身就是为了修那种坑才加的。
+   * `segmentContact` 读它：机器发的出站不进 `lastOutbound`（2026-10-22 起；之前这里写着
+   * 「目前不读它」，那是 ROADMAP M2.7f 的遗留，已补上）。
    */
   automated?: boolean
   /**
@@ -619,7 +617,13 @@ export function segmentContact(
   // 「客户回话了」，也不该把「等了几天」重置成 0。它只在下面的点击规则里用。
   const messages = tps.filter((t) => !t.engagement && !t.unansweredCall)
   const lastInbound = Math.max(0, ...messages.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)))
-  const lastOutbound = Math.max(0, ...messages.filter((t) => t.direction === 'outbound').map((t) => ts(t.occurredAt)))
+  // 机器发的出站（群发、自动安抚、AI 起草经人批准发出的回复）不算「有人联系过他」——
+  // 2026-10-22 PM：昨天今天的 WhatsApp 咨询只收到一句自动安抚就被算成「已跟进」，从
+  // 「今天要联系」掉进「先放着」。判据在 lib/crm/automated-touch（metadata.automated / 群发来源）。
+  const lastOutbound = Math.max(
+    0,
+    ...messages.filter((t) => t.direction === 'outbound' && !t.automated).map((t) => ts(t.occurredAt)),
+  )
 
   /**
    * 最近一次「点了链接」，且**那之后没有任何真人联系过他**。
