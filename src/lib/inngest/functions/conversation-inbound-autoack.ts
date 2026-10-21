@@ -32,16 +32,11 @@
  * 副作用必须在 step 里才会被 Inngest 缓存——`retries: 1` 时如果 Step 2 的
  * emit 失败重试，Step 1 的发送结果已经被 memoize，不会被同一次重放重发一遍）。
  *
- * ## 谁决定「这个客户该用哪份售后判据」——不写死 CTS
+ * ## 不再区分售前 / 售后（2026-10-22 PM）
  *
- * `classifyConversation` 本身不带任何行业默认值（见 classify.ts 文件头），
- * 旅游行业的 `TOURISM_POST_SALE_POLICY` 是一个具名 Playbook 常量。本文件
- * 按 `clients.industry` 走跟 `industry-features.ts` 完全一样的「行业关键词
- * 匹配」路子选 policy（`resolvePostSaleClassificationPolicy`），不是
- * `if (clientId === CTS_ID)`——明天换成另一个旅游客户，这段代码不需要改。
- * 认不出行业 → 没有 Playbook 可用 → 直接按 `lead_intake` 处理（跟
- * `classifyConversation` 自己「查不到消息就保守判 lead_intake」的方向一致，
- * 不是「换了行业就不发」）。
+ * 以前这里有一道「售前/售后分类」闸：对话被判成售后就不发安抚。它按关键词（如 booking）判断，
+ * 把「订之前能不能改行程」这类新咨询误判成老客户。现在所有进线都发；分类函数留在
+ * `messenger-agent/classify.ts`，不再用于拦截。
  *
  * ## 一事件一主
  *
@@ -52,7 +47,6 @@
 
 import { randomUUID } from 'node:crypto'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { supabaseAdmin } from '@/lib/supabase'
 import {
   CONVERSATION_MESSAGE_RECEIVED_EVENT,
   ConversationMessageReceivedSchema,
@@ -66,11 +60,6 @@ import {
   type MessengerAgentChannel,
   type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
-import {
-  TOURISM_POST_SALE_POLICY,
-  type PostSaleClassificationPolicy,
-} from '@/lib/messenger-agent/classify'
-import { hasIndustryFeature } from '@/lib/clients/industry-features'
 import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from '@/lib/messenger/autoack-identity'
 import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
 
@@ -143,19 +132,6 @@ export function parseMessageReceived(raw: unknown): ParsedMessageReceived {
  */
 export function isKnownAutoAckChannel(channel: string): channel is MessengerAgentChannel {
   return channel === 'messenger' || channel === 'whatsapp'
-}
-
-/**
- * 这个客户该用哪份售后判据——按行业关键词匹配（跟
- * `industryFeatureFlags`/`hasIndustryFeature` 同一套判法），不是按
- * `clientId` 硬编码。目前只有旅游行业有具名 Playbook；其它行业没有对应
- * 判据时返回 `null`，调用方按 `lead_intake` 处理（不猜、不套错行业的判据）。
- */
-export function resolvePostSaleClassificationPolicy(
-  industry: string | null | undefined,
-): PostSaleClassificationPolicy | null {
-  if (hasIndustryFeature(industry, 'tailor_made')) return TOURISM_POST_SALE_POLICY
-  return null
 }
 
 /**

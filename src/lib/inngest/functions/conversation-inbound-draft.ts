@@ -93,7 +93,6 @@
  */
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { supabaseAdmin } from '@/lib/supabase'
 import {
   CONVERSATION_MESSAGE_RECEIVED_EVENT,
   CONVERSATION_AUTOACK_SENT_EVENT,
@@ -139,8 +138,7 @@ export const CONVERSATION_REPLY_TIMEOUT_EVENT = 'conversation/reply.timeout'
  * F1（issue #1584，`conversation-inbound-autoack.ts`，PR #1739）在本文件动笔时
  * 是未合并的开着的 PR，跟这里共用的系统身份常量还没有一个已合并的家可以 import——
  * 这个值本身已跟 F1 逐字核对一致（子牙复审）。可对照的两个事件名常量和
- * `resolvePostSaleClassificationPolicy` 已经改成从已合并的 `conversations/events.ts`
- * / `messenger-agent/classify.ts` import（见上方 import 段），不再本地重复声明。
+ * （2026-10-22 PM：售前/售后分类闸已拿掉，所有进线都起草，见 `messenger-agent/classify.ts` 文件头。）
  */
 export const DRAFT_SENT_BY_EMAIL = 'governed-reply-agent@magicengine.cloud'
 

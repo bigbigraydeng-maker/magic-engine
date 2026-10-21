@@ -269,7 +269,7 @@ describe('kill-check', () => {
     expect(deps.runAgent).not.toHaveBeenCalled()
   })
 
-  it('2026-10-22 PM：所有进线都起草——对话里出现「booking」之类像售后的词，也照常起草（不再因为像老客户而跳过）', async () => {
+  it('2026-10-22 PM：不再区分售前 / 售后——F2 不再做分类，所有进线都照常起草', async () => {
     const deps = makeDeps()
     const fn = createConversationInboundDraftFunction(deps)
     const result = await invoke(fn, fakeStep())

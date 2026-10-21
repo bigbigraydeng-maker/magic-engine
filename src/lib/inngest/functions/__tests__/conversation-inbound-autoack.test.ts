@@ -1,21 +1,18 @@
 /**
  * F1 自动安抚回复（issue #1584）装配 + 关键路径测试。
  *
- * 分四块：
+ * 分三块：
  *   1. `parseMessageReceived` —— 复用共享 Zod 契约的校验行为
- *   2. `resolvePostSaleClassificationPolicy` —— 按行业选 Playbook，不认识的
- *      行业不猜、不套旅游判据
- *   3. 装配契约 —— 事件名 / retries / debounce 配置，不撞
+ *   2. 装配契约 —— 事件名 / retries / debounce 配置，不撞
  *      `WORKER_OWNED_EVENTS`
- *   4. 关键路径变异测试 —— opt-out 命中/未命中、kill switch 开/关、
- *      post_sale/lead_intake 分类两条路径，每条都断言"没被跳过的检查
- *      压根没被调用"，不是只看返回值
+ *   3. 关键路径变异测试 —— opt-out 命中/未命中、kill switch 开/关、6 小时限频，
+ *      每条都断言"没被跳过的检查压根没被调用"，不是只看返回值
+ *      （2026-10-22 起不再有售前/售后分类这一路）
  */
 import { describe, it, expect, vi } from 'vitest'
 import {
   createConversationInboundAutoAckFunction,
   parseMessageReceived,
-  resolvePostSaleClassificationPolicy,
   AUTOACK_TEMPLATE,
   AUTOACK_SENT_BY_EMAIL,
   AUTOACK_COOLDOWN_HOURS,
@@ -23,7 +20,6 @@ import {
   type ConversationInboundAutoAckDeps,
 } from '../conversation-inbound-autoack'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
-import { TOURISM_POST_SALE_POLICY } from '@/lib/messenger-agent/classify'
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 import type { SendReplyResult } from '@/lib/messenger/send'
 import type { SendWhatsAppResult } from '@/lib/whatsapp/send'
@@ -130,24 +126,6 @@ describe('parseMessageReceived', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 2) resolvePostSaleClassificationPolicy —— 按行业选 Playbook
-// ---------------------------------------------------------------------------
-
-describe('resolvePostSaleClassificationPolicy', () => {
-  it('旅游关键词命中的行业 → TOURISM_POST_SALE_POLICY', () => {
-    expect(resolvePostSaleClassificationPolicy('Travel — Tour Operator')).toBe(TOURISM_POST_SALE_POLICY)
-    expect(resolvePostSaleClassificationPolicy('旅游')).toBe(TOURISM_POST_SALE_POLICY)
-  })
-
-  it('认不出的行业（地产/建材/空）→ null，不套旅游判据', () => {
-    expect(resolvePostSaleClassificationPolicy('real_estate')).toBeNull()
-    expect(resolvePostSaleClassificationPolicy('SPC/hybrid flooring wholesale (B2B trade)')).toBeNull()
-    expect(resolvePostSaleClassificationPolicy(null)).toBeNull()
-    expect(resolvePostSaleClassificationPolicy(undefined)).toBeNull()
-  })
-})
-
-// ---------------------------------------------------------------------------
 // 3) 装配契约
 // ---------------------------------------------------------------------------
 
@@ -244,7 +222,7 @@ describe('关键路径', () => {
     expect(deps.send.messenger).toHaveBeenCalledTimes(1)
   })
 
-  it('2026-10-22 PM：所有进线都发安抚——对话里出现「booking」之类像售后的词，也照发（不再因为像老客户而跳过）', async () => {
+  it('2026-10-22 PM：不再区分售前 / 售后——F1 不看对话内容，所有进线（含像老客户的）都照发安抚', async () => {
     const deps = makeDeps()
     const fn = createConversationInboundAutoAckFunction(deps)
     const step = fakeStep()
