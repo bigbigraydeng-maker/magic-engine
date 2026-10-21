@@ -16,6 +16,9 @@ const m = vi.hoisted(() => ({
   growthLimit: null as number | null,
 }))
 
+vi.mock('@/lib/ads-strategy/agents/growth-live-goal', () => ({
+  overlayLiveGoal: async (_id: string, row: Record<string, unknown>) => ({ ...row, goal_live: { live: true, readAtIso: 'x' } }),
+}))
 vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
 
 vi.mock('@/lib/supabase', () => {
@@ -104,6 +107,7 @@ describe('GET ad-health — growth visibility by viewer', () => {
     expect(text).toContain(D11_TITLE)
     const problems = (body.growth?.payload as { problems: Array<{ code: string }> }).problems
     expect(problems.map(p => p.code)).toEqual(['D10', 'D11'])
+    expect((body.growth as unknown as { goal_live: { live: boolean } }).goal_live.live).toBe(true)
   })
 
   it('paid client never receives D11 or raw evidence; gets the client view with the D10 card', async () => {
@@ -115,6 +119,7 @@ describe('GET ad-health — growth visibility by viewer', () => {
       expect(text, `leaked: ${leaked}`).not.toContain(leaked)
     }
     expect(body.growth?.viewer).toBe('client')
+    expect(text).not.toContain('goal_live')
     const cards = (body.growth?.adCards as { cards: Array<{ adLabel: string }> }).cards
     expect(cards.map(c => c.adLabel)).toEqual(['Spring Lead Ad'])
   })
