@@ -23,7 +23,8 @@
  *
  *   Step 0   opt-out 检查（#1575 `isConversationOptedOut`，fail-closed）
  *   Step 0.5 渠道 kill switch（#1578 `isChannelEnabled`，fail-closed）
- *   Step 0.8 售前/售后分类（#1576 `classifyConversation`）——post_sale 不发
+ *   （2026-10-22 PM：售前/售后分类这一道闸已拿掉——所有 WhatsApp / 私信进线都发安抚，
+ *     不再因为「看起来像老客户」跳过。原因见台账 2026-10-22-ai-reply-all-inbound-no-postsale-gate。）
  *   Step 1   发硬编码模板（#1578 `CHANNEL_SEND`）
  *   Step 2   emit `conversation/autoack.sent` 收尾事件
  *
@@ -66,9 +67,7 @@ import {
   type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
 import {
-  classifyConversation,
   TOURISM_POST_SALE_POLICY,
-  type ConversationClass,
   type PostSaleClassificationPolicy,
 } from '@/lib/messenger-agent/classify'
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
@@ -102,7 +101,6 @@ export type AutoAckOutcome =
   | 'skipped_opted_out'
   | 'skipped_channel_disabled'
   | 'skipped_recently_replied'
-  | 'skipped_post_sale'
   | 'skipped_invalid_payload'
   | 'send_failed'
 
@@ -161,38 +159,6 @@ export function resolvePostSaleClassificationPolicy(
 }
 
 /**
- * 生产实现：查 `clients.industry`。
- *
- * 🔴 Codex 复审（2026-09-15，PR #1736）实测发现：这里原来把"查询真的报错"跟
- * "这个客户合法地没填 industry"两种情况都折叠成同一个 `null`，下游把
- * `null`一律当"没有对应 Playbook → 按 lead_intake 处理 → 照常发送"。
- * 结果是一次数据库瞬时故障，会让一个正在问售后问题的旅游客户被误判成
- * 新客户，收到一句不适用的"稍后回复您"——这条自动发送路径本该跟本文件
- * 其它每一道闸（opt-out/kill-switch）一样是 fail-closed 方向,却在这一处
- * 变成了"查不出来就当无害情况处理"。
- *
- * 改法：真的查询报错就 throw，让这一步的 `step.run` 把异常往上抛——整个
- * 函数因此失败，Inngest 的 `retries: 1` 会重跑一次（多数瞬时 DB 抖动一次
- * 重试就好了），而不是吞掉错误直接照常发送。"查到了，但这一列本来就是
- * 空的"（`data` 存在但 `industry` 是 `null`）跟"没查到这一行"（`data` 是
- * `null` 但没报错——真实场景几乎不会发生，`clientId` 是发消息时刚查出来
- * 的，但仍按同一个 fail-closed 方向处理，不当成"可以安全发送")都不是报错，
- * 返回 `null` 交给上层当"没有对应 Playbook"处理，这两种跟"查询本身失败"
- * 是不同的两件事，不能混在一起。
- */
-async function loadClientIndustry(clientId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .select('industry')
-    .eq('id', clientId)
-    .maybeSingle()
-  if (error) {
-    throw new Error(`[conversation-inbound-autoack] 查客户行业失败 clientId=${clientId}: ${error.message}`)
-  }
-  return (data as { industry: string | null } | null)?.industry ?? null
-}
-
-/**
  * 返回类型用三渠道合并的 `ChannelSendResult`（不是只有 messenger/whatsapp 的
  * 两渠道联合类型），因为 `deps.send` 的类型是 `Record<MessengerAgentChannel,
  * ChannelSendFn>`——`MessengerAgentChannel` 三个成员都要有一个类型兼容的值，
@@ -211,12 +177,10 @@ export interface ConversationInboundAutoAckDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
   hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
-  classify: (conversationId: string, policy: PostSaleClassificationPolicy) => Promise<ConversationClass>
-  loadIndustry: (clientId: string) => Promise<string | null>
   send: Record<MessengerAgentChannel, ChannelSendFn>
 }
 
-/** 依赖注入版：单测直接注入假的 opt-out/kill-switch/classify/send，不碰真数据库、不真发消息。 */
+/** 依赖注入版：单测直接注入假的 opt-out/kill-switch/send，不碰真数据库、不真发消息。 */
 export function createConversationInboundAutoAckFunction(deps: ConversationInboundAutoAckDeps) {
   return inngest.createFunction(
     {
@@ -293,21 +257,6 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
         return { ...base, outcome: 'skipped_recently_replied', detail: `within_${AUTOACK_COOLDOWN_HOURS}h` }
       }
 
-      // Step 0.8：售前/售后分类——判据按行业注入，本函数不写死任何客户/行业。
-      //
-      // 🔴 同上，不额外挂 pm-todo：售后对话本来就需要员工手动处理（这正是
-      // "不发自动安抚"的原因——不想让 AI 对一个已购客户随口说"我们的顾问会
-      // 联系您"这种对售后场景不成立的话），而售后对话跟售前一样会出现在同
-      // 一个 CRM 收件箱里，不缺一个专属提醒。
-      const conversationClass = await step.run('classify-conversation', async () => {
-        const industry = await deps.loadIndustry(client_id)
-        const policy = resolvePostSaleClassificationPolicy(industry)
-        return policy ? deps.classify(conversation_id, policy) : ('lead_intake' as ConversationClass)
-      })
-      if (conversationClass === 'post_sale') {
-        return { ...base, outcome: 'skipped_post_sale', detail: null }
-      }
-
       // Step 1：发硬编码模板。不调 Claude，不占 verifier，不读任何知识源
       // （见文件头 §9.14 C.5）。
       const sendResult = await step.run('send-autoack', () =>
@@ -375,7 +324,5 @@ export const conversationInboundAutoAck = createConversationInboundAutoAckFuncti
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
   hasRecentOutbound,
-  classify: classifyConversation,
-  loadIndustry: loadClientIndustry,
   send: CHANNEL_SEND,
 })

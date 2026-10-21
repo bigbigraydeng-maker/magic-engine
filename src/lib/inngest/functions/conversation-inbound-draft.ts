@@ -8,7 +8,7 @@
  * v3 方案（`~/.claude/plans/cts-tours-messenger-dynamic-pearl.md` §Layer4 F2）
  * 的九步骨架，逐步对应本文件的 step id：
  *
- *   check-opt-out / check-channel-enabled / classify-conversation
+ *   check-opt-out / check-channel-enabled
  *     —— 三项独立判断，互不依赖，任一命中直接 return（不靠"等 F1 事件"来判断
  *        "要不要继续"，这正是 3 审第 1 轮子牙 B1 blocker 修好的地方）
  *   wait-autoack —— 等 `conversation/autoack.sent`，纯 UX 排序（超时也继续，
@@ -112,12 +112,6 @@ import {
 } from '@/lib/messenger-agent/channel-dispatch'
 import { isKnownAutoAckChannel, AUTOACK_COOLDOWN_HOURS } from './conversation-inbound-autoack'
 import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
-import {
-  classifyConversation,
-  resolvePostSaleClassificationPolicy,
-  type ConversationClass,
-  type PostSaleClassificationPolicy,
-} from '@/lib/messenger-agent/classify'
 import { buildMessengerAgentSystemPrompt } from '@/lib/messenger-agent/prompt'
 import { buildMessengerAgentTools, CUSTOMER_FACING_SENSITIVITIES } from '@/lib/messenger-agent/tools'
 import { callClaudeWithTools } from '@/lib/anthropic/client'
@@ -162,7 +156,6 @@ export type DraftOutcome =
   | 'skipped_invalid_payload'
   | 'skipped_opted_out'
   | 'skipped_channel_disabled'
-  | 'skipped_post_sale'
   | 'draft_error'
   | 'blocked'
   | 'timed_out'
@@ -356,8 +349,6 @@ export interface ConversationInboundDraftDeps {
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
   /** F1 的 6 小时限频用同一个判断：命中就说明 F1 不会再发安抚、也不会 emit autoack.sent。 */
   hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
-  classify: (conversationId: string, policy: PostSaleClassificationPolicy) => Promise<ConversationClass>
-  loadIndustry: (clientId: string) => Promise<string | null>
   loadContext: (clientId: string, conversationId: string) => Promise<LoadedDraftContext>
   runAgent: (clientId: string, conversationId: string, context: LoadedDraftContext) => Promise<MessengerAgentOutput>
   verify: (
@@ -424,15 +415,6 @@ export function createConversationInboundDraftFunction(deps: ConversationInbound
       const enabled = await step.run('check-channel-enabled', () => deps.isEnabled(client_id, channel))
       if (!enabled) {
         return { ...base, outcome: 'skipped_channel_disabled', detail: null }
-      }
-
-      const conversationClass = await step.run('classify-conversation', async () => {
-        const industry = await deps.loadIndustry(client_id)
-        const policy = resolvePostSaleClassificationPolicy(industry)
-        return policy ? deps.classify(conversation_id, policy) : ('lead_intake' as ConversationClass)
-      })
-      if (conversationClass === 'post_sale') {
-        return { ...base, outcome: 'skipped_post_sale', detail: null }
       }
 
       // Step "wait-autoack" —— 纯 UX 排序（确保安抚话术先送达），不是 gate：
@@ -729,14 +711,6 @@ export const conversationInboundDraft = createConversationInboundDraftFunction({
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
   hasRecentOutbound,
-  classify: classifyConversation,
-  loadIndustry: async (clientId: string) => {
-    const { data, error } = await supabaseAdmin.from('clients').select('industry').eq('id', clientId).maybeSingle()
-    if (error) {
-      throw new Error(`[conversation-inbound-draft] 查客户行业失败 clientId=${clientId}: ${error.message}`)
-    }
-    return (data as { industry: string | null } | null)?.industry ?? null
-  },
   loadContext: loadDraftContext,
   runAgent: runDraftAgent,
   verify: verifyDraft,
