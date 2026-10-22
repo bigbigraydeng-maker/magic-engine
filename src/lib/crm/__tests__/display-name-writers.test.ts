@@ -16,6 +16,7 @@ const ALLOWED = new Set([
   'src/lib/crm/identity.ts', // resolveContact：入口清洗
   'src/lib/messenger/link-contacts.ts', // 补名字：cleanDisplayName(leadName)
   'src/app/api/clients/[id]/messenger/unclaimed/claim/route.ts', // 手工认领：cleanDisplayName(newContactName)
+  'src/lib/crm/profile.ts', // 档案卡改名：parseProfileName 清洗 + setProfileName 再确认一次
 ])
 
 describe('只有清洗过的值才能写 contacts.display_name', () => {

@@ -15,6 +15,7 @@ import { ContactTimeline, type TimelineSummary, type StageSource } from './Conta
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { ComposeEmail } from './ComposeEmail'
+import { ProfileCard } from './ProfileCard'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
@@ -355,6 +356,9 @@ export function PersonDrawer({
               <span className="text-xs text-me-charcoal/45">没留电话和邮箱，只能在私信里回他</span>
             )}
           </div>
+
+          {/* 客人档案：名字（可改）/ 昵称 / 邮箱 / 电话（可加）。PM 2026-10-22：先把字段做好，以后有机会再完善。 */}
+          <ProfileCard clientId={clientId} contactId={row.contactId} onChanged={() => onSaved('✓ 档案已保存', true)} />
 
           {/* 该做什么 —— 三行：动作 + 为什么 / AI 建议 / 到哪一步了（点开可改）。
               这一块取代了原来并排的三套状态（阶段按钮、冷热标签、意向小圆标），PM 2026-10-10：
