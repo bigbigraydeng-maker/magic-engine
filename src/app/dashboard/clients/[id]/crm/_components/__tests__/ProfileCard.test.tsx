@@ -22,6 +22,7 @@ function stub(responses: Array<{ ok: boolean; status?: number; body: unknown }>)
   vi.stubGlobal('fetch', f)
   return f
 }
+const confirmYes = () => vi.spyOn(window, 'confirm').mockReturnValue(true)
 const draw = (onChanged = vi.fn()) => render(<ProfileCard clientId="c1" contactId="p1" onChanged={onChanged} />)
 
 afterEach(() => {
@@ -88,6 +89,7 @@ describe('ProfileCard', () => {
       { ok: true, body: { profile: PROFILE } },
       { ok: true, body: { profile: { ...PROFILE, phones: [{ value: '+6421363598', primary: true }] }, added: true } },
     ])
+    confirmYes()
     draw()
     fireEvent.click(await screen.findByRole('button', { name: '+ 加电话' }))
     fireEvent.change(screen.getByLabelText('新电话'), { target: { value: '021 363 598' } })
@@ -103,10 +105,21 @@ describe('ProfileCard', () => {
       { ok: true, body: { profile: PROFILE } },
       { ok: false, status: 409, body: { error: '这个邮箱已经属于「Other Person」' } },
     ])
+    confirmYes()
     draw()
     fireEvent.click(await screen.findByRole('button', { name: '+ 加邮箱' }))
     fireEvent.change(screen.getByLabelText('新邮箱'), { target: { value: 'other@x.com' } })
     fireEvent.click(screen.getByRole('button', { name: '加上' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Other Person')
+  })
+
+  it('加之前要确认（加了不能在这里删）；点取消 → 不发请求', async () => {
+    const f = stub([{ ok: true, body: { profile: PROFILE } }])
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    draw()
+    fireEvent.click(await screen.findByRole('button', { name: '+ 加电话' }))
+    fireEvent.change(screen.getByLabelText('新电话'), { target: { value: '021 363 598' } })
+    fireEvent.click(screen.getByRole('button', { name: '加上' }))
+    expect(f).toHaveBeenCalledTimes(1) // 只有最初那次读取
   })
 })

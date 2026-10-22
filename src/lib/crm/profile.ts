@@ -31,7 +31,9 @@ export interface ProfileView {
 export type NameParse = { ok: true; value: string | null } | { ok: false; error: string }
 
 // 控制字符 / 换行 / 零宽 / 双向控制符：不悄悄剥掉，直接拒绝（名字会进邮件、WhatsApp 回复、发给 Meta 的受众）。
-const FORBIDDEN_CHARS = new RegExp('[\\u0000-\\u001F\\u007F\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF]')
+const FORBIDDEN_CHARS = new RegExp(
+  '[\\u0000-\\u001F\\u007F\\u00AD\\u034F\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2069\\uFE00-\\uFE0F\\uFEFF\\uFFF9-\\uFFFB]',
+)
 
 /** 档案卡上改名字：空串 / null = 清空；其余必须是一个像样的名字。 */
 export function parseProfileName(raw: unknown): NameParse {
@@ -105,7 +107,7 @@ export async function setProfileName(db: SupabaseClient, clientId: string, conta
 
 export type AddIdentityResult =
   | { ok: true; added: boolean }
-  | { ok: false; status: 400 | 404 | 409 | 500; error: string }
+  | { ok: false; status: 400 | 404 | 409 | 500; error: string; ownerContactId?: string }
 
 /**
  * 给这个人加一个邮箱或电话。已经是他的 → 成功（幂等）；已经是**别的客人**的 → 409，不动
@@ -134,7 +136,19 @@ export async function addProfileIdentity(
   if (ownerId && ownerId !== contactId) {
     const { data: other } = await db.from('contacts').select('display_name').eq('id', ownerId).eq('client_id', clientId).maybeSingle()
     const who = cleanDisplayName((other as { display_name: string | null } | null)?.display_name) ?? '另一位客人'
-    return { ok: false, status: 409, error: `这个${kind === 'email' ? '邮箱' : '电话'}已经属于「${who}」，库里可能有两个重复的客人——请先合并，不能在这里加` }
+    return { ok: false, status: 409, ownerContactId: ownerId, error: `这个${kind === 'email' ? '邮箱' : '电话'}已经属于「${who}」，说明库里有重复的客人。这里不能加（合并功能还没有做，需要联系开发处理）` }
+  }
+
+  // 🔴 身份表和主列可能不一致（主列有值、身份表没有那一行的脏数据，魏征 B1）：再查一遍 contacts 的主邮箱 / 主电话，
+  // 已经是别的客人的主联系方式也不许加，否则同一个号码会挂到两个人名下，之后来电 / 来信归谁就不确定了。
+  const primaryCol = kind === 'email' ? 'primary_email' : 'primary_phone'
+  if (!ownerId) {
+    const { data: holder } = await db.from('contacts').select('id, display_name').eq('client_id', clientId).eq(primaryCol, value).neq('id', contactId).limit(1)
+    const other = (holder as Array<{ id: string; display_name: string | null }> | null)?.[0]
+    if (other) {
+      const who = cleanDisplayName(other.display_name) ?? '另一位客人'
+      return { ok: false, status: 409, ownerContactId: other.id, error: `这个${kind === 'email' ? '邮箱' : '电话'}已经是「${who}」的主联系方式，说明库里有重复的客人。这里不能加（合并功能还没有做，需要联系开发处理）` }
+    }
   }
 
   let added = false
@@ -149,7 +163,6 @@ export async function addProfileIdentity(
   }
 
   // 他还没有主邮箱 / 主电话时，这一个就是主的（只补空，不改已有的主联系方式）。
-  const primaryCol = kind === 'email' ? 'primary_email' : 'primary_phone'
   const current = kind === 'email' ? c.primary_email : c.primary_phone
   if (!current) {
     await db.from('contacts').update({ [primaryCol]: value }).eq('id', contactId).eq('client_id', clientId).is(primaryCol, null)

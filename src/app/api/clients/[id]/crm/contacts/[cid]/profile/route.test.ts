@@ -50,7 +50,7 @@ describe('profile route', () => {
   it('identities POST：kind 不对 400；冲突 409 原样返回；成功 200 带 added', async () => {
     const post = (body: unknown) => POST(new NextRequest('http://x/api', { method: 'POST', body: JSON.stringify(body) }), params)
     ;(vi.mocked(await import('@/lib/supabase')).supabaseAdmin.from as ReturnType<typeof vi.fn>).mockReturnValue({
-      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { default_phone_country: 'AU' } }) }) }),
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { country: 'NZ', semrush_db: 'nz' } }) }) }),
     })
     expect((await post({ kind: 'fb_psid', value: 'x' })).status).toBe(400)
     ;(addProfileIdentity as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, status: 409, error: '已属于别人' })
@@ -61,6 +61,29 @@ describe('profile route', () => {
     ;(loadProfile as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ contactId: 'p1' })
     const ok = await post({ kind: 'phone', value: '021 1' })
     expect(await ok.json()).toEqual({ profile: { contactId: 'p1' }, added: true })
-    expect(addProfileIdentity).toHaveBeenLastCalledWith(expect.anything(), 'client-a', 'p1', 'phone', '021 1', 'AU')
+    expect(addProfileIdentity).toHaveBeenLastCalledWith(expect.anything(), 'client-a', 'p1', 'phone', '021 1', 'NZ')
+  })
+
+  it('默认国家跟手工录入路由同一份判据：NZ 客户 → NZ；其余（含 country 为空）→ AU', async () => {
+    const post = (body: unknown) => POST(new NextRequest('http://x/api', { method: 'POST', body: JSON.stringify(body) }), params)
+    const fromMock = vi.mocked(await import('@/lib/supabase')).supabaseAdmin.from as ReturnType<typeof vi.fn>
+    ;(addProfileIdentity as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true, added: true })
+    ;(loadProfile as ReturnType<typeof vi.fn>).mockResolvedValue({ contactId: 'p1' })
+    for (const [row, expected] of [[{ country: 'AU', semrush_db: 'au' }, 'AU'], [{ country: null, semrush_db: null }, 'AU'], [{ country: null, semrush_db: 'nz' }, 'NZ']] as const) {
+      fromMock.mockReturnValue({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row }) }) }) })
+      await post({ kind: 'phone', value: '0412 345 678' })
+      expect(addProfileIdentity).toHaveBeenLastCalledWith(expect.anything(), 'client-a', 'p1', 'phone', '0412 345 678', expected)
+    }
+  })
+
+  it('数据库抛异常 → 统一的 { error } 500，不是 Next 默认页', async () => {
+    const post = () => POST(new NextRequest('http://x/api', { method: 'POST', body: JSON.stringify({ kind: 'email', value: 'a@b.com' }) }), params)
+    const fromMock = vi.mocked(await import('@/lib/supabase')).supabaseAdmin.from as ReturnType<typeof vi.fn>
+    fromMock.mockImplementation(() => {
+      throw new Error('db down')
+    })
+    const res = await post()
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: '保存失败，请稍后再试' })
   })
 })

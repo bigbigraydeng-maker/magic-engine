@@ -33,12 +33,21 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: 'kind 只能是 email 或 phone' }, { status: 400 })
   }
 
-  const { data: client } = await supabaseAdmin.from('clients').select('default_phone_country').eq('id', params.id).maybeSingle()
-  const country = (client as { default_phone_country: string | null } | null)?.default_phone_country === 'AU' ? 'AU' : 'NZ'
+  try {
+    // 默认国家的判据跟手工录入路由（crm/contacts POST）同一份：NZ 客户 → NZ，其余 → AU。
+    // （clients.default_phone_country 在生产库全是空的，不能靠它——否则 AU 客户的本地号码会被补成 +64。）
+    const { data: client } = await supabaseAdmin.from('clients').select('country, semrush_db').eq('id', params.id).maybeSingle()
+    const c = client as { country: string | null; semrush_db: string | null } | null
+    const country: 'NZ' | 'AU' = c?.country === 'NZ' || c?.semrush_db === 'nz' ? 'NZ' : 'AU'
 
-  const result = await addProfileIdentity(supabaseAdmin, params.id, params.cid, body.kind, body.value, country)
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+    const result = await addProfileIdentity(supabaseAdmin, params.id, params.cid, body.kind, body.value, country)
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error, ...(result.ownerContactId ? { ownerContactId: result.ownerContactId } : {}) }, { status: result.status })
+    }
 
-  const profile = await loadProfile(supabaseAdmin, params.id, params.cid)
-  return NextResponse.json({ profile, added: result.added })
+    const profile = await loadProfile(supabaseAdmin, params.id, params.cid)
+    return NextResponse.json({ profile, added: result.added })
+  } catch {
+    return NextResponse.json({ error: '保存失败，请稍后再试' }, { status: 500 })
+  }
 }

@@ -7,7 +7,7 @@
  * 读失败什么都不渲染（不在抽屉里立一块红色报错挡住别的）；写失败显示服务端给的原因。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 interface Profile {
   contactId: string
@@ -30,20 +30,28 @@ export function ProfileCard({ clientId, contactId, onChanged }: { clientId: stri
   const [error, setError] = useState<string | null>(null)
   const base = `/api/clients/${clientId}/crm/contacts/${contactId}/profile`
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(base)
-      if (!res.ok) throw new Error('load failed')
-      setProfile(((await res.json()) as { profile: Profile }).profile)
-      setFailed(false)
-    } catch {
-      setFailed(true)
+  useEffect(() => {
+    // 切到另一个客人时，旧请求晚到的响应要丢掉（否则会把上一个人的档案显示在当前抽屉里）。
+    let stale = false
+    setProfile(null)
+    setFailed(false)
+    setEditingName(false)
+    setAdding(null)
+    setError(null)
+    void (async () => {
+      try {
+        const res = await fetch(base)
+        if (!res.ok) throw new Error('load failed')
+        const json = (await res.json()) as { profile: Profile }
+        if (!stale) setProfile(json.profile)
+      } catch {
+        if (!stale) setFailed(true)
+      }
+    })()
+    return () => {
+      stale = true
     }
   }, [base])
-
-  useEffect(() => {
-    void load()
-  }, [load])
 
   if (failed || !profile) return null
 
@@ -93,7 +101,7 @@ export function ProfileCard({ clientId, contactId, onChanged }: { clientId: stri
             >
               保存
             </button>
-            <button type="button" onClick={() => setEditingName(false)} className="px-1 text-xs font-bold text-me-charcoal/50">
+            <button type="button" onClick={() => (setEditingName(false), setError(null))} className="px-1 text-xs font-bold text-me-charcoal/50">
               取消
             </button>
           </>
@@ -151,12 +159,16 @@ export function ProfileCard({ clientId, contactId, onChanged }: { clientId: stri
                 <button
                   type="button"
                   disabled={busy || valueDraft.trim() === ''}
-                  onClick={() => void call(`${base}/identities`, 'POST', { kind, value: valueDraft }).then((ok) => ok && (setAdding(null), setValueDraft('')))}
+                  onClick={() => {
+                    // 加了之后，这个号码 / 邮箱以后的来电来信都会自动归到这位客人名下，而且这里没有删除入口——加之前确认一次。
+                    if (!window.confirm(`确认把 ${valueDraft.trim()} 加到这位客人名下？\n加上之后，这个${label}以后的来电 / 来信都会归到他，目前不能在这里删除。`)) return
+                    void call(`${base}/identities`, 'POST', { kind, value: valueDraft }).then((ok) => ok && (setAdding(null), setValueDraft('')))
+                  }}
                   className="rounded-lg bg-me-charcoal px-2.5 py-1 text-xs font-bold text-white disabled:opacity-40"
                 >
                   加上
                 </button>
-                <button type="button" onClick={() => setAdding(null)} className="px-1 text-xs font-bold text-me-charcoal/50">
+                <button type="button" onClick={() => (setAdding(null), setError(null))} className="px-1 text-xs font-bold text-me-charcoal/50">
                   取消
                 </button>
               </>

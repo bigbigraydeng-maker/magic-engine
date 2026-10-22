@@ -19,6 +19,8 @@ function memoryDb(seed: Record<string, Row[]>): { db: SupabaseClient; tables: Re
       eq: (col: string, val: unknown) => (filters.push((r) => r[col] === val), builder),
       in: (col: string, vals: unknown[]) => (filters.push((r) => vals.includes(r[col])), builder),
       is: (col: string, _v: null) => (filters.push((r) => r[col] === null || r[col] === undefined), builder),
+      neq: (col: string, val: unknown) => (filters.push((r) => r[col] !== val), builder),
+      limit: () => builder,
       update: (p: Row) => ((mode = 'update'), (patch = p), builder),
       insert: (row: Row) => {
         if (table === 'contact_identities' && rows.some((r) => r.client_id === row.client_id && r.kind === row.kind && r.value === row.value)) {
@@ -81,6 +83,7 @@ describe('parseProfileName', () => {
     expect(parseProfileName('Bob\nLee').ok).toBe(false)
     expect(parseProfileName('Bob​Lee').ok).toBe(false)
     expect(parseProfileName('Bob\u0007').ok).toBe(false)
+    for (const c of ['\u2066', '\u2067', '\u2068', '\u2069', '\u00AD', '\u180E', '\uFE0F', '\uFFF9']) expect(parseProfileName(`Bob${c}Lee`).ok, c).toBe(false)
     expect(parseProfileName('x'.repeat(81)).ok).toBe(false)
     expect(parseProfileName('x'.repeat(80)).ok).toBe(true)
     expect(parseProfileName(5).ok).toBe(false)
@@ -168,5 +171,27 @@ describe('addProfileIdentity', () => {
   it('别的客户的人 → 404', async () => {
     const { db } = memoryDb(seed())
     expect(await addProfileIdentity(db, C, 'x1', 'email', 'a@b.com')).toMatchObject({ ok: false, status: 404 })
+  })
+  it('🔴 身份表没有这一行、但别的客人的**主邮箱 / 主电话**就是它（脏数据）→ 同样 409，不会挂到两个人名下', async () => {
+    const s = seed()
+    s.contacts.push({ id: 'p9', client_id: C, display_name: 'Dirty Data', primary_email: 'dirty@x.com', primary_phone: '+6429999999' })
+    const { db, tables } = memoryDb(s)
+    const e = await addProfileIdentity(db, C, 'p3', 'email', 'dirty@x.com')
+    expect(e).toMatchObject({ ok: false, status: 409 })
+    expect((e as { error: string }).error).toContain('Dirty Data')
+    const p = await addProfileIdentity(db, C, 'p3', 'phone', '+6429999999')
+    expect(p).toMatchObject({ ok: false, status: 409 })
+    expect(tables.contact_identities.filter((i) => i.value === 'dirty@x.com')).toHaveLength(0)
+  })
+  it('数据库唯一约束兜底：并发抢同一个邮箱（insert 撞 23505）→ 409', async () => {
+    const { db } = memoryDb(seed())
+    const racing = {
+      from: (t: string) => {
+        const b = (db as unknown as { from: (x: string) => Record<string, unknown> }).from(t)
+        if (t !== 'contact_identities') return b
+        return { ...b, insert: () => Promise.resolve({ error: { code: '23505', message: 'dup' } }) }
+      },
+    } as unknown as typeof db
+    expect(await addProfileIdentity(racing, C, 'p3', 'email', 'race@x.com')).toMatchObject({ ok: false, status: 409 })
   })
 })

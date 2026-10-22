@@ -4,7 +4,7 @@ const ALNUM_RE = new RegExp('[\\p{L}\\p{N}]', 'u');
 // Zero-width and bidi control characters, plus other control characters.
 // U+200B-U+200F, U+202A-U+202E, U+2060, U+FEFF, U+0000-U+001F, U+007F
 const CONTROL_RUN_RE = new RegExp(
-  '[\\u200B-\\u200F\\u202A-\\u202E\\u2060\\uFEFF\\u0000-\\u001F\\u007F]+',
+  '[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2069\\u00AD\\u034F\\u180E\\uFE00-\\uFE0F\\uFEFF\\uFFF9-\\uFFFB\\u0000-\\u001F\\u007F]+',
   'g',
 );
 
