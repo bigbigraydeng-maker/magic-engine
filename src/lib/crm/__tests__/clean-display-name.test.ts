@@ -127,3 +127,12 @@ describe('normaliseForCompare', () => {
     expect(normaliseForCompare('   ')).toBe('');
   });
 });
+
+describe('cleanDisplayName 不误杀真名（审查提示：Na 是韩国姓）', () => {
+  it('Na / Guest 这类可能是真名的词保留；n/a、N/A、n.a. 这种明显占位的才清', () => {
+    expect(cleanDisplayName('Na')).toBe('Na')
+    expect(cleanDisplayName('Guest')).toBe('Guest')
+    expect(cleanDisplayName('N/A')).toBeNull()
+    expect(cleanDisplayName('n.a.')).toBeNull()
+  })
+})

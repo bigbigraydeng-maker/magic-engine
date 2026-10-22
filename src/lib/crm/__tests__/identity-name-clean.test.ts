@@ -84,6 +84,16 @@ describe('resolveContact 名字清洗', () => {
     expect(updates[0]).toMatchObject({ display_name: 'Christine Brown' })
     mockDb(true)
     await resolveContact({ clientId: 'c', identities: [EMAIL], displayName: 'Christine Brown', overwriteDisplayName: false })
-    expect(updates.every((u) => !('display_name' in u))).toBe(true)
+    // 主更新（带 last_seen_at 的那条）不带名字；名字只会走下面那条「仅原名为空才补」的条件更新
+    expect(updates.find((u) => 'last_seen_at' in u)).not.toHaveProperty('display_name')
+  })
+
+  it('overwriteDisplayName=false 默认**不**补名字（公开端点不许改已有客户资料）；加 fillEmptyDisplayName 才在原名为空时补', async () => {
+    mockDb(true)
+    await resolveContact({ clientId: 'c', identities: [EMAIL], displayName: 'Christine Brown', overwriteDisplayName: false })
+    expect(updates.some((u) => u.display_name === 'Christine Brown')).toBe(false)
+    mockDb(true)
+    await resolveContact({ clientId: 'c', identities: [EMAIL], displayName: 'Christine Brown', overwriteDisplayName: false, fillEmptyDisplayName: true })
+    expect(updates.some((u) => u.display_name === 'Christine Brown')).toBe(true)
   })
 })

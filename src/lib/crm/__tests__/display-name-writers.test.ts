@@ -36,4 +36,14 @@ describe('只有清洗过的值才能写 contacts.display_name', () => {
     const unexpected = writers.filter((f) => !ALLOWED.has(f))
     expect(unexpected).toEqual([])
   })
+
+  it('白名单里的文件都真的 import 了 cleanDisplayName（不只是「别新增」，还验证「已有的真过了清洗」）', () => {
+    for (const f of ALLOWED) {
+      const src = execSync(`cat "${f}"`, { cwd: ROOT, encoding: 'utf-8' })
+      expect(src, `${f} 应该 import cleanDisplayName`).toMatch(/cleanDisplayName/)
+    }
+  })
+
+  // 已知盲区（提醒型护栏，不是强保证）：扫不到 scripts/、用展开 / 变量 / RPC / SQL 迁移写 display_name 的写法。
+  // scripts/crm-clean-email-names.ts 有意把名字写成 NULL（清理历史数据），不在扫描范围内。
 })

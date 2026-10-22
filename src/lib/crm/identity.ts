@@ -132,6 +132,11 @@ export interface ResolveInput {
    */
   overwriteDisplayName?: boolean
   /**
+   * 配合 `overwriteDisplayName: false` 用：命中已有联系人、且他**现在没有名字**时，才用这次的名字补上（已有名字绝不动）。
+   * 只给可信的内部入口（邮件同步）用；公开端点（官网表单等）不要传。
+   */
+  fillEmptyDisplayName?: boolean
+  /**
    * 「他是哪条广告 / 哪条视频带来的」。
    *
    * first-touch 语义：新建的人直接写上；命中已有的人**只在原来是空的时候**回填，
@@ -259,6 +264,13 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId)
+
+    // 调用方明确要求「只补空」时（目前只有邮件同步——客户自己邮箱里读到的，不是公开端点），**原名是空的**才补；
+    // 已有名字绝不动。否则名字被清成 NULL 的老联系人之后永远补不上真名。
+    // 🔴 不对所有 overwriteDisplayName=false 的调用方放开：官网表单是公开端点，不许改已有客户的资料（原有测试钉死）。
+    if (cleanedName && !renameOk && input.fillEmptyDisplayName === true) {
+      await supabaseAdmin.from('contacts').update({ display_name: cleanedName }).eq('id', contactId).is('display_name', null)
+    }
 
     // first-touch 回填：**只在原来是空的时候**写。
     //
