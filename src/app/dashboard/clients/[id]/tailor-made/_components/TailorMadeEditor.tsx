@@ -47,6 +47,7 @@ export default function TailorMadeEditor({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
 
   // AI 对话
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -433,6 +434,40 @@ export default function TailorMadeEditor({
     frame.contentWindow.print();
   };
 
+  /**
+   * 一键生成一页摘要：亮点 / 价格 / 日期的浓缩版，发给终端客户或同行旅行社用，
+   * 不是完整行程单。在新标签页打开，跟当前草稿（含未保存的改动）保持一致。
+   *
+   * 窗口必须在 await 之前同步打开 —— 放在 fetch 之后再 open 会被大多数浏览器
+   * 当成弹窗拦截（非用户手势直接触发），那样点了按钮却什么都不会发生。
+   */
+  const openOnePager = useCallback(async () => {
+    const win = window.open('', '_blank');
+    if (!win) {
+      setNote({ kind: 'err', text: '新标签页被浏览器拦截，请允许弹窗后重试' });
+      return;
+    }
+    setSummaryBusy(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/tailor-made/one-pager-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ payload }),
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || '生成失败');
+      const html = await res.text();
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    } catch (err) {
+      win.close();
+      setNote({ kind: 'err', text: err instanceof Error ? err.message : '生成失败' });
+    } finally {
+      setSummaryBusy(false);
+    }
+  }, [clientId, payload]);
+
   const fileName = useMemo(() => buildFileName(payload), [payload]);
 
   /* ---------------- 渲染 ---------------- */
@@ -488,6 +523,15 @@ export default function TailorMadeEditor({
             className="rounded-md bg-me-ochre px-4 py-2 text-sm font-medium text-white hover:bg-me-ochre/90"
           >
             导出 PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => void openOnePager()}
+            disabled={summaryBusy}
+            title="亮点 / 价格 / 日期的一页浓缩版，发给终端客户或同行旅行社，不是完整行程单"
+            className="rounded-md border border-black/10 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-me-ivory disabled:opacity-50"
+          >
+            {summaryBusy ? '生成中…' : '一页摘要'}
           </button>
           <button
             type="button"

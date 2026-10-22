@@ -1,9 +1,8 @@
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { TailorMadeBrochure } from './brochure-types';
 import { buildCreditLine, HERO_PREFIX } from './brochure-types';
 import { loadHeroDataUri } from './hero';
-import { injectData, loadTemplate } from './template-html';
+import { injectData, loadBrandLogo, loadTemplate } from './template-html';
 
 /**
  * 把画册数据注入 HTML 模板。
@@ -12,7 +11,7 @@ import { injectData, loadTemplate } from './template-html';
  *
  * 两件事在这里算好再交给模板，因为它们是数据问题不是版面问题：
  *  - 版权署名行（哪些图需要署名）
- *  - logo（属于客户的品牌资产，不该焊死在共享模板里）
+ *  - logo（属于客户的品牌资产，不该焊死在共享模板里；见 template-html.ts 的 loadBrandLogo）
  */
 
 const TEMPLATE_PATH = path.join(
@@ -21,23 +20,6 @@ const TEMPLATE_PATH = path.join(
   'tailor-made-brochure',
   'brochure-template.html'
 );
-
-const BRAND_ASSETS_PATH = path.join(process.cwd(), 'templates', 'shared', 'cts-brand-assets.json');
-
-let cachedLogo: string | null = null;
-
-async function loadLogo(): Promise<string> {
-  if (cachedLogo !== null) return cachedLogo;
-  try {
-    const raw = await readFile(BRAND_ASSETS_PATH, 'utf8');
-    cachedLogo = (JSON.parse(raw) as { logo?: string }).logo ?? '';
-  } catch {
-    // 缺 logo 不该让整份画册出不来 —— 顾问宁可拿到一份没 logo 的稿子，
-    // 也好过点了预览只看到一个报错。
-    cachedLogo = '';
-  }
-  return cachedLogo;
-}
 
 /**
  * 封面的收件人和报价编号来自报价单本身，不复制进画册 payload —— 顾问改了
@@ -83,7 +65,7 @@ export async function renderBrochureHtml(
 ): Promise<string> {
   const [template, logo, resolved] = await Promise.all([
     loadTemplate(TEMPLATE_PATH, '画册'),
-    loadLogo(),
+    loadBrandLogo(),
     resolveImages(data),
   ]);
   return injectData(template, {
