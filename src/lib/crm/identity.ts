@@ -17,6 +17,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
 import {
   firstTouchColumns,
   isAttributed,
@@ -179,6 +180,9 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
   }
 
   const seenAt = input.seenAt ?? new Date().toISOString()
+  // 名字不能是邮箱 / 电话 / 占位词（2026-10-22 PM）。所有渠道建人都走这里，清洗放这一处就覆盖全部；
+  // 清洗成 null = 这次没带来名字：新建的人名字留空，命中已有联系人时**不覆盖**原名。
+  const cleanedName = cleanDisplayName(input.displayName)
 
   const { data: hits } = await supabaseAdmin
     .from('contact_identities')
@@ -200,7 +204,7 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
       .from('contacts')
       .insert({
         client_id: clientId,
-        display_name: input.displayName ?? null,
+        display_name: cleanedName,
         primary_phone: identities.find((i) => i.kind === 'phone')?.value ?? null,
         primary_email: identities.find((i) => i.kind === 'email')?.value ?? null,
         first_seen_at: seenAt,
@@ -251,7 +255,7 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
       .from('contacts')
       .update({
         last_seen_at: seenAt,
-        ...(input.displayName && renameOk ? { display_name: input.displayName } : {}),
+        ...(cleanedName && renameOk ? { display_name: cleanedName } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId)

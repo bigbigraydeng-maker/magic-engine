@@ -734,6 +734,8 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
             clientId: target.clientId,
             identities: [{ kind: 'email', value: thread.counterparty.address }],
             displayName: thread.counterparty.name,
+            // 邮件显示名质量最差（对方没设时 Graph 给的就是邮箱），不覆盖已有名字（子牙 B2）。
+            overwriteDisplayName: false,
             source: 'email',
             seenAt: thread.lastAt,
           })

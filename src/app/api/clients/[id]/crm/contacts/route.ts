@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { contactCardTitle } from '@/lib/crm/display-name'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { contactKindOf, isSystemAccountName, readDomainRules } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
@@ -910,7 +911,7 @@ export async function POST(
           reason: 'ambiguous',
           candidates: (rows ?? []).map((r) => ({
             contactId: r.id,
-            name: r.display_name ?? '未留姓名',
+            name: contactCardTitle(r.display_name),
             phone: r.primary_phone,
             email: r.primary_email,
           })),

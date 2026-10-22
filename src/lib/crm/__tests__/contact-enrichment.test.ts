@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 
 import {
   isMissingName,
-  nameFromEmail,
   emailFromHints,
   resolveDisplayName,
   sourcesOf,
@@ -60,18 +59,15 @@ describe('isMissingName', () => {
   it('真名不算缺失', () => {
     expect(isMissingName('Jane Doe')).toBe(false)
   })
-})
 
-describe('nameFromEmail', () => {
-  it('抠出 @ 前面那段，首字母大写', () => {
-    expect(nameFromEmail('Chriskavy@yahoo.com.sg')).toBe('Chriskavy')
-    expect(nameFromEmail('john.smith@x.com')).toBe('John.smith')
+  it('只有「整串是邮箱」才算缺名——带 @ 的昵称（kay@home）是名字，不是邮箱', () => {
+    expect(isMissingName('kay@home')).toBe(false)
+    expect(isMissingName('Bob Lee <bob@x.com>')).toBe(false)
   })
 
-  it('太短、没有 @、null 都返回 null', () => {
-    expect(nameFromEmail('a@x.com')).toBe(null)
-    expect(nameFromEmail('noatsign')).toBe(null)
-    expect(nameFromEmail(null)).toBe(null)
+  it('电话形状、「Facebook 用户」占位也算缺名', () => {
+    expect(isMissingName('+64 21 123 4567')).toBe(true)
+    expect(isMissingName('Facebook 用户')).toBe(true)
   })
 })
 
@@ -114,24 +110,14 @@ describe('resolveDisplayName', () => {
     ).toBe('Wang Lei')
   })
 
-  it('没有参与者真名时，退回 displayName 的邮箱前缀', () => {
-    expect(
-      resolveDisplayName({
-        displayName: 'Chriskavy@yahoo.com.sg',
-        email: null,
-        hints: [],
-      }),
-    ).toBe('Chriskavy')
+  it('🔴 PM 2026-10-22：没有参与者真名时**不再**从邮箱前缀造名字（brendam@… 不会变成「Brendam」）', () => {
+    expect(resolveDisplayName({ displayName: 'Chriskavy@yahoo.com.sg', email: null, hints: [] })).toBe(null)
+    expect(resolveDisplayName({ displayName: null, email: 'john.smith@x.com', hints: [] })).toBe(null)
   })
 
-  it('给了 email 时用 email 的前缀', () => {
-    expect(
-      resolveDisplayName({
-        displayName: null,
-        email: 'john.smith@x.com',
-        hints: [],
-      }),
-    ).toBe('John.smith')
+  it('会话参与者本身也是邮箱（邮件渠道对方没设显示名）→ 不当名字', () => {
+    const hints: ConversationHint[] = [{ contactId: 'c1', channel: 'email', participantName: 'someone@x.com' }]
+    expect(resolveDisplayName({ displayName: null, email: 'someone@x.com', hints })).toBe(null)
   })
 
   it('什么都拼不出来时返回 null', () => {
@@ -190,7 +176,8 @@ describe('enrichContacts — Chriskavy 场景', () => {
 
     expect(result.contacts).toHaveLength(1)
     const enriched = result.contacts[0]
-    expect(enriched.display_name).toBe('Chriskavy')
+    // 2026-10-22 PM：不再从邮箱前缀造名字，缺名字就是 null（显示成「未留姓名」）。
+    expect(enriched.display_name).toBe(null)
     expect(enriched.primary_email).toBe('Chriskavy@yahoo.com.sg')
 
     const synthetic = result.touches.filter((t) => t.id === 'email-msg:m1')
