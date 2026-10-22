@@ -168,7 +168,11 @@ export async function runCallAnalysis(
       const verified = verifyFacts(out.raw, transcript)
       analysisId = await store.saveAnalysis({ callId: call.id, clientId: call.clientId, model: out.model, analysis: verified })
       const truncated = transcript.length > 60_000 ? ' truncated=1' : ''
-      await store.patchCall(call.id, { summaryStatus: 'done' }, { stage: 'analysis', status: 'pending_review', detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} v${ANALYSIS_SCHEMA_VERSION}${truncated}` })
+      await store.patchCall(call.id, { summaryStatus: 'done' }, {
+        stage: 'analysis',
+        status: 'pending_review',
+        detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} inquiries=${verified.inquiries.length} dropped_inquiries=${verified.droppedInquiries} v${ANALYSIS_SCHEMA_VERSION}${truncated}`,
+      })
     } catch (e) {
       // 摘要失败就是失败：不写假摘要、不标 done。
       const c = errClass('analysis', e)
