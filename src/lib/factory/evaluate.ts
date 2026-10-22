@@ -158,7 +158,7 @@ async function loadContext(
 
   const { data: clips, error: clErr } = await supabaseAdmin
     .from('video_clips')
-    .select('id, scene_tag, motion_type, track, usage_count, last_used_at, storage_url, source_meta')
+    .select('id, scene_tag, tags, motion_type, track, usage_count, last_used_at, storage_url, source_meta')
     .eq('client_id', signal.client_id)
     .eq('status', 'active')
   if (clErr) throw new Error(`video_clips query failed: ${clErr.message}`)
