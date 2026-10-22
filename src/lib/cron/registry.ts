@@ -356,6 +356,13 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 回执写 cron_run_logs 并发事件 ads.tracking_preflight.checked。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-preflight.ts 的 TRACKING_PREFLIGHT_CRON。
   { service: 'inngest:cloud-ads-tracking-preflight', jobName: 'ads-tracking-preflight', schedule: '0 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-20' },
+  // 广告心跳：每小时新西兰第 5 分只读采样一遍 Meta（不发布、不改广告、不扣费），
+  // 默认 `dry` 且默认一个客户都不跑（要 AD_HEARTBEAT_MODE=live + AD_HEARTBEAT_CLIENT_IDS 才真跑）。
+  // 每一轮（含空轮）都写一行运行记录，它自己哪天停了才看得出来。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ad-heartbeat.ts 的 AD_HEARTBEAT_CRON
+  //    （带 TZ=Pacific/Auckland 前缀；每小时第 5 分在任何整小时偏移的时区里是同一个周期，所以这里写不带时区的 5 * * * *）。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  { service: 'inngest:cloud-ad-heartbeat', jobName: 'ad-heartbeat', schedule: '5 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-21' },
   // 开投后「自动补排」读回：每小时看一眼，窗口里官方账户一开始花钱就自己补排 T+1h / T+24h 读回（只读）。
   // 窗口外的整点也留一行运行记录（processed=0），它自己哪天停了才看得出来。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-launch-watch.ts 的 LAUNCH_WATCH_CRON。
