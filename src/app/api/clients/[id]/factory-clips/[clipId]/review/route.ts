@@ -54,12 +54,22 @@ export async function POST(req: NextRequest, { params }: Context) {
     nextStatus = 'active'
   }
 
-  const { error } = await supabaseAdmin.from('video_clips').update({
+  let update = supabaseAdmin.from('video_clips').update({
     status: nextStatus,
     reviewed_by: access.user.email ?? access.user.id,
     reviewed_at: new Date().toISOString(),
     review_note: note || null,
   }).eq('client_id', clientId).eq('id', clipId)
+  if (body.decision === 'approve') {
+    // The checks above use a read snapshot. Compare the fields that authorize
+    // activation in the UPDATE itself so a concurrent licence rejection or
+    // metadata edit cannot be overwritten by a stale approval.
+    update = update.eq('status', 'pending_review')
+      .eq('license_status', clip.license_status)
+    update = clip.sha256 === null ? update.is('sha256', null) : update.eq('sha256', clip.sha256)
+  }
+  const { data: updated, error } = await update.select('id').maybeSingle()
   if (error) return NextResponse.json({ error: '保存审核结果失败' }, { status: 500 })
+  if (!updated) return NextResponse.json({ error: '素材审核状态已变化，请刷新后重新审核' }, { status: 409 })
   return NextResponse.json({ success: true, status: nextStatus })
 }

@@ -23,7 +23,8 @@ export async function POST(req: NextRequest, { params }: Context) {
   }
 
   const { data: clip, error: readError } = await supabaseAdmin.from('video_clips')
-    .select('id, source_author, source_url, license_name, license_url').eq('client_id', clientId).eq('id', clipId).maybeSingle()
+    .select('id, source_author, source_url, license_name, license_url, license_status, status, sha256')
+    .eq('client_id', clientId).eq('id', clipId).maybeSingle()
   if (readError) return NextResponse.json({ error: '素材库暂不可用，请确认迁移已安装' }, { status: 500 })
   if (!clip) return NextResponse.json({ error: '素材不存在' }, { status: 404 })
   if (status === 'verified' && (!clip.source_author || !clip.source_url || !clip.license_name || !clip.license_url)) {
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest, { params }: Context) {
   if (status !== 'verified' && !note) return NextResponse.json({ error: '请填写许可结论的核实说明' }, { status: 400 })
 
   const reviewer = access.user.email ?? access.user.id
-  const { error } = await supabaseAdmin.from('video_clips').update({
+  let update = supabaseAdmin.from('video_clips').update({
     license_status: status,
     license_reviewed_by: reviewer,
     license_reviewed_at: new Date().toISOString(),
@@ -41,6 +42,19 @@ export async function POST(req: NextRequest, { params }: Context) {
     reviewed_by: null,
     reviewed_at: null,
   }).eq('client_id', clientId).eq('id', clipId)
+  for (const [field, value] of [
+    ['source_author', clip.source_author],
+    ['source_url', clip.source_url],
+    ['license_name', clip.license_name],
+    ['license_url', clip.license_url],
+  ] as const) {
+    update = value === null ? update.is(field, null) : update.eq(field, value)
+  }
+  update = update.eq('license_status', clip.license_status)
+    .eq('status', clip.status)
+  update = clip.sha256 === null ? update.is('sha256', null) : update.eq('sha256', clip.sha256)
+  const { data: updated, error } = await update.select('id').maybeSingle()
   if (error) return NextResponse.json({ error: '保存许可审核失败' }, { status: 500 })
+  if (!updated) return NextResponse.json({ error: '素材信息已变化，请刷新后重新核验许可' }, { status: 409 })
   return NextResponse.json({ success: true, license_status: status })
 }

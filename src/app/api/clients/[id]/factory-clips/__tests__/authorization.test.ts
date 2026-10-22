@@ -31,6 +31,7 @@ function chainQuery(result: Record<string, unknown>) {
     select: vi.fn(),
     update: vi.fn(),
     eq: vi.fn(),
+    is: vi.fn(),
     order: vi.fn(),
     range: vi.fn(),
     maybeSingle: vi.fn().mockResolvedValue(result),
@@ -39,6 +40,7 @@ function chainQuery(result: Record<string, unknown>) {
   query.select.mockImplementation(() => query)
   query.update.mockImplementation(() => query)
   query.eq.mockImplementation(() => query)
+  query.is.mockImplementation(() => query)
   query.order.mockImplementation(() => query)
   query.range.mockImplementation(() => query)
   return query
@@ -125,6 +127,36 @@ describe('factory clip catalog authorization and client scope', () => {
     expect(query.update).not.toHaveBeenCalled()
   })
 
+  it('does not verify licence evidence if source metadata changed concurrently', async () => {
+    const clipQuery = chainQuery({
+      data: {
+        id: CLIP_ID,
+        source_author: 'Original author',
+        source_url: 'https://example.test/original',
+        license_name: 'CC BY 4.0',
+        license_url: 'https://example.test/original-license',
+        license_status: 'unknown',
+        status: 'pending_review',
+        sha256: null,
+      },
+      error: null,
+    })
+    const updateQuery = chainQuery({ data: null, error: null })
+    mocks.from.mockReturnValueOnce(clipQuery).mockReturnValueOnce(updateQuery)
+
+    const response = await reviewLicense(
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, { status: 'verified' }),
+      context,
+    )
+
+    expect(response.status).toBe(409)
+    expect(updateQuery.eq).toHaveBeenCalledWith('source_author', 'Original author')
+    expect(updateQuery.eq).toHaveBeenCalledWith('source_url', 'https://example.test/original')
+    expect(updateQuery.eq).toHaveBeenCalledWith('license_status', 'unknown')
+    expect(updateQuery.eq).toHaveBeenCalledWith('status', 'pending_review')
+    expect(updateQuery.is).toHaveBeenCalledWith('sha256', null)
+  })
+
   it('blocks activation review for non-admin users before touching the clip', async () => {
     mocks.access.mockResolvedValue({ ok: true, tier: 'paid_client', user: { id: 'client-user' } })
 
@@ -136,5 +168,43 @@ describe('factory clip catalog authorization and client scope', () => {
     expect(response.status).toBe(403)
     expect(mocks.access).toHaveBeenCalledWith(CLIENT_ID)
     expect(mocks.from).not.toHaveBeenCalled()
+  })
+
+  it('does not activate a stale licence snapshot after a concurrent review change', async () => {
+    const sha256 = 'a'.repeat(64)
+    const clipQuery = chainQuery({
+      data: {
+        track: 'a_real',
+        scene_tag: 'chongqing_street',
+        motion_type: 'walking',
+        tags: ['chongqing'],
+        source_author: 'Source author',
+        source_url: 'https://example.test/video',
+        license_name: 'CC BY 4.0',
+        license_url: 'https://example.test/license',
+        duration_seconds: 5,
+        media_type: 'video',
+        sha256,
+        license_status: 'verified',
+        license_review_note: null,
+      },
+      error: null,
+    })
+    const clientQuery = chainQuery({ data: { factory_config: {} }, error: null })
+    const updateQuery = chainQuery({ data: null, error: null })
+    mocks.from
+      .mockReturnValueOnce(clipQuery)
+      .mockReturnValueOnce(clientQuery)
+      .mockReturnValueOnce(updateQuery)
+
+    const response = await reviewClip(
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/review`, { decision: 'approve' }),
+      context,
+    )
+
+    expect(response.status).toBe(409)
+    expect(updateQuery.eq).toHaveBeenCalledWith('status', 'pending_review')
+    expect(updateQuery.eq).toHaveBeenCalledWith('license_status', 'verified')
+    expect(updateQuery.eq).toHaveBeenCalledWith('sha256', sha256)
   })
 })
