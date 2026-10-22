@@ -66,3 +66,15 @@ describe('不会把卡片挤坏', () => {
     expect(contactCardTitle(null, '有​团​吗')).toBe('问：有团吗')
   })
 })
+
+describe('contactCardTitle 不拿邮箱 / 电话 / 占位词当名字（2026-10-22 PM）', () => {
+  it('名字本身是邮箱 → 落到「问：…」或「未留姓名」，绝不原样显示邮箱', () => {
+    expect(contactCardTitle('hayleyhailstone@icloud.com', '想去北京')).toBe('问：想去北京')
+    expect(contactCardTitle('hayleyhailstone@icloud.com')).toBe('未留姓名')
+  })
+  it('电话形状 / 占位词同样处理；带 @ 的昵称（kay@home）是名字，保留', () => {
+    expect(contactCardTitle('+64 21 123 4567')).toBe('未留姓名')
+    expect(contactCardTitle('Facebook 用户')).toBe('未留姓名')
+    expect(contactCardTitle('kay@home')).toBe('kay@home')
+  })
+})

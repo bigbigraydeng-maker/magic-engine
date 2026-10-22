@@ -15,6 +15,7 @@ import {
   scrubContactDetails,
   sendDigestMail,
   stripAddress,
+  digestName,
   type DigestMailer,
 } from '../digest-shared'
 
@@ -127,5 +128,17 @@ describe('sendDigestMail', () => {
     const m = mailer({ error: null })
     await sendDigestMail({ ...base, fromLabel: 'Magic Engine 表单线索提醒', apiKey: 'k', mailerFactory: () => m.mailer })
     expect(m.send.mock.calls[0][0]).toMatchObject({ from: 'Magic Engine 表单线索提醒 <hello@magicengine.cloud>' })
+  })
+})
+
+describe('digestName —— 摘要邮件里认人用的名字（给销售内部看，不是名字字段）', () => {
+  it('名字是邮箱的老数据：退回 @ 前一截，销售还认得出是谁；绝不出现完整地址', () => {
+    expect(digestName('wang.customer@gmail.com')).toBe('wang.customer')
+    expect(digestName('wang.customer@gmail.com')).not.toContain('@')
+  })
+  it('真名原样；空 / 占位词 → 未留姓名', () => {
+    expect(digestName('Jane Doe')).toBe('Jane Doe')
+    expect(digestName(null)).toBe('未留姓名')
+    expect(digestName('Facebook 用户')).toBe('未留姓名')
   })
 })
