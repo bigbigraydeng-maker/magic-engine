@@ -292,3 +292,17 @@ describe('originOf（最早从哪个渠道进来）', () => {
     expect(originOf({ touches: [], conversationChannels: [] })).toBeNull()
   })
 })
+
+describe('enrichContacts 不丢系统账号名', () => {
+  it('WhatsApp Business 这类系统账号名原样保留（别变成 null 逃过按名字的过滤）；邮箱名 / 占位词则清空', () => {
+    const mk = (id: string, name: string | null) => ({ id, display_name: name, primary_email: null, primary_phone: null }) as never
+    const result = enrichContacts({
+      contacts: [mk('a', 'WhatsApp Business'), mk('b', 'hayleyhailstone@icloud.com'), mk('c', 'Facebook 用户'), mk('d', 'Jane Doe')],
+      touches: [],
+      hints: [],
+      outboundEmails: [],
+    } as never)
+    const byId = Object.fromEntries(result.contacts.map((c) => [c.id, c.display_name]))
+    expect(byId).toEqual({ a: 'WhatsApp Business', b: null, c: null, d: 'Jane Doe' })
+  })
+})

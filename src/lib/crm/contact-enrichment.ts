@@ -193,7 +193,8 @@ export function enrichContacts(args: {
     enrichedContacts.push({
       ...contact,
       // 清洗后的名字或 null——**不回落原值**：原值可能就是邮箱，回落等于把邮箱又当名字露出来。
-      display_name: resolvedName,
+      // 平台系统账号名（WhatsApp Business）原样保留：下游靠名字把它们挡在名单外，且它本来就是这个名字。
+      display_name: resolvedName ?? (SYSTEM_ACCOUNT_LITERAL.test((contact.display_name ?? '').trim()) ? contact.display_name : null),
       primary_email: resolvedEmail,
     })
 
