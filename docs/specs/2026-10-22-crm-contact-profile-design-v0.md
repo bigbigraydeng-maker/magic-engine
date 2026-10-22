@@ -61,3 +61,25 @@ PM 原话（2026-10-22）：「我们应该给客户做一个档案的概念，�
 4. （可选，第二步）真名 / 昵称分列存储：要加列，A 级迁移，PM「go apply」。
 
 写代码交 DeepSeek（aider）：纯函数 / 路由 / 组件；`resolveContact` 入口接线（核心共用函数）由我自写并在 PR 写原因。
+
+---
+
+## 8. v0.1 修订（吸收子牙 + 魏征审查，均为「需改后进实现」）
+
+**拆成两个 PR**（子牙 N5）：**PR-1 = 名字卫生**（只止住「邮箱当名字」，不加路由不加组件）；**PR-2 = 档案卡**（GET/PATCH + 抽屉组件）。
+
+### PR-1 范围（修正后）
+1. **`cleanDisplayName` 放进已有的 `lib/crm/display-name.ts`，不新建文件**；把三份占位词表（`contact-enrichment.ts` 的 `MISSING_NAME_LITERALS`、`link-contacts.ts` 的 `META_PLACEHOLDER_NAMES`——含「Facebook 用户」、通用占位词）合成**一份**放这里，旧处改为引用。`isMissingName`、`link-contacts.realDisplayName`、`contactCardTitle` 全部调它——不再有第三份判断。
+2. **清洗规则（列表驱动测试写死）**：整串是邮箱 → null；`Name <a@b.com>`、`'a@b.com'`、`a@b.com (Bob)` 这类 → 去掉地址部分，剩下的若空或仍是邮箱 → null，否则取剩下的名字；整串是电话形状（数字 ≥ 7 位，只含 `+ - ( ) 空格`）→ null（`8888`、`007` 这种短数字不算电话，原样保留）；占位词（trim + 小写 + 去标点后集合匹配：unknown、unknown caller、n/a、null、undefined、`.`、`-`、Facebook 用户、Facebook user…）→ null；**没有任何字母 / 数字 / 汉字的（纯符号、纯表情）→ null（写死）**；**判「有没有字」用 Unicode 字母**（运行时构造 `\p{L}`，覆盖西里尔、阿拉伯、泰文、天城文等，不再用只认拉丁 / CJK 的 `MEANINGFUL`）；`kay@home`、`Mr. A. Smith`、`+1 Bob` **原样保留**。
+3. **系统账号名不清洗**（魏征 B2）：`WhatsApp Business` 等继续作为名字存在，让 `isSystemAccountName` 过滤照常生效——否则系统账号会变成「未留姓名」重新排进「今天要联系」。
+4. **入口清洗，且补上旁路**（子牙 B3 / 魏征 B1）：`resolveContact` 入口清洗；`messenger/unclaimed/claim/route.ts`（直接 insert）和 `link-contacts.ts:584`（直接 update）接上同一个函数；`import-march-bookings.ts` 等脚本逐个核对走没走 `resolveContact`。**加一条全仓扫描测试**：除白名单文件外，没有任何代码直接写 `display_name`。
+5. **读侧**：`contact-enrichment.ts` 删 `nameFromEmail`（两处），**且 `display_name: resolvedName ?? contact.display_name` 改成「清洗后的名字或 null」，不回落原值**（子牙 B1）；`digest-shared.ts` 的 `stripAddress` 不再保留「邮箱 @ 前一截」；各处写死的「未留姓名」（`contact-response-row.ts`、`contacts/route.ts`、`timeline/route.ts`、`manual-crm-items.ts`）统一调 `contactCardTitle`。**兜底词统一用现有的「未留姓名」**（不新造「未知客人」，页面和测试里已经在用）。
+6. **邮件这一路不再覆盖已有名字**：`mail-ingest.ts` 调 `resolveContact` 时传 `overwriteDisplayName: false`（子牙 B2；WhatsApp / 私信 / 官网表单 / 手工录入已经是 false；Meta 表单保持覆盖——客人自己填的名字越新越准）。
+7. **风险级**：`resolveContact` 是所有渠道建人的共用入口，影响面大，我按「高影响 B」对待：只做输入清洗、不改任何判重 / 合并逻辑，改后跑全量 CRM 测试 + 对 CTS 生产数据只读重放（前后列表名字对比）；不是 A（不碰鉴权 / 数据库结构 / 钱 / 对客外发）。
+
+### PR-2 补充（档案卡）
+- 手工改的名字会被下一次 Meta 表单覆盖（魏征 B3）：PR-2 设计里决定保护办法——倾向「手工改名时写一条备注类触点，`resolveContact` 见到就不再覆盖」（不加列）；在 PR-2 的设计里单独评审，PR-1 不涉及。
+- PATCH 拒绝控制字符 / 换行 / 零宽字符 / 邮箱或电话形状，长度 ≤ 80，纯文本；名字会进「按全名认亲」（`link-contacts.attachByUniqueFullName`）和发给 Meta 的受众 / 回传，这两处在 PR-2 设计里写明。
+- 昵称：读 `conversations.participant_name`，**同样过 `cleanDisplayName`**（邮件那一路昵称常常就是邮箱），去重、最多显示 3 条。
+- 历史 45 个修正：**必须在 PR-1 上线之后**（否则邮件同步会把邮箱名字再写回去）；先核对这 45 个都有邮箱可联系；还原脚本只还原「现在仍是 null」的行并同时恢复 `updated_at`。
+- 数字口径：45 = `display_name` **整串是邮箱形状**的联系人数（含 `@` 的不算）；20 = `display_name` 为空。
