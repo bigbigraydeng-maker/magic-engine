@@ -155,6 +155,15 @@ describe('O1 budget observation GET snapshot history', () => {
     expect(result.items[0].observation).toMatchObject({ conclusion: 'keep', budget_matches_this_run: true })
   })
 
+  it('continues observing when the human approval decision is missing', async () => {
+    m.getDecision.mockResolvedValue(null)
+
+    const result = await getObservation()
+
+    expect(m.getDecision).toHaveBeenCalled()
+    expect(result.items[0].observation.conclusion).toBe('continue_observing')
+  })
+
   it('continues observing when budget snapshot history is missing or unreadable', async () => {
     setup([])
     expect((await getObservation()).items[0].observation.conclusion).toBe('continue_observing')

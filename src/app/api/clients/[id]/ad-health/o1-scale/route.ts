@@ -87,7 +87,7 @@ export async function GET(_req: NextRequest, { params }: Params): Promise<NextRe
       run,
       evidence,
       receiptVerified,
-      authorizationVerified: decision?.action_run_id === run.id && decision.client_id === params.id
+      authorizationVerified: decision !== null && decision.action_run_id === run.id && decision.client_id === params.id
         && decision.action_key === ADS_O1_BUDGET_SCALE_ACTION_KEY && decision.verdict === 'allow'
         && decision.decided_by === 'human',
     })
