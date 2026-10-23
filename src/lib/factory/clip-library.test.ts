@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activationBlocker, normalizeClipTags, normalizeHttpsUrl, normalizeSceneTag, parseClipUploadMetadata, REQUIRED_LICENSE_SCOPES, serializeLicenseReviewEvidence } from './clip-library'
+import { activationBlocker, clipCanEnterFactoryPool, hasCurrentLicenseEvidence, normalizeClipTags, normalizeHttpsUrl, normalizeSceneTag, parseClipUploadMetadata, REQUIRED_LICENSE_SCOPES, serializeLicenseReviewEvidence } from './clip-library'
 
 describe('视频工厂素材标签目录校验', () => {
   it('规范化标签，去重并拒绝无效的空白/超量值', () => {
@@ -29,6 +29,7 @@ describe('视频工厂素材标签目录校验', () => {
       track: 'a_real' as const, sceneTag: 'chongqing_river', motionType: null, tags: ['chongqing'],
       sourceAuthor: 'CTS', sourceUrl: 'https://example.com/source', licenseName: 'Owned', licenseUrl: 'https://example.com/license',
       mediaType: 'video' as const, durationSeconds: 4, sha256: 'a'.repeat(64), licenseStatus: 'verified' as const,
+      licenseReviewedByUserId: 'reviewer-1', reviewedByUserId: 'reviewer-2',
       licenseReviewNote: serializeLicenseReviewEvidence({
         summary: 'The official licence page permits reuse for this media in monetised edited online video.',
         permittedScopes: [...REQUIRED_LICENSE_SCOPES],
@@ -47,5 +48,27 @@ describe('视频工厂素材标签目录校验', () => {
     expect(activationBlocker({ ...candidate, licenseReviewNote: serializeLicenseReviewEvidence({ summary: 'The page supports these specific uses and this asset.', permittedScopes: [...REQUIRED_LICENSE_SCOPES], sourceUrl: 'https://example.com/source', licenseUrl: 'https://example.com/license', assetSha256: 'b'.repeat(64), basis: 'license_page' }) }, false)).toContain('绑定当前素材')
     expect(activationBlocker({ ...candidate, track: 'b_generated', sceneTag: 'chongqing_landmark' }, false)).toContain('抽象白名单')
     expect(activationBlocker({ ...candidate, track: 'b_generated', sceneTag: 'chongqing_landmark' }, true)).toBeNull()
+  })
+
+  it('B 轨只允许自身证据通过，或精确继承已核 AI 改图源图的许可', () => {
+    const clearedSources = new Set(['https://storage.example.test/cleared-image.png'])
+    const base = { track: 'b_generated' as const, isStillImage: false, isAiTransformed: false, hasCurrentEvidence: false, sourceImageUrl: null }
+    expect(clipCanEnterFactoryPool({ ...base, sourceImageUrl: 'https://storage.example.test/cleared-image.png' }, clearedSources)).toBe(true)
+    expect(clipCanEnterFactoryPool({ ...base, sourceImageUrl: 'https://storage.example.test/other-image.png' }, clearedSources)).toBe(false)
+    expect(clipCanEnterFactoryPool({ ...base, sourceImageUrl: null }, clearedSources)).toBe(false)
+    expect(clipCanEnterFactoryPool({ ...base, track: 'a_real', sourceImageUrl: 'https://storage.example.test/cleared-image.png' }, clearedSources)).toBe(false)
+    expect(clipCanEnterFactoryPool({ ...base, hasCurrentEvidence: true }, clearedSources)).toBe(true)
+  })
+
+  it('许可证据双人审核使用稳定用户 ID，不因邮箱变化把同一人算成两人', () => {
+    const evidence = {
+      licenseStatus: 'verified' as const,
+      licenseReviewNote: serializeLicenseReviewEvidence({ summary: 'The licence page permits the exact commercial and edited distribution uses.', permittedScopes: [...REQUIRED_LICENSE_SCOPES], sourceUrl: 'https://example.com/source', licenseUrl: 'https://example.com/license', assetSha256: 'a'.repeat(64), basis: 'license_page' }),
+      sourceAuthor: 'Author', sourceUrl: 'https://example.com/source', licenseName: 'CC BY 4.0', licenseUrl: 'https://example.com/license', sha256: 'a'.repeat(64),
+      licenseReviewedByUserId: 'auth-user-1', reviewedByUserId: 'auth-user-2',
+    }
+    expect(hasCurrentLicenseEvidence(evidence)).toBe(true)
+    expect(hasCurrentLicenseEvidence({ ...evidence, reviewedByUserId: 'auth-user-1' })).toBe(false)
+    expect(hasCurrentLicenseEvidence({ ...evidence, licenseReviewedByUserId: null })).toBe(false)
   })
 })
