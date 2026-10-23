@@ -156,17 +156,27 @@ async function readO1BudgetObservation(args: {
     if (!error && data) after = sumO1BudgetMetricPeriod(data as O1BudgetMetricRow[], metric, afterStart, afterEnd)
   }
 
-  const targetSnapshotQuery = supabaseAdmin.from('ad_entity_snapshots')
+  const snapshotHistoryQuery = supabaseAdmin.from('ad_entity_snapshots')
     .select('ad_account_id, daily_budget_minor, captured_at')
     .eq('client_id', args.clientId).eq('platform', 'meta').eq('ad_account_id', saved.ad_account_id)
     .eq('level', saved.target_level).eq('entity_id', saved.target_id)
-    .order('captured_at', { ascending: false }).order('id', { ascending: true }).limit(1).maybeSingle()
-  const { data: currentSnapshot, error: snapshotError } = targetMatches ? await targetSnapshotQuery : { data: null, error: null }
+    .gte('captured_at', finish).lte('captured_at', new Date().toISOString())
+    .order('captured_at', { ascending: true })
+  const { data: budgetSnapshots, error: snapshotError } = targetMatches
+    ? await snapshotHistoryQuery
+    : { data: null, error: null }
+  const snapshots = (budgetSnapshots ?? []) as Array<{ ad_account_id: string; daily_budget_minor: number | string | null; captured_at: string }>
+  const currentSnapshot = snapshots[snapshots.length - 1] ?? null
   const snapshotAt = currentSnapshot?.captured_at ? Date.parse(currentSnapshot.captured_at) : Number.NaN
   const snapshotAge = Date.now() - snapshotAt
-  const budgetMatchesThisRun = !snapshotError && !!currentSnapshot && currentSnapshot.ad_account_id === saved.ad_account_id
+  const allObservedBudgetsMatch = snapshots.length > 0 && snapshots.every(snapshot =>
+    snapshot.ad_account_id === saved.ad_account_id
+    && Number.isFinite(Date.parse(snapshot.captured_at))
+    && Date.parse(snapshot.captured_at) >= Date.parse(finish)
+    && Number(snapshot.daily_budget_minor) === Number(input.after_cents))
+  const budgetMatchesThisRun = !snapshotError && allObservedBudgetsMatch && !!currentSnapshot
+    && currentSnapshot.ad_account_id === saved.ad_account_id
     && Number.isFinite(snapshotAt) && snapshotAt >= Date.parse(finish) && snapshotAge >= 0 && snapshotAge <= 24 * 60 * 60 * 1000
-    && Number(currentSnapshot.daily_budget_minor) === Number(input.after_cents)
 
   const firstReviewAt = new Date(Date.parse(finish) + O1_BUDGET_FIRST_REVIEW_HOURS * 60 * 60 * 1000).toISOString()
   const conclusion = args.run.status === 'succeeded'

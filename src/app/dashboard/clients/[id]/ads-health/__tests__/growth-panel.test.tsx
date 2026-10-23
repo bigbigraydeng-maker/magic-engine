@@ -81,7 +81,7 @@ describe('GrowthPanel — O1 budget follow-up', () => {
           metric_label: 'CTS Tours 新增线索（广告线索）',
           baseline: { start: '2026-09-17', end: '2026-09-30', total: 140, days: 14 },
           after: { start: '2026-10-02', end: '2026-10-15', total: 168, days: 14 },
-          delta: 28, deltaPct: 20, first_review_at: '2026-10-04T12:05:00.000Z',
+          delta: 28, deltaPct: undefined, first_review_at: '2026-10-04T12:05:00.000Z',
           window_start: '2026-10-02', window_end: '2026-10-15', window_complete: true,
           budget_matches_this_run: true,
         },
@@ -97,7 +97,7 @@ describe('GrowthPanel — O1 budget follow-up', () => {
         opportunities: [],
       },
     }
-    render(<GrowthPanel state={state} clientId="simulated-cts-tours" />)
+    const { container } = render(<GrowthPanel state={state} clientId="simulated-cts-tours" />)
 
     await waitFor(() => expect(screen.getByText(/目标 KPI：CTS Tours 新增线索/)).toBeTruthy())
     expect(screen.getByText('O1 预算调整记录')).toBeTruthy()
@@ -105,7 +105,8 @@ describe('GrowthPanel — O1 budget follow-up', () => {
     expect(screen.getByText(/负责人已批准/)).toBeTruthy()
     expect(screen.getByText(/Meta 回读 已核实 USD 60.00/)).toBeTruthy()
     expect(screen.getByText(/结论：保留本次预算/)).toBeTruthy()
-    expect(screen.getByText(/前后变化：\+28（\+20.0%）/)).toBeTruthy()
+    expect(screen.getByText(/前后变化：\+28/)).toBeTruthy()
+    expect(container.textContent).not.toContain('+20.0%')
     expect(fetch).toHaveBeenCalledWith('/api/clients/simulated-cts-tours/ad-health/o1-scale')
   })
 })

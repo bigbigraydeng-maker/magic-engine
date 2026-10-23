@@ -270,7 +270,7 @@ function O1BudgetRunDetail({ run }: { run: O1Run }) {
       {observation.after && <p>调整后：{observation.after.start} 至 {observation.after.end} · {observation.after.total}（{observation.after.days} 个完整日）</p>}
       {!observation.baseline && observation.baseline_unavailable_reason && <p>调整前 KPI：{observation.baseline_unavailable_reason}</p>}
       {observation.first_review_at && <p className="mt-1">首次复查：执行后 72 小时；观察窗口：{observation.window_start} 至 {observation.window_end}{observation.window_complete ? '（已结束）' : '（进行中）'}。</p>}
-      {observation.delta !== null && observation.delta !== undefined && <p>前后变化：{observation.delta > 0 ? '+' : ''}{observation.delta}{observation.deltaPct === null ? '' : `（${observation.deltaPct > 0 ? '+' : ''}${observation.deltaPct.toFixed(1)}%）`}；这是同一投放目标的相关指标变化，不证明因果收益。</p>}
+      {observation.delta !== null && observation.delta !== undefined && <p>前后变化：{observation.delta > 0 ? '+' : ''}{observation.delta}{typeof observation.deltaPct === 'number' && Number.isFinite(observation.deltaPct) ? `（${observation.deltaPct > 0 ? '+' : ''}${observation.deltaPct.toFixed(1)}%）` : ''}；这是同一投放目标的相关指标变化，不证明因果收益。</p>}
       {observation.conclusion === 'request_restore' && <p className="mt-1 font-medium">请负责人另行走人工预算审批流程；此页不支持提交恢复申请，也不会自动改预算。</p>}
       {observation.budget_matches_this_run === false && <p className="mt-1">最近已记录预算与本次批准金额不一致或无法核实，系统不会将后续表现归为本次调整。</p>}
     </>}
