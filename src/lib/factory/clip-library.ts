@@ -5,11 +5,21 @@ export type LicenseReviewStatus = 'unknown' | 'verified' | 'not_required' | 'rej
 export const REQUIRED_LICENSE_SCOPES = ['commercial_use', 'modification', 'online_distribution'] as const
 export type LicenseScope = typeof REQUIRED_LICENSE_SCOPES[number]
 
-type LicenseReviewEvidence = { version: 1; summary: string; permittedScopes: LicenseScope[] }
+type LicenseReviewEvidence = {
+  version: 1
+  summary: string
+  permittedScopes: LicenseScope[]
+  sourceUrl: string
+  licenseUrl: string | null
+  assetSha256: string
+  basis: 'license_page' | 'client_owned' | 'public_domain' | 'other_documented'
+}
 const LICENSE_REVIEW_EVIDENCE_PREFIX = 'license-review-v1:'
 
-export function serializeLicenseReviewEvidence(summary: string, permittedScopes: LicenseScope[]): string {
-  return `${LICENSE_REVIEW_EVIDENCE_PREFIX}${JSON.stringify({ version: 1, summary: summary.trim(), permittedScopes })}`
+export function serializeLicenseReviewEvidence(
+  evidence: Omit<LicenseReviewEvidence, 'version'>,
+): string {
+  return `${LICENSE_REVIEW_EVIDENCE_PREFIX}${JSON.stringify({ version: 1, ...evidence, summary: evidence.summary.trim() })}`
 }
 
 export function parseLicenseReviewEvidence(value: string | null): LicenseReviewEvidence | null {
@@ -19,8 +29,19 @@ export function parseLicenseReviewEvidence(value: string | null): LicenseReviewE
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
     const record = parsed as Record<string, unknown>
     if (record.version !== 1 || typeof record.summary !== 'string' || !Array.isArray(record.permittedScopes)) return null
+    if (typeof record.sourceUrl !== 'string' || (record.licenseUrl !== null && typeof record.licenseUrl !== 'string')) return null
+    if (typeof record.assetSha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(record.assetSha256)) return null
+    if (!['license_page', 'client_owned', 'public_domain', 'other_documented'].includes(String(record.basis))) return null
     if (record.permittedScopes.some((scope) => !REQUIRED_LICENSE_SCOPES.includes(scope as LicenseScope))) return null
-    return { version: 1, summary: record.summary, permittedScopes: record.permittedScopes as LicenseScope[] }
+    return {
+      version: 1,
+      summary: record.summary,
+      permittedScopes: record.permittedScopes as LicenseScope[],
+      sourceUrl: record.sourceUrl,
+      licenseUrl: record.licenseUrl as string | null,
+      assetSha256: record.assetSha256,
+      basis: record.basis as LicenseReviewEvidence['basis'],
+    }
   } catch {
     return null
   }
@@ -174,11 +195,14 @@ export function activationBlocker(
     return '许可核实需要作者、来源页、许可名称和许可证据页'
   }
   const evidence = parseLicenseReviewEvidence(clip.licenseReviewNote)
-  if (clip.licenseStatus === 'verified' && (!evidence || evidence.summary.trim().length < 30 || REQUIRED_LICENSE_SCOPES.some((scope) => !evidence.permittedScopes.includes(scope)))) {
-    return '许可核验需记录证据依据，并确认商业使用、剪辑/改编及网络平台发布范围'
+  if (clip.licenseStatus === 'verified' && (!evidence || evidence.summary.trim().length < 30 || evidence.basis !== 'license_page' || evidence.sourceUrl !== clip.sourceUrl || evidence.licenseUrl !== clip.licenseUrl || evidence.assetSha256 !== clip.sha256)) {
+    return '许可人工声明需绑定当前素材指纹、来源页和许可页，并记录证据及使用范围'
   }
-  if (clip.licenseStatus === 'not_required' && (!evidence || evidence.summary.trim().length < 20)) {
-    return '“无需许可”必须填写核实说明'
+  if (clip.licenseStatus === 'verified' && (!evidence || REQUIRED_LICENSE_SCOPES.some((scope) => !evidence.permittedScopes.includes(scope)))) {
+    return '许可人工声明尚未确认商业使用、剪辑/改编及网络平台发布范围'
+  }
+  if (clip.licenseStatus === 'not_required' && (!evidence || evidence.summary.trim().length < 30 || evidence.sourceUrl !== clip.sourceUrl || evidence.assetSha256 !== clip.sha256 || !['client_owned', 'public_domain', 'other_documented'].includes(evidence.basis))) {
+    return '“无需许可”需绑定当前素材指纹和来源页，并记录依据'
   }
   if (clip.licenseStatus !== 'verified' && clip.licenseStatus !== 'not_required') {
     return '素材许可尚未由 ME 团队核实'
