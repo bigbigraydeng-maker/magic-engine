@@ -39,6 +39,7 @@ import { classifySender } from '@/lib/microsoft/mail-sender'
 import { applyFormNotices, emptyFormStats, mirrorFormThread, type FormEnquiryStats } from '@/lib/microsoft/mail-form-ingest'
 import type { FormNoticeLead } from '@/lib/microsoft/mail-form-notice'
 import { resolveContact } from '@/lib/crm/identity'
+import { isAutoReply } from './auto-reply'
 import { contactKindOf, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
 import { extractAgentCustomers } from '@/lib/crm/travel-agent-customer-extract'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -84,36 +85,7 @@ export interface MailPlan {
   skipped: SkippedSender[]
 }
 
-/**
- * 自动回复的主题前缀。
- *
- * 只看主题、只看开头，跟 mail-sender 里同一套保守做法：一封真回信的主题几乎
- * 不可能以这些词开头，而「包含」会把「Re: 关于 out of office 期间的行程」误伤。
- * 认不出来就当成真回信 —— 漏判一封自动回复只是让一张卡早一天变灰，
- * 误判一封真回信却会让销售以为自己没跟过、重复联系客人。
- */
-const AUTO_REPLY_SUBJECTS = [
-  'automatic reply',
-  'auto reply',
-  'auto-reply',
-  'automatic response',
-  'out of office',
-  'out-of-office',
-  'ooo:',
-  'undeliverable',
-  'delivery status notification',
-  '自动回复',
-  '自動回覆',
-]
-
-/** 这封出站邮件是机器发的自动回执，不是人写的回信。 */
-export function isAutoReply(subject: string | null): boolean {
-  const s = (subject ?? '').trim().toLowerCase()
-  if (!s) return false
-  // 去掉转发/回复前缀再判 —— 「Re: Automatic reply: …」仍然是自动回执。
-  const stripped = s.replace(/^((re|fw|fwd|回复|轉寄)\s*:\s*)+/i, '')
-  return AUTO_REPLY_SUBJECTS.some((p) => stripped.startsWith(p))
-}
+export { isAutoReply }
 
 /**
  * 线程编号。Graph 一般会给 `conversationId`，给不出时退回「这封信自成一条线程」
@@ -762,6 +734,9 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
             clientId: target.clientId,
             identities: [{ kind: 'email', value: thread.counterparty.address }],
             displayName: thread.counterparty.name,
+            // 邮件显示名质量最差（对方没设时 Graph 给的就是邮箱），不覆盖已有名字（子牙 B2）。
+            overwriteDisplayName: false,
+            fillEmptyDisplayName: true,
             source: 'email',
             seenAt: thread.lastAt,
           })

@@ -5,6 +5,7 @@ import { todayIso } from '@/lib/tour-catalog/dates'
 import { buildPublishPreview, publishDraft } from '@/lib/tour-catalog/store-publish'
 import { listChangeActorsSince, listMemberEmails } from '@/lib/tour-catalog/store-access'
 import { makeActorLabeler, summariseContributors } from '@/lib/tour-catalog/changes-view'
+import { revalidatePublishedTourWebsite } from '@/lib/tour-catalog/website-revalidation'
 import type { CatalogRole, PublishContributor } from '@/lib/tour-catalog/catalog-contract'
 import type {
   PublishErrorCode,
@@ -123,7 +124,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       todayIso(new Date()),
     )
     if (result.ok) {
-      return NextResponse.json<PublishResponse>({ ok: true, version: result.version })
+      const websiteSync = await revalidatePublishedTourWebsite(clientId)
+      return NextResponse.json<PublishResponse>({ ok: true, version: result.version, websiteSync })
     }
     return NextResponse.json<PublishErrorResponse>(
       { error: result.error },

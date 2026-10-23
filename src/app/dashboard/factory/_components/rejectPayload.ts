@@ -23,6 +23,7 @@ const MAX_FEEDBACK_LEN = 1500
 export function buildQualityRejectPayload(
   selected: ContentCheckItemKey[],
   freeText: string,
+  musicId?: string,
 ): { ok: true; payload: Record<string, unknown> } | { ok: false; error: string } {
   const picked = selected.filter((key) => REJECT_REASON_KEYS.includes(key))
   if (picked.length === 0) return { ok: false, error: '请至少选一条打回理由' }
@@ -37,7 +38,15 @@ export function buildQualityRejectPayload(
       : { key, judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: null },
   )
 
-  return { ok: true, payload: { action: 'reject_quality', feedback, checklist_human } }
+  return {
+    ok: true,
+    payload: {
+      action: 'reject_quality',
+      feedback,
+      checklist_human,
+      ...(musicId ? { music_id: musicId } : {}),
+    },
+  }
 }
 
 // Build the reject_budget payload from a raw dollar input string.

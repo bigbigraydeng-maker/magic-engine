@@ -190,6 +190,8 @@
 
 | 变量 | 用途 | 配在哪 |
 |---|---|---|
+| `AD_HEARTBEAT_MODE` | 广告心跳模式：`off` / `dry`（默认，每小时只读 Meta 并写状态行、不写报警）/ `live`（写报警行）。拼错会记成运行失败。**live 必须等心跳设计第⑤块上线后才能开**。改后要手动重新部署 | Render-web |
+| `AD_HEARTBEAT_CLIENT_IDS` | 广告心跳检查哪些客户（逗号分隔 client id）。默认空 = 一个客户都不查；live 模式下为空会记成运行失败。首批只填 CTS | Render-web |
 | `MOCK_EXTERNAL_SERVICES` | 测试时 mock 全部外部 API | 本地 / CI |
 | `FACTORY_PUBLISH_LIVE` | 🔴 Factory 是否真发布。**未配 = 静默发 DRAFT**（片子落库全绿但 FB 上没人看得见） | Render-web |
 | `DAILY_PLAN_AUTO_PUBLISH_LIVE` | 🔴 每日计划图文 Post 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部发布闸门、什么都不发也不写库，只在 cron_run_logs 留一行）。第一次真发必须 PM 明确说 go | Render-web |

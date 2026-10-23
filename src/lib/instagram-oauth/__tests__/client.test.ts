@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHmac } from 'node:crypto'
-import { buildInstagramState, getInstagramConfig, instagramAuthUrl, readInstagramIdentity, verifyInstagramState } from '../client'
+import { buildInstagramState, getInstagramConfig, instagramAuthUrl, readInstagramIdentity, refreshInstagramToken, verifyInstagramState } from '../client'
 import { instagramOutcomeMessage, normalizeInstagramHandle } from '../identity'
 
 const context = { clientId: '11111111-1111-4111-8111-111111111111', userId: '22222222-2222-4222-8222-222222222222', handle: 'example.syd' }
@@ -46,6 +46,11 @@ describe('Instagram context and default-off configuration', () => {
       response_type: 'code', scope: 'instagram_business_basic', state: 'bound-state' })
     expect(auth.toString()).not.toContain('secret')
   })
+  it('asks for the publish scope too only while the publish switch is on', () => {
+    vi.stubEnv('INSTAGRAM_PUBLISH_ENABLED', 'true')
+    const auth = new URL(instagramAuthUrl(getInstagramConfig()!, 'bound-state'))
+    expect(auth.searchParams.get('scope')).toBe('instagram_business_basic,instagram_business_content_publish')
+  })
   it('round trips client, actor and canonical handle with a unique nonce', () => {
     const state = buildInstagramState(context, 'secret')
     expect(verifyInstagramState(state, 'secret')).toMatchObject(context)
@@ -66,6 +71,19 @@ describe('Instagram context and default-off configuration', () => {
     expect(normalizeInstagramHandle(' @Example.Syd ')).toBe('example.syd')
     expect(instagramOutcomeMessage('raw-provider-error')).toBeNull()
     expect(instagramOutcomeMessage('__proto__')).toBeNull()
+  })
+})
+
+describe('publish switch and the grant the user actually gave', () => {
+  it('🔴 switch on + grant without publish permission → rejected (not saved as publishable)', async () => {
+    vi.stubEnv('INSTAGRAM_PUBLISH_ENABLED', 'true')
+    replies(short, long, me) // short.permissions is basic only
+    expect(await readInstagramIdentity('one-time-code', getInstagramConfig()!)).toBeNull()
+  })
+  it('switch on + grant with both → accepted', async () => {
+    vi.stubEnv('INSTAGRAM_PUBLISH_ENABLED', 'true')
+    replies({ ...short, permissions: 'instagram_business_basic,instagram_business_content_publish' }, long, me)
+    expect(await readInstagramIdentity('one-time-code', getInstagramConfig()!)).not.toBeNull()
   })
 })
 
@@ -116,5 +134,34 @@ describe('official Instagram protocol boundary', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(errorLog).not.toHaveBeenCalled()
     errorLog.mockRestore()
+  })
+})
+
+describe('refreshInstagramToken (official ig_refresh_token)', () => {
+  const ok = { access_token: 'renewed-test', token_type: 'bearer', expires_in: 5184000 }
+  it('calls the official endpoint without the app secret and returns the new value and lifetime', async () => {
+    const fetcher = replies(ok)
+    expect(await refreshInstagramToken('old-test')).toEqual({ accessToken: 'renewed-test', expiresIn: 5184000 })
+    const [url, init] = fetcher.mock.calls[0]
+    const u = new URL(url)
+    expect(u.origin + u.pathname).toBe('https://graph.instagram.com/refresh_access_token')
+    expect(Object.fromEntries(u.searchParams)).toEqual({ grant_type: 'ig_refresh_token', access_token: 'old-test' })
+    expect(init).toMatchObject({ redirect: 'error', cache: 'no-store' })
+  })
+  it.each([{ ...ok, token_type: 'basic' }, { ...ok, expires_in: 0 }, { ...ok, expires_in: 5184001 }, { ...ok, expires_in: 86399 },
+    { ...ok, expires_in: '5184000' }, { ...ok, access_token: '' }, { error: { message: 'x' } }, { data: [ok, ok] }])(
+    'rejects an unusable response %j', async bad => {
+      replies(bad)
+      expect(await refreshInstagramToken('old-test')).toBeNull()
+    })
+  it('returns null (never throws, never leaks) when the request fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('https://graph.instagram.com/refresh_access_token?access_token=old-test')))
+    expect(await refreshInstagramToken('old-test')).toBeNull()
+  })
+  it('refuses an empty or oversized input without calling the provider', async () => {
+    const fetcher = replies(ok)
+    expect(await refreshInstagramToken('')).toBeNull()
+    expect(await refreshInstagramToken('x'.repeat(9000))).toBeNull()
+    expect(fetcher).not.toHaveBeenCalled()
   })
 })

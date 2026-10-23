@@ -150,6 +150,8 @@ export interface AccountInput {
   adAccountId: string
   /** 同一账户登记给多个客户（§14 M9）→ 只做账户级诊断 */
   shared: boolean
+  /** PM 在后台把这个账户标成「不在广告健康页显示」时为 true：只让「数据新鲜度」类诊断（D7 日数据停更/缺数据、D11 受众池断供）跳过它；钱相关的诊断一律照跑 */
+  hiddenFromAdHealth?: boolean
   timezone: string | null
   currency: string | null
   /** 评估日结束时（账户时区）每个实体的最新设置，不含 disappeared 行 */

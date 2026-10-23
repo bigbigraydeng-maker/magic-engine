@@ -3,7 +3,7 @@
  * Never log requests, responses or exceptions: long-token exchange has secrets in its URL.
  */
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
-import { INSTAGRAM_SCOPES, isInstagramAccountId, normalizeInstagramHandle } from './identity'
+import { isInstagramAccountId, normalizeInstagramHandle, requiredInstagramScopes } from './identity'
 
 export const INSTAGRAM_STATE_COOKIE = 'instagram_oauth_state'
 export const INSTAGRAM_STATE_PATH = '/api/auth/instagram'
@@ -70,7 +70,7 @@ export function verifyInstagramState(state: string, secret: string): InstagramSt
 export function instagramAuthUrl(config: InstagramConfig, state: string): string {
   const url = new URL('https://www.instagram.com/oauth/authorize')
   url.search = new URLSearchParams({ client_id: config.appId, redirect_uri: config.redirectUri,
-    response_type: 'code', scope: INSTAGRAM_SCOPES.join(','), state }).toString()
+    response_type: 'code', scope: requiredInstagramScopes().join(','), state }).toString()
   return url.toString()
 }
 
@@ -104,7 +104,7 @@ export async function readInstagramIdentity(code: string, config: InstagramConfi
     if (!short || !token(short.access_token) || !isInstagramAccountId(short.user_id) || typeof short.permissions !== 'string') return null
     const scopes = short.permissions.split(',').map(value => value.trim())
     if (!scopes.length || scopes.length > 32 || scopes.some(scope => !/^[a-z_]{1,100}$/.test(scope))
-      || new Set(scopes).size !== scopes.length || !INSTAGRAM_SCOPES.every(scope => scopes.includes(scope))) return null
+      || new Set(scopes).size !== scopes.length || !requiredInstagramScopes().every(scope => scopes.includes(scope))) return null
     const exchange = new URL('https://graph.instagram.com/access_token')
     exchange.search = new URLSearchParams({ grant_type: 'ig_exchange_token', client_secret: config.secret, access_token: short.access_token }).toString()
     const long = oneRecord(await providerJson(exchange.toString()))
@@ -120,5 +120,21 @@ export async function readInstagramIdentity(code: string, config: InstagramConfi
     const username = normalizeInstagramHandle(me.username)
     if (!username || tokenExpiry.getTime() <= Date.now()) return null
     return { accessToken: long.access_token, tokenExpiry, accountId: me.user_id, username, scopes }
+  } catch { return null }
+}
+
+/** Renew a long-lived value (official `ig_refresh_token`). Needs no app secret; the provider only accepts
+ * values that are >=24h old and unexpired. Returns null on any failure and never throws: the URL carries the
+ * secret value, so no error text from this call may leave this function. */
+export async function refreshInstagramToken(accessToken: string): Promise<{ accessToken: string; expiresIn: number } | null> {
+  try {
+    if (!token(accessToken)) return null
+    const url = new URL('https://graph.instagram.com/refresh_access_token')
+    url.search = new URLSearchParams({ grant_type: 'ig_refresh_token', access_token: accessToken }).toString()
+    const body = oneRecord(await providerJson(url.toString()))
+    if (!body || !token(body.access_token) || typeof body.token_type !== 'string' || body.token_type.toLowerCase() !== 'bearer'
+      || typeof body.expires_in !== 'number' || !Number.isSafeInteger(body.expires_in)
+      || body.expires_in < 24 * 60 * 60 || body.expires_in > 60 * 24 * 60 * 60) return null // a tiny value would self-expire a healthy grant
+    return { accessToken: body.access_token, expiresIn: body.expires_in }
   } catch { return null }
 }

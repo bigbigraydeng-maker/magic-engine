@@ -119,6 +119,7 @@ describe('readBudgetFacts · 读到了', () => {
       read: true, error: null, as_of: NOW.toISOString(),
       account_cap_cents: 15000, client_cap_cents: 15000, registered_account_count: 1,
       live_daily_budget_cents: 13400, live_lifetime_budget_count: 0, live_entity_count: 3,
+      other_accounts: [], other_accounts_error: null,
     })
   })
 

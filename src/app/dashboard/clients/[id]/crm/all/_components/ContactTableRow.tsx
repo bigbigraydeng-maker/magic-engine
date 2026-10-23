@@ -1,5 +1,6 @@
 'use client'
 
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
 import {
   LIST_CLS,
   fmtDate,
@@ -21,10 +22,13 @@ export function nameForDisplay(
   r: Pick<ContactRow, 'name' | 'phone' | 'email' | 'hasMessenger'>,
 ): { text: string; missing: boolean; sub: string | null } {
   const trimmed = r.name.trim()
+  // 判据跟后端同一份：`cleanDisplayName`（邮箱 / 电话 / 占位词 = 没留名；`kay@home` 这类昵称是名字）；
+  // 后端兜底词「未留姓名」和平台系统账号名（WhatsApp Business）也算没留名。
   const missing =
     trimmed === '' ||
-    trimmed.includes('@') ||
-    /^(whatsapp business|unknown|未知)$/i.test(trimmed)
+    trimmed === '未留姓名' ||
+    /^whatsapp business$/i.test(trimmed) ||
+    cleanDisplayName(trimmed) === null
   if (missing) {
     return {
       text: '未留名',

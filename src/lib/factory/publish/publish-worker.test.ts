@@ -24,6 +24,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
+// 默认夹具 = 切换日(2026-10-23)之前批准的旧版清单；不写死时间的话，过了切换日这些用例会被当成「必须第三版」而失败
+const LEGACY_APPROVED_AT = '2026-10-20T00:00:00.000Z'
+
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockPublish = vi.mocked(facebookReelAdapter.publish)
 const mockFindExisting = vi.mocked(facebookReelAdapter.findExisting)
@@ -41,6 +44,8 @@ interface Scenario {
   noAngle?: boolean
   /** 上次上传到一半崩了:留着 provisional 回执 */
   interrupted?: boolean
+  /** 模拟「幂等锚(provisional 回执)」写库失败 */
+  anchorWriteError?: boolean
   /** brief.remotion.deliverable 取值;'asset_only' = 素材,绝不可发布 */
   deliverable?: string
   /** review_ref.checklist_version(防降级用例:带 v3 版本号但清单是旧的) */
@@ -68,6 +73,9 @@ function installMocks(s: Scenario) {
       if (table === 'content_work_orders') {
         if (ctx.isUpdate) {
           woUpdates.push(ctx.payload ?? {})
+          if (s.anchorWriteError && (ctx.payload?.published_ref as { provisional?: boolean } | undefined)?.provisional) {
+            return { data: null, error: { message: 'db down' } }
+          }
           // claimOne 的条件 UPDATE:返回领到的工单整行
           if (ctx.payload?.status === 'publishing') {
             return {
@@ -77,7 +85,7 @@ function installMocks(s: Scenario) {
                 master_brief_id: 'mb-1',
                 publish_attempts: 0,
               published_ref: s.interrupted ? { provisional: true, video_id: 'v1' } : null,
-                review_ref: s.checklistReady === false ? {} : { ...(s.checklistVersion === undefined ? {} : { checklist_version: s.checklistVersion }), ...(s.approvedAt === undefined ? {} : { approved_at: s.approvedAt }), checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
+                review_ref: s.checklistReady === false ? {} : { ...(s.checklistVersion === undefined ? {} : { checklist_version: s.checklistVersion }), approved_at: s.approvedAt ?? LEGACY_APPROVED_AT, checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
                   key, judge: 'HUMAN', outcome: 'PASS', detail: null,
                   source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
                 })) },
@@ -254,6 +262,29 @@ describe('发布正文红线闸', () => {
         firstComment: expect.stringContaining('Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz/?utm_source=facebook&utm_medium=organic_social'),
       }),
     )
+  })
+})
+
+describe('幂等锚写库', () => {
+  const startThenPublish = () => mockPublish.mockImplementation(async args => {
+    await args.onStarted?.('vid-1')
+    return { platform: 'facebook', post_id: 'p1' } as never
+  })
+
+  it('🔴 锚点(provisional 回执)写库失败 → 中止发布并置失败,不能当没事继续上传', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, anchorWriteError: true })
+    startThenPublish()
+    const r = await run()
+    expect(r.result).toBe('failed')
+    expect(r.detail).toBe('publish_error')
+    expect(finalStatus()!.status).toBe('publish_failed')
+  })
+
+  it('锚点写库成功 → 照常发布', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    startThenPublish()
+    expect((await run()).result).toBe('published')
+    expect(woUpdates.some(u => (u.published_ref as { video_id?: string } | undefined)?.video_id === 'vid-1')).toBe(true)
   })
 })
 

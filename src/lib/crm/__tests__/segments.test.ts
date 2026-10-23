@@ -1114,3 +1114,33 @@ describe('外呼没人接不算已联系', () => {
   })
 })
 
+
+describe('机器发的出站不算「有人联系过他」（2026-10-22 PM：WhatsApp 自动安抚 / AI 批准回复把新咨询挤出「今天要联系」）', () => {
+  const now = new Date('2026-10-22T00:00:00Z')
+  const base = { id: 'x', displayName: 'Brian', doNotContact: false, hasPhone: true }
+  const inbound = (at: string) => ({ channel: 'whatsapp', direction: 'inbound' as const, occurredAt: at })
+  const outbound = (at: string, automated: boolean) => ({ channel: 'whatsapp', direction: 'outbound' as const, occurredAt: at, automated })
+
+  it('客人来消息 + 只有一条机器回复 → 仍是「进线了，还没人联系」（热名单），不是「聊过一轮」', () => {
+    const r = segmentContact({ ...base, touchpoints: [inbound('2026-10-21T02:37:00Z'), outbound('2026-10-21T02:38:00Z', true)] }, now)
+    expect(r.segment).toBe('new_untouched')
+  })
+
+  it('同样的两条，但那条回复是人发的 → 照旧「聊过一轮」（先放着）', () => {
+    const r = segmentContact({ ...base, touchpoints: [inbound('2026-10-21T02:37:00Z'), outbound('2026-10-21T02:38:00Z', false)] }, now)
+    expect(r.segment).toBe('stale_conversation')
+  })
+
+  it('机器回复之后客人又来消息 → 「客户来消息了」只有在「真人联系过」之后才成立；只有机器回复时仍是新进线', () => {
+    const r = segmentContact({ ...base, touchpoints: [inbound('2026-10-21T02:37:00Z'), outbound('2026-10-21T02:38:00Z', true), inbound('2026-10-21T09:00:00Z')] }, now)
+    expect(r.segment).toBe('new_untouched')
+  })
+
+  it('人回过之后机器又发了一条、客人再来消息 → 以人那次为准，客人在等', () => {
+    const r = segmentContact(
+      { ...base, touchpoints: [inbound('2026-10-20T01:00:00Z'), outbound('2026-10-20T02:00:00Z', false), outbound('2026-10-21T02:00:00Z', true), inbound('2026-10-21T09:00:00Z')] },
+      now,
+    )
+    expect(r.segment).toBe('replied')
+  })
+})

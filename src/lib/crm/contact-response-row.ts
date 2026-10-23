@@ -26,6 +26,8 @@ import {
   type TouchpointForColumn,
 } from '@/lib/crm/table-columns'
 
+import { contactCardTitle } from './display-name'
+
 export interface ContactRow {
   id: string
   display_name: string | null
@@ -114,7 +116,7 @@ export function responseRowFor(
     custom,
     row: {
       contactId: c.id,
-      name: c.display_name || '未留姓名',
+      name: contactCardTitle(c.display_name),
       firstSeenAt: firstTouch > 0 ? new Date(firstTouch).toISOString() : c.first_seen_at,
       lastTouchAt: lastTouch > 0 ? new Date(lastTouch).toISOString() : null,
       phone: c.primary_phone,

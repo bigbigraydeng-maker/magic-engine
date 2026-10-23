@@ -14,6 +14,9 @@ import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary, type StageSource } from './ContactTimeline'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
+import { ComposeEmail } from './ComposeEmail'
+import { ProfileCard } from './ProfileCard'
+import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
@@ -335,12 +338,16 @@ export function PersonDrawer({
               />
             )}
             {row.email && (
-              <a
-                href={`mailto:${row.email}`}
-                className="break-all rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
-              >
-                ✉️ {row.email}
-              </a>
+              <>
+                <a
+                  href={`mailto:${row.email}`}
+                  className="break-all rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
+                >
+                  ✉️ {row.email}
+                </a>
+                {/* mailto 靠电脑里设好的邮件程序，没设就没反应——旁边永远有一个有反馈的「复制」。 */}
+                <CopyEmailButton email={row.email} />
+              </>
             )}
             {row.doNotContact && (
               <DncBanner clientId={clientId} contactId={row.contactId} name={row.name} onSaved={onSaved} />
@@ -349,6 +356,9 @@ export function PersonDrawer({
               <span className="text-xs text-me-charcoal/45">没留电话和邮箱，只能在私信里回他</span>
             )}
           </div>
+
+          {/* 客人档案：名字（可改）/ 昵称 / 邮箱 / 电话（可加）。PM 2026-10-22：先把字段做好，以后有机会再完善。 */}
+          <ProfileCard clientId={clientId} contactId={row.contactId} onChanged={() => onSaved('✓ 档案已保存', true)} />
 
           {/* 该做什么 —— 三行：动作 + 为什么 / AI 建议 / 到哪一步了（点开可改）。
               这一块取代了原来并排的三套状态（阶段按钮、冷热标签、意向小圆标），PM 2026-10-10：
@@ -379,6 +389,17 @@ export function PersonDrawer({
                 {summary?.stageSource ? ` · ${STAGE_SOURCE_LABEL[summary.stageSource]}` : ''}
               </p>
             )}
+            {/* 不是有效咨询 → 退回（系统从原因里学）；已退回的人 → 一键拉回。客户没配「非咨询」阶段时不渲染。 */}
+            <ReturnLeadPanel
+              clientId={clientId}
+              contactId={row.contactId}
+              currentStage={row.stage}
+              stages={stages}
+              onDone={(msg) => {
+                setTimelineKey((k) => k + 1)
+                onSaved(msg, true)
+              }}
+            />
           </div>
 
           {/* 现在该做什么 —— 最多两个按钮，措辞按他能被联系到的渠道走。
@@ -585,6 +606,15 @@ export function PersonDrawer({
               onSaved('✓ 邮件已发出', false)
             }}
           />
+          {/* 没有邮件往来的人：EmailReply 什么都不渲染，这里补「写第一封」。两者互斥，判断在服务端。 */}
+          <ComposeEmail
+            clientId={clientId}
+            contactId={row.contactId}
+            onSent={() => {
+              setTimelineKey((k) => k + 1)
+              onSaved('✓ 邮件已发出', false)
+            }}
+          />
           </div>
         </div>
       </aside>
@@ -592,3 +622,23 @@ export function PersonDrawer({
   )
 }
 
+function CopyEmailButton({ email }: { email: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard
+          ?.writeText(email)
+          .then(() => {
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1500)
+          })
+          .catch(() => undefined)
+      }}
+      className="rounded-lg border border-me-stone bg-white px-3 py-2 text-xs font-semibold text-me-charcoal/70"
+    >
+      {copied ? '已复制' : '复制'}
+    </button>
+  )
+}

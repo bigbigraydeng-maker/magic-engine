@@ -101,14 +101,17 @@ describe('listened-to-the-BGM approval item (2026-10-16)', () => {
     ))
     const legacy = withSource(passHuman(REEL_HUMAN_CHECK_KEYS))
     const v2 = withSource(passHuman(REEL_HUMAN_CHECK_KEYS_V2))
-    expect(humanKeysForStored(legacy)).toBe(REEL_HUMAN_CHECK_KEYS)
-    expect(humanKeysForStored(v2)).toBe(REEL_HUMAN_CHECK_KEYS_V2)
-    expect(validateContentChecklist(legacy, humanKeysForStored(legacy), 'HUMAN').ok).toBe(true)
-    expect(validateContentChecklist(v2, humanKeysForStored(v2), 'HUMAN').ok).toBe(true)
+    // 切换日(2026-10-23)之后「没写批准时间」会按第三版处理，所以这里的旧收据都带一个切换前的批准时间，用例才不随日期变化
+    const BEFORE_CUTOVER = '2026-10-20T00:00:00.000Z'
+    const refOf = (checklist_human: unknown) => ({ approved_at: BEFORE_CUTOVER, checklist_human })
+    expect(humanKeysForReviewRef(refOf(legacy))).toBe(REEL_HUMAN_CHECK_KEYS)
+    expect(humanKeysForReviewRef(refOf(v2))).toBe(REEL_HUMAN_CHECK_KEYS_V2)
+    expect(validateContentChecklist(legacy, humanKeysForReviewRef(refOf(legacy)), 'HUMAN').ok).toBe(true)
+    expect(validateContentChecklist(v2, humanKeysForReviewRef(refOf(v2)), 'HUMAN').ok).toBe(true)
     // a V2 receipt whose listened item is missing a sibling cannot sneak through as legacy
-    expect(validateContentChecklist(v2.filter(i => i.key !== 'logo_watermark_present'), humanKeysForStored(v2), 'HUMAN').ok).toBe(false)
-    expect(humanKeysForStored(null)).toBe(REEL_HUMAN_CHECK_KEYS)
-    expect(humanKeysForStored('x')).toBe(REEL_HUMAN_CHECK_KEYS)
+    expect(validateContentChecklist(v2.filter(i => i.key !== 'logo_watermark_present'), humanKeysForReviewRef(refOf(v2)), 'HUMAN').ok).toBe(false)
+    expect(humanKeysForReviewRef(refOf(null))).toBe(REEL_HUMAN_CHECK_KEYS)
+    expect(humanKeysForReviewRef(refOf('x'))).toBe(REEL_HUMAN_CHECK_KEYS)
   })
 
   describe('V3 receipts (stand-alone understandable) and anti-downgrade', () => {

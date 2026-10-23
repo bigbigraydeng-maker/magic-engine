@@ -24,6 +24,18 @@ interface CreativePoolEntry {
   approved_by?: string | null
 }
 
+/** 自动流程状态的中文名（spec 2026-10-21 §2）。candidate / approved 不走这里。 */
+const EXTENDED_STATUS_LABELS: Record<string, string> = {
+  pending_qc: '质检中',
+  test_queue: '待测试',
+  testing: '测试中',
+  scaling: '放大中',
+  rejected: '数据差已停',
+  inconclusive: '没测成',
+  retired: '已退役',
+  manual_approved: '手批在跑',
+}
+
 interface AdStrategyConfig {
   daily_budget_cap_cents: number | null
   autonomy_mode: AutonomyMode
@@ -245,9 +257,13 @@ function CreativePoolList({
           <VideoRow entry={e} label={labels[e.ref]} />
           <div className="flex shrink-0 items-center gap-2">
             <span className={`text-xs ${e.status === 'approved' ? 'text-emerald-600' : 'text-gray-400'}`}>
-              {e.status === 'approved' ? `已批准（${e.approved_by ?? '—'}）` : '待批准'}
+              {e.status === 'approved'
+                ? `已批准（${e.approved_by ?? '—'}）`
+                : e.status === 'candidate'
+                  ? '待批准'
+                  : `自动流程：${EXTENDED_STATUS_LABELS[e.status] ?? e.status}`}
             </span>
-            {e.status !== 'approved' && (
+            {e.status === 'candidate' && (
               <button
                 type="button"
                 disabled={busyRef !== null}
