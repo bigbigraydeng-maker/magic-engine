@@ -2,6 +2,41 @@ import { FACTORY_B_TRACK_SCENE_TAGS, FACTORY_CLIENT_DERIVED_SCENE_TAG } from './
 
 export type ClipTrack = 'a_real' | 'b_generated'
 export type LicenseReviewStatus = 'unknown' | 'verified' | 'not_required' | 'rejected'
+export const REQUIRED_LICENSE_SCOPES = ['commercial_use', 'modification', 'online_distribution'] as const
+export type LicenseScope = typeof REQUIRED_LICENSE_SCOPES[number]
+
+type LicenseReviewEvidence = { version: 1; summary: string; permittedScopes: LicenseScope[] }
+const LICENSE_REVIEW_EVIDENCE_PREFIX = 'license-review-v1:'
+
+export function serializeLicenseReviewEvidence(summary: string, permittedScopes: LicenseScope[]): string {
+  return `${LICENSE_REVIEW_EVIDENCE_PREFIX}${JSON.stringify({ version: 1, summary: summary.trim(), permittedScopes })}`
+}
+
+export function parseLicenseReviewEvidence(value: string | null): LicenseReviewEvidence | null {
+  if (!value?.startsWith(LICENSE_REVIEW_EVIDENCE_PREFIX)) return null
+  try {
+    const parsed: unknown = JSON.parse(value.slice(LICENSE_REVIEW_EVIDENCE_PREFIX.length))
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    if (record.version !== 1 || typeof record.summary !== 'string' || !Array.isArray(record.permittedScopes)) return null
+    if (record.permittedScopes.some((scope) => !REQUIRED_LICENSE_SCOPES.includes(scope as LicenseScope))) return null
+    return { version: 1, summary: record.summary, permittedScopes: record.permittedScopes as LicenseScope[] }
+  } catch {
+    return null
+  }
+}
+
+export function formatLicenseReviewEvidence(value: string | null): string | null {
+  const evidence = parseLicenseReviewEvidence(value)
+  if (!evidence) return value
+  const labels: Record<LicenseScope, string> = {
+    commercial_use: '商业使用',
+    modification: '剪辑/改编',
+    online_distribution: '网络平台发布',
+  }
+  const scope = evidence.permittedScopes.map((item) => labels[item]).join('、')
+  return [scope ? `人工确认范围：${scope}` : null, `核验依据：${evidence.summary}`].filter(Boolean).join('；')
+}
 
 export interface ClipLibraryMetadata {
   track: ClipTrack
@@ -138,7 +173,11 @@ export function activationBlocker(
   if (clip.licenseStatus === 'verified' && (!clip.sourceAuthor || !clip.sourceUrl || !clip.licenseName || !clip.licenseUrl)) {
     return '许可核实需要作者、来源页、许可名称和许可证据页'
   }
-  if (clip.licenseStatus === 'not_required' && !clip.licenseReviewNote?.trim()) {
+  const evidence = parseLicenseReviewEvidence(clip.licenseReviewNote)
+  if (clip.licenseStatus === 'verified' && (!evidence || evidence.summary.trim().length < 30 || REQUIRED_LICENSE_SCOPES.some((scope) => !evidence.permittedScopes.includes(scope)))) {
+    return '许可核验需记录证据依据，并确认商业使用、剪辑/改编及网络平台发布范围'
+  }
+  if (clip.licenseStatus === 'not_required' && (!evidence || evidence.summary.trim().length < 20)) {
     return '“无需许可”必须填写核实说明'
   }
   if (clip.licenseStatus !== 'verified' && clip.licenseStatus !== 'not_required') {
