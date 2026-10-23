@@ -100,8 +100,7 @@ export const supabaseAnalysisStore: AnalysisStore = {
       .insert({
         call_id: row.callId, client_id: row.clientId, schema_version: ANALYSIS_SCHEMA_VERSION, model: row.model,
         summary: row.analysis.summary, language: row.analysis.language, facts: row.analysis.facts,
-        dropped_facts: row.analysis.droppedFacts, inquiries: row.analysis.inquiries,
-        dropped_inquiries: row.analysis.droppedInquiries, review_status: 'pending_review',
+        dropped_facts: row.analysis.droppedFacts, review_status: 'pending_review',
       })
       .select('id')
       .single()

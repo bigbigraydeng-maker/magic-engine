@@ -139,6 +139,11 @@ const AMOUNT_CUE = /预算|budget|dollar|bucks|\$|万|k\b|元|块/i
 const PEOPLE_CUE = /people|person|persons|adult|adults|kids|children|child|pax|travell?ers|guests|位|个人|人|口/i
 const EMAIL_RE = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i
 const SPOKEN_EMAIL_CUE = /e-?mail|email address|(?:my|your) address|邮箱|电邮/i
+const COUNT_TOKEN = String.raw`(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|[零一二两三四五六七八九十]+)`
+const ENGLISH_TOUR_UNIT = String.raw`(?:tours?|groups?|departures?|coaches)`
+const EXPLICIT_EN_DEPARTURE_COUNT = new RegExp(String.raw`\b(${COUNT_TOKEN})\s+${ENGLISH_TOUR_UNIT}\b`, 'gi')
+const EXPLICIT_CN_DEPARTURE_COUNT = new RegExp(String.raw`(${COUNT_TOKEN})\s*(?:个)?(?:团|班期|班次)`, 'gi')
+const SHORT_COUNT_REPLY = new RegExp(String.raw`^(?:(?:we\s+(?:have|will\s+have|run|will\s+run)|there\s+(?:are|is)|only|in\s+total|total\s+of)\s+)?(${COUNT_TOKEN})$`, 'i')
 const MONTH_ALIASES: Record<number, string[]> = {
   1: ['january', 'jan', '1月', '一月'], 2: ['february', 'feb', '2月', '二月'],
   3: ['march', 'mar', '3月', '三月'], 4: ['april', 'apr', '4月', '四月'],
@@ -148,7 +153,6 @@ const MONTH_ALIASES: Record<number, string[]> = {
   11: ['november', 'nov', '11月', '十一月'], 12: ['december', 'dec', '12月', '十二月'],
 }
 const TOUR_COUNT_CUE = /\b(?:tour|group|departure|coach)s?\b|团|班期|班次/i
-const EXPLICIT_COUNT_CUE = /\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)\s+(?:tour|group|departure|coach)s?\b|\b(?:there (?:are|is)|we have|in total|total of|only)\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty)\b|(?:\d+|[零一二两三四五六七八九十]+)\s*(?:个)?(?:团|班|班期|班次)|(?:有|共|一共|总共)\s*(?:\d+|[零一二两三四五六七八九十]+)\s*(?:个)?(?:团|班|班期|班次)/i
 
 const NUMERIC_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['budget', 'party_size'])
 /** 第一人称的拒绝联系（不是任何含 stop/别再 的句子）。 */
@@ -237,12 +241,29 @@ function withoutMonths(text: string): string {
   }, text)
 }
 
+function explicitDepartureCounts(text: string): number[] {
+  const matches = [
+    ...[...text.matchAll(EXPLICIT_EN_DEPARTURE_COUNT)].map((match) => match[1]),
+    ...[...text.matchAll(EXPLICIT_CN_DEPARTURE_COUNT)].map((match) => match[1]),
+  ]
+  return matches.flatMap((token) => [...numbersIn(token)])
+}
+
+function isShortCountReply(text: string, count: number): boolean {
+  const cleaned = withoutMonths(text)
+    .replace(/\b(?:in|for|during)\b/gi, ' ')
+    .replace(/[.,!?;:，。！？]/g, ' ')
+    .trim()
+  const match = cleaned.match(SHORT_COUNT_REPLY)
+  return Boolean(match && numbersIn(match[1]).has(count))
+}
+
 function verifiedDepartureCount(inquiry: RawInquiry): number | null {
   if (inquiry.topic !== 'tour_departures' || inquiry.departureCount === null || !inquiry.answerQuote) return null
   if (inquiry.answerSpeaker !== 'employee') return null
   if (!TOUR_COUNT_CUE.test(`${inquiry.questionQuote} ${inquiry.answerQuote}`)) return null
-  if (!EXPLICIT_COUNT_CUE.test(inquiry.answerQuote)) return null
-  return numbersIn(withoutMonths(inquiry.answerQuote)).has(inquiry.departureCount) ? inquiry.departureCount : null
+  if (explicitDepartureCounts(inquiry.answerQuote).includes(inquiry.departureCount)) return inquiry.departureCount
+  return isShortCountReply(inquiry.answerQuote, inquiry.departureCount) ? inquiry.departureCount : null
 }
 
 function verifyInquiry(inquiry: RawInquiry, transcriptNorm: string): RawInquiry | null {
@@ -278,6 +299,36 @@ function verifyInquiries(raw: RawAnalysis, transcript: string): { inquiries: Raw
   return { inquiries, droppedInquiries: (raw.parseDroppedInquiries ?? 0) + rawInquiries.length - inquiries.length }
 }
 
+function clipQuote(text: string, maxLength: number): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength - 1)}…`
+}
+
+function summaryWithVerifiedEvidence(summary: string, facts: RawFact[], inquiries: RawInquiry[]): string {
+  const notes = facts
+    .filter((fact) => fact.key === 'contact_email')
+    .map((fact) => `客户提供邮箱：${clipQuote(fact.value, 100)}`)
+  const tourInquiries = inquiries.filter((inquiry) => inquiry.topic === 'tour_departures')
+  notes.push(...tourInquiries.slice(0, 4).map((inquiry) => {
+    const month = inquiry.month === null ? '月份未确认' : `${inquiry.month}月`
+    const question = clipQuote(inquiry.questionQuote, 70)
+    const answer = inquiry.answerQuote ? `；答复原话“${clipQuote(inquiry.answerQuote, 70)}”` : '；未找到可核实答复'
+    const count = inquiry.departureCount === null ? '；团数未核实' : `；明确${inquiry.departureCount}团`
+    return `${month}团期：客户问“${question}”${answer}${count}`
+  }))
+  if (tourInquiries.length > 4) notes.push(`另有${tourInquiries.length - 4}条团期问答`)
+  if (notes.length === 0) return summary.slice(0, 1200)
+
+  const evidence = `复核证据：${notes.join('；')}`
+  const base = summary.trim()
+  const separator = base ? '；' : ''
+  const available = Math.max(0, 1200 - evidence.length - separator.length)
+  const visibleBase = base.length > available
+    ? `${base.slice(0, Math.max(0, available - 1))}…`
+    : base
+  return `${visibleBase}${visibleBase ? separator : ''}${evidence}`.slice(0, 1200)
+}
+
 /** 事实的原话必须真的出现在转写里，且够分量；数值类和「别再联系」还要核对值与原话一致。 */
 export function verifyFacts(raw: RawAnalysis, transcript: string): VerifiedAnalysis {
   const t = norm(transcript)
@@ -287,7 +338,14 @@ export function verifyFacts(raw: RawAnalysis, transcript: string): VerifiedAnaly
     return enoughEvidence && t.includes(q) && valueSupported(f)
   })
   const inquiryResult = verifyInquiries(raw, transcript)
-  return { summary: raw.summary, language: raw.language, facts: kept, inquiries: inquiryResult.inquiries, droppedFacts: raw.facts.length - kept.length, droppedInquiries: inquiryResult.droppedInquiries }
+  return {
+    summary: summaryWithVerifiedEvidence(raw.summary, kept, inquiryResult.inquiries),
+    language: raw.language,
+    facts: kept,
+    inquiries: inquiryResult.inquiries,
+    droppedFacts: raw.facts.length - kept.length,
+    droppedInquiries: inquiryResult.droppedInquiries,
+  }
 }
 
 export const ANALYSIS_JSON_SCHEMA = {
