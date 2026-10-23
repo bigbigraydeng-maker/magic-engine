@@ -89,6 +89,7 @@ export interface PublishRequest {
 export interface PublishResponse {
   ok: true
   version: number
+  websiteSync: 'revalidated' | 'not_configured' | 'failed'
 }
 
 export type PublishErrorCode =
