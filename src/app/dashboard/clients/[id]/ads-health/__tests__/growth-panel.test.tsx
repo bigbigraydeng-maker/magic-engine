@@ -4,8 +4,8 @@
  * that "not checked" is never rendered as "found nothing".
  */
 import React from 'react'
-import { describe, it, expect, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { describe, it, expect, afterEach, vi } from 'vitest'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 
 import GrowthPanel from '../growth-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -53,5 +53,58 @@ describe('GrowthPanel — client view', () => {
     render(<GrowthPanel state={{ ...base, goal: null }} />)
     expect(screen.getByText('这段时间还没有设定广告目标，设好后这里会显示进度。')).toBeTruthy()
     expect(screen.queryByText(/这个客户/)).toBeNull()
+  })
+})
+
+describe('GrowthPanel — O1 budget follow-up', () => {
+  it('shows one simulated CTS Tours action from O1 reason through approval, receipt, KPI and observation decision', async () => {
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [{
+        id: 'simulated-run-cts-tours',
+        status: 'succeeded',
+        input: { adset_id: 'simulated-adset-cts' },
+        evidence: { date: '2026-10-01', current_daily_budget_cents: 5000, proposed_daily_budget_cents: 6000, currency: 'USD' },
+        rationale: 'O1 连续三天点击率高于账户中位数；先人工批准后调整。',
+        authorization_decision_id: 'simulated-decision',
+        approval: { verdict: 'allow', decided_by: 'human', decided_at: '2026-10-01T12:00:00.000Z' },
+        receipt: {
+          verified: true,
+          apply: { status: 'succeeded', applied: true, prior_daily_budget_cents: 5000, new_daily_budget_cents: 6000, finished_at: '2026-10-01T12:05:00.000Z' },
+          readback: { status: 'succeeded', daily_budget_now: 6000, passed: true, checks: [], finished_at: '2026-10-01T12:06:00.000Z' },
+        },
+        observation: {
+          conclusion: 'keep', reason: '目标 KPI 按现有归因阈值改善；保留本次预算，变化不代表因果证明。',
+          metric_label: 'CTS Tours 新增线索（广告线索）',
+          baseline: { start: '2026-09-17', end: '2026-09-30', total: 140, days: 14 },
+          after: { start: '2026-10-02', end: '2026-10-15', total: 168, days: 14 },
+          delta: 28, deltaPct: 20, first_review_at: '2026-10-04T12:05:00.000Z',
+          window_start: '2026-10-02', window_end: '2026-10-15', window_complete: true,
+          budget_matches_this_run: true,
+        },
+      }] }),
+    })
+    vi.stubGlobal('fetch', fetch)
+    const state = {
+      date: '2026-10-01',
+      data_completeness: 'complete' as const,
+      goal_pace: null,
+      payload: {
+        goal: { title: 'CTS Tours 旅行获客（模拟）', label: '线索', target: 100, dayIndex: 1, totalDays: 30 },
+        opportunities: [{
+          code: 'O1', status: 'hit' as const, title: '模拟 CTS Tours 广告组连续三天 CTR 高于账户中位数。',
+          units: [{ id: 'simulated-adset-cts', name: '模拟旅行获客广告组' }],
+          evidence: { ctr_by_day: '0.03|0.04|0.035', median_by_day: '0.02|0.02|0.02' },
+        }],
+      },
+    }
+    render(<GrowthPanel state={state} clientId="simulated-cts-tours" />)
+
+    await waitFor(() => expect(screen.getByText(/目标 KPI：CTS Tours 新增线索/)).toBeTruthy())
+    expect(screen.getByText(/负责人已批准/)).toBeTruthy()
+    expect(screen.getByText(/Meta 回读 已核实 USD 60.00/)).toBeTruthy()
+    expect(screen.getByText(/结论：保留本次预算/)).toBeTruthy()
+    expect(screen.getByText(/前后变化：\+28（\+20.0%）/)).toBeTruthy()
+    expect(fetch).toHaveBeenCalledWith('/api/clients/simulated-cts-tours/ad-health/o1-scale')
   })
 })

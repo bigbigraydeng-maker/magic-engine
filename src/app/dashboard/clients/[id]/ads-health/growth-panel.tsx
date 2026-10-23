@@ -148,7 +148,35 @@ function FindingCard({ f, kind, clientId, cycleDate }: { f: GrowthFinding; kind:
   )
 }
 
-interface O1Run { id: string; status: string; input: Record<string, unknown>; evidence: Record<string, unknown>; authorization_decision_id: string | null }
+interface O1Run {
+  id: string
+  status: string
+  input: Record<string, unknown>
+  evidence: Record<string, unknown>
+  rationale?: string
+  authorization_decision_id: string | null
+  approval?: { verdict: string; decided_by: string; decided_at: string } | null
+  receipt?: {
+    verified?: boolean
+    apply: { status: string; applied: boolean; prior_daily_budget_cents: number | null; new_daily_budget_cents: number | null; finished_at: string | null } | null
+    readback: { status: string; daily_budget_now: number | null; passed: boolean; checks: Array<{ name: string; passed: boolean }> ; finished_at: string | null } | null
+  }
+  observation?: {
+    conclusion: 'keep' | 'request_restore' | 'continue_observing'
+    reason: string
+    metric_label?: string | null
+    baseline?: { start: string; end: string; total: number; days: number } | null
+    after?: { start: string; end: string; total: number; days: number } | null
+    delta?: number | null
+    deltaPct?: number | null
+    first_review_at?: string
+    window_start?: string
+    window_end?: string
+    window_complete?: boolean
+    budget_matches_this_run?: boolean
+    baseline_unavailable_reason?: string | null
+  }
+}
 function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: string; adsetId: string; cycleDate?: string; o1Evidence: Record<string, unknown> }) {
   const [runs, setRuns] = useState<O1Run[]>([])
   const [message, setMessage] = useState('')
@@ -194,6 +222,10 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
   const currency = typeof evidence?.currency === 'string' ? evidence.currency : ''
   const budgetTarget = evidence?.target_level === 'campaign' ? '系列' : '广告组'
   const money = (cents: number) => `${currency} ${(cents / 100).toFixed(2)}`.trim()
+  const observation = terminal?.observation
+  const conclusionLabel = observation?.conclusion === 'keep' ? '保留本次预算'
+    : observation?.conclusion === 'request_restore' ? '请求人工评估恢复'
+      : '继续观察'
   return (
     <div className="mt-3 rounded-lg border border-sky-200 bg-white p-3 text-xs text-gray-700">
       <p>这是系统建议，不会自动加预算。批准后最多上调 20%，并受客户预算上限约束。</p>
@@ -208,8 +240,28 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
           </div>
         </>
       ) : active ? <div className="mt-2 flex items-center gap-2"><p>状态：{active.status === 'authorized' ? '已批准，等待执行' : '正在执行'}</p>{active.status === 'authorized' && <button disabled={busy} onClick={() => void decide(active, 'approve')} className="rounded border px-2 py-1 disabled:opacity-50">重新排队</button>}</div>
-        : terminal ? <p className="mt-2">本轮处理状态：{terminal.status === 'succeeded' ? '已完成，系统已保存执行和回读记录' : terminal.status === 'denied' ? '已驳回' : '未完成，请先查看这条记录'}</p>
+        : terminal ? <p className="mt-2">本轮处理状态：{terminal.status === 'succeeded' ? '已完成' : terminal.status === 'denied' ? '已驳回' : '未完成，没有成功执行回执'}</p>
         : <button disabled={busy} onClick={() => void submit()} className="mt-2 rounded bg-sky-700 px-3 py-1.5 text-white disabled:opacity-50">提交预算建议供审批</button>}
+      {terminal && <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-3">
+        <p className="font-semibold">这次预算调整的复查</p>
+        <p className="mt-1">原因：{terminal.rationale ?? 'O1 机会建议，等待负责人核对。'}</p>
+        <p className="mt-1">审批：{terminal.approval?.verdict === 'allow' && terminal.approval.decided_by === 'human' ? '负责人已批准' : terminal.approval?.verdict === 'deny' ? '负责人已驳回' : '未找到匹配的人工批准记录'}</p>
+        <p className="mt-1">执行回执：{terminal.receipt?.verified && terminal.receipt.apply
+          ? `预算由 ${money(terminal.receipt.apply.prior_daily_budget_cents!)} 调至 ${money(terminal.receipt.apply.new_daily_budget_cents!)}`
+          : '没有可核实的成功写入回执'}；Meta 回读 {terminal.receipt?.verified && terminal.receipt.readback?.passed ? `已核实 ${money(Number(terminal.receipt.readback.daily_budget_now))}` : '未验证'}。</p>
+        {observation && <>
+          <p className="mt-2 font-medium">结论：{conclusionLabel}</p>
+          <p>{observation.reason}</p>
+          {observation.metric_label && <p className="mt-1">目标 KPI：{observation.metric_label}</p>}
+          {observation.baseline && <p>调整前：{observation.baseline.start} 至 {observation.baseline.end} · {observation.baseline.total}（{observation.baseline.days} 个完整日）</p>}
+          {observation.after && <p>调整后：{observation.after.start} 至 {observation.after.end} · {observation.after.total}（{observation.after.days} 个完整日）</p>}
+          {!observation.baseline && observation.baseline_unavailable_reason && <p>调整前 KPI：{observation.baseline_unavailable_reason}</p>}
+          {observation.first_review_at && <p className="mt-1">首次复查：执行后 72 小时；观察窗口：{observation.window_start} 至 {observation.window_end}{observation.window_complete ? '（已结束）' : '（进行中）'}。</p>}
+          {observation.delta !== null && observation.delta !== undefined && <p>前后变化：{observation.delta > 0 ? '+' : ''}{observation.delta}{observation.deltaPct === null ? '' : `（${observation.deltaPct > 0 ? '+' : ''}${observation.deltaPct.toFixed(1)}%）`}；这是同一投放目标的相关指标变化，不证明因果收益。</p>}
+          {observation.conclusion === 'request_restore' && <p className="mt-1 font-medium">请负责人通过现有人工预算审批流程处理恢复请求；此复查不会提交或执行恢复操作。</p>}
+          {observation.budget_matches_this_run === false && <p className="mt-1">最近已记录预算与本次批准金额不一致或无法核实，系统不会将后续表现归为本次调整。</p>}
+        </>}
+      </div>}
       {message && <p role="status" className="mt-2">{message}</p>}
     </div>
   )
