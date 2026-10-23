@@ -9,7 +9,7 @@ name: ai-orchestrator CI
 # GitHub does not run the workflow on a PR the filter excludes, so the required
 # check never reports, sits Pending forever, and blocks a PR that has nothing to
 # do with this module. The job is read-only, takes about a minute and needs no
-# secrets, so paying that on unrelated PRs is much cheaper than the alternative.
+# secrets. The job always reports; proven docs/sibling-tool changes skip heavy steps.
 # `tests/workflow-supply-chain.test.ts` fails the build if a filter reappears.
 #
 # This is NOT an orchestrator trigger. It never starts a run, never reads a model
@@ -53,25 +53,41 @@ jobs:
       # Pinned to reviewed commit SHAs, never to moveable tags: `@v4` today and
       # `@v4` tomorrow are not guaranteed to be the same code.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          fetch-depth: 2
+      - name: Detect module check scope
+        id: scope
+        run: >-
+          python3 .github/scripts/module-ci-scope.py ai-orchestrator
+          "${{ github.event.pull_request.base.sha }}"
+          "${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.scope.outputs.run_heavy != 'false'
         with:
           node-version: '22'
           cache: npm
 
       - name: Install dependencies
+        if: steps.scope.outputs.run_heavy != 'false'
         run: npm ci
 
       - name: Type check this module
+        if: steps.scope.outputs.run_heavy != 'false'
         # Scoped config: the repository baseline carries ~180 pre-existing errors and
         # drifts with main, so a whole-repo check could never be a gate. Here the
         # standard is zero.
         run: npx tsc -p tools/ai-orchestrator/tsconfig.json
 
       - name: Tests, including architecture and workflow supply-chain checks
+        if: steps.scope.outputs.run_heavy != 'false'
         # Verbose so the check log names every governance assertion that ran:
         # architecture.test.ts (module isolation, file size, no `any`) and
         # workflow-supply-chain.test.ts (action pinning, permissions, triggers).
         run: npx vitest run tools/ai-orchestrator --reporter=verbose
+
+      - name: Explain skipped module work
+        if: steps.scope.outputs.run_heavy == 'false'
+        run: echo "Heavy module steps skipped - only Markdown docs or sibling tools changed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Confirm the run changed nothing
         run: |
