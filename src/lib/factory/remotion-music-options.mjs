@@ -1,44 +1,15 @@
-import musicCatalogRaw from '../../../scripts/factory-worker/engines/remotion/catalog/music.json'
-import musicVocalsRaw from '../../../scripts/factory-worker/engines/remotion/catalog/music-vocals.json'
-import { beatGrid, excerptFor, parseMusicCatalog, stagedFileName, type MusicEntry } from '../../../scripts/factory-worker/engines/remotion/src/music'
-import { FPS } from '../../../scripts/factory-worker/engines/remotion/src/timing'
-import { loadTemplate, isTemplateId } from '../../../scripts/factory-worker/engines/remotion/src/templates'
-
-interface VocalRecord {
-  name?: string
-  verdict?: string
-  cleanUntilSec?: number
-  signedBy?: string
-}
-
-export interface RemotionMusicChoice {
-  id: string
-  file: string
-  mood: string
-  style: string
-  energy: string
-  status: string
-  clean_until_sec: number
-  max_video_seconds: number
-}
-
-interface RemotionBrief {
-  template?: unknown
-  props?: unknown
-  [key: string]: unknown
-}
-
-export interface RemotionMusicReplacement {
-  remotion: RemotionBrief
-  choice: RemotionMusicChoice
-}
+import musicCatalogRaw from '../../../scripts/factory-worker/engines/remotion/catalog/music.json' with { type: 'json' }
+import musicVocalsRaw from '../../../scripts/factory-worker/engines/remotion/catalog/music-vocals.json' with { type: 'json' }
+import { beatGrid, excerptFor, parseMusicCatalog, stagedFileName } from '../../../scripts/factory-worker/engines/remotion/src/music.ts'
+import { FPS } from '../../../scripts/factory-worker/engines/remotion/src/timing.ts'
+import { loadTemplate, isTemplateId } from '../../../scripts/factory-worker/engines/remotion/src/templates.ts'
 
 const musicCatalog = parseMusicCatalog(musicCatalogRaw)
-const vocalRegistry = musicVocalsRaw as VocalRecord[]
-const humanApproval = (signedBy?: string) =>
+const vocalRegistry = musicVocalsRaw
+const humanApproval = (signedBy) =>
   typeof signedBy === 'string' && (signedBy.startsWith('human:') || signedBy.startsWith('PM审片@'))
 
-function musicNameKey(name: string): string {
+function musicNameKey(name) {
   return (name.split('/').pop() ?? name)
     .normalize('NFKC')
     .toLowerCase()
@@ -46,7 +17,7 @@ function musicNameKey(name: string): string {
     .replace(/[^a-z0-9]/g, '')
 }
 
-function vocalClearUntil(track: MusicEntry): number | null {
+function vocalClearUntil(track) {
   const acceptedNames = new Set([stagedFileName(track), track.file].map(musicNameKey))
   const entries = vocalRegistry.filter((record) =>
     typeof record.name === 'string' &&
@@ -58,16 +29,16 @@ function vocalClearUntil(track: MusicEntry): number | null {
   )
   // The worker validates the exact staged bytes by SHA-256. This name mapping
   // only decides what to offer; a stale or different file still fails closed.
-  return entries.length > 0 ? Math.max(...entries.map((entry) => entry.cleanUntilSec!)) : null
+  return entries.length > 0 ? Math.max(...entries.map((entry) => entry.cleanUntilSec)) : null
 }
 
-function propsRecord(value: unknown): Record<string, unknown> | null {
+function propsRecord(value) {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? value
     : null
 }
 
-function patchedPropsForMusic(template: string, props: Record<string, unknown>, track: MusicEntry): Record<string, unknown> {
+function patchedPropsForMusic(template, props, track) {
   const stagedFile = stagedFileName(track)
   if (template === 'list') {
     const itemCount = Array.isArray(props.items) ? props.items.length : 0
@@ -81,18 +52,18 @@ function patchedPropsForMusic(template: string, props: Record<string, unknown>, 
   return { ...props, musicFile: stagedFile, musicStartSec: 0 }
 }
 
-function eligibleTrackForBrief(brief: RemotionBrief, track: MusicEntry): RemotionMusicChoice | null {
+function eligibleTrackForBrief(brief, track) {
   if (!isTemplateId(brief.template)) return null
   const props = propsRecord(brief.props)
   if (!props) return null
 
   let loaded
-  let patchedProps: Record<string, unknown>
+  let patchedProps
   try {
     loaded = loadTemplate(brief.template, props)
     // Beat-timed layouts require a ready BPM grid. The renderer will independently verify the exact staged bytes.
     if ((brief.template === 'list' || brief.template === 'montage') && track.status !== 'ready') return null
-    patchedProps = patchedPropsForMusic(brief.template, loaded.props as Record<string, unknown>, track)
+    patchedProps = patchedPropsForMusic(brief.template, loaded.props, track)
     loadTemplate(brief.template, patchedProps)
   } catch {
     return null
@@ -114,23 +85,19 @@ function eligibleTrackForBrief(brief: RemotionBrief, track: MusicEntry): Remotio
   }
 }
 
-
-export function remotionMusicChoices(rawBriefRemotion: unknown): RemotionMusicChoice[] {
-  const brief = propsRecord(rawBriefRemotion) as RemotionBrief | null
+export function remotionMusicChoices(rawBriefRemotion) {
+  const brief = propsRecord(rawBriefRemotion)
   if (!brief) return []
   const currentMusic = propsRecord(brief.props)?.musicFile
   const currentMusicKey = typeof currentMusic === 'string' ? musicNameKey(currentMusic) : null
   return musicCatalog.tracks
     .filter((track) => !currentMusicKey || musicNameKey(stagedFileName(track)) !== currentMusicKey)
     .map((track) => eligibleTrackForBrief(brief, track))
-    .filter((choice): choice is RemotionMusicChoice => choice !== null)
+    .filter((choice) => choice !== null)
 }
 
-export function replaceRemotionMusic(
-  rawBriefRemotion: unknown,
-  musicId: string,
-): RemotionMusicReplacement | null {
-  const brief = propsRecord(rawBriefRemotion) as RemotionBrief | null
+export function replaceRemotionMusic(rawBriefRemotion, musicId) {
+  const brief = propsRecord(rawBriefRemotion)
   if (!brief || !isTemplateId(brief.template)) return null
   const choice = remotionMusicChoices(brief).find((option) => option.id === musicId)
   const track = musicCatalog.tracks.find((item) => item.id === musicId)
@@ -142,7 +109,7 @@ export function replaceRemotionMusic(
     return {
       remotion: {
         ...brief,
-        props: patchedPropsForMusic(brief.template, loaded.props as Record<string, unknown>, track),
+        props: patchedPropsForMusic(brief.template, loaded.props, track),
       },
       choice,
     }

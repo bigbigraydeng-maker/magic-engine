@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { remotionMusicChoices, replaceRemotionMusic } from './remotion-music-options'
+import { remotionMusicChoices, replaceRemotionMusic } from './remotion-music-options.mjs'
 
 const postcardBrief = (timing = { hookSec: 3, sceneSec: 3, priceSec: 3 }) => ({
   template: 'postcard',

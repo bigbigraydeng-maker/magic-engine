@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import type { ContentCheckItemKey } from '@/lib/social/content-review'
-import type { RemotionMusicChoice } from '@/lib/factory/remotion-music-options'
+import type { RemotionMusicChoice } from '@/lib/factory/remotion-music-options.mjs'
 import {
   REJECT_REASON_KEYS,
   REJECT_REASON_LABEL,

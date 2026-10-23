@@ -15,7 +15,7 @@ import {
 } from '@/lib/social/content-review'
 import { computeReviewFeedbackDigest, RecipeConfigError, winnerRecipeFromBrief } from './recipe'
 import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from './deliverable'
-import type { RemotionMusicReplacement } from './remotion-music-options'
+import type { RemotionMusicReplacement } from './remotion-music-options.mjs'
 import type { ReviewRejectCategory } from './types'
 
 export interface ReviewApplyResult {
@@ -152,7 +152,7 @@ export async function applyQualityReject(
   }
   let musicOverride: RemotionMusicReplacement | null = null
   if (musicId && !originallyHadRecipe) {
-    const { replaceRemotionMusic } = await import('./remotion-music-options')
+    const { replaceRemotionMusic } = await import('./remotion-music-options.mjs')
     musicOverride = replaceRemotionMusic(brief.remotion, musicId)
   }
   if (musicId && !musicOverride) {

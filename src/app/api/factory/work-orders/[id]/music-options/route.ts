@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireAdminScope } from '@/lib/auth/require-admin'
-import { remotionMusicChoices } from '@/lib/factory/remotion-music-options'
+import { remotionMusicChoices } from '@/lib/factory/remotion-music-options.mjs'
 
 export const dynamic = 'force-dynamic'
 
