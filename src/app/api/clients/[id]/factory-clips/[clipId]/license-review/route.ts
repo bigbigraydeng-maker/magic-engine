@@ -20,6 +20,7 @@ export async function POST(req: NextRequest, { params }: Context) {
   const status = body.status
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, 2000) : ''
   const rawScopes = body.permittedScopes
+  const basis = body.basis
   const permittedScopes = Array.isArray(rawScopes) && rawScopes.every((scope) =>
     typeof scope === 'string' && REQUIRED_LICENSE_SCOPES.includes(scope as LicenseScope),
   ) ? Array.from(new Set(rawScopes as LicenseScope[])) : null
@@ -35,6 +36,12 @@ export async function POST(req: NextRequest, { params }: Context) {
   if (status === 'verified' && (!permittedScopes || REQUIRED_LICENSE_SCOPES.some((scope) => !permittedScopes.includes(scope)))) {
     return NextResponse.json({ error: '必须确认商业使用、剪辑/改编和网络平台发布范围' }, { status: 400 })
   }
+  if (status === 'verified' && basis !== 'license_page') {
+    return NextResponse.json({ error: '有许可声明必须以具体许可证据页面为依据' }, { status: 400 })
+  }
+  if (status === 'not_required' && !['client_owned', 'public_domain', 'other_documented'].includes(String(basis))) {
+    return NextResponse.json({ error: '请选择受控的“无需许可”依据' }, { status: 400 })
+  }
 
   const { data: clip, error: readError } = await supabaseAdmin.from('video_clips')
     .select('id, source_author, source_url, license_name, license_url, license_status, status, sha256')
@@ -44,12 +51,28 @@ export async function POST(req: NextRequest, { params }: Context) {
   if (status === 'verified' && (!clip.source_author || !clip.source_url || !clip.license_name || !clip.license_url)) {
     return NextResponse.json({ error: '已核实必须填写来源作者、来源页面、许可名称和许可证明页面' }, { status: 400 })
   }
+  if ((status === 'verified' || status === 'not_required') && (!clip.source_url || !clip.sha256)) {
+    return NextResponse.json({ error: '人工许可声明必须绑定来源页面和当前文件指纹' }, { status: 400 })
+  }
+  if (status === 'not_required' && basis === 'other_documented' && !clip.license_url) {
+    return NextResponse.json({ error: '其他依据必须填写可供复核的许可或权属证明页面' }, { status: 400 })
+  }
   const reviewer = access.user.email ?? access.user.id
+  const evidence = status === 'verified' || status === 'not_required'
+    ? serializeLicenseReviewEvidence({
+        summary: note,
+        permittedScopes: status === 'verified' ? permittedScopes ?? [] : [],
+        sourceUrl: clip.source_url as string,
+        licenseUrl: clip.license_url,
+        assetSha256: clip.sha256 as string,
+        basis: basis as 'license_page' | 'client_owned' | 'public_domain' | 'other_documented',
+      })
+    : note
   let update = supabaseAdmin.from('video_clips').update({
     license_status: status,
     license_reviewed_by: reviewer,
     license_reviewed_at: new Date().toISOString(),
-    license_review_note: serializeLicenseReviewEvidence(note, status === 'verified' ? permittedScopes ?? [] : []),
+    license_review_note: evidence,
     status: 'pending_review',
     reviewed_by: null,
     reviewed_at: null,
