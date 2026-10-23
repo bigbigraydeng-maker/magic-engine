@@ -44,10 +44,11 @@ export const OUTCOME_STEP_LABEL: Readonly<Record<OutcomeStep, string>> = {
  * 归属方式。只有前两种能进 D5 / 预算处方（`isAttributableForBudget`）。
  *   platform_reported —— Meta 按广告单位直接报（actions / 视频字段）
  *   webhook_referral  —— 私信 Webhook 的 entry_referral 带广告 id（#1640），需 #1299 通过才有生产流量
+ *   crm_first_touch   —— CRM 预订按首次触点归到广告；单独展示，不进 D5 / 预算处方
  *   heuristic         —— 开场白识别之类的临时推断（M3：禁止进 D5）
  *   none              —— 归不上 = UNKNOWN
  */
-export type AttributionMethod = 'platform_reported' | 'webhook_referral' | 'heuristic' | 'none'
+export type AttributionMethod = 'platform_reported' | 'webhook_referral' | 'crm_first_touch' | 'heuristic' | 'none'
 
 export interface OutcomeConfig {
   leading: OutcomeStep | null
@@ -131,7 +132,7 @@ export function countOutcome(
   return { step, value: 0, attribution: 'platform_reported' }
 }
 
-/** M2 / M3：只有平台直报与 Webhook 来源的主结果能进 D5 与预算处方。 */
+/** M2 / M3：CRM 首次归因可作为单独结果展示；只有平台直报与 Webhook 来源能进 D5 与预算处方。 */
 export function isAttributableForBudget(count: OutcomeCount): boolean {
   return count.value !== null && (count.attribution === 'platform_reported' || count.attribution === 'webhook_referral')
 }

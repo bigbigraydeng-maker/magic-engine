@@ -65,6 +65,7 @@ describe('countOutcome', () => {
   it('🔴 M3 启发式归属不能进 D5 / 预算处方', () => {
     expect(isAttributableForBudget({ step: 'qualified_enquiry', value: 4, attribution: 'heuristic' })).toBe(false)
     expect(isAttributableForBudget({ step: 'qualified_enquiry', value: 4, attribution: 'webhook_referral' })).toBe(true)
+    expect(isAttributableForBudget({ step: 'deal', value: 1, attribution: 'crm_first_touch' })).toBe(false)
   })
 })
 

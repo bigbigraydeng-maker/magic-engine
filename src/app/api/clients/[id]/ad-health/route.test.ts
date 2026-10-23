@@ -14,12 +14,21 @@ const m = vi.hoisted(() => ({
   growthRows: [] as unknown[],
   growthError: null as { message: string } | null,
   growthLimit: null as number | null,
+  bookingAccess: vi.fn(),
+  bookingOutcome: vi.fn(),
+  unknownBookingOutcome: vi.fn(),
+  latest: null as { insight_date: string } | null,
 }))
 
 vi.mock('@/lib/ads-strategy/agents/growth-live-goal', () => ({
   overlayLiveGoal: async (_id: string, row: Record<string, unknown>) => ({ ...row, goal_live: { live: true, readAtIso: 'x' } }),
 }))
 vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
+vi.mock('@/lib/crm/booking-access', () => ({ requireBookingAccess: m.bookingAccess }))
+vi.mock('@/lib/ads-strategy/portfolio/company-confirmed-bookings', () => ({
+  loadCompanyConfirmedBookingOutcome: m.bookingOutcome,
+  unknownCompanyConfirmedBookingOutcome: m.unknownBookingOutcome,
+}))
 
 vi.mock('@/lib/supabase', () => {
   function chain(table: string) {
@@ -31,7 +40,7 @@ vi.mock('@/lib/supabase', () => {
         if (table === 'ads_growth_states') m.growthLimit = n
         return q
       },
-      maybeSingle: () => Promise.resolve({ data: null, error: null }),
+      maybeSingle: () => Promise.resolve({ data: table === 'ad_health_narratives' ? m.latest : null, error: null }),
       then: (resolve: (v: unknown) => unknown) =>
         Promise.resolve(
           table === 'ads_growth_states'
@@ -86,7 +95,7 @@ function row(date: string) {
 async function getBody() {
   const res = await GET(new NextRequest(`http://localhost/api/clients/${CLIENT}/ad-health`), { params: { id: CLIENT } })
   const text = await res.text()
-  return { status: res.status, text, body: JSON.parse(text) as { growth?: Record<string, unknown> | null } }
+  return { status: res.status, text, body: JSON.parse(text) as { growth?: Record<string, unknown> | null; company_confirmed_bookings?: Record<string, unknown> } }
 }
 
 describe('GET ad-health — growth visibility by viewer', () => {
@@ -96,6 +105,12 @@ describe('GET ad-health — growth visibility by viewer', () => {
     m.growthRows = [row('2026-09-27'), row('2026-09-26')]
     m.growthError = null
     m.growthLimit = null
+    m.latest = null
+    m.bookingAccess.mockReset()
+    m.bookingOutcome.mockReset()
+    m.unknownBookingOutcome.mockImplementation((window_start: string, window_end: string, note: string) => ({
+      step: 'deal', value: null, attribution: 'none', note, window_start, window_end, source_ad_count: null,
+    }))
   })
   afterEach(() => vi.useRealTimers())
 
@@ -110,8 +125,33 @@ describe('GET ad-health — growth visibility by viewer', () => {
     expect((body.growth as unknown as { goal_live: { live: boolean } }).goal_live.live).toBe(true)
   })
 
+  it('adds the booking result only to the internal view and anchors it to the report week', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'admin', role: 'admin', allowedClientId: null })
+    m.latest = { insight_date: '2026-10-22' }
+    m.bookingAccess.mockResolvedValue({ ok: true })
+    m.bookingOutcome.mockResolvedValue({
+      step: 'deal', value: 1, attribution: 'crm_first_touch',
+      window_start: '2026-10-16', window_end: '2026-10-22', source_ad_count: 1,
+    })
+    const { status, body } = await getBody()
+    expect(status).toBe(200)
+    expect(m.bookingAccess).toHaveBeenCalledWith(CLIENT, 'view')
+    expect(m.bookingOutcome).toHaveBeenCalledWith(CLIENT, '2026-10-16', '2026-10-22')
+    expect(body.company_confirmed_bookings).toMatchObject({ value: 1, attribution: 'crm_first_touch' })
+  })
+
+  it('does not turn a missing booking permission into zero', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'admin', role: 'admin', allowedClientId: null })
+    m.latest = { insight_date: '2026-10-22' }
+    m.bookingAccess.mockResolvedValue({ ok: false })
+    const { body } = await getBody()
+    expect(body.company_confirmed_bookings).toMatchObject({ value: null, note: 'CRM 预订读取权限或配置不可用' })
+    expect(m.bookingOutcome).not.toHaveBeenCalled()
+  })
+
   it('paid client never receives D11 or raw evidence; gets the client view with the D10 card', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'paid_client', role: 'client-viewer', allowedClientId: CLIENT })
+    m.latest = { insight_date: '2026-10-22' }
     const { status, text, body } = await getBody()
     expect(status).toBe(200)
     expect(m.growthLimit).toBe(14)
@@ -119,6 +159,8 @@ describe('GET ad-health — growth visibility by viewer', () => {
       expect(text, `leaked: ${leaked}`).not.toContain(leaked)
     }
     expect(body.growth?.viewer).toBe('client')
+    expect(body.company_confirmed_bookings).toBeUndefined()
+    expect(m.bookingOutcome).not.toHaveBeenCalled()
     expect(text).not.toContain('goal_live')
     const cards = (body.growth?.adCards as { cards: Array<{ adLabel: string }> }).cards
     expect(cards.map(c => c.adLabel)).toEqual(['Spring Lead Ad'])
@@ -126,9 +168,12 @@ describe('GET ad-health — growth visibility by viewer', () => {
 
   it('scoped / demo admin (tier admin but pinned to one client) gets the client view too', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'admin', role: 'admin', allowedClientId: CLIENT })
+    m.latest = { insight_date: '2026-10-22' }
     const { text, body } = await getBody()
     expect(text).not.toContain(D11_TITLE)
     expect(body.growth?.viewer).toBe('client')
+    expect(body.company_confirmed_bookings).toBeUndefined()
+    expect(m.bookingOutcome).not.toHaveBeenCalled()
   })
 
   it('an unknown future tier falls back to the client view', async () => {
