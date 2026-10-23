@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { REQUIRED_LICENSE_SCOPES, serializeLicenseReviewEvidence, type LicenseScope } from '@/lib/factory/clip-library'
 import { supabaseAdmin } from '@/lib/supabase'
 
 type Context = { params: Promise<{ id: string; clipId: string }> }
@@ -18,8 +19,21 @@ export async function POST(req: NextRequest, { params }: Context) {
   } catch { return NextResponse.json({ error: '请求内容无效' }, { status: 400 }) }
   const status = body.status
   const note = typeof body.note === 'string' ? body.note.trim().slice(0, 2000) : ''
+  const rawScopes = body.permittedScopes
+  const permittedScopes = Array.isArray(rawScopes) && rawScopes.every((scope) =>
+    typeof scope === 'string' && REQUIRED_LICENSE_SCOPES.includes(scope as LicenseScope),
+  ) ? Array.from(new Set(rawScopes as LicenseScope[])) : null
   if (status !== 'verified' && status !== 'not_required' && status !== 'rejected') {
     return NextResponse.json({ error: '许可结论必须是已核实、无需许可或拒绝' }, { status: 400 })
+  }
+  if (status === 'verified' && note.length < 30) {
+    return NextResponse.json({ error: '请记录许可证据页及授权范围（至少 30 个字符）' }, { status: 400 })
+  }
+  if (status !== 'verified' && note.length < 20) {
+    return NextResponse.json({ error: '请填写至少 20 个字符的许可结论依据' }, { status: 400 })
+  }
+  if (status === 'verified' && (!permittedScopes || REQUIRED_LICENSE_SCOPES.some((scope) => !permittedScopes.includes(scope)))) {
+    return NextResponse.json({ error: '必须确认商业使用、剪辑/改编和网络平台发布范围' }, { status: 400 })
   }
 
   const { data: clip, error: readError } = await supabaseAdmin.from('video_clips')
@@ -30,14 +44,12 @@ export async function POST(req: NextRequest, { params }: Context) {
   if (status === 'verified' && (!clip.source_author || !clip.source_url || !clip.license_name || !clip.license_url)) {
     return NextResponse.json({ error: '已核实必须填写来源作者、来源页面、许可名称和许可证明页面' }, { status: 400 })
   }
-  if (status !== 'verified' && !note) return NextResponse.json({ error: '请填写许可结论的核实说明' }, { status: 400 })
-
   const reviewer = access.user.email ?? access.user.id
   let update = supabaseAdmin.from('video_clips').update({
     license_status: status,
     license_reviewed_by: reviewer,
     license_reviewed_at: new Date().toISOString(),
-    license_review_note: note || null,
+    license_review_note: serializeLicenseReviewEvidence(note, status === 'verified' ? permittedScopes ?? [] : []),
     status: 'pending_review',
     reviewed_by: null,
     reviewed_at: null,
