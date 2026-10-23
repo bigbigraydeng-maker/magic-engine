@@ -24,13 +24,17 @@ export async function POST(req: NextRequest, { params }: Context) {
   if (body.decision === 'reject' && !note) return NextResponse.json({ error: '打回素材请填写原因' }, { status: 400 })
 
   const { data: clip, error: readError } = await supabaseAdmin.from('video_clips')
-    .select('track, scene_tag, motion_type, tags, source_author, source_url, license_name, license_url, duration_seconds, media_type, sha256, license_status, license_review_note')
+    .select('track, scene_tag, motion_type, tags, source_author, source_url, license_name, license_url, duration_seconds, media_type, sha256, license_status, license_review_note, license_reviewed_by')
     .eq('client_id', clientId).eq('id', clipId).maybeSingle()
   if (readError) return NextResponse.json({ error: '素材库暂不可用，请确认迁移已安装' }, { status: 500 })
   if (!clip) return NextResponse.json({ error: '素材不存在' }, { status: 404 })
 
   let nextStatus: 'active' | 'quarantined' = 'quarantined'
   if (body.decision === 'approve') {
+    const reviewer = access.user.email ?? access.user.id
+    if (clip.license_reviewed_by && clip.license_reviewed_by.toLowerCase() === reviewer.toLowerCase()) {
+      return NextResponse.json({ error: '许可声明和最终激活必须由不同管理员完成' }, { status: 403 })
+    }
     const { data: client, error: clientError } = await supabaseAdmin.from('clients').select('factory_config').eq('id', clientId).maybeSingle()
     if (clientError || !client) return NextResponse.json({ error: '客户配置不可用，无法完成审核' }, { status: 500 })
     const config = (client.factory_config ?? {}) as Record<string, unknown>
@@ -66,6 +70,9 @@ export async function POST(req: NextRequest, { params }: Context) {
     // metadata edit cannot be overwritten by a stale approval.
     update = update.eq('status', 'pending_review')
       .eq('license_status', clip.license_status)
+    update = clip.license_reviewed_by === null
+      ? update.is('license_reviewed_by', null)
+      : update.eq('license_reviewed_by', clip.license_reviewed_by)
     update = clip.sha256 === null ? update.is('sha256', null) : update.eq('sha256', clip.sha256)
   }
   const { data: updated, error } = await update.select('id').maybeSingle()
