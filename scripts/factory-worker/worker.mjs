@@ -375,7 +375,7 @@ async function resolveClips(wo, tmp, onCost) {
       idempotency_key: wo_key,
       motion_type: plan.motion_type,
       generation_cost_usd: gen.cost,
-      source_meta: { muapi_url: gen.muapi_url, request_id: gen.request_id },
+      source_meta: { muapi_url: gen.muapi_url, request_id: gen.request_id, source_image_url: plan.source_image_url ?? null },
     })
   }
   return { localPaths, newClips, cost }
@@ -745,7 +745,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
       idempotency_key: plan.idempotency_key,
       motion_type: plan.motion_type,
       generation_cost_usd: gen.cost,
-      source_meta: { provider: gen.provider ?? 'muapi', request_id: gen.request_id, recipe: recipe.id },
+      source_meta: { provider: gen.provider ?? 'muapi', request_id: gen.request_id, recipe: recipe.id, source_image_url: plan.source_image_url ?? null },
     })
   }
   // 生成完再 heartbeat 一次;abort → 不组装、不 complete
