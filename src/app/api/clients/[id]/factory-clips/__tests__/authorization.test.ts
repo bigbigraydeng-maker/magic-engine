@@ -125,8 +125,7 @@ describe('factory clip catalog authorization and client scope', () => {
     )
 
     expect(response.status).toBe(400)
-    expect(query.eq).toHaveBeenCalledWith('client_id', CLIENT_ID)
-    expect(query.eq).toHaveBeenCalledWith('id', CLIP_ID)
+    expect(mocks.from).not.toHaveBeenCalled()
     expect(query.update).not.toHaveBeenCalled()
   })
 
@@ -143,8 +142,9 @@ describe('factory clip catalog authorization and client scope', () => {
   })
 
   it('records the evidence summary and permitted scopes in the licence audit note', async () => {
+    const sha256 = 'a'.repeat(64)
     const clipQuery = chainQuery({
-      data: { id: CLIP_ID, source_author: 'Source author', source_url: 'https://example.test/source', license_name: 'CC BY 4.0', license_url: 'https://example.test/license', license_status: 'unknown', status: 'pending_review', sha256: null },
+      data: { id: CLIP_ID, source_author: 'Source author', source_url: 'https://example.test/source', license_name: 'CC BY 4.0', license_url: 'https://example.test/license', license_status: 'unknown', status: 'pending_review', sha256 },
       error: null,
     })
     const updateQuery = chainQuery({ data: { id: CLIP_ID }, error: null })
@@ -153,7 +153,7 @@ describe('factory clip catalog authorization and client scope', () => {
 
     const response = await reviewLicense(
       jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, {
-        status: 'verified', note, permittedScopes: [...REQUIRED_LICENSE_SCOPES],
+        status: 'verified', note, permittedScopes: [...REQUIRED_LICENSE_SCOPES], basis: 'license_page',
       }),
       context,
     )
@@ -163,9 +163,11 @@ describe('factory clip catalog authorization and client scope', () => {
     expect(saved.license_review_note).toContain(note)
     expect(saved.license_review_note).toContain('commercial_use')
     expect(saved.license_review_note).toContain('online_distribution')
+    expect(saved.license_review_note).toContain(sha256)
   })
 
   it('does not verify licence evidence if source metadata changed concurrently', async () => {
+    const sha256 = 'b'.repeat(64)
     const clipQuery = chainQuery({
       data: {
         id: CLIP_ID,
@@ -175,7 +177,7 @@ describe('factory clip catalog authorization and client scope', () => {
         license_url: 'https://example.test/original-license',
         license_status: 'unknown',
         status: 'pending_review',
-        sha256: null,
+        sha256,
       },
       error: null,
     })
@@ -184,7 +186,7 @@ describe('factory clip catalog authorization and client scope', () => {
 
     const response = await reviewLicense(
       jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, {
-        status: 'verified', note: 'Official licence page states the permitted reuse conditions for this uploaded clip.', permittedScopes: [...REQUIRED_LICENSE_SCOPES],
+        status: 'verified', note: 'Official licence page states the permitted reuse conditions for this uploaded clip.', permittedScopes: [...REQUIRED_LICENSE_SCOPES], basis: 'license_page',
       }),
       context,
     )
@@ -194,7 +196,7 @@ describe('factory clip catalog authorization and client scope', () => {
     expect(updateQuery.eq).toHaveBeenCalledWith('source_url', 'https://example.test/original')
     expect(updateQuery.eq).toHaveBeenCalledWith('license_status', 'unknown')
     expect(updateQuery.eq).toHaveBeenCalledWith('status', 'pending_review')
-    expect(updateQuery.is).toHaveBeenCalledWith('sha256', null)
+    expect(updateQuery.eq).toHaveBeenCalledWith('sha256', sha256)
   })
 
   it('blocks activation review for non-admin users before touching the clip', async () => {
@@ -208,6 +210,17 @@ describe('factory clip catalog authorization and client scope', () => {
     expect(response.status).toBe(403)
     expect(mocks.access).toHaveBeenCalledWith(CLIENT_ID)
     expect(mocks.from).not.toHaveBeenCalled()
+  })
+
+  it('requires a different admin to activate a clip than the one who recorded the licence attestation', async () => {
+    const clipQuery = chainQuery({ data: { license_reviewed_by: 'admin@example.test' }, error: null })
+    mocks.from.mockReturnValue(clipQuery)
+    const response = await reviewClip(
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/review`, { decision: 'approve' }),
+      context,
+    )
+    expect(response.status).toBe(403)
+    expect(mocks.from).toHaveBeenCalledTimes(1)
   })
 
   it('does not activate a stale licence snapshot after a concurrent review change', async () => {
@@ -226,7 +239,8 @@ describe('factory clip catalog authorization and client scope', () => {
         media_type: 'video',
         sha256,
         license_status: 'verified',
-        license_review_note: serializeLicenseReviewEvidence('Official licence terms allow commercial online publication and edited adaptations.', [...REQUIRED_LICENSE_SCOPES]),
+        license_review_note: serializeLicenseReviewEvidence({ summary: 'Official licence terms allow commercial online publication and edited adaptations.', permittedScopes: [...REQUIRED_LICENSE_SCOPES], sourceUrl: 'https://example.test/video', licenseUrl: 'https://example.test/license', assetSha256: sha256, basis: 'license_page' }),
+        license_reviewed_by: 'other-admin@example.test',
       },
       error: null,
     })
