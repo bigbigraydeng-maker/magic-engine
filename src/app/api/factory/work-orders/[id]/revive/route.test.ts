@@ -140,6 +140,19 @@ describe('POST /api/factory/work-orders/[id]/revive', () => {
     expect(db.updates).toEqual([])
   })
 
+  it('does not retry a recipe order until its production plan has been rebuilt', async () => {
+    h.email = 'fde@magiclab.test'
+    db.loadResult = {
+      data: { id: 'wo-1', status: 'dead_letter', reclaim_count: 0, reject_reason: 'r', brief: { recipe_replan_required: true } },
+      error: null,
+    }
+
+    const res = await callPost()
+
+    expect(res.status).toBe(409)
+    expect(db.updates).toEqual([])
+  })
+
   it('returns 404 when the work order is missing', async () => {
     h.email = 'fde@magiclab.test'
     db.loadResult = { data: null, error: null }

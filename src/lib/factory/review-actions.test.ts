@@ -32,6 +32,12 @@ describe('parseReviewBody', () => {
     const r = parseReviewBody({ action: 'reject_quality', feedback: 'x'.repeat(3000), checklist_human: passChecklist })
     expect(r.ok && r.action === 'reject_quality' && r.feedback.length).toBe(2000)
   })
+
+  it('accepts only catalog-shaped optional music ids on quality rejection', () => {
+    const selected = parseReviewBody({ action: 'reject_quality', feedback: '画面质量', checklist_human: passChecklist, music_id: 'jade-river-journey' })
+    expect(selected.ok && selected.action === 'reject_quality' && selected.musicId).toBe('jade-river-journey')
+    expect(parseReviewBody({ action: 'reject_quality', feedback: '画面质量', checklist_human: passChecklist, music_id: '../bad' }).ok).toBe(false)
+  })
   it('reject_budget 正数且 ≤ $50', () => {
     expect(parseReviewBody({ action: 'reject_budget', new_budget_usd: 30 })).toEqual({
       ok: true, action: 'reject_budget', newBudget: 30,

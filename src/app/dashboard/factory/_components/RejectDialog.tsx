@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import type { ContentCheckItemKey } from '@/lib/social/content-review'
+import type { RemotionMusicChoice } from '@/lib/factory/remotion-music-options'
 import {
   REJECT_REASON_KEYS,
   REJECT_REASON_LABEL,
@@ -20,6 +21,11 @@ interface RejectDialogProps {
   onSubmit: (payload: Record<string, unknown>) => void
   onClose: () => void
   onModeChange?: (mode: 'quality' | 'budget') => void
+  templateId?: string | null
+  currentMusicFile?: string | null
+  musicChoices?: RemotionMusicChoice[]
+  musicChoicesLoading?: boolean
+  musicChoicesError?: string | null
 }
 
 function ErrorBox({ message }: { message: string | null }) {
@@ -32,11 +38,25 @@ function QualityBody({
   onToggle,
   freeText,
   onFreeText,
+  templateId,
+  currentMusicFile,
+  musicChoices,
+  musicChoicesLoading,
+  musicChoicesError,
+  musicId,
+  onMusicChange,
 }: {
   selected: ContentCheckItemKey[]
   onToggle: (key: ContentCheckItemKey) => void
   freeText: string
   onFreeText: (value: string) => void
+  templateId?: string | null
+  currentMusicFile?: string | null
+  musicChoices: RemotionMusicChoice[]
+  musicChoicesLoading: boolean
+  musicChoicesError: string | null
+  musicId: string
+  onMusicChange: (value: string) => void
 }) {
   return (
     <>
@@ -64,6 +84,34 @@ function QualityBody({
         value={freeText}
         onChange={(e) => onFreeText(e.target.value)}
       />
+      {musicChoicesLoading && <p className="mt-3 text-xs text-slate-500">正在读取这条工单可用的 BGM…</p>}
+      {musicChoicesError && <p className="mt-3 text-xs text-amber-700">{musicChoicesError}；仍可沿用 AI 选曲重制。</p>}
+      {!musicChoicesLoading && !musicChoicesError && musicChoices.length === 0 && (
+        <p className="mt-3 text-xs text-slate-500">没有其他已核验且时长覆盖足够的音乐，本次重制将沿用 AI 选曲。</p>
+      )}
+      {musicChoices.length > 0 && (
+        <div className="mt-3">
+          <label htmlFor="reject-music-choice" className="block text-xs font-medium text-slate-700 mb-1">
+            重制时的背景音乐（可选）
+          </label>
+          <select
+            id="reject-music-choice"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            value={musicId}
+            onChange={(event) => onMusicChange(event.target.value)}
+          >
+            <option value="">沿用 AI 选曲 · {currentMusicFile?.split('/').pop() ?? '当前方案'}</option>
+            {musicChoices.map((choice) => (
+              <option key={choice.id} value={choice.id}>
+                {choice.file} · {choice.mood} · {choice.style} · 最长 {choice.max_video_seconds}s
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            当前模板：{templateId ?? '未记录'}。换曲会生成重制任务，成片后再回到待审核；其他曲目不会预先试听，当前播放器可听本片实际配乐。
+          </p>
+        </div>
+      )}
       <p className="mt-2 text-xs text-slate-500">打回后这条作废,你的理由会交回工厂重做。不会发布任何东西。</p>
     </>
   )
@@ -91,10 +139,14 @@ function BudgetBody({ raw, onRaw }: { raw: string; onRaw: (value: string) => voi
   )
 }
 
-export function RejectDialog({ mode, orderNo, busy, error, onSubmit, onClose, onModeChange }: RejectDialogProps) {
+export function RejectDialog({
+  mode, orderNo, busy, error, onSubmit, onClose, onModeChange,
+  templateId, currentMusicFile, musicChoices = [], musicChoicesLoading = false, musicChoicesError = null,
+}: RejectDialogProps) {
   const [selected, setSelected] = useState<ContentCheckItemKey[]>([])
   const [freeText, setFreeText] = useState('')
   const [budgetRaw, setBudgetRaw] = useState('')
+  const [musicId, setMusicId] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
 
   const toggle = (key: ContentCheckItemKey) =>
@@ -103,7 +155,7 @@ export function RejectDialog({ mode, orderNo, busy, error, onSubmit, onClose, on
   const submit = () => {
     setLocalError(null)
     const result = mode === 'quality'
-      ? buildQualityRejectPayload(selected, freeText)
+      ? buildQualityRejectPayload(selected, freeText, musicId)
       : buildBudgetRejectPayload(budgetRaw)
     if (!result.ok) {
       setLocalError(result.error)
@@ -151,7 +203,19 @@ export function RejectDialog({ mode, orderNo, busy, error, onSubmit, onClose, on
         )}
 
         {mode === 'quality' ? (
-          <QualityBody selected={selected} onToggle={toggle} freeText={freeText} onFreeText={setFreeText} />
+          <QualityBody
+            selected={selected}
+            onToggle={toggle}
+            freeText={freeText}
+            onFreeText={setFreeText}
+            templateId={templateId}
+            currentMusicFile={currentMusicFile}
+            musicChoices={musicChoices}
+            musicChoicesLoading={musicChoicesLoading}
+            musicChoicesError={musicChoicesError}
+            musicId={musicId}
+            onMusicChange={setMusicId}
+          />
         ) : (
           <BudgetBody raw={budgetRaw} onRaw={setBudgetRaw} />
         )}
