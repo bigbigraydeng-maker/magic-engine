@@ -56,7 +56,9 @@ export async function POST(req: NextRequest, { params }: Context) {
       licenseStatus: clip.license_status as LicenseReviewStatus,
       licenseReviewNote: clip.license_review_note,
       licenseReviewedByUserId: clip.license_reviewed_by_user_id,
-      reviewedByUserId: clip.reviewed_by_user_id,
+      // This is the prospective final reviewer. The persisted reviewer stays
+      // null until the compare-and-set update below succeeds.
+      reviewedByUserId: access.user.id,
     }
     const blocker = activationBlocker(candidate, config.allow_b_track_landmark_ads === true)
     if (blocker) return NextResponse.json({ error: `暂不能激活：${blocker}` }, { status: 400 })
