@@ -76,6 +76,45 @@ export interface ActivatableClip extends ClipLibraryMetadata {
   sha256: string | null
   licenseStatus: LicenseReviewStatus
   licenseReviewNote: string | null
+  licenseReviewedByUserId: string | null
+  reviewedByUserId: string | null
+}
+
+export interface LicenseEvidenceCandidate {
+  licenseStatus: LicenseReviewStatus
+  licenseReviewNote: string | null
+  sourceAuthor: string | null
+  sourceUrl: string | null
+  licenseName: string | null
+  licenseUrl: string | null
+  sha256: string | null
+  licenseReviewedByUserId: string | null
+  reviewedByUserId: string | null
+}
+
+export function hasCurrentLicenseEvidence(clip: LicenseEvidenceCandidate): boolean {
+  const evidence = parseLicenseReviewEvidence(clip.licenseReviewNote)
+  if (!evidence || evidence.summary.trim().length < 30 || !clip.sha256) return false
+  if (!clip.licenseReviewedByUserId || !clip.reviewedByUserId || clip.licenseReviewedByUserId === clip.reviewedByUserId) return false
+  if (evidence.assetSha256 !== clip.sha256 || evidence.sourceUrl !== clip.sourceUrl || evidence.licenseUrl !== clip.licenseUrl) return false
+  if (clip.licenseStatus === 'verified') {
+    return !!clip.sourceAuthor && !!clip.sourceUrl && !!clip.licenseName && !!clip.licenseUrl
+      && evidence.basis === 'license_page'
+      && REQUIRED_LICENSE_SCOPES.every((scope) => evidence.permittedScopes.includes(scope))
+  }
+  return clip.licenseStatus === 'not_required' && !!clip.sourceUrl
+    && ['client_owned', 'public_domain', 'other_documented'].includes(evidence.basis)
+}
+
+export function clipCanEnterFactoryPool(
+  clip: { track: ClipTrack; isStillImage: boolean; isAiTransformed: boolean; hasCurrentEvidence: boolean; sourceImageUrl: string | null },
+  clearedTransformedImageUrls: ReadonlySet<string>,
+): boolean {
+  if (clip.isStillImage) return clip.isAiTransformed && clip.hasCurrentEvidence
+  if (clip.hasCurrentEvidence) return true
+  return clip.track === 'b_generated'
+    && typeof clip.sourceImageUrl === 'string'
+    && clearedTransformedImageUrls.has(clip.sourceImageUrl)
 }
 
 export interface ClipUploadMediaInfo {
@@ -191,21 +230,13 @@ export function activationBlocker(
   if (clip.track === 'b_generated' && !allowBTrackLandmarkAds && !ABSTRACT_SCENE_TAGS.includes(clip.sceneTag)) {
     return 'B 轨场景标签必须使用抽象白名单'
   }
-  if (clip.licenseStatus === 'verified' && (!clip.sourceAuthor || !clip.sourceUrl || !clip.licenseName || !clip.licenseUrl)) {
-    return '许可核实需要作者、来源页、许可名称和许可证据页'
-  }
-  const evidence = parseLicenseReviewEvidence(clip.licenseReviewNote)
-  if (clip.licenseStatus === 'verified' && (!evidence || evidence.summary.trim().length < 30 || evidence.basis !== 'license_page' || evidence.sourceUrl !== clip.sourceUrl || evidence.licenseUrl !== clip.licenseUrl || evidence.assetSha256 !== clip.sha256)) {
-    return '许可人工声明需绑定当前素材指纹、来源页和许可页，并记录证据及使用范围'
-  }
-  if (clip.licenseStatus === 'verified' && (!evidence || REQUIRED_LICENSE_SCOPES.some((scope) => !evidence.permittedScopes.includes(scope)))) {
-    return '许可人工声明尚未确认商业使用、剪辑/改编及网络平台发布范围'
-  }
-  if (clip.licenseStatus === 'not_required' && (!evidence || evidence.summary.trim().length < 30 || evidence.sourceUrl !== clip.sourceUrl || evidence.assetSha256 !== clip.sha256 || !['client_owned', 'public_domain', 'other_documented'].includes(evidence.basis))) {
-    return '“无需许可”需绑定当前素材指纹和来源页，并记录依据'
-  }
   if (clip.licenseStatus !== 'verified' && clip.licenseStatus !== 'not_required') {
     return '素材许可尚未由 ME 团队核实'
   }
+  const evidence = parseLicenseReviewEvidence(clip.licenseReviewNote)
+  if (clip.licenseStatus === 'verified' && evidence && REQUIRED_LICENSE_SCOPES.some((scope) => !evidence.permittedScopes.includes(scope))) {
+    return '许可人工声明尚未确认商业使用、剪辑/改编及网络平台发布范围'
+  }
+  if (!hasCurrentLicenseEvidence(clip)) return '许可人工声明必须绑定当前素材、记录完整范围，并由另一位管理员激活'
   return null
 }
