@@ -278,6 +278,17 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
+
+## Meta Social Technologies MCP 内部工程助手 · 后续评估（2026-10-24 登记，未排期）
+
+Meta 官方 MCP 工具可辅助开发者查询 Meta 开发文档、应用与权限状态、审核 / 合规信息、API 用量与弃用信息，以及 webhook 订阅状态；Manage 能力还可管理 webhook 订阅并发送测试事件。
+
+- **当前决定**：仅登记为候选，后续有时间再评估是否适合 Magic Engine；尚未按 §11 打分，不排期、不开发。
+- **预期价值**：为 Magic Engine 内部工程人员提供查询 Meta 官方开发资料与应用状态的入口，减少维护 Meta 集成时在代码、文档和开发者后台之间切换核对的工作。
+- **边界**：这是内部研发 / 运维辅助工具，不是 Magic Engine 面向客户的 Meta Ads Connector；不提供客户广告账户 Insights，也不替代 Magic Engine 自身的 OAuth、账户授权、数据存储和只读数据管道。Manage 能力不代表可以修改应用配置或完成 App Review。
+- **后续评估要点**：确认开放资格、Read 权限实际覆盖的问题、与现有 Meta Ads Connector 的互补关系及认证 / 数据边界；默认只评估 Read，只有明确的非生产 webhook 验证需求时再考虑 Manage。
+- **相关现状**：[`docs/specs/2026-09-20-meta-ads-ai-connector-v01.md`](./specs/2026-09-20-meta-ads-ai-connector-v01.md) 仍标记为 Discovery / Implementation Proposal、STOP BEFORE BUILD；本条不改变该状态。
+- **来源**：[Meta Social Technologies MCP 官方文档](https://developers.facebook.com/documentation/mcp/devtools-mcp/)。
 ## SEO 标题周循环 v1 · 上线后跟进（2026-09-20 上线，CTS 开关已关；清单来源 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807) 评论）
 
 - [ ] **重新打开 CTS 的开关**：先用 `POST /api/cron/seo-meta-cycle-trigger` 带 `{"dry_run": true, "client_id": "<CTS>"}` 跑一次演练，把「这一轮会改哪些页、改成什么字、依据的搜索量/难度/前 3 标题」给 PM 看；PM 批准后才把 `clients.seo_config.meta_cycle_enabled` 改回 true（见 PITFALLS D10）
