@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activationBlocker, normalizeClipTags, normalizeHttpsUrl, normalizeSceneTag, parseClipUploadMetadata } from './clip-library'
+import { activationBlocker, normalizeClipTags, normalizeHttpsUrl, normalizeSceneTag, parseClipUploadMetadata, REQUIRED_LICENSE_SCOPES, serializeLicenseReviewEvidence } from './clip-library'
 
 describe('视频工厂素材标签目录校验', () => {
   it('规范化标签，去重并拒绝无效的空白/超量值', () => {
@@ -28,11 +28,14 @@ describe('视频工厂素材标签目录校验', () => {
     const candidate = {
       track: 'a_real' as const, sceneTag: 'chongqing_river', motionType: null, tags: ['chongqing'],
       sourceAuthor: 'CTS', sourceUrl: 'https://example.com/source', licenseName: 'Owned', licenseUrl: 'https://example.com/license',
-      mediaType: 'video' as const, durationSeconds: 4, sha256: 'a'.repeat(64), licenseStatus: 'verified' as const, licenseReviewNote: null,
+      mediaType: 'video' as const, durationSeconds: 4, sha256: 'a'.repeat(64), licenseStatus: 'verified' as const,
+      licenseReviewNote: serializeLicenseReviewEvidence('The official licence page permits reuse for this media in monetised edited online video.', [...REQUIRED_LICENSE_SCOPES]),
     }
     expect(activationBlocker(candidate, false)).toBeNull()
     expect(activationBlocker({ ...candidate, sha256: null }, false)).toContain('指纹')
     expect(activationBlocker({ ...candidate, licenseStatus: 'unknown' }, false)).toContain('许可尚未')
+    expect(activationBlocker({ ...candidate, licenseReviewNote: null }, false)).toContain('商业使用')
+    expect(activationBlocker({ ...candidate, licenseReviewNote: serializeLicenseReviewEvidence('Licence page reviewed; commercial use only.', ['commercial_use']) }, false)).toContain('商业使用')
     expect(activationBlocker({ ...candidate, track: 'b_generated', sceneTag: 'chongqing_landmark' }, false)).toContain('抽象白名单')
     expect(activationBlocker({ ...candidate, track: 'b_generated', sceneTag: 'chongqing_landmark' }, true)).toBeNull()
   })
