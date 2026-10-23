@@ -91,6 +91,8 @@ export interface BlocklistEntry {
 export interface ClipSlice {
   id: string
   scene_tag: string
+  /** Human-reviewed catalogue tags; legacy clips may not have any. */
+  tags?: string[]
   motion_type: string | null
   track: 'a_real' | 'b_generated'
   usage_count: number
