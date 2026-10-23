@@ -8,6 +8,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { todayIso } from '@/lib/tour-catalog/dates'
 import type { BookingStatus } from '@/lib/crm/booking-types'
 import { isAttributed, normalisePlatform } from '@/lib/crm/attribution'
 import type { OriginKind } from '@/lib/crm/sales-progress/types'
@@ -92,7 +93,7 @@ export type CompanyConfirmedBookingUnknownReason =
   | '订单客户归属无法核实'
   | '订单记录无法完整核实'
   | '公司确认依据未通过创建审计核验'
-  | '联系人首次归因缺失或晚于预订日期'
+  | '联系人首次归因缺失或无法确认早于预订日期'
   | '广告来源无法唯一核实'
   | '客户广告账户归属无法核实'
   | '广告账户存在共享或冲突'
@@ -293,16 +294,15 @@ export function resolveCompanyConfirmedBookings(input: ResolveCompanyConfirmedBo
     }
 
     const contactRows = contactsById.get(booking.contact_id) ?? []
-    if (contactRows.length !== 1) return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或晚于预订日期')
+    if (contactRows.length !== 1) return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或无法确认早于预订日期')
     const contact = contactRows[0]
     const platform = normalisePlatform(contact.attr_platform)
-    if (platform && platform !== 'meta') continue
-    if (platform !== 'meta' || !contact.attr_ad_id || !contact.first_attributed_at) {
-      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或晚于预订日期')
+    if (!platform || !contact.first_attributed_at) {
+      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或无法确认早于预订日期')
     }
     const firstTouchMs = Date.parse(contact.first_attributed_at)
-    if (!Number.isFinite(firstTouchMs) || new Date(firstTouchMs).toISOString().slice(0, 10) >= booking.booked_on) {
-      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或晚于预订日期')
+    if (!Number.isFinite(firstTouchMs) || todayIso(new Date(firstTouchMs)) >= booking.booked_on) {
+      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或无法确认早于预订日期')
     }
 
     // contacts carries a first-touch summary; corroborate it against the
@@ -317,14 +317,18 @@ export function resolveCompanyConfirmedBookings(input: ResolveCompanyConfirmedBo
     }))
     const timedTouchpoints = attributedTouchpoints.map(touchpoint => ({ touchpoint, at: Date.parse(touchpoint.occurred_at) }))
     if (timedTouchpoints.some(point => !Number.isFinite(point.at))) {
-      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或晚于预订日期')
+      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或无法确认早于预订日期')
     }
     const earliestAt = timedTouchpoints.reduce((min, point) => Math.min(min, point.at), Number.POSITIVE_INFINITY)
     const firstTouchpoints = timedTouchpoints.filter(point => point.at === earliestAt)
     if (firstTouchpoints.length !== 1 || earliestAt !== firstTouchMs ||
-      normalisePlatform(firstTouchpoints[0].touchpoint.attr_platform) !== 'meta' ||
+      normalisePlatform(firstTouchpoints[0].touchpoint.attr_platform) !== platform ||
       firstTouchpoints[0].touchpoint.attr_ad_id !== contact.attr_ad_id) {
-      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或晚于预订日期')
+      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或无法确认早于预订日期')
+    }
+    if (platform !== 'meta') continue
+    if (!contact.attr_ad_id) {
+      return unknownOutcome(windowStart, windowEnd, '联系人首次归因缺失或无法确认早于预订日期')
     }
 
     const matchingFacts = input.adFacts.filter(fact => fact.entity_id === contact.attr_ad_id && accountIds.has(fact.ad_account_id))
@@ -430,11 +434,8 @@ export async function loadCompanyConfirmedBookingOutcome(
       const contact = contactFacts.find(row => row.id === booking.contact_id)
       return normalisePlatform(contact?.attr_platform) === 'meta' && Boolean(contact?.attr_ad_id)
     })
-    const touchpointContactIds = companyConfirmed.filter(booking => {
-      const contact = contactFacts.find(row => row.id === booking.contact_id)
-      return normalisePlatform(contact?.attr_platform) === 'meta' && Boolean(contact?.attr_ad_id)
-    }).map(booking => booking.contact_id)
-    const rawTouchpoints = touchpointContactIds.length > 0 ? await readTouchpoints(db, clientId, Array.from(new Set(touchpointContactIds))) : []
+    const touchpointContactIds = Array.from(new Set(companyConfirmed.map(booking => booking.contact_id)))
+    const rawTouchpoints = touchpointContactIds.length > 0 ? await readTouchpoints(db, clientId, touchpointContactIds) : []
     const touchpoints = rawTouchpoints.map(mapTouchpoint)
     if (touchpoints.some(row => row === null)) return unknownOutcome(windowStart, windowEnd, '读取 CRM 或广告事实失败')
 

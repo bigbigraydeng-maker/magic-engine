@@ -131,6 +131,29 @@ describe('CRM company-confirmed bookings → Ads Health result', () => {
     expect(resolveCompanyConfirmedBookings(input({ windowStart: '2026-02-31' })).value).toBeNull()
   })
 
+  it('keeps a UTC-prior touch unknown when it falls on the Auckland booking date', () => {
+    const sameAucklandDay = '2026-10-19T23:00:00Z'
+    const result = resolveCompanyConfirmedBookings(input({
+      contacts: [{ ...contact, first_attributed_at: sameAucklandDay }],
+      touchpoints: [{ ...touchpoint, occurred_at: sameAucklandDay }],
+    }))
+    expect(result.value).toBeNull()
+  })
+
+  it('excludes a non-Meta booking only when its summary matches the earliest raw touch', () => {
+    const googleContact = { ...contact, attr_platform: 'google', attr_ad_id: 'google-ad-1' }
+    const googleTouchpoint = { ...touchpoint, attr_platform: 'google', attr_ad_id: 'google-ad-1' }
+    const reliable = resolveCompanyConfirmedBookings(input({
+      contacts: [googleContact], touchpoints: [googleTouchpoint], accountIds: [], adFacts: [], clientPageId: null,
+    }))
+    expect(reliable).toMatchObject({ value: 0, attribution: 'crm_first_touch', source_ad_count: 0 })
+
+    const conflict = resolveCompanyConfirmedBookings(input({
+      contacts: [googleContact], touchpoints: [touchpoint], accountIds: [], adFacts: [], clientPageId: null,
+    }))
+    expect(conflict.value).toBeNull()
+  })
+
   it('returns unknown for shared, ambiguous, cross-tenant or wrong-page ad facts', () => {
     expect(resolveCompanyConfirmedBookings(input({ sharedAccountIds: new Set(['act-1']) })).value).toBeNull()
     expect(resolveCompanyConfirmedBookings(input({
@@ -155,6 +178,20 @@ describe('CRM company-confirmed bookings → Ads Health result', () => {
   it('loads from the existing CRM/audit/account/snapshot facts through the Ads Health adapter', async () => {
     const result = await loadCompanyConfirmedBookingOutcome(CLIENT, START, END, fakeDb(loaderTables()))
     expect(result).toMatchObject({ value: 1, attribution: 'crm_first_touch', window_start: START, window_end: END })
+  })
+
+  it('loads the raw first touch before excluding a reliable non-Meta booking', async () => {
+    const tables = loaderTables()
+    tables.contacts = [{ ...contact, attr_platform: 'google', attr_ad_id: 'google-ad-1' }]
+    tables.contact_touchpoints = [{ ...touchpoint, attr_platform: 'google', attr_ad_id: 'google-ad-1' }]
+    const result = await loadCompanyConfirmedBookingOutcome(CLIENT, START, END, fakeDb(tables))
+    expect(result).toMatchObject({ value: 0, attribution: 'crm_first_touch', source_ad_count: 0 })
+
+    const conflictTables = loaderTables()
+    conflictTables.contacts = [{ ...contact, attr_platform: 'google', attr_ad_id: 'google-ad-1' }]
+    conflictTables.contact_touchpoints = [touchpoint]
+    const conflict = await loadCompanyConfirmedBookingOutcome(CLIENT, START, END, fakeDb(conflictTables))
+    expect(conflict.value).toBeNull()
   })
 
   it.each(['crm_booking_events', 'contact_touchpoints', 'ad_entity_snapshots'])('keeps %s query failures unknown rather than showing zero', async table => {
