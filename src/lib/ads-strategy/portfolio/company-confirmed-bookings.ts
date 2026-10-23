@@ -15,6 +15,8 @@ import type { OriginKind } from '@/lib/crm/sales-progress/types'
 import { findSharedAdAccounts } from '@/lib/meta/client-ad-accounts'
 import { supabaseAdmin } from '@/lib/supabase'
 import { ownershipOfAds } from './diagnostics/ownership'
+import { lookupCreativeLinksByAdIds } from '@/lib/ads/creative-link'
+import type { CreativeOutcomeReference } from '@/lib/marketing-plan/promo/draft-ads'
 import type { AttributionMethod, OutcomeCount } from './outcome-ladder'
 
 const PAGE_CAP = 20_000
@@ -72,6 +74,17 @@ interface AdFact {
   ad_account_id: string
   entity_id: string
   creative_page_id: string | null
+}
+
+interface AdBookingCount {
+  ad_account_id: string
+  count: number
+}
+
+interface LoadedCompanyConfirmedBookingOutcome {
+  outcome: CompanyConfirmedBookingOutcome
+  /** Internal only: never included in the Ads Health aggregate response. */
+  adCountsById: Map<string, AdBookingCount> | null
 }
 
 export interface ResolveCompanyConfirmedBookingsInput {
@@ -232,7 +245,10 @@ function normaliseAccountId(value: string): string {
 }
 
 /** Pure, fail-closed resolver used by both the loader and offline fixtures. */
-export function resolveCompanyConfirmedBookings(input: ResolveCompanyConfirmedBookingsInput): CompanyConfirmedBookingOutcome {
+function resolveCompanyConfirmedBookingsWithCounts(
+  input: ResolveCompanyConfirmedBookingsInput,
+  verifiedAdCounts?: Map<string, AdBookingCount>,
+): CompanyConfirmedBookingOutcome {
   const { clientId, windowStart, windowEnd } = input
   if (!isValidDate(windowStart) || !isValidDate(windowEnd) || windowStart > windowEnd) {
     return unknownOutcome(windowStart, windowEnd, '统计窗口无效')
@@ -278,6 +294,7 @@ export function resolveCompanyConfirmedBookings(input: ResolveCompanyConfirmedBo
 
   const accountIds = new Set(input.accountIds)
   const countableAdIds = new Set<string>()
+  const countsByAdId = new Map<string, AdBookingCount>()
   let count = 0
 
   for (const booking of inWindow) {
@@ -342,7 +359,15 @@ export function resolveCompanyConfirmedBookings(input: ResolveCompanyConfirmedBo
       return unknownOutcome(windowStart, windowEnd, '广告不属于已登记的客户主页')
     }
     countableAdIds.add(contact.attr_ad_id)
+    const prior = countsByAdId.get(contact.attr_ad_id)
+    if (prior && prior.ad_account_id !== adAccountId) return unknownOutcome(windowStart, windowEnd, '广告来源无法唯一核实')
+    countsByAdId.set(contact.attr_ad_id, { ad_account_id: adAccountId, count: (prior?.count ?? 0) + 1 })
     count += 1
+  }
+
+  if (verifiedAdCounts) {
+    verifiedAdCounts.clear()
+    for (const [adId, adCount] of countsByAdId) verifiedAdCounts.set(adId, adCount)
   }
 
   const attribution: AttributionMethod = 'crm_first_touch'
@@ -354,6 +379,11 @@ export function resolveCompanyConfirmedBookings(input: ResolveCompanyConfirmedBo
     window_end: windowEnd,
     source_ad_count: countableAdIds.size,
   }
+}
+
+/** Pure public resolver used by existing callers; per-ad details stay internal. */
+export function resolveCompanyConfirmedBookings(input: ResolveCompanyConfirmedBookingsInput): CompanyConfirmedBookingOutcome {
+  return resolveCompanyConfirmedBookingsWithCounts(input)
 }
 
 function chunks<T>(items: readonly T[], size: number): T[][] {
@@ -406,17 +436,21 @@ async function readTouchpoints(db: SupabaseClient, clientId: string, contactIds:
   return out
 }
 
-/** Load a complete, tenant-scoped and audit-backed booking result for one report window. */
-export async function loadCompanyConfirmedBookingOutcome(
+/** Load one result plus internal ad-level counts using the existing verification path. */
+async function loadCompanyConfirmedBookingOutcomeWithAdCounts(
   clientId: string,
   windowStart: string,
   windowEnd: string,
   db: SupabaseClient = supabaseAdmin,
-): Promise<CompanyConfirmedBookingOutcome> {
+): Promise<LoadedCompanyConfirmedBookingOutcome> {
+  const unknown = (note: CompanyConfirmedBookingUnknownReason): LoadedCompanyConfirmedBookingOutcome => ({
+    outcome: unknownOutcome(windowStart, windowEnd, note),
+    adCountsById: null,
+  })
   try {
     const rawBookings = await readBookings(db, clientId, windowStart, windowEnd)
     const bookings = rawBookings.map(mapBooking)
-    if (bookings.some(row => row === null)) return unknownOutcome(windowStart, windowEnd, '订单记录无法完整核实')
+    if (bookings.some(row => row === null)) return unknown('订单记录无法完整核实')
     const bookingFacts = bookings as BookingFact[]
     const active = bookingFacts.filter(row => row.status === 'active' && row.booked_on >= windowStart && row.booked_on <= windowEnd)
     const companyConfirmed = active.filter(row => row.origin_kind === 'company_confirmed')
@@ -427,7 +461,7 @@ export async function loadCompanyConfirmedBookingOutcome(
     const events = rawEvents.map(mapEvent)
     const contacts = rawContacts.map(mapContact)
     if (events.some(row => row === null) || contacts.some(row => row === null)) {
-      return unknownOutcome(windowStart, windowEnd, '读取 CRM 或广告事实失败')
+      return unknown('读取 CRM 或广告事实失败')
     }
     const contactFacts = contacts as ContactFact[]
     const needsMetaAdFacts = companyConfirmed.some(booking => {
@@ -437,7 +471,7 @@ export async function loadCompanyConfirmedBookingOutcome(
     const touchpointContactIds = Array.from(new Set(companyConfirmed.map(booking => booking.contact_id)))
     const rawTouchpoints = touchpointContactIds.length > 0 ? await readTouchpoints(db, clientId, touchpointContactIds) : []
     const touchpoints = rawTouchpoints.map(mapTouchpoint)
-    if (touchpoints.some(row => row === null)) return unknownOutcome(windowStart, windowEnd, '读取 CRM 或广告事实失败')
+    if (touchpoints.some(row => row === null)) return unknown('读取 CRM 或广告事实失败')
 
     let accountIds: string[] = []
     let sharedAccountIds = new Set<string>()
@@ -445,24 +479,24 @@ export async function loadCompanyConfirmedBookingOutcome(
     let clientPageId: string | null = null
     if (needsMetaAdFacts) {
       const accountRes = await db.from('client_meta_ad_accounts').select('client_id, ad_account_id').eq('client_id', clientId)
-      if (accountRes.error) return unknownOutcome(windowStart, windowEnd, '客户广告账户归属无法核实')
+      if (accountRes.error) return unknown('客户广告账户归属无法核实')
       const accountRows = (accountRes.data ?? []) as unknown[]
       if (!Array.isArray(accountRows) || accountRows.some(row => {
         const value = record(row)
         return !value || typeof value.client_id !== 'string' || typeof value.ad_account_id !== 'string'
-      })) return unknownOutcome(windowStart, windowEnd, '客户广告账户归属无法核实')
+      })) return unknown('客户广告账户归属无法核实')
       const mappedAccounts = accountRows.map(row => row as { client_id: string; ad_account_id: string })
-      if (mappedAccounts.some(row => row.client_id !== clientId)) return unknownOutcome(windowStart, windowEnd, '客户广告账户归属无法核实')
+      if (mappedAccounts.some(row => row.client_id !== clientId)) return unknown('客户广告账户归属无法核实')
       accountIds = Array.from(new Set(mappedAccounts.map(row => row.ad_account_id)))
-      if (accountIds.length === 0) return unknownOutcome(windowStart, windowEnd, '客户广告账户归属无法核实')
+      if (accountIds.length === 0) return unknown('客户广告账户归属无法核实')
 
       const shared = await findSharedAdAccounts(clientId, accountIds)
-      if (shared.error) return unknownOutcome(windowStart, windowEnd, '广告账户存在共享或冲突')
+      if (shared.error) return unknown('广告账户存在共享或冲突')
       sharedAccountIds = shared.shared
 
       const pageRes = await db.from('clients').select('facebook_page_id').eq('id', clientId).maybeSingle()
       if (pageRes.error || typeof pageRes.data?.facebook_page_id !== 'string') {
-        return unknownOutcome(windowStart, windowEnd, '广告不属于已登记的客户主页')
+        return unknown('广告不属于已登记的客户主页')
       }
       clientPageId = pageRes.data.facebook_page_id
 
@@ -475,11 +509,12 @@ export async function loadCompanyConfirmedBookingOutcome(
           .order('entity_id', { ascending: true }).order('captured_at', { ascending: true }).range(from, to)))
       }
       const mappedFacts = rawFacts.map(mapAdFact)
-      if (mappedFacts.some(row => row === null)) return unknownOutcome(windowStart, windowEnd, '广告来源无法唯一核实')
+      if (mappedFacts.some(row => row === null)) return unknown('广告来源无法唯一核实')
       adFacts = mappedFacts as AdFact[]
     }
 
-    return resolveCompanyConfirmedBookings({
+    const adCountsById = new Map<string, AdBookingCount>()
+    const outcome = resolveCompanyConfirmedBookingsWithCounts({
       clientId,
       windowStart,
       windowEnd,
@@ -491,9 +526,109 @@ export async function loadCompanyConfirmedBookingOutcome(
       sharedAccountIds,
       adFacts,
       clientPageId,
-    })
+    }, adCountsById)
+    return { outcome, adCountsById: outcome.value === null ? null : adCountsById }
   } catch {
     // Do not leak DB error text or mistake a failed/partial read for a zero.
-    return unknownOutcome(windowStart, windowEnd, '读取 CRM 或广告事实失败')
+    return unknown('读取 CRM 或广告事实失败')
+  }
+}
+
+/** Load a complete, tenant-scoped and audit-backed booking result for one report window. */
+export async function loadCompanyConfirmedBookingOutcome(
+  clientId: string,
+  windowStart: string,
+  windowEnd: string,
+  db: SupabaseClient = supabaseAdmin,
+): Promise<CompanyConfirmedBookingOutcome> {
+  return (await loadCompanyConfirmedBookingOutcomeWithAdCounts(clientId, windowStart, windowEnd, db)).outcome
+}
+
+/**
+ * Build a human-only CRM reference for the existing promotion draft. Counts are
+ * exposed only after the same booking audit, first-touch, account and page checks
+ * used by Ads Health, followed by exact ad_creative_links lookup. No raw CRM rows
+ * or ad IDs leave this server-side adapter, and the caller must separately pass
+ * the CRM booking permission gate.
+ */
+export async function loadCompanyConfirmedBookingCreativeReference(args: {
+  clientId: string
+  adAccountId: string
+  windowStart: string
+  windowEnd: string
+  approvedCreatives: readonly { ref: string; kind: 'meta_video' | 'work_order' }[]
+  db?: SupabaseClient
+}): Promise<CreativeOutcomeReference> {
+  const unknown = (note: string): CreativeOutcomeReference => ({
+    status: 'unknown',
+    window_start: args.windowStart,
+    window_end: args.windowEnd,
+    bookings_by_creative_ref: {},
+    note: `${note}；已批准不代表已投放或测试，不据此判断素材效果。`,
+  })
+  const loaded = await loadCompanyConfirmedBookingOutcomeWithAdCounts(args.clientId, args.windowStart, args.windowEnd, args.db ?? supabaseAdmin)
+  if (loaded.outcome.value === null || loaded.adCountsById === null) {
+    return unknown(loaded.outcome.note ?? '公司确认预订结果未能完整核实')
+  }
+
+  const selectedAccountRows = Array.from(loaded.adCountsById.entries())
+    .filter(([, value]) => value.ad_account_id === args.adAccountId)
+  if (selectedAccountRows.length === 0) {
+    return unknown('该广告账户在此窗口没有可用于素材参考的已核验预订记录')
+  }
+
+  const links = await lookupCreativeLinksByAdIds(args.clientId, selectedAccountRows.map(([adId]) => adId))
+  if (links === null) return unknown('广告与素材对应关系读取不完整')
+
+  const expectedAdIds = new Set(selectedAccountRows.map(([adId]) => adId))
+  const byAdId = new Map<string, { creativeRef: string | null; creativeSource: string | null }>()
+  let incompleteMapping = false
+  for (const link of links) {
+    if (link.clientId !== args.clientId || link.platform !== 'meta' || !expectedAdIds.has(link.adId)) {
+      return unknown('广告素材对应关系存在客户或来源冲突')
+    }
+    if (byAdId.has(link.adId)) {
+      incompleteMapping = true
+      byAdId.delete(link.adId)
+      continue
+    }
+    byAdId.set(link.adId, { creativeRef: link.creativeRef, creativeSource: link.creativeSource })
+  }
+
+  const approvedWorkOrders = new Set(args.approvedCreatives
+    .filter(item => item.kind === 'work_order')
+    .map(item => item.ref))
+  const approvedAllWorkOrders = args.approvedCreatives.length > 0 && approvedWorkOrders.size === args.approvedCreatives.length
+  const counts: Record<string, number> = {}
+  for (const [adId, adCount] of selectedAccountRows) {
+    const link = byAdId.get(adId)
+    if (!link || link.creativeSource !== 'content_work_order' || !link.creativeRef) {
+      incompleteMapping = true
+      continue
+    }
+    if (!approvedWorkOrders.has(link.creativeRef)) {
+      incompleteMapping = true
+      continue
+    }
+    counts[link.creativeRef] = (counts[link.creativeRef] ?? 0) + adCount.count
+  }
+
+  if (byAdId.size !== expectedAdIds.size || Array.from(expectedAdIds).some(id => !byAdId.has(id))) {
+    incompleteMapping = true
+  }
+  const allApprovedRefsHaveEvidence = approvedAllWorkOrders &&
+    args.approvedCreatives.every(item => (counts[item.ref] ?? 0) > 0)
+  const complete = !incompleteMapping && allApprovedRefsHaveEvidence
+  const hasEvidence = Object.keys(counts).length > 0
+  return {
+    status: complete ? 'complete' : hasEvidence ? 'partial' : 'unknown',
+    window_start: args.windowStart,
+    window_end: args.windowEnd,
+    bookings_by_creative_ref: counts,
+    note: complete
+      ? '映射覆盖完整，但这里是预订笔数参考；已批准不代表已投放或测试，未校正花费、平台结果或频次，不能比较素材效率/优劣。'
+      : hasEvidence
+        ? '映射覆盖不完整，未匹配素材不是零；已批准不代表已投放或测试，缺少可比花费、平台结果或频次，不据此判断素材效果，保持原排序。'
+        : '映射或预订覆盖不足；已批准不代表已投放或测试，缺少可比花费、平台结果或频次，不据此判断素材效果，保持原排序。',
   }
 }

@@ -16,7 +16,8 @@ import { accountDayKey } from './account-timezone'
 import { latestSnapshotsAsOf } from './portfolio/diagnostics/loader'
 import { D4_AUDIENCE_FLOOR } from './portfolio/diagnostics/thresholds'
 import { computeLaunchHeadroom } from './launch-budget-headroom'
-import { DELIVERING_STATUSES } from './portfolio/diagnostics/context'
+import { DELIVERING_STATUSES, shiftDate } from './portfolio/diagnostics/context'
+import { loadCompanyConfirmedBookingCreativeReference } from './portfolio/company-confirmed-bookings'
 import type { EntitySnapshotRow } from './portfolio/snapshot'
 import type { AdsDraftFacts, HeadroomFact, DailySpendFact, AudiencePoolItem } from '@/lib/marketing-plan/promo/draft-ads'
 import type { PromoPlaybook } from '@/lib/marketing-plan/promo/playbooks'
@@ -388,6 +389,8 @@ export async function loadAdsDraftFacts(args: {
   committedAllMinor?: number
   playbook: PromoPlaybook
   now?: Date
+  /** Set only after the route's existing CRM booking permission check succeeds. */
+  companyConfirmedBookingsAllowed?: boolean
 }): Promise<AdsDraftFacts> {
   const now = args.now ?? new Date()
   const { clientId, adAccountId } = args
@@ -462,7 +465,7 @@ export async function loadAdsDraftFacts(args: {
     }
   }
 
-  return buildAdsDraftFacts({
+  const facts = buildAdsDraftFacts({
     now,
     config,
     account_cap_minor,
@@ -479,4 +482,30 @@ export async function loadAdsDraftFacts(args: {
     min_audience_size: D4_AUDIENCE_FLOOR,
     max_creatives: args.playbook.draftMaxCreatives,
   })
+
+  if (args.companyConfirmedBookingsAllowed === true && loaded.source !== 'fallback' && config !== null) {
+    try {
+      const approvedCreatives = loaded.config.creative_pool
+        .filter(entry => entry.status === 'approved')
+        .map(entry => ({ ref: entry.ref, kind: entry.kind }))
+      facts.creative_outcome_reference = await loadCompanyConfirmedBookingCreativeReference({
+        clientId,
+        adAccountId,
+        windowStart: shiftDate(facts.today, -6),
+        windowEnd: facts.today,
+        approvedCreatives,
+      })
+    } catch {
+      const windowStart = shiftDate(facts.today, -6)
+      facts.creative_outcome_reference = {
+        status: 'unknown',
+        window_start: windowStart,
+        window_end: facts.today,
+        bookings_by_creative_ref: {},
+        note: 'CRM 结果或素材映射读取不完整；未把未知素材当零，也未据此判断素材效果。原素材库顺序保持不变。',
+      }
+    }
+  }
+
+  return facts
 }

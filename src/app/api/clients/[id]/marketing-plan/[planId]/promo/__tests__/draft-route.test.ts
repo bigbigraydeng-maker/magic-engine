@@ -7,6 +7,7 @@ import { NextRequest } from 'next/server'
 
 const m = vi.hoisted(() => ({
   approver: vi.fn(),
+  bookingAccess: vi.fn(),
   owned: vi.fn(),
   facts: vi.fn(),
   plan: null as Record<string, unknown> | null,
@@ -15,6 +16,7 @@ const m = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({ requirePlanApproverAccess: m.approver }))
+vi.mock('@/lib/crm/booking-access', () => ({ requireBookingAccess: m.bookingAccess }))
 vi.mock('@/lib/marketing-plan/promo/facts', () => ({ loadOwnedAccounts: m.owned }))
 vi.mock('@/lib/ads-strategy/promo-draft-facts', () => ({ loadAdsDraftFacts: m.facts }))
 vi.mock('@/lib/supabase', () => {
@@ -61,6 +63,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.writes = []
   m.approver.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
+  m.bookingAccess.mockResolvedValue({ ok: true, role: 'me_admin' })
   m.owned.mockResolvedValue([{ id: 'act_1', cap: null }])
   m.facts.mockResolvedValue(draftFacts())
   m.plan = { id: 'plan-1', status: 'draft', client_id: 'client-1', plan_data: {} }
@@ -127,8 +130,18 @@ describe('POST promo/draft — 广告起草（只读）', () => {
       expect(json.draft).toHaveProperty(key)
     }
     expect(m.writes).toHaveLength(0)
+    expect(m.bookingAccess).toHaveBeenCalledWith(P.id, 'view')
+    expect(m.facts).toHaveBeenCalledWith(expect.objectContaining({ companyConfirmedBookingsAllowed: true }))
     // 同账户的占用扣账户上限，所有账户的占用都扣客户总上限
     expect(m.facts).toHaveBeenCalledWith(expect.objectContaining({ committedMinor: 5000, committedAllMinor: 5700 }))
+  })
+
+  it('CRM 预订权限无法确认时仍返回原草稿路径，不加载 CRM 依据', async () => {
+    m.bookingAccess.mockResolvedValue({ ok: false, response: new Response(null, { status: 403 }) })
+    const res = await POST(req({ ad_account_id: 'act_1' }), { params: P })
+    expect(res.status).toBe(200)
+    expect(m.facts).toHaveBeenCalledWith(expect.objectContaining({ companyConfirmedBookingsAllowed: false }))
+    expect(m.writes).toHaveLength(0)
   })
 
   it('loadAdsDraftFacts 抛错 → 500', async () => {

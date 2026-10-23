@@ -262,6 +262,47 @@ describe('draftAdsStep 素材', () => {
       expect(draft.creative_refs.value).toEqual(['c1', 'c2', 'c3'])
     }
   })
+
+  it('公司确认预订只作为人工参考展示，不按原始笔数重排素材', () => {
+    const f = baseFacts()
+    f.approved_creatives = ['wo-lower-count', 'wo-higher-count']
+    f.max_creatives = 1
+    f.creative_outcome_reference = {
+      status: 'complete',
+      window_start: '2026-10-16',
+      window_end: '2026-10-22',
+      bookings_by_creative_ref: { 'wo-lower-count': 1, 'wo-higher-count': 3 },
+      note: '未校正花费、平台结果或频次，不能比较素材效率/优劣。',
+    }
+    const draft = draftAdsStep(f)
+    expect(draft.creative_refs.ok).toBe(true)
+    if (draft.creative_refs.ok) {
+      expect(draft.creative_refs.value).toEqual(['wo-lower-count'])
+      const reference = draft.creative_refs.basis.find(item => item.label === '公司确认预订（人工参考）')
+      expect(reference?.value).toContain('wo-lower-count：1 笔')
+      expect(reference?.value).toContain('wo-higher-count：3 笔')
+      expect(reference?.value).toContain('原素材库顺序保持不变')
+      expect(reference?.value).toContain('不能比较素材效率/优劣')
+    }
+  })
+
+  it('部分覆盖明确不把未映射素材当零，且保持原顺序', () => {
+    const f = baseFacts()
+    f.approved_creatives = ['wo-known', 'wo-unmapped']
+    f.creative_outcome_reference = {
+      status: 'partial',
+      window_start: '2026-10-16',
+      window_end: '2026-10-22',
+      bookings_by_creative_ref: { 'wo-known': 2 },
+      note: '映射覆盖不完整，未匹配素材不是零；保持原排序。',
+    }
+    const draft = draftAdsStep(f)
+    expect(draft.creative_refs.ok).toBe(true)
+    if (draft.creative_refs.ok) {
+      expect(draft.creative_refs.value).toEqual(['wo-known', 'wo-unmapped'])
+      expect(draft.creative_refs.basis.find(item => item.label === '公司确认预订（人工参考）')?.value).toContain('未匹配素材不是零')
+    }
+  })
 })
 
 describe('draftAdsStep 通用约束', () => {

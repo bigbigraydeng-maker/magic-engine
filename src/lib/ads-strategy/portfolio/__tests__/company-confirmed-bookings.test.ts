@@ -1,14 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-const mocks = vi.hoisted(() => ({ sharedAccounts: new Set<string>() }))
+const mocks = vi.hoisted(() => ({
+  sharedAccounts: new Set<string>(),
+  creativeLinks: null as null | Array<{ clientId: string; platform: 'meta'; adId: string; creativeRef: string | null; creativeSource: string | null }>,
+}))
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
   findSharedAdAccounts: async (_clientId: string, accountIds: string[]) => ({
     shared: new Set(accountIds.map(id => id.replace(/^act_/, '')).filter(id => mocks.sharedAccounts.has(id))),
   }),
 }))
+vi.mock('@/lib/ads/creative-link', () => ({ lookupCreativeLinksByAdIds: async () => mocks.creativeLinks }))
 
-import { loadCompanyConfirmedBookingOutcome, resolveCompanyConfirmedBookings, type ResolveCompanyConfirmedBookingsInput } from '../company-confirmed-bookings'
+import { loadCompanyConfirmedBookingCreativeReference, loadCompanyConfirmedBookingOutcome, resolveCompanyConfirmedBookings, type ResolveCompanyConfirmedBookingsInput } from '../company-confirmed-bookings'
 
 const CLIENT = 'client-a'
 const OTHER = 'client-b'
@@ -98,7 +102,10 @@ function loaderTables() {
   }
 }
 
-beforeEach(() => mocks.sharedAccounts.clear())
+beforeEach(() => {
+  mocks.sharedAccounts.clear()
+  mocks.creativeLinks = null
+})
 
 describe('CRM company-confirmed bookings → Ads Health result', () => {
   it('counts a traceable first-touch booking once, even if the booking row repeats', () => {
@@ -180,8 +187,84 @@ describe('CRM company-confirmed bookings → Ads Health result', () => {
     expect(result).toMatchObject({ value: 1, attribution: 'crm_first_touch', window_start: START, window_end: END })
   })
 
+  it('exposes per-creative human context only through complete audit, first-touch, account, and exact-link proof', async () => {
+    const secondBooking = { ...booking, id: 'booking-2', contact_id: 'contact-2' }
+    const secondEvent = { ...event, booking_id: 'booking-2' }
+    const secondContact = { ...contact, id: 'contact-2', attr_ad_id: 'ad-2' }
+    const secondTouchpoint = { ...touchpoint, id: 'touch-2', contact_id: 'contact-2', attr_ad_id: 'ad-2' }
+    const tables = loaderTables() as Record<string, unknown[]>
+    tables.crm_bookings.push(secondBooking)
+    tables.crm_booking_events.push(secondEvent)
+    tables.contacts.push(secondContact)
+    tables.contact_touchpoints.push(secondTouchpoint)
+    tables.ad_entity_snapshots.push({ client_id: CLIENT, ad_account_id: 'act-1', level: 'ad', entity_id: 'ad-2', creative_page_id: 'page-1' })
+    mocks.creativeLinks = [
+      { clientId: CLIENT, platform: 'meta', adId: 'ad-1', creativeRef: 'wo-1', creativeSource: 'content_work_order' },
+      { clientId: CLIENT, platform: 'meta', adId: 'ad-2', creativeRef: 'wo-2', creativeSource: 'content_work_order' },
+    ]
+
+    const reference = await loadCompanyConfirmedBookingCreativeReference({
+      clientId: CLIENT,
+      adAccountId: 'act-1',
+      windowStart: START,
+      windowEnd: END,
+      approvedCreatives: [{ ref: 'wo-1', kind: 'work_order' }, { ref: 'wo-2', kind: 'work_order' }],
+      db: fakeDb(tables),
+    })
+
+    expect(reference).toMatchObject({ status: 'complete', bookings_by_creative_ref: { 'wo-1': 1, 'wo-2': 1 }, window_start: START, window_end: END })
+    expect(reference.note).toContain('未校正花费、平台结果或频次')
+    expect(JSON.stringify(reference)).not.toContain('booking-1')
+    expect(JSON.stringify(reference)).not.toContain('contact-1')
+  })
+
+  it('keeps unresolved, non-work-order, or unapproved links partial and never fabricates a zero', async () => {
+    mocks.creativeLinks = [
+      { clientId: CLIENT, platform: 'meta', adId: 'ad-1', creativeRef: 'wo-1', creativeSource: 'content_work_order' },
+    ]
+    const reference = await loadCompanyConfirmedBookingCreativeReference({
+      clientId: CLIENT,
+      adAccountId: 'act-1',
+      windowStart: START,
+      windowEnd: END,
+      approvedCreatives: [{ ref: 'wo-1', kind: 'work_order' }, { ref: 'video-1', kind: 'meta_video' }],
+      db: fakeDb(loaderTables()),
+    })
+    expect(reference.status).toBe('partial')
+    expect(reference.bookings_by_creative_ref).toEqual({ 'wo-1': 1 })
+    expect(reference.note).toContain('不据此判断素材效果')
+  })
+
+  it('duplicate ad-to-creative rows and a different selected account never become a creative result', async () => {
+    mocks.creativeLinks = [
+      { clientId: CLIENT, platform: 'meta', adId: 'ad-1', creativeRef: 'wo-1', creativeSource: 'content_work_order' },
+      { clientId: CLIENT, platform: 'meta', adId: 'ad-1', creativeRef: 'wo-2', creativeSource: 'content_work_order' },
+    ]
+    const conflict = await loadCompanyConfirmedBookingCreativeReference({
+      clientId: CLIENT,
+      adAccountId: 'act-1',
+      windowStart: START,
+      windowEnd: END,
+      approvedCreatives: [{ ref: 'wo-1', kind: 'work_order' }, { ref: 'wo-2', kind: 'work_order' }],
+      db: fakeDb(loaderTables()),
+    })
+    expect(conflict.status).toBe('unknown')
+    expect(conflict.bookings_by_creative_ref).toEqual({})
+
+    const otherAccount = await loadCompanyConfirmedBookingCreativeReference({
+      clientId: CLIENT,
+      adAccountId: 'act-other',
+      windowStart: START,
+      windowEnd: END,
+      approvedCreatives: [{ ref: 'wo-1', kind: 'work_order' }],
+      db: fakeDb(loaderTables()),
+    })
+    expect(otherAccount.status).toBe('unknown')
+    expect(otherAccount.bookings_by_creative_ref).toEqual({})
+  })
+
   it('loads the raw first touch before excluding a reliable non-Meta booking', async () => {
-    const tables = loaderTables()
+    const tables = loaderTables() as Record<string, unknown[]>
     tables.contacts = [{ ...contact, attr_platform: 'google', attr_ad_id: 'google-ad-1' }]
     tables.contact_touchpoints = [{ ...touchpoint, attr_platform: 'google', attr_ad_id: 'google-ad-1' }]
     const result = await loadCompanyConfirmedBookingOutcome(CLIENT, START, END, fakeDb(tables))
