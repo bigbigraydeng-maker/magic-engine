@@ -244,6 +244,7 @@ describe('factory clip catalog authorization and client scope', () => {
         license_review_note: serializeLicenseReviewEvidence({ summary: 'Official licence terms allow commercial online publication and edited adaptations.', permittedScopes: [...REQUIRED_LICENSE_SCOPES], sourceUrl: 'https://example.test/video', licenseUrl: 'https://example.test/license', assetSha256: sha256, basis: 'license_page' }),
         license_reviewed_by: 'other-admin@example.test',
         license_reviewed_by_user_id: 'admin-2',
+        reviewed_by_user_id: 'admin-3',
       },
       error: null,
     })
@@ -263,5 +264,47 @@ describe('factory clip catalog authorization and client scope', () => {
     expect(updateQuery.eq).toHaveBeenCalledWith('status', 'pending_review')
     expect(updateQuery.eq).toHaveBeenCalledWith('license_status', 'verified')
     expect(updateQuery.eq).toHaveBeenCalledWith('sha256', sha256)
+  })
+
+  it('uses the current admin as the prospective final reviewer before the CAS writes that identity', async () => {
+    const sha256 = 'c'.repeat(64)
+    const clipQuery = chainQuery({
+      data: {
+        track: 'a_real',
+        scene_tag: 'chongqing_street',
+        motion_type: 'walking',
+        tags: ['chongqing'],
+        source_author: 'Source author',
+        source_url: 'https://example.test/video',
+        license_name: 'CC BY 4.0',
+        license_url: 'https://example.test/license',
+        duration_seconds: 5,
+        media_type: 'video',
+        sha256,
+        license_status: 'verified',
+        license_review_note: serializeLicenseReviewEvidence({ summary: 'Official licence terms allow commercial online publication and edited adaptations.', permittedScopes: [...REQUIRED_LICENSE_SCOPES], sourceUrl: 'https://example.test/video', licenseUrl: 'https://example.test/license', assetSha256: sha256, basis: 'license_page' }),
+        license_reviewed_by: 'licence-admin@example.test',
+        license_reviewed_by_user_id: 'admin-2',
+        reviewed_by_user_id: null,
+      },
+      error: null,
+    })
+    const clientQuery = chainQuery({ data: { factory_config: {} }, error: null })
+    const updateQuery = chainQuery({ data: null, error: null })
+    mocks.from
+      .mockReturnValueOnce(clipQuery)
+      .mockReturnValueOnce(clientQuery)
+      .mockReturnValueOnce(updateQuery)
+
+    const response = await reviewClip(
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/review`, { decision: 'approve' }),
+      context,
+    )
+
+    // The request reached the compare-and-set stage (409), rather than being
+    // incorrectly blocked because reviewed_by_user_id is null before approval.
+    expect(response.status).toBe(409)
+    expect(updateQuery.update).toHaveBeenCalledWith(expect.objectContaining({ reviewed_by_user_id: 'admin-1', status: 'active' }))
+    expect(updateQuery.eq).toHaveBeenCalledWith('license_reviewed_by_user_id', 'admin-2')
   })
 })
