@@ -11,10 +11,12 @@ ALTER TABLE public.video_clips
   ADD COLUMN IF NOT EXISTS license_url text,
   ADD COLUMN IF NOT EXISTS license_status text NOT NULL DEFAULT 'unknown',
   ADD COLUMN IF NOT EXISTS license_reviewed_by text,
+  ADD COLUMN IF NOT EXISTS license_reviewed_by_user_id uuid,
   ADD COLUMN IF NOT EXISTS license_reviewed_at timestamptz,
   ADD COLUMN IF NOT EXISTS license_review_note text,
   ADD COLUMN IF NOT EXISTS sha256 text,
   ADD COLUMN IF NOT EXISTS reviewed_by text,
+  ADD COLUMN IF NOT EXISTS reviewed_by_user_id uuid,
   ADD COLUMN IF NOT EXISTS reviewed_at timestamptz,
   ADD COLUMN IF NOT EXISTS review_note text;
 
