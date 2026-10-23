@@ -159,11 +159,12 @@ describe('factory clip catalog authorization and client scope', () => {
     )
 
     expect(response.status).toBe(200)
-    const saved = updateQuery.update.mock.calls[0]?.[0] as { license_review_note: string }
+    const saved = updateQuery.update.mock.calls[0]?.[0] as { license_review_note: string; license_reviewed_by_user_id: string }
     expect(saved.license_review_note).toContain(note)
     expect(saved.license_review_note).toContain('commercial_use')
     expect(saved.license_review_note).toContain('online_distribution')
     expect(saved.license_review_note).toContain(sha256)
+    expect(saved).toMatchObject({ license_reviewed_by_user_id: 'admin-1' })
   })
 
   it('does not verify licence evidence if source metadata changed concurrently', async () => {
@@ -213,7 +214,8 @@ describe('factory clip catalog authorization and client scope', () => {
   })
 
   it('requires a different admin to activate a clip than the one who recorded the licence attestation', async () => {
-    const clipQuery = chainQuery({ data: { license_reviewed_by: 'admin@example.test' }, error: null })
+    mocks.access.mockResolvedValue({ ok: true, tier: 'admin', user: { id: 'admin-1', email: 'new-admin-email@example.test' } })
+    const clipQuery = chainQuery({ data: { license_reviewed_by_user_id: 'admin-1' }, error: null })
     mocks.from.mockReturnValue(clipQuery)
     const response = await reviewClip(
       jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/review`, { decision: 'approve' }),
@@ -241,6 +243,7 @@ describe('factory clip catalog authorization and client scope', () => {
         license_status: 'verified',
         license_review_note: serializeLicenseReviewEvidence({ summary: 'Official licence terms allow commercial online publication and edited adaptations.', permittedScopes: [...REQUIRED_LICENSE_SCOPES], sourceUrl: 'https://example.test/video', licenseUrl: 'https://example.test/license', assetSha256: sha256, basis: 'license_page' }),
         license_reviewed_by: 'other-admin@example.test',
+        license_reviewed_by_user_id: 'admin-2',
       },
       error: null,
     })
