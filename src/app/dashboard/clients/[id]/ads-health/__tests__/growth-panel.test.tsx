@@ -64,7 +64,10 @@ describe('GrowthPanel — O1 budget follow-up', () => {
         id: 'simulated-run-cts-tours',
         status: 'succeeded',
         input: { adset_id: 'simulated-adset-cts' },
-        evidence: { date: '2026-10-01', current_daily_budget_cents: 5000, proposed_daily_budget_cents: 6000, currency: 'USD' },
+        evidence: {
+          date: '2026-10-01', current_daily_budget_cents: 5000, proposed_daily_budget_cents: 6000, currency: 'USD',
+          o1: { ctr_by_day: '0.03|0.04|0.035', median_by_day: '0.02|0.02|0.02' },
+        },
         rationale: 'O1 连续三天点击率高于账户中位数；先人工批准后调整。',
         authorization_decision_id: 'simulated-decision',
         approval: { verdict: 'allow', decided_by: 'human', decided_at: '2026-10-01T12:00:00.000Z' },
@@ -91,16 +94,14 @@ describe('GrowthPanel — O1 budget follow-up', () => {
       goal_pace: null,
       payload: {
         goal: { title: 'CTS Tours 旅行获客（模拟）', label: '线索', target: 100, dayIndex: 1, totalDays: 30 },
-        opportunities: [{
-          code: 'O1', status: 'hit' as const, title: '模拟 CTS Tours 广告组连续三天 CTR 高于账户中位数。',
-          units: [{ id: 'simulated-adset-cts', name: '模拟旅行获客广告组' }],
-          evidence: { ctr_by_day: '0.03|0.04|0.035', median_by_day: '0.02|0.02|0.02' },
-        }],
+        opportunities: [],
       },
     }
     render(<GrowthPanel state={state} clientId="simulated-cts-tours" />)
 
     await waitFor(() => expect(screen.getByText(/目标 KPI：CTS Tours 新增线索/)).toBeTruthy())
+    expect(screen.getByText('O1 预算调整记录')).toBeTruthy()
+    expect(screen.getByText(/调整前 O1 信号 · CTR 0.03 \/ 0.04 \/ 0.035/)).toBeTruthy()
     expect(screen.getByText(/负责人已批准/)).toBeTruthy()
     expect(screen.getByText(/Meta 回读 已核实 USD 60.00/)).toBeTruthy()
     expect(screen.getByText(/结论：保留本次预算/)).toBeTruthy()
