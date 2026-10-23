@@ -22,6 +22,16 @@ export interface AdsDraft {
   warnings: string[]
 }
 
+/** Verified CRM outcome counts kept as human context only; never an efficiency score. */
+export interface CreativeOutcomeReference {
+  status: 'complete' | 'partial' | 'unknown'
+  window_start: string
+  window_end: string
+  /** Only exact, verified approved work-order mappings are present; missing refs are not zero. */
+  bookings_by_creative_ref: Readonly<Record<string, number>>
+  note: string
+}
+
 export interface DailySpendFact {
   date: string
   spend_cents: number
@@ -74,6 +84,8 @@ export interface AdsDraftFacts {
   audiences_complete: boolean | null
   /** 已批准素材 ref；null = 读不到 */
   approved_creatives: string[] | null
+  /** CRM evidence is shown as context; draft ordering always remains the approved-pool order. */
+  creative_outcome_reference?: CreativeOutcomeReference
   /** 剧本参数 */
   budget_share_of_headroom: number
   min_audience_size: number
@@ -393,6 +405,19 @@ function draftCreatives(f: AdsDraftFacts): Suggestion<string[]> {
       as_of: null,
     },
   ]
+  const outcome = f.creative_outcome_reference
+  if (outcome) {
+    const refs = Object.entries(outcome.bookings_by_creative_ref)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([ref, count]) => `${ref}：${count} 笔`)
+    const evidence = refs.length > 0 ? `已核验公司确认预订（${refs.join('；')}）` : '没有可用于素材参考的已核验公司确认预订'
+    basis.push({
+      label: '公司确认预订（人工参考）',
+      value: `${evidence}，窗口 ${outcome.window_start} 至 ${outcome.window_end}。${outcome.note} 原素材库顺序保持不变。`,
+      source: 'CRM 审计 / 首触 / 广告素材精确映射',
+      as_of: outcome.window_end,
+    })
+  }
   return { ok: true, value: taken, basis: basis as [Basis, ...Basis[]] }
 }
 

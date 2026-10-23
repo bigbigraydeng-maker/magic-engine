@@ -18,6 +18,7 @@ import {
   AD_CREATION_PATHS,
   decideCreativeLink,
   linkAdToCreative,
+  lookupCreativeLinksByAdIds,
   lookupCreativeRefByAdId,
   normalisePostId,
   type CreativeCandidate,
@@ -34,6 +35,7 @@ const candidate = (creativeRef: string, postId: string): CreativeCandidate => ({
 // ── DB 替身 ──────────────────────────────────────────────────────────────────
 let linkUpserts: Record<string, unknown>[]
 let upsertOptions: Record<string, unknown>[]
+let linkBatchFilters: Array<{ kind: string; column: string; value: unknown }>
 
 interface MockDbOptions {
   /** content_work_orders 里已发布的行(published_ref.post_id)。 */
@@ -45,11 +47,14 @@ interface MockDbOptions {
   /** lookupCreativeRefByAdId 读到的行。 */
   linkRow?: { creative_ref: unknown } | null
   lookupError?: string
+  batchRows?: unknown[]
+  batchError?: string
 }
 
 function mockDb(opts: MockDbOptions = {}) {
   linkUpserts = []
   upsertOptions = []
+  linkBatchFilters = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     if (table === 'content_work_orders') {
       return {
@@ -74,20 +79,23 @@ function mockDb(opts: MockDbOptions = {}) {
             error: opts.upsertError ? { message: opts.upsertError } : null,
           })
         },
-        select: () => ({
-          eq: () => ({
-            eq: () => ({
-              eq: () => ({
-                maybeSingle: () =>
-                  Promise.resolve(
-                    opts.lookupError
-                      ? { data: null, error: { message: opts.lookupError } }
-                      : { data: opts.linkRow ?? null, error: null },
-                  ),
-              }),
-            }),
-          }),
-        }),
+        select: () => {
+          const query = {
+            eq: (column: string, value: unknown) => { linkBatchFilters.push({ kind: 'eq', column, value }); return query },
+            in: (column: string, value: unknown[]) => { linkBatchFilters.push({ kind: 'in', column, value }); return query },
+            maybeSingle: () => Promise.resolve(
+              opts.lookupError
+                ? { data: null, error: { message: opts.lookupError } }
+                : { data: opts.linkRow ?? null, error: null },
+            ),
+            then: (resolve: (value: unknown) => unknown) => Promise.resolve(
+              opts.batchError
+                ? { data: null, error: { message: opts.batchError } }
+                : { data: opts.batchRows ?? [], error: null },
+            ).then(resolve),
+          }
+          return query
+        },
       }
     }
     throw new Error(`unexpected table ${table}`)
@@ -335,6 +343,27 @@ describe('lookupCreativeRefByAdId', () => {
     mockDb({ lookupError: 'timeout' })
     expect(await lookupCreativeRefByAdId(CLIENT, 'ad-777')).toBeNull()
     expect(console.error).toHaveBeenCalled()
+  })
+})
+
+describe('lookupCreativeLinksByAdIds', () => {
+  it('reads exact tenant, platform, and requested ad ids in one batch', async () => {
+    mockDb({ batchRows: [{ client_id: CLIENT, platform: 'meta', ad_id: 'ad-777', creative_ref: 'wo-1', creative_source: 'content_work_order' }] })
+    expect(await lookupCreativeLinksByAdIds(CLIENT, ['ad-777', 'ad-777'])).toEqual([
+      { clientId: CLIENT, platform: 'meta', adId: 'ad-777', creativeRef: 'wo-1', creativeSource: 'content_work_order' },
+    ])
+    expect(linkBatchFilters).toEqual([
+      { kind: 'eq', column: 'client_id', value: CLIENT },
+      { kind: 'eq', column: 'platform', value: 'meta' },
+      { kind: 'in', column: 'ad_id', value: ['ad-777'] },
+    ])
+  })
+
+  it('returns unknown on query errors or malformed identity rows', async () => {
+    mockDb({ batchError: 'offline' })
+    expect(await lookupCreativeLinksByAdIds(CLIENT, ['ad-777'])).toBeNull()
+    mockDb({ batchRows: [{ client_id: 'other', platform: 'meta', ad_id: 'ad-777', creative_ref: 'wo-1', creative_source: 'content_work_order' }] })
+    expect(await lookupCreativeLinksByAdIds(CLIENT, ['ad-777'])).toBeNull()
   })
 })
 

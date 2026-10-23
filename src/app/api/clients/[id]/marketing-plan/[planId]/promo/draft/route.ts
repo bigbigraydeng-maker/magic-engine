@@ -19,6 +19,7 @@ import { loadOwnedAccounts } from '@/lib/marketing-plan/promo/facts'
 import { resolvePromoPlaybook } from '@/lib/marketing-plan/promo/playbooks'
 import { loadAdsDraftFacts } from '@/lib/ads-strategy/promo-draft-facts'
 import { draftAdsStep } from '@/lib/marketing-plan/promo/draft-ads'
+import { requireBookingAccess } from '@/lib/crm/booking-access'
 
 export async function POST(req: NextRequest, { params }: { params: { id: string; planId: string } }) {
   const access = await requirePlanApproverAccess(params.id)
@@ -85,12 +86,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
     }
     const playbook = resolvePromoPlaybook(industry)
 
+    // CRM-derived creative context is loaded only for users already allowed to
+    // view this client's booking tracker. A denied check leaves the original
+    // approved-pool order and the rest of the draft untouched.
+    let companyConfirmedBookingsAllowed = false
+    try {
+      companyConfirmedBookingsAllowed = (await requireBookingAccess(params.id, 'view')).ok
+    } catch {
+      companyConfirmedBookingsAllowed = false
+    }
+
     const facts = await loadAdsDraftFacts({
       clientId: params.id,
       adAccountId,
       committedMinor,
       committedAllMinor,
       playbook,
+      companyConfirmedBookingsAllowed,
     })
     const draft = draftAdsStep(facts)
 

@@ -291,3 +291,51 @@ export async function lookupCreativeRefByAdId(
     return null
   }
 }
+
+export interface CreativeLinkLookupRow {
+  clientId: string
+  platform: 'meta'
+  adId: string
+  creativeRef: string | null
+  creativeSource: string | null
+}
+
+/** Batch exact lookup for verified outcome consumers; a failed read returns null. */
+export async function lookupCreativeLinksByAdIds(
+  clientId: string,
+  adIds: readonly string[],
+): Promise<CreativeLinkLookupRow[] | null> {
+  const uniqueAdIds = Array.from(new Set(adIds))
+  if (uniqueAdIds.length === 0) return []
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('ad_creative_links')
+      .select('client_id, platform, ad_id, creative_ref, creative_source')
+      .eq('client_id', clientId)
+      .eq('platform', 'meta')
+      .in('ad_id', uniqueAdIds)
+
+    if (error || !Array.isArray(data)) return null
+    const rows: CreativeLinkLookupRow[] = []
+    const requested = new Set(uniqueAdIds)
+    for (const value of data as unknown[]) {
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+      const row = value as Record<string, unknown>
+      if (typeof row.client_id !== 'string' || typeof row.ad_id !== 'string' ||
+        row.platform !== 'meta' ||
+        row.client_id !== clientId || !requested.has(row.ad_id) ||
+        (row.creative_ref !== null && typeof row.creative_ref !== 'string') ||
+        (row.creative_source !== null && typeof row.creative_source !== 'string')) return null
+      rows.push({
+        clientId: row.client_id,
+        platform: 'meta',
+        adId: row.ad_id,
+        creativeRef: row.creative_ref as string | null,
+        creativeSource: row.creative_source as string | null,
+      })
+    }
+    return rows
+  } catch {
+    return null
+  }
+}
