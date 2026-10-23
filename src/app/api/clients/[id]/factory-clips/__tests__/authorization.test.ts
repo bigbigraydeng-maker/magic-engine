@@ -21,6 +21,7 @@ import { GET } from '../route'
 import { PATCH } from '../[clipId]/route'
 import { POST as reviewClip } from '../[clipId]/review/route'
 import { POST as reviewLicense } from '../[clipId]/license-review/route'
+import { REQUIRED_LICENSE_SCOPES, serializeLicenseReviewEvidence } from '@/lib/factory/clip-library'
 
 const CLIENT_ID = 'cts-client'
 const CLIP_ID = 'clip-123'
@@ -117,7 +118,9 @@ describe('factory clip catalog authorization and client scope', () => {
     mocks.from.mockReturnValue(query)
 
     const response = await reviewLicense(
-      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, { status: 'verified' }),
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, {
+        status: 'verified', note: 'Official licence page states the permitted reuse conditions for this uploaded clip.', permittedScopes: [...REQUIRED_LICENSE_SCOPES],
+      }),
       context,
     )
 
@@ -125,6 +128,41 @@ describe('factory clip catalog authorization and client scope', () => {
     expect(query.eq).toHaveBeenCalledWith('client_id', CLIENT_ID)
     expect(query.eq).toHaveBeenCalledWith('id', CLIP_ID)
     expect(query.update).not.toHaveBeenCalled()
+  })
+
+  it('requires a substantive evidence note and all intended reuse scopes before marking a licence verified', async () => {
+    const response = await reviewLicense(
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, {
+        status: 'verified', note: 'Looks fine', permittedScopes: ['commercial_use'],
+      }),
+      context,
+    )
+
+    expect(response.status).toBe(400)
+    expect(mocks.from).not.toHaveBeenCalled()
+  })
+
+  it('records the evidence summary and permitted scopes in the licence audit note', async () => {
+    const clipQuery = chainQuery({
+      data: { id: CLIP_ID, source_author: 'Source author', source_url: 'https://example.test/source', license_name: 'CC BY 4.0', license_url: 'https://example.test/license', license_status: 'unknown', status: 'pending_review', sha256: null },
+      error: null,
+    })
+    const updateQuery = chainQuery({ data: { id: CLIP_ID }, error: null })
+    mocks.from.mockReturnValueOnce(clipQuery).mockReturnValueOnce(updateQuery)
+    const note = 'Official licence terms allow commercial online publication and edited adaptations.'
+
+    const response = await reviewLicense(
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, {
+        status: 'verified', note, permittedScopes: [...REQUIRED_LICENSE_SCOPES],
+      }),
+      context,
+    )
+
+    expect(response.status).toBe(200)
+    const saved = updateQuery.update.mock.calls[0]?.[0] as { license_review_note: string }
+    expect(saved.license_review_note).toContain(note)
+    expect(saved.license_review_note).toContain('commercial_use')
+    expect(saved.license_review_note).toContain('online_distribution')
   })
 
   it('does not verify licence evidence if source metadata changed concurrently', async () => {
@@ -145,7 +183,9 @@ describe('factory clip catalog authorization and client scope', () => {
     mocks.from.mockReturnValueOnce(clipQuery).mockReturnValueOnce(updateQuery)
 
     const response = await reviewLicense(
-      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, { status: 'verified' }),
+      jsonRequest(`http://localhost/api/clients/${CLIENT_ID}/factory-clips/${CLIP_ID}/license-review`, {
+        status: 'verified', note: 'Official licence page states the permitted reuse conditions for this uploaded clip.', permittedScopes: [...REQUIRED_LICENSE_SCOPES],
+      }),
       context,
     )
 
@@ -186,7 +226,7 @@ describe('factory clip catalog authorization and client scope', () => {
         media_type: 'video',
         sha256,
         license_status: 'verified',
-        license_review_note: null,
+        license_review_note: serializeLicenseReviewEvidence('Official licence terms allow commercial online publication and edited adaptations.', [...REQUIRED_LICENSE_SCOPES]),
       },
       error: null,
     })
