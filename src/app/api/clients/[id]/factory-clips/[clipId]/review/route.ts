@@ -24,7 +24,7 @@ export async function POST(req: NextRequest, { params }: Context) {
   if (body.decision === 'reject' && !note) return NextResponse.json({ error: '打回素材请填写原因' }, { status: 400 })
 
   const { data: clip, error: readError } = await supabaseAdmin.from('video_clips')
-    .select('track, scene_tag, motion_type, tags, source_author, source_url, license_name, license_url, duration_seconds, media_type, sha256, license_status, license_review_note, license_reviewed_by, license_reviewed_by_user_id')
+    .select('track, scene_tag, motion_type, tags, source_author, source_url, license_name, license_url, duration_seconds, media_type, sha256, license_status, license_review_note, license_reviewed_by, license_reviewed_by_user_id, reviewed_by_user_id')
     .eq('client_id', clientId).eq('id', clipId).maybeSingle()
   if (readError) return NextResponse.json({ error: '素材库暂不可用，请确认迁移已安装' }, { status: 500 })
   if (!clip) return NextResponse.json({ error: '素材不存在' }, { status: 404 })
@@ -55,6 +55,8 @@ export async function POST(req: NextRequest, { params }: Context) {
       sha256: clip.sha256,
       licenseStatus: clip.license_status as LicenseReviewStatus,
       licenseReviewNote: clip.license_review_note,
+      licenseReviewedByUserId: clip.license_reviewed_by_user_id,
+      reviewedByUserId: clip.reviewed_by_user_id,
     }
     const blocker = activationBlocker(candidate, config.allow_b_track_landmark_ads === true)
     if (blocker) return NextResponse.json({ error: `暂不能激活：${blocker}` }, { status: 400 })
