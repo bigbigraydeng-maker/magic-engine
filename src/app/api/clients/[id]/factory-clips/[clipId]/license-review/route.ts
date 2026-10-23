@@ -71,6 +71,7 @@ export async function POST(req: NextRequest, { params }: Context) {
   let update = supabaseAdmin.from('video_clips').update({
     license_status: status,
     license_reviewed_by: reviewer,
+    license_reviewed_by_user_id: access.user.id,
     license_reviewed_at: new Date().toISOString(),
     license_review_note: evidence,
     status: 'pending_review',
