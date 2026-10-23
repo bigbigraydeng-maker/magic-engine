@@ -30,7 +30,7 @@ import {
   type WinnerRecipe,
 } from './recipe'
 import { FACTORY_CLIP_UNIT_COST_USD, FACTORY_ORDER_BUDGET_CAP_USD } from './constants'
-import { parseLicenseReviewEvidence } from './clip-library'
+import { clipCanEnterFactoryPool, hasCurrentLicenseEvidence } from './clip-library'
 import type { AdCopy, DemandSignal, Decision, GateContext, GoalSlice, VerifiedOffer } from './types'
 import type { MasterBrief } from '@/types/magic-engine'
 
@@ -159,7 +159,7 @@ async function loadContext(
 
   const { data: clips, error: clErr } = await supabaseAdmin
     .from('video_clips')
-    .select('id, scene_tag, tags, motion_type, track, usage_count, last_used_at, storage_url, source_meta, license_status, license_review_note, source_url, license_url, sha256, license_reviewed_by_user_id, reviewed_by_user_id')
+    .select('id, scene_tag, tags, motion_type, track, usage_count, last_used_at, storage_url, source_meta, license_status, license_review_note, source_author, source_url, license_name, license_url, sha256, license_reviewed_by_user_id, reviewed_by_user_id')
     .eq('client_id', signal.client_id)
     .eq('status', 'active')
   if (clErr) throw new Error(`video_clips query failed: ${clErr.message}`)
@@ -173,32 +173,29 @@ async function loadContext(
     ((c.source_meta ?? null) as Record<string, unknown> | null) ?? {}
   const isStill = (c: { source_meta?: unknown }) => meta(c).is_still_image === true
   const allClips = clips ?? []
-  const licenseEvidenceMatches = (c: (typeof allClips)[number]) => {
-    const evidence = parseLicenseReviewEvidence(c.license_review_note)
-    if (!evidence || !c.sha256 || evidence.assetSha256 !== c.sha256 || evidence.sourceUrl !== c.source_url) return false
-    if (evidence.licenseUrl !== c.license_url || !c.license_reviewed_by_user_id || !c.reviewed_by_user_id || c.license_reviewed_by_user_id === c.reviewed_by_user_id) return false
-    if (c.license_status === 'verified') {
-      return evidence.basis === 'license_page'
-        && ['commercial_use', 'modification', 'online_distribution'].every((scope) => evidence.permittedScopes.includes(scope as typeof evidence.permittedScopes[number]))
-    }
-    return c.license_status === 'not_required'
-      && ['client_owned', 'public_domain', 'other_documented'].includes(evidence.basis)
-  }
+  const licenseEvidenceMatches = (c: (typeof allClips)[number]) => hasCurrentLicenseEvidence({
+    licenseStatus: c.license_status,
+    licenseReviewNote: c.license_review_note,
+    sourceAuthor: c.source_author,
+    sourceUrl: c.source_url,
+    licenseName: c.license_name,
+    licenseUrl: c.license_url,
+    sha256: c.sha256,
+    licenseReviewedByUserId: c.license_reviewed_by_user_id,
+    reviewedByUserId: c.reviewed_by_user_id,
+  })
   const clearedTransformedImages = allClips
     .filter((c) => isStill(c) && meta(c).is_ai_transformed === true && licenseEvidenceMatches(c))
     .map((c) => toPublicClipUrl(c.storage_url as string | null))
     .filter((url): url is string => !!url)
   const clearedTransformedImageUrls = new Set(clearedTransformedImages)
-  const videoClips = allClips.filter((c) => {
-    if (isStill(c)) return false
-    if (licenseEvidenceMatches(c)) return true
-    // I2V footage may inherit rights only from the exact AI-transformed source
-    // image selected by the factory; unknown legacy B-track videos fail closed.
-    const sourceImageUrl = meta(c).source_image_url
-    return c.track === 'b_generated'
-      && typeof sourceImageUrl === 'string'
-      && clearedTransformedImageUrls.has(sourceImageUrl)
-  })
+  const videoClips = allClips.filter((c) => !isStill(c) && clipCanEnterFactoryPool({
+    track: c.track,
+    isStillImage: false,
+    isAiTransformed: meta(c).is_ai_transformed === true,
+    hasCurrentEvidence: licenseEvidenceMatches(c),
+    sourceImageUrl: typeof meta(c).source_image_url === 'string' ? meta(c).source_image_url as string : null,
+  }, clearedTransformedImageUrls))
 
   // 🔴 版权隔离:**只有 AI 改过的图能进出片池**。
   // 抓来的原图是别人的作品,只作为改图的输入留在库里,永远不进成片 ——
