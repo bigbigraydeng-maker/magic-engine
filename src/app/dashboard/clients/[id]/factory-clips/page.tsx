@@ -20,7 +20,7 @@ type Editor = { title: string; sceneTag: string; motionType: string; tags: strin
 
 const emptyEditor: Editor = { title: '', sceneTag: '', motionType: '', tags: '', sourceAuthor: '', sourceUrl: '', licenseName: '', licenseUrl: '' }
 const statusLabels: Record<string, string> = { pending_review: '待审核', active: '已激活', quarantined: '已打回', archived: '已归档' }
-const licenseLabels: Record<string, string> = { unknown: '未核验', verified: '人工核验通过', not_required: '人工确认无需许可', rejected: '许可拒绝' }
+const licenseLabels: Record<string, string> = { unknown: '未核验', verified: '人工声明：有许可', not_required: '人工声明：无需许可', rejected: '许可拒绝' }
 const licenseScopeLabels: Record<LicenseScope, string> = { commercial_use: '商业使用', modification: '剪辑/改编', online_distribution: '网络平台发布' }
 const batchLimit = 20
 
@@ -72,6 +72,7 @@ export default function FactoryClipsPage() {
   const [editor, setEditor] = useState<Editor>(emptyEditor)
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({})
   const [reviewScopes, setReviewScopes] = useState<Record<string, LicenseScope[]>>({})
+  const [reviewBases, setReviewBases] = useState<Record<string, string>>({})
 
   const load = useCallback(async (reset = false, requestedOffset = 0) => {
     const nextOffset = reset ? 0 : requestedOffset
@@ -160,13 +161,15 @@ export default function FactoryClipsPage() {
   async function licenseReview(clip: Clip, decision: 'verified' | 'not_required' | 'rejected') {
     const note = reviewNotes[clip.id] ?? ''
     if (decision === 'verified' && note.trim().length < 30) { setMessage('请记录许可证据页及授权范围（至少 30 个字符）'); return }
-    if (decision !== 'verified' && note.trim().length < 20) { setMessage('请填写至少 20 个字符的许可结论依据'); return }
+    if (decision !== 'verified' && decision !== 'not_required' && note.trim().length < 20) { setMessage('请填写至少 20 个字符的许可结论依据'); return }
+    if ((decision === 'verified' || decision === 'not_required') && note.trim().length < 30) { setMessage('请记录至少 30 个字符的具体证据摘要'); return }
     const permittedScopes = reviewScopes[clip.id] ?? []
     if (decision === 'verified' && REQUIRED_LICENSE_SCOPES.some((scope) => !permittedScopes.includes(scope))) {
       setMessage('请逐项确认商业使用、剪辑/改编和网络平台发布范围')
       return
     }
-    await mutateClip(clip.id, '/license-review', { method: 'POST', body: JSON.stringify({ status: decision, note, permittedScopes }) })
+    const basis = reviewBases[clip.id] ?? 'license_page'
+    await mutateClip(clip.id, '/license-review', { method: 'POST', body: JSON.stringify({ status: decision, note, permittedScopes, basis }) })
   }
 
   return <main className="mx-auto max-w-7xl space-y-6 p-6 text-zinc-100">
@@ -205,10 +208,11 @@ export default function FactoryClipsPage() {
           <div className="flex flex-wrap gap-1">{[clip.scene_tag, ...(clip.tags ?? [])].map((tag) => <span key={tag} className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-300">{tag}</span>)}</div>
           <div className="space-y-1 text-xs text-zinc-400"><p>许可：<span className="text-zinc-200">{licenseLabels[clip.license_status] ?? clip.license_status}</span> {clip.license_name ? `· ${clip.license_name}` : ''}</p>{clip.source_author && <p>来源：{clip.source_author}{clip.source_url ? <> · <a className="underline" href={clip.source_url} target="_blank" rel="noreferrer">来源页</a></> : ''}</p>}{clip.license_url && <p><a className="underline" href={clip.license_url} target="_blank" rel="noreferrer">许可证明</a></p>}{clip.license_review_note && <p>许可核验：{formatLicenseReviewEvidence(clip.license_review_note)}</p>}{clip.review_note && <p>素材审核：{clip.review_note}</p>}</div>
           {clip.status === 'pending_review' && <div className="space-y-2 border-t border-zinc-800 pt-3">
-            <p className="text-xs text-amber-300">状态记录人工审阅，不代表系统已独立验证许可证真实性。请先打开来源页和许可证明页，再记录证据。</p>
-            <label className="block text-xs text-zinc-400">证据摘要<textarea rows={3} value={reviewNotes[clip.id] ?? ''} onChange={(e) => setReviewNotes((notes) => ({ ...notes, [clip.id]: e.target.value }))} placeholder="写明许可页面的具体条款、适用对象和结论；有许可时至少 30 个字符" className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-white" /></label>
+            <p className="text-xs text-amber-300">这是人工声明，不是系统验证。许可声明会绑定当前文件指纹和页面地址；另一位 ME 管理员必须复核并激活。</p>
+            <label className="block text-xs text-zinc-400">权利依据<select value={reviewBases[clip.id] ?? 'license_page'} onChange={(e) => setReviewBases((current) => ({ ...current, [clip.id]: e.target.value }))} className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-white"><option value="license_page">许可证页面（有许可）</option><option value="client_owned">客户自有 / 委托拍摄</option><option value="public_domain">公有领域依据</option><option value="other_documented">其他有记录的依据</option></select></label>
+            <label className="block text-xs text-zinc-400">证据摘要<textarea rows={3} value={reviewNotes[clip.id] ?? ''} onChange={(e) => setReviewNotes((notes) => ({ ...notes, [clip.id]: e.target.value }))} placeholder="记录页面的具体条款、适用对象和你的结论；许可声明至少 30 个字符" className="mt-1 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-white" /></label>
             <fieldset className="space-y-1"><legend className="text-xs text-zinc-400">适用授权范围（有许可素材必须全部确认）</legend><div className="flex flex-wrap gap-3">{REQUIRED_LICENSE_SCOPES.map((scope) => <label key={scope} className="flex items-center gap-1.5 text-xs text-zinc-300"><input type="checkbox" checked={(reviewScopes[clip.id] ?? []).includes(scope)} onChange={(event) => setReviewScopes((current) => ({ ...current, [clip.id]: event.target.checked ? Array.from(new Set([...(current[clip.id] ?? []), scope])) : (current[clip.id] ?? []).filter((item) => item !== scope) }))} />{licenseScopeLabels[scope]}</label>)}</div></fieldset>
-            <div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => void licenseReview(clip, 'verified')} className="rounded bg-emerald-700 px-2.5 py-1.5 text-xs">核验为有许可</button><button disabled={busy} onClick={() => void licenseReview(clip, 'not_required')} className="rounded bg-zinc-700 px-2.5 py-1.5 text-xs">无需许可</button><button disabled={busy} onClick={() => void licenseReview(clip, 'rejected')} className="rounded bg-red-900 px-2.5 py-1.5 text-xs">许可拒绝</button></div>
+            <div className="flex flex-wrap gap-2"><button disabled={busy} onClick={() => void licenseReview(clip, 'verified')} className="rounded bg-emerald-700 px-2.5 py-1.5 text-xs">记录有许可声明</button><button disabled={busy} onClick={() => void licenseReview(clip, 'not_required')} className="rounded bg-zinc-700 px-2.5 py-1.5 text-xs">记录无需许可声明</button><button disabled={busy} onClick={() => void licenseReview(clip, 'rejected')} className="rounded bg-red-900 px-2.5 py-1.5 text-xs">许可拒绝</button></div>
             <div className="flex gap-2"><button disabled={busy} onClick={() => void mutateClip(clip.id, '/review', { method: 'POST', body: JSON.stringify({ decision: 'approve' }) })} className="rounded bg-orange-500 px-3 py-1.5 text-xs font-semibold text-black">审核通过并激活</button><button disabled={busy} onClick={() => void mutateClip(clip.id, '/review', { method: 'POST', body: JSON.stringify({ decision: 'reject', note: reviewNotes[clip.id] ?? '' }) })} className="rounded border border-red-800 px-3 py-1.5 text-xs text-red-300">打回隔离</button></div>
           </div>}
           <p className="truncate text-[10px] text-zinc-600">SHA-256：{clip.sha256 ?? '未计算'}</p>
