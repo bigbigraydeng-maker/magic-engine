@@ -1,6 +1,8 @@
 /**
  * Phase 31 — Goal lifecycle operations
  *
+ * IMPACT app/impact stage: Inspect (a draft demand stays out of Measure until this gate passes).
+ *
  * Centralises all DB access for goals so API routes stay thin.
  */
 
@@ -198,19 +200,25 @@ export async function createGoal(
 }
 
 /**
- * Activate a draft Goal — moves status to 'active'.
- * Phase 32: 1-active-Goal restriction removed. Multiple active Goals allowed
- * per client (e.g. CTS 4 团 + Oztop 清仓 + 月营收同时跑).
+ * Activate a draft Goal — moves status to 'active' (进行中).
+ * Phase 32: 1-active-Goal restriction removed. Multiple active Goals allowed.
+ *
+ * Refuses the draft → active step unless the demand contract is complete.
+ * Does not rewrite the row's other fields and does not touch goals that are
+ * already past draft.
  */
 export async function activateGoal(
   supabase: SupabaseClient,
   goalId: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<ActivateGoalResult> {
   const goal = await getGoalById(supabase, goalId)
   if (!goal) return { ok: false, error: 'Goal not found' }
   if (goal.status !== 'draft') {
     return { ok: false, error: `Cannot activate goal in status '${goal.status}'` }
   }
+
+  const refusal = assessGoalActivation(goal)
+  if (refusal) return refusal
 
   const { error } = await supabase
     .from('goals')
@@ -219,6 +227,195 @@ export async function activateGoal(
 
   if (error) return { ok: false, error: error.message }
   return { ok: true }
+}
+
+/** Contract gaps that block draft → active. Order is stable. */
+export type GoalActivationGap = 'primary_metric' | 'period' | 'baseline' | 'reason'
+
+export interface ActivateGoalResult {
+  ok: boolean
+  error?: string
+  /** Present only when the contract refused the transition. */
+  missing?: GoalActivationGap[]
+  /** Present when a sales goal's primary metric is a click or a lead. */
+  sales_metric?: 'click_or_lead'
+}
+
+/**
+ * Fields the activation gate reads. `baseline_value` is `unknown` because
+ * PostgREST returns PostgreSQL NUMERIC as a string.
+ */
+export interface GoalActivationSubject {
+  intent: string | null
+  primary_metric_key: unknown
+  primary_metric_label: unknown
+  baseline_value: unknown
+  supporting_metrics: unknown
+  period_start: unknown
+  period_end: unknown
+  fde_reasoning: unknown
+}
+
+/**
+ * Reserved supporting-metric mark for "we do not know the baseline".
+ * `goals.baseline_value` is numeric NOT NULL, so 0 remains a declared baseline.
+ * Callers store `{ key: BASELINE_UNKNOWN_KEY, label: BASELINE_UNKNOWN_LABEL }`
+ * on `supporting_metrics`. No new column.
+ */
+export const BASELINE_UNKNOWN_KEY = 'baseline_unknown'
+export const BASELINE_UNKNOWN_LABEL = '基线未知'
+
+const GAP_LABEL: Record<GoalActivationGap, string> = {
+  primary_metric: '主指标',
+  period: '周期起止',
+  baseline: '基线（数值或「基线未知」）',
+  reason: '理由',
+}
+
+const REASON_PLACEHOLDERS = new Set([
+  'tbd', 'todo', 'n/a', 'na', 'none', 'null', 'unknown',
+  '未知', '待定', '-', '—', '无',
+])
+
+/**
+ * Click / lead primary metrics. Sales must not be measured by these.
+ * TODO(outcome-levels): replace `isClickOrLeadPrimaryMetric` with the export
+ * of the same name from src/lib/strategy/outcome-levels.ts (parallel work;
+ * do not create that file here). That module owns the contact-success /
+ * qualified-lead / sale split.
+ */
+const CLICK_OR_LEAD_KEYS = new Set([
+  'seo_gsc_clicks_28d',
+  'leads_count',
+  'messaging_started',
+  'form_submissions',
+  'phone_calls',
+])
+
+const CLICK_OR_LEAD_LABELS = new Set([
+  '谷歌搜索点击（近 28 天）',
+  'Google search clicks (28 days)',
+  '新增线索/询盘',
+  'New leads / inquiries',
+  '私信/WhatsApp 对话开启数',
+  'Messaging conversations started',
+  'GA4 表单提交',
+  'GA4 form submissions',
+  '电话呼入',
+  'Phone calls in',
+])
+
+/**
+ * Returns a refusal when the draft is not allowed to become active.
+ * Returns null when the contract is satisfied. Does not write.
+ */
+export function assessGoalActivation(goal: GoalActivationSubject): ActivateGoalResult | null {
+  const missing = collectActivationGaps(goal)
+  const salesDetail = salesClickOrLeadDetail(goal)
+  if (missing.length === 0 && !salesDetail) return null
+  return {
+    ok: false,
+    error: formatActivationRefusal(missing, salesDetail),
+    missing,
+    ...(salesDetail ? { sales_metric: 'click_or_lead' as const } : {}),
+  }
+}
+
+function collectActivationGaps(goal: GoalActivationSubject): GoalActivationGap[] {
+  const missing: GoalActivationGap[] = []
+  if (!hasPrimaryMetric(goal)) missing.push('primary_metric')
+  if (!hasPeriod(goal)) missing.push('period')
+  if (!hasBaseline(goal)) missing.push('baseline')
+  if (!hasReason(goal.fde_reasoning)) missing.push('reason')
+  return missing
+}
+
+function hasPrimaryMetric(goal: GoalActivationSubject): boolean {
+  return readText(goal.primary_metric_key).length > 0
+    && readText(goal.primary_metric_label).length > 0
+}
+
+function hasPeriod(goal: GoalActivationSubject): boolean {
+  const start = parseDate(goal.period_start)
+  const end = parseDate(goal.period_end)
+  if (start === null || end === null) return false
+  return end > start
+}
+
+function hasBaseline(goal: GoalActivationSubject): boolean {
+  return hasBaselineValue(goal.baseline_value) || baselineMarkedUnknown(goal.supporting_metrics)
+}
+
+/** A finite number, including 0, is a declared baseline. Blank is not. */
+function hasBaselineValue(value: unknown): boolean {
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (typeof value !== 'string') return false
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  return Number.isFinite(Number(trimmed))
+}
+
+function baselineMarkedUnknown(metrics: unknown): boolean {
+  if (!Array.isArray(metrics)) return false
+  return metrics.some(item => {
+    if (!item || typeof item !== 'object') return false
+    const record = item as { key?: unknown; label?: unknown }
+    const key = readText(record.key).toLowerCase()
+    const label = readText(record.label)
+    return key === BASELINE_UNKNOWN_KEY || label === BASELINE_UNKNOWN_LABEL
+  })
+}
+
+function hasReason(value: unknown): boolean {
+  const text = readText(value)
+  if (text.length < 8) return false
+  const token = text.toLowerCase().replace(/[.!?。！？]+$/g, '')
+  if (REASON_PLACEHOLDERS.has(token)) return false
+  return /[A-Za-z\u3400-\u9FFF]/.test(text)
+}
+
+function salesClickOrLeadDetail(goal: GoalActivationSubject): string | null {
+  if (goal.intent !== 'sales') return null
+  const key = readText(goal.primary_metric_key)
+  const label = readText(goal.primary_metric_label)
+  if (!key && !label) return null
+  if (!isClickOrLeadPrimaryMetric(key, label)) return null
+  return key || label
+}
+
+function isClickOrLeadPrimaryMetric(key: string, label: string): boolean {
+  const normalized = key.trim().toLowerCase()
+  if (CLICK_OR_LEAD_KEYS.has(normalized)) return true
+  if (/(^|[_\-.])(click|clicks|lead|leads|inquiry|inquiries|enquiry|enquiries)([_\-.]|$)/.test(normalized)) {
+    return true
+  }
+  if (
+    normalized.includes('form_submission')
+    || normalized.includes('messaging_started')
+    || normalized.includes('phone_call')
+  ) return true
+  return CLICK_OR_LEAD_LABELS.has(label.trim())
+}
+
+function formatActivationRefusal(missing: GoalActivationGap[], salesDetail: string | null): string {
+  const parts: string[] = []
+  if (missing.length > 0) {
+    parts.push(`缺：${missing.map(gap => GAP_LABEL[gap]).join('、')}`)
+  }
+  if (salesDetail) {
+    parts.push(`销售目标的主指标不能是点击或线索（${salesDetail}）`)
+  }
+  return `不能改为进行中，${parts.join('；')}`
+}
+
+function readText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function parseDate(value: unknown): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const time = new Date(value).getTime()
+  return Number.isNaN(time) ? null : time
 }
 
 /**
