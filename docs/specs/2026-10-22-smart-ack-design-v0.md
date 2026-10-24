@@ -97,7 +97,16 @@ PM 原话（2026-10-22）：一个客户发了两条信息，AI 回复了两个�
 回执 `detail` 只写原因码 + 长度 + 哈希，不写客人原话和生成文本。干跑脚本输出只写本地文件（不进 PR、不进共享日志），号码和邮箱打码，PM 看完删除。提示词会把客人原话发给 Claude 接口（与现有 Strategy Engine 调用同一出境范围）——在 PR 里写明。
 
 ### 9.9 干跑与上线门槛
-干跑集必须含一组**对抗样例**（投诉、注入、数字复述、承诺背书、拼写绕过、全角字符、中文、emoji、空正文、预填话重复），并固化为回归测试。回退率门槛：干跑 30 条真实首条消息里，进入模型且被采用的占比 <40% 则判功能价值不足，不上线。回执枚举：`source`、`reason ∈ {model_ok, triage_<类>, validate_<类>, timeout, error, daily_cap, empty_body}`（原先还列了 `circuit_open`，对应的熔断没实现，已从枚举里去掉，见 §12）。
+干跑集必须含一组**对抗样例**（投诉、注入、数字复述、承诺背书、拼写绕过、全角字符、中文、emoji、空正文、预填话重复），并固化为回归测试。回退率门槛：干跑 30 条真实首条消息里，进入模型且被采用的占比 <40% 则判功能价值不足，不上线。回执枚举**照代码实抄**（2026-10-25 从 `compose.ts` / `types.ts` / `conversation-inbound-autoack.ts` 里逐个 grep 出来，不是凭记忆写的）：
+
+`source ∈ {smart, fixed}`；`reason` 分三组——
+- **compose.ts 自己返回的**：`model_ok`（采用了模型的话）、`flag_off`（开关没开，发原来那句、不带尾句）、`context_read_failed`、`daily_cap`、`cap_read_failed`、`model_error`（模型抛错，**含超时**）、`parse_failed`、`same_as_last`、`skipped_repeat_message`（唯一不发的分支）；另有 `no_composer`，只在没有注入 composer 时出现（`conversation-inbound-autoack.ts:250`，生产一定注入，所以只会在测试里看到）；
+- **分流命中**：`triage_complaint` / `triage_optout` / `triage_promise` / `triage_no_text` / `triage_too_short` / `triage_link_only` / `triage_non_english`；
+- **校验不过**：`validate_empty` / `validate_length` / `validate_language` / `validate_link_contact` / `validate_number` / `validate_identity` / `validate_forbidden` / `validate_echo`。
+
+F1 自己的 `AutoAckOutcome` 是另一层，别跟上面混：`sent` / `send_failed` / `skipped_opted_out` / `skipped_channel_disabled` / `skipped_recently_replied` / `skipped_invalid_payload` / `skipped_repeat_message`；`detail` 写的是 `${source}:${reason}`。
+
+> 之前这里写过 `timeout`、`error`、`empty_body` 三个码——**代码从来不会返回它们**（超时归进 `model_error`），而实际会返回的 `flag_off`、`context_read_failed`、`cap_read_failed`、`parse_failed`、`same_as_last` 反而没列。按旧枚举去验收干跑会漏归类。这是本刀第六处「文档跑在实现前面」，改法是从代码里 grep 出真值再写。
 
 ### 9.10 新增待 PM 定（一次一个）
 7.3 自动回复里要不要注明“这是自动回复”？（我的默认：不注明，因为 F1 本来就是固定的“已收到”类话；但这涉及渠道政策，由你定。）
