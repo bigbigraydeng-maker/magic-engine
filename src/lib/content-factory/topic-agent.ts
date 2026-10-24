@@ -2,8 +2,9 @@
 // 铁律：只抄爆款（抄结构/钩子/节奏，不凭空想）、按 master_brief 人设、真数字用【】占位不编。
 // 输出写进 content_posts(status='draft' = 看板"选题"段)。
 
-import { callClaudeChat, parseJsonResponse } from '@/lib/anthropic/client'
+import { callClaudeChat, parseJsonResponse, type ClaudeCallResult } from '@/lib/anthropic/client'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
+import { SCRIPT_AGENT_LONG_SYSTEM } from './prompts'
 
 /** 爆款参考（来自 Apify 抓取的平台爆款）。 */
 export interface ViralRef {
@@ -65,4 +66,39 @@ export async function generateCandidate(
   })
 
   return parseJsonResponse<Candidate>(result.text)
+}
+
+/** 脚本 Agent 长稿模式：复用选题助理的内容生成入口，保留完整来源信息密度。 */
+export async function generateFullScriptText(
+  brief: NonNullable<Awaited<ReturnType<typeof getActiveBrief>>>,
+  transcript: string,
+  environment: string,
+  title: string,
+  personaNotes: string,
+): Promise<ClaudeCallResult> {
+  const response = await callClaudeChat({
+    systemPrompt: SCRIPT_AGENT_LONG_SYSTEM,
+    messages: [{
+      role: 'user',
+      content: [
+        '# 目标人设（当前客户 Master Brief）',
+        formatBriefForPrompt(brief),
+        '',
+        '# 表达环境与受众',
+        environment,
+        '',
+        '# 创作者口吻与禁忌（客户配置）',
+        personaNotes,
+        '',
+        '# 来源视频标题',
+        title,
+        '',
+        '# 来源视频完整逐字稿（供改写）',
+        transcript,
+      ].join('\n'),
+    }],
+    maxOutputTokens: 7000,
+    singleAttempt: true,
+  })
+  return response
 }
