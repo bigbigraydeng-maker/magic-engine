@@ -25,21 +25,32 @@ name: PR risk gate refresh
 on:
   issue_comment:
     types: [created, edited]
+  # Re-read the gate after required checks finish. Listening to this workflow
+  # itself would loop, so only the light-check workflow is listed. A stale
+  # run still cannot enable: the enable step re-reads the live head and passes
+  # --match-head-commit.
+  workflow_run:
+    workflows: ['PR light checks']
+    types: [completed]
 
 permissions:
   contents: write        # enable / disable auto-merge
   pull-requests: write   # post the rating comment; enable / disable auto-merge
   checks: write          # publish "Risk gate" on the PR head, not on main
+  issues: write          # create the needs-ray-merge label when it is missing
 
 jobs:
   refresh:
     name: Record risk gate on head
-    # Same predicate as the concurrency group. A Codex comment on a draft
-    # still runs: decideMerge keeps drafts closed. Anything else skips, and
-    # the idle group means the skip cannot cancel another run.
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1'))
+    # Same comment predicate as the concurrency group. A Codex or Claude
+    # sign-off comment on a draft still runs: decideMerge keeps drafts closed.
+    # Anything else skips, and the idle group means the skip cannot cancel
+    # another run. A finished light-check workflow re-runs the same script.
+    if: >-
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1') || contains(github.event.comment.body, 'me-review-signoff')))
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0].number)
     concurrency:
-      group: ${{ case(github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1')), format('pr-risk-gate-issue_comment-{0}', github.event.issue.number), format('pr-risk-gate-issue_comment-idle-{0}', github.run_id)) }}
+      group: ${{ case(github.event_name == 'workflow_run', format('pr-risk-gate-workflow_run-{0}', github.event.workflow_run.pull_requests[0].number), github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1') || contains(github.event.comment.body, 'me-review-signoff')), format('pr-risk-gate-issue_comment-{0}', github.event.issue.number), format('pr-risk-gate-issue_comment-idle-{0}', github.run_id)) }}
       cancel-in-progress: true
     runs-on: ubuntu-slim
     timeout-minutes: 10
@@ -59,7 +70,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
           EVENT_BASE: ${{ github.event.pull_request.base.sha }}
           EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
           EVENT_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -86,7 +97,7 @@ jobs:
         id: gate
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
           BASE_SHA: ${{ steps.pr.outputs.base }}
           HEAD_SHA: ${{ steps.pr.outputs.head }}
           PR_AUTHOR: ${{ steps.pr.outputs.author }}
@@ -96,15 +107,16 @@ jobs:
           GATE_EVENT_NAME: ${{ github.event_name }}
         run: node tools/ops-review-loop/src/check-risk-gate.mjs
 
-      - name: Enable auto-merge (B/C only, current head reviewed)
+      - name: Enable auto-merge when this head is still the reviewed one
         if: steps.gate.outputs.decision == 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
           HEAD_SHA: ${{ steps.pr.outputs.head }}
         run: |
           set -euo pipefail
           live=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          already=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json autoMergeRequest --jq 'if .autoMergeRequest == null then "off" else "on" end')
           decision=$(LIVE_HEAD="$live" node tools/ops-review-loop/src/head-check.mjs --plan-auto-merge)
           if [ "$decision" = "skip" ]; then
             echo '- 自动合并：未开启（这次审的提交已经不是 PR 当前提交）' >> "$GITHUB_STEP_SUMMARY"
@@ -114,6 +126,10 @@ jobs:
             echo '- 自动合并：未开启（无法确认当前提交）' >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
+          if [ "$already" = "on" ]; then
+            echo '- 自动合并：本来就开着（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
           echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
 
@@ -121,7 +137,7 @@ jobs:
         if: always() && steps.gate.outputs.decision != 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
         run: |
           set -euo pipefail
           # Distinguish "already off" from a real API failure (CONCERN-2 from
@@ -134,4 +150,26 @@ jobs:
           else
             gh pr merge --disable-auto "$PR_NUMBER"
             echo '- 自动合并：已关闭' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Label PRs Ray still merges by hand
+        if: always() && steps.gate.outputs.ray_hold == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          gh label create needs-ray-merge --repo "$GITHUB_REPOSITORY" --color B60205 --description "Ray merges this pull request by hand" --force
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label needs-ray-merge
+
+      - name: Drop the Ray label when this head is not held
+        if: always() && steps.gate.outputs.ray_hold == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          has=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | index("needs-ray-merge") != null')
+          if [ "$has" = "true" ]; then
+            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label needs-ray-merge
           fi

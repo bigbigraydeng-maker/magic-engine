@@ -71,6 +71,7 @@ const COMMENT_PREDICATES = [
   'vars.ME_SIGNOFF_TRUSTED_LOGINS',
   'codex-review-state:v1',
   'codex-review-receipt:v1',
+  'me-review-signoff',
 ]
 
 const SHA_PIN = /@[0-9a-f]{40}\b/
@@ -117,10 +118,11 @@ describe('Risk gate workflow: the judge lives on main', () => {
     expect(trigger.branches).toBeUndefined()
   })
 
-  it('declares exactly the two write scopes it needs, and no more', () => {
+  it('declares the write scopes it needs, and no checks scope', () => {
     expect(riskGate.doc.permissions).toEqual({
       contents: 'write',
       'pull-requests': 'write',
+      issues: 'write',
     })
     expect(riskGate.doc.permissions?.checks).toBeUndefined()
   })
@@ -234,8 +236,10 @@ describe('Risk gate workflow: the judge lives on main', () => {
 describe('Risk gate refresh: comment runs publish on the PR head and do not cancel the real gate', () => {
   const refreshJob = () => Object.values(riskRefresh.doc.jobs ?? {})[0]
 
-  it('listens only to issue comments, never to a pull_request merge ref', () => {
-    expect(Object.keys(riskRefresh.triggers)).toEqual(['issue_comment'])
+  it('listens to issue comments and the light-check workflow, never to a pull_request merge ref', () => {
+    expect(Object.keys(riskRefresh.triggers)).toEqual(['issue_comment', 'workflow_run'])
+    expect(riskRefresh.source).toContain('PR light checks')
+    expect(riskRefresh.source).toContain('needs-ray-merge')
     const comments = riskRefresh.triggers.issue_comment as { types?: string[] }
     expect(comments.types).toEqual(expect.arrayContaining(['created', 'edited']))
     expect(riskRefresh.triggers.pull_request).toBeUndefined()
@@ -244,11 +248,12 @@ describe('Risk gate refresh: comment runs publish on the PR head and do not canc
     expect(riskRefresh.triggers.pull_request_review_comment).toBeUndefined()
   })
 
-  it('adds checks: write and no other scope', () => {
+  it('adds checks: write and the label scope, and nothing else', () => {
     expect(riskRefresh.doc.permissions).toEqual({
       contents: 'write',
       'pull-requests': 'write',
       checks: 'write',
+      issues: 'write',
     })
   })
 

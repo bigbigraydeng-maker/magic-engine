@@ -569,3 +569,74 @@ export function evaluateCodexHeadReview({
   }
   return { clear: true, reviewed: true, blocking: 0, reason: 'Codex 已审过当前这次提交，没有未解决的 P0/P1' }
 }
+
+// --- Claude Code sign-off on the current head --------------------------------
+//
+// A Claude sign-off is one issue comment, and only that:
+//
+//   - The author login is exactly the `claude-code` value in
+//     `ME_SIGNOFF_TRUSTED_LOGINS` (REST spelling, including `[bot]`).
+//   - It is not the PR author and not `github-actions[bot]`.
+//   - The body contains `<!-- me-review-signoff:{...} -->` with `v: 1`,
+//     `role: "claude-code"`, `verdict: "pass"`, and `base` / `head` equal to
+//     the PR's current base and head (40 hex, case-insensitive).
+//
+// A new push changes the head, so the old marker no longer matches. A base
+// move changes the diff, so it no longer matches either. Unresolved review
+// threads from that same login on this head that carry P0 or P1 also block.
+// P2 does not. The sign-off comment itself is not scanned for severity, so
+// mentioning "P0" in the instruction does not block. Threads that cannot be
+// read stay closed.
+
+/**
+ * Has Claude Code signed this exact base+head, with no unresolved P0/P1?
+ *
+ * @param {{base?: unknown, head?: unknown, trustedLogin?: unknown, prAuthor?: unknown, sources?: unknown, threads?: unknown, threadsReadable?: unknown}} input
+ * @returns {{clear: boolean, signed: boolean, blocking: number, reason: string}}
+ */
+export function evaluateClaudeHeadSignoff({
+  base,
+  head,
+  trustedLogin,
+  prAuthor,
+  sources,
+  threads,
+  threadsReadable,
+} = {}) {
+  if (!codexLoginUsable(trustedLogin, prAuthor)) {
+    return { clear: false, signed: false, blocking: 0, reason: 'Claude Code 的可信登录名还没配好，或这个登录名不能当审查人' }
+  }
+  if (!isHeadSha(base) || !isHeadSha(head)) {
+    return { clear: false, signed: false, blocking: 0, reason: '当前提交号读不到，不能把 Claude 的签字算在这次提交上' }
+  }
+  const login = String(trustedLogin)
+  const markers = selectTrustedSignoffMarkers({
+    sources,
+    trustedAuthors: [login],
+    prAuthor,
+  })
+  const baseSha = String(base).toLowerCase()
+  const headSha = String(head).toLowerCase()
+  const signed = markers.some(
+    (marker) =>
+      marker.role === 'claude-code' &&
+      marker.author === login &&
+      isHeadSha(marker.base) &&
+      isHeadSha(marker.head) &&
+      marker.base.toLowerCase() === baseSha &&
+      marker.head.toLowerCase() === headSha,
+  )
+  if (!signed) {
+    const stale = markers.some((marker) => marker.role === 'claude-code' && marker.author === login)
+    const reason = stale ? 'Claude Code 签的是更早的提交，当前这次还没签' : 'Claude Code 还没签当前这次提交'
+    return { clear: false, signed: false, blocking: 0, reason }
+  }
+  if (threadsReadable !== true) {
+    return { clear: false, signed: true, blocking: 0, reason: '没能读全 Claude Code 的行内意见' }
+  }
+  const blocking = (Array.isArray(threads) ? threads : []).filter((thread) => threadBlocks(thread, headSha, login)).length
+  if (blocking > 0) {
+    return { clear: false, signed: true, blocking, reason: `Claude Code 还有 ${blocking} 条没解决的 P0/P1` }
+  }
+  return { clear: true, signed: true, blocking: 0, reason: 'Claude Code 已签当前这次提交，没有未解决的 P0/P1' }
+}

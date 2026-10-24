@@ -22,16 +22,15 @@
  * every combination of inputs, not just the ones written by hand. A future edit
  * that adds a fourth way to reach `enable` fails that property test.
  *
- * 🔴 **Why A never auto-merges, even fully signed.**
+ * 🔴 **When A may auto-merge.**
  *
- * A signed A PR returns `pass: true` with `decision: 'disable'`. The two are
- * deliberately separate: `pass` means "this PR is not blocked by the merge
- * gate", `decision` means "what should be done to the auto-merge flag". An A PR
- * that has both sign-offs is *ready*, and a human still presses the button
- * — because the sign-off is a verdict about a diff, and the diff can move
- * between the sign-off and the merge. `evaluateSignoffs` binds the sign-off to
- * `base..head`; keeping the merge itself manual is what makes that binding
- * worth anything.
+ * An A PR enables auto-merge only when Codex has reviewed this head with no
+ * unresolved P0/P1, Claude Code has signed this head with no P0/P1, the
+ * required checks are already green, and the diff does not touch a path Ray
+ * still merges by hand (schema/SQL, Meta tokens or secrets, ad spend).
+ * Anything uncertain — a missing flag, a hold path, a stale review — stays
+ * `disable`. P2 does not block. Resolving review threads stays a repository
+ * rule; this function does not resolve them.
  *
  * 🔴 **Why an unrecognised risk is treated as A, not as B.**
  *
@@ -45,6 +44,7 @@
  * This module is pure: no I/O, no network, no clock.
  */
 
+import { RISK_GATE_CHECK_NAME } from './head-check.mjs'
 import { REQUIRED_SIGNOFF_ROLES } from './signoff-marker.mjs'
 
 /**
@@ -85,29 +85,6 @@ function allRolesMissing() {
 }
 
 /**
- * Is this sign-off object a *claim of completeness* we are willing to act on?
- *
- * 🔴 `complete: true` alone is not enough. The claim is only meaningful if the
- * object also carries a `missing` array that agrees with it — an object saying
- * `complete: true, missing: ['claude-code']` is self-contradictory, and one saying
- * `complete: true, missing: 'not-an-array'` is malformed. Both are treated as
- * "not complete", because a malformed claim of completeness is not a claim.
- * The alternative — trusting the boolean and ignoring the list — would make the
- * boolean the only thing an attacker needs to set.
- *
- * @param {unknown} signoff
- * @returns {boolean}
- */
-function isCompleteSignoff(signoff) {
-  if (!signoff || typeof signoff !== 'object') return false
-  const candidate = /** @type {{complete?: unknown, missing?: unknown, present?: unknown}} */ (signoff)
-  if (candidate.complete !== true) return false
-  if (!Array.isArray(candidate.missing) || candidate.missing.length !== 0) return false
-  if (!Array.isArray(candidate.present)) return false
-  return REQUIRED_SIGNOFF_ROLES.every((role) => candidate.present.includes(role))
-}
-
-/**
  * The roles to name in a "missing sign-off" reason.
  *
  * Falls back to every required role when the sign-off input is absent or does
@@ -126,6 +103,72 @@ function missingRolesFor(signoff) {
     }
   }
   return allRolesMissing()
+}
+
+/**
+ * Latest required checks, ignoring this gate's own check so it cannot wait
+ * on itself. Only an explicit completed success counts. An empty or unreadable
+ * required list stays closed.
+ *
+ * @param {{required?: unknown, checks?: unknown}} input
+ * @returns {boolean}
+ */
+export function requiredChecksAreGreen({ required, checks } = {}) {
+  if (!Array.isArray(required) || required.length === 0) return false
+  const names = required.filter(
+    (name) => typeof name === 'string' && name !== '' && name !== RISK_GATE_CHECK_NAME,
+  )
+  if (names.length === 0) return false
+  const list = Array.isArray(checks) ? checks : []
+  return names.every((name) =>
+    list.some(
+      (check) =>
+        check &&
+        check.name === name &&
+        check.status === 'completed' &&
+        check.conclusion === 'success',
+    ),
+  )
+}
+
+/**
+ * A-level auto-merge. `rayHold` must be the explicit boolean false; a missing
+ * value is treated as "we could not tell" and stays with Ray.
+ *
+ * @param {{codexReview?: {clear?: unknown}|null, claudeSignoff?: {clear?: unknown}|null, requiredChecksGreen?: unknown, rayHold?: unknown}} input
+ * @returns {{pass: boolean, decision: 'enable'|'disable', tier: 'auto'|'signed'|'blocked', reason: string, needsRayMerge?: boolean}}
+ */
+function decideAMerge({ codexReview, claudeSignoff, requiredChecksGreen, rayHold }) {
+  if (rayHold !== false) {
+    const known = rayHold === true
+    return {
+      pass: false,
+      decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
+      tier: TIER.BLOCKED,
+      needsRayMerge: true,
+      reason: known
+        ? 'A 级：碰到库表、Meta 凭证或广告花费，留给 Ray 亲手合'
+        : 'A 级：没能判断有没有碰到库表、Meta 凭证或广告花费，留给 Ray 亲手合',
+    }
+  }
+  const ready =
+    codexReview?.clear === true && claudeSignoff?.clear === true && requiredChecksGreen === true
+  if (ready) {
+    return {
+      pass: true,
+      decision: MERGE_DECISION.ENABLE_AUTO_MERGE,
+      tier: TIER.AUTO,
+      needsRayMerge: false,
+      reason: 'A 级：Codex 与 Claude Code 都审过当前这次提交，没有未解决的 P0/P1，必过检查已全绿，自动合并',
+    }
+  }
+  return {
+    pass: false,
+    decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
+    tier: TIER.BLOCKED,
+    needsRayMerge: false,
+    reason: 'A 级：要 Codex 审过当前提交、Claude Code 签过当前提交、必过检查全绿，才自动合并',
+  }
 }
 
 /**
@@ -170,14 +213,13 @@ function decideBcMerge(risk, codexReview) {
  *       auto-merge into main. Documented in `.github/merge-authorization.md`
  *       and asserted by the caller `check-risk-gate.mjs` — the guard must live
  *       here or a caller that forgets to pass `fork` slips it past.
- *   2. B and C arm auto-merge only when `codexReview.clear === true`: the
- *      trusted Codex login has reviewed this head and left no unresolved
- *      P0/P1. Spot checks by ziya / weizheng / direnjie are not an input.
- *      A missing or stale Codex review returns `disable`, which is what turns
- *      auto-merge off after a new push.
- *   3. A is merged by a human, and only once both sign-offs are present
- *      (Codex Astra and Claude Code). The old three roles do not count.
- *   4. Anything else is treated as A, and says so in the reason.
+ *   2. A diff that touches schema, SQL, Meta tokens or secrets, or ad spend
+ *      is never auto-merged. `rayHold: true` is that fact. A missing `rayHold`
+ *      does not block B/C; for A it fails closed inside rule 3.
+ *   3. B and C arm auto-merge only when `codexReview.clear === true`.
+ *   4. A arms auto-merge only when Codex has cleared this head, Claude Code
+ *      has signed this head, required checks are green, and `rayHold` is false.
+ *   5. Anything else is treated as A, and says so in the reason.
  *
  * 🔴 **`fork` uses the same fail-closed convention as `draft`.** Only an
  * explicit `false` clears the fork check; `undefined`, `null` or `true` all
@@ -187,10 +229,19 @@ function decideBcMerge(risk, codexReview) {
  * `merge-decision.test.ts`'s property enumeration, not silently succeeds), and
  * this rule fires before any risk-based rule can return `enable`.
  *
- * @param {{risk?: unknown, draft?: unknown, fork?: unknown, signoff?: unknown, codexReview?: {clear?: unknown, reason?: unknown}|null}} input
- * @returns {{pass: boolean, decision: 'enable'|'disable', tier: 'auto'|'signed'|'blocked', reason: string}}
+ * @param {{risk?: unknown, draft?: unknown, fork?: unknown, signoff?: unknown, codexReview?: {clear?: unknown, reason?: unknown}|null, claudeSignoff?: {clear?: unknown}|null, requiredChecksGreen?: unknown, rayHold?: unknown}} input
+ * @returns {{pass: boolean, decision: 'enable'|'disable', tier: 'auto'|'signed'|'blocked', reason: string, needsRayMerge?: boolean}}
  */
-export function decideMerge({ risk, draft, fork, signoff, codexReview } = {}) {
+export function decideMerge({
+  risk,
+  draft,
+  fork,
+  signoff,
+  codexReview,
+  claudeSignoff,
+  requiredChecksGreen,
+  rayHold,
+} = {}) {
   // Rule 1. `draft !== false` rather than `draft === true`: a missing or
   // non-boolean `draft` is not evidence that the PR is ready, so it fails
   // closed. Only an explicit `false` opens the gate.
@@ -215,28 +266,23 @@ export function decideMerge({ risk, draft, fork, signoff, codexReview } = {}) {
     }
   }
 
-  // Rule 2. B and C are the only levels that may reach `enable`, and only
-  // after Codex has reviewed this head. `clear !== true` fails closed.
-  if (risk === 'B' || risk === 'C') return decideBcMerge(risk, codexReview)
-
-  // Rule 3. A is signed, never auto-merged. `pass: true` here means "not
-  // blocked by this gate", not "merge it for me" — see the module comment.
-  if (risk === 'A') {
-    if (isCompleteSignoff(signoff)) {
-      return {
-        pass: true,
-        decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
-        tier: TIER.SIGNED,
-        reason: 'A 级：Codex Astra 与 Claude Code 两方签字齐，可由人合并（A 级永不自动合）',
-      }
-    }
+  // Rule 2. Schema, tokens, secrets, and ad spend stay with Ray at every level.
+  if (rayHold === true) {
     return {
       pass: false,
       decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
       tier: TIER.BLOCKED,
-      reason: `A 级：缺签字 ${missingRolesFor(signoff).join('/')} （两方须各用自己的身份签字；自动写入尚未建成，由 PM 决定是否绕过）`,
+      needsRayMerge: true,
+      reason: '碰到库表、Meta 凭证或广告花费，留给 Ray 亲手合',
     }
   }
+
+  // Rule 3. B and C arm only after Codex has reviewed this head.
+  if (risk === 'B' || risk === 'C') return decideBcMerge(risk, codexReview)
+
+  // Rule 4. A arms only with both reviews, green required checks, and an
+  // explicit `rayHold: false`. A missing hold fails closed.
+  if (risk === 'A') return decideAMerge({ codexReview, claudeSignoff, requiredChecksGreen, rayHold })
 
   // Rule 4. An unrecognised level is not a level we can reason about, so it
   // takes A's strict path. The prefix keeps the two cases distinguishable in

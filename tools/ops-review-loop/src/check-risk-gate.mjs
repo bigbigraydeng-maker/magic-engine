@@ -30,7 +30,7 @@
 import { appendFileSync } from 'node:fs'
 
 import { buildRiskGateCheckRun, gateJobExitCode, shouldPublishHeadCheck } from './head-check.mjs'
-import { classifyRisk, readDeclaredRisk } from './risk.mjs'
+import { assessRayMergeHold, classifyRisk, readDeclaredRisk } from './risk.mjs'
 import {
   buildGateMarker,
   findGateFor,
@@ -38,8 +38,8 @@ import {
   selectTrustedGateMarkers,
   shouldPostGateComment,
 } from './gate-marker.mjs'
-import { evaluateCodexHeadReview, reviewSignoffState } from './signoff-marker.mjs'
-import { decideMerge, summariseDecision } from './merge-decision.mjs'
+import { evaluateClaudeHeadSignoff, evaluateCodexHeadReview, reviewSignoffState } from './signoff-marker.mjs'
+import { decideMerge, requiredChecksAreGreen, summariseDecision } from './merge-decision.mjs'
 import { shouldRequestLegacySpotCheck } from './sampling.mjs'
 import { applyTrialRunToDecision, describeTrialRun, evaluateTrialRunSafely } from './quality.mjs'
 
@@ -279,6 +279,16 @@ const CODEX_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
           }
         }
       }
+      statusCheckRollup{
+        contexts(first:100){
+          pageInfo{hasNextPage}
+          nodes{
+            __typename
+            ... on CheckRun{name conclusion status}
+            ... on StatusContext{context state}
+          }
+        }
+      }
     }
   }
 }`
@@ -287,7 +297,49 @@ const CODEX_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
  * Reviews and threads. `isResolved` exists only on GraphQL. A failed or
  * truncated read is not a clean review.
  *
- * @returns {Promise<{reviews: object[], threads: object[], threadsReadable: boolean}>}
+ * @param {unknown} node
+ * @returns {{name: string, status: string, conclusion: string}|null}
+ */
+function normaliseCheckNode(node) {
+  if (!node || typeof node !== 'object') return null
+  if (node.__typename === 'CheckRun' && typeof node.name === 'string') {
+    return {
+      name: node.name,
+      status: String(node.status || '').toLowerCase(),
+      conclusion: String(node.conclusion || '').toLowerCase(),
+    }
+  }
+  if (node.__typename === 'StatusContext' && typeof node.context === 'string') {
+    const state = String(node.state || '').toUpperCase()
+    return {
+      name: node.context,
+      status: state === 'SUCCESS' || state === 'FAILURE' || state === 'ERROR' ? 'completed' : 'queued',
+      conclusion: state === 'SUCCESS' ? 'success' : 'failure',
+    }
+  }
+  return null
+}
+
+/**
+ * Required check names from the main branch rules. Throws if the API fails.
+ *
+ * @returns {Promise<string[]>}
+ */
+async function listRequiredCheckNames() {
+  const rules = await api(`/repos/${repository}/rules/branches/main`)
+  const names = []
+  for (const rule of Array.isArray(rules) ? rules : []) {
+    const contexts = rule?.parameters?.required_status_checks
+    if (!Array.isArray(contexts)) continue
+    for (const item of contexts) {
+      if (typeof item?.context === 'string' && item.context !== '') names.push(item.context)
+    }
+  }
+  return names
+}
+
+/**
+ * @returns {Promise<{reviews: object[], threads: object[], threadsReadable: boolean, checks: object[], checksReadable: boolean}>}
  */
 async function listCodexThreadsFromGraphql() {
   const [owner, name] = String(repository).split('/')
@@ -317,11 +369,22 @@ async function listCodexThreadsFromGraphql() {
     state: review?.state ?? null,
     body: typeof review?.body === 'string' ? review.body : '',
   }))
+  const checks = []
+  for (const node of pull.statusCheckRollup?.contexts?.nodes ?? []) {
+    const check = normaliseCheckNode(node)
+    if (check) checks.push(check)
+  }
   const complete =
     pull.reviews?.pageInfo?.hasNextPage !== true &&
     pull.reviewThreads?.pageInfo?.hasNextPage !== true &&
     commentsComplete
-  return { reviews, threads, threadsReadable: complete }
+  return {
+    reviews,
+    threads,
+    threadsReadable: complete,
+    checks,
+    checksReadable: pull.statusCheckRollup?.contexts?.pageInfo?.hasNextPage !== true,
+  }
 }
 
 /**
@@ -386,7 +449,21 @@ async function readHeadFiles(paths) {
  * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any, spotSample: {reason: string}|null, spotChecks: {present: string[]}|null, trustReady: boolean}} input
  * @returns {string}
  */
-function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError, trialRun, spotSample, spotChecks, trustReady }) {
+function buildSummaryText({
+  rating,
+  decision,
+  signoff,
+  ignoredMarkers,
+  filesError,
+  trialRun,
+  spotSample,
+  spotChecks,
+  trustReady,
+  codexReview,
+  claudeSignoff,
+  checksGreen,
+  rayHold,
+}) {
   const lines = [
     summariseDecision({
       risk: rating.risk,
@@ -396,8 +473,11 @@ function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesErro
     }),
   ]
   if (rating.risk === 'A') {
-    lines.push(`- 签字：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
-    lines.push('- 现阶段：两方签字自动写入尚未建成，A 级由 PM 决定是否以管理员身份合并')
+    lines.push(`- Codex：${codexReview?.reason || '还没审'}`)
+    lines.push(`- Claude Code：${claudeSignoff?.reason || '还没签'}`)
+    lines.push(checksGreen === true ? '- 必过检查：已全绿（不含本闸自己）' : '- 必过检查：还没全绿')
+    if (rayHold?.hold === true) lines.push(`- 留给 Ray：${rayHold.reason}`)
+    lines.push(`- 旧签字标记：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
     if (!trustReady) {
       lines.push('- 可信身份还没按角色配好：仓库变量要写成 codex-astra=登录名,claude-code=另一个登录名')
     }
@@ -475,27 +555,41 @@ try {
     today: new Date().toISOString().slice(0, 10),
     readFiles: readHeadFiles,
   })
+  const rayHold = assessRayMergeHold(files)
   let codexReview = { clear: false, reviewed: false, blocking: 0, reason: 'Codex 还没审过当前这次提交' }
-  if (rating.risk === 'B' || rating.risk === 'C') {
-    try {
-      const inputs = await listCodexThreadsFromGraphql()
-      codexReview = evaluateCodexHeadReview({
-        head: headSha,
-        trustedLogin: bound['codex-astra'],
-        prAuthor,
-        comments: sources,
-        reviews: inputs.reviews,
-        threads: inputs.threads,
-        threadsReadable: inputs.threadsReadable,
+  let claudeSignoff = { clear: false, signed: false, blocking: 0, reason: 'Claude Code 还没签当前这次提交' }
+  let checksGreen = false
+  try {
+    const inputs = await listCodexThreadsFromGraphql()
+    codexReview = evaluateCodexHeadReview({
+      head: headSha,
+      trustedLogin: bound['codex-astra'],
+      prAuthor,
+      comments: sources,
+      reviews: inputs.reviews,
+      threads: inputs.threads,
+      threadsReadable: inputs.threadsReadable,
+    })
+    claudeSignoff = evaluateClaudeHeadSignoff({
+      base: baseSha,
+      head: headSha,
+      trustedLogin: bound['claude-code'],
+      prAuthor,
+      sources,
+      threads: inputs.threads,
+      threadsReadable: inputs.threadsReadable,
+    })
+    if (inputs.checksReadable === true) {
+      checksGreen = requiredChecksAreGreen({
+        required: await listRequiredCheckNames(),
+        checks: inputs.checks,
       })
-    } catch (err) {
-      codexReview = {
-        clear: false,
-        reviewed: false,
-        blocking: 0,
-        reason: `Codex 审查读不到（${err instanceof Error ? err.message : String(err)}）`,
-      }
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    codexReview = { clear: false, reviewed: false, blocking: 0, reason: `审查读不到（${message}）` }
+    claudeSignoff = { clear: false, signed: false, blocking: 0, reason: `审查读不到（${message}）` }
+    checksGreen = false
   }
   const decision = applyTrialRunToDecision({
     decision: decideMerge({
@@ -504,6 +598,9 @@ try {
       fork: parseTriState(prIsFork),
       signoff,
       codexReview,
+      claudeSignoff,
+      requiredChecksGreen: checksGreen,
+      rayHold: rayHold.hold,
     }),
     trialRun,
   })
@@ -518,6 +615,10 @@ try {
     spotSample,
     spotChecks: review.spotChecks,
     trustReady,
+    codexReview,
+    claudeSignoff,
+    checksGreen,
+    rayHold,
   })
   if (shouldPublishHeadCheck(eventName)) {
     summaryText += '\n- 检查结果写在 PR 当前这次提交上，不记在主干提交上'
@@ -536,7 +637,7 @@ try {
     published = await publishRiskGateOnHead(decision.pass === true, summaryText)
   } catch (err) {
     summary(`没能把合并闸结果写到 PR 当前提交上：${err instanceof Error ? err.message : String(err)}`)
-    writeOutputs({ risk: rating.risk, decision: 'disable', tier: 'blocked' })
+    writeOutputs({ risk: rating.risk, decision: 'disable', tier: 'blocked', ray_hold: rayHold.hold ? 'true' : 'false' })
     process.exit(1)
   }
 
@@ -556,7 +657,12 @@ try {
     await postIssueComment(`${summaryText}\n\n${marker}`)
   }
 
-  writeOutputs({ risk: rating.risk, decision: outputDecision, tier: decision.tier })
+  writeOutputs({
+    risk: rating.risk,
+    decision: outputDecision,
+    tier: decision.tier,
+    ray_hold: rayHold.hold ? 'true' : 'false',
+  })
   process.exit(
     gateJobExitCode({ eventName, pass: decision.pass === true, headCheckPublished: published }),
   )

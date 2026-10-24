@@ -228,6 +228,49 @@ export const A_RISK_RULES = [
 ]
 
 /**
+ * Paths that keep an otherwise eligible PR for Ray to merge by hand.
+ *
+ * A-level work can auto-merge once both reviews are on the current head and
+ * the required checks are green. These paths are the exception. The match is
+ * by path only, and it fails closed: an unreadable file list, a rename with
+ * no old path, or any hit below means the whole PR is held. SQL files are
+ * held as a set because a path cannot tell DDL from other SQL. A filename
+ * that merely looks like a migration, a token, or ad spend is held too.
+ */
+export const RAY_MERGE_HOLD_RULES = [
+  { prefix: 'supabase/migrations/', why: '数据库 migration（supabase/migrations）' },
+  { suffix: '.sql', why: 'SQL 文件，路径分不清是不是库表语句' },
+  { includes: '/migrations/', why: 'migration 目录' },
+  { includes: '/migration/', why: 'migration 目录' },
+  { basenameIncludes: 'migration', why: '文件名像 migration' },
+  { basename: 'schema.sql', why: '数据库 schema' },
+  { basename: 'schema.prisma', why: '数据库 schema' },
+  { suffix: '.prisma', why: '数据库 schema' },
+  { includes: '/db/schema', why: '数据库 schema 路径' },
+  { basenameIncludes: 'token', why: 'token 存储或刷新' },
+  { basenameIncludes: 'secret', why: '密钥' },
+  { basenameIncludes: 'credential', why: '凭证' },
+  { basenameIncludes: 'creds', why: '凭证' },
+  { includes: 'system-user', why: 'system user token' },
+  { includes: 'system_user', why: 'system user token' },
+  { pattern: /(^|\/)\.env/i, why: '环境变量或密钥文件' },
+  { includes: '/capabilities/ads/', why: '广告花费能力' },
+  { includes: '/meta-ads/', why: 'Meta 广告写入' },
+  { includes: 'google-ads/', why: 'Google 广告写入' },
+  { includes: 'campaign-budget', why: '广告系列预算' },
+  { includes: 'campaign-writes', why: '广告系列写入' },
+  { includes: 'campaign-management', why: '广告系列变更' },
+  { includes: 'budget-scale', why: '加减广告预算' },
+  { includes: 'ad-publisher', why: '广告发布' },
+  { includes: 'ads-manager', why: '广告管理' },
+  { includes: 'ads-posts', why: '广告帖子' },
+  { includes: '/meta/campaign', why: 'Meta 广告系列' },
+  { includes: '/meta/adset', why: 'Meta 广告组' },
+  { pattern: /(^|\/)ads[-/]/i, why: '广告花费相关路径' },
+  { basenameIncludes: 'guardrail', why: '花费或发布闸' },
+]
+
+/**
  * Patterns a file must match to count as strictly low-risk. Not a fallback:
  * anything unmatched here is B, and a diff is C only when every file matches.
  */
@@ -351,6 +394,36 @@ function pathsForEntry(entry) {
     }
   }
   return { paths, unreadable: null }
+}
+
+/**
+ * Whether this diff must wait for Ray, even when both reviews are clear.
+ *
+ * @param {unknown} files
+ * @returns {{hold: boolean, paths: Array<{path: string, why: string}>, reason: string}}
+ */
+export function assessRayMergeHold(files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { hold: true, paths: [], reason: '改动清单读不到，交给 Ray 亲手合' }
+  }
+  /** @type {Array<{path: string, why: string}>} */
+  const hits = []
+  for (const entry of files) {
+    const parsed = pathsForEntry(/** @type {Record<string, unknown>} */ (entry))
+    if (parsed.unreadable) {
+      return { hold: true, paths: hits, reason: '有一项改动看不出原路径，交给 Ray 亲手合' }
+    }
+    for (const path of parsed.paths) {
+      const rule = RAY_MERGE_HOLD_RULES.find((item) => ruleMatches(item, path, true))
+      if (rule) hits.push({ path, why: rule.why })
+    }
+  }
+  if (hits.length === 0) return { hold: false, paths: [], reason: '' }
+  return {
+    hold: true,
+    paths: hits,
+    reason: hits.map((item) => `${item.path}（${item.why}）`).join('；'),
+  }
 }
 
 /**
