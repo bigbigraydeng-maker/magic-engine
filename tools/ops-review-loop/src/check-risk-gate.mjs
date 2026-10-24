@@ -34,8 +34,9 @@ import {
   selectTrustedGateMarkers,
   shouldPostGateComment,
 } from './gate-marker.mjs'
-import { evaluateSignoffs, parseSignoffMarkers, selectTrustedSignoffMarkers } from './signoff-marker.mjs'
+import { evaluateCodexHeadReview, reviewSignoffState } from './signoff-marker.mjs'
 import { decideMerge, summariseDecision } from './merge-decision.mjs'
+import { shouldRequestLegacySpotCheck } from './sampling.mjs'
 import { applyTrialRunToDecision, describeTrialRun, evaluateTrialRunSafely } from './quality.mjs'
 
 /**
@@ -205,6 +206,69 @@ async function listIssueComments() {
   return sources
 }
 
+/** GraphQL page size. A further page we did not read fails closed. */
+const CODEX_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviews(last:100){
+        pageInfo{hasNextPage}
+        nodes{author{login} state body commit{oid}}
+      }
+      reviewThreads(first:100){
+        pageInfo{hasNextPage}
+        nodes{
+          isResolved
+          comments(first:30){
+            pageInfo{hasNextPage}
+            nodes{author{login} body commit{oid}}
+          }
+        }
+      }
+    }
+  }
+}`
+
+/**
+ * Reviews and threads. `isResolved` exists only on GraphQL. A failed or
+ * truncated read is not a clean review.
+ *
+ * @returns {Promise<{reviews: object[], threads: object[], threadsReadable: boolean}>}
+ */
+async function listCodexThreadsFromGraphql() {
+  const [owner, name] = String(repository).split('/')
+  const payload = await api('/graphql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: CODEX_THREADS_QUERY,
+      variables: { owner, name, number: Number(pr) },
+    }),
+  })
+  const pull = payload?.data?.repository?.pullRequest
+  if (payload?.errors || !pull) throw new Error('Codex 审查讨论串读不到')
+  let commentsComplete = true
+  const threads = (pull.reviewThreads?.nodes ?? []).map((node) => {
+    if (node?.comments?.pageInfo?.hasNextPage === true) commentsComplete = false
+    const comments = (node?.comments?.nodes ?? []).map((comment) => ({
+      author: comment?.author?.login ?? null,
+      commitId: comment?.commit?.oid ?? null,
+      body: typeof comment?.body === 'string' ? comment.body : '',
+    }))
+    return { resolved: node?.isResolved === true, comments }
+  })
+  const reviews = (pull.reviews?.nodes ?? []).map((review) => ({
+    author: review?.author?.login ?? null,
+    commitId: review?.commit?.oid ?? null,
+    state: review?.state ?? null,
+    body: typeof review?.body === 'string' ? review.body : '',
+  }))
+  const complete =
+    pull.reviews?.pageInfo?.hasNextPage !== true &&
+    pull.reviewThreads?.pageInfo?.hasNextPage !== true &&
+    commentsComplete
+  return { reviews, threads, threadsReadable: complete }
+}
+
 /**
  * Post one issue comment. Throws on failure so the caller fails closed.
  *
@@ -264,10 +328,10 @@ async function readHeadFiles(paths) {
 /**
  * Build the human summary text for the step summary and the posted comment.
  *
- * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any}} input
+ * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any, spotSample: {reason: string}|null, spotChecks: {present: string[]}|null, trustReady: boolean}} input
  * @returns {string}
  */
-function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError, trialRun }) {
+function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError, trialRun, spotSample, spotChecks, trustReady }) {
   const lines = [
     summariseDecision({
       risk: rating.risk,
@@ -278,7 +342,16 @@ function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesErro
   ]
   if (rating.risk === 'A') {
     lines.push(`- 签字：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
-    lines.push('- 现阶段：签字自动写入尚未建成，A 级由 PM 决定是否以管理员身份合并')
+    lines.push('- 现阶段：两方签字自动写入尚未建成，A 级由 PM 决定是否以管理员身份合并')
+    if (!trustReady) {
+      lines.push('- 可信身份还没按角色配好：仓库变量要写成 codex-astra=登录名,claude-code=另一个登录名')
+    }
+  }
+  if (rating.risk === 'B' && spotSample) {
+    lines.push(`- 抽查：${spotSample.reason}`)
+    if (spotChecks && spotChecks.present.length > 0) {
+      lines.push(`- 抽查记录（不挡合并）：${spotChecks.present.join('/')}`)
+    }
   }
   lines.push(...describeTrialRun(trialRun))
   if (filesError) {
@@ -323,18 +396,22 @@ try {
   const existing = findGateFor({ markers: trustedGate, base: baseSha, head: headSha })
 
   // Sign-off: only consulted when the rating is A, but always computed so the
-  // summary can report it.
-  const trustedLogins = signoffTrustedLogins
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const signoffMarkers = selectTrustedSignoffMarkers({
+  // summary can report it. Spot checks are reported for B and never block.
+  const review = reviewSignoffState({
+    rawTrust: signoffTrustedLogins,
     sources,
-    trustedAuthors: trustedLogins,
     prAuthor,
+    base: baseSha,
+    head: headSha,
   })
-  const ignoredSignoff = parseSignoffMarkers(sources.map((s) => s.body)).length - signoffMarkers.length
-  const signoff = evaluateSignoffs({ markers: signoffMarkers, base: baseSha, head: headSha })
+  const signoff = review.signoff
+  const ignoredSignoff = review.ignoredMarkers
+  const spotSample = shouldRequestLegacySpotCheck({ risk: rating.risk, pr, sha: headSha })
+  const bound = review.trust.byRole
+  const trustReady =
+    typeof bound['codex-astra'] === 'string' &&
+    typeof bound['claude-code'] === 'string' &&
+    bound['codex-astra'] !== bound['claude-code']
 
   // 当场试跑 can only make the decision stricter — it never yields `enable`.
   const trialRun = await evaluateTrialRunSafely({
@@ -343,12 +420,35 @@ try {
     today: new Date().toISOString().slice(0, 10),
     readFiles: readHeadFiles,
   })
+  let codexReview = { clear: false, reviewed: false, blocking: 0, reason: 'Codex 还没审过当前这次提交' }
+  if (rating.risk === 'B' || rating.risk === 'C') {
+    try {
+      const inputs = await listCodexThreadsFromGraphql()
+      codexReview = evaluateCodexHeadReview({
+        head: headSha,
+        trustedLogin: bound['codex-astra'],
+        prAuthor,
+        comments: sources,
+        reviews: inputs.reviews,
+        threads: inputs.threads,
+        threadsReadable: inputs.threadsReadable,
+      })
+    } catch (err) {
+      codexReview = {
+        clear: false,
+        reviewed: false,
+        blocking: 0,
+        reason: `Codex 审查读不到（${err instanceof Error ? err.message : String(err)}）`,
+      }
+    }
+  }
   const decision = applyTrialRunToDecision({
     decision: decideMerge({
       risk: rating.risk,
       draft: parseTriState(prDraft),
       fork: parseTriState(prIsFork),
       signoff,
+      codexReview,
     }),
     trialRun,
   })
@@ -360,6 +460,9 @@ try {
     ignoredMarkers: ignoredGate + ignoredSignoff,
     filesError,
     trialRun,
+    spotSample,
+    spotChecks: review.spotChecks,
+    trustReady,
   })
   summary(summaryText)
 
