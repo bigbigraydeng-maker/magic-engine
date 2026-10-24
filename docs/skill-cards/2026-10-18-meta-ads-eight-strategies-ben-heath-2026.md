@@ -51,7 +51,9 @@
 **整体：最值得做的只有一件——用 CTS 现成的只读数据核实「拉新组是不是本来就在花钱买热人」，它决定「收割/拉新分开」值不值得；其余已有、冲突以 ME 为准、或属 PM 拍板项。**
 
 ## 验证
-未验证。验证方案（只读、不花钱）：用 Meta 官方只读接口，对 CTS 的 Reborn（拉新）与 Retargeting·Warm 两个系列，按 Meta 的「新受众/互动受众/老客户」拆近 30 天花费占比与结果占比，看两者是否真的差不多。前提：先确认 ME 读得到这个拆分（未核实）。
+**初步验证（2026-10-19，74 号只读，CTS 个人账户 8–10 月；11/7 用官方账户新数据复核）**：按**系列**拆，冷启动广撒约占 50% 花费、再营销暖人群约 45%、养池约 5%，两者每条留资成本接近（暖人群略低）。⚠️ 这是按系列分的占比，**不是**本卡要验的「拉新组里有多少钱花到了已互动/老客户身上」（Meta 受众三层拆分），所以本卡的核心问题仍**未验证**。另：10/22 起计划改为约 20% 暖 / 80% 冷，官方账户暖池约 8,400 人，历史结论不能直接套用。
+
+原验证方案（未执行部分）：验证方案（只读、不花钱）：用 Meta 官方只读接口，对 CTS 的 Reborn（拉新）与 Retargeting·Warm 两个系列，按 Meta 的「新受众/互动受众/老客户」拆近 30 天花费占比与结果占比，看两者是否真的差不多。前提：先确认 ME 读得到这个拆分（未核实）。
 
 ## 落点
 暂不落 skill/手册/代码。若验证成立，结论写进 CTS 客户私有记录，不进共享手册（CTS 单客户证据）。
@@ -67,3 +69,65 @@
 - **「合并数据过学习期＝吸收（已有一致）」说满了：** 视频的意思是把冷、热人群合并成一个系列；CTS v3.1 是把 4 个组并成 2 个，但**仍把收割组和拉新组分开**。两者只在「数据别太碎」这一点相通，方向不同。改为：**部分吸收（仅「别把数据切碎」这一点一致）**。
 - **出处写错：** 「ME 视频只走视频工厂」的原文在广告规则 RL-11 与 C-10（CLAUDE.md 第 8 条管的是社媒发布），请以后者为准。
 - **「ME 全部资料 grep 零命中」只对 grep 过的文件成立：** 广告 Agent 手册 v1.0、Claude 记忆手册本卡均为仅 grep，非通读；「价值规则」「三层受众拆分」应读作「未在已 grep 的文件里发现」，不是「ME 没有」。代码侧（2026-10-18 对 origin/main 的 src/lib 搜索）也未发现这两项。
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "warm-spend-split",
+   "text": "拉新组有多少钱花到已互动/老客户身上",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-new-vs-warm-spend-split",
+   "note": "初步：按系列冷暖各约一半，核心问题未验"
+  },
+  {
+   "key": "value-rules",
+   "text": "价值规则：给某类人群出价加成",
+   "state": "learning"
+  },
+  {
+   "key": "three-tier-report",
+   "text": "标出新人/互动过/老客户三层并按层看报表",
+   "state": "learning"
+  },
+  {
+   "key": "twenty-per-adset",
+   "text": "每组放 20 条素材",
+   "state": "not_applicable",
+   "note": "与 SOP §0 实测冲突"
+  },
+  {
+   "key": "creator-ads",
+   "text": "和创作者合作投广告",
+   "state": "pm_decision",
+   "note": "外部执行方、花钱"
+  },
+  {
+   "key": "creative-test-tool",
+   "text": "平台创意测试功能",
+   "state": "merged",
+   "merged_into": "2026-10-18-meta-ads-creative-testing-post-andromeda#native-creative-test"
+  },
+  {
+   "key": "merge-data",
+   "text": "冷热合并，数据不切碎",
+   "state": "learning",
+   "note": "原判「已有一致」；待合并的复核更正（PR 2852）改为只有「别把数据切碎」一致，ME 仍分收割/拉新"
+  },
+  {
+   "key": "entry-price",
+   "text": "入口产品要么很便宜要么很贵",
+   "state": "not_applicable",
+   "note": "个人经验无数据"
+  },
+  {
+   "key": "whatsapp-funnel",
+   "text": "广告直接进 WhatsApp",
+   "state": "learning",
+   "note": "只在 NAL 一个客户验证过（候选）"
+  }
+ ]
+}
+```

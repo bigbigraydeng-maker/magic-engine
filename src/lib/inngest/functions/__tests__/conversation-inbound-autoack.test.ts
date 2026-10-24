@@ -1,28 +1,25 @@
 /**
  * F1 自动安抚回复（issue #1584）装配 + 关键路径测试。
  *
- * 分四块：
+ * 分三块：
  *   1. `parseMessageReceived` —— 复用共享 Zod 契约的校验行为
- *   2. `resolvePostSaleClassificationPolicy` —— 按行业选 Playbook，不认识的
- *      行业不猜、不套旅游判据
- *   3. 装配契约 —— 事件名 / retries / debounce 配置，不撞
+ *   2. 装配契约 —— 事件名 / retries / debounce 配置，不撞
  *      `WORKER_OWNED_EVENTS`
- *   4. 关键路径变异测试 —— opt-out 命中/未命中、kill switch 开/关、
- *      post_sale/lead_intake 分类两条路径，每条都断言"没被跳过的检查
- *      压根没被调用"，不是只看返回值
+ *   3. 关键路径变异测试 —— opt-out 命中/未命中、kill switch 开/关、6 小时限频，
+ *      每条都断言"没被跳过的检查压根没被调用"，不是只看返回值
+ *      （2026-10-22 起不再有售前/售后分类这一路）
  */
 import { describe, it, expect, vi } from 'vitest'
 import {
   createConversationInboundAutoAckFunction,
   parseMessageReceived,
-  resolvePostSaleClassificationPolicy,
   AUTOACK_TEMPLATE,
   AUTOACK_SENT_BY_EMAIL,
+  AUTOACK_COOLDOWN_HOURS,
   CONVERSATION_AUTOACK_SENT_EVENT,
   type ConversationInboundAutoAckDeps,
 } from '../conversation-inbound-autoack'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
-import { TOURISM_POST_SALE_POLICY, type ConversationClass } from '@/lib/messenger-agent/classify'
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 import type { SendReplyResult } from '@/lib/messenger/send'
 import type { SendWhatsAppResult } from '@/lib/whatsapp/send'
@@ -92,8 +89,7 @@ function makeDeps(overrides: Partial<ConversationInboundAutoAckDeps> = {}): Conv
   return {
     isOptedOut: vi.fn(async () => false),
     isEnabled: vi.fn(async () => true),
-    classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
-    loadIndustry: vi.fn(async () => null),
+    hasRecentOutbound: vi.fn(async () => false),
     // email 也要建模（哪怕 F1 从不会真的调它，见下方"不支持的渠道"用例）——
     // `ConversationInboundAutoAckDeps.send` 的类型是三渠道的 Record，少一个键
     // 类型检不过。
@@ -126,24 +122,6 @@ describe('parseMessageReceived', () => {
     const raw = overrides === undefined ? undefined : messageReceived(overrides)
     const parsed = parseMessageReceived(raw)
     expect(parsed.ok).toBe(false)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 2) resolvePostSaleClassificationPolicy —— 按行业选 Playbook
-// ---------------------------------------------------------------------------
-
-describe('resolvePostSaleClassificationPolicy', () => {
-  it('旅游关键词命中的行业 → TOURISM_POST_SALE_POLICY', () => {
-    expect(resolvePostSaleClassificationPolicy('Travel — Tour Operator')).toBe(TOURISM_POST_SALE_POLICY)
-    expect(resolvePostSaleClassificationPolicy('旅游')).toBe(TOURISM_POST_SALE_POLICY)
-  })
-
-  it('认不出的行业（地产/建材/空）→ null，不套旅游判据', () => {
-    expect(resolvePostSaleClassificationPolicy('real_estate')).toBeNull()
-    expect(resolvePostSaleClassificationPolicy('SPC/hybrid flooring wholesale (B2B trade)')).toBeNull()
-    expect(resolvePostSaleClassificationPolicy(null)).toBeNull()
-    expect(resolvePostSaleClassificationPolicy(undefined)).toBeNull()
   })
 })
 
@@ -189,7 +167,6 @@ describe('关键路径', () => {
     expect(result).toMatchObject({ outcome: 'skipped_invalid_payload' })
     expect(deps.isOptedOut).not.toHaveBeenCalled()
     expect(deps.isEnabled).not.toHaveBeenCalled()
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.send.messenger).not.toHaveBeenCalled()
   })
 
@@ -213,7 +190,6 @@ describe('关键路径', () => {
     const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
     expect(result).toMatchObject({ outcome: 'skipped_opted_out', conversation_id: CONVERSATION_ID })
     expect(deps.isEnabled).not.toHaveBeenCalled()
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.send.messenger).not.toHaveBeenCalled()
     expect(step.sendEvent).not.toHaveBeenCalled()
   })
@@ -232,7 +208,6 @@ describe('关键路径', () => {
     const step = fakeStep()
     const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
     expect(result).toMatchObject({ outcome: 'skipped_channel_disabled' })
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.send.messenger).not.toHaveBeenCalled()
     expect(deps.send.whatsapp).not.toHaveBeenCalled()
     expect(step.sendEvent).not.toHaveBeenCalled()
@@ -247,26 +222,8 @@ describe('关键路径', () => {
     expect(deps.send.messenger).toHaveBeenCalledTimes(1)
   })
 
-  it('分类为 post_sale → skipped_post_sale，不发安抚（发送 mock 断言，不是只看返回值）', async () => {
-    const deps = makeDeps({
-      loadIndustry: vi.fn(async () => 'Travel — Tour Operator'),
-      classify: vi.fn(async (): Promise<ConversationClass> => 'post_sale'),
-    })
-    const fn = createConversationInboundAutoAckFunction(deps)
-    const step = fakeStep()
-    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
-    expect(result).toMatchObject({ outcome: 'skipped_post_sale' })
-    expect(deps.send.messenger).not.toHaveBeenCalled()
-    expect(step.sendEvent).not.toHaveBeenCalled()
-    // 传给 classify 的必须是旅游 Playbook，不是别的
-    expect(deps.classify).toHaveBeenCalledWith(CONVERSATION_ID, TOURISM_POST_SALE_POLICY)
-  })
-
-  it('分类为 lead_intake → 正常发送，body 是硬编码模板、usedAiDraft=false、sentByEmail 是系统身份', async () => {
-    const deps = makeDeps({
-      loadIndustry: vi.fn(async () => 'Travel — Tour Operator'),
-      classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
-    })
+  it('2026-10-22 PM：不再区分售前 / 售后——F1 不看对话内容，所有进线（含像老客户的）都照发安抚', async () => {
+    const deps = makeDeps()
     const fn = createConversationInboundAutoAckFunction(deps)
     const step = fakeStep()
     const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
@@ -278,24 +235,6 @@ describe('关键路径', () => {
       sentByEmail: AUTOACK_SENT_BY_EMAIL,
       usedAiDraft: false,
     })
-  })
-
-  it('认不出行业（没有 Playbook）→ 不调 classify，直接按 lead_intake 继续发送', async () => {
-    const deps = makeDeps({ loadIndustry: vi.fn(async () => 'real_estate') })
-    const fn = createConversationInboundAutoAckFunction(deps)
-    const step = fakeStep()
-    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
-    expect(result).toMatchObject({ outcome: 'sent' })
-    expect(deps.classify).not.toHaveBeenCalled()
-  })
-
-  it('🔴 Codex 复审：查行业真的报错（不是"合法地没填"）→ 必须抛错，绝不能悄悄当成"没有 Playbook"然后照常发送', async () => {
-    const deps = makeDeps({ loadIndustry: vi.fn(async () => { throw new Error('db 抽风') }) })
-    const fn = createConversationInboundAutoAckFunction(deps)
-    const step = fakeStep()
-    await expect(handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })).rejects.toThrow('db 抽风')
-    expect(deps.send.messenger).not.toHaveBeenCalled()
-    expect(step.sendEvent).not.toHaveBeenCalled()
   })
 
   it('发送失败（ok:false）→ send_failed，不 emit 收尾事件', async () => {
@@ -366,8 +305,8 @@ describe('关键路径', () => {
     const fn = createConversationInboundAutoAckFunction(deps)
     const step = fakeStep()
     await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
-    // 4 个真实副作用各自一个 step.run：opt-out / kill-switch / classify / send。
-    // emit 不算在内——它必须是 step.sendEvent 的顶层调用，不是包在第 5 个
+    // 4 个真实副作用各自一个 step.run：opt-out / kill-switch / recent-outbound（6 小时限频）/ send。
+    // emit 不算在内——它必须是 step.sendEvent 的顶层调用，不是包在第 4 个
     // step.run 里面。
     expect(step.run).toHaveBeenCalledTimes(4)
     expect(step.sendEvent).toHaveBeenCalledTimes(1)
@@ -396,5 +335,143 @@ describe('关键路径', () => {
     })
     expect(result).toMatchObject({ outcome: 'skipped_invalid_payload' })
     expect(deps.isOptedOut).not.toHaveBeenCalled()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5) 6 小时限频（PM 决定 2026-10-21）
+// ---------------------------------------------------------------------------
+
+describe('6 小时限频', () => {
+  it('最近没有出站（hasRecentOutbound=false）→ 正常发送，且查询窗口是 ISO 字符串', async () => {
+    const deps = makeDeps()
+    const fn = createConversationInboundAutoAckFunction(deps)
+    const step = fakeStep()
+    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
+    expect(result).toMatchObject({ outcome: 'sent' })
+    expect(deps.send.messenger).toHaveBeenCalledTimes(1)
+    expect(deps.hasRecentOutbound).toHaveBeenCalledTimes(1)
+    const [conversationId, sinceIso] = (deps.hasRecentOutbound as unknown as {
+      mock: { calls: [string, string][] }
+    }).mock.calls[0]
+    expect(conversationId).toBe(CONVERSATION_ID)
+    expect(typeof sinceIso).toBe('string')
+    expect(Number.isNaN(Date.parse(sinceIso))).toBe(false)
+  })
+
+  it('6 小时内已有成功出站（hasRecentOutbound=true）→ skipped_recently_replied，不分类、不发送、不 emit', async () => {
+    const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => true) })
+    const fn = createConversationInboundAutoAckFunction(deps)
+    const step = fakeStep()
+    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
+    expect(result).toMatchObject({
+      outcome: 'skipped_recently_replied',
+      conversation_id: CONVERSATION_ID,
+      detail: `within_${AUTOACK_COOLDOWN_HOURS}h`,
+    })
+    expect(deps.send.messenger).not.toHaveBeenCalled()
+    expect(deps.send.whatsapp).not.toHaveBeenCalled()
+    expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('查询窗口恰好是 AUTOACK_COOLDOWN_HOURS 小时前（假时钟精确断言）', async () => {
+    const T = new Date('2026-10-21T12:00:00.000Z').getTime()
+    vi.useFakeTimers()
+    vi.setSystemTime(T)
+    try {
+      const deps = makeDeps()
+      const fn = createConversationInboundAutoAckFunction(deps)
+      const step = fakeStep()
+      await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
+      expect(deps.hasRecentOutbound).toHaveBeenCalledWith(
+        CONVERSATION_ID,
+        new Date(T - AUTOACK_COOLDOWN_HOURS * 3_600_000).toISOString(),
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('🔴 读取出站记录失败 → 必须抛错让 Inngest 重试，绝不能当成"最近没回过"照常发送', async () => {
+    const deps = makeDeps({
+      hasRecentOutbound: vi.fn(async () => {
+        throw new Error('db down')
+      }),
+    })
+    const fn = createConversationInboundAutoAckFunction(deps)
+    const step = fakeStep()
+    await expect(
+      handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step }),
+    ).rejects.toThrow('db down')
+    expect(deps.send.messenger).not.toHaveBeenCalled()
+    expect(step.sendEvent).not.toHaveBeenCalled()
+  })
+
+  it('顺序：opt-out 命中时根本不查最近出站', async () => {
+    const deps = makeDeps({ isOptedOut: vi.fn(async () => true) })
+    const fn = createConversationInboundAutoAckFunction(deps)
+    const step = fakeStep()
+    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
+    expect(result).toMatchObject({ outcome: 'skipped_opted_out' })
+    expect(deps.hasRecentOutbound).not.toHaveBeenCalled()
+  })
+
+  it('顺序：渠道 kill switch 关时根本不查最近出站', async () => {
+    const deps = makeDeps({ isEnabled: vi.fn(async () => false) })
+    const fn = createConversationInboundAutoAckFunction(deps)
+    const step = fakeStep()
+    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
+    expect(result).toMatchObject({ outcome: 'skipped_channel_disabled' })
+    expect(deps.hasRecentOutbound).not.toHaveBeenCalled()
+  })
+})
+
+describe('6 小时限频 — 独立于常量的边界', () => {
+  it('🔴 常量就是 6（别人把它改成 0/1/60，用同一个常量算期望的测试发现不了）', () => {
+    expect(AUTOACK_COOLDOWN_HOURS).toBe(6)
+  })
+
+  it('查询起点是「现在往前整整 6 小时」，用字面量算，不用常量', async () => {
+    const T = new Date('2026-10-21T12:00:00.000Z').getTime()
+    vi.useFakeTimers()
+    vi.setSystemTime(T)
+    try {
+      const deps = makeDeps()
+      const fn = createConversationInboundAutoAckFunction(deps)
+      await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step: fakeStep() })
+      expect(deps.hasRecentOutbound).toHaveBeenCalledWith(CONVERSATION_ID, new Date(T - 6 * 3_600_000).toISOString())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('用「上一次出站时间」模拟：5 小时 59 分前回过 → 不安抚；6 小时 1 分前回过 → 会再安抚', async () => {
+    const T = new Date('2026-10-21T12:00:00.000Z').getTime()
+    vi.useFakeTimers()
+    vi.setSystemTime(T)
+    try {
+      const run = async (lastSentMsAgo: number) => {
+        const lastSentAt = new Date(T - lastSentMsAgo).toISOString()
+        const deps = makeDeps({ hasRecentOutbound: vi.fn(async (_c: string, since: string) => lastSentAt >= since) })
+        const fn = createConversationInboundAutoAckFunction(deps)
+        return handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step: fakeStep() })
+      }
+      expect(await run(5 * 3_600_000 + 59 * 60_000)).toMatchObject({ outcome: 'skipped_recently_replied' })
+      expect(await run(6 * 3_600_000 + 60_000)).toMatchObject({ outcome: 'sent' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+
+describe('6 小时限频 — 生产接线', () => {
+  it('🔴 生产实例的依赖里接的是真实的 hasRecentOutbound（漏接线类型检查不一定抓得到）', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const source = readFileSync(join(process.cwd(), 'src/lib/inngest/functions/conversation-inbound-autoack.ts'), 'utf8')
+    expect(source).toMatch(/import \{ hasRecentOutbound \} from '@\/lib\/messenger\/recent-outbound'/)
+    const prod = source.slice(source.indexOf('export const conversationInboundAutoAck = '))
+    expect(prod).toMatch(/hasRecentOutbound,/)
   })
 })

@@ -6,6 +6,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
+import { isAssetOnly } from './deliverable'
 import {
   REEL_AUTO_CHECK_KEYS,
   humanKeysForStored,
@@ -208,7 +209,8 @@ interface PullResult {
   errors: string[]
 }
 
-async function applyApprove(wo: Record<string, unknown>, rec: AirtableRecord): Promise<boolean> {
+export async function applyApprove(wo: Record<string, unknown>, rec: AirtableRecord): Promise<boolean> {
+  if (isAssetOnly(wo.brief)) return false
   const ref = (wo.review_ref ?? {}) as Record<string, unknown>
   const output = (wo.output ?? {}) as Record<string, unknown>
   const human = validateContentChecklist(ref['checklist_human'], humanKeysForStored(ref['checklist_human']), 'HUMAN')
@@ -220,7 +222,13 @@ async function applyApprove(wo: Record<string, unknown>, rec: AirtableRecord): P
     .from('content_work_orders')
     .update({
       status: 'approved',
-      review_ref: { ...ref, approved_by: reviewer, approved_at: new Date().toISOString() },
+      review_ref: {
+        ...ref,
+        approved_by: reviewer,
+        approved_at: new Date().toISOString(),
+        approval_source: 'airtable_sync',
+        approver_scope: 'unverified',
+      },
       updated_at: new Date().toISOString(),
     })
     .eq('id', wo.id as string)
@@ -332,7 +340,11 @@ export async function pullReviewActions(): Promise<PullResult> {
       if (action === '通过') {
         const ok = await applyApprove(wo, rec)
         await patchRecord(FACTORY_REVIEW_TABLE_ID, rec.id, {
-          [F.receipt]: ok ? `系统已收到 ✅ 通过 ${nzNow()}` : `❌ 工单已不在待审状态,未执行 ${nzNow()}`,
+          [F.receipt]: ok
+            ? `系统已收到 ✅ 通过 ${nzNow()}`
+            : isAssetOnly(wo.brief)
+              ? `❌ 这是素材工单(不单独发布),不能通过,未执行 ${nzNow()}`
+              : `❌ 工单已不在待审状态,未执行 ${nzNow()}`,
         })
         if (ok) result.approved.push(woId)
       } else if (action === '打回·画面质量') {

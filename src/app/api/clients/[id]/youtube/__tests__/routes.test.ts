@@ -36,6 +36,20 @@ describe('POST youtube/stage', () => {
   it('400 on a non-uuid work order', async () => {
     expect((await stage(post({ workOrderId: 'nope' }), ctx)).status).toBe(400)
   })
+  it('accepts an organic content post id and emits it as the staging source', async () => {
+    const contentPostId = '22222222-2222-4222-8222-222222222222'
+    const res = await stage(post({ contentPostId }), ctx)
+    expect(await res.json()).toMatchObject({ success: true, noPublish: true })
+    expect(mocks.sendInngestEvent.mock.calls[0][0].data).toMatchObject({ contentPostId })
+  })
+  it('rejects two staging source ids', async () => {
+    const res = await stage(post({
+      workOrderId: '11111111-1111-4111-8111-111111111111',
+      contentPostId: '22222222-2222-4222-8222-222222222222',
+    }), ctx)
+    expect(res.status).toBe(400)
+    expect(mocks.sendInngestEvent).not.toHaveBeenCalled()
+  })
   it('emits the staging event and says nothing is published', async () => {
     const res = await stage(post({ workOrderId: '11111111-1111-4111-8111-111111111111' }), ctx)
     expect(await res.json()).toMatchObject({ success: true, noPublish: true })

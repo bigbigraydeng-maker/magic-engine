@@ -63,7 +63,6 @@ describe('decideMerge — fork', () => {
     const result = decideMerge({
       risk: 'C',
       draft: false,
-      // @ts-expect-error deliberately passing an invalid value
       fork: 'true',
       signoff: undefined,
     })

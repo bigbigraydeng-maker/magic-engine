@@ -368,6 +368,8 @@ function classifyImpact(ctr: { recent: number | null; base: number | null }, fre
 }
 
 export function diagnoseAudiencePoolStarved(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {
+  // 后台标了「不在广告健康页显示」的账户：数据新鲜度类噪音跳过（钱相关的诊断照跑）。
+  if (ctx.account.hiddenFromAdHealth === true) return []
   if (input.clientPageId === null || input.clientPageId === undefined) return []
   if (ctx.account.adDaily === undefined) return []
   if (ctx.account.audienceHistory === undefined) return []

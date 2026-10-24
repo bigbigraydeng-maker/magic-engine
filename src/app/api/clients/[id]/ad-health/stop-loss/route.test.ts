@@ -137,8 +137,9 @@ describe('stop-loss POST — campaign belonging to another client', () => {
     const res = await post({ campaign_id: '120220000000000002', action: 'cut' })
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ ok: true, executed: true, status: 'executed', runs: [{ runId: 'run-1' }], warnings: ['广告系列状态已变化，未自动重新开启。'] })
+    // 内核和库里都用 act_ 形式；Meta 返回纯数字，路由入口负责规范化。
     expect(m.submitStopLoss).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      clientId: CLIENT_A, goalId: undefined, campaignId: '120220000000000002', adAccountId: '1111111111',
+      clientId: CLIENT_A, goalId: undefined, campaignId: '120220000000000002', adAccountId: 'act_1111111111',
       cycleDate: '2026-09-30', requestId: 'de305d54-75b4-431b-adb2-eb6b9e546014', action: 'cut_campaign',
     }))
     expectNoMetaWrite()

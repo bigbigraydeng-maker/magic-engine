@@ -4,7 +4,7 @@ title: CTS 广告 10/22 起只用官方账户，个人账户暂停使用
 status: decided
 owner: pm
 decided_on: 2026-10-18
-source: chat:统筹18号窗口 PM 10-18「官方，个人的我们暂停使用，转官方」
+source: session:ec90bb17
 verify_by: 2026-10-22
 verify_how: 10/22 前：官方账户页面条款已接受且 Lead 广告草稿校验通过；计划里的账户与受众已改为官方账户；10/22 开投后日花费落在官方账户而非个人账户
 ---

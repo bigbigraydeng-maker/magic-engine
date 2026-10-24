@@ -15,15 +15,16 @@
  *    敏感事实，等于绕过双签闸自动说出去」。本文件因此：
  *      · 不 import `@/lib/knowledge/read`（`getClientKnowledge`）；
  *      · 不 import 任何 `canonical.*` / offerings 相关模块；
- *      · `AUTOACK_TEMPLATE` 是写死在这个文件里的常量字符串，中英双语、
- *        零客户专属事实（没有团名、价格、电话、日期）。
+ *      · `AUTOACK_TEMPLATE` 是写死在这个文件里的常量字符串，只有英文（PM 2026-10-21：
+ *        自动回复不可以出现中文）、零客户专属事实（没有团名、价格、电话、日期）。
  *    改这个模板前必须重新走一次子牙+魏征复审，不是这个文件内部能拍板的事。
  *
  * ## 五道闸（issue #1584 骨架）
  *
  *   Step 0   opt-out 检查（#1575 `isConversationOptedOut`，fail-closed）
  *   Step 0.5 渠道 kill switch（#1578 `isChannelEnabled`，fail-closed）
- *   Step 0.8 售前/售后分类（#1576 `classifyConversation`）——post_sale 不发
+ *   （2026-10-22 PM：售前/售后分类这一道闸已拿掉——所有 WhatsApp / 私信进线都发安抚，
+ *     不再因为「看起来像老客户」跳过。原因见台账 2026-10-22-ai-reply-all-inbound-no-postsale-gate。）
  *   Step 1   发硬编码模板（#1578 `CHANNEL_SEND`）
  *   Step 2   emit `conversation/autoack.sent` 收尾事件
  *
@@ -31,16 +32,11 @@
  * 副作用必须在 step 里才会被 Inngest 缓存——`retries: 1` 时如果 Step 2 的
  * emit 失败重试，Step 1 的发送结果已经被 memoize，不会被同一次重放重发一遍）。
  *
- * ## 谁决定「这个客户该用哪份售后判据」——不写死 CTS
+ * ## 不再区分售前 / 售后（2026-10-22 PM）
  *
- * `classifyConversation` 本身不带任何行业默认值（见 classify.ts 文件头），
- * 旅游行业的 `TOURISM_POST_SALE_POLICY` 是一个具名 Playbook 常量。本文件
- * 按 `clients.industry` 走跟 `industry-features.ts` 完全一样的「行业关键词
- * 匹配」路子选 policy（`resolvePostSaleClassificationPolicy`），不是
- * `if (clientId === CTS_ID)`——明天换成另一个旅游客户，这段代码不需要改。
- * 认不出行业 → 没有 Playbook 可用 → 直接按 `lead_intake` 处理（跟
- * `classifyConversation` 自己「查不到消息就保守判 lead_intake」的方向一致，
- * 不是「换了行业就不发」）。
+ * 以前这里有一道「售前/售后分类」闸：对话被判成售后就不发安抚。它按关键词（如 booking）判断，
+ * 把「订之前能不能改行程」这类新咨询误判成老客户。现在所有进线都发；分类函数留在
+ * `messenger-agent/classify.ts`，不再用于拦截。
  *
  * ## 一事件一主
  *
@@ -51,7 +47,6 @@
 
 import { randomUUID } from 'node:crypto'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { supabaseAdmin } from '@/lib/supabase'
 import {
   CONVERSATION_MESSAGE_RECEIVED_EVENT,
   ConversationMessageReceivedSchema,
@@ -65,14 +60,8 @@ import {
   type MessengerAgentChannel,
   type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
-import {
-  classifyConversation,
-  TOURISM_POST_SALE_POLICY,
-  type ConversationClass,
-  type PostSaleClassificationPolicy,
-} from '@/lib/messenger-agent/classify'
-import { hasIndustryFeature } from '@/lib/clients/industry-features'
 import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from '@/lib/messenger/autoack-identity'
+import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
 
 export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent'
 
@@ -93,11 +82,14 @@ export { AUTOACK_SENT_BY_EMAIL }
  */
 export { AUTOACK_TEMPLATE }
 
+/** 同一会话最多每 6 小时自动安抚一次；6 小时内已有任何成功出站（含人工回复）则不发。 */
+export const AUTOACK_COOLDOWN_HOURS = 6
+
 export type AutoAckOutcome =
   | 'sent'
   | 'skipped_opted_out'
   | 'skipped_channel_disabled'
-  | 'skipped_post_sale'
+  | 'skipped_recently_replied'
   | 'skipped_invalid_payload'
   | 'send_failed'
 
@@ -143,51 +135,6 @@ export function isKnownAutoAckChannel(channel: string): channel is MessengerAgen
 }
 
 /**
- * 这个客户该用哪份售后判据——按行业关键词匹配（跟
- * `industryFeatureFlags`/`hasIndustryFeature` 同一套判法），不是按
- * `clientId` 硬编码。目前只有旅游行业有具名 Playbook；其它行业没有对应
- * 判据时返回 `null`，调用方按 `lead_intake` 处理（不猜、不套错行业的判据）。
- */
-export function resolvePostSaleClassificationPolicy(
-  industry: string | null | undefined,
-): PostSaleClassificationPolicy | null {
-  if (hasIndustryFeature(industry, 'tailor_made')) return TOURISM_POST_SALE_POLICY
-  return null
-}
-
-/**
- * 生产实现：查 `clients.industry`。
- *
- * 🔴 Codex 复审（2026-09-15，PR #1736）实测发现：这里原来把"查询真的报错"跟
- * "这个客户合法地没填 industry"两种情况都折叠成同一个 `null`，下游把
- * `null`一律当"没有对应 Playbook → 按 lead_intake 处理 → 照常发送"。
- * 结果是一次数据库瞬时故障，会让一个正在问售后问题的旅游客户被误判成
- * 新客户，收到一句不适用的"稍后回复您"——这条自动发送路径本该跟本文件
- * 其它每一道闸（opt-out/kill-switch）一样是 fail-closed 方向,却在这一处
- * 变成了"查不出来就当无害情况处理"。
- *
- * 改法：真的查询报错就 throw，让这一步的 `step.run` 把异常往上抛——整个
- * 函数因此失败，Inngest 的 `retries: 1` 会重跑一次（多数瞬时 DB 抖动一次
- * 重试就好了），而不是吞掉错误直接照常发送。"查到了，但这一列本来就是
- * 空的"（`data` 存在但 `industry` 是 `null`）跟"没查到这一行"（`data` 是
- * `null` 但没报错——真实场景几乎不会发生，`clientId` 是发消息时刚查出来
- * 的，但仍按同一个 fail-closed 方向处理，不当成"可以安全发送")都不是报错，
- * 返回 `null` 交给上层当"没有对应 Playbook"处理，这两种跟"查询本身失败"
- * 是不同的两件事，不能混在一起。
- */
-async function loadClientIndustry(clientId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .select('industry')
-    .eq('id', clientId)
-    .maybeSingle()
-  if (error) {
-    throw new Error(`[conversation-inbound-autoack] 查客户行业失败 clientId=${clientId}: ${error.message}`)
-  }
-  return (data as { industry: string | null } | null)?.industry ?? null
-}
-
-/**
  * 返回类型用三渠道合并的 `ChannelSendResult`（不是只有 messenger/whatsapp 的
  * 两渠道联合类型），因为 `deps.send` 的类型是 `Record<MessengerAgentChannel,
  * ChannelSendFn>`——`MessengerAgentChannel` 三个成员都要有一个类型兼容的值，
@@ -205,12 +152,11 @@ type ChannelSendFn = (input: {
 export interface ConversationInboundAutoAckDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
-  classify: (conversationId: string, policy: PostSaleClassificationPolicy) => Promise<ConversationClass>
-  loadIndustry: (clientId: string) => Promise<string | null>
+  hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
   send: Record<MessengerAgentChannel, ChannelSendFn>
 }
 
-/** 依赖注入版：单测直接注入假的 opt-out/kill-switch/classify/send，不碰真数据库、不真发消息。 */
+/** 依赖注入版：单测直接注入假的 opt-out/kill-switch/send，不碰真数据库、不真发消息。 */
 export function createConversationInboundAutoAckFunction(deps: ConversationInboundAutoAckDeps) {
   return inngest.createFunction(
     {
@@ -219,16 +165,8 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
       retries: 1,
       // v3 补丁#2：Meta 的 webhook 是至少一次投递，客人连发几条消息也会拆成
       // 几个独立事件——30 秒内合并成一次安抚，不是每条消息各回一遍。
-      //
-      // 🔴 已知、刻意的范围边界（Codex 复审 2026-09-15 提问，非 blocker）：
-      // 这个 30 秒 debounce 只合并"同一波连发"，不是"整段对话只回一次"——
-      // 客户隔几分钟又发一条（哪怕还在同一个 lead_intake 对话里）会再收到
-      // 一遍这句安抚。issue #1584 原文只要求"客户消息进来先发一条"，没有要求
-      // "整段对话生命周期只发一次"；对 WhatsApp 而言重复发反而有用（每次都
-      // 会重新打开/续上 72 小时免费窗口）。做成"整段对话只发一次"需要新增一
-      // 个持久化状态（比如查 `conversation_outbound_log` 有没有已经发过这条
-      // 模板，或者新增一列），是比这次范围更大的改动，留作后续单独评估，不
-      // 在这次范围内顺手做。
+      // 这只是"合并一波连发"；跨波次的重复由下面的 6 小时限频
+      // （`check-recent-outbound`）兜住。
       debounce: { period: '30s', key: 'event.data.conversation_id' },
     },
     { event: CONVERSATION_MESSAGE_RECEIVED_EVENT },
@@ -284,19 +222,15 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
         return { ...base, outcome: 'skipped_channel_disabled', detail: null }
       }
 
-      // Step 0.8：售前/售后分类——判据按行业注入，本函数不写死任何客户/行业。
-      //
-      // 🔴 同上，不额外挂 pm-todo：售后对话本来就需要员工手动处理（这正是
-      // "不发自动安抚"的原因——不想让 AI 对一个已购客户随口说"我们的顾问会
-      // 联系您"这种对售后场景不成立的话），而售后对话跟售前一样会出现在同
-      // 一个 CRM 收件箱里，不缺一个专属提醒。
-      const conversationClass = await step.run('classify-conversation', async () => {
-        const industry = await deps.loadIndustry(client_id)
-        const policy = resolvePostSaleClassificationPolicy(industry)
-        return policy ? deps.classify(conversation_id, policy) : ('lead_intake' as ConversationClass)
+      // Step 0.6：6 小时限频——同一会话 6 小时内已有任何成功出站（自动安抚 /
+      // 员工回复 / 人工批准的 AI 草稿）就不再发。读失败必须抛出去让 Inngest
+      // 重试，绝不能把"读不出来"当成"最近没回过"而多发一条。
+      const recentlyReplied = await step.run('check-recent-outbound', () => {
+        const sinceIso = new Date(Date.now() - AUTOACK_COOLDOWN_HOURS * 3_600_000).toISOString()
+        return deps.hasRecentOutbound(conversation_id, sinceIso)
       })
-      if (conversationClass === 'post_sale') {
-        return { ...base, outcome: 'skipped_post_sale', detail: null }
+      if (recentlyReplied) {
+        return { ...base, outcome: 'skipped_recently_replied', detail: `within_${AUTOACK_COOLDOWN_HOURS}h` }
       }
 
       // Step 1：发硬编码模板。不调 Claude，不占 verifier，不读任何知识源
@@ -365,7 +299,6 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
 export const conversationInboundAutoAck = createConversationInboundAutoAckFunction({
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
-  classify: classifyConversation,
-  loadIndustry: loadClientIndustry,
+  hasRecentOutbound,
   send: CHANNEL_SEND,
 })

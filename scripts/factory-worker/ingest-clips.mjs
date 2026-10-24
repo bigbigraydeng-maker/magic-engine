@@ -7,6 +7,7 @@
 //   track = a_real | b_generated
 
 import { execFileSync } from 'node:child_process'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 
@@ -32,34 +33,40 @@ const STORAGE = `https://${REF}.supabase.co/storage/v1/object/content-factory`
 const REST = `https://${REF}.supabase.co/rest/v1/video_clips`
 const H = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}` }
 
-// scene_tag:文件名去扩展名 → 小写 → 非字母数字转下划线(去客户前缀噪音保留语义)
-const sceneTag = (f) => basename(f, extname(f)).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
-
-async function existingOrigins() {
-  const res = await fetch(`${REST}?select=source_meta&client_id=eq.${clientId}`, { headers: H })
-  const rows = res.ok ? await res.json() : []
-  return new Set(rows.map((r) => r?.source_meta?.origin).filter(Boolean))
+async function existingClips() {
+  const res = await fetch(`${REST}?select=source_meta,sha256&client_id=eq.${clientId}`, { headers: H })
+  if (!res.ok) throw new Error(`video_clips 幂等检查失败: ${res.status}`)
+  const rows = await res.json()
+  return {
+    origins: new Set(rows.map((r) => r?.source_meta?.origin).filter(Boolean)),
+    fingerprints: new Set(rows.map((r) => r?.sha256).filter(Boolean)),
+  }
 }
 
 async function main() {
   const files = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.mp4'))
   if (files.length === 0) { console.error(`${dir} 无 mp4`); process.exit(1) }
-  const seen = await existingOrigins()
+  const seen = await existingClips()
   let uploaded = 0, skipped = 0
   const rows = []
 
   for (const f of files) {
     const origin = `${dir.replace(process.env.HOME || '', '~')}/${f}`
-    if (seen.has(origin)) { skipped++; continue }
-    const tag = sceneTag(f)
-    const path = `clips/${folder}/${clientId}/${tag}.mp4`
+    if (seen.origins.has(origin)) { skipped++; continue }
     const buf = readFileSync(join(dir, f))
+    const sha256 = createHash('sha256').update(buf).digest('hex')
+    if (seen.fingerprints.has(sha256)) { skipped++; continue }
+    // 文件名仅保留为显示标题；不再把它伪装成场景标签。
+    // 先入待审核，ME 管理页补标签、许可证据并审核激活。
+    const path = `clips/${folder}/${clientId}/${randomUUID()}.mp4`
     const up = await fetch(`${STORAGE}/${path}`, { method: 'POST', headers: { ...H, 'Content-Type': 'video/mp4', 'x-upsert': 'true' }, body: buf })
     if (!up.ok) { console.error(`上传失败 ${f}: ${up.status} ${await up.text()}`); process.exit(1) }
     rows.push({
-      client_id: clientId, title: basename(f, extname(f)), scene_tag: tag,
+      client_id: clientId, title: basename(f, extname(f)), scene_tag: 'unclassified',
       motion_type: null, duration_seconds: probeDuration(join(dir, f)), track,
-      storage_url: path, generation_cost_usd: 0, status: 'active', usage_count: 0,
+      storage_url: path, generation_cost_usd: 0, status: 'pending_review', usage_count: 0,
+      media_type: 'video', mime_type: 'video/mp4', tags: [], sha256,
+      license_status: 'unknown',
       source_meta: { origin, seed: 'b4-ingest' },
     })
     uploaded++
@@ -68,7 +75,10 @@ async function main() {
 
   if (rows.length > 0) {
     const ins = await fetch(REST, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(rows) })
-    if (!ins.ok) { console.error(`video_clips 入库失败: ${ins.status} ${await ins.text()}`); process.exit(1) }
+    if (!ins.ok) {
+      await Promise.all(rows.map((row) => fetch(`${STORAGE}/${row.storage_url}`, { method: 'DELETE', headers: H }).catch(() => null)))
+      console.error(`video_clips 入库失败: ${ins.status} ${await ins.text()}`); process.exit(1)
+    }
   }
   console.log(`\n完成: 上传+入库 ${uploaded} 条, 跳过(已存在) ${skipped} 条 [client=${clientId} track=${track}]`)
 }

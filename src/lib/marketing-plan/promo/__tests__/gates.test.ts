@@ -79,6 +79,11 @@ describe('红色 = 确定没过', () => {
     expect(light(verifiedAll(), cand)('ads.creative_approved')).toBe('red')
     const missing = goodFacts({ config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [] } })
     expect(light(verifiedAll(), missing)('ads.creative_approved')).toBe('red')
+    // 扩展状态（PR 3016 放宽了 CreativePoolStatus）：只有 'approved' 算批准，其余一律红
+    for (const status of ['testing', 'manual_approved'] as const) {
+      const ext = goodFacts({ config: { daily_budget_cap_cents: 20000, primary_result: 'leads', creative_pool: [{ ref: 'vid-1', status }] } })
+      expect(light(verifiedAll(), ext)('ads.creative_approved')).toBe('red')
+    }
     const s = verifiedAll()
     const ads = s.phases[0].steps[0]
     if (ads.kind === 'ads_campaign') ads.settings.creative_refs = []

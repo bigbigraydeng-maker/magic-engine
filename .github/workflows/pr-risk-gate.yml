@@ -38,7 +38,14 @@ concurrency:
 jobs:
   risk-gate:
     name: Risk gate
-    runs-on: ubuntu-latest
+    # Draft pushes and draft body edits are skipped (0 minutes). A skipped job
+    # reports success, so this must not be the only check standing in front of
+    # a merge: Protect main still waits for the light checks, which are not
+    # reported at all until the PR is ready for review. Marking a PR ready, or
+    # pushing to a PR that is already ready, still runs this gate.
+    # converted_to_draft always runs so an in-flight auto-merge is turned off.
+    if: github.event.pull_request.draft == false || github.event.action == 'converted_to_draft'
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
       # Checked out from `main`, never the PR head: the script that rates the PR

@@ -57,3 +57,67 @@
 - **「有机赢家转广告」不是「已有一致」，改为存疑：** `winner-reel-sync-daily` 确实存在，但规则手册自己把它列为违反 RL-05/RL-01 的缺口（写死目标组、可被配成 ACTIVE）。
 - **「僵尸系列重置学习期」改为存疑：** 手册 §13/§22/§27 讲的是改在投组/组内加广告；僵尸系列是新系列，三节都没讲它。「摊薄小预算」靠 S-01 可成立。
 - **「与 105 号国家+年龄定向互补」未读到 105 号产出，存疑。**
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "identity-keyword",
+   "text": "文案里写明人群身份",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates",
+   "note": "复核更正后：须先过个人属性规则 S-13"
+  },
+  {
+   "key": "retarget-objections",
+   "text": "再营销换说法，针对没下单的原因",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates"
+  },
+  {
+   "key": "lp-mirror-headline",
+   "text": "落地页标题和广告最佳标题一致",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates"
+  },
+  {
+   "key": "static-images",
+   "text": "多用静态图",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-74-small-test-candidates"
+  },
+  {
+   "key": "ai-variants",
+   "text": "用 AI 批量出文案变体",
+   "state": "learning",
+   "note": "部分吸收：只取文案变体"
+  },
+  {
+   "key": "organic-winner-to-ad",
+   "text": "自然流量爆款转成广告",
+   "state": "learning",
+   "note": "复核更正后：现有同步任务被列为违规缺口，存疑"
+  },
+  {
+   "key": "broad-targeting",
+   "text": "宽泛定向，不钻兴趣词",
+   "state": "learning",
+   "note": "原判已有一致；对应的 CTS 方案条目仍待 PM 点头，不算 ME 规则"
+  },
+  {
+   "key": "zombie-campaign",
+   "text": "僵尸系列、同时多组拆分、20–40 个标题",
+   "state": "not_applicable",
+   "note": "小预算摊薄（S-01）"
+  },
+  {
+   "key": "scale-to-breakeven",
+   "text": "预算放大到接近盈亏线",
+   "state": "not_applicable",
+   "note": "与单次加预算上限冲突（B-04）"
+  }
+ ]
+}
+```

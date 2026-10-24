@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { todayIso } from '@/lib/tour-catalog/dates'
 import { buildRevertPreview, revertPublished } from '@/lib/tour-catalog/store-publish'
+import { revalidatePublishedTourWebsite } from '@/lib/tour-catalog/website-revalidation'
 import type {
   PublishErrorCode,
   PublishErrorResponse,
@@ -114,7 +115,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       todayIso(new Date()),
     )
     if (result.ok) {
-      return NextResponse.json<PublishResponse>({ ok: true, version: result.version })
+      const websiteSync = await revalidatePublishedTourWebsite(clientId)
+      return NextResponse.json<PublishResponse>({ ok: true, version: result.version, websiteSync })
     }
     return NextResponse.json<PublishErrorResponse>(
       { error: result.error },

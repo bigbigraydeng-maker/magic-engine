@@ -64,3 +64,54 @@
 ## 复核更正（120 号，2026-10-18）
 - **「SOP 一条臂约 NZ$68」未找到出处：** SOP 里一条臂的定义是 100 次点击（按单次点击成本上界算），没有直接写 NZ$68；上文 3,000 展示≈45 对比 68 的说法是推算，**不要当结论**，只说明两者可能同一量级。
 - **「ME 资料零命中展示上限」只对 grep 过的文件成立**（见对账里写明的仅 grep 项）；代码侧对 origin/main 的 src/lib 搜索也未发现按广告设展示上限的机制，现有 `o1-hot-creative.ts` 的每天 500 曝光只是判断门槛，不是探索量保证。
+
+## 机器索引
+<!-- 给 ME 后台「Agent 学习库」页读的。state 词表见 docs/skill-cards/README.md。以复核更正后的结论为准。 -->
+```json
+{
+ "points": [
+  {
+   "key": "impression-cap",
+   "text": "每条广告到一定曝光就关，逼平台分钱给别的",
+   "state": "verifying",
+   "handoff": "2026-10-18-skill-handoff-119-exploration-floor-mechanism"
+  },
+  {
+   "key": "no-split",
+   "text": "小预算别拆多系列",
+   "state": "already_in_me",
+   "rule": "S-01"
+  },
+  {
+   "key": "small-steps",
+   "text": "放量小步走",
+   "state": "already_in_me",
+   "rule": "B-04"
+  },
+  {
+   "key": "ctr-pick-winner",
+   "text": "用点击率/千次成本直接选赢家",
+   "state": "not_applicable",
+   "note": "只能预筛（AT§1a）"
+  },
+  {
+   "key": "lp-equal-budget",
+   "text": "等额预算比落地页",
+   "state": "not_applicable",
+   "note": "等额预算不等于公平分流"
+  },
+  {
+   "key": "ecom-thresholds",
+   "text": "加购率、结账掉幅、回报倍数阈值",
+   "state": "not_applicable",
+   "note": "电商口径"
+  },
+  {
+   "key": "self-claims",
+   "text": "「营收涨 45%」等自述",
+   "state": "not_applicable",
+   "note": "自述无报表"
+  }
+ ]
+}
+```

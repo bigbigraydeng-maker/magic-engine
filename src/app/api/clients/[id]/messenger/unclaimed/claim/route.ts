@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
 
 /**
  * POST /api/clients/[id]/messenger/unclaimed/claim
@@ -43,7 +44,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const conversationId = typeof body.conversationId === 'string' ? body.conversationId : ''
   const contactIdIn = typeof body.contactId === 'string' ? body.contactId : ''
-  const newName = typeof body.newContactName === 'string' ? body.newContactName.trim() : ''
+  const rawNewName = typeof body.newContactName === 'string' ? body.newContactName.trim() : ''
+  // 名字不能是邮箱 / 电话 / 占位词（2026-10-22 PM）：销售手填也一样，直接说明原因，不悄悄存成别的。
+  const newName = cleanDisplayName(rawNewName) ?? ''
+  if (!contactIdIn && rawNewName && !newName) {
+    return NextResponse.json({ error: '新客户的名字不能是邮箱、电话或占位词，请填他的名字或昵称' }, { status: 400 })
+  }
 
   if (!conversationId) return NextResponse.json({ error: '缺少 conversationId' }, { status: 400 })
   if (!contactIdIn && !newName) {

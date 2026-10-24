@@ -12,6 +12,9 @@ import { parseCreativePool } from '@/lib/ads-strategy/config'
 import type { AccountCapFacts } from './budget-caps'
 import type { AccountSnapshotFact, GateFacts } from './gates'
 import { resolvePromoPlaybook, type PromoPlaybook } from './playbooks'
+import { loadTrackingGateFacts } from '@/lib/ads-tracking-preflight/load-receipt'
+import { readLiveBudgetGateCached } from '@/lib/ads-tracking-preflight/live-budget'
+import { resolveMetaToken } from '@/lib/meta/token-selection'
 import { addDays, plannedSpendCents, reconcileWindow, type GoalFact, type ReconcileFacts } from './reconcile'
 import { allAdsSteps, type ManualCheck, type PromoSpec } from './spec'
 
@@ -214,11 +217,32 @@ export function resolveToday(timezones: (string | null)[], now: Date): { today: 
   return { today: days[0], known: true }
 }
 
+/** 现读预算门用的真依赖（只读）。SDK / 数据库客户端都在调用时才用，不在模块顶层建。 */
+function liveReadDeps(now: Date) {
+  return {
+    now,
+    fetcher: fetch,
+    supabase: supabaseAdmin,
+    resolveMetaToken: async (id: string) => (await resolveMetaToken(supabaseAdmin, id, process.env))?.token ?? null,
+  }
+}
+
+export interface LoadPromoFactsOptions {
+  /**
+   * 现读「广告账户与付款（含在投预算）」那一道门（只读库和 Meta，不写运行记录）：
+   *   · 'always'    —— 授权动作（批准）每次都读，不看存档多新；
+   *   · 'if_needed' —— 看板 / 派广告任务前的复查：存档里的这一道缺失、过期或没过（红 / 灰）才读；
+   *   · 不传        —— 只读存档，后台任务（每日对账等）不去打 Meta。
+   */
+  liveBudget?: 'if_needed' | 'always'
+}
+
 export async function loadPromoFacts(
   clientId: string,
   spec: PromoSpec,
   manualChecks: readonly ManualCheck[],
   now: Date = new Date(),
+  options: LoadPromoFactsOptions = {},
 ): Promise<LoadedPromoFacts> {
   const playbook = resolvePromoPlaybook(await loadIndustry(clientId).catch(() => null))
   const planAccountIds = [...new Set(allAdsSteps(spec).map(s => s.step.settings.ad_account_id))]
@@ -229,12 +253,19 @@ export async function loadPromoFacts(
   const { today, known } = resolveToday(accountTimezones, now)
   const win = reconcileWindow(today, playbook.insightsUnstableDays)
 
-  const [config, coverage, goal, insights, published] = await Promise.all([
+  const [config, coverage, goal, insights, published, tracking] = await Promise.all([
     loadStrategyConfig(clientId),
     loadDailyPlanCoverage(clientId, today),
     loadGoal(clientId, spec.goal_id),
     loadInsights(clientId, planAccountIds, Object.keys(plannedSpendCents(spec, win)), win, playbook.factFreshnessDays, now),
     loadPublishedCount(clientId, win, accountTimezones),
+    // 开投前追踪检查的最近回执；没配置追踪检查的客户是 undefined（清单里不出现追踪门）
+    loadTrackingGateFacts(supabaseAdmin, clientId, {
+      now,
+      ...(options.liveBudget !== undefined && planAccountIds.length > 0
+        ? { readLiveBudget: (id: string) => readLiveBudgetGateCached(id, liveReadDeps(now)), liveMode: options.liveBudget }
+        : {}),
+    }),
   ])
 
   const ownedSet = new Map((owned ?? []).map(a => [a.id, a]))
@@ -257,6 +288,7 @@ export async function loadPromoFacts(
       today, now, playbook, accounts, snapshots: snapFacts, config,
       daily_plan_coverage_days: coverage,
       manual_checks: [...manualChecks],
+      tracking,
     },
     recon: {
       spend_cents_by_account_day: insights.spend,

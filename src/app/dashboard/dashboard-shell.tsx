@@ -38,8 +38,10 @@ export const ADMIN_SECTIONS: NavSection[] = [
     items: [
       { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
       { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
+      { key: 'learning',  label: 'Agent 学习库', mark: 'LB', href: '/dashboard/learning' },
       { key: 'ad-approval',     label: '等你点头的广告',    mark: 'OK', href: '/dashboard/ad-approval' },
       { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
+      { key: 'launch-signoff',  label: '上线签字',         mark: 'SG', href: '/dashboard/launch-signoff' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],
   },
@@ -168,7 +170,7 @@ function buildSelfServeSections(clientId: string): NavSection[] {
         // ⚠️ 这里是 **self-serve 客户** 的导航,不是内部导航。
         // 「视频工厂」不能放这儿:middleware 对 client-viewer 只放行 /dashboard/clients/<自己>/**,
         // /dashboard/factory 会被直接 redirect 回工作台(点了没反应);就算放行,
-        // /api/factory/work-orders 是 guardAdmin,整页也只会是 403 红条。
+        // /api/factory/work-orders 要管理员登录态(requireAdminScope),整页也只会是 403 红条。
         // 内部人员的入口在 ADMIN_SECTIONS 里(不带 ?client=,跨客户总览)。
         { key: 'assets',  label: '素材库',   mark: 'AS', href: `/dashboard/clients/${clientId}/assets` },
         { key: 'visuals', label: 'Visual Studio', mark: 'VS', href: '/dashboard/visuals' },

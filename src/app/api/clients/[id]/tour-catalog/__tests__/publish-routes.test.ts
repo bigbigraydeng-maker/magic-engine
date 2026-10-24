@@ -25,9 +25,14 @@ vi.mock('@/lib/tour-catalog/store-access', () => ({
   listMemberEmails: vi.fn(),
 }))
 
+vi.mock('@/lib/tour-catalog/website-revalidation', () => ({
+  revalidatePublishedTourWebsite: vi.fn(),
+}))
+
 import { requireCatalogAccess } from '@/lib/tour-catalog/access'
 import { listChangeActorsSince, listMemberEmails } from '@/lib/tour-catalog/store-access'
 import { editorAccess } from './access-fixtures'
+import { revalidatePublishedTourWebsite } from '@/lib/tour-catalog/website-revalidation'
 import {
   buildPublishPreview,
   publishDraft,
@@ -47,6 +52,7 @@ const publishDraftMock = vi.mocked(publishDraft)
 const buildRevertPreviewMock = vi.mocked(buildRevertPreview)
 const revertPublishedMock = vi.mocked(revertPublished)
 const listPublishedVersionsMock = vi.mocked(listPublishedVersions)
+const revalidatePublishedTourWebsiteMock = vi.mocked(revalidatePublishedTourWebsite)
 
 const CLIENT_ID = 'client-1'
 
@@ -102,6 +108,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   listChangeActorsSinceMock.mockResolvedValue([])
   listMemberEmailsMock.mockResolvedValue(new Set<string>())
+  revalidatePublishedTourWebsiteMock.mockResolvedValue('revalidated')
 })
 
 describe('GET /tour-catalog/publish', () => {
@@ -215,7 +222,8 @@ describe('POST /tour-catalog/publish', () => {
 
     const res = await publishPOST(makePost(VALID_PUBLISH_BODY), makeParams())
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, version: 3 })
+    expect(await res.json()).toEqual({ ok: true, version: 3, websiteSync: 'revalidated' })
+    expect(revalidatePublishedTourWebsiteMock).toHaveBeenCalledWith(CLIENT_ID)
     expect(publishDraftMock).toHaveBeenCalledWith(
       {},
       CLIENT_ID,
@@ -427,7 +435,8 @@ describe('POST /tour-catalog/publish/revert', () => {
 
     const res = await revertPOST(makePost(VALID_REVERT_BODY), makeParams())
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, version: 4 })
+    expect(await res.json()).toEqual({ ok: true, version: 4, websiteSync: 'revalidated' })
+    expect(revalidatePublishedTourWebsiteMock).toHaveBeenCalledWith(CLIENT_ID)
     expect(revertPublishedMock).toHaveBeenCalledWith(
       {},
       CLIENT_ID,

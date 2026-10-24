@@ -1,16 +1,11 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import {
-  scheduleSocialPost,
-  resolveBoundPublerAccount,
-  type PublerAccount,
-} from '@/lib/flywheel/social-post-publish'
-import { LINKEDIN_PROGRESS_SOURCE, LINKEDIN_PROGRESS_PLATFORM } from '@/lib/linkedin-progress/constants'
 import { enqueueRenderJob } from '@/lib/factory/render-queue'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { CREATOMATE_RENDER_REQUESTED_EVENT } from '@/lib/creatomate/events'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
+import { checkTopicAlignment } from '@/lib/factory/topic-alignment-store'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,33 +35,21 @@ export async function PATCH(
       return NextResponse.json({ error: "action 必须是 'confirm' / 'reject' / 'schedule'" }, { status: 400 })
     }
 
-    // 对 LinkedIn 的 confirm，账号解析必须在下面"原子认领"之前完成：如果
-    // 解析放在认领之后，解析失败时这一行已经被改成了 approved，而认领用的
-    // .eq('status','draft') 条件会让后续重试（账号连好后再点一次确认）永远
-    // 抢不到这一行——草稿就卡死了。这里先只读查一次 source，不碰状态。
-    let linkedinAccount: PublerAccount | null = null
-    let isLinkedinConfirm = false
-    if (body.action === 'confirm') {
+    // YouTube 卡在确认/进发布列时必须过选题对齐闸（主干新增）；Publer/LinkedIn 自动发布已删除。
+    const enforceTopicIfYouTube = async (platforms: string[] | null | undefined) => {
+      if (!(platforms ?? []).some((p) => ['youtube', 'youtube_shorts', 'youtube-shorts'].includes(p.toLowerCase()))) return null
+      const topic = await checkTopicAlignment(params.id, params.postId)
+      return topic.ready ? null : NextResponse.json(
+        { error: `选题对齐未通过：${topic.gaps.join('；')}`, gaps: topic.gaps }, { status: 409 })
+    }
+
+    if (body.action === 'confirm' || body.action === 'schedule') {
       const { data: peek, error: peekErr } = await supabaseAdmin
-        .from('content_posts')
-        .select('source')
-        .eq('client_id', params.id)
-        .eq('id', params.postId)
-        .maybeSingle()
-      // fail closed：预读失败不能当成"不是 LinkedIn"往下走——那样会跳过严格
-      // 账号解析，最后把仍为 null 的账号交给 scheduleSocialPost 的宽松兜底，
-      // 可能发到错误账号。查询出错直接抛，让整个请求 500。
+        .from('content_posts').select('platforms').eq('client_id', params.id).eq('id', params.postId).maybeSingle()
+      // fail closed：预读失败不能当成"不是 YouTube"往下走。
       if (peekErr) throw peekErr
-      isLinkedinConfirm = peek?.source === LINKEDIN_PROGRESS_SOURCE
-      if (isLinkedinConfirm) {
-        linkedinAccount = await resolveBoundPublerAccount(params.id, LINKEDIN_PROGRESS_PLATFORM)
-        if (!linkedinAccount) {
-          return NextResponse.json(
-            { error: 'LinkedIn 账号还没连到发布工具，先去连接器设置页完成一次性授权' },
-            { status: 409 },
-          )
-        }
-      }
+      const topicBlocked = await enforceTopicIfYouTube(peek?.platforms)
+      if (topicBlocked) return topicBlocked
     }
 
     // 只在确认做片时才需要读客户配置——一次读拿两件事用：①这条视频指定的
@@ -111,23 +94,11 @@ export async function PATCH(
       patch.generation_context_snapshot = { ...currentSnapshot, offer_key: offerKey }
     }
 
-    let updateQuery = supabaseAdmin
+    const updateQuery = supabaseAdmin
       .from('content_posts')
       .update(patch)
       .eq('client_id', params.id)   // 双重限定，防越权改到别客户
       .eq('id', params.postId)
-
-    // 原子认领只对 LinkedIn 帖子加：confirm 只能从 'draft' 转 'approved'。
-    // 没有这个条件，两个并发的 confirm（双击、两个管理员同时点）会各自无条
-    // 件把状态重写成 approved，都读到一行，然后各自调一次 scheduleSocialPost
-    // —— 发出两条重复的公开帖子。只有 LinkedIn 帖子会在 confirm 时真发布、
-    // 才需要这道防重复认领；普通视频内容的 confirm 只是入队做片、不对外发，
-    // 而且它的选题段合法地包含 rejected（打回后重新确认要能从 rejected →
-    // approved），所以绝不能给它加 draft-only 限制，否则重新确认打回内容会
-    // 直接 404（真实回归，Codex round 3 P2 挑出）。
-    if (isLinkedinConfirm) {
-      updateQuery = updateQuery.eq('status', 'draft')
-    }
 
     const { data, error } = await updateQuery.select('id, status, format, source').maybeSingle()
 
@@ -142,24 +113,6 @@ export async function PATCH(
     // 讲课式不在这里排做片——要先在单讲工作台选制作方式/传录像，直接排必失败(魏征 m2)
     if (body.action === 'confirm' && data.format === '讲课式') {
       return NextResponse.json({ post: data, render: { jobId: null, created: false, reason: '讲课式内容请进该讲的工作台开始做片' } })
-    }
-
-    // LinkedIn 进度贴是纯文本、没有做片环节——"确认"在这里就等于"批准发布"。
-    // 不能走下面通用的 enqueueRenderJob：那是视频流水线的入口，对一条没有
-    // 视频的文本贴只会 best-effort 失败或空转，PM 点了"确认"以为发出去了，
-    // 实际上这条贴会永远卡在 approved，从没真正调用过 scheduleSocialPost。
-    if (body.action === 'confirm' && data.source === LINKEDIN_PROGRESS_SOURCE) {
-      // linkedinAccount 已经在认领这一行之前严格解析过了（见上面），这里
-      // 保证非空——不能再让 scheduleSocialPost 自己那套更松的逻辑兜底到
-      // "随便一个已连账号"，共享 Publer workspace 里有多个身份时会发错号。
-      const result = await scheduleSocialPost({ postId: params.postId, clientId: params.id, account: linkedinAccount! })
-      if (!result.ok) {
-        return NextResponse.json({ error: `发布失败：${result.error}` }, { status: 500 })
-      }
-      return NextResponse.json({
-        post: { ...data, status: 'scheduled' },
-        publish: { publerJobId: result.publerJobId, scheduledAt: result.scheduledAt },
-      })
     }
 
     // 🔴 2026-09-02：旧 Render 拼片管线(ffmpeg 拼接)已退役，没有 worker 再消费 ffmpeg

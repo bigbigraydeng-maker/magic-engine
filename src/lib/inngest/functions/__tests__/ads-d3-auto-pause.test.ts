@@ -196,6 +196,8 @@ describe('processD3Hit', () => {
     expect(inserted[0].payload).toMatchObject({
       status: 'awaiting_approval', action_run_id: 'run-42', authorization_decision_id: 'dec-42',
     })
+    // 🔴 待办里要看得懂：这条回执必须带一句人话，不能只有状态码
+    expect(String((inserted[0].payload as Row).reason)).toContain('等你批准')
   })
 
   it('Kernel idempotent_hit（重放）→ 不重复记账', async () => {
