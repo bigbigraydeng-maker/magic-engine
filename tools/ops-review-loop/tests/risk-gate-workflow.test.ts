@@ -20,7 +20,7 @@ const YAML = requireFromHere('js-yaml') as { load(input: string): unknown }
 
 const ROOT = join(process.cwd(), '.github/workflows')
 const RISK_GATE_PATH = join(ROOT, 'pr-risk-gate.yml')
-const CI_PATH = join(ROOT, 'ops-review-loop-ci.yml')
+const CI_PATH = join(ROOT, 'pr-light-checks.yml')
 
 interface WorkflowStep {
   id?: string
@@ -176,8 +176,8 @@ describe('Risk gate workflow: the judge lives on main', () => {
   })
 })
 
-describe('ops-review-loop CI: tests run on every PR', () => {
-  it('triggers on every pull_request, with no path or branch filter', () => {
+describe('ops-review-loop CI: tests run on non-draft PRs', () => {
+  it('triggers on pull_request, with no path or branch filter', () => {
     expect(Object.keys(ci.triggers)).toEqual(['pull_request'])
     const trigger = (ci.triggers.pull_request ?? {}) as {
       paths?: unknown
@@ -187,6 +187,7 @@ describe('ops-review-loop CI: tests run on every PR', () => {
     expect(trigger.paths).toBeUndefined()
     expect(trigger['paths-ignore']).toBeUndefined()
     expect(trigger.branches).toBeUndefined()
+    expect(ci.doc.jobs?.tests?.if).toContain('draft')
   })
 
   it('is read-only', () => {
@@ -198,7 +199,8 @@ describe('ops-review-loop CI: tests run on every PR', () => {
   })
 
   it('exposes the stable required-check name', () => {
-    expect(ci.doc.jobs?.tests?.name).toBe('ops-review-loop-tests')
+    expect(ci.steps.some((step) => step.name === 'ops-review-loop-tests')).toBe(true)
+    expect(ci.source).toContain('OUTCOME_OPS_REVIEW')
   })
 
   it('reads no secrets, merges nothing, and pushes nothing', () => {
@@ -223,7 +225,7 @@ describe('only the judge may write', () => {
   it('grants contents: write to the risk gate and to nothing else in the workflows directory', () => {
     const files = readdirSync(ROOT).filter((name) => name.endsWith('.yml'))
     expect(files).toContain('pr-risk-gate.yml')
-    expect(files).toContain('ops-review-loop-ci.yml')
+    expect(files).toContain('pr-light-checks.yml')
 
     const contentsWrite = (workflow: Workflow): boolean => {
       if (workflow.permissions?.contents === 'write') return true
@@ -234,6 +236,9 @@ describe('only the judge may write', () => {
     const ciDoc = YAML.load(readFileSync(CI_PATH, 'utf8')) as Workflow
 
     expect(contentsWrite(riskGateDoc), 'pr-risk-gate.yml must be able to toggle auto-merge').toBe(true)
-    expect(contentsWrite(ciDoc), 'ops-review-loop-ci.yml must stay read-only').toBe(false)
+    expect(contentsWrite(ciDoc), 'pr-light-checks.yml must stay read-only').toBe(false)
+    const report = ciDoc.jobs?.report
+    expect(report?.permissions?.checks, 'only the report job may publish checks').toBe('write')
+    expect(ciDoc.jobs?.tests?.permissions?.checks, 'the test job must not publish checks').toBeUndefined()
   })
 })

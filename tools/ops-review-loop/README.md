@@ -111,17 +111,13 @@ Two facts worth keeping, because both were measured rather than assumed:
   still burned all three automated rounds before landing on NEEDS HUMAN REVIEW.
   That PR is why `maxRoundsForRisk` exists.
 
-### `tools/ops-review-loop` tests do not run in CI yet
+### `tools/ops-review-loop` tests run in the shared light-check job
 
-The required check is `ai-orchestrator-tests`, and it runs
-`npx vitest run tools/ai-orchestrator` — which does **not** match this
-directory. So every test here, old and new, runs only on a laptop.
-
-That also makes one claim in `ops-fix-scope-guard.yml` wrong today: its
-bootstrap branch says `workflow-guards.test.ts` is "part of the REQUIRED
-ai-orchestrator-tests check" and would turn red if the guard script were deleted
-from main. It would not — nothing runs it. Fixing that means editing a workflow,
-so it belongs to the wiring PR, not this one.
+`.github/workflows/pr-light-checks.yml` runs `npx vitest run tools/ops-review-loop`
+on non-draft pull requests and publishes the result as **`ops-review-loop-tests`**.
+That suite includes `workflow-guards.test.ts`, so deleting
+`tools/ops-review-loop/src/check-fix-scope.mjs` turns this required check red.
+The guard step itself still executes the copy checked out from `main`.
 
 ## Why plain Node instead of `actions/github-script`
 
