@@ -25,9 +25,8 @@ import { waitForRequiredCheck } from './poll.mjs'
 import { isActionable } from './severity.mjs'
 
 const MAX_ROUNDS = 3
-// Matches the job name in ai-orchestrator-ci.yml ("ai-orchestrator-tests") or
-// the workflow name shown in the Checks tab ("ai-orchestrator CI") — whichever
-// GitHub surfaces as the check-run `name`.
+// Matches the check name published by pr-light-checks.yml ("ai-orchestrator-tests").
+// GitHub surfaces that string as the check-run `name`.
 const REQUIRED_CHECK_NAME_PATTERN = /ai-orchestrator/i
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 // Overridable so the CI-wait path is testable without really waiting four
