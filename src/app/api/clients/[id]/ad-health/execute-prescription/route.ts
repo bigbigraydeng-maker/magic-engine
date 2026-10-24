@@ -15,17 +15,21 @@
  *
  * Body: { kind: 'refresh_creatives' }
  * 200 → { success, adsAdded: [{name, score}], guardsHit, status }
+ * 403 → not an internal (Magic Lab) account
  * 409 → winner-sync not configured/enabled for this client
+ * 429 → a successful run was logged for this client in the last 10 minutes
  * 422 → kind not executable
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { syncWinnerReels } from '@/lib/winner-reel-sync/engine'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+const DEDUPE_WINDOW_MS = 10 * 60 * 1000
 
 interface RouteParams {
   params: { id: string }
@@ -34,7 +38,8 @@ interface RouteParams {
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const clientId = params.id
 
-  const access = await requirePaidClientAccess(clientId)
+  // Adds ads to the paid pool: internal accounts only.
+  const access = await requirePlanApproverAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -70,6 +75,23 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json(
       { no_supply: true, reason: 'recycle_pool_not_connected' },
       { status: 409 },
+    )
+  }
+
+  // Approximate de-dup (not atomic): a successful run in the last 10 minutes already added
+  // ads, so a second click/tab/retry must not add another batch.
+  const since = new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString()
+  const { data: recent } = await supabaseAdmin
+    .from('winner_reel_sync_log')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('status', 'ok')
+    .gte('run_at', since)
+    .limit(1)
+  if (recent && recent.length > 0) {
+    return NextResponse.json(
+      { error: '10 分钟内刚补过一批素材,请先刷新看看,不要重复提交', recently_run: true },
+      { status: 429 },
     )
   }
 

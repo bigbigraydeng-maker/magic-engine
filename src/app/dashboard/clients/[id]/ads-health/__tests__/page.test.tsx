@@ -223,6 +223,19 @@ describe('every card that is burning money offers a way to stop it', () => {
     expect(screen.queryByText(/广告还在跑/)).toBeNull()
   })
 
+  it('a 403 on the stop-loss write says an internal account is needed, and nothing changed', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/stop-loss': { __status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', current_daily: 60, planned_daily: 48, cuttable: true, pausable: true },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('预算降 20%'))
+    await waitFor(() => expect(screen.getByText(/需要内部账号操作/)).toBeTruthy())
+    expect(screen.queryByText(/已降到每天/)).toBeNull()
+  })
+
   it('an un-cuttable budget still leaves a next step — never "go do it yourself"', async () => {
     vi.stubGlobal('fetch', mockFetch({
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: null, cuttable: false, pausable: true },

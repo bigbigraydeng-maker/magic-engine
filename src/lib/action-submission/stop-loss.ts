@@ -1,11 +1,12 @@
 /** Authenticated manual stop-loss submission. Provider writes stay inside Kernel capabilities. */
-import { requirePaidClientAccess, type ClientAccessResult } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess, type ClientAccessResult } from '@/lib/auth/client-access'
 import { runAction, type ActionRunOutcome, type SubmitActionInput } from '@/lib/kernel/runner'
 import type { KernelDeps } from '@/lib/kernel/deps'
 
 export type StopLossAccess = Extract<ClientAccessResult, { ok: true }>
 export function requireStopLossAccess(clientId: string): Promise<ClientAccessResult> {
-  return requirePaidClientAccess(clientId)
+  // Money-changing action: internal accounts only (paid clients include the client's own staff).
+  return requirePlanApproverAccess(clientId)
 }
 
 export type StopLossKernelAction = 'pause_campaign' | 'cut_campaign' | 'cut_unit'

@@ -359,6 +359,10 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaign_id: c.campaign_id, action, request_id: globalThis.crypto.randomUUID() }),
       })
+      if (res.status === 403) {
+        setResult({ kind: 'err', text: '需要内部账号操作。广告没有变更。' })
+        return
+      }
       const json = await res.json()
       if (json.error === 'no_active_goal') {
         setResult({ kind: 'err', text: '这个客户还没有生效的增长目标，所以系统没有把止损动作提交给执行内核。先补齐目标后再试。' })

@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { createKernel } from '@/lib/kernel'
 import { KernelError } from '@/lib/kernel/errors'
 import { approveAndExecuteAdsAutoPause, rejectAdsAutoPause, ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause'
@@ -138,7 +138,8 @@ async function decide(kernel: Kernel, params: RouteParams['params'], body: Decis
 }
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
-  const access = await requirePaidClientAccess(params.id)
+  // 批准和驳回都只给内部账号：客户自己的员工不该替自己的预算做决定。
+  const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const body = parseBody(await req.json().catch(() => null))

@@ -177,7 +177,19 @@ describe('GET ad-health — growth visibility by viewer', () => {
       payload: {
         overall_verdict: 'watch',
         headline: '本周整体正常',
-        campaigns: [{ campaign_id: 'cp1', campaign_name: 'Spring' }],
+        campaigns: [{
+          campaign_id: 'cp1',
+          campaign_name: 'Spring',
+          verdict: 'alert',
+          headline: '花得多、出得少',
+          metrics: [{ metric: 'ctr', verdict: 'alert', baseline: 0.02, recent: 0.01, ratio: 0.5, reason: 'INTERNAL_METRIC_REASON' }],
+          ctr_series: [{ date: '2026-09-26', ctr: 0.01, impressions_raw: 'INTERNAL_IMPRESSIONS' }],
+          latest_spend_7d: 120,
+          latest_results_7d: 3,
+          frequency_7d: 1.4,
+          prescription: { kind: 'refresh_creatives', title: '换素材', why: '看腻了', executable: true, execute_hint: '补 3 条', audience_id: 'INTERNAL_AUD' },
+          internal_note: 'INTERNAL_CAMPAIGN_NOTE',
+        }],
         evaluated: 1,
         generated_for: CLIENT,
         portfolio_diagnoses: { hit_count: 1, problems: [d11] },
@@ -202,10 +214,27 @@ describe('GET ad-health — growth visibility by viewer', () => {
       }
     })
 
+    it('campaigns[] items are field-whitelisted for non-staff (page fields stay, extras dropped)', async () => {
+      m.access.mockResolvedValue({ ok: true, tier: 'paid_client', role: 'client-viewer', allowedClientId: CLIENT })
+      const { text, body } = await getBody()
+      for (const leaked of ['INTERNAL_', 'internal_note', 'impressions_raw', 'audience_id']) {
+        expect(text, `leaked: ${leaked}`).not.toContain(leaked)
+      }
+      const c = (body as unknown as { latest: { payload: { campaigns: Array<Record<string, unknown>> } } }).latest.payload.campaigns[0]
+      expect(Object.keys(c).sort()).toEqual([
+        'campaign_id', 'campaign_name', 'ctr_series', 'frequency_7d', 'headline', 'latest_results_7d',
+        'latest_spend_7d', 'metrics', 'prescription', 'verdict',
+      ])
+      expect(c.metrics).toEqual([{ metric: 'ctr', verdict: 'alert', baseline: 0.02, ratio: 0.5 }])
+      expect(c.ctr_series).toEqual([{ date: '2026-09-26', ctr: 0.01 }])
+      expect(c.prescription).toEqual({ kind: 'refresh_creatives', title: '换素材', why: '看腻了', executable: true, execute_hint: '补 3 条' })
+    })
+
     it('unscoped admin still gets the full payload', async () => {
       m.access.mockResolvedValue({ ok: true, tier: 'admin', role: 'admin', allowedClientId: null })
       const { text } = await getBody()
       expect(text).toContain('portfolio_diagnoses')
+      expect(text).toContain('INTERNAL_CAMPAIGN_NOTE')
     })
 
     it('db error → fixed message, raw error text not returned', async () => {
