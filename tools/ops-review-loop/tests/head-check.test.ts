@@ -2,11 +2,14 @@
  * The ruleset reads "Risk gate" on the PR head. Comment-triggered runs do not
  * land there, so the verdict is a check run we create ourselves.
  */
+import { execFileSync } from 'node:child_process'
+
 import { describe, expect, it } from 'vitest'
 
-import { buildRiskGateCheckRun, gateJobExitCode, shouldPublishHeadCheck } from '../src/head-check.mjs'
+import { buildRiskGateCheckRun, gateJobExitCode, planAutoMergeEnable, shouldPublishHeadCheck } from '../src/head-check.mjs'
 
 const HEAD = 'b8ae3e8b6015974044d3aff0c0a525d09368c9a1'
+const NEWER_HEAD = 'e4771192c05a734212740f76da336d273340e7fb'
 const NOW = '2026-10-24T12:20:10.000Z'
 
 describe('shouldPublishHeadCheck', () => {
@@ -79,5 +82,37 @@ describe('buildRiskGateCheckRun', () => {
       detailsUrl: 'https://github.com/example/repo/actions/runs/1',
     })
     expect(linked.details_url).toBe('https://github.com/example/repo/actions/runs/1')
+  })
+})
+
+describe('planAutoMergeEnable', () => {
+  it('enables only while the live head is still the reviewed sha, and pins that sha', () => {
+    const plan = planAutoMergeEnable({ boundHead: HEAD, liveHead: HEAD })
+    expect(plan.enable).toBe(true)
+    expect(plan.args).toEqual(['pr', 'merge', '--auto', '--merge', '--match-head-commit', HEAD])
+  })
+
+  it('does not re-enable after a newer push, even when the re-check already decided enable', () => {
+    const plan = planAutoMergeEnable({ boundHead: HEAD, liveHead: NEWER_HEAD })
+    expect(plan.enable).toBe(false)
+    expect(plan.args).toEqual([])
+  })
+
+  it('refuses a short, empty, or missing sha', () => {
+    expect(planAutoMergeEnable({ boundHead: 'e4771192', liveHead: 'e4771192' }).enable).toBe(false)
+    expect(planAutoMergeEnable({ boundHead: HEAD, liveHead: '' }).enable).toBe(false)
+    expect(planAutoMergeEnable({ boundHead: '', liveHead: HEAD }).enable).toBe(false)
+    expect(planAutoMergeEnable({}).enable).toBe(false)
+  })
+
+  it('the workflow entry prints skip for a stale head and enable only for the same head', () => {
+    const script = 'tools/ops-review-loop/src/head-check.mjs'
+    const run = (liveHead: string) =>
+      execFileSync(process.execPath, [script, '--plan-auto-merge'], {
+        env: { ...process.env, HEAD_SHA: HEAD, LIVE_HEAD: liveHead },
+        encoding: 'utf8',
+      }).trim()
+    expect(run(NEWER_HEAD)).toBe('skip')
+    expect(run(HEAD)).toBe('enable')
   })
 })

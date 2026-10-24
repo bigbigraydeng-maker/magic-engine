@@ -1,3 +1,5 @@
+import { pathToFileURL } from 'node:url'
+
 /**
  * Where a Risk gate verdict is recorded.
  *
@@ -87,4 +89,36 @@ export function buildRiskGateCheckRun({ headSha, pass, summary, now, detailsUrl 
   }
   if (typeof detailsUrl === 'string' && detailsUrl !== '') body.details_url = detailsUrl
   return body
+}
+
+/**
+ * Whether this run may turn auto-merge on.
+ *
+ * A comment re-check and a new push do not cancel each other. The re-check
+ * can already have decided "enable" for the head it reviewed. Enabling is
+ * allowed only when the live head is still that same full SHA. The returned
+ * arguments include `--match-head-commit` so a push between this read and
+ * `gh pr merge` cannot enable either.
+ *
+ * @param {{boundHead?: unknown, liveHead?: unknown}} input
+ * @returns {{enable: boolean, args: string[]}}
+ */
+export function planAutoMergeEnable({ boundHead, liveHead } = {}) {
+  const bound = typeof boundHead === 'string' ? boundHead.toLowerCase() : ''
+  const live = typeof liveHead === 'string' ? liveHead.toLowerCase() : ''
+  if (!HEAD_SHA_RE.test(bound) || bound !== live) return { enable: false, args: [] }
+  return {
+    enable: true,
+    args: ['pr', 'merge', '--auto', '--merge', '--match-head-commit', bound],
+  }
+}
+
+const entry = process.argv[1]
+const invokedDirectly = typeof entry === 'string' && import.meta.url === pathToFileURL(entry).href
+if (invokedDirectly && process.argv.includes('--plan-auto-merge')) {
+  const plan = planAutoMergeEnable({
+    boundHead: process.env.HEAD_SHA,
+    liveHead: process.env.LIVE_HEAD,
+  })
+  process.stdout.write(plan.enable === true ? 'enable\n' : 'skip\n')
 }

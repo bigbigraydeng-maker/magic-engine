@@ -24,6 +24,8 @@ Codex 审完是一条 PR 评论，不是一次推送。那次重判在 `pr-risk-
 脚本仍从 `main` 取。评论触发的运行记在主干那次提交上，所以它**不**把任务名叫成
 `Risk gate`；判完后用检查接口把同名结果写到 **PR 当前 head**。审过且没有未解决的
 P0/P1 就变绿，没审过就保持红。无关评论用单独的分组，取消不了正在跑的判级。
+开启自动合并前会再读一次当前 head：对不上这次审过的提交就不打开，并且
+`gh pr merge` 带 `--match-head-commit`。新推送之后，过期的重判不能把自动合并重新打开。
 
 级别由 `tools/ops-review-loop/src/risk.mjs` 按 PR **实际改动的文件**算出
 （规则见 `docs/ENGINEERING_QUALITY_GATES.md` §10.1）：
@@ -45,7 +47,7 @@ P0/P1 就变绿，没审过就保持红。无关评论用单独的分组，取�
 
 | 级别 | `Risk gate` 结果 | 合并方式 |
 |---|---|---|
-| **B / C** | 级别仍按改动文件算出，写在摘要里。自动合并只在 Codex（变量里 `codex-astra` 那个登录名）审过**当前 head**、且没有未解决的 P0/P1 时才打开；否则这道检查是红的，并执行 `--disable-auto`。抽查缺席不改变这一格。P2 不挡 | 满足上一格才执行 `gh pr merge --auto --merge`。GitHub 仍要等所有必过检查全绿、review 线程全部解决才真正合并。新推送若 Codex 还没审新提交，关掉自动合并，不重新打开 |
+| **B / C** | 级别仍按改动文件算出，写在摘要里。自动合并只在 Codex（变量里 `codex-astra` 那个登录名）审过**当前 head**、且没有未解决的 P0/P1 时才打开；否则这道检查是红的，并执行 `--disable-auto`。抽查缺席不改变这一格。P2 不挡 | 满足上一格，且执行前当前 head 仍是这次审过的提交，才执行 `gh pr merge --auto --merge --match-head-commit`。GitHub 仍要等所有必过检查全绿、review 线程全部解决才真正合并。新推送若 Codex 还没审新提交，关掉自动合并，过期重判也不能重新打开 |
 | **A** | 只有当 **Codex Astra**（`codex-astra`）和 **Claude Code**（`claude-code`）对**当前 base+head** 各有一条可信签字标记 `<!-- me-review-signoff:{...} -->`，而且两条来自**两个不同登录名**时才绿；否则**红**。旧的子牙 / 魏征 / 狄仁杰 标记不算数 | A 级永不自动合。绿了也要人合 |
 
 另有三种一律红且关闭 auto-merge：草稿 PR、fork 来的 PR、判级过程任何一步读不到。

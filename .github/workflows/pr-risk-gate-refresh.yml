@@ -101,9 +101,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
         run: |
           set -euo pipefail
-          gh pr merge --auto --merge "$PR_NUMBER"
+          live=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          decision=$(LIVE_HEAD="$live" node tools/ops-review-loop/src/head-check.mjs --plan-auto-merge)
+          if [ "$decision" = "skip" ]; then
+            echo '- 自动合并：未开启（这次审的提交已经不是 PR 当前提交）' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$decision" != "enable" ]; then
+            echo '- 自动合并：未开启（无法确认当前提交）' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
           echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Disable auto-merge (A / draft / fork / Codex has not reviewed this head)
