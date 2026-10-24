@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
 const mocks = vi.hoisted(() => ({ access: vi.fn(), run: vi.fn() }))
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: mocks.access }))
+vi.mock('@/lib/auth/client-access', () => ({ requireOperatorAccess: mocks.access }))
 vi.mock('@/lib/memory', () => ({ runExtractorForClient: mocks.run }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { tag: 'admin-client' } }))
 
