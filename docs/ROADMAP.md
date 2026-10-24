@@ -2,7 +2,7 @@
 
 > 最后整理：2026-10-24。仓库 `main` @ `d81d3fcc5509b568a59841323194c4b5d3b10c11`（与 `origin/main` 一致，fetch 于 2026-10-24）。
 > 对齐的现行文件：[产品定义](./strategy/ME_PRODUCT_DEFINITION.md)、[系统现状](./STATE.md)、[平台化原则](./roadmap/2026-08-19-me2-platformization-principle.md)、[平台线索 S0 与迁移账本](./roadmap/2026-10-12-platform-lead-s0-and-migration-ledger-v0.md)、[CRM 构建控制](./roadmap/2026-09-15-crm-ai-agent-build-control.md)、[广告 WP3.1b 重做方案](./roadmap/2026-09-27-ads-wp3-1b-v2-redo-plan.md)、[Agent 自治运行计划](./specs/2026-09-24-agent-autonomy-operating-plan-v1.md)（名单以这份为准；[旧架构总表](./agents/00-architecture.md) 自己标了过时）、[最小闭环骨架](./specs/2026-10-18-me-closed-loop-skeleton-min-cost.md)、[功能地图与人机分工](./specs/2026-10-16-feature-map-and-human-ai-division-v1.md)、调度目录 `src/lib/cron/dispatch/catalog.ts`（PR #3071）。
-> **计数**：未完成 **355** 条（近期 65，其余 290）。冻结 / 暂停 **89** 条（老阶段 70，NAL 暂停 15，未排期 4）。本次移出 **47** 条（已完成 42，已作废 5）。移出前未完成是 **491** 条。原文件头写「2026-08-01 · 162 条」，作废。
+> **计数**：未完成 **355** 条（近期 65，其余 290）。冻结 / 暂停 **89** 条（老阶段 70，NAL 暂停 15，未排期 4）。本次移出 **47** 条（已完成 42，已作废 4，定案更正 1）。移出前未完成是 **491** 条。原文件头写「2026-08-01 · 162 条」，作废。
 > 已勾选、本来就不在这 491 条里的旧完成项，只留在归档，这里不重列。
 > 旧全文：[archive/ROADMAP-2026-10-24-before-realign.md](./archive/ROADMAP-2026-10-24-before-realign.md)。事项列是要点，逐字原文以归档对应行为准。
 > 本次只重排、去重、标状态。没有新功能、没有新计划。优先级沿用原文；原文没打分的仍写「—」。
@@ -34,6 +34,14 @@
 调度收口已经决定，还差验收：3 个调度入口取代几十个旧定时任务（PR #3071）。验收方式写在 [台账](./ledger/2026-10-24-render-cron-dispatcher.md)，核对日 2026-10-31。
 
 自治计划里 B4（待办先改人话）和 B5（SEO 不问就能改的范围）仍等广告跑稳两周，见下方「尚未到点」。
+
+---
+
+## 已定案（2026-10-24 19:55 NZDT）
+
+合并规则：Ray 原话：「普通改动机器自动合并。」保留仓库现有 [合并规则](../.github/merge-authorization.md)，普通改动由机器自动合并。本次不改那份文件。
+
+与这句矛盾的「PR 一律不自动合并」作废。依据就是上面这句原话。R003、R157 已按此改状态，不再列在下面的拍板清单里。
 
 ---
 
@@ -76,13 +84,6 @@ R007 里 NAL 那一半随 NAL 暂停。Magic Lab Class 的主页权限仍要补�
 NAL 的版位、3PL、加预算（R112、R113、R114）在暂停区，不在这份花钱决定里做。
 
 R066 已按「韩信编排不做」移出，依据是未合并的文档 PR [#2860](https://github.com/bigbigraydeng-maker/magic-engine/pull/2860)。R067 还留在广告近期里，等你确认要不要跟着作废。
-
-### 和「PR 不自动合并」冲突的旧句子
-
-- **R003** 已移到文末作废附录。它要求审查三人签字后自动合并。请确认这句作废，不要再派工。
-- **R157**（—，其余未完成）PR #931 OPS02「Codex 复审干净就自动合并」—— ⚠️ 前置已就绪，卡点在 PR 自己身上：原引用的 #939 已于 2026-08-16 关闭修复，不再是阻塞点。曾经存在的另一个真实缺口——`tools/ops-review-loop/src/fix-scope.mjs` 的 `G…
-
-仓库里的 [合并规则](../.github/merge-authorization.md)（2026-09-25）仍写着：普通改动检查全绿后机器自动合并。这和「PR 一律不自动合并」是两套说法。GitHub Actions 自 2026-10-18 起因账单锁定，两条都没有在跑。请定一句留哪套。本文件不改那份合并规则。
 
 ### NZCPE（展会在 11 月）
 
@@ -558,7 +559,7 @@ Roman 参考闭环、Park Homes、NZCPE。NZCPE 的方向和预算同时列在�
 | R154 | — | 未完成 | PM | WP00 §15 其余未决项（U1–U10、U12）仍单独以未决形态挂着，任何 WP 不许把它们当既定假设 | [归档 L960](./archive/ROADMAP-2026-10-24-before-realign.md#L960) [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872) |
 | R155 | — | 未完成 | PM | Product Map PR3（WP「ME2 Product Map v1」的最后一段）—— PR1（组件登记册＋成熟度引擎,PR #976）与 PR2（GitHub 只读动态同步,PR #979）均已于 2026-08-15 合并并完成生产 provisioning（migration 已 app… | [归档 L961](./archive/ROADMAP-2026-10-24-before-realign.md#L961) [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872) [#976](https://github.com/bigbigraydeng-maker/magic-engine/pull/976) |
 | R156 | — | 未完成 | PM | #911 / PR #912 OPS03 事件驱动 Issue 中继试点 —— ⚠️ 它写死的唯一标的 #910 已关闭，试点要么改标的要么归档 | [归档 L968](./archive/ROADMAP-2026-10-24-before-realign.md#L968) [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872) [#911](https://github.com/bigbigraydeng-maker/magic-engine/issues/911) |
-| R157 | — | 未完成 | PM | PR #931 OPS02「Codex 复审干净就自动合并」—— ⚠️ 前置已就绪，卡点在 PR 自己身上：原引用的 #939 已于 2026-08-16 关闭修复，不再是阻塞点。曾经存在的另一个真实缺口——`tools/ops-review-loop/src/fix-scope.mjs` 的 `G… | [归档 L969](./archive/ROADMAP-2026-10-24-before-realign.md#L969) [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872) [#931](https://github.com/bigbigraydeng-maker/magic-engine/pull/931) |
+| R157 | — | 规则已定案；#931 不另开工 | PM | 【已定案 2026-10-24 19:55 NZDT】Ray 原话：「普通改动机器自动合并。」与此矛盾的「PR 一律不自动合并」作废，依据即该原话。#931 仍是未合并且冲突的旧 PR，不另开工。原文：PR #931 OPS02「Codex 复审干净就自动合并」—— ⚠️ 前置已就绪，卡点在 PR 自己身上：原引用的 #939 已于 2026-08-16 关闭修复，不再是阻塞点。曾经存在的另一个真实缺口——`tools/ops-review-loop/src/fix-scope.mjs` 的 `G… | [归档 L969](./archive/ROADMAP-2026-10-24-before-realign.md#L969) [#872](https://github.com/bigbigraydeng-maker/magic-engine/issues/872) [#931](https://github.com/bigbigraydeng-maker/magic-engine/pull/931) |
 | R199 | — | 待 PM 决定 | PM | [NZCPE 2026（新西兰中国贸易博览会 · 2026-0] NZCPE-1 推广方向口径待 PM 一句话定死 —— 网站 SEO 已按 PM 2026-08-05 拍板改回 B2B（中国企业出海 / NZ 企业对华采购），而广告与社媒计划仍冲 To C 的 15,000 公众访客目标。两条线现在方向不同：是… | [归档 L1222](./archive/ROADMAP-2026-10-24-before-realign.md#L1222) [docs/clients/nzcpe/](./clients/nzcpe/) |
 | R200 | — | 未完成 | PM | [NZCPE 2026（新西兰中国贸易博览会 · 2026-0] NZCPE-2 GBP 建档 地址挂 NZICC（101 Hobson Street, Auckland CBD）—— To C 推广也吃自然搜索流量 | [归档 L1223](./archive/ROADMAP-2026-10-24-before-realign.md#L1223) [docs/clients/nzcpe/](./clients/nzcpe/) |
 | R201 | — | 未完成 | PM | [NZCPE 2026（新西兰中国贸易博览会 · 2026-0] NZCPE-3 确认 `plan_tier` 现设 `starter`，无预算信号，PM 确认后再调 | [归档 L1224](./archive/ROADMAP-2026-10-24-before-realign.md#L1224) [docs/clients/nzcpe/](./clients/nzcpe/) |
@@ -688,7 +689,7 @@ R036 是未排期的内部连接评估。R239、R452 跟语音外呼是同一条
 
 ## 已完成 / 已作废（本次清理）
 
-共 47 条。已完成 42（其中盘点标为「代码已在或模块已删」的 31 条，另加 2026-10-24 核查判定做完的 11 条）。已作废 5 条。
+共 47 条。已完成 42（其中盘点标为「代码已在或模块已删」的 31 条，另加 2026-10-24 核查判定做完的 11 条）。已作废 4 条。定案更正 1 条（R003）。
 
 ### 已完成
 
@@ -741,9 +742,16 @@ R036 是未排期的内部连接评估。R239、R452 跟语音外呼是同一条
 
 | ID | 处置 | 原优先级 | 证据 |
 |---|---|---|---|
-| R003 | 已作废，移出未完成清单 | P2 | 已作废。要求审查签字后自动合并，和现行「PR 不自动合并」冲突。GitHub Actions 自 2026-10-18 起因账单锁定，审查流也没在跑。定级接线 PR #2157 仍开着，作废的是自动合并这句。 |
 | R013 | 已作废，移出未完成清单 | —（记账） | 已作废。原文写明不单独开工。那 12 条是 9 月传出的转化，归因窗口已过，撤回没有意义。 |
 | R030 | 已作废，移出未完成清单 | P2 | 已作废。这是查 9 月 23 日当天没写上数据的一次性调查。该任务现为每周一 16:30 UTC（`catalog.ts` 的 `industry-ai-visibility-daily`），前提「每天跑不完」已不成立。 |
 | R034 | 已作废，移出未完成清单 | P3 | 已作废。原文写了现网没有 UTC+7/+8 账户就别做。2026-10-24 核查近 14 天账户时区里没有这两个时区。 |
 | R066 | 已作废，移出未完成清单 | P0 | 已作废（待你认）。PR #2830 已把熔断探针只读接进日任务。PR #2860（未合并，纯文档）写明账本和韩信函数不做。正式作废以 #2860 合并或你一句确认为准。 |
+
+### 定案更正
+
+R003 仍不在未完成清单里，也不加回近期。更正的是作废理由。
+
+| ID | 处置 | 原优先级 | 证据 |
+|---|---|---|---|
+| R003 | 定案更正，仍移出未完成清单，不另开工 | P2 | 2026-10-24 19:55 NZDT，Ray 原话：「普通改动机器自动合并。」先前把本条标作废，依据是「现行 PR 不自动合并」。这句依据作废。普通改动自动合并与仓库现有合并规则一致，不取消。本次不改合并规则文件。三人签字后的自动写入仍按原文等广告跑稳两周（同 R004、R005），不因此把本条加回近期。GitHub Actions 自 2026-10-18 起因账单锁定，审查流当时没在跑。定级接线 PR #2157 仍开着，本次不处理。 |
 
