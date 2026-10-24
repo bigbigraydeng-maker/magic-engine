@@ -28,6 +28,18 @@ const REAL_OUTAGE = [
   { clientName: 'CTS Tours NZ', error: SERVER_ERROR },
 ]
 
+describe('classifyLeadsSyncOutcome', () => {
+  it('已知坏令牌（等重连）算 blocked，不把整轮涂成失败', () => {
+    expect(
+      classifyLeadsSyncOutcome({
+        clientName: 'Sample',
+        skipped: 'connection_unhealthy',
+        error: 'code=190',
+      }).state,
+    ).toBe('blocked')
+  })
+})
+
 describe('summariseFailures', () => {
   it('全好时返回 undefined —— 否则每小时都会把健康的一跑标成失败', () => {
     expect(
