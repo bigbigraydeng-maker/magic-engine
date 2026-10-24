@@ -153,6 +153,146 @@ const MONTH_ALIASES: Record<number, string[]> = {
   11: ['november', 'nov', '11月', '十一月'], 12: ['december', 'dec', '12月', '十二月'],
 }
 const TOUR_COUNT_CUE = /\b(?:tour|group|departure|coach)s?\b|团|班期|班次/i
+const TOUR_AVAILABILITY_QUESTION =
+  /\b(?:how many|how much|are there|is there|do you (?:have|run|offer)|any|which|what)\b.{0,100}\b(?:tours?|groups?|departures?|coaches?|dates?)\b|\b(?:tours?|groups?|departures?)\b.{0,80}\b(?:available|availability)\b|(?:几(?:个|团|班期|班次)|多少(?:个)?(?:团|班期|班次)?|有哪些(?:团|班期|班次)|有没有.{0,12}(?:团|班期|班次)|(?:团|班期|班次).{0,8}(?:有几|几团|几个|多少))/i
+const TRAVEL_INTENT_CUE =
+  /\b(?:i|we)\b.{0,35}\b(?:plan(?:ning)?|want|hope|intend|would like|am thinking|are thinking|can|will|expect|going)\b.{0,35}\b(?:travel(?:l?ing)?|go(?:ing)?|visit|leave|trip|holiday|vacation)\b|\b(?:i|we)['’]m\s+thinking of\b.{0,35}\b(?:travel|go(?:ing)?|visit)\b|\b(?:my|our)\s+(?:trip|holiday|vacation)\b.{0,40}\b(?:in|is|starts?|will be)\b|(?:我|我们).{0,20}(?:计划|打算|想|要|准备|可以|会).{0,20}(?:出发|去|旅行|旅游|度假)|(?:我的|我们的)(?:旅行|行程|假期).{0,12}(?:在|是|从)/i
+const CONDITIONAL_INTENT =
+  /\b(?:if|unless|provided|depending on|subject to|pending|might|maybe|possibly|once|when|as soon as)\b|\b(?:i|we)\s+may\b|\bafter\s+(?:(?:i|we|you|they)\s+)?(?:(?:receive|get|obtain|have)\s+)?(?:the\s+|my\s+|our\s+)?(?:approval|permission|leave|confirmation|visa)\b|(?:如果|要是|若|如(?:果)?|待.{0,8}(?:批准|确认)|可能|也许|看.{0,8}(?:工作|假期)|(?:拿到|获得|得到|确认|批准|批复|获批|有.{0,8}(?:假期|时间|许可)|等).{0,20}(?:后|之后|再|才能|时)|(?:假期|批准|批复|确认|许可|签证).{0,8}(?:后|之后|再|才能|时))/i
+const NEGATED_TRAVEL_INTENT =
+  /\b(?:i|we)\s+(?:do not|don't|will not|won't|cannot|can't)\b.{0,30}\b(?:travel|go|visit|leave)\b|(?:我|我们)(?:不想|不去|不会|不能|没打算).{0,12}(?:出发|去|旅行|旅游)/i
+const EMPLOYEE_CALLBACK_ACTION =
+  /\b(?:i|we|our team|our office)\s+(?:will|'ll|shall)\s+(?:give you a call|call|phone|ring|contact|get back to you|follow up|check back)\b|\blet me\s+(?:call|phone|ring|contact|get back|follow up)\b|(?:我|我们|我们这边|同事).{0,20}(?:会|将|于).{0,12}(?:回电|回访|打电话|联系)|(?:我|我们|我们这边|同事).{0,24}(?:今天|明天|后天|下周|周末|星期[一二三四五六日天]|周[一二三四五六日天]|\d{1,2}月\d{1,2}[日号]?|\d{1,2}点).{0,12}(?:回电|回访|打电话|联系)/i
+const EXPLICIT_TIME_REFERENCE =
+  /\b(?:today|tomorrow|tonight|next week|next month|weekend|monday|tuesday|wednesday|thursday|friday|saturday|sunday|in (?:a|one|two|three|four|five|six|seven|eight|nine|ten|couple of|few|\d+) (?:days?|weeks?|months?)|within (?:a|one|two|three|four|five|six|seven|eight|nine|ten|couple of|few|\d+) (?:days?|weeks?|months?)|after (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) (?:days?|weeks?|months?)|(?:on|at|by) \d{1,2}(?:st|nd|rd|th)?(?:\s+\w+)?|at \d{1,2}(?::\d{2})?\s?(?:am|pm)?)\b|(?:今天|明天|后天|下周|下个月|周末|星期[一二三四五六日天]|周[一二三四五六日天]|\d{1,2}月\d{1,2}[日号]?|\d{1,2}点|[一二三四五六七八九十\d]+(?:天|周|星期|个月)后)/i
+
+function callbackTimeSupported(value: string, quote: string): boolean {
+  if (CONDITIONAL_INTENT.test(quote)) return false
+  const clauses = quote.split(/[,.!?;，。！？；]|\b(?:and|but|so)\b|(?:但是|不过|然后|以及)/i)
+  return clauses.some((clause) => {
+    const action = EMPLOYEE_CALLBACK_ACTION.exec(clause)
+    if (!action) return false
+    const start = Math.max(0, action.index - 36)
+    const end = Math.min(clause.length, action.index + action[0].length + 60)
+    const actionContext = clause.slice(start, end)
+    // A callback with multiple offered dates or times is not one firm appointment.
+    if (/\b(?:or|and\/or)\b|或者|还是/i.test(actionContext)) return false
+    return (EXPLICIT_TIME_REFERENCE.test(actionContext) || monthsMentioned(actionContext).length > 0)
+      && dateEvidenceMatches(value, actionContext)
+  })
+}
+
+function monthTokensMentioned(text: string): number[] {
+  const raw = text.toLowerCase()
+  const normalised = norm(text)
+  return Object.entries(MONTH_ALIASES).flatMap(([monthText, aliases]) => {
+    const month = Number(monthText)
+    const found = aliases.some((alias) => /^[a-z]+$/i.test(alias)
+      ? new RegExp('\\b' + alias + '\\b', 'i').test(raw)
+      : normalised.includes(norm(alias)))
+    return found ? [month] : []
+  })
+}
+
+function dateTokens(text: string): Set<string> {
+  const tokens = new Set(monthTokensMentioned(text).map((month) => 'month:' + month))
+  const raw = text.toLowerCase()
+  const numberWords: Record<string, string> = {
+    a: '1', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', ten: '10',
+    couple: '2', 'couple of': '2', few: '3',
+    零: '0', 一: '1', 二: '2', 两: '2', 三: '3', 四: '4', 五: '5', 六: '6', 七: '7', 八: '8', 九: '9', 十: '10',
+  }
+  const periods: Array<[string, RegExp]> = [
+    ['early', /\b(?:early|beginning of|start of)\b|初|上旬/],
+    ['mid', /\bmid(?:[-\s])?(?:month)?\b|中旬|月中/],
+    ['late', /\b(?:late|end of)\b|末|月底|下旬/],
+  ]
+  const monthSpans: Array<{ month: number; start: number; end: number }> = []
+  for (const [monthText, aliases] of Object.entries(MONTH_ALIASES)) {
+    for (const alias of aliases) {
+      const pattern = /^[a-z]+$/i.test(alias) ? new RegExp('\\b' + alias + '\\b', 'gi') : new RegExp(alias, 'g')
+      for (const match of raw.matchAll(pattern)) {
+        monthSpans.push({ month: Number(monthText), start: match.index ?? 0, end: (match.index ?? 0) + match[0].length })
+      }
+    }
+  }
+  for (const span of monthSpans) {
+    const context = raw.slice(Math.max(0, span.start - 16), Math.min(raw.length, span.end + 16))
+    for (const [period, pattern] of periods) {
+      if (pattern.test(context)) tokens.add(`month-period:${span.month}:${period}`)
+    }
+    const nearbyYears = [...context.matchAll(/\b20\d{2}\b/g)]
+      .map((match) => ({ year: match[0], distance: Math.min(
+        Math.abs((match.index ?? 0) - (span.start - Math.max(0, span.start - 16))),
+        Math.abs((match.index ?? 0) - (span.end - Math.max(0, span.start - 16))),
+      ) }))
+      .filter((match) => match.distance <= 10)
+      .sort((a, b) => a.distance - b.distance)
+    if (nearbyYears[0] && nearbyYears[0].distance < (nearbyYears[1]?.distance ?? Number.POSITIVE_INFINITY)) {
+      tokens.add(`month-year:${span.month}:${nearbyYears[0].year}`)
+    }
+  }
+  if (/\b(?:morning|a\.m\.)\b|上午|早上|早晨/i.test(raw)) tokens.add('daypart:morning')
+  if (/\b(?:afternoon|p\.m\.)\b|下午/i.test(raw)) tokens.add('daypart:afternoon')
+  if (/\b(?:evening|night)\b|晚上|夜间/i.test(raw)) tokens.add('daypart:evening')
+  const weekdays: Array<[string, RegExp]> = [
+    ['monday', /\b(?:mon|monday)\b|星期一|周一/], ['tuesday', /\b(?:tue|tues|tuesday)\b|星期二|周二/],
+    ['wednesday', /\b(?:wed|wednesday)\b|星期三|周三/], ['thursday', /\b(?:thu|thur|thurs|thursday)\b|星期四|周四/],
+    ['friday', /\b(?:fri|friday)\b|星期五|周五/], ['saturday', /\b(?:sat|saturday)\b|星期六|周六/],
+    ['sunday', /\b(?:sun|sunday)\b|星期日|星期天|周日|周天/],
+  ]
+  for (const [day, pattern] of weekdays) if (pattern.test(raw)) tokens.add('weekday:' + day)
+  const relative: Array<[string, RegExp]> = [
+    ['today', /\btoday\b|今天|今日/], ['tomorrow', /\btomorrow\b|明天/], ['day_after_tomorrow', /\bday after tomorrow\b|后天/],
+    ['next_week', /\bnext\s+(?:week|mon(?:day)?|tue(?:s|sday)?|wed(?:nesday)?|thu(?:r|rs|rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b|下周|下星期/],
+    ['next_month', /\bnext month\b|下个月/], ['weekend', /\bweekend\b|周末/],
+  ]
+  for (const [name, pattern] of relative) if (pattern.test(raw)) tokens.add('relative:' + name)
+  for (const match of raw.matchAll(/\b(?:in|within|after)\s+(a|one|two|three|four|five|six|seven|eight|nine|ten|couple of|few|\d+)\s+(days?|weeks?|months?)\b/g)) {
+    tokens.add('relative:' + (numberWords[match[1]] ?? match[1]) + ':' + match[2].replace(/s$/, ''))
+  }
+  for (const match of raw.matchAll(/([零一二两三四五六七八九十\d]+)(?:个)?(天|周|星期|个月)后/g)) {
+    let count = numberWords[match[1]] ?? match[1]
+    if (match[1].length === 2 && match[1][0] === '十') count = String(10 + Number(numberWords[match[1][1]] ?? 0))
+    else if (match[1].length === 2 && match[1][1] === '十') count = String(Number(numberWords[match[1][0]] ?? 0) * 10)
+    const unit = match[2] === '天' ? 'day' : match[2] === '个月' ? 'month' : 'week'
+    tokens.add('relative:' + count + ':' + unit)
+  }
+  for (const match of raw.matchAll(/\b20\d{2}\b/g)) tokens.add('year:' + match[0])
+  for (const match of raw.matchAll(/\b(?:on|by|the)?\s*(\d{1,2})(?:st|nd|rd|th)?\s+(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\b/g)) {
+    tokens.add('day:' + Number(match[1]))
+  }
+  for (const match of raw.matchAll(/\b(?:january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/g)) {
+    tokens.add('day:' + Number(match[1]))
+  }
+  for (const match of raw.matchAll(/\d{1,2}月(\d{1,2})[日号]?/g)) tokens.add('day:' + Number(match[1]))
+  for (const match of raw.matchAll(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/g)) {
+    tokens.add('clock:' + Number(match[1]) + ':' + (match[2] ?? '00') + ':' + match[3])
+  }
+  for (const match of raw.matchAll(/(\d{1,2})点(?:(\d{1,2})分)?/g)) tokens.add('clock:' + Number(match[1]) + ':' + (match[2] ?? '00'))
+  return tokens
+}
+
+const STAFF_ACTION_IN_VALUE =
+  /(?:员工|公司|我们(?:这边)?|销售|客服|旅行社).{0,20}(?:回电|回访|打电话|联系|跟进)|\b(?:employee|staff|our team|we)\b.{0,30}\b(?:call|contact|follow up|get back)|(?:跟进|回访|回电|打电话|联系).{0,12}(?:客户|客人)/i
+const FIRST_PERSON_FOLLOWUP_ACTION =
+  /\b(?:i|we)\s+(?:(?:will|'ll|can|need to|have to|am going to))\s+(?:check|ask|confirm|contact|call|phone|ring|send|email|get back|follow up|be in touch|come back|decide|review|arrange)\b|\b(?:i|we)\s+(?:will|'ll)\s+be\s+in\s+touch\b|(?:我|我们).{0,16}(?:会|将|要|需要|先|打算).{0,14}(?:确认|查|问|联系|回联|回访|回电|打电话|发送|发邮件|决定|安排)/i
+
+function dateEvidenceMatches(value: string, quote: string): boolean {
+  const valueTokens = dateTokens(value)
+  const quoteTokens = dateTokens(quote)
+  return valueTokens.size > 0 && [...valueTokens].every((token) => quoteTokens.has(token))
+}
+
+function travelDateEvidenceMatches(value: string, quote: string): boolean {
+  // Keep the customer's travel statement and its date in the same sentence. This
+  // prevents a month/year from a nearby unrelated trip being stitched together.
+  const clauses = quote.split(/[.!?;。！？；]+/)
+  return clauses.some((clause) => TRAVEL_INTENT_CUE.test(clause)
+    && !TOUR_AVAILABILITY_QUESTION.test(clause)
+    && !/\b(?:or|and\/or)\b|或者|还是/i.test(clause)
+    && dateEvidenceMatches(value, clause))
+}
 
 const NUMERIC_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['budget', 'party_size'])
 /** 第一人称的拒绝联系（不是任何含 stop/别再 的句子）。 */
@@ -160,9 +300,39 @@ const NEGATION = /(don'?t|do not|please don'?t|stop)\s+(call|calling|contact|con
 const QUESTION = /[?？]|什么意思|为什么|why\b|是什么/i
 
 /** 数值类事实：值里的数字必须有原话依据，且原话要像金额/人数，不是电话号码、日期、钟点。「别再联系」必须是第一人称的陈述句。 */
-function valueSupported(f: RawFact): boolean {
+function valueSupported(f: Pick<RawFact, 'key' | 'value' | 'quote' | 'speaker'>): boolean {
   if (f.key === 'do_not_contact') return NEGATION.test(f.quote) && !QUESTION.test(f.quote)
-  if (f.key === 'contact_email') return f.speaker === 'customer' && emailSupported(f.value, f.quote)
+  if (f.key === 'contact_email') {
+    return f.speaker === 'customer' && emailSupported(f.value, f.quote)
+  }
+  if (f.key === 'travel_window') {
+    // Old rows could omit speaker. Keep their existing verification contract, but
+    // the compact CRM card still hides them until the source role is known.
+    if (f.speaker === undefined) {
+      const valueMonths = monthsMentioned(f.value)
+      const quoteMonths = monthsMentioned(f.quote)
+      return !TOUR_AVAILABILITY_QUESTION.test(f.quote)
+        && (valueMonths.length === 0 || valueMonths.some((month) => quoteMonths.includes(month)))
+    }
+    if (
+      f.speaker !== 'customer'
+      || TOUR_AVAILABILITY_QUESTION.test(f.quote)
+      || !TRAVEL_INTENT_CUE.test(f.quote)
+      || CONDITIONAL_INTENT.test(f.quote)
+      || NEGATED_TRAVEL_INTENT.test(f.quote)
+    ) return false
+    return travelDateEvidenceMatches(f.value, f.quote)
+  }
+  if (f.key === 'next_step') {
+    return (f.speaker === 'customer' || f.speaker === 'employee')
+      && FIRST_PERSON_FOLLOWUP_ACTION.test(f.quote)
+      && (!CONDITIONAL_INTENT.test(f.quote) || CONDITIONAL_INTENT.test(f.value))
+      && !(f.speaker === 'customer' && STAFF_ACTION_IN_VALUE.test(f.value))
+  }
+  if (f.key === 'callback_time') {
+    return f.speaker === 'employee'
+      && callbackTimeSupported(f.value, f.quote)
+  }
   if (!NUMERIC_KEYS.has(f.key)) return true
   const need = [...numbersIn(f.value)]
   if (need.length === 0 || need.some((n) => n > 10_000_000)) return false
@@ -174,6 +344,16 @@ function valueSupported(f: RawFact): boolean {
   const valueCur = currenciesIn(f.value)
   if (valueCur.length > 0 && !valueCur.every((c) => quoteCur.includes(c))) return false
   return AMOUNT_CUE.test(f.quote) || quoteCur.length > 0
+}
+
+/** Only core CRM facts are returned in the compact call card. Reapply semantic guards to stored rows too. */
+export function isCoreCrmCallFact(
+  fact: { key: string; value: string; quote: string; speaker?: RawFact['speaker'] },
+): boolean {
+  if (!['travel_window', 'next_step', 'callback_time', 'contact_email'].includes(fact.key)) return false
+  const quote = norm(fact.quote)
+  const enoughQuote = fact.key === 'contact_email' ? quote.length >= 6 : quoteLongEnough(quote)
+  return enoughQuote && valueSupported({ ...fact, key: fact.key as FactKey })
 }
 
 function normaliseEmailEvidence(text: string): string {
@@ -221,8 +401,8 @@ function monthSupported(month: number, quote: string): boolean {
   const normalised = norm(quote)
   return (MONTH_ALIASES[month] ?? []).some((alias) => {
     if (month === 5 && alias === 'may') {
-      // “May” is also a modal verb; require a month-like preposition or a tour/date noun.
-      return /\b(?:in|for|during|of|from|through|until|by)\s+may\b|\bmay\s+(?:\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{4}|tours?|groups?|departures?|coaches|trips?|holidays?|dates?)\b/i.test(raw)
+      // “May” is also a modal verb; require date context, an explicit tour noun, or a paired month.
+      return /\b(?:in|for|during|of|from|through|until|by|next|this|early|late|end)\s+may\b|\bend of may\b|\bmay\s+(?:\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{4}|next year|this year|tours?|groups?|departures?|coaches|trips?|holidays?|dates?)\b|\b(?:january|jan|february|feb|march|mar|april|apr|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\b.{0,12}(?:,|and|or)\s*may\b|\bmay\b.{0,12}(?:,|and|or)\s*\b(?:january|jan|february|feb|march|mar|april|apr|june|jun|july|jul|august|aug|september|sep|sept|october|oct|november|nov|december|dec)\b/i.test(raw)
     }
     return /^[a-z]+$/i.test(alias)
       ? new RegExp(`\\b${alias}\\b`, 'i').test(raw)

@@ -49,7 +49,7 @@ interface CallAnalysisView {
   id: string
   summary: string
   reviewStatus: 'pending_review' | 'confirmed' | 'rejected'
-  facts: { key: string; value: string; quote: string }[]
+  facts: { key: string; value: string; quote: string; speaker?: 'customer' | 'employee' | 'unclear' }[]
 }
 
 function asReviewStatus(v: unknown): CallAnalysisView['reviewStatus'] {
@@ -60,9 +60,10 @@ function asFacts(v: unknown): CallAnalysisView['facts'] {
   if (!Array.isArray(v)) return []
   return v.flatMap((f) => {
     const o = (f ?? {}) as Record<string, unknown>
-    return typeof o.key === 'string' && typeof o.value === 'string' && typeof o.quote === 'string'
-      ? [{ key: o.key, value: o.value, quote: o.quote }]
-      : []
+    if (typeof o.key !== 'string' || typeof o.value !== 'string' || typeof o.quote !== 'string') return []
+    const fact: CallAnalysisView['facts'][number] = { key: o.key, value: o.value, quote: o.quote }
+    if (o.speaker === 'customer' || o.speaker === 'employee' || o.speaker === 'unclear') fact.speaker = o.speaker
+    return [fact]
   })
 }
 
