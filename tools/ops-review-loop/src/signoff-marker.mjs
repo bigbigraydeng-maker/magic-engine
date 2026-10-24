@@ -569,3 +569,165 @@ export function evaluateCodexHeadReview({
   }
   return { clear: true, reviewed: true, blocking: 0, reason: 'Codex 已审过当前这次提交，没有未解决的 P0/P1' }
 }
+
+// --- Claude Code sign-off on the current head (A auto-merge) ----------------
+//
+// Counts only against the current head sha. A later push drops it, the same
+// way a Codex review of an older head drops. The base sha is not required:
+// Claude's review is of this commit, and the live head compare plus
+// `--match-head-commit` is what stops a stale enable.
+//
+// A sign-off is one of:
+//   - a trusted `me-review-signoff` v1 marker, role `claude-code`, verdict
+//     `pass`, whose `head` is this sha;
+//   - a GitHub review by the trusted login, commit oid = this sha, state
+//     APPROVED;
+//   - a review or issue comment by that login whose body contains this full
+//     sha and an explicit sign-off phrase.
+// "no P0/P1" in that sign-off text is not itself a finding. An unresolved
+// P0/P1 thread from that login on this head still blocks.
+
+const CLAUDE_SIGNOFF_PHRASE = /\b(sign[\s-]?off|signed off|lgtm)\b|签字通过/i
+
+/**
+ * @param {unknown} body
+ * @param {string} headSha
+ * @returns {boolean}
+ */
+function bodySignsHead(body, headSha) {
+  return typeof body === 'string' && CLAUDE_SIGNOFF_PHRASE.test(body) && body.toLowerCase().includes(headSha)
+}
+
+/**
+ * @param {unknown} body
+ * @param {string} headSha
+ * @returns {boolean}
+ */
+function bodySignsOlderHead(body, headSha) {
+  if (typeof body !== 'string' || !CLAUDE_SIGNOFF_PHRASE.test(body)) return false
+  const shas = body.toLowerCase().match(/[0-9a-f]{40}/g) ?? []
+  return shas.some((sha) => sha !== headSha)
+}
+
+/**
+ * @param {unknown} review
+ * @param {string} headSha
+ * @param {string} login
+ * @param {boolean} current
+ * @returns {boolean}
+ */
+function claudeReviewSigns(review, headSha, login, current) {
+  if (!review || typeof review !== 'object') return false
+  const row = /** @type {{author?: unknown, commitId?: unknown, state?: unknown, body?: unknown}} */ (review)
+  if (!loginMatchesTrusted(row.author, login) || !isHeadSha(row.commitId)) return false
+  const same = String(row.commitId).toLowerCase() === headSha
+  if (current !== same) return false
+  if (String(row.state || '').toUpperCase() === 'CHANGES_REQUESTED') return false
+  if (String(row.state || '').toUpperCase() === 'APPROVED') return true
+  return current ? bodySignsHead(row.body, headSha) : bodySignsOlderHead(row.body, headSha)
+}
+
+/**
+ * @param {unknown} markers
+ * @param {string} headSha
+ * @param {string} login
+ * @param {boolean} current
+ * @returns {boolean}
+ */
+function claudeMarkerSigns(markers, headSha, login, current) {
+  return (Array.isArray(markers) ? markers : []).some((marker) => {
+    if (!marker || typeof marker !== 'object') return false
+    const row = /** @type {{role?: unknown, verdict?: unknown, author?: unknown, head?: unknown}} */ (marker)
+    if (row.role !== 'claude-code' || row.verdict !== 'pass') return false
+    if (!loginMatchesTrusted(row.author, login) || !isHeadSha(row.head)) return false
+    return current === (String(row.head).toLowerCase() === headSha)
+  })
+}
+
+/**
+ * @param {{headSha: string, login: string, comments: unknown, reviews: unknown, markers: unknown}} input
+ * @returns {{signed: boolean, older: boolean}}
+ */
+function collectClaudeEvidence({ headSha, login, comments, reviews, markers }) {
+  const reviewList = Array.isArray(reviews) ? reviews : []
+  const commentList = Array.isArray(comments) ? comments : []
+  const signed =
+    claudeMarkerSigns(markers, headSha, login, true) ||
+    reviewList.some((review) => claudeReviewSigns(review, headSha, login, true)) ||
+    commentList.some(
+      (comment) => comment && loginMatchesTrusted(comment.author, login) && bodySignsHead(comment.body, headSha),
+    )
+  const older =
+    claudeMarkerSigns(markers, headSha, login, false) ||
+    reviewList.some((review) => claudeReviewSigns(review, headSha, login, false)) ||
+    commentList.some(
+      (comment) => comment && loginMatchesTrusted(comment.author, login) && bodySignsOlderHead(comment.body, headSha),
+    )
+  return { signed, older }
+}
+
+/**
+ * Has Claude Code signed off on this exact head, with no unresolved P0/P1
+ * from that login left on it?
+ *
+ * @param {{head?: unknown, trustedLogin?: unknown, prAuthor?: unknown, comments?: unknown, reviews?: unknown, markers?: unknown, threads?: unknown, threadsReadable?: unknown}} input
+ * @returns {{clear: boolean, reviewed: boolean, blocking: number, reason: string}}
+ */
+export function evaluateClaudeHeadSignoff({
+  head,
+  trustedLogin,
+  prAuthor,
+  comments,
+  reviews,
+  markers,
+  threads,
+  threadsReadable,
+} = {}) {
+  if (!codexLoginUsable(trustedLogin, prAuthor)) {
+    return { clear: false, reviewed: false, blocking: 0, reason: 'Claude Code 的可信登录名还没配好，或这个登录名不能当审查人' }
+  }
+  if (!isHeadSha(head)) {
+    return { clear: false, reviewed: false, blocking: 0, reason: '当前提交号读不到，不能把签字算在这次提交上' }
+  }
+  const headSha = String(head).toLowerCase()
+  const evidence = collectClaudeEvidence({
+    headSha,
+    login: String(trustedLogin),
+    comments,
+    reviews,
+    markers,
+  })
+  if (!evidence.signed) {
+    const reason = evidence.older
+      ? 'Claude Code 签的是更早的提交，当前这次还没签'
+      : 'Claude Code 还没签过当前这次提交'
+    return { clear: false, reviewed: false, blocking: 0, reason }
+  }
+  if (threadsReadable !== true) {
+    return { clear: false, reviewed: true, blocking: 0, reason: '没能读全 Claude Code 的行内意见' }
+  }
+  const blocking = (Array.isArray(threads) ? threads : []).filter((thread) =>
+    threadBlocks(thread, headSha, String(trustedLogin)),
+  ).length
+  if (blocking > 0) {
+    return { clear: false, reviewed: true, blocking, reason: `Claude Code 还有 ${blocking} 条没解决的 P0/P1` }
+  }
+  return { clear: true, reviewed: true, blocking: 0, reason: 'Claude Code 已签过当前这次提交，没有未解决的 P0/P1' }
+}
+
+/**
+ * Every review conversation must be resolved before an A-level PR can arm
+ * auto-merge. A P2 thread is not a P0/P1 finding, but an open thread still
+ * blocks. Unreadable threads fail closed. This does not resolve anything.
+ *
+ * @param {{threads?: unknown, threadsReadable?: unknown}} input
+ * @returns {{resolved: boolean, reason: string}}
+ */
+export function reviewConversationsResolved({ threads, threadsReadable } = {}) {
+  if (threadsReadable !== true || !Array.isArray(threads)) {
+    return { resolved: false, reason: '没能读全审查对话' }
+  }
+  const open = threads.filter((thread) => !thread || thread.resolved !== true).length
+  if (open > 0) return { resolved: false, reason: `还有 ${open} 条没解决的审查对话` }
+  return { resolved: true, reason: '审查对话都已解决' }
+}
