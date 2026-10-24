@@ -4,7 +4,8 @@ PM 2026-09-25 拍板（台账卡 `docs/ledger/2026-09-25-merge-gate-machine-not-
 `docs/ledger/2026-09-25-merge-two-tiers-auto-vs-signed.md`）：
 
 > 合并不做"每次 GitHub 点头"的人工闸；分两档——B/C 级 PR 机器检查全绿自动合、
-> 不再在聊天里问 PM go；A 级要审核团队三人签字被机器记录后才合，接线前仍问 PM 一句。
+> 不再在聊天里问 PM go。2026-10-25 Ray 口授：A 级改为 Codex Astra 审查 + Claude Code
+> 独立复核，两签齐了才由人合。子牙 / 魏征 / 狄仁杰 只抽查 B 级，缺了不挡合并。
 
 以前这里描述的「Merge authorization (Ray)」检查已删除：它依赖一个从未配置 required
 reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清单，所以从未真正拦过任何
@@ -37,8 +38,8 @@ reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清�
 
 | 级别 | `Risk gate` 结果 | 合并方式 |
 |---|---|---|
-| **B / C** | 绿 | 检查自己执行 `gh pr merge --auto --merge`；GitHub 在**所有**必过检查全绿、review 线程全部解决后合并。没有人点，也不在聊天里问 PM |
-| **A** | 只有当 子牙 / 魏征 / 狄仁杰 三方对**当前 base+head** 都有可信身份写入的签字标记 `<!-- me-review-signoff:{...} -->` 时才绿；否则**红** | A 级永不自动合。绿了也要人合 |
+| **B / C** | 绿。子牙 / 魏征 / 狄仁杰 的抽查缺席不改变这一格 | 检查自己执行 `gh pr merge --auto --merge`；GitHub 在**所有**必过检查全绿、review 线程全部解决后合并。没有人点，也不在聊天里问 PM |
+| **A** | 只有当 **Codex Astra**（`codex-astra`）和 **Claude Code**（`claude-code`）对**当前 base+head** 各有一条可信签字标记 `<!-- me-review-signoff:{...} -->`，而且两条来自**两个不同登录名**时才绿；否则**红**。旧的子牙 / 魏征 / 狄仁杰 标记不算数 | A 级永不自动合。绿了也要人合 |
 
 另有三种一律红且关闭 auto-merge：草稿 PR、fork 来的 PR、判级过程任何一步读不到。
 
@@ -48,16 +49,27 @@ auto-merge 那一步不允许 `continue-on-error`：`gh` 失败即检查红，�
 ## 现阶段行为（如实）
 
 **签字标记的自动写入路径尚未建成**（自治计划 B3 的后半）。可信签字身份来自仓库变量
-`ME_SIGNOFF_TRUSTED_LOGINS`，今天为空——所以今天**所有 A 级 PR 的 `Risk gate` 都是红的**。
+`ME_SIGNOFF_TRUSTED_LOGINS`。2026-10-25 起它必须写成「角色=登录名」，两个角色还要是
+两个不同的人。今天这个变量仍是空的——所以**所有 A 级 PR 的 `Risk gate` 都是红的**。
+本次改规则**不改这个变量**。Ray 若要让两签能被认出来，自己把变量设成：
 
-现阶段 A 级 PR 的合并方式：仍由构建控制窗口在聊天里问 PM 一句，PM 决定后用
-`gh pr merge --admin` 合。这一步机器分不清"PM 说了 go"还是"agent 自己决定"——所有
-Claude 窗口都用 PM 的 gh 身份，今天如此，本机制上线后也如此，只有 B3 的独立签字身份能收口。
-agent 不得自行对 A 级 PR 执行 `--admin`。
+```text
+codex-astra=chatgpt-codex-connector[bot],claude-code=claude[bot]
+```
 
-签字身份的硬约束（代码强制，变量里写了也不信）：`github-actions[bot]` 不能签
-（PR 分支上的任何 workflow 都能以它留言）；PR 作者不能签自己的 PR。B3 建签字写入时必须用
-一个既不是 `github-actions[bot]`、也不是 PM 登录名的独立机器身份（GitHub App 或独立账号）。
+这两个登录名是仓库里已经出现过的：Codex 审查来自 `chatgpt-codex-connector[bot]`，
+Claude 留言来自 `claude[bot]`。如果实际发签字的账号不是这两个，换成那两个真实登录名，
+仍是 `codex-astra=` 和 `claude-code=` 各一个，且不能相同。不要写成旧的逗号名单
+（没有等号的登录名一律不认）。不要把任一格写成 `bigbigraydeng-maker`：那个账号通常就是
+PR 作者，作者给自己签会被丢掉。`github-actions[bot]` 写了也不信。
+
+设了变量也不会自己变绿：还要这两个身份各自留下绑当前 base+head 的签字标记。自动写入
+这条路仍未建成。在那之前，A 级仍由构建控制窗口在聊天里问 PM 一句，PM 决定后用
+`gh pr merge --admin` 合。agent 不得自行对 A 级 PR 执行 `--admin`。
+
+B 级可选抽查（子牙 / 魏征 / 狄仁杰，大约五分之一，按 PR 号和提交固定）只出现在摘要里。
+他们的标记可以记，缺了不挡 B 级或 C 级自动合并。若要让抽查记录被认成可信留言，可在同一
+变量末尾另加 `ziya=登录名,weizheng=登录名,direnjie=登录名`，这三项不是必填。
 
 ## 主干规则集（仓库设置，PM 合并接线 PR 时一并授权）
 
@@ -81,8 +93,9 @@ agent 不得自行对 A 级 PR 执行 `--admin`。
 - **`Risk gate`**（新建的独立规则集）：只含必过检查 `Risk gate`；bypass actor =
   Repository admin。之所以单列：`--admin` 只绕过把你列为 bypass 的那个规则集，
   `Protect main` 的这几道照样拦。
-- **关闭条件（写死）**：B3 签字自动写入上线、`ME_SIGNOFF_TRUSTED_LOGINS` 指向独立机器身份后，
-  撤掉 `Risk gate` 规则集的 bypass（或把它并入 `Protect main`）。不撤，这个口子永久存在。
+- **关闭条件（写死）**：两方签字的自动写入上线、`ME_SIGNOFF_TRUSTED_LOGINS` 按角色指向
+  Codex Astra 与 Claude Code 两个不同登录名之后，撤掉 `Risk gate` 规则集的 bypass
+  （或把它并入 `Protect main`）。不撤，这个口子永久存在。
 - 环境 `merge-authorization` 已无 workflow 引用，可删。
 
 ## 已知缺口

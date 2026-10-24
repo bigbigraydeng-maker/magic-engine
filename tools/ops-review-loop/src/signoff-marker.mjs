@@ -3,7 +3,7 @@
  * comment per reviewer role, carrying the role, the verdict, and the two shas
  * it was computed from.
  *
- *   <!-- me-review-signoff:{"v":1,"base":"<sha>","head":"<sha>","role":"ziya","verdict":"pass"} -->
+ *   <!-- me-review-signoff:{"v":1,"base":"<sha>","head":"<sha>","role":"codex-astra","verdict":"pass"} -->
  *
  * 🔴 **Why the sign-off is bound to a pair of shas.**
  *
@@ -37,26 +37,39 @@
  *
  * 🔴 **Why `github-actions[bot]` and the PR author are never trusted.**
  *
- * A sign-off is a *human verdict*, and the whole point of requiring three named
- * reviewers is that a machine cannot supply one. But any `pull_request`
- * workflow running on the PR branch can post a comment as `github-actions[bot]`
- * — so a bot login in the allowlist would let the PR's own CI sign its own
- * review. And a PR author signing their own review is no gate at all. Both are
- * removed from the trusted set *after* it is built, so naming them in the
- * allowlist cannot re-admit them.
+ * An A-level sign-off is two independent verdicts: Codex Astra reviews, and
+ * Claude Code reviews again on its own. Any `pull_request` workflow running on
+ * the PR branch can post a comment as `github-actions[bot]` — so a bot login in
+ * the allowlist would let the PR's own CI sign its own review. And a PR author
+ * signing their own review is no gate at all. Both are removed from the trusted
+ * set *after* it is built, so naming them in the allowlist cannot re-admit them.
+ * One login also cannot fill both seats: each required role is bound to its own
+ * login, and a login already used for one role cannot satisfy the other.
  */
 
 /** Payload schema version. Bump only with a parser that still reads v1. */
 export const SIGNOFF_MARKER_VERSION = 1
 
 /**
- * The reviewer roles that must all sign off, in the order they are reported.
+ * The reviewer roles that must all sign an A-level PR, in report order.
  *
- * Frozen order: `evaluateSignoffs` returns `present` / `missing` in this order,
- * so a caller can render the list without sorting it, and a test can assert on
- * it without depending on object key order.
+ * Exactly two, and they are not interchangeable: `codex-astra` is Codex Astra's
+ * review, `claude-code` is Claude Code's independent review. Frozen order:
+ * `evaluateSignoffs` returns `present` / `missing` in this order, so a caller
+ * can render the list without sorting it.
  */
-export const REQUIRED_SIGNOFF_ROLES = ['ziya', 'weizheng', 'direnjie']
+export const REQUIRED_SIGNOFF_ROLES = ['codex-astra', 'claude-code']
+
+/**
+ * Former required reviewers. They may be recorded on a B-level PR as an
+ * optional spot check. They are not required at any level, and a missing spot
+ * check never blocks a merge — including B and C, which auto-merge on green
+ * checks alone.
+ */
+export const SPOT_CHECK_ROLES = ['ziya', 'weizheng', 'direnjie']
+
+/** Roles a marker may name. Required roles first, then the non-blocking spot checks. */
+export const STORABLE_SIGNOFF_ROLES = [...REQUIRED_SIGNOFF_ROLES, ...SPOT_CHECK_ROLES]
 
 /**
  * The only verdicts a marker may carry.
@@ -100,9 +113,9 @@ function serialisePayload(payload) {
  * @throws if the role or verdict is not storable, or the marker does not survive its own parser
  */
 export function buildSignoffMarker({ base, head, role, verdict = 'pass' }) {
-  if (!REQUIRED_SIGNOFF_ROLES.includes(role)) {
+  if (!STORABLE_SIGNOFF_ROLES.includes(role)) {
     throw new Error(
-      `refusing to emit a sign-off marker with role "${role}" — only ${REQUIRED_SIGNOFF_ROLES.join(' / ')} are storable`,
+      `refusing to emit a sign-off marker with role "${role}" — only ${STORABLE_SIGNOFF_ROLES.join(' / ')} are storable`,
     )
   }
   if (!SIGNOFF_VERDICTS.includes(verdict)) {
@@ -155,7 +168,7 @@ export function parseSignoffMarkers(bodies) {
       if (!payload || typeof payload !== 'object') continue
       if (payload.v !== SIGNOFF_MARKER_VERSION) continue
       if (typeof payload.base !== 'string' || typeof payload.head !== 'string') continue
-      if (!REQUIRED_SIGNOFF_ROLES.includes(payload.role)) continue
+      if (!STORABLE_SIGNOFF_ROLES.includes(payload.role)) continue
       if (!SIGNOFF_VERDICTS.includes(payload.verdict)) continue
       out.push({
         v: payload.v,
@@ -192,8 +205,8 @@ export function parseSignoffMarkers(bodies) {
  * @returns {Array<{v: number, base: string, head: string, role: string, verdict: string}>}
  */
 export function selectTrustedSignoffMarkers({ sources, trustedAuthors, prAuthor } = {}) {
-  // A bare string is rejected rather than iterated: `trustedAuthors: 'ziya'`
-  // would otherwise become the four single characters of that name, trusting
+  // A bare string is rejected rather than iterated: `trustedAuthors: 'codex-bot'`
+  // would otherwise become the single characters of that name, trusting
   // nobody while looking configured.
   const iterable =
     trustedAuthors !== null &&
@@ -212,30 +225,133 @@ export function selectTrustedSignoffMarkers({ sources, trustedAuthors, prAuthor 
   if (typeof prAuthor === 'string' && prAuthor !== '') trusted.delete(prAuthor)
 
   if (!Array.isArray(sources)) return []
-  const bodies = sources.filter((s) => s && trusted.has(s.author)).map((s) => s.body)
-  return parseSignoffMarkers(bodies)
+  const out = []
+  for (const source of sources) {
+    if (!source || !trusted.has(source.author)) continue
+    for (const marker of parseSignoffMarkers([source.body])) {
+      out.push({ ...marker, author: source.author })
+    }
+  }
+  return out
+}
+
+/**
+ * Parse `SIGNOFF_TRUSTED_LOGINS` into role → login bindings.
+ *
+ * The only form that can satisfy an A-level sign-off is role-bound:
+ * `codex-astra=<login>,claude-code=<login>`. Optional spot-check bindings
+ * (`ziya=<login>` and the same for weizheng / direnjie) only add logins that
+ * may record a non-blocking marker. A bare login with no role is ignored, so
+ * a leftover flat list cannot let one identity sign both seats.
+ *
+ * @param {unknown} raw
+ * @returns {{byRole: Record<string, string>, logins: string[]}}
+ */
+export function parseSignoffTrust(raw) {
+  /** @type {Record<string, string>} */
+  const byRole = {}
+  if (typeof raw !== 'string') return { byRole, logins: [] }
+  const known = new Set(STORABLE_SIGNOFF_ROLES)
+  for (const part of raw.split(',')) {
+    const trimmed = part.trim()
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const role = trimmed.slice(0, eq).trim()
+    const login = trimmed.slice(eq + 1).trim()
+    if (login === '' || !known.has(role)) continue
+    byRole[role] = login
+  }
+  return { byRole, logins: [...new Set(Object.values(byRole))] }
+}
+
+/**
+ * Does this marker sign `role` for this exact diff, as `author`?
+ *
+ * @param {unknown} marker
+ * @param {string} role
+ * @param {string} base
+ * @param {string} head
+ * @param {string} author
+ * @returns {boolean}
+ */
+function markerMatches(marker, role, base, head, author) {
+  if (!marker || typeof marker !== 'object') return false
+  const row = /** @type {{base?: unknown, head?: unknown, role?: unknown, author?: unknown}} */ (marker)
+  return row.base === base && row.head === head && row.role === role && row.author === author
 }
 
 /**
  * Which required roles have signed off for this exact diff?
  *
- * A marker counts only when *both* shas match: a head move invalidates every
- * sign-off, and so does a base move, because either changes what `base..head`
- * contains. `present` and `missing` are reported in `REQUIRED_SIGNOFF_ROLES`
- * order, and `complete` is exactly "nothing is missing".
+ * A marker counts only when both shas match AND its author is the login bound
+ * to that role. A head move or a base move invalidates every sign-off. The same
+ * login cannot fill both seats, even if the variable names it twice. Spot-check
+ * roles are ignored here. `present` / `missing` follow `REQUIRED_SIGNOFF_ROLES`.
  *
- * @param {{markers?: Array<{base?: string, head?: string, role?: string}>|unknown, base?: string, head?: string}} input
+ * @param {{markers?: unknown, base?: string, head?: string, roleAuthors?: Record<string, string>|null}} input
  * @returns {{complete: boolean, present: string[], missing: string[]}}
  */
-export function evaluateSignoffs({ markers, base, head } = {}) {
+export function evaluateSignoffs({ markers, base, head, roleAuthors } = {}) {
   const all = [...REQUIRED_SIGNOFF_ROLES]
   if (typeof base !== 'string' || base === '' || typeof head !== 'string' || head === '') {
     return { complete: false, present: [], missing: all }
   }
   const list = Array.isArray(markers) ? markers : []
-  const present = all.filter((role) =>
-    list.some((m) => m && m.base === base && m.head === head && m.role === role),
-  )
+  const bindings = roleAuthors && typeof roleAuthors === 'object' ? roleAuthors : {}
+  const usedAuthors = new Set()
+  const present = []
+  for (const role of all) {
+    const author = typeof bindings[role] === 'string' ? bindings[role] : ''
+    if (author === '' || usedAuthors.has(author)) continue
+    if (!list.some((marker) => markerMatches(marker, role, base, head, author))) continue
+    usedAuthors.add(author)
+    present.push(role)
+  }
   const missing = all.filter((role) => !present.includes(role))
   return { complete: missing.length === 0, present, missing }
+}
+
+/**
+ * Which optional spot-check roles were recorded for this exact diff?
+ *
+ * This is a report, not a gate. `missing` here never feeds `decideMerge`.
+ *
+ * @param {{markers?: Array<{base?: string, head?: string, role?: string}>|unknown, base?: string, head?: string}} input
+ * @returns {{present: string[], missing: string[]}}
+ */
+export function listSpotChecks({ markers, base, head } = {}) {
+  const all = [...SPOT_CHECK_ROLES]
+  if (typeof base !== 'string' || base === '' || typeof head !== 'string' || head === '') {
+    return { present: [], missing: all }
+  }
+  const list = Array.isArray(markers) ? markers : []
+  const present = all.filter((role) =>
+    list.some((marker) => marker && marker.base === base && marker.head === head && marker.role === role),
+  )
+  return { present, missing: all.filter((role) => !present.includes(role)) }
+}
+
+/**
+ * The sign-off state the risk gate acts on: trusted markers only, two required
+ * roles bound to two logins, and spot checks reported beside that.
+ *
+ * @param {{rawTrust?: unknown, sources?: Array<{author?: string|null, body?: string|null}>|unknown, prAuthor?: string|null, base?: string, head?: string}} input
+ * @returns {{trust: {byRole: Record<string, string>, logins: string[]}, markers: Array<{v: number, base: string, head: string, role: string, verdict: string, author: string}>, signoff: {complete: boolean, present: string[], missing: string[]}, spotChecks: {present: string[], missing: string[]}, ignoredMarkers: number}}
+ */
+export function reviewSignoffState({ rawTrust, sources, prAuthor, base, head } = {}) {
+  const trust = parseSignoffTrust(rawTrust)
+  const list = Array.isArray(sources) ? sources : []
+  const parsedAll = parseSignoffMarkers(list.map((source) => (source ? source.body : null)))
+  const markers = selectTrustedSignoffMarkers({
+    sources: list,
+    trustedAuthors: trust.logins,
+    prAuthor,
+  })
+  return {
+    trust,
+    markers,
+    signoff: evaluateSignoffs({ markers, base, head, roleAuthors: trust.byRole }),
+    spotChecks: listSpotChecks({ markers, base, head }),
+    ignoredMarkers: parsedAll.length - markers.length,
+  }
 }
