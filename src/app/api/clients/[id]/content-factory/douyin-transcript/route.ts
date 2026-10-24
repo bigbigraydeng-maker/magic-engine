@@ -100,14 +100,14 @@ function profileReference(value: string): string {
 }
 
 function videoReference(value: string): string {
-  const source = value.match(/https?:\/\/(?:www\.)?douyin\.com\/video\/\d{17,20}|https?:\/\/v\.douyin\.com\/[A-Za-z0-9]+\/?|https?:\/\/(?:www\.)?douyin\.com\/jingxuan\/search\/[^\s]+/)?.[0] ?? value.trim()
+  const source = value.match(/https?:\/\/(?:www\.)?douyin\.com\/video\/\d{17,20}|https?:\/\/v\.douyin\.com\/[A-Za-z0-9_-]+\/?|https?:\/\/(?:www\.)?douyin\.com\/jingxuan\/search\/[^\s]+/)?.[0] ?? value.trim()
   let parsed: URL
   try {
     parsed = new URL(source)
   } catch {
     throw new RequestError(400, '请粘贴抖音视频链接或分享文案。')
   }
-  if (parsed.hostname === 'v.douyin.com' && /^\/[A-Za-z0-9]+\/?$/.test(parsed.pathname)) {
+  if (parsed.hostname === 'v.douyin.com' && /^\/[A-Za-z0-9_-]+\/?$/.test(parsed.pathname)) {
     return parsed.origin + parsed.pathname
   }
   if (!douyinHost(parsed.hostname)) throw new RequestError(400, '仅支持抖音公开视频链接。')
