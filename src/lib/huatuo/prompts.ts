@@ -13,6 +13,7 @@ import type { PrescriptionIntake, PrescriptionContent, PriorPrescriptionContext 
 import type { GoalRow } from '@/types/strategy'
 import type { HuatuoLookupContext, TrendSummaryLite, SelfGradeWeakness } from './types'
 import { formatBenchmarksForPrompt } from './benchmarks'
+import { budgetAmountLabel, budgetCapInstruction, budgetCurrencyOf } from '@/lib/ads/budget-currency'
 import { categoryToChineseName } from './industry-mapper'
 import { formatTrendForPrompt, type TrendSummary } from './trends'
 import { formatSeasonalCalendarForPrompt } from './seasonal-calendar'
@@ -37,7 +38,7 @@ export const HUATUO_GENERATION_SYSTEM_PROMPT = `你是华佗（Huà Tuó），Ma
 
 1. **基准锚定**：每个 KPI 的 target_value 必须落在行业基准 P50–P90 区间内。如超出，realism_confidence 必须 ≤ 0.5 并在 notes 说明理由。
 2. **FDE 可执行**：每个 action 必须包含 estimated_hours / required_skills / measurement_method / module，缺一不可。
-3. **预算硬上限**：budget_allocation 各项之和 ≤ monthly_budget_aud（绝不可超），且要参考该行业 typical_monthly_budget_aud 判断分配是否合理。
+3. **预算硬上限**：budget_allocation 各项之和 ≤ 客户月度预算（绝不可超）。金额单位是客户意向里写明的币种。字段名 amount_aud 是旧名称，不是“这一定是澳元”。行业表里的 typical_monthly_budget_aud 才是澳元；币种不同时不要拿两者相除。
 4. **DAPE 动态 N 阶段结构（修 BUG-FMT-F19/F20/F21）**：
    - **阶段数不写死 3**: 跟 Goal period 总周数 + Initiative 战线数对齐, 通常 2–5 个阶段
    - **阶段总周数 = Goal period 总周数** (不再固定 12 周). Goal 90 天 → 总 12 周; Goal 60 天 → 总 8 周, 各 phase duration_weeks 之和 = 总周数
@@ -156,7 +157,7 @@ export const HUATUO_SELFGRADE_SYSTEM_PROMPT = `你是华佗的"质检者"——�
 3. **fde_actionability**（FDE 可执行性）：每个 action 是否都有 estimated_hours / required_skills / measurement_method / module？任何一项缺失扣 2 分。
 4. **roi_alignment**（ROI 合理性）：预算分配是否匹配收益预期？把 80% 预算砸在 effort=high impact=low 的动作上 → 0–3 分。
 5. **prioritization**（优先级）：阶段 1 是否真的"快速见效"（effort=low + impact=high 应优先）？长期项目误放阶段 1 扣分。
-6. **resource_match**（资源匹配）：动作总工时是否合理？月预算 AUD 3000 对应约 30–50 小时 FDE 工时，过载或闲置都扣分。
+6. **resource_match**（资源匹配）：动作总工时是否合理？月预算大约三千元（按客户预算币种，不是固定澳元）对应约 30–50 小时 FDE 工时，过载或闲置都扣分。
 7. **innovation**（创新性）：是否有针对该客户/行业的非通用建议？纯套话扣 2 分。
 
 **overall 计算**：七维加权平均（realism × 1.5 + 其他 × 1.0），保留一位小数。
@@ -382,7 +383,9 @@ export function buildHuatuoGenerationPrompt(
     : ''
 
   const industryName = categoryToChineseName(lookup.industry_category)
-  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName, intake.monthly_budget_aud)
+  const budgetCurrency = budgetCurrencyOf(intake)
+  const budgetLabel = budgetAmountLabel(intake.monthly_budget_aud, budgetCurrency)
+  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName, intake.monthly_budget_aud, budgetCurrency)
   const trendSection = lookup.trend_summary
     ? formatTrendForPrompt(lookup.trend_summary as TrendSummary)
     : '## 域名历史流量趋势（SEMrush）\n\n**未拉取**（趋势数据可选）。'
@@ -454,7 +457,7 @@ ${prior.block}
 ## 客户意向
 - **业务目标**：${intake.business_goal}
 - **时间紧迫度**：${intake.timeline_urgency}
-- **月度预算**：AUD ${intake.monthly_budget_aud}
+- **月度预算**：${budgetLabel}
 - **优先维度**：${priorityDims}
 - **补充说明**：${intake.notes ?? '（无）'}
 
@@ -463,7 +466,7 @@ ${prior.block}
 记住：
 1. KPI current_value 必须使用 SEMrush 趋势表的最近真实数字（如有），不要凭空估算
 2. KPI target_value 必须引用基准表的 P50–P90 区间
-3. 预算分配各项之和 ≤ AUD ${intake.monthly_budget_aud}
+3. ${budgetCapInstruction(intake.monthly_budget_aud, budgetCurrency)}
 4. 每个 action 必须有 estimated_hours / required_skills / measurement_method / module
 5. 危机类型「${d?.crisis_type ?? '未指定'}」决定预算重心${trendConstraint}
 7. 全部中文（除枚举值）${prior.instruction}`
@@ -482,7 +485,9 @@ export function buildHuatuoSelfGradePrompt(
   const prevWeaknesses = options?.previousWeaknesses ?? []
 
   const industryName = categoryToChineseName(lookup.industry_category)
-  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName, intake.monthly_budget_aud)
+  const budgetCurrency = budgetCurrencyOf(intake)
+  const budgetLabel = budgetAmountLabel(intake.monthly_budget_aud, budgetCurrency)
+  const benchmarksTable = formatBenchmarksForPrompt(lookup.benchmarks, industryName, intake.monthly_budget_aud, budgetCurrency)
 
   const prevSection = passNum > 1 && prevWeaknesses.length > 0
     ? `\n## PASS=${passNum}\n## PREVIOUS_WEAKNESSES（上一轮自评指出的问题，本轮应已修复）\n${prevWeaknesses.map((w, i) => `${i + 1}. [${w.dimension} | ${w.severity}] ${w.text}`).join('\n')}\n`
@@ -491,7 +496,8 @@ export function buildHuatuoSelfGradePrompt(
   return `# 任务：对以下处方做苛刻的质检评分
 
 ## 客户预算与意向
-- 月度预算：AUD ${intake.monthly_budget_aud}
+- 月度预算：${budgetLabel}
+- ${budgetCapInstruction(intake.monthly_budget_aud, budgetCurrency)}
 - 业务目标：${intake.business_goal}
 - 时间紧迫度：${intake.timeline_urgency}
 

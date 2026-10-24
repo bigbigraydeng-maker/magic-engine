@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  accountSpendReading,
+  alignSpendTile,
   currencyFromCountry,
   formatAdMoney,
   publicAdAccountName,
@@ -72,6 +74,40 @@ describe('unreadWeeklySpendReason', () => {
 
   it('stays honest when the account total is missing too', () => {
     expect(unreadWeeklySpendReason(null)).toContain('广告花费读不出来')
+  })
+})
+
+describe('account spend tile', () => {
+  const flywheelTile = {
+    currentValue: 4024,
+    value7dAgo: 1900,
+    value28dAgo: 1000,
+    deltaPct7d: 111.8,
+    deltaPct28d: 302.4,
+    sparkline: [1000, 4024],
+    currency: null as string | null,
+    periodLabel: null as string | null,
+  }
+
+  it('uses the snapshot spend and its own dates, not a summed daily bucket', () => {
+    const reading = accountSpendReading(
+      { spend: '2012.00', period_start: '2026-09-25', period_end: '2026-10-25' },
+      'NZD',
+    )
+    const tile = alignSpendTile(flywheelTile, reading)
+    expect(tile.currentValue).toBe(2012)
+    expect(tile.periodLabel).toBe('2026-09-25 至 2026-10-25')
+    expect(tile.currency).toBe('NZD')
+    expect(tile.deltaPct7d).toBeNull()
+    expect(tile.value7dAgo).toBeNull()
+    expect(tile.sparkline).toEqual([null, 2012])
+  })
+
+  it('blanks the amount and the dates together when the snapshot is missing', () => {
+    const tile = alignSpendTile(flywheelTile, accountSpendReading(null, 'NZD'))
+    expect(tile.currentValue).toBeNull()
+    expect(tile.periodLabel).toBeNull()
+    expect(tile.sparkline).toEqual([null, null])
   })
 })
 

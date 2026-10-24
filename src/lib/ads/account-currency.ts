@@ -3,12 +3,7 @@
  * Server-only: it reads the database. Display formatting stays in spend-figures.
  */
 import { supabaseAdmin } from '@/lib/supabase'
-import { currencyFromCountry, spendWindowLabel } from './spend-figures'
-
-export interface AccountSpendWindow {
-  currency: string | null
-  periodLabel: string
-}
+import { accountSpendReading, currencyFromCountry, type SpendTileReading } from './spend-figures'
 
 export async function resolveClientAdCurrency(
   clientId: string,
@@ -19,21 +14,23 @@ export async function resolveClientAdCurrency(
   return readClientCountryCurrency(clientId)
 }
 
-/** The same meta_ads_snapshots row the data tab shows, plus its currency. */
-export async function readLatestAccountSpendWindow(clientId: string): Promise<AccountSpendWindow> {
+/** The same meta_ads_snapshots row the data tab shows: spend, dates, and currency together. */
+export async function readLatestAccountSpendWindow(clientId: string): Promise<SpendTileReading> {
   const { data } = await supabaseAdmin
     .from('meta_ads_snapshots')
-    .select('ad_account_id, period_start, period_end')
+    .select('ad_account_id, spend, period_start, period_end')
     .eq('client_id', clientId)
     .order('period_start', { ascending: false })
     .limit(1)
     .maybeSingle()
-  const row = data as { ad_account_id?: string | null; period_start?: string | null; period_end?: string | null } | null
+  const row = data as {
+    ad_account_id?: string | null
+    spend?: number | string | null
+    period_start?: string | null
+    period_end?: string | null
+  } | null
   const currency = await resolveClientAdCurrency(clientId, row?.ad_account_id ?? null)
-  const periodLabel = row?.period_start && row?.period_end
-    ? spendWindowLabel(row.period_start, row.period_end)
-    : '近 30 天'
-  return { currency, periodLabel }
+  return accountSpendReading(row, currency)
 }
 
 async function readAccountCurrency(clientId: string, adAccountId?: string | null): Promise<string | null> {

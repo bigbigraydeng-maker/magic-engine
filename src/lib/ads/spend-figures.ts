@@ -112,3 +112,49 @@ export function readObjectiveCosts(raw: unknown): { cost_per_lead: number | null
 function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
+
+export interface SpendTileReading {
+  spend: number | null
+  periodLabel: string | null
+  currency: string | null
+}
+
+/** Spend and its dates are one snapshot. A missing piece blanks both. */
+export function accountSpendReading(
+  row: { spend?: number | string | null; period_start?: string | null; period_end?: string | null } | null,
+  currency: string | null,
+): SpendTileReading {
+  if (!row?.period_start || !row.period_end) return { spend: null, periodLabel: null, currency }
+  const spend = typeof row.spend === 'number' ? row.spend : Number(row.spend)
+  if (!Number.isFinite(spend)) return { spend: null, periodLabel: null, currency }
+  return { spend, periodLabel: spendWindowLabel(row.period_start, row.period_end), currency }
+}
+
+/**
+ * Replace a flywheel daily-bucket total with the snapshot it is supposed to describe.
+ * Same-day pulls are summed by the bucket, so that total is not one snapshot.
+ */
+export function alignSpendTile<T extends {
+  currentValue: number | null
+  value7dAgo: number | null
+  value28dAgo: number | null
+  deltaPct7d: number | null
+  deltaPct28d: number | null
+  sparkline: Array<number | null>
+  currency?: string | null
+  periodLabel?: string | null
+}>(tile: T, reading: SpendTileReading): T {
+  const sparkline = tile.sparkline.map(() => null as number | null)
+  if (reading.spend != null && sparkline.length > 0) sparkline[sparkline.length - 1] = reading.spend
+  return {
+    ...tile,
+    currentValue: reading.spend,
+    value7dAgo: null,
+    value28dAgo: null,
+    deltaPct7d: null,
+    deltaPct28d: null,
+    sparkline,
+    currency: reading.currency,
+    periodLabel: reading.periodLabel,
+  }
+}

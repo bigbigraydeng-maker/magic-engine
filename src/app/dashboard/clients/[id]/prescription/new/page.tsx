@@ -10,6 +10,7 @@ import { coerceWeaknesses } from '@/lib/huatuo/weakness-utils'
 import { shouldAutoRestoreLatestDraft } from './restore-guards'
 import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
 import { adCurrencyLabel, adCurrencyPrefix, formatAdMoney } from '@/lib/ads/spend-figures'
+import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
 
 // DAPE Week 2 W4 — Goal 一对一 + 版本化所需的轻量 row 类型
 interface MinimalGoal {
@@ -328,6 +329,12 @@ export default function NewPrescriptionPage() {
 
   // ── Generate prescription (SSE 流式) ──────────────────────────────────────
   const handleGenerate = useCallback(async () => {
+    const budgetFields = prescriptionBudgetFields(budget, budgetCurrency)
+    if (!budgetFields.ok) {
+      setGenerateError(budgetFields.error)
+      return
+    }
+
     setIsGenerating(true)
     setGenerateError(null)
     setProgressNote('连接诸葛亮…')
@@ -342,7 +349,8 @@ export default function NewPrescriptionPage() {
       const intake: PrescriptionIntake = {
         business_goal:       businessGoal,
         timeline_urgency:    urgency,
-        monthly_budget_aud:  budget,
+        monthly_budget_aud:  budgetFields.monthly_budget_aud,
+        budget_currency:     budgetFields.budget_currency,
         priority_dimensions: priorityDims,
         notes:               notes || null,
       }
@@ -406,7 +414,7 @@ export default function NewPrescriptionPage() {
       setProgressNote(null)
       if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null }
     }
-  }, [businessGoal, urgency, budget, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
+  }, [businessGoal, urgency, budget, budgetCurrency, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
 
   // ── Approve prescription ──────────────────────────────────────────────────
   const handleApprove = async () => {

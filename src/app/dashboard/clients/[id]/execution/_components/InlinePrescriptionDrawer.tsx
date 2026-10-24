@@ -15,6 +15,7 @@ import type { SelfGrade, HuatuoGenerationMeta } from '@/lib/huatuo/types'
 import { readHuatuoStream } from '@/lib/huatuo/stream-client'
 import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
 import { adCurrencyLabel, adCurrencyPrefix, formatAdMoney } from '@/lib/ads/spend-figures'
+import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
 
 type Mode = 'supplement' | 'revision'
 type Step = 'form' | 'generating' | 'review'
@@ -86,6 +87,13 @@ export function InlinePrescriptionDrawer({
   // ── 生成 ────────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
     if (!goal.trim()) return
+    const amount = budget.trim() ? Math.max(0, Number(budget)) : 0
+    const budgetFields = prescriptionBudgetFields(amount, budgetCurrency)
+    if (!budgetFields.ok) {
+      setError(budgetFields.error)
+      return
+    }
+
     setStep('generating')
     setError(null)
     setProgress('连接诸葛亮…')
@@ -98,7 +106,8 @@ export function InlinePrescriptionDrawer({
         business_goal:       goal.trim(),
         timeline_urgency:    urgency,
         // 预算可选：空 → 0（华佗理解为"不涉及额外预算，在现有资源内完成"）
-        monthly_budget_aud:  budget.trim() ? Math.max(0, Number(budget)) : 0,
+        monthly_budget_aud:  budgetFields.monthly_budget_aud,
+        budget_currency:     budgetFields.budget_currency,
         priority_dimensions: [],
         notes:               notes.trim() || null,
       }
@@ -150,7 +159,7 @@ export function InlinePrescriptionDrawer({
       clearInterval(timer)
       setProgress(null)
     }
-  }, [goal, urgency, budget, notes, mode, priorPrescriptionId, clientId])
+  }, [goal, urgency, budget, budgetCurrency, notes, mode, priorPrescriptionId, clientId])
 
   // ── 批准 ────────────────────────────────────────────────────────────────
   const handleApprove = useCallback(async () => {
