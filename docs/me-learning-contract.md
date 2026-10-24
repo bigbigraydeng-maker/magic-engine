@@ -173,7 +173,8 @@ ALTER TABLE agent_learning_points
   ADD COLUMN IF NOT EXISTS reconcile_rule_ids text[] NOT NULL DEFAULT '{}',
   ADD COLUMN IF NOT EXISTS review_due_at   timestamptz,  -- 到期后进待复核的截止时间；超过仍无人复核则退役
   ADD COLUMN IF NOT EXISTS approved_by     text,         -- 人审通过者的登录邮箱，只能由 2.8 的审核函数写（服务端取自会话，不取自请求体）
-  ADD COLUMN IF NOT EXISTS approved_at     timestamptz;
+  ADD COLUMN IF NOT EXISTS approved_at     timestamptz,
+  ADD COLUMN IF NOT EXISTS approved_rule_text_sha text;  -- 人审通过时锁定的规则句 sha；桥接写 lesson 前必须等于当前 rule_text_sha，否则拒写
 ```
 
 `origin='expert_distill'` 行的约定：`card_id = 'distill:' || <source_key>`，`card_sha` = 条目 `content_hash`，`point_key = 'distill:<source_key>#<content_hash 前 12 位>-<序号>'`。
@@ -277,10 +278,11 @@ CREATE TABLE IF NOT EXISTS agent_learning_budget_holds (
 
 两个函数（SQL 规格；`REVOKE ALL ... FROM PUBLIC, anon, authenticated; GRANT EXECUTE ... TO service_role`）：
 
-- `agent_learning_budget_reserve(p_reservation_id text, p_purpose text, p_items jsonb) RETURNS jsonb`：`p_items` 是 `[{period_key, unit, cap, amount}]`。**一个事务内全有或全无**：先 `INSERT ... ON CONFLICT DO NOTHING` 建行，再按 `period_key` 排序逐行 `SELECT ... FOR UPDATE`（固定顺序，防死锁），逐行检查 `reserved + spent + amount <= cap`；任一行不满足 → 回滚并返回 `{ok:false, denied_key}`；全满足 → 加 `reserved`、写 `holds`、返回 `{ok:true}`。同一 `reservation_id` 重复调用幂等（不重复预留）。`cap` 由调用方代码常量传入，函数取传入值与已存值中**较小**者，防止有人用大值绕过。
-- `agent_learning_budget_settle(p_reservation_id text, p_actuals jsonb) RETURNS jsonb`：`p_actuals` 是 `[{period_key, actual}]`。对 `status='held'` 的 hold：`reserved -= amount`、`spent += actual`、置 `settled`。**重复结算返回 `{ok:true, already:true}`，不二次扣减。** 实际值超过预留也如实记入 `spent`（账本记真话），之后的预留会因此被拒。
+- `agent_learning_budget_reserve(p_reservation_id text, p_purpose text, p_items jsonb) RETURNS jsonb`：`p_items` 是 `[{period_key, unit, cap, amount}]`。**一个事务内全有或全无**：先 `INSERT ... ON CONFLICT DO NOTHING` 建行，再按 `period_key` 排序逐行 `SELECT ... FOR UPDATE`（固定顺序，防死锁），逐行检查 `reserved + spent + amount <= cap`；任一行不满足 → 回滚并返回 `{ok:false, denied_key}`；全满足 → 加 `reserved`、写 `holds`、返回 `{ok:true}`。**同一 `reservation_id` 只能被认领一次**：首次调用成功返回 `{ok:true, claimed:true}`；之后任何重复调用（hold 仍是 `held`，或已 `settled`）一律返回 `{ok:false, reason:'duplicate_reservation', hold_status:'held'|'settled'}`，**不加占用、不批准新的外呼**。因此「预留成功」= 「本次外呼被独占批准」，重复调用方拿到的是拒绝，不是第二张通行证。`cap` 由调用方代码常量传入，函数取传入值与已存值中**较小**者，防止有人用大值绕过。
+- `agent_learning_budget_settle(p_reservation_id text, p_actuals jsonb) RETURNS jsonb`：`p_actuals` 是 `[{period_key, actual}]`。对 `status='held'` 的 hold：`reserved -= amount`、`spent += actual`、置 `settled`。**重复结算返回 `{ok:true, already:true}`，不二次扣减**；对不存在的 `reservation_id` 结算返回 `{ok:false, reason:'unknown_reservation'}`。 实际值超过预留也如实记入 `spent`（账本记真话），之后的预留会因此被拒。
 
 规则（硬）：
+0. **每次外呼用独立的尝试 ID**：`reservation_id` = `<scope>:<业务单元 id>:<attempt 序号>:<随机 uuid>`，**一个 ID 只对应一次外呼**。重试、重跑、手动试跑与定时任务重叠，都必须重新生成 ID 并重新预留，绝不复用旧 ID；复用旧 ID 会被 reserve 拒绝（见上），不会外呼。需要「同一业务单元只处理一次」时，靠 `agent_learning_items` 的唯一约束与 `status`，不靠复用预留 ID。
 1. **结果未知保留占用**：请求发出后进程中断、超时、结算失败，hold 一律保持 `held`，**不自动释放**。日/月 `period_key` 自然翻篇；`held` 超过 1 小时的 hold 进人工待办（what/how/href 三件套），人工核对结算后才释放。
 2. **账本读写任一失败 → 不外呼**（fail-closed）：预留调用报错、超时、返回格式不对，都按拒绝处理，回执 `error='budget_ledger_unavailable'`。
 3. 回执（`agent_learning_runs`）里的 `cost_usd`、读帖数等于账本 `spent` 的增量；账本是唯一事实源，不信 API 响应自报，也不信进程内计数。
@@ -288,7 +290,18 @@ CREATE TABLE IF NOT EXISTS agent_learning_budget_holds (
 
 ### 2.8 审核写入函数（见 4.7）
 
-`agent_learning_review_point(p_point_key text, p_expected_card_sha text, p_expected_rule_text_sha text, p_decision text, p_actor text, p_valid_until timestamptz, p_note text, p_request_id text) RETURNS jsonb`：同一事务内 `SELECT ... FOR UPDATE` 锁点 → 校验 `origin='expert_distill'`、当前 `state` 允许该决定、`card_sha` 与 `rule_text_sha` 等于期望值（期望值是审核人屏幕上看到的那一版，不一致返回 `{ok:false, code:'stale'}`）→ 更新 `state / approved_by / approved_at / valid_until / last_reviewed_at` → 追加一条 `point_events`（`actor = p_actor`，`request_id = p_request_id`）。`p_actor` 必须以 `pm:` 开头，否则函数拒绝。同样 `REVOKE ... FROM PUBLIC, anon, authenticated; GRANT EXECUTE ... TO service_role`。
+`agent_learning_review_point(p_point_key text, p_expected_card_sha text, p_expected_rule_text_sha text, p_decision text, p_actor text, p_actor_role text, p_valid_until timestamptz, p_note text, p_new_rule_text text, p_new_rule_text_sha text, p_request_id text) RETURNS jsonb`。
+
+**同一事务内按此顺序**：
+1. `SELECT ... FOR UPDATE` 锁点；`p_actor` 必须以 `pm:` 开头、`p_actor_role` 只能是 `'admin'|'pm'`，否则拒绝（角色由服务端依据会话与 PM 白名单判定后传入，函数只执行 4.7 的转换表，不自己判断「谁是 PM」）。
+2. 校验 `origin='expert_distill'`。
+3. 按 **4.7 的状态转换表**（唯一规则，函数、路由、V19 共用同一张表）校验 `(当前 state, reconcile_verdict, p_actor_role, p_decision)` 是否允许，不允许返回 `{ok:false, code:'forbidden_transition'}`；需要 `note` 的格子缺 `p_note` 返回 `validation`。
+4. 校验 `card_sha = p_expected_card_sha` 且 `rule_text_sha = p_expected_rule_text_sha`（期望值是审核人屏幕上看到的那一版），不等返回 `{ok:false, code:'stale'}`——**这一步在锁内、针对旧版本**，所以两人同时审核/编辑同一点，后到者必然看到已变化的 sha 而得到 `stale`。
+5. 若给了 `p_new_rule_text`（审核人编辑）：仅 `p_decision='adopt'` 允许；函数**自己**用 `encode(sha256(convert_to(p_new_rule_text,'UTF8')),'hex')` 算 sha，必须等于 `p_new_rule_text_sha`；校验非空、≤600 字符、不匹配 `RULE_ID_RE`；然后在**同一条 UPDATE** 里写 `rule`、`rule_text`、`rule_text_sha`（蒸馏点 `rule = rule_text`）。
+6. 更新 `state / approved_by / approved_at / approved_rule_text_sha（= 提交后的 rule_text_sha）/ valid_until / last_reviewed_at`。
+7. 追加一条 `point_events`（`actor = p_actor`，`request_id = p_request_id`；`evidence` 含 `{reviewerRole, fromState, oldRuleTextSha, newRuleTextSha, edited}`，只放 sha 和指针）。
+
+任何一步失败整体回滚，点的状态、规则句、事件三者要么一起变要么都不变。同样 `REVOKE ... FROM PUBLIC, anon, authenticated; GRANT EXECUTE ... TO service_role`。
 
 ---
 
@@ -427,12 +440,20 @@ live = is_active
 
 **接口**（L4b 实现）：`POST /api/admin/agent-learning/points/[pointKey]/review`
 - 请求体：`{ decision: 'adopt' | 'reject' | 'escalate_pm', expectedCardSha, expectedRuleTextSha, validUntil?, note, editedRule? }`。**不收 `actor`**：审核人身份一律由服务端从登录会话取（沿用 `src/lib/auth/require-admin` 的 `requireAdmin()`），请求体里即使带了身份字段也忽略。
-- 谁能批：
-  - 通过 `requireAdmin()` 的管理员才能调用；非登录 401，非管理员 403。
-  - **涉及钱的点**（`state='pm_decision'`，即预算、出价、投放开关类）：只有 PM 才能批。PM 身份沿用仓库现有的 PM 判定；L4b 开工先 `grep` 找到它，找不到则用环境变量 `AGENT_LEARNING_PM_EMAILS`（邮箱白名单，登记 `docs/ENV.md`）。其它管理员只能 `escalate_pm` 或 `reject`。
-  - `decision='adopt'` 只允许 `reconcile_verdict` 为 `new` / `partial`、且当前 `state='learning'` 的点；`conflict` 的点必须先由 PM 处理成 `pm_decision` 并批。
-- `editedRule`（可选）：审核人可改规则句；改后的文本走 `checkShareable` 再入库，事件里记前后 sha，不记全文差异之外的信息。
-- 服务端流程：①鉴权与角色 → ②读点，核对 `expectedCardSha` / `expectedRuleTextSha` 等于当前（屏幕上看到的版本即批的版本，否则 409 `stale`）→ ③预跑 `checkShareable`，不过则不改状态，写 `blocked_by_gate` 事件并返回命中详情 → ④调用 2.8 的 `agent_learning_review_point`（同事务改状态 + 追加事件）→ ⑤调用 L3 的 `bridgeAdoptedPoints` 按 4.8 写 lesson。⑤失败时点已是 `adopted` 但没有 live lesson，**等于不注入**（fail-closed），回执 `partial`，下一次 `bridgeAdoptedPoints` 幂等重试，并进人工待办。
+- 谁能批（**状态转换表，唯一规则**；2.8 的函数、路由、L4 按钮置灰、V19 全部照此表，表外一律 `forbidden_transition`）：
+
+  | 当前 state | 对账结论 | 普通管理员 | PM |
+  |---|---|---|---|
+  | `learning` | `new` / `partial` | `adopt`→`adopted`；`reject`→`not_applicable`；`escalate_pm`→`pm_decision` | `adopt`；`reject`；`escalate_pm` |
+  | `learning` | `conflict`（非涉钱） | `reject`；`escalate_pm`（不得 `adopt`） | `adopt`（`note` 必填，须写明已读规则编号对应原文及为何采纳）；`reject`；`escalate_pm` |
+  | `pm_decision`（涉钱：预算、出价、投放开关；或升级而来） | 任意 | 仅 `reject`（保守方向）；不得 `adopt` | `adopt`（`note` 必填）；`reject` |
+  | 其它任何 state（`adopted`、`verifying`、`not_applicable`、`already_in_me` 等） | — | 无（不可审） | 无 |
+
+  - 对账结论为 `conflict` 且涉钱的点，在对账阶段已进 `pm_decision`（7.6 步骤 4），按第三行由 PM 直接批，**不再需要「先处理成 pm_decision」这一前置动作**。
+  - `adopt` 一律要求 `rule_text` 非空且 `valid_until` 为未来时间（审核人可调整，默认取 7.6 步骤 5 的建议值）。
+  - 角色判定：通过 `requireAdmin()` 才是管理员（非登录 401，非管理员 403）；PM 身份沿用仓库现有的 PM 判定，L4b 开工先 `grep` 找到它，找不到则用环境变量 `AGENT_LEARNING_PM_EMAILS`（邮箱白名单，登记 `docs/ENV.md`）。角色在服务端判定后作为 `p_actor_role` 传给 2.8 函数，请求体里的角色字样一律忽略。
+- `editedRule`（可选，仅 `adopt` 时）：审核人可改规则句。服务端先对改后的文本跑 `checkShareable`（不过则不进事务），再把**新正文与服务端算出的 sha** 作为 `p_new_rule_text / p_new_rule_text_sha` 交给 2.8 函数，在同一个锁点、同一个事务里：校验旧版本 sha → 改规则句 → 改状态 → 追加事件。**事务外绝不先改 `rule_text`。** 事件里只记前后 sha。
+- 服务端流程：①鉴权与角色 → ②读点，核对 `expectedCardSha` / `expectedRuleTextSha` 等于当前（屏幕上看到的版本即批的版本，否则 409 `stale`）→ ③对**将被采纳的那一版文本**（有 `editedRule` 用新文本，否则用当前 `rule_text`）预跑 `checkShareable`，不过则不改状态，写 `blocked_by_gate` 事件并返回命中详情 → ④调用 2.8 的 `agent_learning_review_point`（同事务：锁点、转换表校验、校验旧 sha、写新规则句与 sha、改状态、追加事件）→ ⑤调用 L3 的 `bridgeAdoptedPoints` 按 4.8 写 lesson：桥接只读点里**提交后**的 `rule_text`，并要求 `rule_text_sha = approved_rule_text_sha`，不等则拒写并进人工待办，所以注入的永远是审核人批准的那一版。⑤失败时点已是 `adopted` 但没有 live lesson，**等于不注入**（fail-closed），回执 `partial`，下一次 `bridgeAdoptedPoints` 幂等重试，并进人工待办。
 - 留痕：每次审核追加一条 `point_events`：`event_type` 为 `adopted` / `state_changed`，`actor='pm:<登录邮箱>'`，`request_id`，`evidence` 含 `{ reviewerRole: 'pm'|'admin', fromState, ruleTextSha, validUntil, edited: boolean }`（只放指针与 sha）；`agent_learning_points.approved_by / approved_at` 同步写入。reject 同样留痕（`state_changed` 到 `not_applicable`，`note` 必填）。事件表只追加，留痕不可事后改。
 - 幂等与并发：同一审核人对同一版本重复点击只产生一次状态变化；两人同时审核同一点，后到者收到 409。
 - **`adopted` 的写入点只有两处**（T10 的静态检查依据）：2.8 的 `agent_learning_review_point`，以及 `sync-cards` 镜像人审合并的卡片点。
@@ -487,8 +508,9 @@ live = is_active
 | V16 | 起草卡可解析 | `extract` 产出的 Markdown 草稿 | 100% 通过现有 `parseSkillCard`（含状态必填字段规则） |
 | V17 | 规则编号解析成规则句 | `adopted` 卡片点 `rule='C-13'`，规则手册 fixtures 有对应行 | `rule_text` 是规则列的句子（不含证据/案例列）；lesson 正文 = 该句子；手册找不到该编号、多行无法定位、无"规则"列、超 600 字符 → `rule_unresolved`，不写 lesson；任何路径都不会把 `C-13` 本身写进 lesson 或提示词 |
 | V18 | lesson 一次写完 | 调用带 `provenance` 的 `writeGlobalLesson`：缺 `validUntil` / 缺 `sourcePointKey` / `validUntil` 在过去 / 正文是编号 | 全部 `invalid`，替身记录到 `upsert` 次数为 0；完整输入只发生 1 次 `upsert`，载荷含正文和全部来源字段；调用方传入的 `sanitized_at` 被忽略；无 `provenance` 的旧调用与改动前快照一致 |
-| V19 | 人工审核入口 | 未登录 / 非管理员 / 管理员批涉及钱的点 / PM 批 / 请求体里带伪造 `actor` / `expectedRuleTextSha` 过期 / 重复点击 / 两人同时批 | 依次 401 / 403 / 403 / 成功 / 伪造被忽略（事件 actor 为会话邮箱）/ 409 / 只变一次 / 后到者 409；成功时 `point_events` 有 `actor='pm:<邮箱>'` 的记录，`approved_by/at` 已写；脱敏闸不过则状态不变并有 `blocked_by_gate`；`adopt` 后桥接写 lesson 失败 → 点已 `adopted` 但无 live lesson，不注入，下次重试成功 |
-| V20 | 额度预留（并发） | 同一日 `period_key` cap 只够 3 次，10 个并发预留；另：预留成功后结算前进程"中断"；账本读写报错；实际用量小于/大于预留 | 恰好 3 个成功、7 个被拒且**未发出外呼**；中断后 hold 仍计入占用，下次预留看到的余量已扣掉；账本报错 → 零外呼；结算按实际值，重复结算不二次扣减，超额如实记入 `spent` |
+| V19 | 人工审核入口（逐格对照 4.7 状态转换表） | 未登录；非管理员；普通管理员对 `learning/new` 点 `adopt`；普通管理员对 `learning/conflict` 点 `adopt`；普通管理员对 `pm_decision` 点 `adopt`；PM 对 `learning/conflict` 点 `adopt`（带/不带 `note`）；PM 对涉钱 `pm_decision` 点 `adopt`（带/不带 `note`）；管理员 `escalate_pm`；对 `adopted` 等其它状态再审；请求体带伪造 `actor`/角色；`expectedRuleTextSha` 过期；重复点击；两人同时批 | 依次 401 / 403 / 成功 / `forbidden_transition` / `forbidden_transition` / 成功（无 `note` 时 `validation` 拒绝）/ 成功（无 `note` 时拒绝）/ `learning`→`pm_decision` / `forbidden_transition` / 伪造被忽略（事件 actor 为会话邮箱，角色由服务端判定）/ 409 `stale` / 只变一次 / 后到者 409；表内允许的格子成功时 `point_events` 有 `actor='pm:<邮箱>'` 的记录且 `evidence.reviewerRole` 正确，`approved_by/at` 已写；表外格子状态不变、无事件；函数层与路由层对同一输入给出同一结论（同一份表驱动测试，路由与 SQL 函数各跑一遍）；脱敏闸不过则状态不变并有 `blocked_by_gate`；`adopt` 后桥接写 lesson 失败 → 点已 `adopted` 但无 live lesson，不注入，下次重试成功 |
+| V21 | 审核编辑后的注入内容与并发编辑 | 审核人 `adopt` 并带 `editedRule`；编辑后文本含客户名；编辑后文本是纯规则编号/超 600 字/空；`p_new_rule_text_sha` 与正文不符；两人同时编辑同一点（都基于同一 `expectedRuleTextSha`）；编辑同时 sync 重算；桥接前有人改了 `rule_text_sha` | 成功时 `rule_text`、`rule_text_sha`、`approved_rule_text_sha`、状态、事件在同一事务内一起变，`loadGlobalLessons` 取到的 lesson 正文**等于编辑后文本**（不是原文）；含客户名 → 脱敏闸拦下、状态与正文都不变；非法正文/sha 不符 → 函数拒绝且整体回滚；两人并发 → 恰好一人成功、另一人 `stale`，最终库里正文是成功者提交的那一版；`rule_text_sha ≠ approved_rule_text_sha` 时桥接拒写；事件 `evidence` 含前后 sha 且无全文 |
+| V20 | 额度预留（并发） | 同一日 `period_key` cap 只够 3 次，10 个并发预留；另：预留成功后结算前进程"中断"；账本读写报错；实际用量小于/大于预留 | 恰好 3 个成功、7 个被拒且**未发出外呼**；中断后 hold 仍计入占用，下次预留看到的余量已扣掉；账本报错 → 零外呼；结算按实际值，重复结算不二次扣减，超额如实记入 `spent`；同一 `reservation_id` 重复预留被拒（见 T21） |
 
 ---
 
@@ -556,7 +578,7 @@ live = is_active
 
 **允许修改**：
 - 新增 `supabase/migrations/<timestamp>_agent_learning_foundation.sql`（按第 2 节；RLS 全部 `FOR ALL TO service_role USING (true)`；`point_events` 的只追加触发器；`runs.error` 的 CHECK；2.6 的 `global_learned_lessons_provenance_complete_chk`；2.7 的 `agent_learning_budget_reserve / _settle`；2.8 的 `agent_learning_review_point`；三个函数均 `REVOKE ... FROM PUBLIC, anon, authenticated` 后只 `GRANT ... TO service_role`）。
-- 测试库演练脚本或测试（不得对生产库）：并发 `reserve` 10 路只成功 cap 允许的次数（V20）；`settle` 幂等；`review_point` 拒绝非 `pm:` 的 actor、过期 sha 返回 `stale`。
+- 测试库演练脚本或测试（不得对生产库）：并发 `reserve` 10 路只成功 cap 允许的次数（V20）；`settle` 幂等；`review_point` 拒绝非 `pm:` 的 actor、过期 sha 返回 `stale`、按状态转换表逐格 `forbidden_transition`、带新正文时同事务写入且并发编辑只一人成功（V19/V21）。
 - 新增 `src/lib/agent-learning/contracts.ts`（按第 3 节）、`src/lib/agent-learning/__fixtures__/*`、`src/lib/agent-learning/__tests__/contracts.test.ts`。
 - 事件名类型：在现有 Inngest 事件定义处登记 7 个 `agent_learning.*`（先 `grep -rn "createFunction\|EventSchemas\|ads-events" src/lib/inngest` 找到约定，**照现有写法**，不发明新机制）。
 **不得修改**：任何运行时代码（`service.ts`、`format.ts`、cron、页面）。
@@ -626,7 +648,7 @@ live = is_active
 - `src/app/dashboard/learning/**` 中候选队列的详情抽屉与三个按钮（4.7 末段）；若需要环境变量，`docs/ENV.md` 登记 `AGENT_LEARNING_PM_EMAILS`。
 **不得修改**：迁移、`service.ts`/`format.ts`、`lesson-shareability.ts`、L3 的同步与过期逻辑、`requireAdmin` 本身。
 **接口**：4.7 的 `POST` 契约；`reviewPoint` 返回 `Result<{ state; lessonWritten: boolean }>`，`code:'stale'` 对应 HTTP 409。
-**验收**：V19；`adopted` 写入点静态检查（T10）；网页交付前过 Impeccable（CLAUDE.md §7），把检查前后数字写进 PR。
+**验收**：V19、V21；`adopted` 写入点静态检查（T10）；网页交付前过 Impeccable（CLAUDE.md §7），把检查前后数字写进 PR。
 **当场试跑**：测试库或替身上，用 fixtures 蒸馏点走完"打开抽屉 → 通过 → 事件留痕 → lesson 出现在 `loadGlobalLessons` 结果里"；非管理员/非 PM 的拒绝各截一次。**生产首次真实审核前须 Ray 同意。**
 
 ---
@@ -771,6 +793,7 @@ interface DistilledRule {
 | T18 | 请求后中断：预留成功、外呼已发、结算前进程"崩溃"（替身抛错） | hold 仍为 `held`，下一次预留看到的余量已扣掉；不自动释放；超过 1 小时进人工待办 |
 | T19 | 账本不可用：`reserve` 报错 / 超时 / 返回非法格式 | 零外呼；回执 `error='budget_ledger_unavailable'`；不回退到进程内计数继续跑 |
 | T20 | 按实际结算：实际 token/读帖数小于或大于预留 | `spent` 等于实际值，`reserved` 归还预留值；重复结算不二次扣减；实际超预留时如实记账并使后续预留被拒 |
+| T21 | 同一预留 ID 重复/并发/结算后重放 | 同一 `reservation_id` 并发 10 路：恰好 1 路认领成功并外呼，其余 9 路 `duplicate_reservation` 且零外呼；结算后重放同一 ID：被拒、零外呼、`spent` 不变；日/月上限不会因重放被突破；重试使用新 ID 并重新占用额度 |
 | T15 | X 只读名册：名册外账号 / `enabled=false` / 未确认可信 / 缺密钥 | 不发请求；X 客户端只含 GET 读帖端点（静态检查）；缺密钥 fail-closed 且日志/回执不含密钥 |
 
 #### 当场试跑（三份共用，只读、不写生产库）
@@ -910,12 +933,13 @@ export function worstCaseUsd(price: DeepSeekPrice, maxInputTokens: number, maxOu
 ```ts
 export interface BudgetItem { periodKey: string; unit: 'usd' | 'items' | 'reads'; cap: number; amount: number }
 export interface BudgetLedger {   // 生产实现是对 2.7 两个 SQL 函数的 rpc 调用；测试用 fake-ledger
-  reserve(reservationId: string, purpose: 'distill' | 'x_read', items: BudgetItem[]): Promise<Result<{ ok: true } | { ok: false; deniedKey: string }>>
+  reserve(reservationId: string, purpose: 'distill' | 'x_read', items: BudgetItem[]): Promise<Result<{ ok: true; claimed: true } | { ok: false; reason: 'cap_exceeded'; deniedKey: string } | { ok: false; reason: 'duplicate_reservation'; holdStatus: 'held' | 'settled' }>>
   settle(reservationId: string, actuals: Array<{ periodKey: string; actual: number }>): Promise<Result<void>>
 }
 export function createRpcLedger(rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>): BudgetLedger
+export function newAttemptId(scope: 'distill' | 'x', unitId: string, attempt: number): string   // '<scope>:<unitId>:<attempt>:<uuid>'，每次调用都不同
 export function periodKeys(scope: 'distill' | 'x', now: Date): { day: string; month: string }   // 'YYYYMMDD' / 'YYYYMM'，UTC，口径写在注释里
-export async function withReservation<T>(ledger: BudgetLedger, spec: { id: string; purpose: 'distill' | 'x_read'; items: BudgetItem[] }, run: () => Promise<{ value: T; actuals: Array<{ periodKey: string; actual: number }> }>): Promise<Result<T>>   // 预留被拒/账本报错 → 不调用 run；run 抛错 → 不结算（hold 保留），向上返回失败
+export async function withReservation<T>(ledger: BudgetLedger, spec: { id: string; purpose: 'distill' | 'x_read'; items: BudgetItem[] }, run: () => Promise<{ value: T; actuals: Array<{ periodKey: string; actual: number }> }>): Promise<Result<T>>   // 只有拿到 {ok:true, claimed:true} 才调用 run；被拒（含 duplicate_reservation）/账本报错 → 不调用 run；run 抛错 → 不结算（hold 保留），向上返回失败；spec.id 由 newAttemptId 生成，一个 id 只用一次
 ```
 - `createRpcLedger` 对返回值做严格格式校验，不合格一律当"账本不可用"。`fake-ledger.ts` 用单线程内存模拟同样的"全有或全无 + 幂等 + 重复结算"语义，供 L6c/L6d 测试复用；并发测试用 `Promise.all` 同时发起，fake 必须在 `reserve` 内同步完成检查与扣减（不得在检查和扣减之间 `await`）。
 
@@ -927,8 +951,8 @@ export async function withReservation<T>(ledger: BudgetLedger, spec: { id: strin
 |---|---|---|
 | R1 | 新建 `src/lib/deepseek/client.ts` | 按"共用 DeepSeek 客户端规格"写全部导出。提示词里完整写出 `import type { Result } from '@/lib/agent-learning/contracts'`。验收：`tsc` 无新增错误。 |
 | R2 | 新建 `src/lib/deepseek/__tests__/client.test.ts`；`--read` R1 产物 | 用 `fetch` 替身测：缺 key 失败不抛；默认模型 `deepseek-v4-flash`、`DEEPSEEK_MODEL` 覆盖生效；请求体含 `response_format` 与 `max_tokens`；超时/HTTP 500/非 JSON 都返回失败且错误信息不含密钥；缺 `usage` 按最坏值计；`costUsd` / `worstCaseUsd` 数值。 |
-| R3 | 新建 `src/lib/agent-learning/budget/types.ts`、`budget/reserve.ts` | 按"额度预留封装规格"写 `BudgetItem / BudgetLedger / createRpcLedger / periodKeys / withReservation`。`createRpcLedger` 调用的函数名固定为 `agent_learning_budget_reserve` / `agent_learning_budget_settle`，参数名与 2.7 一致。 |
-| R4 | 新建 `budget/fake-ledger.ts`、`budget/__tests__/reserve.test.ts` | 验收 T17（10 路并发只成功 3 路、被拒的 7 路外呼计数为 0、多 key 全有或全无）、T18（run 抛错后 hold 仍占用）、T19（`rpc` 报错/非法返回 → `run` 零调用）、T20（按实际结算、重复结算不二次扣减、超额如实记账）。 |
+| R3 | 新建 `src/lib/agent-learning/budget/types.ts`、`budget/reserve.ts` | 按"额度预留封装规格"写 `BudgetItem / BudgetLedger / createRpcLedger / newAttemptId / periodKeys / withReservation`；`createRpcLedger` 必须把 `duplicate_reservation` 原样映射为拒绝，不得当成功。`createRpcLedger` 调用的函数名固定为 `agent_learning_budget_reserve` / `agent_learning_budget_settle`，参数名与 2.7 一致。 |
+| R4 | 新建 `budget/fake-ledger.ts`、`budget/__tests__/reserve.test.ts` | 验收 T17（10 路并发只成功 3 路、被拒的 7 路外呼计数为 0、多 key 全有或全无）、T18（run 抛错后 hold 仍占用）、T19（`rpc` 报错/非法返回 → `run` 零调用）、T20（按实际结算、重复结算不二次扣减、超额如实记账）、T21（同一 ID 并发 10 路只认领 1 次、其余 9 路 `duplicate_reservation` 且 `run` 零调用；结算后用同一 ID 重放 → `duplicate_reservation`（`holdStatus='settled'`）、`run` 零调用、`spent` 不变；`newAttemptId` 连续调用互不相同；重试必须换 ID 并重新占用额度）。 |
 | R5 | 新建 `src/lib/agent-learning/collect/x-limits.ts`、`src/lib/agent-learning/distill/cost-gate.ts` | `x-limits.ts`：`X_DAILY_READ_CAP=40`、`X_MONTHLY_READ_CAP=900`、`X_MONTHLY_USD_CAP=5`、`X_PRICE_PER_READ_USD=0.005`、`X_FIRST_BATCH_HANDLES`（10 个号，见 7.6）、`isFirstBatchHandle(handle)`（大小写不敏感、去 @）、`reserveXBudget` / `settleXBudget` / `projectMonthlyCostUsd`（签名见 L6d，经 `withReservation` 或直接调 `ledger`）。`cost-gate.ts`：`DISTILL_DAILY_ITEM_CAP=30`、`DISTILL_DAILY_USD_CAP=0.20`、`DISTILL_MAX_INPUT_TOKENS=8000`、`DISTILL_MAX_OUTPUT_TOKENS=1500`、`estimateWorstCaseUsd`、`reserveDistillBudget`（签名见 L6c）。 |
 | R6 | 新建两份测试：`collect/__tests__/x-limits.test.ts`、`distill/__tests__/cost-gate.test.ts`；`--read` fake-ledger | 验收 T7（第 31 条被拒、零外呼）、T12（日 40 上限）、T13（月 900 上限）、T14（`x:usd:month` 被拒与提前停读）、T16（仅首批 10 个号）、T17（X 日额度够月额度不够时整体被拒、日额度不被占用）。 |
 | R7 | 新建 `src/lib/agent-learning/rules/resolve-rule-text.ts`、`rules/__tests__/resolve-rule-text.test.ts`；`--read src/lib/skill-cards/board.ts` | 按 4.2a 写 `resolveRuleText`，只 import `findRuleRows`、`RULE_ID_RE`、`rowMentionsCard` 所在导出（若 `rowMentionsCard` 未导出则在本文件内用同口径的整名匹配，**不改 `board.ts`**）。fixtures 用小段示例手册表格（含表头"规则"列、多行同编号、缺列、超长、纯编号）。验收 V17 全部分支。 |
@@ -984,6 +1008,7 @@ export async function withReservation<T>(ledger: BudgetLedger, spec: { id: strin
 
 - v1.2（2026-10-24，按 Ray 10-25 决定与统筹 Traning Day 指示）：①删除第三方抓 YouTube 字幕（Supadata）可选项，R9 改为已否决，R15 取消，`transcript_policy` 列删除；②X API 并进 L6：新增 L6d、「X 读帖闸」、T12–T15，`kind` 增 `x_posts`，`x_handle` 列，R10 改为已同意；③L2、L3 审查口径改为 Codex Astra 审查 + Claude Code 复核。
 - v1.3（2026-10-24，按 Ray 2026-10-25 范围更正，统筹 Traning Day 转达）：①附录 A 替换为 6 领域 30 个来源（SEO、SEM、Facebook 运营、付费社媒广告、GEO、AI 技能），删除垂直行业专家与美妆缺口（R14 取消），垂直行业专家以后需要时再加；②名册字段 `platforms`/`industries` 合并为 `domains`，`SourceCard` 的「平台/行业」改为 `domain`；有效期默认值改为付费社媒 90、SEM 120、SEO 180、GEO 90、AI 技能 90、Facebook 运营 90，去掉"行业基本功 365"；③7.6 记录 Ray 的决定（试跑同意 08:38、名册同意 08:39、Supadata 否决 01:15、X API 同意 01:15，均新西兰时间）；④X 首批只读 10 个号，L6d 新增 T16；⑤视频为主的专家不进主名册。
+- v1.5（2026-10-24，按 Codex Astra 对 v1.4（`6f32964`）的复审 3 条 P1）：①2.7 预留改为「一个 `reservation_id` 只能认领一次」，重复/结算后重放返回 `duplicate_reservation` 且不外呼，每次外呼用 `newAttemptId` 独立尝试 ID，新增 T21 并补进 L56-P1 R3/R4；②4.7 列出普通管理员与 PM 的状态转换表（含 `conflict`、`pm_decision` 的 PM 直接批路径），2.8 函数增加 `p_actor_role` 并按同一张表校验，V19 逐格对照；③`editedRule` 进入 2.8 事务（`p_new_rule_text` / `p_new_rule_text_sha`，锁内校验旧 sha、同事务写新正文、状态与事件），新增 `approved_rule_text_sha` 列，桥接只写与审批 sha 一致的正文，新增 V21。
 - v1.4（2026-10-24，按 Codex Astra 对 v1.3（`f77094e`）的审查，统筹 Traning Day 指示）：①定时任务只在 `catalog.ts` 登记，去掉所有 `render.yaml` 要求（#3087 第 1c 项）；②新增 4.2a 与 `rule_text` 列：卡片点的 `rule` 是规则编号，注入的必须是解析出的规则句，新增 V17；③新增 4.7、2.8、L4b 与 V19：蒸馏点变成 `adopted` 的唯一受权限控制的人工审核入口（谁能批、身份取自会话、留痕）；④新增 4.8、2.6 的 CHECK 与 V18：扩展 `write-lesson.ts` 一次写完，字段不全不注入；⑤新增 2.7 额度预留账本、T17–T20、V20：蒸馏 0.20 美元/天与 X 40 条/天、900 条/月、5 美元/月都改为请求前原子预留、请求后按实际结算；⑥新增 7.7：共用 DeepSeek 客户端（模型名可配置，默认 `deepseek-v4-flash`，不复用 telephony）与 L56-P1 九轮 aider 指令，R17 更正，新增 R18–R20；⑦新表数由 5 张改为 7 张。
 - v1（2026-10-24）：首版。依据 #3088 触发评论的 5 项要求撰写；未执行任何迁移、未改业务代码。
 
