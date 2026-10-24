@@ -29,7 +29,10 @@
 -- ── 1. 主页帖已发布 ──────────────────────────────────────────────────────────
 -- 三本账分开计，避免草稿被记成已发布（#2817）时混成一个数。
 -- 工厂：content_work_orders.published_ref->>'video_state' = PUBLISHED 才算公开。
--- 日计划：daily_plan_auto_publish_attempts.status = published。
+-- 日计划：status = published 只表示 Facebook 收下了。
+--   scheduled_publish_time 在未来 = 还排着，没公开（patchFromOutcome 同时写
+--   provider_impact = FB_SCHEDULED）。公开只计：没有排期时间（当时就发出）
+--   或排期时间已到。时间用排期时刻，没有排期时间才用 updated_at。
 -- 内容日历：content_posts.status = published 且 platforms 含 facebook。
 WITH bounds AS (
   SELECT now() - interval '7 days' AS since
@@ -70,12 +73,24 @@ factory_draft_marked AS (
     AND w.updated_at >= b.since
   GROUP BY w.client_id
 ),
-daily_plan AS (
-  SELECT a.client_id, count(*) AS n, max(a.updated_at) AS last_at
+daily_plan_live AS (
+  SELECT a.client_id,
+         count(*) AS n,
+         max(coalesce(a.scheduled_publish_time, a.updated_at)) AS last_at
   FROM daily_plan_auto_publish_attempts a
   CROSS JOIN bounds b
   WHERE a.status = 'published'
-    AND a.updated_at >= b.since
+    AND (a.scheduled_publish_time IS NULL OR a.scheduled_publish_time <= now())
+    AND coalesce(a.scheduled_publish_time, a.updated_at) >= b.since
+  GROUP BY a.client_id
+),
+daily_plan_scheduled AS (
+  SELECT a.client_id,
+         count(*) AS n,
+         min(a.scheduled_publish_time) AS next_at
+  FROM daily_plan_auto_publish_attempts a
+  WHERE a.status = 'published'
+    AND a.scheduled_publish_time > now()
   GROUP BY a.client_id
 ),
 calendar AS (
@@ -93,14 +108,17 @@ SELECT
   coalesce(f.n, 0) AS factory_published_7d,
   f.last_at AS last_factory_published_at,
   coalesce(d.n, 0) AS factory_status_published_but_not_live_7d,
-  coalesce(dp.n, 0) AS daily_plan_published_7d,
-  dp.last_at AS last_daily_plan_published_at,
+  coalesce(dp.n, 0) AS daily_plan_live_7d,
+  dp.last_at AS last_daily_plan_live_at,
+  coalesce(sch.n, 0) AS daily_plan_scheduled_not_live,
+  sch.next_at AS next_daily_plan_scheduled_at,
   coalesce(cal.n, 0) AS content_posts_published_7d,
   cal.last_at AS last_content_post_published_at
 FROM fb_clients c
 LEFT JOIN factory f ON f.client_id = c.id
 LEFT JOIN factory_draft_marked d ON d.client_id = c.id
-LEFT JOIN daily_plan dp ON dp.client_id = c.id
+LEFT JOIN daily_plan_live dp ON dp.client_id = c.id
+LEFT JOIN daily_plan_scheduled sch ON sch.client_id = c.id
 LEFT JOIN calendar cal ON cal.client_id = c.id
 ORDER BY c.name;
 
@@ -163,7 +181,8 @@ ORDER BY c.name;
 -- ── 3. 广告已起草或在跑 ──────────────────────────────────────────────────────
 -- 起草：flywheel_actions.action_type = ads.create_ad（只说明 ME 记过一次起草，不表示这次要去建）。
 -- 在跑：近 7 天每个广告系列最新一条快照的 effective_status = ACTIVE。
--- 花费：ad_daily_insights 近 7 个 insight_date 的 spend 合计。花费为 0 仍可能有快照。
+-- 花费：先按 campaign 一层汇总，再跟客户名单相接。
+-- daily-insights.ts 把同一笔花费写成 campaign、adset、ad 三行；不先收成一层再相加会算成三倍。
 WITH bounds AS (
   SELECT now() - interval '7 days' AS since,
          (current_date - 7) AS since_date
@@ -219,6 +238,7 @@ spend AS (
   FROM ad_daily_insights i
   CROSS JOIN bounds b
   WHERE i.platform = 'meta'
+    AND i.level = 'campaign'
     AND i.insight_date >= b.since_date
   GROUP BY i.client_id
 )
@@ -357,9 +377,10 @@ LEFT JOIN unlinked u ON u.client_id = c.id
 ORDER BY c.name;
 
 -- ── 6. 跟进已发出 ────────────────────────────────────────────────────────────
--- 从 ME 发出的私信：conversation_outbound_log.status = sent。
--- 人记的跟进：contact_touchpoints.direction = outbound（电话 / 邮件 / 私信 / 手工）。
--- crm-lead-followup-digest 只组每日清单，不写发送行。清单有没有变成真正发出去：看这两列。待确认还有没有别的发送表。
+-- conversation_outbound_log 不是私信专用：whatsapp/send.ts 成功后也写 status = sent。
+-- 先按 conversations.channel 拆开再汇总，Messenger 与 WhatsApp 各一列。
+-- 人记的跟进：contact_touchpoints.direction = outbound（电话 / 邮件 / 私信 / WhatsApp / 手工），不并进上面两列。
+-- crm-lead-followup-digest 只组每日清单，不写发送行。清单有没有变成真正发出去：看这三列。待确认还有没有别的发送表。
 WITH bounds AS (
   SELECT now() - interval '7 days' AS since
 ),
@@ -380,11 +401,17 @@ fb_clients AS (
       )
     )
 ),
-sent_dm AS (
-  SELECT o.client_id, count(*) AS n, max(o.created_at) AS last_at
+sent_by_channel AS (
+  SELECT o.client_id,
+         count(*) FILTER (WHERE v.channel = 'messenger') AS messenger_n,
+         max(o.created_at) FILTER (WHERE v.channel = 'messenger') AS messenger_last,
+         count(*) FILTER (WHERE v.channel = 'whatsapp') AS whatsapp_n,
+         max(o.created_at) FILTER (WHERE v.channel = 'whatsapp') AS whatsapp_last
   FROM conversation_outbound_log o
+  JOIN conversations v ON v.id = o.conversation_id
   CROSS JOIN bounds b
   WHERE o.status = 'sent'
+    AND v.channel IN ('messenger', 'whatsapp')
     AND o.created_at >= b.since
   GROUP BY o.client_id
 ),
@@ -400,12 +427,14 @@ outbound_touch AS (
 SELECT
   c.id AS client_id,
   c.name AS client_name,
-  coalesce(s.n, 0) AS messenger_sent_7d,
-  s.last_at AS last_messenger_sent_at,
+  coalesce(s.messenger_n, 0) AS messenger_sent_7d,
+  s.messenger_last AS last_messenger_sent_at,
+  coalesce(s.whatsapp_n, 0) AS whatsapp_sent_7d,
+  s.whatsapp_last AS last_whatsapp_sent_at,
   coalesce(o.n, 0) AS outbound_touchpoints_7d,
   o.last_at AS last_outbound_touch_at
 FROM fb_clients c
-LEFT JOIN sent_dm s ON s.client_id = c.id
+LEFT JOIN sent_by_channel s ON s.client_id = c.id
 LEFT JOIN outbound_touch o ON o.client_id = c.id
 ORDER BY c.name;
 
