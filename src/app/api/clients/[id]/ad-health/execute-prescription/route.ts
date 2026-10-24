@@ -81,13 +81,20 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
   // Approximate de-dup (not atomic): a successful run in the last 10 minutes already added
   // ads, so a second click/tab/retry must not add another batch.
   const since = new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString()
-  const { data: recent } = await supabaseAdmin
+  const { data: recent, error: recentError } = await supabaseAdmin
     .from('winner_reel_sync_log')
     .select('id')
     .eq('client_id', clientId)
     .eq('status', 'ok')
     .gte('run_at', since)
     .limit(1)
+  if (recentError) {
+    // Fail closed: if we cannot tell whether a batch was just added, do not add another.
+    return NextResponse.json(
+      { error: '读不到最近的补素材记录,为避免重复添加,这次没有执行,请稍后重试' },
+      { status: 503 },
+    )
+  }
   if (recent && recent.length > 0) {
     return NextResponse.json(
       { error: '10 分钟内刚补过一批素材,请先刷新看看,不要重复提交', recently_run: true },

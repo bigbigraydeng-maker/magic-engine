@@ -225,7 +225,7 @@ describe('every card that is burning money offers a way to stop it', () => {
 
   it('a 403 on the stop-loss write says an internal account is needed, and nothing changed', async () => {
     vi.stubGlobal('fetch', mockFetch({
-      '/ad-health/stop-loss': { __status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', current_daily: 60, planned_daily: 48, cuttable: true, pausable: true },
+      '/ad-health/stop-loss': { __status: 403, current_daily: 60, planned_daily: 48, cuttable: true, pausable: true },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
     await renderAdsTab()
@@ -271,6 +271,21 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     expect(msg).not.toContain('明天')          // never defer with no owner
     expect(msg).not.toContain('团队')          // no invented third party
     expect(msg).not.toContain('爆款素材池')     // no internal jargon
+  })
+
+  it.each([
+    [403, /需要内部账号操作/],
+    [429, /10 分钟内已补过,请稍后/],
+  ])('a %i on the top-up button gets its own message', async (status, pattern) => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/execute-prescription': { __status: status, error: 'x' },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('执行'))
+    await waitFor(() => expect(screen.getByText(pattern)).toBeTruthy())
   })
 
   it('an empty recycle result reads the same way — not "明天再扫"', async () => {

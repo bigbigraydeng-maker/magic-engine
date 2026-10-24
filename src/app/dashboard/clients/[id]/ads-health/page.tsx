@@ -198,9 +198,17 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
         })
         return
       }
+      if (res.status === 403) {
+        setResult({ kind: 'err', text: '需要内部账号操作。广告没有变更。' })
+        return
+      }
+      if (res.status === 429) {
+        setResult({ kind: 'err', text: '10 分钟内已补过,请稍后。' })
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
-      const n = (json.adsAdded ?? []).length
+      const n =(json.adsAdded ?? []).length
       setDone(true)
       setResult({
         kind: 'ok',

@@ -14,6 +14,7 @@ const m = vi.hoisted(() => ({
   cfgEnabled: true,
   recentRows: [] as Array<{ id: string }>,
   logFilters: [] as Array<[string, unknown]>,
+  logError: false,
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({ requirePlanApproverAccess: m.access }))
@@ -30,7 +31,9 @@ vi.mock('@/lib/supabase', () => {
       m.logFilters.push([`gte:${col}`, val])
       return q
     }
-    q.limit = () => Promise.resolve({ data: m.recentRows, error: null })
+    q.limit = () => Promise.resolve(
+      m.logError ? { data: null, error: { message: 'boom' } } : { data: m.recentRows, error: null },
+    )
     q.maybeSingle = () => Promise.resolve({ data: { enabled: m.cfgEnabled }, error: null })
     return q
   }
@@ -55,6 +58,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.cfgEnabled = true
   m.recentRows = []
+  m.logError = false
   m.logFilters.length = 0
   m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { id: 'u1' } })
   m.sync.mockResolvedValue({ status: 'ok', postsScanned: 4, adsAdded: [{ name: 'Reel A', score: 9 }], guardsHit: [] })
@@ -87,6 +91,13 @@ describe('execute-prescription — 10 minute de-dup', () => {
     const res = await post()
     expect(res.status).toBe(429)
     expect((await res.json()).recently_run).toBe(true)
+    expect(m.sync).not.toHaveBeenCalled()
+  })
+
+  it('🔴 de-dup lookup fails → 503 fail-closed, sync engine not called', async () => {
+    m.logError = true
+    const res = await post()
+    expect(res.status).toBe(503)
     expect(m.sync).not.toHaveBeenCalled()
   })
 })
