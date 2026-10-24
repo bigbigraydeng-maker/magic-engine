@@ -215,7 +215,7 @@ jobs:
         if: steps.scope.outputs.docs_only != 'true'
         shell: bash
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=7168
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || needs.resolve-fallback-target.outputs.base_sha }}
         run: |
           set -euo pipefail
