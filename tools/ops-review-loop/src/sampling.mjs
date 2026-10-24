@@ -31,6 +31,12 @@
 export const C_SAMPLE_RATE_PERCENT = 20
 
 /**
+ * Share of B-level head shas that draw an optional 子牙 / 魏征 / 狄仁杰 spot
+ * check. Same stable sampler as C. A miss does not block the merge.
+ */
+export const B_SPOT_CHECK_RATE_PERCENT = 20
+
+/**
  * FNV-1a, 32-bit. Deterministic across processes and Node versions: only
  * `Math.imul`, XOR and `>>> 0`, all exactly specified by the language.
  *
@@ -97,4 +103,28 @@ export function shouldRequestCodexReview({ risk, pr, sha, ratePercent = C_SAMPLE
     return { review: true, reason: `${risk} 级 —— 必过 Codex 复审` }
   }
   return { review: true, reason: `风险等级 \`${risk}\` 无法识别 —— 按必审处理` }
+}
+
+/**
+ * Whether this head may draw an optional 子牙 / 魏征 / 狄仁杰 spot check.
+ *
+ * B only, and only when the stable sample selects it. A uses the two required
+ * sign-offs instead. C is not their lane. The result is never an input to
+ * `decideMerge`: a `review: false` here must not stop a B or C auto-merge.
+ *
+ * @param {{risk: string, pr: number|string, sha: string, ratePercent?: number}} input
+ * @returns {{review: boolean, reason: string}}
+ */
+export function shouldRequestLegacySpotCheck({ risk, pr, sha, ratePercent = B_SPOT_CHECK_RATE_PERCENT }) {
+  if (risk !== 'B') {
+    const reason =
+      risk === 'A' || risk === 'C'
+        ? `${risk} 级不抽子牙/魏征/狄仁杰（A 级只认两方签字，C 级不抽查）`
+        : `风险等级 \`${risk}\` 不抽查，也不挡合并`
+    return { review: false, reason }
+  }
+  if (isSampled({ pr, sha, ratePercent })) {
+    return { review: true, reason: `B 级，被 ${ratePercent}% 抽中（可选，缺席不挡合并）` }
+  }
+  return { review: false, reason: `B 级，未被 ${ratePercent}% 抽中（不挡合并）` }
 }

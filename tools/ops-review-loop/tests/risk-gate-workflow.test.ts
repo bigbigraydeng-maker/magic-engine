@@ -20,7 +20,7 @@ const YAML = requireFromHere('js-yaml') as { load(input: string): unknown }
 
 const ROOT = join(process.cwd(), '.github/workflows')
 const RISK_GATE_PATH = join(ROOT, 'pr-risk-gate.yml')
-const CI_PATH = join(ROOT, 'ops-review-loop-ci.yml')
+const CI_PATH = join(ROOT, 'pr-light-checks.yml')
 
 interface WorkflowStep {
   id?: string
@@ -65,8 +65,13 @@ const ci = load(CI_PATH)
 const SHA_PIN = /@[0-9a-f]{40}\b/
 
 describe('Risk gate workflow: the judge lives on main', () => {
-  it('triggers only on pull_request_target, with the full lifecycle set and no filters', () => {
-    expect(Object.keys(riskGate.triggers)).toEqual(['pull_request_target'])
+  it('triggers on pull_request_target plus Codex issue comments, never on the PR merge ref', () => {
+    expect(Object.keys(riskGate.triggers).sort()).toEqual(['issue_comment', 'pull_request_target'])
+    // A review-submitted event uses the PR merge ref, so the PR could replace
+    // this file. Codex's clean review is an issue comment (observed #3086).
+    expect(riskGate.triggers.pull_request).toBeUndefined()
+    expect(riskGate.triggers.pull_request_review).toBeUndefined()
+    expect(riskGate.triggers.pull_request_review_comment).toBeUndefined()
     const trigger = riskGate.triggers.pull_request_target as {
       types?: string[]
       paths?: unknown
@@ -77,6 +82,8 @@ describe('Risk gate workflow: the judge lives on main', () => {
     for (const type of ['opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft', 'edited']) {
       expect(trigger.types, `pull_request_target must include ${type}`).toContain(type)
     }
+    const comments = riskGate.triggers.issue_comment as { types?: string[] }
+    expect(comments.types).toEqual(expect.arrayContaining(['created', 'edited']))
     // A path or branch filter would turn this into a check that never reports
     // on the PRs it skips — a merge deadlock if it is required.
     expect(trigger.paths).toBeUndefined()
@@ -93,6 +100,7 @@ describe('Risk gate workflow: the judge lives on main', () => {
 
   it('serialises per PR and cancels superseded runs', () => {
     expect(riskGate.doc.concurrency?.['cancel-in-progress']).toBe(true)
+    expect(riskGate.doc.concurrency?.group).toContain('github.event.issue.number')
   })
 
   it('checks itself out from main, never the PR head, and persists no credentials', () => {
@@ -173,11 +181,22 @@ describe('Risk gate workflow: the judge lives on main', () => {
     }
     expect(env.SIGNOFF_TRUSTED_LOGINS).toContain('vars.ME_SIGNOFF_TRUSTED_LOGINS')
     expect(env.SIGNOFF_TRUSTED_LOGINS).not.toContain('pull_request.user.login')
+    expect(env.HEAD_SHA).toContain('steps.pr.outputs.head')
+    expect(env.BASE_SHA).toContain('steps.pr.outputs.base')
+    expect(env.PR_AUTHOR).toContain('steps.pr.outputs.author')
+  })
+
+  it('still judges from main and describes exactly two A-level sign-offs', () => {
+    expect(riskGate.triggers.pull_request_target).toBeDefined()
+    expect(riskGate.source).toContain('ref: main')
+    expect(riskGate.source).toContain('Codex Astra')
+    expect(riskGate.source).toContain('Claude Code')
+    expect(riskGate.source).not.toContain('three trusted sign-off')
   })
 })
 
-describe('ops-review-loop CI: tests run on every PR', () => {
-  it('triggers on every pull_request, with no path or branch filter', () => {
+describe('ops-review-loop CI: tests run on non-draft PRs', () => {
+  it('triggers on pull_request, with no path or branch filter', () => {
     expect(Object.keys(ci.triggers)).toEqual(['pull_request'])
     const trigger = (ci.triggers.pull_request ?? {}) as {
       paths?: unknown
@@ -187,6 +206,7 @@ describe('ops-review-loop CI: tests run on every PR', () => {
     expect(trigger.paths).toBeUndefined()
     expect(trigger['paths-ignore']).toBeUndefined()
     expect(trigger.branches).toBeUndefined()
+    expect(ci.doc.jobs?.tests?.if).toContain('draft')
   })
 
   it('is read-only', () => {
@@ -198,7 +218,8 @@ describe('ops-review-loop CI: tests run on every PR', () => {
   })
 
   it('exposes the stable required-check name', () => {
-    expect(ci.doc.jobs?.tests?.name).toBe('ops-review-loop-tests')
+    expect(ci.steps.some((step) => step.name === 'ops-review-loop-tests')).toBe(true)
+    expect(ci.source).toContain('OUTCOME_OPS_REVIEW')
   })
 
   it('reads no secrets, merges nothing, and pushes nothing', () => {
@@ -223,7 +244,7 @@ describe('only the judge may write', () => {
   it('grants contents: write to the risk gate and to nothing else in the workflows directory', () => {
     const files = readdirSync(ROOT).filter((name) => name.endsWith('.yml'))
     expect(files).toContain('pr-risk-gate.yml')
-    expect(files).toContain('ops-review-loop-ci.yml')
+    expect(files).toContain('pr-light-checks.yml')
 
     const contentsWrite = (workflow: Workflow): boolean => {
       if (workflow.permissions?.contents === 'write') return true
@@ -234,6 +255,9 @@ describe('only the judge may write', () => {
     const ciDoc = YAML.load(readFileSync(CI_PATH, 'utf8')) as Workflow
 
     expect(contentsWrite(riskGateDoc), 'pr-risk-gate.yml must be able to toggle auto-merge').toBe(true)
-    expect(contentsWrite(ciDoc), 'ops-review-loop-ci.yml must stay read-only').toBe(false)
+    expect(contentsWrite(ciDoc), 'pr-light-checks.yml must stay read-only').toBe(false)
+    const report = ciDoc.jobs?.report
+    expect(report?.permissions?.checks, 'only the report job may publish checks').toBe('write')
+    expect(ciDoc.jobs?.tests?.permissions?.checks, 'the test job must not publish checks').toBeUndefined()
   })
 })
