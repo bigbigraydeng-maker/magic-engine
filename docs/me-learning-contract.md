@@ -6,7 +6,7 @@
 - 写入者：Claude Code（本文档）；代码由 DeepSeek 写，Codex Astra 只审查
 - 层级判定（平台层级门，Inline）：本契约属于既有「记忆 / 验证」平台基础设施（L1 既有能力的扩展），不新增能力线、不新增支柱；外部来源走既有 Connector；客户名与客户私有事实不进共享代码
 
-> 读法：第 1 节说"现在是什么样"，第 2–5 节是契约本体，第 6 节是验收用例，第 7 节是给 DeepSeek 的 PR 指令（L1–L5，及 7.6 的 L6a/b/c），第 8 节是需要核对的风险，附录 A 是首批专家名册。L6「专家经验蒸馏」的设计在 7.6 节。
+> 读法：第 1 节说"现在是什么样"，第 2–5 节是契约本体，第 6 节是验收用例，第 7 节是给 DeepSeek 的 PR 指令（L1–L5，及 7.6 的 L6a/b/c/d），第 8 节是需要核对的风险，附录 A 是首批专家名册（6 个领域，30 个来源）。L6「专家经验蒸馏」的设计在 7.6 节。
 > 本文所有 SQL / TypeScript 都是**规格**，不在生产库执行，不直接复制成未审代码。
 
 ---
@@ -119,8 +119,7 @@ ALTER TABLE agent_learning_sources
   ADD COLUMN IF NOT EXISTS expert_name        text,         -- 谁
   ADD COLUMN IF NOT EXISTS publish_url        text,         -- 发布地址（专家主页/频道/博客）；采集地址仍用 url
   ADD COLUMN IF NOT EXISTS credibility_reason text,         -- 可信理由，一句话，由 PM 确认
-  ADD COLUMN IF NOT EXISTS platforms          text[] NOT NULL DEFAULT '{}',  -- 如 {'meta','tiktok','google_ads','seo'}
-  ADD COLUMN IF NOT EXISTS industries         text[] NOT NULL DEFAULT '{}',  -- 如 {'travel','real_estate'}；通用基本功留空数组
+  ADD COLUMN IF NOT EXISTS domains            text[] NOT NULL DEFAULT '{}',  -- 领域，取值仅限 {'seo','sem','facebook_organic','paid_social','geo','ai_skills'}
   ADD COLUMN IF NOT EXISTS reviewed_at        date,         -- 复核日期（PM 上次确认可信的日期）
   ADD COLUMN IF NOT EXISTS added_by           text,         -- 谁加的，'pm:<id>' | 'seed:skill-cards'
   ADD COLUMN IF NOT EXISTS robots_ok          boolean,      -- 最近一次 robots.txt 检查结果；NULL = 未检查
@@ -130,7 +129,7 @@ ALTER TABLE agent_learning_sources
 约束：
 - **名册上线前每位专家须有 `credibility_reason` 且 `reviewed_at` 非空，否则 L6b 不采集该来源**（fail-closed）。
 - 视频类内容**只**用专家自己发布的文字版，或人工在工作台粘贴的字幕/要点；**不用任何第三方字幕抓取服务**（Ray 已否决，R9）。
-- 行业字段是**数据**不是代码分支：共享代码不得出现行业名判断（平台化铁律 0）。
+- 领域字段是**数据**不是代码分支：共享代码不得出现客户/行业名判断（平台化铁律 0）。垂直行业专家本版不列，以后需要时再加（届时进 Industry Playbook / Profile，不改本表结构）。
 
 ### 2.3 `agent_learning_points` — 技能点快照
 
@@ -524,7 +523,19 @@ live = is_active
 
 ### 7.6 L6 — 专家经验蒸馏（L6a / L6b / L6c / L6d）
 
-**方向（Ray 更正，取代此前"新闻/RSS/Trends"提法）**：学的是**一线专家公开分享的平台实操打法和垂直行业经验**，不是行业新闻。新闻、热点、趋势榜不在 L6 范围。
+**方向（Ray 更正，取代此前"新闻/RSS/Trends"提法）**：学的是**一线专家公开分享的平台实操打法**，不是行业新闻。新闻、热点、趋势榜不在 L6 范围。
+
+**范围（Ray 2026-10-25 再次更正）**：原话"专家是 seo sem facebook运营 广告 geo AI skill这些领域的专家哦"。名册只覆盖 **6 个领域**（`domain` 取值）：`seo`（SEO）、`sem`（Google Ads / 搜索广告）、`facebook_organic`（Facebook 运营：主页、内容、社群、Messenger 的自然流量）、`paid_social`（付费社媒广告：Meta / TikTok）、`geo`（让品牌被 ChatGPT、Perplexity、Google AI 概览和 AI Mode 引用）、`ai_skills`（做和用 AI agent、提示词、agent skills、AI 营销流程）。**垂直行业专家以后需要时再加，本版不列。**
+
+**Ray 的决定（均为新西兰时间）**
+| 事项 | 决定 | 谁、何时 |
+|---|---|---|
+| L6 当场试跑 | 同意；费用硬上限每天 0.20 美元，写在代码里；试跑结果不写生产库 | Ray，2026-10-25 08:38 |
+| 专家名册 | 同意；2026-10-25 的 6 领域调整是范围调整，不是重新审批 | Ray，2026-10-25 08:39 |
+| Supadata（第三方抓字幕） | 已否决 | Ray，2026-10-25 01:15 |
+| X API | 同意并入 L6，约每月 4.5 美元，月度预计超过 5 美元自动停读；首批只读名册里标出的 10 个 X 号，其余走 RSS | Ray，2026-10-25 01:15 |
+
+"PM 逐位确认可信理由"这一步不因上表而取消。
 
 **层级判定（Inline）**：属 IMPACT 的 Inspect/Prescribe 之前的证据输入，增强既有「学习」基础设施；全部复用 `agent_learning_*` 与 `global_learned_lessons`，不新增表（字段在 L2）、不新增能力线；外部来源走既有封装，不手写直调第三方。
 
@@ -536,7 +547,7 @@ live = is_active
 
 #### 步骤 1：专家名册
 - 沿用 `agent_learning_sources`，字段见 2.1a；**名册由人维护**，机器不自动加专家。
-- 名册上线前每位专家由 PM 确认一次 `credibility_reason`（附录 A 的 25 位目前都是"候选"，未确认前不采集）。
+- 名册上线前每位专家由 PM 确认一次 `credibility_reason`（附录 A 的 30 个来源中，名册范围已获 Ray 同意（见下「Ray 的决定」），但"为什么可信"仍须 PM 逐位确认，未确认前不采集）。
 - **种子**（L6a 第一步）：把 `docs/skill-cards/` 现有 27 张卡末尾「机器索引」JSON 导入 `agent_learning_points`（`origin='card'`），**状态原样导入，不改、不升降级**；卡里出现的专家（Ben Heath、Sam Piliero、Sabri Suby、Matt Shiver、Jared Robinson、咔咔的老吴等）以 `added_by='seed:skill-cards'` 进名册，`credibility_reason` 暂空，待 PM 确认后才允许采集。导入流程与 `.claude/skills/me-expert-source-to-skill/SKILL.md` 对齐（卡 → 点 → 状态），复用现有 `loadSkillCards` / `parseSkillCard`，不另写解析器。种子导入属于 L3 `syncSkillCards` 的同一条路径（L6a 只负责名册与专家字段回填，不重复造同步）。
 
 #### 步骤 2：采集（沿用 `agent_learning_items` / `agent_learning_runs`）
@@ -562,8 +573,7 @@ interface SourceCard {
   expert: string            // 名册里的专家名
   url: string               // 该条内容的具体地址
   publishedAt: string       // ISO 日期
-  platform: string          // 名册 platforms 之一
-  industry: string | null   // 名册 industries 之一；通用基本功为 null
+  domain: 'seo' | 'sem' | 'facebook_organic' | 'paid_social' | 'geo' | 'ai_skills'   // 领域，必为名册 domains 之一
   quote: string             // 原文引用，≤2 行
   videoTimestampSec: number | null   // 视频类必填，其他为 null
 }
@@ -588,7 +598,7 @@ interface DistilledRule {
 - 状态沿用 `docs/skill-cards/README.md` 机器索引状态（即 `PointState` 9 种），映射：`new`→`learning`；`already_in_me`→`already_in_me`；`partial`→`learning`（note 写已有部分）；`conflict`→`pm_decision`（涉及钱/预算/出价/投放开关的一律 `pm_decision`），其余冲突→`learning` 且 note 带规则编号。**机器永不写 `adopted`**。
 
 #### 步骤 5：有效期与退役
-- 默认值（天，写入 `DEFAULT_VALIDITY_DAYS` 的 L6 扩展，按「平台」而非客户）：**Meta 与 TikTok 90、Google Ads 120、SEO 180、行业基本功 365**。取值依据 `source_card.platform` 与 `industry`；行业基本功 = `industry` 非空且规则不依赖某平台界面（由人审时勾选，机器默认走平台值）。
+- 默认值（天，写入 `DEFAULT_VALIDITY_DAYS` 的 L6 扩展，按「领域」而非客户）：**付费社媒广告（Meta / TikTok）90、SEM（Google Ads）120、SEO 180、GEO 90、AI 技能 90、Facebook 运营 90**。取值依据 `source_card.domain`；可被单点 `valid_until` 覆盖（人审时调整）。垂直行业专家本版不列，没有"行业基本功 365"档。
 - 到期：lesson 立即退出提示词（4.3 已 fail-closed）；点进入**待复核**（`review_due_at = valid_until + 14 天`，写 `expired` 事件，产生人工待办）；**到 `review_due_at` 仍无人复核 → 退役**（写 `retired` 事件，`retired_reason='expired_unreviewed'`）。复核通过（`renewed`）必须有人工动作或新证据，不自动续命。
 - 注意：4.2 里"同步时间 + DEFAULT_VALIDITY_DAYS"的起点，L6 改用**专家内容发布日期**（`source_card.publishedAt`）而非采纳日期，避免旧文章靠"现在才采纳"续命；发布日期缺失则取采集日期。
 
@@ -623,10 +633,11 @@ interface DistilledRule {
 | T12 | X 日上限：当天读帖数达 `X_DAILY_READ_CAP` | 达上限后当天不再发任何 X 请求；回执 `partial` + `error='x_daily_cap'`；次日恢复 |
 | T13 | X 月上限：当月累计读帖数达 `X_MONTHLY_READ_CAP` | 当月停读；回执 `error='x_monthly_cap'`；有人工待办 |
 | T14 | X 费用保险丝：月度预计花费 > 5 美元（已读数×单价 + 当日速率外推） | 自动停读并告警（`agent_learning.run.failed` + 人工待办），之后不再请求 |
+| T16 | X 只读首批 10 个号：名册里另有 `x_handle` 的专家，但不在首批 10 个号内（@glenngabe、@lilyraynyc、@aleyda、@Marie_Haynes、@jonloomer、@binghott、@Kevin_Indig、@VeryWellVersed、@simonw、@emollick） | 只对这 10 个号发请求；其余专家的 `x_posts` 来源不建或 `enabled=false`，走 RSS；`fetchJson` 实际请求的账号集合 ⊆ 这 10 个（测试替身断言）；增减账号须走 PR 改允许清单 |
 | T15 | X 只读名册：名册外账号 / `enabled=false` / 未确认可信 / 缺密钥 | 不发请求；X 客户端只含 GET 读帖端点（静态检查）；缺密钥 fail-closed 且日志/回执不含密钥 |
 
 #### 当场试跑（三份共用，只读、不写生产库）
-- 用 **3 个真实 RSS 源**（建议：Jon Loomer、Glenn Gabe、Common Thread Collective（Atom），各取最新 3 条）+ fixtures（含无 RSS 站的 robots 禁止样例、含注入指令的样例、含作者数字的样例）。
+- 用 **3 个真实 RSS 源**（建议：Jon Loomer、Glenn Gabe、Common Thread Collective（Atom），各取最新 3 条；Ray 已同意当场试跑，2026-10-25 08:38，日费用硬上限 0.20 美元写在代码里，结果不写生产库）+ fixtures（含无 RSS 站的 robots 禁止样例、含注入指令的样例、含作者数字的样例）。
 - 跑 `ingest → distill → reconcile` **dry-run**：抓取是只读外网读取（须 Ray 授权，未授权则只用 fixtures 并写明）；蒸馏调用 LLM 产生少量费用，须在 0.20 美元日上限内并**先得到 Ray 对试跑费用的授权**，否则用 fixtures 的预录 LLM 响应；**数据库写入用内存替身或测试库，不写生产库**。
 - PR「## 当场试跑」贴：每个源取到几条、去重几条、蒸馏出几条规则、各对账结论计数、被拦（注入/脱敏/robots）几条、实际 token 与花费、退出码。
 
@@ -695,6 +706,7 @@ runDistill(deps: { llm: DistillLlm; reconcile: ReconcileFn; repo: LearningRepo }
 
 #### X 读帖闸（L6d 共同约束，硬）
 - **只读名册内专家**：只请求 `kind='x_posts'`、`enabled` 且 `isCollectable` 通过的来源；账号名取自 `x_handle`。名册外账号一律不请求。
+- **首批只读 10 个号**（Ray 2026-10-25 01:15 同意，其余专家走 RSS）：@glenngabe、@lilyraynyc、@aleyda、@Marie_Haynes、@jonloomer、@binghott、@Kevin_Indig、@VeryWellVersed、@simonw、@emollick。代码里以允许清单常量（`X_FIRST_BATCH_HANDLES`，放 `x-limits.ts`）表达，名册里有 `x_handle` 但不在清单内也不请求。附录 A 其余 X 号仅作参考。
 - **不爬 x.com**：只调官方 API 读帖端点；不抓网页、不用非官方接口、不绕限流；不发帖/点赞/关注/私信。
 - **代码内硬上限**（常量放 `src/lib/agent-learning/collect/x-limits.ts`，改数值须走 PR）：`X_DAILY_READ_CAP`（初值 40 帖/天）、`X_MONTHLY_READ_CAP`（初值 900 帖/月，按约 0.005 美元/帖 ≈ 4.5 美元）。每次请求前先查"今日/本月已读数 + 本次最大条数"，会超限则不发请求。
 - **费用保险丝**：月度预计花费 = 本月已读数 × 单价 + 今日速率外推到月底；**> 5 美元自动停读**，当月不再请求，发 `agent_learning.run.failed` 并产生人工待办（what/how/href 三件套）。已读数以 `agent_learning_runs` 回执为准，不信 API 响应自报。
@@ -715,7 +727,7 @@ checkXBudget(usage: { todayReads: number; monthReads: number; monthCostUsd: numb
 projectMonthlyCostUsd(usage): number   // 纯函数，> 5 即触发保险丝
 runXCollect(deps, { now, requestId, dryRun }): Promise<Result<RunReceipt>>   // 回执 noPublish:true；读帖数与花费写入 agent_learning_runs
 ```
-**验收**：T12–T15；去重复用 T1；缺密钥不抛错；回执里 `cost_usd` 与读帖数一致；上限触发后 `fetchJson` 调用次数为 0（测试替身断言）。命令：`npm test -- src/lib/agent-learning/collect`、`npm run type-check`。
+**验收**：T12–T16（含 T16「只读首批 10 个号」）；去重复用 T1；缺密钥不抛错；回执里 `cost_usd` 与读帖数一致；上限触发后 `fetchJson` 调用次数为 0（测试替身断言）。命令：`npm test -- src/lib/agent-learning/collect`、`npm run type-check`。
 **当场试跑**：**默认只用 fixtures + 假 `fetchJson`**，不发真实 X 请求，贴"各上限触发的回执与 `fetchJson` 调用次数"。真实 API 试读仅在 Ray 开通密钥并明确授权后做一次（≤10 帖，名册内 1 位专家），贴读帖数与花费。**生产首次真实运行前须 Ray 看过 dry-run 输出并同意。**
 
 ---
@@ -737,7 +749,7 @@ runXCollect(deps, { now, requestId, dryRun }): Promise<Result<RunReceipt>>   // 
 | R11 | 专家可信度是主观判断 | 每位专家须 PM 确认一次「为什么可信」后才采集；公开经验可能过时或只对作者自己的账户成立 | PM 逐位确认 |
 | R12 | 版权与抓取合规 | 只存 hash+标题+链接+≤2 行引用；遵守 robots.txt，不绕付费墙/反爬 | Astra 审查重点 |
 | R13 | 原文里的提示词注入 | 原文按不可信数据处理，蒸馏输出只能是受约束的 JSON，永不执行原文指令（L6 步骤 3、验收 T5） | Astra 审查重点 |
-| R14 | 美妆行业缺口 | 名册里美妆只有 Savannah Sanchez 部分覆盖 | FDE/PM 补 1–2 位 |
+| R14 | （原美妆行业缺口） | 随 v1.3 范围调整取消：名册只覆盖 6 个领域，垂直行业专家以后需要时再加 | 已取消 |
 | R15 | （原 Supadata `mode` 改造项） | 随 R9 否决而取消；L6 不改 `src/lib/supadata/client.ts` | 已取消 |
 | R16 | 蒸馏候选点不走 Markdown 卡（对原则 1 的例外，见 2.3a） | 仓库里看不到这些点的 git 历史，历史靠 `point_events` | Astra 审查，Ray 知悉 |
 | R17 | 模型名 `deepseek-v4-flash` | 仓库里目前只在 `seo-weekly-list/live-snippet.ts` 等处出现，没有统一封装；L6c 须先读那处的调用方式照写，不另手写直调 | L6c 核对 |
@@ -759,47 +771,75 @@ runXCollect(deps, { now, requestId, dryRun }): Promise<Result<RunReceipt>>   // 
 - v1.1（2026-10-24 草拟，Ray 2026-10-25 方向更正）：新增 L6「专家经验蒸馏」（7.6，含 L6a/b/c PR 指令与验收 T1–T11）；2.1a/2.3a 增加专家名册与蒸馏候选字段（随 L2 迁移）；附录 A 首批 25 位专家名册；排期总览加 L6a–c、L1 改为等 PR-T1 合并；R7 改为暂缓，新增 R8–R17；L1 补"幂等查询用确定性 UUID"。此前 #3088 里"新闻/RSS/Trends"版 L6 请求作废。
 
 - v1.2（2026-10-24，按 Ray 10-25 决定与统筹 Traning Day 指示）：①删除第三方抓 YouTube 字幕（Supadata）可选项，R9 改为已否决，R15 取消，`transcript_policy` 列删除；②X API 并进 L6：新增 L6d、「X 读帖闸」、T12–T15，`kind` 增 `x_posts`，`x_handle` 列，R10 改为已同意；③L2、L3 审查口径改为 Codex Astra 审查 + Claude Code 复核。
+- v1.3（2026-10-24，按 Ray 2026-10-25 范围更正，统筹 Traning Day 转达）：①附录 A 替换为 6 领域 30 个来源（SEO、SEM、Facebook 运营、付费社媒广告、GEO、AI 技能），删除垂直行业专家与美妆缺口（R14 取消），垂直行业专家以后需要时再加；②名册字段 `platforms`/`industries` 合并为 `domains`，`SourceCard` 的「平台/行业」改为 `domain`；有效期默认值改为付费社媒 90、SEM 120、SEO 180、GEO 90、AI 技能 90、Facebook 运营 90，去掉"行业基本功 365"；③7.6 记录 Ray 的决定（试跑同意 08:38、名册同意 08:39、Supadata 否决 01:15、X API 同意 01:15，均新西兰时间）；④X 首批只读 10 个号，L6d 新增 T16；⑤视频为主的专家不进主名册。
 - v1（2026-10-24）：首版。依据 #3088 触发评论的 5 项要求撰写；未执行任何迁移、未改业务代码。
 
 ---
 
-## 附录 A. 首批专家名册（候选，25 位）
+## 附录 A. 首批专家名册（6 个领域，30 个来源）
 
-**全部是候选**：每位专家须由 PM 确认一次「为什么可信」（`credibility_reason`）并填 `reviewed_at`，之后才允许采集（2.1a、T9）。"采集方式"栏是第一期的默认方式；"已有卡"指 `docs/skill-cards/` 已有的卡数（来自本次任务说明，未逐张核对）。
+**范围**：只覆盖 SEO、SEM、Facebook 运营、付费社媒广告、GEO、AI 技能 6 个领域（`domain` 取值：`seo` / `sem` / `facebook_organic` / `paid_social` / `geo` / `ai_skills`）。**垂直行业专家以后需要时再加，本版不列。**
 
-| # | 专家 / 来源 | 平台 / 行业 | 地址 | 采集方式（第一期） | 备注 |
-|---|---|---|---|---|---|
-| 1 | Jon Loomer | Meta 广告 | https://www.jonloomer.com/ | RSS | 文字为主，质量高 |
-| 2 | Ben Heath | Meta 广告 | https://www.youtube.com/@BenHeath | YouTube 频道 RSS 发现 + 人工字幕 | 已有 3 张卡 |
-| 3 | Sam Piliero | Meta 广告（素材与放量） | https://www.youtube.com/@sampiliero | YouTube 频道 RSS + 人工字幕 | 已有 2 张卡 |
-| 4 | Foxwell Digital（Andrew Foxwell） | Meta 广告 | https://www.foxwelldigital.com/ | 待确认有无 RSS，否则列表页（遵守 robots） | |
-| 5 | Dara Denney | 广告素材策略 | https://www.youtube.com/@DaraDenney | YouTube 频道 RSS + 人工字幕 | |
-| 6 | Sabri Suby（King Kong，澳洲） | 直效广告 | https://www.youtube.com/@sabrisubyofficial | YouTube 频道 RSS + 人工字幕 | 已有 1 张卡 |
-| 7 | Matt Shiver | Meta 广告 | https://www.youtube.com/@MattShiver | YouTube 频道 RSS + 人工字幕 | 已有 1 张卡 |
-| 8 | Jared Robinson | Meta 广告 | https://www.youtube.com/@JaredRobinson | YouTube 频道 RSS + 人工字幕 | 已有 1 张卡 |
-| 9 | Savannah Sanchez | TikTok / 付费社媒素材；美妆、服装 DTC | https://www.thesocialsavannah.com/ | 待确认有无 RSS，否则列表页 | 美妆部分覆盖 |
-| 10 | Jon Reiter | TikTok Shop / TikTok 广告 | https://www.youtube.com/@thetiktokwiz | YouTube 频道 RSS + 人工字幕 | |
-| 11 | Optmyzr 博客（Frederick Vallaeys） | Google Ads | https://www.optmyzr.com/blog/ | 待确认有无 RSS，否则列表页 | |
-| 12 | The PPC Edge（PPC Mastery） | Google Ads | https://www.ppcmastery.com/blog/ | 待确认有无 RSS，否则列表页 | |
-| 13 | Glenn Gabe | SEO（算法更新） | https://www.gsqi.com/marketing-blog/ | RSS | |
-| 14 | Kevin Indig（Growth Memo） | SEO / 增长 | https://www.growth-memo.com/ | RSS | 只用免费部分 |
-| 15 | Marie Haynes | SEO | https://www.mariehaynes.com/ | RSS | |
-| 16 | Aleyda Solis（SEOFOMO newsletter） | SEO / AI 搜索 | https://www.seofomo.co/ | **只走 newsletter 或人工录入** | 她的主站有反爬，不抓 |
-| 17 | Lily Ray | SEO / AI 搜索 | https://x.com/lilyraynyc ；https://www.searchenginejournal.com/author/lily-ray/ | X 走官方 API 只读（L6d）；SEJ 作者页走列表页（遵守 robots） | X 读帖受日/月上限约束（R10） |
-| 18 | Ahrefs 博客 | SEO | https://ahrefs.com/blog/ | RSS | |
-| 19 | Tourpreneur | 旅游 / 活动运营商 | https://tourpreneur.com/ | RSS（播客；每期网页有文字要点，取文字要点） | 播客音频不处理 |
-| 20 | Tom Ferry | 房产 | https://www.youtube.com/@TomFerry | YouTube 频道 RSS + 人工字幕 | |
-| 21 | Hook Agency | 家装和地板（承包商营销） | https://hookagency.com/blog/ | 待确认有无 RSS，否则列表页 | |
-| 22 | Tommy Mello（Home Service Expert） | 家装和上门服务 | https://www.homeserviceexpert.com/ | 待确认有无 RSS，否则列表页 | |
-| 23 | The Restaurant Boss | 餐饮 | https://www.youtube.com/@TheRestaurantBoss | YouTube 频道 RSS + 人工字幕 | |
-| 24 | Common Thread Collective | 服装和电商 DTC | https://commonthreadco.com/blogs/coachs-corner | Atom | |
-| 25 | Two-Brain Business | 健身 | https://twobrainbusiness.com/ | RSS | |
+名册范围已获 Ray 同意（2026-10-25 08:39 新西兰时间；本次为范围调整，不是重新审批）。但每位专家的 `credibility_reason` 与 `reviewed_at` 仍须 PM 确认后才允许采集（2.1a、T9）。以下 URL、RSS 和 X 号均由统筹在 2026-10-25 逐个打开核实；核实不了的已删（ManyChat 博客有反爬；Dara Denney、Taylor Holiday 找不到 X 号；Savannah Sanchez 的 X 号已被封）。RSS 栏的相对路径接在发布地址的域名后。X 栏标 ★ 的是首批只读的 10 个号（L6d）。
 
-**备选（不计入 25）**
-- 科技 / SaaS：Kyle Poyar（Growth Unhinged）https://www.growthunhinged.com/ ；Lenny's Newsletter https://www.lennysnewsletter.com/ ——**只用免费部分**。
-- 通用成交和报价：Alex Hormozi https://www.youtube.com/@AlexHormozi 。
-- 中文：咔咔的老吴（已有 2 张卡）。
+### SEO（6）
+| # | 名字 | 领域 | 发布地址 | RSS / 采集方式 | X 号 | 可信理由 |
+|---|---|---|---|---|---|---|
+| 1 | Glenn Gabe | seo | https://www.gsqi.com/marketing-blog/ | RSS：`/marketing-blog/feed/` | @glenngabe ★ | Google 算法更新的逐次分析 |
+| 2 | Marie Haynes | seo | https://www.mariehaynes.com/ | RSS：`/feed/` | @Marie_Haynes ★ | Google 质量和 AI 搜索，每周 newsletter |
+| 3 | Aleyda Solis | seo | https://www.seofomo.co/ （SEOFOMO 周报） | 只用周报或人工录入；主站有反爬，不抓 | @aleyda ★ | 技术和国际 SEO、AI 搜索 |
+| 4 | Lily Ray | seo | https://www.searchenginejournal.com/author/lily-ray/ | 作者页列表页（遵守 robots） | @lilyraynyc ★ | E-E-A-T、算法波动、AI 搜索 |
+| 5 | Barry Schwartz（Search Engine Roundtable） | seo | https://www.seroundtable.com/ | RSS：`https://feeds.feedburner.com/seroundtable` | @rustybrick（发帖量大，只走 RSS，不读 X） | 每天记录 Google 搜索和广告的变化，最快 |
+| 6 | Ahrefs 博客 | seo | https://ahrefs.com/blog/ | RSS：`/blog/feed/` | @ahrefs | 用数据做的 SEO 研究 |
 
-**缺口**：美妆目前只有 Savannah Sanchez 部分覆盖，需 FDE 或 PM 补 1–2 位。
+### SEM（Google Ads / 搜索广告）（4）
+| # | 名字 | 领域 | 发布地址 | RSS / 采集方式 | X 号 | 可信理由 |
+|---|---|---|---|---|---|---|
+| 7 | Frederick Vallaeys（Optmyzr） | sem | https://www.optmyzr.com/blog/ | 未标 RSS；L6b 开工时只读核对，否则列表页（遵守 robots） | @siliconvallaeys | 前 Google AdWords 布道师 |
+| 8 | Kirk Williams（ZATO） | sem | https://www.zatomarketing.com/blog | RSS：`/blog/rss.xml` | @PPCKirk（很少发帖，不读 X） | Google Ads 代理，擅长 PMax 和购物广告 |
+| 9 | Brad Geddes（Adalysis） | sem | https://adalysis.com/blog/ | RSS：`/feed/` | @bgtheory | Google Ads 官方研讨会讲师 |
+| 10 | The PPC Edge（PPC Mastery） | sem | https://www.ppcmastery.com/blog/ | 未标 RSS；L6b 开工时只读核对，否则列表页 | 无 | 进阶 Google Ads newsletter |
 
-**备注**：表中"有 RSS / Atom"以任务说明为准；标"待确认"的，L6b 开工时用只读请求核对（遵守 robots.txt），结果写回 `kind`。名册里的专家名、地址是**公开信息**，不含客户数据。
+### Facebook 运营（自然流量：主页、内容、社群、Messenger）（5）
+| # | 名字 | 领域 | 发布地址 | RSS / 采集方式 | X 号 | 可信理由 |
+|---|---|---|---|---|---|---|
+| 11 | Mari Smith | facebook_organic | https://www.marismith.com/blog/ | RSS：`/feed/` | @MariSmith | 资深 Facebook 营销专家 |
+| 12 | Social Media Examiner | facebook_organic | https://www.socialmediaexaminer.com/ | RSS：`/feed/` | @SMExaminer | FB/IG 运营实操文章和播客文字要点 |
+| 13 | Matt Navarra（Geekout 周报） | facebook_organic | https://geekout.mattnavarra.com/ | 未标 RSS；L6b 开工时只读核对，否则列表页 | @MattNavarra | 各平台新功能和规则变化 |
+| 14 | Buffer | facebook_organic | https://buffer.com/resources/ | RSS：`/resources/rss/` | @buffer | 自然社媒的数据研究 |
+| 15 | Later | facebook_organic | https://later.com/blog/ | 没有 RSS，每周抓一次列表页（遵守 robots） | 未标 | Instagram 和 Reels 自然增长 |
+
+### 付费社媒广告（Meta / TikTok）（5）
+| # | 名字 | 领域 | 发布地址 | RSS / 采集方式 | X 号 | 可信理由 |
+|---|---|---|---|---|---|---|
+| 16 | Jon Loomer | paid_social | https://www.jonloomer.com/ | RSS：`/feed/` | @jonloomer ★ | Meta 广告，文字为主 |
+| 17 | Andrew Foxwell（Foxwell Digital） | paid_social | https://www.foxwelldigital.com/blog | RSS：`/blog?format=rss` | @andrewfoxwell | Meta 广告 |
+| 18 | Barry Hott | paid_social | https://barryhott.com/ | 未标 RSS；L6b 开工时只读核对，否则列表页 | @binghott ★ | 广告素材和投放 |
+| 19 | Common Thread Collective | paid_social | https://commonthreadco.com/blogs/coachs-corner | Atom：`.atom` | 未标 | 电商付费社媒的运营方法 |
+| 20 | Savannah Sanchez | paid_social | https://www.thesocialsavannah.com/ | 未标 RSS；文字少，低优先级 | 无（X 账号已被封，不用） | TikTok 和 Meta 的 UGC 素材 |
+
+### GEO（让品牌被 ChatGPT、Perplexity、Google AI 概览和 AI Mode 引用）（5）
+| # | 名字 | 领域 | 发布地址 | RSS / 采集方式 | X 号 | 可信理由 |
+|---|---|---|---|---|---|---|
+| 21 | Kevin Indig（Growth Memo） | geo | https://www.growth-memo.com/ | RSS：`/feed`（只用免费部分） | @Kevin_Indig ★ | AI 搜索和 SEO 研究 |
+| 22 | Mike King（iPullRank） | geo | https://ipullrank.com/blog | RSS：`/feed` | @VeryWellVersed ★ | AI Mode 和 AI 搜索的技术分析 |
+| 23 | Rand Fishkin（SparkToro） | geo | https://sparktoro.com/blog/ | RSS：`/blog/feed/` | @randfish | 零点击搜索和 AI 可见度研究 |
+| 24 | Wil Reynolds（Seer Interactive） | geo | https://www.seerinteractive.com/insights | RSS：`/insights/rss.xml` | @wilreynolds | AI 可见度实测 |
+| 25 | Profound 博客 | geo | https://www.tryprofound.com/blog | 未标 RSS；L6b 开工时只读核对，否则列表页 | 未标 | GEO 监测厂商的研究；**是厂商，数字一律按「作者说法」处理** |
+
+（Lily Ray、Aleyda Solis、Marie Haynes 也写 AI 搜索，不重复列。）
+
+### AI 技能（做和用 AI agent、提示词、agent skills、AI 营销流程）（5）
+| # | 名字 | 领域 | 发布地址 | RSS / 采集方式 | X 号 | 可信理由 |
+|---|---|---|---|---|---|---|
+| 26 | Simon Willison | ai_skills | https://simonwillison.net/ | Atom：`/atom/everything/` | @simonw ★ | LLM 和 agent 工具的一线实践 |
+| 27 | Anthropic Engineering | ai_skills | https://www.anthropic.com/engineering | 未标 RSS；L6b 开工时只读核对，否则列表页 | @AnthropicAI | 官方的 agent 和 Agent Skills 实践 |
+| 28 | Ethan Mollick（One Useful Thing） | ai_skills | https://www.oneusefulthing.org/ | RSS：`/feed` | @emollick ★ | 怎么用好 AI |
+| 29 | Hamel Husain | ai_skills | https://hamel.dev/ | RSS：`/index.xml` | @HamelHusain | LLM 应用的评测方法 |
+| 30 | Marketing AI Institute（Paul Roetzer、Mike Kaput） | ai_skills | https://www.marketingaiinstitute.com/blog | 未标 RSS；L6b 开工时只读核对，否则列表页 | @paulroetzer、@MikeKaput | AI 营销流程 |
+
+### 备注
+- **X 首批只读 10 个号**（★）：@glenngabe、@lilyraynyc、@aleyda、@Marie_Haynes、@jonloomer、@binghott、@Kevin_Indig、@VeryWellVersed、@simonw、@emollick。其余专家走 RSS。读帖上限不变：每天 40 条、每月 900 条，月度预计超过 5 美元就自动停读（见「X 读帖闸」）。
+- **视频为主的专家**（Ben Heath、Sam Piliero、Sabri Suby、Matt Shiver、Jared Robinson、Dara Denney 等）：不进主名册，仍然是现有技能卡的作者。他们的新视频只能由人在工作台粘贴字幕或要点（不用第三方抓字幕服务）。种子导入时卡里的专家仍以 `added_by='seed:skill-cards'` 入库，但不采集，直到 PM 确认并纳入名册。
+- **垂直行业专家**（旅游、房产、家装、餐饮、服装、健身、美妆等）：以后需要时再加，本版不列。
+- 标"未标 RSS"的，L6b 开工时用只读请求核对（遵守 robots.txt），结果写回 `kind`。名册里的专家名、地址是**公开信息**，不含客户数据。
