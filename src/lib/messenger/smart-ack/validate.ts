@@ -30,11 +30,8 @@ const NUMBER_WORDS = [
   'million', 'dozen', 'couple of',
 ]
 
-const ALLOWED_NUMBER_PHRASES = [
-  'one of our team',
-  'one of our consultants',
-  'one of our advisors',
-]
+// Harmless staff-reference idiom: "one of our team", "one of the advisers".
+const STAFF_REFERENCE = /\bone of (?:our|the) [a-z]+\b/gi
 
 const MONTHS = [
   'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august',
@@ -67,8 +64,9 @@ const FORBIDDEN_TERMS = [
   'refunded', 'cancel', 'cancelled', 'canceled', 'cancellation', 'guarantee',
   'guaranteed', 'discount', 'discounted', 'deposit', 'payment', 'pay', 'paid',
   'invoice', 'receipt', 'price', 'prices', 'pricing', 'priced', 'cost', 'costs',
-  'quote', 'quoted', 'fee', 'fees', 'rate', 'rates', 'cheap', 'cheaper', 'offer',
-  'offers', 'special', 'deal', 'deals', 'book', 'booked', 'booking', 'bookings',
+  'quote', 'quoted', 'fee', 'fees', 'rate', 'rates', 'cheap', 'cheaper',
+  'special offer', 'special offers', 'special deal', 'exclusive offer',
+  'deal', 'deals', 'book', 'booked', 'booking', 'bookings',
   'reserve', 'reserved', 'reservation', 'available', 'availability', 'vacancy',
   'vacancies', 'seats', 'spots', 'sold out', 'visa', 'itinerary', 'flights',
   'flight', 'we will arrange', 'we will send', 'we will call', "we'll arrange",
@@ -104,10 +102,7 @@ function hasLinkOrContact(text: string): boolean {
 
 function hasNumber(text: string): boolean {
   if (DIGIT.test(text) || CURRENCY.test(text)) return true
-  let stripped = text.toLowerCase()
-  for (const phrase of ALLOWED_NUMBER_PHRASES) {
-    stripped = stripped.split(phrase).join(' ')
-  }
+  const stripped = text.toLowerCase().replace(STAFF_REFERENCE, ' ')
   for (const w of NUMBER_WORDS) {
     if (new RegExp(`\\b${escapeRegex(w)}\\b`, 'i').test(stripped)) return true
   }

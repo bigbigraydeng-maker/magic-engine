@@ -34,21 +34,41 @@ const complaintCases: Case[] = [
   { name: 'zero-width refund', input: ['re\u200bfund'], reason: 'triage_complaint' },
   { name: 'lawyer', input: ['I am contacting my lawyer'], reason: 'triage_complaint' },
   { name: 'chinese complaint', input: ['我要投诉'], reason: 'triage_complaint' },
+  { name: 'suing', input: ['I am suing you'], reason: 'triage_complaint' },
+  { name: 'take legal action', input: ['We will take legal action'], reason: 'triage_complaint' },
+  { name: 'see you in court', input: ['See you in court'], reason: 'triage_complaint' },
 ]
 
-const numbersCases: Case[] = [
-  { name: 'two adults in May', input: ['We want 2 adults in May'], reason: 'triage_numbers' },
-  { name: 'price word', input: ['What is the price?'], reason: 'triage_numbers' },
-  { name: 'currency', input: ['Budget is $500'], reason: 'triage_numbers' },
-  { name: 'spelled number', input: ['We have three kids'], reason: 'triage_numbers' },
-  { name: 'month name', input: ['Thinking about September'], reason: 'triage_numbers' },
-  { name: 'chinese numeral', input: ['我们三个人'], reason: 'triage_numbers' },
+const promiseCases: Case[] = [
+  {
+    name: 'promised a discount',
+    input: ['You promised me a discount yesterday'],
+    reason: 'triage_promise',
+  },
+  {
+    name: 'how much',
+    input: ['How much for the Golden China tour?'],
+    reason: 'triage_promise',
+  },
+  { name: 'quote', input: ['Can I get a quote please'], reason: 'triage_promise' },
+  { name: 'agreed price', input: ['We agreed price last week'], reason: 'triage_promise' },
 ]
 
 const linkCases: Case[] = [
   { name: 'bit.ly', input: ['Earn big click bit.ly/xx'], reason: 'triage_link_only' },
   { name: 'https', input: ['see https://example.com'], reason: 'triage_link_only' },
   { name: 'www', input: ['visit www.example.com'], reason: 'triage_link_only' },
+  { name: 'https spam host', input: ['https://offers.example.com'], reason: 'triage_link_only' },
+  {
+    name: 'www spam tld',
+    input: ['check this www.freemoney.top now'],
+    reason: 'triage_link_only',
+  },
+  {
+    name: 'shortener always blocks even with prose',
+    input: ['hi https://bit.ly/abc'],
+    reason: 'triage_link_only',
+  },
 ]
 
 const shortCases: Case[] = [
@@ -64,9 +84,59 @@ const nonEnglishCases: Case[] = [
 ]
 
 const useModelCases: Case[] = [
-  { name: 'meta prefilled', input: ['Hello! Can I get more info on this?'], reason: 'triage_no_text' },
-  { name: 'meta prefilled 2', input: ["Hi, I'm interested and I'd like more information"], reason: 'triage_no_text' },
-  { name: 'private tours', input: ["I'd love to learn about your private tours for my family"], reason: 'triage_no_text' },
+  {
+    name: 'form prefilled with name, phone, month',
+    input: [
+      'Hello! I filled out your form and would like to know more about your business. Full name: Jane Doe Phone number: 021 555 0100 Which tour interests you most?: Golden China - November',
+    ],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'two adults in spring',
+    input: ['We are 2 adults travelling in the spring and would love a private tour'],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'wife Sue, New Zealand, May 2027',
+    input: [
+      'My wife Sue and I are from New Zealand and are planning a private personalised holiday in China in May 2027',
+    ],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'about 10 days with family',
+    input: ['Looking at a trip for about 10 days with my family'],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'meta prefilled',
+    input: ['Hello! Can I get more info on this?'],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'meta prefilled 2',
+    input: ["Hi, I'm interested and I'd like more information"],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'private tours',
+    input: ["I'd love to learn about your private tours for my family"],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'form dump containing customer email is not a link',
+    input: [
+      'Hello! I filled out your form and would like to know more about your business. Email: jane.doe@gmail.com Full name: Jane Doe Which tour interests you most?: Golden China - November',
+    ],
+    reason: 'triage_no_text',
+  },
+  {
+    name: 'prose mentioning a news site is not spam',
+    input: [
+      'Hi, I read about your China tours on nzherald.co.nz and I would really like to know more about travelling with my family next year',
+    ],
+    reason: 'triage_no_text',
+  },
 ]
 
 describe('triageMessages - no_text', () => {
@@ -93,8 +163,8 @@ describe('triageMessages - complaint', () => {
   }
 })
 
-describe('triageMessages - numbers', () => {
-  for (const c of numbersCases) {
+describe('triageMessages - promise', () => {
+  for (const c of promiseCases) {
     it(c.name, () => {
       expect(triageMessages(c.input)).toEqual({ useModel: false, reason: c.reason })
     })
@@ -133,31 +203,62 @@ describe('triageMessages - useModel true', () => {
   }
 })
 
-describe('triageMessages - near-miss negatives', () => {
-  it('"may" as modal is not a month', () => {
-    expect(triageMessages(['I may be interested in your tours'])).toEqual({ useModel: true })
+describe('triageMessages - CJK promise only asserts useModel false', () => {
+  it('请问报价多少 is blocked', () => {
+    expect(triageMessages(['请问报价多少']).useModel).toBe(false)
   })
-  it('"free" inside a word is not numbers', () => {
+})
+
+describe('triageMessages - near-miss negatives', () => {
+  it('"free" inside "freedom" is not a promise hit', () => {
     expect(triageMessages(['I feel freedom on your tours'])).toEqual({ useModel: true })
   })
-  it('"sue" inside a word is not complaint', () => {
-    expect(triageMessages(['I want to pursue the issue'])).toEqual({ useModel: true })
+  it('"sue" as a name is not a complaint', () => {
+    expect(triageMessages(['My wife Sue and I are planning a trip'])).toEqual({ useModel: true })
   })
-  it('"may" preceded by "in" is a month', () => {
-    expect(triageMessages(['We are coming in May'])).toEqual({
-      useModel: false,
-      reason: 'triage_numbers',
-    })
-  })
-  it('"may" followed by digit is a month', () => {
-    expect(triageMessages(['May 5 works for us'])).toEqual({
-      useModel: false,
-      reason: 'triage_numbers',
-    })
+  it('"may" as modal is not a month', () => {
+    expect(triageMessages(['I may be interested in your tours'])).toEqual({ useModel: true })
   })
   it('only last 3 non-empty messages are joined', () => {
     expect(
       triageMessages(['refund', '', 'I love your private tours', 'for my family', 'please']),
     ).toEqual({ useModel: true })
+  })
+})
+
+describe('triageMessages - email is not a link', () => {
+  it('long prose containing an email address is not blocked', () => {
+    expect(
+      triageMessages([
+        'Hello! I filled out your form and would like to know more about your business. Email: jane.doe@gmail.com Full name: Jane Doe Which tour interests you most?: Golden China - November',
+      ]),
+    ).toEqual({ useModel: true })
+  })
+})
+
+describe('triageMessages — regex state must not leak between calls', () => {
+  it('returns the same verdict when the same link-spam message is triaged twice', () => {
+    const msg = 'https://offers.example.com'
+    const first = triageMessages([msg])
+    const second = triageMessages([msg])
+    expect(second).toEqual(first)
+    expect(first).toEqual({ useModel: false, reason: 'triage_link_only' })
+  })
+  it('a prose message with an email is not blocked, twice in a row', () => {
+    const msg =
+      'Hello! I filled out your form and would like to know more about your business. Email: jane.doe@gmail.com Full name: Jane Doe'
+    expect(triageMessages([msg])).toEqual({ useModel: true })
+    expect(triageMessages([msg])).toEqual({ useModel: true })
+  })
+})
+
+describe('triageMessages — an email address is not a link (short message)', () => {
+  // 变异测试逼出来的用例：长表单消息周围的正文够多，不剥邮箱也照样放行，
+  // 所以必须用「只有一句问候 + 自己的邮箱」这种短消息，才真的测到剥邮箱那一步。
+  it.each([
+    ['greeting plus own email', 'Hi there, my email is jane.doe@gmail.com'],
+    ['name and email only', 'Jane Doe jane.doe@xtra.co.nz'],
+  ])('%s is not link spam', (_name, msg) => {
+    expect(triageMessages([msg])).toEqual({ useModel: true })
   })
 })

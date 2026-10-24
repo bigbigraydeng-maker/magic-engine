@@ -60,15 +60,25 @@ async function main(): Promise<void> {
     const text = (first?.body ?? '').trim()
     if (!text) continue
     done++
+    let rawModel: string | null = null
     const plan = await composeAck({
       readEnabled: async () => ({ enabled: true, dailyCap: 1_000_000 }),
       loadContext: async () => ({ recentInbound: [text], currentText: text, repliedEarlierInbound: [], lastOutbound: null }),
       smartSentToday: async () => 0,
-      callModel: callSmartAckModel,
+      callModel: async (i) => {
+        rawModel = await callSmartAckModel(i)
+        return rawModel
+      },
     })
     const key = plan.kind === 'skip' ? `skip:${plan.reason}` : `${plan.source}:${plan.reason}`
     tally.set(key, (tally.get(key) ?? 0) + 1)
-    lines.push(`## ${done}. ${c.channel}\n- 客人原话: ${mask(text)}\n- 结果: ${key}\n- 回复: ${plan.kind === 'skip' ? '(不发)' : plan.text}\n`)
+    const lost =
+      rawModel !== null && plan.kind === 'send' && plan.source === 'fixed'
+        ? `\n- 模型本来想说(被拦下): ${mask(String(rawModel))}`
+        : ''
+    lines.push(
+      `## ${done}. ${c.channel}\n- 客人原话: ${mask(text)}\n- 结果: ${key}\n- 回复: ${plan.kind === 'skip' ? '(不发)' : plan.text}${lost}\n`,
+    )
   }
   const summary = [...tally.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}=${n}`)
   lines.unshift(`样本 ${done} 条；分布：${summary.join('，')}\n`)

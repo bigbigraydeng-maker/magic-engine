@@ -106,3 +106,27 @@ PM 原话（2026-10-22）：一个客户发了两条信息，AI 回复了两个�
 - 校验时先去掉该固定尾句再校验模型正文；模型正文禁止自己写类似披露句（避免重复）。长度上限 240 字符只算模型正文。
 - 固定模板 `AUTOACK_TEMPLATE` 是否同步加尾句：实现时一并改（`isAutoAckBody` 要同时认新旧两版文本）。
 - 删除 §9.1 / §7.3 “待定”口径；§3.3 的“禁自称真人”保留。
+
+## 10. v0.2 放宽（PM 2026-10-25 回「放宽」后实测修订，与 §9 冲突处以本节为准）
+
+v0.1 的干跑只有 27% 真的用上模型（30 条里 8 条），低于 §9.9 的 40% 门槛。查出来**不是模型不行，是三道闸误杀**：
+
+| 原闸 | 误杀了什么 | 改法 |
+|---|---|---|
+| `triage_numbers`：客人消息里有数字 / 货币符号 / 月份 / 数字词就不让模型写 | 20/30 条表单消息带客人自己的电话、以及「Golden China - November」这种团名 | **删掉整道数字闸**。回复侧 `validateSmartAck` 本来就保证**发出去的话**一个数字、货币、月份、数字词都不会有，前面再拦一遍是重复设防且代价极高。改为只拦「承诺/价格语义」：新 reason `triage_promise`（promise/promised/discount/quote/price/deposit/how much/you said/as agreed + 中文 报价/折扣/优惠/多少钱/答应/承诺/订金/押金） |
+| `triage_complaint` 里的 `sue` | 客人太太名叫 **Sue**（"My wife Sue and I are planning..."），一条 4167 字的高价值定制咨询被当成投诉 | 删 `sue`，改成 `suing` / `sue you` / `take legal` / `court` |
+| `triage_link_only`：出现 `xxx.com` 形状就当链接垃圾 | 17/30 条表单消息里有客人自己的**邮箱**（`gmail.com` 被当成链接） | 改成 `isLinkSpam`：先剥掉邮箱（邮箱不是链接）；短链域名（bit.ly 等）一律拦；真 URL 周围还有 ≥40 个字母的正文就不算垃圾 |
+
+回复侧两处误杀同时修掉：
+- `one of our colleagues` 被 `validate_number` 拦（"one" 是数字词，而白名单只写死了 `one of our team`）→ 白名单改成正则 `\bone of (?:our|the) [a-z]+\b`，不再手工维护列表。
+- `our China tour offering` 被 `validate_forbidden` 拦（`offer` 五个字母，去标点后是 `offering` 的子串）→ 删掉单词 `offer`/`offers`/`special`，换成词组 `special offer(s)` / `special deal` / `exclusive offer`；promo 风险仍由 discount/free/complimentary/deal 覆盖。
+
+提示词加一条（防叫错人）：**只有客人自己的消息把名字明确标成他的名字时（如表单的 `Full name:`）才可以称呼名字**；散文里提到的人名（"我太太 Sue"）绝不拿来称呼客人，也不许猜名字。
+
+顺带修掉一个真 bug：`URL_PATTERN` 带 `g` 标记却用于 `.test()`，`lastIndex` 会在两次调用之间残留，同一条消息连问两次会一次真一次假。拆成 `URL_PATTERN`（无 g，供 test）+ `URL_PATTERN_ALL`（带 g，供 replace），并加了「同一输入连问两次结果必须相同」的回归测试（把它改回带 g 会红 3 条）。
+
+### 实测结果（2026-10-25，CTS 近 120 天 60 条真实首条进线，只读、未外发）
+- **57/60（95%）用上模型**，57 条措辞**全不重复**（PM 原来的痛点是"两条一模一样"）；
+- 名字与团名都对得上：`Thanks for getting in touch, Diane! … more details about the Golden China tour.`；
+- 3 条回退，逐条看都是**该回退**：①那条 4167 字咨询里写了 "cancellation terms"（谈退改条款，按投诉口径回固定句，安全）；②中文乱码 `莪的莫`；③模型想说 "flight options"，`flight` 在禁词里（CTS 确实含机票，但这是客户私有事实，平台默认不许自动回复碰机票，保持拦住）。
+- 门槛对账：§9.9 的 40% 已达到（95%）。

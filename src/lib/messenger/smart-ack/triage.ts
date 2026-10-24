@@ -32,7 +32,10 @@ const COMPLAINT_ASCII = [
   'ombudsman',
   'scam',
   'fraud',
-  'sue',
+  'suing',
+  'sue you',
+  'take legal',
+  'court',
   'ignored',
   'no reply',
   'no response',
@@ -63,52 +66,6 @@ const COMPLAINT_CJK = [
   '愤怒',
 ]
 
-const NUMBER_WORDS = [
-  'one',
-  'two',
-  'three',
-  'four',
-  'five',
-  'six',
-  'seven',
-  'eight',
-  'nine',
-  'ten',
-  'eleven',
-  'twelve',
-  'twenty',
-  'thirty',
-  'hundred',
-  'thousand',
-  'million',
-]
-
-const MONTH_WORDS = [
-  'january',
-  'february',
-  'march',
-  'april',
-  'june',
-  'july',
-  'august',
-  'september',
-  'october',
-  'november',
-  'december',
-  'jan',
-  'feb',
-  'mar',
-  'apr',
-  'jun',
-  'jul',
-  'aug',
-  'sep',
-  'sept',
-  'oct',
-  'nov',
-  'dec',
-]
-
 const PROMISE_WORDS = [
   'promised',
   'promise',
@@ -120,12 +77,31 @@ const PROMISE_WORDS = [
   'price',
   'priced',
   'how much',
+  'quotation',
+  'discounted',
+  'refundable',
+  'deposit',
+  'you said',
+  'as agreed',
+  'agreed price',
 ]
 
-const CJK_NUMERALS = /[一二三四五六七八九十百千万月号]/
+const PROMISE_CJK = ['报价', '折扣', '优惠', '多少钱', '答应', '承诺', '订金', '押金']
 
-const LINK_PATTERN =
-  /https?:\/\/|www\.|\b[a-z0-9-]+\.(com|net|org|io|co|nz|au|ly|me)\b/
+// Well-known URL shorteners and obvious spam hosts. A hit here always blocks.
+const SHORTENER_PATTERN =
+  /\b(?:bit\.ly|bitly\.com|tinyurl\.com|t\.co|goo\.gl|ow\.ly|buff\.ly|is\.gd|cutt\.ly|rb\.gy|shorturl\.at|rebrand\.ly|lnkd\.in)\b/i
+
+// An email address (name.surname+tag@host.tld) is not a link.
+const EMAIL_PATTERN = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi
+
+// Real URLs: scheme, leading www., or a bare host with a known TLD.
+// 两份同样的式子：带 g 的只用于 replace。`.test()` 绝不能用带 g 的正则——
+// 它会记住上次匹配到哪（lastIndex），同一个输入连着问两次会一次真一次假。
+const URL_SOURCE =
+  'https?:\\/\\/\\S+|www\\.\\S+|\\b[a-z0-9-]+\\.(?:com|net|org|io|co|nz|au|me|info|xyz|top|shop|site|online)\\b'
+const URL_PATTERN = new RegExp(URL_SOURCE, 'i')
+const URL_PATTERN_ALL = new RegExp(URL_SOURCE, 'gi')
 
 const NON_ASCII_SCRIPT =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Thai}\p{Script=Devanagari}\p{Script=Hebrew}]/u
@@ -171,37 +147,25 @@ function isComplaint(folded: string, squashed: string): boolean {
   return false
 }
 
-function hasMayAsMonth(folded: string): boolean {
-  const re = /\bmay\b/g
-  let match: RegExpExecArray | null
-  while ((match = re.exec(folded)) !== null) {
-    const after = folded.slice(match.index + match[0].length)
-    const before = folded.slice(0, match.index)
-    if (/^\s*\d/.test(after)) return true
-    if (/\b(in|next|this|early|late|mid)\s+$/.test(before)) return true
-  }
-  return false
-}
-
-function isNumbers(folded: string, raw: string): boolean {
-  if (/\d/.test(folded)) return true
-  if (/[$£€¥₹]/.test(folded)) return true
-  for (const w of NUMBER_WORDS) {
-    if (wordBoundary(w).test(folded)) return true
-  }
-  for (const w of MONTH_WORDS) {
-    if (wordBoundary(w).test(folded)) return true
-  }
-  if (hasMayAsMonth(folded)) return true
+function isPromiseMaterial(folded: string): boolean {
   for (const w of PROMISE_WORDS) {
     if (wordBoundary(w).test(folded)) return true
   }
-  if (CJK_NUMERALS.test(raw)) return true
+  for (const term of PROMISE_CJK) {
+    if (folded.includes(term)) return true
+  }
   return false
 }
 
-function isLinkOnly(folded: string): boolean {
-  return LINK_PATTERN.test(folded)
+// Block only link spam: an email address in a form dump is not a link, and a
+// link surrounded by real prose is not spam. Shorteners always block.
+function isLinkSpam(folded: string): boolean {
+  if (SHORTENER_PATTERN.test(folded)) return true
+  const withoutEmails = folded.replace(EMAIL_PATTERN, ' ')
+  if (!URL_PATTERN.test(withoutEmails)) return false
+  const withoutUrls = withoutEmails.replace(URL_PATTERN_ALL, ' ')
+  const letters = withoutUrls.match(/\p{L}/gu)
+  return (letters ? letters.length : 0) < 40
 }
 
 function isNonEnglish(raw: string): boolean {
@@ -229,10 +193,10 @@ export function triageMessages(messages: string[]): TriageResult {
   if (isComplaint(folded, squashed)) {
     return { useModel: false, reason: 'triage_complaint' }
   }
-  if (isNumbers(folded, joined)) {
-    return { useModel: false, reason: 'triage_numbers' }
+  if (isPromiseMaterial(folded)) {
+    return { useModel: false, reason: 'triage_promise' }
   }
-  if (isLinkOnly(folded)) {
+  if (isLinkSpam(folded)) {
     return { useModel: false, reason: 'triage_link_only' }
   }
   if (squashed.length < 3) {

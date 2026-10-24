@@ -62,13 +62,19 @@ describe('composeAck', () => {
   })
   it.each([
     ['complaint', 'I want a refund and to cancel right now'],
-    ['numbers', 'We are 2 adults travelling in the spring'],
+    ['promise', 'You promised me a discount yesterday'],
     ['non_english', '我想了解私人定制'],
   ])('triage %s -> fixed with notice and the model is never called', async (_n, text) => {
     const d = deps({}, ctxOf({ recentInbound: [text], currentText: text }))
     const r = await composeAck(d)
     expect(r).toMatchObject({ kind: 'send', text: fixed, source: 'fixed' })
     expect(d.callModel).not.toHaveBeenCalled()
+  })
+  it('a customer message full of their own digits now DOES reach the model (relaxed 2026-10-25)', async () => {
+    const t = 'Hello! I filled out your form. Phone number: 021 555 0100 Which tour interests you most?: Golden China - November'
+    const d = deps({}, ctxOf({ recentInbound: [t], currentText: t }))
+    expect(await composeAck(d)).toMatchObject({ source: 'smart', reason: 'model_ok' })
+    expect(d.callModel).toHaveBeenCalledTimes(1)
   })
   it('daily cap reached -> fixed, no model call', async () => {
     const d = deps({ smartSentToday: vi.fn(async () => 300) })

@@ -38,6 +38,34 @@ describe('validateSmartAck — success', () => {
   })
 })
 
+describe('validateSmartAck — false positives fixed', () => {
+  const okCases: string[] = [
+    'Thanks for reaching out to us. One of our colleagues will be in touch with you shortly to discuss your inquiry.',
+    'Thanks for reaching out! A colleague will be in touch shortly with more details about our China tour offering.',
+    'Thanks for your message, one of the team will follow up with you very soon about this.',
+  ]
+  for (const reply of okCases) {
+    it(`ok: ${reply.slice(0, 40)}`, () => {
+      const r = validateSmartAck(reply, [])
+      expect(r.ok).toBe(true)
+    })
+  }
+
+  const failCases: Array<[string, string]> = [
+    ['validate_forbidden', 'We have a special offer waiting for you today, our team will call.'],
+    ['validate_forbidden', 'Thanks for your note, there is a discount available for your family trip.'],
+    ['validate_number', 'Thanks, we have two colleagues looking at your request right now for you.'],
+    ['validate_number', 'Thanks for reaching out about travelling in March, a colleague will reply.'],
+  ]
+  for (const [reason, reply] of failCases) {
+    it(`${reason}: ${reply.slice(0, 40)}`, () => {
+      const r = validateSmartAck(reply, [])
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.reason).toBe(reason)
+    })
+  }
+})
+
 describe('validateSmartAck — failures', () => {
   const cases: Array<[string, string, string[]]> = [
     ['validate_empty', '', []],

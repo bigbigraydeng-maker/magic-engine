@@ -5,7 +5,7 @@ export const AUTOMATED_NOTICE = '(Automated reply — our team will follow up pe
 export type TriageReason =
   | 'triage_complaint'
   | 'triage_optout'
-  | 'triage_numbers'
+  | 'triage_promise'
   | 'triage_no_text'
   | 'triage_too_short'
   | 'triage_link_only'
