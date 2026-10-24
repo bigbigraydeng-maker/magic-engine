@@ -139,7 +139,15 @@ export function PromoPlanClient() {
     () => (showSample ? buildPromoSample(todayIso) : selected ? readPromoSpec(selected.plan_data) : null),
     [showSample, selected, todayIso],
   )
-  const shownPhases = useMemo(() => (shownSpec ? describePromoSpec(shownSpec) : null), [shownSpec])
+  const accountLabels = useMemo(() => {
+    const map: Record<string, string | null> = {}
+    for (const account of options?.accounts ?? []) map[account.id] = account.label ?? null
+    return map
+  }, [options])
+  const shownPhases = useMemo(
+    () => (shownSpec ? describePromoSpec(shownSpec, showSample ? {} : accountLabels) : null),
+    [shownSpec, showSample, accountLabels],
+  )
   // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
   const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
   const approvedLike = selected?.status === 'approved' || selected?.status === 'completed'

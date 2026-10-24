@@ -18,6 +18,8 @@ export interface PromoAccountOption {
   id: string
   /** 账户级日预算上限（分）；没设置为 null */
   cap_cents: number | null
+  /** 给人看的名称；没有就不要把 act_ 编号显示出来 */
+  label?: string | null
 }
 
 export interface PromoOptions {
@@ -30,6 +32,6 @@ export async function loadPromoOptions(clientId: string): Promise<PromoOptions> 
   const [goals, owned] = await Promise.all([listActiveGoals(supabaseAdmin, clientId), loadOwnedAccounts(clientId)])
   return {
     goals: goals.map(g => ({ id: g.id, title: g.title, period_start: g.period_start, period_end: g.period_end })),
-    accounts: owned === null ? null : owned.map(a => ({ id: a.id, cap_cents: a.cap })),
+    accounts: owned === null ? null : owned.map(a => ({ id: a.id, cap_cents: a.cap, label: a.label })),
   }
 }
