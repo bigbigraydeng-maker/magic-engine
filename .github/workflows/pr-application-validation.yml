@@ -1,21 +1,21 @@
 name: PR Application Validation
 
-# Read-only application evidence for every pull request.
-# This workflow checks out the exact PR head, uses no repository secrets, and
-# never comments, commits, pushes, merges, deploys, or contacts a provider.
+# Manual whole-repo type check, production build, and CRM tests for one open
+# pull request. These used to run on every pull request. They do not anymore:
+# at the current pull-request volume that alone was most of the Actions bill,
+# and Render builds the app again on every deploy.
 #
-# Stable check names:
+# Actions → PR Application Validation → Run workflow → open PR number.
+# The workflow resolves that PR's exact head from GitHub's API and never
+# accepts a caller-supplied SHA. It uses no repository secrets, and it never
+# comments, commits, pushes, merges, deploys, or contacts a provider.
+#
+# Stable check names, only when someone starts this workflow:
 # - CRM focused tests
 # - Type-check
 # - Application build
 
 on:
-  pull_request:
-  # Explicitly authorised, read-only fallback for the rare case where a
-  # normal pull_request event does not produce a run (for example, a workflow
-  # registration/indexing race after this file first reaches the default
-  # branch). Build Control supplies an open PR number; the workflow resolves
-  # the exact head from GitHub's API and never accepts a caller-supplied SHA.
   workflow_dispatch:
     inputs:
       pr_number:

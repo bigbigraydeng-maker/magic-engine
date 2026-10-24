@@ -20,13 +20,15 @@ const CATALOG_PREFIXES = [
   'src/lib/tour-catalog/',
   'src/app/api/clients/[id]/tour-catalog/',
   'src/app/dashboard/clients/[id]/tour-catalog/',
+  // Published-snapshot read API. Same exemption as the client catalog API folder.
+  'src/app/api/public/tour-catalog/',
 ]
 
 /**
- * Official public website feed. It is outside the admin folders, but it is the
- * published-only HTTP exit for one client. `loadPublishedProducts` returns the
- * first-party shape and would change this JSON, so the route stays as it is and
- * is allow-listed here. The pin test below refuses any draft import.
+ * Official public website feed. The folder is already inside the catalog
+ * exemption (same as the client catalog API). `loadPublishedProducts` returns
+ * the first-party shape and would change this JSON, so the route file stays.
+ * The pin test below still refuses any draft import.
  */
 const PUBLISHED_WEBSITE_ROUTES = new Set([
   'src/app/api/public/tour-catalog/[clientId]/route.ts',
@@ -214,7 +216,7 @@ describe('tour catalog draft boundary', () => {
     const path = 'src/app/api/public/tour-catalog/[clientId]/route.ts'
     const text = readFileSync(join(process.cwd(), path), 'utf8')
     expect(PUBLISHED_WEBSITE_ROUTES.has(path)).toBe(true)
-    expect(isInsideCatalog(path)).toBe(false)
+    expect(isInsideCatalog(path)).toBe(true)
     expect(violationsIn(path, text).length).toBeGreaterThan(0)
     const imports = Array.from(text.matchAll(/from\s+['"]([^'"]+)['"]/g)).map((match) => match[1])
     expect(imports).toEqual([
