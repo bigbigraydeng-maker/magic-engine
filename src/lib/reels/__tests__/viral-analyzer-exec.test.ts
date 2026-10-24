@@ -38,6 +38,11 @@ beforeEach(() => {
         rowUpdates.push(payload)
         return { eq: () => Promise.resolve({ error: null }) }
       },
+      select: () => ({
+        eq: () => ({
+          maybeSingle: () => Promise.resolve({ data: { analysis_attempts: 2 }, error: null }),
+        }),
+      }),
     }
   })
   // promisify(execFile) uses the node-style callback as last arg
@@ -59,14 +64,14 @@ const PAYLOADS = [
 
 describe('analyzeViralReference command-injection hardening', () => {
   it.each(PAYLOADS)('never executes anything for %j and records an error', async url => {
-    await analyzeViralReference('ref-1', url)
+    await expect(analyzeViralReference('ref-1', url)).rejects.toThrow(/Unsafe viral source url/)
     expect(m.execFile).not.toHaveBeenCalled()
     expect(m.exec).not.toHaveBeenCalled()
-    expect(rowUpdates.some(u => u.analysis_status === 'error')).toBe(true)
+    expect(rowUpdates.some(u => u.analysis_status === 'error' && u.analysis_attempts === 3)).toBe(true)
   })
 
   it('upload:// rows get a clear error and never reach yt-dlp or DNS', async () => {
-    await analyzeViralReference('ref-4', 'upload://clip.mp4')
+    await expect(analyzeViralReference('ref-4', 'upload://clip.mp4')).rejects.toThrow(/not stored/)
     expect(m.execFile).not.toHaveBeenCalled()
     expect(m.resolve).not.toHaveBeenCalled()
     expect(rowUpdates.some(u => String(u.analysis_error).includes('not stored'))).toBe(true)
@@ -74,12 +79,19 @@ describe('analyzeViralReference command-injection hardening', () => {
 
   it('a hostname that resolves to a private address is rejected before yt-dlp runs', async () => {
     m.resolve.mockImplementation(async () => { throw new Error('blocked') })
-    await analyzeViralReference('ref-2', 'https://rebind.example.com/v')
+    await expect(analyzeViralReference('ref-2', 'https://rebind.example.com/v')).rejects.toThrow(/Unsafe viral source url/)
     expect(m.execFile).not.toHaveBeenCalled()
   })
 
+  it('XiaoHongShu links are terminal and never reach yt-dlp', async () => {
+    await expect(analyzeViralReference('ref-xhs', 'https://www.xiaohongshu.com/explore/abc')).rejects.toThrow(/No video formats found/)
+    expect(m.execFile).not.toHaveBeenCalled()
+    expect(m.resolve).not.toHaveBeenCalled()
+    expect(rowUpdates.some(u => u.analysis_status === 'terminal' && u.next_retry_at === null)).toBe(true)
+  })
+
   it('a legitimate url reaches yt-dlp as an argv element, after `--`, with no shell', async () => {
-    await analyzeViralReference('ref-3', 'https://www.facebook.com/reel/123')
+    await expect(analyzeViralReference('ref-3', 'https://www.facebook.com/reel/123')).rejects.toThrow(/stop-after-exec/)
     expect(m.exec).not.toHaveBeenCalled()
     expect(m.execFile).toHaveBeenCalledTimes(1)
     const [cmd, args, opts] = m.execFile.mock.calls[0]
