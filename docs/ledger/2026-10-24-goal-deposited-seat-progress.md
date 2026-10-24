@@ -1,12 +1,14 @@
 ---
 id: 2026-10-24-goal-deposited-seat-progress
 title: 报名目标可以按已收定金的座位计进度
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-24
 source: doc:docs/clients/cts/2026-10-18-cts-ad-plan-vs-agent-capability.md
 verify_by: 2026-11-07
 verify_how: 目标写上出发日范围并变为进行中后，下一次自动刷新的当前值等于范围内、起点日之后、已标已收定金且未取消的人数；没写范围的报名目标仍按成交笔数。
+done_on: 2026-10-24
+done_ref: pr:3078
 ---
 报名数在目标自带出发日范围时改计座位数。范围写在目标已有的辅助指标里，不写死客户。
 定金标记才算一笔，尾款不加；取消的不算。人数、出发日、定金日期缺了就不出数字；来源缺了单独标未知，座位照计。
