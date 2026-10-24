@@ -327,6 +327,37 @@ describe('applyIndustryInterpreter', () => {
     expect(result).toMatchObject({ ok: true, seats: 2, deals: 1 })
   })
 
+  it('does not publish a partial count when a date-only goal has an undated order on the snapshot tour', () => {
+    const result = countTravelDepositedSeats(
+      {
+        units: [],
+        bookings: [
+          paid({
+            id: 'snapshot-dated',
+            tourId: 'tour-b',
+            departureId: null,
+            departureDepartOn: DEPART,
+            partySize: 2,
+          }),
+          paid({
+            id: 'no-tour-date',
+            tourId: 'tour-b',
+            departureId: null,
+            departureDepartOn: null,
+            partySize: 3,
+          }),
+        ],
+      },
+      [{ departOn: DEPART, tourId: null }],
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.unknown).toBe(true)
+      expect(result.reason).toContain('出发日未知')
+      expect(result).not.toHaveProperty('seats')
+    }
+  })
+
   it('blocks the number when a scoped tour has no departure date', () => {
     const result = countTravelDepositedSeats(
       {

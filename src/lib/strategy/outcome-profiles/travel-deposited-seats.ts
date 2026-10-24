@@ -127,13 +127,31 @@ function paidOnce(marked: readonly DepositMarkedBooking[]): SalesBooking[] {
   return bookings
 }
 
-function scopedTourIds(units: readonly SalesUnit[], departures: readonly DepartureRef[]): Set<string> {
+function hasListedUnit(units: readonly SalesUnit[], departureId: string | null): boolean {
+  return departureId !== null && units.some((unit) => unit.unitId === departureId)
+}
+
+/**
+ * Tours in this count. A date-only goal names no tour id, so a snapshot-dated
+ * order is the only proof its tour belongs here. That tour must be checked
+ * before prepareUnits builds the snapshot row, or an undated order on it
+ * disappears and a partial total is published as complete.
+ */
+function scopedTourIds(
+  bookings: readonly SalesBooking[],
+  units: readonly SalesUnit[],
+  departures: readonly DepartureRef[],
+): Set<string> {
   const ids = new Set<string>()
   for (const item of departures) {
     if (item.tourId) ids.add(item.tourId)
   }
   for (const unit of units) {
     if (matches(unit.date, unit.groupId, departures)) ids.add(unit.groupId)
+  }
+  for (const booking of bookings) {
+    if (booking.status !== 'active' || hasListedUnit(units, booking.departureId)) continue
+    if (matches(booking.departureDepartOn, booking.tourId, departures)) ids.add(booking.tourId)
   }
   return ids
 }
@@ -143,7 +161,7 @@ function unknownTourDates(
   units: readonly SalesUnit[],
   departures: readonly DepartureRef[],
 ): number {
-  const tours = scopedTourIds(units, departures)
+  const tours = scopedTourIds(bookings, units, departures)
   let count = 0
   for (const booking of bookings) {
     if (booking.status !== 'active') continue
