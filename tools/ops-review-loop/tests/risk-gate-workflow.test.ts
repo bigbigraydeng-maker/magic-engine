@@ -65,8 +65,13 @@ const ci = load(CI_PATH)
 const SHA_PIN = /@[0-9a-f]{40}\b/
 
 describe('Risk gate workflow: the judge lives on main', () => {
-  it('triggers only on pull_request_target, with the full lifecycle set and no filters', () => {
-    expect(Object.keys(riskGate.triggers)).toEqual(['pull_request_target'])
+  it('triggers on pull_request_target plus Codex issue comments, never on the PR merge ref', () => {
+    expect(Object.keys(riskGate.triggers).sort()).toEqual(['issue_comment', 'pull_request_target'])
+    // A review-submitted event uses the PR merge ref, so the PR could replace
+    // this file. Codex's clean review is an issue comment (observed #3086).
+    expect(riskGate.triggers.pull_request).toBeUndefined()
+    expect(riskGate.triggers.pull_request_review).toBeUndefined()
+    expect(riskGate.triggers.pull_request_review_comment).toBeUndefined()
     const trigger = riskGate.triggers.pull_request_target as {
       types?: string[]
       paths?: unknown
@@ -77,6 +82,8 @@ describe('Risk gate workflow: the judge lives on main', () => {
     for (const type of ['opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft', 'edited']) {
       expect(trigger.types, `pull_request_target must include ${type}`).toContain(type)
     }
+    const comments = riskGate.triggers.issue_comment as { types?: string[] }
+    expect(comments.types).toEqual(expect.arrayContaining(['created', 'edited']))
     // A path or branch filter would turn this into a check that never reports
     // on the PRs it skips — a merge deadlock if it is required.
     expect(trigger.paths).toBeUndefined()
@@ -93,6 +100,7 @@ describe('Risk gate workflow: the judge lives on main', () => {
 
   it('serialises per PR and cancels superseded runs', () => {
     expect(riskGate.doc.concurrency?.['cancel-in-progress']).toBe(true)
+    expect(riskGate.doc.concurrency?.group).toContain('github.event.issue.number')
   })
 
   it('checks itself out from main, never the PR head, and persists no credentials', () => {
@@ -173,6 +181,9 @@ describe('Risk gate workflow: the judge lives on main', () => {
     }
     expect(env.SIGNOFF_TRUSTED_LOGINS).toContain('vars.ME_SIGNOFF_TRUSTED_LOGINS')
     expect(env.SIGNOFF_TRUSTED_LOGINS).not.toContain('pull_request.user.login')
+    expect(env.HEAD_SHA).toContain('steps.pr.outputs.head')
+    expect(env.BASE_SHA).toContain('steps.pr.outputs.base')
+    expect(env.PR_AUTHOR).toContain('steps.pr.outputs.author')
   })
 
   it('still judges from main and describes exactly two A-level sign-offs', () => {
