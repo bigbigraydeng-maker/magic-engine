@@ -1,34 +1,46 @@
-/**
- * CampaignPanel — expired active campaigns fold into the collapsed "已结束" group.
- * No data is deleted; they are only hidden until the group is expanded.
- */
-import React from 'react'
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { CampaignPanel } from '../CampaignPanel'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
 
 vi.mock('../VisualDirectionSection', () => ({ VisualDirectionSection: () => null }))
 
-const base = { client_id: 'c1', status: 'active' as const }
+import { CampaignPanel } from '../CampaignPanel'
 
-describe('CampaignPanel expired grouping', () => {
-  afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+const campaign = {
+  id: 'c1',
+  client_id: 'client-1',
+  status: 'active',
+  title: '春季团',
+  description: 'PM 2026-10-06 指令：停放中，刻意的',
+  source_urls: [],
+  source_file_urls: [],
+  semrush_keywords: [{ keyword: 'rival', volume: 1, kd: 1, intent: 'info', type: 'related' }],
+  created_at: '2026-10-01',
+  updated_at: '2026-10-01',
+}
 
-  it('hides expired campaigns until the ended group is expanded', async () => {
-    const campaigns = [
-      { ...base, id: 'a', title: 'Live Campaign', valid_until: '2999-01-01' },
-      { ...base, id: 'b', title: 'Old Campaign', valid_until: '2020-01-01' },
-    ]
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+describe('推广活动卡片', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+  })
+
+  it('客户视图不显示内部备注和关键词拉取', async () => {
+    vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ campaigns: String(url).includes('status=active') ? campaigns : [] }),
-    })))
+      json: async () => ({ viewer: 'client', campaigns: [campaign] }),
+    } as Response)
+    render(<CampaignPanel clientId="client-1" />)
+    expect(await screen.findByText('春季团')).toBeInTheDocument()
+    expect(screen.queryByText(/PM 2026-10-06/)).toBeNull()
+    expect(screen.queryByText('推广关键词')).toBeNull()
+  })
 
-    render(<CampaignPanel clientId="c1" />)
-    await waitFor(() => expect(screen.getByText('Live Campaign')).toBeTruthy())
-    expect(screen.queryByText('Old Campaign')).toBeNull()
-
-    fireEvent.click(screen.getByText(/已结束的活动/))
-    await waitFor(() => expect(screen.getByText('Old Campaign')).toBeTruthy())
+  it('内部账号仍看得到备注', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ viewer: 'internal', campaigns: [campaign] }),
+    } as Response)
+    render(<CampaignPanel clientId="client-1" />)
+    expect(await screen.findByText(/PM 2026-10-06/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('春季团')).toBeInTheDocument())
   })
 })
