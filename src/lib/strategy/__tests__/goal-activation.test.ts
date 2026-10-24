@@ -4,10 +4,14 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   activateGoal,
   assessGoalActivation,
+  createGoal,
+  isGoalReason,
+  updateDraftGoalReason,
   BASELINE_UNKNOWN_KEY,
   BASELINE_UNKNOWN_LABEL,
   type GoalActivationSubject,
 } from '../goals'
+import type { CreateGoalInput } from '@/types/strategy'
 
 const REASON = '本周期以成交笔数验收，不拿点击当结果。'
 
@@ -207,5 +211,108 @@ describe('activateGoal', () => {
     const result = await activateGoal(db.client, 'goal-1')
     expect(result).toEqual({ ok: false, error: 'connection refused' })
     expect(db.update).toHaveBeenCalledWith({ status: 'active' })
+  })
+})
+
+const draftInput = (reasoning?: string): CreateGoalInput => ({
+  intent: 'sales',
+  title: '三月成交',
+  primary_metric_key: 'signups_count',
+  primary_metric_label: '报名/预订数',
+  baseline_value: 0,
+  target_value: 4,
+  period_start: '2026-03-01',
+  period_end: '2026-03-31',
+  ...(reasoning === undefined ? {} : { fde_reasoning: reasoning }),
+})
+
+function mockInsert() {
+  const single = vi.fn().mockResolvedValue({ data: { id: 'goal-1', status: 'draft' }, error: null })
+  const select = vi.fn(() => ({ single }))
+  const insert = vi.fn(() => ({ select }))
+  const from = vi.fn(() => ({ insert }))
+  return { client: { from } as unknown as SupabaseClient, insert }
+}
+
+function mockReasonWrite(
+  goal: Record<string, unknown> | null,
+  written: Record<string, unknown> | null = { id: 'goal-1', status: 'draft' },
+  writeError: { message: string } | null = null,
+) {
+  const single = vi.fn().mockResolvedValue({ data: written, error: writeError })
+  const selectAfter = vi.fn(() => ({ single }))
+  const eqStatus = vi.fn(() => ({ select: selectAfter }))
+  const eqId = vi.fn(() => ({ eq: eqStatus }))
+  const update = vi.fn(() => ({ eq: eqId }))
+  const maybeSingle = vi.fn().mockResolvedValue({ data: goal, error: null })
+  const selectEq = vi.fn(() => ({ maybeSingle }))
+  const select = vi.fn(() => ({ eq: selectEq }))
+  const from = vi.fn(() => ({ select, update }))
+  return { client: { from } as unknown as SupabaseClient, update, eqId, eqStatus }
+}
+
+describe('createGoal reason', () => {
+  it('refuses a missing, short, or placeholder reason before insert', async () => {
+    for (const reasoning of [undefined, '短', 'unknown.', '12345678']) {
+      const db = mockInsert()
+      const result = await createGoal(db.client, 'client-1', draftInput(reasoning))
+      expect(result).toEqual({ ok: false, error: '不能保存草稿，缺：理由' })
+      expect(db.insert).not.toHaveBeenCalled()
+      expect(isGoalReason(reasoning)).toBe(false)
+    }
+  })
+
+  it('stores the trimmed reason and nothing else is required for the reason field', async () => {
+    const db = mockInsert()
+    const result = await createGoal(db.client, 'client-1', draftInput(`  ${REASON}  `))
+    expect(result.ok).toBe(true)
+    expect(db.insert).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'draft',
+      fde_reasoning: REASON,
+    }))
+  })
+})
+
+describe('updateDraftGoalReason', () => {
+  it('writes only the reason, and only while the row is still a draft', async () => {
+    const db = mockReasonWrite({ id: 'goal-1', status: 'draft', fde_reasoning: null })
+    const result = await updateDraftGoalReason(db.client, 'goal-1', `  ${REASON}  `)
+    expect(result.ok).toBe(true)
+    expect(db.update).toHaveBeenCalledTimes(1)
+    expect(db.update).toHaveBeenCalledWith({ fde_reasoning: REASON })
+    expect(db.eqId).toHaveBeenCalledWith('id', 'goal-1')
+    expect(db.eqStatus).toHaveBeenCalledWith('status', 'draft')
+  })
+
+  it('does not write when the reason is still invalid', async () => {
+    const db = mockReasonWrite({ id: 'goal-1', status: 'draft', fde_reasoning: null })
+    const result = await updateDraftGoalReason(db.client, 'goal-1', 'todo')
+    expect(result).toEqual({ ok: false, error: '不能保存草稿，缺：理由' })
+    expect(db.update).not.toHaveBeenCalled()
+  })
+
+  it('does not write a goal that is no longer a draft', async () => {
+    const db = mockReasonWrite({ id: 'goal-1', status: 'active', fde_reasoning: null })
+    const result = await updateDraftGoalReason(db.client, 'goal-1', REASON)
+    expect(result).toEqual({ ok: false, error: 'Only draft goals can change their reason' })
+    expect(db.update).not.toHaveBeenCalled()
+  })
+
+  it('returns not found without writing', async () => {
+    const db = mockReasonWrite(null)
+    const result = await updateDraftGoalReason(db.client, 'missing', REASON)
+    expect(result).toEqual({ ok: false, error: 'Goal not found' })
+    expect(db.update).not.toHaveBeenCalled()
+  })
+
+  it('returns the database error', async () => {
+    const db = mockReasonWrite(
+      { id: 'goal-1', status: 'draft' },
+      null,
+      { message: 'connection refused' },
+    )
+    const result = await updateDraftGoalReason(db.client, 'goal-1', REASON)
+    expect(result).toEqual({ ok: false, error: 'connection refused' })
+    expect(db.update).toHaveBeenCalledWith({ fde_reasoning: REASON })
   })
 })

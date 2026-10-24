@@ -165,6 +165,11 @@ export async function createGoal(
     return { ok: false, error: 'sub_type (or awareness_subtype) is required for awareness goals' }
   }
 
+  const reasoning = readText(input.fde_reasoning)
+  if (!isGoalReason(reasoning)) {
+    return { ok: false, error: '不能保存草稿，缺：理由' }
+  }
+
   // ── Insert ────────────────────────────────────────────────────────────
   const { data, error } = await supabase
     .from('goals')
@@ -186,7 +191,7 @@ export async function createGoal(
       budget_amount: input.budget_amount ?? null,
       budget_currency: input.budget_currency ?? 'AUD',
       status: 'draft',
-      fde_reasoning: input.fde_reasoning ?? null,
+      fde_reasoning: reasoning,
       is_beta: true,
     })
     .select()
@@ -326,7 +331,7 @@ function collectActivationGaps(goal: GoalActivationSubject): GoalActivationGap[]
   if (!hasPrimaryMetric(goal)) missing.push('primary_metric')
   if (!hasPeriod(goal)) missing.push('period')
   if (!hasBaseline(goal)) missing.push('baseline')
-  if (!hasReason(goal.fde_reasoning)) missing.push('reason')
+  if (!isGoalReason(goal.fde_reasoning)) missing.push('reason')
   return missing
 }
 
@@ -366,7 +371,8 @@ function baselineMarkedUnknown(metrics: unknown): boolean {
   })
 }
 
-function hasReason(value: unknown): boolean {
+/** Same rule the activation gate uses. Create and draft edits must share it. */
+export function isGoalReason(value: unknown): boolean {
   const text = readText(value)
   if (text.length < 8) return false
   const token = text.toLowerCase().replace(/[.!?。！？]+$/g, '')
@@ -453,4 +459,36 @@ export async function deleteDraftGoal(
   const { error } = await supabase.from('goals').delete().eq('id', goalId)
   if (error) return { ok: false, error: error.message }
   return { ok: true }
+}
+
+/**
+ * Replace the reason on a draft only. Does not touch any other column,
+ * and the write itself is limited to rows still in draft.
+ */
+export async function updateDraftGoalReason(
+  supabase: SupabaseClient,
+  goalId: string,
+  reasoning: unknown,
+): Promise<CreateGoalResult> {
+  const goal = await getGoalById(supabase, goalId)
+  if (!goal) return { ok: false, error: 'Goal not found' }
+  if (goal.status !== 'draft') {
+    return { ok: false, error: 'Only draft goals can change their reason' }
+  }
+
+  const text = readText(reasoning)
+  if (!isGoalReason(text)) {
+    return { ok: false, error: '不能保存草稿，缺：理由' }
+  }
+
+  const { data, error } = await supabase
+    .from('goals')
+    .update({ fde_reasoning: text })
+    .eq('id', goalId)
+    .eq('status', 'draft')
+    .select()
+    .single()
+
+  if (error || !data) return { ok: false, error: error?.message ?? 'Goal not found' }
+  return { ok: true, goal: data as GoalRow }
 }
