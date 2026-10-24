@@ -21,15 +21,17 @@ import {
 } from '../outcome-levels'
 
 describe('outcome levels', () => {
-  it('orders exposure/clicks below contact, then qualified lead, then a closed deal', () => {
+  it('orders exposure below contact, then a plain lead, then a qualified lead, then a deal', () => {
     expect(OUTCOME_LEVELS).toEqual([
       'exposure_or_clicks',
       'contact_success',
+      'plain_lead',
       'qualified_lead',
       'closed_deal',
     ])
     expect(compareOutcomeLevels('exposure_or_clicks', 'contact_success')).toBe(-1)
-    expect(compareOutcomeLevels('contact_success', 'qualified_lead')).toBe(-1)
+    expect(compareOutcomeLevels('contact_success', 'plain_lead')).toBe(-1)
+    expect(compareOutcomeLevels('plain_lead', 'qualified_lead')).toBe(-1)
     expect(compareOutcomeLevels('qualified_lead', 'closed_deal')).toBe(-1)
     expect(compareOutcomeLevels('closed_deal', 'closed_deal')).toBe(0)
   })
@@ -43,6 +45,7 @@ describe('outcome levels', () => {
   })
 
   it('maps each catalog key once and leaves qualified leads empty', () => {
+    expect(METRIC_KEYS_BY_OUTCOME_LEVEL.contact_success).toEqual([])
     expect(METRIC_KEYS_BY_OUTCOME_LEVEL.qualified_lead).toEqual([])
 
     const mapped = OUTCOME_LEVELS.flatMap((level) => [...METRIC_KEYS_BY_OUTCOME_LEVEL[level]])
@@ -77,23 +80,22 @@ describe('outcome levels', () => {
       expect(judged.reason).toContain('不能代替成交')
     }
 
-    for (const key of ['leads_count', 'form_submissions'] as const) {
+    for (const key of ['leads_count', 'form_submissions', 'messaging_started', 'phone_calls'] as const) {
       const judged = judgeOutcomeEvidence('sales', key)
       expect(judged.accepted).toBe(false)
       expect(judged.countsAsClosedDeal).toBe(false)
-      expect(judged.level).toBe('contact_success')
-      expect(judged.ladderStep).toBe('lead')
+      expect(judged.level).toBe('plain_lead')
+      expect(judged.level).not.toBe('qualified_lead')
       expect(judged.reasonCode).toBe('lead_cannot_replace_deal')
-      expect(judged.reason).toContain('线索')
+      expect(judged.reason).toContain('未筛选线索')
       expect(judged.reason).toContain('不能代替成交')
     }
 
+    expect(judgeOutcomeEvidence('sales', 'leads_count').ladderStep).toBe('lead')
+    expect(judgeOutcomeEvidence('sales', 'form_submissions').ladderStep).toBe('lead')
     const started = judgeOutcomeEvidence('sales', 'messaging_started')
-    expect(started.accepted).toBe(false)
-    expect(started.level).toBe('contact_success')
     expect(started.ladderStep).toBe('messaging_started')
-    expect(started.reasonCode).toBe('contact_cannot_replace_deal')
-    expect(started.reason).toContain('不能代替成交')
+    expect(judgeOutcomeEvidence('sales', 'phone_calls').ladderStep).toBeNull()
   })
 
   it('accepts closed-deal keys for sales and marks signups as a transaction count', () => {
@@ -133,14 +135,20 @@ describe('outcome levels', () => {
     expect(ladderStepIsQualifiedLead('qualified_enquiry')).toBe(true)
 
     expect(ladderStepForCatalogKey('messaging_started')).toBe('messaging_started')
-    expect(outcomeLevelOf('messaging_started')).toBe('contact_success')
-    expect(judgeOutcomeEvidence('acquisition', 'messaging_started').level).not.toBe('qualified_lead')
+    expect(outcomeLevelOf('messaging_started')).toBe('plain_lead')
+    const started = judgeOutcomeEvidence('acquisition', 'messaging_started')
+    expect(started.level).toBe('plain_lead')
+    expect(started.level).not.toBe('qualified_lead')
+    expect(started.reason).toContain('未筛选线索')
+    expect(started.reason).toContain('不是合格线索')
 
     for (const key of ['leads_count', 'form_submissions'] as const) {
       expect(CATALOG_LADDER_STEP[key]).toBe('lead')
-      expect(outcomeLevelOf(key)).toBe('contact_success')
-      expect(judgeOutcomeEvidence('acquisition', key).level).not.toBe('qualified_lead')
-      expect(judgeOutcomeEvidence('acquisition', key).reason).toContain('不是合格线索')
+      expect(outcomeLevelOf(key)).toBe('plain_lead')
+      const judged = judgeOutcomeEvidence('acquisition', key)
+      expect(judged.level).toBe('plain_lead')
+      expect(judged.level).not.toBe('qualified_lead')
+      expect(judged.reason).toContain('不是合格线索')
     }
 
     for (const key of Object.keys(CATALOG_LADDER_STEP)) {
@@ -151,14 +159,20 @@ describe('outcome levels', () => {
     }
   })
 
-  it('keeps unqualified contact evidence on acquisition and exposure evidence on awareness', () => {
-    for (const key of METRIC_KEYS_BY_OUTCOME_LEVEL.contact_success) {
+  it('keeps plain leads on acquisition and exposure evidence on awareness', () => {
+    expect(METRIC_KEYS_BY_OUTCOME_LEVEL.plain_lead.length).toBeGreaterThan(0)
+    for (const key of METRIC_KEYS_BY_OUTCOME_LEVEL.plain_lead) {
       const judged = judgeOutcomeEvidence('acquisition', key)
       expect(judged.accepted).toBe(true)
-      expect(judged.level).toBe('contact_success')
+      expect(judged.level).toBe('plain_lead')
+      expect(judged.level).not.toBe('qualified_lead')
       expect(judged.countsAsClosedDeal).toBe(false)
+      expect(judged.reason).toContain('未筛选线索')
       expect(judged.reason).toContain('不是合格线索')
       expect(judged.reason).toContain('不是成交')
+    }
+    for (const key of PRIMARY_METRIC_CATALOG.map((metric) => metric.key)) {
+      expect(outcomeLevelOf(key)).not.toBe('qualified_lead')
     }
 
     for (const key of METRIC_KEYS_BY_OUTCOME_LEVEL.exposure_or_clicks) {

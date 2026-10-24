@@ -4,10 +4,11 @@
  * Platform map: magic-engine-platform `app/impact` Check — whether a catalog
  * metric may count as this goal's outcome evidence. No fetch, no orchestrator.
  *
- * Order: exposure/clicks < contact success < qualified lead < closed deal.
- * Keys are PRIMARY_METRIC_CATALOG keys only. Raw DM starts and form leads
- * keep the contact / `lead` steps from the ads outcome ladder. Neither step
- * is `qualified_enquiry`, so neither key is a qualified lead.
+ * Order: exposure/clicks < contact success < plain lead < qualified lead < closed deal.
+ * Keys are PRIMARY_METRIC_CATALOG keys only. A chat start or a raw form/ad
+ * lead is a plain lead. `qualified_lead` stays empty: no catalog key carries
+ * qualification evidence. The ads ladder still separates `messaging_started`
+ * from `lead`; neither step is `qualified_enquiry`.
  * `signups_count` counts purchase rows, not seats and not leads.
  * CTS deposit / seat rules stay out of this shared module.
  *
@@ -30,6 +31,7 @@ import {
 export const OUTCOME_LEVELS = [
   'exposure_or_clicks',
   'contact_success',
+  'plain_lead',
   'qualified_lead',
   'closed_deal',
 ] as const
@@ -39,6 +41,7 @@ export type OutcomeLevel = (typeof OUTCOME_LEVELS)[number]
 export const OUTCOME_LEVEL_LABEL_ZH: Readonly<Record<OutcomeLevel, string>> = {
   exposure_or_clicks: '曝光/点击',
   contact_success: '联系成功',
+  plain_lead: '未筛选线索',
   qualified_lead: '合格线索',
   closed_deal: '成交',
 }
@@ -71,9 +74,11 @@ export function ladderStepIsQualifiedLead(step: OutcomeStep): boolean {
 
 /**
  * One catalog key, one level.
- * DM starts, phone calls, and form/ad leads sit on contact success: the ladder
- * keeps those steps below `qualified_enquiry`. The precise contact vs `lead`
- * step is `CATALOG_LADDER_STEP`, not this level.
+ * Chat starts, phone calls, and raw form/ad leads are plain leads. Do not put
+ * a key in `qualified_lead` unless that metric is already a qualified enquiry.
+ * No catalog key is. `contact_success` is empty for the same reason: a chat
+ * start is not evidence that contact succeeded.
+ * `CATALOG_LADDER_STEP` still tells a chat start from a form lead.
  */
 export const METRIC_KEYS_BY_OUTCOME_LEVEL: Readonly<Record<OutcomeLevel, readonly string[]>> = {
   exposure_or_clicks: [
@@ -85,7 +90,8 @@ export const METRIC_KEYS_BY_OUTCOME_LEVEL: Readonly<Record<OutcomeLevel, readonl
     'ai_visibility_score',
     GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
   ],
-  contact_success: [
+  contact_success: [],
+  plain_lead: [
     'messaging_started',
     'phone_calls',
     'leads_count',
@@ -191,7 +197,7 @@ function intentLabel(intent: GoalIntent): string {
 
 function rejectLowerSalesRung(
   metricKey: string,
-  level: 'exposure_or_clicks' | 'qualified_lead' | 'contact_success',
+  level: 'exposure_or_clicks' | 'contact_success' | 'plain_lead' | 'qualified_lead',
 ): OutcomeEvidenceJudgement {
   if (level === 'exposure_or_clicks') {
     const noun = CLICK_METRIC_KEYS.has(metricKey) ? '点击' : '曝光'
@@ -205,8 +211,8 @@ function rejectLowerSalesRung(
       reason: `${noun}（${metricKey}）不能代替成交。`,
     })
   }
-  const step = ladderStepForCatalogKey(metricKey)
-  if (level === 'qualified_lead' || step === 'lead') {
+  if (level === 'plain_lead' || level === 'qualified_lead') {
+    const noun = level === 'plain_lead' ? '未筛选线索' : '合格线索'
     return judgement({
       intent: 'sales',
       metricKey,
@@ -214,7 +220,7 @@ function rejectLowerSalesRung(
       accepted: false,
       countsAsClosedDeal: false,
       reasonCode: 'lead_cannot_replace_deal',
-      reason: `线索（${metricKey}）不能代替成交。`,
+      reason: `${noun}（${metricKey}）不能代替成交。`,
     })
   }
   return judgement({
@@ -233,7 +239,12 @@ function judgeSales(
   level: OutcomeLevel | null,
   entry: MetricCandidate,
 ): OutcomeEvidenceJudgement {
-  if (level === 'exposure_or_clicks' || level === 'qualified_lead' || level === 'contact_success') {
+  if (
+    level === 'exposure_or_clicks' ||
+    level === 'contact_success' ||
+    level === 'plain_lead' ||
+    level === 'qualified_lead'
+  ) {
     return rejectLowerSalesRung(metricKey, level)
   }
   if (level === 'closed_deal') {
@@ -306,18 +317,16 @@ function rejectLevelMismatch(
   })
 }
 
-function acceptUnqualifiedContact(
+function acceptPlainLead(
   metricKey: string,
   level: OutcomeLevel,
   entry: MetricCandidate,
 ): OutcomeEvidenceJudgement {
-  const step = ladderStepForCatalogKey(metricKey)
-  const tier = step === 'lead' ? '这是未筛选的留资，不是合格线索' : '这是联系，不是合格线索'
   return acceptForIntent(
     'acquisition',
     metricKey,
     level,
-    `「${entry.label_zh}」可以作为获客目标的结果证据。${tier}，也不是成交。`,
+    `「${entry.label_zh}」是未筛选线索，可以作为获客目标的结果证据。它不是合格线索，也不是成交。`,
   )
 }
 
@@ -327,11 +336,11 @@ function judgeAcquisitionOrAwareness(
   level: OutcomeLevel | null,
   entry: MetricCandidate,
 ): OutcomeEvidenceJudgement {
+  if (level === 'plain_lead' && intent === 'acquisition' && entry.recommended_for.includes('acquisition')) {
+    return acceptPlainLead(metricKey, level, entry)
+  }
   if (level === 'qualified_lead' && intent === 'acquisition') {
     return acceptForIntent(intent, metricKey, level, `「${entry.label_zh}」可以作为获客目标的合格线索证据。它不是成交。`)
-  }
-  if (level === 'contact_success' && intent === 'acquisition' && entry.recommended_for.includes('acquisition')) {
-    return acceptUnqualifiedContact(metricKey, level, entry)
   }
   if (level === 'exposure_or_clicks' && intent === 'awareness') {
     return acceptForIntent(
