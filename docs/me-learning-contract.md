@@ -73,7 +73,7 @@
 CREATE TABLE IF NOT EXISTS agent_learning_sources (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   source_key           text NOT NULL UNIQUE,            -- 稳定标识，如 'rss:industry-feed-1'
-  kind                 text NOT NULL CHECK (kind IN ('rss','web_page','video_transcript','manual_url','internal_outcomes','youtube_channel_rss','web_list_page','manual_text')),
+  kind                 text NOT NULL CHECK (kind IN ('rss','web_page','video_transcript','manual_url','internal_outcomes','youtube_channel_rss','web_list_page','manual_text','x_posts')),
   pillar               text NOT NULL CHECK (pillar IN ('ads','seo','social','reputation','ai_visibility','competitor')),
   url                  text,
   cadence_hours        integer NOT NULL DEFAULT 168 CHECK (cadence_hours > 0),
@@ -124,12 +124,12 @@ ALTER TABLE agent_learning_sources
   ADD COLUMN IF NOT EXISTS reviewed_at        date,         -- 复核日期（PM 上次确认可信的日期）
   ADD COLUMN IF NOT EXISTS added_by           text,         -- 谁加的，'pm:<id>' | 'seed:skill-cards'
   ADD COLUMN IF NOT EXISTS robots_ok          boolean,      -- 最近一次 robots.txt 检查结果；NULL = 未检查
-  ADD COLUMN IF NOT EXISTS transcript_policy  text NOT NULL DEFAULT 'manual' CHECK (transcript_policy IN ('manual','supadata_native'));
+  ADD COLUMN IF NOT EXISTS x_handle           text;         -- X 账号名（仅 kind='x_posts' 用），不含 @
 ```
 
 约束：
 - **名册上线前每位专家须有 `credibility_reason` 且 `reviewed_at` 非空，否则 L6b 不采集该来源**（fail-closed）。
-- `transcript_policy='supadata_native'` 只有 Ray 批准后才可设（见 R9）；默认 `manual`。
+- 视频类内容**只**用专家自己发布的文字版，或人工在工作台粘贴的字幕/要点；**不用任何第三方字幕抓取服务**（Ray 已否决，R9）。
 - 行业字段是**数据**不是代码分支：共享代码不得出现行业名判断（平台化铁律 0）。
 
 ### 2.3 `agent_learning_points` — 技能点快照
@@ -244,7 +244,7 @@ export type LearningPillar = typeof LEARNING_PILLARS[number]
 // 复用，不重新定义：PointState、SkillPoint 来自 '@/lib/skill-cards/types'
 export type { PointState, SkillPoint } from '@/lib/skill-cards/types'
 
-export type SourceKind = 'rss' | 'web_page' | 'video_transcript' | 'manual_url' | 'internal_outcomes'
+export type SourceKind = 'rss' | 'web_page' | 'video_transcript' | 'manual_url' | 'internal_outcomes' | 'youtube_channel_rss' | 'web_list_page' | 'manual_text' | 'x_posts'
 export type RunJob = 'ingest' | 'extract' | 'sync_cards' | 'expiry_sweep' | 'reconcile' | 'eval' | 'weekly_rollup'
 export type RunStatus = 'running' | 'succeeded' | 'failed' | 'partial'
 
@@ -398,6 +398,7 @@ live = is_active
 | L6a | L2 已合并且迁移已执行（或测试库演练）；PR-T1 已合并 | 无新迁移（字段在 L2） | 不碰 `service.ts` |
 | L6b | L6a | 无 | 无 |
 | L6c | L6b；L3 的 `repo.ts` | 无 | 无（注入走 L3 已有路径） |
+| L6d | L6b；Ray 开通 X API 并配置密钥后才可真实运行 | 无 | 无 |
 
 ---
 
@@ -438,7 +439,7 @@ live = is_active
 ### L2 — 共享地基（A 级）
 
 **目的**：落 5 张新表 + `global_learned_lessons` 加列 + `contracts.ts` + 共用测试数据。**不接任何运行逻辑。**
-**风险级别**：A（migration）。需 子牙 + 魏征 两审；Codex Astra 复审；**迁移 PR 写好后单独拿 Ray 的 go 才可执行，执行也不由 DeepSeek 做**。
+**风险级别**：A（migration）。需 Codex Astra 审查 + Claude Code 复核；**迁移 PR 写好后单独拿 Ray 的 go 才可执行，执行也不由 DeepSeek 做**。
 **前置**：PR-T1 已合并（它改记忆层）；契约 v1 获确认。
 
 **允许修改**：
@@ -461,7 +462,7 @@ live = is_active
 ### L3 — 学会的规则进提示词
 
 **目的**：技能卡同步 → 脱敏 → lesson → 提示词；过期与推翻；失败显示。
-**风险级别**：A（鉴权无关，但改 Agent 提示词的共享读路径，影响所有线上 Agent，且含不可逆的对外内容影响）→ 按 A 级：子牙 + 魏征 两审，注入前后快照对比。
+**风险级别**：A（鉴权无关，但改 Agent 提示词的共享读路径，影响所有线上 Agent，且含不可逆的对外内容影响）→ 按 A 级：Codex Astra 审查 + Claude Code 复核，注入前后快照对比。
 **前置**：L2 已合并且迁移已由有权限者执行（或在测试库演练）；PR-T1 已合并。
 
 **允许修改**：
@@ -521,7 +522,7 @@ live = is_active
 
 ---
 
-### 7.6 L6 — 专家经验蒸馏（L6a / L6b / L6c）
+### 7.6 L6 — 专家经验蒸馏（L6a / L6b / L6c / L6d）
 
 **方向（Ray 更正，取代此前"新闻/RSS/Trends"提法）**：学的是**一线专家公开分享的平台实操打法和垂直行业经验**，不是行业新闻。新闻、热点、趋势榜不在 L6 范围。
 
@@ -544,8 +545,9 @@ live = is_active
 | 文章 / newsletter | RSS / Atom（`kind='rss'`） | 不绕付费墙；只用免费部分 |
 | 没有 RSS 的站 | 每周抓**列表页**（`kind='web_list_page'`，`cadence_hours=168`），发现新链接后只取该文章页 | **先读 robots.txt**，不允许就跳过并记 `skipped`；不绕反爬；固定可识别 User-Agent；每站每次最多 5 个请求 |
 | YouTube | **只用官方频道 RSS 发现新视频**（`kind='youtube_channel_rss'`）；字幕默认**人工粘贴**（`manual_text`） | 不下载视频；不做转写生成 |
-| YouTube 字幕（需 Ray 批） | 批准后走现有 `src/lib/supadata/client.ts`，`mode=native`，**每月不超过 100 次**（R9、R15） | 未批准前 `transcript_policy` 只能是 `manual` |
-| X、播客 | 第一期**只收人工录入的链接或文字**（`manual_url` / `manual_text`） | 不接 X API（R10） |
+| 视频文字版 | 只用专家自己发布的文字版（博客/要点页），或人工在工作台粘贴字幕/要点（`manual_text`） | 不用第三方抓字幕服务（含 Supadata），L6 不调用 `src/lib/supadata/client.ts`（R9） |
+| X 帖子 | 官方 X API 只读**名册内**专家的公开帖子（`kind='x_posts'`，见 L6d 与「X 读帖闸」） | 不爬 x.com；不读名单外账号；不发帖/关注/点赞；密钥只放环境变量 |
+| 播客 | 只收人工录入的链接或文字（`manual_url` / `manual_text`） | 不转写生成 |
 
 - 去重沿用 2.2：`(source_id, external_ref)` 与 `(source_id, content_hash)` 双唯一。
 - 不存原文全文，只存 hash+标题+链接+发布日期；正文在内存里流转。
@@ -617,7 +619,11 @@ interface DistilledRule {
 | T8 | 客户数据不进全局：蒸馏上下文断言 + 规则句含示例客户 A 名字 | 蒸馏请求体不含任何客户字段；含客户名的规则被脱敏闸拦下并写 `blocked_by_gate` |
 | T9 | 未确认专家不采集：`credibility_reason` 为空或 `reviewed_at` 为空 | 该来源被跳过，回执说明原因 |
 | T10 | 人审门：机器流程任何路径 | 不存在把蒸馏点写为 `adopted` 的非人工路径（静态检查：`adopted` 写入仅来自 `actor` 以 `pm:` 开头的入口） |
-| T11 | 字幕默认人工：`transcript_policy='manual'` | 不调用 Supadata；月度计数达 100 后即使 `supadata_native` 也拒绝 |
+| T11 | 无第三方字幕：视频类条目 | L6 代码不引用 `supadata`（静态检查）；视频内容只能来自 `manual_text` 或专家自己的文字版 |
+| T12 | X 日上限：当天读帖数达 `X_DAILY_READ_CAP` | 达上限后当天不再发任何 X 请求；回执 `partial` + `error='x_daily_cap'`；次日恢复 |
+| T13 | X 月上限：当月累计读帖数达 `X_MONTHLY_READ_CAP` | 当月停读；回执 `error='x_monthly_cap'`；有人工待办 |
+| T14 | X 费用保险丝：月度预计花费 > 5 美元（已读数×单价 + 当日速率外推） | 自动停读并告警（`agent_learning.run.failed` + 人工待办），之后不再请求 |
+| T15 | X 只读名册：名册外账号 / `enabled=false` / 未确认可信 / 缺密钥 | 不发请求；X 客户端只含 GET 读帖端点（静态检查）；缺密钥 fail-closed 且日志/回执不含密钥 |
 
 #### 当场试跑（三份共用，只读、不写生产库）
 - 用 **3 个真实 RSS 源**（建议：Jon Loomer、Glenn Gabe、Common Thread Collective（Atom），各取最新 3 条）+ fixtures（含无 RSS 站的 robots 禁止样例、含注入指令的样例、含作者数字的样例）。
@@ -639,7 +645,7 @@ interface DistilledRule {
 listRoster(deps): Promise<Result<RosterEntry[]>>
 upsertExpert(deps, input: ExpertInput, actor: string): Promise<Result<RosterEntry>>   // 机器 actor 禁止（actor 必须以 'pm:' 开头，种子除外 'seed:skill-cards'）
 confirmCredibility(deps, sourceKey, reason: string, actor: `pm:${string}`): Promise<Result<RosterEntry>>
-isCollectable(entry: RosterEntry): { ok: boolean; reason?: string }   // credibility_reason 与 reviewed_at 必填、enabled、transcript_policy 合法
+isCollectable(entry: RosterEntry): { ok: boolean; reason?: string }   // credibility_reason 与 reviewed_at 必填、enabled
 seedFromSkillCards(deps, { root, requestId, dryRun }): Promise<Result<{ cards: number; points: number; experts: number; unchanged: number }>>
 ```
 **验收**：T3、T9、T10（名册侧）；`seedFromSkillCards` 的 `dryRun` 不写库；导入幂等；缺机器索引的卡进"未整理"报告而非静默跳过。命令：`npm test -- src/lib/agent-learning/expert`、`npm run type-check`。
@@ -650,7 +656,7 @@ seedFromSkillCards(deps, { root, requestId, dryRun }): Promise<Result<{ cards: n
 **前置**：L6a；L5 的 `ingest/normalizeItem`、`dedupeItems`（未合并则本 PR 内先放最小实现并标注待对齐）。
 **允许修改**：
 - 新增 `src/lib/agent-learning/collect/{feeds.ts, list-page.ts, robots.ts, youtube-rss.ts, manual-entry.ts, run.ts}` 与 `__tests__`（`robots.ts` 先 `grep -rn "robots" src/lib` 确认是否已有可复用实现，有则复用）；
-- `src/lib/supadata/client.ts`：**仅**新增可选 `mode?: 'native'` 参数（默认行为不变）与调用计数钩子；不批 R9 不启用；
+- 不得改动 `src/lib/supadata/client.ts`，L6 代码不得引用它（R9）；
 - 新增 `src/app/api/cron/agent-learning-collect/route.ts`、`render.yaml`、`src/lib/cron/dispatch/catalog.ts` 各一条（同一 PR）；
 - 手工录入接口 `src/app/api/admin/agent-learning/manual-entry/route.ts`（仅管理员）。
 **不得修改**：迁移、`service.ts`/`format.ts`、蒸馏与对账逻辑、skill-cards 正本。
@@ -687,6 +693,31 @@ runDistill(deps: { llm: DistillLlm; reconcile: ReconcileFn; repo: LearningRepo }
 **验收**：T4、T5、T6、T7、T8、T10；输出 schema 100% 合法或被丢弃（不得有"半合法"入库）；每次运行 `cost_usd` 写入回执并与日累计一致；超限停止当天；对账结论带规则编号。命令：`npm test -- src/lib/agent-learning/distill`、`npm run type-check`。
 **当场试跑**：见上"当场试跑"：3 个真实 RSS 源取最新内容 + fixtures，`dryRun:true`，LLM 先用预录响应跑一遍、再（经 Ray 授权费用）用真实模型跑 ≤3 条；贴蒸馏结果（不含原文全文）、对账计数、被拦计数、token 与花费。**生产环境首次真实运行前，须 Ray 看过 dry-run 输出并同意**（写在 PR「等谁决定」）。
 
+#### X 读帖闸（L6d 共同约束，硬）
+- **只读名册内专家**：只请求 `kind='x_posts'`、`enabled` 且 `isCollectable` 通过的来源；账号名取自 `x_handle`。名册外账号一律不请求。
+- **不爬 x.com**：只调官方 API 读帖端点；不抓网页、不用非官方接口、不绕限流；不发帖/点赞/关注/私信。
+- **代码内硬上限**（常量放 `src/lib/agent-learning/collect/x-limits.ts`，改数值须走 PR）：`X_DAILY_READ_CAP`（初值 40 帖/天）、`X_MONTHLY_READ_CAP`（初值 900 帖/月，按约 0.005 美元/帖 ≈ 4.5 美元）。每次请求前先查"今日/本月已读数 + 本次最大条数"，会超限则不发请求。
+- **费用保险丝**：月度预计花费 = 本月已读数 × 单价 + 今日速率外推到月底；**> 5 美元自动停读**，当月不再请求，发 `agent_learning.run.failed` 并产生人工待办（what/how/href 三件套）。已读数以 `agent_learning_runs` 回执为准，不信 API 响应自报。
+- **密钥只放环境变量**（`X_API_BEARER_TOKEN`，登记到 `docs/ENV.md`）；不写进代码、日志、回执、迁移；缺失时该来源 fail-closed 记 `skipped`。**开通与付费由 Ray 自己做，agent 不开通、不付费。**
+- 帖子文本与其他来源一样是不可信数据；帖子里的数字同样标「作者说法」；只存 hash+链接+发布日期+≤2 行引用。
+
+#### L6d — X 读帖（B 级；含新 cron，须 `render.yaml`+`catalog.ts`；花钱上限见「X 读帖闸」）
+**目的**：用官方 API 只读名册内专家的公开帖子，进入与 L6b 相同的去重/回执链路。
+**前置**：L6b；Ray 已开通 X API 并把密钥配到环境变量（未配置时本 PR 只能用 fixtures 验收）。
+**允许修改**：
+- 新增 `src/lib/agent-learning/collect/{x-client.ts, x-limits.ts, x-budget.ts, x-posts.ts}` 与 `__tests__`；
+- 新增 `src/app/api/cron/agent-learning-x/route.ts`、`render.yaml`、`src/lib/cron/dispatch/catalog.ts` 各一条（同一 PR）；`docs/ENV.md` 登记 `X_API_BEARER_TOKEN`。
+**不得修改**：迁移、`service.ts`/`format.ts`、蒸馏与对账逻辑、`supadata/client.ts`；不得新增事件名。
+**接口**：
+```ts
+xClient(deps: { fetchJson: FetchJson; token: string }): { listUserPosts(handle: string, opts: { sinceId?: string; maxResults: number }): Promise<Result<RawItem[]>> }   // 仅 GET 读帖
+checkXBudget(usage: { todayReads: number; monthReads: number; monthCostUsd: number; dayOfMonth: number; daysInMonth: number }, request: { maxResults: number }): { ok: true } | { ok: false; reason: 'x_daily_cap' | 'x_monthly_cap' | 'x_cost_projection' }
+projectMonthlyCostUsd(usage): number   // 纯函数，> 5 即触发保险丝
+runXCollect(deps, { now, requestId, dryRun }): Promise<Result<RunReceipt>>   // 回执 noPublish:true；读帖数与花费写入 agent_learning_runs
+```
+**验收**：T12–T15；去重复用 T1；缺密钥不抛错；回执里 `cost_usd` 与读帖数一致；上限触发后 `fetchJson` 调用次数为 0（测试替身断言）。命令：`npm test -- src/lib/agent-learning/collect`、`npm run type-check`。
+**当场试跑**：**默认只用 fixtures + 假 `fetchJson`**，不发真实 X 请求，贴"各上限触发的回执与 `fetchJson` 调用次数"。真实 API 试读仅在 Ray 开通密钥并明确授权后做一次（≤10 帖，名册内 1 位专家），贴读帖数与花费。**生产首次真实运行前须 Ray 看过 dry-run 输出并同意。**
+
 ---
 
 ## 8. 风险与待确认事项
@@ -701,13 +732,13 @@ runDistill(deps: { llm: DistillLlm; reconcile: ReconcileFn; repo: LearningRepo }
 | R6 | 脱敏闸只是助手 | 可能漏过换说法的客户事实 | 契约第 2 层：案例放 `evidence`，不进 `lesson/rationale`；Astra 审查重点 |
 | R7 | Gemini 付费升级 | **暂缓，Ray 2026-10-25 决定**；不花钱。L5 起草/分析成功率可能偏低，当场试跑如实记录 | 已定（暂缓） |
 | R8 | YouTube 爆款分析 | 暂缓，Ray 2026-10-25 决定；不在本契约范围 | 已定（暂缓） |
-| R9 | YouTube 字幕用 Supadata 属灰色地带（平台条款对批量取字幕不明确） | 默认只走人工粘贴字幕；Ray 批了才开 `transcript_policy='supadata_native'`，且 `mode=native`、每月不超过 100 次 | **Ray 定** |
-| R10 | X API 按量付费（约每条帖子 0.005 美元） | 第一期**不接**，X 只收人工录入的链接/文字；不花钱 | 已定（第一期不接） |
+| R9 | 第三方抓 YouTube 字幕（Supadata）属灰色地带 | **已否决（Ray）**：视频类只用专家自己发布的文字版，或人工粘贴字幕/要点；契约不再含该选项 | 已定（否决） |
+| R10 | X 官方 API 按量付费（约每条帖子 0.005 美元，预算约 4.5 美元/月） | **并进 L6（L6d）**：只读名册内专家公开帖子；代码内日/月读帖硬上限；月度预计超 5 美元自动停读并告警；不爬 x.com；密钥只放环境变量；**开通与付费由 Ray 自己做**，未配置密钥时 L6d 不运行 | 已定（Ray 同意）；开通由 Ray |
 | R11 | 专家可信度是主观判断 | 每位专家须 PM 确认一次「为什么可信」后才采集；公开经验可能过时或只对作者自己的账户成立 | PM 逐位确认 |
 | R12 | 版权与抓取合规 | 只存 hash+标题+链接+≤2 行引用；遵守 robots.txt，不绕付费墙/反爬 | Astra 审查重点 |
 | R13 | 原文里的提示词注入 | 原文按不可信数据处理，蒸馏输出只能是受约束的 JSON，永不执行原文指令（L6 步骤 3、验收 T5） | Astra 审查重点 |
 | R14 | 美妆行业缺口 | 名册里美妆只有 Savannah Sanchez 部分覆盖 | FDE/PM 补 1–2 位 |
-| R15 | `src/lib/supadata/client.ts` 现在只有 `getVideoTranscript(url)`，没有 `mode` 参数 | 启用 R9 前，L6b 须给它加可选 `mode='native'` 和月度计数，不改默认行为 | L6b 实现；Ray 批 R9 后才启用 |
+| R15 | （原 Supadata `mode` 改造项） | 随 R9 否决而取消；L6 不改 `src/lib/supadata/client.ts` | 已取消 |
 | R16 | 蒸馏候选点不走 Markdown 卡（对原则 1 的例外，见 2.3a） | 仓库里看不到这些点的 git 历史，历史靠 `point_events` | Astra 审查，Ray 知悉 |
 | R17 | 模型名 `deepseek-v4-flash` | 仓库里目前只在 `seo-weekly-list/live-snippet.ts` 等处出现，没有统一封装；L6c 须先读那处的调用方式照写，不另手写直调 | L6c 核对 |
 
@@ -727,6 +758,7 @@ runDistill(deps: { llm: DistillLlm; reconcile: ReconcileFn; repo: LearningRepo }
 
 - v1.1（2026-10-24 草拟，Ray 2026-10-25 方向更正）：新增 L6「专家经验蒸馏」（7.6，含 L6a/b/c PR 指令与验收 T1–T11）；2.1a/2.3a 增加专家名册与蒸馏候选字段（随 L2 迁移）；附录 A 首批 25 位专家名册；排期总览加 L6a–c、L1 改为等 PR-T1 合并；R7 改为暂缓，新增 R8–R17；L1 补"幂等查询用确定性 UUID"。此前 #3088 里"新闻/RSS/Trends"版 L6 请求作废。
 
+- v1.2（2026-10-24，按 Ray 10-25 决定与统筹 Traning Day 指示）：①删除第三方抓 YouTube 字幕（Supadata）可选项，R9 改为已否决，R15 取消，`transcript_policy` 列删除；②X API 并进 L6：新增 L6d、「X 读帖闸」、T12–T15，`kind` 增 `x_posts`，`x_handle` 列，R10 改为已同意；③L2、L3 审查口径改为 Codex Astra 审查 + Claude Code 复核。
 - v1（2026-10-24）：首版。依据 #3088 触发评论的 5 项要求撰写；未执行任何迁移、未改业务代码。
 
 ---
@@ -753,7 +785,7 @@ runDistill(deps: { llm: DistillLlm; reconcile: ReconcileFn; repo: LearningRepo }
 | 14 | Kevin Indig（Growth Memo） | SEO / 增长 | https://www.growth-memo.com/ | RSS | 只用免费部分 |
 | 15 | Marie Haynes | SEO | https://www.mariehaynes.com/ | RSS | |
 | 16 | Aleyda Solis（SEOFOMO newsletter） | SEO / AI 搜索 | https://www.seofomo.co/ | **只走 newsletter 或人工录入** | 她的主站有反爬，不抓 |
-| 17 | Lily Ray | SEO / AI 搜索 | https://x.com/lilyraynyc ；https://www.searchenginejournal.com/author/lily-ray/ | X 只收人工录入；SEJ 作者页走列表页（遵守 robots） | X 第一期不接 API（R10） |
+| 17 | Lily Ray | SEO / AI 搜索 | https://x.com/lilyraynyc ；https://www.searchenginejournal.com/author/lily-ray/ | X 走官方 API 只读（L6d）；SEJ 作者页走列表页（遵守 robots） | X 读帖受日/月上限约束（R10） |
 | 18 | Ahrefs 博客 | SEO | https://ahrefs.com/blog/ | RSS | |
 | 19 | Tourpreneur | 旅游 / 活动运营商 | https://tourpreneur.com/ | RSS（播客；每期网页有文字要点，取文字要点） | 播客音频不处理 |
 | 20 | Tom Ferry | 房产 | https://www.youtube.com/@TomFerry | YouTube 频道 RSS + 人工字幕 | |
