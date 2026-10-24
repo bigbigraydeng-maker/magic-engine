@@ -16,7 +16,10 @@
  * 🔴 **Fail closed.** Any error while *evaluating* the gate is a failure, never
  * a pass: "we could not check" and "there was nothing wrong" must not look the
  * same. A missing required env var, an API error, or a head/base mismatch all
- * end in `decision=disable tier=blocked risk=A` and exit 1.
+ * end in `decision=disable tier=blocked risk=A`. On `pull_request_target` the
+ * process then exits 1, because that job *is* the required check. On any other
+ * event the same failure is written onto the PR head as a "Risk gate" check
+ * run and the process exits 0, so the default-branch job does not go red.
  *
  * 🔴 **Gate markers are read only from `GATE_MARKER_AUTHOR`.** A marker is a
  * verdict, and anyone who can comment on a PR can type one. The identity that
@@ -26,6 +29,7 @@
 
 import { appendFileSync } from 'node:fs'
 
+import { buildRiskGateCheckRun, gateJobExitCode, shouldPublishHeadCheck } from './head-check.mjs'
 import { classifyRisk, readDeclaredRisk } from './risk.mjs'
 import {
   buildGateMarker,
@@ -58,6 +62,7 @@ const prAuthor = process.env.PR_AUTHOR
 const prDraft = process.env.PR_DRAFT
 const prIsFork = process.env.PR_IS_FORK
 const signoffTrustedLogins = process.env.SIGNOFF_TRUSTED_LOGINS ?? ''
+const eventName = process.env.GATE_EVENT_NAME ?? ''
 
 const SHA_RE = /^[0-9a-f]{40}$/i
 
@@ -117,15 +122,65 @@ function requiredEnv() {
 }
 
 /**
- * Fail closed: report the reason, write the blocking outputs, and exit 1.
+ * Link the head check back to this Actions run when the runner provides one.
+ *
+ * @returns {string|undefined}
+ */
+function riskGateDetailsUrl() {
+  const server = process.env.GITHUB_SERVER_URL
+  const runId = process.env.GITHUB_RUN_ID
+  if (!server || !repository || !runId) return undefined
+  return `${server}/${repository}/actions/runs/${runId}`
+}
+
+/**
+ * Write the verdict onto the PR head. No-op for events whose job is already
+ * that check. Throws if the publish was required and the API rejected it.
+ *
+ * @param {boolean} pass
+ * @param {string} summaryText
+ * @returns {Promise<boolean>} true when a check run was created
+ */
+async function publishRiskGateOnHead(pass, summaryText) {
+  if (!shouldPublishHeadCheck(eventName)) return false
+  const body = buildRiskGateCheckRun({
+    headSha,
+    pass,
+    summary: summaryText,
+    now: new Date().toISOString(),
+    detailsUrl: riskGateDetailsUrl(),
+  })
+  await api(`/repos/${repository}/check-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return true
+}
+
+/**
+ * Fail closed: report the reason, write the blocking outputs, and exit.
+ *
+ * A republish event records the failure on the PR head and then exits 0, so
+ * the default-branch job does not go red. If that record cannot be written,
+ * the process still exits 1.
  *
  * @param {string} message
- * @returns {never}
+ * @returns {Promise<never>}
  */
-function failClosed(message) {
-  summary(`## ❌ 合并闸：无法判定\n\n${message}\n\n按失败处理（读不到 ≠ 没问题）。`)
+async function failClosed(message) {
+  const text = `## ❌ 合并闸：无法判定\n\n${message}\n\n按失败处理（读不到 ≠ 没问题）。`
+  summary(text)
   writeOutputs({ risk: 'A', decision: 'disable', tier: 'blocked' })
-  process.exit(1)
+  let published = false
+  if (shouldPublishHeadCheck(eventName)) {
+    try {
+      published = await publishRiskGateOnHead(false, text)
+    } catch (err) {
+      summary(`没能把失败结果写到 PR 当前提交上：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  process.exit(gateJobExitCode({ eventName, pass: false, headCheckPublished: published }))
 }
 
 /**
@@ -364,11 +419,11 @@ function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesErro
 
 for (const [name, value] of requiredEnv()) {
   if (typeof value !== 'string' || value === '') {
-    failClosed(`缺少必需的环境变量 ${name}`)
+    await failClosed(`缺少必需的环境变量 ${name}`)
   }
 }
 if (!SHA_RE.test(baseSha) || !SHA_RE.test(headSha)) {
-  failClosed('BASE_SHA / HEAD_SHA 不是 40 位十六进制 sha')
+  await failClosed('BASE_SHA / HEAD_SHA 不是 40 位十六进制 sha')
 }
 
 try {
@@ -453,7 +508,7 @@ try {
     trialRun,
   })
 
-  const summaryText = buildSummaryText({
+  let summaryText = buildSummaryText({
     rating,
     decision,
     signoff,
@@ -464,12 +519,26 @@ try {
     spotChecks: review.spotChecks,
     trustReady,
   })
+  if (shouldPublishHeadCheck(eventName)) {
+    summaryText += '\n- 检查结果写在 PR 当前这次提交上，不记在主干提交上'
+  }
   summary(summaryText)
 
   // Invariant: `enable` only when pass && tier === 'auto'. Every other path
   // writes `disable`, so a stale `enable` cannot survive a later evaluation.
   const outputDecision =
     decision.pass === true && decision.tier === 'auto' ? decision.decision : 'disable'
+
+  // Record the head check before the rating comment. A failed publish must not
+  // leave a comment that says the gate passed, and must not arm auto-merge.
+  let published = false
+  try {
+    published = await publishRiskGateOnHead(decision.pass === true, summaryText)
+  } catch (err) {
+    summary(`没能把合并闸结果写到 PR 当前提交上：${err instanceof Error ? err.message : String(err)}`)
+    writeOutputs({ risk: rating.risk, decision: 'disable', tier: 'blocked' })
+    process.exit(1)
+  }
 
   // Post the rating only when there is no current marker for this exact pair,
   // or the one on record disagrees with what we just computed. The decision is
@@ -488,8 +557,9 @@ try {
   }
 
   writeOutputs({ risk: rating.risk, decision: outputDecision, tier: decision.tier })
-
-  process.exit(decision.pass ? 0 : 1)
+  process.exit(
+    gateJobExitCode({ eventName, pass: decision.pass === true, headCheckPublished: published }),
+  )
 } catch (err) {
-  failClosed(err instanceof Error ? err.message : String(err))
+  await failClosed(err instanceof Error ? err.message : String(err))
 }
