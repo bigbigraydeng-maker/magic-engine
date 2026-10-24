@@ -582,12 +582,37 @@ export function evaluateCodexHeadReview({
 //     `pass`, whose `head` is this sha;
 //   - a GitHub review by the trusted login, commit oid = this sha, state
 //     APPROVED;
-//   - a review or issue comment by that login whose body contains this full
-//     sha and an explicit sign-off phrase.
-// "no P0/P1" in that sign-off text is not itself a finding. An unresolved
-// P0/P1 thread from that login on this head still blocks.
+//   - a line of its own, `SIGNED-OFF: <40-hex sha>`, outside a quote or a
+//     code fence. A refusal ("Cannot sign-off"), a quoted instruction, and
+//     a sha buried in a sentence do not count.
+// An unresolved P0/P1 thread from that login on this head still blocks.
 
-const CLAUDE_SIGNOFF_PHRASE = /\b(sign[\s-]?off|signed off|lgtm)\b|签字通过/i
+const SIGNED_OFF_LINE = /^SIGNED-OFF:\s*([0-9a-f]{40})$/i
+
+/**
+ * Shas from dedicated `SIGNED-OFF:` lines. Quoted and fenced lines are
+ * instructions, not a verdict.
+ *
+ * @param {unknown} body
+ * @returns {string[]}
+ */
+function signedOffShas(body) {
+  if (typeof body !== 'string') return []
+  /** @type {string[]} */
+  const shas = []
+  let fenced = false
+  for (const raw of body.split(/\r?\n/)) {
+    const line = raw.replace(/\s+$/u, '')
+    if (/^(?:```|~~~)/.test(line.trim())) {
+      fenced = !fenced
+      continue
+    }
+    if (fenced || /^(?:\s|>)/.test(line)) continue
+    const match = SIGNED_OFF_LINE.exec(line)
+    if (match) shas.push(match[1].toLowerCase())
+  }
+  return shas
+}
 
 /**
  * @param {unknown} body
@@ -595,7 +620,7 @@ const CLAUDE_SIGNOFF_PHRASE = /\b(sign[\s-]?off|signed off|lgtm)\b|签字通过/
  * @returns {boolean}
  */
 function bodySignsHead(body, headSha) {
-  return typeof body === 'string' && CLAUDE_SIGNOFF_PHRASE.test(body) && body.toLowerCase().includes(headSha)
+  return signedOffShas(body).includes(headSha)
 }
 
 /**
@@ -604,9 +629,7 @@ function bodySignsHead(body, headSha) {
  * @returns {boolean}
  */
 function bodySignsOlderHead(body, headSha) {
-  if (typeof body !== 'string' || !CLAUDE_SIGNOFF_PHRASE.test(body)) return false
-  const shas = body.toLowerCase().match(/[0-9a-f]{40}/g) ?? []
-  return shas.some((sha) => sha !== headSha)
+  return signedOffShas(body).some((sha) => sha !== headSha)
 }
 
 /**
