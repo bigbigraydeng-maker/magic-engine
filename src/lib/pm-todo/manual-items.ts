@@ -39,6 +39,7 @@ import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
+import { pushBrokenPageHoldItems } from './broken-page-hold-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { foldRootCauseDuplicates } from './dedupe-root-cause'
 import { pushCalendarClosureItems } from './calendar-closure-items'
@@ -268,6 +269,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
     (b) => pushFacebookSyncFailingItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Facebook 同步失败检查读取失败（不阻塞其他待办）:', e),
+    ),
+    // 没有连接行可标的坏主页令牌（Graph 190 / 缺角色）。未核实公用令牌仍走主页绑定待办。
+    (b) => pushBrokenPageHoldItems(supabase, b).catch((e) =>
+      console.warn('[manual-items] Facebook 主页暂停名单读取失败（不阻塞其他待办）:', e),
     ),
     // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
     // 而 Facebook 的留资只保留 90 天，超期永久取不回
