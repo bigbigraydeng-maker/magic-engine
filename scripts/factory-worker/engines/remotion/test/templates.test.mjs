@@ -61,13 +61,25 @@ function montageProps() {
   }
 }
 
+function impactProps() {
+  const props = montageProps()
+  const tags = ['hook', 'build-one', 'build-two', 'build-three', 'build-four', 'payoff']
+  props.clips.forEach((clip, i) => { clip.tag = tags[Math.floor(i / 2)] })
+  props.words[3].clipTag = 'build-one'
+  props.words[6].clipTag = 'build-two'
+  props.words.push({ at: 30, beats: 2, text: 'PAYOFF', bg: 'brand', rot: 0, clipTag: 'payoff' })
+  props.impactPlan = { hookTag: 'hook', buildTags: tags.slice(1, 5), payoffTag: 'payoff', hookBeats: 2, payoffBeats: 2 }
+  return props
+}
+
 test('TEMPLATE_IDS lists the supported templates', () => {
-  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage', 'datacard', 'postcard', 'atmosphere'])
+  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage', 'impact', 'datacard', 'postcard', 'atmosphere'])
 })
 
 test('isTemplateId accepts known ids and rejects others', () => {
   assert.equal(isTemplateId('list'), true)
   assert.equal(isTemplateId('montage'), true)
+  assert.equal(isTemplateId('impact'), true)
   assert.equal(isTemplateId('carousel'), false)
   assert.equal(isTemplateId(undefined), false)
 })
@@ -90,9 +102,19 @@ test('loadTemplate montage returns MontageReel metadata', () => {
   }
 })
 
+test('loadTemplate impact returns a structural creative receipt and uses MontageReel', () => {
+  const props = impactProps()
+  const loaded = loadTemplate('impact', props)
+  assert.equal(loaded.compositionId, 'MontageReel')
+  assert.equal(loaded.creativePlan?.planned_scene_count, 6)
+  assert.equal(loaded.creativePlan?.rendered_clip_file_count, 12)
+  assert.equal(loaded.creativePlan?.human_review_required, true)
+})
+
 test('loadTemplate rejects mismatched props', () => {
   assert.throws(() => loadTemplate('list', montageProps()))
   assert.throws(() => loadTemplate('montage', listProps()))
+  assert.throws(() => loadTemplate('impact', montageProps()), /需要 impactPlan/)
 })
 
 test('render.mjs rejects an unknown --template with exit code 2', () => {

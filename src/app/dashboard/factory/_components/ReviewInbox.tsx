@@ -6,6 +6,7 @@ import { REEL_HUMAN_CHECK_KEYS_V2, type CheckItemOutcome, type ContentCheckItemR
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
 import { factoryVideoUrl } from '@/lib/factory/outlets'
 import type { RemotionMusicChoice } from '@/lib/factory/remotion-music-options.mjs'
+import type { ShortCreativePlanEvidence } from '@/lib/social/reel-media-checks'
 import { OneClickConfirm } from './OneClickConfirm'
 import { OrderNo } from './OrderNo'
 import { PublishOutlets } from './PublishOutlets'
@@ -40,6 +41,7 @@ interface WorkOrder {
     redline_hits?: string[]
     quality_flags?: Array<{ category: string; detail: string }>
     quality_checklist_auto?: ContentCheckItemResult[]
+    creative_plan?: ShortCreativePlanEvidence
   } | null
 }
 
@@ -52,6 +54,7 @@ const RETIRED_FLAG_CATEGORIES = ['narrator_voice_mismatch']
 const TEMPLATE_LABELS: Record<string, string> = {
   list: '清单节奏',
   montage: '快切蒙太奇',
+  impact: '冲击叙事',
   datacard: '数据卡',
   postcard: '场景明信片',
   atmosphere: '单镜氛围',
@@ -151,6 +154,18 @@ function QualityFlagsBlock({ o }: { o: WorkOrder }) {
           <span className="block text-amber-700 mt-0.5">{f.detail}</span>
         </p>
       ))}
+    </div>
+  )
+}
+
+function CreativePlanBlock({ o }: { o: WorkOrder }) {
+  const plan = o.output?.creative_plan
+  if (!plan) return null
+  return (
+    <div className="mb-2 rounded-lg border border-violet-200 bg-violet-50 px-2 py-1.5 space-y-1">
+      <p className="text-xs font-medium text-violet-900">分镜标签已按顺序执行：开头 → {plan.build_tags.length} 段递进 → 结尾</p>
+      <p className="text-xs text-violet-800">分镜安排了 {plan.planned_scene_count} 组场景，成片用了 {plan.rendered_clip_file_count} 个不同素材文件。</p>
+      <p className="text-xs text-violet-700">程序只核对了分镜顺序和文件数；请完整看一遍，确认开头能抓人、镜头动作确有变化、结尾兑现主题，音乐和节奏也合适。</p>
     </div>
   )
 }
@@ -335,6 +350,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 )}
 
                 <QualityFlagsBlock o={o} />
+                <CreativePlanBlock o={o} />
 
                 {!autoChecklistReady(o) && (
                   <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">

@@ -466,7 +466,7 @@ export function assessContentSubstance(eng, template, remotion, props) {
   return result
 }
 
-export const TEXT_WIRED_TEMPLATES = ['list', 'montage', 'datacard', 'postcard', 'atmosphere']
+export const TEXT_WIRED_TEMPLATES = ['list', 'montage', 'impact', 'datacard', 'postcard', 'atmosphere']
 
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
@@ -731,17 +731,19 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   let timing
   let totalFrames
   let recipeGaps = null
+  let creativePlan = null
   try {
     const loaded = eng.loadTemplate(template, remotion.props)
     props = loaded.props
     files = loaded.assetFiles
     totalFrames = loaded.totalFrames
     recipeGaps = loaded.recipeGaps ?? null
+    creativePlan = loaded.creativePlan ?? null
     timing = template === 'list' ? eng.computeTimingFromProps(props) : null
   } catch (e) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
   }
-  if (template === 'montage') assertMontageTextVisible(props)
+  if (template === 'montage' || template === 'impact') assertMontageTextVisible(props)
   if (template === 'datacard') {
     assertDatacardTextVisible(props)
     timing = eng.computeDataCardTiming(props)
@@ -867,6 +869,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       postcard: [() => buildPostcardSrt(props, timing, eng.FPS), () => buildPostcardCaption(props)],
       atmosphere: [() => buildAtmosphereSrt(props, timing, eng.FPS), () => buildAtmosphereCaption(props)],
       montage: [() => buildMontageSrt(props, eng.montageFrameOf, eng.FPS), () => buildMontageCaption(props)],
+      impact: [() => buildMontageSrt(props, eng.montageFrameOf, eng.FPS), () => buildMontageCaption(props)],
     }
     const builders = Object.hasOwn(textBuilders, template) ? textBuilders[template] : null
     if (builders === null) throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)
@@ -900,6 +903,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
         content_substance: contentSubstance,
         atmosphere_preflight: atmospherePreflight,
         recipe_gaps: recipeGaps,
+        creative_plan: creativePlan,
         render: { attempts, elapsed_s },
       }, null, 2),
     )
@@ -926,6 +930,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
           textSeconds: contentSubstance.textSeconds,
           reason: contentSubstance.reason,
         },
+        ...(creativePlan ? { creative_plan: creativePlan } : {}),
         capabilities: [CONTENT_SUBSTANCE_CAPABILITY],
       },
     })

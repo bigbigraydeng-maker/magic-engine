@@ -179,6 +179,26 @@ describe('completeWorkOrder — 交付落点(防管道断裂)', () => {
     expect(missingChecks.slice(0, 5).every(item => item.outcome === 'NOT_MEASURED')).toBe(true)
   })
 
+  it('impact 分镜回执单独写入创意审核字段，不混进技术检查清单', async () => {
+    const creativePlan = {
+      schema_version: 1 as const,
+      hook_tag: 'hook-action',
+      hook_beats: 2,
+      build_tags: ['scene-one', 'scene-two', 'scene-three', 'scene-four'],
+      payoff_tag: 'payoff-reveal',
+      payoff_beats: 2,
+      planned_scene_count: 6,
+      rendered_clip_file_count: 12,
+      human_review_required: true as const,
+    }
+    const { db, updates } = mockSupabase(happyQueue())
+    await completeWorkOrder(db, { ...PARAMS, mediaEvidence: { creative_plan: creativePlan } })
+    const output = updates.find((u) => u.table === 'content_work_orders')!.payload.output as Record<string, unknown>
+    expect(output.creative_plan).toEqual(creativePlan)
+    expect(output.quality_checklist_auto).toBeDefined()
+    expect((output.quality_checklist_auto as Array<{ key: string }>).some(item => item.key.startsWith('creative_'))).toBe(false)
+  })
+
   it('🔴 update 必须带防抢占条件:限本 worker + 限活跃状态', async () => {
     const { db, filters } = mockSupabase(happyQueue())
     await completeWorkOrder(db, PARAMS)

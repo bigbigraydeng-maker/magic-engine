@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { completeWorkOrder } from '@/lib/factory/complete-work-order'
-import type { ReelMediaEvidence } from '@/lib/social/reel-media-checks'
+import { parseShortCreativePlan, type ReelMediaEvidence } from '@/lib/social/reel-media-checks'
 import {
   isWorkerAuthorized,
   validateClipPath,
@@ -108,6 +108,8 @@ function parseMediaEvidence(raw: unknown): ReelMediaEvidence | null | undefined 
       }
     }
   }
+  const creativePlan = parseShortCreativePlan(value.creative_plan)
+  if (creativePlan) out.creative_plan = creativePlan
   return out
 }
 

@@ -7,6 +7,7 @@ import {
   computeMontageTiming,
   buildMontageSegments,
   montageFrameOf,
+  montageMusicVolumeAtFrame,
   rnd,
   type MontageReelProps,
   type MontageSegment,
@@ -65,7 +66,7 @@ export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const segments = buildMontageSegments(props)
   const frame = useCurrentFrame()
   const fade = interpolate(frame, [timing.totalFrames - 8, timing.totalFrames], [1, 0], { extrapolateLeft: 'clamp' })
-  const vol = interpolate(frame, [0, 6, timing.totalFrames - 24, timing.totalFrames - 2], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
+  const vol = montageMusicVolumeAtFrame(frame, timing.totalFrames, Boolean(props.impactPlan))
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       {segments.map((seg, i) => (<Sequence key={i} from={seg.from} durationInFrames={seg.dur}><Cut props={props} seg={seg} /></Sequence>))}

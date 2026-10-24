@@ -17,6 +17,9 @@ import {
   MONTAGE_MIN_BEAT_GAP_SEC,
   maxFlashesPerSecond,
   recipeGapsOf,
+  impactTagAtBeat,
+  impactPlanReport,
+  montageMusicVolumeAtFrame,
   MONTAGE_MAX_FLASHES_PER_SEC,
 } from '../src/montage.ts'
 
@@ -73,6 +76,23 @@ const valid = () => {
   }
 }
 
+const impactValid = () => {
+  const raw = valid()
+  const tags = ['hook', 'build-one', 'build-two', 'build-three', 'build-four', 'payoff']
+  raw.clips.forEach((clip, i) => { clip.tag = tags[Math.floor(i / 2)] })
+  raw.words[3].clipTag = 'build-one'
+  raw.words[6].clipTag = 'build-two'
+  raw.words.push({ at: 30, beats: 2, text: 'PAYOFF', bg: 'brand', rot: 0, clipTag: 'payoff' })
+  raw.impactPlan = {
+    hookTag: 'hook',
+    buildTags: tags.slice(1, 5),
+    payoffTag: 'payoff',
+    hookBeats: 2,
+    payoffBeats: 2,
+  }
+  return raw
+}
+
 // Clone the fixture, apply a mutation, and assert parsing rejects it.
 const rejects = (mutate, fragment) => {
   const raw = valid()
@@ -112,6 +132,12 @@ describe('montage props', () => {
     assert.equal(parsed.totalBeats, 32)
     assert.equal(parsed.words.length, 12)
     assert.equal(parsed.clips.length, 12)
+  })
+
+  test('impact plan requires distinct scenes with multiple source clips each', () => {
+    assert.doesNotThrow(() => parseMontageReelProps(impactValid()))
+    rejects((raw) => { raw.impactPlan = impactValid().impactPlan; raw.impactPlan.buildTags[0] = 'hook' }, '不同场景标签')
+    rejects((raw) => { raw.impactPlan = impactValid().impactPlan; raw.clips[0].tag = 'other' }, '需要至少 2 条不同素材')
   })
 
   test('collectMontageAssetFiles returns logo, music and 12 clips', () => {
@@ -316,6 +342,51 @@ describe('buildMontageSegments', () => {
   test('is deterministic', () => {
     const parsed = parseMontageReelProps(valid())
     assert.deepEqual(buildMontageSegments(parsed), buildMontageSegments(parsed))
+  })
+
+  test('impact template renders the planned hook, four-step progression, and payoff in order', () => {
+    const parsed = parseMontageReelProps(impactValid())
+    const segments = buildMontageSegments(parsed)
+    const selectedTags = new Set(segments.map((segment) => parsed.clips[segment.clip].tag))
+    assert.equal(impactTagAtBeat(parsed, 0), 'hook')
+    assert.equal(impactTagAtBeat(parsed, 2), 'build-one')
+    assert.equal(impactTagAtBeat(parsed, 9), 'build-two')
+    assert.equal(impactTagAtBeat(parsed, 30), 'payoff')
+    assert.deepEqual([...selectedTags], ['hook', 'build-one', 'build-two', 'build-three', 'build-four', 'payoff'])
+    assert.deepEqual(impactPlanReport(parsed), {
+      schema_version: 1,
+      hook_tag: 'hook',
+      hook_beats: 2,
+      build_tags: ['build-one', 'build-two', 'build-three', 'build-four'],
+      payoff_tag: 'payoff',
+      payoff_beats: 2,
+      planned_scene_count: 6,
+      rendered_clip_file_count: 12,
+      human_review_required: true,
+    })
+  })
+
+  test('impact template adds two middle-section accelerations even when the brief has only one fast bar', () => {
+    const raw = impactValid()
+    raw.fastBars = [0]
+    const parsed = parseMontageReelProps(raw)
+    const counts = new Map()
+    for (const segment of buildMontageSegments(parsed)) {
+      const bar = Math.floor(beatOfFrame(parsed, segment.from) / 4)
+      counts.set(bar, (counts.get(bar) ?? 0) + 1)
+    }
+    assert.equal(counts.get(0), 8)
+    assert.equal(counts.get(2), 8)
+    assert.equal(counts.get(5), 8)
+    assert.equal(counts.get(1), 4)
+  })
+
+  test('impact music rises through the middle and fades out while standard montage keeps its envelope', () => {
+    const totalFrames = 480
+    assert.equal(montageMusicVolumeAtFrame(3, totalFrames, false), 0.5)
+    assert.equal(montageMusicVolumeAtFrame(3, totalFrames, true), 0.34)
+    assert.ok(montageMusicVolumeAtFrame(300, totalFrames, true) > montageMusicVolumeAtFrame(60, totalFrames, true))
+    assert.equal(montageMusicVolumeAtFrame(totalFrames - 2, totalFrames, true), 0)
   })
 
   test('segments are contiguous and cover the whole video', () => {

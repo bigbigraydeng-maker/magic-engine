@@ -71,6 +71,30 @@ it('retries loading music choices after a temporary failure when the reject dial
   expect(document.body.textContent).not.toContain('音乐列表暂时不可用')
 })
 
+it('shows a separate creative storyboard note without treating it as technical approval', async () => {
+  await mount([{ ok: true }], {
+    template_id: 'impact',
+    output: {
+      quality_checklist_auto: auto,
+      creative_plan: {
+        schema_version: 1,
+        hook_tag: 'hook-action',
+        hook_beats: 2,
+        build_tags: ['scene-one', 'scene-two', 'scene-three', 'scene-four'],
+        payoff_tag: 'payoff-reveal',
+        payoff_beats: 2,
+        planned_scene_count: 6,
+        rendered_clip_file_count: 12,
+        human_review_required: true,
+      },
+    },
+  })
+  expect(document.body.textContent).toContain('模板 · 冲击叙事')
+  expect(document.body.textContent).toContain('分镜标签已按顺序执行：开头 → 4 段递进 → 结尾')
+  expect(document.body.textContent).toContain('请完整看一遍，确认开头能抓人、镜头动作确有变化、结尾兑现主题，音乐和节奏也合适')
+  expect(document.body.textContent).not.toContain('创意审核通过')
+})
+
 it('prefills source, one-click all PASS, shows plain-Chinese server error inside the dialog', async () => {
   await mount([{ ok: false, error: MISSING }], {}, true)
   const urls = [...document.querySelectorAll('input[placeholder^="来源"]')] as HTMLInputElement[]

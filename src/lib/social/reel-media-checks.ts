@@ -16,7 +16,49 @@ export interface ReelMediaEvidence {
     textSeconds: number
     reason: string
   }
+  creative_plan?: ShortCreativePlanEvidence
   capabilities?: string[]
+}
+
+/** Structural rendering receipt for an impact short; it is not a creative approval. */
+export interface ShortCreativePlanEvidence {
+  schema_version: 1
+  hook_tag: string
+  hook_beats: number
+  build_tags: string[]
+  payoff_tag: string
+  payoff_beats: number
+  planned_scene_count: number
+  rendered_clip_file_count: number
+  human_review_required: true
+}
+
+export function parseShortCreativePlan(raw: unknown): ShortCreativePlanEvidence | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const v = raw as Record<string, unknown>
+  const tag = (value: unknown): value is string => typeof value === 'string' && /^[a-z0-9-]{1,24}$/.test(value)
+  if (v.schema_version !== 1 || !tag(v.hook_tag) || !tag(v.payoff_tag)
+    || !Array.isArray(v.build_tags) || v.build_tags.length < 4 || v.build_tags.length > 8
+    || !v.build_tags.every(tag)
+    || !Number.isInteger(v.hook_beats) || Number(v.hook_beats) < 1 || Number(v.hook_beats) > 4
+    || !Number.isInteger(v.payoff_beats) || Number(v.payoff_beats) < 1 || Number(v.payoff_beats) > 4
+    || !Number.isInteger(v.planned_scene_count) || Number(v.planned_scene_count) !== v.build_tags.length + 2
+    || !Number.isInteger(v.rendered_clip_file_count) || Number(v.rendered_clip_file_count) < Number(v.planned_scene_count)
+    || Number(v.rendered_clip_file_count) > 24
+    || v.human_review_required !== true) return null
+  const tags = [v.hook_tag, ...v.build_tags, v.payoff_tag]
+  if (new Set(tags).size !== tags.length) return null
+  return {
+    schema_version: 1,
+    hook_tag: v.hook_tag,
+    hook_beats: Number(v.hook_beats),
+    build_tags: [...v.build_tags] as string[],
+    payoff_tag: v.payoff_tag,
+    payoff_beats: Number(v.payoff_beats),
+    planned_scene_count: Number(v.planned_scene_count),
+    rendered_clip_file_count: Number(v.rendered_clip_file_count),
+    human_review_required: true,
+  }
 }
 
 const measured = (
