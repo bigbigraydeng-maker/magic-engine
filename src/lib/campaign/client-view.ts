@@ -90,3 +90,13 @@ export function campaignPatchForViewer(
   }
   return out
 }
+
+/** Every sent field is still on the campaign the server returned. */
+export function campaignSaveEchoed(sent: Record<string, unknown>, returned: unknown): boolean {
+  if (!isRecord(returned)) return false
+  for (const [key, value] of Object.entries(sent)) {
+    if (!Object.prototype.hasOwnProperty.call(returned, key)) return false
+    if (JSON.stringify(returned[key] ?? null) !== JSON.stringify(value ?? null)) return false
+  }
+  return true
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { campaignPatchForViewer, campaignViewer, presentCampaign, presentCampaigns } from '../client-view'
+import { campaignPatchForViewer, campaignSaveEchoed, campaignViewer, presentCampaign, presentCampaigns } from '../client-view'
 
 const row = {
   id: 'c1',
@@ -47,6 +47,27 @@ describe('推广活动客户视图', () => {
       'client',
     )
     expect(patch).toEqual({ title: '新名字' })
+  })
+
+  it('客户保存视觉要点时这些内部栏不会进补丁', () => {
+    const patch = campaignPatchForViewer(
+      {
+        vi_mood: '金秋',
+        vi_input_notes: '内部画面备注',
+        vi_input_file_urls: ['notes/a.pdf'],
+        vi_reference_note: '不要给客户看的参考',
+      },
+      'client',
+    )
+    expect(patch).toEqual({ vi_mood: '金秋' })
+  })
+
+  it('送出的字段如果没被原样带回，就不能当成已保存', () => {
+    expect(campaignSaveEchoed(
+      { vi_mood: '金秋', vi_input_notes: '内部画面备注' },
+      { vi_mood: '金秋' },
+    )).toBe(false)
+    expect(campaignSaveEchoed({ vi_mood: '金秋' }, { vi_mood: '金秋', title: '春季团' })).toBe(true)
   })
 
   it('内部账号保存仍可改 description', () => {

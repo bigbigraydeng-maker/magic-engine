@@ -575,6 +575,7 @@ function CampaignCard({
           <VisualDirectionSection
             campaign={campaign}
             clientId={clientId}
+            internal={internal}
             onUpdated={onUpdated}
           />
 
