@@ -30,6 +30,7 @@ export type CaptureRequest = z.infer<typeof requestSchema>
 export const externalSourceTypeSchema = z.enum([
   'website', 'mainstream_news', 'industry_news', 'industry_media', 'jobs',
   'facebook_group', 'serp', 'public_ads', 'ai_visibility', 'reputation',
+  'meta_ad_library', 'google_maps_rating', 'tripadvisor', 'ai_answer',
 ])
 export type ExternalSourceType = z.infer<typeof externalSourceTypeSchema>
 export const externalSourceTierSchema = z.enum(['A', 'B', 'C'])

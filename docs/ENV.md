@@ -250,6 +250,9 @@
 | `WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS` | Web Intelligence 客户白名单，未配 = 谁都不跑 | Render-web |
 | `WEB_INTELLIGENCE_TRAFFIC_ENABLED` | Web Intelligence 流量检查总闸，默认 **关** | Render-web |
 | `WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES` | 第一方行程数据源配置（JSON） | Render-web |
+| `FIELD_AGENT_WEBHOOK_URL` | 外勤采集助手的接收地址，必须是 https。未配或不是 https = 仪表盘请求直接说明没接上，不建任务 | Render 服务 `crazycontent` |
+| `FIELD_AGENT_WEBHOOK_KEY` | 调用上面地址时放进请求头的钥匙。未配 = 同样不建任务 | Render 服务 `crazycontent` |
+| `FIELD_AGENT_WEBHOOK_HEADER` | 可选。请求头名字，默认 `Authorization`，此时值是 `Bearer <钥匙>`。改成别的名字时，值就是钥匙原文 | Render 服务 `crazycontent`（可不配） |
 | `FACTORY_STOCK_REFILL_ENABLED` | 内容工厂素材库自动补货总闸，默认 **关** | Render-web |
 | `BASELINE_CRON_ENABLED` | 设 `false` 可临时停掉每月域名基线任务，默认开 | Render-web |
 

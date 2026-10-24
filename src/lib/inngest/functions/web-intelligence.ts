@@ -7,6 +7,7 @@ import { loadCompetitors } from '@/lib/web-intelligence/targets'
 import { authorize, startCapture, collectCapture, stopUnfinishedCapture, understand, settle } from '@/lib/web-intelligence/runner'
 import { discoverTourDetailRequests } from '@/lib/web-intelligence/detail-discovery'
 import { collectAndRecordTrafficDirectionObservations } from '@/lib/web-intelligence/external-run'
+import { closeStaleWebIntelligenceRuns } from '@/lib/web-intelligence/stale-runs'
 
 export const WEB_CAPTURE_EVENT = 'web_intelligence.website.capture.requested'
 export const webIntelligenceCapture = inngest.createFunction({
@@ -46,11 +47,14 @@ export const webIntelligenceDue = inngest.createFunction({
     if (r.error) throw new Error('settings_read_failed')
     return r.data.map(row => row.client_id as string).filter(allowedClient)
   })
+  let staleClosed = 0
   for (const clientId of clients) {
+    const closed = await step.run(`close-stale-${clientId}`, () => closeStaleWebIntelligenceRuns(clientId))
+    staleClosed += closed.closed.length
     const due = await step.run(`due-${clientId}`, () => dueTargets(clientId))
     if (due.length) await step.sendEvent(`dispatch-${clientId}`, due.map(target => ({ id: target.id, name: WEB_CAPTURE_EVENT, data: { client_id: clientId, request_id: target.id, domain: target.domain, url: target.url } })))
   }
-  return { clients_checked: clients.length, no_execute: true }
+  return { clients_checked: clients.length, stale_closed: staleClosed, no_execute: true }
 })
 
 /**
