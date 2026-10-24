@@ -23,11 +23,14 @@ name: PR risk gate
 # Two tiers. B or C arms auto-merge only after the trusted Codex login
 # (`codex-astra` in ME_SIGNOFF_TRUSTED_LOGINS) has reviewed the current head
 # and left no unresolved P0/P1. A new push whose head Codex has not reviewed
-# disables auto-merge instead of re-arming it. A passes only when two trusted
-# sign-offs exist for this exact base+head pair: Codex Astra (role
-# codex-astra) and Claude Code (role claude-code), each written by its own
-# trusted login. Otherwise the check goes red. The former three reviewer
-# roles are optional B-level spot checks and never block a B or C merge.
+# disables auto-merge instead of re-arming it. A arms auto-merge only when
+# Codex Astra and Claude Code have both signed off on this head (no
+# unresolved P0/P1), every required check except this one is green, and no
+# review conversation is still open. A push drops both sign-offs. Schema,
+# migration, Meta token/credential, and Meta campaign/budget/bid paths never
+# arm auto-merge: they get the label needs-ray-merge and stay for Ray. The
+# former three reviewer roles are optional B-level spot checks and never
+# block a B or C merge.
 #
 # It never merges directly, never pushes, never deploys. Its only writes are the
 # rating comment and the auto-merge toggle.
@@ -42,6 +45,7 @@ on:
 permissions:
   contents: write        # enable / disable auto-merge
   pull-requests: write   # post the rating comment; enable / disable auto-merge
+  issues: write          # create and apply the needs-ray-merge label
 
 jobs:
   risk-gate:
@@ -115,7 +119,7 @@ jobs:
           GATE_EVENT_NAME: ${{ github.event_name }}
         run: node tools/ops-review-loop/src/check-risk-gate.mjs
 
-      - name: Enable auto-merge (B/C only, current head reviewed)
+      - name: Enable auto-merge when the gate says the current head is clear
         if: steps.gate.outputs.decision == 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -136,7 +140,7 @@ jobs:
           gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
           echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Disable auto-merge (A / draft / fork / Codex has not reviewed this head)
+      - name: Disable auto-merge when the gate does not enable it
         if: always() && steps.gate.outputs.decision != 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -154,3 +158,29 @@ jobs:
             gh pr merge --disable-auto "$PR_NUMBER"
             echo '- 自动合并：已关闭' >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Label pulls Ray merges by hand
+        if: always() && steps.gate.outputs.ray_hold == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          gh label create needs-ray-merge --repo "$GITHUB_REPOSITORY" --color B60205 --description "Ray merges this pull request by hand" --force
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label needs-ray-merge
+          echo '- 留给 Ray 亲手合：已标 needs-ray-merge' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the Ray-merge label when this diff is not held
+        if: always() && steps.gate.outputs.ray_hold == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          names=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$names," in
+            *,needs-ray-merge,*)
+              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label needs-ray-merge
+              echo '- 留给 Ray 亲手合：标签已去掉' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac

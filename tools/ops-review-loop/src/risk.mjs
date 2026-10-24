@@ -354,6 +354,64 @@ function pathsForEntry(entry) {
 }
 
 /**
+ * Paths that must never arm auto-merge, whatever the risk rating.
+ *
+ * Ray merges these by hand: database schema / migrations, Meta tokens or
+ * credentials, and code that creates or changes a Meta campaign, budget, or
+ * bid. A path that only mentions a budget in a read-only or non-Meta file is
+ * not on this list. Unreadable input fails closed.
+ */
+export const RAY_MERGE_HOLD_RULES = [
+  { prefix: 'supabase/migrations/', why: '数据库 migration' },
+  { suffix: '.sql', why: 'SQL，路径分不清是不是库表语句' },
+  { includes: '/migrations/', why: 'migration 目录' },
+  { basenameIncludes: 'migration', why: '文件名像 migration' },
+  { pattern: /(^|\/)meta\/.*token/i, why: 'Meta token' },
+  { pattern: /(^|\/)meta\/.*cred/i, why: 'Meta 凭证' },
+  { pattern: /(^|\/)meta\/.*secret/i, why: 'Meta 密钥' },
+  { includes: 'system-user', why: 'system user token' },
+  { includes: 'system_user', why: 'system user token' },
+  { pattern: /(^|\/)\.env/i, why: '密钥文件' },
+  { includes: 'src/lib/meta/campaign-writes', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/campaign-management', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/ad-publisher', why: '创建或改 Meta 广告' },
+  { includes: 'src/lib/meta/ads-manager', why: '创建或暂停 Meta 广告' },
+  { includes: 'src/lib/meta/adsets', why: '改 Meta 广告组预算' },
+  { includes: '/meta-ads/', why: 'Meta 广告写入入口' },
+  { includes: '/capabilities/ads/', why: '改广告系列或预算' },
+  { includes: 'ads-campaign-budget', why: '改广告系列预算' },
+  { includes: 'budget-scale', why: '加减广告预算' },
+  { pattern: /(^|\/)meta\/.*bid/i, why: '改 Meta 出价' },
+]
+
+/**
+ * Whether this diff must stay for Ray to merge by hand.
+ *
+ * @param {unknown} files changed-file entries, the same shape `classifyRisk` reads
+ * @returns {{hold: boolean, reason: string}}
+ */
+export function assessRayMergeHold(files) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { hold: true, reason: '改动清单读不到，库表、凭证和广告花费分不清，留给 Ray 亲手合' }
+  }
+  /** @type {string[]} */
+  const hits = []
+  for (const entry of files) {
+    if (!entry || typeof entry !== 'object') {
+      return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    }
+    const { paths, unreadable } = pathsForEntry(/** @type {Record<string, unknown>} */ (entry))
+    if (unreadable) return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    for (const path of paths) {
+      const rule = RAY_MERGE_HOLD_RULES.find((candidate) => ruleMatches(candidate, path, true))
+      if (rule) hits.push(`${path}（${rule.why}）`)
+    }
+  }
+  if (hits.length === 0) return { hold: false, reason: '' }
+  return { hold: true, reason: hits.slice(0, 8).join('；') }
+}
+
+/**
  * Labels that introduce a declared level.
  *
  * `STRONG` is this repo's own convention: a line that opens with one of them

@@ -5,9 +5,11 @@ PM 2026-09-25 拍板（台账卡 `docs/ledger/2026-09-25-merge-gate-machine-not-
 
 > 合并不做"每次 GitHub 点头"的人工闸；分两档。2026-10-25 当晚补了一条：B/C 级
 > 不是检查一绿就自动合，要等 Codex 审过**当前这次提交**、且没有未解决的 P0/P1，
-> 才打开自动合并。新提交让旧审查作废，并关掉已经打开的自动合并。A 级改为
-> Codex Astra 审查 + Claude Code 独立复核，两签齐了才由人合。子牙 / 魏征 / 狄仁杰
-> 只抽查 B 级，缺了不挡合并。
+> 才打开自动合并。新提交让旧审查作废，并关掉已经打开的自动合并。2026-10-25 Ray
+> 定：A 级也由同一道闸自动合，条件是 Codex Astra 与 Claude Code 都签过**当前这次
+> 提交**、没有未解决的 P0/P1、必过检查全绿、审查对话都已解决。碰库表 / migration、
+> Meta 凭证，或会改 Meta 广告系列、预算、出价的，留给 Ray 亲手合。子牙 / 魏征 /
+> 狄仁杰只抽查 B 级，缺了不挡合并。
 
 以前这里描述的「Merge authorization (Ray)」检查已删除：它依赖一个从未配置 required
 reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清单，所以从未真正拦过任何
@@ -48,7 +50,7 @@ P0/P1 就变绿，没审过就保持红。无关评论用单独的分组，取�
 | 级别 | `Risk gate` 结果 | 合并方式 |
 |---|---|---|
 | **B / C** | 级别仍按改动文件算出，写在摘要里。自动合并只在 Codex（变量里 `codex-astra` 那个登录名）审过**当前 head**、且没有未解决的 P0/P1 时才打开；否则这道检查是红的，并执行 `--disable-auto`。抽查缺席不改变这一格。P2 不挡 | 满足上一格，且执行前当前 head 仍是这次审过的提交，才执行 `gh pr merge --auto --merge --match-head-commit`。GitHub 仍要等所有必过检查全绿、review 线程全部解决才真正合并。新推送若 Codex 还没审新提交，关掉自动合并，过期重判也不能重新打开 |
-| **A** | 只有当 **Codex Astra**（`codex-astra`）和 **Claude Code**（`claude-code`）对**当前 base+head** 各有一条可信签字标记 `<!-- me-review-signoff:{...} -->`，而且两条来自**两个不同登录名**时才绿；否则**红**。旧的子牙 / 魏征 / 狄仁杰 标记不算数 | A 级永不自动合。绿了也要人合 |
+| **A** | Codex（`codex-astra`）审过**当前 head**且没有未解决的 P0/P1，并且 Claude Code（`claude-code`）签过**同一个 head**且没有未解决的 P0/P1，必过检查（不含本闸自己）已经全绿，审查对话全部解决，才绿并打开自动合并。Claude 只认当前 head：可信 `me-review-signoff`（角色 `claude-code`、结论 `pass`、head 等于这次提交）、或该登录名对这次提交的 APPROVED 审查、或该登录名的评论里写了这次完整提交号和明确签字（sign-off / signed off / LGTM / 签字通过）。新推送让两签都作废。碰下面三条时**红**，并打上 `needs-ray-merge`，评论里写明原因 | 不碰那三条时，执行与 B/C 相同的 `gh pr merge --auto --merge --match-head-commit`。碰了就永不打开：`supabase/migrations/**`、任意 `.sql`、路径里的 `/migrations/` 或文件名含 migration；`meta/` 下的 token / cred / secret、`system-user`、`.env`；以及会创建或改动 Meta 广告系列、预算、出价的路径（`src/lib/meta/` 下的 campaign-writes、campaign-management、ad-publisher、ads-manager、adsets，`/meta-ads/`、`/capabilities/ads/`、`ads-campaign-budget`、`budget-scale`、`meta/` 下的 bid）。清单读不到也留给 Ray |
 
 另有三种一律红且关闭 auto-merge：草稿 PR、fork 来的 PR、判级过程任何一步读不到。
 
@@ -72,9 +74,7 @@ Claude 留言来自 `claude[bot]`。如果实际发签字的账号不是这两�
 （没有等号的登录名一律不认）。不要把任一格写成 `bigbigraydeng-maker`：那个账号通常就是
 PR 作者，作者给自己签会被丢掉。`github-actions[bot]` 写了也不信。
 
-设了变量也不会自己变绿：还要这两个身份各自留下绑当前 base+head 的签字标记。自动写入
-这条路仍未建成。在那之前，A 级仍由构建控制窗口在聊天里问 PM 一句，PM 决定后用
-`gh pr merge --admin` 合。agent 不得自行对 A 级 PR 执行 `--admin`。
+设了变量也不会自己变绿：Codex 仍靠 `codex-review-state:v1` 里的完整提交号（或对该提交的审查）。Claude 靠上面那三种、只绑当前 head 的签字；base 不必相同。自动写入签字标记这条路仍未建成，有人手写或审查里写明也算。普通 A 级由闸门自动合。碰到库表、Meta 凭证或广告花费的，以及这道闸自己还没合进主干之前，仍由 Ray 亲手合。agent 不得对留给 Ray 的 PR 执行 `--admin`。
 
 B 级可选抽查（子牙 / 魏征 / 狄仁杰，大约五分之一，按 PR 号和提交固定）只出现在摘要里。
 他们的标记可以记，缺了不挡 B 级或 C 级。挡自动合并的是另一件事：Codex 还没审当前
@@ -127,7 +127,7 @@ GitHub「审查」对象，而是两条 PR 评论。能绑定提交的是评论�
   不变，产出的绿勾仍来自同一个 GitHub Actions `integration_id`，`Protect main` 分不出真假。
   上报这些名字的脚本优先从 `main` 取出，所以**不改 workflow 文件**的 PR 不能自己给自己发绿勾；
   改了 `.github/workflows/pr-light-checks.yml` 的 PR 仍然可以改上报方式。
-  这类改动碰了 `.github/`，会被判 A 级、要 PM 在聊天里点头才合；所以今天「这几道检查绿了 =
+  这类改动碰了 `.github/`，会被判 A 级。不碰库表、Meta 凭证和广告花费时，两签齐且检查全绿、对话解决后由闸门自动合；那三条仍留给 Ray。所以今天「这几道检查绿了 =
   真的编译/测试通过了」是流程上的信任，不是机制上的保证。修法另开任务设计并两审，这里不预设方案；
   注意**不能**简单改成 `pull_request_target` 检出 PR head 来构建（见 `pr-risk-gate.yml` 顶部注释），
   也不能只把现有可伪造的结果原样转发成另一个检查。台账：`docs/ledger/2026-09-27-application-build-check-not-tamper-proof.md`。
