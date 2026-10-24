@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
-const mocks = vi.hoisted(() => ({ from: vi.fn() }))
+const mocks = vi.hoisted(() => ({ from: vi.fn(), startCronRun: vi.fn(), finish: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: mocks.from } }))
+vi.mock('@/lib/cron/run-logger', () => ({ startCronRun: mocks.startCronRun }))
 import { GET } from './route'
 
 const now = new Date('2026-09-08T10:00:00Z')
@@ -43,10 +44,16 @@ function database(refreshHeartbeat: boolean) {
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.clearAllMocks() })
 
+function allowRunLog() {
+  mocks.finish.mockResolvedValue(undefined)
+  mocks.startCronRun.mockResolvedValue({ finish: mocks.finish })
+}
+
 describe('factory sweeper recovery', () => {
   it.each([false, true])('clears old failure only when stale recovery wins (heartbeat race=%s)', async race => {
     vi.useFakeTimers(); vi.setSystemTime(now)
     vi.stubEnv('CRON_SECRET', 'local-test')
+    allowRunLog()
     const db = database(race)
     const response = await GET(new NextRequest('http://localhost/api/cron/factory-worker-sweeper', {
       headers: { authorization: 'Bearer local-test' },
@@ -59,12 +66,19 @@ describe('factory sweeper recovery', () => {
     expect(db.row.reject_reason).toBe(race ? 'previous retryable error' : null)
     expect(db.row.status).toBe(race ? 'producing' : 'queued')
     expect(db.row.reclaim_count).toBe(race ? 1 : 2)
+    expect(mocks.startCronRun).toHaveBeenCalledWith('factory-worker-sweeper')
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({
+      processed: race ? 0 : 1,
+      completed: race ? 0 : 1,
+    }))
   })
 
   it('rejects an unauthorized request without querying or updating orders', async () => {
     vi.stubEnv('CRON_SECRET', 'local-test')
+    allowRunLog()
     const response = await GET(new NextRequest('http://localhost/api/cron/factory-worker-sweeper'))
     expect(response.status).toBe(401)
     expect(mocks.from).not.toHaveBeenCalled()
+    expect(mocks.startCronRun).not.toHaveBeenCalled()
   })
 })

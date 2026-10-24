@@ -1,11 +1,12 @@
-// P21.J M2 — factory-worker-sweeper cron(*/5,spec §6.1 心跳纪律,魏征 F10)
+// P21.J M2 — factory-worker-sweeper cron(Render */10,spec §6.1 心跳纪律,魏征 F10)
 // ①heartbeat_at 超 10 分钟的 claimed/producing 收回 queued:reclaim_count+1,
 //   **不消耗 attempt_count**(Mac 合盖睡眠是「超时」不是「失败」,两次睡眠即 dead_letter 是误判)
 // ②离线报警器数据:queued 积压 > 2h 数量 + 全局最后心跳时间(daily digest 消费,M2 后段接)
-// Auth: CRON_SECRET bearer(同全部 ME crons)。
+// Auth: CRON_SECRET bearer(同全部 ME crons)。调度在 render.yaml，不在 GitHub Actions。
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,6 +20,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const cronRun = await startCronRun('factory-worker-sweeper')
   const now = Date.now()
   const staleBefore = new Date(now - HEARTBEAT_STALE_MINUTES * 60_000).toISOString()
 
@@ -29,6 +31,7 @@ export async function GET(req: NextRequest) {
     .in('status', ['claimed', 'producing'])
     .lt('heartbeat_at', staleBefore)
   if (staleErr) {
+    await cronRun.finish({ error: staleErr.message })
     return NextResponse.json({ error: staleErr.message }, { status: 500 })
   }
 
@@ -88,10 +91,16 @@ export async function GET(req: NextRequest) {
     console.warn(`[factory-worker-sweeper] ${backlogCount} queued work orders older than ${BACKLOG_ALERT_HOURS}h`)
   }
 
-  return NextResponse.json({
-    ok: true,
+  const body = {
+    ok: true as const,
     reclaimed,
     backlog_over_2h: backlogCount ?? 0,
     last_heartbeat_at: lastBeat?.heartbeat_at ?? null,
+  }
+  await cronRun.finish({
+    processed: reclaimed.length,
+    completed: reclaimed.length,
+    summary: body,
   })
+  return NextResponse.json(body)
 }

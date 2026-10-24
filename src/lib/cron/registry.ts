@@ -149,6 +149,9 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '25 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '5 * * * *', logsRuns: true },
+  // 2026-10-24 从 GitHub Actions 搬到 Render（每 10 分钟）。addedAt 给首次排班前的宽限期，
+  // 避免「服务还没建好 / 密钥还没填」被健康检查说成从没跑过。
+  { service: 'factory-worker-sweeper', jobName: 'factory-worker-sweeper', schedule: '*/10 * * * *', logsRuns: true, addedAt: '2026-10-24' },
   // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },

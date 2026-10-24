@@ -1046,6 +1046,30 @@ services:
       - key: CRON_SECRET
         sync: false
 
+  # 出片机心跳超时收回: claimed/producing 的 heartbeat_at 超过 10 分钟 → 退回 queued。
+  # 不扣 attempt（机器合盖是超时，不是失败）。
+  # 2026-10-24 从 GitHub Actions（factory-sweepers.yml，原先每 5 分钟）搬到这里：
+  # 仓库准备转私有，那条定时一个月要跑八千多次，按分钟计费。
+  # GitHub 工作流只留手动触发，打的还是同一个接口。
+  # 频率 */10：心跳阈值就是 10 分钟，再密也要等心跳先过期。
+  # 🔴 新建的 cron 服务不会自动拿到 CRON_SECRET（sync: false 只声明不填值）。
+  #    合并、蓝图同步出这个服务之后，必须在 Render 上给 factory-worker-sweeper
+  #    填上和网站 crazycontent 一样的 CRON_SECRET，否则每轮 401。
+  - type: cron
+    name: factory-worker-sweeper
+    env: node
+    schedule: "*/10 * * * *"
+    buildCommand: ""
+    buildFilter:
+      ignoredPaths:
+        - "**/*"
+    startCommand: |
+      curl -fsS --max-time 120 -H "Authorization: Bearer $CRON_SECRET" \
+        https://app.magicengine.com.au/api/cron/factory-worker-sweeper
+    envVars:
+      - key: CRON_SECRET
+        sync: false
+
   # 客户私信 → CRM。PR #652/#653 把接口合进来了,但没有人调用它们,
   # 「客户消息」页会永远是空的 —— 这里补上调用方。
   #
