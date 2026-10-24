@@ -1,0 +1,126 @@
+name: PR risk gate refresh
+
+# Re-evaluates the merge gate when Codex reviews. A clean review is an issue
+# comment (`codex-review-state:v1`, full commit sha), not a review object
+# (#3086, #3091). Codex updates that comment in place, so `edited` counts too.
+#
+# This file is separate from `pr-risk-gate.yml` on purpose. An `issue_comment`
+# run is attached to the default-branch SHA. A job here named "Risk gate"
+# would put that required check on main — green after a clean review, red
+# when the head is still unreviewed. The job below has a different name. The
+# script writes a check run named "Risk gate" onto the PR head, then exits 0
+# so this job does not paint main red. Failing to write that check still
+# fails the job.
+#
+# The script and this workflow both come from `main`. Comment text never
+# enters a `run:` block. A review-submitted event would use the PR merge ref,
+# so this file does not listen for it.
+#
+# Irrelevant comments must not cancel an in-flight gate. Concurrency is on
+# the job, and the group includes the event. A comment that does not
+# re-evaluate gets its own group (`idle` + this run id), so it cannot cancel
+# a real gate run or a review that is still being recorded. A later review
+# of the same PR still cancels the previous re-check.
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write        # enable / disable auto-merge
+  pull-requests: write   # post the rating comment; enable / disable auto-merge
+  checks: write          # publish "Risk gate" on the PR head, not on main
+
+jobs:
+  refresh:
+    name: Record risk gate on head
+    # Same predicate as the concurrency group. A Codex comment on a draft
+    # still runs: decideMerge keeps drafts closed. Anything else skips, and
+    # the idle group means the skip cannot cancel another run.
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1'))
+    concurrency:
+      group: ${{ case(github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1')), format('pr-risk-gate-issue_comment-{0}', github.event.issue.number), format('pr-risk-gate-issue_comment-idle-{0}', github.run_id)) }}
+      cancel-in-progress: true
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      # Checked out from `main`, never the PR head. Credentials are not
+      # persisted because nothing here pushes.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Comment events have no pull_request payload. Read the live PR as data.
+      # The comment body is not passed in.
+      - name: Bind this run to the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_AUTHOR: ${{ github.event.pull_request.user.login }}
+          EVENT_DRAFT: ${{ github.event.pull_request.draft }}
+          EVENT_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            {
+              echo "base=$EVENT_BASE"
+              echo "head=$EVENT_HEAD"
+              echo "author=$EVENT_AUTHOR"
+              echo "draft=$EVENT_DRAFT"
+              echo "fork=$EVENT_FORK"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json baseRefOid,headRefOid,isDraft,isCrossRepository,author \
+            --jq '"base=\(.baseRefOid)\nhead=\(.headRefOid)\ndraft=\(.isDraft)\nfork=\(.isCrossRepository)\nauthor=\(.author.login)"' \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Rate this PR and decide the merge tier
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          BASE_SHA: ${{ steps.pr.outputs.base }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_DRAFT: ${{ steps.pr.outputs.draft }}
+          PR_IS_FORK: ${{ steps.pr.outputs.fork }}
+          SIGNOFF_TRUSTED_LOGINS: ${{ vars.ME_SIGNOFF_TRUSTED_LOGINS }}
+          GATE_EVENT_NAME: ${{ github.event_name }}
+        run: node tools/ops-review-loop/src/check-risk-gate.mjs
+
+      - name: Enable auto-merge (B/C only, current head reviewed)
+        if: steps.gate.outputs.decision == 'enable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          gh pr merge --auto --merge "$PR_NUMBER"
+          echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Disable auto-merge (A / draft / fork / Codex has not reviewed this head)
+        if: always() && steps.gate.outputs.decision != 'enable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          # Distinguish "already off" from a real API failure (CONCERN-2 from
+          # the 2026-09-25 three-way review). The old form `|| echo …` swallowed
+          # both, so an API outage that left a stale enable in place would look
+          # identical to the idempotent no-op.
+          state=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest')
+          if [ "$state" = "null" ] || [ -z "$state" ]; then
+            echo '- 自动合并：本来就未开启（无需操作）' >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr merge --disable-auto "$PR_NUMBER"
+            echo '- 自动合并：已关闭' >> "$GITHUB_STEP_SUMMARY"
+          fi

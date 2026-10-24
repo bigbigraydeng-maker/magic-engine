@@ -20,6 +20,11 @@ reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清�
 取——一个 PR 改不了判它的那把尺子。它**不检出、不执行 PR 的代码**，PR 只以数据身份进入
 （改动文件清单、正文里自报的级别、评论）。
 
+Codex 审完是一条 PR 评论，不是一次推送。那次重判在 `pr-risk-gate-refresh.yml` 里跑，
+脚本仍从 `main` 取。评论触发的运行记在主干那次提交上，所以它**不**把任务名叫成
+`Risk gate`；判完后用检查接口把同名结果写到 **PR 当前 head**。审过且没有未解决的
+P0/P1 就变绿，没审过就保持红。无关评论用单独的分组，取消不了正在跑的判级。
+
 级别由 `tools/ops-review-loop/src/risk.mjs` 按 PR **实际改动的文件**算出
 （规则见 `docs/ENGINEERING_QUALITY_GATES.md` §10.1）：
 
