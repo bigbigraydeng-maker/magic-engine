@@ -1,17 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
+import { OUTCOME_STEPS } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 import {
   GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
   PRIMARY_METRIC_CATALOG,
 } from '@/types/strategy'
 import {
   CATALOG_KEYS_OUTSIDE_OUTCOME_LEVELS,
+  CATALOG_LADDER_STEP,
   METRIC_KEYS_BY_OUTCOME_LEVEL,
   OUTCOME_LEVELS,
   SIGNUPS_COUNT_CAVEAT,
   SIGNUPS_COUNT_METRIC_KEY,
   compareOutcomeLevels,
   judgeOutcomeEvidence,
+  ladderStepForCatalogKey,
+  ladderStepIsQualifiedLead,
   levelMayStandFor,
   outcomeLevelOf,
 } from '../outcome-levels'
@@ -38,8 +42,8 @@ describe('outcome levels', () => {
     }
   })
 
-  it('maps each catalog key once and leaves contact success empty', () => {
-    expect(METRIC_KEYS_BY_OUTCOME_LEVEL.contact_success).toEqual([])
+  it('maps each catalog key once and leaves qualified leads empty', () => {
+    expect(METRIC_KEYS_BY_OUTCOME_LEVEL.qualified_lead).toEqual([])
 
     const mapped = OUTCOME_LEVELS.flatMap((level) => [...METRIC_KEYS_BY_OUTCOME_LEVEL[level]])
     const classified = [...mapped, ...CATALOG_KEYS_OUTSIDE_OUTCOME_LEVELS]
@@ -73,15 +77,23 @@ describe('outcome levels', () => {
       expect(judged.reason).toContain('不能代替成交')
     }
 
-    for (const key of METRIC_KEYS_BY_OUTCOME_LEVEL.qualified_lead) {
+    for (const key of ['leads_count', 'form_submissions'] as const) {
       const judged = judgeOutcomeEvidence('sales', key)
       expect(judged.accepted).toBe(false)
       expect(judged.countsAsClosedDeal).toBe(false)
-      expect(judged.level).toBe('qualified_lead')
+      expect(judged.level).toBe('contact_success')
+      expect(judged.ladderStep).toBe('lead')
       expect(judged.reasonCode).toBe('lead_cannot_replace_deal')
       expect(judged.reason).toContain('线索')
       expect(judged.reason).toContain('不能代替成交')
     }
+
+    const started = judgeOutcomeEvidence('sales', 'messaging_started')
+    expect(started.accepted).toBe(false)
+    expect(started.level).toBe('contact_success')
+    expect(started.ladderStep).toBe('messaging_started')
+    expect(started.reasonCode).toBe('contact_cannot_replace_deal')
+    expect(started.reason).toContain('不能代替成交')
   })
 
   it('accepts closed-deal keys for sales and marks signups as a transaction count', () => {
@@ -111,11 +123,41 @@ describe('outcome levels', () => {
     }
   })
 
-  it('keeps lead evidence on acquisition and exposure evidence on awareness', () => {
-    for (const key of METRIC_KEYS_BY_OUTCOME_LEVEL.qualified_lead) {
+  it('keeps raw DM starts and form leads below a qualified enquiry', () => {
+    const leadAt = OUTCOME_STEPS.indexOf('lead')
+    const qualifiedAt = OUTCOME_STEPS.indexOf('qualified_enquiry')
+    expect(OUTCOME_STEPS.indexOf('messaging_started')).toBeLessThan(leadAt)
+    expect(leadAt).toBeLessThan(qualifiedAt)
+    expect(ladderStepIsQualifiedLead('messaging_started')).toBe(false)
+    expect(ladderStepIsQualifiedLead('lead')).toBe(false)
+    expect(ladderStepIsQualifiedLead('qualified_enquiry')).toBe(true)
+
+    expect(ladderStepForCatalogKey('messaging_started')).toBe('messaging_started')
+    expect(outcomeLevelOf('messaging_started')).toBe('contact_success')
+    expect(judgeOutcomeEvidence('acquisition', 'messaging_started').level).not.toBe('qualified_lead')
+
+    for (const key of ['leads_count', 'form_submissions'] as const) {
+      expect(CATALOG_LADDER_STEP[key]).toBe('lead')
+      expect(outcomeLevelOf(key)).toBe('contact_success')
+      expect(judgeOutcomeEvidence('acquisition', key).level).not.toBe('qualified_lead')
+      expect(judgeOutcomeEvidence('acquisition', key).reason).toContain('不是合格线索')
+    }
+
+    for (const key of Object.keys(CATALOG_LADDER_STEP)) {
+      const step = ladderStepForCatalogKey(key)
+      expect(METRIC_KEYS_BY_OUTCOME_LEVEL.qualified_lead).not.toContain(key)
+      expect(step).not.toBeNull()
+      expect(step === null ? false : ladderStepIsQualifiedLead(step)).toBe(false)
+    }
+  })
+
+  it('keeps unqualified contact evidence on acquisition and exposure evidence on awareness', () => {
+    for (const key of METRIC_KEYS_BY_OUTCOME_LEVEL.contact_success) {
       const judged = judgeOutcomeEvidence('acquisition', key)
       expect(judged.accepted).toBe(true)
+      expect(judged.level).toBe('contact_success')
       expect(judged.countsAsClosedDeal).toBe(false)
+      expect(judged.reason).toContain('不是合格线索')
       expect(judged.reason).toContain('不是成交')
     }
 
