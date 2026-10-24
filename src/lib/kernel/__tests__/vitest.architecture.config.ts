@@ -6,7 +6,7 @@
  *    或者在 setup 里把断言改成空操作 —— 检查照样是绿的，还会被自动合并。
  *    这份配置放在 A 级路径 src/lib/kernel/ 下，改它要过 A 级审。
  *
- * 用法见 .github/workflows/kernel-architecture.yml；本地照旧可以用根配置跑同一个文件。
+ * 用法见 .github/workflows/pr-light-checks.yml；本地照旧可以用根配置跑同一个文件。
  */
 import { defineConfig } from 'vitest/config'
 import path from 'path'
