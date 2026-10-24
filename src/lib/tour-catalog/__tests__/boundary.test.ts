@@ -20,6 +20,8 @@ const CATALOG_PREFIXES = [
   'src/lib/tour-catalog/',
   'src/app/api/clients/[id]/tour-catalog/',
   'src/app/dashboard/clients/[id]/tour-catalog/',
+  // Published-snapshot read API. Same exemption as the client catalog API folder.
+  'src/app/api/public/tour-catalog/',
 ]
 
 const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')

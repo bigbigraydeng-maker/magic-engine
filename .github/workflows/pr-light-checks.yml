@@ -176,7 +176,7 @@ jobs:
         id: ops_review
         if: steps.install.outcome == 'success'
         continue-on-error: true
-        run: npx vitest run tools/ops-review-loop --reporter=verbose
+        run: npx vitest run tools/ops-review-loop --reporter=verbose --exclude '**/.guard-main/**'
 
       - name: Kernel architecture test
         id: kernel
