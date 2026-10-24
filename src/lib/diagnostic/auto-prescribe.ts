@@ -24,6 +24,10 @@ import type { GoalRow } from '@/types/strategy'
 import { generatePrescription } from './prescription-generator'
 import { landPrescription } from './prescription-landing'
 import { listActiveGoals } from '@/lib/strategy/goals'
+import {
+  closeStaleInProgressItems,
+  parkStaleAutoRunItemsWithoutGoal,
+} from '@/lib/execution/auto-run'
 
 /** 体检结果多新才算「这周的」—— 周更任务，给一周多一点余量。 */
 export const DIAGNOSIS_FRESH_DAYS = 8
@@ -279,6 +283,10 @@ export async function runAutoPrescribe(
   supabase: SupabaseClient,
   now: Date = new Date(),
 ): Promise<AutoPrescribeSummary> {
+  // Cards left in progress with no update for >30 days are not being worked.
+  // Close them here because this weekly job is the one that actually runs.
+  await closeStaleInProgressItems(supabase, now)
+
   const since = new Date(now.getTime() - DIAGNOSIS_FRESH_DAYS * 86_400_000).toISOString()
 
   const { data: runRows, error: runErr } = await supabase
@@ -410,14 +418,20 @@ export async function runAutoPrescribe(
       const goals = await listActiveGoals(supabase, cand.clientId)
       const goal = pickGoalForPrescription(goals, now)
       if (!goal) {
+        const parked = await parkStaleAutoRunItemsWithoutGoal(supabase, cand.clientId, now)
+        const parkedNote =
+          parked > 0
+            ? `。已把 ${parked} 条过期方案上的自动动作标成 blocked_needs_goal，不再每天重判`
+            : ''
         outcomes.push({
           clientId: cand.clientId,
           clientName,
           result: 'skipped',
           detail:
-            goals.length === 0
+            (goals.length === 0
               ? '这个客户没有进行中的目标，方案无从挂起 —— 先给他定个目标'
-              : `这个客户 ${goals.length} 个目标全都过期了（状态还挂着"进行中"），先定个新目标再开方`,
+              : `这个客户 ${goals.length} 个目标全都过期了（状态还挂着"进行中"），先定个新目标再开方`) +
+            parkedNote,
         })
         continue
       }

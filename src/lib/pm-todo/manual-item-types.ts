@@ -215,6 +215,10 @@ export type ManualItemKind =
   | 'story_unarmed'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
+  /** 方案过期且没有进行中的目标，自动写文章停住了 —— 要人去定目标，不会自己重判 */
+  | 'auto_run_needs_goal'
+  /** 方案推荐了系统不认识的动作类型，没有排进待办 —— 要人看是改成已知类型还是划掉 */
+  | 'zhuge_unknown_action'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
   | 'dnc_maybe_wrong'
   /** 客人在 Facebook 私信里像是说了「别再联系」，而判据从来读不到私信 —— 只提示，不自动封 */

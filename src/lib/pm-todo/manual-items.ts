@@ -81,6 +81,7 @@ import { fetchAll } from '@/lib/supabase-paginate'
 import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
+import { pushZhugeUnknownActionItems } from '@/lib/pm-todo/zhuge-manual-review-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
 import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
 import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
@@ -348,6 +349,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 只写进 cron 的运行记录 = 发现死在日志里（管道断头那条铁律的反面教材）。
     (b) => pushAutoRunItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 自动执行待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushZhugeUnknownActionItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 不认识的动作类型待办生成失败（不阻塞其他待办）:', e),
     ),
     // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
     (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
@@ -858,7 +862,7 @@ async function pushAutoRunItems(
   const todos = await fetchAutoRunTodos(supabase, now)
   for (const t of todos) {
     items.push({
-      kind: t.stuck ? 'auto_run_stuck' : 'auto_run_blocked',
+      kind: t.needsGoal ? 'auto_run_needs_goal' : t.stuck ? 'auto_run_stuck' : 'auto_run_blocked',
       client_id: t.client_id,
       client_name: nameOf(t.client_id),
       what: t.what,

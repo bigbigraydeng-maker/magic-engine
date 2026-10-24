@@ -135,7 +135,7 @@ function makeFinding(
 const SAMPLE_ACTION: PriorityAction = {
   rank: 1,
   dimension: 'seo',
-  action_type: 'fix_meta_titles',
+  action_type: 'seo.publish_blog',
   why_now: 'Missing meta titles on 8 pages are hurting click-through rates.',
   evidence_refs: ['seo/missing_meta_title', 'SEMrush trust_score=28'],
   expected_impact: 'high',
@@ -227,7 +227,7 @@ describe('parseOutput()', () => {
     const result = parseOutput(raw)
     expect(result).toHaveLength(1)
     expect(result[0].rank).toBe(1)
-    expect(result[0].action_type).toBe('fix_meta_titles')
+    expect(result[0].action_type).toBe('seo.publish_blog')
   })
 
   it('throws when top_actions is missing', () => {
@@ -287,6 +287,19 @@ describe('validateAction()', () => {
 
   it('throws on non-object input', () => {
     expect(() => validateAction('not-an-object', 1)).toThrow()
+  })
+
+  it('routes an invented action type to manual review', () => {
+    const result = validateAction(
+      { ...SAMPLE_ACTION, action_type: 'launch_google_search_ads_3pl' },
+      1,
+    )
+    expect(result.action_type).toBe('manual_review')
+    expect(result.execution_mode).toBe('external_manual')
+    expect(result.metadata).toMatchObject({
+      disposition: 'manual_review',
+      invented_action_type: 'launch_google_search_ads_3pl',
+    })
   })
 })
 

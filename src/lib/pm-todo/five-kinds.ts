@@ -140,6 +140,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
 
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
+  zhuge_unknown_action: 'review', // 不认识的动作类型：看一眼，改成已知类型或划掉
   blog_pr_open: 'review',
   linkedin_progress_needs_review: 'review', // 历史：LinkedIn 自动发帖已下线，仅夹具使用
   maliang_render_passed: 'review',
@@ -237,6 +238,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   diagnostic_findings: 'weekly', // 本周体检结果，已排成看板动作
   not_indexed: 'weekly', // 未收录页面汇总：SEO 日常活（FDE / 开发在修），周报里报进度
   auto_run_blocked: 'weekly', // 「多数情况下不用你动手，周二会自动重判」
+  auto_run_needs_goal: 'decide', // 没有进行中的目标，周二不会重判，要人去定目标
 }
 
 /**

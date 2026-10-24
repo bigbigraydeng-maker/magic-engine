@@ -32,6 +32,7 @@ interface Tables {
   diagnostic_runs?: unknown[]
   prescriptions?: unknown[]
   clients?: unknown[]
+  execution_items?: unknown[]
 }
 
 /** 记录所有写操作，用来断言「到底往库里写了什么」。 */
@@ -42,7 +43,7 @@ function fakeSupabase(tables: Tables) {
     const rows = (tables as Record<string, unknown[]>)[table] ?? []
     const builder: Record<string, unknown> = {}
     const self = () => builder
-    for (const m of ['eq', 'in', 'not', 'gte', 'order', 'limit']) builder[m] = self
+    for (const m of ['eq', 'in', 'not', 'gte', 'lt', 'order', 'limit']) builder[m] = self
     builder.select = self
     builder.maybeSingle = () => Promise.resolve({ data: null, error: null })
     builder.then = (res: (v: { data: unknown; error: null }) => unknown) =>
@@ -56,6 +57,7 @@ function fakeSupabase(tables: Tables) {
         const w: Record<string, unknown> = {}
         const wself = () => w
         w.eq = wself
+        w.in = wself
         w.select = () => Promise.resolve({ data: [{ id: 'p1' }], error: null })
         w.then = (res: (v: { error: null }) => unknown) => res({ error: null })
         return w
@@ -257,6 +259,40 @@ describe('runAutoPrescribe —— 目标', () => {
     })
     const s = await runAutoPrescribe(supabase, NOW)
     expect(s.outcomes[0].detail).toContain('先给他定个目标')
+  })
+
+  it('🔴 没有目标且方案已过期 → 把自动动作标成 blocked_needs_goal，不再每天重判', async () => {
+    mockListGoals.mockResolvedValue([])
+    const { supabase, writes } = fakeSupabase({
+      diagnostic_runs: [RUN()],
+      clients: [CLIENT()],
+      prescriptions: [{
+        id: 'presc-old',
+        client_id: 'c1',
+        status: 'approved',
+        approved_at: iso(52),
+        generated_at: iso(53),
+        created_at: iso(52),
+        goal_id: null,
+        agent_name: null,
+        intake: null,
+      }],
+      execution_items: [{
+        id: 'item-old',
+        client_id: 'c1',
+        status: 'pending',
+        action_type: 'generate_blog_post',
+        source: 'diagnostic',
+        created_at: iso(60),
+        prescription_id: 'presc-old',
+        marketing_plan_id: null,
+      }],
+    })
+    const s = await runAutoPrescribe(supabase, NOW)
+    expect(s.outcomes[0].detail).toContain('先给他定个目标')
+    expect(s.outcomes[0].detail).toContain('blocked_needs_goal')
+    const parked = writes.find((w) => w.patch.auto_run_error === 'blocked_needs_goal')
+    expect(parked?.patch.status).toBe('skipped')
   })
 
   it('🔴 落地前必须打上「机器自动落地」标记 —— 它是 PM 通知的唯一开关', async () => {

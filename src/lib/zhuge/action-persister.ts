@@ -28,6 +28,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ZhugeOutput, PriorityAction, DiagnosticDimension } from './types'
 import type { FlywheelName, ExecutionMode } from '@/lib/flywheel/adapters/types'
 import { saveDecisionHistory } from '@/lib/memory/service'
+import { isRegisteredRecommendedAction, partitionRecommendedActions } from './action-vocabulary'
+import { buildManualReviewRows, type ManualReviewInsert } from './manual-review'
 import { assertAdsExpectedMetric } from '@/lib/flywheel/metric-registry'
 import { resolveClientAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 import { canonicalUrl } from '@/lib/url/canonical-url'
@@ -79,10 +81,12 @@ export interface PersistZhugeActionsResult {
 }
 
 export interface WriteExecutionItemsResult {
-  /** Number of execution_items rows inserted in this call. */
+  /** Number of pending execution_items rows inserted in this call. */
   inserted: number
   /** Number of old zhuge items marked superseded. */
   superseded: number
+  /** Unregistered action types parked as manual review (not pending). */
+  manualReview: number
 }
 
 // ── Session key ───────────────────────────────────────────────────────────────
@@ -204,7 +208,9 @@ export async function persistZhugeActions(
 
   // Filter to dimensions that map to a flywheel (reputation/competitor skipped here)
   const insertable = input.output.top_actions.filter(
-    (a) => DIMENSION_TO_FLYWHEEL[a.dimension] !== undefined,
+    (a) =>
+      DIMENSION_TO_FLYWHEEL[a.dimension] !== undefined &&
+      isRegisteredRecommendedAction(a.action_type),
   )
 
   let ids: string[] = []
@@ -373,9 +379,28 @@ export async function writeExecutionItems(
   actions: PriorityAction[],
   prescriptionId: string | null = null,
 ): Promise<WriteExecutionItemsResult> {
-  if (actions.length === 0) return { inserted: 0, superseded: 0 }
+  if (actions.length === 0) return { inserted: 0, superseded: 0, manualReview: 0 }
 
-  const actionTypes = actions.map((a) => a.action_type)
+  const { registered, manualReview } = partitionRecommendedActions(actions)
+  const manualReviewCount = await insertManualReviewItems(
+    supabase,
+    clientId,
+    manualReview.map((action) => ({
+      dimension: action.dimension,
+      inventedActionType: inventedTypeOf(action),
+      why: action.why_now,
+      source: 'zhuge' as const,
+      prescriptionId,
+      zhugeSessionId,
+      sortOrder: action.rank,
+      metadata: action.metadata,
+    })),
+  )
+  if (registered.length === 0) {
+    return { inserted: 0, superseded: 0, manualReview: manualReviewCount }
+  }
+
+  const actionTypes = registered.map((a) => a.action_type)
 
   // Fetch any existing pending rows for these action types for this client.
   // steps_json is needed to rebuild each row's dedup key (keyword lives there).
@@ -412,7 +437,7 @@ export async function writeExecutionItems(
   const toInsert: PriorityAction[] = []
   const batchKeys = new Set<string>()
 
-  for (const action of actions) {
+  for (const action of registered) {
     const key = executionItemDedupKey(action.action_type, action.metadata?.keyword, action.metadata?.url ?? action.metadata?.page_url)
     // Same finding appearing twice in one batch: insert only the first
     if (batchKeys.has(key)) continue
@@ -471,7 +496,26 @@ export async function writeExecutionItems(
     }
   }
 
-  return { inserted: toInsert.length, superseded: toSupersede.length }
+  return { inserted: toInsert.length, superseded: toSupersede.length, manualReview: manualReviewCount }
+}
+
+function inventedTypeOf(action: PriorityAction): string {
+  const raw = action.metadata?.invented_action_type
+  if (typeof raw === 'string' && raw.trim().length > 0) return raw.trim()
+  return action.action_type
+}
+
+/** Unregistered recommendations land as skipped manual-review rows, never pending. */
+export async function insertManualReviewItems(
+  supabase: SupabaseClient,
+  clientId: string,
+  items: ManualReviewInsert[],
+): Promise<number> {
+  const rows = await buildManualReviewRows(supabase, clientId, items)
+  if (rows.length === 0) return 0
+  const { error } = await supabase.from('execution_items').insert(rows)
+  if (error) throw new Error(`manual review insert failed: ${error.message}`)
+  return rows.length
 }
 
 // ── SEO weekly list items (docs/specs/2026-10-04-seo-weekly-list-v0.2.md) ───────

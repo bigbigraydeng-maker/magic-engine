@@ -12,6 +12,8 @@
  * 它自己的行为在 `src/lib/auth/__tests__/client-access.test.ts` 里已经有测试。
  */
 
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
@@ -661,6 +663,11 @@ describe('POST /api/kernel/approvals/[runId]/decision', () => {
       runCtx(),
     )
     expect(await res.json()).toMatchObject({ ok: true, finalStatus: 'denied' })
+  })
+
+  it('list route is force-dynamic so the build does not throw Dynamic server usage', () => {
+    const src = readFileSync(join(__dirname, '../route.ts'), 'utf8')
+    expect(src).toContain("export const dynamic = 'force-dynamic'")
   })
 
   it('🔴 只把三个允许的字段交给审批层', async () => {

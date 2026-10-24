@@ -93,7 +93,7 @@ beforeEach(() => vi.clearAllMocks())
 
 describe('actionTypeToTitle()', () => {
   it('converts dotted slug to title case', () => {
-    expect(actionTypeToTitle('seo.fix_meta_titles')).toBe('Fix Meta Titles')
+    expect(actionTypeToTitle('seo.publish_blog')).toBe('Publish Blog')
   })
 
   it('handles single-segment slug', () => {
@@ -126,14 +126,14 @@ describe('executionModeToFixType()', () => {
 describe('executionItemDedupKey()', () => {
   it('treats two spellings of the same page as one key', () => {
     expect(
-      executionItemDedupKey('seo.fix_internal_link', null, 'https://www.example.com/a/'),
-    ).toBe(executionItemDedupKey('seo.fix_internal_link', null, 'http://example.com/a'))
+      executionItemDedupKey('seo.optimize_page_seo', null, 'https://www.example.com/a/'),
+    ).toBe(executionItemDedupKey('seo.optimize_page_seo', null, 'http://example.com/a'))
   })
 
   it('gives different pages different keys', () => {
     expect(
-      executionItemDedupKey('seo.fix_internal_link', null, 'https://example.com/a'),
-    ).not.toBe(executionItemDedupKey('seo.fix_internal_link', null, 'https://example.com/b'))
+      executionItemDedupKey('seo.optimize_page_seo', null, 'https://example.com/a'),
+    ).not.toBe(executionItemDedupKey('seo.optimize_page_seo', null, 'https://example.com/b'))
   })
 
   it('falls back to the old key format when no URL is present', () => {
@@ -153,7 +153,7 @@ describe('writeExecutionItems()', () => {
   it('inserts new items when no existing pending rows', async () => {
     const supabase = makeSupabase([])
     const actions = [
-      makeAction('seo',          'seo.fix_meta_titles', 1),
+      makeAction('seo',          'seo.publish_blog', 1),
       makeAction('ai_visibility','geo.deploy_directive', 2),
     ]
 
@@ -172,7 +172,7 @@ describe('writeExecutionItems()', () => {
       action_type: string; source: string; status: string; zhuge_session_id: string
     }>
     expect(rows).toHaveLength(2)
-    expect(rows[0].action_type).toBe('seo.fix_meta_titles')
+    expect(rows[0].action_type).toBe('seo.publish_blog')
     expect(rows[0].source).toBe('zhuge')
     expect(rows[0].status).toBe('pending')
     expect(rows[0].zhuge_session_id).toBe('session-uuid-1')
@@ -180,10 +180,10 @@ describe('writeExecutionItems()', () => {
 
   it('supersedes old zhuge pending row when re-running', async () => {
     const existing: ExistingRow[] = [
-      { id: 'old-item-1', action_type: 'seo.fix_meta_titles', source: 'zhuge', zhuge_session_id: 'old-session' },
+      { id: 'old-item-1', action_type: 'seo.publish_blog', source: 'zhuge', zhuge_session_id: 'old-session' },
     ]
     const supabase = makeSupabase(existing)
-    const actions  = [makeAction('seo', 'seo.fix_meta_titles', 1)]
+    const actions  = [makeAction('seo', 'seo.publish_blog', 1)]
 
     const result = await writeExecutionItems(
       supabase as never,
@@ -203,10 +203,10 @@ describe('writeExecutionItems()', () => {
 
   it('skips action when a non-zhuge pending row already exists', async () => {
     const existing: ExistingRow[] = [
-      { id: 'fde-item-1', action_type: 'seo.fix_meta_titles', source: 'fde', zhuge_session_id: null },
+      { id: 'fde-item-1', action_type: 'seo.publish_blog', source: 'fde', zhuge_session_id: null },
     ]
     const supabase = makeSupabase(existing)
-    const actions  = [makeAction('seo', 'seo.fix_meta_titles', 1)]
+    const actions  = [makeAction('seo', 'seo.publish_blog', 1)]
 
     const result = await writeExecutionItems(
       supabase as never,
@@ -233,14 +233,14 @@ describe('writeExecutionItems()', () => {
 
   it('handles mixed: one new, one skip (fde), one supersede', async () => {
     const existing: ExistingRow[] = [
-      { id: 'zhuge-old', action_type: 'seo.old_action',  source: 'zhuge', zhuge_session_id: 'prev-session' },
-      { id: 'fde-item',  action_type: 'geo.fde_action',  source: 'fde',   zhuge_session_id: null },
+      { id: 'zhuge-old', action_type: 'seo.refresh_blog',  source: 'zhuge', zhuge_session_id: 'prev-session' },
+      { id: 'fde-item',  action_type: 'geo.compose_directive',  source: 'fde',   zhuge_session_id: null },
     ]
     const supabase = makeSupabase(existing)
     const actions  = [
-      makeAction('seo',          'seo.old_action', 1),  // supersede old zhuge
-      makeAction('ai_visibility','geo.fde_action', 2),  // skip (fde owns it)
-      makeAction('ads',          'ads.new_action', 3),  // new insert
+      makeAction('seo',          'seo.refresh_blog', 1),  // supersede old zhuge
+      makeAction('ai_visibility','geo.compose_directive', 2),  // skip (fde owns it)
+      makeAction('ads',          'ads.pause_campaign', 3),  // new insert
     ]
 
     const result = await writeExecutionItems(
@@ -251,13 +251,13 @@ describe('writeExecutionItems()', () => {
     )
 
     expect(result.superseded).toBe(1)
-    // seo.old_action (after supersede) + ads.new_action = 2 inserted
+    // seo.refresh_blog (after supersede) + ads.pause_campaign = 2 inserted
     expect(result.inserted).toBe(2)
   })
 
   it('throws on insert DB error', async () => {
     const supabase = makeSupabase([], { message: 'FK violation' })
-    const actions  = [makeAction('seo', 'seo.fix', 1)]
+    const actions  = [makeAction('seo', 'seo.publish_blog', 1)]
 
     await expect(
       writeExecutionItems(supabase as never, 'client-1', null, actions),
@@ -267,32 +267,54 @@ describe('writeExecutionItems()', () => {
   it('maps all action dimensions and fix_types correctly', async () => {
     const supabase = makeSupabase([])
     const actions  = [
-      makeAction('seo',           'seo.fix',       1, 'in_house'),
-      makeAction('ai_visibility', 'geo.deploy',    2, 'in_house'),
-      makeAction('ads',           'ads.pause',     3, 'third_party'),
-      makeAction('social',        'social.post',   4, 'in_house'),
-      makeAction('reputation',    'rep.monitor',   5, 'external_manual'),
-      makeAction('competitor',    'comp.analysis', 6, 'external_manual'),
+      makeAction('seo',           'seo.publish_blog',    1, 'in_house'),
+      makeAction('ai_visibility', 'geo.deploy_directive', 2, 'in_house'),
+      makeAction('ads',           'ads.pause_campaign',   3, 'third_party'),
+      makeAction('social',        'social.publish_post',  4, 'in_house'),
     ]
 
     const result = await writeExecutionItems(supabase as never, 'client-1', null, actions)
 
-    expect(result.inserted).toBe(6)
+    expect(result.inserted).toBe(4)
+    expect(result.manualReview).toBe(0)
     const rows = supabase._insertFn.mock.calls[0][0] as Array<{
       dimension: string
       fix_type: string
+      status: string
     }>
-    expect(rows[0]).toMatchObject({ dimension: 'seo',           fix_type: 'me_auto' })
-    expect(rows[1]).toMatchObject({ dimension: 'ai_visibility', fix_type: 'me_auto' })
-    expect(rows[2]).toMatchObject({ dimension: 'ads',           fix_type: 'third_party' })
-    expect(rows[3]).toMatchObject({ dimension: 'social',        fix_type: 'me_auto' })
-    expect(rows[4]).toMatchObject({ dimension: 'reputation',    fix_type: 'fde_manual' })
-    expect(rows[5]).toMatchObject({ dimension: 'competitor',    fix_type: 'fde_manual' })
+    expect(rows[0]).toMatchObject({ dimension: 'seo',           fix_type: 'me_auto', status: 'pending' })
+    expect(rows[1]).toMatchObject({ dimension: 'ai_visibility', fix_type: 'me_auto', status: 'pending' })
+    expect(rows[2]).toMatchObject({ dimension: 'ads',           fix_type: 'third_party', status: 'pending' })
+    expect(rows[3]).toMatchObject({ dimension: 'social',        fix_type: 'me_auto', status: 'pending' })
+  })
+
+  it('parks an invented action type as manual review instead of pending', async () => {
+    const supabase = makeSupabase([])
+    const actions = [
+      makeAction('ads', 'launch_google_search_ads_3pl', 1, 'in_house'),
+      makeAction('seo', 'configure_target_keywords', 2, 'external_manual'),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 'session-1', actions)
+
+    expect(result.inserted).toBe(0)
+    expect(result.manualReview).toBe(2)
+    const rows = supabase._insertFn.mock.calls[0][0] as Array<{
+      action_type: string
+      status: string
+      steps_json: { invented_action_type: string; disposition: string }
+    }>
+    expect(rows.every((row) => row.status === 'skipped')).toBe(true)
+    expect(rows.every((row) => row.action_type === 'manual_review')).toBe(true)
+    expect(rows.map((row) => row.steps_json.invented_action_type)).toEqual([
+      'launch_google_search_ads_3pl',
+      'configure_target_keywords',
+    ])
   })
 
   it('passes null zhuge_session_id when no session id available', async () => {
     const supabase = makeSupabase([])
-    const actions  = [makeAction('seo', 'seo.fix', 1)]
+    const actions  = [makeAction('seo', 'seo.publish_blog', 1)]
 
     await writeExecutionItems(supabase as never, 'client-1', null, actions)
 
@@ -385,8 +407,8 @@ describe('writeExecutionItems()', () => {
   it('inserts both cards when two same-type actions carry different page URLs', async () => {
     const supabase = makeSupabase([])
     const actions = [
-      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { keyword: null, url: 'https://example.com/a' }),
-      makeAction('seo', 'seo.fix_internal_link', 2, 'in_house', { keyword: null, url: 'https://example.com/b' }),
+      makeAction('seo', 'seo.optimize_page_seo', 1, 'in_house', { keyword: null, url: 'https://example.com/a' }),
+      makeAction('seo', 'seo.optimize_page_seo', 2, 'in_house', { keyword: null, url: 'https://example.com/b' }),
     ]
 
     const result = await writeExecutionItems(supabase as never, 'client-1', 's1', actions)
@@ -398,11 +420,11 @@ describe('writeExecutionItems()', () => {
 
   it('does not supersede a pending card for a different page', async () => {
     const existing: ExistingRow[] = [
-      { id: 'page-a-card', action_type: 'seo.fix_internal_link', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: null, url: 'https://example.com/a' } },
+      { id: 'page-a-card', action_type: 'seo.optimize_page_seo', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: null, url: 'https://example.com/a' } },
     ]
     const supabase = makeSupabase(existing)
     const actions  = [
-      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { keyword: null, url: 'https://example.com/b' }),
+      makeAction('seo', 'seo.optimize_page_seo', 1, 'in_house', { keyword: null, url: 'https://example.com/b' }),
     ]
 
     const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)
@@ -414,11 +436,11 @@ describe('writeExecutionItems()', () => {
 
   it('supersedes a pending card for the same page written with a different URL spelling', async () => {
     const existing: ExistingRow[] = [
-      { id: 'page-a-card', action_type: 'seo.fix_internal_link', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: null, url: 'https://www.example.com/a/' } },
+      { id: 'page-a-card', action_type: 'seo.optimize_page_seo', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: null, url: 'https://www.example.com/a/' } },
     ]
     const supabase = makeSupabase(existing)
     const actions  = [
-      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { keyword: null, url: 'http://example.com/a' }),
+      makeAction('seo', 'seo.optimize_page_seo', 1, 'in_house', { keyword: null, url: 'http://example.com/a' }),
     ]
 
     const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)
@@ -430,11 +452,11 @@ describe('writeExecutionItems()', () => {
 
   it('matches a row carrying page_url against an action carrying url', async () => {
     const existing: ExistingRow[] = [
-      { id: 'page-a-card', action_type: 'seo.fix_internal_link', source: 'zhuge', zhuge_session_id: 's1', steps_json: { page_url: 'https://example.com/a' } },
+      { id: 'page-a-card', action_type: 'seo.optimize_page_seo', source: 'zhuge', zhuge_session_id: 's1', steps_json: { page_url: 'https://example.com/a' } },
     ]
     const supabase = makeSupabase(existing)
     const actions  = [
-      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { url: 'https://example.com/a' }),
+      makeAction('seo', 'seo.optimize_page_seo', 1, 'in_house', { url: 'https://example.com/a' }),
     ]
 
     const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)

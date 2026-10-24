@@ -26,6 +26,12 @@ import type {
 } from './types'
 import type { DiagnosticFinding } from '@/types/diagnostic'
 import type { BusinessContext } from './types'
+import {
+  formatRegisteredActionPrompt,
+  isRegisteredRecommendedAction,
+  MANUAL_REVIEW_ACTION_TYPE,
+  MANUAL_REVIEW_DISPOSITION,
+} from './action-vocabulary'
 
 // Maximum actions the conductor will recommend per run.
 // DAPE W2 — short mode tightens this further (spec §2.x.6: 自助客户限 3 议题).
@@ -108,7 +114,8 @@ Given a structured evidence package, produce a prioritised list of up to ${MAX_A
       "executable_by": "string | null"
     }
   ]
-}`
+}
+${formatRegisteredActionPrompt()}`
 
 // Short mode: self-serve client path. Tighter token budget, fewer actions,
 // only client-level memory injected. Spec §1.5.6 + §2.x.6.
@@ -141,7 +148,8 @@ Pick the top ${MAX_ACTIONS_SHORT} actions this client should do RIGHT NOW based 
       "executable_by": "string | null"
     }
   ]
-}`
+}
+${formatRegisteredActionPrompt()}`
 
 /**
  * DAPE W2 — Select system prompt by mode. Defaults to long (FDE, backward-compat).
@@ -313,10 +321,17 @@ function validateAction(raw: unknown, fallbackRank: number): PriorityAction {
     ? (rawDim as PriorityAction['dimension'])
     : 'seo'
 
+  const rawType = typeof a.action_type === 'string' ? a.action_type.trim() : ''
+  const registered = isRegisteredRecommendedAction(rawType)
+  const priorMeta =
+    a.metadata && typeof a.metadata === 'object' && !Array.isArray(a.metadata)
+      ? (a.metadata as Record<string, unknown>)
+      : undefined
+
   return {
     rank: typeof a.rank === 'number' ? a.rank : fallbackRank,
     dimension,
-    action_type: typeof a.action_type === 'string' ? a.action_type : 'manual_review',
+    action_type: registered ? rawType : MANUAL_REVIEW_ACTION_TYPE,
     why_now: typeof a.why_now === 'string' ? a.why_now : '',
     evidence_refs: Array.isArray(a.evidence_refs)
       ? (a.evidence_refs as unknown[]).filter((r): r is string => typeof r === 'string')
@@ -327,10 +342,19 @@ function validateAction(raw: unknown, fallbackRank: number): PriorityAction {
     effort: VALID_IMPACTS.has(a.effort as string)
       ? (a.effort as PriorityAction['effort'])
       : 'medium',
-    execution_mode: VALID_MODES.has(a.execution_mode as string)
+    execution_mode: registered && VALID_MODES.has(a.execution_mode as string)
       ? (a.execution_mode as PriorityAction['execution_mode'])
       : 'external_manual',
     executable_by: typeof a.executable_by === 'string' ? a.executable_by : null,
+    ...(registered
+      ? (priorMeta ? { metadata: priorMeta } : {})
+      : {
+          metadata: {
+            ...(priorMeta ?? {}),
+            disposition: MANUAL_REVIEW_DISPOSITION,
+            invented_action_type: rawType || 'missing',
+          },
+        }),
   }
 }
 

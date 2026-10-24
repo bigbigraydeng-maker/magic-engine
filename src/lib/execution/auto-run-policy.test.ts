@@ -5,6 +5,7 @@ import {
   OUTWARD_ACTION_TYPES,
   NOT_AUTO_RUNNABLE_NEEDS_EXECUTOR,
   PRESCRIPTION_FRESH_DAYS,
+  BLOCKED_NEEDS_GOAL,
 } from './auto-run-policy'
 
 import type { Endorsement } from './auto-run-policy'
@@ -21,6 +22,7 @@ const pending = (
   clientStatus: 'active',
   weeklyBlogEnabled: true,
   pinnedTopic: null,
+  hasActiveGoal: true,
   endorsement,
 })
 
@@ -85,7 +87,7 @@ describe('judgeAutoRun —— 白名单，认不出就停', () => {
     for (const s of ['in_progress', 'completed', 'skipped', 'superseded']) {
       const v = judgeAutoRun({
         actionType: 'generate_blog_post', fixType: 'me_auto', status: s,
-        clientStatus: 'active', weeklyBlogEnabled: true, pinnedTopic: null,
+        clientStatus: 'active', weeklyBlogEnabled: true, pinnedTopic: null, hasActiveGoal: true,
         endorsement: { kind: 'current_prescription', ageDays: 2 },
       })
       expect(v.run, s).toBe(false)
@@ -138,6 +140,7 @@ describe('judgeAutoRun —— 「该不该做」排在「能不能做」前面',
     clientStatus: 'active',
     weeklyBlogEnabled: true,
     pinnedTopic: null,
+    hasActiveGoal: true,
   }
 
   it('🔴 不挂任何方案的一律不跑 —— 看板上 272 件里有 204 件是这种，最老的躺了快三个月', () => {
@@ -210,6 +213,52 @@ describe('judgeAutoRun —— 「该不该做」排在「能不能做」前面',
     if (!v.run) expect(v.reason).toContain('早过期了')
   })
 
+  it('🔴 方案过期且没有进行中的目标 → 停住，不再等周二（周二会因为没目标直接跳过）', () => {
+    const v = judgeAutoRun({
+      ...safe,
+      hasActiveGoal: false,
+      endorsement: { kind: 'current_prescription', ageDays: 52 },
+    })
+    expect(v.run).toBe(false)
+    if (!v.run) {
+      expect(v.block).toBe(BLOCKED_NEEDS_GOAL)
+      expect(v.reason).toContain('没有进行中的目标')
+    }
+  })
+
+  it('方案过期但客户还有目标 → 仍是「等新一轮」，不标成缺目标', () => {
+    const v = judgeAutoRun({
+      ...safe,
+      hasActiveGoal: true,
+      endorsement: { kind: 'current_prescription', ageDays: 52 },
+    })
+    expect(v.run).toBe(false)
+    if (!v.run) {
+      expect(v.block).toBeUndefined()
+      expect(v.reason).toContain('太久没复核')
+    }
+  })
+
+  it('旧方案被换掉且没有目标 → 同样停住', () => {
+    const v = judgeAutoRun({
+      ...safe,
+      hasActiveGoal: false,
+      endorsement: { kind: 'stale_prescription' },
+    })
+    expect(v.run).toBe(false)
+    if (!v.run) expect(v.block).toBe(BLOCKED_NEEDS_GOAL)
+  })
+
+  it('方案还新鲜时，没有目标也不因此停住', () => {
+    expect(
+      judgeAutoRun({
+        ...safe,
+        hasActiveGoal: false,
+        endorsement: { kind: 'current_prescription', ageDays: 3 },
+      }).run,
+    ).toBe(true)
+  })
+
   it('🔴 该不该做**先于**能不能做 —— 不该做的事，哪怕它安全也不做', () => {
     // 动作类型是白名单里最安全的那种，但没人认它 → 照样不跑
     const v = judgeAutoRun({ ...safe, endorsement: { kind: 'unendorsed', ageDays: 5 } })
@@ -226,6 +275,7 @@ describe('judgeAutoRun —— 客户闸排在所有判断之前', () => {
     clientStatus: 'active',
     weeklyBlogEnabled: true,
     pinnedTopic: null,
+    hasActiveGoal: true,
     endorsement: { kind: 'current_prescription' as const, ageDays: 1 },
   }
 

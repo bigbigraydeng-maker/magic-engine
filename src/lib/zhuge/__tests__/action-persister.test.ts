@@ -204,7 +204,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       output: makeZhugeOutput([
-        makeAction('seo', 'seo.fix_meta_titles'),
+        makeAction('seo', 'seo.publish_blog'),
         makeAction('ai_visibility', 'geo.deploy_directive'),
       ]),
     }
@@ -227,7 +227,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'd',
       diagnosticRunId: null,
       output: makeZhugeOutput([
-        makeAction('seo', 'seo.fix_titles'),
+        makeAction('seo', 'seo.publish_blog'),
         makeAction('reputation', 'reputation.monitoring', 'external_manual'),
         makeAction('competitor', 'competitor.analysis', 'external_manual'),
       ]),
@@ -240,7 +240,7 @@ describe('persistZhugeActions()', () => {
     expect(supabase._flywheelInsertChain.insert).toHaveBeenCalledTimes(1)
     const rows = supabase._flywheelInsertChain.insert.mock.calls[0][0] as Array<{ action_type: string }>
     expect(rows).toHaveLength(1)
-    expect(rows[0].action_type).toBe('seo.fix_titles')
+    expect(rows[0].action_type).toBe('seo.publish_blog')
   })
 
   it('returns idempotent=true when session key already exists', async () => {
@@ -251,7 +251,7 @@ describe('persistZhugeActions()', () => {
       clientId: 'c',
       discoveryId: 'd',
       diagnosticRunId: 'r',
-      output: makeZhugeOutput([makeAction('seo', 'seo.fix')]),
+      output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
     })
 
     expect(result.idempotent).toBe(true)
@@ -289,7 +289,7 @@ describe('persistZhugeActions()', () => {
         clientId: 'c',
         discoveryId: 'd',
         diagnosticRunId: null,
-        output: makeZhugeOutput([makeAction('seo', 'seo.fix')]),
+        output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
       }),
     ).rejects.toThrow('connection refused')
   })
@@ -305,7 +305,7 @@ describe('persistZhugeActions()', () => {
         clientId: 'c',
         discoveryId: 'd',
         diagnosticRunId: null,
-        output: makeZhugeOutput([makeAction('seo', 'seo.fix')]),
+        output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
       }),
     ).rejects.toThrow('FK violation')
   })
@@ -329,8 +329,8 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       output: makeZhugeOutput([
-        makeAction('seo', 'seo.fix'),
-        makeAction('ads', 'ads.pause_losers', 'third_party'),
+        makeAction('seo', 'seo.publish_blog'),
+        makeAction('ads', 'ads.pause_campaign', 'third_party'),
       ]),
     })
 
@@ -363,10 +363,10 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'd',
       diagnosticRunId: null,
       output: makeZhugeOutput([
-        makeAction('seo', 'seo.fix'),
-        makeAction('ai_visibility', 'geo.directive'),
-        makeAction('ads', 'ads.pause', 'third_party'),
-        makeAction('social', 'social.post'),
+        makeAction('seo', 'seo.publish_blog'),
+        makeAction('ai_visibility', 'geo.compose_directive'),
+        makeAction('ads', 'ads.pause_campaign', 'third_party'),
+        makeAction('social', 'social.publish_post'),
       ]),
     })
 
@@ -403,7 +403,7 @@ describe('persistZhugeActions()', () => {
       clientId: 'client-abc',
       discoveryId: 'disc-xyz',
       diagnosticRunId: 'run-999',
-      output: makeZhugeOutput([makeAction('seo', 'seo.fix')]),
+      output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
     })
 
     const expected = buildSessionKey('client-abc', 'disc-xyz', 'run-999')
@@ -471,7 +471,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       prescriptionId: 'prescription-uuid-7',
-      output: makeZhugeOutput([makeAction('seo', 'seo.fix_titles')]),
+      output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
     })
 
     const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null; source: string }>
@@ -492,7 +492,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       // prescriptionId not provided — backwards-compatible default = null
-      output: makeZhugeOutput([makeAction('seo', 'seo.fix_titles')]),
+      output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
     })
 
     const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null }>
@@ -512,7 +512,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       prescriptionId: null,
-      output: makeZhugeOutput([makeAction('ai_visibility', 'geo.deploy')]),
+      output: makeZhugeOutput([makeAction('ai_visibility', 'geo.deploy_directive')]),
     })
 
     const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null }>

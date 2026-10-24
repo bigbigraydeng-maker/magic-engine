@@ -23,7 +23,10 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getAnthropicClient, MODEL_HAIKU } from '@/lib/anthropic/client'
 import { jsonrepair } from 'jsonrepair'
 import { loadZhugeFeedbackSummary, formatZhugeFeedbackPrompt } from './memory-loader'
+import { formatRegisteredActionPrompt, isRegisteredRecommendedAction } from './action-vocabulary'
+import { insertManualReviewItems } from './action-persister'
 import type { AnomalySeverity } from '@/lib/flywheel/anomaly/types'
+import type { DiagnosticDimension } from '@/types/diagnostic'
 import type { ZhugePromptMode, ZhugeFeedbackSummary } from './types'
 
 // Haiku pricing (per million tokens)
@@ -105,7 +108,8 @@ Each element:
   "action_type": "<snake_case slug — required when should_act=true>",
   "action_description": "<1 sentence Chinese — required when should_act=true>",
   "expected_impact": "low" | "medium" | "high"
-}`
+}
+${formatRegisteredActionPrompt()}`
 
 const SYSTEM_PROMPT_SHORT = `You are 诸葛亮's Proactive Lens (self-serve mode). Keep decisions tight.
 
@@ -119,7 +123,8 @@ Schema:
   "action_type": "<snake_case slug — required when should_act=true>",
   "action_description": "<1 short Chinese sentence — required when should_act=true>",
   "expected_impact": "low" | "medium" | "high"
-}`
+}
+${formatRegisteredActionPrompt()}`
 
 function pickSystemPrompt(mode: ZhugePromptMode | undefined): string {
   return mode === 'short' ? SYSTEM_PROMPT_SHORT : SYSTEM_PROMPT_LONG
@@ -284,14 +289,45 @@ async function processClient(
   }
 
   const toAct = decisions.filter((d) => d.should_act && d.action_type)
+  const known = toAct.filter((d) => isRegisteredRecommendedAction(d.action_type!))
+  const unknown = toAct.filter((d) => !isRegisteredRecommendedAction(d.action_type!))
   const toDismiss = decisions.filter((d) => !d.should_act)
 
   // Build a lookup map for signal metadata
   const sigMap = new Map(signals.map((s) => [s.id, s]))
 
-  // Persist acted decisions
-  if (toAct.length > 0) {
-    const flywheelRows = toAct.map((d) => {
+  if (unknown.length > 0) {
+    try {
+      await insertManualReviewItems(
+        supabaseAdmin,
+        clientId,
+        unknown.map((d) => {
+          const sig = sigMap.get(d.signal_id)!
+          return {
+            dimension: signalDimension(sig.flywheel),
+            inventedActionType: d.action_type!,
+            why: d.action_description ?? sig.description,
+            source: 'proactive_signal' as const,
+            metadata: { anomaly_signal_id: sig.id },
+          }
+        }),
+      )
+      for (const d of unknown) {
+        await supabaseAdmin
+          .from('anomaly_signals')
+          .update({ status: 'processed' })
+          .eq('id', d.signal_id)
+      }
+    } catch (err: unknown) {
+      errors.push(
+        `client ${clientId} manual review: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
+
+  // Persist acted decisions that use a registered action type.
+  if (known.length > 0) {
+    const flywheelRows = known.map((d) => {
       const sig = sigMap.get(d.signal_id)!
       return {
         client_id: clientId,
@@ -322,7 +358,7 @@ async function processClient(
     } else {
       // Also write to execution_items for kanban visibility
       const actionIds = (insertedActions as { id: string }[] | null) ?? []
-      const execRows = toAct.map((d, i) => {
+      const execRows = known.map((d, i) => {
         const sig = sigMap.get(d.signal_id)!
         return {
           client_id: clientId,
@@ -350,7 +386,7 @@ async function processClient(
       }
 
       // Link flywheel_actions back to anomaly_signals
-      const actionSignalUpdates = toAct.map((d, i) => ({
+      const actionSignalUpdates = known.map((d, i) => ({
         id: d.signal_id,
         flywheel_action_id: actionIds[i]?.id ?? null,
         status: 'processed' as const,
@@ -382,7 +418,22 @@ async function processClient(
       )
   }
 
-  return { acted: toAct.length, dismissed: toDismiss.length, cost_usd }
+  return { acted: known.length, dismissed: toDismiss.length, cost_usd }
+}
+
+function signalDimension(flywheel: string): DiagnosticDimension {
+  if (flywheel === 'geo') return 'ai_visibility'
+  if (
+    flywheel === 'seo' ||
+    flywheel === 'ads' ||
+    flywheel === 'social' ||
+    flywheel === 'reputation' ||
+    flywheel === 'competitor' ||
+    flywheel === 'ai_visibility'
+  ) {
+    return flywheel
+  }
+  return 'seo'
 }
 
 // ── Batch entry point ──────────────────────────────────────────────────────────

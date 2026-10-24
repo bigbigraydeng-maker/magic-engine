@@ -21,10 +21,16 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   judgeAutoRun,
   AUTO_RUNNABLE_ACTION_TYPES,
+  BLOCKED_NEEDS_GOAL,
   type AutoRunVerdict,
   type Endorsement,
 } from './auto-run-policy'
 import { deriveEndorsement, type PrescriptionAnchor, type MarketingPlanAnchor } from './endorsement'
+import { loadClientIdsWithUsableGoal, staleAutoRunItemIdsWithoutGoal } from './blocked-needs-goal'
+import {
+  listStaleInProgressItems,
+  STALE_IN_PROGRESS_REASON,
+} from './stale-in-progress'
 import { WEEKLY_COOLDOWN_DAYS } from '@/lib/blog/cadence'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
@@ -198,6 +204,7 @@ export async function selectAutoRunCandidates(
   const clients = new Map(
     ((clientRows ?? []) as CandidateClientRow[]).map((c) => [c.id, c]),
   )
+  const clientsWithGoal = await loadClientIdsWithUsableGoal(supabase, clientIds, now)
 
   // ④ 两根锚：方案 / 营销计划。只查候选行真正引用到的那些。
   const prescriptionIds = Array.from(
@@ -273,6 +280,7 @@ export async function selectAutoRunCandidates(
           weeklyBlogEnabled: weeklyBlogEnabledOf(client.seo_config),
           pinnedTopic: pinnedTopicOf(row.steps_json),
           endorsement,
+          hasActiveGoal: clientsWithGoal.has(row.client_id),
         })
       : { run: false, reason: '查不到这条动作属于哪个客户，不动它' }
 
@@ -450,6 +458,10 @@ export interface AutoRunBatchResult {
   runnable: number
   deferred_by_quota: number
   released_stale: number
+  /** Cards parked because the prescription is stale and the client has no goal. */
+  parked_needs_goal: number
+  /** in_progress cards with no update for >30 days, closed this run. */
+  closed_stale_in_progress: number
   generated: number
   failed: number
   results: AutoRunItemResult[]
@@ -507,11 +519,17 @@ export async function runAutoRunBatch(
   const startedAt = Date.now()
 
   const releasedStale = opts.dryRun ? 0 : await releaseStaleClaims(supabase, now)
+  const closedStale = opts.dryRun ? 0 : await closeStaleInProgressItems(supabase, now)
   const { judged, toRun, deferredByQuota } = await selectAutoRunCandidates(
     supabase,
     now,
     opts.maxItems ?? MAX_ITEMS_PER_RUN,
   )
+
+  const needsGoalIds = judged
+    .filter((j) => !j.verdict.run && j.verdict.block === BLOCKED_NEEDS_GOAL)
+    .map((j) => j.id)
+  const parkedNeedsGoal = opts.dryRun ? 0 : await markItemsBlockedNeedsGoal(supabase, needsGoalIds)
 
   const base: AutoRunBatchResult = {
     dry_run: opts.dryRun,
@@ -519,6 +537,8 @@ export async function runAutoRunBatch(
     runnable: judged.filter((j) => j.verdict.run).length,
     deferred_by_quota: deferredByQuota,
     released_stale: releasedStale,
+    parked_needs_goal: parkedNeedsGoal,
+    closed_stale_in_progress: closedStale,
     generated: 0,
     failed: 0,
     results: [],
@@ -622,4 +642,46 @@ export async function runAutoRunBatch(
     failed: results.filter((r) => r.outcome === 'failed' || r.outcome === 'gave_up').length,
     results,
   }
+}
+
+/** Skip cards left in progress with no update for 30 days. Not a completed outcome. */
+export async function closeStaleInProgressItems(
+  supabase: SupabaseClient,
+  now: Date,
+): Promise<number> {
+  const stale = await listStaleInProgressItems(supabase, now)
+  if (stale.length === 0) return 0
+  const { data, error } = await supabase
+    .from('execution_items')
+    .update({ status: 'skipped', auto_run_error: STALE_IN_PROGRESS_REASON })
+    .in('id', stale.map((row) => row.id))
+    .eq('status', 'in_progress')
+    .select('id')
+  if (error) throw new Error(`stale in_progress close failed: ${error.message}`)
+  return ((data ?? []) as unknown[]).length
+}
+
+async function markItemsBlockedNeedsGoal(
+  supabase: SupabaseClient,
+  itemIds: string[],
+): Promise<number> {
+  if (itemIds.length === 0) return 0
+  const { data, error } = await supabase
+    .from('execution_items')
+    .update({ status: 'skipped', auto_run_error: BLOCKED_NEEDS_GOAL })
+    .in('id', itemIds)
+    .eq('status', 'pending')
+    .select('id')
+  if (error) throw new Error(`blocked_needs_goal 写入失败: ${error.message}`)
+  return ((data ?? []) as unknown[]).length
+}
+
+/** Used by prescription-weekly: that job runs, execution-auto-run often does not. */
+export async function parkStaleAutoRunItemsWithoutGoal(
+  supabase: SupabaseClient,
+  clientId: string,
+  now: Date,
+): Promise<number> {
+  const ids = await staleAutoRunItemIdsWithoutGoal(supabase, clientId, now)
+  return markItemsBlockedNeedsGoal(supabase, ids)
 }

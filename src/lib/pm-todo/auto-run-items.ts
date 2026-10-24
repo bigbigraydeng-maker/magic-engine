@@ -21,10 +21,12 @@ import {
   type JudgedCandidate,
 } from '@/lib/execution/auto-run'
 import {
+  BLOCKED_NEEDS_GOAL,
   ENDORSEMENT_FRESH_DAYS,
   PRESCRIPTION_FRESH_DAYS,
   type Endorsement,
 } from '@/lib/execution/auto-run-policy'
+import { loadClientIdsWithUsableGoal } from '@/lib/execution/blocked-needs-goal'
 
 export interface AutoRunTodo {
   client_id: string
@@ -33,10 +35,15 @@ export interface AutoRunTodo {
   href: string
   /** 停手的那种单独出一条；拦下来的按客户汇总 */
   stuck: boolean
+  /** 方案过期且没有进行中的目标。人要去定目标，不能等下一轮自动重判。 */
+  needsGoal: boolean
 }
 
 const boardHref = (clientId: string) =>
   `https://app.magicengine.com.au/dashboard/clients/${clientId}/execution`
+
+const goalHref = (clientId: string) =>
+  `https://app.magicengine.com.au/dashboard/clients/${clientId}/goal/new`
 
 /**
  * 背书本身是不是拦下这条的原因 —— 跟 `judgeAutoRun` 里背书那一段判断顺序对齐。
@@ -107,6 +114,7 @@ async function fetchStuckTodos(supabase: SupabaseClient): Promise<AutoRunTodo[]>
   }>).map((r) => ({
     client_id: r.client_id,
     stuck: true,
+    needsGoal: false,
     what:
       `「${r.title ?? r.id}」我试了 ${r.auto_run_attempts ?? MAX_ATTEMPTS} 次都没做成，已经停手 —— ` +
       `这条动作现在没人在做。最后一次的原因：${r.auto_run_error ?? '未知'}`,
@@ -117,12 +125,55 @@ async function fetchStuckTodos(supabase: SupabaseClient): Promise<AutoRunTodo[]>
   }))
 }
 
+/** 已经标成 blocked_needs_goal 的卡。待办要在目标补上之前一直露出来。 */
+async function fetchParkedNeedsGoalCounts(
+  supabase: SupabaseClient,
+): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from('execution_items')
+    .select('client_id, status, auto_run_error')
+    .eq('status', 'skipped')
+    .eq('auto_run_error', BLOCKED_NEEDS_GOAL)
+    .limit(200)
+  if (error) {
+    console.warn('[auto-run-todo] blocked_needs_goal 查询失败:', error.message)
+    return new Map()
+  }
+  const counts = new Map<string, number>()
+  for (const row of (data ?? []) as Array<{
+    client_id: string
+    status: string
+    auto_run_error: string | null
+  }>) {
+    if (row.status !== 'skipped' || row.auto_run_error !== BLOCKED_NEEDS_GOAL) continue
+    counts.set(row.client_id, (counts.get(row.client_id) ?? 0) + 1)
+  }
+  return counts
+}
+
+function pushNeedsGoalTodo(todos: AutoRunTodo[], clientId: string, count: number): void {
+  todos.push({
+    client_id: clientId,
+    stuck: false,
+    needsGoal: true,
+    what:
+      `有 ${count} 件本来可以自动写的文章停住了：方案已经过期，而且这个客户没有进行中的目标。` +
+      '每周开方会跳过没有目标的客户，所以这些动作不会自己重新开始',
+    how:
+      '打开下面的链接，给这个客户定一个还在进行的目标。定好之后，下一轮开方才会写出新方案，这些动作才会重新判断',
+    href: goalHref(clientId),
+  })
+}
+
 /**
  * 今日待办要展示的自动执行相关条目。
  *
  * 选候选走**跟 cron 同一个函数**（纯读，不写），所以待办上说的
  * 「今天这几件没做、因为什么」跟机器真实的判定永远一致 ——
  * 各写一份判定逻辑的话，两边迟早会说出不同的话。
+ *
+ * 方案过期且没有目标的，单独成一条「去定目标」。那条不能再说「下一轮会自动重判」——
+ * 没有目标，开方会一直跳过，重判永远等不到。
  */
 export async function fetchAutoRunTodos(
   supabase: SupabaseClient,
@@ -131,7 +182,31 @@ export async function fetchAutoRunTodos(
   const todos = await fetchStuckTodos(supabase)
 
   const { judged } = await selectAutoRunCandidates(supabase, now)
-  const blocked = judged.filter((j) => !j.verdict.run)
+  const needsGoalJudged = judged.filter(
+    (j) => !j.verdict.run && j.verdict.block === BLOCKED_NEEDS_GOAL,
+  )
+  const blocked = judged.filter(
+    (j) => !j.verdict.run && j.verdict.block !== BLOCKED_NEEDS_GOAL,
+  )
+  const parked = await fetchParkedNeedsGoalCounts(supabase)
+
+  const needsGoalClients = new Set<string>([
+    ...needsGoalJudged.map((j) => j.client_id),
+    ...Array.from(parked.keys()),
+  ])
+  if (needsGoalClients.size > 0) {
+    const withGoal = await loadClientIdsWithUsableGoal(
+      supabase,
+      Array.from(needsGoalClients),
+      now,
+    )
+    for (const clientId of Array.from(needsGoalClients)) {
+      if (withGoal.has(clientId)) continue
+      const judgedCount = needsGoalJudged.filter((j) => j.client_id === clientId).length
+      pushNeedsGoalTodo(todos, clientId, judgedCount + (parked.get(clientId) ?? 0))
+    }
+  }
+
   if (blocked.length === 0) return todos
 
   const byClient = new Map<string, JudgedCandidate[]>()
@@ -142,11 +217,11 @@ export async function fetchAutoRunTodos(
   }
 
   for (const [clientId, list] of Array.from(byClient.entries())) {
-    // 第一条的原因原文最有代表性（候选按最老的排在前面）
     const sample = list[0].verdict.run ? '' : list[0].verdict.reason
     todos.push({
       client_id: clientId,
       stuck: false,
+      needsGoal: false,
       what:
         `有 ${list.length} 件本来我可以自己做的动作（写文章草稿）今天没做：` +
         `${summariseReasons(list)}。也就是说这几件事这周没人往前推`,

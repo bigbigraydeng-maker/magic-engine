@@ -184,6 +184,9 @@ function baseTables(over: { items?: Row[]; clients?: Row[]; extraPrescriptions?:
       { id: 'plan-done', client_id: 'oztop', status: 'completed', approved_at: daysAgo(60), end_date: daysAgo(30).slice(0, 10) },
     ],
     execution_logs: [],
+    goals: [
+      { id: 'g-oztop', client_id: 'oztop', status: 'active', period_end: '2026-12-31' },
+    ],
   }
 }
 
@@ -508,6 +511,26 @@ describe('runAutoRunBatch —— 空跑', () => {
     expect(blocked.verdict).toBe('blocked')
     expect(blocked.reason).toContain('太久没复核')
     expect(blocked.client).toBe('Oztop')
+  })
+
+  it('🔴 方案过期且没有目标 → 标成 skipped / blocked_needs_goal，不再留在待办里每天重判', async () => {
+    const tables = baseTables({ items: [item({ prescription_id: 'presc-old' })] })
+    tables.goals = []
+    const { fake, tables: live } = makeFake(tables)
+    const r = await runAutoRunBatch(fake, okGenerate(), NOW, { dryRun: false })
+    expect(r.parked_needs_goal).toBe(1)
+    expect(r.generated).toBe(0)
+    expect(live.execution_items[0].status).toBe('skipped')
+    expect(live.execution_items[0].auto_run_error).toBe('blocked_needs_goal')
+  })
+
+  it('空跑发现缺目标也不许写库', async () => {
+    const tables = baseTables({ items: [item({ prescription_id: 'presc-old' })] })
+    tables.goals = []
+    const { fake, tables: live } = makeFake(tables)
+    const r = await runAutoRunBatch(fake, okGenerate(), NOW, { dryRun: true })
+    expect(r.parked_needs_goal).toBe(0)
+    expect(live.execution_items[0].status).toBe('pending')
   })
 })
 

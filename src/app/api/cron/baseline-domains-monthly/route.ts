@@ -22,6 +22,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import {
+  MIN_NZ_CALENDAR_DAYS_BETWEEN_RUNS,
+  nzCalendarDaysBetween,
+  shouldSkipWeeklyBaseline,
+} from '@/lib/baseline/weekly-throttle'
 import { supabaseAdmin } from '@/lib/supabase'
 import { SeoCollector } from '@/lib/diagnostic/collectors/seo-collector'
 import { startCronRun } from '@/lib/cron/run-logger'
@@ -312,11 +317,11 @@ async function finalizeRun(runId: string, fields: {
     .eq('id', runId)
 }
 
-/** 每周最多跑一次。Render 上的 cron 频率改不了(后台手工建的)，所以在代码层节流。 */
-const MIN_DAYS_BETWEEN_RUNS = 7
-
 /**
- * 距离上一次「真的跑出结果」够 7 天了吗？
+ * 距离上一次「真的跑出结果」够 7 个新西兰日历日了吗？
+ *
+ * 比的是 Pacific/Auckland 的日期，不是 7×24 小时。上次 06:01 跑完，
+ * 七天后 06:00 再敲门，时钟差一分钟也不该再挡住。
  *
  * 手动触发(admin_manual)也算数 —— FDE 刚手动刷过，数据就是新的，
  * 没理由第二天再花一次钱。
@@ -324,7 +329,7 @@ const MIN_DAYS_BETWEEN_RUNS = 7
  * 读不到状态时**选择不跑**：这是花钱的操作，宁可漏跑一周，
  * 也不要因为读不到上次时间而每天重复烧钱。
  */
-async function weeklyThrottleCheck(): Promise<{ skip: boolean; daysSince?: number }> {
+async function weeklyThrottleCheck(now = new Date()): Promise<{ skip: boolean; daysSince?: number }> {
   const { data, error } = await supabaseAdmin
     .from('baseline_cron_runs')
     .select('started_at')
@@ -340,8 +345,9 @@ async function weeklyThrottleCheck(): Promise<{ skip: boolean; daysSince?: numbe
   // 从没成功跑过 → 放行
   if (!data) return { skip: false }
 
-  const daysSince = (Date.now() - new Date((data as { started_at: string }).started_at).getTime()) / 86_400_000
-  return { skip: daysSince < MIN_DAYS_BETWEEN_RUNS, daysSince }
+  const lastStartedAt = new Date((data as { started_at: string }).started_at)
+  const daysSince = nzCalendarDaysBetween(lastStartedAt, now)
+  return { skip: shouldSkipWeeklyBaseline(lastStartedAt, now), daysSince }
 }
 
 // GET — cron trigger (Bearer auth, fire-and-forget to avoid Cloudflare 524)
@@ -379,11 +385,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const throttle = await weeklyThrottleCheck()
   if (throttle.skip) {
-    console.info(`[baseline cron] skipped — last successful run ${throttle.daysSince?.toFixed(1)}d ago (<${MIN_DAYS_BETWEEN_RUNS}d)`)
+    console.info(`[baseline cron] skipped — last successful run ${throttle.daysSince ?? '?'} NZ calendar days ago (<${MIN_NZ_CALENDAR_DAYS_BETWEEN_RUNS})`)
     return NextResponse.json({
       success: true, skipped: true, reason: 'throttled',
       days_since_last_run: throttle.daysSince,
-      message: `Runs at most once every ${MIN_DAYS_BETWEEN_RUNS} days.`,
+      message: `Runs at most once every ${MIN_NZ_CALENDAR_DAYS_BETWEEN_RUNS} New Zealand calendar days.`,
     })
   }
 

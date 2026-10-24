@@ -76,6 +76,7 @@ const item = (over: Row = {}) => ({
 const tables = (items: Row[]) => ({
   execution_items: items,
   clients: [client()],
+  goals: [{ id: 'g-oztop', client_id: 'oztop', status: 'active', period_end: '2026-12-31' }],
   prescriptions: [
     { id: 'presc-old', client_id: 'oztop', status: 'approved', approved_at: daysAgo(69), generated_at: daysAgo(70) },
     { id: 'presc-dead', client_id: 'oztop', status: 'superseded', approved_at: daysAgo(3), generated_at: daysAgo(4) },
@@ -152,6 +153,35 @@ describe('fetchAutoRunTodos', () => {
     expect(gaveUp[0].what).toContain('AI 网关超时')
     // 放弃的那条不该再混进「今天没做」的汇总里（它已经不是候选了）
     expect(todos.filter((t) => !t.stuck)).toHaveLength(0)
+  })
+
+  it('方案过期且没有进行中的目标 → 待办叫人去定目标，不再说会自动重判', async () => {
+    const t = tables([item()])
+    t.goals = []
+    const todos = await fetchAutoRunTodos(makeFake(t), NOW)
+    const needsGoal = todos.filter((todo) => todo.needsGoal)
+    expect(needsGoal).toHaveLength(1)
+    expect(needsGoal[0].what).toContain('没有进行中的目标')
+    expect(needsGoal[0].how).not.toContain('周二')
+    expect(needsGoal[0].href).toContain('/goal/new')
+    expect(todos.filter((todo) => !todo.stuck && !todo.needsGoal)).toHaveLength(0)
+  })
+
+  it('已经标成 blocked_needs_goal、目标还是没有 → 待办还在', async () => {
+    const t = tables([
+      item({ status: 'skipped', auto_run_error: 'blocked_needs_goal' }),
+    ])
+    t.goals = []
+    const todos = await fetchAutoRunTodos(makeFake(t), NOW)
+    expect(todos.filter((todo) => todo.needsGoal)).toHaveLength(1)
+  })
+
+  it('目标补上之后，停住的卡不再占「去定目标」这一条', async () => {
+    const todos = await fetchAutoRunTodos(
+      makeFake(tables([item({ status: 'skipped', auto_run_error: 'blocked_needs_goal' })])),
+      NOW,
+    )
+    expect(todos.filter((todo) => todo.needsGoal)).toHaveLength(0)
   })
 
   it('潜客的动作不进待办 —— 客户闸在选候选那一步就挡住了', async () => {

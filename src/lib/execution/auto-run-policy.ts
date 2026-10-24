@@ -72,12 +72,24 @@ export const OUTWARD_ACTION_TYPES: Record<string, string> = {
   configure_target_keywords_via_blog: '里面带发布动作',
 }
 
+/**
+ * Stored on `execution_items.auto_run_error` when a card is parked.
+ * The status enum has no `blocked_needs_goal` value (and adding one needs a
+ * migration). `skipped` is the existing status that leaves the pending loop.
+ */
+export const BLOCKED_NEEDS_GOAL = 'blocked_needs_goal' as const
+
 export type AutoRunVerdict =
   | { run: true }
   | {
       run: false
       /** 给人看的一句话：为什么这条我不自己做 */
       reason: string
+      /**
+       * `blocked_needs_goal` means stop re-checking. The weekly prescription
+       * job cannot refresh this card until a person sets a goal.
+       */
+      block?: typeof BLOCKED_NEEDS_GOAL
     }
 
 /**
@@ -121,6 +133,18 @@ export const ENDORSEMENT_FRESH_DAYS = 8
  */
 export const PRESCRIPTION_FRESH_DAYS = 45
 
+/** Prescription will not be replaced by the weekly job while the client has no goal. */
+export function prescriptionIsStaleForGoalBlock(endorsement: Endorsement): boolean {
+  if (endorsement.kind === 'stale_prescription') return true
+  if (
+    endorsement.kind === 'current_prescription' &&
+    endorsement.ageDays > PRESCRIPTION_FRESH_DAYS
+  ) {
+    return true
+  }
+  return false
+}
+
 export interface AutoRunInput {
   actionType: string | null
   fixType: string | null
@@ -157,6 +181,11 @@ export interface AutoRunInput {
   pinnedTopic: string | null
   /** 不传时按「没有背书」处理 —— 缺省必须是保守的那一边 */
   endorsement?: Endorsement
+  /**
+   * 这个客户现在有没有还能用的目标（进行中，且到期日没过）。
+   * 必填。方案过期且这里是 false 时，周更开方会永远跳过，不能再每天重判。
+   */
+  hasActiveGoal: boolean
 }
 
 /**
@@ -191,6 +220,15 @@ export function judgeAutoRun(item: AutoRunInput): AutoRunVerdict {
   //    一件不该做的事，做得再安全、再自动也是错的 ——
   //    而看板上四分之三的东西没有任何一轮 A+P 在背书。
   const e = item.endorsement ?? { kind: 'unendorsed' as const, ageDays: Infinity }
+  // 方案过期 + 没有目标 = 死锁。周更开不了新方案，再判一万次结果一样。
+  if (!item.hasActiveGoal && prescriptionIsStaleForGoalBlock(e)) {
+    return {
+      run: false,
+      block: BLOCKED_NEEDS_GOAL,
+      reason:
+        '这条挂的方案已经过期，而且这个客户没有进行中的目标。每周开方会跳过，方案不会自己变新。先定一个目标；这条停住，不再每天重判。',
+    }
+  }
   if (e.kind === 'stale_prescription') {
     return { run: false, reason: '这条属于已经被换掉的旧方案，先让新一轮方案重新判断它还该不该做' }
   }

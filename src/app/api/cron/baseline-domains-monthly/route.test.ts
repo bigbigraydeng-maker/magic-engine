@@ -54,7 +54,8 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 const CRON_SECRET = 'test-cron-secret'
-const DAY_MS = 86_400_000
+/** 2026-10-08 06:00 in Pacific/Auckland (NZDT, UTC+13). */
+const NOW_ISO = '2026-10-07T17:00:00.000Z'
 
 function makeGet(secret: string | null = CRON_SECRET) {
   const headers: Record<string, string> = {}
@@ -65,28 +66,32 @@ function makeGet(secret: string | null = CRON_SECRET) {
   })
 }
 
-/** Pretend the last successful run was N days ago. */
-function lastRunDaysAgo(days: number) {
+/** Last success N New Zealand calendar days before NOW_ISO, same clock time. */
+function lastRunCalendarDaysAgo(days: number) {
+  const last = new Date(Date.UTC(2026, 9, 7 - days, 17, 0, 0))
   mockThrottleQuery.mockResolvedValue({
-    data: { started_at: new Date(Date.now() - days * DAY_MS).toISOString() },
+    data: { started_at: last.toISOString() },
     error: null,
   })
 }
 
 describe('GET /api/cron/baseline-domains-monthly — cost gates', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(NOW_ISO))
     vi.clearAllMocks()
     process.env.CRON_SECRET = CRON_SECRET
     mockStartCronRun.mockResolvedValue({ finish: vi.fn() })
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     delete process.env.BASELINE_CRON_ENABLED
   })
 
   describe('weekly throttle', () => {
-    it.each([0, 1, 3, 6.9])('spends nothing when the last run was %s days ago', async days => {
-      lastRunDaysAgo(days)
+    it.each([0, 1, 3, 6])('spends nothing when the last run was %s NZ calendar days ago', async days => {
+      lastRunCalendarDaysAgo(days)
       const { GET } = await import('./route')
 
       const body = await (await GET(makeGet())).json()
@@ -96,8 +101,12 @@ describe('GET /api/cron/baseline-domains-monthly — cost gates', () => {
       expect(mockCollect).not.toHaveBeenCalled()
     })
 
-    it('lets the run through once 7 days have passed', async () => {
-      lastRunDaysAgo(7.1)
+    it('lets the run through once 7 NZ calendar days have passed, even one minute earlier', async () => {
+      // 2026-10-01 06:01 NZ → 2026-10-08 06:00 NZ is 7 calendar days, not 7×24h.
+      mockThrottleQuery.mockResolvedValue({
+        data: { started_at: '2026-09-30T17:01:00.000Z' },
+        error: null,
+      })
       const { GET } = await import('./route')
 
       const body = await (await GET(makeGet())).json()
@@ -128,7 +137,7 @@ describe('GET /api/cron/baseline-domains-monthly — cost gates', () => {
   describe('hard disable', () => {
     it('spends nothing when BASELINE_CRON_ENABLED=false, even if 30 days have passed', async () => {
       process.env.BASELINE_CRON_ENABLED = 'false'
-      lastRunDaysAgo(30)
+      lastRunCalendarDaysAgo(30)
       const { GET } = await import('./route')
 
       const body = await (await GET(makeGet())).json()
@@ -140,7 +149,7 @@ describe('GET /api/cron/baseline-domains-monthly — cost gates', () => {
 
   describe('auth still comes first', () => {
     it('rejects a bad secret before touching the throttle or spending', async () => {
-      lastRunDaysAgo(30)
+      lastRunCalendarDaysAgo(30)
       const { GET } = await import('./route')
 
       const res = await GET(makeGet('wrong-secret'))
@@ -152,7 +161,7 @@ describe('GET /api/cron/baseline-domains-monthly — cost gates', () => {
   })
 
   it('returns 2xx when skipping so Render does not flag a failing job', async () => {
-    lastRunDaysAgo(1)
+    lastRunCalendarDaysAgo(1)
     const { GET } = await import('./route')
 
     const res = await GET(makeGet())
