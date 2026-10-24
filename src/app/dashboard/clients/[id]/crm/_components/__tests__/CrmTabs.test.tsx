@@ -129,9 +129,18 @@ describe('CrmTabs', () => {
     unmountAll()
 
     stub(async () => res(200))
-    render(<CrmTabs clientId={ID} active="decisions" />)
+    render(<CrmTabs clientId={ID} active="payments" />)
     await screen.findByRole('link', { name: '付款总览' })
-    expect(screen.getByRole('link', { name: '决策清单（只读）' }).className).toContain('bg-me-charcoal')
+    expect(screen.getByRole('link', { name: '付款总览' }).className).toContain('bg-me-charcoal')
+  })
+
+  // 「决策清单（只读）」2026-10-25 退役：它跟「全部客人 → Magic Engine 智能」
+  // 是同一批人同一套建议，而且是最慢的一页（today 接口 6.9 秒）。
+  it('「决策清单（只读）」这个入口已经不在导航里了', async () => {
+    stub(async () => res(200))
+    render(<CrmTabs clientId={ID} active="all" />)
+    await screen.findByRole('link', { name: '付款总览' })
+    expect(screen.queryByRole('link', { name: '决策清单（只读）' })).toBeNull()
   })
 
   it('the other links are untouched whether or not the probe succeeds', async () => {
@@ -144,10 +153,6 @@ describe('CrmTabs', () => {
       expect(screen.getByRole('link', { name: '全部客人' })).toHaveAttribute(
         'href',
         `/dashboard/clients/${ID}/crm/all`,
-      )
-      expect(screen.getByRole('link', { name: '决策清单（只读）' })).toHaveAttribute(
-        'href',
-        `/dashboard/clients/${ID}/crm/decisions`,
       )
       expect(screen.getByRole('link', { name: '客户消息' })).toHaveAttribute(
         'href',

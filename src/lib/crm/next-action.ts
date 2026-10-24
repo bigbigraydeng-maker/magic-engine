@@ -77,6 +77,9 @@ export const BASE_LIST_OF_SEGMENT: Record<Segment, NextActionList> = {
   handoff_sop: 'cold',
   nurture_future: 'cold',
   excluded: 'cold',
+  // 看发件地址就不像客人来咨询 —— 只从「今天要联系」挪到「先放着」，
+  // 人还在名单里看得到，不删不藏（PM 2026-10-21：不许凭空消失）。
+  not_enquiry_suspect: 'cold',
 }
 
 /**

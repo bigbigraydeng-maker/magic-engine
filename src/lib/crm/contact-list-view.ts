@@ -17,7 +17,9 @@
  */
 
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from './contact-model'
-import { segmentContact } from './segments'
+import { segmentContact, SEGMENT_META, type SegmentResult } from './segments'
+import { senderShapeOf } from './enquiry-screen/sender-shape'
+import { BASE_LIST_OF_SEGMENT } from './next-action'
 import { type IntentLevel } from './next-action'
 import {
   buildSections,
@@ -41,6 +43,30 @@ export interface PriorityViewInput {
   focusContactId?: string
   /** 每人最新 AI 摘要的意向（contactId → intent）。缺省 = 没有摘要，所有人 intent=null。 */
   briefs?: ReadonlyMap<string, { intent: IntentLevel | null }>
+}
+
+/**
+ * 发件地址一看就不像客人来咨询的（群发 / 供应商系统通知 / 推销 / 平台系统账号），
+ * 从「今天要联系」挪到「先放着」，并写明为什么。
+ *
+ * 三条边界，都是 PM 2026-10-21 定的「不许凭空消失」：
+ *  1. **只降不升**：本来就在「先放着」的（含「别再联系」）原样不动，不会被这条规则抬上来；
+ *  2. **只挪不删**：人照样在「全部客人」和「先放着」里看得见，抽屉、历史、联系方式全在；
+ *  3. **纯判发件人形状**，不读消息内容、不调模型 —— 判错的代价是少看一眼，不是丢客人。
+ */
+function demoteNonEnquirySender(row: ContactRowLike, seg: SegmentResult): SegmentResult {
+  if (BASE_LIST_OF_SEGMENT[seg.segment] !== 'hot') return seg
+  const shape = senderShapeOf({ email: row.primary_email, displayName: row.display_name })
+  if (!shape) return seg
+  const meta = SEGMENT_META.not_enquiry_suspect
+  return {
+    ...seg,
+    segment: 'not_enquiry_suspect',
+    temperature: meta.temperature,
+    priority: meta.priority,
+    reason: `看着不是客人来咨询（${shape.reason}）`,
+    suggestedChannel: 'none',
+  }
 }
 
 export interface PriorityViewOutput<T> {
@@ -71,7 +97,7 @@ export function buildPriorityView<T>(
     byId.set(c.id, c)
     const tps = byContact.get(c.id) ?? []
     const model = buildContactModel(c, tps, input.stageMeta)
-    const seg = segmentContact(model, input.now)
+    const seg = demoteNonEnquirySender(c, segmentContact(model, input.now))
     ranked.push({
       contactId: c.id,
       seg,

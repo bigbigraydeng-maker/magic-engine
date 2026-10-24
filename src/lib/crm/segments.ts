@@ -27,6 +27,7 @@ export type Segment =
   | 'stale_conversation' // 聊过一轮就断了，没约下次
   | 'nurture_future'   // 说了以后才走，时候还没到
   | 'excluded'         // 别再联系 / 号码是坏的 / 明确没兴趣
+  | 'not_enquiry_suspect' // 看发件地址就不像客人来咨询（群发 / 供应商通知 / 推销 / 系统账号）
 
 import { resolveTravelDate, isDueToWake } from './travel-date'
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
@@ -110,6 +111,11 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
   excluded: {
     label: '别再联系',
     howTo: '明确拒绝过 / 号码是坏的 / 已经成交。不要联系。',
+    batch: 'none',
+  },
+  not_enquiry_suspect: {
+    label: '看着不是客人来咨询',
+    howTo: '发件地址像群发 / 供应商通知 / 推销 / 平台系统账号。不用联系；真是客人就在他的抽屉里点「真客人」，他会回到名单。',
     batch: 'none',
   },
 }
@@ -297,6 +303,7 @@ export const SEGMENT_META: Record<Segment, { temperature: Temperature; priority:
   stale_conversation: { temperature: 'warm', priority: 7 },
   nurture_future:     { temperature: 'cold', priority: 8 },
   excluded:           { temperature: 'off',  priority: 9 },
+  not_enquiry_suspect:{ temperature: 'off',  priority: 10 },
 }
 
 /**
@@ -906,7 +913,7 @@ export function segmentCounts(
   const out: Record<Segment, number> = {
     replied: 0, callback_due: 0, new_untouched: 0, handoff_sop: 0,
     clicked_link: 0, retry_channel: 0, stale_conversation: 0,
-    nurture_future: 0, excluded: 0,
+    nurture_future: 0, excluded: 0, not_enquiry_suspect: 0,
   }
   for (const c of contacts) out[segmentContact(c, now, playbook).segment]++
   return out

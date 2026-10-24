@@ -100,7 +100,6 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
         <Link href={`${base}/all`} className={cls(active === 'all')}>全部客人</Link>
-        <Link href={`${base}/decisions`} className={cls(active === 'decisions')}>决策清单（只读）</Link>
         {showPayments && (
           <Link href={`${base}/payments`} className={cls(active === 'payments')}>付款总览</Link>
         )}

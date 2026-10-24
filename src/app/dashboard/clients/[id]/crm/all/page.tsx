@@ -83,7 +83,15 @@ export default function CrmAllContactsPage() {
    * 平铺 / 按优先级分段。默认平铺 —— 这一轮先把分段做出来给人看，
    * 不动任何老用户打开这一页时看到的东西。
    */
-  const [grouped, setGrouped] = useState(false)
+  /**
+   * 智能视图可以用网址直达：`?view=smart`。
+   * 这样「决策清单」那页能直接指过来，员工也能把它存成书签——
+   * 以前它只是页面里的一个开关，关掉页面就回到平铺名单。
+   */
+  const [grouped, setGrouped] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return new URLSearchParams(window.location.search).get('view') === 'smart'
+  })
   const [sections, setSections] = useState<PrioritySectionData[]>([])
   /** 展开哪些段。null = 还没动过，用服务端默认（前两段展开）。 */
   const [openSections, setOpenSections] = useState<SectionKey[] | null>(null)
@@ -611,7 +619,17 @@ export default function CrmAllContactsPage() {
             onStageFilterChange={setStageFilter}
             grouped={grouped}
             onToggleGrouped={() => {
-              setGrouped((v) => !v)
+              setGrouped((v) => {
+                const next = !v
+                // 让网址跟着视图走（不重新加载页面），这样刷新 / 存书签都还在同一个视图。
+                if (typeof window !== 'undefined') {
+                  const url = new URL(window.location.href)
+                  if (next) url.searchParams.set('view', 'smart')
+                  else url.searchParams.delete('view')
+                  window.history.replaceState(null, '', url.toString())
+                }
+                return next
+              })
               setKindFilter('all')
             }}
             kindFilter={kindFilter}
