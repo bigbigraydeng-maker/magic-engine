@@ -130,3 +130,22 @@ v0.1 的干跑只有 27% 真的用上模型（30 条里 8 条），低于 §9.9 
 - 名字与团名都对得上：`Thanks for getting in touch, Diane! … more details about the Golden China tour.`；
 - 3 条回退，逐条看都是**该回退**：①那条 4167 字咨询里写了 "cancellation terms"（谈退改条款，按投诉口径回固定句，安全）；②中文乱码 `莪的莫`；③模型想说 "flight options"，`flight` 在禁词里（CTS 确实含机票，但这是客户私有事实，平台默认不许自动回复碰机票，保持拦住）。
 - 门槛对账：§9.9 的 40% 已达到（95%）。
+
+## 11. v0.3 修补（2026-10-25，机器复审在 PR #3115 上提的 5 条，逐条本地复现后修）
+
+5 条**全部本地复现过**才动手，不是照着意见改。
+
+| # | 问题 | 本地复现 | 修法 |
+|---|---|---|---|
+| 1 | **§9.3 承诺接入 `evaluateClaims` 这道闸，但代码里一次都没调** | `Your tour is almost full.` 和 `This tour is absolutely safe.` 两条当时都 `ok:true` 放行；而同一份 `evaluateClaims` 对它们分别返回 `availability` / `promise` | 在校验器最后一步调 `evaluateClaims({ text, validPrices: [], validDates: [] })`（空集 = 我们没有任何已批准的价格和日期，所以任何价格/日期声明都算无据），try/catch 包住、抛错也算不过 |
+| 2 | 数字词表缺一整段 | `We can help with thirteen travellers.` / `sixty of our guests` 都放行 | 补 thirteen–nineteen、sixty–ninety |
+| 3 | 短禁词能用分隔符绕过 | `This service is f.r.e.e.` / `the co st of that trip` 都放行（`free`/`cost` 只有 4 个字母，被排除在去标点匹配之外） | 对 <5 字母的禁词单独建「字母间可插分隔符」的正则，并要求**整体至少插过一次分隔符**——这样 `f.r.e.e`、`co st`、`f e e` 抓得到，而 `coffee` 里的 `fee` 不算（长度等于原词 = 它本来就是别的词的一部分） |
+| 4 | 拉丁字母 ≠ 英文 | 西班牙语 `Hola, quiero informacion sobre viajes a China` 和法语退款请求 `Bonjour, je souhaite un remboursement` 都 `useModel:true`，而它们的投诉/退款词也不在中英词表里，等于两道闸一起绕过 | 加**正面英文判断**：折叠后的文本必须命中至少两个不同的英语虚词（the/and/you/we/for/with/is/are/to/of/my/would/like/please/about/can/will/trip/tour/travel/thanks/hello…），否则回退固定英文句 |
+| 5 | 「不发与上一条相同的话」这道闸从来没生效过 | 模型正文**不含**尾句，而库里存的出站正文**含**尾句，两边口径不同 → 永远判不相同 | 比较前两边都去掉固定尾句 |
+
+### 重跑（2026-10-25，CTS 近 120 天 60 条真实首条进线，只读、未外发）
+`smart:model_ok = 54/60（90%）`，仍高于 §9.9 的 40% 门槛。6 条回退逐条核对都该回退：
+①那条 4167 字咨询写了 "cancellation terms"；②中文乱码 `莪的莫`；③`Get Started`（只有一个英语虚词，按新规回退——安全方向）；④另一条非英文；⑤模型想说 "flight options"（`flight` 在禁词里）；⑥模型想说 "available options"（`available` 是空位类声明，正该拦）。
+
+**变异测试**：把这 5 处修复逐个改坏，全部被测试判红（关掉 `evaluateClaims` → 红 13 条；删 `thirteen` → 红 1 条；关掉分隔符长度判断 → 红 6 条；关掉「两个英语虚词」 → 红 4 条；改掉尾句常量 → 红 17 条）。
+另补一条回归：分隔符用的是 `/g` 正则，同一条回复连查两次结果必须相同（`lastIndex` 不许残留）——这是本仓踩过的同一个坑。

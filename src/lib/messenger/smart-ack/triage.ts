@@ -106,6 +106,25 @@ const URL_PATTERN_ALL = new RegExp(URL_SOURCE, 'gi')
 const NON_ASCII_SCRIPT =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Cyrillic}\p{Script=Arabic}\p{Script=Thai}\p{Script=Devanagari}\p{Script=Hebrew}]/u
 
+// Positive English signal: at least two distinct stopwords must appear as
+// whole words. Latin script is not the same as English — Spanish and French
+// messages use Latin letters but almost none of these words.
+//
+// Known trade-off: a very short English message like "Hi" is already caught
+// earlier by triage_too_short, and a terse English message with fewer than
+// two stopwords falls back to the fixed template — that is the safe direction.
+const ENGLISH_STOPWORDS: readonly string[] = [
+  'the', 'and', 'you', 'your', 'we', 'our', 'us', 'for', 'with', 'is', 'are',
+  'was', 'be', 'to', 'of', 'in', 'on', 'at', 'a', 'an', 'i', 'my', 'me',
+  'would', 'like', 'want', 'please', 'about', 'have', 'has', 'can', 'could',
+  'will', 'do', 'does', 'need', 'looking', 'interested', 'information', 'info',
+  'trip', 'tour', 'travel', 'holiday', 'thanks', 'thank', 'hello', 'hi',
+]
+
+const ENGLISH_STOPWORD_PATTERNS: RegExp[] = ENGLISH_STOPWORDS.map(
+  (w) => new RegExp(`\\b${escapeRegExp(w)}\\b`),
+)
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -168,15 +187,25 @@ function isLinkSpam(folded: string): boolean {
   return (letters ? letters.length : 0) < 40
 }
 
-function isNonEnglish(raw: string): boolean {
+function isNonEnglish(raw: string, folded: string): boolean {
   if (NON_ASCII_SCRIPT.test(raw)) return true
   const letters = raw.match(/\p{L}/gu)
-  if (!letters || letters.length === 0) return false
-  let nonAscii = 0
-  for (const ch of letters) {
-    if (ch.charCodeAt(0) > 0x7f) nonAscii += 1
+  if (letters && letters.length > 0) {
+    let nonAscii = 0
+    for (const ch of letters) {
+      if (ch.charCodeAt(0) > 0x7f) nonAscii += 1
+    }
+    if (nonAscii / letters.length > 0.3) return true
   }
-  return nonAscii / letters.length > 0.3
+  // Positive English test: require at least two distinct stopwords.
+  let hits = 0
+  for (const re of ENGLISH_STOPWORD_PATTERNS) {
+    if (re.test(folded)) {
+      hits += 1
+      if (hits >= 2) return false
+    }
+  }
+  return true
 }
 
 export function triageMessages(messages: string[]): TriageResult {
@@ -202,7 +231,7 @@ export function triageMessages(messages: string[]): TriageResult {
   if (squashed.length < 3) {
     return { useModel: false, reason: 'triage_too_short' }
   }
-  if (isNonEnglish(joined)) {
+  if (isNonEnglish(joined, folded)) {
     return { useModel: false, reason: 'triage_non_english' }
   }
   return { useModel: true }

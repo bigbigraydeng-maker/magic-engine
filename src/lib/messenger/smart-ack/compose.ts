@@ -40,6 +40,13 @@ const fixedWithNotice = (reason: string): AckPlan => ({
   reason,
 })
 
+// The stored outbound body includes the automated notice; strip it so the
+// comparison is against the model text only.
+function stripNotice(body: string | null): string | null {
+  if (body === null) return null
+  return body.split(AUTOMATED_NOTICE).join('').trim()
+}
+
 async function tryModel(deps: ComposeDeps, ctx: AckContext): Promise<AckPlan> {
   const messages = ctx.recentInbound.slice(-3)
   let raw: string
@@ -55,7 +62,9 @@ async function tryModel(deps: ComposeDeps, ctx: AckContext): Promise<AckPlan> {
   if (reply === null) return fixedWithNotice('parse_failed')
   const verdict = validateSmartAck(reply, messages)
   if (!verdict.ok) return fixedWithNotice(verdict.reason)
-  if (isSameAsLastOutbound(verdict.text, ctx.lastOutbound)) return fixedWithNotice('same_as_last')
+  if (isSameAsLastOutbound(verdict.text, stripNotice(ctx.lastOutbound))) {
+    return fixedWithNotice('same_as_last')
+  }
   return { kind: 'send', text: `${verdict.text} ${AUTOMATED_NOTICE}`, source: 'smart', reason: 'model_ok' }
 }
 

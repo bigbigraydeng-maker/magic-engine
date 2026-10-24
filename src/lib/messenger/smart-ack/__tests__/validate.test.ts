@@ -140,3 +140,76 @@ describe('validateSmartAck — echo', () => {
     expect(r.ok).toBe(true)
   })
 })
+
+describe('validateSmartAck — claims gate (FIX 1)', () => {
+  it('blocks an availability claim', () => {
+    const r = validateSmartAck('Thanks for your message. Your tour is almost full.', [])
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('validate_forbidden')
+  })
+
+  it('blocks a promise claim', () => {
+    const r = validateSmartAck('Thanks for your message. This tour is absolutely safe.', [])
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('validate_forbidden')
+  })
+})
+
+describe('validateSmartAck — number words (FIX 2)', () => {
+  const cases: string[] = [
+    'We can help with thirteen travellers.',
+    'sixty of our guests enjoyed that.',
+  ]
+  for (const reply of cases) {
+    it(`validate_number: ${reply}`, () => {
+      const r = validateSmartAck(reply, [])
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.reason).toBe('validate_number')
+    })
+  }
+})
+
+describe('validateSmartAck — separated short terms (FIX 3)', () => {
+  const cases: string[] = [
+    'This service is f.r.e.e.',
+    'the co st of that trip today',
+  ]
+  for (const reply of cases) {
+    it(`validate_forbidden: ${reply}`, () => {
+      const r = validateSmartAck(reply, [])
+      expect(r.ok).toBe(false)
+      if (!r.ok) expect(r.reason).toBe('validate_forbidden')
+    })
+  }
+
+  it('does not fire on an ordinary word containing a short term (coffee / fee)', () => {
+    const r = validateSmartAck(
+      'Thanks for getting in touch over coffee talk, a colleague will reply very soon.',
+      [],
+    )
+    expect(r.ok).toBe(true)
+  })
+})
+
+describe('分隔符混淆：既要抓住插空格的，也不能误伤正常词', () => {
+  it.each([
+    ['逐字母加点', 'Thanks for your message. This service is f.r.e.e.'],
+    ['只隔一处', 'Thanks for your message about the co st of that trip today.'],
+    ['加空格', 'Thanks for your note, the f e e is handled by a colleague soon.'],
+  ])('%s 要被拦下', (_n, reply) => {
+    const r = validateSmartAck(reply, [])
+    expect(r.ok).toBe(false)
+  })
+
+  it('正常词里恰好含短禁词（coffee 含 fee）不算混淆', () => {
+    const r = validateSmartAck('Thanks for getting in touch over coffee talk, a colleague will reply very soon.', [])
+    expect(r.ok).toBe(true)
+  })
+
+  it('同一条回复连查两次结果必须相同（/g 正则的 lastIndex 不许残留）', () => {
+    const reply = 'Thanks for your message. This service is f.r.e.e.'
+    const first = validateSmartAck(reply, [])
+    expect(validateSmartAck(reply, [])).toEqual(first)
+    expect(first.ok).toBe(false)
+  })
+})
