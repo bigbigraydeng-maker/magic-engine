@@ -29,6 +29,9 @@ import {
   type GrowthRowForClient,
 } from '@/lib/ads-strategy/agents/growth-client-view'
 import { overlayLiveGoal } from '@/lib/ads-strategy/agents/growth-live-goal'
+import { requireBookingAccess } from '@/lib/crm/booking-access'
+import { loadCompanyConfirmedBookingOutcome, unknownCompanyConfirmedBookingOutcome } from '@/lib/ads-strategy/portfolio/company-confirmed-bookings'
+import { shiftDate } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 
 export const dynamic = 'force-dynamic'
 
@@ -99,12 +102,35 @@ export async function GET(
       ? (growthRows[0] ? await overlayLiveGoal(clientId, growthRows[0]) : null)
       : toClientGrowthView(growthRows, new Date())
 
+  // CRM booking facts are more restricted than the normal client Ads Health view.
+  // The existing booking gate is required, and only a complete global-admin view
+  // receives the separately labelled CRM result (never the CRM row identities).
+  let companyConfirmedBookings: Awaited<ReturnType<typeof loadCompanyConfirmedBookingOutcome>> | undefined
+  const latestInsightDate = (latestRes.data as { insight_date?: string | null } | null)?.insight_date
+  if (fullView && latestInsightDate) {
+    const bookingAccess = await requireBookingAccess(clientId, 'view')
+    if (bookingAccess.ok) {
+      companyConfirmedBookings = await loadCompanyConfirmedBookingOutcome(
+        clientId,
+        shiftDate(latestInsightDate, -6),
+        latestInsightDate,
+      )
+    } else {
+      companyConfirmedBookings = unknownCompanyConfirmedBookingOutcome(
+        shiftDate(latestInsightDate, -6),
+        latestInsightDate,
+        'CRM 预订读取权限或配置不可用',
+      )
+    }
+  }
+
   return NextResponse.json({
     success: true,
     latest: latestRes.data ?? null,
     // Oldest → newest for the trend strip.
     history: (historyRes.data ?? []).slice().reverse(),
     industry: (clientRes.data as { industry?: string | null } | null)?.industry ?? null,
+    ...(companyConfirmedBookings ? { company_confirmed_bookings: companyConfirmedBookings } : {}),
     // 🔴 读失败与「今天还没跑」必须分得开：前者页面要说「读不到」，后者说「今天还没巡察」。
     growth,
   })

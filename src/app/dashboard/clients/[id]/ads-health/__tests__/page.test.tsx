@@ -112,6 +112,38 @@ async function renderAdsTab() {
 }
 
 describe('the money question is answered before any diagnosis', () => {
+  it('shows CRM-confirmed bookings as bookings, with the window and no payment claim', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': {
+        ...respond([OZTOP_ALERT]),
+        company_confirmed_bookings: {
+          value: 1, attribution: 'crm_first_touch',
+          window_start: '2026-07-17', window_end: '2026-07-23', source_ad_count: 1,
+        },
+      },
+    }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('1 笔')).toBeTruthy())
+    expect(screen.getByText('公司确认预订')).toBeTruthy()
+    expect(screen.getByText(/2026-07-17 至 2026-07-23/)).toBeTruthy()
+    expect(screen.getByText(/不代表已付款、收入或出行人数/)).toBeTruthy()
+  })
+
+  it('shows unknown with its reason instead of replacing a failed read with zero', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': {
+        ...respond([OZTOP_ALERT]),
+        company_confirmed_bookings: {
+          value: null, attribution: 'none', note: '读取 CRM 或广告事实失败',
+          window_start: '2026-07-17', window_end: '2026-07-23', source_ad_count: null,
+        },
+      },
+    }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('未知')).toBeTruthy())
+    expect(screen.getByText(/读取 CRM 或广告事实失败/)).toBeTruthy()
+  })
+
   it('opens with what the week actually cost, and names the worst payer', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT, HEALTHY]) }))
     render(<AdsHealthPage />)

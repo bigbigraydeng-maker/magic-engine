@@ -77,6 +77,15 @@ interface AdHealthResponse {
   industry?: string | null
   /** 卫青巡察当天的经营状态。null = 今天还没跑；缺字段 = 这一段读不到（接口出错）。 */
   growth?: GrowthStateView | ClientGrowthView | null
+  /** Present only for an internal viewer with CRM booking access. */
+  company_confirmed_bookings?: {
+    value: number | null
+    attribution: string
+    note?: string
+    window_start: string
+    window_end: string
+    source_ad_count: number | null
+  }
 }
 
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
@@ -294,6 +303,27 @@ function MoneySummary({ campaigns, playbook }: { campaigns: CampaignNarrative[];
         </p>
       )}
     </div>
+  )
+}
+
+function CompanyConfirmedBookings({ outcome }: { outcome: NonNullable<AdHealthResponse['company_confirmed_bookings']> }) {
+  const verified = outcome.value !== null && outcome.attribution === 'crm_first_touch'
+  return (
+    <section className="rounded-xl border border-sky-100 bg-sky-50/60 p-4 mb-4" aria-label="CRM company-confirmed booking outcome">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-700">公司确认预订</h2>
+        <span className="text-lg font-semibold tabular-nums text-slate-800">
+          {!verified || outcome.value === null ? '未知' : `${outcome.value} 笔`}
+        </span>
+      </div>
+      <p className="mt-1 text-xs text-slate-500">
+        近 7 天 {outcome.window_start} 至 {outcome.window_end} · 仅计可核验的 Meta 首次触点来源 · {verified
+          ? 'CRM 公司确认标记与创建审计已核对'
+          : 'CRM 证据或广告归属尚未完整核实'}
+      </p>
+      <p className="mt-1 text-xs text-slate-400">这是预订记录数，凭据内容未独立验证；不代表已付款、收入或出行人数。</p>
+      {outcome.note && <p className="mt-2 text-xs text-amber-700">暂不能完整核实：{outcome.note}</p>}
+    </section>
   )
 }
 
@@ -605,6 +635,7 @@ export default function AdsHealthPage() {
                 </p>
               </div>
               <MoneySummary campaigns={latest.payload.campaigns} playbook={playbook} />
+              {data?.company_confirmed_bookings && <CompanyConfirmedBookings outcome={data.company_confirmed_bookings} />}
               {live.length > 0 && (
                 <p className="text-xs text-gray-400">在投的 {live.length} 条广告要看明细，点上面「每条广告」。</p>
               )}
