@@ -114,6 +114,9 @@ export function verbOf(
   list: NextActionList,
 ): NextActionVerb {
   if (segment === 'excluded') return 'do_not_contact'
+  // 没有这一行会落到最后的 `return 'reply'`，名单上就会出现自相矛盾的
+  // 「回他 —— 看着不是客人来咨询（供应商系统通知）」（子牙复审 P1-1）。
+  if (segment === 'not_enquiry_suspect') return 'do_not_contact'
   if (segment === 'nurture_future') return 'hold'
   if (segment === 'handoff_sop') return 'system_watching'
   if (segment === 'stale_conversation' && list === 'cold') return 'system_watching'

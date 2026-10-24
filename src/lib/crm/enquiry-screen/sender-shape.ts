@@ -1,126 +1,139 @@
 /**
- * Sender-shape check: does this contact look like something other than a real
- * customer enquiry, judged ONLY from the email address and display name?
+ * Sender-shape check: does this contact's ADDRESS look like something other
+ * than a real customer enquiry?
  *
- * This never looks at message content and never calls a model — it is a pure,
- * deterministic function. Contacts it flags are moved to the visible
- * "leave for now" list, never deleted or hidden, so a false positive costs a
- * little attention rather than a lost customer. Be conservative: when in
- * doubt, return null and treat the sender as a normal person.
+ * This judges the sender's address shape only — never message content, never
+ * a model call. It is a pure, deterministic function.
+ *
+ * It is deliberately conservative: a false positive costs us a real customer,
+ * while a false negative costs a human one click. Anything this function
+ * flags is MOVED to the visible "leave for now" list — never hidden, never
+ * deleted — so a mistake is recoverable. Anything it misses is handled by a
+ * human pressing the existing "not an enquiry" button once.
+ *
+ * When in doubt, return null and treat the sender as a normal person.
  */
 
 import { RELAY_DOMAIN_SUFFIXES } from './rules'
 
-export type SenderShapeCategory = 'bulk_marketing' | 'vendor_notice' | 'cold_outreach' | 'system_account'
+export type SenderShapeCategory = 'bulk_marketing' | 'machine_sender'
 
 export interface SenderShapeVerdict {
   category: SenderShapeCategory
   reason: string
 }
 
-/** Suppliers / tools WE use — never a travel customer. */
-export const VENDOR_NOTICE_DOMAINS: readonly string[] = [
-  'twilio.com',
-  'meta.com',
-  'facebookmail.com',
-  'facebook.com',
-  'instagram.com',
-  'microsoft.com',
-  'microsoftonline.com',
-  'office.com',
-  'afterpay.com',
-  'stripe.com',
-  'xero.com',
-  'shopify.com',
-  'render.com',
-  'cloudflare.com',
-  'github.com',
-  'anthropic.com',
-  'openai.com',
-  'google.com',
-  'accounts.google.com',
-  'apple.com',
-  'testflight.apple.com',
-  'mailchimp.com',
-  'intuit.com',
-  'paypal.com',
-  'atlassian.com',
-  'slack.com',
-  'zoom.us',
-  'dropbox.com',
-  'linkedin.com',
-  'trustpilot.com',
-  'semrush.com',
-  'godaddy.com',
-]
-
-/** First labels that mark an ESP sending subdomain. */
-export const BULK_SUBDOMAIN_LABELS: readonly string[] = [
-  'e',
-  'em',
-  'mail',
-  'email',
+/**
+ * Local parts that mean "this mailbox does not accept replies". Compared after
+ * normalisation (see `normaliseLocalPart`), so `no-reply`, `noreply2` and
+ * `bounce+tag` all match.
+ */
+export const MACHINE_LOCAL_PARTS: readonly string[] = [
+  'noreply',
+  'no-reply',
+  'donotreply',
+  'do-not-reply',
+  'mailerdaemon',
+  'mailer-daemon',
+  'postmaster',
+  'bounce',
+  'bounces',
   'mailer',
-  'mailing',
-  'news',
-  'newsletter',
-  'info',
-  'notify',
+  'automated',
+  'autoreply',
+  'auto-reply',
   'notification',
   'notifications',
-  'send',
-  'sender',
-  'smtp',
-  'reply',
-  'noreply',
-  'bounce',
-  'go',
-  'click',
-  'link',
-  'track',
-  't',
-  'm',
-  'msg',
-  'marketing',
+  'alerts',
+  'nreply',
+]
+
+/**
+ * First labels that are unambiguously an email-service-provider sending
+ * subdomain. Deliberately narrow: `mail`, `email`, `info`, `notify`, `send`,
+ * `smtp`, `reply`, `go`, `m`, `t`, `msg` are all used by real organisations
+ * (universities, tour operators, government) and MUST NOT appear here.
+ */
+export const ESP_SUBDOMAIN_LABELS: readonly string[] = [
+  'e',
+  'em',
+  'news',
+  'newsletter',
   'campaign',
+  'campaigns',
+  'marketing',
+  'mkt',
+  'promo',
+  'click',
+  'clicks',
+  'track',
+  'tracking',
+  'link',
+  'links',
+  'sendgrid',
+  'mailgun',
+  'sparkpost',
+  'cmail',
+  'ccsend',
+  'sendible',
+  'mailer',
 ]
 
-/** Local parts that mean someone is selling TO us. */
-export const OUTREACH_LOCAL_PARTS: readonly string[] = [
-  'outreach',
-  'prospecting',
-  'biz',
-  'bizdev',
-  'bd',
-  'growth',
-  'seo',
-  'linkbuilding',
-  'link-building',
-  'guestpost',
-  'collab',
-  'collaboration',
-  'partnerships',
-  'affiliate',
-  'crypto',
-  'invest',
-  'loans',
+/** Labels that mark an academic or government domain — never a bulk sender. */
+export const ACADEMIC_OR_GOVT_LABELS: readonly string[] = [
+  'edu',
+  'ac',
+  'govt',
+  'gov',
+  'school',
+  'mil',
+  'k12',
 ]
 
-/** Display-name prefixes that identify a platform/system account. */
-const SYSTEM_NAME_PREFIXES: readonly string[] = [
-  'meta business',
-  'meta platform',
-  'facebook 用户',
-  'facebook user',
-  'microsoft',
-  'meta platforms',
-  'whatsapp business',
-  'instagram',
-  'google',
+/**
+ * Two-label public suffixes we must not mistake for a sending subdomain.
+ * `info.co.nz` is a registrable domain, not `info` under `co.nz`.
+ */
+export const MULTI_LABEL_PUBLIC_SUFFIXES: readonly string[] = [
+  'co.nz',
+  'net.nz',
+  'org.nz',
+  'govt.nz',
+  'ac.nz',
+  'school.nz',
+  'geek.nz',
+  'com.au',
+  'net.au',
+  'org.au',
+  'gov.au',
+  'edu.au',
+  'asn.au',
+  'id.au',
+  'co.uk',
+  'org.uk',
+  'ac.uk',
+  'gov.uk',
+  'co.jp',
+  'or.jp',
+  'ne.jp',
+  'ac.jp',
+  'com.cn',
+  'net.cn',
+  'org.cn',
+  'edu.cn',
+  'gov.cn',
+  'com.tw',
+  'edu.tw',
+  'org.tw',
+  'com.hk',
+  'edu.hk',
+  'co.in',
+  'com.sg',
+  'edu.sg',
+  'com.my',
+  'co.za',
+  'com.br',
 ]
-
-/** Display-name suffix that identifies a TestFlight build notification. */
-const SYSTEM_NAME_SUFFIX = 'via testflight'
 
 /** Lower-case, trim; null when empty. */
 function clean(value: string | null): string | null {
@@ -150,25 +163,57 @@ function domainMatches(domain: string, listed: string): boolean {
   return domain === listed || domain.endsWith('.' + listed)
 }
 
-/** Strip dots and dashes so 'link-building' and 'linkbuilding' compare equal. */
-function squash(value: string): string {
-  return value.replace(/[.-]/g, '')
+/**
+ * Split a lower-cased domain into the labels ABOVE the registrable domain
+ * (`prefixLabels`) and the registrable domain itself (`root`).
+ *
+ * The public suffix is the longest MULTI_LABEL_PUBLIC_SUFFIXES match the
+ * domain ends with, otherwise the last label. The registrable domain is the
+ * public suffix plus one label. A domain with too few labels returns
+ * `prefixLabels: []` and `root` = the whole domain.
+ */
+export function registrableParts(domain: string): { prefixLabels: string[]; root: string } {
+  const labels = domain.toLowerCase().split('.').filter((l) => l.length > 0)
+  if (labels.length === 0) return { prefixLabels: [], root: '' }
+
+  const suffix = longestMatchingSuffix(labels)
+  const suffixLabelCount = suffix === null ? 1 : suffix.split('.').length
+  const rootLabelCount = suffixLabelCount + 1
+
+  if (labels.length < rootLabelCount) {
+    return { prefixLabels: [], root: labels.join('.') }
+  }
+
+  const prefixLabels = labels.slice(0, labels.length - rootLabelCount)
+  const root = labels.slice(labels.length - rootLabelCount).join('.')
+  return { prefixLabels, root }
 }
 
-/** (a) Known system / platform account, judged from the display name. */
-function systemAccountVerdict(displayName: string | null): SenderShapeVerdict | null {
-  const name = clean(displayName)
-  if (!name) return null
-  if (name.endsWith(SYSTEM_NAME_SUFFIX)) {
-    return { category: 'system_account', reason: '系统账号，不是客人' }
+/** Longest MULTI_LABEL_PUBLIC_SUFFIXES entry the labels end with, or null. */
+function longestMatchingSuffix(labels: string[]): string | null {
+  let best: string | null = null
+  for (const suffix of MULTI_LABEL_PUBLIC_SUFFIXES) {
+    const parts = suffix.split('.')
+    if (parts.length > labels.length) continue
+    const tail = labels.slice(labels.length - parts.length).join('.')
+    if (tail !== suffix) continue
+    if (best === null || parts.length > best.split('.').length) best = suffix
   }
-  if (SYSTEM_NAME_PREFIXES.some((p) => name === p || name.startsWith(p))) {
-    return { category: 'system_account', reason: '系统账号，不是客人' }
-  }
-  return null
+  return best
 }
 
-/** (b) ESP relay domain. */
+/**
+ * Normalise a local part for machine-sender comparison: drop a `+tag`
+ * suffix, then `.`, `-`, `_`, then trailing digits. `bounce+tag` -> `bounce`,
+ * `no-reply` -> `noreply`, `noreply2` -> `noreply`.
+ */
+function normaliseLocalPart(local: string): string {
+  const withoutTag = local.split('+')[0]
+  const withoutSeparators = withoutTag.replace(/[.\-_]/g, '')
+  return withoutSeparators.replace(/\d+$/, '')
+}
+
+/** (a) ESP relay domain. */
 function relayVerdict(domain: string): SenderShapeVerdict | null {
   if (RELAY_DOMAIN_SUFFIXES.some((s) => domainMatches(domain, s))) {
     return { category: 'bulk_marketing', reason: '群发服务中转地址' }
@@ -176,50 +221,35 @@ function relayVerdict(domain: string): SenderShapeVerdict | null {
   return null
 }
 
-/** (c) Vendor / supplier domain. */
-function vendorVerdict(domain: string): SenderShapeVerdict | null {
-  if (VENDOR_NOTICE_DOMAINS.some((v) => domainMatches(domain, v))) {
-    return { category: 'vendor_notice', reason: '供应商系统通知' }
-  }
-  return null
+/** (b) Machine mailbox that does not accept replies. */
+function machineVerdict(local: string): SenderShapeVerdict | null {
+  const normalised = normaliseLocalPart(local)
+  if (normalised.length === 0) return null
+  const hit = MACHINE_LOCAL_PARTS.some((p) => normaliseLocalPart(p) === normalised)
+  return hit ? { category: 'machine_sender', reason: '机器发信地址（不收回复）' } : null
 }
 
-/** (d) ESP sending subdomain: 3+ labels and a listed first label. */
-function bulkSubdomainVerdict(domain: string): SenderShapeVerdict | null {
-  const labels = domain.split('.')
-  if (labels.length < 3) return null
-  const first = labels[0]
-  if (BULK_SUBDOMAIN_LABELS.includes(first)) {
-    return { category: 'bulk_marketing', reason: '群发营销地址' }
-  }
-  return null
-}
-
-/** (e) Local part names a sales/outreach role. */
-function outreachLocalVerdict(local: string): SenderShapeVerdict | null {
-  const squashed = squash(local)
-  if (OUTREACH_LOCAL_PARTS.some((p) => squash(p) === squashed)) {
-    return { category: 'cold_outreach', reason: '对方来推销' }
-  }
-  return null
-}
-
-/** (f) Local part equals the domain's first label, which is 6+ chars. */
-function outreachSelfBrandVerdict(local: string, domain: string): SenderShapeVerdict | null {
-  const first = domain.split('.')[0]
-  if (first.length >= 6 && local === first) {
-    return { category: 'cold_outreach', reason: '对方来推销' }
-  }
-  return null
+/** (c) ESP sending subdomain, unless the root is academic or government. */
+function espSubdomainVerdict(domain: string): SenderShapeVerdict | null {
+  const { prefixLabels, root } = registrableParts(domain)
+  if (prefixLabels.length === 0) return null
+  if (!prefixLabels.some((l) => ESP_SUBDOMAIN_LABELS.includes(l))) return null
+  const rootLabels = root.split('.')
+  if (rootLabels.some((l) => ACADEMIC_OR_GOVT_LABELS.includes(l))) return null
+  return { category: 'bulk_marketing', reason: '群发营销子域' }
 }
 
 /**
- * Judge a sender by shape alone. Returns null when nothing matches, meaning
- * "treat as a normal person". Checks run in a fixed order; the first hit wins.
+ * Judge a sender by address shape alone. Returns null when nothing matches,
+ * meaning "treat as a normal person". Checks run in a fixed order; the first
+ * hit wins.
+ *
+ * `displayName` is accepted for call-site compatibility but is NOT used to
+ * judge: a shared upstream helper already filters platform system accounts,
+ * and a name like 'Facebook 用户' means a real customer who left no name.
  */
 export function senderShapeOf(input: { email: string | null; displayName: string | null }): SenderShapeVerdict | null {
-  const system = systemAccountVerdict(input.displayName)
-  if (system) return system
+  void input.displayName
 
   const email = clean(input.email)
   if (!email) return null
@@ -227,11 +257,14 @@ export function senderShapeOf(input: { email: string | null; displayName: string
   const domain = domainOf(email)
   if (!domain) return null
 
-  return (
-    relayVerdict(domain) ??
-    vendorVerdict(domain) ??
-    bulkSubdomainVerdict(domain) ??
-    (localPartOf(email) ? outreachLocalVerdict(localPartOf(email) as string) : null) ??
-    (localPartOf(email) ? outreachSelfBrandVerdict(localPartOf(email) as string, domain) : null)
-  )
+  const relay = relayVerdict(domain)
+  if (relay) return relay
+
+  const local = localPartOf(email)
+  if (local) {
+    const machine = machineVerdict(local)
+    if (machine) return machine
+  }
+
+  return espSubdomainVerdict(domain)
 }

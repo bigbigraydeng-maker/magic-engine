@@ -88,10 +88,7 @@ export default function CrmAllContactsPage() {
    * 这样「决策清单」那页能直接指过来，员工也能把它存成书签——
    * 以前它只是页面里的一个开关，关掉页面就回到平铺名单。
    */
-  const [grouped, setGrouped] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return new URLSearchParams(window.location.search).get('view') === 'smart'
-  })
+  const [grouped, setGrouped] = useState(false)
   const [sections, setSections] = useState<PrioritySectionData[]>([])
   /** 展开哪些段。null = 还没动过，用服务端默认（前两段展开）。 */
   const [openSections, setOpenSections] = useState<SectionKey[] | null>(null)
@@ -261,6 +258,18 @@ export default function CrmAllContactsPage() {
   const [deepLinkId, setDeepLinkId] = useState<string | null>(null)
   useEffect(() => {
     setDeepLinkId(new URLSearchParams(window.location.search).get('contact'))
+  }, [])
+
+  /**
+   * `?view=smart` 直接进智能视图 —— 退役的「决策清单」页就是跳到这里，员工也能存书签。
+   *
+   * 跟上面的 `?contact=` 同一个写法：在 `useEffect` 里读、不在 `useState` 初始值里读。
+   * 初始值里读 `window.location.search` 会让服务端渲染得 false、客户端首帧得 true，
+   * React 水合不一致（会报错 + 闪一下平铺名单）；用 `useSearchParams` 则要给整页套
+   * Suspense 边界，为一个可选参数不值当（子牙 / 魏征复审 P2-2）。
+   */
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('view') === 'smart') setGrouped(true)
   }, [])
 
   useEffect(() => {

@@ -115,7 +115,7 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
   },
   not_enquiry_suspect: {
     label: '看着不是客人来咨询',
-    howTo: '发件地址像群发 / 供应商通知 / 推销 / 平台系统账号。不用联系；真是客人就在他的抽屉里点「真客人」，他会回到名单。',
+    howTo: '发件地址像群发 / 供应商通知 / 推销 / 平台系统账号。不用联系；如果其实是客人，把他的阶段往前推一步（例如标成「已联系」），之后机器就不会再把他放到这里。',
     batch: 'none',
   },
 }
