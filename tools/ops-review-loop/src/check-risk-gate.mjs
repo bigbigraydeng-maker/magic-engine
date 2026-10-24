@@ -291,19 +291,21 @@ const CODEX_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
 
 /**
  * @param {unknown} node
- * @returns {{name: string, status: string, conclusion: string}|null}
+ * @returns {{name: string, status: string, conclusion: string, completedAt?: string}|null}
  */
 function mapRollupNode(node) {
   if (!node || typeof node !== 'object') return null
-  const row = /** @type {{__typename?: unknown, name?: unknown, conclusion?: unknown, status?: unknown, context?: unknown, state?: unknown}} */ (
+  const row = /** @type {{__typename?: unknown, name?: unknown, conclusion?: unknown, status?: unknown, completedAt?: unknown, context?: unknown, state?: unknown}} */ (
     node
   )
   if (row.__typename === 'CheckRun' && typeof row.name === 'string') {
-    return {
+    const mapped = {
       name: row.name,
       status: String(row.status || '').toLowerCase(),
       conclusion: String(row.conclusion || '').toLowerCase(),
     }
+    if (typeof row.completedAt === 'string' && row.completedAt !== '') mapped.completedAt = row.completedAt
+    return mapped
   }
   if (row.__typename === 'StatusContext' && typeof row.context === 'string') {
     const state = String(row.state || '').toUpperCase()
@@ -363,7 +365,7 @@ const CHECK_ROLLUP_QUERY = `query($owner:String!,$name:String!,$number:Int!){
           pageInfo{hasNextPage}
           nodes{
             __typename
-            ... on CheckRun{name conclusion status}
+            ... on CheckRun{name conclusion status completedAt}
             ... on StatusContext{context state}
           }
         }
@@ -661,7 +663,16 @@ try {
     today: new Date().toISOString().slice(0, 10),
     readFiles: readHeadFiles,
   })
-  const rayHold = assessRayMergeHold(files)
+  const sourcePaths = []
+  if (Array.isArray(files)) {
+    for (const entry of files) {
+      for (const key of ['filename', 'previous_filename']) {
+        const filename = entry && typeof entry[key] === 'string' ? entry[key] : ''
+        if (/\.(?:ts|tsx|js|mjs|cjs)$/i.test(filename)) sourcePaths.push(filename)
+      }
+    }
+  }
+  const rayHold = assessRayMergeHold(files, sourcePaths.length > 0 ? await readHeadFiles(sourcePaths) : {})
   const verdict = await readHeadVerdict({
     sources,
     markers: review.markers,

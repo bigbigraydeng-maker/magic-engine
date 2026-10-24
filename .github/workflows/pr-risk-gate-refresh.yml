@@ -6,8 +6,9 @@ name: PR risk gate refresh
 # in place, so `edited` counts too. A Claude sign-off is the same kind of
 # comment (`me-review-signoff`, or a comment from the trusted login). When
 # the light checks finish, this runs again so an A-level PR can arm
-# auto-merge once they are green. It does not listen to this workflow or to
-# the risk-gate workflow: that would loop.
+# auto-merge once they are green. Every required check other than Risk gate
+# is published by that workflow, so its completion is the retrigger. It does
+# not listen to this workflow or to the risk-gate workflow: that would loop.
 #
 # This file is separate from `pr-risk-gate.yml` on purpose. An `issue_comment`
 # run is attached to the default-branch SHA. A job here named "Risk gate"

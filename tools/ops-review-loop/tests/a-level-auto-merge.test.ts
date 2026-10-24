@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { MERGE_DECISION, decideMerge } from '../src/merge-decision.mjs'
 import { requiredChecksAreGreen } from '../src/required-checks.mjs'
-import { assessRayMergeHold } from '../src/risk.mjs'
+import { assessRayMergeHold, importsMetaSpendWriter } from '../src/risk.mjs'
 import {
   buildSignoffMarker,
   evaluateClaudeHeadSignoff,
@@ -124,7 +124,7 @@ describe('A-level auto-merge', () => {
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
   })
 
-  it('accepts an APPROVED review or an explicit sign-off comment on this head, and ignores "no P0/P1" prose', () => {
+  it('accepts an APPROVED review or a dedicated SIGNED-OFF line, and ignores a refusal', () => {
     const approved = evaluateClaudeHeadSignoff({
       head: HEAD,
       trustedLogin: CLAUDE,
@@ -133,16 +133,35 @@ describe('A-level auto-merge', () => {
       threads: [],
       threadsReadable: true,
     })
-    const comment = evaluateClaudeHeadSignoff({
+    const line = evaluateClaudeHeadSignoff({
       head: HEAD,
       trustedLogin: CLAUDE,
       prAuthor: AUTHOR,
-      comments: [{ author: CLAUDE, body: `LGTM ${HEAD}. no P0/P1 left.` }],
+      comments: [{ author: CLAUDE, body: `Reviewed.\nSIGNED-OFF: ${HEAD}\n` }],
+      threads: [],
+      threadsReadable: true,
+    })
+    const refusal = evaluateClaudeHeadSignoff({
+      head: HEAD,
+      trustedLogin: CLAUDE,
+      prAuthor: AUTHOR,
+      comments: [{ author: CLAUDE, body: `Cannot sign-off ${HEAD}: P1 credentials handling is unsafe.` }],
+      threads: [],
+      threadsReadable: true,
+    })
+    const quoted = evaluateClaudeHeadSignoff({
+      head: HEAD,
+      trustedLogin: CLAUDE,
+      prAuthor: AUTHOR,
+      comments: [{ author: CLAUDE, body: `Write this line yourself:\n> SIGNED-OFF: ${HEAD}\n\`\`\`\nSIGNED-OFF: ${HEAD}\n\`\`\`` }],
       threads: [],
       threadsReadable: true,
     })
     expect(approved.clear).toBe(true)
-    expect(comment.clear).toBe(true)
+    expect(line.clear).toBe(true)
+    expect(refusal.clear).toBe(false)
+    expect(quoted.clear).toBe(false)
+    expect(refusal.reason).toContain('还没签')
   })
 
   it('does not let the PR author or an open P0 thread count as Claude sign-off', () => {
@@ -224,6 +243,30 @@ describe('paths Ray still merges by hand', () => {
     expect(result.hold).toBe(true)
   })
 
+  it('holds the real Meta credential and ad-spend entry points', () => {
+    for (const path of [
+      'src/lib/meta-oauth/client.ts',
+      'src/lib/meta-oauth/ads-read.ts',
+      'src/lib/action-submission/stop-loss.ts',
+      'src/app/api/clients/[id]/ad-health/o1-scale/route.ts',
+      'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
+      'src/lib/meta/entity-settings.ts',
+      'src/lib/ads-strategy/ad-draft.ts',
+      'src/lib/marketing-plan/promo/draft-ads.ts',
+    ]) {
+      expect(held(path).hold, path).toBe(true)
+    }
+  })
+
+  it('holds a file that imports a Meta spend writer even when its path is not listed', () => {
+    const path = 'src/lib/not-on-the-list/bridge.ts'
+    const importing = "import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'\n"
+    expect(importsMetaSpendWriter(importing)).toBe(true)
+    expect(assessRayMergeHold([{ filename: path }], { [path]: importing }).hold).toBe(true)
+    expect(assessRayMergeHold([{ filename: path }], { [path]: 'export const n = 1\n' }).hold).toBe(false)
+    expect(assessRayMergeHold([{ filename: path }], { [path]: null }).hold).toBe(true)
+  })
+
   it('does not hold kernel code, a sitemap budget, Meta insights, or a non-Meta budget', () => {
     for (const path of [
       'src/lib/kernel/state.ts',
@@ -263,6 +306,19 @@ describe('required checks', () => {
         checksReadable: true,
       }),
     ).toBe(true)
+  })
+
+  it('uses completedAt when the same check was rerun, and does not trust array order without it', () => {
+    const older = { name: 'ops-review-loop-tests', status: 'completed', conclusion: 'failure', completedAt: '2026-10-24T00:00:00Z' }
+    const newer = { name: 'ops-review-loop-tests', status: 'completed', conclusion: 'success', completedAt: '2026-10-24T01:00:00Z' }
+    const laterFail = { name: 'ops-review-loop-tests', status: 'completed', conclusion: 'failure', completedAt: '2026-10-24T02:00:00Z' }
+    expect(requiredChecksAreGreen({ requiredNames: ['ops-review-loop-tests'], checks: [older, newer], checksReadable: true })).toBe(true)
+    expect(requiredChecksAreGreen({ requiredNames: ['ops-review-loop-tests'], checks: [newer, older], checksReadable: true })).toBe(true)
+    expect(requiredChecksAreGreen({ requiredNames: ['ops-review-loop-tests'], checks: [newer, laterFail], checksReadable: true })).toBe(false)
+    const plainFail = { name: 'ops-review-loop-tests', status: 'completed', conclusion: 'failure' }
+    const plainOk = { name: 'ops-review-loop-tests', status: 'completed', conclusion: 'success' }
+    expect(requiredChecksAreGreen({ requiredNames: ['ops-review-loop-tests'], checks: [plainOk, plainFail], checksReadable: true })).toBe(false)
+    expect(requiredChecksAreGreen({ requiredNames: ['ops-review-loop-tests'], checks: [plainFail, plainOk], checksReadable: true })).toBe(false)
   })
 
   it('fails closed when the only required check is this gate, or the rollup is unread', () => {
