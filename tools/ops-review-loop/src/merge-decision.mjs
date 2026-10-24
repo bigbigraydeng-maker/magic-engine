@@ -27,7 +27,7 @@
  * A signed A PR returns `pass: true` with `decision: 'disable'`. The two are
  * deliberately separate: `pass` means "this PR is not blocked by the merge
  * gate", `decision` means "what should be done to the auto-merge flag". An A PR
- * that has all three sign-offs is *ready*, and a human still presses the button
+ * that has both sign-offs is *ready*, and a human still presses the button
  * — because the sign-off is a verdict about a diff, and the diff can move
  * between the sign-off and the merge. `evaluateSignoffs` binds the sign-off to
  * `base..head`; keeping the merge itself manual is what makes that binding
@@ -89,7 +89,7 @@ function allRolesMissing() {
  *
  * 🔴 `complete: true` alone is not enough. The claim is only meaningful if the
  * object also carries a `missing` array that agrees with it — an object saying
- * `complete: true, missing: ['direnjie']` is self-contradictory, and one saying
+ * `complete: true, missing: ['claude-code']` is self-contradictory, and one saying
  * `complete: true, missing: 'not-an-array'` is malformed. Both are treated as
  * "not complete", because a malformed claim of completeness is not a claim.
  * The alternative — trusting the boolean and ignoring the list — would make the
@@ -100,10 +100,11 @@ function allRolesMissing() {
  */
 function isCompleteSignoff(signoff) {
   if (!signoff || typeof signoff !== 'object') return false
-  const candidate = /** @type {{complete?: unknown, missing?: unknown}} */ (signoff)
+  const candidate = /** @type {{complete?: unknown, missing?: unknown, present?: unknown}} */ (signoff)
   if (candidate.complete !== true) return false
-  if (!Array.isArray(candidate.missing)) return false
-  return candidate.missing.length === 0
+  if (!Array.isArray(candidate.missing) || candidate.missing.length !== 0) return false
+  if (!Array.isArray(candidate.present)) return false
+  return REQUIRED_SIGNOFF_ROLES.every((role) => candidate.present.includes(role))
 }
 
 /**
@@ -139,8 +140,11 @@ function missingRolesFor(signoff) {
  *       auto-merge into main. Documented in `.github/merge-authorization.md`
  *       and asserted by the caller `check-risk-gate.mjs` — the guard must live
  *       here or a caller that forgets to pass `fork` slips it past.
- *   2. B and C are auto-merged once the machine checks are green.
- *   3. A is merged by a human, and only once all three sign-offs are present.
+ *   2. B and C are auto-merged once the machine checks are green. Spot checks
+ *      by ziya / weizheng / direnjie are not an input: a missing spot check
+ *      cannot stop this branch from returning `enable`.
+ *   3. A is merged by a human, and only once both sign-offs are present
+ *      (Codex Astra and Claude Code). The old three roles do not count.
  *   4. Anything else is treated as A, and says so in the reason.
  *
  * 🔴 **`fork` uses the same fail-closed convention as `draft`.** Only an
@@ -198,14 +202,14 @@ export function decideMerge({ risk, draft, fork, signoff } = {}) {
         pass: true,
         decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
         tier: TIER.SIGNED,
-        reason: 'A 级：三方签字齐，可由人合并（A 级永不自动合）',
+        reason: 'A 级：Codex Astra 与 Claude Code 两方签字齐，可由人合并（A 级永不自动合）',
       }
     }
     return {
       pass: false,
       decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
       tier: TIER.BLOCKED,
-      reason: `A 级：缺签字 ${missingRolesFor(signoff).join('/')} （现阶段签字自动写入未建，由 PM 决定是否绕过）`,
+      reason: `A 级：缺签字 ${missingRolesFor(signoff).join('/')} （两方须各用自己的身份签字；自动写入尚未建成，由 PM 决定是否绕过）`,
     }
   }
 
@@ -216,7 +220,7 @@ export function decideMerge({ risk, draft, fork, signoff } = {}) {
     pass: false,
     decision: MERGE_DECISION.DISABLE_AUTO_MERGE,
     tier: TIER.BLOCKED,
-    reason: `级别不可识别（${String(risk)}），按 A 处理：缺签字 ${missingRolesFor(signoff).join('/')} （现阶段签字自动写入未建，由 PM 决定是否绕过）`,
+    reason: `级别不可识别（${String(risk)}），按 A 处理：缺签字 ${missingRolesFor(signoff).join('/')} （两方须各用自己的身份签字；自动写入尚未建成，由 PM 决定是否绕过）`,
   }
 }
 

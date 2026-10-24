@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { MERGE_DECISION, decideMerge, summariseDecision } from '../src/merge-decision.mjs'
 
-/** A sign-off object claiming all three roles have signed. */
-const COMPLETE_SIGNOFF = { complete: true, present: ['ziya', 'weizheng', 'direnjie'], missing: [] }
+/** A sign-off object claiming both required roles have signed. */
+const COMPLETE_SIGNOFF = { complete: true, present: ['codex-astra', 'claude-code'], missing: [] }
 
-/** A sign-off object with one role still outstanding. */
-const INCOMPLETE_SIGNOFF = { complete: false, present: ['ziya', 'weizheng'], missing: ['direnjie'] }
+/** A sign-off object with one required role still outstanding. */
+const INCOMPLETE_SIGNOFF = { complete: false, present: ['codex-astra'], missing: ['claude-code'] }
+
+/** The old three roles, claimed complete. They must not open an A-level gate. */
+const OLD_THREE_SIGNOFF = { complete: true, present: ['ziya', 'weizheng', 'direnjie'], missing: [] }
 
 describe('decideMerge — drafts', () => {
   it('blocks a draft PR', () => {
@@ -45,7 +48,7 @@ describe('decideMerge — fork', () => {
     expect(result.tier).toBe('blocked')
   })
 
-  it('blocks a fork PR at A even with all three sign-offs', () => {
+  it('blocks a fork PR at A even when both sign-offs are present', () => {
     const result = decideMerge({ risk: 'A', draft: false, fork: true, signoff: COMPLETE_SIGNOFF })
     expect(result.pass).toBe(false)
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
@@ -85,6 +88,20 @@ describe('decideMerge — B and C', () => {
     expect(result.decision).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
     expect(result.tier).toBe('auto')
   })
+
+  it('auto-merges B and C even when every reviewer, old or new, is listed as missing', () => {
+    const signoff = {
+      complete: false,
+      present: [],
+      missing: ['ziya', 'weizheng', 'direnjie', 'codex-astra', 'claude-code'],
+    }
+    for (const risk of ['B', 'C']) {
+      const result = decideMerge({ risk, draft: false, fork: false, signoff })
+      expect(result.pass, risk).toBe(true)
+      expect(result.decision, risk).toBe(MERGE_DECISION.ENABLE_AUTO_MERGE)
+      expect(result.tier, risk).toBe('auto')
+    }
+  })
 })
 
 describe('decideMerge — A', () => {
@@ -99,15 +116,22 @@ describe('decideMerge — A', () => {
     const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: INCOMPLETE_SIGNOFF })
     expect(result.pass).toBe(false)
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.reason).toContain('direnjie')
+    expect(result.reason).toContain('claude-code')
   })
 
-  it('blocks an A PR with no sign-off input, and names all three roles', () => {
+  it('blocks an A PR with no sign-off input, and names both required roles', () => {
     const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: undefined })
     expect(result.pass).toBe(false)
-    expect(result.reason).toContain('ziya')
-    expect(result.reason).toContain('weizheng')
-    expect(result.reason).toContain('direnjie')
+    expect(result.reason).toContain('codex-astra')
+    expect(result.reason).toContain('claude-code')
+    expect(result.reason).not.toContain('ziya')
+  })
+
+  it('does not treat the old three roles as a completed A-level sign-off', () => {
+    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: OLD_THREE_SIGNOFF })
+    expect(result.pass).toBe(false)
+    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+    expect(result.tier).toBe('blocked')
   })
 
   it('does not accept a malformed claim of completeness', () => {

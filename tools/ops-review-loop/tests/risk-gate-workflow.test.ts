@@ -174,6 +174,14 @@ describe('Risk gate workflow: the judge lives on main', () => {
     expect(env.SIGNOFF_TRUSTED_LOGINS).toContain('vars.ME_SIGNOFF_TRUSTED_LOGINS')
     expect(env.SIGNOFF_TRUSTED_LOGINS).not.toContain('pull_request.user.login')
   })
+
+  it('still judges from main and describes exactly two A-level sign-offs', () => {
+    expect(riskGate.triggers.pull_request_target).toBeDefined()
+    expect(riskGate.source).toContain('ref: main')
+    expect(riskGate.source).toContain('Codex Astra')
+    expect(riskGate.source).toContain('Claude Code')
+    expect(riskGate.source).not.toContain('three trusted sign-off')
+  })
 })
 
 describe('ops-review-loop CI: tests run on non-draft PRs', () => {

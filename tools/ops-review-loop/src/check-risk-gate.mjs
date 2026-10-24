@@ -34,8 +34,9 @@ import {
   selectTrustedGateMarkers,
   shouldPostGateComment,
 } from './gate-marker.mjs'
-import { evaluateSignoffs, parseSignoffMarkers, selectTrustedSignoffMarkers } from './signoff-marker.mjs'
+import { reviewSignoffState } from './signoff-marker.mjs'
 import { decideMerge, summariseDecision } from './merge-decision.mjs'
+import { shouldRequestLegacySpotCheck } from './sampling.mjs'
 import { applyTrialRunToDecision, describeTrialRun, evaluateTrialRunSafely } from './quality.mjs'
 
 /**
@@ -264,10 +265,10 @@ async function readHeadFiles(paths) {
 /**
  * Build the human summary text for the step summary and the posted comment.
  *
- * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any}} input
+ * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any, spotSample: {reason: string}|null, spotChecks: {present: string[]}|null, trustReady: boolean}} input
  * @returns {string}
  */
-function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError, trialRun }) {
+function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError, trialRun, spotSample, spotChecks, trustReady }) {
   const lines = [
     summariseDecision({
       risk: rating.risk,
@@ -278,7 +279,16 @@ function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesErro
   ]
   if (rating.risk === 'A') {
     lines.push(`- 签字：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
-    lines.push('- 现阶段：签字自动写入尚未建成，A 级由 PM 决定是否以管理员身份合并')
+    lines.push('- 现阶段：两方签字自动写入尚未建成，A 级由 PM 决定是否以管理员身份合并')
+    if (!trustReady) {
+      lines.push('- 可信身份还没按角色配好：仓库变量要写成 codex-astra=登录名,claude-code=另一个登录名')
+    }
+  }
+  if (rating.risk === 'B' && spotSample) {
+    lines.push(`- 抽查：${spotSample.reason}`)
+    if (spotChecks && spotChecks.present.length > 0) {
+      lines.push(`- 抽查记录（不挡合并）：${spotChecks.present.join('/')}`)
+    }
   }
   lines.push(...describeTrialRun(trialRun))
   if (filesError) {
@@ -323,18 +333,22 @@ try {
   const existing = findGateFor({ markers: trustedGate, base: baseSha, head: headSha })
 
   // Sign-off: only consulted when the rating is A, but always computed so the
-  // summary can report it.
-  const trustedLogins = signoffTrustedLogins
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  const signoffMarkers = selectTrustedSignoffMarkers({
+  // summary can report it. Spot checks are reported for B and never block.
+  const review = reviewSignoffState({
+    rawTrust: signoffTrustedLogins,
     sources,
-    trustedAuthors: trustedLogins,
     prAuthor,
+    base: baseSha,
+    head: headSha,
   })
-  const ignoredSignoff = parseSignoffMarkers(sources.map((s) => s.body)).length - signoffMarkers.length
-  const signoff = evaluateSignoffs({ markers: signoffMarkers, base: baseSha, head: headSha })
+  const signoff = review.signoff
+  const ignoredSignoff = review.ignoredMarkers
+  const spotSample = shouldRequestLegacySpotCheck({ risk: rating.risk, pr, sha: headSha })
+  const bound = review.trust.byRole
+  const trustReady =
+    typeof bound['codex-astra'] === 'string' &&
+    typeof bound['claude-code'] === 'string' &&
+    bound['codex-astra'] !== bound['claude-code']
 
   // 当场试跑 can only make the decision stricter — it never yields `enable`.
   const trialRun = await evaluateTrialRunSafely({
@@ -360,6 +374,9 @@ try {
     ignoredMarkers: ignoredGate + ignoredSignoff,
     filesError,
     trialRun,
+    spotSample,
+    spotChecks: review.spotChecks,
+    trustReady,
   })
   summary(summaryText)
 

@@ -14,8 +14,11 @@ name: PR risk gate
 #
 # Two tiers. A computed risk of B or C enables auto-merge, and GitHub performs
 # the merge itself once every required check is green. A computed risk of A
-# passes only when three trusted sign-off markers exist for this exact
-# base+head pair; otherwise the check goes red.
+# passes only when two trusted sign-offs exist for this exact base+head pair:
+# Codex Astra (role codex-astra) and Claude Code (role claude-code), each
+# written by its own trusted login. Otherwise the check goes red. The former
+# three reviewer roles are optional B-level spot checks and never block a B
+# or C merge.
 #
 # It never merges directly, never pushes, never deploys. Its only writes are the
 # rating comment and the auto-merge toggle.
