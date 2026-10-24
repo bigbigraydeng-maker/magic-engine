@@ -1,6 +1,6 @@
 ---
 id: 2026-10-24-actions-minutes-budget
-title: GitHub 检查费从每月四百多美元降到大约免费额度附近
+title: GitHub 检查费从每月四百多美元降到大约十到二十美元
 status: done
 owner: pm
 decided_on: 2026-10-24
