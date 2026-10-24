@@ -3,9 +3,11 @@
 PM 2026-09-25 拍板（台账卡 `docs/ledger/2026-09-25-merge-gate-machine-not-human.md`、
 `docs/ledger/2026-09-25-merge-two-tiers-auto-vs-signed.md`）：
 
-> 合并不做"每次 GitHub 点头"的人工闸；分两档——B/C 级 PR 机器检查全绿自动合、
-> 不再在聊天里问 PM go。2026-10-25 Ray 口授：A 级改为 Codex Astra 审查 + Claude Code
-> 独立复核，两签齐了才由人合。子牙 / 魏征 / 狄仁杰 只抽查 B 级，缺了不挡合并。
+> 合并不做"每次 GitHub 点头"的人工闸；分两档。2026-10-25 当晚补了一条：B/C 级
+> 不是检查一绿就自动合，要等 Codex 审过**当前这次提交**、且没有未解决的 P0/P1，
+> 才打开自动合并。新提交让旧审查作废，并关掉已经打开的自动合并。A 级改为
+> Codex Astra 审查 + Claude Code 独立复核，两签齐了才由人合。子牙 / 魏征 / 狄仁杰
+> 只抽查 B 级，缺了不挡合并。
 
 以前这里描述的「Merge authorization (Ray)」检查已删除：它依赖一个从未配置 required
 reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清单，所以从未真正拦过任何
@@ -38,7 +40,7 @@ reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清�
 
 | 级别 | `Risk gate` 结果 | 合并方式 |
 |---|---|---|
-| **B / C** | 绿。子牙 / 魏征 / 狄仁杰 的抽查缺席不改变这一格 | 检查自己执行 `gh pr merge --auto --merge`；GitHub 在**所有**必过检查全绿、review 线程全部解决后合并。没有人点，也不在聊天里问 PM |
+| **B / C** | 级别仍按改动文件算出，写在摘要里。自动合并只在 Codex（变量里 `codex-astra` 那个登录名）审过**当前 head**、且没有未解决的 P0/P1 时才打开；否则这道检查是红的，并执行 `--disable-auto`。抽查缺席不改变这一格。P2 不挡 | 满足上一格才执行 `gh pr merge --auto --merge`。GitHub 仍要等所有必过检查全绿、review 线程全部解决才真正合并。新推送若 Codex 还没审新提交，关掉自动合并，不重新打开 |
 | **A** | 只有当 **Codex Astra**（`codex-astra`）和 **Claude Code**（`claude-code`）对**当前 base+head** 各有一条可信签字标记 `<!-- me-review-signoff:{...} -->`，而且两条来自**两个不同登录名**时才绿；否则**红**。旧的子牙 / 魏征 / 狄仁杰 标记不算数 | A 级永不自动合。绿了也要人合 |
 
 另有三种一律红且关闭 auto-merge：草稿 PR、fork 来的 PR、判级过程任何一步读不到。
@@ -68,8 +70,15 @@ PR 作者，作者给自己签会被丢掉。`github-actions[bot]` 写了也不�
 `gh pr merge --admin` 合。agent 不得自行对 A 级 PR 执行 `--admin`。
 
 B 级可选抽查（子牙 / 魏征 / 狄仁杰，大约五分之一，按 PR 号和提交固定）只出现在摘要里。
-他们的标记可以记，缺了不挡 B 级或 C 级自动合并。若要让抽查记录被认成可信留言，可在同一
+他们的标记可以记，缺了不挡 B 级或 C 级。挡自动合并的是另一件事：Codex 还没审当前
+head，或审完还留着没解决的 P0/P1。若要让抽查记录被认成可信留言，可在同一
 变量末尾另加 `ziya=登录名,weizheng=登录名,direnjie=登录名`，这三项不是必填。
+
+Codex 实际怎么留言（2026-10-24 对 #3086、#3091、#3080 看过）：干净审查不产生
+GitHub「审查」对象，而是两条 PR 评论。能绑定提交的是评论里的
+`codex-review-state:v1`，里面的 `commit_sha` 是完整 40 位。收据那句
+「Didn't find any major issues」只带短提交号，不能单独当审查。有意见时才会
+另开一条审查，行内评论用色块标 P0/P1/P2。只有没解决的 P0/P1 挡住自动合并。
 
 ## 主干规则集（仓库设置，PM 合并接线 PR 时一并授权）
 
