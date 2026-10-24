@@ -1,10 +1,12 @@
 ---
 id: 2026-10-24-memory-operator-gate
 title: 客户记忆库只对内部账号开放，门户成员打不开也改不了
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-24
 source: issue:3098
+done_on: 2026-10-24
+done_ref: pr:3113
 verify_by: 2026-11-01
 verify_how: 用 access_type 为 both 或 dashboard、且 scoped_admin 为否的客户账号打开记忆页，应看到拒绝，接口返回 403；内部名单或 scoped_admin 账号仍能打开并编辑。不要用生产库核对账号。
 ---
