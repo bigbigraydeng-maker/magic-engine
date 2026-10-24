@@ -49,7 +49,6 @@ import {
   CONVERSATION_AUTOACK_SENT_EVENT,
   CONVERSATION_REPLY_APPROVED_EVENT,
 } from '@/lib/conversations/events'
-import { TOURISM_POST_SALE_POLICY, type ConversationClass } from '@/lib/messenger-agent/classify'
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { MessengerAgentOutput } from '@/lib/messenger-agent/agent-output-schema'
@@ -151,8 +150,6 @@ function makeDeps(overrides: Partial<ConversationInboundDraftDeps> = {}): Conver
     isOptedOut: vi.fn(async () => false),
     isEnabled: vi.fn(async () => true),
     hasRecentOutbound: vi.fn(async () => false),
-    classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
-    loadIndustry: vi.fn(async () => null),
     loadContext: vi.fn(async () => fakeContext()),
     runAgent: vi.fn(async () => fakeAgentOutput()),
     verify: vi.fn(async () => okVerifier()),
@@ -261,7 +258,6 @@ describe('kill-check', () => {
     const result = await invoke(fn, fakeStep())
     expect(result).toMatchObject({ outcome: 'skipped_opted_out', conversation_id: CONVERSATION_ID })
     expect(deps.isEnabled).not.toHaveBeenCalled()
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.runAgent).not.toHaveBeenCalled()
   })
 
@@ -270,28 +266,15 @@ describe('kill-check', () => {
     const fn = createConversationInboundDraftFunction(deps)
     const result = await invoke(fn, fakeStep())
     expect(result).toMatchObject({ outcome: 'skipped_channel_disabled' })
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.runAgent).not.toHaveBeenCalled()
   })
 
-  it('分类为 post_sale → skipped_post_sale，不起草，传给 classify 的是旅游 Playbook', async () => {
-    const deps = makeDeps({
-      loadIndustry: vi.fn(async () => 'Travel — Tour Operator'),
-      classify: vi.fn(async (): Promise<ConversationClass> => 'post_sale'),
-    })
+  it('2026-10-22 PM：不再区分售前 / 售后——F2 不再做分类，所有进线都照常起草', async () => {
+    const deps = makeDeps()
     const fn = createConversationInboundDraftFunction(deps)
     const result = await invoke(fn, fakeStep())
-    expect(result).toMatchObject({ outcome: 'skipped_post_sale' })
-    expect(deps.runAgent).not.toHaveBeenCalled()
-    expect(deps.classify).toHaveBeenCalledWith(CONVERSATION_ID, TOURISM_POST_SALE_POLICY)
-  })
-
-  it('认不出行业 → 不调 classify，按 lead_intake 继续往下走', async () => {
-    const deps = makeDeps({ loadIndustry: vi.fn(async () => 'real_estate') })
-    const fn = createConversationInboundDraftFunction(deps)
-    const result = await invoke(fn, fakeStep())
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(result).toMatchObject({ outcome: 'sent' })
+    expect(deps.runAgent).toHaveBeenCalled()
   })
 })
 

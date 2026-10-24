@@ -66,6 +66,14 @@ export async function POST(
     return NextResponse.json({ success: true, config, idempotent: true, version })
   }
 
+  // 只有 candidate 能手动批准。扩展状态（质检中/测试中/…）归自动流程管，手动批准会绕过流程结论。
+  if (entry.status !== 'candidate') {
+    return NextResponse.json(
+      { error: 'status_not_approvable', message: '这条素材现在处于自动流程状态，不能用手动批准；请等流程结论或联系管理员。' },
+      { status: 409 },
+    )
+  }
+
   const verdict = promoVerdict(entry.promo_window, nzToday(Date.now()))
   if (verdict === 'undeclared') {
     return NextResponse.json({ error: 'promo_window_undeclared', message: '这条素材还没有声明推广期，不能批准：请先声明起止日期，或明确声明长期有效。' }, { status: 422 })

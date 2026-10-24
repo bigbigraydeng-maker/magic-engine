@@ -39,7 +39,7 @@ const PASS_HUMAN = REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
 }))
 
 const approve = (db: SupabaseClient, checklist: unknown = PASS_HUMAN) =>
-  applyApprove(db, 'wo-1', 'me@x.com', undefined, checklist)
+  applyApprove(db, 'wo-1', 'me@x.com', undefined, checklist, null)
 
 describe('applyApprove server gate stays strict', () => {
   it('baseline: all 9 human items PASS -> approve succeeds', async () => {

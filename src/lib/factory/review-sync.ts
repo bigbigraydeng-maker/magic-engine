@@ -222,7 +222,13 @@ export async function applyApprove(wo: Record<string, unknown>, rec: AirtableRec
     .from('content_work_orders')
     .update({
       status: 'approved',
-      review_ref: { ...ref, approved_by: reviewer, approved_at: new Date().toISOString() },
+      review_ref: {
+        ...ref,
+        approved_by: reviewer,
+        approved_at: new Date().toISOString(),
+        approval_source: 'airtable_sync',
+        approver_scope: 'unverified',
+      },
       updated_at: new Date().toISOString(),
     })
     .eq('id', wo.id as string)

@@ -58,15 +58,23 @@ const DISAPPEARED = 'disappeared'
 
 interface BoundAccount { adAccountId: string; label: string | null }
 
-/** 账户清单以「绑定表」为准（读不到就抛错）；绑定表一行都没有时退回客户表上的旧单值列，和其它读取方一致。 */
+/**
+ * 账户清单以「绑定表」为准（读不到就抛错）；绑定表一行都没有时退回客户表上的旧单值列，和其它读取方一致。
+ * hidden_from_ad_health = true 的账户只在广告健康页隐藏（PM 要求），不影响投放/预算/内核。
+ * 注意：绑定表有行但全被隐藏时返回 []，不退回旧单值列 —— 那是「没绑定」才走的兜底。
+ */
 async function loadBoundAccounts(clientId: string): Promise<BoundAccount[]> {
   const { data, error } = await supabaseAdmin
     .from('client_meta_ad_accounts')
-    .select('ad_account_id, label')
+    .select('ad_account_id, label, hidden_from_ad_health')
     .eq('client_id', clientId)
   if (error) throw new Error(`读绑定广告账户失败：${error.message}`)
-  const rows = (data ?? []) as Array<{ ad_account_id: string; label: string | null }>
-  if (rows.length > 0) return rows.map(r => ({ adAccountId: toActId(r.ad_account_id), label: r.label }))
+  const rows = (data ?? []) as Array<{ ad_account_id: string; label: string | null; hidden_from_ad_health: boolean | null }>
+  if (rows.length > 0) {
+    return rows
+      .filter(r => r.hidden_from_ad_health !== true)
+      .map(r => ({ adAccountId: toActId(r.ad_account_id), label: r.label }))
+  }
   const { data: client, error: clientErr } = await supabaseAdmin
     .from('clients').select('meta_ad_account_id').eq('id', clientId).maybeSingle()
   if (clientErr) throw new Error(`读客户主广告账户失败：${clientErr.message}`)
@@ -424,13 +432,20 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     loadRunningSince(clientId, now, accounts),
   ])
   const campaigns = await loadCampaigns(clientId, clocks.dataDay)
+  // 账户清单是「哪些账户算数」的唯一来源：被隐藏的账户，它的池子/池子历史/系列频率也不能漏进来。
+  // accounts 为空（没绑定）时不过滤，保持原行为。
+  const visible = accounts.length > 0 ? new Set(accounts.map(a => toActId(a.adAccountId))) : null
+  const audiences = visible ? aud.audiences.filter(a => visible.has(toActId(a.adAccountId))) : aud.audiences
+  const audienceIds = visible ? new Set(audiences.map(a => a.id)) : null
+  const audienceHistory = audienceIds ? aud.history.filter(h => audienceIds.has(h.audienceId)) : aud.history
+  const visibleCampaigns = visible ? campaigns.filter(c => visible.has(toActId(c.adAccountId))) : campaigns
   return {
     now: now.toISOString(),
     accounts,
-    audiences: aud.audiences,
-    audienceHistory: aud.history,
+    audiences,
+    audienceHistory,
     adsets,
-    campaigns,
+    campaigns: visibleCampaigns,
     clocks,
     growth,
     plan,

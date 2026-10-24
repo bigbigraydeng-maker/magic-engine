@@ -1,5 +1,5 @@
 /** Persisted authorisation facts only: no provider calls, refreshes or publishing. */
-import { INSTAGRAM_SCOPES, isInstagramAccountId, normalizeInstagramHandle } from '@/lib/instagram-oauth/identity'
+import { isInstagramAccountId, normalizeInstagramHandle, requiredInstagramScopes } from '@/lib/instagram-oauth/identity'
 import { META_PUBLISH_SCOPE } from '@/lib/meta-oauth/client'
 import { TIKTOK_SCOPES } from '@/lib/tiktok-oauth/client'
 import { YOUTUBE_PUBLISH_SCOPES } from '@/lib/youtube-publish/client'
@@ -136,12 +136,12 @@ export function buildSocialConnections(client: SocialClientFacts, rows: SocialCo
   else {
     const igRow = igRows.find(row => row.status !== 'revoked') ?? igRows[0]
     if (!igRow) igGrant = { authorization: 'not_connected', identity: null, detail: '尚未保存此 Instagram 账号的授权。' }
-    else if (igRow.status === 'revoked') igGrant = assessGrant(igRow, INSTAGRAM_SCOPES, now)
+    else if (igRow.status === 'revoked') igGrant = assessGrant(igRow, requiredInstagramScopes(), now)
     else if (!isInstagramAccountId(igRow.account_id) || !normalizeInstagramHandle(igRow.location_name)) {
       igGrant = { authorization: 'unknown', identity: null, detail: '保存的账号身份不完整，请重新核实。' }
     } else if (normalizeInstagramHandle(igRow.location_name) !== igHandle) {
       igGrant = { authorization: 'account_mismatch', identity: null, detail: '保存的 Instagram 授权与登记用户名不一致，请核实后重新连接。' }
-    } else igGrant = assessGrant(igRow, INSTAGRAM_SCOPES, now)
+    } else igGrant = assessGrant(igRow, requiredInstagramScopes(), now)
   }
   const instagram: SocialChannelStatus = {
     platform: 'instagram', name: 'Instagram', profile: text(client.instagram_handle), targetAccountId: null,

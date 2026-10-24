@@ -260,9 +260,11 @@ interface ClipSelection {
 }
 
 /** scene_tag 与角度的 token 重叠度(魏征 M1-F12:素材必须优先匹配角度,防货不对题) */
-function sceneAngleOverlap(sceneTag: string, angle: string): number {
+function sceneAngleOverlap(sceneTag: string, angle: string, tags: readonly string[] = []): number {
   const angleTokens = new Set(normalizeAngle(angle).split(/[^a-z0-9一-鿿]+/).filter(Boolean))
-  const sceneTokens = sceneTag.toLowerCase().split(/[^a-z0-9一-鿿]+/).filter(Boolean)
+  const sceneTokens = [sceneTag, ...tags].flatMap((tag) =>
+    tag.toLowerCase().split(/[^a-z0-9一-鿿]+/).filter(Boolean),
+  )
   return sceneTokens.filter((t) => angleTokens.has(t)).length
 }
 
@@ -286,7 +288,7 @@ export function selectClips(
     .filter((c) => clipAllowed(ctx, c))
     .filter((c) => !requireRealFootage || c.track === 'a_real') // 价格广告红线:AI/生成绝不背书真价
     .sort((a, b) => {
-      const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
+      const ov = sceneAngleOverlap(b.scene_tag, angle, b.tags) - sceneAngleOverlap(a.scene_tag, angle, a.tags)
       if (ov !== 0) return ov
       // 真实产品片(track='a_real',客户真拍)优先于 AI/stock(b_generated):治「AI 冒充真产品打真价+漏水印」
       // 「CTA 配狗」。**按来源(track)判真假,不靠文件名**(隔壁契约 + [[real-vs-generated-clip-provenance]])。

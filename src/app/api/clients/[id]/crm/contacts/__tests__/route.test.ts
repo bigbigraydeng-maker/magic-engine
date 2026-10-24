@@ -96,6 +96,8 @@ let scanRows: Row[] | null = null
 /** 数据库函数的假返回；null = 函数还没装（报错，路由要退回老路径）。 */
 let rpcRows: Array<{ id: string; total: number }> | null = null
 let rpcCalls: Array<Record<string, unknown>> = []
+/** `clients.leads_config` 的假返回（view=priority 用它认「自己人」邮箱域名）。 */
+let clientsLeadsConfig: unknown = null
 
 /**
  * 假 builder。链式方法都返回自己，`then` 让它可 await。
@@ -134,6 +136,8 @@ function fakeDb(table: string) {
       rec.range = [from, to]
       return builder
     },
+    maybeSingle: () =>
+      Promise.resolve(table === 'clients' ? { data: { leads_config: clientsLeadsConfig }, error: null } : { data: null, error: null }),
     then: (resolve: (v: unknown) => unknown) => {
       if (table === 'contacts') {
         // count 查询（head）只回 count；取页查询回行。
@@ -165,6 +169,7 @@ beforeEach(() => {
   resetBriefCacheForTests()
   recorded = []
   scanRows = null
+  clientsLeadsConfig = null
   rpcRows = null
   rpcCalls = []
   ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (_name: string, args: Record<string, unknown>) => {
@@ -420,6 +425,22 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
+  it('自己人（own_email_domains 里的邮箱域名）不进 hot / cold 任何一张名单；别人照常', async () => {
+    clientsLeadsConfig = { own_email_domains: ['example.com'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const names = (body.sections as Array<{ items: Array<{ name: string }> | null }>).flatMap((s) => (s.items ?? []).map((i) => i.name))
+    expect(names).not.toContain('Bob')
+    expect(names).not.toContain('Sue')
+  })
+
+  it('没登记自己人域名时，同一批人照常出现（只有登记过的域名才会被排掉）', async () => {
+    clientsLeadsConfig = { own_email_domains: ['other.example'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const names = (body.sections as Array<{ items: Array<{ name: string }> | null }>).flatMap((s) => (s.items ?? []).map((i) => i.name))
+    expect(names).toContain('Bob')
+    expect(names).toContain('Sue')
+  })
+
   it('?view=priority → 新形状 {view, focus, columns, sections}，两张名单顺序固定 hot / cold', async () => {
     const { status, body } = await get('cts', '?view=priority')
     expect(status).toBe(200)

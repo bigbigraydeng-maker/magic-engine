@@ -22,6 +22,7 @@ import {
   type TrackingGateKey,
   type TrackingGateReceipt,
 } from './types'
+import { summarizeOtherAccounts } from './other-accounts-text'
 
 export const PIXEL_ALIVE_WINDOW_HOURS = 24
 export const MIN_LEAD_MATCH_QUALITY = 7
@@ -609,7 +610,8 @@ interface Finding {
  *
  * 红：账户不正常 / 没付款方式 / 在投合计超过库里任一上限 / 账户花费上限的剩余额度不够一天的在投预算。
  * 灰：账户或付款读不到；预算没读到（库 / Meta / 令牌 / 上限配置无效）；上限都没设；多账户下这个账户自己的上限没设；有终身预算折不出日预算。
- * 黄：读全了，但账户里一个在投的都没有（合计 0，没东西可核）、客户有多个登记账户（客户总上限是各账户加起来比的，这里没算）、
+ * 黄：读全了，但账户里一个在投的都没有（合计 0，没东西可核）、客户有多个登记账户而其它账户里还有开着的预算
+ *     （或其它账户没读到：客户总上限是各账户加起来比的，这里没算；其它账户都没有开着的预算时不因此出黄）、
  *     客户配置里的数字跟库 / 线上对不上。
  * 绿：以上都没有。
  */
@@ -629,6 +631,10 @@ export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 
     live_daily_budget_cents: b.live_daily_budget_cents,
     live_lifetime_budget_count: b.live_lifetime_budget_count,
     live_entity_count: b.live_entity_count,
+    other_accounts_read: b.other_accounts !== null,
+    other_accounts_count: b.other_accounts === null ? null : b.other_accounts.length,
+    other_live_daily_budget_cents: b.other_accounts === null ? null : b.other_accounts.reduce((sum, o) => sum + o.live_daily_budget_cents, 0),
+    other_accounts_error: b.other_accounts_error,
     config_planned_daily_budget_cents: cfg.planned_daily_budget_cents,
     config_official_daily_cap_cents: cfg.official_daily_cap_cents,
   }
@@ -697,6 +703,11 @@ export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 
   }
 
   // ── 黄：读全了、算得对，但还有不放心的地方（不挡批准）──
+  // 其它登记账户：读库里的快照算出它们开着的预算（隐藏 ≠ 没预算）；没读到 / 币种对不上就回到「只核对这一个账户」
+  const others =
+    multiAccount && b.other_accounts !== null
+      ? summarizeOtherAccounts({ registered: b.registered_account_count ?? 0, others: b.other_accounts, live, clientCap: b.client_cap_cents, currency, money })
+      : ({ kind: 'cannot_sum' } as const)
   const notes: Finding[] = []
   if (b.live_entity_count === 0) {
     notes.push({
@@ -704,11 +715,13 @@ export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 
       how: '确认账户里确实没有在投的广告；如果明明有在投的却看到这一条，说明读取有问题，找开发',
     })
   }
-  if (multiAccount) {
+  if (multiAccount && others.kind === 'cannot_sum') {
     notes.push({
       reason: `客户登记了 ${b.registered_account_count} 个广告账户，这里只核对这一个账户；客户总上限是各账户加起来比的，这里没算`,
       how: '动预算时由内核信封核对客户总上限；批准前如需确认，人工看各账户合计',
     })
+  } else if (multiAccount && others.kind === 'open') {
+    notes.push({ reason: others.reason, how: others.how })
   }
   const dbCap = b.account_cap_cents ?? b.client_cap_cents
   if (cfg.official_daily_cap_cents !== null && dbCap !== null && cfg.official_daily_cap_cents !== dbCap) {
@@ -723,10 +736,15 @@ export function judgeAccountBilling(input: Pick<JudgeInput, 'config' | 'meta' | 
       how: '以线上为准：把客户配置里的数字改对，或直接删掉（在投预算已经现读，不需要在配置里再写一份）',
     })
   }
-  // 已核对的部分照实写：多账户时客户总上限是各账户加起来比的，这里只有一个账户，所以只声明「没超账户级上限」
-  const claimedCaps = multiAccount ? caps.filter(c => c.label === '账户级') : caps
+  // 已核对的部分照实写：多账户时客户总上限是各账户加起来比的，这里只有一个账户，所以只声明「没超账户级上限」；
+  // 其它账户都没有开着的预算时，这个账户的合计就是整个客户的合计，客户级上限也可以声明
+  const claimedCaps = multiAccount && others.kind !== 'none_open' ? caps.filter(c => c.label === '账户级') : caps
   const capText = dedupeCaps(claimedCaps).map(c => `${c.label}日上限 ${money(c.cents, currency)}`).join('、')
-  const verified = `账户正常、有付款方式；本账户现在在投的日预算合计 ${money(live, currency)}，没超库里的${capText}（不含本次要新开的计划预算）`
+  const otherText =
+    multiAccount && others.kind === 'none_open'
+      ? `；另有 ${others.accounts} 个登记账户${others.hidden > 0 ? `（其中 ${others.hidden} 个已在广告健康页隐藏）` : ''}里没有开着的预算，所以这里的合计就是整个客户的在投合计`
+      : ''
+  const verified = `账户正常、有付款方式；本账户现在在投的日预算合计 ${money(live, currency)}，没超库里的${capText}（不含本次要新开的计划预算）${otherText}`
   if (notes.length > 0) {
     return receipt(key, 'yellow', `${verified}；但：${notes.map(f => f.reason).join('；')}`, notes.map(f => f.how).join('；'), evidence, as_of)
   }
