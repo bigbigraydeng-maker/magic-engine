@@ -1,12 +1,14 @@
 ---
 id: 2026-10-24-disable-factory-sweepers-github-schedule
 title: 关掉工厂清扫每 5 分钟的自动跑，避免私有仓库烧掉付费分钟；手动能跑还留着。出片卡住后的自动退回会停，服务器上现有定时任务接不住
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-24
 source: doc:.github/workflows/factory-sweepers.yml
 verify_by: 2026-10-31
 verify_how: 合并后打开该工作流文件，确认没有定时触发、仍可手动运行。在那之前出片机心跳超时的工单不会自动退回排队。
+done_on: 2026-10-24
+done_ref: pr:3070
 ---
 这条工作流只打一个接口：把心跳超过 10 分钟、卡在「领取中 / 制作中」的出片工单退回排队。
 服务器上的发布清扫和发布工人做的是另一件事（卡住的「发布中」退回已批准，以及把已批准的片子发出去），接不住。
