@@ -12,13 +12,20 @@ name: PR risk gate
 # changed-file list, the body, the comments) handed to the script through env
 # vars, never interpolated into a `run:` block.
 #
-# Two tiers. A computed risk of B or C enables auto-merge, and GitHub performs
-# the merge itself once every required check is green. A computed risk of A
-# passes only when two trusted sign-offs exist for this exact base+head pair:
-# Codex Astra (role codex-astra) and Claude Code (role claude-code), each
-# written by its own trusted login. Otherwise the check goes red. The former
-# three reviewer roles are optional B-level spot checks and never block a B
-# or C merge.
+# `issue_comment` re-checks when Codex reviews. A clean review is an issue
+# comment (`codex-review-state:v1`, full commit sha), not a review object
+# (#3086, #3091). That event uses the default-branch workflow. A
+# review-submitted event would use the PR merge ref, so this file does not
+# listen for it. Comment text never enters a `run:` block.
+#
+# Two tiers. B or C arms auto-merge only after the trusted Codex login
+# (`codex-astra` in ME_SIGNOFF_TRUSTED_LOGINS) has reviewed the current head
+# and left no unresolved P0/P1. A new push whose head Codex has not reviewed
+# disables auto-merge instead of re-arming it. A passes only when two trusted
+# sign-offs exist for this exact base+head pair: Codex Astra (role
+# codex-astra) and Claude Code (role claude-code), each written by its own
+# trusted login. Otherwise the check goes red. The former three reviewer
+# roles are optional B-level spot checks and never block a B or C merge.
 #
 # It never merges directly, never pushes, never deploys. Its only writes are the
 # rating comment and the auto-merge toggle.
@@ -29,13 +36,19 @@ on:
     # must re-run the gate without pushing a commit. Title / base edits re-run
     # it too; the per-PR concurrency group below cancels the superseded run.
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+  issue_comment:
+    # `edited` as well as `created`: Codex updates the state comment in place
+    # when a later review finishes. Only comments that look like a Codex review
+    # re-run the job; the script still ignores every author except the
+    # codex-astra login from the repo variable.
+    types: [created, edited]
 
 permissions:
   contents: write        # enable / disable auto-merge
   pull-requests: write   # post the rating comment; enable / disable auto-merge
 
 concurrency:
-  group: pr-risk-gate-${{ github.event.pull_request.number }}
+  group: pr-risk-gate-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
@@ -47,47 +60,80 @@ jobs:
     # reported at all until the PR is ready for review. Marking a PR ready, or
     # pushing to a PR that is already ready, still runs this gate.
     # converted_to_draft always runs so an in-flight auto-merge is turned off.
-    if: github.event.pull_request.draft == false || github.event.action == 'converted_to_draft'
+    # A Codex comment on a draft still runs: decideMerge keeps drafts closed.
+    if: |
+      (github.event_name == 'pull_request_target' && (github.event.pull_request.draft == false || github.event.action == 'converted_to_draft')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1')))
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
       # Checked out from `main`, never the PR head: the script that rates the PR
       # must not be editable by the PR it rates. Credentials are not persisted
-      # because nothing here pushes.
+      # because nothing here pushes. Same checkout for a comment event.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
         with:
           ref: main
           fetch-depth: 1
           persist-credentials: false
 
+      # Comment events have no pull_request payload. Read the live PR as data.
+      # The comment body is not passed in.
+      - name: Bind this run to the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_AUTHOR: ${{ github.event.pull_request.user.login }}
+          EVENT_DRAFT: ${{ github.event.pull_request.draft }}
+          EVENT_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            {
+              echo "base=$EVENT_BASE"
+              echo "head=$EVENT_HEAD"
+              echo "author=$EVENT_AUTHOR"
+              echo "draft=$EVENT_DRAFT"
+              echo "fork=$EVENT_FORK"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json baseRefOid,headRefOid,isDraft,isCrossRepository,author \
+            --jq '"base=\(.baseRefOid)\nhead=\(.headRefOid)\ndraft=\(.isDraft)\nfork=\(.isCrossRepository)\nauthor=\(.author.login)"' \
+            >> "$GITHUB_OUTPUT"
+
       - name: Rate this PR and decide the merge tier
         id: gate
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_DRAFT: ${{ github.event.pull_request.draft }}
-          PR_IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          BASE_SHA: ${{ steps.pr.outputs.base }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_DRAFT: ${{ steps.pr.outputs.draft }}
+          PR_IS_FORK: ${{ steps.pr.outputs.fork }}
           SIGNOFF_TRUSTED_LOGINS: ${{ vars.ME_SIGNOFF_TRUSTED_LOGINS }}
         run: node tools/ops-review-loop/src/check-risk-gate.mjs
 
-      - name: Enable auto-merge (B/C only)
+      - name: Enable auto-merge (B/C only, current head reviewed)
         if: steps.gate.outputs.decision == 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
           set -euo pipefail
           gh pr merge --auto --merge "$PR_NUMBER"
           echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Disable auto-merge (A / draft / fork / undecided)
+      - name: Disable auto-merge (A / draft / fork / Codex has not reviewed this head)
         if: always() && steps.gate.outputs.decision != 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
           set -euo pipefail
           # Distinguish "already off" from a real API failure (CONCERN-2 from

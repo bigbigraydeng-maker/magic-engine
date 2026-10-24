@@ -34,7 +34,7 @@ import {
   selectTrustedGateMarkers,
   shouldPostGateComment,
 } from './gate-marker.mjs'
-import { reviewSignoffState } from './signoff-marker.mjs'
+import { evaluateCodexHeadReview, reviewSignoffState } from './signoff-marker.mjs'
 import { decideMerge, summariseDecision } from './merge-decision.mjs'
 import { shouldRequestLegacySpotCheck } from './sampling.mjs'
 import { applyTrialRunToDecision, describeTrialRun, evaluateTrialRunSafely } from './quality.mjs'
@@ -206,6 +206,69 @@ async function listIssueComments() {
   return sources
 }
 
+/** GraphQL page size. A further page we did not read fails closed. */
+const CODEX_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      reviews(last:100){
+        pageInfo{hasNextPage}
+        nodes{author{login} state body commit{oid}}
+      }
+      reviewThreads(first:100){
+        pageInfo{hasNextPage}
+        nodes{
+          isResolved
+          comments(first:30){
+            pageInfo{hasNextPage}
+            nodes{author{login} body commit{oid}}
+          }
+        }
+      }
+    }
+  }
+}`
+
+/**
+ * Reviews and threads. `isResolved` exists only on GraphQL. A failed or
+ * truncated read is not a clean review.
+ *
+ * @returns {Promise<{reviews: object[], threads: object[], threadsReadable: boolean}>}
+ */
+async function listCodexThreadsFromGraphql() {
+  const [owner, name] = String(repository).split('/')
+  const payload = await api('/graphql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: CODEX_THREADS_QUERY,
+      variables: { owner, name, number: Number(pr) },
+    }),
+  })
+  const pull = payload?.data?.repository?.pullRequest
+  if (payload?.errors || !pull) throw new Error('Codex 审查讨论串读不到')
+  let commentsComplete = true
+  const threads = (pull.reviewThreads?.nodes ?? []).map((node) => {
+    if (node?.comments?.pageInfo?.hasNextPage === true) commentsComplete = false
+    const comments = (node?.comments?.nodes ?? []).map((comment) => ({
+      author: comment?.author?.login ?? null,
+      commitId: comment?.commit?.oid ?? null,
+      body: typeof comment?.body === 'string' ? comment.body : '',
+    }))
+    return { resolved: node?.isResolved === true, comments }
+  })
+  const reviews = (pull.reviews?.nodes ?? []).map((review) => ({
+    author: review?.author?.login ?? null,
+    commitId: review?.commit?.oid ?? null,
+    state: review?.state ?? null,
+    body: typeof review?.body === 'string' ? review.body : '',
+  }))
+  const complete =
+    pull.reviews?.pageInfo?.hasNextPage !== true &&
+    pull.reviewThreads?.pageInfo?.hasNextPage !== true &&
+    commentsComplete
+  return { reviews, threads, threadsReadable: complete }
+}
+
 /**
  * Post one issue comment. Throws on failure so the caller fails closed.
  *
@@ -357,12 +420,35 @@ try {
     today: new Date().toISOString().slice(0, 10),
     readFiles: readHeadFiles,
   })
+  let codexReview = { clear: false, reviewed: false, blocking: 0, reason: 'Codex 还没审过当前这次提交' }
+  if (rating.risk === 'B' || rating.risk === 'C') {
+    try {
+      const inputs = await listCodexThreadsFromGraphql()
+      codexReview = evaluateCodexHeadReview({
+        head: headSha,
+        trustedLogin: bound['codex-astra'],
+        prAuthor,
+        comments: sources,
+        reviews: inputs.reviews,
+        threads: inputs.threads,
+        threadsReadable: inputs.threadsReadable,
+      })
+    } catch (err) {
+      codexReview = {
+        clear: false,
+        reviewed: false,
+        blocking: 0,
+        reason: `Codex 审查读不到（${err instanceof Error ? err.message : String(err)}）`,
+      }
+    }
+  }
   const decision = applyTrialRunToDecision({
     decision: decideMerge({
       risk: rating.risk,
       draft: parseTriState(prDraft),
       fork: parseTriState(prIsFork),
       signoff,
+      codexReview,
     }),
     trialRun,
   })

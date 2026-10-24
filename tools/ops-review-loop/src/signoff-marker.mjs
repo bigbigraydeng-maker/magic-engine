@@ -47,6 +47,8 @@
  * login, and a login already used for one role cannot satisfy the other.
  */
 
+import { isMergeBlockingSeverity } from './severity.mjs'
+
 /** Payload schema version. Bump only with a parser that still reads v1. */
 export const SIGNOFF_MARKER_VERSION = 1
 
@@ -63,8 +65,8 @@ export const REQUIRED_SIGNOFF_ROLES = ['codex-astra', 'claude-code']
 /**
  * Former required reviewers. They may be recorded on a B-level PR as an
  * optional spot check. They are not required at any level, and a missing spot
- * check never blocks a merge — including B and C, which auto-merge on green
- * checks alone.
+ * check never blocks a merge. B and C auto-merge only after Codex has reviewed
+ * the current head with no unresolved P0/P1 (`evaluateCodexHeadReview`).
  */
 export const SPOT_CHECK_ROLES = ['ziya', 'weizheng', 'direnjie']
 
@@ -354,4 +356,216 @@ export function reviewSignoffState({ rawTrust, sources, prAuthor, base, head } =
     spotChecks: listSpotChecks({ markers, base, head }),
     ignoredMarkers: parsedAll.length - markers.length,
   }
+}
+
+// --- Codex review of the current head (B/C auto-merge) -----------------------
+//
+// Observed 2026-10-24 on this repo, login chatgpt-codex-connector[bot]:
+//
+//   Clean review (#3086, #3091): `/pulls/{n}/reviews` is empty. Codex posts two
+//   issue comments. The one that binds the head is
+//   `<!-- codex-review-state:v1 {"code_review":{"commit_sha":"<40 hex>",
+//   "has_any_findings":false,"has_unresolved_findings":false,"status":"completed"}} -->`.
+//   The receipt comment says "Didn't find any major issues" and only a short
+//   sha (`**Reviewed commit:** \`8d6681811d\``). A short sha is not a binding.
+//
+//   Review with findings (#3080): a pull-request review (state COMMENTED,
+//   `commit_id` = full head) plus an inline comment. The finding is a shields
+//   badge (`badge/P2-yellow` / `P2 Badge`) and `<!-- codex-code-review-finding:v1 -->`.
+//   The same state comment is posted, with has_unresolved_findings true.
+//   That boolean covers P2 as well, so it is not the P0/P1 gate. Resolution is
+//   GraphQL `reviewThread.isResolved` (REST comments have no such field).
+//
+// Head binding matches `evaluateSignoffs`: the reviewed commit must be the
+// current head. Codex does not record the base sha, so this check binds head
+// only. Trust is the `codex-astra` login from `parseSignoffTrust`, with the
+// same denylist (`github-actions[bot]`, the PR author).
+
+const CODEX_STATE_RE = /<!--\s*codex-review-state:v1\s+(\{[^]*?\})\s*-->/g
+const HEAD_SHA_RE = /^[0-9a-f]{40}$/i
+const CODEX_REVIEW_STATES = new Set(['COMMENTED', 'APPROVED', 'CHANGES_REQUESTED'])
+
+/**
+ * @param {unknown} login
+ * @returns {string}
+ */
+function normaliseLogin(login) {
+  if (typeof login !== 'string') return ''
+  return login.trim().toLowerCase().replace(/\[bot\]$/, '')
+}
+
+/**
+ * GraphQL omits the `[bot]` suffix that REST includes. Both shapes are the
+ * same account.
+ *
+ * @param {unknown} actual
+ * @param {unknown} trusted
+ * @returns {boolean}
+ */
+function loginMatchesTrusted(actual, trusted) {
+  const left = normaliseLogin(actual)
+  const right = normaliseLogin(trusted)
+  return left !== '' && left === right
+}
+
+/**
+ * @param {unknown} trustedLogin
+ * @param {unknown} prAuthor
+ * @returns {boolean}
+ */
+function codexLoginUsable(trustedLogin, prAuthor) {
+  if (typeof trustedLogin !== 'string' || trustedLogin.trim() === '') return false
+  if (NEVER_TRUSTED_SIGNOFF_AUTHORS.some((never) => loginMatchesTrusted(trustedLogin, never))) return false
+  if (typeof prAuthor === 'string' && prAuthor !== '' && loginMatchesTrusted(trustedLogin, prAuthor)) return false
+  return true
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isHeadSha(value) {
+  return typeof value === 'string' && HEAD_SHA_RE.test(value)
+}
+
+/**
+ * Read completed Codex state blobs. A non-completed status, or a commit that
+ * is not a full sha, is ignored.
+ *
+ * @param {unknown} body
+ * @returns {Array<{commitSha: string}>}
+ */
+export function parseCodexReviewStates(body) {
+  if (typeof body !== 'string') return []
+  const out = []
+  for (const match of body.matchAll(CODEX_STATE_RE)) {
+    let payload
+    try {
+      payload = JSON.parse(match[1])
+    } catch {
+      continue
+    }
+    const code = payload && typeof payload === 'object' ? payload.code_review : null
+    if (!code || typeof code !== 'object') continue
+    if (code.status !== 'completed' || !isHeadSha(code.commit_sha)) continue
+    out.push({ commitSha: String(code.commit_sha).toLowerCase() })
+  }
+  return out
+}
+
+/**
+ * @param {unknown} review
+ * @param {string} trustedLogin
+ * @returns {boolean}
+ */
+function isCodexReview(review, trustedLogin) {
+  if (!review || typeof review !== 'object') return false
+  const row = /** @type {{author?: unknown, commitId?: unknown, state?: unknown}} */ (review)
+  return (
+    loginMatchesTrusted(row.author, trustedLogin) &&
+    isHeadSha(row.commitId) &&
+    CODEX_REVIEW_STATES.has(String(row.state || '').toUpperCase())
+  )
+}
+
+/**
+ * @param {{head: string, trustedLogin: string, comments: unknown, reviews: unknown}} input
+ * @returns {{reviewed: boolean, stale: boolean, reviews: object[]}}
+ */
+function collectCodexEvidence({ head, trustedLogin, comments, reviews }) {
+  const headSha = head.toLowerCase()
+  const states = []
+  for (const source of Array.isArray(comments) ? comments : []) {
+    if (!source || !loginMatchesTrusted(source.author, trustedLogin)) continue
+    states.push(...parseCodexReviewStates(source.body))
+  }
+  const trustedReviews = (Array.isArray(reviews) ? reviews : []).filter((review) => isCodexReview(review, trustedLogin))
+  const stateForHead = states.some((state) => state.commitSha === headSha)
+  const reviewForHead = trustedReviews.some((review) => String(review.commitId).toLowerCase() === headSha)
+  const reviewed = stateForHead || reviewForHead
+  return {
+    reviewed,
+    stale: !reviewed && (states.length > 0 || trustedReviews.length > 0),
+    reviews: trustedReviews,
+  }
+}
+
+/**
+ * @param {unknown} thread
+ * @param {string} headSha
+ * @param {string} trustedLogin
+ * @returns {boolean}
+ */
+function threadBlocks(thread, headSha, trustedLogin) {
+  if (!thread || typeof thread !== 'object' || thread.resolved === true) return false
+  const comments = Array.isArray(thread.comments) ? thread.comments : []
+  return comments.some(
+    (comment) =>
+      comment &&
+      loginMatchesTrusted(comment.author, trustedLogin) &&
+      isHeadSha(comment.commitId) &&
+      String(comment.commitId).toLowerCase() === headSha &&
+      isMergeBlockingSeverity(comment.body),
+  )
+}
+
+/**
+ * @param {object[]} reviews
+ * @param {string} headSha
+ * @returns {number}
+ */
+function reviewBodiesBlocking(reviews, headSha) {
+  return reviews.filter(
+    (review) => String(review.commitId).toLowerCase() === headSha && isMergeBlockingSeverity(review.body),
+  ).length
+}
+
+/**
+ * Has the trusted Codex login reviewed this exact head, with no unresolved
+ * P0/P1 left on it?
+ *
+ * `clear: true` is the only value `decideMerge` will arm auto-merge on.
+ * Anything else — missing review, a review of an older head, an untrusted
+ * author, unreadable threads, unresolved P0/P1 — stays closed.
+ *
+ * @param {{head?: unknown, trustedLogin?: unknown, prAuthor?: unknown, comments?: unknown, reviews?: unknown, threads?: unknown, threadsReadable?: unknown}} input
+ * @returns {{clear: boolean, reviewed: boolean, blocking: number, reason: string}}
+ */
+export function evaluateCodexHeadReview({
+  head,
+  trustedLogin,
+  prAuthor,
+  comments,
+  reviews,
+  threads,
+  threadsReadable,
+} = {}) {
+  if (!codexLoginUsable(trustedLogin, prAuthor)) {
+    return { clear: false, reviewed: false, blocking: 0, reason: 'Codex 的可信登录名还没配好，或这个登录名不能当审查人' }
+  }
+  if (!isHeadSha(head)) {
+    return { clear: false, reviewed: false, blocking: 0, reason: '当前提交号读不到，不能把审查算在这次提交上' }
+  }
+  const evidence = collectCodexEvidence({
+    head: String(head),
+    trustedLogin: String(trustedLogin),
+    comments,
+    reviews,
+  })
+  if (!evidence.reviewed) {
+    const reason = evidence.stale ? 'Codex 审的是更早的提交，当前这次还没审' : 'Codex 还没审过当前这次提交'
+    return { clear: false, reviewed: false, blocking: 0, reason }
+  }
+  if (threadsReadable !== true) {
+    return { clear: false, reviewed: true, blocking: 0, reason: '没能读全 Codex 的行内意见' }
+  }
+  const headSha = String(head).toLowerCase()
+  const threadHits = (Array.isArray(threads) ? threads : []).filter((thread) =>
+    threadBlocks(thread, headSha, String(trustedLogin)),
+  ).length
+  const blocking = threadHits + reviewBodiesBlocking(evidence.reviews, headSha)
+  if (blocking > 0) {
+    return { clear: false, reviewed: true, blocking, reason: `还有 ${blocking} 条没解决的 P0/P1` }
+  }
+  return { clear: true, reviewed: true, blocking: 0, reason: 'Codex 已审过当前这次提交，没有未解决的 P0/P1' }
 }
