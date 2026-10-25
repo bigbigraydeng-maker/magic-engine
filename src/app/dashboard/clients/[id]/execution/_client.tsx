@@ -1156,10 +1156,14 @@ function TaskDetailDrawer({
           <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700">
             ✅ 已生成 {factoryResult.successCount} 条草稿 — 前往
             <a
-              href={`/dashboard/clients/${clientId}/daily-plan`}
+              href={
+                factoryResult.packageId
+                  ? `/dashboard/clients/${clientId}/production/${factoryResult.packageId}`
+                  : `/dashboard/clients/${clientId}/production`
+              }
               className="ml-1 underline hover:text-green-900"
             >
-              社媒日常
+              生产包
             </a>
             查看
           </div>

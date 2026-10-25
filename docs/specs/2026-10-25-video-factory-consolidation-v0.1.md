@@ -21,7 +21,7 @@
 | 社媒日常「短视频」页签（`daily-plan?tab=reels`） | 合并进「待审/分发」 | `DailyPlanReelsPanel`，仅 `ADMIN_EMAILS` 精确名单可见 | —（无独立表） |
 | 社媒日常其余 | 只留「本周总览」+「图文帖子」 | — | — |
 | Story 自动发布 | **不动**，留社媒门卡下 | `showEntry('story')` | — |
-| 内容生产包 `/clients/[id]/production` | **摘入口**（门卡）；路由保留 | 查过代码：除生产包页自身、`ZhugeGlobalFab.tsx:95` 页名映射（保留）外，只有 `execution/_client.tsx` 量产完成提示链到 `production/<packageId>`。→ 摘门卡入口，**并把该提示统一改链 `daily-plan`（社媒日常）**；页面、路由、接口都保留 | `production_packages`：总 26 行，30 天新增 0 / 更新 0，最后写入 2026-08-25 |
+| 内容生产包 `/clients/[id]/production` | **摘入口**（门卡）；路由保留 | 查过代码：除生产包页自身、`ZhugeGlobalFab.tsx:95` 页名映射（保留）外，只有 `execution/_client.tsx` 量产完成提示链到 `production/<packageId>`。→ 摘门卡入口；**该提示保留链到生产包页**（量产草稿写 `content_posts`/`production_items`，社媒日常只读 `social_plans`，看不到本次草稿；Codex P2），没有 packageId 时链生产包列表；页面、路由、接口都保留 | `production_packages`：总 26 行，30 天新增 0 / 更新 0，最后写入 2026-08-25 |
 | 客户主页概览的审片框（`ReviewInbox`） | 由「待审」标签代替后摘（**PR 2 随标签页一起摘**，避免出现无入口期） | `page.tsx:593`，组件本体被视频工厂页复用，**组件保留** | — |
 | 推广活动页的生产快捷入口（`ContentHub` 的「生产工作台」两张卡） | **摘**（PR 1） | `ContentHub.tsx`；调用方只有 `campaigns/page.tsx`；两个目标页都在门卡里有入口，不丢入口 | — |
 | 自助客户左栏打不开的链接（`Visual Studio` / `Content`） | **摘**（PR 1） | `middleware.ts:212` 只对 `paid_client` 放行 `/dashboard/content`、`/dashboard/visuals`，自助客户点了被弹回 | — |
