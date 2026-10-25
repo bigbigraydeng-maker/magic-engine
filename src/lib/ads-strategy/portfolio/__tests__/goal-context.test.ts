@@ -213,6 +213,25 @@ describe('buildDigestGoalContext', () => {
     expect(ctx?.pace.reason).toContain('归属数据不足')
   })
 
+  it('purchase 只有待审记录 → 进度未知，不能按 0 或已达标处理', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([
+      goalRow({ primary_metric_key: 'signups_count', primary_metric_label: '报名/预订数', target_value: 2 }),
+    ])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: false,
+      reason: '暂无已审核、可计入的记录；待审记录不计入目标进度',
+      unknown: true,
+      noData: true,
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
+    insightsTable([])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
+    expect(ctx?.pace.actualToDate).toBeNull()
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.verdict).not.toBe('on_track')
+  })
+
   it('listActiveGoals 抛错 → resolves 为 null（不抛）', async () => {
     vi.mocked(listActiveGoals).mockRejectedValue(new Error('db down'))
     await expect(buildDigestGoalContext('client-1', '2026-09-15')).resolves.toBeNull()

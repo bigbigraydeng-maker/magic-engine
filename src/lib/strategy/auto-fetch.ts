@@ -880,15 +880,14 @@ function sumOutcome(
 }
 
 /**
- * 真成交数（报名/预订）——读 `me_sale_outcomes` 的 purchase 行。
+ * 已审核、可计入的购买记录数（报名/预订）——读 `me_sale_outcomes` 的 approved purchase 行。
  *
  * 这些行由 CRM 表格同步流水线写入（`cts-crm-sheet-sync`），它的唯一输入是
  * 客户 CRM 表「阶段Stage」那一列填了 `4-已订金` / `5-已出行归来`。
  *
- * 🔴 一条 purchase 都没有时返回 `unknown`，**绝不返回 0**：
- *    「还没有人成交」和「没人填阶段那一列」在库里长得一模一样，
- *    报 0 等于替客户断言生意没做成。2026-09-24 实测：613 条 lead、0 条 purchase，
- *    而同期 CRM 表 1599 行里只有 1 行填了阶段——正是后者。
+ * `approved` 代表记录已获准对外发送，不代表银行到账或独立核实成交。
+ * 🔴 没有已审核记录时返回 `unknown`，**绝不返回 0**：
+ *    「暂无已审核、可计入的记录」不能推断为没有成交，也不能把待审记录算入目标进度。
  *    日报会显示「未判」并带上原因，这本身就是在催那一格被填上。
  */
 async function fetchBookings(
@@ -906,7 +905,7 @@ async function fetchBookings(
     .eq('client_id', clientId)
     .eq('outcome_kind', 'purchase')
     .is('redacted_at', null)
-    .neq('review_status', 'rejected')
+    .eq('review_status', 'approved')
     .gte('occurred_at', `${goal.period.period_start}T00:00:00Z`)
     .lte('occurred_at', `${goal.period.period_end}T23:59:59Z`)
 
@@ -917,7 +916,7 @@ async function fetchBookings(
       ok: false,
       unknown: true,
       noData: true,
-      reason: '成交数还没有任何记录 —— 可能是真的还没成交，也可能是 CRM「阶段」那一列没人填（两者在库里长得一样，不猜）',
+      reason: '暂无已审核、可计入的记录；待审记录不计入目标进度，现有记录也不能单独证明银行到账或独立核实成交',
     }
   }
   return { ok: true, value: count, source: 'me_sale_outcomes', snapshot_date: goal.period.period_end, label: '报名/预订' }
