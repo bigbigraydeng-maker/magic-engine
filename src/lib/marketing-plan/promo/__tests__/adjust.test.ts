@@ -124,6 +124,15 @@ describe('suggestAdjustment', () => {
     }
   })
 
+  it('花费 over 且目标 immature → 建议按计划继续，窗口仍判为异常', () => {
+    const r = recon([mkRow('spend', 'over'), mkRow('results_goal', 'immature'), mkRow('content', 'on_track')])
+    const s = suggestAdjustment(input({ reconcile: r }))
+    expect(s.decision).toBe('continue')
+    expect(s.experiment_hit).toBeNull()
+    expect(s.reasons).toEqual(['没有命中补数据、补执行、改处方的条件'])
+    expect(isAbnormalWindow(r, [])).toBe(true)
+  })
+
   it('内容发布 unknown → 先补数据，即使目标已连续落后', () => {
     const alone = suggestAdjustment(input({ reconcile: withRow('content', 'unknown', 3, null) }))
     expect(alone.decision).toBe('fix_data')
