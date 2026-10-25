@@ -20,6 +20,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireGoalAccess } from '@/lib/strategy/auth-helpers'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
+import { readSeatFetchExtras } from '@/lib/strategy/seat-scope'
 import { PRIMARY_METRIC_CATALOG } from '@/types/strategy'
 
 export async function GET(
@@ -54,8 +55,13 @@ export async function GET(
     })
   }
 
+  const extras = readSeatFetchExtras(goal)
+  if (!extras.ok) {
+    return NextResponse.json({ ok: false, unknown: true, reason: extras.reason })
+  }
   const result = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key, {
     goalPeriod: { period_start: goal.period_start, period_end: goal.period_end },
+    ...(extras.extras ?? {}),
   })
 
   // A2.1-γ: persist fetched value back to goals table so VerdictPanel can show source + time

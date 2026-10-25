@@ -14,6 +14,7 @@ import Link from 'next/link'
 import type { GoalRow } from '@/types/strategy'
 import { isGoalReason } from '@/lib/strategy/goals'
 import { normalizeGoalRow } from '@/lib/strategy/normalize'
+import { depositedSeatMetricLabel } from '@/lib/strategy/seat-scope'
 import { InitiativeList } from './_components/InitiativeList'
 import { BacklogMigrator } from './_components/BacklogMigrator'
 import { VerdictPanel } from './_components/VerdictPanel'
@@ -164,6 +165,7 @@ export function GoalDetailClient() {
   const periodDays = daysBetween(goal.period_start, goal.period_end)
   const daysElapsed = Math.max(0, daysBetween(goal.period_start, new Date().toISOString().slice(0, 10)))
   const daysRemaining = Math.max(0, periodDays - daysElapsed)
+  const seatFace = depositedSeatMetricLabel(goal.supporting_metrics)
 
   return (
     <div className="min-h-screen bg-[#f6f7f2] px-4 py-8 md:px-6">
@@ -236,7 +238,7 @@ export function GoalDetailClient() {
             )}
           </div>
           <div className="mt-2 font-display text-2xl font-bold text-me-charcoal">
-            {goal.primary_metric_label}
+            {seatFace?.label ?? goal.primary_metric_label}
           </div>
           <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
@@ -246,7 +248,9 @@ export function GoalDetailClient() {
               <div className="text-lg font-bold text-me-charcoal/75">
                 {goal.baseline_value.toLocaleString()}
               </div>
-              <div className="text-[10px] font-semibold text-me-charcoal/45">{goal.primary_metric_unit}</div>
+              <div className="text-[10px] font-semibold text-me-charcoal/45">
+                {seatFace?.unit ?? goal.primary_metric_unit}
+              </div>
             </div>
             {/* A2.1 — auto-fetched current value (or "—" for self_report metrics) */}
             <CurrentValueCell goal={goal} />
@@ -257,7 +261,9 @@ export function GoalDetailClient() {
               <div className="text-lg font-bold text-status-track">
                 {goal.target_value.toLocaleString()}
               </div>
-              <div className="text-[10px] font-semibold text-me-charcoal/45">{goal.primary_metric_unit}</div>
+              <div className="text-[10px] font-semibold text-me-charcoal/45">
+                {seatFace?.unit ?? goal.primary_metric_unit}
+              </div>
             </div>
             <div>
               <div className="text-[11px] font-black uppercase text-me-charcoal/45">
