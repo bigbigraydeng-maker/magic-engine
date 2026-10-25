@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
+import { viewerFacts } from '@/lib/auth/home-entries'
+import { WorkspaceViewerProvider } from './workspace-viewer'
 
 interface Props {
   children: React.ReactNode
@@ -18,6 +20,8 @@ interface Props {
   /** 客户行业 —— 决定「房子」「行程单」这类行业专属入口显不显示。null = 认不出，一个都不给。 */
   clientIndustry: string | null
   roleLabel: string
+  /** 邮箱在 ADMIN_EMAILS 里，且不是受限管理员。由服务端算好，避免把名单打进浏览器包。 */
+  exactGlobalAdmin: boolean
 }
 
 // ── Nav definition ────────────────────────────────────────────────────────────
@@ -243,7 +247,7 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
   ]
 }
 
-export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry }: Props) {
+export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry, roleLabel, exactGlobalAdmin }: Props) {
   const pathname = usePathname()
   const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
 
@@ -251,6 +255,7 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
   const isSelfServe = isClientViewer && userTier === 'self_serve'
   // 受限管理员（DEMO_ADMINS）：FDE 视角，但只在一个客户范围内
   const isScopedAdmin = userRole === 'admin' && Boolean(allowedClientId)
+  const facts = viewerFacts(userRole, allowedClientId, exactGlobalAdmin)
 
   const sections: NavSection[] | null = isScopedAdmin && allowedClientId
     ? buildScopedAdminSections(allowedClientId, clientIndustry)
@@ -289,7 +294,7 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
               Magic Engine
             </span>
             <span className="mt-[3px] block text-[10px] tracking-[.04em] text-white/35">
-              Admin cockpit
+              {roleLabel}
             </span>
           </span>
         </Link>
@@ -380,7 +385,9 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
 
       {/* Main content */}
       <main className="min-w-0 flex-col">
-        {children}
+        <WorkspaceViewerProvider facts={facts}>
+          {children}
+        </WorkspaceViewerProvider>
       </main>
 
       {/* Phase X.S4 — upsell modal triggered by sidebar lock clicks. */}

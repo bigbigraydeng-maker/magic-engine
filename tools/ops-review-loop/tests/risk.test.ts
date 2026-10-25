@@ -966,9 +966,9 @@ describe('the unreadable-line quote is safe to post (W121-2)', () => {
 
 /**
  * DR121-3: `\s*[:：|]?\s*` after a label backtracked quadratically — a 64 KB
- * body took 4–8 s inside a required check. Assert the parse result, not
- * elapsed milliseconds: a 300 ms ceiling failed on a 1-core runner (323–531 ms)
- * while the parse itself stayed linear.
+ * body took 4–8 s inside a required check. The letters that come back do not
+ * change when that happens, so the cases below only check the parsed level.
+ * The next block checks the speed.
  */
 describe('readDeclaredRisk finishes hostile 64 KB bodies (DR121-3)', () => {
   const KB64 = 64 * 1024
@@ -993,4 +993,35 @@ describe('readDeclaredRisk finishes hostile 64 KB bodies (DR121-3)', () => {
       expect(result.unreadable?.length).toBeLessThanOrEqual(60)
     }
   })
+})
+
+/**
+ * Same bug as above. Four times the blanks is about four times the time when
+ * the scan is linear, and about sixteen times when `\s*[:：|]?\s*` is back.
+ * Eight times still passes a noisy 1-core runner (a 300 ms ceiling failed
+ * there at 323–531 ms). 3000 ms catches a 4–8 s sample whose smaller run is
+ * slow as well.
+ */
+describe('readDeclaredRisk stays near-linear on a long blank run (DR121-3)', () => {
+  function blanks(bytes: number): string {
+    return `风险级别${' '.repeat(bytes)}x`
+  }
+
+  function once(body: string): number {
+    const start = performance.now()
+    readDeclaredRisk(body)
+    return performance.now() - start
+  }
+
+  function median(body: string, runs: number): number {
+    const samples = Array.from({ length: runs }, () => once(body)).sort((a, b) => a - b)
+    return samples[Math.floor(runs / 2)]
+  }
+
+  it('64 KB of blanks stays near 4× the 16 KB time, not the old 16×', () => {
+    const small = median(blanks(16 * 1024), 3)
+    const large = once(blanks(64 * 1024))
+    expect(large).toBeLessThan(small * 8 + 50)
+    expect(large).toBeLessThan(3000)
+  }, 20_000)
 })
