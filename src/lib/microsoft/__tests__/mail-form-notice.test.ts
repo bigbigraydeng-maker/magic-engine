@@ -165,6 +165,7 @@ describe('parseFormNotice', () => {
       message: 'hello there',
       submittedAt: '2026-10-19T01:29:17.009Z',
       formUrl: '/contact',
+      utm: null,
     })
   })
 

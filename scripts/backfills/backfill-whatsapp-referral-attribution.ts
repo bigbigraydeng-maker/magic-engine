@@ -32,6 +32,11 @@ async function main(): Promise<void> {
   if (!clientId) throw new Error('必须带 --client-id=<uuid>')
   if (live && !receipt) throw new Error('--live 必须带 --receipt=<路径>')
 
+  if (live && receipt) {
+    const { writeStartReceipt } = await import('../../src/lib/crm/backfill-receipt')
+    writeStartReceipt(receipt, { client_id: clientId, live })
+  }
+
   const { data: convos, error } = await supabaseAdmin
     .from('conversations')
     .select('id, conversation_id, contact_id, entry_referral')
