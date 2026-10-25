@@ -377,6 +377,19 @@
    "energy": "low",
    "style": "calm",
    "mood": "冷静（短）"
+  },
+  {
+   "id": "river-pandas-peaks",
+   "folder": "_shared/music",
+   "file": "river-pandas-peaks.mp3",
+   "durationSec": 172.4,
+   "bpmDetected": 105.03,
+   "offsetSec": 0.224,
+   "barPhase": 2,
+   "status": "beats_unverified",
+   "energy": "mid",
+   "style": "chinese-instrument",
+   "mood": "明快、旅行、有画面感"
   }
  ]
 }
