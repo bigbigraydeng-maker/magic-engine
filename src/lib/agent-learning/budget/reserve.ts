@@ -151,11 +151,26 @@ export async function safeReserve(
   purpose: BudgetPurpose,
   items: BudgetItem[],
 ): Promise<Result<ReserveOutcome>> {
+  let result: Result<ReserveOutcome>
   try {
-    return await ledger.reserve(reservationId, purpose, items)
+    result = await ledger.reserve(reservationId, purpose, items)
   } catch {
     return unavailable<ReserveOutcome>()
   }
+  if (!result.ok) return result
+  // 注入的账本实现不一定经过 createRpcLedger 的校验：在共用边界再验一次形状，
+  // 只有 {ok:true, claimed:true} 才算批准；缺 claimed 或形状不认识一律当账本不可用（零外呼）
+  return isValidReserveOutcome(result.value) ? result : unavailable<ReserveOutcome>()
+}
+
+/** ReserveOutcome 运行时形状校验（类型可以被替身绕过，运行时不行） */
+function isValidReserveOutcome(value: unknown): boolean {
+  if (!isPlainObject(value)) return false
+  if (value.ok === true) return value.claimed === true
+  if (value.ok !== false) return false
+  if (value.reason === 'cap_exceeded') return isNonEmptyString(value.deniedKey)
+  if (value.reason === 'duplicate_reservation') return value.holdStatus === 'held' || value.holdStatus === 'settled'
+  return false
 }
 
 /** 调账本结算：抛异常按「账本不可用」返回，hold 保持占用 */

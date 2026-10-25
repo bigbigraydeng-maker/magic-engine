@@ -6,7 +6,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createFakeLedger } from '@/lib/agent-learning/budget/fake-ledger'
 import { createRpcLedger, newAttemptId, periodKeys, withReservation, RESERVE_RPC, SETTLE_RPC } from '@/lib/agent-learning/budget/reserve'
-import type { BudgetItem } from '@/lib/agent-learning/budget/types'
+import type { BudgetItem, BudgetLedger, ReserveOutcome } from '@/lib/agent-learning/budget/types'
+import type { Result } from '@/lib/agent-learning/contracts'
 
 /** createRpcLedger 的入参形状（避免 import RpcFn，同时不出现 any） */
 type RpcStub = Parameters<typeof createRpcLedger>[0]
@@ -311,5 +312,33 @@ describe('额度预留账本（2.7）', () => {
       p_reservation_id: 'rid-settle',
       p_actuals: [{ period_key: periodKey, actual: 0.03 }],
     })
+  })
+})
+
+describe('shared boundary rejects an approval without claimed:true (Codex P2)', () => {
+  it('withReservation, reserveDistillBudget and reserveXBudget all make zero calls', async () => {
+    const { reserveDistillBudget } = await import('@/lib/agent-learning/distill/cost-gate')
+    const { reserveXBudget } = await import('@/lib/agent-learning/collect/x-limits')
+    const { safeReserve } = await import('@/lib/agent-learning/budget/reserve')
+    // 注入的账本绕过了 createRpcLedger 的校验，返回缺 claimed 的「批准」
+    const missingClaimed: Result<ReserveOutcome> = JSON.parse('{"ok":true,"value":{"ok":true}}')
+    const ledger: BudgetLedger = {
+      reserve: async () => missingClaimed,
+      settle: async () => ({ ok: true, value: undefined }),
+    }
+    const run = vi.fn(async () => ({ value: 1, actuals: [] }))
+    const now = new Date('2026-10-25T03:00:00Z')
+
+    const viaWrapper = await withReservation(ledger, { id: 'distill:u:1:x', purpose: 'distill', items: [{ periodKey: 'k', unit: 'usd', cap: 1, amount: 0.1 }] }, run)
+    expect(viaWrapper.ok).toBe(false)
+    if (viaWrapper.ok) throw new Error('expected failure')
+    expect(viaWrapper.error).toBe('budget_ledger_unavailable')
+    expect(run).not.toHaveBeenCalled()
+
+    expect(await reserveDistillBudget(ledger, 'distill:u:1:y', 0.0042, now)).toEqual({ ok: false, reason: 'budget_ledger_unavailable' })
+    expect(await reserveXBudget(ledger, 'x:u:1:z', { maxResults: 5 }, now)).toEqual({ ok: false, reason: 'budget_ledger_unavailable' })
+
+    const direct = await safeReserve(ledger, 'distill:u:1:w', 'distill', [{ periodKey: 'k', unit: 'usd', cap: 1, amount: 0.1 }])
+    expect(direct.ok).toBe(false)
   })
 })
