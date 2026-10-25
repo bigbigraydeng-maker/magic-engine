@@ -3,13 +3,23 @@
 PM 2026-09-25 拍板（台账卡 `docs/ledger/2026-09-25-merge-gate-machine-not-human.md`、
 `docs/ledger/2026-09-25-merge-two-tiers-auto-vs-signed.md`）：
 
-> 合并不做"每次 GitHub 点头"的人工闸；分两档。2026-10-25 当晚补了一条：B/C 级
-> 不是检查一绿就自动合，要等 Codex 审过**当前这次提交**、且没有未解决的 P0/P1，
-> 才打开自动合并。新提交让旧审查作废，并关掉已经打开的自动合并。2026-10-25 Ray
-> 定：A 级也由同一道闸自动合，条件是 Codex Astra 与 Claude Code 都签过**当前这次
-> 提交**、没有未解决的 P0/P1、必过检查全绿、审查对话都已解决。碰库表 / migration、
-> Meta 凭证，或会改 Meta 广告系列、预算、出价的，留给 Ray 亲手合。子牙 / 魏征 /
-> 狄仁杰只抽查 B 级，缺了不挡合并。
+> 合并不做"每次 GitHub 点头"的人工闸；分两档。碰库表 / migration、Meta 凭证，
+> 或会改 Meta 广告系列、预算、出价的，留给 Ray 亲手合。子牙 / 魏征 / 狄仁杰只
+> 抽查 B 级，缺了不挡合并。
+
+**2026-10-26 Ray 改口，以这条为准：「只有 P0 审」。**
+
+> B/C 级**检查全绿就自动合，不再等任何人签字**。要人看一眼的，在 PR 上打 `p0`
+> 标签 —— 带 `p0` 的要 Claude Code 签过**当前这次提交**才打开自动合并，推新提交
+> 就掉签。A 级仍要签字，但只要 Claude Code 一签（原来还要 Codex Astra 那一签）。
+>
+> **为什么改**：Codex 的三个审查工作流 2026-10-15 被 Ray 停用（`disabled_manually`），
+> 那一签永远不会到。于是 2026-10-25 定的规则让仓库里**每一条** B/C 和 A 级 PR
+> 都停在「等 Codex」上 —— 一道永远不会放行的闸不是闸，是堵。等不到的东西成了
+> 默认阻塞，这种失效不会报错，只会让所有活卡住。
+>
+> 读不到 `p0` 标签时按 P0 拦住（失败朝严），但摘要里写「读不到 p0 标签」，
+> 不写「标了 p0」—— 谎称标了会让人去找一个不存在的标签。
 
 以前这里描述的「Merge authorization (Ray)」检查已删除：它依赖一个从未配置 required
 reviewer 的 GitHub 环境，5 秒自动通过，也从未进过主干必过清单，所以从未真正拦过任何
@@ -49,8 +59,8 @@ P0/P1 就变绿，没审过就保持红。无关评论用单独的分组，取�
 
 | 级别 | `Risk gate` 结果 | 合并方式 |
 |---|---|---|
-| **B / C** | 级别仍按改动文件算出，写在摘要里。自动合并只在 Codex（变量里 `codex-astra` 那个登录名）审过**当前 head**、且没有未解决的 P0/P1 时才打开；否则这道检查是红的，并执行 `--disable-auto`。抽查缺席不改变这一格。P2 不挡 | 满足上一格，且执行前当前 head 仍是这次审过的提交，才执行 `gh pr merge --auto --merge --match-head-commit`。GitHub 仍要等所有必过检查全绿、review 线程全部解决才真正合并。新推送若 Codex 还没审新提交，关掉自动合并，过期重判也不能重新打开 |
-| **A** | Codex（`codex-astra`）审过**当前 head**且没有未解决的 P0/P1，并且 Claude Code（`claude-code`）签过**同一个 head**且没有未解决的 P0/P1，必过检查（不含本闸自己）已经全绿，审查对话全部解决，才绿并打开自动合并。Claude 只认当前 head：可信 `me-review-signoff`（角色 `claude-code`、结论 `pass`、head 等于这次提交）、或该登录名对这次提交的 APPROVED 审查、或该登录名单独一行写了 `SIGNED-OFF:` 加这次完整提交号（否定句、引用和代码块里的同样字样不算）。新推送让两签都作废。碰下面三条时**红**，并打上 `needs-ray-merge`，评论里写明原因 | 不碰那三条时，执行与 B/C 相同的 `gh pr merge --auto --merge --match-head-commit`。碰了就永不打开：`supabase/migrations/**`、任意 `.sql`、路径里的 `/migrations/` 或文件名含 migration；`meta/` 下的 token / cred / secret、`system-user`、`.env`；以及会创建或改动 Meta 广告系列、预算、出价的路径（`src/lib/meta/` 下的 campaign-writes、campaign-management、ad-publisher、ads-manager、adsets，`/meta-ads/`、`/capabilities/ads/`、`ads-campaign-budget`、`budget-scale`、`meta/` 下的 bid，以及 `ad-health/`、`action-submission/`、`ads-strategy/`、`marketing-plan/promo/`、`meta-oauth/`、`meta/entity-settings`）。源文件若导入 campaign-writes、campaign-management、ad-publisher 或 adsets，同样留给 Ray。清单或源文件读不到也留给 Ray |
+| **B / C** | 级别仍按改动文件算出，写在摘要里。**没有 `p0` 标签就直接打开自动合并**（把关交给 GitHub 的必过检查）。带 `p0` 标签的，要 Claude Code（`claude-code`）签过**当前 head**且没有未解决的 P0/P1 才打开，否则这道检查是红的并执行 `--disable-auto`。标签读不到时按 P0 拦住。抽查缺席不改变这一格。P2 不挡 | 满足上一格，且执行前当前 head 仍是这次审过的提交，才执行 `gh pr merge --auto --merge --match-head-commit`。GitHub 仍要等所有必过检查全绿、review 线程全部解决才真正合并。带 `p0` 的 PR 新推送后签字作废，关掉自动合并，过期重判也不能重新打开 |
+| **A** | Claude Code（`claude-code`）签过**当前 head**且没有未解决的 P0/P1（2026-10-26 起不再要 Codex 那一签），必过检查（不含本闸自己）已经全绿，审查对话全部解决，才绿并打开自动合并。Claude 只认当前 head：可信 `me-review-signoff`（角色 `claude-code`、结论 `pass`、head 等于这次提交）、或该登录名对这次提交的 APPROVED 审查、或该登录名单独一行写了 `SIGNED-OFF:` 加这次完整提交号（否定句、引用和代码块里的同样字样不算）。新推送让这一签作废。碰下面三条时**红**，并打上 `needs-ray-merge`，评论里写明原因 | 不碰那三条时，执行与 B/C 相同的 `gh pr merge --auto --merge --match-head-commit`。碰了就永不打开：`supabase/migrations/**`、任意 `.sql`、路径里的 `/migrations/` 或文件名含 migration；`meta/` 下的 token / cred / secret、`system-user`、`.env`；以及会创建或改动 Meta 广告系列、预算、出价的路径（`src/lib/meta/` 下的 campaign-writes、campaign-management、ad-publisher、ads-manager、adsets，`/meta-ads/`、`/capabilities/ads/`、`ads-campaign-budget`、`budget-scale`、`meta/` 下的 bid，以及 `ad-health/`、`action-submission/`、`ads-strategy/`、`marketing-plan/promo/`、`meta-oauth/`、`meta/entity-settings`）。源文件若导入 campaign-writes、campaign-management、ad-publisher 或 adsets，同样留给 Ray。清单或源文件读不到也留给 Ray |
 
 另有三种一律红且关闭 auto-merge：草稿 PR、fork 来的 PR、判级过程任何一步读不到。
 

@@ -20,13 +20,18 @@ name: PR risk gate
 # review-submitted event would use the PR merge ref, so this file does not
 # listen for it. Comment text never enters a `run:` block.
 #
-# Two tiers. B or C arms auto-merge only after the trusted Codex login
-# (`codex-astra` in ME_SIGNOFF_TRUSTED_LOGINS) has reviewed the current head
-# and left no unresolved P0/P1. A new push whose head Codex has not reviewed
-# disables auto-merge instead of re-arming it. A arms auto-merge only when
-# Codex Astra and Claude Code have both signed off on this head (no
+# Two tiers (Ray 2026-10-26: 「只有 P0 审」). B or C arms auto-merge straight
+# away: the gate relies on GitHub's own required checks, since `enable` only
+# means "merge once everything is green". A PR that wants a pair of eyes gets
+# the `p0` label, and then needs a Claude Code sign-off on the current head.
+# A label that cannot be read counts as `p0` — failing closed — and the reason
+# says "读不到 p0 标签" rather than claiming the label is there.
+# A arms auto-merge only when Claude Code has signed off on this head (no
 # unresolved P0/P1), every required check except this one is green, and no
-# review conversation is still open. A push drops both sign-offs. Schema,
+# review conversation is still open. A push drops the sign-off. The Codex
+# signature was removed because those three review workflows have been
+# `disabled_manually` since 2026-10-15, so waiting on it blocked every PR
+# in the repo for ever. Schema,
 # migration, Meta token/credential, and Meta campaign/budget/bid paths never
 # arm auto-merge: they get the label needs-ray-merge and stay for Ray. The
 # former three reviewer roles are optional B-level spot checks and never
@@ -88,6 +93,12 @@ jobs:
           EVENT_AUTHOR: ${{ github.event.pull_request.user.login }}
           EVENT_DRAFT: ${{ github.event.pull_request.draft }}
           EVENT_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          # 带 p0 标签的 PR 要人签字才自动合（Ray 2026-10-26「只有 P0 审」）。
+          # 🔴 大小写：仓库里现有的标签叫 `P0`（大写）。`contains` 在 GitHub 表达式里
+          #    不区分大小写，但下面那条 `gh pr view` 的 jq **区分**，所以 jq 那边用
+          #    `ascii_downcase` 归一化 —— 少了它，两条路径一条认一条不认，
+          #    而「不认」的后果是按 P0 拦住，于是「B/C 自动合」在一半事件上静默失效。
+          EVENT_P0: ${{ contains(github.event.pull_request.labels.*.name, 'p0') }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "pull_request_target" ]; then
@@ -97,12 +108,13 @@ jobs:
               echo "author=$EVENT_AUTHOR"
               echo "draft=$EVENT_DRAFT"
               echo "fork=$EVENT_FORK"
+              echo "p0=$EVENT_P0"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --json baseRefOid,headRefOid,isDraft,isCrossRepository,author \
-            --jq '"base=\(.baseRefOid)\nhead=\(.headRefOid)\ndraft=\(.isDraft)\nfork=\(.isCrossRepository)\nauthor=\(.author.login)"' \
+            --json baseRefOid,headRefOid,isDraft,isCrossRepository,author,labels \
+            --jq '"base=\(.baseRefOid)\nhead=\(.headRefOid)\ndraft=\(.isDraft)\nfork=\(.isCrossRepository)\nauthor=\(.author.login)\np0=\([.labels[].name | ascii_downcase] | index("p0") != null)"' \
             >> "$GITHUB_OUTPUT"
 
       - name: Rate this PR and decide the merge tier
@@ -115,6 +127,7 @@ jobs:
           PR_AUTHOR: ${{ steps.pr.outputs.author }}
           PR_DRAFT: ${{ steps.pr.outputs.draft }}
           PR_IS_FORK: ${{ steps.pr.outputs.fork }}
+          PR_IS_P0: ${{ steps.pr.outputs.p0 }}
           SIGNOFF_TRUSTED_LOGINS: ${{ vars.ME_SIGNOFF_TRUSTED_LOGINS }}
           GATE_EVENT_NAME: ${{ github.event_name }}
         run: node tools/ops-review-loop/src/check-risk-gate.mjs
