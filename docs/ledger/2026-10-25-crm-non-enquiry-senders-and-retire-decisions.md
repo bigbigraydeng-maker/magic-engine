@@ -1,10 +1,12 @@
 ---
 id: 2026-10-25-crm-non-enquiry-senders-and-retire-decisions
 title: CRM 两件 P0：群发营销来信不再出现在「今天要联系」（挪到「先放着」并写明原因，不删不藏），今日决策清单页退役并入「Magic Engine 智能」（PM 回「修」；判据经子牙+魏征两轮复审后大幅收紧）
-status: decided
+status: done
 owner: pm
 decided_on: 2026-10-25
 source: session:96dc6edf
+done_on: 2026-10-26
+done_ref: commit:175e9f40d79c73bc706180e7f25febad9f22b294
 verify_by: 2026-11-08
 verify_how: 合并部署后，①打开 CTS 的「全部客人 → ✨ Magic Engine 智能 → 今天要联系」，Vietnam Tours Direct(anzacvn@221832422.mailchimpapp.com) 和 Afterpay Team(hello@info.e.afterpay.com) 不应再出现；②展开「先放着」能找到这两个，原因写着「看着不是客人来咨询（群发…）」，抽屉、历史、联系方式都在，抽屉里仍可点「回了他」类按钮（= 没有凭空消失、没有变成死胡同）；③ZORAVYO、Twilio 通知、grokbot、chajense 这 4 个**仍会出现**（判据刻意不管它们，靠人点一次抽屉里的「不是有效咨询（退回）」永久清掉）；④访问 /dashboard/clients/<CTS>/crm/decisions 应自动跳到 /crm/all?view=smart，导航条不再有「决策清单（只读）」；⑤本地 `npx vitest run src/lib/crm src/app/dashboard/clients` 全绿
 ---
