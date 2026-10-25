@@ -12,6 +12,7 @@ interface Row {
   spend: number | null
   impressions: number | null
   frequency_7d: number | null
+  primary_results?: number | null
 }
 
 const TARGET = 11
@@ -24,6 +25,7 @@ function coldRows(totalSpend: number, totalResults: number): Map<string, Row[]> 
     ctr: 0.02,
     cost_per_result: totalResults > 0 ? totalSpend / totalResults : null,
     results: totalResults / 5,
+    primary_results: totalResults / 5,
     spend: totalSpend / 5,
     impressions: 3000,
     frequency_7d: null,
@@ -57,6 +59,22 @@ describe('冷启动按目标成本判（历史不满 14 天）', () => {
 
   it('没配目标 → 不判（不回落行业默认）', () => {
     expect(verdictOf(160, 0, null)).toBe('insufficient_history')
+  })
+})
+
+describe('冷启动按客户主结果口径计数', () => {
+  it('通用 results 有私信但主结果（留资）为 0 → 仍按 0 主结果判 alert', () => {
+    const rows = coldRows(150, 0)
+    for (const r of rows.get('cold')!) r.results = 2 // 通用口径把私信算进去了
+    const p = buildNarrativePayload(rows, '2026-07-11', undefined, null, TARGET)
+    expect(p.campaigns[0].verdict).toBe('alert')
+  })
+
+  it('主结果归不上（null）→ 不判，不拿通用 results 代替', () => {
+    const rows = coldRows(150, 0)
+    for (const r of rows.get('cold')!) { r.primary_results = null; r.results = 0 }
+    const p = buildNarrativePayload(rows, '2026-07-11', undefined, null, TARGET)
+    expect(p.campaigns[0].verdict).toBe('insufficient_history')
   })
 })
 

@@ -73,6 +73,10 @@ describe('D3 候选范围', () => {
     expect(run('LEAD_GENERATION', 194, 11, 'expansion')[0]).toMatchObject({ status: 'hit', autoPauseEligible: false })
   })
 
+  it('流量组被判成再营销（retargeting）→ 仍只提醒，不进自动暂停', () => {
+    expect(run('LINK_CLICKS', 152, 11, 'retargeting')[0]).toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+
   it('获客组行为不变：命中且不带 autoPauseEligible=false', () => {
     const [d] = run('LEAD_GENERATION', 100)
     expect(d.status).toBe('hit')

@@ -18,6 +18,7 @@ import {
 } from './baseline'
 import { prescribe, Prescription } from './prescription'
 import { loadOutcomeConfig } from './portfolio/outcome-config'
+import { countOutcome, type OutcomeStep } from './portfolio/outcome-ladder'
 import { D3_COST_MULTIPLE } from './portfolio/diagnostics/thresholds'
 
 /** How many days of history to load for the baseline (needs ≥ 2 windows). */
@@ -33,6 +34,15 @@ interface InsightRow {
   spend: number | null
   impressions: number | null
   frequency_7d: number | null
+  /** 客户主结果口径的当天计数（countOutcome）；null / 缺省 = 归不上，冷启动不判。 */
+  primary_results?: number | null
+}
+
+/** Raw columns needed to count the client's primary outcome (same shape countOutcome reads). */
+type RawInsightRow = InsightRow & {
+  reach: number | null
+  video_thruplays: number | null
+  actions: ReadonlyArray<{ action_type: string; value: string }> | null
 }
 
 export interface CampaignNarrative {
@@ -77,6 +87,11 @@ function worstVerdict(verdicts: Verdict[]): Verdict {
   const real = verdicts.filter(v => v !== 'insufficient_history' && v !== 'paused')
   if (real.length === 0) return 'insufficient_history'
   return real.reduce((worst, v) => (VERDICT_RANK[v] > VERDICT_RANK[worst] ? v : worst), 'healthy')
+}
+
+function primaryCountOf(primary: OutcomeStep | null, r: RawInsightRow): number | null {
+  if (primary === null) return null
+  return countOutcome(primary, r, { messagingReferralAvailable: false }).value
 }
 
 /** Group flat insight rows by campaign into DailyPoint series. */
@@ -155,6 +170,10 @@ function buildCampaignNarrative(
   const last7 = sorted.filter(r => r.insight_date >= windowStart && r.insight_date <= insightDate)
   const latestSpend7d   = last7.reduce((s, r) => s + (r.spend ?? 0), 0)
   const latestResults7d = last7.reduce((s, r) => s + (r.results ?? 0), 0)
+  // 冷启动用客户主结果口径，不用通用 results（max(leads,messaging)）；任何一天归不上 → null → 不判
+  const primaryResults7d = last7.every(r => r.primary_results != null)
+    ? last7.reduce((s, r) => s + (r.primary_results ?? 0), 0)
+    : null
 
   const lastDataDate = sorted[sorted.length - 1].insight_date
   const isPaused = lastDataDate < shiftDateStr(insightDate, -(PAUSED_AFTER_DAYS - 1))
@@ -176,8 +195,8 @@ function buildCampaignNarrative(
 
   const points = toDailyPoints(sorted)
   const baselineJudged = judgeCampaign(points, cfg, industry)
-  const cold = baselineJudged.verdict === 'insufficient_history'
-    ? coldStartAlert(latestSpend7d, latestResults7d, targetCost)
+  const cold = baselineJudged.verdict === 'insufficient_history' && primaryResults7d !== null
+    ? coldStartAlert(latestSpend7d, primaryResults7d, targetCost)
     : null
   const judged: CampaignVerdict = cold
     ? { ...baselineJudged, verdict: 'alert', headline: cold.headline }
@@ -263,7 +282,7 @@ export async function evaluateClientAdHealth(
 
     const { data, error } = await supabaseAdmin
       .from('ad_daily_insights')
-      .select('entity_id, entity_name, insight_date, ctr, cost_per_result, results, spend, impressions, frequency_7d')
+      .select('entity_id, entity_name, insight_date, ctr, cost_per_result, results, spend, impressions, frequency_7d, reach, video_thruplays, actions')
       .eq('client_id', clientId)
       .eq('level', 'campaign')
       .gte('insight_date', sinceStr)
@@ -272,8 +291,8 @@ export async function evaluateClientAdHealth(
 
     if (error) return { success: false, error: error.message }
 
-    const rows = (data ?? []) as InsightRow[]
-    if (rows.length === 0) {
+    const rawRows = (data ?? []) as RawInsightRow[]
+    if (rawRows.length === 0) {
       return { success: true, insight_date: insightDate, overall_verdict: 'insufficient_history', campaigns_evaluated: 0 }
     }
 
@@ -289,8 +308,10 @@ export async function evaluateClientAdHealth(
     }
     const industry = (clientRow as { industry?: string | null } | null)?.industry ?? null
 
-    // 读不到 / 没配目标 → null → 冷启动不判（loadOutcomeConfig 读失败返回空配置，不回落默认）
-    const targetCost = (await loadOutcomeConfig(clientId)).config.targetCostPerPrimary
+    // 读不到 / 没配目标或主结果 → 冷启动不判（loadOutcomeConfig 读失败返回空配置，不回落默认）
+    const { config } = await loadOutcomeConfig(clientId)
+    const targetCost = config.primary === null ? null : config.targetCostPerPrimary
+    const rows = rawRows.map(r => ({ ...r, primary_results: primaryCountOf(config.primary, r) }))
     const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry, targetCost)
 
     const { error: upsertError } = await supabaseAdmin

@@ -71,7 +71,7 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
       optimizationGoal: s.optimization_goal,
     }))
     const unit = unitOf(ctx, 'adset', s.entity_id)
-    const alertOnly = !isAutoPauseScope(ctx.roles.get(s.entity_id)?.role)
+    const alertOnly = isAlertOnlyScope(ctx.roles.get(s.entity_id)?.role, s.optimization_goal)
     if (counts.some(c => c.value === null)) {
       if (spend < threshold) continue
       out.push({

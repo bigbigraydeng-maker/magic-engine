@@ -2,7 +2,7 @@
 id: 2026-10-25-d3-scope-cold-start
 title: D3「花钱没结果」纳入类似人群组和流量组（只提醒、不进自动暂停）；历史不满 14 天按目标 2 倍判；D3 进 PM 今日待办
 status: done
-owner: claude
+owner: agent
 decided_on: 2026-10-25
 source: issue:3125
 verify_by: 2026-11-01
