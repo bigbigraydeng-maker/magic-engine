@@ -236,6 +236,40 @@ describe('every card that is burning money offers a way to stop it', () => {
     expect(screen.queryByText(/已降到每天/)).toBeNull()
   })
 
+  it('pause on a campaign that is no longer ACTIVE says so and never writes', async () => {
+    const fetchMock = mockFetch({
+      '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: false },
+      '/ad-health': respond([OZTOP_ALERT]),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('先全停')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('先全停'))
+    await waitFor(() => expect(screen.getByText(/已经不在投放中/)).toBeTruthy())
+    const wrote = fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+    expect(wrote).toBe(false)
+  })
+
+  it('a 409 no_active_goal on pause says a goal is needed and nothing changed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const isWrite = init?.method === 'POST' && url.includes('/ad-health/stop-loss')
+      const body = isWrite
+        ? { error: 'no_active_goal' }
+        : url.includes('/ad-health/stop-loss')
+          ? { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true }
+          : respond([OZTOP_ALERT])
+      return { ok: !isWrite, status: isWrite ? 409 : 200, json: async () => body } as unknown as Response
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('先全停')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('先全停'))
+    await waitFor(() => expect(screen.getByText(/还没有生效的增长目标/)).toBeTruthy())
+    expect(screen.getByText(/广告没有变更/)).toBeTruthy()
+    expect(screen.queryByText(/已停投/)).toBeNull()
+  })
+
   it('an un-cuttable budget still leaves a next step — never "go do it yourself"', async () => {
     vi.stubGlobal('fetch', mockFetch({
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: null, cuttable: false, pausable: true },
