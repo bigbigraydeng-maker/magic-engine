@@ -35,22 +35,17 @@ import {
   BRIEF_SCHEMA_VERSION,
   type MessengerBrief,
   type BriefContext,
+  type BriefChannel,
   type TripDetails,
 } from './brief-schema'
+
+// 渠道类型定义在 brief-schema（放这里会跟它成环），但调用方习惯从 brief 引，所以再导出一次。
+export type { BriefChannel }
+
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
 import { getClientKnowledge, type GetClientKnowledgeDeps } from '@/lib/knowledge/read'
 import { KnowledgeNotEntitledError } from '@/lib/knowledge/errors'
 import type { KnowledgeEntry } from '@/lib/knowledge/types'
-
-/**
- * 这张卡是从哪条渠道的对话写出来的。
- *
- * 为什么必须是参数、不能省：卡里的 `next_action` 是让销售今天就去做的事，
- * `draft_reply` 是真要发给客人的字。渠道错了，销售会跑去 Messenger 找一个
- * 从没在那说过话的人（这正是原来那行 `.eq('channel','messenger')` 过滤
- * 存在的理由 —— 不是嫌邮件麻烦，是怕写出说错渠道的卡）。
- */
-export type BriefChannel = 'messenger' | 'email'
 
 /**
  * 每条渠道怎么称呼、回信要带什么。英文是给模型看的，所以这里不翻译。
@@ -107,6 +102,8 @@ export interface StoredMessage {
   senderName: string | null
   body: string
   sentAt: string
+  /** 邮件渠道靠它去拉全文（库里只存了 255 字摘要）。私信不需要，留空。 */
+  messageId?: string | null
 }
 
 /**
@@ -473,7 +470,7 @@ export async function generateBrief(
     {
       model: modelName(),
       input: [
-        { role: 'system', content: buildSystemPrompt(identity, facts.entries) },
+        { role: 'system', content: buildSystemPrompt(identity, facts.entries, context?.channel) },
         {
           role: 'user',
           content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
