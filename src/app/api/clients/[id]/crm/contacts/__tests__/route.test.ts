@@ -725,6 +725,8 @@ describe('GET contacts — kind 筛选（WP-B3）', () => {
         eq: () => builder,
         in: () => builder,
         not: () => builder,
+        // `.or(...)`：找同行/员工时按域名收窄用的（2026-10-26 起只捞可能命中的行）。
+        or: () => builder,
         order: () => builder,
         range: () => builder,
         maybeSingle: () => Promise.resolve({ data: { leads_config: LEADS_CONFIG }, error: null }),

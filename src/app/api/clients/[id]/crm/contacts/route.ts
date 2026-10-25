@@ -22,7 +22,7 @@ import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
 import { enrichContacts, type SourceKey } from '@/lib/crm/contact-enrichment'
-import { loadEnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
+import { loadEnrichmentInputs, type EnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
 import {
   responseRowFor,
   stageMetaOf,
@@ -348,8 +348,22 @@ async function loadContactsByIds(clientId: string, ids: string[]): Promise<Conta
  * 我们发出的人工邮件（只在对话里、没落触点的）→ 补成外发记录，别再判「还没联系」；顺带算每人的来源渠道。
  * scoped=true 只查这一批人（分页），false = 整个客户（分段 / 老路径）。失败时原样返回。
  */
-async function enrichForDisplay(clientId: string, contacts: ContactRow[], touches: TouchRow[], scoped: boolean) {
-  const inputs = await loadEnrichmentInputs(supabaseAdmin, clientId, scoped ? contacts.map((c) => c.id) : undefined)
+async function enrichForDisplay(
+  clientId: string,
+  contacts: ContactRow[],
+  touches: TouchRow[],
+  scoped: boolean,
+  /**
+   * 原料已经在路上时直接等它，别再发一次。
+   *
+   * 这一步只要「这一页有哪些人」，而那串编号在上一步（`page_ready`）就已经拿到了；
+   * 原来却要等触点和摘要都回来之后才开始发请求，白串了一轮。实测（Server-Timing）
+   * `touches_briefs 317ms` 之后才轮到 `enrich 516ms`，两段加起来 833ms；并行之后
+   * 只花两者里慢的那一个。跟同文件 `touchesEarly` 是同一个套路。
+   */
+  preloaded?: Promise<EnrichmentInputs>,
+) {
+  const inputs = await (preloaded ?? loadEnrichmentInputs(supabaseAdmin, clientId, scoped ? contacts.map((c) => c.id) : undefined))
   return enrichContacts({ contacts, touches, hints: inputs.hints, outboundEmails: inputs.outboundEmails })
 }
 
@@ -594,6 +608,12 @@ async function getPaged(
 
   timer.step('page_ready')
   const pageIds = pageContacts.map((c) => c.id)
+  // 补全层的原料只要这串编号，现在就发出去，跟下面的触点/摘要并行跑。
+  // 失败不影响名单（`loadEnrichmentInputs` 内部已经 catch 成空值），这里再挂一个
+  // 兜底，避免它比下面的 await 先 reject 时变成没人接的未处理异常（同 `touchesEarly`）。
+  const enrichInputsEarly: Promise<EnrichmentInputs> | null =
+    pageIds.length === 0 ? null : loadEnrichmentInputs(supabaseAdmin, clientId, pageIds)
+  enrichInputsEarly?.catch(() => undefined)
   let touches: TouchRow[]
   let briefs: BriefByContact
   try {
@@ -611,7 +631,7 @@ async function getPaged(
   }
 
   timer.step('touches_briefs')
-  const enrichedPage = await enrichForDisplay(clientId, pageContacts, touches, true)
+  const enrichedPage = await enrichForDisplay(clientId, pageContacts, touches, true, enrichInputsEarly ?? undefined)
   timer.step('enrich')
   const { out, customPerContact } = assembleRows(enrichedPage.contacts, enrichedPage.touches, stageRows, briefs, enrichedPage.sources)
   timer.step('assemble')
