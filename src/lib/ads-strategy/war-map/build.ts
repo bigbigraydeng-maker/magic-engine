@@ -133,5 +133,6 @@ export function buildWarMap(input: WarMapInput): WarMapView {
     frequency,
     adjust,
     goalNote: buildGoalNote(input),
+    prescriptionLine: input.plan?.prescriptionLine ?? null,
   }
 }

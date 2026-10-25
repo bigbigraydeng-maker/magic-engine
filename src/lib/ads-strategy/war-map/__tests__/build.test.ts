@@ -492,6 +492,12 @@ describe('目标进度那一行只陈述事实', () => {
     const plan: PlanInput = { status: 'draft', phases: [], goalTitle: null, recordUpdatedDay: null }
     expect(buildWarMap(baseInput({ growth: g, plan })).goalNote?.warning).toContain('没读到')
   })
+  it('计划上的处方一行原样带到视图；没有就空', () => {
+    const line = '处方 v1 · 草稿 · 2 条人工动作'
+    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: null, recordUpdatedDay: null, prescriptionLine: line }
+    expect(buildWarMap(baseInput({ plan })).prescriptionLine).toBe(line)
+    expect(buildWarMap(baseInput()).prescriptionLine).toBeNull()
+  })
   it('没有目标标题：不出这一段；共享代码里也不写客户事实', () => {
     expect(buildWarMap(baseInput({ growth: growth() })).goalNote).toBeNull()
     const note = buildWarMap(baseInput({ growth: g })).goalNote
