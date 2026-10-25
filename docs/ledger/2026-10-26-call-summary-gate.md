@@ -1,10 +1,12 @@
 ---
 id: 2026-10-26-call-summary-gate
 title: 通话 AI 摘要加核对闸：人名必须对得上客人档案、数字必须有依据、被客人自己推翻的「首次去中国」不许写进摘要；不过关就换成由已核实事实拼的句子（PM 说「记录的不准」后查实并修）
-status: decided
+status: done
 owner: pm
 decided_on: 2026-10-26
 source: session:96dc6edf
+done_on: 2026-10-26
+done_ref: commit:175e9f40d79c73bc706180e7f25febad9f22b294
 verify_by: 2026-11-09
 verify_how: 合并部署后打一通测试电话（或等下一通真实来电），在客人抽屉的通话记录里看摘要：①不应出现任何人名（提示词已禁止，出现了也会被闸换掉）②摘要里的数字应能在转写或已核实事实里找到③若客人在电话里说了「第一次去X」又说「我去过X」，摘要不应断言「首次」。另可只读回放：拿 telephony_call_analyses 的 summary + telephony_transcripts.body + contacts.display_name 跑 verifySummary，2026-10-22 那通（Sarju Dayal）应判 person_name + customer_characterisation，其余 5 通应放行
 ---
