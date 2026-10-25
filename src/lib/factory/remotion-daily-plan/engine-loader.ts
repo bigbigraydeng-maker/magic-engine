@@ -7,7 +7,7 @@ import type { MusicTrack } from './types'
 const ENGINE_SRC = join(process.cwd(), 'scripts', 'factory-worker', 'engines', 'remotion', 'src')
 
 export interface RealEngine {
-  loadTemplate(id: 'montage' | 'list', input: unknown): { totalFrames: number; assetFiles: string[] }
+  loadTemplate(id: 'montage' | 'impact' | 'list', input: unknown): { totalFrames: number; assetFiles: string[] }
   beatGrid(entry: MusicTrack, count: number): number[]
   stagedFileName(entry: Pick<MusicTrack, 'id' | 'file'>): string
 }

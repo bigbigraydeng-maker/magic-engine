@@ -53,4 +53,5 @@ describe('Remotion music choices', () => {
     })
     expect(updated?.choice.id).toBe('jade-river-journey')
   })
+
 })

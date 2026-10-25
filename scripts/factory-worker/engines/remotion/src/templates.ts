@@ -9,6 +9,7 @@ import {
   computeMontageTiming,
   buildMontageSegments,
   recipeGapsOf,
+  impactPlanReport,
   type RecipeGap,
 } from './montage.ts';
 import {
@@ -29,7 +30,7 @@ import {
 import { stagedFileName, type MusicCatalog } from './music.ts';
 
 /** Allowed template ids. */
-export const TEMPLATE_IDS = ['list', 'montage', 'datacard', 'postcard', 'atmosphere'] as const;
+export const TEMPLATE_IDS = ['list', 'montage', 'impact', 'datacard', 'postcard', 'atmosphere'] as const;
 
 /** One supported template id. */
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
@@ -50,6 +51,8 @@ export interface LoadedTemplate {
   totalFrames: number;
   /** Columns of the recipe the template cannot satisfy for these props; absent means not evaluated. */
   recipeGaps?: RecipeGap[];
+  /** Rendered storyboard receipt; this is structural evidence, not a creative pass. */
+  creativePlan?: ReturnType<typeof impactPlanReport>;
 }
 
 /** Recipe columns a pure data card cannot satisfy (no shots, no industry recipe); mirrors DATACARD_RECIPE_RECONCILIATION.md and is reported on every render. */
@@ -106,11 +109,14 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
       recipeGaps: ATMOSPHERE_RECIPE_GAPS,
     };
   }
-  if (id !== 'montage') {
+  if (id !== 'montage' && id !== 'impact') {
     // Never fall through to montage for an unknown id: a missed template must be refused, not mis-rendered.
     throw new Error(`未知模板：${String(id)}`);
   }
   const props = parseMontageReelProps(input);
+  if (id === 'impact' && !props.impactPlan) {
+    throw new Error('冲击叙事模板需要 impactPlan（钩子、中段场景和结尾画面）');
+  }
   const totalFrames = computeMontageTiming(props).totalFrames;
   // Throws a readable error for layouts that would only crash later at render time.
   buildMontageSegments(props);
@@ -120,6 +126,7 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
     assetFiles: collectMontageAssetFiles(props),
     totalFrames,
     recipeGaps: recipeGapsOf(props),
+    ...(id === 'impact' ? { creativePlan: impactPlanReport(props) } : {}),
   };
 }
 

@@ -45,7 +45,7 @@ function patchedPropsForMusic(template, props, track) {
     const excerpt = excerptFor(track, itemCount, 0)
     return { ...props, musicFile: stagedFile, musicStartSec: excerpt.musicStartSec, beats: excerpt.beats }
   }
-  if (template === 'montage') {
+  if (template === 'montage' || template === 'impact') {
     const totalBeats = typeof props.totalBeats === 'number' ? props.totalBeats : 0
     return { ...props, musicFile: stagedFile, beats: beatGrid(track, totalBeats + 1) }
   }
@@ -62,7 +62,7 @@ function eligibleTrackForBrief(brief, track) {
   try {
     loaded = loadTemplate(brief.template, props)
     // Beat-timed layouts require a ready BPM grid. The renderer will independently verify the exact staged bytes.
-    if ((brief.template === 'list' || brief.template === 'montage') && track.status !== 'ready') return null
+    if ((brief.template === 'list' || brief.template === 'montage' || brief.template === 'impact') && track.status !== 'ready') return null
     patchedProps = patchedPropsForMusic(brief.template, loaded.props, track)
     loadTemplate(brief.template, patchedProps)
   } catch {

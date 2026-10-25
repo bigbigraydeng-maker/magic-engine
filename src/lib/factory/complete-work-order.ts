@@ -310,6 +310,7 @@ export async function completeWorkOrder(
         endcard: (((briefRecord.copy ?? {}) as Record<string, unknown>).endcard ?? {}) as Record<string, unknown>,
       }),
     ],
+    ...(mediaEvidence?.creative_plan ? { creative_plan: mediaEvidence.creative_plan } : {}),
     new_clip_ids: insertedClipIds,
     ...(substance.applicable
       ? {

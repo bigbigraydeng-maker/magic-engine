@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildReelMediaAutoChecks, type ReelMediaEvidence } from './reel-media-checks'
+import { buildReelMediaAutoChecks, parseShortCreativePlan, type ReelMediaEvidence } from './reel-media-checks'
 
 const valid: ReelMediaEvidence = {
   audio_stream_present: true,
@@ -25,5 +25,26 @@ describe('Reel media auto checks', () => {
     expect(buildReelMediaAutoChecks({ ...valid, audio_loudness_lufs: -70, width: 1080, height: 1080 })
       .map(item => item.outcome)).toEqual(['FAIL', 'FAIL', 'PASS', 'PASS', 'FAIL'])
     expect(buildReelMediaAutoChecks(null).every(item => item.outcome === 'NOT_MEASURED')).toBe(true)
+  })
+})
+
+describe('Short creative plan receipt', () => {
+  const plan = {
+    schema_version: 1,
+    hook_tag: 'hook-action',
+    hook_beats: 2,
+    build_tags: ['scene-one', 'scene-two', 'scene-three', 'scene-four'],
+    payoff_tag: 'payoff-reveal',
+    payoff_beats: 2,
+    planned_scene_count: 6,
+    rendered_clip_file_count: 12,
+    human_review_required: true,
+  }
+
+  it('accepts a bounded structural receipt and rejects invalid or duplicate scenes', () => {
+    expect(parseShortCreativePlan(plan)).toEqual(plan)
+    expect(parseShortCreativePlan({ ...plan, build_tags: ['scene-one', 'scene-two', 'scene-three', 'hook-action'] })).toBeNull()
+    expect(parseShortCreativePlan({ ...plan, rendered_clip_file_count: 5 })).toBeNull()
+    expect(parseShortCreativePlan({ ...plan, human_review_required: false })).toBeNull()
   })
 })

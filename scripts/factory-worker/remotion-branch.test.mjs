@@ -52,7 +52,7 @@ const MONTAGE_FILES = ['logo.png', 'song-one.m4a', 'clips/a.mp4', 'clips/b.mp4']
 function makeEngine(over = {}) {
   return {
     FPS: 30,
-    isTemplateId: (id) => id === 'list' || id === 'montage',
+    isTemplateId: (id) => id === 'list' || id === 'montage' || id === 'impact',
     loadTemplate: (id, p) => ({
       compositionId: id === 'list' ? 'ListReel' : 'MontageReel',
       props: p,
@@ -387,6 +387,33 @@ describe('montage template and shared music', () => {
     expect(deps.completeFn.mock.calls[0][0].caption).toBe('3 BED OPEN SAT')
     const srt = deps.uploadSignedFn.mock.calls[2][1].toString()
     expect(srt).toBe('1\n00:00:00,000 --> 00:00:01,067\n3 BED\n\n2\n00:00:01,067 --> 00:00:02,067\nOPEN SAT\n\n')
+  })
+
+  it('carries the impact storyboard receipt into review metadata without changing media checks', async () => {
+    const env = makeEnv()
+    const plan = {
+      schema_version: 1, hook_tag: 'hook', hook_beats: 2,
+      build_tags: ['scene-one', 'scene-two', 'scene-three', 'scene-four'],
+      payoff_tag: 'payoff', payoff_beats: 2, planned_scene_count: 6,
+      rendered_clip_file_count: 12, human_review_required: true,
+    }
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 5, audio_stream_present: true })),
+      loadEngineFn: async () => makeEngine({
+        loadTemplate: (template, props) => ({
+          compositionId: 'MontageReel', props,
+          assetFiles: ['logo.png', 'clips/a.mp4'], totalFrames: 150,
+          creativePlan: template === 'impact' ? plan : null,
+        }),
+      }),
+    })
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'impact', props: { ...MONTAGE_PROPS, musicFile: null } }
+    const res = await run(env, deps, wo)
+    expect(res).toEqual({ ok: true, cost: 0 })
+    const segments = JSON.parse(deps.uploadSignedFn.mock.calls[1][1].toString())
+    expect(segments.creative_plan).toEqual(plan)
+    expect(deps.completeFn.mock.calls[0][0].media_evidence.creative_plan).toEqual(plan)
   })
 
   it('keeps a multi-word red-line phrase intact in the caption', async () => {

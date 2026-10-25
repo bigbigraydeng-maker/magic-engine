@@ -77,6 +77,14 @@ const CLIP = z
   })
   .strict();
 
+const IMPACT_PLAN = z.object({
+  hookTag: SLUG,
+  buildTags: z.array(SLUG).min(4, { message: '冲击叙事中段至少要有 4 个不同场景' }).max(8),
+  payoffTag: SLUG,
+  hookBeats: z.number().int().min(1).max(4).default(2),
+  payoffBeats: z.number().int().min(1).max(4).default(2),
+}).strict();
+
 const MontageBaseSchema = z
   .object({
     brandColor: z.string().regex(HEX_COLOR, {
@@ -108,6 +116,8 @@ const MontageBaseSchema = z
         message: `镜头池最少 ${MONTAGE_MIN_CLIPS} 个`,
       })
       .max(24, { message: '镜头池最多 24 个' }),
+    /** Explicit hook → progression → payoff storyboard, required by the impact template. */
+    impactPlan: IMPACT_PLAN.optional(),
   })
   .strict();
 
@@ -289,6 +299,79 @@ function checkWordTags(val: MontageBase, ctx: z.RefinementCtx): void {
   });
 }
 
+/** The planned scene tag for one beat in an impact reel. */
+export function impactTagAtBeat(props: Pick<MontageReelProps, 'impactPlan' | 'totalBeats'>, beat: number): string | null {
+  const plan = props.impactPlan
+  if (!plan) return null
+  if (beat < plan.hookBeats) return plan.hookTag
+  if (beat >= props.totalBeats - plan.payoffBeats) return plan.payoffTag
+  const buildLength = props.totalBeats - plan.hookBeats - plan.payoffBeats
+  const buildBeat = beat - plan.hookBeats
+  const index = Math.min(plan.buildTags.length - 1, Math.floor((buildBeat / buildLength) * plan.buildTags.length))
+  return plan.buildTags[index]
+}
+
+function checkImpactPlan(val: MontageBase, ctx: z.RefinementCtx): void {
+  const plan = val.impactPlan
+  if (!plan) return
+  if (plan.hookBeats + plan.payoffBeats >= val.totalBeats) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['impactPlan'], message: '开头和结尾占满了整条片，中段没有递进空间' })
+    return
+  }
+  const roles = [plan.hookTag, ...plan.buildTags, plan.payoffTag]
+  if (new Set(roles).size !== roles.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['impactPlan'], message: '开头、中段和结尾必须使用不同场景标签' })
+  }
+  const counts = new Map<string, number>()
+  for (const clip of val.clips) counts.set(clip.tag, (counts.get(clip.tag) ?? 0) + 1)
+  for (const tag of roles) {
+    const count = counts.get(tag) ?? 0
+    if (count < 2) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['impactPlan'],
+        message: `场景「${tag}」需要至少 2 条不同素材，避免同一画面反复快切`,
+      })
+    }
+  }
+  const lastWord = val.words[val.words.length - 1]
+  if (!lastWord || lastWord.at < val.totalBeats - plan.payoffBeats) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['words'],
+      message: '冲击叙事的最后一句必须落在结尾兑现画面上',
+    })
+  }
+  val.words.forEach((word, wordIndex) => {
+    if (!word.clipTag) return
+    for (let beat = word.at; beat < word.at + word.beats; beat++) {
+      if (impactTagAtBeat(val as unknown as MontageReelProps, beat) !== word.clipTag) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['words', wordIndex, 'clipTag'],
+          message: `词「${word.text}」绑定的场景与第 ${beat} 拍的分镜不一致`,
+        })
+        break
+      }
+    }
+  })
+}
+
+function fastBarsFor(props: MontageReelProps): Set<number> {
+  const bars = new Set(props.fastBars)
+  if (!props.impactPlan) return bars
+  const start = props.impactPlan.hookBeats
+  const end = props.totalBeats - props.impactPlan.payoffBeats
+  const buildLength = end - start
+  // Add two deliberate accelerations in the middle section, even when the
+  // incoming brief only supplied a generic fast-bar marker.
+  for (const progress of [0.3, 0.65]) {
+    const beat = Math.floor(start + buildLength * progress)
+    if (beat >= start && beat < end) bars.add(Math.floor(beat / 4))
+  }
+  return bars
+}
+
 /** Schema for the montage quick-cut video template props. */
 export const MontageReelPropsSchema = MontageBaseSchema.superRefine(
   (val, ctx) => {
@@ -297,6 +380,7 @@ export const MontageReelPropsSchema = MontageBaseSchema.superRefine(
     checkWords(val, ctx);
     checkClips(val, ctx);
     checkWordTags(val, ctx);
+    checkImpactPlan(val, ctx);
   },
 );
 
@@ -428,6 +512,13 @@ function candidatesFor(
   beat: number,
   k: number,
 ): { candidates: number[]; key: string } {
+  const plannedTag = impactTagAtBeat(props, beat)
+  if (plannedTag !== null) {
+    return {
+      candidates: indicesOf(props.clips, (c) => c.tag === plannedTag),
+      key: `impact:${plannedTag}`,
+    }
+  }
   const word = wordAtBeat(props.words, beat);
   if (word !== undefined && word.clipTag !== undefined) {
     const tag = word.clipTag;
@@ -523,12 +614,13 @@ export function maxFlashesPerSecond(
 /** Build the deterministic list of montage segments. */
 export function buildMontageSegments(props: MontageReelProps): MontageSegment[] {
   const out: MontageSegment[] = [];
+  const fastBars = fastBarsFor(props)
   const rot: Rotations = { tagged: new Map(), person: 0, general: 0 };
   let prevClip = -1;
   let k = 0;
   for (let beat = 0; beat < props.totalBeats; beat++) {
     const bar = Math.floor(beat / 4);
-    const parts = props.fastBars.includes(bar) ? 2 : 1;
+    const parts = fastBars.has(bar) ? 2 : 1;
     for (let part = 0; part < parts; part++) {
       const seg = makeSegment(props, beat, part, parts, k, prevClip, rot);
       out.push(seg);
@@ -570,4 +662,65 @@ export function recipeGapsOf(props: MontageReelProps): RecipeGap[] {
     });
   }
   return gaps;
+}
+
+/**
+ * Compact audit summary for the impact storyboard. It records what the renderer
+ * actually selected; it does not claim that the hook, footage, or payoff is good.
+ */
+export function impactPlanReport(props: MontageReelProps): {
+  schema_version: 1
+  hook_tag: string
+  hook_beats: number
+  build_tags: string[]
+  payoff_tag: string
+  payoff_beats: number
+  planned_scene_count: number
+  rendered_clip_file_count: number
+  human_review_required: true
+} | null {
+  const plan = props.impactPlan
+  if (!plan) return null
+  const used = new Set(buildMontageSegments(props).map((segment) => props.clips[segment.clip].file))
+  return {
+    schema_version: 1,
+    hook_tag: plan.hookTag,
+    hook_beats: plan.hookBeats,
+    build_tags: [...plan.buildTags],
+    payoff_tag: plan.payoffTag,
+    payoff_beats: plan.payoffBeats,
+    planned_scene_count: 2 + plan.buildTags.length,
+    rendered_clip_file_count: used.size,
+    human_review_required: true,
+  }
+}
+
+/** Music envelope for the standard and impact montages, measured per output frame. */
+export function montageMusicVolumeAtFrame(frame: number, totalFrames: number, impact: boolean): number {
+  const points: Array<[number, number]> = impact
+    ? [
+        [0, 0],
+        [6, 0.68],
+        [Math.round(totalFrames * 0.28), 0.76],
+        [Math.round(totalFrames * 0.62), 1],
+        [totalFrames - 24, 1],
+        [totalFrames - 2, 0],
+      ]
+    : [
+        [0, 0],
+        [6, 1],
+        [totalFrames - 24, 1],
+        [totalFrames - 2, 0],
+      ]
+
+  const boundedFrame = Math.max(0, Math.min(frame, totalFrames - 1))
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const [fromFrame, fromVolume] = points[index]
+    const [toFrame, toVolume] = points[index + 1]
+    if (boundedFrame <= toFrame) {
+      const progress = Math.max(0, Math.min(1, (boundedFrame - fromFrame) / (toFrame - fromFrame)))
+      return fromVolume + (toVolume - fromVolume) * progress
+    }
+  }
+  return points[points.length - 1][1]
 }
