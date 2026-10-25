@@ -12,7 +12,7 @@
  * inputs that look editable would let a save overwrite real values with blanks.
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
 type AutonomyMode = 'observe' | 'bounded_auto'
@@ -87,6 +87,8 @@ interface ConfigResponse {
 interface AccountCapRow {
   ad_account_id: string
   daily_budget_cap_cents: number | null
+  /** 缺省当「显示」。只有明确 true 才是藏起来。 */
+  hidden_from_ad_health?: boolean | null
 }
 
 interface AccountCapsResponse {
@@ -296,18 +298,55 @@ function clearConfirmText(accountCount: number, totalCap: number | null): string
   return '清空后这个账户将不允许自动动钱（这个客户绑了 2 个及以上账户时的规则）。确定清空吗？'
 }
 
+function HealthPageSwitch({
+  shown,
+  busy,
+  onChange,
+}: {
+  shown: boolean
+  busy: boolean
+  onChange: (shown: boolean) => void
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-gray-700">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={shown}
+        aria-label="在广告健康页显示"
+        disabled={busy}
+        onClick={() => onChange(!shown)}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition disabled:opacity-50 ${
+          shown ? 'bg-gray-800' : 'bg-gray-300'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${
+            shown ? 'translate-x-4' : 'translate-x-0.5'
+          }`}
+        />
+      </button>
+      在广告健康页显示
+    </label>
+  )
+}
+
 function AccountCapRowEditor({
   row,
   draft,
   busy,
+  visibilityBusy,
   onDraftChange,
   onSave,
+  onShownChange,
 }: {
   row: AccountCapRow
   draft: string
   busy: boolean
+  visibilityBusy: boolean
   onDraftChange: (v: string) => void
   onSave: () => void
+  onShownChange: (shown: boolean) => void
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -335,6 +374,7 @@ function AccountCapRowEditor({
           {row.daily_budget_cap_cents == null ? '未设' : `$${centsToDisplay(row.daily_budget_cap_cents)} / 天`}
         </span>
       </span>
+      <HealthPageSwitch shown={row.hidden_from_ad_health !== true} busy={visibilityBusy} onChange={onShownChange} />
     </div>
   )
 }
@@ -342,6 +382,10 @@ function AccountCapRowEditor({
 /** 留空（null）是合法的「清空」；NaN 或 <= 0 不是。 */
 function capDraftIsUsable(parsed: number | null): boolean {
   return !Number.isNaN(parsed) && (parsed === null || parsed > 0)
+}
+
+function flagVisibility(row: AccountCapRow): AccountCapRow {
+  return { ...row, hidden_from_ad_health: row.hidden_from_ad_health === true }
 }
 
 async function fetchAccountCaps(clientId: string): Promise<AccountCapsResponse> {
@@ -364,7 +408,7 @@ function useAccountCaps(clientId: string) {
     fetchAccountCaps(clientId)
       .then(j => {
         if (!alive) return
-        const list = j.accounts ?? []
+        const list = (j.accounts ?? []).map(flagVisibility)
         setRows(list)
         setTotalCap(j.client_total_cap_cents ?? null)
         setDrafts(Object.fromEntries(list.map(r => [r.ad_account_id, centsToDisplay(r.daily_budget_cap_cents)])))
@@ -404,12 +448,55 @@ function useAccountCaps(clientId: string) {
     }
   }
 
-  return { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save }
+  return { rows, setRows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save }
+}
+
+/** 开关先跟着点的方向走，接口回来后再改成它返回的结果；失败则弹回并显示原文。 */
+function useHealthVisibility(
+  clientId: string,
+  setRows: React.Dispatch<React.SetStateAction<AccountCapRow[] | null>>,
+) {
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const inflight = useRef<string | null>(null)
+
+  const setShown = async (adAccountId: string, shown: boolean, previousHidden: boolean) => {
+    if (inflight.current !== null) return
+    inflight.current = adAccountId
+    setError(null)
+    setBusyId(adAccountId)
+    setRows(prev => prev?.map(r => (
+      r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: !shown } : r
+    )) ?? prev)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-accounts/${adAccountId}/visibility`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden_from_ad_health: !shown }),
+      })
+      const json = (await res.json()) as { hidden_from_ad_health?: boolean; error?: string }
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      const hidden = json.hidden_from_ad_health === true
+      setRows(prev => prev?.map(r => (
+        r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: hidden } : r
+      )) ?? prev)
+    } catch (err) {
+      setRows(prev => prev?.map(r => (
+        r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: previousHidden } : r
+      )) ?? prev)
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      inflight.current = null
+      setBusyId(null)
+    }
+  }
+
+  return { visibilityBusyId: busyId, visibilityError: error, setShown }
 }
 
 function AccountCapList({ clientId }: { clientId: string }) {
-  const { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save } = useAccountCaps(clientId)
-
+  const { rows, setRows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save } = useAccountCaps(clientId)
+  const { visibilityBusyId, visibilityError, setShown } = useHealthVisibility(clientId, setRows)
   if (loadFailed) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -434,11 +521,15 @@ function AccountCapList({ clientId }: { clientId: string }) {
           row={row}
           draft={drafts[row.ad_account_id] ?? ''}
           busy={busyId !== null}
+          visibilityBusy={visibilityBusyId !== null}
           onDraftChange={v => setDrafts(prev => ({ ...prev, [row.ad_account_id]: v }))}
           onSave={() => void save(row.ad_account_id)}
+          onShownChange={shown => void setShown(row.ad_account_id, shown, row.hidden_from_ad_health === true)}
         />
       ))}
       {message && <p className="text-xs text-gray-500">{message}</p>}
+      {visibilityError && <p className="text-xs text-red-600">{visibilityError}</p>}
+      <p className="text-xs text-gray-400">关掉「在广告健康页显示」后，广告健康页不再列出这个账户，超支提醒也不会盯着它。</p>
       <p className="text-xs text-gray-400">
         客户总闸：
         <span className="tabular-nums text-gray-600">
