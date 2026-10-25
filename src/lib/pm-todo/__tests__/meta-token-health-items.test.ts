@@ -2,12 +2,65 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TokenOwnerRow } from '@/lib/meta/token-selection'
 import {
+  ME_META_BUSINESS_ID_ENV,
   META_TOKEN_FIX_URL,
   clearMetaTokenProbeCache,
   pushMetaTokenHealthItems,
   type FetchLike,
 } from '../meta-token-health-items'
 import type { ManualItem } from '../manual-item-types'
+
+const mockLoadStoredClientMetaToken = vi.fn(
+  async (_supabase: unknown, _clientId: unknown): Promise<string | null> => null,
+)
+vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/meta/token-selection')>()
+  return {
+    ...actual,
+    loadStoredClientMetaToken: (
+      supabase: Parameters<typeof actual.loadStoredClientMetaToken>[0],
+      clientId: Parameters<typeof actual.loadStoredClientMetaToken>[1],
+    ) => mockLoadStoredClientMetaToken(supabase, clientId),
+  }
+})
+
+const PERSONAL_TOKEN_PHRASES = [
+  'Generate Access Token',
+  'Extend Access Token',
+  'tools/explorer',
+  'tools/debug/accesstoken',
+  'accesstoken',
+  'Meta 口令',
+  '客户设置 → Meta 口令',
+] as const
+
+function expectSystemUserHow(how: string) {
+  expect(how).toContain('系统用户')
+  expect(how).toContain('不要')
+  expect(how).toContain('Ray')
+  expect(how).toContain('设置 → 用户 → 合作伙伴')
+  expect(how).toContain('Business settings → Users → Partners')
+  expect(how).toContain('分配给名叫 MagicEngine 的系统用户')
+  expect(how).toContain('只共享、不分配')
+  expect(how).toContain('这一步由 ME 管理员操作')
+  expect(how).toContain('内容、消息、社群互动、广告、成效分析')
+  expect(how).toContain('管理广告系列')
+  expect(how).toContain('查看成效')
+  expect(how).toContain('Instagram')
+  expect(how).toContain('跟①一样的权限')
+  expect(how).toContain('集成 → 线索访问权限')
+  expect(how).toContain('Integrations → Leads access')
+  expect(how).toContain('不管它是不是已经作废')
+  expect(how).toContain('才用 Magic Engine 的公共系统用户钥匙')
+  expect(how).toContain('死钥匙清掉，或换成还能用的系统用户钥匙')
+  expect(how.indexOf('第二天这条待办才会消失')).toBeGreaterThan(how.indexOf('死钥匙清掉'))
+  expect(how).not.toContain('新钥匙就位')
+  expect(how).not.toContain('上线之前')
+  expect(how).not.toMatch(/https?:\/\//)
+  for (const phrase of PERSONAL_TOKEN_PHRASES) {
+    expect(how).not.toContain(phrase)
+  }
+}
 
 const row = (over: Partial<TokenOwnerRow>): TokenOwnerRow => ({
   id: 'c1',
@@ -63,7 +116,11 @@ const tokenFrom = (call: [string, RequestInit?]) =>
   ((call[1]?.headers as Record<string, string> | undefined)?.Authorization ?? '').replace('Bearer ', '')
 
 describe('meta token health items', () => {
-  beforeEach(() => clearMetaTokenProbeCache())
+  beforeEach(() => {
+    clearMetaTokenProbeCache()
+    mockLoadStoredClientMetaToken.mockReset()
+    mockLoadStoredClientMetaToken.mockResolvedValue(null)
+  })
 
   it('pushes one item for a dead domain token', async () => {
     const env = { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-dead' }
@@ -75,7 +132,9 @@ describe('meta token health items', () => {
     expect(items[0].kind).toBe('meta_token_dead')
     expect(items[0].client_id).toBe('c1')
     expect(items[0].what).toContain('META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE')
-    expect(items[0].how).toContain('META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE')
+    expect(items[0].what).toContain('Render 里的')
+    expectSystemUserHow(items[0].how)
+    expect(META_TOKEN_FIX_URL).toBe('https://business.facebook.com/settings/system-users')
     expect(items[0].href).toBe(META_TOKEN_FIX_URL)
   })
 
@@ -332,13 +391,92 @@ describe('meta token health items', () => {
     expect(items).toEqual([])
   })
 
-  it('tells the PM to grant the ad permissions and to deploy on save', async () => {
+  it('tells the operator to use the system user and not a personal token', async () => {
     const env = { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-dead' }
     const fetchImpl = fakeFetch({ 'tok-dead': { status: 400, body: DEAD } })
     const items: ManualItem[] = []
     await pushMetaTokenHealthItems(db([row({})]), items, env, fetchImpl)
-    expect(items[0].how).toContain('ads_management')
+    expectSystemUserHow(items[0].how)
+    expect(items[0].how).not.toContain('ads_management')
+    expect(items[0].how).not.toContain('Save only')
+  })
+
+  it('uses the same system-user instructions for a dead database token', async () => {
+    mockLoadStoredClientMetaToken.mockResolvedValue('tok-db')
+    const dbItems: ManualItem[] = []
+    await pushMetaTokenHealthItems(
+      db([row({})]),
+      dbItems,
+      { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-env-should-skip' },
+      fakeFetch({ 'tok-db': { status: 400, body: DEAD } }),
+    )
+    expect(dbItems).toHaveLength(1)
+    expect(dbItems[0].what).toContain('ME 后台数据库')
+    expect(dbItems[0].what).not.toContain('META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE')
+    expectSystemUserHow(dbItems[0].how)
+
+    mockLoadStoredClientMetaToken.mockResolvedValue(null)
+    const envItems: ManualItem[] = []
+    await pushMetaTokenHealthItems(
+      db([row({})]),
+      envItems,
+      { META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-dead' },
+      fakeFetch({ 'tok-dead': { status: 400, body: DEAD } }),
+    )
+    expect(envItems[0].what).toContain('Render 里的')
+    expect(envItems[0].how).toBe(dbItems[0].how)
+    expectSystemUserHow(envItems[0].how)
+  })
+
+  it('adds the configured ME business id to the admin link only', async () => {
+    const items: ManualItem[] = []
+    await pushMetaTokenHealthItems(
+      db([row({})]),
+      items,
+      {
+        META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-dead',
+        [ME_META_BUSINESS_ID_ENV]: '  424242  ',
+      },
+      fakeFetch({ 'tok-dead': { status: 400, body: DEAD } }),
+    )
+    expect(items[0].href).toBe(`${META_TOKEN_FIX_URL}?business_id=424242`)
+    expect(items[0].href).not.toContain(items[0].client_id)
+    expect(items[0].how).toContain('企业编号 424242')
+    expectSystemUserHow(items[0].how)
+  })
+
+  it('drops a non-numeric business id instead of putting it on the link', async () => {
+    const items: ManualItem[] = []
+    await pushMetaTokenHealthItems(
+      db([row({})]),
+      items,
+      {
+        META_SYSTEM_USER_TOKEN_CLIENT_ONE_EXAMPLE: 'tok-dead',
+        [ME_META_BUSINESS_ID_ENV]: '424242?client_id=c1',
+      },
+      fakeFetch({ 'tok-dead': { status: 400, body: DEAD } }),
+    )
+    expect(items[0].href).toBe(META_TOKEN_FIX_URL)
+    expect(items[0].href).not.toContain('client_id')
+    expect(items[0].how).toContain('请向 Ray 要')
+    expect(items[0].how).not.toContain('424242')
+    expectSystemUserHow(items[0].how)
+  })
+
+  it('leaves the shared-token link unchanged when an ME business id is configured', async () => {
+    const items: ManualItem[] = []
+    await pushMetaTokenHealthItems(
+      db([row({})]),
+      items,
+      { META_SYSTEM_USER_TOKEN: 'tok-shared', [ME_META_BUSINESS_ID_ENV]: '424242' },
+      fakeFetch({ 'tok-shared': { status: 400, body: DEAD } }),
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].client_id).toBe('infra')
+    expect(items[0].href).toBe('https://business.facebook.com/settings/system-users')
+    expect(items[0].href).not.toContain('business_id')
     expect(items[0].how).toContain('Save only')
+    expect(items[0].how).toContain('系统用户')
   })
 
   it('tells the PM to deploy on save for the shared token too', async () => {

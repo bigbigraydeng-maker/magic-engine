@@ -30,13 +30,46 @@ export type MetaTokenProbe =
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
-export const META_TOKEN_FIX_URL = 'https://developers.facebook.com/tools/explorer/'
+export const META_TOKEN_FIX_URL = 'https://business.facebook.com/settings/system-users'
 
-const HOW = (envVar: string) =>
-  '这类专属钥匙通常是某个人的 Facebook 授权，那个账号一改密码或被登出就会再失效；根治是把这个客户的广告账户接进 Magic Engine 企业、改用系统用户口令。先临时修：' +
-  '打开链接（Meta 的令牌工具）→ 右上角选 Magic Engine 应用 → 在 Permissions 里勾上 ads_management、ads_read、business_management、pages_read_engagement、leads_retrieval（不勾的话新钥匙能通过这项检查、但读不了广告）→ ' +
-  '用能管这个客户广告账户的 Facebook 账号点 Generate Access Token，同意授权 → 复制令牌，打开 https://developers.facebook.com/tools/debug/accesstoken/ 粘进去点 Debug，再点页面最下面的 Extend Access Token 换成长期版（不换一小时就过期）→ ' +
-  `打开 Render 后台 crazycontent 服务 → Environment → 把 ${envVar} 的值换成长期版 → 保存时选带 deploy 的那个选项（别选 Save only，否则不生效）。换完第二天这条待办会自己消失。`
+/** Magic Engine's own Meta business id. Optional. Never a client id. */
+export const ME_META_BUSINESS_ID_ENV = 'ME_META_BUSINESS_ID'
+
+/** Digits only, so a bad value cannot change the query string. */
+function readMeMetaBusinessId(env: Record<string, string | undefined>): string | null {
+  const raw = env[ME_META_BUSINESS_ID_ENV]
+  if (typeof raw !== 'string') return null
+  const trimmed = raw.trim()
+  return /^\d{1,32}$/.test(trimmed) ? trimmed : null
+}
+
+/** System-users page for an ME admin. Falls back without a business id. */
+function metaTokenFixHref(env: Record<string, string | undefined>): string {
+  const businessId = readMeMetaBusinessId(env)
+  return businessId ? `${META_TOKEN_FIX_URL}?business_id=${businessId}` : META_TOKEN_FIX_URL
+}
+
+/**
+ * What to do when this client's own Meta key is dead.
+ * resolveMetaTokenDetailed uses a stored client key first, then that client's
+ * own domain key, then that client's own Page key, and only then the shared
+ * system-user key. A stored dead key is still chosen, so assigning assets does
+ * not clear this todo. Copy only — that order is not changed here.
+ */
+function clientTokenDeadHow(businessId: string | null): string {
+  const idLine = businessId
+    ? `填上 Magic Engine 的企业编号 ${businessId}`
+    : '填上 Magic Engine 的企业编号（这个编号还没配进系统，请向 Ray 要，不要自己猜）'
+  return (
+    '这个客户的 Meta 专属钥匙已经作废。请不要用个人 Facebook 账号重新生成钥匙。个人钥匙会过期，那个人一改密码或离职，钥匙会再次作废。' +
+    '正确做法是让客户把广告账户和主页共享给 Magic Engine 企业，之后统一用 Magic Engine 的系统用户钥匙。这套做法还在做（跟进 #3092）。请按下面办：' +
+    `① 如果这个客户的广告账户或主页还没共享过来，请客户打开自己的商务管理平台，进入「设置 → 用户 → 合作伙伴」（英文界面是 Business settings → Users → Partners），添加合作伙伴，${idLine}。主页要勾「内容、消息、社群互动、广告、成效分析」；广告账户要勾「管理广告系列」和「查看成效」；这个客户有 Instagram 账号的，也一起共享。只勾「内容」和「广告」不够，私信和评论回复会用不了。` +
+    '② 客户共享之后，还要由 Ray（或 ME 管理员）在 Magic Engine 的商务管理平台里，把这些广告账户、主页和 Instagram 账号分配给名叫 MagicEngine 的系统用户，并勾上跟①一样的权限。只共享、不分配的话，系统用户钥匙仍然读不到这个客户。分到系统用户名下之后，原来那把系统用户钥匙就能直接读这些资产，不用再新生成一把钥匙。这一步由 ME 管理员操作。请用这条待办上的链接打开系统用户页面，不要把这个链接发给客户。' +
+    '要同步留资的话，请再看客户自己的商务管理平台：如果「集成 → 线索访问权限」（英文界面是 Integrations → Leads access）里限制过谁能拿线索，需要把 Magic Engine 加进去。否则共享和分配都做了，留资还是拿不到。' +
+    '③ 不要自己换钥匙，也不要把个人钥匙粘进后台。' +
+    '④ 这条待办是因为这个客户的专属钥匙作废了才出现。系统读这个客户的 Meta 时，后台数据库里只要还存着这个客户的专属钥匙，就先用它，不管它是不是已经作废；数据库里没有，才用这个客户按域名或主页单独配的钥匙（有域名那把就先用域名那把）；这两处都没有，才用 Magic Engine 的公共系统用户钥匙。死钥匙还在，就会一直排在公共钥匙前面被用到，待办也不会自己消失。分配完成后，由 Ray 决定把这条待办里点名的死钥匙清掉，或换成还能用的系统用户钥匙。清掉或换成活钥匙之后，第二天这条待办才会消失。按客户名字另存的旧钥匙不在上面这套主顺序里；如果这条待办点名的是那把旧钥匙，它同样不会自己变好，也要 Ray 清掉或换掉。如果急着恢复，请直接找 Ray。'
+  )
+}
 
 /** 问 Meta 一句「这个令牌还认吗」。只有明确的 code 190 才算死。故意不查权限：钥匙还活着但被收了广告权限时 /me 仍回 200，这里判 alive —— 那类问题由各功能自己的报错负责，这里只抓「整把钥匙作废」。 */
 export async function probeMetaToken(token: string, fetchImpl: FetchLike = fetch): Promise<MetaTokenProbe> {
@@ -166,21 +199,18 @@ export async function pushMetaTokenHealthItems(
     throw new Error('一把 Meta 钥匙都问不到（限流 / 超时 / 连不上 Meta），今天没法判断钥匙死没死')
   }
 
-  pushDeadItems(items, targets, probes)
+  pushDeadItems(items, targets, probes, metaTokenFixHref(env), readMeMetaBusinessId(env))
   if (shared && probes.get(shared)?.status === 'dead') items.push(sharedTokenDeadItem())
 }
-
-const HOW_DB =
-  '这把钥匙存在 ME 后台数据库里。根治是把这个客户的广告账户接进 Magic Engine 企业、改用系统用户口令。先临时修：' +
-  '打开链接（Meta 的令牌工具）→ 右上角选 Magic Engine 应用 → 在 Permissions 里勾上 ads_management、ads_read、business_management、pages_read_engagement、leads_retrieval（不勾的话新钥匙能通过这项检查、但读不了广告）→ ' +
-  '用能管这个客户广告账户的 Facebook 账号点 Generate Access Token，同意授权 → 复制令牌，打开 https://developers.facebook.com/tools/debug/accesstoken/ 粘进去点 Debug，再点页面最下面的 Extend Access Token 换成长期版（不换一小时就过期）→ ' +
-  '打开 ME 后台 → 客户设置 → Meta 口令 → 粘贴长期版保存。换完第二天这条待办会自己消失。'
 
 function pushDeadItems(
   items: ManualItem[],
   targets: { row: TokenOwnerRow; envVar: string; token: string; fromDb?: boolean }[],
   probes: Map<string, MetaTokenProbe>,
+  href: string,
+  businessId: string | null,
 ): void {
+  const how = clientTokenDeadHow(businessId)
   for (const target of targets) {
     if (probes.get(target.token)?.status !== 'dead') continue
     const name = target.row.name ?? '未知客户'
@@ -195,8 +225,8 @@ function pushDeadItems(
         `${name} 的 Meta 专属钥匙（${sourceLabel}）被 Meta 作废了 —— ` +
         `这个客户读广告数据、同步留资这些功能现在都在失败，而且不会自己报错。` +
         `（Meta 回复错误码 190：这把钥匙已作废）`,
-      how: target.fromDb ? HOW_DB : HOW(target.envVar),
-      href: META_TOKEN_FIX_URL,
+      how,
+      href,
     })
   }
 }
