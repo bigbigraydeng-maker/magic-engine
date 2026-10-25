@@ -1,12 +1,14 @@
 ---
 id: 2026-10-26-meta-token-health-system-user-copy
 title: 今日待办不再教人用个人账号重做 Meta 钥匙
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-26
 source: pr:3145
 verify_by: 2026-11-02
 verify_how: 本跟进 PR 合进主干后，下一次今日待办若出现客户钥匙作废，说明里要有合作伙伴共享和分配给系统用户，且没有个人账号生成钥匙的步骤
+done_on: 2026-10-26
+done_ref: pr:3152
 ---
 Ray 2026-10-26 决定保留 #3145，并先把健康检查待办改成 #3092 的系统用户方向。
 客户在自己的商务管理平台把广告账户和主页共享给 Magic Engine；共享之后还要由管理员把资产分配给系统用户。
