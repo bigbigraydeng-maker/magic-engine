@@ -204,7 +204,7 @@ async function readGoalBudgetCurrency(clientId: string, goalId: string): Promise
 
 /**
  * 该客户、该目标下版本最新的一份处方。不按状态过滤（草稿、已批准、已拒绝都算）。
- * 读库失败抛错，让作战地图整页说「读不到」；推广计划页自己接住，避免一页纸一起挂。
+ * 读库失败抛错。推广计划页和作战地图都在调用处接住，只把这一项留空。
  * 没有这一行返回 null，不当成一份空处方。
  */
 export async function loadLatestGoalPrescription(clientId: string, goalId: string): Promise<GoalPrescriptionView | null> {

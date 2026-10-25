@@ -48,7 +48,7 @@ describe('处方卡', () => {
     expect(screen.getByText('线索：0 → 10 条')).toBeTruthy()
     expect(screen.getByText('成本：— → 12 NZD（本周期）')).toBeTruthy()
     expect(screen.getByText('币种：NZD')).toBeTruthy()
-    expect(screen.getByRole('link', { name: '看完整处方' }).getAttribute('href'))
+    expect(screen.getByRole('link', { name: '去处方页查看' }).getAttribute('href'))
       .toBe('/dashboard/clients/client-1/prescription/new?goal_id=goal-1')
     expect(container.querySelectorAll('button')).toHaveLength(0)
     expect(container.textContent).not.toMatch(/批准/)

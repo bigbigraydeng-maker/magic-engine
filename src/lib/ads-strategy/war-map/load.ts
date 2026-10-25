@@ -345,7 +345,8 @@ async function loadPlan(clientId: string): Promise<PlanInput | null> {
     if (!spec) continue
     const [goalTitle, prescription] = await Promise.all([
       loadGoalTitle(clientId, spec.goal_id),
-      loadLatestGoalPrescription(clientId, spec.goal_id),
+      // 处方读失败只空掉这一行，不让整张作战地图一起失败
+      loadLatestGoalPrescription(clientId, spec.goal_id).catch(() => null),
     ])
     return {
       status: row.status === 'approved' ? 'approved' : 'draft',
