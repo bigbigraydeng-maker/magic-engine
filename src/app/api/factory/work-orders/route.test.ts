@@ -15,7 +15,9 @@ const CLIENT_B = 'bbbbbbbb-0000-0000-0000-000000000002'
 const workOrderRow = {
   id: 'wo1',
   client_id: 'c1',
-  status: 'published',
+  status: 'in_review',
+  template_id: 'postcard',
+  music_file: 'jade_river_journey.mp3',
   heartbeat_at: null,
   published_ref: {
     platform: 'facebook',
@@ -39,7 +41,6 @@ const rowForClient = (id: string, clientId: string) => ({
 let workOrdersResult: { data: unknown[]; error: { message: string } | null }
 
 const eqCalls: [string, unknown][] = []
-const filters: [string, unknown][] = []
 const tables: string[] = []
 
 vi.mock('@/lib/supabase', () => {
@@ -55,20 +56,26 @@ vi.mock('@/lib/supabase', () => {
             ],
             error: null,
           }
+    const queryFilters: Array<[string, unknown, 'eq' | 'in']> = []
     const chain: Record<string, unknown> = {}
     chain.select = () => chain
     chain.order = () => chain
     chain.limit = () => chain
-    chain.in = () => chain
+    chain.in = (col: string, values: unknown[]) => {
+      queryFilters.push([col, values, 'in'])
+      return chain
+    }
     chain.eq = (col: string, val: unknown) => {
       eqCalls.push([col, val])
-      filters.push([col, val])
+      queryFilters.push([col, val, 'eq'])
       return chain
     }
     chain.then = (resolve: (value: unknown) => unknown) => {
       if (table !== 'content_work_orders') return resolve(result)
       const rows = (result.data as Record<string, unknown>[]).filter((row) =>
-        filters.every(([col, val]) => row[col] === val),
+        queryFilters.every(([col, val, method]) =>
+          method === 'eq' ? row[col] === val : Array.isArray(val) && val.includes(row[col]),
+        ),
       )
       return resolve({ data: rows, error: result.error })
     }
@@ -94,7 +101,6 @@ beforeEach(() => {
   h.email = 'fde@magiclab.test'
 
   eqCalls.length = 0
-  filters.length = 0
   tables.length = 0
 
   workOrdersResult = { data: [workOrderRow], error: null }
@@ -119,6 +125,7 @@ describe('GET /api/factory/work-orders', () => {
       provisional: false,
     })
     expect(json.orders[0]).not.toHaveProperty('published_ref')
+    expect(json.orders[0]).toMatchObject({ template_id: 'postcard', music_file: 'jade_river_journey.mp3' })
 
     const serialized = JSON.stringify(json)
     expect(serialized).not.toContain('PAGE123')
@@ -147,7 +154,25 @@ describe('GET /api/factory/work-orders', () => {
     expect(res.status).toBe(200)
     expect(json.orders).toHaveLength(2)
     expect(json.orders.map((o: { client_id: string }) => o.client_id)).toEqual([CLIENT_A, CLIENT_B])
-    expect(eqCalls).toEqual([])
+    expect(eqCalls).toEqual([['status', 'in_review']])
+    expect(json.worker.active_count).toBe(0)
+  })
+
+  it('keeps active worker health visible while the inbox only returns in-review orders', async () => {
+    workOrdersResult = {
+      data: [
+        rowForClient('wo-review', CLIENT_A),
+        { ...rowForClient('wo-producing', CLIENT_A), status: 'producing', heartbeat_at: '2026-10-23T00:00:00Z' },
+        { ...rowForClient('wo-published', CLIENT_B), status: 'published' },
+      ],
+      error: null,
+    }
+
+    const res = await GET()
+    const json = await res.json()
+
+    expect(json.orders.map((order: { id: string }) => order.id)).toEqual(['wo-review'])
+    expect(json.worker).toEqual({ last_heartbeat_at: '2026-10-23T00:00:00Z', active_count: 1 })
   })
 
   it('client-scoped admin → only own client rows, filtered in the query', async () => {
@@ -164,11 +189,25 @@ describe('GET /api/factory/work-orders', () => {
     expect(json.orders).toHaveLength(1)
     expect(json.orders[0].client_id).toBe(CLIENT_A)
     expect(json.orders[0].client_name).toBe('Client A')
-    expect(eqCalls).toEqual([['client_id', CLIENT_A]])
+    expect(eqCalls).toEqual([['status', 'in_review'], ['client_id', CLIENT_A], ['client_id', CLIENT_A]])
 
     const serialized = JSON.stringify(json)
     expect(serialized).not.toContain(CLIENT_B)
     expect(serialized).not.toContain('Client B')
+  })
+
+  it('keeps dead-letter recovery separate from the review inbox and limits it to internal staff', async () => {
+    workOrdersResult = { data: [{ ...rowForClient('wo-stuck', CLIENT_A), status: 'dead_letter' }], error: null }
+    const res = await GET(new Request('http://localhost/api/factory/work-orders?view=recovery'))
+    const json = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(json.orders).toHaveLength(1)
+    expect(eqCalls).toContainEqual(['status', 'dead_letter'])
+
+    h.email = 'demo@x.test'
+    const scopedRes = await GET(new Request('http://localhost/api/factory/work-orders?view=recovery'))
+    expect(scopedRes.status).toBe(403)
   })
 
   it('client-scoped admin with capitalised/spaced email → same scoping', async () => {
@@ -184,7 +223,7 @@ describe('GET /api/factory/work-orders', () => {
     expect(res.status).toBe(200)
     expect(json.orders).toHaveLength(1)
     expect(json.orders[0].client_id).toBe(CLIENT_A)
-    expect(eqCalls).toEqual([['client_id', CLIENT_A]])
+    expect(eqCalls).toEqual([['status', 'in_review'], ['client_id', CLIENT_A], ['client_id', CLIENT_A]])
 
     const serialized = JSON.stringify(json)
     expect(serialized).not.toContain(CLIENT_B)

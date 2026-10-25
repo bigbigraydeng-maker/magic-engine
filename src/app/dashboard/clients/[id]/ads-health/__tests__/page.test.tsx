@@ -223,6 +223,53 @@ describe('every card that is burning money offers a way to stop it', () => {
     expect(screen.queryByText(/广告还在跑/)).toBeNull()
   })
 
+  it('a 403 on the stop-loss write says an internal account is needed, and nothing changed', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/stop-loss': { __status: 403, current_daily: 60, planned_daily: 48, cuttable: true, pausable: true },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('预算降 20%'))
+    await waitFor(() => expect(screen.getByText(/需要内部账号操作/)).toBeTruthy())
+    expect(screen.queryByText(/已降到每天/)).toBeNull()
+  })
+
+  it('pause on a campaign that is no longer ACTIVE says so and never writes', async () => {
+    const fetchMock = mockFetch({
+      '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: false },
+      '/ad-health': respond([OZTOP_ALERT]),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('先全停')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('先全停'))
+    await waitFor(() => expect(screen.getByText(/已经不在投放中/)).toBeTruthy())
+    const wrote = fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+    expect(wrote).toBe(false)
+  })
+
+  it('a 409 no_active_goal on pause says a goal is needed and nothing changed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const isWrite = init?.method === 'POST' && url.includes('/ad-health/stop-loss')
+      const body = isWrite
+        ? { error: 'no_active_goal' }
+        : url.includes('/ad-health/stop-loss')
+          ? { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true }
+          : respond([OZTOP_ALERT])
+      return { ok: !isWrite, status: isWrite ? 409 : 200, json: async () => body } as unknown as Response
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('先全停')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('先全停'))
+    await waitFor(() => expect(screen.getByText(/还没有生效的增长目标/)).toBeTruthy())
+    expect(screen.getByText(/广告没有变更/)).toBeTruthy()
+    expect(screen.queryByText(/已停投/)).toBeNull()
+  })
+
   it('an un-cuttable budget still leaves a next step — never "go do it yourself"', async () => {
     vi.stubGlobal('fetch', mockFetch({
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: null, cuttable: false, pausable: true },
@@ -258,6 +305,21 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     expect(msg).not.toContain('明天')          // never defer with no owner
     expect(msg).not.toContain('团队')          // no invented third party
     expect(msg).not.toContain('爆款素材池')     // no internal jargon
+  })
+
+  it.each([
+    [403, /需要内部账号操作/],
+    [429, /10 分钟内已补过,请稍后/],
+  ])('a %i on the top-up button gets its own message', async (status, pattern) => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/execute-prescription': { __status: status, error: 'x' },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('执行'))
+    await waitFor(() => expect(screen.getByText(pattern)).toBeTruthy())
   })
 
   it('an empty recycle result reads the same way — not "明天再扫"', async () => {

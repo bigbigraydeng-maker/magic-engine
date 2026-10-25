@@ -62,6 +62,52 @@ describe('分析：原话核验', () => {
     const v = verifyFacts({ ...raw, facts: [{ key: 'concern', value: 'x', quote: 'a', confidence: 1 }] }, transcript)
     expect(v.facts).toHaveLength(0)
   })
+
+  it('保留客户邮箱，并在现有摘要中逐月呈现已核实的团期问答', () => {
+    const callText = 'Customer: My email is sarju.dayal@example.com. How many tours are there in March? How many tours are there in May? Employee: We have two tours in March and three tours in May.'
+    const v = verifyFacts({
+      summary: '客户咨询中国旅行安排。', language: 'en',
+      facts: [{ key: 'contact_email', value: 'sarju.dayal@example.com', quote: 'My email is sarju.dayal@example.com', speaker: 'customer', confidence: 0.95 }],
+      inquiries: [
+        { topic: 'tour_departures', month: 3, question: '三月有几团', questionQuote: 'How many tours are there in March?', questionSpeaker: 'customer', answer: '三月有两团', answerQuote: 'We have two tours in March', answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 2, confidence: 0.9 },
+        { topic: 'tour_departures', month: 5, question: '五月有几团', questionQuote: 'How many tours are there in May?', questionSpeaker: 'customer', answer: '五月有三团', answerQuote: 'three tours in May', answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 3, confidence: 0.9 },
+      ],
+    }, callText)
+
+    expect(v.facts).toHaveLength(1)
+    expect(v.facts[0]).toMatchObject({ key: 'contact_email', value: 'sarju.dayal@example.com' })
+    expect(v.inquiries.map((inquiry) => [inquiry.month, inquiry.departureCount])).toEqual([[3, 2], [5, 3]])
+    expect(v.summary).toContain('客户提供邮箱：sarju.dayal@example.com')
+    expect(v.summary).toContain('3月团期')
+    expect(v.summary).toContain('明确2团')
+    expect(v.summary).toContain('5月团期')
+    expect(v.summary).toContain('明确3团')
+  })
+
+  it('不把“确认需要两周”误记成两团', () => {
+    const callText = 'How many tours do you have in March? We have two weeks to confirm the tours.'
+    const v = verifyFacts({
+      summary: '客户询问三月团期。', language: 'en', facts: [],
+      inquiries: [{ topic: 'tour_departures', month: 3, question: '三月有几团', questionQuote: 'How many tours do you have in March?', questionSpeaker: 'customer', answer: '员工需要两周确认', answerQuote: 'We have two weeks to confirm the tours', answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 2, confidence: 0.8 }],
+    }, callText)
+
+    expect(v.inquiries[0]).toMatchObject({ answerStatus: 'answered', departureCount: null })
+    expect(v.summary).toContain('团数未核实')
+  })
+
+  it('跨月份的合并答复不能给每个月分别认定团数', () => {
+    const combinedAnswer = 'We have two tours in March and three tours in May'
+    const callText = `How many tours are there in March? How many tours are there in May? ${combinedAnswer}.`
+    const v = verifyFacts({
+      summary: '客户询问团期。', language: 'en', facts: [],
+      inquiries: [
+        { topic: 'tour_departures', month: 3, question: '三月有几团', questionQuote: 'How many tours are there in March?', questionSpeaker: 'customer', answer: '逐月说明团数', answerQuote: combinedAnswer, answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 2, confidence: 0.9 },
+        { topic: 'tour_departures', month: 5, question: '五月有几团', questionQuote: 'How many tours are there in May?', questionSpeaker: 'customer', answer: '逐月说明团数', answerQuote: combinedAnswer, answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 3, confidence: 0.9 },
+      ],
+    }, callText)
+
+    expect(v.inquiries.map((inquiry) => [inquiry.answerStatus, inquiry.departureCount])).toEqual([['unclear', null], ['unclear', null]])
+  })
 })
 
 function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<AnalysisConnection>; transcribedToday?: number; markFails?: boolean } = {}) {

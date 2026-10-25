@@ -354,6 +354,104 @@ function pathsForEntry(entry) {
 }
 
 /**
+ * Paths that must never arm auto-merge, whatever the risk rating.
+ *
+ * Ray merges these by hand: database schema / migrations, Meta tokens or
+ * credentials, and code that creates or changes a Meta campaign, budget, or
+ * bid. A path that only mentions a budget in a read-only or non-Meta file is
+ * not on this list. Unreadable input fails closed.
+ */
+export const RAY_MERGE_HOLD_RULES = [
+  { prefix: 'supabase/migrations/', why: '数据库 migration' },
+  { suffix: '.sql', why: 'SQL，路径分不清是不是库表语句' },
+  { includes: '/migrations/', why: 'migration 目录' },
+  { basenameIncludes: 'migration', why: '文件名像 migration' },
+  { pattern: /(^|\/)meta\/.*token/i, why: 'Meta token' },
+  { pattern: /(^|\/)meta\/.*cred/i, why: 'Meta 凭证' },
+  { pattern: /(^|\/)meta\/.*secret/i, why: 'Meta 密钥' },
+  { includes: 'system-user', why: 'system user token' },
+  { includes: 'system_user', why: 'system user token' },
+  { pattern: /(^|\/)\.env/i, why: '密钥文件' },
+  { includes: 'src/lib/meta/campaign-writes', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/campaign-management', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/ad-publisher', why: '创建或改 Meta 广告' },
+  { includes: 'src/lib/meta/ads-manager', why: '创建或暂停 Meta 广告' },
+  { includes: 'src/lib/meta/adsets', why: '改 Meta 广告组预算' },
+  { includes: '/meta-ads/', why: 'Meta 广告写入入口' },
+  { includes: '/capabilities/ads/', why: '改广告系列或预算' },
+  { includes: 'ads-campaign-budget', why: '改广告系列预算' },
+  { includes: 'budget-scale', why: '加减广告预算' },
+  { pattern: /(^|\/)meta\/.*bid/i, why: '改 Meta 出价' },
+  { includes: 'ad-health/', why: '广告健康度里的预算或止损入口' },
+  { includes: 'action-submission/', why: '把广告动作交给执行' },
+  { includes: 'ads-strategy/', why: '广告策略草稿或止损' },
+  { includes: 'marketing-plan/promo/', why: '推广方案里的广告草稿' },
+  { includes: 'meta-oauth/', why: 'Meta 登录和凭证' },
+  { includes: 'meta/entity-settings', why: 'Meta 广告实体设置' },
+]
+
+/** Import specifiers that write a Meta campaign, budget, or bid. */
+const SPEND_IMPORT = /(?:^|\/)(?:campaign-writes|campaign-management|ad-publisher|adsets)(?:\.js)?$/
+
+/**
+ * True when the file imports a module that creates or changes Meta spend.
+ *
+ * @param {unknown} source
+ * @returns {boolean}
+ */
+export function importsMetaSpendWriter(source) {
+  if (typeof source !== 'string' || source === '') return false
+  for (const match of source.matchAll(/(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g)) {
+    if (SPEND_IMPORT.test(match[1])) return true
+  }
+  return false
+}
+
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isSourcePath(path) {
+  return /\.(?:ts|tsx|js|mjs|cjs)$/i.test(path)
+}
+
+/**
+ * Whether this diff must stay for Ray to merge by hand.
+ *
+ * @param {unknown} files changed-file entries, the same shape `classifyRisk` reads
+ * @param {Record<string, string|null>|null} [contents] file text at the head. When passed, a source file that imports a Meta spend writer is held, and a source file that could not be read is held too.
+ * @returns {{hold: boolean, reason: string}}
+ */
+export function assessRayMergeHold(files, contents) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { hold: true, reason: '改动清单读不到，库表、凭证和广告花费分不清，留给 Ray 亲手合' }
+  }
+  const knownContents = contents && typeof contents === 'object' ? contents : null
+  /** @type {string[]} */
+  const hits = []
+  for (const entry of files) {
+    if (!entry || typeof entry !== 'object') {
+      return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    }
+    const { paths, unreadable } = pathsForEntry(/** @type {Record<string, unknown>} */ (entry))
+    if (unreadable) return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    for (const path of paths) {
+      const rule = RAY_MERGE_HOLD_RULES.find((candidate) => ruleMatches(candidate, path, true))
+      if (rule) {
+        hits.push(`${path}（${rule.why}）`)
+        continue
+      }
+      if (!knownContents || !isSourcePath(path)) continue
+      const text = knownContents[path]
+      if (typeof text !== 'string') hits.push(`${path}（读不到文件，分不清是否在改广告花费）`)
+      else if (importsMetaSpendWriter(text)) hits.push(`${path}（导入了 Meta 广告写入模块）`)
+    }
+  }
+  if (hits.length === 0) return { hold: false, reason: '' }
+  return { hold: true, reason: hits.slice(0, 8).join('；') }
+}
+
+/**
  * Labels that introduce a declared level.
  *
  * `STRONG` is this repo's own convention: a line that opens with one of them

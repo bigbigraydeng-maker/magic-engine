@@ -51,7 +51,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     parsed.action === 'approve'
       ? await applyApprove(supabaseAdmin, id, reviewer, scopedClientId, parsed.checklistHuman, marker)
       : parsed.action === 'reject_quality'
-        ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer, scopedClientId, parsed.checklistHuman)
+        ? await applyQualityReject(supabaseAdmin, id, parsed.feedback, reviewer, scopedClientId, parsed.checklistHuman, parsed.musicId)
         : await applyBudgetUpdate(supabaseAdmin, id, parsed.newBudget, reviewer, scopedClientId)
 
   if (!result.ok && result.status === 403 && scopedClientId) {

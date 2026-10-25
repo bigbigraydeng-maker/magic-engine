@@ -84,7 +84,8 @@ PM 原话（2026-10-22）：一个客户发了两条信息，AI 回复了两个�
 - 每条进线最多 1 次模型调用，**不做“换说法”重试**（去掉 §3.1 里让模型重写的说法）；校验不过直接回退。
 - 给 `callClaudeChat` 加可选 `timeoutMs` + AbortSignal 真取消（改共享文件，PR 中说明）；超时 8s。
 - 读不到入站正文（入库竞态）→ 回退模板，不抛。读最近 ≤3 条入站，不是只读触发那条。
-- 每客户每日模型调用上限（常量），超限直接回退；回退率自动熔断：当日回退占比 >60% 且样本 ≥20 → 当日停用智能版。
+- 每客户每日**智能回复发出条数**上限（`smart_ack.daily_cap`，默认 300），超限直接回退。**它是软上限，不是硬闸**，而且数的是「发出的条数」不是「调用的次数」，原因见 §12。
+- ~~回退率自动熔断：当日回退占比 >60% 且样本 ≥20 → 当日停用智能版。~~ **这条当初写了没做，见 §12 —— 开开关之前必须先补上。**
 
 ### 9.6 识别与指标（修高 1）
 出站记录新增来源标记（`ack_kind: 'fixed'|'smart'`，写入既有出站日志 meta，不改表结构则放 metadata），`reply-metrics` 与 `isAutoAckBody` 改读标记；正文比对仅保留给历史数据。验收：智能版发出后，首响应时间指标不把它算成人工回复。
@@ -96,7 +97,16 @@ PM 原话（2026-10-22）：一个客户发了两条信息，AI 回复了两个�
 回执 `detail` 只写原因码 + 长度 + 哈希，不写客人原话和生成文本。干跑脚本输出只写本地文件（不进 PR、不进共享日志），号码和邮箱打码，PM 看完删除。提示词会把客人原话发给 Claude 接口（与现有 Strategy Engine 调用同一出境范围）——在 PR 里写明。
 
 ### 9.9 干跑与上线门槛
-干跑集必须含一组**对抗样例**（投诉、注入、数字复述、承诺背书、拼写绕过、全角字符、中文、emoji、空正文、预填话重复），并固化为回归测试。回退率门槛：干跑 30 条真实首条消息里，进入模型且被采用的占比 <40% 则判功能价值不足，不上线。回执枚举：`source`、`reason ∈ {model_ok, triage_<类>, validate_<类>, timeout, error, daily_cap, circuit_open, empty_body}`。
+干跑集必须含一组**对抗样例**（投诉、注入、数字复述、承诺背书、拼写绕过、全角字符、中文、emoji、空正文、预填话重复），并固化为回归测试。回退率门槛：干跑 30 条真实首条消息里，进入模型且被采用的占比 <40% 则判功能价值不足，不上线。回执枚举**照代码实抄**（2026-10-25 从 `compose.ts` / `types.ts` / `conversation-inbound-autoack.ts` 里逐个 grep 出来，不是凭记忆写的）：
+
+`source ∈ {smart, fixed}`；`reason` 分三组——
+- **compose.ts 自己返回的**：`model_ok`（采用了模型的话）、`flag_off`（开关没开，发原来那句、不带尾句）、`context_read_failed`、`daily_cap`、`cap_read_failed`、`model_error`（模型抛错，**含超时**）、`parse_failed`、`same_as_last`、`skipped_repeat_message`（唯一不发的分支）；另有 `no_composer`，只在没有注入 composer 时出现（`conversation-inbound-autoack.ts:250`，生产一定注入，所以只会在测试里看到）；
+- **分流命中**：`triage_complaint` / `triage_optout` / `triage_promise` / `triage_no_text` / `triage_too_short` / `triage_link_only` / `triage_non_english`；
+- **校验不过**：`validate_empty` / `validate_length` / `validate_language` / `validate_link_contact` / `validate_number` / `validate_identity` / `validate_forbidden` / `validate_echo`。
+
+F1 自己的 `AutoAckOutcome` 是另一层，别跟上面混：`sent` / `send_failed` / `skipped_opted_out` / `skipped_channel_disabled` / `skipped_recently_replied` / `skipped_invalid_payload` / `skipped_repeat_message`；`detail` 写的是 `${source}:${reason}`。
+
+> 之前这里写过 `timeout`、`error`、`empty_body` 三个码——**代码从来不会返回它们**（超时归进 `model_error`），而实际会返回的 `flag_off`、`context_read_failed`、`cap_read_failed`、`parse_failed`、`same_as_last` 反而没列。按旧枚举去验收干跑会漏归类。这是本刀第六处「文档跑在实现前面」，改法是从代码里 grep 出真值再写。
 
 ### 9.10 新增待 PM 定（一次一个）
 7.3 自动回复里要不要注明“这是自动回复”？（我的默认：不注明，因为 F1 本来就是固定的“已收到”类话；但这涉及渠道政策，由你定。）
@@ -130,3 +140,52 @@ v0.1 的干跑只有 27% 真的用上模型（30 条里 8 条），低于 §9.9 
 - 名字与团名都对得上：`Thanks for getting in touch, Diane! … more details about the Golden China tour.`；
 - 3 条回退，逐条看都是**该回退**：①那条 4167 字咨询里写了 "cancellation terms"（谈退改条款，按投诉口径回固定句，安全）；②中文乱码 `莪的莫`；③模型想说 "flight options"，`flight` 在禁词里（CTS 确实含机票，但这是客户私有事实，平台默认不许自动回复碰机票，保持拦住）。
 - 门槛对账：§9.9 的 40% 已达到（95%）。
+
+## 11. v0.3 修补（2026-10-25，机器复审在 PR #3115 上提的 5 条，逐条本地复现后修）
+
+5 条**全部本地复现过**才动手，不是照着意见改。
+
+| # | 问题 | 本地复现 | 修法 |
+|---|---|---|---|
+| 1 | **§9.3 承诺接入 `evaluateClaims` 这道闸，但代码里一次都没调** | `Your tour is almost full.` 和 `This tour is absolutely safe.` 两条当时都 `ok:true` 放行；而同一份 `evaluateClaims` 对它们分别返回 `availability` / `promise` | 在校验器最后一步调 `evaluateClaims({ text, validPrices: [], validDates: [] })`（空集 = 我们没有任何已批准的价格和日期，所以任何价格/日期声明都算无据），try/catch 包住、抛错也算不过 |
+| 2 | 数字词表缺一整段 | `We can help with thirteen travellers.` / `sixty of our guests` 都放行 | 补 thirteen–nineteen、sixty–ninety |
+| 3 | 短禁词能用分隔符绕过 | `This service is f.r.e.e.` / `the co st of that trip` 都放行（`free`/`cost` 只有 4 个字母，被排除在去标点匹配之外） | 对 <5 字母的禁词单独建「字母间可插分隔符」的正则，并要求**整体至少插过一次分隔符**——这样 `f.r.e.e`、`co st`、`f e e` 抓得到，而 `coffee` 里的 `fee` 不算（长度等于原词 = 它本来就是别的词的一部分） |
+| 4 | 拉丁字母 ≠ 英文 | 西班牙语 `Hola, quiero informacion sobre viajes a China` 和法语退款请求 `Bonjour, je souhaite un remboursement` 都 `useModel:true`，而它们的投诉/退款词也不在中英词表里，等于两道闸一起绕过 | 加**正面英文判断**：折叠后的文本必须命中至少两个不同的英语虚词（the/and/you/we/for/with/is/are/to/of/my/would/like/please/about/can/will/trip/tour/travel/thanks/hello…），否则回退固定英文句 |
+| 5 | 「不发与上一条相同的话」这道闸从来没生效过 | 模型正文**不含**尾句，而库里存的出站正文**含**尾句，两边口径不同 → 永远判不相同 | 比较前两边都去掉固定尾句 |
+
+### 重跑（2026-10-25，CTS 近 120 天 60 条真实首条进线，只读、未外发）
+`smart:model_ok = 54/60（90%）`，仍高于 §9.9 的 40% 门槛。6 条回退逐条核对都该回退：
+①那条 4167 字咨询写了 "cancellation terms"；②中文乱码 `莪的莫`；③`Get Started`（只有一个英语虚词，按新规回退——安全方向）；④另一条非英文；⑤模型想说 "flight options"（`flight` 在禁词里）；⑥模型想说 "available options"（`available` 是空位类声明，正该拦）。
+
+**变异测试**：把这 5 处修复逐个改坏，全部被测试判红（关掉 `evaluateClaims` → 红 13 条；删 `thirteen` → 红 1 条；关掉分隔符长度判断 → 红 6 条；关掉「两个英语虚词」 → 红 4 条；改掉尾句常量 → 红 17 条）。
+另补一条回归：分隔符用的是 `/g` 正则，同一条回复连查两次结果必须相同（`lastIndex` 不许残留）——这是本仓踩过的同一个坑。
+
+
+## 12. 写了没做的（2026-10-25 A 级签字审查查出，必须在**打开开关之前**补上）
+
+**回退率自动熔断**。§9.5 原先写「当日回退占比 >60% 且样本 ≥20 → 当日停用智能版」，`grep` 整个 `src/lib/messenger/smart-ack/` 与 `conversation-inbound-autoack.ts`，**一处实现都没有**；现在只有每日调用上限。
+
+这是本仓反复踩的同一个坑（「spec 承诺的每道防线要逐个 grep 调用点」）——本 PR 里 `evaluateClaims` 已经栽过一次，这是第二处。两处的共同点：设计稿先写下防线，实现时漏掉，而测试只测写了的部分，所以没人发现。
+
+**现状已按「没做就不许写」改口**：§9.5 那条划掉并标注、§9.9 的 `circuit_open` 从回执枚举里去掉。开关默认关，所以这不挡本次合并。
+
+**补的时候怎么做**（留给下一刀，不要塞进本 PR）：回退与采用两种结果都会写进 `conversation_outbound_log`，且固定句版的正文以 `AUTOACK_TEMPLATE` 开头、智能版不是，两者都以固定尾句结尾——据此可以按客户按天算出回退占比，不需要新表。门槛与 `daily_cap` 放在同一处配置。
+
+### 每日上限是软的，不是硬的（2026-10-25 机器复审查出）
+
+`composeAck` 先读当天条数再决定要不要调模型，读和用之间没有原子占位。两件事因此不成立：
+1. **并发会超出**：同一客户的多个会话同时进线时，各自读到同一个计数，然后一起往下走——F1 的 debounce 只按 `conversation_id` 合并，拦不住跨会话并发。复审方说以 `dailyCap=1` 并行跑两次 `composeAck` 实测发生了两次模型调用。
+2. **数的是发出去的，不是调过的**：`countSmartAcksToday` 只统计 `conversation_outbound_log` 里 `status='sent'` 的行，模型调过但渠道发送失败的那次不消耗额度。
+
+**本轮不做硬上限**：要做得按「客户 + 日期」原子预占（新表或新列 + 原子自增），那是带数据库改动的另一刀。
+
+3. **渠道持续发送失败时，每天的模型调用次数没有任何硬约束**（2026-10-25 第二轮机器复审查出，已核实）：每日上限（`store.ts` 的 `countSmartAcksToday`）和 6 小时限频（`recent-outbound.ts`）**都只数 `status='sent'` 的行**。发不出去 → 两个计数都不涨 → 两道闸同时失效；此后客人每发一条新消息（间隔超过 30 秒 debounce）就会重新触发一次模型调用，累计次数只受客人发了多少条消息限制。
+   （同一次运行内的重试不会重复调模型——生成是独立的 `step.run`，重试读缓存。）
+
+   我上一版在这里写过「超出量被并发数限住（个位数量级）」，**那句是错的，已删**：它既没有代码依据，也没覆盖上面这种发送失败的情形。这是本刀第五处「先把话写进文档、没有核实」，一并记在这里。
+
+**眼下真正兜着的只有三条**：开关默认关（没开就一次都不会调）、同一会话 6 小时限频与 30 秒 debounce（**仅在发送成功时有效**）、每条约 \$0.001。
+**开开关之前**，上面 1、2、3 三条都要先有结论——尤其第 3 条，要么让计数改为统计「调用」而不是「发出」，要么接受并在监控里盯住。
+**改口已落地**：§9.5 和这里都写明它是软上限；任何地方不许再称它为「硬上限」。另按复审建议，§9.5 / §9.9 里的「每日**模型调用**上限」口径也应读作「每日**智能回复发出条数**上限」——它数的是发出的条数，不是调用次数。
+
+**另一条次要取舍（不改）**：分流只看客人最近 3 条消息，更早的投诉 / 取消 / 退款不会触发分流。有 6 小时限频和每日上限兜着，风险低，记在这里备查。

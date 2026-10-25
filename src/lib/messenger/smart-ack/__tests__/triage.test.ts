@@ -81,6 +81,16 @@ const nonEnglishCases: Case[] = [
   { name: 'cyrillic', input: ['привет'], reason: 'triage_non_english' },
   { name: 'arabic', input: ['مرحبا'], reason: 'triage_non_english' },
   { name: 'accented majority', input: ['élégant école déjà très été'], reason: 'triage_non_english' },
+  {
+    name: 'spanish (latin script, no english stopwords)',
+    input: ['Hola, quiero informacion sobre viajes a China'],
+    reason: 'triage_non_english',
+  },
+  {
+    name: 'french (latin script, no english stopwords)',
+    input: ['Bonjour, je souhaite un remboursement'],
+    reason: 'triage_non_english',
+  },
 ]
 
 const useModelCases: Case[] = [
@@ -257,8 +267,31 @@ describe('triageMessages — an email address is not a link (short message)', ()
   // 所以必须用「只有一句问候 + 自己的邮箱」这种短消息，才真的测到剥邮箱那一步。
   it.each([
     ['greeting plus own email', 'Hi there, my email is jane.doe@gmail.com'],
-    ['name and email only', 'Jane Doe jane.doe@xtra.co.nz'],
+    ['short English line plus own email', 'Hi, is this your email jane.doe@xtra.co.nz'],
   ])('%s is not link spam', (_name, msg) => {
     expect(triageMessages([msg])).toEqual({ useModel: true })
+  })
+})
+
+describe('triageMessages — positive English test (FIX 4)', () => {
+  it('Spanish Latin-script message is non-English', () => {
+    expect(triageMessages(['Hola, quiero informacion sobre viajes a China'])).toEqual({
+      useModel: false,
+      reason: 'triage_non_english',
+    })
+  })
+  it('French Latin-script message is non-English', () => {
+    expect(triageMessages(['Bonjour, je souhaite un remboursement'])).toEqual({
+      useModel: false,
+      reason: 'triage_non_english',
+    })
+  })
+  it('real English enquiry still passes', () => {
+    expect(triageMessages(['I would love to learn about your private tours for my family'])).toEqual({
+      useModel: true,
+    })
+  })
+  it('Meta pre-filled opener still passes', () => {
+    expect(triageMessages(['Hello! Can I get more info on this?'])).toEqual({ useModel: true })
   })
 })

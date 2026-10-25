@@ -22,7 +22,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   const { data: wo, error: loadErr } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, status, reclaim_count, reject_reason')
+    .select('id, status, reclaim_count, reject_reason, brief')
     .eq('id', id)
     .maybeSingle()
   if (loadErr) return NextResponse.json({ error: loadErr.message }, { status: 500 })
@@ -30,6 +30,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (wo.status !== 'dead_letter') {
     return NextResponse.json(
       { error: `only dead_letter orders can be revived (status=${wo.status})` },
+      { status: 409 },
+    )
+  }
+  if ((wo.brief as Record<string, unknown> | null)?.recipe_replan_required === true) {
+    return NextResponse.json(
+      { error: 'this order needs a new production plan; ordinary retry is blocked' },
       { status: 409 },
     )
   }

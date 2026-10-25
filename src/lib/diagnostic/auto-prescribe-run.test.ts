@@ -24,6 +24,7 @@ vi.mock('@/lib/strategy/goals', () => ({
 }))
 
 import { runAutoPrescribe, AUTO_LANDED_AGENT } from './auto-prescribe'
+import { MANUAL_PRESCRIPTION_AGENT } from './manual-prescription'
 
 const NOW = new Date('2026-08-04T00:00:00Z')
 const iso = (daysAgo: number) => new Date(NOW.getTime() - daysAgo * 86_400_000).toISOString()
@@ -257,6 +258,50 @@ describe('runAutoPrescribe —— 目标', () => {
     })
     const s = await runAutoPrescribe(supabase, NOW)
     expect(s.outcomes[0].detail).toContain('先给他定个目标')
+  })
+
+  function draft(over: Record<string, unknown> = {}) {
+    return {
+      client_id: 'c1', created_at: iso(7), status: 'draft', goal_id: 'g1', intake: null,
+      agent_name: MANUAL_PRESCRIPTION_AGENT, generation_meta: { source: 'manual' }, ...over,
+    }
+  }
+
+  it('🔴 人工处方草稿挡在目标上：不生成、不批准、不覆盖', async () => {
+    const { supabase, writes } = fakeSupabase({
+      diagnostic_runs: [RUN()], clients: [CLIENT()], prescriptions: [draft()],
+    })
+    const s = await runAutoPrescribe(supabase, NOW)
+    expect(mockGenerate).not.toHaveBeenCalled()
+    expect(mockLand).not.toHaveBeenCalled()
+    expect(writes.some((w) => w.patch.supersedes_id)).toBe(false)
+    expect(s.prescribed).toBe(0)
+    expect(s.outcomes[0].detail).toContain('人工处方草稿')
+  })
+
+  it('来源是人工、开方人不是广告 Agent 的草稿同样挡住这个目标', async () => {
+    const { supabase } = fakeSupabase({
+      diagnostic_runs: [RUN()], clients: [CLIENT()],
+      prescriptions: [draft({ agent_name: 'huatuo', generation_meta: { source: 'manual' } })],
+    })
+    const s = await runAutoPrescribe(supabase, NOW)
+    expect(mockGenerate).not.toHaveBeenCalled()
+    expect(s.outcomes[0].detail).toContain('不会覆盖')
+  })
+
+  it('人工草稿只挡住那个目标，另一个进行中的目标仍可自动开方', async () => {
+    mockListGoals.mockResolvedValue([GOAL, { ...GOAL, id: 'g2', title: '另一个目标', period_end: '2026-12-01' }])
+    const { supabase, writes } = fakeSupabase({
+      diagnostic_runs: [RUN()], clients: [CLIENT()], prescriptions: [draft()],
+    })
+    await runAutoPrescribe(supabase, NOW)
+
+    expect(mockGenerate).toHaveBeenCalledTimes(1)
+    const link = writes.find((w) => w.patch.goal_id)
+    expect(link!.patch.goal_id).toBe('g2')
+    expect(link!.patch.supersedes_id).toBeNull()
+    const landed = mockLand.mock.calls[0][1] as { goal_id: string }
+    expect(landed.goal_id).toBe('g2')
   })
 
   it('🔴 落地前必须打上「机器自动落地」标记 —— 它是 PM 通知的唯一开关', async () => {

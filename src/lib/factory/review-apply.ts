@@ -15,6 +15,7 @@ import {
 } from '@/lib/social/content-review'
 import { computeReviewFeedbackDigest, RecipeConfigError, winnerRecipeFromBrief } from './recipe'
 import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from './deliverable'
+import type { RemotionMusicReplacement } from './remotion-music-options.mjs'
 import type { ReviewRejectCategory } from './types'
 
 export interface ReviewApplyResult {
@@ -130,6 +131,7 @@ export async function applyQualityReject(
   reviewer: string,
   clientId?: string,
   checklistHuman: unknown = null,
+  musicId?: string,
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
@@ -138,6 +140,24 @@ export async function applyQualityReject(
   if (!hasChecklistFailure(checkedHuman.items)) return { ok: false, status: 400, error: 'quality rejection requires a failed checklist item' }
   const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
   if (sourceError) return { ok: false, status: 422, error: sourceError }
+
+  const brief = (wo!.brief ?? {}) as Record<string, unknown>
+  let originallyHadRecipe = false
+  try {
+    originallyHadRecipe = winnerRecipeFromBrief(brief) !== null
+  } catch (e) {
+    // brief 里恰好带非法 creative_recipe:视作确实有 recipe(把它当 recipe 单处理,强制 replan)
+    if (e instanceof RecipeConfigError) originallyHadRecipe = true
+    else throw e
+  }
+  let musicOverride: RemotionMusicReplacement | null = null
+  if (musicId && !originallyHadRecipe) {
+    const { replaceRemotionMusic } = await import('./remotion-music-options.mjs')
+    musicOverride = replaceRemotionMusic(brief.remotion, musicId)
+  }
+  if (musicId && !musicOverride) {
+    return { ok: false, status: 422, error: '所选音乐不适用于这条工单，或无人声核验时长不足；工单未改动' }
+  }
 
   const { data: upd, error } = await supabase
     .from('content_work_orders')
@@ -153,24 +173,28 @@ export async function applyQualityReject(
   if (error) return { ok: false, status: 500, error: error.message }
   if (!upd || upd.length === 0) return { ok: false, status: 409, error: 'work order no longer in_review' }
 
-  const brief = (wo!.brief ?? {}) as Record<string, unknown>
   // recipe 单被打回:清掉 stale creative_recipe/plan,打上结构化 replan-required marker。
   // worker 遇到 marker 会在任何 provider 之前 fail-closed,直到服务端产出新的合法 plan(合同 R3/R4)。
   // 无 recipe 的普通单:继承 review_feedback 直接进 queued,legacy 行为不变。
-  let originallyHadRecipe = false
-  try {
-    originallyHadRecipe = winnerRecipeFromBrief(brief) !== null
-  } catch (e) {
-    // brief 里恰好带非法 creative_recipe:视作确实有 recipe(把它当 recipe 单处理,强制 replan)
-    if (e instanceof RecipeConfigError) originallyHadRecipe = true
-    else throw e
-  }
   const newBrief: Record<string, unknown> = {
     ...brief,
     review_feedback: feedback.slice(0, 2000),
     review_feedback_by: reviewer,
     reopened_from: id,
     review_checklist_failed_items: checkedHuman.items.filter(item => item.outcome === 'FAIL').map(item => item.key),
+  }
+  if (musicOverride) {
+    newBrief.remotion = musicOverride.remotion
+    newBrief.review_overrides = {
+      ...(brief.review_overrides && typeof brief.review_overrides === 'object' ? brief.review_overrides as Record<string, unknown> : {}),
+      music: {
+        track_id: musicOverride.choice.id,
+        staged_file: (musicOverride.remotion.props as Record<string, unknown>).musicFile,
+        catalog_file: musicOverride.choice.file,
+        selected_by: reviewer,
+        selected_at: new Date().toISOString(),
+      },
+    }
   }
   if (originallyHadRecipe) {
     // 保留旧 recipe 供审计,但从 top-level 抹掉,worker/evaluate 都不再拿到可用 recipe

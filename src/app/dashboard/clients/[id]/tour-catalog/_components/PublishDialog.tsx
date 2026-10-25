@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type {
   FirstPublishRow,
   PublishPreviewResponse,
+  PublishResponse,
   PublishRequest,
 } from '@/lib/tour-catalog/publish-contract'
 import type { PublishContributor } from '@/lib/tour-catalog/catalog-contract'
@@ -119,7 +120,7 @@ function usePublishSubmit(
   clientId: string,
   preview: PublishPreviewResponse,
   onRefresh: () => void | Promise<void>,
-  onPublished: () => void,
+  onPublished: (websiteSync: PublishResponse['websiteSync']) => void,
   ackHigh: boolean,
   ackRevert: boolean,
   countText: string,
@@ -140,7 +141,11 @@ function usePublishSubmit(
         body: JSON.stringify(body),
       })
       if (res.ok) {
-        onPublished()
+        const data = (await res.json().catch(() => ({}))) as Partial<PublishResponse>
+        const websiteSync = data.websiteSync === 'revalidated' || data.websiteSync === 'failed'
+          ? data.websiteSync
+          : 'not_configured'
+        onPublished(websiteSync)
         return
       }
       const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -330,7 +335,7 @@ export function PublishDialog(props: {
   preview: PublishPreviewResponse
   onRefresh: () => void | Promise<void>
   onClose: () => void
-  onPublished: () => void
+  onPublished: (websiteSync: PublishResponse['websiteSync']) => void
 }): JSX.Element {
   const { clientId, preview, onRefresh, onClose, onPublished } = props
   const gates = usePublishGates(preview)

@@ -198,7 +198,11 @@ export async function runCallAnalysis(
         .join(' | ')
       const summaryNote = sv.ok ? '' : ` summary_replaced=${sv.rejected.join(',')}`
       const droppedNote = droppedKeys === '' ? '' : ` dropped_detail=[${droppedKeys.slice(0, 400)}]`
-      await store.patchCall(call.id, { summaryStatus: 'done' }, { stage: 'analysis', status: 'pending_review', detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} v${ANALYSIS_SCHEMA_VERSION}${truncated}${summaryNote}${droppedNote}` })
+      await store.patchCall(call.id, { summaryStatus: 'done' }, {
+        stage: 'analysis',
+        status: 'pending_review',
+        detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} inquiries=${verified.inquiries.length} dropped_inquiries=${verified.droppedInquiries} v${ANALYSIS_SCHEMA_VERSION}${truncated}${summaryNote}${droppedNote}`,
+      })
     } catch (e) {
       // 摘要失败就是失败：不写假摘要、不标 done。
       const c = errClass('analysis', e)

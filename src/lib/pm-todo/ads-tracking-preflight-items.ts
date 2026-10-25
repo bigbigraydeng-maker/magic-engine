@@ -198,6 +198,31 @@ function pushClientItems(
   }
 
   for (const item of picked.receipt.items) items.push(fixItem(item, nameOf))
+  pushBillingYellowItem(picked.receipt, nameOf, items)
+}
+
+/**
+ * 「广告账户与付款」是黄灯、且其它登记账户（含健康页隐藏的）里还有在投预算 → 下发一条。
+ * 黄灯本来不进待办，但这种黄是「别的账户欠款 / 受限，里面开着的系列一还款就继续花钱」，不下发就只躺在回执里。
+ * 红灯 / 灰灯已经由回执的 items 下发，这里不重复。
+ */
+function pushBillingYellowItem(
+  receipt: TrackingClientReceipt,
+  nameOf: (id: string) => string,
+  items: ManualItem[],
+): void {
+  const gate = receipt.gates.find(g => g.key === 'env.account_billing')
+  if (!gate || gate.status !== 'yellow' || gate.na) return
+  const otherBudget = gate.evidence.other_live_daily_budget_cents
+  if (typeof otherBudget !== 'number' || otherBudget <= 0) return
+  items.push({
+    kind: 'ads_tracking_preflight_fix',
+    client_id: receipt.client_id,
+    client_name: nameOf(receipt.client_id),
+    what: `🟡 ${gate.reason}`,
+    how: gate.how.length > 0 ? gate.how : '到广告管理工具核对其它账户的状态和在投系列。',
+    href: promoPlanHref(receipt.client_id),
+  })
 }
 
 /** 一份开投后读回回执里的待办原样下发；超过 3 天的不再挂。 */

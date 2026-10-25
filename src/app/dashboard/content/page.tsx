@@ -675,7 +675,7 @@ export default function ContentBoardPage() {
     ? [
         { label: '客户概览', href: `/dashboard/clients/${selectedClient}` },
         { label: 'Execution', href: `/dashboard/clients/${selectedClient}/execution` },
-        { label: 'Launch Hub', href: `/dashboard/content?client=${selectedClient}` },
+        { label: '内容日历', href: `/dashboard/content?client=${selectedClient}` },
       ]
     : [];
 
@@ -687,7 +687,7 @@ export default function ContentBoardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">🚀 Launch Hub</h1>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">📆 内容日历</h1>
           <p className="text-sm text-me-charcoal/55 mt-1">{posts.length} 条内容 · 审批 / 排期（排期只作记录，这里不会自动发布）</p>
         </div>
         <Link
@@ -763,7 +763,7 @@ export default function ContentBoardPage() {
         </p>
       )}
 
-      <BriefGateBanner clientId={selectedClient} featureLabel="Launch Hub content approval" className="space-y-5">
+      <BriefGateBanner clientId={selectedClient} featureLabel="content calendar approval" className="space-y-5">
       {/* Batch action bar */}
       {someSelected && viewMode === 'list' && (
         <div className="flex items-center gap-3 bg-me-ochre/10 border border-me-ochre/30 rounded-xl px-4 py-3 flex-wrap gap-y-2">
@@ -1310,7 +1310,7 @@ export default function ContentBoardPage() {
             clientId={selectedClient}
             currentHref={currentHref}
             clientLabel={selectedClientLabel}
-            currentAreaLabel="Launch Hub"
+            currentAreaLabel="内容日历"
             packageLabel={packageContextId ? `Package ${packageContextId.slice(0, 8)}` : null}
             taskLabel={modalPost?.title ?? null}
             quickLinks={quickLinks}

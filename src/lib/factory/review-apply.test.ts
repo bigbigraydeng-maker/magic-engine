@@ -45,6 +45,21 @@ const approve = (db: SupabaseClient, id = 'wo-1', reviewer = 'me@x.com', clientI
 const reject = (db: SupabaseClient, id = 'wo-1', feedback = '画面太慢', reviewer = 'me@x.com', clientId?: string) =>
   applyQualityReject(db, id, feedback, reviewer, clientId, FAIL_HUMAN)
 
+const musicBrief = {
+  remotion: {
+    template: 'postcard',
+    props: {
+      brandColor: '#123456', logoFile: 'cts-logo.png', musicFile: 'founders-at-dawn.mp3', musicStartSec: 5,
+      cardOpacity: 0.7, cardSide: 'center', hook: { clip: 'hook.mp4', lines: ['China at dawn'] },
+      scenes: [
+        { clip: 'scene-one.mp4', place: 'Shanghai', line: 'Walk beside the old waterfront.', sourceUrl: 'https://example.com/one', sourceQuote: 'Walk beside the old waterfront in Shanghai.', placeSourceQuote: 'Shanghai waterfront.' },
+        { clip: 'scene-two.mp4', place: 'Hangzhou', line: 'Follow the lake into the hills.', sourceUrl: 'https://example.com/two', sourceQuote: 'Follow the lake into the hills.', placeSourceQuote: 'Hangzhou lake.' },
+      ],
+      price: null, end: { backdropClip: 'end.mp4', title: 'Explore China' }, timing: { hookSec: 3, sceneSec: 3, priceSec: 3 },
+    },
+  },
+}
+
 describe('applyApprove — 花钱闸(魏征红线③)', () => {
   it('in_review + 无 publish_budget → approved', async () => {
     const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }, { data: [{ id: 'wo-1' }], error: null }])
@@ -138,6 +153,32 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
 })
 
 describe('applyQualityReject — 打回重开', () => {
+  it('把人工选曲写进重开的 Remotion brief 并留审计信息', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: musicBrief }
+    const { db, inserts } = mockSupabase([
+      { data: wo, error: null },
+      { data: [{ id: 'wo-1' }], error: null },
+      { data: { id: 'wo-2' }, error: null },
+    ])
+    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com', undefined, FAIL_HUMAN, 'horizons-call')
+    expect(r.ok).toBe(true)
+    const reopened = inserts[0] as { brief: Record<string, any> }
+    expect(reopened.brief.remotion.props).toMatchObject({ musicFile: 'horizons-call.mp3', musicStartSec: 0 })
+    expect(reopened.brief.review_overrides.music).toMatchObject({
+      track_id: 'horizons-call', staged_file: 'horizons-call.mp3', catalog_file: "Horizon's Call.mp3", selected_by: 'me@x.com',
+    })
+    expect(reopened.brief.review_overrides.music.selected_at).toEqual(expect.any(String))
+  })
+
+  it('rejects an unapproved or incompatible music id before touching either work order', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: musicBrief }
+    const { db, updates, inserts } = mockSupabase([{ data: wo, error: null }])
+    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com', undefined, FAIL_HUMAN, 'pipa-trap')
+    expect(r.status).toBe(422)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
   it('clientId 不匹配 → 403(跨客户越权),老单不动、不重开新单', async () => {
     const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
     const r = await reject(db, 'wo-1', '画面太慢', 'me@x.com', 'other-client')

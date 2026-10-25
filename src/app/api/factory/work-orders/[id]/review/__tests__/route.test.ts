@@ -123,7 +123,7 @@ describe('review route — client scope + approve permission', () => {
 
     expect(res.status).toBe(200)
     expect(mocks.applyQualityReject).toHaveBeenCalledTimes(1)
-    expect(mocks.applyQualityReject).toHaveBeenCalledWith({}, 'wo-1', 'x', 'demo@x.test', CLIENT_A, [])
+    expect(mocks.applyQualityReject).toHaveBeenCalledWith({}, 'wo-1', 'x', 'demo@x.test', CLIENT_A, [], undefined)
   })
 
   it('限定客户的管理员改预算 → 客户 id 传给 applyBudgetUpdate', async () => {
@@ -147,7 +147,7 @@ describe('review route — client scope + approve permission', () => {
       checklistHuman: [],
     })
     await callRoute({ action: 'reject_quality' })
-    expect(mocks.applyQualityReject).toHaveBeenCalledWith({}, 'wo-1', 'x', 'staff@example.test', undefined, [])
+    expect(mocks.applyQualityReject).toHaveBeenCalledWith({}, 'wo-1', 'x', 'staff@example.test', undefined, [], undefined)
 
     mocks.parseReviewBody.mockReturnValue({ ok: true, action: 'reject_budget', newBudget: 20 })
     await callRoute({ action: 'reject_budget', new_budget_usd: 20 })
