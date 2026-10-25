@@ -177,8 +177,8 @@ function buildSelfServeSections(clientId: string): NavSection[] {
         // /api/factory/work-orders 要管理员登录态(requireAdminScope),整页也只会是 403 红条。
         // 内部人员的入口在 ADMIN_SECTIONS 里(不带 ?client=,跨客户总览)。
         { key: 'assets',  label: '素材库',   mark: 'AS', href: `/dashboard/clients/${clientId}/assets` },
-        { key: 'visuals', label: 'Visual Studio', mark: 'VS', href: '/dashboard/visuals' },
-        { key: 'content', label: 'Content',       mark: 'CT', href: '/dashboard/content' },
+        // 图片工厂(/dashboard/visuals)、内容日历(/dashboard/content)不放这儿:
+        // middleware 只对 paid_client 放行这两个地址,self_serve 点了会被弹回工作台。
       ],
     },
     {

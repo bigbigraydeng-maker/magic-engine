@@ -135,11 +135,11 @@ function buildSuggestions({
       key: makeKey('social-approve', summary.social.draft),
       title: `先审批 ${summary.social.draft} 条社媒草稿`,
       detail:
-        currentAreaLabel === 'Launch Hub'
+        currentAreaLabel === '内容日历'
           ? '这些草稿已经生成完成，先把最接近发布的一批过掉，会让后面的生图和推送更顺。'
-          : '社媒草稿已经在队列里，先去 Launch Hub 审批，能最快把当前 campaign 往发布推进一段。',
+          : '社媒草稿已经在队列里，先去 内容日历 审批，能最快把当前 campaign 往发布推进一段。',
       href: launchHubHref,
-      ctaLabel: currentAreaLabel === 'Launch Hub' ? '继续审批' : '去 Launch Hub',
+      ctaLabel: currentAreaLabel === '内容日历' ? '继续审批' : '去 内容日历',
       tone: 'amber',
     })
   }
@@ -150,11 +150,11 @@ function buildSuggestions({
       key: makeKey('social-image', summary.social.needs_image),
       title: `补完 ${summary.social.needs_image} 条待生图内容`,
       detail:
-        currentAreaLabel === 'Launch Hub'
+        currentAreaLabel === '内容日历'
           ? '这些帖子已经通过审批，但还缺视觉产物。把图片补齐后，推送和排期会顺很多。'
-          : '当前有一批社媒内容卡在视觉阶段，先回 Launch Hub 完成生图，能避免 approved 内容堆积。',
+          : '当前有一批社媒内容卡在视觉阶段，先回 内容日历 完成生图，能避免 approved 内容堆积。',
       href: launchHubHref,
-      ctaLabel: currentAreaLabel === 'Launch Hub' ? '继续生图' : '去补图片',
+      ctaLabel: currentAreaLabel === '内容日历' ? '继续生图' : '去补图片',
       tone: 'indigo',
     })
   }
@@ -165,11 +165,11 @@ function buildSuggestions({
       key: makeKey('social-publish', summary.social.ready_to_publish),
       title: `安排 ${summary.social.ready_to_publish} 条待排期内容`,
       detail:
-        currentAreaLabel === 'Launch Hub'
+        currentAreaLabel === '内容日历'
           ? '这些帖子已经具备发布条件，下一步最值钱的是把它们排期（排期只作记录，发布请走每日计划）。'
           : '当前已有待排期内容，不用再等生成；先把它们排期，最能带来真实进度。',
       href: launchHubHref,
-      ctaLabel: currentAreaLabel === 'Launch Hub' ? '去排期' : '去安排排期',
+      ctaLabel: currentAreaLabel === '内容日历' ? '去排期' : '去安排排期',
       tone: 'emerald',
     })
   }
