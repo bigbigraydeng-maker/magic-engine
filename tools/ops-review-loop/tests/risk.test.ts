@@ -1025,3 +1025,116 @@ describe('readDeclaredRisk stays near-linear on a long blank run (DR121-3)', () 
     expect(large).toBeLessThan(3000)
   }, 20_000)
 })
+
+describe('auth edits outside the auth directories rate A (#3123)', () => {
+  const visual = 'src/app/api/visual/video/route.ts'
+
+  it('rates a route that adds a client-access check as A', () => {
+    const patch = [
+      '@@ -1,6 +1,7 @@',
+      " import { submitVideoGeneration } from '@/lib/visual/seedance'",
+      "+import { requireDashboardClientAccess } from '@/lib/auth/client-access'",
+      '@@ -13,6 +14,10 @@',
+      '+    const access = await requireDashboardClientAccess(client_id)',
+      '+    if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })',
+    ].join('\n')
+    const result = classifyRisk({ files: [{ filename: visual, status: 'modified', patch }] })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('auth-isolation')
+    expect(result.reasons.some((reason) => reason.includes('鉴权或客户访问校验'))).toBe(true)
+  })
+
+  it('rates an added requireSession call as A, including when the check is removed', () => {
+    const added = classifyRisk({
+      files: [{
+        filename: 'src/app/api/visual/queue/route.ts',
+        patch: '+  const session = await requireSession()\n+  if (!session.ok) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })\n',
+      }],
+    })
+    expect(added.risk).toBe('A')
+    const removed = classifyRisk({
+      files: [{
+        filename: 'src/app/api/visual/queue/route.ts',
+        patch: '-  const session = await requireSession()\n',
+      }],
+    })
+    expect(removed.risk).toBe('A')
+  })
+
+  it('rates a swap of which access check is called as A', () => {
+    const patch = [
+      "-import { requirePaidClientAccess } from '@/lib/auth/client-access'",
+      "+import { requirePlanApproverAccess } from '@/lib/auth/client-access'",
+      '-  const access = await requirePaidClientAccess(params.id)',
+      '+  const access = await requirePlanApproverAccess(params.id)',
+    ].join('\n')
+    const result = classifyRisk({
+      files: [{ filename: 'src/app/api/clients/[id]/ad-health/execute-prescription/route.ts', patch }],
+    })
+    expect(result.risk).toBe('A')
+  })
+
+  it('leaves a business edit on the same route at B when the diff does not touch the check', () => {
+    const patch = '@@ -1 +1 @@\n-    return NextResponse.json({ error: msg }, { status: 500 })\n+    return NextResponse.json({ error: "fail" }, { status: 500 })\n'
+    const result = classifyRisk({ files: [{ filename: visual, patch }] })
+    expect(result.risk).toBe('B')
+    expect(result.categories).not.toContain('auth-isolation')
+  })
+
+  it('does not treat a comment that merely names the helper as an auth change', () => {
+    const patch = '+const label = "production" // see requireSession\n'
+    expect(classifyRisk({ files: [{ filename: visual, patch }] }).risk).toBe('B')
+  })
+
+  it('does not rate a docs mention of the helper as A', () => {
+    const result = classifyRisk({
+      files: [{ filename: 'docs/notes.md', patch: '+call requireSession() before writing\n' }],
+    })
+    expect(result.risk).toBe('C')
+  })
+
+  it('keeps a path that is already A on its path reason', () => {
+    const result = classifyRisk({
+      files: [{
+        filename: 'src/lib/auth/client-access.ts',
+        patch: '+  const access = await requireDashboardClientAccess(clientId)\n',
+      }],
+    })
+    expect(result.risk).toBe('A')
+    expect(result.reasons.some((reason) => reason.includes('鉴权与客户访问边界'))).toBe(true)
+    expect(result.reasons.some((reason) => reason.includes('改动行碰到鉴权'))).toBe(false)
+  })
+
+  it('rates A when GitHub omitted the patch of a source file that actually changed', () => {
+    const result = classifyRisk({
+      files: [{
+        filename: 'src/app/api/visual/video/route.ts',
+        status: 'modified',
+        additions: 2000,
+        deletions: 2000,
+        changes: 4000,
+      }],
+    })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('auth-isolation')
+    expect(result.reasons.some((reason) => reason.includes('diff 读不到，没法判断是否改了鉴权'))).toBe(true)
+  })
+
+  it('does not treat a pure rename, or an entry with no line count, as an unreadable auth diff', () => {
+    const renamed = classifyRisk({
+      files: [{
+        filename: 'src/lib/geo/score.ts',
+        previous_filename: 'src/lib/geo/old-score.ts',
+        status: 'renamed',
+        changes: 0,
+        additions: 0,
+        deletions: 0,
+      }],
+    })
+    expect(renamed.risk).toBe('B')
+    expect(renamed.reasons.some((reason) => reason.includes('diff 读不到'))).toBe(false)
+
+    const pathOnly = classifyRisk({ files: [{ filename: 'src/lib/geo/score.ts', status: 'modified' }] })
+    expect(pathOnly.risk).toBe('B')
+  })
+})

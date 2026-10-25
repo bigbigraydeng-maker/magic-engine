@@ -360,3 +360,69 @@ describe('分隔符剔除', () => {
     expect(stripDelimiters('a TRANSCRIPT>>TRANSCRIPT>>>> b <<<TRANSCRIPT c')).not.toMatch(/TRANSCRIPT>>>|<<<TRANSCRIPT/)
   })
 })
+
+describe('摘要不过核对闸时，存进库的必须是换过的那句（2026-10-25 真实事故）', () => {
+  /** 转写里有「1st time」也有「I've been to South China」—— 客人自己推翻了「首次」。 */
+  const TRANSCRIPT = "声道1：Is this Sergio Dyer? 声道2：Yeah. 1st time. I've been to South China, but not Central China."
+
+  function deps(store: AnalysisStore, summary: string) {
+    return goodDeps(store, {
+      transcribe: async () => ({ text: TRANSCRIPT, model: 'm-t' }),
+      analyze: async () => ({
+        raw: {
+          summary,
+          language: 'en',
+          facts: [{ key: 'destination_or_tour' as const, value: '中国', quote: 'but not Central China', confidence: 0.9 }],
+        },
+        model: 'm-a',
+      }),
+    })
+  }
+
+  it('人名写错 + 首次被推翻 → 换成由已核实事实拼的摘要', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => ['Sarju Dayal']
+    await runCallAnalysis(deps(s.store, '旅行社回电客人Sergio Dyer，客人首次去中国。'), ref)
+    expect(s.analyses).toHaveLength(1)
+    expect(s.analyses[0].summary).not.toContain('Sergio Dyer')
+    expect(s.analyses[0].summary).not.toContain('首次')
+    expect(s.analyses[0].summary).toContain('这通电话抽到的可核实信息')
+    expect(s.analyses[0].summary).toContain('中国')
+  })
+
+  it('摘要干净时原样存，不乱换', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => ['Sarju Dayal']
+    await runCallAnalysis(deps(s.store, '旅行社回电客人，了解其中国旅行计划。'), ref)
+    expect(s.analyses[0].summary).toBe('旅行社回电客人，了解其中国旅行计划。')
+  })
+
+  it('读不到客人姓名时，摘要里的人名一律当成写错（宁可换成事实清单）', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => []
+    await runCallAnalysis(deps(s.store, '旅行社回电客人Sergio Dyer，了解计划。'), ref)
+    expect(s.analyses[0].summary).toContain('这通电话抽到的可核实信息')
+  })
+})
+
+describe('口语数字与书面数字写法不同时，不许把正确摘要误判成瞎编（2026-10-12 真实通话）', () => {
+  it('转写说 "March 20 27th"、摘要写「2027年3月20日」，而这个日期是条已核实事实 → 原样保留', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => ['Newasian Logistics']
+    await runCallAnalysis(
+      goodDeps(s.store, {
+        transcribe: async () => ({ text: "声道2：It's for March 20 27th. 声道1：Okay.", model: 'm-t' }),
+        analyze: async () => ({
+          raw: {
+            summary: '客人计划2027年3月20日出行。',
+            language: 'en',
+            facts: [{ key: 'travel_window' as const, value: '2027年3月20日', quote: "It's for March 20 27th", confidence: 0.9 }],
+          },
+          model: 'm-a',
+        }),
+      }),
+      ref,
+    )
+    expect(s.analyses[0].summary).toBe('客人计划2027年3月20日出行。')
+  })
+})

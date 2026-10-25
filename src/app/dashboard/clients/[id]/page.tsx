@@ -18,7 +18,6 @@ import { IntelligenceSummarySection } from './_components/intelligence/Intellige
 import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
-import { ReviewInbox } from '../../factory/_components/ReviewInbox';
 import { industryFeatureFlags } from '@/lib/clients/industry-features';
 import { homeEntryVisible, type HomeEntry } from '@/lib/auth/home-entries';
 import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer';
@@ -589,9 +588,6 @@ export default function ClientDetailPage() {
       {/* ── 概览 tab ──────────────────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
         <>
-          {/* 内容工厂待审 — 有成片等你拍板时冒出来(spec me-native-design v0.2) */}
-          <ReviewInbox clientId={clientId} hideWhenEmpty />
-
           {/* Workflow progress bar — 3-step overview */}
           <WorkflowProgress
             discoveryConfirmed={discoveryConfirmed}
@@ -717,7 +713,6 @@ export default function ClientDetailPage() {
                   links={[
                     { label: '素材库', href: `/dashboard/clients/${clientId}/assets` },
                     ...(showEntry('factory-clips') ? [{ label: '视频工厂素材标签与审核', href: `/dashboard/clients/${clientId}/factory-clips` }] : []),
-                    { label: '内容生产包', href: `/dashboard/clients/${clientId}/production` },
                     { label: '内容工厂', href: `/dashboard/clients/${clientId}/content-factory` },
                     { label: '生成单条内容', onClick: () => setGenerationOpen(true) },
                   ]}

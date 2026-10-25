@@ -34,6 +34,8 @@
  * exercises it offline.
  */
 
+import { isFileReadFailure } from './ray-file-read.mjs'
+
 /** Severity order, lowest first. Index position is the comparison key. */
 export const RISK_ORDER = ['C', 'B', 'A']
 
@@ -408,6 +410,51 @@ export function importsMetaSpendWriter(source) {
 }
 
 /**
+ * Added and removed lines of a unified diff, without the leading `+` or `-`.
+ * `null` means there is no diff to read. Context lines are not changes.
+ * GitHub's files API usually sends hunks only; `--- a/` / `+++ b/` headers
+ * are skipped when a full diff is passed in.
+ *
+ * @param {unknown} patch
+ * @returns {string|null}
+ */
+function patchChangedText(patch) {
+  if (typeof patch !== 'string' || patch === '') return null
+  const lines = []
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue
+    if (line.startsWith('+') || line.startsWith('-')) lines.push(line.slice(1))
+  }
+  return lines.join('\n')
+}
+
+/** Access-check modules. A quoted path must sit under an `auth/` segment. */
+const AUTH_BOUNDARY_MODULE =
+  /(?:^|\/)auth\/(?:require-session|client-access|require-admin|api-key-access|whitelist|paid-only-handler)(?:\.js)?$/
+
+/** Calls that decide who is logged in, who may act, or which client's data is visible. */
+const AUTH_BOUNDARY_CALL =
+  /\b(?:requireSession|requireDashboardClientAccess|requireOnboardingClientAccess|requirePaidClientAccess|requireOperatorAccess|requirePlanApproverAccess|requireAdmin|guardAdmin|guardGlobalAdmin|requireGlobalAdmin|requireAdminScope|scopeAllowsClient|verifyApiKey|requireMeClientId|requireAdminContext|getUserPermissions|isAllowedEmail|isGlobalAdminEmail|withPaidOnlyTrap|isPaidOnly)\s*\(/
+
+/**
+ * True when added or removed lines touch a login, permission, or client-access check.
+ * The whole file is not scanned: a route that already had a check stays at its
+ * path rating when this diff does not change that check.
+ *
+ * @param {unknown} patch
+ * @returns {boolean}
+ */
+export function diffTouchesAuthBoundary(patch) {
+  const changed = patchChangedText(patch)
+  if (!changed) return false
+  if (AUTH_BOUNDARY_CALL.test(changed)) return true
+  for (const match of changed.matchAll(/['"]([^'"]+)['"]/g)) {
+    if (AUTH_BOUNDARY_MODULE.test(match[1])) return true
+  }
+  return false
+}
+
+/**
  * @param {string} path
  * @returns {boolean}
  */
@@ -416,10 +463,34 @@ function isSourcePath(path) {
 }
 
 /**
+ * Spend-import hold for one source path. A string is the whole file. A read
+ * failure stays for Ray. `null` is too big or a confirmed deletion, so the diff is used.
+ *
+ * @param {string} path
+ * @param {Record<string, unknown>} entry
+ * @param {Record<string, string|null|object>} knownContents
+ * @returns {string|null}
+ */
+function spendHoldForSource(path, entry, knownContents) {
+  if (!isSourcePath(path)) return null
+  const text = knownContents[path]
+  if (typeof text === 'string') {
+    return importsMetaSpendWriter(text) ? `${path}（导入了 Meta 广告写入模块）` : null
+  }
+  if (isFileReadFailure(text)) return `${path}（文件读取失败，分不清是否导入了 Meta 广告写入模块）`
+  const changed = patchChangedText(entry.patch)
+  if (changed === null) {
+    return `${path}（读不到文件，diff 也没有，分不清是否碰到库表、Meta 凭证或广告花费）`
+  }
+  if (importsMetaSpendWriter(changed)) return `${path}（diff 导入了 Meta 广告写入模块）`
+  return null
+}
+
+/**
  * Whether this diff must stay for Ray to merge by hand.
  *
  * @param {unknown} files changed-file entries, the same shape `classifyRisk` reads
- * @param {Record<string, string|null>|null} [contents] file text at the head. When passed, a source file that imports a Meta spend writer is held, and a source file that could not be read is held too.
+ * @param {Record<string, string|null|object>|null} [contents] whole-file text, `null` when only the diff can be judged, or a read-failure marker that still holds.
  * @returns {{hold: boolean, reason: string}}
  */
 export function assessRayMergeHold(files, contents) {
@@ -433,7 +504,8 @@ export function assessRayMergeHold(files, contents) {
     if (!entry || typeof entry !== 'object') {
       return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
     }
-    const { paths, unreadable } = pathsForEntry(/** @type {Record<string, unknown>} */ (entry))
+    const record = /** @type {Record<string, unknown>} */ (entry)
+    const { paths, unreadable } = pathsForEntry(record)
     if (unreadable) return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
     for (const path of paths) {
       const rule = RAY_MERGE_HOLD_RULES.find((candidate) => ruleMatches(candidate, path, true))
@@ -441,14 +513,36 @@ export function assessRayMergeHold(files, contents) {
         hits.push(`${path}（${rule.why}）`)
         continue
       }
-      if (!knownContents || !isSourcePath(path)) continue
-      const text = knownContents[path]
-      if (typeof text !== 'string') hits.push(`${path}（读不到文件，分不清是否在改广告花费）`)
-      else if (importsMetaSpendWriter(text)) hits.push(`${path}（导入了 Meta 广告写入模块）`)
+      if (!knownContents) continue
+      const spend = spendHoldForSource(path, record, knownContents)
+      if (spend) hits.push(spend)
     }
   }
   if (hits.length === 0) return { hold: false, reason: '' }
   return { hold: true, reason: hits.slice(0, 8).join('；') }
+}
+
+function entryName(entry) {
+  const filename = entry && typeof entry === 'object' ? /** @type {{filename?: unknown}} */ (entry).filename : ''
+  return typeof filename === 'string' && filename !== '' ? filename : '未命名文件'
+}
+
+/** True when GitHub reported real edits but did not include the patch. A pure rename has no line count. */
+function sourceDiffUnreadable(entry) {
+  if (!entry || typeof entry !== 'object') return false
+  const row = /** @type {{patch?: unknown, changes?: unknown, additions?: unknown, deletions?: unknown}} */ (entry)
+  if (typeof row.patch === 'string' && row.patch !== '') return false
+  return [row.changes, row.additions, row.deletions].some((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+}
+
+/** Auth-edit reason. A path that is already A is unchanged. An omitted source patch is A too. */
+function authDiffReason(entry, pathRatings) {
+  if (pathRatings.some((rated) => rated.risk === 'A')) return null
+  if (!pathRatings.some((rated) => isSourcePath(rated.path))) return null
+  const patch = entry && typeof entry === 'object' ? /** @type {{patch?: unknown}} */ (entry).patch : undefined
+  if (diffTouchesAuthBoundary(patch)) return `${entryName(entry)} —— A 级（改动行碰到鉴权或客户访问校验）`
+  if (sourceDiffUnreadable(entry)) return `${entryName(entry)} —— A 级（diff 读不到，没法判断是否改了鉴权）`
+  return null
 }
 
 /**
@@ -633,14 +727,24 @@ export function classifyRisk({ files, declaredRisk = null, declaredUnreadable = 
       categories.add(RISK_CATEGORY.UNREADABLE)
       unreadableReasons.push(problem)
     }
+    const pathRatings = []
     for (const path of paths) {
-      const { risk, why, category } = classifyFile(path)
-      computed = higherRisk(computed, risk)
-      if (category) categories.add(category)
-      if (risk !== 'C') {
-        const renamed = path !== entry?.filename ? `（rename 前的原路径，现为 ${entry.filename}）` : ''
-        reasons.push(`${path} —— ${risk} 级（${why}）${renamed}`)
-      }
+      const rated = classifyFile(path)
+      pathRatings.push({ path, ...rated })
+      computed = higherRisk(computed, rated.risk)
+      if (rated.category) categories.add(rated.category)
+    }
+    const authReason = authDiffReason(entry, pathRatings)
+    if (authReason) {
+      computed = 'A'
+      categories.add(RISK_CATEGORY.AUTH_ISOLATION)
+      reasons.push(authReason)
+    }
+    for (const rated of pathRatings) {
+      if (rated.risk === 'C') continue
+      if (authReason && rated.risk !== 'A') continue
+      const renamed = rated.path !== entry?.filename ? `（rename 前的原路径，现为 ${entry.filename}）` : ''
+      reasons.push(`${rated.path} —— ${rated.risk} 级（${rated.why}）${renamed}`)
     }
   }
 

@@ -132,7 +132,7 @@
 | 程序名 | 定义文件 | 怎么叫醒 | 做什么 | 对外副作用 | Agent | 依据 |
 |---|---|---|---|---|---|---|
 | diagnostic-weekly | cron/diagnostic-weekly | Render `0 8 * * 1` | 六维深度诊断 | ④ 付费 | 华佗 | §4.4：六维打分在 diagnostic/runner.ts |
-| prescription-weekly | cron/prescription-weekly | Render `0 8 * * 2` | 自动开处方，直接落进执行看板 | ④ 付费 | 华佗 | 文件头 |
+| prescription-weekly | cron/prescription-weekly | Render `0 8 * * 2` | 复查已批准方案的进度，只写建议，不开方、不批准 | 无对外副作用 | 华佗 | 文件头 |
 
 ### 鲁班（执行助手）· 1 个
 

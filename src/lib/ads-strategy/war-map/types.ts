@@ -96,6 +96,8 @@ export interface PlanInput {
   goalTitle: string | null
   /** 这条计划记录最后一次更新是新西兰哪一天（YYYY-MM-DD）；读不到 = null。用来判断「计划写完之后才有广告开始跑」。 */
   recordUpdatedDay: string | null
+  /** 该计划所挂目标的最新处方一行。没有处方时不填。 */
+  prescriptionLine?: string | null
 }
 
 export interface WarMapInput {
@@ -231,4 +233,6 @@ export interface WarMapView {
   frequency: { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null }
   adjust: { headline: Headline; actions: ActionRow[] }
   goalNote: GoalNote | null
+  /** 计划所挂目标的最新处方一行；没有就是 null */
+  prescriptionLine: string | null
 }

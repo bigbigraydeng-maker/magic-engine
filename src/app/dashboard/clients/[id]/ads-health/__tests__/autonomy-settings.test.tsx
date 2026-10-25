@@ -526,3 +526,53 @@ describe('AutonomySettings', () => {
     expect(screen.getByText('读不到页面版本，请刷新页面后再添加素材。')).toBeTruthy()
   })
 })
+
+describe('AutonomySettings · 客户总闸的「保存上限」按钮', () => {
+  it('点一下只 PATCH 客户总闸，不发素材池和模式字段', async () => {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (init?.method === 'PATCH') {
+        return Response.json({
+          success: true,
+          config: { ...config, daily_budget_cap_cents: 20000 },
+          version: 'v2',
+        })
+      }
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByDisplayValue('150')).toBeTruthy())
+    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '200' } })
+    fireEvent.click(screen.getByTestId('save-total-cap'))
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
+    const patch = fn.mock.calls.find(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')
+    expect(patch).toBeTruthy()
+    const body = JSON.parse(String((patch?.[1] as RequestInit).body)) as Record<string, unknown>
+    expect(body).toEqual({ daily_budget_cap_cents: 20000 })
+    // 保存成功后把回传的新值回填进输入框
+    await waitFor(() => expect(screen.getByDisplayValue('200')).toBeTruthy())
+  })
+
+  it('没改数字时点一下说「没有改动」，不发请求', async () => {
+    const fn = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      return Response.json({ success: true, config, version: 'v1' })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByDisplayValue('150')).toBeTruthy())
+    fireEvent.click(screen.getByTestId('save-total-cap'))
+    await waitFor(() => expect(screen.getByText('没有改动')).toBeTruthy())
+    expect(fn.mock.calls.some(c => (c[1] as RequestInit | undefined)?.method === 'PATCH')).toBe(false)
+  })
+
+  it('填 0 或负数时拦住并提示', async () => {
+    stubFetch()
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByDisplayValue('150')).toBeTruthy())
+    fireEvent.change(screen.getByDisplayValue('150'), { target: { value: '0' } })
+    fireEvent.click(screen.getByTestId('save-total-cap'))
+    await waitFor(() => expect(screen.getByText('每天上限要填大于 0 的金额')).toBeTruthy())
+  })
+})

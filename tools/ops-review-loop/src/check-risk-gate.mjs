@@ -30,6 +30,7 @@
 import { appendFileSync } from 'node:fs'
 
 import { buildRiskGateCheckRun, gateJobExitCode, shouldPublishHeadCheck } from './head-check.mjs'
+import { readRayHoldFiles } from './ray-file-read.mjs'
 import { assessRayMergeHold, classifyRisk, readDeclaredRisk } from './risk.mjs'
 import { requiredChecksAreGreen } from './required-checks.mjs'
 import {
@@ -67,6 +68,7 @@ const headSha = process.env.HEAD_SHA
 const prAuthor = process.env.PR_AUTHOR
 const prDraft = process.env.PR_DRAFT
 const prIsFork = process.env.PR_IS_FORK
+const prIsP0 = process.env.PR_IS_P0
 const signoffTrustedLogins = process.env.SIGNOFF_TRUSTED_LOGINS ?? ''
 const eventName = process.env.GATE_EVENT_NAME ?? ''
 
@@ -124,6 +126,7 @@ function requiredEnv() {
     ['PR_AUTHOR', prAuthor],
     ['PR_DRAFT', prDraft],
     ['PR_IS_FORK', prIsFork],
+    ['PR_IS_P0', prIsP0],
   ]
 }
 
@@ -520,7 +523,7 @@ async function loadPullRequest() {
   return { declaredRisk: declared.risk, declaredUnreadable: declared.unreadable, body }
 }
 
-/** Largest file the trial-run check will read. Anything bigger reads as `null`. */
+/** Largest file the trial-run check will read. The Ray hold uses `ray-file-read.mjs` instead. */
 const TRIAL_RUN_READ_CAP = 64 * 1024
 
 /**
@@ -663,16 +666,19 @@ try {
     today: new Date().toISOString().slice(0, 10),
     readFiles: readHeadFiles,
   })
-  const sourcePaths = []
-  if (Array.isArray(files)) {
-    for (const entry of files) {
-      for (const key of ['filename', 'previous_filename']) {
-        const filename = entry && typeof entry[key] === 'string' ? entry[key] : ''
-        if (/\.(?:ts|tsx|js|mjs|cjs)$/i.test(filename)) sourcePaths.push(filename)
-      }
-    }
-  }
-  const rayHold = assessRayMergeHold(files, sourcePaths.length > 0 ? await readHeadFiles(sourcePaths) : {})
+  // String: whole file, including one read through the git blob API.
+  // null: over 100MB, or a 404 on a path the file list marks removed — judge that entry's patch.
+  // A read failure (rate limit, 5xx, network, or any other 404) stays for Ray and does not use the diff.
+  const rayContents = Array.isArray(files)
+    ? await readRayHoldFiles({
+        files,
+        repository: repository ?? '',
+        ref: headSha,
+        token: token ?? '',
+        fetchImpl: fetch,
+      })
+    : {}
+  const rayHold = assessRayMergeHold(files, rayContents)
   const verdict = await readHeadVerdict({
     sources,
     markers: review.markers,
@@ -684,6 +690,7 @@ try {
       risk: rating.risk,
       draft: parseTriState(prDraft),
       fork: parseTriState(prIsFork),
+      p0: prIsP0,
       signoff,
       codexReview: verdict.codexReview,
       claudeSignoff: verdict.claudeSignoff,
