@@ -4,7 +4,7 @@ title: 接手 CTS CRM 之后全流程，拆五刀依次做
 status: decided
 owner: agent
 decided_on: 2026-10-26
-source: issue:3158
+source: session:aedf9b5a
 verify_by: 2026-11-16
 verify_how: 五刀全部合并且四项成品可见——跟进人分配 UI 能用、总表三列有数、测试线索走通、CAPI 有效线索回传上线。到期若未完成，开子卡注明阻塞原因
 ---
