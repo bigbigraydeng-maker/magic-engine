@@ -194,7 +194,10 @@ export async function runCallAnalysis(
       // 被闸掉的事实和被换掉的摘要都留痕：否则只看到一个数字，分不清是闸太严还是模型在编。
       const droppedKeys = out.raw.facts
         .filter((f) => !verified.facts.some((k) => k.key === f.key && k.quote === f.quote))
-        .map((f) => `${f.key}:${String(f.quote).slice(0, 40)}`)
+        // 只写「哪一类事实、原话多长」，**不写原话本身** —— 原话里可能有客人的
+        // 姓名电话，而这条回执的访问范围和保留期都不受控（同 smart-ack 设计稿 §9.8
+        // 定的口径：回执只写原因码 + 长度，不写客人原文）。
+        .map((f) => `${f.key}:${String(f.quote).length}字`)
         .join(' | ')
       const summaryNote = sv.ok ? '' : ` summary_replaced=${sv.rejected.join(',')}`
       const droppedNote = droppedKeys === '' ? '' : ` dropped_detail=[${droppedKeys.slice(0, 400)}]`

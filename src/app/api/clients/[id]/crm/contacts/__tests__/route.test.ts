@@ -787,3 +787,48 @@ describe('GET contacts — ?ids= 只取指定的客人', () => {
     expect((await get('c-1', `?ids=${many}`)).status).toBe(400)
   })
 })
+
+describe('客户配置里的域名含逗号/括号时，不许把过滤语法拼坏（复审 P3）', () => {
+  /** PostgREST 的 .or() 用逗号分隔、括号分组；域名里混进这些字符会把整条过滤串拼坏。 */
+  function dirtyConfigStore(domains: string[]) {
+    const seen: string[] = []
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder: Record<string, unknown> = {
+        select: () => builder,
+        eq: () => builder,
+        in: () => builder,
+        not: () => builder,
+        order: () => builder,
+        range: () => builder,
+        or: (expr: string) => {
+          seen.push(expr)
+          return builder
+        },
+        maybeSingle: () =>
+          Promise.resolve({ data: { leads_config: { trade_domains: domains } }, error: null }),
+        then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null, count: 0 }),
+      }
+      void table
+      return builder
+    })
+    return seen
+  }
+
+  it('干净配置：按域名收窄（过滤串里出现这个域名）', async () => {
+    const seen = dirtyConfigStore(['agency.co.nz'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('agency.co.nz'))).toBe(true)
+  })
+
+  it('脏配置（含逗号）：退回整表扫描，绝不把这个域名拼进过滤串', async () => {
+    const seen = dirtyConfigStore(['ab,cd.com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('ab,cd.com'))).toBe(false)
+  })
+
+  it('脏配置（含括号）：同样退回整表扫描', async () => {
+    const seen = dirtyConfigStore(['x(y).com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('x(y).com'))).toBe(false)
+  })
+})

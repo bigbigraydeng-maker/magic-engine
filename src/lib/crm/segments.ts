@@ -904,7 +904,14 @@ export function compareForWorklist(a: SegmentResult, b: SegmentResult): number {
   )
 }
 
-/** 各段人数，给页面顶部的统计条。 */
+/**
+ * 各段人数，给页面顶部的统计条。
+ *
+ * ⚠️ **这是未降级的口径**：它直接调 `segmentContact`，不过 `contact-list-view.ts` 的
+ * `demoteNonEnquirySender`（把看着不是客人来咨询的从「今天要联系」挪走那一步）。
+ * 所以它算出来的数会比「全部客人 → Magic Engine 智能」里看到的**多**。
+ * 要拿它当口径的人请先想清楚要的是哪一个；需要同口径就得在这里也走一遍降级。
+ */
 export function segmentCounts(
   contacts: ContactLike[],
   now: Date,

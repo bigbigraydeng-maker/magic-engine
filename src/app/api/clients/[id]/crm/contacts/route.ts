@@ -218,6 +218,11 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
   const clientRes = await supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle()
   const rules = readDomainRules((clientRes.data as { leads_config: unknown } | null)?.leads_config)
   const domains = [...rules.own, ...rules.trade].map(normaliseDomain).filter((d) => d.length > 0)
+  // PostgREST 的 `.or(...)` 用逗号分隔、用括号分组。客户配置里的域名要是混进这几个字符
+  // （`normaliseDomain` 不清理它们，实测 `ab,cd.com` 原样留着），拼出来的过滤串语法就坏了：
+  // 要么整条查询报错把页面打挂，要么静默少捞行、把同行当成终端客户混进名单 —— 后者更坏。
+  // 所以遇到脏配置就**退回整表扫描**：慢一点，但结果一定对。
+  const filterSafe = domains.every((d) => !/[,()]/.test(d))
 
   // 系统账号（WhatsApp Business 等）只有固定几个名字，按名字收窄即可 ——
   // 以前这里整表扫 1211 行只为挑出 6 个，是这个接口最大的一块浪费。
@@ -253,7 +258,8 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
         .select('contact_id, value')
         .eq('client_id', clientId)
         .eq('kind', 'email')
-        .or(valueOr)
+        // 脏配置时不加这层收窄，整表扫回来再用原判据复核（慢，但不会漏人）。
+        .or(filterSafe ? valueOr : 'value.not.is.null')
         .order('contact_id', { ascending: true })
         .range(from, to),
     ),
@@ -262,7 +268,7 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
         .from('contacts')
         .select('id, primary_email, display_name')
         .eq('client_id', clientId)
-        .or(emailOr)
+        .or(filterSafe ? emailOr : 'id.not.is.null')
         .order('id', { ascending: true })
         .range(from, to),
     ),
