@@ -175,6 +175,11 @@ export interface Prescription {
    * supersedes_id 链路指向上一版的真实 row id; version 是给 UI 渲染滚动 chips 用.
    */
   version: number
+  /**
+   * Who wrote this prescription. Manual drafts are always `广告 Agent`.
+   * Older rows may omit it.
+   */
+  agent_name?: string | null
   created_at: string
   updated_at: string
 }
