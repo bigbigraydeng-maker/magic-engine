@@ -23,6 +23,10 @@ function companyOnlyText(row: UnitProgress): string | null {
   return `${row.remainingCompanyOnly} 人`
 }
 
+function hasDetail(row: UnitProgress): boolean {
+  return rowNotes(row).length > 0 || row.bookings.length > 0
+}
+
 function BookingList({ bookings }: { bookings: SalesBooking[] }): JSX.Element {
   return (
     <details>
@@ -45,7 +49,7 @@ function RowDetail({ row }: { row: UnitProgress }): JSX.Element | null {
   if (notes.length === 0 && row.bookings.length === 0) return null
   return (
     <tr className="border-b border-me-charcoal/10">
-      <td colSpan={6} className="px-3 pb-3 pt-0 text-xs text-me-charcoal/70">
+      <td colSpan={6} className="pb-3 pl-6 pr-3 pt-0 text-xs text-me-charcoal/70">
         {notes.map((note) => (
           <p key={note}>{note}</p>
         ))}
@@ -57,9 +61,10 @@ function RowDetail({ row }: { row: UnitProgress }): JSX.Element | null {
 
 function ProgressRow({ row }: { row: UnitProgress }): JSX.Element {
   const companyOnly = companyOnlyText(row)
+  const detail = hasDetail(row)
   return (
     <>
-      <tr className="border-b border-me-charcoal/10">
+      <tr className={detail ? undefined : 'border-b border-me-charcoal/10'}>
         <td className="px-3 py-2 text-me-charcoal">
           {row.unit.label}
           {statusText(row.unit) !== null ? (
@@ -124,12 +129,12 @@ export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.E
           <table className="mt-3 w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/70">
-                <th className="px-3 py-2 font-medium">出发日</th>
+                <th className="px-3 py-2 font-medium">团 · 出发日</th>
                 <th className="px-3 py-2 font-medium">座位上限</th>
                 <th className="px-3 py-2 font-medium">公司确认</th>
                 <th className="px-3 py-2 font-medium">客人自述</th>
                 <th className="px-3 py-2 font-medium">待核实</th>
-                <th className="px-3 py-2 font-medium">剩余（已算上客人自述和待核实）</th>
+                <th className="px-3 py-2 font-medium">剩余</th>
               </tr>
             </thead>
             <tbody>
@@ -139,7 +144,7 @@ export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.E
             </tbody>
           </table>
           <p className="mt-3 text-xs text-me-charcoal/70">
-            对外只说「公司确认」那一栏；其余两栏只是内部参考。剩余按保守算法：上限减去三栏之和。
+            对外只说「公司确认」那一栏；其余两栏只是内部参考。「剩余」按保守算法，上限减去三栏之和；下面那行小字「仅算公司确认」只算公司确认的座位。
           </p>
         </>
       )}
