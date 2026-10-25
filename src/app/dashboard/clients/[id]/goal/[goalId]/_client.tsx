@@ -180,7 +180,7 @@ export function GoalDetailClient() {
                 </button>
               </>
             )}
-            {goal.status === 'active' && (
+            {(goal.status === 'active' || (goal.status === 'draft' && goal.title !== '[Migration] Unassigned Backlog')) && (
               <button
                 onClick={archive}
                 disabled={busy}
