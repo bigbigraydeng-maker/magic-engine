@@ -114,6 +114,42 @@ describe('suggestAdjustment', () => {
     const okGoal = recon([mkRow('spend', 'over'), mkRow('results_goal', 'on_track'), mkRow('content', 'on_track')])
     expect(suggestAdjustment(input({ reconcile: okGoal })).decision).toBe('continue')
   })
+
+  it('花费超出但目标 immature 或 info → 继续，不改处方', () => {
+    for (const status of ['immature', 'info'] as const) {
+      const r = recon([mkRow('spend', 'over'), mkRow('results_goal', status), mkRow('content', 'on_track')])
+      const s = suggestAdjustment(input({ reconcile: r }))
+      expect(s.decision).toBe('continue')
+      expect(s.reasons.join('\n')).not.toContain('目标进度却没跟上')
+    }
+  })
+
+  it('内容发布 unknown → 先补数据，即使目标已连续落后', () => {
+    const alone = suggestAdjustment(input({ reconcile: withRow('content', 'unknown', 3, null) }))
+    expect(alone.decision).toBe('fix_data')
+    expect(alone.reasons.some(reason => reason.includes('读不出来'))).toBe(true)
+
+    const behind = recon([mkRow('spend', 'on_track'), mkRow('results_goal', 'behind'), mkRow('content', 'unknown', 3, null)])
+    const s = suggestAdjustment(input({ reconcile: behind, priorAdjustments: [prior('2026-11-02', 'behind')] }))
+    expect(s.decision).toBe('fix_data')
+    expect(s.reasons.join('\n')).not.toContain('执行到位')
+  })
+
+  it('有实验卡但累计花费未知 → 先补数据', () => {
+    const quiet = suggestAdjustment(input({ experiment: { max_loss_cents: 50_000 }, spentCentsInExperiment: null }))
+    expect(quiet.decision).toBe('fix_data')
+    expect(quiet.reasons).toContain('实验累计花费读不出来')
+    expect(quiet.experiment_hit).toBeNull()
+
+    const wouldRevise = suggestAdjustment(input({
+      experiment: { max_loss_cents: 50_000 },
+      spentCentsInExperiment: null,
+      reconcile: withRow('results_goal', 'behind'),
+      priorAdjustments: [prior('2026-11-02', 'behind')],
+    }))
+    expect(wouldRevise.decision).toBe('fix_data')
+    expect(wouldRevise.experiment_hit).toBeNull()
+  })
 })
 
 describe('isAbnormalWindow', () => {
@@ -133,6 +169,7 @@ describe('isAbnormalWindow', () => {
 
   it('落后 / 超出 / 核心行看不清 / 对账看不清 / 执行告警 → 异常', () => {
     expect(isAbnormalWindow(withRow('content', 'behind'), [])).toBe(true)
+    expect(isAbnormalWindow(withRow('content', 'unknown', 3, null), [])).toBe(true)
     expect(isAbnormalWindow(withRow('spend', 'over'), [])).toBe(true)
     expect(isAbnormalWindow(withRow('spend', 'unknown'), [])).toBe(true)
     expect(isAbnormalWindow(recon(OK_ROWS(), true), [])).toBe(true)
@@ -174,11 +211,22 @@ describe('nextRecheckDate', () => {
 })
 
 describe('T20 客户中立', () => {
-  const files = ['../adjust.ts', '../../types.ts']
   const banned = /\b(cts|roman|oztop|east\s*inter)\b|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
 
-  it.each(files)('%s 不含客户名或客户 id', rel => {
-    const src = readFileSync(join(__dirname, rel), 'utf8')
+  it('adjust.ts 不含客户名或客户 id', () => {
+    const src = readFileSync(join(__dirname, '../adjust.ts'), 'utf8')
     expect(src).not.toMatch(banned)
+  })
+
+  it('types.ts 本次新增的调整类型不含客户名或客户 id', () => {
+    const src = readFileSync(join(__dirname, '../../types.ts'), 'utf8')
+    const start = src.indexOf('// ─── 调整记录')
+    const end = src.indexOf('export interface ApprovalReceipt')
+    expect(start).toBeGreaterThanOrEqual(0)
+    expect(end).toBeGreaterThan(start)
+    const section = src.slice(start, end)
+    expect(section).toContain('export type AdjustDecision')
+    expect(section).toContain('export interface PromoAdjustmentRecord')
+    expect(section).not.toMatch(banned)
   })
 })

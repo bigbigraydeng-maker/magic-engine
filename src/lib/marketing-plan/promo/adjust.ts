@@ -60,7 +60,7 @@ export function isAbnormalWindow(reconcile: Reconciliation, findings: WatchFindi
   return reconcile.rows.some(r => {
     if (r.key === 'results_meta') return false
     if (r.status === 'behind' || r.status === 'over') return true
-    return r.status === 'unknown' && (r.key === 'spend' || r.key === 'results_goal')
+    return r.status === 'unknown' && (r.key === 'spend' || r.key === 'results_goal' || r.key === 'content')
   })
 }
 
@@ -68,9 +68,10 @@ function dataReasons(i: AdjustInput): string[] {
   const out: string[] = []
   const { reconcile: rec } = i
   if (rec.blind) out.push('本周对账看不清')
-  for (const key of ['spend', 'results_goal'] as const) {
+  for (const key of ['spend', 'results_goal', 'content'] as const) {
     if (row(rec, key)?.status === 'unknown') out.push(`${row(rec, key)?.label.split('（')[0]}读不出来`)
   }
+  if (i.experiment && i.spentCentsInExperiment === null) out.push('实验累计花费读不出来')
   if (i.checkEvidence === null) out.push('没有检查证据')
   else if (i.checkEvidence.status === 'unknown') out.push(`检查证据看不清${i.checkEvidence.reason ? `：${i.checkEvidence.reason}` : ''}`)
   if (hasCode(i.findings, DATA_CODES)) out.push('每日检查发现数据读不出来')
@@ -118,7 +119,8 @@ function reviseReasons(i: AdjustInput): { reasons: string[]; hit: AdjustSuggesti
   if (goal?.status === 'behind' && priorWindowsBehind(i)) {
     reasons.push(`目标进度连续 ${CONSECUTIVE_BEHIND_WINDOWS} 个窗口落后`)
   }
-  if (row(i.reconcile, 'spend')?.status === 'over' && goal?.status !== 'on_track') {
+  // immature / info 表示还不能判断效果，只有明确 behind 才算「没跟上」。
+  if (row(i.reconcile, 'spend')?.status === 'over' && goal?.status === 'behind') {
     reasons.push('花费超出计划，目标进度却没跟上')
   }
   return { reasons, hit }
