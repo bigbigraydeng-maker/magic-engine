@@ -152,6 +152,66 @@ describe('checkFrozenFields', () => {
     expect(violations[0].field).toBe('verify_how')
   })
 
+  it('坏卡可以把编号改成文件名，并把 PR #数字改成同一个 pr 编号', () => {
+    const file = '2026-10-25-meta-client-token-db-verify.md'
+    const base = fm([
+      'id: task_meta_client_token_db_verify',
+      'title: 验证口令',
+      'status: decided',
+      'owner: agent',
+      'decided_on: 2026-10-25',
+      'source: PR #3145',
+      'verify_by: 2026-11-01',
+      'verify_how: 看三件事',
+    ].join('\n'), '正文不动')
+    const head = base
+      .replace('id: task_meta_client_token_db_verify', 'id: 2026-10-25-meta-client-token-db-verify')
+      .replace('source: PR #3145', 'source: pr:3145')
+    const result = checkFrozenFields(file, head, base)
+    expect(result.violations).toEqual([])
+    expect(result.parseError).toBeNull()
+    expect(result.baseParseError?.reason).toContain('对不上')
+  })
+
+  it.each([
+    ['换成别的 PR 号', 'id: 2026-10-25-meta-client-token-db-verify', 'source: pr:9999', 'source'],
+    ['编号仍和文件名不同', 'id: 2026-10-25-other', 'source: pr:3145', 'id'],
+    ['改了标题', 'id: 2026-10-25-meta-client-token-db-verify', 'source: pr:3145', 'title'],
+    ['改了验收说法', 'id: 2026-10-25-meta-client-token-db-verify', 'source: pr:3145', 'verify_how'],
+  ])('坏卡拼写修复时不许%s', (_name, idLine, sourceLine, field) => {
+    const file = '2026-10-25-meta-client-token-db-verify.md'
+    const base = fm([
+      'id: task_meta_client_token_db_verify',
+      'title: 验证口令',
+      'status: decided',
+      'owner: agent',
+      'decided_on: 2026-10-25',
+      'source: PR #3145',
+      'verify_by: 2026-11-01',
+      'verify_how: 看三件事',
+    ].join('\n'), '正文不动')
+    let head = base.replace('id: task_meta_client_token_db_verify', idLine).replace('source: PR #3145', sourceLine)
+    if (field === 'title') head = head.replace('title: 验证口令', 'title: 新标题')
+    if (field === 'verify_how') head = head.replace('verify_how: 看三件事', 'verify_how: 换成别的验法')
+    expect(checkFrozenFields(file, head, base).violations.map((v) => v.field)).toContain(field)
+  })
+
+  it('已经合法的卡不能借这条修法改编号', () => {
+    const file = '2026-10-25-meta-client-token-db-verify.md'
+    const base = fm([
+      'id: 2026-10-25-meta-client-token-db-verify',
+      'title: 验证口令',
+      'status: decided',
+      'owner: agent',
+      'decided_on: 2026-10-25',
+      'source: pr:3145',
+      'verify_by: 2026-11-01',
+      'verify_how: 看三件事',
+    ].join('\n'))
+    const head = base.replace('id: 2026-10-25-meta-client-token-db-verify', 'id: 2026-10-25-renamed')
+    expect(checkFrozenFields(file, head, base).violations.map((v) => v.field)).toContain('id')
+  })
+
   it('base 解析失败 → 跳过检查但返回 baseParseError', () => {
     const baseText = '这不是合法的台账文件'
     const headText = fm(BASE_FIELDS)

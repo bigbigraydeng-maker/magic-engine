@@ -92,5 +92,14 @@
     "signedBy": "human:Ray Deng",
     "signedAt": "2026-10-25T06:48:36.000Z",
     "evidence": "PM listened and signed in chat (session cd128ea2, 2026-10-25); demucs vocal stem mean -52.6 dB, 0/35 5s windows above -40 dB (controls: Jayden -20.2 dB 36/36, Founders at Dawn -76.5 dB 0/31); ledger 2026-10-25-music-river-pandas-peaks"
+  },
+  {
+    "sha256": "6ef3347b7f38c8afc8dc62d2937523edc3212dde50fb11745a3b376627ea97ec",
+    "name": "music/river-pandas-peaks-b2-2.mp3",
+    "verdict": "none",
+    "strength": "approval-only",
+    "signedBy": "human:Ray Deng",
+    "signedAt": "2026-10-25T08:30:00.000Z",
+    "evidence": "PM 2026-10-25 在对话中定为 CTS 7274 留资系列最终配乐（session ca48762e）；Suno 纯器乐；whisper small 0 段人声，large-v3-turbo 仅已知音乐幻听"
   }
 ]
