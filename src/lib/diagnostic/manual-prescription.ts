@@ -1,62 +1,31 @@
-/**
- * Manual prescription drafts.
- *
- * A person (or an agent acting for them) supplies the prescription body.
- * The row is always a draft written by 广告 Agent. Nothing here approves,
- * lands execution items, or calls a model.
- */
-
 import type {
-  BudgetAllocationItem,
-  DiagnosticDimension,
-  KPITarget,
-  PhaseInitiativeSeed,
-  PrescriptionAction,
-  PrescriptionContent,
-  PrescriptionPhase,
+  BudgetAllocationItem, DiagnosticDimension, KPITarget, PhaseInitiativeSeed,
+  PrescriptionAction, PrescriptionContent, PrescriptionPhase,
 } from '@/types/diagnostic'
 
 export const MANUAL_PRESCRIPTION_AGENT = '广告 Agent'
-
-const DIMENSIONS: ReadonlySet<string> = new Set<DiagnosticDimension>([
-  'seo',
-  'ai_visibility',
-  'ads',
-  'social',
-  'reputation',
-  'competitor',
-])
-
-const POSTURES: ReadonlySet<string> = new Set(['offensive', 'defensive', 'fast', 'slow'])
-
-const EFFORTS: ReadonlySet<string> = new Set(['low', 'medium', 'high'])
-
-const INITIATIVE_TYPES: ReadonlySet<string> = new Set([
-  'demand_generation',
-  'conversion_optimization',
-  'trust_building',
-  'competitive_defense',
-  'market_education',
-  'content_asset_production',
-  'unassigned',
-])
-
 export const NO_COMPLETED_RUN_MESSAGE =
   '这个客户还没有已完成的体检，处方草稿存不进去。先完成一次体检再保存。'
 
-export type ManualParseFailure = { ok: false; status: 400 | 422; error: string }
+const DIMENSIONS: ReadonlySet<string> = new Set<DiagnosticDimension>([
+  'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',
+])
+const POSTURES: ReadonlySet<string> = new Set(['offensive', 'defensive', 'fast', 'slow'])
+const EFFORTS: ReadonlySet<string> = new Set(['low', 'medium', 'high'])
+const INITIATIVE_TYPES: ReadonlySet<string> = new Set([
+  'demand_generation', 'conversion_optimization', 'trust_building', 'competitive_defense',
+  'market_education', 'content_asset_production', 'unassigned',
+])
 
+export type ManualParseFailure = { ok: false; status: 400 | 422; error: string }
 export type ManualParseSuccess = {
   ok: true
   goalId: string
   content: PrescriptionContent
   generationMeta: Record<string, unknown>
 }
-
 export type ManualParseResult = ManualParseSuccess | ManualParseFailure
-
-type Ok<T> = { ok: true } & T
-type StepResult<T> = Ok<T> | ManualParseFailure
+type StepResult<T> = ({ ok: true } & T) | ManualParseFailure
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
@@ -92,28 +61,25 @@ export function goalIdsWithManualDraft(
 ): Set<string> {
   const ids = new Set<string>()
   for (const row of rows) {
-    if (row.client_id !== clientId || !row.goal_id) continue
-    if (isManualDraftRow(row)) ids.add(row.goal_id)
+    if (row.client_id === clientId && row.goal_id && isManualDraftRow(row)) ids.add(row.goal_id)
   }
   return ids
-}
-
-export function buildGenerationMeta(raw: unknown, sourceRefs: unknown): Record<string, unknown> {
-  const base = isRecord(raw) ? { ...raw } : {}
-  const explicit = stringList(sourceRefs)
-  const embedded = stringList(base.source_refs)
-  return {
-    ...base,
-    source: 'manual',
-    prescriber: MANUAL_PRESCRIPTION_AGENT,
-    execution: '人工执行',
-    source_refs: explicit ?? embedded ?? [],
-  }
 }
 
 function stringList(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null
   return value.filter((item): item is string => typeof item === 'string')
+}
+
+export function buildGenerationMeta(raw: unknown, sourceRefs: unknown): Record<string, unknown> {
+  const base = isRecord(raw) ? { ...raw } : {}
+  return {
+    ...base,
+    source: 'manual',
+    prescriber: MANUAL_PRESCRIPTION_AGENT,
+    execution: '人工执行',
+    source_refs: stringList(sourceRefs) ?? stringList(base.source_refs) ?? [],
+  }
 }
 
 function manualActionError(action: Record<string, unknown>, id: string): string | null {
@@ -144,10 +110,7 @@ function parseAction(raw: unknown): StepResult<{ action: PrescriptionAction }> {
   return { ok: true, action: raw as unknown as PrescriptionAction }
 }
 
-function parseSeed(
-  raw: unknown,
-  phaseNumber: number,
-): StepResult<{ seed: PhaseInitiativeSeed | null }> {
+function parseSeed(raw: unknown, phaseNumber: number): StepResult<{ seed: PhaseInitiativeSeed | null }> {
   if (raw == null) return { ok: true, seed: null }
   if (!isRecord(raw)) return fail(422, `阶段 ${phaseNumber} 的 initiative_seed 必须是对象`)
   if (!INITIATIVE_TYPES.has(String(raw.initiative_type))) {
@@ -183,10 +146,7 @@ function parsePhase(raw: unknown): StepResult<{ phase: PrescriptionPhase }> {
   const seed = parseSeed(raw.initiative_seed, raw.phase_number)
   if (!seed.ok) return seed
   const phase: PrescriptionPhase = {
-    phase_number: raw.phase_number,
-    name: raw.name,
-    duration_weeks: raw.duration_weeks,
-    actions,
+    phase_number: raw.phase_number, name: raw.name, duration_weeks: raw.duration_weeks, actions,
   }
   if (seed.seed) phase.initiative_seed = seed.seed
   return { ok: true, phase }
@@ -234,7 +194,6 @@ function parseContent(raw: unknown): StepResult<{ content: PrescriptionContent }
   if (!Array.isArray(raw.phases) || raw.phases.length === 0) return fail(422, 'content.phases 至少要有一个阶段')
   if (!Array.isArray(raw.kpi_targets)) return fail(422, 'content.kpi_targets 必须是数组')
   if (!Array.isArray(raw.budget_allocation)) return fail(422, 'content.budget_allocation 必须是数组')
-
   const phases: PrescriptionPhase[] = []
   for (const phase of raw.phases) {
     const parsed = parsePhase(phase)
@@ -243,17 +202,12 @@ function parseContent(raw: unknown): StepResult<{ content: PrescriptionContent }
   }
   const budgetSum = phaseBudgetPercentSum(phases)
   if (budgetSum > 100) return fail(422, `各阶段预算占比合计 ${budgetSum}，不能超过 100`)
-
   const kpis = parseKpis(raw.kpi_targets)
   if (!kpis.ok) return kpis
   const budgets = parseBudgets(raw.budget_allocation)
   if (!budgets.ok) return budgets
-
   const content: PrescriptionContent = {
-    summary: raw.summary,
-    phases,
-    kpi_targets: kpis.items,
-    budget_allocation: budgets.items,
+    summary: raw.summary, phases, kpi_targets: kpis.items, budget_allocation: budgets.items,
   }
   if (typeof raw.narrative === 'string') content.narrative = raw.narrative
   return { ok: true, content }
@@ -275,15 +229,8 @@ export function parseManualPrescriptionBody(body: unknown, clientId: string): Ma
   }
 }
 
-/**
- * Accept either the full write payload (`{ goal_id, content, ... }`)
- * or a bare content object when the page URL already names the goal.
- */
-export function parseManualPaste(
-  raw: unknown,
-  urlGoalId: string | null,
-  clientId: string,
-): ManualParseResult {
+/** Full payload, or a bare content object when the page URL already names the goal. */
+export function parseManualPaste(raw: unknown, urlGoalId: string | null, clientId: string): ManualParseResult {
   if (!isRecord(raw)) return fail(400, '贴进来的内容不是 JSON 对象')
   if (!('content' in raw) && Array.isArray(raw.phases)) {
     return parseManualPrescriptionBody({ goal_id: urlGoalId, content: raw }, clientId)

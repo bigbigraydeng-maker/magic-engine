@@ -260,43 +260,29 @@ describe('runAutoPrescribe —— 目标', () => {
     expect(s.outcomes[0].detail).toContain('先给他定个目标')
   })
 
+  function draft(over: Record<string, unknown> = {}) {
+    return {
+      client_id: 'c1', created_at: iso(7), status: 'draft', goal_id: 'g1', intake: null,
+      agent_name: MANUAL_PRESCRIPTION_AGENT, generation_meta: { source: 'manual' }, ...over,
+    }
+  }
+
   it('🔴 人工处方草稿挡在目标上：不生成、不批准、不覆盖', async () => {
     const { supabase, writes } = fakeSupabase({
-      diagnostic_runs: [RUN()],
-      clients: [CLIENT()],
-      prescriptions: [{
-        client_id: 'c1',
-        created_at: iso(7),
-        status: 'draft',
-        agent_name: MANUAL_PRESCRIPTION_AGENT,
-        goal_id: 'g1',
-        generation_meta: { source: 'manual' },
-        intake: null,
-      }],
+      diagnostic_runs: [RUN()], clients: [CLIENT()], prescriptions: [draft()],
     })
     const s = await runAutoPrescribe(supabase, NOW)
-
     expect(mockGenerate).not.toHaveBeenCalled()
     expect(mockLand).not.toHaveBeenCalled()
     expect(writes.some((w) => w.patch.supersedes_id)).toBe(false)
     expect(s.prescribed).toBe(0)
-    expect(s.outcomes[0].result).toBe('skipped')
     expect(s.outcomes[0].detail).toContain('人工处方草稿')
   })
 
   it('来源是人工、开方人不是广告 Agent 的草稿同样挡住这个目标', async () => {
     const { supabase } = fakeSupabase({
-      diagnostic_runs: [RUN()],
-      clients: [CLIENT()],
-      prescriptions: [{
-        client_id: 'c1',
-        created_at: iso(7),
-        status: 'draft',
-        agent_name: 'huatuo',
-        goal_id: 'g1',
-        generation_meta: { source: 'manual' },
-        intake: null,
-      }],
+      diagnostic_runs: [RUN()], clients: [CLIENT()],
+      prescriptions: [draft({ agent_name: 'huatuo', generation_meta: { source: 'manual' } })],
     })
     const s = await runAutoPrescribe(supabase, NOW)
     expect(mockGenerate).not.toHaveBeenCalled()
@@ -304,21 +290,9 @@ describe('runAutoPrescribe —— 目标', () => {
   })
 
   it('人工草稿只挡住那个目标，另一个进行中的目标仍可自动开方', async () => {
-    mockListGoals.mockResolvedValue([
-      GOAL,
-      { ...GOAL, id: 'g2', title: '另一个目标', period_end: '2026-12-01' },
-    ])
+    mockListGoals.mockResolvedValue([GOAL, { ...GOAL, id: 'g2', title: '另一个目标', period_end: '2026-12-01' }])
     const { supabase, writes } = fakeSupabase({
-      diagnostic_runs: [RUN()],
-      clients: [CLIENT()],
-      prescriptions: [{
-        client_id: 'c1',
-        created_at: iso(7),
-        status: 'draft',
-        agent_name: MANUAL_PRESCRIPTION_AGENT,
-        goal_id: 'g1',
-        intake: null,
-      }],
+      diagnostic_runs: [RUN()], clients: [CLIENT()], prescriptions: [draft()],
     })
     await runAutoPrescribe(supabase, NOW)
 

@@ -1,11 +1,3 @@
-/**
- * POST /api/clients/[id]/prescriptions/manual
- *
- * Stores a supplied prescription as a draft. The prescriber is always
- * 广告 Agent. Every action must be manual. This route never approves,
- * never creates execution items, and never calls a model.
- */
-
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -36,13 +28,11 @@ async function latestCompletedRunId(clientId: string): Promise<{ runId: string }
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle<{ id: string }>()
-
   if (error) return { ok: false, status: 500, error: '读取体检记录失败' }
   if (!data?.id) return { ok: false, status: 422, error: NO_COMPLETED_RUN_MESSAGE }
   return { runId: data.id }
 }
 
-/** Same rule as prescription/generate: next version is max(version) + 1 for the goal. */
 async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
   const { data, error } = await supabaseAdmin
     .from('prescriptions')
@@ -51,7 +41,6 @@ async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
     .order('version', { ascending: false })
     .limit(1)
     .maybeSingle<{ version: number }>()
-
   if (error) return { ok: false, status: 500, error: '读取处方版本失败' }
   return (data?.version ?? 0) + 1
 }
@@ -92,7 +81,6 @@ async function insertDraft(
     .insert(row)
     .select('id')
     .single<{ id: string }>()
-
   if (error || !data) {
     const message = error?.message ?? ''
     if (message.includes('run_id') || message.includes('discovery_id')) {
@@ -101,8 +89,6 @@ async function insertDraft(
     console.error('[prescriptions/manual] insert failed', error)
     return jsonError(500, '保存处方草稿失败')
   }
-
-  const viewPath = `/dashboard/clients/${clientId}/prescription/new?goal_id=${parsed.goalId}`
   return NextResponse.json({
     success: true,
     prescription_id: data.id,
@@ -111,7 +97,7 @@ async function insertDraft(
     agent_name: MANUAL_PRESCRIPTION_AGENT,
     goal_id: parsed.goalId,
     run_id: ready.runId,
-    view_path: viewPath,
+    view_path: `/dashboard/clients/${clientId}/prescription/new?goal_id=${parsed.goalId}`,
   })
 }
 
@@ -121,9 +107,7 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id: clientId } = params
   const access = await requirePaidClientAccess(clientId)
-  if (!access.ok) {
-    return NextResponse.json({ error: access.error }, { status: access.status })
-  }
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   let body: unknown
   try {
@@ -134,7 +118,6 @@ export async function POST(
 
   const parsed = parseManualPrescriptionBody(body, clientId)
   if (!parsed.ok) return jsonError(parsed.status, parsed.error)
-
   const ready = await loadInsertContext(clientId, parsed.goalId)
   if (!ready.ok) return jsonError(ready.status, ready.error)
   return insertDraft(clientId, parsed, ready)
