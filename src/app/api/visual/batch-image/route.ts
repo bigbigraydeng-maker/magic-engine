@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { generateImage } from '@/lib/visual/openai-images'
 import { uploadFromBase64 } from '@/lib/visual/storage'
 import { requireSession } from '@/lib/auth/require-session'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 interface BatchResult {
   post_id: string
@@ -37,6 +38,15 @@ export async function POST(req: NextRequest) {
       .in('id', post_ids)
 
     if (fetchErr) throw fetchErr
+
+    // Caller must have access to every client whose posts are in the batch
+    const batchClientIds = Array.from(new Set((dbPosts ?? []).map(p => p.client_id as string)))
+    for (const cid of batchClientIds) {
+      const access = await requireDashboardClientAccess(cid)
+      if (!access.ok) {
+        return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+      }
+    }
 
     const postMap = new Map(
       (dbPosts ?? []).map(p => [p.id as string, p as { id: string; client_id: string; visual_brief: string | null }])
