@@ -218,11 +218,13 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
   const clientRes = await supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle()
   const rules = readDomainRules((clientRes.data as { leads_config: unknown } | null)?.leads_config)
   const domains = [...rules.own, ...rules.trade].map(normaliseDomain).filter((d) => d.length > 0)
-  // PostgREST 的 `.or(...)` 用逗号分隔、用括号分组。客户配置里的域名要是混进这几个字符
-  // （`normaliseDomain` 不清理它们，实测 `ab,cd.com` 原样留着），拼出来的过滤串语法就坏了：
-  // 要么整条查询报错把页面打挂，要么静默少捞行、把同行当成终端客户混进名单 —— 后者更坏。
-  // 所以遇到脏配置就**退回整表扫描**：慢一点，但结果一定对。
-  const filterSafe = domains.every((d) => !/[,()]/.test(d))
+  // PostgREST 的 `.or(...)` 用逗号分隔、用括号分组，`ilike` 还认 `%` `_` 是通配符。
+  // 客户配置里的域名要是混进这些字符（`normaliseDomain` 不清理它们，实测 `ab,cd.com`
+  // 原样留着），拼出来的过滤串要么报错把页面打挂，要么静默少捞行、把同行当成终端客户
+  // 混进名单 —— 后者更坏。所以这里用**白名单**：只有合法域名字符（`normaliseDomain`
+  // 已经转小写，punycode 的 `xn--` 也在内）才允许拼进过滤串，其余一律**退回整表扫描**：
+  // 慢一点，但结果一定对。白名单而不是逐个列禁用字符，是为了一次盖住所有特殊字符。
+  const filterSafe = domains.every((d) => /^[a-z0-9.-]+$/.test(d))
 
   // 系统账号（WhatsApp Business 等）只有固定几个名字，按名字收窄即可 ——
   // 以前这里整表扫 1211 行只为挑出 6 个，是这个接口最大的一块浪费。

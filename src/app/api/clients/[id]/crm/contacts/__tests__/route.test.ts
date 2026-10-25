@@ -831,4 +831,12 @@ describe('客户配置里的域名含逗号/括号时，不许把过滤语法拼
     await get('client-a', '?kind=trade')
     expect(seen.some((e) => e.includes('x(y).com'))).toBe(false)
   })
+
+  // 白名单守卫的意义就在这里：`%` 不会让过滤串语法崩，但它是 ilike 的通配符，
+  // 拼进去会悄悄改变匹配范围。黑名单（只挡逗号括号）放它过去，白名单挡住。
+  it('脏配置（含 ilike 通配符 %）：也退回整表扫描', async () => {
+    const seen = dirtyConfigStore(['%.com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('%.com'))).toBe(false)
+  })
 })
