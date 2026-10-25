@@ -92,9 +92,10 @@ describe('evaluateCodexHeadReview', () => {
     })
     expect(result.clear).toBe(true)
     expect(result.reviewed).toBe(true)
-    expect(decideMerge({ risk: 'C', draft: false, fork: false, codexReview: result }).decision).toBe(
-      MERGE_DECISION.ENABLE_AUTO_MERGE,
-    )
+    // 原来这里还断言「Codex 签了 → C 级自动合并」。那个耦合 2026-10-26 去掉了
+    // （Ray「只有 P0 审」）：Codex 的审查工作流 10-15 就停用了，等它等于永久阻塞。
+    // 这个函数仍然负责「这条审查是不是绑在当前这次提交上、有没有未解决的 P0/P1」，
+    // 但它的结论不再是开自动合并的条件 —— 那部分归 merge-decision 自己的测试管。
   })
 
   it('accepts the GraphQL login, which drops the [bot] suffix', () => {
