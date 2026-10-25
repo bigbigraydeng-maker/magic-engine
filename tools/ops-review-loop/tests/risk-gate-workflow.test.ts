@@ -225,6 +225,35 @@ describe('Risk gate workflow: the judge lives on main', () => {
     expect(env.PR_AUTHOR).toContain('steps.pr.outputs.author')
   })
 
+  it('🔴 闸门脚本要求的每个环境变量，**每一个**调用它的工作流都必须传（别的入口漏传就是全仓 PR 判红）', () => {
+    // 2026-10-26 事故：#3155 给脚本新增了必需变量 PR_IS_P0，只改了 pr-risk-gate.yml，
+    // 漏了 pr-risk-gate-refresh.yml —— 每次检查跑完后的重判都报「缺少必需的环境变量」，
+    // 全仓库的 PR 都被这条红挡住。原来的清单是手写的，漏了它自己；
+    // 所以这里**直接从脚本源码里读**必需变量，以后再加变量，漏改任何入口都会立刻红。
+    const script = readFileSync(join(ROOT, '..', '..', 'tools', 'ops-review-loop', 'src', 'check-risk-gate.mjs'), 'utf8')
+    const block = script.slice(script.indexOf('function requiredEnv()'))
+    const required = [...block.slice(0, block.indexOf('\n}\n')).matchAll(/\['([A-Z0-9_]+)',/g)].map((m) => m[1])
+    expect(required.length).toBeGreaterThan(5)
+    expect(required).toContain('PR_IS_P0')
+
+    // 脚本自己在 GitHub Actions 里自动有的两个，不用工作流传
+    const AUTO = new Set(['GITHUB_REPOSITORY'])
+    for (const wf of [riskGate, riskRefresh]) {
+      const step = wf.steps.find((s) => s.run?.includes('check-risk-gate.mjs'))
+      const env = step?.env ?? {}
+      for (const key of required.filter((k) => !AUTO.has(k))) {
+        expect(env[key], `${wf.source.split('\n')[0]} 的闸门步骤缺 ${key}`).toBeDefined()
+      }
+    }
+  })
+
+  it('🔴 重判入口也要把 p0 标签读出来（事件路径和 gh pr view 路径都要，并忽略大小写）', () => {
+    expect(riskRefresh.source).toContain("contains(github.event.pull_request.labels.*.name, 'p0')")
+    expect(riskRefresh.source).toContain('PR_IS_P0:')
+    expect(riskRefresh.source).toContain('ascii_downcase')
+    expect(riskRefresh.source).toMatch(/--json [^\n]*labels/)
+  })
+
   it('still judges from main, and describes the single A-level sign-off plus the p0 label', () => {
     expect(riskGate.triggers.pull_request_target).toBeDefined()
     expect(riskGate.source).toContain('ref: main')
