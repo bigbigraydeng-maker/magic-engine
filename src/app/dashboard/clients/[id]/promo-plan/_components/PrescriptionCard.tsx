@@ -41,7 +41,7 @@ export function PrescriptionCard({ clientId, prescription }: { clientId: string;
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h2 className="text-base font-semibold text-gray-900">处方</h2>
         <p className="text-xs text-gray-500">v{prescription.version} · {prescription.status_label}</p>
-        <Link href={href} className="ml-auto text-xs text-indigo-600 hover:underline">看完整处方</Link>
+        <Link href={href} className="ml-auto text-xs text-indigo-600 hover:underline">去处方页查看</Link>
       </div>
       <p className="mt-1 text-xs text-gray-600">开方人：{prescription.prescriber ?? '未填写'}</p>
       {prescription.summary !== '' && <p className="mt-2 text-sm text-gray-800 whitespace-pre-wrap">{prescription.summary}</p>}

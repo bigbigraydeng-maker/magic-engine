@@ -276,14 +276,23 @@ describe('loadWarMapInput · 真实形状的行（CTS 2026-10-20 08:50Z）', () 
     expect(view.prescriptionLine).toBe('处方 v2 · 草稿 · 2 条人工动作')
   })
 
-  it('L. 处方读失败会抛错，不把作战地图画成没有处方', async () => {
+  it('L. 处方读失败时计划和阶段仍在，处方那一行留空', async () => {
     db.tables.marketing_plans = [{
       client_id: CLIENT, status: 'draft', updated_at: '2026-10-20T01:00:00.000Z',
       plan_data: { promo: baseSpec({ goal_id: 'goal-1' }) },
     }]
     db.tables.goals = [{ id: 'goal-1', client_id: CLIENT, title: '目标甲', budget_currency: 'NZD' }]
     db.errors.prescriptions = 'boom'
-    await expect(loadWarMapInput(CLIENT, NOW)).rejects.toThrow('读处方失败：boom')
+    const input = await loadWarMapInput(CLIENT, NOW)
+    expect(input.plan).toMatchObject({
+      status: 'draft',
+      goalTitle: '目标甲',
+      prescriptionLine: null,
+      phases: [
+        { name: '阶段 1', startDate: '2026-11-01', endDate: '2026-11-14' },
+        { name: '阶段 2', startDate: '2026-11-15', endDate: '2026-11-30' },
+      ],
+    })
   })
 
   it('J. control: nothing hidden -> pools and campaigns from both accounts are present', async () => {

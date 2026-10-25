@@ -2,7 +2,7 @@
  * 推广计划的事实读取（只读）：把数据库里的东西读成 gates / reconcile 要的形状。
  *
  * 规则：任何一项读失败都返回 null（= 没读到），绝不当成 0 / 空列表 / 通过。
- * 例外：loadLatestGoalPrescription 读失败会抛错，调用方自己决定整页失败还是这一项留空。
+ * 例外：loadLatestGoalPrescription 读失败会抛错，推广计划页和作战地图在调用处接住，只把这一项留空。
  * 复用：广告设置 parseCreativePool、账户时区 accountDayKey、行业剧本选择。
  * 所有读取都带 client_id（目标 / 广告账户额外校验归属同一客户）。
  */
