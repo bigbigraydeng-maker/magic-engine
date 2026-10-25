@@ -13,6 +13,7 @@ import type { ManualItem } from './manual-item-types'
 import {
   domainToEnvKey,
   hasScopedEnvToken,
+  loadStoredClientMetaToken,
   loadTokenOwnerPeers,
   ownsKey,
   pageIdToEnvVar,
@@ -135,8 +136,15 @@ export async function pushMetaTokenHealthItems(
   // 权限被收掉时 PostgREST 回的是零行、不报错；生产里不可能一个客户都没有
   if (peers.length === 0) throw new Error('客户表读回零行（多半是读权限被挡了），没法检查各客户的 Meta 钥匙')
 
-  const targets: { row: TokenOwnerRow; envVar: string; token: string }[] = []
+  const targets: { row: TokenOwnerRow; envVar: string; token: string; fromDb?: boolean }[] = []
   for (const row of peers) {
+    // Preferred: DB-stored per-client token (post env-var migration path).
+    const dbToken = await loadStoredClientMetaToken(supabase, row.id)
+    if (dbToken) {
+      targets.push({ row, envVar: 'platform_oauth_connections', token: dbToken, fromDb: true })
+      continue
+    }
+    // Legacy: env-var tokens.
     for (const owned of ownedTokens(row, peers, env)) {
       targets.push({ row, envVar: owned.envVar, token: owned.token })
     }
@@ -162,23 +170,32 @@ export async function pushMetaTokenHealthItems(
   if (shared && probes.get(shared)?.status === 'dead') items.push(sharedTokenDeadItem())
 }
 
+const HOW_DB =
+  '这把钥匙存在 ME 后台数据库里。根治是把这个客户的广告账户接进 Magic Engine 企业、改用系统用户口令。先临时修：' +
+  '打开链接（Meta 的令牌工具）→ 右上角选 Magic Engine 应用 → 在 Permissions 里勾上 ads_management、ads_read、business_management、pages_read_engagement、leads_retrieval（不勾的话新钥匙能通过这项检查、但读不了广告）→ ' +
+  '用能管这个客户广告账户的 Facebook 账号点 Generate Access Token，同意授权 → 复制令牌，打开 https://developers.facebook.com/tools/debug/accesstoken/ 粘进去点 Debug，再点页面最下面的 Extend Access Token 换成长期版（不换一小时就过期）→ ' +
+  '打开 ME 后台 → 客户设置 → Meta 口令 → 粘贴长期版保存。换完第二天这条待办会自己消失。'
+
 function pushDeadItems(
   items: ManualItem[],
-  targets: { row: TokenOwnerRow; envVar: string; token: string }[],
+  targets: { row: TokenOwnerRow; envVar: string; token: string; fromDb?: boolean }[],
   probes: Map<string, MetaTokenProbe>,
 ): void {
   for (const target of targets) {
     if (probes.get(target.token)?.status !== 'dead') continue
     const name = target.row.name ?? '未知客户'
+    const sourceLabel = target.fromDb
+      ? 'ME 后台数据库'
+      : `Render 里的 ${target.envVar}`
     items.push({
       kind: 'meta_token_dead',
       client_id: target.row.id,
       client_name: name,
       what:
-        `${name} 的 Meta 专属钥匙（Render 里的 ${target.envVar}）被 Meta 作废了 —— ` +
+        `${name} 的 Meta 专属钥匙（${sourceLabel}）被 Meta 作废了 —— ` +
         `这个客户读广告数据、同步留资这些功能现在都在失败，而且不会自己报错。` +
         `（Meta 回复错误码 190：这把钥匙已作废）`,
-      how: HOW(target.envVar),
+      how: target.fromDb ? HOW_DB : HOW(target.envVar),
       href: META_TOKEN_FIX_URL,
     })
   }
