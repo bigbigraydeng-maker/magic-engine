@@ -83,5 +83,14 @@
     "signedBy": "PM审片@2ef627ff",
     "signedAt": "2026-10-15T04:43:22.966Z",
     "evidence": "approved published orders 2ef627ff; machine transcripts (small + large-v3-turbo) in evidence pack 2026-10-16-tale-vocals"
+  },
+  {
+    "sha256": "5a2da544b99874cb156ac62a9254b7d3c70bda05237df14f8e99138cda92b169",
+    "name": "_shared/music/river-pandas-peaks.mp3",
+    "verdict": "none",
+    "strength": "signed",
+    "signedBy": "human:Ray Deng",
+    "signedAt": "2026-10-25T06:48:36.000Z",
+    "evidence": "PM listened and signed in chat (session cd128ea2, 2026-10-25); demucs vocal stem mean -52.6 dB, 0/35 5s windows above -40 dB (controls: Jayden -20.2 dB 36/36, Founders at Dawn -76.5 dB 0/31); ledger 2026-10-25-music-river-pandas-peaks"
   }
 ]

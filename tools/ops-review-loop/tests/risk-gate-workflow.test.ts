@@ -15,11 +15,14 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { RISK_GATE_CHECK_NAME } from '../src/head-check.mjs'
+
 const requireFromHere = createRequire(import.meta.url)
 const YAML = requireFromHere('js-yaml') as { load(input: string): unknown }
 
 const ROOT = join(process.cwd(), '.github/workflows')
 const RISK_GATE_PATH = join(ROOT, 'pr-risk-gate.yml')
+const RISK_GATE_REFRESH_PATH = join(ROOT, 'pr-risk-gate-refresh.yml')
 const CI_PATH = join(ROOT, 'pr-light-checks.yml')
 
 interface WorkflowStep {
@@ -36,6 +39,7 @@ interface WorkflowJob {
   if?: string
   steps?: WorkflowStep[]
   permissions?: Record<string, string>
+  concurrency?: { group?: string; 'cancel-in-progress'?: boolean }
 }
 interface Workflow {
   on?: Record<string, unknown>
@@ -60,16 +64,41 @@ function load(path: string) {
 }
 
 const riskGate = load(RISK_GATE_PATH)
+const riskRefresh = load(RISK_GATE_REFRESH_PATH)
 const ci = load(CI_PATH)
+
+const COMMENT_PREDICATES = [
+  'vars.ME_SIGNOFF_TRUSTED_LOGINS',
+  'codex-review-state:v1',
+  'codex-review-receipt:v1',
+  'me-review-signoff',
+]
 
 const SHA_PIN = /@[0-9a-f]{40}\b/
 
+function expectEnableBoundToReviewedHead(steps: WorkflowStep[]) {
+  const enableStep = steps.find((step) => step.run?.includes('gh pr merge --auto --merge'))
+  expect(enableStep?.env?.HEAD_SHA).toContain('steps.pr.outputs.head')
+  expect(enableStep?.env?.HEAD_SHA).not.toContain('github.sha')
+  const run = enableStep?.run ?? ''
+  const mergeAt = run.indexOf('gh pr merge --auto --merge')
+  expect(run).toContain('gh pr view')
+  expect(run).toContain('head-check.mjs --plan-auto-merge')
+  expect(run).toContain('--match-head-commit "$HEAD_SHA"')
+  expect(run.indexOf('--plan-auto-merge')).toBeLessThan(mergeAt)
+  expect(run.indexOf('exit 0')).toBeLessThan(mergeAt)
+  expect(run).not.toContain('|| true')
+}
+
 describe('Risk gate workflow: the judge lives on main', () => {
-  it('triggers on pull_request_target plus Codex issue comments, never on the PR merge ref', () => {
-    expect(Object.keys(riskGate.triggers).sort()).toEqual(['issue_comment', 'pull_request_target'])
+  it('triggers on pull_request_target only, never on the PR merge ref or on comments', () => {
+    expect(Object.keys(riskGate.triggers)).toEqual(['pull_request_target'])
     // A review-submitted event uses the PR merge ref, so the PR could replace
-    // this file. Codex's clean review is an issue comment (observed #3086).
+    // this file. Comment re-checks are a separate workflow: an issue_comment
+    // run is recorded on the default branch, and a job named Risk gate here
+    // would attach that result to main.
     expect(riskGate.triggers.pull_request).toBeUndefined()
+    expect(riskGate.triggers.issue_comment).toBeUndefined()
     expect(riskGate.triggers.pull_request_review).toBeUndefined()
     expect(riskGate.triggers.pull_request_review_comment).toBeUndefined()
     const trigger = riskGate.triggers.pull_request_target as {
@@ -82,8 +111,6 @@ describe('Risk gate workflow: the judge lives on main', () => {
     for (const type of ['opened', 'synchronize', 'reopened', 'ready_for_review', 'converted_to_draft', 'edited']) {
       expect(trigger.types, `pull_request_target must include ${type}`).toContain(type)
     }
-    const comments = riskGate.triggers.issue_comment as { types?: string[] }
-    expect(comments.types).toEqual(expect.arrayContaining(['created', 'edited']))
     // A path or branch filter would turn this into a check that never reports
     // on the PRs it skips — a merge deadlock if it is required.
     expect(trigger.paths).toBeUndefined()
@@ -91,16 +118,24 @@ describe('Risk gate workflow: the judge lives on main', () => {
     expect(trigger.branches).toBeUndefined()
   })
 
-  it('declares exactly the two write scopes it needs, and no more', () => {
+  it('declares the write scopes it needs, and no checks scope', () => {
     expect(riskGate.doc.permissions).toEqual({
       contents: 'write',
       'pull-requests': 'write',
+      issues: 'write',
     })
+    expect(riskGate.doc.permissions?.checks).toBeUndefined()
+    expect(riskGate.source).toContain('needs-ray-merge')
   })
 
-  it('serialises per PR and cancels superseded runs', () => {
-    expect(riskGate.doc.concurrency?.['cancel-in-progress']).toBe(true)
-    expect(riskGate.doc.concurrency?.group).toContain('github.event.issue.number')
+  it('serialises per PR at job level, and a comment group cannot cancel it', () => {
+    expect(riskGate.doc.concurrency).toBeUndefined()
+    const job = riskGate.doc.jobs?.['risk-gate']
+    expect(job?.name).toBe(RISK_GATE_CHECK_NAME)
+    expect(job?.concurrency?.['cancel-in-progress']).toBe(true)
+    expect(job?.concurrency?.group).toContain('pull_request_target')
+    expect(job?.concurrency?.group).toContain('github.event.pull_request.number')
+    expect(job?.concurrency?.group).not.toContain('issue_comment')
   })
 
   it('checks itself out from main, never the PR head, and persists no credentials', () => {
@@ -137,6 +172,7 @@ describe('Risk gate workflow: the judge lives on main', () => {
   it("enables auto-merge only from the gate's own 'enable' decision", () => {
     const enableStep = riskGate.steps.find((s) => s.run?.includes('gh pr merge --auto --merge'))
     expect(enableStep?.if?.trim()).toBe("steps.gate.outputs.decision == 'enable'")
+    expectEnableBoundToReviewedHead(riskGate.steps)
   })
 
   it('never interpolates event data into a run block', () => {
@@ -176,9 +212,12 @@ describe('Risk gate workflow: the judge lives on main', () => {
       'PR_IS_FORK',
       'SIGNOFF_TRUSTED_LOGINS',
       'GITHUB_TOKEN',
+      'GATE_EVENT_NAME',
     ]) {
       expect(env[key], `gate step env must define ${key}`).toBeDefined()
     }
+    expect(env.GATE_EVENT_NAME).toContain('github.event_name')
+    expect(env.HEAD_SHA).not.toContain('github.sha')
     expect(env.SIGNOFF_TRUSTED_LOGINS).toContain('vars.ME_SIGNOFF_TRUSTED_LOGINS')
     expect(env.SIGNOFF_TRUSTED_LOGINS).not.toContain('pull_request.user.login')
     expect(env.HEAD_SHA).toContain('steps.pr.outputs.head')
@@ -192,6 +231,80 @@ describe('Risk gate workflow: the judge lives on main', () => {
     expect(riskGate.source).toContain('Codex Astra')
     expect(riskGate.source).toContain('Claude Code')
     expect(riskGate.source).not.toContain('three trusted sign-off')
+  })
+})
+
+describe('Risk gate refresh: comment runs publish on the PR head and do not cancel the real gate', () => {
+  const refreshJob = () => Object.values(riskRefresh.doc.jobs ?? {})[0]
+
+  it('listens to review comments and light-check completion, never to a pull_request merge ref', () => {
+    expect(Object.keys(riskRefresh.triggers).sort()).toEqual(['issue_comment', 'workflow_run'])
+    const comments = riskRefresh.triggers.issue_comment as { types?: string[] }
+    expect(comments.types).toEqual(expect.arrayContaining(['created', 'edited']))
+    const rerun = riskRefresh.triggers.workflow_run as { workflows?: string[]; types?: string[] }
+    expect(rerun.workflows).toEqual(['PR light checks'])
+    expect(rerun.types).toEqual(['completed'])
+    expect(riskRefresh.triggers.pull_request).toBeUndefined()
+    expect(riskRefresh.triggers.pull_request_target).toBeUndefined()
+    expect(riskRefresh.triggers.pull_request_review).toBeUndefined()
+    expect(riskRefresh.triggers.pull_request_review_comment).toBeUndefined()
+    expect(riskRefresh.source).toContain('needs-ray-merge')
+  })
+
+  it('adds checks: write and the label scope, and nothing else', () => {
+    expect(riskRefresh.doc.permissions).toEqual({
+      contents: 'write',
+      'pull-requests': 'write',
+      checks: 'write',
+      issues: 'write',
+    })
+  })
+
+  it('does not name its job Risk gate, so a comment run is not recorded on main under that name', () => {
+    const names = Object.values(riskRefresh.doc.jobs ?? {}).map((job) => job.name)
+    expect(names.length).toBeGreaterThan(0)
+    expect(names).not.toContain(RISK_GATE_CHECK_NAME)
+    expect(riskRefresh.source).not.toContain(`name: ${RISK_GATE_CHECK_NAME}`)
+  })
+
+  it('puts concurrency on the job, and irrelevant comments get a group that cannot cancel a live run', () => {
+    expect(riskRefresh.doc.concurrency).toBeUndefined()
+    const job = refreshJob()
+    expect(job?.concurrency?.['cancel-in-progress']).toBe(true)
+    const group = job?.concurrency?.group ?? ''
+    expect(group).toContain('issue_comment')
+    expect(group).toContain('github.run_id')
+    expect(group).not.toContain('pull_request_target')
+    for (const needle of COMMENT_PREDICATES) {
+      expect(job?.if, `job if must mention ${needle}`).toContain(needle)
+      expect(group, `concurrency group must mention ${needle}`).toContain(needle)
+    }
+  })
+
+  it('checks itself out from main and publishes through the same gate script', () => {
+    const checkouts = riskRefresh.steps.filter((step) => step.uses?.startsWith('actions/checkout'))
+    expect(checkouts.length).toBeGreaterThan(0)
+    for (const checkout of checkouts) {
+      expect(checkout.with?.ref).toBe('main')
+      expect(checkout.with?.['persist-credentials']).toBe(false)
+    }
+    const gateStep = riskRefresh.steps.find((step) => step.run?.includes('node tools/ops-review-loop/src/check-risk-gate.mjs'))
+    expect(gateStep?.env?.GATE_EVENT_NAME).toContain('github.event_name')
+    expect(gateStep?.env?.HEAD_SHA).toContain('steps.pr.outputs.head')
+    expect(gateStep?.env?.HEAD_SHA).not.toContain('github.sha')
+  })
+
+  it('toggles auto-merge only from the gate decision, and never interpolates event data into a run block', () => {
+    const enableStep = riskRefresh.steps.find((step) => step.run?.includes('gh pr merge --auto --merge'))
+    expect(enableStep?.if?.trim()).toBe("steps.gate.outputs.decision == 'enable'")
+    expectEnableBoundToReviewedHead(riskRefresh.steps)
+    expect(riskRefresh.steps.some((step) => step.run?.includes('gh pr merge --disable-auto'))).toBe(true)
+    for (const step of riskRefresh.steps) {
+      if (step.run) expect(step.run).not.toContain('${{')
+      if (step.uses) expect(step.uses).toMatch(SHA_PIN)
+    }
+    expect(riskRefresh.source.toLowerCase()).not.toContain('continue-on-error')
+    expect(riskRefresh.source).not.toContain('--admin')
   })
 })
 
@@ -252,9 +365,13 @@ describe('only the judge may write', () => {
     }
 
     const riskGateDoc = YAML.load(readFileSync(RISK_GATE_PATH, 'utf8')) as Workflow
+    const refreshDoc = YAML.load(readFileSync(RISK_GATE_REFRESH_PATH, 'utf8')) as Workflow
     const ciDoc = YAML.load(readFileSync(CI_PATH, 'utf8')) as Workflow
 
     expect(contentsWrite(riskGateDoc), 'pr-risk-gate.yml must be able to toggle auto-merge').toBe(true)
+    expect(contentsWrite(refreshDoc), 'the comment re-check must be able to toggle auto-merge').toBe(true)
+    expect(refreshDoc.permissions?.checks).toBe('write')
+    expect(riskGateDoc.permissions?.checks).toBeUndefined()
     expect(contentsWrite(ciDoc), 'pr-light-checks.yml must stay read-only').toBe(false)
     const report = ciDoc.jobs?.report
     expect(report?.permissions?.checks, 'only the report job may publish checks').toBe('write')

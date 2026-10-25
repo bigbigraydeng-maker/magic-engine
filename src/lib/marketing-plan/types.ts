@@ -280,6 +280,8 @@ export interface MarketingPlan {
     previous_weekly_reviews?: WeeklyReviewRecord[]
     /** PM 每周「按计划继续」的确认记录（服务端写入，按 week_start 幂等）。*/
     weekly_reviews?: WeeklyReviewRecord[]
+    /** 空白草稿创建时记下的目标。推广结构仍为空，等保存接口写入。*/
+    blank_draft?: { goal_id: string }
   } | null
   approved_at: string | null
   created_at: string
