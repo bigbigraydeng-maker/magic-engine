@@ -238,13 +238,24 @@ function deepseekProvider(
     provider: 'deepseek',
     model: DEEPSEEK_MODEL_LABEL,
     async call(signal) {
+      // 🔴 DeepSeek 的 `json_object` 模式有两个坑，2026-10-26 用真实对话试跑时 5/5 全部撞上（HTTP 400）：
+      //    ① 提示词里**必须出现 "json" 这个词**，否则一律 400（"Prompt must contain the word 'json'"）；
+      //    ② 它只保证返回合法 JSON，**不认识我们的格式** —— 不把 schema 写进提示词，它会自己编一个结构。
+      //    OpenAI / Claude 靠 API 参数拿格式，DeepSeek 只能靠提示词，所以这里把 schema 原文拼进去。
+      const system = [
+        a.backupSystemSuffix ? `${a.system}${a.backupSystemSuffix}` : a.system,
+        '',
+        'Respond with exactly ONE JSON object and nothing else (no markdown fences, no commentary).',
+        'The JSON object must match this JSON schema exactly — include every required field:',
+        JSON.stringify(a.jsonSchema.schema),
+      ].join('\n')
       // DeepSeek 客户端只收超时、不收 signal：这里把 signal 赛一下，到点就放弃等它。
       const aborted = new Promise<never>((_, reject) => {
         signal.addEventListener('abort', () => reject(new Error('deepseek_aborted')), { once: true })
       })
       const res = await Promise.race([
         c.completeJson({
-          system: a.backupSystemSuffix ? `${a.system}${a.backupSystemSuffix}` : a.system,
+          system,
           user: a.user,
           maxOutputTokens: a.maxOutputTokens ?? DEFAULT_MAX_OUTPUT,
           maxInputTokens: 100_000,

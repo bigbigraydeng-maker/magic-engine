@@ -174,7 +174,53 @@ describe('三家的请求形状', () => {
     expect(sent.openai).not.toContain('FINAL CHECK')
     expect(sent.openai).toContain('"sys"')
     expect(sent.anthropic).toBe(`sys${SUFFIX}`)
-    expect(sent.deepseek).toBe(`sys${SUFFIX}`)
+    // DeepSeek 的提示词 = 原文 + 备用后缀 + JSON 指令（见下面专门的测试），所以只验前缀
+    expect(sent.deepseek.startsWith(`sys${SUFFIX}`)).toBe(true)
+  })
+
+  // 🔴 下面两条钉的是 2026-10-26 真实对话试跑查出来的 bug：5 条请求 5 条 HTTP 400。
+  //    DeepSeek 的 json_object 模式 ① 提示词里必须出现 "json" 这个词，否则一律 400；
+  //    ② 只保证返回合法 JSON、不认识我们的格式 —— 不把 schema 写进提示词它会自己编结构。
+  //    单测里的假客户端永远不会 400，这个 bug 只有真调用才暴露。
+  it('🔴 DeepSeek：提示词里必须有 "json" 这个词（没有的话 DeepSeek 对每条请求都 400）', async () => {
+    let sentSystem = ''
+    const clients: FailoverClients = {
+      deepseek: () => ({
+        completeJson: async (req) => {
+          sentSystem = req.system
+          return { ok: true as const, value: { text: '{}', model: 'deepseek' } }
+        },
+      }),
+    }
+    const [p] = buildProviders(baseArgs as AskJsonArgs<unknown>, { DEEPSEEK_API_KEY: 'd', AI_FAILOVER_ALLOW_DEEPSEEK: '1' }, clients)
+    await p.call(new AbortController().signal)
+    expect(sentSystem).toMatch(/json/i)
+  })
+
+  it('🔴 DeepSeek：要把 schema 原文写进提示词（它不靠 API 参数拿格式）', async () => {
+    let sentSystem = ''
+    const clients: FailoverClients = {
+      deepseek: () => ({
+        completeJson: async (req) => {
+          sentSystem = req.system
+          return { ok: true as const, value: { text: '{}', model: 'deepseek' } }
+        },
+      }),
+    }
+    const [p] = buildProviders(baseArgs as AskJsonArgs<unknown>, { DEEPSEEK_API_KEY: 'd', AI_FAILOVER_ALLOW_DEEPSEEK: '1' }, clients)
+    await p.call(new AbortController().signal)
+    expect(sentSystem).toContain(JSON.stringify(baseArgs.jsonSchema.schema))
+    expect(sentSystem).toContain('required')
+  })
+
+  it('OpenAI 和 Claude 不受影响：它们靠 API 参数拿格式，提示词里不拼 schema', async () => {
+    const sent: string[] = []
+    const clients: FailoverClients = {
+      openai: () => ({ responses: { create: async (body) => { sent.push(JSON.stringify((body as { input: unknown }).input)); return { output_text: '{}' } } } }),
+      anthropic: () => ({ messages: { create: async (body) => { sent.push((body as { system: string }).system); return { content: [{ type: 'tool_use', input: {} }] } } } }),
+    }
+    for (const p of buildProviders(baseArgs as AskJsonArgs<unknown>, KEYS_ALL, clients)) await p.call(new AbortController().signal)
+    for (const text of sent) expect(text).not.toContain('"required"')
   })
 
   it('没传后缀时备用模型的提示词也一字不变', async () => {
