@@ -164,15 +164,15 @@ export const MESSENGER_BRIEF_JSON_SCHEMA = {
       type: 'object',
       additionalProperties: false,
       properties: {
-        phone: { type: ['string', 'null'], description: "The CUSTOMER's phone number, never CTS's." },
-        email: { type: ['string', 'null'], description: "The CUSTOMER's email, never CTS's." },
+        phone: { type: ['string', 'null'], description: "The CUSTOMER's phone number, never the business's own." },
+        email: { type: ['string', 'null'], description: "The CUSTOMER's email, never the business's own." },
       },
       required: ['phone', 'email'],
     },
     draft_reply: {
       type: 'string',
       description:
-        'Plain text only. Messenger renders asterisks and underscores literally, so no markdown.',
+        'Plain text only, no markdown: Messenger renders asterisks and underscores literally, and an email reply goes out as plain text.',
     },
   },
   required: [

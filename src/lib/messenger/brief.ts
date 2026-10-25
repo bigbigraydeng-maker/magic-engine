@@ -42,6 +42,39 @@ import { getClientKnowledge, type GetClientKnowledgeDeps } from '@/lib/knowledge
 import { KnowledgeNotEntitledError } from '@/lib/knowledge/errors'
 import type { KnowledgeEntry } from '@/lib/knowledge/types'
 
+/**
+ * 这张卡是从哪条渠道的对话写出来的。
+ *
+ * 为什么必须是参数、不能省：卡里的 `next_action` 是让销售今天就去做的事，
+ * `draft_reply` 是真要发给客人的字。渠道错了，销售会跑去 Messenger 找一个
+ * 从没在那说过话的人（这正是原来那行 `.eq('channel','messenger')` 过滤
+ * 存在的理由 —— 不是嫌邮件麻烦，是怕写出说错渠道的卡）。
+ */
+export type BriefChannel = 'messenger' | 'email'
+
+/**
+ * 每条渠道怎么称呼、回信要带什么。英文是给模型看的，所以这里不翻译。
+ *
+ * `replyNote` 对私信**刻意留空**：私信这条路已经上线并在给 525 段对话写卡，
+ * 这次只加邮件，不顺手改它的提示词 —— 换了提示词就等于换了一条在跑的链路。
+ */
+const CHANNEL_WORDS: Record<
+  BriefChannel,
+  { article: string; thread: string; replyNote: (business: string) => string }
+> = {
+  messenger: {
+    article: 'a',
+    thread: 'Facebook Messenger thread',
+    replyNote: () => '',
+  },
+  email: {
+    article: 'an',
+    thread: 'email thread',
+    replyNote: (business) =>
+      `- It is an email, not a chat message: open with the customer's first name and sign off as ${business}. Never write a subject line.`,
+  },
+}
+
 /** Wait this long after the last message before summarising. */
 export const QUIET_PERIOD_MS = 30 * 60 * 1000
 
@@ -232,11 +265,18 @@ TRIP DETAILS — every field describes what the CUSTOMER told us, never what we 
  * fact comes from `factEntries` (the `customer_reply`-eligible rows
  * `loadClientFacts`/`getClientKnowledge` returned for this client).
  */
-export function buildSystemPrompt(identity: ClientIdentity, factEntries: readonly KnowledgeEntry[]): string {
+export function buildSystemPrompt(
+  identity: ClientIdentity,
+  factEntries: readonly KnowledgeEntry[],
+  channel: BriefChannel = 'messenger',
+): string {
   const isTravel = isTravelIndustry(identity)
   const business = identity.name
+  const words = CHANNEL_WORDS[channel]
+  const replyNote = words.replyNote(business)
+  const replyNoteLine = replyNote === '' ? '' : `\n${replyNote}`
 
-  return `You turn a Facebook Messenger thread between ${business} and a prospective customer into a briefing card for a ${business} salesperson.
+  return `You turn ${words.article} ${words.thread} between ${business} and a prospective customer into a briefing card for a ${business} salesperson.
 
 LANGUAGE — this is the most common mistake, get it right:
 - summary, customer_needs, objections, promises_made, next_action, risk_flags: write in SIMPLIFIED CHINESE. Staff read these in a Chinese interface.
@@ -259,7 +299,7 @@ ${clientFactsBlock(factEntries)}
 next_action must be a concrete thing a salesperson does today, in the imperative — "打电话给 Kam，确认出行月份". Never "等待客户回复": if the customer has gone quiet, chasing them IS the action, and the elapsed time below tells you how overdue it is.
 
 draft_reply rules (it goes to a real customer as ${business}):
-- Warm, plain English. Two or three sentences. No hype words.
+- Warm, plain English. Two or three sentences. No hype words.${replyNoteLine}
 - If the thread is about refunds, cancellations, changes, payment, insurance, medical or accessibility needs, or a complaint: do not attempt to resolve it. Draft a short reply saying a ${business} specialist will come back to them.`
 }
 
