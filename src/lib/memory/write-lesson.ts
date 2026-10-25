@@ -23,6 +23,12 @@
  * 带来源的 lesson 如果先 upsert 再 update 补列，中间那一瞬是
  * 「is_active=true 且来源字段为空」的可注入半成品。所以来源字段、脱敏时间、
  * 脱敏结论、有效期与正文放在**同一条** upsert 里；字段不全就当场拒绝，不发请求。
+ *
+ * ── 时间必须是真实存在的 ISO 时间 ───────────────────────────────────────
+ * `Date.parse('2099-02-31T00:00:00.000Z')` 不会报错，它会悄悄滚成 3 月 3 日；
+ * `Date.parse('12/31/2099')` 也照收。有效期的含义是「这条规则什么时候失效」，
+ * 滚一天就是一天的区别，所以这里用 `parseStrictIsoInstant` 先做严格的形状 +
+ * 日历校验，过了才交给 `Date.parse`。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -57,6 +63,61 @@ export interface LessonInput {
   evidence?: Record<string, unknown> | null
   /** 有它时走「一次写完」路径，见契约 4.8。 */
   provenance?: LessonProvenance
+}
+
+/**
+ * 只认「完整时间戳 + 时区」这一种形状：`YYYY-MM-DDTHH:mm:ss[.fraction](Z|±HH:mm)`。
+ * 日期只有日期、没有时区、用斜杠、带首尾空格的，一律不收（**不做 trim**：
+ * 能带空格进来就说明上游给的字符串不可信）。
+ */
+const STRICT_ISO_INSTANT_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+}
+
+function daysInMonth(year: number, month: number): number {
+  const table = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (month === 2 && isLeapYear(year)) return 29
+  return table[month - 1]
+}
+
+/**
+ * 严格解析一个 ISO 瞬时时间，返回 epoch 毫秒；不是**真实存在**的完整 ISO 时间就返回 `null`。
+ *
+ * 纯函数，不读库不写库。存在的理由：`Date.parse` 会把 `'2099-02-31T00:00:00.000Z'`
+ * 滚成 3 月 3 日、也会接受 `'12/31/2099'`，而有效期滚一天就是规则多活一天。
+ *
+ * 校验顺序：① 形状（正则，含时分秒与时区）→ ② 真实日历（月 1..12、日 1..当月天数含闰年、
+ * 时 0..23、分 0..59、秒 0..59、偏移小时 0..23、偏移分钟 0..59）→ ③ `Date.parse` 且有限。
+ */
+export function parseStrictIsoInstant(value: unknown): number | null {
+  if (typeof value !== 'string') return null
+
+  const match = STRICT_ISO_INSTANT_RE.exec(value)
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  const zone = match[7]
+
+  if (month < 1 || month > 12) return null
+  if (day < 1 || day > daysInMonth(year, month)) return null
+  if (hour > 23 || minute > 59 || second > 59) return null
+
+  if (zone !== 'Z') {
+    const offsetHour = Number(zone.slice(1, 3))
+    const offsetMinute = Number(zone.slice(4, 6))
+    if (offsetHour > 23 || offsetMinute > 59) return null
+  }
+
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : null
 }
 
 /** 一次查全库的客户名与人名，给脱敏闸用。 */
@@ -95,14 +156,17 @@ export function validateProvenance(
   if (!LEARNING_PILLARS.includes(provenance.pillar)) {
     return '支柱取值不合法'
   }
-  const validUntilMs = Date.parse(provenance.validUntil)
-  if (!Number.isFinite(validUntilMs) || validUntilMs <= now.getTime()) {
+  const validUntilMs = parseStrictIsoInstant(provenance.validUntil)
+  if (validUntilMs === null) {
+    return '有效期格式不对，要写成完整的 ISO 时间（含时区），且必须是真实存在的日期'
+  }
+  if (validUntilMs <= now.getTime()) {
     return '有效期必须是未来时间'
   }
   const lastReviewedAt = provenance.lastReviewedAt
   if (lastReviewedAt !== undefined && lastReviewedAt !== null) {
-    if (!Number.isFinite(Date.parse(lastReviewedAt))) {
-      return '复核时间格式不对'
+    if (parseStrictIsoInstant(lastReviewedAt) === null) {
+      return '复核时间格式不对，要写成完整的 ISO 时间（含时区），且必须是真实存在的日期'
     }
   }
   if (RULE_ID_RE.test(lesson.trim())) {
@@ -137,6 +201,7 @@ function buildLessonRow(
   if (!provenance) return row
 
   // 来源字段、脱敏时间、脱敏结论、有效期与正文在同一条 upsert 里落库（契约 4.8）。
+  // 走到这里说明 validUntil / lastReviewedAt 已经过 parseStrictIsoInstant，可放心转 ISO。
   row.source_point_key = provenance.sourcePointKey
   row.source_card_id = provenance.sourceCardId
   row.pillar = provenance.pillar
@@ -202,11 +267,19 @@ export async function writeGlobalLesson(
  * 给非路由调用方（cron、后台 agent）的强制版：不过就抛。
  *
  * 这是 `assertShareable` 真正的生产调用点 —— 在它存在之前，那道闸只有测试在调。
+ *
+ * 来源校验放在最前面：`loadShareabilityContext` 是**读库**操作，
+ * 字段不全的行连查库都不该发生（无效输入不配触发任何 I/O）。
  */
 export async function writeGlobalLessonOrThrow(
   supabase: SupabaseClient,
   input: LessonInput,
 ): Promise<void> {
+  if (input.provenance) {
+    const invalid = validateProvenance(input.provenance, input.lesson, new Date())
+    if (invalid) throw new Error(`写入失败：${invalid}`)
+  }
+
   const ctx = await loadShareabilityContext(supabase)
   assertShareable(input.lesson, input.rationale, ctx)
   const r = await writeGlobalLesson(supabase, input)

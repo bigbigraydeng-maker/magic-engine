@@ -11,7 +11,14 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { writeGlobalLesson, writeGlobalLessonOrThrow, validateProvenance, type LessonInput, type LessonProvenance } from '../write-lesson'
+import {
+  writeGlobalLesson,
+  writeGlobalLessonOrThrow,
+  validateProvenance,
+  parseStrictIsoInstant,
+  type LessonInput,
+  type LessonProvenance,
+} from '../write-lesson'
 
 const NOW = Date.now()
 const FUTURE = new Date(NOW + 90 * 24 * 3600 * 1000).toISOString()
@@ -303,3 +310,150 @@ describe('writeGlobalLessonOrThrow — 带来源的强制版', () => {
     expect(upserted[0].source_point_key).toBe('card-x#p1')
   })
 })
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * R10（Codex P2）：`Date.parse` 会放行「不存在的日期」，也会顺手接受
+ * `12/31/2099`、只有日期、没有时区、带首尾空格的写法。有效期滚一天就是规则
+ * 多活一天，所以形状与日历都必须是严的。
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('parseStrictIsoInstant — 只接受真实存在的完整 ISO 时间', () => {
+  const accepted = [
+    '2099-12-31T10:00:00+13:00',
+    '2096-02-29T00:00:00Z',       // 2096 是闰年
+    '2099-12-31T23:59:59.123Z',
+  ]
+
+  for (const value of accepted) {
+    it(`接受「${value}」`, () => {
+      const ms = parseStrictIsoInstant(value)
+      expect(ms).not.toBeNull()
+      if (ms === null) throw new Error('应该接受这个时间')
+      expect(Number.isFinite(ms)).toBe(true)
+      expect(ms).toBe(Date.parse(value))
+    })
+  }
+
+  const rejected = [
+    '2099-02-31T00:00:00.000Z',   // 2 月没有 31 号（Date.parse 会滚成 3 月 3 日）
+    '2099-02-29T00:00:00Z',       // 2099 不是闰年
+    '2099-04-31T00:00:00Z',       // 4 月没有 31 号
+    '2099-13-01T00:00:00Z',       // 没有 13 月
+    '2099-12-31T24:00:00Z',
+    '2099-12-31T00:60:00Z',
+    '2099-12-31T00:00:60Z',
+    '12/31/2099',
+    '2099-12-31',                 // 只有日期
+    '2099-12-31T00:00:00',        // 没有时区
+    ' 2099-12-31T00:00:00Z',      // 前导空格（不做 trim）
+    '',
+  ]
+
+  for (const value of rejected) {
+    it(`拒绝「${value}」`, () => {
+      expect(parseStrictIsoInstant(value)).toBeNull()
+    })
+  }
+
+  it('非字符串一律拒绝', () => {
+    expect(parseStrictIsoInstant(1700000000000)).toBeNull()
+    expect(parseStrictIsoInstant(undefined)).toBeNull()
+  })
+})
+
+describe('writeGlobalLesson — 不存在的日期与合法偏移（V18 第 1 组再延伸）', () => {
+  it('validUntil 是 2099-02-31 → invalid，且完全不碰库', async () => {
+    const r = await writeGlobalLesson(fakeSupabase(), {
+      ...CLEAN,
+      provenance: { ...PROV, validUntil: '2099-02-31T00:00:00.000Z' },
+    })
+
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.reason).toBe('invalid')
+    expect(upserted).toHaveLength(0)
+    expect(upsertAttempts).toBe(0)
+    expect(fromCalls).toBe(0)
+  })
+
+  it('lastReviewedAt 是 2099-02-31 → invalid，且完全不碰库', async () => {
+    const r = await writeGlobalLesson(fakeSupabase(), {
+      ...CLEAN,
+      provenance: { ...PROV, lastReviewedAt: '2099-02-31T00:00:00.000Z' },
+    })
+
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.reason).toBe('invalid')
+    expect(upserted).toHaveLength(0)
+    expect(upsertAttempts).toBe(0)
+    expect(fromCalls).toBe(0)
+  })
+
+  it('带时区的合法时间照常写入，valid_until 是它的 ISO 形态', async () => {
+    const offset = '2099-12-31T10:00:00+13:00'
+    const r = await writeGlobalLesson(fakeSupabase(), {
+      ...CLEAN,
+      provenance: { ...PROV, validUntil: offset },
+    })
+
+    expect(r.ok).toBe(true)
+    expect(upsertAttempts).toBe(1)
+    expect(upserted).toHaveLength(1)
+    expect(upserted[0].valid_until).toBe(new Date(offset).toISOString())
+  })
+})
+
+describe('writeGlobalLessonOrThrow — 来源不合格时先拒绝，一次 from() 都不发生', () => {
+  const rejectedInputs: Array<{ label: string; input: LessonInput }> = [
+    { label: '有效期在过去', input: { ...CLEAN, provenance: { ...PROV, validUntil: PAST } } },
+    {
+      label: '不存在的日期',
+      input: { ...CLEAN, provenance: { ...PROV, validUntil: '2099-02-31T00:00:00.000Z' } },
+    },
+    { label: '正文只是规则编号', input: { ...CLEAN, lesson: 'C-13', provenance: PROV } },
+  ]
+
+  for (const { label, input } of rejectedInputs) {
+    it(`${label} → 抛「写入失败」，且完全不碰库`, async () => {
+      await expect(writeGlobalLessonOrThrow(fakeSupabase(), input)).rejects.toThrow('写入失败')
+
+      expect(fromCalls).toBe(0)
+      expect(upsertAttempts).toBe(0)
+      expect(upserted).toHaveLength(0)
+      expect(updates).toHaveLength(0)
+    })
+  }
+
+  it('只要碰库就抛：证明来源不合格时连读库都没有', async () => {
+    const exploding = fakeSupabaseThatThrowsOnFrom()
+
+    await expect(
+      writeGlobalLessonOrThrow(exploding, {
+        ...CLEAN,
+        provenance: { ...PROV, validUntil: PAST },
+      }),
+    ).rejects.toThrow('写入失败')
+
+    expect(fromCalls).toBe(0)
+    expect(upserted).toHaveLength(0)
+  })
+})
+
+/**
+ * 任何一次 `from()` 都立即抛：用来证明来源不合格时**根本没有碰库**。
+ * 用 Proxy 包一层，既复用同一份替身，也不需要额外的类型断言。
+ */
+function fakeSupabaseThatThrowsOnFrom(): SupabaseClient {
+  return new Proxy(fakeSupabase(), {
+    get(target, prop): unknown {
+      if (prop === 'from') {
+        return () => {
+          fromCalls += 1
+          throw new Error('来源不合格时不该碰库')
+        }
+      }
+      return Reflect.get(target, prop)
+    },
+  })
+}
