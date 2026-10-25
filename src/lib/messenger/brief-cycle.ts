@@ -156,10 +156,16 @@ export interface GenerateDueBriefsOptions {
   /** 读表用的时钟，默认 `Date.now`。测试注入假表，不用真等 90 秒。 */
   clock?: () => number
   /**
-   * 邮件渠道怎么拿「某个客户的拉全文方法」。默认走生产那条（查邮箱连接 → 换令牌）。
-   * 测试注入假的，整条链路不碰网络。
+   * 邮件渠道怎么**造**那个「按客户拿拉全文方法」的解析器。默认走生产那条
+   * （查邮箱连接 → 换令牌）。测试注入假的，整条链路不碰网络。
+   *
+   * 🔴 为什么注入的是**工厂**而不是解析器本身（复审 2026-10-26 的 P2，实测成立）：
+   *    令牌缓存必须「一轮一份」。如果只能注入解析器，测试就没法观察到
+   *    「每轮有没有新造一个」—— 实测把 `makeEmailFullTextResolver()` 提到模块顶层
+   *    （P1 那个 bug 的另一种写法），7 条测试照样全绿。注入工厂之后，
+   *    「这一轮问过工厂几次」就成了可断言的事实。
    */
-  emailFullText?: (clientId: string) => Promise<FetchFullText | null>
+  emailFullTextFactory?: () => (clientId: string) => Promise<FetchFullText | null>
 }
 
 export interface PostBriefSweepResult {
@@ -461,7 +467,7 @@ export async function generateDueBriefs(
   // 邮件清洗完没有任何客人原话的条数。单独记，不混进 failed —— 它不是故障。
   let emptyThreads = 0
   // 🔴 一轮一份的邮箱令牌缓存（见 makeEmailFullTextResolver 头上那条）。
-  const emailFullText = opts.emailFullText ?? makeEmailFullTextResolver()
+  const emailFullText = (opts.emailFullTextFactory ?? makeEmailFullTextResolver)()
   const perCandidateMs = opts.perCandidateMs ?? PER_CANDIDATE_BUDGET_MS
   const clock = opts.clock ?? Date.now
   const startedAt = clock()
