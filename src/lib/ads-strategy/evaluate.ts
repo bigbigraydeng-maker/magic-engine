@@ -89,9 +89,53 @@ function worstVerdict(verdicts: Verdict[]): Verdict {
   return real.reduce((worst, v) => (VERDICT_RANK[v] > VERDICT_RANK[worst] ? v : worst), 'healthy')
 }
 
-function primaryCountOf(primary: OutcomeStep | null, r: RawInsightRow): number | null {
+/** 保守兜底：行里只有自定义像素事件时，countOutcome 会把留资记为 null（归不上）。 */
+const UNCERTAIN_GOAL = 'OFFSITE_CONVERSIONS'
+
+/**
+ * 广告系列的优化目标：旗下任何广告组是网站转化、或查不到广告组目标 → 按网站转化保护（宁可不判）。
+ * 否则取任一广告组目标（无自定义事件歧义时结果与目标无关）。
+ */
+export function campaignGoalFor(goals: ReadonlySet<string | null> | undefined): string {
+  if (!goals || goals.size === 0 || goals.has(null) || goals.has(UNCERTAIN_GOAL)) return UNCERTAIN_GOAL
+  return goals.values().next().value as string
+}
+
+export function primaryCountOf(
+  primary: OutcomeStep | null,
+  r: RawInsightRow,
+  optimizationGoal: string | null,
+): number | null {
   if (primary === null) return null
-  return countOutcome(primary, r, { messagingReferralAvailable: false }).value
+  return countOutcome(primary, r, { messagingReferralAvailable: false, optimizationGoal }).value
+}
+
+/** campaign_id → 旗下广告组优化目标集合（取每个广告组最新快照）。读失败返回空 Map（走保守兜底）。 */
+async function loadCampaignGoals(clientId: string): Promise<Map<string, Set<string | null>>> {
+  const out = new Map<string, Set<string | null>>()
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('ad_entity_snapshots')
+    .select('entity_id, campaign_id, optimization_goal, capture_reason')
+    .eq('client_id', clientId)
+    .eq('level', 'adset')
+    .gte('captured_at', since)
+    .order('captured_at', { ascending: false })
+    .order('id', { ascending: true })
+  if (error) {
+    console.warn('[ads-strategy/evaluate] 读广告组优化目标失败，冷启动按保守口径', { clientId, error: error.message })
+    return out
+  }
+  const seen = new Set<string>()
+  for (const r of (data ?? []) as Array<{ entity_id: string; campaign_id: string | null; optimization_goal: string | null; capture_reason: string }>) {
+    if (seen.has(r.entity_id)) continue
+    seen.add(r.entity_id)
+    if (r.capture_reason === 'disappeared' || !r.campaign_id) continue
+    const set = out.get(r.campaign_id) ?? new Set<string | null>()
+    set.add(r.optimization_goal ?? null)
+    out.set(r.campaign_id, set)
+  }
+  return out
 }
 
 /** Group flat insight rows by campaign into DailyPoint series. */
@@ -311,7 +355,11 @@ export async function evaluateClientAdHealth(
     // 读不到 / 没配目标或主结果 → 冷启动不判（loadOutcomeConfig 读失败返回空配置，不回落默认）
     const { config } = await loadOutcomeConfig(clientId)
     const targetCost = config.primary === null ? null : config.targetCostPerPrimary
-    const rows = rawRows.map(r => ({ ...r, primary_results: primaryCountOf(config.primary, r) }))
+    const campaignGoals = config.primary === null ? new Map<string, Set<string | null>>() : await loadCampaignGoals(clientId)
+    const rows = rawRows.map(r => ({
+      ...r,
+      primary_results: primaryCountOf(config.primary, r, campaignGoalFor(campaignGoals.get(r.entity_id))),
+    }))
     const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry, targetCost)
 
     const { error: upsertError } = await supabaseAdmin

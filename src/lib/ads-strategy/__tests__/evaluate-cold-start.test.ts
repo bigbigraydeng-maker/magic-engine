@@ -1,6 +1,6 @@
 /** 冷启动按目标成本判：历史不满 14 天时，花费与单次成本都超过 2× 目标 → alert；没配目标不判。 */
 import { describe, expect, it } from 'vitest'
-import { buildNarrativePayload, coldStartAlert } from '../evaluate'
+import { buildNarrativePayload, campaignGoalFor, coldStartAlert, primaryCountOf } from '../evaluate'
 
 interface Row {
   entity_id: string
@@ -73,6 +73,41 @@ describe('冷启动按客户主结果口径计数', () => {
   it('主结果归不上（null）→ 不判，不拿通用 results 代替', () => {
     const rows = coldRows(150, 0)
     for (const r of rows.get('cold')!) { r.primary_results = null; r.results = 0 }
+    const p = buildNarrativePayload(rows, '2026-07-11', undefined, null, TARGET)
+    expect(p.campaigns[0].verdict).toBe('insufficient_history')
+  })
+})
+
+describe('冷启动主结果计数带广告组优化目标', () => {
+  const customOnly = {
+    entity_id: 'c1', entity_name: 'C1', insight_date: '2026-07-10', ctr: 0.02, cost_per_result: null,
+    results: 0, spend: 30, impressions: 3000, frequency_7d: null,
+    reach: null, video_thruplays: null,
+    actions: [{ action_type: 'offsite_conversion.fb_pixel_custom', value: '1' }],
+  }
+
+  it('网站转化优化 + 只有自定义像素事件 → 留资 null（不判）', () => {
+    expect(primaryCountOf('lead', customOnly, 'OFFSITE_CONVERSIONS')).toBeNull()
+  })
+
+  it('不传优化目标会误算成 0（说明保护靠目标上下文）', () => {
+    expect(primaryCountOf('lead', customOnly, null)).toBe(0)
+  })
+
+  it('广告组目标缺失 / 查不到 / 含网站转化 → 按保守口径 OFFSITE_CONVERSIONS', () => {
+    expect(campaignGoalFor(undefined)).toBe('OFFSITE_CONVERSIONS')
+    expect(campaignGoalFor(new Set())).toBe('OFFSITE_CONVERSIONS')
+    expect(campaignGoalFor(new Set<string | null>([null]))).toBe('OFFSITE_CONVERSIONS')
+    expect(campaignGoalFor(new Set<string | null>(['LEAD_GENERATION', 'OFFSITE_CONVERSIONS']))).toBe('OFFSITE_CONVERSIONS')
+  })
+
+  it('目标明确且非网站转化 → 原样返回', () => {
+    expect(campaignGoalFor(new Set<string | null>(['LEAD_GENERATION']))).toBe('LEAD_GENERATION')
+  })
+
+  it('归不上的天（primary_results null）使整条冷启动不判，即便花费远超 2× 目标', () => {
+    const rows = coldRows(500, 0)
+    for (const r of rows.get('cold')!) r.primary_results = primaryCountOf('lead', customOnly, 'OFFSITE_CONVERSIONS')
     const p = buildNarrativePayload(rows, '2026-07-11', undefined, null, TARGET)
     expect(p.campaigns[0].verdict).toBe('insufficient_history')
   })
