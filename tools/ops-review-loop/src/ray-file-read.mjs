@@ -6,8 +6,11 @@
  * 64KB. When that body is missing, or the contents API says the blob is too
  * large for that endpoint, the git blob API reads the whole file up to 100MB
  * (raw media type once the JSON body is omitted). Over 100MB comes back
- * `null` so the caller can judge the diff. A rate limit, 5xx, or network
- * error comes back `FILE_READ_FAILED` so the caller keeps the PR for Ray.
+ * `null` so the caller can judge the diff. A 404 is that same `null` only
+ * when the PR file list marks this path `removed`. Any other 404 — permissions,
+ * a stale read, or a rename's old path — is a read failure. A rate limit, 5xx,
+ * network error, or that other 404 comes back `FILE_READ_FAILED` so the caller
+ * keeps the PR for Ray.
  */
 
 export const FILE_READ_FAILED = Object.freeze({ kind: 'file-read-failed' })
@@ -161,12 +164,16 @@ function classifyOkBody(input, known) {
 /**
  * What one GitHub response means for the Ray-hold read.
  *
- * @param {{phase:'contents'|'blob'|'raw', status:number, json?:unknown, text?:string, knownSha?:string}} input
+ * @param {{phase:'contents'|'blob'|'raw', status:number, json?:unknown, text?:string, knownSha?:string, removed?:boolean}} input
  * @returns {{kind:'text', text:string}|{kind:'need-blob', sha:string}|{kind:'need-raw', sha:string}|{kind:'too-big'}|{kind:'missing'}|{kind:'failed'}}
  */
 export function classifyRayHoldResponse(input) {
   const known = blobSha(input.knownSha) || shaOf(input.json)
-  if (input.status === 404) return { kind: 'missing' }
+  // Trust a 404 only for the contents read of a path the file list marks removed.
+  // A blob 404, or a 404 on a file that is still supposed to be at this ref, is a failure.
+  if (input.status === 404) {
+    return input.phase === 'contents' && input.removed === true ? { kind: 'missing' } : { kind: 'failed' }
+  }
   if (input.status === 0 || input.status >= 500 || isRateLimited(input.status, input.json, input.text)) {
     return { kind: 'failed' }
   }
@@ -254,10 +261,11 @@ function finishRead(step) {
 }
 
 /**
- * Read one source file. String = whole file. `null` = too big or not at this
- * ref (caller may use the diff). `FILE_READ_FAILED` = the API failed.
+ * Read one source file. String = whole file. `null` = too big, or a 404 on a
+ * path the PR list marks removed (caller may use the diff).
+ * `FILE_READ_FAILED` = the API failed, including any other 404.
  *
- * @param {{repository:string, path:string, ref:string, token:string, sha?:string, fetchImpl?: RayFetch}} input
+ * @param {{repository:string, path:string, ref:string, token:string, sha?:string, removed?:boolean, fetchImpl?: RayFetch}} input
  * @returns {Promise<string|null|typeof FILE_READ_FAILED>}
  */
 export async function readRayHoldFile(input) {
@@ -277,6 +285,7 @@ export async function readRayHoldFile(input) {
       json: contents.json,
       text: contents.text,
       knownSha: input.sha,
+      removed: input.removed === true,
     }),
     fetchImpl,
     input.repository,
@@ -288,10 +297,10 @@ export async function readRayHoldFile(input) {
 
 /**
  * @param {unknown} files
- * @returns {Array<{path:string, sha?:string}>}
+ * @returns {Array<{path:string, sha?:string, removed?:boolean}>}
  */
 function sourceJobs(files) {
-  /** @type {Array<{path:string, sha?:string}>} */
+  /** @type {Array<{path:string, sha?:string, removed?:boolean}>} */
   const jobs = []
   const seen = new Set()
   if (!Array.isArray(files)) return jobs
@@ -304,7 +313,8 @@ function sourceJobs(files) {
       if (seen.has(filename)) continue
       seen.add(filename)
       const sha = key === 'filename' ? blobSha(record.sha) : null
-      jobs.push(sha ? { path: filename, sha } : { path: filename })
+      const removed = key === 'filename' && record.status === 'removed'
+      jobs.push(sha ? { path: filename, sha, removed } : { path: filename, removed })
     }
   }
   return jobs
@@ -324,6 +334,7 @@ export async function readRayHoldFiles(input) {
       ref: input.ref,
       token: input.token,
       sha: job.sha,
+      removed: job.removed,
       fetchImpl: input.fetchImpl,
     })
   }

@@ -417,9 +417,23 @@ describe('paths Ray still merges by hand', () => {
     })
     const failed = classifyRayHoldResponse({ phase: 'contents', status: 500, text: 'boom' })
     const limited = classifyRayHoldResponse({ phase: 'contents', status: 429, text: 'rate limit' })
+    const blobTooBig = classifyRayHoldResponse({
+      phase: 'blob',
+      status: 403,
+      text: 'this blob is too large',
+      knownSha: sha,
+    })
+    const blobUnprocessable = classifyRayHoldResponse({
+      phase: 'blob',
+      status: 422,
+      json: { message: 'blob too large', errors: [{ code: 'too_large' }] },
+      knownSha: sha,
+    })
     expect(over.kind).toBe('too-big')
     expect(failed.kind).toBe('failed')
     expect(limited.kind).toBe('failed')
+    expect(blobTooBig.kind).toBe('too-big')
+    expect(blobUnprocessable.kind).toBe('too-big')
 
     const tooBig = assessRayMergeHold([{ filename: path, patch }], { [path]: null })
     expect(tooBig.hold).toBe(false)
@@ -456,6 +470,97 @@ describe('paths Ray still merges by hand', () => {
       expect(held.hold).toBe(true)
       expect(held.reason).toContain('文件读取失败')
     })
+  })
+
+  it('trusts a 404 only when the file list says the file was removed', async () => {
+    const path = 'src/lib/not-on-the-list/bridge.ts'
+    const sha = 'e'.repeat(40)
+    const ref = 'f'.repeat(40)
+    const patch = '-const label = "old"\n'
+    const notRemoved = classifyRayHoldResponse({ phase: 'contents', status: 404, text: 'Not Found' })
+    const removedKind = classifyRayHoldResponse({
+      phase: 'contents',
+      status: 404,
+      text: 'Not Found',
+      removed: true,
+    })
+    const blobMissing = classifyRayHoldResponse({ phase: 'blob', status: 404, knownSha: sha, removed: true })
+    expect(notRemoved.kind).toBe('failed')
+    expect(removedKind.kind).toBe('missing')
+    expect(blobMissing.kind).toBe('failed')
+
+    const fetch404 = async () => ({ status: 404, text: async () => JSON.stringify({ message: 'Not Found' }) })
+    const read = (status: string | undefined) =>
+      readRayHoldFiles({
+        files: [{ filename: path, sha, ...(status ? { status } : {}), patch }],
+        repository: 'acme/repo',
+        ref,
+        token: 't',
+        fetchImpl: fetch404,
+      })
+
+    const stillThere = await read('modified')
+    expect(stillThere[path]).toBe(FILE_READ_FAILED)
+    const held = assessRayMergeHold([{ filename: path, status: 'modified', patch }], stillThere)
+    expect(held.hold).toBe(true)
+    expect(held.reason).toContain('文件读取失败')
+    expect(held.reason).not.toContain('diff 导入')
+
+    const unmarked = await read(undefined)
+    expect(unmarked[path]).toBe(FILE_READ_FAILED)
+    expect(assessRayMergeHold([{ filename: path, patch }], unmarked).hold).toBe(true)
+
+    const gone = await read('removed')
+    expect(gone[path]).toBeNull()
+    const released = assessRayMergeHold([{ filename: path, status: 'removed', patch }], gone)
+    expect(released.hold).toBe(false)
+    expect(released.reason).toBe('')
+
+    const spendPatch = "-import { pause } from '@/lib/meta/ad-publisher'\n"
+    const deletedSpend = await readRayHoldFiles({
+      files: [{ filename: path, sha, status: 'removed', patch: spendPatch }],
+      repository: 'acme/repo',
+      ref,
+      token: 't',
+      fetchImpl: fetch404,
+    })
+    const spendHold = assessRayMergeHold([{ filename: path, status: 'removed', patch: spendPatch }], deletedSpend)
+    expect(spendHold.hold).toBe(true)
+    expect(spendHold.reason).toContain('diff 导入了 Meta 广告写入模块')
+
+    const renamedSha = 'a'.repeat(40)
+    const next = 'src/lib/not-on-the-list/next.ts'
+    const quiet = 'export const n = 1\n'
+    const renamed = await readRayHoldFiles({
+      files: [{ filename: next, previous_filename: path, status: 'renamed', sha: renamedSha, patch }],
+      repository: 'acme/repo',
+      ref,
+      token: 't',
+      fetchImpl: async (url) => {
+        if (url.includes('/next.ts')) {
+          return {
+            status: 200,
+            text: async () =>
+              JSON.stringify({
+                type: 'file',
+                encoding: 'base64',
+                size: Buffer.byteLength(quiet),
+                sha: renamedSha,
+                content: Buffer.from(quiet).toString('base64'),
+              }),
+          }
+        }
+        return { status: 404, text: async () => JSON.stringify({ message: 'Not Found' }) }
+      },
+    })
+    expect(renamed[next]).toContain('export const n')
+    expect(renamed[path]).toBe(FILE_READ_FAILED)
+    const renameHold = assessRayMergeHold(
+      [{ filename: next, previous_filename: path, status: 'renamed', patch }],
+      renamed,
+    )
+    expect(renameHold.hold).toBe(true)
+    expect(renameHold.reason).toContain('文件读取失败')
   })
 
   it('wires the Ray hold through the blob reader instead of the 64KB contents cap', () => {

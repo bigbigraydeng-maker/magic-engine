@@ -464,7 +464,7 @@ function isSourcePath(path) {
 
 /**
  * Spend-import hold for one source path. A string is the whole file. A read
- * failure stays for Ray. `null` is too big or missing, so the diff is used.
+ * failure stays for Ray. `null` is too big or a confirmed deletion, so the diff is used.
  *
  * @param {string} path
  * @param {Record<string, unknown>} entry

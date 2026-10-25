@@ -665,8 +665,8 @@ try {
     readFiles: readHeadFiles,
   })
   // String: whole file, including one read through the git blob API.
-  // null: still over 100MB or not at this ref — judge that entry's patch.
-  // A read failure (rate limit, 5xx, network) stays for Ray and does not use the diff.
+  // null: over 100MB, or a 404 on a path the file list marks removed — judge that entry's patch.
+  // A read failure (rate limit, 5xx, network, or any other 404) stays for Ray and does not use the diff.
   const rayContents = Array.isArray(files)
     ? await readRayHoldFiles({
         files,
