@@ -119,4 +119,12 @@ describe('formatBenchmarksForPrompt — 预算定位', () => {
     )
     expect(text).toContain('AUD 800 – 800')
   })
+
+  it('NZD 预算不和澳元典型预算相除', () => {
+    const text = formatBenchmarksForPrompt(makeBenchmarks({ seo: 1000 }), '零售', 400, 'NZD')
+    expect(text).toContain('400 NZD')
+    expect(text).toContain('不是同一种货币')
+    expect(text).not.toContain('预算显著低于行业典型水平')
+    expect(text).not.toContain('0.40×')
+  })
 })

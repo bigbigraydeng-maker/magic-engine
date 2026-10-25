@@ -4,22 +4,25 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { applyApprove, applyBudgetUpdate, applyQualityReject } from './review-apply'
+import { ASSET_ONLY_NOT_PUBLISHABLE } from './deliverable'
 import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/content-review'
 
 type Resp = { data: unknown; error: unknown }
 
 /** 每个 await 的查询链消费队列里下一个响应(按调用顺序)。 */
-function mockSupabase(queue: Resp[]): { db: SupabaseClient; inserts: unknown[] } {
+function mockSupabase(queue: Resp[]): { db: SupabaseClient; inserts: unknown[]; updates: unknown[] } {
   let i = 0
   const inserts: unknown[] = []
+  const updates: unknown[] = []
   const builder: Record<string, unknown> = {}
-  const passthrough = ['select', 'eq', 'in', 'order', 'limit', 'update', 'maybeSingle', 'single']
+  const passthrough = ['select', 'eq', 'in', 'order', 'limit', 'maybeSingle', 'single']
   for (const m of passthrough) builder[m] = () => builder
+  builder.update = (row: unknown) => { updates.push(row); return builder }
   builder.insert = (rows: unknown) => { inserts.push(rows); return builder }
   ;(builder as { then: unknown }).then = (resolve: (r: Resp) => unknown) =>
     resolve(queue[i++] ?? { data: null, error: null })
   const db = { from: () => builder } as unknown as SupabaseClient
-  return { db, inserts }
+  return { db, inserts, updates }
 }
 
 const IN_REVIEW_WO = {
@@ -38,9 +41,24 @@ const FAIL_HUMAN = PASS_HUMAN.map(item => item.key === 'viral_recipe_hook_matche
   ? { ...item, outcome: 'FAIL' as const, detail: 'Hook did not match recipe' }
   : { ...item, outcome: 'NOT_MEASURED' as const })
 const approve = (db: SupabaseClient, id = 'wo-1', reviewer = 'me@x.com', clientId?: string) =>
-  applyApprove(db, id, reviewer, clientId, PASS_HUMAN)
+  applyApprove(db, id, reviewer, clientId, PASS_HUMAN, null)
 const reject = (db: SupabaseClient, id = 'wo-1', feedback = '画面太慢', reviewer = 'me@x.com', clientId?: string) =>
   applyQualityReject(db, id, feedback, reviewer, clientId, FAIL_HUMAN)
+
+const musicBrief = {
+  remotion: {
+    template: 'postcard',
+    props: {
+      brandColor: '#123456', logoFile: 'cts-logo.png', musicFile: 'founders-at-dawn.mp3', musicStartSec: 5,
+      cardOpacity: 0.7, cardSide: 'center', hook: { clip: 'hook.mp4', lines: ['China at dawn'] },
+      scenes: [
+        { clip: 'scene-one.mp4', place: 'Shanghai', line: 'Walk beside the old waterfront.', sourceUrl: 'https://example.com/one', sourceQuote: 'Walk beside the old waterfront in Shanghai.', placeSourceQuote: 'Shanghai waterfront.' },
+        { clip: 'scene-two.mp4', place: 'Hangzhou', line: 'Follow the lake into the hills.', sourceUrl: 'https://example.com/two', sourceQuote: 'Follow the lake into the hills.', placeSourceQuote: 'Hangzhou lake.' },
+      ],
+      price: null, end: { backdropClip: 'end.mp4', title: 'Explore China' }, timing: { hookSec: 3, sceneSec: 3, priceSec: 3 },
+    },
+  },
+}
 
 describe('applyApprove — 花钱闸(魏征红线③)', () => {
   it('in_review + 无 publish_budget → approved', async () => {
@@ -93,18 +111,83 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
     expect((await approve(db, 'wo-x')).status).toBe(404)
   })
 
-  it('clientId 不匹配 → 403(跨客户越权)', async () => {
-    const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+  it('clientId 不匹配 → 403(跨客户越权),且没有写库', async () => {
+    const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
     expect((await approve(db, 'wo-1', 'me@x.com', 'other-client')).status).toBe(403)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
+  it('别家客户 + 状态不是 in_review → 403（先核客户再核状态，不泄露别家工单的状态）', async () => {
+    const { db, updates } = mockSupabase([{ data: { ...IN_REVIEW_WO, status: 'approved' }, error: null }])
+    const r = await approve(db, 'wo-1', 'me@x.com', 'other-client')
+    expect(r.status).toBe(403)
+    expect(String(r.error)).not.toContain('status=')
+    expect(updates).toEqual([])
   })
 
   it('update 0 行(被 sweeper 抢) → 409', async () => {
     const { db } = mockSupabase([{ data: IN_REVIEW_WO, error: null }, { data: [], error: null }])
     expect((await approve(db)).status).toBe(409)
   })
+
+  it('asset_only 工单 → 409,不尝试 update', async () => {
+    const assetOnly = { ...IN_REVIEW_WO, brief: { remotion: { deliverable: 'asset_only' } } }
+    // Only the load response is queued: any further query would get the default
+    // { data: null } and the happy path would fail, so a 409 proves no update ran.
+    const { db } = mockSupabase([{ data: assetOnly, error: null }])
+    const r = await approve(db)
+    expect(r.ok).toBe(false)
+    expect(r.status).toBe(409)
+    // The guard's own message, not the generic "no longer in_review" a missing update would also give.
+    expect(r.error).toBe(ASSET_ONLY_NOT_PUBLISHABLE)
+  })
+
+  it('deliverable 拼错(typo) → 走正常路径', async () => {
+    const typo = { ...IN_REVIEW_WO, brief: { remotion: { deliverable: 'typo' } } }
+    const { db } = mockSupabase([{ data: typo, error: null }, { data: [{ id: 'wo-1' }], error: null }])
+    const r = await approve(db)
+    expect(r.ok).toBe(true)
+    expect(r.status).toBe(200)
+  })
 })
 
 describe('applyQualityReject — 打回重开', () => {
+  it('把人工选曲写进重开的 Remotion brief 并留审计信息', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: musicBrief }
+    const { db, inserts } = mockSupabase([
+      { data: wo, error: null },
+      { data: [{ id: 'wo-1' }], error: null },
+      { data: { id: 'wo-2' }, error: null },
+    ])
+    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com', undefined, FAIL_HUMAN, 'horizons-call')
+    expect(r.ok).toBe(true)
+    const reopened = inserts[0] as { brief: Record<string, any> }
+    expect(reopened.brief.remotion.props).toMatchObject({ musicFile: 'horizons-call.mp3', musicStartSec: 0 })
+    expect(reopened.brief.review_overrides.music).toMatchObject({
+      track_id: 'horizons-call', staged_file: 'horizons-call.mp3', catalog_file: "Horizon's Call.mp3", selected_by: 'me@x.com',
+    })
+    expect(reopened.brief.review_overrides.music.selected_at).toEqual(expect.any(String))
+  })
+
+  it('rejects an unapproved or incompatible music id before touching either work order', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: musicBrief }
+    const { db, updates, inserts } = mockSupabase([{ data: wo, error: null }])
+    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com', undefined, FAIL_HUMAN, 'pipa-trap')
+    expect(r.status).toBe(422)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
+  it('clientId 不匹配 → 403(跨客户越权),老单不动、不重开新单', async () => {
+    const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+    const r = await reject(db, 'wo-1', '画面太慢', 'me@x.com', 'other-client')
+    expect(r.ok).toBe(false)
+    expect(r.status).toBe(403)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
   it('老单 review_rejected + 重开新单(意见进新 brief)', async () => {
     const { db, inserts } = mockSupabase([
       { data: IN_REVIEW_WO, error: null },       // load
@@ -215,5 +298,14 @@ describe('applyBudgetUpdate — 只改预算不重生产', () => {
     const r = await applyBudgetUpdate(db, 'wo-1', 20, 'me@x.com')
     expect(r.ok).toBe(true)
     expect(r.data?.publish_budget_usd).toBe(20)
+  })
+
+  it('clientId 不匹配 → 403(跨客户越权),预算不动、没有写库', async () => {
+    const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+    const r = await applyBudgetUpdate(db, 'wo-1', 20, 'me@x.com', 'other-client')
+    expect(r.ok).toBe(false)
+    expect(r.status).toBe(403)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
   })
 })

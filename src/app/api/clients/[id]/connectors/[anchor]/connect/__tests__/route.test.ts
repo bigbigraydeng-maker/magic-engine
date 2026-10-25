@@ -76,6 +76,14 @@ beforeEach(() => {
 })
 
 describe('POST /api/clients/[id]/connectors/[anchor]/connect', () => {
+  it('refuses to mint an unverified social authorisation marker and supplies the real entry', async () => {
+    const res = await POST(makeRequest('social'), routeContext('social'))
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.code).toBe('SOCIAL_REQUIRES_OAUTH')
+    expect(body.href).toContain('section=social-connections')
+    expect(mocks.from).not.toHaveBeenCalled()
+  })
   it('rejects anchor=ga4 with the explicit GA4_REQUIRES_PROPERTY_VERIFICATION code — never touches the DB', async () => {
     const res = await POST(makeRequest('ga4', { config: { property_id: '550203806' } }), routeContext('ga4'))
 
@@ -98,7 +106,7 @@ describe('POST /api/clients/[id]/connectors/[anchor]/connect', () => {
     expect(mocks.upsertCalls).toHaveLength(0)
   })
 
-  it.each(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'social'])(
+  it.each(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews'])(
     'anchor=%s is unaffected — still connects normally',
     async (anchor) => {
       const res = await POST(makeRequest(anchor, { config: { page_url: 'https://example.com' } }), routeContext(anchor))

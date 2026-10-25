@@ -10,6 +10,13 @@ export interface ReelMediaEvidence {
   cover_mean_luma?: number
   cover_luma_range?: number
   cover_placeholder_detected?: boolean | null
+  content_substance?: {
+    verdict: 'pass' | 'asset_only' | 'fail'
+    kinds: string[]
+    textSeconds: number
+    reason: string
+  }
+  capabilities?: string[]
 }
 
 const measured = (

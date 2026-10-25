@@ -38,6 +38,8 @@ export interface GrowthFinding {
 
 export interface GrowthStateView {
   date: string
+  /** 目标卡是不是刚读出来的（员工版）；缺省 = 旧接口，按「每日缓存」处理 */
+  goal_live?: { live: boolean; readAtIso: string }
   data_completeness: 'complete' | 'partial'
   goal_pace: GoalPaceView | null
   payload: {
@@ -66,9 +68,17 @@ const CLIENT_PACE_LABEL: Record<GrowthVerdict, string> = {
   unknown: '暂时判断不了',
 }
 
+function goalLiveNote(meta: GrowthStateView['goal_live']): string | undefined {
+  if (!meta) return undefined
+  if (!meta.live) return '实时没读到生效中的目标（读取失败或已无目标），这张卡显示的是昨晚的缓存，可能不是最新。'
+  const t = new Date(meta.readAtIso)
+  if (Number.isNaN(t.getTime())) return '实时读取'
+  return `实时读取 · ${t.toLocaleTimeString('en-NZ', { timeZone: 'Pacific/Auckland', hour: '2-digit', minute: '2-digit', hour12: false })}`
+}
+
 type GoalView = { title: string; label: string; target: number; dayIndex: number; totalDays: number }
 
-function GoalBar({ goal, pace, clientView = false }: { goal: GoalView | null; pace: GoalPaceView | null; clientView?: boolean }) {
+function GoalBar({ goal, pace, clientView = false, liveNote }: { goal: GoalView | null; pace: GoalPaceView | null; clientView?: boolean; liveNote?: string }) {
   if (!goal || !pace) {
     return (
       <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
@@ -107,6 +117,7 @@ function GoalBar({ goal, pace, clientView = false }: { goal: GoalView | null; pa
           <p className="mt-1 text-xs text-gray-500">{pace.reason}</p>
         </>
       )}
+      {liveNote && <p className="mt-2 text-xs text-gray-500">{liveNote}</p>}
     </div>
   )
 }
@@ -271,7 +282,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
 
   return (
     <div className="space-y-4">
-      <GoalBar goal={state.payload?.goal ?? null} pace={state.goal_pace} />
+      <GoalBar goal={state.payload?.goal ?? null} pace={state.goal_pace} liveNote={goalLiveNote(state.goal_live)} />
 
       {partial && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">

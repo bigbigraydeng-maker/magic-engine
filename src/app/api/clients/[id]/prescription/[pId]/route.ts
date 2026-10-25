@@ -4,7 +4,7 @@
  *
  * PATCH /api/clients/[id]/prescription/[pId]
  *   Body: { status: 'approved'|'rejected', rejection_note?: string }
- *   - 'approved' → save approval (含批准人，取自会话) + synchronously generate execution_items
+ *   - 'approved' → save approval (含批准人，取自会话) + 把阶段挂到目标下。不再生成看板上的待办。
  *   - 'rejected'  → record rejection note
  *   - Already-approved prescription → 409 Conflict
  *
@@ -114,10 +114,9 @@ export async function PATCH(
     }
 
     // ── 批准 = 落地 ──
-    // 派生 Initiative → 生成执行项 → 归档旧版 → 标 approved，整套在
-    // lib/diagnostic/prescription-landing.ts 里，跟处方周更共用同一段代码。
-    // （顺序很重要：若执行项生成失败，status 保持 draft，
-    //   不会卡在"已批准但看板上没动作"这种从界面完全看不出来的状态。）
+    // 派生 Initiative（目标下的阶段）→ 归档旧版 → 标 approved。
+    // 不再生成看板上的待办；看板生成失败也不会让这次批准失败。
+    // 整套在 lib/diagnostic/prescription-landing.ts，处方周更共用同一段代码。
     if (body.status === 'approved') {
       try {
         // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）

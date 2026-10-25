@@ -91,7 +91,7 @@ describe('server gate unchanged', () => {
     const items = REEL_HUMAN_CHECK_KEYS_V2.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: null }))
     const wo = { id: 'w', client_id: 'c', status: 'in_review', output: {}, review_ref: {} }
     const supabase = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: wo, error: null }) }) }) }) }
-    const res = await applyApprove(supabase as never, 'w', 'pm', undefined, items)
+    const res = await applyApprove(supabase as never, 'w', 'pm', undefined, items, null)
     expect(res.ok).toBe(false)
     expect(reviewErrorZh(res.error ?? '', labelOf)).toContain('来源网址')
   })

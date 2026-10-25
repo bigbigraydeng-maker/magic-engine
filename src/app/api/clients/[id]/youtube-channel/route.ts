@@ -15,7 +15,8 @@ import { isValidChannelId } from '@/lib/youtube-publish/oauth'
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const access = await requireDashboardClientAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
-  return NextResponse.json({ channel_id: await getClientChannelId(params.id) })
+  const admin = await requireGlobalAdmin()
+  return NextResponse.json({ channel_id: await getClientChannelId(params.id), can_edit: admin.ok })
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {

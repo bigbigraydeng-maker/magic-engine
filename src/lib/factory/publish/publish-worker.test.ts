@@ -41,6 +41,10 @@ interface Scenario {
   noAngle?: boolean
   /** 上次上传到一半崩了:留着 provisional 回执 */
   interrupted?: boolean
+  /** 模拟「幂等锚(provisional 回执)」写库失败 */
+  anchorWriteError?: boolean
+  /** brief.remotion.deliverable 取值;'asset_only' = 素材,绝不可发布 */
+  deliverable?: string
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
@@ -62,6 +66,9 @@ function installMocks(s: Scenario) {
       if (table === 'content_work_orders') {
         if (ctx.isUpdate) {
           woUpdates.push(ctx.payload ?? {})
+          if (s.anchorWriteError && (ctx.payload?.published_ref as { provisional?: boolean } | undefined)?.provisional) {
+            return { data: null, error: { message: 'db down' } }
+          }
           // claimOne 的条件 UPDATE:返回领到的工单整行
           if (ctx.payload?.status === 'publishing') {
             return {
@@ -81,7 +88,7 @@ function installMocks(s: Scenario) {
                     quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
                   }),
                 },
-                brief: { ...(s.noAngle ? {} : { angle: 'X' }), copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
+                brief: { ...(s.noAngle ? {} : { angle: 'X' }), ...(s.deliverable === undefined ? {} : { remotion: { deliverable: s.deliverable } }), copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
               },
               error: null,
             }
@@ -199,6 +206,22 @@ describe('发布正文红线闸', () => {
     expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
   })
 
+  it('🔴 asset_only 素材即使被置成 approved 也不发布,且置终态不排重试', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, deliverable: 'asset_only' })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('asset_only_not_publishable')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('deliverable 拼错不当素材放行,也不当素材拦截(按成片正常发布)', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, deliverable: 'asset-only' })
+    await run()
+
+    expect(mockPublish).toHaveBeenCalled()
+  })
+
   it('正文使用分镜文案,CTA 与追踪链接放首评', async () => {
     installMocks({ redlines: [], endcard: { cta: 'Book now', offer: ['Save 20%', 'Ends Friday'], url: 'https://ctstours.co.nz' } })
     await run()
@@ -209,6 +232,29 @@ describe('发布正文红线闸', () => {
         firstComment: expect.stringContaining('Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz/?utm_source=facebook&utm_medium=organic_social'),
       }),
     )
+  })
+})
+
+describe('幂等锚写库', () => {
+  const startThenPublish = () => mockPublish.mockImplementation(async args => {
+    await args.onStarted?.('vid-1')
+    return { platform: 'facebook', post_id: 'p1' } as never
+  })
+
+  it('🔴 锚点(provisional 回执)写库失败 → 中止发布并置失败,不能当没事继续上传', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, anchorWriteError: true })
+    startThenPublish()
+    const r = await run()
+    expect(r.result).toBe('failed')
+    expect(r.detail).toBe('publish_error')
+    expect(finalStatus()!.status).toBe('publish_failed')
+  })
+
+  it('锚点写库成功 → 照常发布', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    startThenPublish()
+    expect((await run()).result).toBe('published')
+    expect(woUpdates.some(u => (u.published_ref as { video_id?: string } | undefined)?.video_id === 'vid-1')).toBe(true)
   })
 })
 

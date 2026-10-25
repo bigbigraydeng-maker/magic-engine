@@ -175,6 +175,11 @@ export interface Prescription {
    * supersedes_id 链路指向上一版的真实 row id; version 是给 UI 渲染滚动 chips 用.
    */
   version: number
+  /**
+   * Who wrote this prescription. Manual drafts are always `广告 Agent`.
+   * Older rows may omit it.
+   */
+  agent_name?: string | null
   created_at: string
   updated_at: string
 }
@@ -287,7 +292,7 @@ export interface CardContentState {
   text:       ContentStateSignal      // caption / script 有无
   image:      ContentStateSignal      // visual_assets 状态
   video:      ContentStateSignal      // reels_drafts 状态
-  publish:    ContentStateSignal      // publer_post_id / scheduled_at
+  publish:    ContentStateSignal      // scheduled_at / published_at
   priority:   CardPrioritySignal
   /** 最近一次相关状态变更时间（ISO 字符串）— 用于卡片右下角"3 分钟前" */
   last_changed_at: string | null
@@ -328,7 +333,10 @@ export type TimelineUrgency = 'immediate' | 'short_term' | 'long_term'
 export interface PrescriptionIntake {
   business_goal: string
   timeline_urgency: TimelineUrgency
+  /** Amount in budget_currency. The field name is historical and is not a promise of AUD. */
   monthly_budget_aud: number
+  /** ISO code from the ad account or the client country. Absent only on old rows. */
+  budget_currency?: string | null
   priority_dimensions: DiagnosticDimension[]
   notes: string | null
 }

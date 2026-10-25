@@ -59,7 +59,7 @@
 | SEMrush / DataForSEO | 只读 |
 | GA4 | 只读 |
 | Airtable（Content Workspace） | 读写 |
-| Publer（Publishing Hub） | 读写 |
+| Publer（Publishing Hub） | 读写（Publer 已于 2026-10 删除） |
 | Supabase（ME 内部数据）| 只读 |
 | 所有 ME API 路由 | 读写 |
 

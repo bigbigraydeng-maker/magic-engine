@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "id": "2000000000000001", "name": "Main dataset", "last_fired_time": "2026-10-19T12:51:21+1300", "is_unavailable": false },
+    { "id": "2000000000000002", "name": "Never fired", "last_fired_time": null, "is_unavailable": false }
+  ],
+  "paging": { "cursors": { "before": "QVFIbefore", "after": "QVFIafter" } }
+}

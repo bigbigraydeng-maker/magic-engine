@@ -5,6 +5,7 @@
  * 平台通用：不出现任何客户名 / 行业词；示例里的名称和数字都是占位，页面上会标「示例」。
  */
 
+import { publicAdAccountName } from '@/lib/ads/spend-figures'
 import type { PromoPhase, PromoSpec, PromoStep } from './spec'
 
 export type StepGroup = 'ads' | 'social' | 'blog' | 'newsletter'
@@ -57,7 +58,7 @@ function targetingText(t: NonNullable<Extract<PromoStep, { kind: 'ads_campaign' 
   return parts.length > 0 ? parts.join(' · ') : '还没填'
 }
 
-function adsView(step: Extract<PromoStep, { kind: 'ads_campaign' }>): StepView {
+function adsView(step: Extract<PromoStep, { kind: 'ads_campaign' }>, accountLabels: Record<string, string | null>): StepView {
   const s = step.settings
   const t = s.targeting
   // 受众和投放范围是二选一；只显示真填了的那一种，别显示「受众：」后面空着。
@@ -68,7 +69,7 @@ function adsView(step: Extract<PromoStep, { kind: 'ads_campaign' }>): StepView {
       : '还没说投给谁'
   const lines = [
     `每天预算 ${money(s.daily_budget_cents)}（按广告账户的币种）`,
-    `广告账户：${s.ad_account_id} · ${who}`,
+    `广告账户：${publicAdAccountName(accountLabels[s.ad_account_id], s.ad_account_id)} · ${who}`,
     s.creative_refs.length > 0 ? `用 ${s.creative_refs.length} 个已批准的素材` : '还没选素材',
   ]
   if (s.paused_ranges.length > 0) {
@@ -87,9 +88,9 @@ function socialView(step: Extract<PromoStep, { kind: 'social_cadence' }>): StepV
   return { id: step.id, group: 'social', title: '发社媒', lines: [parts.length > 0 ? parts.join('，') : '这个阶段不安排社媒'] }
 }
 
-function stepView(step: PromoStep): StepView {
+function stepView(step: PromoStep, accountLabels: Record<string, string | null>): StepView {
   switch (step.kind) {
-    case 'ads_campaign': return adsView(step)
+    case 'ads_campaign': return adsView(step, accountLabels)
     case 'social_cadence': return socialView(step)
     case 'blog_article':
       return {
@@ -104,18 +105,18 @@ function stepView(step: PromoStep): StepView {
   }
 }
 
-function phaseView(phase: PromoPhase): PhaseView {
+function phaseView(phase: PromoPhase, accountLabels: Record<string, string | null>): PhaseView {
   return {
     id: phase.id,
     name: phase.name,
     range: `${phase.start_date} 至 ${phase.end_date}`,
     days: inclusiveDays(phase.start_date, phase.end_date),
-    steps: phase.steps.map(stepView),
+    steps: phase.steps.map(step => stepView(step, accountLabels)),
   }
 }
 
-export function describePromoSpec(spec: PromoSpec): PhaseView[] {
-  return [...spec.phases].sort((a, b) => a.start_date.localeCompare(b.start_date)).map(phaseView)
+export function describePromoSpec(spec: PromoSpec, accountLabels: Record<string, string | null> = {}): PhaseView[] {
+  return [...spec.phases].sort((a, b) => a.start_date.localeCompare(b.start_date)).map(phase => phaseView(phase, accountLabels))
 }
 
 /**

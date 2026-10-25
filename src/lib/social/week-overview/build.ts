@@ -94,21 +94,24 @@ interface ReelRow {
   published_ref: unknown
   music_file: string | null
   template: string | null
+  deliverable: string | null
 }
 
 /** This client's factory Reels only (filtered in the query), newest first. Throws on a database error. */
 export async function listClientReels(db: SupabaseClient, clientId: string): Promise<OverviewReel[]> {
   const { data, error } = await db
     .from('content_work_orders')
-    .select('id, status, angle, created_at, video_path:output->>video_path, published_ref, music_file:brief->remotion->props->>musicFile, template:brief->remotion->>template')
+    .select('id, status, angle, created_at, video_path:output->>video_path, published_ref, music_file:brief->remotion->props->>musicFile, template:brief->remotion->>template, deliverable:brief->remotion->>deliverable')
     .eq('client_id', clientId)
     .not('status', 'in', `(${HIDDEN_REEL_STATUSES.join(',')})`)
     .not('output->>video_path', 'is', null)
+    // Filter asset_only in SQL so material orders cannot crowd real Reels out of the limit window.
+    .or('brief->remotion->>deliverable.is.null,brief->remotion->>deliverable.neq.asset_only')
     .order('created_at', { ascending: false })
     .limit(REEL_LIMIT)
   if (error) throw new Error(error.message)
   return ((data ?? []) as unknown as ReelRow[])
-    .filter((row) => typeof row.video_path === 'string' && row.video_path.length > 0)
+    .filter((row) => typeof row.video_path === 'string' && row.video_path.length > 0 && row.deliverable !== 'asset_only')
     .map((row) => {
       const published = toPublishedView(row.published_ref)
       return {

@@ -20,6 +20,7 @@ import type {
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { getAnthropicClient, parseJsonResponse, MODEL_SONNET } from '@/lib/anthropic/client'
 import { loadNarrativesForRun, type NarrativeRow } from './synthesis/persistence'
+import { budgetAmountLabel, budgetCapInstruction, budgetCurrencyOf } from '@/lib/ads/budget-currency'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -227,14 +228,14 @@ ${synthesisText}
 
 Business Goal: ${intake.business_goal}
 Timeline Urgency: ${intake.timeline_urgency}
-Monthly Budget: AUD ${intake.monthly_budget_aud}
+Monthly Budget: ${budgetAmountLabel(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Priority Dimensions: ${priorityDims}
 Additional Notes: ${intake.notes ?? 'None'}
 
 ## Instructions
 
 Generate a 3-phase prescription JSON for this AU/NZ business.
-Budget: AUD ${intake.monthly_budget_aud}/month — allocations must NOT exceed this total.
+${budgetCapInstruction(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Focus on the critical and high severity findings listed above.`
 }
 
@@ -444,14 +445,14 @@ ${findingsText}
 
 Business Goal: ${intake.business_goal}
 Timeline Urgency: ${intake.timeline_urgency}
-Monthly Budget: AUD ${intake.monthly_budget_aud}
+Monthly Budget: ${budgetAmountLabel(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Priority Dimensions: ${priorityDims}
 Additional Notes: ${intake.notes ?? 'None'}
 
 ## Instructions
 
 Generate a 3-phase prescription JSON for this AU/NZ business.
-Budget: AUD ${intake.monthly_budget_aud}/month — allocations must NOT exceed this total.
+${budgetCapInstruction(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Focus on the crisis type and recommended actions listed above.`
 }
 

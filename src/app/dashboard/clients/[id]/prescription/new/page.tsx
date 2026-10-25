@@ -8,6 +8,16 @@ import type { ClientDiscoveryRow } from '@/lib/zhangqian/types'
 import type { SelfGrade, HuatuoGenerationMeta, TrendSummaryLite, SelfGradeWeakness, SelfGradeDimension } from '@/lib/huatuo/types'
 import { coerceWeaknesses } from '@/lib/huatuo/weakness-utils'
 import { shouldAutoRestoreLatestDraft } from './restore-guards'
+import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
+import { adCurrencyLabel, adCurrencyPrefix, formatAdMoney } from '@/lib/ads/spend-figures'
+import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
+import { actionFixBadge, showActionModuleChip } from './action-badge'
+import {
+  ManualDraftBanner,
+  PrescriberLine,
+  PrescriptionReviewActions,
+} from './review-actions'
+import { MANUAL_PRESCRIPTION_AGENT, manualSource } from '@/lib/diagnostic/manual-prescription'
 
 // DAPE Week 2 W4 — Goal 一对一 + 版本化所需的轻量 row 类型
 interface MinimalGoal {
@@ -106,6 +116,9 @@ export default function NewPrescriptionPage() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const clientId     = params.id as string
+  const budgetCurrency = useClientAdCurrency(clientId)
+  const budgetCode = adCurrencyLabel(budgetCurrency)
+  const budgetPrefix = adCurrencyPrefix(budgetCurrency)
 
   // 补充/修订模式：URL 带 ?supplement_of=<id> 或 ?revise=<id>
   const supplementOf = searchParams.get('supplement_of')
@@ -149,6 +162,8 @@ export default function NewPrescriptionPage() {
   const [trendSummary, setTrendSummary]       = useState<TrendSummaryLite | null>(null)
   // 处方状态 — approved 时切只读，禁用精修/批准
   const [prescriptionStatus, setPrescriptionStatus] = useState<PrescriptionStatus | null>(null)
+  const [agentName, setAgentName] = useState<string | null>(null)
+  const [manualSourceFlag, setManualSourceFlag] = useState(false)
 
   // Approval state
   const [isApproving, setIsApproving]   = useState(false)
@@ -190,6 +205,8 @@ export default function NewPrescriptionPage() {
         const p = data.prescription
         if (cancelled || !p.content) return
         setContent(p.content)
+        setAgentName(p.agent_name ?? null)
+        setManualSourceFlag(manualSource((p as Prescription & { generation_meta?: unknown }).generation_meta))
         const sg = (p as Prescription & { self_grade?: SelfGrade }).self_grade
         if (sg) setSelfGrade(sg)
         const meta = (p as Prescription & { generation_meta?: HuatuoGenerationMeta & { trend_summary?: TrendSummaryLite } }).generation_meta
@@ -307,6 +324,8 @@ export default function NewPrescriptionPage() {
         setPrescriptionId(p.id)
         setPrescriptionStatus(p.status)
         setContent(p.content)
+        setAgentName(p.agent_name ?? null)
+        setManualSourceFlag(manualSource((p as Prescription & { generation_meta?: unknown }).generation_meta))
         const sg = (p as Prescription & { self_grade?: SelfGrade }).self_grade
         if (sg) setSelfGrade(sg)
         const meta = (p as Prescription & { generation_meta?: HuatuoGenerationMeta & { trend_summary?: TrendSummaryLite } }).generation_meta
@@ -323,6 +342,12 @@ export default function NewPrescriptionPage() {
 
   // ── Generate prescription (SSE 流式) ──────────────────────────────────────
   const handleGenerate = useCallback(async () => {
+    const budgetFields = prescriptionBudgetFields(budget, budgetCurrency)
+    if (!budgetFields.ok) {
+      setGenerateError(budgetFields.error)
+      return
+    }
+
     setIsGenerating(true)
     setGenerateError(null)
     setProgressNote('连接诸葛亮…')
@@ -337,7 +362,8 @@ export default function NewPrescriptionPage() {
       const intake: PrescriptionIntake = {
         business_goal:       businessGoal,
         timeline_urgency:    urgency,
-        monthly_budget_aud:  budget,
+        monthly_budget_aud:  budgetFields.monthly_budget_aud,
+        budget_currency:     budgetFields.budget_currency,
         priority_dimensions: priorityDims,
         notes:               notes || null,
       }
@@ -380,6 +406,8 @@ export default function NewPrescriptionPage() {
             if (payload.trend_summary) setTrendSummary(payload.trend_summary)
           }
           setPrescriptionStatus('draft')
+          setAgentName('huatuo')
+          setManualSourceFlag(false)
           setStep(3)
         },
         onError: (err) => { streamErr = err },
@@ -401,7 +429,7 @@ export default function NewPrescriptionPage() {
       setProgressNote(null)
       if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null }
     }
-  }, [businessGoal, urgency, budget, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
+  }, [businessGoal, urgency, budget, budgetCurrency, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
 
   // ── Approve prescription ──────────────────────────────────────────────────
   const handleApprove = async () => {
@@ -541,6 +569,8 @@ export default function NewPrescriptionPage() {
     setStep(1)
     setContent(null)
     setPrescriptionId(null)
+    setAgentName(null)
+    setManualSourceFlag(false)
   }
 
   const toggleDimension = (dim: DiagnosticDimension) => {
@@ -568,7 +598,7 @@ export default function NewPrescriptionPage() {
             </svg>
             返回
           </Link>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-lg font-semibold text-gray-900">
               {priorMode === 'supplement' ? '补充处方' : priorMode === 'revision' ? '修订处方' : '生成处方'}
             </h1>
@@ -580,6 +610,12 @@ export default function NewPrescriptionPage() {
                   : '基于品牌健康发现，由 Strategy Engine 生成三阶段营销方案'}
             </p>
           </div>
+          <Link
+            href={`/dashboard/clients/${clientId}/prescription/import${selectedGoalId ? `?goal_id=${selectedGoalId}` : ''}`}
+            className="ml-auto shrink-0 text-xs font-medium text-indigo-700 hover:underline"
+          >
+            贴入处方草稿
+          </Link>
         </div>
       </div>
 
@@ -718,10 +754,10 @@ export default function NewPrescriptionPage() {
             {/* Monthly budget */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                月度预算（AUD）<span className="text-red-500">*</span>
+                月度预算（{budgetCode}）<span className="text-red-500">*</span>
               </label>
               <div className="flex items-center gap-2">
-                <span className="text-gray-500 text-sm">AUD $</span>
+                <span className="text-gray-500 text-sm">{budgetPrefix || budgetCode}</span>
                 <input
                   type="number"
                   min={500}
@@ -880,9 +916,16 @@ export default function NewPrescriptionPage() {
               <TrendCard summary={trendSummary} />
             )}
 
+            <ManualDraftBanner
+              show={prescriptionStatus === 'draft' && (agentName === MANUAL_PRESCRIPTION_AGENT || manualSourceFlag)}
+            />
+
             {/* Summary */}
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h2 className="font-semibold text-gray-900 mb-2">处方摘要</h2>
+            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 className="font-semibold text-gray-900">处方摘要</h2>
+                <PrescriberLine agentName={agentName} />
+              </div>
               <p className="text-sm text-gray-600">{content.summary}</p>
             </div>
 
@@ -901,7 +944,7 @@ export default function NewPrescriptionPage() {
                         />
                       </div>
                       <span className="text-xs font-medium text-gray-700 w-24 text-right">
-                        AUD ${b.amount_aud} ({b.percentage}%)
+                        {formatAdMoney(b.amount_aud, budgetCurrency)} ({b.percentage}%)
                       </span>
                     </div>
                   ))}
@@ -1016,25 +1059,12 @@ export default function NewPrescriptionPage() {
                 </Link>
               </div>
             ) : (
-              <div className="flex gap-3 pt-2 pb-20 lg:pb-2">
-                <button
-                  onClick={() => void handleReject()}
-                  className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  要求修改
-                </button>
-                <button
-                  onClick={() => void handleApprove()}
-                  disabled={isApproving}
-                  className="flex-1 rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isApproving ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                      处理中…
-                    </span>
-                  ) : '✓ 批准并生成执行计划'}
-                </button>
+              <div className="pt-2 pb-20 lg:pb-2">
+                <PrescriptionReviewActions
+                  onApprove={() => void handleApprove()}
+                  onReject={() => void handleReject()}
+                  isApproving={isApproving}
+                />
               </div>
             )}
             </div>
@@ -1686,10 +1716,7 @@ const MODULE_LABEL: Record<string, string> = {
 }
 
 function ActionRow({ action }: { action: PrescriptionAction }) {
-  const fixTypeBadge =
-    action.fix_type === 'me_auto'    ? { label: 'ME', cls: 'bg-blue-100 text-blue-700' } :
-    action.fix_type === 'fde_manual' ? { label: 'FDE', cls: 'bg-purple-100 text-purple-700' } :
-                                       { label: '第三方', cls: 'bg-gray-100 text-gray-600' }
+  const fixTypeBadge = actionFixBadge(action)
 
   const impactDot =
     action.impact === 'high'   ? 'bg-green-500' :
@@ -1706,7 +1733,7 @@ function ActionRow({ action }: { action: PrescriptionAction }) {
           <div className="flex items-baseline gap-2 flex-wrap">
             <p className="text-sm font-medium text-gray-900">{action.title}</p>
             <span className={`w-1.5 h-1.5 rounded-full ${impactDot}`} title={`影响：${action.impact}`} />
-            {action.module && (
+            {showActionModuleChip(action) && action.module && (
               <span className="text-[10px] uppercase tracking-wide text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5">
                 {MODULE_LABEL[action.module] ?? action.module}
               </span>

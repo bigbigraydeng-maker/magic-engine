@@ -14,30 +14,26 @@ import type { PromoBoard } from '@/lib/marketing-plan/promo/board'
 import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
 import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
 import { ScheduleTable } from './_components/ScheduleTable'
 import { expandPromoSchedule } from '@/lib/marketing-plan/promo/schedule'
+import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
 import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
+import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
+import { PrescriptionCard } from './_components/PrescriptionCard'
+import { adsRunningFrom, describeLiveAds } from '@/lib/marketing-plan/promo/live-ads-message'
+import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
+import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
 /** 计划内容变了（含从「高级」保存）就换 key，让表格和文本编辑器都重新读最新内容。 */
 const planKey = (p: MarketingPlan) => `${p.id}:${JSON.stringify((p.plan_data as unknown as { promo?: unknown })?.promo ?? null)}`
-
-const hasPromo = (p: MarketingPlan) => !!(p.plan_data as unknown as { promo?: unknown })?.promo
-
-/** 默认看哪份：有推广结构的已批准计划 > 有推广结构的草稿 > 任意草稿。 */
-function pickDefault(plans: MarketingPlan[]): MarketingPlan | null {
-  const live = plans.filter(p => p.status !== 'archived')
-  return live.find(p => p.status === 'approved' && hasPromo(p))
-    ?? live.find(p => p.status === 'draft' && hasPromo(p))
-    ?? live.find(p => p.status === 'draft')
-    ?? null
-}
 
 export function PromoPlanClient() {
   const clientId = useParams().id as string
@@ -45,6 +41,9 @@ export function PromoPlanClient() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [board, setBoard] = useState<PromoBoard | null>(null)
   const [options, setOptions] = useState<PromoOptions | null>(null)
+  const [liveAds, setLiveAds] = useState<LiveAdsFact | null>(null)
+  const [liveAdsVisible, setLiveAdsVisible] = useState(false)
+  const [prescription, setPrescription] = useState<GoalPrescriptionView | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -56,27 +55,45 @@ export function PromoPlanClient() {
 
   const loadPlans = useCallback(async () => {
     const res = await fetch(base)
-    const json = await res.json() as { success: boolean; plans?: MarketingPlan[]; error?: string }
+    const json = await res.json() as {
+      success: boolean
+      plans?: MarketingPlan[]
+      prescription?: GoalPrescriptionView | null
+      error?: string
+    }
     if (!json.success) throw new Error(json.error ?? '读取计划失败')
-    setPlans(json.plans ?? [])
-    return json.plans ?? []
+    const plans = json.plans ?? []
+    setPlans(plans)
+    return { plans, prescription: json.prescription ?? null }
   }, [base])
 
   const loadBoard = useCallback(async (planId: string) => {
     const res = await fetch(`${base}/${planId}/promo`)
-    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; error?: string }
+    const json = await res.json() as {
+      success: boolean
+      board?: PromoBoard
+      options?: PromoOptions
+      live_ads?: LiveAdsFact | null
+      live_ads_visible?: boolean
+      prescription?: GoalPrescriptionView | null
+      error?: string
+    }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
     setOptions(json.options ?? null)
+    setLiveAds(json.live_ads ?? null)
+    setLiveAdsVisible(json.live_ads_visible === true)
+    setPrescription(json.prescription ?? null)
   }, [base])
 
   const refresh = useCallback(async (keepId?: string | null) => {
     setLoading(true); setError(null)
     try {
-      const list = await loadPlans()
-      const id = keepId ?? pickDefault(list)?.id ?? null
+      const loaded = await loadPlans()
+      const id = keepId ?? pickPlanForPrescription(loaded.plans, loaded.prescription?.goal_id ?? null)?.id ?? null
       setSelectedId(id)
-      if (id) await loadBoard(id); else setBoard(null)
+      if (id) await loadBoard(id)
+      else { setBoard(null); setPrescription(loaded.prescription) }
     } catch (e) {
       setError((e as Error).message)
     } finally { setLoading(false) }
@@ -125,17 +142,26 @@ export function PromoPlanClient() {
   }
 
   const approve = board ? approveButtonState(board) : null
-  // 「今天」按悉尼日期（澳新客户的日历日），不用 UTC，免得早上少算一天
-  const todayIso = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Sydney' }).format(new Date())
+  // 「今天」按新西兰日期（页面是 NZ 的），不用 UTC，免得凌晨少算一天
+  const todayIso = todayInNz()
   // 展示用的推广结构：示例开着看示例，否则看这份计划自己的
   const shownSpec = useMemo(
     () => (showSample ? buildPromoSample(todayIso) : selected ? readPromoSpec(selected.plan_data) : null),
     [showSample, selected, todayIso],
   )
-  const shownPhases = useMemo(() => (shownSpec ? describePromoSpec(shownSpec) : null), [shownSpec])
+  const accountLabels = useMemo(() => {
+    const map: Record<string, string | null> = {}
+    for (const account of options?.accounts ?? []) map[account.id] = account.label ?? null
+    return map
+  }, [options])
+  const shownPhases = useMemo(
+    () => (shownSpec ? describePromoSpec(shownSpec, showSample ? {} : accountLabels) : null),
+    [shownSpec, showSample, accountLabels],
+  )
   // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
   const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
   const approvedLike = selected?.status === 'approved' || selected?.status === 'completed'
+  const viewPhases = useMemo(() => (shownSpec?.phases ?? []).map(p => ({ id: p.id, name: p.name, start_date: p.start_date })), [shownSpec])
   const scheduleMode = showSample ? 'sample' : approvedLike ? 'approved' : 'preview'
 
   return (
@@ -148,6 +174,7 @@ export function PromoPlanClient() {
           <Link href={`/dashboard/clients/${clientId}/marketing-plan`} className="ml-auto text-xs text-indigo-600 hover:underline">
             去 Marketing Plan 看任务 →
           </Link>
+          <BlankDraftPlanButton clientId={clientId} onCreated={id => { void refresh(id) }} />
         </div>
 
         {plans.length > 1 && (
@@ -167,16 +194,18 @@ export function PromoPlanClient() {
         {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">读取失败：{error}。这不代表“没有计划”，请稍后重试。</p>}
         {message && <p className="text-sm bg-white border border-gray-200 rounded-lg p-3">{message}</p>}
 
+        {!loading && !error && prescription && <PrescriptionCard clientId={clientId} prescription={prescription} />}
+
         {!loading && !error && !selected && (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-center">
             <p className="text-sm text-gray-700">这个客户还没有可用的计划。</p>
-            <p className="text-xs text-gray-500 mt-1">先到 Marketing Plan 页面生成一份草稿，再回来补上推广计划的阶段。</p>
+            <p className="text-xs text-gray-500 mt-1">用上面的「新建空白草稿计划」选一个目标。不会自动写内容，也不会改动已有计划。</p>
           </div>
         )}
 
         {board && selected && (
           <>
-            <Headline board={board} plan={selected} />
+            <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
@@ -194,7 +223,7 @@ export function PromoPlanClient() {
                     <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。先在下面「想自己改？展开」里搭出阶段，广告那一项可以让系统起草预算、受众和素材。</p>
                   </div>
                 )}
-            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} />}
+            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} adsRunning={adsRunningFrom(liveAdsVisible ? liveAds : null)} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
@@ -253,16 +282,20 @@ export function PromoPlanClient() {
   )
 }
 
-function Headline({ board, plan }: { board: PromoBoard; plan: MarketingPlan }) {
+function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: { board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveAdsVisible: boolean; clientId: string }) {
   const draft = plan.status === 'draft'
+  const live = draft ? describeLiveAds(liveAds) : null
   const text = draft
-    ? '还没批准——批准之前什么都不会发生'
+    ? live?.level === 'red' ? '还没批准——但系统里显示广告已经在花钱'
+      : live?.level === 'amber' ? '还没批准——Meta 里的广告可能已经在花钱'
+      : '还没批准——批准之前，ME 的自动动作都不会发生'
     : board.reconcile?.headline ?? (board.has_promo ? '推广计划的内容有问题，先改好' : '这份计划还没有推广计划的阶段')
   const blind = !draft && !!board.reconcile?.blind
   return (
     <div className={`rounded-xl border px-5 py-4 ${blind ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200'}`}>
       <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
       <p className="text-lg font-bold text-gray-900">{text}</p>
+      {draft && liveAdsVisible && <LiveAdsNotice fact={liveAds} message={live} clientId={clientId} />}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (
         <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>
@@ -280,4 +313,19 @@ function SpecProblems({ board }: { board: PromoBoard }) {
       </ul>
     </div>
   )
+}
+
+function LiveAdsNotice({ fact, message, clientId }: { fact: LiveAdsFact | null; message: LiveAdsMessage | null; clientId: string }) {
+  if (message) {
+    const tone = message.level === 'red' ? 'border-red-300 bg-red-50 text-red-800'
+      : message.level === 'amber' ? 'border-yellow-300 bg-yellow-50 text-yellow-900' : 'border-gray-200 bg-gray-50 text-gray-700'
+    return (
+      <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone}`}>
+        {message.text}{' '}
+        <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
+      </p>
+    )
+  }
+  if (!fact || !fact.ok) return <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
+  return null
 }

@@ -251,6 +251,12 @@ export interface SupportingMetric {
   unit?: string
   baseline?: number
   target?: number
+  /**
+   * Only read when key is `deposited_seat_scope`.
+   * Lists the departures whose deposited seats fill this goal.
+   * Verdict does not use supporting metrics.
+   */
+  departures?: Array<{ depart_on: string; tour_id?: string }>
 }
 
 export interface InitiativeRow {

@@ -36,7 +36,7 @@ import { startAdvancedDiscovery } from '@/lib/zhangqian/start-advanced-discovery
 // verifies live GA4 Data API access before ever writing 'connected'. No
 // other anchor currently needs that guarantee — see the explicit 400 below
 // if this ever gets called with anchor=ga4 again.
-const VALID_ANCHORS = new Set(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews', 'social'])
+const VALID_ANCHORS = new Set(['gsc', 'google-ads', 'gbp', 'meta-ads', 'reviews'])
 
 // Anchors that unlock advanced discovery when connected.
 const ADVANCED_DISCOVERY_TRIGGERS = new Set(['meta-ads', 'gbp', 'gsc', 'google-ads'])
@@ -50,6 +50,14 @@ export async function POST(
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error }, { status: access.status })
   }
+
+  // A marker row cannot prove platform consent. Keep old callers actionable,
+  // but never mint a fake social authorisation from a checkbox.
+  if (anchor === 'social') return NextResponse.json({
+    success: false, code: 'SOCIAL_REQUIRES_OAUTH',
+    error: '请在社媒授权与连接中核实具体平台账号。登记资料不代表授权。',
+    href: `/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=connect&section=social-connections`,
+  }, { status: 409 })
 
   if (anchor === 'ga4') {
     return NextResponse.json(

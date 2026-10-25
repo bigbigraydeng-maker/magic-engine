@@ -3,6 +3,7 @@
 import type { PromoStep } from '@/lib/marketing-plan/promo/spec'
 import type { PromoAccountOption } from '@/lib/marketing-plan/promo/options'
 import { ageOrUndefined, centsToYuan, newAdsTargeting, splitCountries, splitList, withAdsTargeting, withTargetingAge, yuanToCents } from '@/lib/marketing-plan/promo/form'
+import { publicAdAccountName } from '@/lib/ads/spend-figures'
 import { Field, LocalInput, inputCls } from './Field'
 
 type StepOf<K extends PromoStep['kind']> = Extract<PromoStep, { kind: K }>
@@ -25,9 +26,9 @@ export function AdsFields({ step, onChange, accounts }: Props<'ads_campaign'> & 
           <select className={inputCls} value={s.ad_account_id} onChange={e => set({ ad_account_id: e.target.value })}>
             <option value="">请选择</option>
             {s.ad_account_id !== '' && !(accounts ?? []).some(a => a.id === s.ad_account_id) && (
-              <option value={s.ad_account_id}>{s.ad_account_id}（不在这个客户名下，请重选）</option>
+              <option value={s.ad_account_id}>{publicAdAccountName(null, s.ad_account_id)}（不在这个客户名下，请重选）</option>
             )}
-            {(accounts ?? []).map(a => <option key={a.id} value={a.id}>{a.id}</option>)}
+            {(accounts ?? []).map(a => <option key={a.id} value={a.id}>{publicAdAccountName(a.label, a.id)}</option>)}
           </select>
         </Field>
         <Field label="每天预算（元，按账户币种）" hint={cap ? `这个账户每天最多 ${cap / 100} 元，超了保存不了` : undefined}>
