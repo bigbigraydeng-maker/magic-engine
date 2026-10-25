@@ -293,4 +293,27 @@ describe('createDeepSeekClient', () => {
     expect(costUsd(DEEPSEEK_FLASH_PRICE, { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBeCloseTo(1.5, 10)
     expect(worstCaseUsd(DEEPSEEK_FLASH_PRICE, 8000, 1500)).toBeCloseTo(0.0042, 10)
   })
+
+  it('11. thinking is disabled by default (reasoning tokens would eat max_tokens) and can be enabled', async () => {
+    const fetchDouble = vi.fn<FetchLike>(async () => okResponse({ choices: [{ message: { content: '{}' } }] }))
+    const client = clientWith({ DEEPSEEK_API_KEY: KEY }, fetchDouble)
+    await client.completeJson({ system: SYSTEM, user: USER, maxOutputTokens: 100, maxInputTokens: 100 })
+    await client.completeJson({ system: SYSTEM, user: USER, maxOutputTokens: 100, maxInputTokens: 100, thinking: 'enabled' })
+    const first = parseJsonObject(fetchDouble.mock.calls[0][1].body)
+    const second = parseJsonObject(fetchDouble.mock.calls[1][1].body)
+    expect(first.thinking).toEqual({ type: 'disabled' })
+    expect(second.thinking).toEqual({ type: 'enabled' })
+  })
+
+  it('12. empty content with finish_reason length -> deepseek_output_truncated', async () => {
+    const fetchDouble = vi.fn<FetchLike>(async () =>
+      okResponse({ choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: 'long thoughts' } }] }),
+    )
+    const client = clientWith({ DEEPSEEK_API_KEY: KEY }, fetchDouble)
+    const res = await client.completeJson({ system: SYSTEM, user: USER, maxOutputTokens: 100, maxInputTokens: 100 })
+    expect(res.ok).toBe(false)
+    if (res.ok) throw new Error('expected failure')
+    expect(res.error).toBe('deepseek_output_truncated')
+    expect(JSON.stringify(res)).not.toContain(KEY)
+  })
 })

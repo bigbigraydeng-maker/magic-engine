@@ -40,6 +40,8 @@ export interface CompleteJsonRequest {
   maxOutputTokens: number
   maxInputTokens: number
   timeoutMs?: number
+  /** 默认 'disabled'：思考模式的推理 token 计入输出上限，长输入时会把 max_tokens 吃光、正文为空（2026-10-25 试跑实测） */
+  thinking?: 'enabled' | 'disabled'
 }
 
 /** 共用的 DeepSeek 客户端：只做 JSON 模式补全，不自动重试 */
@@ -90,6 +92,17 @@ function readCompletionContent(envelope: unknown): string | null {
   const content = (message as { content?: unknown }).content
   if (typeof content !== 'string' || content.trim().length === 0) return null
   return content
+}
+
+/** 取 choices[0].finish_reason；'length' 表示输出被 max_tokens 截断 */
+function readFinishReason(envelope: unknown): string | null {
+  if (typeof envelope !== 'object' || envelope === null) return null
+  const choices = (envelope as { choices?: unknown }).choices
+  if (!Array.isArray(choices) || choices.length === 0) return null
+  const first: unknown = choices[0]
+  if (typeof first !== 'object' || first === null) return null
+  const reason = (first as { finish_reason?: unknown }).finish_reason
+  return typeof reason === 'string' ? reason : null
 }
 
 /** 从响应信封里取模型名；不是字符串则回退到配置的模型名 */
@@ -145,6 +158,7 @@ export function createDeepSeekClient(
       response_format: { type: 'json_object' },
       max_tokens: req.maxOutputTokens,
       stream: false,
+      thinking: { type: req.thinking ?? 'disabled' },
     })
 
     const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -203,7 +217,8 @@ export function createDeepSeekClient(
 
     const content = readCompletionContent(envelope)
     if (content === null) {
-      return { ok: false, error: 'deepseek_bad_response', code: 'validation' }
+      const truncated = readFinishReason(envelope) === 'length'
+      return { ok: false, error: truncated ? 'deepseek_output_truncated' : 'deepseek_bad_response', code: 'validation' }
     }
 
     try {
