@@ -67,6 +67,7 @@ const headSha = process.env.HEAD_SHA
 const prAuthor = process.env.PR_AUTHOR
 const prDraft = process.env.PR_DRAFT
 const prIsFork = process.env.PR_IS_FORK
+const prIsP0 = process.env.PR_IS_P0
 const signoffTrustedLogins = process.env.SIGNOFF_TRUSTED_LOGINS ?? ''
 const eventName = process.env.GATE_EVENT_NAME ?? ''
 
@@ -124,6 +125,7 @@ function requiredEnv() {
     ['PR_AUTHOR', prAuthor],
     ['PR_DRAFT', prDraft],
     ['PR_IS_FORK', prIsFork],
+    ['PR_IS_P0', prIsP0],
   ]
 }
 
@@ -684,6 +686,7 @@ try {
       risk: rating.risk,
       draft: parseTriState(prDraft),
       fork: parseTriState(prIsFork),
+      p0: prIsP0,
       signoff,
       codexReview: verdict.codexReview,
       claudeSignoff: verdict.claudeSignoff,
