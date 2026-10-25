@@ -98,8 +98,8 @@
     "name": "music/river-pandas-peaks-b2-2.mp3",
     "verdict": "none",
     "strength": "approval-only",
-    "signedBy": "Ray（PM 本人在对话中定为最终配乐）",
+    "signedBy": "human:Ray Deng",
     "signedAt": "2026-10-25T08:30:00.000Z",
-    "evidence": "Suno 纯器乐生成；whisper small 0 段人声，large-v3-turbo 仅已知音乐幻听；PM 2026-10-25 听后定稿"
+    "evidence": "PM 2026-10-25 在对话中定为 CTS 7274 留资系列最终配乐（session ca48762e）；Suno 纯器乐；whisper small 0 段人声，large-v3-turbo 仅已知音乐幻听"
   }
 ]
