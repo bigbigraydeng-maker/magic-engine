@@ -225,12 +225,25 @@ describe('Risk gate workflow: the judge lives on main', () => {
     expect(env.PR_AUTHOR).toContain('steps.pr.outputs.author')
   })
 
-  it('still judges from main and describes exactly two A-level sign-offs', () => {
+  it('still judges from main, and describes the single A-level sign-off plus the p0 label', () => {
     expect(riskGate.triggers.pull_request_target).toBeDefined()
     expect(riskGate.source).toContain('ref: main')
-    expect(riskGate.source).toContain('Codex Astra')
+    // 2026-10-26「只有 P0 审」：A 级只剩 Claude Code 一签，B/C 靠 p0 标签。
     expect(riskGate.source).toContain('Claude Code')
+    expect(riskGate.source).toContain('`p0` label')
     expect(riskGate.source).not.toContain('three trusted sign-off')
+  })
+
+  it('🔴 把 p0 标签真的喂给了判定脚本（注释写了而接线漏了，等于没有这道闸）', () => {
+    // 事件路径和 `gh pr view` 路径都要出 p0，少一条就有一半事件读不到标签；
+    // 读不到会按 P0 拦住，于是「B/C 自动合」在那一半事件上静默失效。
+    expect(riskGate.source).toContain("contains(github.event.pull_request.labels.*.name, 'p0')")
+    expect(riskGate.source).toContain('labels')
+    expect(riskGate.source).toContain('PR_IS_P0:')
+    // 🔴 仓库里现有的标签叫 `P0`（大写）。jq 的 index 区分大小写，所以必须先归一化，
+    //    不然这条路径永远匹配不上真实标签，而「匹配不上」会按 P0 拦住 ——
+    //    「B/C 自动合」就在一半事件上静默失效。
+    expect(riskGate.source).toContain('ascii_downcase')
   })
 })
 
