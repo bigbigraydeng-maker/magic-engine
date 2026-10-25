@@ -589,3 +589,35 @@ describe('按目标盯盘的提醒：盯盘函数最近一次回执里的提醒�
     expect(out.some(i => i.kind === 'ads_tracking_preflight_broken')).toBe(true)
   })
 })
+
+describe('「广告账户与付款」黄灯：其它账户里有在投预算 → 下发', () => {
+  const billing = (status: TrackingGateReceipt['status'], evidence: TrackingGateReceipt['evidence']): TrackingGateReceipt => ({
+    ...gate('env.account_billing', status), reason: '另一个账户尾号 7274 欠款，里面开着 4 个系列、日预算合计 NZ$115', evidence,
+  })
+  const runWith = (g: TrackingGateReceipt) => run([okRow(runReceipt([clientReceipt('c1', [g])]))])
+
+  it('黄灯 + 其它账户在投预算 > 0 → 一条带原因的待办', async () => {
+    const out = await runWith(billing('yellow', { other_live_daily_budget_cents: 11500 }))
+    expect(out).toHaveLength(1)
+    expect(out[0].kind).toBe('ads_tracking_preflight_fix')
+    expect(out[0].what).toContain('尾号 7274')
+    expect(out[0].client_id).toBe('c1')
+  })
+
+  it('黄灯 + 其它账户没有在投预算 / 没读到 → 不下发', async () => {
+    expect(await runWith(billing('yellow', { other_live_daily_budget_cents: 0 }))).toEqual([])
+    expect(await runWith(billing('yellow', { other_live_daily_budget_cents: null }))).toEqual([])
+  })
+
+  it('红灯不重复下发：只有回执 items 里原来那一条', async () => {
+    const out = await runWith(billing('red', { other_live_daily_budget_cents: 11500 }))
+    expect(out).toHaveLength(1)
+  })
+
+  it('回执过期 → 不下发黄灯（只有「回执没更新」的欠账）', async () => {
+    const old = '2026-10-18T05:00:00Z'
+    const r = clientReceipt('c1', [billing('yellow', { other_live_daily_budget_cents: 11500 })], old)
+    const out = await run([okRow(runReceipt([r], '2026-10-19T18:00:00Z'))])
+    expect(out.every(i => i.kind === 'ads_tracking_preflight_broken')).toBe(true)
+  })
+})

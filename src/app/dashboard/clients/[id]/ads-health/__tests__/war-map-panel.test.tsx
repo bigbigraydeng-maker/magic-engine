@@ -39,6 +39,7 @@ function baseView(): WarMapView {
     },
     adjust: { headline: { light: 'green', sentence: '今天没有要调的' }, actions: [] },
     goalNote: null,
+    prescriptionLine: null,
   }
 }
 
@@ -47,6 +48,16 @@ function stubView(view: WarMapView) {
   vi.stubGlobal('fetch', fn)
   return fn
 }
+
+describe('WarMapPanel · 处方一行', () => {
+  it('有处方摘要就显示那一行', async () => {
+    const view = baseView()
+    view.prescriptionLine = '处方 v1 · 草稿 · 2 条人工动作'
+    stubView(view)
+    render(<WarMapPanel clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('处方 v1 · 草稿 · 2 条人工动作')).toBeTruthy())
+  })
+})
 
 describe('WarMapPanel · 倒计时条', () => {
   it('计划过时：显示实际开投日，不显示「距计划开投日还有」', async () => {

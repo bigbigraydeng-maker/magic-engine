@@ -1109,7 +1109,7 @@ export default function VisualsPage() {
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-black/10 flex-shrink-0">
-        <h1 className="text-sm font-semibold text-me-charcoal/75 mr-1">🚀 Launch Hub</h1>
+        <h1 className="text-sm font-semibold text-me-charcoal/75 mr-1">🖼️ 图片工厂</h1>
         <select
           value={selectedClientId}
           onChange={e => setSelectedClientId(e.target.value)}
@@ -1149,7 +1149,7 @@ export default function VisualsPage() {
       {selectedClientId ? (
         <BriefGateBanner
           clientId={selectedClientId}
-          featureLabel="Launch Hub visual production"
+          featureLabel="image factory visual production"
           className="flex min-h-0 flex-1 flex-col"
         >
         <div className="flex-1 overflow-auto">

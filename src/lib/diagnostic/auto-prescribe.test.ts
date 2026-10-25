@@ -191,6 +191,27 @@ describe('pickGoalForPrescription —— 一个客户好几个目标时挂哪个
     const picked = pickGoalForPrescription([goal({ id: 'a', period_end: null as never })], NOW)
     expect(picked!.id).toBe('a')
   })
+
+  it('skips a goal that already has a manual draft and picks the next live one', () => {
+    const picked = pickGoalForPrescription(
+      [
+        goal({ id: 'manual', title: '人工草稿那个', period_end: '2026-08-20' }),
+        goal({ id: 'open', title: '还能自动开方的', period_end: '2026-10-01' }),
+      ],
+      NOW,
+      new Set(['manual']),
+    )
+    expect(picked!.id).toBe('open')
+  })
+
+  it('returns null when every live goal is held by a manual draft', () => {
+    const picked = pickGoalForPrescription(
+      [goal({ id: 'manual', period_end: '2026-09-02' })],
+      NOW,
+      new Set(['manual']),
+    )
+    expect(picked).toBeNull()
+  })
 })
 
 describe('buildIntake —— 一项都不许编，跟目标走的每次重算', () => {
