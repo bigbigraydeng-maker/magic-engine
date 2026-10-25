@@ -106,12 +106,18 @@ meta-leads-sync ──► 联系人（含来源：广告编号/系列/表单名�
 3. **响应阈值**：24h 黄 / 72h 红
 4. **digest 收件人**：第二刀把「收件人字段」做成读 `client_configurations.sales_assignees`，但 digest 开关仍默认 off。真打开留独立 PR + PM 本人同意
 
-## 7. 关键发现（10-26）
+## 7. 关键发现 + 架构需追问（10-26）
 
-`conversations.owner_email` 字段 2026-07-26 migration 已加（见 `supabase/migrations/20260726000004_unified_contacts.sql:144`，注释「两个 CTS 邮箱共用一个列表，没有这个会撞车」）。第二刀**不用加 schema**，风险从 A 降到 B：
-- 后端：在 `meta-leads-sync` 创建/更新 conversation 时按 round-robin 设置 `owner_email`
-- 配置：`client_configurations` 新增 CTS 的 `sales_assignees` 条目（JSON）
-- UI：CRM 联系人详情页 + 「我的待跟进」看板读 `owner_email`
+**发现**：`conversations.owner_email` 字段 2026-07-26 migration 已加（`supabase/migrations/20260726000004_unified_contacts.sql:144`，注释「两个 CTS 邮箱共用一个列表，没有这个会撞车」）。
+
+**但是**：Meta 表单线索进来时**不会立即建 conversation** —— `meta-lead.ts` 写的是 `contact_touchpoints`。conversation 要等客人之后在 Messenger / 邮件主动来一次才建。所以 `owner_email` 挂 conversation 上**解决不了「刚进来的线索分给谁跟」这个核心问题**。
+
+**三条备选**，第二刀开工前要 PM 定：
+- **A. 分配在联系人上**：给 `contacts` 加 `assigned_to` 字段（迁回 A 级 migration）
+- **B. 分配在触点上**：复用 `contact_touchpoints.metadata` 塞 `assigned_to`（无 schema 改动，但查询要翻 jsonb，B 级）
+- **C. 分配延后**：进库时不分配，员工在看板「未分配」桶里自己认领（最小改动，但违背 PM 原则「人尽量少干预」）
+
+**另一问**：Baker 和 Lisa 没有个人邮箱，共用 `info@ctstours.co.nz`。digest 真打开那天收件人**本质上就是一个邮箱**，round-robin 分配人只是在数据库里记谁的名字，发出去的邮件两个人都看到——这其实跟「不分配」没差。要不要先去问 CTS 要 Baker 和 Lisa 的个人邮箱？
 
 ---
 
