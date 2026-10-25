@@ -8,20 +8,20 @@
 
 ## 一、入口处理总表（含「是否在用」核实）
 
-核实方法：只读，查代码引用（grep）。**最近 30 天数据写入：本环境没有生产库只读权限，未核实，标「待 Raybot/FDE 查数」**——这类项一律按「在用」处理，只摘入口不删页面，风险可控。
+核实方法：只读，查代码引用（grep）+ 生产库只读 `count` / `max(created_at|updated_at)`（2026-10-25 约 19:10 NZDT，Supabase 项目 `glbdnayojixmexgofbsd`，没读行内容）。结果见第五节；只摘入口不删页面，风险可控。
 
 | 入口 | 处理 | 代码引用核实 | 30 天数据 |
 |---|---|---|---|
 | 「出片」门卡 | **保留**，唯一主入口 | `clients/[id]/page.tsx` 门卡 | — |
-| 素材库 `/clients/[id]/assets` | 合并成「素材」标签主体 | 自助客户左栏、出片门卡引用，在用 | 待查 |
-| 视频工厂素材标签与审核 `/clients/[id]/factory-clips` | 合并为「素材」标签里的「视频片段」子页 | 仅出片门卡引用（受 `factory-clips` 入口开关，仅管理员） | 待查 |
-| 内容工厂看板 `/clients/[id]/content-factory` | 合并进「选题」标签 | 门卡、ContentHub、出片门卡的客户侧兜底目标，在用 | 待查 |
+| 素材库 `/clients/[id]/assets` | 合并成「素材」标签主体 | 自助客户左栏、出片门卡引用，在用 | `visual_assets`：总 9 行，30 天新增 0 / 更新 0，最后写入 2026-06-08 |
+| 视频工厂素材标签与审核 `/clients/[id]/factory-clips` | 合并为「素材」标签里的「视频片段」子页 | 仅出片门卡引用（受 `factory-clips` 入口开关，仅管理员） | `video_clips`：30 天新增 0 / 更新 0，最后写入 2026-09-01 |
+| 内容工厂看板 `/clients/[id]/content-factory` | 合并进「选题」标签 | 门卡、ContentHub、出片门卡的客户侧兜底目标，在用 | `content_posts`：30 天新增 34 / 更新 48，最后写入 2026-10-25（在用，不能摘） |
 | 「生成单条内容」按钮 | 合并进「选题」标签（`新建选题`） | 绑 `setGenerationOpen`，在用 | — |
-| 系列视频与播放数据 `/content-factory/series` | 合并进「表现」标签 | 内容工厂页内链接，有测试 `series/page.test.tsx` | 待查 |
-| 社媒日常「短视频」页签（`daily-plan?tab=reels`） | 合并进「待审/分发」 | `DailyPlanReelsPanel`，仅 `ADMIN_EMAILS` 精确名单可见 | 待查 |
+| 系列视频与播放数据 `/content-factory/series` | 合并进「表现」标签 | 内容工厂页内链接，有测试 `series/page.test.tsx` | series 没有单独的表（清单文件 + `clients.factory_config` JSON 字段），无写入时间，查不出 |
+| 社媒日常「短视频」页签（`daily-plan?tab=reels`） | 合并进「待审/分发」 | `DailyPlanReelsPanel`，仅 `ADMIN_EMAILS` 精确名单可见 | —（无独立表） |
 | 社媒日常其余 | 只留「本周总览」+「图文帖子」 | — | — |
 | Story 自动发布 | **不动**，留社媒门卡下 | `showEntry('story')` | — |
-| 内容生产包 `/clients/[id]/production` | **摘入口**（门卡）；路由保留 | ⚠️ **仍有代码引用**：`execution/_client.tsx:1161` 生成完成后跳到 `production/<packageId>`；`ZhugeGlobalFab.tsx:95` 有页名映射。→ 只摘门卡入口，**不动 Execution 里的跳转**，Execution 出包流程仍可达，等 Ray 另定是否退役 | 待查（Ray 称最后一包 08-25） |
+| 内容生产包 `/clients/[id]/production` | **摘入口**（门卡）；路由保留 | 查过代码：除生产包页自身、`ZhugeGlobalFab.tsx:95` 页名映射（保留）外，只有 `execution/_client.tsx` 量产完成提示链到 `production/<packageId>`。→ 摘门卡入口，**并把该提示统一改链 `daily-plan`（社媒日常）**；页面、路由、接口都保留 | `production_packages`：总 26 行，30 天新增 0 / 更新 0，最后写入 2026-08-25 |
 | 客户主页概览的审片框（`ReviewInbox`） | 由「待审」标签代替后摘（**PR 2 随标签页一起摘**，避免出现无入口期） | `page.tsx:593`，组件本体被视频工厂页复用，**组件保留** | — |
 | 推广活动页的生产快捷入口（`ContentHub` 的「生产工作台」两张卡） | **摘**（PR 1） | `ContentHub.tsx`；调用方只有 `campaigns/page.tsx`；两个目标页都在门卡里有入口，不丢入口 | — |
 | 自助客户左栏打不开的链接（`Visual Studio` / `Content`） | **摘**（PR 1） | `middleware.ts:212` 只对 `paid_client` 放行 `/dashboard/content`、`/dashboard/visuals`，自助客户点了被弹回 | — |
@@ -77,9 +77,19 @@ PR 2 / 3：
 - 客户账号访问行为不变（仍被 middleware 拦，不引入新可达路径）。
 - 不动 `content_posts` / `content_work_orders` 结构。
 
-## 五、需要 Raybot/FDE 补的数据核实（本环境读不到生产库）
+## 五、30 天数据核实结果（只读，2026-10-25 约 19:10 NZDT）
 
-最近 30 天写入情况（只读查询即可）：`content_production_packages`（生产包）、`factory_clips`、`content_posts`（内容工厂）、series 相关记录、`visual_assets`。结果若显示某项长期无写入，再另开卡决定是否退役；本规格不依赖结果（在用/待查一律只摘入口）。
+ME 生产库只跑 `count` / `max(created_at|updated_at)`，没读行内容。规格早期草稿里的表名 `content_production_packages`、`factory_clips` 在库里不存在，实际为 `production_packages`、`video_clips`。
+
+| 项 | 实际表 | 总行数 | 30 天新增 | 30 天更新 | 最后写入（NZ） |
+|---|---|---|---|---|---|
+| 内容生产包 | `production_packages` | 26 | 0 | 0 | 2026-08-25 23:19 NZST |
+| 视频片段 | `video_clips` | 281 | 0 | 0 | 2026-09-01 09:33 NZST |
+| 内容工厂 | `content_posts` | 318 | 34 | 48 | 2026-10-25 11:01 NZDT |
+| 图片素材 | `visual_assets` | 9 | 0 | 0 | 2026-06-08 03:37 NZST |
+| 系列视频 series | 无单独表 | — | — | — | — |
+
+补充：`video_clips` 的 `last_used_at`、`reviewed_at`、`license_reviewed_at` 全为空；series 数据在代码清单文件 + `clients.factory_config` JSON 字段里，查不出写入时间。结论：生产包两个月无新包，按 Ray「没用的都摘掉」处理；内容工厂在用，不能摘。其余项是否退役另开卡决定，本规格仍只摘入口。
 
 ## 六、验证与检查点
 
