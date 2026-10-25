@@ -17,7 +17,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
-import { contactKindOf, isSystemAccountName, readDomainRules } from '@/lib/crm/contact-kind'
+import { contactKindOf, isSystemAccountName, normaliseDomain, readDomainRules, SYSTEM_ACCOUNT_NAMES } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
@@ -200,20 +200,60 @@ function contactFilterParams(query: ListQuery): {
  * 判据跟 `crm/today/route.ts` 完全一致（同一份 `contactKindOf`/`readDomainRules`，
  * 不在这里另起一套）：一个人可能有多个邮箱身份，同行常用私人邮箱来问事，
  * 只看 `primary_email` 会漏判。
+ *
+ * ## 为什么现在只捞「可能命中」的行（2026-10-26 提速）
+ *
+ * 老版本为了找这 20 来个人，把**全部** `contact_identities`（CTS 2788 行）和
+ * **全部** `contacts`（1211 行）都翻一遍——连一次普通翻页都要付这份钱，页面
+ * 3.6 秒里它占一大块。但读 `contact-kind.ts` 就知道：一个人要能算成 trade 或
+ * staff，只有两条路——邮箱域名命中配置里的 own/trade 清单（`domainMatches` 是
+ * `===` 或 `.endsWith('.' + listed)`），或者 `display_name` 落在固定的
+ * `SYSTEM_ACCOUNT_NAMES` 里。于是把「可能命中」的行先筛出来，再拿**原封不动的**
+ * `contactKindOf` / `isSystemAccountName` 在它们身上重跑一遍，结果跟全表扫逐字
+ * 相同：多捞是安全的（原判据会把它剔掉），少捞才是 bug（会漏掉真正的同行）。
+ *
+ * 域名清单为空、又没有系统账号要查时，直接返回空——一次查询都不发。
  */
 async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: string[]; staffIds: string[] }> {
-  const [clientRes, identities, contactsLite] = await Promise.all([
-    supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle(),
-    // 🔴 魏征 2026-09-28 复审 B3 查出：range 分页必须配 order，否则页之间顺序不稳，
-    // 客户联系人/身份超过一页（1000 条）时会漏行或重复行——跟本仓库 2026-07-29 CTS
-    // 事故同款问题，`crm/today/route.ts` 抄的是同一套判定逻辑但那边配了 order，
-    // 这里漏抄了。
+  const clientRes = await supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle()
+  const rules = readDomainRules((clientRes.data as { leads_config: unknown } | null)?.leads_config)
+  const domains = [...rules.own, ...rules.trade].map(normaliseDomain).filter((d) => d.length > 0)
+
+  // 系统账号（WhatsApp Business 等）只有固定几个名字，按名字收窄即可 ——
+  // 以前这里整表扫 1211 行只为挑出 6 个，是这个接口最大的一块浪费。
+  // ilike 用 %name% 是**故意放宽**的：宁可多捞几行回来，再用原来的
+  // `isSystemAccountName`（trim + 小写 + 精确查表）复核一遍；少捞才是 bug。
+  const nameOr = [...SYSTEM_ACCOUNT_NAMES].map((n) => `display_name.ilike.%${n}%`).join(',')
+  const nameScan = fetchAll<{ id: string; display_name: string | null }>((from, to) =>
+    supabaseAdmin
+      .from('contacts')
+      .select('id, display_name')
+      .eq('client_id', clientId)
+      .or(nameOr)
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
+
+  if (domains.length === 0) {
+    const named = await nameScan
+    return { tradeIds: [], staffIds: named.filter((c) => isSystemAccountName(c.display_name)).map((c) => c.id) }
+  }
+
+  const valueOr = domains.map((d) => `value.ilike.%${d}`).join(',')
+  const emailOr = domains.map((d) => `primary_email.ilike.%${d}`).join(',')
+
+  // 🔴 魏征 2026-09-28 复审 B3 查出：range 分页必须配 order，否则页之间顺序不稳，
+  // 客户联系人/身份超过一页（1000 条）时会漏行或重复行——跟本仓库 2026-07-29 CTS
+  // 事故同款问题，`crm/today/route.ts` 抄的是同一套判定逻辑但那边配了 order，
+  // 这里漏抄了。
+  const [identities, byEmail, named] = await Promise.all([
     fetchAll<{ contact_id: string; value: string }>((from, to) =>
       supabaseAdmin
         .from('contact_identities')
         .select('contact_id, value')
         .eq('client_id', clientId)
         .eq('kind', 'email')
+        .or(valueOr)
         .order('contact_id', { ascending: true })
         .range(from, to),
     ),
@@ -222,14 +262,15 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
         .from('contacts')
         .select('id, primary_email, display_name')
         .eq('client_id', clientId)
+        .or(emailOr)
         .order('id', { ascending: true })
         .range(from, to),
     ),
+    nameScan,
   ])
 
-  const rules = readDomainRules((clientRes.data as { leads_config: unknown } | null)?.leads_config)
   const emailsByContact = new Map<string, string[]>()
-  for (const c of contactsLite) {
+  for (const c of byEmail) {
     if (c.primary_email) emailsByContact.set(c.id, [c.primary_email])
   }
   for (const i of identities) {
@@ -241,7 +282,7 @@ async function loadTradeAndStaffIds(clientId: string): Promise<{ tradeIds: strin
   const tradeIds: string[] = []
   const staffIds: string[] = []
   // 系统账号（WhatsApp Business 等）跟自己人一起从零售名单里排掉。
-  for (const c of contactsLite) if (isSystemAccountName(c.display_name)) staffIds.push(c.id)
+  for (const c of named) if (isSystemAccountName(c.display_name)) staffIds.push(c.id)
   for (const [id, emails] of emailsByContact) {
     const kind = contactKindOf(emails, rules)
     if (kind === 'trade') tradeIds.push(id)

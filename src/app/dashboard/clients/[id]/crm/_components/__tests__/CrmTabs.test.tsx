@@ -206,3 +206,22 @@ describe('CrmTabs 挂了「新消息提醒」', () => {
     }
   })
 })
+
+describe('右上角这几个入口要能说清自己是干嘛的（PM 2026-10-26：不知道干嘛用的）', () => {
+  it('每个入口都带一句人话说明', async () => {
+    stub(async () => res(200))
+    render(<CrmTabs clientId={ID} active="all" />)
+    await screen.findByRole('link', { name: '付款总览' })
+    for (const name of ['全部客人', '付款总览', '客户消息', '商务收件箱']) {
+      const el = screen.getByRole('link', { name })
+      expect(el.getAttribute('title') ?? '').not.toBe('')
+    }
+  })
+
+  it('「我的客人」这个死入口已经去掉（点进去要等 3 秒才告诉你该去别处）', async () => {
+    stub(async () => res(200))
+    render(<CrmTabs clientId={ID} active="all" />)
+    await screen.findByRole('link', { name: '付款总览' })
+    expect(screen.queryByRole('link', { name: '我的客人' })).toBeNull()
+  })
+})
