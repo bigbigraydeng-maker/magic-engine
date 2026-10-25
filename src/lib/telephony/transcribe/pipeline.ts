@@ -8,6 +8,7 @@
 
 import { downloadTwilioRecording, recordingSidFromUrl, RecordingFetchError } from './recording'
 import { verifyFacts, ANALYSIS_SCHEMA_VERSION, type VerifiedAnalysis } from './analysis-schema'
+import { verifySummary, fallbackSummaryFromFacts } from './summary-gate'
 import { SECRET_REF_PATTERN } from '@/lib/telephony/twilio/ingest'
 import { TranscriptPendingError, type Analyzer, type Transcriber } from './vendors'
 
@@ -27,6 +28,8 @@ export interface AnalysisCall {
   recordingStatus: 'none' | 'pending_download' | 'downloaded' | 'failed'
   transcriptStatus: 'not_started' | 'pending' | 'done' | 'failed'
   summaryStatus: 'not_started' | 'pending' | 'done' | 'failed'
+  /** 这通电话挂在哪个客人身上；摘要核对闸要拿他的名字比对。没认到人时为 null。 */
+  contactId?: string | null
   recordingRawEventId: string | null
   recordingStoragePath: string | null
   recordingAttempts: number
@@ -47,6 +50,8 @@ export interface AnalysisConnection {
 }
 
 export interface AnalysisStore {
+  /** 读这个客人已知的名字，供摘要核对闸比对；没接的实现当成「不知道名字」。 */
+  getKnownNames?: (contactId: string | null) => Promise<readonly string[]>
   getCall(clientId: string, provider: string, providerCallId: string): Promise<AnalysisCall | null>
   getConnection(id: string): Promise<AnalysisConnection | null>
   getRecordingUrl(rawEventId: string): Promise<string | null>
@@ -166,12 +171,40 @@ export async function runCallAnalysis(
     try {
       const out = await deps.analyze(transcript)
       const verified = verifyFacts(out.raw, transcript)
-      analysisId = await store.saveAnalysis({ callId: call.id, clientId: call.clientId, model: out.model, analysis: verified })
+
+      // 摘要也要过闸 —— 以前只有 facts 有原话核验，summary 是模型写完原样存，
+      // 结果 2026-10-25 查出两处错：把客人 Sarju Dayal 写成 Sergio Dyer、
+      // 以及「首次去中国」跟原话「I've been to South China」矛盾。
+      // 不过关就换成「由已核实事实拼出来的摘要」：少了可读性，但不会写错事实。
+      const knownNames = store.getKnownNames ? await store.getKnownNames(call.contactId ?? null) : []
+      const sv = verifySummary({
+        summary: verified.summary,
+        transcript,
+        knownNames,
+        // 已核实事实的值和原话也算数字的依据：口语里的 "March 20 27th" 会被写成
+        // 「2027年3月20日」，只跟转写比字面会把这种正确摘要误判成瞎编。
+        supportingTexts: verified.facts.flatMap((f) => [f.value, f.quote]),
+      })
+      const gated: VerifiedAnalysis = sv.ok
+        ? verified
+        : { ...verified, summary: fallbackSummaryFromFacts(verified.facts) }
+
+      analysisId = await store.saveAnalysis({ callId: call.id, clientId: call.clientId, model: out.model, analysis: gated })
       const truncated = transcript.length > 60_000 ? ' truncated=1' : ''
+      // 被闸掉的事实和被换掉的摘要都留痕：否则只看到一个数字，分不清是闸太严还是模型在编。
+      const droppedKeys = out.raw.facts
+        .filter((f) => !verified.facts.some((k) => k.key === f.key && k.quote === f.quote))
+        // 只写「哪一类事实、原话多长」，**不写原话本身** —— 原话里可能有客人的
+        // 姓名电话，而这条回执的访问范围和保留期都不受控（同 smart-ack 设计稿 §9.8
+        // 定的口径：回执只写原因码 + 长度，不写客人原文）。
+        .map((f) => `${f.key}:${String(f.quote).length}字`)
+        .join(' | ')
+      const summaryNote = sv.ok ? '' : ` summary_replaced=${sv.rejected.join(',')}`
+      const droppedNote = droppedKeys === '' ? '' : ` dropped_detail=[${droppedKeys.slice(0, 400)}]`
       await store.patchCall(call.id, { summaryStatus: 'done' }, {
         stage: 'analysis',
         status: 'pending_review',
-        detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} inquiries=${verified.inquiries.length} dropped_inquiries=${verified.droppedInquiries} v${ANALYSIS_SCHEMA_VERSION}${truncated}`,
+        detail: `facts=${verified.facts.length} dropped=${verified.droppedFacts} inquiries=${verified.inquiries.length} dropped_inquiries=${verified.droppedInquiries} v${ANALYSIS_SCHEMA_VERSION}${truncated}${summaryNote}${droppedNote}`,
       })
     } catch (e) {
       // 摘要失败就是失败：不写假摘要、不标 done。

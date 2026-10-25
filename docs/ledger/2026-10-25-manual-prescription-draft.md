@@ -8,7 +8,7 @@ source: issue:3127
 verify_by: 2026-10-27
 verify_how: 合并部署后，调用手工处方接口能存下一份草稿且状态仍是草稿；下一个周二的自动开方不会把这份草稿批准或盖掉。
 done_on: 2026-10-25
-done_ref: commit:31b28b5204efd9f4ca15e4e9249fe96da65db5c2
+done_ref: commit:258ba6a45eba176a5859faab59b75df156eb5d6e
 check_note: 本机相关测试和类型检查已过。还没合并，所以生产上的周二自动开方还没验。
 ---
 新入口只把给好的处方存成草稿，开方人固定是广告 Agent，每个动作都必须是人工执行。
