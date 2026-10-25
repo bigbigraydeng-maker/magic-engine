@@ -21,7 +21,6 @@ vi.mock('../_components/BriefGateBanner', () => ({
   BriefGateBanner: ({ children }: { children: unknown }) => children,
 }))
 vi.mock('../_components/WorkLogPanel', () => ({ WorkLogPanel: () => null }))
-vi.mock('../../../factory/_components/ReviewInbox', () => ({ ReviewInbox: () => null }))
 
 import ClientDetailPage from '../page'
 import { WorkspaceViewerProvider } from '@/app/dashboard/workspace-viewer'
@@ -52,6 +51,9 @@ afterEach(() => {
 
 async function openTools() {
   await screen.findByRole('heading', { level: 1, name: 'CTS Tours' })
+  // 概览上的审片框与视频工厂是同一只，首页不再挂。出片门仍进视频工厂。
+  expect(screen.queryByText(/加载待审/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/只列出待审核视频/)).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '工具' }))
 }
 
