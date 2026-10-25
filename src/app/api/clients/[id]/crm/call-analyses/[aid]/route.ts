@@ -3,6 +3,10 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 
 /**
+ * GET /api/clients/[id]/crm/call-analyses/[aid]
+ *
+ * 按需读取通话转写。转写正文只在明确展开时间线卡片时返回，且不进入缓存。
+ *
  * PATCH /api/clients/[id]/crm/call-analyses/[aid]
  *
  * 人工复核一份通话分析：确认无误 / 驳回 / 撤回成待复核。
@@ -18,6 +22,53 @@ export const dynamic = 'force-dynamic'
 
 const ALLOWED = ['confirmed', 'rejected', 'pending_review'] as const
 type Review = (typeof ALLOWED)[number]
+
+function noStoreJson(body: Record<string, unknown>, status = 200): NextResponse {
+  const response = NextResponse.json(body, { status })
+  response.headers.set('Cache-Control', 'private, no-store, max-age=0')
+  return response
+}
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string; aid: string } },
+): Promise<NextResponse> {
+  const { id: clientId, aid } = params
+  const access = await requirePaidClientAccess(clientId)
+  if (!access.ok) return noStoreJson({ error: access.error }, access.status)
+
+  const { data: analysis, error: analysisError } = await supabaseAdmin
+    .from('telephony_call_analyses')
+    .select('id, call_id')
+    .eq('id', aid)
+    .eq('client_id', clientId)
+    .maybeSingle()
+
+  if (analysisError) return noStoreJson({ error: '读取通话记录失败' }, 500)
+  if (!analysis) return noStoreJson({ error: '分析不存在' }, 404)
+
+  const { data: call, error: callError } = await supabaseAdmin
+    .from('telephony_calls')
+    .select('id')
+    .eq('id', analysis.call_id)
+    .eq('client_id', clientId)
+    .maybeSingle()
+
+  if (callError) return noStoreJson({ error: '读取通话记录失败' }, 500)
+  if (!call) return noStoreJson({ error: '分析不存在' }, 404)
+
+  const { data: transcript, error: transcriptError } = await supabaseAdmin
+    .from('telephony_transcripts')
+    .select('body')
+    .eq('call_id', analysis.call_id)
+    .eq('client_id', clientId)
+    .maybeSingle()
+
+  if (transcriptError) return noStoreJson({ error: '读取通话记录失败' }, 500)
+  if (!transcript || typeof transcript.body !== 'string') return noStoreJson({ error: '通话记录不存在' }, 404)
+
+  return noStoreJson({ transcript: transcript.body })
+}
 
 export async function PATCH(
   req: NextRequest,
