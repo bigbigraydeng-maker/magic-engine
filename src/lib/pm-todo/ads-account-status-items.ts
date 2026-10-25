@@ -298,6 +298,18 @@ async function loadLastCompleteCaptures(
   return map
 }
 
+/**
+ * 「最近一次读到这个账户」的时间：完整快照的 capture，和最新一行有效账户行（含 2 小时探测写的）里取较新者。
+ * 探测只写账户级快照行、不写 capture，所以账户刚登记 / 完整快照停摆时，欠款只能靠这行被认可。
+ * 空状态和「账户消失」行不算读到。
+ */
+function freshestReadAt(capture: string | null, rows: readonly AccountStatusRow[]): string | null {
+  const newest = rows[0]
+  if (!newest || newest.account_status === null || newest.capture_reason === DISAPPEARED_CAPTURE_REASON) return capture
+  if (capture === null) return newest.captured_at
+  return Date.parse(newest.captured_at) > Date.parse(capture) ? newest.captured_at : capture
+}
+
 function rowsForAccount(
   rows: readonly AccountStatusRow[],
   normalizedId: string,
@@ -354,7 +366,7 @@ async function evaluateClient(
       adAccountId: account.adAccountId,
       accountName,
       rows: accountRows,
-      lastCompleteCaptureAt: captures.get(normalizedId) ?? null,
+      lastCompleteCaptureAt: freshestReadAt(captures.get(normalizedId) ?? null, accountRows),
       hidden: hiddenAccounts?.has(normalizedId) ?? false,
       now,
     })

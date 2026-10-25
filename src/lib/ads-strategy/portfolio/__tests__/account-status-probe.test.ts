@@ -123,4 +123,24 @@ describe('probeAllAccountStatuses', () => {
     const bad = await probeAllAccountStatuses(NOW)
     expect(bad).toMatchObject({ accounts: 1, written: 0, failed: 1 })
   })
+
+  it('rate-limit codes (4/17/613) are counted separately from other unreadable', async () => {
+    h.settings = { complete: false, rows: [], error: { message: 'too many calls', code: 17 } as never }
+    const r = await probeAllAccountStatuses(NOW)
+    expect(r).toMatchObject({ failed: 1, rateLimited: 1, timedOut: false })
+    expect(r.results[0]).toMatchObject({ state: 'unreadable', rateLimited: true })
+  })
+
+  it('budget exhausted → stops, timedOut=true and error is recorded, never throws', async () => {
+    const r = await probeAllAccountStatuses(NOW, 0)
+    expect(r).toMatchObject({ accounts: 0, timedOut: true })
+    expect(r.error).toContain('timed out')
+    expect(h.fetchAccountSettings).not.toHaveBeenCalled()
+  })
+
+  it('a hung Meta read is cut off by the budget', async () => {
+    h.fetchAccountSettings.mockImplementation(() => new Promise(() => {}))
+    const r = await probeAllAccountStatuses(NOW, 30)
+    expect(r).toMatchObject({ accounts: 0, timedOut: true })
+  })
 })

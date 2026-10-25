@@ -445,6 +445,19 @@ describe('pushAdsAccountStatusItems', () => {
     h.captures['c-1'] = [{ ad_account_id: 'act_1', captured_at: hoursAgo(1) }]
   }
 
+  it('probe-written status 3 with no recent complete capture still yields the unsettled item (not unreadable)', async () => {
+    h.clients = [{ id: 'c-1', name: 'Client One', meta_ad_account_id: 'act_1' }]
+    h.accounts['c-1'] = [{ adAccountId: 'act_1', label: 'Main', isPrimary: true }]
+    h.rows['c-1'] = [row({ account_status: 3, capture_reason: 'first_seen', captured_at: hoursAgo(1) })]
+    h.captures['c-1'] = []
+
+    const items: import('../manual-item-types').ManualItem[] = []
+    await pushAdsAccountStatusItems(asSupabase(makeSb()), items, NOW, nameOf)
+
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('ads_account_not_active')
+  })
+
   it('hidden-from-health account with status 3 still produces an item, with the pause note', async () => {
     unsettledSetup()
     h.hiddenRows = [{ ad_account_id: 'act_1', hidden_from_ad_health: true }]

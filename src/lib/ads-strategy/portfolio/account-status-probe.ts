@@ -29,7 +29,14 @@ export interface AccountProbeResult {
   adAccountId: string
   state: AccountProbeState
   error?: string
+  /** Meta 限流（code 4 / 17 / 613）：和别的读不到分开记，方便看是不是在抢线索拉取的配额。 */
+  rateLimited?: boolean
 }
+
+const RATE_LIMIT_CODES = new Set([4, 17, 613])
+
+/** 探测总时限：和线索同步共用 maxDuration，探测不能把运行记录拖丢。 */
+export const PROBE_BUDGET_MS = 120_000
 
 export interface AccountStatusProbeSummary {
   clients: number
@@ -37,6 +44,8 @@ export interface AccountStatusProbeSummary {
   written: number
   unchanged: number
   failed: number
+  rateLimited: number
+  timedOut: boolean
   results: AccountProbeResult[]
   error?: string
 }
@@ -72,7 +81,13 @@ export async function probeAccountStatus(
   try {
     const account = await fetchAccountSettings(adAccountId, accessToken)
     if (!account.complete || account.rows.length === 0) {
-      return { ...base, state: 'unreadable', error: account.error?.message ?? 'account unreadable' }
+      const rateLimited = account.error?.code != null && RATE_LIMIT_CODES.has(account.error.code)
+      return {
+        ...base,
+        state: 'unreadable',
+        error: account.error?.message ?? 'account unreadable',
+        ...(rateLimited ? { rateLimited: true } : {}),
+      }
     }
     const acct = account.rows[0]
     const ctx: SnapshotContext = { clientId, adAccountId, currency: acct.currency ?? null, sharedAccount: opts.shared }
@@ -90,13 +105,40 @@ export async function probeAccountStatus(
   }
 }
 
-/** 探全部登记了 Meta 广告账户的客户（含隐藏账户）。永不抛。 */
-export async function probeAllAccountStatuses(now: Date = new Date()): Promise<AccountStatusProbeSummary> {
-  const summary: AccountStatusProbeSummary = { clients: 0, accounts: 0, written: 0, unchanged: 0, failed: 0, results: [] }
+const TIMED_OUT = Symbol('probe-timed-out')
+
+/** 和剩余时限赛跑；超时返回 TIMED_OUT（底下那次读可能还在飞，但结果不再被采用）。 */
+async function raceDeadline<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<typeof TIMED_OUT>(resolve => { timer = setTimeout(() => resolve(TIMED_OUT), Math.max(ms, 0)) }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** 探全部登记了 Meta 广告账户的客户（含隐藏账户）。永不抛；超过总时限就停，记进 timedOut / error。 */
+export async function probeAllAccountStatuses(
+  now: Date = new Date(),
+  budgetMs: number = PROBE_BUDGET_MS,
+): Promise<AccountStatusProbeSummary> {
+  const summary: AccountStatusProbeSummary = {
+    clients: 0, accounts: 0, written: 0, unchanged: 0, failed: 0, rateLimited: 0, timedOut: false, results: [],
+  }
+  const deadline = Date.now() + budgetMs
+  const timeUp = (): AccountStatusProbeSummary => {
+    summary.timedOut = true
+    summary.error = `accountStatusProbe timed out after ${budgetMs}ms; remaining accounts skipped`
+    return summary
+  }
   try {
     const clients = await listSnapshotClients()
     summary.clients = clients.length
     for (const client of clients) {
+      if (Date.now() >= deadline) return timeUp()
       try {
         const token = await getMetaTokenForClient(client.id)
         if (!token) continue
@@ -104,14 +146,19 @@ export async function probeAllAccountStatuses(now: Date = new Date()): Promise<A
         if (accounts.length === 0) continue
         const { shared } = await findSharedAdAccounts(client.id, accounts.map(a => a.adAccountId))
         for (const a of accounts) {
-          const result = await probeAccountStatus(client.id, a.adAccountId, token, {
-            shared: shared.has(normalizeAccountId(a.adAccountId)),
-            now,
-          })
+          const result = await raceDeadline(
+            probeAccountStatus(client.id, a.adAccountId, token, {
+              shared: shared.has(normalizeAccountId(a.adAccountId)),
+              now,
+            }),
+            deadline - Date.now(),
+          )
+          if (result === TIMED_OUT) return timeUp()
           summary.accounts += 1
           if (result.state === 'written') summary.written += 1
           else if (result.state === 'unchanged') summary.unchanged += 1
           else summary.failed += 1
+          if (result.rateLimited) summary.rateLimited += 1
           summary.results.push(result)
         }
       } catch (err) {
