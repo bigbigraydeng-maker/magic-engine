@@ -5,6 +5,8 @@
  * human-approved drafts (`DRAFT_SENT_BY_EMAIL`), so the email alone does not
  * prove a message is the auto-ack — match the body as well.
  */
+import { AUTOMATED_NOTICE } from './smart-ack/types'
+
 export const AUTOACK_SENT_BY_EMAIL = 'governed-reply-agent@magicengine.cloud'
 
 /**
@@ -25,5 +27,7 @@ export const LEGACY_AUTOACK_TEMPLATE =
 /** 这条正文是不是 ME 自动安抚（新版或旧版），两边都忽略零宽字符和首尾空白。 */
 export function isAutoAckBody(body: string, normalise: (s: string) => string): boolean {
   const text = normalise(body)
+  // 智能版每条文字都不同，靠末尾固定的「自动回复」提示识别（代码追加，模型写不出来）。
+  if (text.endsWith(normalise(AUTOMATED_NOTICE))) return true
   return text === normalise(AUTOACK_TEMPLATE) || text === normalise(LEGACY_AUTOACK_TEMPLATE)
 }

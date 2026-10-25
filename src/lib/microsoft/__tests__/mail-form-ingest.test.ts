@@ -137,6 +137,17 @@ describe('mirrorFormThread / formLeadRaw', () => {
     expect(calls[0]).toMatchObject({ leadId: 'mid-1', phone: null, email: 'jane@example.com', name: 'Jane' })
   })
 
+  it('utm 原样传给 mirror（缺失时为 undefined，不写 null 兜底）', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const utm = { source: 'facebook', medium: null, campaign: '1', content: '2' }
+    await mirrorFormThread({
+      clientId: 'c1',
+      messages: [{ id: 'mid-3', receivedAt: 'x', formLead: { ...lead, utm } }],
+      mirror: async (i) => { calls.push(i as unknown as Record<string, unknown>); return { contactId: 'ct-1', skipped: null } },
+    })
+    expect(calls[0]).toMatchObject({ utmSource: 'facebook', utmCampaign: '1', utmContent: '2' })
+  })
+
   it('skipped=error 一律抛出（交给「一条失败就停」）', async () => {
     await expect(
       mirrorFormThread({

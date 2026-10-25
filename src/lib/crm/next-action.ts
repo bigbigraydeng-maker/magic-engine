@@ -77,6 +77,9 @@ export const BASE_LIST_OF_SEGMENT: Record<Segment, NextActionList> = {
   handoff_sop: 'cold',
   nurture_future: 'cold',
   excluded: 'cold',
+  // 看发件地址就不像客人来咨询 —— 只从「今天要联系」挪到「先放着」，
+  // 人还在名单里看得到，不删不藏（PM 2026-10-21：不许凭空消失）。
+  not_enquiry_suspect: 'cold',
 }
 
 /**
@@ -111,6 +114,9 @@ export function verbOf(
   list: NextActionList,
 ): NextActionVerb {
   if (segment === 'excluded') return 'do_not_contact'
+  // 没有这一行会落到最后的 `return 'reply'`，名单上就会出现自相矛盾的
+  // 「回他 —— 看着不是客人来咨询（供应商系统通知）」（子牙复审 P1-1）。
+  if (segment === 'not_enquiry_suspect') return 'do_not_contact'
   if (segment === 'nurture_future') return 'hold'
   if (segment === 'handoff_sop') return 'system_watching'
   if (segment === 'stale_conversation' && list === 'cold') return 'system_watching'

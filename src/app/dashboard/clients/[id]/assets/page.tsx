@@ -630,7 +630,7 @@ function StoryboardPanel({
               <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-700/40 rounded-lg px-4 py-3">
                 <div>
                   <p className="text-xs font-medium text-emerald-300">✓ 已发送到内容看板</p>
-                  <p className="text-[11px] text-emerald-600 mt-0.5">可在 Launch Hub → Reels Studio 查看并生成视频</p>
+                  <p className="text-[11px] text-emerald-600 mt-0.5">可在执行看板 → 短视频（Reels Studio）查看并生成视频</p>
                 </div>
                 <Link
                   href={`/dashboard/clients/${clientId}/execution`}

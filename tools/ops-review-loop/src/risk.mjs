@@ -34,6 +34,8 @@
  * exercises it offline.
  */
 
+import { isFileReadFailure } from './ray-file-read.mjs'
+
 /** Severity order, lowest first. Index position is the comparison key. */
 export const RISK_ORDER = ['C', 'B', 'A']
 
@@ -354,6 +356,196 @@ function pathsForEntry(entry) {
 }
 
 /**
+ * Paths that must never arm auto-merge, whatever the risk rating.
+ *
+ * Ray merges these by hand: database schema / migrations, Meta tokens or
+ * credentials, and code that creates or changes a Meta campaign, budget, or
+ * bid. A path that only mentions a budget in a read-only or non-Meta file is
+ * not on this list. Unreadable input fails closed.
+ */
+export const RAY_MERGE_HOLD_RULES = [
+  { prefix: 'supabase/migrations/', why: '数据库 migration' },
+  { suffix: '.sql', why: 'SQL，路径分不清是不是库表语句' },
+  { includes: '/migrations/', why: 'migration 目录' },
+  { basenameIncludes: 'migration', why: '文件名像 migration' },
+  { pattern: /(^|\/)meta\/.*token/i, why: 'Meta token' },
+  { pattern: /(^|\/)meta\/.*cred/i, why: 'Meta 凭证' },
+  { pattern: /(^|\/)meta\/.*secret/i, why: 'Meta 密钥' },
+  { includes: 'system-user', why: 'system user token' },
+  { includes: 'system_user', why: 'system user token' },
+  { pattern: /(^|\/)\.env/i, why: '密钥文件' },
+  { includes: 'src/lib/meta/campaign-writes', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/campaign-management', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/ad-publisher', why: '创建或改 Meta 广告' },
+  { includes: 'src/lib/meta/ads-manager', why: '创建或暂停 Meta 广告' },
+  { includes: 'src/lib/meta/adsets', why: '改 Meta 广告组预算' },
+  { includes: '/meta-ads/', why: 'Meta 广告写入入口' },
+  { includes: '/capabilities/ads/', why: '改广告系列或预算' },
+  { includes: 'ads-campaign-budget', why: '改广告系列预算' },
+  { includes: 'budget-scale', why: '加减广告预算' },
+  { pattern: /(^|\/)meta\/.*bid/i, why: '改 Meta 出价' },
+  { includes: 'ad-health/', why: '广告健康度里的预算或止损入口' },
+  { includes: 'action-submission/', why: '把广告动作交给执行' },
+  { includes: 'ads-strategy/', why: '广告策略草稿或止损' },
+  { includes: 'marketing-plan/promo/', why: '推广方案里的广告草稿' },
+  { includes: 'meta-oauth/', why: 'Meta 登录和凭证' },
+  { includes: 'meta/entity-settings', why: 'Meta 广告实体设置' },
+]
+
+/** Import specifiers that write a Meta campaign, budget, or bid. */
+const SPEND_IMPORT = /(?:^|\/)(?:campaign-writes|campaign-management|ad-publisher|adsets)(?:\.js)?$/
+
+/**
+ * True when the file imports a module that creates or changes Meta spend.
+ *
+ * @param {unknown} source
+ * @returns {boolean}
+ */
+export function importsMetaSpendWriter(source) {
+  if (typeof source !== 'string' || source === '') return false
+  for (const match of source.matchAll(/(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g)) {
+    if (SPEND_IMPORT.test(match[1])) return true
+  }
+  return false
+}
+
+/**
+ * Added and removed lines of a unified diff, without the leading `+` or `-`.
+ * `null` means there is no diff to read. Context lines are not changes.
+ * GitHub's files API usually sends hunks only; `--- a/` / `+++ b/` headers
+ * are skipped when a full diff is passed in.
+ *
+ * @param {unknown} patch
+ * @returns {string|null}
+ */
+function patchChangedText(patch) {
+  if (typeof patch !== 'string' || patch === '') return null
+  const lines = []
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue
+    if (line.startsWith('+') || line.startsWith('-')) lines.push(line.slice(1))
+  }
+  return lines.join('\n')
+}
+
+/** Access-check modules. A quoted path must sit under an `auth/` segment. */
+const AUTH_BOUNDARY_MODULE =
+  /(?:^|\/)auth\/(?:require-session|client-access|require-admin|api-key-access|whitelist|paid-only-handler)(?:\.js)?$/
+
+/** Calls that decide who is logged in, who may act, or which client's data is visible. */
+const AUTH_BOUNDARY_CALL =
+  /\b(?:requireSession|requireDashboardClientAccess|requireOnboardingClientAccess|requirePaidClientAccess|requireOperatorAccess|requirePlanApproverAccess|requireAdmin|guardAdmin|guardGlobalAdmin|requireGlobalAdmin|requireAdminScope|scopeAllowsClient|verifyApiKey|requireMeClientId|requireAdminContext|getUserPermissions|isAllowedEmail|isGlobalAdminEmail|withPaidOnlyTrap|isPaidOnly)\s*\(/
+
+/**
+ * True when added or removed lines touch a login, permission, or client-access check.
+ * The whole file is not scanned: a route that already had a check stays at its
+ * path rating when this diff does not change that check.
+ *
+ * @param {unknown} patch
+ * @returns {boolean}
+ */
+export function diffTouchesAuthBoundary(patch) {
+  const changed = patchChangedText(patch)
+  if (!changed) return false
+  if (AUTH_BOUNDARY_CALL.test(changed)) return true
+  for (const match of changed.matchAll(/['"]([^'"]+)['"]/g)) {
+    if (AUTH_BOUNDARY_MODULE.test(match[1])) return true
+  }
+  return false
+}
+
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isSourcePath(path) {
+  return /\.(?:ts|tsx|js|mjs|cjs)$/i.test(path)
+}
+
+/**
+ * Spend-import hold for one source path. A string is the whole file. A read
+ * failure stays for Ray. `null` is too big or a confirmed deletion, so the diff is used.
+ *
+ * @param {string} path
+ * @param {Record<string, unknown>} entry
+ * @param {Record<string, string|null|object>} knownContents
+ * @returns {string|null}
+ */
+function spendHoldForSource(path, entry, knownContents) {
+  if (!isSourcePath(path)) return null
+  const text = knownContents[path]
+  if (typeof text === 'string') {
+    return importsMetaSpendWriter(text) ? `${path}（导入了 Meta 广告写入模块）` : null
+  }
+  if (isFileReadFailure(text)) return `${path}（文件读取失败，分不清是否导入了 Meta 广告写入模块）`
+  const changed = patchChangedText(entry.patch)
+  if (changed === null) {
+    return `${path}（读不到文件，diff 也没有，分不清是否碰到库表、Meta 凭证或广告花费）`
+  }
+  if (importsMetaSpendWriter(changed)) return `${path}（diff 导入了 Meta 广告写入模块）`
+  return null
+}
+
+/**
+ * Whether this diff must stay for Ray to merge by hand.
+ *
+ * @param {unknown} files changed-file entries, the same shape `classifyRisk` reads
+ * @param {Record<string, string|null|object>|null} [contents] whole-file text, `null` when only the diff can be judged, or a read-failure marker that still holds.
+ * @returns {{hold: boolean, reason: string}}
+ */
+export function assessRayMergeHold(files, contents) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { hold: true, reason: '改动清单读不到，库表、凭证和广告花费分不清，留给 Ray 亲手合' }
+  }
+  const knownContents = contents && typeof contents === 'object' ? contents : null
+  /** @type {string[]} */
+  const hits = []
+  for (const entry of files) {
+    if (!entry || typeof entry !== 'object') {
+      return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    }
+    const record = /** @type {Record<string, unknown>} */ (entry)
+    const { paths, unreadable } = pathsForEntry(record)
+    if (unreadable) return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    for (const path of paths) {
+      const rule = RAY_MERGE_HOLD_RULES.find((candidate) => ruleMatches(candidate, path, true))
+      if (rule) {
+        hits.push(`${path}（${rule.why}）`)
+        continue
+      }
+      if (!knownContents) continue
+      const spend = spendHoldForSource(path, record, knownContents)
+      if (spend) hits.push(spend)
+    }
+  }
+  if (hits.length === 0) return { hold: false, reason: '' }
+  return { hold: true, reason: hits.slice(0, 8).join('；') }
+}
+
+function entryName(entry) {
+  const filename = entry && typeof entry === 'object' ? /** @type {{filename?: unknown}} */ (entry).filename : ''
+  return typeof filename === 'string' && filename !== '' ? filename : '未命名文件'
+}
+
+/** True when GitHub reported real edits but did not include the patch. A pure rename has no line count. */
+function sourceDiffUnreadable(entry) {
+  if (!entry || typeof entry !== 'object') return false
+  const row = /** @type {{patch?: unknown, changes?: unknown, additions?: unknown, deletions?: unknown}} */ (entry)
+  if (typeof row.patch === 'string' && row.patch !== '') return false
+  return [row.changes, row.additions, row.deletions].some((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+}
+
+/** Auth-edit reason. A path that is already A is unchanged. An omitted source patch is A too. */
+function authDiffReason(entry, pathRatings) {
+  if (pathRatings.some((rated) => rated.risk === 'A')) return null
+  if (!pathRatings.some((rated) => isSourcePath(rated.path))) return null
+  const patch = entry && typeof entry === 'object' ? /** @type {{patch?: unknown}} */ (entry).patch : undefined
+  if (diffTouchesAuthBoundary(patch)) return `${entryName(entry)} —— A 级（改动行碰到鉴权或客户访问校验）`
+  if (sourceDiffUnreadable(entry)) return `${entryName(entry)} —— A 级（diff 读不到，没法判断是否改了鉴权）`
+  return null
+}
+
+/**
  * Labels that introduce a declared level.
  *
  * `STRONG` is this repo's own convention: a line that opens with one of them
@@ -535,14 +727,24 @@ export function classifyRisk({ files, declaredRisk = null, declaredUnreadable = 
       categories.add(RISK_CATEGORY.UNREADABLE)
       unreadableReasons.push(problem)
     }
+    const pathRatings = []
     for (const path of paths) {
-      const { risk, why, category } = classifyFile(path)
-      computed = higherRisk(computed, risk)
-      if (category) categories.add(category)
-      if (risk !== 'C') {
-        const renamed = path !== entry?.filename ? `（rename 前的原路径，现为 ${entry.filename}）` : ''
-        reasons.push(`${path} —— ${risk} 级（${why}）${renamed}`)
-      }
+      const rated = classifyFile(path)
+      pathRatings.push({ path, ...rated })
+      computed = higherRisk(computed, rated.risk)
+      if (rated.category) categories.add(rated.category)
+    }
+    const authReason = authDiffReason(entry, pathRatings)
+    if (authReason) {
+      computed = 'A'
+      categories.add(RISK_CATEGORY.AUTH_ISOLATION)
+      reasons.push(authReason)
+    }
+    for (const rated of pathRatings) {
+      if (rated.risk === 'C') continue
+      if (authReason && rated.risk !== 'A') continue
+      const renamed = rated.path !== entry?.filename ? `（rename 前的原路径，现为 ${entry.filename}）` : ''
+      reasons.push(`${rated.path} —— ${rated.risk} 级（${rated.why}）${renamed}`)
     }
   }
 

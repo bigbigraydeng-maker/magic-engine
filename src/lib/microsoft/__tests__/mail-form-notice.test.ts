@@ -40,6 +40,35 @@ function goodInput(): FormNoticeInput {
   }
 }
 
+describe('parseFormNotice utm', () => {
+  function withBody(extra: string[], url = '/contact<https://www.example.co.nz/contact>'): FormNoticeInput {
+    const input = goodInput()
+    const lines = input.body.split('\n').map((l) => (l.startsWith('Form URL') ? `Form URL\t${url}` : l))
+    const at = lines.indexOf('')
+    lines.splice(at, 0, ...extra)
+    return { ...input, body: lines.join('\n') }
+  }
+
+  it('没有 utm → utm 为 null（旧通知行为不变）', () => {
+    const r = parseFormNotice(goodInput())
+    expect(r.ok && r.lead.utm).toBeNull()
+  })
+
+  it('从 Form URL 查询串取 utm', () => {
+    const r = parseFormNotice(
+      withBody([], '/tour?utm_source=facebook&utm_campaign=5255&utm_content=5256<https://www.example.co.nz/tour>'),
+    )
+    expect(r.ok && r.lead.utm).toEqual({ source: 'facebook', medium: null, campaign: '5255', content: '5256' })
+  })
+
+  it('独立 UTM 行优先于查询串', () => {
+    const r = parseFormNotice(
+      withBody(['UTM source\tfb', 'UTM content\t777777'], '/tour?utm_source=google<https://x.co.nz/tour>'),
+    )
+    expect(r.ok && r.lead.utm).toMatchObject({ source: 'fb', content: '777777' })
+  })
+})
+
 describe('isFormNoticeCandidate', () => {
   it('accepts inbound self-sent contact form subject', () => {
     expect(
@@ -136,6 +165,7 @@ describe('parseFormNotice', () => {
       message: 'hello there',
       submittedAt: '2026-10-19T01:29:17.009Z',
       formUrl: '/contact',
+      utm: null,
     })
   })
 
