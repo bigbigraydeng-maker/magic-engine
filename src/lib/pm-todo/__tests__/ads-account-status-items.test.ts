@@ -8,6 +8,8 @@ const h = vi.hoisted(() => ({
   rows: {} as Record<string, AccountStatusRow[]>,
   captures: {} as Record<string, Array<{ ad_account_id: string; captured_at: string }>>,
   captureError: null as string | null,
+  hiddenRows: [] as Array<{ ad_account_id: string; hidden_from_ad_health: boolean | null }>,
+  hiddenError: null as string | null,
 }))
 
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
@@ -70,6 +72,13 @@ function input(over: Partial<AccountStatusEvalInput>): AccountStatusEvalInput {
 function makeSb(): object {
   return {
     from(_table: string) {
+      if (_table === 'client_meta_ad_accounts') {
+        const result = h.hiddenError
+          ? { data: null, error: { message: h.hiddenError } }
+          : { data: h.hiddenRows, error: null }
+        const reg = { select: () => reg, eq: () => Promise.resolve(result) }
+        return reg
+      }
       let clientId: string | null = null
       const builder = {
         select() {
@@ -108,6 +117,8 @@ beforeEach(() => {
   h.rows = {}
   h.captures = {}
   h.captureError = null
+  h.hiddenRows = []
+  h.hiddenError = null
 })
 
 describe('evaluateAccountStatus', () => {
@@ -115,7 +126,7 @@ describe('evaluateAccountStatus', () => {
     expect(evaluateAccountStatus(input({}))).toBeNull()
   })
 
-  it('status 3 for 10 hours → null (not yet 24h)', () => {
+  it('status 3 for 10 hours → finding right away (unsettled has no 24h hold)', () => {
     const finding = evaluateAccountStatus(
       input({
         rows: [
@@ -125,7 +136,42 @@ describe('evaluateAccountStatus', () => {
         ],
       }),
     )
+    expect(finding?.item.kind).toBe('ads_account_not_active')
+    expect(finding?.item.what).toContain('10 小时')
+  })
+
+  it('status 3 first read just now → finding', () => {
+    const finding = evaluateAccountStatus(
+      input({
+        rows: [
+          row({ account_status: 3, captured_at: hoursAgo(0) }),
+          row({ account_status: 1, captured_at: hoursAgo(6) }),
+        ],
+      }),
+    )
+    expect(finding?.item.kind).toBe('ads_account_not_active')
+  })
+
+  it('other non-active code (7) for 10 hours → still null (24h hold kept)', () => {
+    const finding = evaluateAccountStatus(
+      input({
+        rows: [
+          row({ account_status: 7, captured_at: hoursAgo(1) }),
+          row({ account_status: 7, captured_at: hoursAgo(10) }),
+          row({ account_status: 1, captured_at: hoursAgo(20) }),
+        ],
+      }),
+    )
     expect(finding).toBeNull()
+  })
+
+  it('hidden account with status 3 → finding with the repay-then-pause note', () => {
+    const rows = [row({ account_status: 3, captured_at: hoursAgo(1) })]
+    const hidden = evaluateAccountStatus(input({ rows, hidden: true }))
+    expect(hidden?.item.what).toContain('隐藏')
+    expect(hidden?.item.what).toContain('马上暂停')
+    const visible = evaluateAccountStatus(input({ rows }))
+    expect(visible?.item.what).not.toContain('隐藏')
   })
 
   it('status 3 for 30 hours → ads_account_not_active finding', () => {
@@ -178,13 +224,27 @@ describe('evaluateAccountStatus', () => {
     expect(finding).toBeNull()
   })
 
-  it('flap: current run only 4 hours old → null', () => {
+  it('flap: status 3 again after recovery → finding counted from the current run only', () => {
     const finding = evaluateAccountStatus(
       input({
         rows: [
           row({ account_status: 3, captured_at: hoursAgo(1) }),
           row({ account_status: 1, captured_at: hoursAgo(5) }),
           row({ account_status: 3, captured_at: hoursAgo(40) }),
+        ],
+      }),
+    )
+    expect(finding?.item.what).toContain('1 小时')
+    expect(finding?.item.what).not.toContain('40 小时')
+  })
+
+  it('flap with code 7: current run only 4 hours old → null', () => {
+    const finding = evaluateAccountStatus(
+      input({
+        rows: [
+          row({ account_status: 7, captured_at: hoursAgo(1) }),
+          row({ account_status: 1, captured_at: hoursAgo(5) }),
+          row({ account_status: 7, captured_at: hoursAgo(40) }),
         ],
       }),
     )
@@ -373,6 +433,36 @@ describe('pushAdsAccountStatusItems', () => {
     expect(items[0].kind).toBe('ads_account_not_active')
     expect(items[0].client_id).toBe('c-1')
     expect(items[0].client_name).toBe('Client c-1')
+  })
+
+  function unsettledSetup(): void {
+    h.clients = [{ id: 'c-1', name: 'Client One', meta_ad_account_id: 'act_1' }]
+    h.accounts['c-1'] = [{ adAccountId: 'act_1', label: 'Main', isPrimary: true }]
+    h.rows['c-1'] = [
+      row({ account_status: 3, captured_at: hoursAgo(1) }),
+      row({ account_status: 1, captured_at: hoursAgo(8) }),
+    ]
+    h.captures['c-1'] = [{ ad_account_id: 'act_1', captured_at: hoursAgo(1) }]
+  }
+
+  it('hidden-from-health account with status 3 still produces an item, with the pause note', async () => {
+    unsettledSetup()
+    h.hiddenRows = [{ ad_account_id: 'act_1', hidden_from_ad_health: true }]
+    const items: import('../manual-item-types').ManualItem[] = []
+    await pushAdsAccountStatusItems(asSupabase(makeSb()), items, NOW, nameOf)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('ads_account_not_active')
+    expect(items[0].what).toContain('马上暂停')
+  })
+
+  it('hidden lookup fails → item is still produced (fail visible), just without the note', async () => {
+    unsettledSetup()
+    h.hiddenError = 'boom'
+    const items: import('../manual-item-types').ManualItem[] = []
+    await pushAdsAccountStatusItems(asSupabase(makeSb()), items, NOW, nameOf)
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('ads_account_not_active')
+    expect(items[0].what).not.toContain('马上暂停')
   })
 
   it('unbound account is ignored', async () => {

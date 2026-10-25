@@ -24,6 +24,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { syncClientMetaLeads, type MetaLeadsSyncClient } from '@/lib/meta/leads-sync'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { buildLeadsSyncReceipts, summariseSyncProblems } from '@/lib/meta/leads-sync-alert'
+import { probeAllAccountStatuses } from '@/lib/ads-strategy/portfolio/account-status-probe'
 
 // 一个客户可能有多个表单，每个表单还要翻页；给足时间。
 export const maxDuration = 600
@@ -63,6 +64,10 @@ async function run(): Promise<NextResponse> {
     }
   }
 
+  // 顺带探一遍广告账户状态（只读 Meta、只写账户级快照），把欠款发现的最坏延迟从 6 小时缩到约 2 小时。
+  // 探测自己吞异常；它出什么事都不能影响线索同步的结论。
+  const accountStatusProbe = await probeAllAccountStatuses()
+
   const newContacts = results.reduce((n, r) => n + r.newContacts, 0)
   const leadsIngested = results.reduce((n, r) => n + r.leadsIngested, 0)
   // 逐客户回执：三态（ok / blocked / failed），PM todo 检测器和日报都读它。
@@ -89,7 +94,7 @@ async function run(): Promise<NextResponse> {
     processed: results.length,
     completed: results.length - failed - blocked,
     failed,
-    summary: { newContacts, leadsIngested, mailchimp, blocked, receipts, results },
+    summary: { newContacts, leadsIngested, mailchimp, blocked, receipts, results, accountStatusProbe },
     // 有客户取不到数就必须把原话带进 error_message —— 日报邮件的「错误原因」列
     // 读的就是这个字段。2026-08-21~08-30 这里一直是 null,于是日报每天照发
     // 「meta-leads-sync 4 failed —」,一屏破折号没有一个字说明是什么事,
@@ -112,6 +117,7 @@ async function run(): Promise<NextResponse> {
     blocked,
     receipts,
     results,
+    accountStatusProbe,
   })
 }
 

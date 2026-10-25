@@ -6,7 +6,7 @@
  * 地方会主动说这件事。这里把它变成一条待办。
  *
  * 三种情况：
- * - `ads_account_not_active`：状态不是 1、且已经持续至少 24 小时。
+ * - `ads_account_not_active`：状态不是 1、且已经持续至少 24 小时；欠款（码 3）一读到就出。
  * - `ads_account_status_unreadable`：读不到状态（最近一次完整读取过期、
  *   快照行是空的、最新一行是「账户消失」、或状态字段为空）。这是系统自己
  *   的问题，不是客户的问题，所以文案里明确说「不用你操作」。
@@ -32,6 +32,7 @@ import {
   accountStatusHint,
   normalizeAdAccountId,
   ACCOUNT_STATUS_ACTIVE,
+  ACCOUNT_STATUS_UNSETTLED,
   DISAPPEARED_CAPTURE_REASON,
   type AccountStatusRow,
 } from '@/lib/ads-strategy/account-status'
@@ -42,8 +43,18 @@ export type AdsAccountStatusItemKind =
   | 'ads_account_status_unreadable'
   | 'ads_account_closed_weekly'
 
-/** 状态不是 1 至少持续这么久，才值得打扰人。 */
+/** 状态不是 1 至少持续这么久，才值得打扰人（欠款除外，见下）。 */
 export const ACCOUNT_NOT_ACTIVE_MIN_HOURS = 24
+
+/** 欠款（码 3）一读到就下发：不花钱、不出线索的每一小时都是损失，状态本身最慢也只隔约 2 小时才读一次。 */
+export const ACCOUNT_UNSETTLED_MIN_HOURS = 0
+
+function minHoursFor(status: number): number {
+  return status === ACCOUNT_STATUS_UNSETTLED ? ACCOUNT_UNSETTLED_MIN_HOURS : ACCOUNT_NOT_ACTIVE_MIN_HOURS
+}
+
+const HIDDEN_NOTE =
+  '这个账户在健康页是隐藏的，但里面开着的系列一旦还款会立刻继续花钱：还款后要马上暂停（要还款先通知广告总控）。'
 
 /** 最近一次完整账户级快照超过这么久没更新，就认为「读不到」。 */
 export const ACCOUNT_CAPTURE_STALE_HOURS = 36
@@ -73,6 +84,8 @@ export interface AccountStatusEvalInput {
   rows: readonly AccountStatusRow[]
   /** 这个账户最近一次 level='account' 且 complete=true 的 capture 时间；没有就是 null。 */
   lastCompleteCaptureAt: string | null
+  /** 这个账户在健康页被隐藏（hidden_from_ad_health）；隐藏不等于里面没有在投的系列。读不到就当 false。 */
+  hidden?: boolean
   now: Date
 }
 
@@ -195,7 +208,7 @@ function buildNotActiveFinding(
       kind: 'ads_account_not_active',
       client_id: input.clientId,
       client_name: input.clientName,
-      what: `账户 ${label} 的 Meta 广告账户状态不是正常（码 ${status}${hintPart}），已经 ${durationText(hours)}；这期间不会花钱、不会有新线索。`,
+      what: `账户 ${label} 的 Meta 广告账户状态不是正常（码 ${status}${hintPart}），已经 ${durationText(hours)}；这期间不会花钱、不会有新线索。${input.hidden ? HIDDEN_NOTE : ''}`,
       how: '去 Meta 付款设置看扣款失败原因，结清并补上备用卡；结清后要看到当天有新数据、线索回流，才算恢复。账户恢复正常后这条会自动消失。',
       href: adsHealthHref(input.clientId),
     },
@@ -216,8 +229,26 @@ export function evaluateAccountStatus(input: AccountStatusEvalInput): AccountSta
   const onset = findNotActiveOnset(input.rows)
   if (onset === null) return null
   const hours = hoursSince(onset, input.now.toISOString())
-  if (hours === null || hours < ACCOUNT_NOT_ACTIVE_MIN_HOURS) return null
+  if (hours === null || hours < minHoursFor(status)) return null
   return buildNotActiveFinding(input, status, hours)
+}
+
+/** 哪些账户在健康页被隐藏。读失败返回 null：调用方当「没隐藏」照常出待办，只少一句提示。 */
+async function loadHiddenAccounts(supabase: SupabaseClient, clientId: string): Promise<Set<string> | null> {
+  try {
+    const { data, error } = await supabase
+      .from('client_meta_ad_accounts')
+      .select('ad_account_id, hidden_from_ad_health')
+      .eq('client_id', clientId)
+    if (error || !Array.isArray(data)) return null
+    const hidden = new Set<string>()
+    for (const r of data as Array<{ ad_account_id: string; hidden_from_ad_health: boolean | null }>) {
+      if (r.hidden_from_ad_health === true) hidden.add(normalizeAdAccountId(r.ad_account_id))
+    }
+    return hidden
+  } catch {
+    return null
+  }
 }
 
 interface CaptureRow {
@@ -311,6 +342,7 @@ async function evaluateClient(
 
   const rows = await loadAccountStatusRows(clientId, sinceRows)
   const captures = await loadLastCompleteCaptures(supabase, clientId, sinceCaptures)
+  const hiddenAccounts = await loadHiddenAccounts(supabase, clientId)
 
   for (const account of accounts) {
     const normalizedId = normalizeAdAccountId(account.adAccountId)
@@ -323,6 +355,7 @@ async function evaluateClient(
       accountName,
       rows: accountRows,
       lastCompleteCaptureAt: captures.get(normalizedId) ?? null,
+      hidden: hiddenAccounts?.has(normalizedId) ?? false,
       now,
     })
     if (finding) items.push(finding.item)
