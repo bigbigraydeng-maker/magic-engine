@@ -697,9 +697,7 @@ export default function ClientDetailPage() {
                   desc="广告健康 · 每天自动体检、疲劳预警 · 花钱推广的事都从这里进"
                   badge="in_house"
                   links={[
-                    { label: '推广计划', href: `/dashboard/clients/${clientId}/promo-plan` },
-                    { label: '推广活动', href: `/dashboard/clients/${clientId}/campaigns` },
-                    { label: 'Marketing Plan', href: `/dashboard/clients/${clientId}/marketing-plan` },
+                    { label: '计划', href: `/dashboard/clients/${clientId}/promo-plan` },
                     ...(showEntry('ad-approval') ? [{ label: '等你点头的广告', href: '/dashboard/ad-approval' }] : []),
                     // 🔴 网址从登记表取，不写死：入口搬动时（2026-10-18 搬进广告门标签）
                     //    改 `dedicated-approval-entries.ts` 一处，这里和待办的链接一起跟着走。
