@@ -7,6 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { AssigneeSelect } from './AssigneeSelect'
 import { CallButton } from './CallButton'
 import { useCallback, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
@@ -72,6 +73,13 @@ export interface DrawerRow {
   nextAction?: NextAction
   /** 最新 AI 摘要的意向。只用来显示一行「AI 初判（未校准）」小字，不影响任何按钮或排序。 */
   intent?: 'high' | 'medium' | 'low' | 'unknown' | null
+  /**
+   * 这条线索的跟进人（`contacts.assigned_to`）—— 字面邮箱或 null。
+   *
+   * part 2 的 round-robin 新进线时自动写入；part 3 这里给员工看 + 改。
+   * 列表接口把它跟别的字段一起透下来；下拉里的候选从 `/crm/assignees` 另拉。
+   */
+  assignedTo?: string | null
 }
 
 const STAGE_SOURCE_LABEL: Record<StageSource, string> = {
@@ -359,6 +367,17 @@ export function PersonDrawer({
 
           {/* 客人档案：名字（可改）/ 昵称 / 邮箱 / 电话（可加）。PM 2026-10-22：先把字段做好，以后有机会再完善。 */}
           <ProfileCard clientId={clientId} contactId={row.contactId} onChanged={() => onSaved('✓ 档案已保存', true)} />
+
+          {/* 跟进人（issue #3158 part 3）—— 这一条线索分给谁跟。part 2 的 round-robin
+              在新进线时自动写入；这里让员工看得见 + 改得动。放在档案下面、「该做什么」上面：
+              销售开口前先知道「这单归我吗」，再往下看该做什么。 */}
+          <AssigneeSelect
+            clientId={clientId}
+            contactId={row.contactId}
+            current={row.assignedTo ?? null}
+            viewerEmail={viewerEmail}
+            onSaved={onSaved}
+          />
 
           {/* 该做什么 —— 三行：动作 + 为什么 / AI 建议 / 到哪一步了（点开可改）。
               这一块取代了原来并排的三套状态（阶段按钮、冷热标签、意向小圆标），PM 2026-10-10：

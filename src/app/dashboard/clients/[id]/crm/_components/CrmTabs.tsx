@@ -110,6 +110,18 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-me-charcoal/45">
         <span>相关工具：</span>
+        {/*
+          「我的待跟进」入口（issue #3158 part 3）—— 其实就是「全部客人」页加上
+          `?assignee=me` 筛选条，不是新页面：员工最高频的问题是「我今天要跟谁」，
+          放个一键捷径省得先打开全部客人再点筛选。走同一道付费客户闸，不另开门。
+        */}
+        <Link
+          href={`${base}/all?assignee=me`}
+          title="只看分给我自己的线索。到了那边可以在筛选条里切「未分配 / 其他同事」。"
+          className="hover:text-me-charcoal hover:underline"
+        >
+          👤 我的待跟进
+        </Link>
         <Link
           href={`/dashboard/clients/${clientId}/messenger`}
           title="Facebook / WhatsApp 的对话列表，可以在这里直接回客人。"

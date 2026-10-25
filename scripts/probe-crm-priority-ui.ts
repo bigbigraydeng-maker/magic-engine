@@ -90,7 +90,7 @@ async function loadPriorityResponse(clientId: string, open?: Partial<Record<Sect
       supabaseAdmin
         .from('contacts')
         .select(
-          'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at',
+          'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at, assigned_to',
         )
         .eq('client_id', clientId)
         .order('id', { ascending: true })

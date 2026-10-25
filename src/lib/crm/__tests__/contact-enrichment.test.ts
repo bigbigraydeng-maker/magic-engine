@@ -25,6 +25,7 @@ function makeContact(over: Partial<ContactRow> = {}): ContactRow {
     pinned_at: null,
     important_note: null,
     important_due_at: null,
+    assigned_to: null,
     ...over,
   }
 }
