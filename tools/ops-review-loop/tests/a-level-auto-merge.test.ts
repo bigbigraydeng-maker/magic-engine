@@ -267,6 +267,58 @@ describe('paths Ray still merges by hand', () => {
     expect(assessRayMergeHold([{ filename: path }], { [path]: null }).hold).toBe(true)
   })
 
+  it('does not hold a file that is too large to read when the diff does not touch spend (#3133)', () => {
+    const path = 'src/app/dashboard/clients/[id]/execution/_client.tsx'
+    const patch = [
+      '@@ -1159,7 +1159,7 @@ function TaskDetailDrawer({',
+      '               href={',
+      '-                  : `/dashboard/clients/${clientId}/daily-plan`',
+      '+                  : `/dashboard/clients/${clientId}/production`',
+      '             >',
+    ].join('\n')
+    const result = assessRayMergeHold([{ filename: path, patch }], { [path]: null })
+    expect(result.hold).toBe(false)
+    expect(result.reason).toBe('')
+  })
+
+  it('holds an unread file when the diff imports a spend writer, and when the diff is missing', () => {
+    const path = 'src/app/dashboard/clients/[id]/execution/_client.tsx'
+    const patch = "+import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'\n"
+    const imported = assessRayMergeHold([{ filename: path, patch }], { [path]: null })
+    expect(imported.hold).toBe(true)
+    expect(imported.reason).toContain('diff 导入了 Meta 广告写入模块')
+
+    const missing = assessRayMergeHold([{ filename: path }], { [path]: null })
+    expect(missing.hold).toBe(true)
+    expect(missing.reason).toContain('diff 也没有')
+    expect(missing.reason).toContain('库表')
+    expect(missing.reason).toContain('Meta 凭证')
+    expect(missing.reason).toContain('广告花费')
+  })
+
+  it('still holds schema, Meta credential, and ad-spend paths when the diff looks harmless', () => {
+    const patch = '+const label = "renamed"\n'
+    for (const path of [
+      'supabase/migrations/20261025_one.sql',
+      'src/lib/meta/token-manager.ts',
+      'src/lib/meta/campaign-writes.ts',
+      'src/app/api/clients/[id]/ad-health/route.ts',
+    ]) {
+      const result = assessRayMergeHold([{ filename: path, patch }], { [path]: null })
+      expect(result.hold, path).toBe(true)
+    }
+  })
+
+  it('still holds a readable file that imports a spend writer even if this hunk does not', () => {
+    const path = 'src/lib/not-on-the-list/bridge.ts'
+    const result = assessRayMergeHold(
+      [{ filename: path, patch: '+const label = "copy"\n' }],
+      { [path]: "import { pause } from '@/lib/meta/ad-publisher'\n" },
+    )
+    expect(result.hold).toBe(true)
+    expect(result.reason).toContain('导入了 Meta 广告写入模块')
+  })
+
   it('does not hold kernel code, a sitemap budget, Meta insights, or a non-Meta budget', () => {
     for (const path of [
       'src/lib/kernel/state.ts',

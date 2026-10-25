@@ -672,6 +672,8 @@ try {
       }
     }
   }
+  // `null` means the contents API missed the file or it is over the read cap.
+  // The hold then uses that entry's `patch` (the PR diff already on `files`).
   const rayHold = assessRayMergeHold(files, sourcePaths.length > 0 ? await readHeadFiles(sourcePaths) : {})
   const verdict = await readHeadVerdict({
     sources,
