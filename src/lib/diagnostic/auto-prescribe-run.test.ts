@@ -43,11 +43,17 @@ function fakeSupabase(tables: Tables) {
     const rows = (tables as Record<string, unknown[]>)[table] ?? []
     const builder: Record<string, unknown> = {}
     const self = () => builder
-    for (const m of ['eq', 'in', 'not', 'gte', 'order', 'limit']) builder[m] = self
+    let cap = Infinity
+    for (const m of ['eq', 'in', 'not', 'gte', 'order']) builder[m] = self
+    // 只模拟条数上限：没有 limit 的查询拿全量，带 limit 的只拿前 n 条
+    builder.limit = (n: number) => {
+      cap = n
+      return builder
+    }
     builder.select = self
     builder.maybeSingle = () => Promise.resolve({ data: null, error: null })
     builder.then = (res: (v: { data: unknown; error: null }) => unknown) =>
-      res({ data: rows, error: null })
+      res({ data: rows.slice(0, cap), error: null })
 
     return {
       ...builder,
@@ -302,6 +308,40 @@ describe('runAutoPrescribe —— 目标', () => {
     expect(link!.patch.supersedes_id).toBeNull()
     const landed = mockLand.mock.calls[0][1] as { goal_id: string }
     expect(landed.goal_id).toBe('g2')
+  })
+
+  it('🔴 人工草稿被挤出全站最近 500 条之外，仍然挡住这个目标', async () => {
+    const filler = Array.from({ length: 600 }, (_, i) => ({
+      client_id: 'other', created_at: iso(1), status: 'approved', goal_id: `x${i}`, intake: null,
+      agent_name: 'huatuo', generation_meta: null,
+    }))
+    const { supabase } = fakeSupabase({
+      diagnostic_runs: [RUN()], clients: [CLIENT()], prescriptions: [...filler, draft()],
+    })
+    const s = await runAutoPrescribe(supabase, NOW)
+    expect(mockGenerate).not.toHaveBeenCalled()
+    expect(mockLand).not.toHaveBeenCalled()
+    expect(s.outcomes[0].detail).toContain('人工处方草稿')
+  })
+
+  it('🔴 生成期间才存进来的人工草稿：不落地，刚生成的那份标 failed，记为跳过', async () => {
+    const prescriptions: unknown[] = []
+    mockGenerate.mockImplementation(async () => {
+      prescriptions.push(draft())
+      return { prescriptionId: 'p1', content: { phases: [] } }
+    })
+    const { supabase, writes } = fakeSupabase({
+      diagnostic_runs: [RUN()], clients: [CLIENT()], prescriptions,
+    })
+    const s = await runAutoPrescribe(supabase, NOW)
+
+    expect(mockGenerate).toHaveBeenCalledTimes(1)
+    expect(mockLand).not.toHaveBeenCalled()
+    expect(writes.some((w) => w.patch.goal_id)).toBe(false)
+    expect(writes.some((w) => w.patch.status === 'failed')).toBe(true)
+    expect(s.prescribed).toBe(0)
+    expect(s.outcomes[0].result).toBe('skipped')
+    expect(s.outcomes[0].detail).toContain('已作废')
   })
 
   it('🔴 落地前必须打上「机器自动落地」标记 —— 它是 PM 通知的唯一开关', async () => {

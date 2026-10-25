@@ -135,6 +135,42 @@ export function pickPrescribeCandidates(
   return { candidates, skipped }
 }
 
+const MANUAL_DRAFT_HELD_DETAIL =
+  '这个目标上有一份人工处方草稿（开方人是广告 Agent，或来源是人工）。周更不会生成、批准，也不会覆盖它。'
+
+/**
+ * 该客户（可再限定某个目标）上仍是草稿的人工处方所挂的目标集合。
+ *
+ * 🔴 按客户精确查、不设条数上限 —— 不能借用全站最近 N 条的历史窗口：
+ *    人工草稿被别的客户的新处方挤出窗口后，保护就静默失效了。
+ * 查询出错直接抛：调用方按「这个客户失败」处理，不放行。
+ */
+async function loadManualDraftGoalIds(
+  supabase: SupabaseClient,
+  clientId: string,
+  goalId?: string,
+): Promise<Set<string>> {
+  let query = supabase
+    .from('prescriptions')
+    .select('client_id, status, goal_id, agent_name, generation_meta')
+    .eq('client_id', clientId)
+    .eq('status', 'draft')
+    .not('goal_id', 'is', null)
+  if (goalId) query = query.eq('goal_id', goalId)
+  const { data, error } = await query
+  if (error) throw new Error(`读取人工处方草稿失败：${error.message}`)
+  return goalIdsWithManualDraft(
+    (data ?? []) as Array<{
+      client_id: string
+      status: string
+      goal_id: string | null
+      agent_name: string | null
+      generation_meta?: unknown
+    }>,
+    clientId,
+  )
+}
+
 /**
  * 体检里得分最低的几个维度 —— 交给 AI 当「这次重点看哪几块」。
  *
@@ -419,7 +455,7 @@ export async function runAutoPrescribe(
     let draftId: string | null = null
     try {
       const goals = await listActiveGoals(supabase, cand.clientId)
-      const blocked = goalIdsWithManualDraft(allPres, cand.clientId)
+      const blocked = await loadManualDraftGoalIds(supabase, cand.clientId)
       const goal = pickGoalForPrescription(goals, now, blocked)
       if (!goal) {
         const unblocked = pickGoalForPrescription(goals, now)
@@ -429,23 +465,13 @@ export async function runAutoPrescribe(
           clientName,
           result: 'skipped',
           detail: heldByManualDraft
-            ? '这个目标上有一份人工处方草稿（开方人是广告 Agent，或来源是人工）。周更不会生成、批准，也不会覆盖它。'
+            ? MANUAL_DRAFT_HELD_DETAIL
             : goals.length === 0
               ? '这个客户没有进行中的目标，方案无从挂起 —— 先给他定个目标'
               : `这个客户 ${goals.length} 个目标全都过期了（状态还挂着"进行中"），先定个新目标再开方`,
         })
         continue
       }
-      if (blocked.has(goal.id)) {
-        outcomes.push({
-          clientId: cand.clientId,
-          clientName,
-          result: 'skipped',
-          detail: '这个目标上有一份人工处方草稿（开方人是广告 Agent，或来源是人工）。周更不会生成、批准，也不会覆盖它。',
-        })
-        continue
-      }
-
       const intake = buildIntake(goal, cand.dimensionScores, priorIntake.get(cand.clientId) ?? null, now)
       const { prescriptionId, content } = await generatePrescription(
         supabase,
@@ -454,6 +480,26 @@ export async function runAutoPrescribe(
         intake,
       )
       draftId = prescriptionId
+
+      // 生成要打一次 AI，耗时里人工草稿可能刚好存进来 —— 落地前重新读一次，
+      // 不能用循环开始前算好的 blocked（那份永远看不到这次新存的）。
+      // 刚生成的这份还没挂目标，查不到它自己。
+      const latestBlocked = await loadManualDraftGoalIds(supabase, cand.clientId, goal.id)
+      if (latestBlocked.has(goal.id)) {
+        await supabase
+          .from('prescriptions')
+          .update({ status: 'failed', error_message: MANUAL_DRAFT_HELD_DETAIL })
+          .eq('id', prescriptionId)
+          .eq('client_id', cand.clientId)
+        draftId = null
+        outcomes.push({
+          clientId: cand.clientId,
+          clientName,
+          result: 'skipped',
+          detail: `${MANUAL_DRAFT_HELD_DETAIL}（生成期间有人存了草稿，这次生成的方案已作废）`,
+        })
+        continue
+      }
 
       // generatePrescription 存的是不挂目标的裸草稿，补上目标与版本号
       const { data: verRow } = await supabase
@@ -464,10 +510,6 @@ export async function runAutoPrescribe(
         .limit(1)
         .maybeSingle<{ version: number }>()
       const nextVersion = (verRow?.version ?? 0) + 1
-
-      if (blocked.has(goal.id)) {
-        throw new Error('拒绝覆盖人工处方草稿')
-      }
 
       // 这一版要替代该目标下当前生效的那份 —— 不填的话旧方案永远停在 approved，
       // 它名下没人动过的动作会一直挂在看板上，一周叠一层
