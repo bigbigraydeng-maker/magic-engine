@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-10-25
 source: issue:3125
 done_on: 2026-10-25
-done_ref: commit:pending
+done_ref: commit:c6c089f
 verify_by: 2026-11-01
 verify_how: 合并上线后，看新进的 WhatsApp 广告会话联系人 attr_platform=meta、有 source_id 的带 attr_ad_id；带 utm 的官网表单通知触点 attr_platform=meta。历史 9 个会话由 Ray 自己跑 scripts/backfills/backfill-whatsapp-referral-attribution.ts（默认预演）。
 ---
