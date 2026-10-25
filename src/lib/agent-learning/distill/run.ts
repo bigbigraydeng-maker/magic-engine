@@ -101,6 +101,17 @@ export async function distillOne(
   )
   const reservationId = newAttemptId('distill', distillUnitId(source.sourceKey, item.text), attempt)
 
+  // 先建提示词（纯函数）：整份请求的 token 上界必须在预留所依据的上限之内，否则不预留、不外呼
+  const prompt = buildDistillPrompt({
+    title: item.title,
+    text: item.text,
+    source: { expert: source.expert, domain: source.domain },
+  })
+
+  if (prompt.inputTokenUpperBound > DISTILL_MAX_INPUT_TOKENS) {
+    return { ok: false, error: 'prompt_exceeds_input_cap', code: 'validation' }
+  }
+
   const reserved = await reserveDistillBudget(deps.ledger, reservationId, worst, now)
   if (!reserved.ok) {
     return {
@@ -109,12 +120,6 @@ export async function distillOne(
       code: reserved.reason === 'budget_ledger_unavailable' ? 'db_error' : 'gate_blocked',
     }
   }
-
-  const prompt = buildDistillPrompt({
-    title: item.title,
-    text: item.text,
-    source: { expert: source.expert, domain: source.domain },
-  })
 
   const called = await callLlmOnce(deps.llm, prompt)
   // 请求已发出但结果未知：不结算，hold 保留（2.7 规则 1）
