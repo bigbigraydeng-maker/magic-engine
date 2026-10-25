@@ -44,6 +44,13 @@ export interface FormNoticeInput {
   allowedDkimSelectors?: string[] // 默认 ['resend']
 }
 
+export interface FormNoticeUtm {
+  source: string | null
+  medium: string | null
+  campaign: string | null
+  content: string | null
+}
+
 export type FormNoticeKind = 'contact_form' | 'tour_enquiry'
 
 export interface FormNoticeLead {
@@ -56,6 +63,8 @@ export interface FormNoticeLead {
   message: string | null
   submittedAt: string | null
   formUrl: string | null
+  /** utm 四项,来自通知里的 UTM 行或 Form URL 的查询串;一项都没有为 null。 */
+  utm?: FormNoticeUtm | null
   /** 官网「预计出发时间」答案的稳定代码；缺失 / 映射不到为 null（映射不到会进 unknownExtras）。 */
   travelWindow?: TravelWindowCode | null
   /** 官网「每人预算」答案的稳定代码。 */
@@ -169,6 +178,33 @@ function extractFormUrl(value: string | undefined): string | null {
   const idx = value.indexOf('<')
   const url = (idx >= 0 ? value.slice(0, idx) : value).trim()
   return url === '' ? null : url
+}
+
+/**
+ * utm 四项:通知里的独立行(`UTM source` 等)优先,没有再从 Form URL 查询串取。
+ * 值只截 200 字(客人可控的 URL);一项都没有返回 null(旧通知保持原行为)。
+ */
+function extractUtm(
+  fields: Map<string, string>,
+  formUrl: string | null,
+): FormNoticeUtm | null {
+  let params: URLSearchParams | null = null
+  if (formUrl) {
+    const q = formUrl.indexOf('?')
+    if (q >= 0) params = new URLSearchParams(formUrl.slice(q + 1).split('#')[0])
+  }
+  const pick = (name: 'source' | 'medium' | 'campaign' | 'content'): string | null => {
+    const raw = fields.get(`utm ${name}`) ?? params?.get(`utm_${name}`) ?? null
+    const v = raw?.trim().slice(0, 200)
+    return v ? v : null
+  }
+  const utm = {
+    source: pick('source'),
+    medium: pick('medium'),
+    campaign: pick('campaign'),
+    content: pick('content'),
+  }
+  return Object.values(utm).some((v) => v !== null) ? utm : null
 }
 
 /** 校验认证结果（DMARC + DKIM） */
@@ -304,6 +340,7 @@ export function parseFormNotice(input: FormNoticeInput): FormNoticeParse {
       message,
       submittedAt,
       formUrl,
+      utm: extractUtm(fields, formUrl),
     },
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
 const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm', 'video/mov']
@@ -40,6 +41,20 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'file, post_id, and client_id are required' },
         { status: 400 }
       )
+    }
+
+    const access = await requireDashboardClientAccess(clientId)
+    if (!access.ok) {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+    }
+
+    const { data: post } = await supabaseAdmin
+      .from('content_posts')
+      .select('client_id')
+      .eq('id', postId)
+      .single()
+    if (!post || post.client_id !== clientId) {
+      return NextResponse.json({ success: false, error: 'Post not found' }, { status: 404 })
     }
 
     if (!ALLOWED_TYPES.includes(file.type)) {

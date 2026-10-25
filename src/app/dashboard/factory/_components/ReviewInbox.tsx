@@ -159,7 +159,8 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 const publicUrl = (path?: string) =>
   path ? `${SUPABASE_URL}/storage/v1/object/public/content-factory/${path}` : ''
 
-// clientId:只看该客户的待审(客户页概览用);hideWhenEmpty:没待审就不渲染(不占地方)
+// clientId:只看该客户的待审。审片入口在视频工厂；客户首页概览不再挂这只框。
+// hideWhenEmpty:没待审就不渲染(不占地方)
 export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?: string; hideWhenEmpty?: boolean; onReviewed?: () => void } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
   const [rejecting, setRejecting] = useState<{ order: WorkOrder; mode: 'quality' | 'budget' } | null>(null)

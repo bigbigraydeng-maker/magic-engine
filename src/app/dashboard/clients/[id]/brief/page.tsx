@@ -98,7 +98,7 @@ export default function BriefPage() {
           <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Brand Brief</p>
           <h1 className="mt-2 text-2xl font-black text-slate-950">Tell us about your business</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            These 5 fields unlock content generation, the execution kanban, and Launch Hub. Takes 2 minutes.
+            These 5 fields unlock content generation, the execution kanban, and 内容日历 / 图片工厂. Takes 2 minutes.
           </p>
         </div>
         {/* P0-J: brief was a forced gate with no escape. Users who want to
