@@ -968,7 +968,8 @@ describe('the unreadable-line quote is safe to post (W121-2)', () => {
  * DR121-3: `\s*[:：|]?\s*` after a label backtracked quadratically — a 64 KB
  * body took 4–8 s inside a required check. Assert the parse result, not
  * elapsed milliseconds: a 300 ms ceiling failed on a 1-core runner (323–531 ms)
- * while the parse itself stayed linear.
+ * while the parse itself stayed linear. A later 1000 ms ceiling is the same
+ * kind of clock, so it stays out too.
  */
 describe('readDeclaredRisk finishes hostile 64 KB bodies (DR121-3)', () => {
   const KB64 = 64 * 1024
