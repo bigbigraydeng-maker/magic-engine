@@ -14,6 +14,7 @@ import type { PromoBoard } from '@/lib/marketing-plan/promo/board'
 import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
 import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
 import { ScheduleTable } from './_components/ScheduleTable'
@@ -33,17 +34,6 @@ import { PromoSpecForm } from './_components/PromoSpecForm'
 
 /** 计划内容变了（含从「高级」保存）就换 key，让表格和文本编辑器都重新读最新内容。 */
 const planKey = (p: MarketingPlan) => `${p.id}:${JSON.stringify((p.plan_data as unknown as { promo?: unknown })?.promo ?? null)}`
-
-const hasPromo = (p: MarketingPlan) => !!(p.plan_data as unknown as { promo?: unknown })?.promo
-
-/** 默认看哪份：有推广结构的已批准计划 > 有推广结构的草稿 > 任意草稿。 */
-function pickDefault(plans: MarketingPlan[]): MarketingPlan | null {
-  const live = plans.filter(p => p.status !== 'archived')
-  return live.find(p => p.status === 'approved' && hasPromo(p))
-    ?? live.find(p => p.status === 'draft' && hasPromo(p))
-    ?? live.find(p => p.status === 'draft')
-    ?? null
-}
 
 export function PromoPlanClient() {
   const clientId = useParams().id as string
@@ -65,10 +55,16 @@ export function PromoPlanClient() {
 
   const loadPlans = useCallback(async () => {
     const res = await fetch(base)
-    const json = await res.json() as { success: boolean; plans?: MarketingPlan[]; error?: string }
+    const json = await res.json() as {
+      success: boolean
+      plans?: MarketingPlan[]
+      prescription?: GoalPrescriptionView | null
+      error?: string
+    }
     if (!json.success) throw new Error(json.error ?? '读取计划失败')
-    setPlans(json.plans ?? [])
-    return json.plans ?? []
+    const plans = json.plans ?? []
+    setPlans(plans)
+    return { plans, prescription: json.prescription ?? null }
   }, [base])
 
   const loadBoard = useCallback(async (planId: string) => {
@@ -93,11 +89,11 @@ export function PromoPlanClient() {
   const refresh = useCallback(async (keepId?: string | null) => {
     setLoading(true); setError(null)
     try {
-      const list = await loadPlans()
-      const id = keepId ?? pickDefault(list)?.id ?? null
+      const loaded = await loadPlans()
+      const id = keepId ?? pickPlanForPrescription(loaded.plans, loaded.prescription?.goal_id ?? null)?.id ?? null
       setSelectedId(id)
       if (id) await loadBoard(id)
-      else { setBoard(null); setPrescription(null) }
+      else { setBoard(null); setPrescription(loaded.prescription) }
     } catch (e) {
       setError((e as Error).message)
     } finally { setLoading(false) }
@@ -190,6 +186,8 @@ export function PromoPlanClient() {
         {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">读取失败：{error}。这不代表“没有计划”，请稍后重试。</p>}
         {message && <p className="text-sm bg-white border border-gray-200 rounded-lg p-3">{message}</p>}
 
+        {!loading && !error && prescription && <PrescriptionCard clientId={clientId} prescription={prescription} />}
+
         {!loading && !error && !selected && (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-center">
             <p className="text-sm text-gray-700">这个客户还没有可用的计划。</p>
@@ -200,7 +198,6 @@ export function PromoPlanClient() {
         {board && selected && (
           <>
             <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
-            {prescription && <PrescriptionCard clientId={clientId} prescription={prescription} />}
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>

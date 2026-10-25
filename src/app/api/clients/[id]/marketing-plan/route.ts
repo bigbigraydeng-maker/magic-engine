@@ -15,6 +15,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import type { MarketingPlan, MarketingPlanStatus } from '@/lib/marketing-plan/types'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { createBlankDraftPlan } from '@/lib/marketing-plan/blank-draft-create'
+import { loadLatestClientPrescription } from '@/lib/marketing-plan/promo/goal-prescription'
 
 const VALID_STATUSES: MarketingPlanStatus[] = ['draft', 'approved', 'completed', 'archived']
 
@@ -48,10 +49,15 @@ export async function GET(
 
     const { data, error } = await query
     if (error) throw error
+    const prescription = await loadLatestClientPrescription(clientId).catch((err: unknown) => {
+      console.warn('[marketing-plan GET] 处方没读到', err instanceof Error ? err.message : err)
+      return null
+    })
 
     return NextResponse.json({
       success: true,
       plans: (data ?? []) as MarketingPlan[],
+      prescription,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'

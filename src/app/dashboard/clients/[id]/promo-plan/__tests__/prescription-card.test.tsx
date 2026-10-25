@@ -15,55 +15,74 @@ function view(over: Partial<GoalPrescriptionView> = {}): GoalPrescriptionView {
     version: 2,
     prescriber: '开方人甲',
     summary: '摘要甲',
-    phases: [{
-      phase_number: 1,
-      name: '准备',
-      duration_weeks: 1,
-      actions: [
-        { id: 'a1', title: '动作一', description: '说明一', manual: true },
-        { id: 'a2', title: '自动动作', description: '', manual: false },
-      ],
-    }],
-    kpis: [
-      { metric: '线索', current_value: 0, target_value: 10, unit: '条', timeframe: null },
-      { metric: '成本', current_value: null, target_value: 12, unit: 'NZD', timeframe: '本周期' },
-    ],
+    phases: [],
+    kpis: [],
     manual_action_count: 1,
     line: '处方 v2 · 草稿 · 1 条人工动作',
     currency: 'NZD',
+    todos: ['建成暂停的系列', '第 7 天看一次结果'],
+    rules: ['到了暂停线就停'],
+    why: ['现在最要紧的是先把能投的草稿建好。', '花得比配速快就先停。'],
+    spend: { daily: '12 NZD', total: '100 NZD', pacing: null },
+    review_anchor: '2026-10-01',
     ...over,
   }
 }
 
 describe('处方卡', () => {
-  it('只读展示开方人、状态、版本、摘要、阶段、动作和指标，并链到处方页', () => {
-    const { container } = render(<PrescriptionCard clientId="client-1" prescription={view()} />)
+  it('用四段大白话讲清楚，规矩默认收起，没有写入按钮', () => {
+    const { container } = render(
+      <PrescriptionCard clientId="client-1" prescription={view()} today="2026-10-01" />,
+    )
     expect(screen.getByRole('heading', { name: '处方' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '这周做什么' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '为什么' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '花多少' })).toBeTruthy()
+    expect(screen.getByRole('heading', { name: '什么时候复盘' })).toBeTruthy()
+    expect(screen.getByText('建成暂停的系列')).toBeTruthy()
+    expect(screen.getByText('第 7 天看一次结果')).toBeTruthy()
+    expect(screen.getByText('现在最要紧的是先把能投的草稿建好。')).toBeTruthy()
+    expect(screen.getByText('花得比配速快就先停。')).toBeTruthy()
+    expect(screen.getByText('每天：12 NZD')).toBeTruthy()
+    expect(screen.getByText('总共：100 NZD')).toBeTruthy()
+    expect(screen.getByText('配速：还没写下')).toBeTruthy()
+    expect(screen.getByText('第 7 天：10月7日')).toBeTruthy()
+    expect(screen.getByText('第 14 天：10月14日')).toBeTruthy()
+    expect(screen.getByText('距第 7 天还有 6 天')).toBeTruthy()
+    expect(screen.getByText('到了暂停线就停')).toBeTruthy()
+    const rules = screen.getByText('规矩').closest('details') as HTMLDetailsElement | null
+    expect(rules?.open).toBe(false)
     expect(screen.getByText('v2 · 草稿')).toBeTruthy()
     expect(screen.getByText('开方人：开方人甲')).toBeTruthy()
-    expect(screen.getByText('摘要甲')).toBeTruthy()
-    expect(screen.getByText('阶段 1 · 准备 · 1 周')).toBeTruthy()
-    expect(screen.getByText('动作一')).toBeTruthy()
-    expect(screen.getAllByText('人工执行')).toHaveLength(1)
-    expect(screen.getByText('线索：0 → 10 条')).toBeTruthy()
-    expect(screen.getByText('成本：— → 12 NZD（本周期）')).toBeTruthy()
-    expect(screen.getByText('币种：NZD')).toBeTruthy()
     expect(screen.getByRole('link', { name: '去处方页查看' }).getAttribute('href'))
       .toBe('/dashboard/clients/client-1/prescription/new?goal_id=goal-1')
     expect(container.querySelectorAll('button')).toHaveLength(0)
     expect(container.textContent).not.toMatch(/批准/)
+    expect(container.textContent).not.toMatch(/\{/)
+    expect(container.textContent).not.toMatch(/阶段/)
     expect(container.textContent).not.toMatch(/AUD/)
   })
 
-  it('没有币种就不写币种，也不填默认币种；开方人空着写未填写', () => {
+  it('没写下的原因、花费和起算日留空，不填默认币种', () => {
     const { container } = render(<PrescriptionCard clientId="client-1" prescription={view({
       prescriber: null,
       currency: null,
-      summary: '',
-      kpis: [{ metric: '线索', current_value: 0, target_value: 3, unit: '条', timeframe: null }],
-    })} />)
+      goal_id: '',
+      todos: [],
+      rules: [],
+      why: [],
+      spend: { daily: null, total: null, pacing: null },
+      review_anchor: null,
+    })} today="2026-10-01" />)
     expect(screen.getByText('开方人：未填写')).toBeTruthy()
-    expect(screen.queryByText(/币种/)).toBeNull()
+    expect(screen.getByText('这份处方没有单独列出要做的事。')).toBeTruthy()
+    expect(screen.getByText('这份处方没有写下原因。')).toBeTruthy()
+    expect(screen.getByText('每天、总共、配速都还没写在这份处方里。')).toBeTruthy()
+    expect(screen.getByText('还没写下从哪天起算，所以算不出还剩几天。')).toBeTruthy()
+    expect(screen.getByText('没有单独的规矩。')).toBeTruthy()
+    expect(screen.getByRole('link', { name: '去处方页查看' }).getAttribute('href'))
+      .toBe('/dashboard/clients/client-1/prescription/new')
     expect(container.textContent).not.toMatch(/AUD/)
+    expect(container.textContent).not.toMatch(/NZD/)
   })
 })
