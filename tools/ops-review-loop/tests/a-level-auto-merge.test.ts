@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { MERGE_DECISION, decideMerge } from '../src/merge-decision.mjs'
+import { FILE_READ_FAILED, classifyRayHoldResponse, readRayHoldFiles } from '../src/ray-file-read.mjs'
 import { requiredChecksAreGreen } from '../src/required-checks.mjs'
 import { assessRayMergeHold, importsMetaSpendWriter } from '../src/risk.mjs'
 import {
@@ -328,6 +332,136 @@ describe('paths Ray still merges by hand', () => {
     ]) {
       expect(held(path).hold, path).toBe(false)
     }
+  })
+
+  it('reads a file over 64KB whole, including through the git blob, and still holds an old spend import (#3133 P1)', () => {
+    const path = 'src/app/dashboard/clients/[id]/execution/_client.tsx'
+    const sha = 'a'.repeat(40)
+    const ref = 'b'.repeat(40)
+    const harmless = '+const label = "copy"\n'
+    const importing = `import { pause } from '@/lib/meta/ad-publisher'\n${'x'.repeat(70 * 1024)}`
+    const quiet = `export const n = 1\n${'y'.repeat(70 * 1024)}`
+
+    const inline = async (text: string) => {
+      const body = Buffer.from(text).toString('base64')
+      const contents = await readRayHoldFiles({
+        files: [{ filename: path, sha, patch: harmless }],
+        repository: 'acme/repo',
+        ref,
+        token: 't',
+        fetchImpl: async (url) => {
+          if (url.includes('/git/blobs/')) throw new Error('complete contents body should not call the blob API')
+          expect(url).toContain('%5Bid%5D')
+          return {
+            status: 200,
+            text: async () => JSON.stringify({ type: 'file', encoding: 'base64', size: Buffer.byteLength(text), sha, content: body }),
+          }
+        },
+      })
+      return assessRayMergeHold([{ filename: path, patch: harmless }], contents)
+    }
+
+    return inline(importing).then((held) => {
+      expect(held.hold).toBe(true)
+      expect(held.reason).toContain('导入了 Meta 广告写入模块')
+      expect(held.reason).not.toContain('diff 导入')
+      return inline(quiet)
+    }).then((quietHold) => {
+      expect(quietHold.hold).toBe(false)
+    }).then(async () => {
+      const source = `import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'\nconst n = 1\n`
+      let sawBlob = false
+      const contents = await readRayHoldFiles({
+        files: [{ filename: path, sha, patch: harmless }],
+        repository: 'acme/repo',
+        ref,
+        token: 't',
+        fetchImpl: async (url, init) => {
+          const accept = init?.headers?.Accept ?? ''
+          if (url.includes('/contents/')) {
+            return {
+              status: 403,
+              text: async () => JSON.stringify({
+                message: 'This API returns blobs up to 1 MB in size. The requested blob is too large',
+                errors: [{ code: 'too_large' }],
+              }),
+            }
+          }
+          if (accept.includes('github.raw')) {
+            sawBlob = true
+            return { status: 200, text: async () => source }
+          }
+          sawBlob = true
+          return { status: 200, text: async () => JSON.stringify({ sha, size: Buffer.byteLength(source) }) }
+        },
+      })
+      const held = assessRayMergeHold([{ filename: path, patch: harmless }], contents)
+      expect(sawBlob).toBe(true)
+      expect(contents[path]).toContain('campaign-writes')
+      expect(held.hold).toBe(true)
+      expect(held.reason).toContain('导入了 Meta 广告写入模块')
+      expect(held.reason).not.toContain('文件读取失败')
+    })
+  })
+
+  it('keeps a failed file read for Ray, and still uses the diff only when the file is too big', () => {
+    const path = 'src/lib/not-on-the-list/bridge.ts'
+    const sha = 'c'.repeat(40)
+    const ref = 'd'.repeat(40)
+    const patch = '+const label = "copy"\n'
+    const over = classifyRayHoldResponse({
+      phase: 'contents',
+      status: 200,
+      json: { type: 'file', encoding: 'base64', size: 100 * 1024 * 1024 + 1, content: 'YQ==', sha },
+      knownSha: sha,
+    })
+    const failed = classifyRayHoldResponse({ phase: 'contents', status: 500, text: 'boom' })
+    const limited = classifyRayHoldResponse({ phase: 'contents', status: 429, text: 'rate limit' })
+    expect(over.kind).toBe('too-big')
+    expect(failed.kind).toBe('failed')
+    expect(limited.kind).toBe('failed')
+
+    const tooBig = assessRayMergeHold([{ filename: path, patch }], { [path]: null })
+    expect(tooBig.hold).toBe(false)
+
+    const unread = assessRayMergeHold([{ filename: path, patch }], { [path]: FILE_READ_FAILED })
+    expect(unread.hold).toBe(true)
+    expect(unread.reason).toContain('文件读取失败')
+
+    const schema = assessRayMergeHold(
+      [{ filename: 'supabase/migrations/20261025_one.sql', patch }],
+      { 'supabase/migrations/20261025_one.sql': FILE_READ_FAILED },
+    )
+    expect(schema.hold).toBe(true)
+    expect(schema.reason).toContain('数据库 migration')
+
+    const spendPath = assessRayMergeHold(
+      [{ filename: 'src/lib/meta/campaign-writes.ts', patch }],
+      { 'src/lib/meta/campaign-writes.ts': FILE_READ_FAILED },
+    )
+    expect(spendPath.hold).toBe(true)
+    expect(spendPath.reason).toContain('改 Meta 广告系列预算或状态')
+
+    return readRayHoldFiles({
+      files: [{ filename: path, sha, patch }],
+      repository: 'acme/repo',
+      ref,
+      token: 't',
+      fetchImpl: async () => {
+        throw new Error('socket hang up')
+      },
+    }).then((contents) => {
+      expect(contents[path]).toBe(FILE_READ_FAILED)
+      const held = assessRayMergeHold([{ filename: path, patch }], contents)
+      expect(held.hold).toBe(true)
+      expect(held.reason).toContain('文件读取失败')
+    })
+  })
+
+  it('wires the Ray hold through the blob reader instead of the 64KB contents cap', () => {
+    const source = readFileSync(join(process.cwd(), 'tools/ops-review-loop/src/check-risk-gate.mjs'), 'utf8')
+    expect(source).toContain('readRayHoldFiles')
+    expect(source).not.toContain('assessRayMergeHold(files, sourcePaths')
   })
 
   it('fails closed when the file list cannot be read, and a held path blocks B as well', () => {

@@ -34,6 +34,8 @@
  * exercises it offline.
  */
 
+import { isFileReadFailure } from './ray-file-read.mjs'
+
 /** Severity order, lowest first. Index position is the comparison key. */
 export const RISK_ORDER = ['C', 'B', 'A']
 
@@ -461,17 +463,12 @@ function isSourcePath(path) {
 }
 
 /**
- * Spend-import hold for one source path.
- *
- * A readable file is still scanned whole, same as before. A file the caller
- * could not read (too big, or the contents API failed) is judged from the
- * added and removed lines already on the file entry. Path rules for schema,
- * Meta credentials, and spend-writer files have already run; the only question
- * left is whether this source imports a spend writer. No diff at all still holds.
+ * Spend-import hold for one source path. A string is the whole file. A read
+ * failure stays for Ray. `null` is too big or missing, so the diff is used.
  *
  * @param {string} path
  * @param {Record<string, unknown>} entry
- * @param {Record<string, string|null>} knownContents
+ * @param {Record<string, string|null|object>} knownContents
  * @returns {string|null}
  */
 function spendHoldForSource(path, entry, knownContents) {
@@ -480,6 +477,7 @@ function spendHoldForSource(path, entry, knownContents) {
   if (typeof text === 'string') {
     return importsMetaSpendWriter(text) ? `${path}（导入了 Meta 广告写入模块）` : null
   }
+  if (isFileReadFailure(text)) return `${path}（文件读取失败，分不清是否导入了 Meta 广告写入模块）`
   const changed = patchChangedText(entry.patch)
   if (changed === null) {
     return `${path}（读不到文件，diff 也没有，分不清是否碰到库表、Meta 凭证或广告花费）`
@@ -492,7 +490,7 @@ function spendHoldForSource(path, entry, knownContents) {
  * Whether this diff must stay for Ray to merge by hand.
  *
  * @param {unknown} files changed-file entries, the same shape `classifyRisk` reads
- * @param {Record<string, string|null>|null} [contents] file text at the head. When passed, a source file that imports a Meta spend writer is held. A source file that could not be read is judged from its `patch`; a missing patch is held too.
+ * @param {Record<string, string|null|object>|null} [contents] whole-file text, `null` when only the diff can be judged, or a read-failure marker that still holds.
  * @returns {{hold: boolean, reason: string}}
  */
 export function assessRayMergeHold(files, contents) {
@@ -524,23 +522,27 @@ export function assessRayMergeHold(files, contents) {
   return { hold: true, reason: hits.slice(0, 8).join('；') }
 }
 
-/**
- * A-level reason when this diff edits an auth check outside the auth path list.
- * Files whose path is already A keep their path reason, so existing ratings
- * do not gain a second line.
- *
- * @param {unknown} entry
- * @param {Array<{path: string, risk: 'A'|'B'|'C'}>} pathRatings
- * @returns {string|null}
- */
+function entryName(entry) {
+  const filename = entry && typeof entry === 'object' ? /** @type {{filename?: unknown}} */ (entry).filename : ''
+  return typeof filename === 'string' && filename !== '' ? filename : '未命名文件'
+}
+
+/** True when GitHub reported real edits but did not include the patch. A pure rename has no line count. */
+function sourceDiffUnreadable(entry) {
+  if (!entry || typeof entry !== 'object') return false
+  const row = /** @type {{patch?: unknown, changes?: unknown, additions?: unknown, deletions?: unknown}} */ (entry)
+  if (typeof row.patch === 'string' && row.patch !== '') return false
+  return [row.changes, row.additions, row.deletions].some((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+}
+
+/** Auth-edit reason. A path that is already A is unchanged. An omitted source patch is A too. */
 function authDiffReason(entry, pathRatings) {
   if (pathRatings.some((rated) => rated.risk === 'A')) return null
   if (!pathRatings.some((rated) => isSourcePath(rated.path))) return null
   const patch = entry && typeof entry === 'object' ? /** @type {{patch?: unknown}} */ (entry).patch : undefined
-  if (!diffTouchesAuthBoundary(patch)) return null
-  const filename = entry && typeof entry === 'object' ? /** @type {{filename?: unknown}} */ (entry).filename : ''
-  const name = typeof filename === 'string' && filename !== '' ? filename : '未命名文件'
-  return `${name} —— A 级（改动行碰到鉴权或客户访问校验）`
+  if (diffTouchesAuthBoundary(patch)) return `${entryName(entry)} —— A 级（改动行碰到鉴权或客户访问校验）`
+  if (sourceDiffUnreadable(entry)) return `${entryName(entry)} —— A 级（diff 读不到，没法判断是否改了鉴权）`
+  return null
 }
 
 /**

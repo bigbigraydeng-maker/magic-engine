@@ -1074,4 +1074,37 @@ describe('auth edits outside the auth directories rate A (#3123)', () => {
     expect(result.reasons.some((reason) => reason.includes('鉴权与客户访问边界'))).toBe(true)
     expect(result.reasons.some((reason) => reason.includes('改动行碰到鉴权'))).toBe(false)
   })
+
+  it('rates A when GitHub omitted the patch of a source file that actually changed', () => {
+    const result = classifyRisk({
+      files: [{
+        filename: 'src/app/api/visual/video/route.ts',
+        status: 'modified',
+        additions: 2000,
+        deletions: 2000,
+        changes: 4000,
+      }],
+    })
+    expect(result.risk).toBe('A')
+    expect(result.categories).toContain('auth-isolation')
+    expect(result.reasons.some((reason) => reason.includes('diff 读不到，没法判断是否改了鉴权'))).toBe(true)
+  })
+
+  it('does not treat a pure rename, or an entry with no line count, as an unreadable auth diff', () => {
+    const renamed = classifyRisk({
+      files: [{
+        filename: 'src/lib/geo/score.ts',
+        previous_filename: 'src/lib/geo/old-score.ts',
+        status: 'renamed',
+        changes: 0,
+        additions: 0,
+        deletions: 0,
+      }],
+    })
+    expect(renamed.risk).toBe('B')
+    expect(renamed.reasons.some((reason) => reason.includes('diff 读不到'))).toBe(false)
+
+    const pathOnly = classifyRisk({ files: [{ filename: 'src/lib/geo/score.ts', status: 'modified' }] })
+    expect(pathOnly.risk).toBe('B')
+  })
 })

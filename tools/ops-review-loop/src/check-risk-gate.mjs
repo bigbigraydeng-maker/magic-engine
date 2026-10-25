@@ -30,6 +30,7 @@
 import { appendFileSync } from 'node:fs'
 
 import { buildRiskGateCheckRun, gateJobExitCode, shouldPublishHeadCheck } from './head-check.mjs'
+import { readRayHoldFiles } from './ray-file-read.mjs'
 import { assessRayMergeHold, classifyRisk, readDeclaredRisk } from './risk.mjs'
 import { requiredChecksAreGreen } from './required-checks.mjs'
 import {
@@ -520,7 +521,7 @@ async function loadPullRequest() {
   return { declaredRisk: declared.risk, declaredUnreadable: declared.unreadable, body }
 }
 
-/** Largest file the trial-run check will read. Anything bigger reads as `null`. */
+/** Largest file the trial-run check will read. The Ray hold uses `ray-file-read.mjs` instead. */
 const TRIAL_RUN_READ_CAP = 64 * 1024
 
 /**
@@ -663,18 +664,19 @@ try {
     today: new Date().toISOString().slice(0, 10),
     readFiles: readHeadFiles,
   })
-  const sourcePaths = []
-  if (Array.isArray(files)) {
-    for (const entry of files) {
-      for (const key of ['filename', 'previous_filename']) {
-        const filename = entry && typeof entry[key] === 'string' ? entry[key] : ''
-        if (/\.(?:ts|tsx|js|mjs|cjs)$/i.test(filename)) sourcePaths.push(filename)
-      }
-    }
-  }
-  // `null` means the contents API missed the file or it is over the read cap.
-  // The hold then uses that entry's `patch` (the PR diff already on `files`).
-  const rayHold = assessRayMergeHold(files, sourcePaths.length > 0 ? await readHeadFiles(sourcePaths) : {})
+  // String: whole file, including one read through the git blob API.
+  // null: still over 100MB or not at this ref — judge that entry's patch.
+  // A read failure (rate limit, 5xx, network) stays for Ray and does not use the diff.
+  const rayContents = Array.isArray(files)
+    ? await readRayHoldFiles({
+        files,
+        repository: repository ?? '',
+        ref: headSha,
+        token: token ?? '',
+        fetchImpl: fetch,
+      })
+    : {}
+  const rayHold = assessRayMergeHold(files, rayContents)
   const verdict = await readHeadVerdict({
     sources,
     markers: review.markers,
