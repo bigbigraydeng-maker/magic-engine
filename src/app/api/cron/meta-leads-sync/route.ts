@@ -24,12 +24,18 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { syncClientMetaLeads, type MetaLeadsSyncClient } from '@/lib/meta/leads-sync'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { buildLeadsSyncReceipts, summariseSyncProblems } from '@/lib/meta/leads-sync-alert'
-import { probeAllAccountStatuses } from '@/lib/ads-strategy/portfolio/account-status-probe'
+import {
+  probeAllAccountStatuses,
+  probeBudgetFromDeadline,
+  type AccountStatusProbeSummary,
+} from '@/lib/ads-strategy/portfolio/account-status-probe'
 
 // 一个客户可能有多个表单，每个表单还要翻页；给足时间。
 export const maxDuration = 600
 
 async function run(): Promise<NextResponse> {
+  // 整轮共享截止时间：线索同步和探测共用 maxDuration，探测只能用剩下的（并为回执预留时间）。
+  const routeDeadlineMs = Date.now() + maxDuration * 1000
   const cronRun = await startCronRun('meta-leads-sync')
 
   const { data: clients, error } = await supabaseAdmin
@@ -66,7 +72,15 @@ async function run(): Promise<NextResponse> {
 
   // 顺带探一遍广告账户状态（只读 Meta、只写账户级快照），把欠款发现的最坏延迟从 6 小时缩到约 2 小时。
   // 探测自己吞异常；它出什么事都不能影响线索同步的结论。
-  const accountStatusProbe = await probeAllAccountStatuses()
+  const probeBudgetMs = probeBudgetFromDeadline(routeDeadlineMs)
+  const accountStatusProbe: AccountStatusProbeSummary =
+    probeBudgetMs > 0
+      ? await probeAllAccountStatuses(new Date(), probeBudgetMs)
+      : {
+          clients: 0, accounts: 0, written: 0, unchanged: 0, failed: 0, rateLimited: 0,
+          timedOut: true, results: [],
+          error: 'accountStatusProbe skipped: lead sync used up the shared time budget',
+        }
 
   const newContacts = results.reduce((n, r) => n + r.newContacts, 0)
   const leadsIngested = results.reduce((n, r) => n + r.leadsIngested, 0)

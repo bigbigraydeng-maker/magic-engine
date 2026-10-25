@@ -39,7 +39,14 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
-import { probeAccountStatus, probeAllAccountStatuses } from '../account-status-probe'
+import {
+  probeAccountStatus,
+  probeAllAccountStatuses,
+  probeBudgetFromDeadline,
+  PROBE_BUDGET_MS,
+  RECEIPT_RESERVE_MS,
+} from '../account-status-probe'
+import * as snapshotSync from '../snapshot-sync'
 import { normalizeAccount, settingsHash } from '../snapshot'
 
 const NOW = new Date('2026-10-25T03:00:00Z')
@@ -142,5 +149,23 @@ describe('probeAllAccountStatuses', () => {
     h.fetchAccountSettings.mockImplementation(() => new Promise(() => {}))
     const r = await probeAllAccountStatuses(NOW, 30)
     expect(r).toMatchObject({ accounts: 0, timedOut: true })
+  })
+
+  it('a hung client list is cut off by the budget too', async () => {
+    vi.mocked(snapshotSync.listSnapshotClients).mockImplementationOnce(() => new Promise(() => {}))
+    const r = await probeAllAccountStatuses(NOW, 30)
+    expect(r).toMatchObject({ accounts: 0, timedOut: true })
+  })
+})
+
+describe('probeBudgetFromDeadline', () => {
+  it('fresh run → capped at the probe budget', () => {
+    expect(probeBudgetFromDeadline(1_000_000 + 600_000, 1_000_000)).toBe(PROBE_BUDGET_MS)
+  })
+  it('lead sync used most of the time → what is left minus the receipt reserve', () => {
+    expect(probeBudgetFromDeadline(1_000_000, 1_000_000 - RECEIPT_RESERVE_MS - 40_000)).toBe(40_000)
+  })
+  it('lead sync used almost everything → ≤ 0, probe must be skipped', () => {
+    expect(probeBudgetFromDeadline(1_000_000, 1_000_000 - 10_000)).toBeLessThanOrEqual(0)
   })
 })

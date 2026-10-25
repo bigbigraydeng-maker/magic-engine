@@ -35,8 +35,11 @@ export interface AccountProbeResult {
 
 const RATE_LIMIT_CODES = new Set([4, 17, 613])
 
-/** 探测总时限：和线索同步共用 maxDuration，探测不能把运行记录拖丢。 */
+/** 探测自身总时限上限；实际预算还要扣掉线索同步已用时间（见 probeBudgetFromDeadline）。 */
 export const PROBE_BUDGET_MS = 120_000
+
+/** 给 cronRun.finish() 写回执预留的时间。 */
+export const RECEIPT_RESERVE_MS = 30_000
 
 export interface AccountStatusProbeSummary {
   clients: number
@@ -120,6 +123,18 @@ async function raceDeadline<T>(work: Promise<T>, ms: number): Promise<T | typeof
   }
 }
 
+/**
+ * 整轮共享截止时间下，探测还能用多少毫秒：不超过自己的上限，并给回执写入预留时间。
+ * 返回值 ≤ 0 表示不该探了。
+ */
+export function probeBudgetFromDeadline(
+  routeDeadlineMs: number,
+  nowMs: number = Date.now(),
+  reserveMs: number = RECEIPT_RESERVE_MS,
+): number {
+  return Math.min(PROBE_BUDGET_MS, routeDeadlineMs - reserveMs - nowMs)
+}
+
 /** 探全部登记了 Meta 广告账户的客户（含隐藏账户）。永不抛；超过总时限就停，记进 timedOut / error。 */
 export async function probeAllAccountStatuses(
   now: Date = new Date(),
@@ -134,24 +149,31 @@ export async function probeAllAccountStatuses(
     summary.error = `accountStatusProbe timed out after ${budgetMs}ms; remaining accounts skipped`
     return summary
   }
+  // 每一步等待（客户列表 / 令牌 / 账户 / 读 Meta）都和同一个剩余时限赛跑。
+  const within = <T,>(work: Promise<T>) => raceDeadline(work, deadline - Date.now())
   try {
-    const clients = await listSnapshotClients()
+    if (budgetMs <= 0) return timeUp()
+    const clients = await within(listSnapshotClients())
+    if (clients === TIMED_OUT) return timeUp()
     summary.clients = clients.length
     for (const client of clients) {
       if (Date.now() >= deadline) return timeUp()
       try {
-        const token = await getMetaTokenForClient(client.id)
+        const token = await within(getMetaTokenForClient(client.id))
+        if (token === TIMED_OUT) return timeUp()
         if (!token) continue
-        const accounts = await getClientAdAccounts(client.id)
+        const accounts = await within(getClientAdAccounts(client.id))
+        if (accounts === TIMED_OUT) return timeUp()
         if (accounts.length === 0) continue
-        const { shared } = await findSharedAdAccounts(client.id, accounts.map(a => a.adAccountId))
+        const sharedLookup = await within(findSharedAdAccounts(client.id, accounts.map(a => a.adAccountId)))
+        if (sharedLookup === TIMED_OUT) return timeUp()
+        const { shared } = sharedLookup
         for (const a of accounts) {
-          const result = await raceDeadline(
+          const result = await within(
             probeAccountStatus(client.id, a.adAccountId, token, {
               shared: shared.has(normalizeAccountId(a.adAccountId)),
               now,
             }),
-            deadline - Date.now(),
           )
           if (result === TIMED_OUT) return timeUp()
           summary.accounts += 1
