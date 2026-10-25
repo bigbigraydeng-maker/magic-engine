@@ -21,8 +21,11 @@ export const INJECTION_PATTERNS: readonly RegExp[] = [
 /** URL / 站点名：规则句里出现链接即不可注入（链接属来源卡，不属规则正文） */
 export const URL_RE: RegExp = /https?:\/\/|www\./i
 
-/** 作者给的数字或效果（百分比、钱、倍数）：属「作者说法」，不得进规则句 */
-export const AUTHOR_NUMBER_RE: RegExp = /\d+(?:\.\d+)?\s*(?:%|％|percent|倍|x\b)|[$€£¥]\s*\d|\d+(?:\.\d+)?\s*(?:美元|元|块|dollars?)/i
+/**
+ * 规则句里出现任何阿拉伯数字（半角或全角）就拒：样本数、ROAS、澳元金额、百分比等都是「作者说法」，
+ * 只能进 authorClaims。宁可多拒（规则句改用文字描述），不做按单位逐个枚举的白名单。
+ */
+export const AUTHOR_NUMBER_RE: RegExp = /[0-9０-９]/
 
 /** 单条文本的守护结论：ok，或命中的第一个原因 */
 export type GuardVerdict =
