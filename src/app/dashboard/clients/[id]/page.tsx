@@ -717,7 +717,6 @@ export default function ClientDetailPage() {
                   links={[
                     { label: '素材库', href: `/dashboard/clients/${clientId}/assets` },
                     ...(showEntry('factory-clips') ? [{ label: '视频工厂素材标签与审核', href: `/dashboard/clients/${clientId}/factory-clips` }] : []),
-                    { label: '内容生产包', href: `/dashboard/clients/${clientId}/production` },
                     { label: '内容工厂', href: `/dashboard/clients/${clientId}/content-factory` },
                     { label: '生成单条内容', onClick: () => setGenerationOpen(true) },
                   ]}
