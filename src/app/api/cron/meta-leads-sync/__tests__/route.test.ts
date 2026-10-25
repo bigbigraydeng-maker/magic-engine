@@ -57,7 +57,7 @@ describe('meta-leads-sync shared deadline', () => {
     const res = await call()
     expect(h.probeAll).not.toHaveBeenCalled()
     expect(h.finish).toHaveBeenCalledTimes(1)
-    const arg = h.finish.mock.calls[0][0] as unknown as {
+    const arg = (h.finish.mock.calls[0] as unknown[])[0] as {
       summary: { accountStatusProbe: { timedOut: boolean; error: string } }
     }
     expect(arg.summary.accountStatusProbe.timedOut).toBe(true)
