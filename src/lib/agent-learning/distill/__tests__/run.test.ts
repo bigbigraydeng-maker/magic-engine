@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { createFakeLedger } from '@/lib/agent-learning/budget/fake-ledger'
 import { DEEPSEEK_FLASH_PRICE, type CompleteJsonRequest, type JsonCompletion } from '@/lib/agent-learning/llm/deepseek-client'
 import type { Result } from '@/lib/agent-learning/contracts'
+import type { BudgetItem } from '@/lib/agent-learning/budget/types'
 import { distillOne, distillUnitId, type DistillLlm } from '@/lib/agent-learning/distill/run'
 
 /** 正文哨兵：任何回执、错误或 outcome 里都不能出现它 */
@@ -22,7 +23,7 @@ type Deps = Parameters<typeof distillOne>[0]
 type Item = Parameters<typeof distillOne>[1]
 type Source = Parameters<typeof distillOne>[2]
 type Ledger = Deps['ledger']
-type ReserveItem = { periodKey: string; unit: string; cap: number; amount: number }
+type ReserveItem = BudgetItem
 type SettleActual = { periodKey: string; actual: number }
 
 /** 示例来源（示例专家，无客户数据） */
