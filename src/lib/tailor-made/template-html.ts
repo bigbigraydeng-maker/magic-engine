@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 
 /**
  * 自包含 HTML 模板的载入与数据注入。
  *
- * 行程单和画册用同一套机制：模板是一份完整的 A4 HTML，数据以 JSON 字面量
+ * 行程单、画册、一页摘要用同一套机制：模板是一份完整的 A4 HTML，数据以 JSON 字面量
  * 注入到 `/*__DATA_START__*\/ … /*__DATA_END__*\/` 之间，模板内的 JS 负责排版分页。
  * 后台预览和最终 PDF 用的是同一个文件 —— 所见即所得。
  *
@@ -51,4 +52,28 @@ export function injectData(template: string, data: unknown): string {
     .replace(/\u2029/g, '\\u2029');
 
   return template.slice(0, a + START.length) + json + template.slice(b);
+}
+
+const BRAND_ASSETS_PATH = path.join(process.cwd(), 'templates', 'shared', 'cts-brand-assets.json');
+
+let cachedLogo: string | null = null;
+
+/**
+ * 读共享品牌资产里的 logo（目前只有一份 —— CTS）。
+ *
+ * 提出来给画册、一页摘要等每个渲染器共用，而不是各自读一遍同一个 JSON、
+ * 各自维护一份缓存变量。logo 属于客户的品牌资产，不焊死在共享模板里，
+ * 由渲染时注入（见 brochure-render.ts / summary-render.ts）。
+ */
+export async function loadBrandLogo(): Promise<string> {
+  if (cachedLogo !== null) return cachedLogo;
+  try {
+    const raw = await readFile(BRAND_ASSETS_PATH, 'utf8');
+    cachedLogo = (JSON.parse(raw) as { logo?: string }).logo ?? '';
+  } catch {
+    // 缺 logo 不该让整份文档出不来 —— 顾问宁可拿到一份没 logo 的稿子，
+    // 也好过点了预览只看到一个报错。
+    cachedLogo = '';
+  }
+  return cachedLogo;
 }

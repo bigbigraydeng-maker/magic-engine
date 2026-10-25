@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CTS Tours — Trip Summary</title>
+<style>
+/* ============================================================
+   CTS TOURS — TAILOR-MADE ONE-PAGE SUMMARY TEMPLATE
+   Fixed single A4 sheet (no pagination) — a condensed share-out
+   of an already-built tailor-made itinerary: highlights, dates,
+   price. The full day-by-day document is a separate template
+   (../tailor-made-itinerary). Brand tokens mirror that template
+   and tailwind.config.ts.
+   ============================================================ */
+:root{
+  --red:#B61E2E;
+  --gold:#D6A756;
+  --ink:#23201C;
+  --muted:#5A554F;
+  --cream:#FBF7F0;
+  --line:#E4DCD0;
+  --pad-x:16mm;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{
+  background:#6f6a64;
+  font-family:'Inter','Helvetica Neue',Helvetica,Arial,sans-serif;
+  color:var(--ink);
+  font-size:10pt;
+  line-height:1.58;
+  -webkit-font-smoothing:antialiased;
+}
+.serif{font-family:'Playfair Display',Georgia,'Times New Roman',serif}
+
+/* ---------- toolbar (screen only) ---------- */
+.toolbar{
+  position:sticky;top:0;z-index:10;display:flex;justify-content:center;gap:3mm;
+  padding:4mm;background:#6f6a64;
+}
+.toolbar button{
+  font-family:inherit;font-size:9pt;font-weight:600;letter-spacing:.03em;
+  border:none;border-radius:5px;padding:2.4mm 5mm;cursor:pointer;
+  background:var(--red);color:#fff;
+}
+.toolbar button:hover{background:#9c1826}
+.toolbar .hint{align-self:center;font-size:8pt;color:#d8d4cc}
+
+/* ---------- sheet ---------- */
+.sheet{
+  width:210mm;min-height:297mm;background:#fff;
+  margin:0 auto 10mm;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;
+  box-shadow:0 8px 30px rgba(0,0,0,.32);
+}
+.sheet__band{flex:0 0 auto;height:2.4mm;display:flex}
+.sheet__band i{display:block;height:100%}
+.sheet__band i:nth-child(1){width:64%;background:var(--red)}
+.sheet__band i:nth-child(2){width:36%;background:var(--gold)}
+
+.sheet__head{
+  flex:0 0 auto;padding:6mm var(--pad-x) 0;
+  display:flex;align-items:flex-start;justify-content:space-between;
+}
+.sheet__head img{height:9mm;width:auto;display:block}
+.sheet__head .hmeta{text-align:right;font-size:7pt;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);line-height:1.5}
+.sheet__head .hmeta b{display:block;color:var(--ink);font-weight:600;letter-spacing:.05em}
+
+.sheet__body{flex:1 1 auto;padding:6mm var(--pad-x) 0}
+
+.sheet__foot{
+  flex:0 0 auto;padding:3mm var(--pad-x) 6mm;margin-top:auto;
+  border-top:.5pt solid var(--line);
+  font-size:7pt;color:var(--muted);letter-spacing:.02em;text-align:center;
+}
+
+.eyebrow{font-size:7.6pt;letter-spacing:.24em;text-transform:uppercase;color:var(--red);font-weight:700;margin-bottom:2mm}
+
+/* ---------- title block ---------- */
+.title{font-size:27pt;line-height:1.12;margin-bottom:3mm}
+.route{
+  font-size:9.6pt;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);
+  font-weight:600;margin-bottom:5mm;display:flex;flex-wrap:wrap;gap:0 2.5mm;
+}
+.route .arrow{color:var(--red)}
+
+.meta-row{display:flex;flex-wrap:wrap;gap:8mm;margin-bottom:5mm;padding-bottom:5mm;border-bottom:.5pt solid var(--line)}
+.meta-row .m b{display:block;font-size:6.8pt;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:.8mm}
+.meta-row .m span{font-size:10pt;font-weight:500;color:var(--ink)}
+
+.prepared{font-size:9pt;color:var(--muted);margin-bottom:6mm}
+.prepared b{color:var(--ink);font-weight:700}
+
+p.lede{font-size:10.4pt;line-height:1.68;color:var(--muted);margin-bottom:6mm}
+
+/* ---------- facts ---------- */
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:4mm 6mm;margin-bottom:6mm}
+.facts .f{border-top:1.4pt solid var(--red);padding-top:2mm}
+.facts .f b{display:block;font-size:6.8pt;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:.8mm}
+.facts .f span{font-size:9.4pt;font-weight:500;line-height:1.4;display:block}
+
+/* ---------- highlights ---------- */
+h3.sub{font-size:10.5pt;font-weight:700;letter-spacing:.01em;margin-bottom:2.5mm}
+ul.ticks{list-style:none;margin-bottom:6mm}
+ul.ticks li{position:relative;padding-left:6mm;margin-bottom:2mm;font-size:9.8pt;line-height:1.5}
+ul.ticks li:last-child{margin-bottom:0}
+ul.ticks li svg{position:absolute;left:0;top:1.2mm;width:3.6mm;height:3.6mm}
+
+/* ---------- price ---------- */
+.price{display:flex;align-items:flex-end;justify-content:space-between;gap:8mm;background:var(--cream);padding:7mm;border-top:2.2pt solid var(--red);margin-bottom:6mm}
+.price .amt{font-family:'Playfair Display',Georgia,serif;font-size:24pt;line-height:1;color:var(--red)}
+.price .amt small{font-size:10.5pt;color:var(--muted);display:block;margin-top:2mm;font-family:'Inter','Helvetica Neue',Arial,sans-serif}
+.price .amt b{display:block;font-size:6.8pt;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:1.6mm;font-family:'Inter','Helvetica Neue',Arial,sans-serif}
+.price .amt .tbc{font-family:'Inter','Helvetica Neue',Arial,sans-serif;font-size:11pt;font-weight:500;color:var(--ink);line-height:1.45;display:block;max-width:82mm}
+.price .basis{font-size:8.8pt;color:var(--muted);max-width:68mm;text-align:right;line-height:1.55}
+
+/* ---------- contact ---------- */
+.contact{display:flex;gap:6mm;align-items:flex-start;background:var(--cream);padding:6mm;border-top:2.2pt solid var(--gold)}
+.contact .nm{font-size:11.5pt;font-weight:600;line-height:1.3}
+.contact .rl{font-size:8.2pt;color:var(--muted);margin-bottom:2mm}
+.contact .ct{font-size:9.2pt;line-height:1.7}
+.contact .ct em{font-style:normal;color:var(--muted);display:inline-block;width:14mm}
+
+/* ---------- print ---------- */
+@media print{
+  .toolbar{display:none}
+  @page{size:A4;margin:0}
+  body{background:#fff}
+  .sheet{margin:0;box-shadow:none}
+}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button type="button" onclick="window.print()">Print / Save as PDF</button>
+  <span class="hint">Margins: none · Background graphics: on</span>
+</div>
+
+<div id="doc"></div>
+
+<script>
+/* ============================================================
+   Data injected by src/lib/tailor-made/summary-render.ts.
+   Shape: OnePageSummaryData (src/lib/tailor-made/summary.ts) + { logo }.
+   ============================================================ */
+const ME_ONE_PAGER = /*__DATA_START__*/{}/*__DATA_END__*/;
+
+/* brand footer — fixed per trip, not part of the injected data
+   (same convention as itinerary-template.html / brochure-template.html) */
+const CTS_FIRM = {
+  name: 'CTS Tours',
+  phone: '0800 287 888',
+  email: 'info@ctstours.co.nz',
+  web: 'www.ctstours.co.nz',
+};
+
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const TICK = '<svg viewBox="0 0 16 16" fill="none" stroke="#B61E2E" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.6l3.2 3.2L13 5"/></svg>';
+
+function render(){
+  const d = ME_ONE_PAGER;
+
+  const factsHtml = (d.trip.facts || []).filter(f => f.value).map(f =>
+    `<div class="f"><b>${esc(f.label)}</b><span>${esc(f.value)}</span></div>`
+  ).join('');
+
+  const highlightsHtml = (d.trip.highlights && d.trip.highlights.length)
+    ? `<h3 class="sub">Trip highlights</h3>
+       <ul class="ticks">${d.trip.highlights.map(h => `<li>${TICK}${esc(h)}</li>`).join('')}</ul>`
+    : '';
+
+  const p = d.pricing || {};
+  const amount = (p.amount === null || p.amount === undefined || p.amount === '')
+    ? `<b>Your price</b><span class="tbc">${esc(p.amountNote || 'Quotation to follow')}</span>`
+    : `<b>Your price</b>${esc(p.currency)} $${Number(p.amount).toLocaleString('en-NZ')}<small>per person</small>`;
+
+  const c = (d.meta && d.meta.consultant) || {};
+  const contactHtml = (c.name || c.phone || c.email)
+    ? `<div class="contact">
+         <div>
+           ${c.name ? `<div class="nm">${esc(c.name)}</div>` : ''}
+           ${c.title ? `<div class="rl">${esc(c.title)}</div>` : ''}
+           <div class="ct">${c.phone ? `<em>Phone</em>${esc(c.phone)}<br>` : ''}${c.email ? `<em>Email</em>${esc(c.email)}` : ''}</div>
+         </div>
+       </div>`
+    : '';
+
+  const sheet = document.createElement('section');
+  sheet.className = 'sheet';
+  sheet.innerHTML = `
+    <div class="sheet__band"><i></i><i></i></div>
+    <div class="sheet__head">
+      <img src="${d.logo || ''}" alt="CTS Tours" ${d.logo ? '' : 'style="display:none"'}>
+      <div class="hmeta"><b>Trip summary</b>Ref ${esc(d.meta.quoteRef)} &nbsp;·&nbsp; ${esc(d.meta.issuedDate)}</div>
+    </div>
+    <div class="sheet__body">
+      <div class="eyebrow">Tailor-made journey — one-page summary</div>
+      <h1 class="title serif">${esc(d.trip.title)}</h1>
+      <div class="route">${(d.trip.route || []).map(c => `<span>${esc(c)}</span>`).join('<span class="arrow">→</span>')}</div>
+
+      <div class="meta-row">
+        <div class="m"><b>Dates</b><span>${esc(d.trip.dateRange)}</span></div>
+        <div class="m"><b>Duration</b><span>${esc(d.trip.duration)}</span></div>
+        <div class="m"><b>Travelling</b><span>${esc(d.client.travellers)}</span></div>
+      </div>
+
+      <div class="prepared"><b>Prepared for</b> &nbsp;${esc(d.client.name)}</div>
+
+      ${d.trip.summary ? `<p class="lede">${esc(d.trip.summary)}</p>` : ''}
+
+      ${factsHtml ? `<div class="facts">${factsHtml}</div>` : ''}
+
+      ${highlightsHtml}
+
+      <div class="price"><div class="amt">${amount}</div><div class="basis">${esc(p.basis || '')}</div></div>
+
+      ${contactHtml}
+    </div>
+    <div class="sheet__foot">
+      ${esc(CTS_FIRM.name)} &nbsp;·&nbsp; ${esc(CTS_FIRM.phone)} &nbsp;·&nbsp; ${esc(CTS_FIRM.email)} &nbsp;·&nbsp; ${esc(CTS_FIRM.web)}
+    </div>`;
+
+  document.getElementById('doc').appendChild(sheet);
+}
+
+render();
+</script>
+</body>
+</html>
