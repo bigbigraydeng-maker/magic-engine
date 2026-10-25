@@ -11,6 +11,7 @@ import { NextRequest } from 'next/server'
 const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
   factoryConfig: { publish_target: { platform: 'facebook', page_id: '778899' } } as unknown,
+  queryError: null as { message: string } | null,
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -23,7 +24,7 @@ vi.mock('@/lib/supabase', () => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
           maybeSingle: vi.fn(() =>
-            Promise.resolve({ data: { factory_config: mocks.factoryConfig }, error: null }),
+            Promise.resolve({ data: { facebook_page_id: '778899', factory_config: mocks.factoryConfig }, error: mocks.queryError }),
           ),
         })),
       })),
@@ -32,7 +33,7 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 import { GET } from '../route'
-import { verifyState } from '@/lib/meta-oauth/client'
+import { verifyState, META_STATE_COOKIE } from '@/lib/meta-oauth/client'
 
 const CLIENT_ID = '11111111-1111-1111-1111-111111111111'
 
@@ -45,7 +46,7 @@ function makeRequest(params: { clientId?: string; intent?: string; rerequest?: s
 }
 
 function adminAccess() {
-  return { ok: true as const, user: { email: 'admin@test.com' }, role: 'admin' as const, tier: 'admin' as const, allowedClientId: null }
+  return { ok: true as const, user: { id: 'operator-one', email: 'admin@test.com' }, role: 'admin' as const, tier: 'admin' as const, allowedClientId: null }
 }
 
 beforeEach(() => {
@@ -55,6 +56,7 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_APP_URL = 'https://app.magic-engine.com'
   mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
   mocks.factoryConfig = { publish_target: { platform: 'facebook', page_id: '778899' } }
+  mocks.queryError = null
 })
 
 describe('tenant isolation — no unauthenticated / cross-tenant reauthorisation', () => {
@@ -100,7 +102,13 @@ describe('publishing intent reaches the signed state and requests the publishing
     expect(authUrl.searchParams.get('auth_type')).toBe('rerequest')
 
     const state = authUrl.searchParams.get('state') ?? ''
-    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID, intent: 'publishing' })
+    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID, userId: 'operator-one', targetPageId: '778899', nonce: expect.any(String), intent: 'publishing' })
+    expect(res.cookies.get(META_STATE_COOKIE)?.value).toBe(state)
+    expect(res.headers.get('set-cookie')).toContain('HttpOnly')
+    expect(res.headers.get('set-cookie')).toContain('Secure')
+    expect(res.headers.get('set-cookie')).toContain('SameSite=lax')
+    expect(res.headers.get('set-cookie')).toContain('Path=/api/auth/facebook')
+    expect(res.headers.get('set-cookie')).toContain('Max-Age=600')
   })
 
   it('a plain connect (no intent) carries no intent and no rerequest — inbox flow unchanged', async () => {
@@ -109,7 +117,7 @@ describe('publishing intent reaches the signed state and requests the publishing
     const authUrl = new URL(res.headers.get('location') ?? '')
     expect(authUrl.searchParams.get('auth_type')).toBeNull()
     const state = authUrl.searchParams.get('state') ?? ''
-    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID })
+    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID, userId: 'operator-one', targetPageId: '778899', nonce: expect.any(String) })
   })
 
   it('ignores an unrecognised intent value rather than trusting it', async () => {
@@ -117,7 +125,7 @@ describe('publishing intent reaches the signed state and requests the publishing
 
     const authUrl = new URL(res.headers.get('location') ?? '')
     const state = authUrl.searchParams.get('state') ?? ''
-    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID })
+    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID, userId: 'operator-one', targetPageId: '778899', nonce: expect.any(String) })
   })
 
   it('rerequest=1 forces auth_type=rerequest without changing intent, state or scopes (comment-reply reauthorisation entry)', async () => {
@@ -128,7 +136,7 @@ describe('publishing intent reaches the signed state and requests the publishing
     expect(authUrl.searchParams.get('scope')).toContain('pages_manage_engagement')
 
     const state = authUrl.searchParams.get('state') ?? ''
-    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID })
+    expect(verifyState(state)).toEqual({ clientId: CLIENT_ID, userId: 'operator-one', targetPageId: '778899', nonce: expect.any(String) })
   })
 
   it('any rerequest value other than 1 is ignored', async () => {
@@ -184,5 +192,13 @@ describe('publishing reauth must not even start without a valid Facebook publish
     const res = await GET(makeRequest({ clientId: CLIENT_ID }))
     // ...a plain connect still proceeds to Meta (inbox anchored to facebook_page_id).
     expect(new URL(res.headers.get('location') ?? '').hostname).toContain('facebook.com')
+  })
+
+  it('does not start consent when the server target lookup fails', async () => {
+    mocks.queryError = { message: 'private database failure' }
+    const res = await GET(makeRequest({ clientId: CLIENT_ID, intent: 'publishing' }))
+    expect(new URL(res.headers.get('location') ?? '').searchParams.get('meta')).toBe('verify_failed')
+    expect(res.cookies.get(META_STATE_COOKIE)).toBeUndefined()
+    expect(res.headers.get('location')).not.toContain('private database failure')
   })
 })

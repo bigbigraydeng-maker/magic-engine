@@ -51,6 +51,13 @@ function renderRow(row: ContactRow, grouped = false) {
   )
 }
 
+describe('nameForDisplay 与后端同一套判据', () => {
+  it('后端兜底词「未留姓名」也算没留名；带 @ 的昵称（kay@home）是名字，不算', () => {
+    expect(nameForDisplay({ name: '未留姓名', phone: null, email: null, hasMessenger: true })).toEqual({ text: '未留名', missing: true, sub: '仅 FB 私信' })
+    expect(nameForDisplay({ name: 'kay@home', phone: null, email: null, hasMessenger: false })).toEqual({ text: 'kay@home', missing: false, sub: null })
+  })
+})
+
 describe('nameForDisplay', () => {
   it('把 "WhatsApp Business" 当成没留名，副标题用电话', () => {
     const r = nameForDisplay({

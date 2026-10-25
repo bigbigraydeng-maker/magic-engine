@@ -56,7 +56,7 @@ describe('🔴 一条等批准的暂停，今日待办里恰好一条', () => {
     expect(kept[0]).toMatchObject({
       kind: 'ads_auto_pause_pending',
       client_id: CLIENT,
-      href: `https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ad-health/auto-pause`,
+      href: `https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health?tab=approvals`,
     })
     expect(kept[0].what).toContain('圣诞团')
     expect(`${kept[0].what}${kept[0].how}`).not.toContain('还没上线')

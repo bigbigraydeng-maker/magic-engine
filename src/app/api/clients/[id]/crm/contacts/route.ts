@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { contactCardTitle } from '@/lib/crm/display-name'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { contactKindOf, isSystemAccountName, readDomainRules } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
@@ -606,9 +607,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   let touches: TouchRow[]
   let stageRows: StageRow[]
   let briefs: BriefByContact
+  let leadsConfig: unknown = null
   try {
     const filters = contactFilterParams(query)
-    ;[contacts, touches, stageRows, briefs] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs, leadsConfig] = await Promise.all([
       fetchAll<ContactRow>((from, to) => {
         let b = supabaseAdmin
           .from('contacts')
@@ -636,6 +638,12 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
           .range(from, to),
       ),
       loadLatestBriefByContact(clientId),
+      supabaseAdmin
+        .from('clients')
+        .select('leads_config')
+        .eq('id', clientId)
+        .maybeSingle()
+        .then((r) => (r.data as { leads_config: unknown } | null)?.leads_config ?? null),
     ])
   } catch (err) {
     return NextResponse.json(
@@ -646,6 +654,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
 
   // 系统账号（WhatsApp Business 等）不是客人，不进「智能」视图的任何一栏。
   contacts = contacts.filter((c) => !isSystemAccountName(c.display_name))
+  // 客户自己的员工（登记在 leads_config.own_email_domains 的邮箱域名）也不是客人 —— 跟旧的「今天要联系」
+  // 页一致，不进两张名单（2026-09 CTS 老板：「contact 里面怎么还有工作人员？」）。平铺名单不动（见 ListQuery.kind 的说明）。
+  const ownRules = readDomainRules(leadsConfig)
+  contacts = contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) !== 'staff')
 
   const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false)
   contacts = enrichedPri.contacts
@@ -899,7 +911,7 @@ export async function POST(
           reason: 'ambiguous',
           candidates: (rows ?? []).map((r) => ({
             contactId: r.id,
-            name: r.display_name ?? '未留姓名',
+            name: contactCardTitle(r.display_name),
             phone: r.primary_phone,
             email: r.primary_email,
           })),

@@ -9,6 +9,8 @@ import { CampaignDailyPlanPanel } from '../_components/CampaignDailyPlanPanel'
 import { DailyPlanReelsPanel } from '../_components/DailyPlanReelsPanel'
 import { WeekOverviewPanel } from '../_components/WeekOverviewPanel'
 import { pickDefaultCampaignId } from './pick-default-campaign'
+import { homeEntryVisible } from '@/lib/auth/home-entries'
+import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer'
 
 interface ClientLite {
   id: string
@@ -20,9 +22,17 @@ export default function DailyPlanPage() {
   const searchParams = useSearchParams()
   const clientId = params.id as string
   const requestedCampaignId = searchParams.get('campaign')
-  // 图文 Post 与视频 Reels 分开看（PM：Post 和 Reels 要拆开）。?tab=reels 可直达视频页。
+  const viewer = useWorkspaceViewer()
+  const showOverview = homeEntryVisible(viewer, 'week-overview')
+  const showReels = homeEntryVisible(viewer, 'reels')
+  // Posts and Reels are separate tabs. ?tab=reels opens the video tab.
+  // Week overview and reels both read social-overview, which only the exact
+  // ADMIN_EMAILS list can open. Everyone else would see "no permission".
+  const requestedTab = searchParams.get('tab')
   const [tab, setTab] = useState<'post' | 'reels' | 'overview'>(
-    searchParams.get('tab') === 'reels' ? 'reels' : searchParams.get('tab') === 'overview' ? 'overview' : 'post',
+    requestedTab === 'reels' && showReels ? 'reels'
+      : requestedTab === 'overview' && showOverview ? 'overview'
+        : 'post',
   )
 
   const [client, setClient] = useState<ClientLite | null>(null)
@@ -90,7 +100,9 @@ export default function DailyPlanPage() {
       </div>
 
       <div className="flex gap-2" role="tablist" aria-label="社媒日常内容类型">
-        {([['overview', '本周总览'], ['post', '图文帖子'], ['reels', '短视频']] as const).map(([key, label]) => (
+        {([['overview', '本周总览'], ['post', '图文帖子'], ['reels', '短视频']] as const)
+          .filter(([key]) => (key !== 'overview' || showOverview) && (key !== 'reels' || showReels))
+          .map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -108,9 +120,9 @@ export default function DailyPlanPage() {
         ))}
       </div>
 
-      {tab === 'overview' ? (
+      {tab === 'overview' && showOverview ? (
         <WeekOverviewPanel clientId={clientId} />
-      ) : tab === 'reels' ? (
+      ) : tab === 'reels' && showReels ? (
         <DailyPlanReelsPanel clientId={clientId} />
       ) : campaigns.length === 0 ? (
         <div className="bg-white rounded-xl border border-dashed border-black/10 py-14 text-center">

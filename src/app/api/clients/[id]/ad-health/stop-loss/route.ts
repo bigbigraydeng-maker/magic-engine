@@ -34,6 +34,7 @@ import {
 import { createKernel } from '@/lib/kernel'
 import { submitStopLossThroughKernel, requireStopLossAccess } from '@/lib/action-submission/stop-loss'
 import { resolveAccountTimezone, accountDayKey } from '@/lib/ads-strategy/account-timezone'
+import { toActAccountId } from '@/lib/meta/ad-account-binding'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -148,10 +149,12 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     goalId = goal.id
   }
 
-  const timezone = await resolveAccountTimezone(ownership.campaign.account_id ?? '')
+  const adAccountId = toActAccountId(ownership.campaign.account_id)
+  if (!adAccountId) return NextResponse.json({ error: 'account_id_unreadable' }, { status: 503 })
+  const timezone = await resolveAccountTimezone(adAccountId)
   if (!timezone) return NextResponse.json({ error: 'timezone_unreadable' }, { status: 503 })
   const submitted = await submitStopLossThroughKernel(createKernel(supabaseAdmin), {
-    clientId, access, goalId, campaignId, adAccountId: ownership.campaign.account_id ?? '', requestId,
+    clientId, access, goalId, campaignId, adAccountId, requestId,
     cycleDate: accountDayKey(timezone, new Date()), action: kernelAction, targets,
   })
   const kinds = submitted.runs.map(run => run.kind)

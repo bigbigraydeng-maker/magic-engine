@@ -34,6 +34,8 @@ cron / 批量 / 基础设施                 随时被 FDE / 客户调用
 
 ## 二、9 Agent 职责表
 
+> ⚠️ **本表已过时（6 月版），不再维护。** Agent 名单以 `docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md` §4（PM 已认）为准，代码对照见同文件 §4.4；新 Agent 怎么立项、上线、体检见 `docs/specs/2026-10-18-me-agent-standard-process-v1.0.md`。（2026-10-18）
+
 | Agent | 模型 | 职责 | 代码 | 状态 |
 |-------|------|------|------|------|
 | **子牙** | Claude Opus | 技术大脑：架构/安全/后台统筹 | `src/lib/ziya/` | 待建 |
@@ -182,10 +184,10 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 | Agent | 可用 Plugin | 权限 |
 |-------|------------|------|
 | 子牙 | Supabase / Cloudflare / GitHub | 读写 |
-| 诸葛亮 | Meta Ads / SEMrush / GA4 / Airtable / Publer / 所有 ME API | 读写 |
+| 诸葛亮 | Meta Ads / SEMrush / GA4 / Airtable / Publer / 所有 ME API | 读写（Publer 已于 2026-10 删除） |
 | 张骞 | Jina.ai / SEMrush / DataForSEO / AI Tracker | 只读 |
 | 华佗 | Supabase（内部数据）| 只读 |
-| 鲁班 | Publer / Meta Ads / Google Ads / Airtable / Atlas / Seedance | 读写 |
+| 鲁班 | Publer / Meta Ads / Google Ads / Airtable / Atlas / Seedance | 读写（Publer 已于 2026-10 删除） |
 | 马良 | Higgsfield AI / Seedance / WaveSpeed / Meta Insights / TikTok Insights | 只读+写 Memory |
 | 李白 | SEMrush / DataForSEO / Jina.ai | 只读+写 Memory |
 | 魏征 | Bash/shell / 代码仓库 | 读写（仅代码层）|

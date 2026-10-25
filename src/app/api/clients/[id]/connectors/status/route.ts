@@ -65,7 +65,7 @@ const CONNECTOR_CATALOGUE = [
     name: '客户社媒账号',
     emoji: '📱',
     description: 'Instagram Business / Facebook Page / TikTok Business 等',
-    setupHint: '客户社媒账号接入后，Magic Engine 即可读取真实指标。',
+    setupHint: '请在「社媒授权与连接」中逐个平台授权。登记用户名或确认标记不代表已获得授权。',
   },
 ]
 
@@ -101,7 +101,7 @@ export async function GET(
 
   const connectors = CONNECTOR_CATALOGUE.map(c => {
     const row = statusMap.get(c.anchor)
-    const status = row?.status ?? 'not_connected'
+    const status = c.anchor === 'social' && row?.status === 'connected' ? 'partial' : row?.status ?? 'not_connected'
     return {
       anchor: c.anchor,
       name: c.name,
@@ -110,7 +110,7 @@ export async function GET(
       setupHint: c.setupHint,
       docsUrl: (c as { docsUrl?: string }).docsUrl,
       status: status as 'connected' | 'not_connected' | 'partial' | 'error',
-      statusLabel:
+      statusLabel: c.anchor === 'social' ? '按平台核验授权' :
         status === 'connected' ? '已连接' :
         status === 'partial'   ? '部分配置' :
         status === 'error'     ? '连接有问题' : '未连接',

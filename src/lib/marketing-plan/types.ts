@@ -183,7 +183,18 @@ export interface ApprovalReceipt {
   tasks_skipped: number
   packages_created: number
   /** 批准当时第一阶段的检查清单快照（事后能说清「批的时候是什么状态」）*/
-  gate_snapshot?: { taken_at: string; results: { key: string; light: string; hard: boolean; phase_id?: string }[] }
+  gate_snapshot?: {
+    taken_at: string
+    results: {
+      key: string
+      light: string
+      hard: boolean
+      phase_id?: string
+      /** 「广告账户与付款」那一道才有：批准时用的是现读还是存档，以及证据的读取时间 */
+      source?: 'receipt' | 'live' | 'receipt_after_live_failed'
+      as_of?: string | null
+    }[]
+  }
   /** 批准当时 plan_data.promo 的内容指纹；旧回执没有。*/
   content_hash?: string
 }

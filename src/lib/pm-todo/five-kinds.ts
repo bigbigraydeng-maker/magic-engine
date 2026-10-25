@@ -84,6 +84,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   promo_plan_watch: 'decide',
   lead_followup_check_failed: 'dev', // 「填了表没人回」这一栏没算出来：我们这边的欠账
   promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
+  ads_tracking_preflight_fix: 'dev', // 开投前追踪检查的红灯怎么修：改官网 / 改配置，开发的活（PM 在推广计划页看灯，开投拍板走「到期阶段检查没过」）
+  ads_tracking_preflight_broken: 'dev', // 开投前追踪检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
@@ -105,8 +107,6 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
   conversion_capi_token_dead: 'one_click',
-  linkedin_progress_needs_setup: 'one_click',
-  linkedin_progress_failed: 'one_click', // 先看 Publer 里 LinkedIn 账号掉没掉线
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
@@ -116,8 +116,6 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
-  instagram_account_disconnected: 'one_click', // Publer 里 Instagram 账号掉线，只有人能去重新连接
-  instagram_publish_failed: 'dev', // 同步 Instagram 重试都失败：开发看原因，不占 PM 的清单
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   whatsapp_number_unclaimed: 'one_click', // 号码在发消息但没客户绑定它，去设置页绑一次
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
@@ -143,7 +141,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // ── 4 · 发出去前要看一眼的 ───────────────────────────────────────────
   blog_draft_waiting: 'review',
   blog_pr_open: 'review',
-  linkedin_progress_needs_review: 'review',
+  linkedin_progress_needs_review: 'review', // 历史：LinkedIn 自动发帖已下线，仅夹具使用
   maliang_render_passed: 'review',
   libai_copy_unverified: 'review',
   simaqian_review_drafts: 'review',
@@ -278,6 +276,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   cron_not_running: '有自动任务没按时跑，它负责的那一栏今天可能不全',
   cron_silent_success: '有自动任务显示跑完了但一行没写，它负责的那一栏今天可能不全',
   promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
+  ads_tracking_preflight_broken: '开投前追踪检查今天没跑成，像素 / 落地页 / 留资有没有问题看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
 }
 

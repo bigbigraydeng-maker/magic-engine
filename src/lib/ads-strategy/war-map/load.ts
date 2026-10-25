@@ -12,8 +12,12 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
+import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 import { loadAccountStatusRows, latestPerAccount } from '@/lib/ads-strategy/account-status'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { unusableAccountNote } from './pools'
+import { nzDay } from './util'
+import { computeRunningSince, type SnapRowLite } from './running-since'
 import type {
   AccountInput,
   AdsetInput,
@@ -52,20 +56,57 @@ function str(v: unknown): string | null {
 /** 「读全了却没返回它」的实体会被写一行 disappeared：最新一行是它，就整个实体不要，不能当成「读不到」。 */
 const DISAPPEARED = 'disappeared'
 
-async function loadAccounts(clientId: string, now: Date): Promise<AccountInput[]> {
-  const rows = await loadAccountStatusRows(clientId, isoDaysAgo(now, 14))
-  const out: AccountInput[] = []
-  for (const r of latestPerAccount(rows)) {
-    if (r.capture_reason === DISAPPEARED) continue
-    out.push({
-      adAccountId: r.ad_account_id,
-      name: r.entity_name,
-      statusCode: r.account_status,
-      capturedAt: r.captured_at,
-      timezoneName: r.timezone_name,
-    })
+interface BoundAccount { adAccountId: string; label: string | null }
+
+/**
+ * 账户清单以「绑定表」为准（读不到就抛错）；绑定表一行都没有时退回客户表上的旧单值列，和其它读取方一致。
+ * hidden_from_ad_health = true 的账户只在广告健康页隐藏（PM 要求），不影响投放/预算/内核。
+ * 注意：绑定表有行但全被隐藏时返回 []，不退回旧单值列 —— 那是「没绑定」才走的兜底。
+ */
+async function loadBoundAccounts(clientId: string): Promise<BoundAccount[]> {
+  const { data, error } = await supabaseAdmin
+    .from('client_meta_ad_accounts')
+    .select('ad_account_id, label, hidden_from_ad_health')
+    .eq('client_id', clientId)
+  if (error) throw new Error(`读绑定广告账户失败：${error.message}`)
+  const rows = (data ?? []) as Array<{ ad_account_id: string; label: string | null; hidden_from_ad_health: boolean | null }>
+  if (rows.length > 0) {
+    return rows
+      .filter(r => r.hidden_from_ad_health !== true)
+      .map(r => ({ adAccountId: toActId(r.ad_account_id), label: r.label }))
   }
-  return out
+  const { data: client, error: clientErr } = await supabaseAdmin
+    .from('clients').select('meta_ad_account_id').eq('id', clientId).maybeSingle()
+  if (clientErr) throw new Error(`读客户主广告账户失败：${clientErr.message}`)
+  const legacy = str((client as { meta_ad_account_id?: unknown } | null)?.meta_ad_account_id)
+  return legacy ? [{ adAccountId: toActId(legacy), label: null }] : []
+}
+
+/** 快照里存的是 act_ 形式；绑定表可能不带前缀，统一成 act_ 再比。 */
+function toActId(raw: string): string {
+  return `act_${canonicalAccountDigits(raw)}`
+}
+
+async function loadAccounts(clientId: string, now: Date): Promise<AccountInput[]> {
+  const [bound, rows] = await Promise.all([
+    loadBoundAccounts(clientId),
+    loadAccountStatusRows(clientId, isoDaysAgo(now, 14)),
+  ])
+  const snap = new Map<string, (typeof rows)[number]>()
+  for (const r of latestPerAccount(rows)) {
+    if (r.capture_reason !== DISAPPEARED) snap.set(toActId(r.ad_account_id), r)
+  }
+  return bound.map(b => {
+    const r = snap.get(b.adAccountId)
+    // 绑了但没有快照：照样列出来（名字用标签），状态和读取时间都是 null，页面写「已绑定，暂无数据」
+    return {
+      adAccountId: r?.ad_account_id ?? b.adAccountId,
+      name: r?.entity_name ?? b.label,
+      statusCode: r?.account_status ?? null,
+      capturedAt: r?.captured_at ?? null,
+      timezoneName: r?.timezone_name ?? null,
+    }
+  })
 }
 
 // ── 观众池：最新人数 + 近 9 天历史（同一次查询）──────────────────────────────
@@ -156,19 +197,25 @@ async function loadAdsets(clientId: string, now: Date): Promise<AdsetInput[]> {
 }
 
 // ── 数据日 / 取数时间（两个时钟）+ 近 7 天频率 ────────────────────────────────
-async function loadClocks(clientId: string): Promise<{ dataDay: string | null; fetchedAt: string | null }> {
+async function loadClocks(
+  clientId: string,
+  accountIds: string[] | null,
+): Promise<{ dataDay: string | null; fetchedAt: string | null }> {
+  if (accountIds !== null && accountIds.length === 0) return { dataDay: null, fetchedAt: null }
+  const dayQuery = supabaseAdmin
+    .from('ad_daily_insights')
+    .select('insight_date')
+    .eq('client_id', clientId)
+  const fetchedQuery = supabaseAdmin
+    .from('ad_daily_insights')
+    .select('fetched_at')
+    .eq('client_id', clientId)
   const [dayRes, fetchedRes] = await Promise.all([
-    supabaseAdmin
-      .from('ad_daily_insights')
-      .select('insight_date')
-      .eq('client_id', clientId)
+    (accountIds === null ? dayQuery : dayQuery.in('ad_account_id', accountIds))
       .order('insight_date', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabaseAdmin
-      .from('ad_daily_insights')
-      .select('fetched_at')
-      .eq('client_id', clientId)
+    (accountIds === null ? fetchedQuery : fetchedQuery.in('ad_account_id', accountIds))
       .order('fetched_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -292,13 +339,14 @@ async function loadPlan(clientId: string): Promise<PlanInput | null> {
     .order('updated_at', { ascending: false })
     .limit(10)
   if (error) throw new Error(`读推广计划失败：${error.message}`)
-  for (const row of (data ?? []) as Array<{ plan_data: unknown; status: string }>) {
+  for (const row of (data ?? []) as Array<{ plan_data: unknown; status: string; updated_at: string | null }>) {
     const spec = readPromoSpec(row.plan_data)
     if (!spec) continue
     return {
       status: row.status === 'approved' ? 'approved' : 'draft',
       phases: spec.phases.map(p => ({ name: p.name, startDate: p.start_date, endDate: p.end_date })),
       goalTitle: await loadGoalTitle(clientId, spec.goal_id),
+      recordUpdatedDay: row.updated_at ? nzDay(row.updated_at) : null,
     }
   }
   return null
@@ -312,27 +360,97 @@ async function loadApprovedCreatives(clientId: string): Promise<number | null> {
   return loaded.config.creative_pool.filter(e => e.status === 'approved').length
 }
 
+// ── 每个账户自己的数据日（账户小结用）────────────────────────────────────────
+async function loadAccountDataDays(clientId: string, accounts: AccountInput[]): Promise<Record<string, string | null>> {
+  const entries = await Promise.all(accounts.map(async a => {
+    const { data, error } = await supabaseAdmin
+      .from('ad_daily_insights')
+      .select('insight_date')
+      .eq('client_id', clientId)
+      .eq('ad_account_id', a.adAccountId)
+      .order('insight_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw new Error(`读账户数据日失败：${error.message}`)
+    return [a.adAccountId, str((data as { insight_date?: unknown } | null)?.insight_date)] as const
+  }))
+  return Object.fromEntries(entries)
+}
+
+// ── 实际已经在跑的最早日子（判断计划记录是不是过时了）────────────────────────
+interface SnapLiteRow {
+  entity_id: string
+  campaign_id: string | null
+  effective_status: string | null
+  capture_reason: string | null
+  captured_at: string
+}
+
+async function loadSnapRows(clientId: string, level: 'adset' | 'campaign', ids: string[], now: Date): Promise<SnapRowLite[]> {
+  const rows = await fetchAll<SnapLiteRow>((from, to) =>
+    supabaseAdmin
+      .from('ad_entity_snapshots')
+      .select('entity_id, campaign_id, effective_status, capture_reason, captured_at')
+      .eq('client_id', clientId)
+      .eq('level', level)
+      .in('ad_account_id', ids)
+      .gte('captured_at', isoDaysAgo(now, 30))
+      .order('captured_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
+  return rows.map(r => ({
+    entityId: r.entity_id,
+    campaignId: level === 'campaign' ? r.entity_id : r.campaign_id,
+    effectiveStatus: r.effective_status,
+    captureReason: r.capture_reason,
+    capturedAt: r.captured_at,
+  }))
+}
+
+async function loadRunningSince(clientId: string, now: Date, accounts: AccountInput[]): Promise<string | null> {
+  const ids = accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId)
+  if (ids.length === 0) return null
+  const [adsets, campaigns] = await Promise.all([
+    loadSnapRows(clientId, 'adset', ids, now),
+    loadSnapRows(clientId, 'campaign', ids, now),
+  ])
+  return computeRunningSince(adsets, campaigns)
+}
+
 export async function loadWarMapInput(clientId: string, now: Date = new Date()): Promise<WarMapInput> {
-  const [accounts, aud, adsets, clocks, growth, plan, creativePoolApproved] = await Promise.all([
-    loadAccounts(clientId, now),
+  const accounts = await loadAccounts(clientId, now)
+  const usableIds = accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId)
+  const [aud, adsets, clocks, growth, plan, creativePoolApproved, accountDataDays, runningSince] = await Promise.all([
     loadAudiences(clientId, now),
     loadAdsets(clientId, now),
-    loadClocks(clientId),
+    loadClocks(clientId, accounts.length === 0 ? null : usableIds),
     loadGrowth(clientId),
     loadPlan(clientId),
     loadApprovedCreatives(clientId),
+    loadAccountDataDays(clientId, accounts),
+    loadRunningSince(clientId, now, accounts),
   ])
   const campaigns = await loadCampaigns(clientId, clocks.dataDay)
+  // 账户清单是「哪些账户算数」的唯一来源：被隐藏的账户，它的池子/池子历史/系列频率也不能漏进来。
+  // accounts 为空（没绑定）时不过滤，保持原行为。
+  const visible = accounts.length > 0 ? new Set(accounts.map(a => toActId(a.adAccountId))) : null
+  const audiences = visible ? aud.audiences.filter(a => visible.has(toActId(a.adAccountId))) : aud.audiences
+  const audienceIds = visible ? new Set(audiences.map(a => a.id)) : null
+  const audienceHistory = audienceIds ? aud.history.filter(h => audienceIds.has(h.audienceId)) : aud.history
+  const visibleCampaigns = visible ? campaigns.filter(c => visible.has(toActId(c.adAccountId))) : campaigns
   return {
     now: now.toISOString(),
     accounts,
-    audiences: aud.audiences,
-    audienceHistory: aud.history,
+    audiences,
+    audienceHistory,
     adsets,
-    campaigns,
+    campaigns: visibleCampaigns,
     clocks,
     growth,
     plan,
+    runningSince,
+    accountDataDays,
     creativePoolApproved,
   }
 }

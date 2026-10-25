@@ -11,12 +11,14 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  B_SPOT_CHECK_RATE_PERCENT,
   C_SAMPLE_RATE_PERCENT,
   fnv1a32,
   isSampled,
   sampleBucket,
   sampleKey,
   shouldRequestCodexReview,
+  shouldRequestLegacySpotCheck,
 } from '../src/sampling.mjs'
 
 const sha = (n: number) => n.toString(16).padStart(40, '0')
@@ -118,5 +120,33 @@ describe('shouldRequestCodexReview routes by level', () => {
       r: shouldRequestCodexReview({ risk: 'C', pr: 1, sha: sha(i) }),
     })).find((x) => !x.r.review)
     expect(skipped?.r.reason).toContain('未被 20% 抽样抽中')
+  })
+})
+
+describe('legacy spot checks are B-only and never a merge input', () => {
+  it('never selects A or C', () => {
+    for (let i = 0; i < 40; i++) {
+      expect(shouldRequestLegacySpotCheck({ risk: 'A', pr: 1, sha: sha(i) }).review).toBe(false)
+      expect(shouldRequestLegacySpotCheck({ risk: 'C', pr: 1, sha: sha(i) }).review).toBe(false)
+    }
+  })
+
+  it('samples some B heads and skips others, stably', () => {
+    const input = { risk: 'B' as const, pr: 7, sha: sha(3) }
+    const first = shouldRequestLegacySpotCheck(input)
+    expect(shouldRequestLegacySpotCheck(input)).toEqual(first)
+    const results = Array.from({ length: 200 }, (_, i) =>
+      shouldRequestLegacySpotCheck({ risk: 'B', pr: 1, sha: sha(i) }).review,
+    )
+    expect(results).toContain(true)
+    expect(results).toContain(false)
+    expect(B_SPOT_CHECK_RATE_PERCENT).toBe(C_SAMPLE_RATE_PERCENT)
+  })
+
+  it('says a miss does not block', () => {
+    const skipped = Array.from({ length: 200 }, (_, i) =>
+      shouldRequestLegacySpotCheck({ risk: 'B', pr: 1, sha: sha(i) }),
+    ).find((result) => !result.review)
+    expect(skipped?.reason).toContain('不挡合并')
   })
 })

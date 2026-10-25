@@ -314,7 +314,7 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
    * 多放一个允许目录，整个目录都能直接对外写。模块清单两个方向都冻：新加模块是好事，
    * 但要同步进冻结清单，下限才会跟着涨——不涨的话，以后有人再把它删掉，这里看不出来。
    *
-   * 2026-09-27：历史 26 条 + seo-meta 三条临时豁免（子牙拍板，SEO 3b · B7 迁走后删）。
+   * 2026-09-27：seo-meta 三条为临时豁免（子牙拍板，SEO 3b · B7 迁走后删）；2026-10 Publer 退役删 6 条后，现状共 23 条（含 seo-meta 3 条）。
    */
   const PROVIDER_WRITE_GRANDFATHERED_FROZEN: readonly string[] = [
     'src/app/api/clients/[id]/cms/github/update-page/route.ts',
@@ -331,16 +331,10 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     'src/app/api/clients/[id]/cms/wordpress/update-post/route.ts',
     'src/app/api/clients/[id]/cms/wordpress/yoast-probe/route.ts',
     'src/app/api/clients/[id]/gsc/index-request/route.ts',
-    'src/app/api/clients/[id]/reels/[draftId]/publish/route.ts',
     'src/app/api/cms/github/webhook/route.ts',
     'src/app/api/cron/cms-connection-retest/route.ts',
-    'src/app/api/publer/accounts/route.ts',
-    'src/app/api/publer/create-post/route.ts',
-    'src/app/api/publer/draft/[assetId]/route.ts',
-    'src/app/api/publer/schedule/route.ts',
     'src/lib/blog/pr-sync.ts',
     'src/lib/cms/page-upgrade-pr-sync.ts',
-    'src/lib/flywheel/social-post-publish.ts',
     'src/lib/luban/tools.ts',
     'src/lib/seo-meta/cts-meta-pr.ts',
     'src/lib/inngest/functions/seo-meta-cycle.ts',
@@ -348,7 +342,6 @@ describe('L1 边界：对外写能力只能由 capability 层调用', () => {
     'src/lib/seo-meta/cycle/pr-guard.ts',
   ]
   const PROVIDER_WRITE_MODULES_FROZEN: readonly string[] = [
-    '@/lib/publer/client',
     '@/lib/cms/wordpress-client',
     '@/lib/cms/shopify-client',
     '@/lib/cms/github-client',
@@ -2717,10 +2710,10 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
           '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
       ).toEqual([])
     },
-    // 🔴 扫描整仓运行时文件（剥注释 + 正则）。CI 上实测跑到 6.3s，触发
-    //    Vitest 默认 5s 超时——不是判据坏了，是这两条本来就该比默认值慢。
-    //    15s 留出约 2.4 倍余量，本地/CI 都验过在这个上限内。
-    15_000,
+    // Assert the whitelist above, not elapsed time. A 15s cap aborted this
+    // full-repo scan on the 1-CPU runner (about 9–18s) before expect() ran.
+    // Vitest treats Infinity as no per-test clock. The job cap still stops a hang.
+    Number.POSITIVE_INFINITY,
   )
 
   it(
@@ -2733,7 +2726,8 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
         '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
       ).toEqual([])
     },
-    15_000,
+    // Same scan as the test above. No millisecond budget; see that comment.
+    Number.POSITIVE_INFINITY,
   )
 
   it('🔴 这两条闸真的能抓到东西（真实磁盘探针，因为现在生产代码里是零个）', () => {
