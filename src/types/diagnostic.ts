@@ -333,7 +333,10 @@ export type TimelineUrgency = 'immediate' | 'short_term' | 'long_term'
 export interface PrescriptionIntake {
   business_goal: string
   timeline_urgency: TimelineUrgency
+  /** Amount in budget_currency. The field name is historical and is not a promise of AUD. */
   monthly_budget_aud: number
+  /** ISO code from the ad account or the client country. Absent only on old rows. */
+  budget_currency?: string | null
   priority_dimensions: DiagnosticDimension[]
   notes: string | null
 }

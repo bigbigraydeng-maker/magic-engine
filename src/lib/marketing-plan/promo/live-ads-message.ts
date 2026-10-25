@@ -2,6 +2,7 @@
  * 「计划没批准，Meta 里却可能已有广告在跑」的提示文案（纯函数，不引任何服务端模块：
  * 页面组件会直接 import 它，一旦这里 import 了 supabase，浏览器一加载就会因缺服务端密钥整页白屏）。
  */
+import { publicAdAccountName } from '@/lib/ads/spend-figures'
 
 /**
  * spending = 近 2 天确认有花费；no_spend_data = 状态开着但花费数据缺失/没跟上，没法确认；
@@ -39,7 +40,7 @@ export type LiveAdsLevel = 'red' | 'amber' | 'grey'
 export interface LiveAdsMessage { level: LiveAdsLevel; text: string }
 
 const MONEY_PREFIX: Record<string, string> = { NZD: 'NZ$', AUD: 'A$', USD: 'US$' }
-const nameOf = (a: LiveAdsAccount): string => a.label ?? a.ad_account_id
+const nameOf = (a: LiveAdsAccount): string => publicAdAccountName(a.label, a.ad_account_id)
 const REFRESH_NOTE = '（页面数据每 6 小时更新一次，以 Meta 为准）'
 /** 快照抓取停摆多久算「没更新」：每 6 小时抓一次，超过 2 天一定是出问题了 */
 export const SNAPSHOT_STALE_HOURS = 48
