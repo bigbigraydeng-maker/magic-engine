@@ -1,6 +1,6 @@
 # ME 学习功能实现契约 v1
 
-- 状态：草案 v1.6（文档，不含任何代码或迁移执行）
+- 状态：草案 v1.7（文档，不含任何代码或迁移执行）
 - 日期：2026-10-24
 - 权威任务说明：Issue #3088（挂在 #3087 下）；工作模式以 #3087 为准
 - 写入者：Claude Code（本文档）；代码由 DeepSeek 写，Codex Astra 只审查
@@ -774,7 +774,7 @@ live = is_active
 
 #### 步骤 3：蒸馏
 - 输入：正文由步骤 2 的同一次流程以参数传入（或由手动粘贴请求带入），**蒸馏函数不从库里读正文**（库里没有）。
-- 模型：DeepSeek，模型名**可配置，默认 `deepseek-v4-flash`，JSON 模式**；经 L56-P1 新建的共用客户端 `src/lib/deepseek/client.ts` 调用（7.7、R17）；**不复用** `telephony` 里的 `deepseek-chat`；UI/报告/客户交付物不出现真实供应商名（API 路由内部、日志、环境变量可用真名）。
+- 模型：DeepSeek，模型名**可配置，默认 `deepseek-flash`（官方现名；旧名 `deepseek-v4-flash` 仍可用），JSON 模式**；经 L56-P1 新建的共用客户端 `src/lib/deepseek/client.ts` 调用（7.7、R17）；**不复用** `telephony` 里的 `deepseek-chat`；UI/报告/客户交付物不出现真实供应商名（API 路由内部、日志、环境变量可用真名）。
 - 每条内容抽 **0–5 条规则句**（宁缺毋滥，0 条是合法结果）。输出必须是受约束的 JSON，每条规则带**来源卡**：
 
 ```ts
@@ -972,8 +972,8 @@ collectXPosts(deps: { x: ReturnType<typeof xClient>; ledger: BudgetLedger }, sou
 
 #### 共用 DeepSeek 客户端规格（`src/lib/deepseek/client.ts`）
 
-- 现状：全仓没有 `deepseek-v4-flash` 的调用；`src/lib/telephony/transcribe/vendors.ts` 里用的是 `deepseek-chat`，用途不同，**不复用、不改动**。
-- 配置全部来自环境变量，在函数内读取（不在模块顶层）：`DEEPSEEK_API_KEY`（必填，缺失 → `Result` 失败，不抛）、`DEEPSEEK_MODEL`（可选，**默认 `deepseek-v4-flash`**）、`DEEPSEEK_BASE_URL`（可选，默认官方地址）。模型 ID 是否为官方 API 的真实名称，由 L56-P1 在 PR 里对照官方文档核对并附链接；若 ID 不同，只改默认值，不改调用方。登记到 `docs/ENV.md`。
+- 现状（写契约时）：全仓没有 `deepseek-flash` 或旧名 `deepseek-v4-flash` 的调用；`src/lib/telephony/transcribe/vendors.ts` 里用的是 `deepseek-chat`，用途不同，**不复用、不改动**。
+- 配置全部来自环境变量，在函数内读取（不在模块顶层）：`DEEPSEEK_API_KEY`（必填，缺失 → `Result` 失败，不抛）、`DEEPSEEK_MODEL`（可选，**默认 `deepseek-flash`**；官方现名，旧名 `deepseek-v4-flash` 仍可用、同价，可用本变量覆盖）、`DEEPSEEK_BASE_URL`（可选，默认官方地址）。模型 ID 是否为官方 API 的真实名称，由 L56-P1 在 PR 里对照官方文档核对并附链接；若 ID 不同，只改默认值，不改调用方。登记到 `docs/ENV.md`。
 - 接口：
 ```ts
 export interface DeepSeekPrice { inputPerMTokUsd: number; outputPerMTokUsd: number; source: string; checkedOn: string }   // 价格常量，source=官方价格页链接，checkedOn=取价日期
@@ -1006,12 +1006,12 @@ export async function withReservation<T>(ledger: BudgetLedger, spec: { id: strin
 
 #### 分轮指令（每轮 1–3 个文件；aider 配方与已知坑见 `docs/codex-prompts/2026-09-24-ads-impact-deepseek-rounds.md` 与记忆 `reference-aider-deepseek-oneshot-recipe`）
 
-通用启动（每轮换文件清单）：`aider --model deepseek/deepseek-v4-flash --no-auto-commits --map-tokens 0 --read docs/me-learning-contract.md --read src/lib/agent-learning/contracts.ts <本轮要改/新建的文件> [--read <模板>]`。每轮结束：`/run npx tsc --noEmit`（只看新增错误）→ `/run npx vitest run <本轮测试>` → `/run git diff --name-only` → `/exit`。**行号基于 `origin/main`，开工前先 grep 核对，漂了以符号名为准。** 每轮提示词末尾必带 `RULES`：只许动列出的文件、不许动 `.gitignore`、保留 JSDoc、不 import supabase/inngest（除非该轮明说）。Claude Code 每轮核 diff 只动了该动的文件后 `git add <文件>` 提交，commit 带 `[L56-P1.Rn]`。
+通用启动（每轮换文件清单）：`aider --model deepseek/deepseek-flash --no-auto-commits --map-tokens 0 --read docs/me-learning-contract.md --read src/lib/agent-learning/contracts.ts <本轮要改/新建的文件> [--read <模板>]`。每轮结束：`/run npx tsc --noEmit`（只看新增错误）→ `/run npx vitest run <本轮测试>` → `/run git diff --name-only` → `/exit`。**行号基于 `origin/main`，开工前先 grep 核对，漂了以符号名为准。** 每轮提示词末尾必带 `RULES`：只许动列出的文件、不许动 `.gitignore`、保留 JSDoc、不 import supabase/inngest（除非该轮明说）。Claude Code 每轮核 diff 只动了该动的文件后 `git add <文件>` 提交，commit 带 `[L56-P1.Rn]`。
 
 | 轮 | 文件（≤3） | 内容与验收 |
 |---|---|---|
 | R1 | 新建 `src/lib/deepseek/client.ts` | 按"共用 DeepSeek 客户端规格"写全部导出。提示词里完整写出 `import type { Result } from '@/lib/agent-learning/contracts'`。验收：`tsc` 无新增错误。 |
-| R2 | 新建 `src/lib/deepseek/__tests__/client.test.ts`；`--read` R1 产物 | 用 `fetch` 替身测：缺 key 失败不抛；默认模型 `deepseek-v4-flash`、`DEEPSEEK_MODEL` 覆盖生效；请求体含 `response_format` 与 `max_tokens`；超时/HTTP 500/非 JSON 都返回失败且错误信息不含密钥；缺 `usage` 按最坏值计；`costUsd` / `worstCaseUsd` 数值。 |
+| R2 | 新建 `src/lib/deepseek/__tests__/client.test.ts`；`--read` R1 产物 | 用 `fetch` 替身测：缺 key 失败不抛；默认模型 `deepseek-flash`、`DEEPSEEK_MODEL` 覆盖生效（覆盖值用旧名 `deepseek-v4-flash` 验证）；请求体含 `response_format` 与 `max_tokens`；超时/HTTP 500/非 JSON 都返回失败且错误信息不含密钥；缺 `usage` 按最坏值计；`costUsd` / `worstCaseUsd` 数值。 |
 | R3 | 新建 `src/lib/agent-learning/budget/types.ts`、`budget/reserve.ts` | 按"额度预留封装规格"写 `BudgetItem / BudgetLedger / createRpcLedger / newAttemptId / periodKeys / withReservation`；`createRpcLedger` 必须把 `duplicate_reservation` 原样映射为拒绝，不得当成功。`createRpcLedger` 调用的函数名固定为 `agent_learning_budget_reserve` / `agent_learning_budget_settle`，参数名与 2.7 一致。 |
 | R4 | 新建 `budget/fake-ledger.ts`、`budget/__tests__/reserve.test.ts` | 验收 T17（10 路并发只成功 3 路、被拒的 7 路外呼计数为 0、多 key 全有或全无）、T18（run 抛错后 hold 仍占用）、T19（`rpc` 报错/非法返回 → `run` 零调用）、T20（按实际结算、重复结算不二次扣减、超额如实记账）、T21（同一 ID 并发 10 路只认领 1 次、其余 9 路 `duplicate_reservation` 且 `run` 零调用；结算后用同一 ID 重放 → `duplicate_reservation`（`holdStatus='settled'`）、`run` 零调用、`spent` 不变；`newAttemptId` 连续调用互不相同；重试必须换 ID 并重新占用额度）。 |
 | R5 | 新建 `src/lib/agent-learning/collect/x-limits.ts`、`src/lib/agent-learning/distill/cost-gate.ts` | `x-limits.ts`：`X_DAILY_READ_CAP=40`、`X_MONTHLY_READ_CAP=900`、`X_MONTHLY_USD_CAP=5`、`X_PRICE_PER_READ_USD=0.005`、`X_FIRST_BATCH_HANDLES`（10 个号，见 7.6）、`isFirstBatchHandle(handle)`（大小写不敏感、去 @）、`reserveXBudget` / `settleXBudget` / `projectMonthlyCostUsd`（签名见 L6d，经 `withReservation` 或直接调 `ledger`）。`cost-gate.ts`：`DISTILL_DAILY_ITEM_CAP=30`、`DISTILL_DAILY_USD_CAP=0.20`、`DISTILL_MAX_INPUT_TOKENS=8000`、`DISTILL_MAX_OUTPUT_TOKENS=1500`、`estimateWorstCaseUsd`、`reserveDistillBudget`（签名见 L6c）。 |
@@ -1059,7 +1059,7 @@ export async function withReservation<T>(ledger: BudgetLedger, spec: { id: strin
 | R14 | （原美妆行业缺口） | 随 v1.3 范围调整取消：名册只覆盖 6 个领域，垂直行业专家以后需要时再加 | 已取消 |
 | R15 | （原 Supadata `mode` 改造项） | 随 R9 否决而取消；L6 不改 `src/lib/supadata/client.ts` | 已取消 |
 | R16 | 蒸馏候选点不走 Markdown 卡（对原则 1 的例外，见 2.3a） | 仓库里看不到这些点的 git 历史，历史靠 `point_events` | Astra 审查，Ray 知悉 |
-| R17 | 模型名 `deepseek-v4-flash` | **v1.4 更正**：全仓搜索只有本契约自己提到它；原先指的 `seo-weekly-list/live-snippet.ts` 是网页 title/meta 抓取，不是模型调用（Codex Astra 审查 P2）。仓库里唯一的 DeepSeek 调用在 `telephony/transcribe/vendors.ts`，用 `deepseek-chat`，用途不同。处理：L56-P1 新建共用客户端（7.7），模型名可配置、默认 `deepseek-v4-flash`，不复用 telephony；模型 ID 与价格由 L56-P1 对官方文档核对后 Ray 确认 | L56-P1 核对；Ray 确认价格 |
+| R17 | 模型名 `deepseek-flash`（旧名 `deepseek-v4-flash` 仍可用） | **v1.4 更正**：全仓搜索只有本契约自己提到它；原先指的 `seo-weekly-list/live-snippet.ts` 是网页 title/meta 抓取，不是模型调用（Codex Astra 审查 P2）。仓库里唯一的 DeepSeek 调用在 `telephony/transcribe/vendors.ts`，用 `deepseek-chat`，用途不同。处理：L56-P1 新建共用客户端（7.7），模型名可配置、默认 `deepseek-flash`，不复用 telephony；模型 ID 与价格由 L56-P1 对官方文档核对后 Ray 确认 | L56-P1 核对；Ray 确认价格 |
 | R18 | 额度预留账本依赖新表和 SQL 函数（2.7） | 费用上限靠它才是硬上限；账本不可用时 L6c/L6d 一律停，不回退到进程内计数。并发正确性需要在测试库演练（L2），fake 账本只能证明调用方行为 | Astra 审查重点；L2 测试库演练需 Ray 另行授权 |
 | R19 | 卡片点的规则句依赖规则手册表头（4.2a；v1.6 已按两份真实手册改为取"条件/判据"类列，不再假设"规则"列） | 手册改了表头或列，`resolveRuleText` 会失败并进 `rule_unresolved`（fail-closed，不会注入编号或错行）；SEO 等其它支柱的手册表头不同（如"判据（条件 → 动作）"），目前 `PILLAR_RULES` 未收录，收录时需补 fixtures | L3 PR 在真实手册上 dry-run 贴结果；V17 的真实文件结构断言兜底 |
 | R21 | 蒸馏失败的条目下次重新抓取（v1.6） | 每次重试都会再花一次预留额度；已用 `attempts` 满 3 次停止、每日 30 条/0.20 美元上限、每次尝试新预留 ID 三道限制。来源页面若在两次运行之间下架，该条就拿不到了（可接受：本来就没学到） | Astra 审查重点 |
@@ -1088,6 +1088,7 @@ export async function withReservation<T>(ledger: BudgetLedger, spec: { id: strin
 - v1.5.1（2026-10-25，小改，只改文档）：7.7 的 aider 启动命令 `--model deepseek/deepseek-chat`（已停用）改为 `--model deepseek/deepseek-v4-flash`；全文其余 `deepseek-chat` 均是在描述 telephony 现状并声明"不复用"，保留不改。
 - v1.6（2026-10-25，按 Codex 对 3de1fae 的 PR #3122 复审 3 条；只改文档）：①**P1 规则正文提取**——读两份真实手册（广告、社媒）发现没有"规则"列，4.2a 改为按真实表头取"条件/判据"类列（+单独的"动作"列），第 1 列只当编号和短标题，取不到就跳过并记录、不拿编号或短标题充数；V17 改用四种真实表头的 fixtures 并加真实文件结构断言；7.7 R7、R19 同步；②**P1 采集→蒸馏交接**（Ray 决定）——采集与蒸馏合成同一次流程，只保留一个 cron（`agent-learning-expert`，仅在 `catalog.ts` 登记），正文不落库不进载荷；items 行只在蒸馏有终态后写，失败写 `failed`（无正文，`attempts` 满 3 次停）、下次重新抓取并用新预留 ID 重新蒸馏；手动粘贴同步蒸馏、失败整次报错零写入；L6b 改为纯抓取函数、L6d 无独立 cron，L6c 增加流水线与手动粘贴接口，7.7 新增 L6b/L6c 分轮 C1–C6；2.2 加 `attempts`，新增 T22–T26、R21；③**P2 撤销/删除后撤下注入**——新增 4.9：卡片点从 `adopted` 改走、点或卡被删除时 lesson 退役并留痕（不硬删），points 加 `removed_at`；4.3 读取侧要求来源点仍是 `adopted` 且未删，读不到 points 则同步行不注入；读不全不退役；新增 V22–V25、R22。
 - v1.4（2026-10-24，按 Codex Astra 对 v1.3（`f77094e`）的审查，统筹 Traning Day 指示）：①定时任务只在 `catalog.ts` 登记，去掉所有 `render.yaml` 要求（#3087 第 1c 项）；②新增 4.2a 与 `rule_text` 列：卡片点的 `rule` 是规则编号，注入的必须是解析出的规则句，新增 V17；③新增 4.7、2.8、L4b 与 V19：蒸馏点变成 `adopted` 的唯一受权限控制的人工审核入口（谁能批、身份取自会话、留痕）；④新增 4.8、2.6 的 CHECK 与 V18：扩展 `write-lesson.ts` 一次写完，字段不全不注入；⑤新增 2.7 额度预留账本、T17–T20、V20：蒸馏 0.20 美元/天与 X 40 条/天、900 条/月、5 美元/月都改为请求前原子预留、请求后按实际结算；⑥新增 7.7：共用 DeepSeek 客户端（模型名可配置，默认 `deepseek-v4-flash`，不复用 telephony）与 L56-P1 九轮 aider 指令，R17 更正，新增 R18–R20；⑦新表数由 5 张改为 7 张。
+- v1.7（2026-10-25，小改，只改文档，PR #3132 合并后的跟进）：默认模型名由 `deepseek-v4-flash` 改为官方现名 `deepseek-flash`（Ray 2026-10-25 19:33 批准；官方价格页写明旧名是已退役名称、仍可用、按 Flash 价计费，输入 $0.30 / 输出 $1.20 每百万 token，高峰未命中价）；涉及 7.6 步骤 3、7.7 的客户端规格、R2 验收、aider 启动命令与 R17。变更记录里 v1.4、v1.5.1 的旧名属历史描述，保留不改。
 - v1（2026-10-24）：首版。依据 #3088 触发评论的 5 项要求撰写；未执行任何迁移、未改业务代码。
 
 ---
