@@ -12,6 +12,9 @@
  *   - tasks:  批准后派发到 Luban 的具体任务清单
  */
 
+import type { WatchCode } from './promo/daily-watch'
+import type { ReconcileRow } from './promo/reconcile'
+
 // ─── Plan 状态 ────────────────────────────────────────────────────────────────
 
 export type MarketingPlanStatus = 'draft' | 'approved' | 'completed' | 'archived'
@@ -173,6 +176,53 @@ export interface WeeklyReviewRecord {
   week_start: string
   by: string | null
   at: string
+}
+
+// ─── 调整记录（IMPACT 的 Tune 段）────────────────────────────────────────────────
+// 补数据 / 补执行 / 改处方 / 继续；判断顺序固定，见 promo/adjust.ts。
+
+export type AdjustDecision = 'fix_data' | 'fix_execution' | 'revise_prescription' | 'continue'
+export type AdjustStatus = 'proposed' | 'confirmed' | 'rechecked'
+export type RecheckResult = 'improved' | 'no_change' | 'worse' | 'unknown'
+
+export interface PromoAdjustmentTriggerRow {
+  key: ReconcileRow['key']
+  status: ReconcileRow['status']
+  planned: number | null
+  actual: number | null
+  unit: string
+  reason: string
+  as_of: string | null
+}
+
+export interface PromoAdjustmentRecord {
+  id: string
+  v: 1
+  /** 对账窗口，YYYY-MM-DD */
+  window: { start: string; end: string }
+  goal_id: string
+  trigger: {
+    watch_codes: WatchCode[]
+    rows: PromoAdjustmentTriggerRow[]
+    /** 当时的检查证据摘要；没有检查证据 = null */
+    check_evidence: { status: 'declared' | 'unknown'; reason: string; as_of: string } | null
+    experiment_hit: 'stop_rule' | 'max_loss' | null
+  }
+  suggested_decision: AdjustDecision
+  suggestion_reasons: string[]
+  /** 人确认后才有 */
+  decision: AdjustDecision | null
+  /** decision 与 suggested_decision 不同时必填 */
+  override_reason: string | null
+  note: string
+  status: AdjustStatus
+  proposed_by: string
+  proposed_at: string
+  confirmed_by: string | null
+  confirmed_at: string | null
+  /** YYYY-MM-DD，见 nextRecheckDate */
+  recheck_due: string
+  recheck: { at: string; result: RecheckResult; rows: PromoAdjustmentTriggerRow[] } | null
 }
 
 export interface ApprovalReceipt {
