@@ -468,7 +468,7 @@ function declareLeads(clientId: string, period: Period | null): ResolvedRead {
     caveats: [
       '数的是其他，不是报名笔数，也不是座位。',
       '不区分联系成功和合格线索，也不能当成成交。',
-      '先读 ga4_traffic_snapshots 的最近快照；这一路不按目标周期过滤。读不成才读 ad_daily_insights 的留资档，那一路按目标周期。',
+      '有起止日期时先数广告留资，结束日收到今天，开始日之前的不计。没有起止日期时才先读网站最近快照，读不成才读广告留资。',
       '本模块不选今天用了哪张表，也不出数。',
     ],
   })
