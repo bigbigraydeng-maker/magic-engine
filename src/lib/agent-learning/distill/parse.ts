@@ -5,7 +5,7 @@
  */
 
 import type { DistilledRule, ExpertDomain, Result } from '@/lib/agent-learning/contracts'
-import { guardRuleText, looksLikeInjection } from '@/lib/agent-learning/distill/guard'
+import { guardRuleText, looksLikeInjection, URL_RE } from '@/lib/agent-learning/distill/guard'
 
 /** 每条内容最多保留的规则条数（宁缺毋滥，0 条合法） */
 export const MAX_RULES_PER_ITEM = 5
@@ -15,9 +15,6 @@ export const MAX_QUOTE_CHARS = 280
 
 /** 单条规则句的最大字符数（超出不截断，直接丢弃该条） */
 export const MAX_RULE_CHARS = 300
-
-/** rationale 里出现链接同样按违规处理（不入库、不进提示词） */
-const RATIONALE_URL_RE: RegExp = /https?:\/\/|www\./i
 
 /** 解析上下文：来源卡的可信字段全部来自这里，不来自模型输出 */
 export interface ParseContext {
@@ -55,6 +52,17 @@ function countLines(text: string): number {
   return text.split(/\r?\n/).length
 }
 
+/**
+ * 非规则正文（rationale / quote / authorClaims.text）的守护：先查注入，再查链接。
+ * 数字不在拦截范围内——作者给的数字正是要保留在 quote / authorClaims 里的东西。
+ * `URL_RE` 没有 `g` 标志，`.test` 无状态，可安全重复调用。
+ */
+function untrustedTextReason(text: string): 'injection_suspected' | 'contains_url' | null {
+  if (looksLikeInjection(text)) return 'injection_suspected'
+  if (URL_RE.test(text)) return 'contains_url'
+  return null
+}
+
 /** 解析 authorClaims：缺省视为空数组；给了但不合法整条丢弃（不做部分保留） */
 function parseAuthorClaims(
   value: unknown,
@@ -78,7 +86,18 @@ function parseAuthorClaims(
 }
 
 /**
- * 解析单条规则：形状 → 规则句长度 → 引用长度 → 规则句守护 → rationale 守护。
+ * 逐条检查 authorClaims 的文本；返回第一条命中的原因，全部干净则 null。
+ */
+function claimsReason(claims: Array<{ text: string }>): 'injection_suspected' | 'contains_url' | null {
+  for (const claim of claims) {
+    const reason = untrustedTextReason(claim.text)
+    if (reason) return reason
+  }
+  return null
+}
+
+/**
+ * 解析单条规则：形状 → 规则句长度 → 引用长度 → 规则句守护 → rationale → quote → authorClaims。
  * 顺序固定，保证同一输入永远得到同一个原因；任何一步不过都只丢这一条。
  */
 function parseOneRule(rawRule: unknown, ctx: ParseContext): OneRuleOutcome {
@@ -109,8 +128,14 @@ function parseOneRule(rawRule: unknown, ctx: ParseContext): OneRuleOutcome {
   const verdict = guardRuleText(ruleText)
   if (!verdict.ok) return { ok: false, reason: verdict.reason }
 
-  if (looksLikeInjection(rationale)) return { ok: false, reason: 'injection_suspected' }
-  if (RATIONALE_URL_RE.test(rationale)) return { ok: false, reason: 'contains_url' }
+  const rationaleReason = untrustedTextReason(rationale)
+  if (rationaleReason) return { ok: false, reason: rationaleReason }
+
+  const quoteReason = untrustedTextReason(quote)
+  if (quoteReason) return { ok: false, reason: quoteReason }
+
+  const claimsReasonResult = claimsReason(claims.value)
+  if (claimsReasonResult) return { ok: false, reason: claimsReasonResult }
 
   return {
     ok: true,
