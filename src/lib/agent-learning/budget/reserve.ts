@@ -144,6 +144,29 @@ export function createRpcLedger(rpc: RpcFn): BudgetLedger {
   }
 }
 
+/** 调账本预留：账本实现抛异常也按「账本不可用」处理，绝不向上抛（fail-closed） */
+export async function safeReserve(
+  ledger: BudgetLedger,
+  reservationId: string,
+  purpose: BudgetPurpose,
+  items: BudgetItem[],
+): Promise<Result<ReserveOutcome>> {
+  try {
+    return await ledger.reserve(reservationId, purpose, items)
+  } catch {
+    return unavailable<ReserveOutcome>()
+  }
+}
+
+/** 调账本结算：抛异常按「账本不可用」返回，hold 保持占用 */
+export async function safeSettle(ledger: BudgetLedger, reservationId: string, actuals: SettleActual[]): Promise<Result<void>> {
+  try {
+    return await ledger.settle(reservationId, actuals)
+  } catch {
+    return unavailable<void>()
+  }
+}
+
 /**
  * 只在拿到 {ok:true, claimed:true} 时调用一次 run，然后按实际值结算。
  * - 账本报错：零外呼，budget_ledger_unavailable
@@ -157,7 +180,7 @@ export async function withReservation<T>(
   spec: { id: string; purpose: BudgetPurpose; items: BudgetItem[] },
   run: () => Promise<{ value: T; actuals: SettleActual[] }>,
 ): Promise<Result<T>> {
-  const reserved = await ledger.reserve(spec.id, spec.purpose, spec.items)
+  const reserved = await safeReserve(ledger, spec.id, spec.purpose, spec.items)
   if (!reserved.ok) return { ok: false, error: 'budget_ledger_unavailable', code: 'db_error' }
 
   const outcome = reserved.value
@@ -175,7 +198,7 @@ export async function withReservation<T>(
     return { ok: false, error: 'run_failed_hold_kept', code: 'db_error' }
   }
 
-  const settled = await ledger.settle(spec.id, out.actuals)
+  const settled = await safeSettle(ledger, spec.id, out.actuals)
   if (!settled.ok) return { ok: false, error: `settle_failed:${settled.error}`, code: 'db_error' }
 
   return { ok: true, value: out.value }
