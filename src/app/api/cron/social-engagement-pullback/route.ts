@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { syncPageMetrics, type PageMetricsSyncResult } from '@/lib/social/page-metrics-sync'
+import { countPageMetricFailures, syncPageMetrics, type PageMetricsSyncResult } from '@/lib/social/page-metrics-sync'
 import { TikTokAdapter } from '@/lib/flywheel/adapters/TikTokAdapter'
 import { startCronRun } from '@/lib/cron/run-logger'
 
@@ -44,11 +44,16 @@ export async function GET(request: NextRequest) {
       pageMetrics = { error: message }
     }
 
+    const pageFailed = countPageMetricFailures(pageMetrics)
+    const pageSynced = 'synced' in pageMetrics ? pageMetrics.synced : 0
+    const failed = tiktokResult.failed + pageFailed
+    const completed = tiktokResult.tiktok_synced + pageSynced
     await cronRun.finish({
-      processed: tiktokResult.clients_processed,
-      completed: tiktokResult.tiktok_synced,
-      failed: tiktokResult.failed,
-      summary: { tiktok: tiktokResult, page_metrics: pageMetrics },
+      processed: tiktokResult.clients_processed + ('clients' in pageMetrics ? pageMetrics.clients : 0),
+      completed,
+      failed,
+      summary: { tiktok: tiktokResult, page_metrics: pageMetrics, page_failed: pageFailed },
+      ...(failed > 0 ? { error: `${failed} item(s) failed (see summary)` } : {}),
     })
     return NextResponse.json({
       timestamp: new Date().toISOString(),
