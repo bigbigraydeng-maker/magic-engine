@@ -22,7 +22,9 @@ import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
 import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
+import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
+import { PrescriptionCard } from './_components/PrescriptionCard'
 import { adsRunningFrom, describeLiveAds } from '@/lib/marketing-plan/promo/live-ads-message'
 import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
@@ -50,6 +52,7 @@ export function PromoPlanClient() {
   const [options, setOptions] = useState<PromoOptions | null>(null)
   const [liveAds, setLiveAds] = useState<LiveAdsFact | null>(null)
   const [liveAdsVisible, setLiveAdsVisible] = useState(false)
+  const [prescription, setPrescription] = useState<GoalPrescriptionView | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -69,12 +72,21 @@ export function PromoPlanClient() {
 
   const loadBoard = useCallback(async (planId: string) => {
     const res = await fetch(`${base}/${planId}/promo`)
-    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; live_ads?: LiveAdsFact | null; live_ads_visible?: boolean; error?: string }
+    const json = await res.json() as {
+      success: boolean
+      board?: PromoBoard
+      options?: PromoOptions
+      live_ads?: LiveAdsFact | null
+      live_ads_visible?: boolean
+      prescription?: GoalPrescriptionView | null
+      error?: string
+    }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
     setOptions(json.options ?? null)
     setLiveAds(json.live_ads ?? null)
     setLiveAdsVisible(json.live_ads_visible === true)
+    setPrescription(json.prescription ?? null)
   }, [base])
 
   const refresh = useCallback(async (keepId?: string | null) => {
@@ -83,7 +95,8 @@ export function PromoPlanClient() {
       const list = await loadPlans()
       const id = keepId ?? pickDefault(list)?.id ?? null
       setSelectedId(id)
-      if (id) await loadBoard(id); else setBoard(null)
+      if (id) await loadBoard(id)
+      else { setBoard(null); setPrescription(null) }
     } catch (e) {
       setError((e as Error).message)
     } finally { setLoading(false) }
@@ -185,6 +198,7 @@ export function PromoPlanClient() {
         {board && selected && (
           <>
             <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
+            {prescription && <PrescriptionCard clientId={clientId} prescription={prescription} />}
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>

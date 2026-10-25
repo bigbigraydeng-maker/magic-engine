@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   access: vi.fn(),
   loadGoal: vi.fn(),
   loadPromoFacts: vi.fn(),
+  loadPrescription: vi.fn(),
   loadOptions: vi.fn(),
   liveAds: vi.fn(),
   dispatch: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access, 
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({ dispatchPlanTasks: m.dispatch, revokePlanTasks: vi.fn() }))
 vi.mock('@/lib/marketing-plan/promo/facts', async () => {
   const actual = await vi.importActual<typeof import('@/lib/marketing-plan/promo/facts')>('@/lib/marketing-plan/promo/facts')
-  return { ...actual, loadGoal: m.loadGoal, loadPromoFacts: m.loadPromoFacts }
+  return { ...actual, loadGoal: m.loadGoal, loadPromoFacts: m.loadPromoFacts, loadLatestGoalPrescription: m.loadPrescription }
 })
 vi.mock('@/lib/marketing-plan/promo/options', () => ({ loadPromoOptions: m.loadOptions }))
 vi.mock('@/lib/marketing-plan/promo/live-ads', () => ({ loadLiveAds: m.liveAds }))
@@ -70,6 +71,7 @@ beforeEach(() => {
   m.updates = []; m.updateFilters = []; m.casMiss = false
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.loadGoal.mockResolvedValue({ status: 'active' })
+  m.loadPrescription.mockResolvedValue(null)
   m.loadPromoFacts.mockResolvedValue(loadedFacts())
   m.loadOptions.mockResolvedValue({ goals: [{ id: 'g1', title: '目标一', period_start: '2026-11-01', period_end: '2026-12-31' }], accounts: [{ id: 'act_1', cap_cents: null }] })
   m.dispatch.mockResolvedValue({ marketing_plan_id: 'plan-1', tasks_created: 0, tasks_skipped: 0, task_ids: [], packages_created: 0, package_ids: [] })
@@ -216,6 +218,33 @@ describe('GET promo — 一页纸', () => {
     await GET(req(null, 'GET'), { params: P })
     expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
     expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: 'if_needed' })
+  })
+  it('计划挂了目标：返回该目标最新处方（含草稿），并按路径里的客户去读', async () => {
+    const prescription = { id: 'rx-1', goal_id: 'goal-1', status: 'draft', version: 1, line: '处方 v1 · 草稿 · 2 条人工动作' }
+    m.loadPrescription.mockResolvedValue(prescription)
+    m.plan = planWith(baseSpec())
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.prescription).toEqual(prescription)
+    expect(m.loadPrescription).toHaveBeenCalledWith('client-1', 'goal-1')
+  })
+  it('已批准的计划同样返回处方', async () => {
+    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.loadPrescription.mockResolvedValue({ id: 'rx-2', status: 'approved', version: 3 })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.prescription.version).toBe(3)
+    expect(m.loadPrescription).toHaveBeenCalledWith('client-1', 'goal-1')
+  })
+  it('没有推广结构：不读处方', async () => {
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(m.loadPrescription).not.toHaveBeenCalled()
+    expect(json.prescription).toBeNull()
+  })
+  it('处方读失败：整页仍 200，这一项是空，不当成一份空处方去展示', async () => {
+    m.plan = planWith(baseSpec())
+    m.loadPrescription.mockRejectedValue(new Error('db down'))
+    const res = await GET(req(null, 'GET'), { params: P })
+    expect(res.status).toBe(200)
+    expect((await res.json()).prescription).toBeNull()
   })
   it('计划不存在 → 404', async () => {
     m.plan = null

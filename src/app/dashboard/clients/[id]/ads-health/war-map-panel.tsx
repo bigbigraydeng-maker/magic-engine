@@ -356,6 +356,7 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
       </div>
 
       <Timeline view={view} />
+      {view.prescriptionLine ? <p className="mt-2 text-sm text-gray-700">{view.prescriptionLine}</p> : null}
 
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
         <BigCard title="① 观众池" light={view.pools.headline.light} big={pb.big} unit={pb.unit} sentence={view.pools.headline.sentence}>
