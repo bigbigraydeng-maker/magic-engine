@@ -1,7 +1,7 @@
 import type { Result } from '@/lib/agent-learning/contracts'
 
-/** 默认模型名；可用环境变量 DEEPSEEK_MODEL 覆盖 */
-export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-flash'
+/** 默认模型名：官方现名 deepseek-flash（2026-10-25 官方价格页）；旧名 deepseek-v4-flash 仍可用，可用环境变量 DEEPSEEK_MODEL 覆盖 */
+export const DEFAULT_DEEPSEEK_MODEL = 'deepseek-flash'
 
 /** 默认官方 API 地址；可用环境变量 DEEPSEEK_BASE_URL 覆盖（自动去掉结尾斜杠） */
 export const DEFAULT_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'

@@ -54,10 +54,10 @@ describe('createDeepSeekClient', () => {
     expect(fetchDouble).not.toHaveBeenCalled()
   })
 
-  it('2. uses the default model unless DEEPSEEK_MODEL overrides it', async () => {
+  it('2. uses the default model (deepseek-flash) unless DEEPSEEK_MODEL overrides it', async () => {
     const defaultFetch = vi.fn<FetchLike>(async () => okResponse({ choices: [{ message: { content: '{}' } }] }))
     const defaultClient = clientWith({ DEEPSEEK_API_KEY: KEY }, defaultFetch)
-    expect(DEFAULT_DEEPSEEK_MODEL).toBe('deepseek-v4-flash')
+    expect(DEFAULT_DEEPSEEK_MODEL).toBe('deepseek-flash')
     expect(defaultClient.model).toBe(DEFAULT_DEEPSEEK_MODEL)
 
     const defaultRes = await defaultClient.completeJson({
@@ -71,8 +71,8 @@ describe('createDeepSeekClient', () => {
     expect(parseJsonObject(defaultInit.body).model).toBe(DEFAULT_DEEPSEEK_MODEL)
 
     const overrideFetch = vi.fn<FetchLike>(async () => okResponse({ choices: [{ message: { content: '{}' } }] }))
-    const overrideClient = clientWith({ DEEPSEEK_API_KEY: KEY, DEEPSEEK_MODEL: 'deepseek-flash' }, overrideFetch)
-    expect(overrideClient.model).toBe('deepseek-flash')
+    const overrideClient = clientWith({ DEEPSEEK_API_KEY: KEY, DEEPSEEK_MODEL: 'deepseek-v4-flash' }, overrideFetch)
+    expect(overrideClient.model).toBe('deepseek-v4-flash')
 
     const overrideRes = await overrideClient.completeJson({
       system: SYSTEM,
@@ -82,7 +82,7 @@ describe('createDeepSeekClient', () => {
     })
     if (!overrideRes.ok) throw new Error('expected ok completion')
     const [, overrideInit] = readCall(overrideFetch.mock.calls)
-    expect(parseJsonObject(overrideInit.body).model).toBe('deepseek-flash')
+    expect(parseJsonObject(overrideInit.body).model).toBe('deepseek-v4-flash')
   })
 
   it('3. posts the expected JSON body and respects DEEPSEEK_BASE_URL', async () => {
@@ -135,7 +135,7 @@ describe('createDeepSeekClient', () => {
       okResponse({
         choices: [{ message: { content } }],
         usage: { prompt_tokens: 1000, completion_tokens: 200 },
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-flash',
       }),
     )
     const client = clientWith({ DEEPSEEK_API_KEY: KEY }, fetchDouble)

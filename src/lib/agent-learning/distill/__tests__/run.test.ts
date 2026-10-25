@@ -68,7 +68,7 @@ function okResponder(
 ): (req: CompleteJsonRequest) => Promise<Result<JsonCompletion>> {
   return async () => ({
     ok: true,
-    value: { text, inputTokens, outputTokens, model: 'deepseek-v4-flash' },
+    value: { text, inputTokens, outputTokens, model: 'deepseek-flash' },
   })
 }
 
