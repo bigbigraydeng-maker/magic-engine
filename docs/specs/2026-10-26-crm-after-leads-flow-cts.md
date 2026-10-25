@@ -61,7 +61,7 @@ meta-leads-sync ──► 联系人（含来源：广告编号/系列/表单名�
 | # | 范围 | 碰生产 | 风险 | 要 PM 合 |
 |---|---|---|---|---|
 | 1 | **本设计稿 + 根台账卡** | 否 | C | 否（纯文档） |
-| 2 | **跟进人字段 + 分配 UI + 看板**：`unified_contacts` 加 `assigned_to`、分配 UI、「我的待跟进」看板；digest 开关不动 | 加表字段 | A | 是 |
+| 2 | **跟进人分配**：复用现有 `conversations.owner_email`、round-robin 分配 + CTS 销售配置 + 分配 UI + 看板；digest 开关不动 | 无 schema 改动 | B | 否（机器自动合） |
 | 3 | **总表三件事**：补广告编号/系列/表单三列；查 10-09 后谁在往表里写；去掉 10-07 重复行 | 改表结构 + 补写回表 | A | 是 |
 | 4 | **测试线索端到端**：Meta 线索测试工具 → v6.1 → CRM → 总表 → CAPI 测试事件 → Mailchimp 只读核对 | 测试事件 + 测试数据 | B | 是（点"发测试线索") |
 | 5 | **CAPI「有效线索」+ Newsletter 核实**：新增 qualified 级回传；核实 Mailchimp 自动邮件挂了哪些 | CAPI 真回传 | A | 是 |
@@ -99,12 +99,19 @@ meta-leads-sync ──► 联系人（含来源：广告编号/系列/表单名�
 
 ---
 
-## 6. 待 PM 拍板的事（第二刀开工前要回答）
+## 6. PM 答复（2026-10-26）
 
-1. **CTS 销售是谁、几个人**：姓名 + 邮箱（后面要写进分配下拉）
-2. **分配规则**：轮流（round-robin）还是全部进"未分配"桶等人认领？
-3. **响应时间**：多少小时内没动当黄灯，多少小时当红灯？（我默认 24/72）
-4. **digest 收件人**：第二刀上线后，什么时候改成 CTS 销售、改成谁？
+1. **CTS 销售**：Baker 和 Lisa 两个。个人邮箱暂未提供，先用共享邮箱 `info@ctstours.co.nz` 占位，等 PM 给了个人邮箱再填进 `client_configurations`
+2. **分配规则**：轮流（round-robin）—— PM 原则「人尽量少干预」
+3. **响应阈值**：24h 黄 / 72h 红
+4. **digest 收件人**：第二刀把「收件人字段」做成读 `client_configurations.sales_assignees`，但 digest 开关仍默认 off。真打开留独立 PR + PM 本人同意
+
+## 7. 关键发现（10-26）
+
+`conversations.owner_email` 字段 2026-07-26 migration 已加（见 `supabase/migrations/20260726000004_unified_contacts.sql:144`，注释「两个 CTS 邮箱共用一个列表，没有这个会撞车」）。第二刀**不用加 schema**，风险从 A 降到 B：
+- 后端：在 `meta-leads-sync` 创建/更新 conversation 时按 round-robin 设置 `owner_email`
+- 配置：`client_configurations` 新增 CTS 的 `sales_assignees` 条目（JSON）
+- UI：CRM 联系人详情页 + 「我的待跟进」看板读 `owner_email`
 
 ---
 
