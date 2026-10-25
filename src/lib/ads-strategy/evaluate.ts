@@ -17,6 +17,8 @@ import {
   DEFAULT_BASELINE_CONFIG,
 } from './baseline'
 import { prescribe, Prescription } from './prescription'
+import { loadOutcomeConfig } from './portfolio/outcome-config'
+import { D3_COST_MULTIPLE } from './portfolio/diagnostics/thresholds'
 
 /** How many days of history to load for the baseline (needs ≥ 2 windows). */
 const HISTORY_DAYS = 30
@@ -113,11 +115,34 @@ function shiftDateStr(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** 冷启动绝对线倍数：跟 D3 同一把尺子（花费与单次成本都 ≥ 2× 客户目标）。 */
+const COLD_START_COST_MULTIPLE = D3_COST_MULTIPLE
+
+/**
+ * 历史不满 14 天（baseline 判 insufficient_history）时的绝对线判定：近 7 天花费 ≥ 2× 目标，
+ * 且 0 结果或单次成本 > 2× 目标 → alert。目标没配（null）不判——不拿行业默认值代替（红线 7）。
+ */
+export function coldStartAlert(
+  spend7d: number,
+  results7d: number,
+  targetCost: number | null,
+): { headline: string } | null {
+  if (targetCost === null || !(targetCost > 0)) return null
+  const line = COLD_START_COST_MULTIPLE * targetCost
+  if (spend7d < line) return null
+  const spend = Math.round(spend7d * 100) / 100
+  if (results7d <= 0) return { headline: `冷启动按目标成本判：近 7 天花了 ${spend}，0 个结果（目标单次 ${targetCost}）` }
+  const cpr = Math.round((spend7d / results7d) * 100) / 100
+  if (cpr <= line) return null
+  return { headline: `冷启动按目标成本判：单次结果 ${cpr}，超过目标 ${targetCost} 的 ${COLD_START_COST_MULTIPLE} 倍` }
+}
+
 function buildCampaignNarrative(
   rows: InsightRow[],
   insightDate: string,
   cfg: BaselineConfig,
   industry: string | null,
+  targetCost: number | null = null,
 ): CampaignNarrative {
   const sorted = [...rows].sort((a, b) => (a.insight_date < b.insight_date ? -1 : 1))
 
@@ -150,7 +175,13 @@ function buildCampaignNarrative(
   }
 
   const points = toDailyPoints(sorted)
-  const judged = judgeCampaign(points, cfg, industry)
+  const baselineJudged = judgeCampaign(points, cfg, industry)
+  const cold = baselineJudged.verdict === 'insufficient_history'
+    ? coldStartAlert(latestSpend7d, latestResults7d, targetCost)
+    : null
+  const judged: CampaignVerdict = cold
+    ? { ...baselineJudged, verdict: 'alert', headline: cold.headline }
+    : baselineJudged
   // frequency_7d is sparse (only the newest day carries it); take the latest
   // non-null — but only from inside the current window, never a stale value.
   const freq7d = [...last7].reverse().find(r => r.frequency_7d != null)?.frequency_7d ?? null
@@ -165,7 +196,8 @@ function buildCampaignNarrative(
     latest_spend_7d:   Math.round(latestSpend7d * 100) / 100,
     latest_results_7d: latestResults7d,
     frequency_7d:      freq7d,
-    prescription: prescribe({ verdict: judged.verdict, metrics: judged.metrics, frequency_7d: freq7d, industry }),
+    // 冷启动 alert 没有基线指标可开方，不套疲劳处方
+    prescription: cold ? null : prescribe({ verdict: judged.verdict, metrics: judged.metrics, frequency_7d: freq7d, industry }),
   }
 }
 
@@ -195,10 +227,11 @@ export function buildNarrativePayload(
   insightDate: string,
   cfg: BaselineConfig = DEFAULT_BASELINE_CONFIG,
   industry: string | null = null,
+  targetCost: number | null = null,
 ): NarrativePayload {
   const campaigns = Array.from(rowsByCampaign.values())
     .filter(rows => rows.length > 0)
-    .map(rows => buildCampaignNarrative(rows, insightDate, cfg, industry))
+    .map(rows => buildCampaignNarrative(rows, insightDate, cfg, industry, targetCost))
     // Worst first; paused sinks to the bottom (rank -1).
     .sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict])
 
@@ -256,7 +289,9 @@ export async function evaluateClientAdHealth(
     }
     const industry = (clientRow as { industry?: string | null } | null)?.industry ?? null
 
-    const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry)
+    // 读不到 / 没配目标 → null → 冷启动不判（loadOutcomeConfig 读失败返回空配置，不回落默认）
+    const targetCost = (await loadOutcomeConfig(clientId)).config.targetCostPerPrimary
+    const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry, targetCost)
 
     const { error: upsertError } = await supabaseAdmin
       .from('ad_health_narratives')
