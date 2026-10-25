@@ -12,20 +12,25 @@ name: PR risk gate
 # changed-file list, the body, the comments) handed to the script through env
 # vars, never interpolated into a `run:` block.
 #
-# `issue_comment` re-checks when Codex reviews. A clean review is an issue
-# comment (`codex-review-state:v1`, full commit sha), not a review object
-# (#3086, #3091). That event uses the default-branch workflow. A
+# Comment re-checks live in `pr-risk-gate-refresh.yml`, not here. An
+# `issue_comment` run is recorded on the default-branch SHA. Keeping that
+# trigger in this file would attach a skipped or failed "Risk gate" job to
+# main, and the workflow-level concurrency group would cancel the in-flight
+# head check before the job `if` could skip an irrelevant comment. A
 # review-submitted event would use the PR merge ref, so this file does not
 # listen for it. Comment text never enters a `run:` block.
 #
 # Two tiers. B or C arms auto-merge only after the trusted Codex login
 # (`codex-astra` in ME_SIGNOFF_TRUSTED_LOGINS) has reviewed the current head
 # and left no unresolved P0/P1. A new push whose head Codex has not reviewed
-# disables auto-merge instead of re-arming it. A passes only when two trusted
-# sign-offs exist for this exact base+head pair: Codex Astra (role
-# codex-astra) and Claude Code (role claude-code), each written by its own
-# trusted login. Otherwise the check goes red. The former three reviewer
-# roles are optional B-level spot checks and never block a B or C merge.
+# disables auto-merge instead of re-arming it. A arms auto-merge only when
+# Codex Astra and Claude Code have both signed off on this head (no
+# unresolved P0/P1), every required check except this one is green, and no
+# review conversation is still open. A push drops both sign-offs. Schema,
+# migration, Meta token/credential, and Meta campaign/budget/bid paths never
+# arm auto-merge: they get the label needs-ray-merge and stay for Ray. The
+# former three reviewer roles are optional B-level spot checks and never
+# block a B or C merge.
 #
 # It never merges directly, never pushes, never deploys. Its only writes are the
 # rating comment and the auto-merge toggle.
@@ -34,22 +39,13 @@ on:
   pull_request_target:
     # `edited`: the 当场试跑 check reads the PR body, so filling in that section
     # must re-run the gate without pushing a commit. Title / base edits re-run
-    # it too; the per-PR concurrency group below cancels the superseded run.
+    # it too; the per-PR job concurrency group below cancels the superseded run.
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
-  issue_comment:
-    # `edited` as well as `created`: Codex updates the state comment in place
-    # when a later review finishes. Only comments that look like a Codex review
-    # re-run the job; the script still ignores every author except the
-    # codex-astra login from the repo variable.
-    types: [created, edited]
 
 permissions:
   contents: write        # enable / disable auto-merge
   pull-requests: write   # post the rating comment; enable / disable auto-merge
-
-concurrency:
-  group: pr-risk-gate-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: true
+  issues: write          # create and apply the needs-ray-merge label
 
 jobs:
   risk-gate:
@@ -60,16 +56,19 @@ jobs:
     # reported at all until the PR is ready for review. Marking a PR ready, or
     # pushing to a PR that is already ready, still runs this gate.
     # converted_to_draft always runs so an in-flight auto-merge is turned off.
-    # A Codex comment on a draft still runs: decideMerge keeps drafts closed.
-    if: |
-      (github.event_name == 'pull_request_target' && (github.event.pull_request.draft == false || github.event.action == 'converted_to_draft')) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1')))
+    # Concurrency is on the job, not the workflow, and the group name includes
+    # the event. Comment re-checks use a different group, so a comment cannot
+    # cancel this run. A new push still cancels the previous one.
+    if: github.event.pull_request.draft == false || github.event.action == 'converted_to_draft'
+    concurrency:
+      group: pr-risk-gate-pull_request_target-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
     runs-on: ubuntu-slim
     timeout-minutes: 10
     steps:
       # Checked out from `main`, never the PR head: the script that rates the PR
       # must not be editable by the PR it rates. Credentials are not persisted
-      # because nothing here pushes. Same checkout for a comment event.
+      # because nothing here pushes.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
         with:
           ref: main
@@ -117,19 +116,31 @@ jobs:
           PR_DRAFT: ${{ steps.pr.outputs.draft }}
           PR_IS_FORK: ${{ steps.pr.outputs.fork }}
           SIGNOFF_TRUSTED_LOGINS: ${{ vars.ME_SIGNOFF_TRUSTED_LOGINS }}
+          GATE_EVENT_NAME: ${{ github.event_name }}
         run: node tools/ops-review-loop/src/check-risk-gate.mjs
 
-      - name: Enable auto-merge (B/C only, current head reviewed)
+      - name: Enable auto-merge when the gate says the current head is clear
         if: steps.gate.outputs.decision == 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
         run: |
           set -euo pipefail
-          gh pr merge --auto --merge "$PR_NUMBER"
+          live=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          decision=$(LIVE_HEAD="$live" node tools/ops-review-loop/src/head-check.mjs --plan-auto-merge)
+          if [ "$decision" = "skip" ]; then
+            echo '- 自动合并：未开启（这次审的提交已经不是 PR 当前提交）' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$decision" != "enable" ]; then
+            echo '- 自动合并：未开启（无法确认当前提交）' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
           echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Disable auto-merge (A / draft / fork / Codex has not reviewed this head)
+      - name: Disable auto-merge when the gate does not enable it
         if: always() && steps.gate.outputs.decision != 'enable'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -147,3 +158,29 @@ jobs:
             gh pr merge --disable-auto "$PR_NUMBER"
             echo '- 自动合并：已关闭' >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Label pulls Ray merges by hand
+        if: always() && steps.gate.outputs.ray_hold == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          gh label create needs-ray-merge --repo "$GITHUB_REPOSITORY" --color B60205 --description "Ray merges this pull request by hand" --force
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label needs-ray-merge
+          echo '- 留给 Ray 亲手合：已标 needs-ray-merge' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the Ray-merge label when this diff is not held
+        if: always() && steps.gate.outputs.ray_hold == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          names=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$names," in
+            *,needs-ray-merge,*)
+              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label needs-ray-merge
+              echo '- 留给 Ray 亲手合：标签已去掉' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac

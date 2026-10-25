@@ -16,7 +16,10 @@
  * 🔴 **Fail closed.** Any error while *evaluating* the gate is a failure, never
  * a pass: "we could not check" and "there was nothing wrong" must not look the
  * same. A missing required env var, an API error, or a head/base mismatch all
- * end in `decision=disable tier=blocked risk=A` and exit 1.
+ * end in `decision=disable tier=blocked risk=A`. On `pull_request_target` the
+ * process then exits 1, because that job *is* the required check. On any other
+ * event the same failure is written onto the PR head as a "Risk gate" check
+ * run and the process exits 0, so the default-branch job does not go red.
  *
  * 🔴 **Gate markers are read only from `GATE_MARKER_AUTHOR`.** A marker is a
  * verdict, and anyone who can comment on a PR can type one. The identity that
@@ -26,7 +29,9 @@
 
 import { appendFileSync } from 'node:fs'
 
-import { classifyRisk, readDeclaredRisk } from './risk.mjs'
+import { buildRiskGateCheckRun, gateJobExitCode, shouldPublishHeadCheck } from './head-check.mjs'
+import { assessRayMergeHold, classifyRisk, readDeclaredRisk } from './risk.mjs'
+import { requiredChecksAreGreen } from './required-checks.mjs'
 import {
   buildGateMarker,
   findGateFor,
@@ -34,7 +39,12 @@ import {
   selectTrustedGateMarkers,
   shouldPostGateComment,
 } from './gate-marker.mjs'
-import { evaluateCodexHeadReview, reviewSignoffState } from './signoff-marker.mjs'
+import {
+  evaluateClaudeHeadSignoff,
+  evaluateCodexHeadReview,
+  reviewConversationsResolved,
+  reviewSignoffState,
+} from './signoff-marker.mjs'
 import { decideMerge, summariseDecision } from './merge-decision.mjs'
 import { shouldRequestLegacySpotCheck } from './sampling.mjs'
 import { applyTrialRunToDecision, describeTrialRun, evaluateTrialRunSafely } from './quality.mjs'
@@ -58,6 +68,7 @@ const prAuthor = process.env.PR_AUTHOR
 const prDraft = process.env.PR_DRAFT
 const prIsFork = process.env.PR_IS_FORK
 const signoffTrustedLogins = process.env.SIGNOFF_TRUSTED_LOGINS ?? ''
+const eventName = process.env.GATE_EVENT_NAME ?? ''
 
 const SHA_RE = /^[0-9a-f]{40}$/i
 
@@ -117,15 +128,65 @@ function requiredEnv() {
 }
 
 /**
- * Fail closed: report the reason, write the blocking outputs, and exit 1.
+ * Link the head check back to this Actions run when the runner provides one.
+ *
+ * @returns {string|undefined}
+ */
+function riskGateDetailsUrl() {
+  const server = process.env.GITHUB_SERVER_URL
+  const runId = process.env.GITHUB_RUN_ID
+  if (!server || !repository || !runId) return undefined
+  return `${server}/${repository}/actions/runs/${runId}`
+}
+
+/**
+ * Write the verdict onto the PR head. No-op for events whose job is already
+ * that check. Throws if the publish was required and the API rejected it.
+ *
+ * @param {boolean} pass
+ * @param {string} summaryText
+ * @returns {Promise<boolean>} true when a check run was created
+ */
+async function publishRiskGateOnHead(pass, summaryText) {
+  if (!shouldPublishHeadCheck(eventName)) return false
+  const body = buildRiskGateCheckRun({
+    headSha,
+    pass,
+    summary: summaryText,
+    now: new Date().toISOString(),
+    detailsUrl: riskGateDetailsUrl(),
+  })
+  await api(`/repos/${repository}/check-runs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return true
+}
+
+/**
+ * Fail closed: report the reason, write the blocking outputs, and exit.
+ *
+ * A republish event records the failure on the PR head and then exits 0, so
+ * the default-branch job does not go red. If that record cannot be written,
+ * the process still exits 1.
  *
  * @param {string} message
- * @returns {never}
+ * @returns {Promise<never>}
  */
-function failClosed(message) {
-  summary(`## ❌ 合并闸：无法判定\n\n${message}\n\n按失败处理（读不到 ≠ 没问题）。`)
+async function failClosed(message) {
+  const text = `## ❌ 合并闸：无法判定\n\n${message}\n\n按失败处理（读不到 ≠ 没问题）。`
+  summary(text)
   writeOutputs({ risk: 'A', decision: 'disable', tier: 'blocked' })
-  process.exit(1)
+  let published = false
+  if (shouldPublishHeadCheck(eventName)) {
+    try {
+      published = await publishRiskGateOnHead(false, text)
+    } catch (err) {
+      summary(`没能把失败结果写到 PR 当前提交上：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  process.exit(gateJobExitCode({ eventName, pass: false, headCheckPublished: published }))
 }
 
 /**
@@ -229,6 +290,33 @@ const CODEX_THREADS_QUERY = `query($owner:String!,$name:String!,$number:Int!){
 }`
 
 /**
+ * @param {unknown} node
+ * @returns {{name: string, status: string, conclusion: string, completedAt?: string}|null}
+ */
+function mapRollupNode(node) {
+  if (!node || typeof node !== 'object') return null
+  const row = /** @type {{__typename?: unknown, name?: unknown, conclusion?: unknown, status?: unknown, completedAt?: unknown, context?: unknown, state?: unknown}} */ (
+    node
+  )
+  if (row.__typename === 'CheckRun' && typeof row.name === 'string') {
+    const mapped = {
+      name: row.name,
+      status: String(row.status || '').toLowerCase(),
+      conclusion: String(row.conclusion || '').toLowerCase(),
+    }
+    if (typeof row.completedAt === 'string' && row.completedAt !== '') mapped.completedAt = row.completedAt
+    return mapped
+  }
+  if (row.__typename === 'StatusContext' && typeof row.context === 'string') {
+    const state = String(row.state || '').toUpperCase()
+    if (state === 'SUCCESS') return { name: row.context, status: 'completed', conclusion: 'success' }
+    if (state === 'PENDING' || state === 'EXPECTED') return { name: row.context, status: 'queued', conclusion: '' }
+    return { name: row.context, status: 'completed', conclusion: 'failure' }
+  }
+  return null
+}
+
+/**
  * Reviews and threads. `isResolved` exists only on GraphQL. A failed or
  * truncated read is not a clean review.
  *
@@ -267,6 +355,140 @@ async function listCodexThreadsFromGraphql() {
     pull.reviewThreads?.pageInfo?.hasNextPage !== true &&
     commentsComplete
   return { reviews, threads, threadsReadable: complete }
+}
+
+const CHECK_ROLLUP_QUERY = `query($owner:String!,$name:String!,$number:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      statusCheckRollup{
+        contexts(first:100){
+          pageInfo{hasNextPage}
+          nodes{
+            __typename
+            ... on CheckRun{name conclusion status completedAt}
+            ... on StatusContext{context state}
+          }
+        }
+      }
+    }
+  }
+}`
+
+/**
+ * Required checks on the PR head. A failed or truncated read is not green.
+ * Kept separate from the review query so a checks-permission miss cannot
+ * hide a Codex review.
+ *
+ * @returns {Promise<{checks: object[], checksReadable: boolean}>}
+ */
+async function listCheckRollup() {
+  const [owner, name] = String(repository).split('/')
+  const payload = await api('/graphql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: CHECK_ROLLUP_QUERY,
+      variables: { owner, name, number: Number(pr) },
+    }),
+  })
+  const rollup = payload?.data?.repository?.pullRequest?.statusCheckRollup
+  const contexts = rollup?.contexts
+  if (payload?.errors || !contexts) return { checks: [], checksReadable: false }
+  const nodes = Array.isArray(contexts.nodes) ? contexts.nodes : []
+  return {
+    checks: nodes.map(mapRollupNode).filter((node) => node !== null),
+    checksReadable: contexts.pageInfo?.hasNextPage !== true,
+  }
+}
+
+/**
+ * Required check names from the active rules on main. Throws when the list
+ * cannot be read; the caller then treats the checks as not green.
+ *
+ * @returns {Promise<string[]>}
+ */
+async function listRequiredCheckNames() {
+  const rules = await api(`/repos/${repository}/rules/branches/main`)
+  if (!Array.isArray(rules)) throw new Error('主干必过检查名单读不到')
+  /** @type {string[]} */
+  const names = []
+  for (const rule of rules) {
+    const checks = rule?.parameters?.required_status_checks
+    if (!Array.isArray(checks)) continue
+    for (const check of checks) {
+      if (typeof check?.context === 'string' && check.context !== '') names.push(check.context)
+    }
+  }
+  return names
+}
+
+/**
+ * Required checks, failing closed without taking the review result with them.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function readRequiredChecks() {
+  try {
+    const [requiredNames, rollup] = await Promise.all([listRequiredCheckNames(), listCheckRollup()])
+    return requiredChecksAreGreen({
+      requiredNames,
+      checks: rollup.checks,
+      checksReadable: rollup.checksReadable,
+    })
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Codex review, Claude sign-off, required checks, and open threads.
+ *
+ * A review-query failure closes both sign-offs. A checks-list failure only
+ * leaves the required checks red, so a B/C review can still arm auto-merge.
+ *
+ * @param {{sources: unknown, markers: unknown, codexLogin: unknown, claudeLogin: unknown}} input
+ */
+async function readHeadVerdict({ sources, markers, codexLogin, claudeLogin }) {
+  let inputs
+  try {
+    inputs = await listCodexThreadsFromGraphql()
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    const unread = (who) => ({ clear: false, reviewed: false, blocking: 0, reason: `${who}审查读不到（${detail}）` })
+    return {
+      codexReview: unread('Codex '),
+      claudeSignoff: unread('Claude Code '),
+      requiredChecksGreen: false,
+      conversationsResolved: false,
+    }
+  }
+  const conversations = reviewConversationsResolved({
+    threads: inputs.threads,
+    threadsReadable: inputs.threadsReadable,
+  })
+  return {
+    codexReview: evaluateCodexHeadReview({
+      head: headSha,
+      trustedLogin: codexLogin,
+      prAuthor,
+      comments: sources,
+      reviews: inputs.reviews,
+      threads: inputs.threads,
+      threadsReadable: inputs.threadsReadable,
+    }),
+    claudeSignoff: evaluateClaudeHeadSignoff({
+      head: headSha,
+      trustedLogin: claudeLogin,
+      prAuthor,
+      comments: sources,
+      reviews: inputs.reviews,
+      markers,
+      threads: inputs.threads,
+      threadsReadable: inputs.threadsReadable,
+    }),
+    requiredChecksGreen: await readRequiredChecks(),
+    conversationsResolved: conversations.resolved === true,
+  }
 }
 
 /**
@@ -328,10 +550,25 @@ async function readHeadFiles(paths) {
 /**
  * Build the human summary text for the step summary and the posted comment.
  *
- * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any, spotSample: {reason: string}|null, spotChecks: {present: string[]}|null, trustReady: boolean}} input
+ * @param {{rating: any, decision: any, signoff: any, ignoredMarkers: number, filesError: string|null, trialRun: any, spotSample: {reason: string}|null, spotChecks: {present: string[]}|null, trustReady: boolean, codexReview: {reason?: string}, claudeSignoff: {reason?: string}, requiredChecksGreen: boolean, conversationsResolved: boolean, rayHold: {hold: boolean, reason: string}}} input
  * @returns {string}
  */
-function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesError, trialRun, spotSample, spotChecks, trustReady }) {
+function buildSummaryText({
+  rating,
+  decision,
+  signoff,
+  ignoredMarkers,
+  filesError,
+  trialRun,
+  spotSample,
+  spotChecks,
+  trustReady,
+  codexReview,
+  claudeSignoff,
+  requiredChecksGreen,
+  conversationsResolved,
+  rayHold,
+}) {
   const lines = [
     summariseDecision({
       risk: rating.risk,
@@ -341,11 +578,17 @@ function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesErro
     }),
   ]
   if (rating.risk === 'A') {
-    lines.push(`- 签字：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
-    lines.push('- 现阶段：两方签字自动写入尚未建成，A 级由 PM 决定是否以管理员身份合并')
+    lines.push(`- Codex：${codexReview?.reason ?? '读不到'}`)
+    lines.push(`- Claude Code：${claudeSignoff?.reason ?? '读不到'}`)
+    lines.push(requiredChecksGreen ? '- 必过检查：已全绿（不含本闸自己）' : '- 必过检查：还没全绿')
+    lines.push(conversationsResolved ? '- 审查对话：都已解决' : '- 审查对话：还有没解决的')
+    lines.push(`- 旧签字标记：已有 ${signoff.present.join('/') || '无'}，缺 ${signoff.missing.join('/') || '无'}`)
     if (!trustReady) {
       lines.push('- 可信身份还没按角色配好：仓库变量要写成 codex-astra=登录名,claude-code=另一个登录名')
     }
+  }
+  if (rayHold?.hold) {
+    lines.push(`- 留给 Ray 亲手合：${rayHold.reason}`)
   }
   if (rating.risk === 'B' && spotSample) {
     lines.push(`- 抽查：${spotSample.reason}`)
@@ -364,11 +607,11 @@ function buildSummaryText({ rating, decision, signoff, ignoredMarkers, filesErro
 
 for (const [name, value] of requiredEnv()) {
   if (typeof value !== 'string' || value === '') {
-    failClosed(`缺少必需的环境变量 ${name}`)
+    await failClosed(`缺少必需的环境变量 ${name}`)
   }
 }
 if (!SHA_RE.test(baseSha) || !SHA_RE.test(headSha)) {
-  failClosed('BASE_SHA / HEAD_SHA 不是 40 位十六进制 sha')
+  await failClosed('BASE_SHA / HEAD_SHA 不是 40 位十六进制 sha')
 }
 
 try {
@@ -420,40 +663,38 @@ try {
     today: new Date().toISOString().slice(0, 10),
     readFiles: readHeadFiles,
   })
-  let codexReview = { clear: false, reviewed: false, blocking: 0, reason: 'Codex 还没审过当前这次提交' }
-  if (rating.risk === 'B' || rating.risk === 'C') {
-    try {
-      const inputs = await listCodexThreadsFromGraphql()
-      codexReview = evaluateCodexHeadReview({
-        head: headSha,
-        trustedLogin: bound['codex-astra'],
-        prAuthor,
-        comments: sources,
-        reviews: inputs.reviews,
-        threads: inputs.threads,
-        threadsReadable: inputs.threadsReadable,
-      })
-    } catch (err) {
-      codexReview = {
-        clear: false,
-        reviewed: false,
-        blocking: 0,
-        reason: `Codex 审查读不到（${err instanceof Error ? err.message : String(err)}）`,
+  const sourcePaths = []
+  if (Array.isArray(files)) {
+    for (const entry of files) {
+      for (const key of ['filename', 'previous_filename']) {
+        const filename = entry && typeof entry[key] === 'string' ? entry[key] : ''
+        if (/\.(?:ts|tsx|js|mjs|cjs)$/i.test(filename)) sourcePaths.push(filename)
       }
     }
   }
+  const rayHold = assessRayMergeHold(files, sourcePaths.length > 0 ? await readHeadFiles(sourcePaths) : {})
+  const verdict = await readHeadVerdict({
+    sources,
+    markers: review.markers,
+    codexLogin: bound['codex-astra'],
+    claudeLogin: bound['claude-code'],
+  })
   const decision = applyTrialRunToDecision({
     decision: decideMerge({
       risk: rating.risk,
       draft: parseTriState(prDraft),
       fork: parseTriState(prIsFork),
       signoff,
-      codexReview,
+      codexReview: verdict.codexReview,
+      claudeSignoff: verdict.claudeSignoff,
+      requiredChecksGreen: verdict.requiredChecksGreen,
+      conversationsResolved: verdict.conversationsResolved,
+      rayHold: rayHold.hold,
     }),
     trialRun,
   })
 
-  const summaryText = buildSummaryText({
+  let summaryText = buildSummaryText({
     rating,
     decision,
     signoff,
@@ -463,13 +704,32 @@ try {
     spotSample,
     spotChecks: review.spotChecks,
     trustReady,
+    codexReview: verdict.codexReview,
+    claudeSignoff: verdict.claudeSignoff,
+    requiredChecksGreen: verdict.requiredChecksGreen,
+    conversationsResolved: verdict.conversationsResolved,
+    rayHold,
   })
+  if (shouldPublishHeadCheck(eventName)) {
+    summaryText += '\n- 检查结果写在 PR 当前这次提交上，不记在主干提交上'
+  }
   summary(summaryText)
 
   // Invariant: `enable` only when pass && tier === 'auto'. Every other path
   // writes `disable`, so a stale `enable` cannot survive a later evaluation.
   const outputDecision =
     decision.pass === true && decision.tier === 'auto' ? decision.decision : 'disable'
+
+  // Record the head check before the rating comment. A failed publish must not
+  // leave a comment that says the gate passed, and must not arm auto-merge.
+  let published = false
+  try {
+    published = await publishRiskGateOnHead(decision.pass === true, summaryText)
+  } catch (err) {
+    summary(`没能把合并闸结果写到 PR 当前提交上：${err instanceof Error ? err.message : String(err)}`)
+    writeOutputs({ risk: rating.risk, decision: 'disable', tier: 'blocked', ray_hold: rayHold.hold ? 'true' : 'false' })
+    process.exit(1)
+  }
 
   // Post the rating only when there is no current marker for this exact pair,
   // or the one on record disagrees with what we just computed. The decision is
@@ -487,9 +747,15 @@ try {
     await postIssueComment(`${summaryText}\n\n${marker}`)
   }
 
-  writeOutputs({ risk: rating.risk, decision: outputDecision, tier: decision.tier })
-
-  process.exit(decision.pass ? 0 : 1)
+  writeOutputs({
+    risk: rating.risk,
+    decision: outputDecision,
+    tier: decision.tier,
+    ray_hold: rayHold.hold ? 'true' : 'false',
+  })
+  process.exit(
+    gateJobExitCode({ eventName, pass: decision.pass === true, headCheckPublished: published }),
+  )
 } catch (err) {
-  failClosed(err instanceof Error ? err.message : String(err))
+  await failClosed(err instanceof Error ? err.message : String(err))
 }
