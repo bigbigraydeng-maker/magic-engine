@@ -49,17 +49,25 @@ function metaTokenFixHref(env: Record<string, string | undefined>): string {
   return businessId ? `${META_TOKEN_FIX_URL}?business_id=${businessId}` : META_TOKEN_FIX_URL
 }
 
+/**
+ * What to do when this client's own Meta key is dead.
+ * resolveMetaTokenDetailed uses a stored client key first, then that client's
+ * own domain key, then that client's own Page key, and only then the shared
+ * system-user key. A stored dead key is still chosen, so assigning assets does
+ * not clear this todo. Copy only — that order is not changed here.
+ */
 function clientTokenDeadHow(businessId: string | null): string {
   const idLine = businessId
     ? `填上 Magic Engine 的企业编号 ${businessId}`
     : '填上 Magic Engine 的企业编号（这个编号还没配进系统，请向 Ray 要，不要自己猜）'
   return (
     '这个客户的 Meta 专属钥匙已经作废。请不要用个人 Facebook 账号重新生成钥匙。个人钥匙会过期，那个人一改密码或离职，钥匙会再次作废。' +
-    '正确做法是让客户把广告账户和主页共享给 Magic Engine 企业，之后统一用 Magic Engine 的系统用户钥匙。这套做法还在做（跟进 #3092）。上线前请按下面办：' +
-    `① 如果这个客户的广告账户或主页还没共享过来，请客户打开自己的商务管理平台，进入「设置 → 用户 → 合作伙伴」（英文界面是 Business settings → Users → Partners），添加合作伙伴，${idLine}，再勾上要共享的广告账户和主页，以及对应权限。` +
-    '② 客户共享之后，还要由 Ray（或 ME 管理员）在 Magic Engine 的商务管理平台里，把这些广告账户和主页分配给名叫 MagicEngine 的系统用户。只共享、不分配的话，系统用户钥匙仍然读不到这个客户。这一步由 ME 管理员操作。请用这条待办上的链接打开系统用户页面，不要把这个链接发给客户。' +
-    '③ 在这套做法上线之前，这个客户的读广告和同步留资会继续失败。不要自己换钥匙，也不要把个人钥匙粘进后台。' +
-    '④ 如果急着恢复，请直接找 Ray。新钥匙就位后的第二天，这条待办会自己消失。'
+    '正确做法是让客户把广告账户和主页共享给 Magic Engine 企业，之后统一用 Magic Engine 的系统用户钥匙。这套做法还在做（跟进 #3092）。请按下面办：' +
+    `① 如果这个客户的广告账户或主页还没共享过来，请客户打开自己的商务管理平台，进入「设置 → 用户 → 合作伙伴」（英文界面是 Business settings → Users → Partners），添加合作伙伴，${idLine}。主页要勾「内容、消息、社群互动、广告、成效分析」；广告账户要勾「管理广告系列」和「查看成效」；这个客户有 Instagram 账号的，也一起共享。只勾「内容」和「广告」不够，私信和评论回复会用不了。` +
+    '② 客户共享之后，还要由 Ray（或 ME 管理员）在 Magic Engine 的商务管理平台里，把这些广告账户、主页和 Instagram 账号分配给名叫 MagicEngine 的系统用户，并勾上跟①一样的权限。只共享、不分配的话，系统用户钥匙仍然读不到这个客户。分到系统用户名下之后，原来那把系统用户钥匙就能直接读这些资产，不用再新生成一把钥匙。这一步由 ME 管理员操作。请用这条待办上的链接打开系统用户页面，不要把这个链接发给客户。' +
+    '要同步留资的话，请再看客户自己的商务管理平台：如果「集成 → 线索访问权限」（英文界面是 Integrations → Leads access）里限制过谁能拿线索，需要把 Magic Engine 加进去。否则共享和分配都做了，留资还是拿不到。' +
+    '③ 不要自己换钥匙，也不要把个人钥匙粘进后台。' +
+    '④ 这条待办是因为这个客户的专属钥匙作废了才出现。系统读这个客户的 Meta 时，后台数据库里只要还存着这个客户的专属钥匙，就先用它，不管它是不是已经作废；数据库里没有，才用这个客户按域名或主页单独配的钥匙（有域名那把就先用域名那把）；这两处都没有，才用 Magic Engine 的公共系统用户钥匙。死钥匙还在，就会一直排在公共钥匙前面被用到，待办也不会自己消失。分配完成后，由 Ray 决定把这条待办里点名的死钥匙清掉，或换成还能用的系统用户钥匙。清掉或换成活钥匙之后，第二天这条待办才会消失。按客户名字另存的旧钥匙不在上面这套主顺序里；如果这条待办点名的是那把旧钥匙，它同样不会自己变好，也要 Ray 清掉或换掉。如果急着恢复，请直接找 Ray。'
   )
 }
 
