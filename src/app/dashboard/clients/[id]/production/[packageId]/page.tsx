@@ -655,7 +655,7 @@ export default function ProductionPackageDetailPage() {
   const quickLinks = [
     { label: '客户概览', href: `/dashboard/clients/${clientId}` },
     { label: 'Execution', href: `/dashboard/clients/${clientId}/execution` },
-    { label: 'Launch Hub', href: `/dashboard/content?client=${clientId}${firstContentPost ? `&highlight=${firstContentPost}` : ''}` },
+    { label: '内容日历', href: `/dashboard/content?client=${clientId}${firstContentPost ? `&highlight=${firstContentPost}` : ''}` },
   ]
 
   const canApprove = ['ready_for_review', 'revision_requested', 'draft'].includes(pkgStatus)

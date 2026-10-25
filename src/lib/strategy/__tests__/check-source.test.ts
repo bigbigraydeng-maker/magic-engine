@@ -214,6 +214,7 @@ describe('describeCheckSource', () => {
     expect(evidence.outcome_level).not.toBe(CHECK_OUTCOME_LEVEL_CONTACT_SUCCESS)
     expect(evidence.outcome_level).not.toBe(CHECK_OUTCOME_LEVEL_QUALIFIED_LEAD)
     expect(evidence.caveats.join(' ')).toContain('不区分联系成功和合格线索')
+    expect(evidence.caveats.join(' ')).toContain('有起止日期时先数广告留资')
     expect(evidence.caveats.join(' ')).toContain('销售目标的进度不能用这个数代替成交')
     assertNoProgressNumber(evidence)
   })

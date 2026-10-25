@@ -80,6 +80,8 @@ export interface Diagnosis {
   notComparableReason?: NotComparableReason
   /** §14 C6：D1、D3 未来可给客户看（须带处理状态）；D7、D8 永不进客户版。阶段 1 只发内部。 */
   clientVisible: boolean
+  /** 自动暂停消费端只处理 !== false 的 D3 命中；false = 只提醒（类似人群 / 流量组）。缺省 = 原行为。 */
+  autoPauseEligible?: boolean
   manualTask?: ManualTask
   /**
    * 给人的回头检查约定（D2/D10）：什么时候回来看、看什么、不成就退回什么。
