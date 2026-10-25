@@ -14,6 +14,7 @@ import type { PromoBoard } from '@/lib/marketing-plan/promo/board'
 import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
 import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
 import { ScheduleTable } from './_components/ScheduleTable'
@@ -22,25 +23,17 @@ import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
 import { DEFAULT_PROMO_PLAYBOOK } from '@/lib/marketing-plan/promo/playbooks'
 import { ReconcileTable } from './_components/ReconcileTable'
 import { GateList } from './_components/GateList'
+import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
+import { PrescriptionCard } from './_components/PrescriptionCard'
 import { adsRunningFrom, describeLiveAds } from '@/lib/marketing-plan/promo/live-ads-message'
 import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
+import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
 /** 计划内容变了（含从「高级」保存）就换 key，让表格和文本编辑器都重新读最新内容。 */
 const planKey = (p: MarketingPlan) => `${p.id}:${JSON.stringify((p.plan_data as unknown as { promo?: unknown })?.promo ?? null)}`
-
-const hasPromo = (p: MarketingPlan) => !!(p.plan_data as unknown as { promo?: unknown })?.promo
-
-/** 默认看哪份：有推广结构的已批准计划 > 有推广结构的草稿 > 任意草稿。 */
-function pickDefault(plans: MarketingPlan[]): MarketingPlan | null {
-  const live = plans.filter(p => p.status !== 'archived')
-  return live.find(p => p.status === 'approved' && hasPromo(p))
-    ?? live.find(p => p.status === 'draft' && hasPromo(p))
-    ?? live.find(p => p.status === 'draft')
-    ?? null
-}
 
 export function PromoPlanClient() {
   const clientId = useParams().id as string
@@ -50,6 +43,7 @@ export function PromoPlanClient() {
   const [options, setOptions] = useState<PromoOptions | null>(null)
   const [liveAds, setLiveAds] = useState<LiveAdsFact | null>(null)
   const [liveAdsVisible, setLiveAdsVisible] = useState(false)
+  const [prescription, setPrescription] = useState<GoalPrescriptionView | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
@@ -61,29 +55,45 @@ export function PromoPlanClient() {
 
   const loadPlans = useCallback(async () => {
     const res = await fetch(base)
-    const json = await res.json() as { success: boolean; plans?: MarketingPlan[]; error?: string }
+    const json = await res.json() as {
+      success: boolean
+      plans?: MarketingPlan[]
+      prescription?: GoalPrescriptionView | null
+      error?: string
+    }
     if (!json.success) throw new Error(json.error ?? '读取计划失败')
-    setPlans(json.plans ?? [])
-    return json.plans ?? []
+    const plans = json.plans ?? []
+    setPlans(plans)
+    return { plans, prescription: json.prescription ?? null }
   }, [base])
 
   const loadBoard = useCallback(async (planId: string) => {
     const res = await fetch(`${base}/${planId}/promo`)
-    const json = await res.json() as { success: boolean; board?: PromoBoard; options?: PromoOptions; live_ads?: LiveAdsFact | null; live_ads_visible?: boolean; error?: string }
+    const json = await res.json() as {
+      success: boolean
+      board?: PromoBoard
+      options?: PromoOptions
+      live_ads?: LiveAdsFact | null
+      live_ads_visible?: boolean
+      prescription?: GoalPrescriptionView | null
+      error?: string
+    }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
     setOptions(json.options ?? null)
     setLiveAds(json.live_ads ?? null)
     setLiveAdsVisible(json.live_ads_visible === true)
+    setPrescription(json.prescription ?? null)
   }, [base])
 
   const refresh = useCallback(async (keepId?: string | null) => {
     setLoading(true); setError(null)
     try {
-      const list = await loadPlans()
-      const id = keepId ?? pickDefault(list)?.id ?? null
+      const loaded = await loadPlans()
+      const id = keepId ?? pickPlanForPrescription(loaded.plans, loaded.prescription?.goal_id ?? null)?.id ?? null
       setSelectedId(id)
-      if (id) await loadBoard(id); else setBoard(null)
+      if (id) await loadBoard(id)
+      else { setBoard(null); setPrescription(loaded.prescription) }
     } catch (e) {
       setError((e as Error).message)
     } finally { setLoading(false) }
@@ -156,6 +166,7 @@ export function PromoPlanClient() {
           <Link href={`/dashboard/clients/${clientId}/marketing-plan`} className="ml-auto text-xs text-indigo-600 hover:underline">
             去 Marketing Plan 看任务 →
           </Link>
+          <BlankDraftPlanButton clientId={clientId} onCreated={id => { void refresh(id) }} />
         </div>
 
         {plans.length > 1 && (
@@ -175,10 +186,12 @@ export function PromoPlanClient() {
         {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">读取失败：{error}。这不代表“没有计划”，请稍后重试。</p>}
         {message && <p className="text-sm bg-white border border-gray-200 rounded-lg p-3">{message}</p>}
 
+        {!loading && !error && prescription && <PrescriptionCard clientId={clientId} prescription={prescription} />}
+
         {!loading && !error && !selected && (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-center">
             <p className="text-sm text-gray-700">这个客户还没有可用的计划。</p>
-            <p className="text-xs text-gray-500 mt-1">先到 Marketing Plan 页面生成一份草稿，再回来补上推广计划的阶段。</p>
+            <p className="text-xs text-gray-500 mt-1">用上面的「新建空白草稿计划」选一个目标。不会自动写内容，也不会改动已有计划。</p>
           </div>
         )}
 

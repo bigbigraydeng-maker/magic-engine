@@ -1,20 +1,20 @@
 /**
- * 处方「落地」—— 把一份方案变成执行看板上的动作。
+ * 处方「落地」—— 把一份方案挂到目标下的阶段，并标成已批准。
  *
  * 这段逻辑原本只长在 PATCH /api/clients/[id]/prescription/[pId] 里（人工点批准）。
- * 现在周更也要落地处方（PM 2026-08-04 拍板：方案自动落地，只在待办里通知一声），
- * 所以抽出来给两边共用 —— 复制一份等于以后修 bug 要修两处，必漏一处。
+ * 周更（auto-prescribe.ts）也走这里，所以两边共用同一段，避免修一处漏一处。
  *
- * 顺序是有讲究的，别改：
- *   派生 Initiative → 生成执行项 → 归档上一版（含它没人动过的动作）→ 最后才标 approved
- * 执行项生成失败时处方保持 draft —— 宁可"没批准"，也不能"已批准但看板上没动作"，
- * 后者从界面上完全看不出来，等于把问题藏起来。
+ * 顺序别改：
+ *   派生 Initiative（目标下的阶段）→ 归档上一版（含它没人动过的旧看板动作）→ 最后才标 approved
+ *
+ * 2026-10-25：批准不再调用 generateExecutionItems，不往 execution_items 插行。
+ * 看板生成失败因此也不会再挡住批准。阶段挂不上仍然不挡住批准。
+ * 标记已批准失败仍然 throw，处方保持未批准。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Prescription } from '@/types/diagnostic'
 import { deriveInitiativesFromPrescription } from './initiative-derive'
-import { generateExecutionItems } from './execution-generator'
 import { buildPrescriptionDecisionPatch } from './prescription-patch'
 
 /** 落地一份处方需要的最小字段集 —— 调用方自己 select 这几列即可。 */
@@ -127,9 +127,12 @@ async function supersedeUntouchedItems(
 }
 
 export interface LandPrescriptionResult {
-  /** 派生出的 Initiative 数。**0 表示这批动作没挂到任何目标下** —— 调用方要照实说 */
+  /** 派生出的 Initiative 数。**0 表示阶段没挂到任何目标下** —— 调用方要照实说 */
   initiativesInserted: number
-  /** 生成的执行项数 —— 这是「方案有没有真的变成活儿」的唯一硬指标 */
+  /**
+   * 本轮新插入的看板待办数。批准不再生成待办，所以恒为 0。
+   * 字段留着：周更回执和批准日志还在读它，删掉会对不上。
+   */
   executionItems: number
   /** 归档上一版时顺带作废的旧动作数 */
   supersededItems: number
@@ -172,13 +175,11 @@ export async function landPrescription(
   const notes: string[] = []
   let initiativesInserted = 0
   let supersededItems = 0
-  let initiativeIdsByPhase: Record<number, string> = {}
 
   // Initiative 派生失败**不阻塞**落地 —— 沿用原路由的既定行为：
-  // 派生只是把方案的阶段挂到目标下，挂不上不代表动作做不了。
+  // 派生只是把方案的阶段挂到目标下，挂不上不代表这份方案不能标成已批准。
   try {
     const r = await deriveInitiativesFromPrescription(supabase, prescription)
-    initiativeIdsByPhase = r.initiativeIdsByPhase
     initiativesInserted = r.inserted
     notes.push(`派生 Initiative ${r.inserted} 个（跳过 ${r.skipped} 个）`)
     notes.push(...r.notes)
@@ -187,11 +188,9 @@ export async function landPrescription(
     notes.push(`Initiative 派生失败（不阻塞）：${e instanceof Error ? e.message : String(e)}`)
   }
 
-  // 执行项生成失败**必须**阻塞 —— 没有执行项的"已批准处方"是幽灵
-  const items = await generateExecutionItems(supabase, prescription.id, prescription.client_id, {
-    initiativeIdsByPhase,
-  })
-  notes.push(`生成执行项 ${items.length} 条`)
+  // 不再生成看板上的待办。以前这里调用 generateExecutionItems，
+  // 插入失败会让整次批准失败、处方停在草稿。那条失败路径已去掉。
+  notes.push('不往看板上生成待办')
 
   // 归档上一版。不做的话看板会一周一层往上堆，且新旧动作长得一模一样、分不出哪条还算数。
   if (prescription.supersedes_id) {
@@ -232,5 +231,5 @@ export async function landPrescription(
 
   if (approvedBy) notes.push(`批准人：${approvedBy}`)
 
-  return { initiativesInserted, executionItems: items.length, supersededItems, notes }
+  return { initiativesInserted, executionItems: 0, supersededItems, notes }
 }

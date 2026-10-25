@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { headers } from 'next/headers'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import DashboardShell from './dashboard-shell'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -40,6 +41,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       allowedClientId={allowedClientId}
       clientIndustry={clientIndustry}
       roleLabel={roleLabel}
+      exactGlobalAdmin={userRole === 'admin' && !allowedClientId && isGlobalAdminEmail(user.email ?? '')}
     >
       {children}
     </DashboardShell>

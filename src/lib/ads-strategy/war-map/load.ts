@@ -14,6 +14,7 @@ import { fetchAll } from '@/lib/supabase-paginate'
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
 import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 import { loadAccountStatusRows, latestPerAccount } from '@/lib/ads-strategy/account-status'
+import { loadLatestGoalPrescription } from '@/lib/marketing-plan/promo/goal-prescription'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { unusableAccountNote } from './pools'
 import { nzDay } from './util'
@@ -342,11 +343,17 @@ async function loadPlan(clientId: string): Promise<PlanInput | null> {
   for (const row of (data ?? []) as Array<{ plan_data: unknown; status: string; updated_at: string | null }>) {
     const spec = readPromoSpec(row.plan_data)
     if (!spec) continue
+    const [goalTitle, prescription] = await Promise.all([
+      loadGoalTitle(clientId, spec.goal_id),
+      // 处方读失败只空掉这一行，不让整张作战地图一起失败
+      loadLatestGoalPrescription(clientId, spec.goal_id).catch(() => null),
+    ])
     return {
       status: row.status === 'approved' ? 'approved' : 'draft',
       phases: spec.phases.map(p => ({ name: p.name, startDate: p.start_date, endDate: p.end_date })),
-      goalTitle: await loadGoalTitle(clientId, spec.goal_id),
+      goalTitle,
       recordUpdatedDay: row.updated_at ? nzDay(row.updated_at) : null,
+      prescriptionLine: prescription?.line ?? null,
     }
   }
   return null

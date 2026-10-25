@@ -101,10 +101,14 @@ function CapField({
   draftCap,
   currentCap,
   onChange,
+  onSave,
+  saving,
 }: {
   draftCap: string
   currentCap: number | null
   onChange: (v: string) => void
+  onSave: () => void
+  saving: boolean
 }) {
   return (
     <div>
@@ -119,6 +123,15 @@ function CapField({
           placeholder="未设"
           className="w-40 rounded-lg border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
         />
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onSave}
+          data-testid="save-total-cap"
+          className="rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+        >
+          {saving ? '保存中…' : '保存上限'}
+        </button>
         <span className="text-xs text-gray-400">$ / 天（按广告账户的币种）</span>
       </div>
       <p className="mt-1 text-xs text-gray-400">广告自动化每天最多花这么多钱。留空 = 没设上限，这时系统只看不动钱。</p>
@@ -539,6 +552,37 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
   const existingRefs = new Set(config.creative_pool.map(e => e.ref))
   const freshRefs = [...new Set(newRefs)].filter(r => !existingRefs.has(r))
 
+  // 单独保存客户总闸：和账户级保存按钮体验一致，用户改完数字可以直接存，不用滚到最底部。
+  // 只 PATCH daily_budget_cap_cents，不动模式、不动素材池；expected_version 也不带（这个字段只在素材池并发时才有意义）。
+  const saveTotalCap = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const parsedCap = displayToCents(draftCap)
+      if (parsedCap !== null && (!Number.isInteger(parsedCap) || parsedCap <= 0)) {
+        setMessage('每天上限要填大于 0 的金额')
+        return
+      }
+      if (parsedCap === config.daily_budget_cap_cents) {
+        setMessage('没有改动')
+        return
+      }
+      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daily_budget_cap_cents: parsedCap }),
+      })
+      const json = (await res.json()) as ConfigResponse
+      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
+      applyConfig(json.config, json.version)
+      setMessage('已保存')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const save = async () => {
     setSaving(true)
     setMessage(null)
@@ -631,7 +675,13 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
           </Link>
         </div>
 
-        <CapField draftCap={draftCap} currentCap={config.daily_budget_cap_cents} onChange={setDraftCap} />
+        <CapField
+          draftCap={draftCap}
+          currentCap={config.daily_budget_cap_cents}
+          onChange={setDraftCap}
+          onSave={saveTotalCap}
+          saving={saving}
+        />
 
         <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
 

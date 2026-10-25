@@ -229,6 +229,10 @@ export async function mirrorFormThread(args: {
       email: m.formLead.email,
       message: formLeadRaw(m.formLead),
       sourceUrl: m.formLead.formUrl,
+      utmSource: m.formLead.utm?.source,
+      utmMedium: m.formLead.utm?.medium,
+      utmCampaign: m.formLead.utm?.campaign,
+      utmContent: m.formLead.utm?.content,
       submittedAt: m.receivedAt,
       metadata: formLeadMetadata(m.formLead),
     })

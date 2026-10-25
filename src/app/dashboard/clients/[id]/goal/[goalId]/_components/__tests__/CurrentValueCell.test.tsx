@@ -127,6 +127,31 @@ describe('CurrentValueCell', () => {
     expect(screen.getByText(/FDE 补录其他渠道/)).toBeInTheDocument()
   })
 
+  it('shows Meta leads as the source when the fetch used the dated window', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        value: 4,
+        source: 'auto.meta_leads',
+        snapshot_date: '2026-10-25',
+        label: '4 Meta leads (25 Oct → 25 Oct)',
+      }),
+    } as Response)
+
+    render(<CurrentValueCell goal={makeGoal({
+      primary_metric_key: 'leads_count',
+      period_start: '2026-10-25',
+      period_end: '2026-11-30',
+    })} />)
+
+    await waitFor(() => {
+      expect(screen.getByText('4')).toBeInTheDocument()
+    })
+    expect(screen.getByText(/Meta 线索/)).toBeInTheDocument()
+    expect(screen.getByTitle('4 Meta leads (25 Oct → 25 Oct)')).toBeInTheDocument()
+  })
+
   it('shows "未识别指标" for catalog-miss keys (defensive)', async () => {
     const fetchMock = vi.spyOn(global, 'fetch')
 

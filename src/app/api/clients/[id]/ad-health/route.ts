@@ -28,6 +28,10 @@ import {
   toClientGrowthView,
   type GrowthRowForClient,
 } from '@/lib/ads-strategy/agents/growth-client-view'
+import {
+  toClientNarrativeView,
+  type NarrativeRowForClient,
+} from '@/lib/ads-strategy/narrative-client-view'
 import { overlayLiveGoal } from '@/lib/ads-strategy/agents/growth-live-goal'
 
 export const dynamic = 'force-dynamic'
@@ -83,7 +87,8 @@ export async function GET(
   }
 
   if (latestRes.error) {
-    return NextResponse.json({ error: latestRes.error.message }, { status: 500 })
+    console.warn('[api/ad-health] 读体检失败', { clientId, error: latestRes.error.message })
+    return NextResponse.json({ error: '体检读取失败，请稍后再试' }, { status: 500 })
   }
 
   if (growthRes.error) {
@@ -101,7 +106,10 @@ export async function GET(
 
   return NextResponse.json({
     success: true,
-    latest: latestRes.data ?? null,
+    // Non-staff get a whitelisted payload: portfolio_diagnoses (D11 etc.) stays internal.
+    latest: fullView
+      ? (latestRes.data ?? null)
+      : toClientNarrativeView((latestRes.data ?? null) as NarrativeRowForClient | null),
     // Oldest → newest for the trend strip.
     history: (historyRes.data ?? []).slice().reverse(),
     industry: (clientRes.data as { industry?: string | null } | null)?.industry ?? null,

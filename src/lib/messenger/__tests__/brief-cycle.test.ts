@@ -30,17 +30,41 @@ interface Row {
 
 let rows: Row[] = []
 let readError: string | null = null
+/** 开了「邮件也写简报」的客户。空数组 = 一个都没开（线上默认）。 */
+let emailBriefClients: string[] = []
+/** 让「读哪些客户开了开关」这条查询报错，验 fail-closed。 */
+let clientsReadError = false
 /** 查询链上真正被用到的筛选条件 —— 少一个就说明那道闸没接上。 */
-let seen: { eqs: [string, unknown][]; gts: [string, unknown][]; limit: number | null }
+interface Filters {
+  eqs: [string, unknown][]
+  gts: [string, unknown][]
+  ins: [string, readonly unknown[]][]
+  limit: number | null
+}
+/** 这一轮里发出去的每一条 conversations 查询各自用了哪些筛选条件。 */
+let queries: Filters[] = []
+/** 所有查询的条件并起来 —— 断言「某道闸接上了」用它。 */
+const allEqs = (): [string, unknown][] => queries.flatMap((q) => q.eqs)
+/** 读「哪些客户开了邮件简报」时真正用上的筛选条件。 */
+let seenClientFilter: [string, string, unknown] | null = null
 
+/**
+ * 🔴 每次 `from()` 各记一份筛选条件，**不能共用一份全局的**。
+ *    私信和邮件两条候选查询是并发发出的（`Promise.all`），共用一份的话，
+ *    一条查询的 `channel=email` 会被套到另一条上，两条都筛成空 ——
+ *    那是假件自己的毛病，却长得像产品代码的 bug（第一版就这样骗了我一次）。
+ */
 function builder() {
+  const mine: Filters = { eqs: [], gts: [], ins: [], limit: null }
   const api = {
     select: () => api,
-    gt: (col: string, v: unknown) => { seen.gts.push([col, v]); return api },
-    eq: (col: string, v: unknown) => { seen.eqs.push([col, v]); return api },
+    gt: (col: string, v: unknown) => { mine.gts.push([col, v]); return api },
+    eq: (col: string, v: unknown) => { mine.eqs.push([col, v]); return api },
+    in: (col: string, v: readonly unknown[]) => { mine.ins.push([col, v]); return api },
     order: () => api,
     limit: (n: number) => {
-      seen.limit = n
+      mine.limit = n
+      queries.push(mine)
       return Promise.resolve(
         readError
           ? { data: null, error: { message: readError } }
@@ -48,8 +72,9 @@ function builder() {
               // 照着真实查询把筛选条件也应用一遍：假件不能比真库宽松，
               // 否则「删掉 channel 筛选」这种变异在假件上看不出区别。
               data: rows
-                .filter((r) => seen.gts.every(([c, v]) => (r as never as Record<string, number>)[c] > (v as number)))
-                .filter((r) => seen.eqs.every(([c, v]) => (r as never as Record<string, unknown>)[c] === v))
+                .filter((r) => mine.gts.every(([c, v]) => (r as never as Record<string, number>)[c] > (v as number)))
+                .filter((r) => mine.eqs.every(([c, v]) => (r as never as Record<string, unknown>)[c] === v))
+                .filter((r) => mine.ins.every(([c, v]) => v.includes((r as never as Record<string, unknown>)[c])))
                 .slice(0, n),
               error: null,
             },
@@ -59,7 +84,29 @@ function builder() {
   return api
 }
 
-vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: () => builder() } }))
+/**
+ * `clients` 表的假件：只需要支撑 `.select('id').filter(...)` 这一条链。
+ * 必须跟真查询一样「按开关筛」，否则「忘了筛开关」这种变异在假件上看不出来。
+ */
+function clientsBuilder() {
+  const result = Promise.resolve(
+    clientsReadError
+      ? { data: null, error: { message: 'clients read failed' } }
+      : { data: emailBriefClients.map((id) => ({ id })), error: null },
+  )
+  const api = {
+    select: () => api,
+    filter: (col: string, op: string, v: unknown) => {
+      seenClientFilter = [col, op, v]
+      return result
+    },
+  }
+  return api
+}
+
+vi.mock('@/lib/supabase', () => ({
+  supabaseAdmin: { from: (table: string) => (table === 'clients' ? clientsBuilder() : builder()) },
+}))
 
 import { loadDueBriefs, chunkDueBriefs, MAX_BRIEFS_PER_RUN, BRIEFS_PER_CHUNK } from '../brief-cycle'
 
@@ -84,7 +131,10 @@ function row(id: string, over: Partial<Row> = {}): Row {
 beforeEach(() => {
   rows = []
   readError = null
-  seen = { eqs: [], gts: [], limit: null }
+  emailBriefClients = []
+  clientsReadError = false
+  queries = []
+  seenClientFilter = null
 })
 
 describe('读失败不许被写成「今天没人要写卡」', () => {
@@ -101,19 +151,50 @@ describe('读失败不许被写成「今天没人要写卡」', () => {
   })
 })
 
-describe('只认私信渠道', () => {
-  it('🔴 邮件对话不许被挑进来 —— 会写出一张说错渠道的卡', async () => {
-    // 仓里有前例：conversations 是四渠道共用表，私信那几条读写路径一条都没筛 channel，
-    // 邮件一落库就出现在明确写着「私信」的页面上，还配一个走 Meta 的回复框。
+describe('渠道：私信一律写，邮件只给开了开关的客户写', () => {
+  // 原来这一组叫「只认私信渠道」，理由是「邮件会写出一张说错渠道的卡」。
+  // 提示词现在认渠道了，所以邮件可以写 —— 但**必须按客户开关**，而且
+  // 没开的客户一段邮件都不许被挑进来（否则等于替客户决定花钱调模型）。
+
+  it('🔴 没有任何客户开开关 → 邮件对话一段都不许被挑进来', async () => {
     rows = [row('mail-1', { channel: 'email' }), row('dm-1')]
     const due = await loadDueBriefs(NOW)
     expect(due.map((d) => d.conversationId)).toEqual(['dm-1'])
   })
 
-  it('渠道筛选真的挂在查询上（不是靠假件恰好没有邮件数据才绿）', async () => {
+  it('🔴 没有任何客户开开关 → 连那条邮件查询都不该发（行为跟加这功能之前逐字相同）', async () => {
     rows = [row('dm-1')]
     await loadDueBriefs(NOW)
-    expect(seen.eqs).toContainEqual(['channel', 'messenger'])
+    expect(allEqs()).toContainEqual(['channel', 'messenger'])
+    expect(allEqs()).not.toContainEqual(['channel', 'email'])
+  })
+
+  it('开了开关 → 邮件对话被挑进来，而且 channel 字段标对', async () => {
+    emailBriefClients = [CLIENT]
+    rows = [row('mail-1', { channel: 'email' }), row('dm-1')]
+    const due = await loadDueBriefs(NOW)
+    expect(due.map((d) => d.conversationId).sort()).toEqual(['dm-1', 'mail-1'])
+    expect(due.find((d) => d.conversationId === 'mail-1')!.channel).toBe('email')
+    expect(due.find((d) => d.conversationId === 'dm-1')!.channel).toBe('messenger')
+  })
+
+  it('🔴 开关真的挂在查询上（不是在内存里过一遍）', async () => {
+    emailBriefClients = [CLIENT]
+    rows = [row('dm-1')]
+    await loadDueBriefs(NOW)
+    expect(seenClientFilter).toEqual(['leads_config->email_briefs->>enabled', 'eq', 'true'])
+  })
+
+  it('🔴 读开关失败 → 当成没人开，只写私信（fail-closed，不许因为读配置失败就替客户花钱）', async () => {
+    emailBriefClients = [CLIENT]
+    rows = [row('mail-1', { channel: 'email' }), row('dm-1')]
+    // 让 clients 那条查询报错
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    clientsReadError = true
+    const due = await loadDueBriefs(NOW)
+    expect(due.map((d) => d.conversationId)).toEqual(['dm-1'])
+    clientsReadError = false
+    spy.mockRestore()
   })
 })
 

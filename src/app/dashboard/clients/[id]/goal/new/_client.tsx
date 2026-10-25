@@ -174,17 +174,9 @@ export function NewGoalClient() {
   function handleSubTypeChange(newSubType: GoalSubType) {
     setSubType(newSubType)
     const def = availableSubTypes.find(s => s.value === newSubType)
-    if (def) {
-      setTargetDirection(def.default_direction)
-      // B13 fix: pre-fill title with sub-type example, FDE can edit or accept as-is
-      // Only pre-fill if title is empty or matches a previous sub-type example
-      // (so FDE's manual edits aren't overwritten)
-      const previousExamples = availableSubTypes.map(s => s.example)
-      if (!title.trim() || previousExamples.includes(title.trim())) {
-        setTitle(def.example)
-      }
-    }
-    // Clear metric — will be re-chosen from filtered list
+    if (def) setTargetDirection(def.default_direction)
+    // Clear metric — will be re-chosen from filtered list.
+    // Title stays empty until typed. The card example is only the placeholder.
     setSelectedMetric(null)
     setBaselineValue('')
     setTargetValue('')
@@ -195,13 +187,6 @@ export function NewGoalClient() {
     setSubType(null)
     setTargetDirection('increase')
     setSelectedMetric(null)
-    // B13: also clear title if it's a previous sub-type example
-    if (intent) {
-      const previousExamples = GOAL_SUBTYPES_BY_INTENT[intent].map(s => s.example)
-      if (previousExamples.includes(title.trim())) {
-        setTitle('')
-      }
-    }
   }
 
   // ── Validation per step ────────────────────────────────────────────────────
@@ -211,7 +196,7 @@ export function NewGoalClient() {
 
   // ── Submit handler ─────────────────────────────────────────────────────────
   async function handleSubmit() {
-    if (!intent || !subType || !selectedMetric) return
+    if (!intent || !subType || !selectedMetric || !title.trim()) return
     setSaving(true)
     setError('')
 
@@ -378,8 +363,10 @@ export function NewGoalClient() {
             {/* Title (only after sub_type chosen) */}
             {subType && (
               <div className="space-y-2 border-t border-black/10 pt-4">
-                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">1.3 Goal 标题（FDE 起名）</label>
+                <label htmlFor="goal-title" className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">1.3 Goal 标题（FDE 起名）</label>
                 <input
+                  id="goal-title"
+                  required
                   value={title}
                   onChange={e => setTitle(e.target.value)}
                   placeholder={selectedSubTypeDef?.example ?? 'e.g. CTS 2026 春节中国团'}
@@ -685,7 +672,7 @@ export function NewGoalClient() {
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={saving}
+              disabled={saving || !title.trim()}
               className="rounded-lg bg-status-track px-6 py-2 text-sm font-black text-white transition-colors hover:bg-status-track/90 disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Save Draft'}
