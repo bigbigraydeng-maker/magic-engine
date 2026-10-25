@@ -1,6 +1,6 @@
 # ME 学习功能实现契约 v1
 
-- 状态：草案 v1（文档，不含任何代码或迁移执行）
+- 状态：草案 v1.5.1（文档，不含任何代码或迁移执行）
 - 日期：2026-10-24
 - 权威任务说明：Issue #3088（挂在 #3087 下）；工作模式以 #3087 为准
 - 写入者：Claude Code（本文档）；代码由 DeepSeek 写，Codex Astra 只审查
@@ -945,7 +945,7 @@ export async function withReservation<T>(ledger: BudgetLedger, spec: { id: strin
 
 #### 分轮指令（每轮 1–3 个文件；aider 配方与已知坑见 `docs/codex-prompts/2026-09-24-ads-impact-deepseek-rounds.md` 与记忆 `reference-aider-deepseek-oneshot-recipe`）
 
-通用启动（每轮换文件清单）：`aider --model deepseek/deepseek-chat --no-auto-commits --map-tokens 0 --read docs/me-learning-contract.md --read src/lib/agent-learning/contracts.ts <本轮要改/新建的文件> [--read <模板>]`。每轮结束：`/run npx tsc --noEmit`（只看新增错误）→ `/run npx vitest run <本轮测试>` → `/run git diff --name-only` → `/exit`。**行号基于 `origin/main`，开工前先 grep 核对，漂了以符号名为准。** 每轮提示词末尾必带 `RULES`：只许动列出的文件、不许动 `.gitignore`、保留 JSDoc、不 import supabase/inngest（除非该轮明说）。Claude Code 每轮核 diff 只动了该动的文件后 `git add <文件>` 提交，commit 带 `[L56-P1.Rn]`。
+通用启动（每轮换文件清单）：`aider --model deepseek/deepseek-v4-flash --no-auto-commits --map-tokens 0 --read docs/me-learning-contract.md --read src/lib/agent-learning/contracts.ts <本轮要改/新建的文件> [--read <模板>]`。每轮结束：`/run npx tsc --noEmit`（只看新增错误）→ `/run npx vitest run <本轮测试>` → `/run git diff --name-only` → `/exit`。**行号基于 `origin/main`，开工前先 grep 核对，漂了以符号名为准。** 每轮提示词末尾必带 `RULES`：只许动列出的文件、不许动 `.gitignore`、保留 JSDoc、不 import supabase/inngest（除非该轮明说）。Claude Code 每轮核 diff 只动了该动的文件后 `git add <文件>` 提交，commit 带 `[L56-P1.Rn]`。
 
 | 轮 | 文件（≤3） | 内容与验收 |
 |---|---|---|
@@ -1009,6 +1009,7 @@ export async function withReservation<T>(ledger: BudgetLedger, spec: { id: strin
 - v1.2（2026-10-24，按 Ray 10-25 决定与统筹 Traning Day 指示）：①删除第三方抓 YouTube 字幕（Supadata）可选项，R9 改为已否决，R15 取消，`transcript_policy` 列删除；②X API 并进 L6：新增 L6d、「X 读帖闸」、T12–T15，`kind` 增 `x_posts`，`x_handle` 列，R10 改为已同意；③L2、L3 审查口径改为 Codex Astra 审查 + Claude Code 复核。
 - v1.3（2026-10-24，按 Ray 2026-10-25 范围更正，统筹 Traning Day 转达）：①附录 A 替换为 6 领域 30 个来源（SEO、SEM、Facebook 运营、付费社媒广告、GEO、AI 技能），删除垂直行业专家与美妆缺口（R14 取消），垂直行业专家以后需要时再加；②名册字段 `platforms`/`industries` 合并为 `domains`，`SourceCard` 的「平台/行业」改为 `domain`；有效期默认值改为付费社媒 90、SEM 120、SEO 180、GEO 90、AI 技能 90、Facebook 运营 90，去掉"行业基本功 365"；③7.6 记录 Ray 的决定（试跑同意 08:38、名册同意 08:39、Supadata 否决 01:15、X API 同意 01:15，均新西兰时间）；④X 首批只读 10 个号，L6d 新增 T16；⑤视频为主的专家不进主名册。
 - v1.5（2026-10-24，按 Codex Astra 对 v1.4（`6f32964`）的复审 3 条 P1）：①2.7 预留改为「一个 `reservation_id` 只能认领一次」，重复/结算后重放返回 `duplicate_reservation` 且不外呼，每次外呼用 `newAttemptId` 独立尝试 ID，新增 T21 并补进 L56-P1 R3/R4；②4.7 列出普通管理员与 PM 的状态转换表（含 `conflict`、`pm_decision` 的 PM 直接批路径），2.8 函数增加 `p_actor_role` 并按同一张表校验，V19 逐格对照；③`editedRule` 进入 2.8 事务（`p_new_rule_text` / `p_new_rule_text_sha`，锁内校验旧 sha、同事务写新正文、状态与事件），新增 `approved_rule_text_sha` 列，桥接只写与审批 sha 一致的正文，新增 V21。
+- v1.5.1（2026-10-25，小改，只改文档）：7.7 的 aider 启动命令 `--model deepseek/deepseek-chat`（已停用）改为 `--model deepseek/deepseek-v4-flash`；全文其余 `deepseek-chat` 均是在描述 telephony 现状并声明"不复用"，保留不改。
 - v1.4（2026-10-24，按 Codex Astra 对 v1.3（`f77094e`）的审查，统筹 Traning Day 指示）：①定时任务只在 `catalog.ts` 登记，去掉所有 `render.yaml` 要求（#3087 第 1c 项）；②新增 4.2a 与 `rule_text` 列：卡片点的 `rule` 是规则编号，注入的必须是解析出的规则句，新增 V17；③新增 4.7、2.8、L4b 与 V19：蒸馏点变成 `adopted` 的唯一受权限控制的人工审核入口（谁能批、身份取自会话、留痕）；④新增 4.8、2.6 的 CHECK 与 V18：扩展 `write-lesson.ts` 一次写完，字段不全不注入；⑤新增 2.7 额度预留账本、T17–T20、V20：蒸馏 0.20 美元/天与 X 40 条/天、900 条/月、5 美元/月都改为请求前原子预留、请求后按实际结算；⑥新增 7.7：共用 DeepSeek 客户端（模型名可配置，默认 `deepseek-v4-flash`，不复用 telephony）与 L56-P1 九轮 aider 指令，R17 更正，新增 R18–R20；⑦新表数由 5 张改为 7 张。
 - v1（2026-10-24）：首版。依据 #3088 触发评论的 5 项要求撰写；未执行任何迁移、未改业务代码。
 
