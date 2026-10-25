@@ -32,7 +32,7 @@ vi.mock('@/lib/messenger/brief', async () => {
 vi.mock('@/lib/crm/qualified-buyer-autotag', () => ({ autoTagQualifiedBuyers: vi.fn() }))
 vi.mock('@/lib/crm/stage-infer', () => ({ inferStagesFromConversations: vi.fn() }))
 
-import { generateDueBriefs, type DueBrief } from '../brief-cycle'
+import { generateDueBriefs, makeEmailFullTextResolver, type DueBrief } from '../brief-cycle'
 
 const NOW = new Date('2026-10-26T04:00:00Z')
 
@@ -102,7 +102,7 @@ describe('邮件渠道会去拉全文并清洗', () => {
     expect((generateBrief.mock.calls[0][0] as Array<{ body: string }>)[0].body).toBe(STORED)
   })
 
-  it('🔴 清洗完一个字不剩 → 不写卡，而且不算失败（客人只把我们的邮件转回来、没写字）', async () => {
+  it('🔴 清洗完一个字不剩 → 不调模型，但要写一张「客人没写内容」的卡（否则这段对话每小时被重选、永远占配额）', async () => {
     messagesResult = {
       data: [{ direction: 'inbound', sender_name: 'S', body: 'Sent from my iPad', sent_at: '2026-10-26T02:00:00Z', message_id: 'AAA' }],
       error: null,
@@ -111,8 +111,43 @@ describe('邮件渠道会去拉全文并清洗', () => {
     const r = await generateDueBriefs([candidate('email')], NOW, { emailFullText: async () => async () => onlyQuoted })
     expect(r.generated).toBe(0)
     expect(r.failed).toBe(0)
-    expect(r.skippedEmpty).toBe(1)
+    expect(r.emptyThreads).toBe(1)
+    // 不许调模型（没有任何可总结的东西，调了就是花钱让它编）
     expect(generateBrief).not.toHaveBeenCalled()
-    expect(storeBrief).not.toHaveBeenCalled()
+    // 但必须写卡 —— 不写就等于这段对话永远「待写卡」
+    expect(storeBrief).toHaveBeenCalledTimes(1)
+    const card = storeBrief.mock.calls[0][1] as { summary: string; customer_needs: string[]; draft_reply: string }
+    expect(card.summary).toContain('没有自己写的内容')
+    expect(card.customer_needs).toEqual([])
+    expect(card.draft_reply).toBe('')
+  })
+
+  it('🔴 令牌缓存必须是「一轮一份」：新的一轮要重新换令牌，同一轮内同一客户只换一次', async () => {
+    // 这是复审查出的 P1。`getValidTokenForConnection` 的契约是「每次调用都给你一个
+    // 没过期的」，它自己会在过期前换新。把返回的字符串长期缓存就把这个保证作废了：
+    // Render 上进程常驻、令牌约一小时过期，于是第二轮起每次拉全文都失败，
+    // 而失败被吞掉、退回 255 字摘要 —— 运行记录里一点异常都没有。
+    const resolveOne = vi.fn(async () => async () => FULL)
+
+    const runA = makeEmailFullTextResolver(resolveOne)
+    await runA('client-1')
+    await runA('client-1')
+    await runA('client-2')
+    expect(resolveOne).toHaveBeenCalledTimes(2) // 一轮内：每个客户各一次
+
+    const runB = makeEmailFullTextResolver(resolveOne)
+    await runB('client-1')
+    expect(resolveOne).toHaveBeenCalledTimes(3) // 新的一轮：同一个客户要重新换
+  })
+
+  it('🔴 缓存 null 也只在一轮内有效（客户之后接上邮箱，下一轮就该认，不该等重启）', async () => {
+    const resolveOne = vi.fn(async () => null)
+    const runA = makeEmailFullTextResolver(resolveOne)
+    expect(await runA('client-1')).toBeNull()
+    expect(await runA('client-1')).toBeNull()
+    expect(resolveOne).toHaveBeenCalledTimes(1)
+    const runB = makeEmailFullTextResolver(resolveOne)
+    await runB('client-1')
+    expect(resolveOne).toHaveBeenCalledTimes(2)
   })
 })

@@ -26,6 +26,7 @@ import {
   shouldGenerateBrief,
   generateBrief,
   storeBrief,
+  nothingFromCustomerBrief,
   type BriefCandidate,
   type StoredMessage,
 } from '@/lib/messenger/brief'
@@ -132,11 +133,11 @@ export interface BriefGenerationResult {
   generated: number
   failed: number
   /**
-   * 邮件清洗完一个字都不剩、因此没写卡的条数（客人只转发了我们自己的邮件、没写字）。
-   * 跟 `failed` 分开记：它不是故障，但也不能当成「写了卡」—— 混进任何一边
-   * 都会让运行记录说谎。
+   * 邮件清洗完一个字都不剩的条数（客人只转发了我们自己的邮件、没写字）。
+   * 这些对话会拿到一张「客人没写内容」的卡（不调模型），所以不算进 `generated`，
+   * 也绝不算 `failed` —— 它不是故障。混进任何一边都会让运行记录说谎。
    */
-  skippedEmpty?: number
+  emptyThreads?: number
   /**
    * 这一段被提前掐掉的原因，正常跑完是 null。
    *
@@ -379,14 +380,30 @@ async function withEmailFullText(
  * 生产用的取全文方法：按客户找到在用的邮箱连接，换一个有效令牌。
  *
  * 跟 `payment-email-detect-wire.ts` 同一套（同一个 provider 常量、同一个状态常量、
- * 同一个令牌管理器），不另起一条读邮箱的路。每个客户在一轮里只换一次令牌。
+ * 同一个令牌管理器），不另起一条读邮箱的路。
+ *
+ * 🔴 **缓存必须是「一轮一份」，绝不能挂在模块顶层**（复审 2026-10-26 的 P1，实测成立）：
+ *    `getValidTokenForConnection` 的契约是「每次调用都给你一个没过期的令牌」，
+ *    它自己会在过期前换新。把它返回的**字符串**长期缓存，等于把这个保证作废 ——
+ *    Render 上进程常驻，令牌约一小时过期，于是第二轮之后每次拉全文都失败，
+ *    而失败被 `tryFetchFullText` 吞掉、退回 255 字摘要，运行记录里一点异常都没有。
+ *    结果是悄悄退回这个功能要解决的那个老问题：73% 的来信被截断，卡却看着正常。
+ *    缓存 `null` 一样有害：客户之后接上邮箱，不重启就永远不认。
  */
-const emailTokenCache = new Map<string, FetchFullText | null>()
+export function makeEmailFullTextResolver(
+  resolveOne: (clientId: string) => Promise<FetchFullText | null> = resolveEmailFetcher,
+): (clientId: string) => Promise<FetchFullText | null> {
+  const perRunCache = new Map<string, FetchFullText | null>()
+  return async (clientId: string) => {
+    const cached = perRunCache.get(clientId)
+    if (cached !== undefined) return cached
+    const resolved = await resolveOne(clientId)
+    perRunCache.set(clientId, resolved)
+    return resolved
+  }
+}
 
-async function emailFullTextForClient(clientId: string): Promise<FetchFullText | null> {
-  const cached = emailTokenCache.get(clientId)
-  if (cached !== undefined) return cached
-
+async function resolveEmailFetcher(clientId: string): Promise<FetchFullText | null> {
   let resolvedFetch: FetchFullText | null = null
   try {
     const { MICROSOFT_MAIL_PROVIDER } = await import('@/lib/microsoft/mail-oauth')
@@ -413,7 +430,6 @@ async function emailFullTextForClient(clientId: string): Promise<FetchFullText |
     // 换令牌失败就按「没有全文」走，上面会退回 255 字摘要。
     resolvedFetch = null
   }
-  emailTokenCache.set(clientId, resolvedFetch)
   return resolvedFetch
 }
 
@@ -442,8 +458,10 @@ export async function generateDueBriefs(
   opts: GenerateDueBriefsOptions = {},
 ): Promise<BriefGenerationResult> {
   const budgetMs = opts.budgetMs ?? CHUNK_TIME_BUDGET_MS
-  // 邮件清洗完没内容而跳过的条数。单独记，不混进 failed —— 它不是故障。
-  let skippedEmpty = 0
+  // 邮件清洗完没有任何客人原话的条数。单独记，不混进 failed —— 它不是故障。
+  let emptyThreads = 0
+  // 🔴 一轮一份的邮箱令牌缓存（见 makeEmailFullTextResolver 头上那条）。
+  const emailFullText = opts.emailFullText ?? makeEmailFullTextResolver()
   const perCandidateMs = opts.perCandidateMs ?? PER_CANDIDATE_BUDGET_MS
   const clock = opts.clock ?? Date.now
   const startedAt = clock()
@@ -482,12 +500,17 @@ export async function generateDueBriefs(
           if (stored.length === 0) return
           const prepared =
             candidate.channel === 'email'
-              ? await withEmailFullText(candidate, stored, opts.emailFullText ?? emailFullTextForClient)
+              ? await withEmailFullText(candidate, stored, emailFullText)
               : stored
           // 邮件清洗完可能一个字都不剩（客人只把我们自己的推广邮件转回来、没写字）。
-          // 这种情况**不写卡**：没有卡比一张凭空编出来的卡好。它不是失败，所以只计数。
+          // 这种情况写一张**只陈述这个事实**的卡，不调模型、不编任何内容。
+          // 为什么不是直接跳过：跳过等于不往 conversation_briefs 写行，而「该不该写卡」
+          // 的判据看的就是那张表 —— 这段对话每小时都会被重新选中、重新拉最多 12 封全文，
+          // 还占着邮件那半配额。实测约一成邮件对话落到这里（553 段里约 55 段），
+          // 比每轮 25 段的配额还多，真会把配额占死、让存量永远跑不完。
           if (prepared === null) {
-            skippedEmpty++
+            await storeBrief(candidate, nothingFromCustomerBrief(), now, null, signal)
+            emptyThreads++
             return
           }
           const { brief, knowledgeStatus } = await generateBrief(
@@ -537,14 +560,14 @@ export async function generateDueBriefs(
       if (needsHuman(kind)) {
         const reason = ABORT_REASON[kind]
         console.error(`[messenger/brief] 账户级故障，这一轮当场停下：${reason}`, err)
-        return { generated, failed, skippedEmpty, aborted: reason }
+        return { generated, failed, emptyThreads, aborted: reason }
       }
       failed++
       console.error(`[messenger/brief] ${candidate.conversationId} failed:`, err)
     }
   }
 
-  return { generated, failed, skippedEmpty, aborted: null }
+  return { generated, failed, emptyThreads, aborted: null }
 }
 
 /**

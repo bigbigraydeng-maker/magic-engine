@@ -367,6 +367,41 @@ export function looksLikeAutomatedSpam(messages: StoredMessage[]): boolean {
 }
 
 /**
+ * 邮件线程清洗完一个字都不剩时写的卡。
+ *
+ * 为什么要写卡、而不是跳过（魏征式复审 2026-10-26 的 P2）：跳过等于不往
+ * `conversation_briefs` 写行，而「该不该写卡」的判据看的就是那张表——于是这段对话
+ * 每小时都会被重新选中、重新拉最多 12 封邮件全文，还占着邮件那半配额。
+ * 实测约一成邮件对话会落到这里（553 段里约 55 段），**比每轮 25 段的配额还多**，
+ * 真会把配额占死、让存量永远跑不完。
+ *
+ * 卡的内容只陈述事实，不编任何东西 —— 这正是员工需要知道的一件事：
+ * 这个人把我们自己发的邮件转回来了，但一个字没写。
+ */
+export function nothingFromCustomerBrief(): MessengerBrief {
+  return MessengerBriefSchema.parse({
+    summary: '客人这封邮件里没有自己写的内容（只转发/引用了我们发出的邮件）。',
+    intent_level: 'unknown',
+    customer_needs: [],
+    objections: [],
+    promises_made: [],
+    next_action: '打开原始邮件看一眼客人想问什么；如果确实什么都没写，直接打电话或回一封问他需要什么。',
+    follow_up_due_at: null,
+    risk_flags: ['客人没写文字，无法判断需求，别照这张卡做跟进决定'],
+    trip: {
+      tour_interest: null,
+      travel_window: null,
+      party_size: null,
+      departure_city: null,
+      first_time_to_china: null,
+      budget_signal: null,
+    },
+    contact: { phone: null, email: null },
+    draft_reply: '',
+  })
+}
+
+/**
  * Deterministic brief for a thread that is spam/phishing/promotional, not a
  * real customer inquiry. No model call, no invented need, no auto-reply.
  * The raw conversation is untouched and still visible to staff — this only
