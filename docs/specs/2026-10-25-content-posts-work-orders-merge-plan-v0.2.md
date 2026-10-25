@@ -4,7 +4,7 @@
 - 方向来源：Ray 2026-10-25 14:56 NZDT「最好可以合并呀。别自己让自己麻烦」
 - 取代：同日 v0.1（分支 `claude/issue-3090-20261025-0150`）里的"只做翻译层 / 关联表 / 只读视图"几个并存方案。本版只讲**真合并**，不设计两张表并存的同步层或桥接表。
 - 风险级别：**A 级**（改库表 + 触及签字/发布链路）。migration PR 由 Ray 亲手合；生产库执行前，把最终迁移脚本贴回 #3090，由 Ray 本人拍板。
-- 核实范围：只读了仓库里的 migration 和代码。**没读生产库**，行数、状态分布、脏数据全部未核实（见 §8）。origin/main 未刷新，仅本地快照 `26dbbf9`。
+- 核实范围：只读了仓库里的 migration 和代码。生产库只有 RLS 策略做过只读核实（见 §8 第 2 条），行数、状态分布、脏数据仍未核实（见 §8）。origin/main 未刷新，仅本地快照 `26dbbf9`。
 
 ## 1. 结论（一句话）
 
@@ -60,9 +60,9 @@
 | 4 卡住了 | `failed` / `dead_letter` / `publish_failed` | 无 |
 | 5 待审 | `in_review` | 帖子 `approved` **且已有成品**：一律落在这里，**要重新过审**，不沿用旧批准（宁可多审一次，不让旧批准绕过新质检） |
 | 6 打回 | `review_rejected` | 无 |
-| 7 已通过·待分发 | `approved`（含 `scheduled_at` 有值时标"已排期"） | 帖子 `scheduled`：落到这里并保留 `scheduled_at`；**这是迁移时唯一需要 Ray 确认的取舍**（见 §9 问题 1） |
+| 7 已通过·待分发 | `approved`（含 `scheduled_at` 有值时标"已排期"） | 帖子 `scheduled`：**一律退回此状态**，旧 `scheduled_at` 不沿用，由人重新排期（Ray 已定，见 §9 第 1 条） |
 | 8 已分发（草稿） | `publishing` / `published` 且回执 `video_state = DRAFT` | 无 |
-| 9 已公开 | `published` 且回执 `video_state = PUBLISHED` | 帖子 `published`：**回执为空，无法证明是否公开**，显示为"已发布（公开状态未核实）"，不猜 |
+| 9 已公开 | `published` 且回执 `video_state = PUBLISHED` | 帖子 `published`：**回执为空，无法证明是否公开**，显示为"公开状态未核实"，不猜（Ray 已定，见 §9 第 2 条） |
 | 10 看表现 | `measuring` | 无 |
 | 11 收尾 | `closed` / `archived` / `superseded` | 帖子 `rejected`：选题被否、从未出片，落 `superseded` 并把原因写进 `reject_reason`（`reject_category = 'other'`） |
 
@@ -108,18 +108,20 @@
 ## 8. 风险
 
 1. **不知道生产里有多少数据、多脏**（行数、空 `client_id`、重复 id、非法状态值）。M2 前必须只读查一遍，结果贴 #3090。
-2. **行级安全策略**：工单表建表时的策略写的是 `FOR ALL USING (true)`，**没有 `TO service_role`**（见 `20260711000002_p21j_content_factory_m1.sql:150`）。按项目规则这等于对匿名访客敞开。我没有核实是否有后续 migration 修过它。**M1 必须先核实并按 service-role 模板修正**，否则搬进去的 organic 内容也会被暴露。这条可能比合并本身更急。
+2. **行级安全策略（已更正）**：生产已只读核实：两张表 RLS 开启，各只有 `service_role_full` 一条策略，roles = `{service_role}`，匿名访客会被拒；只是仓库 migration（`20260711000002_p21j_content_factory_m1.sql:150`）写的 `FOR ALL USING (true)` 没带 `TO service_role`，和生产不一致，M1 里显式写成 `FOR ALL TO service_role USING (true)`。
 3. **触发器断线**（§6.2）。
 4. **图片素材外键行为是推断值**（§6.1）。
 5. **旧批准失效**：帖子里"已批准且有成品"的会重新进待审，短期会让待审队列变长；这是有意的 fail-closed 选择。
 6. **共享表语义**：工单表原本围绕广告工厂（`budget_cap_usd`、`published_ad_id`）。organic 行进来后，所有现有的"扫工单"代码（发布 worker、sweeper、广告素材池 `creative-pool-labels`）必须按 `order_type` 过滤，否则 organic 行会混进广告流程。需要在 M3 前逐个核对这 21 个文件。
 7. 大小：M3 预计超过 800 行，必须拆成上面 6 个顺序 PR。
 
-## 9. 需要 Ray 定的事（每条一句话能回）
+## 9. Ray 已定
 
-1. 帖子里"已排期（scheduled）"的，迁过去要不要**先退回"已通过·待分发"并暂停排期**，由人重新点排期？我的默认：**要**（排期是外发副作用，旧排期不沿用）。
-2. 帖子里"已发布"但没有公开/草稿证据的，显示"已发布（公开状态未核实）"可以吗？默认：**可以**。
-3. 认可 M1→M4 四步，且 M1、M4 的 migration PR 由 Ray 亲手合、M2 在生产执行前先贴脚本到本 issue 吗？
+Ray 2026-10-25 15:14 NZDT「三条都按你的建议同意」（已记在 #3090；本次推进经 ME Video 转达）：
+
+1. 旧的"已排期（scheduled）"帖子迁移时一律退回"已通过·待分发"，由人重新排期，旧排期不沿用。
+2. "已发布"但没有公开证据的，显示"公开状态未核实"。
+3. M1→M4 四步批准。M1、M4 的 migration PR 由 Ray 亲手合；M2 在生产执行前先把脚本贴到 #3090。
 
 ## 10. 本规格没做的事
 
