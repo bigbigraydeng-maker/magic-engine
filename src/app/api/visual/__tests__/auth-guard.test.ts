@@ -1,9 +1,10 @@
+// @vitest-environment node
 /**
  * Auth guard tests for /api/visual/* (video, avatar, upload, status, queue, assets, batch-image).
  *
  * Verifies for each route:
  *   - no session            → 401, and zero paid provider / DB calls
- *   - session, wrong client → 403 (404 for status), and zero paid provider calls
+ *   - session, wrong client → 403 (404 for status and batch-image), and zero paid provider calls
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -139,7 +140,7 @@ describe('logged in but not this client → 403, zero paid calls', () => {
     expectNoPaidCalls()
   })
 
-  it('batch-image', async () => {
+  it('batch-image hides other clients posts as 404', async () => {
     result.data = null
     result.error = null
     ;(chain.in as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => ({
@@ -147,7 +148,26 @@ describe('logged in but not this client → 403, zero paid calls', () => {
       error: null,
     }))
     const res = await batchPOST(json('http://test/b', { post_ids: ['p1'] }))
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(404)
+    expect(await res.json()).toMatchObject({ success: false, error: 'Post not found' })
+    expectNoPaidCalls()
+  })
+
+  it('batch-image rejects the whole batch when one post belongs to another client', async () => {
+    mockAccess.mockImplementation(async (cid: string) =>
+      cid === 'c1'
+        ? { ok: true, user: {} as never, role: 'client-viewer', tier: 'paid_client', allowedClientId: 'c1' }
+        : FORBIDDEN
+    )
+    ;(chain.in as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => ({
+      data: [
+        { id: 'p1', client_id: 'c1', visual_brief: 'x' },
+        { id: 'p2', client_id: 'other', visual_brief: 'y' },
+      ],
+      error: null,
+    }))
+    const res = await batchPOST(json('http://test/b', { post_ids: ['p1', 'p2'] }))
+    expect(res.status).toBe(404)
     expectNoPaidCalls()
   })
 })

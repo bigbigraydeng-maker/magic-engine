@@ -39,12 +39,13 @@ export async function POST(req: NextRequest) {
 
     if (fetchErr) throw fetchErr
 
-    // Caller must have access to every client whose posts are in the batch
+    // Caller must have access to every client whose posts are in the batch.
+    // Other clients' posts are reported as 404 so post existence is not exposed.
     const batchClientIds = Array.from(new Set((dbPosts ?? []).map(p => p.client_id as string)))
     for (const cid of batchClientIds) {
       const access = await requireDashboardClientAccess(cid)
       if (!access.ok) {
-        return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+        return NextResponse.json({ success: false, error: 'Post not found' }, { status: 404 })
       }
     }
 
