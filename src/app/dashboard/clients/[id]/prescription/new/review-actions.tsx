@@ -6,7 +6,7 @@ export const APPROVE_BUTTON_LABEL = '✓ 批准并生成执行计划'
 export const REJECT_BUTTON_LABEL = '要求修改（标为已拒绝）'
 
 export const APPROVE_CONFIRM_TEXT =
-  '批准后会立刻生成执行计划，看板上会出现待办。这一步不能当没发生。确定批准？'
+  '批准后，这份方案会记到对应目标下面，并按阶段排好。这一步不能当没发生。确定批准？'
 
 export const REJECT_CONFIRM_TEXT =
   '「要求修改」会把这份处方标成已拒绝，不会改写内容。确定标为已拒绝？'
@@ -83,7 +83,7 @@ export function ManualDraftBanner({ show }: { show: boolean }) {
   if (!show) return null
   return (
     <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-      草稿 · 人工执行 · 未批准。点「批准并生成执行计划」会生成看板上的待办。
+      草稿 · 人工执行 · 未批准。点「批准并生成执行计划」会把方案记到目标下面，按阶段排好。
     </div>
   )
 }
