@@ -277,15 +277,17 @@ export const HUMAN_TRIGGER_ALLOWED_DIRS = ['src/lib/action-submission/'] as cons
 /**
  * 传 `triggeredBy: 'human'` 的文件必须命中的鉴权调用之一（第二层）。
  *
- * 为什么是这四个：前两个是内部员工判据（`ADMIN_EMAILS` / `ADMIN_EMAIL_DOMAIN`），
- * 后两个是客户看板的按客户/付费权限鉴权 —— 看板里的预算下调和止损动作由人点，
- * 所以走客户鉴权也算「真有人按过」。**都不算的话，就没有任何东西证明有人在。**
+ * 为什么是这五个：前两个是内部员工判据（`ADMIN_EMAILS` / `ADMIN_EMAIL_DOMAIN`），
+ * 中间两个是客户看板的按客户/付费权限鉴权 —— 看板里的预算下调和止损动作由人点，
+ * 所以走客户鉴权也算「真有人按过」。最后一个 `requirePlanApproverAccess` 先过付费客户校验
+ * 再要求全局管理员，比单独的付费客户鉴权更严。**都不算的话，就没有任何东西证明有人在。**
  */
 export const HUMAN_TRIGGER_REQUIRED_AUTH_CALLS = [
   'requireGlobalAdmin',
   'guardGlobalAdmin',
   'requireDashboardClientAccess',
   'requirePaidClientAccess',
+  'requirePlanApproverAccess',
 ] as const
 
 export const KERNEL_RUNNER_SOURCE_MODULES = ['@/lib/kernel/runner', '@/lib/kernel'] as const
