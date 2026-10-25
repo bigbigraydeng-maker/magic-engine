@@ -25,6 +25,7 @@ import { GateList } from './_components/GateList'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
 import { adsRunningFrom, describeLiveAds } from '@/lib/marketing-plan/promo/live-ads-message'
 import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
+import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
@@ -156,6 +157,7 @@ export function PromoPlanClient() {
           <Link href={`/dashboard/clients/${clientId}/marketing-plan`} className="ml-auto text-xs text-indigo-600 hover:underline">
             去 Marketing Plan 看任务 →
           </Link>
+          <BlankDraftPlanButton clientId={clientId} onCreated={id => { void refresh(id) }} />
         </div>
 
         {plans.length > 1 && (
@@ -178,7 +180,7 @@ export function PromoPlanClient() {
         {!loading && !error && !selected && (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-center">
             <p className="text-sm text-gray-700">这个客户还没有可用的计划。</p>
-            <p className="text-xs text-gray-500 mt-1">先到 Marketing Plan 页面生成一份草稿，再回来补上推广计划的阶段。</p>
+            <p className="text-xs text-gray-500 mt-1">用上面的「新建空白草稿计划」选一个目标。不会自动写内容，也不会改动已有计划。</p>
           </div>
         )}
 
