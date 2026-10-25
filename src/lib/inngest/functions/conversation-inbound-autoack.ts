@@ -62,6 +62,9 @@ import {
 } from '@/lib/messenger-agent/channel-dispatch'
 import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from '@/lib/messenger/autoack-identity'
 import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
+import { composeAck, type AckPlan } from '@/lib/messenger/smart-ack/compose'
+import { callSmartAckModel } from '@/lib/messenger/smart-ack/model'
+import { countSmartAcksToday, loadAckContext, readClientSmartAckConfig } from '@/lib/messenger/smart-ack/store'
 
 export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent'
 
@@ -90,6 +93,7 @@ export type AutoAckOutcome =
   | 'skipped_opted_out'
   | 'skipped_channel_disabled'
   | 'skipped_recently_replied'
+  | 'skipped_repeat_message'
   | 'skipped_invalid_payload'
   | 'send_failed'
 
@@ -153,6 +157,11 @@ export interface ConversationInboundAutoAckDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
   hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
+  /**
+   * 智能安抚（设计稿 2026-10-22-smart-ack-design-v0.md §9）。不传 = 永远发固定模板（旧行为）。
+   * 约定：永不抛错——任何失败都退回固定模板，保证客人一定有回应。
+   */
+  composeAck?: (input: { clientId: string; conversationId: string }) => Promise<AckPlan>
   send: Record<MessengerAgentChannel, ChannelSendFn>
 }
 
@@ -233,13 +242,29 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
         return { ...base, outcome: 'skipped_recently_replied', detail: `within_${AUTOACK_COOLDOWN_HOURS}h` }
       }
 
-      // Step 1：发硬编码模板。不调 Claude，不占 verifier，不读任何知识源
-      // （见文件头 §9.14 C.5）。
+      // Step 0.7：决定发什么。开关关 = 固定模板（旧行为，逐字不变）；开 = 智能版
+      // （分流 / 模型 / 校验，任何一环失败都退回固定模板；重复预填话则不发）。
+      // 独立一步 + 永不抛：发送步骤重试时读的是这一步缓存的结果，不会重新调模型生成另一句话。
+      const plan: AckPlan = deps.composeAck
+        ? await step.run('compose-ack', () => deps.composeAck!({ clientId: client_id, conversationId: conversation_id }))
+        : { kind: 'send', text: AUTOACK_TEMPLATE, source: 'fixed', reason: 'no_composer' }
+      if (plan.kind === 'skip') {
+        // F2 在等 autoack.sent 做排序；跳过也发一个收尾事件，免得它白等 5 分钟。
+        await step.sendEvent('autoack-skipped', {
+          id: `autoack-skip:${conversation_id}:${event.id ?? randomUUID()}`,
+          name: CONVERSATION_AUTOACK_SENT_EVENT,
+          data: { client_id, conversation_id, channel, trigger_message_id: parsed.value.message_id, skipped: true, reason: plan.reason },
+        })
+        return { ...base, outcome: 'skipped_repeat_message', detail: plan.reason }
+      }
+
+      // Step 1：发出安抚。固定模板不读任何知识源（见文件头 §9.14 C.5）；智能版文本只来自
+      // 客人原话 + 静态提示词，且必须过 smart-ack/validate（不含价格/日期/数字/承诺）。
       const sendResult = await step.run('send-autoack', () =>
         deps.send[channel]({
           clientId: client_id,
           conversationId: conversation_id,
-          body: AUTOACK_TEMPLATE,
+          body: plan.text,
           sentByEmail: AUTOACK_SENT_BY_EMAIL,
           usedAiDraft: false,
         }),
@@ -290,7 +315,7 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
         },
       })
 
-      return { ...base, outcome: 'sent', detail: null }
+      return { ...base, outcome: 'sent', detail: `${plan.source}:${plan.reason}` }
     },
   )
 }
@@ -300,5 +325,12 @@ export const conversationInboundAutoAck = createConversationInboundAutoAckFuncti
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
   hasRecentOutbound,
+  composeAck: ({ clientId, conversationId }) =>
+    composeAck({
+      readEnabled: () => readClientSmartAckConfig(clientId),
+      loadContext: () => loadAckContext(conversationId),
+      smartSentToday: () => countSmartAcksToday(clientId),
+      callModel: callSmartAckModel,
+    }),
   send: CHANNEL_SEND,
 })

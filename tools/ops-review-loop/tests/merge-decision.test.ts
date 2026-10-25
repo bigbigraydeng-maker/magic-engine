@@ -138,40 +138,45 @@ describe('decideMerge — B and C', () => {
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
   })
 
-  it('does not auto-merge A even when the Codex review of this head is clear', () => {
+  it('does not auto-merge A when only the Codex review of this head is clear', () => {
     const result = decideMerge({
       risk: 'A',
       draft: false,
       fork: false,
       signoff: COMPLETE_SIGNOFF,
       codexReview: CODEX_CLEAR,
+      claudeSignoff: { clear: false, reason: 'Claude Code 还没签过当前这次提交' },
+      requiredChecksGreen: true,
+      conversationsResolved: true,
+      rayHold: false,
     })
-    expect(result.pass).toBe(true)
+    expect(result.pass).toBe(false)
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.tier).toBe('signed')
+    expect(result.tier).toBe('blocked')
+    expect(result.reason).toContain('Claude Code')
   })
 })
 
 describe('decideMerge — A', () => {
-  it('passes but never auto-merges a fully signed A PR', () => {
-    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: COMPLETE_SIGNOFF })
-    expect(result.pass).toBe(true)
-    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.tier).toBe('signed')
-  })
-
-  it('blocks an A PR with a role still missing, and names the role', () => {
-    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: INCOMPLETE_SIGNOFF })
+  it('does not treat a base-and-head marker pair as an A auto-merge by itself', () => {
+    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: COMPLETE_SIGNOFF, rayHold: false })
     expect(result.pass).toBe(false)
     expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
-    expect(result.reason).toContain('claude-code')
+    expect(result.tier).toBe('blocked')
   })
 
-  it('blocks an A PR with no sign-off input, and names both required roles', () => {
-    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: undefined })
+  it('blocks an A PR while Claude Code has not signed this head', () => {
+    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: INCOMPLETE_SIGNOFF, rayHold: false })
     expect(result.pass).toBe(false)
-    expect(result.reason).toContain('codex-astra')
-    expect(result.reason).toContain('claude-code')
+    expect(result.decision).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+    expect(result.reason).toContain('Claude Code')
+  })
+
+  it('blocks an A PR with no sign-off input, and names both reviewers', () => {
+    const result = decideMerge({ risk: 'A', draft: false, fork: false, signoff: undefined, rayHold: false })
+    expect(result.pass).toBe(false)
+    expect(result.reason).toContain('Codex')
+    expect(result.reason).toContain('Claude Code')
     expect(result.reason).not.toContain('ziya')
   })
 
@@ -212,23 +217,60 @@ describe('decideMerge — the enable implication holds over every combination', 
     const forks = [true, false, undefined]
     const signoffs = [undefined, COMPLETE_SIGNOFF, INCOMPLETE_SIGNOFF]
     const codexReviews = [undefined, { clear: false }, { clear: true }, { clear: 'true' }]
+    const claudeSignoffs = [undefined, { clear: false }, { clear: true }, { clear: 'true' }]
+    const checks = [undefined, false, true, 'true']
+    const conversations = [undefined, false, true]
+    const holds = [undefined, false, true]
 
     for (const risk of risks) {
       for (const draft of drafts) {
         for (const fork of forks) {
           for (const signoff of signoffs) {
             for (const codexReview of codexReviews) {
-              const result = decideMerge({ risk, draft, fork, signoff, codexReview })
-              if (result.decision === MERGE_DECISION.ENABLE_AUTO_MERGE) {
-                const label = JSON.stringify({ risk, draft, fork, signoff, codexReview })
-                expect(result.pass, `enable but not pass: ${label}`).toBe(true)
-                expect(result.tier, `enable but tier != auto: ${label}`).toBe('auto')
-                expect(draft, `enable but draft !== false`).toBe(false)
-                expect(fork, `enable but fork !== false`).toBe(false)
-                expect(risk === 'B' || risk === 'C', `enable but risk not in {B,C}`).toBe(true)
-                expect(codexReview && codexReview.clear === true, `enable without a clear Codex review: ${label}`).toBe(
-                  true,
-                )
+              for (const claudeSignoff of claudeSignoffs) {
+                for (const requiredChecksGreen of checks) {
+                  for (const conversationsResolved of conversations) {
+                    for (const rayHold of holds) {
+                      const result = decideMerge({
+                        risk,
+                        draft,
+                        fork,
+                        signoff,
+                        codexReview,
+                        claudeSignoff,
+                        requiredChecksGreen,
+                        conversationsResolved,
+                        rayHold,
+                      })
+                      if (result.decision === MERGE_DECISION.ENABLE_AUTO_MERGE) {
+                        const label = JSON.stringify({
+                          risk,
+                          draft,
+                          fork,
+                          codexReview,
+                          claudeSignoff,
+                          requiredChecksGreen,
+                          conversationsResolved,
+                          rayHold,
+                        })
+                        expect(result.pass, `enable but not pass: ${label}`).toBe(true)
+                        expect(result.tier, `enable but tier != auto: ${label}`).toBe('auto')
+                        expect(draft, 'enable but draft !== false').toBe(false)
+                        expect(fork, 'enable but fork !== false').toBe(false)
+                        expect(rayHold, `enable while Ray must merge: ${label}`).not.toBe(true)
+                        expect(codexReview && codexReview.clear === true, `enable without Codex: ${label}`).toBe(true)
+                        if (risk === 'A') {
+                          expect(claudeSignoff && claudeSignoff.clear === true, label).toBe(true)
+                          expect(requiredChecksGreen, label).toBe(true)
+                          expect(conversationsResolved, label).toBe(true)
+                          expect(rayHold, label).toBe(false)
+                        } else {
+                          expect(risk === 'B' || risk === 'C', `enable but risk not in {A,B,C}: ${label}`).toBe(true)
+                        }
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -246,18 +288,40 @@ describe('decideMerge — the enable implication holds over every combination', 
     const forks = [true, false, undefined]
     const signoffs = [undefined, COMPLETE_SIGNOFF, INCOMPLETE_SIGNOFF]
     const codexReviews = [undefined, { clear: false }, CODEX_CLEAR]
+    const claudeSignoffs = [undefined, { clear: false }, { clear: true }]
+    const checks = [undefined, false, true]
+    const conversations = [undefined, false, true]
+    const holds = [undefined, false, true]
 
     for (const risk of risks) {
       for (const draft of drafts) {
         for (const fork of forks) {
           for (const signoff of signoffs) {
             for (const codexReview of codexReviews) {
-              const result = decideMerge({ risk, draft, fork, signoff, codexReview })
-              if (result.pass !== true) {
-                expect(
-                  result.decision,
-                  `pass false but decision enable: ${JSON.stringify({ risk, draft, fork, codexReview })}`,
-                ).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+              for (const claudeSignoff of claudeSignoffs) {
+                for (const requiredChecksGreen of checks) {
+                  for (const conversationsResolved of conversations) {
+                    for (const rayHold of holds) {
+                      const result = decideMerge({
+                        risk,
+                        draft,
+                        fork,
+                        signoff,
+                        codexReview,
+                        claudeSignoff,
+                        requiredChecksGreen,
+                        conversationsResolved,
+                        rayHold,
+                      })
+                      if (result.pass !== true) {
+                        expect(
+                          result.decision,
+                          `pass false but decision enable: ${JSON.stringify({ risk, draft, fork, rayHold })}`,
+                        ).toBe(MERGE_DECISION.DISABLE_AUTO_MERGE)
+                      }
+                    }
+                  }
+                }
               }
             }
           }
