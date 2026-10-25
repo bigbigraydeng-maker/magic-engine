@@ -2,9 +2,14 @@
  * 某个目标下最新一版处方的只读视图。
  * 推广计划页和作战地图共用这一读法：任何状态都算（含草稿），版本号最大的那一版；
  * 同版本再比写入时间。不写库、不批准。币种只取处方指标单位或目标上已有的币种。
+ * 客户还没有挂上目标的计划时，另按「最近一份还在用的处方」读（和 latest-draft 同一组状态）。
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import {
+  isStandingRule, oneSentence, reviewAnchor, ruleLines, spendFromStored, whySentences,
+  type StoredSpend,
+} from './prescription-copy'
 
 export interface GoalPrescriptionAction {
   id: string
@@ -12,6 +17,8 @@ export interface GoalPrescriptionAction {
   description: string
   /** fix_type 为 fde_manual，或 module 为 manual。 */
   manual: boolean
+  /** 站住不动的规矩（暂停线、保护期一类），不是这周要做的一件事。 */
+  rule: boolean
 }
 
 export interface GoalPrescriptionPhase {
@@ -45,6 +52,16 @@ export interface GoalPrescriptionView {
   line: string
   /** 处方指标单位或目标币种。两边都没有就是 null。 */
   currency: string | null
+  /** 这周真正要做的事，每件一句。 */
+  todos: string[]
+  /** 规矩，卡片里默认收起。 */
+  rules: string[]
+  /** 为什么，最多三句。 */
+  why: string[]
+  /** 每天 / 总共 / 配速。没写在处方里的就是 null。 */
+  spend: StoredSpend
+  /** 复盘起算日（YYYY-MM-DD）。没有就是 null。 */
+  review_anchor: string | null
 }
 
 export interface GoalPrescriptionRow {
@@ -106,6 +123,7 @@ function readActions(raw: unknown): GoalPrescriptionAction[] {
       title,
       description: readText(row.description),
       manual: isManualPrescriptionAction(row),
+      rule: isStandingRule(title, row.kind ?? row.role ?? row.category),
     })
   }
   return out
@@ -174,6 +192,8 @@ export function toGoalPrescriptionView(
   const manual = phases.reduce((sum, phase) => sum + phase.actions.filter(action => action.manual).length, 0)
   const prescriber = readText(row.agent_name).trim()
   const statusLabel = prescriptionStatusLabel(status)
+  const currency = currencyFromPrescription(kpis, goalCurrency)
+  const spoken = spokenCopy(content, phases)
   return {
     id,
     goal_id: readText(row.goal_id).trim() || goalId,
@@ -186,8 +206,32 @@ export function toGoalPrescriptionView(
     kpis,
     manual_action_count: manual,
     line: formatPrescriptionLine(version, statusLabel, manual),
-    currency: currencyFromPrescription(kpis, goalCurrency),
+    currency,
+    todos: spoken.todos,
+    rules: spoken.rules,
+    why: whySentences(readText(content?.narrative), readText(content?.summary)),
+    spend: spendFromStored(content, kpis, currency),
+    review_anchor: reviewAnchor(content, row.created_at),
   }
+}
+
+function spokenCopy(
+  content: Record<string, unknown> | null,
+  phases: readonly GoalPrescriptionPhase[],
+): { todos: string[]; rules: string[] } {
+  const rules: string[] = []
+  const todos: string[] = []
+  const seen = new Set<string>()
+  const push = (bucket: string[], line: string) => {
+    if (line === '' || seen.has(line)) return
+    seen.add(line)
+    bucket.push(line)
+  }
+  for (const line of ruleLines(content?.rules)) push(rules, line)
+  for (const phase of phases) {
+    for (const action of phase.actions) push(action.rule ? rules : todos, oneSentence(action.title))
+  }
+  return { todos, rules }
 }
 
 async function readGoalBudgetCurrency(clientId: string, goalId: string): Promise<string | null> {
@@ -221,4 +265,24 @@ export async function loadLatestGoalPrescription(clientId: string, goalId: strin
   if (error) throw new Error(`读处方失败：${error.message}`)
   if (!data) return null
   return toGoalPrescriptionView(data as GoalPrescriptionRow, goalId, await readGoalBudgetCurrency(clientId, goalId))
+}
+
+/** 和 prescriptions/latest-draft 不带目标时一样：还在用的状态里，按写入时间取最近一份。 */
+const READABLE_STATUSES = ['draft', 'generating', 'failed', 'approved'] as const
+
+export async function loadLatestClientPrescription(clientId: string): Promise<GoalPrescriptionView | null> {
+  const { data, error } = await supabaseAdmin
+    .from('prescriptions')
+    .select('id, goal_id, status, version, agent_name, content, created_at')
+    .eq('client_id', clientId)
+    .in('status', [...READABLE_STATUSES])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) throw new Error(`读处方失败：${error.message}`)
+  if (!data) return null
+  const row = data as GoalPrescriptionRow
+  const goalId = readText(row.goal_id).trim()
+  const currency = goalId === '' ? null : await readGoalBudgetCurrency(clientId, goalId)
+  return toGoalPrescriptionView(row, goalId, currency)
 }

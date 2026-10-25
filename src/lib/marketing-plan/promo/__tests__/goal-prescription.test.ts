@@ -22,7 +22,12 @@ vi.mock('@/lib/supabase', () => {
     constructor(private table: string) {}
     select() { return this }
     eq(column: string, value: unknown) { this.filters.push(row => row[column] === value); return this }
-    in() { db.usedIn = true; return this }
+    in(column: string, values: readonly unknown[]) {
+      db.usedIn = true
+      const allowed = new Set(values)
+      this.filters.push(row => allowed.has(row[column]))
+      return this
+    }
     order(column: string, options?: { ascending?: boolean }) {
       this.orders.push([column, options?.ascending !== false])
       return this
@@ -49,7 +54,8 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from: (table: string) => new Q(table) } }
 })
 
-import { loadLatestGoalPrescription } from '../goal-prescription'
+import { todayInNz } from '../schedule-view'
+import { loadLatestClientPrescription, loadLatestGoalPrescription } from '../goal-prescription'
 
 const CLIENT = 'client-1'
 const GOAL = 'goal-1'
@@ -191,5 +197,75 @@ describe('loadLatestGoalPrescription', () => {
     const view = await loadLatestGoalPrescription(CLIENT, GOAL)
     expect(view?.manual_action_count).toBe(1)
     expect(view?.phases[0]?.actions[0]?.manual).toBe(true)
+  })
+})
+
+describe('loadLatestClientPrescription', () => {
+  it('跳过已拒绝和已被替代，取最近一份还在用的，并且不看别的客户', async () => {
+    db.tables.prescriptions = [
+      rx({ id: 'old', status: 'approved', created_at: '2026-10-01T00:00:00.000Z' }),
+      rx({ id: 'no', status: 'rejected', version: 9, created_at: '2026-10-08T00:00:00.000Z' }),
+      rx({ id: 'gone', status: 'superseded', version: 8, created_at: '2026-10-07T00:00:00.000Z' }),
+      rx({ id: 'other', client_id: 'client-9', status: 'draft', created_at: '2026-10-09T00:00:00.000Z' }),
+      rx({ id: 'fail', status: 'failed', created_at: '2026-10-04T00:00:00.000Z' }),
+    ]
+    const view = await loadLatestClientPrescription(CLIENT)
+    expect(view?.id).toBe('fail')
+    expect(view?.review_anchor).toBe(todayInNz(new Date('2026-10-04T00:00:00.000Z')))
+  })
+
+  it('没有还在用的处方就返回 null；读失败抛错', async () => {
+    db.tables.prescriptions = [rx({ id: 'no', status: 'rejected' })]
+    expect(await loadLatestClientPrescription(CLIENT)).toBeNull()
+    db.errors.prescriptions = 'boom'
+    db.tables.prescriptions = [rx({ id: 'rx-1' })]
+    await expect(loadLatestClientPrescription(CLIENT)).rejects.toThrow('读处方失败：boom')
+  })
+})
+
+describe('大白话分段', () => {
+  it('要做的事和规矩分开，花费不从金额字段发明，原因最多三句', async () => {
+    db.tables.prescriptions = [rx({
+      id: 'rx-1',
+      created_at: '2026-10-02T00:00:00.000Z',
+      content: content({
+        summary: '摘要不该当原因。',
+        narrative: '第一句。第二句。第三句。第四句不要。',
+        rules: ['账户异常马上停'],
+        budget_allocation: [{ dimension: 'ads', amount_aud: 999, percentage: 100 }],
+        phases: [{
+          phase_number: 1,
+          name: '准备',
+          duration_weeks: 1,
+          actions: [
+            { ...action('a1', '建成暂停的系列。后面不要出现', 'fde_manual', 'manual') },
+            { ...action('a2', '加预算前先看三天', 'fde_manual', 'manual'), kind: 'rule' },
+            action('a3', '保护期内先别改', 'me_auto', 'ads_intelligence'),
+          ],
+        }],
+        kpi_targets: [
+          { metric: '日预算', current_value: null, target_value: 12, unit: 'NZD', dimension: 'ads' },
+        ],
+      }),
+    })]
+    const view = await loadLatestGoalPrescription(CLIENT, GOAL)
+    expect(view?.todos).toEqual(['建成暂停的系列。'])
+    expect(view?.rules).toEqual(['账户异常马上停', '加预算前先看三天', '保护期内先别改'])
+    expect(view?.why).toEqual(['第一句。', '第二句。', '第三句。'])
+    expect(view?.spend).toEqual({ daily: '12 NZD', total: null, pacing: null })
+    expect(view?.manual_action_count).toBe(2)
+    expect(view?.line).toBe('处方 v1 · 草稿 · 2 条人工动作')
+    expect(JSON.stringify(view?.spend)).not.toMatch(/999/)
+    expect(JSON.stringify(view?.spend)).not.toMatch(/AUD/)
+    expect(view?.review_anchor).toBe(todayInNz(new Date('2026-10-02T00:00:00.000Z')))
+  })
+
+  it('正文写了起算日就用它，不用写下时间', async () => {
+    db.tables.prescriptions = [rx({
+      id: 'rx-1',
+      content: content({ review_anchor: '2026-11-01' }),
+    })]
+    const view = await loadLatestGoalPrescription(CLIENT, GOAL)
+    expect(view?.review_anchor).toBe('2026-11-01')
   })
 })
