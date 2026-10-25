@@ -333,8 +333,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
       console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
-    // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
-    (b) => pushPrescriptionItems(supabase, b, now, nameOf),
+    // 本周已批准方案的进度复查 —— 只通知建议，不要求按这条去改方案
+    (b) => pushPrescriptionItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 方案复查通知读取失败（不阻塞其他待办）:', e),
+    ),
     // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
     (b) => pushLeadsSanityItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 客资口径检查失败（不阻塞其他待办）:', e),

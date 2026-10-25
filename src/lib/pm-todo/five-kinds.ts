@@ -233,7 +233,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
 
   // ── 知会 → 周一周报 ──────────────────────────────────────────────────
   calendar_closure_probe_passed: 'weekly', // 自动核对通过但只是部分证据：周报里报，窗口去补确认
-  prescription_updated: 'weekly', // 本周方案已自动落地
+  prescription_updated: 'weekly', // 本周已批准方案的进度复查
   diagnostic_findings: 'weekly', // 本周体检结果，已排成看板动作
   not_indexed: 'weekly', // 未收录页面汇总：SEO 日常活（FDE / 开发在修），周报里报进度
   auto_run_blocked: 'weekly', // 「多数情况下不用你动手，周二会自动重判」

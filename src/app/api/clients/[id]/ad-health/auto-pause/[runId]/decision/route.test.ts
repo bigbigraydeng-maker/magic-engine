@@ -27,7 +27,7 @@ const m = vi.hoisted(() => ({
   reject: vi.fn(),
 }))
 
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
+vi.mock('@/lib/auth/client-access', () => ({ requirePlanApproverAccess: m.access }))
 vi.mock('@/lib/kernel', () => ({ createKernel: m.createKernel }))
 vi.mock('@/lib/action-submission/ads-auto-pause', () => ({
   ADS_AUTO_PAUSE_ACTION_KEY: 'ads.auto_pause_on_d3',
@@ -108,6 +108,17 @@ describe('② 带上了 → 原样交下去', () => {
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
     expect(res.status).toBe(409)
     expect((await res.json()).code).toBe('STALE_DECISION')
+  })
+})
+
+describe('S2 非内部账号：批准和驳回都挡', () => {
+  it.each(['approve', 'reject'] as const)('🔴 %s → 403，连 Kernel 都不建', async (resolution) => {
+    m.access.mockResolvedValue({ ok: false, status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', reason: 'approver_only' })
+    const res = await post({ resolution, expectedDecisionId: SEEN, reason: '不要' })
+    expect(res.status).toBe(403)
+    expect(m.createKernel).not.toHaveBeenCalled()
+    expect(m.approve).not.toHaveBeenCalled()
+    expect(m.reject).not.toHaveBeenCalled()
   })
 })
 
