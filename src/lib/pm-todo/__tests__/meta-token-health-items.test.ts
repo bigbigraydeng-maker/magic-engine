@@ -19,9 +19,16 @@ const row = (over: Partial<TokenOwnerRow>): TokenOwnerRow => ({
   ...over,
 })
 
+// 实测：mock 只需覆盖被测函数实际调用的方法链；platform_oauth_connections 返回空使 DB 查找落空、走 env-var 路径
 function db(rows: TokenOwnerRow[] | 'error') {
   return {
     from(table: string) {
+      if (table === 'platform_oauth_connections') {
+        const c: Record<string, unknown> = {}
+        c.select = () => c; c.eq = () => c; c.order = () => c; c.limit = () => c
+        c.maybeSingle = async () => ({ data: null, error: null })
+        return c
+      }
       expect(table).toBe('clients')
       const chain = {
         select: () => chain,
