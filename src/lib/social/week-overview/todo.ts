@@ -4,10 +4,10 @@
  */
 import type { LitePackState } from '../story-lite/service'
 import type { StoryTally } from '../story-lite/page-text'
-import type { ReelWork } from './reel-works'
+import { REEL_QUERY_LIMIT, type ReelWork } from './reel-works'
 
 export interface TodoItem {
-  id: 'reel_review' | 'reel_problem' | 'story_authorize' | 'story_newer_draft' | 'story_blocked' | 'story_overdue'
+  id: 'reel_review' | 'reel_problem' | 'reel_old_review' | 'story_authorize' | 'story_newer_draft' | 'story_blocked' | 'story_overdue'
   count: number
   /** One plain sentence, no codes. */
   text: string
@@ -21,6 +21,8 @@ export interface TodoSummary {
   items: TodoItem[]
   /** Parts that could not be read ("Reel" / "Story"); the page must say the count may be incomplete. */
   unknown: string[]
+  /** Set when the Reel list is as long as the API's cap, so older orders may be missing; the page says it only looked at the newest N. */
+  limitedTo: number | null
 }
 
 export interface TodoStoryInput {
@@ -40,6 +42,12 @@ export interface TodoInput {
   tally: StoryTally
 }
 
+function limitOf(works: ReadonlyArray<ReelWork> | null): number | null {
+  if (!works) return null
+  const versions = works.reduce((sum, work) => sum + work.versions.length, 0)
+  return versions >= REEL_QUERY_LIMIT ? REEL_QUERY_LIMIT : null
+}
+
 function reelItems(clientId: string, works: ReadonlyArray<ReelWork>): TodoItem[] {
   const href = `/dashboard/factory?client=${clientId}`
   const review = works.filter((work) => work.tag.kind === 'review').length
@@ -47,6 +55,9 @@ function reelItems(clientId: string, works: ReadonlyArray<ReelWork>): TodoItem[]
   const items: TodoItem[] = []
   if (review > 0) items.push({ id: 'reel_review', count: review, text: `视频：${review} 条作品等你审核`, cta: '去视频工厂看 / 点通过', href })
   if (problem > 0) items.push({ id: 'reel_problem', count: problem, text: `视频：${problem} 条被打回或出了问题`, cta: '去视频工厂看', href })
+  // the newest version of a piece is no longer waiting, but an older one still is: it must not hide behind the folded row
+  const oldReview = works.filter((work) => work.tag.kind !== 'review' && work.olderPending > 0).length
+  if (oldReview > 0) items.push({ id: 'reel_old_review', count: oldReview, text: `视频：${oldReview} 条作品的最新版已不是待审核，但旧版本还有在等你审核的`, cta: '去视频工厂看', href })
   return items
 }
 
@@ -59,8 +70,8 @@ function storyItems(clientId: string, story: TodoStoryInput | null, tally: Story
   if (story?.newerDraftTitle) {
     items.push({ id: 'story_newer_draft', count: 1, text: `Story：新的周包「${story.newerDraftTitle}」还没授权`, cta: '去 Story 页授权', href })
   }
-  if (tally.blocked > 0) items.push({ id: 'story_blocked', count: tally.blocked, text: `Story：${tally.blocked} 条被拦或出错，没发出去`, cta: '去 Story 页看看', href })
-  if (tally.overdue > 0) items.push({ id: 'story_overdue', count: tally.overdue, text: `Story：${tally.overdue} 条已过发布时间，没发出去`, cta: '去 Story 页看看', href })
+  if (tally.blocked > 0) items.push({ id: 'story_blocked', count: tally.blocked, text: `Story：${tally.blocked} 条被拦、出错，或不确定有没有发出去，需要人看一眼`, cta: '去 Story 页看看', href })
+  if (tally.overdue > 0) items.push({ id: 'story_overdue', count: tally.overdue, text: `Story：${tally.overdue} 条已过计划时间，还没确认发出去`, cta: '去 Story 页看看', href })
   return items
 }
 
@@ -71,12 +82,12 @@ export function buildTodoSummary(input: TodoInput): TodoSummary {
   else items.push(...reelItems(input.clientId, input.works))
   if (input.storyFailed) unknown.push('Story')
   else items.push(...storyItems(input.clientId, input.story, input.tally))
-  return { total: items.reduce((sum, item) => sum + item.count, 0), items, unknown }
+  return { total: items.reduce((sum, item) => sum + item.count, 0), items, unknown, limitedTo: limitOf(input.works) }
 }
 
 /** Only the Reel part of the headline, for the 短视频 tab. `null` works = the Reel read failed. */
 export function buildReelTodoSummary(clientId: string, works: ReadonlyArray<ReelWork> | null): TodoSummary {
-  if (works === null) return { total: 0, items: [], unknown: ['视频'] }
+  if (works === null) return { total: 0, items: [], unknown: ['视频'], limitedTo: null }
   const items = reelItems(clientId, works)
-  return { total: items.reduce((sum, item) => sum + item.count, 0), items, unknown: [] }
+  return { total: items.reduce((sum, item) => sum + item.count, 0), items, unknown: [], limitedTo: limitOf(works) }
 }

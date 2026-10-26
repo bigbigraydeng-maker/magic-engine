@@ -9,7 +9,7 @@ const NOW = new Date('2026-10-14T00:00:00Z')
 describe('describeStoryChips', () => {
   it('lists only non-empty counts, what needs a person first', () => {
     const chips = describeStoryChips({ ...EMPTY, total: 8, unauthorised: 1, blocked: 2, overdue: 1, waiting: 2, recordedSent: 1, stopped: 1 })
-    expect(chips.map((c) => `${c.label} ${c.count}`)).toEqual(['还没授权 1', '被拦或出错 2', '过点没发出 1', '待发 2', '已发出（未核对） 1', '已停或授权过期 1'])
+    expect(chips.map((c) => `${c.label} ${c.count}`)).toEqual(['还没授权 1', '需要人看 2', '过点还没发出 1', '待发 2', '已发出（未核对） 1', '已停或授权过期 1'])
     expect(describeStoryChips(EMPTY)).toEqual([])
   })
 

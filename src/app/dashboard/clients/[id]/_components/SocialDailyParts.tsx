@@ -66,10 +66,10 @@ export function FoldGroup({ title, count, kind, hint, defaultOpen, children }: {
 
 /** The headline of the page: how many things need a click, and where to click. Never says "0" for a part it could not read. */
 export function TodoStrip({ summary, scope = '社媒日常' }: { summary: TodoSummary; scope?: string }) {
-  const { total, items, unknown } = summary
+  const { total, items, unknown, limitedTo } = summary
   const calm = total === 0 && unknown.length === 0
   const heading = calm ? (
-    `${scope}：现在没有要你处理的事`
+    `${scope}：${limitedTo ? `最近 ${limitedTo} 个版本里` : '现在'}没有要你处理的事`
   ) : total === 0 ? (
     `现在读不到${unknown.join('、')}，不确定有没有要你处理的事`
   ) : (
@@ -99,6 +99,7 @@ export function TodoStrip({ summary, scope = '社媒日常' }: { summary: TodoSu
       {unknown.length > 0 && total > 0 && (
         <p className="mt-2 text-xs font-medium text-[#8F2B22]">现在读不到{unknown.join('、')}，上面的件数可能不全，请刷新页面。</p>
       )}
+      {limitedTo !== null && <p className="mt-2 text-xs text-me-charcoal/70">只读了最近 {limitedTo} 个版本，更早的请到视频工厂看。</p>}
     </section>
   )
 }
@@ -157,6 +158,9 @@ function ReelWorkRow({ work, clientId }: { work: ReelWork; clientId: string }) {
               <h4 className="min-w-0 break-words text-sm font-semibold leading-snug text-me-charcoal">{work.title}</h4>
               <StatusTag kind={work.tag.kind} title={work.tag.hint}>{work.tag.label}</StatusTag>
               {work.versions.length > 1 && <StatusTag>共 {work.versions.length} 版</StatusTag>}
+              {work.olderPending > 0 && work.tag.kind !== 'review' && (
+                <StatusTag kind="review" title="最新版已经不是待审核，但旧版本里还有在等审核的。">另有 {work.olderPending} 个旧版待审核</StatusTag>
+              )}
             </div>
             <p className="text-xs text-me-charcoal/70">{meta}</p>
           </div>

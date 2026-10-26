@@ -9,9 +9,13 @@ const TRAILING_LABEL = /\s*[·•|\-–—]\s*Campaign\s*$/i
 /** A separator is a dot, bar or dash with spaces around it, so "FB+IG" and "2027-03-25" are never cut. */
 const SEPARATOR = /\s+[·•|]\s+|\s+[—–-]\s+/
 const MAX_LENGTH = 22
+/** When two names are the same only because the cut removed what told them apart, they get this much room. */
+const WIDE_LENGTH = 48
 
-function clip(text: string): string {
-  return text.length > MAX_LENGTH ? `${text.slice(0, MAX_LENGTH - 1).trimEnd()}…` : text
+/** Cuts by character (an emoji is never split) and adds an ellipsis. */
+function clipTo(text: string, max: number): string {
+  const chars = Array.from(text)
+  return chars.length > max ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : text
 }
 
 function partsOf(title: string): string[] {
@@ -20,30 +24,38 @@ function partsOf(title: string): string[] {
   return parts.length > 0 ? parts : [title.trim()]
 }
 
-/** "CTS 3 月团招募 · 四个中国团 · 每日计划 · Campaign" gives "CTS 3 月团招募". */
+/** "Spring Launch · Four Tours · Daily Plan · Campaign" gives "Spring Launch". */
 export function shortCampaignName(title: string): string {
-  return clip(partsOf(title)[0])
+  return clipTo(partsOf(title)[0], MAX_LENGTH)
 }
 
 /**
  * Short names for a whole list. When two campaigns would get the same short name, the next part of each title is added
- * ("Spring · Leads" / "Spring · Brand") until they differ, so a person can always tell them apart.
+ * ("Spring · Leads" / "Spring · Brand") until they differ. If the cut to a short length then makes them the same again,
+ * the two are shown longer, so a person can always tell them apart.
  */
 export function shortCampaignNames(titles: ReadonlyArray<string>): string[] {
   const parts = titles.map(partsOf)
-  const depth = titles.map(() => 1)
+  const depth = parts.map(() => 1)
+  const joined = (i: number): string => parts[i].slice(0, depth[i]).join(' · ')
+  const count = (names: string[]): Map<string, number> => {
+    const seen = new Map<string, number>()
+    for (const name of names) seen.set(name, (seen.get(name) ?? 0) + 1)
+    return seen
+  }
   for (let round = 0; round < 4; round += 1) {
-    const names = parts.map((p, i) => p.slice(0, depth[i]).join(' · '))
-    const counts = new Map<string, number>()
-    for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1)
+    const full = parts.map((_, i) => joined(i))
+    const seen = count(full)
     let changed = false
-    names.forEach((name, i) => {
-      if ((counts.get(name) ?? 0) > 1 && depth[i] < parts[i].length) {
+    full.forEach((name, i) => {
+      if ((seen.get(name) ?? 0) > 1 && depth[i] < parts[i].length) {
         depth[i] += 1
         changed = true
       }
     })
     if (!changed) break
   }
-  return parts.map((p, i) => clip(p.slice(0, depth[i]).join(' · ')))
+  const names = parts.map((_, i) => clipTo(joined(i), MAX_LENGTH))
+  const shown = count(names)
+  return names.map((name, i) => ((shown.get(name) ?? 0) > 1 ? clipTo(joined(i), WIDE_LENGTH) : name))
 }

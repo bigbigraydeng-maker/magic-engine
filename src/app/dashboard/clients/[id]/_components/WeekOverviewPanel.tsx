@@ -17,7 +17,7 @@ import {
 } from '@/lib/social/story-lite/page-text'
 import type { LitePackState } from '@/lib/social/story-lite/service'
 import type { OverviewStoryItem, PublishingQuota, WeekOverview } from '@/lib/social/week-overview/build'
-import { countReelWorks, describeVarietyAdvice, groupReelWorks, type ReelWork, type StatusKind } from '@/lib/social/week-overview/reel-works'
+import { REEL_QUERY_LIMIT, countReelWorks, describeVarietyAdvice, groupReelWorks, type ReelWork, type StatusKind } from '@/lib/social/week-overview/reel-works'
 import { describeStoryChips, describeStoryItemState, describeStoryPackLine } from '@/lib/social/week-overview/story-view'
 import { buildTodoSummary } from '@/lib/social/week-overview/todo'
 
@@ -38,7 +38,7 @@ const KIND_LABEL: Record<StatusKind, string> = {
   problem: '出问题',
   approved: '已通过',
   making: '制作中',
-  draft: '草稿',
+  draft: 'Facebook 草稿',
   uploaded: '已上传（未核对）',
   sent: '已发出',
   closed: '旧记录',
@@ -103,14 +103,7 @@ function SafetyBanner({ live, clientId }: { live: boolean; clientId: string }) {
           去 Story 页授权 / 停
         </Link>
       </div>
-      {live ? (
-        <p className="mt-1 text-xs text-me-charcoal/80">{mode.detail}</p>
-      ) : (
-        <details className="mt-1 text-xs text-me-charcoal/80">
-          <summary className="cursor-pointer font-medium underline">说明</summary>
-          <p className="mt-1">{mode.detail}</p>
-        </details>
-      )}
+      <p className="mt-1 text-xs text-me-charcoal/80">{mode.detail}</p>
     </div>
   )
 }
@@ -144,7 +137,11 @@ function ReelTile({ data, works }: { data: WeekOverview; works: ReelWork[] | nul
       ) : (
         <>
           <BigNumber value={counts.works} unit="条作品" />
-          {counts.versions > counts.works && <p className="text-xs text-me-charcoal/70">共 {counts.versions} 个版本，同一条的修订版已折叠在一起</p>}
+          {counts.versions > counts.works && (
+            <p className="text-xs text-me-charcoal/70">
+              共 {counts.versions} 个版本，同一条的修订版已折叠在一起{counts.versions >= REEL_QUERY_LIMIT ? `；只读了最近 ${REEL_QUERY_LIMIT} 个版本` : ''}
+            </p>
+          )}
           <div className="flex flex-wrap gap-1.5">
             {KIND_ORDER.filter((kind) => counts.byKind[kind] > 0).map((kind) => (
               <StatusTag key={kind} kind={kind}>

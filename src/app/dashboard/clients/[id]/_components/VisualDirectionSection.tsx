@@ -224,7 +224,7 @@ export function VisualDirectionSection({
             <input
               value={draft.vi_mood}
               onChange={e => update('vi_mood', e.target.value)}
-              placeholder="例如：秋日北京皇城，薄雾清晨，有历史感"
+              placeholder="例如：秋日清晨，薄雾，柔和自然光，有质感"
               className={`${INPUT_CLASS} text-xs`}
             />
           </div>
@@ -233,7 +233,7 @@ export function VisualDirectionSection({
             <input
               value={draft.vi_color_accent}
               onChange={e => update('vi_color_accent', e.target.value)}
-              placeholder="例如：丰收金 #C9A84C"
+              placeholder="例如：暖金色 #C9A84C"
               className={`${INPUT_CLASS} text-xs`}
             />
           </div>
@@ -247,7 +247,7 @@ export function VisualDirectionSection({
             <textarea
               value={draft.vi_specific_dos}
               onChange={e => update('vi_specific_dos', e.target.value)}
-              placeholder={"秋叶\n清晨薄雾\n古建筑特写"}
+              placeholder={"秋叶\n清晨薄雾\n建筑细节特写"}
               rows={3}
               className={`${INPUT_CLASS} text-xs resize-none`}
             />
@@ -259,7 +259,7 @@ export function VisualDirectionSection({
             <textarea
               value={draft.vi_specific_donts}
               onChange={e => update('vi_specific_donts', e.target.value)}
-              placeholder={"夏日绿叶\n现代都市背景"}
+              placeholder={"夏日绿叶\n杂乱的背景"}
               rows={3}
               className={`${INPUT_CLASS} text-xs resize-none`}
             />
@@ -274,7 +274,7 @@ export function VisualDirectionSection({
             <input
               value={draft.vi_reference_note}
               onChange={e => update('vi_reference_note', e.target.value)}
-              placeholder="例如：Warm cinematic autumn travel photography, Palace Museum editorial style, harvest gold tones"
+              placeholder="例如：Warm cinematic autumn photography, editorial style, golden tones"
               className={`${INPUT_CLASS} text-xs`}
             />
           </div>

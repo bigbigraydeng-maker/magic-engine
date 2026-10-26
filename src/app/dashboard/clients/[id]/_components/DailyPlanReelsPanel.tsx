@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
 import type { OverviewReel, ReelVariety } from '@/lib/social/week-overview/build'
-import { countReelWorks, describeVarietyAdvice, groupReelWorks, type ReelWork, type StatusKind } from '@/lib/social/week-overview/reel-works'
+import { REEL_QUERY_LIMIT, countReelWorks, describeVarietyAdvice, groupReelWorks, type ReelWork, type StatusKind } from '@/lib/social/week-overview/reel-works'
 import { buildReelTodoSummary } from '@/lib/social/week-overview/todo'
 
 import { ReelWorkGroups, TodoStrip } from './SocialDailyParts'
@@ -37,8 +37,9 @@ function ReelStats({ works }: { works: ReelWork[] }) {
   const cells: Array<{ label: string; value: number; kind: StatusKind; always: boolean }> = [
     { label: '待你审核', value: byKind.review, kind: 'review', always: true },
     { label: '已通过，等发出', value: byKind.approved, kind: 'approved', always: true },
-    { label: 'Facebook 草稿', value: byKind.draft + byKind.uploaded, kind: 'draft', always: true },
+    { label: 'Facebook 草稿', value: byKind.draft, kind: 'draft', always: true },
     { label: '已公开', value: byKind.sent, kind: 'sent', always: true },
+    { label: '已上传（未核对）', value: byKind.uploaded, kind: 'uploaded', always: false },
     { label: '出问题 / 被打回', value: byKind.problem, kind: 'problem', always: false },
     { label: '制作中', value: byKind.making, kind: 'making', always: false },
   ]
@@ -63,7 +64,7 @@ function ReelsBody({ clientId, works, variety, weeklyQuota }: { clientId: string
       <ReelStats works={works} />
       <div>
         <p className={NOTE}>
-          共 {counts.works} 条作品{counts.versions > counts.works ? `（${counts.versions} 个版本，同一条的修订版已折叠在一起）` : ''}
+          共 {counts.works} 条作品{counts.versions > counts.works ? `（${counts.versions} 个版本，同一条的修订版已折叠在一起${counts.versions >= REEL_QUERY_LIMIT ? `；只读了最近 ${REEL_QUERY_LIMIT} 个版本` : ''}）` : ''}
           ；{typeof weeklyQuota === 'number' ? `每周名额 ${weeklyQuota} 条` : '每周名额未配置'}。
         </p>
         {advice && <p className="mt-1 text-xs font-medium text-[#8A4A0A]">{advice}</p>}

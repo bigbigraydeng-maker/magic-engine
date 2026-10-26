@@ -37,6 +37,8 @@ export interface ReelWork {
   latest: ReelVersion
   /** All versions, newest first (length >= 1). */
   versions: ReelVersion[]
+  /** How many OLDER versions are still waiting for review (the newest one's own state is `tag`). */
+  olderPending: number
   tag: ReelTag
 }
 
@@ -45,9 +47,16 @@ export interface ReelWork {
 const OPEN = new Set(['(', '（'])
 const CLOSE = new Set([')', '）'])
 const COLON = new Set([':', '：'])
-const VERSION_TOKEN = /\b(?:v\d+[a-z]?(?:-[a-z0-9]+)*|r\d+)\b/gi
+const VERSION_WORD = /^(?:v\d+[a-z]?(?:-[a-z0-9]+)*|r\d+)$/i
 const REVISION_GROUP = /^\s*((?:[vr]\d+[a-z]?(?:-[a-z0-9]+)*|retry\s*\d+|re-?run(?:\s*\d+)?))\s*(?:[:：]|$)/i
 const MAX_TITLE = 64
+const EDGE_CHAR = /[\s,;·\-–—]/
+
+/**
+ * How many Reel orders the overview API sends at most (newest first). Keep it equal to REEL_LIMIT in build.ts: a list
+ * this long may be cut off, and the page says so instead of calling an unseen part "nothing to do".
+ */
+export const REEL_QUERY_LIMIT = 30
 
 interface Piece {
   kind: 'text' | 'group'
@@ -92,8 +101,14 @@ function firstTopLevelColon(text: string): number {
   return -1
 }
 
+/** Collapses white space and trims separators from both ends in one pass each, so a long run of dashes cannot make it slow. */
 function tidy(text: string): string {
-  return text.replace(/\s+/g, ' ').replace(/^[\s,;·\-–—]+|[\s,;·\-–—]+$/g, '')
+  const spaced = text.replace(/\s+/g, ' ')
+  let start = 0
+  let end = spaced.length
+  while (start < end && EDGE_CHAR.test(spaced[start])) start += 1
+  while (end > start && EDGE_CHAR.test(spaced[end - 1])) end -= 1
+  return spaced.slice(start, end)
 }
 
 function stripTemplateWord(name: string, template: string | null): string {
@@ -104,29 +119,41 @@ function stripTemplateWord(name: string, template: string | null): string {
 
 export interface ParsedTicket {
   name: string
-  index: number | null
+  /** Every "#n" in the head, in the order written. */
+  indexes: string[]
   batch: number | null
-  campaignNote: string | null
+  /** The ticket's own bracket notes in the head (revision notes are not included), as written. */
+  notes: string[]
   headVersion: string | null
 }
 
-function readHead(headRaw: string, template: string | null) {
+/** Takes version marks ("v2", "r3", "v1g-nov") out of a name. A mark is a whole word and never the first word ("V8 Engine" stays). */
+function takeOutVersionMarks(text: string): { text: string; first: string | null } {
+  let first: string | null = null
+  const kept = text.split(' ').filter((word, i) => {
+    if (i > 0 && VERSION_WORD.test(word)) {
+      first = first ?? word
+      return false
+    }
+    return true
+  })
+  return { text: kept.join(' '), first }
+}
+
+function readHead(headRaw: string, template: string | null): ParsedTicket {
   const pieces = tokenize(headRaw)
   const groups = pieces.filter((p) => p.kind === 'group').map((p) => p.text)
-  let headText = pieces.filter((p) => p.kind === 'text').map((p) => p.text).join(' ')
-  const noteGroups = groups.filter((g) => !REVISION_GROUP.test(g))
-  const indexMatch = /#\s*(\d{1,3})\b/.exec(`${headText} ${groups.join(' ')}`)
+  const notes = groups.filter((g) => !REVISION_GROUP.test(g)).map(tidy).filter((g) => g.length > 0)
+  const plain = tidy(pieces.filter((p) => p.kind === 'text').map((p) => p.text).join(' '))
+  const indexes = Array.from(`${plain} ${groups.join(' ')}`.matchAll(/#\s*(\d+)/g), (match) => match[1])
   const batchMatch = /\bbatch\s*(\d+)\b/i.exec(groups.join(' '))
-  const note = noteGroups.length > 0 ? tidy(noteGroups[0].replace(/#\s*\d+/g, ' ')) : ''
-  headText = headText.replace(/#\s*\d+/g, ' ')
-  const versionMatch = new RegExp(VERSION_TOKEN.source, 'i').exec(headText)
-  headText = headText.replace(VERSION_TOKEN, ' ')
+  const marked = takeOutVersionMarks(tidy(plain.replace(/#\s*\d+/g, ' ')))
   return {
-    name: tidy(stripTemplateWord(tidy(headText), template)),
-    index: indexMatch ? Number(indexMatch[1]) : null,
+    name: tidy(stripTemplateWord(tidy(marked.text), template)),
+    indexes,
     batch: batchMatch ? Number(batchMatch[1]) : null,
-    campaignNote: note.length > 0 ? note : null,
-    headVersion: versionMatch ? versionMatch[0] : null,
+    notes,
+    headVersion: marked.first,
   }
 }
 
@@ -180,36 +207,43 @@ export function describeReelTag(reel: Pick<OverviewReel, 'status' | 'published_a
     case 'superseded':
       return { kind: 'closed', label: '已归档', hint: '旧记录，不会再发。' }
     default:
-      return { kind: 'making', label: '状态未知', hint: '读不出这条的状态，请到视频工厂看。' }
+      return { kind: 'problem', label: '状态未知', hint: '读不出这条的状态，请到视频工厂看。' }
   }
 }
 
 function clip(text: string): string {
-  return text.length > MAX_TITLE ? `${text.slice(0, MAX_TITLE - 1).trimEnd()}…` : text
+  const chars = Array.from(text) // by character, so an emoji is never cut in half
+  return chars.length > MAX_TITLE ? `${chars.slice(0, MAX_TITLE - 1).join('').trimEnd()}…` : text
 }
 
 function titleOf(ticket: ParsedTicket, angle: string): string {
   const base = ticket.name.length > 0 ? ticket.name : angle.trim()
   if (base.length === 0) return '（没有写主题）'
-  return clip(ticket.index !== null && ticket.name.length > 0 ? `${base} #${ticket.index}` : base)
+  return clip(ticket.indexes.length > 0 && ticket.name.length > 0 ? `${base} #${ticket.indexes.join(' #')}` : base)
+}
+
+/** The note shown in the details: the first bracket note without its "#n". */
+function noteOf(ticket: ParsedTicket): string | null {
+  const note = ticket.notes.length > 0 ? tidy(ticket.notes[0].replace(/#\s*\d+/g, ' ')) : ''
+  return note.length > 0 ? note : null
 }
 
 /**
- * Folds the Reels of one client into works. Two orders are the same work only when the name, the "#n", the template and
- * the ticket's own note all match once version marks like "v2" / "r3" are taken away; anything less certain stays apart,
- * so a piece that needs a decision can never be hidden behind another one.
+ * Folds the Reels of one client into works. Two orders are the same work only when the name, every "#n", the template and
+ * every bracket note of the ticket all match once version marks like "v2" / "r3" are taken away; anything less certain
+ * stays apart, so a piece that needs a decision can never be hidden behind another one.
  * Input order is kept: the API sends newest first, so the first version of a group is its newest.
  */
 export function groupReelWorks(reels: ReadonlyArray<OverviewReel>): ReelWork[] {
   const byKey = new Map<string, ReelWork>()
-  const marks = new Map<ReelWork, string | null>()
+  const tieBreaks = new Map<ReelWork, TieBreak>()
   const order: ReelWork[] = []
   for (const reel of reels) {
     const ticket = parseTicket(reel.angle ?? '', reel.template)
     const version: ReelVersion = { reel, tag: describeReelTag(reel) }
     const key = ticket.name.length === 0
       ? `solo:${reel.id}`
-      : [ticket.name.toLowerCase(), ticket.index ?? '', reel.template ?? '', (ticket.campaignNote ?? '').toLowerCase()].join('|')
+      : [ticket.name.toLowerCase(), ticket.indexes.join(','), reel.template ?? '', ticket.notes.map((note) => note.toLowerCase()).join(' | ')].join('|')
     const existing = byKey.get(key)
     if (existing) {
       existing.versions.push(version)
@@ -219,26 +253,45 @@ export function groupReelWorks(reels: ReadonlyArray<OverviewReel>): ReelWork[] {
       key,
       title: titleOf(ticket, reel.angle ?? ''),
       batchLabel: ticket.batch !== null ? `第 ${ticket.batch} 批` : null,
-      campaignNote: ticket.campaignNote,
+      campaignNote: noteOf(ticket),
       templateLabel: describeReelTemplate(reel.template),
       latest: version,
       versions: [version],
+      olderPending: 0,
       tag: version.tag,
     }
     byKey.set(key, work)
-    marks.set(work, ticket.headVersion)
+    tieBreaks.set(work, { mark: ticket.headVersion, note: noteOf(ticket) })
     order.push(work)
   }
-  return tellSameTitlesApart(order, marks)
+  for (const work of order) work.olderPending = work.versions.slice(1).filter((version) => version.tag.kind === 'review').length
+  return tellSameTitlesApart(order, tieBreaks)
 }
 
-/** Two different works with the same title get their version mark added ("Name v4"), so a person can tell them apart. */
-function tellSameTitlesApart(works: ReelWork[], marks: ReadonlyMap<ReelWork, string | null>): ReelWork[] {
-  const seen = new Map<string, number>()
-  for (const work of works) seen.set(work.title, (seen.get(work.title) ?? 0) + 1)
+interface TieBreak {
+  mark: string | null
+  note: string | null
+}
+
+/**
+ * Two different works with the same title are told apart: first by their version mark ("Name v4"), and if they are
+ * still the same, by the ticket's own note ("Name（Spring 2026）"). Nothing is dropped from the title otherwise.
+ */
+function tellSameTitlesApart(works: ReelWork[], tieBreaks: ReadonlyMap<ReelWork, TieBreak>): ReelWork[] {
+  const repeated = (): Map<string, number> => {
+    const seen = new Map<string, number>()
+    for (const work of works) seen.set(work.title, (seen.get(work.title) ?? 0) + 1)
+    return seen
+  }
+  let seen = repeated()
   for (const work of works) {
-    const mark = marks.get(work)
+    const mark = tieBreaks.get(work)?.mark
     if ((seen.get(work.title) ?? 0) > 1 && mark) work.title = clip(`${work.title} ${mark}`)
+  }
+  seen = repeated()
+  for (const work of works) {
+    const note = tieBreaks.get(work)?.note
+    if ((seen.get(work.title) ?? 0) > 1 && note) work.title = clip(`${work.title}（${note}）`)
   }
   return works
 }

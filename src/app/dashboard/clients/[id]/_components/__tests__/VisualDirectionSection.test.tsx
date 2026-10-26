@@ -52,7 +52,7 @@ describe('视觉方向保存', () => {
     render(
       <VisualDirectionSection campaign={campaign} clientId="client-1" onUpdated={vi.fn()} />,
     )
-    fireEvent.change(screen.getByPlaceholderText(/秋日北京皇城/), { target: { value: '金秋' } })
+    fireEvent.change(screen.getByPlaceholderText(/秋日清晨，薄雾/), { target: { value: '金秋' } })
     fireEvent.click(screen.getByRole('button', { name: '保存视觉方向' }))
     expect(await screen.findByText('已保存')).toBeTruthy()
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
@@ -71,7 +71,7 @@ describe('视觉方向保存', () => {
     render(
       <VisualDirectionSection campaign={campaign} clientId="client-1" onUpdated={vi.fn()} />,
     )
-    fireEvent.change(screen.getByPlaceholderText(/秋日北京皇城/), { target: { value: '金秋' } })
+    fireEvent.change(screen.getByPlaceholderText(/秋日清晨，薄雾/), { target: { value: '金秋' } })
     fireEvent.click(screen.getByRole('button', { name: '保存视觉方向' }))
     expect(await screen.findByText('没有存上，请再试一次')).toBeTruthy()
     expect(screen.queryByText('已保存')).toBeNull()

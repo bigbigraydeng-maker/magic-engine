@@ -128,7 +128,7 @@ describe('describeReelTag', () => {
     expect(tag('dead_letter')).toMatchObject({ kind: 'problem', label: '出问题' })
     for (const status of ['queued', 'claimed', 'producing']) expect(tag(status)).toMatchObject({ kind: 'making', label: '制作中' })
     for (const status of ['rendered', 'archived', 'superseded']) expect(tag(status).kind).toBe('closed')
-    expect(tag('something_new')).toMatchObject({ kind: 'making', label: '状态未知' })
+    expect(tag('something_new')).toMatchObject({ kind: 'problem', label: '状态未知' }) // an unreadable state is something to look at, not a quiet "making"
   })
 
   it('an uploaded Reel says draft / public, and never claims more than the record knows', () => {
@@ -206,5 +206,66 @@ describe('describeVarietyAdvice', () => {
     expect(describeVarietyAdvice({ same_track_max: 1, same_track_file: 'a.mp3', price_screen_count: 0, total: 3 })).toBeNull()
     expect(describeVarietyAdvice({ same_track_max: 0, same_track_file: null, price_screen_count: 0, total: 0 })).toBeNull()
     expect(`${track}${price}${both}`).not.toMatch(/BGM|价格屏|放行规则/)
+  })
+})
+
+describe('groupReelWorks: never merge what only looks alike (review fixes)', () => {
+  const titles = (angles: string[]) => groupReelWorks(angles.map((angle, i) => reel({ id: `x${i}`, angle }))).map((w) => w.title)
+
+  it('keeps pieces apart when the only difference is something the title cannot show', () => {
+    expect(groupReelWorks([
+      reel({ id: '1', angle: 'Harbour Tour (Spring launch) (batch1 #4): a' }),
+      reel({ id: '2', angle: 'Harbour Tour (Spring launch) (batch2 #4): a' }),
+    ])).toHaveLength(2)
+    expect(groupReelWorks([reel({ id: '1', angle: 'Top Picks #2026: a' }), reel({ id: '2', angle: 'Top Picks #2027: a' })])).toHaveLength(2)
+    expect(groupReelWorks([reel({ id: '1', angle: 'Top #1 picks #2: a' }), reel({ id: '2', angle: 'Top #1 picks #3: a' })])).toHaveLength(2)
+    expect(groupReelWorks([
+      reel({ id: '1', angle: 'Harbour Tour (Spring batch1 #4) (Winter special): a' }),
+      reel({ id: '2', angle: 'Harbour Tour (Spring batch1 #4) (Summer special): a' }),
+    ])).toHaveLength(2)
+  })
+
+  it('a version-looking first word is part of the name ("V8 Engine" is not "Engine v8")', () => {
+    expect(groupReelWorks([reel({ id: '1', angle: 'V8 Engine postcard: a' }), reel({ id: '2', angle: 'V6 Engine postcard: a' })])).toHaveLength(2)
+    expect(groupReelWorks([reel({ id: '1', angle: 'R1 Roadshow: a' }), reel({ id: '2', angle: 'R2 Roadshow: a' })])).toHaveLength(2)
+    expect(titles(['V8 Engine postcard: a'])).toEqual(['V8 Engine'])
+    // a real trailing mark still folds
+    expect(groupReelWorks([reel({ id: '1', angle: 'Roadshow r2: a' }), reel({ id: '2', angle: 'Roadshow r1: a' })])).toHaveLength(1)
+  })
+
+  it('only a whole word is a version mark; "v1.2" and "[v2]" stay in the title', () => {
+    expect(titles(['Harbour v1.2: x', 'Harbour Tour [v2]: a'])).toEqual(['Harbour v1.2', 'Harbour Tour [v2]'])
+  })
+
+  it('shows every "#n" and tells same-title works apart by the ticket note when there is no version mark', () => {
+    expect(titles(['Top #1 picks #2: a'])).toEqual(['Top picks #1 #2'])
+    expect(titles(['Harbour (Spring 2026): a', 'Harbour (Spring 2027): a'])).toEqual(['Harbour（Spring 2026）', 'Harbour（Spring 2027）'])
+  })
+
+  it('counts older versions still waiting for review, only when the newest is not itself waiting', () => {
+    const [work] = groupReelWorks([
+      reel({ id: 'v3', status: 'approved', created_at: '2026-10-23T00:00:00Z', angle: 'Harbour Tour v3: x' }),
+      reel({ id: 'v2', status: 'in_review', created_at: '2026-10-22T00:00:00Z', angle: 'Harbour Tour v2: x' }),
+      reel({ id: 'v1', status: 'in_review', created_at: '2026-10-21T00:00:00Z', angle: 'Harbour Tour v1: x' }),
+    ])
+    expect(work.versions).toHaveLength(3)
+    expect(work.tag.kind).toBe('approved')
+    expect(work.olderPending).toBe(2)
+    const [plain] = groupReelWorks([reel({ id: 'a', angle: 'Solo: x' })])
+    expect(plain.olderPending).toBe(0)
+  })
+
+  it('cuts a long title by character, never in the middle of an emoji', () => {
+    const [work] = groupReelWorks([reel({ id: 'e', template: null, angle: `${'a'.repeat(62)}🙂${'b'.repeat(10)}` })])
+    expect(work.title.endsWith('…')).toBe(true)
+    expect(Array.from(work.title).every((ch) => ch.length === 1 || ch.codePointAt(0)! > 0xffff)).toBe(true)
+    expect(work.title).not.toMatch(/[\ud800-\udbff]…$/)
+  })
+
+  it('a very long run of dashes before the colon does not freeze the page', () => {
+    const started = Date.now()
+    const [work] = groupReelWorks([reel({ id: 'd', angle: `a${'-'.repeat(100000)}b: x` })])
+    expect(work.title.length).toBeGreaterThan(0)
+    expect(Date.now() - started).toBeLessThan(1500)
   })
 })

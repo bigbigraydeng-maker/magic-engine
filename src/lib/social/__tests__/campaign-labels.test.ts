@@ -49,3 +49,26 @@ describe('shortCampaignNames', () => {
     expect(shortCampaignNames([])).toEqual([])
   })
 })
+
+describe('shortCampaignNames: names that the cut would make equal are shown longer', () => {
+  it('keeps two similar long titles apart', () => {
+    const names = shortCampaignNames([
+      'Spring Launch · Four Tours · Daily Plan · Campaign',
+      'Spring Launch · Four Tours · Weekly Plan · Campaign',
+    ])
+    expect(names[0]).not.toBe(names[1])
+    expect(names).toEqual(['Spring Launch · Four Tours · Daily Plan', 'Spring Launch · Four Tours · Weekly Plan'])
+    const dashed = shortCampaignNames(['Spring Launch Leads Campaign - Auckland - Email', 'Spring Launch Leads Campaign - Auckland - Social'])
+    expect(dashed[0]).not.toBe(dashed[1])
+  })
+
+  it('names that were already different keep their short form', () => {
+    expect(shortCampaignNames(['One · a · Campaign', 'Two · b · Campaign'])).toEqual(['One', 'Two'])
+  })
+
+  it('cuts by character, not in the middle of an emoji', () => {
+    const name = shortCampaignName(`${'a'.repeat(20)}🙂${'b'.repeat(5)}`)
+    expect(name.endsWith('…')).toBe(true)
+    expect(name).not.toMatch(/[\ud800-\udbff]…$/)
+  })
+})
