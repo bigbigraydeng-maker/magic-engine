@@ -1,7 +1,8 @@
-# 处方 → 推广计划草稿：广告 Agent 主导 设计稿 **v0.5**（文件名沿用 v0.1 以免引用失效）
+# 处方 → 推广计划草稿：广告 Agent 主导 设计稿 **v0.6**（文件名沿用 v0.1 以免引用失效）
 
 - 作者：119 号窗口　日期：2026-10-26　功能风险级：**A**（碰计划/预算数字的写入口）；本 PR 只含设计稿（纯文档）。
-- 状态：**设计稿 v0.5，待子牙+魏征再审，再给 PM 看方向，审过前不写代码。**
+- 状态：**设计稿 v0.6 = 定稿（吸收魏征、子牙第二轮全部意见；审查两轮已用完，不再开第三轮）。第一刀开写前还卡三件事实，见 §11.1。**
+- **v0.6 变化一句话**：第二轮审查（魏征 N-0…N-H + 子牙 N1–N6）全部落地；**§12 的 promote_pages 结论被令牌身份实测推翻并重写**（系统身份与客户令牌看到的世界不一样）；预算等分公式与 Basis 署名定死；指纹加版本号；`play` 只留一个真相源；`page_id` 进种子。
 - 版本脉络：v0.1/v0.2「种子只能人工写」→ PM 2026-10-26「让 ME 的广告 Agent 做主导」→ v0.3「种子由 Agent 从系统事实产出」→ v0.4 吸收魏征 8 必改 → **v0.5 吸收子牙 10 必改 + 7 建议（其中 4 条是“稿子依赖的取数源主干里不存在/已被规则禁止”）**，并把“资格判定”拎成**第零刀只读探针**，已真打一次（§12，原始输出已摘录）。
 - **先 fetch 最新 main 再改的原因**：PR 2822 已合进主干（`cf1ba619`，改的正是 `spec.ts`），受众/排除受众形状必须按合并后重写（见 §1.1、§3）。
 - 对“Agent 主导”说实话：**数字**的主导权交给系统（`Suggestion` 逼每个数带出处，人从“填数字”退到“看一眼”）；**结构**（打哪几类打法）靠处方里的结构化 `intent`（§2）——**华佗生成入口的 intent 由 LLM 给（真 Agent 主导）；人工入口的 intent 是人填的（如实写，不叫 Agent 主导）**。
@@ -15,7 +16,7 @@
 
 ## 1. 现状事实（主干，已核；★ = v0.5 新增/更正）
 1. ★ **2822 已合并**：`ads_campaign.settings` 新增 `targeting`（`.optional()`，**注释明令不许 default**，否则旧计划指纹变）；`audience_ref: z.string()` **去掉了 `.min(1)`**，空串合法但必须填 `targeting`（二选一，在 `crossFieldIssues` 查，spec.ts ~L278-287）；`targeting = {countries[], city_keys[], age_min?, age_max?, excluded_audience_refs[]}`，**`excluded_audience_refs` 只存在于 `settings.targeting` 里，step 层没有**；`countries` 与 `city_keys` 不许同时给（Meta 按并集，08-04 事故，~L288-295）；`audience_ref` 有四处下游当“受审编号”读（overview.ts / schedule.ts / AdsDraftPanel.tsx / draft-ads.ts）。`ads_campaign` zod **非 strict（默认 strip）**，且 `creative_refs/placements/paused_ranges` 带 `.default([])`。
-2. `parseContent`（manual-prescription.ts:191-213）是**白名单**，没显式拷贝的键静默丢弃、返回 200。
+2. `parseContent`（manual-prescription.ts:191-213）是**白名单**，没显式拷贝的键静默丢弃、返回 200——这一支管顶层 `plan_seed`。★ **但 `initiative_seed` 那一支方向相反（魏征 N-0 / 子牙 N3，两人都查到）**：`parseSeed`（manual-prescription.ts:112-128）结尾是 `raw as unknown as PhaseInitiativeSeed`，**整体 cast**、不是白名单——`ad_plays` 今天不加任何代码就能存进去，而且**零校验**。风险不是“静默丢”，是**“静默收下脏数据”**。所以 `ad_plays` 必须在 `parseSeed` 里**显式校验**（`step_key` 非空字符串且不重复、`play` 属于 `PlayKey` 封闭集合、数组长度上限），**形状错 422**；回归测试：POST 带**非法** `ad_plays` → 422，带合法 → 读回等于入参。否则“形状不对 422”是句空话。
 3. `draft-ads.ts`：`budget_share_of_headroom` 是单个标量（playbook `draftBudgetShareOfHeadroom`=0.5，`evidence:'unvalidated_default'`），basis 署名「剧本参数」；有两个扣减口 `committed_minor`/`committed_all_minor`；`f.daily===null` 时只 push warning、预算仍 `ok:true` 且**不打折**；受众是三态；`last_used_on===null` 只是排序权重；`promoVerdict` 五态；`account_status!==1` 只给 warning 仍给预算。剧本里只有 `draftBudgetShareOfHeadroom` 与 `draftMaxCreatives` 两个参数；**`min_audience_size` 是全局常量 `D4_AUDIENCE_FLOOR=1000`（thresholds.ts:42），不是剧本参数**。
 4. `loadAdsDraftFacts` 每次翻客户名下所有账户近 35 天快照（各≤10 页）+ 近 30 天逐日 + 受众抓取；其 `coverageProblem` 在 `owned_account_ids===undefined` 时返回 null（=没问题）。
 5. 处方正文**已有**结构化容器 `PhaseInitiativeSeed`（diagnostic.ts:396-416）：`initiative_type`（6 类封闭）、`posture`、`budget_percent`（**占 Goal 总预算百分比**，manual-prescription.ts:185-189 校验合计≤100，批准时写进 initiatives）、`hypothesis`。人工路由的 `agent_name='广告 Agent'` 只是标签常量，正文是人填表单。
@@ -37,7 +38,8 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
   currency: string | null,
   period: { start_date, end_date },                    // ★ 本版只出**单阶段**（M3）
   ad_steps: [{
-    step_key, play: PlayKey,                           // ← intent 的落点（见下）
+    step_key, play: PlayKey,                           // ← 由 ad_plays 派生的快照（见下，非独立真相）
+    page_id: Field<string>,                            // ★ 判资格用的那个主页编号，必须落进种子+Basis（10-09 硬规矩：多客户主页的账户里一律显式指定，禁依赖默认值/清单第一个）
     ad_account_id:      { value,basis[],notes[] } | { why_empty, notes[] },
     daily_budget_cents: 同上,
     audience:  {kind:'saved', ref, ...} | {kind:'targeting', countries[], age_min?, age_max?} | {why_empty},   // ★ 对齐 2822
@@ -47,6 +49,7 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 }
 ```
 - ★ **存储契约**：种子只存**快照**，读回必须过 zod；形状不符按“未知”处理；以后改 `Basis` 字段不影响旧种子含义（种子里存的是自己的版本化形状）。
+- ★ **`play` 的唯一真相源（子牙 N3）**：**只有 `initiative_seed.ad_plays[].{step_key, play}` 是存下来的真相**（LLM 或人填，经 `parseSeed` 校验）；`plan_seed.ad_steps[].play` 是构建器按它**派生出来的快照**，只用于审计展示。**refine 路由整份重写 content 时，不“保留旧 plan_seed”，而是用新的 `ad_plays` 重新跑构建器重建 `plan_seed`**（数字重新取事实）；若 refine 的输出没有 `ad_plays` → 保留旧 `ad_plays` 并提示。两边永远不会分叉。
 - ★ **intent 落点（M6，铁律 0 Reuse Gate）**：**先尝试扩展 `PhaseInitiativeSeed`**，加可选 `ad_plays?: {step_key, play}[]`（加性字段，派生 initiatives 的逻辑忽略它）。若评审认为承载不了，逐条理由：`initiative_seed` 是**按阶段**的、`budget_percent` 语义是 Goal 总预算百分比；而 plays 是**按广告步骤**的、日预算来自“上限×余量”——**同一份处方里会出现两套钱的口径**，本版**只在审阅页并排标注，不做口径对账**（§9、§11 风险）。
 - 入口分开写：**华佗 `/prescription/generate`：`ad_plays` 由 LLM 输出（zod，形状错 422）= 真 Agent 主导**；**人工 `/prescriptions/manual`：`ad_plays` 是人填的，如实标“人工填写”**。
 - ★ **warnings 按字段挂**（`notes[]`），`daily===null` 时预算字段固定带 Basis「真实日花费：读不到，这个数没经过核对」。
@@ -55,14 +58,14 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 ## 3. 每个字段从哪取
 | 字段 | 取数与规则 | 取不到 |
 |---|---|---|
-| `ad_account_id` | ★ **候选 = `loadOwnedAccounts`（客户名下）**；**不得用 `hidden_from_ad_health` 筛**（展示开关≠投放开关，“状态字段当授权”老坑）。★ **资格判据 = 系统读得到的三样**：该主页有可用 token（`getStoredPageToken`）+ 必需权限（`leads_retrieval`、`pages_manage_ads`，以 meta-oauth/client.ts 的 scope 清单为真相源）+ 至少一个 **ACTIVE** 表单（`fetchPageLeadForms`）。“账户↔可投主页”再加 `promote_pages`（**待建只读适配器**）。★ **三态**：读成功且非空 / 读成功且空 / **读失败或无权限（HTTP 错、令牌缺 scope、字段缺失）**——三者 why_empty 文案不同，第三态写“读不到”。★ 资格**未知 → `ok:false` 整个步骤丢掉**，不许先选账户再附 warning。★ `account_status!==1` → `ok:false`。多个都合格 → 取余量最大者并在 Basis 列出候选与各自余量 | 三态各自 why_empty |
-| `daily_budget_cents` | ★ **多步骤拆分公式写死（M7）**：总额 = 余量 × 剧本标量 share；**按步骤数等分**，**事先一次算好**，不靠调用顺序（顺序扣减会得到 0.5/0.25 只用掉 0.75 余量）；`Basis.source` 写「剧本参数 ÷ 步骤数」。★ 近 30 天真实日花费读得到才会“贴近上限则减半”，**读不到就不压**并标“没经过核对”。★ 两个扣减口都累加（同账户 + 同阶段所有账户），范围=阶段内。★ **币种读不到 → 该步骤 `ok:false`**（不依赖 `checkAdsBudget` 对 unknown 的放行） | 现成 why_empty |
-| `audience` | ★ **受众池读取注意（2026-10-26 实测，已写入 Meta 广告手册 §30 第 7 条）**：账户的受众列表边（`customaudiences`，含 `fetchCustomAudiences`）**会漏掉部分相似受众**——CTS 旧账户列表边只返回 8 条，而广告 MCP 读到 12 条，缺的 4 条都是「类似受众 (NZ, 1%)」，按 id 直读均 200 且 `account_id` 就是本账户。所以**“不在列表里 ≠ 不属于该账户”**；受众归属/可选性判断，列表里没有的要按 id 直读核 `account_id`（刀② 已实现 `fetchCustomAudienceById`）。官方账户列表边也只返回 8 条而 MCP 读到 11 条，缺的 3 条**同类原因、未穷尽，未逐条核实**。`approximate_count_lower_bound` 会返回 **-1/0 表示“不报”**，≤0 一律当读不到、不当“人太少”。★ 按 2822 形状：有合格已保存受众 → `audience_ref=<编号>`；没有 → **不得把中文散文塞进 `audience_ref`**，改用 `targeting={countries:['NZ'], age_min, age_max}`（`audience_ref=''`），`countries` 与 `city_keys` 不同时给。重定向类打法构建器再加**硬过滤**（子类型 + 人数 ≥ `D4_AUDIENCE_FLOOR`）；“在投仍挂着”只是排序权重，按代码写 | 三态 why_empty |
+| `ad_account_id` | ★ **候选 = `loadOwnedAccounts`（客户名下）**；**不得用 `hidden_from_ad_health` 筛**（展示开关≠投放开关，“状态字段当授权”老坑）。★ **（子牙 N2，已被令牌实测证实，见 §12）`promote_pages` 的读数是“令牌身份”的函数**：系统身份长期钥匙看到官方账户只有 Roman、看不到 CTS Tours；构建器运行时那把客户令牌（`source=client_domain`）两个账户都列出 CTS Tours。**所以第一刀把 `promote_pages` 降成“Basis 展示 + warning，不参与 `ok:false`”**，样本齐了再升；Basis 里**必须写明用的是哪把令牌身份**。★ **资格判据 = 系统读得到的三样**（用构建器运行时实际会拿到的那把令牌）：该主页有可用 token（`getStoredPageToken`）+ 必需权限（`leads_retrieval`、`pages_manage_ads`，以 meta-oauth/client.ts 的 scope 清单为真相源）+ 至少一个 **ACTIVE** 表单（`fetchPageLeadForms`）。“账户↔可投主页”再加 `promote_pages`（**待建只读适配器**）。★ **三态**：读成功且非空 / 读成功且空 / **读失败或无权限**。★ **（魏征 N-F）两态行为相同（都 → `ok:false` 丢步骤，fail-closed）**，但真实返回下第二态与第三态分不开（令牌看不到某条边时 Meta 常见是 **200+空数组**而不是报错）。所以**文案不能说“这个主页没有在用的表单”**，要说「**读到 0 个——也可能是这个令牌看不到**」；样本缺口不挡第一刀，只挡这两句文案定稿（台账卡跟踪）。★ 资格**未知 → `ok:false` 整个步骤丢掉**，不许先选账户再附 warning。★ `account_status!==1` → `ok:false`。多个都合格 → **preview 把所有合格候选及各自余量都摆出来**；默认取余量最大者，并在 notes 写明“该账户是否有 ME 成功建过广告的记录（有读数时）”，因为“取余量最大”会系统性地选中**从没经 ME 成功建过**的官方账户而不是已真建过的旧账户——账户选择在 preview 里要让 PM 看得见、能改 | 三态各自 why_empty |
+| `daily_budget_cents` | ★ **等分公式（v0.6 定死）**：<br>**先算资格再算钱，只切一次（魏征 N-C）**：N = 通过**非预算闸**（账户资格 / 账户状态 / 受众 / 素材 / 起止日 / 币种可读）的步骤数；因预算 `ok:false` 被丢的**不重新切**（避免“丢一个→N 变小→别的变大→刚丢的又够了”的循环）。`n_a` = 落在账户 a 上的步骤数。每步：`budget = floor( share × min( 客户余量 / N , 账户 a 余量 / n_a ) )`（`share` = 剧本标量 `draftBudgetShareOfHeadroom`）。性质：Σ ≤ share × 客户余量，每个账户 Σ ≤ share × 该账户余量——**不会超上限，只会偏小**。<br>★ **写法选择（子牙 N4a）：构建器不复用 `draftBudget` 的预算计算与它写死的「剧本参数」Basis，用纯函数 `splitBudget(facts, plan)` 自己算、自己写 Basis**（共享的 `draft-ads.ts` 不改，现有 `promo/draft` 与 AdsDraftPanel 行为不变）；复用的是**取事实**（`loadAdsDraftFacts` 读一次）和受众/素材建议。Basis 打出实际除数与余量：「客户余量 15000 ÷ N=2；账户 a 余量 10000 ÷ n_a=1；取小者×剧本比例 0.5」。**绝对不许**用“改小传进去的 `headroom_minor`/`budget_share_of_headroom`”来实现等分（Basis 会对 PM 打出假的余量/假的出处）。<br>★ **扣减口（子牙 N4b）**：本次生成的这批步骤**一律不走 `committed_*` 顺序扣减**（它靠调用顺序，会得到 0.5/0.25）；`committed_minor`/`committed_all_minor` **只装计划里“人工已有的步骤”**（先从余量里扣掉，再按上式等分），且范围=同阶段、与 `checkAdsBudget` 分组口径对齐。<br>★ **示例（CTS 当下真实读数，§12.1）**：客户上限 15000，账户 7274 上限 10000、0470 上限 3000，两账户在投合计读数均为 0（⚠️ 快照陈旧，见 §12.1），share=0.5。N=2（各 1 步）→ 7274：floor(0.5×min(7500,10000))=3750；0470：floor(0.5×min(7500,3000))=1500；合计 5250 ≤ 0.5×15000。N=1 只落 7274 → floor(0.5×min(15000,10000))=5000。<br>★ **读不到近 30 天真实日花费（`daily===null`）→ 同样保守减半**（与币种读不到/资格未知同一套 fail-closed 口径；读不到时的建议值恒 ≥ 读得到且贴近上限时的值，方向往大偏）；Basis 写「真实日花费读不到，按保守口径减半」。★ 币种读不到 → 该步骤 `ok:false`。★ **preview 固定写一行**：「本阶段 N 步通过资格，日预算按 N 等分（各账户按落在该账户的步骤数再等分）」；某步因预算被丢时明说“该步骤被丢，其余步骤预算未重新分配”。 | 现成 why_empty；币种读不到→why_empty |
+| `audience` | ★ **受众池读取注意（2026-10-26 实测，已写入 Meta 广告手册 §30 第 7 条）**：账户的受众列表边（`customaudiences`，含 `fetchCustomAudiences`）**会漏掉部分相似受众**——CTS 旧账户列表边只返回 8 条，而广告 MCP 读到 12 条，缺的 4 条都是「类似受众 (NZ, 1%)」，按 id 直读均 200 且 `account_id` 就是本账户。所以**“不在列表里 ≠ 不属于该账户”**；受众归属/可选性判断，列表里没有的要按 id 直读核 `account_id`（`fetchCustomAudienceById` **只存在于 PR 3190（OPEN Draft）里，主干零命中**——本功能依赖 3190 合并；3190 不落地时本功能自建同等读取器）。官方账户列表边也只返回 8 条而 MCP 读到 11 条，缺的 3 条**同类原因、未穷尽，未逐条核实**。`approximate_count_lower_bound` 会返回 **-1/0 表示“不报”**，≤0 一律当读不到、不当“人太少”。★ 按 2822 形状（空 `audience_ref=''` + `targeting` 会成为构建器的**常规产物**，所以下游要跟上：`schedule.ts:148` 无条件打印 `受众引用 ${…}`，空串会渲染成「受众引用 」；`AdsDraftPanel.tsx:15/118` 的 `onAdopt` patch 形状里没有 `targeting`——这两处在第二/第三刀一并补，子牙 N6）：有合格已保存受众 → `audience_ref=<编号>`；没有 → **不得把中文散文塞进 `audience_ref`**，改用 `targeting={countries:['NZ'], age_min, age_max}`（`audience_ref=''`），`countries` 与 `city_keys` 不同时给。重定向类打法构建器按子类型过滤；★ **人数处理（子牙）**：`D4_AUDIENCE_FLOOR=1000` 的原语义是「**≤ 它说明 Meta 显示下限、人数判不了**」（thresholds.ts:40-42），**不是“不合格”**——所以**不做“人数 ≥ 1000”的硬过滤**；人数 `null` 或 ≤ 该下限 → 记“人数判不了”并仍可入选（例：CTS「Leadform submitted 90d」显示 1000 = 下限，是合法暖名单）；人数按大小只作排序权重。★ **`approximate_count_lower_bound` 的 -1/0（Meta“不报”）在构建器入口归一成 `null`（facts 预处理，不碰共享 `draft-ads.ts`）**，否则 -1 会静默掉进“不达门槛”被剔除、连“人数未知”那条 Basis 都不出现。★ **被跳过的候选必须在 Basis 里列出（几个、各自原因）**，不许静默剔除；“在投仍挂着”只是排序权重，按代码写 | 三态 why_empty |
 | `excluded_audience_refs` | 受众池里排除名单型自定义受众 → 写入 `settings.targeting.excluded_audience_refs`。★ **有意“仅为携带排除名单而创建 `targeting` 对象”**（targeting 是 optional，注释禁 default，所以只在有排除名单时才创建，不能给每个步骤都塞空对象）。47 人名单本身的上传不在本功能（要 PM 授权） | 留空+原因 |
 | `creative_refs` | `creative_pool` approved；`promoVerdict` 五态逐个：ok→可用；**undeclared（最常见）**→不可用并写「素材没声明推广期」；not_started/expired/expires_before_use_end→各自原因。★ 结果为空 → 整步骤进“未生成清单”（素材空是硬红，PM 批不了） | 五态汇总 |
-| 起止日 | 目标周期 ∩ 今天之后；**单阶段** | 无周期→整个种子不产出 |
+| 起止日 | 目标周期 ∩ 今天之后；**单阶段**。★ **映射规则（子牙 N1，第三刀 write 用）**：`ads_campaign` 步骤自己没有起止日（只有 `paused_ranges`），`schedule.ts:142` 拿 `phase.start_date` 当开投日，所以 period 只能落在**阶段**上；而阶段不许重叠。规则：目标计划**还没有任何阶段** → 新建这一个阶段；**已有阶段** → **只在其中恰好一个阶段的日期区间完整覆盖 period 时，复用该阶段**（把步骤加进去）；否则**不写，preview 明说“与现有阶段冲突，需人手处理”**，绝不新建会重叠的阶段。幂等粒度：阶段按 `phase_key`、步骤按 `step_key`。 | 无周期→整个种子不产出；冲突→不写 |
 | ~~班次核对~~ | ★ **移出主干**：旅游语义，将来走行业 Playbook 可选钩子，经 `loadPublishedProducts(db, clientId, today)`（catch `PublishedUnreadableError` → “未知”） | — |
-★ **事实读一次、复用（M10）**：构建器每次只调一次 `loadAdsDraftFacts`，facts 按账户缓存、`committed` 在内存递减；**`owned_account_ids` 必传**，并把 `coverageProblem` 的 `undefined` 分支改为“按读不全处理”（前置小改）。★ **失败隔离**：种子构建**任何一环失败只落 why_empty，绝不让处方保存失败**；给整体耗时上限（建议 8 秒，超时→未完成的步骤 why_empty「取数超时」）；不在处方保存请求里做 Meta 实时读取以外的重活（资格探测并发+超时）。
+★ **事实读一次、复用（M10）**：构建器每次只调一次 `loadAdsDraftFacts`，facts 按账户缓存（只读一次）；预算按上面的等分公式**一次算出**，不靠调用顺序；**`owned_account_ids` 必传**，并把 `coverageProblem` 的 `undefined` 分支改为“按读不全处理”（前置小改）。★ **失败隔离**：种子构建**任何一环失败只落 why_empty，绝不让处方保存失败**；给整体耗时上限（建议 8 秒，超时→未完成的步骤 why_empty「取数超时」）；不在处方保存请求里做 Meta 实时读取以外的重活（资格探测并发+超时）。
 
 ## 4. 谁在什么时候产出种子
 - 两个处方写入口都产（华佗 LLM intent / 人工人填 intent），**加上 refine 路由必须保留已有种子**（refine 整份重写 content）。只在目标是广告类时产出。
@@ -71,13 +74,14 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 
 ## 5. 触发、两档、指纹
 - 计划页「按处方起草」：先 **preview**（任意状态处方可读、纯计算），PM 点“写入”才 **write**（只认 approved）；write 与 `PUT /promo` 共用同一个校验函数；单测“生成的草稿必须能被 PUT 原样接受”；映射后整份 `PromoSpec` 先过 `parsePromoSpec` 才写。
-- ★ **指纹一律算在 `parsePromoSpec` 返回的规范形上**，用 `stableStringify`（构建器“不写”的可选字段 parse 后变 `[]`，按原始对象算会永远对不上、判成“人改过”、永不覆盖且无报错）。测试：生成→保存→重读→重算，指纹相等。“人改完又改回去”= 视为未改（故意，页面说明里写明）。
+- ★ **指纹一律算在 `parsePromoSpec` 返回的规范形上，并且指纹输入先过一次 JSON 往返（`JSON.parse(JSON.stringify(spec))`）**，再喂 `stableStringify`（魏征 N-A）。原因：① 构建器“不写”的可选字段 parse 后变 `[]`，按原始对象算会永远对不上；② **zod 对 `.optional()` 会保留“键在、值 undefined”的键**（本机实跑：`parse({audience_ref:'x', targeting: undefined})` 得 `{…,"targeting":null}`，而省掉键则没有；`stableStringify` 用 `Object.keys`、不跳 undefined）。实现者最自然的写法 `targeting: hasExcluded ? {…} : undefined` 正好落进这个形：生成时指纹含 `"targeting":null` → 存 jsonb 时 undefined 被丢 → 重读重算不同 → 该步骤**永久判成“人改过”、永不覆盖、不报错**。**测试：生成→保存→重读→重算，指纹必须相等；夹具必须包含“可选字段键在、值 undefined”这一例**。历史数据（§12.1 实测）：33 份计划 / 5 个广告步骤，没有任何一个带 `targeting` 键，不需要兼容旧数据。
+- ★ **指纹连 spec zod 版本号一起存（子牙 N5）**：规范形本身是 zod 版本的函数——2822 刚往 `adsTargeting` 加了 `excluded_audience_refs: .default([])`，下次谁再加一个带 `.default()` 的字段，所有已存步骤的指纹一起变。所以 `generated_step_hashes` 旁存 `spec_schema_version`；**版本不一致 → 按“未知”处理：不覆盖 + 页面明说“规范形已升级，这些步骤无法判断是否被人改过”，不静默跳过**。步骤粒度的新指纹放在新模块（`promo/step-fingerprint.ts`），与既有 `promoContentHash`（整份推广结构是否被改动的尺）**并存、互不替代**，剔除规则在模块注释里写明与它的差异；`content-hash.ts` 不改。“人改完又改回去”= 视为未改（故意，页面说明里写明）。
 - 带状态过滤的新读取变体（只取 approved，提示有更高版本草稿）。
 
 ## 6. 幂等、改版、人改保留
 1. `generation_meta.from_prescription` 存 `marketing_plans.generation_meta`（jsonb 合并只写这一个键 + `updated_at` 乐观锁，不入指纹，S1）。
 2. 同版本再点：只覆盖“仍等于上次生成值（规范形指纹）”的步骤；人改的保留并列出；首次遇同 id 手填步骤视为人改；人删的不复活。
-3. ★ **改版草稿会顶掉已批准计划（`pickPlanForPrescription`）**：仅“页面提示并存”不够。**需要决定这个顺序变化是不是想要的**——建议在第三刀之前先做一个小刀“plan-pick 改 approved 优先”（更新被测试锁住的行为），否则不发布“改版草稿”功能。**待 74/PM 拍板。**
+3. ★ **改版草稿会顶掉已批准计划（`pickPlanForPrescription`）**：仅“页面提示并存”不够。**74 已拍板：同意，单独一小刀，放在第三刀前**，别混进这条链：它改的是“页面认哪份计划”（用户看得见的行为，`plan-pick.test.ts` 正锁着现行为，**不能当纯重构混进去**），动之前要确认 3143/3150/3156 刚合的只读显示（都走这条挑选逻辑）没有反向依赖。第一刀/第二刀期间触发不了（这两刀都不建 `marketing_plans` 行）。
 4. Agent 不覆盖人；并发验收：两份草稿并存时“按处方起草”写哪份取决于创建时间——验收真跑一次看提示说不说得清。
 
 ## 7. 与周边的边界
@@ -87,13 +91,13 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 不自动批准计划；不自动建 Meta 对象；不碰钱（不改 `ad_strategy_configs`）；不解析 summary；LLM 不输出数字事实；不上传名单；本版只做 `ads_campaign` 且**单阶段**；不用 `hidden_from_ad_health`/人填资格列当投放判据；不加迁移；★ **批准处方不写任何预算授权痕迹**；不改 content-hash.ts。
 
 ## 9. 处方审阅页（两个面）
-★ **两个面**：(a) `prescription/new/page.tsx`（**1882 行，已超 800 行上限，新渲染必须另开组件文件**，不往里加）；(b) promo-plan 页的处方卡（走 `toGoalPrescriptionView` + `prescription-copy.ts`，`GoalPrescriptionView` 要扩字段）——块 B 两个都算。渲染：账户名+币种+日预算+起止+每字段依据或留空原因；并排标注两套钱口径（`budget_percent` = Goal 总预算百分比 vs 日预算 = 上限×余量，不对账）；显式标注「**这些数字只是 Agent 的建议，批准这份处方不等于批准花这些钱**」（10-19 反向事故）。
+★ **两个面**：(a) `prescription/new/page.tsx`（**1882 行，已超 800 行上限，新渲染必须另开组件文件**，不往里加）；(b) promo-plan 页的处方卡（走 `toGoalPrescriptionView` + `prescription-copy.ts`，`GoalPrescriptionView` 要扩字段）——块 B 两个都算。渲染：账户名+币种+日预算+起止+每字段依据或留空原因；★ **并明写这句（魏征 N-H）**：「**百分比（`budget_percent`）只是记在 Initiative 上的分配说明，不会花钱；日预算才是以后真能花出去的数；本版两者不互相校验。**」（代码追踪：`budget_percent` 经 `parseSeed` → `phaseBudgetPercentSum`（≤100）→ initiative-derive.ts:243-252 → `createInitiative`，之后只被 polish-hypothesis 回显和 UI 求和消费（InitiativeList.tsx:87,179、prescription/new/page.tsx:982），从不进 `checkAdsBudget`、不进 `ad_strategy_configs`、不碰任何 Meta 对象。）；显式标注「**这些数字只是 Agent 的建议，批准这份处方不等于批准花这些钱**」（10-19 反向事故）。
 
 ## 10. 验收链（第一刀切薄）
 **第零刀（只读探针，已做，§12）**→ **第一刀只做 `ad_account_id` + `daily_budget_cents` 两个字段**，不写计划步骤。
 1. 第一刀上线后，**只读接口**对 CTS 目标现算种子，PM 在页面看到：账户/日预算由 Agent 填好、每字段带依据或留空原因。
 2. ★ **只读 SQL 对照**：打出 `ad_strategy_configs.daily_budget_cap_cents`、各账户在投合计，与页面数字逐项对齐，贴进 PR「当场试跑」。
-3. 必测：多账户多步骤（含币种读不到→`ok:false`）；`daily===null`→“没经过核对”；资格三态各一例；POST 带种子→读回非空；种子形状错→422；refine 后种子仍在；生成→保存→重读→指纹相等；种子构建失败时处方保存仍成功。
+3. 必测：多账户多步骤（含币种读不到→`ok:false`）；`daily===null`→**断言数字本身：满额 vs 保守减半两例**（不能只断言 warning 在——否则把减半分支整段删掉测试照样全绿，同 10-26“假时钟藏住预算逻辑”一类）；等分公式 N=1/N=2/N=4、单账户/跨账户、某步因预算被丢不重新切；**只读现算接口真的一行库都不写：验收里数一次 `marketing_plans` 行数前后不变**；资格三态各一例；POST 带种子→读回非空；种子形状错→422；refine 后种子仍在；生成→保存→重读→指纹相等；种子构建失败时处方保存仍成功。
 4. 第二刀起：与已批准计划 7a8bee93 对照；素材逐个**回查 Meta 侧还在不在**（已知缺口：本地 approved+推广期≠Meta 没下架）。
 
 ## 11. 工作量（子牙估 10–13 天；本稿采纳）
@@ -107,7 +111,21 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 | 第四刀 | 计划页按钮 + preview 展示 + 并存提示 + 验收 | 1–1.5 天 |
 **风险**：两套钱口径并存（`budget_percent` vs 日预算）本版不对账；`ad_plays` 若被评审否决需另开字段；资格是“读数判断（必要条件）”，**真能不能建只有建了才知道**（见 §12 的发现）。
 
-## 12. 第零刀结果（只读探针，2026-10-26，CTS，已真打 Graph；未写任何东西）
+## 11.1 第一刀开写前卡的三件事实（子牙）+ 必须一起落的两件
+1. **`promote_pages` 用哪把令牌读、读出来什么** → ✅ 已做（§12：令牌身份实测，三把令牌并列）。结论：第一刀 `promote_pages` 只做 Basis + warning。
+2. **“未知→丢步骤”会不会在第一刀直接产出零条** → 第一刀的资格判据不再依赖 `promote_pages`，只依赖（运行时令牌 + 必需 scope + ≥1 个 ACTIVE 表单 + 账户状态 + 币种），§12 读数下这些都满足（11 个表单、v6.1 ACTIVE、scope 齐全），所以不会因判据本身产出零条；“读成功且空 / 读失败”两态样本仍缺（台账卡跟踪，不挡第一刀）。
+3. **预算两处互相抵消先各选一条写法** → ✅ 已定（§3 预算：构建器自写 `splitBudget` 与 Basis；生成批次不走 `committed_*`，它只装人工已有步骤）。
+**第一刀 PR 必须一起落**：① 种子里的 `page_id`（+Basis）；② `parseSeed` 对 `ad_plays` 的校验（422）。
+**范围外但要开卡**：`snapshot.ts:273` 是 `approximate_count_lower_bound ?? null`，-1 原样入库；而 `d4-unharvested-audience.ts:76` 的 isSmall 用 `<= D4_AUDIENCE_FLOOR`、`d11-audience-pool-starved.ts:46` 用 `<= floor` 跳过——**现有 D4/D11 诊断可能对“Meta 不报人数”的受众误报**（台账卡已开）。
+
+## 12.1 开工前只读读数（2026-10-26，CTS，只读；未写任何东西）
+1. **会生成几步、落哪几个账户**：取决于 `ad_plays`。处方 89cb61eb 是“一个系列、两组人群（A 新客 + B 老客户）”→ 两类打法；资格读数下两个账户都“可投”，N 可能是 1 或 2——**公式按 N 参数化，不在纸上定 N**（§3 示例给了 N=1/N=2）。
+2. **预算读数**：客户日上限 **15000 分（$150）**；账户 7274 上限 **10000**、0470 上限 **3000**；剧本 `draftBudgetShareOfHeadroom=0.5`、`draftMaxCreatives=3`；近 30 天逐日都读到（7274 15 天、0470 6 天），账户状态 1。现有 `draftAdsStep` 单步建议：7274 → **5000**、0470 → **750**（贴近上限被减半）。⚠️ **事实层陈旧**：两个账户“在投合计”读数都是 **0**，快照 as_of 是 **2026-10-25 12:31Z**，而 7274 上 10-26 晚已有一条 $50/天的广告在投——`loadAdsDraftFacts` 吃最多 2 天前的快照，**会把余量高估**；构建器必须在 Basis 里打出快照 as_of，快照老于 24 小时时给 notes（本版不改取数层）。
+3. **历史计划里 `targeting` 的存法**：33 份计划、5 个广告步骤，**0 个带 `targeting` 键**（无 null/undefined/对象）→ 指纹修法不需要兼容旧数据。
+4. **权限不足账户上 `promote_pages`/`leadgen_forms` 的真实返回形状**：仍无样本（不挡第一刀；已开台账卡，等真撞上再补）。
+
+## 12.2 第零刀结果（只读探针，2026-10-26，CTS，已真打 Graph；未写任何东西）
+> ★★ **以下 v0.5 的结论被令牌身份实测推翻（子牙 N2），以本节“令牌身份对照”为准。**
 | 探针 | 原始结果（摘录，无令牌） | 结论 |
 |---|---|---|
 | `act_<旧账户>/promote_pages` | 200，列出 `CTS Tours(1616575215312482)`、`Oztop…` | 旧账户可投 CTS 主页 |
@@ -116,7 +134,15 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 | 页令牌 `me/permissions` | 400「Tried accessing nonexisting field (permissions)」 | 该边对页令牌不可用（要用客户令牌读） |
 | `fetchPageLeadForms(CTS 主页)` | 11 个表单；v6.1 `1419397053495913` ACTIVE；v6 `861321827044055` ACTIVE… | 表单可读且有在用表单 |
 | 两个账户 `customaudiences?limit=200` | 各 8 条，**`paging.next` 不存在**（只有 `cursors`）——**仅是 8 条样本上的结论，不是通则（待复核）** | 本次样本读全；“有无下一页”可用 `data.length<limit` 判断，但列表边本身会漏项（见下两行） |
-**由此得出的设计结论**：`promote_pages` 是“必要条件”，**不能单独证明“能建表单广告”**；官方账户那条缺口**系统读不出来**，不得写死“官方账户不能投”——构建器按读数判为“可投”，**preview 里标注“资格为读数判断，未实际建过”**，真建时 Meta 报错会如实回流。运营说法与读数不一致这件事需要 74/PM 知道（可能是该账户另一层权限/业务验证，不在这些边上）。
+### ★ 令牌身份对照（2026-10-26 只读，三把令牌各读一遍；不打印令牌值）
+| 令牌 | 官方账户 `promote_pages` | 旧账户 `promote_pages` | `/me/accounts` |
+|---|---|---|---|
+| ① 系统身份长期钥匙（`META_SYSTEM_USER_TOKEN`） | **只有 Roman Hu Real Estate**，CTS Tours 不在 | **403**「Ad account owner has NOT grant ads_management or ads_read permission」 | 6 个主页（East Inter / NM Medspa / NewAsian Logistics / NZ China Products Expo / Oztop / Roman），**无 CTS Tours** |
+| ② 客户令牌 = ③ **构建器运行时实际拿到的**（`resolveMetaTokenForClient`，`source=client_domain`；两者字符串与 ① 不同） | **CTS Tours + Roman** | **CTS Tours + Oztop** | 7 个主页，**含 CTS Tours** |
+**如何解释 2026-10-09 那条相反记录**（docs/clients/cts/2026-10-09-shanghai-ads-paused-build.md §5：用“公司长期钥匙”读官方账户只返回 Roman、CTS 不在）：**它和今天的读数一致**——那条用的就是 ①；今天 ② 的读数是另一把令牌看到的世界。所以这不是“运营说法与读数不一致”，而是**两把钥匙看到的世界不一样**，PM 的说法（官方账户缺主页权限）对**系统身份视角**成立；而 ME 实际建广告走的是 ②/③（`meta-ads/draft` 用 `getMetaTokenForClient`），它在**旧账户**已被真建广告证明可用，在**官方账户**还没真建过。该文档同时点名 `leadgen_tos_accepted=false` 是“令牌身份视角问题，已踩过三次”——**不要用这个字段做资格判据**。
+**这条结论的设计后果**：`promote_pages` 本身就是令牌身份的函数，**不能把它当硬必要条件**（与受众“列表边会漏项、不能用‘不在列表里’当否定判据”是同一类推理）——第一刀降成 Basis 展示 + warning（§3）。
+
+**（v0.5 原结论，已被上面推翻，留作对照）**`promote_pages` 是“必要条件”，**不能单独证明“能建表单广告”**；官方账户那条缺口**系统读不出来**，不得写死“官方账户不能投”——构建器按读数判为“可投”，**preview 里标注“资格为读数判断，未实际建过”**，真建时 Meta 报错会如实回流。运营说法与读数不一致这件事需要 74/PM 知道（可能是该账户另一层权限/业务验证，不在这些边上）。
 | 旧账户 `customaudiences?limit=200` vs 广告 MCP | 列表边 8 条 vs MCP 12 条；缺的 4 条（相似受众 NZ 1%）按 id 直读 200 且 `account_id` 正确；某相似受众 `approximate_count_lower_bound=-1` | ⚠️ 列表边会漏项；“不在列表=不属于本账户”是错判据；count≤0=不报 |
 | 官方账户 `customaudiences?limit=200` vs MCP | 列表边 8 条 vs MCP 11 条；缺的 3 条同类原因**未穷尽、未逐条核实** | 同上 |
 **仍未核实**：`landPrescription` 副作用未逐行核；权限不足时 `promote_pages` 是返回空数组还是报错**没有对照样本**（本次读到的都是成功且非空，三态里“读成功且空/读失败”两态尚无真实样本，需在权限不足的账户上补一次）。
