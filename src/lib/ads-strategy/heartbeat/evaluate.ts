@@ -145,7 +145,7 @@ function outcomeVerdict(
  */
 function insightsKnown(read: HeartbeatAccountRead): boolean {
   const verdict = outcomeVerdict(read, 'insights');
-  return verdict === 'ok' || verdict === 'skipped';
+  return verdict === 'ok' || verdict === 'empty_but_ok' || verdict === 'skipped';
 }
 
 function knownSpend(a: HeartbeatAdsetSample, known: boolean): number | null {

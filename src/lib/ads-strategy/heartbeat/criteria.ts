@@ -104,7 +104,9 @@ export function classifyRead(input: ClassifyReadInput): ClassifyReadResult {
     return { verdict: 'read_failed', reason: 'read_failed' };
   }
   if (kind === 'adsets' && accountHasActiveCampaigns && rowCount === 0) {
-    return { verdict: 'read_failed', reason: 'empty_adset_list' };
+    // Graph said ok, the adsets whitelist just excluded everything (all PAUSED/ARCHIVED).
+    // Not a read failure — the account genuinely has no live adsets right now.
+    return { verdict: 'empty_but_ok', reason: 'empty_adset_list' };
   }
   return { verdict: 'ok', reason: 'ok' };
 }

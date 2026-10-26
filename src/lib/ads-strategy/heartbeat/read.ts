@@ -24,6 +24,7 @@ export type HeartbeatReadKind = 'account' | 'adsets' | 'ads' | 'insights';
 
 export type HeartbeatReadVerdict =
   | 'ok'
+  | 'empty_but_ok'
   | 'read_failed'
   | 'token_expired'
   | 'rate_limited'
