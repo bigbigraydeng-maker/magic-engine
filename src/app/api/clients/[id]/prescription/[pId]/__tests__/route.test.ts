@@ -27,6 +27,13 @@ vi.mock('@/lib/auth/client-access', () => ({
     tier: 'admin',
     allowedClientId: null,
   }),
+  requirePlanApproverAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'fde@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
 }))
 
 const mockLand = vi.fn()

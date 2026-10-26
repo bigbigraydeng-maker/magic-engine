@@ -11,13 +11,13 @@
  * 作为 priorContext 传给华佗。
  *
  * Response: text/event-stream（SSE）
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: logged-in session. OPC or this client's own FDE (requireOperatorAccess).
  * Reference: ROADMAP.md P8.10.S3 / S5
  */
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { generatePrescription } from '@/lib/diagnostic/prescription-generator'
 import { runHuatuo } from '@/lib/huatuo/agent'
 import type {
@@ -52,7 +52,8 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<Response> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Drafting stays open to this client's FDE. requireGlobalAdmin would lock them out.
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) {
     return new Response(JSON.stringify({ error: access.error }), {
       status: access.status,

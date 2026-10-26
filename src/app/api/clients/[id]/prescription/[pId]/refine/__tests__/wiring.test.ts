@@ -13,7 +13,7 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requirePaidClientAccess: vi.fn(async () => ({
+  requireOperatorAccess: vi.fn(async () => ({
     ok: true,
     user: { id: 'u', email: 'fde@magiclab.com' },
     role: 'admin',

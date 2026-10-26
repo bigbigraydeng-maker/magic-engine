@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
@@ -77,7 +77,8 @@ export async function PATCH(
   { params }: { params: { id: string; pId: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Agree is OPC only. This check rejects a single-client FDE; drafting uses requireOperatorAccess.
+  const access = await requirePlanApproverAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
