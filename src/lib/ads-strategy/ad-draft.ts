@@ -116,6 +116,9 @@ export interface AdDraft {
 /** 每天最多敢自动花多少 —— 超过这个数不是 ME 该自己决定的事。 */
 export const MAX_AUTO_DAILY_BUDGET = 50
 
+/** 一次最少跑几天（Meta：每日预算的广告组时长必须超过 24 小时）。 */
+export const MIN_DURATION_DAYS = 2
+
 /** 一次最多跑多久 —— 再长的投放应该是续，不是一次性下注。 */
 export const MAX_DURATION_DAYS = 30
 
@@ -176,6 +179,11 @@ function validateCommon(d: AdDraft): DraftProblem[] {
 
   if (!Number.isInteger(d.durationDays) || d.durationDays <= 0) {
     p.push({ field: 'durationDays', message: '必须说跑几天 —— 不设终点的广告没人会记得关' })
+  } else if (d.durationDays < MIN_DURATION_DAYS) {
+    p.push({
+      field: 'durationDays',
+      message: `至少 ${MIN_DURATION_DAYS} 天：Meta 只允许跑超过 24 小时的广告组使用每日预算，1 天会被拒`,
+    })
   } else if (d.durationDays > MAX_DURATION_DAYS) {
     p.push({ field: 'durationDays', message: `一次最多 ${MAX_DURATION_DAYS} 天` })
   }
@@ -290,7 +298,7 @@ const META_TRIPLET: Readonly<Record<DraftKind, MetaObjectiveTriplet>> = {
     objective: 'OUTCOME_AWARENESS',
     optimizationGoal: 'THRUPLAY',
     billingEvent: 'IMPRESSIONS',
-    destinationType: 'ON_VIDEO',
+    // 不发 destination_type：ON_VIDEO 在 Meta 文档里标 limited beta、本仓没有实测过审记录（2026-10-26 魏征/子牙审）。
   },
   messenger_conversation: {
     objective: 'OUTCOME_ENGAGEMENT',

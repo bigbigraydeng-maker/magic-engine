@@ -22,7 +22,7 @@ import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
@@ -184,6 +184,10 @@ export async function createDraftForApproval(
     return failedOutcome(deps, draft, { ...base, error })
   }
 
+  // ── 0.4 日预算低于账户最低日预算 → Meta 一定拒，别浪费一次真实创建 ──────
+  const budgetError = await checkMinDailyBudget(draft, deps)
+  if (budgetError) return failedOutcome(deps, draft, { ...base, error: budgetError })
+
   // ── 0.5 私信类型：视频上传完还要转码，转码没完就建会失败 ───────────────
   const waitError = await waitForTranscode(draft, deps, now)
   if (waitError) return failedOutcome(deps, draft, { ...base, error: waitError })
@@ -220,6 +224,19 @@ interface GateContext extends RecordBase {
 function skippedRedlines(redlines: readonly string[] | undefined): string[] | undefined {
   const skipped = redlines ? unusableRedlinePhrases(redlines) : []
   return skipped.length > 0 ? skipped : undefined
+}
+
+const ZERO_DECIMAL_CURRENCIES = new Set(['JPY', 'KRW', 'VND', 'CLP'])
+
+/** 读不到最低日预算就放行（Meta 自己会拒）；读到了而且草案低于它 → 人话报错。 */
+async function checkMinDailyBudget(draft: AdDraft, deps: CreateDraftDeps): Promise<string | null> {
+  const min = await fetchAccountMinDailyBudget(deps.adAccountId, deps.accessToken)
+  if (!min) return null
+  const factor = ZERO_DECIMAL_CURRENCIES.has(min.currency.toUpperCase()) ? 1 : 100
+  const draftMinor = Math.round(draft.dailyBudget * factor)
+  if (draftMinor >= min.minDailyBudgetMinor) return null
+  const shown = (min.minDailyBudgetMinor / factor).toFixed(factor === 1 ? 0 : 2)
+  return `每天预算 ${draft.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`
 }
 
 /** 任一创意带视频就等转码（视频没转完建创意会报「视频还没准备好」）；返回错误文案，`null` = 可以继续。 */
