@@ -194,6 +194,32 @@ describe('createDraftForApproval', () => {
     expect(r.findings.map((f) => f.code)).toContain('playback_placement_not_locked')
   })
 
+  it('🔴 留资视频广告也要等转码；只有图的不等；转码超时 → failed 且不建', async () => {
+    const { sb } = fakeSupabase()
+    const leadVideo = { ...DRAFT, creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v9', thumbnailImageHash: 'th' }] }
+    mWait.mockClear()
+    mWait.mockResolvedValue({ ok: false, error: '视频还没转码好' } as Awaited<ReturnType<typeof waitForVideoReady>>)
+    const r = await createDraftForApproval(leadVideo, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mWait).toHaveBeenCalledTimes(1)
+    expect(mWait.mock.calls[0][0]).toEqual(['v9'])
+    expect(r.status).toBe('failed')
+    mWait.mockClear()
+    await createDraftForApproval(DRAFT, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mWait).not.toHaveBeenCalled()
+  })
+
+  it('🔴 带视频的草案建广告有整次时间预算；纯图的不限（与等转码同口径）', async () => {
+    const { sb } = fakeSupabase()
+    mWait.mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof waitForVideoReady>>)
+    mPublish.mockClear()
+    const leadVideo = { ...DRAFT, creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v9', thumbnailImageHash: 'th' }] }
+    await createDraftForApproval(leadVideo, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish.mock.calls[0][3]).toMatchObject({ stopWritingAt: expect.any(Number) })
+    mPublish.mockClear()
+    await createDraftForApproval(DRAFT, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish.mock.calls[0][3]).toBeUndefined()
+  })
+
   it('客户行业真的传进闸门文案（G11 接线）：travel 说「客户服务市场」，不说中性词', async () => {
     const { sb } = fakeSupabase()
     const r = await createDraftForApproval(DRAFT, {
