@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { bundle } from '@remotion/bundler'
 import { selectComposition, renderMedia, makeCancelSignal } from '@remotion/renderer'
 import { TEMPLATE_IDS, isTemplateId, loadTemplate } from './src/templates.ts'
+import { encodingCapFor } from './encode-cap.mjs'
 
 const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [选项]
 
@@ -244,11 +245,15 @@ async function runRender(opts) {
       browserExecutable: opts.browserExecutable,
     })
 
+    const cap = encodingCapFor(composition.durationInFrames / composition.fps)
     await renderMedia({
       composition,
       serveUrl: bundleDir,
       codec: 'h264',
       crf: 18,
+      // Capped CRF: quality target stays CRF 18, peaks are clipped so final.mp4 fits storage.
+      encodingMaxRate: cap.encodingMaxRate,
+      encodingBufferSize: cap.encodingBufferSize,
       outputLocation: opts.outFile,
       inputProps: loaded.props,
       concurrency: opts.concurrency,

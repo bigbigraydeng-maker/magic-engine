@@ -1,7 +1,7 @@
 // Vitest for remotion-branch.mjs. All IO is faked through `deps`; real temp dirs are used only for files.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync, truncateSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText, defaultMusicVocalGate, MUSIC_VOCAL_REGISTRY_PATH, buildAtmosphereText, buildAtmosphereCaption, buildAtmosphereSrt, assertAtmosphereTextVisible, assertAtmosphereClipUsable, defaultProbeClip } from './remotion-branch.mjs'
@@ -313,6 +313,25 @@ describe('post-render checks', () => {
     const env = makeEnv()
     const deps = makeDeps(env, over)
     await expect(run(env, deps)).rejects.toThrow(RemotionOrderError)
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses a final over 48 MB before upload, in plain language, and does not retry', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      renderFn: vi.fn(async ({ outFile }) => {
+        writeFileSync(outFile, '')
+        truncateSync(outFile, 48_000_000 + 1)
+        return { code: 0, stderrTail: '' }
+      }),
+    })
+    const err = await errOf(run(env, deps))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBe(false)
+    expect(err.message).toMatch(/超过存储上限/)
+    expect(err.message).toMatch(/成片 48\.0 MB/)
+    expect(err.message).toMatch(/请缩短时长或换更静的镜头后重出/)
     expect(deps.uploadSignedFn).not.toHaveBeenCalled()
     expect(deps.completeFn).not.toHaveBeenCalled()
   })
