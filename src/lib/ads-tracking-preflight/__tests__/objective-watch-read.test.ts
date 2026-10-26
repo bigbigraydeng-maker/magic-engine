@@ -3,7 +3,7 @@
  * 读一个系列的结构（广告组 / 广告 / 状态 / 最后修改时间）和三层洞察（整个系列 / 按广告组 / 按广告）。
  */
 import { describe, expect, it, vi } from 'vitest'
-import { parseMetricsRows, readSeriesFacts } from '../objective-watch-read'
+import { parseCampaignNode, parseMetricsRows, readSeriesFacts } from '../objective-watch-read'
 import { makeGraphGet } from '../meta-reader'
 
 const ACCOUNT = 'act_1234567890'
@@ -84,6 +84,16 @@ const read = (fetcher: typeof fetch) =>
   readSeriesFacts({ adAccountId: ACCOUNT, campaignId: CAMPAIGN, token: TOKEN, fetcher, now: NOW, sleep: noSleep })
 
 const pathOf = (u: URL): string => u.pathname.replace(/^\/v\d+\.\d+\//, '')
+
+describe('parseCampaignNode · 系列日预算', () => {
+  it('日预算是已经按分给的整数；没有或读不懂 = null，不让整份节点失败', () => {
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '2500' })?.daily_budget_cents).toBe(2500)
+    expect(parseCampaignNode(nodeBody)?.daily_budget_cents).toBeNull()
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '12.5' })?.daily_budget_cents).toBeNull()
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '-1' })).not.toBeNull()
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '-1' })?.daily_budget_cents).toBeNull()
+  })
+})
 
 describe('readSeriesFacts · 读结构和三层洞察', () => {
   it('读到系列、广告组、广告（含状态和最后修改时间）和三层数字', async () => {
@@ -230,6 +240,7 @@ describe('Graph 路径白名单 · 只多放开了「系列节点 + 广告组 / 
 
   it('读系列节点只许要白名单里的字段：要 access_token 之类的 / 不带字段 → 拒绝', async () => {
     await expect(get(CAMPAIGN, { fields: 'id,name,objective,status,effective_status,created_time,updated_time,account_id' })).resolves.toEqual({})
+    await expect(get(CAMPAIGN, { fields: 'daily_budget' })).resolves.toEqual({})
     await expect(get(CAMPAIGN, { fields: 'access_token' })).rejects.toThrow('不允许')
     await expect(get(CAMPAIGN, { fields: 'id,name,access_token' })).rejects.toThrow('不允许')
     await expect(get(CAMPAIGN, {})).rejects.toThrow('不允许')

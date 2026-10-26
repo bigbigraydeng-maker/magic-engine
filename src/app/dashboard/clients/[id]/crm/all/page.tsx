@@ -18,7 +18,7 @@
  * 总数；渠道/方向标签带 fallback（DB 加新枚举前端不炸）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
@@ -28,6 +28,7 @@ import { PrioritySectionHeader } from './_components/PrioritySection'
 import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
 import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
 import { takeContactName } from '../_components/bookings/payments-return'
+import { expectCrmList, markCrmListReady } from '@/lib/crm/list-ready'
 import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
 import { type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
@@ -44,7 +45,13 @@ type PendingNav =
   | { mode: 'segment'; sectionKey: SectionKey; openFirst: boolean }
   | { mode: 'flat'; openFirst: boolean }
 
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
 export default function CrmAllContactsPage() {
+  // 次要请求（悬浮按钮摘要、付款页签探针、付款要催）等客人表出来后再发。
+  // 用 layout effect：它先于所有子组件的 useEffect 请求运行。
+  useIsoLayoutEffect(() => expectCrmList(), [])
+
   const params = useParams()
   const clientId = params.id as string
 
@@ -229,6 +236,7 @@ export default function CrmAllContactsPage() {
       setLoading(false)
       setSectionsLoading(false)
       fetchInFlightRef.current = false
+      markCrmListReady()
     }
   }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, assigneeFilter, grouped, openSections, sectionPages])
 

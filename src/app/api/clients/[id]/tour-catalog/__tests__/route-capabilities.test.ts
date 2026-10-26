@@ -26,6 +26,7 @@ const EXPECTED: Record<string, CatalogCapability> = {
   'batches/[batchId]/apply/route.ts POST': 'import',
   'batches/[batchId]/rollback/route.ts POST': 'import',
   'seed/route.ts POST': 'seed',
+  'tours/route.ts POST': 'import',
   'publish/route.ts GET': 'view',
   'publish/route.ts POST': 'publish',
   'publish/history/route.ts GET': 'view',

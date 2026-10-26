@@ -149,3 +149,90 @@ describe('manual draft marker', () => {
     expect(Array.from(ids).sort()).toEqual(['g1', 'g3'])
   })
 })
+
+describe('parseManualPrescriptionBody · ad_plays', () => {
+  function bodyWithPlays(adPlays: unknown) {
+    const b = body()
+    const p = phase()
+    ;(p.initiative_seed as Record<string, unknown>).ad_plays = adPlays
+    ;(b.content as Record<string, unknown>).phases = [p]
+    return b
+  }
+
+  it('rejects malformed ad_plays', () => {
+    const invalid: unknown[] = [
+      'x',
+      [],
+      [{ step_key: 'a1', play: 'nope' }],
+      [{ step_key: 'a1', play: 'lead_form_harvest' }, { step_key: 'a1', play: 'thruplay_pool_build' }],
+      [{ step_key: 'BAD KEY', play: 'lead_form_harvest' }],
+    ]
+    for (const adPlays of invalid) {
+      fail(parseManualPrescriptionBody(bodyWithPlays(adPlays), CLIENT), 422, '广告打法')
+    }
+  })
+
+  it('accepts valid ad_plays and trims step keys', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays([
+      { step_key: '  a1 ', play: 'lead_form_harvest' },
+      { step_key: 'b2', play: 'thruplay_pool_build' },
+    ]), CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.content.phases[0].initiative_seed?.ad_plays).toEqual([
+      { step_key: 'a1', play: 'lead_form_harvest' },
+      { step_key: 'b2', play: 'thruplay_pool_build' },
+    ])
+  })
+
+  it('treats ad_plays null as not provided', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays(null), CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.content.phases[0].initiative_seed).not.toHaveProperty('ad_plays')
+  })
+
+  it('still rejects a non-null malformed ad_plays', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays('x'), CLIENT)
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.status).toBe(422)
+  })
+
+  it('null ad_plays keeps the other seed keys', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays(null), CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const seed = parsed.content.phases[0].initiative_seed
+    expect(seed?.initiative_type).toBe('demand_generation')
+    expect(seed?.title).toBe('建系列')
+  })
+
+  it('leaves ad_plays absent when not supplied', () => {
+    const parsed = parseManualPrescriptionBody(body(), CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.content.phases[0].initiative_seed).not.toHaveProperty('ad_plays')
+  })
+
+  it('drops a top-level plan_seed from content', () => {
+    const b = body()
+    ;(b.content as Record<string, unknown>).plan_seed = { schema_version: 1, evil: true }
+    const parsed = parseManualPrescriptionBody(b, CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect('plan_seed' in parsed.content).toBe(false)
+  })
+
+  it('keeps other seed keys when ad_plays is valid', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays([
+      { step_key: 'a1', play: 'lead_form_harvest' },
+    ]), CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const seed = parsed.content.phases[0].initiative_seed
+    expect(seed?.title).toBe('建系列')
+    expect(seed?.posture).toBe('fast')
+    expect(seed?.budget_percent).toBe(100)
+  })
+})

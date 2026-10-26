@@ -57,7 +57,15 @@ describe('处方卡', () => {
     expect(screen.getByRole('link', { name: '去处方页查看' }).getAttribute('href'))
       .toBe('/dashboard/clients/client-1/prescription/new?goal_id=goal-1')
     expect(container.querySelectorAll('button')).toHaveLength(0)
-    expect(container.textContent).not.toMatch(/批准/)
+    // 计划草稿建议面板里有一句「批准这份处方不等于批准花这些钱」的免责提示，不是批准入口；
+    // 其余部分仍然不许出现「批准」。
+    const withoutSeedPanel = container.cloneNode(true) as HTMLElement
+    withoutSeedPanel.querySelector('[data-plan-seed-panel]')?.remove()
+    expect(withoutSeedPanel.textContent).not.toMatch(/批准/)
+    const seedPanel = container.querySelector('[data-plan-seed-panel]')
+    expect(seedPanel).not.toBeNull()
+    expect(seedPanel?.textContent).toContain('批准这份处方不等于批准花这些钱')
+    expect(seedPanel?.querySelectorAll('a')).toHaveLength(0)
     expect(container.textContent).not.toMatch(/\{/)
     expect(container.textContent).not.toMatch(/阶段/)
     expect(container.textContent).not.toMatch(/AUD/)
