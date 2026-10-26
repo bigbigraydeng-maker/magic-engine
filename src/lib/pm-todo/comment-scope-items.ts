@@ -121,16 +121,41 @@ export async function fetchCommentScopeTodos(
   supabase: SupabaseClient,
   now: Date,
 ): Promise<CommentScopeTodo[]> {
+  // 🔴 只认真正写下了 summary 的那一轮 —— 不是最新那一行，也不是「最新几行里」的
+  // 某一行。
+  //
+  // startCronRun 一开跑就先插一行 status='running'（summary 还是空的），summary
+  // 要 finish() 才写。所以最新那一行随时可能是「正在跑 / 超时卡死没 finish / 失败
+  // 没带 summary」——这几种都**不代表没问题**，只代表这一轮还没给出结果。若照
+  // `rows[0]?.summary` 取最新一行，那一刻这道本该报警的待办会自己闭嘴，昨天已知的
+  // 「评论读不到 / 令牌被拒」被静默抹掉 —— 正是这个功能存在的意义要消灭的事。
+  //
+  // 早先版本改成「往回翻几行找一条有 summary 的」，但这个 cron 每 30 分钟一轮，
+  // 5 行只盖 2.5 小时：连续 5 轮超时/失败不带 summary（约 2.5 小时内就可能发生）
+  // 会把查询窗口外、仍在 RUN_STALE_DAYS 两天有效期内的上一条好结果也漏掉，待办
+  // 照样静默消失 —— 跟只看最新一行是同一种 fail-open，只是需要更久触发。所以改
+  // 在查询端直接过滤，取真正的最近一条，不受回看行数限制
+  // （mailbox-run.ts 文件头 + meta-auth-health-items.ts 记着同一个坑）。
+  //
+  // 过滤条件是 summary->>results 非空，而不是只看 summary 非空：finish() 写 summary
+  // 也不保证带 results —— kill 开关那轮写 `{ killed: true }`（route.ts），非空却没有
+  // results。只判「summary 非空」会取到它、loop 空 results 出 0 条待办，kill 开关一
+  // 开着（可长时间）就把仍有效的上一条「评论读不到 / 令牌被拒」静默盖掉，又是同一
+  // 种 fail-open。按 results 是否存在过滤，running/失败(summary=null)、kill(无 results)
+  // 全排除；无配置成功轮写 `{ results: [] }`（route.ts），results 存在故保留，正确识别
+  // 为「已确认无问题」而不回落到更早的旧报错。
   const { data } = await supabase
     .from('cron_run_logs')
     .select('finished_at, summary')
     .eq('job_name', 'social-comment-autoreply')
+    .not('summary->>results', 'is', null)
     .order('started_at', { ascending: false })
     .limit(1)
 
-  const run = (data ?? [])[0] as
-    | { finished_at: string | null; summary: CommentRunSummary | null }
-    | undefined
+  const run = (data?.[0] ?? null) as {
+    finished_at: string | null
+    summary: CommentRunSummary | null
+  } | null
   if (!run?.summary) return []
 
   // 「该跑没跑」有 pushCronHealthItems 在管，这里不重复报，只在结果够新时说话
