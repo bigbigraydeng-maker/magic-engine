@@ -168,23 +168,28 @@
   .brand-chain .nm{color:var(--cream);font-size:16px;font-family:var(--serif);letter-spacing:2px;font-weight:500;margin-bottom:4px}
   .brand-chain .desc{color:var(--muted);font-size:13px}
 
-  /* Contact */
-  .contact{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:stretch}
-  .contact .shot{position:relative;border-radius:4px;overflow:hidden;border:1px solid var(--line-strong);min-height:580px}
-  .contact .shot img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0}
-  .contact .shot .ov{position:absolute;inset:0;background:linear-gradient(180deg,transparent 40%,rgba(6,28,23,0.9));display:flex;flex-direction:column;justify-content:flex-end;padding:40px}
-  .contact .shot .ov h4{font-family:var(--serif);color:var(--cream);font-size:26px;letter-spacing:3px;margin-bottom:12px;font-weight:500}
-  .contact .shot .ov p{color:var(--muted);font-size:13px;line-height:1.8;max-width:380px}
-  .contact .form{background:linear-gradient(180deg,var(--ink-2),var(--ink));border:1px solid var(--line);border-radius:4px;padding:48px;display:flex;flex-direction:column;gap:18px}
-  .contact .form .title{font-family:var(--serif);color:var(--cream);font-size:22px;letter-spacing:2px;margin-bottom:14px;font-weight:500}
-  .fld{display:flex;flex-direction:column;gap:8px}
-  .fld label{color:var(--mute-2);font-size:10px;letter-spacing:3px;text-transform:uppercase}
-  .fld input,.fld textarea,.fld select{background:transparent;border:none;border-bottom:1px solid var(--line);color:var(--cream);padding:12px 2px;font-size:14px;font-family:inherit;outline:none;transition:border-color .3s}
-  .fld input::placeholder,.fld textarea::placeholder{color:var(--mute-2)}
-  .fld input:focus,.fld textarea:focus,.fld select:focus{border-color:var(--gold)}
-  .fld select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23D3B066' d='M0 0l6 8 6-8z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 4px center}
-  .contact button{margin-top:16px;padding:16px;background:linear-gradient(135deg,var(--gold) 0%,var(--gold-3) 50%,var(--gold) 100%);background-size:200% 200%;color:var(--ink);border:none;border-radius:3px;font-size:13px;letter-spacing:3px;font-weight:600;cursor:pointer;transition:background-position .5s}
-  .contact button:hover{background-position:100% 100%}
+  /* Contact — WeChat QR only */
+  .contact{display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:center}
+  .contact .copy h3{font-family:var(--serif);color:var(--cream);font-size:46px;line-height:1.25;font-weight:500;letter-spacing:4px;margin-bottom:28px}
+  .contact .copy p{color:var(--muted);font-size:15px;line-height:1.9;max-width:460px;margin-bottom:14px}
+  .contact .copy .note{color:var(--mute-2);font-size:13px;line-height:1.9;max-width:460px;margin-top:24px;padding-top:24px;border-top:1px solid var(--line)}
+  .qrcard{position:relative;background:linear-gradient(165deg,rgba(239,230,204,0.08) 0%,rgba(239,230,204,0.03) 40%,rgba(211,176,102,0.06) 100%);border:1px solid rgba(239,230,204,0.18);border-radius:14px;padding:52px 44px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 40px 80px -40px rgba(0,0,0,0.7),inset 0 1px 0 rgba(239,230,204,0.08);text-align:center;overflow:hidden}
+  .qrcard::before{content:'';position:absolute;top:-1px;left:-1px;right:-1px;height:60%;background:linear-gradient(180deg,rgba(239,230,204,0.12),transparent);border-radius:14px 14px 0 0;pointer-events:none}
+  .qrcard .wx-icon{width:72px;height:72px;margin:0 auto 18px;position:relative}
+  .qrcard .wx-icon .glow{position:absolute;inset:-8px;background:radial-gradient(circle,rgba(30,107,87,0.5),transparent 70%);filter:blur(10px)}
+  .qrcard .wx-icon svg{position:relative;width:100%;height:100%;filter:drop-shadow(0 6px 12px rgba(0,0,0,0.4))}
+  .qrcard .eyebrow-wx{color:var(--mute-2);font-size:11px;letter-spacing:5px;margin-bottom:10px;font-family:var(--sans)}
+  .qrcard h4{font-family:var(--serif);color:var(--cream);font-size:34px;letter-spacing:6px;font-weight:500;margin-bottom:14px}
+  .qrcard .sub-cn{color:var(--text);font-size:14px;letter-spacing:2px;margin-bottom:2px}
+  .qrcard .sub-en{color:var(--mute-2);font-size:11px;letter-spacing:2px;margin-bottom:32px;font-family:var(--sans)}
+  .qrcard .qr{width:260px;height:260px;margin:0 auto;background:#fff;padding:16px;border-radius:8px;position:relative;box-shadow:0 20px 40px -15px rgba(0,0,0,0.5)}
+  .qrcard .qr svg{width:100%;height:100%;display:block}
+  .qrcard .qr .center{position:absolute;left:50%;top:50%;width:48px;height:48px;background:#1AAD19;border-radius:8px;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+  .qrcard .qr .center svg{width:32px;height:32px}
+  .qrcard .scan-btn{display:inline-flex;align-items:center;gap:12px;margin-top:30px;padding:14px 32px;color:var(--cream);font-size:13px;letter-spacing:3px;border:1px solid rgba(239,230,204,0.22);border-radius:999px;background:rgba(239,230,204,0.04);transition:all .3s;cursor:pointer}
+  .qrcard .scan-btn:hover{border-color:var(--gold);color:var(--gold)}
+  .qrcard .scan-btn .arr{transition:transform .3s}
+  .qrcard .scan-btn:hover .arr{transform:translateX(4px)}
 
   /* Footer */
   footer{padding:60px 0 40px;color:var(--muted);font-size:12px;letter-spacing:1px;border-top:1px solid var(--line);position:relative;z-index:1}
@@ -404,23 +409,84 @@
       <p class="section-lead">填写合作申请，我们会在收到后由对应的区域 / 行业团队与你联系。</p>
     </div>
     <div class="contact reveal">
-      <div class="shot">
-        <img src="images/网站占位图/联系我们.jpg" alt="联系我们">
-        <div class="ov">
-          <h4>与我们一起<br>连接全球</h4>
-          <p>每一份合作申请都会由对应的区域 / 行业团队核对后回复，我们重视你的时间，也重视这段合作的开始。</p>
-        </div>
+      <div class="copy">
+        <h3>与我们一起<br>连接全球</h3>
+        <p>每一份合作申请都会由对应的区域 / 行业团队核对后回复——我们重视你的时间，也重视这段合作的开始。</p>
+        <p class="note">扫描右侧二维码添加森诺官方微信，面向中国与亚洲地区的国家 / 区域代理、机构、渠道与生态伙伴，获取合作资料与申请路径。</p>
       </div>
-      <form class="form" onsubmit="event.preventDefault();alert('这是预览版，表单未对外发送')">
-        <div class="title">合作申请</div>
-        <div class="fld"><label>合作类型</label><select><option>国家 / 区域代理</option><option>机构合作</option><option>渠道合作</option><option>供应链 / 技术合作</option><option>媒体 / 公益</option><option>健康学院</option></select></div>
-        <div class="fld"><label>姓名</label><input type="text" placeholder="你的姓名"></div>
-        <div class="fld"><label>所属机构</label><input type="text" placeholder="公司 / 机构名称"></div>
-        <div class="fld"><label>邮箱</label><input type="email" placeholder="name@example.com"></div>
-        <div class="fld"><label>所在国家 / 地区</label><input type="text" placeholder="国家或地区"></div>
-        <div class="fld"><label>合作意向</label><textarea rows="4" placeholder="简要描述你希望合作的方向"></textarea></div>
-        <button type="submit">提交合作申请</button>
-      </form>
+      <div class="qrcard">
+        <div class="wx-icon">
+          <div class="glow"></div>
+          <svg viewBox="0 0 72 72">
+            <defs>
+              <radialGradient id="wxg" cx="35%" cy="30%" r="70%">
+                <stop offset="0%" stop-color="#4CBF4A"/>
+                <stop offset="55%" stop-color="#1AAD19"/>
+                <stop offset="100%" stop-color="#0E6F1A"/>
+              </radialGradient>
+              <radialGradient id="wxh" cx="30%" cy="20%" r="40%">
+                <stop offset="0%" stop-color="rgba(255,255,255,0.7)"/>
+                <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+              </radialGradient>
+            </defs>
+            <circle cx="36" cy="36" r="34" fill="url(#wxg)"/>
+            <circle cx="36" cy="36" r="34" fill="url(#wxh)"/>
+            <circle cx="36" cy="36" r="34" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.8"/>
+            <!-- WeChat chat bubbles -->
+            <g fill="#fff">
+              <path d="M26 25c-6 0-11 4-11 9 0 3 2 5 4 7l-1 4 5-2c1 0 2 1 3 1 0-5 5-9 11-9h1c-1-6-6-10-12-10zm-4 7a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm8 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/>
+              <path d="M46 34c-5 0-10 3-10 8 0 3 2 5 4 7l-1 3 4-2c1 0 2 1 3 1 5 0 10-4 10-9s-5-8-10-8zm-3 6a1.2 1.2 0 110 2.5 1.2 1.2 0 010-2.5zm6 0a1.2 1.2 0 110 2.5 1.2 1.2 0 010-2.5z"/>
+            </g>
+          </svg>
+        </div>
+        <div class="eyebrow-wx">WECHAT</div>
+        <h4>微信</h4>
+        <div class="sub-cn">中国及亚洲合作</div>
+        <div class="sub-en">China &amp; Asia partnerships</div>
+        <div class="qr">
+          <svg viewBox="0 0 29 29" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
+            <rect width="29" height="29" fill="#fff"/>
+            <g fill="#000">
+              <!-- Three finder patterns -->
+              <path d="M0 0h7v7h-7zM1 1v5h5v-5zM2 2h3v3h-3z"/>
+              <path d="M22 0h7v7h-7zM23 1v5h5v-5zM24 2h3v3h-3z"/>
+              <path d="M0 22h7v7h-7zM1 23v5h5v-5zM2 24h3v3h-3z"/>
+              <!-- Timing patterns + data (synthesized decorative) -->
+              <rect x="8" y="0" width="1" height="1"/><rect x="10" y="0" width="2" height="1"/><rect x="13" y="0" width="1" height="1"/><rect x="15" y="0" width="2" height="1"/><rect x="18" y="0" width="1" height="1"/><rect x="20" y="0" width="1" height="1"/>
+              <rect x="8" y="1" width="2" height="1"/><rect x="11" y="1" width="1" height="1"/><rect x="14" y="1" width="2" height="1"/><rect x="17" y="1" width="1" height="1"/><rect x="19" y="1" width="2" height="1"/>
+              <rect x="9" y="2" width="1" height="1"/><rect x="11" y="2" width="3" height="1"/><rect x="15" y="2" width="1" height="1"/><rect x="17" y="2" width="2" height="1"/><rect x="20" y="2" width="1" height="1"/>
+              <rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="13" y="3" width="2" height="1"/><rect x="16" y="3" width="1" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="20" y="3" width="1" height="1"/>
+              <rect x="9" y="4" width="2" height="1"/><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="1" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="19" y="4" width="2" height="1"/>
+              <rect x="8" y="5" width="1" height="1"/><rect x="11" y="5" width="1" height="1"/><rect x="13" y="5" width="1" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="17" y="5" width="1" height="1"/><rect x="19" y="5" width="1" height="1"/><rect x="21" y="5" width="1" height="1"/>
+              <rect x="9" y="6" width="1" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="14" y="6" width="2" height="1"/><rect x="17" y="6" width="2" height="1"/><rect x="20" y="6" width="2" height="1"/>
+              <rect x="0" y="8" width="1" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="1" height="1"/><rect x="7" y="8" width="2" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="15" y="8" width="1" height="1"/><rect x="18" y="8" width="2" height="1"/><rect x="21" y="8" width="1" height="1"/><rect x="23" y="8" width="2" height="1"/><rect x="26" y="8" width="1" height="1"/><rect x="28" y="8" width="1" height="1"/>
+              <rect x="1" y="9" width="2" height="1"/><rect x="4" y="9" width="1" height="1"/><rect x="6" y="9" width="2" height="1"/><rect x="9" y="9" width="1" height="1"/><rect x="11" y="9" width="2" height="1"/><rect x="14" y="9" width="2" height="1"/><rect x="17" y="9" width="1" height="1"/><rect x="19" y="9" width="2" height="1"/><rect x="22" y="9" width="1" height="1"/><rect x="24" y="9" width="2" height="1"/><rect x="27" y="9" width="1" height="1"/>
+              <rect x="0" y="10" width="2" height="1"/><rect x="3" y="10" width="1" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="10" y="10" width="2" height="1"/><rect x="13" y="10" width="1" height="1"/><rect x="15" y="10" width="2" height="1"/><rect x="18" y="10" width="2" height="1"/><rect x="21" y="10" width="1" height="1"/><rect x="23" y="10" width="2" height="1"/><rect x="26" y="10" width="1" height="1"/><rect x="28" y="10" width="1" height="1"/>
+              <rect x="2" y="11" width="1" height="1"/><rect x="4" y="11" width="2" height="1"/><rect x="7" y="11" width="1" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="1" height="1"/><rect x="14" y="11" width="2" height="1"/><rect x="17" y="11" width="2" height="1"/><rect x="20" y="11" width="1" height="1"/><rect x="22" y="11" width="2" height="1"/><rect x="25" y="11" width="1" height="1"/><rect x="27" y="11" width="2" height="1"/>
+              <rect x="0" y="12" width="1" height="1"/><rect x="3" y="12" width="2" height="1"/><rect x="6" y="12" width="1" height="1"/><rect x="8" y="12" width="2" height="1"/><rect x="11" y="12" width="1" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="1" height="1"/><rect x="18" y="12" width="2" height="1"/><rect x="21" y="12" width="1" height="1"/><rect x="23" y="12" width="2" height="1"/><rect x="26" y="12" width="1" height="1"/>
+              <rect x="1" y="13" width="2" height="1"/><rect x="5" y="13" width="1" height="1"/><rect x="7" y="13" width="2" height="1"/><rect x="10" y="13" width="2" height="1"/><rect x="14" y="13" width="1" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="19" y="13" width="1" height="1"/><rect x="21" y="13" width="2" height="1"/><rect x="25" y="13" width="2" height="1"/><rect x="28" y="13" width="1" height="1"/>
+              <rect x="0" y="14" width="2" height="1"/><rect x="3" y="14" width="1" height="1"/><rect x="6" y="14" width="2" height="1"/><rect x="9" y="14" width="1" height="1"/><rect x="12" y="14" width="2" height="1"/><rect x="15" y="14" width="2" height="1"/><rect x="18" y="14" width="1" height="1"/><rect x="20" y="14" width="2" height="1"/><rect x="24" y="14" width="1" height="1"/><rect x="26" y="14" width="2" height="1"/>
+              <rect x="2" y="15" width="1" height="1"/><rect x="4" y="15" width="2" height="1"/><rect x="7" y="15" width="1" height="1"/><rect x="10" y="15" width="2" height="1"/><rect x="13" y="15" width="1" height="1"/><rect x="16" y="15" width="2" height="1"/><rect x="19" y="15" width="2" height="1"/><rect x="22" y="15" width="1" height="1"/><rect x="24" y="15" width="2" height="1"/><rect x="27" y="15" width="1" height="1"/>
+              <rect x="0" y="16" width="1" height="1"/><rect x="3" y="16" width="2" height="1"/><rect x="6" y="16" width="1" height="1"/><rect x="8" y="16" width="2" height="1"/><rect x="11" y="16" width="2" height="1"/><rect x="15" y="16" width="1" height="1"/><rect x="17" y="16" width="2" height="1"/><rect x="20" y="16" width="1" height="1"/><rect x="22" y="16" width="2" height="1"/><rect x="25" y="16" width="2" height="1"/><rect x="28" y="16" width="1" height="1"/>
+              <rect x="1" y="17" width="2" height="1"/><rect x="4" y="17" width="1" height="1"/><rect x="7" y="17" width="2" height="1"/><rect x="10" y="17" width="1" height="1"/><rect x="12" y="17" width="2" height="1"/><rect x="16" y="17" width="2" height="1"/><rect x="19" y="17" width="1" height="1"/><rect x="21" y="17" width="2" height="1"/><rect x="24" y="17" width="1" height="1"/><rect x="26" y="17" width="2" height="1"/>
+              <rect x="0" y="18" width="2" height="1"/><rect x="5" y="18" width="1" height="1"/><rect x="7" y="18" width="2" height="1"/><rect x="11" y="18" width="1" height="1"/><rect x="13" y="18" width="2" height="1"/><rect x="17" y="18" width="1" height="1"/><rect x="19" y="18" width="2" height="1"/><rect x="22" y="18" width="1" height="1"/><rect x="25" y="18" width="2" height="1"/><rect x="28" y="18" width="1" height="1"/>
+              <rect x="2" y="19" width="1" height="1"/><rect x="4" y="19" width="2" height="1"/><rect x="8" y="19" width="1" height="1"/><rect x="10" y="19" width="2" height="1"/><rect x="14" y="19" width="1" height="1"/><rect x="16" y="19" width="2" height="1"/><rect x="20" y="19" width="2" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="25" y="19" width="2" height="1"/>
+              <rect x="0" y="20" width="1" height="1"/><rect x="3" y="20" width="1" height="1"/><rect x="5" y="20" width="2" height="1"/><rect x="9" y="20" width="2" height="1"/><rect x="12" y="20" width="1" height="1"/><rect x="15" y="20" width="2" height="1"/><rect x="18" y="20" width="1" height="1"/><rect x="22" y="20" width="2" height="1"/><rect x="26" y="20" width="1" height="1"/><rect x="28" y="20" width="1" height="1"/>
+              <rect x="8" y="22" width="1" height="1"/><rect x="10" y="22" width="2" height="1"/><rect x="13" y="22" width="1" height="1"/><rect x="15" y="22" width="2" height="1"/><rect x="18" y="22" width="2" height="1"/><rect x="21" y="22" width="1" height="1"/><rect x="23" y="22" width="1" height="1"/><rect x="26" y="22" width="2" height="1"/>
+              <rect x="9" y="23" width="2" height="1"/><rect x="12" y="23" width="2" height="1"/><rect x="16" y="23" width="1" height="1"/><rect x="18" y="23" width="1" height="1"/><rect x="20" y="23" width="2" height="1"/><rect x="24" y="23" width="2" height="1"/><rect x="28" y="23" width="1" height="1"/>
+              <rect x="8" y="24" width="2" height="1"/><rect x="11" y="24" width="1" height="1"/><rect x="13" y="24" width="2" height="1"/><rect x="16" y="24" width="2" height="1"/><rect x="19" y="24" width="1" height="1"/><rect x="21" y="24" width="2" height="1"/><rect x="25" y="24" width="1" height="1"/><rect x="27" y="24" width="1" height="1"/>
+              <rect x="10" y="25" width="1" height="1"/><rect x="12" y="25" width="2" height="1"/><rect x="15" y="25" width="1" height="1"/><rect x="17" y="25" width="2" height="1"/><rect x="20" y="25" width="1" height="1"/><rect x="22" y="25" width="2" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="28" y="25" width="1" height="1"/>
+              <rect x="8" y="26" width="1" height="1"/><rect x="11" y="26" width="2" height="1"/><rect x="14" y="26" width="1" height="1"/><rect x="16" y="26" width="2" height="1"/><rect x="19" y="26" width="2" height="1"/><rect x="23" y="26" width="1" height="1"/><rect x="25" y="26" width="1" height="1"/><rect x="27" y="26" width="2" height="1"/>
+              <rect x="9" y="27" width="2" height="1"/><rect x="12" y="27" width="1" height="1"/><rect x="15" y="27" width="2" height="1"/><rect x="18" y="27" width="1" height="1"/><rect x="20" y="27" width="2" height="1"/><rect x="24" y="27" width="1" height="1"/><rect x="26" y="27" width="2" height="1"/>
+              <rect x="8" y="28" width="2" height="1"/><rect x="11" y="28" width="1" height="1"/><rect x="13" y="28" width="2" height="1"/><rect x="17" y="28" width="1" height="1"/><rect x="19" y="28" width="2" height="1"/><rect x="22" y="28" width="2" height="1"/><rect x="25" y="28" width="2" height="1"/><rect x="28" y="28" width="1" height="1"/>
+            </g>
+          </svg>
+          <div class="center">
+            <svg viewBox="0 0 32 32" fill="#fff"><path d="M12 10c-4 0-7 3-7 6 0 2 1 4 3 5l-1 2 3-1 2 1h1c-1-4 3-7 7-7h2c-1-4-5-6-10-6zm-3 4a1 1 0 110 2 1 1 0 010-2zm5 0a1 1 0 110 2 1 1 0 010-2z"/><path d="M22 15c-4 0-7 2-7 5s3 5 7 5l2-1 3 1-1-2c1-1 3-2 3-4 0-3-3-4-7-4zm-2 3a1 1 0 110 2 1 1 0 010-2zm4 0a1 1 0 110 2 1 1 0 010-2z"/></svg>
+          </div>
+        </div>
+        <a class="scan-btn" href="#">扫码联系我们 <span class="arr">→</span></a>
+      </div>
     </div>
   </div>
 </section>
