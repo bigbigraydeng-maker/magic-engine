@@ -8,6 +8,7 @@ import {
   parseManualPrescriptionBody,
   type ManualParseSuccess,
 } from '@/lib/diagnostic/manual-prescription'
+import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -120,5 +121,7 @@ export async function POST(
   if (!parsed.ok) return jsonError(parsed.status, parsed.error)
   const ready = await loadInsertContext(clientId, parsed.goalId)
   if (!ready.ok) return jsonError(ready.status, ready.error)
+  // 种子构建失败不能挡住保存草稿：attachPlanSeed 自己不抛错，这里再兜一层
+  parsed.content = await attachPlanSeed(parsed.content, { clientId, goalId: parsed.goalId }).catch(() => parsed.content)
   return insertDraft(clientId, parsed, ready)
 }
