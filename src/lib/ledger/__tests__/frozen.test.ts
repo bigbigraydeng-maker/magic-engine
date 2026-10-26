@@ -45,6 +45,47 @@ describe('checkFrozenFields', () => {
     expect(checkFrozenFields('2026-09-24-foo.md', head(), base()).violations.map(v => v.field)).toContain('verify_how')
   })
 
+  const boldValue = '**【第一条】会不会返回？** 其余**保留**'
+  const strippedBold = '【第一条】会不会返回？ 其余**保留**'
+  const boldBase = () => fm(BASE_FIELDS.replace('跑一遍抓取脚本看还报不报错', boldValue))
+  const boldHead = (value = strippedBold) => fm(BASE_FIELDS.replace(
+    'verify_how: 跑一遍抓取脚本看还报不报错',
+    `verify_how: ${value}`,
+  ))
+
+  it('repairs a leading ** pair that YAML reads as an alias', () => {
+    const result = checkFrozenFields('2026-09-24-foo.md', boldHead(), boldBase())
+    expect(result.baseParseError).not.toBeNull()
+    expect(result.parseError).toBeNull()
+    expect(result.violations).toEqual([])
+  })
+
+  it('rejects any other change while stripping that leading ** pair', () => {
+    const changed = checkFrozenFields('2026-09-24-foo.md', boldHead(strippedBold + '改'), boldBase())
+    expect(changed.violations.map((v) => v.field)).toContain('verify_how')
+    const laterPair = checkFrozenFields(
+      '2026-09-24-foo.md',
+      boldHead('**【第一条】会不会返回？** 其余保留'),
+      boldBase(),
+    )
+    expect(laterPair.violations.map((v) => v.field)).toContain('verify_how')
+    const alreadyValid = fm(BASE_FIELDS.replace(
+      'verify_how: 跑一遍抓取脚本看还报不报错',
+      'verify_how: "**保持**"',
+    ))
+    const rewritten = fm(BASE_FIELDS.replace('verify_how: 跑一遍抓取脚本看还报不报错', 'verify_how: 保持'))
+    expect(checkFrozenFields('2026-09-24-foo.md', rewritten, alreadyValid).violations.map((v) => v.field)).toContain('verify_how')
+  })
+
+  it('still freezes other fields during a leading-bold repair', () => {
+    const result = checkFrozenFields(
+      '2026-09-24-foo.md',
+      boldHead().replace('title: 换掉旧的抓取库', 'title: 新标题'),
+      boldBase(),
+    )
+    expect(result.violations.map((v) => v.field)).toEqual(['title'])
+  })
+
   it('still freezes other fields during an otherwise valid wrapping repair', () => {
     const result = checkFrozenFields('2026-09-24-foo.md', wrappedHead().replace('title: 换掉旧的抓取库', 'title: 新标题'), brokenBase())
     expect(result.violations.map(v => v.field)).toEqual(['title'])

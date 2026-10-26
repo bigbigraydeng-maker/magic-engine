@@ -67,6 +67,43 @@ function isExactVerifyHowRepair(file: string, baseText: string, headText: string
   }
 }
 
+/**
+ * A leading `**...**` is markdown bold, and YAML reads the opening `*` as an alias,
+ * so the whole card fails to parse. Dropping that one pair — and nothing else —
+ * is a repair. Any other character change stays frozen.
+ */
+function isLeadingBoldAliasRepair(file: string, baseText: string, headText: string): boolean {
+  const baseFm = baseText.match(FM_RE)?.[1]
+  const headFm = headText.match(FM_RE)?.[1]
+  if (!baseFm || !headFm || !parseLedgerFile(file, headText).ok) return false
+  try {
+    if (parseDocument(baseFm).errors.length === 0) return false
+    const baseValue = singlePlainVerifyHow(baseFm)
+    const headValue = singlePlainVerifyHow(headFm)
+    if (baseValue === null || headValue === null || !baseValue.startsWith('**')) return false
+    const closeAt = baseValue.indexOf('**', 2)
+    if (closeAt < 2) return false
+    const repaired = baseValue.slice(2, closeAt) + baseValue.slice(closeAt + 2)
+    if (!repaired || headValue !== repaired || repaired !== repaired.trim()) return false
+    if (`'"|>[]{}&*!%@\`-?:`.includes(repaired[0]) || /[\u0000-\u001f\u007f#]/.test(repaired)) return false
+    const head = parseDocument(headFm)
+    return head.errors.length === 0 && head.warnings.length === 0 && head.get('verify_how') === repaired
+  } catch {
+    return false
+  }
+}
+
+function singlePlainVerifyHow(frontmatter: string): string | null {
+  const lines = frontmatter.split(/\r?\n/)
+  const indices = lines.flatMap((line, i) => (line.startsWith('verify_how:') ? [i] : []))
+  if (indices.length !== 1) return null
+  const index = indices[0]
+  const raw = lines[index]
+  if (!raw.startsWith('verify_how: ') || /^\s/.test(lines[index + 1] ?? '')) return null
+  const value = raw.slice('verify_how: '.length)
+  return value.length > 0 ? value : null
+}
+
 function rawFieldValue(text: string, field: string): string | null {
   const raw = extractRawField(text, field)
   if (raw === null) return null
@@ -138,6 +175,7 @@ export function checkFrozenFields(
     if (baseRaw === null) continue
     if (baseRaw !== headRaw) {
       if (field === 'verify_how' && isExactVerifyHowRepair(file, baseText, headText)) continue
+      if (field === 'verify_how' && isLeadingBoldAliasRepair(file, baseText, headText)) continue
       if (isBrokenCardSpellingRepair(file, field, baseText, headText)) continue
       const valPart = (s: string | null) =>
         s === null ? '（已删除）' : s.slice(s.indexOf(':') + 1).trimStart()
