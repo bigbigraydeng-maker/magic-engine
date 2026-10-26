@@ -65,7 +65,16 @@ function mockDb(
 ) {
   const { newest = null, settled = [], settledError = false } = opts
   settledQueryCalls = []
+  const untouched = { data: [] as unknown[], error: null }
+  const writeChain: Record<string, unknown> = {
+    eq: () => writeChain,
+    select: () => Promise.resolve(untouched),
+    in: () => Promise.resolve(untouched),
+    then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(untouched)),
+  }
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => ({
+    update: () => writeChain,
+    upsert: () => Promise.resolve({ error: null }),
     select: (columns: string) => {
       const filters: Array<[string, unknown]> = []
       const chain = {
@@ -81,8 +90,11 @@ function mockDb(
             }),
           }
         },
-        in: (_col: string, ids: string[]) => {
-          settledQueryCalls.push({ table, columns, filters: [...filters], ids: [...ids] })
+        in: (col: string, ids: string[]) => {
+          // 主页暂停检查也走 .in()，但那不是已办完批量查。只记 source_ref 这一条。
+          if (col === 'source_ref') {
+            settledQueryCalls.push({ table, columns, filters: [...filters], ids: [...ids] })
+          }
           const hit = settled.filter((row) => ids.includes(row.source_ref))
           return Promise.resolve(
             settledError
@@ -160,6 +172,42 @@ describe('getLeadWatermark', () => {
 })
 
 describe('syncClientMetaLeads', () => {
+  it('连接已经不健康 → 不再打 Graph，也不去核实令牌', async () => {
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      if (table !== 'platform_oauth_connections') {
+        return { select: () => ({ eq: () => ({ eq: () => Promise.resolve({ data: [], error: null }) }) }) }
+      }
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                in: () => Promise.resolve({ data: [{ id: 'conn-1' }], error: null }),
+              }),
+            }),
+          }),
+        }),
+      }
+    })
+
+    const res = await syncClientMetaLeads(CLIENT)
+
+    expect(res.skipped).toBe('connection_unhealthy')
+    expect(res.error).toBeUndefined()
+    expect(mock(authorizePageSync)).not.toHaveBeenCalled()
+    expect(mock(fetchPageLeadForms)).not.toHaveBeenCalled()
+  })
+
+  it('表单一上来就 Graph 190 → 记成等重连，不再当成普通失败去拉表单', async () => {
+    mock(fetchPageLeadForms).mockResolvedValue({ rows: [], error: 'leadgen_forms HTTP 400 code=190' })
+
+    const res = await syncClientMetaLeads(CLIENT)
+
+    expect(res.skipped).toBe('connection_unhealthy')
+    expect(res.error).toContain('190')
+    expect(mock(fetchFormLeads)).not.toHaveBeenCalled()
+  })
+
   it('AD-SEC-4：主页没核实是这个客户的 → 一个表单都不读，并记成 error 让定时任务算失败', async () => {
     mock(authorizePageSync).mockResolvedValue({ ok: false, skipped: 'page_not_verified', reason: 'bound_to_other_client' })
 

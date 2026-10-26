@@ -377,7 +377,7 @@ export async function GET(req: NextRequest) {
       const slug = (client.client_name ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '_')
       const peers = await getTokenOwnerPeers()
       const resolved = await resolveMetaTokenDetailed(supabaseAdmin, client.client_id, process.env, peers)
-      let metaToken = resolved !== 'ownership_unknown' && resolved && resolved.source === 'client_domain' ? resolved.token : undefined
+      let metaToken = resolved !== 'ownership_unknown' && resolved && (resolved.source === 'client_db' || resolved.source === 'client_domain') ? resolved.token : undefined
       const legacyToken = slug ? process.env[`${slug}_META_SYSTEM_USER_TOKEN`] : undefined
       let legacyOwnershipDenied = false
       // Distinct from "denied": the ownership snapshot itself failed to load, so

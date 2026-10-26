@@ -300,6 +300,64 @@ describe('runFrozenFieldCheck（真实 git 仓库集成测试）', () => {
     execSync(`rm -rf "${dir}"`)
   })
 
+  it('坏卡只改正编号和 PR # 写法 → 不报错', () => {
+    const dir = setupRepo()
+    const cardPath = join(dir, 'docs/ledger/2026-10-25-meta-client-token-db-verify.md')
+    writeFileSync(cardPath, card({
+      id: 'task_meta_client_token_db_verify',
+      source: 'PR #3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+    }))
+    git('git add -A && git commit -m "broken card"', dir)
+    const baseSha = git('git rev-parse HEAD', dir)
+
+    writeFileSync(cardPath, card({
+      id: '2026-10-25-meta-client-token-db-verify',
+      source: 'pr:3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+    }))
+    git('git add -A && git commit -m "legal spelling"', dir)
+    const headSha = git('git rev-parse HEAD', dir)
+
+    const result = runFrozenFieldCheck(baseSha, headSha, dir)
+    expect(result.errors).toEqual([])
+    expect(result.warnings.some((w) => w.includes('主干版本解析失败'))).toBe(true)
+
+    execSync(`rm -rf "${dir}"`)
+  })
+
+  it('坏卡顺手改验收说法 → 仍然报冻结字段', () => {
+    const dir = setupRepo()
+    const cardPath = join(dir, 'docs/ledger/2026-10-25-meta-client-token-db-verify.md')
+    writeFileSync(cardPath, card({
+      id: 'task_meta_client_token_db_verify',
+      source: 'PR #3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+    }))
+    git('git add -A && git commit -m "broken card"', dir)
+    const baseSha = git('git rev-parse HEAD', dir)
+
+    writeFileSync(cardPath, card({
+      id: '2026-10-25-meta-client-token-db-verify',
+      source: 'pr:3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+      verify_how: '换成别的验法',
+    }))
+    git('git add -A && git commit -m "changed verification"', dir)
+    const headSha = git('git rev-parse HEAD', dir)
+
+    const result = runFrozenFieldCheck(baseSha, headSha, dir)
+    expect(result.errors.some((e) => e.includes('verify_how') && e.includes('被改写'))).toBe(true)
+    expect(result.errors.some((e) => e.includes('冻结字段 id'))).toBe(false)
+    expect(result.errors.some((e) => e.includes('冻结字段 source'))).toBe(false)
+
+    execSync(`rm -rf "${dir}"`)
+  })
+
   it('没改过台账文件 → 通过', () => {
     const dir = setupRepo()
     writeFileSync(join(dir, 'docs/ledger/2026-09-28-test-card.md'), card())

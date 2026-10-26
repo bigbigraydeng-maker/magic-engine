@@ -475,3 +475,40 @@ describe('6 小时限频 — 生产接线', () => {
     expect(prod).toMatch(/hasRecentOutbound,/)
   })
 })
+
+describe('F1 smart composer wiring', () => {
+  const run = async (deps: ConversationInboundAutoAckDeps) => {
+    const step = fakeStep()
+    const fn = createConversationInboundAutoAckFunction(deps)
+    const out = await handlerOf(fn)({ event: { id: 'e1', data: messageReceived() }, step })
+    return { out: out as { outcome: string; detail: string | null }, step }
+  }
+  it('no composer -> fixed template exactly as before', async () => {
+    const deps = makeDeps()
+    const { out } = await run(deps)
+    expect(out.outcome).toBe('sent')
+    expect(deps.send.messenger).toHaveBeenCalledWith(expect.objectContaining({ body: AUTOACK_TEMPLATE }))
+  })
+  it('composer text is what gets sent, via its own memoised step', async () => {
+    const composeAck = vi.fn(async () => ({ kind: 'send' as const, text: 'hello there friend', source: 'smart' as const, reason: 'model_ok' }))
+    const deps = makeDeps({ composeAck })
+    const { out, step } = await run(deps)
+    expect(deps.send.messenger).toHaveBeenCalledWith(expect.objectContaining({ body: 'hello there friend', usedAiDraft: false }))
+    expect(out.detail).toBe('smart:model_ok')
+    expect(step.run.mock.calls.map((c) => c[0])).toContain('compose-ack')
+  })
+  it('skip plan -> nothing sent, but F2 still gets its autoack.sent event', async () => {
+    const composeAck = vi.fn(async () => ({ kind: 'skip' as const, reason: 'skipped_repeat_message' }))
+    const deps = makeDeps({ composeAck })
+    const { out, step } = await run(deps)
+    expect(out.outcome).toBe('skipped_repeat_message')
+    expect(deps.send.messenger).not.toHaveBeenCalled()
+    expect(step.sentEvents).toHaveLength(1)
+    expect((step.sentEvents[0] as { name: string; data: { skipped: boolean } }).data.skipped).toBe(true)
+  })
+  it('composer is not consulted when an earlier gate already stops the run', async () => {
+    const composeAck = vi.fn(async () => ({ kind: 'skip' as const, reason: 'x' }))
+    await run(makeDeps({ composeAck, hasRecentOutbound: vi.fn(async () => true) }))
+    expect(composeAck).not.toHaveBeenCalled()
+  })
+})

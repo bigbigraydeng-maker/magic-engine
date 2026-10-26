@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/social/content-review', () => ({
   REEL_AUTO_CHECK_KEYS: [],
   checklistPasses: () => true,
-  humanKeysForStored: () => [],
+  humanKeysForReviewRef: () => [],
   validateContentChecklist: () => ({ ok: true, items: [{ key: 'k' }] }),
 }))
 

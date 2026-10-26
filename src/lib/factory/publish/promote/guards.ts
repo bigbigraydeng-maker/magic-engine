@@ -7,7 +7,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import {
   REEL_AUTO_CHECK_KEYS,
   checklistPasses,
-  humanKeysForStored,
+  humanKeysForReviewRef,
   validateContentChecklist,
 } from '@/lib/social/content-review'
 import type { PublishTarget } from '../../types'
@@ -128,7 +128,7 @@ function checkChecklists(order: PromoteOrder): PrecheckResult | null {
   const output = asRecord(order.output)
   const humanChecklist = validateContentChecklist(
     reviewRef['checklist_human'],
-    humanKeysForStored(reviewRef['checklist_human']),
+    humanKeysForReviewRef(reviewRef),
     'HUMAN',
   )
   const autoChecklist = validateContentChecklist(

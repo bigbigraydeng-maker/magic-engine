@@ -32,6 +32,9 @@ export default defineConfig({
       // Remotion 渲染引擎是独立 npm 包（自带依赖与 node:test 测试，由它自己的
       // `npm test` 跑）；主仓不装它的依赖，放进来只会报「没有测试套件」。
       'scripts/factory-worker/engines/remotion/**',
+      // CI checks the blast-radius script out from main into this folder.
+      // Those copies still name the old workflow files, so vitest must not run them.
+      '**/.guard-main/**',
     ],
     coverage: {
       provider: 'v8',

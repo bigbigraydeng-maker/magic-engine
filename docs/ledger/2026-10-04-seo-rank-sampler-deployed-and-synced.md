@@ -9,7 +9,8 @@ done_ref: pr:2218
 source: session:06ec010d
 verify_by: 2026-10-07
 verify_how: "①合并并部署后对 /api/inngest 做一次 Sync，Sync 前后 GET /api/inngest 的 function_count 差 +2；②cron_run_logs 里 job_name=seo-meta-rank-sampler 从 10/5 起每天 20:20 UTC 有一行 completed（前 18 天没有到期的改动，processed=0 是正常的，但这一行必须有）；③10/5 周一改标题那一轮之后，seo_meta_log 里新增的行都带 baseline_rank_status；若某行是 fetch_failed，周报里「记下了改动前排名」的数字要比「改了」少。三项都满足算成。"
-check_note: 判据更正（原判据字段冻结不改）：第①项「function_count 差 +2」不成立，GET 的 function_count 反映已部署代码、部署后即为 57，Sync 不改它；改看 PUT 返回 Successfully registered 且 modified:true（2026-10-04 已做）。第②③项到期核查仍未做。
+check_note: 判不了：②成立，cron_run_logs 里 seo-meta-rank-sampler 从 10-05 到 10-26 每天 20:20 UTC 都有一行 completed（共 22 行，processed 全为 0）；③没有样本，seo_meta_log 里 optimised_at≥10-04 的改动行为 0 条，没有可检查 baseline_rank_status 的行
+last_checked: 2026-10-26
 ---
 排名采样两个函数（cloud-seo-meta-rank-sampler-fanout / -one）是新增的。Inngest 的坑：新增函数部署后没人点 Sync，它会安静地不跑，样子和「一切正常」一模一样。
 本卡只验「函数被认到、按时醒来、基线被记下」；真正的排名结论要等改动满 18 天、连查三次，见 2026-10-04-seo-title-rank-verification。

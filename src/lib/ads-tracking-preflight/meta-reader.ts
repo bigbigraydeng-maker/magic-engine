@@ -235,7 +235,7 @@ async function doFetch(
 /** 直接读数字编号节点（系列）时只许要这些字段：不能借这条口子读 Page / 用户节点上的 access_token 之类。 */
 const BARE_NODE_RE = /^\d{6,20}$/
 export const NODE_FIELDS_ALLOWED: ReadonlySet<string> = new Set([
-  'id', 'name', 'objective', 'status', 'effective_status', 'created_time', 'updated_time', 'account_id',
+  'id', 'name', 'objective', 'status', 'effective_status', 'created_time', 'updated_time', 'account_id', 'daily_budget',
 ])
 
 function nodeFieldsAllowed(params: GraphParams): boolean {

@@ -211,7 +211,7 @@ export const CONTACT_KIND_LABEL: Record<Exclude<ContactKind, 'retail'>, string> 
  * 它发来的全是 `[unsupported message]` 占位符。这类账号按名字就能认，不需要 AI。
  * 只收平台自带的名字；真人叫什么都可能，所以不做模糊匹配。
  */
-const SYSTEM_ACCOUNT_NAMES = new Set([
+export const SYSTEM_ACCOUNT_NAMES: ReadonlySet<string> = new Set([
   'whatsapp business',
   'whatsapp',
   'facebook',

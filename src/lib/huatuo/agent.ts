@@ -35,6 +35,7 @@ import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
 import { retrieveSimilarCases } from '@/lib/case-library/retriever'
+import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { fetchOutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
 
 // re-export 供 refine route 等使用
@@ -176,7 +177,7 @@ export async function runHuatuo(
     retrieveSimilarCases(supabase, {
       industry_category: industryCategory,
       crisis_type: crisisType,
-      monthly_budget_aud: intake.monthly_budget_aud,
+      monthly_budget_aud: audOnlyAmount(intake.monthly_budget_aud, intake.budget_currency),
       market: marketCode,
       limit: 3,
     }),

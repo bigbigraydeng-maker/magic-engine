@@ -47,6 +47,8 @@ export function toDrawerRow(r: ContactRow): DrawerRow {
     nextAction: r.nextAction,
     // 只给抽屉显示一行「AI 初判（未校准）」小字，不参与任何判断。
     intent: r.intent,
+    // 跟进人（part 3）：抽屉里给下拉改；列表接口已经把这个值透出来。
+    assignedTo: r.assignedTo ?? null,
   }
 }
 

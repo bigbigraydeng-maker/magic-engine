@@ -343,7 +343,12 @@ describe('small parsers', () => {
 
 describe('folding into the merge decision — stricter only, never enable', () => {
   const enable = { pass: true, decision: 'enable', tier: 'auto', reason: 'B 级：机器检查全绿后自动合并' }
-  const signedA = { pass: true, decision: 'disable', tier: 'signed', reason: 'A 级：三方签字齐' }
+  const signedA = {
+    pass: true,
+    decision: 'disable',
+    tier: 'signed',
+    reason: 'A 级：Codex Astra 与 Claude Code 两方签字齐，可由人合并（A 级永不自动合）',
+  }
   const files = [mod('src/lib/inngest/functions/daily-plan.ts')]
 
   it('leaves the decision alone when no trial run is owed', () => {
@@ -492,7 +497,7 @@ describe('W78-1: a blocked decision keeps its own reason first', () => {
 
   it.each([
     ['draft', { pass: false, decision: 'disable', tier: 'blocked', reason: '草稿 PR 不做合并判定' }],
-    ['A without sign-off', { pass: false, decision: 'disable', tier: 'blocked', reason: 'A 级：缺签字 ziya/weizheng/direnjie' }],
+    ['A without sign-off', { pass: false, decision: 'disable', tier: 'blocked', reason: 'A 级：缺签字 codex-astra/claude-code' }],
   ])('%s', (_label, decision) => {
     const result = applyTrialRunToDecision({ decision, trialRun: evaluate(files, '') })
     expect(result.reason).toBe(`${decision.reason}；另：当场试跑不合格 —— PR 正文没有「## 当场试跑」段`)

@@ -19,6 +19,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { detectPlatform, analyzeViralReference } from '@/lib/reels/viral-analyzer'
+import { isQueueableViralSourceUrl } from '@/lib/reels/viral-analyzer-retry'
 import { validateViralSourceUrl } from '@/lib/reels/viral-url-guard'
 
 // Fields needed for InsightsPanel only (lightweight)
@@ -126,7 +127,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Maximum 30 videos per batch' }, { status: 400 })
   }
 
-  const safeUrls: string[] = []
+  const accepted: VideoInput[] = []
+  const acceptedUrls: string[] = []
+  let skippedUnsupported = 0
   for (const [i, v] of videos.entries()) {
     if (!v || !v.url || !v.industry) {
       return NextResponse.json(
@@ -141,16 +144,25 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
-    safeUrls.push(check.url)
+    if (!isQueueableViralSourceUrl(check.url)) {
+      skippedUnsupported++
+      continue
+    }
+    accepted.push(v)
+    acceptedUrls.push(check.url)
   }
 
-  const rows = videos.map((v, i) => ({
-    source_url:      safeUrls[i],
+  if (accepted.length === 0) {
+    return NextResponse.json({ success: true, queued: 0, skipped_unsupported: skippedUnsupported, references: [] })
+  }
+
+  const rows = accepted.map((v, i) => ({
+    source_url:      acceptedUrls[i],
     industry:        v.industry,
     content_goal:    v.content_goal ?? 'brand',
     is_our_video:    v.is_our_video ?? false,
     client_id:       v.client_id ?? null,
-    platform:        detectPlatform(safeUrls[i]),
+    platform:        detectPlatform(acceptedUrls[i]),
     notes:           v.notes ?? null,
     analysis_status: 'pending',
   }))
@@ -171,6 +183,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     success:    true,
     queued:     inserted?.length ?? 0,
+    skipped_unsupported: skippedUnsupported,
     references: inserted,
   })
 }

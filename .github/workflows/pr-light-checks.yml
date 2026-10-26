@@ -1,0 +1,376 @@
+name: PR light checks
+
+# One install, then every light pull-request check as its own step.
+#
+# Billable minutes are rounded up per job. The old workflows each checked out
+# the repo and ran `npm ci`, so eight jobs of well under a minute were billed
+# as eight minutes. This file is one test job plus a short report job.
+#
+# Required check names are NOT the job names. A skipped job reports success,
+# which would turn a draft into a false green if "Kernel architecture test"
+# were the job name. The report job publishes those names only after the test
+# job actually ran, using the publisher script from `main` (a PR that does not
+# edit this workflow cannot mark its own checks green). Draft test jobs are
+# skipped and bill nothing; the required names stay pending until the PR is
+# marked ready for review.
+#
+# No `paths:` filter. A filtered required check never reports on the PRs it
+# skips and blocks them forever.
+#
+# The whole-repo type check and the production build are not here. They cost
+# several minutes a run and, at about 33 pull requests a day, do not fit the
+# free minute quota. Render builds on deploy. Next.js is configured to ignore
+# type errors during that build. A manual run of "PR Application Validation"
+# still does both for one pull request number.
+#
+# ubuntu-slim is the 1-CPU runner (15 minute job cap). It is the right size
+# for these checks and the cheaper Linux rate.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-light-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Run PR checks
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-slim
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      head_sha: ${{ steps.meta.outputs.head_sha }}
+      install: ${{ steps.install.outcome }}
+      ledger_entries: ${{ steps.ledger_entries.outcome }}
+      ledger_code: ${{ steps.ledger_code.outcome }}
+      ledger_refs: ${{ steps.ledger_refs.outcome }}
+      ledger_verify: ${{ steps.ledger_verify.outcome }}
+      orchestrator: ${{ steps.orchestrator.outcome }}
+      ops_review: ${{ steps.ops_review.outcome }}
+      kernel: ${{ steps.kernel.outcome }}
+      tour: ${{ steps.tour.outcome }}
+      factory: ${{ steps.factory.outcome }}
+      fix_scope: ${{ steps.fix_scope.outcome }}
+      crm: ${{ steps.crm.outcome }}
+      publisher: ${{ steps.publisher_tests.outcome }}
+      clean: ${{ steps.clean.outcome }}
+      tree_dirty: ${{ steps.clean.outputs.dirty }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout the blast-radius guard from main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          path: .guard-main
+          sparse-checkout: tools/ops-review-loop
+          fetch-depth: 1
+          persist-credentials: false
+
+      - id: meta
+        name: Record the pull request head
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        id: install
+        run: |
+          set -euo pipefail
+          node --version
+          node -e 'const [a,b]=process.versions.node.split(".").map(Number); if (a<22 || (a===22 && b<18)) { console.error("Node >= 22.18 required"); process.exit(1) }'
+          npm ci
+
+      - name: Ledger entries valid
+        id: ledger_entries
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          npx vitest run src/lib/ledger
+          bash scripts/ledger-check-frozen.sh
+
+      - name: Code change has ledger entry
+        id: ledger_code
+        if: ${{ !cancelled() && !startsWith(github.head_ref, 'dependabot/') && !startsWith(github.head_ref, 'claude/ledger-verify-') }}
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+          code=$(grep -E '^(src/|supabase/migrations/|scripts/|\.github/workflows/|render\.yaml$)' <<<"$changed" || true)
+          ledger=$(grep -E '^docs/ledger/[^/]+\.md$' <<<"$changed" | grep -v 'README\.md' || true)
+          if [[ -n "${code}" && -z "${ledger}" ]]; then
+            echo '::error::这个 PR 改了代码（src/、supabase/migrations/、scripts/、.github/workflows/ 或 render.yaml）但没写台账。请在 docs/ledger/ 新增或更新一条（格式见 docs/ledger/README.md）。'
+            echo 'Changed code files:'
+            echo "${code}"
+            exit 1
+          fi
+          {
+            echo '## Ledger check'
+            echo
+            if [[ -n "${code}" ]]; then echo '- Code changed: yes'; else echo '- Code changed: no'; fi
+            if [[ -n "${ledger}" ]]; then
+              echo '- Ledger files touched:'
+              while IFS= read -r line; do
+                [[ -z "$line" ]] && continue
+                echo "  - ${line}"
+              done <<<"${ledger}"
+            else
+              echo '- Ledger files touched: none'
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Ledger refs exist
+        id: ledger_refs
+        if: ${{ !cancelled() && !startsWith(github.head_ref, 'dependabot/') && !startsWith(github.head_ref, 'claude/ledger-verify-') }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/ledger-check-refs.sh
+
+      - name: Ledger verify branch shape
+        id: ledger_verify
+        if: ${{ !cancelled() && startsWith(github.head_ref, 'claude/ledger-verify-') }}
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bash scripts/ledger-check-verify-branch.sh
+
+      - name: ai-orchestrator-tests
+        id: orchestrator
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npx tsc -p tools/ai-orchestrator/tsconfig.json
+          npx vitest run tools/ai-orchestrator --reporter=verbose
+
+      - name: ops-review-loop-tests
+        id: ops_review
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npx vitest run tools/ops-review-loop --reporter=verbose --exclude '**/.guard-main/**'
+
+      - name: Kernel architecture test
+        id: kernel
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          RESULTS: ${{ runner.temp }}/kernel-architecture-results.json
+          MIN_PASSED: '203'
+          EXPECTED_FILE: src/lib/kernel/__tests__/architecture.test.ts
+          FAIL_LABEL: 架构测试
+        run: |
+          set -euo pipefail
+          npx vitest run --config src/lib/kernel/__tests__/vitest.architecture.config.ts --reporter=verbose --reporter=json --outputFile.json="$RESULTS"
+          node scripts/ci/confirm-vitest-json.mjs
+
+      - name: Tour catalog boundary test
+        id: tour
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          RESULTS: ${{ runner.temp }}/tour-catalog-boundary-results.json
+          MIN_PASSED: '8'
+          EXPECTED_FILE: src/lib/tour-catalog/__tests__/boundary.test.ts
+          FAIL_LABEL: 边界测试
+        run: |
+          set -euo pipefail
+          npx vitest run src/lib/tour-catalog/__tests__/boundary.test.ts --reporter=verbose --reporter=json --outputFile.json="$RESULTS"
+          node scripts/ci/confirm-vitest-json.mjs
+
+      - name: factory-worker-tests
+        id: factory
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          npx vitest run scripts/factory-worker --reporter=verbose
+          run_remotion=true
+          if changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA"); then
+            if ! grep -q '^scripts/factory-worker/' <<<"$changed"; then
+              run_remotion=false
+            fi
+          else
+            echo "::warning::could not diff the pull request; running the Remotion engine tests"
+          fi
+          if [[ "$run_remotion" == "true" ]]; then
+            ( cd scripts/factory-worker/engines/remotion && npm ci --ignore-scripts --no-audit --no-fund && node --test test/*.test.mjs )
+          else
+            echo "Remotion engine tests skipped: this pull request does not touch scripts/factory-worker/."
+          fi
+
+      - name: fix-scope
+        id: fix_scope
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          script=".guard-main/tools/ops-review-loop/src/check-fix-scope.mjs"
+          if [[ ! -f "$script" ]]; then
+            echo "::notice::guard script is not on main yet — treating this as the bootstrap PR that adds it"
+            echo '闸门脚本还没进 main。合入之后，从下一个 PR 起就会真正生效。' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node "$script"
+
+      - name: CRM focused tests
+        id: crm
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          unit_test='src/lib/crm/__tests__/decision-list.test.ts'
+          page_test='src/app/dashboard/clients/[id]/crm/decisions/__tests__/page.test.tsx'
+          if [[ -f "${unit_test}" && -f "${page_test}" ]]; then
+            npm test -- "${unit_test}" "${page_test}"
+          else
+            echo "::notice::#1009 CRM focused tests are not present on PR head ${PR_HEAD_SHA}; check is not applicable."
+          fi
+
+      - name: CI publisher unit tests
+        id: publisher_tests
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npx vitest run scripts/ci
+
+      - name: Confirm the run changed nothing
+        id: clean
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          if ! dirty=$(git status --porcelain -- . ':(exclude).guard-main'); then
+            echo "dirty=1" >> "$GITHUB_OUTPUT"
+            echo "::error::could not inspect the working tree"
+            exit 1
+          fi
+          if [[ -n "$dirty" ]]; then
+            echo "dirty=1" >> "$GITHUB_OUTPUT"
+            echo "::error::CI modified the working tree. It must not."
+            echo "$dirty"
+            exit 1
+          fi
+          echo "dirty=0" >> "$GITHUB_OUTPUT"
+          echo "Working tree clean."
+
+      - name: Fail this job if any check failed
+        if: always() && !cancelled()
+        env:
+          OUTCOME_INSTALL: ${{ steps.install.outcome }}
+          OUTCOME_LEDGER_ENTRIES: ${{ steps.ledger_entries.outcome }}
+          OUTCOME_LEDGER_CODE: ${{ steps.ledger_code.outcome }}
+          OUTCOME_LEDGER_REFS: ${{ steps.ledger_refs.outcome }}
+          OUTCOME_LEDGER_VERIFY: ${{ steps.ledger_verify.outcome }}
+          OUTCOME_ORCHESTRATOR: ${{ steps.orchestrator.outcome }}
+          OUTCOME_OPS_REVIEW: ${{ steps.ops_review.outcome }}
+          OUTCOME_KERNEL: ${{ steps.kernel.outcome }}
+          OUTCOME_TOUR: ${{ steps.tour.outcome }}
+          OUTCOME_FACTORY: ${{ steps.factory.outcome }}
+          OUTCOME_FIX_SCOPE: ${{ steps.fix_scope.outcome }}
+          OUTCOME_CRM: ${{ steps.crm.outcome }}
+          OUTCOME_PUBLISHER: ${{ steps.publisher_tests.outcome }}
+          OUTCOME_CLEAN: ${{ steps.clean.outcome }}
+          TREE_DIRTY: ${{ steps.clean.outputs.dirty }}
+        run: node scripts/ci/publish-pr-check-runs.mjs
+
+  report:
+    name: Publish PR check results
+    needs: tests
+    if: always() && !cancelled() && (needs.tests.result == 'success' || needs.tests.result == 'failure')
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout the publisher from main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          path: .from-main
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Only the pull request that introduces the publisher needs this copy.
+      # After it is on main, this step is skipped and the report job never
+      # executes the pull request's copy.
+      - name: Checkout this pull request only for the bootstrap copy
+        if: hashFiles('.from-main/scripts/ci/publish-pr-check-runs.mjs') == ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          path: .from-pr
+          sparse-checkout: scripts/ci
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Publish legacy check names
+        env:
+          PUBLISH_CHECKS: '1'
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.tests.outputs.head_sha }}
+          OUTCOME_INSTALL: ${{ needs.tests.outputs.install }}
+          OUTCOME_LEDGER_ENTRIES: ${{ needs.tests.outputs.ledger_entries }}
+          OUTCOME_LEDGER_CODE: ${{ needs.tests.outputs.ledger_code }}
+          OUTCOME_LEDGER_REFS: ${{ needs.tests.outputs.ledger_refs }}
+          OUTCOME_LEDGER_VERIFY: ${{ needs.tests.outputs.ledger_verify }}
+          OUTCOME_ORCHESTRATOR: ${{ needs.tests.outputs.orchestrator }}
+          OUTCOME_OPS_REVIEW: ${{ needs.tests.outputs.ops_review }}
+          OUTCOME_KERNEL: ${{ needs.tests.outputs.kernel }}
+          OUTCOME_TOUR: ${{ needs.tests.outputs.tour }}
+          OUTCOME_FACTORY: ${{ needs.tests.outputs.factory }}
+          OUTCOME_FIX_SCOPE: ${{ needs.tests.outputs.fix_scope }}
+          OUTCOME_CRM: ${{ needs.tests.outputs.crm }}
+          OUTCOME_PUBLISHER: ${{ needs.tests.outputs.publisher }}
+          OUTCOME_CLEAN: ${{ needs.tests.outputs.clean }}
+          TREE_DIRTY: ${{ needs.tests.outputs.tree_dirty }}
+        run: |
+          set -euo pipefail
+          main_script=".from-main/scripts/ci/publish-pr-check-runs.mjs"
+          pr_script=".from-pr/scripts/ci/publish-pr-check-runs.mjs"
+          if [[ -f "$main_script" ]]; then
+            script="$main_script"
+          elif [[ -f "$pr_script" ]]; then
+            echo "::notice::publisher script is not on main yet — bootstrap PR, using this pull request's copy"
+            script="$pr_script"
+          else
+            echo "::error::publisher script is missing on main and on this pull request"
+            exit 1
+          fi
+          node "$script"

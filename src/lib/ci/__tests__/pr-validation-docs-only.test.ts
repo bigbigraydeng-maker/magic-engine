@@ -44,6 +44,12 @@ const HEAVY_JOBS: Record<string, string> = {
 const GATE = "steps.scope.outputs.docs_only != 'true'"
 
 describe('workflow structure', () => {
+  it('is manual only, so pull requests do not pay for the build', () => {
+    const triggers = (wf.on ?? (wf as unknown as { true?: Record<string, unknown> }).true) as Record<string, unknown>
+    expect(triggers.pull_request).toBeUndefined()
+    expect(triggers.workflow_dispatch).toBeDefined()
+  })
+
   it('has no paths filter on any trigger', () => {
     for (const trigger of Object.values(wf.on)) {
       const t = (trigger ?? {}) as Record<string, unknown>
