@@ -59,6 +59,7 @@ jobs:
       kernel: ${{ steps.kernel.outcome }}
       tour: ${{ steps.tour.outcome }}
       factory: ${{ steps.factory.outcome }}
+      huatuo: ${{ steps.huatuo.outcome }}
       fix_scope: ${{ steps.fix_scope.outcome }}
       crm: ${{ steps.crm.outcome }}
       publisher: ${{ steps.publisher_tests.outcome }}
@@ -230,6 +231,14 @@ jobs:
             echo "Remotion engine tests skipped: this pull request does not touch scripts/factory-worker/."
           fi
 
+      # Offline only. These tests are pure functions and in-memory mocks.
+      # Do not add a live model call, an external request, or a provider key here.
+      - name: huatuo-tests
+        id: huatuo
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: npx vitest run src/lib/huatuo --reporter=verbose
+
       - name: fix-scope
         id: fix_scope
         if: ${{ !cancelled() }}
@@ -303,6 +312,7 @@ jobs:
           OUTCOME_KERNEL: ${{ steps.kernel.outcome }}
           OUTCOME_TOUR: ${{ steps.tour.outcome }}
           OUTCOME_FACTORY: ${{ steps.factory.outcome }}
+          OUTCOME_HUATUO: ${{ steps.huatuo.outcome }}
           OUTCOME_FIX_SCOPE: ${{ steps.fix_scope.outcome }}
           OUTCOME_CRM: ${{ steps.crm.outcome }}
           OUTCOME_PUBLISHER: ${{ steps.publisher_tests.outcome }}
@@ -355,6 +365,7 @@ jobs:
           OUTCOME_KERNEL: ${{ needs.tests.outputs.kernel }}
           OUTCOME_TOUR: ${{ needs.tests.outputs.tour }}
           OUTCOME_FACTORY: ${{ needs.tests.outputs.factory }}
+          OUTCOME_HUATUO: ${{ needs.tests.outputs.huatuo }}
           OUTCOME_FIX_SCOPE: ${{ needs.tests.outputs.fix_scope }}
           OUTCOME_CRM: ${{ needs.tests.outputs.crm }}
           OUTCOME_PUBLISHER: ${{ needs.tests.outputs.publisher }}
