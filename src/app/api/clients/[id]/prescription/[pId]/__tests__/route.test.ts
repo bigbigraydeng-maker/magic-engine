@@ -41,6 +41,12 @@ vi.mock('@/lib/diagnostic/prescription-landing', () => ({
   landPrescription: (...a: unknown[]) => mockLand(...a),
 }))
 
+const mockEmit = vi.fn()
+vi.mock('@/lib/factory/promotion-signal', () => ({
+  emitPromotionSignal: (...args: unknown[]) => mockEmit(...args),
+  readableError: (error: unknown) => (error instanceof Error && error.message.trim() ? error.message : '读不到'),
+}))
+
 import { GET, PATCH } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
 import { PRESCRIPTION_COLUMNS } from '@/lib/diagnostic/prescription-patch'
@@ -98,6 +104,7 @@ const ok = (status: string) => ({ data: { ...DRAFT, status }, error: null })
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockEmit.mockResolvedValue({ ok: true, outcome: 'accepted', signal_id: 'sig-1' })
   mockLand.mockResolvedValue({
     initiativesInserted: 0,
     executionItems: 0,
@@ -156,6 +163,31 @@ describe('PATCH prescription — 批准', () => {
     expect(res.status).toBe(200)
     expect(mockLand).toHaveBeenCalledTimes(1)
     expect(mockLand.mock.calls[0][2]).toBe('fde@magiclab.com')
+    expect(mockEmit).toHaveBeenCalledWith({
+      clientId: 'client-1',
+      prescriptionId: 'presc-1',
+      goalId: 'goal-1',
+      content: null,
+    })
+    expect((await res.json()).promotion_signal).toMatchObject({ ok: true })
+  })
+
+  it('信号没发出去时，批准仍然成功，并且不把失败写成成功', async () => {
+    mockSupabase(ok('approved'))
+    mockEmit.mockResolvedValue({ ok: false, reason: '读不到' })
+
+    const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.promotion_signal).toEqual({ ok: false, reason: '读不到' })
+  })
+
+  it('打回不发新推广信号', async () => {
+    mockSupabase(ok('rejected'))
+    await PATCH(makeRequest({ status: 'rejected', rejection_note: '先不批' }), { params })
+    expect(mockEmit).not.toHaveBeenCalled()
   })
 
   it('落地失败 → 500，处方不留在"已批准但没动作"', async () => {

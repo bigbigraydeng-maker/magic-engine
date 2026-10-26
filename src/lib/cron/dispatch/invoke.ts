@@ -47,6 +47,7 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'seo-patrol-daily': () => import('@/app/api/cron/seo-patrol-daily/route'),
   'social-comment-autoreply': () => import('@/app/api/cron/social-comment-autoreply/route'),
   'factory-publish-worker': () => import('@/app/api/cron/factory-publish-worker/route'),
+  'factory-dead-letter-rerun': () => import('@/app/api/cron/factory-dead-letter-rerun/route'),
   'factory-order-scheduler': () => import('@/app/api/cron/factory-order-scheduler/route'),
   'factory-publish-sweeper': () => import('@/app/api/cron/factory-publish-sweeper/route'),
   'messenger-sync-hourly': () => import('@/app/api/cron/messenger-sync-hourly/route'),

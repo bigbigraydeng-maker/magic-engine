@@ -72,6 +72,7 @@ import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
+import { pushFactoryMaterialItems } from './factory-material-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
@@ -240,6 +241,17 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushFactoryWorkerItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] 出片工人在岗检查失败（不阻塞其他待办）:', e),
     ),
+    (b) => pushFactoryMaterialItems(supabase, b, now, clients).catch((e: unknown) => {
+      const message = e instanceof Error && e.message.trim() ? e.message.trim().slice(0, 160) : '读不到'
+      b.push({
+        kind: 'factory_material_check_failed',
+        client_id: 'infra',
+        client_name: 'Magic Engine 后台',
+        what: `素材待审和死信检查没跑成（${message}）。没列出来不等于没有。`,
+        how: '这条不用你动手。回我一句「素材催办检查没跑成」，我去查。',
+        href: 'https://app.magicengine.com.au/dashboard/factory',
+      })
+    }),
     // Creatomate 渲染失败/超时 —— 旧路径的卡死回收已死透，这是它的替代（spec §4.4 B4）
     (b) => pushCreatomateRenderItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] Creatomate 渲染检查失败（不阻塞其他待办）:', e),
