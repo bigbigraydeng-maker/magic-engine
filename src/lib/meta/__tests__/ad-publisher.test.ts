@@ -58,6 +58,17 @@ describe('建系列必须声明 is_adset_budget_sharing_enabled（2026-10-26 试
   })
 })
 
+describe('建组必须声明竞价策略（2026-10-26 试跑第二次撞上 Meta 100/2490487）', () => {
+  it('广告组请求带 bid_strategy=LOWEST_COST_WITHOUT_CAP 且不带 bid_amount，仍是 PAUSED', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    const as = calls.find((c) => c.url.includes('/adsets') && c.method === 'POST')!
+    expect(as.body.get('bid_strategy')).toBe('LOWEST_COST_WITHOUT_CAP')
+    expect(as.body.has('bid_amount')).toBe(false)
+    expect(as.body.get('status')).toBe('PAUSED')
+  })
+})
+
 describe('lead_form 视频创意写法（实测过审的 video_data）', () => {
   const VID: AdDraft = {
     ...DRAFT,

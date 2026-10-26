@@ -250,6 +250,9 @@ function adSetBodyFor(d: AdDraft, campaignId: string, nowMs: number): Record<str
     status: 'PAUSED',
     billing_event: t.billingEvent,
     optimization_goal: t.optimizationGoal,
+    // 不用系列预算时，竞价策略要在组上明说；最低成本（不设上限）= Meta 自动出价，不需要 bid_amount。
+    // 2026-10-26 $1 试跑第二次真跑撞上（100/2490487）。
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     // Meta 收的是最小货币单位（分）。传元会变成 1/100 的预算，静默跑不出量。
     daily_budget: String(Math.round(d.dailyBudget * 100)),
     start_time: String(Math.floor(nowMs / 1000)),
