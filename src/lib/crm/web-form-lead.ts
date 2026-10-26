@@ -89,6 +89,7 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       displayName: input.name,
       source: 'web_form',
       seenAt: occurredAt,
+      autoAssign: true,
       mergeStrategy: 'reject',
       overwriteDisplayName: false,
       attribution,
