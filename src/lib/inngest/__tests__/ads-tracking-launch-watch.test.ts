@@ -43,6 +43,8 @@ import { ADS_TRACKING_POSTLAUNCH_REQUESTED } from '../ads-events'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { watchEventId, type PostLaunchReceiptState } from '@/lib/ads-tracking-preflight/launch-watch'
 import type { MeInboundFact, MetricsRow, SeriesFacts, SeriesUnread } from '@/lib/ads-tracking-preflight/objective-watch'
+import type { LeadFormExtra } from '@/lib/ads-tracking-preflight/lead-form-watch'
+import type { PauseRequestReceipt, ServicePauseCall } from '@/lib/ads-tracking-preflight/lead-form-types'
 import type { ObjectiveWatchSeries, TrackingClientConfig } from '@/lib/ads-tracking-preflight/types'
 
 const NOW = new Date('2026-10-22T20:30:00.000Z') // 新西兰 10-23 09:30
@@ -126,13 +128,23 @@ interface World {
   objectiveFacts?: Record<string, SeriesFacts | SeriesUnread>
   /** 按目标盯盘：ME 收到的 WhatsApp 会话数；不给 = 读到 0 个 */
   me?: MeInboundFact
+  /** 表单留资这一小时多读的数；不给 = 全部没读到（不因此暂停） */
+  leadFormExtra?: LeadFormExtra
+  previousSurplus?: string | null
+  pauseResult?: PauseRequestReceipt
 }
 
 function makeDeps(world: World = {}) {
   const sent: { id: string; data: { client_id: string; phase: 't1h' | 't24h'; launched_at: string } }[] = []
   const finished: { runId: string; startedAt: number; summary: unknown }[] = []
   const calls = { readSpend: 0, loadStates: 0, loadFirstSeen: 0 }
-  const objectiveCalls = { read: [] as string[], me: [] as { clientId: string; since: string }[] }
+  const objectiveCalls = { read: [] as string[], me: [] as { clientId: string; since: string }[], accounts: [] as string[] }
+  const pauseCalls: ServicePauseCall[] = []
+  const quietExtra = (): LeadFormExtra => ({
+    todaySpendCents: null, accountCapCents: null, accountCapKnown: false, accountTodaySpendCents: null,
+    totalCapCents: null, totalCapKnown: false, clientTodaySpendCents: null, metaLeadsToday: null,
+    crmRead: false, crmLeadsToday: null, syncRead: false, syncStreak: null,
+  })
   const deps: LaunchWatchDeps = {
     now: () => NOW,
     configuredClientIds: () => ['c1'],
@@ -144,9 +156,16 @@ function makeDeps(world: World = {}) {
     loadReceiptStates: async () => { calls.loadStates += 1; return world.states ?? [] },
     loadFirstSpendSeenAt: async () => { calls.loadFirstSeen += 1; return world.firstSeen ?? null },
     sendEvent: async event => { sent.push(event) },
-    readObjectiveSeries: async (_clientId, _cfg, series) => {
+    readObjectiveSeries: async (_clientId, cfg, series) => {
       objectiveCalls.read.push(series.campaign_id)
+      objectiveCalls.accounts.push(cfg.ad_account_id)
       return world.objectiveFacts?.[series.campaign_id] ?? seriesFacts(series.campaign_id)
+    },
+    readLeadFormExtra: async () => world.leadFormExtra ?? quietExtra(),
+    loadPreviousSurplus: async () => world.previousSurplus ?? null,
+    requestServicePause: async call => {
+      pauseCalls.push(call)
+      return world.pauseResult ?? { called: true, paused: false, reason: 'switch_off', idempotent: false }
     },
     countMeInbound: async (clientId, since) => {
       objectiveCalls.me.push({ clientId, since })
@@ -156,7 +175,7 @@ function makeDeps(world: World = {}) {
     startRun: async () => 'run-1',
     finishRun: async (runId, startedAt, summary) => { finished.push({ runId, startedAt, summary }) },
   }
-  return { deps, sent, finished, calls, objectiveCalls }
+  return { deps, sent, finished, calls, objectiveCalls, pauseCalls }
 }
 
 function fakeStep() {
@@ -567,5 +586,96 @@ describe('readLaunchSpend · 花费只按本次投放的广告系列算（不是
     expect(out).toMatchObject({ read: false, spend_cents: 0, series_found: null })
     expect(out.error).toContain('广告系列')
     expect(fetcher).not.toHaveBeenCalled()
+  })
+})
+
+const LEAD_ID = '333333333333'
+const LEAD_ACCOUNT = 'act_444444444444'
+
+describe('表单留资系列 · 命中故障才调只暂停入口', () => {
+  const leadSeries = (over: Partial<ObjectiveWatchSeries> = {}): ObjectiveWatchSeries => ({
+    campaign_id: LEAD_ID, kind: 'lead_form', label: '表单系列', daily_spend_multiple: 2, ...over,
+  })
+  const leadConfig = (series: ObjectiveWatchSeries = leadSeries()): TrackingClientConfig => ({
+    ...CONFIG, launch_watch: undefined, objective_watch: { series: [series] },
+  })
+  const overExtra = (): LeadFormExtra => ({
+    todaySpendCents: 2500,
+    accountCapCents: null,
+    accountCapKnown: true,
+    accountTodaySpendCents: 100,
+    totalCapCents: null,
+    totalCapKnown: true,
+    clientTodaySpendCents: 100,
+    metaLeadsToday: 0,
+    crmRead: true,
+    crmLeadsToday: 0,
+    syncRead: true,
+    syncStreak: 0,
+  })
+
+  it('没超、也没有别的故障 → 读了额外的数，但不调暂停入口；播放量那种步骤不会多出来', async () => {
+    const { deps, pauseCalls } = makeDeps({ config: leadConfig() })
+    const { ids, step } = fakeStep()
+    const out = await runLaunchWatch(step, deps)
+    expect(pauseCalls).toEqual([])
+    expect(ids).toEqual(['start-run', `objective:c1:${LEAD_ID}`, `lead-form:c1:${LEAD_ID}`, `lead-form-prev:c1:${LEAD_ID}`, 'finish-run'])
+    expect(out.clients[0].objective_watch?.series[0]).toMatchObject({ state: 'waiting_first_spend', pause_request: null })
+    expect(out.no_publish).toBe(true)
+  })
+
+  it('当天花费超过日预算倍数 → 调入口，回执记下原因；入口说没停成也不把系列改成没读到', async () => {
+    const facts = seriesFacts(LEAD_ID, {
+      campaign: { ...seriesFacts(LEAD_ID).campaign, daily_budget_cents: 1000 },
+      total: spendRow(LEAD_ID),
+    })
+    const { deps, pauseCalls } = makeDeps({
+      config: leadConfig(),
+      objectiveFacts: { [LEAD_ID]: facts },
+      leadFormExtra: overExtra(),
+      pauseResult: { called: true, paused: false, reason: 'meta_failed', idempotent: false },
+    })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    const verdict = out.clients[0].objective_watch?.series[0]
+    expect(verdict?.state).not.toBe('unread')
+    expect(verdict?.pause_request).toMatchObject({ called: true, paused: false, reason: 'meta_failed' })
+    expect(verdict?.stop_faults?.map(item => item.code)).toEqual(['over_daily_cap'])
+    expect(pauseCalls).toHaveLength(1)
+    expect(pauseCalls[0]).toMatchObject({
+      client_id: 'c1',
+      campaign_id: LEAD_ID,
+      triggered_by: 'ads-tracking-launch-watch',
+      spend_today_cents: 2500,
+      idempotency_key: `c1:${LEAD_ID}:over_daily_cap:${facts.as_of}`,
+    })
+    expect(pauseCalls[0].fault_what.length).toBeGreaterThan(0)
+  })
+
+  it('系列已经停了 → 不读表单额外数字，也不调入口', async () => {
+    const facts = seriesFacts(LEAD_ID, {
+      campaign: { ...seriesFacts(LEAD_ID).campaign, effective_status: 'PAUSED', status: 'PAUSED' },
+      adsets: [{ id: 's1', name: '广告组', parent_id: null, status: 'PAUSED', effective_status: 'PAUSED', updated_at: hoursBefore(2) }],
+      ads: [{ id: 'a1', name: '广告', parent_id: 's1', status: 'PAUSED', effective_status: 'PAUSED', updated_at: hoursBefore(2) }],
+    })
+    const { deps, pauseCalls } = makeDeps({ config: leadConfig(), objectiveFacts: { [LEAD_ID]: facts } })
+    const { ids, step } = fakeStep()
+    const out = await runLaunchWatch(step, deps)
+    expect(pauseCalls).toEqual([])
+    expect(ids).toEqual(['start-run', `objective:c1:${LEAD_ID}`, 'finish-run'])
+    expect(out.clients[0].objective_watch?.series[0].state).toBe('stopped')
+  })
+
+  it('系列写了别的广告账户就用那一个；写错了就不读也不暂停', async () => {
+    const moved = makeDeps({ config: leadConfig(leadSeries({ ad_account_id: LEAD_ACCOUNT })) })
+    await runLaunchWatch(fakeStep().step, moved.deps)
+    expect(moved.objectiveCalls.accounts).toEqual([LEAD_ACCOUNT])
+    expect(moved.pauseCalls).toEqual([])
+
+    const bad = makeDeps({ config: leadConfig(leadSeries({ ad_account_id: 'not-an-account' })) })
+    const out = await runLaunchWatch(fakeStep().step, bad.deps)
+    expect(bad.objectiveCalls.read).toEqual([])
+    expect(bad.pauseCalls).toEqual([])
+    expect(out.clients[0].objective_watch?.series[0]).toMatchObject({ state: 'unread' })
+    expect(out.clients[0].objective_watch?.series[0].error).toContain('广告账户')
   })
 })

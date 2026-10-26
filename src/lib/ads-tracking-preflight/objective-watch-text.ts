@@ -174,3 +174,22 @@ export function whatsappHeadline(input: {
   const me = input.me === null ? '' : input.me.read && input.me.count !== null ? ` · ME 收到 ${input.me.count} 个` : ' · ME 收到几个没读到'
   return `「${input.label}」开始聊天 ${total.conversations} 个${cost} · 花费 ${formatCents(total.spend_cents, currency)}${me}`
 }
+
+/** 表单留资系列在判定出当天数字之前的一句；有当天数字时由盯盘改写成带花费和线索的那句。 */
+export function leadFormWatchHeadline(label: string): string {
+  return `「${label}」是表单留资系列，这一小时看花费、线索和审核状态`
+}
+
+/** 表单留资这一小时的摘要。没读到的数写成「没读到」，不当成 0。 */
+export function leadFormDetailHeadline(input: {
+  label: string
+  todaySpendCents: number | null
+  todayLeads: number | null
+  currency: string
+}): string {
+  const spend = input.todaySpendCents === null
+    ? '当天花费没读到'
+    : `当天花费 ${formatCents(input.todaySpendCents, input.currency)}`
+  const leads = input.todayLeads === null ? '当天线索没读到' : `当天线索 ${input.todayLeads} 条`
+  return `「${input.label}」${spend}，${leads}`
+}
