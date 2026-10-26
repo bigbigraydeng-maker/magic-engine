@@ -51,7 +51,12 @@
 | [2026-10-19 Instagram Best Practices](2026-10-19-social-instagram-best-practices.md) | candidate | 账号级站内建议作复盘线索，不当固定规则 |
 | [2026-10-19 Threads Insights](2026-10-19-social-threads-insights.md) | candidate | 周报并列看帖子、views、关注与回复，不推断因果 |
 
-外部来源与 ME 数据尚未完成验证，机器状态统一为 `learning`；本轮不标 `adopted` / `verified`。
+| [2026-10-19 Kallaway：先定这个账号图什么](2026-10-19-social-five-content-games-kallaway.md) | candidate | **待验证（优先）**：账号目标要有记录、对标只看中小号（交 97）；ME 早已在做：不用虚荣指标判好坏（SO-09）；忽略：头 30–50 条照抄、8 分就发 |
+| [2026-10-19 Alex Cattoni：简介写清服务谁 + 评论区挖选题](2026-10-19-social-human-framework-trust-cattoni.md) | candidate | **待验证（优先）**：简介写清服务谁（交 97）、从同行评论区挖选题（挂已有社媒交接卡）；ME 早已在做：不刷假互动（SO-11）；PM 拍板项：以客户账号主动去别人内容下留评论 |
+| [2026-10-19 Mike Yanda：TikTok 怎么决定推不推 + 3–4 个固定栏目](2026-10-19-social-tiktok-algorithm-pillars-yanda.md) | candidate | **待验证（优先）**：固定栏目（挂已有社媒交接卡）、发布时段到底有没有影响（交 97，n<5 记 cannot_check）；忽略：只看播放量当记分板（撞 SO-09） |
+| [2026-10-19 Ethan Shaw：招牌系列 + 一个主题拆成一长十短](2026-10-19-social-signature-series-and-repurposing-shaw.md) | candidate | **待验证（优先）**：一稿多发/同主题多钩子、模板一致但配乐与内容类型要轮换（交 97，出片部分带 106）；忽略：冲刺期每天发 |
+
+外部来源与 ME 数据尚未完成验证，文章来源那 9 张卡的机器状态统一为 `learning`。视频来源的 4 张（本页上面 4 行）另有两类：补对摘要后确认 ME 早已在做的标 `already_in_me` 并挂了 SO 编号；已开交接卡派出去的标 `verifying`。本轮仍不标 `adopted` / `verified`。
 
 ## 机器索引（给 ME 后台「Agent 学习库」页读）
 每张卡末尾必须有一节 `## 机器索引`，下面一个 ```json 块：`{"points":[{"key","text","state",...}]}`。一个点只能有一个 state，以复核更正后的结论为准（note 里写「复核更正后」）。没有这一节的卡会在页面上进「还没整理」红区。
