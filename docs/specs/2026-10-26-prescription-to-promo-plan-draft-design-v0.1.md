@@ -1,110 +1,110 @@
-# 处方 → 推广计划草稿 自动生成 设计稿 v0.1
+# 处方 → 推广计划草稿：广告 Agent 主导 设计稿 **v0.3**（文件名沿用 v0.1 以免引用失效）
 
 - 作者：119 号窗口　日期：2026-10-26　功能风险级：**A**（碰计划/预算数字的写入口）；本 PR 只含设计稿（纯文档）。
-- 状态：**设计稿，待子牙+魏征审，审过前不写代码。** 子项标【待核】的是我还没在代码里证实的假设。
-- 来源：74 号转述 PM「把没有的继续开发」；事实依据是对主干代码的只读调查 + CTS 生产数据的只读对照（见 §8）。
-- 平台层级（tier-gate Inline）：归位既有 L1「广告支柱 · IMPACT 的 Prescribe→Act 衔接」，不新增能力线；映射表只读「处方里的结构化种子」，不含客户名/行业词；换成地产或其它行业客户，这段共享代码不用改。无需登记候选。
+- 状态：**设计稿 v0.3，待子牙+魏征审，再给 PM 看方向，审过前不写代码。**
+- 为什么有 v0.3：PM 2026-10-26 原话「继续修复 prescription 到广告计划的全链条！让 ME 的广告 Agent 做主导！」——优先级拔高（取代之前的“停/P3”）。v0.1/v0.2 假设“种子只能由人工处方写”，那样人还是要手填账户、日预算、受众、素材，只是换个地方填，与“Agent 主导”冲突。**v0.3 的核心改动：`plan_seed` 由广告 Agent 在出处方时自己产出，每个字段都从系统里已有的事实取，取不到就留空并写明原因（不猜、不兜底）。** 人退回「看一眼、改一改、批准」。
+- 不变的三条：生成出来仍是**草稿**；批准仍由 **PM 在计划页点**；**不自动建 Meta 对象**。
+- 平台层级（tier-gate Inline）：归位既有 L1「广告支柱 · IMPACT 的 Prescribe→Act 衔接」；Agent 产出种子的取数逻辑是平台共享（读客户名下账户/预算上限/素材池/受众池/目标周期，无客户名、无行业词）；行业差异走既有广告剧本参数（`budget_share_of_headroom / min_audience_size / max_creatives`）。
 
-## 0. 先说结论（一句话）
-**现在的处方里没有结构化的账户/日预算/受众字段，所以不能"读处方生成步骤"——必须先让处方带一个结构化种子（`plan_seed`），生成器只读种子，不解析摘要文字。** 触发用计划页上一个显式按钮「按处方起草」；只生成草稿，批准仍由 PM 在计划页点。
+## 0. 先说结论
+**广告 Agent 出处方时，由一个确定性的取数构建器 `buildPlanSeed` 产出结构化种子 `content.plan_seed`：Agent 决定“结构”（打哪几类打法、各占预算几成），系统事实决定“数字”（账户、日预算、素材、受众、起止日）。每个字段要么有值 + 依据（凭什么），要么留空 + 原因。** 之后计划页「按处方起草」只做搬运与校验，不再有人手填。
 
-## 1. 现状事实（主干，已读代码）
-1. 处方 `prescriptions.content`：`summary`(文字) / `phases[].actions[]` / `kpi_targets[]` / `budget_allocation[]`（src/types/diagnostic.ts:438）。**没有**每个动作的广告账户、日预算、受众、素材、日期字段。日预算、总预算、起止日只存在于 `summary` 文字、KPI 的 `metric` 文字和 `intake`。`goal-prescription.ts` 读的 `content.spend / rules / review_anchor` 是读侧的宽松容错、没有 schema。
-2. 推广计划 `marketing_plans.plan_data.promo`（promo_v1，spec.ts）：阶段(phase)有起止日期；`ads_campaign` 步骤只有 `ad_account_id / daily_budget_cents(>0) / audience_ref / creative_refs / placements / paused_ranges`，**没有步骤备注、没有 KPI 字段、没有日期**。指纹 `promoContentHash` 覆盖几乎全部字段（除 checks、gate_snapshot 与 seats 三项）；可选字段必须「不写」而不是写 undefined，否则指纹会漂移。
-3. 计划与处方没有直接外键：计划靠 `plan_data.promo.goal_id`（或 `generation_meta.blank_draft.goal_id`）挂到目标，处方也挂到目标；谁是「这个目标的最新处方」由 `goal-prescription.ts`（按 version desc）决定；`pickPlanForPrescription` 决定打开哪份计划。
-4. 批准处方只改状态并落成 Initiatives，**不再生成待办**（3156）；人工处方只存草稿、周更不覆盖（3144）；计划页只读显示目标上最新处方（3143/3150）。
-5. 保存计划走 `PUT …/promo`（`parsePromoSpec` 失败即拒、账户必须属于该客户、预算超限直接 400）；批准走 `…/approve`（算指纹、过 gate、写回执）。
+**关键复用（已核）：** 仓库里**已经有**这套“取事实→给建议→取不到写原因”的机器——`draftAdsStep`（src/lib/marketing-plan/promo/draft-ads.ts）：入参是 `AdsDraftFacts`（预算余量 `computeLaunchHeadroom`、近 30 天逐日花费、受众池、已批准素材），出参是 `Suggestion<T>` = `{ok:true,value,basis[]}` 或 `{ok:false,why_empty}`——类型层面就写不出“读不到被悄悄填成 0”。目前它只给「广告起草」按钮用（只读建议）。**种子构建器直接调用它，不另造一套。**
 
-## 2. 字段映射表（处方 → 计划步骤）
-设计原则：**只映射结构化种子；映射不了的不丢、不硬塞，落到「未映射清单」并在计划页显示。**
+## 1. 现状事实（主干，已核）
+1. 处方 `prescriptions.content` 没有每动作的账户/日预算/受众/素材/日期；数字只在 `summary`/KPI 文字（CTS 89cb61eb：`budget_allocation` 为空，动作全是人工文字）。
+2. promo_v1（spec.ts）：阶段有起止、**阶段不得重叠**；`ads_campaign` 步骤只有 `ad_account_id / daily_budget_cents(>0) / audience_ref(min1) / creative_refs / placements / paused_ranges{from,to}`；指纹 `promoContentHash` 覆盖几乎全部字段，可选字段必须“不写”。
+3. 自动开方已停：`auto-prescribe.ts` 头注释（2026-10-25 起）；全仓无调用方（只剩一条测试禁止周更文件引用它）。处方现在的写入口：人工路由 `/prescriptions/manual`（agent_name='广告 Agent'）与华佗生成路由 `/prescription/generate`。
+4. `draftAdsStep`/`loadAdsDraftFacts`（src/lib/ads-strategy/promo-draft-facts.ts，482 行）/`computeLaunchHeadroom` 已存在，`POST …/promo/draft` 在用（纯只读）。
+5. 批准处方 `landPrescription` 会写 initiatives、supersede 旧方案；3156 之后批准不再生成待办；3144 人工草稿不被覆盖。
+6. 保存计划 `PUT …/promo` 的校验链：结构 → 目标属客户 → 账户归属 → `checkAdsBudget`（over 拒、unknown 放行）→ 草稿 + 乐观锁；批准走 `…/approve`（指纹、gate、回执）。
+7. 空白草稿创建无按目标去重（blank-draft-create.ts，3142）；`pickPlanForPrescription` 按“最新创建”选计划（plan-pick.ts:26-43，测试锁行为）。
+8. **验收样本现状**：处方 89cb61eb 已被 PM 批准（2026-10-26 07:25）；计划 7a8bee93 已批准（07:33）。可直接拿它们做对照，不需要“approved 副本”。
 
-### 2.1 新增：处方里的结构化种子 `content.plan_seed`（可选，zod 校验）
+## 2. 种子长什么样（`content.plan_seed`）
 ```
 plan_seed: {
-  currency: 'NZD',                       // 币种；与账户币种不符 → 整条拒绝
-  start_date, end_date: 'YYYY-MM-DD',    // 广告投放的起止（=计划阶段日期）
-  ad_steps: [{
-    step_key: 'ads-lead-a',              // 稳定键 → 成为步骤 id（幂等的锚）
-    phase_label: '留资表单 · 2027 中国团',  // → 阶段名
-    ad_account_id: 'act_…',              // 必须属于该客户（生成时校验，不是 UI 填的）
-    daily_budget_cents: 5000,
-    audience_ref | targeting,            // 二选一：文字受众 / 2822 的结构化定向（2822 合并前只写 audience_ref）
-    creative_refs?: string[],
-    placements?: string[],
-    paused_ranges?: {from,to}[]
-  }]
+  produced_by: 'ads-agent',              // 谁产出的
+  facts_as_of: ISO 时间,                 // 取数时刻（过期要重取）
+  currency: 'NZD' | null,
+  phases: [{                             // 顺序时间窗，彼此不得重叠（同 promo_v1）
+    phase_key, name,
+    start_date, end_date,                // 取自目标周期（goal.period_*），不猜
+    ad_steps: [{
+      step_key,                          // → 步骤 id（幂等锚）
+      play: PlayKey,                     // Agent 决定的打法：如 lead_form_harvest / warm_pool_retarget（play-vocabulary.ts）
+      ad_account_id:   Field<string>,    // Field<T> = {ok:true,value,basis[]} | {ok:false,why_empty}
+      daily_budget_cents: Field<number>,
+      audience_ref:    Field<string>,    // 2822 合并后可换 targeting
+      excluded_audience_refs?: Field<string[]>,
+      creative_refs:   Field<string[]>,
+      placements?:     Field<string[]>,
+      paused_ranges?:  [{from,to}]
+    }]
+  }],
+  warnings: string[]                     // 来自 draftAdsStep 的提醒 + 构建器自己的
 }
 ```
-谁写：人工处方路由（`/prescriptions/manual`，3144 那条）与周更自动处方，写入时**同一个校验函数**；缺任一必填项 → 种子整体无效，不进步骤（不猜）。
+`Field<T>` 就是 `Suggestion<T>`（复用类型）。**一个步骤只要有任一必填字段（账户/日预算/受众）是 `ok:false`，该步骤不生成计划步骤，整条原因进「未生成清单」**——不猜、不用占位文字顶。`creative_refs` 空是允许的（promo_v1 默认 []），但会提示“素材池里没有可用的”。
 
-### 2.2 映射表
-| 处方里的东西 | 落到计划的哪里 | 说明 |
+## 3. 每个字段从哪取（逐条，已核存在性；标【待核】的是动手前先证实）
+| 字段 | 取数来源 | 取不到时 |
 |---|---|---|
-| `goal_id` | `promo.goal_id` | 已有（3150 的挂目标逻辑复用） |
-| `plan_seed.start_date/end_date` | 阶段 `start_date/end_date` | 必须 YYYY-MM-DD；阶段不得重叠（spec 已有规则） |
-| `ad_steps[].phase_label` | 阶段 `name` | 同 label 的步骤归同一阶段 |
-| `ad_steps[].step_key` | 步骤 `id` | 幂等锚；同键更新、不新增 |
-| `ad_account_id / daily_budget_cents / audience_ref(或 targeting) / creative_refs / placements / paused_ranges` | 步骤 `settings` 同名字段 | 一一对应；可选字段缺省时**不写**（防指纹漂移） |
-| `kpi_targets[]`（留资 300、线索成本 $12/$16、日上限 $150、总预算 $3,700…） | **不进 `plan_data.promo`**；进 `generation_meta.from_prescription.kpis`（展示）；日上限类对照 `ad_strategy_configs`（只读核对，不写） | promo_v1 没有 KPI 字段；硬塞会改指纹 |
-| `summary` 里的规则（学习期 72h、继续线/暂停线、加钱条件、两组人群、$12 继续线…） | `generation_meta.from_prescription.unmapped[]`，原文按条列出 + 「这是广告 Agent 的运行规则，计划不承载」 | 不丢、不解析；这些规则的家是广告 Agent 配置（`ad_strategy_configs`，A 级，不在本功能里写） |
-| `phases[].actions[]` 里 `external_manual`（建好暂停、送审、换配乐、上传排除名单、开投、回线索、复盘、补素材） | 不生成步骤；列入 `unmapped[]` 的「人工动作」栏 | 全是人做的事，不是广告步骤；`补素材` 阶段没有广告步骤 |
-| `intake.monthly_budget_aud` / `budget_allocation[]` | 不用（空数组或口径不同） | 币种是 AUD 字段，与种子币种冲突风险；不作为日预算来源 |
+| `ad_account_id` | `client_meta_ad_accounts`（该客户名下、未隐藏）；再按“这个打法能不能在这个账户投”过滤：表单类要主页权限（CTS 官方账户 0470 因主页权限未回，**不能投表单广告**，这条写进构建器的账户资格判定；资格事实来源【待核】：`promote_pages` 读取或账户级资格标记） | `why_empty`：「这个客户名下没有能投表单广告的账户（0470 缺主页权限）」 |
+| `daily_budget_cents` | `draftAdsStep` 的日预算建议：`ad_strategy_configs.daily_budget_cap_cents` × 剧本 `budget_share_of_headroom`，经 `computeLaunchHeadroom` 的余量、近 30 天真实日花费压低；**同一计划多个步骤用 `committed_minor` 逐个扣减** | 现成的 `why_empty`（余量读不全/已用完/太小…） |
+| `audience_ref` | `draftAdsStep` 的受众建议（受众池：人数达门槛、在投广告组仍挂着）；重定向类打法过滤受众子类型（视频观看/互动/名单）；冷启动类走年龄地区兜底（`audience_ref` 写“新西兰 45–65 岁”这类文字，且标“刀①前不可自动落 targeting”） | 现成的 `why_empty`（读不到受众池 / 没读全 / 没有达标受众） |
+| `excluded_audience_refs` | 受众池里的**排除名单型**自定义受众（CTS 0470 有一份）；**47 人名单本身的上传不在本功能，要 PM 本人授权** | 留空 + 「该账户没有排除名单」 |
+| `creative_refs` | `creative_pool` 里 `status=approved` 且**推广期覆盖投放期**（`promoVerdict`）的素材 | `why_empty`：「素材池里没有可用的」 |
+| 起止日 | 目标周期 `goals.period_start/period_end`（与投放期取交集，不早于今天） | 目标没有周期 → 整个种子不产出 |
+| 推什么（班次） | `tour_catalog_departures` 里还在卖的班次，仅用于**核对素材**（素材讲的班次已售完 → 警告），不写进步骤（promo_v1 无此字段） | 读不到 → 警告“没法核对班次在售” |
+| 币种 | 账户币种（`computeLaunchHeadroom` 已按币种）；多币种账户同计划 → `checkAdsBudget` 已有 unknown 规则 | `currency: null`，整种子不产出 |
 
-### 2.3 三个例子（CTS 现有处方里的难点怎么落）
-- 「两组人群（组 A 新客、组 B 老客户）」→ 种子里写成两个 `ad_steps`（`ads-lead-a`、`ads-lead-b`）；B 组需要挂名单（刀②未做）→ B 的 `audience_ref` 写文字，并在 `unmapped[]` 标「需挂名单后才可建」。
-- 「$12 继续线、$16 暂停线」→ 不进步骤；进 `kpis` 展示 + `unmapped[]`；真正执行的地方是广告 Agent 的阈值，不由计划承载。
-- 「学习期 72 小时保护」→ `unmapped[]`；落点是广告 Agent 的动作冷却，不在计划。
+## 4. 谁在什么时候产出种子
+- **产出时机**：广告 Agent 写处方时（人工路由 `/prescriptions/manual` 与华佗生成路由两个入口都调用同一个 `buildPlanSeed(clientId, goalId, intent)`；**只在目标是广告类时**）。`intent` = Agent 的结构决定（打哪几类打法、各占预算几成），由处方作者（Agent）给；其余全部系统事实。
+- **种子是处方的一部分**：作为 `content.plan_seed` 存下来——这是“Agent 当时凭什么这么定”的可审计记录；审阅页**渲染种子**（账户名+币种+日预算+起止，并列出每个 `why_empty`），PM 批准处方时看得见数字。
+- **新鲜度**：种子带 `facts_as_of`；**「按处方起草」写入计划时重新取一遍事实再校验**（账户归属、`checkAdsBudget`、素材推广期），种子与重取结果不一致或种子超过 N 天（N 待定，建议 3）→ 以重取结果为准并列出差异。即：种子是 Agent 的决定记录，写入时的数字由当时事实核过。
 
-## 3. 与周边的边界（各一句）
-- **3010 v0.7 指纹**：生成器写的是步骤里的广告相关字段，这些字段本来就在（将来的）ads-only 指纹里；生成器**不写**批准回执、不写 `gate_snapshot`、不设 `approved_at`；草稿计划不是花钱授权。
-- **2999 日预算闸**：起草时调用 `computeLaunchHeadroom`，只产出**提示**（写入 `warnings`，不拦），真正的闸仍在激活/批准入口。
-- **2822 结构化定向**：未合并前种子只写 `audience_ref`；合并后种子可写 `targeting` 且二选一规则沿用 2822。
-- **3143/3150 只读显示**：复用同一个「目标上最新处方」读取函数；**只认 status=approved**（3143 的显示可以含草稿，生成器不行）。
-- **3156**：批准处方不再有副作用；本功能是显式的另一步，不挂在批准上。
-- **3144**：人工草稿处方不会被生成器读取；周更自动处方（`prescription-weekly（自动落地）`，status=approved）可以是来源。
+## 5. 触发与两档（沿用 v0.2）
+- 计划页（已打开的草稿计划）上「按处方起草」。先 **preview**（任意状态处方可读、纯计算、不写库）显示“将生成/将更新/被人改过不覆盖/未生成及原因/警告”，PM 点“写入”才 **write**（只认 approved 处方）。
+- write 与 `PUT /promo` **共用同一个校验函数**（从 route.ts:76-111 抽出）；单测：生成的草稿必须能被 PUT 原样接受。映射后整份 `PromoSpec` 先过 `parsePromoSpec` 才写。
+- 带状态过滤的新读取变体（只取 approved，并提示有更高版本草稿）；`loadLatestGoalPrescription` 不变。
 
-## 4. 触发方式：计划页「按处方起草」按钮（不做批准即起草）
-理由：①显式、可重复，与 3156「批准不生成东西」口径一致；②批准处方的人和起草计划的人不一定是同一个动作，自动起草会在 PM 没打算建计划时多出一份草稿；③出错可重试，不影响处方状态；④按钮可展示「将生成什么 / 哪些没映射」的预览再确认。路由：`POST …/marketing-plan/[planId]/promo/from-prescription`（或没有计划时先走 3150 的空白计划创建再填）。授权同 `requirePlanApproverAccess`。
+## 6. 幂等、改版、人改保留（沿用 v0.2，补充 Agent 主导后的变化）
+1. `generation_meta.from_prescription = {prescription_id, goal_id, version, seed_hash, generated_step_ids[], generated_step_hashes{}, unmapped[], skipped_steps[{step_key, why_empty}], warnings, generated_at}`，加类型；jsonb 合并只写这一个键 + `updated_at` 乐观锁；**不入指纹**。
+2. 同处方版本再点：只覆盖“仍等于上次生成值”的步骤；人改过的保留并列出。首次遇同 id 手填步骤视为人改、不覆盖。人删的不复活。
+3. 改版识别用 (goal_id, version)（人工路由 supersedes_id 恒为 null）；旧版本生成的计划仍是草稿 → 就地更新；已批准 → 新建草稿并标「改版草稿」，**不改 plan-pick**，页面对“同目标 approved + 草稿并存”显式提示。
+4. **Agent 主导带来的新规则**：重新取事实后，Agent 产出的步骤数字与人手改过的数字不同 → 一律保留人改并报差异（Agent 不覆盖人）。
 
-## 5. 幂等与改版
-- 记录：`generation_meta.from_prescription = { prescription_id, version, seed_hash, generated_step_hashes{step_id: hash}, unmapped[], kpis, warnings, generated_at }`。
-- 同一处方版本再点：只更新同一份草稿计划。**只覆盖「仍等于上次生成值」的步骤**（用 `generated_step_hashes` 判断）；PM 手改过的步骤保留，并在结果里列「这些步骤被人改过，没覆盖」。
-- 处方改版（新版本 `supersedes_id` 指向旧版本）：若旧版本生成的计划还是草稿 → 就地更新并记 `previous_prescription_id`；若那份计划已批准 → **不动它**，新建一份草稿计划（并行存在，由 PM 决定哪份作数）。旧草稿里的人工改动按上条规则保留。
-- 阶段/步骤 id 取 `step_key`，不用随机 id。
+## 7. 与周边的边界
+- 3010 v0.7：写的是（将来 ads-only 指纹里的）广告字段；不写批准回执/`gate_snapshot`/`approved_at`；草稿≠花钱授权。
+- 2999：起草时 `computeLaunchHeadroom` 只出提示，真闸在激活入口（种子里的日预算本来就来自 headroom，所以天然在余量内；不替代激活闸）。
+- 2822：合并前 `audience_ref` 走文字；合并后可写结构化 `targeting`（二选一）。
+- 刀②（PR 3190，起草器挂受众/排除受众）：种子里的 `audience_refs / excluded_audience_refs` 将来可直接喂 `AdDraft.audienceIds/excludedAudienceIds`；本功能不依赖它先合。
+- 3143/3150/3156/3144：只读显示不变；批准处方无副作用（本功能是显式另一步）；人工草稿处方在 preview 可读、write 不读。
 
-## 6. 不做（明确）
-不自动批准计划；不自动建任何 Meta 对象；不碰钱（不改 `ad_strategy_configs`、不改预算上限）；不解析 `summary` 文字；不从处方的 `budget_allocation`/AUD 字段推日预算；不生成社媒/博客/邮件步骤（本版只做 `ads_campaign`）。
+## 8. 不做
+不自动批准计划；不自动建 Meta 对象；不碰钱（不改 `ad_strategy_configs`）；不解析 `summary` 文字；不上传名单（47 人名单要 PM 授权）；本版只做 `ads_campaign`；不改 plan-pick；不建空白计划。
 
-## 7. 当场验收（dry-run 对照，已人工做了一遍预演）
-对象：CTS 处方 `89cb61eb`（status=draft，人工，agent=广告 Agent）对 74 手填的计划草稿 `7a8bee93`。**注意：该处方现在是 draft，生成器按设计不会读它（只认 approved）——正式验收前需先让 PM 批准处方，或用同一份内容的 approved 副本做试验。**
-| 项 | 处方 89cb61eb | 手填草稿 7a8bee93 | 生成器预期 |
-|---|---|---|---|
-| 结构化种子 | **无** | — | 生成 0 个步骤，只出 `unmapped` + 提示「处方没有 plan_seed」 |
-| 阶段 | 3 个（开投前/投放中/补素材，按活动分，周数 1/5/2） | 2 个（按投放步骤分：留资 10/26–11/30；Shanghai 11/2–11/30） | 取决于种子；活动阶段不直接变成计划阶段 |
-| 起止日 | 摘要文字「2026-10-25 到 11-30」 | 10/26 起 | 以种子为准；两者差 1 天 → 提示 |
-| 日预算 | 文字「每天 $100（含 A/B 两组）」，上限 $150 | 组 A $50（B 暂缓）+ Shanghai $30 | 以种子为准；若种子日预算合计 > 客户总闸 → 起草警告 |
-| 账户 | 无 | 留资 → 7274；Shanghai → 0470 | 以种子为准，不属于客户 → 拒 |
-| 受众/素材/版位 | 无（只有文字描述） | 文字受众 + 版位；Shanghai 带 1 个素材 id | 以种子为准 |
-| Shanghai 阶段 | **处方里没有** | 有（手加） | 不会生成；`unmapped` 里不出现（处方没提） |
-| 规则类内容（学习期 72h、$12/$16 线、两组人群…） | 在摘要里 | 不在计划里 | 全部进 `unmapped[]` |
-结论：**当前处方内容不足以产出任何广告步骤**；验收要先补种子（人工处方路由与周更都要写 `plan_seed`），这是本功能的前置块 0。
+## 9. 验收链（89cb61eb 已 approved，可直接用）
+1. 块 A（取数构建器）上线后，对 CTS 目标跑 **preview**，期望产出：账户=旧账户（0470 因主页权限被排除并写明原因）、日预算来自余量（与 PM 定的 $50/$100 对照，差异列出）、受众来自 7274 现有受众池（组 B 能选到“看过视频/互动”类）、素材=素材池里 approved 且推广期覆盖的（今天加的 1133861909177335）、起止=目标周期。
+2. 与现有已批准计划 7a8bee93 逐步对照：同 id 步骤“视为人改、不覆盖”，字段逐项 diff 列表。
+3. write 档用单元/集成测试覆盖（假 approved 行）；**不对生产处方重新批准**（批准有 initiatives/supersede 副作用，是 PM 的业务决定）。
 
-## 8. 工作量估计（按块，含测试）
+## 10. 工作量（按块，重新估；Agent 主导后变大）
 | 块 | 内容 | 估 |
 |---|---|---|
-| 0 | `plan_seed` 类型 + zod 校验 + 人工处方路由/周更写入（A 级，碰处方写入） | 0.5–1 天 |
-| 1 | 映射纯函数（种子→PromoSpec 片段 + unmapped + warnings + 币种/账户校验）+ 单测（含幂等哈希、可选字段不写、指纹稳定） | 0.5–1 天 |
-| 2 | 路由（读 approved 处方、建/更新草稿、幂等、人改保留、`computeLaunchHeadroom` 提示）+ 测试 | 1 天 |
-| 3 | 计划页按钮 + 预览/未映射清单展示 | 0.5 天 |
-| 4 | 当场验收（approved 副本对照 7a8bee93）+ 台账 | 0.5 天 |
-合计约 3–4 天；块 0 是前置，建议第一个 PR 单独走。
+| A | `buildPlanSeed`：账户资格判定 + 多步骤预算扣减 + 受众子类型过滤 + 素材推广期 + 班次核对 + 单测（复用 `draftAdsStep`/`loadAdsDraftFacts`，只做编排） | 2–3 天 |
+| B | `plan_seed` 类型/zod + `content` 解析保留 + 两个处方入口调用构建器 + 审阅页渲染（账户名/币种/日预算/起止/why_empty）+ 导入页提示 | 2–2.5 天 |
+| C | 映射纯函数 + 整份 `parsePromoSpec` + 幂等哈希/人改/人删判定 + 单测 | 1–1.5 天 |
+| D | 共享校验函数抽出（含 PUT 回归）+ 路由 preview/write + jsonb 合并 + approved 读取变体 | 1.5–2 天 |
+| E | 计划页按钮 + preview 展示（含未生成清单/并存提示）+ 验收与台账 | 1–1.5 天 |
+合计约 **7.5–10 天**（v0.2 的 5–7 天不含 Agent 取数构建器与审阅页渲染）。建议拆 3 个 A 级 PR：A+B（种子产出与可见）→ C+D（写入）→ E（页面与验收）。
 
-## 9. 风险与待审问题
-- 【待核】`ads_campaign` 的 zod 是否 `.strict()`（决定「步骤备注」能否放进步骤；本稿默认不放）。
-- 【待核】blank-draft-create 之后再 PUT promo 的并发写（`expected_updated_at` 乐观锁够不够）。
-- 【待核】周更自动处方（prescription-weekly）写 `plan_seed` 的口径：它没有账户/受众信息，**只能由人工处方写种子**；周更对已有种子的处方保持不动。
-- 处方里写账户号 = 把账户事实放进「处方」这类文字产物；校验在生成时做（账户必须属于客户），失败即拒。
-- 与 74 同日开发的 3066（CRM 结果上下文）与 2822 改 `promo/draft` 附近文件：本功能用新路由，不碰这些文件。
+## 11. 风险与待核
+- 【待核】账户资格事实（表单类广告“主页权限”）的程序化来源；【待核】`ads_campaign` zod 是否 `.strict()`；【待核】`tour_catalog_departures` 在广告侧的可读入口。
+- Agent 的“结构决定（intent）”是否由 LLM 生成：本稿默认由处方作者（广告 Agent）在写处方时给出，构建器只做确定性取数；若要让 LLM 自动出 intent，是另一件事（单独设计，不在本稿）。
+- 种子里写账户号 = 把账户事实放进处方：校验在产出时与写入时各做一次（账户属客户）。
+- 与刀②/2822/3066 无文件冲突（新路由、新模块）。
 
-## 10. Reuse Statement
-复用：promo_v1 spec/`parsePromoSpec`、`goal-prescription.ts` 最新处方读取、`pickPlanForPrescription`/`planLinkedGoalId`、3150 的空白计划创建、`checkAdsBudget`/`computeLaunchHeadroom`、`requirePlanApproverAccess`。新增（平台共享）：`plan_seed` 种子协议与映射纯函数。行业特定：无。客户特定：无（CTS 只用于验收对照）。无客户名/行业判断进共享代码。学习：无写入。
+## 12. Reuse Statement
+复用：`draftAdsStep`/`Suggestion<T>`/`loadAdsDraftFacts`/`computeLaunchHeadroom`/`checkAdsBudget`、promo_v1 spec 与 `parsePromoSpec`、`loadOwnedAccounts`、`requirePlanApproverAccess`、PUT /promo 的校验链（抽成共享函数）、广告剧本参数。新增（平台共享）：`plan_seed` 协议、`buildPlanSeed` 编排、映射纯函数。行业/客户特定：无（CTS 仅作验收样本）。无客户名进共享代码。
