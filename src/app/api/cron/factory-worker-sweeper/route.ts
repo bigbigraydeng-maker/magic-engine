@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
     processed: reclaimed.length + updateFailures,
     completed: reclaimed.length,
     failed: updateFailures,
-    summary: body,
+    summary: body as Record<string, unknown>,
   })
   return NextResponse.json(body)
 }

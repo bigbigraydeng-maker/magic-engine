@@ -1,11 +1,13 @@
 ---
 id: 2026-10-26-factory-worker-sweeper-on-dispatcher
 title: 出片卡住的自动收回改挂到现有的每 5 分钟调度，不再靠 GitHub 准点，也不新开一台服务器任务
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-26
 source: pr:3070
 verify_by: 2026-10-28
+done_on: 2026-10-26
+done_ref: pr:3255
 verify_how: 合并并让网站部署这版之后，看每 5 分钟那次调度的运行记录里出现 factory-worker-sweeper 且成功；GitHub 工作流 factory-sweepers 不再有定时触发。部署前不要打线上接口。
 ---
 出片工单心跳超过 10 分钟还停在领取中或制作中，改由已经在跑的每 5 分钟调度去打原来的接口，退回排队。
