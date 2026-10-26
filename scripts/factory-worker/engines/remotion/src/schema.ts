@@ -23,12 +23,15 @@ export const LOGO_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 /** Exactly 6 hex digits with a leading #. */
 export const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 
-/** Optional music gain multiplier. Default 1 (no boost); values above 2 may clip, so check true peak yourself. */
+/**
+ * Optional music gain multiplier. Default 1 (no boost). The 2.5 cap is an engineering limit, not a safe value:
+ * the gain is calibrated per track by measuring the render (one real track already reached -1.6 dBFS true peak at 1.9).
+ */
 export const musicGainSchema = z
   .number()
   .finite()
-  .min(1, { message: '音乐增益必须在 1 到 3 之间' })
-  .max(3, { message: '音乐增益必须在 1 到 3 之间' })
+  .min(1, { message: '音乐增益必须在 1 到 2.5 之间' })
+  .max(2.5, { message: '音乐增益必须在 1 到 2.5 之间' })
   .optional();
 
 const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f]*$/;
