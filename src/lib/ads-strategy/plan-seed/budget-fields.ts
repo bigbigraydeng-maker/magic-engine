@@ -1,6 +1,7 @@
 import { accountLevelRoom, accountRoom, currencyOfFacts } from './classify'
 import { formatMinor } from './format'
 import { splitBudget, type HalveFlags } from './split-budget'
+import { windowBefore } from '@/lib/marketing-plan/promo/draft-ads'
 import { isStale, safe, type AccountData, type PassingStep, type PlanSeedDeps } from './shared'
 import type { Basis, Field } from './types'
 
@@ -78,11 +79,22 @@ function accountHeadroomMap(passing: PassingStep[]): Record<string, number> {
   return map
 }
 
+/** 近 7 天最高日花费 >= 客户日上限 95%（口径同 marketing-plan/promo/draft-ads.ts）；读不到逐日花费时不判（那条走 dailyUnknown）。 */
+function isNearCap(facts: AccountData['facts']): boolean {
+  if (facts === null || facts.daily === null || facts.headroom.ok !== true) return false
+  let maxSpend = 0
+  for (const row of windowBefore(facts.daily, facts.today, 7)) {
+    if (row.spend_cents > maxSpend) maxSpend = row.spend_cents
+  }
+  return maxSpend >= facts.headroom.cap_minor * 0.95
+}
+
 /** 单个账户的保守口径标记。 */
 function haveFlags(a: AccountData, nowMs: number): HalveFlags {
   return {
     stale: isStale(a.captureAt, nowMs),
     dailyUnknown: a.facts !== null && a.facts.daily === null,
+    nearCap: isNearCap(a.facts),
   }
 }
 
@@ -90,12 +102,14 @@ function haveFlags(a: AccountData, nowMs: number): HalveFlags {
 function clientFlags(all: AccountData[], nowMs: number): HalveFlags {
   let stale = false
   let dailyUnknown = false
+  let nearCap = false
   for (const a of all) {
     const f = haveFlags(a, nowMs)
     if (f.stale) stale = true
     if (f.dailyUnknown) dailyUnknown = true
+    if (f.nearCap) nearCap = true
   }
-  return { stale, dailyUnknown }
+  return { stale, dailyUnknown, nearCap }
 }
 
 /** 账户层保守口径：只按已选账户逐个给出。 */

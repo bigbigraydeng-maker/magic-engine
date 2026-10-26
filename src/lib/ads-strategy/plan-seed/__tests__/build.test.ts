@@ -741,7 +741,7 @@ describe('buildPlanSeed', () => {
     }
   })
 
-  it('stale + unknown daily + near cap halves exactly once', async () => {
+  it('stale + unknown daily halves exactly once (125, not quartered)', async () => {
     const deps = makeDeps({
       loadCaptureAt: vi.fn(async () => STALE),
       loadFacts: vi.fn(async () =>
@@ -758,6 +758,56 @@ describe('buildPlanSeed', () => {
         b.value.includes('只减半一次'),
       )
       expect(halved).toHaveLength(1)
+    }
+  })
+
+  const day = (date: string, spend_cents: number) => ({
+    date,
+    spend_cents,
+    results: 0,
+    account_status: 1,
+  })
+
+  it('recent max daily spend >= 95% of client cap halves once: 5000 -> 2500', async () => {
+    const deps = makeDeps({
+      loadFacts: vi.fn(async () => facts({ daily: [day('2026-10-25', 19000)] })),
+    })
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    const step = findStep(seed, 's1')
+    expect(step?.daily_budget_cents.ok).toBe(true)
+    if (step?.daily_budget_cents.ok) {
+      expect(step.daily_budget_cents.value).toBe(2500)
+      expect(
+        step.daily_budget_cents.basis.some((b) => b.value.includes('贴近上限')),
+      ).toBe(true)
+    }
+  })
+
+  it('recent daily spend well under cap keeps full 5000 and no halve basis', async () => {
+    const deps = makeDeps({
+      loadFacts: vi.fn(async () => facts({ daily: [day('2026-10-25', 5000)] })),
+    })
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    const step = findStep(seed, 's1')
+    if (step?.daily_budget_cents.ok) {
+      expect(step.daily_budget_cents.value).toBe(5000)
+      expect(step.daily_budget_cents.basis.some((b) => b.label === '保守口径')).toBe(false)
+    } else {
+      throw new Error('expected a budget')
+    }
+  })
+
+  it('near cap + stale + unknown-free still halves exactly once (2500)', async () => {
+    const deps = makeDeps({
+      loadCaptureAt: vi.fn(async () => STALE),
+      loadFacts: vi.fn(async () => facts({ daily: [day('2026-10-25', 19000)] })),
+    })
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    const step = findStep(seed, 's1')
+    if (step?.daily_budget_cents.ok) {
+      expect(step.daily_budget_cents.value).toBe(2500)
+    } else {
+      throw new Error('expected a budget')
     }
   })
 

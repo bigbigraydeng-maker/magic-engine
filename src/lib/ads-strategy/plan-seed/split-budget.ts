@@ -4,6 +4,8 @@ import { formatMinor } from './format'
 export interface HalveFlags {
   stale: boolean
   dailyUnknown: boolean
+  /** 近 7 天最高日花费已 >= 客户日上限的 95%（与 draft-ads 同口径）。 */
+  nearCap?: boolean
 }
 
 export interface SplitInput {
@@ -62,8 +64,10 @@ function halveBasis(
   const reasons: string[] = []
   if (clientFlags.stale) reasons.push('客户名下账户的广告数据过期或读不到抓取时间')
   if (clientFlags.dailyUnknown) reasons.push('客户名下账户近期逐日花费读不到')
+  if (clientFlags.nearCap) reasons.push('客户名下账户最近真实日花费已经贴近上限')
   if (accountFlags?.stale) reasons.push('该账户的广告数据过期或读不到抓取时间')
   if (accountFlags?.dailyUnknown) reasons.push('该账户近期逐日花费读不到')
+  if (accountFlags?.nearCap) reasons.push('该账户最近真实日花费已经贴近上限')
   if (reasons.length === 0) return null
   return {
     label: '保守口径',
@@ -88,8 +92,10 @@ export function splitBudget(i: SplitInput): SplitResult {
     const shouldHalve =
       i.halve.client.stale ||
       i.halve.client.dailyUnknown ||
+      (i.halve.client.nearCap ?? false) ||
       (accountFlags?.stale ?? false) ||
-      (accountFlags?.dailyUnknown ?? false)
+      (accountFlags?.dailyUnknown ?? false) ||
+      (accountFlags?.nearCap ?? false)
     const raw = Math.floor(i.share * Math.min(clientH / N, acctH / n_a))
     const budget = shouldHalve ? Math.floor(raw / 2) : raw
 
