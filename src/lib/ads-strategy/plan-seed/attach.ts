@@ -1,5 +1,5 @@
 import type { PrescriptionContent } from '@/types/diagnostic'
-import { lenientAdPlays, type AdPlay } from './ad-plays'
+import { lenientAdPlays, wasAdPlaysDropped, type AdPlay } from './ad-plays'
 import { buildPlanSeed, type PlanSeedDeps } from './build'
 import { loadGoalPeriod, productionDeps } from './deps'
 import { planSeedSchema } from './types'
@@ -79,34 +79,38 @@ export function collectAdPlays(content: PrescriptionContent): AdPlay[] {
 }
 
 /**
- * 精修场景：新内容里一条打法都没有、但旧内容有时，把旧内容的打法按阶段编号带回来
- * （华佗重写内容不会输出 ad_plays，不带回来就丢了真相源）。就地修改 content。
- * 返回 true 表示至少有一个 phase 真正带回了非空打法。
+ * 精修场景：LLM 对某个阶段写了打法但没通过校验（整组被丢）时，按阶段号把上一版该阶段的打法带回来；
+ * LLM 没写某阶段的打法 = 有意去掉，不补。就地修改 content，返回被带回打法的阶段号列表。
  */
-export function carryPriorAdPlays(content: PrescriptionContent, prior: PrescriptionContent): boolean {
+export function carryPriorAdPlays(content: PrescriptionContent, prior: PrescriptionContent): number[] {
   try {
-    if (collectAdPlays(content).length > 0) return false
-    const priorByPhase = new Map<unknown, unknown>()
+    const priorByPhase = new Map<number, unknown>()
     for (const phase of safePhases(prior)) {
+      if (!isPlainObject(phase)) continue
+      const number = phase.phase_number
+      if (typeof number !== 'number') continue
       const seed = seedOf(phase)
-      const number = isPlainObject(phase) ? phase.phase_number : undefined
       if (seed !== null && seed.ad_plays !== undefined) priorByPhase.set(number, seed.ad_plays)
     }
-    let carried = false
+    const carried: number[] = []
     for (const phase of safePhases(content)) {
       if (!isPlainObject(phase)) continue
-      const plays = priorByPhase.get(phase.phase_number)
+      const number = phase.phase_number
+      if (typeof number !== 'number') continue
       const seed = seedOf(phase)
-      if (plays === undefined || seed === null) continue
+      if (seed === null) continue
+      if (!wasAdPlaysDropped(seed)) continue
+      const plays = priorByPhase.get(number)
+      if (plays === undefined) continue
       const cleaned = lenientAdPlays(plays)
       if (cleaned.length === 0) continue
       seed.ad_plays = cleaned
-      carried = true
+      carried.push(number)
     }
     return carried
   } catch (err) {
     console.warn('[plan-seed] carry prior plays failed', errorMessage(err))
-    return false
+    return []
   }
 }
 
@@ -186,8 +190,8 @@ export async function attachPlanSeed(
     const startedAt = Date.now()
     const timeoutMs = deps?.timeoutMs ?? ATTACH_TIMEOUT_MS
 
-    const carried =
-      ctx.priorContent !== undefined ? carryPriorAdPlays(content, ctx.priorContent) : false
+    const carriedPhases: number[] =
+      ctx.priorContent !== undefined ? carryPriorAdPlays(content, ctx.priorContent) : []
     sanitizeAdPlays(content)
     const plays = collectAdPlays(content)
     if (plays.length === 0) return content
@@ -209,10 +213,11 @@ export async function attachPlanSeed(
       timeoutMs: remaining,
     })
 
-    if (carried) {
+    if (carriedPhases.length > 0) {
       const notes: string[] = Array.isArray(seed.notes) ? seed.notes : []
-      if (!notes.includes('打法是从上一版处方带回来的')) {
-        notes.push('打法是从上一版处方带回来的')
+      for (const n of carriedPhases) {
+        const note = `打法是从上一版带回来的（阶段 ${n}）`
+        if (!notes.includes(note)) notes.push(note)
       }
       seed.notes = notes
     }

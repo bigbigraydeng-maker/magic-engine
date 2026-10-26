@@ -239,6 +239,37 @@ describe('PlanSeedPanel', () => {
     )
   })
 
+  it('hides the snapshot-limit sentence when the budget basis carries a successful live read', async () => {
+    const s = seed()
+    const step = s.ad_steps[0]
+    const budget = step.daily_budget_cents
+    if (!budget.ok) throw new Error('fixture budget must be ok')
+    const live: PlanSeed = {
+      ...s,
+      ad_steps: [
+        {
+          ...step,
+          daily_budget_cents: {
+            ...budget,
+            basis: [
+              ...budget.basis,
+              {
+                label: '在投合计（实时）',
+                value: '快照 $0.00 NZD（抓取 10月26日 14:31），实时 $50.00 NZD（读数 10月26日 15:00），这次用 $50.00 NZD',
+                source: '实时读 Meta（只读）',
+                as_of: '2026-10-26T02:00:00Z',
+              },
+            ],
+          },
+        },
+      ],
+    }
+    mockFetch({ json: { success: true, seed: live } })
+    render(<PlanSeedPanel clientId="c1" prescriptionId="p1" />)
+    await screen.findByText('广告步骤的建议')
+    expect(document.body.textContent).not.toContain('抓取之后新开的广告不在内。')
+  })
+
   it('shows the server-written conservative-basis line from the budget basis', async () => {
     const s = seed()
     const step = s.ad_steps[0]

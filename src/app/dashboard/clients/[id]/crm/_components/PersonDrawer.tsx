@@ -9,10 +9,11 @@
 
 import { AssigneeSelect } from './AssigneeSelect'
 import { CallButton } from './CallButton'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
-import { ContactTimeline, type TimelineSummary, type StageSource } from './ContactTimeline'
+import { ContactTimeline, type TimelineSummary, type TimelineAiBrief, type StageSource } from './ContactTimeline'
+import { briefAge } from '@/lib/crm/brief-age'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { ComposeEmail } from './ComposeEmail'
@@ -153,6 +154,39 @@ export function PersonDrawer({
    */
   const [summary, setSummary] = useState<TimelineSummary | null>(null)
   const onSummary = useCallback((s: TimelineSummary | null) => setSummary(s), [])
+  // AI 概况（conversation_briefs 最新一份）—— 抽屉打开 / 换人时单独取一次。
+  // 不并进时间线接口：那个接口 2026-10-10 起有测试守着「不查 conversation_briefs」；
+  // 也不并进列表接口：全带会把那页拖慢。换人时先清空，不让上一个人的概况留着。
+  const [aiBrief, setAiBrief] = useState<TimelineAiBrief | null>(null)
+  const age = aiBrief ? briefAge(aiBrief.generatedAt) : null
+  const contactId = row.contactId
+  useEffect(() => {
+    let alive = true
+    setAiBrief(null)
+    const ctrl = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/clients/${clientId}/crm/contacts/${contactId}/brief`,
+          { signal: ctrl.signal },
+        )
+        if (!res.ok) {
+          // 「确实没简报」和「接口 4xx/5xx」在界面上都表现为不显示概况卡 ——
+          // 打一条日志，让排查时能区分，不然两者看起来一模一样。
+          console.warn(`[drawer] AI 概况取失败 contact=${contactId} status=${res.status}`)
+          return
+        }
+        const json = (await res.json()) as { brief?: TimelineAiBrief | null }
+        if (alive) setAiBrief(json.brief ?? null)
+      } catch {
+        // 取不到就不显示概况卡 —— 抽屉其余部分照常，不挡人干活。
+      }
+    })()
+    return () => {
+      alive = false
+      ctrl.abort()
+    }
+  }, [clientId, contactId])
 
   const changeStage = async (toStage: string, label: string) => {
     if (!window.confirm(`到哪一步了：${row.stageLabel ?? '还没标'} → 改成「${label}」？`)) return
@@ -281,6 +315,56 @@ export function PersonDrawer({
             <p className="mb-2 text-[12px] font-bold text-me-charcoal/70" data-testid="form-facts-line">
               {summary.formFactsLine}
             </p>
+          )}
+
+          {/* AI 概况 —— 摆在第一屏最上面（PM 2026-10-26）。CTS 员工日常不用翻全部历史，
+              看这张卡就知道这个客人是谁、到哪一步、想要什么、我们承诺过什么；要查证点下面
+              「看完整往来原文」。
+              🔴 这是 AI 生成、**未经人工核实**（提示词已知偶尔编商业细节，例如价格有效期），
+                 卡上明确标注「以原文为准」，不让员工把它当成板上钉钉的事实。
+                 不放「下一步」——那是下面「该做什么」卡的事，避免两处打架。 */}
+          {aiBrief && (
+            <div className="mb-3 rounded-xl border border-me-ochre/30 bg-me-ochre/[0.06] px-3 py-2.5" data-testid="ai-overview">
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-me-ochre">
+                AI 概况 · 未核实，以原文为准
+              </p>
+              {/* 生成时间：简报里常带「明天 11 点」「等待了 825 小时」这类跟生成时刻绑死的说法，
+                  不写时间员工没法判断新不新。超过 3 天多提醒一句。读不出时间就不写，不猜。 */}
+              {age && (
+                <p
+                  className={`mb-1.5 text-[11px] ${age.stale ? 'font-bold text-[#C2453A]' : 'text-me-charcoal/50'}`}
+                  data-testid="ai-overview-age"
+                >
+                  {age.label}
+                  {age.stale ? ' · 里面的时间说法可能已过时，请核对原文' : ''}
+                </p>
+              )}
+              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{aiBrief.summary}</p>
+              {aiBrief.customerNeeds.length > 0 && (
+                <div className="mt-2 flex gap-2">
+                  <span className="min-w-[52px] text-[11px] font-bold text-me-charcoal/50">想要什么</span>
+                  <span className="flex-1 text-[12px] leading-relaxed text-me-charcoal/85">
+                    {aiBrief.customerNeeds.join('；')}
+                  </span>
+                </div>
+              )}
+              {aiBrief.promisesMade.length > 0 && (
+                <div className="mt-1.5 flex gap-2">
+                  <span className="min-w-[52px] text-[11px] font-bold text-me-charcoal/50">我们承诺过</span>
+                  <span className="flex-1 text-[12px] leading-relaxed text-me-charcoal/85">
+                    {aiBrief.promisesMade.join('；')}
+                  </span>
+                </div>
+              )}
+              {aiBrief.objections.length > 0 && (
+                <div className="mt-1.5 flex gap-2">
+                  <span className="min-w-[52px] text-[11px] font-bold text-[#C2453A]/80">顾虑</span>
+                  <span className="flex-1 text-[12px] leading-relaxed text-me-charcoal/85">
+                    {aiBrief.objections.join('；')}
+                  </span>
+                </div>
+              )}
+            </div>
           )}
           {summary && (summary.lastText || summary.tour || summary.travelWindow) && (
             <div className="mb-3 rounded-xl border border-me-ochre/25 bg-me-ochre/[0.06] px-3 py-2.5">
@@ -568,11 +652,13 @@ export function PersonDrawer({
               往来记录
             </p>
             <ContactTimeline
-              key={timelineKey}
+              key={row.contactId}
+              refreshKey={timelineKey}
               clientId={clientId}
               contactId={row.contactId}
               onSummary={onSummary}
               dialedAt={dialedAt}
+              collapsible
             />
           </div>
 

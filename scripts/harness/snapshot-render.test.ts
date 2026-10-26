@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DOT_SYMBOLS, escapeHtml, formatNz, renderHtml } from './snapshot-render.mjs'
+import { DOT_SYMBOLS, attentionItems, escapeHtml, formatAgo, formatNz, renderHtml, windowStatus } from './snapshot-render.mjs'
 
 type DotState = 'ok' | 'warn' | 'bad' | 'none'
 
@@ -211,8 +211,8 @@ describe('renderHtml groups', () => {
       'mobile',
     )
     const headings = html.match(/<h2>/g) ?? []
-    // 4 section headings (窗口 / 撞车 / Grok 的活 / 建议归档) + 2 group headings
-    expect(headings).toHaveLength(6)
+    // 5 section headings (要你关注的 / 窗口 / 撞车 / Grok 的活 / 建议归档) + 2 group headings
+    expect(headings).toHaveLength(7)
     expect(html).toContain('<h2>CTS</h2>')
     expect(html).toContain('<h2>ME 广告</h2>')
   })
@@ -345,5 +345,127 @@ describe('window label in collisions', () => {
     expect(html).toContain('PR#2（无编号窗口）')
     expect(html).toContain('PR#3')
     expect(html).not.toContain('PR#3（')
+  })
+})
+
+describe('formatAgo', () => {
+  const NOW_ISO = '2026-10-26T12:00:00.000Z'
+  const at = (minutesAgo: number) => new Date(Date.parse(NOW_ISO) - minutesAgo * 60000).toISOString()
+
+  it('writes minutes, hours and days at the boundaries', () => {
+    expect(formatAgo(at(0), NOW_ISO)).toBe('刚刚')
+    expect(formatAgo(at(1), NOW_ISO)).toBe('1 分钟前')
+    expect(formatAgo(at(59), NOW_ISO)).toBe('59 分钟前')
+    expect(formatAgo(at(60), NOW_ISO)).toBe('1 小时前')
+    expect(formatAgo(at(23 * 60 + 59), NOW_ISO)).toBe('23 小时前')
+    expect(formatAgo(at(24 * 60), NOW_ISO)).toBe('1 天前')
+    expect(formatAgo(at(3 * 24 * 60), NOW_ISO)).toBe('3 天前')
+  })
+
+  it('never goes negative and reports unknown for bad dates', () => {
+    expect(formatAgo('2026-10-26T13:00:00.000Z', NOW_ISO)).toBe('刚刚')
+    expect(formatAgo('nope', NOW_ISO)).toBe('时间未知')
+    expect(formatAgo(NOW_ISO, 'nope')).toBe('时间未知')
+  })
+})
+
+describe('windowStatus', () => {
+  const dots = (verified: string, opened = 'ok') => ({ opened, merged: 'ok', verified })
+
+  it('maps every PR situation to one plain label', () => {
+    expect(windowStatus({ prNumber: null, dots: dots('none') })).toEqual({ label: '还没开 PR', tone: 'none' })
+    expect(windowStatus({ prNumber: 1, prState: 'OPEN', dots: dots('none') })).toEqual({ label: 'PR 进行中', tone: 'info' })
+    expect(windowStatus({ prNumber: 1, prState: 'OPEN', dots: dots('none', 'warn') })).toEqual({ label: '检查没过', tone: 'bad' })
+    expect(windowStatus({ prNumber: 1, prState: 'CLOSED', dots: dots('none') })).toEqual({ label: 'PR 已关闭', tone: 'none' })
+    expect(windowStatus({ prNumber: 1, prState: 'MERGED', dots: dots('none') })).toEqual({ label: '已合并', tone: 'ok' })
+    expect(windowStatus({ prNumber: 1, prState: 'MERGED', dots: dots('warn') })).toEqual({ label: '已合并·待验证', tone: 'warn' })
+    expect(windowStatus({ prNumber: 1, prState: 'MERGED', dots: dots('ok') })).toEqual({ label: '已合并·已验证', tone: 'ok' })
+    expect(windowStatus({ prNumber: 1, prState: 'MERGED', dots: dots('bad') })).toEqual({ label: '验证失败', tone: 'bad' })
+  })
+})
+
+describe('attention list and summary tiles', () => {
+  const merged = (number: string | null, verified: string, prNumber = 5) =>
+    window({ number, prNumber, prState: 'MERGED', dots: { opened: 'ok', merged: 'ok', verified } } as Partial<Window>)
+
+  it('says nothing needs attention when everything is clean', () => {
+    const html = renderHtml(model({ windows: [merged('74', 'ok')], collisions: [] }), 'mobile')
+    expect(html).toContain('现在没有需要你处理的')
+  })
+
+  it('lists failures, pending verification, collisions and stale Grok PRs by number only', () => {
+    const items = attentionItems({
+      windows: [
+        merged('74', 'bad'),
+        merged('18', 'warn', 6),
+        merged(null, 'warn', 7),
+      ],
+      collisions: [{ file: 'src/secret.ts', prs: [{ number: 9, headRefName: 'b', window: '74' }, { number: 10, headRefName: 'c', window: null }] }],
+      grok: { openCount: 2, openPrs: [{ number: 3, idleDays: 5, isDraft: false }, { number: 4, idleDays: 1, isDraft: false }], oldestIdleDays: 5, mergedRecent: 0, closedRecent: 0, days: 7 },
+    })
+    const text = items.map((item) => item.text).join('\n')
+    expect(text).toContain('74号：验证失败')
+    expect(text).toContain('2 个已合并的窗口，台账还没验完：18号、PR#7')
+    expect(text).toContain('1 处撞车')
+    expect(text).toContain('PR#9、PR#10')
+    expect(text).toContain('Grok 有 1 个 PR 超过 3 天没动：PR#3')
+    expect(text).not.toContain('src/secret.ts')
+    expect(items.filter((item) => item.tone === 'bad')).toHaveLength(2)
+  })
+
+  it('caps a long id list at 8 and counts the rest', () => {
+    const many = Array.from({ length: 10 }, (_, index) => merged(String(index + 1), 'warn', index + 20))
+    const text = attentionItems({ windows: many, collisions: [], grok: null }).map((item) => item.text).join('')
+    expect(text).toContain('等 10 个')
+    expect(text).not.toContain('9号')
+  })
+
+  it('shows the five summary tiles with the right numbers', () => {
+    const html = renderHtml(
+      model({
+        windows: [merged('1', 'warn'), merged('2', 'ok'), window({ prNumber: 8, prState: 'OPEN', dots: { opened: 'ok', merged: 'none', verified: 'none' } } as Partial<Window>)],
+        collisions: [{ file: 'f', prs: [{ number: 1, headRefName: 'a', window: null }, { number: 2, headRefName: 'b', window: null }] }],
+        grok: { openCount: 4, openPrs: [], oldestIdleDays: null, mergedRecent: 1, closedRecent: 0, days: 7 },
+      } as Partial<Model>),
+      'mobile',
+    )
+    const tile = (value: number, label: string, tone: string) => `<div class="tile tile-${tone}"><div class="tile-value">${value}</div><div class="tile-label">${label}</div></div>`
+    expect(html).toContain(tile(3, '活跃窗口', 'none'))
+    expect(html).toContain(tile(1, 'PR 进行中', 'info'))
+    expect(html).toContain(tile(1, '待验证', 'warn'))
+    expect(html).toContain(tile(1, '撞车', 'bad'))
+    expect(html).toContain(tile(4, 'Grok 开着', 'none'))
+  })
+
+  it('shows the relative time and keeps the absolute time as a tooltip', () => {
+    const html = renderHtml(model({ windows: [window({ lastActivityAt: '2026-10-26T11:00:00.000Z' })] }), 'mobile')
+    expect(html).toContain('1 小时前')
+    expect(html).toContain('title="10-27 00:00"')
+  })
+})
+
+describe('window row details', () => {
+  const noPr = () => window({ number: null, prNumber: null, risk: '?', dots: { opened: 'none', merged: 'none', verified: 'none' } })
+
+  it('shows no progress steps and no risk text for a window without a PR', () => {
+    const html = renderHtml(model({ windows: [noPr()] }), 'mobile')
+    expect(html).not.toContain('class="steps"')
+    expect(html).not.toContain('风险?')
+    expect(html).toContain('还没开 PR')
+  })
+
+  it('uses the title as the headline for an unnumbered window in full mode only', () => {
+    const full = renderHtml(model({ windows: [noPr()] }), 'full')
+    expect(full).toContain('<span class="win-number">SECRET-TITLE-XYZ</span>')
+    expect(full).not.toContain('class="win-title"')
+    const mobile = renderHtml(model({ windows: [noPr()] }), 'mobile')
+    expect(mobile).toContain('<span class="win-number">无编号</span>')
+    expect(mobile).not.toContain('SECRET-TITLE-XYZ')
+  })
+
+  it('keeps the title on its own line for a numbered window in full mode', () => {
+    const full = renderHtml(model({ windows: [window({ number: '74' })] }), 'full')
+    expect(full).toContain('<span class="win-number">74号</span>')
+    expect(full).toContain('<div class="win-title">SECRET-TITLE-XYZ</div>')
   })
 })
