@@ -229,6 +229,21 @@ describe('upsertConnection', () => {
     )
   })
 
+  it('重新连接 Meta 时清掉这条主页的暂停，Google 连接不清', async () => {
+    const chain = chainResolving({ error: null })
+    const deleteEq = vi.fn().mockResolvedValue({ error: null })
+    const deleteChain = { delete: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ eq: deleteEq }) }) }
+    mocks.from.mockImplementation((table: string) => (table === 'meta_page_sync_holds' ? deleteChain : chain))
+
+    await upsertConnection(UPSERT_INPUT)
+    expect(mocks.from).not.toHaveBeenCalledWith('meta_page_sync_holds')
+
+    await upsertConnection({ ...UPSERT_INPUT, provider: PLATFORM_PROVIDERS.META, accountId: 'page-1' })
+    expect(mocks.from).toHaveBeenCalledWith('meta_page_sync_holds')
+    expect(deleteChain.delete).toHaveBeenCalled()
+    expect(deleteEq).toHaveBeenCalledWith('page_id', 'page-1')
+  })
+
   it('throws when DB returns an error', async () => {
     mocks.from.mockReturnValue(chainResolving({ error: { message: 'DB constraint violation' } }))
 

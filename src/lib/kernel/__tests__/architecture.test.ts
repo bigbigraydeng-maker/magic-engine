@@ -2710,10 +2710,10 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
           '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
       ).toEqual([])
     },
-    // Assert the whitelist above, not elapsed time. A 15s cap aborted this
-    // full-repo scan on the 1-CPU runner (about 9–18s) before expect() ran.
-    // Vitest treats Infinity as no per-test clock. The job cap still stops a hang.
-    Number.POSITIVE_INFINITY,
+    // A 15s cap aborted this full-repo scan on the 1-CPU runner (about 9–18s)
+    // before expect() ran. 120s still finishes a slow scan and stops a hang
+    // before it uses up the 15-minute light-check job.
+    120_000,
   )
 
   it(
@@ -2726,8 +2726,8 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
         '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
       ).toEqual([])
     },
-    // Same scan as the test above. No millisecond budget; see that comment.
-    Number.POSITIVE_INFINITY,
+    // Same scan as the test above. 120s cap; see that comment.
+    120_000,
   )
 
   it('🔴 这两条闸真的能抓到东西（真实磁盘探针，因为现在生产代码里是零个）', () => {

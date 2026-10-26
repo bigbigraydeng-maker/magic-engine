@@ -8,6 +8,9 @@ import type { ClientDiscoveryRow } from '@/lib/zhangqian/types'
 import type { SelfGrade, HuatuoGenerationMeta, TrendSummaryLite, SelfGradeWeakness, SelfGradeDimension } from '@/lib/huatuo/types'
 import { coerceWeaknesses } from '@/lib/huatuo/weakness-utils'
 import { shouldAutoRestoreLatestDraft } from './restore-guards'
+import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
+import { adCurrencyLabel, adCurrencyPrefix, formatAdMoney } from '@/lib/ads/spend-figures'
+import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
 import { actionFixBadge, showActionModuleChip } from './action-badge'
 import {
   ManualDraftBanner,
@@ -113,6 +116,9 @@ export default function NewPrescriptionPage() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const clientId     = params.id as string
+  const budgetCurrency = useClientAdCurrency(clientId)
+  const budgetCode = adCurrencyLabel(budgetCurrency)
+  const budgetPrefix = adCurrencyPrefix(budgetCurrency)
 
   // 补充/修订模式：URL 带 ?supplement_of=<id> 或 ?revise=<id>
   const supplementOf = searchParams.get('supplement_of')
@@ -336,6 +342,12 @@ export default function NewPrescriptionPage() {
 
   // ── Generate prescription (SSE 流式) ──────────────────────────────────────
   const handleGenerate = useCallback(async () => {
+    const budgetFields = prescriptionBudgetFields(budget, budgetCurrency)
+    if (!budgetFields.ok) {
+      setGenerateError(budgetFields.error)
+      return
+    }
+
     setIsGenerating(true)
     setGenerateError(null)
     setProgressNote('连接诸葛亮…')
@@ -350,7 +362,8 @@ export default function NewPrescriptionPage() {
       const intake: PrescriptionIntake = {
         business_goal:       businessGoal,
         timeline_urgency:    urgency,
-        monthly_budget_aud:  budget,
+        monthly_budget_aud:  budgetFields.monthly_budget_aud,
+        budget_currency:     budgetFields.budget_currency,
         priority_dimensions: priorityDims,
         notes:               notes || null,
       }
@@ -416,7 +429,7 @@ export default function NewPrescriptionPage() {
       setProgressNote(null)
       if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null }
     }
-  }, [businessGoal, urgency, budget, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
+  }, [businessGoal, urgency, budget, budgetCurrency, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
 
   // ── Approve prescription ──────────────────────────────────────────────────
   const handleApprove = async () => {
@@ -741,10 +754,10 @@ export default function NewPrescriptionPage() {
             {/* Monthly budget */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                月度预算（AUD）<span className="text-red-500">*</span>
+                月度预算（{budgetCode}）<span className="text-red-500">*</span>
               </label>
               <div className="flex items-center gap-2">
-                <span className="text-gray-500 text-sm">AUD $</span>
+                <span className="text-gray-500 text-sm">{budgetPrefix || budgetCode}</span>
                 <input
                   type="number"
                   min={500}
@@ -931,7 +944,7 @@ export default function NewPrescriptionPage() {
                         />
                       </div>
                       <span className="text-xs font-medium text-gray-700 w-24 text-right">
-                        AUD ${b.amount_aud} ({b.percentage}%)
+                        {formatAdMoney(b.amount_aud, budgetCurrency)} ({b.percentage}%)
                       </span>
                     </div>
                   ))}

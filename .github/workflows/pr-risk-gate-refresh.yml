@@ -77,6 +77,11 @@ jobs:
           EVENT_AUTHOR: ${{ github.event.pull_request.user.login }}
           EVENT_DRAFT: ${{ github.event.pull_request.draft }}
           EVENT_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          # 带 p0 标签的 PR 要人签字才自动合（Ray 2026-10-26「只有 P0 审」）。
+          # 🔴 这个入口 2026-10-26 漏过一次：#3155 只给 pr-risk-gate.yml 传了 PR_IS_P0，
+          #    闸门脚本却把它列为必需变量 —— 于是每次「检查跑完后的重判」都报
+          #    「缺少必需的环境变量 PR_IS_P0」判红，仓库里每条 PR 都会被这条红挡住。
+          EVENT_P0: ${{ contains(github.event.pull_request.labels.*.name, 'p0') }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "pull_request_target" ]; then
@@ -86,12 +91,13 @@ jobs:
               echo "author=$EVENT_AUTHOR"
               echo "draft=$EVENT_DRAFT"
               echo "fork=$EVENT_FORK"
+              echo "p0=$EVENT_P0"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --json baseRefOid,headRefOid,isDraft,isCrossRepository,author \
-            --jq '"base=\(.baseRefOid)\nhead=\(.headRefOid)\ndraft=\(.isDraft)\nfork=\(.isCrossRepository)\nauthor=\(.author.login)"' \
+            --json baseRefOid,headRefOid,isDraft,isCrossRepository,author,labels \
+            --jq '"base=\(.baseRefOid)\nhead=\(.headRefOid)\ndraft=\(.isDraft)\nfork=\(.isCrossRepository)\nauthor=\(.author.login)\np0=\([.labels[].name | ascii_downcase] | index("p0") != null)"' \
             >> "$GITHUB_OUTPUT"
 
       - name: Rate this PR and decide the merge tier
@@ -104,6 +110,7 @@ jobs:
           PR_AUTHOR: ${{ steps.pr.outputs.author }}
           PR_DRAFT: ${{ steps.pr.outputs.draft }}
           PR_IS_FORK: ${{ steps.pr.outputs.fork }}
+          PR_IS_P0: ${{ steps.pr.outputs.p0 }}
           SIGNOFF_TRUSTED_LOGINS: ${{ vars.ME_SIGNOFF_TRUSTED_LOGINS }}
           GATE_EVENT_NAME: ${{ github.event_name }}
         run: node tools/ops-review-loop/src/check-risk-gate.mjs

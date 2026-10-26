@@ -22,6 +22,8 @@ describe('处方审阅确认', () => {
     await user.click(screen.getByRole('button', { name: '✓ 批准并生成执行计划' }))
     expect(onApprove).not.toHaveBeenCalled()
     expect(screen.getByRole('alertdialog', { name: '确认批准' })).toHaveTextContent(APPROVE_CONFIRM_TEXT)
+    expect(APPROVE_CONFIRM_TEXT).not.toContain('看板上会出现待办')
+    expect(APPROVE_CONFIRM_TEXT).toContain('按阶段排好')
 
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(onApprove).not.toHaveBeenCalled()
@@ -63,9 +65,11 @@ describe('开方人与人工草稿提示', () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('warns that approving a manual draft creates board tasks', () => {
+  it('says approving a manual draft records stages under the goal', () => {
     render(<ManualDraftBanner show />)
     expect(screen.getByRole('status')).toHaveTextContent('未批准')
-    expect(screen.getByRole('status')).toHaveTextContent('待办')
+    expect(screen.getByRole('status')).toHaveTextContent('按阶段排好')
+    expect(screen.getByRole('status')).not.toHaveTextContent('看板上会出现待办')
+    expect(screen.getByRole('status')).not.toHaveTextContent('看板上的待办')
   })
 })

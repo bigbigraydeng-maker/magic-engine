@@ -12,6 +12,7 @@ import {
   syncCompletedEventId,
   type MessengerSyncCompletedData,
 } from '@/lib/messenger/sync-completed-event'
+import { isSkippablePageTokenFailure } from '@/lib/meta/broken-page-token'
 
 /**
  * GET /api/cron/messenger-sync-hourly
@@ -95,7 +96,9 @@ export async function GET(req: NextRequest) {
   // 补挂历史老对话认出来的人 + 还剩多少没挂上（能看出还要几轮清完积压）。
   const backfilled = results.reduce((n, r) => n + r.backfilled, 0)
   const backfillRemaining = results.reduce((n, r) => n + r.backfillRemaining, 0)
-  const failed = results.filter((r) => r.error).length
+  // 已知坏令牌（190 / 缺角色 / 未核实公用令牌）有自己的待办，不算进这轮 failed，
+  // 否则这条每小时任务会永远停在 partial。其它客户错误照常计数。
+  const failed = results.filter((r) => !!r.error && !isSkippablePageTokenFailure(r)).length
 
   // ── 顺带把邮箱也同步了（理由见文件头）────────────────────────────────
   // 整段包在 try 里：邮箱那边出任何问题都不能让私信这条报失败 ——

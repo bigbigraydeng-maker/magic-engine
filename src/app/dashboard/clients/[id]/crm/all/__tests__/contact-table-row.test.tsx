@@ -20,6 +20,7 @@ function makeRow(over: Partial<ContactRow> = {}): ContactRow {
     segmentLabel: 'S',
     temperature: 'cold',
     intent: null,
+    assignedTo: null,
     custom: {},
     nextAction: {
       list: 'hot',

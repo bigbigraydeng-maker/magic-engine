@@ -13,6 +13,9 @@ import { useState, useCallback, useEffect } from 'react'
 import type { PrescriptionContent, PrescriptionIntake, PrescriptionAction } from '@/types/diagnostic'
 import type { SelfGrade, HuatuoGenerationMeta } from '@/lib/huatuo/types'
 import { readHuatuoStream } from '@/lib/huatuo/stream-client'
+import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
+import { adCurrencyLabel, adCurrencyPrefix, formatAdMoney } from '@/lib/ads/spend-figures'
+import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
 
 type Mode = 'supplement' | 'revision'
 type Step = 'form' | 'generating' | 'review'
@@ -76,11 +79,21 @@ export function InlinePrescriptionDrawer({
   const goalPlaceholder = mode === 'supplement'
     ? '例：客户决定也要做 LinkedIn B2B 内容，需要补充对应动作'
     : '例：客户预算砍半，需要聚焦最高 ROI 的动作，砍掉视频拍摄类'
+  const budgetCurrency = useClientAdCurrency(clientId)
+  const budgetCode = adCurrencyLabel(budgetCurrency)
+  const budgetPrefix = adCurrencyPrefix(budgetCurrency)
   const budgetLabel = mode === 'supplement' ? '本次补充的月度增量预算' : '修订后月度预算'
 
   // ── 生成 ────────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
     if (!goal.trim()) return
+    const amount = budget.trim() ? Math.max(0, Number(budget)) : 0
+    const budgetFields = prescriptionBudgetFields(amount, budgetCurrency)
+    if (!budgetFields.ok) {
+      setError(budgetFields.error)
+      return
+    }
+
     setStep('generating')
     setError(null)
     setProgress('连接诸葛亮…')
@@ -93,7 +106,8 @@ export function InlinePrescriptionDrawer({
         business_goal:       goal.trim(),
         timeline_urgency:    urgency,
         // 预算可选：空 → 0（华佗理解为"不涉及额外预算，在现有资源内完成"）
-        monthly_budget_aud:  budget.trim() ? Math.max(0, Number(budget)) : 0,
+        monthly_budget_aud:  budgetFields.monthly_budget_aud,
+        budget_currency:     budgetFields.budget_currency,
         priority_dimensions: [],
         notes:               notes.trim() || null,
       }
@@ -145,7 +159,7 @@ export function InlinePrescriptionDrawer({
       clearInterval(timer)
       setProgress(null)
     }
-  }, [goal, urgency, budget, notes, mode, priorPrescriptionId, clientId])
+  }, [goal, urgency, budget, budgetCurrency, notes, mode, priorPrescriptionId, clientId])
 
   // ── 批准 ────────────────────────────────────────────────────────────────
   const handleApprove = useCallback(async () => {
@@ -217,10 +231,10 @@ export function InlinePrescriptionDrawer({
 
               <div>
                 <label className="mb-1 block text-sm font-black text-slate-700">
-                  {budgetLabel} <span className="text-xs font-semibold text-slate-400">（可选）</span>
+                  {budgetLabel}（{budgetCode}） <span className="text-xs font-semibold text-slate-400">（可选）</span>
                 </label>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-500">AUD $</span>
+                  <span className="text-sm font-bold text-slate-500">{budgetPrefix || budgetCode}</span>
                   <input
                     type="number" min={0} max={50000} step={100}
                     value={budget}
@@ -339,7 +353,7 @@ export function InlinePrescriptionDrawer({
                     {content.budget_allocation.map(b => (
                       <div key={b.dimension} className="flex justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
                         <span className="font-semibold text-slate-600">{b.dimension}</span>
-                        <span className="font-black text-slate-800">AUD ${b.amount_aud}（{b.percentage}%）</span>
+                        <span className="font-black text-slate-800">{formatAdMoney(b.amount_aud, budgetCurrency)}（{b.percentage}%）</span>
                       </div>
                     ))}
                   </div>

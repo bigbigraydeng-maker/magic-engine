@@ -16,9 +16,14 @@ vi.mock('@/lib/cron/run-logger', () => ({
   startCronRun: vi.fn(async () => ({ finish })),
 }))
 
+vi.mock('@/lib/cron/abandon-stale-runs', () => ({
+  abandonStaleRunningRuns: vi.fn(async () => ({ abandoned: 0 })),
+}))
+
 import { GET } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { abandonStaleRunningRuns } from '@/lib/cron/abandon-stale-runs'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -63,7 +68,7 @@ describe('GET /api/cron/cron-run-logs-cleanup', () => {
 
     const res = await GET(makeReq('Bearer test-secret-123'))
     expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ purged_noise: 12, purged_expired: 3 })
+    expect(await res.json()).toMatchObject({ purged_noise: 12, purged_expired: 3, abandoned: 0 })
 
     // 🔴 函数名写错 = 生产上直接 404，而单测照样绿。所以断言的是具体名字。
     expect(supabaseAdmin.rpc).toHaveBeenCalledWith('cron_run_logs_purge')
@@ -73,7 +78,12 @@ describe('GET /api/cron/cron-run-logs-cleanup', () => {
         processed: 15,
         completed: 15,
         failed: 0,
-        summary: expect.objectContaining({ purged_noise: 12, purged_expired: 3, remaining: 31000 }),
+        summary: expect.objectContaining({
+          purged_noise: 12,
+          purged_expired: 3,
+          remaining: 31000,
+          abandoned: 0,
+        }),
       }),
     )
   })
@@ -91,6 +101,41 @@ describe('GET /api/cron/cron-run-logs-cleanup', () => {
         failed: 1,
         error: 'function public.cron_run_logs_purge() does not exist',
       }),
+    )
+    expect(abandonStaleRunningRuns).not.toHaveBeenCalled()
+  })
+
+  it('收掉过期的 running 行，并把条数写进运行记录', async () => {
+    ;(supabaseAdmin.rpc as any).mockResolvedValue({
+      data: { purged_noise: 1, purged_expired: 0, remaining: 10, oldest_started_at: null },
+      error: null,
+    })
+    vi.mocked(abandonStaleRunningRuns).mockResolvedValue({ abandoned: 2 })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ abandoned: 2 })
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        processed: 3,
+        completed: 3,
+        failed: 0,
+        summary: expect.objectContaining({ abandoned: 2 }),
+      }),
+    )
+  })
+
+  it('收口写不进去 → 清理自己记成失败，不许假装清完了', async () => {
+    ;(supabaseAdmin.rpc as any).mockResolvedValue({
+      data: { purged_noise: 1, purged_expired: 0, remaining: 10, oldest_started_at: null },
+      error: null,
+    })
+    vi.mocked(abandonStaleRunningRuns).mockResolvedValue({ abandoned: 0, error: 'update failed' })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+    expect(res.status).toBe(500)
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({ failed: 1, error: 'update failed' }),
     )
   })
 })

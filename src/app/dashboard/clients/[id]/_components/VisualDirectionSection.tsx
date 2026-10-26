@@ -2,16 +2,25 @@
 
 import { useState, useRef } from 'react'
 import type { CampaignBrief } from '@/types/magic-engine'
+import { campaignSaveEchoed } from '@/lib/campaign/client-view'
 
 const INPUT_CLASS = 'w-full bg-me-ivory border border-black/10 rounded-lg px-3 py-2 text-sm text-me-charcoal/90 placeholder-me-charcoal/45 focus:outline-none focus:ring-2 focus:ring-me-ochre focus:bg-white transition-colors'
+
+function lineList(value: string): string[] | null {
+  const items = value.split('\n').map(s => s.trim()).filter(Boolean)
+  return items.length > 0 ? items : null
+}
 
 export function VisualDirectionSection({
   campaign,
   clientId,
+  internal = false,
   onUpdated,
 }: {
   campaign: CampaignBrief
   clientId: string
+  /** Internal accounts can edit the AI-input notes. Clients cannot; those columns are not saved for them. */
+  internal?: boolean
   onUpdated: (c: CampaignBrief) => void
 }) {
   const hasExisting = !!(campaign.vi_mood || campaign.vi_color_accent || campaign.vi_specific_dos?.length)
@@ -100,28 +109,31 @@ export function VisualDirectionSection({
   }
 
   const handleSave = async () => {
+    const payload: Record<string, unknown> = {
+      vi_mood: draft.vi_mood.trim() || null,
+      vi_color_accent: draft.vi_color_accent.trim() || null,
+      vi_specific_dos: lineList(draft.vi_specific_dos),
+      vi_specific_donts: lineList(draft.vi_specific_donts),
+    }
+    if (internal) {
+      payload.vi_input_notes = inputNotes.trim() || null
+      payload.vi_input_file_urls = inputFiles.map(f => f.storagePath)
+      payload.vi_reference_note = draft.vi_reference_note.trim() || null
+    }
     setSaving(true)
     setMsg('')
     try {
       const res = await fetch(`/api/clients/${clientId}/campaign/${campaign.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vi_input_notes:     inputNotes.trim() || null,
-          vi_input_file_urls: inputFiles.map(f => f.storagePath),
-          vi_mood:           draft.vi_mood.trim()           || null,
-          vi_color_accent:   draft.vi_color_accent.trim()   || null,
-          vi_specific_dos:   draft.vi_specific_dos.trim()
-            ? draft.vi_specific_dos.split('\n').map((s: string) => s.trim()).filter(Boolean)
-            : null,
-          vi_specific_donts: draft.vi_specific_donts.trim()
-            ? draft.vi_specific_donts.split('\n').map((s: string) => s.trim()).filter(Boolean)
-            : null,
-          vi_reference_note: draft.vi_reference_note.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
+      if (!campaignSaveEchoed(payload, json.campaign)) {
+        setMsg('没有存上，请再试一次')
+        return
+      }
       onUpdated(json.campaign)
       setDirty(false)
       setMsg('Saved')
@@ -159,8 +171,8 @@ export function VisualDirectionSection({
         </button>
       </div>
 
-      {/* ── Campaign Visual Inputs ── */}
-      <div className="px-4 pt-4 pb-3 space-y-2 border-b border-black/[.06] bg-me-ochre/10/40">
+      {/* Campaign visual inputs stay internal. Clients cannot see or save them. */}
+      {internal && <div className="px-4 pt-4 pb-3 space-y-2 border-b border-black/[.06] bg-me-ochre/10/40">
         <p className="text-xs font-semibold text-me-charcoal/60 uppercase tracking-wide">
           活动视觉要点 <span className="font-normal normal-case text-me-charcoal/45">— 填写后点 AI Generate，系统将结合品牌 DNA 生成方向</span>
         </p>
@@ -198,7 +210,7 @@ export function VisualDirectionSection({
             ))}
           </ul>
         )}
-      </div>
+      </div>}
 
       {/* ── AI-generated / manually editable fields ── */}
       <div className="px-4 py-4 space-y-3">
@@ -250,17 +262,19 @@ export function VisualDirectionSection({
           </div>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-me-charcoal/55 mb-1">
-            Image Generation Reference <span className="text-me-charcoal/45 font-normal">(English, for ChatGPT / Midjourney)</span>
-          </label>
-          <input
-            value={draft.vi_reference_note}
-            onChange={e => update('vi_reference_note', e.target.value)}
-            placeholder="e.g. Warm cinematic autumn travel photography, Palace Museum editorial style, harvest gold tones"
-            className={`${INPUT_CLASS} text-xs`}
-          />
-        </div>
+        {internal && (
+          <div>
+            <label className="block text-xs font-medium text-me-charcoal/55 mb-1">
+              Image Generation Reference <span className="text-me-charcoal/45 font-normal">(English, for ChatGPT / Midjourney)</span>
+            </label>
+            <input
+              value={draft.vi_reference_note}
+              onChange={e => update('vi_reference_note', e.target.value)}
+              placeholder="e.g. Warm cinematic autumn travel photography, Palace Museum editorial style, harvest gold tones"
+              className={`${INPUT_CLASS} text-xs`}
+            />
+          </div>
+        )}
 
         <div className="flex items-center justify-between pt-1">
           {msg ? (

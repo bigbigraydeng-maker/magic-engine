@@ -83,8 +83,8 @@ export function classifyLeadsSyncOutcome(r: LeadsSyncOutcome): LeadsSyncReceipt 
   const clientId = r.clientId ?? null
   const clientName = r.clientName
 
-  if (r.skipped === 'page_not_verified') {
-    return { clientId, clientName, state: 'blocked', detail: r.error ?? 'page_not_verified' }
+  if (r.skipped === 'page_not_verified' || r.skipped === 'connection_unhealthy') {
+    return { clientId, clientName, state: 'blocked', detail: r.error ?? r.skipped ?? 'blocked' }
   }
 
   if (r.error) {
