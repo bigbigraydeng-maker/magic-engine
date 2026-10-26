@@ -22,6 +22,7 @@ import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
 import { hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
@@ -30,6 +31,13 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
+  const denied = await rejectAgentAdsBearer(_req, {
+    clientId: params.id,
+    action: 'approve',
+    resourceId: params.planId,
+  })
+  if (denied) return denied
+
   const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
