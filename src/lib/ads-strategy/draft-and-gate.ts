@@ -85,6 +85,8 @@ export interface DraftRecord {
    * 这两种必须分得出：「红线没生效」不能长得和「红线是空的」一样。
    */
   redlinesChecked?: number | null
+  /** 建前读到的账户最低日预算（最小单位）；`null` = 没读到 / 没查（放行，Meta 兜底）。 */
+  minBudgetChecked?: number | null
   /** 名单里因为太短没拿来比的条目（如果有）。 */
   redlinesSkipped?: string[]
   /** 回读发现有东西不是暂停的 → 我们补了一刀暂停，结果在这里。 */
@@ -185,8 +187,9 @@ export async function createDraftForApproval(
   }
 
   // ── 0.4 日预算低于账户最低日预算 → Meta 一定拒，别浪费一次真实创建 ──────
-  const budgetError = await checkMinDailyBudget(draft, deps)
-  if (budgetError) return failedOutcome(deps, draft, { ...base, error: budgetError })
+  const budget = await checkMinDailyBudget(draft, deps)
+  base.minBudgetChecked = budget.checked
+  if (budget.error) return failedOutcome(deps, draft, { ...base, error: budget.error })
 
   // ── 0.5 私信类型：视频上传完还要转码，转码没完就建会失败 ───────────────
   const waitError = await waitForTranscode(draft, deps, now)
@@ -211,6 +214,11 @@ export async function createDraftForApproval(
 interface RecordBase {
   summary: string
   redlinesChecked: number | null
+  /**
+   * 建前读到的账户最低日预算（账户币种最小单位）。`null` = 没读到 / 没查，**放行**（Meta 会兜底拒）；
+   * 数字 = 查过。跟 `redlinesChecked` 同口径，账本看得出「查过够」还是「没查到放行」。
+   */
+  minBudgetChecked?: number | null
   /** 名单里太短、没拿来比的条目 —— 不静默忽略，记下来让人知道有条目没生效。 */
   redlinesSkipped?: string[]
 }
@@ -226,17 +234,23 @@ function skippedRedlines(redlines: readonly string[] | undefined): string[] | un
   return skipped.length > 0 ? skipped : undefined
 }
 
-const ZERO_DECIMAL_CURRENCIES = new Set(['JPY', 'KRW', 'VND', 'CLP'])
-
-/** 读不到最低日预算就放行（Meta 自己会拒）；读到了而且草案低于它 → 人话报错。 */
-async function checkMinDailyBudget(draft: AdDraft, deps: CreateDraftDeps): Promise<string | null> {
+/**
+ * 读不到最低日预算就放行（Meta 自己会拒），`checked` 记 null；读到了而且草案低于它 → 人话报错。
+ * 换算永远 ×100，与 `adSetBodyFor`（ad-publisher）同口径；本仓目前没有零小数币种（JPY 等）的账户。
+ */
+async function checkMinDailyBudget(
+  draft: AdDraft,
+  deps: CreateDraftDeps,
+): Promise<{ error: string | null; checked: number | null }> {
   const min = await fetchAccountMinDailyBudget(deps.adAccountId, deps.accessToken)
-  if (!min) return null
-  const factor = ZERO_DECIMAL_CURRENCIES.has(min.currency.toUpperCase()) ? 1 : 100
-  const draftMinor = Math.round(draft.dailyBudget * factor)
-  if (draftMinor >= min.minDailyBudgetMinor) return null
-  const shown = (min.minDailyBudgetMinor / factor).toFixed(factor === 1 ? 0 : 2)
-  return `每天预算 ${draft.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`
+  if (!min) return { error: null, checked: null }
+  const draftMinor = Math.round(draft.dailyBudget * 100)
+  if (draftMinor >= min.minDailyBudgetMinor) return { error: null, checked: min.minDailyBudgetMinor }
+  const shown = (min.minDailyBudgetMinor / 100).toFixed(2)
+  return {
+    checked: min.minDailyBudgetMinor,
+    error: `每天预算 ${draft.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`,
+  }
 }
 
 /** 任一创意带视频就等转码（视频没转完建创意会报「视频还没准备好」）；返回错误文案，`null` = 可以继续。 */
@@ -274,6 +288,7 @@ async function failedOutcome(
   const id = await record(deps.supabase, draft.clientId, {
     status: 'failed', draft, summary: f.summary, error: f.error,
     redlinesChecked: f.redlinesChecked, redlinesSkipped: f.redlinesSkipped, orphans: f.orphans,
+    minBudgetChecked: f.minBudgetChecked ?? null,
   })
   return { actionId: id, status: 'failed', summary: f.summary, findings: [], error: f.error }
 }
@@ -314,6 +329,7 @@ async function blockedUnreadable(
   const id = await record(deps.supabase, draft.clientId, {
     status: 'blocked', draft, summary: base.summary, error,
     redlinesChecked: base.redlinesChecked, redlinesSkipped: base.redlinesSkipped,
+    minBudgetChecked: base.minBudgetChecked ?? null,
     campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
   })
   return { actionId: id, status: 'blocked', summary: base.summary, findings: [], error }
@@ -393,6 +409,7 @@ async function recordGate(
     buyerWillSee: merged.buyerWillSee,
     redlinesChecked: ctx.redlinesChecked,
     redlinesSkipped: ctx.redlinesSkipped,
+    minBudgetChecked: ctx.minBudgetChecked ?? null,
     autoPause,
   })
   return { actionId: id, status, summary: ctx.summary, findings: merged.findings, readback }

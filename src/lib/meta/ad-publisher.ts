@@ -196,8 +196,9 @@ function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
       if (c.videoId) {
         // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），不是把 video_id 塞进 link_data
         // （同类实测见 docs/PITFALLS.md D13 与 Meta 广告手册 §30）。封面必给（validateDraft 查）。
-        // CTA value 只写表单 id：Meta 留资文档与本仓两次真建成（09-23、10-09）的 CTA 里都没有自定义网址，
-        // 落地页由表单结束页承载。
+        // CTA value 只写表单 id：10-09 真建成的上海那条（docs/clients/cts/2026-10-09-shanghai-ads-paused-build.md §2.3）
+        // 的 CTA 里只有 lead_gen_form_id，落地页由表单结束页承载。Meta 视频留资示例的 value 里带 link（fb.me），
+        // 带不带都有依据；这里取「有实测的那种」。
         storySpec.video_data = {
           video_id: c.videoId,
           message: c.primaryText,

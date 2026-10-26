@@ -219,6 +219,7 @@ describe('createDraftForApproval', () => {
     expect(r.error).toContain('最低日预算 1.78 NZD')
     expect(mPublish).not.toHaveBeenCalled()
     expect(inserted).toHaveLength(1)
+    expect(inserted[0].minBudgetChecked).toBe(178)
     mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
     await createDraftForApproval({ ...DRAFT, dailyBudget: 2 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
     expect(mPublish).toHaveBeenCalledTimes(1)
@@ -226,6 +227,11 @@ describe('createDraftForApproval', () => {
     mMinBudget.mockResolvedValueOnce(null)
     await createDraftForApproval({ ...DRAFT, dailyBudget: 1 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
     expect(mPublish).toHaveBeenCalledTimes(1)
+    // 没读到 → 账本记 null（不是 0、不是漏记）；读到 → 记数字
+    expect(inserted.at(-1)?.minBudgetChecked).toBeNull()
+    mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
+    await createDraftForApproval({ ...DRAFT, dailyBudget: 2 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(inserted.at(-1)?.minBudgetChecked).toBe(178)
   })
 
   it('🔴 带视频的草案建广告有整次时间预算；纯图的不限（与等转码同口径）', async () => {
