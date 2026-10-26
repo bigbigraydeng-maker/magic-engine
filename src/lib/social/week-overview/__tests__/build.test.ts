@@ -4,6 +4,7 @@ import { InMemoryLiteStore } from '../../story-lite/in-memory-store'
 import type { LiteServicePorts } from '../../story-lite/service'
 import type { LiteActor, NewLiteItem } from '../../story-lite/types'
 import { buildWeekOverview, readPublishingQuota } from '../build'
+import { REEL_QUERY_LIMIT } from '../reel-works'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const OTHER = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
@@ -61,6 +62,12 @@ describe('buildWeekOverview', () => {
     expect(calls).toContainEqual(['eq', ['client_id', CLIENT]])
     expect(result.value.live).toBe(false)
     expect(result.value.post).toEqual({ connected: false })
+  })
+
+  it('asks for exactly as many Reel orders as the page believes it can see (the page says "only the newest N" from the same number)', async () => {
+    const { db, calls } = fakeDb([])
+    await buildWeekOverview({ ports: ports(new InMemoryLiteStore()), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now: NOW })
+    expect(calls).toContainEqual(['limit', [REEL_QUERY_LIMIT]])
   })
 
   it('a stopped or expired pack is not shown as in play', async () => {
