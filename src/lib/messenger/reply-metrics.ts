@@ -5,7 +5,7 @@ import {
   normaliseNoticeText,
   type ThreadMessage,
 } from './automation'
-import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from './autoack-identity'
+import { AUTOACK_SENT_BY_EMAIL, isAutoAckBody } from './autoack-identity'
 
 /** One conversation_messages row, as read from the database. */
 export interface ReplyMetricRow {
@@ -42,7 +42,7 @@ export function rowToThreadMessage(row: ReplyMetricRow): ThreadMessage {
   if (row.direction === 'outbound') {
     const viaMeAutoAck =
       senderName === AUTOACK_SENT_BY_EMAIL &&
-      normaliseNoticeText(body) === normaliseNoticeText(AUTOACK_TEMPLATE)
+      isAutoAckBody(body, normaliseNoticeText)
     message.viaMeAutoAck = viaMeAutoAck
     message.sentByHumanViaMe = EMAIL_SENDER_RE.test(senderName) && !viaMeAutoAck
   }

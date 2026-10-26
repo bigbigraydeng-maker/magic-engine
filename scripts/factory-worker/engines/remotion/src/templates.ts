@@ -16,10 +16,20 @@ import {
   collectDataCardAssetFiles,
   computeDataCardTiming,
 } from './datacard.ts';
+import {
+  parsePostcardProps,
+  collectPostcardAssetFiles,
+  computePostcardTiming,
+} from './postcard.ts';
+import {
+  parseAtmosphereProps,
+  collectAtmosphereAssetFiles,
+  computeAtmosphereTiming,
+} from './atmosphere.ts';
 import { stagedFileName, type MusicCatalog } from './music.ts';
 
 /** Allowed template ids. */
-export const TEMPLATE_IDS = ['list', 'montage', 'datacard'] as const;
+export const TEMPLATE_IDS = ['list', 'montage', 'datacard', 'postcard', 'atmosphere'] as const;
 
 /** One supported template id. */
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
@@ -50,6 +60,11 @@ const DATACARD_RECIPE_GAPS: RecipeGap[] = [
   { column: '行业配方', status: '未满足', reason: '配方库没有物流/贸易等行业记录，行业层配方空白' },
 ];
 
+/** Recipe columns a single-shot ambience reel cannot satisfy; reported on every render so the gap is visible, never silent. */
+const ATMOSPHERE_RECIPE_GAPS: RecipeGap[] = [
+  { column: '真人背影/真人出镜', status: '未满足', reason: '氛围片只有一段实拍风景素材，没有人物画面（无自有素材、无肖像授权）' },
+];
+
 /** Parse and validate input for a template, returning everything the renderer needs. */
 export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
   if (id === 'list') {
@@ -71,6 +86,29 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
       totalFrames: computeDataCardTiming(props).totalFrames,
       recipeGaps: DATACARD_RECIPE_GAPS,
     };
+  }
+  if (id === 'postcard') {
+    const props = parsePostcardProps(input);
+    return {
+      compositionId: 'PostcardReel',
+      props,
+      assetFiles: collectPostcardAssetFiles(props),
+      totalFrames: computePostcardTiming(props).totalFrames,
+    };
+  }
+  if (id === 'atmosphere') {
+    const props = parseAtmosphereProps(input);
+    return {
+      compositionId: 'AtmosphereReel',
+      props,
+      assetFiles: collectAtmosphereAssetFiles(props),
+      totalFrames: computeAtmosphereTiming(props).totalFrames,
+      recipeGaps: ATMOSPHERE_RECIPE_GAPS,
+    };
+  }
+  if (id !== 'montage') {
+    // Never fall through to montage for an unknown id: a missed template must be refused, not mis-rendered.
+    throw new Error(`未知模板：${String(id)}`);
   }
   const props = parseMontageReelProps(input);
   const totalFrames = computeMontageTiming(props).totalFrames;

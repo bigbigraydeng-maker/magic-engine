@@ -1,14 +1,22 @@
 // Remotion render branch for the factory worker. All IO is injected through `deps`.
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import {
   existsSync, copyFileSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync,
   openSync, closeSync, fstatSync, readSync, writeSync, constants,
 } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import {
+  MusicVocalGateError,
+  assertMusicVocalClear,
+  loadMusicVocalRegistry,
+  sha256File,
+  usedWindowFromProps,
+} from './music-vocal-gate.mjs'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
 export const REMOTION_ENGINE_DIR = join(import.meta.dirname, 'engines', 'remotion')
+export const MUSIC_VOCAL_REGISTRY_PATH = join(REMOTION_ENGINE_DIR, 'catalog', 'music-vocals.json')
 
 /** Non-retryable order error: the server must not hand this order back to us. */
 export class RemotionOrderError extends Error {
@@ -78,6 +86,10 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const templates = await import(pathToFileURL(join(engineDir, 'src', 'templates.ts')).href)
     const montage = await import(pathToFileURL(join(engineDir, 'src', 'montage.ts')).href)
     const music = await import(pathToFileURL(join(engineDir, 'src', 'music.ts')).href)
+    const datacard = await import(pathToFileURL(join(engineDir, 'src', 'datacard.ts')).href)
+    const postcard = await import(pathToFileURL(join(engineDir, 'src', 'postcard.ts')).href)
+    const atmosphere = await import(pathToFileURL(join(engineDir, 'src', 'atmosphere.ts')).href)
+    const substance = await import(pathToFileURL(join(engineDir, 'src', 'contentSubstance.ts')).href)
     let catalog = null
     return {
       computeTimingFromProps: timing.computeTimingFromProps,
@@ -85,6 +97,10 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       isTemplateId: templates.isTemplateId,
       loadTemplate: templates.loadTemplate,
       montageFrameOf: montage.montageFrameOf,
+      computeDataCardTiming: datacard.computeDataCardTiming,
+      computePostcardTiming: postcard.computePostcardTiming,
+      computeAtmosphereTiming: atmosphere.computeAtmosphereTiming,
+      contentSubstanceOf: substance.contentSubstanceOf,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
           JSON.parse(readFileSync(join(engineDir, 'catalog', 'music.json'), 'utf8')),
@@ -141,6 +157,166 @@ export function buildRemotionSrt(props, timing, fps) {
     cues.push([timing.itemFrom[i] / fps, (timing.itemFrom[i] + timing.itemDur[i]) / fps, items[i]])
   }
   cues.push([timing.revealFrom / fps, timing.totalFrames / fps - 0.1, reveal])
+  return cues
+    .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
+    .join('')
+}
+
+// Every on-screen data-card string (hook, rows, disclaimer) as cleaned strings, in reading order.
+export function buildDatacardText(props) {
+  const hook = props.hook.lines.map(clean).join(' ')
+  const rows = props.rows.map((r) =>
+    [clean(r.label), clean(r.value), ...(r.sublabel === null || r.sublabel === undefined ? [] : [clean(r.sublabel)])].join(' '),
+  )
+  return { hook, rows, disclaimer: clean(props.disclaimer) }
+}
+
+// Every data-card string joined for the server-side red-line rescan.
+export function buildDatacardCaption(props) {
+  const { hook, rows, disclaimer } = buildDatacardText(props)
+  return [hook, ...rows, disclaimer].join(' · ')
+}
+
+// Refuse data-card props whose hook, labels, values or disclaimer are all invisible after cleaning.
+export function assertDatacardTextVisible(props) {
+  const parts = [...props.hook.lines.map((t) => ['钩子', t]), ...props.rows.flatMap((r, i) => [[`第 ${i + 1} 行标签`, r.label], [`第 ${i + 1} 行数值`, r.value], ...(r.sublabel == null ? [] : [[`第 ${i + 1} 行副标签`, r.sublabel]])]), ['免责文案', props.disclaimer]]
+  for (const [name, t] of parts) {
+    if (clean(t) === '') throw new RemotionOrderError(`数据卡${name}清理后是空的（只含不可见字符）`)
+    // The renderer paints raw props; a caption that silently drops bidi/invisible characters could differ from what is on screen.
+    if (clean(t) !== String(t).trim().normalize('NFKC')) {
+      throw new RemotionOrderError(`数据卡${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+    }
+  }
+}
+
+// Every on-screen postcard string (hook, scene place + line, price block) as cleaned strings, in reading order.
+export function buildPostcardText(props) {
+  const hook = props.hook.lines.map(clean).join(' ')
+  const scenes = props.scenes.map((sc) => `${clean(sc.place)} ${clean(sc.line)}`)
+  const p = props.price
+  const price = p == null
+    ? clean(props.end.title)
+    : [
+      clean(p.fromLabel),
+      clean(`${p.currencyPrefix}${p.amount.toLocaleString('en-US')}`),
+      clean(p.qualifier),
+      ...(p.dateLine === undefined || p.dateLine === null ? [] : [clean(p.dateLine)]),
+      clean(p.footnote),
+    ].join(' ')
+  return { hook, scenes, price }
+}
+
+// Every postcard string joined for the server-side red-line rescan.
+export function buildPostcardCaption(props) {
+  const { hook, scenes, price } = buildPostcardText(props)
+  return [hook, ...scenes, price].join(' · ')
+}
+
+// The renderer paints raw props, so text that cleans to nothing or differs once invisible characters are dropped must be refused.
+export function assertPostcardTextVisible(props) {
+  const parts = [
+    ...props.hook.lines.map((t) => ['钩子', t]),
+    ...props.scenes.flatMap((sc, i) => [[`第 ${i + 1} 景地名`, sc.place], [`第 ${i + 1} 景文案`, sc.line]]),
+    ...(props.price == null
+      ? [['片尾标题', props.end.title]]
+      : [
+        ['价格前缀', props.price.fromLabel],
+        ['价格说明', props.price.qualifier],
+        ['价格脚注', props.price.footnote],
+        ...(props.price.dateLine == null ? [] : [['价格日期行', props.price.dateLine]]),
+      ]),
+  ]
+  for (const [name, t] of parts) {
+    if (clean(t) === '') throw new RemotionOrderError(`明信片${name}清理后是空的（只含不可见字符）`)
+    if (clean(t) !== String(t).trim().normalize('NFKC')) {
+      throw new RemotionOrderError(`明信片${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+    }
+  }
+}
+
+// Build the SRT captions from the postcard timing layout.
+export function buildPostcardSrt(props, timing, fps) {
+  const { hook, scenes, price } = buildPostcardText(props)
+  const cues = [[0, timing.hookFrames / fps, hook]]
+  scenes.forEach((text, i) => cues.push([timing.sceneFrom[i] / fps, (timing.sceneFrom[i] + timing.sceneDur[i]) / fps, text]))
+  cues.push([timing.priceFrom / fps, timing.totalFrames / fps - 0.1, price])
+  return cues
+    .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
+    .join('')
+}
+
+// Atmosphere reel: at most one on-screen line. No line is a valid reel (no text at all).
+export function buildAtmosphereText(props) {
+  return props.line == null ? '' : clean(props.line.text)
+}
+
+// The line (or nothing) joined for the server-side red-line rescan.
+export function buildAtmosphereCaption(props) {
+  return buildAtmosphereText(props)
+}
+
+// Text that cleans to nothing or differs once invisible characters are dropped must be refused (only when a line exists).
+export function assertAtmosphereTextVisible(props) {
+  if (props.line == null) return
+  const t = props.line.text
+  if (clean(t) === '') throw new RemotionOrderError('氛围片文字清理后是空的（只含不可见字符）')
+  if (clean(t) !== String(t).trim().normalize('NFKC')) {
+    throw new RemotionOrderError('氛围片文字含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符')
+  }
+}
+
+// One cue spanning the whole reel. A reel without text still gets a neutral sidecar cue so the subtitle-timing
+// check can be measured; the cue is not burned into the picture.
+export function buildAtmosphereSrt(props, timing, fps) {
+  const text = buildAtmosphereText(props) || '♪'
+  return `1\n${fmtTime(0)} --> ${fmtTime(timing.totalFrames / fps - 0.1)}\n${text}\n\n`
+}
+
+// ffprobe the staged clip (real duration + pixel size). Injected in tests.
+export function defaultProbeClip(path, execFn = execFileSync) {
+  const out = execFn(process.env.FFPROBE_BIN || 'ffprobe', [
+    '-v', 'error', '-select_streams', 'v:0',
+    '-show_entries', 'stream=width,height:stream_tags=rotate:stream_side_data=rotation:format=duration',
+    '-of', 'json', path,
+  ], { encoding: 'utf8', timeout: 30000 })
+  const j = JSON.parse(out)
+  const st = (j.streams ?? [])[0] ?? {}
+  // A phone clip is often stored sideways with a rotation flag; the displayed size swaps width and height.
+  const rot = Math.abs(Number(st.side_data_list?.find((d) => d.rotation !== undefined)?.rotation ?? st.tags?.rotate ?? 0)) % 180
+  const sideways = rot === 90
+  const w = Number(st.width)
+  const h = Number(st.height)
+  return { durationSec: Number(j.format?.duration), width: sideways ? h : w, height: sideways ? w : h }
+}
+
+// Refuse before rendering when the staged clip cannot honour the props: too short for sourceIn + durationSec,
+// or a crop whose pixel region is not 9:16. Reports the upscale factor so weak picture quality is visible.
+export function assertAtmosphereClipUsable(props, probe) {
+  const { durationSec, width, height } = probe
+  if (![durationSec, width, height].every((n) => Number.isFinite(n) && n > 0)) {
+    throw new RemotionOrderError('氛围片素材读不出时长或分辨率（ffprobe 失败），拒绝出片')
+  }
+  const need = (props.sourceIn ?? 0) + props.durationSec
+  if (need > durationSec + 0.05) {
+    throw new RemotionOrderError(`氛围片素材不够长：需要从 ${props.sourceIn ?? 0}s 起连续 ${props.durationSec}s（共 ${need}s），素材只有 ${durationSec.toFixed(2)}s；不循环、不定格`)
+  }
+  const cw = width * (props.crop?.w ?? 1)
+  const ch = height * (props.crop?.h ?? 1)
+  if (props.crop && Math.abs(cw / ch - 9 / 16) > 0.03) {
+    throw new RemotionOrderError(`氛围片裁剪区域不是 9:16（${cw.toFixed(0)}×${ch.toFixed(0)} 像素），画面会变形`)
+  }
+  return { source: { durationSec, width, height }, regionPx: { width: Math.round(cw), height: Math.round(ch) }, upscale: Number((1920 / ch).toFixed(2)), quality: 1920 / ch > 1.05 ? 'weak: upscaled' : 'ok' }
+}
+
+// Build the SRT captions for the data card: hook, one cue per row, disclaimer held with the last row.
+export function buildDatacardSrt(props, timing, fps) {
+  const { hook, rows, disclaimer } = buildDatacardText(props)
+  const end = timing.totalFrames / fps - 0.1
+  const cues = [[0, timing.hookFrames / fps, hook]]
+  rows.forEach((text, i) => {
+    const last = i === rows.length - 1
+    cues.push([timing.rowFrom[i] / fps, last ? end : timing.rowFrom[i + 1] / fps, last ? `${text} · ${disclaimer}` : text])
+  })
   return cues
     .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
     .join('')
@@ -212,9 +388,90 @@ export function copyWithinRoot(srcReal, rootReal, dest) {
   }
 }
 
+// Dropbox "online-only" files are placeholders: size > 0 but nothing on disk. Reading them makes the client download the file.
+const WAKE_ATTEMPTS = 2
+const WAKE_DEADLINE_MS = 60_000
+const WAKE_CHUNK_BYTES = 1 << 20
+const NOT_THERE_CODES = new Set(['ENOENT', 'ENOTDIR'])
+
+export function isCloudOnly(path) {
+  try {
+    const st = statSync(path)
+    return st.isFile() && st.size > 0 && st.blocks === 0
+  } catch {
+    return false
+  }
+}
+
+// Read a file end to end (forces a cloud download) with a hard time limit. Never throws.
+export function wakeCloudFile(path, { deadlineMs = WAKE_DEADLINE_MS, now = Date.now } = {}) {
+  const started = now()
+  let fd
+  try {
+    fd = openSync(path, constants.O_RDONLY)
+    const buf = Buffer.alloc(WAKE_CHUNK_BYTES)
+    for (;;) {
+      if (now() - started > deadlineMs) return { ok: false, reason: `超过 ${Math.round(deadlineMs / 1000)} 秒仍没读完` }
+      if (readSync(fd, buf, 0, buf.length, null) === 0) return { ok: true }
+    }
+  } catch (e) {
+    return { ok: false, reason: e.code || e.message }
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}
+
+// 'missing' = the file is not there; 'unreadable' = it is there but could not be read (cloud-only, I/O error, permissions).
+export function classifyStageError(e) {
+  if (e instanceof RemotionOrderError) return 'fatal'
+  if (e && NOT_THERE_CODES.has(e.code)) return 'missing'
+  if (e && e.code === undefined && e.message === 'bad') return 'missing'
+  return 'unreadable'
+}
+
+// Vocal-free gate on the STAGED music file (the exact bytes that get rendered).
+// Fail-closed: unregistered, vocal, or window-not-covered music never renders.
+export async function defaultMusicVocalGate({ stagedPath, props, totalFrames, fps, label, registryPath = MUSIC_VOCAL_REGISTRY_PATH }) {
+  const registry = loadMusicVocalRegistry(registryPath)
+  const sha256 = await sha256File(stagedPath)
+  const { startSec, durationSec } = usedWindowFromProps({ musicStartSec: props.musicStartSec, totalFrames, fps })
+  return assertMusicVocalClear({ registry, sha256, startSec, durationSec, label })
+}
+
+// Templates whose on-screen text, caption and SRT the worker can rescan (see textBuilders below).
+export const CONTENT_SUBSTANCE_CAPABILITY = 'content_substance_v1'
+
+// Content-substance gate (fail-closed): a finished video must put real words on screen long enough to stand on
+// its own. `deliverable: 'asset_only'` (strict equality, case-sensitive) marks material that is never published;
+// anything else, including a mistyped value, is treated as a normal deliverable and must pass.
+export function assessContentSubstance(eng, template, remotion, props) {
+  if (typeof eng.contentSubstanceOf !== 'function') {
+    throw new RemotionOrderError('出片机缺少内容闸（contentSubstanceOf），拒绝出片：请先升级出片机')
+  }
+  let result
+  try {
+    result = eng.contentSubstanceOf(template, props)
+  } catch (e) {
+    // A malformed shape must never turn into a retryable generic error: refuse the order.
+    throw new RemotionOrderError(`内容闸检查本身出错，拒绝出片：${String(e?.message ?? e).slice(0, 200)}`)
+  }
+  if (remotion.deliverable === 'asset_only') {
+    return { ...result, verdict: 'asset_only' }
+  }
+  if (result.verdict !== 'pass') {
+    throw new RemotionOrderError(
+      `内容闸：整条片屏幕上没有连续可见 ≥2 秒的团名/地点/卖点/品牌卡，不是能单独发布的成片（需改下单参数：加内容，或明确标 deliverable=asset_only 作素材；复活原单无效）。${result.reason}`,
+    )
+  }
+  return result
+}
+
+export const TEXT_WIRED_TEMPLATES = ['list', 'montage', 'datacard', 'postcard', 'atmosphere']
+
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
-  if (!props.logoFile.toLowerCase().endsWith('.png')) {
+  const hasLogo = typeof props.logoFile === 'string'
+  if (hasLogo && !props.logoFile.toLowerCase().endsWith('.png')) {
     throw new RemotionOrderError('logo 文件名必须是 .png（logo 一律取自该客户品牌包的 watermark.png）')
   }
   const lower = files.map((f) => f.toLowerCase())
@@ -222,9 +479,11 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
     throw new RemotionOrderError('素材文件名大小写不敏感地重复了，请改名')
   }
 
-  const logoDest = join(stageDir, props.logoFile)
-  mkdirSync(dirname(logoDest), { recursive: true })
-  copyFileSync(join(brandkitDir, 'assets', 'watermark.png'), logoDest)
+  if (hasLogo) {
+    const logoDest = join(stageDir, props.logoFile)
+    mkdirSync(dirname(logoDest), { recursive: true })
+    copyFileSync(join(brandkitDir, 'assets', 'watermark.png'), logoDest)
+  }
 
   if (musicPath !== null) {
     try {
@@ -251,21 +510,45 @@ export function stageRemotionAssets({ props, files, stageDir, brandkitDir, asset
   }
 
   const missing = []
-  for (const name of others) {
+  const unreadable = []
+  const stageOne = (name) => {
     const dest = join(stageDir, name)
+    const srcReal = realpathSync(resolve(libReal, name))
+    if (!isInside(libReal, srcReal) || !statSync(srcReal).isFile()) throw new Error('bad')
+    mkdirSync(dirname(dest), { recursive: true })
+    copyWithinRoot(srcReal, libReal, dest)
+    return srcReal
+  }
+  for (const name of others) {
+    let lastReason = ''
     try {
-      const srcReal = realpathSync(resolve(libReal, name))
-      if (!isInside(libReal, srcReal) || !statSync(srcReal).isFile()) throw new Error('bad')
-      mkdirSync(dirname(dest), { recursive: true })
-      copyWithinRoot(srcReal, libReal, dest)
+      stageOne(name)
+      continue
     } catch (e) {
-      if (e instanceof RemotionOrderError) throw e
-      missing.push(name)
+      const kind = classifyStageError(e)
+      if (kind === 'fatal') throw e
+      if (kind === 'missing') { missing.push(name); continue }
+      lastReason = e.code || e.message
     }
+    let staged = false
+    for (let attempt = 1; attempt <= WAKE_ATTEMPTS && !staged; attempt++) {
+      const woke = wakeCloudFile(resolve(libReal, name))
+      try {
+        stageOne(name)
+        staged = true
+      } catch (e) {
+        if (classifyStageError(e) === 'fatal') throw e
+        lastReason = woke.ok ? (e.code || e.message) : woke.reason
+      }
+    }
+    if (!staged) unreadable.push(`${name}（${lastReason}）`)
   }
-  if (missing.length > 0) {
-    throw new RemotionOrderError(`缺少素材文件：${missing.join(', ')}。请放到 ${assetLibDir}`)
+  const problems = []
+  if (missing.length > 0) problems.push(`缺少素材文件：${missing.join(', ')}。请放到 ${assetLibDir}`)
+  if (unreadable.length > 0) {
+    problems.push(`素材文件在目录里但读不出来（不是缺失）：${unreadable.join(', ')}。已尝试唤醒 ${WAKE_ATTEMPTS} 次（每次最多 ${WAKE_DEADLINE_MS / 1000} 秒）仍失败；多半是 Dropbox 仅云端文件没下载下来，或磁盘/权限问题`)
   }
+  if (problems.length > 0) throw new RemotionOrderError(problems.join('；'))
 }
 
 // Last 300 chars of stderr; worker.mjs truncates messages to 500 chars.
@@ -439,9 +722,9 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       `UNKNOWN_TEMPLATE: 不认识的模板 ${JSON.stringify(String(template)).slice(0, 40)}：出片机的模板注册表里没有它。先升级出片机，或检查工单 brief.remotion.template`,
     )
   }
-  // The data-card template is registered in the engine but the worker has no captions / red-line rescan for it yet: refuse before rendering.
-  if (template === 'datacard') {
-    throw new RemotionOrderError('DATACARD_NOT_WIRED: 数据卡模板已在渲染引擎里注册，但出片机还没接上它的字幕和红线复扫，暂不接单')
+  // Refuse a template the worker has no text/red-line wiring for BEFORE any staging or rendering.
+  if (!TEXT_WIRED_TEMPLATES.includes(template)) {
+    throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)
   }
   let props
   let files
@@ -459,6 +742,20 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
   }
   if (template === 'montage') assertMontageTextVisible(props)
+  if (template === 'datacard') {
+    assertDatacardTextVisible(props)
+    timing = eng.computeDataCardTiming(props)
+  }
+  if (template === 'postcard') {
+    assertPostcardTextVisible(props)
+    timing = eng.computePostcardTiming(props)
+  }
+  if (template === 'atmosphere') {
+    assertAtmosphereTextVisible(props)
+    timing = eng.computeAtmosphereTiming(props)
+  }
+  // After the text checks, before any staging, probing, vocal gate or rendering.
+  const contentSubstance = assessContentSubstance(eng, template, remotion, props)
 
   const hb = startHeartbeats({
     woId: wo.work_order_id,
@@ -474,13 +771,19 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     const tmpDir = join(root, 'tmp')
     for (const d of [stageDir, outDir, tmpDir]) mkdirSync(d, { recursive: true })
 
-    let brandkitDir
-    try {
-      brandkitDir = deps.brandkitFor(wo.client_id)
-    } catch (e) {
-      throw new RemotionOrderError(e.message)
+    let brandkitDir = null
+    if (typeof props.logoFile === 'string') {
+      try {
+        brandkitDir = deps.brandkitFor(wo.client_id)
+      } catch (e) {
+        throw new RemotionOrderError(e.message)
+      }
     }
-    const clientRootDir = join(deps.studioRoot, deps.clientStudio[wo.client_id])
+    const clientFolder = deps.clientStudio[wo.client_id]
+    if (!clientFolder) {
+      throw new RemotionOrderError(`客户 ${wo.client_id} 没配 studio 目录：在出片机 FACTORY_CLIENT_STUDIO 里加一条映射`)
+    }
+    const clientRootDir = join(deps.studioRoot, clientFolder)
     const assetLibDir = join(clientRootDir, 'remotion-assets')
     let musicSource = null
     if (props.musicFile) {
@@ -497,6 +800,28 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     const musicPath = musicSource ? join(musicRoot, musicSource.file) : null
     stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath, musicRoot, musicFolder: musicSource ? musicSource.folder : '' })
     hb.assertAlive()
+
+    let vocalGate = null
+    if (props.musicFile) {
+      const gateFn = deps.musicVocalGateFn ?? defaultMusicVocalGate
+      try {
+        vocalGate = await gateFn({ stagedPath: join(stageDir, props.musicFile), props, totalFrames, fps: eng.FPS, label: props.musicFile })
+      } catch (e) {
+        const reason = e instanceof MusicVocalGateError ? `${e.code}: ${e.message}` : `检查本身出错：${e.message}`
+        throw new RemotionOrderError('音乐人声检查没过（出片已拦下）：' + reason)
+      }
+      hb.assertAlive()
+    }
+
+    let atmospherePreflight = null
+    if (template === 'atmosphere') {
+      try {
+        atmospherePreflight = assertAtmosphereClipUsable(props, (deps.probeClipFn ?? defaultProbeClip)(join(stageDir, props.clip)))
+      } catch (e) {
+        if (e instanceof RemotionOrderError) throw e
+        throw new RemotionOrderError('氛围片素材检查本身出错：' + e.message)
+      }
+    }
 
     const propsFile = join(root, 'props.json')
     writeFileSync(propsFile, JSON.stringify(props, null, 2))
@@ -535,10 +860,18 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     if (!stat.isFile() || stat.size <= 0) {
       throw new RemotionOrderError('成片体检没过：渲染产物不存在或为空')
     }
-    const srtText = template === 'list'
-      ? buildRemotionSrt(props, timing, eng.FPS)
-      : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)
-    const caption = template === 'list' ? buildRemotionCaption(props) : buildMontageCaption(props)
+    // Every known template is listed explicitly; an unknown one is refused instead of falling through to montage.
+    const textBuilders = {
+      list: [() => buildRemotionSrt(props, timing, eng.FPS), () => buildRemotionCaption(props)],
+      datacard: [() => buildDatacardSrt(props, timing, eng.FPS), () => buildDatacardCaption(props)],
+      postcard: [() => buildPostcardSrt(props, timing, eng.FPS), () => buildPostcardCaption(props)],
+      atmosphere: [() => buildAtmosphereSrt(props, timing, eng.FPS), () => buildAtmosphereCaption(props)],
+      montage: [() => buildMontageSrt(props, eng.montageFrameOf, eng.FPS), () => buildMontageCaption(props)],
+    }
+    const builders = Object.hasOwn(textBuilders, template) ? textBuilders[template] : null
+    if (builders === null) throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)
+    const srtText = builders[0]()
+    const caption = builders[1]()
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
     const expected = totalFrames / eng.FPS
     if (evidence.width !== 1080 || evidence.height !== 1920) {
@@ -563,6 +896,9 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
           ? { source: 'catalog', id: musicSource.id, folder: musicSource.folder, file: musicSource.file, status: musicSource.status }
           : (props.musicFile ? { source: 'client_library', file: props.musicFile } : null),
         props,
+        music_vocal_gate: vocalGate,
+        content_substance: contentSubstance,
+        atmosphere_preflight: atmospherePreflight,
         recipe_gaps: recipeGaps,
         render: { attempts, elapsed_s },
       }, null, 2),
@@ -582,7 +918,16 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       caption,
       actual_cost_usd: 0,
       new_clips: [],
-      media_evidence: evidence,
+      media_evidence: {
+        ...evidence,
+        content_substance: {
+          verdict: contentSubstance.verdict,
+          kinds: contentSubstance.kinds,
+          textSeconds: contentSubstance.textSeconds,
+          reason: contentSubstance.reason,
+        },
+        capabilities: [CONTENT_SUBSTANCE_CAPABILITY],
+      },
     })
     if (!r.ok) {
       const message = `complete ${r.status}: ${JSON.stringify(r.json)}`

@@ -410,6 +410,7 @@ export async function processD3Hit(
     await recordFlywheelAction(deps.supabase, args.clientId, {
       ...basePayload,
       status: 'awaiting_approval' satisfies string,
+      reason: '花钱没结果：已提交，等你批准后才会暂停这个广告组',
       action_run_id: result.runId,
       authorization_decision_id: result.authorizationDecisionId,
     })
@@ -487,7 +488,7 @@ export function createD3AutoPauseFunction(deps: D3AutoPauseDeps) {
       const run = await step.run('load-diagnosis-run', () => deps.loadDiagnosisRun(d.client_id, d.insight_date))
       if (!run) return { ok: true, skipped: 'diagnosis_run_not_found' as const, processed: 0 }
 
-      const hits = run.diagnoses.filter((x) => x.code === 'D3' && x.status === 'hit')
+      const hits = run.diagnoses.filter((x) => x.code === 'D3' && x.status === 'hit' && x.autoPauseEligible !== false)
       if (hits.length === 0) return { ok: true, processed: 0 }
 
       const outcomes: D3HitOutcome[] = []

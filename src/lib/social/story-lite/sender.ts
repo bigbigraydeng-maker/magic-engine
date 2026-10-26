@@ -9,7 +9,7 @@
  */
 import { computeItemFingerprint } from './fingerprint'
 import type { LiteStore } from './store'
-import { isLiveFor, type LiteItem, type LiteItemStatus, type LitePack, type LiteSwitches } from './types'
+import { isLiveFor, type LiteFileCheck, type LiteItem, type LiteItemStatus, type LitePack, type LiteSwitches } from './types'
 
 export interface SweepConfig {
   earlyMinutes: number
@@ -25,7 +25,7 @@ export interface SenderDeps {
   switches: LiteSwitches
   config: SweepConfig
   /** Re-download the media and compare its sha256. */
-  checkFile(item: LiteItem): Promise<'OK' | 'CHANGED' | 'UNREACHABLE'>
+  checkFile(item: LiteItem): Promise<LiteFileCheck>
   /** The Facebook Page token for (client, page); null when none can be found. */
   getPageToken(clientId: string, pageId: string): Promise<string | null>
   /** Send one story. Throws PagePublishError on failure. */
@@ -153,7 +153,7 @@ async function checkItem(
     return 'FINGERPRINT_CHANGED'
   }
 
-  let fileResult: 'OK' | 'CHANGED' | 'UNREACHABLE'
+  let fileResult: LiteFileCheck
   try {
     fileResult = await deps.checkFile(item)
   } catch {
@@ -161,6 +161,7 @@ async function checkItem(
   }
   if (fileResult === 'CHANGED') return 'FILE_CHANGED'
   if (fileResult === 'UNREACHABLE') return 'FILE_UNREACHABLE'
+  if (fileResult === 'BAD_VIDEO') return 'VIDEO_NOT_ACCEPTABLE'
   return null
 }
 

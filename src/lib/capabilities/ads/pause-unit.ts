@@ -112,7 +112,7 @@ export function createPauseUnitCapability(sb: SupabaseClient): CapabilityImpleme
 
         const verification = makeReadbackVerification({ status: 'PAUSED' }, { status: current.status })
         return {
-          output: { adset_id: id, status_now: current.status },
+          output: { applied: true, adset_id: id, status_now: current.status },
           verification,
         }
       },

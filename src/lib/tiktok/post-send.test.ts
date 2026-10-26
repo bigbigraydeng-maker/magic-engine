@@ -1,8 +1,9 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 vi.mock('@/lib/tiktok/video-proof',()=>({inspectTikTokVideo:vi.fn(async()=>({sha256:'a'.repeat(64),durationSeconds:12}))}))
-vi.mock('@/lib/tiktok/token',()=>({getValidTikTokToken:vi.fn(async()=>({accessToken:'test-token',openId:'test-account'}))}))
+vi.mock('@/lib/tiktok/token',async(importOriginal)=>({...(await importOriginal<typeof import('@/lib/tiktok/token')>()),getValidTikTokToken:vi.fn(async()=>({accessToken:'test-token',openId:'test-account'}))}))
 vi.mock('@/lib/tiktok/publish-source',()=>({storedTikTokSourcePath:vi.fn(),snapshotReviewedTikTokVideo:vi.fn(async()=> 'https://storage.example.com/tiktok-publish/test/hash.mp4')}))
-import {publishToTikTok} from '@/lib/factory/publish/tiktok-adapter'
+import {publishToTikTok,checkTikTokStatus} from '@/lib/factory/publish/tiktok-adapter'
+import {getValidTikTokToken,TikTokAmbiguousConnectionError} from '@/lib/tiktok/token'
 import {snapshotReviewedTikTokVideo} from './publish-source'
 const creator={accountId:'test-account',creator_nickname:'Test',privacy_level_options:['SELF_ONLY'],comment_disabled:true,duet_disabled:false,stitch_disabled:false,max_video_post_duration_sec:30}
 const review={accountId:'test-account',videoUrl:'https://example.com/video.mp4',videoSha256:'a'.repeat(64),privacy:'SELF_ONLY' as const,caption:'Test',allowComment:false,allowDuet:false,allowStitch:false,ownBrand:false,brandedContent:false,musicConsent:true,confirmed:true,durationSeconds:12}
@@ -39,3 +40,19 @@ describe('TikTok pull execution guard',()=>{
     expect(fetcher).toHaveBeenCalledTimes(2);expect(log).toHaveBeenCalledWith(expect.any(String),{clientId:'test',publishId:'test-publish'});log.mockRestore()
   })
 })
+describe('multiple TikTok authorisations through the real adapter',()=>{
+  it('publish: the ambiguity error reaches the caller unchanged and nothing is sent to TikTok',async()=>{
+    const fetcher=provider();vi.stubGlobal('fetch',fetcher)
+    vi.mocked(getValidTikTokToken).mockRejectedValueOnce(new TikTokAmbiguousConnectionError())
+    await expect(publishToTikTok({clientId:'test',videoUrl:review.videoUrl,caption:'Test',privacy:'SELF_ONLY',review})).rejects.toBeInstanceOf(TikTokAmbiguousConnectionError)
+    expect(fetcher).not.toHaveBeenCalled();expect(snapshotReviewedTikTokVideo).not.toHaveBeenCalled()
+  })
+  it('status poll of an already-sent task asks for its original account; a fresh publish does not',async()=>{
+    const fetcher=vi.fn(async()=>new Response(JSON.stringify({error:{code:'ok'},data:{status:'PUBLISH_COMPLETE'}})));vi.stubGlobal('fetch',fetcher)
+    expect(await checkTikTokStatus('test','pid','test-account')).toEqual({status:'published'})
+    expect(getValidTikTokToken).toHaveBeenLastCalledWith('test',{accountId:'test-account'})
+    await checkTikTokStatus('test','pid')
+    expect(getValidTikTokToken).toHaveBeenLastCalledWith('test',undefined)
+  })
+})
+

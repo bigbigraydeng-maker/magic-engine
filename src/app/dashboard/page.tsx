@@ -15,6 +15,7 @@ import {
   MeChip,
 } from '@/components/ui/me-primitives';
 import { GOLD_GRADIENT } from '@/components/ui/me-theme';
+import { collectRecentNonVideoPosts } from './recent-content';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,9 @@ interface RecentPost {
   status: string | null;
   route: string | null;
   platforms: string[] | null;
+  format: string | null;
+  ratio: string | null;
+  source_video_url: string | null;
   created_at: string;
   client_id: string;
   clients?: { id: string; name: string } | null;
@@ -89,7 +93,7 @@ async function getOverviewData() {
   const [
     clientsCountRes,
     activeClientsRes,
-    recentPostsRes,
+    recentPosts,
     contentInFlightRes,
     contentThisMonthRes,
     pendingReviewRes,
@@ -114,11 +118,15 @@ async function getOverviewData() {
       .order('created_at', { ascending: false })
       .limit(6),
 
-    supabaseAdmin
-      .from('content_posts')
-      .select('id, title, status, route, platforms, created_at, client_id, clients(id, name)')
-      .order('created_at', { ascending: false })
-      .limit(6),
+    collectRecentNonVideoPosts<RecentPost>(async (from, to) => {
+      const { data, error } = await supabaseAdmin
+        .from('content_posts')
+        .select('id, title, status, route, platforms, format, ratio, source_video_url, created_at, client_id, clients(id, name)')
+        .order('created_at', { ascending: false })
+        .range(from, to);
+      if (error) return [];
+      return ((data as unknown) as RecentPost[] | null) ?? [];
+    }),
 
     supabaseAdmin
       .from('content_posts')
@@ -282,8 +290,6 @@ async function getOverviewData() {
     { key: 'execute',    label: 'Execute',    pct: phasePct(clientsWithExecute.size) },
     { key: 'measure',    label: 'Measure',    pct: phasePct(clientsWithMeasure.size) },
   ];
-
-  const recentPosts: RecentPost[] = ((recentPostsRes.data as unknown) as RecentPost[]) ?? [];
 
   return {
     activeClientCount: totalClientCount,

@@ -111,6 +111,13 @@ describe('POST 点击外呼', () => {
     mockDb({ contact: { id: 'c', primary_phone: '+64 900 123 456', do_not_contact: false }, touches: [], conn: CONN })
     expect((await call()).status).toBe(422)
     expect(start).not.toHaveBeenCalled()
+    // 澳洲号码：默认也拒（PM 2026-10-15 定只限新西兰）；环境变量显式加回才放行
+    mockDb({ contact: { id: 'c', primary_phone: '+61 412 345 678', do_not_contact: false }, touches: [], conn: CONN })
+    expect((await call()).status).toBe(422)
+    vi.stubEnv('TELEPHONY_OUTBOUND_COUNTRIES', '+64,+61')
+    mockDb({ contact: { id: 'c', primary_phone: '+61 412 345 678', do_not_contact: false }, touches: [], conn: CONN })
+    expect((await call()).status).toBe(200)
+    start.mockClear()
     vi.stubEnv('TELEPHONY_OUTBOUND_COUNTRIES', '+86')
     mockDb({ contact: { id: 'c', primary_phone: '+86 138 0013 8000', do_not_contact: false }, touches: [], conn: CONN })
     expect((await call()).status).toBe(200)

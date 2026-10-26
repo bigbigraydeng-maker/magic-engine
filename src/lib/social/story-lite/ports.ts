@@ -18,7 +18,8 @@ import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { DEFAULT_SWEEP_CONFIG, readLiteSwitches, type SenderDeps } from './sender'
 import type { LiteServicePorts } from './service'
 import { SupabaseLiteStore } from './supabase-store'
-import type { LiteItem } from './types'
+import { checkVideoFile } from './video-check'
+import type { LiteFileCheck, LiteItem } from './types'
 
 /** The only host story media may be downloaded from: our own public storage (empty list = deny everything). */
 function mediaHosts(): string[] {
@@ -31,8 +32,9 @@ function mediaHosts(): string[] {
   }
 }
 
-function checkFile(item: LiteItem) {
-  return checkMediaFile(item, { allowedHosts: mediaHosts() })
+function checkFile(item: LiteItem): Promise<LiteFileCheck> {
+  const allowedHosts = mediaHosts()
+  return item.media_kind === 'video' ? checkVideoFile(item, { allowedHosts }) : checkMediaFile(item, { allowedHosts })
 }
 
 /** Dependencies of the authorise / revoke / preview services. */

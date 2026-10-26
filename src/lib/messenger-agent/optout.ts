@@ -173,8 +173,19 @@ export async function isConversationOptedOut(
 
   // IDOR 闸：contact / 触点查询必须同时按 contact_id 和「这条会话自己的」
   // client_id 过滤 —— 不接受任何外部传入的 client_id（本函数压根不收这个参数）。
-  const clientId = row.client_id
+  return isContactMarkedDoNotContact(contactId, row.client_id, supabase)
+}
 
+/**
+ * 这个联系人在**联系人层面**是不是「别再联系」—— 联系人列 + 触点判词（含人工纠正）。
+ * 从 `isConversationOptedOut` 原样抽出（行为不变，日志文字不变），让「按联系人」的外发闸
+ * 与「按会话」的闸共用同一段判据，不再各写一套。查不出来一律当拦下（fail-closed）。
+ */
+export async function isContactMarkedDoNotContact(
+  contactId: string,
+  clientId: string,
+  supabase: SupabaseClient = supabaseAdmin,
+): Promise<boolean> {
   const [contactResult, touchResult] = await Promise.all([
     supabase
       .from('contacts')
@@ -226,6 +237,35 @@ export async function isConversationOptedOut(
 
   // 判据只有一份：lib/crm/dnc.ts。不在这里重新发明「怎么判 DNC」。
   return isDoNotContact(contactFlag, touches)
+}
+
+/**
+ * 给一个联系人发**第一封**消息之前用：这个人在**任何渠道**说过别再联系吗？
+ *
+ * 在 `isContactMarkedDoNotContact` 之上多查一样：这个联系人名下**任何会话**的
+ * `optout_unlinked`（他在别的渠道回过 STOP，但当时那条会话没挂上人，后来才被补挂；
+ * 全仓没有把它转成联系人级退订的路径，见上面 `isConversationOptedOut` 里的说明）。
+ * 查询失败一律当拦下。
+ */
+export async function isContactOptedOutAnyChannel(
+  contactId: string,
+  clientId: string,
+  supabase: SupabaseClient = supabaseAdmin,
+): Promise<boolean> {
+  if (await isContactMarkedDoNotContact(contactId, clientId, supabase)) return true
+
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('contact_id', contactId)
+    .eq('client_id', clientId)
+    .eq('optout_unlinked', true)
+    .limit(1)
+  if (error) {
+    console.error(`[messenger-agent/optout] 查联系人名下会话退订标记失败 contactId=${contactId}:`, error.message)
+    return true
+  }
+  return Array.isArray(data) && data.length > 0
 }
 
 // ---------------------------------------------------------------------------

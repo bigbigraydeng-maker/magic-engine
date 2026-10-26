@@ -76,7 +76,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 让顾问以为还能回、结果被拒。`send.ts` 的权威窗口也是这么取的。
   const { data: lastInbound } = await supabaseAdmin
     .from('conversation_messages')
-    .select('sent_at')
+    .select('sent_at, body')
     .eq('conversation_id', convo.id)
     .eq('direction', 'inbound')
     .order('sent_at', { ascending: false })
@@ -88,9 +88,34 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 共用一个算法会让其中一边的倒计时是错的。
   const raw = whatsappWindow(lastInbound?.sent_at ?? null, new Date())
 
+  // AI 起草了但被安全检查拦下的最新一条（只看客人最后一句话之后的）：抽屉里给一行原因提示，
+  // 免得顾问以为 AI 没起草、或以为它坏了。读失败按「没有」处理 —— 这只是提示，不挡回复。
+  let blockedDraft: { reasons: string[]; createdAt: string } | null = null
+  try {
+    const { data: blocked } = await supabaseAdmin
+      .from('conversation_reply_drafts')
+      .select('blocked_reasons, created_at')
+      .eq('client_id', clientId)
+      .eq('conversation_id', convo.id)
+      .eq('verifier_status', 'blocked')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (blocked && (!lastInbound?.sent_at || blocked.created_at >= lastInbound.sent_at)) {
+      blockedDraft = {
+        reasons: Array.isArray(blocked.blocked_reasons) ? (blocked.blocked_reasons as string[]) : [],
+        createdAt: blocked.created_at as string,
+      }
+    }
+  } catch {
+    blockedDraft = null
+  }
+
   return NextResponse.json({
     conversationId: convo.id,
     participantName: convo.participant_name ?? null,
     replyWindow: toReplyWindow(raw.kind, raw.msRemaining),
+    lastInbound: lastInbound ? { body: (lastInbound.body as string | null) ?? '', sentAt: lastInbound.sent_at as string } : null,
+    blockedDraft,
   })
 }

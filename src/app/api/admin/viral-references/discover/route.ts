@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { analyzeViralReference } from '@/lib/reels/viral-analyzer'
+import { isQueueableViralSourceUrl } from '@/lib/reels/viral-analyzer-retry'
 
 const DEFAULT_MIN_VIEWS = 50_000
 const DEFAULT_LIMIT     = 20
@@ -181,6 +182,7 @@ export async function POST(req: NextRequest) {
     const views  = detail?.statistics?.viewCount ? Number(detail.statistics.viewCount) : 0
 
     if (existingSet.has(url)) { skipped++;        continue }
+    if (!isQueueableViralSourceUrl(url)) { skipped++; continue }
     if (views < minViews)     { belowThreshold++; continue }
 
     toInsert.push({

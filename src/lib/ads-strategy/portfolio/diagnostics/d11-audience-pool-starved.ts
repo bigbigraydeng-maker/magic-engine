@@ -37,7 +37,7 @@ function isVideoPool(a: EntitySnapshotRow): boolean {
   return videoish && (a.audience_count_lower ?? 0) > D4_AUDIENCE_FLOOR && a.audience_rule_object_ids.length > 0
 }
 
-function dailyCounts(history: AudienceCountPoint[], audienceId: string, days: string[], tz: string | null): Array<{ day: string; count: number }> {
+export function dailyCounts(history: AudienceCountPoint[], audienceId: string, days: string[], tz: string | null): Array<{ day: string; count: number }> {
   const inDays = new Set(days)
   const earliest = new Map<string, { at: number; count: number }>()
   for (const p of history) {
@@ -61,7 +61,7 @@ function median(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
 }
 
-interface FlatResult {
+export interface FlatResult {
   first: number
   last: number
   delta: number
@@ -70,7 +70,7 @@ interface FlatResult {
   days: number
 }
 
-function poolFlat(counts: Array<{ day: string; count: number }>, latest: number): FlatResult | null {
+export function poolFlat(counts: Array<{ day: string; count: number }>, latest: number): FlatResult | null {
   if (counts.length < D11_MIN_SNAPSHOT_DAYS) return null
   const first = median(counts.slice(0, 3).map(c => c.count))
   const last = median(counts.slice(-3).map(c => c.count))
@@ -368,6 +368,8 @@ function classifyImpact(ctr: { recent: number | null; base: number | null }, fre
 }
 
 export function diagnoseAudiencePoolStarved(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {
+  // 后台标了「不在广告健康页显示」的账户：数据新鲜度类噪音跳过（钱相关的诊断照跑）。
+  if (ctx.account.hiddenFromAdHealth === true) return []
   if (input.clientPageId === null || input.clientPageId === undefined) return []
   if (ctx.account.adDaily === undefined) return []
   if (ctx.account.audienceHistory === undefined) return []

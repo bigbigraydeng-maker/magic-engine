@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { applyApprove } from './review-apply'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from './review-ui'
 import type { ReviewGateInput } from './review-ui'
-import { REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
 const labelOf = (k: string) => (k === 'factual_claims_have_source' ? '事实性主张有来源' : k)
 
@@ -34,7 +34,6 @@ describe('reviewGate', () => {
     autoReady: true,
     redlineHits: [],
     qualityFlags: [],
-    acceptedCategories: [],
     factSourcePrefilled: true,
   }
 
@@ -55,28 +54,12 @@ describe('reviewGate', () => {
     expect(gate.oneClick).toBe(false)
   })
 
-  it('blocks an unaccepted narrator_voice_mismatch flag but allows it once accepted', () => {
-    const flag = { category: 'narrator_voice_mismatch' }
-    const blocked = reviewGate({ ...base, qualityFlags: [flag] })
-    expect(blocked.oneClick).toBe(false)
-
-    const allowed = reviewGate({
-      ...base,
-      qualityFlags: [flag],
-      acceptedCategories: ['narrator_voice_mismatch'],
-    })
-    expect(allowed.oneClick).toBe(true)
-  })
-
   it.each(['competitor_brand', 'placeholder_caption', 'quality_check_unavailable'])(
-    'never settles a non-acceptable flag %s even if listed as accepted',
+    'blocks one-click for quality flag %s',
     (category) => {
-      const gate = reviewGate({
-        ...base,
-        qualityFlags: [{ category }],
-        acceptedCategories: [category],
-      })
+      const gate = reviewGate({ ...base, qualityFlags: [{ category }] })
       expect(gate.oneClick).toBe(false)
+      expect(gate.reasons).toEqual([`品控提示未处理:${category}`])
     },
   )
 
@@ -89,15 +72,14 @@ describe('reviewGate', () => {
     const gate = reviewGate({
       autoReady: false,
       redlineHits: ['最便宜'],
-      qualityFlags: [{ category: 'narrator_voice_mismatch' }],
-      acceptedCategories: [],
-      factSourcePrefilled: false,
+      qualityFlags: [{ category: 'competitor_brand' }],
+        factSourcePrefilled: false,
     })
     expect(gate.oneClick).toBe(false)
     expect(gate.reasons).toEqual([
       '自动媒体检测未通过',
       '文案命中品牌红线,需逐项核对',
-      '品控提示未处理:narrator_voice_mismatch',
+      '品控提示未处理:competitor_brand',
       '来源网址没有预填,需要手动填写',
     ])
   })
@@ -106,10 +88,10 @@ describe('reviewGate', () => {
 // 服务端把关规则没变:全 PASS 但「事实有来源」没填网址,仍被挡,且报错能被翻成「去哪填」。
 describe('server gate unchanged', () => {
   it('rejects a PASS factual item without source_ref, and the message is translatable', async () => {
-    const items = REEL_HUMAN_CHECK_KEYS.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: null }))
+    const items = REEL_HUMAN_CHECK_KEYS_V3.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: null }))
     const wo = { id: 'w', client_id: 'c', status: 'in_review', output: {}, review_ref: {} }
     const supabase = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: wo, error: null }) }) }) }) }
-    const res = await applyApprove(supabase as never, 'w', 'pm', undefined, items)
+    const res = await applyApprove(supabase as never, 'w', 'pm', undefined, items, null)
     expect(res.ok).toBe(false)
     expect(reviewErrorZh(res.error ?? '', labelOf)).toContain('来源网址')
   })

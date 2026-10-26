@@ -75,10 +75,24 @@ export interface TimelineEntry {
   body?: string
 }
 
+/** AI 概况卡的数据。全部来自 conversation_briefs，**AI 生成、未经人工核实**。 */
+export interface TimelineAiBrief {
+  summary: string
+  customerNeeds: string[]
+  objections: string[]
+  promisesMade: string[]
+  nextAction: string | null
+  intentLevel: string | null
+  channel: string | null
+  generatedAt: string | null
+}
+
 interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
   omittedMessages?: number
+  /** 官网表单里「预计出发时间 / 每人预算」的一行人话；缺失 null（不显示）。 */
+  formFactsLine?: string | null
   error?: string
 }
 
@@ -186,6 +200,8 @@ export interface TimelineSummary {
    * 'order_system' 是给将来订单系统留的口子，今天没有任何代码会产生它。
    */
   stageSource: StageSource | null
+  /** 官网表单里「预计出发时间 · 每人预算」一行人话；只是事实，不参与冷热/阶段判断。 */
+  formFactsLine: string | null
 }
 
 /** changedBy → 来源。只认得出的才说；认不出的机器身份返回 null（宁可不显示，不许说错）。 */
@@ -199,8 +215,8 @@ export function stageSourceOf(changedBy: string | null | undefined): StageSource
 }
 
 /** 从整条线里提炼摘要。线是从旧到新的，所以后面的覆盖前面的。 */
-function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
-  if (timeline.length === 0) return null
+function summarise(timeline: TimelineEntry[], formFactsLine: string | null = null): TimelineSummary | null {
+  if (timeline.length === 0 && !formFactsLine) return null
   const s: TimelineSummary = {
     lastText: null,
     lastWho: null,
@@ -208,6 +224,7 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
     tour: null,
     travelWindow: null,
     stageSource: null,
+    formFactsLine,
   }
   for (const e of timeline) {
     if (e.tour) s.tour = e.tour
@@ -220,7 +237,7 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
       s.lastAt = e.at
     }
   }
-  return s.lastText || s.tour || s.travelWindow || s.stageSource ? s : null
+  return s.lastText || s.tour || s.travelWindow || s.stageSource || s.formFactsLine ? s : null
 }
 
 /**
@@ -432,6 +449,7 @@ function useTimeline(
   contactId: string,
   onSummary?: (s: TimelineSummary | null) => void,
   dialedAt?: number | null,
+  refreshKey?: number,
 ) {
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -472,7 +490,7 @@ function useTimeline(
         if (!alive.current) return
         dataRef.current = json
         setData(json)
-        onSummary?.(summarise(json.timeline ?? []))
+        onSummary?.(summarise(json.timeline ?? [], json.formFactsLine ?? null))
       } catch (e) {
         // 被自己 abort 掉的不是失败，什么都别改 —— 改了就是替一个已经作废的
         // 请求说话，而它说的正好是旧的。
@@ -491,7 +509,7 @@ function useTimeline(
       alive.current = false
       ctrl.abort()
     }
-  }, [clientId, contactId, onSummary, attempt])
+  }, [clientId, contactId, onSummary, attempt, refreshKey])
 
   return { data, loading, err, retry: () => setAttempt((n) => n + 1) }
 }
@@ -502,13 +520,16 @@ function useTimeline(
  * 用容器自己的 `scrollTop`，不用 `scrollIntoView` —— 后者会把**抽屉整体**
  * 一起滚下去，把上面的联系方式和摘要卡顶出屏幕，正好抵消这次改动的目的。
  */
-function useStickToLatest(data: Payload | null) {
+function useStickToLatest(data: Payload | null, visible: boolean) {
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    // `visible` 进依赖：折叠时列表没挂载、`listRef` 为空，effect 提前返回；
+    // 点开后 data 没变，少了这个依赖 effect 不会重跑，长时间线会停在最旧一条。
+    if (!visible) return
     const el = listRef.current
     if (!el || !data || data.timeline.length <= LONG_TIMELINE) return
     el.scrollTop = el.scrollHeight
-  }, [data])
+  }, [data, visible])
   return listRef
 }
 
@@ -539,11 +560,20 @@ export function ContactTimeline({
   contactId,
   onSummary,
   dialedAt,
+  refreshKey,
+  collapsible = false,
 }: {
   clientId: string
   contactId: string
   /** 员工刚点了拨打的时间（毫秒）；有它就自动刷新，直到这通电话变成正式记录。 */
   dialedAt?: number | null
+  /**
+   * 变了就重新取一次数据（发笔记 / 回消息 / 改阶段之后，抽屉把它加一）。
+   * 刻意不用 React 的 `key` 触发重取：`key` 一变整个组件重挂，「展开 / 收起」
+   * 状态跟着丢，员工刚展开原文回复了一条，时间线就缩回去、刚发的那条看不见。
+   * 换人才该重挂（由抽屉用 contactId 当 `key`）。
+   */
+  refreshKey?: number
   /**
    * 把摘要交给抽屉，让它渲染在**最上面**那张卡里。
    *
@@ -551,12 +581,36 @@ export function ContactTimeline({
    * 两处判据、以后必然走散。这里是唯一拉时间线的地方。
    */
   onSummary?: (s: TimelineSummary | null) => void
+  /**
+   * 可折叠：默认只显示「看完整往来原文（N 条）」一行，点开才铺原文。
+   * CTS 员工日常看顶部 AI 概况就够，要查证再展开。无论折叠与否都照常拉数据、
+   * 照常回传概况 —— 折叠只影响这段原文渲不渲染。
+   */
+  collapsible?: boolean
 }) {
-  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt)
-  const listRef = useStickToLatest(data)
+  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt, refreshKey)
+  // 折叠模式下默认收起。换人时不留上一个人的展开状态：抽屉给本组件挂了
+  // `key` 带 contactId（见 PersonDrawer），换人会整组件重挂、state 自然回到初值，
+  // 不靠 effect 重置（那样会先用旧状态渲染一帧）。
+  const [expanded, setExpanded] = useState(false)
+  // 折叠时列表没渲染；只有展开、或根本不可折叠时才需要滚到最新。
+  const listRef = useStickToLatest(data, !collapsible || expanded)
 
   if (loading || err || !data || data.timeline.length === 0) {
     return <Placeholder loading={loading} err={err} onRetry={retry} />
+  }
+
+  if (collapsible && !expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
+      >
+        看完整往来原文（{data.timeline.length} 条）
+        <span aria-hidden>▾</span>
+      </button>
+    )
   }
 
   const origin = originOf(data.timeline)
@@ -589,6 +643,16 @@ export function ContactTimeline({
           </p>
         )}
       </div>
+      {collapsible && expanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-[12px] font-bold text-me-charcoal/60 hover:bg-me-ivory"
+        >
+          收起往来原文
+          <span aria-hidden>▴</span>
+        </button>
+      )}
     </div>
   )
 }

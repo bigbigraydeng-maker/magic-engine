@@ -89,13 +89,13 @@ const ERROR_TEXT: Record<string, string> = {
   PAGE_ID_MISMATCH: 'Facebook 主页号和客户登记的不一致。请到客户设置核对主页，改好后再授权。',
   CLIENT_HAS_NO_FACEBOOK_PAGE: '这个客户还没登记 Facebook 主页。请先到客户设置里登记。',
   ALREADY_AUTHORIZED: '这份计划已经授权了，先停止再重新授权。',
-  PRICE_CLAIM_UNBACKED: '有帖子写了价格，但配图证明不了这个价格，整批被拦。请到每日计划里找出写了价格的帖子，改掉价格或换成有价格的图。',
+  PRICE_CLAIM_UNBACKED: '有帖子写了价格，但配图证明不了这个价格，整批被拦。请到社媒日常的图文帖子里找出写了价格的帖子，改掉价格或换成有价格的图。',
   PRICE_FACT_UNVERIFIED: '有帖子里的价格和客户资料对不上，整批被拦。请核对该帖子里的价格和客户资料，改对后重新审核。',
   FIRST_COMMENT_CHECK_FAILED: '有帖子正文里带了链接或行动号召，整批被拦。请把正文里的链接和「点击」「预订」这类话删掉，链接放在第一条评论里。',
-  POSTS_NOT_READY_FOR_PUBLISH: '有帖子还没准备好（图片或文案不可用）。请到每日计划里看哪条图片或文案缺了，补齐后再授权。',
-  REVIEW_CHECKLIST_REQUIRED: '还有帖子没有审核通过。请先把每日计划里所有帖子审核完，再来授权。',
-  PUBLISH_QUEUE_RECEIPT_REQUIRED: '还没有「发布准备回执」。请回到每日计划，先点「生成发布准备回执」。',
-  PUBLISH_QUEUE_RECEIPT_STALE: '这份计划在生成回执之后被改动过，回执已经对不上，不能再授权。需要重新建一份每日计划，审核后再授权。',
+  POSTS_NOT_READY_FOR_PUBLISH: '有帖子还没准备好（图片或文案不可用）。请到社媒日常的图文帖子里看哪条图片或文案缺了，补齐后再授权。',
+  REVIEW_CHECKLIST_REQUIRED: '还有帖子没有审核通过。请先把图文帖子里所有帖子审核完，再来授权。',
+  PUBLISH_QUEUE_RECEIPT_REQUIRED: '还没有「发布准备回执」。请回到社媒日常的图文帖子，先点「生成发布准备回执」。',
+  PUBLISH_QUEUE_RECEIPT_STALE: '这份计划在生成回执之后被改动过，回执已经对不上，不能再授权。需要重新建一份图文帖子计划，审核后再授权。',
   REVIEW_REVISION_MISMATCH: '计划被改过了，请刷新页面，刷新后重新预览再授权。',
   PLAN_REVISION_MISMATCH: '计划被改过了，请刷新页面，刷新后重新预览再授权。',
   PLAN_SUPERSEDED: '计划被改过了，请刷新页面，刷新后重新预览再授权。',
@@ -154,8 +154,8 @@ function isGone(date: string, clock: { date: string; minutes: number }): boolean
 
 function blockedReasonWords(code: string | null): string {
   if (code === 'ABORTED_BEFORE_SEND') return '发之前一刻检查没通过（授权被停止或这一天被改动），没有发出'
-  if (code && code.startsWith('PRICE_')) return '价格检查没通过，这条不会发。请到每日计划里看这条的价格'
-  return '被发布前检查拦住了，这条不会发。请到每日计划里看这条的检查结果'
+  if (code && code.startsWith('PRICE_')) return '价格检查没通过，这条不会发。请到社媒日常的图文帖子里看这条的价格'
+  return '被发布前检查拦住了，这条不会发。请到社媒日常的图文帖子里看这条的检查结果'
 }
 
 /** Chinese status word for one attempt row. */
@@ -558,7 +558,7 @@ export function CampaignDailyAutoPublishPanel({
             : missingIdentity
               ? '计划信息不完整，请刷新页面。'
               : missingQueue
-                ? '现在还不能授权：有帖子还没审核通过，或还没生成「发布准备回执」。请先把每日计划里所有帖子审核完。'
+                ? '现在还不能授权：有帖子还没审核通过，或还没生成「发布准备回执」。请先把图文帖子里所有帖子审核完。'
                 : '今天没有可发的已审核帖子。'}
         </p>
       )}

@@ -120,6 +120,10 @@ export interface GraphCustomAudience {
   name?: string
   subtype?: string
   approximate_count_lower_bound?: number
+  /** 受众是否可用：code 200 = 正常；读不到时缺省 */
+  operation_status?: { code?: number }
+  /** 受众是否能投出去：code 200 = 可投；读不到时缺省 */
+  delivery_status?: { code?: number }
   time_created?: number
   time_updated?: number
   retention_days?: number
@@ -222,8 +226,19 @@ export function fetchAdSettings(adAccountId: string, accessToken: string) {
 
 export function fetchCustomAudiences(adAccountId: string, accessToken: string) {
   return readList<GraphCustomAudience>(graphUrl(`${adAccountId}/customaudiences`, {
-    fields: 'id,name,subtype,approximate_count_lower_bound,time_created,time_updated,retention_days,rule',
+    fields: 'id,name,subtype,approximate_count_lower_bound,operation_status{code},delivery_status{code},time_created,time_updated,retention_days,rule',
     limit: PAGE_LIMIT,
+  }, accessToken))
+}
+
+/**
+ * 单个自定义受众（含所属账户号 account_id）。
+ * 2026-10-26 实测：Meta 的「账户受众列表」边会漏掉部分相似受众（直接按 id 读得到、account_id 也对，
+ * 但列表里没有），所以归属核对在列表里找不到时要用它补一次，不能直接判「不属于这个账户」。
+ */
+export function fetchCustomAudienceById(audienceId: string, accessToken: string) {
+  return readOne<GraphCustomAudience & { account_id?: string }>(graphUrl(audienceId, {
+    fields: 'id,name,subtype,account_id,approximate_count_lower_bound,operation_status{code},delivery_status{code}',
   }, accessToken))
 }
 
@@ -239,6 +254,111 @@ export function fetchHourlyAdsetSpend(adAccountId: string, accessToken: string, 
     limit: '500',
   }, accessToken))
 }
+
+// ---------------------------------------------------------------------------
+// 心跳（heartbeat）专用瘦读接口。全部 GET，只读；字段刻意收窄以压低延迟与配额。
+// ---------------------------------------------------------------------------
+
+/** 账户级心跳字段：账户状态 / 停用原因 / 币种 / 时区。 */
+export interface GraphHeartbeatAccount {
+  id: string
+  account_status?: number
+  disable_reason?: number
+  currency?: string
+  timezone_name?: string
+}
+
+export function fetchHeartbeatAccount(adAccountId: string, accessToken: string) {
+  return readOne<GraphHeartbeatAccount>(graphUrl(adAccountId, {
+    fields: 'id,account_status,disable_reason,currency,timezone_name',
+  }, accessToken))
+}
+
+/** 广告组级心跳字段。不含 targeting / ad_studies / creative。 */
+export interface GraphHeartbeatAdset {
+  id: string
+  name?: string
+  campaign_id?: string
+  effective_status?: string
+  daily_budget?: string
+  lifetime_budget?: string
+  created_time?: string
+  start_time?: string
+  updated_time?: string
+  adset_schedule?: unknown[]
+  is_dynamic_creative?: boolean
+}
+
+/** 心跳只看「还活着」的投放状态；PAUSED / ARCHIVED 不读。 */
+const HEARTBEAT_STATUSES = ['ACTIVE', 'WITH_ISSUES', 'PENDING_REVIEW', 'IN_PROCESS', 'DISAPPROVED', 'PREAPPROVED']
+const HEARTBEAT_STATUS_FILTER = JSON.stringify([{ field: 'effective_status', operator: 'IN', value: HEARTBEAT_STATUSES }])
+
+/**
+ * 只读一页的广告组读取（给「实时在投合计」用）：状态过滤由调用方传（覆盖预算核算要算的全部在投状态，
+ * 心跳自己的 HEARTBEAT_STATUSES 不含 PENDING_BILLING_INFO）；**不跟分页**——有下一页就标 incomplete，
+ * 让调用方回落快照，这样每个账户的实际 HTTP 请求数就是 1（不会被 readList 的 25 页翻页放大）。
+ */
+export async function fetchAdsetsSinglePage(
+  adAccountId: string,
+  accessToken: string,
+  statuses: readonly string[],
+): Promise<GraphReadResult<GraphHeartbeatAdset>> {
+  const got = await fetchJson(graphUrl(`${adAccountId}/adsets`, {
+    fields: 'id,name,campaign_id,effective_status,daily_budget,lifetime_budget,created_time,start_time,updated_time,adset_schedule,is_dynamic_creative',
+    filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: [...statuses] }]),
+    limit: PAGE_LIMIT,
+  }, accessToken))
+  if (!got.ok) return { rows: [], complete: false, error: got.error }
+  const envelope = (got.body ?? {}) as GraphEnvelope
+  const rows = Array.isArray(envelope.data) ? (envelope.data as GraphHeartbeatAdset[]) : []
+  if (envelope.paging?.next) {
+    return { rows, complete: false, error: { status: 0, code: null, message: 'more than one page; not followed' } }
+  }
+  return { rows, complete: true, error: null }
+}
+
+export function fetchHeartbeatAdsets(adAccountId: string, accessToken: string) {
+  return readList<GraphHeartbeatAdset>(graphUrl(`${adAccountId}/adsets`, {
+    fields: 'id,name,campaign_id,effective_status,daily_budget,lifetime_budget,created_time,start_time,updated_time,adset_schedule,is_dynamic_creative',
+    filtering: HEARTBEAT_STATUS_FILTER,
+    limit: PAGE_LIMIT,
+  }, accessToken))
+}
+
+/** 广告级心跳字段。不展开 creative。 */
+export interface GraphHeartbeatAd {
+  id: string
+  adset_id?: string
+  effective_status?: string
+  updated_time?: string
+}
+
+export function fetchHeartbeatAds(adAccountId: string, accessToken: string) {
+  return readList<GraphHeartbeatAd>(graphUrl(`${adAccountId}/ads`, {
+    fields: 'id,adset_id,effective_status,updated_time',
+    filtering: HEARTBEAT_STATUS_FILTER,
+    limit: PAGE_LIMIT,
+  }, accessToken))
+}
+
+/** 当日按广告组拆的花费/曝光（账户时区日期由调用方给出）。 */
+export interface GraphHeartbeatInsightRow {
+  adset_id?: string
+  spend?: string
+  impressions?: string
+}
+
+export function fetchHeartbeatTodayInsights(adAccountId: string, accessToken: string, day: string) {
+  return readList<GraphHeartbeatInsightRow>(graphUrl(`${adAccountId}/insights`, {
+    fields: 'adset_id,spend,impressions',
+    level: 'adset',
+    time_range: JSON.stringify({ since: day, until: day }),
+    limit: '500',
+  }, accessToken))
+}
+
+/** 每账户每小时心跳读次数：账户 + 广告组 + 广告 + 当日 insights。设计上限为每账户每小时 <= 6 次。 */
+export const HEARTBEAT_READ_CALLS_PER_ACCOUNT = 4
 
 /** Minimal public read projection. Shared with the model-neutral AI tools; no targeting/PII. */
 export const AI_ENTITY_FIELDS = {

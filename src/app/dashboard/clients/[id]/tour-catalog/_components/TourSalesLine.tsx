@@ -74,7 +74,7 @@ export function TourSalesLine(props: { clientId: string; tourId: string }): JSX.
             {`共 ${orders} 单 · 定金已收 ${groups.reduce((n, g) => n + g.depositPaid, 0)} · 尾款已收 ${groups.reduce((n, g) => n + g.balancePaid, 0)} · 还没收齐 ${groups.reduce((n, g) => n + g.unsettled, 0)}`}
           </p>
           <ul className="mt-2 space-y-0.5 text-sm text-me-charcoal">
-            {groups.map((g) => (
+            {groups.filter((g) => g.orders > 0).map((g) => (
               <li key={g.key}>
                 {`${groupLabel(g)}：${g.orders} 单，定金已收 ${g.depositPaid}，尾款已收 ${g.balancePaid}，还没收齐 ${g.unsettled}`}
               </li>

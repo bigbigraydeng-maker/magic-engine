@@ -89,7 +89,7 @@ describe('BookingTrackerPanel compact strip', () => {
   it('shrinks to a slim strip when there is nothing new to chase (the guest list stays the star of the page)', async () => {
     setup({ nudge: () => makeNudgeList({ rows: [] }) })
     const section = await screen.findByTestId('payment-nudge-section')
-    expect(section.className).toContain('py-2')
+    expect(section.className).toContain('py-1.5')
     expect(section.className).not.toContain('p-4')
   })
 

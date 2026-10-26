@@ -196,6 +196,8 @@ describe('processD3Hit', () => {
     expect(inserted[0].payload).toMatchObject({
       status: 'awaiting_approval', action_run_id: 'run-42', authorization_decision_id: 'dec-42',
     })
+    // 🔴 待办里要看得懂：这条回执必须带一句人话，不能只有状态码
+    expect(String((inserted[0].payload as Row).reason)).toContain('等你批准')
   })
 
   it('Kernel idempotent_hit（重放）→ 不重复记账', async () => {
@@ -495,5 +497,33 @@ describe('createD3AutoPauseFunction —— 装配契约', () => {
     })) as { processed: number }
     expect(result.processed).toBe(1)
     expect(submitCandidate).toHaveBeenCalledTimes(1)
+  })
+
+  it('🔴 autoPauseEligible=false（类似人群 / 流量组，只提醒）的 D3 命中不进自动暂停', async () => {
+    const submitCandidate = vi.fn(async (): Promise<SubmitAdsAutoPauseResult> => ({
+      ok: true, outcome: 'pending_approval', runId: 'run-1', authorizationDecisionId: 'dec-1',
+    }))
+    const { supabase, inserted } = makeFakeFlywheelSupabase()
+    const fn = createD3AutoPauseFunction(
+      makeDeps({
+        supabase,
+        loadConfig: vi.fn(async () => loaded(makeConfig({ autopilot_dry_run: false }))),
+        loadDiagnosisRun: vi.fn(async () => ({
+          clientId: 'client-1', date: '2026-09-21', evaluatedAt: '2026-09-22T00:00:00Z',
+          diagnoses: [
+            makeD3Diagnosis({ autoPauseEligible: false, units: [{ level: 'adset', id: 'adset-traffic', name: null, adAccountId: '123' }] }),
+          ],
+          excluded: [],
+        })),
+        submitCandidate,
+      }),
+    )
+    const result = (await handlerOf(fn)({
+      event: { data: { client_id: 'client-1', insight_date: '2026-09-21', diagnostic_run_id: 'n-1' } },
+      step: fakeStep(),
+    })) as { processed: number }
+    expect(result.processed).toBe(0)
+    expect(submitCandidate).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(0)
   })
 })

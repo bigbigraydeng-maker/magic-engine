@@ -14,6 +14,7 @@ import { scanRedlineHits, validateClipPath } from './worker-guard'
 import { assertRecipeReceipt, winnerRecipeFromBrief, type WinnerRecipe } from './recipe'
 import { buildReelPostCaption, buildReelPublishAutoChecks } from '@/lib/social/reel-publishing'
 import { buildReelMediaAutoChecks, type ReelMediaEvidence } from '@/lib/social/reel-media-checks'
+import { assessRemotionContentSubstance } from './content-substance'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
 
@@ -129,6 +130,22 @@ export async function completeWorkOrder(
   const recipeGate = assertRecipeCompletion(wo, newClips, recipeReceipt)
   if (!recipeGate.ok) return { ok: false, status: 422, error: recipeGate.error }
 
+  // 内容实质闸（服务端复核）：用工单自己的 props 重算，不信出片机自报的结论。默认只告警+留审计，
+  // FACTORY_CONTENT_SUBSTANCE_ENFORCE=1 后：缺内容或缺 capability 一律 422（在任何库写入之前）。
+  const substance = assessRemotionContentSubstance(wo.brief, mediaEvidence)
+  const enforceSubstance = process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE === '1'
+  if (substance.applicable) {
+    if (enforceSubstance && !substance.assetOnly && substance.server?.verdict !== 'pass') {
+      return { ok: false, status: 422, error: `content_substance_failed: ${substance.server?.reason ?? ''}`.slice(0, 300) }
+    }
+    if (enforceSubstance && !substance.capable) {
+      return { ok: false, status: 422, error: 'content_substance_missing' }
+    }
+    if ((!substance.assetOnly && substance.server?.verdict !== 'pass') || substance.mismatch || !substance.capable) {
+      console.warn(`[factory worker] content substance warning for ${String(wo.id)}: server=${substance.server?.verdict} reported=${substance.reported?.verdict ?? 'none'} capable=${substance.capable} mismatch=${substance.mismatch} enforce=${enforceSubstance}`)
+    }
+  }
+
   // ② 成片级红线复扫(fail-closed:红线/brief 查询失败即拒,查不到 ≠ 没有)
   const { data: client, error: cErr } = await supabase
     .from('clients')
@@ -155,11 +172,10 @@ export async function completeWorkOrder(
     }
   }
 
-  // brand_name/brand_voice 供下面的成片文案品控用(竞品角度检测要 brand_name,
-  // 人称检测要 brand_voice.persona)——同一条查询多选两列,不增加往返。
+  // brand_name 供下面的成片文案品控用(竞品角度检测)——同一条查询多选一列,不增加往返。
   const { data: brief, error: bErr } = await supabase
     .from('master_briefs')
-    .select('excluded_topics, brand_name, brand_voice')
+    .select('excluded_topics, brand_name')
     .eq('id', wo.master_brief_id as string)
     .maybeSingle()
   if (bErr) return { ok: false, status: 500, error: 'brief lookup failed' }
@@ -214,19 +230,12 @@ export async function completeWorkOrder(
     (typeof receiptHookSegment?.['caption'] === 'string' ? (receiptHookSegment['caption'] as string) : null) ??
     overlays.find((o): o is string => !!o) ??
     null
-  const persona = (brief?.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
-  const personaName = typeof persona?.name === 'string' ? persona.name.trim() : ''
   const brandNameForGuard = (brief?.brand_name as string | undefined) ?? ''
-  const intendedNarrator = personaName
-    ? `a single first-person narrator (a real ${brandNameForGuard || 'brand'} representative named ` +
-      `${personaName}${persona?.role ? `, ${persona.role}` : ''}, speaking about their own experience)`
-    : null
   const qualityFlags = await scanContentQualityFlags({
     brandName: brandNameForGuard,
     angleLabel: typeof wo.angle === 'string' ? (wo.angle as string) : null,
     onScreenHook,
     captions: [caption, ...overlays].filter((t): t is string => !!t),
-    intendedNarrator,
   })
 
   // ③ new_clips 幂等入库:idempotency_key 命中已有行 → 复用不重插
@@ -302,6 +311,22 @@ export async function completeWorkOrder(
       }),
     ],
     new_clip_ids: insertedClipIds,
+    ...(substance.applicable
+      ? {
+          // Server recompute is the verdict; the worker's report is audit only.
+          content_substance: {
+            server: substance.server
+              ? { verdict: substance.server.verdict, kinds: substance.server.kinds, textSeconds: substance.server.textSeconds, reason: substance.server.reason.slice(0, 500) }
+              : null,
+            reported: substance.reported,
+            capable: substance.capable,
+            mismatch: substance.mismatch,
+            enforced: enforceSubstance,
+          },
+          // Audit mark only: the approve/publish guards read brief.remotion.deliverable (see deliverable.ts), not this.
+          ...(substance.assetOnly ? { deliverable: 'asset_only' } : {}),
+        }
+      : {}),
   }
 
   // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能伪装成功(魏征 M2-P1-1)

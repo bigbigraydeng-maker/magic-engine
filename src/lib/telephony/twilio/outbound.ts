@@ -107,8 +107,8 @@ export async function startOutboundCall(a: StartOutboundArgs): Promise<{ callSid
   return { callSid: out.sid }
 }
 
-/** 默认只放行 CTS 的客人所在的两个国家；要加别的国家，在服务器环境变量里逐个加（带 +）。 */
-export const DEFAULT_OUTBOUND_PREFIXES = ['+64', '+61'] as const
+/** 默认只放行新西兰（PM 2026-10-15 定：CTS 外呼只限新西兰境内）；要加别的国家，在服务器环境变量里逐个加（带 +）。 */
+export const DEFAULT_OUTBOUND_PREFIXES = ['+64'] as const
 /** 高价 / 付费号段：新西兰 0900、澳洲 190x。放行的国家里也不许拨。 */
 const PREMIUM = [/^\+64900/, /^\+6119[0-9]/]
 

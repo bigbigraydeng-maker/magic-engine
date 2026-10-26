@@ -8,7 +8,11 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ClientRegistration, LiteStore } from './store'
-import type { LiteItem, LiteItemStatus, LitePack, NewLiteItem } from './types'
+import { LITE_ROLES, type LiteItem, type LiteItemStatus, type LitePack, type LiteRole, type NewLiteItem } from './types'
+
+function isLiteRole(value: unknown): value is LiteRole {
+  return typeof value === 'string' && (LITE_ROLES as readonly string[]).includes(value)
+}
 
 interface PackRow {
   id: string
@@ -26,6 +30,8 @@ interface PackRow {
 }
 
 interface ItemRow {
+  /** Only present once the optional role column exists. */
+  role?: string | null
   item_id: string
   pack_id: string
   client_id: string
@@ -97,6 +103,7 @@ function mapItem(row: ItemRow): LiteItem {
     reason_code: row.reason_code,
     last_check_at: iso(row.last_check_at),
     last_check_result: row.last_check_result,
+    ...(isLiteRole(row.role) ? { role: row.role } : {}),
   }
 }
 

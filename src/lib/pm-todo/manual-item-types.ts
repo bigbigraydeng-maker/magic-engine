@@ -35,9 +35,12 @@ import type { CalendarClosureItemKind } from './calendar-closure-items'
 import type { TourPublishRequestItemKind } from './tour-catalog-publish-request-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
+import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { AdsServicePauseItemKind } from './ads-service-pause-items'
+import type { AdsAccountStatusItemKind } from './ads-account-status-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
@@ -60,11 +63,18 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // diagnostic_synthesis_failing：链接是需要登录的后台页，探活大概率判成坏链接 —— 这条正是要消灭「静默」的，不能被探活悄悄丢掉（魏征 2026-10-18）。
+  'diagnostic_synthesis_failing',
   'cross_client_leak',
   'facebook_page_binding_unverified',
   // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
   //   链接是需要登录的后台页，探活大概率判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
   'facebook_sync_failing',
+  // ads_service_pause_notice：链接是登录后的广告健康页，探活容易判成坏链接。系列已经停了，这条不能静默丢掉。
+  'ads_service_pause_notice',
+  // lead_followup_due：链接是登录后台页，探活易判成坏链接；这条丢了 = 有人填了表没人知道。
+  'lead_followup_due',
+  'lead_followup_check_failed',
   // whatsapp_number_unclaimed：链接指向需要登录的后台页，探活可能判成坏链接 —— 消息正在丢，宁可让人自己找入口，也不能静默消失。
   'whatsapp_number_unclaimed',
   'ai_provider_exhausted',
@@ -88,6 +98,13 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'ai_tracker_all_failed_dev',
   // 待确认电话的链接是需要登录的页面，探活多半判成坏链接 —— 不能因此让「有电话没记进客人档案」静默消失。
   'phone_call_needs_review',
+  // 推广计划每日检查：链接是需要登录的页面，探活多半判成坏链接——这条里还有「检查自己没跑成」，绝不能静默消失。
+  'promo_plan_watch',
+  'promo_plan_watch_broken',
+  // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
+  // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
+  'ads_tracking_preflight_fix',
+  'ads_tracking_preflight_broken',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -96,6 +113,14 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  /** 体检的 AI 文字叙事没写成（保存失败/模型失败）—— 开发欠账，不用 PM 动手（2026-10-18）。 */
+  | 'diagnostic_synthesis_failing'
+  | 'promo_plan_watch'
+  | 'promo_plan_watch_broken'
+  /** 开投前追踪检查里有硬门 / 软门红灯：具体怎么修（开发的活，不占 PM 的清单；PM 在推广计划页看灯） */
+  | 'ads_tracking_preflight_fix'
+  /** 开投前追踪检查自己没跑成 / 回执过期：没人在盯追踪（开发欠账） */
+  | 'ads_tracking_preflight_broken'
   | 'blog_pr_open'
   | 'not_indexed'
   | 'meta_stuck'
@@ -244,6 +269,10 @@ export type ManualItemKind =
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
   | AdsCircuitItemKind
+  /** 服务把一条在投的广告系列暂停了 —— 要不要恢复由人点确认卡 */
+  | AdsServicePauseItemKind
+  /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
+  | AdsAccountStatusItemKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
   | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
@@ -270,9 +299,8 @@ export type ManualItemKind =
   | 'knowledge_fact_expiring_soon'
   | AttributionItemKind
   | ClientRosterItemKind
+  /** 历史：LinkedIn 自动发帖已于 2026-10 下线，不再有产出方；保留成员只为让 2026-09-25 的待办夹具继续成立 */
   | 'linkedin_progress_needs_review'
-  | 'linkedin_progress_needs_setup'
-  | 'linkedin_progress_failed'
   | EmailReplyItemKind
   /** 客户在自助向导里交了广告账户号，只有内部员工能核实后接上（AD-SEC-3）*/
   | BindingRequestItemKind
@@ -301,10 +329,8 @@ export type ManualItemKind =
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
   | FacebookSyncItemKind
-  /** 工厂把 Facebook Reel 同步到客户 Instagram(Publer)时,Publer 里的 Instagram 账号掉线 —— 只有人能去 Publer 重新连接 */
-  | 'instagram_account_disconnected'
-  /** 同步到 Instagram 自动重试都失败、已放弃 —— 要开发看原因 */
-  | 'instagram_publish_failed'
+  /** 客人填了表超过 24 小时没人回 / 这一栏没算出来 */
+  | LeadFollowupItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
@@ -486,7 +512,7 @@ export const NOT_INDEXED_REPORT_ORDER: readonly IndexClass[] = [
  * 谷歌没收录的页面 —— **一个客户汇总成一条，不是一页一条**。
  *
  * 🔴 实测 oztop 一家就 116 个未收录页面（PM 2026-09-04 fix闭环），一页一条会把
- * 今日待办正文淹掉 122 行 —— 跟 pushDiagnosticItems / pushLinkedinProgressItems
+ * 今日待办正文淹掉 122 行 —— 跟 pushDiagnosticItems 等
  * 早就立下的「别把待办刷屏」是同一条纪律，唯独这条线之前漏了。逐条的网址和单独
  * 深链没意义（谁也不会点 116 个链接），价值全在「哪个客户、几个、什么原因、去哪
  * 看全部」。

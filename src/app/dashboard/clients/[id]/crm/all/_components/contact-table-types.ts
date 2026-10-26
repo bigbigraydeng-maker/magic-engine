@@ -44,6 +44,13 @@ export interface ContactRow {
   /** 最新一张 AI 摘要的意向；null = 没有摘要。 */
   intent: IntentLevel | null
   custom: Record<string, string | null>
+  /** 他最早是从哪个渠道进来的（messenger / email / whatsapp / phone / fb_form / web_form），最多一项；列表在名字旁画小标签。 */
+  sources?: string[]
+  /**
+   * 这条线索当前分给谁跟进（`client_portal_users.email`）。null = 未分配。
+   * part 2 的 round-robin 自动写入；part 3 UI 让人手动改（issue #3158）。
+   */
+  assignedTo: string | null
 }
 
 export interface CustomColumnMeta {

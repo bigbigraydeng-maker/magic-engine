@@ -37,10 +37,13 @@ export interface WebFormLeadInput {
   utmSource?: string | null
   utmMedium?: string | null
   utmCampaign?: string | null
+  utmContent?: string | null
   /** ISO；不传用当下。 */
   submittedAt?: string | null
   /** 这套房的 listings.id（listing 落地页才有）。 */
   listingId?: string | null
+  /** 附加的结构化事实（如邮件表单的出发时间/预算稳定代码），合并进触点 metadata；不传则与之前完全一致。 */
+  metadata?: Record<string, unknown> | null
 }
 
 export interface WebFormLeadResult {
@@ -77,6 +80,7 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       utm_source: input.utmSource,
       utm_medium: input.utmMedium,
       utm_campaign: input.utmCampaign,
+      utm_content: input.utmContent,
     })
 
     const { contactId } = await resolveContact({
@@ -91,7 +95,7 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       listingId: input.listingId ?? null,
     })
 
-    await supabaseAdmin.from('contact_touchpoints').upsert(
+    const { error: touchError } = await supabaseAdmin.from('contact_touchpoints').upsert(
       {
         client_id: input.clientId,
         contact_id: contactId,
@@ -101,13 +105,15 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
         occurred_at: occurredAt,
         summary: `官网表单${input.sourceUrl ? ` · ${input.sourceUrl}` : ''}`,
         raw: input.message ?? null,
-        metadata: { lead_id: input.leadId, source_url: input.sourceUrl ?? null },
+        metadata: { ...(input.metadata ?? {}), lead_id: input.leadId, source_url: input.sourceUrl ?? null },
         ...attributionColumns(attribution),
         source: 'web_form',
         source_ref: input.leadId,
       },
       { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true },
     )
+    // supabase 的写失败不会抛，只放在返回的 error 里；不检查就是「联系人建了、触点永远缺」。
+    if (touchError) throw touchError
 
     return { contactId, skipped: null }
   } catch (err) {

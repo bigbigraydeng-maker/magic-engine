@@ -32,8 +32,14 @@ export interface DedicatedApprovalEntry {
 export const DEDICATED_APPROVAL_ENTRIES: readonly DedicatedApprovalEntry[] = [
   {
     actionKey: 'ads.auto_pause_on_d3',
-    label: '广告自动暂停待批准页',
-    path: (clientId) => `/dashboard/clients/${encodeURIComponent(clientId)}/ad-health/auto-pause`,
+    label: '广告门 ·「等你点头」',
+    /**
+     * 2026-10-18：内容从 `ad-health/auto-pause` 整段搬进广告门的标签
+     * （设计稿 `2026-10-18-ads-door-merge-design-v0.1.md` §5 步 2）。
+     * 改这一行，待办里的链接和页面里的链接会一起跟着走 —— 这就是把路径收在一张表里的用处。
+     * 旧网址保留为跳转，已经发出去的待办邮件不会失效。
+     */
+    path: (clientId) => `/dashboard/clients/${encodeURIComponent(clientId)}/ads-health?tab=approvals`,
   },
 ]
 

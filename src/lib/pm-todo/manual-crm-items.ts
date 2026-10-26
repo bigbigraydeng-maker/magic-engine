@@ -9,6 +9,7 @@ import { findMessengerStopSignals } from '@/lib/crm/messenger-stop-signal'
 import { dropAlreadyPaidTagged } from '@/lib/mailchimp/paid-review-filter'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { countReviewCallsByClient } from '@/lib/telephony/review-calls'
+import { contactCardTitle } from '@/lib/crm/display-name'
 
 /** Mailchimp 后台的联系人页 —— 登录后一定打得开的稳定入口。 */
 const MAILCHIMP_AUDIENCE_URL = 'https://admin.mailchimp.com/audience/contacts/'
@@ -264,7 +265,7 @@ export async function pushDncReviewItems(
     if (raws.some((r) => BOUNDARY.test(r))) continue
     if (!raws.some((r) => SOFT.test(r))) continue
 
-    const name = (c.display_name as string) || '未留姓名'
+    const name = contactCardTitle(c.display_name as string | null)
     items.push({
       kind: 'dnc_maybe_wrong',
       client_id: c.client_id as string,
@@ -324,7 +325,7 @@ export async function pushMessengerStopItems(
   )
 
   for (const s of signals) {
-    const who = nameById.get(s.contactId) || '未留姓名'
+    const who = contactCardTitle(nameById.get(s.contactId))
     items.push({
       kind: 'dm_maybe_stop',
       client_id: s.clientId,

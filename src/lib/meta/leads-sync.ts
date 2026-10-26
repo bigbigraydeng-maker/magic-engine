@@ -21,6 +21,7 @@ import { authorizePageSync } from '@/lib/meta/page-sync-authorization'
 import { fetchFormLeads, fetchPageLeadForms } from '@/lib/meta/lead-forms'
 import { ingestMetaLead, parseLeadAnswers } from '@/lib/crm/meta-lead'
 import { ALREADY_SYNCED_REASON, isMailchimpSettled } from '@/lib/mailchimp/outlet-tally'
+import { classifyBrokenPageToken, metaPageSyncHeld, rememberBrokenPageToken } from '@/lib/meta/broken-page-token'
 import type { SubscribeMemberResult } from '@/lib/mailchimp/client'
 import type { TagRepair } from '@/lib/mailchimp/tags'
 
@@ -72,7 +73,7 @@ export interface MetaLeadsSyncResult {
    * 没有任何 lead 进到出口时是 `{}`，不是缺字段。
    */
   mailchimp: Record<string, number>
-  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified'
+  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified' | 'connection_unhealthy'
   error?: string
 }
 
@@ -215,6 +216,17 @@ export function resolveDefaultCountry(client: {
   return client.country === 'NZ' || client.semrush_db === 'nz' ? 'NZ' : 'AU'
 }
 
+/** 报错里全是坏令牌时标成「等重连」，并记进暂停名单。混着真错误则只留 error。 */
+async function withBrokenToken(
+  clientId: string,
+  pageId: string,
+  error: string | undefined,
+): Promise<{ error?: string; skipped?: 'connection_unhealthy' }> {
+  if (!error) return {}
+  await rememberBrokenPageToken(supabaseAdmin, clientId, pageId, error)
+  return classifyBrokenPageToken(error) ? { error, skipped: 'connection_unhealthy' } : { error }
+}
+
 /** 把一个客户 Facebook 表单里的新 lead 拉进 CRM。永不抛异常。 */
 export async function syncClientMetaLeads(
   client: MetaLeadsSyncClient,
@@ -235,13 +247,18 @@ export async function syncClientMetaLeads(
   const pageId = client.facebook_page_id
   if (!pageId) return { ...base, skipped: 'no_page_id' }
 
+  if (await metaPageSyncHeld(supabaseAdmin, client.id, pageId)) {
+    return { ...base, skipped: 'connection_unhealthy' }
+  }
+
   // 跟私信同步同一道闸（AD-SEC-4）：主页核实过属于这个客户才取令牌。
   // 取令牌顺序不变：先用「连接 Meta」存下的 Page token，没有再从 env 里的 user token 换。
   const auth = await authorizePageSync(supabaseAdmin, client.id, pageId, process.env)
   if (!auth.ok) {
     if (auth.skipped !== 'page_not_verified') return { ...base, skipped: auth.skipped }
-    // 记成 error：定时任务按 error 计失败、日报会点名，暂停不能看起来像「今天没人填表」。
-    return { ...base, skipped: auth.skipped, error: `主页绑定没核实，线索同步已暂停（${auth.reason}）` }
+    const error = `主页绑定没核实，线索同步已暂停（${auth.reason}）`
+    await rememberBrokenPageToken(supabaseAdmin, client.id, pageId, error)
+    return { ...base, skipped: auth.skipped, error }
   }
   const pageToken = auth.pageToken
 
@@ -253,7 +270,8 @@ export async function syncClientMetaLeads(
   // 表单一个都没列出来 + 有报错 = 取数就没通（多半是 token 缺 leads_retrieval）。
   // 直接如实回报，别让它看起来像「今天没人填表」。
   if (formsRead.rows.length === 0) {
-    return { ...base, ...(errors.length ? { error: errors.join(' | ') } : {}) }
+    const error = errors.length ? errors.join(' | ') : undefined
+    return { ...base, ...(await withBrokenToken(client.id, pageId, error)) }
   }
 
   const since = await getLeadWatermark(client.id)
@@ -322,6 +340,7 @@ export async function syncClientMetaLeads(
     }
   }
 
+  const error = errors.length ? errors.join(' | ') : undefined
   return {
     ...base,
     forms,
@@ -332,6 +351,6 @@ export async function syncClientMetaLeads(
     failed,
     settledLookupFailures,
     mailchimp,
-    ...(errors.length ? { error: errors.join(' | ') } : {}),
+    ...(await withBrokenToken(client.id, pageId, error)),
   }
 }

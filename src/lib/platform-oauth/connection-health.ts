@@ -132,12 +132,22 @@ export const HEARTBEAT_POLICY: Record<PlatformProvider, HeartbeatPolicy> = {
     refreshScope: 'per_connection',
     why: 'token-manager 没有实现 Meta 的刷新（长期令牌），last_synced_at 只在授权那一刻盖过一次，不是心跳',
   },
+  [PLATFORM_PROVIDERS.INSTAGRAM]: {
+    refreshable: false, staleHours: null, refreshScope: 'per_connection',
+    why: '没有定时心跳；仅在发布前由 getInstagramPublishToken 按需续期(距到期 30 天内,开关打开时)。长期不发布会过期,须重新连接',
+  },
   [PLATFORM_PROVIDERS.TIKTOK]: {
     refreshable: false,
     staleHours: null,
     // staleHours 为 null 时这个字段用不上，仍要填 —— 免得以后打开心跳时漏想一层。
     refreshScope: 'per_connection',
     why: '同 meta，token-manager 里也还没有 TikTok 的刷新实现',
+  },
+  [PLATFORM_PROVIDERS.GOOGLE_YOUTUBE]: {
+    refreshable: true,
+    staleHours: null,
+    refreshScope: 'per_connection',
+    why: '只在有人上传视频 / 读回时才刷令牌，没有固定节奏的调用方；接上定时发布任务之后再回来填这个数',
   },
   [PLATFORM_PROVIDERS.WHATSAPP]: {
     refreshable: false,
@@ -171,7 +181,9 @@ export const SCOPE_REPLAYED_ON_REFRESH: Record<PlatformProvider, readonly string
   [PLATFORM_PROVIDERS.GOOGLE_GTM]: null,
   [PLATFORM_PROVIDERS.META]: null,
   [PLATFORM_PROVIDERS.TIKTOK]: null,
+  [PLATFORM_PROVIDERS.INSTAGRAM]: null,
   [PLATFORM_PROVIDERS.WHATSAPP]: null,
+  [PLATFORM_PROVIDERS.GOOGLE_YOUTUBE]: null,
 }
 
 // ─── 输入 / 输出 ──────────────────────────────────────────────────────────────

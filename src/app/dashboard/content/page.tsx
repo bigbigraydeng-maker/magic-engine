@@ -200,12 +200,10 @@ export default function ContentBoardPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
 
-  // Schedule + Publer publish state
+  // Schedule state
   const [scheduleAt, setScheduleAt] = useState('');
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [scheduleMsg, setScheduleMsg] = useState('');
-  const [publishing, setPublishing] = useState(false);
-  const [publishMsg, setPublishMsg] = useState('');
 
   // 关联执行项 state（内容飞轮闭环）
   const [execItems, setExecItems] = useState<ExecutionItemLite[]>([]);
@@ -224,9 +222,6 @@ export default function ContentBoardPage() {
   const [batchImgRunning, setBatchImgRunning] = useState(false);
   const [batchImgMsg, setBatchImgMsg] = useState('');
 
-  // Batch Publer publish state
-  const [batchPubRunning, setBatchPubRunning] = useState(false);
-  const [batchPubMsg, setBatchPubMsg] = useState('');
   const handledHighlightRef = useRef<string | null>(null);
   const postsFetchAbortRef = useRef<AbortController | null>(null);
   const postsFetchSequenceRef = useRef(0);
@@ -350,37 +345,6 @@ export default function ContentBoardPage() {
     }
   };
 
-  const handleBatchPublish = async () => {
-    const toPublish = Array.from(selectedIds).filter(id => {
-      const p = posts.find(p => p.id === id);
-      return p && p.status === 'approved' && p.visual_asset_url;
-    });
-    if (toPublish.length === 0) {
-      setBatchPubMsg('无可发布条目（需状态=已批准且有图片）');
-      return;
-    }
-    setBatchPubRunning(true);
-    setBatchPubMsg(`发布中（共 ${toPublish.length} 条）…`);
-    let ok = 0;
-    let fail = 0;
-    for (const postId of toPublish) {
-      try {
-        const res = await fetch('/api/publer/create-post', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ post_id: postId }),
-        });
-        const json = await res.json() as { success: boolean; error?: string };
-        if (json.success) ok++; else fail++;
-      } catch {
-        fail++;
-      }
-    }
-    setBatchPubMsg(`✓ 成功 ${ok} 条${fail > 0 ? `，失败 ${fail} 条` : ''}`);
-    setBatchPubRunning(false);
-    if (ok > 0) await fetchPosts();
-  };
-
   const handleGenerateImage = async () => {
     if (!modalPost) return;
     setGeneratingImage(true);
@@ -432,7 +396,6 @@ export default function ContentBoardPage() {
     // 排期 init：取已有 scheduled_at，转换成 datetime-local input 接受的格式 (YYYY-MM-DDTHH:mm)
     setScheduleAt(post.scheduled_at ? post.scheduled_at.slice(0, 16) : '');
     setScheduleMsg('');
-    setPublishMsg('');
     setLinkMsg('');
     setImageAspectRatio('1:1');
     setImageGenMsg('');
@@ -521,7 +484,6 @@ export default function ContentBoardPage() {
     setEditMode(false);
     setSaveMsg('');
     setScheduleMsg('');
-    setPublishMsg('');
     setLinkMsg('');
     setImageGenMsg('');
     setGeneratingImage(false);
@@ -554,32 +516,6 @@ export default function ContentBoardPage() {
       setScheduleMsg(`✗ ${(err as Error).message}`);
     } finally {
       setSavingSchedule(false);
-    }
-  };
-
-  const handlePublishToPubler = async () => {
-    if (!modalPost) return;
-    setPublishing(true);
-    setPublishMsg('');
-    try {
-      const body: { post_id: string; schedule_at?: string } = { post_id: modalPost.id };
-      if (scheduleAt) body.schedule_at = new Date(scheduleAt).toISOString();
-      const res = await fetch('/api/publer/create-post', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || '发布失败');
-      const newStatus = scheduleAt ? 'scheduled' : 'published';
-      const updated: ContentPost = { ...modalPost, status: newStatus };
-      setModalPost(updated);
-      setPosts(prev => prev.map(p => p.id === updated.id ? updated : p));
-      setPublishMsg(`✓ 已${scheduleAt ? '排期推送' : '推送'}到 Publishing Hub (job=${json.job_id ?? json.job_ids?.join(',') ?? 'ok'})`);
-    } catch (err) {
-      setPublishMsg(`✗ ${(err as Error).message}`);
-    } finally {
-      setPublishing(false);
     }
   };
 
@@ -739,7 +675,7 @@ export default function ContentBoardPage() {
     ? [
         { label: '客户概览', href: `/dashboard/clients/${selectedClient}` },
         { label: 'Execution', href: `/dashboard/clients/${selectedClient}/execution` },
-        { label: 'Launch Hub', href: `/dashboard/content?client=${selectedClient}` },
+        { label: '内容日历', href: `/dashboard/content?client=${selectedClient}` },
       ]
     : [];
 
@@ -751,8 +687,8 @@ export default function ContentBoardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">🚀 Launch Hub</h1>
-          <p className="text-sm text-me-charcoal/55 mt-1">{posts.length} 条内容 · 审批 / 排期 / 推送</p>
+          <h1 className="font-display text-2xl font-bold tracking-tight text-me-charcoal/90">📆 内容日历</h1>
+          <p className="text-sm text-me-charcoal/55 mt-1">{posts.length} 条内容 · 审批 / 排期（排期只作记录，这里不会自动发布）</p>
         </div>
         <Link
           href={selectedClient ? `/dashboard/clients/${selectedClient}/execution` : '/dashboard/clients'}
@@ -827,7 +763,7 @@ export default function ContentBoardPage() {
         </p>
       )}
 
-      <BriefGateBanner clientId={selectedClient} featureLabel="Launch Hub content approval" className="space-y-5">
+      <BriefGateBanner clientId={selectedClient} featureLabel="content calendar approval" className="space-y-5">
       {/* Batch action bar */}
       {someSelected && viewMode === 'list' && (
         <div className="flex items-center gap-3 bg-me-ochre/10 border border-me-ochre/30 rounded-xl px-4 py-3 flex-wrap gap-y-2">
@@ -860,13 +796,6 @@ export default function ContentBoardPage() {
               {batchImgRunning ? '生成中…' : '🎨 生成全部图片'}
             </button>
             <button
-              onClick={() => void handleBatchPublish()}
-              disabled={batchPubRunning || batching}
-              className="bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
-            >
-              {batchPubRunning ? '推送中…' : '🚀 全部推送 Publishing Hub'}
-            </button>
-            <button
               onClick={() => setShowDeleteConfirm(true)}
               disabled={batching}
               className="bg-[#C2453A] hover:bg-[#C2453A] text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium"
@@ -877,16 +806,11 @@ export default function ContentBoardPage() {
           </div>
         </div>
       )}
-      {(batchImgMsg || batchPubMsg) && (
+      {batchImgMsg && (
         <div className="flex gap-4 flex-wrap">
           {batchImgMsg && (
             <p className={`text-sm ${batchImgMsg.startsWith('✓') ? 'text-[#5C8A4A]' : batchImgMsg.startsWith('✗') ? 'text-[#C2453A]' : 'text-me-ochre'}`}>
               🎨 {batchImgMsg}
-            </p>
-          )}
-          {batchPubMsg && (
-            <p className={`text-sm ${batchPubMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-me-ochre'}`}>
-              🚀 {batchPubMsg}
             </p>
           )}
         </div>
@@ -1169,15 +1093,15 @@ export default function ContentBoardPage() {
                       <p className={`text-[11px] ${linkMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{linkMsg}</p>
                     )}
                     <p className="text-[10px] text-me-ochre/70 leading-relaxed">
-                      关联后：内容推送到 Publishing Hub 成功（→ status=published），执行项会自动 mark 完成 + 写工作日志。
+                      关联后可在执行项里查到这条内容（这里不再有自动推送）。
                     </p>
                   </div>
                 );
               })()}
 
-              {/* 排期 + 发布到 Publer */}
+              {/* 排期 */}
               <div className="rounded-lg border border-me-ochre/30 bg-me-ochre/40 p-3 space-y-2.5">
-                <p className="text-xs font-semibold text-me-ochre uppercase tracking-wider">排期与发布 · Publishing Hub</p>
+                <p className="text-xs font-semibold text-me-ochre uppercase tracking-wider">排期</p>
 
                 {/* 发布内容预览 */}
                 {(modalPost.caption || (modalPost.hashtags?.length ?? 0) > 0) && (
@@ -1216,23 +1140,9 @@ export default function ContentBoardPage() {
                   >
                     {savingSchedule ? '保存中…' : '💾 保存排期'}
                   </button>
-                  <button
-                    onClick={() => void handlePublishToPubler()}
-                    disabled={publishing || modalPost.status === 'draft' || modalPost.status === 'rejected'}
-                    title={modalPost.status === 'draft' ? '需先批准才能推送' : modalPost.status === 'rejected' ? '已拒绝的内容不能推送' : ''}
-                    className="bg-me-ochre hover:bg-me-ochre text-white text-xs px-4 py-1.5 rounded-lg font-semibold disabled:opacity-50"
-                  >
-                    {publishing ? '推送中…' : scheduleAt ? '🚀 推送到 Publishing Hub' : '🚀 立即推送 Publishing Hub'}
-                  </button>
                 </div>
-                {(modalPost.status === 'draft' || modalPost.status === 'rejected') && (
-                  <p className="text-[11px] text-me-ochre">⚠ 当前状态为「{modalPost.status === 'draft' ? '草稿' : '已拒绝'}」，需先批准才能推送到 Publishing Hub。</p>
-                )}
                 {scheduleMsg && (
                   <p className={`text-[11px] ${scheduleMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{scheduleMsg}</p>
-                )}
-                {publishMsg && (
-                  <p className={`text-[11px] ${publishMsg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{publishMsg}</p>
                 )}
               </div>
 
@@ -1400,7 +1310,7 @@ export default function ContentBoardPage() {
             clientId={selectedClient}
             currentHref={currentHref}
             clientLabel={selectedClientLabel}
-            currentAreaLabel="Launch Hub"
+            currentAreaLabel="内容日历"
             packageLabel={packageContextId ? `Package ${packageContextId.slice(0, 8)}` : null}
             taskLabel={modalPost?.title ?? null}
             quickLinks={quickLinks}

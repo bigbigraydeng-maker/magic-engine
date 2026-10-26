@@ -88,17 +88,6 @@ function getDimensionHint(format: string | null, platforms: string[] | null): st
   return RATIO_FOR_FORMAT_PLATFORM[key] ?? RATIO_FOR_FORMAT_PLATFORM[`${format.toLowerCase()}_`] ?? ''
 }
 
-interface PublerAccount {
-  id: string
-  provider: string
-  name: string
-}
-
-interface PubModal {
-  assetId: string
-  postId: string
-}
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const VIDEO_FORMATS = ['reel', 'video']
@@ -413,7 +402,7 @@ function EditablePlatforms({
 // ── Asset cell ─────────────────────────────────────────────────────────────────
 
 function AssetCell({
-  post, genState, readyAsset, clientId, onGenerate, onCancel, onSchedule, onShowError, onUploaded, onAssetUpdated,
+  post, genState, readyAsset, clientId, onGenerate, onCancel, onShowError, onUploaded, onAssetUpdated,
 }: {
   post: Post
   genState?: GenState
@@ -421,7 +410,6 @@ function AssetCell({
   clientId: string
   onGenerate: () => void
   onCancel: () => void
-  onSchedule: (assetId: string) => void
   onShowError?: (error: {postId: string, message: string, code?: string, retryCount: number}) => void
   onUploaded: (asset: VisualAsset) => void
   onAssetUpdated: (asset: VisualAsset) => void
@@ -671,12 +659,6 @@ function AssetCell({
           {/* Primary actions */}
           <div className="flex gap-1 text-[10px]">
             <button
-              onClick={() => onSchedule(readyAsset.id)}
-              className="px-1.5 py-0.5 bg-[#5C8A4A] text-white rounded hover:bg-[#5C8A4A] whitespace-nowrap"
-            >
-              → Publer
-            </button>
-            <button
               onClick={onGenerate}
               title="Regenerate"
               className="px-1.5 py-0.5 bg-me-charcoal/25 text-white rounded hover:bg-me-charcoal/35 whitespace-nowrap"
@@ -848,10 +830,6 @@ export default function VisualsPage() {
   // Track posts whose visual_brief was recently edited — shows 🔄 Regen button
   const [dirtyBriefs, setDirtyBriefs] = useState<Set<string>>(new Set())
   const [refreshing, setRefreshing] = useState(false)
-  const [pubModal, setPubModal] = useState<PubModal | null>(null)
-  const [publerAccounts, setPublerAccounts] = useState<PublerAccount[]>([])
-  const [scheduleForm, setScheduleForm] = useState({ account_id: '', scheduled_at: '', caption: '' })
-  const [scheduleLoading, setScheduleLoading] = useState(false)
   const [toast, setToast] = useState<{ type: 'success' | 'error', message: string } | null>(null)
   const [errorModal, setErrorModal] = useState<{
     postId: string
@@ -1089,47 +1067,6 @@ export default function VisualsPage() {
   }, [selectedClientId, submitGeneration, patchGen])
 
 
-  // ── Publer ─────────────────────────────────────────────────────────────────
-
-  const openPubModal = useCallback(async (assetId: string, postId: string) => {
-    setPubModal({ assetId, postId })
-    const res = await fetch(`/api/publer/draft/${assetId}`)
-    const d = await res.json()
-    setPublerAccounts(d.accounts ?? [])
-    const post = posts.find(p => p.id === postId)
-    setScheduleForm({
-      account_id: '',
-      scheduled_at: post?.scheduled_at ? toDatetimeLocal(post.scheduled_at) : '',
-      caption: d.caption ?? post?.caption ?? '',
-    })
-  }, [posts])
-
-  const handleSchedule = useCallback(async () => {
-    if (!pubModal || !scheduleForm.account_id) return
-    setScheduleLoading(true)
-    try {
-      const res = await fetch('/api/publer/schedule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          asset_id: pubModal.assetId,
-          account_id: scheduleForm.account_id,
-          scheduled_at: fromDatetimeLocal(scheduleForm.scheduled_at),
-          caption: scheduleForm.caption,
-        }),
-      })
-      const d = await res.json()
-      if (d.success) {
-        setToast({ type: 'success', message: 'Scheduled! Job: ' + d.job_id })
-        setPubModal(null)
-      } else {
-        setToast({ type: 'error', message: 'Error: ' + d.error })
-      }
-    } finally {
-      setScheduleLoading(false)
-    }
-  }, [pubModal, scheduleForm])
-
   // ── Refresh ────────────────────────────────────────────────────────────────
 
   const handleRefresh = useCallback(async () => {
@@ -1172,7 +1109,7 @@ export default function VisualsPage() {
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-black/10 flex-shrink-0">
-        <h1 className="text-sm font-semibold text-me-charcoal/75 mr-1">🚀 Launch Hub</h1>
+        <h1 className="text-sm font-semibold text-me-charcoal/75 mr-1">🖼️ 图片工厂</h1>
         <select
           value={selectedClientId}
           onChange={e => setSelectedClientId(e.target.value)}
@@ -1212,7 +1149,7 @@ export default function VisualsPage() {
       {selectedClientId ? (
         <BriefGateBanner
           clientId={selectedClientId}
-          featureLabel="Launch Hub visual production"
+          featureLabel="image factory visual production"
           className="flex min-h-0 flex-1 flex-col"
         >
         <div className="flex-1 overflow-auto">
@@ -1358,7 +1295,6 @@ export default function VisualsPage() {
                       clientId={selectedClientId}
                       onGenerate={() => handleGenerate(post)}
                       onCancel={() => handleCancel(post.id)}
-                      onSchedule={assetId => openPubModal(assetId, post.id)}
                       onShowError={setErrorModal}
                       onUploaded={handleUploaded}
                       onAssetUpdated={handleAssetUpdated}
@@ -1381,70 +1317,6 @@ export default function VisualsPage() {
       ) : (
         <div className="flex-1 flex items-center justify-center text-me-charcoal/45 text-sm">
           Select a client to view their content
-        </div>
-      )}
-
-      {/* Publer modal */}
-      {pubModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-base font-semibold mb-4">Schedule to Publer</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-me-charcoal/55 block mb-1">Account</label>
-                <select
-                  value={scheduleForm.account_id}
-                  onChange={e => setScheduleForm(f => ({ ...f, account_id: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
-                >
-                  <option value="">Select account…</option>
-                  {publerAccounts.map(a => (
-                    <option key={a.id} value={a.id}>{a.name} ({a.provider})</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-me-charcoal/55 block mb-1">Schedule Time (NZT)</label>
-                <input
-                  type="datetime-local"
-                  value={scheduleForm.scheduled_at}
-                  onChange={e => setScheduleForm(f => ({ ...f, scheduled_at: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-me-charcoal/55 block mb-1">Caption</label>
-                <textarea
-                  value={scheduleForm.caption}
-                  onChange={e => setScheduleForm(f => ({ ...f, caption: e.target.value }))}
-                  rows={4}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white resize-none"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-5 justify-end">
-              <button
-                onClick={() => setPubModal(null)}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-me-ivory"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSchedule}
-                disabled={!scheduleForm.account_id || scheduleLoading}
-                className="px-3 py-1.5 text-sm bg-[#5C8A4A] text-white rounded disabled:opacity-50 hover:bg-[#5C8A4A] flex items-center gap-2"
-              >
-                {scheduleLoading ? (
-                  <>
-                    <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    Scheduling…
-                  </>
-                ) : (
-                  'Schedule'
-                )}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

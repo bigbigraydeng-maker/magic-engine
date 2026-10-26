@@ -17,6 +17,39 @@ const BASE_FIELDS = [
 ].join('\n')
 
 describe('checkFrozenFields', () => {
+  const brokenValue = "查 captureClientSnapshots(..., reason: 'kernel_post') 的调用方"
+  const brokenBase = () => fm(BASE_FIELDS.replace('跑一遍抓取脚本看还报不报错', brokenValue))
+  const wrappedHead = (value = brokenValue) => fm(BASE_FIELDS.replace(
+    'verify_how: 跑一遍抓取脚本看还报不报错', `verify_how: |-\n  ${value}`,
+  ))
+
+  it('only repairs invalid YAML by wrapping the exact single-line verification text', () => {
+    const result = checkFrozenFields('2026-09-24-foo.md', wrappedHead(), brokenBase())
+    expect(result.baseParseError).not.toBeNull()
+    expect(result.parseError).toBeNull()
+    expect(result.violations).toEqual([])
+  })
+
+  it.each([
+    ['changed character', () => brokenBase(), () => wrappedHead(brokenValue + '改')],
+    ['valid base YAML', () => fm(BASE_FIELDS), () => wrappedHead('跑一遍抓取脚本看还报不报错')],
+    ['business validation failure only', () => fm(BASE_FIELDS.replace('status: decided', 'status: bogus')), () => wrappedHead('跑一遍抓取脚本看还报不报错')],
+    ['duplicate verification key', () => brokenBase().replace('\n---\n正文', '\nverify_how: other\n---\n正文'), () => wrappedHead()],
+    ['another duplicate key', () => brokenBase().replace('\n---\n正文', '\nsource: session:abc12345\n---\n正文'), () => wrappedHead()],
+    ['base continuation', () => brokenBase().replace(brokenValue, brokenValue + '\n  continuation'), () => wrappedHead()],
+    ['invalid head', () => brokenBase(), () => wrappedHead().replace('status: decided', 'status: bogus')],
+    ['noncanonical wrapping', () => brokenBase(), () => wrappedHead().replace('verify_how: |-', 'verify_how: >-')],
+    ['hash truncation', () => brokenBase().replace(brokenValue, brokenValue + ' #2010'), () => wrappedHead(brokenValue + ' #2010')],
+    ['other syntax error', () => brokenBase().replace('title: 换掉旧的抓取库', 'title: [unclosed'), () => wrappedHead()],
+  ] as const)('rejects %s', (_name, base, head) => {
+    expect(checkFrozenFields('2026-09-24-foo.md', head(), base()).violations.map(v => v.field)).toContain('verify_how')
+  })
+
+  it('still freezes other fields during an otherwise valid wrapping repair', () => {
+    const result = checkFrozenFields('2026-09-24-foo.md', wrappedHead().replace('title: 换掉旧的抓取库', 'title: 新标题'), brokenBase())
+    expect(result.violations.map(v => v.field)).toEqual(['title'])
+  })
+
   it('新卡（base 不存在）→ 不检查冻结字段', () => {
     const headText = fm(BASE_FIELDS)
     const { violations } = checkFrozenFields('2026-09-24-foo.md', headText, null)
@@ -117,6 +150,66 @@ describe('checkFrozenFields', () => {
     const { violations } = checkFrozenFields('2026-09-24-foo.md', headText, baseText)
     expect(violations).toHaveLength(1)
     expect(violations[0].field).toBe('verify_how')
+  })
+
+  it('坏卡可以把编号改成文件名，并把 PR #数字改成同一个 pr 编号', () => {
+    const file = '2026-10-25-meta-client-token-db-verify.md'
+    const base = fm([
+      'id: task_meta_client_token_db_verify',
+      'title: 验证口令',
+      'status: decided',
+      'owner: agent',
+      'decided_on: 2026-10-25',
+      'source: PR #3145',
+      'verify_by: 2026-11-01',
+      'verify_how: 看三件事',
+    ].join('\n'), '正文不动')
+    const head = base
+      .replace('id: task_meta_client_token_db_verify', 'id: 2026-10-25-meta-client-token-db-verify')
+      .replace('source: PR #3145', 'source: pr:3145')
+    const result = checkFrozenFields(file, head, base)
+    expect(result.violations).toEqual([])
+    expect(result.parseError).toBeNull()
+    expect(result.baseParseError?.reason).toContain('对不上')
+  })
+
+  it.each([
+    ['换成别的 PR 号', 'id: 2026-10-25-meta-client-token-db-verify', 'source: pr:9999', 'source'],
+    ['编号仍和文件名不同', 'id: 2026-10-25-other', 'source: pr:3145', 'id'],
+    ['改了标题', 'id: 2026-10-25-meta-client-token-db-verify', 'source: pr:3145', 'title'],
+    ['改了验收说法', 'id: 2026-10-25-meta-client-token-db-verify', 'source: pr:3145', 'verify_how'],
+  ])('坏卡拼写修复时不许%s', (_name, idLine, sourceLine, field) => {
+    const file = '2026-10-25-meta-client-token-db-verify.md'
+    const base = fm([
+      'id: task_meta_client_token_db_verify',
+      'title: 验证口令',
+      'status: decided',
+      'owner: agent',
+      'decided_on: 2026-10-25',
+      'source: PR #3145',
+      'verify_by: 2026-11-01',
+      'verify_how: 看三件事',
+    ].join('\n'), '正文不动')
+    let head = base.replace('id: task_meta_client_token_db_verify', idLine).replace('source: PR #3145', sourceLine)
+    if (field === 'title') head = head.replace('title: 验证口令', 'title: 新标题')
+    if (field === 'verify_how') head = head.replace('verify_how: 看三件事', 'verify_how: 换成别的验法')
+    expect(checkFrozenFields(file, head, base).violations.map((v) => v.field)).toContain(field)
+  })
+
+  it('已经合法的卡不能借这条修法改编号', () => {
+    const file = '2026-10-25-meta-client-token-db-verify.md'
+    const base = fm([
+      'id: 2026-10-25-meta-client-token-db-verify',
+      'title: 验证口令',
+      'status: decided',
+      'owner: agent',
+      'decided_on: 2026-10-25',
+      'source: pr:3145',
+      'verify_by: 2026-11-01',
+      'verify_how: 看三件事',
+    ].join('\n'))
+    const head = base.replace('id: 2026-10-25-meta-client-token-db-verify', 'id: 2026-10-25-renamed')
+    expect(checkFrozenFields(file, head, base).violations.map((v) => v.field)).toContain('id')
   })
 
   it('base 解析失败 → 跳过检查但返回 baseParseError', () => {

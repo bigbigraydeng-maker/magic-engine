@@ -4,6 +4,8 @@ import { checkImageStatus } from '@/lib/visual/atlas'
 import { checkVideoStatus } from '@/lib/visual/seedance'
 import { checkAvatarStatus } from '@/lib/visual/heygen'
 import { uploadFromUrl } from '@/lib/visual/storage'
+import { requireSession } from '@/lib/auth/require-session'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { GenerationErrorResponse } from '@/lib/visual/generation-config'
 
 type ProviderResult = {
@@ -87,6 +89,11 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { assetId: string } }
 ) {
+  const session = await requireSession()
+  if (!session.ok) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
     const { data: asset } = await supabaseAdmin
       .from('visual_assets')
@@ -96,6 +103,16 @@ export async function GET(
 
     if (!asset) {
       return NextResponse.json({ success: false, error: 'Asset not found' }, { status: 404 })
+    }
+
+    // Other clients' assets look like "not found" so ids can't be probed
+    const access = await requireDashboardClientAccess(asset.client_id)
+    if (!access.ok) {
+      const hidden = access.status === 403
+      return NextResponse.json(
+        { success: false, error: hidden ? 'Asset not found' : access.error },
+        { status: hidden ? 404 : access.status },
+      )
     }
 
     if (asset.generation_status === 'ready' || asset.generation_status === 'failed') {

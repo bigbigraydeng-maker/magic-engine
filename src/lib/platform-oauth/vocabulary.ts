@@ -22,6 +22,8 @@ export const PLATFORM_PROVIDERS = {
   GOOGLE_GSC: 'google_gsc',
   META:       'meta',
   TIKTOK:     'tiktok',
+  /** Instagram Login professional ID; location_name stores the verified username. */
+  INSTAGRAM:  'instagram',
   GOOGLE_ADS: 'google_ads',
   /**
    * 客户自己的邮箱（Microsoft Graph —— 同一套接口既服务 Outlook.com
@@ -32,6 +34,12 @@ export const PLATFORM_PROVIDERS = {
   GOOGLE_GTM: 'google_gtm',
   /** WhatsApp Business number: one row per (client, phone_number_id); access token is the number's own token. */
   WHATSAPP: 'whatsapp',
+  /**
+   * YouTube channel publishing: account_id = channel id. Publishing selects the row for the
+   * client's target channel via getYouTubePublishToken (youtube-publish/token.ts); the generic
+   * getValidToken() would pick the newest row per client, so do not use it for publishing.
+   */
+  GOOGLE_YOUTUBE: 'google_youtube',
 } as const
 
 export type PlatformProvider = (typeof PLATFORM_PROVIDERS)[keyof typeof PLATFORM_PROVIDERS]

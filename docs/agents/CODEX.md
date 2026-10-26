@@ -289,4 +289,4 @@ DEFER — <real blocker>
 | SEMrush | Keyword Intelligence |
 | Jina.ai | Site Analyzer |
 | Airtable | Content Workspace |
-| Publer | Publishing Hub |
+| Publer | Publishing Hub（Publer 已于 2026-10 删除） |

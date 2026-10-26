@@ -17,7 +17,8 @@
  */
 
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from './contact-model'
-import { segmentContact } from './segments'
+import { segmentContact, SEGMENT_META, type SegmentResult } from './segments'
+import { senderShapeOf } from './enquiry-screen/sender-shape'
 import { type IntentLevel } from './next-action'
 import {
   buildSections,
@@ -41,6 +42,49 @@ export interface PriorityViewInput {
   focusContactId?: string
   /** 每人最新 AI 摘要的意向（contactId → intent）。缺省 = 没有摘要，所有人 intent=null。 */
   briefs?: ReadonlyMap<string, { intent: IntentLevel | null }>
+}
+
+/**
+ * 发件地址一看就不像客人来咨询的（群发 / 供应商系统通知 / 推销 / 平台系统账号），
+ * 从「今天要联系」挪到「先放着」，并写明为什么。
+ *
+ * 三条边界，都是 PM 2026-10-21 定的「不许凭空消失」：
+ *  1. **只降不升**：本来就在「先放着」的（含「别再联系」）原样不动，不会被这条规则抬上来；
+ *  2. **只挪不删**：人照样在「全部客人」和「先放着」里看得见，抽屉、历史、联系方式全在；
+ *  3. **人碰过就不再碰**：只要真人把这个人推进过流程（阶段已经不是初始态），机器就再不降级他 ——
+ *     这是唯一的人工推翻通道，跟 `enquiry-screen/eligibility.ts` 的 `human_stage_change` 同一条口径。
+ *     没有这条，判错的人会在每次请求里被重新降回去，谁也翻不过来（子牙复审 P0-2）。
+ *  4. **保留原本的建议渠道**：不改成 'none'。抽屉的按钮是按渠道算的，改成 'none' 会让一个被误判的
+ *     真客人连「回了他」都点不了（子牙复审 P1-2）。要收敛按钮应该按分段判，不是伪造渠道。
+ */
+function demoteNonEnquirySender(row: ContactRowLike, seg: SegmentResult): SegmentResult {
+  // 只碰「进线了，还没人联系」这一段。客户刚回了信（replied）、或员工自己约了今天回电
+  // （callback_due）的人绝不降级 —— 那是真人已经在跟的事，机器不许静默取消
+  // （魏征复审 P0-2）。
+  if (seg.segment !== 'new_untouched') return seg
+  if (hasHumanProgressed(row.stage)) return seg
+  const shape = senderShapeOf({ email: row.primary_email, displayName: row.display_name })
+  if (!shape) return seg
+  const meta = SEGMENT_META.not_enquiry_suspect
+  return {
+    ...seg,
+    segment: 'not_enquiry_suspect',
+    temperature: meta.temperature,
+    priority: meta.priority,
+    reason: `看着不是客人来咨询（${shape.reason}）`,
+  }
+}
+
+/**
+ * 这个人有没有被真人推进过流程。
+ *
+ * 空阶段、或仍停在「新线索」这类初始态 = 没人碰过，机器可以降级；
+ * 其余（已联系 / 已报价 / 已付定金 …）= 真人已经认下这个人，机器不许再判他不是客人。
+ */
+const UNTOUCHED_STAGE_KEYS: ReadonlySet<string> = new Set(['', 'new', 'new_lead', 'lead', 'unqualified'])
+
+function hasHumanProgressed(stage: string | null): boolean {
+  return !UNTOUCHED_STAGE_KEYS.has((stage ?? '').trim().toLowerCase())
 }
 
 export interface PriorityViewOutput<T> {
@@ -71,7 +115,7 @@ export function buildPriorityView<T>(
     byId.set(c.id, c)
     const tps = byContact.get(c.id) ?? []
     const model = buildContactModel(c, tps, input.stageMeta)
-    const seg = segmentContact(model, input.now)
+    const seg = demoteNonEnquirySender(c, segmentContact(model, input.now))
     ranked.push({
       contactId: c.id,
       seg,

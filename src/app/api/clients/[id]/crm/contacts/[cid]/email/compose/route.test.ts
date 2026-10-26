@@ -1,0 +1,61 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { NextRequest } from 'next/server'
+
+vi.mock('@/lib/auth/client-access', () => ({
+  requirePaidClientAccess: vi.fn(async () => ({ ok: true, allowedClientId: 'client-a', user: { email: 'Sales@Client.co.nz ' } })),
+}))
+vi.mock('@/lib/microsoft/mail-send-new-prod', () => ({ createMailNewDeps: vi.fn(() => ({ marker: 'deps' })) }))
+vi.mock('@/lib/microsoft/mail-send-new', () => ({ sendMailNew: vi.fn() }))
+
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { sendMailNew } from '@/lib/microsoft/mail-send-new'
+import { POST } from './route'
+
+const post = (body: unknown, raw?: string) =>
+  POST(new NextRequest('http://x/api', { method: 'POST', body: raw ?? JSON.stringify(body) }), { params: { id: 'client-a', cid: 'contact-1' } })
+
+beforeEach(() => vi.clearAllMocks())
+
+describe('POST email/compose', () => {
+  it('passes client, contact, normalised sender email and the body fields to sendMailNew', async () => {
+    ;(sendMailNew as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, messageId: 'm1', conversationId: 'c1' })
+    const res = await post({ subject: 'S', body: 'B', requestId: 'r', expectedRecipient: 'a@b.com' })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true, messageId: 'm1', conversationId: 'c1', duplicate: false })
+    expect(sendMailNew).toHaveBeenCalledWith(
+      { clientId: 'client-a', contactId: 'contact-1', subject: 'S', body: 'B', sentByEmail: 'sales@client.co.nz', requestId: 'r', expectedRecipient: 'a@b.com' },
+      { marker: 'deps' },
+    )
+  })
+
+  it('maps a failure to its status + reason + message', async () => {
+    ;(sendMailNew as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, status: 403, reason: 'do_not_contact', error: 'no' })
+    const res = await post({})
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'no', reason: 'do_not_contact' })
+  })
+
+  it('rejects unauthenticated callers without touching sendMailNew', async () => {
+    ;(requirePaidClientAccess as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, status: 401, error: 'login' })
+    const res = await post({})
+    expect(res.status).toBe(401)
+    expect(sendMailNew).not.toHaveBeenCalled()
+  })
+
+  it('refuses when the sender identity cannot be confirmed', async () => {
+    ;(requirePaidClientAccess as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, allowedClientId: 'client-a', user: { email: null } })
+    const res = await post({})
+    expect(res.status).toBe(403)
+    expect(sendMailNew).not.toHaveBeenCalled()
+  })
+
+  it('400 on malformed JSON, and a non-object JSON body is passed on as empty fields (sendMailNew rejects it as invalid_input)', async () => {
+    const bad = await post(null, '{not json')
+    expect(bad.status).toBe(400)
+    expect(sendMailNew).not.toHaveBeenCalled()
+    ;(sendMailNew as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, status: 400, reason: 'invalid_input', error: 'x' })
+    const arr = await post(null, '[1,2]')
+    expect(arr.status).toBe(400)
+    expect(sendMailNew).toHaveBeenCalledTimes(1)
+  })
+})

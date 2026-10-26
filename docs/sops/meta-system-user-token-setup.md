@@ -1,3 +1,5 @@
+> **可能过期，见记忆 `reference-cts-meta-page-token-bypasses-dead-system-token` 与 `project-me-meta-leads-sync-token-dead`：CTS 的 system user 令牌（env 变量）2026-09-23 实测已失效，实际走 `platform_oauth_connections` 里的主页令牌。以下正文未改，按它配置前先核对当前令牌路径。**
+
 # SOP — Meta System User Token 配置（CTS + Oztop）
 
 > **目的**：拿到 **永不过期** 的 Meta System User Token，让 ME 后台能调 Meta Ads API 跑广告闭环。

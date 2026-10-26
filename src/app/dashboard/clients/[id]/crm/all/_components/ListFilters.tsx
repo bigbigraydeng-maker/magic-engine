@@ -1,9 +1,19 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { type StageOption } from '../../_components/ComposeNote'
 import { BatchEmail, type BatchEmailBucket } from '../../_components/BatchEmail'
 import { type KindView } from '@/lib/crm/kind-filter'
 import { type ContactRow } from './contact-table-types'
+
+/**
+ * 跟进人筛选的三挡 + 具体人（issue #3158 part 3）。
+ *   - 'all' = 全部，不筛（默认）
+ *   - 'me' = 自己负责的 —— 服务端用 `access.user.email` 判
+ *   - 'unassigned' = 没分配的
+ *   - 具体邮箱字符串 = 筛这个人
+ */
+export type AssigneeView = 'all' | 'me' | 'unassigned' | string
 
 type FilterProps = {
   stages: StageOption[]
@@ -13,6 +23,11 @@ type FilterProps = {
   onToggleGrouped: () => void
   kindFilter: KindView
   onKindFilterChange: (k: KindView) => void
+  /** 当前的跟进人筛选 —— 分段模式下不生效（服务端 priority 视图这一轮不接）。 */
+  assigneeFilter: AssigneeView
+  onAssigneeFilterChange: (v: AssigneeView) => void
+  /** 客户 id —— 候选名单从 /api/clients/[id]/crm/assignees 拉。 */
+  clientId: string
 }
 
 function StageFilter(props: Pick<FilterProps, 'stages' | 'stageFilter' | 'onStageFilterChange'>) {
@@ -69,24 +84,99 @@ function KindFilter(props: Pick<FilterProps, 'kindFilter' | 'onKindFilterChange'
   )
 }
 
+/**
+ * 第一行：先选「看谁」（全部 / 终端客户 / 同行），智能分段开关靠右。
+ * 阶段筛选在它下面——先收窄人群，再按阶段细分，顺序跟人的想法一致（2026-10-14 好用性整理）。
+ */
 function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' | 'kindFilter' | 'onKindFilterChange'>) {
   const { grouped, onToggleGrouped, kindFilter, onKindFilterChange } = props
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={onToggleGrouped}
-        className="rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
-      >
-        {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
-      </button>
+      {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
+      {!grouped && <KindFilter kindFilter={kindFilter} onKindFilterChange={onKindFilterChange} />}
       {grouped && (
         <span className="text-xs text-me-charcoal/45">
           系统读完往来记录和 AI 摘要，告诉你今天该先联系谁、做什么；段内按紧急程度排，点表头不改顺序
         </span>
       )}
-      {/* 终端客户 / 同行 筛选（2026-09-28 WP-B3）——分段模式下不显示，服务端还没接。 */}
-      {!grouped && <KindFilter kindFilter={kindFilter} onKindFilterChange={onKindFilterChange} />}
+      <button
+        type="button"
+        onClick={onToggleGrouped}
+        className="ml-auto rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
+      >
+        {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
+      </button>
+    </div>
+  )
+}
+
+/**
+ * 跟进人筛选条 —— 分段视图下不显示（服务端 priority 视图这一轮没接 ?assignee）。
+ *
+ * 「我的待跟进」是入口：候选为空（这个客户还没配跟进人）时也**保留** `👤 我负责`
+ * 这个按钮——点下去服务端返回空列表，员工能看出来「名单还没配」，不要悄悄把
+ * 入口藏起来让人以为自己没线索可跟。
+ */
+function AssigneeFilter(props: {
+  clientId: string
+  value: AssigneeView
+  onChange: (v: AssigneeView) => void
+}) {
+  const { clientId, value, onChange } = props
+  const [candidates, setCandidates] = useState<string[] | null>(null)
+  const [viewerEmail, setViewerEmail] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/crm/assignees`)
+        if (!res.ok) return
+        const json = (await res.json()) as { assignees?: { email: string }[]; viewerEmail?: string | null }
+        if (cancelled) return
+        setCandidates((json.assignees ?? []).map((a) => a.email))
+        setViewerEmail(json.viewerEmail ?? null)
+      } catch {
+        // 读失败就按「没配」渲染 —— 不炸整块筛选条
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [clientId])
+
+  const chipCls = (on: boolean) =>
+    `rounded-full border border-black/10 px-3 py-1 text-xs font-semibold ${
+      on ? 'bg-me-charcoal text-white' : 'text-me-charcoal/60'
+    }`
+
+  // 自己不在候选里 = 还没把自己放进 round-robin 名单；仍然给「我负责」按钮，
+  // 服务端会按登录邮箱筛，筛到自己之前手动改过的那几条。
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="assignee-filter">
+      <span className="text-xs text-me-charcoal/45">跟进人：</span>
+      <button className={chipCls(value === 'all')} onClick={() => onChange('all')}>
+        全部
+      </button>
+      <button className={chipCls(value === 'me')} onClick={() => onChange('me')}>
+        👤 我负责
+      </button>
+      <button className={chipCls(value === 'unassigned')} onClick={() => onChange('unassigned')}>
+        未分配
+      </button>
+      {candidates !== null &&
+        candidates
+          .filter((email) => !viewerEmail || email.toLowerCase() !== viewerEmail.toLowerCase())
+          .map((email) => (
+            <button
+              key={email}
+              className={chipCls(value === email)}
+              onClick={() => onChange(email)}
+              title={email}
+            >
+              {email}
+            </button>
+          ))}
     </div>
   )
 }
@@ -94,16 +184,23 @@ function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' |
 export function ListFilters(props: FilterProps) {
   return (
     <>
-      <StageFilter
-        stages={props.stages}
-        stageFilter={props.stageFilter}
-        onStageFilterChange={props.onStageFilterChange}
-      />
       <GroupToggleRow
         grouped={props.grouped}
         onToggleGrouped={props.onToggleGrouped}
         kindFilter={props.kindFilter}
         onKindFilterChange={props.onKindFilterChange}
+      />
+      {!props.grouped && (
+        <AssigneeFilter
+          clientId={props.clientId}
+          value={props.assigneeFilter}
+          onChange={props.onAssigneeFilterChange}
+        />
+      )}
+      <StageFilter
+        stages={props.stages}
+        stageFilter={props.stageFilter}
+        onStageFilterChange={props.onStageFilterChange}
       />
     </>
   )

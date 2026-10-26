@@ -13,6 +13,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { filterUndispatched, planTaskKey } from './plan-guard'
 import type {
   DispatchResult,
   MarketingPlan,
@@ -83,6 +84,7 @@ function buildStepsJson(task: PlanTask): Record<string, unknown> {
   return {
     source: 'marketing_plan',
     kind: task.kind,
+    ...(task.promo_ref ? { promo_ref: task.promo_ref } : {}),
     platform: platformSingle,         // 兼容旧字段
     platforms: platformsArray,        // 新：量产扇出用
     topic: task.topic ?? null,
@@ -196,12 +198,35 @@ async function createProductionPackagesFromPlan(
 
 export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchResult> {
   const tasks = plan.plan_data?.tasks ?? []
-
-  if (tasks.length === 0) {
-    return { marketing_plan_id: plan.id, tasks_created: 0, task_ids: [], packages_created: 0, package_ids: [] }
+  const empty: DispatchResult = {
+    marketing_plan_id: plan.id, tasks_created: 0, tasks_skipped: 0,
+    task_ids: [], packages_created: 0, package_ids: [],
   }
 
-  const rows = tasks.map((task, idx) => ({
+  if (tasks.length === 0) return empty
+
+  // 去重：批准重试 / 并发点两次时，这份计划已经派过的任务不再重复插入。
+  // 先查后插没有数据库唯一约束兜底（设计稿 §0.1：第一步接受较弱保证），
+  // 残余风险是两个人「同时」点批准各派一份，后果只是多出内部待办。
+  const { data: existing, error: existingErr } = await supabaseAdmin
+    .from('execution_items')
+    .select('title, due_date, steps_json')
+    .eq('marketing_plan_id', plan.id)
+    .eq('source', 'marketing_plan')
+  if (existingErr) {
+    throw new Error(`Failed to read existing plan tasks: ${existingErr.message}`)
+  }
+  const existingKeys = new Set(
+    (existing ?? []).map(r => {
+      const sj = (r.steps_json ?? {}) as { kind?: string; platform?: string | null; promo_ref?: { step_id?: string } }
+      return planTaskKey(String(r.title ?? ''), r.due_date as string | null, sj.kind, sj.platform, sj.promo_ref?.step_id)
+    }),
+  )
+  const fresh = filterUndispatched(tasks, existingKeys)
+  const skipped = tasks.length - fresh.length
+  if (fresh.length === 0) return { ...empty, tasks_skipped: skipped }
+
+  const rows = fresh.map(({ task, index }) => ({
     client_id:         plan.client_id,
     prescription_id:   null,
     marketing_plan_id: plan.id,
@@ -215,7 +240,7 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
     status:            'pending',
     steps_json:        buildStepsJson(task),
     execution_target:  buildExecutionTarget(task),
-    sort_order:        idx,
+    sort_order:        index,
     due_date:          task.due_date,
   }))
 
@@ -230,11 +255,16 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
 
   const ids = (data ?? []).map(r => r.id as string)
 
-  const { packages_created, package_ids } = await createProductionPackagesFromPlan(plan, tasks, ids)
+  const { packages_created, package_ids } = await createProductionPackagesFromPlan(
+    plan,
+    fresh.map(f => f.task),
+    ids,
+  )
 
   return {
     marketing_plan_id: plan.id,
     tasks_created:     ids.length,
+    tasks_skipped:     skipped,
     task_ids:          ids,
     packages_created,
     package_ids,
@@ -243,7 +273,17 @@ export async function dispatchPlanTasks(plan: MarketingPlan): Promise<DispatchRe
 
 // ─── 反向操作：删除某 Plan 派发的所有未完成任务（用于"撤回审批"场景）─────────
 
-export async function revokePlanTasks(planId: string): Promise<{ revoked: number }> {
+export async function revokePlanTasks(planId: string, clientId: string): Promise<{ revoked: number }> {
+  // 先确认计划属于这个客户，再动任何关联资源（不靠 UUID 保密）
+  const { data: owned, error: ownErr } = await supabaseAdmin
+    .from('marketing_plans')
+    .select('id')
+    .eq('id', planId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (ownErr) throw new Error(`Failed to verify plan ownership: ${ownErr.message}`)
+  if (!owned) throw new Error('Plan not found')
+
   const { data, error } = await supabaseAdmin
     .from('execution_items')
     .delete()
@@ -254,5 +294,35 @@ export async function revokePlanTasks(planId: string): Promise<{ revoked: number
   if (error) {
     throw new Error(`Failed to revoke plan tasks: ${error.message}`)
   }
+
+  // 批准时生成的生产包：还没开始（draft）的一并归档，免得留下指向已删任务的陈旧包
+  const { error: pkgErr } = await supabaseAdmin
+    .from('production_packages')
+    .update({ status: 'archived' })
+    .eq('marketing_plan_id', planId)
+    .eq('status', 'draft')
+  if (pkgErr) {
+    throw new Error(`Failed to archive plan production packages: ${pkgErr.message}`)
+  }
   return { revoked: (data ?? []).length }
+}
+
+/** 撤回批准前的检查：已开工的任务 / 已开始的生产包还在跑，就不能撤回。 */
+export async function countRevokeBlockers(planId: string): Promise<{ tasks_in_progress: number; packages_started: number }> {
+  const [tasks, pkgs] = await Promise.all([
+    supabaseAdmin
+      .from('execution_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('marketing_plan_id', planId)
+      .eq('status', 'in_progress'),
+    supabaseAdmin
+      .from('production_packages')
+      .select('id', { count: 'exact', head: true })
+      .eq('marketing_plan_id', planId)
+      // 只数还在进行的生产包；已发布 / 已衡量 / 失败 这类终态处理不了，不能永远挡住退回
+      .in('status', ['generating', 'ready_for_review', 'revision_requested', 'approved', 'scheduled']),
+  ])
+  if (tasks.error) throw new Error(`Failed to check in-progress tasks: ${tasks.error.message}`)
+  if (pkgs.error) throw new Error(`Failed to check started packages: ${pkgs.error.message}`)
+  return { tasks_in_progress: tasks.count ?? 0, packages_started: pkgs.count ?? 0 }
 }

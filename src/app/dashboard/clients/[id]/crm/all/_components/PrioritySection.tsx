@@ -8,6 +8,31 @@
  * 回调 —— 那些逻辑一行都没动。
  */
 
+const HINT_SEPARATORS = ['；', ';', '，', ',', '。'] as const
+
+/**
+ * 段头里那行说明只留最前面那一小截 —— 完整的话太长，会把段名和人数挤到换行。
+ * 完整文本仍然挂在 title 上，鼠标停上去能看到。
+ */
+export function shortHint(hint: string): string {
+  const trimmed = hint.trim()
+  if (trimmed.length <= 12) return trimmed
+
+  let cut = trimmed.length
+  for (const separator of HINT_SEPARATORS) {
+    const index = trimmed.indexOf(separator)
+    if (index !== -1 && index < cut) cut = index
+  }
+
+  let short = trimmed.slice(0, cut).trim()
+  if (short.endsWith('个')) {
+    const before = short.charAt(short.length - 2)
+    if (/\d/.test(before) || before === ' ') short = short.slice(0, -1).trimEnd()
+  }
+
+  return short.length > 0 ? short : trimmed
+}
+
 export interface PrioritySectionHeaderProps {
   title: string
   hint: string
@@ -23,7 +48,7 @@ export interface PrioritySectionHeaderProps {
 export function PrioritySectionHeader({ title, hint, total, progress, open, colSpan, onToggle }: PrioritySectionHeaderProps) {
   return (
     <tr className="border-y border-me-charcoal/10 bg-me-ivory/60">
-      <td colSpan={colSpan} className="px-4 py-2">
+      <td colSpan={colSpan} className="px-4 py-1.5">
         <button
           type="button"
           onClick={onToggle}
@@ -46,7 +71,9 @@ export function PrioritySectionHeader({ title, hint, total, progress, open, colS
               </span>
             )
           )}
-          <span className="truncate text-xs text-me-charcoal/45">{hint}</span>
+          <span className="truncate text-xs text-me-charcoal/45" title={hint}>
+            {shortHint(hint)}
+          </span>
         </button>
       </td>
     </tr>

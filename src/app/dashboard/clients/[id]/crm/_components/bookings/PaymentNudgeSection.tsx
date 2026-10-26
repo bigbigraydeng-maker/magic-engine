@@ -58,12 +58,12 @@ export function PaymentNudgeSection({
       aria-labelledby={headingId}
       className={
         compact
-          ? 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-me-charcoal/15 bg-white px-4 py-2'
+          ? 'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-me-charcoal/10 bg-white px-3 py-1.5 text-xs'
           : 'rounded-xl border border-me-charcoal/15 bg-white p-4'
       }
     >
       <div className={compact ? 'flex items-baseline gap-2' : 'flex flex-wrap items-baseline justify-between gap-2'}>
-        <h2 id={headingId} className={compact ? 'text-sm font-black text-me-charcoal' : 'text-lg font-black text-me-charcoal'}>
+        <h2 id={headingId} className={compact ? 'text-xs font-black text-me-charcoal' : 'text-lg font-black text-me-charcoal'}>
           付款要催
         </h2>
         <span className={MUTED_TEXT}>{countText}</span>
@@ -103,8 +103,14 @@ export function PaymentNudgeSection({
 
       {nudge.collapsedOverdue > 0 ? (
         <div className={compact ? 'flex flex-wrap items-center gap-x-3 gap-y-1' : 'mt-3'}>
-          <p className={MUTED_TEXT}>{`逾期很久（${nudge.collapsedOverdue} 单）`}</p>
-          <p className={MUTED_TEXT}>已逾期超过 14 天，不再逐条列出。</p>
+          {compact ? (
+            <p className={MUTED_TEXT}>{`逾期很久（${nudge.collapsedOverdue} 单）· 超过 14 天不逐条列出`}</p>
+          ) : (
+            <>
+              <p className={MUTED_TEXT}>{`逾期很久（${nudge.collapsedOverdue} 单）`}</p>
+              <p className={MUTED_TEXT}>已逾期超过 14 天，不再逐条列出。</p>
+            </>
+          )}
           {nudge.collapsedRows.length > 0 ? (
             <button
               type="button"

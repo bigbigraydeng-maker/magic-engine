@@ -168,7 +168,7 @@ async function loadAdDaily(clientId: string, adAccountId: string, date: string):
   return Array.from(byKey.values())
 }
 
-async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string, clientPageId: string | null, evaluatedAt: string): Promise<AccountInput> {
+async function loadAccount(clientId: string, adAccountId: string, shared: boolean, hiddenFromAdHealth: boolean, date: string, clientPageId: string | null, evaluatedAt: string): Promise<AccountInput> {
   const tzRow = await supabaseAdmin.from('ad_entity_snapshots').select('timezone_name, currency')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'account')
     .order('captured_at', { ascending: false }).limit(1).maybeSingle()
@@ -204,7 +204,7 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
     .map(r => ({ entity_id: r.entity_id, captured_at: r.captured_at, audience_count_lower: r.audience_count_lower }))
 
   const account: AccountInput = {
-    adAccountId, shared, timezone, currency,
+    adAccountId, shared, hiddenFromAdHealth, timezone, currency,
     snapshots: latestSnapshotsAsOf(snapshots, endMs),
     daily: daily.map(r => ({
       ...r,
@@ -259,6 +259,32 @@ async function loadStrategyConfig(clientId: string): Promise<AdStrategyConfig> {
 }
 
 /**
+ * 后台标了「不在广告健康页显示」的账户（`client_meta_ad_accounts.hidden_from_ad_health`，PR 3012）。
+ * 🔴 读失败**不能**当成「全都隐藏」——那会把真问题藏起来；失败就当没隐藏（fail visible），只打日志。
+ * 账户号按本文件其它地方的口径去掉 `act_` 前缀再比。
+ */
+async function loadHiddenAdAccounts(clientId: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabaseAdmin.from('client_meta_ad_accounts')
+      .select('ad_account_id, hidden_from_ad_health').eq('client_id', clientId)
+    if (error) {
+      console.warn(`[ads-diagnostics] client_meta_ad_accounts read failed, treating no account as hidden: ${error.message}`)
+      return new Set()
+    }
+    const hidden = new Set<string>()
+    for (const row of (data ?? []) as Array<{ ad_account_id: string | null; hidden_from_ad_health: boolean | null }>) {
+      if (!row.hidden_from_ad_health || !row.ad_account_id) continue
+      hidden.add(row.ad_account_id.replace(/^act_/, ''))
+    }
+    return hidden
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[ads-diagnostics] client_meta_ad_accounts read failed, treating no account as hidden: ${message}`)
+    return new Set()
+  }
+}
+
+/**
  * `known.digestRecipients`：调用方刚读过广告设置时把收件人传进来，这里就不再读第二遍——
  * 每日回拉已经读成功，诊断不该因为几秒后多余的一次重读失败而整天停跑、连带不发自动暂停事件（卫青复审）。
  * 没传才自己读，读失败照旧抛。
@@ -271,10 +297,12 @@ export async function loadDiagnosisInput(
 ): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
+  const hidden = await loadHiddenAdAccounts(clientId)
   const clientPageId = await loadClientPageId(clientId)
   const accounts: AccountInput[] = []
   for (const id of accountIds) {
-    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId, evaluatedAt))
+    const key = id.replace(/^act_/, '')
+    accounts.push(await loadAccount(clientId, id, shared.has(key), hidden.has(key), date, clientPageId, evaluatedAt))
   }
   const [outcome, digestRecipients] = await Promise.all([
     loadOutcomeConfig(clientId),

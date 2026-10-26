@@ -437,7 +437,7 @@ describe('counting rules', () => {
     expect(g.offlineHandled).toBe(1)
   })
 
-  it('the summary carries no money and no party size', () => {
+  it('the summary carries no money', () => {
     const s = summariseOverview(
       entriesOf(
         [
@@ -453,8 +453,6 @@ describe('counting rules', () => {
       TODAY,
       false,
     )
-    expect(JSON.stringify(s)).not.toMatch(
-      /amount|price|money|revenue|partySize|party_size/i,
-    )
+    expect(JSON.stringify(s)).not.toMatch(/amount|price|money|revenue/i)
   })
 })
