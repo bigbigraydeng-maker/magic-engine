@@ -1,12 +1,14 @@
 ---
 id: 2026-10-27-prescription-approve-draft-nonempty
 title: 同意处方只放行草稿而且写了内容的那一份
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-27
 source: session:bc-7a513
 verify_by: 2026-10-30
 verify_how: 合并后看同意接口测试：草稿且有内容通过；草稿但内容为空，以及退回、失败和其他非草稿状态都返回 4xx，并且不写库。退回接口行为不变。
+done_on: 2026-10-27
+done_ref: pr:3265
 ---
 同意处方只放行状态为草稿且内容非空的记录。退回、失败、空内容和其他非草稿状态返回 4xx，不写库。
 只改同意接口的校验和对应测试。不改退回接口，不改花钱、预算、发布、写 Meta、库表和权限。
