@@ -27,10 +27,16 @@ export function PlanDraftNoticeCard({ view }: { view: PlanDraftCardView | null }
  * Shows the plan-draft receipt next to the agree buttons. Drafting runs after the
  * prescription is saved, so re-read until the receipt settles (bounded, then stop).
  */
-export function PlanDraftNotice({ clientId, prescriptionId }: { clientId: string; prescriptionId: string }) {
+export function PlanDraftNotice({ clientId, prescriptionId, refineRound = 0 }: {
+  clientId: string
+  prescriptionId: string
+  /** Bumped by the parent after each successful refine (same prescription id), so the old receipt is dropped and re-read. */
+  refineRound?: number
+}) {
   const [view, setView] = useState<PlanDraftCardView | null>(null)
 
   useEffect(() => {
+    setView(null)
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
     const read = async (polls: number): Promise<void> => {
@@ -54,7 +60,7 @@ export function PlanDraftNotice({ clientId, prescriptionId }: { clientId: string
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [clientId, prescriptionId])
+  }, [clientId, prescriptionId, refineRound])
 
   return <PlanDraftNoticeCard view={view} />
 }

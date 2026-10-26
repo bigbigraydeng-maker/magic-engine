@@ -143,6 +143,7 @@ export default function NewPrescriptionPage() {
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(initialGoalId)
   const [goalsLoading, setGoalsLoading] = useState(true)
   // 该 Goal 下所有处方版本 (供版本切换 UI)
+  const [refineRound, setRefineRound]     = useState(0)
   const [versionList, setVersionList]   = useState<PrescriptionVersionItem[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
 
@@ -571,6 +572,7 @@ export default function NewPrescriptionPage() {
         return false
       }
       succeeded = true
+      setRefineRound(n => n + 1)
       const nv = outcome.snapshot.self_grade?.overall ?? null
       const delta = prevOverall != null && nv != null
         ? `评分 ${prevOverall.toFixed(1)} → ${nv.toFixed(1)}`
@@ -1097,7 +1099,7 @@ export default function NewPrescriptionPage() {
               </div>
             ) : (
               <div className="pt-2 pb-20 lg:pb-2 space-y-3">
-                {prescriptionId && <PlanDraftNotice clientId={clientId} prescriptionId={prescriptionId} />}
+                {prescriptionId && <PlanDraftNotice clientId={clientId} prescriptionId={prescriptionId} refineRound={refineRound} />}
                 <PrescriptionReviewActions
                   onApprove={() => void handleApprove()}
                   onReject={() => void handleReject()}
