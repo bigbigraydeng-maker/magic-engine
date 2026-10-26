@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary, type TimelineAiBrief, type StageSource } from './ContactTimeline'
+import { briefAge } from '@/lib/crm/brief-age'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { ComposeEmail } from './ComposeEmail'
@@ -157,6 +158,7 @@ export function PersonDrawer({
   // 不并进时间线接口：那个接口 2026-10-10 起有测试守着「不查 conversation_briefs」；
   // 也不并进列表接口：全带会把那页拖慢。换人时先清空，不让上一个人的概况留着。
   const [aiBrief, setAiBrief] = useState<TimelineAiBrief | null>(null)
+  const age = aiBrief ? briefAge(aiBrief.generatedAt) : null
   const contactId = row.contactId
   useEffect(() => {
     let alive = true
@@ -326,6 +328,17 @@ export function PersonDrawer({
               <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-me-ochre">
                 AI 概况 · 未核实，以原文为准
               </p>
+              {/* 生成时间：简报里常带「明天 11 点」「等待了 825 小时」这类跟生成时刻绑死的说法，
+                  不写时间员工没法判断新不新。超过 3 天多提醒一句。读不出时间就不写，不猜。 */}
+              {age && (
+                <p
+                  className={`mb-1.5 text-[11px] ${age.stale ? 'font-bold text-[#C2453A]' : 'text-me-charcoal/50'}`}
+                  data-testid="ai-overview-age"
+                >
+                  {age.label}
+                  {age.stale ? ' · 里面的时间说法可能已过时，请核对原文' : ''}
+                </p>
+              )}
               <p className="text-[13px] leading-relaxed text-me-charcoal/90">{aiBrief.summary}</p>
               {aiBrief.customerNeeds.length > 0 && (
                 <div className="mt-2 flex gap-2">
