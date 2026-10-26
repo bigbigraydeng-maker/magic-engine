@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import LoginForm from './login-form'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 interface Props {
   searchParams: { next?: string; error?: string }
@@ -37,7 +38,7 @@ function LogoMark({ size = 28 }: { size?: number }) {
 }
 
 export default function LoginPage({ searchParams }: Props) {
-  const next = searchParams.next ?? '/dashboard'
+  const next = safeInternalPath(searchParams.next, '/dashboard')
   const hasError = searchParams.error === 'auth_failed'
   const isMetaAdsAi = next.startsWith('/meta-ads-ai/')
   const loops = isMetaAdsAi ? [

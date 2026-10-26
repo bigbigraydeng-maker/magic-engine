@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { MeMark, MeMarkDefs } from '@/components/ui/me-mark'
 import PortalLoginForm from './portal-login-form'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 interface Props {
   searchParams: { next?: string; error?: string }
@@ -25,9 +26,7 @@ const portalLoops = [
 ]
 
 export default function PortalLoginPage({ searchParams }: Props) {
-  const next = searchParams.next?.startsWith('/') && !searchParams.next.startsWith('//')
-    ? searchParams.next
-    : '/portal'
+  const next = safeInternalPath(searchParams.next, '/portal')
   const hasError = searchParams.error === 'auth_failed'
   const fromProspect = next === '/prospect'
   const registerHref = `/portal/register?next=${encodeURIComponent(next)}`

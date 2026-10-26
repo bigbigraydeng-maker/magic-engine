@@ -23,10 +23,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { resolveRedirectForSession } from '@/lib/auth/resolve-redirect'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 function sanitizeNext(next: unknown): string {
-  if (typeof next !== 'string') return '/dashboard'
-  return next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
+  return safeInternalPath(next, '/dashboard')
 }
 
 export async function POST(request: NextRequest) {

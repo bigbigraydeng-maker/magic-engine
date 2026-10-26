@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { createBrowserClient } from '@supabase/ssr'
+import { isSafeInternalPath } from '@/lib/auth/safe-internal-path'
 
 type Locale = 'en' | 'zh-CN'
 
@@ -77,7 +78,7 @@ export default function LoginForm({ next, authFailed, locale = 'en' }: { next: s
       })
       if (!res.ok) throw new Error('Session could not be started')
       const data = await res.json() as { redirect?: unknown }
-      if (typeof data.redirect !== 'string' || !data.redirect.startsWith('/') || data.redirect.startsWith('//')) {
+      if (!isSafeInternalPath(data.redirect)) {
         throw new Error('Invalid sign-in destination')
       }
       window.location.href = data.redirect
