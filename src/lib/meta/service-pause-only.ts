@@ -5,6 +5,7 @@
  * 不点名任何客户。
  */
 
+import { getTrackingClientConfig } from '@/lib/ads-tracking-preflight/client-config'
 import { inngest } from '@/lib/inngest/client'
 import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
 import { setCampaignStatus } from '@/lib/meta/client'
@@ -46,8 +47,15 @@ export interface OwnedCampaign {
   status: string | null
 }
 
+export interface AllowedCampaign {
+  campaign_id: string
+  ad_account_id: string
+}
+
 export interface PauseOnlyDeps {
   enabled: boolean
+  /** 服务端维护的本客户可暂停系列名单；读不到 / 没配置返回 null。 */
+  allowedCampaigns: (clientId: string) => AllowedCampaign[] | null
   findByKey: (clientId: string, key: string) => Promise<PauseRow | null | 'error'>
   insert: (clientId: string, payload: Record<string, unknown>) => Promise<{ id: string } | null>
   update: (id: string, payload: Record<string, unknown>) => Promise<boolean>
@@ -199,11 +207,38 @@ async function pauseNew(deps: PauseOnlyDeps, body: PauseBody, token: string): Pr
   return result(200, 'paused', { paused: true, action_id: row.id, ...(note !== null ? { warning: note } : {}) })
 }
 
+/** fail-closed：名单读不到、系列不在名单、请求体账户与名单不符，一律不通过。 */
+function onAllowlist(deps: PauseOnlyDeps, body: PauseBody): boolean {
+  let list: AllowedCampaign[] | null = null
+  try {
+    list = deps.allowedCampaigns(body.client_id)
+  } catch {
+    return false
+  }
+  if (list === null) return false
+  return list.some(item => item.campaign_id === body.campaign_id && item.ad_account_id === body.ad_account_id)
+}
+
+/** 从客户系列配置取可暂停名单：按目标盯盘的系列 + 开投窗口的系列。 */
+export function allowedCampaignsFromConfig(clientId: string): AllowedCampaign[] | null {
+  const config = getTrackingClientConfig(clientId)
+  if (config === null) return null
+  const items: AllowedCampaign[] = []
+  for (const series of config.objective_watch?.series ?? []) {
+    items.push({ campaign_id: series.campaign_id, ad_account_id: series.ad_account_id ?? config.ad_account_id })
+  }
+  for (const id of config.launch_watch?.campaign_ids ?? []) {
+    items.push({ campaign_id: id, ad_account_id: config.ad_account_id })
+  }
+  return items.length > 0 ? items : null
+}
+
 /** 总开关关着、或同一把钥匙已经处理过，都不会再去改广告，也不会再发通知。 */
 export async function pauseCampaignServiceOnly(raw: unknown, deps: PauseOnlyDeps): Promise<PauseOnlyResult> {
   const parsed = parsePauseBody(raw)
   if (!parsed.ok) return result(422, parsed.reason)
   if (!deps.enabled) return result(200, 'switch_off')
+  if (!onAllowlist(deps, parsed.body)) return result(403, 'not_allowlisted')
   const existing = await deps.findByKey(parsed.body.client_id, parsed.body.idempotency_key)
   if (existing === 'error') return result(503, 'log_failed')
   if (existing) return replay(existing)
@@ -223,6 +258,7 @@ function rowFrom(data: unknown): PauseRow | null {
 export function realPauseDeps(): PauseOnlyDeps {
   return {
     enabled: servicePauseEnabled(process.env),
+    allowedCampaigns: allowedCampaignsFromConfig,
     findByKey: findPauseByKey,
     insert: insertPause,
     update: updatePause,

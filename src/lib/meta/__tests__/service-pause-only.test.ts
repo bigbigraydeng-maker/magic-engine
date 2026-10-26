@@ -3,6 +3,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import {
+  allowedCampaignsFromConfig,
   handlePauseOnlyRequest,
   pauseCampaignOnly,
   pauseCampaignServiceOnly,
@@ -38,6 +39,7 @@ function harness(over: Partial<PauseOnlyDeps> = {}): { deps: PauseOnlyDeps; call
   const row: { current: PauseRow | null } = { current: null }
   const deps: PauseOnlyDeps = {
     enabled: true,
+    allowedCampaigns: () => [{ campaign_id: BODY.campaign_id, ad_account_id: BODY.ad_account_id }],
     findByKey: async () => row.current,
     insert: async (_clientId, payload) => {
       calls.inserts.push(payload)
@@ -105,6 +107,27 @@ describe('只暂停', () => {
     expect(out).toEqual({ http: 403, body: { paused: false, reason: 'not_owned' } })
     expect(calls.pause).toEqual([])
     expect(calls.inserts).toEqual([])
+  })
+
+  it('名单外系列 / 名单读不到 / 账户不符 → 拒绝，不写记录，不改广告', async () => {
+    const cases: Partial<PauseOnlyDeps>[] = [
+      { allowedCampaigns: () => [{ campaign_id: '999999999999', ad_account_id: BODY.ad_account_id }] },
+      { allowedCampaigns: () => null },
+      { allowedCampaigns: () => { throw new Error('boom') } },
+      { allowedCampaigns: () => [{ campaign_id: BODY.campaign_id, ad_account_id: 'act_555555555555' }] },
+    ]
+    for (const over of cases) {
+      const { deps, calls } = harness(over)
+      const out = await pauseCampaignServiceOnly(BODY, deps)
+      expect(out).toEqual({ http: 403, body: { paused: false, reason: 'not_allowlisted' } })
+      expect(calls.pause).toEqual([])
+      expect(calls.inserts).toEqual([])
+      expect(calls.events).toEqual([])
+    }
+  })
+
+  it('配置里没有的客户 → 名单为空', () => {
+    expect(allowedCampaignsFromConfig(BODY.client_id)).toBeNull()
   })
 
   it('记录写不进去就不改广告', async () => {
