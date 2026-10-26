@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FPS } from './timing.ts';
-import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues } from './schema.ts';
+import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues, musicGainSchema } from './schema.ts';
 
 /** Fewest scenes a postcard may show. */
 export const MIN_SCENES = 2;
@@ -377,6 +377,7 @@ export const PostcardPropsSchema = z
       .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
+    musicGain: musicGainSchema,
     scrim: z
       .number()
       .min(0, { message: '压暗强度必须在 0 到 1 之间' })

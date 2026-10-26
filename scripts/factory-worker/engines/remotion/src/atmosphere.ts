@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FPS } from './timing.ts';
-import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues } from './schema.ts';
+import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues, musicGainSchema } from './schema.ts';
 import { textWidthUnits, bannedWordHits, priceMentionHits, isAcceptableSourceUrl, quoteSupports } from './postcard.ts';
 
 /** Shortest total runtime (seconds). */
@@ -66,6 +66,7 @@ export const AtmospherePropsSchema = z
       .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
+    musicGain: musicGainSchema,
     clip: relFile('镜头文件', CLIP_EXTS),
     sourceIn: z
       .number()
