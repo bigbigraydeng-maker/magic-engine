@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { packState, requireGlobalAdmin, type LitePackState, type LiteResult, type LiteServicePorts } from '../story-lite/service'
 import { isLiveFor, type LiteActor, type LiteChannel, type LiteItemStatus, type LiteMediaKind, type LiteRole, type LiteSwitches } from '../story-lite/types'
+import { factoryVideoUrl } from '../../factory/outlets'
 import { toPublishedView } from '../../factory/publish/publish-display'
 
 export interface OverviewStoryItem {
@@ -43,6 +44,11 @@ export interface OverviewReel {
   video_state: 'DRAFT' | 'PUBLISHED' | null
   music_file: string | null
   template: string | null
+  /**
+   * Public address of the finished video file in the factory bucket, so the page can show its first frame as a cover.
+   * null = this order has no usable file (or the storage address is not configured); absent = an older response.
+   */
+  video_url?: string | null
 }
 
 /** Read-only variety hint for a batch of Reels. Never blocks anything. */
@@ -97,6 +103,17 @@ interface ReelRow {
   deliverable: string | null
 }
 
+/**
+ * The factory keeps finished videos in one public bucket (the review page plays them from there). Only a plain path inside
+ * that bucket becomes an address: anything that could point somewhere else (a full address, "..", a leading slash) does not.
+ */
+function videoUrlOf(path: string | null): string | null {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!base || typeof path !== 'string' || path.length === 0) return null
+  if (path.startsWith('/') || path.includes('..') || path.includes('://')) return null
+  return factoryVideoUrl(path, base)
+}
+
 /** This client's factory Reels only (filtered in the query), newest first. Throws on a database error. */
 export async function listClientReels(db: SupabaseClient, clientId: string): Promise<OverviewReel[]> {
   const { data, error } = await db
@@ -124,6 +141,7 @@ export async function listClientReels(db: SupabaseClient, clientId: string): Pro
         video_state: published?.video_state === 'DRAFT' || published?.video_state === 'PUBLISHED' ? published.video_state : null,
         music_file: typeof row.music_file === 'string' && row.music_file.trim().length > 0 ? row.music_file.trim() : null,
         template: typeof row.template === 'string' && row.template.length > 0 ? row.template : null,
+        video_url: videoUrlOf(row.video_path),
       }
     })
 }

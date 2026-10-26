@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { InMemoryLiteStore } from '../../story-lite/in-memory-store'
 import type { LiteServicePorts } from '../../story-lite/service'
@@ -152,5 +152,41 @@ describe('readPublishingQuota', () => {
   })
   it('any other database error is thrown, not hidden', async () => {
     await expect(readPublishingQuota(quotaDb({ data: null, error: { message: 'timeout' } }), CLIENT)).rejects.toThrow('timeout')
+  })
+})
+
+describe('buildWeekOverview — the video address for the Reel cover', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  async function reelsOf(paths: Array<string | null>) {
+    const rows = paths.map((video, i) => reelRow(`r${i}`, CLIENT, 'in_review', video))
+    const { db } = fakeDb(rows)
+    const result = await buildWeekOverview({ ports: ports(new InMemoryLiteStore()), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now: NOW })
+    if (!result.ok) throw new Error('overview failed')
+    return result.value.reels
+  }
+
+  it('turns the factory video path into the public address of that file in the factory bucket', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
+    const [reel] = await reelsOf(['renders/c1/r1/final.mp4'])
+    expect(reel.video_url).toBe('https://example.supabase.co/storage/v1/object/public/content-factory/renders/c1/r1/final.mp4')
+  })
+
+  it('without a configured storage address there is no cover address (the page keeps its plain tile), and the Reel is still listed', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '')
+    const reels = await reelsOf(['renders/c1/r1/final.mp4'])
+    expect(reels).toHaveLength(1)
+    expect(reels[0].video_url).toBeNull()
+  })
+
+  it('a path that could point somewhere else never becomes an address', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
+    const reels = await reelsOf(['../secret/final.mp4', '/absolute/final.mp4', 'https://evil.example/x.mp4', 'renders/c1/ok/final.mp4'])
+    expect(reels.map((r) => r.video_url)).toEqual([
+      null,
+      null,
+      null,
+      'https://example.supabase.co/storage/v1/object/public/content-factory/renders/c1/ok/final.mp4',
+    ])
   })
 })

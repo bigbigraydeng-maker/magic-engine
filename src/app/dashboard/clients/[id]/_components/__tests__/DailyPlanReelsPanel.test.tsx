@@ -7,9 +7,10 @@
  * "uploaded but not checked" case in plain words), the headline "待你处理", the permalink link, the honest failure states
  * (401 / 403 / reels_error), the empty state, and the factory links.
  */
-import { render, screen, cleanup, fireEvent } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, act } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { DailyPlanReelsPanel } from '../DailyPlanReelsPanel'
+import { restoreCoverStubs, stubCoverMedia, stubScreenWatcher } from './cover-stubs'
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 
@@ -23,6 +24,7 @@ interface ReelFixture {
   permalink: string | null
   music_file: string | null
   template: string | null
+  video_url?: string | null
 }
 
 function reel(overrides: Partial<ReelFixture> = {}): ReelFixture {
@@ -322,5 +324,151 @@ describe('DailyPlanReelsPanel — review fixes', () => {
     render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
     expect(await screen.findByText('另有 1 个旧版待审核')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /待你处理\s*1\s*件/ })).toBeInTheDocument()
+  })
+})
+
+describe('DailyPlanReelsPanel — cover', () => {
+  const NEW_VIDEO = 'https://x.supabase.co/storage/v1/object/public/content-factory/renders/c1/new/final.mp4'
+  const OLD_VIDEO = 'https://x.supabase.co/storage/v1/object/public/content-factory/renders/c1/old/final.mp4'
+
+  // Unmount first: leaving the page stops the loading videos, which needs the stand-ins still in place.
+  afterEach(() => {
+    cleanup()
+    restoreCoverStubs()
+  })
+
+  function oneReelWithVideo() {
+    mockFetch({ success: true, reels: [reel({ id: 'a', angle: 'Harbour Tour: a', video_url: NEW_VIDEO })], reels_error: null })
+  }
+
+  it('asks for the video of a Reel that has one, off-screen and from its start only; the page itself holds no video', async () => {
+    const media = stubCoverMedia()
+    oneReelWithVideo()
+    const { container } = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Harbour Tour')
+    expect(media.videos).toHaveLength(1)
+    const [video] = media.videos
+    expect(video.getAttribute('src')).toBe(NEW_VIDEO)
+    expect(video.getAttribute('preload')).toBe('metadata')
+    expect(video.muted).toBe(true)
+    expect(container.querySelector('video')).toBeNull()
+    expect(screen.queryByLabelText('视频封面')).toBeNull() // nothing is called a cover until its picture is there
+  })
+
+  it('copies the first frame onto the cover only once the browser has shown it, then stops the download', async () => {
+    const media = stubCoverMedia()
+    oneReelWithVideo()
+    render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Harbour Tour')
+    const [video] = media.videos
+
+    media.tell(video, 'loadeddata')
+    expect(media.drawImage).not.toHaveBeenCalled() // too early: a canvas drawn now stays empty
+    expect(screen.queryByLabelText('视频封面')).toBeNull()
+
+    media.showFrame()
+    expect(media.drawImage).toHaveBeenCalledTimes(1)
+    expect(media.drawImage).toHaveBeenCalledWith(video, 0, 0, 135, 240)
+    expect(video.hasAttribute('src')).toBe(false)
+    expect(media.stopDownload).toHaveBeenCalled()
+    expect(screen.getByLabelText('视频封面').tagName).toBe('CANVAS')
+
+    media.tell(video, 'error') // a late error does not take the cover away
+    expect(screen.getByLabelText('视频封面')).toBeInTheDocument()
+  })
+
+  it.each(['no-canvas-support', 'cannot-draw', 'no-frame-callback'] as const)(
+    'when no still can be made (%s) the row keeps its plain play tile and the download is stopped',
+    async (mode) => {
+      const media = stubCoverMedia(mode)
+      oneReelWithVideo()
+      const { container } = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+      await screen.findByText('Harbour Tour')
+      const [video] = media.videos
+
+      media.tell(video, 'loadeddata')
+      media.showFrame()
+
+      expect(screen.queryByLabelText('视频封面')).toBeNull()
+      expect(container.querySelector('canvas')).toBeNull()
+      expect(media.stopDownload).toHaveBeenCalled()
+      expect(video.hasAttribute('src')).toBe(false)
+      expect(container.querySelectorAll('span.bg-me-charcoal svg')).toHaveLength(1)
+    },
+  )
+
+  it('a video that cannot be loaded keeps the plain play tile', async () => {
+    const media = stubCoverMedia()
+    oneReelWithVideo()
+    const { container } = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Harbour Tour')
+    media.tell(media.videos[0], 'error')
+    expect(screen.queryByLabelText('视频封面')).toBeNull()
+    expect(container.querySelector('canvas')).toBeNull()
+    expect(container.querySelectorAll('span.bg-me-charcoal svg')).toHaveLength(1)
+  })
+
+  it('a Reel without a video address keeps the plain play tile and asks for no video', async () => {
+    const media = stubCoverMedia()
+    mockFetch({
+      success: true,
+      reels: [reel({ id: 'a', angle: 'Harbour Tour: a', video_url: null }), reel({ id: 'b', angle: 'Coast Walk: a' })],
+      reels_error: null,
+    })
+    const { container } = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Harbour Tour')
+    expect(media.videos).toHaveLength(0)
+    expect(container.querySelector('canvas')).toBeNull()
+    expect(container.querySelectorAll('span.bg-me-charcoal svg')).toHaveLength(2)
+  })
+
+  it('does not ask for the video until its row is about to be on screen, then stops watching', async () => {
+    const watchers = stubScreenWatcher()
+    const media = stubCoverMedia()
+    oneReelWithVideo()
+    const { container } = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Harbour Tour')
+    expect(media.videos).toHaveLength(0)
+    expect(container.querySelector('canvas')).toBeNull()
+    expect(watchers).toHaveLength(1)
+
+    act(() => watchers[0].callback([{ isIntersecting: false }]))
+    expect(media.videos).toHaveLength(0)
+    expect(watchers[0].disconnected).toBe(false)
+
+    act(() => watchers[0].callback([{ isIntersecting: true }]))
+    expect(media.videos.map((video) => video.getAttribute('src'))).toEqual([NEW_VIDEO])
+    expect(watchers[0].disconnected).toBe(true)
+  })
+
+  it('a work asks for the cover of its newest version only, never an older version\'s video', async () => {
+    const media = stubCoverMedia()
+    mockFetch({
+      success: true,
+      reels: [
+        reel({ id: 'a2', created_at: '2026-09-02T02:00:00Z', angle: 'Harbour Tour v2: a', video_url: NEW_VIDEO }),
+        reel({ id: 'a1', created_at: '2026-09-02T01:00:00Z', angle: 'Harbour Tour v1: a', video_url: OLD_VIDEO }),
+        reel({ id: 'b2', created_at: '2026-09-02T04:00:00Z', angle: 'Coast Walk v2: a', video_url: null }),
+        reel({ id: 'b1', created_at: '2026-09-02T03:00:00Z', angle: 'Coast Walk v1: a', video_url: OLD_VIDEO }),
+      ],
+      reels_error: null,
+    })
+    render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Harbour Tour')
+    expect(media.videos.map((video) => video.getAttribute('src'))).toEqual([NEW_VIDEO])
+  })
+
+  it('leaving the page stops a video that is still loading', async () => {
+    const media = stubCoverMedia()
+    oneReelWithVideo()
+    const { unmount } = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Harbour Tour')
+    const [video] = media.videos
+    expect(video.getAttribute('src')).toBe(NEW_VIDEO)
+
+    unmount()
+
+    expect(video.hasAttribute('src')).toBe(false)
+    expect(media.stopDownload).toHaveBeenCalled()
   })
 })

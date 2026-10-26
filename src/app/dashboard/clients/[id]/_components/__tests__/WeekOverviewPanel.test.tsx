@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OverviewReel, WeekOverview } from '@/lib/social/week-overview/build'
 
 import { WeekOverviewPanel } from '../WeekOverviewPanel'
+import { restoreCoverStubs, stubCoverMedia } from './cover-stubs'
 
 const CLIENT = '11111111-1111-4111-8111-111111111111'
 
@@ -70,6 +71,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   cleanup()
+  restoreCoverStubs()
   vi.useRealTimers()
 })
 
@@ -377,5 +379,26 @@ describe('WeekOverviewPanel — review fixes', () => {
     render(<WeekOverviewPanel clientId={CLIENT} />)
     await screen.findByText('Draft')
     expect(screen.getAllByText('Facebook 草稿 1').length).toBe(1)
+  })
+})
+
+describe('WeekOverviewPanel — Reel cover', () => {
+  it('a Reel row keeps the first frame of its video as the cover; a Reel without a video address keeps the plain play tile', async () => {
+    const media = stubCoverMedia()
+    const video = 'https://x.supabase.co/storage/v1/object/public/content-factory/renders/c1/o1/final.mp4'
+    mockFetch({
+      success: true,
+      ...overview({ reels: [reel({ id: 'a', angle: 'Harbour Tour: x', video_url: video }), reel({ id: 'b', angle: 'Coast Walk: x' })] }),
+    })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText('Harbour Tour')
+    expect(media.videos.map((cover) => cover.getAttribute('src'))).toEqual([video])
+
+    media.tell(media.videos[0], 'loadeddata')
+    media.showFrame()
+
+    expect(screen.getAllByLabelText('视频封面')).toHaveLength(1)
+    expect(container.querySelector('video')).toBeNull()
+    expect(container.querySelectorAll('span.bg-me-charcoal svg')).toHaveLength(2) // the badge on the cover and the plain tile
   })
 })
