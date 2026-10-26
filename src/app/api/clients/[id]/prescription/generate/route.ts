@@ -32,6 +32,7 @@ import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
 import { loadMemoryForClient } from '@/lib/memory'
 import { getGoalById, listActiveGoals } from '@/lib/strategy/goals'
 import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
+import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -441,6 +442,11 @@ function makeHuatuoStream(
           })
           .eq('id', prescriptionId!)
           .eq('client_id', clientId)
+
+        await afterPrescriptionDraftSaved({
+          clientId,
+          prescriptionId: prescriptionId!,
+        })
 
         // 4. 案例库存档（静默，不阻塞主流程）
         savePrescriptionCase(supabaseAdmin, {

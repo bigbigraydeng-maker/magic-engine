@@ -44,6 +44,7 @@ import { youtubeStaging, youtubePublicStep } from './youtube-publish'
 import { storyLitePublish } from './story-lite-publish'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
+import { planDraftFromPrescription } from './plan-draft-from-prescription'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
@@ -106,6 +107,7 @@ export const cloudFunctions = [
   telephonyVoiplineSweep,
   telephonyCallAnalysis,
   telephonyCallAnalysisSweep,
+  planDraftFromPrescription,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

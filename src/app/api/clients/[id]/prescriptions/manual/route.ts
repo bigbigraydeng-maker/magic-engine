@@ -9,6 +9,7 @@ import {
   type ManualParseSuccess,
 } from '@/lib/diagnostic/manual-prescription'
 import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
+import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -90,6 +91,7 @@ async function insertDraft(
     console.error('[prescriptions/manual] insert failed', error)
     return jsonError(500, '保存处方草稿失败')
   }
+  await afterPrescriptionDraftSaved({ clientId, prescriptionId: data.id })
   return NextResponse.json({
     success: true,
     prescription_id: data.id,

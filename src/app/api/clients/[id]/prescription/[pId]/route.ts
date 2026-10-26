@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { planDraftCardLine } from '@/lib/marketing-plan/promo/plan-draft-card'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -51,7 +52,11 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Prescription not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, prescription: data }, {
+    return NextResponse.json({
+      success: true,
+      prescription: data,
+      plan_draft_line: planDraftCardLine(data.generation_meta),
+    }, {
       headers: {
         // 双重保险：浏览器也不要缓存
         'Cache-Control': 'no-store, no-cache, must-revalidate',
