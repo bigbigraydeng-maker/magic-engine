@@ -22,7 +22,7 @@ import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget, fetchAccountCustomAudiences } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
@@ -87,8 +87,6 @@ export interface DraftRecord {
   redlinesChecked?: number | null
   /** 建前读到的账户最低日预算（最小单位）；`null` = 没读到 / 没查（放行，Meta 兜底）。 */
   minBudgetChecked?: number | null
-  /** 建前核过的受众：包含 / 排除各是哪些 id。`null` = 草案没有受众（没查）。 */
-  audiencesChecked?: { included: string[]; excluded: string[] } | null
   /** 名单里因为太短没拿来比的条目（如果有）。 */
   redlinesSkipped?: string[]
   /** 回读发现有东西不是暂停的 → 我们补了一刀暂停，结果在这里。 */
@@ -188,11 +186,6 @@ export async function createDraftForApproval(
     return failedOutcome(deps, draft, { ...base, error })
   }
 
-  // ── 0.3 受众：属不属于这个账户、准备好没有（失败关闭）─────────────
-  const audiences = await checkAudiences(draft, deps)
-  base.audiencesChecked = audiences.checked
-  if (audiences.error) return failedOutcome(deps, draft, { ...base, error: audiences.error })
-
   // ── 0.4 日预算低于账户最低日预算 → Meta 一定拒，别浪费一次真实创建 ──────
   const budget = await checkMinDailyBudget(draft, deps)
   base.minBudgetChecked = budget.checked
@@ -226,7 +219,6 @@ interface RecordBase {
    * 数字 = 查过。跟 `redlinesChecked` 同口径，账本看得出「查过够」还是「没查到放行」。
    */
   minBudgetChecked?: number | null
-  audiencesChecked?: { included: string[]; excluded: string[] } | null
   /** 名单里太短、没拿来比的条目 —— 不静默忽略，记下来让人知道有条目没生效。 */
   redlinesSkipped?: string[]
 }
@@ -259,42 +251,6 @@ async function checkMinDailyBudget(
     checked: min.minDailyBudgetMinor,
     error: `每天预算 ${draft.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`,
   }
-}
-
-/**
- * 草案挂了受众 → 建之前核对：这些受众真的属于这个广告账户、包含的受众准备好了且够大。
- * 与最低日预算相反，这里是**失败关闭**：读不到受众列表就不建 —— 受众挂错账户，
- * Meta 要么拒收要么（更糟）静默忽略，我们没办法事后分辨。
- * 草案没有任何受众 id → 不发请求，直接过。
- */
-async function checkAudiences(
-  draft: AdDraft,
-  deps: CreateDraftDeps,
-): Promise<{ error: string | null; checked: { included: string[]; excluded: string[] } | null }> {
-  const included = draft.audienceIds ?? []
-  const excluded = draft.excludedAudienceIds ?? []
-  if (included.length === 0 && excluded.length === 0) return { error: null, checked: null }
-
-  const list = await fetchAccountCustomAudiences(deps.adAccountId, deps.accessToken)
-  if (!list) {
-    return { checked: null, error: '读不到这个广告账户的受众列表，核实不了受众归不归它，所以没建' }
-  }
-  const byId = new Map(list.map((a) => [a.id, a]))
-  const missing = [...included, ...excluded].filter((id) => !byId.has(id))
-  if (missing.length > 0) {
-    return { checked: null, error: `受众 ${missing.join('、')} 不属于这个广告账户，所以没建` }
-  }
-  for (const id of included) {
-    const a = byId.get(id)
-    if (!a) continue
-    if (a.operationStatusCode !== null && a.operationStatusCode !== 200) {
-      return { checked: null, error: `受众 ${id} 还没准备好（状态 ${a.operationStatusCode}），现在投不出去，所以没建` }
-    }
-    if (a.approxCountLowerBound !== null && a.approxCountLowerBound < 100) {
-      return { checked: null, error: `受众 ${id} 太小（不足 100 人），Meta 不会投，所以没建` }
-    }
-  }
-  return { error: null, checked: { included, excluded } }
 }
 
 /** 任一创意带视频就等转码（视频没转完建创意会报「视频还没准备好」）；返回错误文案，`null` = 可以继续。 */
@@ -333,7 +289,6 @@ async function failedOutcome(
     status: 'failed', draft, summary: f.summary, error: f.error,
     redlinesChecked: f.redlinesChecked, redlinesSkipped: f.redlinesSkipped, orphans: f.orphans,
     minBudgetChecked: f.minBudgetChecked ?? null,
-    audiencesChecked: f.audiencesChecked ?? null,
   })
   return { actionId: id, status: 'failed', summary: f.summary, findings: [], error: f.error }
 }
@@ -375,7 +330,6 @@ async function blockedUnreadable(
     status: 'blocked', draft, summary: base.summary, error,
     redlinesChecked: base.redlinesChecked, redlinesSkipped: base.redlinesSkipped,
     minBudgetChecked: base.minBudgetChecked ?? null,
-    audiencesChecked: base.audiencesChecked ?? null,
     campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
   })
   return { actionId: id, status: 'blocked', summary: base.summary, findings: [], error }
@@ -395,13 +349,10 @@ function launchReportFor(
       // 传 false 会顶掉名字启发式那道保险 —— 一个叫「暖池重定向」的组
       // 就此不再受重定向那几条检查约束，而它恰好是最需要被查的那种。
       // 2026-08-05 自测抓到：这行原来无条件传 false，等于把闸门关了一半。
-      // Declared audiences also declare retargeting; still never pass false.
-      isRetargeting: DRAFT_PLAY[draft.kind] === 'warm_pool_retarget' || (draft.audienceIds?.length ?? 0) > 0 ? true : undefined,
+      isRetargeting: DRAFT_PLAY[draft.kind] === 'warm_pool_retarget' ? true : undefined,
     }),
     industry: deps.industry ?? null,
     expectedOptimizationGoal: metaTripletFor(draft.kind).optimizationGoal,
-    ...(draft.audienceIds && draft.audienceIds.length > 0 ? { expectedAudienceIds: draft.audienceIds } : {}),
-    ...(draft.excludedAudienceIds && draft.excludedAudienceIds.length > 0 ? { expectedExcludedAudienceIds: draft.excludedAudienceIds } : {}),
   })
 }
 
@@ -459,7 +410,6 @@ async function recordGate(
     redlinesChecked: ctx.redlinesChecked,
     redlinesSkipped: ctx.redlinesSkipped,
     minBudgetChecked: ctx.minBudgetChecked ?? null,
-    audiencesChecked: ctx.audiencesChecked ?? null,
     autoPause,
   })
   return { actionId: id, status, summary: ctx.summary, findings: merged.findings, readback }
