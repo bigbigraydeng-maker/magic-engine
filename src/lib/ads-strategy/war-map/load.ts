@@ -33,6 +33,10 @@ import type {
 const DAY_MS = 86_400_000
 /** 池子人数往回看几天（趋势要 7 天，多留一天防边界） */
 const AUDIENCE_LOOKBACK_DAYS = 9
+/** 取数链路健康度回看多长。48 小时足够看出「每天跑一次」的 cron 有没有断，又避免拉太多行 */
+const CRON_HEALTH_LOOKBACK_HOURS = 48
+/** 这个 cron 既写 ad_daily_insights 又跑 Meta / GA4 / GSC；war-map 判「取数链路」只认它 */
+const PULLBACK_CRON_JOB = 'google-data-pullback-daily'
 
 function isoDaysAgo(now: Date, days: number): string {
   return new Date(now.getTime() - days * DAY_MS).toISOString()
@@ -425,10 +429,54 @@ async function loadRunningSince(clientId: string, now: Date, accounts: AccountIn
   return computeRunningSince(adsets, campaigns)
 }
 
+// ── 取数链路健康度（google-data-pullback-daily 最近 48 小时跑成什么样）─────────
+/**
+ * 读 cron_run_logs 判断取数链路对**这个客户**是不是通的。
+ *   - 「成功跑过」= 本客户没出现在该次运行的 summary.errors[].client_id 里（即走通到了 upsert）
+ *   - 读表失败返 null（判不出来，UI 显示「取数状态读不到」而不是绿灯）
+ * 不抛错：取数状态读不到不能把整张作战地图连带废掉——那样 PM 看到的还是「读不到作战地图」，更糊。
+ */
+async function loadCronHealth(
+  clientId: string,
+  now: Date,
+): Promise<WarMapInput['cronHealth']> {
+  const since = new Date(now.getTime() - CRON_HEALTH_LOOKBACK_HOURS * 3600_000).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('cron_run_logs')
+    .select('started_at, status, summary')
+    .eq('job_name', PULLBACK_CRON_JOB)
+    .gte('started_at', since)
+    .order('started_at', { ascending: false })
+    .limit(50)
+  if (error) return null
+  const rows = (data ?? []) as Array<{ started_at: string; status: string | null; summary: unknown }>
+  if (rows.length === 0) return { lastRunAt: null, lastClientSuccessAt: null, recentFailureCount: 0 }
+  let lastClientSuccessAt: string | null = null
+  let recentFailureCount = 0
+  for (const r of rows) {
+    const failed = runHadErrorForClient(r.summary, clientId) || r.status === 'failed'
+    if (failed) recentFailureCount += 1
+    else if (lastClientSuccessAt === null) lastClientSuccessAt = r.started_at
+  }
+  return {
+    lastRunAt: rows[0].started_at,
+    lastClientSuccessAt,
+    recentFailureCount,
+  }
+}
+
+/** summary.errors[].client_id === 本客户时算这次 run 对本客户失败。summary 形状不对就当「没失败」。 */
+function runHadErrorForClient(summary: unknown, clientId: string): boolean {
+  if (!summary || typeof summary !== 'object') return false
+  const errs = (summary as { errors?: unknown }).errors
+  if (!Array.isArray(errs)) return false
+  return errs.some(e => e && typeof e === 'object' && (e as { client_id?: unknown }).client_id === clientId)
+}
+
 export async function loadWarMapInput(clientId: string, now: Date = new Date()): Promise<WarMapInput> {
   const accounts = await loadAccounts(clientId, now)
   const usableIds = accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId)
-  const [aud, adsets, clocks, growth, plan, creativePoolApproved, accountDataDays, runningSince] = await Promise.all([
+  const [aud, adsets, clocks, growth, plan, creativePoolApproved, accountDataDays, runningSince, cronHealth] = await Promise.all([
     loadAudiences(clientId, now),
     loadAdsets(clientId, now),
     loadClocks(clientId, accounts.length === 0 ? null : usableIds),
@@ -437,6 +485,7 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     loadApprovedCreatives(clientId),
     loadAccountDataDays(clientId, accounts),
     loadRunningSince(clientId, now, accounts),
+    loadCronHealth(clientId, now),
   ])
   const campaigns = await loadCampaigns(clientId, clocks.dataDay)
   // 账户清单是「哪些账户算数」的唯一来源：被隐藏的账户，它的池子/池子历史/系列频率也不能漏进来。
@@ -459,5 +508,6 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     runningSince,
     accountDataDays,
     creativePoolApproved,
+    cronHealth,
   }
 }

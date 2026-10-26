@@ -120,6 +120,19 @@ export interface WarMapInput {
   accountDataDays: Record<string, string | null>
   /** 素材池里「已批准」的条数；null = 读不到素材池 */
   creativePoolApproved: number | null
+  /**
+   * 取数链路健康度（google-data-pullback-daily 最近 48 小时的运行情况，按本客户过滤）。
+   * null = 读不到 cron_run_logs（判不出链路好坏）。
+   *
+   * - lastRunAt：最近一次 cron 跑的开始时间（不管这个客户里失败没失败），null = 48h 内一次没跑
+   * - lastClientSuccessAt：最近一次「这个客户在 summary.errors 里没出现」的 cron 开始时间，null = 48h 内每次都对这个客户失败
+   * - recentFailureCount：48h 内 summary.errors 里出现过这个客户的次数（0 = 没失败过）
+   */
+  cronHealth: {
+    lastRunAt: string | null
+    lastClientSuccessAt: string | null
+    recentFailureCount: number
+  } | null
 }
 
 // ── 输出（页面直接渲染）────────────────────────────────────────────────
@@ -222,10 +235,37 @@ export interface GoalNote {
   warning: string
 }
 
+/**
+ * 数据契约里显示用的「源状态」。拆开「源头没花钱」vs「取数链路挂了」，这两件事看起来一样，处理方式完全不一样。
+ *   - fresh：数据日近到 DATA_STALE_DAYS 以内，不显示提示
+ *   - no_spend_upstream：取数链路最近成功过，但广告账户没有新花费 → 不需要 FDE 排查
+ *   - fetch_chain_down：取数任务最近失败或没跑 → FDE 要进 cron 运行记录看
+ *   - unknown：cron_run_logs 读不到，判不出来 → 不下定论
+ */
+export type DataSourceState = 'fresh' | 'no_spend_upstream' | 'fetch_chain_down' | 'unknown'
+
+/** 哪些账户的数据过期了（用于「no_spend_upstream」时把账户名列出来） */
+export interface StaleAccountEntry {
+  adAccountId: string
+  name: string
+  /** 这个账户的 ad_daily_insights 落后今天几天；null = 从没有过数据 */
+  staleDays: number | null
+}
+
 export interface WarMapView {
   generatedAt: string
   countdown: CountdownView
-  clocks: { dataDay: string | null; fetchedAt: string | null; staleDays: number | null }
+  clocks: {
+    dataDay: string | null
+    fetchedAt: string | null
+    staleDays: number | null
+    /** UI 判断「数据过期」黄灯怎么写：源头没花钱 vs 取数链路挂了 vs 读不到 */
+    sourceState: DataSourceState
+    /** 挂了的在用账户清单；sourceState !== 'no_spend_upstream' 时为 [] */
+    staleAccounts: StaleAccountEntry[]
+    /** fetch_chain_down 时写出来「最近失败几次」；其它状态为 0 */
+    recentFailureCount: number
+  }
   accounts: AccountView[]
   accountSummaries: AccountPoolSummary[]
   pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number; unusableRows: PoolRow[] }

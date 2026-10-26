@@ -48,6 +48,8 @@ function baseInput(over: Partial<WarMapInput> = {}): WarMapInput {
     runningSince: null,
     accountDataDays: {},
     creativePoolApproved: 3,
+    // 默认：取数链路最近一次刚跑过，本客户没失败 —— 保持既有测试的「fresh」心智
+    cronHealth: { lastRunAt: NOW, lastClientSuccessAt: NOW, recentFailureCount: 0 },
     ...over,
   }
 }
@@ -567,5 +569,59 @@ describe('审查补断言 · 账户清单、新鲜度、频率按账户过滤', 
     }))
     expect(v.clocks.dataDay).toBe('2026-10-10')
     expect(v.clocks.staleDays).toBe(6)
+  })
+})
+
+describe('clocks.sourceState：把「源头没花钱」和「取数链路挂了」分开', () => {
+  const H = 3600_000
+
+  it('链路最近成功过且数据够新 → fresh（不显示提示）', () => {
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-16T00:30:00.000Z' },
+      cronHealth: { lastRunAt: '2026-10-16T00:30:00.000Z', lastClientSuccessAt: '2026-10-16T00:30:00.000Z', recentFailureCount: 0 },
+    }))
+    expect(v.clocks.sourceState).toBe('fresh')
+    expect(v.clocks.staleAccounts).toEqual([])
+    expect(v.clocks.recentFailureCount).toBe(0)
+  })
+
+  it('链路最近成功过但账户 10 天没花钱 → no_spend_upstream + 列出账户', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct({ adAccountId: 'act_1', name: '主账户' }), acct({ adAccountId: 'act_2', name: '新账户' })],
+      accountDataDays: { act_1: '2026-10-06', act_2: '2026-10-15' }, // act_1 落后 10 天 > DATA_STALE_DAYS，act_2 新鲜
+      clocks: { dataDay: '2026-10-06', fetchedAt: '2026-10-16T00:00:00.000Z' },
+      cronHealth: { lastRunAt: NOW, lastClientSuccessAt: NOW, recentFailureCount: 0 },
+    }))
+    expect(v.clocks.sourceState).toBe('no_spend_upstream')
+    expect(v.clocks.staleAccounts).toEqual([
+      { adAccountId: 'act_1', name: '主账户', staleDays: 10 },
+    ])
+    expect(v.clocks.recentFailureCount).toBe(0)
+  })
+
+  it('cron 对本客户 48h 内一次没成功 → fetch_chain_down 且带失败次数', () => {
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-15T17:00:00.000Z' },
+      cronHealth: { lastRunAt: NOW, lastClientSuccessAt: null, recentFailureCount: 3 },
+    }))
+    expect(v.clocks.sourceState).toBe('fetch_chain_down')
+    expect(v.clocks.staleAccounts).toEqual([])
+    expect(v.clocks.recentFailureCount).toBe(3)
+  })
+
+  it('最近一次成功太久以前（>36h） → fetch_chain_down', () => {
+    const lastOk = new Date(new Date(NOW).getTime() - 40 * H).toISOString()
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-15', fetchedAt: lastOk },
+      cronHealth: { lastRunAt: lastOk, lastClientSuccessAt: lastOk, recentFailureCount: 1 },
+    }))
+    expect(v.clocks.sourceState).toBe('fetch_chain_down')
+  })
+
+  it('cronHealth === null（读不到 cron_run_logs） → unknown，不下定论', () => {
+    const v = buildWarMap(baseInput({ cronHealth: null }))
+    expect(v.clocks.sourceState).toBe('unknown')
+    expect(v.clocks.staleAccounts).toEqual([])
+    expect(v.clocks.recentFailureCount).toBe(0)
   })
 })
