@@ -34,6 +34,7 @@ import { summarizeTrend } from './trends'
 import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
+import { sanitizeSeedAdPlays } from '@/lib/ads-strategy/plan-seed/ad-plays'
 import { retrieveSimilarCases } from '@/lib/case-library/retriever'
 import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { fetchOutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
@@ -558,16 +559,22 @@ function normalizeInitiativeSeed(seed: unknown): import('@/types/diagnostic').Ph
     ? Math.max(0, Math.min(100, s.budget_percent))
     : null
 
-  return {
+  const result: import('@/types/diagnostic').PhaseInitiativeSeed = {
     initiative_type,
     title: typeof s.title === 'string' ? s.title : '',
     posture,
     budget_percent,
     hypothesis: typeof s.hypothesis === 'string' ? s.hypothesis : null,
   }
+  // ad_plays：只认严格校验通过的（只含 step_key + play）；不合法就不设置该键
+  if (s.ad_plays !== undefined && s.ad_plays !== null) {
+    const plays = sanitizeSeedAdPlays(s.ad_plays)
+    if (plays !== undefined) result.ad_plays = plays
+  }
+  return result
 }
 
-function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
+export function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
   return {
     summary: typeof p.summary === 'string' ? p.summary : '',
     // DAPE W3 — narrative 是新加的可选字段，旧 prompt 无此输出 → 空串兜底

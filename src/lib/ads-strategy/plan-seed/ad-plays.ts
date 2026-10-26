@@ -84,3 +84,13 @@ export function lenientAdPlays(raw: unknown): AdPlay[] {
   }
   return out
 }
+
+/**
+ * 华佗生成入口用：严格校验 LLM 给的 ad_plays。
+ * 不是数组 / 任何一条不合法 / 超过 8 条 / step_key 重复 → 返回 undefined（调用方应删掉该键）。
+ * 返回值只含 step_key 与 play 两个字段，多余字段（如预算）一律丢弃。
+ */
+export function sanitizeSeedAdPlays(raw: unknown): AdPlay[] | undefined {
+  const res = parseAdPlays(raw)
+  return res.ok ? res.plays : undefined
+}
