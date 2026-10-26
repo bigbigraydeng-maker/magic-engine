@@ -311,6 +311,10 @@ function clearConfirmText(accountCount: number, totalCap: number | null): string
   return '清空后这个账户将不允许自动动钱（这个客户绑了 2 个及以上账户时的规则）。确定清空吗？'
 }
 
+/** 关掉显示 = 心跳整户跳过这个账户（超支提醒不响），所以和清空上限一样要二次确认；打开方向不拦。 */
+const HIDE_CONFIRM_TEXT =
+  '关掉后这个账户整户跳过心跳、超支提醒不会响、广告健康页也不再列它。确定关掉吗？'
+
 function HealthPageSwitch({
   shown,
   busy,
@@ -475,6 +479,7 @@ function useHealthVisibility(
 
   const setShown = async (adAccountId: string, shown: boolean, previousHidden: boolean) => {
     if (inflight.current !== null) return
+    if (!shown && !window.confirm(HIDE_CONFIRM_TEXT)) return
     inflight.current = adAccountId
     setError(null)
     setBusyId(adAccountId)
@@ -542,7 +547,7 @@ function AccountCapList({ clientId }: { clientId: string }) {
       ))}
       {message && <p className="text-xs text-gray-500">{message}</p>}
       {visibilityError && <p className="text-xs text-red-600">{visibilityError}</p>}
-      <p className="text-xs text-gray-400">关掉「在广告健康页显示」后，广告健康页不再列出这个账户，超支提醒也不会盯着它。</p>
+      <p className="text-xs text-gray-400">关掉「在广告健康页显示」后，广告健康页不再列出这个账户，超支提醒也不会盯着它。打开后从下一次心跳 / 明早体检起生效；今日实时面板最多一分钟后更新。</p>
       <p className="text-xs text-gray-400">
         客户总闸：
         <span className="tabular-nums text-gray-600">
