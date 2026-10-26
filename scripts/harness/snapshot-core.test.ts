@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  GROK_BRANCH_PREFIX,
   IGNORED_COLLISION_FILES,
   IGNORED_COLLISION_PREFIXES,
   attachOwners,
@@ -11,6 +12,7 @@ import {
   riskFromComments,
   splitCollisions,
   suggestArchive,
+  summarizeGrokPrs,
   windowNumber,
   worstCardState,
 } from './snapshot-core.mjs'
@@ -405,6 +407,146 @@ describe('boundaries that earlier cases missed', () => {
     const collisions = [{ file: 'f', prs: [{ number: 1, headRefName: 'shared' }] }]
     const windows = [{ number: null, branch: 'shared' }, { number: '75', branch: 'shared' }]
     expect(attachOwners(collisions, windows)[0].prs[0].window).toBe('75')
+  })
+})
+
+describe('summarizeGrokPrs', () => {
+  const GROK_NOW = '2026-10-26T12:00:00.000Z'
+
+  it('exposes the cursor/ branch prefix', () => {
+    expect(GROK_BRANCH_PREFIX).toBe('cursor/')
+  })
+
+  it('ignores non-cursor branches and non-string headRefName in all three lists', () => {
+    const result = summarizeGrokPrs(
+      {
+        open: [
+          { number: 1, headRefName: 'feat/x', updatedAt: GROK_NOW, isDraft: false },
+          { number: 2, headRefName: 42, updatedAt: GROK_NOW, isDraft: false },
+          { number: 3, headRefName: 'cursor/ok', updatedAt: GROK_NOW, isDraft: false },
+        ],
+        merged: [
+          { number: 4, headRefName: 'feat/x', mergedAt: GROK_NOW },
+          { number: 5, headRefName: null, mergedAt: GROK_NOW },
+          { number: 6, headRefName: 'cursor/ok', mergedAt: GROK_NOW },
+        ],
+        closed: [
+          { number: 7, headRefName: 'feat/x', closedAt: GROK_NOW },
+          { number: 8, headRefName: undefined, closedAt: GROK_NOW },
+          { number: 9, headRefName: 'cursor/ok', closedAt: GROK_NOW },
+        ],
+      },
+      GROK_NOW,
+      7,
+    )
+    expect(result.openCount).toBe(1)
+    expect(result.openPrs.map((pr) => pr.number)).toEqual([3])
+    expect(result.mergedRecent).toBe(1)
+    expect(result.closedRecent).toBe(1)
+  })
+
+  it('floors idleDays and clamps negatives to 0', () => {
+    const result = summarizeGrokPrs(
+      {
+        open: [
+          { number: 1, headRefName: 'cursor/a', updatedAt: '2026-10-23T16:48:00.000Z', isDraft: false },
+          { number: 2, headRefName: 'cursor/b', updatedAt: '2026-10-27T12:00:00.000Z', isDraft: false },
+        ],
+      },
+      GROK_NOW,
+      7,
+    )
+    const byId = new Map(result.openPrs.map((pr) => [pr.number, pr.idleDays]))
+    expect(byId.get(1)).toBe(2)
+    expect(byId.get(2)).toBe(0)
+  })
+
+  it('sorts by idleDays desc then number asc, with null last', () => {
+    const result = summarizeGrokPrs(
+      {
+        open: [
+          { number: 5, headRefName: 'cursor/a', updatedAt: '2026-10-24T12:00:00.000Z', isDraft: false },
+          { number: 3, headRefName: 'cursor/b', updatedAt: '2026-10-24T12:00:00.000Z', isDraft: false },
+          { number: 9, headRefName: 'cursor/c', updatedAt: 'not-a-date', isDraft: false },
+          { number: 1, headRefName: 'cursor/d', updatedAt: '2026-10-20T12:00:00.000Z', isDraft: false },
+        ],
+      },
+      GROK_NOW,
+      7,
+    )
+    expect(result.openPrs.map((pr) => pr.number)).toEqual([1, 3, 5, 9])
+    expect(result.openPrs[3].idleDays).toBeNull()
+  })
+
+  it('returns oldestIdleDays null when there are no open PRs', () => {
+    const result = summarizeGrokPrs({ open: [] }, GROK_NOW, 7)
+    expect(result.openCount).toBe(0)
+    expect(result.oldestIdleDays).toBeNull()
+  })
+
+  it('counts merged/closed exactly at the boundary but not one second older', () => {
+    const edge = '2026-10-19T12:00:00.000Z'
+    const older = '2026-10-19T11:59:59.000Z'
+    const result = summarizeGrokPrs(
+      {
+        merged: [
+          { number: 1, headRefName: 'cursor/a', mergedAt: edge },
+          { number: 2, headRefName: 'cursor/b', mergedAt: older },
+        ],
+        closed: [
+          { number: 3, headRefName: 'cursor/c', closedAt: edge },
+          { number: 4, headRefName: 'cursor/d', closedAt: older },
+        ],
+      },
+      GROK_NOW,
+      7,
+    )
+    expect(result.mergedRecent).toBe(1)
+    expect(result.closedRecent).toBe(1)
+  })
+
+  it('treats missing or non-array inputs as empty and echoes days', () => {
+    const result = summarizeGrokPrs({}, GROK_NOW, 5)
+    expect(result).toEqual({
+      openCount: 0,
+      openPrs: [],
+      oldestIdleDays: null,
+      mergedRecent: 0,
+      closedRecent: 0,
+      days: 5,
+    })
+  })
+
+  it('passes isDraft through', () => {
+    const result = summarizeGrokPrs(
+      {
+        open: [
+          { number: 1, headRefName: 'cursor/a', updatedAt: GROK_NOW, isDraft: true },
+          { number: 2, headRefName: 'cursor/b', updatedAt: GROK_NOW, isDraft: false },
+        ],
+      },
+      GROK_NOW,
+      7,
+    )
+    const byId = new Map(result.openPrs.map((pr) => [pr.number, pr.isDraft]))
+    expect(byId.get(1)).toBe(true)
+    expect(byId.get(2)).toBe(false)
+  })
+
+  it('does not mutate the inputs', () => {
+    const open = [
+      { number: 2, headRefName: 'cursor/a', updatedAt: '2026-10-20T12:00:00.000Z', isDraft: false },
+      { number: 1, headRefName: 'cursor/b', updatedAt: '2026-10-24T12:00:00.000Z', isDraft: false },
+    ]
+    const merged = [{ number: 3, headRefName: 'cursor/c', mergedAt: GROK_NOW }]
+    const closed = [{ number: 4, headRefName: 'cursor/d', closedAt: GROK_NOW }]
+    const openSnapshot = open.map((pr) => ({ ...pr }))
+    const mergedSnapshot = merged.map((pr) => ({ ...pr }))
+    const closedSnapshot = closed.map((pr) => ({ ...pr }))
+    summarizeGrokPrs({ open, merged, closed }, GROK_NOW, 7)
+    expect(open).toEqual(openSnapshot)
+    expect(merged).toEqual(mergedSnapshot)
+    expect(closed).toEqual(closedSnapshot)
   })
 })
 

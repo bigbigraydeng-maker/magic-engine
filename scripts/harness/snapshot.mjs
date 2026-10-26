@@ -16,6 +16,7 @@ import {
   riskFromComments,
   splitCollisions,
   suggestArchive,
+  summarizeGrokPrs,
   worstCardState,
 } from './snapshot-core.mjs'
 import { renderHtml } from './snapshot-render.mjs'
@@ -28,6 +29,7 @@ const USAGE = '用法：node scripts/harness/snapshot.mjs --sessions <会话列�
 const ERR_PR_LIST = 'GitHub 开着的 PR 列表没取到，撞车检查是空的，不代表没有撞车'
 const ERR_PR_OVER_LIMIT = 'GitHub 开着的 PR 超过 300 个，撞车检查只看了前 300 个'
 const ERR_PR_DETAIL = 'GitHub 部分 PR 的详情没取到，这些窗口的灯可能偏空'
+const ERR_GROK = 'GitHub 上 Grok 开的 PR 没取到，Grok 这一栏可能不全'
 
 /**
  * 从 gh 的 files 列表里挑出 ledger 卡片路径，排除 README 和嵌套目录。
@@ -86,6 +88,7 @@ export function riskGateFromRollup(rollup) {
  *   collisions: Array<{ file: string, prs: Array<{ number: number, headRefName: string, window: string|null }> }>,
  *   collisionsOtherCount: number,
  *   archiveSuggestions: Array<{ id: string, number: string|null, group: string, lastActivityAt: string }>,
+ *   grok: { openCount: number, openPrs: Array<{ number: number, idleDays: number|null, isDraft: boolean }>, oldestIdleDays: number|null, mergedRecent: number, closedRecent: number, days: number },
  *   errors: string[],
  * }}
  */
@@ -95,10 +98,10 @@ export function buildSnapshot(deps) {
   const errors = []
 
   // 开着的 PR 列表 -> 撞车
-  /** @type {Array<{ number: number, headRefName: string, files?: Array<{ path: string }> }>} */
+  /** @type {Array<{ number: number, headRefName: string, files?: Array<{ path: string }>, updatedAt?: string, isDraft?: boolean }>} */
   let openPrs = []
   try {
-    const raw = deps.runGh(['pr', 'list', '--state', 'open', '--limit', String(GH_FETCH_LIMIT), '--json', 'number,title,headRefName,files'])
+    const raw = deps.runGh(['pr', 'list', '--state', 'open', '--limit', String(GH_FETCH_LIMIT), '--json', 'number,headRefName,files,updatedAt,isDraft'])
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) {
       openPrs = parsed
@@ -109,6 +112,30 @@ export function buildSnapshot(deps) {
   } catch {
     errors.push(ERR_PR_LIST)
   }
+
+  // Grok Bot 的 PR：合并 / 关闭列表，任一取不到就只报一次通用错误
+  /** @type {Array<{ number: number, headRefName?: unknown, mergedAt?: string }>} */
+  let mergedPrs = []
+  /** @type {Array<{ number: number, headRefName?: unknown, closedAt?: string, mergedAt?: string | null }>} */
+  let closedPrs = []
+  let grokFailed = false
+  try {
+    const raw = deps.runGh(['pr', 'list', '--state', 'merged', '--limit', '300', '--json', 'number,headRefName,mergedAt'])
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) mergedPrs = parsed
+    else grokFailed = true
+  } catch {
+    grokFailed = true
+  }
+  try {
+    const raw = deps.runGh(['pr', 'list', '--state', 'closed', '--limit', '100', '--json', 'number,headRefName,closedAt,mergedAt'])
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) closedPrs = parsed.filter((item) => item && !item.mergedAt)
+    else grokFailed = true
+  } catch {
+    grokFailed = true
+  }
+  if (grokFailed) errors.push(ERR_GROK)
 
   const { relevant: collisions, otherCount: collisionsOtherCount } = splitCollisions(
     attachOwners(findCollisions(openPrs), active),
@@ -177,6 +204,7 @@ export function buildSnapshot(deps) {
   if (detailFailed) errors.push(ERR_PR_DETAIL)
 
   const archiveSuggestions = suggestArchive(deps.sessions, deps.nowIso, 3)
+  const grok = summarizeGrokPrs({ open: openPrs, merged: mergedPrs, closed: closedPrs }, deps.nowIso, 7)
 
   return {
     generatedAt: deps.nowIso,
@@ -186,6 +214,7 @@ export function buildSnapshot(deps) {
     collisions,
     collisionsOtherCount,
     archiveSuggestions,
+    grok,
     errors,
   }
 }
