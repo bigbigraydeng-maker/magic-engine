@@ -36,6 +36,8 @@ function emptyInput(): WarMapInput {
     growth: null,
     plan: null,
     creativePoolApproved: 0,
+    runningSince: null,
+    accountDataDays: {},
   }
 }
 

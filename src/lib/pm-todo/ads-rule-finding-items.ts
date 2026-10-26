@@ -15,7 +15,7 @@ import {
   ADS_RULE_MIN_STREAK,
   ADS_RULE_CODES,
   findingKey,
-  ruleHits,
+  pmRuleHits,
   streakFor,
   streakForReason,
   isUsableNewest,
@@ -70,13 +70,14 @@ function groupByClient(rows: readonly GrowthStateRow[]): Map<string, GrowthState
   return byClient
 }
 
-/** D10 在前、D2 次之、D11 再次，其余最后；同 rank 内保持原顺序（sort 稳定）。 */
+/** D3（花钱没结果）在前、D10 次之、D2、D11，其余最后；同 rank 内保持原顺序（sort 稳定）。 */
 function orderCandidates(findings: readonly RuleFinding[]): RuleFinding[] {
   const rank = (f: RuleFinding): number => {
-    if (f.code === 'D10') return 0
-    if (f.code === 'D2') return 1
-    if (f.code === 'D11') return 2
-    return 3
+    if (f.code === 'D3') return 0
+    if (f.code === 'D10') return 1
+    if (f.code === 'D2') return 2
+    if (f.code === 'D11') return 3
+    return 4
   }
   return [...findings].sort((a, b) => rank(a) - rank(b))
 }
@@ -141,7 +142,7 @@ export function buildAdsRuleFindingItems(
     const newest = clientRows[0]
     if (!newest || !isUsableNewest(newest, now)) continue
 
-    const candidates = orderCandidates(ruleHits(newest).filter((f) => findingKey(f) !== null))
+    const candidates = orderCandidates(pmRuleHits(newest).filter((f) => findingKey(f) !== null))
     // daysSinceLatest 恒传 0：候选只取最新一行，新鲜度由 ADS_RULE_STALE_DAYS 单独卡（巡察记录的日期本来就比今天晚一天）。
     const kept = candidates.filter((f) => {
       const key = findingKey(f)

@@ -94,6 +94,10 @@ export interface PlanInput {
   phases: PlanPhaseInput[]
   /** 计划挂的目标标题；读不到 = null */
   goalTitle: string | null
+  /** 这条计划记录最后一次更新是新西兰哪一天（YYYY-MM-DD）；读不到 = null。用来判断「计划写完之后才有广告开始跑」。 */
+  recordUpdatedDay: string | null
+  /** 该计划所挂目标的最新处方一行。没有处方时不填。 */
+  prescriptionLine?: string | null
 }
 
 export interface WarMapInput {
@@ -110,6 +114,10 @@ export interface WarMapInput {
   growth: GrowthInput | null
   /** null = 没有推广计划 */
   plan: PlanInput | null
+  /** 实际已经在跑的最早日子（新西兰日期 YYYY-MM-DD）：在用账户里有「系列开着且下面有在投广告组」的那个最早起算日。null = 没有在跑的，或读不到。用来判断「计划记录是不是过时了」。 */
+  runningSince: string | null
+  /** 每个绑定账户自己的数据日（该账户 ad_daily_insights 里最新的 insight_date）。键是 adAccountId；没有数据 = null。 */
+  accountDataDays: Record<string, string | null>
   /** 素材池里「已批准」的条数；null = 读不到素材池 */
   creativePoolApproved: number | null
 }
@@ -130,6 +138,10 @@ export interface CountdownView {
   /** 距计划开投日几天；负数 = 已过；null = 没有计划 */
   daysToLaunch: number | null
   daysToTarget: number | null
+  /** 实际开投日：仅当计划开投日晚于它时才有值；否则 null */
+  actualLaunchDay: string | null
+  /** 计划记录是不是过时了（计划写的开投日晚于实际已在跑的日子） */
+  planStale: boolean
 }
 
 export interface AccountView {
@@ -146,6 +158,7 @@ export type PoolTrend = 'growing' | 'flat' | 'shrinking' | 'unknown'
 export interface PoolRow {
   id: string
   name: string
+  adAccountId: string
   accountName: string
   /** null = 判不了（没读到 / −1） */
   sizeLower: number | null
@@ -154,6 +167,29 @@ export interface PoolRow {
   trendNote: string
   /** 设置里有几个广告组把它当受众（账户欠款时不等于真在投） */
   usedByAdsets: number
+  /** 这个池子所属的广告账户现在能不能用（账户状态异常=不能用） */
+  accountUsable: boolean
+  /** 不能用时的一句话原因，例如「欠款停用·不可用」；能用时 null */
+  accountNote: string | null
+  light: Light
+}
+
+/** 一个绑定账户在观众池这一块的小结（每个账户一行） */
+export interface AccountPoolSummary {
+  adAccountId: string
+  name: string
+  statusCode: number | null
+  usable: boolean
+  /** 不可用原因，例如「欠款停用·不可用」；可用时 null */
+  note: string | null
+  /** 这个账户自己的数据日；null = 没有数据 */
+  dataDay: string | null
+  /** 这个账户的数据落后今天几天；null = 没有数据日 */
+  staleDays: number | null
+  /** 这个账户里最大的池子（读得准的才算）；没有 = null */
+  biggestPoolName: string | null
+  biggestPoolSize: number | null
+  poolCount: number
   light: Light
 }
 
@@ -189,11 +225,14 @@ export interface GoalNote {
 export interface WarMapView {
   generatedAt: string
   countdown: CountdownView
-  clocks: { dataDay: string | null; fetchedAt: string | null }
+  clocks: { dataDay: string | null; fetchedAt: string | null; staleDays: number | null }
   accounts: AccountView[]
-  pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number }
+  accountSummaries: AccountPoolSummary[]
+  pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number; unusableRows: PoolRow[] }
   /** windowLabel：花费和频率对应的真实日期区间（数据日往前 7 天），如「10/4–10/10」 */
   frequency: { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null }
   adjust: { headline: Headline; actions: ActionRow[] }
   goalNote: GoalNote | null
+  /** 计划所挂目标的最新处方一行；没有就是 null */
+  prescriptionLine: string | null
 }

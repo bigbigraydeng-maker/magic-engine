@@ -3,7 +3,7 @@
  * 草稿允许暂时不完整（空日期、空主题），保存时由服务端统一校验。
  */
 
-import type { BusinessCase, ExperimentCard, PromoPhase, PromoSpec, PromoStep, SalesHandover } from './spec'
+import type { AdsStep, AdsTargeting, BusinessCase, ExperimentCard, PromoPhase, PromoSpec, PromoStep, SalesHandover } from './spec'
 
 export type StepKind = PromoStep['kind']
 
@@ -92,6 +92,60 @@ export function setGoal(spec: PromoSpec, goalId: string): PromoSpec {
 /** 逗号 / 换行分隔的文本拆成列表，去空去重。 */
 export function splitList(text: string): string[] {
   return Array.from(new Set(text.split(/[,\n，]/).map(s => s.trim()).filter(Boolean)))
+}
+
+/**
+ * 国家码列表：拆开、去空格、转大写、去重。
+ * 转大写是因为 schema 只收两位大写码，人手打 `nz` 不该被判成错。
+ */
+export function splitCountries(text: string): string[] {
+  return Array.from(new Set(text.split(/[,\n，]/).map(s => s.trim().toUpperCase()).filter(Boolean)))
+}
+
+/**
+ * 年龄输入框的文本转成数字；空的、非数字、0 一律当「没填」返回 undefined。
+ * 不返回 0 —— schema 的下限是 18，返回 0 会让草稿一直显示校验错。
+ */
+export function ageOrUndefined(text: string): number | undefined {
+  const n = Math.floor(Number(text))
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/**
+ * 空白的结构化定向块：三个列表都空、年龄不填。
+ * **一个默认国家、默认年龄都不给** —— 给了就等于把首个客户的市场写进了平台默认。
+ */
+export function newAdsTargeting(): AdsTargeting {
+  return { countries: [], city_keys: [], excluded_audience_refs: [] }
+}
+
+/**
+ * 写入 / 删除广告步骤的投放范围。
+ *
+ * 删除时**真的把键删掉**，不写 `targeting: undefined`：
+ * 内容指纹用 `Object.keys` 枚举，undefined 的键会被序列化成 `null`，
+ * 于是「点了加上又删掉」跟「从来没填过」算出来的指纹不一样 ——
+ * 已批准的计划会被判成「内容变过了」，人工核实记录跟着作废。
+ */
+export function withAdsTargeting(step: AdsStep, targeting: AdsTargeting | undefined): AdsStep {
+  const settings: Record<string, unknown> = { ...step.settings }
+  if (targeting === undefined) delete settings.targeting
+  else settings.targeting = targeting
+  return { ...step, settings: settings as AdsStep['settings'] }
+}
+
+/**
+ * 改投放范围里的年龄；留空时**把键删掉**而不是写 undefined（原因同 `withAdsTargeting`）。
+ */
+export function withTargetingAge(
+  targeting: AdsTargeting,
+  which: 'age_min' | 'age_max',
+  value: number | undefined,
+): AdsTargeting {
+  const next: Record<string, unknown> = { ...targeting }
+  if (value === undefined) delete next[which]
+  else next[which] = value
+  return next as AdsTargeting
 }
 
 /**

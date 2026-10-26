@@ -15,7 +15,7 @@ import type { PublishTarget } from '../../types'
 
 vi.mock('@/lib/social/content-review', () => ({
   REEL_AUTO_CHECK_KEYS: ['a', 'b'],
-  humanKeysForStored: () => ['h1', 'h2'],
+  humanKeysForReviewRef: () => ['h1', 'h2'],
   validateContentChecklist: vi.fn(() => ({ ok: true, items: [] })),
   checklistPasses: vi.fn(() => true),
 }))
@@ -249,7 +249,7 @@ describe('checkOrderPrechecks', () => {
     const res = checkOrderPrechecks({
       order: makeOrder(),
       rows: [makeRow()],
-      target: makeTarget({ platform: 'publer' }),
+      target: makeTarget({ platform: 'other' as unknown as 'facebook' }),
     })
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.status).toBe(422)

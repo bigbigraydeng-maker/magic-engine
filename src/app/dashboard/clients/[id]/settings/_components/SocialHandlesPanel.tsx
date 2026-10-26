@@ -16,6 +16,7 @@
  * 3-row form. Mirrors GbpPanel's load/error/ready three-state pattern.
  */
 
+import { normalizeInstagramHandle } from '@/lib/instagram-oauth/identity'
 import { useState, useEffect, useCallback } from 'react'
 
 interface Props {
@@ -67,6 +68,11 @@ export function SocialHandlesPanel({ clientId }: Props) {
   useEffect(() => { void load() }, [load])
 
   const handleSave = async () => {
+    const instagram = normalizeInstagramHandle(draft.instagram_handle)
+    if (draft.instagram_handle?.trim() && !instagram) {
+      setErrMsg('Instagram 用户名须为 1–30 位字母、数字、点或下划线；不能含连字符、首尾点或连续点。')
+      return
+    }
     setSaving(true)
     setErrMsg(null)
     try {
@@ -74,7 +80,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          instagram_handle:  draft.instagram_handle  || null,
+          instagram_handle:  instagram,
           facebook_page_url: draft.facebook_page_url || null,
           tiktok_handle:     draft.tiktok_handle     || null,
         }),
@@ -85,6 +91,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
       }
       const fresh = (await res.json()) as Handles & { success: boolean }
       setState({ phase: 'ready', handles: fresh })
+      setDraft({ instagram_handle: fresh.instagram_handle ?? '', facebook_page_url: fresh.facebook_page_url ?? '', tiktok_handle: fresh.tiktok_handle ?? '' })
       setSavedAt(new Date().toLocaleTimeString('zh-CN'))
     } catch (err) {
       setErrMsg(err instanceof Error ? err.message : String(err))
@@ -132,7 +139,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
     <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-start justify-between gap-4">
         <p className="text-xs text-slate-500">
-          配置后驱动诊断引擎的「社媒」维度评分。至少配置一个平台才能让 social 维度产出真实分数。
+          这些资料用于识别客户的公开账号；保存不会授予发帖、消息或广告权限。授权状态请看上方「社媒授权与连接」。
         </p>
         <span
           className={[
@@ -142,7 +149,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
               : 'border border-emerald-200 bg-emerald-50 text-emerald-700',
           ].join(' ')}
         >
-          {configuredCount} / 3 已配置
+          {configuredCount} / 3 资料已登记
         </span>
       </div>
 
@@ -160,7 +167,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
             className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500"
             disabled={saving}
           />
-          <p className="mt-1 text-xs text-slate-400">仅字母数字 . _ -，最长 64 字符</p>
+          <p className="mt-1 text-xs text-slate-400">字母、数字、点或下划线，1–30 字符；不能含连字符、首尾点或连续点，可带一个 @。</p>
         </div>
 
         {/* Facebook */}
@@ -202,6 +209,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
           {savedAt && !isDirty && (
             <span className="text-emerald-700">
               ✓ 已保存 · {savedAt}
+              {normalizeInstagramHandle(state.handles.instagram_handle) && <a className="ml-3 font-semibold underline" href={`/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=content&section=social-connections`}>继续连接 Instagram</a>}
             </span>
           )}
           {errMsg && (
@@ -213,7 +221,7 @@ export function SocialHandlesPanel({ clientId }: Props) {
           disabled={!isDirty || saving}
           className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-cyan-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {saving ? '保存中…' : '保存'}
+          {saving ? '保存中…' : '保存账号资料'}
         </button>
       </div>
     </div>

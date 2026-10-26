@@ -56,6 +56,7 @@ export function chunkRange(
 
 /** 把 TikTok 的报错翻成客户能行动的话。原始报错留日志给我们排查。 */
 export function humanTikTokError(raw: string): string {
+  if (/存在多个 TikTok 授权/.test(raw)) return '存在多个 TikTok 授权,已暂停发布,请联系团队核实'
   if (/缺少 ffprobe/.test(raw)) return '发布服务缺少 ffprobe，请管理员配置视频核验依赖'
   if (/unaudited_client_can_only_post_to_private_accounts/i.test(raw)) {
     return 'TikTok 未审核应用只能向私密账号发片；账号本身需设为私密，同时视频选择仅自己可见。'
@@ -167,7 +168,8 @@ export async function checkTikTokStatus(
   publishId: string,
   expectedAccountId?: string,
 ): Promise<{ status: TikTokPostStatus; detail?: string }> {
-  const token = await getValidTikTokToken(clientId)
+  // 已发出的任务带着原账号:有别的授权并存时,按原账号精确取,让它能照常收尾
+  const token = await getValidTikTokToken(clientId, expectedAccountId ? { accountId: expectedAccountId } : undefined)
   if (!token) throw new Error('这个客户还没连过 TikTok(access_token 取不到)')
   if (expectedAccountId && token.openId !== expectedAccountId) throw new Error('TikTok 目标账号已改变，无法核验原发布任务')
   const json = await post('/post/publish/status/fetch/', token.accessToken, { publish_id: publishId })

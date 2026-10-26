@@ -80,6 +80,8 @@ export interface Diagnosis {
   notComparableReason?: NotComparableReason
   /** §14 C6：D1、D3 未来可给客户看（须带处理状态）；D7、D8 永不进客户版。阶段 1 只发内部。 */
   clientVisible: boolean
+  /** 自动暂停消费端只处理 !== false 的 D3 命中；false = 只提醒（类似人群 / 流量组）。缺省 = 原行为。 */
+  autoPauseEligible?: boolean
   manualTask?: ManualTask
   /**
    * 给人的回头检查约定（D2/D10）：什么时候回来看、看什么、不成就退回什么。
@@ -150,6 +152,8 @@ export interface AccountInput {
   adAccountId: string
   /** 同一账户登记给多个客户（§14 M9）→ 只做账户级诊断 */
   shared: boolean
+  /** PM 在后台把这个账户标成「不在广告健康页显示」时为 true：只让「数据新鲜度」类诊断（D7 日数据停更/缺数据、D11 受众池断供）跳过它；钱相关的诊断一律照跑 */
+  hiddenFromAdHealth?: boolean
   timezone: string | null
   currency: string | null
   /** 评估日结束时（账户时区）每个实体的最新设置，不含 disappeared 行 */

@@ -1159,7 +1159,7 @@ function TaskDetailDrawer({
               href={
                 factoryResult.packageId
                   ? `/dashboard/clients/${clientId}/production/${factoryResult.packageId}`
-                  : `/dashboard/clients/${clientId}/daily-plan`
+                  : `/dashboard/clients/${clientId}/production`
               }
               className="ml-1 underline hover:text-green-900"
             >

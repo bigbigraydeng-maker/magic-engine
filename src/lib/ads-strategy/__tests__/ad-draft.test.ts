@@ -8,6 +8,7 @@ import {
   DRAFT_PLAY,
   MAX_AUTO_DAILY_BUDGET,
   MAX_MESSENGER_CREATIVES,
+  MAX_AUDIENCES_PER_LIST,
   MESSENGER_CTA_TYPE,
   type AdDraft,
 } from '../ad-draft'
@@ -102,10 +103,10 @@ describe('metaTripletFor — 三件套写死，配错就是「名字叫留资、
     expect(t.destinationType).toBe('ON_AD')
   })
 
-  it('养受众 → THRUPLAY，落点 ON_VIDEO（少了它 Meta 不给按完播优化）', () => {
+  it('养受众 → THRUPLAY，不发落点（ON_VIDEO 是 limited beta、无实测）', () => {
     const t = metaTripletFor('video_thruplay')
     expect(t.optimizationGoal).toBe('THRUPLAY')
-    expect(t.destinationType).toBe('ON_VIDEO')
+    expect(t.destinationType).toBeUndefined()
   })
 
   it('原来那两种草案的落点仍然都不是私信 —— 私信是单独的类型 messenger_conversation', () => {
@@ -194,6 +195,30 @@ describe('messenger_conversation — metaTripletFor / 打法 / 描述', () => {
   it('请求体里的 kind 是任意值时描述也不炸（它在校验之前就会被调）', () => {
     expect(() => describeDraft(messengerDraft({ kind: 'constructor' as never }))).not.toThrow()
     expect(describeDraft(messengerDraft({ kind: 'constructor' as never }))).toContain('不认识')
+  })
+})
+
+describe('validateDraft — 最少 2 天（Meta：按日预算的组要跑超过 24 小时）', () => {
+  it('1 天被拒，2 天通过；0 仍是原来的「必须说跑几天」', () => {
+    expect(fields(leadDraft({ durationDays: 1 }))).toContain('durationDays')
+    expect(validateDraft(leadDraft({ durationDays: 1 }))[0].message).toContain('至少 2 天')
+    expect(validateDraft(leadDraft({ durationDays: 2 }))).toEqual([])
+  })
+})
+
+describe('validateDraft — 视频留资要封面', () => {
+  const lead = (c: object) => ({
+    kind: 'lead_form', clientId: 'c1', campaignName: 'n', adSetName: 'a', dailyBudget: 2, durationDays: 2,
+    geoCountries: ['NZ'], pageId: 'p', leadFormId: 'f',
+    creatives: [{ name: 'A', primaryText: 'x', headline: 'y', ...c }],
+  }) as AdDraft
+
+  it('视频没封面 → 拒；给 hash 或 https 链接 → 放行；只给图不要封面', () => {
+    expect(fields(lead({ videoId: 'v' }))).toContain('creatives[0].thumbnail')
+    expect(fields(lead({ videoId: 'v', thumbnailUrl: 'http://a.test/t.jpg' }))).toContain('creatives[0].thumbnail')
+    expect(validateDraft(lead({ videoId: 'v', thumbnailImageHash: 'h' }))).toEqual([])
+    expect(validateDraft(lead({ videoId: 'v', thumbnailUrl: 'https://a.test/t.jpg' }))).toEqual([])
+    expect(validateDraft(lead({ imageHash: 'h' }))).toEqual([])
   })
 })
 
@@ -315,5 +340,67 @@ describe('isApprovableKind — ME 的「开」按钮只认白名单', () => {
   it('isKnownDraftKind 认三种、不认原型链上的名字', () => {
     expect(['lead_form', 'video_thruplay', 'messenger_conversation'].every(isKnownDraftKind)).toBe(true)
     expect(isKnownDraftKind('hasOwnProperty')).toBe(false)
+  })
+})
+
+describe('validateDraft — 自定义受众（包含 / 排除）', () => {
+  it('合法的包含 + 排除 → 放行', () => {
+    expect(
+      validateDraft(
+        leadDraft({ audienceIds: ['1111111', '2222222'], excludedAudienceIds: ['3333333'] }),
+      ),
+    ).toEqual([])
+  })
+
+  it('只给排除 → 放行', () => {
+    expect(validateDraft(leadDraft({ excludedAudienceIds: ['3333333'] }))).toEqual([])
+  })
+
+  it('格式错：非数字 / 位数不对 / 带空格 → 拦', () => {
+    expect(fields(leadDraft({ audienceIds: ['abc'] }))).toContain('audienceIds')
+    expect(fields(leadDraft({ audienceIds: ['1234'] }))).toContain('audienceIds')
+    expect(fields(leadDraft({ excludedAudienceIds: ['12 345'] }))).toContain('excludedAudienceIds')
+  })
+
+  it(`超过 ${MAX_AUDIENCES_PER_LIST} 个 → 拦；刚好 ${MAX_AUDIENCES_PER_LIST} 个放行`, () => {
+    const tooMany = Array.from({ length: MAX_AUDIENCES_PER_LIST + 1 }, (_, i) =>
+      String(10000000 + i),
+    )
+    const p = validateDraft(leadDraft({ audienceIds: tooMany }))
+    const hit = p.find((x) => x.field === 'audienceIds')
+    expect(hit).toBeDefined()
+    expect(hit?.message).toContain('最多')
+
+    const exact = Array.from({ length: MAX_AUDIENCES_PER_LIST }, (_, i) => String(10000000 + i))
+    expect(validateDraft(leadDraft({ audienceIds: exact }))).toEqual([])
+  })
+
+  it('列表内重复 → 拦', () => {
+    const p = validateDraft(leadDraft({ audienceIds: ['1111111', '1111111'] }))
+    const hit = p.find((x) => x.field === 'audienceIds')
+    expect(hit).toBeDefined()
+    expect(hit?.message).toContain('重复')
+  })
+
+  it('同一个受众既包含又排除 → 拦，并点名是哪个', () => {
+    const p = validateDraft(
+      leadDraft({ audienceIds: ['1111111', '2222222'], excludedAudienceIds: ['2222222'] }),
+    )
+    const hit = p.find((x) => x.field === 'excludedAudienceIds')
+    expect(hit).toBeDefined()
+    expect(hit?.message).toContain('2222222')
+  })
+
+  it('请求体形状不对 → 返回问题，不抛 500', () => {
+    const asString = leadDraft({ audienceIds: '1111111' as unknown as string[] })
+    expect(() => validateDraft(asString)).not.toThrow()
+    expect(fields(asString)).toContain('audienceIds')
+
+    const asObject = leadDraft({ excludedAudienceIds: { a: 1 } as unknown as string[] })
+    expect(() => validateDraft(asObject)).not.toThrow()
+    expect(fields(asObject)).toContain('excludedAudienceIds')
+
+    const asNumber = leadDraft({ audienceIds: [1111111 as unknown as string] })
+    expect(fields(asNumber)).toContain('audienceIds')
   })
 })

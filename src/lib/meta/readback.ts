@@ -267,3 +267,21 @@ async function fetchPostText(
     .map((v) => v.trim())
   return texts.length > 0 ? texts : null
 }
+
+/**
+ * 广告账户的最低日预算（账户币种的最小单位，如 NZD 178 = $1.78）和币种。
+ * 低于它 Meta 一定拒绝按天预算的广告组。读不到返回 null（= 查不出来，调用方放行、由 Meta 兜底，
+ * 不是「预算够」）。
+ */
+export async function fetchAccountMinDailyBudget(
+  adAccountId: string,
+  accessToken: string,
+): Promise<{ minDailyBudgetMinor: number; currency: string } | null> {
+  const params = new URLSearchParams({ fields: 'currency,min_daily_budget', access_token: accessToken })
+  const json = await graphGet(`${GRAPH_BASE}/${adAccountId}?${params}`, `min budget ${adAccountId}`)
+  if (!json || typeof json !== 'object') return null
+  const o = json as { currency?: unknown; min_daily_budget?: unknown }
+  const min = typeof o.min_daily_budget === 'string' ? Number(o.min_daily_budget) : o.min_daily_budget
+  if (typeof o.currency !== 'string' || typeof min !== 'number' || !Number.isFinite(min) || min <= 0) return null
+  return { minDailyBudgetMinor: min, currency: o.currency }
+}

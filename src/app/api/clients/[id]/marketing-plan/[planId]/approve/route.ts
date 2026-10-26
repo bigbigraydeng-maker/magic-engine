@@ -22,6 +22,7 @@ import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval } from '@/lib/marketing-plan/promo/gates'
 import { hasPromoField, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 
 export const maxDuration = 60
@@ -30,6 +31,13 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
+  const denied = await rejectAgentAdsBearer(_req, {
+    clientId: params.id,
+    action: 'approve',
+    resourceId: params.planId,
+  })
+  if (denied) return denied
+
   const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
@@ -84,7 +92,8 @@ export async function POST(
         return NextResponse.json({ success: false, error: '推广计划结构不合法，不能批准', issues: parsed.issues }, { status: 400 })
       }
       contentHash = promoContentHash(parsed.spec)
-      const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow))
+      // 批准是授权动作：预算门每次都现读最新的在投预算再判（只读；60 秒缓存使成本很小），不信最多 12 小时前的存档
+      const facts = await loadPromoFacts(planRow.client_id, parsed.spec, manualChecksOf(planRow), new Date(), { liveBudget: 'always' })
       const verdict = evaluateApproval(parsed.spec, facts.gate)
       if (!verdict.can_approve) {
         return NextResponse.json({
@@ -95,7 +104,11 @@ export async function POST(
       }
       gateSnapshot = {
         taken_at: new Date().toISOString(),
-        results: verdict.results.map(r => ({ key: r.key, light: r.light, hard: r.hard, phase_id: r.phase_id })),
+        results: verdict.results.map(r => ({
+          key: r.key, light: r.light, hard: r.hard, phase_id: r.phase_id,
+          // 预算那一道用的是现读还是存档、证据读于何时，事后要能说清（魏征：批准后没留「用的是哪份预算证据」）
+          ...(r.source ? { source: r.source, as_of: r.as_of } : {}),
+        })),
       }
     }
 

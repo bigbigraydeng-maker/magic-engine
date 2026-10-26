@@ -13,15 +13,20 @@ import type {
 } from '@/types/strategy'
 import { INITIATIVE_TYPE_TIER } from '@/types/strategy'
 
+export type InitiativeReadResult =
+  | { ok: true; rows: InitiativeRow[] }
+  | { ok: false; error: { message: string } }
+
 /**
- * List initiatives for a Goal, ordered by sort_order.
- * Excludes archived by default.
+ * Read initiatives for a Goal, ordered by sort_order. Excludes archived by default.
+ * A failed read comes back as { ok: false } so callers can tell "could not read"
+ * apart from "this goal has no initiatives".
  */
-export async function listInitiativesForGoal(
+export async function readInitiativesForGoal(
   supabase: SupabaseClient,
   goalId: string,
   opts: { includeArchived?: boolean } = {},
-): Promise<InitiativeRow[]> {
+): Promise<InitiativeReadResult> {
   let query = supabase
     .from('initiatives')
     .select('*')
@@ -32,11 +37,26 @@ export async function listInitiativesForGoal(
   if (!opts.includeArchived) query = query.eq('is_archived', false)
 
   const { data, error } = await query
-  if (error) {
-    console.error('[strategy/initiatives] listInitiativesForGoal error', error)
+  if (error) return { ok: false, error }
+  return { ok: true, rows: (data ?? []) as InitiativeRow[] }
+}
+
+/**
+ * List initiatives for a Goal, ordered by sort_order.
+ * Excludes archived by default. Logs and returns [] on read error
+ * (legacy behaviour; use readInitiativesForGoal to tell errors apart).
+ */
+export async function listInitiativesForGoal(
+  supabase: SupabaseClient,
+  goalId: string,
+  opts: { includeArchived?: boolean } = {},
+): Promise<InitiativeRow[]> {
+  const result = await readInitiativesForGoal(supabase, goalId, opts)
+  if (!result.ok) {
+    console.error('[strategy/initiatives] listInitiativesForGoal error', result.error)
     return []
   }
-  return (data ?? []) as InitiativeRow[]
+  return result.rows
 }
 
 /**
@@ -375,9 +395,14 @@ export async function getExecutionSummaryForGoal(
   supabase: SupabaseClient,
   goalId: string,
 ): Promise<GoalExecutionSummary | null> {
-  // 1) Initiatives for this goal (active = is_archived=false; unassigned bucket excluded)
-  const inits = await listInitiativesForGoal(supabase, goalId, { includeArchived: false })
-  const realInits = inits.filter(i => i.initiative_type !== 'unassigned')
+  // 1) Initiatives for this goal (active = is_archived=false; unassigned bucket excluded).
+  //    A failed read returns null — never a zero summary that reads as "no initiatives".
+  const inits = await readInitiativesForGoal(supabase, goalId, { includeArchived: false })
+  if (!inits.ok) {
+    console.error('[strategy/initiatives] initiatives query error', inits.error)
+    return null
+  }
+  const realInits = inits.rows.filter(i => i.initiative_type !== 'unassigned')
 
   if (realInits.length === 0) {
     return {

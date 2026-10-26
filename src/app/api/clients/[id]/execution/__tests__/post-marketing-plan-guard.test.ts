@@ -125,6 +125,12 @@ describe('POST /execution — 推广计划的任务必须指明属于哪一步',
     expect(stepRow()).toBeUndefined()
   })
 
+  it('🔴 往执行看板派广告任务前的阶段复查是授权动作：读事实时要求现读预算门', async () => {
+    await POST(req({ ...body, promo_ref: { phase_id: 'p1', step_id: 's-ads' } }), params)
+    expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: 'if_needed' })
+  })
+
   it('旧版计划（没有 promo）：不要求 promo_ref，行为不变', async () => {
     m.planData = { tasks: [] }
     const res = await POST(req(body), params)

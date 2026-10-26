@@ -62,6 +62,52 @@ describe('分析：原话核验', () => {
     const v = verifyFacts({ ...raw, facts: [{ key: 'concern', value: 'x', quote: 'a', confidence: 1 }] }, transcript)
     expect(v.facts).toHaveLength(0)
   })
+
+  it('保留客户邮箱，并在现有摘要中逐月呈现已核实的团期问答', () => {
+    const callText = 'Customer: My email is sarju.dayal@example.com. How many tours are there in March? How many tours are there in May? Employee: We have two tours in March and three tours in May.'
+    const v = verifyFacts({
+      summary: '客户咨询中国旅行安排。', language: 'en',
+      facts: [{ key: 'contact_email', value: 'sarju.dayal@example.com', quote: 'My email is sarju.dayal@example.com', speaker: 'customer', confidence: 0.95 }],
+      inquiries: [
+        { topic: 'tour_departures', month: 3, question: '三月有几团', questionQuote: 'How many tours are there in March?', questionSpeaker: 'customer', answer: '三月有两团', answerQuote: 'We have two tours in March', answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 2, confidence: 0.9 },
+        { topic: 'tour_departures', month: 5, question: '五月有几团', questionQuote: 'How many tours are there in May?', questionSpeaker: 'customer', answer: '五月有三团', answerQuote: 'three tours in May', answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 3, confidence: 0.9 },
+      ],
+    }, callText)
+
+    expect(v.facts).toHaveLength(1)
+    expect(v.facts[0]).toMatchObject({ key: 'contact_email', value: 'sarju.dayal@example.com' })
+    expect(v.inquiries.map((inquiry) => [inquiry.month, inquiry.departureCount])).toEqual([[3, 2], [5, 3]])
+    expect(v.summary).toContain('客户提供邮箱：sarju.dayal@example.com')
+    expect(v.summary).toContain('3月团期')
+    expect(v.summary).toContain('明确2团')
+    expect(v.summary).toContain('5月团期')
+    expect(v.summary).toContain('明确3团')
+  })
+
+  it('不把“确认需要两周”误记成两团', () => {
+    const callText = 'How many tours do you have in March? We have two weeks to confirm the tours.'
+    const v = verifyFacts({
+      summary: '客户询问三月团期。', language: 'en', facts: [],
+      inquiries: [{ topic: 'tour_departures', month: 3, question: '三月有几团', questionQuote: 'How many tours do you have in March?', questionSpeaker: 'customer', answer: '员工需要两周确认', answerQuote: 'We have two weeks to confirm the tours', answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 2, confidence: 0.8 }],
+    }, callText)
+
+    expect(v.inquiries[0]).toMatchObject({ answerStatus: 'answered', departureCount: null })
+    expect(v.summary).toContain('团数未核实')
+  })
+
+  it('跨月份的合并答复不能给每个月分别认定团数', () => {
+    const combinedAnswer = 'We have two tours in March and three tours in May'
+    const callText = `How many tours are there in March? How many tours are there in May? ${combinedAnswer}.`
+    const v = verifyFacts({
+      summary: '客户询问团期。', language: 'en', facts: [],
+      inquiries: [
+        { topic: 'tour_departures', month: 3, question: '三月有几团', questionQuote: 'How many tours are there in March?', questionSpeaker: 'customer', answer: '逐月说明团数', answerQuote: combinedAnswer, answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 2, confidence: 0.9 },
+        { topic: 'tour_departures', month: 5, question: '五月有几团', questionQuote: 'How many tours are there in May?', questionSpeaker: 'customer', answer: '逐月说明团数', answerQuote: combinedAnswer, answerSpeaker: 'employee', answerStatus: 'answered', departureCount: 3, confidence: 0.9 },
+      ],
+    }, callText)
+
+    expect(v.inquiries.map((inquiry) => [inquiry.answerStatus, inquiry.departureCount])).toEqual([['unclear', null], ['unclear', null]])
+  })
 })
 
 function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<AnalysisConnection>; transcribedToday?: number; markFails?: boolean } = {}) {
@@ -312,5 +358,71 @@ describe('分隔符剔除', () => {
   it('拼接还原也剔除干净', async () => {
     const { stripDelimiters } = await import('../vendors')
     expect(stripDelimiters('a TRANSCRIPT>>TRANSCRIPT>>>> b <<<TRANSCRIPT c')).not.toMatch(/TRANSCRIPT>>>|<<<TRANSCRIPT/)
+  })
+})
+
+describe('摘要不过核对闸时，存进库的必须是换过的那句（2026-10-25 真实事故）', () => {
+  /** 转写里有「1st time」也有「I've been to South China」—— 客人自己推翻了「首次」。 */
+  const TRANSCRIPT = "声道1：Is this Sergio Dyer? 声道2：Yeah. 1st time. I've been to South China, but not Central China."
+
+  function deps(store: AnalysisStore, summary: string) {
+    return goodDeps(store, {
+      transcribe: async () => ({ text: TRANSCRIPT, model: 'm-t' }),
+      analyze: async () => ({
+        raw: {
+          summary,
+          language: 'en',
+          facts: [{ key: 'destination_or_tour' as const, value: '中国', quote: 'but not Central China', confidence: 0.9 }],
+        },
+        model: 'm-a',
+      }),
+    })
+  }
+
+  it('人名写错 + 首次被推翻 → 换成由已核实事实拼的摘要', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => ['Sarju Dayal']
+    await runCallAnalysis(deps(s.store, '旅行社回电客人Sergio Dyer，客人首次去中国。'), ref)
+    expect(s.analyses).toHaveLength(1)
+    expect(s.analyses[0].summary).not.toContain('Sergio Dyer')
+    expect(s.analyses[0].summary).not.toContain('首次')
+    expect(s.analyses[0].summary).toContain('这通电话抽到的可核实信息')
+    expect(s.analyses[0].summary).toContain('中国')
+  })
+
+  it('摘要干净时原样存，不乱换', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => ['Sarju Dayal']
+    await runCallAnalysis(deps(s.store, '旅行社回电客人，了解其中国旅行计划。'), ref)
+    expect(s.analyses[0].summary).toBe('旅行社回电客人，了解其中国旅行计划。')
+  })
+
+  it('读不到客人姓名时，摘要里的人名一律当成写错（宁可换成事实清单）', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => []
+    await runCallAnalysis(deps(s.store, '旅行社回电客人Sergio Dyer，了解计划。'), ref)
+    expect(s.analyses[0].summary).toContain('这通电话抽到的可核实信息')
+  })
+})
+
+describe('口语数字与书面数字写法不同时，不许把正确摘要误判成瞎编（2026-10-12 真实通话）', () => {
+  it('转写说 "March 20 27th"、摘要写「2027年3月20日」，而这个日期是条已核实事实 → 原样保留', async () => {
+    const s = makeStore()
+    s.store.getKnownNames = async () => ['Newasian Logistics']
+    await runCallAnalysis(
+      goodDeps(s.store, {
+        transcribe: async () => ({ text: "声道2：It's for March 20 27th. 声道1：Okay.", model: 'm-t' }),
+        analyze: async () => ({
+          raw: {
+            summary: '客人计划2027年3月20日出行。',
+            language: 'en',
+            facts: [{ key: 'travel_window' as const, value: '2027年3月20日', quote: "It's for March 20 27th", confidence: 0.9 }],
+          },
+          model: 'm-a',
+        }),
+      }),
+      ref,
+    )
+    expect(s.analyses[0].summary).toBe('客人计划2027年3月20日出行。')
   })
 })

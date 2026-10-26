@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import type { CatalogSnapshotResponse } from './types'
-import type { PublishPreviewResponse } from '@/lib/tour-catalog/publish-contract'
+import type { PublishPreviewResponse, PublishResponse } from '@/lib/tour-catalog/publish-contract'
 import type { PublishPreviewState } from './usePublishPreview'
 import { CatalogTabs, TabPanel, type CatalogTab } from './CatalogTabs'
 import { PublishBar } from './PublishBar'
@@ -14,6 +14,8 @@ import { BatchHistory } from './BatchHistory'
 import { AliasList } from './AliasList'
 import { AssistantDrawer } from './AssistantDrawer'
 import { ImportPanel } from './ImportPanel'
+import { NewTourEntry } from './NewTourDialog'
+import { incompleteNewTours } from './incomplete-new-tours'
 import { AssistantPanel } from './AssistantPanel'
 import { CatalogChangeFeed } from './CatalogChangeFeed'
 import { CatalogSettingsPanel } from './CatalogSettingsPanel'
@@ -174,7 +176,16 @@ function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
         >
           导出全部团（含未上架的修改，Excel 可直接打开）
         </a>
-        {snapshot.permissions.import ? null : (
+        {snapshot.permissions.import ? (
+          <NewTourEntry
+            clientId={clientId}
+            tours={snapshot.tours}
+            onCreated={id => {
+              onChanged()
+              onSelect(id)
+            }}
+          />
+        ) : (
           <p className="mt-2 px-1 text-xs font-semibold text-me-charcoal/70">{IMPORT_BY_ME_TEXT}</p>
         )}
       </div>
@@ -539,12 +550,14 @@ function usePublishRequest(snapshot: CatalogSnapshotResponse, publishedVersion: 
 
 function WorkspaceDialogs(props: {
   clientId: string
+  snapshot: CatalogSnapshotResponse
   publish: PublishPreviewState
   state: WorkspaceState
   onChanged: () => void
+  onPublished: (websiteSync: PublishResponse['websiteSync']) => void
   onRequested: (request: PublishRequestView) => void
 }): JSX.Element | null {
-  const { clientId, publish, state, onChanged, onRequested } = props
+  const { clientId, snapshot, publish, state, onChanged, onRequested, onPublished } = props
   if (state.requestOpen) {
     return (
       <RequestPublishDialog
@@ -563,10 +576,12 @@ function WorkspaceDialogs(props: {
       <PublishDialog
         clientId={clientId}
         preview={publish.preview}
+        incompleteNewTours={incompleteNewTours(publish.preview, snapshot.tours, snapshot.departures)}
         onRefresh={publish.refresh}
         onClose={state.closePublish}
-        onPublished={() => {
+        onPublished={(websiteSync) => {
           state.closePublish()
+          onPublished(websiteSync)
           onChanged()
         }}
       />
@@ -583,6 +598,7 @@ export function CatalogWorkspace(props: {
   onChanged: () => void
 }): JSX.Element {
   const { clientId, snapshot, publish, onChanged } = props
+  const [websiteSyncNotice, setWebsiteSyncNotice] = useState<PublishResponse['websiteSync'] | null>(null)
   const canPublish = snapshot.permissions.publish
   const state = useWorkspaceState(canPublish)
   const { request, setSubmitted } = usePublishRequest(snapshot, publish.preview?.publishedVersion)
@@ -600,6 +616,23 @@ export function CatalogWorkspace(props: {
   return (
     <CatalogUiProvider value={ui}>
       <div className="space-y-4">
+        {websiteSyncNotice ? (
+          <div
+            role="status"
+            className={`flex items-start justify-between gap-4 rounded-lg border p-4 text-sm ${websiteSyncNotice === 'revalidated' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-950'}`}
+          >
+            <p>
+              {websiteSyncNotice === 'revalidated'
+                ? '已上架；官网已确认收到刷新通知。'
+                : websiteSyncNotice === 'not_configured'
+                  ? '已上架；官网即时刷新通道尚未配置。若官网目录连接已启用，页面会在最多 15 秒内重新读取；否则需要先配置目录连接。'
+                  : '已上架；官网刷新通知失败。若目录连接已启用，页面会在最多 15 秒内重新读取；请检查官网刷新接口配置。'}
+            </p>
+            <button type="button" className="shrink-0 font-semibold underline" onClick={() => setWebsiteSyncNotice(null)}>
+              关闭
+            </button>
+          </div>
+        ) : null}
         <WorkspaceHeader
           publish={publish}
           assistantOpen={state.assistantOpen}
@@ -619,9 +652,11 @@ export function CatalogWorkspace(props: {
         />
         <WorkspaceDialogs
           clientId={clientId}
+          snapshot={snapshot}
           publish={publish}
           state={state}
           onChanged={onChanged}
+          onPublished={setWebsiteSyncNotice}
           onRequested={setSubmitted}
         />
       </div>

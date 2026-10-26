@@ -6,13 +6,14 @@
 ## 索引（每张卡的裁决一眼看）
 | 卡 | 状态 | 裁决摘要 |
 |---|---|---|
+| [2026-10-20 Meta 事件管理工具追踪体检](2026-10-20-meta-events-manager-tracking-health.md) | candidate | 吸收：四屏只读体检、同一事件名至多一条服务器来源；不吸收：Meta 宣传数字、经向导再加第三条回传（只限某客户）；待验证：接口读诊断警告 / 集成清单（目前读不到）、11-12 设备端衡量通知 |
 | [2026-10-18 Facebook 素材先行测试顺序](2026-10-18-meta-ads-creative-first-test-order.md) | candidate | 部分吸收（待验证）：测试≠放量；忽略：1:4:1（对 CTS）、点击率选赢家；吸收：ABO 测/CBO 放量（已有） |
 | [2026-10-18 Facebook 广告入门六步与指标线](2026-10-18-meta-ads-beginner-setup-and-metrics.md) | candidate | 吸收（已有一致）：落地页/盈亏CPA/加预算幅度；~~忽略：Advantage+开启~~（已更正为吸收，见卡内复核更正）；忽略：电商数字线（依据是 E-06）；待验证：开始时间次日0点、点击率×点击成本矩阵 |
 | [2026-10-18 Meta 创意测试工具（Post Andromeda）](2026-10-18-meta-ads-creative-testing-post-andromeda.md) | candidate | **待验证（优先）**：相似创意被合并只投一条（该细点 ME 无记录；Andromeda 本身 ME 审计已展开）、后台「创意测试」可否成为可执行测试路径、钩子测试；吸收（已有一致）：指标要选对、别硬做 20 条；忽略：Hyros 推广 |
 | [2026-10-18 Sabri Suby 8 个技巧](2026-10-18-meta-ads-eight-hacks-sabri-suby.md) | candidate | **待验证（优先）**：身份关键词、再营销换报价（用不买原因）、落地页镜像标题、静态图；吸收（已有一致）：有机赢家转广告、宽泛定向；忽略：僵尸系列、20–40 标题、放大到盈亏线 |
 | [2026-10-18 Sam Piliero 创意飞轮](2026-10-18-meta-ads-creative-flywheel-sam-piliero.md) | candidate | **待验证（优先）**：广告组「日最低花费」可作 AD-EXPL-1（A+ 档）的实现机制；竞品广告库只读扫描；忽略：不要怕学习期、增量归因 |
 | [2026-10-18 Ben Heath 两系列与 10 钩子](2026-10-18-meta-ads-two-campaigns-and-10-hooks-ben-heath.md) | candidate | 待验证：放量+测试两系列、10 钩子（并入创意测试卡）；忽略（PM 层面）：请创作者/网红做广告 |
-| [2026-10-18 Ben Heath 2026 年 8 个新打法](2026-10-18-meta-ads-eight-strategies-ben-heath-2026.md) | candidate | **待验证（优先）**：拉新组实际有多少钱花在已互动/老客户上（决定「收割/拉新分开」值不值）；待验证：价值规则、按三层拆报表；PM 拍板项：创作者合作广告；忽略：每组 20 条、入口价位说；吸收（已有一致）：合并数据、WhatsApp |
+| [2026-10-18 Ben Heath 2026 年 8 个新打法](2026-10-18-meta-ads-eight-strategies-ben-heath-2026.md) | candidate | **待验证（优先）**：拉新组实际有多少钱花在已互动/老客户上（决定「收割/拉新分开」值不值）；待验证：价值规则、按三层拆报表；PM 拍板项：创作者合作广告；忽略：每组 20 条、入口价位说；部分吸收：合并数据（仅「别切碎」一点一致，ME 仍分收割/拉新）；吸收（已有一致）：WhatsApp；注：CTS 池子规模已按 10/22 官方账户（约 8,400）更正，见卡内复核更正 |
 | [2026-10-18 Jared Robinson 一个 CBO + 3 角度×5 类型](2026-10-18-meta-ads-cbo-batches-jared-robinson.md) | candidate | **待验证（优先）**：角度之外再记「素材类型」第二层标签（补 SOP §6 缺口，交 AD-LINK-1）；忽略：CBO 同等机会（与 ME 实测相反）、每组 15–30 条；PM 拍板项：创始人出镜、先买后付；吸收（已有一致）：按批建组、排除老客户 |
 | [2026-10-18 Sergio C 小预算：先测创意、按展示量关停、砍掉拖后腿的](2026-10-18-meta-ads-small-budget-cut-fat-sergio-c.md) | candidate | **待验证（优先）**：每条广告设展示上限、到量关停，作为 AD-EXPL-1 的候选机制（与 Sam Piliero「最低花费」互补，只做预筛）；忽略：用点击率直接选赢家、电商阈值；吸收（已有一致）：别拆多系列、小步加预算 |
 | [2026-10-18 Matt Shiver 拆 Hormozi：一个人群多痛点、测试与放量分开](2026-10-18-meta-ads-hormozi-callout-test-matt-shiver.md) | candidate | **待验证（优先）**：建测试广告时关掉「相关媒体」与创意增强（119 号先只读查默认值）；部分吸收：点名行业可以、点名个人属性不行（S-13①）；忽略：按花费挑赢家（AT §4）、100 美元/天 |

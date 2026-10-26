@@ -6,6 +6,7 @@ import { asRecord, computeFingerprint, redlineSurface } from './guards'
 import { writeCompletionBooks } from './books'
 import { finishStage, type FinishInput } from './publish-steps'
 import { readAuth } from './payload-lock'
+import { portFor } from './platform-port'
 import type { ClaimIds, ClaimTarget } from './action'
 import {
   CLAIM_LEASE_MS,
@@ -57,7 +58,8 @@ async function buildResume(deps: PromoteDeps, order: PromoteOrder, row: ResumeCo
   const copy = asRecord(asRecord(order.brief)['copy'])
   const first = buildReelFirstComment(asRecord(copy['endcard']), order.id)
   const approvedAt = asRecord(order.review_ref)['approved_at']
-  if (!target || target.platform !== 'facebook' || target.page_id !== pageId || !target.expect_brand) return fail(422, '发布目标缺失或与工单主页不一致,不能补做收尾')
+  const port = target ? portFor(target.platform) : null
+  if (!target || !port || !port.matchesStoredAccount(target, pageId) || !target.expect_brand) return fail(422, '发布目标缺失或与工单主页不一致,不能补做收尾')
   if (!videoId || !first || !order.master_brief_id || typeof approvedAt !== 'string') return fail(422, '补做收尾所需的配置缺失')
   const hit = await deps.scanRedline(order.client_id, order.master_brief_id, redlineSurface(first.text))
   if (hit) return fail(422, `首评命中红线,不能发送: ${hit}`)

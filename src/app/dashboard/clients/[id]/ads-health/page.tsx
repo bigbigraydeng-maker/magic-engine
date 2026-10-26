@@ -18,6 +18,7 @@ import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playboo
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
+import LiveTodayPanel from './live-today-panel'
 import AutoPausePanel from './auto-pause-panel'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -197,9 +198,17 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
         })
         return
       }
+      if (res.status === 403) {
+        setResult({ kind: 'err', text: '需要内部账号操作。广告没有变更。' })
+        return
+      }
+      if (res.status === 429) {
+        setResult({ kind: 'err', text: '10 分钟内已补过,请稍后。' })
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
-      const n = (json.adsAdded ?? []).length
+      const n =(json.adsAdded ?? []).length
       setDone(true)
       setResult({
         kind: 'ok',
@@ -338,9 +347,14 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
         return
       }
 
+      if (action === 'pause' && pv.pausable === false) {
+        setResult({ kind: 'err', text: '这条广告现在已经不在投放中,不需要再停。广告没有变更。' })
+        return
+      }
+
       if (action === 'cut' && !pv.cuttable) {
-        // Not a dead end: pausing always works, so offer it as the next step
-        // rather than telling the PM to go into the ad platform himself.
+        // Not a dead end: offer pause as the next step (when the campaign is
+        // still ACTIVE; the server may also refuse it with no_active_goal).
         setResult({
           kind: 'err',
           text: `这条广告的每天预算改不了(它用的不是「每日预算」)。能立刻做的是先全停 —— 要停就点右边的「先全停」。`,
@@ -358,9 +372,13 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaign_id: c.campaign_id, action, request_id: globalThis.crypto.randomUUID() }),
       })
+      if (res.status === 403) {
+        setResult({ kind: 'err', text: '需要内部账号操作。广告没有变更。' })
+        return
+      }
       const json = await res.json()
       if (json.error === 'no_active_goal') {
-        setResult({ kind: 'err', text: '这个客户还没有生效的增长目标，所以系统没有把止损动作提交给执行内核。先补齐目标后再试。' })
+        setResult({ kind: 'err', text: '这个客户还没有生效的增长目标，暂停动作暂时提交不了，广告没有变更。先在「目标与设置」补上目标后再试。' })
         return
       }
       if (json.error === 'goal_unreadable' || json.error === 'adsets_unreadable' || json.error === 'timezone_unreadable') {
@@ -580,6 +598,7 @@ export default function AdsHealthPage() {
       {tab === 'today' && (
         <>
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
+          <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />
           {loading && <div className="text-gray-400 text-sm py-8 text-center">加载中…</div>}
           {error && (
@@ -613,6 +632,7 @@ export default function AdsHealthPage() {
 
       {tab === 'ads' && (
         <>
+          <LiveTodayPanel clientId={clientId} part="new" />
           {loading && <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>}
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">加载出错:{error}</div>

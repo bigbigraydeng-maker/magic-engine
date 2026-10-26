@@ -62,6 +62,7 @@ function makeEngine(over = {}) {
     computeTimingFromProps: () => TIMING,
     montageFrameOf: (beats, i) => (i === 0 ? 0 : Math.round(beats[i] * 30) + 2),
     musicSourceFor: () => null,
+    contentSubstanceOf: () => ({ verdict: 'pass', kinds: ['brand_card'], textSeconds: 3, reason: 'ok', texts: [] }),
     ...over,
   }
 }
@@ -914,11 +915,14 @@ describe('atmosphere template wiring', () => {
     isTemplateId: (id) => ['atmosphere', 'weird'].includes(id),
     loadTemplate: (id, p) => ({ compositionId: 'AtmosphereReel', props: p, assetFiles: ['clips/a.mp4', 'logo.png'], totalFrames: 450, recipeGaps: [{ column: '真人背影/真人出镜', status: '未满足', reason: 'x' }] }),
     computeAtmosphereTiming: () => ({ totalFrames: 450 }),
+    contentSubstanceOf: (_t, p) => (p.line
+      ? { verdict: 'pass', kinds: ['selling_line'], textSeconds: 5, reason: 'ok', texts: [] }
+      : { verdict: 'fail', kinds: [], textSeconds: 0, reason: '没有文字', texts: [] }),
     ...over,
   })
-  const atmosWo = (props = PROPS_ATMOS, template = 'atmosphere') => {
+  const atmosWo = (props = PROPS_ATMOS, template = 'atmosphere', deliverable = undefined) => {
     const wo = makeWo()
-    wo.brief.remotion = { template, props }
+    wo.brief.remotion = { template, props, ...(deliverable === undefined ? {} : { deliverable }) }
     return wo
   }
   const probe = (over = {}) => vi.fn(() => ({ durationSec: 20, width: 1080, height: 1920, ...over }))
@@ -929,22 +933,57 @@ describe('atmosphere template wiring', () => {
     ...over,
   })
 
-  it('a reel with no text renders, gets a neutral sidecar cue, an empty caption and a preflight receipt', async () => {
+  it('a reel with no text renders only when marked asset_only: neutral sidecar cue, empty caption, preflight and substance receipts', async () => {
     const env = makeEnv()
     const deps = mk(env)
-    const res = await run(env, deps, atmosWo())
+    const res = await run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only'))
     expect(res).toEqual({ ok: true, cost: 0 })
     const segments = JSON.parse(deps.uploadSignedFn.mock.calls[1][1].toString())
+    expect(segments.content_substance).toMatchObject({ verdict: 'asset_only' })
+    expect(deps.completeFn.mock.calls[0][0].media_evidence).toMatchObject({
+      content_substance: { verdict: 'asset_only' },
+      capabilities: ['content_substance_v1'],
+    })
     expect(segments.atmosphere_preflight).toMatchObject({ upscale: 1, quality: 'ok' })
     expect(segments.recipe_gaps[0].column).toBe('真人背影/真人出镜')
     expect(deps.uploadSignedFn.mock.calls[2][1].toString()).toContain('♪')
     expect(deps.completeFn.mock.calls[0][0].caption).toBe('')
   })
 
+  it('content gate: an unmarked reel with no text is refused before staging, probing or rendering', async () => {
+    const env = makeEnv()
+    const deps = mk(env)
+    const err = await errOf(run(env, deps, atmosWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/内容闸/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+    expect(deps.probeClipFn).not.toHaveBeenCalled()
+  })
+
+  it('content gate: a mistyped deliverable is not a pass (strict enum, treated as a normal deliverable)', async () => {
+    for (const bad of ['Asset_Only', 'asset-only', 'asset_only ', true, null]) {
+      const env = makeEnv()
+      const deps = mk(env)
+      const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', bad)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toMatch(/内容闸/)
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    }
+  })
+
+  it('content gate: a worker engine without contentSubstanceOf refuses (fail-closed)', async () => {
+    const env = makeEnv()
+    const deps = mk(env, { loadEngineFn: async () => atmosEngine({ contentSubstanceOf: undefined }) })
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only')))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/内容闸/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
   it('refuses before rendering when the staged clip is shorter than sourceIn + durationSec', async () => {
     const env = makeEnv()
     const deps = mk(env, { probeClipFn: probe({ durationSec: 9 }) })
-    const err = await errOf(run(env, deps, atmosWo()))
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only')))
     expect(err).toBeInstanceOf(RemotionOrderError)
     expect(err.message).toMatch(/素材不够长/)
     expect(deps.renderFn).not.toHaveBeenCalled()
@@ -953,7 +992,7 @@ describe('atmosphere template wiring', () => {
   it('refuses when ffprobe itself fails (fail-closed)', async () => {
     const env = makeEnv()
     const deps = mk(env, { probeClipFn: vi.fn(() => { throw new Error('ffprobe missing') }) })
-    const err = await errOf(run(env, deps, atmosWo()))
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only')))
     expect(err).toBeInstanceOf(RemotionOrderError)
     expect(err.message).toMatch(/素材检查本身出错/)
     expect(deps.renderFn).not.toHaveBeenCalled()

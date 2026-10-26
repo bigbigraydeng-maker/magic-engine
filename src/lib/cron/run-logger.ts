@@ -35,14 +35,35 @@ import { supabaseAdmin } from '@/lib/supabase'
  * 写日志本身失败**不抛异常**：它是观测手段，不是安全闸，不该把正在跑的业务任务弄挂。
  */
 
+export interface CronRunFinishOpts {
+  processed?: number
+  completed?: number
+  failed?: number
+  summary?: Record<string, unknown>
+  error?: string
+}
+
 export interface CronRunHandle {
-  finish(opts: {
-    processed?: number
-    completed?: number
-    failed?: number
-    summary?: Record<string, unknown>
-    error?: string
-  }): Promise<void>
+  finish(opts: CronRunFinishOpts): Promise<void>
+}
+
+/**
+ * 一次跑里有的条目成了、有的条目没成 → `partial`。
+ * 一条都没成，或整次抛了 → `failed`。全成（或空转）→ `completed`。
+ *
+ * 有 `error` 但 `failed` 为 0（例如出口坏了、人已经进了 CRM）仍是 `failed`，
+ * 日报靠这个状态看见「没有可数失败对象、但这轮没干成」。
+ */
+export function resolveCronRunStatus(input: CronRunFinishOpts): 'completed' | 'partial' | 'failed' {
+  const failed = input.failed ?? 0
+  const completed = input.completed ?? 0
+  if (failed > 0 && completed > 0) return 'partial'
+  if (input.error || failed > 0) return 'failed'
+  return 'completed'
+}
+
+function isStatusCheckViolation(error: { message: string; code?: string }): boolean {
+  return error.code === '23514' || error.message.includes('cron_run_logs_status_check')
 }
 
 /** Supabase 的错误对象只保证有 message，其余字段按需带上，全部塞进一行日志里。 */
@@ -91,19 +112,50 @@ export async function startCronRun(jobName: string): Promise<CronRunHandle> {
   return finisher(jobName, runId, startedAt)
 }
 
+async function upsertCronOutcome(jobName: string, outcome: Record<string, unknown>): Promise<void> {
+  const { error } = await supabaseAdmin.from('cron_run_logs').upsert(outcome, { onConflict: 'id' })
+  if (!error) return
+
+  // `partial` / `abandoned` 要等状态约束的迁移应用之后才写得进。迁移还没上时，
+  // 直接失败会把这一行永远留在 running —— 比「先记成 failed」更瞎。
+  const status = String(outcome.status)
+  if (isStatusCheckViolation(error) && (status === 'partial' || status === 'abandoned')) {
+    const fallbackMessage = status === 'abandoned'
+      ? `abandoned: ${outcome.error_message ?? 'still running past 2× expected duration'}`
+      : `partial: ${outcome.error_message ?? `${outcome.failed_count ?? 0} item(s) failed`}`
+    const { error: retryError } = await supabaseAdmin.from('cron_run_logs').upsert(
+      { ...outcome, status: 'failed', error_message: fallbackMessage },
+      { onConflict: 'id' },
+    )
+    if (!retryError) {
+      console.error(
+        `[cron-run-logger] ${jobName}: cron_run_logs 还不接受 status=${status}，已改写成 failed，避免停在 running。${describe(error)}`,
+      )
+      return
+    }
+    console.error(
+      `[cron-run-logger] ${jobName}: 收尾写不进 cron_run_logs（id=${outcome.id}）—— 这次运行可能永远停在 running，或者彻底没有痕迹。${describe(retryError)}`,
+    )
+    return
+  }
+
+  console.error(
+    `[cron-run-logger] ${jobName}: 收尾写不进 cron_run_logs（id=${outcome.id}）—— 这次运行可能永远停在 running，或者彻底没有痕迹。${describe(error)}`,
+  )
+}
+
 function finisher(jobName: string, runId: string, startedAt: number): CronRunHandle {
   const startedAtIso = new Date(startedAt).toISOString()
 
   return {
     async finish({ processed = 0, completed = 0, failed = 0, summary, error: jobError }) {
-      const durationMs = Date.now() - startedAt
       const outcome = {
         id: runId,
         job_name: jobName,
         started_at: startedAtIso,
-        status: jobError ? 'failed' : 'completed',
+        status: resolveCronRunStatus({ failed, completed, error: jobError }),
         finished_at: new Date().toISOString(),
-        duration_ms: durationMs,
+        duration_ms: Date.now() - startedAt,
         processed,
         completed_count: completed,
         failed_count: failed,
@@ -115,15 +167,7 @@ function finisher(jobName: string, runId: string, startedAt: number): CronRunHan
       // 提交，调用方并不确定（网络错误既可能是没插进去，也可能是插成功了但响应丢了）。
       // 用同一个 runId upsert：提交过就收敛成更新它，没提交过就把它插出来，
       // 两种真实结果都只落一行，不会再冒出第二条孤儿记录。
-      const { error: upsertError } = await supabaseAdmin
-        .from('cron_run_logs')
-        .upsert(outcome, { onConflict: 'id' })
-
-      if (upsertError) {
-        console.error(
-          `[cron-run-logger] ${jobName}: 收尾写不进 cron_run_logs（id=${runId}）—— 这次运行可能永远停在 running，或者彻底没有痕迹。${describe(upsertError)}`,
-        )
-      }
+      await upsertCronOutcome(jobName, outcome)
     },
   }
 }

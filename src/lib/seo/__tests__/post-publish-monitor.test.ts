@@ -25,7 +25,7 @@ describe('post-publish watch contract', () => {
   it('keeps the CTS bootstrap manifest inside the shared event contract', () => {
     const manifest = JSON.parse(readFileSync(resolve('config/clients/cts/post-publish-watch.json'), 'utf8'))
     const parsed = PostPublishWatchStartedSchema.parse(manifest)
-    expect(parsed.pages).toHaveLength(14)
+    expect(parsed.pages).toHaveLength(11)
     expect(parsed.pages.every((page) => new URL(page.url).hostname === 'www.ctstours.co.nz')).toBe(true)
   })
 

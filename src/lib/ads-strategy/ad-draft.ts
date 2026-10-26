@@ -111,16 +111,33 @@ export interface AdDraft {
   pageId: string
   /** 一个草案下可以有多条创意；**同一个组里语言必须一致**（闸门会查）。 */
   creatives: AdDraftCreative[]
+  /** 包含的自定义受众编号（Meta 自定义受众的数字 id）。给了就等于声明这个广告组是重定向。 */
+  audienceIds?: string[]
+  /** 排除的自定义受众编号。只给排除不算重定向。 */
+  excludedAudienceIds?: string[]
 }
 
 /** 每天最多敢自动花多少 —— 超过这个数不是 ME 该自己决定的事。 */
 export const MAX_AUTO_DAILY_BUDGET = 50
+
+/** 一次最少跑几天（Meta：每日预算的广告组时长必须超过 24 小时）。 */
+export const MIN_DURATION_DAYS = 2
 
 /** 一次最多跑多久 —— 再长的投放应该是续，不是一次性下注。 */
 export const MAX_DURATION_DAYS = 30
 
 /** 私信组里最多几条创意：写操作次数和等转码的总时间都随它涨，要有顶。 */
 export const MAX_MESSENGER_CREATIVES = 4
+
+/** 包含与排除两个受众列表各自最多几个。 */
+export const MAX_AUDIENCES_PER_LIST = 10
+
+/**
+ * 包含受众的最小人数下限（Meta 自定义受众投放最小规模的保守取值）。
+ * docs/specs/2026-09-06-me-ads-audience-capability-spec.md:56 的 100 是相似人群种子门槛，口径不同；
+ * 本值待线上试跑核实，改数字前先核。
+ */
+export const MIN_INCLUDED_AUDIENCE_SIZE = 100
 
 export interface DraftProblem {
   field: string
@@ -176,6 +193,11 @@ function validateCommon(d: AdDraft): DraftProblem[] {
 
   if (!Number.isInteger(d.durationDays) || d.durationDays <= 0) {
     p.push({ field: 'durationDays', message: '必须说跑几天 —— 不设终点的广告没人会记得关' })
+  } else if (d.durationDays < MIN_DURATION_DAYS) {
+    p.push({
+      field: 'durationDays',
+      message: `至少 ${MIN_DURATION_DAYS} 天：Meta 只允许跑超过 24 小时的广告组使用每日预算，1 天会被拒`,
+    })
   } else if (d.durationDays > MAX_DURATION_DAYS) {
     p.push({ field: 'durationDays', message: `一次最多 ${MAX_DURATION_DAYS} 天` })
   }
@@ -196,6 +218,10 @@ function validateCommon(d: AdDraft): DraftProblem[] {
     if (d.kind === 'lead_form' && !c.imageHash && !c.videoId) {
       p.push({ field: `creatives[${i}].imageHash`, message: '表单广告没给图也没给视频' })
     }
+    // 视频留资走 video_data，Meta 要封面（没有「缺了用首帧」这回事）。
+    if (d.kind === 'lead_form' && c.videoId && !hasThumbnail(c)) {
+      p.push({ field: `creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
+    }
   })
 
   if (d.kind === 'lead_form' && !d.leadFormId) {
@@ -209,10 +235,69 @@ function validateCommon(d: AdDraft): DraftProblem[] {
     p.push({ field: 'ageMax', message: '年龄下限比上限还大' })
   }
 
+  p.push(...validateAudiences(d))
+
+  return p
+}
+
+/** 自定义受众编号：Meta 的数字 id，5 位以上纯数字。 */
+const AUDIENCE_ID = /^\d{5,}$/
+
+/**
+ * 受众列表能不能用。
+ *
+ * 请求体是 `body as AdDraft`，`audienceIds` / `excludedAudienceIds` 可能是任何东西 ——
+ * 先按 `unknown` 收窄，再查格式、数量、重复，最后查「包含」和「排除」有没有打架。
+ */
+function validateAudiences(d: AdDraft): DraftProblem[] {
+  const p: DraftProblem[] = []
+  const fields = ['audienceIds', 'excludedAudienceIds'] as const
+  const valid: Partial<Record<(typeof fields)[number], string[]>> = {}
+
+  for (const field of fields) {
+    const raw: unknown = d[field]
+    if (raw === undefined) continue
+
+    if (!Array.isArray(raw) || raw.some((id) => typeof id !== 'string' || !AUDIENCE_ID.test(id))) {
+      p.push({ field, message: '受众编号格式不对（要是 5 位以上的纯数字字符串）' })
+      continue
+    }
+
+    const ids = raw as string[]
+    valid[field] = ids
+
+    if (ids.length > MAX_AUDIENCES_PER_LIST) {
+      p.push({ field, message: `受众最多 ${MAX_AUDIENCES_PER_LIST} 个，现在有 ${ids.length} 个` })
+    }
+
+    const dupIds = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))]
+    if (dupIds.length > 0) {
+      p.push({ field, message: `受众编号重复：${dupIds.join('、')}` })
+    }
+  }
+
+  const included = valid.audienceIds
+  const excluded = valid.excludedAudienceIds
+  if (included && excluded) {
+    const excludedSet = new Set(excluded)
+    const ids = [...new Set(included.filter((id) => excludedSet.has(id)))]
+    if (ids.length > 0) {
+      p.push({
+        field: 'excludedAudienceIds',
+        message: `受众 ${ids.join('、')} 同时出现在「包含」和「排除」里，自相矛盾`,
+      })
+    }
+  }
+
   return p
 }
 
 const HTTPS_URL = /^https:\/\/\S+$/i
+const THUMBNAIL_MISSING = '视频广告没有封面（要 thumbnailImageHash，或 https 开头的 thumbnailUrl）'
+
+function hasThumbnail(c: AdDraftCreative): boolean {
+  return !!c.thumbnailImageHash || (!!c.thumbnailUrl && HTTPS_URL.test(c.thumbnailUrl))
+}
 /** 语言代码：两位小写字母（ISO 639-1：`en` / `zh` / `mi`）。三位的 `eng` 和 `en` 会被当成两种语言，所以不收。 */
 const LANG_CODE = /^[a-z]{2}$/
 
@@ -231,12 +316,8 @@ function validateMessenger(d: AdDraft): DraftProblem[] {
   }
 
   d.creatives.forEach((c, i) => {
-    const hasThumb = !!c.thumbnailImageHash || (!!c.thumbnailUrl && HTTPS_URL.test(c.thumbnailUrl))
-    if (!hasThumb) {
-      p.push({
-        field: `creatives[${i}].thumbnail`,
-        message: '视频广告没有封面（要 thumbnailImageHash，或 https 开头的 thumbnailUrl）',
-      })
+    if (!hasThumbnail(c)) {
+      p.push({ field: `creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
     }
   })
 
@@ -285,7 +366,7 @@ const META_TRIPLET: Readonly<Record<DraftKind, MetaObjectiveTriplet>> = {
     objective: 'OUTCOME_AWARENESS',
     optimizationGoal: 'THRUPLAY',
     billingEvent: 'IMPRESSIONS',
-    destinationType: 'ON_VIDEO',
+    // 不发 destination_type：ON_VIDEO 在 Meta 文档里标 limited beta、本仓没有实测过审记录（2026-10-26 魏征/子牙审）。
   },
   messenger_conversation: {
     objective: 'OUTCOME_ENGAGEMENT',

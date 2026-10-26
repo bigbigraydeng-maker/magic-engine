@@ -6,35 +6,13 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import type { PromoteBooks } from './types'
+import { projectPublishedReelExecutionItem } from '../publish-worker'
 
 const FACTORY_AUTHOR = 'factory@magicengine.com.au'
 
 async function completeExecutionItem(a: Parameters<PromoteBooks['completeExecutionItem']>[0]): Promise<void> {
-  const nowIso = new Date().toISOString()
-  if (a.existingItemId) {
-    const { data, error } = await supabaseAdmin
-      .from('execution_items')
-      .update({ status: 'completed', completed_at: nowIso, updated_at: nowIso })
-      .eq('id', a.existingItemId)
-      .eq('client_id', a.clientId)
-      .select('id')
-    if (error) throw error
-    if (!Array.isArray(data) || data.length < 1) throw new Error('执行事项更新没有命中任何行')
-    return
-  }
-  const { data, error } = await supabaseAdmin
-    .from('execution_items')
-    .insert({
-      client_id: a.clientId, title: a.title.slice(0, 200), description: a.description,
-      dimension: 'social', status: 'completed', fix_type: 'me_auto',
-      source: 'proactive_signal', // 与 writeThreeBooks 一致;'factory_auto' 会撞 CHECK
-      completed_at: nowIso, created_at: nowIso, updated_at: nowIso,
-    })
-    .select('id')
-    .maybeSingle()
-  if (error) throw error
-  const itemId = typeof data?.id === 'string' ? data.id : null
-  if (!itemId) throw new Error('执行事项创建后没有返回 id')
+  const itemId = await projectPublishedReelExecutionItem(a)
+  if (a.existingItemId) return
   const link = await supabaseAdmin
     .from('flywheel_actions')
     .update({ execution_item_id: itemId })

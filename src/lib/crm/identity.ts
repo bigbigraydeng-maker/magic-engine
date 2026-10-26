@@ -17,6 +17,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
 import {
   firstTouchColumns,
   isAttributed,
@@ -131,6 +132,11 @@ export interface ResolveInput {
    */
   overwriteDisplayName?: boolean
   /**
+   * 配合 `overwriteDisplayName: false` 用：命中已有联系人、且他**现在没有名字**时，才用这次的名字补上（已有名字绝不动）。
+   * 只给可信的内部入口（邮件同步）用；公开端点（官网表单等）不要传。
+   */
+  fillEmptyDisplayName?: boolean
+  /**
    * 「他是哪条广告 / 哪条视频带来的」。
    *
    * first-touch 语义：新建的人直接写上；命中已有的人**只在原来是空的时候**回填，
@@ -179,6 +185,9 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
   }
 
   const seenAt = input.seenAt ?? new Date().toISOString()
+  // 名字不能是邮箱 / 电话 / 占位词（2026-10-22 PM）。所有渠道建人都走这里，清洗放这一处就覆盖全部；
+  // 清洗成 null = 这次没带来名字：新建的人名字留空，命中已有联系人时**不覆盖**原名。
+  const cleanedName = cleanDisplayName(input.displayName)
 
   const { data: hits } = await supabaseAdmin
     .from('contact_identities')
@@ -200,7 +209,7 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
       .from('contacts')
       .insert({
         client_id: clientId,
-        display_name: input.displayName ?? null,
+        display_name: cleanedName,
         primary_phone: identities.find((i) => i.kind === 'phone')?.value ?? null,
         primary_email: identities.find((i) => i.kind === 'email')?.value ?? null,
         first_seen_at: seenAt,
@@ -251,10 +260,17 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
       .from('contacts')
       .update({
         last_seen_at: seenAt,
-        ...(input.displayName && renameOk ? { display_name: input.displayName } : {}),
+        ...(cleanedName && renameOk ? { display_name: cleanedName } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId)
+
+    // 调用方明确要求「只补空」时（目前只有邮件同步——客户自己邮箱里读到的，不是公开端点），**原名是空的**才补；
+    // 已有名字绝不动。否则名字被清成 NULL 的老联系人之后永远补不上真名。
+    // 🔴 不对所有 overwriteDisplayName=false 的调用方放开：官网表单是公开端点，不许改已有客户的资料（原有测试钉死）。
+    if (cleanedName && !renameOk && input.fillEmptyDisplayName === true) {
+      await supabaseAdmin.from('contacts').update({ display_name: cleanedName }).eq('id', contactId).is('display_name', null)
+    }
 
     // first-touch 回填：**只在原来是空的时候**写。
     //

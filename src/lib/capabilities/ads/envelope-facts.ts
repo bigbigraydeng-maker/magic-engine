@@ -291,6 +291,13 @@ function latestOf(rows: readonly SnapRow[]): SnapRow | null {
  *    才写的一行，所以**人工在 Ads Manager 里改的也算**（§14 K12：72 小时按真实
  *    变化算，不是只算 ME 自己的动作）。`daily` 那种例行抓取不算变化。
  *    完全没有快照 = 读不到（null）；有快照但没有一条 changed = 确实从没变过。
+ *
+ * 🔴 **故意不认 `kernel_post`**（魏征复审查实，本窗口核过 `snapshot.ts:363-365`）：
+ *    那个原因码写的时候是「该客户**所有**实体一律写一行」，不管这个实体的设置有没有变。
+ *    所以它代表不了「这个实体变了」；一旦有人接上它，任何一次动作之后整个客户
+ *    每个实体都会显示「刚改过」→ 自治被整体冻死 72 小时。
+ *    「我们自己刚改过」改由 `hoursSinceOwnLastAction` 查内核执行记录来回答，那是按实体精确的。
+ *    （`diagnostics/loader.ts:89` 认它，是同一颗地雷，已另开卡，本轮不动那边。）
  */
 function hoursSinceLastRealChange(rows: readonly SnapRow[], now: Date): number | null {
   if (rows.length === 0) return null
@@ -298,6 +305,100 @@ function hoursSinceLastRealChange(rows: readonly SnapRow[], now: Date): number |
   if (changed.length === 0) return Number.MAX_SAFE_INTEGER
   const ms = now.getTime() - Date.parse(latestOf(changed)!.captured_at)
   return Number.isFinite(ms) ? ms / 3_600_000 : null
+}
+
+/**
+ * 内核自己上次成功改过这个实体是多久以前（小时）。读不到任何记录返回 null。
+ *
+ * 🔴 **为什么不靠快照**：内核执行完一个动作后，没有任何地方会立刻补写一条
+ *    `changed` 快照 —— 那要等下一次定期对账。所以同一个实体连续两次自治动作
+ *    之间，快照里可能一条「刚改过」的痕迹都没有，冷却期闸读到的还是旧数字。
+ *    内核自己的执行记录（`action_runs`）是唯一当场就知道「我们刚动过它」的来源。
+ *
+ * 🔴 **为什么撤回也算**：`rolled_back` 意味着我们确实改过设置、又改回去了 ——
+ *    设置被碰过就是被碰过，学习期照样重置，不能因为最后撤回了就当没发生。
+ *
+ * 🔴 **为什么读失败必须报错而不是当成没动过**：把查询失败当成「从没动过」，
+ *    等于一次数据库抖动就静默放行一次本该被冷却期挡下的动作 —— fail-open。
+ *    调用方拿到 `ok: false` 必须拒绝，不能拿 `hours: null` 凑合。
+ */
+/**
+ * 哪些最终状态代表「这次动作可能已经碰过 Meta 的设置」。
+ *
+ * 🔴 **故意宁多勿少（fail-closed）**：
+ *   · `succeeded` —— 显然碰过
+ *   · `dead_letter` —— 撤回之后的终态就是这个（`gateway.ts` failRun 的注释：
+ *     「rollback 结果不改 run 的最终状态，永远还是 dead_letter」）。撤回意味着
+ *     设置被改过又改回去，学习期照样被重置，不能当没发生
+ *   · `failed` —— provider 写成功、但验证或后续步骤失败的 run 落在这里，设置已经被改过
+ * 不含 `denied` / `superseded` / `queued` / `authorizing` / `authorized` /
+ * `pending_approval` / `running`：这些都还没走到 apply 那一步。
+ *
+ * ⚠️ 代价：在 apply 之前就失败的 run 也会被算成「动过」，于是冷却期偏严、
+ *    可能多拦 72 小时。偏严比偏松安全，所以先这样；要精确就得逐个查
+ *    `action_run_steps` 里有没有 provider 写入回执，另开卡做。
+ *
+ * ❌ 不要写 `rolled_back`：`action_runs.status` 没有这个取值（见 `kernel/types.ts`
+ *    的 `RunStatus` 与建表 CHECK），写了等于筛零行 —— 第一版就踩了这个坑。
+ */
+const TOUCHED_PROVIDER_STATUSES = ['succeeded', 'failed', 'dead_letter'] as const
+
+/**
+ * `action_runs.input` 里可能装广告实体编号的字段。八个 `ads.*` 动作的全集。
+ *
+ * 🔴 少一个就等于那类动作的冷却期失效：`ads.swap_creative` 的 input 只有 `ad_id`
+ *    （`registry-ads.ts` 的 inputSchema），第一版只筛 adset/campaign，它永远不命中。
+ */
+const ENTITY_INPUT_FIELDS = ['adset_id', 'campaign_id', 'ad_id', 'audience_id'] as const
+
+export async function hoursSinceOwnLastAction(
+  sb: SupabaseClient,
+  args: {
+    readonly clientId: string
+    /** 要查的实体编号：判据实体 + 这次 input 里原始的那些（换素材要靠原始 ad_id 才命中）。 */
+    readonly entityIds: readonly string[]
+    readonly now: Date
+  },
+): Promise<{ ok: true; hours: number | null } | { ok: false; error: string }> {
+  // 🔴 **按实体在服务端精确筛，不许「拉最近 N 条再在内存里找」**：那样一旦这个客户
+  //    的动作条数超过 N，目标实体最后一次动作就掉出窗口 → 返回 null（= 从没动过）
+  //    → 冷却期闸静默失效。这正是同文件上面那段注释记下的 4000 行截断事故
+  //    （#1994 缺陷 2）的同一种坑，不能再踩一遍。
+  const ids = [...new Set(args.entityIds)].filter((id) => id.length > 0)
+  if (ids.length === 0) return { ok: false, error: '没有可查的实体编号，判不了我们自己上次动它是什么时候' }
+  // 形状不认识就拒，不拼进查询：这些 id 会被拼进 PostgREST 的 or 表达式。
+  // 白名单里没有逗号、点、括号、引号，所以拼不出第二个 or 子句或别的运算符（子牙复审核过）。
+  // 这里**故意不用**本文件别处那个更严的纯数字判据：实体编号不全来自 input
+  // （换素材那条是从快照里反查出来的所属广告组），收太严会变成误拒。
+  const bad = ids.find((id) => !/^[A-Za-z0-9_-]{1,64}$/.test(id))
+  if (bad !== undefined) {
+    return { ok: false, error: `实体编号形状不认识，不敢拿去查内核执行记录：${bad}` }
+  }
+  const orExpr = ids
+    .flatMap((id) => ENTITY_INPUT_FIELDS.map((field) => `input->>${field}.eq.${id}`))
+    .join(',')
+  const { data, error } = await sb
+    .from('action_runs')
+    .select('finished_at')
+    .eq('client_id', args.clientId)
+    .like('action_key', 'ads.%')
+    .in('status', [...TOUCHED_PROVIDER_STATUSES])
+    .not('finished_at', 'is', null)
+    .or(orExpr)
+    .order('finished_at', { ascending: false })
+    .limit(1)
+  if (error) return { ok: false, error: '读内核执行记录失败：' + error.message }
+
+  const rows = (data ?? []) as Array<{ finished_at: string | null }>
+  const finishedAt = rows[0]?.finished_at ?? null
+  if (!finishedAt) return { ok: true, hours: null }
+  const ms = args.now.getTime() - Date.parse(finishedAt)
+  // 🔴 有这一行、但时间读不懂 → 拒，不许跟「没有行」走同一个出口（魏征复审）：
+  //    返回 hours: null 会被调用方当成「我们没动过」→ 放行，那是 fail-open。
+  if (!Number.isFinite(ms)) {
+    return { ok: false, error: `内核执行记录里的完成时间读不懂：${finishedAt}` }
+  }
+  return { ok: true, hours: ms / 3_600_000 }
 }
 
 /** 这次动作的「跟钱和学习期相关的那个实体」解析结果。 */
@@ -618,7 +719,35 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       .order('captured_at', { ascending: false })
       .limit(200)
     if (cooldownErr) return cantRead(`读这个单位的变动历史失败：${cooldownErr.message}`)
-    const cooldownHours = hoursSinceLastRealChange((cooldownRows ?? []) as SnapRow[], now())
+    const snapshotCooldownHours = hoursSinceLastRealChange((cooldownRows ?? []) as SnapRow[], now())
+
+    // 🔴 **两个来源各看见一半，取更近的那个**：
+    //    · 快照（`changed` / `kernel_post`）看见「设置真的变了」，包括人在 Ads Manager 里改的
+    //    · 内核执行记录（`action_runs`）看见「我们自己刚动过」，哪怕还没轮到下一次对账
+    //    只用一个都会漏：只靠快照会漏掉内核刚改完、还没对账的那一段；只靠执行记录
+    //    会漏掉人工在 Ads Manager 里改的。取小时数更小的那个（= 更近）才不会漏。
+    //    两个都是 null 时保持 null（下游语义不变）；只有一个有数就用那个。
+    // 要查的实体编号：判据实体 + 这次 input 里原始的那几个。换素材的 input 只有
+    // `ad_id`，而判据实体是它所属的广告组 —— 只拿判据实体去查，那类动作永远不命中。
+    const ownEntityIds = [
+      subject.entityId,
+      ...ENTITY_INPUT_FIELDS.map((field) => str(field)).filter((v): v is string => typeof v === 'string' && v.length > 0),
+    ]
+    const ownAction = await hoursSinceOwnLastAction(deps.sb, {
+      clientId,
+      entityIds: ownEntityIds,
+      now: now(),
+    })
+    if (!ownAction.ok) return cantRead(ownAction.error)
+    // 🔴 **快照是 null 时保持 null**（子牙复审）：null 的意思是「这个实体一条快照都没有」，
+    //    下游（`autonomy-envelope.ts`）据此直接拒。让一条很旧的执行记录把 null 变成数字
+    //    等于把「读不到」改写成「很久没动过」——方向是从偏严变偏松，不许。
+    //    执行记录只用来覆盖 `MAX_SAFE_INTEGER`（= 有快照但没有一条真改动）这一种。
+    const cooldownHours = snapshotCooldownHours === null
+      ? null
+      : ownAction.hours === null
+        ? snapshotCooldownHours
+        : Math.min(snapshotCooldownHours, ownAction.hours)
 
     // 新建的单位改动前没有预算（0）；其余类型必须真读到，读不到就是 null → 拒绝。
     const beforeCents = kind === 'new_spend'
