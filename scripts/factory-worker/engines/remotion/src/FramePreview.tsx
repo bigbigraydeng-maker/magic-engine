@@ -1,5 +1,5 @@
 import React from 'react'
-import { AbsoluteFill } from 'remotion'
+import { AbsoluteFill, Img, staticFile } from 'remotion'
 import { BrandEndCard } from './BrandEndCard.tsx'
 import { resolveEndCard, resolveHook, type ResolvedEndCard, type ResolvedHook } from './frame.ts'
 import { OpeningHook } from './OpeningHook.tsx'
@@ -15,22 +15,15 @@ function previewHook(kind: string): ResolvedHook | null {
   return null
 }
 
-function previewEnd(kind: string, raw: Record<string, unknown>): ResolvedEndCard | null {
-  const spec = { cta: '了解更多', contact: 'example.com', brandName: '示例客户' }
-  if (kind === 'end-fallback') return resolveEndCard({ spec, logoFile: null })
-  if (kind === 'end') {
-    const logoFile = typeof raw.logoFile === 'string' ? raw.logoFile : 'logo.png'
-    return resolveEndCard({ spec, logoFile })
-  }
+function previewEnd(kind: string): ResolvedEndCard | null {
+  if (kind === 'end-fallback') return resolveEndCard({ spec: { cta: '了解更多', contact: 'example.com' }, logoFile: null })
+  if (kind === 'end') return resolveEndCard({ spec: { cta: '了解更多', contact: 'example.com', brandName: '示例客户' }, logoFile: null })
   return null
 }
 
-function SubjectWash({ brandColor }: { brandColor: string }) {
-  return (
-    <AbsoluteFill style={{ background: `radial-gradient(ellipse at 50% 62%, ${brandColor}66 0%, #1a242c 46%, #0c1218 100%)` }}>
-      <div style={{ position: 'absolute', left: '16%', top: '40%', width: '68%', height: '26%', borderRadius: 36, background: 'rgba(255,255,255,0.1)' }} />
-    </AbsoluteFill>
-  )
+function Backdrop({ file }: { file: string | null }) {
+  if (!file) return <AbsoluteFill style={{ background: '#14181e' }} />
+  return <Img src={staticFile(file)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
 }
 
 /** Still-frame preview of the shared hook and end card. Not a factory template. */
@@ -38,12 +31,13 @@ export const FramePreview: React.FC<Record<string, unknown>> = (raw) => {
   const kind = typeof raw.kind === 'string' ? raw.kind : 'hook-kinetic'
   const brandColor = brandColorOf(raw)
   const hook = previewHook(kind)
-  const endCard = previewEnd(kind, raw)
+  const endCard = previewEnd(kind)
+  const backgroundFile = typeof raw.backgroundFile === 'string' ? raw.backgroundFile : null
   return (
-    <AbsoluteFill style={{ background: '#0c1218' }}>
-      <SubjectWash brandColor={brandColor} />
+    <AbsoluteFill style={{ background: '#14181e' }}>
+      <Backdrop file={backgroundFile} />
       {hook ? <OpeningHook hook={hook} brandColor={brandColor} /> : null}
-      {endCard ? <BrandEndCard card={endCard} brandColor={brandColor} solid /> : null}
+      {endCard ? <BrandEndCard card={endCard} brandColor={brandColor} /> : null}
     </AbsoluteFill>
   )
 }

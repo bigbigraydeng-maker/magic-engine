@@ -153,7 +153,36 @@ const fmtTime = (sec) =>
 // Kept in plain JS so the worker can load it without the Remotion package's dependencies.
 // engines/remotion/test/frame.test.mjs checks this stays in step with extraCaptionLines.
 const FALLBACK_HOOK_LINE = 'Watch this'
+const FALLBACK_HOOK_LINE_ZH = '先看这里'
 const FALLBACK_CTA = 'Learn more'
+const FALLBACK_CTA_ZH = '了解更多'
+const CJK = /[\u3400-\u9fff]/
+
+function looksChineseText(value) {
+  return CJK.test(value)
+}
+
+function collectCopyStrings(value, out, depth) {
+  if (depth > 5 || out.length > 80) return
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (text) out.push(text)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectCopyStrings(item, out, depth + 1)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) collectCopyStrings(item, out, depth + 1)
+  }
+}
+
+function workOrderLooksChinese(props) {
+  const bits = []
+  collectCopyStrings(props, bits, 0)
+  return bits.some(looksChineseText)
+}
 
 function frameTrimmed(value) {
   if (typeof value !== 'string') return null
@@ -225,7 +254,9 @@ export function frameCaptionExtras(template, props) {
   const bits = []
   if (hookIsActive(template, frame)) {
     const spec = frame?.hook && frame.hook !== false ? frame.hook : undefined
-    if (hookWasInvented(template, props ?? {}, spec)) pushExtra(bits, FALLBACK_HOOK_LINE)
+    if (hookWasInvented(template, props ?? {}, spec)) {
+      pushExtra(bits, workOrderLooksChinese(props ?? {}) ? FALLBACK_HOOK_LINE_ZH : FALLBACK_HOOK_LINE)
+    }
     pushExtra(bits, spec?.text)
     pushExtra(bits, spec?.stat)
     pushExtra(bits, spec?.question)
@@ -233,8 +264,9 @@ export function frameCaptionExtras(template, props) {
   if (endCardIsActive(template, frame, ending)) {
     const spec = frame?.endCard && frame.endCard !== false ? frame.endCard : undefined
     const title = endTitle(props ?? {})
-    const cta = frameTrimmed(spec?.cta) || title || FALLBACK_CTA
-    if (cta === FALLBACK_CTA && !frameTrimmed(spec?.cta) && !title) pushExtra(bits, FALLBACK_CTA)
+    const ctaFallback = workOrderLooksChinese(props ?? {}) ? FALLBACK_CTA_ZH : FALLBACK_CTA
+    const cta = frameTrimmed(spec?.cta) || title || ctaFallback
+    if (cta === ctaFallback && !frameTrimmed(spec?.cta) && !title) pushExtra(bits, ctaFallback)
     pushExtra(bits, spec?.cta)
     pushExtra(bits, spec?.contact)
     pushExtra(bits, spec?.brandName)

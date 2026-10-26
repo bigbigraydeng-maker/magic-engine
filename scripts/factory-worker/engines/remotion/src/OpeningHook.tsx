@@ -1,90 +1,173 @@
 import React from 'react'
-import { useVideoConfig } from 'remotion'
-import type { ResolvedHook } from './frame.ts'
+import { AbsoluteFill, useVideoConfig } from 'remotion'
+import { hookDisplayRows, hookTypeSize, looksChinese, statTypeSize, type ResolvedHook, type ResolvedHookLine } from './frame.ts'
 import { PopIn } from './pop.tsx'
 import { safeRectFor, type SafeRect } from './safeZone.ts'
 import { fontFamily } from './theme.ts'
 
-function headlineSize(safeWidth: number, lines: string[], cap: number): number {
-  const longest = lines.reduce((max, line) => Math.max(max, Array.from(line).length), 1)
-  const cjk = lines.some((line) => /[\u3400-\u9fff]/.test(line))
-  const unit = cjk ? 1 : 0.58
-  const fit = Math.floor((safeWidth - 64) / Math.max(1, longest * unit))
-  return Math.max(52, Math.min(cap, fit))
+function splitEmphasis(text: string): { before: string; hit: string; after: string } {
+  const chars = Array.from(text)
+  if (looksChinese(text)) {
+    const count = chars.length >= 4 ? 2 : Math.max(1, chars.length)
+    if (chars.length <= count) return { before: '', hit: text, after: '' }
+    return { before: chars.slice(0, -count).join(''), hit: chars.slice(-count).join(''), after: '' }
+  }
+  const match = text.match(/^(.*\s)(\S+)$/)
+  if (!match) return { before: '', hit: text, after: '' }
+  return { before: match[1], hit: match[2], after: '' }
 }
 
-function plate(safe: SafeRect): React.CSSProperties {
+function Emphasis({ text, color, on }: { text: string; color: string; on: boolean }) {
+  if (!on) return <>{text}</>
+  const parts = splitEmphasis(text)
+  return (
+    <>
+      {parts.before}
+      <span style={{ color }}>{parts.hit}</span>
+      {parts.after}
+    </>
+  )
+}
+
+function rowsFrom(lines: ResolvedHookLine[]): ResolvedHookLine[] {
+  const out: ResolvedHookLine[] = []
+  for (const line of lines) {
+    const parts = line.badge ? [line.text] : hookDisplayRows(line.text)
+    parts.forEach((text, index) => out.push({ text, badge: index === 0 ? line.badge : null }))
+  }
+  return out.slice(0, 3)
+}
+
+function Scrim() {
+  return (
+    <AbsoluteFill
+      style={{
+        background:
+          'linear-gradient(180deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.08) 16%, rgba(0,0,0,0.58) 46%, rgba(0,0,0,0.42) 74%, rgba(0,0,0,0.2) 100%)',
+      }}
+    />
+  )
+}
+
+function stage(safe: SafeRect): React.CSSProperties {
   return {
     position: 'absolute',
     left: safe.left,
-    top: safe.top + 12,
+    top: safe.top,
     width: safe.width,
+    height: safe.height,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    textAlign: 'center',
     boxSizing: 'border-box',
-    padding: '26px 32px 22px',
-    borderRadius: 28,
-    background: 'linear-gradient(180deg, rgba(0,0,0,0.62) 0%, rgba(0,0,0,0.28) 100%)',
   }
 }
 
-const KineticHook: React.FC<{ hook: ResolvedHook; brandColor: string; safe: SafeRect }> = ({ hook, brandColor, safe }) => {
-  const size = headlineSize(safe.width, hook.lines.map((line) => line.text), 80)
+const lineStyle = (size: number): React.CSSProperties => ({
+  fontFamily,
+  fontWeight: 900,
+  fontSize: size,
+  lineHeight: 1.02,
+  color: '#fff',
+  letterSpacing: -0.8,
+  textShadow: '0 8px 28px rgba(0,0,0,0.78), 0 2px 0 rgba(0,0,0,0.45)',
+  maxWidth: '100%',
+})
+
+const KineticHook: React.FC<{ hook: ResolvedHook; brandColor: string; safe: SafeRect; frameWidth: number }> = ({
+  hook,
+  brandColor,
+  safe,
+  frameWidth,
+}) => {
+  const rows = rowsFrom(hook.lines)
+  const cjk = rows.some((row) => looksChinese(row.text))
+  const longest = rows.reduce((max, row) => Math.max(max, Array.from(row.text).length), 1)
+  const size = hookTypeSize(frameWidth, safe.width, longest, cjk)
+  const last = rows.length - 1
   return (
-    <div style={plate(safe)}>
-      {hook.lines.map((line, i) => (
-        <PopIn key={`${line.text}-${i}`} delay={i * 6}>
-          <div style={{ fontFamily, fontWeight: 900, fontSize: size, lineHeight: 1.08, color: '#fff', letterSpacing: -0.4, textShadow: '0 4px 18px rgba(0,0,0,0.55)' }}>
-            {line.badge ? (
-              <span style={{ color: '#fff', background: brandColor, borderRadius: 10, padding: '0 12px', marginRight: 12 }}>{line.badge}</span>
+    <div style={stage(safe)}>
+      {rows.map((row, i) => (
+        <PopIn key={`${row.text}-${i}`} delay={i * 7}>
+          <div style={lineStyle(size)}>
+            {row.badge ? (
+              <span style={{ color: '#fff', background: brandColor, borderRadius: 12, padding: '0 14px', marginRight: 14 }}>{row.badge}</span>
             ) : null}
-            {line.text}
+            <Emphasis text={row.text} color={brandColor} on={i === last && !row.badge} />
           </div>
         </PopIn>
       ))}
-      <PopIn delay={hook.lines.length * 6}>
-        <div style={{ marginTop: 14, height: 8, width: 120, borderRadius: 8, background: brandColor }} />
-      </PopIn>
     </div>
   )
 }
 
-const StatHook: React.FC<{ hook: ResolvedHook; brandColor: string; safe: SafeRect }> = ({ hook, brandColor, safe }) => {
+const StatHook: React.FC<{ hook: ResolvedHook; brandColor: string; safe: SafeRect; frameWidth: number }> = ({
+  hook,
+  brandColor,
+  safe,
+  frameWidth,
+}) => {
   const stat = hook.stat ?? hook.lines[0]?.text ?? ''
-  const size = headlineSize(safe.width, [stat], 128)
-  const captionSize = Math.max(36, Math.round(size * 0.34))
+  const size = statTypeSize(frameWidth, safe.width, stat)
+  const longest = hook.lines.reduce((max, line) => Math.max(max, Array.from(line.text).length), 1)
+  const cjk = hook.lines.some((line) => looksChinese(line.text))
+  const captionSize = hook.lines.length > 0 ? hookTypeSize(frameWidth, safe.width, longest, cjk) : 56
   return (
-    <div style={plate(safe)}>
-      <PopIn delay={0}>
-        <div style={{ fontFamily, fontWeight: 900, fontSize: size, lineHeight: 0.95, color: brandColor, textShadow: '0 8px 24px rgba(0,0,0,0.45)' }}>{stat}</div>
+    <div style={stage(safe)}>
+      <PopIn delay={0} travel={88}>
+        <div style={{ ...lineStyle(size), color: brandColor, lineHeight: 0.92 }}>{stat}</div>
       </PopIn>
       {hook.lines.map((line, i) => (
-        <PopIn key={`${line.text}-${i}`} delay={8 + i * 6}>
-          <div style={{ fontFamily, fontWeight: 800, fontSize: captionSize, color: '#fff', lineHeight: 1.15, marginTop: 8 }}>{line.text}</div>
+        <PopIn key={`${line.text}-${i}`} delay={8 + i * 7}>
+          <div style={{ ...lineStyle(captionSize), marginTop: 12 }}>{line.text}</div>
         </PopIn>
       ))}
     </div>
   )
 }
 
-const QuestionHook: React.FC<{ hook: ResolvedHook; brandColor: string; safe: SafeRect }> = ({ hook, brandColor, safe }) => {
-  const text = hook.question ?? hook.lines[0]?.text ?? ''
-  const size = headlineSize(safe.width, [text], 64)
+const QuestionHook: React.FC<{ hook: ResolvedHook; brandColor: string; safe: SafeRect; frameWidth: number }> = ({
+  hook,
+  brandColor,
+  safe,
+  frameWidth,
+}) => {
+  const rows = hookDisplayRows(hook.question ?? hook.lines[0]?.text ?? '').slice(0, 3)
+  const cjk = rows.some((row) => looksChinese(row))
+  const longest = rows.reduce((max, row) => Math.max(max, Array.from(row).length), 1)
+  const size = hookTypeSize(frameWidth, safe.width, longest, cjk)
+  const last = rows.length - 1
   return (
-    <div style={{ ...plate(safe), borderLeft: `10px solid ${brandColor}`, paddingLeft: 28 }}>
-      <PopIn delay={0}>
-        <div style={{ fontFamily, fontWeight: 900, fontSize: Math.round(size * 0.72), color: brandColor, lineHeight: 1 }}>?</div>
-      </PopIn>
-      <PopIn delay={5}>
-        <div style={{ fontFamily, fontWeight: 800, fontSize: size, color: '#fff', lineHeight: 1.2, marginTop: 8, textShadow: '0 4px 16px rgba(0,0,0,0.5)' }}>{text}</div>
-      </PopIn>
+    <div style={stage(safe)}>
+      {rows.map((row, i) => (
+        <PopIn key={`${row}-${i}`} delay={i * 7}>
+          <div style={lineStyle(size)}>
+            <Emphasis text={row} color={brandColor} on={i === last} />
+          </div>
+        </PopIn>
+      ))}
     </div>
   )
 }
 
-/** Opening hook parked in the platform safe zone. Readable on the first frame. */
+/** Full-width opening hook. Copy sits in the safe zone over a light scrim, not a caption box. */
 export const OpeningHook: React.FC<{ hook: ResolvedHook; brandColor: string }> = ({ hook, brandColor }) => {
   const { width, height } = useVideoConfig()
   const safe = safeRectFor(width, height)
-  if (hook.style === 'stat') return <StatHook hook={hook} brandColor={brandColor} safe={safe} />
-  if (hook.style === 'question') return <QuestionHook hook={hook} brandColor={brandColor} safe={safe} />
-  return <KineticHook hook={hook} brandColor={brandColor} safe={safe} />
+  const body =
+    hook.style === 'stat' ? (
+      <StatHook hook={hook} brandColor={brandColor} safe={safe} frameWidth={width} />
+    ) : hook.style === 'question' ? (
+      <QuestionHook hook={hook} brandColor={brandColor} safe={safe} frameWidth={width} />
+    ) : (
+      <KineticHook hook={hook} brandColor={brandColor} safe={safe} frameWidth={width} />
+    )
+  return (
+    <AbsoluteFill>
+      <Scrim />
+      {body}
+    </AbsoluteFill>
+  )
 }

@@ -4,17 +4,24 @@ import fs from 'node:fs'
 
 import {
   FALLBACK_CTA,
+  FALLBACK_CTA_ZH,
   FALLBACK_HOOK_LINE,
+  FALLBACK_HOOK_LINE_ZH,
+  ctaButtonWidth,
   endCardActive,
   estimatePostcardCardHeight,
   extraCaptionLines,
   hookActive,
+  hookDisplayRows,
+  hookTypeSize,
   inferHookStyle,
   overlayWindows,
   postcardCardTop,
   resolveEndCard,
   resolveFramePlan,
   resolveHook,
+  statTypeSize,
+  workOrderLooksChinese,
   wrapHeadline,
 } from '../src/frame.ts'
 import { readableOn, safeRectFor } from '../src/safeZone.ts'
@@ -113,6 +120,24 @@ describe('hook fallbacks', () => {
     assert.ok(lines.length >= 2)
     assert.ok(lines.length <= 3)
   })
+
+  test('empty copy stays English, and Chinese copy selects the Chinese line', () => {
+    assert.equal(resolveHook({}).lines[0].text, FALLBACK_HOOK_LINE)
+    assert.equal(resolveHook({ chinese: true }).lines[0].text, FALLBACK_HOOK_LINE_ZH)
+    assert.equal(workOrderLooksChinese({ scenes: [{ place: '示例湾' }] }), true)
+    assert.equal(workOrderLooksChinese({ scenes: [{ place: 'Example Bay' }] }), false)
+  })
+
+  test('a short Chinese question splits so the type can stay large', () => {
+    assert.deepEqual(hookDisplayRows('想从哪一步开始？'), ['想从哪一步', '开始？'])
+  })
+
+  test('hook type for four Han characters covers at least 60% of a 9:16 frame', () => {
+    const size = hookTypeSize(1080, 900, 4, true)
+    assert.ok(size * 1.02 * 4 >= 1080 * 0.6, `width ${size * 1.02 * 4}`)
+    const stat = statTypeSize(1080, 900, '48')
+    assert.ok(stat >= 200)
+  })
 })
 
 describe('end card fallbacks', () => {
@@ -138,6 +163,14 @@ describe('end card fallbacks', () => {
     assert.equal(card.contact, 'example.com')
     assert.equal(card.logoFile, 'logo.png')
     assert.equal(card.fallbackCta, false)
+  })
+
+  test('a Chinese work order uses the Chinese action, an English one does not', () => {
+    assert.equal(resolveEndCard({ chinese: true }).cta, FALLBACK_CTA_ZH)
+    assert.equal(resolveEndCard({}).cta, FALLBACK_CTA)
+    const width = ctaButtonWidth(1080, 900)
+    assert.ok(width >= 1080 * 0.55, `button ${width}`)
+    assert.ok(width <= 900)
   })
 })
 

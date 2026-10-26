@@ -1,14 +1,14 @@
 import React from 'react'
 import { AbsoluteFill, Img, staticFile, useVideoConfig } from 'remotion'
-import type { ResolvedEndCard } from './frame.ts'
+import { ctaButtonWidth, looksChinese, type ResolvedEndCard } from './frame.ts'
 import { PopIn } from './pop.tsx'
 import { readableOn, safeRectFor, type SafeRect } from './safeZone.ts'
 import { fontFamily } from './theme.ts'
 
-function ctaFont(safeWidth: number, cta: string): number {
+function ctaFont(buttonWidth: number, cta: string): number {
   const count = Math.max(1, Array.from(cta).length)
-  const unit = /[\u3400-\u9fff]/.test(cta) ? 1 : 0.62
-  return Math.max(30, Math.min(48, Math.floor((safeWidth - 96) / (count * unit))))
+  const unit = looksChinese(cta) ? 1 : 0.62
+  return Math.max(40, Math.min(64, Math.floor((buttonWidth - 64) / (count * unit))))
 }
 
 function stack(safe: SafeRect): React.CSSProperties {
@@ -21,31 +21,49 @@ function stack(safe: SafeRect): React.CSSProperties {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-evenly',
     textAlign: 'center',
     boxSizing: 'border-box',
-    padding: '12px 8px',
+    padding: '8px 0',
   }
 }
 
-const LogoMark: React.FC<{ card: ResolvedEndCard; brandColor: string; ink: string; safeWidth: number }> = ({
+const Monogram: React.FC<{ glyph: string; brandColor: string; ink: string; size: number }> = ({ glyph, brandColor, ink, size }) => (
+  <div
+    style={{
+      width: size,
+      height: size,
+      borderRadius: Math.round(size * 0.22),
+      background: brandColor,
+      color: ink,
+      fontFamily,
+      fontWeight: 900,
+      fontSize: Math.round(size * 0.52),
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxShadow: '0 16px 40px rgba(0,0,0,0.35)',
+    }}
+  >
+    {glyph}
+  </div>
+)
+
+const LogoMark: React.FC<{ card: ResolvedEndCard; brandColor: string; ink: string; frameWidth: number; badge: number }> = ({
   card,
   brandColor,
   ink,
-  safeWidth,
+  frameWidth,
+  badge,
 }) => {
   if (card.logoFile) {
-    const width = Math.min(460, Math.round(safeWidth * 0.72))
-    return <Img src={staticFile(card.logoFile)} style={{ width, height: 150, objectFit: 'contain' }} />
+    const width = Math.min(Math.round(frameWidth * 0.62), 760)
+    return <Img src={staticFile(card.logoFile)} style={{ width, height: badge, objectFit: 'contain' }} />
   }
-  return (
-    <div style={{ width: 132, height: 132, borderRadius: 66, background: brandColor, color: ink, fontFamily, fontWeight: 900, fontSize: 68, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      {card.monogram}
-    </div>
-  )
+  return <Monogram glyph={card.monogram} brandColor={brandColor} ink={ink} size={badge} />
 }
 
-/** Centered logo, one call to action, and an optional contact line. All of it stays inside the safe rect. */
+/** Centered lockup inside the safe zone: badge or logo, name, one wide action. */
 export const BrandEndCard: React.FC<{ card: ResolvedEndCard; brandColor: string; solid?: boolean }> = ({
   card,
   brandColor,
@@ -54,28 +72,31 @@ export const BrandEndCard: React.FC<{ card: ResolvedEndCard; brandColor: string;
   const { width, height } = useVideoConfig()
   const safe = safeRectFor(width, height)
   const ink = readableOn(brandColor)
+  const buttonWidth = ctaButtonWidth(width, safe.width)
+  const badge = height >= 1400 ? 228 : 168
+  const nameSize = height >= 1400 ? 68 : 48
   return (
     <AbsoluteFill>
       {solid ? (
-        <AbsoluteFill style={{ background: `linear-gradient(165deg, ${brandColor} 0%, #121820 46%, #070b10 100%)` }} />
+        <AbsoluteFill style={{ background: `linear-gradient(165deg, ${brandColor} 0%, #121820 42%, #070b10 100%)` }} />
       ) : (
-        <AbsoluteFill style={{ background: 'rgba(5,10,16,0.42)' }} />
+        <AbsoluteFill style={{ background: 'linear-gradient(180deg, rgba(6,10,16,0.5) 0%, rgba(6,10,16,0.66) 42%, rgba(6,10,16,0.74) 100%)' }} />
       )}
       <div style={stack(safe)}>
-        <PopIn delay={0}>
-          <LogoMark card={card} brandColor={brandColor} ink={ink} safeWidth={safe.width} />
+        <PopIn delay={0} travel={48}>
+          <LogoMark card={card} brandColor={brandColor} ink={ink} frameWidth={width} badge={badge} />
         </PopIn>
         {card.brandName ? (
-          <PopIn delay={5}>
-            <div style={{ fontFamily, fontWeight: 800, fontSize: 40, color: '#fff', marginTop: 18, textShadow: '0 4px 16px rgba(0,0,0,0.45)' }}>{card.brandName}</div>
+          <PopIn delay={5} travel={48}>
+            <div style={{ fontFamily, fontWeight: 900, fontSize: nameSize, color: '#fff', letterSpacing: 0.4, textShadow: '0 6px 22px rgba(0,0,0,0.55)' }}>{card.brandName}</div>
           </PopIn>
         ) : null}
-        <PopIn delay={10}>
-          <div style={{ marginTop: 22, background: brandColor, color: ink, fontFamily, fontWeight: 800, fontSize: ctaFont(safe.width, card.cta), lineHeight: 1.15, borderRadius: 999, padding: '16px 36px' }}>{card.cta}</div>
+        <PopIn delay={10} travel={48}>
+          <div style={{ width: buttonWidth, background: brandColor, color: ink, fontFamily, fontWeight: 900, fontSize: ctaFont(buttonWidth, card.cta), lineHeight: 1.1, borderRadius: 999, padding: '28px 24px', boxShadow: '0 14px 36px rgba(0,0,0,0.35)' }}>{card.cta}</div>
         </PopIn>
         {card.contact ? (
-          <PopIn delay={16}>
-            <div style={{ fontFamily, fontWeight: 600, fontSize: 30, color: 'rgba(255,255,255,0.92)', marginTop: 16 }}>{card.contact}</div>
+          <PopIn delay={15} travel={36}>
+            <div style={{ fontFamily, fontWeight: 700, fontSize: height >= 1400 ? 36 : 28, color: 'rgba(255,255,255,0.94)' }}>{card.contact}</div>
           </PopIn>
         ) : null}
       </div>

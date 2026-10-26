@@ -3,8 +3,12 @@ import { textWidthUnits } from './postcard.ts'
 
 /** Shown when a reel has no headline, hook lines, or question. */
 export const FALLBACK_HOOK_LINE = 'Watch this'
+/** Chinese hook line, used only when the work order copy is already Chinese. */
+export const FALLBACK_HOOK_LINE_ZH = '先看这里'
 /** Shown when a reel has no end title and no call to action. */
 export const FALLBACK_CTA = 'Learn more'
+/** Chinese action, used only when the work order copy is already Chinese. */
+export const FALLBACK_CTA_ZH = '了解更多'
 /** Brand colour when a template does not carry one. */
 export const DEFAULT_BRAND = '#14364A'
 /** Opening overlay length at 30 fps (2 seconds). */
@@ -62,7 +66,83 @@ export interface FramePlan {
 }
 
 const QUESTION_END = /[?？]\s*$/
+const CJK = /[\u3400-\u9fff]/
 const HOOK_DEFAULT_ON = new Set(['postcard'])
+
+/** True when the string contains Han characters. */
+export function looksChinese(value: string): boolean {
+  return CJK.test(value)
+}
+
+function collectStrings(value: unknown, out: string[], depth: number): void {
+  if (depth > 5 || out.length > 80) return
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (text) out.push(text)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStrings(item, out, depth + 1)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value as Record<string, unknown>)) collectStrings(item, out, depth + 1)
+  }
+}
+
+/** True when any existing work-order string is Chinese. There is no language field. */
+export function workOrderLooksChinese(props: object): boolean {
+  const bits: string[] = []
+  collectStrings(props, bits, 0)
+  return bits.some(looksChinese)
+}
+
+function fallbackHookLine(chinese: boolean): string {
+  return chinese ? FALLBACK_HOOK_LINE_ZH : FALLBACK_HOOK_LINE
+}
+
+function fallbackCtaLine(chinese: boolean): string {
+  return chinese ? FALLBACK_CTA_ZH : FALLBACK_CTA
+}
+
+/** Type size that fills about 70% of the frame width, clamped to the safe width. */
+export function hookTypeSize(frameWidth: number, safeWidth: number, longestChars: number, cjk: boolean): number {
+  const unit = cjk ? 1.02 : 0.58
+  const longest = Math.max(1, longestChars)
+  const fit = Math.floor((frameWidth * 0.72) / (longest * unit))
+  const limit = Math.floor((safeWidth - 16) / (longest * unit))
+  return Math.max(72, Math.min(200, fit, limit))
+}
+
+/** Digit size for a stat hook. Narrow glyphs get a higher cap than a sentence. */
+export function statTypeSize(frameWidth: number, safeWidth: number, stat: string): number {
+  const cjk = looksChinese(stat)
+  const unit = cjk ? 1 : 0.62
+  const longest = Math.max(1, Array.from(stat).length)
+  const fit = Math.floor((frameWidth * 0.48) / (longest * unit))
+  const limit = Math.floor((safeWidth - 16) / (longest * unit))
+  return Math.max(120, Math.min(320, fit, limit))
+}
+
+/** Call-to-action width. At least 55% of the frame, and never past the safe width. */
+export function ctaButtonWidth(frameWidth: number, safeWidth: number): number {
+  return Math.min(safeWidth, Math.round(frameWidth * 0.7))
+}
+
+/** Split a hook sentence into 1–3 short rows so the type can stay large. */
+export function hookDisplayRows(text: string): string[] {
+  const trimmedText = text.trim()
+  const chars = Array.from(trimmedText)
+  if (chars.length === 0) return []
+  if (!looksChinese(trimmedText)) return chars.length <= 22 ? [trimmedText] : wrapHeadline(trimmedText)
+  if (chars.length <= 6) return [trimmedText]
+  const tail = Math.min(4, Math.max(2, chars.length - 5))
+  const head = chars.slice(0, chars.length - tail)
+  const last = chars.slice(chars.length - tail).join('')
+  if (head.length <= 6) return [head.join(''), last]
+  const mid = Math.ceil(head.length / 2)
+  return [head.slice(0, mid).join(''), head.slice(mid).join(''), last]
+}
 
 function trimmed(value: unknown): string | null {
   if (typeof value !== 'string') return null
@@ -189,14 +269,14 @@ function plainLines(input: Array<string | { text?: string; badge?: string | null
   return out
 }
 
-function resolveQuestion(source: ResolvedHookLine[], spec: FrameHookSpec): ResolvedHook {
+function resolveQuestion(source: ResolvedHookLine[], spec: FrameHookSpec, chinese: boolean): ResolvedHook {
   const provided = Boolean(spec.question?.trim() || spec.text?.trim() || source.length > 0)
   const question =
     spec.question?.trim() ||
     spec.text?.trim() ||
     source.find((line) => QUESTION_END.test(line.text))?.text ||
     source[0]?.text ||
-    FALLBACK_HOOK_LINE
+    fallbackHookLine(chinese)
   return {
     style: 'question',
     lines: [{ text: question, badge: null }],
@@ -206,18 +286,18 @@ function resolveQuestion(source: ResolvedHookLine[], spec: FrameHookSpec): Resol
   }
 }
 
-function resolveStat(source: ResolvedHookLine[], spec: FrameHookSpec): ResolvedHook {
+function resolveStat(source: ResolvedHookLine[], spec: FrameHookSpec, chinese: boolean): ResolvedHook {
   const fromText = spec.text?.trim() ? digitToken(spec.text.trim()) : null
   const fromLine = source.map((line) => digitToken(line.text)).find((token): token is string => Boolean(token)) ?? null
   const provided = Boolean(spec.stat?.trim() || fromText || fromLine || spec.text?.trim() || source.length > 0)
-  const stat = spec.stat?.trim() || fromText || fromLine || spec.text?.trim() || source[0]?.text || FALLBACK_HOOK_LINE
+  const stat = spec.stat?.trim() || fromText || fromLine || spec.text?.trim() || source[0]?.text || fallbackHookLine(chinese)
   const caption = spec.text?.trim() && spec.text.trim() !== stat
     ? [{ text: spec.text.trim(), badge: null }]
     : source.filter((line) => line.text !== stat).slice(0, 2)
   return { style: 'stat', lines: caption, stat, question: null, fallbackLine: !provided }
 }
 
-function resolveKinetic(source: ResolvedHookLine[], spec: FrameHookSpec): ResolvedHook {
+function resolveKinetic(source: ResolvedHookLine[], spec: FrameHookSpec, chinese: boolean): ResolvedHook {
   if (spec.text?.trim()) {
     const lines = wrapHeadline(spec.text.trim()).map((text) => ({ text, badge: null as string | null }))
     return { style: 'kinetic', lines, stat: null, question: null, fallbackLine: false }
@@ -225,7 +305,7 @@ function resolveKinetic(source: ResolvedHookLine[], spec: FrameHookSpec): Resolv
   if (source.length === 0) {
     return {
       style: 'kinetic',
-      lines: [{ text: FALLBACK_HOOK_LINE, badge: null }],
+      lines: [{ text: fallbackHookLine(chinese), badge: null }],
       stat: null,
       question: null,
       fallbackLine: true,
@@ -238,13 +318,15 @@ function resolveKinetic(source: ResolvedHookLine[], spec: FrameHookSpec): Resolv
 export function resolveHook(input: {
   lines?: Array<string | { text?: string; badge?: string | null }>
   spec?: FrameHookSpec
+  chinese?: boolean
 }): ResolvedHook {
   const spec = input.spec ?? {}
   const source = plainLines(input.lines ?? [])
+  const chinese = input.chinese === true
   const style = inferHookStyle(source.map((line) => line.text), spec)
-  if (style === 'question') return resolveQuestion(source, spec)
-  if (style === 'stat') return resolveStat(source, spec)
-  return resolveKinetic(source, spec)
+  if (style === 'question') return resolveQuestion(source, spec, chinese)
+  if (style === 'stat') return resolveStat(source, spec, chinese)
+  return resolveKinetic(source, spec, chinese)
 }
 
 function firstGlyph(value: string): string {
@@ -257,9 +339,11 @@ export function resolveEndCard(input: {
   spec?: FrameEndSpec
   title?: string | null
   logoFile?: string | null
+  chinese?: boolean
 }): ResolvedEndCard {
   const spec = input.spec ?? {}
-  const cta = trimmed(spec.cta) || trimmed(input.title) || FALLBACK_CTA
+  const fallback = fallbackCtaLine(input.chinese === true)
+  const cta = trimmed(spec.cta) || trimmed(input.title) || fallback
   const contact = trimmed(spec.contact)
   const brandName = trimmed(spec.brandName)
   const logoFile = trimmed(input.logoFile)
@@ -269,7 +353,7 @@ export function resolveEndCard(input: {
     brandName,
     logoFile,
     monogram: firstGlyph(brandName || cta),
-    fallbackCta: cta === FALLBACK_CTA && !trimmed(spec.cta) && !trimmed(input.title),
+    fallbackCta: cta === fallback && !trimmed(spec.cta) && !trimmed(input.title),
   }
 }
 
@@ -316,14 +400,16 @@ function sourceLines(template: string, props: Record<string, unknown>): Array<st
 export function resolveFramePlan(template: string, props: Record<string, unknown>): FramePlan {
   const frame = readFrame(props.frame)
   const ending = endingOf(props)
+  const chinese = workOrderLooksChinese(props)
   const hook = hookActive(template, frame)
-    ? resolveHook({ lines: sourceLines(template, props), spec: specOfHook(frame) })
+    ? resolveHook({ lines: sourceLines(template, props), spec: specOfHook(frame), chinese })
     : null
   const endCard = endCardActive(template, frame, ending)
     ? resolveEndCard({
         spec: specOfEnd(frame),
         title: endTitleOf(props),
         logoFile: typeof props.logoFile === 'string' ? props.logoFile : null,
+        chinese,
       })
     : null
   return { hook, endCard }
@@ -340,11 +426,12 @@ function pushSpec(bits: string[], value: string | undefined): void {
 export function extraCaptionLines(template: string, props: Record<string, unknown>): string[] {
   const frame = readFrame(props.frame)
   const ending = endingOf(props)
+  const chinese = workOrderLooksChinese(props)
   const bits: string[] = []
   if (hookActive(template, frame)) {
     const spec = specOfHook(frame)
-    const resolved = resolveHook({ lines: sourceLines(template, props), spec })
-    if (resolved.fallbackLine) pushSpec(bits, FALLBACK_HOOK_LINE)
+    const resolved = resolveHook({ lines: sourceLines(template, props), spec, chinese })
+    if (resolved.fallbackLine) pushSpec(bits, resolved.lines[0]?.text)
     pushSpec(bits, spec?.text)
     pushSpec(bits, spec?.stat)
     pushSpec(bits, spec?.question)
@@ -355,8 +442,9 @@ export function extraCaptionLines(template: string, props: Record<string, unknow
       spec,
       title: endTitleOf(props),
       logoFile: typeof props.logoFile === 'string' ? props.logoFile : null,
+      chinese,
     })
-    if (resolved.fallbackCta) pushSpec(bits, FALLBACK_CTA)
+    if (resolved.fallbackCta) pushSpec(bits, resolved.cta)
     pushSpec(bits, spec?.cta)
     pushSpec(bits, spec?.contact)
     pushSpec(bits, spec?.brandName)

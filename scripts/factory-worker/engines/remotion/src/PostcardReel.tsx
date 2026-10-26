@@ -10,6 +10,7 @@ import {
   resolveEndCard,
   resolveFramePlan,
   resolveHook,
+  workOrderLooksChinese,
 } from './frame'
 import { OpeningHook } from './OpeningHook'
 import { PriceScene } from './PriceScene'
@@ -30,8 +31,9 @@ const LegacyHookText: React.FC<{ lines: string[] }> = ({ lines }) => {
 
 const Hook: React.FC<{ props: PostcardProps; animated: boolean }> = ({ props, animated }) => {
   const hookSpec = props.frame?.hook
-  const hook = animated && hookSpec && typeof hookSpec === 'object'
-    ? resolveHook({ lines: props.hook.lines, spec: hookSpec })
+  const spec = hookSpec && typeof hookSpec === 'object' ? hookSpec : undefined
+  const hook = animated
+    ? resolveHook({ lines: props.hook.lines, spec, chinese: workOrderLooksChinese(props) })
     : null
   return (
     <AbsoluteFill>
@@ -84,7 +86,7 @@ const LegacyEndCard: React.FC<{ backdropClip: string; title: string; scrim: numb
 const BrandedEnd: React.FC<{ props: PostcardProps; backdropClip: string; title: string }> = ({ props, backdropClip, title }) => {
   const endSpec = props.frame?.endCard
   const spec = endSpec && typeof endSpec === 'object' ? endSpec : undefined
-  const card = resolveEndCard({ spec, title, logoFile: props.logoFile })
+  const card = resolveEndCard({ spec, title, logoFile: props.logoFile, chinese: workOrderLooksChinese(props) })
   return (
     <AbsoluteFill>
       <Footage src={backdropClip} zoomTo={1.04} scrim={props.scrim ?? 0.35} />
