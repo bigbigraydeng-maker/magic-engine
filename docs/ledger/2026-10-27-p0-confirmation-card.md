@@ -1,12 +1,14 @@
 ---
 id: 2026-10-27-p0-confirmation-card
 title: 确认卡只记下有没有点过，不改广告
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-27
 source: issue:3239
 verify_by: 2026-10-30
 verify_how: 内部账号打开确认卡页，硬检查没通过时确认按钮变灰并写原因；点不做后记录能看到是谁点的。不改广告。
+done_on: 2026-10-27
+done_ref: pr:3248
 ---
 
 这张卡只有确认和不做两个按钮，写清账户、金额、日期和范围。
