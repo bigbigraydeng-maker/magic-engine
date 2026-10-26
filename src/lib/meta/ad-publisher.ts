@@ -193,21 +193,19 @@ function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
       }
       break
     case 'lead_form': {
-      const cta = {
-        type: 'SIGN_UP',
-        value: { lead_gen_form_id: d.leadFormId, link: d.linkUrl ?? `https://facebook.com/${d.pageId}` },
-      }
       if (c.videoId) {
-        // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），
-        // 不是把 video_id 塞进 link_data（同类实测见 docs/PITFALLS.md D13 与 Meta 广告手册 §30 接口建广告）。
-        // 封面必给（validateDraft 查）。
+        // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），不是把 video_id 塞进 link_data
+        // （同类实测见 docs/PITFALLS.md D13 与 Meta 广告手册 §30）。封面必给（validateDraft 查）。
+        // CTA value 只写表单 id：10-09 真建成的上海那条（docs/clients/cts/2026-10-09-shanghai-ads-paused-build.md §2.3）
+        // 的 CTA 里只有 lead_gen_form_id，落地页由表单结束页承载。Meta 视频留资示例的 value 里带 link（fb.me），
+        // 带不带都有依据；这里取「有实测的那种」。
         storySpec.video_data = {
           video_id: c.videoId,
           message: c.primaryText,
           title: c.headline,
           ...(c.description ? { link_description: c.description } : {}),
           ...thumbnailFields(c),
-          call_to_action: cta,
+          call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: d.leadFormId } },
         }
       } else {
         storySpec.link_data = {
@@ -215,8 +213,9 @@ function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
           name: c.headline,
           ...(c.description ? { description: c.description } : {}),
           ...(c.imageHash ? { image_hash: c.imageHash } : {}),
-          link: d.linkUrl ?? `https://facebook.com/${d.pageId}`,
-          call_to_action: { type: cta.type, value: { lead_gen_form_id: d.leadFormId } },
+          // 留资文档：link_data.link 只能是 https://fb.me/（真正的落地页在表单结束页）
+          link: 'https://fb.me/',
+          call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: d.leadFormId } },
         }
       }
       break
@@ -234,6 +233,7 @@ function campaignBody(d: AdDraft): Record<string, string> {
     objective: metaTripletFor(d.kind).objective,
     status: 'PAUSED',
     special_ad_categories: JSON.stringify([]),
+    // ⚠️ 将来若走系列预算（CBO）路径，这个字段应随草案决定，不能照抄 'false'。
     // 预算放在广告组（不用系列预算）时，Meta 现在要求明确写 is_adset_budget_sharing_enabled
     // （否则报 100/4834011）。false = 各组预算互不共享，与我们每组独立日预算的做法一致。
     // 2026-10-26 $1 试跑第一次真跑 ads.create_ad 时撞上。

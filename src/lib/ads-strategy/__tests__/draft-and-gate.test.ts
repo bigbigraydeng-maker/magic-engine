@@ -18,13 +18,14 @@ vi.mock('@/lib/meta/readback', () => ({
   fetchAdSetReadback: vi.fn(),
   fetchAdCreativesReadback: vi.fn(),
   fetchCampaignStatus: vi.fn(),
+  fetchAccountMinDailyBudget: vi.fn(),
 }))
 vi.mock('@/lib/meta/asset-upload', () => ({
   waitForVideoReady: vi.fn(),
 }))
 
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import {
   createDraftForApproval,
@@ -42,6 +43,7 @@ const mAdSet = vi.mocked(fetchAdSetReadback)
 const mCreatives = vi.mocked(fetchAdCreativesReadback)
 const mCampaignStatus = vi.mocked(fetchCampaignStatus)
 const mWait = vi.mocked(waitForVideoReady)
+const mMinBudget = vi.mocked(fetchAccountMinDailyBudget)
 const mPause = vi.mocked(pausePublished)
 
 /** 记下每次写进账本的 payload，测试直接检查它。 */
@@ -206,6 +208,30 @@ describe('createDraftForApproval', () => {
     mWait.mockClear()
     await createDraftForApproval(DRAFT, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
     expect(mWait).not.toHaveBeenCalled()
+  })
+
+  it('🔴 日预算低于账户最低日预算 → 不建，人话报错；读不到最低值 → 放行（Meta 兜底）', async () => {
+    const { sb, inserted } = fakeSupabase()
+    mPublish.mockClear()
+    mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
+    const r = await createDraftForApproval({ ...DRAFT, dailyBudget: 1 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('最低日预算 1.78 NZD')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].minBudgetChecked).toBe(178)
+    mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
+    await createDraftForApproval({ ...DRAFT, dailyBudget: 2 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    mPublish.mockClear()
+    mMinBudget.mockResolvedValueOnce(null)
+    await createDraftForApproval({ ...DRAFT, dailyBudget: 1 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    // 没读到 → 账本记 null（不是 0、不是漏记）；读到 → 记数字
+    expect(inserted.at(-1)?.minBudgetChecked).toBeNull()
+    mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
+    await createDraftForApproval({ ...DRAFT, dailyBudget: 2 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(inserted.at(-1)?.minBudgetChecked).toBe(178)
   })
 
   it('🔴 带视频的草案建广告有整次时间预算；纯图的不限（与等转码同口径）', async () => {

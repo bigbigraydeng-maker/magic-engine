@@ -48,6 +48,32 @@ function mockGraph(fail?: { onPath: string }) {
 beforeEach(() => { calls = [] })
 afterEach(() => { vi.unstubAllGlobals() })
 
+describe('整体请求体快照（防多发/改字段）', () => {
+  it('系列请求体逐字段固定', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    const b = calls.find((c) => c.url.includes('/campaigns') && c.method === 'POST')!.body
+    const o = Object.fromEntries(b.entries()); delete o.access_token
+    expect(o).toEqual({
+      name: 'Kiteroa 留资', objective: 'OUTCOME_LEADS', status: 'PAUSED',
+      special_ad_categories: '[]', is_adset_budget_sharing_enabled: 'false',
+    })
+  })
+
+  it('广告组请求体：字段集合固定（start/end 时间单独测）', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    const b = calls.find((c) => c.url.includes('/adsets') && c.method === 'POST')!.body
+    const o = Object.fromEntries(b.entries()); delete o.access_token
+    expect(Object.keys(o).sort()).toEqual([
+      'bid_strategy', 'billing_event', 'campaign_id', 'daily_budget', 'destination_type', 'end_time',
+      'name', 'optimization_goal', 'promoted_object', 'start_time', 'status', 'targeting',
+    ])
+    expect(o.daily_budget).toBe('3000')
+    expect(o.bid_strategy).toBe('LOWEST_COST_WITHOUT_CAP')
+  })
+})
+
 describe('建系列必须声明 is_adset_budget_sharing_enabled（2026-10-26 试跑撞上 Meta 100/4834011）', () => {
   it('系列请求带 is_adset_budget_sharing_enabled=false，且仍是 PAUSED', async () => {
     vi.stubGlobal('fetch', mockGraph())
@@ -86,7 +112,7 @@ describe('lead_form 视频创意写法（实测过审的 video_data）', () => {
       title: 'Sign up',
       link_description: 'desc',
       image_hash: 'th9',
-      call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: 'f1', link: 'https://example.co.nz' } },
+      call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: 'f1' } },
     })
   })
 
@@ -96,7 +122,7 @@ describe('lead_form 视频创意写法（实测过审的 video_data）', () => {
     const spec = JSON.parse(calls.find((c) => c.url.includes('/adcreatives'))!.body.get('object_story_spec')!)
     expect(spec.video_data).toBeUndefined()
     expect(spec.link_data.image_hash).toBe('h1')
-    expect(spec.link_data.link).toBe('https://example.co.nz')
+    expect(spec.link_data.link).toBe('https://fb.me/')
     expect(spec.link_data.message).toBe('Brand new home')
     expect(spec.link_data.name).toBe('Book a viewing')
     expect(spec.link_data.video_id).toBeUndefined()
@@ -134,7 +160,7 @@ describe('publishDraftPaused — 建出来的一律暂停', () => {
     expect(creative.body.get('object_story_spec')).toContain('f1')
   })
 
-  it('视频广告走 ON_VIDEO —— 少了它 Meta 不按完播优化', async () => {
+  it('视频养受众（THRUPLAY）不发 destination_type（ON_VIDEO 是 limited beta、无实测过审记录）', async () => {
     vi.stubGlobal('fetch', mockGraph())
     await publishDraftPaused(
       { ...DRAFT, kind: 'video_thruplay', creatives: [
@@ -142,8 +168,7 @@ describe('publishDraftPaused — 建出来的一律暂停', () => {
       ] },
       'act_1', 'tok',
     )
-    expect(calls.find((c) => c.url.includes('/adsets'))!.body.get('destination_type'))
-      .toBe('ON_VIDEO')
+    expect(calls.find((c) => c.url.includes('/adsets'))!.body.has('destination_type')).toBe(false)
   })
 
   it('有终点：end_time 必给，且晚于 start_time', async () => {

@@ -102,10 +102,10 @@ describe('metaTripletFor — 三件套写死，配错就是「名字叫留资、
     expect(t.destinationType).toBe('ON_AD')
   })
 
-  it('养受众 → THRUPLAY，落点 ON_VIDEO（少了它 Meta 不给按完播优化）', () => {
+  it('养受众 → THRUPLAY，不发落点（ON_VIDEO 是 limited beta、无实测）', () => {
     const t = metaTripletFor('video_thruplay')
     expect(t.optimizationGoal).toBe('THRUPLAY')
-    expect(t.destinationType).toBe('ON_VIDEO')
+    expect(t.destinationType).toBeUndefined()
   })
 
   it('原来那两种草案的落点仍然都不是私信 —— 私信是单独的类型 messenger_conversation', () => {
@@ -197,9 +197,17 @@ describe('messenger_conversation — metaTripletFor / 打法 / 描述', () => {
   })
 })
 
+describe('validateDraft — 最少 2 天（Meta：按日预算的组要跑超过 24 小时）', () => {
+  it('1 天被拒，2 天通过；0 仍是原来的「必须说跑几天」', () => {
+    expect(fields(leadDraft({ durationDays: 1 }))).toContain('durationDays')
+    expect(validateDraft(leadDraft({ durationDays: 1 }))[0].message).toContain('至少 2 天')
+    expect(validateDraft(leadDraft({ durationDays: 2 }))).toEqual([])
+  })
+})
+
 describe('validateDraft — 视频留资要封面', () => {
   const lead = (c: object) => ({
-    kind: 'lead_form', clientId: 'c1', campaignName: 'n', adSetName: 'a', dailyBudget: 1, durationDays: 1,
+    kind: 'lead_form', clientId: 'c1', campaignName: 'n', adSetName: 'a', dailyBudget: 2, durationDays: 2,
     geoCountries: ['NZ'], pageId: 'p', leadFormId: 'f',
     creatives: [{ name: 'A', primaryText: 'x', headline: 'y', ...c }],
   }) as AdDraft
