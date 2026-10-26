@@ -87,7 +87,7 @@ function dayIndex(date: string): number {
 }
 
 /** 取 today 之前连续 N 天（不含 today）的逐日数据 */
-function windowBefore(daily: DailySpendFact[], today: string, n: number): DailySpendFact[] {
+export function windowBefore(daily: DailySpendFact[], today: string, n: number): DailySpendFact[] {
   const t = dayIndex(today)
   return daily.filter(row => {
     const idx = dayIndex(row.date)

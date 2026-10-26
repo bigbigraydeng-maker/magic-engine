@@ -24,6 +24,7 @@ import type { SelfGrade, SelfGradeWeakness } from '@/lib/huatuo/types'
 import type { GoalRow } from '@/types/strategy'
 import { loadMemoryForClient } from '@/lib/memory'
 import { getGoalById } from '@/lib/strategy/goals'
+import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -196,6 +197,13 @@ function makeRefineStream(
             },
           },
         )
+
+        // 精修重写了内容：用新内容的打法重建计划草稿种子（新内容没有打法就带回旧的）
+        result.content = await attachPlanSeed(result.content, {
+          clientId,
+          goalId: goal?.id ?? null,
+          priorContent: previousContent,
+        }).catch(() => result.content)
 
         await supabaseAdmin
           .from('prescriptions')

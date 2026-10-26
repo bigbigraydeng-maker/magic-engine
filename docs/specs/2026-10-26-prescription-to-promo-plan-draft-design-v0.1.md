@@ -193,3 +193,9 @@ M1→§1.1/§3 排除受众落 `targeting.excluded_audience_refs`；M2→§3 aud
 
 ### 15.5 Reuse Statement（本节）
 复用：`ad_plays`/`plan_seed` 协议、`parseSeed` 校验、`splitBudget`、`AdDraft`（含 `leadFormId`）、`ad_entity_snapshots`、`goal-pace.ts`、素材池五态、Playbook 机制。新增（平台共享）：试算参数、多受众/CBO 可选字段、里程碑结构、复盘面板。行业/客户特定：无；规则倍数进 Playbook 并标未验证；负责人只读引用。无客户名进共享代码。
+## 16. 后续刀前置（第一刀审查后追加，2026-10-26；119 号窗口）
+
+- **第二刀开工前必须先定：处方审阅页的面板显示哪一份种子**——页面现算的，还是处方里存档的 `content.plan_seed`。第一刀是有意让面板读现算（只读展示），第二刀起受众/素材会进种子，两份可能不一致，必须先选定一份并写进本节。
+- **第三刀开工前必须先收敛两套「日预算」计算**：计划页的预算建议与本设计的 `splitBudget` 各算一套，口径不同；写入计划前只能留一个。
+- **在投合计的实时读取**（第一刀之后单独一轮）：现在读的是最近一次抓取，抓取之后新开的广告不在内；改成对被选中的账户实时读，3 秒封顶、读不回来就回落快照并在依据里明写，6.5 小时过期闸保留（PR 3196，台账卡 2026-10-26-plan-seed-live-delivering；本节上一条 ads-facts-live-delivering-budget 卡的「第一刀不改」口径已被取代）。
+- 两条 Meta 只读通道的合并，见台账卡 2026-10-26-meta-readonly-two-channels。

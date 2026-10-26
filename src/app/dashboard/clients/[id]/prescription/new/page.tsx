@@ -18,6 +18,7 @@ import {
   PrescriptionReviewActions,
 } from './review-actions'
 import { MANUAL_PRESCRIPTION_AGENT, manualSource } from '@/lib/diagnostic/manual-prescription'
+import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
 
 // DAPE Week 2 W4 — Goal 一对一 + 版本化所需的轻量 row 类型
 interface MinimalGoal {
@@ -951,6 +952,8 @@ export default function NewPrescriptionPage() {
                 </div>
               </div>
             )}
+
+            <PlanSeedPanel clientId={clientId} prescriptionId={prescriptionId} />
 
             {/* Phases — DAPE W4: 动态 N 阶段, 每阶段对应 1 个派生 Initiative */}
             {content.phases.map(phase => (
