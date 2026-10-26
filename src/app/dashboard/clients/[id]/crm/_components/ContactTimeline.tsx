@@ -75,6 +75,18 @@ export interface TimelineEntry {
   body?: string
 }
 
+/** AI 概况卡的数据。全部来自 conversation_briefs，**AI 生成、未经人工核实**。 */
+export interface TimelineAiBrief {
+  summary: string
+  customerNeeds: string[]
+  objections: string[]
+  promisesMade: string[]
+  nextAction: string | null
+  intentLevel: string | null
+  channel: string | null
+  generatedAt: string | null
+}
+
 interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
@@ -544,6 +556,7 @@ export function ContactTimeline({
   contactId,
   onSummary,
   dialedAt,
+  collapsible = false,
 }: {
   clientId: string
   contactId: string
@@ -556,12 +569,36 @@ export function ContactTimeline({
    * 两处判据、以后必然走散。这里是唯一拉时间线的地方。
    */
   onSummary?: (s: TimelineSummary | null) => void
+  /**
+   * 可折叠：默认只显示「看完整往来原文（N 条）」一行，点开才铺原文。
+   * CTS 员工日常看顶部 AI 概况就够，要查证再展开。无论折叠与否都照常拉数据、
+   * 照常回传概况 —— 折叠只影响这段原文渲不渲染。
+   */
+  collapsible?: boolean
 }) {
   const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt)
   const listRef = useStickToLatest(data)
+  // 折叠模式下默认收起；换人（contactId 变）时重新收起，不把上一个人的展开状态带过来。
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    setExpanded(false)
+  }, [contactId])
 
   if (loading || err || !data || data.timeline.length === 0) {
     return <Placeholder loading={loading} err={err} onRetry={retry} />
+  }
+
+  if (collapsible && !expanded) {
+    return (
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
+      >
+        看完整往来原文（{data.timeline.length} 条）
+        <span aria-hidden>▾</span>
+      </button>
+    )
   }
 
   const origin = originOf(data.timeline)
