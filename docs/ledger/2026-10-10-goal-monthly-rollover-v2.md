@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-10
 source: session:a52bae68
-verify_by: 2026-10-16
+verify_by: 2026-10-14
 verify_how: 合并后数据库加上 recurrence 列；PM 回「补建」后 NAL 有一条 2026-10-01~10-31、目标 300、状态生效中的 messaging_started 目标，且 recurrence=monthly；之后看 cron_run_logs 里 goals-expiry-check 最近一次的 summary 无报错，今日待办里没有「月目标没续上」。11-01 之后应自动出现 11 月那条（目标值仍为 300）。
 done_on: 2026-10-14
 done_ref: pr:2428
