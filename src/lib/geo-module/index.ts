@@ -79,3 +79,13 @@ export {
   type GeoModuleOutcome,
   type GeoModuleDeferReason,
 } from './pipeline'
+
+export {
+  evaluateQualifiedMentionVerdict,
+  type GeoVerificationVerdict,
+  type GeoVerificationReasonCode,
+  type GeoVerificationSide,
+  type GeoVerificationInput,
+  type GeoVerificationOutcome,
+  type GeoRate,
+} from './verdict'

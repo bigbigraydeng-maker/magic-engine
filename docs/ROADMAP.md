@@ -938,6 +938,10 @@ Agent 的事实层，替代 offerings.yaml 路线"）矛盾。PM 拍板"一步�
 > **别把「issue 已关闭」读成「功能已在生产生效」** —— 关闭只代表代码交付完成。
 
 **未完成**：
+
+- [ ] **#1443** GEO 验证判定层（IMPACT Check 段判定内核）—— Draft PR，未合并、未接线，且分支前缀触发 `fix-scope` 闸（本车道 800 行上限，本次 852 行）。合并需换 `feat/*` 前缀分支重开。判据、四道 fail-closed 闸、变异验证的做法都在 `src/lib/geo-module/verdict.ts`。**本层零调用方：判定内核就位 ≠ Check 段通电。**接线（消费方 + 从批次读覆盖账 + Inngest step 编排）留给后续 WP。三审全过，PM 已就"n=18 样本量"拍板 `宽`（不加显著性闸，代价书面留档在 PR 正文）。
+- [ ] **IMPACT 其余三个断点**（本 PR 明确不碰）：页面文案生成 · 页面版本令牌（`basedOnVersion`）· `validatedDiffHash` 触发端。四个断点里只补了 Check，另三个仍是断的。**合并 verdict PR ≠ IMPACT 闭环打通**。
+
 > WP05（#879）与前置 #930 已于 2026-08-17 合入 main（PR #1032 / #1020）—— 详见 [CHANGELOG](./history/CHANGELOG.md)，此处按仓库约定不再保留完成项。
 
 **WP05 follow-up**（本轮不扩，登记待排）：
