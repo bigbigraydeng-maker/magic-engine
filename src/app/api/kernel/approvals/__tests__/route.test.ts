@@ -107,6 +107,57 @@ beforeEach(() => {
   })
 })
 
+// ── 确认卡：通用入口的拒绝也要核角色 ────────────────────────────────────────
+
+describe('通用入口 × 确认卡', () => {
+  const cardRun = () => pendingRun(CLIENT_A, { action_key: 'governance.p0_confirmation' })
+  const staff = () => ({
+    ok: true as const,
+    user: { email: 'staff@example.com' },
+    role: 'client-viewer' as const,
+    tier: 'paid_client' as const,
+    allowedClientId: CLIENT_A,
+  })
+  const body = { resolution: 'reject', expectedDecisionId: DECISION_ID }
+
+  it('客户员工走通用入口拒绝确认卡 → 403，不写决定', async () => {
+    mocks.loadRunForApproval.mockResolvedValue(cardRun())
+    mocks.requirePaidClientAccess.mockResolvedValue(staff())
+    const res = await decisionPOST(decisionReq(body), runCtx())
+    expect(res.status).toBe(403)
+    expect(mocks.decideApproval).not.toHaveBeenCalled()
+  })
+
+  it('别的客户的 FDE、代理人不行；负责人和本客户 FDE 放行', async () => {
+    mocks.loadRunForApproval.mockResolvedValue(cardRun())
+    mocks.requirePaidClientAccess.mockResolvedValue({ ...access('admin'), allowedClientId: CLIENT_B })
+    expect((await decisionPOST(decisionReq(body), runCtx())).status).toBe(403)
+
+    mocks.requirePaidClientAccess.mockResolvedValue(access('admin'))
+    const agentReq = new NextRequest(
+      `http://localhost:3001/api/kernel/approvals/${RUN_ID}/decision`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-me-actor': 'agent' },
+        body: JSON.stringify(body),
+      },
+    )
+    expect((await decisionPOST(agentReq, runCtx())).status).toBe(403)
+    expect(mocks.decideApproval).not.toHaveBeenCalled()
+
+    expect((await decisionPOST(decisionReq(body), runCtx())).status).toBe(200)
+    mocks.requirePaidClientAccess.mockResolvedValue({ ...access('admin'), allowedClientId: CLIENT_A })
+    expect((await decisionPOST(decisionReq(body), runCtx())).status).toBe(200)
+    expect(mocks.decideApproval).toHaveBeenCalledTimes(2)
+  })
+
+  it('其它动作的拒绝不受影响', async () => {
+    mocks.requirePaidClientAccess.mockResolvedValue(staff())
+    const res = await decisionPOST(decisionReq(body), runCtx())
+    expect(res.status).toBe(200)
+  })
+})
+
 // ── UUID 边界（Codex P2：读 uuid 列之前必须先判语法） ────────────────────────
 
 /**
