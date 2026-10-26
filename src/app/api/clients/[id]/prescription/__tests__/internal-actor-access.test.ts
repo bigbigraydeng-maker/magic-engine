@@ -11,7 +11,7 @@ const spies = vi.hoisted(() => ({
   refine: vi.fn(),
   land: vi.fn(),
   generate: vi.fn(),
-  attach: vi.fn(async (content: unknown) => content),
+  attach: vi.fn(async (...args: unknown[]) => args[0]),
 }))
 
 vi.mock('@/lib/auth/require-session', () => ({ requireSession: vi.fn() }))
@@ -140,9 +140,9 @@ beforeEach(() => {
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key]
   mockFrom.mockImplementation((table: string) => {
     if (table === 'client_portal_users') {
-      return fluent({ data: portalRows, error: null }) as ReturnType<typeof supabaseAdmin.from>
+      return fluent({ data: portalRows, error: null }) as unknown as ReturnType<typeof supabaseAdmin.from>
     }
-    return fluent({ data: null, error: { message: 'missing' } }) as ReturnType<typeof supabaseAdmin.from>
+    return fluent({ data: null, error: { message: 'missing' } }) as unknown as ReturnType<typeof supabaseAdmin.from>
   })
 })
 
