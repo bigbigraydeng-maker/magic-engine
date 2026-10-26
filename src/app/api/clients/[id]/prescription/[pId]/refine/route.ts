@@ -15,13 +15,12 @@
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireOperatorAccess } from '@/lib/auth/client-access'
-import { refineHuatuoPrescription, coerceWeaknesses } from '@/lib/huatuo/agent'
+import { coerceWeaknesses } from '@/lib/huatuo/agent'
+import { schedulePrescriptionRefine } from '@/lib/huatuo/prescription-job'
 import type { PrescriptionIntake, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { SelfGrade } from '@/lib/huatuo/types'
 import { getGoalById } from '@/lib/strategy/goals'
-import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
-import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -149,112 +148,5 @@ function errorResponse(status: number, error: string): Response {
   return new Response(JSON.stringify({ success: false, error }), {
     status,
     headers: { 'Content-Type': 'application/json' },
-  })
-}
-
-function makeRefineStream(
-  prescriptionId: string,
-  clientId: string,
-  discovery: DiscoveryReport,
-  intake: PrescriptionIntake,
-  previousContent: PrescriptionContent,
-  previousWeaknesses: SelfGradeWeakness[],
-  humanComments: string | undefined,
-  previousPasses: number,
-  previousSelfGrade: SelfGrade | null,
-  goal: GoalRow | null,
-): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder()
-
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const heartbeat = setInterval(() => {
-        try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch {/* */}
-      }, HEARTBEAT_INTERVAL_MS)
-
-      const sendEvent = (data: object) => {
-        try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)) }
-        catch {/* */}
-      }
-
-      sendEvent({ type: 'started', prescription_id: prescriptionId })
-
-      // Phase 23.D.2: Non-blocking memory load
-      const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, {
-        maxRecentDecisions: 5,
-      })
-
-      try {
-        const result = await refineHuatuoPrescription(
-          supabaseAdmin, discovery, intake, previousContent, previousWeaknesses,
-          {
-            humanComments,
-            previousPasses,
-            previousSelfGrade,
-            memoryContext,
-            goal,    // DAPE W4: 一对一 Goal 注入 prompt
-            onProgress: async (note) => {
-              sendEvent({ type: 'progress', note })
-              await supabaseAdmin
-                .from('prescriptions')
-                .update({ progress_note: note })
-                .eq('id', prescriptionId)
-                .eq('client_id', clientId)
-            },
-          },
-        )
-
-        // 精修重写了内容：用新内容的打法重建计划草稿种子（某阶段打法被校验整组丢掉时，按阶段号带回上一版该阶段的；LLM 没写的阶段不补）
-        result.content = await attachPlanSeed(result.content, {
-          clientId,
-          goalId: goal?.id ?? null,
-          priorContent: previousContent,
-        }).catch(() => result.content)
-
-        await supabaseAdmin
-          .from('prescriptions')
-          .update({
-            status:          'draft',
-            content:         result.content,
-            self_grade:      result.self_grade,
-            generation_meta: { ...result.meta, trend_summary: result.trend_summary },
-            progress_note:   null,
-            error_message:   null,
-          })
-          .eq('id', prescriptionId)
-          .eq('client_id', clientId)
-
-        await afterPrescriptionDraftSaved({ clientId, prescriptionId })
-
-        sendEvent({
-          type: 'done',
-          prescription_id: prescriptionId,
-          content: result.content,
-          self_grade: result.self_grade,
-          meta: result.meta,
-          trend_summary: result.trend_summary,
-        })
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        console.error('[huatuo/refine-stream] failed', { prescriptionId, message })
-
-        // 精修失败：原 content/self_grade 仍然是好的，把状态回滚到 draft，
-        // 只记录 error_message。用户可以继续看原处方、重试精修或直接批准。
-        await supabaseAdmin
-          .from('prescriptions')
-          .update({
-            status:        'draft',           // ← 回滚到草稿（不是 failed）
-            error_message: message,
-            progress_note: null,
-          })
-          .eq('id', prescriptionId)
-          .eq('client_id', clientId)
-
-        sendEvent({ type: 'error', error: message })
-      } finally {
-        clearInterval(heartbeat)
-        controller.close()
-      }
-    },
   })
 }

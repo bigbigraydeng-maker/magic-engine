@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
 import { planDraftCardLine } from '@/lib/marketing-plan/promo/plan-draft-card'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
@@ -52,11 +53,13 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Prescription not found' }, { status: 404 })
     }
 
+    const prescription = await failIfStaleGenerating(clientId, pId, data)
+
     return NextResponse.json({
       success: true,
-      prescription: data,
+      prescription,
       plan_draft_line: planDraftCardLine(
-        (data as Prescription & { generation_meta?: unknown }).generation_meta,
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
       ),
     }, {
       headers: {

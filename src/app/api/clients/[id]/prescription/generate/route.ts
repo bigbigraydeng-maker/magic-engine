@@ -28,8 +28,6 @@ import type { GoalRow } from '@/types/strategy'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { prepareBudgetIntake } from '@/lib/ads/budget-currency'
 import { getGoalById, listActiveGoals } from '@/lib/strategy/goals'
-import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
-import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -357,91 +355,35 @@ async function startHuatuoJob(
   }
 }
 
-      // 2. 执行华佗（补充/修订模式带 priorContext，附 L3 记忆上下文，DAPE W4 附 Goal）
-      try {
-        const result = await runHuatuo(supabaseAdmin, discovery, intake, {
-          priorContext: priorMeta?.priorContext,
-          memoryContext,
-          goal,    // DAPE W4: 一对一 Goal 注入 prompt
-          onProgress: async (note) => {
-            sendEvent({ type: 'progress', note })
-            if (prescriptionId) {
-              await supabaseAdmin
-                .from('prescriptions')
-                .update({ progress_note: note })
-                .eq('id', prescriptionId)
-                .eq('client_id', clientId)
-            }
-          },
-        })
+async function insertGeneratingRow(
+  clientId: string,
+  discoveryId: string,
+  intake: PrescriptionIntake,
+  goal: GoalRow | null,
+  priorMeta?: PriorMeta,
+): Promise<{ id: string } | { error: string }> {
+  const nextVersion = await computeNextVersion(goal?.id ?? null)
+  const insertRow: Record<string, unknown> = {
+    client_id:     clientId,
+    discovery_id:  discoveryId,
+    run_id:        null,
+    status:        'generating',
+    intake,
+    content:       null,
+    agent_name:    'huatuo',
+    progress_note: '排队中…',
+    generated_at:  new Date().toISOString(),
+    goal_id:       goal?.id ?? null,
+    version:       nextVersion,
+  }
+  if (priorMeta) insertRow[priorMeta.relationField] = priorMeta.priorPrescriptionId
 
-        // 2b. 用事实构建计划草稿种子（永不抛错；失败时不写 plan_seed）
-        result.content = await attachPlanSeed(result.content, { clientId, goalId: goal?.id ?? null }).catch(() => result.content)
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from('prescriptions')
+    .insert(insertRow)
+    .select('id')
+    .single<{ id: string }>()
 
-        // 3. 写回 DB
-        await supabaseAdmin
-          .from('prescriptions')
-          .update({
-            status:          'draft',
-            content:         result.content,
-            self_grade:      result.self_grade,
-            agent_version:   result.meta.agent_version,
-            benchmarks_used: result.benchmarks_used,
-            generation_meta: { ...result.meta, trend_summary: result.trend_summary },
-            progress_note:   null,
-            error_message:   null,
-          })
-          .eq('id', prescriptionId!)
-          .eq('client_id', clientId)
-
-        await afterPrescriptionDraftSaved({
-          clientId,
-          prescriptionId: prescriptionId!,
-        })
-
-        // 4. 案例库存档（静默，不阻塞主流程）
-        savePrescriptionCase(supabaseAdmin, {
-          clientId,
-          discoveryId,
-          prescriptionId: prescriptionId!,
-          industryCategory: mapIndustryToCategory(discovery.business.industry),
-          crisisType: deriveCrisisType(intake.priority_dimensions),
-          monthlyBudgetAud: audOnlyAmount(intake.monthly_budget_aud, intake.budget_currency),
-          market: 'AU',
-          businessSize: 'small',
-          prescriptionSummary: result.content.summary?.slice(0, 500) ?? null,
-          selfGradeOverall: result.self_grade.overall ?? null,
-        }).catch(err => console.warn('[prescription/generate] case save failed:', err))
-
-        // 5. 通过流发完整结果给前端
-        sendEvent({
-          type: 'done',
-          prescription_id: prescriptionId,
-          content: result.content,
-          self_grade: result.self_grade,
-          meta: result.meta,
-          trend_summary: result.trend_summary,
-        })
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        console.error('[huatuo/stream] failed', { prescriptionId, message })
-
-        if (prescriptionId) {
-          await supabaseAdmin
-            .from('prescriptions')
-            .update({
-              status:        'failed',
-              error_message: message,
-              progress_note: null,
-            })
-            .eq('id', prescriptionId)
-            .eq('client_id', clientId)
-        }
-        sendEvent({ type: 'error', error: message })
-      } finally {
-        clearInterval(heartbeat)
-        controller.close()
-      }
-    },
-  })
+  if (insertErr || !inserted) return { error: `创建处方草稿失败: ${insertErr?.message ?? 'unknown'}` }
+  return { id: inserted.id }
 }
