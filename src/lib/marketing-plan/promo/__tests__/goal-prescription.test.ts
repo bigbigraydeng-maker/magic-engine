@@ -260,6 +260,47 @@ describe('大白话分段', () => {
     expect(view?.review_anchor).toBe(todayInNz(new Date('2026-10-02T00:00:00.000Z')))
   })
 
+  it('已开投的处方带上达标句，读开投失败也不把整份处方弄丢', async () => {
+    db.tables.prescriptions = [rx({
+      id: 'rx-1',
+      status: 'approved',
+      approved_at: '2019-11-01T00:00:00.000Z',
+    })]
+    db.tables.marketing_plans = [{
+      client_id: CLIENT,
+      status: 'approved',
+      approved_at: '2019-12-01T00:00:00.000Z',
+      plan_data: { promo: { goal_id: GOAL } },
+    }]
+    db.tables.flywheel_actions = [{
+      client_id: CLIENT,
+      action_type: 'ads.create_ad',
+      payload: {
+        status: 'active',
+        campaignId: 'camp-1',
+        activation: { status: 'executed', authorized_at: '2020-01-01T00:00:00.000Z' },
+      },
+    }]
+    db.tables.ad_daily_insights = [{
+      client_id: CLIENT,
+      level: 'campaign',
+      entity_id: 'camp-1',
+      insight_date: '2020-01-02',
+      spend: 80,
+      results: 12,
+    }]
+    const view = await loadLatestGoalPrescription(CLIENT, GOAL)
+    expect(view?.launch_check?.lines.join('\n')).toContain('达标')
+    expect(view?.launch_check?.lines.join('\n')).toContain('这份结论还没写进复盘记录，因为没有案例行。')
+    expect(db.usedIn).toBe(false)
+
+    db.errors.flywheel_actions = 'nope'
+    const still = await loadLatestGoalPrescription(CLIENT, GOAL)
+    expect(still?.id).toBe('rx-1')
+    expect(still?.launch_check?.lines.join('\n')).toContain('不知道')
+    expect(still?.launch_check?.lines.join('\n')).not.toContain('达标')
+  })
+
   it('正文写了起算日就用它，不用写下时间', async () => {
     db.tables.prescriptions = [rx({
       id: 'rx-1',

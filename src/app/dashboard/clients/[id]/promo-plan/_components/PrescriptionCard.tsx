@@ -38,6 +38,11 @@ function SpendBlock({ spend }: { spend: StoredSpend }) {
   )
 }
 
+function launchLines(prescription: GoalPrescriptionView): string[] {
+  const lines = prescription.launch_check?.lines ?? []
+  return lines.length === 0 ? ['还没对上已开投的广告，所以还不知道。'] : lines
+}
+
 function prescriptionHref(clientId: string, goalId: string): string {
   const base = `/dashboard/clients/${clientId}/prescription/new`
   return goalId.trim() === '' ? base : `${base}?goal_id=${encodeURIComponent(goalId)}`
@@ -77,6 +82,9 @@ export function PrescriptionCard({
         {review.day7 && <p>第 7 天：{review.day7}</p>}
         {review.day14 && <p>第 14 天：{review.day14}</p>}
         <p>{review.note}</p>
+      </Section>
+      <Section title="开投之后">
+        {launchLines(prescription).map((sentence, index) => <p key={`${index}:${sentence}`}>{sentence}</p>)}
       </Section>
       <details className="mt-4 rounded-lg border border-gray-200 px-3 py-2">
         <summary className="cursor-pointer text-sm font-semibold text-gray-900">规矩</summary>
