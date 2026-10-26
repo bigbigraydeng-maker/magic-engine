@@ -30,6 +30,8 @@ describe('shouldSyncInngestOnBoot', () => {
     expect(shouldSyncInngestOnBoot({ ...prod, NODE_ENV: 'development' })).toBe(false)
     expect(shouldSyncInngestOnBoot({ ...prod, NEXT_PHASE: 'phase-production-build' })).toBe(false)
     expect(shouldSyncInngestOnBoot({ ...prod, NEXT_RUNTIME: 'edge' })).toBe(false)
+    expect(shouldSyncInngestOnBoot({ ...prod, IS_PULL_REQUEST: 'true' })).toBe(false)
+    expect(shouldSyncInngestOnBoot({ ...prod, IS_PULL_REQUEST: 'false' })).toBe(true)
     expect(shouldSyncInngestOnBoot({ ...prod, INNGEST_SIGNING_KEY: '' })).toBe(false)
     expect(shouldSyncInngestOnBoot({ ...prod, INNGEST_DEV: '1' })).toBe(false)
   })
@@ -69,6 +71,35 @@ describe('scheduleInngestSyncOnBoot', () => {
     expect(INNGEST_BOOT_SYNC_DELAY_MS).toBe(30_000)
   })
 
+  it('登记返回非 2xx 时记一行，不带密钥', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const runs: Array<() => void> = []
+    scheduleInngestSyncOnBoot(prod, {
+      put: async () => new Response('bad', { status: 500 }),
+      later: (fn) => {
+        runs.push(fn)
+      },
+    })
+    runs[0]?.()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(error).toHaveBeenCalledWith('inngest boot sync failed: HTTP 500')
+    expect(JSON.stringify(error.mock.calls)).not.toContain('sign-test')
+  })
+
+  it('2xx 不记错误', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const runs: Array<() => void> = []
+    scheduleInngestSyncOnBoot(prod, {
+      put: async () => new Response('{}', { status: 200 }),
+      later: (fn) => {
+        runs.push(fn)
+      },
+    })
+    runs[0]?.()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(error).not.toHaveBeenCalled()
+  })
+
   it('登记失败不把启动拖垮', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const runs: Array<() => void> = []
@@ -83,5 +114,21 @@ describe('scheduleInngestSyncOnBoot', () => {
     runs[0]?.()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(error).toHaveBeenCalledWith('inngest boot sync failed: network down')
+  })
+})
+
+describe('register (instrumentation)', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('非 nodejs 运行时直接返回', async () => {
+    vi.stubEnv('NEXT_RUNTIME', 'edge')
+    const { register } = await import('../../../instrumentation')
+    await expect(register()).resolves.toBeUndefined()
+  })
+
+  it('nodejs 运行时、非生产环境下正常返回', async () => {
+    vi.stubEnv('NEXT_RUNTIME', 'nodejs')
+    const { register } = await import('../../../instrumentation')
+    await expect(register()).resolves.toBeUndefined()
   })
 })

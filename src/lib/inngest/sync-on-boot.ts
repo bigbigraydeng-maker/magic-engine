@@ -18,6 +18,7 @@ export interface InngestBootEnv {
   NEXT_PHASE?: string
   NEXT_RUNTIME?: string
   RENDER?: string
+  IS_PULL_REQUEST?: string
   INNGEST_SIGNING_KEY?: string
   INNGEST_DEV?: string
 }
@@ -30,6 +31,7 @@ export function shouldSyncInngestOnBoot(env: InngestBootEnv): boolean {
   if (env.NEXT_RUNTIME === 'edge') return false
   if (env.NEXT_PHASE === 'phase-production-build') return false
   if (env.RENDER !== 'true') return false
+  if (env.IS_PULL_REQUEST === 'true') return false
   if (env.NODE_ENV !== 'production') return false
   return productionGuardError({
     nodeEnv: env.NODE_ENV,
@@ -56,6 +58,11 @@ export async function syncInngestOnBoot(
   return { ran: true, status: response.status }
 }
 
+export function logSyncStatus(status: number | null): void {
+  if (status === null || (status >= 200 && status < 300)) return
+  console.error(`inngest boot sync failed: HTTP ${status}`)
+}
+
 function logSyncFailure(err: unknown): void {
   const message = err instanceof Error ? err.message : 'unknown'
   console.error(`inngest boot sync failed: ${message}`)
@@ -68,7 +75,9 @@ export function scheduleInngestSyncOnBoot(
   if (scheduled || !shouldSyncInngestOnBoot(env)) return false
   scheduled = true
   const run = () => {
-    void syncInngestOnBoot(env, deps.put).catch(logSyncFailure)
+    void syncInngestOnBoot(env, deps.put)
+      .then((result) => logSyncStatus(result.status))
+      .catch(logSyncFailure)
   }
   if (deps.later) deps.later(run)
   else {
