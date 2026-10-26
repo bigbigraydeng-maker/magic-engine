@@ -22,7 +22,7 @@ import { getAnthropicClient, parseJsonResponse, MODEL_SONNET } from '@/lib/anthr
 import { loadNarrativesForRun, type NarrativeRow } from './synthesis/persistence'
 import { budgetAmountLabel, budgetCapInstruction, budgetCurrencyOf } from '@/lib/ads/budget-currency'
 import { adPlaysPromptSection, adPlaysSchemaExample } from '@/lib/ads-strategy/plan-seed/ad-plays-prompt'
-import { applyLlmAdPlays } from '@/lib/ads-strategy/plan-seed/ad-plays'
+import { applyLlmAdPlays, dedupeAdPlayStepKeys } from '@/lib/ads-strategy/plan-seed/ad-plays'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -160,9 +160,12 @@ export function stripInvalidAdPlays(content: PrescriptionContent): void {
   for (const phase of content.phases) {
     const seed = phase?.initiative_seed
     if (!seed || typeof seed !== 'object') continue
+    // 嵌套在 initiative_seed 里的 plan_seed 同样只能由系统事实构建，LLM 夹带的一律丢弃
+    delete (seed as { plan_seed?: unknown }).plan_seed
     if (seed.ad_plays === undefined) continue
     applyLlmAdPlays(seed, seed.ad_plays, typeof phase.phase_number === 'number' ? phase.phase_number : 0)
   }
+  dedupeAdPlayStepKeys(content.phases)
 }
 
 // ---------------------------------------------------------------------------

@@ -158,3 +158,27 @@ export function applyLlmAdPlays(
   const n = Number.isInteger(phaseNumber) && phaseNumber >= 0 ? phaseNumber : 0
   console.warn(`[huatuo] ad_plays dropped phase=${n} reason=${res.reason}`)
 }
+
+/**
+ * 全处方范围内让系统生成的 step_key 唯一：两个阶段的 phase_number 相同（LLM 重复/缺失）时，
+ * 生成的键会撞（p1-1-lead_form_harvest 出现两次），第二个阶段的打法会被 collectAdPlays 悄悄去重丢掉。
+ * 撞了就在后面加 -2、-3……（总长不超过 40）。只改传入对象，不抛错。
+ */
+export function dedupeAdPlayStepKeys(phases: unknown): void {
+  if (!Array.isArray(phases)) return
+  const seen = new Set<string>()
+  for (const phase of phases) {
+    const seed = isPlainObject(phase) ? phase.initiative_seed : undefined
+    if (!isPlainObject(seed) || !Array.isArray(seed.ad_plays)) continue
+    for (const item of seed.ad_plays) {
+      if (!isPlainObject(item) || typeof item.step_key !== 'string') continue
+      let key = item.step_key
+      for (let n = 2; seen.has(key); n++) {
+        const suffix = `-${n}`
+        key = `${item.step_key.slice(0, MAX_STEP_KEY_LEN - suffix.length)}${suffix}`
+      }
+      item.step_key = key
+      seen.add(key)
+    }
+  }
+}

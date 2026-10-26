@@ -437,7 +437,9 @@ describe('attachPlanSeed budget', () => {
     const remaining = options?.timeoutMs
     expect(typeof remaining).toBe('number')
     expect(remaining).toBeGreaterThan(0)
-    expect(remaining).toBeLessThanOrEqual(300)
+    // 不依赖毫秒级精度：定时器可能比 100ms 早几毫秒触发，只断言「总预算 400ms 里确实扣掉了读周期用掉的那段」
+    expect(remaining).toBeLessThan(400)
+    expect(remaining).toBeLessThanOrEqual(350)
   })
 })
 
