@@ -1,5 +1,7 @@
 import React from 'react'
 import { AbsoluteFill, Img, interpolate, OffthreadVideo, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
+import { subjectObjectPosition } from './aspect'
+import { useStage } from './stage'
 
 /** Legibility gradient; scrim (0-1) scales its strength, undefined or 1 keeps the original look byte for byte. */
 export function scrimGradient(scrim?: number): string {
@@ -13,12 +15,13 @@ export function scrimGradient(scrim?: number): string {
 /** Full-bleed real footage with slow push-in, light grade and a legibility gradient. */
 export const Footage: React.FC<{ src: string; zoomTo?: number; startFrom?: number; scrim?: number }> = ({ src, zoomTo = 1.08, startFrom = 0, scrim }) => {
   const frame = useCurrentFrame()
-  const { durationInFrames } = useVideoConfig()
+  const { durationInFrames, width, height } = useVideoConfig()
+  const objectPosition = subjectObjectPosition(width, height)
   const scale = interpolate(frame, [0, durationInFrames], [1.0, zoomTo], { extrapolateRight: 'clamp' })
   return (
     <AbsoluteFill style={{ overflow: 'hidden', background: '#000' }}>
       <AbsoluteFill style={{ transform: `scale(${scale})`, filter: 'contrast(1.1) saturate(1.12)' }}>
-        <OffthreadVideo src={staticFile(src)} startFrom={startFrom} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        <OffthreadVideo src={staticFile(src)} startFrom={startFrom} muted style={{ width: '100%', height: '100%', objectFit: 'cover', ...(objectPosition ? { objectPosition } : {}) }} />
       </AbsoluteFill>
       <AbsoluteFill style={{ background: scrimGradient(scrim) }} />
     </AbsoluteFill>
@@ -46,5 +49,6 @@ export const Reveal: React.FC<{ children: React.ReactNode; delay?: number; style
 
 /** Persistent brand logo, file name comes from props (relative to the public dir). */
 export const Logo: React.FC<{ file: string }> = ({ file }) => {
-  return <Img src={staticFile(file)} style={{ position: 'absolute', left: 54, top: 292, width: 470, height: 171, objectFit: 'contain', objectPosition: 'left center', filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))' }} />
+  const box = useStage().logo
+  return <Img src={staticFile(file)} style={{ position: 'absolute', left: box.left, top: box.top, width: box.width, height: box.height, objectFit: 'contain', objectPosition: 'left center', filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))' }} />
 }

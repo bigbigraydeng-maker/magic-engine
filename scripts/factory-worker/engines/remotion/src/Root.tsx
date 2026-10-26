@@ -11,30 +11,36 @@ import { PostcardReel } from './PostcardReel'
 import { parsePostcardProps, computePostcardTiming } from './postcard'
 import { AtmosphereReel } from './AtmosphereReel'
 import { parseAtmosphereProps, computeAtmosphereTiming } from './atmosphere'
+import { canvasForProps, templateProps } from './aspect'
+
+function canvasMeta(props: Record<string, unknown>, durationInFrames: number) {
+  const canvas = canvasForProps(props)
+  return { durationInFrames, width: canvas.width, height: canvas.height }
+}
 
 const calculateMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
-  const parsed = parseListReelProps(props)
-  return { durationInFrames: computeTimingFromProps(parsed).totalFrames }
+  const parsed = parseListReelProps(templateProps(props))
+  return canvasMeta(props, computeTimingFromProps(parsed).totalFrames)
 }
 
 const calculateMontageMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
-  const parsed = parseMontageReelProps(props)
-  return { durationInFrames: computeMontageTiming(parsed).totalFrames }
+  const parsed = parseMontageReelProps(templateProps(props))
+  return canvasMeta(props, computeMontageTiming(parsed).totalFrames)
 }
 
 const calculateDataCardMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
-  const parsed = parseDataCardProps(props)
-  return { durationInFrames: computeDataCardTiming(parsed).totalFrames }
+  const parsed = parseDataCardProps(templateProps(props))
+  return canvasMeta(props, computeDataCardTiming(parsed).totalFrames)
 }
 
 const calculatePostcardMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
-  const parsed = parsePostcardProps(props)
-  return { durationInFrames: computePostcardTiming(parsed).totalFrames }
+  const parsed = parsePostcardProps(templateProps(props))
+  return canvasMeta(props, computePostcardTiming(parsed).totalFrames)
 }
 
 const calculateAtmosphereMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
-  const parsed = parseAtmosphereProps(props)
-  return { durationInFrames: computeAtmosphereTiming(parsed).totalFrames }
+  const parsed = parseAtmosphereProps(templateProps(props))
+  return canvasMeta(props, computeAtmosphereTiming(parsed).totalFrames)
 }
 
 export const Root: React.FC = () => (

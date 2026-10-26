@@ -13,6 +13,7 @@ import {
   sha256File,
   usedWindowFromProps,
 } from './music-vocal-gate.mjs'
+import { ASPECTS, planWorkOrderAspects } from './engines/remotion/src/video-aspects.ts'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
 export const REMOTION_ENGINE_DIR = join(import.meta.dirname, 'engines', 'remotion')
@@ -561,6 +562,7 @@ export function runRemotionRender({
   publicDir,
   tmpDir,
   template = 'list',
+  aspect = '9:16',
   engineDir = REMOTION_ENGINE_DIR,
   timeoutSec = 600,
   signal,
@@ -568,14 +570,16 @@ export function runRemotionRender({
   spawnFn = spawn,
 }) {
   return new Promise((resolvePromise) => {
-    const child = spawnFn(process.execPath, [
+    const argv = [
       join(engineDir, 'render.mjs'),
       '--props', propsFile,
       '--out', outFile,
       '--template', template,
       '--public-dir', publicDir,
       '--timeout-sec', String(timeoutSec),
-    ], {
+    ]
+    if (aspect !== '9:16') argv.push('--aspect', aspect)
+    const child = spawnFn(process.execPath, argv, {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
@@ -659,6 +663,69 @@ function assertRemotionBrief(wo, deps) {
   return remotion
 }
 
+// Extra ratios need a claim-time signed URL whose file name matches the aspect.
+function aspectUploadSlots(wo, extras) {
+  const rows = Array.isArray(wo.aspect_uploads) ? wo.aspect_uploads : []
+  const byAspect = new Map(rows.filter((row) => row && typeof row.aspect === 'string').map((row) => [row.aspect, row]))
+  const slots = []
+  for (const id of extras) {
+    const row = byAspect.get(id)
+    const fileName = ASPECTS[id].fileName
+    const path = typeof row?.path === 'string' ? row.path : ''
+    const signedUrl = typeof row?.signed_url === 'string' ? row.signed_url : ''
+    if (!signedUrl || !path.endsWith(`/${fileName}`) || path.includes('..')) {
+      throw new RemotionOrderError(`工单要额外画幅 ${id}，但领单响应里没有可用的上传地址`)
+    }
+    slots.push({ aspect: id, path, signedUrl, width: ASPECTS[id].width, height: ASPECTS[id].height, fileName })
+  }
+  return slots
+}
+
+function assertAspectFile(evidence, slot, expectedSeconds, musicFile) {
+  if (evidence.width !== slot.width || evidence.height !== slot.height) {
+    if (!Number.isInteger(evidence.width)) {
+      throw new RemotionOrderError(`成片体检没过：${slot.aspect} 没测到分辨率（出片机的 ffprobe 可能没装好）`)
+    }
+    throw new RemotionOrderError(`成片体检没过：${slot.aspect} 分辨率是 ${evidence.width}x${evidence.height}，应为 ${slot.width}x${slot.height}`)
+  }
+  if (!Number.isFinite(evidence.duration_seconds) || Math.abs(evidence.duration_seconds - expectedSeconds) > 0.5) {
+    throw new RemotionOrderError(`成片体检没过：${slot.aspect} 时长 ${evidence.duration_seconds}s 与预期 ${expectedSeconds.toFixed(2)}s 不符`)
+  }
+  if (musicFile !== null && evidence.audio_stream_present !== true) {
+    throw new RemotionOrderError(`成片体检没过：工单配了音乐，但 ${slot.aspect} 成片里没有音轨`)
+  }
+}
+
+async function renderOneFile({ renderFn, args, hb, deps, timeoutSec }) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const res = await renderFn(args)
+    hb.assertAlive()
+    if (res.code === 0) return
+    if (res.code === 124) throw new RemotionOrderError(`渲染超时（超过 ${timeoutSec} 秒）：${lastLines(res)}`)
+    if (res.code === 2 || res.code === 3 || res.code === 4) {
+      throw new RemotionOrderError(`渲染前检查没过（退出码 ${res.code}）：${lastLines(res)}`)
+    }
+    if (attempt === 1) {
+      deps.log(`remotion 渲染失败（退出码 ${res.code}），重试一次：${lastLines(res)}`)
+      continue
+    }
+    throw new Error('渲染失败（已重试 1 次）：' + lastLines(res))
+  }
+}
+
+async function renderExtraAspects({ slots, renderFn, baseArgs, outDir, hb, deps, timeoutSec, srtText, expectedSeconds, musicFile }) {
+  const delivered = []
+  for (const slot of slots) {
+    const outFile = join(outDir, slot.fileName)
+    await renderOneFile({ renderFn, args: { ...baseArgs, outFile, aspect: slot.aspect }, hb, deps, timeoutSec })
+    const stat = statSync(outFile)
+    if (!stat.isFile() || stat.size <= 0) throw new RemotionOrderError(`成片体检没过：${slot.aspect} 渲染产物不存在或为空`)
+    assertAspectFile(deps.probeMediaEvidenceFn(outFile, srtText), slot, expectedSeconds, musicFile)
+    delivered.push({ slot, outFile })
+  }
+  return delivered
+}
+
 // Poll the server while rendering; abort the render on abort/409.
 function startHeartbeats({ woId, heartbeatFn, intervalMs, log }) {
   const ac = new AbortController()
@@ -709,6 +776,9 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   } = deps
 
   const remotion = assertRemotionBrief(wo, deps)
+  const aspectPlanned = planWorkOrderAspects(remotion.aspects)
+  if (!aspectPlanned.ok) throw new RemotionOrderError(aspectPlanned.message)
+  const extraSlots = aspectPlanned.plan.extras.length > 0 ? aspectUploadSlots(wo, aspectPlanned.plan.extras) : []
 
   const problems = healthFn()
   if (problems.length > 0) {
@@ -872,6 +942,18 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     if (builders === null) throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)
     const srtText = builders[0]()
     const caption = builders[1]()
+    const extraRendered = extraSlots.length === 0 ? [] : await renderExtraAspects({
+      slots: extraSlots,
+      renderFn,
+      baseArgs: { propsFile, publicDir: stageDir, tmpDir, template, timeoutSec, signal: hb.signal },
+      outDir,
+      hb,
+      deps,
+      timeoutSec,
+      srtText,
+      expectedSeconds: totalFrames / eng.FPS,
+      musicFile: props.musicFile,
+    })
     const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
     const expected = totalFrames / eng.FPS
     if (evidence.width !== 1080 || evidence.height !== 1920) {
@@ -901,10 +983,15 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
         atmosphere_preflight: atmospherePreflight,
         recipe_gaps: recipeGaps,
         render: { attempts, elapsed_s },
+        ...(extraRendered.length > 0 ? { aspects: ['9:16', ...extraRendered.map((extra) => extra.slot.aspect)] } : {}),
       }, null, 2),
     )
     await deps.uploadSignedFn(wo.uploads.video.signed_url, readFileSync(finalPath), 'video/mp4')
     hb.assertAlive()
+    for (const extra of extraRendered) {
+      await deps.uploadSignedFn(extra.slot.signedUrl, readFileSync(extra.outFile), 'video/mp4')
+      hb.assertAlive()
+    }
     await deps.uploadSignedFn(wo.uploads.segments_json.signed_url, segmentsJson, 'application/json')
     hb.assertAlive()
     await deps.uploadSignedFn(wo.uploads.srt.signed_url, Buffer.from(srtText), 'text/plain')
@@ -915,6 +1002,14 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       video_url: wo.uploads.video.path,
       segments_json_url: wo.uploads.segments_json.path,
       srt_url: wo.uploads.srt.path,
+      ...(extraRendered.length > 0
+        ? {
+            aspect_outputs: [
+              { aspect: '9:16', video_url: wo.uploads.video.path },
+              ...extraRendered.map((extra) => ({ aspect: extra.slot.aspect, video_url: extra.slot.path })),
+            ],
+          }
+        : {}),
       caption,
       actual_cost_usd: 0,
       new_clips: [],

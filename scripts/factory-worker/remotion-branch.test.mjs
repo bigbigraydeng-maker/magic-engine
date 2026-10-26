@@ -1042,3 +1042,100 @@ describe('atmosphere template wiring', () => {
     expect(defaultProbeClip('/x.mp4', exec)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
   })
 })
+
+describe('extra aspect ratios', () => {
+  const SIZES = {
+    'final.mp4': { width: 1080, height: 1920 },
+    'final-4x5.mp4': { width: 1080, height: 1350 },
+    'final-1x1.mp4': { width: 1080, height: 1080 },
+    'final-16x9.mp4': { width: 1920, height: 1080 },
+  }
+
+  function withAspects(aspects) {
+    const wo = makeWo({ remotion: { template: 'list', props: PROPS, aspects } })
+    wo.aspect_uploads = aspects
+      .filter((id) => id !== '9:16')
+      .map((id) => {
+        const file = id === '4:5' ? 'final-4x5.mp4' : id === '1:1' ? 'final-1x1.mp4' : 'final-16x9.mp4'
+        return { aspect: id, path: `renders/c/wo-1/${file}`, signed_url: `https://sig/${file}` }
+      })
+    return wo
+  }
+
+  it('renders each requested file, probes its canvas, and reports aspect_outputs', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => {
+        const name = String(file).split('/').pop()
+        const size = SIZES[name]
+        return { ...size, duration_seconds: 12, audio_stream_present: true }
+      }),
+    })
+    const wo = withAspects(['4:5', '1:1', '16:9'])
+    const res = await run(env, deps, wo)
+    expect(res).toEqual({ ok: true, cost: 0 })
+    expect(deps.renderFn).toHaveBeenCalledTimes(4)
+    expect(deps.renderFn.mock.calls[0][0].aspect).toBeUndefined()
+    expect(deps.renderFn.mock.calls.slice(1).map((c) => c[0].aspect)).toEqual(['4:5', '1:1', '16:9'])
+    const urls = deps.uploadSignedFn.mock.calls.map((c) => c[0])
+    expect(urls).toEqual([
+      wo.uploads.video.signed_url,
+      'https://sig/final-4x5.mp4',
+      'https://sig/final-1x1.mp4',
+      'https://sig/final-16x9.mp4',
+      wo.uploads.segments_json.signed_url,
+      wo.uploads.srt.signed_url,
+    ])
+    expect(deps.completeFn.mock.calls[0][0].aspect_outputs).toEqual([
+      { aspect: '9:16', video_url: wo.uploads.video.path },
+      { aspect: '4:5', video_url: 'renders/c/wo-1/final-4x5.mp4' },
+      { aspect: '1:1', video_url: 'renders/c/wo-1/final-1x1.mp4' },
+      { aspect: '16:9', video_url: 'renders/c/wo-1/final-16x9.mp4' },
+    ])
+  })
+
+  it('refuses a bad aspect list and a missing upload slot before rendering', async () => {
+    const env = makeEnv()
+    const bad = makeDeps(env)
+    const badErr = await errOf(run(env, bad, makeWo({ remotion: { template: 'list', props: PROPS, aspects: ['2:1'] } })))
+    expect(badErr).toBeInstanceOf(RemotionOrderError)
+    expect(bad.renderFn).not.toHaveBeenCalled()
+
+    const missing = makeDeps(env)
+    const wo = makeWo({ remotion: { template: 'list', props: PROPS, aspects: ['4:5'] } })
+    const missErr = await errOf(run(env, missing, wo))
+    expect(missErr).toBeInstanceOf(RemotionOrderError)
+    expect(missErr.message).toContain('4:5')
+    expect(missing.renderFn).not.toHaveBeenCalled()
+    expect(missing.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('does not upload when an extra canvas is the wrong size', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => ({
+        width: 1080,
+        height: String(file).endsWith('final-4x5.mp4') ? 1920 : 1920,
+        duration_seconds: 12,
+        audio_stream_present: true,
+      })),
+    })
+    const err = await errOf(run(env, deps, withAspects(['4:5'])))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('1080x1350')
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('passes --aspect only for a non-default ratio', async () => {
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const spawnFn = vi.fn(() => {
+      const c = Object.assign(new EventEmitter(), { pid: 7, stdout: new EventEmitter(), stderr: new EventEmitter() })
+      setImmediate(() => c.emit('close', 0))
+      return c
+    })
+    await runRemotionRender({ propsFile: 'p', outFile: 'o', publicDir: 'd', tmpDir: '/t', spawnFn, aspect: '16:9' })
+    const argv = spawnFn.mock.calls[0][1]
+    expect(argv[argv.indexOf('--aspect') + 1]).toBe('16:9')
+  })
+})

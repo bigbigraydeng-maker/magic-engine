@@ -107,6 +107,18 @@ test('render.mjs rejects an unknown --template with exit code 2', () => {
   assert.ok(result.stderr.includes('--template'))
 })
 
+test('render.mjs rejects an unknown --aspect with exit code 2 and accepts 9:16 as the default flag', () => {
+  const renderPath = fileURLToPath(new URL('../render.mjs', import.meta.url))
+  const propsPath = path.join(here, '..', 'examples', 'sydney-apartment.props.json')
+  const bad = spawnSync(
+    process.execPath,
+    [renderPath, '--props', propsPath, '--out', '/tmp/x.mp4', '--aspect', '21:9'],
+    { encoding: 'utf8' },
+  )
+  assert.equal(bad.status, 2)
+  assert.ok(bad.stderr.includes('--aspect'))
+})
+
 test('the sydney montage example loads and uses 3 or more clip kinds', () => {
   const raw = JSON.parse(
     fs.readFileSync(new URL('../examples/sydney-montage.props.json', import.meta.url), 'utf8'),
