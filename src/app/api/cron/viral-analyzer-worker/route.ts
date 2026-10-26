@@ -13,6 +13,8 @@
  * failed_count on the cron run log.
  *
  * Auth:     Authorization: Bearer ${CRON_SECRET}
+ * Switch:   no-ops unless VIRAL_ANALYZER_ENABLED === 'true' (paused 2026-10-27,
+ *           Gemini quota exhausted; set the env var to 'true' to resume)
  * Schedule: render.yaml
  * Batch:    4 videos per run, sequential, ~5s delay between each
  */
@@ -51,6 +53,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  if (process.env.VIRAL_ANALYZER_ENABLED !== 'true') {
+    return NextResponse.json({ skipped: 'disabled', hint: 'set VIRAL_ANALYZER_ENABLED=true to run' })
   }
 
   const cronRun = await startCronRun('viral-analyzer-worker')
