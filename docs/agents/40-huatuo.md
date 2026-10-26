@@ -119,3 +119,11 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 - 诸葛亮手册（下游）：`docs/agents/20-zhuge.md`
 - 行业基准引擎：`src/lib/huatuo/benchmarks.ts`
 - 异常检测规则：`src/lib/diagnostic/`（Phase 22.D）
+
+---
+
+## 操作手册
+
+暂无。
+
+> 代号与全员对照：[agents 索引](./README.md)

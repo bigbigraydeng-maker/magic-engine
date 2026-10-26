@@ -4,7 +4,7 @@
 > 状态：**已采用（索引本身）；所列文档状态以各自文件为准，本索引只核对过标注「已读头部」的几份** ｜ 日期：2026-10-27 ｜ 最后核实：2026-10-27 ｜ 风险：C（仅文档）
 > 依据：`docs/FILING.md`（`sops/` 放可复用操作手册）· `docs/skill-cards/README.md`（索引表格式）· `docs/sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md`、`docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md`（文件头写法）
 
-只做链接，不搬动、不改名现有文件。
+只做链接，不搬动、不改名现有文件。agent 代号与档案↔手册对照见 [agents 索引](../agents/README.md)。
 
 ## 统一写法（能力类文档）
 

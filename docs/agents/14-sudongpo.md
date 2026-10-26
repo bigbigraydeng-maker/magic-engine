@@ -120,3 +120,13 @@
 - 设计：`docs/specs/2026-09-28-pillar-agents-capability-memory-kernel-v0.1.md`
 - 样板：卫青 `docs/agents/11-weiqing.md`；视觉：马良 `docs/agents/60-maliang.md`；文案：李白 `docs/agents/70-libai.md`
 - 平行：孔子 `docs/agents/13-kongzi.md`；孟子 `docs/agents/15-mengzi.md`
+
+---
+
+## 操作手册
+
+- [社媒 Agent 操作手册与规则 v1.0](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md)
+- [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md)（出片 / 发布一侧归苏东坡，出片检查一侧见 [马良](./60-maliang.md)；归属理由见 [agents 索引](./README.md#手册归属说明)）
+- 视频工厂文档索引：[video-factory-index](../sops/video-factory-index.md)
+
+> 代号与全员对照：[agents 索引](./README.md)

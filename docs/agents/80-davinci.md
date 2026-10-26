@@ -141,3 +141,11 @@ QUESTION
 - 总架构：`docs/agents/00-architecture.md`
 - 子牙手册（触发者）：`docs/agents/10-ziya.md`
 - ROADMAP（审查材料）：`ROADMAP.md`
+
+---
+
+## 操作手册
+
+暂无（已撤，见文件头）。
+
+> 代号与全员对照：[agents 索引](./README.md)

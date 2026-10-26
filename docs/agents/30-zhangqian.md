@@ -121,3 +121,11 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 - AI Tracker 运行器：`src/lib/ai-tracker/`
 - SEMrush 客户端：`src/lib/semrush/client.ts`
 - 华佗手册（下游）：`docs/agents/40-huatuo.md`
+
+---
+
+## 操作手册
+
+暂无。
+
+> 代号与全员对照：[agents 索引](./README.md)

@@ -116,3 +116,11 @@
 - 设计：`docs/specs/2026-09-28-pillar-agents-capability-memory-kernel-v0.1.md`
 - 样板：卫青 `docs/agents/11-weiqing.md`
 - 平行：孔子 `docs/agents/13-kongzi.md`；苏东坡 `docs/agents/14-sudongpo.md`
+
+---
+
+## 操作手册
+
+暂无。
+
+> 代号与全员对照：[agents 索引](./README.md)

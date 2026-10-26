@@ -263,3 +263,11 @@ Messenger 留资广告（在聊天里填表那种）会给**同一个人**同时
 - Ad Strategy Engine Spec：`docs/specs/2026-07-13-ad-strategy-engine.md`
 - Meta 广告经验手册：`~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-ads-meta-general.md`
 - 广告健康度看板：`src/app/dashboard/clients/[id]/ads-health/page.tsx`
+
+---
+
+## 操作手册
+
+- [广告 agent 操作手册与规则 v1.0](../sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md)
+
+> 代号与全员对照：[agents 索引](./README.md)

@@ -166,3 +166,11 @@ Seedance 友好词：
 - 马良手册（视觉协作）：`docs/agents/60-maliang.md`
 - 博客生成代码：`src/lib/blog/generator.ts`
 - GEO 生成代码：`src/lib/geo/composer.ts`
+
+---
+
+## 操作手册
+
+暂无。
+
+> 代号与全员对照：[agents 索引](./README.md)

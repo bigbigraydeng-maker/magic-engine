@@ -193,3 +193,11 @@ await saveProvenPattern(supabase, {
 - 李白手册：`docs/agents/70-libai.md`
 - 鲁班手册：`docs/agents/50-luban.md`
 - 提示词库：`docs/agents/prompt-library/`
+
+---
+
+## 操作手册
+
+- [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md)（马良负责其中的出片检查；主负责 agent 是 [苏东坡](./14-sudongpo.md)，理由见 [agents 索引](./README.md#手册归属说明)）
+
+> 代号与全员对照：[agents 索引](./README.md)

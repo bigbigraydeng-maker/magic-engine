@@ -187,3 +187,11 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 - 达芬奇手册（已撤，历史参考；审查清单已并入本文件 §四b）：`docs/agents/80-davinci.md`
 - 魏征手册（代码验收）：`docs/agents/90-weicheng.md`
 - Codex 入口：`docs/agents/CODEX.md`
+
+---
+
+## 操作手册
+
+暂无。
+
+> 代号与全员对照：[agents 索引](./README.md)

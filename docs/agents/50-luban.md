@@ -137,3 +137,11 @@ await flywheelAdapter.execute({
 - 词表：`src/lib/flywheel/vocabulary.ts`
 - 诸葛亮手册（上游）：`docs/agents/20-zhuge.md`
 - 马良手册（视觉执行协作）：`docs/agents/60-maliang.md`
+
+---
+
+## 操作手册
+
+暂无。
+
+> 代号与全员对照：[agents 索引](./README.md)

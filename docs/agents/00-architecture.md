@@ -216,7 +216,13 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 ```
 docs/agents/
 ├── 00-architecture.md   ← 本文件
+├── README.md            ← agents 索引（代号 / 分组 / 档案 / 手册，名单以 §4 为准）
 ├── 10-ziya.md           ← 子牙手册
+├── 11-weiqing.md        ← 卫青
+├── 13-kongzi.md         ← 孔子
+├── 14-sudongpo.md       ← 苏东坡
+├── 15-mengzi.md         ← 孟子
+├── 16-simaqian.md       ← 司马迁（骨架）
 ├── 20-zhuge.md          ← 诸葛亮
 ├── 30-zhangqian.md      ← 张骞
 ├── 40-huatuo.md         ← 华佗
@@ -225,6 +231,8 @@ docs/agents/
 ├── 70-libai.md          ← 李白
 ├── 80-davinci.md        ← 达芬奇（已撤，历史参考）
 ├── 90-weicheng.md       ← 魏征
+├── 91-direnjie.md       ← 狄仁杰（骨架）
+├── 92-banqiao.md        ← 板桥（骨架）
 ├── CODEX.md             ← Codex 专用入口
 └── prompt-library/      ← 李白管理的提示词库
 ```
