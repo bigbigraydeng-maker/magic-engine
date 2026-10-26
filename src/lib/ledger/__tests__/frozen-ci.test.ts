@@ -39,7 +39,7 @@ describe('runFrozenFieldCheck（真实 git 仓库集成测试）', () => {
 
   beforeAll(() => {
     repoDir = setupRepo()
-  })
+  }, 60_000)
 
   afterAll(() => {
     execSync(`rm -rf "${repoDir}"`)

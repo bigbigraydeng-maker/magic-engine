@@ -50,11 +50,16 @@ export function shouldPublishHeadCheck(eventName) {
  * Head-bound events: 0 only when the gate passed. Republish events: 0 when
  * the head check was written (pass or fail), 1 when it was not.
  *
- * @param {{eventName?: unknown, pass?: unknown, headCheckPublished?: unknown}} input
+ * A draft is the one exception: a draft PR cannot be merged and auto-merge is
+ * already switched off for it, so a red cross says nothing true. Only an
+ * explicit `draft === true` counts; a missing or malformed value stays red.
+ *
+ * @param {{eventName?: unknown, pass?: unknown, headCheckPublished?: unknown, draft?: unknown}} input
  * @returns {0|1}
  */
-export function gateJobExitCode({ eventName, pass, headCheckPublished } = {}) {
+export function gateJobExitCode({ eventName, pass, headCheckPublished, draft } = {}) {
   if (shouldPublishHeadCheck(eventName)) return headCheckPublished === true ? 0 : 1
+  if (draft === true) return 0
   return pass === true ? 0 : 1
 }
 
@@ -62,22 +67,24 @@ export function gateJobExitCode({ eventName, pass, headCheckPublished } = {}) {
  * Body for `POST /repos/{owner}/{repo}/check-runs`.
  *
  * `failure` is deliberate. `neutral` and `skipped` do not keep an unreviewed
- * head red under every ruleset.
+ * head red under every ruleset — so `neutral` is used only for a draft
+ * (explicit `draft === true`), which cannot merge anyway. A pass is never
+ * neutral, and a non-draft failure is always `failure`.
  *
- * @param {{headSha?: unknown, pass?: unknown, summary?: unknown, now?: unknown, detailsUrl?: unknown}} input
- * @returns {{name: string, head_sha: string, status: 'completed', conclusion: 'success'|'failure', started_at: string, completed_at: string, output: {title: string, summary: string}, details_url?: string}}
+ * @param {{headSha?: unknown, pass?: unknown, summary?: unknown, now?: unknown, detailsUrl?: unknown, draft?: unknown}} input
+ * @returns {{name: string, head_sha: string, status: 'completed', conclusion: 'success'|'failure'|'neutral', started_at: string, completed_at: string, output: {title: string, summary: string}, details_url?: string}}
  */
-export function buildRiskGateCheckRun({ headSha, pass, summary, now, detailsUrl } = {}) {
+export function buildRiskGateCheckRun({ headSha, pass, summary, now, detailsUrl, draft } = {}) {
   if (typeof headSha !== 'string' || !HEAD_SHA_RE.test(headSha)) {
     throw new Error('refuse to publish Risk gate without a full head sha')
   }
   if (typeof now !== 'string' || now === '') {
     throw new Error('refuse to publish Risk gate without a timestamp')
   }
-  const conclusion = pass === true ? 'success' : 'failure'
+  const conclusion = pass === true ? 'success' : draft === true ? 'neutral' : 'failure'
   const text =
     typeof summary === 'string' && summary.trim() !== '' ? summary : conclusion === 'success' ? '通过' : '没通过'
-  /** @type {{name: string, head_sha: string, status: 'completed', conclusion: 'success'|'failure', started_at: string, completed_at: string, output: {title: string, summary: string}, details_url?: string}} */
+  /** @type {{name: string, head_sha: string, status: 'completed', conclusion: 'success'|'failure'|'neutral', started_at: string, completed_at: string, output: {title: string, summary: string}, details_url?: string}} */
   const body = {
     name: RISK_GATE_CHECK_NAME,
     head_sha: headSha,

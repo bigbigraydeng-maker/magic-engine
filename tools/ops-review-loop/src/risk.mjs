@@ -355,6 +355,10 @@ function pathsForEntry(entry) {
   return { paths, unreadable: null }
 }
 
+/** Write-capable files under the ad directories; tests and docs are excluded up front. */
+const AD_WRITE_PATH =
+  /^(?!.*(?:\/__tests__\/|(?:^|\/)docs\/|\.(?:test|spec)\.[cm]?[jt]sx?$)).*(?:^|\/)(?:ads-strategy|ad-health|marketing-plan\/promo)\/.*(?:launch|stop-?loss|auto-?pause|budget|bid|scale|pause|activate|publish|draft-ads|ad-draft|draft-and-gate|execut|apply|writes?)/i
+
 /**
  * Paths that must never arm auto-merge, whatever the risk rating.
  *
@@ -365,7 +369,8 @@ function pathsForEntry(entry) {
  */
 export const RAY_MERGE_HOLD_RULES = [
   { prefix: 'supabase/migrations/', why: '数据库 migration' },
-  { suffix: '.sql', why: 'SQL，路径分不清是不是库表语句' },
+  // docs/ 下的 .sql 是写给人看的示例，不会被执行；其余 .sql 仍扣。
+  { pattern: /^(?!docs\/).*\.sql$/i, why: 'SQL，路径分不清是不是库表语句' },
   { includes: '/migrations/', why: 'migration 目录' },
   { basenameIncludes: 'migration', why: '文件名像 migration' },
   { pattern: /(^|\/)meta\/.*token/i, why: 'Meta token' },
@@ -384,10 +389,11 @@ export const RAY_MERGE_HOLD_RULES = [
   { includes: 'ads-campaign-budget', why: '改广告系列预算' },
   { includes: 'budget-scale', why: '加减广告预算' },
   { pattern: /(^|\/)meta\/.*bid/i, why: '改 Meta 出价' },
-  { includes: 'ad-health/', why: '广告健康度里的预算或止损入口' },
-  { includes: 'action-submission/', why: '把广告动作交给执行' },
-  { includes: 'ads-strategy/', why: '广告策略草稿或止损' },
-  { includes: 'marketing-plan/promo/', why: '推广方案里的广告草稿' },
+  // 这三个目录不再整目录扣（读取、展示、评估的文件占大多数）。只扣路径里带
+  // 「开投 / 止损 / 预算 / 出价 / 暂停 / 激活 / 发布 / 执行」字样的写入文件；
+  // 其余文件由 importsMetaSpendWriter 按真实导入判断。__tests__/、docs/ 和
+  // *.test.* 不会在生产里运行，放过。
+  { pattern: AD_WRITE_PATH, why: '广告开投、止损、预算或出价的写入文件' },
   { includes: 'meta-oauth/', why: 'Meta 登录和凭证' },
   { includes: 'meta/entity-settings', why: 'Meta 广告实体设置' },
 ]
@@ -462,6 +468,11 @@ function isSourcePath(path) {
   return /\.(?:ts|tsx|js|mjs|cjs)$/i.test(path)
 }
 
+/** Tests and docs never run in production, so mocking a spend writer there spends nothing. */
+function isNonRuntimeSource(path) {
+  return /(?:^|\/)(?:__tests__|docs)\//.test(path) || /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(path)
+}
+
 /**
  * Spend-import hold for one source path. A string is the whole file. A read
  * failure stays for Ray. `null` is too big or a confirmed deletion, so the diff is used.
@@ -473,6 +484,7 @@ function isSourcePath(path) {
  */
 function spendHoldForSource(path, entry, knownContents) {
   if (!isSourcePath(path)) return null
+  if (isNonRuntimeSource(path)) return null
   const text = knownContents[path]
   if (typeof text === 'string') {
     return importsMetaSpendWriter(text) ? `${path}（导入了 Meta 广告写入模块）` : null

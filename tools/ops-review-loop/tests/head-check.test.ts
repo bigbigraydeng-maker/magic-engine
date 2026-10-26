@@ -47,6 +47,25 @@ describe('gateJobExitCode', () => {
   it('does not treat an unknown event as a successful republish', () => {
     expect(gateJobExitCode({ eventName: '', pass: false, headCheckPublished: true })).toBe(1)
   })
+
+  it('草稿 PR 不挂红叉；但只认明确的 true，缺失或写歪都仍然红（失败朝严）', () => {
+    expect(gateJobExitCode({ eventName: 'pull_request_target', pass: false, draft: true })).toBe(0)
+    for (const draft of [false, undefined, null, 'true', 1]) {
+      expect(gateJobExitCode({ eventName: 'pull_request_target', pass: false, draft }), String(draft)).toBe(1)
+    }
+    expect(gateJobExitCode({ eventName: 'issue_comment', pass: false, headCheckPublished: false, draft: true })).toBe(1)
+  })
+})
+
+describe('buildRiskGateCheckRun · draft', () => {
+  it('草稿未通过 → neutral；非草稿未通过仍是 failure；通过永远是 success', () => {
+    const base = { headSha: HEAD, summary: 's', now: NOW }
+    expect(buildRiskGateCheckRun({ ...base, pass: false, draft: true }).conclusion).toBe('neutral')
+    expect(buildRiskGateCheckRun({ ...base, pass: false, draft: false }).conclusion).toBe('failure')
+    expect(buildRiskGateCheckRun({ ...base, pass: false, draft: undefined }).conclusion).toBe('failure')
+    expect(buildRiskGateCheckRun({ ...base, pass: false, draft: 'true' }).conclusion).toBe('failure')
+    expect(buildRiskGateCheckRun({ ...base, pass: true, draft: true }).conclusion).toBe('success')
+  })
 })
 
 describe('buildRiskGateCheckRun', () => {

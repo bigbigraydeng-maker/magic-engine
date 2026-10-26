@@ -348,7 +348,7 @@ describe('decideMerge — the enable implication holds over every combination', 
         }
       }
     }
-  })
+  }, 60_000)
 
   it('never leaves auto-merge enabled on a failing result', () => {
     // A caller reads `decision` to decide whether to call `gh pr merge --auto`

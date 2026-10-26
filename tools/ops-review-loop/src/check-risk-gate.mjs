@@ -148,13 +148,15 @@ function riskGateDetailsUrl() {
  *
  * @param {boolean} pass
  * @param {string} summaryText
+ * @param {boolean|undefined} draft explicit `true` only; anything else is not a draft
  * @returns {Promise<boolean>} true when a check run was created
  */
-async function publishRiskGateOnHead(pass, summaryText) {
+async function publishRiskGateOnHead(pass, summaryText, draft) {
   if (!shouldPublishHeadCheck(eventName)) return false
   const body = buildRiskGateCheckRun({
     headSha,
     pass,
+    draft,
     summary: summaryText,
     now: new Date().toISOString(),
     detailsUrl: riskGateDetailsUrl(),
@@ -731,7 +733,7 @@ try {
   // leave a comment that says the gate passed, and must not arm auto-merge.
   let published = false
   try {
-    published = await publishRiskGateOnHead(decision.pass === true, summaryText)
+    published = await publishRiskGateOnHead(decision.pass === true, summaryText, parseTriState(prDraft))
   } catch (err) {
     summary(`没能把合并闸结果写到 PR 当前提交上：${err instanceof Error ? err.message : String(err)}`)
     writeOutputs({ risk: rating.risk, decision: 'disable', tier: 'blocked', ray_hold: rayHold.hold ? 'true' : 'false' })
@@ -761,7 +763,12 @@ try {
     ray_hold: rayHold.hold ? 'true' : 'false',
   })
   process.exit(
-    gateJobExitCode({ eventName, pass: decision.pass === true, headCheckPublished: published }),
+    gateJobExitCode({
+      eventName,
+      pass: decision.pass === true,
+      headCheckPublished: published,
+      draft: parseTriState(prDraft),
+    }),
   )
 } catch (err) {
   await failClosed(err instanceof Error ? err.message : String(err))

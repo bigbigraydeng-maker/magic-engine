@@ -262,6 +262,68 @@ describe('paths Ray still merges by hand', () => {
     }
   })
 
+  it('三个广告目录不再整目录扣：读取、展示、评估类文件放行，测试与 docs 放行 (#3200)', () => {
+    for (const path of [
+      'src/lib/ads-strategy/account-status.ts',
+      'src/lib/ads-strategy/digest.ts',
+      'src/lib/ads-strategy/war-map/render.ts',
+      'src/lib/marketing-plan/promo/board.ts',
+      'src/lib/marketing-plan/promo/facts.ts',
+      'src/app/api/clients/[id]/ad-health/route.ts',
+      'src/lib/ads-strategy/__tests__/ad-draft.test.ts',
+      'src/lib/ads-strategy/__tests__/stop-loss.test.ts',
+      'src/lib/marketing-plan/promo/__tests__/draft-ads.test.ts',
+      'src/lib/ads-strategy/stop-loss.test.ts',
+      'docs/ads-strategy/stop-loss.md',
+      'docs/specs/launch.sql',
+    ]) {
+      expect(held(path).hold, path).toBe(false)
+    }
+  })
+
+  it('🔴 写入类文件仍然扣：开投、止损、预算、出价、暂停、发布', () => {
+    for (const path of [
+      'src/lib/ads-strategy/stop-loss.ts',
+      'src/lib/ads-strategy/auto-pause-pending.ts',
+      'src/lib/ads-strategy/launch-readback.ts',
+      'src/lib/ads-strategy/launch-budget-headroom.ts',
+      'src/lib/ads-strategy/draft-and-gate.ts',
+      'src/lib/marketing-plan/promo/budget-caps.ts',
+      'src/lib/marketing-plan/promo/draft-ads.ts',
+      'src/app/api/clients/[id]/ad-health/o1-scale/route.ts',
+      'src/app/api/clients/[id]/ad-health/execute-prescription/route.ts',
+      'src/app/api/clients/[id]/ad-health/activate/route.ts',
+    ]) {
+      expect(held(path).hold, path).toBe(true)
+    }
+  })
+
+  it('🔴 目录里看起来无害的文件一旦导入 Meta 花钱模块，照样扣；读不到时也扣（fail closed）', () => {
+    const path = 'src/lib/ads-strategy/digest.ts'
+    const importing = "import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'\n"
+    expect(assessRayMergeHold([{ filename: path }], { [path]: importing }).hold).toBe(true)
+    expect(assessRayMergeHold([{ filename: path }], { [path]: FILE_READ_FAILED }).hold).toBe(true)
+    expect(assessRayMergeHold([{ filename: path }], { [path]: null }).hold).toBe(true)
+    expect(assessRayMergeHold([{ filename: path }], { [path]: 'export const n = 1\n' }).hold).toBe(false)
+  })
+
+  it('测试文件里 mock 花钱模块不扣；非测试文件导入照扣', () => {
+    const mocked = "vi.mock('@/lib/meta/campaign-writes')\nimport { x } from '@/lib/meta/campaign-writes'\n"
+    const test = 'src/lib/ads-strategy/__tests__/digest.test.ts'
+    expect(assessRayMergeHold([{ filename: test }], { [test]: mocked }).hold).toBe(false)
+    const prod = 'src/lib/ads-strategy/digest.ts'
+    expect(assessRayMergeHold([{ filename: prod }], { [prod]: mocked }).hold).toBe(true)
+  })
+
+  it('docs 下的 .sql 示例放行；migration 与其它位置的 .sql 仍然扣', () => {
+    expect(held('docs/examples/query.sql').hold).toBe(false)
+    expect(held('scripts/query.sql').hold).toBe(true)
+    expect(held('supabase/migrations/20261026_a.sql').hold).toBe(true)
+    expect(
+      assessRayMergeHold([{ filename: 'docs/moved.sql', previous_filename: 'supabase/migrations/x.sql', status: 'renamed' }]).hold,
+    ).toBe(true)
+  })
+
   it('holds a file that imports a Meta spend writer even when its path is not listed', () => {
     const path = 'src/lib/not-on-the-list/bridge.ts'
     const importing = "import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'\n"
@@ -306,7 +368,7 @@ describe('paths Ray still merges by hand', () => {
       'supabase/migrations/20261025_one.sql',
       'src/lib/meta/token-manager.ts',
       'src/lib/meta/campaign-writes.ts',
-      'src/app/api/clients/[id]/ad-health/route.ts',
+      'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
     ]) {
       const result = assessRayMergeHold([{ filename: path, patch }], { [path]: null })
       expect(result.hold, path).toBe(true)
