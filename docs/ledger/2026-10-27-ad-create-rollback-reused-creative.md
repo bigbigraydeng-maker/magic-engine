@@ -1,5 +1,5 @@
 ---
-id: 2026-10-27-ad-publisher-rollback-reused-creative
+id: 2026-10-27-ad-create-rollback-reused-creative
 title: 发布器失败回滚会删除「刚建出来」的创意，但相同内容的创意会被 Meta 复用同一个对象，回滚可能去删别的广告在用的创意
 status: decided
 owner: agent
