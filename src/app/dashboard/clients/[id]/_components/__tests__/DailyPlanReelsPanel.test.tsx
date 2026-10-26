@@ -285,3 +285,42 @@ describe('DailyPlanReelsPanel — not signed in', () => {
     expect(screen.queryByText('只有管理员能看')).toBeNull()
   })
 })
+
+describe('DailyPlanReelsPanel — review fixes', () => {
+  it('drafts and unchecked uploads are separate numbers, so the draft number is never overstated', async () => {
+    mockFetch({
+      success: true,
+      reels: [
+        reel({ id: 'd', status: 'published', published_at: '2026-09-02T00:00:00Z', video_state: 'DRAFT', angle: 'Draft One: a' }),
+        reel({ id: 'u', status: 'published', published_at: '2026-09-02T00:00:00Z', video_state: null, angle: 'Unchecked One: a' }),
+      ],
+      reels_error: null,
+    })
+    render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText('Draft One')
+    const stats = screen.getAllByRole('listitem').filter((li) => li.className.includes('rounded-xl border px-3'))
+    expect(stats.map((li) => li.textContent)).toEqual(['待你审核0', '已通过，等发出0', 'Facebook 草稿1', '已公开0', '已上传（未核对）1'])
+  })
+
+  it('says it only looked at the newest 30 versions when the list is as long as the cap', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => reel({ id: `p${i}`, status: 'published', published_at: '2026-09-02T00:00:00Z', video_state: 'PUBLISHED', angle: `Piece ${i}: a` }))
+    mockFetch({ success: true, reels: many, reels_error: null })
+    render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    expect(await screen.findByText('短视频：最近 30 个版本里没有要你处理的事')).toBeInTheDocument()
+    expect(screen.getByText(/只读了最近 30 个版本，更早的请到视频工厂看/)).toBeInTheDocument()
+  })
+
+  it('an older version still waiting for review shows on the row and in the headline', async () => {
+    mockFetch({
+      success: true,
+      reels: [
+        reel({ id: 'v2', status: 'approved', created_at: '2026-09-02T02:00:00Z', angle: 'Harbour Tour postcard v2: a' }),
+        reel({ id: 'v1', status: 'in_review', created_at: '2026-09-02T01:00:00Z', angle: 'Harbour Tour postcard v1: a' }),
+      ],
+      reels_error: null,
+    })
+    render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    expect(await screen.findByText('另有 1 个旧版待审核')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /待你处理\s*1\s*件/ })).toBeInTheDocument()
+  })
+})

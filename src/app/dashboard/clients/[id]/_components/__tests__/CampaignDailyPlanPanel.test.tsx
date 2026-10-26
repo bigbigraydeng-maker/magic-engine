@@ -719,3 +719,30 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     expect(screen.queryByText('OLD CLIENT POST')).not.toBeInTheDocument()
   })
 })
+
+describe('CampaignDailyPlanPanel — readiness fold counts only what can be ready', () => {
+  it('says 已就绪 n/7 (the four rows that are always "not yet" are not in the total) and keeps the list in the page', async () => {
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: daysGrid(['2026-08-24']),
+      bundles: [
+        {
+          date: '2026-08-24',
+          post: { hook: 'h', body: 'b', cta: 'Enquire Now' },
+          story: { frames: [{ order: 1, copy: 'f1' }] },
+          reel: { brief: 'br', script: 'sc', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+          readiness: readiness(),
+          provenance: [],
+        },
+      ],
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText(/就绪检查 · 已就绪 5\/7/)
+    expect(screen.getByText('证据支撑')).toBeInTheDocument()
+    expect(screen.getByText('第三方服务授权')).toBeInTheDocument()
+  })
+})

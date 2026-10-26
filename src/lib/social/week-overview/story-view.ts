@@ -19,8 +19,8 @@ export interface StoryChip {
 export function describeStoryChips(tally: StoryTally): StoryChip[] {
   const chips: StoryChip[] = [
     { kind: 'review', label: '还没授权', count: tally.unauthorised, hint: '这一周还没授权，到点也不会发。' },
-    { kind: 'problem', label: '被拦或出错', count: tally.blocked, hint: '检查没通过、发布失败，或不确定有没有发出去，需要人看。' },
-    { kind: 'problem', label: '过点没发出', count: tally.overdue, hint: '已经过了计划时间，但没有发出去。' },
+    { kind: 'problem', label: '需要人看', count: tally.blocked, hint: '被检查拦下、发布失败，或不确定有没有发出去，需要人看一眼。' },
+    { kind: 'problem', label: '过点还没发出', count: tally.overdue, hint: '已经过了计划时间，还没确认发出去。' },
     { kind: 'approved', label: '待发', count: tally.waiting, hint: '已授权，等到计划时间发出。' },
     { kind: 'sent', label: '已发出（未核对）', count: tally.recordedSent, hint: '系统记录已发出，还没有逐条和 Facebook 主页核对。' },
     { kind: 'closed', label: '已停或授权过期', count: tally.stopped, hint: '这一周被停掉或授权过期，不会再发。' },

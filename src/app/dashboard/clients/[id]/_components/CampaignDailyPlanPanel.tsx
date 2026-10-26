@@ -639,7 +639,7 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           ) : (
             <details className="group rounded-lg border border-black/[.06]">
               <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-me-charcoal/70 [&::-webkit-details-marker]:hidden">
-                就绪检查 · 已就绪 {readinessRows.filter(row => row.ok).length}/{readinessRows.length}
+                就绪检查 · 已就绪 {readinessRows.filter(row => row.ok).length}/{readinessRows.filter(row => !row.forceLabel).length}
                 <span className="ml-2 font-normal text-me-charcoal/60 underline">点开看</span>
               </summary>
               <ul className="grid grid-cols-1 gap-x-4 gap-y-1 px-3 pb-3 sm:grid-cols-2">

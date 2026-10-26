@@ -217,7 +217,7 @@ describe('WeekOverviewPanel', () => {
     expect(container.textContent).toContain('待发 2')
     expect(container.textContent).toContain('本周 2 条')
     expect(container.textContent).toContain('1 条作品')
-    expect(container.textContent).not.toContain('过点没发出')
+    expect(container.textContent).not.toContain('过点还没发出')
   })
 
   it('a Story whose time has passed but is still waiting says it did not go out, in the headline strip and on the row', async () => {
@@ -225,9 +225,9 @@ describe('WeekOverviewPanel', () => {
     vi.setSystemTime(new Date('2026-10-14T02:00:00Z'))
     mockFetch({ success: true, ...overview() })
     render(<WeekOverviewPanel clientId={CLIENT} />)
-    await screen.findByText(/过点没发出 2/)
+    await screen.findByText(/过点还没发出 2/)
     expect(screen.getAllByText(/已过点，没发出（系统里仍是待发）/).length).toBe(2)
-    expect(screen.getByText(/Story：2 条已过发布时间，没发出去/)).toBeTruthy()
+    expect(screen.getByText(/Story：2 条已过计划时间，还没确认发出去/)).toBeTruthy()
   })
 
   it('a Reel whose platform state is known says draft / public; an unchecked upload says it is unchecked, in plain words', async () => {
@@ -327,5 +327,55 @@ describe('WeekOverviewPanel', () => {
     const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
     await screen.findByText(/演练模式/)
     expect(container.textContent).not.toMatch(/截止|限时|倒计时|CTS|旅游/)
+  })
+})
+
+describe('WeekOverviewPanel — review fixes', () => {
+  it('the rehearsal warning (an authorisation made now goes out once real publishing is on) is always in view, not folded', async () => {
+    mockFetch({ success: true, ...overview() })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    const note = await screen.findByText(/一旦开启真发/)
+    expect(note.closest('details')).toBeNull()
+  })
+
+  it('an older version still waiting for review is not hidden behind the folded row: a chip on the row and a line in the headline', async () => {
+    mockFetch({
+      success: true,
+      ...overview({
+        reels: [
+          reel({ id: 'v2', status: 'approved', created_at: '2026-10-12T02:00:00Z', angle: 'Harbour Tour postcard v2: x' }),
+          reel({ id: 'v1', status: 'in_review', created_at: '2026-10-12T01:00:00Z', angle: 'Harbour Tour postcard v1: x' }),
+        ],
+      }),
+    })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    expect(await screen.findByText('另有 1 个旧版待审核')).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /待你处理\s*1\s*件/ })).toBeTruthy()
+    expect(screen.getByText(/旧版本还有在等你审核的/)).toBeTruthy()
+  })
+
+  it('a Reel list as long as the API cap says it only looked at the newest 30, and is not called "nothing to do" without that', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => reel({ id: `p${i}`, status: 'published', published_at: '2026-10-12T00:00:00Z', video_state: 'PUBLISHED', angle: `Piece ${i}: x` }))
+    mockFetch({ success: true, ...overview({ reels: many }) })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    expect(await screen.findByText(/只读了最近 30 个版本，更早的请到视频工厂看/)).toBeTruthy()
+    expect(screen.getByText('社媒日常：最近 30 个版本里没有要你处理的事')).toBeTruthy()
+  })
+
+  it('a Reel in a state this page does not know is an open "出问题" thing, not a quiet making', async () => {
+    mockFetch({ success: true, ...overview({ reels: [reel({ id: 'u', status: 'some_new_state', angle: 'Mystery Piece: x' })] }) })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText('Mystery Piece')
+    expect(screen.getAllByText('状态未知').length).toBeGreaterThan(0)
+    const group = Array.from(container.querySelectorAll('details')).find((d) => d.querySelector('h3')?.textContent === '出问题 / 被打回')
+    expect(group?.open).toBe(true)
+    expect(screen.getByRole('heading', { name: /待你处理\s*1\s*件/ })).toBeTruthy()
+  })
+
+  it('the Reel chip says "Facebook 草稿" in full, so it means something without a tooltip', async () => {
+    mockFetch({ success: true, ...overview({ reels: [reel({ id: 'd', status: 'published', published_at: '2026-10-12T00:00:00Z', video_state: 'DRAFT', angle: 'Draft: x' })] }) })
+    render(<WeekOverviewPanel clientId={CLIENT} />)
+    await screen.findByText('Draft')
+    expect(screen.getAllByText('Facebook 草稿 1').length).toBe(1)
   })
 })

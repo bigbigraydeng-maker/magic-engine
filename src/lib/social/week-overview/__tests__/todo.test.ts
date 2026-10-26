@@ -60,7 +60,7 @@ describe('buildTodoSummary', () => {
   })
 
   it('nothing waiting and everything readable gives a clean zero', () => {
-    expect(buildTodoSummary(input())).toEqual({ total: 0, items: [], unknown: [] })
+    expect(buildTodoSummary(input())).toEqual({ total: 0, items: [], unknown: [], limitedTo: null })
   })
 })
 
@@ -77,7 +77,43 @@ describe('buildReelTodoSummary (the 短视频 tab)', () => {
   })
 
   it('a failed Reel read is unknown, not zero; nothing waiting is a clean zero', () => {
-    expect(buildReelTodoSummary(CLIENT, null)).toEqual({ total: 0, items: [], unknown: ['视频'] })
-    expect(buildReelTodoSummary(CLIENT, [])).toEqual({ total: 0, items: [], unknown: [] })
+    expect(buildReelTodoSummary(CLIENT, null)).toEqual({ total: 0, items: [], unknown: ['视频'], limitedTo: null })
+    expect(buildReelTodoSummary(CLIENT, [])).toEqual({ total: 0, items: [], unknown: [], limitedTo: null })
+  })
+})
+
+describe('to-do honesty (review fixes)', () => {
+  it('an older version still waiting for review is a thing to do even when the newest version is not', () => {
+    const works = groupReelWorks([
+      { ...reel('v2', 'approved', 'Harbour Tour postcard v2: x'), created_at: '2026-10-22T00:00:00Z' },
+      { ...reel('v1', 'in_review', 'Harbour Tour postcard v1: x'), created_at: '2026-10-21T00:00:00Z' },
+    ])
+    expect(works).toHaveLength(1)
+    const summary = buildReelTodoSummary(CLIENT, works)
+    expect(summary.total).toBe(1)
+    expect(summary.items.map((i) => i.id)).toEqual(['reel_old_review'])
+    expect(summary.items[0].text).toContain('旧版本还有在等你审核的')
+    // when the newest version is itself waiting, the older ones are not counted a second time
+    const both = groupReelWorks([
+      { ...reel('v2', 'in_review', 'Harbour Tour postcard v2: x'), created_at: '2026-10-22T00:00:00Z' },
+      { ...reel('v1', 'in_review', 'Harbour Tour postcard v1: x'), created_at: '2026-10-21T00:00:00Z' },
+    ])
+    expect(buildReelTodoSummary(CLIENT, both).items.map((i) => [i.id, i.count])).toEqual([['reel_review', 1]])
+  })
+
+  it('a list as long as the API cap may be cut off, and says so', () => {
+    const many = Array.from({ length: 30 }, (_, i) => reel(`r${i}`, 'published', `Piece ${i}: x`))
+    expect(buildReelTodoSummary(CLIENT, groupReelWorks(many)).limitedTo).toBe(30)
+    expect(buildTodoSummary(input({ works: groupReelWorks(many) })).limitedTo).toBe(30)
+    expect(buildReelTodoSummary(CLIENT, groupReelWorks(many.slice(0, 29))).limitedTo).toBeNull()
+  })
+
+  it('does not claim a Story that may or may not have gone out "did not go out"', () => {
+    const summary = buildTodoSummary(input({ tally: { ...NO_STORY_ISSUES, total: 3, blocked: 1, overdue: 1 } }))
+    const blocked = summary.items.find((i) => i.id === 'story_blocked')!
+    const overdue = summary.items.find((i) => i.id === 'story_overdue')!
+    expect(blocked.text).toContain('不确定有没有发出去')
+    expect(overdue.text).toContain('还没确认发出去')
+    expect(`${blocked.text}${overdue.text}`).not.toContain('没发出去，')
   })
 })
