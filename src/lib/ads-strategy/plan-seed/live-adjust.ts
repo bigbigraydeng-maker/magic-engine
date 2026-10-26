@@ -11,7 +11,7 @@ export interface LiveAdjustment {
   totalBump: number
   /** one Basis per selected account */
   basisByAccount: Record<string, Basis>
-  /** true when the live read succeeded and was used for that account (so the "snapshot only" fixed sentence is dropped) */
+  /** true when the live read succeeded and was used for that account (so the "snapshot only" fixed sentence is dropped); false also when the live read was incomplete */
   liveUsedByAccount: Record<string, boolean>
 }
 
@@ -69,6 +69,20 @@ function basisCurrencyMismatch(acct: AccountData): Basis {
   return { label: '在投合计（实时）', value, source: '广告快照', as_of: acct.captureAt }
 }
 
+/** Case B2: live read is incomplete (misses campaign-level budgets), so it is not comparable with the snapshot; keep the snapshot. */
+function basisIncomplete(acct: AccountData): Basis {
+  const tail =
+    acct.captureAt !== null
+      ? `仍按 ${snapshotTime(acct)} 的快照算`
+      : '仍按最近一次快照算'
+  return {
+    label: '在投合计（实时）',
+    value: '实时读到的不含系列级预算（CBO），和快照口径不同，不能比，这次不用实时数，' + tail,
+    source: '广告快照',
+    as_of: acct.captureAt,
+  }
+}
+
 /** Case C: live read usable; returns the basis plus the bump amount. */
 function basisLive(
   acct: AccountData,
@@ -84,7 +98,6 @@ function basisLive(
 
   let value = `快照 ${F(snap)}（抓取 ${snapTimeForC}），实时 ${F(lv.minor)}（读数 ${formatNzTime(lv.readAtIso)}），这次用 ${F(chosen)}`
   if (lv.minor < snap) value += '（实时比快照小，仍取快照数）'
-  if (lv.incomplete) value += '。实时读到的不含系列级预算，只是下限'
   value += othersDisclosure(allAccounts, acct.id, lv.readAtIso)
 
   return {
@@ -105,6 +118,9 @@ function adjustAccount(
   const factsCur = currencyOfFacts(acct.facts)
   if (lv.currency === null || factsCur === null || lv.currency.trim().toUpperCase() !== factsCur.toUpperCase()) {
     return { basis: basisCurrencyMismatch(acct), bump: 0, used: false }
+  }
+  if (lv.incomplete) {
+    return { basis: basisIncomplete(acct), bump: 0, used: false }
   }
   const { basis, bump } = basisLive(acct, lv, factsCur, allAccounts)
   return { basis, bump, used: true }

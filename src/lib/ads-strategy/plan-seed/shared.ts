@@ -3,6 +3,7 @@ import type { AdPlay } from './ad-plays'
 import { STALE_AFTER_MS } from './constants'
 import type { ReadState } from './eligibility'
 import type { LiveDelivering } from './live-delivering'
+import { sanitizeReason } from './sanitize'
 import type { Basis, PlanSeedStep } from './types'
 
 export interface PlanSeedDeps {
@@ -72,8 +73,8 @@ export interface Accumulator {
 
 /** 把任意异常转成中文可读的原因字符串。 */
 export function errorReason(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message
-  if (typeof err === 'string' && err.length > 0) return err
+  if (err instanceof Error && err.message) return sanitizeReason(err.message)
+  if (typeof err === 'string' && err.length > 0) return sanitizeReason(err)
   return '未知错误'
 }
 

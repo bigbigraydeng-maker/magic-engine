@@ -256,7 +256,7 @@ describe('live delivering', () => {
     expect(budgetOf(seed, 's2')).toBe(1000)
   })
 
-  it('f) incomplete live read adds lower-bound note', async () => {
+  it('f) incomplete live read is not used and says why', async () => {
     {
       const deps = makeDeps({
         readLiveDelivering: vi.fn<LiveFn>(async () => live(5000, { incomplete: true })),
@@ -264,7 +264,7 @@ describe('live delivering', () => {
       const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
       const basis = liveBasisOf(seed, 's1')
       expect(basis).toBeDefined()
-      expect(basis?.value).toContain('只是下限')
+      expect(basis?.value).toContain('不含系列级预算')
     }
     {
       const deps = makeDeps({
@@ -273,7 +273,7 @@ describe('live delivering', () => {
       const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
       const basis = liveBasisOf(seed, 's1')
       expect(basis).toBeDefined()
-      expect(basis?.value).not.toContain('只是下限')
+      expect(basis?.value).not.toContain('不含系列级预算')
     }
   })
 

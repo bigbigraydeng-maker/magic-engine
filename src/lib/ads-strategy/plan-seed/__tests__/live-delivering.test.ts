@@ -222,7 +222,7 @@ describe('liveDeliveringFromRead', () => {
     })
   })
 
-  it('returns a real zero when the read succeeded with no adsets', () => {
+  it('(pure function) returns minor 0 when the adsets step is ok and no adset is ACTIVE', () => {
     const result = liveDeliveringFromRead(read({ adsets: [] }))
 
     expect(result).toEqual({
