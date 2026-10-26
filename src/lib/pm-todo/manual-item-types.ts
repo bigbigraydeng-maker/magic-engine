@@ -39,6 +39,7 @@ import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { AdsServicePauseItemKind } from './ads-service-pause-items'
 import type { AdsAccountStatusItemKind } from './ads-account-status-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
@@ -69,6 +70,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
   //   链接是需要登录的后台页，探活大概率判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
   'facebook_sync_failing',
+  // ads_service_pause_notice：链接是登录后的广告健康页，探活容易判成坏链接。系列已经停了，这条不能静默丢掉。
+  'ads_service_pause_notice',
   // lead_followup_due：链接是登录后台页，探活易判成坏链接；这条丢了 = 有人填了表没人知道。
   'lead_followup_due',
   'lead_followup_check_failed',
@@ -266,6 +269,8 @@ export type ManualItemKind =
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
   | AdsCircuitItemKind
+  /** 服务把一条在投的广告系列暂停了 —— 要不要恢复由人点确认卡 */
+  | AdsServicePauseItemKind
   /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
   | AdsAccountStatusItemKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
