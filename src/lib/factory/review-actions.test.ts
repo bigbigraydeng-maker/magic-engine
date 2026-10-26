@@ -2,9 +2,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { approveBudgetWithinCap, parseReviewBody } from './review-actions'
-import { REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
-const passChecklist = REEL_HUMAN_CHECK_KEYS.map(key => ({
+const passChecklist = REEL_HUMAN_CHECK_KEYS_V3.map(key => ({
   key,
   judge: 'HUMAN',
   outcome: 'PASS',
@@ -31,6 +31,12 @@ describe('parseReviewBody', () => {
   it('reject_quality feedback 截断 2000', () => {
     const r = parseReviewBody({ action: 'reject_quality', feedback: 'x'.repeat(3000), checklist_human: passChecklist })
     expect(r.ok && r.action === 'reject_quality' && r.feedback.length).toBe(2000)
+  })
+
+  it('accepts only catalog-shaped optional music ids on quality rejection', () => {
+    const selected = parseReviewBody({ action: 'reject_quality', feedback: '画面质量', checklist_human: passChecklist, music_id: 'jade-river-journey' })
+    expect(selected.ok && selected.action === 'reject_quality' && selected.musicId).toBe('jade-river-journey')
+    expect(parseReviewBody({ action: 'reject_quality', feedback: '画面质量', checklist_human: passChecklist, music_id: '../bad' }).ok).toBe(false)
   })
   it('reject_budget 正数且 ≤ $50', () => {
     expect(parseReviewBody({ action: 'reject_budget', new_budget_usd: 30 })).toEqual({

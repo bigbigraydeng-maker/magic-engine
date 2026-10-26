@@ -28,6 +28,7 @@ import {
   engagementFromMetadata,
   isPhoneVerdict,
   isFailedReach,
+  isUnansweredCall,
   latestIntentVerdict,
 } from '@/lib/crm/segments'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
@@ -38,7 +39,12 @@ import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
 import { dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
-import { contactKindOf, readDomainRules, type ContactKind } from '@/lib/crm/contact-kind'
+import {
+  contactKindOf,
+  isSystemAccountName,
+  readDomainRules,
+  type ContactKind,
+} from '@/lib/crm/contact-kind'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 interface RouteParams {
@@ -258,7 +264,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const kindOf = (id: string): ContactKind =>
     contactKindOf(emailsByContact.get(id) ?? [], rules)
 
-  const rows = contacts.filter((c) => kindOf(c.id) !== 'staff')
+  // 系统账号（如 WhatsApp Business）跟自己人一样整个丢掉，不进任何一栏。
+  const rows = contacts.filter((c) => kindOf(c.id) !== 'staff' && !isSystemAccountName(c.display_name))
   const models: ContactLike[] = rows.map((c) => {
     const tps = byContact.get(c.id) ?? []
     const stage = c.stage ? stageMeta.get(c.stage) : undefined
@@ -374,6 +381,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
           // 拨到一个空号不算「我们出手了」—— 客人什么都没收到，
           // 该走的备用渠道一次都还没走。判据跟 day-list 共用同一个函数。
           !isFailedReach(t.metadata?.outcome as string | undefined) &&
+          // 电话系统记录的「没人接」同样不算出手（PM 2026-10-12）。
+          !isUnansweredCall(t.metadata) &&
           localDay(t.occurred_at, timeZone) === todayLocal,
       )
       .map((t) => t.contact_id),

@@ -54,6 +54,7 @@ export async function createLookalike(spec, token): Promise<LookalikeResultItem>
 
 **吸收 B2/B3（种子门槛）**：
 - Meta 要求种子 ≥100 人。`listCustomAudiences` 只回 `id,name`，**拿不到人数** → 只能**事后捕获**，不能事前预检（设计不许暗示能预检）。
+- 2026-10-26 起 operation_status 与 approximate_count_lower_bound 可读（见 draft-and-gate.ts checkAudiences），事前预检已可行；注意 count 小受众会返回 -1/0 表示不报。
 - 靠 Meta error subcode 判定，映射独立 `outcome:'seed_too_small'`，与通用 `failed` 分开，不静默吞（对照 `createOne` 现在一律 `throw` 成一坨 `failed` 的问题）。
 - **绝不对同一次运行里新建（0 人）的受众建 lookalike**——接线层只对「已存在且非本轮新建」的种子建。新建种子这一轮跳过，下一轮人长起来再建。
 

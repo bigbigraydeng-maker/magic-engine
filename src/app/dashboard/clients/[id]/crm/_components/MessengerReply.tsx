@@ -29,17 +29,25 @@ interface Payload {
   replyWindow?: ReplyWindow
 }
 
+/** 窗口关了之后那一行话 —— 说清为什么发不了，别让人对着一个灰按钮猜。 */
+const CLOSED_TEXT = 'Facebook 已经不让回这条私信了。'
+
 export function MessengerReply({
   clientId,
   contactId,
   customerName,
   viewerEmail,
+  phone,
+  email,
   onSent,
 }: {
   clientId: string
   contactId: string
   customerName: string
   viewerEmail: string | null
+  /** 窗口关了时还能走的两条路 —— 没电话 / 没邮箱就不给那一条。 */
+  phone?: string | null
+  email?: string | null
   onSent: () => void
 }) {
   const [data, setData] = useState<Payload | null>(null)
@@ -63,6 +71,21 @@ export function MessengerReply({
   // 查不到就当没有私信线：这一块是「多一个能回他的地方」，
   // 读失败不该在抽屉里立一块红色报错挡住记一笔和往来记录。
   if (failed || !data?.conversationId) return null
+
+  // 窗口已关：不再摆一整块发不出去的输入框（PM：按钮太多）。只留一句话 + 还能用的两条路。
+  if (data.replyWindow?.kind === 'closed') {
+    return (
+      <div className="mt-3 rounded-lg bg-[#C2453A]/10 px-3 py-2 text-xs font-semibold text-[#C2453A]" data-testid="reply-closed">
+        <span>{CLOSED_TEXT}</span>
+        {phone && (
+          <a href={`tel:${phone}`} className="ml-2 underline">打电话</a>
+        )}
+        {email && (
+          <a href={`mailto:${email}`} className="ml-2 underline">发邮件</a>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="mt-4 rounded-xl border border-me-charcoal/10 bg-me-ivory/40 p-3">

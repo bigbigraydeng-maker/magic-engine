@@ -19,12 +19,14 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/platform-oauth/token-manager', () => ({
   getValidTokenForConnection: vi.fn(async () => 'access-token'),
 }))
-vi.mock('@/lib/microsoft/mail-graph', () => ({ fetchMailSince: vi.fn() }))
+vi.mock('@/lib/microsoft/mail-graph', () => ({ fetchMailSince: vi.fn(), fetchFormNoticeSource: vi.fn() }))
+vi.mock('@/lib/crm/web-form-lead', () => ({ mirrorWebFormLead: vi.fn() }))
 vi.mock('@/lib/crm/identity', () => ({ resolveContact: vi.fn() }))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn(async () => ({ event_ids: ['evt-1'] })) }))
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { fetchMailSince } from '@/lib/microsoft/mail-graph'
+import { fetchMailSince, fetchFormNoticeSource } from '@/lib/microsoft/mail-graph'
+import { mirrorWebFormLead } from '@/lib/crm/web-form-lead'
 import { resolveContact } from '@/lib/crm/identity'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { syncMailbox } from '../mail-ingest'
@@ -410,5 +412,81 @@ describe('读失败', () => {
     )
     const res = await syncMailbox(TARGET)
     expect(res.error).toContain('连接已断开')
+  })
+})
+
+describe('⑤ 网站表单通知（发件人是本邮箱自己）', () => {
+  const FORM_BODY =
+    'New message — Contact form (Example site)\nName\tJane Test\nEmail\tjane@example.com\nPhone\t0211234567\nTravel interest\tCustom Itinerary\nForm URL\t/contact\n\nMessage\n\nhello'
+  const GOOD_HEADERS = [
+    { name: 'Authentication-Results', value: 'mx 1; dkim=pass header.d=ctstours.co.nz; dmarc=pass header.from=ctstours.co.nz' },
+    { name: 'DKIM-Signature', value: 'v=1; s=resend; d=ctstours.co.nz; t=1' },
+  ]
+  function formNotice(): MailMessage {
+    return {
+      id: 'msg-form-1',
+      conversationId: 'cv-self',
+      subject: 'Contact form: Custom Itinerary — Jane',
+      preview: 'Name Jane Test Email jane@example.com Phone 0211234567',
+      hasAttachment: false,
+      receivedAt: '2026-10-19T01:29:20.000Z',
+      counterparty: { address: 'info@ctstours.co.nz', name: 'CTS Tours' },
+      direction: 'inbound',
+    }
+  }
+
+  it('识别成功 → 走 mirrorWebFormLead 建人，不走默认 resolveContact，不触发事件', async () => {
+    ;(fetchFormNoticeSource as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      source: { body: FORM_BODY, replyTo: ['jane@example.com'], headers: GOOD_HEADERS },
+    })
+    ;(mirrorWebFormLead as ReturnType<typeof vi.fn>).mockResolvedValue({ contactId: 'contact-form', skipped: null })
+    inbox([formNotice()])
+    const res = await syncMailbox(TARGET)
+    expect(storedThreads).toEqual(['mail-form:msg-form-1'])
+    expect(resolveContact).not.toHaveBeenCalled()
+    expect(mirrorWebFormLead).toHaveBeenCalledWith(
+      expect.objectContaining({ leadId: 'msg-form-1', email: 'jane@example.com', phone: null, clientId: 'client-1' }),
+    )
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+    expect(res.formEnquiries).toMatchObject({ recognised: 1, parsed: 1, created: 1, failed: 0 })
+    expect(res.stoppedEarly).toBeUndefined()
+  })
+
+  it('出发时间/预算选项映射不到代码 → 回执计 unknownExtras，并留一条日志（不含客人信息）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    ;(fetchFormNoticeSource as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      source: { body: FORM_BODY.replace('Form URL\t/contact', 'Form URL\t/contact\nTravel window\tEarly 2028'), replyTo: ['jane@example.com'], headers: GOOD_HEADERS },
+    })
+    ;(mirrorWebFormLead as ReturnType<typeof vi.fn>).mockResolvedValue({ contactId: 'contact-form', skipped: null })
+    inbox([formNotice()])
+    const res = await syncMailbox(TARGET)
+    expect(res.formEnquiries?.unknownExtras).toBe(1)
+    const msg = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('[mail-form]'))
+    expect(msg).toBeTruthy()
+    expect(msg).not.toContain('jane@example.com')
+    warn.mockRestore()
+  })
+
+  it('读不到全文 → 不入库、不建人、不拦后面的邮件，只计数', async () => {
+    ;(fetchFormNoticeSource as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, error: 'HTTP 429' })
+    inbox([formNotice(), inboundFrom('real@gmail.com', '2026-10-19T02:00:00.000Z', 'cv-real')])
+    const res = await syncMailbox(TARGET)
+    expect(storedThreads).toEqual(['mail:cv-real'])
+    expect(mirrorWebFormLead).not.toHaveBeenCalled()
+    expect(res.formEnquiries?.failed).toBe(1)
+    expect(res.stoppedEarly).toBeUndefined()
+  })
+
+  it('mirrorWebFormLead 返回 error → 按「一条失败就停」处理，水位线不越过', async () => {
+    ;(fetchFormNoticeSource as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      source: { body: FORM_BODY, replyTo: ['jane@example.com'], headers: GOOD_HEADERS },
+    })
+    ;(mirrorWebFormLead as ReturnType<typeof vi.fn>).mockResolvedValue({ contactId: null, skipped: 'error' })
+    inbox([formNotice()])
+    const res = await syncMailbox(TARGET)
+    expect(res.stoppedEarly).toContain('mail-form:msg-form-1')
   })
 })

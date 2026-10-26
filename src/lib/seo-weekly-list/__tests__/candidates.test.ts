@@ -132,6 +132,25 @@ describe('exclusions and own-page matching', () => {
     expect(isExcludedUrl('https://x.com/blog/bar', ['china-tours'], new Set())).toBe(false)
   })
 
+  it('protected list: slug entries match the last path segment, path entries need the full path, home needs the "/" entry', () => {
+    const none = new Set<string>()
+    // CTS-style: a bare slug entry still protects the page that lives under /blog/
+    expect(isExcludedUrl('https://x.com/blog/china-visa-free-nz-2026', ['china-visa-free-nz-2026'], none)).toBe(true)
+    // a slug entry is not a substring match and does not protect sub-pages
+    expect(isExcludedUrl('https://x.com/about/team', ['about'], none)).toBe(false)
+    expect(isExcludedUrl('https://x.com/tours/china/beijing', ['tours'], none)).toBe(false)
+    // path entries need the full path
+    expect(isExcludedUrl('https://x.com/tours/china', ['tours/china'], none)).toBe(true)
+    expect(isExcludedUrl('https://x.com/other/tours/china', ['tours/china'], none)).toBe(false)
+    // the home page can now be protected (it used to be dropped as an empty slug)
+    expect(isExcludedUrl('https://x.com/', ['/'], none)).toBe(true)
+    expect(isExcludedUrl('https://x.com/anything', ['/'], none)).toBe(false)
+    // encoded / mixed case URLs
+    expect(isExcludedUrl('https://x.com/China%2DTours/', ['china-tours'], none)).toBe(true)
+    // undecodable URL is never offered as an opportunity
+    expect(isExcludedUrl('https://x.com/%E0%A4%A', [], none)).toBe(true)
+  })
+
   it('matches own pages only when title/H1/path contain EVERY keyword token (a text match, not a rank fact)', () => {
     const pages = [
       { url: 'https://x.com/visa', path: '/china-visa-guide', title: 'China visa for Kiwis', h1: null, word_count: 900 },

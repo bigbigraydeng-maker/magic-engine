@@ -44,10 +44,12 @@ import {
 } from './creative-recipe.mjs'
 
 import {
+  MUSIC_VOCAL_REGISTRY_PATH,
   checkRemotionHealth,
   processRemotionOrder,
   resolveEngine,
 } from './remotion-branch.mjs'
+import { MusicVocalGateError, assertBgmFileVocalClear, assertLegacyBgmVocalGate } from './music-vocal-gate.mjs'
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 
@@ -373,7 +375,7 @@ async function resolveClips(wo, tmp, onCost) {
       idempotency_key: wo_key,
       motion_type: plan.motion_type,
       generation_cost_usd: gen.cost,
-      source_meta: { muapi_url: gen.muapi_url, request_id: gen.request_id },
+      source_meta: { muapi_url: gen.muapi_url, request_id: gen.request_id, source_image_url: plan.source_image_url ?? null },
     })
   }
   return { localPaths, newClips, cost }
@@ -451,6 +453,7 @@ function assemble(wo, localPaths, copy, tmp) {
   const brandKit = brandkitFor(wo.client_id) // B3:brandkit 按客户,不再硬编 CTS
   const profile = creativeProfile(brandKit, wo)
   const bgm = resolveBgm(profile, brandKit)
+  assertLegacyBgmVocalGate({ bgm, musicMood: profile.music_mood, registryPath: MUSIC_VOCAL_REGISTRY_PATH })
   const cfg = {
     output: out,
     brand_kit: brandKit,
@@ -584,6 +587,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     probeLoudnessFn,
     probeMediaEvidenceFn = () => ({}),
     hashFileFn,
+    musicVocalGateFn,
     execAssembleFn,
     completeFn,
     receiptValidator,
@@ -633,6 +637,15 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
     minLoudnessLufs: minBgmInputLoudnessLufs,
   })
   logFn?.(`  BGM: ${music.portableId} (${music.source}, ${music.loudnessLufs.toFixed(1)} LUFS)`)
+  // Vocal gate on the exact file handed to the renderer (fail-closed: no gate fn = refuse).
+  if (typeof musicVocalGateFn !== 'function') {
+    throw new MusicVocalGateError('MUSIC_VOCAL_REGISTRY_INVALID', 'recipe 分支缺少音乐人声检查函数，拒绝出片')
+  }
+  const gateResult = musicVocalGateFn(music.absPath, { label: music.portableId })
+  if (gateResult && typeof gateResult.then === 'function') {
+    gateResult.then(() => {}, () => {}) // swallow: we refuse below, don't leak an unhandled rejection
+    throw new MusicVocalGateError('MUSIC_VOCAL_REGISTRY_INVALID', 'recipe 音乐人声检查必须是同步函数（异步结果会被忽略=绕过闸），拒绝出片')
+  }
 
   // 6. 结构化文案(禁 angle 兜底 · R9)。multicut(text_overlay_roles 含 'middle')走
   // hook+middle 校验并构建 captionsByRole;legacy 保持 hookText/ctaText 原路径不变。
@@ -732,7 +745,7 @@ export async function runRecipeSequence({ wo, recipe, tmp, deps }) {
       idempotency_key: plan.idempotency_key,
       motion_type: plan.motion_type,
       generation_cost_usd: gen.cost,
-      source_meta: { provider: gen.provider ?? 'muapi', request_id: gen.request_id, recipe: recipe.id },
+      source_meta: { provider: gen.provider ?? 'muapi', request_id: gen.request_id, recipe: recipe.id, source_image_url: plan.source_image_url ?? null },
     })
   }
   // 生成完再 heartbeat 一次;abort → 不组装、不 complete
@@ -845,6 +858,7 @@ async function processRecipeOrder(wo, tmp, recipe) {
       probeLoudnessFn: probeLoudnessLufs,
       probeMediaEvidenceFn: probeMediaEvidence,
       hashFileFn: sha256File,
+      musicVocalGateFn: (absPath, opts) => assertBgmFileVocalClear(absPath, MUSIC_VOCAL_REGISTRY_PATH, opts),
       execAssembleFn: ({ cfgPath, outputPath }) => {
         execFileSync(PYTHON_BIN, [MAKE_PROMO, cfgPath], { stdio: 'inherit' })
         // 30fps muxing can leave one trailing frame (12.033s for a 12.000s

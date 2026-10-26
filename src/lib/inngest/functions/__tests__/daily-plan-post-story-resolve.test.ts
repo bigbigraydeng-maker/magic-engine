@@ -14,6 +14,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 vi.mock('@/lib/meta/token-manager', () => ({ getStoredPageToken: vi.fn() }))
 
 import { getStoredPageToken } from '@/lib/meta/token-manager'
+import { GRAPH_BASE } from '@/lib/meta/graph-base'
 import {
   DailyPlanPostPublishedEventSchema,
   STORY_RESOLVE_JOB_NAME,
@@ -195,7 +196,7 @@ describe('story-resolve — resolved', () => {
     const sleepIndex = h.log.indexOf('sleep:wait-resolve-1@2026-09-16T20:10:00.000Z')
     expect(sleepIndex).toBeGreaterThanOrEqual(0)
     expect(h.log.indexOf('run:read-story-id-1')).toBeGreaterThan(sleepIndex)
-    expect(h.graph.urls).toEqual([`https://graph.facebook.com/v20.0/${PHOTO}?fields=page_story_id&access_token=page-token`])
+    expect(h.graph.urls).toEqual([`${GRAPH_BASE}/${PHOTO}?fields=page_story_id&access_token=page-token`])
     expect(mockToken).toHaveBeenCalledWith(CLIENT, PAGE)
 
     expect(h.send).toHaveBeenCalledTimes(1)

@@ -11,7 +11,7 @@ import { getStoredPageToken } from '@/lib/meta/token-manager'
 import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 
-const GRAPH = 'https://graph.facebook.com/v25.0'
+export const GRAPH = 'https://graph.facebook.com/v25.0'
 const RUPLOAD = 'https://rupload.facebook.com/video-upload/v25.0'
 
 // 零宽幂等标记:wo_id 前 8 位 hex 编成不可见字符,埋 caption 末尾。ANCHOR 打头方便扫描。
@@ -62,7 +62,7 @@ async function ensurePageFirstComment(args: {
 // 先库后 env:已经按老路配好的客户(CTS)一行不用改,新客户点一下按钮就通。
 //
 // 页名同时做防误发第三重断言(魏征 B9):页名必须 ~ 该客户品牌,否则绝不发(防把 A 客户片发到 B 页)。
-async function resolveToken(target: PublishTarget): Promise<{ accessToken: string; pageId: string; pageName: string }> {
+export async function resolveToken(target: PublishTarget): Promise<{ accessToken: string; pageId: string; pageName: string }> {
   if (!target.page_id) throw new Error('publish_target.page_id 缺失')
 
   let accessToken: string | null = null
@@ -204,27 +204,85 @@ export const facebookReelAdapter: PublishAdapter = {
   },
 }
 
+// 回读重试间隔:测试环境(VITEST)下置 0,免得单测白等 1.5s。
+const READBACK_DELAY_MS = process.env.VITEST ? 0 : 1500
+
+/**
+ * 回读视频对象的 published/permalink_url,最多试 3 次(每次间隔 delayMs)。
+ * 转正后 FB 侧状态可能有一小段延迟,单次读不到就重试;三次都读不到才认失败。
+ */
+async function readBackPublished(
+  videoId: string,
+  accessToken: string,
+  delayMs: number = READBACK_DELAY_MS,
+): Promise<Record<string, unknown>> {
+  let last: Record<string, unknown> = {}
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, delayMs))
+    const info = await fetch(`${GRAPH}/${videoId}?fields=published,permalink_url&access_token=${accessToken}`)
+    const j = (await info.json().catch(() => ({}))) as Record<string, unknown>
+    last = j
+    if (info.ok && j['published'] === true) return j
+  }
+  return last
+}
+
 /**
  * 把已经躺在主页后台的草稿正式发出去 —— 不重新上传。
  *
  * 为什么要单独一条路:审片通过后「真发」如果走重新上传,主页上会同时留着一条草稿和一条正式的,
- * 等于每条片都要人去删一次。同一个 finish 接口再喊一次、把状态改成 PUBLISHED 就够了。
+ * 等于每条片都要人去删一次。
+ *
+ * 为什么不能再喊一次 finish(2026-10-11 CTS 主页真机验证,Graph v25.0):
+ * 对一条已经 finish 过的草稿再 POST /{page}/video_reels?upload_phase=finish&video_state=PUBLISHED,
+ * FB 直接 400 code 6000 subcode 1363130「Video Upload Is Missing」—— finish 只认「刚上传完还没收尾」的会话。
+ * 真正管用的是翻视频对象本身:POST /{video_id} 带 published=true,返回 {"success":true}。
+ * 翻完必须回读 published 确认(失败即抛,绝不吞),否则「以为发了其实没发」。
  */
 export async function promoteReelToPublished(params: {
   target: PublishTarget
   videoId: string
 }): Promise<PublishedRef> {
   const { accessToken, pageId } = await resolveToken(params.target)
-  await graphPost(`/${pageId}/video_reels`, {
-    upload_phase: 'finish',
-    video_id: params.videoId,
-    video_state: 'PUBLISHED',
-    access_token: accessToken,
-  })
-  const info = await fetch(
-    `${GRAPH}/${params.videoId}?fields=permalink_url&access_token=${accessToken}`,
+
+  // 转正前先读一眼视频对象(fail-closed):
+  // ① 读不到直接抛,绝不盲发;② 视频不属于本页 → 防误发拦截;③ 已经是 published 就别再 POST(幂等)。
+  const preRes = await fetch(
+    `${GRAPH}/${params.videoId}?fields=published,from&access_token=${accessToken}`,
   )
-  const j = (await info.json().catch(() => ({}))) as Record<string, unknown>
+  const preJson = (await preRes.json().catch(() => ({}))) as Record<string, unknown>
+  if (!preRes.ok) {
+    throw new Error(`FB 转正前读视频失败 ${preRes.status}: ${JSON.stringify(preJson)}`)
+  }
+  const from = preJson['from'] as Record<string, unknown> | undefined
+  if (from && typeof from['id'] === 'string' && from['id'] !== pageId) {
+    throw new Error(`视频 ${params.videoId} 不属于主页 ${pageId} —— 防误发拦截`)
+  }
+
+  // 已经是 published:跳过 POST,直接回读 permalink 组装回执。
+  if (preJson['published'] === true) {
+    const j = await readBackPublished(params.videoId, accessToken)
+    return {
+      platform: 'facebook',
+      page_id: pageId,
+      post_id: params.videoId,
+      video_id: params.videoId,
+      published_at: new Date().toISOString(),
+      // 视频早已被人手公开:这里的 now 不是真实发布时间,调用方不得拿它当 T0(标估算)。
+      published_at_estimated: true,
+      permalink: typeof j['permalink_url'] === 'string' ? (j['permalink_url'] as string) : undefined,
+      video_state: 'PUBLISHED',
+    }
+  }
+
+  const res = await graphPost(`/${params.videoId}`, { published: 'true', access_token: accessToken })
+  if (res['success'] !== true) {
+    throw new Error(`FB 草稿转正未返回 success: ${JSON.stringify(res)}`)
+  }
+  const j = await readBackPublished(params.videoId, accessToken)
+  if (j['published'] !== true) {
+    throw new Error(`FB 草稿转正后回读 published 不是 true: ${JSON.stringify(j)}`)
+  }
   return {
     platform: 'facebook',
     page_id: pageId,

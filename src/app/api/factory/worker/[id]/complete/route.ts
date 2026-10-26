@@ -86,6 +86,28 @@ function parseMediaEvidence(raw: unknown): ReelMediaEvidence | null | undefined 
     }
     out.subtitle_cues = cues
   }
+  // Informational fields: a malformed or null value is dropped, never a reason to reject the whole
+  // delivery (the render cost is already spent).
+  if (Array.isArray(value.capabilities)
+    && value.capabilities.length <= 20
+    && value.capabilities.every((c) => typeof c === 'string' && c.length > 0 && c.length <= 64)) {
+    out.capabilities = value.capabilities as string[]
+  }
+  const substance = value.content_substance
+  if (substance && typeof substance === 'object' && !Array.isArray(substance)) {
+    const s = substance as Record<string, unknown>
+    if ((s.verdict === 'pass' || s.verdict === 'asset_only' || s.verdict === 'fail')
+      && Array.isArray(s.kinds) && s.kinds.length <= 10 && s.kinds.every((k) => typeof k === 'string' && k.length <= 40)
+      && typeof s.textSeconds === 'number' && Number.isFinite(s.textSeconds) && s.textSeconds >= 0
+      && typeof s.reason === 'string') {
+      out.content_substance = {
+        verdict: s.verdict,
+        kinds: s.kinds as string[],
+        textSeconds: s.textSeconds,
+        reason: s.reason.slice(0, 500),
+      }
+    }
+  }
   return out
 }
 

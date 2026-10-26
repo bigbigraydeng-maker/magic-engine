@@ -26,6 +26,7 @@ import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
 import { FACTORY_CONFIG_SECTION } from '@/lib/factory/config-link'
 import { ClientStatusPanel } from './_components/ClientStatusPanel'
+import { YoutubePanel } from './_components/YoutubePanel'
 import { GbpPanel } from './_components/GbpPanel'
 import { GbpLocationPanel } from './_components/GbpLocationPanel'
 import { GscPanel } from './_components/GscPanel'
@@ -45,6 +46,7 @@ import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
 import { BrandGeoAnchorsPanel } from './_components/BrandGeoAnchorsPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
+import { SocialConnectionsPanel } from './_components/SocialConnectionsPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
 import { WeeklyBlogPanel } from './_components/WeeklyBlogPanel'
@@ -59,6 +61,7 @@ import { MailchimpAudiencePanel } from './_components/MailchimpAudiencePanel'
 import { LeadNotifyEmailsPanel } from './_components/LeadNotifyEmailsPanel'
 import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
+import { BookingMembersCard } from '../crm/_components/bookings/BookingMembersCard'
 import { CommentAuditList } from './_components/CommentAuditList'
 import { MessengerEmergencyStopPanel } from './_components/MessengerEmergencyStopPanel'
 import {
@@ -88,6 +91,7 @@ interface ConnectCallbacks {
   mail: boolean
   gbp: boolean
   oauth: boolean
+  tiktok: boolean
 }
 
 function TabBody({
@@ -106,8 +110,14 @@ function TabBody({
     case 'connect':
       return (
         <>
-          <SettingsSection first icon="🚦" title="真客户 / 调研档案">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚦" title="真客户 / 调研档案">
             <ClientStatusPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="▶️" title="YouTube 频道配置" id="youtube-channel" defaultOpen={focusSection === 'youtube-channel'}>
+            <YoutubePanel clientId={clientId} configurationOnly />
           </SettingsSection>
           <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）" defaultOpen={callbacks.mail}>
             <MailboxPanel clientId={clientId} />
@@ -200,13 +210,19 @@ function TabBody({
           <SettingsSection icon="📤" title="客户素材上传链接（免登录）">
             <UploadLinkPanel clientId={clientId} />
           </SettingsSection>
+          <SettingsSection icon="🔑" title="权限：谁能看订单与付款进度">
+            <BookingMembersCard clientId={clientId} />
+          </SettingsSection>
         </>
       )
 
     case 'content':
       return (
         <>
-          <SettingsSection first icon="📱" title="社媒账号（Instagram · Facebook · TikTok）">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🏷️" title="社媒资料登记（不授予发布权限）" id="social-profiles" defaultOpen={focusSection === 'social-profiles'}>
             <SocialHandlesPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
@@ -257,6 +273,17 @@ export default function ClientSettingsPage() {
   // 邮箱授权回跳（见 MailboxPanel）——用它来判断该默认展开哪一块，不用来
   // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
   const mailStatus = searchParams.get('mail')
+  const tiktokStatus = searchParams.get('tiktok')
+  const tiktokMessage: Record<string, string> = {
+    connected: 'TikTok 授权已完成。发布视频前请确认目标账号。',
+    denied: 'TikTok 授权已取消，可以重新连接。',
+    bad_state: '本次连接已失效，请从「连接 TikTok」重新开始。',
+    exchange_failed: 'TikTok 授权未完成，请重新连接。',
+    missing_scopes: 'TikTok 没有授予所需权限，请重新连接并允许账号信息和视频发布。',
+    needs_team_check: '这个 TikTok 账号暂时无法连接到当前客户，请联系团队核实后再试。',
+    has_other_account: '该客户已连接另一个 TikTok 账号。如需更换，请联系团队先断开旧授权再重新连接。',
+    save_failed: 'TikTok 授权已完成，但保存失败，请稍后重试。',
+  }
   // 深链锚点（见 lib/factory/config-link）——驾驶舱的「该客户工厂配置」跳过来时
   // 直接落在「视频工厂配置」那一块，不用人在「内容与社媒」里自己找。
   const focusSection = searchParams.get('section')
@@ -278,6 +305,12 @@ export default function ClientSettingsPage() {
         </div>
 
         <h1 className="text-2xl font-black text-slate-950">客户配置中心</h1>
+
+        {tiktokStatus && tiktokMessage[tiktokStatus] && (
+          <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
+            {tiktokMessage[tiktokStatus]}
+          </div>
+        )}
 
         {gbpStatus === 'connected' && (
           <div className="mt-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
@@ -352,7 +385,7 @@ export default function ClientSettingsPage() {
           <TabBody
             tab={tab}
             clientId={clientId}
-            callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null }}
+            callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null, tiktok: tiktokStatus !== null }}
             focusSection={focusSection}
           />
         </div>

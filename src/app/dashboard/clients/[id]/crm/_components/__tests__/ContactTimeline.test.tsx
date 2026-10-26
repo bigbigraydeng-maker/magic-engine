@@ -14,8 +14,8 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
-import { ContactTimeline, type TimelineEntry } from '../ContactTimeline'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { ContactTimeline, stageSourceOf, type TimelineEntry } from '../ContactTimeline'
 
 const touch = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
   kind: 'touch',
@@ -113,6 +113,12 @@ describe('其余结论只挑影响下一步动作的', () => {
     await waitFor(() => expect(screen.getByText('这个号打不通')).toBeTruthy())
     expect(screen.getByText('打了没人接')).toBeTruthy()
     expect(screen.getByText('他说不买了')).toBeTruthy()
+  })
+
+  it('客人打来我们没接到（missed_inbound）显示成人话', async () => {
+    mockTimeline([touch({ summary: 'c', outcome: 'missed_inbound' })])
+    draw()
+    await waitFor(() => expect(screen.getByText('他打来我们没接到')).toBeTruthy())
   })
 
   /**
@@ -407,5 +413,179 @@ describe('摘要回传给抽屉', () => {
     const onSummary = vi.fn()
     render(<ContactTimeline clientId="cts" contactId="c1" onSummary={onSummary} />)
     await waitFor(() => expect(onSummary).toHaveBeenCalledWith(null))
+  })
+})
+
+/**
+ * 意向卡已经并进抽屉顶部那张「该做什么」卡（PM 2026-10-10：页面少信息多引导，
+ * 只留一个概念告诉人该做什么）。时间线自己不再画意向标签 / 摘要卡 ——
+ * 接口就算还回着 `brief`，这里也不该冒出第二张卡跟抽屉顶上那张打架。
+ */
+describe('意向卡已并进抽屉顶部那一张「该做什么」卡 —— 时间线自己不再画', () => {
+  it('接口就算回了 brief，时间线里也没有意向标签 / 摘要卡', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        contact: { name: 'Sue', phone: null, email: null, stageLabel: null },
+        timeline: [touch()],
+        brief: { intentLevel: 'high', summary: '客人已确认合作', nextAction: '发最终账单' },
+      }),
+    }) as unknown as typeof fetch
+    draw()
+    await waitFor(() => expect(screen.getByText('打过去聊了两句')).toBeTruthy())
+    expect(screen.queryByText('高意向')).toBeNull()
+    expect(screen.queryByTestId('timeline-brief')).toBeNull()
+  })
+})
+
+/**
+ * 「到哪一步了」是谁判的 —— 从最新一条阶段变更的 `changedBy` 推断，回传给抽屉。
+ *
+ * 判据只有一份（`stageSourceOf`），抽屉顶上那张卡靠它决定要不要标「人工标的」。
+ * 认不出的机器身份返回 null —— 宁可不显示，不许说错。
+ */
+describe('到哪一步了是谁判的（stageSource）', () => {
+  const stage = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
+    kind: 'stage',
+    at: '2026-09-01T00:00:00Z',
+    fromLabel: null,
+    toLabel: '已报价',
+    changedBy: 'ai:conversation-read',
+    ...over,
+  })
+
+  const summaryOf = async (timeline: TimelineEntry[]) => {
+    mockTimeline(timeline)
+    const onSummary = vi.fn()
+    render(<ContactTimeline clientId="cts" contactId="c1" onSummary={onSummary} />)
+    await waitFor(() => expect(onSummary).toHaveBeenCalled())
+    return onSummary.mock.calls.at(-1)?.[0]
+  }
+
+  it('AI 从对话里读的 → ai_conversation', async () => {
+    const s = await summaryOf([stage(), touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: 'ai_conversation' }))
+  })
+
+  it('同事的邮箱 → human', async () => {
+    const s = await summaryOf([stage({ changedBy: 'info@example.co.nz' }), touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: 'human' }))
+  })
+
+  it('🔴 认不出的机器身份 → null（宁可不显示，不许说错）', async () => {
+    const s = await summaryOf([stage({ changedBy: 'system:qualified-buyer' }), touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: null }))
+  })
+
+  it('🔴 多条阶段变更 → 最新的那条算数', async () => {
+    const s = await summaryOf([
+      stage({ at: '2026-08-01T00:00:00Z', changedBy: 'info@example.co.nz' }),
+      stage({ at: '2026-09-01T00:00:00Z', changedBy: 'ai:conversation-read' }),
+      touch(),
+    ])
+    expect(s).toEqual(expect.objectContaining({ stageSource: 'ai_conversation' }))
+  })
+
+  it('没有任何阶段变更 → null', async () => {
+    const s = await summaryOf([touch()])
+    expect(s).toEqual(expect.objectContaining({ stageSource: null }))
+  })
+
+  it('stageSourceOf 直接判：订单系统 / 空值', () => {
+    expect(stageSourceOf('order-system')).toBe('order_system')
+    expect(stageSourceOf('')).toBeNull()
+  })
+})
+
+describe('刚拨出、整理中的电话 —— 页面要立刻看得出「打过了」', () => {
+  it('通话中 / 已挂断整理中各有自己的标签和说明', async () => {
+    mockTimeline([
+      touch({ pendingCall: 'ringing', summary: '正在通话中…（挂断后这里会自动整理成记录）' }),
+      touch({ at: '2026-08-10T00:05:00Z', pendingCall: 'ended', summary: '刚拨出的电话已结束，正在整理成记录（约 2 分钟，不用等，可以直接去下一位）' }),
+    ])
+    draw()
+    await waitFor(() => expect(screen.getAllByTestId('pending-call')).toHaveLength(2))
+    expect(screen.getByText(/通话中$/)).toBeTruthy()
+    expect(screen.getByText(/已挂断，整理中/)).toBeTruthy()
+    expect(screen.getByText(/可以直接去下一位/)).toBeTruthy()
+  })
+
+  it('点过拨打后自动刷新：整理中的电话变成正式记录，列表不闪成「加载中」', async () => {
+    vi.useFakeTimers()
+    try {
+      const first = [touch({ pendingCall: 'ended', summary: '刚拨出的电话已结束，正在整理成记录（约 2 分钟，不用等，可以直接去下一位）' })]
+      const second = [touch({ summary: '外呼，通话 43 秒' })]
+      let n = 0
+      global.fetch = vi.fn().mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({ contact: { name: 'Sue', phone: null, email: null, stageLabel: null }, timeline: n++ === 0 ? first : second }),
+      })) as unknown as typeof fetch
+      render(<ContactTimeline clientId="cts" contactId="c1" dialedAt={Date.now()} />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      expect(screen.getAllByTestId('pending-call')).toHaveLength(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(8_100) })
+      expect(screen.queryByText('加载往来记录…')).toBeNull()
+      expect(screen.queryAllByTestId('pending-call')).toHaveLength(0)
+      expect(screen.getByText('外呼，通话 43 秒')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('没点过拨打、也没有整理中的电话：不自动刷新', async () => {
+    vi.useFakeTimers()
+    try {
+      mockTimeline([touch({ summary: '打过去聊了两句' })])
+      render(<ContactTimeline clientId="cts" contactId="c1" />)
+      await act(async () => { await vi.advanceTimersByTimeAsync(50) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+      expect((global.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', () => {
+  const drawCollapsible = (props: { refreshKey?: number } = {}) =>
+    render(<ContactTimeline clientId="cts" contactId="c1" collapsible {...props} />)
+
+  it('默认只显示一行「看完整往来原文（N 条）」，不铺原文', async () => {
+    mockTimeline([touch({ summary: '第一通电话' }), touch({ summary: '第二通电话', at: '2026-08-11T00:00:00Z' })])
+    drawCollapsible()
+    await waitFor(() => expect(screen.getByText(/看完整往来原文（2 条）/)).toBeTruthy())
+    expect(screen.queryByText('第一通电话')).toBeNull()
+  })
+
+  it('点开铺出原文，再点「收起往来原文」回到一行', async () => {
+    mockTimeline([touch({ summary: '第一通电话' })])
+    drawCollapsible()
+    fireEvent.click(await screen.findByText(/看完整往来原文/))
+    expect(screen.getByText('第一通电话')).toBeTruthy()
+    fireEvent.click(screen.getByText(/收起往来原文/))
+    expect(screen.queryByText('第一通电话')).toBeNull()
+    expect(screen.getByText(/看完整往来原文/)).toBeTruthy()
+  })
+
+  it('🔴 展开后 refreshKey 变了（回了一条消息）→ 重新取数，且仍保持展开', async () => {
+    mockTimeline([touch({ summary: '旧的一条' })])
+    const view = drawCollapsible({ refreshKey: 0 })
+    fireEvent.click(await screen.findByText(/看完整往来原文/))
+    expect(screen.getByText('旧的一条')).toBeTruthy()
+
+    // 发完消息后服务端多了一条
+    mockTimeline([touch({ summary: '旧的一条' }), touch({ summary: '刚发的一条', at: '2026-08-12T00:00:00Z' })])
+    view.rerender(<ContactTimeline clientId="cts" contactId="c1" collapsible refreshKey={1} />)
+
+    await waitFor(() => expect(screen.getByText('刚发的一条')).toBeTruthy())
+    // 没缩回「看完整往来原文」那一行
+    expect(screen.queryByText(/看完整往来原文/)).toBeNull()
+  })
+
+  it('不传 collapsible → 照旧整条铺开（其它页面不受影响）', async () => {
+    mockTimeline([touch({ summary: '直接铺开' })])
+    draw()
+    await waitFor(() => expect(screen.getByText('直接铺开')).toBeTruthy())
+    expect(screen.queryByText(/看完整往来原文/)).toBeNull()
   })
 })

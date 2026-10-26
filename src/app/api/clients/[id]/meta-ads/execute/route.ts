@@ -32,6 +32,7 @@ import { ADS_CAMPAIGN_BUDGET_DECREASE_REQUESTED } from '@/lib/inngest/ads-events
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { setCampaignStatus } from '@/lib/meta/client'
 import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
+import { toActAccountId } from '@/lib/meta/ad-account-binding'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 import { nzToday } from '@/lib/pm-todo/ledger-items'
@@ -41,6 +42,7 @@ import {
   MESSENGER_LOOKUP_FAILED_MESSAGE,
 } from '@/lib/ads-strategy/messenger-draft-campaign-guard'
 import { requireSpendActivationAuthority, buildSpendActivationReceipt, type SpendActivationAuthority } from '@/lib/ads/spend-activation'
+import { rejectAgentAdsMetaExecute } from '@/lib/auth/agent-ads-guard'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
@@ -65,6 +67,8 @@ interface ExecuteBody {
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const clientId = params.id
+  const denied = await rejectAgentAdsMetaExecute(req, clientId)
+  if (denied) return denied
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   const access = await requireAdsCampaignBudgetAccess(clientId)
@@ -228,11 +232,14 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       return NextResponse.json({ error: 'params.execution_item_id must be a string' }, { status: 400 })
     }
 
+    // Meta 返回纯数字账户号，内核和库都用 act_ 形式（2026-10-19 止损路由 503 同根缺陷）。
+    const adAccountId = toActAccountId(beforeDetails.account_id)
+    if (!adAccountId) return NextResponse.json({ error: 'account_id_unreadable' }, { status: 503 })
     const submitted = await queueAdsCampaignBudgetDecrease(createKernel(supabaseAdmin), {
       clientId,
       access,
       cycleDate: nzToday(new Date()),
-      adAccountId: beforeDetails.account_id ?? '',
+      adAccountId,
       campaignId: campaign_id,
       afterCents: budgetCents,
       executionItemId: actionParams.execution_item_id ?? null,

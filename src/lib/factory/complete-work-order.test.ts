@@ -11,7 +11,7 @@
 // 同时记录 update/insert 的 payload 与 eq/in 过滤条件 —— 不记过滤条件的话,把
 // `.eq('claimed_by')` / `.in('status', ACTIVE_STATUSES)` 这两道防抢占条件删掉,测试不会报警。
 
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { completeWorkOrder } from './complete-work-order'
 import { resolveRecipe } from './recipe'
@@ -508,7 +508,7 @@ describe('completeWorkOrder — 成片文案品控(2026-09-20 Jev 评估)', () =
     expect(r.ok && r.qualityFlags.some((f) => f.category === 'placeholder_caption')).toBe(true)
   })
 
-  it('brand_name / brand_voice.persona 从 master_briefs 正确传给品控(供 A/C 检测用)', async () => {
+  it('brand_name 从 master_briefs 传给品控;persona 不再触发人称检测(2026-10-16 取消)', async () => {
     const { db } = mockSupabase([
       okClient(),
       { table: 'master_briefs', data: { excluded_topics: [], brand_name: 'CTS Tours', brand_voice: { persona: { name: 'Baker Gu', role: 'tour guide' } } }, error: null },
@@ -522,15 +522,7 @@ describe('completeWorkOrder — 成片文案品控(2026-09-20 Jev 评估)', () =
 
     const [state, questions] = callJev.mock.calls[0]
     expect(state.brand).toBe('CTS Tours')
-    expect(state.intended_voice).toContain('Baker Gu')
-    expect(questions.wrong_voice).toBeDefined() // 有 persona.name → 应该发起人称检测
-  })
-
-  it('brief 没配 persona → 不发起人称检测(不误报品牌口吻文案)', async () => {
-    const { db } = mockSupabase(happyQueue())
-    await completeWorkOrder(db, PARAMS)
-
-    const [, questions] = callJev.mock.calls[0]
+    expect(state.intended_voice).toBeUndefined()
     expect(questions.wrong_voice).toBeUndefined()
   })
 
@@ -553,5 +545,106 @@ describe('completeWorkOrder — 并发', () => {
 
     expect(r.ok).toBe(false)
     expect(!r.ok && r.status).toBe(409)
+  })
+})
+
+describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
+  const ATMOS_PASS = { durationSec: 15, fadeInSec: 1, fadeOutSec: 1.5, line: { text: 'The skyline at dusk', sourceUrl: 'https://example.test/a', sourceQuote: 'The skyline at dusk.' } }
+  const ATMOS_EMPTY = { durationSec: 15, line: null }
+  const woWith = (props: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    ...WO,
+    brief: { segments: [], remotion: { template: 'atmosphere', props, ...extra } },
+  }) as Record<string, unknown>
+  const CAP = { capabilities: ['content_substance_v1'] }
+
+  const run = (wo: Record<string, unknown>, evidence: Record<string, unknown> | null = null) => {
+    const m = mockSupabase(happyQueue())
+    return completeWorkOrder(m.db, { ...PARAMS, wo, mediaEvidence: evidence as never }).then((r) => ({ r, m }))
+  }
+  const savedOutput = (m: ReturnType<typeof mockSupabase>) =>
+    m.updates.find((u) => u.table === 'content_work_orders')!.payload.output as Record<string, unknown>
+
+  const savedEnforce = process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE
+  beforeEach(() => { delete process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE })
+  afterEach(() => {
+    if (savedEnforce === undefined) delete process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE
+    else process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = savedEnforce
+  })
+
+  it('non-remotion orders are untouched by the gate', async () => {
+    const { r, m } = await run(WO as Record<string, unknown>)
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toBeUndefined()
+  })
+
+  it('warn mode (default): a text-less reel still completes, with the server verdict kept for audit', async () => {
+    const { r, m } = await run(woWith(ATMOS_EMPTY))
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toMatchObject({ server: { verdict: 'fail' }, enforced: false, capable: false })
+  })
+
+  it('enforce: a text-less reel is refused with 422 before any database write', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY), mediaEvidence: CAP as never })
+    expect(r).toMatchObject({ ok: false, status: 422 })
+    expect((r as { error: string }).error).toMatch(/^content_substance_failed: .+/)
+    expect(m.consumed()).toBe(0)
+    expect(m.updates).toHaveLength(0)
+  })
+
+  it('enforce: a passing reel from a worker without the capability is refused (old worker)', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_PASS), mediaEvidence: null })
+    expect(r).toMatchObject({ ok: false, status: 422, error: 'content_substance_missing' })
+    expect(m.consumed()).toBe(0)
+  })
+
+  it('enforce: a passing reel with the capability completes and records enforced=true', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const { r, m } = await run(woWith(ATMOS_PASS), CAP)
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toMatchObject({ server: { verdict: 'pass' }, enforced: true, capable: true })
+  })
+
+  it('enforce: asset_only material passes the gate and is marked output.deliverable', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const { r, m } = await run(woWith(ATMOS_EMPTY, { deliverable: 'asset_only' }), CAP)
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).deliverable).toBe('asset_only')
+  })
+
+  it('enforce: a mistyped deliverable is not material (still refused)', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY, { deliverable: 'Asset_Only' }), mediaEvidence: CAP as never })
+    expect(r).toMatchObject({ ok: false, status: 422 })
+    expect((r as { error: string }).error).toMatch(/^content_substance_failed/)
+  })
+
+  it('enforce: a worker self-report of pass cannot override the server verdict', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    const m = mockSupabase([])
+    const lying = { content_substance: { verdict: 'pass', kinds: ['selling_line'], textSeconds: 9, reason: 'x' }, ...CAP }
+    const r = await completeWorkOrder(m.db, { ...PARAMS, wo: woWith(ATMOS_EMPTY), mediaEvidence: lying as never })
+    expect(r).toMatchObject({ ok: false, status: 422 })
+    expect(m.consumed()).toBe(0)
+  })
+
+  it('enforce: engine=remotion with a missing or malformed brief.remotion is refused, never skipped', async () => {
+    process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = '1'
+    for (const brief of [{ engine: 'remotion' }, { engine: 'remotion', remotion: [] }, { engine: 'remotion', remotion: { template: 5, props: {} } }, { remotion: 'x' }]) {
+      const m = mockSupabase([])
+      const r = await completeWorkOrder(m.db, { ...PARAMS, wo: { ...WO, brief } as Record<string, unknown>, mediaEvidence: CAP as never })
+      expect(r).toMatchObject({ ok: false, status: 422 })
+      expect((r as { error: string }).error).toMatch(/^content_substance_failed/)
+    }
+  })
+
+  it('a worker that reports pass while the server computes fail is flagged as a mismatch', async () => {
+    const { r, m } = await run(woWith(ATMOS_EMPTY), { content_substance: { verdict: 'pass', kinds: ['selling_line'], textSeconds: 5, reason: 'x' }, ...CAP })
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).content_substance).toMatchObject({ mismatch: true })
   })
 })

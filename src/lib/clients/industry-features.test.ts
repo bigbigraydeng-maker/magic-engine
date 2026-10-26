@@ -41,7 +41,7 @@ describe('hasIndustryFeature —— 库里的真实取值', () => {
 
   it('🔴 行业为空 → 一个都不给（默认隐藏，不是默认显示）', () => {
     // 库里 15 个客户行业是空的。默认显示就等于把地产按钮塞给所有人 —— 正是现在的 bug
-    for (const f of ['listings', 'projects', 'tailor_made', 'agents'] as const) {
+    for (const f of ['listings', 'projects', 'tailor_made', 'agents', 'tour_catalog'] as const) {
       expect(hasIndustryFeature(null, f)).toBe(false)
       expect(hasIndustryFeature('', f)).toBe(false)
       expect(hasIndustryFeature('Healthcare — Physiotherapy', f)).toBe(false)
@@ -63,6 +63,15 @@ describe('hasIndustryFeature —— 库里的真实取值', () => {
     expect(hasIndustryFeature(null, 'projects')).toBe(false)
   })
 
+  it('🔴 「团目录」只给旅游客户 —— 跟行程单同一组关键词', () => {
+    expect(hasIndustryFeature('travel', 'tour_catalog')).toBe(true)
+    expect(hasIndustryFeature('Travel — Tour Operator', 'tour_catalog')).toBe(true)
+    expect(hasIndustryFeature('旅游运营商', 'tour_catalog')).toBe(true)
+    expect(hasIndustryFeature('logistics', 'tour_catalog')).toBe(false)
+    expect(hasIndustryFeature('real_estate', 'tour_catalog')).toBe(false)
+    expect(hasIndustryFeature(null, 'tour_catalog')).toBe(false)
+  })
+
   it('中文行业也认', () => {
     expect(hasIndustryFeature('房地产中介', 'listings')).toBe(true)
     expect(hasIndustryFeature('旅游运营商', 'tailor_made')).toBe(true)
@@ -76,8 +85,8 @@ describe('hasIndustryFeature —— 库里的真实取值', () => {
 
 describe('industryFeatureFlags', () => {
   it('一次拿全部开关', () => {
-    expect(industryFeatureFlags('real_estate')).toEqual({ listings: true, projects: true, tailor_made: false, agents: false })
-    expect(industryFeatureFlags('travel')).toEqual({ listings: false, projects: false, tailor_made: true, agents: true })
-    expect(industryFeatureFlags(null)).toEqual({ listings: false, projects: false, tailor_made: false, agents: false })
+    expect(industryFeatureFlags('real_estate')).toEqual({ listings: true, projects: true, tailor_made: false, agents: false, tour_catalog: false, business_calculator: false })
+    expect(industryFeatureFlags('travel')).toEqual({ listings: false, projects: false, tailor_made: true, agents: true, tour_catalog: true, business_calculator: true })
+    expect(industryFeatureFlags(null)).toEqual({ listings: false, projects: false, tailor_made: false, agents: false, tour_catalog: false, business_calculator: false })
   })
 })

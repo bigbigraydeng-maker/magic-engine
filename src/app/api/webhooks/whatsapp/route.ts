@@ -8,7 +8,9 @@
  * `conversations` / `conversation_messages`.
  *
  * GET  — Meta's one-time subscription handshake (`hub.challenge`).
- * POST — the message payload. Signature-verified with `META_APP_SECRET`.
+ * POST — the message payload. Signature-verified with the per-number app
+ *        secret from `whatsapp_app_credentials`, falling back to
+ *        `META_APP_SECRET`.
  *
  * ## Three rules this file exists to uphold
  *
@@ -26,11 +28,25 @@
  * Routing an inbound message to a client_id goes through
  * `clients.whatsapp_phone_number_id` (20260902000001) — never a hardcoded
  * client_id here.
+ *
+ * Inbound is classified (`lib/whatsapp/inbound-classify.ts`): customer messages
+ * → storeMessage (unchanged); staff-phone echoes → storeEcho (outbound message,
+ * no opt-out check, no event, never moves the customer clock); failed delivery
+ * statuses → applyFailedStatus; history → stored metadata-only into
+ * `whatsapp_history_inbox` ("to be claimed"; no contacts, conversations,
+ * touchpoints or events). A history chunk whose shape we do not recognise is
+ * still refused with 503 so Meta redelivers — and the Meta app must NOT be
+ * subscribed to the `history` field before the migration is applied.
  */
 
 import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import {
+  attributionColumns,
+  attributionFromWhatsAppReferral,
+  isAttributed,
+} from '@/lib/crm/attribution'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
 import { isOptOutKeyword, recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
 import { recordOptOutWriteFailure } from '@/lib/messenger-agent/optout-failures'
@@ -47,6 +63,21 @@ import { inngest } from '@/lib/inngest/client'
 // 字符串常量；payload 形状也改成跟 `ConversationMessageReceivedSchema` 完全
 // 一致（见下面 emit 调用处）。
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
+import {
+  MAX_WEBHOOK_BODY_BYTES,
+  extractWebhookPhoneNumberIds,
+  chooseWebhookSecret,
+} from '@/lib/whatsapp/app-secret'
+import {
+  classifyInboundChanges,
+  type WhatsAppInboundMessage,
+  type WhatsAppMedia,
+  type WhatsAppReferral,
+} from '@/lib/whatsapp/inbound-classify'
+import { storeEcho, applyFailedStatus } from '@/lib/whatsapp/inbound-handlers'
+import { storeHistoryChunks } from '@/lib/whatsapp/history-intake'
+import { recordUnclaimedNumber, type UnclaimedKind } from '@/lib/whatsapp/unclaimed'
+import { logRejection } from '@/lib/whatsapp/reject-log'
 
 export const dynamic = 'force-dynamic'
 
@@ -106,51 +137,6 @@ function isValidSignature(rawBody: string, signatureHeader: string | null, appSe
 // ---------------------------------------------------------------------------
 // Meta's documented Cloud API webhook payload.
 // ---------------------------------------------------------------------------
-
-/** The ad/CTA click that started a thread. Present on the FIRST inbound message
- *  only — no read API returns it later, so it is captured on sight. */
-interface WhatsAppReferral {
-  source_url?: string
-  source_id?: string
-  source_type?: string
-  headline?: string
-  body?: string
-  ctwa_clid?: string
-}
-
-interface WhatsAppMedia {
-  id?: string
-  mime_type?: string
-  sha256?: string
-  caption?: string
-  filename?: string
-}
-
-interface WhatsAppInboundMessage {
-  id?: string
-  from?: string
-  timestamp?: string
-  type?: string
-  text?: { body?: string }
-  referral?: WhatsAppReferral
-  image?: WhatsAppMedia
-  video?: WhatsAppMedia
-  audio?: WhatsAppMedia
-  document?: WhatsAppMedia
-  sticker?: WhatsAppMedia
-}
-
-interface WhatsAppWebhookPayload {
-  entry?: Array<{
-    changes?: Array<{
-      value?: {
-        metadata?: { phone_number_id?: string }
-        contacts?: Array<{ wa_id?: string; profile?: { name?: string } }>
-        messages?: WhatsAppInboundMessage[]
-      }
-    }>
-  }>
-}
 
 /** Media attached to a message, if any — kept so the Meta media id survives.
  *  Meta deletes the underlying file after ~30 days; losing the id loses the
@@ -248,6 +234,9 @@ async function upsertConversation(
       overwriteDisplayName: false,
       source: 'whatsapp',
       seenAt: sentAt,
+      // First-touch only (resolveContact fills empty columns), so a later ad never
+      // overwrites the one that brought the customer in. Empty without a referral.
+      attribution: attributionFromWhatsAppReferral(referral),
     })
     contactId = resolved.contactId
   } catch (err) {
@@ -319,12 +308,25 @@ async function recordInboundTouch(
   conversationId: string,
   contactId: string,
   at: string,
+  referral?: WhatsAppReferral,
 ): Promise<void> {
   const sourceRef = `${conversationId}:in`
   const body = {
     summary: '客人在 WhatsApp 上说了话',
     metadata: { thread_id: conversationId, sender: 'customer' },
   }
+  // Attribution + click id belong to the FIRST inbound touch only: the create below
+  // ignores duplicates and the advance update never rewrites these columns.
+  const attribution = attributionFromWhatsAppReferral(referral)
+  const firstTouch = isAttributed(attribution)
+    ? {
+        ...attributionColumns(attribution),
+        metadata: {
+          ...body.metadata,
+          ...(referral?.ctwa_clid ? { ctwa_clid: referral.ctwa_clid } : {}),
+        },
+      }
+    : {}
 
   // Create if absent, never overwrite — an existing row is the earlier contact.
   await supabaseAdmin.from('contact_touchpoints').upsert(
@@ -335,6 +337,7 @@ async function recordInboundTouch(
       direction: 'inbound',
       occurred_at: at,
       ...body,
+      ...firstTouch,
       source: 'whatsapp',
       source_ref: sourceRef,
     },
@@ -345,7 +348,7 @@ async function recordInboundTouch(
   // database, so concurrent deliveries cannot walk the timestamp backwards.
   await supabaseAdmin
     .from('contact_touchpoints')
-    .update({ occurred_at: at, ...body })
+    .update({ occurred_at: at, summary: body.summary })
     .eq('client_id', clientId)
     .eq('source', 'whatsapp')
     .eq('source_ref', sourceRef)
@@ -399,7 +402,7 @@ async function storeMessage(
   // Meta redeliver it — but it does mean a salesperson may not be prompted.
   if (contactId) {
     try {
-      await recordInboundTouch(clientId, conversationId, contactId, sentAt)
+      await recordInboundTouch(clientId, conversationId, contactId, sentAt, msg.referral)
     } catch (err) {
       console.error(`[webhooks/whatsapp] 记 CRM 触点失败（消息已入库，但可能不会出现在今日待办）:`, err)
     }
@@ -494,78 +497,295 @@ async function storeMessage(
   }
 }
 
+/**
+ * Resolve the client for a phone_number_id, then run `fn` with it. Keeps the
+ * three "resolve then handle" branches in POST identical and short.
+ *
+ * Returns true when the change was handled (or was genuinely not applicable),
+ * false when it produced a failure entry. `failures` is appended to in place.
+ */
+async function withClient(
+  phoneNumberId: string,
+  count: number,
+  what: string,
+  kind: UnclaimedKind,
+  failures: string[],
+  fn: (clientId: string) => Promise<void>,
+  retryIfUnmapped = false,
+): Promise<void> {
+  const lookup = await resolveClientId(phoneNumberId)
+  if (!lookup.ok) {
+    if (lookup.kind === 'lookup_failed') {
+      // Our fault, not Meta's: ask for redelivery rather than swallow it.
+      console.error(
+        `[webhooks/whatsapp] client lookup FAILED for phone_number_id=${phoneNumberId} ` +
+          `— this is a lookup error, not an unmapped number: ${lookup.message}`,
+      )
+      failures.push(`lookup_failed:${phoneNumberId}`)
+    } else {
+      // Genuinely nobody owns this number. Retrying will not help, so this
+      // must not hold up the delivery — but it is a real configuration hole
+      // AND a real customer message being lost.
+      //
+      // TODO(#1331): the number is now registered in
+      // `whatsapp_unclaimed_numbers` and surfaces as a to-do via
+      // `lib/pm-todo/whatsapp-unclaimed-items.ts`, so it no longer dead-ends
+      // in a log line (铁律 3 下半). The log line stays as the immediate
+      // signal; the registry is what a human actually sees.
+      await recordUnclaimedNumber(phoneNumberId, kind)
+      console.error(
+        `[webhooks/whatsapp] no client mapped to phone_number_id=${phoneNumberId} ` +
+          `— ${count} ${what} dropped. Set clients.whatsapp_phone_number_id.`,
+      )
+      if (retryIfUnmapped) {
+        // History is delivered exactly once, so a 200 here would lose it for
+        // good. Hold it back (503) so Meta redelivers once someone binds the
+        // number.
+        console.error(
+          `[webhooks/whatsapp] ${what} held back (503) until a client binds this number`,
+        )
+        failures.push(`unclaimed:${phoneNumberId}`)
+      }
+    }
+    return
+  }
+  await fn(lookup.clientId)
+}
+
+/**
+ * Handle a `history` change: store metadata-only rows into
+ * `whatsapp_history_inbox`, refuse an unrecognised chunk shape, and acknowledge
+ * media follow-ups without storing them.
+ *
+ * History is delivered exactly once, so anything we cannot store must produce a
+ * failure entry (503) rather than a silent 200.
+ */
+async function handleHistory(
+  change: Extract<ReturnType<typeof classifyInboundChanges>[number], { kind: 'history' }>,
+  failures: string[],
+): Promise<void> {
+  const unrecognised = change.itemCount - change.chunks.length - change.mediaFollowUps
+  if (unrecognised > 0) {
+    console.error(
+      '[webhooks/whatsapp] history chunk shape not recognised — refusing so Meta redelivers',
+    )
+    failures.push('history_unrecognised')
+  }
+
+  if (change.mediaFollowUps > 0) {
+    console.log(
+      `[webhooks/whatsapp] history media follow-up acknowledged but not stored (count=${change.mediaFollowUps})`,
+    )
+  }
+
+  if (change.chunks.length > 0) {
+    await withClient(
+      change.phoneNumberId,
+      change.chunks.length,
+      'history chunk(s)',
+      'history',
+      failures,
+      async (clientId) => {
+        try {
+          await storeHistoryChunks(
+            clientId,
+            { phoneNumberId: change.phoneNumberId, displayNumber: change.displayNumber },
+            change.chunks,
+          )
+        } catch {
+          console.error('[webhooks/whatsapp] history intake failed')
+          failures.push('history_failed')
+        }
+      },
+      true,
+    )
+  }
+}
+
+type RejectReason =
+  | 'malformed_number'
+  | 'mixed_apps'
+  | 'disabled_number'
+  | 'signature_mismatch'
+  | 'lookup_unavailable'
+  | 'secret_unreadable'
+
+/**
+ * Refuse a delivery AND leave one fixed-text line saying why. Before this, a rejected signature
+ * was completely silent, so "Meta says it sent it, we show nothing" could not be diagnosed — the
+ * usual cause is a number whose app secret we do not hold (it then falls back to the env secret).
+ * The line carries only a reason code, which secret SOURCE was tried, a count and whether a
+ * signature header was present — never a secret, a signature, a number, an id or any body text.
+ */
+function rejectionLine(
+  reason: RejectReason,
+  ctx: { source: 'route' | 'env' | 'none'; numbers: number; hasSignatureHeader: boolean },
+): string {
+  return (
+    `[webhooks/whatsapp] delivery rejected: reason=${reason} secret_source=${ctx.source} ` +
+    `numbers=${ctx.numbers} signature_header=${ctx.hasSignatureHeader ? 'present' : 'absent'}`
+  )
+}
+
+function reject(
+  reason: RejectReason,
+  status: 401 | 503,
+  ctx: { source: 'route' | 'env' | 'none'; numbers: number; hasSignatureHeader: boolean },
+): NextResponse {
+  logRejection(`${reason}:${ctx.source}`, rejectionLine(reason, ctx))
+  const error = status === 503 ? 'Credential lookup unavailable' : 'Invalid signature'
+  return NextResponse.json({ error }, { status })
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const appSecret = process.env.META_APP_SECRET
-  if (!appSecret) {
-    return NextResponse.json({ error: 'Server misconfiguration: META_APP_SECRET not set' }, { status: 500 })
-  }
-
+  // The phone_number_id list is read from the UNVERIFIED body only to decide
+  // WHICH secret verifies it — nothing is processed unless that secret's
+  // signature matches. Mixed or unknown mixes are rejected so one app's secret
+  // can never vouch for another app's number. Never log secrets, signatures or
+  // the body.
   const rawBody = await req.text()
-  const signature = req.headers.get('x-hub-signature-256')
-  if (!isValidSignature(rawBody, signature, appSecret)) {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  if (Buffer.byteLength(rawBody, 'utf8') > MAX_WEBHOOK_BODY_BYTES) {
+    return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
   }
 
-  let payload: WhatsAppWebhookPayload
+  const signature = req.headers.get('x-hub-signature-256')
+  const hasSignatureHeader = signature !== null
+
+  const extracted = extractWebhookPhoneNumberIds(rawBody)
+  if (!extracted.ok) {
+    // Same body as a bad signature: do not hint at the reason to the caller (the log has it).
+    return reject('malformed_number', 401, { source: 'none', numbers: 0, hasSignatureHeader })
+  }
+  const numbers = extracted.ids.length
+
+  const choice = await chooseWebhookSecret(extracted.ids)
+
+  let secret: string
+  if (choice.kind === 'reject') {
+    if (choice.reason === 'decrypt_failed') {
+      // A server-side configuration fault (every delivery for these numbers fails): leave a trace too.
+      logRejection(
+        'secret_unreadable:route',
+        rejectionLine('secret_unreadable', { source: 'route', numbers, hasSignatureHeader }),
+      )
+      return NextResponse.json(
+        { error: 'Server misconfiguration: webhook secret unreadable' },
+        { status: 500 },
+      )
+    }
+    return reject(choice.reason === 'disabled_number' ? 'disabled_number' : 'mixed_apps', 401, {
+      source: 'none',
+      numbers,
+      hasSignatureHeader,
+    })
+  } else if (choice.kind === 'route') {
+    secret = choice.secret
+  } else if (choice.kind === 'env') {
+    const envSecret = process.env.META_APP_SECRET
+    if (!envSecret) {
+      return NextResponse.json({ error: 'Server misconfiguration: META_APP_SECRET not set' }, { status: 500 })
+    }
+    secret = envSecret
+  } else {
+    // lookup_failed. Only "the table is not deployed yet" may fall back to the env
+    // secret (then no number can have its own secret, so the CTS number keeps
+    // working). Any other failure fails closed: otherwise the env secret could
+    // vouch for a number that has its own app secret.
+    const envSecret = process.env.META_APP_SECRET
+    if (!choice.tableMissing || !envSecret || !isValidSignature(rawBody, signature, envSecret)) {
+      return reject('lookup_unavailable', 503, { source: 'env', numbers, hasSignatureHeader })
+    }
+    secret = envSecret
+  }
+
+  if (!isValidSignature(rawBody, signature, secret)) {
+    return reject('signature_mismatch', 401, {
+      source: choice.kind === 'route' ? 'route' : 'env',
+      numbers,
+      hasSignatureHeader,
+    })
+  }
+
+  let payload: unknown
   try {
     payload = JSON.parse(rawBody)
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Every message is attempted independently: one bad message must not discard
-  // the others in the same delivery. `failed` decides the status code below.
+  // Every change is attempted independently: one bad change must not discard
+  // the others in the same delivery. `failures` decides the status code below.
   let stored = 0
   const failures: string[] = []
 
-  for (const entry of payload.entry ?? []) {
-    for (const change of entry.changes ?? []) {
-      const value = change.value
-      const phoneNumberId = value?.metadata?.phone_number_id
-      const messages = value?.messages ?? []
-      // Status callbacks (delivered/read) and other change types have no
-      // `messages` array — not an error, just nothing to store.
-      if (!phoneNumberId || messages.length === 0) continue
-
-      const lookup = await resolveClientId(phoneNumberId)
-      if (!lookup.ok) {
-        if (lookup.kind === 'lookup_failed') {
-          // Our fault, not Meta's: ask for redelivery rather than swallow it.
-          console.error(
-            `[webhooks/whatsapp] client lookup FAILED for phone_number_id=${phoneNumberId} ` +
-              `— this is a lookup error, not an unmapped number: ${lookup.message}`,
-          )
-          failures.push(`lookup_failed:${phoneNumberId}`)
-        } else {
-          // Genuinely nobody owns this number. Retrying will not help, so this
-          // must not hold up the delivery — but it is a real configuration hole
-          // AND a real customer message being lost.
-          //
-          // TODO(#1331): this currently dead-ends in a log line, which 铁律 3
-          // 下半 forbids. It needs to reach 「🙋 需要你动手」 via
-          // lib/pm-todo/manual-items.ts. Deferred out of this PR because the
-          // signal has nowhere to persist yet — by definition we do not know
-          // which client to attach it to, so it needs its own store. Both
-          // reviewers agreed this is a follow-up, not a merge blocker, since
-          // the alternative (503 forever) would take the whole subscription
-          // down over one client's misconfiguration.
-          console.error(
-            `[webhooks/whatsapp] no client mapped to phone_number_id=${phoneNumberId} ` +
-              `— ${messages.length} message(s) dropped. Set clients.whatsapp_phone_number_id.`,
-          )
-        }
-        continue
+  for (const change of classifyInboundChanges(payload)) {
+    switch (change.kind) {
+      case 'customer_messages': {
+        await withClient(change.phoneNumberId, change.messages.length, 'message(s)', 'customer_messages', failures, async (clientId) => {
+          for (const msg of change.messages) {
+            try {
+              await storeMessage(clientId, msg, change.contactName)
+              stored++
+            } catch (err) {
+              console.error(`[webhooks/whatsapp] failed to store message ${msg.id}:`, err)
+              failures.push(`store_failed:${msg.id ?? 'unknown'}`)
+            }
+          }
+        })
+        break
       }
 
-      const contactName = value?.contacts?.[0]?.profile?.name
-      for (const msg of messages) {
-        try {
-          await storeMessage(lookup.clientId, msg, contactName)
-          stored++
-        } catch (err) {
-          console.error(`[webhooks/whatsapp] failed to store message ${msg.id}:`, err)
-          failures.push(`store_failed:${msg.id ?? 'unknown'}`)
-        }
+      case 'echoes': {
+        await withClient(change.phoneNumberId, change.echoes.length, 'staff-phone echo(es)', 'echoes', failures, async (clientId) => {
+          for (const echo of change.echoes) {
+            try {
+              const result = await storeEcho(
+                clientId,
+                { phoneNumberId: change.phoneNumberId, displayNumber: change.displayNumber },
+                echo,
+              )
+              if (result === 'stored') stored++
+            } catch {
+              console.error('[webhooks/whatsapp] echo store failed')
+              failures.push('echo_failed')
+            }
+          }
+        })
+        break
+      }
+
+      case 'statuses': {
+        // Only failures are reconciled; sent/delivered/read receipts must not cost a
+        // client lookup (a lookup error would otherwise 503 a harmless receipt).
+        const failed = change.statuses.filter((s) => s.status === 'failed')
+        if (failed.length === 0) break
+        await withClient(change.phoneNumberId, failed.length, 'failed-delivery receipt(s)', 'statuses', failures, async (clientId) => {
+          for (const status of failed) {
+            try {
+              await applyFailedStatus(clientId, status)
+            } catch {
+              console.error('[webhooks/whatsapp] status update failed')
+              failures.push('status_failed')
+            }
+          }
+        })
+        break
+      }
+
+      case 'history': {
+        await handleHistory(change, failures)
+        break
+      }
+
+      case 'malformed': {
+        console.error(
+          `[webhooks/whatsapp] malformed change ignored (field=${change.field}, reason=${change.reason})`,
+        )
+        break
+      }
+
+      case 'ignored': {
+        break
       }
     }
   }

@@ -1,136 +1,149 @@
 'use client'
 
+/**
+ * 「短视频」只读面板 —— 视频由视频工厂统一生产与审核，这里按「作品」看排期和状态（同一条片的修订版折成一条）。
+ * 数据与「本周总览」同源（social-overview 接口，已按客户过滤），不请求工厂工单接口。
+ */
+
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import type { WorkOrderStatus } from '@/lib/factory/types'
-import type { PublishedView } from '@/lib/factory/publish/publish-display'
-import { factoryVideoUrl } from '@/lib/factory/outlets'
-import { STATUS_META, publishedBadge } from '@/app/dashboard/factory/_components/statusMeta'
 
-// 每日计划页的「视频 Reels」只读面板 —— 视频由视频工厂统一生产与审核,
-// 这里只做查看入口,通过/发布仍走工厂审核页并经 PM 授权。
+import type { OverviewReel, ReelVariety } from '@/lib/social/week-overview/build'
+import { REEL_QUERY_LIMIT, countReelWorks, describeVarietyAdvice, groupReelWorks, type ReelWork, type StatusKind } from '@/lib/social/week-overview/reel-works'
+import { buildReelTodoSummary } from '@/lib/social/week-overview/todo'
 
-interface WorkOrder {
-  id: string
-  client_id: string
-  status: WorkOrderStatus
-  angle: string
-  output?: { video_path?: string } | null
-  published: PublishedView | null
-  created_at: string
+import { ReelWorkGroups, TodoStrip } from './SocialDailyParts'
+
+type LoadState = 'loading' | 'ready' | 'unauthenticated' | 'forbidden' | 'error'
+
+const NOTE = 'text-xs text-me-charcoal/70'
+const ERROR_TEXT = 'text-sm font-medium text-[#8F2B22]'
+
+const CELL_TONE: Record<StatusKind | 'neutral', string> = {
+  review: 'border-me-ochre/55 bg-me-ochre/10',
+  approved: 'border-status-sched/35 bg-status-sched/10',
+  sent: 'border-status-track/40 bg-status-track/10',
+  uploaded: 'border-black/10 bg-white',
+  draft: 'border-black/10 bg-white',
+  problem: 'border-status-rej/40 bg-status-rej/10',
+  making: 'border-black/10 bg-white',
+  closed: 'border-black/10 bg-white',
+  neutral: 'border-black/10 bg-white',
 }
 
-// 展示顺序:要拍板/在途的在前,历史/停用的在后。空组跳过。
-const REEL_STATUS_ORDER: readonly WorkOrderStatus[] = [
-  'in_review', 'approved', 'publishing', 'published', 'measuring', 'closed',
-  'review_rejected', 'publish_failed', 'rendered', 'queued', 'claimed', 'producing',
-]
+/** The Reels from "being made" to "public", as four or more numbers: where the pieces are right now. */
+function ReelStats({ works }: { works: ReelWork[] }) {
+  const { byKind } = countReelWorks(works)
+  const cells: Array<{ label: string; value: number; kind: StatusKind; always: boolean }> = [
+    { label: '待你审核', value: byKind.review, kind: 'review', always: true },
+    { label: '已通过，等发出', value: byKind.approved, kind: 'approved', always: true },
+    { label: 'Facebook 草稿', value: byKind.draft, kind: 'draft', always: true },
+    { label: '已公开', value: byKind.sent, kind: 'sent', always: true },
+    { label: '已上传（未核对）', value: byKind.uploaded, kind: 'uploaded', always: false },
+    { label: '出问题 / 被打回', value: byKind.problem, kind: 'problem', always: false },
+    { label: '制作中', value: byKind.making, kind: 'making', always: false },
+  ]
+  return (
+    <ul className="grid grid-cols-2 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(120px,1fr))]">
+      {cells.filter((cell) => cell.always || cell.value > 0).map((cell) => (
+        <li key={cell.label} className={`rounded-xl border px-3 py-2 ${CELL_TONE[cell.kind]}`}>
+          <p className="text-xs font-medium text-me-charcoal/75">{cell.label}</p>
+          <p className="text-2xl font-black tabular-nums text-me-charcoal">{cell.value}</p>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
-// 这些状态不展示:归档/被替换/失败/死信 —— 不是「可看的 Reel」。
-const HIDDEN_STATUSES: readonly WorkOrderStatus[] = ['archived', 'superseded', 'failed', 'dead_letter']
+function ReelsBody({ clientId, works, variety, weeklyQuota }: { clientId: string; works: ReelWork[]; variety: ReelVariety | null; weeklyQuota: number | null }) {
+  const counts = countReelWorks(works)
+  const advice = variety ? describeVarietyAdvice(variety) : null
+  return (
+    <div className="space-y-4">
+      <TodoStrip summary={buildReelTodoSummary(clientId, works)} scope="短视频" />
+      <ReelStats works={works} />
+      <div>
+        <p className={NOTE}>
+          共 {counts.works} 条作品{counts.versions > counts.works ? `（${counts.versions} 个版本，同一条的修订版已折叠在一起${counts.versions >= REEL_QUERY_LIMIT ? `；只读了最近 ${REEL_QUERY_LIMIT} 个版本` : ''}）` : ''}
+          ；{typeof weeklyQuota === 'number' ? `每周名额 ${weeklyQuota} 条` : '每周名额未配置'}。
+        </p>
+        {advice && <p className="mt-1 text-xs font-medium text-[#8A4A0A]">{advice}</p>}
+      </div>
+      <ReelWorkGroups works={works} clientId={clientId} />
+    </div>
+  )
+}
 
 export function DailyPlanReelsPanel({ clientId }: { clientId: string }) {
-  const [orders, setOrders] = useState<WorkOrder[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [load, setLoad] = useState<LoadState>('loading')
+  const [reels, setReels] = useState<OverviewReel[]>([])
+  const [reelsError, setReelsError] = useState<string | null>(null)
+  const [variety, setVariety] = useState<ReelVariety | null>(null)
+  const [weeklyQuota, setWeeklyQuota] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
-    setError(null)
+    setLoad('loading')
+    setReelsError(null)
     void (async () => {
       try {
-        const res = await fetch('/api/factory/work-orders')
-        if (!res.ok) {
-          if (!cancelled) setError(`读不到视频工单（${res.status}），请刷新或确认管理员登录`)
-          return
-        }
-        const json = await res.json()
+        const res = await fetch(`/api/clients/${clientId}/social-overview`)
         if (cancelled) return
-        setOrders((json.orders ?? []) as WorkOrder[])
+        if (res.status === 401) return setLoad('unauthenticated')
+        if (res.status === 403) return setLoad('forbidden')
+        const json = (await res.json().catch(() => ({}))) as {
+          success?: boolean
+          reels?: OverviewReel[]
+          reels_error?: string | null
+          reel_variety?: ReelVariety
+          quota?: { reel_per_week?: number | null } | null
+        }
+        if (!res.ok || json.success !== true) return setLoad('error')
+        setReels(Array.isArray(json.reels) ? json.reels : [])
+        setReelsError(typeof json.reels_error === 'string' ? json.reels_error : null)
+        setVariety(json.reel_variety ?? null)
+        setWeeklyQuota(typeof json.quota?.reel_per_week === 'number' ? json.quota.reel_per_week : null)
+        setLoad('ready')
       } catch {
-        if (!cancelled) setError('读不到视频工单，请刷新或确认管理员登录')
-      } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) setLoad('error')
       }
     })()
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [clientId])
 
-  const videos = useMemo(() => {
-    return orders
-      .filter((o) => o.client_id === clientId)
-      .filter((o) => typeof o.output?.video_path === 'string' && o.output.video_path.length > 0)
-      .filter((o) => !HIDDEN_STATUSES.includes(o.status))
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-  }, [orders, clientId])
-
-  const grouped = useMemo(
-    () => REEL_STATUS_ORDER
-      .map((status) => ({ status, items: videos.filter((o) => o.status === status) }))
-      .filter((g) => g.items.length > 0),
-    [videos],
-  )
+  const works = useMemo(() => groupReelWorks(reels), [reels])
 
   return (
-    <section className="bg-white rounded-xl border border-black/10 p-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap mb-1">
-        <h2 className="text-sm font-semibold text-me-charcoal">视频 Reels（共 {videos.length} 条）</h2>
-        <Link
-          href={`/dashboard/factory?client=${clientId}`}
-          className="text-xs text-blue-600 underline"
-        >去视频工厂审核页</Link>
-      </div>
-      <p className="text-xs text-me-charcoal/60 mb-4">
-        视频由视频工厂统一生产与审核；这里只是查看入口，通过、发布仍要在工厂审核页操作并经 PM 授权。
-      </p>
-
-      {loading ? (
-        <p className="text-xs text-me-charcoal/50">加载中…</p>
-      ) : error ? (
-        <p className="text-xs text-red-600">{error}</p>
-      ) : videos.length === 0 ? (
-        <p className="text-xs text-me-charcoal/50">这个客户还没有可看的 Reel 视频。</p>
-      ) : (
-        <div className="space-y-6">
-          {grouped.map((g) => (
-            <div key={g.status}>
-              <h3 className="text-xs font-medium text-me-charcoal/60 mb-2 flex items-center gap-2">
-                <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${STATUS_META[g.status].color}`}>
-                  {STATUS_META[g.status].label}
-                </span>
-                <span className="text-me-charcoal/40">{g.items.length}</span>
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {g.items.map((o) => {
-                  const badge = o.published ? publishedBadge(o.published) : null
-                  return (
-                    <div key={o.id} className="border border-black/10 rounded-lg p-3 bg-white">
-                      <video
-                        controls
-                        preload="metadata"
-                        className="w-full rounded-md bg-black/5"
-                        src={factoryVideoUrl(o.output?.video_path, process.env.NEXT_PUBLIC_SUPABASE_URL ?? '')}
-                      />
-                      <p className="text-xs text-me-charcoal mt-2 line-clamp-2">{o.angle}</p>
-                      <div className="flex items-center gap-2 flex-wrap mt-2">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${STATUS_META[o.status].color}`}>
-                          {STATUS_META[o.status].label}
-                        </span>
-                        {badge && (
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs ${badge.color}`}>
-                            {badge.label}
-                          </span>
-                        )}
-                        <span className="text-xs text-me-charcoal/40">工单 {o.id.slice(0, 8)}</span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          ))}
+    <section className="space-y-4">
+      <div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-me-charcoal">短视频</h2>
+          <Link href={`/dashboard/factory?client=${clientId}`} className="text-xs font-semibold underline">
+            去视频工厂
+          </Link>
         </div>
+        <p className={NOTE}>这里只看排期和状态；审片、通过、打回、看片都在视频工厂。</p>
+      </div>
+
+      {load === 'loading' ? (
+        <div className="space-y-3" aria-busy="true">
+          <p className={NOTE}>加载中…</p>
+          <div className="h-24 animate-pulse rounded-2xl bg-me-stone/70" />
+        </div>
+      ) : load === 'unauthenticated' ? (
+        <p className={ERROR_TEXT}>请先登录管理员账号后刷新</p>
+      ) : load === 'forbidden' ? (
+        <p className={ERROR_TEXT}>只有管理员能看</p>
+      ) : load === 'error' ? (
+        <p className={ERROR_TEXT}>读不到短视频排期，请刷新或确认管理员登录</p>
+      ) : reelsError ? (
+        <p className={ERROR_TEXT}>短视频现在读不到，请刷新页面。</p>
+      ) : works.length === 0 ? (
+        <p className="text-sm text-me-charcoal/80">这个客户还没有可看的短视频。</p>
+      ) : (
+        <ReelsBody clientId={clientId} works={works} variety={variety} weeklyQuota={weeklyQuota} />
       )}
     </section>
   )

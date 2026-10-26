@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { publishPageUpgradeToGithub } from '@/lib/cms/github-page-upgrade-publisher'
+import { buildRouteGuard, protectedPageResponse } from '@/lib/seo/protected-pages-route'
 
 interface RouteContext {
   params: { id: string }
@@ -60,7 +61,9 @@ export async function POST(req: NextRequest, { params }: RouteContext): Promise<
     return badInput('execution_item_id must be a string')
   }
 
-  const result = await publishPageUpgradeToGithub({
+  let result: Awaited<ReturnType<typeof publishPageUpgradeToGithub>>
+  try {
+  result = await publishPageUpgradeToGithub({
     clientId,
     pageId: body.page_id as string,
     pageUrl: body.page_url as string,
@@ -69,7 +72,14 @@ export async function POST(req: NextRequest, { params }: RouteContext): Promise<
     enhancedMetaDescription: body.enhanced_meta_description as string,
     enhancedHtmlBody: body.enhanced_html_body as string,
     executionItemId: typeof body.execution_item_id === 'string' ? body.execution_item_id : undefined,
+    guard: buildRouteGuard(access.user, clientId, 'cms-github-update-page'),
   })
+  } catch (err) {
+    const refused = protectedPageResponse(err)
+    if (refused) return refused
+    throw err
+  }
+
 
   if (!result.ok) {
     const status = result.code === 'GITHUB_READ_ERROR'

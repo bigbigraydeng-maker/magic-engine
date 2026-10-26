@@ -1,8 +1,17 @@
 import React from 'react'
 import { AbsoluteFill, Img, interpolate, OffthreadVideo, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
 
+/** Legibility gradient; scrim (0-1) scales its strength, undefined or 1 keeps the original look byte for byte. */
+export function scrimGradient(scrim?: number): string {
+  if (scrim === undefined || scrim === 1) {
+    return 'linear-gradient(180deg, rgba(0,0,0,0.38) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,0.30) 38%, rgba(0,0,0,0.66) 55%, rgba(0,0,0,0.82) 100%)'
+  }
+  const a = (v: number) => (v * scrim).toFixed(3)
+  return `linear-gradient(180deg, rgba(0,0,0,${a(0.38)}) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,${a(0.3)}) 38%, rgba(0,0,0,${a(0.66)}) 55%, rgba(0,0,0,${a(0.82)}) 100%)`
+}
+
 /** Full-bleed real footage with slow push-in, light grade and a legibility gradient. */
-export const Footage: React.FC<{ src: string; zoomTo?: number; startFrom?: number }> = ({ src, zoomTo = 1.08, startFrom = 0 }) => {
+export const Footage: React.FC<{ src: string; zoomTo?: number; startFrom?: number; scrim?: number }> = ({ src, zoomTo = 1.08, startFrom = 0, scrim }) => {
   const frame = useCurrentFrame()
   const { durationInFrames } = useVideoConfig()
   const scale = interpolate(frame, [0, durationInFrames], [1.0, zoomTo], { extrapolateRight: 'clamp' })
@@ -11,7 +20,7 @@ export const Footage: React.FC<{ src: string; zoomTo?: number; startFrom?: numbe
       <AbsoluteFill style={{ transform: `scale(${scale})`, filter: 'contrast(1.1) saturate(1.12)' }}>
         <OffthreadVideo src={staticFile(src)} startFrom={startFrom} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       </AbsoluteFill>
-      <AbsoluteFill style={{ background: 'linear-gradient(180deg, rgba(0,0,0,0.38) 0%, rgba(0,0,0,0) 22%, rgba(0,0,0,0.30) 38%, rgba(0,0,0,0.66) 55%, rgba(0,0,0,0.82) 100%)' }} />
+      <AbsoluteFill style={{ background: scrimGradient(scrim) }} />
     </AbsoluteFill>
   )
 }

@@ -72,34 +72,34 @@ function stale(id: string) {
 }
 
 describe('buildPriorityView', () => {
-  it('4 段都出现在结果里，顺序稳定', () => {
+  it('两张名单都出现在结果里，顺序稳定 hot / cold', () => {
     const r = repliedRow('a')
     const { sections } = buildPriorityView(
       { contacts: [r.row], touchpoints: r.tps, stageMeta: stages, now: NOW },
       (row) => ({ id: row.id, name: row.display_name }),
     )
-    expect(sections.map((s) => s.key)).toEqual(['waiting', 'acted', 'queued', 'off_list'])
+    expect(sections.map((s) => s.key)).toEqual(['hot', 'cold'])
   })
 
-  it('回话了 → waiting 段（total=1，默认展开，含该客人）', () => {
+  it('回话了 → hot 名单（total=1，默认展开，含该客人）', () => {
     const r = repliedRow('a')
     const { sections } = buildPriorityView(
       { contacts: [r.row], touchpoints: r.tps, stageMeta: stages, now: NOW },
       (row) => ({ id: row.id }),
     )
-    const waiting = sections.find((s) => s.key === 'waiting')!
+    const waiting = sections.find((s) => s.key === 'hot')!
     expect(waiting.total).toBe(1)
     expect(waiting.open).toBe(true)
     expect(waiting.items).toEqual([{ id: 'a' }])
   })
 
-  it('snooze 到未来 → off_list 段（默认收起，items=null，但 total 计入）', () => {
+  it('snooze 到未来 → cold 名单（默认收起，items=null，但 total 计入）', () => {
     const s = snoozed('b')
     const { sections } = buildPriorityView(
       { contacts: [s.row], touchpoints: s.tps, stageMeta: stages, now: NOW },
       (row) => ({ id: row.id }),
     )
-    const off = sections.find((s) => s.key === 'off_list')!
+    const off = sections.find((s) => s.key === 'cold')!
     expect(off.total).toBe(1)
     expect(off.open).toBe(false)
     expect(off.items).toBeNull()
@@ -119,11 +119,10 @@ describe('buildPriorityView', () => {
       },
       (row) => ({ id: row.id }),
     )
-    const waiting = sections.find((s) => s.key === 'waiting')!
-    const acted = sections.find((s) => s.key === 'acted')!
-    expect(waiting.items?.map((r) => r.id)).toEqual(['a'])
+    const hot = sections.find((s) => s.key === 'hot')!
+    expect(hot.items?.map((r) => r.id)).toContain('a')
     // b 一进线不到 14 天、没触点 → new_untouched
-    expect(acted.items?.map((r) => r.id)).toContain('b')
+    expect(hot.items?.map((r) => r.id)).toContain('b')
   })
 
   it('置顶排在段首（按 pinned_at 倒序）', () => {
@@ -139,7 +138,7 @@ describe('buildPriorityView', () => {
       },
       (row) => ({ id: row.id }),
     )
-    const waiting = sections.find((s) => s.key === 'waiting')!
+    const waiting = sections.find((s) => s.key === 'hot')!
     expect(waiting.items?.map((r) => r.id)).toEqual(['b', 'a', 'c'])
   })
 
@@ -156,9 +155,9 @@ describe('buildPriorityView', () => {
       (row) => ({ id: row.id }),
     )
     expect(focus.found).toBe(true)
-    expect(focus.section).toBe('off_list')
+    expect(focus.section).toBe('cold')
     expect(focus.page).toBe(1)
-    const off = sections.find((s) => s.key === 'off_list')!
+    const off = sections.find((s) => s.key === 'cold')!
     expect(off.items).toBeNull() // open 需要调用方在 opts.open 里显式打开
   })
 
@@ -204,10 +203,7 @@ describe('buildPriorityView', () => {
       (row) => row.id,
     )
     const t = Object.fromEntries(sections.map((s) => [s.key, s.total]))
-    expect(t.waiting).toBe(3)
-    expect(t.queued).toBe(1) // stale_conversation
-    expect(t.off_list).toBe(1) // snoozed
-    // acted 段这次没人
-    expect(t.acted).toBe(0)
+    expect(t.hot).toBe(3) // 3 replied
+    expect(t.cold).toBe(2) // stale_conversation（没摘要 → 留在 cold）+ snoozed
   })
 })

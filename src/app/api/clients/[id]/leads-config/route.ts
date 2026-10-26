@@ -22,6 +22,8 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { parseDomainList, readDomainRules } from '@/lib/crm/contact-kind'
 import { parseEmailList } from '@/lib/leads/parse-email-list'
+import { parsePhoneList, toPhoneCountry } from '@/lib/leads/parse-phone-list'
+import { readOwnPhoneNumbers } from '@/lib/leads/own-phone-numbers'
 import { readAudienceId, writeAudienceId } from '@/lib/mailchimp/audience-config'
 
 export interface LeadsConfig {
@@ -31,6 +33,8 @@ export interface LeadsConfig {
   ownEmailDomains: string[]
   /** 同行 / 分销商的域名。 */
   tradeDomains: string[]
+  /** 客户自己人（销售、老板）的手机号，E.164。用来在 WhatsApp 群里认出谁是自己人。 */
+  ownPhoneNumbers: string[]
   /** 网站表单每来一条新客资，best-effort 邮件通知的收件人清单。 */
   notifyEmails: string[]
   /**
@@ -53,6 +57,7 @@ function readConfig(raw: unknown): LeadsConfig {
     mailchimpEnabled: o.mailchimp_enabled === true,
     ownEmailDomains: rules.own,
     tradeDomains: rules.trade,
+    ownPhoneNumbers: readOwnPhoneNumbers(o),
     notifyEmails,
   }
 }
@@ -93,6 +98,7 @@ interface PatchBody {
   mailchimpAudienceId?: unknown
   ownEmailDomains?: unknown
   tradeDomains?: unknown
+  ownPhoneNumbers?: unknown
   notifyEmails?: unknown
 }
 
@@ -146,6 +152,34 @@ export async function PATCH(
     const parsed = parseEmailList(body.notifyEmails)
     patch.notify_emails = parsed.emails
     rejected.push(...parsed.rejected)
+  }
+
+  if (body.ownPhoneNumbers !== undefined) {
+    if (typeof body.ownPhoneNumbers !== 'string' && !Array.isArray(body.ownPhoneNumbers)) {
+      return NextResponse.json({ error: 'ownPhoneNumbers 要么是一段文字，要么是一个清单' }, { status: 400 })
+    }
+    // 本地号码（021…）按这个客户的默认国家补国码；读不到就当 NZ。
+    const { data: row, error: countryErr } = await supabaseAdmin
+      .from('clients')
+      .select('default_phone_country')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (countryErr) {
+      return NextResponse.json({ error: `读客户默认国家失败: ${countryErr.message}` }, { status: 500 })
+    }
+    const parsed = parsePhoneList(body.ownPhoneNumbers, toPhoneCountry(row?.default_phone_country))
+    // 手机号填错要当场退回、整项不存：这里不存在「存对的那几个」的折中，
+    // 漏掉一个自己人 = 他在群里会被当成客人。
+    if (parsed.rejected.length > 0) {
+      return NextResponse.json(
+        {
+          error: `这几条看不出是手机号，整项没有保存：${parsed.rejected.join('、')}。请带国家码写完整（例如 +64 21 000 0000）`,
+          rejected: parsed.rejected,
+        },
+        { status: 400 },
+      )
+    }
+    patch.ownPhoneNumbers = parsed.phones
   }
 
   // audience id 单独走 —— 它不一定住在 leads_config 里（专列 apply 之后就在专列

@@ -10,7 +10,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { fetchHourlyAdsetSpend, type GraphHourlySpendRow } from '@/lib/meta/entity-settings'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
-import { loadAdStrategyConfig } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfigWithSource, type AdStrategyConfig } from '@/lib/ads-strategy/config'
 import type { EntitySnapshotRow } from '../snapshot'
 import { loadOutcomeConfig } from '../outcome-config'
 import { buildAccountContext, localDayEndUtc, shiftDate } from './context'
@@ -168,7 +168,7 @@ async function loadAdDaily(clientId: string, adAccountId: string, date: string):
   return Array.from(byKey.values())
 }
 
-async function loadAccount(clientId: string, adAccountId: string, shared: boolean, date: string, clientPageId: string | null, evaluatedAt: string): Promise<AccountInput> {
+async function loadAccount(clientId: string, adAccountId: string, shared: boolean, hiddenFromAdHealth: boolean, date: string, clientPageId: string | null, evaluatedAt: string): Promise<AccountInput> {
   const tzRow = await supabaseAdmin.from('ad_entity_snapshots').select('timezone_name, currency')
     .eq('client_id', clientId).eq('ad_account_id', adAccountId).eq('level', 'account')
     .order('captured_at', { ascending: false }).limit(1).maybeSingle()
@@ -204,7 +204,7 @@ async function loadAccount(clientId: string, adAccountId: string, shared: boolea
     .map(r => ({ entity_id: r.entity_id, captured_at: r.captured_at, audience_count_lower: r.audience_count_lower }))
 
   const account: AccountInput = {
-    adAccountId, shared, timezone, currency,
+    adAccountId, shared, hiddenFromAdHealth, timezone, currency,
     snapshots: latestSnapshotsAsOf(snapshots, endMs),
     daily: daily.map(r => ({
       ...r,
@@ -248,24 +248,72 @@ async function loadClientPageId(clientId: string): Promise<string | null> {
   return (data as { facebook_page_id: string | null } | null)?.facebook_page_id ?? null
 }
 
-export async function loadDiagnosisInput(clientId: string, date: string, evaluatedAt: string): Promise<DiagnosisInput> {
+/**
+ * 客户的广告设置。读失败要抛（同上）——塌成默认值会让收件人检查拿着空列表跑，
+ * 该报的「收件人混了外部邮箱」就静默漏掉了；「没有行」是新客户，照默认值走。
+ */
+async function loadStrategyConfig(clientId: string): Promise<AdStrategyConfig> {
+  const { config, source, error } = await loadAdStrategyConfigWithSource(clientId)
+  if (source === 'fallback') throw new Error(`ad_strategy_configs read failed: ${error ?? 'unknown error'}`)
+  return config
+}
+
+/**
+ * 后台标了「不在广告健康页显示」的账户（`client_meta_ad_accounts.hidden_from_ad_health`，PR 3012）。
+ * 🔴 读失败**不能**当成「全都隐藏」——那会把真问题藏起来；失败就当没隐藏（fail visible），只打日志。
+ * 账户号按本文件其它地方的口径去掉 `act_` 前缀再比。
+ */
+async function loadHiddenAdAccounts(clientId: string): Promise<Set<string>> {
+  try {
+    const { data, error } = await supabaseAdmin.from('client_meta_ad_accounts')
+      .select('ad_account_id, hidden_from_ad_health').eq('client_id', clientId)
+    if (error) {
+      console.warn(`[ads-diagnostics] client_meta_ad_accounts read failed, treating no account as hidden: ${error.message}`)
+      return new Set()
+    }
+    const hidden = new Set<string>()
+    for (const row of (data ?? []) as Array<{ ad_account_id: string | null; hidden_from_ad_health: boolean | null }>) {
+      if (!row.hidden_from_ad_health || !row.ad_account_id) continue
+      hidden.add(row.ad_account_id.replace(/^act_/, ''))
+    }
+    return hidden
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[ads-diagnostics] client_meta_ad_accounts read failed, treating no account as hidden: ${message}`)
+    return new Set()
+  }
+}
+
+/**
+ * `known.digestRecipients`：调用方刚读过广告设置时把收件人传进来，这里就不再读第二遍——
+ * 每日回拉已经读成功，诊断不该因为几秒后多余的一次重读失败而整天停跑、连带不发自动暂停事件（卫青复审）。
+ * 没传才自己读，读失败照旧抛。
+ */
+export async function loadDiagnosisInput(
+  clientId: string,
+  date: string,
+  evaluatedAt: string,
+  known?: { digestRecipients: string[] },
+): Promise<DiagnosisInput> {
   const accountIds = await getClientAdAccountIds(clientId)
   const { shared } = await findSharedAdAccounts(clientId, accountIds)
+  const hidden = await loadHiddenAdAccounts(clientId)
   const clientPageId = await loadClientPageId(clientId)
   const accounts: AccountInput[] = []
   for (const id of accountIds) {
-    accounts.push(await loadAccount(clientId, id, shared.has(id.replace(/^act_/, '')), date, clientPageId, evaluatedAt))
+    const key = id.replace(/^act_/, '')
+    accounts.push(await loadAccount(clientId, id, shared.has(key), hidden.has(key), date, clientPageId, evaluatedAt))
   }
-  const [outcome, strategy] = await Promise.all([
+  const [outcome, digestRecipients] = await Promise.all([
     loadOutcomeConfig(clientId),
-    loadAdStrategyConfig(clientId),
+    known ? known.digestRecipients : loadStrategyConfig(clientId).then(c => c.digest_recipients),
   ])
   return {
     clientId, date, evaluatedAt,
     outcome: outcome.config,
     outcomeConfigured: outcome.source === 'row' && outcome.config.primary !== null,
     messagingReferralAvailable: MESSAGING_REFERRAL_AVAILABLE,
-    digestRecipients: strategy.digest_recipients,
+    digestRecipients,
     clientPageId,
     accounts,
   }

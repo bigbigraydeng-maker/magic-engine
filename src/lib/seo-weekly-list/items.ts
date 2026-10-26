@@ -11,6 +11,7 @@ import { canonicalUrl } from '@/lib/url/canonical-url'
 import type { CtrGapCandidate, KeywordMember, NearMissCandidate, SitePageRow } from './candidates'
 import { DECAY_CAUSE_LABEL, type DecayCandidate } from './decay'
 import { CAUSE_LABEL, type CtrDiagnosis } from './ctr-diagnosis'
+import type { KeywordPageCheck } from './keyword-page-check'
 
 export const SEO_PLAN_LOOP_MARKER = 'seo_goal_v1'
 export const PLAN_ACTION = {
@@ -69,6 +70,7 @@ export function buildNearMissItem(
   matches: SitePageRow[],
   ctx: ItemContext,
   index: number,
+  check?: KeywordPageCheck,
 ): PlanItemDraft {
   const p = c.primary
   const failure = `28 天后「${p.keyword}」排名没有上移至少 3 名，判没起效（不做点击归因）`
@@ -115,6 +117,8 @@ export function buildNearMissItem(
     }
   }
 
+  if (check) evidence.push(...keywordPageEvidence(check, ctx))
+
   const split = matches.length >= 2
   const how = [
     '① 先看这页收录了吗（后台"收录状态"），没收录先解决收录，不改内容。',
@@ -130,6 +134,7 @@ export function buildNearMissItem(
     description: [
       `【为什么】${evidence[0].claim}；站内最可能的对应页面：${main.url}（粗估增量约 +${c.potentialClicks} 次点击/月，按通用点击率曲线算，只用于排序）。`,
       variantsLine(c.members),
+      check ? `【系统预诊断】${check.verdict === 'proceed' ? '可直接按这页处理' : '需要人先看一眼'}：${check.reasons.join('；')}` : '',
       `【怎么做】\n${how}`,
       `【怎么算没起效】${failure}`,
       `【证据】${evidence.map(e => `${e.claim}〔${e.confidence}｜${e.source}｜${e.fetched_at}〕`).join('；')}`,
@@ -142,6 +147,7 @@ export function buildNearMissItem(
       opportunity: { members: c.members, matched_pages: matches.map(m => m.url), potential_clicks_estimate: c.potentialClicks },
       baseline: { rank: p.position, volume: p.volume, kd: p.kd, snapshot_date: ctx.snapshotDate, word_count: main.word_count, crawled_at: main.crawled_at ?? null },
       verify: { type: 'page_strengthened' },
+      ...(check ? { prediagnosis: check } : {}),
     }),
   }
 }
@@ -280,6 +286,18 @@ function diagnosisEvidence(d: CtrDiagnosis, ctx: ItemContext): EvidenceLine[] {
       claim: `同主题自家页面：${d.siblings.map(s => `${s.url}（曝光${s.impressions}、点击${s.clicks}，共同词：${s.sharedTerms.join('/')}）`).join('；')}`,
       source: '站内页面文本匹配 + 谷歌逐页数据', fetched_at: ctx.gscDay, confidence: '很可能',
     })
+  }
+  return out
+}
+
+function keywordPageEvidence(check: KeywordPageCheck, ctx: ItemContext): EvidenceLine[] {
+  const out: EvidenceLine[] = []
+  if (check.ranking.length > 0) {
+    const list = check.ranking.map(r => `${r.url}（曝光${r.impressions}、点击${r.clicks}、平均排第${r.position.toFixed(1)}）`).join('；')
+    out.push({ claim: `谷歌记录显示这些自家页在「${check.keyword}」上有曝光：${list}`, source: '谷歌搜索数据（该页查询）', fetched_at: ctx.gscDay, confidence: '确认' })
+  }
+  if (check.unreadableUrls.length > 0) {
+    out.push({ claim: `${check.unreadableUrls.length} 个页面的搜索词没读到：${check.unreadableUrls.join('、')}（这部分结论不完整）`, source: '谷歌搜索数据（该页查询）', fetched_at: ctx.gscDay, confidence: '假设' })
   }
   return out
 }

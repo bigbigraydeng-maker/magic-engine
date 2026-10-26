@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
+import { viewerFacts } from '@/lib/auth/home-entries'
+import { WorkspaceViewerProvider } from './workspace-viewer'
 
 interface Props {
   children: React.ReactNode
@@ -18,6 +20,8 @@ interface Props {
   /** 客户行业 —— 决定「房子」「行程单」这类行业专属入口显不显示。null = 认不出，一个都不给。 */
   clientIndustry: string | null
   roleLabel: string
+  /** 邮箱在 ADMIN_EMAILS 里，且不是受限管理员。由服务端算好，避免把名单打进浏览器包。 */
+  exactGlobalAdmin: boolean
 }
 
 // ── Nav definition ────────────────────────────────────────────────────────────
@@ -31,18 +35,22 @@ type NavItem = {
   /** Feature label shown in the upsell modal when self_serve clicks this. */
   paidOnlyFeature?: string
 }
-type NavSection = { title?: string; items: NavItem[] }
+type NavSection = { title?: string; items: NavItem[]; /** Folded by default; opens by itself when it holds the current page. */ collapsed?: boolean }
 
-const ADMIN_SECTIONS: NavSection[] = [
+export const ADMIN_SECTIONS: NavSection[] = [
   {
     items: [
       { key: 'overview',  label: 'Overview', mark: 'OV', href: '/dashboard' },
       { key: 'today',     label: '今日待办', mark: 'TD', href: '/dashboard/today' },
+      { key: 'learning',  label: 'Agent 学习库', mark: 'LB', href: '/dashboard/learning' },
+      { key: 'ad-approval',     label: '等你点头的广告',    mark: 'OK', href: '/dashboard/ad-approval' },
+      { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
+      { key: 'launch-signoff',  label: '上线签字',         mark: 'SG', href: '/dashboard/launch-signoff' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],
   },
   {
-    title: 'Create',
+    title: '出片与内容',
     items: [
       // 每天高频入口:看片 + 拍板。页面早就存在,但此前全站没有任何链接指向它,
       // 只能手敲 URL —— 等于不存在。排在本组第一位是因为它是日常最常来的地方。
@@ -50,23 +58,35 @@ const ADMIN_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Operate',
+    title: '广告与客人',
     items: [
-      { key: 'launch-hub',       label: 'Launch Hub',      mark: 'LH', href: '/dashboard/visuals' },
-      { key: 'analytics',        label: 'Analytics',       mark: 'AN', soon: true },
+      { key: 'ad-engine',       label: '广告',             mark: 'AE', href: '/dashboard/ad-engine' },
+      { key: 'voice',            label: '电话',           mark: 'VO', href: '/dashboard/voice' },
+      { key: 'conversions',      label: '转化',           mark: 'CV', href: '/dashboard/conversions' },
       { key: 'reports',          label: 'Reports',         mark: 'RP', href: '/dashboard/reports' },
-      { key: 'billing-monitor',  label: 'Billing Monitor', mark: 'BM', href: '/dashboard/admin/billing-monitor' },
+    ],
+  },
+  {
+    title: '账务与客户管理',
+    collapsed: true,
+    items: [
       { key: 'mtc-overview',     label: 'MTC Overview',    mark: 'MC', href: '/dashboard/admin/mtc-overview' },
-      { key: 'ai-gateway',       label: 'AI Gateway',      mark: 'AG', href: '/dashboard/admin/ai-gateway' },
-      { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
-      { key: 'user-console',     label: 'User Console',    mark: 'UC', href: '/dashboard/admin/users' },
       { key: 'prospecting',      label: 'Prospecting',     mark: 'PS', href: '/dashboard/admin/prospecting' },
-      { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
-      { key: 'cron-health',     label: 'Cron Health',     mark: 'CH', href: '/dashboard/admin/cron-health' },
+      { key: 'user-console',     label: 'User Console',    mark: 'UC', href: '/dashboard/admin/users' },
       { key: 'commerce',        label: '选品工作台',       mark: 'PI', href: '/dashboard/commerce' },
-      { key: 'ad-engine',       label: '广告引擎',         mark: 'AE', href: '/dashboard/ad-engine' },
-      { key: 'ad-approval',     label: '等你点头的广告',    mark: 'OK', href: '/dashboard/ad-approval' },
-      { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
+    ],
+  },
+  {
+    title: '系统与诊断',
+    collapsed: true,
+    items: [
+      { key: 'workflows-health', label: '自动任务健康',   mark: 'WH', href: '/dashboard/workflows-health' },
+      { key: 'cron-health',     label: 'Cron Health',     mark: 'CH', href: '/dashboard/admin/cron-health' },
+      { key: 'ai-gateway',       label: 'AI Gateway',      mark: 'AG', href: '/dashboard/admin/ai-gateway' },
+      { key: 'mcp-keys',         label: 'MCP Keys',       mark: 'MK', href: '/dashboard/admin/mcp-keys' },
+      { key: 'flywheel',         label: 'Flywheel',       mark: 'FW', href: '/dashboard/admin/flywheel' },
+      { key: 'industry-baselines', label: 'Industry Baselines', mark: 'IB', href: '/dashboard/industry-baselines' },
+      { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
       { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
       { key: 'product-map',     label: 'ME2 产品地图',    mark: 'PM', href: '/dashboard/me2/product-map' },
     ],
@@ -154,11 +174,11 @@ function buildSelfServeSections(clientId: string): NavSection[] {
         // ⚠️ 这里是 **self-serve 客户** 的导航,不是内部导航。
         // 「视频工厂」不能放这儿:middleware 对 client-viewer 只放行 /dashboard/clients/<自己>/**,
         // /dashboard/factory 会被直接 redirect 回工作台(点了没反应);就算放行,
-        // /api/factory/work-orders 是 guardAdmin,整页也只会是 403 红条。
+        // /api/factory/work-orders 要管理员登录态(requireAdminScope),整页也只会是 403 红条。
         // 内部人员的入口在 ADMIN_SECTIONS 里(不带 ?client=,跨客户总览)。
         { key: 'assets',  label: '素材库',   mark: 'AS', href: `/dashboard/clients/${clientId}/assets` },
-        { key: 'visuals', label: 'Visual Studio', mark: 'VS', href: '/dashboard/visuals' },
-        { key: 'content', label: 'Content',       mark: 'CT', href: '/dashboard/content' },
+        // 图片工厂(/dashboard/visuals)、内容日历(/dashboard/content)不放这儿:
+        // middleware 只对 paid_client 放行这两个地址,self_serve 点了会被弹回工作台。
       ],
     },
     {
@@ -227,7 +247,7 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
   ]
 }
 
-export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry }: Props) {
+export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry, roleLabel, exactGlobalAdmin }: Props) {
   const pathname = usePathname()
   const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
 
@@ -235,6 +255,7 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
   const isSelfServe = isClientViewer && userTier === 'self_serve'
   // 受限管理员（DEMO_ADMINS）：FDE 视角，但只在一个客户范围内
   const isScopedAdmin = userRole === 'admin' && Boolean(allowedClientId)
+  const facts = viewerFacts(userRole, allowedClientId, exactGlobalAdmin)
 
   const sections: NavSection[] | null = isScopedAdmin && allowedClientId
     ? buildScopedAdminSections(allowedClientId, clientIndustry)
@@ -273,7 +294,7 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
               Magic Engine
             </span>
             <span className="mt-[3px] block text-[10px] tracking-[.04em] text-white/35">
-              Admin cockpit
+              {roleLabel}
             </span>
           </span>
         </Link>
@@ -308,18 +329,29 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
             />
           ) : (
             ADMIN_SECTIONS.map((section, i) => (
-              <div key={i} className="mb-4">
-                {section.title && (
-                  <p className="mb-1.5 px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22">
-                    {section.title}
-                  </p>
-                )}
-                <div className="space-y-[2px]">
-                  {section.items.map(item => (
-                    <NavLink key={item.key} item={item} active={item.key === activeKey} />
-                  ))}
+              section.collapsed ? (
+                <details key={i} className="mb-4" open={section.items.some(item => item.key === activeKey)}>
+                  <summary className="mb-1.5 cursor-pointer select-none px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22 hover:text-white/40">{section.title} ▾</summary>
+                  <div className="space-y-[2px]">
+                    {section.items.map(item => (
+                      <NavLink key={item.key} item={item} active={item.key === activeKey} />
+                    ))}
+                  </div>
+                </details>
+              ) : (
+                <div key={i} className="mb-4">
+                  {section.title && (
+                    <p className="mb-1.5 px-3 text-[9.5px] font-black uppercase tracking-[.16em] text-white/22">
+                      {section.title}
+                    </p>
+                  )}
+                  <div className="space-y-[2px]">
+                    {section.items.map(item => (
+                      <NavLink key={item.key} item={item} active={item.key === activeKey} />
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )
             ))
           )}
         </nav>
@@ -353,7 +385,9 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
 
       {/* Main content */}
       <main className="min-w-0 flex-col">
-        {children}
+        <WorkspaceViewerProvider facts={facts}>
+          {children}
+        </WorkspaceViewerProvider>
       </main>
 
       {/* Phase X.S4 — upsell modal triggered by sidebar lock clicks. */}

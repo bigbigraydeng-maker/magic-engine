@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Estimate shipping costs in Australian dollars from Guangzhou to Australia. East Inter current freight rates, including chargeable weight and delivery options.">
+  <title>Shipping Cost Estimator | East Inter</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+    :root{--blue:#1952ec;--ink:#122440;--muted:#58667a;--line:#e1e7f0;--canvas:#f3f6fb;--soft:#eaf0ff;--focus:#edaa1c}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--canvas);color:var(--ink);font-family:'DM Sans',sans-serif;line-height:1.6}
+    a{color:inherit;text-decoration:none}button,input,select{font:inherit}button,select{cursor:pointer}button,input,select,a{-webkit-tap-highlight-color:transparent}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid var(--focus);outline-offset:4px}
+    .site-container{max-width:1280px;width:calc(100% - 96px);margin-inline:auto}.topbar{background:var(--ink);color:#fff;font-size:12px;letter-spacing:.3px;padding:9px 0}.topbar .site-container{display:flex;justify-content:space-between}.topbar a{color:#e0e9ff}
+    .site-header{height:103px;background:#fff;border-bottom:1px solid var(--line)}.header-inner{height:100%;display:flex;align-items:center;justify-content:space-between;gap:25px}.brand{display:flex;align-items:center;gap:12px;font-family:Manrope,sans-serif;font-size:21px;font-weight:800;letter-spacing:1px;line-height:1.4}.brand small{display:block;font-size:12px;letter-spacing:2px;font-weight:600}.mark{background:var(--blue);color:#fff;font-size:31px;letter-spacing:-2px;display:flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:11px}.mark span{font-size:20px;align-self:flex-start;margin-top:3px}.site-nav{display:flex;align-items:center;gap:29px;font-size:14px;font-weight:500}.site-nav>a:not(.home-link):hover{color:var(--blue)}.home-link{background:var(--blue);color:#fff;padding:12px 19px;border-radius:6px;font-size:14px;font-weight:700;white-space:nowrap}.home-link:hover{background:#1040c3}
+    main{max-width:1180px;margin:auto;padding:47px 40px 42px}.intro{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:32px}.eyebrow{font-size:12px;font-weight:700;letter-spacing:1.7px;color:var(--blue);margin:0 0 10px}h1,h2,h3{font-family:Manrope,sans-serif}h1{font-size:clamp(34px,4vw,50px);line-height:1.13;letter-spacing:-2px;margin:0 0 13px;color:var(--ink)}.intro p:last-child{margin:0;color:var(--muted);font-size:14px}.rate-tag{white-space:nowrap;display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--line);border-radius:30px;padding:8px 14px;font-size:12px;color:var(--blue);margin-bottom:4px}.dot{height:6px;width:6px;background:var(--blue);border-radius:50%}
+    .layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:24px;align-items:start}.card{background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 35px #12244007}.form-card{padding:28px 30px}.step{border:0;padding:0;margin:0 0 26px;min-width:0}.step:last-child{margin-bottom:0}.step legend,.step-title{padding:0;display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700;margin-bottom:15px}.step-no{width:24px;height:24px;display:inline-grid;place-items:center;border-radius:50%;background:var(--soft);color:var(--blue);font-size:12px;font-weight:800}.step-title label{cursor:pointer}.services{display:grid;grid-template-columns:1fr 1fr;gap:10px}.service{border:1px solid var(--line);border-radius:9px;background:#fff;text-align:left;padding:15px 14px;position:relative;color:var(--ink);min-height:103px;transition:background .15s,border-color .15s}.service:hover{border-color:#91a4c6;background:#f8faff}.service[aria-pressed="true"]{border:2px solid var(--blue);padding:14px 13px;background:var(--soft)}.service .symbol{display:block;font-size:19px;color:var(--blue);line-height:1;margin-bottom:10px}.service .label{display:block;font-size:14px;font-weight:700}.service small{display:block;overflow-wrap:anywhere;color:var(--muted);font-size:12px;margin-top:2px;letter-spacing:.3px}.check{position:absolute;right:12px;top:11px;border:1px solid #c7cfdd;width:16px;height:16px;border-radius:50%;font-size:12px;text-align:center;line-height:14px;color:transparent}.service[aria-pressed="true"] .check{background:var(--blue);color:#fff;border-color:var(--blue)}
+    select{width:100%;height:48px;border:1px solid #dce3ed;border-radius:6px;background:#fff;color:var(--ink);padding:0 12px;font-size:14px}.measurement{display:flex;border:1px solid #dce3ed;border-radius:6px;overflow:hidden;align-items:center}.measurement:focus-within{outline:3px solid var(--focus);outline-offset:3px}.measurement input{width:100%;min-width:0;border:0;background:transparent;font-size:22px;font-weight:650;color:var(--blue);padding:10px 14px;outline:none}.measurement span{padding:0 16px;white-space:nowrap;color:var(--muted);font-size:13px}.hint{font-size:12px;line-height:1.7;color:var(--muted);margin:8px 0 0}.options{margin-top:17px}.options label{font-size:12px;font-weight:650;display:block;margin-bottom:7px}.segmented{display:grid;grid-template-columns:1fr 1fr;gap:8px}.segmented button{border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);font-size:12px;padding:10px 6px}.segmented button[aria-pressed="true"]{background:var(--soft);border-color:var(--blue);color:var(--blue);font-weight:700}.error{font-size:12px;color:#a73125;margin:8px 0 0}[hidden]{display:none!important}
+    .quote{overflow:hidden}.quote-top{background:var(--ink);color:white;padding:28px 28px 24px;position:relative}.quote-top:after{content:"";position:absolute;right:-37px;top:-59px;width:180px;height:180px;border:1px solid #ffffff12;border-radius:50%;pointer-events:none}.quote-label{font-size:12px;font-weight:700;letter-spacing:2px;color:#c4cee4;margin:0 0 7px}.quote-top h2{font-size:14px;font-weight:500;margin:0;color:#edf1fa}.price{display:flex;align-items:baseline;gap:10px;margin:7px 0 1px;flex-wrap:wrap}.price strong{font-family:Manrope,sans-serif;font-size:clamp(38px,4.6vw,53px);line-height:1.25;letter-spacing:-1.5px;font-weight:750;overflow-wrap:anywhere}.price span{font-size:12px;color:#c4cee4;letter-spacing:1px}.quote-subtitle{font-size:12px;color:#c4cee4;margin:9px 0 0}.transit{display:flex;align-items:center;gap:10px;margin-top:23px;padding-top:17px;border-top:1px solid #ffffff24;font-size:12px;color:#c4cee4}.transit strong{text-align:right;color:white;font-size:13px;margin-left:auto}.quote-body{padding:24px 28px}.route{display:flex;align-items:center;gap:11px;padding-bottom:19px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted)}.route .route-city{min-width:0;overflow-wrap:anywhere;font-weight:700;color:var(--blue)}.route .route-line{height:1px;background:var(--line);flex:1;min-width:12px}.breakdown-heading{display:flex;justify-content:space-between;align-items:center;margin:20px 0 13px}.breakdown-heading h3{font-size:13px;margin:0}.breakdown-heading span{font-size:12px;color:var(--muted)}.line-item{display:flex;justify-content:space-between;align-items:baseline;gap:15px;font-size:12px;margin:11px 0;color:var(--muted)}.line-item span:first-child{min-width:0;overflow-wrap:anywhere}.line-item strong{white-space:nowrap;font-weight:600;color:var(--ink)}.line-total{border-top:1px dashed var(--line);padding-top:14px;margin-top:15px;font-size:13px;font-weight:700;color:var(--blue)}.line-total strong{color:var(--blue)}.note{border-radius:8px;background:#f5f7fa;padding:12px 14px;font-size:12px;line-height:1.8;color:var(--muted);margin:18px 0 0}.surcharge{background:#fff7e7;color:#704400;border-left:3px solid var(--focus)}.contact{display:block;margin-top:20px;background:var(--blue);border-radius:6px;text-decoration:none;text-align:center;color:#fff;font-size:13px;font-weight:700;padding:13px}.contact:hover{background:#1040c3}.disclaimer{text-align:center;font-size:12px;color:var(--muted);margin:9px 0 0}.below{display:flex;justify-content:center;gap:24px;color:var(--muted);font-size:12px;margin:25px 0 0}.below span{display:flex;align-items:center;gap:7px}.below i{font-style:normal;color:var(--blue)}
+    .site-footer{background:#fff;border-top:1px solid var(--line);padding:48px 0 24px}.footer-top{display:grid;grid-template-columns:2fr 1fr 1fr;gap:55px}.site-footer p{font-size:12px;color:var(--muted)}.site-footer h3{font-size:12px;letter-spacing:.4px;margin:0 0 12px}.site-footer .footer-links{display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--muted)}.site-footer .footer-links a:hover{color:var(--blue)}.footer-bottom{display:flex;justify-content:space-between;border-top:1px solid var(--line);padding-top:18px;margin-top:35px;font-size:12px;color:var(--muted)}
+    @media(max-width:900px){.site-nav>a:not(.home-link){display:none}.layout{grid-template-columns:1fr}.footer-top{grid-template-columns:1fr 1fr}.footer-top>div:first-child{grid-column:1/-1}}
+    @media(max-width:800px){.site-container{width:calc(100% - 48px)}.site-header{height:87px}.header-inner{padding:0}.topbar{font-size:12px}main{padding:30px 24px 34px}.intro{display:block}.rate-tag{display:inline-flex;margin-top:18px}.quote-top{padding:25px}.quote-body{padding:22px 25px}.price strong{font-size:48px}}
+    @media(max-width:520px){.topbar .site-container span{display:none}.topbar .site-container{justify-content:flex-end}.site-container{width:calc(100% - 32px)}.site-header{height:78px}.brand{gap:9px;font-size:18px}.mark{width:43px;height:43px;font-size:25px}.mark span{font-size:16px}.brand small{font-size:12px}.home-link{padding:9px 12px;font-size:12px}.site-nav{gap:0}main{padding:27px 16px 30px}h1{font-size:34px;letter-spacing:-1.2px;max-width:340px}.intro{margin-bottom:23px}.intro p:last-child{font-size:12px}.form-card{padding:22px 20px}.services{gap:9px}.service{padding:13px 11px}.service[aria-pressed="true"]{padding:12px 10px}.service small{font-size:12px}.below{gap:14px;font-size:12px}.quote-top,.quote-body{padding:23px}.price strong{font-size:46px}.footer-top{grid-template-columns:1fr;gap:28px}.footer-top>div:first-child{grid-column:auto}.footer-bottom{display:block}.footer-bottom span{display:block;margin-top:6px}}
+    @media(max-width:390px){.brand>span:last-child{display:none}.below{flex-wrap:wrap}.home-link{font-size:12px}.form-card{padding:20px 16px}.quote-top,.quote-body{padding:21px 19px}}
+    @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+  .brand-logo{max-width:100%}@media(max-width:390px){.brand-logo{height:34px!important}}
+  </style>
+<script src="/tracking-config.js"></script>
+  <script src="/tracking.js" defer></script>
+</head>
+<body>
+  <div class="topbar"><div class="site-container"><span>From China. To your door in Australia.</span><a href="mailto:zzj@eastinter.net">Talk to our freight team ↗</a></div></div>
+  <header class="site-header"><div class="header-inner site-container"><a class="brand" href="/" aria-label="East Inter home"><img src="/assets/east-inter-logo.svg" alt="East Inter International Logistics" width="326" height="80" class="brand-logo" style="height:50px;width:auto;display:block"></a><nav class="site-nav" aria-label="Main navigation"><a href="/#services">Our services</a><a href="/eastinter-pricing-calculator" aria-current="page">Pricing calculator</a><a href="/#how">How it works</a><a href="/#coverage">Destinations</a><a class="home-link" href="/" aria-label="Back to East Inter home page">Back to home ↗</a></nav></div></header>
+  <main>
+    <div class="intro"><div><p class="eyebrow">PLAN YOUR SHIPMENT</p><h1>Shipping Cost Estimator</h1><p>Guangzhou to Australia. Get an instant estimate in Australian dollars.</p></div><div class="rate-tag"><span class="dot"></span> <span id="rate-tag-text">CURRENT RATES</span></div></div>
+    <div class="layout">
+      <section class="card form-card" aria-label="Shipping options">
+        <fieldset class="step"><legend><span class="step-no">01</span>Choose your service</legend><div class="services">
+          <button class="service" type="button" data-service="lcl" aria-pressed="true"><span class="symbol" aria-hidden="true">▤</span><span class="check" aria-hidden="true">✓</span><span class="label">LCL sea freight</span><small>DOOR TO DOOR · CLEARANCE INCLUDED</small></button>
+          <button class="service" type="button" data-service="airParcel" aria-pressed="false"><span class="symbol" aria-hidden="true">✈</span><span class="check" aria-hidden="true">✓</span><span class="label">Air parcel</span><small>BILLED PER 0.5kg</small></button>
+          <button class="service" type="button" data-service="seaParcel" aria-pressed="false"><span class="symbol" aria-hidden="true">▱</span><span class="check" aria-hidden="true">✓</span><span class="label">Sea parcel</span><small>BILLED PER kg</small></button>
+          <button class="service" type="button" data-service="bulkAir" aria-pressed="false"><span class="symbol" aria-hidden="true">↗</span><span class="check" aria-hidden="true">✓</span><span class="label">Bulk air freight</span><small>AIR FREIGHT · 10–99kg</small></button>
+        </div></fieldset>
+        <div class="step"><div class="step-title"><span class="step-no">02</span><label for="city">Choose your destination</label></div><select id="city"></select>
+          <div class="options" id="delivery-options" hidden><label for="delivery">Delivery option</label><select id="delivery"><option value="door">Add door delivery</option><option value="collection">Warehouse collection (no delivery fee)</option></select></div>
+          <div class="options" id="cargo-options" hidden><label for="cargo">Goods type</label><select id="cargo"><option value="normal">General goods</option><option value="sensitive">Sensitive goods (powders / liquids / batteries)</option></select></div>
+          <div class="options" id="tax-options" hidden><div class="hint" style="margin:0 0 7px">Duties & taxes</div><div class="segmented" role="group" aria-label="Duties & taxes"><button type="button" data-tax="DDU" aria-pressed="false">DDU · Duties unpaid</button><button type="button" data-tax="DDP" aria-pressed="true">DDP · Duties prepaid</button></div></div>
+        </div>
+        <div class="step"><div class="step-title"><span class="step-no">03</span><label id="quantity-label" for="quantity">Enter shipment volume</label></div><div class="measurement"><input id="quantity" type="number" inputmode="decimal" min="1" step="any" value="5" aria-describedby="quantity-hint quantity-error"><span id="unit">m³ / CBM</span></div><p class="hint" id="quantity-hint"></p><p class="error" id="quantity-error" role="alert" hidden></p><div class="options" id="lcl-weight-options"><label for="lcl-weight">Total cargo weight (kg, optional)</label><div class="measurement"><input id="lcl-weight" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional"><span>kg</span></div><p class="hint">Cargo over 500kg per m³ is charged at 500kg = 1 m³. If omitted, the estimate uses volume only.</p></div><div class="options" id="volume-options" hidden><label for="volume">Total packed volume (m³, optional)</label><div class="measurement"><input id="volume" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional" aria-describedby="volume-hint"><span>m³ / CBM</span></div><p class="hint" id="volume-hint">Volume weight = L × W × H (cm) ÷ 6,000, or total m³ × 1,000,000 ÷ 6,000. We use the greater of actual and volume weight. If omitted, the estimate uses actual weight only.</p></div></div>
+          <div class="options" id="postcode-options" hidden><label for="postcode">Delivery postcode (optional)</label><div class="measurement"><input id="postcode" type="text" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="e.g. 2000" autocomplete="postal-code" aria-describedby="postcode-hint"><span>AU</span></div><p class="hint" id="postcode-hint">Some remote postcodes carry an extra per-kg charge. Enter the delivery postcode to include it.</p></div>
+      </section>
+      <aside class="card quote" aria-label="Live shipping estimate" aria-live="polite" aria-atomic="true">
+        <div class="quote-top"><p class="quote-label">YOUR SHIPPING ESTIMATE</p><h2 id="estimate-title">Estimated shipping cost</h2><div class="price"><strong id="price">—</strong><span>AUD</span></div><p class="quote-subtitle" id="quote-subtitle"></p><div class="transit"><span aria-hidden="true">◷</span><span>Estimated transit time</span><strong id="transit">—</strong></div></div>
+        <div class="quote-body"><div class="route"><span>GUANGZHOU</span><span class="route-line"></span><span aria-hidden="true">→</span><span class="route-city" id="route-city">Sydney</span></div><div class="breakdown-heading"><h3>Cost breakdown</h3><span>PRICE BREAKDOWN</span></div><div id="breakdown"></div><p id="surcharge" class="note surcharge" hidden></p><p class="note" id="pricing-note"></p><a class="contact" href="mailto:info@eastinter.com.au">Request a binding quote ↗</a><p class="disclaimer">Estimates are indicative. Final charges are subject to a binding quote.</p></div>
+      </aside>
+    </div>
+    <div class="below"><span><i>✓</i> Instant estimates</span><span><i>✓</i> Clear breakdown</span><span><i>✓</i> No sign-up</span></div>
+  </main>
+  <footer class="site-footer"><div class="site-container"><div class="footer-top"><div><a class="brand" href="/"><img src="/assets/east-inter-logo.svg" alt="East Inter International Logistics" width="326" height="80" class="brand-logo" style="height:50px;width:auto;display:block"></a><p>Your China–Australia freight connection.<br>广州东际国际货运代理有限公司</p></div><div><h3>Explore</h3><div class="footer-links"><a href="/">Home</a><a href="/#services">Our services</a><a href="/eastinter-pricing-calculator">Pricing calculator</a><a href="/#coverage">Destinations</a></div></div><div><h3>Let's talk</h3><div class="footer-links"><a href="mailto:zzj@eastinter.net">zzj@eastinter.net ↗</a><a href="tel:+862082507023">+86 20 8250 7023</a><a href="mailto:info@eastinter.com.au">Request a binding quote</a><a href="/privacy">Privacy policy</a></div></div></div><div class="footer-bottom"><span>© 2026 East Inter International Logistics.</span><span>All prices in AUD · <span id="footer-effective">Current</span> rates</span></div></div></footer>
+  <script src="pricing-rates.js"></script>
+  <script src="pricing-engine.js"></script>
+  <script>
+    'use strict';
+    const engine = EastInterEngine.createEngine(EastInterRates);
+    document.getElementById('rate-tag-text').textContent=EastInterRates.effective.toUpperCase()+' RATES';
+    document.getElementById('footer-effective').textContent=EastInterRates.effective;
+    document.querySelector('meta[name=description]').content=document.querySelector('meta[name=description]').content.replace('current',EastInterRates.effective.toLowerCase());
+    const {cities,estimate} = engine, lclRates = engine.rates.lcl;
+    const {number,money} = EastInterEngine;
+    const serviceNames = {lcl:'LCL sea freight',airParcel:'Air parcel',seaParcel:'Sea parcel',bulkAir:'Bulk air freight'};
+    const $ = id => document.getElementById(id);
+    let service = 'lcl', tax = 'DDP';
+    const savedQuantities = {lcl:'5',airParcel:'2',seaParcel:'25',bulkAir:'50'};
+    function updateCities() {
+      const previous=$('city').value; $('city').replaceChildren();
+      Object.entries(cities).forEach(([key,label]) => {if (service !== 'lcl' || lclRates[key]) $('city').add(new Option(label,key));});
+      if ([...$('city').options].some(option => option.value === previous)) $('city').value=previous;
+    }
+    function selectService(next) {
+      savedQuantities[service]=$('quantity').value; service=next;
+      document.querySelectorAll('[data-service]').forEach(button => button.setAttribute('aria-pressed',String(button.dataset.service === service)));
+      $('cargo-options').hidden=service !== 'airParcel'; $('tax-options').hidden=service !== 'bulkAir'; $('volume-options').hidden=service === 'lcl'; $('lcl-weight-options').hidden=service !== 'lcl'; $('postcode-options').hidden=service !== 'bulkAir';
+      $('quantity-label').textContent=service === 'lcl' ? 'Enter shipment volume' : 'Enter actual shipment weight';
+      $('unit').textContent=service === 'lcl' ? 'm³ / CBM' : 'kg';
+      $('quantity').min=service === 'lcl' ? '1' : '0.01';
+      $('quantity').removeAttribute('max'); $('quantity').value=savedQuantities[service];
+      updateCities(); calculate();
+    }
+    function row(label,value,total=false) {
+      const div=document.createElement('div'); div.className='line-item'+(total?' line-total':'');
+      const text=document.createElement('span'),amount=document.createElement('strong'); text.textContent=label; amount.textContent=value;
+      div.append(text,amount); $('breakdown').append(div);
+    }
+    function calculate() {
+      const city=$('city').value,quantity=$('quantity').valueAsNumber;
+      $('delivery-options').hidden=!(service === 'lcl' && lclRates[city]?.optional);
+      $('quantity-hint').textContent={
+        lcl:'1 CBM = 1 cubic metre. Minimum: 1 m³; extra volume is prorated. At 10 m³ and above, the reduced first-CBM rate applies.',
+        airParcel:'Small parcels: under approximately 10kg. Chargeable weight is rounded up to the next 0.5kg.',
+        seaParcel:'Chargeable weight is rounded up to a whole kg. At 20kg billed weight and above, the flat per-kg rate applies.',
+        bulkAir:'10–99kg chargeable weight only. Both DDU and DDP are priced per kg, rounded up to the next whole kg.'
+      }[service];
+      const quote=estimate({service,city,quantity,cargo:$('cargo').value,tax,delivery:$('delivery').value,volume:$('volume').value.trim()===''?null:$('volume').valueAsNumber,weightKg:$('lcl-weight').value.trim()===''?null:$('lcl-weight').valueAsNumber,postcode:$('postcode').value.trim()===''?null:$('postcode').value.trim()});
+      $('route-city').textContent=cities[city]; $('breakdown').replaceChildren();
+      $('quantity-error').textContent=quote.error||''; $('quantity-error').hidden=!quote.error;
+      const errField=!quote.error?null:/packed volume/.test(quote.error)?'volume':/cargo weight/.test(quote.error)?'lcl-weight':/postcode/.test(quote.error)?'postcode':'quantity';
+      ['quantity','volume','lcl-weight','postcode'].forEach(id => {const bad=id === errField; $(id).setAttribute('aria-invalid',String(bad)); if (bad) $(id).setAttribute('aria-describedby',[...new Set([...($(id).getAttribute('aria-describedby')||'').split(' ').filter(Boolean),'quantity-error'])].join(' '));});
+      $('surcharge').hidden=!quote.warning; $('surcharge').textContent=quote.warning||'';
+      $('estimate-title').textContent=service === 'bulkAir' && tax === 'DDP' ? 'Estimated total, tax included' : 'Estimated freight charges';
+      if (quote.error) {
+        $('price').textContent='—'; $('transit').textContent='—'; $('quote-subtitle').textContent='Check shipment details'; $('pricing-note').textContent=quote.error; row('No estimate available','—'); return;
+      }
+      $('price').textContent=money(quote.total); $('transit').textContent=quote.days;
+      $('quote-subtitle').textContent=serviceNames[service]+' · '+number(service === 'lcl'?quantity:quote.billed)+(service === 'lcl'?' m³':'kg billed')+(service === 'bulkAir'?' · '+tax:'');
+      quote.lines.forEach(([label,amount]) => row(label,money(amount)));
+      row('Estimated '+(service === 'bulkAir' && tax === 'DDP'?'total':'freight total'),money(quote.total),true);
+      $('pricing-note').textContent=quote.note;
+    }
+    document.querySelectorAll('[data-service]').forEach(button => button.addEventListener('click',() => selectService(button.dataset.service)));
+    document.querySelectorAll('[data-tax]').forEach(button => button.addEventListener('click',() => {
+      tax=button.dataset.tax; document.querySelectorAll('[data-tax]').forEach(item => item.setAttribute('aria-pressed',String(item.dataset.tax === tax))); calculate();
+    }));
+    ['city','cargo','delivery'].forEach(id => $(id).addEventListener('change',calculate));
+    ['quantity','volume','lcl-weight','postcode'].forEach(id => $(id).addEventListener('input',calculate));
+    const params=new URLSearchParams(window.location.search);
+    const requestedService=['lcl','airParcel','seaParcel','bulkAir'].includes(params.get('service'))?params.get('service'):'lcl';
+    selectService(requestedService);
+    if ([...$('city').options].some(option => option.value === params.get('city'))) $('city').value=params.get('city');
+    const requestedQuantity=Number(params.get('quantity'));
+    if (Number.isFinite(requestedQuantity) && requestedQuantity > 0) $('quantity').value=String(requestedQuantity);
+    calculate();
+</script>
+</body>
+</html>

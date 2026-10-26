@@ -77,7 +77,7 @@ export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
       <Grain />
       <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>
       <AbsoluteFill style={{ background: '#000', opacity: 1 - fade }} />
-      <Audio src={staticFile(props.musicFile)} volume={vol} />
+      <Audio src={staticFile(props.musicFile)} volume={vol * (props.musicGain ?? 1)} />
     </AbsoluteFill>
   )
 }

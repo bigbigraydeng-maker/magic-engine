@@ -13,23 +13,38 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer, rejectAgentAdsCapWrite } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, parseCreativePool, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import {
+  loadAdStrategyConfig, loadAdStrategyConfigWithSource, loadConfigVersion, loadConfigWithVersion, parseCreativePool, writeConfigCas,
+  type ConfigVersion, type CreativePoolEntry,
+} from '@/lib/ads-strategy/config'
 import { notifyAutonomyModeChanged } from '@/lib/ads-strategy/autonomy/notify'
 
 export const dynamic = 'force-dynamic'
+
+/** 推广期相关的素材池键：只许 /creative-pool/promo-window 写。 */
+const PROMO_ENTRY_KEYS = ['promo_window', 'alias_refs', 'promo_window_set_by', 'promo_window_set_at', 'promo_window_changed_at']
 
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
+  const deniedRead = await rejectAgentAdsBearer(_req, { clientId, action: 'outside_allowlist' })
+  if (deniedRead) return deniedRead
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
-  const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config })
+  const loaded = await loadConfigWithVersion(clientId)
+  if (!loaded.ok) {
+    return NextResponse.json(
+      { error: 'config_version_unreadable', message: '读不到设置版本，请稍后再试。' },
+      { status: 503 },
+    )
+  }
+  return NextResponse.json({ success: true, config: loaded.config, version: loaded.version })
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -39,6 +54,8 @@ export async function PATCH(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
+  const denied = await rejectAgentAdsCapWrite(req, clientId)
+  if (denied) return denied
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
@@ -58,6 +75,7 @@ export async function PATCH(
     daily_budget_cap_cents?: unknown
     autonomy_mode?: unknown
     creative_pool?: unknown
+    expected_version?: unknown
   }
   try {
     body = await req.json()
@@ -65,9 +83,47 @@ export async function PATCH(
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  // expected_version 是界面带回的乐观锁版本：只接受 string 或 null，其它一律拒（放在其它校验之前，不写库）。
+  if (body.expected_version !== undefined && body.expected_version !== null && typeof body.expected_version !== 'string') {
+    return NextResponse.json({ error: 'expected_version must be a string or null' }, { status: 400 })
+  }
+
+  // 带 creative_pool 却没带 expected_version：没有版本比较的整数组重写，并发下会互相覆盖，
+  // 而且界面拿不到版本时可能是在「内容读失败回落默认配置」的页面上操作——那样保存会把已批准素材删光。
+  // 所以直接拒绝，让用户刷新页面拿到版本再保存。只改上限/模式等（不带 creative_pool）的请求不受影响。
+  if (body.creative_pool !== undefined && body.expected_version === undefined) {
+    return NextResponse.json(
+      { error: 'expected_version_required', message: '页面版本信息缺失，请刷新页面后再保存素材。' },
+      { status: 428 },
+    )
+  }
+
   const update: Record<string, unknown> = { client_id: clientId, updated_at: new Date().toISOString() }
   const updatedAt = String(update.updated_at)
-  const before = await loadAdStrategyConfig(clientId)
+  // 🔴 读不出改之前的设置时，不拿默认值（observe）当「改之前」：那样把自动模式改回 observe
+  //    会被判成「没变」、不发收紧事件（魏征复审）。也不拒绝保存：设置表持续读不出时，
+  //    收紧（调低上限 / 改回 observe）正是最需要能存进去的操作（卫青复审）。
+  //    before = null 表示「不知道改之前是什么」，下面一律按「变了」发叫醒铃。
+  // 改素材池是整数组读改写：先读版本、再读内容，写的时候带版本比较（并发保存会得到 409，不会互相覆盖）。
+  let poolVersion: ConfigVersion | null = null
+  if (body.creative_pool !== undefined) {
+    const v = await loadConfigVersion(clientId)
+    if (!v.ok) return NextResponse.json({ error: v.error }, { status: 503 })
+    poolVersion = v.version
+  }
+  // 界面带回的版本与当前版本比较：不一致说明别处已经改过，拒绝保存（不写库）。
+  // 没带 expected_version 时行为完全不变（老客户端照常保存）。
+  if (body.expected_version !== undefined && poolVersion !== null) {
+    const currentVersion = poolVersion.exists ? poolVersion.updatedAt : null
+    if (body.expected_version !== currentVersion) {
+      return NextResponse.json(
+        { error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新页面后再保存。' },
+        { status: 409 },
+      )
+    }
+  }
+  const loadedBefore = await loadAdStrategyConfigWithSource(clientId)
+  const before = loadedBefore.source === 'fallback' ? null : loadedBefore.config
 
   if (body.enabled !== undefined) {
     if (typeof body.enabled !== 'boolean') {
@@ -114,27 +170,104 @@ export async function PATCH(
     if (tainted) {
       return NextResponse.json({ error: 'creative_pool approval must go through /creative-pool/approve' }, { status: 400 })
     }
+    // 推广期、别名及其时间戳只能走 /creative-pool/promo-window（它记录是谁、什么时候设的）。
+    // 这条通用路由既不接受客户端带这些键，也不能在重写素材池时把已有的抹掉。
+    const promoTainted = body.creative_pool.some(e =>
+      typeof e === 'object' && e !== null && PROMO_ENTRY_KEYS.some(k => k in e))
+    if (promoTainted) {
+      return NextResponse.json({ error: 'promo_window / alias_refs must go through /creative-pool/promo-window' }, { status: 400 })
+    }
     const parsed = parseCreativePool(body.creative_pool)
     if (parsed.length !== body.creative_pool.length) {
-      return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref, status=candidate)' }, { status: 400 })
+      return NextResponse.json({ error: 'creative_pool has malformed entries (need kind, ref and a recognised status)' }, { status: 400 })
     }
-    update.creative_pool = parsed.map((e): CreativePoolEntry => ({ kind: e.kind, ref: e.ref, status: 'candidate' }))
+    // 同一个 ref 在请求体里出现两次：无法判断哪条是「真身」，整请求拒绝（不静默取其一）。
+    if (new Set(parsed.map(e => e.ref)).size !== parsed.length) {
+      return NextResponse.json(
+        { error: 'creative_pool_duplicate_ref', message: '请求里有重复的视频编号，已拒绝保存。' },
+        { status: 400 },
+      )
+    }
+    // 读不出现有素材池就没法保住已有的推广期 —— 拒绝重写素材池，其它设置照常能存。
+    if (before === null) {
+      return NextResponse.json({ error: 'creative_pool_existing_unreadable' }, { status: 503 })
+    }
+    // 已存在的素材，kind 以库里为准：客户端把 meta_video 写成 work_order（或反过来）会让
+    // 同一条素材的推广期/别名挂到错误的类型上，整请求拒绝。
+    const kindMismatch = parsed.find(e => {
+      const existing = before.creative_pool.find(x => x.ref === e.ref)
+      return existing !== undefined && existing.kind !== e.kind
+    })
+    if (kindMismatch) {
+      return NextResponse.json(
+        { error: 'creative_pool_kind_mismatch', ref: kindMismatch.ref, message: '素材类型和库里不一致，已拒绝保存。' },
+        { status: 400 },
+      )
+    }
+    // 新加的素材 id 不得恰好是别的素材已登记的别名（否则同一个视频会同时属于两条素材）。
+    const aliasOwner = parsed.find(e =>
+      !before.creative_pool.some(x => x.ref === e.ref) &&
+      before.creative_pool.some(x => x.alias_refs?.includes(e.ref)))
+    if (aliasOwner) {
+      return NextResponse.json(
+        { error: 'ref_conflicts_with_existing_alias', ref: aliasOwner.ref, message: '这个视频编号已经是别的素材登记的别名，不能当成新素材添加。' },
+        { status: 400 },
+      )
+    }
+    update.creative_pool = parsed.map((e): CreativePoolEntry => {
+      const existing = before.creative_pool.find(x => x.ref === e.ref)
+      // 已存在的素材保持原有批准状态（界面保存素材池时会把旧条目一起提交，不能因此把已批准的全降回候选）；
+      // 新加的素材一律是候选。这里只是「保留服务端已有的」，客户端带 approved 仍然在上面被拒。
+      const next: CreativePoolEntry = { kind: e.kind, ref: e.ref, status: existing?.status ?? 'candidate' }
+      if (existing?.approved_by !== undefined) next.approved_by = existing.approved_by
+      if (existing?.approved_at !== undefined) next.approved_at = existing.approved_at
+      if (existing?.promo_window !== undefined) next.promo_window = existing.promo_window
+      if (existing?.alias_refs !== undefined) next.alias_refs = existing.alias_refs
+      if (existing?.promo_window_set_by !== undefined) next.promo_window_set_by = existing.promo_window_set_by
+      if (existing?.promo_window_set_at !== undefined) next.promo_window_set_at = existing.promo_window_set_at
+      if (existing?.promo_window_changed_at !== undefined) next.promo_window_changed_at = existing.promo_window_changed_at
+      return next
+    })
   }
 
-  const { error } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .upsert(update, { onConflict: 'client_id' })
+  // 通知用的时间戳：素材池路径走 writeConfigCas，实际写入的 updated_at 由它决定（可能被顶到
+  // version.updatedAt + 1ms），所以要用它返回的 updatedAt；非素材池路径走 upsert，用 update.updated_at。
+  let notifyUpdatedAt = updatedAt
+  if (poolVersion !== null) {
+    const written = await writeConfigCas(clientId, update, poolVersion)
+    if (!written.ok) {
+      if (written.kind === 'conflict') {
+        return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新页面后再保存。' }, { status: 409 })
+      }
+      return NextResponse.json({ error: written.message }, { status: 500 })
+    }
+    notifyUpdatedAt = written.updatedAt
+  } else {
+    const { error } = await supabaseAdmin
+      .from('ad_strategy_configs')
+      .upsert(update, { onConflict: 'client_id' })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   // 意向真的变了才发叫醒铃（spec §4.4）；发送失败不影响保存，每日 reconcile 会追上。
   const envelopeChanged =
-    (update.autonomy_mode !== undefined && update.autonomy_mode !== before.autonomy_mode) ||
-    (update.daily_budget_cap_cents !== undefined && update.daily_budget_cap_cents !== before.daily_budget_cap_cents)
+    (update.autonomy_mode !== undefined && (before === null || update.autonomy_mode !== before.autonomy_mode)) ||
+    (update.daily_budget_cap_cents !== undefined &&
+      (before === null || update.daily_budget_cap_cents !== before.daily_budget_cap_cents))
   const syncEvents = envelopeChanged
-    ? await notifyAutonomyModeChanged(clientId, updatedAt, { relaxed: true })
+    ? await notifyAutonomyModeChanged(clientId, notifyUpdatedAt, { relaxed: true })
     : { sent: false, events: 0 }
 
-  const config = await loadAdStrategyConfig(clientId)
-  return NextResponse.json({ success: true, config, sync_events: syncEvents })
+  const loaded = await loadConfigWithVersion(clientId)
+  if (!loaded.ok) {
+    // 保存已经成功，只是读回版本失败：仍返回 200，让界面自己重新加载（不带 version 键）。
+    return NextResponse.json({
+      success: true,
+      config: await loadAdStrategyConfig(clientId),
+      version_unreadable: true,
+      sync_events: syncEvents,
+    })
+  }
+  return NextResponse.json({ success: true, config: loaded.config, version: loaded.version, sync_events: syncEvents })
 }

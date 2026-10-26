@@ -19,11 +19,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+vi.mock('@/lib/whatsapp/credentials', () => ({ resolveWhatsAppCredentials: vi.fn() }))
 
 import { whatsappWindow, sendWhatsApp, CUSTOMER_SERVICE_WINDOW_MS } from '../send'
 import { supabaseAdmin } from '@/lib/supabase'
+import { resolveWhatsAppCredentials } from '@/lib/whatsapp/credentials'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
+const mockResolveCreds = vi.mocked(resolveWhatsAppCredentials)
 
 const CTS = 'c0000000-0000-0000-0000-000000000000'
 const OZTOP = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
@@ -177,8 +180,12 @@ describe('sendWhatsApp', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
-    process.env.WHATSAPP_ACCESS_TOKEN = 'test-token'
-    process.env.WHATSAPP_PHONE_NUMBER_ID = OUR_NUMBER
+    // 凭据解析本身有自己的测试；这里只关心 send.ts 怎么用它。
+    // 默认返回 env 风格的凭据，让原本依赖 env 的用例保持原意。
+    mockResolveCreds.mockResolvedValue({
+      ok: true,
+      credentials: { accessToken: 'test-token', phoneNumberId: OUR_NUMBER, source: 'env' },
+    })
     // 默认让 fetch 炸 —— 任何**不该**打网络的用例一旦打了，就会以明显的方式失败，
     // 而不是安静地发出一个真实请求。
     global.fetch = vi.fn(() => {
@@ -241,6 +248,25 @@ describe('sendWhatsApp', () => {
     expect(captured.filters.conversation_messages.__order_sent_at).toBe(false)
   })
 
+  it('2026-10-22 PM：机器发的（自动安抚 / AI 起草经人批准发出）触点标 automated；人亲手发的不标 —— CRM 才不会把机器回复当成「已跟进」', async () => {
+    const okFetch = () =>
+      (global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => JSON.stringify({ messages: [{ id: 'wamid.1' }] }),
+      }) as unknown as typeof fetch)
+    const machine = stubSupabase({ lastInboundAt: NOW.toISOString() })
+    okFetch()
+    await send({ sentByEmail: 'governed-reply-agent@magicengine.cloud' })
+    expect(machine.touchpointUpserts[0].row).toMatchObject({ metadata: { sender: 'page', automated: true } })
+
+    const human = stubSupabase({ lastInboundAt: NOW.toISOString() })
+    okFetch()
+    await send({ sentByEmail: 'sales@cts.co.nz' })
+    const meta = (human.touchpointUpserts[0].row as { metadata: Record<string, unknown> }).metadata
+    expect(meta.sender).toBe('page')
+    expect('automated' in meta).toBe(false)
+  })
+
   it('不是 whatsapp 渠道的会话 → 拒', async () => {
     stubSupabase({ channel: 'messenger', lastInboundAt: NOW.toISOString() })
     expect(await send()).toMatchObject({ ok: false, reason: 'wrong_channel' })
@@ -255,26 +281,23 @@ describe('sendWhatsApp', () => {
     expect(captured.auditInserts).toHaveLength(0)
   })
 
-  it('凭据没配 → 明确说未配置，不打 Graph', async () => {
-    delete process.env.WHATSAPP_ACCESS_TOKEN
-    stubSupabase({ lastInboundAt: NOW.toISOString() })
-    expect(await send()).toMatchObject({ ok: false, reason: 'no_token' })
+  it('凭据解析失败 → 424 no_token，用解析器给的原文，不写审计、不打 Graph', async () => {
+    mockResolveCreds.mockResolvedValue({ ok: false, error: 'WhatsApp 授权未配置，无法发送' })
+    const captured = stubSupabase({ lastInboundAt: NOW.toISOString() })
+    const res = await send()
+    expect(res).toMatchObject({ ok: false, status: 424, reason: 'no_token' })
+    expect(res.ok === false && res.error).toBe('WhatsApp 授权未配置，无法发送')
+    expect(captured.auditInserts).toHaveLength(0)
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 
   // ── 发件号归属：这是 WhatsApp 独有的隔离缺口 ────────────────────────────
-  it('客户绑的号码跟当前配置的发送号码不一致 → 拒发，绝不用别人的号发出去', async () => {
-    const captured = stubSupabase({ lastInboundAt: NOW.toISOString(), ownedNumberId: '111222333' })
-    const res = await send()
-    expect(res).toMatchObject({ ok: false, reason: 'no_token' })
-    expect(res.ok === false && res.error).toContain('不一致')
-    expect(captured.auditInserts).toHaveLength(0)
-  })
-
-  it('客户压根没绑号码 → 拒发', async () => {
+  it('客户压根没绑号码 → 拒发，且不去解析凭据', async () => {
     stubSupabase({ lastInboundAt: NOW.toISOString(), ownedNumberId: null })
     const res = await send()
     expect(res).toMatchObject({ ok: false, reason: 'no_token' })
     expect(res.ok === false && res.error).toContain('还没有绑定')
+    expect(mockResolveCreds).not.toHaveBeenCalled()
   })
 
   it('查号码归属时按会话所属客户查 —— 断言查的是 convo.client_id，不是调用方传的', async () => {
@@ -292,9 +315,20 @@ describe('sendWhatsApp', () => {
     expect(captured.filters.clients.id).not.toBe(CTS)
   })
 
-  it('归属查询本身失败 → 拒发（查不到不等于没绑）', async () => {
+  it('归属查询本身失败 → 拒发（查不到不等于没绑），且不去解析凭据', async () => {
     stubSupabase({ lastInboundAt: NOW.toISOString(), ownerLookupFails: true })
     expect(await send()).toMatchObject({ ok: false, reason: 'no_token' })
+    expect(mockResolveCreds).not.toHaveBeenCalled()
+  })
+
+  it('解析凭据时传的是会话所属客户和绑定的号码', async () => {
+    stubSupabase({ lastInboundAt: NOW.toISOString() })
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ messages: [{ id: 'wamid.1' }] }),
+    }) as unknown as typeof fetch
+    await send()
+    expect(mockResolveCreds).toHaveBeenCalledWith(CTS, OUR_NUMBER)
   })
 
   // ── 审计 ────────────────────────────────────────────────────────────────
@@ -343,6 +377,34 @@ describe('sendWhatsApp', () => {
         headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
       }),
     )
+  })
+
+  it('用解析出来的凭据发 Graph —— 号码和 token 都来自解析器，不是 env', async () => {
+    // env 故意设成跟解析结果不同的值：如果实现偷偷读 env，这条会红。
+    process.env.WHATSAPP_ACCESS_TOKEN = 'env-token-should-not-be-used'
+    process.env.WHATSAPP_PHONE_NUMBER_ID = 'env-number-should-not-be-used'
+    mockResolveCreds.mockResolvedValue({
+      ok: true,
+      credentials: { accessToken: 'conn-token', phoneNumberId: OUR_NUMBER, source: 'connection' },
+    })
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: async () => JSON.stringify({ messages: [{ id: 'wamid.conn' }] }),
+    }) as unknown as typeof fetch
+
+    const captured = stubSupabase({ lastInboundAt: NOW.toISOString() })
+    const res = await send()
+
+    expect(res).toMatchObject({ ok: true, whatsappMessageId: 'wamid.conn' })
+    expect(global.fetch).toHaveBeenCalledWith(
+      `https://graph.facebook.com/v20.0/${OUR_NUMBER}/messages`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer conn-token' }),
+      }),
+    )
+    // 回写行的 sender_id 必须是解析出来的号码
+    expect(captured.messageInserts[0]).toMatchObject({ sender_id: OUR_NUMBER })
   })
 
   it('Graph 拒收 → 明确失败并记进审计，不假装发出去了', async () => {

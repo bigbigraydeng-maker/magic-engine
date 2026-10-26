@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 //
 // 从 facebook-reel-adapter.ts 里抽出来(纯重构,Reel 行为不变),好让 Daily Plan 帖复用同一套:
 // ① 先扫已有评论找零宽幂等标记 —— 命中就返回,绝不重复发;
-// ② 没命中才 POST 一条,把标记埋在正文末尾,下次扫描能认出来;
+// ② 没命中才 POST 一条,把标记单独放在正文下一行,下次扫描能认出来;
 // ③ 读失败一律抛错,绝不「读不到就当没有」然后盲发。
 
 /**
@@ -38,6 +38,11 @@ export interface EnsureFirstCommentArgs {
   fetcher?: typeof fetch
   /** 最多翻几页评论,默认 5 */
   maxPages?: number
+}
+
+/** 正文与不可见标记之间必须隔一个换行:标记紧贴正文时,正文若以链接结尾,平台会把零宽字符算进链接(utm_content 被污染)。 */
+export function composeFirstCommentBody(message: string, marker: string): string {
+  return `${message}\n${marker}`
 }
 
 export async function ensureFacebookFirstComment(args: EnsureFirstCommentArgs): Promise<string> {
@@ -82,7 +87,7 @@ export async function ensureFacebookFirstComment(args: EnsureFirstCommentArgs): 
   if (nextUrl) throw new Error(`${args.failureLabel} 首评幂等扫描未完成(评论超过 ${maxPages} 页),为避免重复未发布`)
 
   const body = new URLSearchParams({
-    message: `${args.message}${args.marker}`,
+    message: composeFirstCommentBody(args.message, args.marker),
     access_token: args.accessToken,
   })
   const created = await doFetch(`${args.graphBase}/${args.objectId}/comments`, { method: 'POST', body })

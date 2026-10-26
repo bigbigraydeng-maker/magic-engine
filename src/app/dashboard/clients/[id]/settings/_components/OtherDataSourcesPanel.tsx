@@ -5,8 +5,8 @@
  *
  * PR5（docs/specs/2026-08-11-onboarding-integrations-unify-v1.md §2.4）：
  * GBP/GSC/GA4 已经有真 OAuth 面板了（GbpPanel/GscPanel/Ga4Panel），这里只
- * 收剩下 5 个还没搬的：Facebook 主页 URL 抓取、Google 广告透明度扫描、
- * 第三方评价平台标记、Publer 账号绑定、客户社媒账号标记。
+ * 收剩下 4 个还没搬的：Facebook 主页 URL 抓取、Google 广告透明度扫描、
+ * 第三方评价平台标记、客户社媒账号标记。
  *
  * 逻辑原样从 connectors/[anchor]/page.tsx 搬过来（同一套 API：
  * GET .../connectors/status + POST .../connectors/[anchor]/connect），
@@ -44,12 +44,6 @@ const ANCHORS: Record<string, AnchorMeta> = {
     description: '当前张骞通过 Jina/Apify 抓取公开数据，无需额外授权。此处可标记为已确认配置。',
     fields: [],
   },
-  social: {
-    name: '客户社媒账号',
-    emoji: '📱',
-    description: '客户社媒账号通过 Publer 授权后，在此标记为已连接。',
-    fields: [],
-  },
 }
 
 interface StatusRow {
@@ -75,6 +69,10 @@ export function OtherDataSourcesPanel({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-2">
+      <a className="block rounded-xl border border-slate-200 bg-white p-4 text-sm font-semibold text-cyan-800"
+        href={`/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=connect&section=social-connections`}>
+        查看社媒授权与连接 →
+      </a>
       {Object.entries(ANCHORS).map(([anchor, meta]) => (
         <AnchorRow
           key={anchor}
@@ -87,7 +85,6 @@ export function OtherDataSourcesPanel({ clientId }: { clientId: string }) {
           onSaved={loadStatus}
         />
       ))}
-      <PublerRow clientId={clientId} status={statusFor('publer')} open={openAnchor === 'publer'} onToggle={() => setOpenAnchor(o => (o === 'publer' ? null : 'publer'))} onSaved={loadStatus} />
     </div>
   )
 }
@@ -178,112 +175,6 @@ function AnchorRow({
           >
             {saving ? '保存中…' : (meta.buttonLabel ?? '确认 →')}
           </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function PublerRow({
-  clientId, status, open, onToggle, onSaved,
-}: {
-  clientId: string
-  status: string
-  open: boolean
-  onToggle: () => void
-  onSaved: () => void
-}) {
-  const [accounts, setAccounts] = useState<Array<{ id: string; provider: string; name: string }>>([])
-  const [loading, setLoading] = useState(false)
-  const [loaded, setLoaded] = useState(false)
-  const [selectedIds, setSelectedIds] = useState<Record<string, string>>({})
-  const [saving, setSaving] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; error?: string } | null>(null)
-
-  useEffect(() => {
-    if (!open || loaded) return
-    setLoading(true)
-    Promise.all([
-      fetch('/api/publer/accounts').then(r => r.json() as Promise<{ accounts?: Array<{ id: string; provider: string; name: string }> }>),
-      fetch(`/api/clients/${clientId}/connectors/status`).then(r => r.ok ? r.json() as Promise<{ connectors?: Array<{ anchor: string; config: Record<string, unknown> | null }> }> : null),
-    ]).then(([accountsData, statusData]) => {
-      setAccounts(accountsData.accounts ?? [])
-      const row = statusData?.connectors?.find(c => c.anchor === 'publer')
-      setSelectedIds((row?.config?.publer_account_ids as Record<string, string> | undefined) ?? {})
-    }).finally(() => { setLoading(false); setLoaded(true) })
-  }, [open, loaded, clientId])
-
-  const handleSave = async () => {
-    setSaving(true)
-    setResult(null)
-    try {
-      const res = await fetch(`/api/clients/${clientId}/connectors/publer/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          config: { publer_account_ids: Object.fromEntries(Object.entries(selectedIds).filter(([, v]) => v !== '')) },
-        }),
-      })
-      const data = await res.json() as { success: boolean; error?: string }
-      setResult(data.success ? { ok: true } : { ok: false, error: data.error ?? '保存失败' })
-      if (data.success) onSaved()
-    } catch {
-      setResult({ ok: false, error: '网络错误，请重试' })
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white">
-      <button type="button" onClick={onToggle} className="flex w-full items-center gap-3 px-4 py-3 text-left">
-        <span>🚀</span>
-        <span className="flex-1 text-sm font-semibold text-slate-800">Publer 发布器</span>
-        <StatusBadge status={status} />
-        <span className="text-slate-400">{open ? '▲' : '▼'}</span>
-      </button>
-      {open && (
-        <div className="border-t border-slate-100 px-4 py-4 space-y-3">
-          <p className="text-xs leading-relaxed text-slate-500">
-            选择该客户在 Publishing Hub 中对应的社媒账号，确保内容发布到正确的账户而非其他客户账号。
-          </p>
-          {loading ? (
-            <div className="h-9 w-full animate-pulse rounded-lg bg-slate-100" />
-          ) : accounts.length === 0 ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              ⚠ Publishing Hub workspace 中暂无社媒账号，请先在 Publer 后台授权客户的 Instagram / Facebook 等账号。
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {Array.from(new Set(accounts.map(a => a.provider))).sort().map(provider => (
-                <div key={provider}>
-                  <label className="mb-1 block text-xs font-medium capitalize text-slate-700">{provider}</label>
-                  <select
-                    value={selectedIds[provider] ?? ''}
-                    onChange={e => setSelectedIds(prev => ({ ...prev, [provider]: e.target.value }))}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                  >
-                    <option value="">— 未绑定（不发布到此平台）—</option>
-                    {accounts.filter(a => a.provider === provider).map(a => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-              {result && (
-                <p className={`text-xs ${result.ok ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {result.ok ? '✓ 账号绑定已保存' : result.error}
-                </p>
-              )}
-              <button
-                onClick={() => void handleSave()}
-                disabled={saving}
-                className="w-full rounded-lg bg-cyan-600 px-3 py-2 text-xs font-bold text-white hover:bg-cyan-700 disabled:opacity-50"
-              >
-                {saving ? '保存中…' : '💾 保存账号绑定'}
-              </button>
-            </div>
-          )}
         </div>
       )}
     </div>

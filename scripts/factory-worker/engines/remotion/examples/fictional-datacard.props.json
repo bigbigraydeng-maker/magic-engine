@@ -1,0 +1,20 @@
+{
+  "bgColor": "#0E1B2C",
+  "textColor": "#FFFFFF",
+  "brandColor": "#FFB020",
+  "logoFile": "logo.png",
+  "musicFile": null,
+  "hook": { "lines": ["SAME BOX", "3 PRICES"] },
+  "hookSec": 2,
+  "rows": [
+    { "label": "Town Alpha", "value": "$120", "sublabel": "1 cubic metre, door to door", "bar": 0.4 },
+    { "label": "Town Beta", "value": "$210", "sublabel": "1 cubic metre, door to door", "bar": 0.7 },
+    { "label": "Town Gamma", "value": "$300", "sublabel": "1 cubic metre, door to door", "bar": 1 },
+    { "label": "Town Delta", "value": "$180", "sublabel": null, "bar": 0.6 },
+    { "label": "Town Epsilon", "value": "$95", "sublabel": "fictional sample figures", "bar": 0.32 }
+  ],
+  "rowSec": 1.2,
+  "holdSec": 3,
+  "barMode": "bars",
+  "disclaimer": "Fictional sample figures. Not a quote."
+}

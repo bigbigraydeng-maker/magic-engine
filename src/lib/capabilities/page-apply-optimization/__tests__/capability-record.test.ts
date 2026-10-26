@@ -87,6 +87,7 @@ function deps(gh: any) {
       contentPaths: ['website/geo.html'], plainToken: 't',
     }),
     createGithubClient: () => gh,
+    createPageGuard: () => ({ clientId: 'c', assert: async () => undefined }) as never,
   }
 }
 
@@ -96,6 +97,7 @@ const APPROVED_DIFF_CHANGES = [
 
 const PREPARE_OUTPUT = {
   repo_owner: 'o', repo_name: 'r', default_branch: 'main',
+  page_url: 'https://x.com/geo',
   content_path: 'website/geo.html',
   page_version_token: BLOB_SHA,
   branch_name: 'me/page-apply/idem',

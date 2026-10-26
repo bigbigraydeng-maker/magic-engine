@@ -9,7 +9,7 @@ import { AiVisibilityCollector } from './collectors/ai-visibility-collector'
 import { createDefaultLiveProbe } from './ai-visibility-live-probe'
 import { AdsCollector } from './collectors/ads-collector'
 import { computeOverallScore, isDiagnosticDimension } from './guards'
-import { runSynthesis } from './synthesis-orchestrator'
+import { runSynthesis, summarizeSynthesis, type SynthesisReceipt } from './synthesis-orchestrator'
 
 /** Per-dimension collector return — `competitor` may carry competitorList. */
 type RunnerCollectorResult = CollectorResult & { competitorList?: CompetitorEntry[] }
@@ -58,13 +58,19 @@ export async function createDiagnosticRun(
   return (data as { id: string }).id
 }
 
-/** Runs collectors for an existing run record and persists results. */
+/**
+ * Runs collectors for an existing run record and persists results.
+ *
+ * Returns the synthesis receipt (null when synthesis was not attempted or the run
+ * itself failed) so schedulers can record it — a swallowed synthesis failure used to
+ * leave no trace anywhere (2026-10-18: narratives silently never saved).
+ */
 export async function executeDiagnosticRun(
   supabase: SupabaseClient,
   runId: string,
   clientId: string,
   module: DiagnosticModule,
-): Promise<void> {
+): Promise<SynthesisReceipt | null> {
   await supabase
     .from('diagnostic_runs')
     .update({ status: 'running', started_at: new Date().toISOString() })
@@ -78,6 +84,7 @@ export async function executeDiagnosticRun(
     // BUG-FMT-S13/S16 — fan out to LLM synthesis after the deterministic run is
     // safely persisted. Failures here MUST NOT mark the run failed; they are
     // logged and the report-generator silently drops the empty sections.
+    let receipt: SynthesisReceipt | null = null
     if (module === 'full' && overallScore !== null) {
       try {
         const result = await runSynthesis(supabase, {
@@ -86,6 +93,7 @@ export async function executeDiagnosticRun(
           resultMap,
           overallScore,
         })
+        receipt = summarizeSynthesis(result)
         if (!result.ran && result.skipped_reason) {
           console.log(`[runner] synthesis skipped for run ${runId}: ${result.skipped_reason}`)
         } else if (result.ran) {
@@ -94,8 +102,15 @@ export async function executeDiagnosticRun(
       } catch (synthErr) {
         const message = synthErr instanceof Error ? synthErr.message : String(synthErr)
         console.warn(`[runner] synthesis threw for run ${runId}, ignoring:`, message)
+        receipt = {
+          state: 'failed',
+          failed_modules: [],
+          errors: [`synthesis threw: ${message}`.slice(0, 200)],
+          total_cost_usd: 0,
+        }
       }
     }
+    return receipt
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
     await supabase
@@ -106,6 +121,7 @@ export async function executeDiagnosticRun(
         completed_at: new Date().toISOString(),
       })
       .eq('id', runId)
+    return null
   }
 }
 

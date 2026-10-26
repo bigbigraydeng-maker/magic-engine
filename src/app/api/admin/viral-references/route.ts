@@ -17,7 +17,10 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { detectPlatform, analyzeViralReference } from '@/lib/reels/viral-analyzer'
+import { isQueueableViralSourceUrl } from '@/lib/reels/viral-analyzer-retry'
+import { validateViralSourceUrl } from '@/lib/reels/viral-url-guard'
 
 // Fields needed for InsightsPanel only (lightweight)
 const INSIGHT_FIELDS = [
@@ -39,6 +42,9 @@ interface VideoInput {
 }
 
 export async function GET(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   const { searchParams } = new URL(req.url)
 
   const isSummary = searchParams.get('summary') === '1'
@@ -103,6 +109,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   let body: { videos?: VideoInput[] }
   try {
     body = await req.json()
@@ -118,22 +127,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Maximum 30 videos per batch' }, { status: 400 })
   }
 
-  for (const v of videos) {
-    if (!v.url || !v.industry) {
+  const accepted: VideoInput[] = []
+  const acceptedUrls: string[] = []
+  let skippedUnsupported = 0
+  for (const [i, v] of videos.entries()) {
+    if (!v || !v.url || !v.industry) {
       return NextResponse.json(
         { success: false, error: 'Each video must have url and industry' },
         { status: 400 }
       )
     }
+    const check = validateViralSourceUrl(v.url)
+    if (!check.ok) {
+      return NextResponse.json(
+        { success: false, error: `videos[${i}].url rejected: ${check.reason}` },
+        { status: 400 }
+      )
+    }
+    if (!isQueueableViralSourceUrl(check.url)) {
+      skippedUnsupported++
+      continue
+    }
+    accepted.push(v)
+    acceptedUrls.push(check.url)
   }
 
-  const rows = videos.map(v => ({
-    source_url:      v.url,
+  if (accepted.length === 0) {
+    return NextResponse.json({ success: true, queued: 0, skipped_unsupported: skippedUnsupported, references: [] })
+  }
+
+  const rows = accepted.map((v, i) => ({
+    source_url:      acceptedUrls[i],
     industry:        v.industry,
     content_goal:    v.content_goal ?? 'brand',
     is_our_video:    v.is_our_video ?? false,
     client_id:       v.client_id ?? null,
-    platform:        detectPlatform(v.url),
+    platform:        detectPlatform(acceptedUrls[i]),
     notes:           v.notes ?? null,
     analysis_status: 'pending',
   }))
@@ -154,6 +183,7 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     success:    true,
     queued:     inserted?.length ?? 0,
+    skipped_unsupported: skippedUnsupported,
     references: inserted,
   })
 }

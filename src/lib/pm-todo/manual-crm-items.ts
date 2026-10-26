@@ -8,6 +8,8 @@ import { daysAgo, type ManualItem } from './manual-item-types'
 import { findMessengerStopSignals } from '@/lib/crm/messenger-stop-signal'
 import { dropAlreadyPaidTagged } from '@/lib/mailchimp/paid-review-filter'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import { countReviewCallsByClient } from '@/lib/telephony/review-calls'
+import { contactCardTitle } from '@/lib/crm/display-name'
 
 /** Mailchimp 后台的联系人页 —— 登录后一定打得开的稳定入口。 */
 const MAILCHIMP_AUDIENCE_URL = 'https://admin.mailchimp.com/audience/contacts/'
@@ -263,7 +265,7 @@ export async function pushDncReviewItems(
     if (raws.some((r) => BOUNDARY.test(r))) continue
     if (!raws.some((r) => SOFT.test(r))) continue
 
-    const name = (c.display_name as string) || '未留姓名'
+    const name = contactCardTitle(c.display_name as string | null)
     items.push({
       kind: 'dnc_maybe_wrong',
       client_id: c.client_id as string,
@@ -323,7 +325,7 @@ export async function pushMessengerStopItems(
   )
 
   for (const s of signals) {
-    const who = nameById.get(s.contactId) || '未留姓名'
+    const who = contactCardTitle(nameById.get(s.contactId))
     items.push({
       kind: 'dm_maybe_stop',
       client_id: s.clientId,
@@ -396,3 +398,30 @@ export async function pushImportantDueItems(
     })
   }
 }
+
+/**
+ * 电话系统收了通话、但没能自动记进客人档案（待确认 / 没记成）—— 每个客户一条汇总。
+ *
+ * 三件套：what（几通、后果）、how（怎么处理，具体到点哪里）、href（绝对网址，直达待确认页）。
+ * 只读：读失败抛出去，由调用方记警告；不许把「读不到」当成「没有」。
+ */
+export async function pushPhoneReviewItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  ids: string[],
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const counts = await countReviewCallsByClient(supabase, ids)
+  for (const [clientId, n] of counts) {
+    if (n <= 0) continue
+    items.push({
+      kind: 'phone_call_needs_review',
+      client_id: clientId,
+      client_name: nameOf(clientId),
+      what: `有 ${n} 通电话没能自动记进客人档案 —— 客人打来或我们打出去的这几通，销售在客人页上看不到`,
+      how: '点链接看是哪几通（时间、方向、号码尾号、为什么待确认）。在「全部客人」里按尾号搜到是谁，就在他档案里记一笔；找不到就新建一位客人再记',
+      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/crm/phone-review`,
+    })
+  }
+}
+

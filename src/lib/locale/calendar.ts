@@ -101,7 +101,7 @@ const NZ_EVENTS: LocalEvent[] = [
   { name: "Easter Monday",      date: '2026-04-06', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "Last day of Easter long weekend" },
   { name: "ANZAC Day",          date: '2026-04-25', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "Respectful/reflective tone only. No promotional content." },
   { name: "King's Birthday",    date: '2026-06-01', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "First Monday in June (NZ). Long weekend." },
-  { name: "Matariki",           date: '2026-06-26', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "Māori New Year. Star cluster rising. Cultural celebration, reflection, giving. Strong in Māori heartland regions." },
+  { name: "Matariki",           date: '2026-07-10', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "Māori New Year. Star cluster rising. Cultural celebration, reflection, giving. Strong in Māori heartland regions." },
   { name: "Labour Day",         date: '2026-10-26', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "Fourth Monday in October. Long weekend." },
   { name: "Christmas Day",      date: '2026-12-25', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "Peak summer retail season." },
   { name: "Boxing Day",         date: '2026-12-26', type: 'public_holiday', scope: 'national', country: 'NZ', marketing_note: "Major NZ sale day." },

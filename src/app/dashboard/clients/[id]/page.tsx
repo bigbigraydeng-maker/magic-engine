@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { ContentHub } from './_components/ContentHub';
 import { GenerationDrawer } from './_components/GenerationDrawer';
 import { SettingsDrawer, type SettingsTab } from './_components/SettingsDrawer';
 import { ZhugePriorityWidget } from './_components/ZhugePriorityWidget';
@@ -17,8 +18,9 @@ import { IntelligenceSummarySection } from './_components/intelligence/Intellige
 import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
-import { ReviewInbox } from '../../factory/_components/ReviewInbox';
 import { industryFeatureFlags } from '@/lib/clients/industry-features';
+import { homeEntryVisible, type HomeEntry } from '@/lib/auth/home-entries';
+import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer';
 
 
 interface Client {
@@ -293,6 +295,32 @@ function ToolCard({
   return inner
 }
 
+type SubLink = { label: string; href?: string; onClick?: () => void }
+
+/**
+ * 「自动暂停」那条次级链接的网址 —— 只认登记表，不在这里拼。
+ * 登记表查不到（入口被撤）时退回广告健康页，不猜一个可能 404 的网址。
+ */
+function autoPauseHref(clientId: string): string {
+  const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
+  return entry ? entry.path(clientId) : `/dashboard/clients/${encodeURIComponent(clientId)}/ads-health`
+}
+
+function ToolDoorCard({ href, onClick, title, desc, badge, links }: {
+  href?: string; onClick?: () => void; title: string; desc: string; badge: ToolBadge; links: SubLink[]
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <ToolCard href={href} onClick={onClick} title={title} desc={desc} badge={badge} />
+      <div className="flex flex-wrap gap-x-3 gap-y-1 px-1">
+        {links.map(l => l.href
+          ? <Link key={l.label} href={l.href} className="text-xs font-semibold text-me-charcoal/55 hover:text-me-ochre">{l.label}</Link>
+          : <button key={l.label} type="button" onClick={l.onClick} className="text-xs font-semibold text-me-charcoal/55 hover:text-me-ochre">{l.label}</button>)}
+      </div>
+    </div>
+  )
+}
+
 // ─── Workflow Progress ────────────────────────────────────────────────────────
 
 function WorkflowProgress({
@@ -391,6 +419,8 @@ export default function ClientDetailPage() {
   const router = useRouter();
   const pathname = usePathname();
   const clientId = params.id as string;
+  const viewer = useWorkspaceViewer();
+  const showEntry = (entry: HomeEntry) => homeEntryVisible(viewer, entry);
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
@@ -538,7 +568,9 @@ export default function ClientDetailPage() {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 rounded-xl border border-black/10 bg-white p-1">
-        {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'], ['logs', '日志'] ] as const).map(([id, label]) => (
+        {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'], ['logs', '日志'] ] as const)
+          .filter(([id]) => id !== 'logs' || showEntry('work-logs'))
+          .map(([id, label]) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -556,9 +588,6 @@ export default function ClientDetailPage() {
       {/* ── 概览 tab ──────────────────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
         <>
-          {/* 内容工厂待审 — 有成片等你拍板时冒出来(spec me-native-design v0.2) */}
-          <ReviewInbox clientId={clientId} hideWhenEmpty />
-
           {/* Workflow progress bar — 3-step overview */}
           <WorkflowProgress
             discoveryConfirmed={discoveryConfirmed}
@@ -618,16 +647,6 @@ export default function ClientDetailPage() {
               </button>
             </div>
           )}
-
-          {/* ── 推广活动（Campaign 基座）──────────────────────────────────────────
-              Master Brief × Campaign = FDE 工作的上下文基座。
-              所有内容生产（社媒/博客/广告）应当在某个活跃 Campaign 下进行。 */}
-          <BriefGateBanner clientId={clientId} featureLabel="workspace production entry points">
-            <section>
-              <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">推广活动</p>
-              <ContentHub clientId={clientId} />
-            </section>
-          </BriefGateBanner>
         </>
       )}
 
@@ -646,22 +665,58 @@ export default function ClientDetailPage() {
             <section>
               <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">内容生产</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                <ToolCard href={`/dashboard/clients/${clientId}/marketing-plan`} title="Marketing Plan" desc="AI 生成营销计划 → 派发任务到鲁班"   badge="in_house" />
+                <ToolDoorCard
+                  href={showEntry('week-overview')
+                    ? `/dashboard/clients/${clientId}/daily-plan?tab=overview`
+                    : `/dashboard/clients/${clientId}/daily-plan?tab=post`}
+                  title="社媒"
+                  desc="社媒日常 · 这周 Post / Story / Reel 一眼看清、审核通过或打回"
+                  badge="in_house"
+                  links={[
+                    { label: '图文帖子', href: `/dashboard/clients/${clientId}/daily-plan?tab=post` },
+                  ]}
+                />
                 <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
-                <ToolCard href={`/dashboard/content?client=${clientId}`}         title="社媒矩阵"       desc="Campaign · 排期 · 多平台发布"    badge="in_house" />
-                <ToolCard href={`/dashboard/clients/${clientId}/daily-plan`}     title="每日计划"       desc="推广活动 7 日内容排期审核 · Facebook Post 通过/打回" badge="in_house" />
-                <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
-                <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
+                {showEntry('story') && (
+                  <ToolCard href={`/dashboard/clients/${clientId}/story`}          title="Story 自动发布" desc="看这一周要发的 Story · 一键授权 / 随时停（仅管理员）" badge="in_house" />
+                )}
+                {showEntry('geo-composer') && (
+                  <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
+                )}
+                {showEntry('ai-visibility') && (
+                  <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
+                )}
                 <ToolCard href={`/dashboard/clients/${clientId}/settings?tab=connect`} title="平台连接"    desc="连接 GBP · GSC · GA4 · Meta 广告账户" badge="in_house" />
-                <ToolCard href={`/dashboard/clients/${clientId}/ads-health`}     title="广告健康"      desc="每天自动体检 · 每条广告跟自己最好一周比 · 疲劳预警" badge="in_house" />
+                <ToolDoorCard
+                  href={`/dashboard/clients/${clientId}/ads-health`}
+                  title="广告"
+                  desc="广告健康 · 每天自动体检、疲劳预警 · 花钱推广的事都从这里进"
+                  badge="in_house"
+                  links={[
+                    { label: '计划', href: `/dashboard/clients/${clientId}/promo-plan` },
+                    ...(showEntry('ad-approval') ? [{ label: '等你点头的广告', href: '/dashboard/ad-approval' }] : []),
+                    // 🔴 网址从登记表取，不写死：入口搬动时（2026-10-18 搬进广告门标签）
+                    //    改 `dedicated-approval-entries.ts` 一处，这里和待办的链接一起跟着走。
+                    { label: '自动暂停', href: autoPauseHref(clientId) },
+                    { label: 'Meta 账户连接', href: `/dashboard/clients/${clientId}/settings?tab=connect` },
+                  ]}
+                />
                 {/* 视频工厂此前只在内部导航(跨客户总览),客户维度没有入口 —— 跟紧邻的
                     「素材库」不一致,而且 PM 是按客户干活的。?client= 进去只看这个客户。 */}
-                <ToolCard href={`/dashboard/factory?client=${clientId}`}          title="视频工厂"      desc="看片 · 拍板 · 跟 Claude 说人话改片 · 只看这个客户"  badge="in_house" />
-                <ToolCard href={`/dashboard/clients/${clientId}/assets`}          title="素材库"        desc="上传图片 → Vision AI 自动分析 → Hook/Middle/CTA 评分 → 视频提示词"  badge="in_house" />
-                <ToolCard href={`/dashboard/visuals?client=${clientId}`}         title="Launch Hub"    desc="Reels · 图片 · 视频素材生产"      badge="in_house" />
-                <ToolCard href={`/dashboard/clients/${clientId}/production`}     title="内容生产包"    desc="查看各维度内容包状态 · 生成内容后自动归集" badge="in_house" />
-                <ToolCard href={`/dashboard/clients/${clientId}/content-factory`} title="内容工厂"      desc="选题 → 备料 → 出片 → 发布 → 看表现 · 一条内容的流水线看板" badge="in_house" />
-                <ToolCard onClick={() => setGenerationOpen(true)}              title="生成单条内容" desc="按关键词 · 视频 · 话题快速生成一条社媒帖子"  badge="in_house" />
+                <ToolDoorCard
+                  href={showEntry('factory')
+                    ? `/dashboard/factory?client=${clientId}`
+                    : `/dashboard/clients/${clientId}/content-factory`}
+                  title="出片"
+                  desc="视频工厂 · 看片审片、拍板、跟 Claude 说人话改片 · 只看这个客户"
+                  badge="in_house"
+                  links={[
+                    { label: '素材库', href: `/dashboard/clients/${clientId}/assets` },
+                    ...(showEntry('factory-clips') ? [{ label: '视频工厂素材标签与审核', href: `/dashboard/clients/${clientId}/factory-clips` }] : []),
+                    { label: '内容工厂', href: `/dashboard/clients/${clientId}/content-factory` },
+                    { label: '生成单条内容', onClick: () => setGenerationOpen(true) },
+                  ]}
+                />
               </div>
             </section>
           </BriefGateBanner>
@@ -680,6 +735,22 @@ export default function ClientDetailPage() {
                   href={`/dashboard/clients/${clientId}/tailor-made`}
                   title="Tailor-made 行程单"
                   desc="定制行程：粘贴行程 → AI 解析 → 上传出票单读航班 → 导出品牌 PDF"
+                  badge="in_house"
+                />
+              )}
+              {industryFeatureFlags(client?.industry).tour_catalog && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/tour-catalog`}
+                  title="团目录 · Beta"
+                  desc="团名、行程、展示价、出发班期统一在这里维护。测试版。"
+                  badge="in_house"
+                />
+              )}
+              {industryFeatureFlags(client?.industry).business_calculator && showEntry('business-calculator') && (
+                <ToolCard
+                  href={`/dashboard/clients/${clientId}/business-calculator`}
+                  title="经营测算 · 内部"
+                  desc="手填广告、线索价、转化率、价格和成本，算年度利润；可存多个场景对比。仅内部模拟。"
                   badge="in_house"
                 />
               )}
@@ -724,7 +795,9 @@ export default function ClientDetailPage() {
               <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/memory`}             title="客户记忆库"     desc="L3 长期学习：好模式 / 失败记录 / 偏好 / 决策历史（仅 FDE）"  badge="in_house" />
+              {showEntry('memory') && (
+                <ToolCard href={`/dashboard/clients/${clientId}/memory`}             title="客户记忆库"     desc="L3 长期学习：好模式 / 失败记录 / 偏好 / 决策历史（仅 FDE）"  badge="in_house" />
+              )}
               <ToolCard                                                             title="口碑管理"       desc="Google 评价 · 公众号舆情"        badge="external" soon />
               <ToolCard                                                             title="竞品追踪"       desc="持续监控竞品动态"                 badge="external" soon />
             </div>
@@ -742,7 +815,7 @@ export default function ClientDetailPage() {
       )}
 
       {/* ── 日志 tab ──────────────────────────────────────────────────────────── */}
-      {activeTab === 'logs' && (
+      {activeTab === 'logs' && showEntry('work-logs') && (
         <div className="max-w-2xl">
           <WorkLogPanel clientId={clientId} />
         </div>

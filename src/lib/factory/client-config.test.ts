@@ -209,7 +209,7 @@ describe('mergeFactoryConfig — 发布目标校验', () => {
     expect(!r.ok && r.error).toContain('只填一半')
   })
 
-  it('🔴 publer 等无 adapter 的平台 → 拒(配了也只会 no_adapter 失败)', () => {
+  it('🔴 publer(已退役)等无 adapter 的平台 → 拒(配了也只会 no_adapter 失败)', () => {
     const r = mergeFactoryConfig({}, { publish_target: { platform: 'publer', page_id: '123456' } })
     expect(r.ok).toBe(false)
     expect(!r.ok && r.error).toContain('facebook')

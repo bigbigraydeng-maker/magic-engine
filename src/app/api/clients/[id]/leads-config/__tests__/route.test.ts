@@ -170,3 +170,39 @@ describe('PATCH', () => {
     expect(json.config.mailchimpAudienceId).toBe('dda97b7e61')
   })
 })
+
+describe('PATCH ownPhoneNumbers', () => {
+  it('规范化成 E.164 再存，并且不覆盖已有的 ownEmailDomains', async () => {
+    const updates = mockClients({ own_email_domains: ['example.test'], ownPhoneNumbers: [] })
+    const res = await PATCH(patchReq({ ownPhoneNumbers: '+64 21 000 0000\n021 000 0001' }), params)
+    expect(res.status).toBe(200)
+    expect(updates).toHaveLength(1)
+    expect(updates[0].leads_config).toMatchObject({
+      own_email_domains: ['example.test'],
+      ownPhoneNumbers: ['+64210000000', '+64210000001'],
+    })
+    const json = await res.json()
+    expect(json.config.ownPhoneNumbers).toEqual(['+64210000000', '+64210000001'])
+    expect(json.config.ownEmailDomains).toEqual(['example.test'])
+  })
+
+  it('填错 → 400，整项不存', async () => {
+    const updates = mockClients({})
+    const res = await PATCH(patchReq({ ownPhoneNumbers: '+64 21 000 0000\nnot a number' }), params)
+    expect(res.status).toBe(400)
+    expect((await res.json()).rejected).toEqual(['not a number'])
+    expect(updates).toHaveLength(0)
+  })
+
+  it('类型不对 → 400', async () => {
+    mockClients({})
+    expect((await PATCH(patchReq({ ownPhoneNumbers: 5 }), params)).status).toBe(400)
+  })
+
+  it('GET 回显 ownPhoneNumbers', async () => {
+    mockClients({ ownPhoneNumbers: ['+64210000000'] })
+    mocks.readAudienceId.mockResolvedValue({ ok: true, audienceId: '' })
+    const res = await GET(new NextRequest('http://localhost/x'), params)
+    expect((await res.json()).config.ownPhoneNumbers).toEqual(['+64210000000'])
+  })
+})

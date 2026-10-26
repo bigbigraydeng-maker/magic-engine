@@ -10,15 +10,18 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { GoogleAIFileManager } from '@google/generative-ai/server'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
+import { randomUUID } from 'crypto'
 import { promisify } from 'util'
 import { unlink, access } from 'fs/promises'
 import { tmpdir } from 'os'
 import path from 'path'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchYouTubeMetadata } from './youtube-metadata'
+import { isUnsupportedViralDownloadUrl, planAnalysisFailure } from './viral-analyzer-retry'
+import { assertSafeViralSourceUrl, validateViralSourceUrl } from './viral-url-guard'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 const ANALYSIS_MODEL = 'gemini-2.5-flash'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -181,7 +184,11 @@ export async function analyzeLocalVideoFile(
 // ─── Non-YouTube URL: yt-dlp download → analyzeLocalVideoFile ────────────────
 
 async function downloadAndAnalyzeVideo(url: string, apiKey: string): Promise<ViralAnalysisResult> {
-  const tmpFile = path.join(tmpdir(), `viral_ref_${Date.now()}.mp4`)
+  // Defence in depth: the caller already ran the full check; never let an unchecked url reach yt-dlp.
+  const checked = validateViralSourceUrl(url)
+  if (!checked.ok) throw new Error(`Unsafe viral source url: ${checked.reason}`)
+
+  const tmpFile = path.join(tmpdir(), `viral_ref_${randomUUID()}.mp4`)
 
   // yt-dlp lives in project root on Render (downloaded by build command).
   // Falls back to system PATH for local dev where yt-dlp is installed globally.
@@ -189,15 +196,17 @@ async function downloadAndAnalyzeVideo(url: string, apiKey: string): Promise<Vir
   let cmd = 'yt-dlp'
   try {
     await access(ytDlpBin)
-    cmd = `"${ytDlpBin}"`
+    cmd = ytDlpBin
   } catch {
     // local binary missing — fall back to PATH
   }
 
   try {
-    await execAsync(
-      `${cmd} -f "best[height<=720][ext=mp4]/best[height<=720]/best" -o "${tmpFile}" "${url}"`,
-      { timeout: 180_000 }
+    // argv array, no shell; `--` stops yt-dlp treating the url as an option.
+    await execFileAsync(
+      cmd,
+      ['-f', 'best[height<=720][ext=mp4]/best[height<=720]/best', '--no-playlist', '-o', tmpFile, '--', checked.url],
+      { timeout: 180_000 },
     )
 
     return await analyzeLocalVideoFile(tmpFile, apiKey, 'video/mp4')
@@ -390,53 +399,88 @@ export async function finalizeAnalysis(
       ...merged,
       analysis_status: 'done',
       analyzed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      next_retry_at: null,
     })
     .eq('id', referenceId)
+}
+
+// ─── Failure persistence ──────────────────────────────────────────────────────
+
+const UNSUPPORTED_DOWNLOAD_ERROR = 'No video formats found: XiaoHongShu links are not supported by the downloader'
+
+async function readAttemptCount(referenceId: string): Promise<number> {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('viral_reference_library')
+      .select('analysis_attempts')
+      .eq('id', referenceId)
+      .maybeSingle()
+    if (error) {
+      console.error(`[viral-analyzer] attempt count unreadable for ${referenceId}: ${error.message}`)
+      return 0
+    }
+    const attempts = data?.analysis_attempts
+    return typeof attempts === 'number' && Number.isFinite(attempts) && attempts > 0 ? attempts : 0
+  } catch {
+    return 0
+  }
+}
+
+async function persistAnalysisFailure(referenceId: string, sourceUrl: string, message: string): Promise<void> {
+  const plan = planAnalysisFailure({
+    message,
+    previousAttempts: await readAttemptCount(referenceId),
+    now: new Date(),
+    sourceUrl,
+  })
+  try {
+    await supabaseAdmin.from('viral_reference_library').update(plan).eq('id', referenceId)
+  } catch {
+    // best-effort status update
+  }
+}
+
+async function runAnalysis(url: string, apiKey: string): Promise<{ safeUrl: string; result: ViralAnalysisResult }> {
+  if (url.startsWith('upload://')) {
+    throw new Error('Uploaded file is not stored, cannot be re-analysed from its label')
+  }
+  if (isUnsupportedViralDownloadUrl(url)) throw new Error(UNSUPPORTED_DOWNLOAD_ERROR)
+  const safeUrl = await assertSafeViralSourceUrl(url)
+  if (isUnsupportedViralDownloadUrl(safeUrl)) throw new Error(UNSUPPORTED_DOWNLOAD_ERROR)
+  const result = detectPlatform(safeUrl) === 'youtube'
+    ? await analyzeYouTubeVideo(safeUrl, apiKey)
+    : await downloadAndAnalyzeVideo(safeUrl, apiKey)
+  return { safeUrl, result }
 }
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
  * Analyze a single viral video reference.
- * Updates `viral_reference_library` row with results (or error).
+ * Updates `viral_reference_library` row with results (or error) and rethrows
+ * so the worker can record a real failure instead of a silent success.
  */
 export async function analyzeViralReference(referenceId: string, url: string): Promise<void> {
-  // Helper: always persist errors to DB so UI reflects actual state
-  const saveError = async (msg: string) => {
-    try {
-      await supabaseAdmin
-        .from('viral_reference_library')
-        .update({ analysis_status: 'error', analysis_error: msg })
-        .eq('id', referenceId)
-    } catch {
-      // best-effort status update
-    }
-  }
-
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    await saveError('GEMINI_API_KEY not configured on server')
-    return
+    const message = 'GEMINI_API_KEY not configured on server'
+    await persistAnalysisFailure(referenceId, url, message)
+    throw new Error(message)
   }
 
   await supabaseAdmin
     .from('viral_reference_library')
-    .update({ analysis_status: 'analyzing' })
+    .update({ analysis_status: 'analyzing', updated_at: new Date().toISOString() })
     .eq('id', referenceId)
 
   try {
-    const platform = detectPlatform(url)
-    const result = platform === 'youtube'
-      ? await analyzeYouTubeVideo(url, apiKey)
-      : await downloadAndAnalyzeVideo(url, apiKey)
-
-    // Fetch YouTube metadata (returns nulls for non-YouTube or no API key)
-    const metadata = await fetchYouTubeMetadata(url)
-
-    await finalizeAnalysis(referenceId, result, metadata)
+    const { safeUrl, result } = await runAnalysis(url, apiKey)
+    await finalizeAnalysis(referenceId, result, await fetchYouTubeMetadata(safeUrl))
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err)
     console.error(`[viral-analyzer] ${referenceId} failed:`, errorMsg)
-    await saveError(errorMsg)
+    await persistAnalysisFailure(referenceId, url, errorMsg)
+    throw err instanceof Error ? err : new Error(errorMsg)
   }
 }

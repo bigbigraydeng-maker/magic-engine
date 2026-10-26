@@ -10,8 +10,12 @@
  */
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 
 export async function POST() {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   const { data: pending, error } = await supabaseAdmin
     .from('viral_reference_library')
     .select('id', { count: 'exact', head: false })

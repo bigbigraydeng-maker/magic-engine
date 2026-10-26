@@ -41,10 +41,13 @@ void _statusOrderComplete
 /** 发布结果徽章:把 published_ref 的核实状态翻成人话(provisional = 上传中断,无最终回执)。 */
 export function publishedBadge(p: PublishedView | null): { label: string; color: string; href: string | null } {
   if (p?.provisional) return { label: '发到一半中断(待人工核对)', color: 'bg-red-100 text-red-700', href: null }
-  if (p?.video_state === 'DRAFT') return { label: '发布时存为草稿', color: 'bg-amber-100 text-amber-800', href: null }
+  if (p?.video_state === 'DRAFT') return { label: 'Facebook 草稿，未公开', color: 'bg-amber-100 text-amber-800', href: null }
   if (p?.video_state === 'PUBLISHED') return { label: '已公开', color: 'bg-green-100 text-green-700', href: p.permalink }
   return { label: '已在平台上(公开状态未核实)', color: 'bg-slate-100 text-slate-600', href: null }
 }
 
 /** statuses whose reject_reason is a real failure/rejection reason (not stale text from an earlier attempt). queued: worker/[id]/fail 把可重试失败退回 queued 并写原因 */
 export const REASON_STATUSES: readonly WorkOrderStatus[] = ['queued', 'publish_failed', 'failed', 'dead_letter', 'review_rejected']
+
+// 发布后阶段(已发布 / 监测中 / 已关闭):审片区的「已发布」历史卡片统一用这组状态
+export const POST_PUBLISH: readonly WorkOrderStatus[] = ['published', 'measuring', 'closed']

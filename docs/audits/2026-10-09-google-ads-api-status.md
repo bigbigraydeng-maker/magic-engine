@@ -285,3 +285,105 @@ const GOOGLE_ADS_API_BASE = 'https://googleads.googleapis.com/v17'
 频率 **低**（一次性）/ IMPACT 闭环关键度 **中**（打通才进 Measure，但现在没数据可进）/ 收入关联度 **低**（接口不影响收入）→ **两个低 → 仍是 P3**。
 
 **建议：先不配，等 CTS 谷歌广告恢复投放再做。** 当前该做的 P1 是处理欠费停投。
+
+---
+
+## 十、按 PM「继续配」执行的进度（2026-10-10）
+
+PM 回「继续配」后按 §9.5 的五步往下走。**四步做完，卡在第三步的一个值上。**
+
+### 10.1 第一步 ✅ 代码版本号已升级并上线
+
+`v17` → `v25`，PR [#2399](https://github.com/bigbigraydeng-maker/magic-engine/pull/2399)，12 项检查全绿已自动合并。
+开工前用 `curl` 实测各版本的 discovery 端点：**v17、v20 返回 404（确已关停）**，v22/v23/v24/v25 返回 200。再用 v25 的 discovery 文档逐项核对，五个接口路径与用到的全部字段均存在、无改名。
+代码由 DeepSeek 经 aider 一轮写成（约 0.003 美元），我审 diff 并修正测试断言。测试 86 个全过。
+
+### 10.2 第二步 ✅ OAuth 客户端已建
+
+`compass-489509` 项目里新建 Web application 类型客户端 **Magic Engine Google Ads API**，回调地址 `https://developers.google.com/oauthplayground`。
+表单由我填好，**「创建」那一下被本机安全闸拒绝（理由：创建持久凭据），由 PM 本人点的**。
+
+关于项目归属的疑问（PM 问过「是不是设错了」）：**没设错，是刻意的**。谷歌广告接口的访问级别挂在 `compass-489509`，`magic-engine-prod-497614` 与 `cts-seo` 两个项目都没启用该接口。授权客户端必须与访问级别在同一项目，否则调用不被承认；搬到别的项目等于重新启用接口、重新过品牌认证、重新申请 Basic。
+**副作用（已告知 PM 并确认接受）**：品牌信息是项目级共用的，同项目里 PM 自己的另一个应用 `Yellow Book Web`（情报系统）的授权页面现在也会显示「Magic Engine」。PM 确认那是自己的东西，不处理。
+**遗留议题**：`compass` 这个项目混着不相关的应用与密钥，命名也与 ME 对不上。是否迁到独立项目，等接口真跑通后另议，不在本轮。
+
+### 10.3 第三步 ⚠️ 刷新令牌已拿到，但开发者令牌拿不到
+
+- **刷新令牌 ✅**：PM 用 Google OAuth Playground（scope `https://www.googleapis.com/auth/adwords`）跑通同意流程拿到。
+  开工前先核过一个会埋雷的点：Cloud 项目的 **Publishing status 是 In production**（不是 Testing）——Testing 状态下拿到的刷新令牌 7 天就失效，会让接口在一周后毫无征兆地断掉。现为已上线，令牌长期有效。
+- **开发者令牌 ❌**：要在 Ads API centre 点「View token」才显形，谷歌要求先重新验证身份，**只提供通行密钥（passkey）一种方式**，而 PM 手机的谷歌密码管家里没有通行密钥，蓝牙路径也失败。
+  这是 PM 谷歌账号的安全设置问题，与本条线无关，我也不应代为修改账号安全设置。
+  后续解法（PM 自行决定）：在已登录的 Mac 上到 `myaccount.google.com/signinoptions/passkeys` 用 Touch ID 建一个本机通行密钥，之后验证只需指纹。
+
+### 10.4 第四步 ⚠️ 线上五个变量到了四个
+
+PM 已把四个填进 Render 生产服务 `crazycontent`。我只读复核键名（未展开、未记录任何值），按字母序确认：
+
+| 变量 | 线上 |
+|---|---|
+| `GOOGLE_ADS_CLIENT_ID` | ✅ 有 |
+| `GOOGLE_ADS_CLIENT_SECRET` | ✅ 有 |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | ❌ **缺**（按字母序应排在 CLIENT_SECRET 与 MANAGER_ID 之间，那个位置是空的） |
+| `GOOGLE_ADS_MANAGER_ID` | ✅ 有 |
+| `GOOGLE_ADS_REFRESH_TOKEN` | ✅ 有 |
+
+另外把 CTS 的谷歌广告账户号 `105-817-1329` 填进了客户设置（Settings → Google Ads），界面显示「手动设置 ✓ 已保存」，存成 `1058171329`。
+
+### 10.5 当场试跑：跑了，结果是预期中的「差一个值」
+
+在 PM 已登录的浏览器里对生产环境发了一次真实只读请求：
+
+```
+GET https://app.magicengine.com.au/api/clients/<CTS>/google-ads/campaigns?google_ads_customer_id=1058171329&limit=20
+```
+
+返回：
+
+```json
+{"error":"Google Ads credentials are not configured. Add GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET, and GOOGLE_ADS_REFRESH_TOKEN to Render environment variables."}
+```
+
+**这个结果与「只缺开发者令牌」完全吻合**：`src/lib/google-ads/client.ts:505` 的 `loadGoogleAdsCreds` 要求 developerToken / clientId / clientSecret / refreshToken **四个全齐**才返回凭据，缺任一即返回 null。四个里三个已在线上，所以必然是缺的那一个把它挡住了。
+
+过程中顺带发现一个**与文档不符的事实**：这个接口的客户账户号是从**查询参数**读的（`route.ts:37`），不是从客户设置里读的——第一次不带参数请求返回的是「google_ads_customer_id must be a numeric string」。设置里那个值是给定时任务和执行链路用的（`creds-loader.ts` 的查找顺序），不是给这个路由用的。
+
+**所以：补上开发者令牌这一个值，这条线就通了；不补，其余全部就绪也调不通。**
+
+---
+
+## 十一、CTS 谷歌广告停投与欠费的逐日复核（2026-10-10，全程只读）
+
+起因：51 号窗口发现 **10/1 发给客户的《9 月广告基金对账单》STMT-2026-004 写着「Google Ads: NZD 1,982.78」**，与本文件第六节「9 月起零曝光」矛盾，且与 8 月官方发票 2,184.71 做算术后超出 90 天总额。统筹要求重新只读核实，不许用汇总口径。
+
+**结论：对账单那一栏对不上。这个账户 9 月整月花费为 NZD 0.00。**
+
+### 11.1 逐段实测（China Travel，CID 105-817-1329，已去掉全部筛选）
+
+| 区间 | 花费 | 展示 |
+|---|---|---|
+| 2026-08-01 ~ 08-31 | **NZD 2,185.15** | 7,360 |
+| 2026-09-01 ~ 09-30 | **NZD 0.00** | 0 |
+| 2026-10-01 ~ 10-10 | **NZD 0.00** | 0 |
+
+**最后一天有投放是 2026-08-25**（NZD 38.40、19 次点击）。8 月 26–31 日除 8/31 一条 GST 入账外，没有任何投放记录。
+
+### 11.2 账单页独立印证（不是同一个口径的复读）
+
+Billing → Summary 按月：**September 的 Net cost 就是 NZD 0.00**；August 的 Net cost 是 **NZD 2,512.42**，等于 2,184.71 + GST 327.71 —— **正好等于 51 号手上的 8 月官方发票金额**。所以广告报表与官方发票互相对得上，对不上的是发给客户的对账单。
+
+### 11.3 欠费证据
+
+- 账单页 **Balance：NZD 1,512.42**
+- Billing activity 2026-09-01 一条 Payments 原文：「Monthly charge declined: Mastercard ••••9201 for NZ$512.42. Insufficient funds.」
+- 最后一次成功扣款：2026-08-10，NZD 1,000.00（threshold charge）
+- 页面顶部红条原文：「Service may be suspended - You've significantly exceeded your payment threshold and your service may be suspended. Make a payment to keep your service running.」2026-10-09 首次打开该账户时已存在，更早何时出现**无证据，不推断**。
+
+**全程只读：没点 Fix it、没碰付款、没改任何设置。**
+
+### 11.4 对第六节的自我更正
+
+第六节写「9 月 1 日起零曝光」—— 方向对但不精确。**真正停投在 2026-08-25**，9 月只是已经停满整月。第六节那组 90 天数据（1,549 点击 / 12,243 展示 / NZD 4,048.33 / 269 次 pending 转化）用的区间是自定义 **2026-07-11 ~ 2026-10-09**，算术自洽：4,048.33 − 2,185.15（8 月）− 0（9 月）− 0（10 月）≈ 1,863（7 月 11–31 日）。
+
+另：管理账户 Magic Engine Agency 名下只有 China Travel 一个客户账户，所以在可见范围内不存在「9 月花在另一个谷歌账户」的可能。
+
+**对外财务文件是否需要更正，由 PM 决定，不在本窗口权限内。**

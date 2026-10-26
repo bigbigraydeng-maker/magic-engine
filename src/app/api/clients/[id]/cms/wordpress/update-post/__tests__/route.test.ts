@@ -54,6 +54,7 @@ import {
   type ExistingWordpressPost,
 } from '@/lib/cms/wordpress-client'
 import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
+import { ProtectedPageError } from '@/lib/seo/protected-pages'
 
 // ── Typed mocks ───────────────────────────────────────────────────────────────
 
@@ -178,7 +179,7 @@ describe('POST /api/clients/[id]/cms/wordpress/update-post', () => {
 
   describe('input validation', () => {
     beforeEach(() => {
-      mockAuth.mockResolvedValue({ ok: true } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
+      mockAuth.mockResolvedValue({ ok: true, user: { email: 'fde@example.com', email_confirmed_at: '2026-01-01T00:00:00Z' } } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
     })
 
     it('returns 400 when remote_post_id is missing', async () => {
@@ -223,7 +224,7 @@ describe('POST /api/clients/[id]/cms/wordpress/update-post', () => {
 
   describe('connection failures', () => {
     beforeEach(() => {
-      mockAuth.mockResolvedValue({ ok: true } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
+      mockAuth.mockResolvedValue({ ok: true, user: { email: 'fde@example.com', email_confirmed_at: '2026-01-01T00:00:00Z' } } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
     })
 
     it('returns 422 when no WordPress connection exists', async () => {
@@ -252,7 +253,7 @@ describe('POST /api/clients/[id]/cms/wordpress/update-post', () => {
 
   describe('happy path', () => {
     beforeEach(() => {
-      mockAuth.mockResolvedValue({ ok: true } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
+      mockAuth.mockResolvedValue({ ok: true, user: { email: 'fde@example.com', email_confirmed_at: '2026-01-01T00:00:00Z' } } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
       mockGetConn.mockResolvedValue(MOCK_CONN)
       mockGetExist.mockResolvedValue(MOCK_BEFORE)
       mockUpdateExt.mockResolvedValue(MOCK_AFTER)
@@ -369,7 +370,7 @@ describe('POST /api/clients/[id]/cms/wordpress/update-post', () => {
 
   describe('kanban_item_id routing', () => {
     beforeEach(() => {
-      mockAuth.mockResolvedValue({ ok: true } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
+      mockAuth.mockResolvedValue({ ok: true, user: { email: 'fde@example.com', email_confirmed_at: '2026-01-01T00:00:00Z' } } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
       mockGetConn.mockResolvedValue(MOCK_CONN)
       mockGetExist.mockResolvedValue(MOCK_BEFORE)
       mockUpdateExt.mockResolvedValue(MOCK_AFTER)
@@ -434,7 +435,7 @@ describe('POST /api/clients/[id]/cms/wordpress/update-post', () => {
 
   describe('idempotency', () => {
     beforeEach(() => {
-      mockAuth.mockResolvedValue({ ok: true } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
+      mockAuth.mockResolvedValue({ ok: true, user: { email: 'fde@example.com', email_confirmed_at: '2026-01-01T00:00:00Z' } } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
       mockGetConn.mockResolvedValue(MOCK_CONN)
     })
 
@@ -457,9 +458,36 @@ describe('POST /api/clients/[id]/cms/wordpress/update-post', () => {
 
   // ── 7. WAF / WP error code → HTTP status mapping ───────────────────────────────
 
+  describe('protected-page gate', () => {
+    beforeEach(() => {
+      mockAuth.mockResolvedValue({ ok: true, user: { email: 'fde@example.com', email_confirmed_at: '2026-01-01T00:00:00Z' } } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
+      mockGetConn.mockResolvedValue(MOCK_CONN)
+      mockGetExist.mockResolvedValue(MOCK_BEFORE)
+      mockSupabaseChainSequence([
+        { maybeSingleResult: { data: { id: CONN_ID }, error: null } },
+        { maybeSingleResult: { data: null,           error: null } },
+      ])
+    })
+
+    it('🔴 a refusal from the write function becomes HTTP 403 PROTECTED_PAGE, and no job row is written', async () => {
+      mockUpdateExt.mockRejectedValue(new ProtectedPageError('protected', 'refused'))
+      const res = await POST(makeRequest(happyPathBody()), CTX)
+      expect(res.status).toBe(403)
+      expect((await res.json()).code).toBe('PROTECTED_PAGE')
+    })
+
+    it('passes a guard (third argument) to the write function, built from the logged-in user', async () => {
+      mockUpdateExt.mockResolvedValue(MOCK_AFTER)
+      await POST(makeRequest(happyPathBody()), CTX)
+      const guard = mockUpdateExt.mock.calls[0][2]
+      expect(guard).toBeDefined()
+      expect(guard.clientId).toBe(CLIENT_ID)
+    })
+  })
+
   describe('WP error code mapping', () => {
     beforeEach(() => {
-      mockAuth.mockResolvedValue({ ok: true } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
+      mockAuth.mockResolvedValue({ ok: true, user: { email: 'fde@example.com', email_confirmed_at: '2026-01-01T00:00:00Z' } } as unknown as Awaited<ReturnType<typeof requirePaidClientAccess>>)
       mockGetConn.mockResolvedValue(MOCK_CONN)
       mockSupabaseChainSequence([
         { maybeSingleResult: { data: { id: CONN_ID }, error: null } },

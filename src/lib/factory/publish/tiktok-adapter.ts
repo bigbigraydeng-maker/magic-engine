@@ -1,9 +1,11 @@
+import { snapshotReviewedTikTokVideo, storedTikTokSourcePath } from '@/lib/tiktok/publish-source'
+import { inspectTikTokVideo } from '@/lib/tiktok/video-proof'
+import { validateReview, type CreatorInfo, type PostReview } from '@/lib/tiktok/post-review'
 /**
  * TikTok 发布 —— Content Posting API(直接发布)。
  *
- * 为什么是分块直传,不是给个链接让 TikTok 自己来拉:
- * TikTok 的「拉取链接」模式要求先在开发者后台**验证域名归属**。我们的成片放在存储服务上,
- * 域名不是我们的,验证不了。所以只能自己把文件推过去(init 拿上传地址 → 分块 PUT → 轮询状态)。
+ * 服务端成片通过已验证 URL 前缀让 TikTok 拉取。用户确认后先固化核验过的字节，
+ * 防止审核预览与平台拉取之间的原始文件覆盖；副本不在 init 后删除。
  *
  * ⚠️ 应用没过 TikTok 审核之前,发出去的片子一律只有作者自己可见 —— 这是 TikTok 定的,
  * 不是我们的开关。所以「发成功了」和「别人看得到」在过审前是两件事,界面上必须说清楚。
@@ -54,6 +56,11 @@ export function chunkRange(
 
 /** 把 TikTok 的报错翻成客户能行动的话。原始报错留日志给我们排查。 */
 export function humanTikTokError(raw: string): string {
+  if (/存在多个 TikTok 授权/.test(raw)) return '存在多个 TikTok 授权,已暂停发布,请联系团队核实'
+  if (/缺少 ffprobe/.test(raw)) return '发布服务缺少 ffprobe，请管理员配置视频核验依赖'
+  if (/unaudited_client_can_only_post_to_private_accounts/i.test(raw)) {
+    return 'TikTok 未审核应用只能向私密账号发片；账号本身需设为私密，同时视频选择仅自己可见。'
+  }
   if (/unaudited_client/i.test(raw)) {
     return 'TikTok 应用还没过审 —— 现在只能发成「仅自己可见」，过审后才能公开'
   }
@@ -89,69 +96,61 @@ async function post(path: string, token: string, body: unknown): Promise<Record<
   return json
 }
 
+export async function getTikTokCreatorInfo(clientId: string, existingToken?: {accessToken:string;openId:string}): Promise<CreatorInfo> {
+  const token = existingToken ?? await getValidTikTokToken(clientId)
+  if (!token) throw new Error('请先连接 TikTok')
+  const result = await post('/post/publish/creator_info/query/', token.accessToken, {})
+  const data = result.data as CreatorInfo
+  if (!data || !Array.isArray(data.privacy_level_options) || !data.creator_nickname || !Number.isFinite(data.max_video_post_duration_sec)) throw new Error('账号发布信息暂不可用')
+  return { ...data, accountId:token.openId }
+}
+
 /**
  * 发一条片到 TikTok。
  *
- * @param privacy 想要的可见级别。未过审时 TikTok 会强制降级,返回值里回报的是**实际**级别。
+ * @param privacy 用户确认的可见级别。未过审时必须选择平台允许的私密级别，不会自动降级。
  */
 export async function publishToTikTok(params: {
   clientId: string
   videoUrl: string
   caption: string
   privacy: TikTokPrivacy
+  review?: PostReview
+  onInitialized?: (publishId: string, accountId: string) => Promise<void>
 }): Promise<TikTokPublishResult> {
   const token = await getValidTikTokToken(params.clientId)
   if (!token) throw new Error('这个客户还没连过 TikTok(access_token 取不到)')
 
-  // 先摸一下文件多大 —— init 必须先报准确的字节数,报错了整个上传作废
-  const head = await fetch(params.videoUrl, { method: 'HEAD' })
-  const videoSize = Number(head.headers.get('content-length') ?? 0)
-  if (!Number.isFinite(videoSize) || videoSize <= 0) {
-    throw new Error(`取不到成片大小(${head.status}) —— 无法上传`)
-  }
-  const { chunkSize, totalChunks } = planChunks(videoSize)
+  const creator = await getTikTokCreatorInfo(params.clientId, token)
+  if (!params.review) throw new Error('请先确认 TikTok 发布设置')
+  storedTikTokSourcePath(params.videoUrl, params.clientId)
+  const videoProof = await inspectTikTokVideo(params.videoUrl)
+  const reviewed = validateReview(params.review, {...creator,videoProof}, params.videoUrl)
+  if (reviewed.privacy !== params.privacy) throw new Error('发布范围与确认记录不一致')
+
+  const pullUrl = await snapshotReviewedTikTokVideo(params.videoUrl, params.clientId, reviewed.videoSha256)
 
   const init = await post('/post/publish/video/init/', token.accessToken, {
     post_info: {
-      title: params.caption,
+      title: reviewed.caption,
       privacy_level: params.privacy,
-      disable_comment: false,
-      disable_duet: false,
-      disable_stitch: false,
+      disable_comment: !reviewed.allowComment,
+      disable_duet: !reviewed.allowDuet,
+      disable_stitch: !reviewed.allowStitch,
+      brand_organic_toggle: reviewed.ownBrand,
+      brand_content_toggle: reviewed.brandedContent,
     },
-    source_info: {
-      source: 'FILE_UPLOAD',
-      video_size: videoSize,
-      chunk_size: chunkSize,
-      total_chunk_count: totalChunks,
-    },
+    source_info: { source: 'PULL_FROM_URL', video_url: pullUrl },
   })
 
-  const data = (init['data'] ?? {}) as { publish_id?: string; upload_url?: string }
-  if (!data.publish_id || !data.upload_url) {
-    throw new Error(`TikTok init 没给上传地址: ${JSON.stringify(init)}`)
-  }
-
-  // 分块推过去。逐块从存储按 Range 取、立刻转发,不把整条片读进内存 ——
-  // 一次性读进来正是之前把做片进程撑爆的原因(160MB 录像静默 OOM)。
-  for (let i = 0; i < totalChunks; i++) {
-    const { start, end } = chunkRange(i, totalChunks, chunkSize, videoSize)
-    const part = await fetch(params.videoUrl, { headers: { Range: `bytes=${start}-${end}` } })
-    if (!part.ok || !part.body) throw new Error(`取第 ${i + 1} 块失败 ${part.status}`)
-    const buf = Buffer.from(await part.arrayBuffer())
-    const up = await fetch(data.upload_url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Length': String(buf.length),
-        'Content-Range': `bytes ${start}-${end}/${videoSize}`,
-      },
-      body: buf,
-    })
-    // 201 = 收完最后一块;206 = 收下了还等后面的。其它都算失败。
-    if (up.status !== 201 && up.status !== 206 && up.status !== 200) {
-      throw new Error(`上传第 ${i + 1}/${totalChunks} 块失败 ${up.status}: ${await up.text().catch(() => '')}`)
-    }
+  const data = (init['data'] ?? {}) as { publish_id?: string }
+  if (!data.publish_id) throw new Error('TikTok init 未返回发布编号')
+  // PULL init already starts retrieval. A failed receipt write is uncertain, never retry init.
+  try {
+    await params.onInitialized?.(data.publish_id, token.openId)
+  } catch (error) {
+    console.error('[tiktok] provider receipt not persisted', { clientId:params.clientId,publishId:data.publish_id })
+    throw error
   }
 
   return { publishId: data.publish_id, privacy: params.privacy }
@@ -167,9 +166,12 @@ export type TikTokPostStatus = 'processing' | 'published' | 'failed'
 export async function checkTikTokStatus(
   clientId: string,
   publishId: string,
+  expectedAccountId?: string,
 ): Promise<{ status: TikTokPostStatus; detail?: string }> {
-  const token = await getValidTikTokToken(clientId)
+  // 已发出的任务带着原账号:有别的授权并存时,按原账号精确取,让它能照常收尾
+  const token = await getValidTikTokToken(clientId, expectedAccountId ? { accountId: expectedAccountId } : undefined)
   if (!token) throw new Error('这个客户还没连过 TikTok(access_token 取不到)')
+  if (expectedAccountId && token.openId !== expectedAccountId) throw new Error('TikTok 目标账号已改变，无法核验原发布任务')
   const json = await post('/post/publish/status/fetch/', token.accessToken, { publish_id: publishId })
   const data = (json['data'] ?? {}) as { status?: string; fail_reason?: string }
   const s = data.status ?? ''

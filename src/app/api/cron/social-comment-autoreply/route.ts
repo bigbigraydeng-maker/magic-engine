@@ -67,11 +67,20 @@ export async function GET(req: NextRequest) {
   const privateReplies = results.reduce((s, r) => s + (r.private_replies ?? 0), 0)
   const hidden = results.reduce((s, r) => s + (r.hidden ?? 0), 0)
 
+  // A client whose scan did not complete (Meta rejected the post list, token
+  // refused, Page not verified…) is a failed run, not a "completed" one — the
+  // run log is what the health check and the to-do lane read, so recording it as
+  // completed hides a run that read nothing (2026-09-10..22: CTS, every run).
+  const failureNote = failed > 0
+    ? results.filter(r => !r.ok).map(r => `${r.client_id}: ${(r.error ?? 'unknown').slice(0, 160)}`).join(' | ')
+    : undefined
+
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
     failed,
     summary: { public_replies: publicReplies, private_replies: privateReplies, hidden, results },
+    ...(failureNote ? { error: failureNote } : {}),
   })
 
   return NextResponse.json({

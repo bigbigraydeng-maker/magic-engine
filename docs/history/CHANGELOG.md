@@ -5,6 +5,34 @@
 
 ---
 
+### 2026-10-14（推广计划第一步：批准加固 + 只读推广计划页）
+
+设计稿 `docs/specs/2026-10-14-promo-plan-board-design-v0.1.md`。批准重试不再重复派任务；已批准计划不能直接改内容（要改先退回草稿）；手工加任务须计划已批准；批准留回执。新增客户页「推广计划」：一句话头条、本周对账、下一阶段检查清单（绿/黄/红/灰）、「按计划继续」。不碰广告账户、不新增表。**回滚**：revert 本 PR。
+
+### 2026-10-10（East Inter 官网：运费计算器换成新版报价）
+
+PR [#2427](https://github.com/bigbigraydeng-maker/magic-engine/pull/2427)。计算器按东际新报价表（人民币÷4.9 向上取整，沿用旧规则）更新海运拼箱各城市单价；空运大件计费单位更正为每公斤（东际确认；旧版高报一倍）并按表加 50/51kg 分档；海运拼箱新增可选「货物总重量」，按 500kg=1 立方取大；含税空运大件提示已含关税和税（不加 15%），不含税提示收件人自付关税/GST、货值超 AUD1,000 另有 A$110 清关费；页面日期标签中性写 CURRENT RATES（生效日期待东际确认）。新旧对比见 `docs/clients/east-inter/2026-10-10-calculator-new-quote-diff.md`，台账卡 `2026-10-10-east-inter-calculator-new-quote`。
+**上线位置**：客户站点仓库 `bigbigraydeng-maker/east-inter-demo`（eastinter.com.au），首发 `65b2fdd`，之后 `b2be46f`、`28a1df1`。**回滚**：在该仓库把 `eastinter-pricing-calculator.html` 还原到 `d60c23a`，并删除 `pricing-rates.js`、`pricing-engine.js`（还原 PR #2427 只会删本仓库的草稿和记录，不会回滚客户网站）。验证：`node --test tests/pricing.test.js` 66 项通过；空运大件新增可选派送邮编，按表加偏远邮编每公斤附加费（10-14）。Impeccable 网页检查已跑：修复前 19 项、修复后 6 项（余下为既有设计语言或误判，理由见差异文档第 10 节）。
+
+**Reuse Statement**：客户专属计算器，全部在客户交付目录内，未进入共享运行时。
+
+### 2026-10-12（读不出广告设置时，自动暂停 / 每日诊断 / 目标进度 / 设置保存都如实记下「没读到」）
+
+- **为什么**：PR #2116 只让每日回拉在读不出 `ad_strategy_configs` 时喊出来；另外几处读设置的地方读失败时仍静默拿默认值往下走——自动暂停记成「客户没开自动化」或「演练」，诊断拿空收件人照跑，目标进度缺日上限仍报「按节奏走」，设置保存把「改回只观察」判成没变、不发收紧信号。
+- **上线**：PR [#2192](https://github.com/bigbigraydeng-maker/magic-engine/pull/2192)（合并 `6ab11df0`，2026-10-11 20:48 UTC，20:51 UTC 部署成功；A 级，PM 10-12 回「合」后 `--admin`）。自动暂停读失败单独记 `config_read_failed` 并写 `failed` 回执、不提交 Kernel；这类回执 30 小时内进今日待办「系统欠账」；每日诊断用回拉已读到的收件人、不再重读；目标进度缺日上限时「按节奏走」降成「未判」；设置保存在读不出改前状态时照存并一律发同步信号。
+- **当场试跑（合并前，10-11 20:42 UTC，真实数据只读、网络层拦下全部写操作）**：正常路径处理 0 条、无写入；注入设置表读失败后自动暂停返回 `config_read_failed`、提交 Kernel 0 次、唯一被拦下的写入是带 `config_read_error` 的 `failed` 回执；两条今日待办查询在真实库上执行成功。没在真实数据上跑到的：目标进度降级、设置保存路由（只有单元测试）。
+- **审查**：子牙 + 魏征两轮；合并主干后子牙复审合并部分；卫青事后补审（两条必改已修并复核关闭）。16 个故意改坏的变异全部被对应测试抓到。
+- **留作后续**：设置页读取 / 素材批准路由读失败时仍把默认值当真实设置、结果设置读失败误报「还没设置」（已开任务）；读失败当天不能补判；巡察路径读失败只进运行记录。
+- **台账卡**：`2026-09-29-ads-config-read-failure-other-callers`（10/14 验；读失败分支未经真实故障验证）。
+
+### 2026-10-10（CRM 客人页：三套状态合成一个「该做什么」，列表只分「今天要联系 / 先放着」两张名单）
+
+PR [#2421](https://github.com/bigbigraydeng-maker/magic-engine/pull/2421)（B 级，机器自动合）。PM 2026-10-10 看 NAL 全部客人页后拍板：页面少信息多引导，「跟进到哪步」「现在冷热」「高/中/低意向」三套并列状态合成一个概念——该做什么。列表两列合成一列「该做什么」（动作 + 为什么），分段 4 → 2；侧栏顶部一张三行卡（动作 / AI 建议 / 到哪一步了，谁判的只在有记录时写）；AI 意向只能把人往上提（聊断了 + 高意向 → 今天要联系），不往下压。新增 `lib/crm/next-action.ts`、`lib/crm/brief-lookup.ts`。当场试跑 NAL 生产只读：229 人 → 47 / 182，抬升 19，总数守恒；页面渲染探针 8 项全过。DeepSeek 8 轮约 US$0.057。设计审 + 实施后审各一轮（子牙 + 魏征），处置见 `docs/specs/2026-10-10-crm-one-next-action-design-v0.md`。顺带查出 NAL 109 张私信摘要正文冒充 CTS（另开窗口重算）与 18 条进线从没被真人回过（登记后续）。
+
+**Reuse Statement**：复用分段引擎、排序、阶段身份常量、现成 AI 摘要字段；新增两个 platform-shared 纯模块，无客户 / 行业语义；实现落点与层级门判定一致（L1 既有 CRM 能力内部收口）。
+
+---
+
 ### 2026-10-05（Park Homes 官网：Riverside 页「工程进度」加上客户发来的进度更新视频）
 
 PR [#2252](https://github.com/bigbigraydeng-maker/magic-engine/pull/2252) 由机器自动合并（C 级），随后手动触发 `parkhomes-deploy.yml` 发布（自动合并不会触发发布，见 [合并审批](../../.github/merge-authorization.md)「已知缺口」），线上已核实。客户 Jason 2026-10-04 邮件发来一条 Riverside 进度更新视频（YouTube），要求放上网站。嵌入位置是 Riverside 页「Development progress」一段的航拍图下方，由 `projects.js` 里新增的可选字段 `story.progress.video` 驱动；说明只写「开发商提供，2026 年 10 月」（收到时间），不从视频推断分期或完工状态；原有的走访视频保留在原处。代码由 DeepSeek 写（aider 一次性 1 轮，$0.0042），Claude Code 出指令、审 diff、构建、提交。验证：站点构建 20 页通过；生成页与线上页均含新旧两个视频嵌入；浏览器实际打开线上页，新视频播放器加载正常（16:9，无横向溢出）。台账卡 `2026-10-05-parkhomes-riverside-update-video`。
@@ -347,14 +375,24 @@ PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
 
 ---
 
-### 2026-09-23（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）
+### 2026-09-28（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）
 
-PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)：
-- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂时，自动出现在今日待办里，带原因分桶（余额用光 / 授权失效 / 供应商出错）和修复指引
-- 修复旧 cron `ai-tracker-weekly/route.ts`：全挂客户以前被算成"成功"，现在正确计入失败
-- 查询使用 `fetchAll` 分页器避开 PostgREST 1000 行静默截断
-- 17 个新单测覆盖错误分桶、连续失败周数计算、提醒节拍、多客户场景
-- 经子牙（架构）+ 魏征（挑刺）两轮独立复审
+PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)（2026-09-23 开工，2026-09-28 合并）：
+- 新增 `ai_tracker_all_failed` PM 待办项：当某客户的 AI 可见度周度体检所有探测全挂、且至少有一个原因需要
+  PM 动手（充值/换钥匙；不论它是不是占比最多的原因）时，自动出现在今日待办里，按实际出错的供应商（OpenAI/Google AI/Claude/
+  Perplexity）给对应的充值或换钥匙指引；不用 PM 操心的原因（暂时限流/供应商出错/我们解析不出排名）
+  单独归开发栏的新 kind `ai_tracker_all_failed_dev`，不计入 PM 待办数量。**数据库写入失败不在此列**：
+  插入失败时那次探测根本不落库、更新失败时那一行会被误读成成功，两种情况现在都读不到、分不进
+  `db_error` 桶（`ai-tracker-failure-items.ts` 里的 `db_error` 分类目前是死代码），见下方「3 条架构级
+  已知缺口」
+- 修复旧 cron `ai-tracker-weekly/route.ts`：全挂客户以前被算成"成功"，现在用新增的 `runs_conclusive`
+  字段（跟快照闸门同一套可判定标准）正确计入失败，含"AI 答了但我们解析不出排名"这种更隐蔽的全挂
+- 查询使用 `fetchAll` 分页器 + `(ran_at, id)` 稳定排序，避开 PostgREST 1000 行静默截断和分页跳行
+- 30 个新单测覆盖错误分桶、按供应商路由修复指引、连续失败周数计算、提醒节拍、活跃客户名单过滤、多客户场景
+- 经子牙（架构）+ 魏征（挑刺）+ Codex 三轮独立复审共 12 条意见，其中一条是真的编译不过的错误、一条
+  会让所有新告警从待办里彻底消失，均已修；3 条架构级已知缺口（数据库插入失败时这行数据完全不落库
+  检测不到、更新失败时那行会被误读成成功、批次没跑完时可能误报一次但会自愈）记入台账卡并回写
+  [ROADMAP §AI 可见度全挂告警上线后跟进](../ROADMAP.md)
 
 ### 2026-09-23（AI 可见度探测失败被当成「零提及」发给客户：数据结构分离 + 回执 finding + 过度矫正守卫）
 
@@ -3669,5 +3707,11 @@ P33.9（PR #301/#302 — Goal filter 状态 chips 数字跟随）/ P33.10（未�
 - `website/ai-training.html`、`website/ai-automation.html`、`website/ai-marketing-smes.html` 以及 `/cn/` 对应页已上线，SME-first public surface 补齐
 - `website/index.html`、`website/cn/index.html`、`website/robots.txt`、`website/sitemap.xml` 已同步新页面入口与抓取路径
 
+### 2026-09-28（广告巡检按创意主页划归属，别家客户的广告组不再算进诊断和自动暂停，PR [#2118](https://github.com/bigbigraydeng-maker/magic-engine/pull/2118)）
+
+- 生产核实：一个只登记给某客户的广告账户里投着另一个客户主页的广告，另一个账户里有挂第三个客户主页的广告组花过钱；广告组/系列层诊断（D1/D3/D4/D5/D7/D8/D9）和机会发现（O1/O2/O3）之前把账户里所有实体都算给登记的那个客户，D3 命中还会进自动暂停
+- 新增 `src/lib/ads-strategy/portfolio/diagnostics/ownership.ts`：按名下广告挂过的每个 Facebook 主页判归属，拿不准一律不算客户的；自动暂停出手前回库再核一次归属和快照新鲜度
+- 登记表不改成「共用」（会让客户整个主账户降级只做账户级、快照同步跳过四层）
+- 子牙+魏征设计审两轮、实施后审两轮，狄仁杰攻击验证四轮，加上仓库自带 Codex 自动审查六轮（含 1 次采纳自动修车道 `claude[bot]` 先推的等价实现），逐条核实修复或记入台账（`docs/ledger/2026-09-29-ads-ownership-mid-window-capture-gap.md`、`docs/ledger/2026-09-29-ads-cbo-orphan-sibling-not-connate.md`）
 
 ---

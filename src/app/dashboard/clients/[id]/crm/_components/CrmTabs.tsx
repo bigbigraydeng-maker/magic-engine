@@ -26,8 +26,25 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
+import { afterCrmListReady } from '@/lib/crm/list-ready'
+import { NewMessagesBanner } from './NewMessagesBanner'
 
-export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' }) {
+const PROBE_TTL_MS = 5 * 60 * 1000
+const probeCache = new Map<string, { ok: boolean; at: number }>()
+
+/** The cached probe answer for this client, or null when there is none or it is older than 5 minutes. */
+function readProbeCache(clientId: string): boolean | null {
+  const hit = probeCache.get(clientId)
+  if (hit === undefined || Date.now() - hit.at > PROBE_TTL_MS) return null
+  return hit.ok
+}
+
+/** Test hook: forget every cached probe answer. */
+export function resetPaymentsProbeCache(): void {
+  probeCache.clear()
+}
+
+export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' | 'payments' | 'sales' }) {
   const base = `/dashboard/clients/${clientId}/crm`
   const cls = (on: boolean) =>
     `rounded-md px-4 py-1.5 text-sm font-bold transition ${
@@ -37,47 +54,112 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
   const [industry, setIndustry] = useState<string | null | undefined>(undefined)
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch(`/api/clients/${clientId}`)
-        if (!res.ok) return
-        const json = (await res.json()) as { client?: { industry?: string | null } }
-        if (!cancelled) setIndustry(json.client?.industry ?? null)
-      } catch {
-        // 拿不到就不显示条件项 —— 默认隐藏，不默认显示（跟 industry-features 的既有约定一致）。
-      }
-    })()
+    const cancelWait = afterCrmListReady(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/clients/${clientId}`)
+          if (!res.ok) return
+          const json = (await res.json()) as { client?: { industry?: string | null } }
+          if (!cancelled) setIndustry(json.client?.industry ?? null)
+        } catch {
+          // 拿不到就不显示条件项 —— 默认隐藏，不默认显示（跟 industry-features 的既有约定一致）。
+        }
+      })()
+    })
     return () => {
       cancelled = true
+      cancelWait()
     }
   }, [clientId])
   const flags = industryFeatureFlags(industry)
 
+  // 「付款总览」页签：只有探针返回 200 才显示；403/404/出错/还没回来一律不显示（不暴露这个功能存在）。
+  // 结果按客户缓存 5 分钟（出错不缓存），所以在 CRM 各页之间切换时页签不会消失再弹出来。
+  const [showPayments, setShowPayments] = useState(() => readProbeCache(clientId) === true)
+  useEffect(() => {
+    const cached = readProbeCache(clientId)
+    setShowPayments(cached === true)
+    if (cached !== null) return
+    let cancelled = false
+    const cancelWait = afterCrmListReady(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/clients/${clientId}/crm/bookings/access`)
+          if (res.status === 200 || res.status === 403 || res.status === 404) {
+            probeCache.set(clientId, { ok: res.status === 200, at: Date.now() })
+          }
+          if (!cancelled) setShowPayments(res.status === 200)
+        } catch {
+          // 网络出错：不显示，也不缓存（下次再试）
+        }
+      })()
+    })
+    return () => {
+      cancelled = true
+      cancelWait()
+    }
+  }, [clientId])
+
   return (
+    <>
+      {/* 新消息提醒：页面不会自己刷新，隔 30 秒问一次有没有客人发来新消息（读失败什么都不做）。 */}
+      <NewMessagesBanner clientId={clientId} />
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
-        <Link href={`${base}/all`} className={cls(active === 'all')}>全部客人</Link>
-        <Link href={`${base}/decisions`} className={cls(active === 'decisions')}>决策清单（只读）</Link>
+        <Link href={`${base}/all`} title="这个客户的所有客人：翻看、搜人、改他到哪一步。点右边「✨ Magic Engine 智能」能看今天该先联系谁。" className={cls(active === 'all')}>全部客人</Link>
+        {showPayments && (
+          <Link href={`${base}/payments`} title="按出发日期看每个团收了多少定金尾款、谁还没收齐、哪些已过期。" className={cls(active === 'payments')}>付款总览</Link>
+        )}
+        {/* 销售进度页和付款总览走同一道名单闸，同一个探针：能看付款总览的人才看得到它。 */}
+        {showPayments && (
+          <Link href={`/dashboard/clients/${clientId}/sales-progress`} title="每个团卖了多少、还差多少人成行。" className={cls(active === 'sales')}>销售进度</Link>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-me-charcoal/45">
         <span>相关工具：</span>
-        <Link href={`/dashboard/clients/${clientId}/messenger`} className="hover:text-me-charcoal hover:underline">
+        {/*
+          「我的待跟进」入口（issue #3158 part 3）—— 其实就是「全部客人」页加上
+          `?assignee=me` 筛选条，不是新页面：员工最高频的问题是「我今天要跟谁」，
+          放个一键捷径省得先打开全部客人再点筛选。走同一道付费客户闸，不另开门。
+        */}
+        <Link
+          href={`${base}/all?assignee=me`}
+          title="只看分给我自己的线索。到了那边可以在筛选条里切「未分配 / 其他同事」。"
+          className="hover:text-me-charcoal hover:underline"
+        >
+          👤 我的待跟进
+        </Link>
+        <Link
+          href={`/dashboard/clients/${clientId}/messenger`}
+          title="Facebook / WhatsApp 的对话列表，可以在这里直接回客人。"
+          className="hover:text-me-charcoal hover:underline"
+        >
           客户消息
         </Link>
-        <Link href={`/dashboard/clients/${clientId}/business-inbox`} className="hover:text-me-charcoal hover:underline">
+        <Link
+          href={`/dashboard/clients/${clientId}/business-inbox`}
+          title="已连接邮箱里同步进来的邮件清单（每小时一次）。只能看，回信仍然去邮箱里回。"
+          className="hover:text-me-charcoal hover:underline"
+        >
           商务收件箱
         </Link>
         {flags.agents && (
-          <Link href={`/dashboard/clients/${clientId}/agents`} className="hover:text-me-charcoal hover:underline">
+          <Link
+            href={`/dashboard/clients/${clientId}/agents`}
+            title="送客给我们的旅行社同行，以及他们各自手上的客人进展。"
+            className="hover:text-me-charcoal hover:underline"
+          >
             🤝 同行渠道
           </Link>
         )}
-        {flags.listings && (
-          <Link href={`/dashboard/clients/${clientId}/contacts`} className="hover:text-me-charcoal hover:underline">
-            我的客人
-          </Link>
-        )}
+        {/*
+          「我的客人」入口 2026-10-26 去掉：那一页是给「按房子跟客人的中介」做的，
+          对不按房子经营的客户（例如 CTS）点进去只会看到一句「用它反而绕远」+
+          一个跳回「全部客人」的按钮，而这句话要等 3 秒（实测 /crm/contacts 接口 3046ms）
+          才显示出来。页面本身留着，按房子经营的客户仍能用网址进；只是不再摆在这里误导人。
+        */}
       </div>
     </div>
+    </>
   )
 }

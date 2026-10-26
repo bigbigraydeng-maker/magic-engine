@@ -1,0 +1,271 @@
+import { describe, expect, it } from 'vitest'
+
+import type { OverviewReel } from '../build'
+import {
+  countReelWorks,
+  describeReelTag,
+  describeReelTemplate,
+  describeVarietyAdvice,
+  groupReelWorks,
+  groupWorksByStage,
+  parseTicket,
+} from '../reel-works'
+
+function reel(overrides: Partial<OverviewReel> & { id: string; angle: string }): OverviewReel {
+  return {
+    status: 'in_review',
+    created_at: '2026-10-20T00:00:00Z',
+    published_at: null,
+    permalink: null,
+    video_state: null,
+    music_file: null,
+    template: 'postcard',
+    ...overrides,
+  }
+}
+
+describe('groupReelWorks: folding revisions of one piece', () => {
+  it('folds revisions into one work, newest first, with a short title, batch and note', () => {
+    const works = groupReelWorks([
+      reel({ id: 'a3', created_at: '2026-10-22T00:00:00Z', angle: 'Harbour Tour postcard (Spring launch batch1 #4): hook on the bridge; end card (r2: scene replaced (card covered the bridge in a1)) (r3: clip swapped)' }),
+      reel({ id: 'a1', created_at: '2026-10-21T00:00:00Z', angle: 'Harbour Tour postcard (Spring launch batch1 #4): hook on the bridge; end card' }),
+      reel({ id: 'b1', angle: 'Coast Walk postcard (Spring launch batch1 #2): hook on the cliffs' }),
+    ])
+    expect(works).toHaveLength(2)
+    expect(works[0]).toMatchObject({ title: 'Harbour Tour #4', batchLabel: '第 1 批', campaignNote: 'Spring launch batch1', templateLabel: '明信片款' })
+    expect(works[0].versions.map((v) => v.reel.id)).toEqual(['a3', 'a1'])
+    expect(works[0].latest.reel.id).toBe('a3')
+    expect(works[1].title).toBe('Coast Walk #2')
+  })
+
+  it('takes version marks (v1, v1g, r2, v5-story-r3) out of the name', () => {
+    const works = groupReelWorks([
+      reel({ id: 'g', angle: 'Alpine Story postcard v1g (May remake): same as v1f except music' }),
+      reel({ id: 'f', angle: 'Alpine Story postcard v1 (May remake): hook; end card (v1f: preview, temporary music)' }),
+      reel({ id: 'e', angle: 'Alpine Story postcard v1 (May remake): hook; end card (v1e: preview only)' }),
+      reel({ id: 'x', angle: 'Detail Clip r2: new ending' }),
+      reel({ id: 'y', angle: 'Detail Clip r1: first cut' }),
+      reel({ id: 'z', angle: 'Night Market ad v5-story-r3: postcard (no price)' }),
+    ])
+    expect(works.map((w) => [w.title, w.versions.length])).toEqual([
+      ['Alpine Story', 3],
+      ['Detail Clip', 2],
+      ['Night Market ad', 1],
+    ])
+  })
+
+  it('reads "#n" from the name itself and folds "City Break #2 postcard v2" with "City Break #2 postcard"', () => {
+    const works = groupReelWorks([
+      reel({ id: 'n2', angle: 'City Break #2 postcard v2: hook trimmed (re-run: first try failed) (re-run 2)' }),
+      reel({ id: 'n1', angle: 'City Break #2 postcard: ten days, no price on screen' }),
+    ])
+    expect(works).toHaveLength(1)
+    expect(works[0].title).toBe('City Break #2')
+    expect(works[0].versions).toHaveLength(2)
+  })
+
+  it('does not fold anything it is not sure about', () => {
+    const works = groupReelWorks([
+      reel({ id: '1', angle: 'Harbour Tour postcard (Spring batch1 #4): a' }),
+      reel({ id: '2', angle: 'Harbour Tour postcard (Spring batch1 #5): a' }),
+      reel({ id: '3', template: 'list', angle: 'Harbour Tour postcard (Spring batch1 #4): a' }),
+      reel({ id: '4', angle: 'Harbour Tour postcard (Autumn batch1 #4): a' }),
+      reel({ id: '5', angle: 'Lake Paid A: price suspense' }),
+      reel({ id: '6', angle: 'Lake Paid A2: price suspense, revised' }),
+    ])
+    expect(works).toHaveLength(6)
+  })
+
+  it('tells two different works with the same title apart by their version mark', () => {
+    const works = groupReelWorks([
+      reel({ id: 'n4', template: 'list', angle: 'Alpha v4: price-led list' }),
+      reel({ id: 'n1', template: 'postcard', angle: 'Alpha v1 (remake): hook' }),
+    ])
+    expect(works.map((w) => w.title)).toEqual(['Alpha v4', 'Alpha v1'])
+  })
+
+  it('drops the template word that the template chip already says', () => {
+    expect(groupReelWorks([reel({ id: 'a', angle: 'Dusk Walk postcard v2: two shots' })])[0].title).toBe('Dusk Walk')
+    expect(groupReelWorks([reel({ id: 'a', template: 'list', angle: 'Best Of v3: price-led list reel (From NZ$1,000)' })])[0].title).toBe('Best Of')
+  })
+})
+
+describe('parseTicket / odd tickets never break the page', () => {
+  it('empty, Chinese, full-width colon, very long and unbalanced tickets', () => {
+    expect(groupReelWorks([reel({ id: 'a', angle: '' })])[0].title).toBe('（没有写主题）')
+    expect(groupReelWorks([reel({ id: 'a', angle: '' }), reel({ id: 'b', angle: '' })])).toHaveLength(2)
+    expect(groupReelWorks([reel({ id: 'a', angle: '上海价格', template: null })])[0].title).toBe('上海价格')
+    expect(groupReelWorks([reel({ id: 'a', angle: '上海行程：第一版', template: null })])[0].title).toBe('上海行程')
+    const long = groupReelWorks([reel({ id: 'a', angle: 'word '.repeat(60) })])[0].title
+    expect(long.length).toBeLessThanOrEqual(64)
+    expect(long.endsWith('…')).toBe(true)
+    expect(() => parseTicket('Name (oops: never closed', 'postcard')).not.toThrow()
+    expect(parseTicket('Name (oops: never closed', 'postcard').name).toContain('Name')
+  })
+
+  it('keeps the batch and note only when the ticket says them', () => {
+    const plain = groupReelWorks([reel({ id: 'a', angle: 'Quiet Cove: one shot' })])[0]
+    expect(plain.batchLabel).toBeNull()
+    expect(plain.campaignNote).toBeNull()
+    expect(describeReelTemplate('postcard')).toBe('明信片款')
+    expect(describeReelTemplate('list')).toBe('价格款')
+    expect(describeReelTemplate('atmosphere')).toBe('氛围款')
+    expect(describeReelTemplate('some_internal_code')).toBeNull()
+    expect(describeReelTemplate(null)).toBeNull()
+  })
+})
+
+describe('describeReelTag', () => {
+  const tag = (status: string, extra: Partial<OverviewReel> = {}) => describeReelTag({ status, published_at: null, video_state: null, ...extra })
+
+  it('one small tag per state, same words everywhere', () => {
+    expect(tag('in_review')).toMatchObject({ kind: 'review', label: '待审核' })
+    expect(tag('approved')).toMatchObject({ kind: 'approved', label: '已通过' })
+    expect(tag('publishing')).toMatchObject({ kind: 'approved', label: '发布中' })
+    expect(tag('review_rejected')).toMatchObject({ kind: 'problem', label: '已打回' })
+    expect(tag('publish_failed')).toMatchObject({ kind: 'problem', label: '发布失败' })
+    expect(tag('failed')).toMatchObject({ kind: 'problem', label: '出问题' })
+    expect(tag('dead_letter')).toMatchObject({ kind: 'problem', label: '出问题' })
+    for (const status of ['queued', 'claimed', 'producing']) expect(tag(status)).toMatchObject({ kind: 'making', label: '制作中' })
+    for (const status of ['rendered', 'archived', 'superseded']) expect(tag(status).kind).toBe('closed')
+    expect(tag('something_new')).toMatchObject({ kind: 'problem', label: '状态未知' }) // an unreadable state is something to look at, not a quiet "making"
+  })
+
+  it('an uploaded Reel says draft / public, and never claims more than the record knows', () => {
+    expect(tag('published', { published_at: '2026-10-21T00:00:00Z', video_state: 'DRAFT' })).toMatchObject({ kind: 'draft', label: '草稿' })
+    expect(tag('published', { published_at: '2026-10-21T00:00:00Z', video_state: 'PUBLISHED' })).toMatchObject({ kind: 'sent', label: '已发出' })
+    const unchecked = tag('published', { published_at: '2026-10-21T00:00:00Z', video_state: null })
+    expect(unchecked).toMatchObject({ kind: 'uploaded', label: '已上传（未核对）' })
+    expect(unchecked.hint).toContain('还没核对')
+    expect(tag('closed')).toMatchObject({ kind: 'uploaded' })
+  })
+
+  it('no tag or hint uses internal words', () => {
+    const all = ['in_review', 'approved', 'publishing', 'review_rejected', 'publish_failed', 'failed', 'queued', 'archived', 'published', 'weird'].map((s) => tag(s))
+    for (const t of all) expect(`${t.label}${t.hint}`).not.toMatch(/库里|平台状态未核|尚未接入|放行规则|BGM|价格屏/)
+  })
+})
+
+describe('groupWorksByStage / countReelWorks', () => {
+  const works = groupReelWorks([
+    reel({ id: '1', angle: 'Review One: a' }),
+    reel({ id: '2', angle: 'Review Two: a' }),
+    reel({ id: '3', status: 'review_rejected', angle: 'Rejected One: a' }),
+    reel({ id: '4', status: 'approved', angle: 'Approved One: a' }),
+    reel({ id: '5', status: 'queued', angle: 'Making One: a' }),
+    reel({ id: '6', status: 'published', published_at: '2026-10-21T00:00:00Z', video_state: 'DRAFT', angle: 'Draft One: a' }),
+    reel({ id: '7', status: 'published', published_at: '2026-10-21T00:00:00Z', video_state: null, angle: 'Unchecked One: a' }),
+    reel({ id: '8', status: 'published', published_at: '2026-10-21T00:00:00Z', video_state: 'PUBLISHED', angle: 'Public One: a' }),
+  ])
+
+  it('puts what needs a person first, drafts and unchecked uploads together, and leaves empty groups out', () => {
+    const stages = groupWorksByStage(works)
+    expect(stages.map((s) => [s.id, s.works.length])).toEqual([
+      ['review', 2],
+      ['problem', 1],
+      ['approved', 1],
+      ['making', 1],
+      ['draft', 2],
+      ['sent', 1],
+    ])
+    expect(Object.fromEntries(stages.map((s) => [s.id, s.defaultOpen]))).toEqual({ review: true, problem: true, approved: true, making: false, draft: false, sent: true })
+    expect(groupWorksByStage([])).toEqual([])
+  })
+
+  it('counts works and versions, per state', () => {
+    const folded = groupReelWorks([
+      reel({ id: 'a2', created_at: '2026-10-22T00:00:00Z', angle: 'Same Piece v2: x' }),
+      reel({ id: 'a1', created_at: '2026-10-21T00:00:00Z', angle: 'Same Piece v1: x' }),
+      reel({ id: 'b', status: 'failed', angle: 'Other Piece: x' }),
+    ])
+    const counts = countReelWorks(folded)
+    expect(counts).toMatchObject({ works: 2, versions: 3 })
+    expect(counts.byKind.review).toBe(1)
+    expect(counts.byKind.problem).toBe(1)
+  })
+
+  it('the state of a work is the state of its newest version', () => {
+    const folded = groupReelWorks([
+      reel({ id: 'r2', created_at: '2026-10-22T00:00:00Z', angle: 'Detail Clip r2: new ending' }),
+      reel({ id: 'r1', created_at: '2026-10-21T00:00:00Z', status: 'published', published_at: '2026-10-21T01:00:00Z', video_state: 'DRAFT', angle: 'Detail Clip r1: first cut' }),
+    ])
+    expect(folded).toHaveLength(1)
+    expect(folded[0].tag.label).toBe('待审核')
+    expect(folded[0].versions[1].tag.label).toBe('草稿')
+  })
+})
+
+describe('describeVarietyAdvice', () => {
+  it('says what is off in plain words and what to do, only when the existing rule says something is off', () => {
+    const track = describeVarietyAdvice({ same_track_max: 7, same_track_file: 'a.mp3', price_screen_count: 9, total: 30 })
+    expect(track).toBe('最近 30 条里，同一首背景音乐用了 7 次。下一批建议换一首背景音乐。')
+    const price = describeVarietyAdvice({ same_track_max: 1, same_track_file: 'a.mp3', price_screen_count: 5, total: 10 })
+    expect(price).toBe('最近 10 条里，价格款占了 5 条。下一批建议少放价格款。')
+    const both = describeVarietyAdvice({ same_track_max: 3, same_track_file: 'a.mp3', price_screen_count: 5, total: 10 })
+    expect(both).toContain('换一首背景音乐、少放价格款')
+    expect(describeVarietyAdvice({ same_track_max: 1, same_track_file: 'a.mp3', price_screen_count: 0, total: 3 })).toBeNull()
+    expect(describeVarietyAdvice({ same_track_max: 0, same_track_file: null, price_screen_count: 0, total: 0 })).toBeNull()
+    expect(`${track}${price}${both}`).not.toMatch(/BGM|价格屏|放行规则/)
+  })
+})
+
+describe('groupReelWorks: never merge what only looks alike (review fixes)', () => {
+  const titles = (angles: string[]) => groupReelWorks(angles.map((angle, i) => reel({ id: `x${i}`, angle }))).map((w) => w.title)
+
+  it('keeps pieces apart when the only difference is something the title cannot show', () => {
+    expect(groupReelWorks([
+      reel({ id: '1', angle: 'Harbour Tour (Spring launch) (batch1 #4): a' }),
+      reel({ id: '2', angle: 'Harbour Tour (Spring launch) (batch2 #4): a' }),
+    ])).toHaveLength(2)
+    expect(groupReelWorks([reel({ id: '1', angle: 'Top Picks #2026: a' }), reel({ id: '2', angle: 'Top Picks #2027: a' })])).toHaveLength(2)
+    expect(groupReelWorks([reel({ id: '1', angle: 'Top #1 picks #2: a' }), reel({ id: '2', angle: 'Top #1 picks #3: a' })])).toHaveLength(2)
+    expect(groupReelWorks([
+      reel({ id: '1', angle: 'Harbour Tour (Spring batch1 #4) (Winter special): a' }),
+      reel({ id: '2', angle: 'Harbour Tour (Spring batch1 #4) (Summer special): a' }),
+    ])).toHaveLength(2)
+  })
+
+  it('a version-looking first word is part of the name ("V8 Engine" is not "Engine v8")', () => {
+    expect(groupReelWorks([reel({ id: '1', angle: 'V8 Engine postcard: a' }), reel({ id: '2', angle: 'V6 Engine postcard: a' })])).toHaveLength(2)
+    expect(groupReelWorks([reel({ id: '1', angle: 'R1 Roadshow: a' }), reel({ id: '2', angle: 'R2 Roadshow: a' })])).toHaveLength(2)
+    expect(titles(['V8 Engine postcard: a'])).toEqual(['V8 Engine'])
+    // a real trailing mark still folds
+    expect(groupReelWorks([reel({ id: '1', angle: 'Roadshow r2: a' }), reel({ id: '2', angle: 'Roadshow r1: a' })])).toHaveLength(1)
+  })
+
+  it('only a whole word is a version mark; "v1.2" and "[v2]" stay in the title', () => {
+    expect(titles(['Harbour v1.2: x', 'Harbour Tour [v2]: a'])).toEqual(['Harbour v1.2', 'Harbour Tour [v2]'])
+  })
+
+  it('shows every "#n" and tells same-title works apart by the ticket note when there is no version mark', () => {
+    expect(titles(['Top #1 picks #2: a'])).toEqual(['Top picks #1 #2'])
+    expect(titles(['Harbour (Spring 2026): a', 'Harbour (Spring 2027): a'])).toEqual(['Harbour（Spring 2026）', 'Harbour（Spring 2027）'])
+  })
+
+  it('counts older versions still waiting for review, only when the newest is not itself waiting', () => {
+    const [work] = groupReelWorks([
+      reel({ id: 'v3', status: 'approved', created_at: '2026-10-23T00:00:00Z', angle: 'Harbour Tour v3: x' }),
+      reel({ id: 'v2', status: 'in_review', created_at: '2026-10-22T00:00:00Z', angle: 'Harbour Tour v2: x' }),
+      reel({ id: 'v1', status: 'in_review', created_at: '2026-10-21T00:00:00Z', angle: 'Harbour Tour v1: x' }),
+    ])
+    expect(work.versions).toHaveLength(3)
+    expect(work.tag.kind).toBe('approved')
+    expect(work.olderPending).toBe(2)
+    const [plain] = groupReelWorks([reel({ id: 'a', angle: 'Solo: x' })])
+    expect(plain.olderPending).toBe(0)
+  })
+
+  it('cuts a long title by character, never in the middle of an emoji', () => {
+    const [work] = groupReelWorks([reel({ id: 'e', template: null, angle: `${'a'.repeat(62)}🙂${'b'.repeat(10)}` })])
+    expect(work.title.endsWith('…')).toBe(true)
+    expect(Array.from(work.title).every((ch) => ch.length === 1 || ch.codePointAt(0)! > 0xffff)).toBe(true)
+    expect(work.title).not.toMatch(/[\ud800-\udbff]…$/)
+  })
+
+  it('a very long run of dashes before the colon does not freeze the page', () => {
+    const started = Date.now()
+    const [work] = groupReelWorks([reel({ id: 'd', angle: `a${'-'.repeat(100000)}b: x` })])
+    expect(work.title.length).toBeGreaterThan(0)
+    expect(Date.now() - started).toBeLessThan(1500)
+  })
+})

@@ -143,6 +143,11 @@ export interface LeadPickResult {
 export function isHumanFollowup(t: LeadTouch): boolean {
   // 🔴 机器发的先排掉。放在渠道判断之后 = AI 外呼被当成真人跟进。
   if (isAutomatedTouch(t.source, t.metadata)) return false
+  // 客人自己打进来、没人接（任何电话适配器写的 inbound + outcome=missed_inbound）= 我们错过了他，
+  // 不是我们跟进了他；算作「已跟进」会把最该回电的人从名单里抹掉。
+  if (t.channel === 'phone' && t.direction === 'inbound' && t.metadata?.outcome === 'missed_inbound') return false
+  // 电话系统记录的外呼没人接：不算「真人跟进过」（PM 2026-10-12）。
+  if (t.channel === 'phone' && t.direction === 'outbound' && t.metadata?.answered === false) return false
   if (t.channel === 'phone') return true
   if (t.source === 'me_manual' || t.source === 'sheet_followup') return true
   if (t.direction !== 'outbound') return false

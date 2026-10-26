@@ -19,7 +19,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { fetchPagePosts, fetchPageReels } from '@/lib/meta/page-posts'
+import { fetchPagePosts, fetchPageReels, type HalvingStats } from '@/lib/meta/page-posts'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { fetchAdStoryIds } from '@/lib/meta/ads-posts'
 import { fetchPostCommentsResult, replyToComment, sendPrivateReply, hideComment, PageComment } from '@/lib/meta/comments'
@@ -73,6 +73,10 @@ export interface ClientRunResult {
   permission_denied_count?: number
   /** A few of those post ids, so a human can spot-check. Not the whole list. */
   permission_denied_sample?: string[]
+  /** Times Meta said "too much data" and the post-list page size was halved to retry. */
+  list_halvings?: number
+  /** Page size that finally worked for the post list (100 = no halving was needed). */
+  list_page_size?: number
   /** Set when the token itself was rejected — the scan stops, nothing else works. */
   token_invalid?: string
 }
@@ -122,9 +126,11 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
     const cutoff = Date.now() - config.lookback_days * 86_400_000
     // Scan recent feed posts + Reels (whose comments live on the video object,
     // not the /published_posts representation) + any pinned evergreen posts.
+    const postStats: HalvingStats = { halvings: 0, finalLimit: 100 }
+    const reelStats: HalvingStats = { halvings: 0, finalLimit: 100 }
     const [recent, reels] = await Promise.all([
-      fetchPagePosts(config.fb_page_id, pageToken, 100),
-      fetchPageReels(config.fb_page_id, pageToken, 100),
+      fetchPagePosts(config.fb_page_id, pageToken, 100, { stats: postStats }),
+      fetchPageReels(config.fb_page_id, pageToken, 100, { stats: reelStats }),
     ])
     // 🔴 用 fullId（`<page_id>_<post_id>`），不是拆过的 postId。
     //    /comments 边上给裸 id，Graph 会把它当成老式 singular status 对象，
@@ -202,6 +208,8 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
       ok: !tokenInvalid,
       page_id: config.fb_page_id,
       posts_scanned: postIds.size,
+      list_halvings: postStats.halvings + reelStats.halvings,
+      list_page_size: Math.min(postStats.finalLimit, reelStats.finalLimit),
       posts_skipped: scan.skipped,
       posts_unreadable: scan.unreadable,
       permission_denied_count: scan.permissionDenied.length,

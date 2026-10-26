@@ -48,4 +48,12 @@ export const INDUSTRY_FEATURE_NOTICE: Record<IndustryFeature, { title: string; b
     title: '这个功能不适用于你的业务',
     body: '「同行渠道」是给旅游业务用的（旅行社同行代终端客户订团）。如果这里应该出现，请在客户设置里把行业填成旅游。',
   },
+  tour_catalog: {
+    title: '这个客户没有开通团目录。',
+    body: '「团目录」是给旅游业务用的。如果这里应该出现，请联系 Magic Engine 团队。',
+  },
+  business_calculator: {
+    title: '这个功能不适用于你的业务',
+    body: '「经营测算」是给旅游业务用的内部模拟工具。如果这里应该出现，请在客户设置里把行业填成旅游。',
+  },
 }

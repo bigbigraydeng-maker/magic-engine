@@ -203,3 +203,24 @@ export const CONTACT_KIND_LABEL: Record<Exclude<ContactKind, 'retail'>, string> 
   trade: '🤝 同行',
   staff: '🏢 自己人',
 }
+
+/**
+ * 平台自己的系统账号（不是真人客人）。
+ *
+ * PM 2026-10-16 截图：「WhatsApp Business」被当成客人排在「今天要联系」第一位，
+ * 它发来的全是 `[unsupported message]` 占位符。这类账号按名字就能认，不需要 AI。
+ * 只收平台自带的名字；真人叫什么都可能，所以不做模糊匹配。
+ */
+export const SYSTEM_ACCOUNT_NAMES: ReadonlySet<string> = new Set([
+  'whatsapp business',
+  'whatsapp',
+  'facebook',
+  'messenger',
+  'instagram',
+  'meta',
+])
+
+export function isSystemAccountName(name: string | null | undefined): boolean {
+  if (!name) return false
+  return SYSTEM_ACCOUNT_NAMES.has(name.trim().toLowerCase())
+}

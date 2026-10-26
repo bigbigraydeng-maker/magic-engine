@@ -203,6 +203,33 @@ describe('runStep3Gate — editable-slug check runs BEFORE any DataForSEO/GSC sp
   })
 })
 
+describe('step3 protected pages — shared matcher', () => {
+  async function run(config: typeof CONFIG, cand: ReturnType<typeof candidate>) {
+    const { runStep3Gate } = await import('../runner')
+    const supabase = fakeSupabase({ snapshotRow: { config: { site_url: 'https://ctstours.co.nz/' } } })
+    const canEditSlug = vi.fn(async () => true)
+    const adapter: ApplyAdapter = { channel: 'pr', canEditSlug, apply: vi.fn() }
+    const result = await runStep3Gate(supabase, adapter, config, [cand])
+    return { result, canEditSlug }
+  }
+
+  it('protects the home page when "/" is on the list (used to be impossible)', async () => {
+    const { result, canEditSlug } = await run({ ...CONFIG, protectedSlugs: ['/'] }, candidate({ slug: null, pageUrl: 'https://ctstours.co.nz/' }))
+    expect(result.failures[0]?.reason).toBe('protected_conversion_page')
+    expect(canEditSlug).not.toHaveBeenCalled()
+  })
+
+  it('a candidate with neither slug nor URL is refused fail-closed, not waved through', async () => {
+    const { result } = await run({ ...CONFIG, protectedSlugs: [] }, candidate({ slug: null, pageUrl: null }))
+    expect(result.failures[0]?.reason).toBe('protected_conversion_page')
+  })
+
+  it('a path entry matches by URL path even when the slug alone would not', async () => {
+    const { result } = await run({ ...CONFIG, protectedSlugs: ['blog/china-visa'] }, candidate({ slug: 'china-visa', pageUrl: 'https://ctstours.co.nz/blog/china-visa' }))
+    expect(result.failures[0]?.reason).toBe('protected_conversion_page')
+  })
+})
+
 describe('deriveTopicMatchedKeyword — English-only target keyword (PM 2026-09-20 W38 dry-run follow-up)', () => {
   it('skips a higher-impression French on-topic query and picks this page\'s own English on-topic query instead', async () => {
     const { deriveTopicMatchedKeyword } = await import('../gate')

@@ -4,7 +4,9 @@ import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText } from './remotion-branch.mjs'
+import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText, defaultMusicVocalGate, MUSIC_VOCAL_REGISTRY_PATH, buildAtmosphereText, buildAtmosphereCaption, buildAtmosphereSrt, assertAtmosphereTextVisible, assertAtmosphereClipUsable, defaultProbeClip } from './remotion-branch.mjs'
+import { MusicVocalGateError } from './music-vocal-gate.mjs'
+import { createHash } from 'node:crypto'
 
 const roots = []
 afterEach(() => {
@@ -60,6 +62,7 @@ function makeEngine(over = {}) {
     computeTimingFromProps: () => TIMING,
     montageFrameOf: (beats, i) => (i === 0 ? 0 : Math.round(beats[i] * 30) + 2),
     musicSourceFor: () => null,
+    contentSubstanceOf: () => ({ verdict: 'pass', kinds: ['brand_card'], textSeconds: 3, reason: 'ok', texts: [] }),
     ...over,
   }
 }
@@ -91,6 +94,7 @@ function makeDeps(env, over = {}) {
     healthFn: () => [],
     loadEngineFn: async () => makeEngine(),
     renderFn: vi.fn(async ({ outFile }) => { writeFileSync(outFile, 'video-bytes'); return { code: 0, stderrTail: '' } }),
+    musicVocalGateFn: vi.fn(async ({ label }) => ({ sha256: 'a'.repeat(64), verdict: 'none', strength: 'signed', name: label, window: [0, 1], cleanUntilSec: null })),
     heartbeatIntervalMs: 10, timeoutSec: 600,
     ...over,
   }
@@ -534,6 +538,89 @@ describe('montage template and shared music', () => {
     expect(deps.renderFn).not.toHaveBeenCalled()
   })
 
+  describe('datacard template', () => {
+    const DC_PROPS = {
+      logoFile: 'logo.png', musicFile: null,
+      hook: { lines: ['SAME BOX', '3 PRICES'] },
+      rows: [
+        { label: 'Alpha', value: '$120', sublabel: 'per m3', bar: 0.4 },
+        { label: 'Beta', value: '$210', sublabel: null, bar: 0.7 },
+        { label: 'Gamma', value: '$300', sublabel: null, bar: 1 },
+      ],
+      disclaimer: 'Estimates only.',
+    }
+    const DC_TIMING = { hookFrames: 60, rowFrames: 36, rowFrom: [60, 96, 132], totalFrames: 240 }
+    const dcEngine = () => makeEngine({
+      isTemplateId: (id) => ['list', 'montage', 'datacard'].includes(id),
+      loadTemplate: (id, p) => ({ compositionId: 'DataCardReel', props: p, assetFiles: ['logo.png'], totalFrames: 240 }),
+      computeDataCardTiming: () => DC_TIMING,
+    })
+    const dcWo = (props = DC_PROPS) => {
+      const wo = makeWo()
+      wo.brief.remotion = { template: 'datacard', props }
+      return wo
+    }
+
+    it('renders and sends every on-screen string as caption and SRT', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 8, audio_stream_present: false })) })
+      const res = await run(env, deps, dcWo())
+      expect(res.ok).toBe(true)
+      const sent = deps.completeFn.mock.calls[0][0]
+      for (const word of ['SAME BOX 3 PRICES', 'Alpha $120 per m3', 'Beta $210', 'Estimates only.']) expect(sent.caption).toContain(word)
+      const srt = deps.uploadSignedFn.mock.calls.find((c) => c[2] === 'text/plain')[1].toString()
+      expect(srt).toContain('Gamma $300 · Estimates only.')
+      expect(srt).toContain('00:00:02,000 --> 00:00:03,200')
+    })
+
+    it('refuses bidi or invisible characters that could make caption differ from the screen', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, disclaimer: '\u202eemit detimil\u202c' }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('双向控制字符')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
+    it('refuses bidi characters hidden in a row sublabel', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, rows: [{ ...DC_PROPS.rows[0], sublabel: '\u202eemit detimil\u202c' }, DC_PROPS.rows[1], DC_PROPS.rows[2]] }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('副标签')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
+    it('refuses a client without a studio mapping with a non-retryable error', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), clientStudio: {} })
+      const err = await errOf(run(env, deps, dcWo({ ...DC_PROPS, logoFile: null })))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.retryable).toBeFalsy()
+      expect(err.message).toContain('FACTORY_CLIENT_STUDIO')
+    })
+
+    it('refuses props whose label is only invisible characters', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine() })
+      const props = { ...DC_PROPS, rows: [{ ...DC_PROPS.rows[0], label: '\u200b' }, DC_PROPS.rows[1], DC_PROPS.rows[2]] }
+      const err = await errOf(run(env, deps, dcWo(props)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toContain('清理后是空的')
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+
+    it('is still refused for a client that is not on the remotion allowlist', async () => {
+      const env = makeEnv()
+      const deps = makeDeps(env, { loadEngineFn: async () => dcEngine(), allowedClientIds: [] })
+      const err = await errOf(run(env, deps, dcWo()))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    })
+  })
+
   it('rejects an unknown template', async () => {
     const env = makeEnv()
     const deps = makeDeps(env)
@@ -680,6 +767,23 @@ describe('real engine contract', () => {
     expect(segments.music.id).toBe('pipa-trap')
     expect(deps.renderFn.mock.calls[0][0].template).toBe('montage')
   })
+
+  it.skipIf(!hasEngine)('runs the fictional data-card example through the real engine', async () => {
+    const props = JSON.parse(readFileSync(join(REMOTION_ENGINE_DIR, 'examples', 'fictional-datacard.props.json'), 'utf8'))
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      loadEngineFn: () => loadRemotionEngine(),
+      probeMediaEvidenceFn: vi.fn((_f, _srt) => ({ width: 1080, height: 1920, duration_seconds: 11, audio_stream_present: false })),
+    })
+    writeFileSync(join(env.lib, 'logo.png'), 'logo')
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'datacard', props }
+    const eng = await loadRemotionEngine()
+    expect(typeof eng.computeDataCardTiming).toBe('function')
+    const res = await run(env, deps, wo)
+    expect(res).toEqual({ ok: true, cost: 0 })
+    expect(deps.completeFn.mock.calls[0][0].caption).toContain('Town Alpha $120')
+  })
 })
 
 describe('buildRemotionText optional dateLine', () => {
@@ -695,5 +799,246 @@ describe('buildRemotionText optional dateLine', () => {
     const reveal = buildRemotionText(clone).reveal
     expect(reveal).toBe('THE LIST. FROM A$12,345 PER PERSON EXAMPLE ONLY')
     expect(reveal).not.toContain('undefined')
+  })
+})
+
+describe('music vocal gate', () => {
+  const montageWo = () => {
+    const wo = makeWo()
+    wo.brief.remotion = { template: 'montage', props: MONTAGE_PROPS }
+    return wo
+  }
+  const clientMusicDeps = (env, over = {}) => {
+    writeFileSync(join(env.lib, 'song-one.m4a'), 'client-bytes')
+    return makeDeps(env, {
+      loadEngineFn: async () => makeEngine({
+        loadTemplate: (id, p) => ({ compositionId: 'MontageReel', props: p, assetFiles: MONTAGE_FILES, totalFrames: 150 }),
+      }),
+      probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 5, audio_stream_present: true })),
+      ...over,
+    })
+  }
+
+  it('checks the STAGED music file with the used window and records the receipt', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env)
+    const res = await run(env, deps, montageWo())
+    expect(res).toEqual({ ok: true, cost: 0 })
+    const call = deps.musicVocalGateFn.mock.calls[0][0]
+    expect(call.stagedPath.endsWith('assets/song-one.m4a')).toBe(true)
+    expect(call.totalFrames).toBe(150)
+    expect(call.fps).toBe(30)
+    const segments = JSON.parse(deps.uploadSignedFn.mock.calls[1][1].toString())
+    expect(segments.music_vocal_gate.verdict).toBe('none')
+  })
+
+  it('blocks the render (non-retryable) when the gate says vocals are present', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env, {
+      musicVocalGateFn: vi.fn(async () => { throw new MusicVocalGateError('MUSIC_VOCAL_PRESENT', '音乐含人声') }),
+    })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBe(false)
+    expect(err.message).toMatch(/音乐人声检查没过.*MUSIC_VOCAL_PRESENT/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when the gate itself errors', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env, { musicVocalGateFn: vi.fn(async () => { throw new Error('boom') }) })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/检查本身出错/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('production wiring: with NO injected gate the shipped registry blocks unregistered music before render', async () => {
+    const env = makeEnv()
+    const deps = clientMusicDeps(env, { musicVocalGateFn: undefined })
+    const err = await errOf(run(env, deps, montageWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/音乐人声检查没过.*MUSIC_VOCAL_UNREGISTERED/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('does not run the gate when the order has no music', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env)
+    await run(env, deps)
+    expect(deps.musicVocalGateFn).not.toHaveBeenCalled()
+  })
+
+  describe('defaultMusicVocalGate', () => {
+    const setup = (entries) => {
+      const dir = mkdtempSync(join(tmpdir(), 'mvg-'))
+      const music = join(dir, 'm.mp3')
+      writeFileSync(music, 'tiny-music')
+      const sha = createHash('sha256').update('tiny-music').digest('hex')
+      const reg = join(dir, 'reg.json')
+      writeFileSync(reg, JSON.stringify(entries(sha)))
+      return { music, reg, sha }
+    }
+    const base = { name: 'm', signedAt: '2026-10-16T00:00:00.000Z', evidence: 'doc:x' }
+    const args = (t, over = {}) => ({ stagedPath: t.music, props: { musicStartSec: 0 }, totalFrames: 300, fps: 30, label: 'm.mp3', registryPath: t.reg, ...over })
+
+    it('passes a signed vocal-free track', async () => {
+      const t = setup((sha) => [{ ...base, sha256: sha, verdict: 'none', signedBy: 'human:Ray' }])
+      const receipt = await defaultMusicVocalGate(args(t))
+      expect(receipt.verdict).toBe('none')
+    })
+    it('rejects an unregistered file by content hash', async () => {
+      const t = setup(() => [])
+      await expect(defaultMusicVocalGate(args(t))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_UNREGISTERED' })
+    })
+    it('rejects a vocal track and a window past cleanUntilSec', async () => {
+      const t1 = setup((sha) => [{ ...base, sha256: sha, verdict: 'present', signedBy: 'auto-scan' }])
+      await expect(defaultMusicVocalGate(args(t1))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_PRESENT' })
+      const t2 = setup((sha) => [{ ...base, sha256: sha, verdict: 'unknown', cleanUntilSec: 10, signedBy: 'PM审片@abcdef12', strength: 'approval-only' }])
+      await expect(defaultMusicVocalGate(args(t2))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_UNKNOWN' })
+    })
+    it('refuses to run when the registry is missing (never an empty table)', async () => {
+      const t = setup(() => [])
+      await expect(defaultMusicVocalGate(args(t, { registryPath: join(tmpdir(), 'nope-registry.json') }))).rejects.toMatchObject({ code: 'MUSIC_VOCAL_REGISTRY_INVALID' })
+    })
+    it('the shipped registry parses and blocks the known vocal tracks', async () => {
+      const { loadMusicVocalRegistry } = await import('./music-vocal-gate.mjs')
+      const reg = loadMusicVocalRegistry(MUSIC_VOCAL_REGISTRY_PATH)
+      expect(reg.filter((e) => e.verdict === 'present').length).toBeGreaterThanOrEqual(3)
+    })
+  })
+})
+
+describe('atmosphere template wiring', () => {
+  const PROPS_ATMOS = { logoFile: 'logo.png', musicFile: null, clip: 'clips/a.mp4', durationSec: 15, line: null }
+  const atmosEngine = (over = {}) => makeEngine({
+    isTemplateId: (id) => ['atmosphere', 'weird'].includes(id),
+    loadTemplate: (id, p) => ({ compositionId: 'AtmosphereReel', props: p, assetFiles: ['clips/a.mp4', 'logo.png'], totalFrames: 450, recipeGaps: [{ column: '真人背影/真人出镜', status: '未满足', reason: 'x' }] }),
+    computeAtmosphereTiming: () => ({ totalFrames: 450 }),
+    contentSubstanceOf: (_t, p) => (p.line
+      ? { verdict: 'pass', kinds: ['selling_line'], textSeconds: 5, reason: 'ok', texts: [] }
+      : { verdict: 'fail', kinds: [], textSeconds: 0, reason: '没有文字', texts: [] }),
+    ...over,
+  })
+  const atmosWo = (props = PROPS_ATMOS, template = 'atmosphere', deliverable = undefined) => {
+    const wo = makeWo()
+    wo.brief.remotion = { template, props, ...(deliverable === undefined ? {} : { deliverable }) }
+    return wo
+  }
+  const probe = (over = {}) => vi.fn(() => ({ durationSec: 20, width: 1080, height: 1920, ...over }))
+  const mk = (env, over = {}) => makeDeps(env, {
+    loadEngineFn: async () => atmosEngine(),
+    probeClipFn: probe(),
+    probeMediaEvidenceFn: vi.fn(() => ({ width: 1080, height: 1920, duration_seconds: 15, audio_stream_present: true })),
+    ...over,
+  })
+
+  it('a reel with no text renders only when marked asset_only: neutral sidecar cue, empty caption, preflight and substance receipts', async () => {
+    const env = makeEnv()
+    const deps = mk(env)
+    const res = await run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only'))
+    expect(res).toEqual({ ok: true, cost: 0 })
+    const segments = JSON.parse(deps.uploadSignedFn.mock.calls[1][1].toString())
+    expect(segments.content_substance).toMatchObject({ verdict: 'asset_only' })
+    expect(deps.completeFn.mock.calls[0][0].media_evidence).toMatchObject({
+      content_substance: { verdict: 'asset_only' },
+      capabilities: ['content_substance_v1'],
+    })
+    expect(segments.atmosphere_preflight).toMatchObject({ upscale: 1, quality: 'ok' })
+    expect(segments.recipe_gaps[0].column).toBe('真人背影/真人出镜')
+    expect(deps.uploadSignedFn.mock.calls[2][1].toString()).toContain('♪')
+    expect(deps.completeFn.mock.calls[0][0].caption).toBe('')
+  })
+
+  it('content gate: an unmarked reel with no text is refused before staging, probing or rendering', async () => {
+    const env = makeEnv()
+    const deps = mk(env)
+    const err = await errOf(run(env, deps, atmosWo()))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/内容闸/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+    expect(deps.probeClipFn).not.toHaveBeenCalled()
+  })
+
+  it('content gate: a mistyped deliverable is not a pass (strict enum, treated as a normal deliverable)', async () => {
+    for (const bad of ['Asset_Only', 'asset-only', 'asset_only ', true, null]) {
+      const env = makeEnv()
+      const deps = mk(env)
+      const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', bad)))
+      expect(err).toBeInstanceOf(RemotionOrderError)
+      expect(err.message).toMatch(/内容闸/)
+      expect(deps.renderFn).not.toHaveBeenCalled()
+    }
+  })
+
+  it('content gate: a worker engine without contentSubstanceOf refuses (fail-closed)', async () => {
+    const env = makeEnv()
+    const deps = mk(env, { loadEngineFn: async () => atmosEngine({ contentSubstanceOf: undefined }) })
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only')))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/内容闸/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses before rendering when the staged clip is shorter than sourceIn + durationSec', async () => {
+    const env = makeEnv()
+    const deps = mk(env, { probeClipFn: probe({ durationSec: 9 }) })
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only')))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/素材不够长/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses when ffprobe itself fails (fail-closed)', async () => {
+    const env = makeEnv()
+    const deps = mk(env, { probeClipFn: vi.fn(() => { throw new Error('ffprobe missing') }) })
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'atmosphere', 'asset_only')))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/素材检查本身出错/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('a template the engine knows but the worker has no text wiring for is refused, never rendered as montage', async () => {
+    const env = makeEnv()
+    const deps = mk(env)
+    const err = await errOf(run(env, deps, atmosWo(PROPS_ATMOS, 'weird')))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toMatch(/没有.*模板的文字复扫接线/)
+    expect(deps.renderFn).not.toHaveBeenCalled()
+  })
+
+  it('builders: no line -> empty text and caption; invisible characters are refused', () => {
+    expect(buildAtmosphereText({ line: null })).toBe('')
+    expect(buildAtmosphereCaption({ line: { text: '  A calm view ' } })).toBe('A calm view')
+    expect(() => assertAtmosphereTextVisible({ line: null })).not.toThrow()
+    expect(() => assertAtmosphereTextVisible({ line: { text: 'A calm view' } })).not.toThrow()
+    expect(() => assertAtmosphereTextVisible({ line: { text: 'A calm\u200b view' } })).toThrow(RemotionOrderError)
+    expect(buildAtmosphereSrt({ line: null }, { totalFrames: 450 }, 30)).toMatch(/^1\n00:00:00,000 --> 00:00:14,9\d\d\n♪\n/)
+  })
+
+  it('clip preflight: crop must be 9:16, upscale is reported, weak quality is flagged', () => {
+    const p4k = { durationSec: 20, width: 3840, height: 2160 }
+    expect(() => assertAtmosphereClipUsable({ sourceIn: 0, durationSec: 15, crop: { x: 0, y: 0, w: 0.5, h: 1 } }, p4k)).toThrow(/9:16/)
+    const ok = assertAtmosphereClipUsable({ sourceIn: 2, durationSec: 15, crop: { x: 0.3, y: 0, w: 0.31640625, h: 1 } }, p4k)
+    expect(ok).toMatchObject({ regionPx: { width: 1215, height: 2160 }, quality: 'ok' })
+    const weak = assertAtmosphereClipUsable({ sourceIn: 0, durationSec: 15, crop: { x: 0.3, y: 0, w: 0.31640625, h: 1 } }, { durationSec: 20, width: 1920, height: 1080 })
+    expect(weak.quality).toBe('weak: upscaled')
+    expect(weak.upscale).toBeGreaterThan(1.5)
+    expect(() => assertAtmosphereClipUsable({ sourceIn: 6, durationSec: 15 }, p4k)).toThrow(/素材不够长/)
+    expect(() => assertAtmosphereClipUsable({ sourceIn: 0, durationSec: 15 }, { durationSec: NaN, width: 1080, height: 1920 })).toThrow(/读不出/)
+  })
+
+  it('defaultProbeClip swaps width and height for a sideways (rotated 90) clip', () => {
+    const exec = vi.fn(() => JSON.stringify({ streams: [{ width: 1920, height: 1080, side_data_list: [{ rotation: -90 }] }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', exec)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
+    const old = vi.fn(() => JSON.stringify({ streams: [{ width: 1920, height: 1080, tags: { rotate: '270' } }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', old)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
+    const flat = vi.fn(() => JSON.stringify({ streams: [{ width: 1920, height: 1080, side_data_list: [{ rotation: 180 }] }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', flat)).toEqual({ durationSec: 14, width: 1920, height: 1080 })
+  })
+
+  it('defaultProbeClip parses ffprobe json', () => {
+    const exec = vi.fn(() => JSON.stringify({ streams: [{ width: 1080, height: 1920 }], format: { duration: '14.0' } }))
+    expect(defaultProbeClip('/x.mp4', exec)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
   })
 })

@@ -1,11 +1,20 @@
 /** Authenticated manual stop-loss submission. Provider writes stay inside Kernel capabilities. */
 import { requirePaidClientAccess, type ClientAccessResult } from '@/lib/auth/client-access'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { runAction, type ActionRunOutcome, type SubmitActionInput } from '@/lib/kernel/runner'
 import type { KernelDeps } from '@/lib/kernel/deps'
 
 export type StopLossAccess = Extract<ClientAccessResult, { ok: true }>
-export function requireStopLossAccess(clientId: string): Promise<ClientAccessResult> {
-  return requirePaidClientAccess(clientId)
+export async function requireStopLossAccess(clientId: string): Promise<ClientAccessResult> {
+  // Money-changing action: internal accounts only (paid clients include the client's own staff).
+  // Same two gates as requirePlanApproverAccess, called literally so the Kernel human-trigger scan sees them.
+  const paid = await requirePaidClientAccess(clientId)
+  if (!paid.ok) return paid
+  const admin = await requireGlobalAdmin()
+  if (!admin.ok) {
+    return { ok: false, status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', reason: 'approver_only' }
+  }
+  return paid
 }
 
 export type StopLossKernelAction = 'pause_campaign' | 'cut_campaign' | 'cut_unit'

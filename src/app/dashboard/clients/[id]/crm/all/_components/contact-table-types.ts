@@ -9,6 +9,8 @@
  * 或加一个渠道，改这一处。
  */
 
+import type { NextAction, IntentLevel } from '@/lib/crm/next-action'
+
 export interface ContactRow {
   contactId: string
   name: string
@@ -34,7 +36,21 @@ export interface ContactRow {
   suggestedChannel?: 'phone' | 'sms' | 'email' | 'messenger' | 'none'
   /** 为什么排到这一批 —— 抽屉顶部「上次说到这」那一档用。 */
   reason?: string
+  /**
+   * 「该做什么」—— 阶段 / 冷热 / 意向三套状态合成的那一个概念（PM 2026-10-10）。
+   * 列表只画 `nextAction.line`；`stage` / `segment` 仍在，抽屉改阶段和筛选还要用。
+   */
+  nextAction: NextAction
+  /** 最新一张 AI 摘要的意向；null = 没有摘要。 */
+  intent: IntentLevel | null
   custom: Record<string, string | null>
+  /** 他最早是从哪个渠道进来的（messenger / email / whatsapp / phone / fb_form / web_form），最多一项；列表在名字旁画小标签。 */
+  sources?: string[]
+  /**
+   * 这条线索当前分给谁跟进（`client_portal_users.email`）。null = 未分配。
+   * part 2 的 round-robin 自动写入；part 3 UI 让人手动改（issue #3158）。
+   */
+  assignedTo: string | null
 }
 
 export interface CustomColumnMeta {
@@ -88,6 +104,7 @@ export const DIRECTION_LABEL: Record<string, string> = {
 }
 export const OUTCOME_LABEL: Record<string, string> = {
   no_answer: '没接通',
+  missed_inbound: '漏接来电',
   bad_number: '号码不通',
   do_not_contact: '别再联系',
   not_interested: '没兴趣',
@@ -106,6 +123,12 @@ export const TEMP_CLS: Record<ContactRow['temperature'], string> = {
   off: 'bg-me-charcoal/5 text-me-charcoal/45',
 }
 
+/** 「该做什么」那一格的底色：hot 名单红、cold 名单灰。按 `nextAction.list` 取。 */
+export const LIST_CLS: Record<NextAction['list'], string> = {
+  hot: 'bg-[#C2453A]/12 text-[#C2453A]',
+  cold: 'bg-me-charcoal/5 text-me-charcoal/55',
+}
+
 export function ts(v: string | null | undefined): number {
   if (!v) return 0
   const t = new Date(v).getTime()
@@ -117,14 +140,22 @@ export function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'numeric', day: 'numeric' })
 }
 
-/** 「今天 / 昨天 / 3天前 / 7/2」—— 最近联系用相对时间，不是干日期。 */
+/**
+ * 「今天 / 昨天 / 3天前 / 87天前」—— 最近联系一律用「几天前」。
+ *
+ * 原来满 30 天就换成「9/10」这种日期：PM 2026-10-10 看本地页，一列里「29天前」
+ * 紧跟着「9/10」，同一列两种写法，眼睛要换算。一年以内都说「N天前」，超过一年才给日期。
+ */
 export function relTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
   const now = new Date()
-  if (d.toDateString() === now.toDateString()) return '今天'
-  const days = Math.floor((now.getTime() - d.getTime()) / 86_400_000)
+  // 按日历日算，不按 24 小时算：昨晚 11 点在今天早上 6 点就该叫「昨天」，
+  // 不能因为还没满 24 小时就掉回日期写法。
+  const dayOf = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate())
+  const days = Math.round((dayOf(now) - dayOf(d)) / 86_400_000)
+  if (days <= 0) return '今天'
   if (days === 1) return '昨天'
-  if (days >= 2 && days < 30) return `${days}天前`
+  if (days >= 2 && days < 365) return `${days}天前`
   return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }

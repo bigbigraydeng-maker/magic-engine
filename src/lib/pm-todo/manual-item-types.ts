@@ -27,14 +27,21 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
+import type { CommentAutoreplyRunFailingTodo } from './comment-autoreply-run-failing-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
 import type { LeadSheetItemKind } from './lead-sheet-items'
+import type { CalendarClosureItemKind } from './calendar-closure-items'
+import type { TourPublishRequestItemKind } from './tour-catalog-publish-request-items'
 import type { PlatformConnectionItemKind } from './platform-connection-items'
 import type { FacebookSyncItemKind } from './facebook-sync-items'
+import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { AdsServicePauseItemKind } from './ads-service-pause-items'
+import type { AdsAccountStatusItemKind } from './ads-account-status-items'
+import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
@@ -56,11 +63,20 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // diagnostic_synthesis_failing：链接是需要登录的后台页，探活大概率判成坏链接 —— 这条正是要消灭「静默」的，不能被探活悄悄丢掉（魏征 2026-10-18）。
+  'diagnostic_synthesis_failing',
   'cross_client_leak',
   'facebook_page_binding_unverified',
   // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
   //   链接是需要登录的后台页，探活大概率判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
   'facebook_sync_failing',
+  // ads_service_pause_notice：链接是登录后的广告健康页，探活容易判成坏链接。系列已经停了，这条不能静默丢掉。
+  'ads_service_pause_notice',
+  // lead_followup_due：链接是登录后台页，探活易判成坏链接；这条丢了 = 有人填了表没人知道。
+  'lead_followup_due',
+  'lead_followup_check_failed',
+  // whatsapp_number_unclaimed：链接指向需要登录的后台页，探活可能判成坏链接 —— 消息正在丢，宁可让人自己找入口，也不能静默消失。
+  'whatsapp_number_unclaimed',
   'ai_provider_exhausted',
   'ai_alerting_broken',
   // 「授权体检自己读不出来了」「整条通道停了」跟 ai_alerting_broken 是同一类：
@@ -80,6 +96,15 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 需要 PM 动手，都不能因为链接问题静默消失（Codex 复审 2026-09-28）。
   'ai_tracker_all_failed',
   'ai_tracker_all_failed_dev',
+  // 待确认电话的链接是需要登录的页面，探活多半判成坏链接 —— 不能因此让「有电话没记进客人档案」静默消失。
+  'phone_call_needs_review',
+  // 推广计划每日检查：链接是需要登录的页面，探活多半判成坏链接——这条里还有「检查自己没跑成」，绝不能静默消失。
+  'promo_plan_watch',
+  'promo_plan_watch_broken',
+  // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
+  // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
+  'ads_tracking_preflight_fix',
+  'ads_tracking_preflight_broken',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -88,6 +113,14 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  /** 体检的 AI 文字叙事没写成（保存失败/模型失败）—— 开发欠账，不用 PM 动手（2026-10-18）。 */
+  | 'diagnostic_synthesis_failing'
+  | 'promo_plan_watch'
+  | 'promo_plan_watch_broken'
+  /** 开投前追踪检查里有硬门 / 软门红灯：具体怎么修（开发的活，不占 PM 的清单；PM 在推广计划页看灯） */
+  | 'ads_tracking_preflight_fix'
+  /** 开投前追踪检查自己没跑成 / 回执过期：没人在盯追踪（开发欠账） */
+  | 'ads_tracking_preflight_broken'
   | 'blog_pr_open'
   | 'not_indexed'
   | 'meta_stuck'
@@ -169,6 +202,20 @@ export type ManualItemKind =
   | 'price_claim_unbacked'
   /** 每日计划里帖子的价格数字跟客户资料里该团的价格对不上（或没资料可对）—— 发布时整批会被拦 */
   | 'price_fact_unverified'
+  /** 自动发布：帖子被拦 / 多次失败 / 发布时间已过没补发 —— 没发出去，要人看 */
+  | 'auto_publish_stalled'
+  /** 自动发布：系统不确定帖子有没有发出去，为防重复不自动重试 —— 要人去主页核对 */
+  | 'auto_publish_unknown_outcome'
+  /** 自动发布：已授权的日期到了，却没有任何发布记录 —— 发布器可能没在跑 */
+  | 'auto_publish_unarmed'
+  /** 自动发布：记录说「已撤回」，但回执里同一天又有一条新发出的帖子 —— 主页上有帖、系统记录对不上，要人核对 */
+  | 'auto_publish_record_conflict'
+  /** Story 自动发布：某条 Story 被拦 / 被平台拒绝 / 时间已过没补发 —— 没发出去，要人看 */
+  | 'story_stalled'
+  /** Story 自动发布：不确定某条 Story 有没有发出去，为防重复不自动重试 —— 要人去主页核对 */
+  | 'story_unknown_outcome'
+  /** Story 自动发布：已授权的周包到点了，却没有任何发布 / 演练记录 —— 发布器可能没在跑 */
+  | 'story_unarmed'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -177,6 +224,8 @@ export type ManualItemKind =
   | 'dm_maybe_stop'
   /** 客人身上的「⭐重要标记」到期了 —— 员工手工设的"约好周三 3 点回电"这种事，到点该做了 */
   | 'crm_important_due'
+  /** 电话系统收了通话但没能自动记进客人档案（待确认 / 没记成）—— 要人看一眼是谁、补记一笔 */
+  | 'phone_call_needs_review'
   /** 平台候选（docs/registry/platform-candidates.md）到了复查日期 —— 见 me-platform-tier-gate skill */
   | 'platform_candidate_review_due'
   /** 客户方案文档里写了一次性人工动作（如"明早 09:00 前扫一眼 xx"），只登记在文档里等于没下发 */
@@ -197,6 +246,8 @@ export type ManualItemKind =
   | ToolLeadItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
+  /** 评论自动回复连续多轮整轮没扫完 —— 以前被记成「完成」，约一个月没人发现 */
+  | CommentAutoreplyRunFailingTodo['kind']
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
   | MetaTokenHealthKind
   /** 上面那项检查自己没跑成 —— 不报 ≠ 钥匙都活着 */
@@ -207,6 +258,10 @@ export type ManualItemKind =
   | 'deploy_check_failed'
   /** 线索没写进客户的 Google 表格 —— 销售看的那张表缺人，留资 90 天后永久取不回 */
   | LeadSheetItemKind
+  /** 日历上带日期的验证事项每日巡检：读不到日历 / 巡检没跑成 / 没法自动核对 / 核对没达预期 */
+  | CalendarClosureItemKind
+  /** 客户员工改了团目录、请我们上架 —— 不上架这些修改不会对外生效（对外动作，只有 ME 管理员能点） */
+  | TourPublishRequestItemKind
   /** 执行内核停手 / 等审批 / 被规则挡下 —— 必须有人看见，不许死在日志里 */
   | 'kernel_needs_human'
   /** 自治开关同步到执行内核失败 —— 面板档位和内核实际档位可能不一致（WP3.1a） */
@@ -214,6 +269,12 @@ export type ManualItemKind =
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
   | AdsCircuitItemKind
+  /** 服务把一条在投的广告系列暂停了 —— 要不要恢复由人点确认卡 */
+  | AdsServicePauseItemKind
+  /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
+  | AdsAccountStatusItemKind
+  /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
+  | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
   | 'meta_data_deletion_failure'
   /** 有成交/咨询等着人核对要不要告诉广告平台 —— 撤不回，所以必须人点 */
@@ -238,9 +299,8 @@ export type ManualItemKind =
   | 'knowledge_fact_expiring_soon'
   | AttributionItemKind
   | ClientRosterItemKind
+  /** 历史：LinkedIn 自动发帖已于 2026-10 下线，不再有产出方；保留成员只为让 2026-09-25 的待办夹具继续成立 */
   | 'linkedin_progress_needs_review'
-  | 'linkedin_progress_needs_setup'
-  | 'linkedin_progress_failed'
   | EmailReplyItemKind
   /** 客户在自助向导里交了广告账户号，只有内部员工能核实后接上（AD-SEC-3）*/
   | BindingRequestItemKind
@@ -254,6 +314,8 @@ export type ManualItemKind =
   | 'conversation_health_check_error'
   /** 经验手册（Claude 持久记忆，不在仓库）里点名的函数/路径/表名疑似过期，每周巡检自动发现 */
   | 'playbook_reference_stale'
+  /** WhatsApp 收到了消息但没有客户绑定这个号码 */
+  | 'whatsapp_number_unclaimed'
   /**
    * 外部平台的授权断了 / 没了心跳 / 权限清单不够用（2026-09-24 CTS 邮箱断 9 天）。
    * 只有人能重新走一次同意页，所以必须进人工车道，不许只躺在 error_message 里。
@@ -267,10 +329,8 @@ export type ManualItemKind =
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */
   | FacebookSyncItemKind
-  /** 工厂把 Facebook Reel 同步到客户 Instagram(Publer)时,Publer 里的 Instagram 账号掉线 —— 只有人能去 Publer 重新连接 */
-  | 'instagram_account_disconnected'
-  /** 同步到 Instagram 自动重试都失败、已放弃 —— 要开发看原因 */
-  | 'instagram_publish_failed'
+  /** 客人填了表超过 24 小时没人回 / 这一栏没算出来 */
+  | LeadFollowupItemKind
   /** Magic Bridge 全平台免费额度用到 80% 以上 —— 要不要加额度由 PM 定 */
   | 'magic_bridge_quota'
   /** Tools Lab 全站每月合计花费/次数上限用到 80% 以上（网站诊断+广告体检共用）—— 要不要加名额由 PM 定 */
@@ -452,7 +512,7 @@ export const NOT_INDEXED_REPORT_ORDER: readonly IndexClass[] = [
  * 谷歌没收录的页面 —— **一个客户汇总成一条，不是一页一条**。
  *
  * 🔴 实测 oztop 一家就 116 个未收录页面（PM 2026-09-04 fix闭环），一页一条会把
- * 今日待办正文淹掉 122 行 —— 跟 pushDiagnosticItems / pushLinkedinProgressItems
+ * 今日待办正文淹掉 122 行 —— 跟 pushDiagnosticItems 等
  * 早就立下的「别把待办刷屏」是同一条纪律，唯独这条线之前漏了。逐条的网址和单独
  * 深链没意义（谁也不会点 116 个链接），价值全在「哪个客户、几个、什么原因、去哪
  * 看全部」。

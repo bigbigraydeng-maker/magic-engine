@@ -8,6 +8,18 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // The code base uses colour opacity steps (bg-x/8, /12, /14 ...) that Tailwind's default scale
+      // does not have; Tailwind silently generates nothing for them, so those tints/borders never
+      // rendered (measured on the payments page, 2026-10-14). Adding the steps makes the existing
+      // class names do what their authors meant.
+      opacity: {
+        6: '0.06',
+        8: '0.08',
+        12: '0.12',
+        14: '0.14',
+        16: '0.16',
+        22: '0.22',
+      },
       fontFamily: {
         sans:    ['var(--font-sans)',    'system-ui', 'sans-serif'],
         display: ['var(--font-display)', 'var(--font-sans)', 'sans-serif'],

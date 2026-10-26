@@ -12,7 +12,7 @@ const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [�
 选项：
   --props <file>              必填，props JSON 文件路径
   --out <file.mp4>            必填，输出 mp4 文件路径（必须以 .mp4 结尾）
-  --template <list|montage>   模板，默认 list
+  --template <list|montage|datacard|postcard|atmosphere>   模板，默认 list
   --public-dir <dir>          素材目录（默认：render.mjs 同级的 public）
   --concurrency <int>         并发数 1..16（默认 2）
   --timeout-sec <int>         总超时秒数，至少 30（默认 600）

@@ -267,6 +267,7 @@ function planClient(
   own: readonly PlanReceipt[],
   segments: readonly DaySegment[],
   today: string,
+  maxBackfillSegments: number,
 ): { orders: PullOrder[]; stopped: StoppedMonth[] } {
   const orders: PullOrder[] = [
     { client_id: c.clientId, kind: 'daily', start_day: addDays(today, -DAILY_WINDOW_DAYS), end_day: addDays(today, -1) },
@@ -279,7 +280,7 @@ function planClient(
     if (stoppedOn) stopped.push({ client_id: c.clientId, month: s.start_day.slice(0, 7), stopped_on: stoppedOn })
     else candidates.push(s)
   }
-  for (const s of candidates.slice(0, MAX_BACKFILL_SEGMENTS_PER_DISPATCH)) {
+  for (const s of candidates.slice(0, maxBackfillSegments)) {
     orders.push({ client_id: c.clientId, kind: 'backfill', start_day: s.start_day, end_day: s.end_day })
   }
   return { orders, stopped }
@@ -299,13 +300,14 @@ export function planPageDailyPulls(
   clients: readonly GscConnectedClient[],
   receipts: readonly PlanReceipt[],
   today: string,
+  maxBackfillSegments: number = MAX_BACKFILL_SEGMENTS_PER_DISPATCH,
 ): PagePlan {
   const segments = backfillSegments(today)
   const orders: PullOrder[] = []
   const stopped: StoppedMonth[] = []
   for (const c of clients) {
     const own = receipts.filter((r) => r.client_id === c.clientId && r.site_url === c.siteUrl)
-    const planned = planClient(c, own, segments, today)
+    const planned = planClient(c, own, segments, today, maxBackfillSegments)
     orders.push(...planned.orders)
     stopped.push(...planned.stopped)
   }
@@ -315,8 +317,8 @@ export function planPageDailyPulls(
 }
 
 /** Only a 24-hour de-dup key inside Inngest; the real de-dup is the receipt coverage above. */
-export function pullEventId(order: PullOrder): string {
-  return `gsc-page-daily:${order.client_id}:${order.kind}:${order.start_day}:${order.end_day}`
+export function pullEventId(order: PullOrder, prefix: string = 'gsc-page-daily'): string {
+  return `${prefix}:${order.client_id}:${order.kind}:${order.start_day}:${order.end_day}`
 }
 
 /** Validate an untrusted pull-due payload, fail-closed, in a fixed order. */

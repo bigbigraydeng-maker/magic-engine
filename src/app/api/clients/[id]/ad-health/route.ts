@@ -28,6 +28,11 @@ import {
   toClientGrowthView,
   type GrowthRowForClient,
 } from '@/lib/ads-strategy/agents/growth-client-view'
+import {
+  toClientNarrativeView,
+  type NarrativeRowForClient,
+} from '@/lib/ads-strategy/narrative-client-view'
+import { overlayLiveGoal } from '@/lib/ads-strategy/agents/growth-live-goal'
 
 export const dynamic = 'force-dynamic'
 
@@ -82,7 +87,8 @@ export async function GET(
   }
 
   if (latestRes.error) {
-    return NextResponse.json({ error: latestRes.error.message }, { status: 500 })
+    console.warn('[api/ad-health] 读体检失败', { clientId, error: latestRes.error.message })
+    return NextResponse.json({ error: '体检读取失败，请稍后再试' }, { status: 500 })
   }
 
   if (growthRes.error) {
@@ -90,15 +96,20 @@ export async function GET(
   }
 
   const growthRows = (growthRes.data ?? []) as GrowthRowForClient[]
+  // 目标卡读当前生效的目标（员工版）：每日缓存行里的目标最多晚一天，目标刚改/刚换时会显示旧的。
+  // 今天还没有缓存行（null）时不覆盖——页面照旧说「今天还没巡察」。
   const growth = growthRes.error
     ? undefined
     : fullView
-      ? (growthRows[0] ?? null)
+      ? (growthRows[0] ? await overlayLiveGoal(clientId, growthRows[0]) : null)
       : toClientGrowthView(growthRows, new Date())
 
   return NextResponse.json({
     success: true,
-    latest: latestRes.data ?? null,
+    // Non-staff get a whitelisted payload: portfolio_diagnoses (D11 etc.) stays internal.
+    latest: fullView
+      ? (latestRes.data ?? null)
+      : toClientNarrativeView((latestRes.data ?? null) as NarrativeRowForClient | null),
     // Oldest → newest for the trend strip.
     history: (historyRes.data ?? []).slice().reverse(),
     industry: (clientRes.data as { industry?: string | null } | null)?.industry ?? null,

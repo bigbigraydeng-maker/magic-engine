@@ -41,6 +41,14 @@ export type GoalSubType = SalesSubType | AcquisitionSubType | AwarenessSubtype
 
 export type TargetDirection = 'increase' | 'decrease'
 
+/**
+ * Goal auto-rollover cadence.
+ *   - null: one-shot goal (default) — expires and stays expired
+ *   - 'monthly': cron creates next natural month goal after period_end
+ * Values are extensible (weekly / quarterly) but only 'monthly' is wired today.
+ */
+export type GoalRecurrence = 'monthly' | null
+
 export type GoalStatus = 'draft' | 'active' | 'expired' | 'archived'
 
 export type GoalVerdict = 'confirmed' | 'partial' | 'reversed' | 'inconclusive'
@@ -210,6 +218,9 @@ export interface GoalRow {
   verdict_at: string | null
   verdict_summary: string | null
 
+  /** Auto-rollover cadence; null = one-shot. See GoalRecurrence. */
+  recurrence: GoalRecurrence
+
   fde_reasoning: string | null
   is_beta: boolean
 
@@ -240,6 +251,12 @@ export interface SupportingMetric {
   unit?: string
   baseline?: number
   target?: number
+  /**
+   * Only read when key is `deposited_seat_scope`.
+   * Lists the departures whose deposited seats fill this goal.
+   * Verdict does not use supporting metrics.
+   */
+  departures?: Array<{ depart_on: string; tour_id?: string }>
 }
 
 export interface InitiativeRow {

@@ -28,6 +28,9 @@ import {
 } from './candidates'
 import { buildCtrGapItem, buildDecayItem, buildNearMissItem, type ItemContext, type PlanItemDraft } from './items'
 import { buildDecayCandidates, type DecayCandidate } from './decay'
+import { checkKeywordPages, type KeywordPageCheck } from './keyword-page-check'
+import { parseProtectedSlugs, readProtectedRaw } from '@/lib/seo/protected-pages'
+import { buildTopicMap, type TopicMapEntry } from './topic-map'
 import { CAUSE_LABEL, diagnoseCtrGap, type CtrDiagnosis, type PageQueryRow } from './ctr-diagnosis'
 import { fetchGscQueriesForPage } from '@/lib/gsc/client'
 import { fetchLiveSnippet, type SnippetFetcher } from './live-snippet'
@@ -39,6 +42,10 @@ const MAX_PAGES = 20
 const GSC_WINDOW_DAYS = 28
 /** Per client per run: how many low-CTR pages get a live per-page query read from Google (free). */
 const MAX_QUERY_FETCH = 3
+/** Per client per run: how many near-miss keywords get a live "which own page really gets impressions for it" check (free Google read). */
+const MAX_KEYWORD_PAGE_FETCH = 3
+/** Per checked keyword: how many of its best-matching own pages are read. */
+const MAX_PAGES_PER_KEYWORD = 2
 const DAY_MS = 86_400_000
 
 /** Reads one page's own search queries (Google Search Console). Injected so tests never touch Google. */
@@ -63,13 +70,17 @@ export interface WeeklyListClientResult {
   expired: number
   inserted: number
   duplicates: number
-  withheld: 'wip_cap' | 'no_candidates' | 'no_snapshot' | 'stale_snapshot' | null
+  withheld: 'wip_cap' | 'no_candidates' | 'no_snapshot' | 'stale_snapshot' | 'protected_list_malformed' | null
   skipped_keywords: number
   preview: string[]
   /** High-potential pages left out because their last crawl is too old to take a baseline from (data gap, surfaced not hidden). */
   stale_crawl_pages?: string[]
   /** Traffic-decay source switched off for this run (thin history / read failed), with why. Absent = ran normally. */
   decay_note?: string
+  /** Own-page spread for near-miss topics (text match + Google impressions); a suggestion for a human, never an action. */
+  topic_map?: TopicMapEntry[]
+  /** How many near-miss keywords had their own pages checked against Google's per-page queries this run. */
+  prediagnosed_keywords?: number
   /** Items whose verify / expire write failed (the run continues; any entry turns the cron red). */
   item_errors?: string[]
   error?: string
@@ -329,6 +340,16 @@ async function buildDrafts(
   const clientId = client.id
   const locationCode = LOCATION_CODE_BY_DB[client.semrush_db ?? 'au'] ?? LOCATION_CODE_BY_DB.au
 
+  // Protected-page list FIRST (before any query): a malformed list must withhold the whole client,
+  // never degrade to "protect nothing" (SEO playbook P-02b).
+  const protectedRaw = readProtectedRaw(client.seo_config)
+  const protectedParsed = protectedRaw.malformed ? null : parseProtectedSlugs(protectedRaw.raw)
+  if (protectedParsed === null || protectedParsed.malformed) {
+    result.withheld = 'protected_list_malformed'
+    return []
+  }
+  const protectedSlugs = protectedParsed.entries
+
   // keyword snapshot (latest day)
   const { data: latestSnap, error: snapErr } = await supabase
     .from('keyword_snapshots').select('snapshot_date').eq('client_id', clientId).eq('location_code', locationCode)
@@ -381,11 +402,7 @@ async function buildDrafts(
     if (c) sitePageByCanon.set(c, p)
   }
 
-  // exclusions: meta-cycle protected pages + pages it changed in the last 30 days
-  const seoConfig = (client.seo_config && typeof client.seo_config === 'object' ? client.seo_config : {}) as Record<string, unknown>
-  const protectedSlugs = Array.isArray(seoConfig.meta_cycle_protected_slugs)
-    ? (seoConfig.meta_cycle_protected_slugs as unknown[]).filter((s): s is string => typeof s === 'string')
-    : []
+  // exclusions: pages the meta-cycle changed in the last 30 days (protected pages were resolved up front)
   const since30 = new Date(now.getTime() - 30 * DAY_MS).toISOString()
   const { data: metaLog, error: metaErr } = await supabase
     .from('seo_meta_log').select('page_url').eq('client_id', clientId).gte('optimised_at', since30)
@@ -435,6 +452,10 @@ async function buildDrafts(
     pageImpressions,
   }
 
+  const { data: gscSite } = await supabase
+    .from('gsc_performance_snapshots').select('site_url').eq('client_id', clientId).order('period_end', { ascending: false }).limit(1).maybeSingle()
+  const siteUrl = (gscSite as { site_url: string } | null)?.site_url ?? null
+
   const near = buildNearMissCandidates(snapshotRows, {
     config, brandRoot: domainRoot(client.domain ?? ''), brandAliases: client.brand_aliases, competitorDomains: client.competitor_domains ?? [],
   })
@@ -444,6 +465,7 @@ async function buildDrafts(
   type Ranked = { potential: number; build: (index: number) => PlanItemDraft | null }
   const ctrEligible: Array<{ c: (typeof ctrGap)[number]; page: SitePageRow }> = []
   const ranked: Ranked[] = []
+  let prediagnosed = 0
   for (const c of near.candidates) {
     if (blockedKeywordKeys.has(tokenKey(c.primary.keyword))) continue
     const matches = matchOwnPages(c.primary.keyword, sitePages)
@@ -461,8 +483,25 @@ async function buildDrafts(
       noteStale(result, main.url) // no trustworthy word-count baseline
       continue
     }
-    ranked.push({ potential: c.potentialClicks, build: i => buildNearMissItem(c, matches, ctx, i) })
+    let check: KeywordPageCheck | undefined
+    if (main && siteUrl && prediagnosed < MAX_KEYWORD_PAGE_FETCH) {
+      prediagnosed += 1
+      const imp = (u: string) => pageImpressions.get(canonicalUrl(u) ?? '') ?? 0
+      const top = [...matches].sort((a, b) => imp(b.url) - imp(a.url)).slice(0, MAX_PAGES_PER_KEYWORD)
+      const inputs = await Promise.all(top.map(async p => {
+        try {
+          return { url: p.url, queries: await fetchPageQueries(siteUrl, p.url, clientId) }
+        } catch {
+          return { url: p.url, queries: null }
+        }
+      }))
+      check = checkKeywordPages(c.primary.keyword, inputs)
+    }
+    ranked.push({ potential: c.potentialClicks, build: i => buildNearMissItem(c, matches, ctx, i, check) })
   }
+  result.prediagnosed_keywords = prediagnosed
+  const topicMap = buildTopicMap(near.candidates.map(n => n.primary), sitePages, pageAgg)
+  if (topicMap.length > 0) result.topic_map = topicMap
   for (const c of ctrGap) {
     const canon = canonicalUrl(c.url)
     if ((canon && blockedUrls.has(canon)) || isExcludedUrl(c.url, protectedSlugs, recentMetaUrls)) continue
@@ -497,9 +536,6 @@ async function buildDrafts(
   // CTR diagnosis for the top low-CTR pages: read the page's OWN search queries from Google
   // (free) and combine with title / sibling-page facts. A failed read never blocks the item —
   // it just says the query data could not be fetched.
-  const { data: gscSite } = await supabase
-    .from('gsc_performance_snapshots').select('site_url').eq('client_id', clientId).order('period_end', { ascending: false }).limit(1).maybeSingle()
-  const siteUrl = (gscSite as { site_url: string } | null)?.site_url ?? null
   for (const [i, e] of ctrEligible.entries()) {
     let diag: CtrDiagnosis | undefined
     if (i < MAX_QUERY_FETCH) {

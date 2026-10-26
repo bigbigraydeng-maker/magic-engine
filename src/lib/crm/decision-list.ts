@@ -21,6 +21,7 @@
  */
 
 import type { ContactKind } from './contact-kind'
+import { LIST_META } from './next-action'
 
 export type SuggestedChannel = 'phone' | 'sms' | 'email' | 'messenger' | 'none'
 
@@ -148,7 +149,8 @@ export function buildDecisionList(buckets: DecisionBucketSource[]): DecisionRow[
         contact: contactText(p.phone, p.email, p.phoneUnusable),
         why: p.reason,
         nextAction: nextActionText(p),
-        layerLabel: bucket.label,
+        // 这页只列要人动手的那一层，跟「全部客人」页同一个说法：今天要联系（PM 2026-10-10 一个概念）。
+        layerLabel: LIST_META.hot.title,
         pinned: p.pinned === true,
       })
     }

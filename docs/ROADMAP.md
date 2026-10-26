@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | B1 广告 WP3 | Inngest 链、孔明预检 + denied 恢复点、韩信、Check/Tune、Jev、五段日报、`autonomy_mode`↔`client_automation_policies.mode` 同步设计、G11 熔断落点确认 | 高/高/高 → P0 | A | 已派 ME 广告构建控制（合同待开）；设计与实施各一次 子牙+魏征，狄仁杰看同步开关 |
 | B2 三只闹钟 | 马良出片自动 9 宫格自检 · 李白逐句溯源 + 月度提示词体检 · 司马迁周四读评价起草不发 | 中/中/中 → P2 | B | 已派 ME 2.0 构建控制；只写 pm-todo 三件套，避开周五六 |
-| B3 审查自动被叫 | 接线 `tools/ops-review-loop/src/risk.mjs` → PR 事件 → 自动分派魏征/狄仁杰/板桥 | 高/中/低 → P2 | A（碰 workflows） | PM 2026-09-25「分两档」插队：定级接线 + B/C 自动合 + A 级签字闸已派 ME 2.0（合同 A 级，DeepSeek 执行）；三人签字的自动写入仍待广告跑稳两周后开 |
+| B3 审查自动被叫 | 接线 `tools/ops-review-loop/src/risk.mjs` → PR 事件 → 自动分派魏征/狄仁杰/板桥 | 高/中/低 → P2 | A（碰 workflows） | PM 2026-09-25「分两档」插队：定级接线 + B/C 自动合 + A 级签字闸已派 ME 2.0（合同 A 级，DeepSeek 执行）。2026-10-25 起 A 级签字改为 Codex Astra + Claude Code 两方，子牙/魏征/狄仁杰只抽查 B 级且不挡合并（见 .github/merge-authorization.md）。两方签字的自动写入仍未建成。 |
 | B4 板桥待办人话闸 | 今日待办条目先过板桥改人话 | 高/中/中 → P2 | B | 待广告跑稳两周、且 B2 后再开 |
 | B5 孔子 SEO 笼子 | 给 SEO 改文案划「不问就能做」范围 | 广告跑稳两周后再打分 | A | 未开工 |
 
@@ -278,6 +278,17 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
+
+## Meta Social Technologies MCP 内部工程助手 · 后续评估（2026-10-24 登记，未排期）
+
+Meta 官方 MCP 工具可辅助开发者查询 Meta 开发文档、应用与权限状态、审核 / 合规信息、API 用量与弃用信息，以及 webhook 订阅状态；Manage 能力还可管理 webhook 订阅并发送测试事件。
+
+- **当前决定**：仅登记为候选，后续有时间再评估是否适合 Magic Engine；尚未按 §11 打分，不排期、不开发。
+- **预期价值**：为 Magic Engine 内部工程人员提供查询 Meta 官方开发资料与应用状态的入口，减少维护 Meta 集成时在代码、文档和开发者后台之间切换核对的工作。
+- **边界**：这是内部研发 / 运维辅助工具，不是 Magic Engine 面向客户的 Meta Ads Connector；不提供客户广告账户 Insights，也不替代 Magic Engine 自身的 OAuth、账户授权、数据存储和只读数据管道。Manage 能力不代表可以修改应用配置或完成 App Review。
+- **后续评估要点**：确认开放资格、Read 权限实际覆盖的问题、与现有 Meta Ads Connector 的互补关系及认证 / 数据边界；默认只评估 Read，只有明确的非生产 webhook 验证需求时再考虑 Manage。
+- **相关现状**：[`docs/specs/2026-09-20-meta-ads-ai-connector-v01.md`](./specs/2026-09-20-meta-ads-ai-connector-v01.md) 仍标记为 Discovery / Implementation Proposal、STOP BEFORE BUILD；本条不改变该状态。
+- **来源**：[Meta Social Technologies MCP 官方文档](https://developers.facebook.com/documentation/mcp/devtools-mcp/)。
 ## SEO 标题周循环 v1 · 上线后跟进（2026-09-20 上线，CTS 开关已关；清单来源 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807) 评论）
 
 - [ ] **重新打开 CTS 的开关**：先用 `POST /api/cron/seo-meta-cycle-trigger` 带 `{"dry_run": true, "client_id": "<CTS>"}` 跑一次演练，把「这一轮会改哪些页、改成什么字、依据的搜索量/难度/前 3 标题」给 PM 看；PM 批准后才把 `clients.seo_config.meta_cycle_enabled` 改回 true（见 PITFALLS D10）
@@ -339,6 +350,7 @@ PM 要求把 parkhomes.nz 整体检查一遍还有什么可以升级。首页网
   - [ ] **让 `triggeredBy: 'human'` 不可自报** —— `SubmitActionInput.triggeredBy` 是提交方必填、`runner.ts:194` 原样写库、**零校验**；而人工止损信封刻意不看学习期 / 72h 冷却 / 变动 ≤20% / 日上限，所以**谁能填 `'human'` 就能跳过 AI 信封那五条闸**（统筹 + 卫青 2026-09-27 查出，我核实成立；今天生产代码零处填它，止损路由接上那一刻打开）。彻底修法 = `submitActionRun` 不收 `'human'`，改收一个由鉴权层产出的「已鉴权人工上下文」，Kernel 自己翻成 `'human'`，让类型系统保证「没鉴权过就构造不出 human 提交」（同 `AUTHORIZED_CONTEXT_MINTERS` 的思路）。代价是动 `runner.ts` 公开入参 = 动所有提交方，本轮太大。**本轮的替代是两层围栏**：`HUMAN_TRIGGER_ALLOWED_DIRS`（只有 `src/lib/ads-strategy/submission/` 能传）+ `HUMAN_TRIGGER_REQUIRED_AUTH_CALLS`（传它的文件必须命中鉴权调用，剥注释后按调用形式判），两条由架构测试强制、4 条变异全红。**不许因为围栏在了就认为这条修好了** —— 围栏管的是「哪个文件能说谁」，不是「说谁本身不可能」
   - [ ] **provider-write 闸的 AST 化** —— 狄仁杰实测那道闸能被 barrel 转发 + 同目录相对 import 绕过（9 种写法里架构测试只认得 1 种）。修法在 `architecture.test.ts` 同文件里已有（341 行起的 AST 版 `moduleRefsIn`），存量弱点非本轮引入
 - [ ] **WP3.2 链条**：`google-data-pullback-daily` 末尾发 `ads.impact_cycle.due`（不新开 cron）；韩信（新 agent `docs/agents/12-hanxin.md`）编排：熔断检查 → 孔明 `isWithinEnvelope` 预检 → denied 恢复入批 → 去冲突 → Kernel；批次表 + 成员表；pm-todo 四个拉取函数 + 活性项。
+  - 🔴 **在它做完之前，熔断等于不存在**（2026-10-18 查实）：写 trip 的人是韩信 step 1（设计稿 §2.2 第 1 行：「#1/#2/#4 的 trip 在这里写」），而韩信属本条。所以今天 `ads_circuit_events` **0 行**、`capabilities/ads/envelope-facts.ts` 的执行前熔断闸**恒为放行**、`pm-todo/ads-circuit-items.ts` **恒为空**。WP3.1b 交付的是表 + 五条判据函数 + 派生态查询 + 执行前闸 + admin 解除接口，**读侧已在生产、写侧在本条**——代码读起来像有熔断保护，实际没有。工作量只读估算见 `docs/specs/2026-10-18-ads-agent-whole-design-and-code-gaps-v0.1.md` §6.5。
 - [ ] **WP3.3 Check + Tune + Jev + 日报两段**：韩信在 `runAction` 成功后写 `flywheel_actions`（加 `action_run_id` 列）；attribution 加 `ads_check` 评估器（扩 `flywheel_outcomes_evaluator_key_check`、`OUTCOME_EVALUATOR` 登记、`ads.` owner）；Tune 复用 `memory-extractor`（`pattern_type` CHECK 扩 `budget|pause|creative`）；`prescription_evaluations`；日报 Check/Tune 段。
 - **不在 WP3**：任何客户开 `bounded_auto`（单独授权）；三个 stub capability 的真实实现；`deny` 写入口（v1 不提供，管理员的「关」= `observe`）。
 - **PM 需知**：翻 `autonomy_mode` 触发 `policy_version +1`，当天在途授权作废、下一轮重提（正常，日报提示）。
@@ -998,18 +1010,18 @@ Codex 复审又挖出 6 个「落地页存在，但操作的东西跟待办要�
 第三轮挑出的 1 条回归（原子认领误伤视频内容重新确认）已修；另 4 条（下方 ⚠️ 清单）功能默认关闭时不触发，
 按 PM 决策登记成"开启前必关"的后续任务，不阻塞本次合并。
 
-- [ ] **上线前 PM 必做的一次性动作**：① 去 Publer 后台用自己的 LinkedIn 账号做一次性授权连接
+- [x] 【已作废（Publer 已删除）】**上线前 PM 必做的一次性动作**：① 去 Publer 后台用自己的 LinkedIn 账号做一次性授权连接
       ② 打开 ME 后台「Magic Lab Class」客户的 connectors 设置页，把出现的 LinkedIn 账号 ID 填进 Publer 绑定
       ③ 在 Render 的 `crazycontent` 服务（不是 render.yaml 里那个不对外服务的 `magic-engine`）Environment 页手动加
       `LINKEDIN_PROGRESS_POST_ENABLED=true`（未配置=默认禁用，这三步没做完之前功能保持休眠，不会误发）
-- [ ] 上线后先跑一次人工验证：确认 Publer 的 schedule 接口对 `provider='linkedin'` 真的认（目前只有代码推断，没有已连账号可实测），
+- [x] 【已作废（Publer 已删除）】上线后先跑一次人工验证：确认 Publer 的 schedule 接口对 `provider='linkedin'` 真的认（目前只有代码推断，没有已连账号可实测），
       建议先手工发 1-2 条真实验证一次发布路径，再考虑打开 cron 开关
 
 **⚠️ 打开开关（第③步 `LINKEDIN_PROGRESS_POST_ENABLED=true`）之前必须先关掉的 4 条（Codex 第三轮复审，功能默认关闭时不会触发，所以不阻塞合并，但是"开启前"的硬门槛）：**
 
 - [ ] **[P1] 匿名客户业务数字漏过滤**（`src/lib/linkedin-progress/run.ts` 敏感过滤）：CHANGELOG 若只用匿名方式写客户指标（如「2099 条消息 / 658 个会话」），`findSensitiveMatches` 只认客户名/域名/代号/术语，完全不认运营数字，这类稿会绕过"不点名也不得披露客户数字"的要求自动发。要加代码级数字/联系方式检测，或含此类数据一律转人审。
-- [ ] **[P1] 人工确认路径没处理"发布成功但数据库没同步"**（`content-factory/[postId]/route.ts` LinkedIn 分支）：cron 的 `run.ts` 已消费 `dbSyncError` 并写 `published_but_db_sync_failed` 对账标记，但看板手工 confirm 这条分支还没有——Publer 已发但回写失败时，界面会误报失败稿，可能被当失败重发。要把 run.ts 那套对账逻辑同样接到这条分支。
-- [ ] **[P1] 发布失败后 approved 状态卡死、无重试入口**（同上文件 LinkedIn 分支）：Publer 调度超时/报错时，帖子已被原子认领改成 approved，这里只返 500 不回滚；无视频的 approved 帖子归"备料"段，确认按钮只在"选题"段显示，PM 修好连接后无法再确认，稿件永久卡住。要在确认外部未接受时回滚为 draft，或给 approved 提供幂等重试入口。
+- [x] 【已作废（Publer 已删除）】**[P1] 人工确认路径没处理"发布成功但数据库没同步"**（`content-factory/[postId]/route.ts` LinkedIn 分支）：cron 的 `run.ts` 已消费 `dbSyncError` 并写 `published_but_db_sync_failed` 对账标记，但看板手工 confirm 这条分支还没有——Publer 已发但回写失败时，界面会误报失败稿，可能被当失败重发。要把 run.ts 那套对账逻辑同样接到这条分支。
+- [x] 【已作废（Publer 已删除）】**[P1] 发布失败后 approved 状态卡死、无重试入口**（同上文件 LinkedIn 分支）：Publer 调度超时/报错时，帖子已被原子认领改成 approved，这里只返 500 不回滚；无视频的 approved 帖子归"备料"段，确认按钮只在"选题"段显示，PM 修好连接后无法再确认，稿件永久卡住。要在确认外部未接受时回滚为 draft，或给 approved 提供幂等重试入口。
 - [ ] **[P2] 待办查询失败被当成"零条记录"**（`src/lib/pm-todo/manual-items.ts` `pushLinkedinProgressItems`）：那次 `content_posts` 查询若失败，Supabase 返回 `{data:null,error}` 不抛异常，这里只取 `data` 再 `?? []`，账号未连/敏感稿/已发未同步等卡点会全部静默从今日待办消失。要检查并抛 `error`。
 
 ### 广告引擎中心 — 已上线部分的收尾（2026-08-05）
@@ -1271,7 +1283,7 @@ chunked 绕过 OOM 闸 · 闸门没接在花钱那条线上 · 归档入口（�
 - [ ] **P35.10** 外呼专用域名（PM 已拍板不用主域）：候选近似域名查询 → PM 选定注册 → SPF/DKIM/DMARC 配置 → 2-3 周预热计划。主域只收回复，保 magic link 通道信誉
 - [ ] **P35.11 邮箱深挖（治本，PM 拍板 2026-07-13）⭐**：**「假邮箱」≠「没邮箱」** —— 诊断 9 个被判无邮箱的商家（Maddren Homes / Clinic 1 / ETF Electrical / Roofing Excellence / Space Air / The Cosmetic Store / Factory Carpets / Voltsy / Moore Quality），**全部有真实官网 + 电话，4 家还有在线询盘表单**。根因 = 抓取器只读首页 HTML、抓到主题占位符（`user@domain.com`/Wix `mysite.com`）就当邮箱、漏了真邮箱。三条深挖路径（PM 全部同意）：
 - [ ] **P35.12 $19.90 Tripwire Onboarding（获客漏斗第一钩，PM 拍板 2026-07-13）⭐⭐**：一次性 $19.90「onboarding 数字优化」当 tripwire → 建联建信任 → 上钩 $990 套餐（GEO / FB 代运营 / newsletter+WhatsApp）。**设计原则**：每个 $19.9 交付物 = 一个 $990 套餐的「种子」，展示价值同时暴露只有 $990 能补的缺口。
-- [ ] **P35.13 社媒内容引擎升级（IG 原生 + 品牌套件，为 $990 代运营铺路）**：现输出主打 FB 文字帖、太粗不符 IG。三支柱：① IG 原生格式模板库（轮播/Reel/精修图/Story）② **每客户品牌套件**（从 logo/官网抽主色+2 字体+滤镜，治「粗犷」根因，精致来自模板不是原始 AI）③ 视频优先（Higgsfield shorts_studio/Seedance 出竖版 Reel + virality_predictor 筛）。能力已有（Atlas/Higgsfield/HeyGen/Publer），缺模板+品牌系统。医美 before/after 有 Meta+NZ 合规限制 → 主打不需临床照的科普/团队/FAQ。**先建一套医美 IG 样板跑通一家再产品化**。此项是「医美 Wave 2」的前置。
+- [ ] **P35.13 社媒内容引擎升级（IG 原生 + 品牌套件，为 $990 代运营铺路）**：现输出主打 FB 文字帖、太粗不符 IG。三支柱：① IG 原生格式模板库（轮播/Reel/精修图/Story）② **每客户品牌套件**（从 logo/官网抽主色+2 字体+滤镜，治「粗犷」根因，精致来自模板不是原始 AI）③ 视频优先（Higgsfield shorts_studio/Seedance 出竖版 Reel + virality_predictor 筛）。能力已有（Atlas/Higgsfield/HeyGen/Publer），缺模板+品牌系统。医美 before/after 有 Meta+NZ 合规限制 → 主打不需临床照的科普/团队/FAQ。**先建一套医美 IG 样板跑通一家再产品化**。此项是「医美 Wave 2」的前置。（Publer 已于 2026-10 删除）
 
 ## Phase 7 — 遗留尾项 ⚠️ 计划执行日期已过期，需判断是否作废
 
@@ -1603,7 +1615,7 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] **P21.J.M3 闭环**(≈1-2 周):发布($50 绝对硬顶 + publish_intent 幂等 + publish_failed 收敛)+ UTM 沿用 + 表现回流单链路 + winner 判定拆片入库 + 工厂内部自发疲劳信号。验收:真实成片上 CTS Meta 账户(**PM 显式 go 后才首发**,$10/天×3 天)+ 回流数据落 `flywheel_metrics` + 工作日志人话叙事无"工厂"字眼
 - [ ] **开放项**:信号契约与 34.A 对齐冻结(M1 前置)· asset_gap 信号归属 · MTC 计费触点(v1 占位不扣)· Airtable 观测层↔ME 真值同步(M2 起)
 - [ ] **P21.J.SEC 接口安全完整审计**:狄仁杰三审报"26 个 `/api/clients/[id]/*` 无鉴权",逐个核实后发现多数(ads 执行/cms 发布)其实已有锁、是误报,真裸奔仅 5 个已补。**需一次系统性复核**:grep 全部 access 守卫关键词 + 逐个确认,把"真裸奔"与"已有锁被误报"彻底分开,补齐真缺的。今天只是止血
-- [ ] **P21.J.SEC-2 `/api/publer/create-post` 至今无鉴权**:任何人拿一个 `post_id` 就能把该客户的成片发到他的社媒账号。**不能像 schedule/draft 那样直接加登录鉴权** —— 这条同时被 Zapier/Airtable webhook 调用(仅 body 带 `post_id`,没有会话),加了就当场打断线上自动化。正解是 Bearer Token,而 token 要同时配到 Zapier 那边 = 需要 PM 动手一次。此项 2025 年就登记过(`docs/archive/AUTOMATION_SPEC.md` D-2),躺在 archive 里没人看,2026-08-05 补进主线。同批的 `/api/publer/schedule` 与 `/api/publer/draft/[assetId]` 只有后台一个调用方,已直接补上鉴权
+- [x] 【已作废（Publer 已删除）】**P21.J.SEC-2 `/api/publer/create-post` 至今无鉴权**:任何人拿一个 `post_id` 就能把该客户的成片发到他的社媒账号。**不能像 schedule/draft 那样直接加登录鉴权** —— 这条同时被 Zapier/Airtable webhook 调用(仅 body 带 `post_id`,没有会话),加了就当场打断线上自动化。正解是 Bearer Token,而 token 要同时配到 Zapier 那边 = 需要 PM 动手一次。此项 2025 年就登记过(`docs/archive/AUTOMATION_SPEC.md` D-2),躺在 archive 里没人看,2026-08-05 补进主线。同批的 `/api/publer/schedule` 与 `/api/publer/draft/[assetId]` 只有后台一个调用方,已直接补上鉴权
   🔄 **2026-08-19 代码已写完,PR [#1081](https://github.com/bigbigraydeng-maker/magic-engine/pull/1081) 待复审,未合并**:读 `PUBLER_CREATE_POST_TOKEN` 环境变量做 Bearer 比对。**合并前需要 PM 配合两步,顺序不能反**:①先在 Render 生产环境变量加 `PUBLER_CREATE_POST_TOKEN` ②再去 Zapier 那个触发 create-post 的 webhook 步骤配上同一个密钥,两边都配完才能合并 PR——反过来的话线上自动发布会先被打断。
 - [ ] **P21.J.UP 上传链接两取舍**:①无单条吊销(作废靠换 `UPLOAD_LINK_SECRET`,所有链接一起失效)②无速率限制(有真链接者可刷存储/烧 Vision 额度)。规模化前需补 per-client 限流 + 单链接吊销
 - [ ] **本地 worker 没在认领**:今天 00:18 有 CTS 新工单卡在 `queued` 没人做 = 那台 Mac 的 worker 没跑/没连。工厂要真转,先确认 worker 进程在跑(仓库无 launchd/pm2 配置,`ps`/`pm2 list` 上机看)且已在 07-24 后重启(否则风格下发用旧逻辑)
@@ -1841,11 +1853,43 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
       它写「**最近一次**挂着 running」，而现在 `startedAt` 是 48 小时窗口内**最早**那一轮；
       而且新加的 `rounds`（卡了几轮）没渲染出来，看板比待办少一条信息。
 
+## AI 可见度全挂告警 · 上线后跟进（PR [#1943](https://github.com/bigbigraydeng-maker/magic-engine/pull/1943)，2026-09-28 合并；代码已合并、单测已过，以下是三轮复审点出、**刻意没做**的部分）
+
+主体改动：某客户 AI 可见度体检整周全挂时自动进今日待办，分供应商给修复指引，不用 PM 操心的原因单独
+归开发栏。台账卡：[`docs/ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md`](./ledger/2026-09-23-ai-tracker-100pct-failure-pm-todo-alert.md)。
+**尚未当场试跑完整链路**：本改动同时改了 `/api/cron/ai-tracker-weekly` 的失败计数，并依赖随后运行
+的 `pm-daily-todo` 把失败读出来生成告警；按 CLAUDE.md「当场试跑」规则，这条「周检失败 → 待办生成」
+链路需要拿替身数据手动触发一次、看到真实待办回执后才能算完整验证，目前还没跑过。台账卡 `verify_by`
+定在 2026-09-30，届时用真实周检（或人为制造一次全挂）确认待办邮件里出现这条提醒，再把台账状态更新
+为 `verified`；在此之前不应把这个功能说成「已验证可用」，只能说「本体代码已合并」。
+以下按 §11：三条频率都低（都要撞上特定的低概率数据库/时序状态才会触发）、IMPACT 前两条中（真撞上
+会让检测彻底失效）后一条低（会自愈）、收入都低（没有证据显示已经影响过真实客户）→ 三条都是 P3。
+
+- [ ] **[P3] `ai_visibility_runs` 插入本身失败时，这行数据完全不落库，检测不到。**
+      `orchestrator.ts` 的 `processOne` 在 DB insert 失败时只 `runs_failed++`，不写任何行；
+      本模块的查询只读 `ai_visibility_runs`，一行没有 = 看起来跟「还没跑」一样。
+      要做的事：读一份按客户记录的批次/定时任务回执作第二数据源，或者插入失败时也落一行
+      占位记录（哪怕内容是空的）。
+
+- [ ] **[P3] `ai_visibility_runs` 插入成功但更新失败时，那一行会被误读成「成功」。**
+      `processOne` 第四步更新（写入解析结果/`parse_error_message`）失败时，`orchestrator.ts`
+      正确记了 `runs_failed++`，但最初插入的那一行仍然带着两个空字段（`error_message` /
+      `parse_error_message` 都是 `null`）——`isRunConclusive` 只看这两个字段，会把它当真成功。
+      要做的事：给该表加一个能区分「还没解析」/「解析成功」/「更新失败」三种状态的字段，
+      或者也用上面那条的批次回执来判定。
+
+- [ ] **[P3] 待办查询可能撞上「这周的批次还没跑完」，误报一次全挂。**
+      旧的 `ai-tracker-weekly` 定时任务周日 18:00 UTC 起跑、`pm-daily-todo` 一小时后就查；
+      如果某客户当前批次只跑完前几条且都失败，会被误判成「全挂」，甚至给出充值指引，
+      尽管剩下的探测随后会成功。属于低概率但会自愈的一类：下一天的检查会因为看到新的
+      成功记录而自动撤回提醒，不会一直卡在错的结论上。要做的事：依据批次完成回执或
+      预期探测数确认该周运行已结束后再生成告警（同上两条的批次回执可以一起解决）。
+
 ## 每日计划价格数字核对 · 审查后登记（2026-10-08，PR 2365）
 
 **§11 打分**：频率中（每次发布都过）· IMPACT 关键度高（Act 外发出口）· 收入关联度高（错价 = 客户投诉）→ 以下为本 PR 审查中**未并入**的次要意见，记入待认领，不现在动。
 
-- [ ] **[P2] Publer 三条发布路由（`/api/publer/create-post` `schedule` `quick-post`）没接价格数字核对**，只有旧的图来源闸。
+- [x] 【已作废（Publer 已删除）】**[P2] Publer 三条发布路由（`/api/publer/create-post` `schedule` `quick-post`）没接价格数字核对**，只有旧的图来源闸。
 - [ ] **[P2] 资料包由人手填，官网改价后会过期。** 官网事实快照（PR 2270）合并后，让核对改为对官网快照自动对账，并给资料加「核对日期」。
 - [ ] **[P3] 资料包里任意字段里的数字都算事实**（过期早鸟价、单人房加价可被当团价放行）。收紧成只认带语义的价格字段。
 - [ ] **[P3] 共享代码默认团名放在 `tour` 字段、破折号和括号出发地写法**，对旅游以外行业不通用；应改成 Industry Profile 或显式声明团名字段。没填资料包又写了价格的非旅游客户目前会被整批拦（待查哪些客户走每日计划发布）。
@@ -1856,3 +1900,36 @@ Gate B 定的 `minSampleSize=3`，页面目前只会显示「数据还不够说�
 - [ ] **[P3] 设置页资料包没有字段名提示**（`tour` `url` 影响匹配，价格字段名随意），加占位符说明。
 - [ ] **[P3] 魏征二审：新增的「带千分位逗号的数字都算价格」会多拦社交证明文案**（Join 2,500 happy guests、1,000 5-star reviews、1,500 bookings、up to 8,848 m）。补单位词表（customers/bookings/spots/rooms/m/tours/5-star reviews）；只会多拦、不会多放。
 - [ ] **[P2] 已知缺口：`now 1999`、`was 2,699, now 1999` 这类 1900–2099 间不带逗号的促销价会被当年份放过**（NZ 团价常落在这一带）。让 was/now 后面的数字不再按年份排除即可堵上。
+
+## SEO 负责人节奏 · 审查后续项（2026-10-08，设计稿 [docs/specs/2026-10-08-seo-lead-operating-rhythm-v0.1.md](./specs/2026-10-08-seo-lead-operating-rhythm-v0.1.md)，待 PM 批准第一阶段后再排）
+
+- [ ] 簇体检的「谁当主页」要有通用判据，不得写死客户页面（子牙）
+- [ ] P2-B 月度竞品词差落地时需要存历史，那时要新表评审（子牙）
+- [ ] P3 的 `seo.change.*` 事件补授权失效、幂等、重放规则（子牙）
+- [ ] P1-C 询盘取数口径落地后补一张台账卡（子牙）
+- [ ] 预诊断上线后，逐条核实 CTS 示范里「哪页在排这个词」的假设（魏征）
+- [ ] 算出张家界「第 4 → 前 3」的点击差额（用现有点击率曲线，不编数）（魏征）
+- [ ] 对账 42 号体检里「已过期清单卡」张数（§一写 4、§五写 3）（魏征）
+- [ ] 先测「卡从出生到被批」中位天数的基线，再定 ≤7 天目标（魏征）
+- [ ] 开源仓库的 SERP 重叠阈值用 CTS 实测校准后才可上线（设计稿 §11）
+
+- [ ] **[待排] 谷歌搜索广告（SEM）专家工作节奏设计**（PM 2026-10-09 拍板与 SEO 分开管理，归广告支柱；SEO 第一阶段跑起来后再排，不开工）。SEO 设计稿 §12 已定义两边「对表」接口；台账卡 `2026-10-09-sem-expert-rhythm-design-todo`
+
+## 广告负责人节奏 · 审查后续项（2026-10-10，设计稿 [docs/specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md](./specs/2026-10-10-ads-lead-capability-map-and-rhythm-v0.1.md)，待 PM 批准第一阶段后再排）
+
+- [ ] **[P2] 把 `detectSpendSpike` / `detectClientSpendOverCap` 接到日循环上** —— 判据、阈值、fail-closed 防护全是现成的，生产里零个调用方；**先与 51 号窗口对口径**，别两边各写一套（魏征 D-2、卫青）
+- [ ] **[P3] 频次阈值按角色分档**（拉新 vs 再营销）需先扩 `AdsPlaybook` 接口（`playbooks/types.ts:23` 不收判断规则），且阈值须用 CTS/NAL 真实数据校准，不用开源的数字（子牙）
+- [ ] **[P2] W1 的「置信度」本期降级成「样本天数」**；真要做置信度得先定算法与取值域，否则实现出来是个凭感觉的字符串（子牙 6-3）
+- [ ] **[P2] 把广告组 / 广告层的 `frequency_7d` 真正填上**（`daily-insights.ts` 现在直接写死 null），否则疲劳分类长期只能靠系列层（魏征 B-1）
+- [ ] **[P3] `ad_entity_snapshots` 存按版位拆开的花费**，让 D9 能按真实花费判、不只按设置字段判（设计稿 §2.1 #4）
+- [ ] **[P3] NZ 版合规规则库**（AU 那份 `src/lib/compliance/au-rules.ts` 已存在但零调用方，先把 AU 接上广告草稿闸再谈 NZ）；Meta 个人属性规则也没落成可比对清单（设计稿 §2.1 #6）
+- [ ] **[P3] 命名规范自动校验**（CTS 一个账户里已有四种命名风格并存）（设计稿 §2.1 #2）
+- [ ] **[P3] 卫青手册 §三 把 `ad_health_prescriptions` 改成实际存在的表名**（生产库没这张表，照它去查会白跑一轮）（设计稿 §2.6）
+- [ ] **[P3] 季节性冲刺层排期（Q5）** 等 02 号窗口的 CTS 预算计划 PM 拍板后再排（设计稿 §3.4）
+- [ ] **[P3] `src/lib/cron/registry.ts` 两处清单与 `render.yaml` 不一致**：`google-data-pullback-daily` 写 `0 3 * * *`（实际 `0 17 * * *`）、`ad-entity-snapshot` 写 `30 */3`（实际 `30 */6`）；`reel-batch-render` 调了运行记录没人认领监控。**本分支基线 `registry.test.ts` 已有 2 条红，不是广告改动造成的**，碰 registry 的 PR 会撞上（子牙 4.1）
+
+## 广告 agent 手册 v1.0 · 审查后续项（2026-10-10，手册 [docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md](./sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md)，等 PM 回第十节拍板后再排）
+
+- [ ] **[P0] 授权红线落代码**：开投 / 加预算 / 改在投素材 / 改受众 / 关整系列永远只认 PM 身份审批接口；`winner-reel-sync-daily` 改只建 PAUSED（手册 §11 行 A1，A 级，等 PM 回第 1 问）
+- [ ] **[P2] S-01 / S-02 / S-11 / C-07 判据补门槛**：「抢量」「预期周事件数」「出价偏差」「素材够几周」目前只有方向、缺可验证门槛（子牙审查）
+- [ ] **[P3] 通用手册重号**：`playbook-ads-meta-general` 有两个 §十三、两个 §三十，建议改编号（记忆文件，不在本仓库）

@@ -1,0 +1,108 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Natural China: 15-second price-suspense reel (spring 2027 push, departs 26 March 2027; v2: lower third lifted (v1 measured 35.5), reveal title shortened (v1 wrapped into FROM), no guests; PRICE TIER UNCONFIRMED by CTS)",
+ "angle_source": {
+  "source": "manual_remotion_cts_spring2027",
+  "authorized_by": "PM 2026-10-11 要主推 2027 最早出发的团 · 75 号窗口任务卡；只出片到 in_review，不发布、不起广告",
+  "facts_checked": "ctstours.co.nz/tours/china/signature/landscapes (China Signature — Natural China), 2026-10-11 实抓：16 days / 14 nights；NZD 7,349 pp twin share；单人房差 NZD 1,895；26 March 2027 → 10 April 2027（与 CTS 出团表 16 天吻合）；Return international airfares + domestic flights；Three Gorges / Chongqing / Chengdu pandas / Zhangjiajie。另一页 discovery/natural-china 价格写 TBC、14 天，与出团表不吻合，价格档位待 CTS 确认。"
+ },
+ "rationale_one_liner": "15 秒悬念价格 reel；价格用 Signature 页（唯一有价格且天数与出团表吻合的页面），发布前必须 CTS 确认档位。只存草稿，不发布。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.08,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.35,
+    "musicFile": "music/founders-at-dawn.mp3",
+    "musicStartSec": 0.302,
+    "beats": [
+     0,
+     0.8,
+     1.6,
+     2.4,
+     3.2,
+     4.35,
+     5.5,
+     6.65,
+     7.8,
+     8.95,
+     10.1,
+     10.7,
+     11.3,
+     11.9,
+     12.5,
+     13.1,
+     13.7,
+     14.3,
+     14.9
+    ],
+    "hook": {
+     "clip": "clips/c2b_zhangjiajie_pillar.mp4",
+     "lines": [
+      {
+       "badge": null,
+       "text": "NZ$7,XXX"
+      },
+      {
+       "badge": "16",
+       "text": "DAYS"
+      },
+      {
+       "badge": null,
+       "text": "FLIGHTS"
+      }
+     ]
+    },
+    "items": [
+     {
+      "text": "ZHANGJIAJIE NATIONAL FOREST PARK",
+      "clip": "clips/c2_zhangjiajie_peaks.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "HONGYADONG, CHONGQING",
+      "clip": "clips/c2b_chongqing_hongyadong.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "GIANT PANDAS, CHENGDU",
+      "clip": "clips/c2b_chengdu_panda.mp4",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "YOUR 16 DAYS",
+    "revealTitle": "NATURAL CHINA.",
+    "price": {
+     "backdropClip": "clips/c2b_tianmen_gate.mp4",
+     "fromLabel": "FROM",
+     "currencyPrefix": "NZ$",
+     "amount": 7349,
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "footnote": "SINGLE SUPPLEMENT NZ$1,895",
+     "footnoteSize": 50
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Sixteen days from Auckland: Shanghai, a Three Gorges cruise, Chongqing, Chengdu and Zhangjiajie. Return international airfares, domestic flights, 4-5 star hotels, an English-speaking tour guide and the meals listed in the itinerary are all in the price. NZD $7,349 per person, twin share; single supplement NZD $1,895. Next departure 26 March 2027.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/signature/landscapes",
+    "offer": [
+     "16 days from Auckland",
+     "NZD $7,349 per person, twin share",
+     "Next departure 26 March 2027"
+    ]
+   }
+  }
+ }
+}

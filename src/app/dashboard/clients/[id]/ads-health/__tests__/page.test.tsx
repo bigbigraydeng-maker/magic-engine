@@ -16,8 +16,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
+/** 页面读 `?tab=` 定初始标签，所以这个 mock 要能被各用例换掉。 */
+let searchParamsValue = new URLSearchParams()
+
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84' }),
+  useSearchParams: () => searchParamsValue,
 }))
 
 vi.mock('next/link', () => ({
@@ -97,8 +101,15 @@ function mockFetch(routes: Record<string, unknown>) {
   })
 }
 
-beforeEach(() => { vi.stubGlobal('confirm', vi.fn(() => true)) })
+beforeEach(() => { vi.stubGlobal('confirm', vi.fn(() => true)); searchParamsValue = new URLSearchParams() })
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
+
+/** 逐条广告卡片在「每条广告」标签里，先点过去 */
+async function renderAdsTab() {
+  const result = render(<AdsHealthPage />)
+  await userEvent.click(await screen.findByText('每条广告'))
+  return result
+}
 
 describe('the money question is answered before any diagnosis', () => {
   it('opens with what the week actually cost, and names the worst payer', async () => {
@@ -128,7 +139,7 @@ describe('the money question is answered before any diagnosis', () => {
     // The headline compares a typical DAY (median); this is total ÷ total. Both
     // are correct and they differ — unlabelled they read as a contradiction.
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText(/实付每个结果/)).toBeTruthy())
   })
 
@@ -137,9 +148,11 @@ describe('the money question is answered before any diagnosis', () => {
       '/ad-health': { ...respond([OZTOP_ALERT, HEALTHY]), industry: 'travel' },
     }))
     render(<AdsHealthPage />)
-    await waitFor(() => expect(screen.getAllByText(/实付每个咨询/).length).toBe(2))
+    await waitFor(() => expect(screen.getByText(/过去 7 天花了/)).toBeTruthy())
     expect(screen.getByText(/过去 7 天花了/).textContent).toContain('个咨询')
     expect(screen.getByText(/最贵的是/).textContent).toContain('一个咨询')
+    await userEvent.click(screen.getByText('每条广告'))
+    await waitFor(() => expect(screen.getAllByText(/实付每个咨询/).length).toBe(2))
     expect(screen.getAllByText(/近 7 天咨询/).length).toBeGreaterThan(0)
     expect(screen.queryByText(/实付每个询盘|实付每个结果/)).toBeNull()
   })
@@ -148,7 +161,7 @@ describe('the money question is answered before any diagnosis', () => {
 describe('every card that is burning money offers a way to stop it', () => {
   it('shows the stop-loss controls on an alert, ABOVE the creative prescription', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
-    const { container } = render(<AdsHealthPage />)
+    const { container } = await renderAdsTab()
 
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
     expect(screen.getByText('先全停')).toBeTruthy()
@@ -162,14 +175,14 @@ describe('every card that is burning money offers a way to stop it', () => {
 
   it('does NOT offer stop-loss on a healthy card', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([HEALTHY]) }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText(/表现正常/)).toBeTruthy())
     expect(screen.queryByText('预算降 20%')).toBeNull()
   })
 
   it('"先不动" is a real choice, not a no-op — it says what happens next', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([OZTOP_ALERT]) }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('先不动')).toBeTruthy())
 
     await userEvent.click(screen.getByText('先不动'))
@@ -184,7 +197,7 @@ describe('every card that is burning money offers a way to stop it', () => {
       '/ad-health': respond([OZTOP_ALERT]),
     })
     vi.stubGlobal('fetch', fetch)
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
@@ -201,7 +214,7 @@ describe('every card that is burning money offers a way to stop it', () => {
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true, executed: true, action: 'cut', ok: true, new_daily: 48, warnings: ['广告系列状态已变化，未自动重新开启，请检查。'] },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
@@ -210,12 +223,59 @@ describe('every card that is burning money offers a way to stop it', () => {
     expect(screen.queryByText(/广告还在跑/)).toBeNull()
   })
 
+  it('a 403 on the stop-loss write says an internal account is needed, and nothing changed', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/stop-loss': { __status: 403, current_daily: 60, planned_daily: 48, cuttable: true, pausable: true },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('预算降 20%'))
+    await waitFor(() => expect(screen.getByText(/需要内部账号操作/)).toBeTruthy())
+    expect(screen.queryByText(/已降到每天/)).toBeNull()
+  })
+
+  it('pause on a campaign that is no longer ACTIVE says so and never writes', async () => {
+    const fetchMock = mockFetch({
+      '/ad-health/stop-loss': { current_daily: 60, planned_daily: 48, cuttable: true, pausable: false },
+      '/ad-health': respond([OZTOP_ALERT]),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('先全停')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('先全停'))
+    await waitFor(() => expect(screen.getByText(/已经不在投放中/)).toBeTruthy())
+    const wrote = fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+    expect(wrote).toBe(false)
+  })
+
+  it('a 409 no_active_goal on pause says a goal is needed and nothing changed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const isWrite = init?.method === 'POST' && url.includes('/ad-health/stop-loss')
+      const body = isWrite
+        ? { error: 'no_active_goal' }
+        : url.includes('/ad-health/stop-loss')
+          ? { current_daily: 60, planned_daily: 48, cuttable: true, pausable: true }
+          : respond([OZTOP_ALERT])
+      return { ok: !isWrite, status: isWrite ? 409 : 200, json: async () => body } as unknown as Response
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('先全停')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('先全停'))
+    await waitFor(() => expect(screen.getByText(/还没有生效的增长目标/)).toBeTruthy())
+    expect(screen.getByText(/广告没有变更/)).toBeTruthy()
+    expect(screen.queryByText(/已停投/)).toBeNull()
+  })
+
   it('an un-cuttable budget still leaves a next step — never "go do it yourself"', async () => {
     vi.stubGlobal('fetch', mockFetch({
       '/ad-health/stop-loss': { current_daily: 60, planned_daily: null, cuttable: false, pausable: true },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('预算降 20%')).toBeTruthy())
 
     await userEvent.click(screen.getByText('预算降 20%'))
@@ -234,7 +294,7 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
       '/execute-prescription': { __status: 409, no_supply: true, reason: 'recycle_pool_not_connected' },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
@@ -247,12 +307,27 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     expect(msg).not.toContain('爆款素材池')     // no internal jargon
   })
 
+  it.each([
+    [403, /需要内部账号操作/],
+    [429, /10 分钟内已补过,请稍后/],
+  ])('a %i on the top-up button gets its own message', async (status, pattern) => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/execute-prescription': { __status: status, error: 'x' },
+      '/ad-health': respond([OZTOP_ALERT]),
+    }))
+    await renderAdsTab()
+    await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
+
+    await userEvent.click(screen.getByText('执行'))
+    await waitFor(() => expect(screen.getByText(pattern)).toBeTruthy())
+  })
+
   it('an empty recycle result reads the same way — not "明天再扫"', async () => {
     vi.stubGlobal('fetch', mockFetch({
       '/execute-prescription': { adsAdded: [] },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
@@ -267,7 +342,7 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
       '/execute-prescription': { adsAdded: [{ name: 'a' }, { name: 'b' }] },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
-    render(<AdsHealthPage />)
+    await renderAdsTab()
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
@@ -275,5 +350,167 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     const msg = screen.getByText(/已补 2 条新素材/).textContent ?? ''
     expect(msg).toContain('一分钱不花')
     expect(msg).not.toContain('团队')
+  })
+})
+
+/**
+ * 「等你点头」标签（设计稿 2026-10-18-ads-door-merge-design §5 步 1）。
+ * 这一步只立门牌 + 给直达链接，所以用例盯三件：标签在、点开有链接、链接来自登记表而不是写死的网址。
+ */
+describe('「等你点头」标签', () => {
+  it('标签在，点开就是真的批准面板（没有待批准时如实说没有）', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+      '/ad-health/auto-pause': { items: [], hasMore: false },
+    }))
+    render(<AdsHealthPage />)
+
+    await userEvent.click(await screen.findByText('等你点头'))
+
+    // 面板自己去取待批准列表，取到空就如实说没有 —— 不是一个指向别处的链接
+    await waitFor(() => expect(screen.getByText('目前没有等你点头的暂停建议。')).toBeTruthy())
+    expect(screen.queryByText(/去「.*」处理/)).toBeNull()
+  })
+
+  it('有待批准时列出来，且批准按钮打的是原来那个接口、请求体一个字没变', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.includes('/ad-health/auto-pause/')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, kind: 'done' }) })
+      }
+      if (url.includes('/ad-health/auto-pause')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            items: [{
+              runId: 'run-1', expectedDecisionId: 'dec-1', adsetId: '123', adsetName: '物流组',
+              adAccountId: 'act_1', diagnosisTitle: '花钱没结果', insightDate: '2026-10-17',
+              createdAt: '2026-10-17T00:00:00Z',
+            }],
+            hasMore: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(respond([])) })
+    }))
+    render(<AdsHealthPage />)
+
+    await userEvent.click(await screen.findByText('等你点头'))
+    await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
+
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+
+    // 🔴 这一刀的全部红线：接口网址、方法、请求体一个字都不许变
+    const decide = calls.find((c) => c.url.includes('/decision'))
+    expect(decide).toBeTruthy()
+    expect(decide!.url).toBe('/api/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/ad-health/auto-pause/run-1/decision')
+    expect(decide!.init?.method).toBe('POST')
+    expect(JSON.parse(String(decide!.init?.body))).toEqual({ resolution: 'approve', expectedDecisionId: 'dec-1' })
+  })
+
+  /**
+   * 🔴 下面三条补的是面板顶部红字点名、却一条测试都没有的分支（独立审查 2026-10-18 指出）。
+   * 这些行有史以来第一次被搬动，是补测试最便宜的时刻；删掉任何一条分支，原来全都照绿。
+   */
+  function panelFetch(decideReply: Record<string, unknown>, status = 200) {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const fn = vi.fn((url: string, init?: RequestInit) => {
+      calls.push({ url, init })
+      if (url.includes('/ad-health/auto-pause/')) {
+        return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(decideReply) })
+      }
+      if (url.includes('/ad-health/auto-pause')) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          json: () => Promise.resolve({
+            items: [{
+              runId: 'run-1', expectedDecisionId: 'dec-1', adsetId: '123', adsetName: '物流组',
+              adAccountId: 'act_1', diagnosisTitle: '花钱没结果', insightDate: '2026-10-17',
+              createdAt: '2026-10-17T00:00:00Z',
+            }],
+            hasMore: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(respond([])) })
+    })
+    return { fn, calls }
+  }
+
+  async function openPanel() {
+    render(<AdsHealthPage />)
+    await userEvent.click(await screen.findByText('等你点头'))
+    await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
+  }
+
+  it('签了但没停成（200 + ok:false）必须说出来——不许让人以为广告停了', async () => {
+    const { fn } = panelFetch({ ok: false, humanReason: '广告组已被别处改过' })
+    vi.stubGlobal('fetch', fn)
+    await openPanel()
+
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+
+    await waitFor(() => expect(screen.getByText(/没暂停成：广告组已被别处改过——广告还在投/)).toBeTruthy())
+  })
+
+  it('409（你看的不是最新的）要提示重看，不许自己换个 id 再提交', async () => {
+    const { fn, calls } = panelFetch({ error: '这条已经变了' }, 409)
+    vi.stubGlobal('fetch', fn)
+    await openPanel()
+
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+
+    await waitFor(() => expect(screen.getByText(/列表已刷新，请再看一遍/)).toBeTruthy())
+    // 只提交过一次，没有拿新 id 重试
+    expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(1)
+  })
+
+  it('驳回必须带理由；理由留空就不发请求', async () => {
+    const { fn, calls } = panelFetch({ ok: true, kind: 'done' })
+    vi.stubGlobal('fetch', fn)
+    vi.stubGlobal('prompt', vi.fn(() => ''))
+    await openPanel()
+
+    await userEvent.click(screen.getByText('驳回'))
+    expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(0)
+
+    vi.stubGlobal('prompt', vi.fn(() => '这个组我要留着'))
+    await userEvent.click(screen.getByText('驳回'))
+
+    await waitFor(() => expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(1))
+    const body = JSON.parse(String(calls.find((c) => c.url.includes('/decision'))!.init?.body))
+    expect(body).toEqual({ resolution: 'reject', expectedDecisionId: 'dec-1', reason: '这个组我要留着' })
+  })
+
+
+  it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
+    searchParamsValue = new URLSearchParams('tab=approvals')
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+
+    await waitFor(() =>
+      expect(screen.getByText(/系统发现这些广告组连续花钱没结果/)).toBeTruthy(),
+    )
+  })
+
+  /**
+   * 🔴 这条用例第一版是空的：只断言「等你点头」那段**不在**。
+   * 可是给一个认不出的标签名时，那段本来就不会渲染 —— 无论 `tabFromQuery`
+   * 落不落回 'today'，断言都成立。变异验证（把判据改成「什么值都认」）
+   * 16 条全绿，才发现它什么都没测。
+   * 所以改成**正向**断言：必须真的落在「今天看这里」上，看到那个标签的内容。
+   */
+  it('?tab= 给了认不出的值，落回「今天看这里」而不是空白', async () => {
+    searchParamsValue = new URLSearchParams('tab=nonsense')
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+
+    // 断言「哪个标签是选中态」，而不是断言某块面板的文字 ——
+    // 选中态是这条用例真正要测的事，而面板内容会随取数结果变。
+    const active = await screen.findByTitle('三句话：池子、频率、今天调什么')
+    expect(active.className).toContain('border-gray-800')
+    expect(screen.getByTitle('这个客户等人点头的广告动作').className).toContain('border-transparent')
+    expect(screen.queryByText(/系统发现这些广告组连续花钱没结果/)).toBeNull()
   })
 })

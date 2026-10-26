@@ -7,6 +7,7 @@
  *   Blog     本周生成/发布/待点头
  *   社媒      发帖数/互动/断更天数/最佳帖(social.fb.* 滚动指标)
  *   社媒广告  花费/进线/私信(ad_daily_insights 7 天)
+ *   广告一本账 每个有广告的客户算到第几级(花费→线索→合格→成交→金额→回报)，只读
  *
  * EVERY section carries a data-freshness stamp; data older than
  * STALE_AFTER_DAYS renders as 「⚠️ 数据断流」 instead of masquerading as
@@ -21,6 +22,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { esc, FOCUS_CLIENT_IDS } from '@/lib/pm-todo/daily-todo'
 import { gatherSeoListWeekly, seoListLines, type SeoListWeeklyResult } from '@/lib/seo-weekly-list/report'
+import { gatherReturnLadders, type ReturnLadderSection } from './return-ladder-gather'
+import { renderLadderBlock, renderLadderUnavailable, renderOtherLadders } from './return-ladder-section'
 
 const STALE_AFTER_DAYS = 3
 /** Keyword snapshots are WEEKLY by design — 8 days tolerance, not 3, or
@@ -341,15 +344,43 @@ async function gatherClient(
   }
 }
 
+/**
+ * 周报客户列表，外加「广告一本账」这一段。
+ *
+ * 一本账要覆盖**所有**有广告花费的客户，不只重点客户，所以它不属于某一个 `ClientWeekly`。
+ * 挂在返回的数组上、而不是把返回值改成对象：调用方（定时任务入口）只把这个数组原样交给
+ * `renderWeeklyReport`、再对它做 `.map` / `.length`，这样入口文件一个字不用改。
+ * 下次有正当理由动入口文件时，换成对象返回。
+ */
+export type WeeklyClients = ClientWeekly[] & { return_ladders?: ReturnLadderSection }
+
+/** 一本账最多等这么久。整封周报的网关上限约 125 秒（PITFALLS F10），超时就如实写「没读出来」。 */
+const RETURN_LADDER_TIMEOUT_MS = 45_000
+
+async function gatherReturnLaddersWithin(supabase: SupabaseClient, now: Date, ms: number): Promise<ReturnLadderSection> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<ReturnLadderSection>((resolve) => {
+    timer = setTimeout(() => resolve({ error: `读了 ${Math.round(ms / 1000)} 秒还没读完` }), ms)
+  })
+  try {
+    return await Promise.race([gatherReturnLadders(supabase, now), timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 export async function gatherWeeklyReport(
   supabase: SupabaseClient,
   now: Date = new Date(),
-): Promise<ClientWeekly[]> {
-  const out: ClientWeekly[] = []
+): Promise<WeeklyClients> {
+  // 跟逐客户取数并行跑，不排在后面（两段串着会逼近网关上限）。
+  const laddersPending = gatherReturnLaddersWithin(supabase, now, RETURN_LADDER_TIMEOUT_MS)
+  const out: WeeklyClients = []
   for (const clientId of FOCUS_CLIENT_IDS) {
     const weekly = await gatherClient(supabase, clientId, now)
     if (weekly) out.push(weekly)
   }
+  out.return_ladders = await laddersPending
   return out
 }
 
@@ -425,10 +456,21 @@ function rankLineText(o: ClientWeekly['auto_changes']['outcomes_checked_week'][n
   }
 }
 
-export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string, notices?: WeeklyNotices): {
+/** 某个客户的「广告一本账」块：有数出数，读失败如实写，没广告花费就不出这一块。 */
+function ladderBlockFor(clientId: string, section: ReturnLadderSection | undefined): string {
+  if (!section) return ''
+  if ('error' in section) return renderLadderUnavailable(section.error)
+  const row = section.rows.find((r) => r.client_id === clientId)
+  if (row) return renderLadderBlock(row)
+  const failure = section.failed.find((f) => f.client_id === clientId)
+  return failure ? renderLadderUnavailable(failure.error) : ''
+}
+
+export function renderWeeklyReport(clients: WeeklyClients, nzDateLabel: string, notices?: WeeklyNotices): {
   subject: string
   html: string
 } {
+  const ladders = clients.return_ladders
   const sections = clients.map((c) => {
     const seoDelta = c.seo.page1_now - c.seo.page1_prior
     const seoLines = [
@@ -514,8 +556,9 @@ export function renderWeeklyReport(clients: ClientWeekly[], nzDateLabel: string,
       ${block('🤖', '系统自动改动', autoLines)}
       ${block('📝', 'Blog', blogLines)}
       ${block('📱', '社媒', socialLines + reelsLine, c.social.freshness)}
-      ${block('📣', '社媒广告', adsLines, c.ads.freshness)}`
-  }).join('')
+      ${block('📣', '社媒广告', adsLines, c.ads.freshness)}
+      ${ladderBlockFor(c.client_id, ladders)}`
+  }).join('') + renderOtherLadders(ladders, clients.map((c) => c.client_id))
 
   const html = `
     <div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:24px">

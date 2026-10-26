@@ -27,6 +27,7 @@ export type Segment =
   | 'stale_conversation' // 聊过一轮就断了，没约下次
   | 'nurture_future'   // 说了以后才走，时候还没到
   | 'excluded'         // 别再联系 / 号码是坏的 / 明确没兴趣
+  | 'not_enquiry_suspect' // 看发件地址就不像客人来咨询（群发 / 供应商通知 / 推销 / 系统账号）
 
 import { resolveTravelDate, isDueToWake } from './travel-date'
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
@@ -112,6 +113,11 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
     howTo: '明确拒绝过 / 号码是坏的 / 已经成交。不要联系。',
     batch: 'none',
   },
+  not_enquiry_suspect: {
+    label: '看着不是客人来咨询',
+    howTo: '发件地址像群发 / 供应商通知 / 推销 / 平台系统账号。不用联系；如果其实是客人，把他的阶段往前推一步（例如标成「已联系」），之后机器就不会再把他放到这里。',
+    batch: 'none',
+  },
 }
 
 export interface TouchpointLike {
@@ -135,10 +141,8 @@ export interface TouchpointLike {
    * 要判「我们今天最后一次**真人**出手是几点」—— 拿一封 16:00 的群发当
    * 「我们出手了」，会把 15:00 客人的回信整个盖住，当天最热的线索被折叠掉。
    *
-   * ⚠️ **本文件的 `segmentContact` 目前不读它**（ROADMAP M2.7f）—— 一封群发
-   * 照样被它当成「我们最后一次出站」，于是「客人回话了」那条规则不成立，
-   * 人掉进别的桶。这里写明，是因为**一个只接了一半的概念会坑下一个人**，
-   * 而这个字段本身就是为了修那种坑才加的。
+   * `segmentContact` 读它：机器发的出站不进 `lastOutbound`（2026-10-22 起；之前这里写着
+   * 「目前不读它」，那是 ROADMAP M2.7f 的遗留，已补上）。
    */
   automated?: boolean
   /**
@@ -155,6 +159,15 @@ export interface TouchpointLike {
    * 写入侧见 `RecordTouchpointInput.action`。
    */
   action?: 'snooze' | 'unsnooze' | null
+  /**
+   * 电话系统记录的「外呼没人接」（`channel=phone`、方向出站、`metadata.answered===false`）。
+   *
+   * 这一笔我们拨出去了、但**没有联系上客人**（PM 2026-10-12：不算已出手、不算真人跟进）。
+   * `segmentContact` 因此不把它算进「我们最后一次出站」，否则一个只被拨过一通没人接的
+   * 新线索会被当成「已联系过」，掉出「新线索还没碰」那一段。入站漏接（客人打进来我们没接）
+   * 不受影响：那是客人来找过我们。
+   */
+  unansweredCall?: boolean
   /**
    * 这一笔从哪来的（`contact_touchpoints.source`）。
    *
@@ -290,6 +303,7 @@ export const SEGMENT_META: Record<Segment, { temperature: Temperature; priority:
   stale_conversation: { temperature: 'warm', priority: 7 },
   nurture_future:     { temperature: 'cold', priority: 8 },
   excluded:           { temperature: 'off',  priority: 9 },
+  not_enquiry_suspect:{ temperature: 'off',  priority: 10 },
 }
 
 /**
@@ -443,6 +457,15 @@ const PHONE_VERDICTS: ReadonlySet<string> = new Set(['bad_number', 'spoke'])
  * 「今天试过了、晚点再试」本来就是销售那一天对这个人做完的事。
  * 坏号不一样 —— 它是「这条路永久关闭了，今天得换一条走」。
  */
+/**
+ * 电话系统记录的「外呼没人接」（metadata.answered === false）不算我们联系上了他，
+ * 也不算「今天已出手」（PM 2026-10-12 拍板）。手打笔记没有 answered 字段，仍按原规则：
+ * `no_answer` 是一次正常尝试。
+ */
+export function isUnansweredCall(metadata: Record<string, unknown> | null | undefined): boolean {
+  return metadata?.answered === false
+}
+
 export function isFailedReach(outcome: string | null | undefined): boolean {
   return outcome === 'bad_number'
 }
@@ -599,9 +622,15 @@ export function segmentContact(
   //
   // 行为信号不参与 lastInbound / lastOutbound / lastAny：它既不能让人升进
   // 「客户回话了」，也不该把「等了几天」重置成 0。它只在下面的点击规则里用。
-  const messages = tps.filter((t) => !t.engagement)
+  const messages = tps.filter((t) => !t.engagement && !t.unansweredCall)
   const lastInbound = Math.max(0, ...messages.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)))
-  const lastOutbound = Math.max(0, ...messages.filter((t) => t.direction === 'outbound').map((t) => ts(t.occurredAt)))
+  // 机器发的出站（群发、自动安抚、AI 起草经人批准发出的回复）不算「有人联系过他」——
+  // 2026-10-22 PM：昨天今天的 WhatsApp 咨询只收到一句自动安抚就被算成「已跟进」，从
+  // 「今天要联系」掉进「先放着」。判据在 lib/crm/automated-touch（metadata.automated / 群发来源）。
+  const lastOutbound = Math.max(
+    0,
+    ...messages.filter((t) => t.direction === 'outbound' && !t.automated).map((t) => ts(t.occurredAt)),
+  )
 
   /**
    * 最近一次「点了链接」，且**那之后没有任何真人联系过他**。
@@ -787,6 +816,9 @@ export function segmentContact(
     if (days >= FRESH_LEAD_DAYS) {
       return make('handoff_sop', `进线 ${days} 天，一直没人联系过 —— 交给系统跟`, 'email')
     }
+    // 没有任何一条客人来信的时间（lastInbound 为 0，比如只有一个名字/号码的新建客人）时，
+    // 不能拿 0 当时间去算 —— 会算出「进线 20739 天」（从 1970 年起）。没有时间就不说时间。
+    if (lastInbound === 0) return make('new_untouched', '进线了，还没人联系', 'phone')
     return make('new_untouched', `进线 ${humanGap(nowMs - lastInbound)} 还没人联系`, 'phone')
   }
 
@@ -872,7 +904,14 @@ export function compareForWorklist(a: SegmentResult, b: SegmentResult): number {
   )
 }
 
-/** 各段人数，给页面顶部的统计条。 */
+/**
+ * 各段人数，给页面顶部的统计条。
+ *
+ * ⚠️ **这是未降级的口径**：它直接调 `segmentContact`，不过 `contact-list-view.ts` 的
+ * `demoteNonEnquirySender`（把看着不是客人来咨询的从「今天要联系」挪走那一步）。
+ * 所以它算出来的数会比「全部客人 → Magic Engine 智能」里看到的**多**。
+ * 要拿它当口径的人请先想清楚要的是哪一个；需要同口径就得在这里也走一遍降级。
+ */
 export function segmentCounts(
   contacts: ContactLike[],
   now: Date,
@@ -881,7 +920,7 @@ export function segmentCounts(
   const out: Record<Segment, number> = {
     replied: 0, callback_due: 0, new_untouched: 0, handoff_sop: 0,
     clicked_link: 0, retry_channel: 0, stale_conversation: 0,
-    nurture_future: 0, excluded: 0,
+    nurture_future: 0, excluded: 0, not_enquiry_suspect: 0,
   }
   for (const c of contacts) out[segmentContact(c, now, playbook).segment]++
   return out

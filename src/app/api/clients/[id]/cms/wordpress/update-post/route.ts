@@ -56,6 +56,7 @@ import {
 } from '@/lib/cms/wordpress-client'
 import { prepareCmsContent } from '@/lib/cms/html-sanitizer'
 import { CMS_ACTION_TYPE } from '@/lib/cms/vocabulary'
+import { buildRouteGuard, protectedPageResponse } from '@/lib/seo/protected-pages-route'
 
 interface RouteContext {
   params: { id: string }
@@ -270,8 +271,10 @@ async function handleUpdatePost(req: NextRequest, { params }: RouteContext): Pro
   // ── 6. Apply the update ─────────────────────────────────────────────────────
   let after: { postId: number; postType: WordpressPostType; link: string; modified: string; updatedFields: string[] }
   try {
-    after = await updateExistingWordpressPost(config, updateInput)
+    after = await updateExistingWordpressPost(config, updateInput, buildRouteGuard(access.user, clientId, 'cms-wordpress-update-post'))
   } catch (err) {
+    const refused = protectedPageResponse(err)
+    if (refused) return refused
     if (err instanceof WordpressFetchError) return respondWpError(err)
     throw err
   }

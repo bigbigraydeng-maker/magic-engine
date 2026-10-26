@@ -12,23 +12,18 @@
  * 这不是我们能绕的,只能先跑通全流程,等 TikTok 审过再变公开。
  */
 
-import { createHmac } from 'crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
 
 const AUTH_URL = 'https://www.tiktok.com/v2/auth/authorize/'
 const TOKEN_URL = 'https://open.tiktokapis.com/v2/oauth/token/'
 const API_BASE = 'https://open.tiktokapis.com/v2'
 
 /** 十分钟够点完授权,泄漏了也没用。 */
+export const TIKTOK_STATE_COOKIE = 'me_tiktok_oauth_state'
 const STATE_TTL_MS = 10 * 60 * 1000
 
-/**
- * 要授权哪些能力。
- * - user.info.basic:拿到账号名字,用来在界面上显示「连的是哪个号」并防误发
- * - video.publish:直接发布(过审后才能公开)
- * - video.upload:退一步的路——传进创作者的草稿箱,由本人在 App 里点最后一下
- * 两个都要:审核通过前用 upload 也能跑通,通过后 publish 才是真自动。
- */
-export const TIKTOK_SCOPES = ['user.info.basic', 'video.publish', 'video.upload'] as const
+/** Only request the implemented direct-post flow; inbox draft upload is not implemented. */
+export const TIKTOK_SCOPES = ['user.info.basic', 'video.publish'] as const
 
 export interface VerifiedState {
   clientId: string
@@ -51,7 +46,7 @@ function clientSecret(): string {
 /** state 带着「在连哪个客户」,签名防止回来的路上被换成别人的客户 id。 */
 export function buildState(clientId: string): string {
   const payload = Buffer.from(
-    JSON.stringify({ clientId, exp: Date.now() + STATE_TTL_MS }),
+    JSON.stringify({ clientId, nonce: randomBytes(32).toString('base64url'), exp: Date.now() + STATE_TTL_MS }),
   ).toString('base64url')
   const sig = createHmac('sha256', clientSecret()).update(payload).digest('base64url')
   return `${payload}.${sig}`
@@ -63,7 +58,9 @@ export function verifyState(state: string): VerifiedState | null {
   const payload = state.slice(0, dot)
   const sig = state.slice(dot + 1)
   const expected = createHmac('sha256', clientSecret()).update(payload).digest('base64url')
-  if (sig !== expected) return null
+  const received = Buffer.from(sig)
+  const wanted = Buffer.from(expected)
+  if (received.length !== wanted.length || !timingSafeEqual(received, wanted)) return null
   try {
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
       clientId?: unknown

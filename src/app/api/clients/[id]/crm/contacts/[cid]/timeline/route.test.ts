@@ -38,7 +38,9 @@ const MESSAGES = [
   { direction: 'inbound', sender_name: 'Susan', body: '有长城的团吗', sent_at: '2026-07-22T01:00:00Z' },
 ]
 
-function mockDb() {
+function mockDb(over: { touches?: Array<Record<string, unknown>>; conversations?: Array<Record<string, unknown>> } = {}) {
+  const touches = over.touches ?? [TOUCH]
+  const conversations = over.conversations ?? [{ id: 'conv-1' }]
   messageOrder = null
   messageLimit = null
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
@@ -61,7 +63,7 @@ function mockDb() {
         select: () => ({
           eq: () => ({
             eq: () => ({
-              neq: () => ({ order: () => ({ limit: async () => ({ data: [TOUCH], error: null }) }) }),
+              neq: () => ({ order: () => ({ limit: async () => ({ data: touches, error: null }) }) }),
             }),
           }),
         }),
@@ -78,7 +80,7 @@ function mockDb() {
       return { select: () => ({ eq: async () => ({ data: [] }) }) }
     }
     if (table === 'conversations') {
-      return { select: () => ({ eq: () => ({ eq: async () => ({ data: [{ id: 'conv-1' }] }) }) }) }
+      return { select: () => ({ eq: () => ({ eq: async () => ({ data: conversations }) }) }) }
     }
     if (table === 'conversation_messages') {
       return {
@@ -131,5 +133,66 @@ describe('往来时间线的顺序', () => {
     await call()
     expect(messageOrder).toEqual({ column: 'sent_at', ascending: false })
     expect(messageLimit).toBe(3000)
+  })
+})
+
+describe('AI 摘要不再从时间线接口出（2026-10-10 并进列表接口的「该做什么」）', () => {
+  it('有 WhatsApp 对话的人，WhatsApp 占位触点（对话开始 / 最近一次来信）不进时间线', async () => {
+    mockDb({
+      touches: [TOUCH, { ...TOUCH, channel: 'whatsapp', summary: '客人最近一次来信', occurred_at: '2026-10-06T00:00:00Z' }],
+      conversations: [{ id: 'conv-1', channel: 'whatsapp' }],
+    })
+    const body = await (await call()).json()
+    const touches = (body.timeline as Array<{ kind: string; channel?: string }>).filter((e) => e.kind === 'touch')
+    expect(touches.map((e) => e.channel)).not.toContain('whatsapp')
+    expect(touches.length).toBe(1)
+  })
+
+  it('没有 WhatsApp 对话记录的人，WhatsApp 触点照常显示（不让人消失）', async () => {
+    mockDb({ touches: [{ ...TOUCH, channel: 'whatsapp', summary: '客人最近一次来信' }] })
+    const body = await (await call()).json()
+    const touches = (body.timeline as Array<{ kind: string; channel?: string }>).filter((e) => e.kind === 'touch')
+    expect(touches.map((e) => e.channel)).toContain('whatsapp')
+  })
+
+  it('响应里没有 brief，也不再查 conversation_briefs', async () => {
+    const body = await (await call()).json()
+    expect(body).not.toHaveProperty('brief')
+    const tables = (supabaseAdmin.from as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])
+    expect(tables).not.toContain('conversation_briefs')
+  })
+})
+
+describe('官网表单的「出发时间 / 每人预算」一行人话', () => {
+  const FORM = (at: string, meta: Record<string, unknown>) => ({
+    channel: 'web_form',
+    direction: 'inbound',
+    occurred_at: at,
+    summary: '官网表单 · /tours/x',
+    metadata: meta,
+  })
+
+  it('web_form 触点带稳定代码 → 返回一行人话（只是事实）', async () => {
+    mockDb({ touches: [FORM('2026-10-20T00:00:00Z', { form_travel_window: 'mar_may_2027', form_budget_band: '3000_5000' })] })
+    const body = await (await call()).json()
+    expect(body.formFactsLine).toBe('预计 2027 年 3–5 月出发 · 预算 3,000–5,000/人（10月20日提交）')
+  })
+
+  it('多条 web_form 取最新一条带代码的', async () => {
+    mockDb({
+      touches: [
+        FORM('2026-10-01T00:00:00Z', { form_travel_window: 'oct_dec_2027' }),
+        FORM('2026-10-20T00:00:00Z', { form_travel_window: 'jun_sep_2027', form_budget_band: 'above_8000' }),
+      ],
+    })
+    const body = await (await call()).json()
+    expect(body.formFactsLine).toBe('预计 2027 年 6–9 月出发 · 预算 8,000 以上/人（10月20日提交）')
+  })
+
+  it('缺失 / 映射不到的代码 → null（不显示、不当 0）；其它渠道的触点不算', async () => {
+    mockDb({ touches: [FORM('2026-10-20T00:00:00Z', {}), FORM('2026-10-21T00:00:00Z', { form_travel_window: 'early_2028' })] })
+    expect((await (await call()).json()).formFactsLine).toBeNull()
+    mockDb({ touches: [{ ...FORM('2026-10-20T00:00:00Z', { form_travel_window: 'mar_may_2027' }), channel: 'email' }] })
+    expect((await (await call()).json()).formFactsLine).toBeNull()
   })
 })

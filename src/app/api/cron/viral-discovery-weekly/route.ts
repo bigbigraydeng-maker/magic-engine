@@ -20,6 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { isQueueableViralSourceUrl } from '@/lib/reels/viral-analyzer-retry'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300  // 5 min — 8 industries × ~30s each
@@ -263,6 +264,7 @@ async function discoverForKeywords(
     const views  = detail?.statistics?.viewCount ? Number(detail.statistics.viewCount) : 0
 
     if (existingSet.has(url)) { skipped++;        continue }
+    if (!isQueueableViralSourceUrl(url)) { skipped++; continue }
     if (views < cfg.min_views) { belowThreshold++; continue }
 
     toInsert.push({

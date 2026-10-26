@@ -110,6 +110,15 @@ describe('buildContactModel', () => {
     expect(buildTouchpointLike(tp({ source: 'me_manual' })).automated).toBe(false)
   })
 
+  it('电话系统记录的外呼没人接 → unansweredCall=true；接通 / 入站 / 手打笔记 / 别的渠道都不是', () => {
+    const unanswered = { metadata: { answered: false } }
+    expect(buildTouchpointLike(tp(unanswered)).unansweredCall).toBe(true)
+    expect(buildTouchpointLike(tp({ metadata: { answered: true } })).unansweredCall).toBe(false)
+    expect(buildTouchpointLike(tp({ ...unanswered, direction: 'inbound' })).unansweredCall).toBe(false)
+    expect(buildTouchpointLike(tp({ metadata: null })).unansweredCall).toBe(false)
+    expect(buildTouchpointLike(tp({ ...unanswered, channel: 'email' })).unansweredCall).toBe(false)
+  })
+
   it('邮件打开 / 链接点开变成 engagement，不当作出站消息', () => {
     expect(buildTouchpointLike(tp({ metadata: { email_opened: true } })).engagement).toBe('open')
     expect(buildTouchpointLike(tp({ metadata: { email_clicked: true } })).engagement).toBe('click')

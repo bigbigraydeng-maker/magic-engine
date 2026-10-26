@@ -34,6 +34,8 @@ export interface DigestGoalContext {
   dayIndex: number     // 今天是目标期第几天（1-based）
   totalDays: number
   pace: GoalPace
+  /** 读广告设置失败时的原始报错（只在内部账本里，客户版不下发） */
+  configReadError?: string
 }
 
 const APP_BASE = 'https://app.magicengine.com.au'
@@ -145,7 +147,8 @@ function goalSection(goal: DigestGoalContext | null | undefined): string {
   }
   const { title, label, target, dayIndex, totalDays, pace } = goal
   if (pace.verdict === 'unknown') {
-    return `<p style="font-size:13px;color:#64748b">目标进度：${esc(title)} — 归属数据不足，未判（${esc(pace.reason)}）</p>`
+    const why = goal.configReadError ? '' : '归属数据不足，'
+    return `<p style="font-size:13px;color:#64748b">目标进度：${esc(title)} — ${why}未判（${esc(pace.reason)}）</p>`
   }
   const gap = pace.gapPct === null
     ? '差距未判'

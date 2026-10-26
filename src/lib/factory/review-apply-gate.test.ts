@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { applyApprove } from './review-apply'
-import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
 type Resp = { data: unknown; error: unknown }
 
@@ -33,13 +33,13 @@ const IN_REVIEW_WO = {
   angle_source: {}, rationale_one_liner: 'why', budget_cap_usd: 2, source_ad_id: 'ad-1',
 }
 
-const PASS_HUMAN = REEL_HUMAN_CHECK_KEYS.map(key => ({
+const PASS_HUMAN = REEL_HUMAN_CHECK_KEYS_V3.map(key => ({
   key, judge: 'HUMAN' as const, outcome: 'PASS' as const, detail: null,
   source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
 }))
 
 const approve = (db: SupabaseClient, checklist: unknown = PASS_HUMAN) =>
-  applyApprove(db, 'wo-1', 'me@x.com', undefined, checklist)
+  applyApprove(db, 'wo-1', 'me@x.com', undefined, checklist, null)
 
 describe('applyApprove server gate stays strict', () => {
   it('baseline: all 9 human items PASS -> approve succeeds', async () => {

@@ -266,3 +266,30 @@ describe('加载器 / 时区 / 内部邮箱', () => {
     expect(splitAddresses(['a@magicengine.cloud, boss@ctstours.co.nz'])).toEqual(['a@magicengine.cloud', 'boss@ctstours.co.nz'])
   })
 })
+
+describe('hidden_from_ad_health：只压数据新鲜度噪音，钱相关诊断照跑', () => {
+  const hasTitle = (r: ReturnType<typeof run>, code: string, needle: string) =>
+    r.diagnoses.some(d => d.code === code && d.title.includes(needle))
+
+  it('快照为空：隐藏账户不报「诊断缺数据」，未隐藏的对照照报', () => {
+    const hidden = run({ ...nalAcc([], '2026-09-13'), hiddenFromAdHealth: true }, '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(hidden, 'D7', '缺数据')).toBe(false)
+    const control = run(nalAcc([], '2026-09-13'), '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(control, 'D7', '缺数据')).toBe(true)
+  })
+
+  it('日数据停更：隐藏账户不报「停更」，未隐藏的对照照报', () => {
+    const snaps = nalSnaps('2026-09-13', '2026-09-13T09:00:00Z')
+    const stale = { ...nalAcc(snaps, '2026-09-13'), lastInsightDate: '2026-09-01' }
+    const control = run(stale, '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(control, 'D7', '停更')).toBe(true)
+    const hidden = run({ ...stale, hiddenFromAdHealth: true }, '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(hidden, 'D7', '停更')).toBe(false)
+  })
+
+  it('钱相关诊断不受影响：NAL 3PL 组 8/27 的 D3 在隐藏账户上照常命中', () => {
+    const acc = { ...nalAcc(nalSnaps('2026-08-27', '2026-08-27T11:59:00Z'), '2026-08-27'), hiddenFromAdHealth: true }
+    const r = run(acc, '2026-08-27', '2026-08-27T11:59:00Z', LEAD)
+    expect(r.diagnoses.some(d => d.code === 'D3' && d.status === 'hit' && d.units[0].id === '52589907084325')).toBe(true)
+  })
+})

@@ -22,9 +22,11 @@ import { randomBytes } from 'crypto'
 import { getConnection } from './connection-store'
 import { GithubClient, GitHubApiError } from './github-client'
 import { patchMetaField }             from './meta-patcher'
+import { firstSlugAnchorIsNested }    from './slug-anchor'
 import { ME_BRANCH_PREFIX, CMS_ACTION_TYPE } from './vocabulary'
 import type { CmsSeoFixPayload } from './vocabulary'
 import { supabaseAdmin } from '../supabase'
+import { assertGuardMatchesClient, identityFromSlug, unresolvedIdentity, type PageWriteGuard } from '@/lib/seo/protected-pages'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,8 @@ export interface SeoFixInput {
   executionItemId?:   string
   productionPackageId?: string
   fix:                CmsSeoFixPayload
+  /** Protected-page gate. The page identity is computed in here from the real patch target, not supplied by the caller. */
+  guard:              PageWriteGuard
 }
 
 export type SeoFixResult =
@@ -61,7 +65,8 @@ export type SeoFixErrorCode =
 // ─── orchestrateSeoFix ────────────────────────────────────────────────────────
 
 export async function orchestrateSeoFix(input: SeoFixInput): Promise<SeoFixResult> {
-  const { clientId, executionItemId, productionPackageId, fix } = input
+  const { clientId, executionItemId, productionPackageId, fix, guard } = input
+  assertGuardMatchesClient(guard, clientId)
 
   // ── Step 1: Load connection (includes decrypted PAT) ───────────────────────
   let conn: Awaited<ReturnType<typeof getConnection>>
@@ -103,7 +108,16 @@ export async function orchestrateSeoFix(input: SeoFixInput): Promise<SeoFixResul
     }
   }
 
-  // ── Step 3: Patch in-memory ────────────────────────────────────────────────
+  // ── Step 3: Protected-page gate (BEFORE patching, so a refusal never reveals whether old_value matched) ──────
+  // The patch window is text-based and anchors on the FIRST `slug: '<slug>'` in the file. If that anchor is a nested
+  // reference inside another entry, the edit would land in a different page than the one named — the target page
+  // is then ambiguous and treated as unknown.
+  await guard.assert(
+    firstSlugAnchorIsNested(decodedContent, fix.slug) ? unresolvedIdentity('nested_slug_anchor') : identityFromSlug(fix.slug),
+    { targetType: 'data_file_entry' },
+  )
+
+  // ── Step 3b: Patch in-memory ────────────────────────────────────────────────
   const patchResult = patchMetaField(
     decodedContent, fix.slug, fix.field, fix.oldValue, fix.newValue,
   )

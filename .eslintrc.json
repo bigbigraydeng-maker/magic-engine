@@ -7,7 +7,6 @@
         "patterns": [
           {
             "group": [
-              "**/lib/publer/client",
               "**/lib/cms/wordpress-client",
               "**/lib/cms/shopify-client",
               "**/lib/cms/github-client",
@@ -60,16 +59,10 @@
         "src/app/api/clients/\\[id\\]/cms/wordpress/update-post/route.ts",
         "src/app/api/clients/\\[id\\]/cms/wordpress/yoast-probe/route.ts",
         "src/app/api/clients/\\[id\\]/gsc/index-request/route.ts",
-        "src/app/api/clients/\\[id\\]/reels/\\[draftId\\]/publish/route.ts",
         "src/app/api/cms/github/webhook/route.ts",
         "src/app/api/cron/cms-connection-retest/route.ts",
-        "src/app/api/publer/accounts/route.ts",
-        "src/app/api/publer/create-post/route.ts",
-        "src/app/api/publer/draft/\\[assetId\\]/route.ts",
-        "src/app/api/publer/schedule/route.ts",
         "src/lib/blog/pr-sync.ts",
         "src/lib/cms/page-upgrade-pr-sync.ts",
-        "src/lib/flywheel/social-post-publish.ts",
         "src/lib/luban/tools.ts",
         "src/lib/seo-meta/cts-meta-pr.ts",
         "src/lib/inngest/functions/seo-meta-cycle.ts",
