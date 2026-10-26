@@ -4,8 +4,10 @@
  *
  * PATCH /api/clients/[id]/prescription/[pId]
  *   Body: { status: 'approved'|'rejected', rejection_note?: string }
- *   - 'approved' → save approval (含批准人，取自会话) + 把阶段挂到目标下。不再生成看板上的待办。
- *   - 'rejected'  → record rejection note
+ *   - 'approved' → only a draft with non-empty content. Anything else is 4xx
+ *     and does not write. Then save approval (含批准人，取自会话) + 把阶段挂到目标下。
+ *     不再生成看板上的待办。
+ *   - 'rejected'  → record rejection note（不走上面的草稿校验）
  *   - Already-approved prescription → 409 Conflict
  *
  * Security: Bearer token (INTERNAL_API_KEY)
@@ -17,6 +19,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { approveDraftContentGate } from './approve-gate'
 import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
@@ -150,6 +153,14 @@ export async function PATCH(
     // 不再生成看板上的待办；看板生成失败也不会让这次批准失败。
     // 整套在 lib/diagnostic/prescription-landing.ts，处方周更共用同一段代码。
     if (body.status === 'approved') {
+      // 退回、失败、空内容、以及其他非草稿：拒绝且不落地、不写库。
+      const gate = approveDraftContentGate(current.status, current.content)
+      if (!gate.ok) {
+        return NextResponse.json(
+          { success: false, error: gate.error },
+          { status: gate.httpStatus },
+        )
+      }
       try {
         // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）
         const landed = await landPrescription(supabaseAdmin, current, access.user.email)

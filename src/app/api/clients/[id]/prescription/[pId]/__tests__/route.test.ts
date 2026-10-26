@@ -66,11 +66,21 @@ function makeRequest(body: unknown): NextRequest {
   })
 }
 
+const FILLED = {
+  summary: '三阶段方案',
+  phases: [],
+  kpi_targets: [],
+  budget_allocation: [],
+}
+
 /**
  * 第一次 from() = 取当前处方；之后每次 from() = 一次写/读回。
  * `result` 是写（或批准后读回）那一次的返回值。
  */
-function mockSupabase(result: { data: unknown; error: unknown }) {
+function mockSupabase(
+  result: { data: unknown; error: unknown },
+  current: Record<string, unknown> = DRAFT,
+) {
   const update = vi.fn().mockReturnValue({
     eq: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
@@ -81,7 +91,7 @@ function mockSupabase(result: { data: unknown; error: unknown }) {
     .mockReturnValueOnce({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: DRAFT, error: null }),
+      single: vi.fn().mockResolvedValue({ data: current, error: null }),
     })
     .mockReturnValue({
       update,
@@ -145,8 +155,10 @@ describe('PATCH prescription — 打回', () => {
 })
 
 describe('PATCH prescription — 批准', () => {
-  it('批准人取自登录会话，不认前端传值', async () => {
-    mockSupabase(ok('approved'))
+  const draftWithContent = { ...DRAFT, content: FILLED }
+
+  it('草稿且有内容才放行，批准人取自登录会话', async () => {
+    mockSupabase(ok('approved'), draftWithContent)
 
     const res = await PATCH(
       makeRequest({ status: 'approved', approved_by: 'attacker@evil.com' }),
@@ -159,13 +171,59 @@ describe('PATCH prescription — 批准', () => {
   })
 
   it('落地失败 → 500，处方不留在"已批准但没动作"', async () => {
-    mockSupabase(ok('approved'))
+    mockSupabase(ok('approved'), draftWithContent)
     mockLand.mockRejectedValue(new Error('生成执行项失败'))
 
     const res = await PATCH(makeRequest({ status: 'approved' }), { params })
 
     expect(res.status).toBe(500)
     expect((await res.json()).error).toContain('生成执行计划失败')
+  })
+
+  it.each([null, '', '   ', {}, { summary: '', phases: [], kpi_targets: [], budget_allocation: [] }])(
+    '草稿但内容为空 (%j) → 422，不写库',
+    async (content) => {
+      const update = mockSupabase(ok('approved'), { ...DRAFT, content })
+
+      const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+      const json = await res.json()
+
+      expect(res.status).toBe(422)
+      expect(json.success).toBe(false)
+      expect(json.error).toBe('处方内容为空，不能同意')
+      expect(mockLand).not.toHaveBeenCalled()
+      expect(update).not.toHaveBeenCalled()
+      expect(supabaseAdmin.from).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['rejected', 'failed', 'generating', 'superseded', 'published'])(
+    '%s → 409，不写库',
+    async (status) => {
+      const update = mockSupabase(ok('approved'), { ...DRAFT, status, content: FILLED })
+
+      const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+      const json = await res.json()
+
+      expect(res.status).toBe(409)
+      expect(json.success).toBe(false)
+      expect(json.error).toContain(status)
+      expect(mockLand).not.toHaveBeenCalled()
+      expect(update).not.toHaveBeenCalled()
+      expect(supabaseAdmin.from).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('已经同意过 → 409，不写库', async () => {
+    const update = mockSupabase(ok('approved'), { ...DRAFT, status: 'approved', content: FILLED })
+
+    const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain('already approved')
+    expect(mockLand).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+    expect(supabaseAdmin.from).toHaveBeenCalledTimes(1)
   })
 })
 
