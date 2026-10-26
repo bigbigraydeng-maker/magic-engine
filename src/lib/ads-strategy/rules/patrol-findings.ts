@@ -11,6 +11,8 @@ export const ADS_RULE_MIN_STREAK = 2
 
 export const ADS_RULE_CODES: ReadonlySet<string> = new Set(['D2', 'D10', 'D11'])
 
+/** 只给 PM 今日待办用：在客户侧共享的 ADS_RULE_CODES 之外加 D3（花钱没结果，内部提醒，不进客户报告）。 */
+export const PM_ADS_RULE_CODES: ReadonlySet<string> = new Set([...ADS_RULE_CODES, 'D3'])
 export interface RuleFinding {
   code: string
   status: string
@@ -41,15 +43,29 @@ export interface GrowthStateRow {
 export function findingKey(f: RuleFinding): string | null {
   const ad = f.units?.find((u) => u.level === 'ad')
   if (ad) return `${f.code}:${ad.id}`
+  // D3 命中在广告组层（没有广告单位）
+  if (f.code === 'D3') {
+    const adset = f.units?.find((u) => u.level === 'adset')
+    return adset ? `D3:${adset.id}` : null
+  }
   if (f.code === 'D11' && typeof f.evidence?.audience_id === 'string') return `D11:${f.evidence.audience_id}`
   return null
 }
 
 /** 一行 payload.problems 里 status 为 'hit' 的 D2/D10（payload/problems 缺失时为空）。 */
 export function ruleHits(row: GrowthStateRow): RuleFinding[] {
+  return hitsIn(row, ADS_RULE_CODES)
+}
+
+/** PM 待办版：多一个 D3。客户侧不要用这个。 */
+export function pmRuleHits(row: GrowthStateRow): RuleFinding[] {
+  return hitsIn(row, PM_ADS_RULE_CODES)
+}
+
+function hitsIn(row: GrowthStateRow, codes: ReadonlySet<string>): RuleFinding[] {
   const problems = row.payload?.problems
   if (!problems) return []
-  return problems.filter((p) => ADS_RULE_CODES.has(p.code) && p.status === 'hit')
+  return problems.filter((p) => codes.has(p.code) && p.status === 'hit')
 }
 
 /** 两个 YYYY-MM-DD 之间差几天（UTC 零点起算，四舍五入）。 */
@@ -69,7 +85,7 @@ export function streakFor(key: string, rowsNewestFirst: readonly GrowthStateRow[
   let streak = 0
   let lastHitDate: string | null = null
   for (const row of rowsNewestFirst) {
-    const hit = ruleHits(row).some((f) => findingKey(f) === key)
+    const hit = pmRuleHits(row).some((f) => findingKey(f) === key)
     if (!hit) break
     if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
     streak += 1

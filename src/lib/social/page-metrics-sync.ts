@@ -25,6 +25,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchPagePosts, type PagePost } from '@/lib/meta/page-posts'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
+import { isSkippablePageTokenFailure, metaPageSyncHeld, rememberBrokenPageToken } from '@/lib/meta/broken-page-token'
 
 const POSTS_TO_FETCH = 50
 
@@ -133,6 +134,18 @@ export async function loadPageMappings(supabase: SupabaseClient): Promise<PageMa
   return Array.from(byClient.entries()).map(([client_id, page_id]) => ({ client_id, page_id }))
 }
 
+/** 主页这一腿里，真正算进 failed_count 的条数。已知坏令牌不算，它们有自己的待办。 */
+export function countPageMetricFailures(
+  pageMetrics: PageMetricsSyncResult | { error: string },
+): number {
+  if (!('results' in pageMetrics)) {
+    return isSkippablePageTokenFailure({ error: pageMetrics.error }) ? 0 : 1
+  }
+  return pageMetrics.results.filter(
+    (row) => row.outcome === 'error' && !isSkippablePageTokenFailure({ error: row.error }),
+  ).length
+}
+
 // ── Sync ────────────────────────────────────────────────────────────────────────
 
 export async function syncPageMetrics(
@@ -143,14 +156,20 @@ export async function syncPageMetrics(
 
   for (const { client_id, page_id } of mappings) {
     try {
+      if (await metaPageSyncHeld(supabase, client_id, page_id)) {
+        results.push({ client_id, page_id, outcome: 'error', error: 'connection_unhealthy' })
+        continue
+      }
       // AD-SEC-4: both mapping sources are client-editable, so only read a Page
       // verified as this client's (bound + gate, or its own OAuth connection).
       // Token order is unchanged: stored OAuth Page token, else env-derived.
       const auth = await authorizeConfiguredPage(supabase, client_id, page_id, process.env)
       if (!auth.ok) {
+        const error = auth.skipped === 'page_not_verified' ? `page_not_verified: ${auth.reason}` : undefined
+        if (error) await rememberBrokenPageToken(supabase, client_id, page_id, error)
         results.push(
-          auth.skipped === 'page_not_verified'
-            ? { client_id, page_id, outcome: 'error', error: `page_not_verified: ${auth.reason}` }
+          error
+            ? { client_id, page_id, outcome: 'error', error }
             : { client_id, page_id, outcome: 'no_token' },
         )
         continue
@@ -184,12 +203,9 @@ export async function syncPageMetrics(
 
       results.push({ client_id, page_id, outcome: 'synced', posts_seen: posts.length })
     } catch (err) {
-      results.push({
-        client_id,
-        page_id,
-        outcome: 'error',
-        error: err instanceof Error ? err.message : String(err),
-      })
+      const error = err instanceof Error ? err.message : String(err)
+      await rememberBrokenPageToken(supabase, client_id, page_id, error)
+      results.push({ client_id, page_id, outcome: 'error', error })
     }
   }
 

@@ -35,12 +35,40 @@ import {
   BRIEF_SCHEMA_VERSION,
   type MessengerBrief,
   type BriefContext,
+  type BriefChannel,
   type TripDetails,
 } from './brief-schema'
+
+// 渠道类型定义在 brief-schema（放这里会跟它成环），但调用方习惯从 brief 引，所以再导出一次。
+export type { BriefChannel }
+
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
 import { getClientKnowledge, type GetClientKnowledgeDeps } from '@/lib/knowledge/read'
 import { KnowledgeNotEntitledError } from '@/lib/knowledge/errors'
 import type { KnowledgeEntry } from '@/lib/knowledge/types'
+
+/**
+ * 每条渠道怎么称呼、回信要带什么。英文是给模型看的，所以这里不翻译。
+ *
+ * `replyNote` 对私信**刻意留空**：私信这条路已经上线并在给 525 段对话写卡，
+ * 这次只加邮件，不顺手改它的提示词 —— 换了提示词就等于换了一条在跑的链路。
+ */
+const CHANNEL_WORDS: Record<
+  BriefChannel,
+  { article: string; thread: string; replyNote: (business: string) => string }
+> = {
+  messenger: {
+    article: 'a',
+    thread: 'Facebook Messenger thread',
+    replyNote: () => '',
+  },
+  email: {
+    article: 'an',
+    thread: 'email thread',
+    replyNote: (business) =>
+      `- It is an email, not a chat message: open with the customer's first name and sign off as ${business}. Never write a subject line.`,
+  },
+}
 
 /** Wait this long after the last message before summarising. */
 export const QUIET_PERIOD_MS = 30 * 60 * 1000
@@ -74,6 +102,8 @@ export interface StoredMessage {
   senderName: string | null
   body: string
   sentAt: string
+  /** 邮件渠道靠它去拉全文（库里只存了 255 字摘要）。私信不需要，留空。 */
+  messageId?: string | null
 }
 
 /**
@@ -232,11 +262,18 @@ TRIP DETAILS — every field describes what the CUSTOMER told us, never what we 
  * fact comes from `factEntries` (the `customer_reply`-eligible rows
  * `loadClientFacts`/`getClientKnowledge` returned for this client).
  */
-export function buildSystemPrompt(identity: ClientIdentity, factEntries: readonly KnowledgeEntry[]): string {
+export function buildSystemPrompt(
+  identity: ClientIdentity,
+  factEntries: readonly KnowledgeEntry[],
+  channel: BriefChannel = 'messenger',
+): string {
   const isTravel = isTravelIndustry(identity)
   const business = identity.name
+  const words = CHANNEL_WORDS[channel]
+  const replyNote = words.replyNote(business)
+  const replyNoteLine = replyNote === '' ? '' : `\n${replyNote}`
 
-  return `You turn a Facebook Messenger thread between ${business} and a prospective customer into a briefing card for a ${business} salesperson.
+  return `You turn ${words.article} ${words.thread} between ${business} and a prospective customer into a briefing card for a ${business} salesperson.
 
 LANGUAGE — this is the most common mistake, get it right:
 - summary, customer_needs, objections, promises_made, next_action, risk_flags: write in SIMPLIFIED CHINESE. Staff read these in a Chinese interface.
@@ -259,7 +296,7 @@ ${clientFactsBlock(factEntries)}
 next_action must be a concrete thing a salesperson does today, in the imperative — "打电话给 Kam，确认出行月份". Never "等待客户回复": if the customer has gone quiet, chasing them IS the action, and the elapsed time below tells you how overdue it is.
 
 draft_reply rules (it goes to a real customer as ${business}):
-- Warm, plain English. Two or three sentences. No hype words.
+- Warm, plain English. Two or three sentences. No hype words.${replyNoteLine}
 - If the thread is about refunds, cancellations, changes, payment, insurance, medical or accessibility needs, or a complaint: do not attempt to resolve it. Draft a short reply saying a ${business} specialist will come back to them.`
 }
 
@@ -327,6 +364,41 @@ export function looksLikeAutomatedSpam(messages: StoredMessage[]): boolean {
   const substantiveInbound = messages.filter((m) => m.direction === 'inbound' && m.body.trim())
   if (substantiveInbound.length === 0) return false
   return substantiveInbound.every((m) => messageLooksLikeSpam(m.body))
+}
+
+/**
+ * 邮件线程清洗完一个字都不剩时写的卡。
+ *
+ * 为什么要写卡、而不是跳过（魏征式复审 2026-10-26 的 P2）：跳过等于不往
+ * `conversation_briefs` 写行，而「该不该写卡」的判据看的就是那张表——于是这段对话
+ * 每小时都会被重新选中、重新拉最多 12 封邮件全文，还占着邮件那半配额。
+ * 实测约一成邮件对话会落到这里（553 段里约 55 段），**比每轮 25 段的配额还多**，
+ * 真会把配额占死、让存量永远跑不完。
+ *
+ * 卡的内容只陈述事实，不编任何东西 —— 这正是员工需要知道的一件事：
+ * 这个人把我们自己发的邮件转回来了，但一个字没写。
+ */
+export function nothingFromCustomerBrief(): MessengerBrief {
+  return MessengerBriefSchema.parse({
+    summary: '客人这封邮件里没有自己写的内容（只转发/引用了我们发出的邮件）。',
+    intent_level: 'unknown',
+    customer_needs: [],
+    objections: [],
+    promises_made: [],
+    next_action: '打开原始邮件看一眼客人想问什么；如果确实什么都没写，直接打电话或回一封问他需要什么。',
+    follow_up_due_at: null,
+    risk_flags: ['客人没写文字，无法判断需求，别照这张卡做跟进决定'],
+    trip: {
+      tour_interest: null,
+      travel_window: null,
+      party_size: null,
+      departure_city: null,
+      first_time_to_china: null,
+      budget_signal: null,
+    },
+    contact: { phone: null, email: null },
+    draft_reply: '',
+  })
 }
 
 /**
@@ -433,7 +505,7 @@ export async function generateBrief(
     {
       model: modelName(),
       input: [
-        { role: 'system', content: buildSystemPrompt(identity, facts.entries) },
+        { role: 'system', content: buildSystemPrompt(identity, facts.entries, context?.channel) },
         {
           role: 'user',
           content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,

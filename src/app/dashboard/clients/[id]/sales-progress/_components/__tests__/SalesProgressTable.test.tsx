@@ -313,3 +313,58 @@ describe('statusText', () => {
     expect(statusText(unit('open'))).toBeNull()
   })
 })
+
+describe('一个出发日必须读成一条记录，不能被分隔线切成两条（PM 2026-10-26：UI 不对）', () => {
+  /** 这个出发日有附注（有单没填人数）+ 有订单明细，所以会多出一行「详情」。 */
+  const withDetail = () =>
+    data({
+      result: {
+        rows: [row({ unfilledOrders: 1, bookings: [booking()] })],
+        onClosedUnits: [],
+        unattributedOrders: 0,
+        unattributedPeople: 0,
+        activeOrders: 10,
+      },
+    })
+
+  function rowsOf(container: HTMLElement): HTMLTableRowElement[] {
+    return [...container.querySelectorAll('tbody tr')] as HTMLTableRowElement[]
+  }
+
+  it('有详情时：主行不画线，线只画在详情行下面（否则一个团被切成两条）', () => {
+    const { container } = render(<SalesProgressTable data={withDetail()} />)
+    const trs = rowsOf(container)
+    expect(trs).toHaveLength(2)
+    expect(trs[0].className).not.toContain('border-b')
+    expect(trs[1].className).toContain('border-b')
+  })
+
+  it('没有详情时：这一行自己画线', () => {
+    const { container } = render(<SalesProgressTable data={data()} />)
+    const trs = rowsOf(container)
+    expect(trs).toHaveLength(1)
+    expect(trs[0].className).toContain('border-b')
+  })
+
+  it('详情行往右缩进，读起来是上一行的附注而不是新记录', () => {
+    const { container } = render(<SalesProgressTable data={withDetail()} />)
+    const cell = rowsOf(container)[1].querySelector('td')
+    expect(cell?.className ?? '').toContain('pl-6')
+  })
+})
+
+describe('表头要跟格子里的内容对得上', () => {
+  it('第一列写「团 · 出发日」—— 格子里是团名加日期，不只是日期', () => {
+    render(<SalesProgressTable data={data()} />)
+    expect(screen.getByText('团 · 出发日')).toBeDefined()
+  })
+
+  it('最后一列就叫「剩余」，解释挪到表格下面的小字里', () => {
+    render(<SalesProgressTable data={data()} />)
+    expect(screen.getByText('剩余')).toBeDefined()
+    expect(screen.queryByText('剩余（已算上客人自述和待核实）')).toBeNull()
+    const note = screen.getByText(/对外只说/)
+    expect(note.textContent).toContain('剩余')
+    expect(note.textContent).toContain('仅算公司确认')
+  })
+})

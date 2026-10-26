@@ -98,6 +98,7 @@ const POST_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
   asset_provenance_matches_claim_context: '素材与主张场景相符',
   bgm_segmented_with_fades: 'BGM 分段并带淡入淡出',
   bgm_listened_no_vocals: '已开声音听过，背景音乐无人声',
+  standalone_understandable: '这条单独发给粉丝，他们能看懂在讲什么',
   format_is_reel: '发布格式为 Reel',
   cta_in_first_comment_not_body: 'CTA 位于首评而非正文',
   first_comment_link_has_tracking_params: '首评链接含追踪参数',

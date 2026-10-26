@@ -13,6 +13,8 @@ interface OneClickConfirmProps {
 export function OneClickConfirm({ itemLabels, sourceUrl, busy, onConfirm, onExpand }: OneClickConfirmProps) {
   // Never pre-ticked: the reviewer must say they actually listened with sound on.
   const [listened, setListened] = useState(false)
+  // Also never pre-ticked: a person must say this reel makes sense on its own for the fans.
+  const [standalone, setStandalone] = useState(false)
   return (
     <div className="space-y-3">
       <p className="text-sm text-slate-600">
@@ -38,11 +40,16 @@ export function OneClickConfirm({ itemLabels, sourceUrl, busy, onConfirm, onExpa
         <span>我已开声音听过，背景音乐里没有人声</span>
       </label>
 
+      <label className="flex items-start gap-2 text-sm text-slate-800">
+        <input type="checkbox" checked={standalone} onChange={e => setStandalone(e.target.checked)} className="mt-1" />
+        <span>这条单独发给粉丝，他们能看懂在讲什么</span>
+      </label>
+
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={onConfirm}
-          disabled={busy || !listened}
+          disabled={busy || !listened || !standalone}
           className="h-10 rounded-lg px-5 bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
         >{busy ? '处理中…' : '我已看过这条片子,同意通过'}</button>
         <button

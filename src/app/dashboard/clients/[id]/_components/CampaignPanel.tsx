@@ -13,14 +13,16 @@ export function CampaignPanel({ clientId }: Props) {
   const [campaigns, setCampaigns] = useState<CampaignBrief[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [internal, setInternal] = useState(false)
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch(`/api/clients/${clientId}/campaign?status=active`)
       if (res.ok) {
-        const { campaigns: list } = await res.json()
-        setCampaigns(list ?? [])
+        const body = await res.json()
+        setInternal(body.viewer === 'internal')
+        setCampaigns(body.campaigns ?? [])
       }
     } finally {
       setLoading(false)
@@ -78,6 +80,7 @@ export function CampaignPanel({ clientId }: Props) {
       {showForm && (
         <CreateCampaignForm
           clientId={clientId}
+          internal={internal}
           onCreated={handleCreated}
           onCancel={() => setShowForm(false)}
         />
@@ -97,6 +100,7 @@ export function CampaignPanel({ clientId }: Props) {
               key={c.id}
               campaign={c}
               clientId={clientId}
+              internal={internal}
               onArchived={handleArchived}
               onUpdated={handleUpdated}
             />
@@ -114,10 +118,12 @@ export function CampaignPanel({ clientId }: Props) {
 
 function CreateCampaignForm({
   clientId,
+  internal,
   onCreated,
   onCancel,
 }: {
   clientId: string
+  internal: boolean
   onCreated: (c: CampaignBrief) => void
   onCancel: () => void
 }) {
@@ -138,7 +144,7 @@ function CreateCampaignForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(),
-          description: description.trim() || null,
+          ...(internal ? { description: description.trim() || null } : {}),
           valid_from: validFrom || null,
           valid_until: validUntil || null,
         }),
@@ -167,15 +173,17 @@ function CreateCampaignForm({
           />
         </Field>
 
-        <Field label="推广描述">
-          <textarea
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            placeholder="简述推广目的、核心卖点、目标客群…"
-            rows={3}
-            className={`${INPUT_CLASS} resize-none`}
-          />
-        </Field>
+        {internal && (
+          <Field label="内部备注">
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="只给内部看：PM 指令、停放原因、竞品调研…"
+              rows={3}
+              className={`${INPUT_CLASS} resize-none`}
+            />
+          </Field>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="开始日期">
@@ -216,11 +224,13 @@ const CAMPAIGN_COLORS = [
 function CampaignCard({
   campaign,
   clientId,
+  internal,
   onArchived,
   onUpdated,
 }: {
   campaign: CampaignBrief
   clientId: string
+  internal: boolean
   onArchived: (id: string) => void
   onUpdated: (c: CampaignBrief) => void
 }) {
@@ -253,7 +263,7 @@ function CampaignCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: editTitle.trim(),
-          description: editDescription.trim() || null,
+          ...(internal ? { description: editDescription.trim() || null } : {}),
           valid_from: editFrom || null,
           valid_until: editUntil || null,
         }),
@@ -389,13 +399,15 @@ function CampaignCard({
                 placeholder="活动名称"
                 className={`${INPUT_CLASS} text-sm font-semibold`}
               />
-              <textarea
-                value={editDescription}
-                onChange={e => setEditDescription(e.target.value)}
-                placeholder="推广描述（可选）"
-                rows={2}
-                className={`${INPUT_CLASS} text-xs resize-none`}
-              />
+              {internal && (
+                <textarea
+                  value={editDescription}
+                  onChange={e => setEditDescription(e.target.value)}
+                  placeholder="内部备注（可选）"
+                  rows={2}
+                  className={`${INPUT_CLASS} text-xs resize-none`}
+                />
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <input type="date" value={editFrom} onChange={e => setEditFrom(e.target.value)}
                   className={`${INPUT_CLASS} text-xs`} />
@@ -428,7 +440,7 @@ function CampaignCard({
                   ✏️ 编辑
                 </button>
               </div>
-              {campaign.description && (
+              {internal && campaign.description && (
                 <p className="text-xs text-me-charcoal/55 mt-1 line-clamp-2">{campaign.description}</p>
               )}
               <div className="flex items-center gap-3 mt-2 text-xs text-me-charcoal/45">
@@ -508,8 +520,8 @@ function CampaignCard({
             </button>
           </div>
 
-          {/* Keyword Enrichment */}
-          <div>
+          {/* Keyword Enrichment — 搜索量和竞品向的词只给内部看 */}
+          {internal && <div>
             <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-1">
               推广关键词
             </p>
@@ -557,12 +569,13 @@ function CampaignCard({
                 点击「拉取」从 Keyword Intelligence 获取推广相关词
               </p>
             )}
-          </div>
+          </div>}
 
           {/* ── Visual Direction ─────────────────────────────── */}
           <VisualDirectionSection
             campaign={campaign}
             clientId={clientId}
+            internal={internal}
             onUpdated={onUpdated}
           />
 

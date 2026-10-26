@@ -17,6 +17,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
+import { pickAssignee } from '@/lib/crm/lead-assignee'
 import { attributionColumns, attributionFromMetaLeadRow } from '@/lib/crm/attribution'
 import { lookupCreativeRefByAdId } from '@/lib/ads/creative-link'
 import { type SubscribeMemberResult } from '@/lib/mailchimp/client'
@@ -309,6 +310,32 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
       seenAt: lead.createdTime,
       attribution,
     })
+
+    // ── Round-robin 分配：只对**新建**的 contact 分配一次；已有 contact 的
+    //    assigned_to 保持原样（员工可能自己改过，不覆盖）。候选名单空时留 null，
+    //    由「我的待跟进」看板的「未分配」桶兜底。写失败不中断主流程 —— 入库
+    //    优先，分配可以后台脚本回填。
+    if (created) {
+      try {
+        const assignee = await pickAssignee({ clientId, supabase: supabaseAdmin })
+        if (assignee) {
+          const { error: assignErr } = await supabaseAdmin
+            .from('contacts')
+            .update({ assigned_to: assignee })
+            .eq('id', contactId)
+            .is('assigned_to', null)
+          if (assignErr) {
+            console.warn(
+              `[meta-lead] lead ${lead.leadId} assign to ${assignee} failed: ${sanitizeErr(assignErr.message)}`,
+            )
+          }
+        }
+      } catch (err) {
+        console.warn(
+          `[meta-lead] lead ${lead.leadId} pickAssignee failed: ${sanitizeErr(err instanceof Error ? err.message : String(err))}`,
+        )
+      }
+    }
 
     // ── 触点 Phase A：**在任何 Mailchimp 调用之前**先 create-if-not-exists 一条
     //    contact + source touchpoint。用 upsert(ignoreDuplicates=true) 保幂等：

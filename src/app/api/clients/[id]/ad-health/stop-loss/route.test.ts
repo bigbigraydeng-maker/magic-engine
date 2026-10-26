@@ -19,13 +19,14 @@ const m = vi.hoisted(() => ({
   setAdSetDailyBudget: vi.fn(),
   setAdSetStatus: vi.fn(),
   submitStopLoss: vi.fn(),
+  stopLossAccess: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
   requirePaidClientAccess: vi.fn().mockResolvedValue({ ok: true, tier: 'paid_client', user: { id: 'operator-1' } }),
 }))
 vi.mock('@/lib/action-submission/stop-loss', () => ({
-  requireStopLossAccess: vi.fn().mockResolvedValue({ ok: true, tier: 'paid_client', user: { id: 'operator-1' } }),
+  requireStopLossAccess: m.stopLossAccess,
   submitStopLossThroughKernel: m.submitStopLoss,
 }))
 vi.mock('@/lib/kernel', () => ({ createKernel: vi.fn(() => ({ kernel: true })) }))
@@ -85,9 +86,21 @@ function expectNoMetaWrite() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  m.stopLossAccess.mockResolvedValue({ ok: true, tier: 'admin', user: { id: 'operator-1' } })
   // Client A only ever registered its own account.
   m.registeredAccounts.mockResolvedValue({ data: [{ ad_account_id: 'act_1111111111' }], error: null })
   m.submitStopLoss.mockResolvedValue({ action: 'pause_campaign', runs: [] })
+})
+
+describe('stop-loss POST — non-internal account', () => {
+  it.each(['pause', 'cut'] as const)('action=%s by a client account → 403, nothing submitted', async action => {
+    m.stopLossAccess.mockResolvedValue({ ok: false, status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', reason: 'approver_only' })
+    const res = await post({ campaign_id: '120220000000000001', action })
+    expect(res.status).toBe(403)
+    expect(m.getCampaignDetails).not.toHaveBeenCalled()
+    expect(m.submitStopLoss).not.toHaveBeenCalled()
+    expectNoMetaWrite()
+  })
 })
 
 describe('stop-loss POST — campaign belonging to another client', () => {

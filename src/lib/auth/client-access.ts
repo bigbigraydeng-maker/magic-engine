@@ -152,6 +152,25 @@ export async function requirePaidClientAccess(
 }
 
 /**
+ * 客户工作台里标了「仅内部 / 仅 FDE 可见」的页面和接口。
+ *
+ * 内部身份不看 client_portal_users.access_type。只认：
+ *   - ADMIN_EMAILS 精确邮箱，或 ADMIN_EMAIL_DOMAIN 域名后缀 → 全局管理员
+ *   - DEMO_ADMINS（email:clientId）或 scoped_admin=true → 受限管理员，FDE 视角
+ * access_type 为 both / dashboard / client / fde 且上面都不中、scoped_admin=false 的，是客户角色，这里 403。
+ *
+ * 不用 requirePlanApproverAccess：那个会拒绝受限管理员，而 FDE 视角本来就该看自己这一个客户的内部页。
+ */
+export async function requireOperatorAccess(clientId: string): Promise<ClientAccessResult> {
+  const access = await requirePaidClientAccess(clientId)
+  if (!access.ok) return access
+  if (access.role !== 'admin') {
+    return { ok: false, status: 403, error: 'Forbidden', reason: 'forbidden' }
+  }
+  return access
+}
+
+/**
  * 批准推广计划这类「带钱」的动作：先过付费客户门（保留 401/402/403 语义），
  * 再要求是 Magic Lab 内部账号（requireGlobalAdmin：拒绝受限管理员，与素材批准同一档）。
  * 为什么不是 requirePaidClientAccess：paid_client 档包含客户自己的员工 —— 客户不该批准自己的预算。

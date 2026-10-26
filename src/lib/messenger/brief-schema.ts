@@ -49,11 +49,21 @@ export type TripDetails = z.infer<typeof TripDetailsSchema>
 export type Contact = z.infer<typeof ContactSchema>
 
 /** Runtime facts the model cannot read off the transcript. */
+/**
+ * 这张卡是从哪条渠道的对话写出来的。
+ *
+ * 为什么必须带着走：卡里的 `next_action` 是让销售今天就去做的事，`draft_reply`
+ * 是真要发给客人的字。渠道错了，销售会跑去 Messenger 找一个从没在那说过话的人。
+ */
+export type BriefChannel = 'messenger' | 'email'
+
 export interface BriefContext {
-  /** True when the customer spoke last and is waiting on CTS. */
+  /** True when the customer spoke last and is waiting on the business. */
   awaitingReply: boolean
   /** Whole hours since the last message in the thread. */
   hoursSinceLastMessage: number
+  /** 省略时按私信处理 —— 私信是这条链路上线时唯一的渠道。 */
+  channel?: BriefChannel
 }
 
 export const MessengerBriefSchema = z.object({
@@ -164,15 +174,15 @@ export const MESSENGER_BRIEF_JSON_SCHEMA = {
       type: 'object',
       additionalProperties: false,
       properties: {
-        phone: { type: ['string', 'null'], description: "The CUSTOMER's phone number, never CTS's." },
-        email: { type: ['string', 'null'], description: "The CUSTOMER's email, never CTS's." },
+        phone: { type: ['string', 'null'], description: "The CUSTOMER's phone number, never the business's own." },
+        email: { type: ['string', 'null'], description: "The CUSTOMER's email, never the business's own." },
       },
       required: ['phone', 'email'],
     },
     draft_reply: {
       type: 'string',
       description:
-        'Plain text only. Messenger renders asterisks and underscores literally, so no markdown.',
+        'Plain text only, no markdown: Messenger renders asterisks and underscores literally, and an email reply goes out as plain text.',
     },
   },
   required: [
