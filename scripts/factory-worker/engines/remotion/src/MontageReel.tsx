@@ -1,6 +1,8 @@
 import React from 'react'
 import { AbsoluteFill, Audio, interpolate, OffthreadVideo, Sequence, staticFile, useCurrentFrame } from 'remotion'
 import { Logo } from './components'
+import { FrameOverlay } from './FrameOverlay'
+import { overlayWindows, resolveFramePlan } from './frame'
 import { fontFamily } from './theme'
 import {
   parseMontageReelProps,
@@ -64,8 +66,11 @@ export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const timing = computeMontageTiming(props)
   const segments = buildMontageSegments(props)
   const frame = useCurrentFrame()
+  const plan = resolveFramePlan('montage', props)
+  const windows = overlayWindows(timing.totalFrames)
   const fade = interpolate(frame, [timing.totalFrames - 8, timing.totalFrames], [1, 0], { extrapolateLeft: 'clamp' })
   const vol = interpolate(frame, [0, 6, timing.totalFrames - 24, timing.totalFrames - 2], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
+  const logoUntil = plan.endCard ? windows.endFrom : timing.totalFrames
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       {segments.map((seg, i) => (<Sequence key={i} from={seg.from} durationInFrames={seg.dur}><Cut props={props} seg={seg} /></Sequence>))}
@@ -75,8 +80,9 @@ export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
         return (<Sequence key={i} from={from} durationInFrames={montageFrameOf(props.beats, w.at + w.beats) - from}><WordSlam word={w} brandColor={props.brandColor} /></Sequence>)
       })}
       <Grain />
-      <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>
+      {logoUntil > timing.logoFrom ? <Sequence from={timing.logoFrom} durationInFrames={logoUntil - timing.logoFrom}><Logo file={props.logoFile} /></Sequence> : null}
       <AbsoluteFill style={{ background: '#000', opacity: 1 - fade }} />
+      <FrameOverlay totalFrames={timing.totalFrames} hook={plan.hook} endCard={plan.endCard} brandColor={props.brandColor} />
       <Audio src={staticFile(props.musicFile)} volume={vol * (props.musicGain ?? 1)} />
     </AbsoluteFill>
   )

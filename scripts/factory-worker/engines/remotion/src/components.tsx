@@ -1,5 +1,6 @@
 import React from 'react'
 import { AbsoluteFill, Img, interpolate, OffthreadVideo, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
+import { CORNER_LOGO } from './safeZone.ts'
 
 /** Legibility gradient; scrim (0-1) scales its strength, undefined or 1 keeps the original look byte for byte. */
 export function scrimGradient(scrim?: number): string {
@@ -46,5 +47,5 @@ export const Reveal: React.FC<{ children: React.ReactNode; delay?: number; style
 
 /** Persistent brand logo, file name comes from props (relative to the public dir). */
 export const Logo: React.FC<{ file: string }> = ({ file }) => {
-  return <Img src={staticFile(file)} style={{ position: 'absolute', left: 54, top: 292, width: 470, height: 171, objectFit: 'contain', objectPosition: 'left center', filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))' }} />
+  return <Img src={staticFile(file)} style={{ position: 'absolute', left: CORNER_LOGO.left, top: CORNER_LOGO.top, width: CORNER_LOGO.width, height: CORNER_LOGO.height, objectFit: 'contain', objectPosition: 'left center', filter: 'drop-shadow(0 6px 18px rgba(0,0,0,0.45))' }} />
 }

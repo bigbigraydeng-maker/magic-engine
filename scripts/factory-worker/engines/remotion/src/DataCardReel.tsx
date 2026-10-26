@@ -1,6 +1,8 @@
 import React from 'react'
 import { AbsoluteFill, Audio, cancelRender, continueRender, delayRender, Img, interpolate, Sequence, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
 import { computeDataCardTiming, DISCLAIMER_OPACITY, HOOK_SETTLE_FRAMES, SUBLABEL_OPACITY, parseDataCardProps, type DataCardProps } from './datacard'
+import { FrameOverlay } from './FrameOverlay'
+import { overlayWindows, resolveFramePlan } from './frame'
 import { FPS } from './timing'
 import { fontFamily, SAFE_BOTTOM, SAFE_RIGHT, SAFE_TOP } from './theme'
 
@@ -145,15 +147,18 @@ const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number }> 
 export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseDataCardProps(rawProps)
   const timing = computeDataCardTiming(props)
+  const plan = resolveFramePlan('datacard', props)
+  const windows = overlayWindows(timing.totalFrames)
   const frame = useCurrentFrame()
   const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
+  const hideTitle = plan.hook !== null && frame < windows.hookFrames
   return (
     <AbsoluteFill style={{ background: props.bgColor }}>
       <FontGate>
       {props.logoFile !== null ? (
         <Img src={staticFile(props.logoFile)} style={{ position: 'absolute', left: LEFT, top: LOGO_TOP, width: 400, height: LOGO_H, objectFit: 'contain', objectPosition: 'left center' }} />
       ) : null}
-      <Hook props={props} hookFrames={timing.hookFrames} />
+      {hideTitle ? null : <Hook props={props} hookFrames={timing.hookFrames} />}
       {props.rows.map((_, i) => (
         <Sequence key={i} from={timing.rowFrom[i]} durationInFrames={timing.totalFrames - timing.rowFrom[i]}>
           <Row props={props} index={i} rowFrames={timing.rowFrames} />
@@ -163,6 +168,7 @@ export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <FitText avail={WIDTH} origin="center" text={props.disclaimer} style={{ fontFamily, fontSize: 26, fontWeight: 600, color: props.textColor, opacity: DISCLAIMER_OPACITY }} />
       </div>
       </FontGate>
+      <FrameOverlay totalFrames={timing.totalFrames} hook={plan.hook} endCard={plan.endCard} brandColor={props.brandColor} />
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
