@@ -112,13 +112,11 @@ describe('POST /api/cron/viral-analyzer-worker', () => {
   })
 
   it('counts every failure in a batch, not the thrown ones as success', async () => {
-    vi.useFakeTimers()
     script.push({}, {}, { data: [] }, { data: [DUE, { ...DUE, id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', source_url: 'https://www.youtube.com/watch?v=two' }] }, {})
     analyze.mockRejectedValue(new Error('503 Service Unavailable'))
-    const pending = call('s3cret')
-    await vi.runAllTimersAsync()
-    const body = await (await pending).json()
+    // Real clock: the route sleeps DELAY_MS (5s) between the two items.
+    const body = await (await call('s3cret')).json()
     expect(body).toMatchObject({ batch: 2, succeeded: 0, failed: 2 })
     expect(finish).toHaveBeenCalledWith(expect.objectContaining({ completed: 0, failed: 2 }))
-  })
+  }, 20_000)
 })
