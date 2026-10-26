@@ -10,6 +10,7 @@
 > - **已定（Ray/OPC 2026-10-26 23:48 NZDT）**：必过项全绿时，计划随「同意」一起批准；有黄或红就不自动批，另出确认卡问 OPC。建 Meta 暂停草稿并送审不在「同意」里，单独一张确认卡。人手顺序是「同意」→「批准建 Meta 暂停草稿并送审」→「开投」。花钱、发布、写 Meta 的确认卡只有 OPC 和该客户的 FDE 能点，Agent 不能点，每次记下是谁。
 > - **已定（Ray/OPC 2026-10-27 00:24 NZDT）**：「先停再报」已定。三种故障（超日上限、线索进不了 CRM、广告被拒）触发时，自动暂停**出问题的那个系列**（只停，不改预算、不删除、不新建），然后通知 OPC。通知写清：停了哪个系列（账户 + 系列名 + 系列 id）、到停的时候花了多少（当天与累计）、为什么停（哪种故障 + 触发数据）、数据时间点。恢复投放仍要 OPC 或该客户 FDE 点确认卡。这是 P0（写 Meta）：Codex 审 + Ray 亲手合。现状对照见 3.4，补齐的三刀是刀 16–18。
 > - **已定（Ray/OPC 2026-10-27 00:33 NZDT）**：暂停通知的收件邮箱由 Ray 定为 hello@magicengine.cloud。代码里不写死这个地址，走 Render 环境变量（例如 `ME_STOP_ALERT_EMAIL`）。见刀 18。
+> - **已定（Ray/OPC 2026-10-27 01:07 NZDT）**：华佗深度诊断的打分全部废弃。六维分数、问题清单、每周一自动诊断（`diagnostic-weekly`，周一 08:00 UTC / 21:00 NZDT）都不再使用。华佗只保留开处方的名字和入口。入口叫「处方」，背后角色叫「华佗」。开方喂料是 Master Brief、客户需求、FDE 录入，不读华佗诊断。清理是后续刀 20，今晚不改代码；删表或迁移由 Ray 亲手合。见第八节。
 > - CTS 新计划模板（未写入数据库、未批准）：`docs/plans/2026-10-27-cts-plan-v2-template-without-0470.md`。
 
 ---
@@ -101,12 +102,12 @@
 > 同意卡点下去之前，要先跑完 S6（出计划草稿）和 S7（必过检查）。下面编号沿用初稿，执行顺序是 S6 → S7 → S5。
 
 **S1 看（Inspect）**
-- 谁：现有定时任务（每天 06:00 拉广告数和体检，每周一六维体检）+ 广告 Agent 汇总。
+- 谁：现有定时任务（每天 06:00 拉广告数）+ 广告 Agent 汇总。每周一六维体检已废弃（Ray/OPC 2026-10-27 01:07 NZDT），不再作为这一步的来源，见第八节。
 - 开始：每天自动跑；目标变成 active 时多跑一次。
 - 交接：当天的广告现状 `ads_growth_states` 写好，就进 S2。
 - 产出：带来源和时间的「现状」一张。
 - 出错：拉数失败自动重试 3 次（间隔 30 分钟）。还失败就标「数据缺口」，S4 的处方里必须写出来，不能装作有数。快照超过 12 小时没更新，就升级给设备 / 运维（初查看到快照从 01:31 起没再更新；广告已经开投，见第 15 步，快照没跟上要单独查）。
-- 记录：现有的体检表和快照表。
+- 记录：广告快照。六维体检那三张表不再作为这一步的记录。
 
 **S2 量（Measure）**
 - 谁：代码现算（`goal-pace.ts`、`baseline.ts`、`outcome-config.ts`）。
@@ -124,8 +125,9 @@
 - 说明：给客户发确认邮件算对外，**ME 能不能自己发，要 Ray 定一次**。存「客户点了哪条」可靠的做法要加一张小表，**这要迁移，单独开 PR，由 Ray 亲手合**。第一期可以先跳过这一步：由 FDE 在对话框里口述，记进处方的 `intake`。
 
 **S4 开方（Prescribe）**
-- 谁：广告 Agent 在 ME 后台起草（按 #3198 的后台身份）。
-- 开始：S3 完成（或者第一期由 FDE 在对话框里说「给 CTS 开方」）。
+- 谁：广告 Agent 在 ME 后台起草（按 #3198 的后台身份）。页面上这个入口叫「处方」，背后角色叫「华佗」。
+- 开始：S3 完成（或者第一期由 FDE 在对话框里说「给 CTS 开方」）。没有处方就打开对话开方，不先去做诊断。
+- 喂料（已定，Ray/OPC 2026-10-27 01:07 NZDT）：Master Brief、客户需求、FDE 录入。不读华佗诊断。不读 `diagnostic_runs`、`diagnostic_findings`、`diagnostic_narratives`，也不读六维分数。这条不再留待讨论。
 - 交接：处方草稿通过手写处方的校验，**而且带结构化的 `ad_plays`**，就进「待同意」。
 - 产出：处方草稿，包括打法、组数、预算分配，以及每个数怎么算出来的；复盘日。
 - 出错：校验不过就自动重写一次；还不过，就在处方卡上用大白话写出缺什么。同一个目标已经有一份在执行的处方，就只出「修订版」（`supersedes_id`），不另开一份。
@@ -397,9 +399,10 @@
 | 17 | **【P0】服务级「只暂停」**：用服务密钥调用，只能停本客户自己的系列，不能恢复，留操作记录。复用 `meta-ads/execute` 的归属核对和暂停逻辑。不改预算、不删除、不新建 | A | **是 · Codex 审 + Ray 亲手合** | 不要 | 刀 16 读到故障之后才调用。现有执行页要人登录手点，不能当这条入口 |
 | 18 | **【P0】暂停后通知 OPC**：写一条今日待办，并按环境变量发邮件。收件邮箱不写进代码，走 Render 环境变量（例如 `ME_STOP_ALERT_EMAIL`）。当前取值由 Ray 于 2026-10-27 00:33 NZDT 定为 hello@magicengine.cloud。变量没配就只写待办、不乱发，并在待办里写明邮件没发出去。字段固定：停了哪个系列、花了多少（当天与累计）、为什么停、数据时间点 | A | **是 · Codex 审 + Ray 亲手合** | 不要 | 刀 17 |
 | 19 | **【P0】处方四个接口改内部账号**：批准、生成、精修、贴入现在都用 `requirePaidClientAccess`（客户自己的员工过得去）。改为内部账号。批准只认 OPC；生成、精修、贴入给 OPC 和该客户的 FDE。不能把「拒绝受限管理员」的全局管理员函数原样套上，否则该客户的 FDE 会被挡在起草外面。见第八节 | A | **是 · Codex 审 + Ray 亲手合** | 不要 | 刀 3、刀 7 |
+| 20 | **后续：摘掉华佗诊断打分**（今晚不做）。停 `diagnostic-weekly`，诊断页和诊断接口标废弃，开方、诸葛抽屉、鲁班、复盘不再读诊断。删三张诊断表或做迁移的那个 PR 由 Ray 亲手合。`src/lib/huatuo/industry-mapper.ts` 不在这刀里。清单见第八节 | A（只在删表或迁移时） | **删表或迁移 · Ray 亲手合** | 删表才要 | 第八节。本设计稿这一刀不含代码 |
 | 以后 | 客户需求确认表、对话记录表（要是以后要单独的链路表也算在这里） | — | 视内容 | **要** | **每张单独开 PR，只能 Ray 亲手合** |
 
-排期：刀 1 → 2、3（先把身份和授权口子堵上）→ 4、5 → 6（全绿随同意）→ 7（确认卡组件）→ 8、9 → 10 → 11（单独批准建暂停草稿）→ 12（开投）→ 13。刀 16 → 17 → 18 是先停再报的三刀，16 没读到故障之前 17 不许被别的入口拿去停广告。刀 19 和刀 3 一起做。刀 14 的周二调优仍在开投之后。刀 15 的只读和起草可以和刀 4 同时做。刀 16–18 上线前的过渡见 3.4：广告 Agent 每 2 小时只读，命中即报，由人暂停。
+排期：刀 1 → 2、3（先把身份和授权口子堵上）→ 4、5 → 6（全绿随同意）→ 7（确认卡组件）→ 8、9 → 10 → 11（单独批准建暂停草稿）→ 12（开投）→ 13。刀 16 → 17 → 18 是先停再报的三刀，16 没读到故障之前 17 不许被别的入口拿去停广告。刀 19 和刀 3 一起做。刀 14 的周二调优仍在开投之后。刀 15 的只读和起草可以和刀 4 同时做。刀 16–18 上线前的过渡见 3.4：广告 Agent 每 2 小时只读，命中即报，由人暂停。刀 20 是后续清理，今晚不做。
 
 ---
 
@@ -417,13 +420,18 @@
 
 **已定（Ray/OPC 2026-10-27 00:33 NZDT）**：暂停通知收件邮箱定为 hello@magicengine.cloud。只作为环境变量 `ME_STOP_ALERT_EMAIL` 的当前取值写在这里，不写进代码。
 
+**已定（Ray/OPC 2026-10-27 01:07 NZDT）**：
+
+1. 华佗深度诊断的打分全部废弃，不再使用。六维分数、问题清单、每周一自动诊断都停。
+2. 华佗只保留开处方的名字和入口。OPC 看到的入口叫「处方」，背后角色叫「华佗」。
+3. 开方不读华佗诊断。喂料是 Master Brief、客户需求、FDE 录入。这条已定，不再待讨论。
+
 CTS 计划模板（未写入数据库、未批准）见 `docs/plans/2026-10-27-cts-plan-v2-template-without-0470.md`。旧计划 `7a8bee93` 在 Ray 批准新计划之前不动。
 
 另外还有几件要你定的（之前已经提过）：
 - 新的计划草稿能不能顶替处方卡上已经批准的那份计划。这份模板自己还不是替换。
 - 三个上限按 180 / 150 / 30，目标线索成本按 11 还是 12。设置页这次读到的是总上限 150、7274 为 100、0470 账户上限仍为 30；模板只给 7274 排每天 100，不改这三格。
 - ME 能不能自己给客户发需求确认邮件。
-- 面向 OPC 的处方统一名字用哪一个（推荐见第八节，待确认）。
 
 ---
 
@@ -451,7 +459,7 @@ CTS 计划模板（未写入数据库、未批准）见 `docs/plans/2026-10-27-c
 - 「批准建暂停草稿」和「开投」是写 Meta / 花钱。只有 OPC 和该客户的 FDE 能点。Agent 不能点。每次记下是谁点的。
 - 客户自己的员工可以对话、可以上传文件和图片，不能点这三张卡。
 
-**客户页收成一个入口。** 现在客户页有两张卡：「华佗深度诊断」「诸葛亮处方」（`src/app/dashboard/clients/[id]/page.tsx` 第 794–795 行），进度条第 2、3 步也是拆开的（同文件第 345–356 行，第 2 步去诊断、第 3 步去 `prescription/new`）。这两张卡和这两步合成一个「处方」入口。按状态自己走：还没有完成的诊断，先去诊断；诊断完成但还没有处方，打开对话开方；已经有处方，直接打开审阅。
+**客户页收成一个入口。** 现在客户页有两张卡：「华佗深度诊断」「诸葛亮处方」（`src/app/dashboard/clients/[id]/page.tsx` 第 794–795 行），进度条第 2、3 步也是拆开的（同文件第 345–356 行，第 2 步去诊断、第 3 步去 `prescription/new`）。这两张卡和这两步合成一个「处方」入口。按状态自己走：没有处方，就打开对话开方；已经有处方，就打开审阅。不再有「还没有完成的诊断，先去诊断」这一步。
 
 **删掉页面上的「贴入处方草稿」链接。** 链接在 `src/app/dashboard/clients/[id]/prescription/new/page.tsx` 第 614–618 行，指向 `prescription/import`（该页标题在 `prescription/import/page.tsx` 第 25 行）。链接删掉之后，导入页不再从处方页链出去。接口 `POST /api/clients/[id]/prescriptions/manual` 留给广告 Agent，不删。
 
@@ -468,5 +476,24 @@ CTS 计划模板（未写入数据库、未批准）见 `docs/plans/2026-10-27-c
 
 改为内部账号。批准只认 OPC。生成、精修、贴入给 OPC 和该客户的 FDE。实现时不能把「拒绝受限管理员」的全局管理员检查原样套上（`src/lib/auth/require-admin.ts` 第 50–64 行会拒绝只负责一个客户的管理员），否则该客户的 FDE 连起草都进不去。Codex 审 + Ray 亲手合。这一刀不改数据库结构。
 
-**面向 OPC 只用一个名字。待 Ray 确认。** 现在同一件事在页面和代码里叫三个名字：诸葛亮（客户页和进度条）、huatuo（处方页读的诊断元数据，`prescription/new/page.tsx` 第 8 行）、广告 Agent（开方的人）。推荐：OPC 能看到的入口和对话都叫「处方」；背后的人设只留「华佗」（诊断和开方是同一个人做的）。诸葛亮、广告 Agent、huatuo 只留在代码和日志里，不出现在 OPC 页面上。具体用哪个名字等 Ray 定，没定之前不改页面文案。
+**名字已定（Ray/OPC 2026-10-27 01:07 NZDT）。** OPC 能看到的入口和对话叫「处方」。背后角色叫「华佗」，只保留开处方这一用处。诸葛亮、广告 Agent、huatuo 只留在代码和日志里，不出现在 OPC 页面上。页面文案等刀 20 再改，今晚不改代码。
+
+**华佗深度诊断的打分全部废弃（同一次决定）。** 六维分数、问题清单、每周一自动诊断都不再使用。定时任务名是 `diagnostic-weekly`，时刻 `0 8 * * 1`（周一 08:00 UTC / 21:00 NZDT），登记在 `src/lib/cron/dispatch/catalog.ts` 第 33 行和 `src/lib/cron/registry.ts` 第 140 行。它由 `render.yaml` 里的 `cron-dispatch-weekly` 按这个时刻调起来，不是单独一条 Render 服务。今晚不关这个任务，也不删代码。
+
+开方不读华佗诊断。这条已定。喂料是 Master Brief、客户需求、FDE 录入。
+
+下面这些诊断面标为废弃。刀 20 再移除或改成不再调用。今晚不动代码。
+
+- 诊断页：`src/app/dashboard/clients/[id]/diagnostic/`（含 `page.tsx`、`report/page.tsx`）。客户门户上仍显示分数的 `src/app/portal/[clientId]/diagnosis/page.tsx`，以及门户首页、报告页里读诊断表的部分（`portal/[clientId]/page.tsx`、`report/page.tsx`），一起标废弃。
+- 诊断接口：`src/app/api/clients/[id]/diagnostic/` 整组（run、latest、runs、report、report/docx、baseline、synthesize、status）；`src/app/api/diagnostic/` 整组（questions、results、details、response、verify-brands、parser-errors）；`src/app/api/cron/diagnostic-weekly/route.ts`。
+- 诊断表：`diagnostic_runs`、`diagnostic_findings`、`diagnostic_narratives`。删表或迁移单独开 PR，由 Ray 亲手合。
+- 贴入仍要先有一份完成的诊断并写入 `run_id`：`src/app/api/clients/[id]/prescriptions/manual/route.ts` 第 23–34 行。接口留给广告 Agent，不删；这条「先有诊断」的要求要去掉。
+- 生成的旧路径仍按 `run_id` 读诊断：`src/app/api/clients/[id]/prescription/generate/route.ts` 第 130–141 行，以及 `src/lib/diagnostic/prescription-generator.ts` 读分数和问题清单。
+- 客户页进度条第 2 步「深度诊断」：`page.tsx` 第 345–348 行。和第 794 行「华佗深度诊断」卡一起收掉。
+- 诸葛抽屉仍读诊断分数和问题清单：`src/lib/zhuge/assembler.ts` 第 60–87 行；`src/app/api/clients/[id]/zhuge/conduct/route.ts` 把诊断编号传下去。抽屉还在，当对话框用，只是不再读诊断。
+- 鲁班仍读诊断：`src/lib/luban/agent.ts` 第 108–121 行读分数和问题清单，`src/lib/luban/project-agent.ts` 第 96–107 行读分数。
+- 复盘仍读诊断分数：`src/lib/review/agent.ts` 第 96–113 行。
+- 一起停的还有：`src/lib/diagnostic/runner.ts`、`scheduled-run.ts`、`synthesis/`、`report-generator.ts`，`src/lib/pm-todo/diagnostic-synthesis-items.ts`，`src/lib/pm-todo/manual-strategy-items.ts` 第 91–97 行的问题清单，`src/app/api/clients/[id]/onboarding/complete/route.ts` 第 35 行，`src/components/diagnostic/`。`src/types/diagnostic.ts` 里诊断专用类型可以摘；处方用的类型还在这个文件里，不要连处方类型一起删。
+
+**不在清理里：** `src/lib/huatuo/industry-mapper.ts`。它是开方 `runHuatuo`（`src/lib/huatuo/agent.ts`）用的行业映射，不是诊断打分。
 
