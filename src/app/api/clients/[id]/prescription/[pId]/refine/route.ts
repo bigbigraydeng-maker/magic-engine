@@ -8,15 +8,14 @@
  *
  * 校验：必须是草稿状态 + 华佗生成 + 有 discovery + 有 weaknesses。
  *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: logged-in session. OPC or this client's own FDE (requireOperatorAccess).
  * Reference: ROADMAP.md P8.10.S3
  */
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { coerceWeaknesses } from '@/lib/huatuo/agent'
-import { schedulePrescriptionRefine } from '@/lib/huatuo/prescription-job'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
+import { refineHuatuoPrescription, coerceWeaknesses } from '@/lib/huatuo/agent'
 import type { PrescriptionIntake, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { SelfGrade } from '@/lib/huatuo/types'
@@ -51,7 +50,8 @@ export async function POST(
   { params }: { params: { id: string; pId: string } },
 ): Promise<Response> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Drafting stays open to this client's FDE. requireGlobalAdmin would lock them out.
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) {
     return errorResponse(access.status, access.error)
   }
