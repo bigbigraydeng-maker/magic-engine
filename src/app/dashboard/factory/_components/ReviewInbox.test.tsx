@@ -135,6 +135,12 @@ it('AUTO checklist with a FAIL: no one-click, shows reasons, 确定通过 disabl
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true)
 })
 
+it('shows when 马良 has not machine-reviewed the video yet', async () => {
+  await mount([{ ok: true }], { output: { quality_checklist_auto: auto, machine_reviewed: false } })
+  expect(document.body.textContent).toContain('马良还没审完这条片子')
+  expect(btn(ONE_CLICK)).toBeDefined()
+})
+
 it('redline hits: no one-click, shows redline reason', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, redline_hits: ['x'] } })
   expect(btn(ONE_CLICK)).toBeUndefined()

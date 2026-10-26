@@ -9,6 +9,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 import {
   buildMaliangTodo,
+  buildRemotionMaliangTodo,
   fetchMaliangTodos,
   pushMaliangRenderItems,
   boardUrl,
@@ -39,8 +40,10 @@ type Post = { id: string; title: string | null; generation_context_snapshot: unk
 function database(tables: {
   content_factory_render_jobs?: Job[]
   content_posts?: Post[]
+  content_work_orders?: Array<Record<string, unknown>>
   jobsError?: { message: string } | null
   postsError?: { message: string } | null
+  ordersError?: { message: string } | null
 }) {
   return {
     from: (table: string) => {
@@ -80,6 +83,28 @@ function database(tables: {
           },
           then: (resolve: (result: unknown) => unknown) =>
             resolve({ data, error: tables.postsError ?? null }),
+        }
+        return query
+      }
+      if (table === 'content_work_orders') {
+        let data = [...(tables.content_work_orders ?? [])]
+        const query = {
+          select: () => query,
+          in: (key: string, values: readonly unknown[]) => {
+            data = data.filter((r) => values.includes(r[key]))
+            return query
+          },
+          gte: (key: string, value: string) => {
+            data = data.filter((r) => String(r[key] ?? '') >= value)
+            return query
+          },
+          order: () => query,
+          limit: (n: number) => {
+            data = data.slice(0, n)
+            return query
+          },
+          then: (resolve: (result: unknown) => unknown) =>
+            resolve({ data, error: tables.ordersError ?? null }),
         }
         return query
       }
@@ -239,6 +264,54 @@ describe('pushMaliangRenderItems', () => {
     expect(items[0].href.startsWith('https://')).toBe(true)
     expect(items[0].client_name).toBe('CTS')
     expect(items[0].href).toBe(boardUrl('client-a'))
+  })
+})
+
+describe('buildRemotionMaliangTodo', () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: 'wo-1',
+    client_id: 'client-a',
+    status: 'in_review',
+    angle: '示例角度',
+    updated_at: ago(3),
+    brief: { remotion: { template: 'postcard', props: {} } },
+    output: {},
+    ...over,
+  })
+
+  it('pass stays a review todo for the factory screen', () => {
+    const todo = buildRemotionMaliangTodo(row({
+      output: { machine_reviewed: true, maliang_check: passCheck },
+    }), NOW)
+    expect(todo?.kind).toBe('maliang_render_passed')
+    expect(todo?.href).toBe('https://app.magicengine.com.au/dashboard/factory')
+  })
+
+  it('reject is the same failed kind, and is not described as waiting for approval', () => {
+    const todo = buildRemotionMaliangTodo(row({
+      status: 'review_rejected',
+      output: { machine_reviewed: true, maliang_check: failCheck(['第 1 镜文字：错字']) },
+    }), NOW)
+    expect(todo?.kind).toBe('maliang_render_failed')
+    expect(todo?.what).toContain('没放进你的审片队列')
+  })
+
+  it('a review that did not finish is unverifiable and still points at the queue', () => {
+    const todo = buildRemotionMaliangTodo(row({
+      output: {
+        machine_reviewed: false,
+        maliang_check: {
+          status: 'unverifiable',
+          checked_at: ago(1),
+          video_url: 'https://x.supabase.co/v.mp4',
+          reasons: ['马良自检失败：model down'],
+          frames: [],
+          model: null,
+        },
+      },
+    }), NOW)
+    expect(todo?.kind).toBe('maliang_check_unverifiable')
+    expect(todo?.how).toContain('审片队列')
   })
 })
 

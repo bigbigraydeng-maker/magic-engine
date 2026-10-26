@@ -16,6 +16,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { readMaliangFromSnapshot } from '@/lib/maliang/render-check'
+import { MACHINE_REVIEWED_KEY } from '@/lib/maliang/review-disposition'
+import { isRemotionBrief } from '@/lib/factory/render-mode'
 import { NEEDS_REWORK_STATUS } from '@/lib/inngest/functions/maliang-render-check'
 
 export type MaliangItemKind =
@@ -51,6 +53,10 @@ export interface PostRow {
 
 export function boardUrl(clientId: string): string {
   return `https://app.magicengine.com.au/dashboard/clients/${clientId}/content-factory`
+}
+
+export function factoryReviewUrl(): string {
+  return 'https://app.magicengine.com.au/dashboard/factory'
 }
 
 function hoursSince(iso: string, now: Date): number {
@@ -149,6 +155,95 @@ export async function fetchMaliangTodos(
   const todos: MaliangTodo[] = []
   for (const job of jobs) {
     const todo = buildMaliangTodo(job, postsById.get(job.content_post_id), now)
+    if (todo) todos.push(todo)
+  }
+  const remotion = await fetchRemotionMaliangTodos(supabase, now)
+  todos.push(...remotion)
+  return todos
+}
+
+export interface RemotionOrderRow {
+  id: string
+  client_id: string
+  status: string
+  angle: string | null
+  output: unknown
+  updated_at: string
+  brief: unknown
+}
+
+function machineReviewedFlag(output: unknown): boolean | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null
+  const flag = (output as Record<string, unknown>)[MACHINE_REVIEWED_KEY]
+  return typeof flag === 'boolean' ? flag : null
+}
+
+/** Template-render orders use the same todo kinds. The video link is the factory review screen. */
+export function buildRemotionMaliangTodo(row: RemotionOrderRow, now: Date): MaliangTodo | null {
+  if (!isRemotionBrief(row.brief)) return null
+  const title = row.angle?.trim() || '(未命名)'
+  const href = factoryReviewUrl()
+  const check = readMaliangFromSnapshot(row.output)
+  if (!check) {
+    if (row.status !== 'in_review' || machineReviewedFlag(row.output) !== false) return null
+    const hours = hoursSince(row.updated_at, now)
+    if (hours < CHECK_GRACE_HOURS) return null
+    return {
+      kind: 'maliang_check_missing',
+      client_id: row.client_id,
+      what: `马良还没检《${title}》这条成片（出片 ${hours} 小时了）—— 没检 ≠ 没问题，别直接发`,
+      how: '这条不用你动手 —— 是自检事件没发出去或没跑。回我一句「马良重查」我去补',
+      href,
+    }
+  }
+  if (check.status === 'unverifiable') {
+    return {
+      kind: 'maliang_check_unverifiable',
+      client_id: row.client_id,
+      what: `马良看不了《${title}》：${check.reasons.join('；')}`,
+      how: '这条片已在审片队列里，标成还没经过机器审。你审的时候请自己逐镜看',
+      href,
+    }
+  }
+  if (check.status === 'fail') {
+    const head = check.reasons.slice(0, 4).join('；')
+    const tail = check.reasons.length > 4 ? `；另有 ${check.reasons.length - 4} 处` : ''
+    return {
+      kind: 'maliang_render_failed',
+      client_id: row.client_id,
+      what: `马良：《${title}》9 宫格自检不过关，没放进你的审片队列 —— ${head}${tail}`,
+      how: `这条已经从待审里拿掉了，原因在上面。要重做就回我「返工 ${title}」，不要就回「放弃 ${title}」`,
+      href,
+    }
+  }
+  if (check.status === 'pass' && row.status === 'in_review') {
+    return {
+      kind: 'maliang_render_passed',
+      client_id: row.client_id,
+      what: `马良：《${title}》9 宫格自检过关（图 / 字 / logo 都对），等你审片`,
+      how: '打开审片台看完这条，再点通过或打回',
+      href,
+    }
+  }
+  return null
+}
+
+export async function fetchRemotionMaliangTodos(
+  supabase: SupabaseClient,
+  now: Date,
+): Promise<MaliangTodo[]> {
+  const sinceIso = new Date(now.getTime() - RENDER_LOOKBACK_DAYS * 86_400_000).toISOString()
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .select('id, client_id, status, angle, output, updated_at, brief')
+    .in('status', ['in_review', 'review_rejected'])
+    .gte('updated_at', sinceIso)
+    .order('updated_at', { ascending: false })
+    .limit(50)
+  if (error) throw new Error(`maliang work orders query failed: ${error.message}`)
+  const todos: MaliangTodo[] = []
+  for (const row of (data ?? []) as RemotionOrderRow[]) {
+    const todo = buildRemotionMaliangTodo(row, now)
     if (todo) todos.push(todo)
   }
   return todos

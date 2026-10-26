@@ -12,6 +12,7 @@ import { PublishOutlets } from './PublishOutlets'
 import { PendingCardHead } from './OrderTile'
 import { RejectDialog } from './RejectDialog'
 import { groupCounts, parseAngle } from './reviewCardMeta'
+import { maliangReviewNote } from '@/lib/maliang/review-note'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -357,6 +358,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   <span className="rounded bg-slate-100 px-2 py-1">模板 · {renderChoiceLabel(o.template_id)}</span>
                   <span className="rounded bg-slate-100 px-2 py-1">BGM · {musicChoiceLabel(o.music_file)}</span>
                 </div>
+
+                {maliangReviewNote(o.output) && (
+                  <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5" data-testid="maliang-review-note">
+                    <p className="text-xs font-medium text-amber-950">{maliangReviewNote(o.output)}</p>
+                  </div>
+                )}
 
                 {redlineHitsOf(o).length > 0 && (
                   <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
