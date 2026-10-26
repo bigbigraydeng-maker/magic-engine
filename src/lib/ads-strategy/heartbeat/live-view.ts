@@ -82,6 +82,14 @@ function toLiveAdset(
   };
 }
 
+/** 读取项的人话名字（页面上给 PM 看，不许出现英文代号）。 */
+const KIND_LABEL: Record<string, string> = {
+  account: '账户信息',
+  adsets: '广告组',
+  ads: '广告',
+  insights: '今天的花费数据',
+};
+
 function reasonOf(read: HeartbeatAccountRead): string | null {
   const bad = read.outcomes.filter(
     (o) => o.verdict === 'read_failed' || o.verdict === 'token_expired' || o.verdict === 'rate_limited',
@@ -89,7 +97,8 @@ function reasonOf(read: HeartbeatAccountRead): string | null {
   if (bad.length === 0 && read.abortedBy === null) return null;
   if (read.abortedBy === 'token_expired') return 'Meta 授权过期，读不到';
   if (read.abortedBy === 'rate_limited') return 'Meta 限流，稍后再试';
-  return `这些读取失败：${bad.map((o) => o.kind).join('、')}`;
+  const names = [...new Set(bad.map((o) => KIND_LABEL[o.kind] ?? '某项数据'))].join('、');
+  return `这些数据没读到：${names}。稍后点右上角「刷新」再试；持续读不到请告诉开发。`;
 }
 
 /** Pure: shape one account read for the page. */
@@ -150,6 +159,16 @@ export function clearLiveCacheForTests(): void {
 export interface LiveDeps {
   listOfficialAccountIds(clientId: string): Promise<string[]>;
   getToken(clientId: string): Promise<string | null>;
+  /**
+   * 该账户现在有没有在投系列（读最近 14 天的快照，与定时心跳 run.ts 同口径，复用 store.hasActiveCampaigns）。
+   * 读不到 = null，调用方按「有」处理（保守：读到 0 个广告组就判读失败）。
+   *
+   * 已知取舍：快照每 6 小时一轮，「刚被打开、快照还没抓到」的系列会被当成没在投——
+   * 这时若 Meta 恰好对该账户返回空广告组列表，实时页显示「没有在投」而不是读失败。
+   * 残余风险可接受：真读失败是 read_failed（红字），不是「返回空列表」；
+   * 要求 Meta 对确有在投广告组的账户返回空列表才会漏报。
+   */
+  hasActiveCampaigns(clientId: string, adAccountId: string): Promise<boolean | null>;
   read: typeof readHeartbeatAccount;
   now(): Date;
 }
@@ -165,11 +184,13 @@ async function buildFresh(clientId: string, deps: LiveDeps): Promise<LiveTodayVi
       continue;
     }
     try {
+      // 与定时心跳同口径：读不到（或抛错）一律当「有在投系列」，保住「有在投却读到 0 个广告组 = 读失败」这条安全规则。
+      const active = await deps.hasActiveCampaigns(clientId, id).catch(() => null);
       const read = await deps.read({
         adAccountId: id,
         accessToken: token,
         now,
-        accountHasActiveCampaigns: true,
+        accountHasActiveCampaigns: active === null ? true : active,
       });
       accounts.push(buildLiveAccountView(read));
     } catch {

@@ -1,36 +1,30 @@
 /**
  * POST /api/clients/[id]/prescription/[pId]/refine
  *
- * 让华佗对已生成处方做精修 — **流式响应模式**（与 /generate 一致）。
- *
- * 同样原因：Render 会回收 fire-and-forget 进程。这里保持 HTTP 连接活的整个
- * 精修执行期间，进程不会被杀。
- *
- * 响应：text/event-stream，事件类型与 /generate 相同（started / progress / done / error）。
+ * 让华佗对已生成处方做精修。先把这一行标成生成中，立刻回 202。
+ * 模型调用在进程里后台跑，结果写回同一行。不能在这条 HTTP 里干等：
+ * 正式域名的代理大约 100 秒就掐断，而精修本身又是一轮大约 2 分钟的模型调用。
+ * 精修失败会把状态退回草稿，原内容还在。
  *
  * 校验：必须是草稿状态 + 华佗生成 + 有 discovery + 有 weaknesses。
  *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: logged-in session. OPC or this client's own FDE (requireOperatorAccess).
  * Reference: ROADMAP.md P8.10.S3
  */
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { refineHuatuoPrescription, coerceWeaknesses } from '@/lib/huatuo/agent'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
+import { coerceWeaknesses } from '@/lib/huatuo/agent'
+import { schedulePrescriptionRefine } from '@/lib/huatuo/prescription-job'
 import type { PrescriptionIntake, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
-import type { SelfGrade, SelfGradeWeakness } from '@/lib/huatuo/types'
-import type { GoalRow } from '@/types/strategy'
-import { loadMemoryForClient } from '@/lib/memory'
+import type { SelfGrade } from '@/lib/huatuo/types'
 import { getGoalById } from '@/lib/strategy/goals'
-import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 export const maxDuration = 300
-
-const HEARTBEAT_INTERVAL_MS = 8_000
 
 interface PrescriptionRow {
   id: string
@@ -57,7 +51,8 @@ export async function POST(
   { params }: { params: { id: string; pId: string } },
 ): Promise<Response> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Drafting stays open to this client's FDE. requireGlobalAdmin would lock them out.
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) {
     return errorResponse(access.status, access.error)
   }
@@ -107,146 +102,51 @@ export async function POST(
 
   if (dErr || !disc) return errorResponse(404, '源发现报告不存在')
 
-  // 标记 generating（同步快速更新）
+  // 标记 generating（同步快速更新）。generated_at 重置为本轮开始时间：
+  // 10 分钟中断判断（failIfStaleGenerating）按它计时，不重置的话旧草稿一精修就被判中断。
   await supabaseAdmin
     .from('prescriptions')
-    .update({ status: 'generating', progress_note: '排队精修中…', error_message: null })
+    .update({
+      status: 'generating',
+      progress_note: '排队精修中…',
+      error_message: null,
+      generated_at: new Date().toISOString(),
+    })
     .eq('id', pId)
     .eq('client_id', clientId)
 
   const previousPasses = presc.generation_meta?.passes ?? 1
-
-  // DAPE W4: 加载关联 Goal (refine 时复用 prompt 注入)
   const goal = presc.goal_id ? await getGoalById(supabaseAdmin, presc.goal_id) : null
 
-  return new Response(
-    makeRefineStream(
-      pId, clientId, disc.payload, presc.intake, presc.content,
-      previousWeaknesses, humanComments, previousPasses, presc.self_grade, goal,
-    ),
-    { headers: streamHeaders() },
-  )
-}
+  schedulePrescriptionRefine({
+    clientId,
+    prescriptionId: pId,
+    discovery: disc.payload,
+    intake: presc.intake,
+    previousContent: presc.content,
+    previousWeaknesses,
+    humanComments,
+    previousPasses,
+    previousSelfGrade: presc.self_grade,
+    goal,
+  })
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-function streamHeaders(): HeadersInit {
-  return {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-store, no-cache, must-revalidate',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  }
+  return new Response(JSON.stringify({
+    success: true,
+    prescription_id: pId,
+    status: 'generating',
+  }), {
+    status: 202,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    },
+  })
 }
 
 function errorResponse(status: number, error: string): Response {
   return new Response(JSON.stringify({ success: false, error }), {
     status,
     headers: { 'Content-Type': 'application/json' },
-  })
-}
-
-function makeRefineStream(
-  prescriptionId: string,
-  clientId: string,
-  discovery: DiscoveryReport,
-  intake: PrescriptionIntake,
-  previousContent: PrescriptionContent,
-  previousWeaknesses: SelfGradeWeakness[],
-  humanComments: string | undefined,
-  previousPasses: number,
-  previousSelfGrade: SelfGrade | null,
-  goal: GoalRow | null,
-): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder()
-
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const heartbeat = setInterval(() => {
-        try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch {/* */}
-      }, HEARTBEAT_INTERVAL_MS)
-
-      const sendEvent = (data: object) => {
-        try { controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`)) }
-        catch {/* */}
-      }
-
-      sendEvent({ type: 'started', prescription_id: prescriptionId })
-
-      // Phase 23.D.2: Non-blocking memory load
-      const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, {
-        maxRecentDecisions: 5,
-      })
-
-      try {
-        const result = await refineHuatuoPrescription(
-          supabaseAdmin, discovery, intake, previousContent, previousWeaknesses,
-          {
-            humanComments,
-            previousPasses,
-            previousSelfGrade,
-            memoryContext,
-            goal,    // DAPE W4: 一对一 Goal 注入 prompt
-            onProgress: async (note) => {
-              sendEvent({ type: 'progress', note })
-              await supabaseAdmin
-                .from('prescriptions')
-                .update({ progress_note: note })
-                .eq('id', prescriptionId)
-                .eq('client_id', clientId)
-            },
-          },
-        )
-
-        // 精修重写了内容：用新内容的打法重建计划草稿种子（某阶段打法被校验整组丢掉时，按阶段号带回上一版该阶段的；LLM 没写的阶段不补）
-        result.content = await attachPlanSeed(result.content, {
-          clientId,
-          goalId: goal?.id ?? null,
-          priorContent: previousContent,
-        }).catch(() => result.content)
-
-        await supabaseAdmin
-          .from('prescriptions')
-          .update({
-            status:          'draft',
-            content:         result.content,
-            self_grade:      result.self_grade,
-            generation_meta: { ...result.meta, trend_summary: result.trend_summary },
-            progress_note:   null,
-            error_message:   null,
-          })
-          .eq('id', prescriptionId)
-          .eq('client_id', clientId)
-
-        sendEvent({
-          type: 'done',
-          prescription_id: prescriptionId,
-          content: result.content,
-          self_grade: result.self_grade,
-          meta: result.meta,
-          trend_summary: result.trend_summary,
-        })
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        console.error('[huatuo/refine-stream] failed', { prescriptionId, message })
-
-        // 精修失败：原 content/self_grade 仍然是好的，把状态回滚到 draft，
-        // 只记录 error_message。用户可以继续看原处方、重试精修或直接批准。
-        await supabaseAdmin
-          .from('prescriptions')
-          .update({
-            status:        'draft',           // ← 回滚到草稿（不是 failed）
-            error_message: message,
-            progress_note: null,
-          })
-          .eq('id', prescriptionId)
-          .eq('client_id', clientId)
-
-        sendEvent({ type: 'error', error: message })
-      } finally {
-        clearInterval(heartbeat)
-        controller.close()
-      }
-    },
   })
 }

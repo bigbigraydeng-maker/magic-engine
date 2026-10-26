@@ -30,7 +30,8 @@ const READ_LIMIT = 500
 export interface WeeklyCheckOutcome {
   clientId: string
   clientName: string
-  result: 'checked' | 'skipped' | 'error'
+  /** unreadable: this read failed. Not a successful check and not a failure. */
+  result: 'checked' | 'skipped' | 'error' | 'unreadable'
   prescriptionId?: string
   goalId?: string | null
   goalTitle?: string | null
@@ -107,17 +108,21 @@ export async function runPrescriptionWeeklyCheck(
 ): Promise<WeeklyCheckSummary> {
   const approved = pickInActPrescriptions(await loadApproved(supabase))
   const clients = await loadClients(supabase, unique(approved.map((row) => row.client_id)))
+  if (clients.failed) {
+    const outcomes = approved.map((row) => unreadableOutcome(row, row.client_id, '客户名单'))
+    return { considered: approved.length, checked: 0, outcomes }
+  }
   const skipped: WeeklyCheckOutcome[] = []
   const live: ApprovedRow[] = []
   for (const row of approved) {
-    const skip = skipReason(clients.get(row.client_id))
+    const skip = skipReason(clients.byId.get(row.client_id))
     if (skip) {
-      skipped.push(skippedOutcome(row, clients, skip))
+      skipped.push(skippedOutcome(row, clients.byId, skip))
       continue
     }
     live.push(row)
   }
-  const checked = await checkLive(supabase, live, clients)
+  const checked = await checkLive(supabase, live, clients.byId)
   return {
     considered: approved.length,
     checked: checked.filter((row) => row.result === 'checked').length,
@@ -145,6 +150,8 @@ function checkOne(
   bundle: FactBundle,
 ): WeeklyCheckOutcome {
   const clientName = clients.get(row.client_id)?.name || row.client_id
+  const blocked = unreadKind(row, bundle)
+  if (blocked) return unreadableOutcome(row, clientName, blocked)
   try {
     const text = describePrescriptionCheck(factsFor(row, bundle))
     return {
@@ -169,6 +176,8 @@ function checkOne(
   }
 }
 
+type BundleRead = 'goals' | 'items' | 'orders' | 'kpis' | 'drafts'
+
 interface FactBundle {
   goals: Map<string, GoalFactRow>
   items: ItemRow[]
@@ -177,7 +186,10 @@ interface FactBundle {
   kpis: OutcomeRow[]
   stages: Map<string, StageFact>
   readsCapped: boolean
+  failed: Set<BundleRead>
 }
+
+type ReadResult<T> = { ok: true; rows: T[] } | { ok: false }
 
 interface StageFact {
   known: boolean
@@ -195,23 +207,42 @@ async function loadBundle(supabase: SupabaseClient, live: ApprovedRow[]): Promis
     fetchIn<OrderRow>(supabase, 'content_work_orders', 'id, client_id, goal_id, status', 'goal_id', goalIds),
     fetchIn<OutcomeRow>(supabase, 'prescription_outcomes', 'prescription_id, client_id, kpi_metric, actual_value, target_value, unit, measured_at', 'prescription_id', ids),
   ])
-  const itemIds = items.map((row) => row.id)
-  const drafts = await fetchIn<DraftRow>(
-    supabase,
-    'flywheel_actions',
-    'execution_item_id, client_id, action_type, payload',
-    'execution_item_id',
-    itemIds,
-  )
+  const failed = new Set<BundleRead>()
+  noteFailure(failed, 'goals', goals)
+  noteFailure(failed, 'items', items)
+  noteFailure(failed, 'orders', orders)
+  noteFailure(failed, 'kpis', kpis)
+  const itemRows = items.ok ? items.rows : []
+  const drafts = items.ok
+    ? await fetchIn<DraftRow>(supabase, 'flywheel_actions', 'execution_item_id, client_id, action_type, payload', 'execution_item_id', itemRows.map((row) => row.id))
+    : unread<DraftRow>()
+  noteFailure(failed, 'drafts', drafts)
   return {
-    goals: new Map(goals.map((row) => [row.id, row])),
-    items,
-    orders,
-    drafts: drafts.filter((row) => row.action_type === 'ads.create_ad'),
-    kpis,
+    goals: new Map(rowsOf(goals).map((row) => [row.id, row])),
+    items: itemRows,
+    orders: rowsOf(orders),
+    drafts: rowsOf(drafts).filter((row) => row.action_type === 'ads.create_ad'),
+    kpis: rowsOf(kpis),
     stages: await loadStages(supabase, goalIds),
-    readsCapped: [goals, items, orders, kpis, drafts].some((rows) => rows.length >= READ_LIMIT),
+    readsCapped: [goals, items, orders, kpis, drafts].some(hitLimit),
+    failed,
   }
+}
+
+function noteFailure<T>(failed: Set<BundleRead>, kind: BundleRead, read: ReadResult<T>): void {
+  if (!read.ok) failed.add(kind)
+}
+
+function rowsOf<T>(read: ReadResult<T>): T[] {
+  return read.ok ? read.rows : []
+}
+
+function hitLimit(read: ReadResult<unknown>): boolean {
+  return read.ok && read.rows.length >= READ_LIMIT
+}
+
+function unread<T>(): ReadResult<T> {
+  return { ok: false }
 }
 
 async function loadStages(supabase: SupabaseClient, goalIds: string[]): Promise<Map<string, StageFact>> {
@@ -223,21 +254,38 @@ async function loadStages(supabase: SupabaseClient, goalIds: string[]): Promise<
 }
 
 async function stageFact(supabase: SupabaseClient, goalId: string): Promise<StageFact> {
-  const summary = await getExecutionSummaryForGoal(supabase, goalId)
-  if (!summary) return { known: false, initiativeCount: 0, actions: null, campaigns: null }
-  const actions: ActionCounts = {
+  try {
+    const summary = await getExecutionSummaryForGoal(supabase, goalId)
+    if (!summary) return unknownStage()
+    return {
+      known: true,
+      initiativeCount: summary.initiativeCount,
+      actions: actionCounts(summary),
+      campaigns: { total: summary.totalCampaigns },
+    }
+  } catch {
+    return unknownStage()
+  }
+}
+
+function unknownStage(): StageFact {
+  return { known: false, initiativeCount: 0, actions: null, campaigns: null }
+}
+
+function actionCounts(summary: {
+  totalActions: number
+  totalCompleted: number
+  totalInProgress: number
+  totalPending: number
+  totalSkipped: number
+}): ActionCounts {
+  return {
     completed: summary.totalCompleted,
     inProgress: summary.totalInProgress,
     pending: summary.totalPending,
     skipped: summary.totalSkipped,
     superseded: 0,
     other: otherActions(summary),
-  }
-  return {
-    known: true,
-    initiativeCount: summary.initiativeCount,
-    actions,
-    campaigns: { total: summary.totalCampaigns },
   }
 }
 
@@ -250,6 +298,28 @@ function otherActions(summary: {
 }): number {
   const known = summary.totalCompleted + summary.totalInProgress + summary.totalPending + summary.totalSkipped
   return Math.max(0, summary.totalActions - known)
+}
+
+function unreadKind(row: ApprovedRow, bundle: FactBundle): string | null {
+  if (bundle.failed.has('items') || bundle.failed.has('drafts') || bundle.failed.has('kpis')) return '方案记录'
+  if (!row.goal_id) return null
+  if (bundle.failed.has('goals') || bundle.failed.has('orders')) return '目标记录'
+  const stage = bundle.stages.get(row.goal_id)
+  if (!stage || !stage.known) return '阶段'
+  return null
+}
+
+function unreadableOutcome(row: ApprovedRow, clientName: string, what: string): WeeklyCheckOutcome {
+  return {
+    clientId: row.client_id,
+    clientName,
+    result: 'unreadable',
+    prescriptionId: row.id,
+    goalId: row.goal_id,
+    progress: `数据读不到。${what}这次没读出来，不把没读到当成没有。`,
+    suggestion: '数据读不到，这周先不判断效果。系统不会自己改方案，也不会新开一份。',
+    detail: `数据读不到：${what}`,
+  }
 }
 
 function factsFor(row: ApprovedRow, bundle: FactBundle): PrescriptionCheckFacts {
@@ -352,9 +422,13 @@ async function loadApproved(supabase: SupabaseClient): Promise<ApprovedRow[]> {
   return (data ?? []) as ApprovedRow[]
 }
 
-async function loadClients(supabase: SupabaseClient, ids: string[]): Promise<Map<string, ClientRow>> {
-  const rows = await fetchIn<ClientRow>(supabase, 'clients', 'id, name, client_status, industry', 'id', ids)
-  return new Map(rows.map((row) => [row.id, row]))
+async function loadClients(
+  supabase: SupabaseClient,
+  ids: string[],
+): Promise<{ byId: Map<string, ClientRow>; failed: boolean }> {
+  const read = await fetchIn<ClientRow>(supabase, 'clients', 'id, name, client_status, industry', 'id', ids)
+  if (!read.ok) return { byId: new Map(), failed: true }
+  return { byId: new Map(read.rows.map((row) => [row.id, row])), failed: false }
 }
 
 const GOAL_COLUMNS = 'id, title, primary_metric_label, baseline_value, current_value, target_value, target_direction, current_value_fetched_at'
@@ -365,11 +439,11 @@ async function fetchIn<T>(
   columns: string,
   column: string,
   ids: string[],
-): Promise<T[]> {
-  if (ids.length === 0) return []
+): Promise<ReadResult<T>> {
+  if (ids.length === 0) return { ok: true, rows: [] }
   const { data, error } = await supabase.from(table).select(columns).in(column, ids).limit(READ_LIMIT)
-  if (error) throw new Error(`${table} 读取失败：${error.message}`)
-  return (data ?? []) as T[]
+  if (error) return { ok: false }
+  return { ok: true, rows: (data ?? []) as T[] }
 }
 
 function unique(ids: string[]): string[] {

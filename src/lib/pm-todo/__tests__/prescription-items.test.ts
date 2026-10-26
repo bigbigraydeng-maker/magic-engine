@@ -49,6 +49,31 @@ describe('prescriptionCheckItemsFromLogs', () => {
     expect(items[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/c1/goal/g1')
   })
 
+  it('数据读不到仍写进通知，读失败和跳过的不写', () => {
+    const items = prescriptionCheckItemsFromLogs([
+      {
+        summary: {
+          kind: PRESCRIPTION_WEEKLY_CHECK_KIND,
+          outcomes: [
+            {
+              clientId: 'c1',
+              clientName: '北岛旅行',
+              result: 'unreadable',
+              goalId: 'g1',
+              progress: '数据读不到。阶段这次没读出来，不把没读到当成没有。',
+              suggestion: '数据读不到，这周先不判断效果。系统不会自己改方案，也不会新开一份。',
+            },
+            { clientId: 'c2', result: 'error', detail: 'boom', progress: '不该出现', suggestion: '不该出现' },
+          ],
+        },
+      },
+    ], () => '未知客户')
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('数据读不到')
+    expect(items[0].what).not.toContain('0 条阶段')
+    expect(items[0].href).toContain('/goal/g1')
+  })
+
   it('旧的自动开方记录没有复查标记，不再报警', () => {
     const items = prescriptionCheckItemsFromLogs([
       {
