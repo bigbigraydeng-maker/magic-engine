@@ -64,14 +64,10 @@ function mockDb(opts: {
       return {
         // 建人
         insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'new-person' }, error: null }) }) }),
-        // 数每个人手上有几位（countHeldLeads）
+        // 数每个人手上有几位（countHeldLeads：每人单独 count，不拉整行）
         select: () => ({
           eq: () => ({
-            in: () =>
-              Promise.resolve({
-                data: Object.entries(held).flatMap(([email, n]) => Array.from({ length: n }, () => ({ assigned_to: email }))),
-                error: null,
-              }),
+            eq: (_col: string, email: string) => Promise.resolve({ count: held[email] ?? 0, error: null }),
           }),
         }),
         update: (row: Record<string, unknown>) => {
