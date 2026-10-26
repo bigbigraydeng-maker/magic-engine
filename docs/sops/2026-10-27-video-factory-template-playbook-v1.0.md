@@ -1,5 +1,7 @@
 # 视频模板优化手册 v1.0（生产车间模型）
 
+> 负责 agent：苏东坡（`sudongpo`，主）；出片检查一侧配合马良（`maliang`）｜ 档案：[`14-sudongpo`](../agents/14-sudongpo.md) · [`60-maliang`](../agents/60-maliang.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 > 负责：ME Video（视频工厂） ｜ 范围：视频/图片模板的画面质量、入库闸、渠道分流、数据回流（不含素材本身质量，素材归素材库专项）
 > 状态：**已核实（对照代码，2026-10-27 一次，有 3 处核不了，见 §6）** ｜ 日期：2026-10-27 ｜ 最后核实：2026-10-27 ｜ 风险：C（仅文档）
 > 依据：`scripts/factory-worker/remotion-branch.mjs` · `scripts/factory-worker/engines/remotion/render.mjs` · `scripts/factory-worker/engines/remotion/src/*Reel.tsx` · `src/lib/maliang/render-check.ts` · `src/lib/inngest/functions/{maliang-render-check,factory-creatomate-render,youtube-publish}.ts` · `src/lib/visual/openai-images.ts` · `src/lib/factory/worker-guard.ts`

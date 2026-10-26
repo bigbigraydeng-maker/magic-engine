@@ -188,3 +188,9 @@ PriorityAction = {
 - 诊断链类型：`src/lib/zhuge/types.ts`
 - Memory Layer：`src/lib/memory/`
 - CTS 项目经理手册：`docs/sops/cts-project-manager-playbook.md`（日/周/月检查的第一个落地范本）
+
+---
+
+## 操作手册
+
+暂无通用手册。客户专属的项目经理手册（见上）不列入通用索引。索引：[agents 索引](./README.md)。
