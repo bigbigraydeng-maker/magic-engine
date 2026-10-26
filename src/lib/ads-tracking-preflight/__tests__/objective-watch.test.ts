@@ -549,3 +549,21 @@ describe('latestObjectiveAlerts · 今日待办从盯盘回执里取提醒', () 
     expect(out.map(a => a.code)).toEqual(['frequency'])
   })
 })
+
+describe('judgeSeries · 表单留资不走聊天那一套提醒', () => {
+  const lead: ObjectiveWatchSeries = { campaign_id: CAMPAIGN_ID, kind: 'lead_form', label: '表单系列' }
+
+  it('在投时不报「开始聊天」或 ME 没收到，摘要只说这是表单留资', () => {
+    const v = judge({
+      series: lead,
+      facts: facts({ total: spending({ conversations: 4 }) }),
+      me: { read: true, count: 0, since: ago(1) },
+    })
+    expect(v.state).toBe('delivering')
+    expect(v.kind).toBe('lead_form')
+    expect(v.alerts.map(item => item.code)).not.toContain('me_not_receiving')
+    expect(v.headline).toContain('表单留资')
+    expect(v.headline).not.toContain('开始聊天')
+    expect(v.me).toBeNull()
+  })
+})

@@ -27,6 +27,7 @@ import { promoPlanDailyWatch } from './promo-plan-daily-watch'
 import { adHeartbeat } from './ad-heartbeat'
 import { adsTrackingPreflight } from './ads-tracking-preflight'
 import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
+import { adsServicePauseNotify } from './ads-service-pause-notify'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
@@ -49,6 +50,7 @@ export const cloudFunctions = [
   adHeartbeat,
   adsTrackingPreflight,
   adsTrackingLaunchWatch,
+  adsServicePauseNotify,
   webIntelligenceCapture,
   webIntelligenceDue,
   webIntelligenceTrafficDue,

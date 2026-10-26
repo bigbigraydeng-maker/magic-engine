@@ -48,6 +48,7 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushAdsServicePauseItems } from './ads-service-pause-items'
 import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
@@ -390,6 +391,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 广告熔断中的账户 —— 判据是"现在还处在熔断中吗"，不是时间窗口（v2.5 §6.2 派生态）
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 服务刚暂停的广告系列 —— 拉模式读操作记录，通知事件丢了也照样出现在今日待办
+    (b) => pushAdsServicePauseItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 广告暂停待办生成失败（不阻塞其他待办）:', e),
     ),
     // Meta 广告账户状态不是正常（欠款 / 被限制）超过 24 小时 —— 账户停摆时不会花钱也不会有新线索，系统里没有别处会说
     (b) => pushAdsAccountStatusItems(supabase, b, now, nameOf).catch((e) =>
