@@ -8,6 +8,7 @@ export {
   canvasForProps,
   claimAspectUploads,
   coverRect,
+  portraitCoverBox,
   dataCardFrame,
   extraAspectUploadSpecs,
   isAspectId,

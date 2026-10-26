@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   ASPECTS,
+  coverRect,
+  logoBox,
   placeBox,
   planWorkOrderAspects,
   resolveAspectDelivery,
@@ -48,6 +50,36 @@ describe('placeBox', () => {
       const block = (placed.fontSize ?? 0) * 1.12 * 3
       expect(placed.top + block).toBeLessThanOrEqual(safe.bottom + 1)
     }
+  })
+
+  it('puts 4:5 and 1:1 headlines in the lower band, away from the upper subject', () => {
+    for (const id of ['4:5', '1:1'] as const) {
+      const spec = ASPECTS[id]
+      const safe = safeInsets(id)
+      const placed = placeBox(spec.width, spec.height, box)
+      expect(placed.top).toBeGreaterThanOrEqual(safe.top + safe.height * 0.5 - 1)
+    }
+  })
+})
+
+describe('portrait cover', () => {
+  it('covers a 16:9 frame with a 9:16 source instead of leaving side bars', () => {
+    const box = coverRect(9, 16, 1920, 1080, 0.42)
+    expect(box.width).toBeGreaterThanOrEqual(1920)
+    expect(box.height).toBeGreaterThanOrEqual(1080)
+    expect(box.left).toBeLessThanOrEqual(0)
+    expect(box.left + box.width).toBeGreaterThanOrEqual(1920)
+  })
+
+  it('keeps the wordmark the same shape in every non-vertical ratio', () => {
+    const ratio = 470 / 171
+    for (const id of ['4:5', '1:1', '16:9'] as const) {
+      const spec = ASPECTS[id]
+      const box = logoBox(spec.width, spec.height)
+      expect(box.width / box.height).toBeCloseTo(ratio, 1)
+      expect(box.height).toBeLessThan(100)
+    }
+    expect(logoBox(1080, 1920)).toEqual({ left: 54, top: 292, width: 470, height: 171 })
   })
 })
 

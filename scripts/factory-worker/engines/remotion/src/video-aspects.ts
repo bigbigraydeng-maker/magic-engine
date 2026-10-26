@@ -149,6 +149,30 @@ export function subjectAnchorY(width: number, height: number): number {
   return 0.5
 }
 
+/**
+ * Pixel box for a 9:16 clip that covers this canvas. The box is the clip's own
+ * shape, so a renderer that ignores object-fit still fills the frame and the
+ * parent overflow crops it. 9:16 callers keep the original width/height 100% style.
+ */
+export function portraitCoverBox(width: number, height: number): {
+  position: 'absolute'
+  left: number
+  top: number
+  width: number
+  height: number
+  objectFit: 'fill'
+} {
+  const box = coverRect(9, 16, width, height, subjectAnchorY(width, height))
+  return {
+    position: 'absolute',
+    left: box.left,
+    top: box.top,
+    width: box.width,
+    height: box.height,
+    objectFit: 'fill',
+  }
+}
+
 /** Cover a destination with a source rectangle. 9:16-into-9:16 is a full bleed. */
 export function coverRect(
   srcW: number,
@@ -209,6 +233,11 @@ export function placeBox(width: number, height: number, box: PlaceBoxInput): Pla
   }
   const blockH = fontSize === undefined ? extra : fontSize * lineHeight * lines + extra
   let top = dst.top + ny * Math.max(0, dst.height - blockH)
+  // Portrait cover keeps the subject up high. Headlines sit in the lower band, on the scrim.
+  if (aspect === '4:5' || aspect === '1:1') {
+    const bandTop = dst.top + dst.height * 0.5
+    if (top < bandTop) top = bandTop
+  }
   if (top + blockH > dst.bottom) top = Math.max(dst.top, dst.bottom - blockH)
   if (left + boxW > dst.right) left = Math.max(dst.left, dst.right - boxW)
   const placed: PlacedBox = {
@@ -220,15 +249,18 @@ export function placeBox(width: number, height: number, box: PlaceBoxInput): Pla
   return placed
 }
 
+const LOGO_ASPECT = 470 / 171
+
 export function logoBox(width: number, height: number): { left: number; top: number; width: number; height: number } {
   if (aspectFromCanvas(width, height) === '9:16') return { left: 54, top: 292, width: 470, height: 171 }
-  const safe = safeInsets(aspectFromCanvas(width, height))
-  const scale = FONT_SCALE[aspectFromCanvas(width, height)]
+  const aspect = aspectFromCanvas(width, height)
+  const safe = safeInsets(aspect)
+  const logoH = aspect === '16:9' ? 78 : aspect === '1:1' ? 68 : 74
   return {
     left: safe.left,
     top: safe.top,
-    width: Math.round(470 * scale * 0.62),
-    height: Math.round(171 * scale * 0.5),
+    width: Math.round(logoH * LOGO_ASPECT),
+    height: logoH,
   }
 }
 

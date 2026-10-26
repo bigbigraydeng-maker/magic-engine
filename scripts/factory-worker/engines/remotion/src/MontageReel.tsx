@@ -2,7 +2,7 @@ import React from 'react'
 import { AbsoluteFill, Audio, interpolate, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
 import { Logo } from './components'
 import { fontFamily } from './theme'
-import { subjectObjectPosition, templateProps } from './aspect'
+import { aspectFromCanvas, portraitCoverBox, templateProps } from './aspect'
 import { useStage } from './stage'
 import {
   parseMontageReelProps,
@@ -29,11 +29,13 @@ const Cut: React.FC<{ props: MontageReelProps; seg: MontageSegment }> = ({ props
   const luma = clip.luma ?? 95
   const bright = Math.max(0.72, Math.min(1.7, 95 / luma))
   const { width, height } = useVideoConfig()
-  const objectPosition = subjectObjectPosition(width, height)
+  const clipStyle = aspectFromCanvas(width, height) === '9:16'
+    ? { width: '100%', height: '100%', objectFit: 'cover' as const }
+    : portraitCoverBox(width, height)
   return (
     <AbsoluteFill style={{ overflow: 'hidden', background: '#000' }}>
       <AbsoluteFill style={{ transform: `translate(${sx}px, ${sy}px) scale(${punch})`, filter: seg.bw ? `grayscale(1) contrast(1.4) brightness(${(bright * 0.95).toFixed(2)})` : `brightness(${bright.toFixed(2)}) contrast(1.15) saturate(1.2)` }}>
-        <OffthreadVideo src={staticFile(clip.file)} startFrom={seg.start} muted style={{ width: '100%', height: '100%', objectFit: 'cover', ...(objectPosition ? { objectPosition } : {}) }} />
+        <OffthreadVideo src={staticFile(clip.file)} startFrom={seg.start} muted style={clipStyle} />
       </AbsoluteFill>
       {seg.bw ? <AbsoluteFill style={{ background: props.brandColor, mixBlendMode: 'multiply', opacity: 0.55 }} /> : null}
       <AbsoluteFill style={{ background: '#fff', opacity: flash }} />

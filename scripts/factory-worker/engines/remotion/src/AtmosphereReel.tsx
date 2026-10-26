@@ -4,14 +4,14 @@ import { Logo } from './components'
 import { parseAtmosphereProps, computeAtmosphereTiming, FADE_START_OPACITY, type AtmosphereProps, type AtmosphereTiming } from './atmosphere'
 import { FPS } from './timing'
 import { fontFamily } from './theme'
-import { coverRect, subjectAnchorY, subjectObjectPosition, templateProps } from './aspect'
+import { aspectFromCanvas, coverRect, portraitCoverBox, subjectAnchorY, templateProps } from './aspect'
 import { useStage } from './stage'
 
 function atmosphereVideoStyle(props: AtmosphereProps, width: number, height: number): React.CSSProperties {
   const crop = props.crop
   if (crop === undefined) {
-    const objectPosition = subjectObjectPosition(width, height)
-    return { width: '100%', height: '100%', objectFit: 'cover', ...(objectPosition ? { objectPosition } : {}) }
+    if (aspectFromCanvas(width, height) === '9:16') return { width: '100%', height: '100%', objectFit: 'cover' }
+    return portraitCoverBox(width, height)
   }
   const frame = coverRect(9, 16, width, height, subjectAnchorY(width, height))
   const videoW = frame.width / crop.w
