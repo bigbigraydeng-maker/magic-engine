@@ -1,5 +1,7 @@
 # 应用说明：给 YouTube 回执表加一列（已应用，2026-10-21）
 
+> 负责 agent：苏东坡（`sudongpo`）｜ 档案：[`docs/agents/14-sudongpo.md`](../agents/14-sudongpo.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 状态：**已应用**（2026-10-21 约 09:20 新西兰时间，PM 本人回「go apply」后由统管 18 号应用并读回，证据见 docs/ledger/evidence/2026-10-21-youtube-receipts-column-applied--2026-10-21.md）。下面是应用前写的说明，留作记录。
 
 ## 一句话

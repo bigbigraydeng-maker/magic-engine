@@ -46,19 +46,26 @@
 | 手册 | 归谁 | 依据 / 备注 |
 |---|---|---|
 | [广告 agent 手册 v1.0](../sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md) | 卫青 `weiqing` | 手册自述为广告 agent；与档案互链 |
-| [`meta-ads-angle-test-and-budget`](../sops/meta-ads-angle-test-and-budget.md) | 卫青 | 用户指定 |
-| [`winner-reel-auto-sync`](../sops/winner-reel-auto-sync.md) | 卫青 | 用户指定 |
+| [`meta-ads-angle-test-and-budget`](../sops/meta-ads-angle-test-and-budget.md) | 卫青 | #3261 补充评论建议，待 PM 确认 |
+| [`winner-reel-auto-sync`](../sops/winner-reel-auto-sync.md) | 卫青 | #3261 补充评论建议，待 PM 确认 |
 | [SEO agent 手册 v1.0](../sops/2026-10-11-seo-agent-playbook-and-rules-v1.0.md) | 孔子 `kongzi` | |
 | [SEO 工作流与目标方案 v1](../sops/2026-10-14-seo-agent-workflow-and-goal-plan-v1.md) | 孔子 | **含客户层**：§6 是客户层数据，不当通用规则用 |
-| [`keyword-gap-attack-playbook`](../sops/keyword-gap-attack-playbook.md) | 孔子 | 用户指定 |
-| [`brand-aliases-setup-for-gsc`](../sops/brand-aliases-setup-for-gsc.md) | 孔子 | 用户指定 |
+| [`keyword-gap-attack-playbook`](../sops/keyword-gap-attack-playbook.md) | 孔子 | #3261 补充评论建议，待 PM 确认 |
+| [`brand-aliases-setup-for-gsc`](../sops/brand-aliases-setup-for-gsc.md) | 孔子 | #3261 补充评论建议，待 PM 确认 |
 | [社媒 agent 手册 v1.0](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md) | 苏东坡 `sudongpo` | |
 | [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md) | 苏东坡（主），马良（出片检查配合） | 见下「视频工厂手册归属」 |
-| [`messenger-ai-rollback`](../sops/messenger-ai-rollback.md) | 苏东坡 | 用户指定；§4.4 苏东坡入口含 `src/lib/messenger/` |
-| [`tiktok-app-setup`](../sops/tiktok-app-setup.md)、[`tiktok-production-audit-checkpoint`](../sops/tiktok-production-audit-checkpoint.md)、[`tiktok-publishing-test-checkpoint`](../sops/tiktok-publishing-test-checkpoint.md) | 苏东坡 | 用户指定（`tiktok-*`） |
-| [`2026-10-21-youtube-receipts-content-post-go-apply`](../sops/2026-10-21-youtube-receipts-content-post-go-apply.md) | 苏东坡 | 用户指定 |
+| [`messenger-ai-rollback`](../sops/messenger-ai-rollback.md) | 苏东坡 | #3261 补充评论建议，待 PM 确认；§4.4 苏东坡入口含 `src/lib/messenger/` |
+| [`tiktok-app-setup`](../sops/tiktok-app-setup.md)、[`tiktok-production-audit-checkpoint`](../sops/tiktok-production-audit-checkpoint.md)、[`tiktok-publishing-test-checkpoint`](../sops/tiktok-publishing-test-checkpoint.md) | 苏东坡 | #3261 补充评论建议，待 PM 确认（`tiktok-*`） |
+| [`2026-10-21-youtube-receipts-content-post-go-apply`](../sops/2026-10-21-youtube-receipts-content-post-go-apply.md) | 苏东坡 | #3261 补充评论建议，待 PM 确认 |
 
 其余 `docs/sops/` 文件（接入、迁移、密钥、客户专属等）归属**待定**，本次不判。
+
+### 归属待定
+
+| 手册 | 归谁 |
+|---|---|
+| [`2026-10-15-video-factory-handoff-to-97`](../sops/2026-10-15-video-factory-handoff-to-97.md) | 待 ME Video 定 |
+| [`lecture-video-production`](../sops/lecture-video-production.md) | 待 ME Video 定 |
 
 ### 视频工厂手册归属：苏东坡主，马良配合
 
@@ -71,7 +78,7 @@
 | 文件 | 格式 | 缺 |
 |---|---|---|
 | 13 份档案（10 / 11 / 13 / 14 / 15 / 20 / 30 / 40 / 50 / 60 / 70 / 80 / 90） | 待补 | 都缺 负责、最后核实、风险；13 / 14 / 15 有「设计依据」，其余缺 依据；80 已有「已撤」状态说明，其余缺 状态 |
-| 16 / 91 / 92 骨架档案 | 基本符合 | 负责待 PM 指定 |
+| 16 / 91 / 92 骨架档案 | 待补 | 缺 负责、风险、日期 |
 | 广告手册 | 待补 | 缺 负责（本次已补「负责 agent」）、最后核实；有状态、风险；依据只有「起因」 |
 | SEO 手册 | 待补 | 同上 |
 | SEO 工作流方案 | 待补 | 缺 负责、最后核实、风险、依据；**含客户层** |

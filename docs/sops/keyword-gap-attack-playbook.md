@@ -1,5 +1,7 @@
 # Keyword Gap Attack Playbook（关键词缺口攻击 SOP）
 
+> 负责 agent：孔子（`kongzi`）｜ 档案：[`docs/agents/13-kongzi.md`](../agents/13-kongzi.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 > **适用客户**：所有 FDE 月付客户 + self-serve 客户（接 Google Ads + SEO 内容飞轮）
 > **第一受益客户**：CTS Tours NZ（2026-06-11 启动）
 > **维护人**：诸葛亮（Ads 模块） + 华佗（诊断模块）
