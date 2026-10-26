@@ -600,12 +600,17 @@ async function verifyAudiencesStillAttached(
     ...(hasIncluded ? { expectedAudienceIds: p.draft.audienceIds } : {}),
     ...(hasExcluded ? { expectedExcludedAudienceIds: p.draft.excludedAudienceIds } : {}),
   })
+  // 读不到 ≠ 安全：缺字段时 checkLaunch 只给 warn（unknown），但开前「任何读不到一律拒开」——
+  // 优势受众读不到：一律拦；「允许投给名单外」读不到：只在草稿带包含名单时拦（只给排除名单时 Meta 本来就可能不返回该字段）。
   const blockers = report.findings.filter(
-    (f) => f.severity === 'blocker' && OPEN_TIME_AUDIENCE_CODES.has(f.code),
+    (f) =>
+      (f.severity === 'blocker' && OPEN_TIME_AUDIENCE_CODES.has(f.code)) ||
+      f.code === 'retargeting_advantage_unknown' ||
+      (f.code === 'retargeting_relaxation_unknown' && hasIncluded),
   )
   if (blockers.length === 0) return null
 
-  const error = `广告组上的受众设置现在不对：${blockers.map((f) => f.message).join('；')}（可能被删除、收回共享、过期，或被打开了扩量），所以没开`
+  const error = `广告组上的受众设置现在不对：${blockers.map((f) => f.message).join('；')}（可能被删除、收回共享、过期，被打开了扩量，或这些设置读不到），所以没开`
   await writeBackAudienceError(actionId, supabase, { ...p, status: 'blocked', error })
   return error
 }
