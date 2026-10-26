@@ -48,6 +48,16 @@ function mockGraph(fail?: { onPath: string }) {
 beforeEach(() => { calls = [] })
 afterEach(() => { vi.unstubAllGlobals() })
 
+describe('建系列必须声明 is_adset_budget_sharing_enabled（2026-10-26 试跑撞上 Meta 100/4834011）', () => {
+  it('系列请求带 is_adset_budget_sharing_enabled=false，且仍是 PAUSED', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    const camp = calls.find((c) => c.url.includes('/campaigns') && c.method === 'POST')!
+    expect(camp.body.get('is_adset_budget_sharing_enabled')).toBe('false')
+    expect(camp.body.get('status')).toBe('PAUSED')
+  })
+})
+
 describe('lead_form 视频创意写法（实测过审的 video_data）', () => {
   const VID: AdDraft = {
     ...DRAFT,

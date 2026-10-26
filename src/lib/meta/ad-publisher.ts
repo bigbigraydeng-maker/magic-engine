@@ -234,6 +234,10 @@ function campaignBody(d: AdDraft): Record<string, string> {
     objective: metaTripletFor(d.kind).objective,
     status: 'PAUSED',
     special_ad_categories: JSON.stringify([]),
+    // 预算放在广告组（不用系列预算）时，Meta 现在要求明确写 is_adset_budget_sharing_enabled
+    // （否则报 100/4834011）。false = 各组预算互不共享，与我们每组独立日预算的做法一致。
+    // 2026-10-26 $1 试跑第一次真跑 ads.create_ad 时撞上。
+    is_adset_budget_sharing_enabled: 'false',
   }
 }
 
