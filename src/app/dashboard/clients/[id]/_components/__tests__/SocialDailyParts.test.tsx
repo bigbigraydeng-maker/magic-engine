@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { OverviewReel } from '@/lib/social/week-overview/build'
@@ -21,18 +21,18 @@ afterEach(() => {
 })
 
 describe('ReelWorkGroups — a row that gets a newer version', () => {
-  it('drops the still of the old version and asks for the video of the new one', () => {
+  it('drops the still of the old version and asks for the video of the new one', async () => {
     const media = stubCoverMedia()
     const old = reel({ id: 'a1', angle: 'Harbour Tour v1: a', video_url: OLD_VIDEO })
-    const { rerender } = render(<ReelWorkGroups works={groupReelWorks([old])} clientId="c1" />)
-    media.tell(media.videos[0], 'loadeddata')
-    media.showFrame()
-    expect(screen.getByLabelText('视频封面')).toBeInTheDocument()
+    const { container, rerender } = render(<ReelWorkGroups works={groupReelWorks([old])} clientId="c1" />)
+    const states = () => Array.from(container.querySelectorAll('[data-cover]')).map((tile) => tile.getAttribute('data-cover'))
+    await media.showFrame()
+    expect(states()).toEqual(['kept'])
 
     const newer = reel({ id: 'a2', angle: 'Harbour Tour v2: a', created_at: '2026-10-13T00:00:00Z', video_url: NEW_VIDEO })
     rerender(<ReelWorkGroups works={groupReelWorks([newer, old])} clientId="c1" />)
 
-    expect(screen.queryByLabelText('视频封面')).toBeNull() // the old picture is not shown for the new version
+    expect(states()).toEqual(['waiting']) // the old picture is not shown for the new version
     expect(media.videos.map((video) => video.getAttribute('src'))).toEqual([null, NEW_VIDEO])
   })
 })

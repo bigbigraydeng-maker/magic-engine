@@ -136,66 +136,122 @@ function useNearScreen<T extends Element>(): { ref: RefObject<T>; near: boolean 
 
 /** Size in pixels of the still kept as a cover: sharp enough for the 44 x 78 tile on a 3x screen. */
 const COVER_STILL = { width: 135, height: 240 }
+/** How long to wait for the first frame before giving up and stopping the download. */
+const COVER_GIVE_UP_MS = 10_000
+/** At most this many covers load at the same time: the browser's media pipeline stalls when dozens of videos start together. */
+const COVER_MAX_PARALLEL = 6
 
 type CoverPhase = 'waiting' | 'kept' | 'failed'
 
+/** Copies what `video` is showing onto `canvas`. False when that cannot be done (no canvas, no 2d drawing, drawing fails). */
+function drawStill(video: HTMLVideoElement, canvas: HTMLCanvasElement | null): boolean {
+  const context = canvas?.getContext('2d')
+  if (!context) return false
+  try {
+    context.drawImage(video, 0, 0, COVER_STILL.width, COVER_STILL.height)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /**
- * Loads the start of a finished Reel video off-screen and copies its first frame onto `canvas`, then stops the download:
- * a finished video is tens of MB, its first frame about half a MB. Nothing is loaded until `wanted` is true.
- * "kept" = the still is on the canvas; "failed" = no still could be made, the row keeps its plain play tile.
+ * Loads the start of a finished Reel video off-screen and copies its first frame onto the canvas, then stops the download:
+ * a finished video is tens of MB, its first frame about half a MB. `onDone` is called once, with "kept" (the still is on the
+ * canvas) or "failed" (no still could be made). Returns what to call to give up early; that also stops the download.
  */
+function loadVideoStill(url: string, getCanvas: () => HTMLCanvasElement | null, onDone: (result: 'kept' | 'failed') => void): () => void {
+  const video = document.createElement('video')
+  let settled = false
+  let giveUp = 0
+  const stop = () => {
+    window.clearTimeout(giveUp)
+    video.removeAttribute('src')
+    video.load()
+  }
+  const settle = (result: 'kept' | 'failed') => {
+    if (settled) return
+    settled = true
+    stop()
+    onDone(result)
+  }
+  if (typeof video.requestVideoFrameCallback !== 'function') {
+    onDone('failed') // no way to learn when the first frame is shown, so do not start a download at all
+    return () => {}
+  }
+  video.muted = true
+  video.playsInline = true
+  video.preload = 'metadata'
+  video.addEventListener('error', () => settle('failed'))
+  // Drawing before the browser has shown the first frame leaves the canvas empty, so wait to be told it is shown.
+  // Asked before the source is set: a frame shown before the question would never be announced.
+  video.requestVideoFrameCallback(() => {
+    if (!settled) settle(drawStill(video, getCanvas()) ? 'kept' : 'failed')
+  })
+  giveUp = window.setTimeout(() => settle('failed'), COVER_GIVE_UP_MS)
+  video.src = url
+  return () => {
+    settled = true
+    stop()
+  }
+}
+
+const coverQueue: Array<() => void> = []
+let coversRunning = 0
+
+let drainScheduled = false
+
+/** Starts waiting covers once the current batch of changes is over, so rows that leave the page together do not start in between. */
+function startQueuedCoversSoon() {
+  if (drainScheduled) return
+  drainScheduled = true
+  queueMicrotask(() => {
+    drainScheduled = false
+    while (coversRunning < COVER_MAX_PARALLEL) {
+      const start = coverQueue.shift()
+      if (!start) return
+      start()
+    }
+  })
+}
+
+/** `loadVideoStill`, but never more than COVER_MAX_PARALLEL at once across the page; the rest wait their turn in order. */
+function loadFirstFrame(url: string, getCanvas: () => HTMLCanvasElement | null, onDone: (result: 'kept' | 'failed') => void): () => void {
+  let holdsSlot = false
+  let giveUp: (() => void) | null = null
+  const release = () => {
+    if (!holdsSlot) return
+    holdsSlot = false
+    coversRunning -= 1
+    startQueuedCoversSoon()
+  }
+  const start = () => {
+    holdsSlot = true
+    coversRunning += 1
+    giveUp = loadVideoStill(url, getCanvas, (result) => {
+      release()
+      onDone(result)
+    })
+  }
+  if (coversRunning < COVER_MAX_PARALLEL && coverQueue.length === 0) {
+    start()
+  } else {
+    coverQueue.push(start)
+    startQueuedCoversSoon()
+  }
+  return () => {
+    const queued = coverQueue.indexOf(start)
+    if (queued >= 0) coverQueue.splice(queued, 1)
+    giveUp?.()
+    release()
+  }
+}
+
 function useFirstFrameStill(url: string | null | undefined, wanted: boolean, canvas: RefObject<HTMLCanvasElement>): CoverPhase {
   const [phase, setPhase] = useState<CoverPhase>('waiting')
   useEffect(() => {
     if (!url || !wanted) return
-    const video = document.createElement('video')
-    let live = true
-    let settled = false
-    const stop = () => {
-      video.removeAttribute('src')
-      video.load()
-    }
-    const settle = (next: 'kept' | 'failed') => {
-      if (settled) return
-      settled = true
-      stop()
-      if (live) setPhase(next)
-    }
-    const keepStill = () => {
-      const context = live ? canvas.current?.getContext('2d') : null
-      if (!context) {
-        settle('failed')
-        return
-      }
-      try {
-        context.drawImage(video, 0, 0, COVER_STILL.width, COVER_STILL.height)
-      } catch {
-        settle('failed')
-        return
-      }
-      settle('kept')
-    }
-    video.muted = true
-    video.playsInline = true
-    video.preload = 'metadata'
-    video.addEventListener('error', () => settle('failed'))
-    video.addEventListener(
-      'loadeddata',
-      () => {
-        if (typeof video.requestVideoFrameCallback !== 'function') {
-          settle('failed')
-          return
-        }
-        // The first picture can only be copied once the browser has shown it: drawing at this moment leaves the canvas empty.
-        video.requestVideoFrameCallback(keepStill)
-      },
-      { once: true },
-    )
-    video.src = url
-    return () => {
-      live = false
-      stop()
-    }
+    return loadFirstFrame(url, () => canvas.current, setPhase)
   }, [url, wanted, canvas])
   return phase
 }
@@ -203,7 +259,7 @@ function useFirstFrameStill(url: string | null | undefined, wanted: boolean, can
 /**
  * The cover of a Reel: the first frame of its finished video, which is already a finished picture (hook text and logo).
  * The video is only asked for when the row is about to be seen. No video address, or a video that cannot be shown,
- * leaves the plain play tile.
+ * leaves the plain play tile. Decorative: the row's title already says what the Reel is.
  */
 function ReelCover({ url }: { url?: string | null }) {
   const { ref, near } = useNearScreen<HTMLSpanElement>()
@@ -211,16 +267,14 @@ function ReelCover({ url }: { url?: string | null }) {
   const phase = useFirstFrameStill(url, near, stillRef)
   const kept = phase === 'kept'
   return (
-    <span ref={ref} className="relative mt-0.5 flex h-[78px] w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-me-charcoal text-me-gold">
+    <span
+      ref={ref}
+      aria-hidden
+      data-cover={url ? phase : 'none'}
+      className={`relative mt-0.5 flex ${url ? 'h-[78px]' : 'h-11'} w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-me-charcoal text-me-gold`}
+    >
       {url && near && phase !== 'failed' && (
-        <canvas
-          ref={stillRef}
-          width={COVER_STILL.width}
-          height={COVER_STILL.height}
-          role={kept ? 'img' : undefined}
-          aria-label={kept ? '视频封面' : undefined}
-          className={kept ? 'h-full w-full object-cover' : 'hidden'}
-        />
+        <canvas ref={stillRef} width={COVER_STILL.width} height={COVER_STILL.height} className={kept ? 'h-full w-full object-cover' : 'hidden'} />
       )}
       <PlayGlyph className={kept ? 'absolute bottom-1 right-1 h-3.5 w-3.5 text-white/90 drop-shadow' : 'h-5 w-5'} />
     </span>
