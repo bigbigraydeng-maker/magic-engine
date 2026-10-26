@@ -48,6 +48,37 @@ function mockGraph(fail?: { onPath: string }) {
 beforeEach(() => { calls = [] })
 afterEach(() => { vi.unstubAllGlobals() })
 
+describe('lead_form 视频创意写法（实测过审的 video_data）', () => {
+  const VID: AdDraft = {
+    ...DRAFT,
+    creatives: [{ name: 'V', primaryText: 'Tour text', headline: 'Sign up', description: 'desc', videoId: 'v9', thumbnailImageHash: 'th9' }],
+  }
+
+  it('带视频 → video_data（封面 + SIGN_UP + 表单 id），绝不再把 video_id 塞进 link_data', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(VID, 'act_1', 'tok')
+    const spec = JSON.parse(calls.find((c) => c.url.includes('/adcreatives'))!.body.get('object_story_spec')!)
+    expect(spec.link_data).toBeUndefined()
+    expect(spec.video_data).toEqual({
+      video_id: 'v9',
+      message: 'Tour text',
+      title: 'Sign up',
+      link_description: 'desc',
+      image_hash: 'th9',
+      call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: 'f1', link: 'https://example.co.nz' } },
+    })
+  })
+
+  it('只给图 → 仍然是 link_data（老写法不变）', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    const spec = JSON.parse(calls.find((c) => c.url.includes('/adcreatives'))!.body.get('object_story_spec')!)
+    expect(spec.video_data).toBeUndefined()
+    expect(spec.link_data.image_hash).toBe('h1')
+    expect(spec.link_data.call_to_action).toEqual({ type: 'SIGN_UP', value: { lead_gen_form_id: 'f1' } })
+  })
+})
+
 describe('publishDraftPaused — 建出来的一律暂停', () => {
   it('系列 / 组 / 广告三层的 status 全是 PAUSED', async () => {
     vi.stubGlobal('fetch', mockGraph())

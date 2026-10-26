@@ -197,6 +197,22 @@ describe('messenger_conversation — metaTripletFor / 打法 / 描述', () => {
   })
 })
 
+describe('validateDraft — 视频留资要封面', () => {
+  const lead = (c: object) => ({
+    kind: 'lead_form', clientId: 'c1', campaignName: 'n', adSetName: 'a', dailyBudget: 1, durationDays: 1,
+    geoCountries: ['NZ'], pageId: 'p', leadFormId: 'f',
+    creatives: [{ name: 'A', primaryText: 'x', headline: 'y', ...c }],
+  }) as AdDraft
+
+  it('视频没封面 → 拒；给 hash 或 https 链接 → 放行；只给图不要封面', () => {
+    expect(fields(lead({ videoId: 'v' }))).toContain('creatives[0].thumbnail')
+    expect(fields(lead({ videoId: 'v', thumbnailUrl: 'http://a.test/t.jpg' }))).toContain('creatives[0].thumbnail')
+    expect(validateDraft(lead({ videoId: 'v', thumbnailImageHash: 'h' }))).toEqual([])
+    expect(validateDraft(lead({ videoId: 'v', thumbnailUrl: 'https://a.test/t.jpg' }))).toEqual([])
+    expect(validateDraft(lead({ imageHash: 'h' }))).toEqual([])
+  })
+})
+
 describe('validateDraft — 私信类型', () => {
   it('齐全的私信草案没问题；不要求表单和落地页', () => {
     expect(validateDraft(messengerDraft())).toEqual([])

@@ -196,6 +196,10 @@ function validateCommon(d: AdDraft): DraftProblem[] {
     if (d.kind === 'lead_form' && !c.imageHash && !c.videoId) {
       p.push({ field: `creatives[${i}].imageHash`, message: '表单广告没给图也没给视频' })
     }
+    // 视频留资走 video_data，Meta 要封面（没有「缺了用首帧」这回事）。
+    if (d.kind === 'lead_form' && c.videoId && !hasThumbnail(c)) {
+      p.push({ field: `creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
+    }
   })
 
   if (d.kind === 'lead_form' && !d.leadFormId) {
@@ -213,6 +217,11 @@ function validateCommon(d: AdDraft): DraftProblem[] {
 }
 
 const HTTPS_URL = /^https:\/\/\S+$/i
+const THUMBNAIL_MISSING = '视频广告没有封面（要 thumbnailImageHash，或 https 开头的 thumbnailUrl）'
+
+function hasThumbnail(c: AdDraftCreative): boolean {
+  return !!c.thumbnailImageHash || (!!c.thumbnailUrl && HTTPS_URL.test(c.thumbnailUrl))
+}
 /** 语言代码：两位小写字母（ISO 639-1：`en` / `zh` / `mi`）。三位的 `eng` 和 `en` 会被当成两种语言，所以不收。 */
 const LANG_CODE = /^[a-z]{2}$/
 
@@ -231,12 +240,8 @@ function validateMessenger(d: AdDraft): DraftProblem[] {
   }
 
   d.creatives.forEach((c, i) => {
-    const hasThumb = !!c.thumbnailImageHash || (!!c.thumbnailUrl && HTTPS_URL.test(c.thumbnailUrl))
-    if (!hasThumb) {
-      p.push({
-        field: `creatives[${i}].thumbnail`,
-        message: '视频广告没有封面（要 thumbnailImageHash，或 https 开头的 thumbnailUrl）',
-      })
+    if (!hasThumbnail(c)) {
+      p.push({ field: `creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
     }
   })
 

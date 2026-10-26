@@ -192,20 +192,35 @@ function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
         call_to_action: { type: MESSENGER_CTA_TYPE, value: { app_destination: 'MESSENGER' } },
       }
       break
-    case 'lead_form':
-      storySpec.link_data = {
-        message: c.primaryText,
-        name: c.headline,
-        ...(c.description ? { description: c.description } : {}),
-        ...(c.imageHash ? { image_hash: c.imageHash } : {}),
-        ...(c.videoId ? { video_id: c.videoId } : {}),
-        link: d.linkUrl ?? `https://facebook.com/${d.pageId}`,
-        call_to_action: {
-          type: 'SIGN_UP',
-          value: { lead_gen_form_id: d.leadFormId },
-        },
+    case 'lead_form': {
+      const cta = {
+        type: 'SIGN_UP',
+        value: { lead_gen_form_id: d.leadFormId, link: d.linkUrl ?? `https://facebook.com/${d.pageId}` },
+      }
+      if (c.videoId) {
+        // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），
+        // 不是把 video_id 塞进 link_data（见 docs/clients/cts/2026-10-09-shanghai-ads-paused-build.md §2.3）。
+        // 封面必给（validateDraft 查）。
+        storySpec.video_data = {
+          video_id: c.videoId,
+          message: c.primaryText,
+          title: c.headline,
+          ...(c.description ? { link_description: c.description } : {}),
+          ...thumbnailFields(c),
+          call_to_action: cta,
+        }
+      } else {
+        storySpec.link_data = {
+          message: c.primaryText,
+          name: c.headline,
+          ...(c.description ? { description: c.description } : {}),
+          ...(c.imageHash ? { image_hash: c.imageHash } : {}),
+          link: d.linkUrl ?? `https://facebook.com/${d.pageId}`,
+          call_to_action: { type: cta.type, value: { lead_gen_form_id: d.leadFormId } },
+        }
       }
       break
+    }
     default:
       return assertNever(d.kind)
   }
