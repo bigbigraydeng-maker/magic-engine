@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { getGoalById } from '@/lib/strategy/goals'
 import {
   MANUAL_PRESCRIPTION_AGENT,
@@ -109,7 +109,8 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Paste stays open to this client's FDE. The row label "广告 Agent" is not a caller.
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   let body: unknown

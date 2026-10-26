@@ -13,7 +13,7 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
-  requirePaidClientAccess: vi.fn().mockResolvedValue({
+  requireOperatorAccess: vi.fn().mockResolvedValue({
     ok: true,
     user: { id: 'u', email: 'fde@magiclab.com' },
     role: 'admin',
@@ -28,7 +28,7 @@ vi.mock('@/lib/strategy/goals', () => ({
 }))
 
 vi.mock('@/lib/huatuo/agent', () => ({
-  // fresh object per call: the route reassigns result.content
+  // fresh object per call: the job reassigns result.content
   runHuatuo: vi.fn(async () => ({
     content: { summary: 'orig', phases: [], kpi_targets: [], budget_allocation: [] },
     self_grade: { overall: 80 },
@@ -67,6 +67,7 @@ vi.mock('@/lib/ads-strategy/plan-seed/attach', () => ({
 // ─── Import route AFTER mocks ────────────────────────────────────────────────
 
 import { POST } from '../route'
+import { runHuatuo } from '@/lib/huatuo/agent'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -101,16 +102,6 @@ function makeDb(tables: Record<string, unknown>, writes: Write[]) {
   }
 }
 
-function parseSse(text: string): Record<string, unknown>[] {
-  const events: Record<string, unknown>[] = []
-  for (const line of text.split('\n')) {
-    if (line.startsWith('data: ')) {
-      events.push(JSON.parse(line.slice('data: '.length)) as Record<string, unknown>)
-    }
-  }
-  return events
-}
-
 function makeRequest(): NextRequest {
   return new NextRequest('http://test/api/clients/client-1/prescription/generate', {
     method: 'POST',
@@ -142,16 +133,49 @@ describe('POST /prescription/generate — attachPlanSeed wiring', () => {
     dbRef.current = makeDb(tables, writes)
   })
 
+  async function draftUpdates(): Promise<Write[]> {
+    let found: Write[] = []
+    await vi.waitFor(() => {
+      found = writes.filter(
+        w => w.table === 'prescriptions' && w.op === 'update' && w.payload.status === 'draft',
+      )
+      expect(found).toHaveLength(1)
+    })
+    return found
+  }
+
+  it('returns before the model call finishes', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const gate = new Promise((resolve) => { release = resolve })
+    vi.mocked(runHuatuo).mockImplementationOnce(() => gate as ReturnType<typeof runHuatuo>)
+    mockAttach.mockResolvedValue({ summary: 'later' })
+
+    const res = await POST(makeRequest(), { params: { id: 'client-1' } })
+    const body = await res.json() as { success: boolean; prescription_id: string; status: string }
+
+    expect(res.status).toBe(202)
+    expect(body).toEqual({ success: true, prescription_id: 'p-new', status: 'generating' })
+    expect(writes.some(w => w.payload.status === 'draft')).toBe(false)
+
+    release({
+      content: { summary: 'orig', phases: [], kpi_targets: [], budget_allocation: [] },
+      self_grade: { overall: 80 },
+      meta: { agent_version: 'v1' },
+      benchmarks_used: [],
+      trend_summary: null,
+    })
+    const saved = await draftUpdates()
+    expect(saved[0].payload.content).toEqual({ summary: 'later' })
+  })
+
   it('uses the value returned by attachPlanSeed', async () => {
     const attachReturn = { summary: 'from-attach', phases: [], plan_seed: { marker: 1 } }
     mockAttach.mockResolvedValue(attachReturn)
 
     const res = await POST(makeRequest(), { params: { id: 'client-1' } })
-    const text = await res.text()
-    const events = parseSse(text)
+    expect(res.status).toBe(202)
 
-    // attach called once with runHuatuo content + { clientId, goalId }
-    expect(mockAttach).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(mockAttach).toHaveBeenCalledTimes(1))
     const [firstArg, secondArg] = mockAttach.mock.calls[0] as [unknown, unknown]
     expect(firstArg).toEqual({
       summary: 'orig',
@@ -161,35 +185,33 @@ describe('POST /prescription/generate — attachPlanSeed wiring', () => {
     })
     expect(secondArg).toEqual({ clientId: 'client-1', goalId: 'goal-1' })
 
-    // exactly one update on prescriptions with status 'draft' whose content === attachReturn
-    const draftUpdates = writes.filter(
-      w => w.table === 'prescriptions' && w.op === 'update' && w.payload.status === 'draft',
-    )
-    expect(draftUpdates).toHaveLength(1)
-    expect(draftUpdates[0].payload).toHaveProperty('content')
-    expect(draftUpdates[0].payload.content).toEqual(attachReturn)
+    const saved = await draftUpdates()
+    expect(saved[0].payload.content).toEqual(attachReturn)
+  })
 
-    // SSE done event content === attachReturn
-    const done = events.find(e => e.type === 'done')
-    expect(done).toBeDefined()
-    expect(done!.content).toEqual(attachReturn)
+  it('marks the row failed when the model throws, after the response is already back', async () => {
+    vi.mocked(runHuatuo).mockRejectedValueOnce(new Error('模型超时'))
+
+    const res = await POST(makeRequest(), { params: { id: 'client-1' } })
+    expect(res.status).toBe(202)
+
+    await vi.waitFor(() => {
+      const failed = writes.find(
+        w => w.table === 'prescriptions' && w.op === 'update' && w.payload.status === 'failed',
+      )
+      expect(failed?.payload.error_message).toBe('模型超时')
+    })
   })
 
   it('still saves the original content when attachPlanSeed rejects', async () => {
     mockAttach.mockRejectedValue(new Error('boom'))
 
     const res = await POST(makeRequest(), { params: { id: 'client-1' } })
-    const text = await res.text()
-    const events = parseSse(text)
+    expect(res.status).toBe(202)
 
-    const draftUpdates = writes.filter(
-      w => w.table === 'prescriptions' && w.op === 'update' && w.payload.status === 'draft',
-    )
-    expect(draftUpdates).toHaveLength(1)
-    const savedContent = draftUpdates[0].payload.content as { summary?: string }
+    const saved = await draftUpdates()
+    const savedContent = saved[0].payload.content as { summary?: string }
     expect(savedContent.summary).toBe('orig')
-
-    expect(events.some(e => e.type === 'done')).toBe(true)
-    expect(events.some(e => e.type === 'error')).toBe(false)
+    expect(writes.some(w => w.payload.status === 'failed')).toBe(false)
   })
 })

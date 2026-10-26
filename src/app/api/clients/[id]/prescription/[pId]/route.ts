@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
 import { planDraftCardLine } from '@/lib/marketing-plan/promo/plan-draft-card'
@@ -70,6 +70,34 @@ export async function GET(
   }
 }
 
+async function failIfStaleGenerating(
+  clientId: string,
+  prescriptionId: string,
+  row: Prescription,
+): Promise<Prescription> {
+  if (!isStaleGenerating(row.status, row.generated_at, Date.now())) return row
+  const { error } = await supabaseAdmin
+    .from('prescriptions')
+    .update({
+      status: 'failed',
+      error_message: STALE_GENERATING_MESSAGE,
+      progress_note: null,
+    })
+    .eq('id', prescriptionId)
+    .eq('client_id', clientId)
+    .eq('status', 'generating')
+  if (error) {
+    console.error('[prescription GET] stale heal failed', error)
+    return row
+  }
+  return {
+    ...row,
+    status: 'failed',
+    error_message: STALE_GENERATING_MESSAGE,
+    progress_note: null,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // PATCH — approve or reject
 // ---------------------------------------------------------------------------
@@ -84,7 +112,8 @@ export async function PATCH(
   { params }: { params: { id: string; pId: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Agree is OPC only. This check rejects a single-client FDE; drafting uses requireOperatorAccess.
+  const access = await requirePlanApproverAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }

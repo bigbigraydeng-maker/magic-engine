@@ -63,6 +63,11 @@ export interface LessonInput {
   evidence?: Record<string, unknown> | null
   /** 有它时走「一次写完」路径，见契约 4.8。 */
   provenance?: LessonProvenance
+  /**
+   * 默认 `true`（老调用方行为不变）。给 `false` = 写成未启用的候选，
+   * 不进任何提示词，要人在广告引擎页点开才算采纳。
+   */
+  isActive?: boolean
 }
 
 /**
@@ -193,7 +198,7 @@ function buildLessonRow(
     rationale: input.rationale ?? null,
     confidence: input.confidence,
     evidence: input.evidence ?? null,
-    is_active: true,
+    is_active: input.isActive ?? true,
     updated_at: now.toISOString(),
   }
 

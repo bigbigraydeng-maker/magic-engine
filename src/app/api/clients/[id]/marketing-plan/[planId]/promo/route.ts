@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
@@ -44,6 +45,8 @@ async function loadPlan(ctx: Ctx): Promise<MarketingPlan | null> {
 }
 
 export async function GET(_req: NextRequest, ctx: Ctx) {
+  const denied = await rejectAgentAdsBearer(_req, { clientId: ctx.params.id, action: 'outside_allowlist' })
+  if (denied) return denied
   const access = await requirePaidClientAccess(ctx.params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
@@ -69,6 +72,12 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function PUT(req: NextRequest, ctx: Ctx) {
+  const denied = await rejectAgentAdsBearer(req, {
+    clientId: ctx.params.id,
+    action: 'change_budget',
+    resourceId: ctx.params.planId,
+  })
+  if (denied) return denied
   const access = await requirePlanApproverAccess(ctx.params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
