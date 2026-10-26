@@ -30,6 +30,7 @@ export interface RawMetaTargeting {
     countries?: unknown[]
   }
   custom_audiences?: { id?: unknown; name?: unknown }[]
+  excluded_custom_audiences?: unknown
   expanded_implicit_custom_audiences?: { id?: unknown }[]
   targeting_relaxation_types?: { custom_audience?: unknown; lookalike?: unknown }
   targeting_automation?: { advantage_audience?: unknown }
@@ -133,6 +134,9 @@ export function adaptMetaAdSet(
       customAudienceRelaxed: flag(t?.targeting_relaxation_types?.custom_audience),
       advantageAudience:     flag(t?.targeting_automation?.advantage_audience),
       customAudienceIds:     strList(t?.custom_audiences, (a) => (a as { id?: unknown })?.id),
+      excludedAudienceIds:   Array.isArray(t?.excluded_custom_audiences)
+        ? strList(t?.excluded_custom_audiences, (a) => (a as { id?: unknown })?.id)
+        : undefined,
       implicitLookalikeIds:  strList(t?.expanded_implicit_custom_audiences, (a) => (a as { id?: unknown })?.id),
       geoNames:              geoNames(t),
       publisherPlatforms:    strList(t?.publisher_platforms, (p) => p),

@@ -111,6 +111,10 @@ export interface AdDraft {
   pageId: string
   /** 一个草案下可以有多条创意；**同一个组里语言必须一致**（闸门会查）。 */
   creatives: AdDraftCreative[]
+  /** 包含的自定义受众编号（Meta 自定义受众的数字 id）。给了就等于声明这个广告组是重定向。 */
+  audienceIds?: string[]
+  /** 排除的自定义受众编号。只给排除不算重定向。 */
+  excludedAudienceIds?: string[]
 }
 
 /** 每天最多敢自动花多少 —— 超过这个数不是 ME 该自己决定的事。 */
@@ -124,6 +128,9 @@ export const MAX_DURATION_DAYS = 30
 
 /** 私信组里最多几条创意：写操作次数和等转码的总时间都随它涨，要有顶。 */
 export const MAX_MESSENGER_CREATIVES = 4
+
+/** 包含与排除两个受众列表各自最多几个。 */
+export const MAX_AUDIENCES_PER_LIST = 10
 
 export interface DraftProblem {
   field: string
@@ -219,6 +226,60 @@ function validateCommon(d: AdDraft): DraftProblem[] {
   }
   if (d.ageMin !== undefined && d.ageMax !== undefined && d.ageMin > d.ageMax) {
     p.push({ field: 'ageMax', message: '年龄下限比上限还大' })
+  }
+
+  p.push(...validateAudiences(d))
+
+  return p
+}
+
+/** 自定义受众编号：Meta 的数字 id，5 位以上纯数字。 */
+const AUDIENCE_ID = /^\d{5,}$/
+
+/**
+ * 受众列表能不能用。
+ *
+ * 请求体是 `body as AdDraft`，`audienceIds` / `excludedAudienceIds` 可能是任何东西 ——
+ * 先按 `unknown` 收窄，再查格式、数量、重复，最后查「包含」和「排除」有没有打架。
+ */
+function validateAudiences(d: AdDraft): DraftProblem[] {
+  const p: DraftProblem[] = []
+  const fields = ['audienceIds', 'excludedAudienceIds'] as const
+  const valid: Partial<Record<(typeof fields)[number], string[]>> = {}
+
+  for (const field of fields) {
+    const raw: unknown = d[field]
+    if (raw === undefined) continue
+
+    if (!Array.isArray(raw) || raw.some((id) => typeof id !== 'string' || !AUDIENCE_ID.test(id))) {
+      p.push({ field, message: '受众编号格式不对（要是 5 位以上的纯数字字符串）' })
+      continue
+    }
+
+    const ids = raw as string[]
+    valid[field] = ids
+
+    if (ids.length > MAX_AUDIENCES_PER_LIST) {
+      p.push({ field, message: `受众最多 ${MAX_AUDIENCES_PER_LIST} 个，现在有 ${ids.length} 个` })
+    }
+
+    const dupIds = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))]
+    if (dupIds.length > 0) {
+      p.push({ field, message: `受众编号重复：${dupIds.join('、')}` })
+    }
+  }
+
+  const included = valid.audienceIds
+  const excluded = valid.excludedAudienceIds
+  if (included && excluded) {
+    const excludedSet = new Set(excluded)
+    const ids = [...new Set(included.filter((id) => excludedSet.has(id)))]
+    if (ids.length > 0) {
+      p.push({
+        field: 'excludedAudienceIds',
+        message: `受众 ${ids.join('、')} 同时出现在「包含」和「排除」里，自相矛盾`,
+      })
+    }
   }
 
   return p
