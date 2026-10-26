@@ -1,10 +1,20 @@
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import { PrescriptionCard } from '../_components/PrescriptionCard'
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: false,
+    json: async () => ({}),
+  }))
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 function view(over: Partial<GoalPrescriptionView> = {}): GoalPrescriptionView {
   return {
@@ -30,10 +40,11 @@ function view(over: Partial<GoalPrescriptionView> = {}): GoalPrescriptionView {
 }
 
 describe('处方卡', () => {
-  it('用四段大白话讲清楚，规矩默认收起，没有写入按钮', () => {
+  it('用四段大白话讲清楚，规矩默认收起，没有写入按钮', async () => {
     const { container } = render(
       <PrescriptionCard clientId="client-1" prescription={view()} today="2026-10-01" />,
     )
+    expect(await screen.findByText('读不到')).toBeTruthy()
     expect(screen.getByRole('heading', { name: '处方' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '这周做什么' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '为什么' })).toBeTruthy()
@@ -71,7 +82,7 @@ describe('处方卡', () => {
     expect(container.textContent).not.toMatch(/AUD/)
   })
 
-  it('没写下的原因、花费和起算日留空，不填默认币种', () => {
+  it('没写下的原因、花费和起算日留空，不填默认币种', async () => {
     const { container } = render(<PrescriptionCard clientId="client-1" prescription={view({
       prescriber: null,
       currency: null,
@@ -82,6 +93,7 @@ describe('处方卡', () => {
       spend: { daily: null, total: null, pacing: null },
       review_anchor: null,
     })} today="2026-10-01" />)
+    expect(await screen.findByText('读不到')).toBeTruthy()
     expect(screen.getByText('开方人：未填写')).toBeTruthy()
     expect(screen.getByText('这份处方没有单独列出要做的事。')).toBeTruthy()
     expect(screen.getByText('这份处方没有写下原因。')).toBeTruthy()
