@@ -1,6 +1,6 @@
 /**
  * 首批专家名册（Ray 2026-10-26 批准 3 位，代码常量，不建表）。
- * 「为什么可信」是写给 Ray 在 PR 里确认的一句话；Ray 未确认前不得扩名册。
+ * 「为什么可信」是一句话理由（Ray 2026-10-26 已确认）；扩名册须另经 Ray 批准。
  * 名册只放数据，不放任何客户信息。
  */
 
@@ -15,21 +15,21 @@ export interface RosterEntry {
 
 export const EXPERT_ROSTER: readonly RosterEntry[] = [
   {
-    // 可信理由（待 Ray 确认）：Meta 广告领域公认的一线实操博主，长期按平台改版逐条测试并公开结论。
+    // 可信理由：Meta 广告领域公认的一线实操博主，长期按平台改版逐条测试并公开结论。
     sourceKey: 'jon-loomer',
     expert: 'Jon Loomer',
     domain: 'paid_social',
     feedUrl: 'https://www.jonloomer.com/feed/',
   },
   {
-    // 可信理由（待 Ray 确认）：长期追踪并复盘 Google 核心算法更新对真实站点的影响，文章带前后数据。
+    // 可信理由：长期追踪并复盘 Google 核心算法更新对真实站点的影响，文章带前后数据。
     sourceKey: 'glenn-gabe',
     expert: 'Glenn Gabe',
     domain: 'seo',
     feedUrl: 'https://www.gsqi.com/marketing-blog/feed/',
   },
   {
-    // 可信理由（待 Ray 确认）：专做电商 DTC 付费投放的代理机构，博客文章来自其管理的真实账户经验。
+    // 可信理由：专做电商 DTC 付费投放的代理机构，博客文章来自其管理的真实账户经验。
     sourceKey: 'common-thread-collective',
     expert: 'Common Thread Collective',
     domain: 'paid_social',
