@@ -99,3 +99,42 @@ export async function pickAssignee(opts: PickAssigneeOptions): Promise<string | 
   })
   return sorted[0]
 }
+
+/**
+ * 新建客人后，按轮流规则分给一位跟进人。
+ *
+ * 各渠道（Meta 表单 / 官网表单 / 邮件 / WhatsApp）建人时都走 `resolveContact`，
+ * 它在「新建」那一刻、且调用方打开了 `autoAssign` 时调这里。放在这一处，
+ * 新增渠道只需要多传一个开关，不必每处各抄一份分配逻辑。
+ *
+ * 🔴 **永远不抛错**：分配失败不能挡住建人和后面的触点、邮件名单——入库优先，
+ *    没分上的人在「未分配」里等人认领，或以后回填。
+ * 🔴 **只补空**：`.is('assigned_to', null)`，不会覆盖员工已经手动设的人。
+ * 候选名单为空（这个客户没人开「接新线索」）→ 什么都不做，返回 null。
+ */
+export async function assignNewContact(opts: {
+  clientId: string
+  contactId: string
+  supabase: Pick<SupabaseClient, 'from'>
+}): Promise<string | null> {
+  try {
+    const assignee = await pickAssignee({ clientId: opts.clientId, supabase: opts.supabase })
+    if (!assignee) return null
+    const { error } = await opts.supabase
+      .from('contacts')
+      .update({ assigned_to: assignee })
+      .eq('id', opts.contactId)
+      .eq('client_id', opts.clientId)
+      .is('assigned_to', null)
+    if (error) {
+      console.warn(`[assign-new-contact] 写入失败 contact=${opts.contactId}: ${String(error.message).slice(0, 120)}`)
+      return null
+    }
+    return assignee
+  } catch (err) {
+    console.warn(
+      `[assign-new-contact] 分配失败 contact=${opts.contactId}: ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
+    )
+    return null
+  }
+}
