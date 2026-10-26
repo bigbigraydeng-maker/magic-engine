@@ -1148,7 +1148,7 @@ describe('approveDraft — 开之前复核受众还在', () => {
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(false)
     if (!r.ok) {
-      expect(r.error).toContain('受众不见了')
+      expect(r.error).toContain('没排除上')
       expect(r.error).toContain('2222222')
     }
     expect(mActivate).not.toHaveBeenCalled()
@@ -1165,11 +1165,48 @@ describe('approveDraft — 开之前复核受众还在', () => {
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(false)
     if (!r.ok) {
-      expect(r.error).toContain('受众不见了')
+      expect(r.error).toContain('没有挂上')
       expect(r.error).toContain('1111111')
     }
     expect(mActivate).not.toHaveBeenCalled()
     expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('名单还在但「允许投给名单外」被打开 → 不开，状态改 blocked', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, targeting_relaxation_types: { custom_audience: 1, lookalike: 0 } },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('名单以外')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('名单还在但优势受众被打开 → 不开，状态改 blocked', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, targeting_automation: { advantage_audience: 1 } },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('优势受众')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('只排除不包含 + 优势受众开着 → 照开（排除是硬规则，不算扩量风险）', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, custom_audiences: [], targeting_automation: { advantage_audience: 1 } },
+    })
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb } = fakeSupabase({ ...AUD_READY, draft: { ...DRAFT, excludedAudienceIds: ['2222222'] } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(true)
   })
 
   it('名单都还挂着 → 正常开，只回读一次', async () => {

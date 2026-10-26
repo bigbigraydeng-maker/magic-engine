@@ -589,21 +589,31 @@ async function verifyAudiencesStillAttached(
     await writeBackAudienceError(actionId, supabase, { ...p, error })
     return error
   }
-  const targeting = adaptMetaAdSet(raw, [], { expectedGeo: null }).adSet.targeting
-  const attached = new Set(targeting.customAudienceIds ?? [])
-  const attachedExcluded = new Set(targeting.excludedAudienceIds ?? [])
-  const missingIncluded = (p.draft.audienceIds ?? []).filter((id) => !attached.has(id))
-  const missingExcluded = (p.draft.excludedAudienceIds ?? []).filter((id) => !attachedExcluded.has(id))
-  if (missingIncluded.length === 0 && missingExcluded.length === 0) return null
+  // 复用建后同一道闸（checkLaunch）的受众 blocker：名单缺失、放宽、优势受众开着都拒开。
+  // 只取受众相关的 blocker —— 创意 / 版位等别的检查建后已过，这里不重复判。
+  const hasIncluded = (p.draft.audienceIds?.length ?? 0) > 0
+  const hasExcluded = (p.draft.excludedAudienceIds?.length ?? 0) > 0
+  const report = checkLaunch({
+    ...adaptMetaAdSet(raw, [], { expectedGeo: null, isRetargeting: hasIncluded ? true : undefined }),
+    ...(hasIncluded ? { expectedAudienceIds: p.draft.audienceIds } : {}),
+    ...(hasExcluded ? { expectedExcludedAudienceIds: p.draft.excludedAudienceIds } : {}),
+  })
+  const blockers = report.findings.filter(
+    (f) => f.severity === 'blocker' && OPEN_TIME_AUDIENCE_CODES.has(f.code),
+  )
+  if (blockers.length === 0) return null
 
-  const parts = [
-    ...(missingIncluded.length > 0 ? [`包含 ${missingIncluded.join('、')}`] : []),
-    ...(missingExcluded.length > 0 ? [`排除 ${missingExcluded.join('、')}`] : []),
-  ]
-  const error = `广告组上的受众不见了：${parts.join('；')}（可能被删除、收回共享或已过期），所以没开`
+  const error = `广告组上的受众设置现在不对：${blockers.map((f) => f.message).join('；')}（可能被删除、收回共享、过期，或被打开了扩量），所以没开`
   await writeBackAudienceError(actionId, supabase, { ...p, status: 'blocked', error })
   return error
 }
+
+const OPEN_TIME_AUDIENCE_CODES: ReadonlySet<string> = new Set([
+  'audience_not_attached',
+  'excluded_audience_not_attached',
+  'retargeting_relaxed',
+  'retargeting_advantage_audience',
+])
 
 /** 把受众核对失败写回账本；写不进去只记日志，不掩盖原始错误。 */
 async function writeBackAudienceError(
