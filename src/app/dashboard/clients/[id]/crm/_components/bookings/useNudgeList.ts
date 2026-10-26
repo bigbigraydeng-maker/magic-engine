@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NudgeList, NudgeMode, NudgeRow } from '@/lib/crm/booking-types'
+import { afterCrmListReady } from '@/lib/crm/list-ready'
 import {
   BOOKINGS_CHANGED_EVENT,
   fetchNudgeList,
@@ -107,7 +108,9 @@ export function useNudgeList(clientId: string): UseNudgeListResult {
   )
 
   useEffect(() => {
-    void load(stateRef.current.status !== 'ready')
+    return afterCrmListReady(() => {
+      void load(stateRef.current.status !== 'ready')
+    })
   }, [load])
 
   const reload = useCallback(async () => {

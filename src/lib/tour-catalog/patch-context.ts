@@ -7,8 +7,27 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { TourPatchContext } from './content-validation'
 import { collectImagePool } from './image-rules'
+import { blankTour } from './new-tour'
 import { getClientDomain, loadDraftCatalog } from './store'
 import { getSettings } from './store-access'
+
+/** Same context for a tour that does not exist yet: the "current" tour is an empty one. */
+export async function loadNewTourContext(
+  db: SupabaseClient,
+  clientId: string,
+  canEditSite: boolean,
+): Promise<TourPatchContext> {
+  const snapshot = await loadDraftCatalog(db, clientId)
+  const settings = await getSettings(db, clientId)
+  const clientDomain = await getClientDomain(db, clientId)
+  return {
+    canEditSite,
+    imagePool: new Set(collectImagePool(snapshot.tours)),
+    imageHosts: settings.imageHosts,
+    clientDomain,
+    existingTour: blankTour(clientId),
+  }
+}
 
 /** Null when the tour does not exist in this client's draft catalog. */
 export async function loadTourPatchContext(
