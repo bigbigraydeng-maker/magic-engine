@@ -151,6 +151,9 @@ const CRON_REGISTRY_ENTRIES = [
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '25 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '5 * * * *', logsRuns: true },
+  // 心跳超时收回。2026-10-26 从 GitHub Actions 的 schedule 改挂已有 dispatcher。
+  // addedAt 盖住部署后第一次排班前的「从没跑过」。
+  { service: 'factory-worker-sweeper', jobName: 'factory-worker-sweeper', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-26' },
   // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },
