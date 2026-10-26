@@ -12,6 +12,7 @@ name: PR Application Validation
 #
 # Stable check names, only when someone starts this workflow:
 # - CRM focused tests
+# - Changed-area tests
 # - Type-check
 # - Application build
 
@@ -151,6 +152,35 @@ jobs:
             echo "::notice::#1009 CRM focused tests are not present on PR head ${PR_HEAD_SHA}; check is not applicable."
             echo '- Result: NOT APPLICABLE — both #1009 test files are not present on this head.' >> "${GITHUB_STEP_SUMMARY}"
           fi
+
+  changed-area-tests:
+    # Runs the vitest tests that import what this PR changed (src/, scripts/),
+    # and fails only on failures not already red at the PR fork point.
+    # Why: 2026-09-27 a shared Meta constant change left src/lib/meta and
+    # src/lib/inngest tests red on main for 4 days — no PR workflow ran them.
+    # Logic lives in scripts/ci/changed-area-tests.sh.
+    name: Changed-area tests
+    needs: resolve-fallback-target
+    if: always() && (github.event_name == 'pull_request' || needs.resolve-fallback-target.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run related tests, compare failures against base
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || needs.resolve-fallback-target.outputs.base_sha }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || needs.resolve-fallback-target.outputs.head_sha }}
+        run: bash scripts/ci/changed-area-tests.sh
 
   type-check:
     name: Type-check
