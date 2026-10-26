@@ -6,7 +6,7 @@ import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-presc
 import type { StoredSpend } from '@/lib/marketing-plan/promo/prescription-copy'
 import { describeReview } from '@/lib/marketing-plan/promo/prescription-copy'
 import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
-import { PlanSeedPanel } from '../../prescription/new/PlanSeedPanel'
+import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (

@@ -268,12 +268,10 @@ describe('buildPlanSeed', () => {
           expect(step.daily_budget_cents.value).toBe(5000)
         }
       } else if (name === 'playbookShare') {
-        const step = findStep(seed, 's1')
-        expect(step).toBeDefined()
-        expect(step?.daily_budget_cents.ok).toBe(false)
-        if (step && !step.daily_budget_cents.ok) {
-          expect(step.daily_budget_cents.why_empty.length).toBeGreaterThan(0)
-        }
+        expect(seed.ad_steps).toEqual([])
+        const skipped = findSkipped(seed, 's1')
+        expect(skipped).toBeDefined()
+        expect(skipped?.why_empty).toContain('读不到剧本里的预算比例')
       }
     }
   })
@@ -435,13 +433,10 @@ describe('buildPlanSeed', () => {
       ),
     })
     const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
-    const step = findStep(seed, 's1')
-    expect(step).toBeDefined()
-    expect(step?.daily_budget_cents.ok).toBe(false)
-    if (step && !step.daily_budget_cents.ok) {
-      expect(step.daily_budget_cents.why_empty).toContain('客户预算余量读不全')
-      expect(step.daily_budget_cents.why_empty).toContain('快照没抓全')
-    }
+    expect(findStep(seed, 's1')).toBeUndefined()
+    const skipped = findSkipped(seed, 's1')
+    expect(skipped?.why_empty).toContain('客户预算余量读不全')
+    expect(skipped?.why_empty).toContain('快照没抓全')
   })
 
   it('page missing', async () => {
@@ -726,5 +721,63 @@ describe('buildPlanSeed', () => {
       }),
     })
     await expect(buildPlanSeed(args([leadPlay('s1')]), deps)).resolves.toBeDefined()
+  })
+
+  it('budget basis carries the three fixed sentences', async () => {
+    const deps = makeDeps()
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    const step = findStep(seed, 's1')
+    expect(step).toBeDefined()
+    expect(step?.daily_budget_cents.ok).toBe(true)
+    if (step?.daily_budget_cents.ok) {
+      const values = step.daily_budget_cents.basis.map((b) => b.value)
+      expect(values).toContain(
+        '这是第一版建议：只按客户和账户的日上限、在投合计算，不含受众与素材。',
+      )
+      expect(values).toContain('没扣掉计划里人工已填的步骤。')
+      expect(values).toContain(
+        '读到的在投合计来自最近一次数据抓取，抓取之后新开的广告不在内。',
+      )
+    }
+  })
+
+  it('stale + unknown daily + near cap halves exactly once', async () => {
+    const deps = makeDeps({
+      loadCaptureAt: vi.fn(async () => STALE),
+      loadFacts: vi.fn(async () =>
+        facts({ account_cap_minor: 10000, account_delivering_minor: 9500, daily: null }),
+      ),
+    })
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    const step = findStep(seed, 's1')
+    expect(step).toBeDefined()
+    expect(step?.daily_budget_cents.ok).toBe(true)
+    if (step?.daily_budget_cents.ok) {
+      expect(step.daily_budget_cents.value).toBe(125)
+      const halved = step.daily_budget_cents.basis.filter((b) =>
+        b.value.includes('只减半一次'),
+      )
+      expect(halved).toHaveLength(1)
+    }
+  })
+
+  it('a step with no budget goes to skipped, not ad_steps', async () => {
+    const deps = makeDeps({
+      loadFacts: vi.fn(async () =>
+        facts({ account_cap_minor: 10000, account_delivering_minor: 10000 }),
+      ),
+    })
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    expect(seed.ad_steps).toEqual([])
+    const skipped = findSkipped(seed, 's1')
+    expect(skipped).toBeDefined()
+    expect(skipped?.why_empty.length).toBeGreaterThan(0)
+  })
+
+  it('empty page id string never becomes a valid page', async () => {
+    const deps = makeDeps({ loadClientPageId: vi.fn(async () => '   ') })
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    expect(seed.ad_steps).toEqual([])
+    expect(findSkipped(seed, 's1')).toBeDefined()
   })
 })

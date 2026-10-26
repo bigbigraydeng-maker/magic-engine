@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { PLAY_CATALOG } from '@/lib/ads-strategy/play-vocabulary'
-import { STALE_AFTER_MS, STALE_LABEL } from '@/lib/ads-strategy/plan-seed/constants'
 import { formatMinor } from '@/lib/ads-strategy/plan-seed/format'
 import type { PlanSeed, PlanSeedStep } from '@/lib/ads-strategy/plan-seed/types'
 
@@ -54,17 +53,12 @@ function formatNz(iso: string): string {
   return `${month}月${day}日 ${hour}:${minute}`
 }
 
-export function describeCapture(capturedAt: string | null, factsAsOf: string): string {
+export function describeCapture(capturedAt: string | null, _factsAsOf: string): string {
   const capturedMs = capturedAt === null ? NaN : Date.parse(capturedAt)
   if (Number.isNaN(capturedMs)) {
     return '读不到这个账户最近一次数据抓取的时间，预算建议不可靠，请看依据里的说明'
   }
-  const base = `这个余量是按 ${formatNz(capturedAt as string)} 的数据算的，之后新开的广告没算进去`
-  const factsMs = Date.parse(factsAsOf)
-  if (!Number.isNaN(factsMs) && factsMs - capturedMs > STALE_AFTER_MS) {
-    return `${base}；数据已不是最新一轮（超过 ${STALE_LABEL}），预算已按保守口径减半`
-  }
-  return base
+  return `这个余量是按 ${formatNz(capturedAt as string)} 的数据算的，之后新开的广告没算进去`
 }
 
 function FieldRow<T>({
@@ -150,6 +144,11 @@ function ReadyView({ seed }: { seed: PlanSeed }) {
         <StepCard key={step.step_key} step={step} currency={seed.currency} />
       ))}
       <CaptureLines seed={seed} />
+      {seed.ad_steps.length > 0 && (
+        <p className="mt-4 text-xs text-gray-600">
+          读到的在投合计来自最近一次数据抓取，抓取之后新开的广告不在内。
+        </p>
+      )}
       {seed.skipped.length > 0 && (
         <div className="mt-4">
           <div className="font-semibold">这次没产出的步骤</div>

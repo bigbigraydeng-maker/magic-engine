@@ -1,14 +1,7 @@
-import type { PlayKey } from '../play-vocabulary'
+import { PLAY_CATALOG, type PlayKey } from '../play-vocabulary'
 
-/** 允许的广告打法（与 play-vocabulary 保持一致）。 */
-export const PLAY_KEYS: readonly PlayKey[] = [
-  'thruplay_pool_build',
-  'lead_form_harvest',
-  'messenger_direct',
-  'warm_pool_retarget',
-  'reach_awareness',
-  'boost_organic_post',
-]
+/** 允许的广告打法（单一来源：play-vocabulary 的 PLAY_CATALOG）。 */
+export const PLAY_KEYS: readonly PlayKey[] = Object.keys(PLAY_CATALOG) as PlayKey[]
 
 /** 一条广告打法：步骤编号 + 打法。 */
 export interface AdPlay {

@@ -149,19 +149,10 @@ describe('splitBudget', () => {
     expect(result[1].why_empty?.startsWith('预算余量不够这一步')).toBe(true)
   })
 
-  it('8. humanCommitted reduces client and account headroom -> 4000', () => {
+  it('9. zero client headroom -> budgetMinor null', () => {
     const result = splitBudget(
       input({
-        humanCommitted: { byAccount: { A: 2000 }, all: 5000 },
-      }),
-    )
-    expect(result[0].budgetMinor).toBe(4000)
-  })
-
-  it('9. over-committed client -> budgetMinor null', () => {
-    const result = splitBudget(
-      input({
-        humanCommitted: { byAccount: {}, all: 20000 },
+        clientHeadroomMinor: 0,
       }),
     )
     expect(result[0].budgetMinor).toBeNull()
@@ -196,7 +187,6 @@ describe('splitBudget', () => {
         { step_key: 's1', accountId: 'A' },
         { step_key: 's2', accountId: 'B' },
       ],
-      humanCommitted: { byAccount: { A: 1000 }, all: 2000 },
       halve: { client: { stale: true, dailyUnknown: true }, account: {} },
     })
     const snapshot = structuredClone(original)
@@ -276,9 +266,7 @@ describe('splitBudget', () => {
       '客户余量 $150.00 NZD ÷ N=1 → $150.00 NZD；账户余量 $100.00 NZD ÷ n_a=1 → $100.00 NZD；取小者 × 剧本比例 0.5 = $50.00 NZD',
     )
 
-    const overCommitted = splitBudget(
-      input({ humanCommitted: { byAccount: {}, all: 20000 } }),
-    )
+    const overCommitted = splitBudget(input({ clientHeadroomMinor: 0 }))
     const texts: string[] = []
     for (const entry of result[0].basis) texts.push(entry.value)
     for (const entry of overCommitted[0].basis) texts.push(entry.value)
@@ -293,5 +281,21 @@ describe('splitBudget', () => {
   it('currency null shows the unreadable-currency note', () => {
     const result = splitBudget(input({ currency: null }))
     expect(result[0].basis[0].value).toContain('$150.00（币种读不到）')
+  })
+
+  it('stale + dailyUnknown + account flags together halve exactly once (not quartered)', () => {
+    const result = splitBudget(
+      input({
+        steps: [{ step_key: 's1', accountId: 'A' }],
+        halve: {
+          client: { stale: true, dailyUnknown: true },
+          account: { A: { stale: true, dailyUnknown: true } },
+        },
+      }),
+    )
+    expect(result[0].budgetMinor).toBe(2500)
+    expect(
+      result[0].basis.filter((b) => b.value.includes('只减半一次')),
+    ).toHaveLength(1)
   })
 })

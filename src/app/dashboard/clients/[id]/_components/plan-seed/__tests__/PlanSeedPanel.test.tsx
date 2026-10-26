@@ -2,7 +2,6 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, waitFor, cleanup } from '@testing-library/react'
 import type { PlanSeed } from '@/lib/ads-strategy/plan-seed/types'
 import { PLAY_CATALOG } from '@/lib/ads-strategy/play-vocabulary'
-import { STALE_AFTER_MS, STALE_LABEL } from '@/lib/ads-strategy/plan-seed/constants'
 import { PlanSeedPanel, describeCapture } from '../PlanSeedPanel'
 
 function mockFetch(response: { ok?: boolean; json: unknown } | 'throw'): void {
@@ -108,40 +107,9 @@ describe('describeCapture', () => {
     expect(text.includes('减半')).toBe(false)
   })
 
-  it('flags a stale capture (16 hours old)', () => {
+  it('never prints stale or halving text itself', () => {
     expect(describeCapture('2026-10-25T10:00:00Z', '2026-10-26T02:00:00Z')).toBe(
-      `这个余量是按 10月25日 23:00 的数据算的，之后新开的广告没算进去；数据已不是最新一轮（超过 ${STALE_LABEL}），预算已按保守口径减半`,
-    )
-  })
-
-  it('does not flag a capture exactly STALE_AFTER_MS old', () => {
-    const factsAsOf = '2026-10-26T02:00:00Z'
-    const capturedAt = new Date(Date.parse(factsAsOf) - STALE_AFTER_MS).toISOString()
-    const text = describeCapture(capturedAt, factsAsOf)
-    expect(text.includes('数据已不是最新一轮')).toBe(false)
-    expect(text.includes('减半')).toBe(false)
-  })
-
-  it('stale threshold is 6.5 hours in real terms', () => {
-    const factsAsOf = '2026-10-26T02:00:00Z'
-
-    const sixHoursBefore = describeCapture('2026-10-25T20:00:00Z', factsAsOf)
-    expect(sixHoursBefore.includes('数据已不是最新一轮')).toBe(false)
-
-    const sevenHoursBefore = describeCapture('2026-10-25T19:00:00Z', factsAsOf)
-    expect(sevenHoursBefore).toContain(
-      '数据已不是最新一轮（超过 6 小时半），预算已按保守口径减半',
-    )
-  })
-
-  it('flags a capture one minute past STALE_AFTER_MS', () => {
-    const factsAsOf = '2026-10-26T02:00:00Z'
-    const capturedAt = new Date(
-      Date.parse(factsAsOf) - STALE_AFTER_MS - 60_000,
-    ).toISOString()
-    const text = describeCapture(capturedAt, factsAsOf)
-    expect(text.includes(`数据已不是最新一轮（超过 ${STALE_LABEL}），预算已按保守口径减半`)).toBe(
-      true,
+      '这个余量是按 10月25日 23:00 的数据算的，之后新开的广告没算进去',
     )
   })
 })
@@ -262,15 +230,44 @@ describe('PlanSeedPanel', () => {
     expect(el).not.toBeNull()
   })
 
-  it('renders the stale capture sentence', async () => {
-    mockFetch({
-      json: { success: true, seed: seed({ captured_at: { act_A: '2026-10-25T10:00:00Z' } }) },
-    })
+  it('shows the known-limit sentence in the ready state', async () => {
+    mockFetch({ json: { success: true, seed: seed() } })
     render(<PlanSeedPanel clientId="c1" prescriptionId="p1" />)
     await screen.findByText('广告步骤的建议')
     expect(document.body.textContent).toContain(
-      `数据已不是最新一轮（超过 ${STALE_LABEL}），预算已按保守口径减半`,
+      '读到的在投合计来自最近一次数据抓取，抓取之后新开的广告不在内。',
     )
+  })
+
+  it('shows the server-written conservative-basis line from the budget basis', async () => {
+    const s = seed()
+    const step = s.ad_steps[0]
+    const budget = step.daily_budget_cents
+    if (!budget.ok) throw new Error('fixture budget must be ok')
+    const withBasis: PlanSeed = {
+      ...s,
+      ad_steps: [
+        {
+          ...step,
+          daily_budget_cents: {
+            ...budget,
+            basis: [
+              ...budget.basis,
+              {
+                label: '保守口径',
+                value: '该账户的广告数据过期或读不到抓取时间，按保守口径减半（只减半一次）',
+                source: '剧本参数 + 广告快照',
+                as_of: null,
+              },
+            ],
+          },
+        },
+      ],
+    }
+    mockFetch({ json: { success: true, seed: withBasis } })
+    render(<PlanSeedPanel clientId="c1" prescriptionId="p1" />)
+    await screen.findByText('广告步骤的建议')
+    expect(document.body.textContent).toContain('按保守口径减半（只减半一次）')
   })
 
   it('renders the null capture sentence', async () => {

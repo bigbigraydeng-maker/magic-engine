@@ -18,7 +18,7 @@ import {
   PrescriptionReviewActions,
 } from './review-actions'
 import { MANUAL_PRESCRIPTION_AGENT, manualSource } from '@/lib/diagnostic/manual-prescription'
-import { PlanSeedPanel } from './PlanSeedPanel'
+import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
 
 // DAPE Week 2 W4 — Goal 一对一 + 版本化所需的轻量 row 类型
 interface MinimalGoal {

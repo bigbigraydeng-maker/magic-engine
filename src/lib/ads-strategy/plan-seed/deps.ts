@@ -18,25 +18,52 @@ const CAPTURE_LEVELS = ['campaign', 'adset'] as const
 /** 单次 Graph 请求超时（毫秒）。 */
 const GRAPH_TIMEOUT_MS = 6000
 
-/** 把任意异常转成中文可读的原因字符串（绝不包含 token）。 */
-function errorReason(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message
-  if (typeof err === 'string' && err.length > 0) return err
-  return '未知错误'
+/** 从 Graph 错误响应体里取出 error.code（不是数字则返回 null）。 */
+function extractErrorCode(body: unknown): number | null {
+  if (typeof body !== 'object' || body === null) return null
+  const error = (body as { error?: unknown }).error
+  if (typeof error !== 'object' || error === null) return null
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'number' ? code : null
+}
+
+/** 把 Graph 错误状态码 / 错误码归类成中文原因（绝不包含响应体 / URL / token）。 */
+function classifyGraphError(status: number, body: unknown): string {
+  const code = extractErrorCode(body)
+  if (status === 429 || code === 4 || code === 17 || code === 32 || code === 613) {
+    return 'Meta 限流，稍后再试'
+  }
+  if (code === 190) return '令牌失效，需要重新连接'
+  if (code === 10 || code === 200) return '缺少权限'
+  return 'Meta 接口返回错误'
+}
+
+/** 清洗原因字符串，抹掉可能泄露的 token / 长串。 */
+function sanitizeReason(reason: string): string {
+  return reason
+    .replace(/access_token=[^&\s]+/gi, 'access_token=***')
+    .replace(/Bearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer ***')
+    .replace(/[A-Za-z0-9_-]{20,}/g, '***')
 }
 
 /** 只读 GET 一个 Graph URL；失败时返回中文原因，绝不泄露 URL / token。 */
-async function graphGetJson(url: string): Promise<GraphResult> {
+export async function graphGetJson(url: string, token: string): Promise<GraphResult> {
   try {
-    const res = await fetch(url, { method: 'GET', signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS) })
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+    })
     if (!res.ok) {
-      return { ok: false, reason: `Meta 接口返回 HTTP ${res.status}` }
+      const body: unknown = await res.json().catch(() => null)
+      return { ok: false, reason: sanitizeReason(classifyGraphError(res.status, body)) }
     }
     const json: unknown = await res.json()
     return { ok: true, json }
   } catch (err) {
-    const msg = errorReason(err)
-    return { ok: false, reason: `网络错误：${msg}` }
+    const isTimeout =
+      err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+    return { ok: false, reason: sanitizeReason(isTimeout ? '读取超时' : '网络错误') }
   }
 }
 
@@ -57,6 +84,15 @@ function parseScopes(json: unknown): string[] {
     if (typeof rec.permission === 'string' && rec.permission !== '') out.push(rec.permission)
   }
   return out
+}
+
+/** 判断响应里是否有 paging.next（非空字符串）。 */
+function hasNextPage(json: unknown): boolean {
+  if (typeof json !== 'object' || json === null) return false
+  const paging = (json as { paging?: unknown }).paging
+  if (typeof paging !== 'object' || paging === null) return false
+  const next = (paging as { next?: unknown }).next
+  return typeof next === 'string' && next !== ''
 }
 
 /** 解析 promote_pages 响应，取出 data[].id。 */
@@ -178,13 +214,13 @@ async function loadForms(
 }
 
 /** 读令牌权限（/me/permissions，只读 GET）。 */
-async function loadScopes(
+export async function loadScopes(
   clientId: string,
 ): Promise<{ source: string; scopes: ReadState<string[]> } | null> {
   const resolved = await resolveMetaTokenForClient(clientId)
   if (resolved === null) return null
-  const url = `${GRAPH_BASE}/me/permissions?access_token=${encodeURIComponent(resolved.token)}`
-  const res = await graphGetJson(url)
+  const url = `${GRAPH_BASE}/me/permissions`
+  const res = await graphGetJson(url, resolved.token)
   if (!res.ok) {
     return { source: resolved.source, scopes: { state: 'failed', reason: res.reason } }
   }
@@ -194,17 +230,18 @@ async function loadScopes(
 }
 
 /** 读可推广主页（/act_xxx/promote_pages，只读 GET）。 */
-async function loadPromotePages(
+export async function loadPromotePages(
   clientId: string,
   adAccountId: string,
 ): Promise<ReadState<string[]>> {
   const resolved = await resolveMetaTokenForClient(clientId)
   if (resolved === null) return { state: 'failed', reason: '没有可用令牌' }
-  const url =
-    `${GRAPH_BASE}/${adAccountId}/promote_pages` +
-    `?fields=id&limit=100&access_token=${encodeURIComponent(resolved.token)}`
-  const res = await graphGetJson(url)
+  const url = `${GRAPH_BASE}/${adAccountId}/promote_pages?fields=id&limit=100`
+  const res = await graphGetJson(url, resolved.token)
   if (!res.ok) return { state: 'failed', reason: res.reason }
+  if (hasNextPage(res.json)) {
+    return { state: 'failed', reason: '可推广主页超过 100 个，只读了前 100 个' }
+  }
   const ids = parseIds(res.json)
   if (ids.length === 0) return { state: 'empty' }
   return { state: 'ok', value: ids }
@@ -230,8 +267,8 @@ export function productionDeps(): PlanSeedDeps {
     return loadAdsDraftFacts({
       clientId,
       adAccountId,
+      // required by loadAdsDraftFacts; plan seed does not deduct human-filled plan steps.
       committedMinor: 0,
-      committedAllMinor: 0,
       playbook,
     })
   }

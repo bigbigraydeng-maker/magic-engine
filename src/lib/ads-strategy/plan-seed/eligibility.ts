@@ -21,6 +21,7 @@ export interface EligibilityInput {
 
 const SNAPSHOT_SOURCE = '广告快照与 Meta 只读检查'
 const CUSTOMER_SOURCE = '客户设置'
+// 来源：发布 lead-form（即时表单）广告需要的 Meta 权限；这里不另列别的权限清单。
 const REQUIRED_SCOPES = ['leads_retrieval', 'pages_manage_ads']
 
 interface Collector {

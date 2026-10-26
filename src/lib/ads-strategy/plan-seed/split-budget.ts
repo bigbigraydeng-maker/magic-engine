@@ -14,7 +14,6 @@ export interface SplitInput {
   halve: { client: HalveFlags; account: Record<string, HalveFlags> }
   currency: string | null
   extraDivisor?: number
-  humanCommitted?: { byAccount: Record<string, number>; all: number }
 }
 
 export type SplitResult = {
@@ -79,16 +78,12 @@ export function splitBudget(i: SplitInput): SplitResult {
   const N = i.steps.length + (i.extraDivisor ?? 0)
 
   const counts = countByAccount(i.steps)
-  const clientH = Math.max(0, i.clientHeadroomMinor - (i.humanCommitted?.all ?? 0))
+  const clientH = Math.max(0, i.clientHeadroomMinor)
   const F = (minor: number): string => formatMinor(minor, i.currency)
 
   return i.steps.map((step) => {
     const n_a = counts[step.accountId] ?? 1
-    const acctH = Math.max(
-      0,
-      (i.accountHeadroomMinor[step.accountId] ?? 0) -
-        (i.humanCommitted?.byAccount[step.accountId] ?? 0),
-    )
+    const acctH = Math.max(0, i.accountHeadroomMinor[step.accountId] ?? 0)
     const accountFlags = i.halve.account[step.accountId]
     const shouldHalve =
       i.halve.client.stale ||
