@@ -10,6 +10,7 @@
 
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { PrescriptionIntake, PrescriptionContent, PriorPrescriptionContext } from '@/types/diagnostic'
+import { adPlaysPromptSection, adPlaysSchemaExample } from '@/lib/ads-strategy/plan-seed/ad-plays-prompt'
 import type { GoalRow } from '@/types/strategy'
 import type { HuatuoLookupContext, TrendSummaryLite, SelfGradeWeakness } from './types'
 import { formatBenchmarksForPrompt } from './benchmarks'
@@ -49,6 +50,8 @@ export const HUATUO_GENERATION_SYSTEM_PROMPT = `你是华佗（Huà Tuó），Ma
    - **terminal** (直接驱动 Goal verdict): demand_generation 需求生成 / conversion_optimization 转化优化 / trust_building 信任建设 / competitive_defense 竞争防御 / market_education 市场教育
    - **supporting** (服务 terminal): content_asset_production 内容资产生产 — 弹药库, 自己 KPI 是"产了多少弹药"
    - 一个 Goal 至少 1 个 terminal Initiative. 不要全填 supporting.
+
+${adPlaysPromptSection()}
 
 ## 输出语言规则
 
@@ -104,7 +107,8 @@ export const HUATUO_GENERATION_SYSTEM_PROMPT = `你是华佗（Huà Tuó），Ma
         "title": "中文 Initiative 标题（跟 phase.name 一致或更精炼）",
         "posture": "offensive|defensive|fast|slow",
         "budget_percent": number,
-        "hypothesis": "中文 1–2 句战略假设（为什么押这一条，90 天后验证）"
+        "hypothesis": "中文 1–2 句战略假设（为什么押这一条，90 天后验证）",
+        ${adPlaysSchemaExample()}  // 可选：仅有广告投放的阶段才写，其它阶段整行省略
       },
       "actions": [
         {
