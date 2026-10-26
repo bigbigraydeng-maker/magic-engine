@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { buildPlanSeed, type PlanSeedDeps, type BuildArgs } from '../build'
 import { planSeedSchema, type PlanSeed, type PlanSeedStep } from '../types'
+import { STALE_AFTER_MS } from '../constants'
 import type { AdsDraftFacts } from '@/lib/marketing-plan/promo/draft-ads'
 import type { AdPlay } from '../ad-plays'
 
@@ -362,12 +363,12 @@ describe('buildPlanSeed', () => {
     if (step?.ad_account_id.ok) {
       expect(step.ad_account_id.value).toBe('act_B')
       const basis = step.ad_account_id.basis
-      expect(basis.some((b) => b.value.includes('act_A') && b.value.includes('可用余量 2000'))).toBe(
-        true,
-      )
-      expect(basis.some((b) => b.value.includes('act_B') && b.value.includes('可用余量 9000'))).toBe(
-        true,
-      )
+      expect(
+        basis.some((b) => b.value.includes('act_A') && b.value.includes('可用余量 $20.00 NZD')),
+      ).toBe(true)
+      expect(
+        basis.some((b) => b.value.includes('act_B') && b.value.includes('可用余量 $90.00 NZD')),
+      ).toBe(true)
     }
     expect(step?.daily_budget_cents.ok).toBe(true)
     if (step?.daily_budget_cents.ok) {
@@ -486,11 +487,231 @@ describe('buildPlanSeed', () => {
   })
 
   it('source guard: no hidden_from_ad_health string', () => {
-    const files = ['../build.ts', '../deps.ts', '../attach.ts']
+    const files = [
+      '../build.ts',
+      '../deps.ts',
+      '../attach.ts',
+      '../../../marketing-plan/promo/facts.ts',
+    ]
     for (const rel of files) {
       const path = resolve(__dirname, rel)
       const content = readFileSync(path, 'utf8')
       expect(content).not.toContain('hidden_from_ad_health')
+    }
+  })
+
+  it('stale boundary', async () => {
+    const budgetOf = (seed: PlanSeed): number => {
+      const step = findStep(seed, 's1')
+      expect(step).toBeDefined()
+      expect(step?.daily_budget_cents.ok).toBe(true)
+      if (step === undefined || !step.daily_budget_cents.ok) throw new Error('no budget')
+      return step.daily_budget_cents.value
+    }
+
+    // (i) exactly at the threshold -> not stale
+    {
+      const at = new Date(NOW.getTime() - STALE_AFTER_MS).toISOString()
+      const deps = makeDeps({ loadCaptureAt: vi.fn(async () => at) })
+      const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+      expect(budgetOf(seed)).toBe(5000)
+    }
+
+    // (ii) one minute older -> stale
+    {
+      const older = new Date(NOW.getTime() - STALE_AFTER_MS - 60_000).toISOString()
+      const deps = makeDeps({ loadCaptureAt: vi.fn(async () => older) })
+      const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+      expect(budgetOf(seed)).toBe(2500)
+      const step = findStep(seed, 's1')
+      expect(step).toBeDefined()
+      if (step !== undefined && step.daily_budget_cents.ok) {
+        expect(
+          step.daily_budget_cents.basis.some((b) => b.value.includes('按保守口径减半')),
+        ).toBe(true)
+      }
+    }
+
+    // (iii) null capture -> stale
+    {
+      const deps = makeDeps({ loadCaptureAt: vi.fn(async () => null) })
+      const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+      expect(budgetOf(seed)).toBe(2500)
+    }
+  })
+
+  it('stale threshold is 6.5 hours in real terms', async () => {
+    const budgetOf = (seed: PlanSeed): number => {
+      const step = findStep(seed, 's1')
+      expect(step).toBeDefined()
+      expect(step?.daily_budget_cents.ok).toBe(true)
+      if (step === undefined || !step.daily_budget_cents.ok) throw new Error('no budget')
+      return step.daily_budget_cents.value
+    }
+
+    // 6h old -> not stale
+    {
+      const sixHoursAgo = new Date(NOW.getTime() - 6 * 3600 * 1000).toISOString()
+      const deps = makeDeps({ loadCaptureAt: vi.fn(async () => sixHoursAgo) })
+      const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+      expect(budgetOf(seed)).toBe(5000)
+    }
+
+    // 7h old -> stale
+    {
+      const sevenHoursAgo = new Date(NOW.getTime() - 7 * 3600 * 1000).toISOString()
+      const deps = makeDeps({ loadCaptureAt: vi.fn(async () => sevenHoursAgo) })
+      const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+      expect(budgetOf(seed)).toBe(2500)
+    }
+  })
+
+  it('client layer looks at all candidate accounts', async () => {
+    const deps = makeDeps({
+      loadOwnedAccounts: vi.fn(async () => [
+        { id: 'act_A', cap: 10000, label: 'A' },
+        { id: 'act_B', cap: 10000, label: 'B' },
+      ]),
+      loadFacts: vi.fn(async (_clientId: string, accountId: string) => {
+        if (accountId === 'act_A') return facts()
+        return facts({ account_cap_minor: 10000, account_delivering_minor: 9500 })
+      }),
+      loadCaptureAt: vi.fn(async (_clientId: string, accountId: string) =>
+        accountId === 'act_A' ? FRESH : STALE,
+      ),
+    })
+
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    const step = findStep(seed, 's1')
+    expect(step).toBeDefined()
+    expect(step?.ad_account_id.ok).toBe(true)
+    if (step?.ad_account_id.ok) {
+      expect(step.ad_account_id.value).toBe('act_A')
+    }
+    expect(step?.daily_budget_cents.ok).toBe(true)
+    if (step?.daily_budget_cents.ok) {
+      expect(step.daily_budget_cents.value).toBe(2500)
+      expect(
+        step.daily_budget_cents.basis.some((b) => b.value.includes('客户名下账户')),
+      ).toBe(true)
+    }
+  })
+
+  it('selected stale, other fresh still halves', async () => {
+    const deps = makeDeps({
+      loadOwnedAccounts: vi.fn(async () => [
+        { id: 'act_A', cap: 10000, label: 'A' },
+        { id: 'act_B', cap: 10000, label: 'B' },
+      ]),
+      loadFacts: vi.fn(async (_clientId: string, accountId: string) => {
+        if (accountId === 'act_A') return facts()
+        return facts({ account_cap_minor: 10000, account_delivering_minor: 9500 })
+      }),
+      loadCaptureAt: vi.fn(async (_clientId: string, accountId: string) =>
+        accountId === 'act_A' ? STALE : FRESH,
+      ),
+    })
+
+    const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
+    const step = findStep(seed, 's1')
+    expect(step).toBeDefined()
+    expect(step?.ad_account_id.ok).toBe(true)
+    if (step?.ad_account_id.ok) {
+      expect(step.ad_account_id.value).toBe('act_A')
+    }
+    expect(step?.daily_budget_cents.ok).toBe(true)
+    if (step?.daily_budget_cents.ok) {
+      expect(step.daily_budget_cents.value).toBe(2500)
+    }
+  })
+
+  it('failed read still counts in N', async () => {
+    const deps = makeDeps({
+      readForms: vi.fn(async () => ({ state: 'failed' as const, reason: '读表单失败' })),
+    })
+    const seed = await buildPlanSeed(args([leadPlay('s1'), thruplayPlay('s2')]), deps)
+
+    expect(findSkipped(seed, 's1')).toBeDefined()
+    expect(findStep(seed, 's1')).toBeUndefined()
+
+    const s2 = findStep(seed, 's2')
+    expect(s2).toBeDefined()
+    expect(s2?.daily_budget_cents.ok).toBe(true)
+    if (s2?.daily_budget_cents.ok) {
+      expect(s2.daily_budget_cents.value).toBe(3750)
+      expect(
+        s2.daily_budget_cents.basis.some((b) =>
+          b.value.includes(
+            '本来 2 步，其中 1 步因为读不到表单列表被丢掉，除数仍按 2 算（读不到≠没有）',
+          ),
+        ),
+      ).toBe(true)
+    }
+  })
+
+  it('definitely ineligible does not count in N', async () => {
+    const deps = makeDeps({
+      readForms: vi.fn(async () => ({ state: 'empty' as const })),
+    })
+    const seed = await buildPlanSeed(args([leadPlay('s1'), thruplayPlay('s2')]), deps)
+
+    const s2 = findStep(seed, 's2')
+    expect(s2).toBeDefined()
+    expect(s2?.daily_budget_cents.ok).toBe(true)
+    if (s2?.daily_budget_cents.ok) {
+      expect(s2.daily_budget_cents.value).toBe(5000)
+      expect(s2.daily_budget_cents.basis.some((b) => b.label === '除数说明')).toBe(false)
+    }
+  })
+
+  it('no bare minor numbers in user-visible text', async () => {
+    const collectText = (seed: PlanSeed): string[] => {
+      const out: string[] = []
+      for (const step of seed.ad_steps) {
+        for (const field of [step.page_id, step.ad_account_id, step.daily_budget_cents]) {
+          if (field.ok) {
+            for (const b of field.basis) out.push(b.value)
+          } else {
+            out.push(field.why_empty)
+          }
+          out.push(...field.notes)
+        }
+      }
+      for (const s of seed.skipped) out.push(s.why_empty)
+      out.push(...seed.notes)
+      return out
+    }
+
+    const assertNoBareMinor = (seed: PlanSeed): void => {
+      for (const text of collectText(seed)) {
+        expect(text).not.toContain('15000')
+        expect(text).not.toContain('10000')
+        expect(text).not.toContain('5000')
+      }
+    }
+
+    // happy path
+    {
+      const deps = makeDeps()
+      const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+      assertNoBareMinor(seed)
+
+      const step = findStep(seed, 's1')
+      expect(step).toBeDefined()
+      expect(step?.daily_budget_cents.ok).toBe(true)
+      if (step?.daily_budget_cents.ok) {
+        const how = step.daily_budget_cents.basis.find((b) => b.label === '预算怎么算的')
+        expect(how).toBeDefined()
+        expect(how?.value).toContain('$150.00 NZD')
+        expect(how?.value).toContain('$50.00 NZD')
+      }
+    }
+
+    // halved
+    {
+      const deps = makeDeps({ loadCaptureAt: vi.fn(async () => STALE) })
+      const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+      assertNoBareMinor(seed)
     }
   })
 

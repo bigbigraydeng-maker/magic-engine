@@ -352,4 +352,84 @@ describe('carryPriorAdPlays', () => {
       { step_key: 'two', play: 'lead_form_harvest' },
     ])
   })
+
+  it('carryPriorAdPlays returns true only when something was carried', () => {
+    const prior = content([{ step_key: 'p1', play: 'lead_form_harvest' }])
+    const empty = content(undefined)
+    expect(carryPriorAdPlays(empty, prior)).toBe(true)
+
+    const withOwn = content([{ step_key: 'n1', play: 'reach_awareness' }])
+    expect(carryPriorAdPlays(withOwn, prior)).toBe(false)
+
+    const noPriorPlays = content(undefined)
+    expect(carryPriorAdPlays(noPriorPlays, content(undefined))).toBe(false)
+  })
+})
+
+describe('attachPlanSeed budget', () => {
+  it('a hanging loadPeriod cannot hold attach beyond the budget', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const deps: AttachDeps = {
+      ...fullDeps(),
+      timeoutMs: 100,
+      loadPeriod: () => new Promise(() => {}),
+    }
+    const input = content([{ step_key: 's1', play: 'thruplay_pool_build' }])
+    const startedAt = Date.now()
+    const result = await attachPlanSeed(input, ctx, deps)
+    const elapsed = Date.now() - startedAt
+    expect(elapsed).toBeLessThan(1500)
+    expect(result).toBe(input)
+    expect('plan_seed' in result).toBe(false)
+    warn.mockRestore()
+  })
+
+  it('total time includes period read: remaining budget is passed to buildPlanSeed', async () => {
+    const deps: AttachDeps = {
+      ...fullDeps(),
+      timeoutMs: 400,
+      loadPeriod: () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () => resolve({ start_date: '2026-10-27', end_date: '2026-11-10' }),
+            100,
+          )
+        }),
+    }
+    const input = content([{ step_key: 's1', play: 'thruplay_pool_build' }])
+    await attachPlanSeed(input, ctx, deps)
+    const calls = vi.mocked(buildPlanSeed).mock.calls
+    expect(calls.length).toBeGreaterThan(0)
+    const lastCall = calls[calls.length - 1]
+    const options = lastCall[2]
+    expect(options).toBeDefined()
+    const remaining = options?.timeoutMs
+    expect(typeof remaining).toBe('number')
+    expect(remaining).toBeGreaterThan(0)
+    expect(remaining).toBeLessThanOrEqual(300)
+  })
+})
+
+describe('carried plays note', () => {
+  it('carried plays leave a note', async () => {
+    const prior = content([{ step_key: 'p1', play: 'lead_form_harvest' }])
+    const next = content(undefined)
+    const result = await attachPlanSeed(
+      next,
+      { clientId: 'c1', goalId: 'g1', priorContent: prior },
+      fullDeps(),
+    )
+    expect(seedOf(result).notes).toContain('打法是从上一版处方带回来的')
+  })
+
+  it('own plays leave no carried note', async () => {
+    const prior = content([{ step_key: 'p1', play: 'lead_form_harvest' }])
+    const next = content([{ step_key: 'n1', play: 'reach_awareness' }])
+    const result = await attachPlanSeed(
+      next,
+      { clientId: 'c1', goalId: 'g1', priorContent: prior },
+      fullDeps(),
+    )
+    expect(seedOf(result).notes).not.toContain('打法是从上一版处方带回来的')
+  })
 })

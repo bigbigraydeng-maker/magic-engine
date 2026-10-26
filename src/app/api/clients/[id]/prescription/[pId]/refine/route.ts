@@ -199,11 +199,11 @@ function makeRefineStream(
         )
 
         // 精修重写了内容：用新内容的打法重建计划草稿种子（新内容没有打法就带回旧的）
-        await attachPlanSeed(result.content, {
+        result.content = await attachPlanSeed(result.content, {
           clientId,
           goalId: goal?.id ?? null,
           priorContent: previousContent,
-        }).catch(() => undefined)
+        }).catch(() => result.content)
 
         await supabaseAdmin
           .from('prescriptions')

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { PLAY_CATALOG } from '@/lib/ads-strategy/play-vocabulary'
+import { STALE_AFTER_MS, STALE_LABEL } from '@/lib/ads-strategy/plan-seed/constants'
+import { formatMinor } from '@/lib/ads-strategy/plan-seed/format'
 import type { PlanSeed, PlanSeedStep } from '@/lib/ads-strategy/plan-seed/types'
 
 type Field<T> =
@@ -55,12 +57,12 @@ function formatNz(iso: string): string {
 export function describeCapture(capturedAt: string | null, factsAsOf: string): string {
   const capturedMs = capturedAt === null ? NaN : Date.parse(capturedAt)
   if (Number.isNaN(capturedMs)) {
-    return '读不到这个账户最近一次数据抓取的时间，预算已按保守口径减半'
+    return '读不到这个账户最近一次数据抓取的时间，预算建议不可靠，请看依据里的说明'
   }
   const base = `这个余量是按 ${formatNz(capturedAt as string)} 的数据算的，之后新开的广告没算进去`
   const factsMs = Date.parse(factsAsOf)
-  if (!Number.isNaN(factsMs) && factsMs - capturedMs > 12 * 3600 * 1000) {
-    return `${base}；数据已超过 12 小时，预算已按保守口径减半`
+  if (!Number.isNaN(factsMs) && factsMs - capturedMs > STALE_AFTER_MS) {
+    return `${base}；数据已不是最新一轮（超过 ${STALE_LABEL}），预算已按保守口径减半`
   }
   return base
 }
@@ -108,8 +110,7 @@ function FieldRow<T>({
 
 function StepCard({ step, currency }: { step: PlanSeedStep; currency: string | null }) {
   const playLabel = PLAY_CATALOG[step.play].label
-  const budgetFormat = (minor: number): string =>
-    `$${(minor / 100).toFixed(2)}${currency !== null ? ` ${currency}` : ''}`
+  const budgetFormat = (minor: number): string => formatMinor(minor, currency)
   return (
     <div className="mt-4 rounded border border-gray-200 p-3 text-sm">
       <div className="font-semibold">

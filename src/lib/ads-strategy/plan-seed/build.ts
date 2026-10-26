@@ -1,7 +1,9 @@
 import type { AdsDraftFacts } from '@/lib/marketing-plan/promo/draft-ads'
 import type { AdPlay } from './ad-plays'
+import { STALE_AFTER_MS } from './constants'
 import { judgeEligibility, type ReadState } from './eligibility'
-import { splitBudget } from './split-budget'
+import { formatMinor } from './format'
+import { splitBudget, type HalveFlags } from './split-budget'
 import type { Basis, Field, PlanSeed, PlanSeedStep } from './types'
 
 export interface PlanSeedDeps {
@@ -75,7 +77,6 @@ interface Accumulator {
 }
 
 const DEFAULT_TIMEOUT_MS = 8000
-const STALE_MS = 12 * 3600 * 1000
 const SNAPSHOT_SOURCE = '广告快照'
 const CAPTURE_SOURCE = 'ad_snapshot_captures'
 
@@ -96,12 +97,20 @@ async function safe<T>(fn: () => Promise<T>): Promise<SafeResult<T>> {
   }
 }
 
-/** 抓取时间是否过期（读不到、解析失败、超过 12 小时都算过期）。 */
+/** 抓取时间是否过期（读不到、解析失败、超过 6.5 小时都算过期）。 */
 function isStale(captureAt: string | null, nowMs: number): boolean {
   if (captureAt === null) return true
   const parsed = Date.parse(captureAt)
   if (Number.isNaN(parsed)) return true
-  return nowMs - parsed > STALE_MS
+  return nowMs - parsed > STALE_AFTER_MS
+}
+
+/** 账户快照里的币种；读不到或为空时返回 null。 */
+function currencyOfFacts(facts: AdsDraftFacts | null): string | null {
+  if (facts === null) return null
+  if (facts.headroom.ok !== true) return null
+  const cur = facts.headroom.currency.trim()
+  return cur === '' ? null : cur
 }
 
 /** 账户级可用余量：日上限 - 在投预算；读不全按 0 算。 */
@@ -206,7 +215,7 @@ function pickAccount(
 function candidateBasis(accounts: AccountData[]): Basis[] {
   return accounts.map((a) => ({
     label: '合格候选账户',
-    value: `${a.id}：可用余量 ${accountRoom(a.facts)}（读不全按 0 算）`,
+    value: `${a.id}：可用余量 ${formatMinor(accountRoom(a.facts), currencyOfFacts(a.facts))}（读不全按 0 算）`,
     source: SNAPSHOT_SOURCE,
     as_of: a.captureAt,
   }))
@@ -296,14 +305,33 @@ function accountHeadroomMap(passing: PassingStep[]): Record<string, number> {
   return map
 }
 
-/** 判断某个已选账户是否过期。 */
-function anyStale(passing: PassingStep[], nowMs: number): boolean {
-  return passing.some((p) => isStale(p.account.captureAt, nowMs))
+/** 单个账户的保守口径标记。 */
+function haveFlags(a: AccountData, nowMs: number): HalveFlags {
+  return {
+    stale: isStale(a.captureAt, nowMs),
+    dailyUnknown: a.facts !== null && a.facts.daily === null,
+  }
 }
 
-/** 判断某个已选账户是否读不到逐日花费。 */
-function anyDailyUnknown(passing: PassingStep[]): boolean {
-  return passing.some((p) => p.account.facts !== null && p.account.facts.daily === null)
+/** 客户层保守口径：所有候选账户里任一命中即命中。 */
+function clientFlags(all: AccountData[], nowMs: number): HalveFlags {
+  let stale = false
+  let dailyUnknown = false
+  for (const a of all) {
+    const f = haveFlags(a, nowMs)
+    if (f.stale) stale = true
+    if (f.dailyUnknown) dailyUnknown = true
+  }
+  return { stale, dailyUnknown }
+}
+
+/** 账户层保守口径：只按已选账户逐个给出。 */
+function accountFlagMap(passing: PassingStep[], nowMs: number): Record<string, HalveFlags> {
+  const map: Record<string, HalveFlags> = {}
+  for (const p of passing) {
+    map[p.accountId] = haveFlags(p.account, nowMs)
+  }
+  return map
 }
 
 /** 预算字段为空时的原因（按优先级）。 */
@@ -368,14 +396,44 @@ function buildStep(
   }
 }
 
+/** 判断"没有合格账户"是否因为读不到（读不到≠没有）；返回原因或 null。 */
+function unknownReason(
+  play: AdPlay,
+  accounts: AccountData[],
+  ctx: SharedContext,
+): string | null {
+  const reasons: string[] = []
+  const add = (r: string): void => {
+    if (!reasons.includes(r)) reasons.push(r)
+  }
+  if (ctx.pageId !== null && ctx.pageId !== '' && ctx.pageToken.state === 'failed') {
+    add('主页访问令牌')
+  }
+  if (play.play === 'lead_form_harvest' && ctx.scopes.state === 'failed') {
+    add('令牌权限')
+  }
+  if (play.play === 'lead_form_harvest' && ctx.forms.state === 'failed') {
+    add('表单列表')
+  }
+  if (accounts.some((a) => (a.facts?.account_status ?? null) === null)) {
+    add('账户状态')
+  }
+  return reasons.length === 0 ? null : reasons.join('、')
+}
+
 /** 把每个打法映射到"通过 / 跳过"的结果。 */
 function classifyPlays(
   plays: AdPlay[],
   accounts: AccountData[],
   ctx: SharedContext,
-): { passing: PassingStep[]; skipped: { step_key: string; why_empty: string }[] } {
+): {
+  passing: PassingStep[]
+  skipped: { step_key: string; why_empty: string }[]
+  unknownDrops: { step_key: string; reason: string }[]
+} {
   const passing: PassingStep[] = []
   const skipped: { step_key: string; why_empty: string }[] = []
+  const unknownDrops: { step_key: string; reason: string }[] = []
   for (const play of plays) {
     const { passing: chosen, reasons } = pickAccount(play, accounts, ctx)
     if (chosen === null) {
@@ -383,11 +441,15 @@ function classifyPlays(
         step_key: play.step_key,
         why_empty: `没有合格的广告账户：${reasons.join('；')}`,
       })
+      const unknown = unknownReason(play, accounts, ctx)
+      if (unknown !== null) {
+        unknownDrops.push({ step_key: play.step_key, reason: unknown })
+      }
       continue
     }
     passing.push(chosen)
   }
-  return { passing, skipped }
+  return { passing, skipped, unknownDrops }
 }
 
 /** 组装所有通过步骤的预算字段（含 splitBudget 调用）。 */
@@ -396,8 +458,13 @@ async function buildBudgetFields(
   passing: PassingStep[],
   args: BuildArgs,
   deps: PlanSeedDeps,
-  nowMs: number,
-  multiCurrency: boolean,
+  extra: {
+    nowMs: number
+    multiCurrency: boolean
+    allAccounts: AccountData[]
+    unknownDrops: { step_key: string; reason: string }[]
+    currency: string | null
+  },
 ): Promise<Map<string, Field<number>>> {
   const out = new Map<string, Field<number>>()
   if (passing.length === 0) return out
@@ -420,15 +487,45 @@ async function buildBudgetFields(
     clientHeadroomMinor: minClientHeadroom(passing),
     accountHeadroomMinor: accountHeadroomMap(passing),
     share,
-    halve: { stale: anyStale(passing, nowMs), dailyUnknown: anyDailyUnknown(passing) },
+    halve: {
+      client: clientFlags(extra.allAccounts, extra.nowMs),
+      account: accountFlagMap(passing, extra.nowMs),
+    },
+    currency: extra.currency,
+    extraDivisor: extra.unknownDrops.length,
     humanCommitted: args.humanCommitted,
   })
+
+  const k = extra.unknownDrops.length
+  const N = passing.length + k
+  const dropReasons: string[] = []
+  for (const d of extra.unknownDrops) {
+    if (!dropReasons.includes(d.reason)) dropReasons.push(d.reason)
+  }
+  const divisorBasis: Basis | null =
+    k > 0
+      ? {
+          label: '除数说明',
+          value: `本来 ${N} 步，其中 ${k} 步因为读不到${dropReasons.join('、')}被丢掉，除数仍按 ${N} 算（读不到≠没有）`,
+          source: '剧本参数 + 广告快照',
+          as_of: null,
+        }
+      : null
+
   const byKey = new Map(split.map((r) => [r.step_key, r]))
   for (const p of passing) {
     const r = byKey.get(p.play.step_key)
+    const splitBasis = r?.basis ?? []
+    if (divisorBasis !== null) splitBasis.push(divisorBasis)
     out.set(
       p.play.step_key,
-      buildBudgetField(p, r?.budgetMinor ?? null, r?.why_empty, r?.basis ?? [], multiCurrency),
+      buildBudgetField(
+        p,
+        r?.budgetMinor ?? null,
+        r?.why_empty,
+        splitBasis,
+        extra.multiCurrency,
+      ),
     )
   }
   return out
@@ -542,7 +639,7 @@ async function runWork(
     const accounts = await loadAllAccounts(args.clientId, candidates, deps)
     for (const a of accounts) acc.capturedAt[a.id] = a.captureAt
 
-    const { passing, skipped } = classifyPlays(args.plays, accounts, ctx)
+    const { passing, skipped, unknownDrops } = classifyPlays(args.plays, accounts, ctx)
     acc.skipped = skipped
 
     const currencies = collectCurrencies(passing)
@@ -550,14 +647,13 @@ async function runWork(
     acc.currency = currencies.length === 1 ? currencies[0] : null
     if (multiCurrency) acc.notes.push('多币种')
 
-    const budgets = await buildBudgetFields(
-      args.clientId,
-      passing,
-      args,
-      deps,
+    const budgets = await buildBudgetFields(args.clientId, passing, args, deps, {
       nowMs,
       multiCurrency,
-    )
+      allAccounts: accounts,
+      unknownDrops,
+      currency: acc.currency,
+    })
 
     const steps: PlanSeedStep[] = []
     for (const p of passing) {

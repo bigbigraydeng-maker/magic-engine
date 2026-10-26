@@ -424,7 +424,7 @@ function makeHuatuoStream(
         })
 
         // 2b. 用事实构建计划草稿种子（永不抛错；失败时不写 plan_seed）
-        await attachPlanSeed(result.content, { clientId, goalId: goal?.id ?? null }).catch(() => undefined)
+        result.content = await attachPlanSeed(result.content, { clientId, goalId: goal?.id ?? null }).catch(() => result.content)
 
         // 3. 写回 DB
         await supabaseAdmin

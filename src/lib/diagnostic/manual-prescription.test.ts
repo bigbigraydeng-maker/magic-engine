@@ -185,6 +185,29 @@ describe('parseManualPrescriptionBody · ad_plays', () => {
     ])
   })
 
+  it('treats ad_plays null as not provided', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays(null), CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.content.phases[0].initiative_seed).not.toHaveProperty('ad_plays')
+  })
+
+  it('still rejects a non-null malformed ad_plays', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays('x'), CLIENT)
+    expect(parsed.ok).toBe(false)
+    if (parsed.ok) return
+    expect(parsed.status).toBe(422)
+  })
+
+  it('null ad_plays keeps the other seed keys', () => {
+    const parsed = parseManualPrescriptionBody(bodyWithPlays(null), CLIENT)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    const seed = parsed.content.phases[0].initiative_seed
+    expect(seed?.initiative_type).toBe('demand_generation')
+    expect(seed?.title).toBe('建系列')
+  })
+
   it('leaves ad_plays absent when not supplied', () => {
     const parsed = parseManualPrescriptionBody(body(), CLIENT)
     expect(parsed.ok).toBe(true)

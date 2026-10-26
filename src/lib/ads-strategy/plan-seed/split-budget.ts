@@ -1,11 +1,19 @@
 import type { Basis } from './types'
+import { formatMinor } from './format'
+
+export interface HalveFlags {
+  stale: boolean
+  dailyUnknown: boolean
+}
 
 export interface SplitInput {
   steps: { step_key: string; accountId: string }[]
   clientHeadroomMinor: number
   accountHeadroomMinor: Record<string, number>
   share: number
-  halve: { stale: boolean; dailyUnknown: boolean }
+  halve: { client: HalveFlags; account: Record<string, HalveFlags> }
+  currency: string | null
+  extraDivisor?: number
   humanCommitted?: { byAccount: Record<string, number>; all: number }
 }
 
@@ -34,22 +42,29 @@ function budgetBasis(
   n_a: number,
   share: number,
   raw: number,
+  currency: string | null,
 ): Basis {
   const clientPer = Math.floor(clientH / N)
   const acctPer = Math.floor(acctH / n_a)
+  const F = (minor: number): string => formatMinor(minor, currency)
   return {
     label: '预算怎么算的',
-    value: `客户余量 ${clientH} ÷ N=${N} → ${clientPer} ；账户余量 ${acctH} ÷ n_a=${n_a} → ${acctPer} ；取小者 × 剧本比例 ${share} = ${raw}`,
+    value: `客户余量 ${F(clientH)} ÷ N=${N} → ${F(clientPer)}；账户余量 ${F(acctH)} ÷ n_a=${n_a} → ${F(acctPer)}；取小者 × 剧本比例 ${share} = ${F(raw)}`,
     source: '剧本参数 + 广告快照',
     as_of: null,
   }
 }
 
 /** 生成"保守口径"依据；不适用时返回 null。 */
-function halveBasis(halve: { stale: boolean; dailyUnknown: boolean }): Basis | null {
+function halveBasis(
+  clientFlags: HalveFlags,
+  accountFlags: HalveFlags | undefined,
+): Basis | null {
   const reasons: string[] = []
-  if (halve.stale) reasons.push('广告数据过期或读不到抓取时间')
-  if (halve.dailyUnknown) reasons.push('近期逐日花费读不到')
+  if (clientFlags.stale) reasons.push('客户名下账户的广告数据过期或读不到抓取时间')
+  if (clientFlags.dailyUnknown) reasons.push('客户名下账户近期逐日花费读不到')
+  if (accountFlags?.stale) reasons.push('该账户的广告数据过期或读不到抓取时间')
+  if (accountFlags?.dailyUnknown) reasons.push('该账户近期逐日花费读不到')
   if (reasons.length === 0) return null
   return {
     label: '保守口径',
@@ -60,13 +75,12 @@ function halveBasis(halve: { stale: boolean; dailyUnknown: boolean }): Basis | n
 }
 
 export function splitBudget(i: SplitInput): SplitResult {
-  const N = i.steps.length
-  if (N === 0) return []
+  if (i.steps.length === 0) return []
+  const N = i.steps.length + (i.extraDivisor ?? 0)
 
   const counts = countByAccount(i.steps)
   const clientH = Math.max(0, i.clientHeadroomMinor - (i.humanCommitted?.all ?? 0))
-  const shouldHalve = i.halve.stale || i.halve.dailyUnknown
-  const halveEntry = halveBasis(i.halve)
+  const F = (minor: number): string => formatMinor(minor, i.currency)
 
   return i.steps.map((step) => {
     const n_a = counts[step.accountId] ?? 1
@@ -75,17 +89,26 @@ export function splitBudget(i: SplitInput): SplitResult {
       (i.accountHeadroomMinor[step.accountId] ?? 0) -
         (i.humanCommitted?.byAccount[step.accountId] ?? 0),
     )
+    const accountFlags = i.halve.account[step.accountId]
+    const shouldHalve =
+      i.halve.client.stale ||
+      i.halve.client.dailyUnknown ||
+      (accountFlags?.stale ?? false) ||
+      (accountFlags?.dailyUnknown ?? false)
     const raw = Math.floor(i.share * Math.min(clientH / N, acctH / n_a))
     const budget = shouldHalve ? Math.floor(raw / 2) : raw
 
-    const basis: Basis[] = [budgetBasis(clientH, N, acctH, n_a, i.share, raw)]
+    const basis: Basis[] = [
+      budgetBasis(clientH, N, acctH, n_a, i.share, raw, i.currency),
+    ]
+    const halveEntry = halveBasis(i.halve.client, accountFlags)
     if (halveEntry) basis.push(halveEntry)
 
     if (budget <= 0) {
       return {
         step_key: step.step_key,
         budgetMinor: null,
-        why_empty: `预算余量不够这一步（客户余量 ${clientH} ÷ ${N}，账户余量 ${acctH} ÷ ${n_a}，剧本比例 ${i.share}）`,
+        why_empty: `预算余量不够这一步（客户余量 ${F(clientH)} ÷ ${N}，账户余量 ${F(acctH)} ÷ ${n_a}，剧本比例 ${i.share}）`,
         divisors: { N, n_a },
         basis,
       }

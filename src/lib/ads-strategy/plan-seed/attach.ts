@@ -4,9 +4,13 @@ import { buildPlanSeed, type PlanSeedDeps } from './build'
 import { loadGoalPeriod, productionDeps } from './deps'
 import { planSeedSchema } from './types'
 
-/** 附加依赖：PlanSeedDeps 的部分覆盖 + 可选的周期读取。 */
+/** 整个 attach 流程的默认时间预算（毫秒）。 */
+export const ATTACH_TIMEOUT_MS = 8000
+
+/** 附加依赖：PlanSeedDeps 的部分覆盖 + 可选的周期读取 + 总时间预算。 */
 export type AttachDeps = Partial<PlanSeedDeps> & {
   loadPeriod?: (goalId: string | null) => Promise<{ start_date: string; end_date: string } | null>
+  timeoutMs?: number
 }
 
 /** 判断是否为普通对象（非 null、非数组）。 */
@@ -77,25 +81,32 @@ export function collectAdPlays(content: PrescriptionContent): AdPlay[] {
 /**
  * 精修场景：新内容里一条打法都没有、但旧内容有时，把旧内容的打法按阶段编号带回来
  * （华佗重写内容不会输出 ad_plays，不带回来就丢了真相源）。就地修改 content。
+ * 返回 true 表示至少有一个 phase 真正带回了非空打法。
  */
-export function carryPriorAdPlays(content: PrescriptionContent, prior: PrescriptionContent): void {
+export function carryPriorAdPlays(content: PrescriptionContent, prior: PrescriptionContent): boolean {
   try {
-    if (collectAdPlays(content).length > 0) return
+    if (collectAdPlays(content).length > 0) return false
     const priorByPhase = new Map<unknown, unknown>()
     for (const phase of safePhases(prior)) {
       const seed = seedOf(phase)
       const number = isPlainObject(phase) ? phase.phase_number : undefined
       if (seed !== null && seed.ad_plays !== undefined) priorByPhase.set(number, seed.ad_plays)
     }
+    let carried = false
     for (const phase of safePhases(content)) {
       if (!isPlainObject(phase)) continue
       const plays = priorByPhase.get(phase.phase_number)
       const seed = seedOf(phase)
       if (plays === undefined || seed === null) continue
-      seed.ad_plays = lenientAdPlays(plays)
+      const cleaned = lenientAdPlays(plays)
+      if (cleaned.length === 0) continue
+      seed.ad_plays = cleaned
+      carried = true
     }
+    return carried
   } catch (err) {
     console.warn('[plan-seed] carry prior plays failed', errorMessage(err))
+    return false
   }
 }
 
@@ -106,16 +117,37 @@ function errorMessage(err: unknown): string {
   return '未知错误'
 }
 
-/** 读取周期；失败或抛错时返回 null。 */
+/** 读取周期的结果：成功（period 可能为 null）或超时。 */
+type PeriodResult =
+  | { kind: 'ok'; period: { start_date: string; end_date: string } | null }
+  | { kind: 'timeout' }
+
+/**
+ * 读取周期，与计时器赛跑；超时返回 { kind: 'timeout' }。
+ * loader 抛错时 warn 并返回 { kind: 'ok', period: null }。
+ */
 async function readPeriod(
   goalId: string | null,
   loader: (goalId: string | null) => Promise<{ start_date: string; end_date: string } | null>,
-): Promise<{ start_date: string; end_date: string } | null> {
+  timeoutMs: number,
+): Promise<PeriodResult> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<PeriodResult>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: 'timeout' }), Math.max(0, timeoutMs))
+  })
+  const load = (async (): Promise<PeriodResult> => {
+    try {
+      const period = await loader(goalId)
+      return { kind: 'ok', period }
+    } catch (err) {
+      console.warn('[plan-seed] loadPeriod failed', errorMessage(err))
+      return { kind: 'ok', period: null }
+    }
+  })()
   try {
-    return await loader(goalId)
-  } catch (err) {
-    console.warn('[plan-seed] loadPeriod failed', errorMessage(err))
-    return null
+    return await Promise.race([load, timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
   }
 }
 
@@ -151,15 +183,39 @@ export async function attachPlanSeed(
   try {
     // 客户端或 LLM 提供的 plan_seed 一律丢弃，只信本次计算。
     delete content.plan_seed
+    const startedAt = Date.now()
+    const timeoutMs = deps?.timeoutMs ?? ATTACH_TIMEOUT_MS
 
-    if (ctx.priorContent !== undefined) carryPriorAdPlays(content, ctx.priorContent)
+    const carried =
+      ctx.priorContent !== undefined ? carryPriorAdPlays(content, ctx.priorContent) : false
     sanitizeAdPlays(content)
     const plays = collectAdPlays(content)
     if (plays.length === 0) return content
 
-    const period = await readPeriod(ctx.goalId, deps?.loadPeriod ?? loadGoalPeriod)
+    const periodResult = await readPeriod(
+      ctx.goalId,
+      deps?.loadPeriod ?? loadGoalPeriod,
+      timeoutMs,
+    )
+    if (periodResult.kind === 'timeout') {
+      console.warn('[plan-seed] loadPeriod timed out')
+      return content
+    }
+    const period = periodResult.period
+
     const full = resolveDeps(deps)
-    const seed = await buildPlanSeed({ clientId: ctx.clientId, plays, period }, full)
+    const remaining = Math.max(0, timeoutMs - (Date.now() - startedAt))
+    const seed = await buildPlanSeed({ clientId: ctx.clientId, plays, period }, full, {
+      timeoutMs: remaining,
+    })
+
+    if (carried) {
+      const notes: string[] = Array.isArray(seed.notes) ? seed.notes : []
+      if (!notes.includes('打法是从上一版处方带回来的')) {
+        notes.push('打法是从上一版处方带回来的')
+      }
+      seed.notes = notes
+    }
 
     const checked = planSeedSchema.safeParse(seed)
     if (checked.success) {
