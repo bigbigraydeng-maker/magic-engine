@@ -222,15 +222,16 @@ function skippedRedlines(redlines: readonly string[] | undefined): string[] | un
   return skipped.length > 0 ? skipped : undefined
 }
 
-/** 私信类型才等转码；返回错误文案，`null` = 可以继续。 */
+/** 任一创意带视频就等转码（视频没转完建创意会报「视频还没准备好」）；返回错误文案，`null` = 可以继续。 */
 async function waitForTranscode(
   draft: AdDraft,
   deps: CreateDraftDeps,
   now: () => number,
 ): Promise<string | null> {
-  if (draft.kind !== 'messenger_conversation') return null
+  const videoIds = draft.creatives.map((c) => c.videoId).filter((v): v is string => !!v)
+  if (videoIds.length === 0) return null
   const ready = await waitForVideoReady(
-    draft.creatives.map((c) => c.videoId ?? ''),
+    videoIds,
     deps.accessToken,
     { timeoutMs: BUDGET.waitForVideoMs, now },
   )
