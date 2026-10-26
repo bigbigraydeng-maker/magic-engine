@@ -29,6 +29,13 @@ import {
 } from './client-brand-match'
 import { isRunConclusive } from './run-conclusive'
 import { supabaseAdmin } from '../supabase'
+import { fetchAll } from '../supabase-paginate'
+import {
+  RUN_CONCLUSIVENESS_COLUMNS,
+  partitionConclusiveRuns,
+  summariseRunFailures,
+  type RunConclusiveness,
+} from './run-conclusive'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
   AiEngine,
@@ -71,6 +78,14 @@ export interface RunTrackerResult {
   total_cost_usd: number
   total_latency_ms: number
   snapshot_id: string | null
+  /**
+   * Why no snapshot / no flywheel metric was written, in plain language.
+   * Non-null means "we could not compute a number", which is NOT the same as
+   * "the number is zero" — see run-conclusive.ts. Kept on the result so the
+   * cron log and the caller name the real cause instead of leaving FDE/PM to
+   * read a missing row as a system fault (playbook-geo §9.5).
+   */
+  snapshot_skipped_reason: string | null
   errors: Array<{ query_id: string; engine: AiEngine; message: string }>
 }
 
@@ -125,6 +140,7 @@ export async function runTracker(
     total_cost_usd: 0,
     total_latency_ms: 0,
     snapshot_id: null,
+    snapshot_skipped_reason: null,
     errors: [],
   }
 
@@ -146,26 +162,41 @@ export async function runTracker(
     console.log(`[runTracker] Engine ${engine} completed: succeeded=${result.runs_succeeded}, failed=${result.runs_failed}`)
   }
 
-  // 4. Aggregate weekly snapshot (only if we got at least one successful run)
+  // 4. Aggregate weekly snapshot.
+  //
+  // A pass where nothing completed produces NO snapshot and NO metric — not a
+  // snapshot full of zeros. `runs_succeeded` is not a sufficient gate on its
+  // own: a run whose parser threw still increments it (the engine answered),
+  // yet its rank is null for want of parsing, so a pass can reach here with
+  // zero conclusive evidence. aggregateSnapshot re-checks against the stored
+  // rows and refuses rather than publishing a 0% mention rate.
   console.log('[runTracker] Aggregating snapshot...')
-  if (result.runs_succeeded > 0) {
+  if (result.runs_succeeded === 0) {
+    const topError = result.errors[0]?.message ?? '无错误详情'
+    result.snapshot_skipped_reason = `本次 ${result.runs_attempted} 次探测全部失败，没有可用于计算的结果（首个错误：${topError}）`
+    console.warn('[runTracker] Snapshot skipped:', result.snapshot_skipped_reason)
+  } else {
     const agg = await aggregateSnapshot(client.id, {
       brandName,
       domain: client.domain,
       aliases: client.brand_aliases,
       geoAnchors: client.brand_geo_anchors,
     })
-    result.snapshot_id = agg?.snapshotId ?? null
 
-    // 5. Write GEO flywheel metrics so attribution job can compute outcomes
-    if (agg) {
+    if (agg.ok) {
+      result.snapshot_id = agg.value.snapshotId
+
+      // 5. Write GEO flywheel metrics so attribution job can compute outcomes
       await writeTrackerFlywheelMetrics(client.id, {
-        snapshotId: agg.snapshotId,
-        mentionsCount: agg.mentionsCount,
-        totalRuns: agg.totalRuns,
-        avgRank: agg.avgRank,
-        engineCoverage: agg.engineCoverage,
+        snapshotId: agg.value.snapshotId,
+        mentionsCount: agg.value.mentionsCount,
+        totalRuns: agg.value.totalRuns,
+        avgRank: agg.value.avgRank,
+        engineCoverage: agg.value.engineCoverage,
       })
+    } else {
+      result.snapshot_skipped_reason = agg.reason
+      console.warn('[runTracker] Snapshot skipped:', agg.reason)
     }
   }
 
@@ -439,61 +470,96 @@ interface AggregateResult {
 }
 
 /**
+ * Either a computed snapshot, or a named reason why no number could be
+ * produced. There is no third branch that returns zeros: "we could not
+ * measure" must never reach a consumer wearing the clothes of "we measured
+ * zero" (run-conclusive.ts).
+ */
+type AggregateOutcome =
+  | { ok: true; value: AggregateResult }
+  | { ok: false; reason: string }
+
+/** The row shape aggregateSnapshot reads. */
+interface WeekRunRow extends RunConclusiveness {
+  ai_engine: string
+  ai_model: string
+  client_brand_rank: number | null
+  brands_mentioned: BrandMention[]
+}
+
+/**
  * Aggregate this week's runs into ai_visibility_snapshots.
  * Uses Monday of the current week as the snapshot key.
  * Returns metric data alongside the snapshot id for flywheel writes.
+ *
+ * Only runs that completed end to end are counted — in the numerator AND the
+ * denominator. Counting failed rows in `total_runs` was measurably deflating
+ * every client's mention rate (CTS: 39.5% reported vs 50.3% actual across
+ * 4031 rows, 2026-09-23), because a row whose engine call threw looks exactly
+ * like a row where the AI genuinely did not name the client.
  */
 async function aggregateSnapshot(
   clientId: string,
   identity: ClientBrandIdentity
-): Promise<AggregateResult | null> {
+): Promise<AggregateOutcome> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
-  // Pull all runs for this client this week
+  // Pull all runs for this client this week.
+  //
+  // Paged: PostgREST caps a single response at 1000 rows and says nothing
+  // about it (src/lib/supabase-paginate.ts). A busy week goes past that —
+  // CTS week of 2026-04-27 stored 1194 runs — so an unpaged read would have
+  // silently aggregated the first 1000 and called it the week. Ordered by
+  // `id` because the page boundaries need a stable unique key; `ran_at` has
+  // ties within a batch and would drop or duplicate rows across pages.
   const weekStart = new Date(weekOf + 'T00:00:00.000Z').toISOString()
-  const { data: runs, error } = await supabaseAdmin
-    .from('ai_visibility_runs')
-    .select('ai_engine, ai_model, client_brand_rank, brands_mentioned, error_message, parse_error_message')
-    .eq('client_id', clientId)
-    .gte('ran_at', weekStart)
+  let runs: WeekRunRow[]
+  try {
+    runs = await fetchAll<WeekRunRow>((from, to) =>
+      supabaseAdmin
+        .from('ai_visibility_runs')
+        .select(
+          `ai_engine, ai_model, client_brand_rank, brands_mentioned, ${RUN_CONCLUSIVENESS_COLUMNS}`
+        )
+        .eq('client_id', clientId)
+        .gte('ran_at', weekStart)
+        .order('id', { ascending: true })
+        .range(from, to)
+    )
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Unknown error'
+    return { ok: false, reason: `读取本周探测记录失败：${msg}` }
+  }
 
-  if (error || !runs) return null
+  // Failed runs are kept in the table as history, but they are not evidence.
+  const { conclusive, failed } = partitionConclusiveRuns(runs)
 
-  // Failed provider calls / parser errors carry a null client_brand_rank that
-  // is indistinguishable from "AI answered but didn't mention the client" —
-  // counting them here would drag the same head-line mention rate the
-  // dashboard's per-engine cards already exclude them from back down to
-  // "failure == not mentioned". Same filter as isRunConclusive() everywhere
-  // else this data is displayed.
-  const conclusiveRuns = runs.filter(isRunConclusive)
+  if (conclusive.length === 0) {
+    const detail =
+      runs.length === 0
+        ? '本周没有任何探测记录'
+        : `本周 ${runs.length} 条探测记录没有一条完成（${summariseRunFailures(failed)}）`
+    return {
+      ok: false,
+      reason: `${detail}，提及率算不出来——这不是"AI 没提到我们"，是"这次没探测成"`,
+    }
+  }
 
-  const totalRuns = conclusiveRuns.length
-  const ranks = conclusiveRuns
-    .map(r => (r as { client_brand_rank: number | null }).client_brand_rank)
+  const totalRuns = conclusive.length
+  const ranks = conclusive
+    .map(r => r.client_brand_rank)
     .filter((r): r is number => r !== null)
   const mentionsCount = ranks.length
   const avgRank =
     mentionsCount > 0 ? ranks.reduce((a, b) => a + b, 0) / mentionsCount : null
-  const modelsCovered = Array.from(
-    new Set(conclusiveRuns.map(r => (r as { ai_model: string }).ai_model))
-  )
-  // Distinct engines where brand appeared at least once
+  const modelsCovered = Array.from(new Set(conclusive.map(r => r.ai_model)))
   const engineCoverage = new Set(
-    conclusiveRuns
-      .filter(r => (r as { client_brand_rank: number | null }).client_brand_rank !== null)
-      .map(r => (r as { ai_engine: string }).ai_engine)
+    conclusive.filter(r => r.client_brand_rank !== null).map(r => r.ai_engine)
   ).size
 
   // Build a compact ranking_table for reporting:
   //   { brands: [{ name, mentions, avg_rank, by_engine }] }
-  const ranking_table = buildRankingTable(
-    conclusiveRuns as Array<{
-      ai_engine: string
-      brands_mentioned: BrandMention[]
-      client_brand_rank: number | null
-    }>,
-    identity
-  )
+  const ranking_table = buildRankingTable(conclusive, identity)
 
   // Upsert by (client_id, week_of)
   const { data: snapshot, error: upsertErr } = await supabaseAdmin
@@ -513,8 +579,16 @@ async function aggregateSnapshot(
     .select('id')
     .single<{ id: string }>()
 
-  if (upsertErr || !snapshot) return null
-  return { snapshotId: snapshot.id, mentionsCount, totalRuns, avgRank, engineCoverage }
+  if (upsertErr || !snapshot) {
+    return {
+      ok: false,
+      reason: `写入本周快照失败：${upsertErr?.message ?? '没有返回行'}`,
+    }
+  }
+  return {
+    ok: true,
+    value: { snapshotId: snapshot.id, mentionsCount, totalRuns, avgRank, engineCoverage },
+  }
 }
 
 /**

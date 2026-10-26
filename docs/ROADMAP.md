@@ -199,6 +199,7 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 - **背景**：`ai-tracker/orchestrator.ts` 的 `aggregateSnapshot` 拉本周 `ai_visibility_runs` 时不排除 `error_message` 有值的行，失败次数计入 `total_runs`，`mentionRate = mentions_count / total_runs` 的分母被撑大。CTS 9-14 那周落库 23.3%，真值 50.8%。
 - `ai-visibility-collector.ts:93` 看到 `mentions_count === 0` 就直出 critical「Brand Not Mentioned by AI」，不检查这些 run 是否真的测到过——这跟 PR #1919 修的实时探测是同一类 bug，走了快照这条管子。
 - **修法**：`aggregateSnapshot` 过滤 `error_message IS NULL`；给快照补 `failed_runs` 列；collector 的 `mentions_count === 0` 分支加 guard。
+- **进度**：[PR #1932](https://github.com/bigbigraydeng-maker/magic-engine/pull/1932) 已开（`claude/exciting-mayer-f0aace`），修了 orchestrator 聚合 + parser 短响应 + dashboard 统一用 `isRunConclusive` + weekly-fanout 带 `snapshot_skipped_reason`。**collector 那侧还没修**（被任务边界排除，另有一张卡）。PR 跟主干有冲突，合并前需先解决。历史数据重算方案已出、日历提醒已建（9-29），不自动执行。
 - 见 PITFALLS D12 补充段。
 
 ---

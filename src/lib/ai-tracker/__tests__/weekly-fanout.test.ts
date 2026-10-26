@@ -209,7 +209,7 @@ describe('runOneClientTracker — 干活函数（依赖注入版，不碰真 pro
     let called = false
     const fakeRunTracker = async (): Promise<TrackerRunOutcome> => {
       called = true
-      return { runs_attempted: 1, runs_succeeded: 1, runs_failed: 0, client_brand_mentions: 1, total_cost_usd: 0.01, snapshot_id: 's1' }
+      return { runs_attempted: 1, runs_succeeded: 1, runs_failed: 0, client_brand_mentions: 1, total_cost_usd: 0.01, snapshot_id: 's1', snapshot_skipped_reason: null }
     }
     const receipt = await runOneClientTracker(due, fakeRunTracker, async () => ({ skip: true, reason: 'tracked_recently' }))
     expect(called).toBe(false)
@@ -225,6 +225,7 @@ describe('runOneClientTracker — 干活函数（依赖注入版，不碰真 pro
       client_brand_mentions: 11,
       total_cost_usd: 0.842,
       snapshot_id: 'snap-abc',
+      snapshot_skipped_reason: null,
     }
     const fakeRunTracker = async (input: { client_id: string }): Promise<TrackerRunOutcome> => {
       capturedInput = input
@@ -247,10 +248,29 @@ describe('runOneClientTracker — 干活函数（依赖注入版，不碰真 pro
   it('runTracker 跑完但一次都没成功 → no_data，不算 completed', async () => {
     const fakeResult: TrackerRunOutcome = {
       runs_attempted: 4, runs_succeeded: 0, runs_failed: 4, client_brand_mentions: 0, total_cost_usd: 0, snapshot_id: null,
+      snapshot_skipped_reason: null,
     }
     const receipt = await runOneClientTracker(due, async () => fakeResult, neverSkip)
     expect(receipt.status).toBe('no_data')
     expect(receipt.error).toBe('no_successful_runs')
+  })
+
+  it('🔴 引擎答了但一个数字都没落库 → no_data，且回执带上真因（不许写成 completed）', async () => {
+    // 解析全挂时 runs_succeeded 照样大于 0（引擎确实答了），但没有快照。
+    // 只看 runs_succeeded 会把它写成 completed / error:null，真因死在日志里。
+    const fakeResult: TrackerRunOutcome = {
+      runs_attempted: 18,
+      runs_succeeded: 18,
+      runs_failed: 0,
+      client_brand_mentions: 0,
+      total_cost_usd: 0.4,
+      snapshot_id: null,
+      snapshot_skipped_reason: '本周 18 条探测记录没有一条完成（18 次结果解析失败），提及率算不出来',
+    }
+    const receipt = await runOneClientTracker(due, async () => fakeResult, neverSkip)
+    expect(receipt.status).toBe('no_data')
+    expect(receipt.error).toBe(fakeResult.snapshot_skipped_reason)
+    expect(receipt.snapshot_id).toBeNull()
   })
 
   it('🔴 runTracker 抛异常（比如这个客户没有已启用的问题）→ failed 回执，不往外抛', async () => {
@@ -266,7 +286,7 @@ describe('runOneClientTracker — 干活函数（依赖注入版，不碰真 pro
     const dueB = { client_id: OZTOP, week_key: '2026-W38' }
     const runTracker = async (input: { client_id: string }): Promise<TrackerRunOutcome> => {
       if (input.client_id === CTS) throw new Error('provider timeout')
-      return { runs_attempted: 2, runs_succeeded: 2, runs_failed: 0, client_brand_mentions: 1, total_cost_usd: 0.02, snapshot_id: 'snap-b' }
+      return { runs_attempted: 2, runs_succeeded: 2, runs_failed: 0, client_brand_mentions: 1, total_cost_usd: 0.02, snapshot_id: 'snap-b', snapshot_skipped_reason: null }
     }
     const [receiptA, receiptB] = await Promise.all([
       runOneClientTracker(due, runTracker, neverSkip),

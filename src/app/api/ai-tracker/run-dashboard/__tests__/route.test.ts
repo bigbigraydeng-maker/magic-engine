@@ -77,6 +77,7 @@ describe('POST /api/ai-tracker/run-dashboard', () => {
       total_cost_usd: 0.02,
       total_latency_ms: 1200,
       snapshot_id: 'snapshot-1',
+      snapshot_skipped_reason: null,
       errors: [],
     })
 

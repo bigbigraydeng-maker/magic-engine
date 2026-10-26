@@ -15,8 +15,8 @@ import { RankingsTable } from './_components/RankingsTable';
 import { EngineComparison } from './_components/EngineComparison';
 import { ModelStats } from './_components/ModelStats';
 import { QueriesManager } from './_components/QueriesManager';
-import type { AiVisibilityRun, AiVisibilitySnapshot, AiVisibilityQuery } from '@/types/magic-engine';
 import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
+import type { AiVisibilityRun, AiVisibilitySnapshot, AiVisibilityQuery } from '@/types/magic-engine';
 
 type Tab = 'rankings' | 'engines' | 'models' | 'queries';
 
@@ -52,7 +52,13 @@ interface EngineStat {
 
 /**
  * Aggregate runs by engine into score % + avg rank.
- * Score = (mentioned runs / total successful runs) × 100.
+ * Score = (mentioned runs / measured runs) × 100.
+ *
+ * "Measured" uses the same predicate as the weekly snapshot shown above these
+ * cards (lib/ai-tracker/run-conclusive.ts). Filtering on `error_message`
+ * alone counted a run whose parser threw as a confirmed miss, so the per-engine
+ * percentages here disagreed with the headline number computed from the
+ * snapshot — on the same screen, for the same week.
  */
 function aggregateByEngine(runs: AiVisibilityRun[]): EngineStat[] {
   return AI_ENGINES.map(cfg => {

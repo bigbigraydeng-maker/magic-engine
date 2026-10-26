@@ -373,6 +373,19 @@ PR [#1952](https://github.com/bigbigraydeng-maker/magic-engine/pull/1952)：
   跑不通」和「无人值守任务直接用生产库密钥」两处硬伤；实施后复审又抓出一个 Next.js App Router
   导出限制的真实类型错误，已修
 
+### 2026-09-24（AI 可见度周快照聚合：失败探测不再算进提及率分母）[PR #1932]
+
+同一类 bug 的快照侧修复。`aggregateSnapshot()` 以前拉本周全部 `ai_visibility_runs` 算提及率，
+失败行（`error_message` 有值）混入分母，导致客户 AI 可见度分数被系统性压低（CTS 9-14 那周：落库 23.3%，真值 50.8%）。
+
+- 新增 `run-conclusive.ts`：共享判据 + `no_ai_overview` 允许名单，fail-closed 设计
+- `orchestrator.ts`：用 `partitionConclusiveRuns` 过滤后再算 mention_rate / avg_rank / engine 覆盖，`fetchAll` 分页绕过 PostgREST 1000 行上限
+- `parser.ts`：短响应（<30 字符）从静默返回空结果改成 throw，让错误列有值
+- `weekly-fanout.ts`：receipt 带 `snapshot_skipped_reason`，全失败时 status='no_data' 而不是假的 'completed'
+- Dashboard 页面统一用 `isRunConclusive` 替换原来的 `!r.error_message`（Codex 辅助修复 EngineComparison + ModelStats）
+
+⚠️ collector 侧（`ai-visibility-collector.ts` 的 `mentions_count === 0` 不检查是否测成）未在本 PR 范围内。
+
 ---
 
 ### 2026-09-28（AI 可见度：100% 探测失败 → PM 今日待办告警 + 旧 cron 失败计数修复）

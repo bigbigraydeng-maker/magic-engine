@@ -80,9 +80,21 @@ export async function parseRanking(input: {
 }): Promise<ParseResult> {
   const { rawResponse, clientBrandName, clientDomain, clientAliases, clientGeoAnchors } = input
 
-  // Empty / very short responses can't yield meaningful rankings
+  // Empty / very short responses can't yield meaningful rankings.
+  //
+  // This THROWS rather than returning an empty result, because an empty
+  // result here is indistinguishable from "the AI answered and named nobody"
+  // — and the caller stores exactly that shape (brands: [], rank: null) for
+  // both. A refused or truncated completion still arrives with
+  // `error_message: null` from the runner (`content ?? ''`), so returning
+  // quietly would hand run-conclusive.ts a row it has no way to reject, and
+  // the miss would land in the mention-rate denominator as a real zero.
+  // Throwing routes it through processOne's parse-error path, which is what
+  // "we did not get an answer to score" actually means.
   if (!rawResponse || rawResponse.trim().length < 30) {
-    return { brands: [], client_brand_rank: null, parse_cost_usd: 0 }
+    throw new Error(
+      `Response too short to parse (${rawResponse?.trim().length ?? 0} chars) — nothing was measured`
+    )
   }
 
   // The client name is deliberately NOT sent to the model: naming it biased
