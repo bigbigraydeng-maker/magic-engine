@@ -35,7 +35,7 @@ describe('adPlaysPromptSection', () => {
 describe('adPlaysSchemaExample', () => {
   it('joins play keys from PLAY_KEYS', () => {
     expect(adPlaysSchemaExample()).toBe(
-      `"ad_plays": [{ "step_key": "phase1-xxx", "play": "${PLAY_KEYS.join('|')}" }]`,
+      `"ad_plays": [{ "play": "${PLAY_KEYS.join('|')}" }]`,
     )
   })
 

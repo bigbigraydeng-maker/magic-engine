@@ -22,7 +22,7 @@ import { getAnthropicClient, parseJsonResponse, MODEL_SONNET } from '@/lib/anthr
 import { loadNarrativesForRun, type NarrativeRow } from './synthesis/persistence'
 import { budgetAmountLabel, budgetCapInstruction, budgetCurrencyOf } from '@/lib/ads/budget-currency'
 import { adPlaysPromptSection, adPlaysSchemaExample } from '@/lib/ads-strategy/plan-seed/ad-plays-prompt'
-import { sanitizeSeedAdPlays } from '@/lib/ads-strategy/plan-seed/ad-plays'
+import { applyLlmAdPlays } from '@/lib/ads-strategy/plan-seed/ad-plays'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -152,8 +152,8 @@ ${adPlaysPromptSection()}
 }`
 
 /**
- * LLM 直出的 JSON 不经 normalize：这里对每个阶段的 initiative_seed.ad_plays 做严格校验。
- * 不合法（含非数组、重复 step_key、超过 8 条、未知打法）就整键删掉；合法的只保留 step_key 与 play。
+ * LLM 直出的 JSON 不经 normalize：这里对每个阶段的 initiative_seed.ad_plays 清洗——
+ * 只读 play，step_key 由系统按「阶段号-序号-打法」生成；不合法整组删并 console.warn。
  */
 export function stripInvalidAdPlays(content: PrescriptionContent): void {
   if (!Array.isArray(content.phases)) return
@@ -161,9 +161,7 @@ export function stripInvalidAdPlays(content: PrescriptionContent): void {
     const seed = phase?.initiative_seed
     if (!seed || typeof seed !== 'object') continue
     if (seed.ad_plays === undefined) continue
-    const plays = sanitizeSeedAdPlays(seed.ad_plays)
-    if (plays === undefined) delete seed.ad_plays
-    else seed.ad_plays = plays
+    applyLlmAdPlays(seed, seed.ad_plays, typeof phase.phase_number === 'number' ? phase.phase_number : 0)
   }
 }
 
@@ -378,6 +376,8 @@ async function savePrescription(
   intake: PrescriptionIntake,
   content: PrescriptionContent,
 ): Promise<string> {
+  // LLM 解析出的 content 里若夹带 plan_seed（假账户号/预算），一律丢弃；plan_seed 只能由系统事实构建
+  delete content.plan_seed
   const { data, error } = await supabase
     .from('prescriptions')
     .insert({
@@ -504,6 +504,7 @@ export async function generatePrescriptionFromDiscovery(
     .join('')
 
   const content = parseJsonResponse<PrescriptionContent>(rawText)
+  stripInvalidAdPlays(content)
   clampBudgetAllocation(content, intake.monthly_budget_aud)
 
   const prescriptionId = await savePrescription(

@@ -108,7 +108,7 @@ function StepCard({ step, currency }: { step: PlanSeedStep; currency: string | n
   return (
     <div className="mt-4 rounded border border-gray-200 p-3 text-sm">
       <div className="font-semibold">
-        {step.step_key} · {playLabel}
+        {playLabel}
       </div>
       <FieldRow title="主页" field={step.page_id} format={(v) => v} />
       <FieldRow title="广告账户" field={step.ad_account_id} format={(v) => v} />

@@ -14,14 +14,14 @@ export function adPlaysPromptSection(): string {
   }
   lines.push('规则：')
   lines.push('- 仅当该阶段确有广告投放动作（dimension=ads 且要花钱投）才填 ad_plays；其它阶段不要这个字段（不是空数组，是整个字段不出现）。')
-  lines.push('- 每条写成 {"step_key": "kebab-case 唯一", "play": "<上面清单里的一个 key>"}，step_key 在整份处方内唯一（建议带阶段号，如 phase1-lead-form），最多 8 条。')
+  lines.push('- 每条只写 {"play": "<上面清单里的一个 key>"}，最多 8 条；不要写 step_key，编号由系统生成。')
   lines.push('- 顺序 = 优先级（先做的放前面）。')
-  lines.push('- ad_plays 只写打法类型与顺序（step_key + play）；不要写账户、预算、人数、花费、日期，一个都不要写——这些由系统用真实数据计算。')
+  lines.push('- ad_plays 只写打法类型与顺序；不要写账户、预算、人数、花费、日期，一个都不要写——这些由系统用真实数据计算。')
   lines.push('- 拿不准要不要投广告 → 不填。')
   return lines.join('\n')
 }
 
 /** 给 LLM 的 ad_plays 字段示例（play 的取值从 PLAY_KEYS 拼出来，不手写）。 */
 export function adPlaysSchemaExample(): string {
-  return `"ad_plays": [{ "step_key": "phase1-xxx", "play": "${PLAY_KEYS.join('|')}" }]`
+  return `"ad_plays": [{ "play": "${PLAY_KEYS.join('|')}" }]`
 }

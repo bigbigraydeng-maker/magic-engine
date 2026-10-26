@@ -24,6 +24,7 @@ vi.mock('../build', async (importOriginal) => {
 })
 import { buildPlanSeed } from '../build'
 import { attachPlanSeed, collectAdPlays, sanitizeAdPlays, carryPriorAdPlays, type AttachDeps } from '../attach'
+import { markAdPlaysDropped } from '../ad-plays'
 
 function facts(): AdsDraftFacts {
   return {
@@ -97,6 +98,11 @@ function content(plays?: unknown, extra: Record<string, unknown> = {}): Prescrip
 }
 
 const ctx = { clientId: 'c1', goalId: 'g1' }
+
+function markDropped(c: PrescriptionContent, index = 0): void {
+  const phases = c.phases as unknown as Array<{ initiative_seed: object }>
+  markAdPlaysDropped(phases[index].initiative_seed)
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -189,9 +195,10 @@ describe('attachPlanSeed', () => {
 })
 
 describe('carryPriorAdPlays via attachPlanSeed', () => {
-  it('carries prior ad_plays into a refined content with none', async () => {
+  it('carries prior ad_plays when the new content\'s plays were dropped by validation', async () => {
     const prior = content([{ step_key: 'p1', play: 'lead_form_harvest' }])
     const next = content(undefined)
+    markDropped(next)
     const result = await attachPlanSeed(
       next,
       { clientId: 'c1', goalId: 'g1', priorContent: prior },
@@ -208,6 +215,21 @@ describe('carryPriorAdPlays via attachPlanSeed', () => {
       seed.ad_steps.some((s) => s.step_key === 'p1') ||
       seed.skipped.some((s) => s.step_key === 'p1')
     expect(mentioned).toBe(true)
+  })
+
+  it('does NOT carry when the new content simply has no ad_plays (intentional removal)', async () => {
+    const prior = content([{ step_key: 'p1', play: 'lead_form_harvest' }])
+    const next = content(undefined)
+    const result = await attachPlanSeed(
+      next,
+      { clientId: 'c1', goalId: 'g1', priorContent: prior },
+      fullDeps(),
+    )
+    const phases = result.phases as unknown as Array<{
+      initiative_seed: Record<string, unknown>
+    }>
+    expect('ad_plays' in phases[0].initiative_seed).toBe(false)
+    expect('plan_seed' in result).toBe(false)
   })
 
   it('does not overwrite new ad_plays with prior ones', async () => {
@@ -340,7 +362,9 @@ describe('carryPriorAdPlays', () => {
         { phase_number: 2, name: 'p2', duration_weeks: 1, actions: [], initiative_seed: { initiative_type: 'demand_generation', title: 't' } },
       ],
     } as PrescriptionContent
-    carryPriorAdPlays(next, prior)
+    markDropped(next, 0)
+    markDropped(next, 1)
+    const carried = carryPriorAdPlays(next, prior)
     const phases = next.phases as unknown as Array<{
       phase_number: number
       initiative_seed: { ad_plays?: unknown }
@@ -351,18 +375,25 @@ describe('carryPriorAdPlays', () => {
     expect(phases[1].initiative_seed.ad_plays).toEqual([
       { step_key: 'two', play: 'lead_form_harvest' },
     ])
+    expect(carried).toEqual([1, 2])
   })
 
-  it('carryPriorAdPlays returns true only when something was carried', () => {
+  it('returns the carried phase numbers', () => {
     const prior = content([{ step_key: 'p1', play: 'lead_form_harvest' }])
-    const empty = content(undefined)
-    expect(carryPriorAdPlays(empty, prior)).toBe(true)
+
+    const markedEmpty = content(undefined)
+    markDropped(markedEmpty)
+    expect(carryPriorAdPlays(markedEmpty, prior)).toEqual([1])
+
+    const unmarkedEmpty = content(undefined)
+    expect(carryPriorAdPlays(unmarkedEmpty, prior)).toEqual([])
 
     const withOwn = content([{ step_key: 'n1', play: 'reach_awareness' }])
-    expect(carryPriorAdPlays(withOwn, prior)).toBe(false)
+    expect(carryPriorAdPlays(withOwn, prior)).toEqual([])
 
-    const noPriorPlays = content(undefined)
-    expect(carryPriorAdPlays(noPriorPlays, content(undefined))).toBe(false)
+    const markedNoPrior = content(undefined)
+    markDropped(markedNoPrior)
+    expect(carryPriorAdPlays(markedNoPrior, content(undefined))).toEqual([])
   })
 })
 
@@ -414,12 +445,13 @@ describe('carried plays note', () => {
   it('carried plays leave a note', async () => {
     const prior = content([{ step_key: 'p1', play: 'lead_form_harvest' }])
     const next = content(undefined)
+    markDropped(next)
     const result = await attachPlanSeed(
       next,
       { clientId: 'c1', goalId: 'g1', priorContent: prior },
       fullDeps(),
     )
-    expect(seedOf(result).notes).toContain('打法是从上一版处方带回来的')
+    expect(seedOf(result).notes).toContain('打法是从上一版带回来的（阶段 1）')
   })
 
   it('own plays leave no carried note', async () => {
@@ -430,6 +462,147 @@ describe('carried plays note', () => {
       { clientId: 'c1', goalId: 'g1', priorContent: prior },
       fullDeps(),
     )
-    expect(seedOf(result).notes).not.toContain('打法是从上一版处方带回来的')
+    expect(seedOf(result).notes).not.toContain('打法是从上一版带回来的（阶段 1）')
+  })
+
+  it('partial carry (M1 regression)', async () => {
+    const prior = {
+      summary: 's',
+      kpi_targets: [],
+      budget_allocation: [],
+      phases: [
+        {
+          phase_number: 1,
+          name: 'p1',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: {
+            initiative_type: 'demand_generation',
+            title: 't',
+            ad_plays: [{ step_key: 'p1-lead', play: 'lead_form_harvest' }],
+          },
+        },
+        {
+          phase_number: 2,
+          name: 'p2',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: {
+            initiative_type: 'demand_generation',
+            title: 't',
+            ad_plays: [{ step_key: 'p2-pool', play: 'thruplay_pool_build' }],
+          },
+        },
+      ],
+    } as PrescriptionContent
+    const next = {
+      summary: 's',
+      kpi_targets: [],
+      budget_allocation: [],
+      phases: [
+        {
+          phase_number: 1,
+          name: 'p1',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: {
+            initiative_type: 'demand_generation',
+            title: 't',
+            ad_plays: [{ step_key: 'p1-1-lead_form_harvest', play: 'lead_form_harvest' }],
+          },
+        },
+        {
+          phase_number: 2,
+          name: 'p2',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: { initiative_type: 'demand_generation', title: 't' },
+        },
+      ],
+    } as PrescriptionContent
+    markDropped(next, 1)
+    const result = await attachPlanSeed(
+      next,
+      { clientId: 'c1', goalId: 'g1', priorContent: prior },
+      fullDeps(),
+    )
+    const phases = result.phases as unknown as Array<{
+      initiative_seed: { ad_plays?: unknown }
+    }>
+    expect(phases[0].initiative_seed.ad_plays).toEqual([
+      { step_key: 'p1-1-lead_form_harvest', play: 'lead_form_harvest' },
+    ])
+    expect(phases[1].initiative_seed.ad_plays).toEqual([
+      { step_key: 'p2-pool', play: 'thruplay_pool_build' },
+    ])
+    const notes = seedOf(result).notes
+    expect(notes).toContain('打法是从上一版带回来的（阶段 2）')
+    expect(notes).not.toContain('打法是从上一版带回来的（阶段 1）')
+  })
+
+  it('unmarked phase 2 is not filled even when phase 1 has plays', async () => {
+    const prior = {
+      summary: 's',
+      kpi_targets: [],
+      budget_allocation: [],
+      phases: [
+        {
+          phase_number: 1,
+          name: 'p1',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: {
+            initiative_type: 'demand_generation',
+            title: 't',
+            ad_plays: [{ step_key: 'p1-lead', play: 'lead_form_harvest' }],
+          },
+        },
+        {
+          phase_number: 2,
+          name: 'p2',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: {
+            initiative_type: 'demand_generation',
+            title: 't',
+            ad_plays: [{ step_key: 'p2-pool', play: 'thruplay_pool_build' }],
+          },
+        },
+      ],
+    } as PrescriptionContent
+    const next = {
+      summary: 's',
+      kpi_targets: [],
+      budget_allocation: [],
+      phases: [
+        {
+          phase_number: 1,
+          name: 'p1',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: {
+            initiative_type: 'demand_generation',
+            title: 't',
+            ad_plays: [{ step_key: 'p1-1-lead_form_harvest', play: 'lead_form_harvest' }],
+          },
+        },
+        {
+          phase_number: 2,
+          name: 'p2',
+          duration_weeks: 1,
+          actions: [],
+          initiative_seed: { initiative_type: 'demand_generation', title: 't' },
+        },
+      ],
+    } as PrescriptionContent
+    const result = await attachPlanSeed(
+      next,
+      { clientId: 'c1', goalId: 'g1', priorContent: prior },
+      fullDeps(),
+    )
+    const phases = result.phases as unknown as Array<{
+      initiative_seed: Record<string, unknown>
+    }>
+    expect('ad_plays' in phases[1].initiative_seed).toBe(false)
   })
 })

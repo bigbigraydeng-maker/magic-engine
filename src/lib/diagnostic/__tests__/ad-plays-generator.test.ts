@@ -1,10 +1,6 @@
 /**
  * TDD: ad_plays wiring through generatePrescription + stripInvalidAdPlays
  *
- * NOTE: this file currently lives at src/lib/diagnostic/ad-plays-generator-draft.ts
- * and will be moved to src/lib/diagnostic/__tests__/ later. Imports are written
- * as if it already lives in __tests__/.
- *
  * Covers:
  * 1. System prompt contains adPlaysPromptSection() + adPlaysSchemaExample()
  *    + the "不要写账户、预算、人数、花费" rule.
@@ -88,12 +84,14 @@ function buildSupabaseMock(opts: {
   findings?: unknown[]
   insertedId?: string
   narratives?: unknown[]
+  onInsert?: (row: Record<string, unknown>) => void
 }) {
   const {
     run = MOCK_RUN,
     findings = MOCK_FINDINGS,
     insertedId = 'presc-001',
     narratives = [],
+    onInsert,
   } = opts
 
   return {
@@ -121,11 +119,15 @@ function buildSupabaseMock(opts: {
         }
       }
       if (table === 'prescriptions') {
-        return {
-          insert: vi.fn().mockReturnThis(),
-          select: vi.fn().mockReturnThis(),
+        const q = {
+          insert: vi.fn().mockImplementation((row: Record<string, unknown>) => {
+            onInsert?.(row)
+            return q
+          }),
+          select: vi.fn().mockImplementation(() => q),
           single: vi.fn().mockResolvedValue({ data: { id: insertedId }, error: null }),
         }
+        return q
       }
       return {
         select: vi.fn().mockReturnThis(),
@@ -243,7 +245,7 @@ describe('ad_plays wiring', () => {
     )
 
     expect(result.phases[0].initiative_seed?.ad_plays).toEqual([
-      { step_key: 'phase1-lead', play: 'lead_form_harvest' },
+      { step_key: 'p1-1-lead_form_harvest', play: 'lead_form_harvest' },
     ])
 
     const phase2Seed = result.phases[1].initiative_seed
@@ -305,5 +307,194 @@ describe('ad_plays wiring', () => {
     })
 
     expect(() => stripInvalidAdPlays(badPhases)).not.toThrow()
+  })
+
+  // =========================================================================
+  // 4a. End-to-end persisted shape: system-generated step_key, extra fields
+  //     (budget/account/daily_budget_cents/LLM step_key) never persisted.
+  // =========================================================================
+  it('persists only system-generated step_key + play, stripping all extra fields', async () => {
+    const content = asContent({
+      summary: 'stub',
+      phases: [
+        {
+          phase_number: 1,
+          name: 'Phase 1',
+          duration_weeks: 4,
+          actions: [],
+          initiative_seed: {
+            ad_plays: [
+              {
+                step_key: 'ACT-1234567890-50aud-day',
+                play: 'lead_form_harvest',
+                budget: 999,
+                account: 'act_123',
+                daily_budget_cents: 5000,
+              },
+            ],
+          },
+        },
+        {
+          phase_number: 2,
+          name: 'Phase 2',
+          duration_weeks: 4,
+          actions: [],
+          initiative_seed: {
+            ad_plays: [{ step_key: 'x', play: 'thruplay_pool_build' }],
+          },
+        },
+      ],
+      kpi_targets: [],
+      budget_allocation: [],
+    })
+
+    mockMessagesCreate.mockResolvedValueOnce(makeClaudeResponse(content))
+
+    let captured: Record<string, unknown> | undefined
+    const supabase = buildSupabaseMock({
+      onInsert: (row) => {
+        captured = row
+      },
+    })
+
+    await generatePrescription(supabase as never, RUN_ID, CLIENT_ID, INTAKE)
+
+    expect(captured).toBeDefined()
+    const rowContent = captured?.content as PrescriptionContent
+    expect(rowContent.phases[0].initiative_seed?.ad_plays).toEqual([
+      { step_key: 'p1-1-lead_form_harvest', play: 'lead_form_harvest' },
+    ])
+    expect(rowContent.phases[1].initiative_seed?.ad_plays).toEqual([
+      { step_key: 'p2-1-thruplay_pool_build', play: 'thruplay_pool_build' },
+    ])
+
+    const serialized = JSON.stringify(rowContent)
+    expect(serialized).not.toContain('999')
+    expect(serialized).not.toContain('act_123')
+    expect(serialized).not.toContain('5000')
+    expect(serialized).not.toContain('1234567890')
+
+    for (const phase of rowContent.phases) {
+      const plays = phase.initiative_seed?.ad_plays ?? []
+      for (const item of plays) {
+        expect(Object.keys(item).sort()).toEqual(['play', 'step_key'])
+      }
+    }
+  })
+
+  // =========================================================================
+  // 4b. LLM-injected top-level plan_seed is never persisted.
+  // =========================================================================
+  it('drops LLM-injected top-level plan_seed before insert', async () => {
+    const content = {
+      summary: 'stub',
+      phases: [],
+      kpi_targets: [],
+      budget_allocation: [],
+      plan_seed: {
+        ad_steps: [
+          {
+            ad_account_id: { ok: true, value: 'act_FAKE' },
+            daily_budget_cents: 999999,
+          },
+        ],
+      },
+    } as PrescriptionContent
+
+    mockMessagesCreate.mockResolvedValueOnce(makeClaudeResponse(content))
+
+    let captured: Record<string, unknown> | undefined
+    const supabase = buildSupabaseMock({
+      onInsert: (row) => {
+        captured = row
+      },
+    })
+
+    const { content: result } = await generatePrescription(
+      supabase as never,
+      RUN_ID,
+      CLIENT_ID,
+      INTAKE,
+    )
+
+    expect(captured).toBeDefined()
+    const rowContent = captured?.content as Record<string, unknown>
+    expect('plan_seed' in rowContent).toBe(false)
+    expect('plan_seed' in (result as unknown as Record<string, unknown>)).toBe(false)
+  })
+
+  // =========================================================================
+  // 4c. S1 trace: invalid play -> warn with phase + reason, key dropped.
+  // =========================================================================
+  it('warns and drops ad_plays when a play is not in the catalog', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const content = asContent({
+      summary: 'stub',
+      phases: [
+        {
+          phase_number: 1,
+          name: 'Phase 1',
+          duration_weeks: 4,
+          actions: [],
+          initiative_seed: {
+            ad_plays: [{ play: 'retargeting' }],
+          },
+        },
+      ],
+      kpi_targets: [],
+      budget_allocation: [],
+    })
+
+    mockMessagesCreate.mockResolvedValueOnce(makeClaudeResponse(content))
+
+    let captured: Record<string, unknown> | undefined
+    const supabase = buildSupabaseMock({
+      onInsert: (row) => {
+        captured = row
+      },
+    })
+
+    await generatePrescription(supabase as never, RUN_ID, CLIENT_ID, INTAKE)
+
+    const warnCalls = warnSpy.mock.calls.map((args) => String(args[0]))
+    const matched = warnCalls.find(
+      (msg) => msg.includes('phase=1') && msg.includes('不在允许范围内'),
+    )
+    expect(matched).toBeDefined()
+
+    expect(captured).toBeDefined()
+    const rowContent = captured?.content as PrescriptionContent
+    const seed = rowContent.phases[0].initiative_seed
+    expect(seed === undefined || !('ad_plays' in seed)).toBe(true)
+
+    warnSpy.mockRestore()
+  })
+
+  // =========================================================================
+  // 4d. stripInvalidAdPlays: phases without phase_number use phase 0 in keys.
+  // =========================================================================
+  it('stripInvalidAdPlays uses phase 0 in step_key when phase_number is missing', () => {
+    const content = asContent({
+      summary: 'stub',
+      phases: [
+        {
+          name: 'Phase 1',
+          duration_weeks: 4,
+          actions: [],
+          initiative_seed: {
+            ad_plays: [{ play: 'lead_form_harvest' }],
+          },
+        },
+      ],
+      kpi_targets: [],
+      budget_allocation: [],
+    })
+
+    stripInvalidAdPlays(content)
+
+    expect(content.phases[0].initiative_seed?.ad_plays).toEqual([
+      { step_key: 'p0-1-lead_form_harvest', play: 'lead_form_harvest' },
+    ])
   })
 })
