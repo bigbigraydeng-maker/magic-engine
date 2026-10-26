@@ -449,6 +449,7 @@ function useTimeline(
   contactId: string,
   onSummary?: (s: TimelineSummary | null) => void,
   dialedAt?: number | null,
+  refreshKey?: number,
 ) {
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -508,7 +509,7 @@ function useTimeline(
       alive.current = false
       ctrl.abort()
     }
-  }, [clientId, contactId, onSummary, attempt])
+  }, [clientId, contactId, onSummary, attempt, refreshKey])
 
   return { data, loading, err, retry: () => setAttempt((n) => n + 1) }
 }
@@ -559,12 +560,20 @@ export function ContactTimeline({
   contactId,
   onSummary,
   dialedAt,
+  refreshKey,
   collapsible = false,
 }: {
   clientId: string
   contactId: string
   /** 员工刚点了拨打的时间（毫秒）；有它就自动刷新，直到这通电话变成正式记录。 */
   dialedAt?: number | null
+  /**
+   * 变了就重新取一次数据（发笔记 / 回消息 / 改阶段之后，抽屉把它加一）。
+   * 刻意不用 React 的 `key` 触发重取：`key` 一变整个组件重挂，「展开 / 收起」
+   * 状态跟着丢，员工刚展开原文回复了一条，时间线就缩回去、刚发的那条看不见。
+   * 换人才该重挂（由抽屉用 contactId 当 `key`）。
+   */
+  refreshKey?: number
   /**
    * 把摘要交给抽屉，让它渲染在**最上面**那张卡里。
    *
@@ -579,7 +588,7 @@ export function ContactTimeline({
    */
   collapsible?: boolean
 }) {
-  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt)
+  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt, refreshKey)
   // 折叠模式下默认收起。换人时不留上一个人的展开状态：抽屉给本组件挂了
   // `key` 带 contactId（见 PersonDrawer），换人会整组件重挂、state 自然回到初值，
   // 不靠 effect 重置（那样会先用旧状态渲染一帧）。

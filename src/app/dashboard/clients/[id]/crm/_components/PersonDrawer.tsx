@@ -639,7 +639,8 @@ export function PersonDrawer({
               往来记录
             </p>
             <ContactTimeline
-              key={`${row.contactId}:${timelineKey}`}
+              key={row.contactId}
+              refreshKey={timelineKey}
               clientId={clientId}
               contactId={row.contactId}
               onSummary={onSummary}
