@@ -57,7 +57,11 @@ function makePreview(overrides: Partial<PublishPreviewResponse> = {}): PublishPr
   }
 }
 
-function renderDialog(preview: PublishPreviewResponse, fetchMock: ReturnType<typeof vi.fn>) {
+function renderDialog(
+  preview: PublishPreviewResponse,
+  fetchMock: ReturnType<typeof vi.fn>,
+  incompleteNewTours: Array<{ tourId: string; tourName: string; missing: string[] }> = [],
+) {
   vi.stubGlobal('fetch', fetchMock)
   const onRefresh = vi.fn()
   const onClose = vi.fn()
@@ -66,6 +70,7 @@ function renderDialog(preview: PublishPreviewResponse, fetchMock: ReturnType<typ
     <PublishDialog
       clientId="c1"
       preview={preview}
+      incompleteNewTours={incompleteNewTours}
       onRefresh={onRefresh}
       onClose={onClose}
       onPublished={onPublished}
@@ -474,5 +479,23 @@ describe('PublishDialog small things', () => {
     )
     expect(screen.getByLabelText(/我知道上一次是把已上架的内容换回了第 2 版/)).toBeInTheDocument()
     expect(screen.getByRole('dialog').textContent).not.toMatch(/对外|客人/)
+  })
+
+  it('blocks publishing a new tour that is not filled in until the box is ticked', () => {
+    const fetchMock = vi.fn()
+    renderDialog(makePreview(), fetchMock, [
+      { tourId: 't-new', tourName: 'China Unveiled', missing: ['主图', '常见问题（至少 3 条）'] },
+    ])
+    expect(screen.getByTestId('incomplete-new-tours').textContent).toContain('China Unveiled：缺 主图、常见问题（至少 3 条）')
+    const submit = screen.getByRole('button', { name: '确认上架' })
+    expect(submit).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox', { name: /这些新团还没补齐/ }))
+    expect(submit).toBeEnabled()
+  })
+
+  it('shows no warning when every new tour is filled in', () => {
+    renderDialog(makePreview(), vi.fn(), [])
+    expect(screen.queryByTestId('incomplete-new-tours')).toBeNull()
+    expect(screen.getByRole('button', { name: '确认上架' })).toBeEnabled()
   })
 })
