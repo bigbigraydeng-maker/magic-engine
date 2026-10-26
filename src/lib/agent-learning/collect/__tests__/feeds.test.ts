@@ -166,6 +166,22 @@ describe('createFetchText', () => {
     expect(calls[0]?.headers['Accept']).toBeTruthy()
   })
 
+  it('sends a standard feed Accept and no Content-Type on GET', async () => {
+    const calls: Array<Record<string, string>> = []
+    const fetchImpl = async (_url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => {
+      calls.push(init.headers)
+      return { ok: true, status: 200, text: async () => '<rss></rss>' }
+    }
+
+    await createFetchText(fetchImpl)('https://example.com/feed')
+
+    expect(calls[0]?.['Accept']).toBe(
+      'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
+    )
+    expect(calls[0]?.['User-Agent']).toMatch(/^Mozilla\/5\.0 \(compatible; MagicEngineLearningBot\//)
+    expect(Object.keys(calls[0] ?? {}).map((k) => k.toLowerCase())).not.toContain('content-type')
+  })
+
   it('maps non-2xx status into http_<status>', async () => {
     const fetchImpl = async (_url: string, _init: { headers: Record<string, string>; signal: AbortSignal }) => ({
       ok: false,
