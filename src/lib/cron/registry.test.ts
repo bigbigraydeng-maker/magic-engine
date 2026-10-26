@@ -517,6 +517,8 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
 // 开关仍由 web 进程里的那条路由读取。对账改看路由源码，不再要求 yaml 里有同名服务。
 const CRON_TRIGGERED_WEB_FLAGS: { env: string; route: string }[] = [
   { env: 'PROSPECTING_SWEEP_ENABLED', route: 'prospecting-sweep' },
+  { env: 'VIRAL_ANALYZER_ENABLED', route: 'viral-analyzer-worker' },
+  { env: 'VIRAL_ANALYZER_ENABLED', route: 'viral-discovery-weekly' },
 ]
 
 /**

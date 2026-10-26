@@ -321,6 +321,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  // Same master switch as viral-analyzer-worker: no new queue rows while analysis is paused.
+  if (process.env.VIRAL_ANALYZER_ENABLED !== 'true') {
+    return NextResponse.json({ skipped: 'disabled', hint: 'set VIRAL_ANALYZER_ENABLED=true to run' })
+  }
 
   const cronRun = await startCronRun('viral-discovery-weekly')
 
