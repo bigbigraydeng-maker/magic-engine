@@ -13,7 +13,7 @@ export function defaultFactSourceRef(url: unknown): string {
 export function reviewErrorZh(error: string, labelOf: (key: string) => string): string {
   const needSource = /^checklist (\w+) requires source_ref$/.exec(error)
   if (needSource) return `「${labelOf(needSource[1])}」这一项要填来源网址(https 开头),请填在这一项下面的输入框里。`
-  if (error === 'all human checklist items must PASS') return '还有清单项没标「通过」,请 9 项都标 PASS,再点「确定通过」。'
+  if (error === 'all human checklist items must PASS') return '还有清单项没标「通过」,请每一项都标 PASS,再点「确定通过」。'
   if (error === 'checklist contains an invalid source_ref') return '来源网址格式不对,要填 https:// 开头的完整网址。'
   if (error === 'checklist source is not owned by this client') return '填的素材编号不属于这个客户,请改填官网产品页网址。'
   if (error.startsWith('automatic checklist')) return '自动媒体检测还没通过,系统不允许通过这条。请找开发处理,不是你填错了。'

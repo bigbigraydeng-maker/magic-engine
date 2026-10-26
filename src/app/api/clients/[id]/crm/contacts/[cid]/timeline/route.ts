@@ -17,6 +17,7 @@ import { formFactsLine } from '@/lib/crm/form-facts'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
@@ -441,7 +442,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   return NextResponse.json({
     contact: {
       contactId: contact.id,
-      name: contact.display_name || '未留姓名',
+      name: contactCardTitle(contact.display_name),
       phone: contact.primary_phone,
       email: contact.primary_email,
       stage: contact.stage,

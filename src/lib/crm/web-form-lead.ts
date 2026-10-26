@@ -37,6 +37,7 @@ export interface WebFormLeadInput {
   utmSource?: string | null
   utmMedium?: string | null
   utmCampaign?: string | null
+  utmContent?: string | null
   /** ISO；不传用当下。 */
   submittedAt?: string | null
   /** 这套房的 listings.id（listing 落地页才有）。 */
@@ -79,6 +80,7 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       utm_source: input.utmSource,
       utm_medium: input.utmMedium,
       utm_campaign: input.utmCampaign,
+      utm_content: input.utmContent,
     })
 
     const { contactId } = await resolveContact({

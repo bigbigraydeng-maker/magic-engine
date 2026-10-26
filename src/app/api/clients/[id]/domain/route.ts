@@ -23,7 +23,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { domainToEnvKey } from '@/lib/meta/token-selection'
+import { domainToEnvKey, loadStoredClientMetaToken } from '@/lib/meta/token-selection'
 
 /** Strip protocol, path, query, and leading www./trailing slash → bare host. */
 function normaliseDomain(raw: string): string | null {
@@ -66,7 +66,21 @@ export async function PATCH(
     return NextResponse.json({ error: 'Enter a valid website address (e.g. yourbusiness.co.nz)' }, { status: 400 })
   }
 
-  if (process.env[`META_SYSTEM_USER_TOKEN_${domainToEnvKey(domain)}`]) {
+  // AD-SEC-4: domains with a configured per-client Meta token (env OR DB)
+  // are reserved — only internal staff can claim them.
+  const hasEnvToken = !!process.env[`META_SYSTEM_USER_TOKEN_${domainToEnvKey(domain)}`]
+  const { data: domainOwner } = await supabaseAdmin
+    .from('clients')
+    .select('id')
+    .eq('domain', domain)
+    .neq('id', params.id)
+    .limit(1)
+    .maybeSingle()
+  let hasDbToken = false
+  if (domainOwner) {
+    hasDbToken = !!(await loadStoredClientMetaToken(supabaseAdmin, domainOwner.id))
+  }
+  if (hasEnvToken || hasDbToken) {
     const staff = await requireGlobalAdmin()
     if (!staff.ok) {
       return NextResponse.json(

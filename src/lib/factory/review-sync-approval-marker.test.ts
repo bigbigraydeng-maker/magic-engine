@@ -6,11 +6,11 @@ const { from } = vi.hoisted(() => ({ from: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from } }))
 
 import { applyApprove } from './review-sync'
-import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/content-review'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
 type Written = { status?: string; review_ref?: Record<string, unknown> }
 
-const humanItems = REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
+const humanItems = REEL_HUMAN_CHECK_KEYS_V3.map(key => ({
   key,
   judge: 'HUMAN' as const,
   outcome: 'PASS' as const,

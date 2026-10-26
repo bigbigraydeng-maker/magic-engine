@@ -72,7 +72,7 @@ export const PostcardReel: React.FC<Record<string, unknown>> = (rawProps) => {
         ) : null}
       </Sequence>
       <Sequence from={logoFrom} durationInFrames={timing.totalFrames - logoFrom}><Logo file={props.logoFile} /></Sequence>
-      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
 }

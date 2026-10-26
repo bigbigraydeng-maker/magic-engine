@@ -3,7 +3,7 @@
  * 读一个系列的结构（广告组 / 广告 / 状态 / 最后修改时间）和三层洞察（整个系列 / 按广告组 / 按广告）。
  */
 import { describe, expect, it, vi } from 'vitest'
-import { parseMetricsRows, readSeriesFacts } from '../objective-watch-read'
+import { parseCampaignNode, parseEntities, parseMetricsRows, readSeriesFacts } from '../objective-watch-read'
 import { makeGraphGet } from '../meta-reader'
 
 const ACCOUNT = 'act_1234567890'
@@ -85,6 +85,33 @@ const read = (fetcher: typeof fetch) =>
 
 const pathOf = (u: URL): string => u.pathname.replace(/^\/v\d+\.\d+\//, '')
 
+describe('parseCampaignNode · 系列日预算', () => {
+  it('日预算是已经按分给的整数；没有或读不懂 = null，不让整份节点失败', () => {
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '2500' })?.daily_budget_cents).toBe(2500)
+    expect(parseCampaignNode(nodeBody)?.daily_budget_cents).toBeNull()
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '12.5' })?.daily_budget_cents).toBeNull()
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '-1' })).not.toBeNull()
+    expect(parseCampaignNode({ ...nodeBody, daily_budget: '-1' })?.daily_budget_cents).toBeNull()
+  })
+})
+
+describe('parseEntities · 广告组日预算', () => {
+  it('只在广告组上读 daily_budget；没有或读不懂 = null，广告不带这个字段', () => {
+    const adsets = parseEntities({
+      data: [
+        { id: '1', name: '组A', daily_budget: '5000' },
+        { id: '2', name: '组B' },
+        { id: '3', name: '组C', daily_budget: '12.5' },
+      ],
+    }, false)
+    expect(adsets?.map(row => row.daily_budget_cents)).toEqual([5000, null, null])
+    const ads = parseEntities({ data: [{ id: '9', name: '广告', adset_id: '1', daily_budget: '5000' }] }, true)
+    expect(ads).toEqual([{
+      id: '9', name: '广告', parent_id: '1', status: null, effective_status: null, updated_at: null,
+    }])
+  })
+})
+
 describe('readSeriesFacts · 读结构和三层洞察', () => {
   it('读到系列、广告组、广告（含状态和最后修改时间）和三层数字', async () => {
     const { fetcher } = makeFetcher()
@@ -125,6 +152,8 @@ describe('readSeriesFacts · 读结构和三层洞察', () => {
     for (const c of insights) {
       expect(JSON.parse(c.url.searchParams.get('time_range') ?? '{}')).toEqual({ since: '2026-10-20', until: '2026-10-21' })
     }
+    const adsetCall = calls.find(c => pathOf(c.url).endsWith('/adsets'))
+    expect(adsetCall?.url.searchParams.get('fields')).toContain('daily_budget')
     expect(insights[0].url.searchParams.get('fields')).toContain('video_thruplay_watched_actions')
     expect(insights[0].url.searchParams.get('fields')).toContain('cost_per_thruplay')
   })
@@ -230,6 +259,7 @@ describe('Graph 路径白名单 · 只多放开了「系列节点 + 广告组 / 
 
   it('读系列节点只许要白名单里的字段：要 access_token 之类的 / 不带字段 → 拒绝', async () => {
     await expect(get(CAMPAIGN, { fields: 'id,name,objective,status,effective_status,created_time,updated_time,account_id' })).resolves.toEqual({})
+    await expect(get(CAMPAIGN, { fields: 'daily_budget' })).resolves.toEqual({})
     await expect(get(CAMPAIGN, { fields: 'access_token' })).rejects.toThrow('不允许')
     await expect(get(CAMPAIGN, { fields: 'id,name,access_token' })).rejects.toThrow('不允许')
     await expect(get(CAMPAIGN, {})).rejects.toThrow('不允许')

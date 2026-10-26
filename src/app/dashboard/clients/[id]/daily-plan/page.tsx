@@ -6,9 +6,12 @@ import Link from 'next/link'
 import type { CampaignBrief } from '@/types/magic-engine'
 import { VisualDirectionSection } from '../_components/VisualDirectionSection'
 import { CampaignDailyPlanPanel } from '../_components/CampaignDailyPlanPanel'
+import { CampaignPicker } from '../_components/CampaignPicker'
 import { DailyPlanReelsPanel } from '../_components/DailyPlanReelsPanel'
 import { WeekOverviewPanel } from '../_components/WeekOverviewPanel'
 import { pickDefaultCampaignId } from './pick-default-campaign'
+import { homeEntryVisible } from '@/lib/auth/home-entries'
+import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer'
 
 interface ClientLite {
   id: string
@@ -20,9 +23,17 @@ export default function DailyPlanPage() {
   const searchParams = useSearchParams()
   const clientId = params.id as string
   const requestedCampaignId = searchParams.get('campaign')
-  // 图文 Post 与视频 Reels 分开看（PM：Post 和 Reels 要拆开）。?tab=reels 可直达视频页。
+  const viewer = useWorkspaceViewer()
+  const showOverview = homeEntryVisible(viewer, 'week-overview')
+  const showReels = homeEntryVisible(viewer, 'reels')
+  // Posts and Reels are separate tabs. ?tab=reels opens the video tab.
+  // Week overview and reels both read social-overview, which only the exact
+  // ADMIN_EMAILS list can open. Everyone else would see "no permission".
+  const requestedTab = searchParams.get('tab')
   const [tab, setTab] = useState<'post' | 'reels' | 'overview'>(
-    searchParams.get('tab') === 'reels' ? 'reels' : searchParams.get('tab') === 'overview' ? 'overview' : 'post',
+    requestedTab === 'reels' && showReels ? 'reels'
+      : requestedTab === 'overview' && showOverview ? 'overview'
+        : 'post',
   )
 
   const [client, setClient] = useState<ClientLite | null>(null)
@@ -90,7 +101,9 @@ export default function DailyPlanPage() {
       </div>
 
       <div className="flex gap-2" role="tablist" aria-label="社媒日常内容类型">
-        {([['overview', '本周总览'], ['post', '图文帖子'], ['reels', '短视频']] as const).map(([key, label]) => (
+        {([['overview', '本周总览'], ['post', '图文帖子'], ['reels', '短视频']] as const)
+          .filter(([key]) => (key !== 'overview' || showOverview) && (key !== 'reels' || showReels))
+          .map(([key, label]) => (
           <button
             key={key}
             type="button"
@@ -108,9 +121,9 @@ export default function DailyPlanPage() {
         ))}
       </div>
 
-      {tab === 'overview' ? (
+      {tab === 'overview' && showOverview ? (
         <WeekOverviewPanel clientId={clientId} />
-      ) : tab === 'reels' ? (
+      ) : tab === 'reels' && showReels ? (
         <DailyPlanReelsPanel clientId={clientId} />
       ) : campaigns.length === 0 ? (
         <div className="bg-white rounded-xl border border-dashed border-black/10 py-14 text-center">
@@ -124,43 +137,43 @@ export default function DailyPlanPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {/* Campaign switcher — only shown when there's more than one active campaign */}
-          {campaigns.length > 1 && (
-            <div className="flex flex-wrap gap-2">
-              {campaigns.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => setSelectedCampaignId(c.id)}
-                  className={`text-sm px-3 py-1.5 rounded-lg border transition-colors ${
-                    c.id === selectedCampaignId
-                      ? 'bg-me-ochre text-me-charcoal border-me-ochre'
-                      : 'bg-white text-me-charcoal/70 border-black/10 hover:border-me-ochre/40'
-                  }`}
-                >
-                  {c.title}
-                </button>
-              ))}
-            </div>
-          )}
+          {/* Campaign picker — only shown when there's more than one active campaign; short names, full title below */}
+          <CampaignPicker campaigns={campaigns} selectedId={selectedCampaignId} onSelect={setSelectedCampaignId} />
 
           {selectedCampaign && (
             <>
               <div>
                 <h2 className="text-base font-semibold text-me-charcoal/90">{selectedCampaign.title}</h2>
                 {selectedCampaign.description && (
-                  <p className="text-xs text-me-charcoal/55 mt-0.5">{selectedCampaign.description}</p>
+                  <details className="mt-1 text-xs text-me-charcoal/70">
+                    <summary className="cursor-pointer font-medium underline">活动说明</summary>
+                    <p className="mt-1 whitespace-pre-line break-words">{selectedCampaign.description}</p>
+                  </details>
                 )}
               </div>
 
-              {/* key forces a remount on campaign switch — VisualDirectionSection only seeds its form state from `campaign` on mount, so without it a switch would keep showing (and could save) the previous campaign's draft. */}
-              <VisualDirectionSection
-                key={selectedCampaign.id}
-                campaign={selectedCampaign}
-                clientId={clientId}
-                onUpdated={handleCampaignUpdated}
-              />
-
+              {/* The seven-day plan comes first: it is what is looked at every day. */}
               <CampaignDailyPlanPanel clientId={clientId} campaignId={selectedCampaign.id} />
+
+              {/* Visual direction is set once and rarely touched, so it lives in a folded settings area. */}
+              <details className="group rounded-xl border border-black/[.06] bg-white">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold text-me-charcoal [&::-webkit-details-marker]:hidden">
+                  <svg aria-hidden viewBox="0 0 20 20" className="h-4 w-4 shrink-0 text-me-charcoal/55 transition-transform group-open:rotate-90" fill="currentColor">
+                    <path d="M7.2 4.6a1 1 0 0 1 1.4 0l4.7 4.7a1 1 0 0 1 0 1.4l-4.7 4.7a1 1 0 1 1-1.4-1.4L11.2 10 7.2 6a1 1 0 0 1 0-1.4Z" />
+                  </svg>
+                  设置：视觉方向
+                  <span className="text-xs font-normal text-me-charcoal/65">不用每天动，需要时再展开</span>
+                </summary>
+                <div className="border-t border-black/5 p-3 [&>div]:rounded-none [&>div]:border-0">
+                  {/* key forces a remount on campaign switch — VisualDirectionSection only seeds its form state from `campaign` on mount, so without it a switch would keep showing (and could save) the previous campaign's draft. */}
+                  <VisualDirectionSection
+                    key={selectedCampaign.id}
+                    campaign={selectedCampaign}
+                    clientId={clientId}
+                    onUpdated={handleCampaignUpdated}
+                  />
+                </div>
+              </details>
             </>
           )}
         </div>

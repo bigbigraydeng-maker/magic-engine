@@ -3,9 +3,9 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { applyApprove, applyBudgetUpdate, applyQualityReject } from './review-apply'
+import { applyApprove, applyAssetAccept, applyBudgetUpdate, applyQualityReject } from './review-apply'
 import { ASSET_ONLY_NOT_PUBLISHABLE } from './deliverable'
-import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/content-review'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
 type Resp = { data: unknown; error: unknown }
 
@@ -33,7 +33,7 @@ const IN_REVIEW_WO = {
   angle_source: {}, rationale_one_liner: 'why', budget_cap_usd: 2, source_ad_id: 'ad-1',
 }
 
-const PASS_HUMAN = REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
+const PASS_HUMAN = REEL_HUMAN_CHECK_KEYS_V3.map(key => ({
   key, judge: 'HUMAN' as const, outcome: 'PASS' as const, detail: null,
   source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
 }))
@@ -44,6 +44,21 @@ const approve = (db: SupabaseClient, id = 'wo-1', reviewer = 'me@x.com', clientI
   applyApprove(db, id, reviewer, clientId, PASS_HUMAN, null)
 const reject = (db: SupabaseClient, id = 'wo-1', feedback = '画面太慢', reviewer = 'me@x.com', clientId?: string) =>
   applyQualityReject(db, id, feedback, reviewer, clientId, FAIL_HUMAN)
+
+const musicBrief = {
+  remotion: {
+    template: 'postcard',
+    props: {
+      brandColor: '#123456', logoFile: 'cts-logo.png', musicFile: 'founders-at-dawn.mp3', musicStartSec: 5,
+      cardOpacity: 0.7, cardSide: 'center', hook: { clip: 'hook.mp4', lines: ['China at dawn'] },
+      scenes: [
+        { clip: 'scene-one.mp4', place: 'Shanghai', line: 'Walk beside the old waterfront.', sourceUrl: 'https://example.com/one', sourceQuote: 'Walk beside the old waterfront in Shanghai.', placeSourceQuote: 'Shanghai waterfront.' },
+        { clip: 'scene-two.mp4', place: 'Hangzhou', line: 'Follow the lake into the hills.', sourceUrl: 'https://example.com/two', sourceQuote: 'Follow the lake into the hills.', placeSourceQuote: 'Hangzhou lake.' },
+      ],
+      price: null, end: { backdropClip: 'end.mp4', title: 'Explore China' }, timing: { hookSec: 3, sceneSec: 3, priceSec: 3 },
+    },
+  },
+}
 
 describe('applyApprove — 花钱闸(魏征红线③)', () => {
   it('in_review + 无 publish_budget → approved', async () => {
@@ -137,7 +152,93 @@ describe('applyApprove — 花钱闸(魏征红线③)', () => {
   })
 })
 
+describe('applyApprove — V3 清单与版本号', () => {
+  it('V2 形状（缺「单独看得懂」）→ 400，不写库', async () => {
+    const v2 = PASS_HUMAN.filter(i => i.key !== 'standalone_understandable')
+    const { db, updates } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+    const r = await applyApprove(db, 'wo-1', 'me@x.com', undefined, v2, null)
+    expect(r.status).toBe(400)
+    expect(updates).toHaveLength(0)
+  })
+
+  it('批准时把 checklist_version=v3 写进 review_ref', async () => {
+    const { db, updates } = mockSupabase([{ data: IN_REVIEW_WO, error: null }, { data: [{ id: 'wo-1' }], error: null }])
+    const r = await approve(db)
+    expect(r.ok).toBe(true)
+    expect(((updates[0] as Record<string, unknown>).review_ref as Record<string, unknown>).checklist_version).toBe('v3')
+  })
+})
+
+describe('applyAssetAccept — 素材验收入库（不是发布授权）', () => {
+  const ASSET_WO = { ...IN_REVIEW_WO, brief: { remotion: { template: 'atmosphere', props: {}, deliverable: 'asset_only' } } }
+
+  it('asset_only + in_review → archived，记 asset_accepted_by/at', async () => {
+    const { db, updates } = mockSupabase([{ data: ASSET_WO, error: null }, { data: [{ id: 'wo-1' }], error: null }])
+    const r = await applyAssetAccept(db, 'wo-1', 'me@x.com')
+    expect(r).toMatchObject({ ok: true, status: 200 })
+    expect(updates[0]).toMatchObject({ status: 'archived' })
+    expect((updates[0] as Record<string, unknown>).review_ref as Record<string, unknown>).toMatchObject({ asset_accepted_by: 'me@x.com' })
+  })
+
+  it('普通成片 → 409，不写库', async () => {
+    const { db, updates } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
+    const r = await applyAssetAccept(db, 'wo-1', 'me@x.com')
+    expect(r.status).toBe(409)
+    expect(updates).toHaveLength(0)
+  })
+
+  it('拼错的 deliverable 不当素材（409）', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: { remotion: { deliverable: 'Asset_Only' } } }
+    const { db } = mockSupabase([{ data: wo, error: null }])
+    expect((await applyAssetAccept(db, 'wo-1', 'me@x.com')).status).toBe(409)
+  })
+
+  it('非 in_review → 409；别家客户 → 403', async () => {
+    const a = mockSupabase([{ data: { ...ASSET_WO, status: 'approved' }, error: null }])
+    expect((await applyAssetAccept(a.db, 'wo-1', 'me@x.com')).status).toBe(409)
+    const b = mockSupabase([{ data: ASSET_WO, error: null }])
+    expect((await applyAssetAccept(b.db, 'wo-1', 'me@x.com', 'other-client')).status).toBe(403)
+  })
+})
+
+describe('applyQualityReject — remotion 单不重开新单', () => {
+  it('remotion 单打回：只标 review_rejected，不 insert 重开单', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: { engine: 'remotion', remotion: { template: 'list', props: {} } } }
+    const { db, inserts } = mockSupabase([{ data: wo, error: null }, { data: [{ id: 'wo-1' }], error: null }])
+    const r = await reject(db)
+    expect(r.ok).toBe(true)
+    expect(r.data).toMatchObject({ status: 'review_rejected', reopened_work_order_id: null })
+    expect(inserts).toHaveLength(0)
+  })
+})
+
 describe('applyQualityReject — 打回重开', () => {
+  it('把人工选曲写进重开的 Remotion brief 并留审计信息', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: musicBrief }
+    const { db, inserts } = mockSupabase([
+      { data: wo, error: null },
+      { data: [{ id: 'wo-1' }], error: null },
+      { data: { id: 'wo-2' }, error: null },
+    ])
+    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com', undefined, FAIL_HUMAN, 'horizons-call')
+    expect(r.ok).toBe(true)
+    const reopened = inserts[0] as { brief: Record<string, any> }
+    expect(reopened.brief.remotion.props).toMatchObject({ musicFile: 'horizons-call.mp3', musicStartSec: 0 })
+    expect(reopened.brief.review_overrides.music).toMatchObject({
+      track_id: 'horizons-call', staged_file: 'horizons-call.mp3', catalog_file: "Horizon's Call.mp3", selected_by: 'me@x.com',
+    })
+    expect(reopened.brief.review_overrides.music.selected_at).toEqual(expect.any(String))
+  })
+
+  it('rejects an unapproved or incompatible music id before touching either work order', async () => {
+    const wo = { ...IN_REVIEW_WO, brief: musicBrief }
+    const { db, updates, inserts } = mockSupabase([{ data: wo, error: null }])
+    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com', undefined, FAIL_HUMAN, 'pipa-trap')
+    expect(r.status).toBe(422)
+    expect(updates).toEqual([])
+    expect(inserts).toEqual([])
+  })
+
   it('clientId 不匹配 → 403(跨客户越权),老单不动、不重开新单', async () => {
     const { db, updates, inserts } = mockSupabase([{ data: IN_REVIEW_WO, error: null }])
     const r = await reject(db, 'wo-1', '画面太慢', 'me@x.com', 'other-client')

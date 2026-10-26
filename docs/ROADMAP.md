@@ -29,7 +29,7 @@
 |---|---|---|---|---|
 | B1 广告 WP3 | Inngest 链、孔明预检 + denied 恢复点、韩信、Check/Tune、Jev、五段日报、`autonomy_mode`↔`client_automation_policies.mode` 同步设计、G11 熔断落点确认 | 高/高/高 → P0 | A | 已派 ME 广告构建控制（合同待开）；设计与实施各一次 子牙+魏征，狄仁杰看同步开关 |
 | B2 三只闹钟 | 马良出片自动 9 宫格自检 · 李白逐句溯源 + 月度提示词体检 · 司马迁周四读评价起草不发 | 中/中/中 → P2 | B | 已派 ME 2.0 构建控制；只写 pm-todo 三件套，避开周五六 |
-| B3 审查自动被叫 | 接线 `tools/ops-review-loop/src/risk.mjs` → PR 事件 → 自动分派魏征/狄仁杰/板桥 | 高/中/低 → P2 | A（碰 workflows） | PM 2026-09-25「分两档」插队：定级接线 + B/C 自动合 + A 级签字闸已派 ME 2.0（合同 A 级，DeepSeek 执行）；三人签字的自动写入仍待广告跑稳两周后开 |
+| B3 审查自动被叫 | 接线 `tools/ops-review-loop/src/risk.mjs` → PR 事件 → 自动分派魏征/狄仁杰/板桥 | 高/中/低 → P2 | A（碰 workflows） | PM 2026-09-25「分两档」插队：定级接线 + B/C 自动合 + A 级签字闸已派 ME 2.0（合同 A 级，DeepSeek 执行）。2026-10-25 起 A 级签字改为 Codex Astra + Claude Code 两方，子牙/魏征/狄仁杰只抽查 B 级且不挡合并（见 .github/merge-authorization.md）。两方签字的自动写入仍未建成。 |
 | B4 板桥待办人话闸 | 今日待办条目先过板桥改人话 | 高/中/中 → P2 | B | 待广告跑稳两周、且 B2 后再开 |
 | B5 孔子 SEO 笼子 | 给 SEO 改文案划「不问就能做」范围 | 广告跑稳两周后再打分 | A | 未开工 |
 
@@ -278,6 +278,17 @@ PR #1973 给 Meta 留资同步加了「上一轮已办完就别重跑」的闸�
 
 ---
 
+
+## Meta Social Technologies MCP 内部工程助手 · 后续评估（2026-10-24 登记，未排期）
+
+Meta 官方 MCP 工具可辅助开发者查询 Meta 开发文档、应用与权限状态、审核 / 合规信息、API 用量与弃用信息，以及 webhook 订阅状态；Manage 能力还可管理 webhook 订阅并发送测试事件。
+
+- **当前决定**：仅登记为候选，后续有时间再评估是否适合 Magic Engine；尚未按 §11 打分，不排期、不开发。
+- **预期价值**：为 Magic Engine 内部工程人员提供查询 Meta 官方开发资料与应用状态的入口，减少维护 Meta 集成时在代码、文档和开发者后台之间切换核对的工作。
+- **边界**：这是内部研发 / 运维辅助工具，不是 Magic Engine 面向客户的 Meta Ads Connector；不提供客户广告账户 Insights，也不替代 Magic Engine 自身的 OAuth、账户授权、数据存储和只读数据管道。Manage 能力不代表可以修改应用配置或完成 App Review。
+- **后续评估要点**：确认开放资格、Read 权限实际覆盖的问题、与现有 Meta Ads Connector 的互补关系及认证 / 数据边界；默认只评估 Read，只有明确的非生产 webhook 验证需求时再考虑 Manage。
+- **相关现状**：[`docs/specs/2026-09-20-meta-ads-ai-connector-v01.md`](./specs/2026-09-20-meta-ads-ai-connector-v01.md) 仍标记为 Discovery / Implementation Proposal、STOP BEFORE BUILD；本条不改变该状态。
+- **来源**：[Meta Social Technologies MCP 官方文档](https://developers.facebook.com/documentation/mcp/devtools-mcp/)。
 ## SEO 标题周循环 v1 · 上线后跟进（2026-09-20 上线，CTS 开关已关；清单来源 Issue [#1807](https://github.com/bigbigraydeng-maker/magic-engine/issues/1807) 评论）
 
 - [ ] **重新打开 CTS 的开关**：先用 `POST /api/cron/seo-meta-cycle-trigger` 带 `{"dry_run": true, "client_id": "<CTS>"}` 跑一次演练，把「这一轮会改哪些页、改成什么字、依据的搜索量/难度/前 3 标题」给 PM 看；PM 批准后才把 `clients.seo_config.meta_cycle_enabled` 改回 true（见 PITFALLS D10）

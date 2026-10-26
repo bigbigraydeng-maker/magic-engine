@@ -84,7 +84,7 @@ describe('客户配置（L4）', () => {
     expect(cfg?.known_issues).toBeUndefined()
   })
 
-  it('按目标盯盘（如果配了）：系列编号是纯数字且不重复、类型只能是播放量 / WhatsApp、名字非空、阈值合理', () => {
+  it('按目标盯盘（如果配了）：系列编号是纯数字且不重复、类型只能是播放量 / WhatsApp / 表单留资、名字非空、阈值合理', () => {
     for (const id of listTrackingClientIds()) {
       const watch = getTrackingClientConfig(id)?.objective_watch
       if (!watch) continue
@@ -93,7 +93,8 @@ describe('客户配置（L4）', () => {
       for (const campaignId of ids) expect(campaignId).toMatch(/^\d{6,20}$/)
       expect(new Set(ids).size).toBe(ids.length)
       for (const s of watch.series) {
-        expect(['awareness', 'whatsapp']).toContain(s.kind)
+        expect(['awareness', 'whatsapp', 'lead_form']).toContain(s.kind)
+        if (s.ad_account_id !== undefined) expect(s.ad_account_id).toMatch(/^act_\d{6,20}$/)
         expect(s.label.trim().length).toBeGreaterThan(0)
         if (s.frequency_yellow !== undefined || s.frequency_red !== undefined) {
           expect(s.frequency_yellow, `${s.label} 频次黄线`).toBeGreaterThan(0)
@@ -109,9 +110,10 @@ describe('客户配置（L4）', () => {
 
   it('CTS 按目标盯盘：本期的播放量系列和 WhatsApp 系列在盯；上一期已暂停的「官网点击」系列不在', () => {
     const watch = getTrackingClientConfig('c0000000-0000-0000-0000-000000000000')?.objective_watch
-    expect(watch?.series.map(s => [s.campaign_id, s.kind, s.label])).toEqual([
-      ['52558359035473', 'awareness', '播放量系列'],
-      ['52558367358873', 'whatsapp', 'WhatsApp 系列'],
+    expect(watch?.series.map(s => [s.campaign_id, s.kind, s.label, s.ad_account_id ?? ''])).toEqual([
+      ['52558359035473', 'awareness', '播放量系列', ''],
+      ['52558367358873', 'whatsapp', 'WhatsApp 系列', ''],
+      ['120250459565520307', 'lead_form', '表单留资系列（7274）', 'act_2775766642787274'],
     ])
     expect(watch?.series.some(s => s.campaign_id === '52558131445673')).toBe(false)
   })

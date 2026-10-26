@@ -1,9 +1,9 @@
 /**
  * 账户级日上限清单 —— 只读（v2.1 §3.9 / §11.11）。
  *
- * 这里只负责"把每个账户现在填了多少、客户总闸是多少"读出来给面板显示。
- * 写入仍然只走 `[accountId]/daily-cap` 那个 PATCH——它是唯一入口，自己会
- * 校验 sum(账户上限) ≤ 客户总闸、币种一致、账户必须已绑定。
+ * 这里只负责"把每个账户现在填了多少、客户总闸是多少、要不要出现在广告健康页"
+ * 读出来给面板显示。日上限的写入仍然只走 `[accountId]/daily-cap`；
+ * 「在广告健康页显示」走 `[accountId]/visibility`。
  *
  * ── 界面不许自己算校验 ────────────────────────────────────────────────
  * 面板只负责把用户填的数字原样交给 PATCH，校验结论一律以 PATCH 的返回为准。
@@ -22,6 +22,7 @@ import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 interface AccountCapRow {
   ad_account_id: string
   daily_budget_cap_cents: number | null
+  hidden_from_ad_health: boolean
 }
 
 export async function GET(
@@ -38,7 +39,7 @@ export async function GET(
   const [{ data: accountRows, error: accountErr }, { data: cfg, error: cfgErr }] = await Promise.all([
     supabaseAdmin
       .from('client_meta_ad_accounts')
-      .select('ad_account_id, daily_budget_cap_cents')
+      .select('ad_account_id, daily_budget_cap_cents, hidden_from_ad_health')
       .eq('client_id', clientId)
       .order('ad_account_id', { ascending: true }),
     supabaseAdmin
@@ -57,6 +58,7 @@ export async function GET(
   const accounts: AccountCapRow[] = ((accountRows ?? []) as AccountCapRow[]).map((r) => ({
     ad_account_id: r.ad_account_id,
     daily_budget_cap_cents: typeof r.daily_budget_cap_cents === 'number' ? r.daily_budget_cap_cents : null,
+    hidden_from_ad_health: r.hidden_from_ad_health === true,
   }))
   const clientTotalCapCents = typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null
 

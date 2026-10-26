@@ -10,7 +10,10 @@
  *
  * 怎么跑（密钥由 node --env-file 加载，脚本不读、不打印密钥）：
  *   node --env-file=/path/.env.local node_modules/tsx/dist/cli.mjs scripts/crm-enquiry-screen-dryrun.ts \
- *     --client <clientId> [--staff Baker,Anna] [--no-model] [--out report.json]
+ *     --client <clientId> [--staff Baker,Anna] [--no-model] [--out report.json] [--apply]
+ *
+ * --apply：把干跑判出的「不是咨询」真的写进库（阶段改成非咨询，走界面「退回」同一条路径）。
+ *          不加 = 只出报告、一个字都不写。
  *
  * --no-model：只跑第一层 + 硬否决，不调模型（零花费）。
  * 模型：平台已有的 Claude Haiku（对外叫 Strategy Engine），每封只发「主题 + 前 255 字预览」。
@@ -28,6 +31,8 @@ import { enrichContacts } from '@/lib/crm/contact-enrichment'
 import { loadEnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
 import { loadLatestBriefByContact } from '@/lib/crm/brief-lookup'
 import { decideScreen, type ScreenDecision } from '@/lib/crm/enquiry-screen/decide'
+import { advanceContactStage } from '@/lib/crm/advance-contact-stage'
+import { ENQUIRY_SCREEN_ACTOR } from '@/lib/crm/actors'
 import { SCREEN_MODEL, acceptNonEnquiry, callScreenModel } from '@/lib/crm/enquiry-screen/classify'
 import { hasEnquiryEvidence, layerOneVerdict } from '@/lib/crm/enquiry-screen/rules'
 import { flattenEnquiryTerms } from '@/lib/crm/industry/travel-enquiry-terms'
@@ -97,6 +102,8 @@ async function main(): Promise<void> {
   const clientId = arg('client') ?? CTS
   const staffNames = (arg('staff') ?? '').split(',').map((s) => s.trim()).filter(Boolean)
   const useModel = !flag('no-model')
+  // 默认只干跑；只有显式写 --apply 才会写库（而且只写「改成非咨询」这一种）。
+  const APPLY = flag('apply')
   const now = new Date()
 
   const { data: client } = await sb
@@ -198,6 +205,7 @@ async function main(): Promise<void> {
       const first = (touchByContact.get(id) ?? [])[0]
       moved.push({
         id,
+        fromStage: (c.stage as string | null) ?? null,
         name: c.display_name,
         email,
         layer: decision.layer,
@@ -216,6 +224,39 @@ async function main(): Promise<void> {
   console.log('\n— 硬否决词命中次数 —', vetoTermHits)
   console.log('\n— 被挪走者 —')
   for (const m of moved) console.log(`[${m.layer}/${m.category}] ${m.name} <${m.email}> | ${m.subject} | ${m.reason}`)
+
+  // ── 2.5 真写（只有 --apply 才走这里）──
+  //
+  // 走的是界面「退回」按钮同一条路径：`advanceContactStage` 先写一条阶段变更记录
+  // 再改 contacts.stage，所以抽屉里看得到「谁、什么时候、为什么」，也进学习样本。
+  // 改的人记成 `ai:enquiry-screen`（`isAutomatedActor` 认得它）——这很重要：
+  // 机器自己写的记录不会把这个人永久挡在筛选之外，而真人一旦动过阶段，
+  // `eligibility.ts` 的 `human_stage_change` 就让机器此后再不碰他。
+  if (APPLY) {
+    console.log(`\n=== 真写：把上面 ${moved.length} 个改成「非咨询」 ===`)
+    let ok = 0
+    let failed = 0
+    for (const m of moved) {
+      const res = await advanceContactStage(
+        sb,
+        clientId,
+        String(m.id),
+        NOT_ENQUIRY_STAGE_KEY,
+        String(m.note ?? ''),
+        ENQUIRY_SCREEN_ACTOR,
+        (m.fromStage as string | null) ?? null,
+      )
+      if (res.ok) {
+        ok += 1
+      } else {
+        failed += 1
+        console.log(`  ✗ ${String(m.name)} <${String(m.email)}>: ${res.error}`)
+      }
+    }
+    console.log(`写成功 ${ok} 个，失败 ${failed} 个`)
+  } else if (moved.length > 0) {
+    console.log('\n（这是干跑，上面一个都没写进库。确认名单没问题后，加 --apply 再跑一次才会真改。）')
+  }
 
   // ── 3. 金标准一：我们用邮件回过信的人，第一封来信 ──
   let goldFlagged = 0

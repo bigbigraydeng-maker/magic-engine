@@ -163,7 +163,7 @@ export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <FitText avail={WIDTH} origin="center" text={props.disclaimer} style={{ fontFamily, fontSize: 26, fontWeight: 600, color: props.textColor, opacity: DISCLAIMER_OPACITY }} />
       </div>
       </FontGate>
-      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
 }

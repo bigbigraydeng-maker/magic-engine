@@ -63,6 +63,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  ads_service_pause_notice: 'decide', // 系列已暂停，要不要恢复由人点确认卡
   ads_account_not_active: 'one_click', // 去 Meta 付款设置结清欠款、补备用卡（系统进不去）
   ads_account_status_unreadable: 'dev', // 账户状态读不到：快照任务的问题，开发看，不占 PM 的清单
   ads_account_closed_weekly: 'decide', // 账户已关闭：要不要从客户名下解绑，由 PM 定（每周一提醒）
@@ -233,7 +234,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
 
   // ── 知会 → 周一周报 ──────────────────────────────────────────────────
   calendar_closure_probe_passed: 'weekly', // 自动核对通过但只是部分证据：周报里报，窗口去补确认
-  prescription_updated: 'weekly', // 本周方案已自动落地
+  prescription_updated: 'weekly', // 本周已批准方案的进度复查
   diagnostic_findings: 'weekly', // 本周体检结果，已排成看板动作
   not_indexed: 'weekly', // 未收录页面汇总：SEO 日常活（FDE / 开发在修），周报里报进度
   auto_run_blocked: 'weekly', // 「多数情况下不用你动手，周二会自动重判」

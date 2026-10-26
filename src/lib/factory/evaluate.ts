@@ -30,6 +30,7 @@ import {
   type WinnerRecipe,
 } from './recipe'
 import { FACTORY_CLIP_UNIT_COST_USD, FACTORY_ORDER_BUDGET_CAP_USD } from './constants'
+import { clipCanEnterFactoryPool, hasCurrentLicenseEvidence } from './clip-library'
 import type { AdCopy, DemandSignal, Decision, GateContext, GoalSlice, VerifiedOffer } from './types'
 import type { MasterBrief } from '@/types/magic-engine'
 
@@ -158,7 +159,7 @@ async function loadContext(
 
   const { data: clips, error: clErr } = await supabaseAdmin
     .from('video_clips')
-    .select('id, scene_tag, motion_type, track, usage_count, last_used_at, storage_url, source_meta')
+    .select('id, scene_tag, tags, motion_type, track, usage_count, last_used_at, storage_url, source_meta, license_status, license_review_note, source_author, source_url, license_name, license_url, sha256, license_reviewed_by_user_id, reviewed_by_user_id')
     .eq('client_id', signal.client_id)
     .eq('status', 'active')
   if (clErr) throw new Error(`video_clips query failed: ${clErr.message}`)
@@ -172,14 +173,36 @@ async function loadContext(
     ((c.source_meta ?? null) as Record<string, unknown> | null) ?? {}
   const isStill = (c: { source_meta?: unknown }) => meta(c).is_still_image === true
   const allClips = clips ?? []
-  const videoClips = allClips.filter((c) => !isStill(c))
+  const licenseEvidenceMatches = (c: (typeof allClips)[number]) => hasCurrentLicenseEvidence({
+    licenseStatus: c.license_status,
+    licenseReviewNote: c.license_review_note,
+    sourceAuthor: c.source_author,
+    sourceUrl: c.source_url,
+    licenseName: c.license_name,
+    licenseUrl: c.license_url,
+    sha256: c.sha256,
+    licenseReviewedByUserId: c.license_reviewed_by_user_id,
+    reviewedByUserId: c.reviewed_by_user_id,
+  })
+  const clearedTransformedImages = allClips
+    .filter((c) => isStill(c) && meta(c).is_ai_transformed === true && licenseEvidenceMatches(c))
+    .map((c) => toPublicClipUrl(c.storage_url as string | null))
+    .filter((url): url is string => !!url)
+  const clearedTransformedImageUrls = new Set(clearedTransformedImages)
+  const videoClips = allClips.filter((c) => !isStill(c) && clipCanEnterFactoryPool({
+    track: c.track,
+    isStillImage: false,
+    isAiTransformed: meta(c).is_ai_transformed === true,
+    hasCurrentEvidence: licenseEvidenceMatches(c),
+    sourceImageUrl: typeof meta(c).source_image_url === 'string' ? meta(c).source_image_url as string : null,
+  }, clearedTransformedImageUrls))
 
   // 🔴 版权隔离:**只有 AI 改过的图能进出片池**。
   // 抓来的原图是别人的作品,只作为改图的输入留在库里,永远不进成片 ——
   // 这是 PM 定的「抓图 → AI 改图(防版权)→ 图转视频」里「防版权」那一步的落点。
   // 绝不能因为「改图失败了就先用原图顶上」而放宽:那等于把版权风险直接发给客户。
   const transformedPool = allClips
-    .filter((c) => isStill(c) && meta(c).is_ai_transformed === true)
+    .filter((c) => isStill(c) && meta(c).is_ai_transformed === true && licenseEvidenceMatches(c))
     .map((c) => toPublicClipUrl(c.storage_url as string | null))
     .filter((u): u is string => !!u)
 

@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer, rejectAgentAdsCapWrite } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import {
@@ -31,6 +32,8 @@ export async function GET(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
+  const deniedRead = await rejectAgentAdsBearer(_req, { clientId, action: 'outside_allowlist' })
+  if (deniedRead) return deniedRead
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
@@ -51,6 +54,8 @@ export async function PATCH(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
+  const denied = await rejectAgentAdsCapWrite(req, clientId)
+  if (denied) return denied
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 

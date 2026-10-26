@@ -9,10 +9,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
-import { loadGoal, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
+import { loadGoal, loadLatestClientPrescription, loadLatestGoalPrescription, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
+import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
+import { planLinkedGoalId } from '@/lib/marketing-plan/promo/plan-pick'
 import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
 import { allAdsSteps, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
@@ -20,6 +23,16 @@ import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketin
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 
 type Ctx = { params: { id: string; planId: string } }
+
+function loadPlanPrescription(clientId: string, goalId: string): Promise<GoalPrescriptionView | null> {
+  const load = goalId !== ''
+    ? loadLatestGoalPrescription(clientId, goalId)
+    : loadLatestClientPrescription(clientId)
+  return load.catch((err: unknown) => {
+    console.warn('[promo] 处方没读到', err instanceof Error ? err.message : err)
+    return null
+  })
+}
 
 async function loadPlan(ctx: Ctx): Promise<MarketingPlan | null> {
   const { data } = await supabaseAdmin
@@ -32,21 +45,26 @@ async function loadPlan(ctx: Ctx): Promise<MarketingPlan | null> {
 }
 
 export async function GET(_req: NextRequest, ctx: Ctx) {
+  const denied = await rejectAgentAdsBearer(_req, { clientId: ctx.params.id, action: 'outside_allowlist' })
+  if (denied) return denied
   const access = await requirePaidClientAccess(ctx.params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
+    const goalId = planLinkedGoalId(plan)
     // 下拉选项只有草稿填表才用；读不到时页面照常显示（选项为空，表格里会提示）
-    const [board, options, liveAds] = await Promise.all([
+    const [board, options, liveAds, prescription] = await Promise.all([
       // 页面上的「批准」按钮是否可点由这份清单决定，所以预算门存档过期 / 没过时要现读（不然晚上永远灰、点不了）
       buildPromoBoard(plan, new Date(), { liveBudget: 'if_needed' }),
       plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
       // 只在计划还没批准、且是管理员账号时才读（FDE 按付费客户处理，不返回）：账户编号、标签、花费是内部口径，付费客户账号不给。
       // 数据来自快照表（每 6 小时抓一次）和日花费表（次日才到），读不到时回 ok:false。
       plan.status === 'draft' && access.tier === 'admin' ? loadLiveAds(ctx.params.id) : Promise.resolve(null),
+      // 推广表单或空白草稿上的目标 → 该目标最新一版。都没有 → 客户最近一份还在用的处方。
+      loadPlanPrescription(ctx.params.id, goalId),
     ])
-    return NextResponse.json({ success: true, board, options, live_ads: liveAds, live_ads_visible: access.tier === 'admin' })
+    return NextResponse.json({ success: true, board, options, live_ads: liveAds, live_ads_visible: access.tier === 'admin', prescription })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })
@@ -54,6 +72,12 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function PUT(req: NextRequest, ctx: Ctx) {
+  const denied = await rejectAgentAdsBearer(req, {
+    clientId: ctx.params.id,
+    action: 'change_budget',
+    resourceId: ctx.params.planId,
+  })
+  if (denied) return denied
   const access = await requirePlanApproverAccess(ctx.params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {

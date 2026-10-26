@@ -2,17 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { WorkOrderStatus } from '@/lib/factory/types'
-import type { PublishedView } from '@/lib/factory/publish/publish-display'
-import { REEL_HUMAN_CHECK_KEYS_V2, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3, type CheckItemOutcome, type ContentCheckItemResult, type ContentCheckItemKey } from '@/lib/social/content-review'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from '@/lib/factory/review-ui'
 import { factoryVideoUrl } from '@/lib/factory/outlets'
+import type { RemotionMusicChoice } from '@/lib/factory/remotion-music-options.mjs'
 import { OneClickConfirm } from './OneClickConfirm'
 import { OrderNo } from './OrderNo'
 import { PublishOutlets } from './PublishOutlets'
-import { publishedBadge, POST_PUBLISH } from './statusMeta'
-import { PendingCardHead, ReadOnlyTile } from './OrderTile'
+import { PendingCardHead } from './OrderTile'
 import { RejectDialog } from './RejectDialog'
-import { PromoteReelButton, promoteEntry } from './PromoteReelButton'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
@@ -24,12 +22,14 @@ interface WorkOrder {
   client_id: string
   client_name: string
   status: WorkOrderStatus
+  template_id?: string | null
+  music_file?: string | null
+  deliverable?: string | null // brief.remotion.deliverable;'asset_only' = 素材,不单独发布
   fact_source_url?: string | null // 工单自带的官网产品页(brief.copy.endcard.url),用来预填「事实有来源」
   angle: string
   rationale_one_liner: string
   created_at?: string
   reject_reason?: string | null
-  published?: PublishedView | null
   // redline_hits:交付时服务端复扫命中的品牌红线词(complete-work-order.ts)。
   // 设计是「命中不打回,标红让人审有的放矢」——但此前唯一的「标红」实现在 Airtable 审核卡里,
   // 随 Airtable 退役一起没了。成片直连 in_review 后这条护栏必须在这里补上,否则命中红线的片子
@@ -49,6 +49,24 @@ const redlineHitsOf = (o: WorkOrder): string[] =>
 
 // 「人称口吻不符简报」检测已于 2026-10-16 取消;历史工单里残留的这类标记只在展示层过滤,不改库。
 const RETIRED_FLAG_CATEGORIES = ['narrator_voice_mismatch']
+
+const TEMPLATE_LABELS: Record<string, string> = {
+  list: '清单节奏',
+  montage: '快切蒙太奇',
+  datacard: '数据卡',
+  postcard: '场景明信片',
+  atmosphere: '单镜氛围',
+}
+
+function renderChoiceLabel(templateId?: string | null): string {
+  if (!templateId) return '未记录'
+  return TEMPLATE_LABELS[templateId] ?? templateId
+}
+
+function musicChoiceLabel(musicFile?: string | null): string {
+  if (!musicFile?.trim()) return '未记录'
+  return musicFile.split('/').pop() ?? musicFile
+}
 
 const qualityFlagsOf = (o: WorkOrder): Array<{ category: string; detail: string }> =>
   Array.isArray(o.output?.quality_flags)
@@ -94,6 +112,7 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
   asset_provenance_matches_claim_context: '素材与主张场景相符',
   bgm_segmented_with_fades: 'BGM 分段并带淡入淡出',
   bgm_listened_no_vocals: '我已开声音听过，背景音乐里没有人声',
+  standalone_understandable: '这条单独发给粉丝，他们能看懂在讲什么',
   format_is_reel: '发布格式为 Reel',
   cta_in_first_comment_not_body: 'CTA 位于首评而非正文',
   first_comment_link_has_tracking_params: '首评链接含追踪参数',
@@ -102,27 +121,29 @@ const HUMAN_CHECK_LABEL: Record<ContentCheckItemKey, string> = {
 type ChecklistDraft = Record<ContentCheckItemKey, { outcome: CheckItemOutcome; detail: string; source_ref: string }>
 const FACT_KEYS: readonly ContentCheckItemKey[] = ['factual_claims_have_source', 'factual_claims_source_verified']
 const emptyChecklistDraft = (factSource = ''): ChecklistDraft => Object.fromEntries(
-  REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
+  REEL_HUMAN_CHECK_KEYS_V3.map(key => [key, { outcome: 'NOT_MEASURED', detail: '', source_ref: FACT_KEYS.includes(key) ? factSource : '' }]),
 ) as ChecklistDraft
 
-// The listened-to-the-audio item is never bulk-passed: it only counts if the reviewer ticks it themselves.
-const MANUAL_ONLY_KEYS: readonly ContentCheckItemKey[] = ['bgm_listened_no_vocals']
+// The listened-to-the-audio and the stand-alone-understandable items are never bulk-passed: it only counts if the reviewer ticks it themselves.
+const MANUAL_ONLY_KEYS: readonly ContentCheckItemKey[] = ['bgm_listened_no_vocals', 'standalone_understandable']
 const allPass = (draft: ChecklistDraft): ChecklistDraft =>
-  Object.fromEntries(REEL_HUMAN_CHECK_KEYS_V2.map(key => [key, MANUAL_ONLY_KEYS.includes(key) ? draft[key] : { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
+  Object.fromEntries(REEL_HUMAN_CHECK_KEYS_V3.map(key => [key, MANUAL_ONLY_KEYS.includes(key) ? draft[key] : { ...draft[key], outcome: 'PASS' }])) as ChecklistDraft
 
 // One-click path: the confirm button is only enabled after the reviewer ticks "listened, no vocals".
-const markListened = (draft: ChecklistDraft): ChecklistDraft => ({ ...draft, bgm_listened_no_vocals: { ...draft.bgm_listened_no_vocals, outcome: 'PASS' } })
+const markListened = (draft: ChecklistDraft): ChecklistDraft => ({
+  ...draft,
+  bgm_listened_no_vocals: { ...draft.bgm_listened_no_vocals, outcome: 'PASS' },
+  standalone_understandable: { ...draft.standalone_understandable, outcome: 'PASS' },
+})
 
 const checklistPayload = (draft: ChecklistDraft): ContentCheckItemResult[] =>
-  REEL_HUMAN_CHECK_KEYS_V2.map(key => ({
+  REEL_HUMAN_CHECK_KEYS_V3.map(key => ({
     key,
     judge: 'HUMAN',
     outcome: draft[key].outcome,
     detail: draft[key].detail.trim() || null,
     source_ref: draft[key].source_ref.trim() || null,
   }))
-
-type Seg = 'pending' | 'done' | 'rejected'
 
 // 品控提示:有就显示黄框(只读;没有「接受」按钮,提示本身就该被处理)
 function QualityFlagsBlock({ o }: { o: WorkOrder }) {
@@ -144,15 +165,18 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
 const publicUrl = (path?: string) =>
   path ? `${SUPABASE_URL}/storage/v1/object/public/content-factory/${path}` : ''
 
-// clientId:只看该客户的待审(客户页概览用);hideWhenEmpty:没待审就不渲染(不占地方)
+// clientId:只看该客户的待审。审片入口在视频工厂；客户首页概览不再挂这只框。
+// hideWhenEmpty:没待审就不渲染(不占地方)
 export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?: string; hideWhenEmpty?: boolean; onReviewed?: () => void } = {}) {
   const [orders, setOrders] = useState<WorkOrder[]>([])
-  const [published, setPublished] = useState<WorkOrder[]>([]) // 只读展示:已发布
-  const [superseded, setSuperseded] = useState<WorkOrder[]>([]) // 只读展示:已作废,折叠在页面底部
-  const [rejected, setRejected] = useState<WorkOrder[]>([]) // 只读展示:已打回(带理由)
+  const [assets, setAssets] = useState<WorkOrder[]>([])
   const [rejecting, setRejecting] = useState<{ order: WorkOrder; mode: 'quality' | 'budget' } | null>(null)
+  const [musicChoicesByOrder, setMusicChoicesByOrder] = useState<Record<string, RemotionMusicChoice[]>>({})
+  const [musicChoicesLoaded, setMusicChoicesLoaded] = useState<Record<string, boolean>>({})
+  const [musicOptionsLoading, setMusicOptionsLoading] = useState<string | null>(null)
+  const [musicOptionsError, setMusicOptionsError] = useState<Record<string, string>>({})
+  const musicOptionsInFlight = useRef(new Set<string>())
   const [notice, setNotice] = useState<string | null>(null)
-  const [seg, setSeg] = useState<Seg>('pending')
   const inFlight = useRef(false) // 同一帧连点也只发一次
   const [groupFilter, setGroupFilter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -163,24 +187,46 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   const [checklistDraft, setChecklistDraft] = useState<ChecklistDraft>(emptyChecklistDraft)
   const [showDetails, setShowDetails] = useState(false)
 
+  const beginReject = (order: WorkOrder) => {
+    setError(null)
+    setRejecting({ order, mode: 'quality' })
+    if (musicChoicesLoaded[order.id] || musicOptionsInFlight.current.has(order.id)) return
+    musicOptionsInFlight.current.add(order.id)
+    setMusicOptionsLoading(order.id)
+    setMusicOptionsError((prev) => ({ ...prev, [order.id]: '' }))
+    void (async () => {
+      try {
+        const res = await fetch(`/api/factory/work-orders/${order.id}/music-options`)
+        const json = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(json.error ?? `读取音乐选项失败 (${res.status})`)
+        const choices = Array.isArray(json.music_choices) ? json.music_choices as RemotionMusicChoice[] : []
+        setMusicChoicesByOrder((prev) => ({ ...prev, [order.id]: choices }))
+        setMusicChoicesLoaded((prev) => ({ ...prev, [order.id]: true }))
+      } catch (e) {
+        const message = e instanceof Error ? e.message : '读取音乐选项失败'
+        setMusicOptionsError((prev) => ({ ...prev, [order.id]: message }))
+      } finally {
+        musicOptionsInFlight.current.delete(order.id)
+        setMusicOptionsLoading((current) => current === order.id ? null : current)
+      }
+    })()
+  }
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/factory/work-orders')
       if (!res.ok) throw new Error(`加载失败 (${res.status})`)
       const json = await res.json()
-      const pending = (json.orders ?? []).filter(
+      const inReview = (json.orders ?? []).filter(
         (o: WorkOrder & { client_id?: string }) =>
           o.status === 'in_review' && (!clientId || o.client_id === clientId),
       )
+      // 素材（asset_only）不是成片：单独分区，没有「通过」按钮
+      const pending = inReview.filter((o: WorkOrder) => o.deliverable !== 'asset_only')
       setOrders(pending)
-      const mine = (json.orders ?? []).filter((o: WorkOrder & { client_id?: string }) => !clientId || o.client_id === clientId)
-      setPublished(mine.filter((o: WorkOrder) => POST_PUBLISH.includes(o.status)))
-      const old = mine.filter((o: WorkOrder) => o.status === 'superseded')
-      setSuperseded(old)
-      setRejected(mine.filter((o: WorkOrder) => o.status === 'review_rejected'))
-      // 只剩历史卡的客户也算「显示过」:否则对话框触发刷新时整块被加载提示替换,对话历史丢失
-      if (pending.length > 0 || old.length > 0 || mine.some((o: WorkOrder) => o.status === 'review_rejected') || mine.some((o: WorkOrder) => POST_PUBLISH.includes(o.status))) setHasShown(true)
+      setAssets(inReview.filter((o: WorkOrder) => o.deliverable === 'asset_only'))
+      if (inReview.length > 0) setHasShown(true)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载失败')
@@ -191,10 +237,22 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
 
   useEffect(() => { void load() }, [load])
 
-  // 选中的团已不存在 → 清掉源状态,避免它以历史卡重新出现时旧筛选悄悄复活
   useEffect(() => {
-    if (groupFilter && !groupCounts([...orders, ...published].map((o) => o.angle)).some((g) => g.group === groupFilter)) setGroupFilter(null)
-  }, [groupFilter, orders, published])
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load()
+    }, 30_000)
+    const onFocus = () => { if (document.visibilityState === 'visible') void load() }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [load])
+
+  // 选中的团已不存在 → 清掉筛选,避免旧筛选把剩余待审卡片过滤光
+  useEffect(() => {
+    if (groupFilter && !groupCounts(orders.map((o) => o.angle)).some((g) => g.group === groupFilter)) setGroupFilter(null)
+  }, [groupFilter, orders])
 
   const act = useCallback(async (id: string, payload: Record<string, unknown>, okNotice?: string) => {
     if (inFlight.current) return
@@ -212,12 +270,15 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
         const j = await res.json().catch(() => ({}))
         throw new Error(j.error ?? `操作失败 (${res.status})`)
       }
+      const resJson = (await res.json().catch(() => ({}))) as { reopened_work_order_id?: string | null }
       setOrders((prev) => prev.filter((o) => o.id !== id)) // 审完自动翻下一条
       setConfirming(null)
       setRejecting(null)
-      if (okNotice) setNotice(okNotice)
+      // 模板出片（remotion）的单被打回后系统不会自动重做：提醒要改下单参数后另提新单
+      const noRedo = payload.action === 'reject_quality' && resJson.reopened_work_order_id === null
+      if (okNotice || noRedo) setNotice([okNotice, noRedo ? '模板出片的单不会自动重做：请改下单参数（加内容，或明确标成素材）后另提新单。' : ''].filter(Boolean).join(' '))
       onReviewed?.() // 通知父页刷新工单,待审数才会变,自动切客户才会触发
-      if (okNotice) void load() // 打回后本区的「已打回」列表要立刻出现
+      if (okNotice) void load()
     } catch (e) {
       setError(e instanceof Error ? reviewErrorZh(e.message, k => HUMAN_CHECK_LABEL[k as ContentCheckItemKey] ?? k) : '操作失败')
     } finally {
@@ -226,47 +287,47 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
     }
   }, [onReviewed, load])
 
-  // 只在「从没显示过 + 当前也没待审」时隐藏。一旦显示过就常驻——刷新时绝不整体卸载,
-  // 否则右侧对话框(ReviewInbox 的子组件)会被连带卸载,历史 + 正在输入的指令全丢(PM 报的 bug)。
-  if (hideWhenEmpty && !hasShown && orders.length === 0 && published.length === 0 && superseded.length === 0) return null
-  // 选中的团已无卡片(例如最后一条审完)→ 视同「全部」,否则剩余卡片被过滤光且筛选控件可能已隐藏
-  const groups = groupCounts([...orders, ...published].map((o) => o.angle))
+  const acceptAsset = useCallback(async (id: string) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setBusy(id)
+    setError(null)
+    try {
+      const res = await fetch(`/api/factory/work-orders/${id}/asset-accept`, { method: 'POST' })
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}))
+        throw new Error(j.error ?? `操作失败 (${res.status})`)
+      }
+      setAssets((prev) => prev.filter((o) => o.id !== id))
+      setNotice('已收入素材库（这不是发布；成片文件需另行搬进素材目录）。')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '操作失败')
+    } finally {
+      inFlight.current = false
+      setBusy(null)
+    }
+  }, [])
+
+  // 只在「从没显示过 + 当前没有待审」时隐藏；显示过后保留审核对话框的状态。
+  if (hideWhenEmpty && !hasShown && orders.length === 0 && assets.length === 0) return null
+  const groups = groupCounts(orders.map((o) => o.angle))
   const activeGroup = groupFilter && groups.some((g) => g.group === groupFilter) ? groupFilter : null
   if (!hasShown && loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
 
   const inGroup = (o: WorkOrder) => !activeGroup || parseAngle(o.angle).group === activeGroup
   const shownPending = orders.filter(inGroup)
-  const shownDone = published.filter(inGroup)
-  const shownRejected = rejected.filter(inGroup)
-  const shownOld = superseded.filter(inGroup)
-  const segs: Array<{ key: Seg; label: string; count: number }> = [
-    { key: 'pending', label: '待审', count: shownPending.length },
-    { key: 'done', label: '已通过/已发布', count: shownDone.length },
-    { key: 'rejected', label: '已打回', count: shownRejected.length },
-  ]
   const gridCls = 'grid gap-3 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]'
 
   return (
     <section className="mb-8">
-      <div className="flex flex-wrap gap-2 mb-3" role="tablist" aria-label="审核状态">
-        {segs.map((g) => (
-          <button
-            key={g.key}
-            type="button"
-            role="tab"
-            aria-selected={seg === g.key}
-            onClick={() => setSeg(g.key)}
-            className={`px-3 h-9 rounded-lg text-sm font-medium border ${seg === g.key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
-          >{g.label} · {g.count}</button>
-        ))}
-      </div>
-
       {error && !confirming && !rejecting && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
       {notice && <div role="status" className="mb-3 px-4 py-2 rounded-lg bg-orange-50 text-orange-800 text-sm">{notice}</div>}
 
+      <p className="mb-3 text-xs text-slate-500">只列出待审核视频。已通过、已打回和被新版替代的记录自动从待办中收起，原工单记录保留。</p>
+
       {groups.length > 1 && (
         <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
-          {[{ group: null as string | null, count: orders.length + published.length }, ...groups].map((g) => (
+          {[{ group: null as string | null, count: orders.length }, ...groups].map((g) => (
             <button
               key={g.group ?? 'all'}
               type="button"
@@ -278,11 +339,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
         </div>
       )}
 
-      {seg === 'pending' && (
-        <>
-          {shownPending.length === 0 && <p className="text-sm text-slate-400">都审完了,去忙别的。</p>}
-          <div className={gridCls}>
-            {shownPending.map((o) => (
+      <>
+        {shownPending.length === 0 && <p className="text-sm text-slate-400">现在没有待审核视频。</p>}
+        <div className={gridCls}>
+          {shownPending.map((o) => (
               <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-3 flex flex-col">
                 <PendingCardHead
                   id={o.id}
@@ -292,6 +352,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   createdAt={o.created_at}
                   videoSrc={publicUrl(o.output?.video_path)}
                 />
+
+                <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-slate-600" aria-label="本次成片模板和音乐">
+                  <span className="rounded bg-slate-100 px-2 py-1">模板 · {renderChoiceLabel(o.template_id)}</span>
+                  <span className="rounded bg-slate-100 px-2 py-1">BGM · {musicChoiceLabel(o.music_file)}</span>
+                </div>
 
                 {redlineHitsOf(o).length > 0 && (
                   <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
@@ -325,7 +390,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
                   <button
                     type="button"
-                    onClick={() => { setError(null); setRejecting({ order: o, mode: 'quality' }) }}
+                    onClick={() => beginReject(o)}
                     disabled={busy === o.id}
                     className="w-full h-11 rounded-lg border border-orange-300 text-orange-800 text-sm font-medium hover:bg-orange-50 disabled:opacity-50"
                   >打回</button>
@@ -342,81 +407,35 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   <PublishOutlets />
                 </div>
               </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {seg === 'done' && (
-        <>
-          {shownDone.length === 0 && <p className="text-sm text-slate-400">还没有已通过/已发布的片子。</p>}
-          <div className={gridCls}>
-            {shownDone.map((o) => {
-              const b = publishedBadge(o.published ?? null)
-              const tone = b.color.includes('green') ? 'green' : b.color.includes('slate') ? 'slate' : 'amber'
-              return (
-                <div key={o.id}>
-                  <ReadOnlyTile
+          ))}
+        </div>
+        {assets.length > 0 && (
+          <div className="mt-6" data-testid="asset-only-section">
+            <h3 className="text-sm font-medium text-slate-800 mb-1">素材（不单独发布）</h3>
+            <p className="text-xs text-slate-500 mb-2">这些是标成「素材」的工单：不能通过、不能发布，只能验收入库。</p>
+            <div className={gridCls}>
+              {assets.map((o) => (
+                <div key={o.id} className="border border-dashed border-slate-300 rounded-xl bg-slate-50 p-3 flex flex-col">
+                  <PendingCardHead
                     id={o.id}
                     angle={o.angle}
                     rationale={o.rationale_one_liner}
                     clientName={o.client_name}
                     createdAt={o.created_at}
                     videoSrc={publicUrl(o.output?.video_path)}
-                    status={{ label: b.label, tone }}
-                    link={b.href ? { href: b.href, label: '在 Facebook 查看' } : null}
                   />
-                  {o.output?.video_path && <a className="mt-2 inline-block text-sm text-blue-600 underline" href={`/dashboard/clients/${o.client_id}/tiktok/${o.id}`}>发布到 TikTok（需单独确认）</a>}
-                  {promoteEntry(o) && (
-                    <div className="mt-2"><PromoteReelButton orderId={o.id} commentOnly={promoteEntry(o) === 'comment'} onDone={() => { void load() }} /></div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => void acceptAsset(o.id)}
+                    disabled={busy === o.id}
+                    className="mt-2 h-10 rounded-lg border border-slate-300 bg-white text-sm hover:bg-slate-100 disabled:opacity-50"
+                  >{busy === o.id ? '处理中…' : '收入素材库'}</button>
                 </div>
-              )
-            })}
+              ))}
+            </div>
           </div>
-        </>
-      )}
-
-      {seg === 'rejected' && (
-        <>
-          {shownRejected.length === 0 && <p className="text-sm text-slate-400">还没有被打回的片子。</p>}
-          <div className={gridCls}>
-            {shownRejected.map((o) => (
-              <ReadOnlyTile
-                key={o.id}
-                id={o.id}
-                angle={o.angle}
-                rationale={o.rationale_one_liner}
-                clientName={o.client_name}
-                createdAt={o.created_at}
-                videoSrc={publicUrl(o.output?.video_path)}
-                status={{ label: '已打回', tone: 'orange' }}
-                note={o.reject_reason ? `打回理由:${o.reject_reason}` : '打回理由:未记录'}
-              />
-            ))}
-          </div>
-          {shownOld.length > 0 && (
-            <details className="mt-6 group">
-              <summary className="cursor-pointer select-none text-sm font-medium text-slate-500">已作废 · {shownOld.length} 条(旧版,已被新版替换,默认收起)</summary>
-              <div className={`mt-3 ${gridCls}`}>
-                {shownOld.map((o) => (
-                  <ReadOnlyTile
-                    key={o.id}
-                    id={o.id}
-                    angle={o.angle}
-                    rationale={o.rationale_one_liner}
-                    clientName={o.client_name}
-                    createdAt={o.created_at}
-                    videoSrc={publicUrl(o.output?.video_path)}
-                    status={{ label: '已作废', tone: 'slate' }}
-                    dim
-                  />
-                ))}
-              </div>
-            </details>
-          )}
-        </>
-      )}
+        )}
+      </>
 
       {rejecting && (
         <RejectDialog
@@ -426,6 +445,11 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
           error={error}
           onClose={() => { setRejecting(null); setError(null) }}
           onModeChange={(mode) => { setError(null); setRejecting({ order: rejecting.order, mode }) }}
+          templateId={rejecting.order.template_id}
+          currentMusicFile={rejecting.order.music_file}
+          musicChoices={musicChoicesByOrder[rejecting.order.id] ?? []}
+          musicChoicesLoading={musicOptionsLoading === rejecting.order.id}
+          musicChoicesError={musicOptionsError[rejecting.order.id] || null}
           onSubmit={(payload) => void act(
             rejecting.order.id,
             payload,
@@ -473,7 +497,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 return (
                   <div className="mb-4">
                     <OneClickConfirm
-                      itemLabels={REEL_HUMAN_CHECK_KEYS_V2.map(k => HUMAN_CHECK_LABEL[k])}
+                      itemLabels={REEL_HUMAN_CHECK_KEYS_V3.map(k => HUMAN_CHECK_LABEL[k])}
                       sourceUrl={defaultFactSourceRef(confirming.fact_source_url)}
                       busy={busy === confirming.id}
                       onConfirm={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(allPass(markListened(checklistDraft))) })}
@@ -501,8 +525,8 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 type="button"
                 onClick={() => setChecklistDraft(prev => allPass(prev))}
                 className="px-3 h-8 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
-              >{REEL_HUMAN_CHECK_KEYS_V2.length - MANUAL_ONLY_KEYS.length} 项全部标为通过（“已听声音”需单独勾）</button>
-              {REEL_HUMAN_CHECK_KEYS_V2.map(key => (
+              >{REEL_HUMAN_CHECK_KEYS_V3.length - MANUAL_ONLY_KEYS.length} 项全部标为通过（“已听声音”“能看懂”需单独勾）</button>
+              {REEL_HUMAN_CHECK_KEYS_V3.map(key => (
                 <div key={key} className="rounded-lg border border-slate-200 p-3">
                   <p className="text-sm font-medium text-slate-800">{HUMAN_CHECK_LABEL[key]}</p>
                   <div className="mt-2 flex gap-4 text-xs">
@@ -552,7 +576,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               {(showDetails || !gateOf(confirming).oneClick) && (
                 <button
                   onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
-                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS_V2.some(key => checklistDraft[key].outcome !== 'PASS')}
+                  disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS_V3.some(key => checklistDraft[key].outcome !== 'PASS')}
                   className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
                 >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
               )}

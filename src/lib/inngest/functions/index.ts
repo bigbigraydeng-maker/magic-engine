@@ -24,8 +24,10 @@ import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { calendarClosureAudit } from './calendar-closure-audit'
 import { promoPlanDailyWatch } from './promo-plan-daily-watch'
+import { adHeartbeat } from './ad-heartbeat'
 import { adsTrackingPreflight } from './ads-tracking-preflight'
 import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
+import { adsServicePauseNotify } from './ads-service-pause-notify'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
@@ -45,8 +47,10 @@ import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-a
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
+  adHeartbeat,
   adsTrackingPreflight,
   adsTrackingLaunchWatch,
+  adsServicePauseNotify,
   webIntelligenceCapture,
   webIntelligenceDue,
   webIntelligenceTrafficDue,

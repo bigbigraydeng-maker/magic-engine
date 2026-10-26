@@ -23,7 +23,8 @@
  *
  *   Step 0   opt-out 检查（#1575 `isConversationOptedOut`，fail-closed）
  *   Step 0.5 渠道 kill switch（#1578 `isChannelEnabled`，fail-closed）
- *   Step 0.8 售前/售后分类（#1576 `classifyConversation`）——post_sale 不发
+ *   （2026-10-22 PM：售前/售后分类这一道闸已拿掉——所有 WhatsApp / 私信进线都发安抚，
+ *     不再因为「看起来像老客户」跳过。原因见台账 2026-10-22-ai-reply-all-inbound-no-postsale-gate。）
  *   Step 1   发硬编码模板（#1578 `CHANNEL_SEND`）
  *   Step 2   emit `conversation/autoack.sent` 收尾事件
  *
@@ -31,16 +32,11 @@
  * 副作用必须在 step 里才会被 Inngest 缓存——`retries: 1` 时如果 Step 2 的
  * emit 失败重试，Step 1 的发送结果已经被 memoize，不会被同一次重放重发一遍）。
  *
- * ## 谁决定「这个客户该用哪份售后判据」——不写死 CTS
+ * ## 不再区分售前 / 售后（2026-10-22 PM）
  *
- * `classifyConversation` 本身不带任何行业默认值（见 classify.ts 文件头），
- * 旅游行业的 `TOURISM_POST_SALE_POLICY` 是一个具名 Playbook 常量。本文件
- * 按 `clients.industry` 走跟 `industry-features.ts` 完全一样的「行业关键词
- * 匹配」路子选 policy（`resolvePostSaleClassificationPolicy`），不是
- * `if (clientId === CTS_ID)`——明天换成另一个旅游客户，这段代码不需要改。
- * 认不出行业 → 没有 Playbook 可用 → 直接按 `lead_intake` 处理（跟
- * `classifyConversation` 自己「查不到消息就保守判 lead_intake」的方向一致，
- * 不是「换了行业就不发」）。
+ * 以前这里有一道「售前/售后分类」闸：对话被判成售后就不发安抚。它按关键词（如 booking）判断，
+ * 把「订之前能不能改行程」这类新咨询误判成老客户。现在所有进线都发；分类函数留在
+ * `messenger-agent/classify.ts`，不再用于拦截。
  *
  * ## 一事件一主
  *
@@ -51,7 +47,6 @@
 
 import { randomUUID } from 'node:crypto'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { supabaseAdmin } from '@/lib/supabase'
 import {
   CONVERSATION_MESSAGE_RECEIVED_EVENT,
   ConversationMessageReceivedSchema,
@@ -65,15 +60,11 @@ import {
   type MessengerAgentChannel,
   type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
-import {
-  classifyConversation,
-  TOURISM_POST_SALE_POLICY,
-  type ConversationClass,
-  type PostSaleClassificationPolicy,
-} from '@/lib/messenger-agent/classify'
-import { hasIndustryFeature } from '@/lib/clients/industry-features'
 import { AUTOACK_SENT_BY_EMAIL, AUTOACK_TEMPLATE } from '@/lib/messenger/autoack-identity'
 import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
+import { composeAck, type AckPlan } from '@/lib/messenger/smart-ack/compose'
+import { callSmartAckModel } from '@/lib/messenger/smart-ack/model'
+import { countSmartAcksToday, loadAckContext, readClientSmartAckConfig } from '@/lib/messenger/smart-ack/store'
 
 export const CONVERSATION_AUTOACK_SENT_EVENT = 'conversation/autoack.sent'
 
@@ -102,7 +93,7 @@ export type AutoAckOutcome =
   | 'skipped_opted_out'
   | 'skipped_channel_disabled'
   | 'skipped_recently_replied'
-  | 'skipped_post_sale'
+  | 'skipped_repeat_message'
   | 'skipped_invalid_payload'
   | 'send_failed'
 
@@ -148,51 +139,6 @@ export function isKnownAutoAckChannel(channel: string): channel is MessengerAgen
 }
 
 /**
- * 这个客户该用哪份售后判据——按行业关键词匹配（跟
- * `industryFeatureFlags`/`hasIndustryFeature` 同一套判法），不是按
- * `clientId` 硬编码。目前只有旅游行业有具名 Playbook；其它行业没有对应
- * 判据时返回 `null`，调用方按 `lead_intake` 处理（不猜、不套错行业的判据）。
- */
-export function resolvePostSaleClassificationPolicy(
-  industry: string | null | undefined,
-): PostSaleClassificationPolicy | null {
-  if (hasIndustryFeature(industry, 'tailor_made')) return TOURISM_POST_SALE_POLICY
-  return null
-}
-
-/**
- * 生产实现：查 `clients.industry`。
- *
- * 🔴 Codex 复审（2026-09-15，PR #1736）实测发现：这里原来把"查询真的报错"跟
- * "这个客户合法地没填 industry"两种情况都折叠成同一个 `null`，下游把
- * `null`一律当"没有对应 Playbook → 按 lead_intake 处理 → 照常发送"。
- * 结果是一次数据库瞬时故障，会让一个正在问售后问题的旅游客户被误判成
- * 新客户，收到一句不适用的"稍后回复您"——这条自动发送路径本该跟本文件
- * 其它每一道闸（opt-out/kill-switch）一样是 fail-closed 方向,却在这一处
- * 变成了"查不出来就当无害情况处理"。
- *
- * 改法：真的查询报错就 throw，让这一步的 `step.run` 把异常往上抛——整个
- * 函数因此失败，Inngest 的 `retries: 1` 会重跑一次（多数瞬时 DB 抖动一次
- * 重试就好了），而不是吞掉错误直接照常发送。"查到了，但这一列本来就是
- * 空的"（`data` 存在但 `industry` 是 `null`）跟"没查到这一行"（`data` 是
- * `null` 但没报错——真实场景几乎不会发生，`clientId` 是发消息时刚查出来
- * 的，但仍按同一个 fail-closed 方向处理，不当成"可以安全发送")都不是报错，
- * 返回 `null` 交给上层当"没有对应 Playbook"处理，这两种跟"查询本身失败"
- * 是不同的两件事，不能混在一起。
- */
-async function loadClientIndustry(clientId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from('clients')
-    .select('industry')
-    .eq('id', clientId)
-    .maybeSingle()
-  if (error) {
-    throw new Error(`[conversation-inbound-autoack] 查客户行业失败 clientId=${clientId}: ${error.message}`)
-  }
-  return (data as { industry: string | null } | null)?.industry ?? null
-}
-
-/**
  * 返回类型用三渠道合并的 `ChannelSendResult`（不是只有 messenger/whatsapp 的
  * 两渠道联合类型），因为 `deps.send` 的类型是 `Record<MessengerAgentChannel,
  * ChannelSendFn>`——`MessengerAgentChannel` 三个成员都要有一个类型兼容的值，
@@ -211,12 +157,15 @@ export interface ConversationInboundAutoAckDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
   hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
-  classify: (conversationId: string, policy: PostSaleClassificationPolicy) => Promise<ConversationClass>
-  loadIndustry: (clientId: string) => Promise<string | null>
+  /**
+   * 智能安抚（设计稿 2026-10-22-smart-ack-design-v0.md §9）。不传 = 永远发固定模板（旧行为）。
+   * 约定：永不抛错——任何失败都退回固定模板，保证客人一定有回应。
+   */
+  composeAck?: (input: { clientId: string; conversationId: string }) => Promise<AckPlan>
   send: Record<MessengerAgentChannel, ChannelSendFn>
 }
 
-/** 依赖注入版：单测直接注入假的 opt-out/kill-switch/classify/send，不碰真数据库、不真发消息。 */
+/** 依赖注入版：单测直接注入假的 opt-out/kill-switch/send，不碰真数据库、不真发消息。 */
 export function createConversationInboundAutoAckFunction(deps: ConversationInboundAutoAckDeps) {
   return inngest.createFunction(
     {
@@ -293,28 +242,29 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
         return { ...base, outcome: 'skipped_recently_replied', detail: `within_${AUTOACK_COOLDOWN_HOURS}h` }
       }
 
-      // Step 0.8：售前/售后分类——判据按行业注入，本函数不写死任何客户/行业。
-      //
-      // 🔴 同上，不额外挂 pm-todo：售后对话本来就需要员工手动处理（这正是
-      // "不发自动安抚"的原因——不想让 AI 对一个已购客户随口说"我们的顾问会
-      // 联系您"这种对售后场景不成立的话），而售后对话跟售前一样会出现在同
-      // 一个 CRM 收件箱里，不缺一个专属提醒。
-      const conversationClass = await step.run('classify-conversation', async () => {
-        const industry = await deps.loadIndustry(client_id)
-        const policy = resolvePostSaleClassificationPolicy(industry)
-        return policy ? deps.classify(conversation_id, policy) : ('lead_intake' as ConversationClass)
-      })
-      if (conversationClass === 'post_sale') {
-        return { ...base, outcome: 'skipped_post_sale', detail: null }
+      // Step 0.7：决定发什么。开关关 = 固定模板（旧行为，逐字不变）；开 = 智能版
+      // （分流 / 模型 / 校验，任何一环失败都退回固定模板；重复预填话则不发）。
+      // 独立一步 + 永不抛：发送步骤重试时读的是这一步缓存的结果，不会重新调模型生成另一句话。
+      const plan: AckPlan = deps.composeAck
+        ? await step.run('compose-ack', () => deps.composeAck!({ clientId: client_id, conversationId: conversation_id }))
+        : { kind: 'send', text: AUTOACK_TEMPLATE, source: 'fixed', reason: 'no_composer' }
+      if (plan.kind === 'skip') {
+        // F2 在等 autoack.sent 做排序；跳过也发一个收尾事件，免得它白等 5 分钟。
+        await step.sendEvent('autoack-skipped', {
+          id: `autoack-skip:${conversation_id}:${event.id ?? randomUUID()}`,
+          name: CONVERSATION_AUTOACK_SENT_EVENT,
+          data: { client_id, conversation_id, channel, trigger_message_id: parsed.value.message_id, skipped: true, reason: plan.reason },
+        })
+        return { ...base, outcome: 'skipped_repeat_message', detail: plan.reason }
       }
 
-      // Step 1：发硬编码模板。不调 Claude，不占 verifier，不读任何知识源
-      // （见文件头 §9.14 C.5）。
+      // Step 1：发出安抚。固定模板不读任何知识源（见文件头 §9.14 C.5）；智能版文本只来自
+      // 客人原话 + 静态提示词，且必须过 smart-ack/validate（不含价格/日期/数字/承诺）。
       const sendResult = await step.run('send-autoack', () =>
         deps.send[channel]({
           clientId: client_id,
           conversationId: conversation_id,
-          body: AUTOACK_TEMPLATE,
+          body: plan.text,
           sentByEmail: AUTOACK_SENT_BY_EMAIL,
           usedAiDraft: false,
         }),
@@ -365,7 +315,7 @@ export function createConversationInboundAutoAckFunction(deps: ConversationInbou
         },
       })
 
-      return { ...base, outcome: 'sent', detail: null }
+      return { ...base, outcome: 'sent', detail: `${plan.source}:${plan.reason}` }
     },
   )
 }
@@ -375,7 +325,12 @@ export const conversationInboundAutoAck = createConversationInboundAutoAckFuncti
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
   hasRecentOutbound,
-  classify: classifyConversation,
-  loadIndustry: loadClientIndustry,
+  composeAck: ({ clientId, conversationId }) =>
+    composeAck({
+      readEnabled: () => readClientSmartAckConfig(clientId),
+      loadContext: () => loadAckContext(conversationId),
+      smartSentToday: () => countSmartAcksToday(clientId),
+      callModel: callSmartAckModel,
+    }),
   send: CHANNEL_SEND,
 })

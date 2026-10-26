@@ -110,7 +110,7 @@ async function loadRuns(supabase: SupabaseClient, job: string): Promise<SyncRunR
     .select('finished_at, summary')
     .eq('job_name', job)
     .not('finished_at', 'is', null)
-    .in('status', ['completed', 'failed'])
+    .in('status', ['completed', 'partial', 'failed'])
     .order('finished_at', { ascending: false })
     .limit(FACEBOOK_SYNC_FAILURE_RUNS)
 

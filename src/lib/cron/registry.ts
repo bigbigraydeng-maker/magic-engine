@@ -1,3 +1,5 @@
+import { DISPATCH_OWNED_SERVICES } from './dispatch/catalog'
+
 /**
  * 全部定时任务清单（2026-08-03 自动从 render.yaml + 各接口代码生成）。
  *
@@ -34,7 +36,7 @@
  *                       必须有人去 Inngest 后台对 `/api/inngest` 重新 Sync 一次，
  *                       否则它**安静地不跑**。这类登记的全部意义就是把「安静地不跑」喊出来。
  */
-export type CronScheduler = 'render' | 'github-actions' | 'external' | 'inngest'
+export type CronScheduler = 'render' | 'github-actions' | 'external' | 'inngest' | 'dispatcher'
 
 /**
  * 这个任务跑成之后**本该往哪些表写新数据**。
@@ -101,7 +103,7 @@ export interface CronRegistryEntry {
   outputTables?: readonly CronOutputTable[]
 }
 
-export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
+const CRON_REGISTRY_ENTRIES = [
   // 补登记：这条 cron 2026-08-05 就进了 render.yaml（commit 3c6fe88c），清单里一直没有 ——
   // 也就是说它从上线起就不在监控范围内，而「不在监控范围」和「一切正常」在告警里长得一模一样。
   // 是本 PR 新加的这份对账测试把它抓出来的（service 名带 -daily，jobName 不带）。
@@ -244,7 +246,6 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
     }] },
   // 服务名叫 hourly，但 2026-09-16（commit 2a17a85f2）起实际是每 2 小时一轮（偶数 UTC 小时的第 25 分）。
   { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 */2 * * *', logsRuns: true },
-  { service: 'oztop-seo-optimizer', jobName: 'oztop-seo-optimizer', schedule: '0 5 * * 1', logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
   { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '15 * * * *', logsRuns: true },
   // ME2 Product Map 每日全量对账(webhook 的兜底)。表未 apply 前它会天天报 failed ——
@@ -291,9 +292,10 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 每月约 US$360 → 约 US$13），所以**真正落地的频率是每周一次**，登记按每周填。
   // 实测三次成功：08-16 / 08-23 / 08-30，都在周日 17:00 UTC，间隔正好 7 天。
   //
-  // 🔴 绝对不要为了「补登记」把它加进 render.yaml —— 那会变成两个调度器同时敲，
-  //    节流闸只挡得住重复的**采集**，挡不住重复的排班混乱，而且这活儿是花钱的。
-  { service: 'render-dashboard:baseline-domains-monthly', jobName: 'baseline-domains-monthly', schedule: '0 17 * * 0', logsRuns: true, scheduler: 'external', addedAt: '2026-09-07' },
+  // 调度改由 dispatcher 每天 17:00 UTC 敲门（跟原先后台那条一样）。
+  // 健康检查仍按每周：跳过的日子不写成功记录，真正采集大约 7 天一次。
+  // 切流后删掉 Render 上的 baseline-domains-weekly，不要两条一起敲。
+  { service: 'render-dashboard:baseline-domains-monthly', jobName: 'baseline-domains-monthly', schedule: '0 17 * * 0', logsRuns: true, addedAt: '2026-09-07' },
 
   // 7 本跨客户经验手册（Claude 持久记忆，不在这个仓库）每周过期巡检。触发方是
   // 仓库外的 Claude scheduled task（~/.claude/scheduled-tasks/playbook-staleness-weekly/
@@ -356,6 +358,13 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 回执写 cron_run_logs 并发事件 ads.tracking_preflight.checked。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-preflight.ts 的 TRACKING_PREFLIGHT_CRON。
   { service: 'inngest:cloud-ads-tracking-preflight', jobName: 'ads-tracking-preflight', schedule: '0 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-20' },
+  // 广告心跳：每小时新西兰第 5 分只读采样一遍 Meta（不发布、不改广告、不扣费），
+  // 默认 `dry` 且默认一个客户都不跑（要 AD_HEARTBEAT_MODE=live + AD_HEARTBEAT_CLIENT_IDS 才真跑）。
+  // 每一轮（含空轮）都写一行运行记录，它自己哪天停了才看得出来。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ad-heartbeat.ts 的 AD_HEARTBEAT_CRON
+  //    （带 TZ=Pacific/Auckland 前缀；每小时第 5 分在任何整小时偏移的时区里是同一个周期，所以这里写不带时区的 5 * * * *）。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
+  { service: 'inngest:cloud-ad-heartbeat', jobName: 'ad-heartbeat', schedule: '5 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-21' },
   // 开投后「自动补排」读回：每小时看一眼，窗口里官方账户一开始花钱就自己补排 T+1h / T+24h 读回（只读）。
   // 窗口外的整点也留一行运行记录（processed=0），它自己哪天停了才看得出来。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-launch-watch.ts 的 LAUNCH_WATCH_CRON。
@@ -421,7 +430,16 @@ export const CRON_REGISTRY: readonly CronRegistryEntry[] = [
   // 每一轮都写一行运行记录。设计稿 docs/specs/2026-10-12-story-lite-design.md。2026-10-21 补登记，理由同上一条。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/story-lite-publish.ts 的 STORY_LITE_PUBLISH_CRON（该函数的测试断言两边一致）。
   { service: 'inngest:cloud-story-lite-publish', jobName: 'story-lite-publish', schedule: '*/10 * * * *', logsRuns: true, scheduler: 'inngest' },
+
+  // Render 上只留这三条。它们自己很快返回，到点的旧接口在 web 进程里接着跑。
+  { service: 'cron-dispatch-frequent', jobName: 'cron-dispatch-frequent', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },
+  { service: 'cron-dispatch-daily', jobName: 'cron-dispatch-daily', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },
+  { service: 'cron-dispatch-weekly', jobName: 'cron-dispatch-weekly', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },
 ] as const
+
+export const CRON_REGISTRY: readonly CronRegistryEntry[] = CRON_REGISTRY_ENTRIES.map((entry) =>
+  DISPATCH_OWNED_SERVICES.has(entry.service) ? { ...entry, scheduler: 'dispatcher' as const } : entry,
+)
 
 /**
  * 代码里写了运行记录（调了 `startCronRun`）、但**故意不给它排班**的接口。
@@ -490,4 +508,8 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 2026-10-07 PM 拍板暂停：上游已停 6 周的空跑。render.yaml 那段已整块注释掉，
   // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
   'team-memory-sweeper': '2026-10-07 暂停（上游已停 6 周的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+
+  // Render 上这条从 2026-10-24 审计起已是暂停、30 天没有运行。不进 dispatcher。
+  // 路由留着给人手补跑。恢复时要重新加登记、加进 DISPATCH_CATALOG，并在 Render 打开它。
+  'oztop-seo-optimizer': '2026-10-24 审计时 Render 上已暂停且 30 天无运行，不进 dispatcher',
 }

@@ -13,7 +13,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { PersonDrawer, type DrawerRow } from '../PersonDrawer'
 
 const row = (over: Partial<DrawerRow> = {}): DrawerRow => ({
@@ -455,5 +455,52 @@ describe('B2 · 改阶段的并发保护', () => {
     await Promise.resolve()
     await Promise.resolve()
     expect(onSaved).toHaveBeenCalledWith(expect.stringContaining('已成交'), true)
+  })
+})
+
+describe('AI 概况卡写明生成时间（简报里的时间说法跟生成时刻绑死）', () => {
+  const brief = (generatedAt: string | null) => ({
+    summary: '客户想订 China Discovery 团',
+    customerNeeds: ['带朋友一起报'],
+    objections: [],
+    promisesMade: [],
+    nextAction: null,
+    intentLevel: 'high',
+    channel: 'email',
+    generatedAt,
+  })
+
+  function stubBrief(generatedAt: string | null) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.endsWith('/brief') ? { brief: brief(generatedAt) } : { timeline: [], omittedMessages: 0 },
+      })),
+    )
+  }
+
+  it('今天生成 → 卡上写「生成于 …（今天）」，不带过时提醒', async () => {
+    stubBrief(new Date().toISOString())
+    draw()
+    const age = await waitFor(() => screen.getByTestId('ai-overview-age'))
+    expect(age.textContent).toContain('（今天）')
+    expect(age.textContent).not.toContain('已过时')
+  })
+
+  it('🔴 5 天前生成 → 多一句「可能已过时，请核对原文」', async () => {
+    stubBrief(new Date(Date.now() - 5 * 86_400_000).toISOString())
+    draw()
+    const age = await waitFor(() => screen.getByTestId('ai-overview-age'))
+    expect(age.textContent).toContain('5 天前')
+    expect(age.textContent).toContain('可能已过时，请核对原文')
+  })
+
+  it('接口没给生成时间 → 概况卡照常显示，只是不写时间（不猜）', async () => {
+    stubBrief(null)
+    draw()
+    await waitFor(() => screen.getByTestId('ai-overview'))
+    expect(screen.queryByTestId('ai-overview-age')).toBeNull()
   })
 })

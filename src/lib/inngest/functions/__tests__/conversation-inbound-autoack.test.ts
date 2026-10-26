@@ -1,21 +1,18 @@
 /**
  * F1 自动安抚回复（issue #1584）装配 + 关键路径测试。
  *
- * 分四块：
+ * 分三块：
  *   1. `parseMessageReceived` —— 复用共享 Zod 契约的校验行为
- *   2. `resolvePostSaleClassificationPolicy` —— 按行业选 Playbook，不认识的
- *      行业不猜、不套旅游判据
- *   3. 装配契约 —— 事件名 / retries / debounce 配置，不撞
+ *   2. 装配契约 —— 事件名 / retries / debounce 配置，不撞
  *      `WORKER_OWNED_EVENTS`
- *   4. 关键路径变异测试 —— opt-out 命中/未命中、kill switch 开/关、
- *      post_sale/lead_intake 分类两条路径，每条都断言"没被跳过的检查
- *      压根没被调用"，不是只看返回值
+ *   3. 关键路径变异测试 —— opt-out 命中/未命中、kill switch 开/关、6 小时限频，
+ *      每条都断言"没被跳过的检查压根没被调用"，不是只看返回值
+ *      （2026-10-22 起不再有售前/售后分类这一路）
  */
 import { describe, it, expect, vi } from 'vitest'
 import {
   createConversationInboundAutoAckFunction,
   parseMessageReceived,
-  resolvePostSaleClassificationPolicy,
   AUTOACK_TEMPLATE,
   AUTOACK_SENT_BY_EMAIL,
   AUTOACK_COOLDOWN_HOURS,
@@ -23,7 +20,6 @@ import {
   type ConversationInboundAutoAckDeps,
 } from '../conversation-inbound-autoack'
 import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
-import { TOURISM_POST_SALE_POLICY, type ConversationClass } from '@/lib/messenger-agent/classify'
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 import type { SendReplyResult } from '@/lib/messenger/send'
 import type { SendWhatsAppResult } from '@/lib/whatsapp/send'
@@ -94,8 +90,6 @@ function makeDeps(overrides: Partial<ConversationInboundAutoAckDeps> = {}): Conv
     isOptedOut: vi.fn(async () => false),
     isEnabled: vi.fn(async () => true),
     hasRecentOutbound: vi.fn(async () => false),
-    classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
-    loadIndustry: vi.fn(async () => null),
     // email 也要建模（哪怕 F1 从不会真的调它，见下方"不支持的渠道"用例）——
     // `ConversationInboundAutoAckDeps.send` 的类型是三渠道的 Record，少一个键
     // 类型检不过。
@@ -128,24 +122,6 @@ describe('parseMessageReceived', () => {
     const raw = overrides === undefined ? undefined : messageReceived(overrides)
     const parsed = parseMessageReceived(raw)
     expect(parsed.ok).toBe(false)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// 2) resolvePostSaleClassificationPolicy —— 按行业选 Playbook
-// ---------------------------------------------------------------------------
-
-describe('resolvePostSaleClassificationPolicy', () => {
-  it('旅游关键词命中的行业 → TOURISM_POST_SALE_POLICY', () => {
-    expect(resolvePostSaleClassificationPolicy('Travel — Tour Operator')).toBe(TOURISM_POST_SALE_POLICY)
-    expect(resolvePostSaleClassificationPolicy('旅游')).toBe(TOURISM_POST_SALE_POLICY)
-  })
-
-  it('认不出的行业（地产/建材/空）→ null，不套旅游判据', () => {
-    expect(resolvePostSaleClassificationPolicy('real_estate')).toBeNull()
-    expect(resolvePostSaleClassificationPolicy('SPC/hybrid flooring wholesale (B2B trade)')).toBeNull()
-    expect(resolvePostSaleClassificationPolicy(null)).toBeNull()
-    expect(resolvePostSaleClassificationPolicy(undefined)).toBeNull()
   })
 })
 
@@ -191,7 +167,6 @@ describe('关键路径', () => {
     expect(result).toMatchObject({ outcome: 'skipped_invalid_payload' })
     expect(deps.isOptedOut).not.toHaveBeenCalled()
     expect(deps.isEnabled).not.toHaveBeenCalled()
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.send.messenger).not.toHaveBeenCalled()
   })
 
@@ -215,7 +190,6 @@ describe('关键路径', () => {
     const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
     expect(result).toMatchObject({ outcome: 'skipped_opted_out', conversation_id: CONVERSATION_ID })
     expect(deps.isEnabled).not.toHaveBeenCalled()
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.send.messenger).not.toHaveBeenCalled()
     expect(step.sendEvent).not.toHaveBeenCalled()
   })
@@ -234,7 +208,6 @@ describe('关键路径', () => {
     const step = fakeStep()
     const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
     expect(result).toMatchObject({ outcome: 'skipped_channel_disabled' })
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.send.messenger).not.toHaveBeenCalled()
     expect(deps.send.whatsapp).not.toHaveBeenCalled()
     expect(step.sendEvent).not.toHaveBeenCalled()
@@ -249,26 +222,8 @@ describe('关键路径', () => {
     expect(deps.send.messenger).toHaveBeenCalledTimes(1)
   })
 
-  it('分类为 post_sale → skipped_post_sale，不发安抚（发送 mock 断言，不是只看返回值）', async () => {
-    const deps = makeDeps({
-      loadIndustry: vi.fn(async () => 'Travel — Tour Operator'),
-      classify: vi.fn(async (): Promise<ConversationClass> => 'post_sale'),
-    })
-    const fn = createConversationInboundAutoAckFunction(deps)
-    const step = fakeStep()
-    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
-    expect(result).toMatchObject({ outcome: 'skipped_post_sale' })
-    expect(deps.send.messenger).not.toHaveBeenCalled()
-    expect(step.sendEvent).not.toHaveBeenCalled()
-    // 传给 classify 的必须是旅游 Playbook，不是别的
-    expect(deps.classify).toHaveBeenCalledWith(CONVERSATION_ID, TOURISM_POST_SALE_POLICY)
-  })
-
-  it('分类为 lead_intake → 正常发送，body 是硬编码模板、usedAiDraft=false、sentByEmail 是系统身份', async () => {
-    const deps = makeDeps({
-      loadIndustry: vi.fn(async () => 'Travel — Tour Operator'),
-      classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
-    })
+  it('2026-10-22 PM：不再区分售前 / 售后——F1 不看对话内容，所有进线（含像老客户的）都照发安抚', async () => {
+    const deps = makeDeps()
     const fn = createConversationInboundAutoAckFunction(deps)
     const step = fakeStep()
     const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
@@ -280,24 +235,6 @@ describe('关键路径', () => {
       sentByEmail: AUTOACK_SENT_BY_EMAIL,
       usedAiDraft: false,
     })
-  })
-
-  it('认不出行业（没有 Playbook）→ 不调 classify，直接按 lead_intake 继续发送', async () => {
-    const deps = makeDeps({ loadIndustry: vi.fn(async () => 'real_estate') })
-    const fn = createConversationInboundAutoAckFunction(deps)
-    const step = fakeStep()
-    const result = await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
-    expect(result).toMatchObject({ outcome: 'sent' })
-    expect(deps.classify).not.toHaveBeenCalled()
-  })
-
-  it('🔴 Codex 复审：查行业真的报错（不是"合法地没填"）→ 必须抛错，绝不能悄悄当成"没有 Playbook"然后照常发送', async () => {
-    const deps = makeDeps({ loadIndustry: vi.fn(async () => { throw new Error('db 抽风') }) })
-    const fn = createConversationInboundAutoAckFunction(deps)
-    const step = fakeStep()
-    await expect(handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })).rejects.toThrow('db 抽风')
-    expect(deps.send.messenger).not.toHaveBeenCalled()
-    expect(step.sendEvent).not.toHaveBeenCalled()
   })
 
   it('发送失败（ok:false）→ send_failed，不 emit 收尾事件', async () => {
@@ -368,10 +305,10 @@ describe('关键路径', () => {
     const fn = createConversationInboundAutoAckFunction(deps)
     const step = fakeStep()
     await handlerOf(fn)({ event: { id: 'evt-1', data: messageReceived() }, step })
-    // 5 个真实副作用各自一个 step.run：opt-out / kill-switch / recent-outbound（6 小时限频）/ classify / send。
-    // emit 不算在内——它必须是 step.sendEvent 的顶层调用，不是包在第 5 个
+    // 4 个真实副作用各自一个 step.run：opt-out / kill-switch / recent-outbound（6 小时限频）/ send。
+    // emit 不算在内——它必须是 step.sendEvent 的顶层调用，不是包在第 4 个
     // step.run 里面。
-    expect(step.run).toHaveBeenCalledTimes(5)
+    expect(step.run).toHaveBeenCalledTimes(4)
     expect(step.sendEvent).toHaveBeenCalledTimes(1)
   })
 
@@ -432,7 +369,6 @@ describe('6 小时限频', () => {
       conversation_id: CONVERSATION_ID,
       detail: `within_${AUTOACK_COOLDOWN_HOURS}h`,
     })
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.send.messenger).not.toHaveBeenCalled()
     expect(deps.send.whatsapp).not.toHaveBeenCalled()
     expect(step.sendEvent).not.toHaveBeenCalled()
@@ -537,5 +473,42 @@ describe('6 小时限频 — 生产接线', () => {
     expect(source).toMatch(/import \{ hasRecentOutbound \} from '@\/lib\/messenger\/recent-outbound'/)
     const prod = source.slice(source.indexOf('export const conversationInboundAutoAck = '))
     expect(prod).toMatch(/hasRecentOutbound,/)
+  })
+})
+
+describe('F1 smart composer wiring', () => {
+  const run = async (deps: ConversationInboundAutoAckDeps) => {
+    const step = fakeStep()
+    const fn = createConversationInboundAutoAckFunction(deps)
+    const out = await handlerOf(fn)({ event: { id: 'e1', data: messageReceived() }, step })
+    return { out: out as { outcome: string; detail: string | null }, step }
+  }
+  it('no composer -> fixed template exactly as before', async () => {
+    const deps = makeDeps()
+    const { out } = await run(deps)
+    expect(out.outcome).toBe('sent')
+    expect(deps.send.messenger).toHaveBeenCalledWith(expect.objectContaining({ body: AUTOACK_TEMPLATE }))
+  })
+  it('composer text is what gets sent, via its own memoised step', async () => {
+    const composeAck = vi.fn(async () => ({ kind: 'send' as const, text: 'hello there friend', source: 'smart' as const, reason: 'model_ok' }))
+    const deps = makeDeps({ composeAck })
+    const { out, step } = await run(deps)
+    expect(deps.send.messenger).toHaveBeenCalledWith(expect.objectContaining({ body: 'hello there friend', usedAiDraft: false }))
+    expect(out.detail).toBe('smart:model_ok')
+    expect(step.run.mock.calls.map((c) => c[0])).toContain('compose-ack')
+  })
+  it('skip plan -> nothing sent, but F2 still gets its autoack.sent event', async () => {
+    const composeAck = vi.fn(async () => ({ kind: 'skip' as const, reason: 'skipped_repeat_message' }))
+    const deps = makeDeps({ composeAck })
+    const { out, step } = await run(deps)
+    expect(out.outcome).toBe('skipped_repeat_message')
+    expect(deps.send.messenger).not.toHaveBeenCalled()
+    expect(step.sentEvents).toHaveLength(1)
+    expect((step.sentEvents[0] as { name: string; data: { skipped: boolean } }).data.skipped).toBe(true)
+  })
+  it('composer is not consulted when an earlier gate already stops the run', async () => {
+    const composeAck = vi.fn(async () => ({ kind: 'skip' as const, reason: 'x' }))
+    await run(makeDeps({ composeAck, hasRecentOutbound: vi.fn(async () => true) }))
+    expect(composeAck).not.toHaveBeenCalled()
   })
 })

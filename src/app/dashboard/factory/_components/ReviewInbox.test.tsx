@@ -10,14 +10,20 @@ const auto = ['audio_track_present_nonsilent', 'resolution_aspect_ratio_correct'
   .map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: null, source_ref: null }))
 interface Order {
   id: string; client_id: string; client_name: string; status: string; angle: string; rationale_one_liner: string
+  template_id?: string | null
+  music_file?: string | null
+  music_choices?: Array<{ id: string; file: string; mood: string; style: string; energy: string; status: string; clean_until_sec: number; max_video_seconds: number }>
   fact_source_url: string | null
   output: Record<string, unknown>
 }
-const order: Order = { id: 'w1', client_id: 'c1', client_name: 'CTS', status: 'in_review', angle: 'a', rationale_one_liner: 'r', fact_source_url: URL_OK, output: { quality_checklist_auto: auto } }
+const order: Order = { id: 'w1', client_id: 'c1', client_name: 'CTS', status: 'in_review', angle: 'a', rationale_one_liner: 'r', template_id: 'postcard', music_file: 'music/jade_river_journey.mp3', fact_source_url: URL_OK, output: { quality_checklist_auto: auto } }
 const click = async (el: Element | undefined) => { await act(async () => { el?.dispatchEvent(new MouseEvent('click', { bubbles: true })) }) }
-const tickListened = async () => { await click(document.querySelector('input[type="checkbox"]') ?? undefined) }
+const checkboxes = () => [...document.querySelectorAll('input[type="checkbox"]')]
+const tickListened = async () => { await click(checkboxes()[0]) }
+const tickStandalone = async () => { await click(checkboxes()[1]) }
 // Expanded checklist: the listened item's PASS radio (first radio of that row).
 const passListenedRadio = () => document.querySelector('input[type="radio"][name$="-bgm_listened_no_vocals"]') ?? undefined
+const passStandaloneRadio = () => document.querySelector('input[type="radio"][name$="-standalone_understandable"]') ?? undefined
 const btn = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.includes(text))
 
 afterEach(() => { document.body.innerHTML = ''; vi.unstubAllGlobals(); posts.length = 0 })
@@ -28,9 +34,14 @@ const mount = async (
   responses: Array<{ ok: boolean; error?: string }>,
   orderOverride: Partial<Order> = {},
   expand = false,
+  musicResponses: Array<{ ok: boolean; error?: string; music_choices?: Order['music_choices'] }> = [],
 ) => {
   const merged: Order = { ...order, ...orderOverride }
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
+    if (init?.method !== 'POST' && u.endsWith('/music-options')) {
+      const r = musicResponses.shift() ?? { ok: true, music_choices: merged.music_choices ?? [] }
+      return { ok: r.ok, status: r.ok ? 200 : 503, json: async () => (r.ok ? { music_choices: r.music_choices ?? [] } : { error: r.error }) }
+    }
     if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged] }) }
     posts.push({ url: u, body: init.body ? JSON.parse(init.body) : undefined })
     const r = responses.shift()!
@@ -47,6 +58,22 @@ const reviewPosts = () => posts.filter(p => p.url === '/api/factory/work-orders/
 const ONE_CLICK = '我已看过这条片子,同意通过'
 const FAIL_AUTO = auto.map(item => item.key === 'audio_track_present_nonsilent' ? { ...item, outcome: 'FAIL' } : item)
 
+it('retries loading music choices after a temporary failure when the reject dialog is reopened', async () => {
+  await mount([{ ok: true }], {}, false, [
+    { ok: false, error: '音乐列表暂时不可用' },
+    { ok: true, music_choices: [] },
+  ])
+
+  await click(btn('打回'))
+  expect(document.body.textContent).toContain('音乐列表暂时不可用')
+  await click(btn('再想想'))
+  await click(btn('打回'))
+
+  const musicRequests = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(([url]) => String(url).endsWith('/music-options'))
+  expect(musicRequests).toHaveLength(2)
+  expect(document.body.textContent).not.toContain('音乐列表暂时不可用')
+})
+
 it('prefills source, one-click all PASS, shows plain-Chinese server error inside the dialog', async () => {
   await mount([{ ok: false, error: MISSING }], {}, true)
   const urls = [...document.querySelectorAll('input[placeholder^="来源"]')] as HTMLInputElement[]
@@ -56,6 +83,8 @@ it('prefills source, one-click all PASS, shows plain-Chinese server error inside
   await click(btn('项全部标为通过'))
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // bulk pass never ticks "listened"
   await click(passListenedRadio())
+  expect(btn('确定通过')?.hasAttribute('disabled')).toBe(true) // "能看懂" is also never bulk-passed
+  await click(passStandaloneRadio())
   expect(btn('确定通过')?.hasAttribute('disabled')).toBe(false)
   await click(btn('确定通过'))
   expect(document.querySelector('.fixed')?.textContent).toContain('「事实性主张有来源」这一项要填来源网址')
@@ -65,6 +94,7 @@ it('clears the old error when a retry succeeds (no stale red text on the page)',
   await mount([{ ok: false, error: MISSING }, { ok: true }], {}, true)
   await click(btn('项全部标为通过'))
   await click(passListenedRadio())
+  await click(passStandaloneRadio())
   await click(btn('确定通过'))
   expect(document.body.textContent).toContain('这一项要填来源网址')
   await click(btn('确定通过'))
@@ -72,7 +102,7 @@ it('clears the old error when a retry succeeds (no stale red text on the page)',
   expect(document.body.textContent).not.toContain('这一项要填来源网址')
 })
 
-it('clean order: one-click panel needs the listened tick, then sends 10 HUMAN PASS items with prefilled source', async () => {
+it('clean order: one-click panel needs the listened tick, then sends 11 HUMAN PASS items with prefilled source', async () => {
   await mount([{ ok: true }])
   expect(btn('确定通过')).toBeUndefined()
   expect(btn(ONE_CLICK)).toBeDefined()
@@ -80,14 +110,17 @@ it('clean order: one-click panel needs the listened tick, then sends 10 HUMAN PA
   await click(btn(ONE_CLICK))
   expect(reviewPosts()).toHaveLength(0) // a disabled button posts nothing
   await tickListened()
+  expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(true) // listened alone is not enough
+  await tickStandalone()
   expect(btn(ONE_CLICK)?.hasAttribute('disabled')).toBe(false)
   await click(btn(ONE_CLICK))
   const sent = reviewPosts()
   expect(sent).toHaveLength(1)
   const body = sent[0].body as { action: string; checklist_human: Array<{ key: string; judge: string; outcome: string; source_ref: string | null }> }
   expect(body.action).toBe('approve')
-  expect(body.checklist_human).toHaveLength(10)
+  expect(body.checklist_human).toHaveLength(11)
   expect(body.checklist_human.some(i => i.key === 'bgm_listened_no_vocals' && i.outcome === 'PASS')).toBe(true)
+  expect(body.checklist_human.some(i => i.key === 'standalone_understandable' && i.outcome === 'PASS')).toBe(true)
   expect(body.checklist_human.every(i => i.outcome === 'PASS' && i.judge === 'HUMAN')).toBe(true)
   const facts = body.checklist_human.filter(i => i.key.startsWith('factual_'))
   expect(facts.map(i => i.source_ref)).toEqual([URL_OK, URL_OK])
@@ -167,6 +200,12 @@ it('shows a download link only when the order has a video_path', async () => {
   expect(links[0].href.endsWith('/content-factory/x/y.mp4?download=w1.mp4')).toBe(true)
 })
 
+it('shows the template and music that the worker actually used', async () => {
+  await mountOrders([order])
+  expect(document.body.textContent).toContain('模板 · 场景明信片')
+  expect(document.body.textContent).toContain('BGM · jade_river_journey.mp3')
+})
+
 it('renders the publish outlets disclosure with the outlet list', async () => {
   await mountOrders([{ ...order, output: { ...order.output, video_path: 'x/y.mp4' } }])
   expect(document.body.textContent).toContain('通过后会去哪里?')
@@ -196,6 +235,25 @@ it('打回 needs a reason, posts reject_quality, and shows the 已打回 notice'
   expect(document.body.textContent).toContain('已打回 #w1')
 })
 
+it('lets the reviewer choose a safe alternate BGM for the reopened render', async () => {
+  await mount([{ ok: true }], {
+    music_file: 'music/pipa-trap.m4a',
+    music_choices: [{ id: 'horizons-call', file: "Horizon's Call.mp3", mood: '开阔、期待', style: 'light', energy: 'mid', status: 'beats_unverified', clean_until_sec: 21, max_video_seconds: 20 }],
+  })
+  await openReject()
+  const selector = document.querySelector('#reject-music-choice') as HTMLSelectElement
+  expect(selector).toBeDefined()
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(selector, 'horizons-call')
+    selector.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  const reason = [...document.querySelectorAll('label')].find(l => l.textContent?.includes('字幕太长或太小'))
+  await click(reason?.querySelector('input') ?? undefined)
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('不会预先试听')
+  await click(btn('确认打回'))
+  expect(reviewPosts()[0].body).toMatchObject({ action: 'reject_quality', music_id: 'horizons-call' })
+})
+
 it('只改预算 tab posts reject_budget', async () => {
   await mount([{ ok: true }])
   await openReject()
@@ -215,4 +273,26 @@ it('card shows short title and hides engineering notes inside 详情; no Claude 
   expect(document.body.textContent).not.toContain('问 Claude')
   const details = [...document.querySelectorAll('details')].find(d => d.textContent?.includes('loudness 74'))
   expect(details?.querySelector('summary')?.textContent).toBe('详情')
+})
+
+it('asset_only material gets its own section: no 通过 button, only 收入素材库, and it posts to asset-accept', async () => {
+  const assetOrder = { ...order, id: 'a1', angle: 'asset', deliverable: 'asset_only' }
+  const normal = { ...order, id: 'w1' }
+  vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
+    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [normal, assetOrder] }) }
+    posts.push({ url: u, body: undefined })
+    return { ok: true, status: 200, json: async () => ({}) }
+  }))
+  const div = document.body.appendChild(document.createElement('div'))
+  await act(async () => { createRoot(div).render(<ReviewInbox />) })
+  const section = document.querySelector('[data-testid="asset-only-section"]')
+  expect(section).not.toBeNull()
+  expect(section?.textContent).toContain('素材（不单独发布）')
+  expect(section?.textContent).not.toContain('通过·待发布')
+  const accept = [...(section?.querySelectorAll('button') ?? [])].find(b => b.textContent?.includes('收入素材库'))
+  expect(accept).toBeDefined()
+  await click(accept)
+  expect(posts.map(p => p.url)).toContain('/api/factory/work-orders/a1/asset-accept')
+  // the normal card is still in the pending list with its approve button
+  expect(btn('通过·待发布')).toBeDefined()
 })

@@ -13,6 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { createDraftForApproval } from '@/lib/ads-strategy/draft-and-gate'
@@ -26,6 +27,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id: clientId } = await params
+  const denied = await rejectAgentAdsBearer(req, { clientId, action: 'write_meta' })
+  if (denied) return denied
 
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
