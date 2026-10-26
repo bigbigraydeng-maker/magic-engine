@@ -31,6 +31,7 @@ import { audOnlyAmount, prepareBudgetIntake } from '@/lib/ads/budget-currency'
 import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
 import { loadMemoryForClient } from '@/lib/memory'
 import { getGoalById, listActiveGoals } from '@/lib/strategy/goals'
+import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -421,6 +422,9 @@ function makeHuatuoStream(
             }
           },
         })
+
+        // 2b. 用事实构建计划草稿种子（永不抛错；失败时不写 plan_seed）
+        result.content = await attachPlanSeed(result.content, { clientId, goalId: goal?.id ?? null }).catch(() => result.content)
 
         // 3. 写回 DB
         await supabaseAdmin

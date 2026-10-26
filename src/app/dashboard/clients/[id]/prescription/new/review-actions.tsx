@@ -8,6 +8,9 @@ export const REJECT_BUTTON_LABEL = '要求修改（标为已拒绝）'
 export const APPROVE_CONFIRM_TEXT =
   '批准后，这份方案会记到对应目标下面，并按阶段排好。这一步不能当没发生。确定批准？'
 
+export const APPROVE_SPEND_REMINDER =
+  '提醒：这份处方里 Agent 给的账户和日预算只是建议，批准处方不等于批准花钱；花钱要另外在计划页批准计划、在审批页点开广告。'
+
 export const REJECT_CONFIRM_TEXT =
   '「要求修改」会把这份处方标成已拒绝，不会改写内容。确定标为已拒绝？'
 
@@ -26,6 +29,7 @@ function ConfirmStep({ pending, onCancel, onConfirm }: {
       className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3"
     >
       <p className="text-sm text-amber-950">{approving ? APPROVE_CONFIRM_TEXT : REJECT_CONFIRM_TEXT}</p>
+      {approving && <p className="text-sm font-medium text-amber-950">{APPROVE_SPEND_REMINDER}</p>}
       <div className="flex gap-2 justify-end">
         <button type="button" onClick={onCancel} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
           取消

@@ -6,6 +6,7 @@ import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-presc
 import type { StoredSpend } from '@/lib/marketing-plan/promo/prescription-copy'
 import { describeReview } from '@/lib/marketing-plan/promo/prescription-copy'
 import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
+import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -83,6 +84,7 @@ export function PrescriptionCard({
           <ItemList items={prescription.rules} empty="没有单独的规矩。" ordered={false} />
         </div>
       </details>
+      <PlanSeedPanel clientId={clientId} prescriptionId={prescription.id} />
     </section>
   )
 }

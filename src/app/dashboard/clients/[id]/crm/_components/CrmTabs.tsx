@@ -26,6 +26,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
+import { afterCrmListReady } from '@/lib/crm/list-ready'
 import { NewMessagesBanner } from './NewMessagesBanner'
 
 const PROBE_TTL_MS = 5 * 60 * 1000
@@ -53,18 +54,21 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
   const [industry, setIndustry] = useState<string | null | undefined>(undefined)
   useEffect(() => {
     let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch(`/api/clients/${clientId}`)
-        if (!res.ok) return
-        const json = (await res.json()) as { client?: { industry?: string | null } }
-        if (!cancelled) setIndustry(json.client?.industry ?? null)
-      } catch {
-        // 拿不到就不显示条件项 —— 默认隐藏，不默认显示（跟 industry-features 的既有约定一致）。
-      }
-    })()
+    const cancelWait = afterCrmListReady(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/clients/${clientId}`)
+          if (!res.ok) return
+          const json = (await res.json()) as { client?: { industry?: string | null } }
+          if (!cancelled) setIndustry(json.client?.industry ?? null)
+        } catch {
+          // 拿不到就不显示条件项 —— 默认隐藏，不默认显示（跟 industry-features 的既有约定一致）。
+        }
+      })()
+    })
     return () => {
       cancelled = true
+      cancelWait()
     }
   }, [clientId])
   const flags = industryFeatureFlags(industry)
@@ -77,19 +81,22 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
     setShowPayments(cached === true)
     if (cached !== null) return
     let cancelled = false
-    void (async () => {
-      try {
-        const res = await fetch(`/api/clients/${clientId}/crm/bookings/access`)
-        if (res.status === 200 || res.status === 403 || res.status === 404) {
-          probeCache.set(clientId, { ok: res.status === 200, at: Date.now() })
+    const cancelWait = afterCrmListReady(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/clients/${clientId}/crm/bookings/access`)
+          if (res.status === 200 || res.status === 403 || res.status === 404) {
+            probeCache.set(clientId, { ok: res.status === 200, at: Date.now() })
+          }
+          if (!cancelled) setShowPayments(res.status === 200)
+        } catch {
+          // 网络出错：不显示，也不缓存（下次再试）
         }
-        if (!cancelled) setShowPayments(res.status === 200)
-      } catch {
-        // 网络出错：不显示，也不缓存（下次再试）
-      }
-    })()
+      })()
+    })
     return () => {
       cancelled = true
+      cancelWait()
     }
   }, [clientId])
 
