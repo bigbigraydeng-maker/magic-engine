@@ -59,9 +59,20 @@ function reject(code: string, text: string, retryable = false): PlanDraftMapResu
   return { ok: false, code, text, retryable }
 }
 
-function keptSteps(input: PlanDraftMapInput): { steps: PromoSpec['phases'][number]['steps']; dropped: string[]; network: boolean } {
+interface RawAdsStep {
+  id: string
+  kind: 'ads_campaign'
+  settings: {
+    ad_account_id: string
+    daily_budget_cents: number
+    audience_ref: string
+    targeting: { countries: Array<'AU' | 'NZ'>; city_keys: string[]; excluded_audience_refs: string[] }
+  }
+}
+
+function keptSteps(input: PlanDraftMapInput): { steps: RawAdsStep[]; dropped: string[]; network: boolean } {
   const byKey = new Map(input.seed.ad_steps.map(step => [step.step_key, step]))
-  const steps: PromoSpec['phases'][number]['steps'] = []
+  const steps: RawAdsStep[] = []
   const dropped: string[] = []
   let network = seedLooksBroken(input.seed)
   for (const play of input.plays) {

@@ -108,6 +108,12 @@ export interface PlanDraftDeps {
   scheduleRetry: (event: PlanDraftEventData) => Promise<void>
 }
 
+export interface PlanDraftOutcome {
+  wrote: boolean
+  receipt: PlanDraftReceipt | null
+  retryable: boolean
+}
+
 export interface BuiltDraft {
   status: PlanDraftStatus
   reasonCode: string

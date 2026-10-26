@@ -1,12 +1,14 @@
 ---
 id: 2026-10-26-plan-draft-before-agree
 title: 处方草稿通过校验后先起草一份未批准的推广计划
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-26
 source: issue:3238
 verify_by: 2026-11-02
 verify_how: 打开一份带广告打法、已在白名单里的处方草稿，同意卡上能看到未批准计划草稿或一句人话原因；同一版不会生成第二份；连续三次网络失败会出现在今日待办。
+done_on: 2026-10-26
+done_ref: pr:3242
 ---
 同一目标下先打开已批准计划，再允许自动起草。
 草稿不批准、不写广告账户、不花钱。

@@ -55,7 +55,9 @@ export async function GET(
     return NextResponse.json({
       success: true,
       prescription: data,
-      plan_draft_line: planDraftCardLine(data.generation_meta),
+      plan_draft_line: planDraftCardLine(
+        (data as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
     }, {
       headers: {
         // 双重保险：浏览器也不要缓存
