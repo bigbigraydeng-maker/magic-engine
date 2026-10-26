@@ -26,6 +26,9 @@ import { computeDeltaPct, buildSparkline, bucketByGranularity } from '@/lib/flyw
 import { getMetricMeta, SPOTLIGHT_METRIC_KEYS } from '@/lib/flywheel/intelligence/metric-catalog'
 import type { MetricSummaryTile } from '@/lib/flywheel/intelligence/types'
 import type { FlywheelName } from '@/lib/flywheel/adapters/types'
+import { ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { readLatestAccountSpendWindow } from '@/lib/ads/account-currency'
+import { alignSpendTile } from '@/lib/ads/spend-figures'
 
 export const dynamic = 'force-dynamic'
 
@@ -76,6 +79,11 @@ export async function GET(
     }
   }
 
+  // Spend amount and its dates are one meta_ads_snapshots row, the same row as the data tab.
+  // The flywheel daily bucket sums every pull that day, so it is not that row.
+  const spendWindow = await readLatestAccountSpendWindow(clientId)
+  const moneyKeys = new Set<string>([ADS_METRIC_KEY.SPEND, ADS_METRIC_KEY.CPC])
+
   // ── Build summary tiles ────────────────────────────────────────────────────
   const now = new Date()
   const tiles: MetricSummaryTile[] = SPOTLIGHT_METRIC_KEYS.map(key => {
@@ -108,7 +116,7 @@ export async function GET(
 
     const sparkline = buildSparkline(points, 28, now)
 
-    return {
+    const tile: MetricSummaryTile = {
       metricKey:    key,
       flywheel,
       label:        meta.label,
@@ -120,7 +128,11 @@ export async function GET(
       deltaPct7d,
       deltaPct28d,
       sparkline,
+      currency:    moneyKeys.has(key) ? spendWindow.currency : null,
+      periodLabel: null,
     }
+    if (key === ADS_METRIC_KEY.SPEND) return alignSpendTile(tile, spendWindow)
+    return tile
   })
 
   return NextResponse.json({

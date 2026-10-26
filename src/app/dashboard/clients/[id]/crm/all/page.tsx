@@ -35,7 +35,7 @@ import { DAILY_QUOTA } from '@/lib/crm/next-action'
 import { ts, type ContactRow, type CustomColumnMeta } from './_components/contact-table-types'
 import { ContactTableRow } from './_components/ContactTableRow'
 import { ContactTableHead } from './_components/ContactTableHead'
-import { ListFilters, TradeBatchPanel } from './_components/ListFilters'
+import { ListFilters, TradeBatchPanel, type AssigneeView } from './_components/ListFilters'
 import { FlatPagination, SectionPagerRow } from './_components/ListPagination'
 import { isToday, toDrawerRow, sectionRange, type PrioritySectionData } from './_components/list-helpers'
 
@@ -69,6 +69,12 @@ export default function CrmAllContactsPage() {
    * 不留一个"选了但看起来没生效"的筛选条件)。
    */
   const [kindFilter, setKindFilter] = useState<KindView>('all')
+  /**
+   * 跟进人筛选（issue #3158 part 3）—— 全部 / 我负责 / 未分配 / 具体邮箱。
+   * 只在平铺模式生效：服务端 priority 视图这一轮没接 `?assignee`，切到分段模式时
+   * 会被重置为 'all'，不留一个「选了但悄悄没生效」的筛选条件（同 kindFilter）。
+   */
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeView>('all')
   const [page, setPage] = useState(1)
   // C1a 固定 100，先不给改每页条数的入口。
   // 分段（智能）视图：服务端每段默认 100 一页，这里的页数换算要与之一致。
@@ -160,6 +166,7 @@ export default function CrmAllContactsPage() {
         if (qDebounced.trim()) params.set('q', qDebounced.trim())
         for (const s of stageFilter) params.append('stage', s)
         if (kindFilter !== 'all') params.set('kind', kindFilter)
+        if (assigneeFilter !== 'all') params.set('assignee', assigneeFilter)
       }
 
       const [res, stageRes] = await Promise.all([
@@ -223,7 +230,7 @@ export default function CrmAllContactsPage() {
       setSectionsLoading(false)
       fetchInFlightRef.current = false
     }
-  }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, grouped, openSections, sectionPages])
+  }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, assigneeFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
     void loadList()
@@ -238,7 +245,7 @@ export default function CrmAllContactsPage() {
   // 换了搜索词或筛选条件就回第一页 —— 否则会停在一个可能不存在的页码上。
   useEffect(() => {
     setPage(1)
-  }, [qDebounced, stageFilter, kindFilter])
+  }, [qDebounced, stageFilter, kindFilter, assigneeFilter])
 
   /**
    * 直达链接 `?contact=<id>` —— 列表加载完自动打开那个人的抽屉。
@@ -270,6 +277,19 @@ export default function CrmAllContactsPage() {
    */
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get('view') === 'smart') setGrouped(true)
+  }, [])
+
+  /**
+   * `?assignee=me|unassigned|<email>` 直达 —— 「我的待跟进」入口就是跳到
+   * `/dashboard/clients/<id>/crm/all?assignee=me`。首帧吃一次 URL，之后由筛选条
+   * 自己管状态，不随后续手动切换再去动 URL（跟 `?view=smart` 同款）。
+   */
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get('assignee')
+    if (!raw) return
+    const trimmed = raw.trim()
+    if (trimmed === 'me' || trimmed === 'unassigned') setAssigneeFilter(trimmed)
+    else if (trimmed.length > 0) setAssigneeFilter(trimmed.toLowerCase())
   }, [])
 
   useEffect(() => {
@@ -640,9 +660,13 @@ export default function CrmAllContactsPage() {
                 return next
               })
               setKindFilter('all')
+              setAssigneeFilter('all')
             }}
             kindFilter={kindFilter}
             onKindFilterChange={setKindFilter}
+            clientId={clientId}
+            assigneeFilter={assigneeFilter}
+            onAssigneeFilterChange={setAssigneeFilter}
           />
 
           {!grouped && kindFilter === 'trade' && rows.length > 0 && (

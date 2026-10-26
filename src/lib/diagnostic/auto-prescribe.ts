@@ -9,6 +9,7 @@
 
 import type { DiagnosticDimension, PrescriptionIntake, TimelineUrgency } from '@/types/diagnostic'
 import type { GoalRow } from '@/types/strategy'
+import { budgetAmountLabel, normalizeBudgetCurrency } from '@/lib/ads/budget-currency'
 
 /** 体检结果多新才算「这周的」—— 周更任务，给一周多一点余量。 */
 export const DIAGNOSIS_FRESH_DAYS = 8
@@ -225,7 +226,9 @@ export function buildIntake(
   //    这正是这段文档块上面刚判过死刑的「凭空注入客户业务数据」。
   //    宁可让 AI 知道"没预算"，也不替客户编一个数。
   const budget = goal.budget_amount ?? 0
+  const budgetCurrency = normalizeBudgetCurrency(goal.budget_currency)
   const budgetSource = goal.budget_amount != null ? '目标自带预算' : '这个目标没填预算，按 0 处理'
+  const budgetText = budgetCurrency ? budgetAmountLabel(budget, budgetCurrency) : `${budget}（币种未标明）`
 
   // 🔴 措辞不能写死「人工填过的」：这条链自己产出的方案也是 approved 状态，
   //    取上一份时必须把机器那份排掉，否则第二周起
@@ -239,11 +242,12 @@ export function buildIntake(
     business_goal: goal.title,
     timeline_urgency: urgencyFromGoal(goal, now),
     monthly_budget_aud: budget,
+    ...(budgetCurrency ? { budget_currency: budgetCurrency } : {}),
     // 🔴 每次用本周体检重算 —— 冻住这一项等于白采数据
     priority_dimensions: priority,
     notes:
       `本次开方服务于目标《${goal.title}》。\n` +
-      `　预算口径：${budgetSource}（${budget} AUD/月）。\n` +
+      `　预算口径：${budgetSource}（${budgetText}）。\n` +
       `　重点维度：${priority.length > 0 ? `本周体检最低分的 ${priority.map((d) => DIMENSION_LABELS[d]).join(' / ')}` : '本周体检未采到任何维度分数'}。\n` +
       priorLine,
   }

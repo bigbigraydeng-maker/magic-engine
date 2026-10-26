@@ -67,6 +67,21 @@ describe('reconcileWeek — 头条', () => {
     expect(r.headline).not.toContain('基本按计划')
   })
 
+  it('逐日花费读不到时引用广告数据页的合计，但不把它当成这一周的实际', () => {
+    const r = reconcileWeek(baseSpec(), TODAY, goodReconFacts({
+      spend_cents_by_account_day: null,
+      account_total: { spend: 2012, currency: 'NZD', period_start: '2026-09-25', period_end: '2026-10-25' },
+    }), pb)
+    const row = r.rows.find(x => x.key === 'spend')
+    expect(row?.status).toBe('unknown')
+    expect(row?.actual).toBeNull()
+    expect(row?.reason).toContain('NZ$2,012.00')
+    expect(row?.reason).toContain('2026-09-25 至 2026-10-25')
+    expect(row?.reason).toContain('不是这一周')
+    expect(r.headline).toContain('NZ$2,012.00')
+    expect(r.blind).toBe(true)
+  })
+
   it('时区未确定 → 花费行 unknown，不静默按 UTC', () => {
     const r = reconcileWeek(baseSpec(), TODAY, goodReconFacts({ spend_cents_by_account_day: spendFacts(5000), timezone_known: false }), pb)
     expect(r.rows.find(x => x.key === 'spend')?.status).toBe('unknown')

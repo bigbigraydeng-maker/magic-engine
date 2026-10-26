@@ -102,6 +102,24 @@ async function readBookingRows(
   )
 }
 
+/** Bookings for one client. Same read as the sales-progress page; no payment columns. */
+export async function loadClientSalesBookings(
+  db: SupabaseClient,
+  clientId: string,
+): Promise<{ bookings: SalesBooking[]; originColumnsMissing: boolean }> {
+  let originColumnsMissing = false
+  let rawRows: unknown[]
+  try {
+    rawRows = await readBookingRows(db, clientId, FULL_COLUMNS)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!isMissingOriginColumns(message)) throw error
+    originColumnsMissing = true
+    rawRows = await readBookingRows(db, clientId, LEGACY_COLUMNS)
+  }
+  return { bookings: rawRows.map(mapBookingRow), originColumnsMissing }
+}
+
 /** Today's date (YYYY-MM-DD) in New Zealand. */
 function nzToday(date: Date): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
@@ -113,19 +131,8 @@ export async function loadSalesProgress(
   source: SalesUnitSource,
   now?: () => Date,
 ): Promise<SalesProgressData> {
-  let originColumnsMissing = false
-  let rawRows: unknown[]
-
-  try {
-    rawRows = await readBookingRows(db, clientId, FULL_COLUMNS)
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (!isMissingOriginColumns(message)) throw error
-    originColumnsMissing = true
-    rawRows = await readBookingRows(db, clientId, LEGACY_COLUMNS)
-  }
-
-  const bookings = rawRows.map(mapBookingRow)
+  const loaded = await loadClientSalesBookings(db, clientId)
+  const { bookings, originColumnsMissing } = loaded
   const units = await source.listSalesUnits(clientId)
 
   const computed = computeProgress(units, bookings)

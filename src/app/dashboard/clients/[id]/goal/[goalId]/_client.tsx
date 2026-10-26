@@ -12,7 +12,9 @@ import { useEffect, useState, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import type { GoalRow } from '@/types/strategy'
+import { isGoalReason } from '@/lib/strategy/goals'
 import { normalizeGoalRow } from '@/lib/strategy/normalize'
+import { depositedSeatMetricLabel } from '@/lib/strategy/seat-scope'
 import { InitiativeList } from './_components/InitiativeList'
 import { BacklogMigrator } from './_components/BacklogMigrator'
 import { VerdictPanel } from './_components/VerdictPanel'
@@ -45,6 +47,9 @@ export function GoalDetailClient() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [reasonDraft, setReasonDraft] = useState<string | null>(null)
+  const [reasonError, setReasonError] = useState('')
+  const [reasonBusy, setReasonBusy] = useState(false)
   // Phase 33 M4: shared execution summary so the bar + per-Initiative cards
   // render off the same fetch.
   const [execSummary, setExecSummary] = useState<GoalExecutionSummary | null>(null)
@@ -62,6 +67,8 @@ export function GoalDetailClient() {
       }
       const j = await res.json()
       // B7 fix: normalize NUMERIC strings to numbers
+      setReasonDraft(null)
+      setReasonError('')
       setGoal(j.goal ? normalizeGoalRow(j.goal) : null)
     } finally {
       setLoading(false)
@@ -102,6 +109,33 @@ export function GoalDetailClient() {
     }
   }
 
+  async function saveReason() {
+    if (!goal || goal.status !== 'draft') return
+    const text = (reasonDraft ?? goal.fde_reasoning ?? '').trim()
+    if (!isGoalReason(text)) {
+      setReasonError('不能保存草稿，缺：理由')
+      return
+    }
+    setReasonBusy(true)
+    setReasonError('')
+    try {
+      const res = await fetch(`/api/goals/${goalId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fde_reasoning: text }),
+      })
+      const j = await res.json()
+      if (!res.ok) {
+        setReasonError(j.error ?? '保存失败')
+        return
+      }
+      setReasonDraft(null)
+      setGoal(j.goal ? normalizeGoalRow(j.goal) : goal)
+    } finally {
+      setReasonBusy(false)
+    }
+  }
+
   async function deleteDraft() {
     if (!confirm('Delete this draft goal permanently?')) return
     setBusy(true)
@@ -131,6 +165,7 @@ export function GoalDetailClient() {
   const periodDays = daysBetween(goal.period_start, goal.period_end)
   const daysElapsed = Math.max(0, daysBetween(goal.period_start, new Date().toISOString().slice(0, 10)))
   const daysRemaining = Math.max(0, periodDays - daysElapsed)
+  const seatFace = depositedSeatMetricLabel(goal.supporting_metrics)
 
   return (
     <div className="min-h-screen bg-[#f6f7f2] px-4 py-8 md:px-6">
@@ -203,7 +238,7 @@ export function GoalDetailClient() {
             )}
           </div>
           <div className="mt-2 font-display text-2xl font-bold text-me-charcoal">
-            {goal.primary_metric_label}
+            {seatFace?.label ?? goal.primary_metric_label}
           </div>
           <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
@@ -213,7 +248,9 @@ export function GoalDetailClient() {
               <div className="text-lg font-bold text-me-charcoal/75">
                 {goal.baseline_value.toLocaleString()}
               </div>
-              <div className="text-[10px] font-semibold text-me-charcoal/45">{goal.primary_metric_unit}</div>
+              <div className="text-[10px] font-semibold text-me-charcoal/45">
+                {seatFace?.unit ?? goal.primary_metric_unit}
+              </div>
             </div>
             {/* A2.1 — auto-fetched current value (or "—" for self_report metrics) */}
             <CurrentValueCell goal={goal} />
@@ -224,7 +261,9 @@ export function GoalDetailClient() {
               <div className="text-lg font-bold text-status-track">
                 {goal.target_value.toLocaleString()}
               </div>
-              <div className="text-[10px] font-semibold text-me-charcoal/45">{goal.primary_metric_unit}</div>
+              <div className="text-[10px] font-semibold text-me-charcoal/45">
+                {seatFace?.unit ?? goal.primary_metric_unit}
+              </div>
             </div>
             <div>
               <div className="text-[11px] font-black uppercase text-me-charcoal/45">
@@ -284,13 +323,21 @@ export function GoalDetailClient() {
           </div>
         </div>
 
-        {/* FDE reasoning */}
-        {goal.fde_reasoning && (
+        {goal.status === 'draft' ? (
+          <DraftReasonEditor
+            value={reasonDraft ?? goal.fde_reasoning ?? ''}
+            error={reasonError}
+            saving={reasonBusy}
+            disabled={reasonBusy || busy}
+            onChange={setReasonDraft}
+            onSave={saveReason}
+          />
+        ) : goal.fde_reasoning ? (
           <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
-            <div className="text-xs font-black uppercase tracking-wide text-me-charcoal/45">FDE Reasoning</div>
+            <div className="text-xs font-black uppercase tracking-wide text-me-charcoal/45">理由</div>
             <p className="mt-2 whitespace-pre-wrap text-sm font-semibold text-me-charcoal/80">{goal.fde_reasoning}</p>
           </div>
-        )}
+        ) : null}
 
         {/* Verdict panel (M4) — visible for active/expired/archived */}
         <VerdictPanel goal={goal} onJudged={load} />
@@ -315,6 +362,52 @@ export function GoalDetailClient() {
           <BacklogMigrator clientId={clientId} goal={goal} />
         )}
       </div>
+    </div>
+  )
+}
+
+function DraftReasonEditor({
+  value,
+  error,
+  saving,
+  disabled,
+  onChange,
+  onSave,
+}: {
+  value: string
+  error: string
+  saving: boolean
+  disabled: boolean
+  onChange: (value: string) => void
+  onSave: () => void
+}) {
+  const valid = isGoalReason(value)
+  return (
+    <div className="rounded-xl border border-black/10 bg-white p-5 shadow-sm">
+      <label htmlFor="draft-goal-reason" className="text-xs font-black uppercase tracking-wide text-me-charcoal/45">
+        理由（必填）
+      </label>
+      <textarea
+        id="draft-goal-reason"
+        value={value}
+        onChange={event => onChange(event.target.value)}
+        rows={4}
+        disabled={disabled}
+        placeholder="写清这个周期用什么结果验收，至少 8 个字"
+        className="mt-2 w-full resize-none rounded-lg border border-black/15 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal placeholder:text-me-taupe focus:border-me-ochre focus:outline-none disabled:opacity-50"
+      />
+      <p className="mt-2 text-[11px] font-semibold text-me-charcoal/55">
+        {valid ? '保存后即可改为进行中。' : '至少 8 个字，不能是待定这类占位词。'}
+      </p>
+      {error ? <p className="mt-2 text-sm font-semibold text-status-rej">{error}</p> : null}
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={disabled || !valid}
+        className="mt-3 rounded-lg bg-me-ochre px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90 disabled:cursor-not-allowed disabled:opacity-30"
+      >
+        {saving ? '保存中…' : '保存理由'}
+      </button>
     </div>
   )
 }
