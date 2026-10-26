@@ -84,6 +84,8 @@ export interface EntityFact {
   end_at?: string | null
   /** 广告组：投放目的地（WHATSAPP / MESSENGER …）；读不出 = 缺省 */
   destination_type?: string | null
+  /** 广告组日预算（分）。没设或读不懂 = null。广告没有这个字段。 */
+  daily_budget_cents?: number | null
 }
 
 /** 一行洞察数字。钱：spend_cents 是分；cost_* 是币种单位（元），Meta 报什么就是什么，没报 = null（不是 0）。 */

@@ -651,6 +651,48 @@ describe('表单留资系列 · 命中故障才调只暂停入口', () => {
     expect(pauseCalls[0].fault_what.length).toBeGreaterThan(0)
   })
 
+  it('系列没有日预算时，用在投广告组日预算之和判倍数；暂停的组不算', async () => {
+    const facts = seriesFacts(LEAD_ID, {
+      campaign: { ...seriesFacts(LEAD_ID).campaign, daily_budget_cents: null },
+      adsets: [
+        { id: 's1', name: '组A', parent_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', updated_at: hoursBefore(2), daily_budget_cents: 5000 },
+        { id: 's2', name: '组停', parent_id: null, status: 'PAUSED', effective_status: 'PAUSED', updated_at: hoursBefore(2), daily_budget_cents: 9000 },
+      ],
+      total: spendRow(LEAD_ID),
+    })
+    const { deps, pauseCalls } = makeDeps({
+      config: leadConfig(),
+      objectiveFacts: { [LEAD_ID]: facts },
+      leadFormExtra: { ...overExtra(), todaySpendCents: 10001 },
+      pauseResult: { called: true, paused: false, reason: 'meta_failed', idempotent: false },
+    })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    const verdict = out.clients[0].objective_watch?.series[0]
+    expect(verdict?.state).not.toBe('unread')
+    expect(verdict?.stop_faults?.map(item => item.code)).toEqual(['over_daily_cap'])
+    expect(verdict?.stop_faults?.[0].what).toContain('日预算')
+    expect(pauseCalls).toHaveLength(1)
+  })
+
+  it('系列和在投广告组的日预算都读不到 → 不按倍数判，也不调入口', async () => {
+    const facts = seriesFacts(LEAD_ID, {
+      campaign: { ...seriesFacts(LEAD_ID).campaign, daily_budget_cents: null },
+      adsets: [
+        { id: 's1', name: '组A', parent_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', updated_at: hoursBefore(2), daily_budget_cents: null },
+      ],
+    })
+    const { deps, pauseCalls } = makeDeps({
+      config: leadConfig(),
+      objectiveFacts: { [LEAD_ID]: facts },
+      leadFormExtra: overExtra(),
+    })
+    const out = await runLaunchWatch(fakeStep().step, deps)
+    const verdict = out.clients[0].objective_watch?.series[0]
+    expect(pauseCalls).toEqual([])
+    expect(verdict?.stop_faults ?? []).toEqual([])
+    expect(verdict?.stop_notes?.join(' ')).toContain('系列日预算没读到')
+  })
+
   it('系列已经停了 → 不读表单额外数字，也不调入口', async () => {
     const facts = seriesFacts(LEAD_ID, {
       campaign: { ...seriesFacts(LEAD_ID).campaign, effective_status: 'PAUSED', status: 'PAUSED' },
