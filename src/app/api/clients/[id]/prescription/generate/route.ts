@@ -10,16 +10,14 @@
  * 补充/修订模式：从原处方 derive discovery_id，加载原处方全文 + 执行进度，
  * 作为 priorContext 传给华佗。
  *
- * 华佗路径先写入 generating 行，立刻回 202。模型调用在进程里后台跑，
- * 结果写回同一行。不能在这条 HTTP 里干等：正式域名的代理大约 100 秒就掐断。
- *
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Response: text/event-stream（SSE）
+ * Security: logged-in session. OPC or this client's own FDE (requireOperatorAccess).
  * Reference: ROADMAP.md P8.10.S3 / S5
  */
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { generatePrescription } from '@/lib/diagnostic/prescription-generator'
 import { schedulePrescriptionGeneration } from '@/lib/huatuo/prescription-job'
 import type {
@@ -48,7 +46,8 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<Response> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Drafting stays open to this client's FDE. requireGlobalAdmin would lock them out.
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) {
     return new Response(JSON.stringify({ error: access.error }), {
       status: access.status,

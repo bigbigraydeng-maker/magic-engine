@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/auth/client-access', () => ({
-  requirePaidClientAccess: vi.fn().mockResolvedValue({
+  requireOperatorAccess: vi.fn().mockResolvedValue({
     ok: true, user: { id: 'test-user', email: 'fde@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null,
   }),
 }))
@@ -20,7 +20,7 @@ vi.mock('@/lib/ads-strategy/plan-seed/attach', () => ({ attachPlanSeed: (...a: u
 
 import { POST } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 
 const params = { id: 'client-1' }
 
@@ -79,7 +79,7 @@ function mockDb(options: { goal?: unknown; run?: unknown; version?: unknown; ord
 beforeEach(() => {
   vi.clearAllMocks()
   mockAttach.mockImplementation(async (c: unknown) => c)
-  ;(requirePaidClientAccess as ReturnType<typeof vi.fn>).mockResolvedValue({
+  ;(requireOperatorAccess as ReturnType<typeof vi.fn>).mockResolvedValue({
     ok: true, user: { id: 'test-user', email: 'fde@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null,
   })
 })
