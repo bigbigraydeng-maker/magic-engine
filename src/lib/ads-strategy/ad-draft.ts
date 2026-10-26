@@ -132,6 +132,13 @@ export const MAX_MESSENGER_CREATIVES = 4
 /** 包含与排除两个受众列表各自最多几个。 */
 export const MAX_AUDIENCES_PER_LIST = 10
 
+/**
+ * 包含受众的最小人数下限（Meta 自定义受众投放最小规模的保守取值）。
+ * docs/specs/2026-09-06-me-ads-audience-capability-spec.md:56 的 100 是相似人群种子门槛，口径不同；
+ * 本值待线上试跑核实，改数字前先核。
+ */
+export const MIN_INCLUDED_AUDIENCE_SIZE = 100
+
 export interface DraftProblem {
   field: string
   message: string

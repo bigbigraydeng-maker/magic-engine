@@ -151,7 +151,7 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
 
   if (d.audienceIds && d.audienceIds.length > 0) {
     targeting.custom_audiences = d.audienceIds.map((id) => ({ id }))
-    // Explicitly do not relax the list: no custom-audience or lookalike expansion.
+    // 明确不放宽名单：不扩展到名单以外的人，也不自动加相似人群。
     targeting.targeting_relaxation_types = { custom_audience: 0, lookalike: 0 }
   }
   if (d.excludedAudienceIds && d.excludedAudienceIds.length > 0) {

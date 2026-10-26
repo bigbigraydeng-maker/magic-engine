@@ -599,5 +599,54 @@ describe('targetingFor — 自定义受众（包含 / 排除）', () => {
     expect(campaign.body.get('status')).toBe('PAUSED')
     expect(adset.body.get('status')).toBe('PAUSED')
     expect(ad.body.get('status')).toBe('PAUSED')
+
+    // 受众路径也要守住前两次试跑撞出来的两条 Meta 规则
+    expect(adset.body.get('bid_strategy')).toBe('LOWEST_COST_WITHOUT_CAP')
+    expect(campaign.body.get('is_adset_budget_sharing_enabled')).toBe('false')
+    expect([...adset.body.keys()].filter((k) => k !== 'access_token').sort()).toEqual([
+      'bid_strategy', 'billing_event', 'campaign_id', 'daily_budget', 'destination_type', 'end_time',
+      'name', 'optimization_goal', 'promoted_object', 'start_time', 'status', 'targeting',
+    ])
+  })
+
+  it('视频养受众（video_thruplay）+ 受众：版位锁定与 custom_audiences / excluded_custom_audiences 并存', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(
+      {
+        ...DRAFT,
+        kind: 'video_thruplay',
+        creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v1' }],
+        audienceIds: ['1111111'],
+        excludedAudienceIds: ['3333333'],
+      },
+      'act_1', 'tok',
+    )
+    expect(Object.keys(targetingOf()).sort()).toEqual([
+      'age_max', 'age_min', 'custom_audiences', 'excluded_custom_audiences',
+      'geo_locations', 'publisher_platforms', 'targeting_automation', 'targeting_relaxation_types',
+    ])
+    expect(targetingOf().custom_audiences).toEqual([{ id: '1111111' }])
+    expect(targetingOf().excluded_custom_audiences).toEqual([{ id: '3333333' }])
+    expect(Array.isArray(targetingOf().publisher_platforms)).toBe(true)
+    expect(targetingOf().publisher_platforms.length).toBeGreaterThan(0)
+    expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 0 })
+  })
+
+  it('视频养受众只给排除受众：publisher_platforms 在、excluded_custom_audiences 在、没有 custom_audiences', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(
+      {
+        ...DRAFT,
+        kind: 'video_thruplay',
+        creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v1' }],
+        excludedAudienceIds: ['3333333'],
+      },
+      'act_1', 'tok',
+    )
+    expect(Object.keys(targetingOf()).sort()).toEqual([
+      'age_max', 'age_min', 'excluded_custom_audiences', 'geo_locations',
+      'publisher_platforms', 'targeting_automation',
+    ])
+    expect(targetingOf().custom_audiences).toBeUndefined()
   })
 })

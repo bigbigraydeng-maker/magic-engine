@@ -22,7 +22,8 @@ import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget, fetchAccountCustomAudiences } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
+import { checkAudiences, renderAudienceSummary, type AudienceFact, type AudiencesChecked } from './draft-audiences'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
@@ -65,6 +66,10 @@ export type DraftStatus =
 
 export const ADS_CREATE_ACTION = 'ads.create_ad'
 
+// 受众核对拆在 draft-audiences.ts（本文件超 800 行上限）；这里转出口，外部 import 路径不变。
+export { renderAudienceSummary }
+export type { AudienceFact, AudiencesChecked }
+
 export interface DraftRecord {
   status: DraftStatus
   draft: AdDraft
@@ -87,8 +92,11 @@ export interface DraftRecord {
   redlinesChecked?: number | null
   /** 建前读到的账户最低日预算（最小单位）；`null` = 没读到 / 没查（放行，Meta 兜底）。 */
   minBudgetChecked?: number | null
-  /** 建前核过的受众：包含 / 排除各是哪些 id。`null` = 草案没有受众（没查）。 */
-  audiencesChecked?: { included: string[]; excluded: string[] } | null
+  /**
+   * 建前核过的受众：包含 / 排除各读到的事实，以及过没过。
+   * `null` **只**表示草案没有受众（没查）；查了但失败会记 `outcome: 'failed'`。
+   */
+  audiencesChecked?: AudiencesChecked | null
   /** 名单里因为太短没拿来比的条目（如果有）。 */
   redlinesSkipped?: string[]
   /** 回读发现有东西不是暂停的 → 我们补了一刀暂停，结果在这里。 */
@@ -226,7 +234,7 @@ interface RecordBase {
    * 数字 = 查过。跟 `redlinesChecked` 同口径，账本看得出「查过够」还是「没查到放行」。
    */
   minBudgetChecked?: number | null
-  audiencesChecked?: { included: string[]; excluded: string[] } | null
+  audiencesChecked?: AudiencesChecked | null
   /** 名单里太短、没拿来比的条目 —— 不静默忽略，记下来让人知道有条目没生效。 */
   redlinesSkipped?: string[]
 }
@@ -259,42 +267,6 @@ async function checkMinDailyBudget(
     checked: min.minDailyBudgetMinor,
     error: `每天预算 ${draft.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`,
   }
-}
-
-/**
- * 草案挂了受众 → 建之前核对：这些受众真的属于这个广告账户、包含的受众准备好了且够大。
- * 与最低日预算相反，这里是**失败关闭**：读不到受众列表就不建 —— 受众挂错账户，
- * Meta 要么拒收要么（更糟）静默忽略，我们没办法事后分辨。
- * 草案没有任何受众 id → 不发请求，直接过。
- */
-async function checkAudiences(
-  draft: AdDraft,
-  deps: CreateDraftDeps,
-): Promise<{ error: string | null; checked: { included: string[]; excluded: string[] } | null }> {
-  const included = draft.audienceIds ?? []
-  const excluded = draft.excludedAudienceIds ?? []
-  if (included.length === 0 && excluded.length === 0) return { error: null, checked: null }
-
-  const list = await fetchAccountCustomAudiences(deps.adAccountId, deps.accessToken)
-  if (!list) {
-    return { checked: null, error: '读不到这个广告账户的受众列表，核实不了受众归不归它，所以没建' }
-  }
-  const byId = new Map(list.map((a) => [a.id, a]))
-  const missing = [...included, ...excluded].filter((id) => !byId.has(id))
-  if (missing.length > 0) {
-    return { checked: null, error: `受众 ${missing.join('、')} 不属于这个广告账户，所以没建` }
-  }
-  for (const id of included) {
-    const a = byId.get(id)
-    if (!a) continue
-    if (a.operationStatusCode !== null && a.operationStatusCode !== 200) {
-      return { checked: null, error: `受众 ${id} 还没准备好（状态 ${a.operationStatusCode}），现在投不出去，所以没建` }
-    }
-    if (a.approxCountLowerBound !== null && a.approxCountLowerBound < 100) {
-      return { checked: null, error: `受众 ${id} 太小（不足 100 人），Meta 不会投，所以没建` }
-    }
-  }
-  return { error: null, checked: { included, excluded } }
 }
 
 /** 任一创意带视频就等转码（视频没转完建创意会报「视频还没准备好」）；返回错误文案，`null` = 可以继续。 */
@@ -395,7 +367,7 @@ function launchReportFor(
       // 传 false 会顶掉名字启发式那道保险 —— 一个叫「暖池重定向」的组
       // 就此不再受重定向那几条检查约束，而它恰好是最需要被查的那种。
       // 2026-08-05 自测抓到：这行原来无条件传 false，等于把闸门关了一半。
-      // Declared audiences also declare retargeting; still never pass false.
+      // 声明了包含受众也等于声明了重定向；仍然绝不传 false。
       isRetargeting: DRAFT_PLAY[draft.kind] === 'warm_pool_retarget' || (draft.audienceIds?.length ?? 0) > 0 ? true : undefined,
     }),
     industry: deps.industry ?? null,
@@ -450,7 +422,11 @@ async function recordGate(
   autoPause: { ok: boolean; failed: string[] } | undefined,
 ): Promise<CreateDraftOutcome> {
   const status: DraftStatus = merged.safeToActivate ? 'awaiting_approval' : 'blocked'
-  const readback = renderReadback(merged) + renderAutoPause(autoPause)
+  const audienceSummary = renderAudienceSummary(ctx.audiencesChecked)
+  const readback =
+    renderReadback(merged) +
+    renderAutoPause(autoPause) +
+    (audienceSummary ? `\n\n${audienceSummary}` : '')
   const id = await record(deps.supabase, draft.clientId, {
     status, draft, summary: ctx.summary, readback,
     campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
@@ -511,6 +487,13 @@ export async function approveDraft(
   }
   if (!p.campaignId || !p.adSetId || !p.adIds) {
     return { ok: false, error: '这条草案没记下 Meta 那边的 id，开不了' }
+  }
+
+  const hasAudiences =
+    (p.draft.audienceIds?.length ?? 0) > 0 || (p.draft.excludedAudienceIds?.length ?? 0) > 0
+  if (hasAudiences) {
+    const audienceError = await verifyAudiencesStillAttached(actionId, supabase, p, accessToken)
+    if (audienceError) return { ok: false, error: audienceError }
   }
 
   const clientId = (data as { client_id: string }).client_id
@@ -587,6 +570,56 @@ export async function approveDraft(
     return { ok: true, warning: `广告已开，但账本状态没写成功：${msg}` }
   }
   return { ok: true }
+}
+
+/**
+ * 开之前再核一次：草案挂了受众，广告组上现在是不是还挂着它们。
+ * 中间可能被删除、收回共享或过期 —— 那样开出去就是投给错的人。
+ * 返回错误文案（已写回账本）或 null（都还在）。
+ */
+async function verifyAudiencesStillAttached(
+  actionId: string,
+  supabase: SupabaseClient,
+  p: DraftRecord,
+  accessToken: string,
+): Promise<string | null> {
+  const raw = await fetchAdSetReadback(p.adSetId as string, accessToken)
+  if (!raw) {
+    const error = '读不到广告组现在的受众设置，没法确认受众还挂着，所以没开'
+    await writeBackAudienceError(actionId, supabase, { ...p, error })
+    return error
+  }
+  const targeting = adaptMetaAdSet(raw, [], { expectedGeo: null }).adSet.targeting
+  const attached = new Set(targeting.customAudienceIds ?? [])
+  const attachedExcluded = new Set(targeting.excludedAudienceIds ?? [])
+  const missingIncluded = (p.draft.audienceIds ?? []).filter((id) => !attached.has(id))
+  const missingExcluded = (p.draft.excludedAudienceIds ?? []).filter((id) => !attachedExcluded.has(id))
+  if (missingIncluded.length === 0 && missingExcluded.length === 0) return null
+
+  const parts = [
+    ...(missingIncluded.length > 0 ? [`包含 ${missingIncluded.join('、')}`] : []),
+    ...(missingExcluded.length > 0 ? [`排除 ${missingExcluded.join('、')}`] : []),
+  ]
+  const error = `广告组上的受众不见了：${parts.join('；')}（可能被删除、收回共享或已过期），所以没开`
+  await writeBackAudienceError(actionId, supabase, { ...p, status: 'blocked', error })
+  return error
+}
+
+/** 把受众核对失败写回账本；写不进去只记日志，不掩盖原始错误。 */
+async function writeBackAudienceError(
+  actionId: string,
+  supabase: SupabaseClient,
+  payload: DraftRecord,
+): Promise<void> {
+  const res = await supabase
+    .from('flywheel_actions')
+    .update({ payload })
+    .eq('id', actionId)
+    .eq('payload->>status', 'awaiting_approval')
+    .select('id')
+  if (res.error) {
+    console.error('[draft-and-gate] audience check write-back failed:', actionId, res.error.message)
+  }
 }
 
 /** 人否了 —— 只改账本状态，Meta 那边它本来就是暂停的。 */
