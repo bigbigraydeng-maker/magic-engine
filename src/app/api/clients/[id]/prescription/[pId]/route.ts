@@ -17,6 +17,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -51,7 +52,9 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Prescription not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, prescription: data }, {
+    const prescription = await failIfStaleGenerating(clientId, pId, data)
+
+    return NextResponse.json({ success: true, prescription }, {
       headers: {
         // 双重保险：浏览器也不要缓存
         'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -60,6 +63,34 @@ export async function GET(
   } catch (err: unknown) {
     console.error('[prescription GET] Error:', err)
     return NextResponse.json({ success: false, error: 'An unexpected error occurred' }, { status: 500 })
+  }
+}
+
+async function failIfStaleGenerating(
+  clientId: string,
+  prescriptionId: string,
+  row: Prescription,
+): Promise<Prescription> {
+  if (!isStaleGenerating(row.status, row.generated_at, Date.now())) return row
+  const { error } = await supabaseAdmin
+    .from('prescriptions')
+    .update({
+      status: 'failed',
+      error_message: STALE_GENERATING_MESSAGE,
+      progress_note: null,
+    })
+    .eq('id', prescriptionId)
+    .eq('client_id', clientId)
+    .eq('status', 'generating')
+  if (error) {
+    console.error('[prescription GET] stale heal failed', error)
+    return row
+  }
+  return {
+    ...row,
+    status: 'failed',
+    error_message: STALE_GENERATING_MESSAGE,
+    progress_note: null,
   }
 }
 

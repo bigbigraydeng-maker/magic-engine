@@ -47,6 +47,7 @@ vi.mock('@/lib/ads-strategy/plan-seed/attach', () => ({
 // ─── import route AFTER mocks ─────────────────────────────────────────────────
 
 import { POST } from '../route'
+import { refineHuatuoPrescription } from '@/lib/huatuo/agent'
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -78,16 +79,6 @@ function makeDb(tables: Record<string, unknown>, writes: Write[]) {
       return q
     },
   }
-}
-
-function parseSse(text: string): Array<Record<string, unknown>> {
-  const events: Array<Record<string, unknown>> = []
-  for (const line of text.split('\n')) {
-    if (line.startsWith('data: ')) {
-      events.push(JSON.parse(line.slice('data: '.length)) as Record<string, unknown>)
-    }
-  }
-  return events
 }
 
 function makeTables(): Record<string, unknown> {
@@ -131,16 +122,51 @@ describe('POST /api/clients/[id]/prescription/[pId]/refine — attachPlanSeed wi
     dbRef.current = makeDb(makeTables(), writes)
   })
 
+  async function settledDraft(): Promise<Write> {
+    let found: Write | undefined
+    await vi.waitFor(() => {
+      found = writes.find(
+        (w) => w.table === 'prescriptions' && w.op === 'update' && w.payload.content != null,
+      )
+      expect(found).toBeDefined()
+    })
+    return found!
+  }
+
+  it('returns before the refine model call finishes', async () => {
+    let release: (value: unknown) => void = () => undefined
+    const gate = new Promise((resolve) => { release = resolve })
+    vi.mocked(refineHuatuoPrescription).mockImplementationOnce(
+      () => gate as ReturnType<typeof refineHuatuoPrescription>,
+    )
+    mockAttach.mockResolvedValue({ summary: 'later' })
+
+    const res = await POST(makeRequest(), { params: { id: 'client-1', pId: 'p1' } })
+    const body = await res.json() as { prescription_id: string; status: string }
+
+    expect(res.status).toBe(202)
+    expect(body).toMatchObject({ prescription_id: 'p1', status: 'generating' })
+    expect(writes.some((w) => w.payload.content != null)).toBe(false)
+
+    release({
+      content: { summary: 'refined', phases: [], kpi_targets: [], budget_allocation: [] },
+      self_grade: { overall: 85 },
+      meta: { agent_version: 'v1' },
+      trend_summary: null,
+      benchmarks_used: [],
+    })
+    const saved = await settledDraft()
+    expect(saved.payload.content).toEqual({ summary: 'later' })
+  })
+
   it('uses the value returned by attachPlanSeed and passes priorContent', async () => {
     const attachReturn = { summary: 'from-attach', phases: [], plan_seed: { marker: 1 } }
     mockAttach.mockResolvedValueOnce(attachReturn)
 
     const res = await POST(makeRequest(), { params: { id: 'client-1', pId: 'p1' } })
-    const text = await res.text()
-    const events = parseSse(text)
+    expect(res.status).toBe(202)
 
-    // attach called once with refined content + correct options
-    expect(mockAttach).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(mockAttach).toHaveBeenCalledTimes(1))
     const [firstArg, secondArg] = mockAttach.mock.calls[0] as [unknown, unknown]
     expect(firstArg).toEqual({ summary: 'refined', phases: [], kpi_targets: [], budget_allocation: [] })
     expect(secondArg).toEqual({
@@ -149,35 +175,33 @@ describe('POST /api/clients/[id]/prescription/[pId]/refine — attachPlanSeed wi
       priorContent: { summary: 'old', phases: [], kpi_targets: [], budget_allocation: [] },
     })
 
-    // draft update carries attach return value
-    const draftUpdate = writes.find(
-      (w) => w.table === 'prescriptions' && w.op === 'update' && w.payload.status === 'draft',
-    )
-    expect(draftUpdate).toBeDefined()
-    expect(draftUpdate!.payload.content).toEqual(attachReturn)
+    const saved = await settledDraft()
+    expect(saved.payload.content).toEqual(attachReturn)
+  })
 
-    // done SSE event carries attach return value
-    const done = events.find((e) => e.type === 'done')
-    expect(done).toBeDefined()
-    expect(done!.content).toEqual(attachReturn)
+  it('keeps the old draft when refine throws, and records the error', async () => {
+    vi.mocked(refineHuatuoPrescription).mockRejectedValueOnce(new Error('精修超时'))
+
+    const res = await POST(makeRequest(), { params: { id: 'client-1', pId: 'p1' } })
+    expect(res.status).toBe(202)
+
+    await vi.waitFor(() => {
+      const rolled = writes.find(
+        (w) => w.table === 'prescriptions' && w.op === 'update' && w.payload.error_message === '精修超时',
+      )
+      expect(rolled?.payload.status).toBe('draft')
+    })
   })
 
   it('still saves refined content when attachPlanSeed rejects', async () => {
     mockAttach.mockRejectedValueOnce(new Error('boom'))
 
     const res = await POST(makeRequest(), { params: { id: 'client-1', pId: 'p1' } })
-    const text = await res.text()
-    const events = parseSse(text)
+    expect(res.status).toBe(202)
 
-    const draftUpdate = writes.find(
-      (w) => w.table === 'prescriptions' && w.op === 'update' && w.payload.status === 'draft',
-    )
-    expect(draftUpdate).toBeDefined()
-    const savedContent = draftUpdate!.payload.content as { summary?: string }
+    const saved = await settledDraft()
+    const savedContent = saved.payload.content as { summary?: string }
     expect(savedContent.summary).toBe('refined')
-
-    const done = events.find((e) => e.type === 'done')
-    expect(done).toBeDefined()
-    expect(events.some((e) => e.type === 'error')).toBe(false)
+    expect(writes.some((w) => w.payload.status === 'failed')).toBe(false)
   })
 })
