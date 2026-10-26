@@ -11,6 +11,8 @@ import {
   defaultFetchers,
   type HeartbeatFetchers,
 } from '@/lib/ads-strategy/heartbeat/read'
+import { fetchAdsetsSinglePage } from '@/lib/meta/entity-settings'
+import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 import type { PlanSeedDeps } from './build'
 import type { ReadState } from './eligibility'
 import { LIVE_READ_TIMEOUT_MS } from './constants'
@@ -262,9 +264,13 @@ const NOOP_INSIGHTS: HeartbeatFetchers['insights'] = async () => ({
   error: null,
 })
 
-/** Live-read fetchers: account + adsets come from `base` (default: the real ones), ads + insights are always the no-ops, whatever `base` holds. */
-function liveFetchers(base: HeartbeatFetchers): HeartbeatFetchers {
-  return { ...base, ads: NOOP_ADS, insights: NOOP_INSIGHTS }
+/** Production adsets read for the live number: ONE page (never follows paging.next), and the status filter is the same set the snapshot budget accounting counts as delivering (includes PENDING_BILLING_INFO, which the heartbeat filter does not). More than one page => incomplete => caller falls back to the snapshot. */
+const LIVE_ADSETS: HeartbeatFetchers['adsets'] = (adAccountId, accessToken) =>
+  fetchAdsetsSinglePage(adAccountId, accessToken, [...DELIVERING_STATUSES])
+
+/** Live-read fetchers: account comes from `base`; adsets is the single-page delivering-status read unless a test passes its own `adsets`; ads + insights are always the no-ops, whatever `base` holds. */
+function liveFetchers(base: HeartbeatFetchers, useDefaultAdsets: boolean): HeartbeatFetchers {
+  return { ...base, adsets: useDefaultAdsets ? LIVE_ADSETS : base.adsets, ads: NOOP_ADS, insights: NOOP_INSIGHTS }
 }
 
 /** Live read of one account's delivering budget. Never throws; any failure or timeout -> null. The token never leaves this function. */
@@ -289,7 +295,7 @@ export async function readLiveDeliveringProd(
       // Load-bearing safety choice: true makes an empty adsets list classify as read_failed ("read nothing" is
       // treated as "did not read", never as a real zero), so a failed/empty read falls back to the snapshot.
       accountHasActiveCampaigns: true,
-      fetchers: liveFetchers(overrides.fetchers ?? defaultFetchers),
+      fetchers: liveFetchers(overrides.fetchers ?? defaultFetchers, overrides.fetchers === undefined),
     })
     return liveDeliveringFromRead(read)
   })()
