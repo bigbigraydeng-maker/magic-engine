@@ -3,7 +3,7 @@
  * 系列停了、还没读到、或定时未开始，不调入口。
  */
 
-import { judgeLeadFormFaults, DEFAULT_CRM_LAG_HOURS, DEFAULT_SYNC_FAILURE_RUNS, type LeadFormJudgeInput } from './lead-form-faults'
+import { dailyBudgetCentsForCap, judgeLeadFormFaults, DEFAULT_CRM_LAG_HOURS, DEFAULT_SYNC_FAILURE_RUNS, type LeadFormJudgeInput } from './lead-form-faults'
 import type { PauseRequestReceipt, ServicePauseCall } from './lead-form-types'
 import { leadFormDetailHeadline } from './objective-watch-text'
 import type { SeriesFacts, SeriesVerdict } from './objective-watch'
@@ -52,12 +52,17 @@ function signalsOf(input: {
   series: ObjectiveWatchSeries
   previous: string | null
   currency: string
+  now: Date
 }): LeadFormJudgeInput['money'] & { crm: LeadFormJudgeInput['crm']; sync: LeadFormJudgeInput['sync'] } {
-  const budget = input.facts.campaign.daily_budget_cents
+  const dailyBudgetCents = dailyBudgetCentsForCap({
+    campaignDailyBudgetCents: input.facts.campaign.daily_budget_cents,
+    adsets: input.facts.adsets,
+    nowMs: input.now.getTime(),
+  })
   return {
     todaySpendCents: input.extra.todaySpendCents,
     lifetimeSpendCents: input.facts.total?.spend_cents ?? null,
-    dailyBudgetCents: typeof budget === 'number' ? budget : null,
+    dailyBudgetCents,
     accountCapCents: input.extra.accountCapCents,
     accountCapKnown: input.extra.accountCapKnown,
     accountTodaySpendCents: input.extra.accountTodaySpendCents,
@@ -124,7 +129,7 @@ export async function reviewLeadFormSeries(args: {
     args.deps.readLeadFormExtra(args.clientId, args.cfg, args.series, facts, args.now))
   const previous = await args.step.run(`lead-form-prev:${args.clientId}:${args.series.campaign_id}`, () =>
     args.deps.loadPreviousSurplus(args.clientId, args.series.campaign_id))
-  const packed = signalsOf({ facts, extra, series: args.series, previous, currency: args.cfg.currency })
+  const packed = signalsOf({ facts, extra, series: args.series, previous, currency: args.cfg.currency, now: args.now })
   const review = judgeLeadFormFaults({
     now: args.now,
     money: packed,

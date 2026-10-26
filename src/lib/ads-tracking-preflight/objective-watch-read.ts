@@ -29,7 +29,7 @@ const VIDEO_VIEW = ['video_view']
 
 /** 读系列节点只许要这些字段（meta-reader 的白名单也认这一份）。 */
 export const CAMPAIGN_FIELDS = 'id,name,objective,status,effective_status,created_time,updated_time,account_id,daily_budget'
-const ADSET_FIELDS = 'id,name,status,effective_status,updated_time,start_time,end_time,destination_type'
+const ADSET_FIELDS = 'id,name,status,effective_status,updated_time,start_time,end_time,destination_type,daily_budget'
 const AD_FIELDS = 'id,name,adset_id,status,effective_status,updated_time'
 const METRIC_FIELDS = 'spend,impressions,reach,frequency,actions,cost_per_action_type,video_thruplay_watched_actions,cost_per_thruplay'
 
@@ -99,10 +99,16 @@ function parseEntity(raw: unknown, withParent: boolean): EntityFact | null {
     effective_status: str(raw.effective_status),
     updated_at: parseGraphTime(raw.updated_time),
   }
-  // 广告组才有定时开始 / 结束时间和投放目的地
+  // 广告组才有定时开始 / 结束时间、投放目的地和日预算
   return withParent
     ? base
-    : { ...base, start_at: parseGraphTime(raw.start_time), end_at: parseGraphTime(raw.end_time), destination_type: str(raw.destination_type) }
+    : {
+      ...base,
+      start_at: parseGraphTime(raw.start_time),
+      end_at: parseGraphTime(raw.end_time),
+      destination_type: str(raw.destination_type),
+      daily_budget_cents: dailyBudgetCents(raw.daily_budget),
+    }
 }
 
 /** 广告组 / 广告列表 → 实体；没有 data 数组 = null（读不懂）。 */

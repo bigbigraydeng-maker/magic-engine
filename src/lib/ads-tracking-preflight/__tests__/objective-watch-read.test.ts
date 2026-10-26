@@ -3,7 +3,7 @@
  * 读一个系列的结构（广告组 / 广告 / 状态 / 最后修改时间）和三层洞察（整个系列 / 按广告组 / 按广告）。
  */
 import { describe, expect, it, vi } from 'vitest'
-import { parseCampaignNode, parseMetricsRows, readSeriesFacts } from '../objective-watch-read'
+import { parseCampaignNode, parseEntities, parseMetricsRows, readSeriesFacts } from '../objective-watch-read'
 import { makeGraphGet } from '../meta-reader'
 
 const ACCOUNT = 'act_1234567890'
@@ -95,6 +95,23 @@ describe('parseCampaignNode · 系列日预算', () => {
   })
 })
 
+describe('parseEntities · 广告组日预算', () => {
+  it('只在广告组上读 daily_budget；没有或读不懂 = null，广告不带这个字段', () => {
+    const adsets = parseEntities({
+      data: [
+        { id: '1', name: '组A', daily_budget: '5000' },
+        { id: '2', name: '组B' },
+        { id: '3', name: '组C', daily_budget: '12.5' },
+      ],
+    }, false)
+    expect(adsets?.map(row => row.daily_budget_cents)).toEqual([5000, null, null])
+    const ads = parseEntities({ data: [{ id: '9', name: '广告', adset_id: '1', daily_budget: '5000' }] }, true)
+    expect(ads).toEqual([{
+      id: '9', name: '广告', parent_id: '1', status: null, effective_status: null, updated_at: null,
+    }])
+  })
+})
+
 describe('readSeriesFacts · 读结构和三层洞察', () => {
   it('读到系列、广告组、广告（含状态和最后修改时间）和三层数字', async () => {
     const { fetcher } = makeFetcher()
@@ -135,6 +152,8 @@ describe('readSeriesFacts · 读结构和三层洞察', () => {
     for (const c of insights) {
       expect(JSON.parse(c.url.searchParams.get('time_range') ?? '{}')).toEqual({ since: '2026-10-20', until: '2026-10-21' })
     }
+    const adsetCall = calls.find(c => pathOf(c.url).endsWith('/adsets'))
+    expect(adsetCall?.url.searchParams.get('fields')).toContain('daily_budget')
     expect(insights[0].url.searchParams.get('fields')).toContain('video_thruplay_watched_actions')
     expect(insights[0].url.searchParams.get('fields')).toContain('cost_per_thruplay')
   })
