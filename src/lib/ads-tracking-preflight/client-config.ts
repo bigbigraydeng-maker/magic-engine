@@ -56,6 +56,9 @@ const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
     //   · WhatsApp 系列：开始聊天数 / 单个成本，按受众和视频拆开，并核对 ME 有没有收到这些 WhatsApp 会话；
     //   · 两个系列都盯「最近一次改动后一直没花钱」（默认 6 小时黄、24 小时红）。
     // 上一期「官网点击」系列（52558131445673）已暂停，不在这里。新一期的系列要把编号加到下面。
+    // 表单留资系列用 kind: 'lead_form' 加在下面。系列在另一个广告账户上时，这一条写 ad_account_id（act_ 加数字）。
+    // 可选 daily_spend_multiple（正数才按当天花费相对日预算的倍数判）和 crm_lag_hours（不写则按 2 小时）。
+    // 没有确认过的系列编号不要加。命中故障才去调只暂停入口；入口没开或没部署时广告不动。
     objective_watch: {
       series: [
         { campaign_id: '52558359035473', kind: 'awareness', label: '播放量系列' },
