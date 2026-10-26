@@ -5,7 +5,7 @@
  * Display only. Every link goes where it went before; nothing here approves, authorises, stops or publishes.
  */
 import Link from 'next/link'
-import { useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react'
 
 import { formatSlot } from '@/lib/social/story-lite/page-text'
 import { groupWorksByStage, type ReelWork, type ReelVersion, type StatusKind } from '@/lib/social/week-overview/reel-works'
@@ -104,12 +104,179 @@ export function TodoStrip({ summary, scope = '社媒日常' }: { summary: TodoSu
   )
 }
 
-function PlayTile() {
+function PlayGlyph({ className }: { className: string }) {
   return (
-    <span aria-hidden className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-me-charcoal text-me-gold">
-      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
-        <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z" />
-      </svg>
+    <svg aria-hidden viewBox="0 0 24 24" className={className} fill="currentColor">
+      <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z" />
+    </svg>
+  )
+}
+
+/** True once the element is (nearly) on screen. Without IntersectionObserver (old browsers, tests) it is true at once. */
+function useNearScreen<T extends Element>(): { ref: RefObject<T>; near: boolean } {
+  const ref = useRef<T>(null)
+  const [near, setNear] = useState(() => typeof IntersectionObserver === 'undefined')
+  useEffect(() => {
+    const node = ref.current
+    if (near || !node) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setNear(true)
+          observer.disconnect()
+        }
+      },
+      { rootMargin: '300px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [near])
+  return { ref, near }
+}
+
+/** Size in pixels of the still kept as a cover: sharp enough for the 44 x 78 tile on a 3x screen. */
+const COVER_STILL = { width: 135, height: 240 }
+/** How long to wait for the first frame before giving up and stopping the download. */
+const COVER_GIVE_UP_MS = 10_000
+/** At most this many covers load at the same time: the browser's media pipeline stalls when dozens of videos start together. */
+const COVER_MAX_PARALLEL = 6
+
+type CoverPhase = 'waiting' | 'kept' | 'failed'
+
+/** Copies what `video` is showing onto `canvas`. False when that cannot be done (no canvas, no 2d drawing, drawing fails). */
+function drawStill(video: HTMLVideoElement, canvas: HTMLCanvasElement | null): boolean {
+  const context = canvas?.getContext('2d')
+  if (!context) return false
+  try {
+    context.drawImage(video, 0, 0, COVER_STILL.width, COVER_STILL.height)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Loads the start of a finished Reel video off-screen and copies its first frame onto the canvas, then stops the download:
+ * a finished video is tens of MB, its first frame about half a MB. `onDone` is called once, with "kept" (the still is on the
+ * canvas) or "failed" (no still could be made). Returns what to call to give up early; that also stops the download.
+ */
+function loadVideoStill(url: string, getCanvas: () => HTMLCanvasElement | null, onDone: (result: 'kept' | 'failed') => void): () => void {
+  const video = document.createElement('video')
+  let settled = false
+  let giveUp = 0
+  const stop = () => {
+    window.clearTimeout(giveUp)
+    video.removeAttribute('src')
+    video.load()
+  }
+  const settle = (result: 'kept' | 'failed') => {
+    if (settled) return
+    settled = true
+    stop()
+    onDone(result)
+  }
+  if (typeof video.requestVideoFrameCallback !== 'function') {
+    onDone('failed') // no way to learn when the first frame is shown, so do not start a download at all
+    return () => {}
+  }
+  video.muted = true
+  video.playsInline = true
+  video.preload = 'metadata'
+  video.addEventListener('error', () => settle('failed'))
+  // Drawing before the browser has shown the first frame leaves the canvas empty, so wait to be told it is shown.
+  // Asked before the source is set: a frame shown before the question would never be announced.
+  video.requestVideoFrameCallback(() => {
+    if (!settled) settle(drawStill(video, getCanvas()) ? 'kept' : 'failed')
+  })
+  giveUp = window.setTimeout(() => settle('failed'), COVER_GIVE_UP_MS)
+  video.src = url
+  return () => {
+    settled = true
+    stop()
+  }
+}
+
+const coverQueue: Array<() => void> = []
+let coversRunning = 0
+
+let drainScheduled = false
+
+/** Starts waiting covers once the current batch of changes is over, so rows that leave the page together do not start in between. */
+function startQueuedCoversSoon() {
+  if (drainScheduled) return
+  drainScheduled = true
+  queueMicrotask(() => {
+    drainScheduled = false
+    while (coversRunning < COVER_MAX_PARALLEL) {
+      const start = coverQueue.shift()
+      if (!start) return
+      start()
+    }
+  })
+}
+
+/** `loadVideoStill`, but never more than COVER_MAX_PARALLEL at once across the page; the rest wait their turn in order. */
+function loadFirstFrame(url: string, getCanvas: () => HTMLCanvasElement | null, onDone: (result: 'kept' | 'failed') => void): () => void {
+  let holdsSlot = false
+  let giveUp: (() => void) | null = null
+  const release = () => {
+    if (!holdsSlot) return
+    holdsSlot = false
+    coversRunning -= 1
+    startQueuedCoversSoon()
+  }
+  const start = () => {
+    holdsSlot = true
+    coversRunning += 1
+    giveUp = loadVideoStill(url, getCanvas, (result) => {
+      release()
+      onDone(result)
+    })
+  }
+  if (coversRunning < COVER_MAX_PARALLEL && coverQueue.length === 0) {
+    start()
+  } else {
+    coverQueue.push(start)
+    startQueuedCoversSoon()
+  }
+  return () => {
+    const queued = coverQueue.indexOf(start)
+    if (queued >= 0) coverQueue.splice(queued, 1)
+    giveUp?.()
+    release()
+  }
+}
+
+function useFirstFrameStill(url: string | null | undefined, wanted: boolean, canvas: RefObject<HTMLCanvasElement>): CoverPhase {
+  const [phase, setPhase] = useState<CoverPhase>('waiting')
+  useEffect(() => {
+    if (!url || !wanted) return
+    return loadFirstFrame(url, () => canvas.current, setPhase)
+  }, [url, wanted, canvas])
+  return phase
+}
+
+/**
+ * The cover of a Reel: the first frame of its finished video, which is already a finished picture (hook text and logo).
+ * The video is only asked for when the row is about to be seen. No video address, or a video that cannot be shown,
+ * leaves the plain play tile. Decorative: the row's title already says what the Reel is.
+ */
+function ReelCover({ url }: { url?: string | null }) {
+  const { ref, near } = useNearScreen<HTMLSpanElement>()
+  const stillRef = useRef<HTMLCanvasElement>(null)
+  const phase = useFirstFrameStill(url, near, stillRef)
+  const kept = phase === 'kept'
+  return (
+    <span
+      ref={ref}
+      aria-hidden
+      data-cover={url ? phase : 'none'}
+      className={`relative mt-0.5 flex ${url ? 'h-[78px]' : 'h-11'} w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-me-charcoal text-me-gold`}
+    >
+      {url && near && phase !== 'failed' && (
+        <canvas ref={stillRef} width={COVER_STILL.width} height={COVER_STILL.height} className={kept ? 'h-full w-full object-cover' : 'hidden'} />
+      )}
+      <PlayGlyph className={kept ? 'absolute bottom-1 right-1 h-3.5 w-3.5 text-white/90 drop-shadow' : 'h-5 w-5'} />
     </span>
   )
 }
@@ -151,7 +318,7 @@ function ReelWorkRow({ work, clientId }: { work: ReelWork; clientId: string }) {
     <li className="rounded-xl border border-black/10 bg-white p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
         <div className="flex min-w-0 flex-1 gap-3">
-          <PlayTile />
+          <ReelCover key={latest.reel.video_url ?? 'none'} url={latest.reel.video_url} />
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               {work.batchLabel && <span className="text-xs font-semibold text-me-charcoal/65">{work.batchLabel} ·</span>}
