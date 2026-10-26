@@ -1,12 +1,14 @@
 ---
 id: 2026-10-27-ads-agent-plan-draft-routes
 title: 内部人员可以发广告草稿钥匙，只能读建议和存未批准草稿
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-27
 source: issue:3238
 verify_by: 2026-10-29
 verify_how: 用测试钥匙读计划种子并保存未批准草稿，预算超过建议或上限应被拒绝。同一把钥匙做批准、开投、改预算、改上限、上传名单、写 Meta 应得到拒绝并留下访问记录。不发真钥匙，不写生产库。
+done_on: 2026-10-27
+done_ref: pr:3258
 ---
 
 内部管理员发钥匙必须带失效时间，明文只出现一次，记在现有钥匙表。
