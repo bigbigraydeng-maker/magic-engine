@@ -34,7 +34,9 @@ describe('requestServicePause', () => {
       call, fetchImpl, appBase: 'https://app.example.test/', serviceKey: 'cron-secret-value',
     })
     expect(out).toEqual({ called: true, paused: true, reason: 'paused', idempotent: false })
-    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit]
+    const first = fetchImpl.mock.calls[0]
+    const url = String(first?.[0])
+    const init = (first?.[1] ?? {}) as RequestInit
     expect(url).toBe(`https://app.example.test${SERVICE_PAUSE_PATH}`)
     expect(url).not.toContain('cron-secret-value')
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer cron-secret-value')

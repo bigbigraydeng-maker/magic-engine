@@ -86,7 +86,7 @@ export async function readTodaySpend(input: {
   }
   const clientSpendCents = perAccount.some(n => n === null) || perAccount.length === 0
     ? null
-    : perAccount.reduce((sum, n) => sum + (n ?? 0), 0)
+    : perAccount.reduce<number>((sum, n) => sum + (n ?? 0), 0)
   return {
     campaignSpendCents: campaign === null ? null : campaign.spendCents,
     campaignLeads: campaign === null ? null : campaign.leads,
