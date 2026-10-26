@@ -77,6 +77,43 @@ function moneyText(cents: number, currency: string): string {
   return formatCents(cents, currency)
 }
 
+function wholeCents(value: number | null | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return null
+  return value
+}
+
+/** 结束时间已过的广告组不算在投。开始时间还没到的仍算在投。 */
+function adsetStillInPlay(adset: EntityFact, nowMs: number): boolean {
+  if (!isInPlay(adset.effective_status)) return false
+  const end = adset.end_at
+  if (typeof end !== 'string') return true
+  const ms = Date.parse(end)
+  return Number.isNaN(ms) || ms > nowMs
+}
+
+/**
+ * 系列有正的日预算就用它。没有时，用还在投的广告组日预算之和。
+ * 其中任何一组读不到日预算，整份返回 null，不拿读到的那几组凑。
+ */
+export function dailyBudgetCentsForCap(input: {
+  campaignDailyBudgetCents: number | null | undefined
+  adsets: readonly EntityFact[]
+  nowMs: number
+}): number | null {
+  const campaign = wholeCents(input.campaignDailyBudgetCents)
+  if (campaign !== null && campaign > 0) return campaign
+  let sum = 0
+  let count = 0
+  for (const adset of input.adsets) {
+    if (!adsetStillInPlay(adset, input.nowMs)) continue
+    const cents = wholeCents(adset.daily_budget_cents)
+    if (cents === null) return null
+    sum += cents
+    count += 1
+  }
+  return count > 0 && sum > 0 ? sum : null
+}
+
 function overMultiple(money: LeadFormMoney): string | null {
   const { multiple, dailyBudgetCents, todaySpendCents } = money
   if (multiple === null) return null

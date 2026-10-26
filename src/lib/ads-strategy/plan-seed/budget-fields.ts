@@ -1,6 +1,8 @@
 import { accountLevelRoom, accountRoom, currencyOfFacts } from './classify'
 import { formatMinor } from './format'
 import { splitBudget, type HalveFlags } from './split-budget'
+import { computeLiveAdjustment, type LiveAdjustment } from './live-adjust'
+import type { LiveDelivering } from './live-delivering'
 import { windowBefore } from '@/lib/marketing-plan/promo/draft-ads'
 import { isStale, safe, type AccountData, type PassingStep, type PlanSeedDeps } from './shared'
 import type { Basis, Field } from './types'
@@ -18,7 +20,7 @@ export const BUDGET_FIXED_BASIS: Basis[] = [
 export function candidateBasis(accounts: AccountData[]): Basis[] {
   return accounts.map((a) => ({
     label: '合格候选账户',
-    value: `${a.id}：可用余量 ${formatMinor(accountRoom(a.facts), currencyOfFacts(a.facts))}（读不全按 0 算）`,
+    value: `${a.id}：可用余量 ${formatMinor(accountRoom(a.facts), currencyOfFacts(a.facts))}（快照口径，读不全按 0 算）`,
     source: SNAPSHOT_SOURCE,
     as_of: a.captureAt,
   }))
@@ -70,23 +72,46 @@ function minClientHeadroom(passing: PassingStep[]): number {
   return min ?? 0
 }
 
-/** 已选账户的账户级余量映射。 */
-function accountHeadroomMap(passing: PassingStep[]): Record<string, number> {
+/** 已选账户的账户级余量映射（扣掉实时读到的增量）。 */
+function accountHeadroomMap(
+  passing: PassingStep[],
+  bumpByAccount: Record<string, number>,
+): Record<string, number> {
   const map: Record<string, number> = {}
   for (const p of passing) {
-    map[p.accountId] = accountLevelRoom(p.account.facts)
+    map[p.accountId] = Math.max(
+      0,
+      accountLevelRoom(p.account.facts) - (bumpByAccount[p.accountId] ?? 0),
+    )
   }
   return map
 }
 
-/** 近 7 天最高日花费 >= 客户日上限 95%（口径同 marketing-plan/promo/draft-ads.ts）；读不到逐日花费时不判（那条走 dailyUnknown）。 */
-function isNearCap(facts: AccountData['facts']): boolean {
-  if (facts === null || facts.daily === null || facts.headroom.ok !== true) return false
+/** Max daily spend (cents) over the 7 days before facts.today; null when the daily rows are unreadable. */
+function recentMaxSpend(facts: AccountData['facts']): number | null {
+  if (facts === null || facts.daily === null) return null
   let maxSpend = 0
   for (const row of windowBefore(facts.daily, facts.today, 7)) {
     if (row.spend_cents > maxSpend) maxSpend = row.spend_cents
   }
+  return maxSpend
+}
+
+/** 近 7 天最高日花费 >= 本账户日上限 95%（口径同 marketing-plan/promo/draft-ads.ts）；读不到逐日花费时不判（那条走 dailyUnknown）。 */
+function isNearCap(facts: AccountData['facts']): boolean {
+  if (facts === null || facts.daily === null || facts.headroom.ok !== true) return false
+  const maxSpend = recentMaxSpend(facts)
+  if (maxSpend === null) return false
   return maxSpend >= facts.headroom.cap_minor * 0.95
+}
+
+/** Client cap from ANY candidate whose headroom read succeeded (the client cap is the same number for every account); null when none. */
+function clientCapMinor(all: AccountData[]): number | null {
+  for (const a of all) {
+    const facts = a.facts
+    if (facts !== null && facts.headroom.ok === true) return facts.headroom.cap_minor
+  }
+  return null
 }
 
 /** 单个账户的保守口径标记。 */
@@ -98,16 +123,20 @@ function haveFlags(a: AccountData, nowMs: number): HalveFlags {
   }
 }
 
-/** 客户层保守口径：所有候选账户里任一命中即命中。 */
+/** 客户层保守口径：所有候选账户里任一命中即命中；读不到也算命中（信息越少，建议不能越大）。 */
 function clientFlags(all: AccountData[], nowMs: number): HalveFlags {
+  const cap = clientCapMinor(all)
   let stale = false
   let dailyUnknown = false
   let nearCap = false
   for (const a of all) {
     const f = haveFlags(a, nowMs)
     if (f.stale) stale = true
-    if (f.dailyUnknown) dailyUnknown = true
-    if (f.nearCap) nearCap = true
+    if (a.facts === null || f.dailyUnknown) dailyUnknown = true
+    if (cap !== null) {
+      const maxSpend = recentMaxSpend(a.facts)
+      if (maxSpend !== null && maxSpend >= cap * 0.95) nearCap = true
+    }
   }
   return { stale, dailyUnknown, nearCap }
 }
@@ -137,6 +166,23 @@ function budgetEmptyReason(
   return splitWhy ?? '预算余量不够这一步'
 }
 
+/** 实时读数可用时去掉"数据口径"那条固定说明。 */
+function fixedBasisFor(liveUsed: boolean): Basis[] {
+  return liveUsed ? BUDGET_FIXED_BASIS.filter((b) => b.label !== '数据口径') : BUDGET_FIXED_BASIS
+}
+
+/** True when this budget field's basis contains a successful live read (the basis text contains 这次用). */
+export function budgetUsedLive(field: Field<number>): boolean {
+  if (!field.ok) return false
+  return field.basis.some((b) => b.label === '在投合计（实时）' && b.value.includes('这次用'))
+}
+
+/** Appends the live-read disclosure to a "no value" reason so it never disappears (the panel shows skipped steps' why_empty only). */
+function withLiveDisclosure(reason: string, liveBasis: Basis | null, liveUsed: boolean, hasFacts: boolean): string {
+  if (liveBasis === null || !hasFacts) return reason
+  return liveUsed ? `${reason}。这个账户的在投是刚读的：${liveBasis.value}` : `${reason}。${liveBasis.value}`
+}
+
 /** 组装单个通过步骤的 daily_budget_cents 字段。 */
 export function buildBudgetField(
   passing: PassingStep,
@@ -144,6 +190,8 @@ export function buildBudgetField(
   splitWhy: string | undefined,
   splitBasis: Basis[],
   multiCurrency: boolean,
+  liveBasis: Basis | null = null,
+  liveUsed: boolean = false,
 ): Field<number> {
   const facts = passing.account.facts
   const canValue =
@@ -157,13 +205,23 @@ export function buildBudgetField(
     return {
       ok: true,
       value: budgetMinor,
-      basis: [...splitBasis, ...BUDGET_FIXED_BASIS, captureBasis(passing.account.captureAt)],
+      basis: [
+        ...splitBasis,
+        ...(liveBasis !== null ? [liveBasis] : []),
+        ...fixedBasisFor(liveUsed),
+        captureBasis(passing.account.captureAt),
+      ],
       notes: [],
     }
   }
   return {
     ok: false,
-    why_empty: budgetEmptyReason(passing, splitWhy, multiCurrency),
+    why_empty: withLiveDisclosure(
+      budgetEmptyReason(passing, splitWhy, multiCurrency),
+      liveBasis,
+      liveUsed,
+      facts !== null,
+    ),
     notes: [],
   }
 }
@@ -179,6 +237,7 @@ export async function buildBudgetFields(
     allAccounts: AccountData[]
     unknownDrops: { step_key: string; reason: string }[]
     currency: string | null
+    live?: Map<string, LiveDelivering | null>
   },
 ): Promise<Map<string, Field<number>>> {
   const out = new Map<string, Field<number>>()
@@ -197,10 +256,16 @@ export async function buildBudgetFields(
     return out
   }
 
+  const adj: LiveAdjustment = computeLiveAdjustment(
+    passing,
+    extra.allAccounts,
+    extra.live ?? new Map(),
+  )
+
   const split = splitBudget({
     steps: passing.map((p) => ({ step_key: p.play.step_key, accountId: p.accountId })),
-    clientHeadroomMinor: minClientHeadroom(passing),
-    accountHeadroomMinor: accountHeadroomMap(passing),
+    clientHeadroomMinor: Math.max(0, minClientHeadroom(passing) - adj.totalBump),
+    accountHeadroomMinor: accountHeadroomMap(passing, adj.bumpByAccount),
     share,
     halve: {
       client: clientFlags(extra.allAccounts, extra.nowMs),
@@ -239,6 +304,8 @@ export async function buildBudgetFields(
         r?.why_empty,
         splitBasis,
         extra.multiCurrency,
+        adj.basisByAccount[p.accountId] ?? null,
+        adj.liveUsedByAccount[p.accountId] ?? false,
       ),
     )
   }

@@ -63,6 +63,7 @@ const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
       series: [
         { campaign_id: '52558359035473', kind: 'awareness', label: '播放量系列' },
         { campaign_id: '52558367358873', kind: 'whatsapp', label: 'WhatsApp 系列' },
+        { campaign_id: '120250459565520307', kind: 'lead_form', label: '表单留资系列（7274）', ad_account_id: 'act_2775766642787274' },
       ],
     },
   },

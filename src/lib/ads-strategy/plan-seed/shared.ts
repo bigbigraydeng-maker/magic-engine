@@ -2,6 +2,8 @@ import type { AdsDraftFacts } from '@/lib/marketing-plan/promo/draft-ads'
 import type { AdPlay } from './ad-plays'
 import { STALE_AFTER_MS } from './constants'
 import type { ReadState } from './eligibility'
+import type { LiveDelivering } from './live-delivering'
+import { sanitizeReason } from './sanitize'
 import type { Basis, PlanSeedStep } from './types'
 
 export interface PlanSeedDeps {
@@ -15,6 +17,8 @@ export interface PlanSeedDeps {
   readScopes(clientId: string): Promise<{ source: string; scopes: ReadState<string[]> } | null>
   readPromotePages(clientId: string, adAccountId: string): Promise<ReadState<string[]>>
   playbookShare(clientId: string): Promise<number>
+  /** 可选：实时读选中账户的在投合计；没提供等同读不到。 */
+  readLiveDelivering?: (clientId: string, adAccountId: string) => Promise<LiveDelivering | null>
 }
 
 export type SafeResult<T> = { ok: true; value: T } | { ok: false; reason: string }
@@ -69,8 +73,8 @@ export interface Accumulator {
 
 /** 把任意异常转成中文可读的原因字符串。 */
 export function errorReason(err: unknown): string {
-  if (err instanceof Error && err.message) return err.message
-  if (typeof err === 'string' && err.length > 0) return err
+  if (err instanceof Error && err.message) return sanitizeReason(err.message)
+  if (typeof err === 'string' && err.length > 0) return sanitizeReason(err)
   return '未知错误'
 }
 

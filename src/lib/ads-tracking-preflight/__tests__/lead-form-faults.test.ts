@@ -2,7 +2,7 @@
  * 表单留资三种故障。纯函数，不读网络。读不到的数不停。
  */
 import { describe, expect, it } from 'vitest'
-import { judgeLeadFormFaults, resolveCrmSurplus, type LeadFormCrm, type LeadFormJudgeInput, type LeadFormMoney, type LeadFormSync } from '../lead-form-faults'
+import { dailyBudgetCentsForCap, judgeLeadFormFaults, resolveCrmSurplus, type LeadFormCrm, type LeadFormJudgeInput, type LeadFormMoney, type LeadFormSync } from '../lead-form-faults'
 import type { EntityFact } from '../objective-watch'
 
 const NOW = new Date('2026-10-27T01:00:00.000Z')
@@ -35,6 +35,12 @@ function sync(over: Partial<LeadFormSync> = {}): LeadFormSync {
 const entity = (name: string, status: string): EntityFact => ({
   id: '1', name, parent_id: null, status, effective_status: status, updated_at: null,
 })
+
+const NOW_MS = NOW.getTime()
+
+function adset(over: Partial<EntityFact> = {}): EntityFact {
+  return { id: 's', name: '组', parent_id: null, status: 'ACTIVE', effective_status: 'ACTIVE', updated_at: null, daily_budget_cents: 5000, ...over }
+}
 
 function input(over: Partial<LeadFormJudgeInput> = {}): LeadFormJudgeInput {
   return {
@@ -82,6 +88,41 @@ describe('超日上限', () => {
     expect(unset.notes.join(' ')).toContain('账户日上限没配')
     expect(unset.notes.join(' ')).toContain('总日上限没配')
     expect(unset.notes.join(' ')).toContain('系列日预算没读到')
+  })
+
+  it('系列没有日预算时用在投广告组日预算之和；读不到不凑默认值', () => {
+    const cap = (campaign: number | null, adsets: EntityFact[]) =>
+      dailyBudgetCentsForCap({ campaignDailyBudgetCents: campaign, adsets, nowMs: NOW_MS })
+    expect(cap(2500, [adset({ daily_budget_cents: 5000 })])).toBe(2500)
+    expect(cap(null, [
+      adset({ id: 'a', daily_budget_cents: 5000 }),
+      adset({ id: 'b', effective_status: 'PAUSED', status: 'PAUSED', daily_budget_cents: 9000 }),
+    ])).toBe(5000)
+    expect(cap(0, [
+      adset({ id: 'a', daily_budget_cents: 5000 }),
+      adset({ id: 'b', daily_budget_cents: 3000 }),
+    ])).toBe(8000)
+    expect(cap(null, [
+      adset({ id: 'a', daily_budget_cents: 5000 }),
+      adset({ id: 'b', daily_budget_cents: null }),
+    ])).toBeNull()
+    expect(cap(null, [adset({ end_at: new Date(NOW_MS - 1000).toISOString(), daily_budget_cents: 5000 })])).toBeNull()
+    expect(cap(null, [adset({ daily_budget_cents: null })])).toBeNull()
+    const unread = judgeLeadFormFaults(input({
+      money: money({ multiple: 2, dailyBudgetCents: cap(null, [adset({ daily_budget_cents: null })]), todaySpendCents: 99999 }),
+    }))
+    expect(unread.faults).toEqual([])
+    expect(unread.notes.join(' ')).toContain('系列日预算没读到，不按倍数判')
+    const accountStill = judgeLeadFormFaults(input({
+      money: money({
+        multiple: 2,
+        dailyBudgetCents: cap(null, [adset({ daily_budget_cents: null })]),
+        accountTodaySpendCents: 5001,
+      }),
+    }))
+    expect(accountStill.faults.map(item => item.code)).toEqual(['over_daily_cap'])
+    expect(accountStill.faults[0].what).toContain('账户日上限')
+    expect(accountStill.faults[0].what).not.toContain('倍')
   })
 })
 
