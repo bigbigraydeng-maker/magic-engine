@@ -751,6 +751,22 @@ describe('pushClientDocManualTaskItems — 客户文档里的一次性人工请�
     pushClientDocManualTaskItems(items, new Date('2026-09-08T20:00:00Z'), [task])
     expect(items).toHaveLength(0)
   })
+
+  it('带 startsAt 且还没到 → 不下发（事情还没到能做的那一刻，点开找不到东西做）', () => {
+    // startsAt = 2026-09-07T11:00:00Z；now 早于它
+    const futureTask = { ...task, startsAt: '2026-09-08T00:00:00+13:00' }
+    const items: ManualItem[] = []
+    pushClientDocManualTaskItems(items, new Date('2026-09-07T00:00:00Z'), [futureTask])
+    expect(items).toHaveLength(0)
+  })
+
+  it('带 startsAt 且已过 → 下发待办', () => {
+    // startsAt = 2026-09-07T11:00:00Z；now 晚于它，且早于 expiresAt（2026-09-07T20:00:00Z）
+    const futureTask = { ...task, startsAt: '2026-09-08T00:00:00+13:00' }
+    const items: ManualItem[] = []
+    pushClientDocManualTaskItems(items, new Date('2026-09-07T12:00:00Z'), [futureTask])
+    expect(items).toHaveLength(1)
+  })
 })
 
 describe('daysAgo → 文案年龄', () => {

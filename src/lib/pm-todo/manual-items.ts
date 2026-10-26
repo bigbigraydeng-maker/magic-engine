@@ -662,6 +662,7 @@ export function pushClientDocManualTaskItems(
   tasks: ClientDocManualTask[] = CLIENT_DOC_MANUAL_TASKS,
 ): void {
   for (const t of tasks) {
+    if (t.startsAt && now.getTime() < Date.parse(t.startsAt)) continue
     if (now.getTime() > Date.parse(t.expiresAt)) continue
     items.push({
       kind: 'client_doc_manual_task',

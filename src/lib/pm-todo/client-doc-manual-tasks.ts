@@ -20,6 +20,11 @@ export interface ClientDocManualTask {
   /** ISO instant，过了这个时间点不再下发。 */
   expiresAt: string
   /**
+   * ISO instant，早于这个时间点不下发——避免"事情还没到能做的那一刻"就摆上今日待办，
+   * 操作者点开却找不到东西做（比如视频还没发布，首评链接没地方贴）。不填等于现在就能下发。
+   */
+  startsAt?: string
+  /**
    * 这件事属于 PM 五类里的哪一类（默认「点一次」）。比如「要不要对生产库执行」
    * 是拍板，不是点一次 —— 写在这里，今日待办就会把它放进「要你拍板的」那一栏。
    */
@@ -131,4 +136,124 @@ export const CLIENT_DOC_MANUAL_TASKS: ClientDocManualTask[] = [
     href: 'https://business.facebook.com/settings/info',
     expiresAt: '2026-10-26T09:00:00+13:00',
   },
+  {
+    // 见 docs/ledger/2026-09-28-eastinter-reels-sep29-oct5.md「阻塞」。
+    // Muapi 余额不足是本地 scratchpad 脚本触发的，不经过 content_work_orders，
+    // pushVideoCreditsItem（manual-content-items.ts）按 content_work_orders.reject_reason
+    // 判断余额告警，这条命中不了它——台账卡写了阻塞原因，但没有任何今日待办真正下发充值
+    // 这件事，剩下 5 条 Oct 1–5 的 Reels 会因为没人充值而按期发不出（Codex 2026-09-28
+    // 复审第 3 轮抓到 PR #2173）。改成显式今日待办条目，过期时间覆盖到最后一条 Oct 5
+    // 发布窗口，同台账卡里的 verify_by 一起兜底。
+    clientId: 'infra',
+    clientName: 'Magic Engine 后台',
+    what: 'East International Facebook Reels 排期用的 Muapi 出片余额不足（低于约 $0.50 的最低阈值），剩下 5 条（Oct 1–5，每天 10:00 AEST/AEDT 发布）脚本已写好但提交不了新任务，不充值这 5 条会按期发不出',
+    how: '打开链接充值约 $1–2（这是我们生成 East International Reels 画面用的账户）。充完回我一句，我立即续跑剩下的 5 条',
+    href: 'https://muapi.ai/topup',
+    expiresAt: '2026-10-05T09:00:00+11:00',
+  },
+  {
+    // 见 docs/ledger/2026-09-28-eastinter-meta-nz-ad-account-slot-full.md。
+    // 台账卡只写了结论（需 PM 联系 Meta 客服），没有对应的今日待办条目——写进台账卡不等于
+    // 下发（CLAUDE.md 铁律 3 下半：管道不许断头）。ledger 卡本身当时也没有 verify_by，
+    // 单靠 decided 状态默认 7 天才会被夜巡拎出来，太慢（Codex 2026-09-28 复审第 3 轮抓到
+    // PR #2173）。
+    clientId: 'east-international',
+    clientName: 'East International',
+    what: 'East International 建不出新西兰元 Meta 广告账户——所属 Business Manager 广告账户数已满 5/5，其中一个已关闭的澳元账号占着名额没释放，必须联系 Meta 客服处理才能解除，不然新西兰这条投放起不来',
+    how: '打开链接进 Business Settings 广告账户列表，确认已关闭的澳元账号还占着名额 → 通过 Meta 官方客服/帮助中心提交「Increase ad account limit」或说明已关闭账号要释放名额 → 客服处理完回我一句，我立即建新西兰元账号',
+    href: 'https://business.facebook.com/settings/ad-accounts',
+    expiresAt: '2026-10-28T09:00:00+11:00',
+  },
+  ...eastinterReelsFirstCommentTasks(),
 ]
+
+/**
+ * East International 7 条 Facebook Reels（docs/ledger/2026-09-28-eastinter-reels-sep29-oct5.md）
+ * 每条发布后都要人工在第一条评论粘贴带 UTM 的 CTA 链接，Reels 本身用 API 排期但这一步
+ * API 做不到（Facebook 没有「发布时自动加首评」的接口）。
+ *
+ * 之前这 7 条操作只写在台账卡正文里——decided 卡默认要闲置超过 7 天（2026-10-06）
+ * 才会被今日待办拎出来，届时全部发布时间早就过了，等于没人在发布当天被提醒去加首评
+ * （Codex 2026-09-28 复审 PR #2173 抓到）。改成每条各自一条今日待办，发布当天出现，
+ * 过期自动消失，不依赖台账的「闲置超期」兜底。
+ *
+ * 2026-09-28 Codex 复审第 3 轮又抓到：只给 expiresAt 没给 startsAt，7 条从部署那一刻
+ * 起就会全部出现在今日待办里——Sep 29 那条还没关系（本来就该马上看到），但 Oct 1–5
+ * 那几条视频当时还没发布，操作者点开待办去 Facebook 找不到对应的 Reel，等于白提醒。
+ * 现在每条都带 startsAt = 该条视频的排期发布时间，发布前不下发。
+ *
+ * clientId 用 'east-international' 占位：这个客户的真实生产 client_id 不在仓库里，
+ * 本次修复不查生产库确认，先用非 UUID 占位（同 'infra' 的写法），不影响待办展示——
+ * pushClientDocManualTaskItems 不按 clientId 反查 clients 表。以后核实到真实 id 时
+ * 顺手换掉。
+ *
+ * href 统一指向台账卡本身（session:e12e5606 里的视频 ID / BM ID 不进仓库，没有更精确
+ * 的直达链接可以确认），how 里说清楚去 Facebook 哪个标签页找哪条视频。
+ */
+function eastinterReelsFirstCommentTasks(): ClientDocManualTask[] {
+  const LEDGER_HREF =
+    'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/ledger/2026-09-28-eastinter-reels-sep29-oct5.md'
+  const clientId = 'east-international'
+  const clientName = 'East International'
+  const rows: Array<{ date: string; ctaUrl: string; startsAt: string; expiresAt: string }> = [
+    {
+      date: 'Sep 29',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=sea-freight-sep29',
+      startsAt: '2026-09-29T10:00:00+10:00',
+      expiresAt: '2026-09-30T09:00:00+10:00',
+    },
+    {
+      date: 'Sep 30',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=4steps-sep30',
+      startsAt: '2026-09-30T10:00:00+10:00',
+      expiresAt: '2026-10-01T09:00:00+10:00',
+    },
+    {
+      date: 'Oct 1（周四）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=air-freight-oct1',
+      startsAt: '2026-10-01T10:00:00+10:00',
+      expiresAt: '2026-10-02T09:00:00+10:00',
+    },
+    {
+      date: 'Oct 2（周五）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=lcl-vs-fcl-oct2',
+      startsAt: '2026-10-02T10:00:00+10:00',
+      expiresAt: '2026-10-03T09:00:00+10:00',
+    },
+    {
+      date: 'Oct 3（周六）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=4steps-oct3',
+      startsAt: '2026-10-03T10:00:00+10:00',
+      expiresAt: '2026-10-04T09:00:00+11:00',
+    },
+    {
+      date: 'Oct 4（周日）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=cities-oct4',
+      // Oct 4 2026 02:00 AEST 起 AU 东部进入夏令时(AEDT, UTC+11)，这条发布时间已在切换之后。
+      startsAt: '2026-10-04T10:00:00+11:00',
+      expiresAt: '2026-10-05T09:00:00+11:00',
+    },
+    {
+      date: 'Oct 5（周一）',
+      ctaUrl:
+        'https://eastinter.com.au/eastinter-pricing-calculator?utm_source=facebook&utm_medium=reel&utm_campaign=one-partner-oct5',
+      startsAt: '2026-10-05T10:00:00+11:00',
+      expiresAt: '2026-10-06T09:00:00+11:00',
+    },
+  ]
+  return rows.map((r) => ({
+    clientId,
+    clientName,
+    what: `East International ${r.date} 10:00 AEST/AEDT 排期发布的 Facebook Reel 需要人工加首评——发布本身走 API 排期，但「发布后在第一条评论粘贴带 UTM 的 CTA 链接」这步 Facebook 没有排期接口能做，漏了这条视频就没有可追踪的落地页流量`,
+    how: `打开 East International 管理的 Facebook 主页 → Reels/视频标签，找到 ${r.date} 发布的这条 → 在第一条评论原样粘贴：${r.ctaUrl}`,
+    href: LEDGER_HREF,
+    startsAt: r.startsAt,
+    expiresAt: r.expiresAt,
+  }))
+}
