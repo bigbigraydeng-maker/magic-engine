@@ -25,15 +25,18 @@ vi.mock('@/lib/auth/self-serve-routing', () => ({
 
 import { resolveRedirectForSession, INVITE_INVALID_REDIRECT } from '../resolve-redirect'
 
-function authClient(email: string | null) {
+function authClient(identity: string | null | { id: string; email?: string | null; phone?: string | null }) {
+  const user = typeof identity === 'string'
+    ? identity ? { email: identity } : null
+    : identity
   return {
     auth: {
-      getUser: vi.fn().mockResolvedValue({ data: { user: email ? { email } : null } }),
+      getUser: vi.fn().mockResolvedValue({ data: { user } }),
     },
   }
 }
 
-function accessRows(rows: Array<{ client_id: string; access_type: string }>) {
+function accessRows(rows: Array<{ client_id: string; access_type: string; email?: string | null; auth_user_id?: string | null }>) {
   return {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockResolvedValue({ data: rows }),
@@ -75,7 +78,7 @@ describe('resolveRedirectForSession', () => {
   })
 
   it('GRANTS the 500 MTC bonus for a self_serve user and returns the landing path', async () => {
-    mocks.from.mockReturnValueOnce(accessRows([{ client_id: 'client-1', access_type: 'self_serve' }]))
+    mocks.from.mockReturnValueOnce(accessRows([{ client_id: 'client-1', access_type: 'self_serve', email: 'owner@biz.com' }]))
     mocks.grantSignupBonus.mockResolvedValue(true)
     mocks.resolveSelfServeLanding.mockResolvedValue('/dashboard/clients/client-1/brief?welcome=1')
 
@@ -87,7 +90,7 @@ describe('resolveRedirectForSession', () => {
   })
 
   it('still resolves the self_serve landing even when the bonus was already granted', async () => {
-    mocks.from.mockReturnValueOnce(accessRows([{ client_id: 'client-1', access_type: 'self_serve' }]))
+    mocks.from.mockReturnValueOnce(accessRows([{ client_id: 'client-1', access_type: 'self_serve', email: 'owner@biz.com' }]))
     mocks.grantSignupBonus.mockResolvedValue(false)
     mocks.resolveSelfServeLanding.mockResolvedValue('/dashboard/clients/client-1')
 
@@ -98,11 +101,40 @@ describe('resolveRedirectForSession', () => {
     expect(redirect).toBe('/dashboard/clients/client-1')
   })
 
+  it('routes a phone-only self-serve user by Auth ID without attempting the email bonus', async () => {
+    mocks.from.mockReturnValueOnce(accessRows([{
+      client_id: 'client-phone',
+      access_type: 'self_serve',
+      auth_user_id: 'phone-user-1',
+      email: null,
+    }]))
+    mocks.resolveSelfServeLanding.mockResolvedValue('/dashboard/clients/client-phone/onboarding')
+
+    const redirect = await resolveRedirectForSession(
+      authClient({ id: 'phone-user-1', phone: '+8613800001380', email: null }),
+      '/dashboard',
+    )
+
+    expect(redirect).toBe('/dashboard/clients/client-phone/onboarding')
+    expect(mocks.grantSignupBonus).not.toHaveBeenCalled()
+    expect(mocks.resolveSelfServeLanding).toHaveBeenCalledWith('client-phone', '/dashboard', false)
+  })
+
   it('routes a plain portal user to their portal without granting a bonus', async () => {
     mocks.from.mockReturnValueOnce(accessRows([{ client_id: 'client-9', access_type: 'portal' }]))
     const redirect = await resolveRedirectForSession(authClient('viewer@biz.com'), '/dashboard')
     expect(redirect).toBe('/portal/client-9')
     expect(mocks.grantSignupBonus).not.toHaveBeenCalled()
+  })
+
+  it('preserves the exact authenticated phone-link destination for an existing customer', async () => {
+    mocks.from.mockReturnValueOnce(accessRows([{ client_id: 'client-1', access_type: 'self_serve' }]))
+
+    const redirect = await resolveRedirectForSession(authClient('owner@biz.com'), '/account/phone')
+
+    expect(redirect).toBe('/account/phone')
+    expect(mocks.grantSignupBonus).not.toHaveBeenCalled()
+    expect(mocks.resolveSelfServeLanding).not.toHaveBeenCalled()
   })
 
   it('routes a dashboard-tier invite to the invited client, not the first row', async () => {

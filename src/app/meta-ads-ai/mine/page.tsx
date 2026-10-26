@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import { supabaseAdmin } from '@/lib/supabase'
 import { resolveRedirectForSession } from '@/lib/auth/resolve-redirect'
 import { ADS_CHECK_ENTRY } from '@/lib/auth/self-serve-routing'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,15 +20,11 @@ const REGISTER = `/portal/register?next=${encodeURIComponent(ADS_CHECK_ENTRY)}`
 export default async function AdsCheckEntry() {
   const supabase = createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user?.email) redirect(REGISTER)
+  if (!user) redirect(REGISTER)
 
   const landing = await resolveRedirectForSession(supabase, ADS_CHECK_ENTRY)
   if (landing !== ADS_CHECK_ENTRY) redirect(landing)
 
-  const { data: rows } = await supabaseAdmin
-    .from('client_portal_users')
-    .select('client_id')
-    .eq('email', user.email.toLowerCase())
-    .limit(1)
-  redirect(rows && rows.length > 0 ? '/dashboard' : REGISTER)
+  const { rows } = await clientPortalMembershipsForUser(user)
+  redirect(rows.length > 0 ? '/dashboard' : REGISTER)
 }

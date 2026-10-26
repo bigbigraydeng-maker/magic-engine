@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { MeMark, MeMarkDefs } from '@/components/ui/me-mark'
-import RegisterForm from './register-form'
+import RegisterMethods from './register-methods'
+import { isChinaPhoneSignupEnabled } from '@/lib/auth/china-phone-otp'
 
 const benefits = [
   {
@@ -22,8 +23,8 @@ const benefits = [
 
 const zhBenefits = [
   {
-    label: '2 分钟注册，不用信用卡',
-    body: '填个邮箱就能开始，不需要绑定任何付款方式。',
+    label: '手机号或邮箱注册，不用信用卡',
+    body: '选择手机号或邮箱验证后即可创建工作区，不需要绑定付款方式。',
   },
   {
     label: '只看不改，随时可以断开',
@@ -50,7 +51,11 @@ export default function RegisterPage({ searchParams }: Props) {
     : undefined
   const next = validNext ?? (isAdsCheck ? '/meta-ads-ai/mine' : '/dashboard')
   const fromProspect = next === '/prospect'
-  const zh = next === '/meta-ads-ai/mine' || isAdsCheck
+  const phoneSignupEnabled = isChinaPhoneSignupEnabled()
+  const localizedBenefits = phoneSignupEnabled
+    ? zhBenefits
+    : [{ label: '邮箱注册，不用信用卡', body: '验证邮箱后即可创建工作区，不需要绑定付款方式。' }, ...zhBenefits.slice(1)]
+  const zh = next === '/meta-ads-ai/mine' || isAdsCheck || phoneSignupEnabled
   const authFailed = searchParams.error === 'auth_failed'
   const signInHref = `/portal/login?next=${encodeURIComponent(next)}`
 
@@ -91,7 +96,7 @@ export default function RegisterPage({ searchParams }: Props) {
 
           <div className="mt-8 flex flex-col gap-3">
             {zh
-              ? zhBenefits.map(item => (
+              ? localizedBenefits.map(item => (
                   <div
                     key={item.label}
                     className="rounded-xl border border-white/[.08] bg-white/[.055] p-4"
@@ -139,26 +144,26 @@ export default function RegisterPage({ searchParams }: Props) {
             </h2>
             <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
               {zh
-                ? '不用信用卡，2 分钟完成。'
+                ? phoneSignupEnabled ? '选择手机号或邮箱验证后创建工作区，不用信用卡。' : '验证邮箱后创建工作区，不用信用卡。'
                 : fromProspect
                   ? 'Verify your email, then we will take you from your Discovery Report into your workspace brief.'
                   : 'Free to start — no credit card required.'}
             </p>
           </div>
 
-          <RegisterForm next={next} fromProspect={fromProspect} zh={zh} authFailed={authFailed} />
+          <RegisterMethods
+            next={next}
+            fromProspect={fromProspect}
+            zh={zh}
+            authFailed={authFailed}
+            phoneSignupEnabled={phoneSignupEnabled}
+          />
 
           <p className="mt-7 text-center text-xs text-me-charcoal/45">
-            {zh ? (
-              '已经注册过？照常填公司名和邮箱，我们会改发登录验证码给你'
-            ) : (
-              <>
-                Already have an account?{' '}
-                <Link href={signInHref} className="font-semibold text-me-ochre no-underline hover:underline">
-                  Sign in →
-                </Link>
-              </>
-            )}
+            {zh ? '已经有账号？' : 'Already have an account?'}{' '}
+            <Link href={signInHref} className="font-semibold text-me-ochre no-underline hover:underline">
+              {zh ? '登录 →' : 'Sign in →'}
+            </Link>
           </p>
         </div>
       </div>

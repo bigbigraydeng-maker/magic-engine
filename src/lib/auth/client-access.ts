@@ -1,7 +1,7 @@
 import type { User } from '@supabase/supabase-js'
-import { supabaseAdmin } from '@/lib/supabase'
 import { requireSession } from '@/lib/auth/require-session'
 import { getUserPermissions, type UserRole } from '@/lib/auth/whitelist'
+import { clientPortalMembershipsForUser } from '@/lib/auth/client-portal-membership'
 import {
   ACCESS_TYPES_DASHBOARD,
   tierForAccessType,
@@ -55,7 +55,7 @@ export async function requireDashboardClientAccess(
     }
   }
 
-  const dbAccess = await getDashboardAccessForEmail(email)
+  const dbAccess = await getDashboardAccessForUser(session.user)
   if (!dbAccess.ok) return dbAccess
 
   // Find the row matching this clientId so we can determine its tier.
@@ -102,7 +102,7 @@ export async function requireDashboardClientAccess(
  *
  * Isolation is IDENTICAL to requireDashboardClientAccess — allows admin,
  * paid_client, AND self_serve, and the caller can only ever touch the
- * client(s) their verified email is a member of (email → client_portal_users).
+ * client(s) their verified Auth identity or legacy email is a member of.
  * This function adds NO extra narrowing of its own.
  *
  * The "onboarding-only" scope is a CONVENTION enforced by WHICH routes adopt
@@ -159,15 +159,11 @@ interface DashboardAccessRow {
   scopedAdmin: boolean
 }
 
-async function getDashboardAccessForEmail(email: string): Promise<
+async function getDashboardAccessForUser(user: User): Promise<
   | { ok: true; rows: DashboardAccessRow[] }
   | { ok: false; status: 500; error: string; reason: 'lookup_failed' }
 > {
-  const { data, error } = await supabaseAdmin
-    .from('client_portal_users')
-    .select('client_id, access_type, scoped_admin')
-    .eq('email', email)
-    .in('access_type', ACCESS_TYPES_DASHBOARD as readonly string[] as string[])
+  const { rows, error } = await clientPortalMembershipsForUser(user)
 
   if (error) {
     console.error('[auth client-access] client lookup failed:', error)
@@ -176,11 +172,10 @@ async function getDashboardAccessForEmail(email: string): Promise<
 
   return {
     ok: true,
-    rows: (data ?? []).map((row) => ({
+    rows: rows.filter(row => (ACCESS_TYPES_DASHBOARD as readonly string[]).includes(row.access_type)).map((row) => ({
       clientId:    row.client_id as string,
       accessType:  row.access_type as AccessType,
       scopedAdmin: (row as { scoped_admin?: boolean }).scoped_admin === true,
     })),
   }
 }
-

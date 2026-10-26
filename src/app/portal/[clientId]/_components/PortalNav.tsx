@@ -11,6 +11,7 @@ interface Props {
 
 const NAV_ITEMS = (clientId: string) => [
   { href: `/portal/${clientId}`, label: 'Overview' },
+  { href: '/account/phone', label: '绑定手机号' },
   { href: `/portal/${clientId}/discovery`, label: 'Discovery report' },
   { href: `/portal/${clientId}/report`, label: 'Monthly report' },
   { href: `/portal/${clientId}/content`, label: 'Content library' },
