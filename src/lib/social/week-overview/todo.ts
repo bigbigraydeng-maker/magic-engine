@@ -73,3 +73,10 @@ export function buildTodoSummary(input: TodoInput): TodoSummary {
   else items.push(...storyItems(input.clientId, input.story, input.tally))
   return { total: items.reduce((sum, item) => sum + item.count, 0), items, unknown }
 }
+
+/** Only the Reel part of the headline, for the 短视频 tab. `null` works = the Reel read failed. */
+export function buildReelTodoSummary(clientId: string, works: ReadonlyArray<ReelWork> | null): TodoSummary {
+  if (works === null) return { total: 0, items: [], unknown: ['视频'] }
+  const items = reelItems(clientId, works)
+  return { total: items.reduce((sum, item) => sum + item.count, 0), items, unknown: [] }
+}

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { StoryTally } from '../../story-lite/page-text'
 import type { OverviewReel } from '../build'
 import { groupReelWorks } from '../reel-works'
-import { buildTodoSummary, type TodoInput } from '../todo'
+import { buildReelTodoSummary, buildTodoSummary, type TodoInput } from '../todo'
 
 const CLIENT = '11111111-1111-4111-8111-111111111111'
 const NO_STORY_ISSUES: StoryTally = { total: 0, recordedSent: 0, overdue: 0, waiting: 0, blocked: 0, stopped: 0, unauthorised: 0 }
@@ -61,5 +61,23 @@ describe('buildTodoSummary', () => {
 
   it('nothing waiting and everything readable gives a clean zero', () => {
     expect(buildTodoSummary(input())).toEqual({ total: 0, items: [], unknown: [] })
+  })
+})
+
+describe('buildReelTodoSummary (the 短视频 tab)', () => {
+  it('counts only the Reel part, with the same entries as the overview', () => {
+    const works = groupReelWorks([reel('1', 'in_review', 'One: a'), reel('2', 'publish_failed', 'Two: a'), reel('3', 'approved', 'Three: a')])
+    const summary = buildReelTodoSummary(CLIENT, works)
+    expect(summary.total).toBe(2)
+    expect(summary.items.map((i) => [i.id, i.count, i.cta, i.href])).toEqual([
+      ['reel_review', 1, '去视频工厂看 / 点通过', `/dashboard/factory?client=${CLIENT}`],
+      ['reel_problem', 1, '去视频工厂看', `/dashboard/factory?client=${CLIENT}`],
+    ])
+    expect(summary.unknown).toEqual([])
+  })
+
+  it('a failed Reel read is unknown, not zero; nothing waiting is a clean zero', () => {
+    expect(buildReelTodoSummary(CLIENT, null)).toEqual({ total: 0, items: [], unknown: ['视频'] })
+    expect(buildReelTodoSummary(CLIENT, [])).toEqual({ total: 0, items: [], unknown: [] })
   })
 })
