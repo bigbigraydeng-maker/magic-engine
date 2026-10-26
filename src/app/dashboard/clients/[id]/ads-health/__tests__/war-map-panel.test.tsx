@@ -23,7 +23,14 @@ function baseView(): WarMapView {
       actualLaunchDay: null,
       planStale: false,
     },
-    clocks: { dataDay: '2026-10-20', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 0 },
+    clocks: {
+      dataDay: '2026-10-20',
+      fetchedAt: '2026-10-20T03:26:00.000Z',
+      staleDays: 0,
+      sourceState: 'fresh',
+      staleAccounts: [],
+      recentFailureCount: 0,
+    },
     accounts: [],
     accountSummaries: [],
     pools: {
@@ -86,22 +93,77 @@ describe('WarMapPanel · 倒计时条', () => {
   })
 })
 
-describe('WarMapPanel · 数据停了', () => {
-  it('数据停了 10 天：显示琥珀色标签', async () => {
+describe('WarMapPanel · 数据过期（分「源头没花钱」vs「取数链路挂了」）', () => {
+  it('源头没花钱（no_spend_upstream）：列出账户，不说「任务挂了」', async () => {
     const view = baseView()
-    view.clocks = { dataDay: '2026-10-10', fetchedAt: '2026-10-17T17:00:00.000Z', staleDays: 10 }
+    view.clocks = {
+      dataDay: '2026-10-10',
+      fetchedAt: '2026-10-17T17:00:00.000Z',
+      staleDays: 10,
+      sourceState: 'no_spend_upstream',
+      staleAccounts: [{ adAccountId: 'act_1', name: '主账户', staleDays: 10 }],
+      recentFailureCount: 0,
+    }
     stubView(view)
     render(<WarMapPanel clientId="c1" />)
-    await waitFor(() => expect(screen.getByText('数据已 10 天没更新')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/这几个账户/)).toBeTruthy())
+    expect(screen.getByText(/主账户（10 天）/)).toBeTruthy()
+    expect(screen.queryByText(/任务挂了/)).toBeNull()
+    expect(screen.queryByText(/查运行记录/)).toBeNull()
   })
 
-  it('只停了 1 天：不显示这句', async () => {
+  it('取数链路挂了（fetch_chain_down）：说「任务挂了」+ 失败次数 + 「查运行记录」链接', async () => {
     const view = baseView()
-    view.clocks = { dataDay: '2026-10-19', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 1 }
+    view.clocks = {
+      dataDay: '2026-10-15',
+      fetchedAt: '2026-10-15T17:00:00.000Z',
+      staleDays: 5,
+      sourceState: 'fetch_chain_down',
+      staleAccounts: [],
+      recentFailureCount: 3,
+    }
+    stubView(view)
+    render(<WarMapPanel clientId="c1" />)
+    await waitFor(() => expect(screen.getByText(/取数任务挂了/)).toBeTruthy())
+    expect(screen.getByText(/3 次失败/)).toBeTruthy()
+    const link = screen.getByText('查运行记录') as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe('/dashboard/admin/cron-health')
+    expect(screen.queryByText(/这几个账户/)).toBeNull()
+  })
+
+  it('cronHealth 读不到（unknown）：只说「取数状态读不到」，不下定论', async () => {
+    const view = baseView()
+    view.clocks = {
+      dataDay: '2026-10-10',
+      fetchedAt: '2026-10-17T17:00:00.000Z',
+      staleDays: 10,
+      sourceState: 'unknown',
+      staleAccounts: [],
+      recentFailureCount: 0,
+    }
+    stubView(view)
+    render(<WarMapPanel clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('取数状态读不到')).toBeTruthy())
+    expect(screen.queryByText(/任务挂了/)).toBeNull()
+    expect(screen.queryByText(/这几个账户/)).toBeNull()
+  })
+
+  it('fresh：只停了 1 天，不显示任何提示', async () => {
+    const view = baseView()
+    view.clocks = {
+      dataDay: '2026-10-19',
+      fetchedAt: '2026-10-20T03:26:00.000Z',
+      staleDays: 1,
+      sourceState: 'fresh',
+      staleAccounts: [],
+      recentFailureCount: 0,
+    }
     stubView(view)
     render(<WarMapPanel clientId="c1" />)
     await waitFor(() => expect(screen.getByText(/数据日/)).toBeTruthy())
-    expect(screen.queryByText(/天没更新/)).toBeNull()
+    expect(screen.queryByText(/这几个账户/)).toBeNull()
+    expect(screen.queryByText(/任务挂了/)).toBeNull()
+    expect(screen.queryByText(/读不到/)).toBeNull()
   })
 })
 

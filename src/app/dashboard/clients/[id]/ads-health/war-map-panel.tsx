@@ -9,8 +9,55 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import type { Light, WarMapView } from '@/lib/ads-strategy/war-map/types'
+import Link from 'next/link'
+import type { DataSourceState, Light, StaleAccountEntry, WarMapView } from '@/lib/ads-strategy/war-map/types'
 import { DATA_STALE_DAYS } from '@/lib/ads-strategy/war-map/frequency'
+
+/**
+ * 「数据过期」黄灯要分两种情况，别用一样的话：
+ *   - no_spend_upstream：这几个账户没花钱而已，不是出错 —— PM 看了不该再去找 FDE 查链路
+ *   - fetch_chain_down：取数任务挂了 —— 要有人进 cron 运行记录看
+ *   - unknown：cron_run_logs 读不到 —— 不下定论，提示「取数状态读不到」
+ */
+function SourceStateBadge({
+  sourceState, staleDays, staleAccounts, recentFailureCount,
+}: {
+  sourceState: DataSourceState
+  staleDays: number | null
+  staleAccounts: StaleAccountEntry[]
+  recentFailureCount: number
+}) {
+  if (sourceState === 'fresh') return null
+  if (sourceState === 'unknown') {
+    return (
+      <span className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-500">
+        取数状态读不到
+      </span>
+    )
+  }
+  if (sourceState === 'no_spend_upstream') {
+    const names = staleAccounts.map(a =>
+      a.staleDays === null ? `${a.name}（从没有数据）` : `${a.name}（${a.staleDays} 天）`,
+    ).join('、')
+    const text = staleAccounts.length === 0 && staleDays !== null
+      ? `这几个账户 ${staleDays} 天没花费`
+      : `这几个账户 ${staleDays ?? '?'} 天内没花费：${names || '—'}`
+    return (
+      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+        {text}
+      </span>
+    )
+  }
+  // fetch_chain_down：加链接跳 cron 运行记录
+  return (
+    <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-700">
+      取数任务挂了（最近 48 小时 {recentFailureCount} 次失败）
+      <Link href="/dashboard/admin/cron-health" className="ml-1 underline">
+        查运行记录
+      </Link>
+    </span>
+  )
+}
 
 const LIGHT_META: Record<Light, { dot: string; tint: string; text: string; label: string }> = {
   green:   { dot: 'bg-emerald-500', tint: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: '正常' },
@@ -347,11 +394,12 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
         <h2 className="text-base font-semibold text-gray-800">广告作战地图</h2>
         <p className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
           <span>数据日 {fmtDay(view.clocks.dataDay)} · 取数 {fmtNz(view.clocks.fetchedAt)}（新西兰时间）</span>
-          {view.clocks.staleDays !== null && view.clocks.staleDays > DATA_STALE_DAYS && (
-            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
-              数据已 {view.clocks.staleDays} 天没更新
-            </span>
-          )}
+          <SourceStateBadge
+            sourceState={view.clocks.sourceState}
+            staleDays={view.clocks.staleDays}
+            staleAccounts={view.clocks.staleAccounts}
+            recentFailureCount={view.clocks.recentFailureCount}
+          />
         </p>
       </div>
 

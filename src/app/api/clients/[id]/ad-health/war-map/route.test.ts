@@ -38,6 +38,7 @@ function emptyInput(): WarMapInput {
     creativePoolApproved: 0,
     runningSince: null,
     accountDataDays: {},
+    cronHealth: null,
   }
 }
 
