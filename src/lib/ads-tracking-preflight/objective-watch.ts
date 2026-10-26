@@ -6,6 +6,8 @@
  *   · 播放量系列（awareness）：完整播放（ThruPlay）/ 触达 / 平均看到几次（频次），按视频（广告）拆开；
  *   · WhatsApp 系列（whatsapp）：开始聊天数 / 单个成本，按受众（广告组）和视频（广告）拆开，
  *     再和 ME 里实际收到的 WhatsApp 会话比一比，防止「Meta 说有人聊了、ME 一条没收到」；
+ *   · 表单留资系列（lead_form）：当天花费、线索、审核状态，以及和 CRM 对不上时的故障
+ *     （故障判据在 lead-form-faults.ts；命中后由盯盘函数去调只暂停入口）；
  *   · 所有系列：改动后一直没花钱要提醒。
  * 系列整个停了、或里面没有在投的广告，就自动不盯。
  *
@@ -21,11 +23,13 @@ import {
   readFailedText,
   scheduledHeadline,
   stoppedHeadline,
+  leadFormWatchHeadline,
   unreadHeadline,
   waitingHeadline,
   whatsappHeadline,
   zeroSpendText,
 } from './objective-watch-text'
+import type { LeadFormStopFault, PauseRequestReceipt } from './lead-form-types'
 import type { ObjectiveWatchConfig, ObjectiveWatchKind, ObjectiveWatchSeries } from './types'
 
 // ─── 阈值（通用默认值；客户在 client-config.ts 里按系列覆盖）─────────────────────
@@ -63,6 +67,8 @@ export interface CampaignFact {
   /** ISO（UTC）；读不出 = null */
   created_at: string | null
   updated_at: string | null
+  /** 系列日预算（分）。没设、或这轮读数里没有这个字段 = 缺省，不当成 0。 */
+  daily_budget_cents?: number | null
 }
 
 /** 广告组或广告。广告的 parent_id 是它所在的广告组编号。 */
@@ -157,6 +163,14 @@ export interface SeriesVerdict {
   headline: string
   alerts: ObjectiveAlert[]
   error: string | null
+  /** 表单留资系列的故障（会拿去调只暂停入口）。其它类型不写这个字段。 */
+  stop_faults?: LeadFormStopFault[]
+  /** 故障为什么没判（读不到 / 没配）。不是故障本身。 */
+  stop_notes?: string[]
+  /** Meta 线索多于 CRM 的这一段是从什么时候开始的；对上了就是 null。 */
+  crm_surplus_since?: string | null
+  /** 这一小时有没有去调只暂停入口，以及入口回了什么。没调用 = null。 */
+  pause_request?: PauseRequestReceipt | null
 }
 
 /** 写进盯盘运行记录的按目标盯盘回执。单个系列读不到记在各自的 verdict 里（state=unread）。 */
@@ -457,13 +471,16 @@ export function judgeSeries(input: JudgeSeriesInput): SeriesVerdict {
   if (total === null) return unreadVerdict(input, '按广告读到了花费，但整个系列那一行没读到，数字对不上', facts.campaign.objective)
 
   const me = meSummary(input, total.conversations, applicable)
-  const meFound = applicable ? meAlert(input, total.conversations) : null
-  const found = series.kind === 'awareness' ? frequencyAlert(input, facts, live) : meFound
+  const meFound = series.kind === 'whatsapp' && applicable ? meAlert(input, total.conversations) : null
+  const found = series.kind === 'awareness' ? frequencyAlert(input, facts, live) : series.kind === 'whatsapp' ? meFound : null
+  const headline = series.kind === 'awareness'
+    ? awarenessHeadline({ label: series.label, total, currency })
+    : series.kind === 'whatsapp'
+      ? whatsappHeadline({ label: series.label, total, me, currency })
+      : leadFormWatchHeadline(series.label)
   return baseVerdict(input, {
     ...common, state: 'delivering', anchor_at: anchor, hours_since_anchor: hoursRounded, me,
-    headline: series.kind === 'awareness'
-      ? awarenessHeadline({ label: series.label, total, currency })
-      : whatsappHeadline({ label: series.label, total, me, currency }),
+    headline,
     alerts: found === null ? [] : [found],
   })
 }
