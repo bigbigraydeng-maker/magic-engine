@@ -41,7 +41,7 @@ export const MIN_HIGHLIGHTS = 3
 export const MANUAL_CONFIRMATIONS: readonly string[] = [
   '每晚酒店是客户给的名字，不是编的',
   '图片和景点对得上，酒店/车辆/客户真实产品的图是客户自己提供的',
-  '官网详情页上的地图能出来',
+  '官网有这个团的路线地图（要在官网代码里另做图并登记，后台管不了）',
   '主关键词有 DataForSEO 真数据，没有和官网同城市、同线路的页抢词',
   '常见问题的答案在行程或客户资料里有出处',
 ]
@@ -107,7 +107,7 @@ function basicsItems(tour: CompletenessTour, departureCount: number): Completene
     item('highlights', `亮点（至少 ${MIN_HIGHLIGHTS} 条）`, count(tour.highlights) >= MIN_HIGHLIGHTS, `现在 ${count(tour.highlights)} 条`),
     item('inclusions', '包含项', count(tour.inclusions) > 0, '没填'),
     item('exclusions', '不含项', count(tour.exclusions) > 0, '没填'),
-    item('cities', '途经城市', count(tour.tourCities) > 0, '没填（官网地图可能靠它）'),
+    item('cities', '途经城市', count(tour.tourCities) > 0, '没填'),
   ]
 }
 
