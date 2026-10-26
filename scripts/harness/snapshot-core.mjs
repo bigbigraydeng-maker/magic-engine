@@ -2,6 +2,8 @@
 // 所有输入都通过参数传入，所有输出都是普通数据，方便在测试里直接断言。
 // 风格与 scripts/ledger-update.mjs 保持一致：ESM、具名导出、JSDoc 类型、2 空格缩进、无分号、单引号。
 
+export const GROK_BRANCH_PREFIX = 'cursor/'
+
 export const IGNORED_COLLISION_PREFIXES = ['docs/ledger/']
 export const IGNORED_COLLISION_FILES = [
   'package-lock.json',
@@ -255,6 +257,76 @@ export function splitCollisions(collisions) {
     }
   }
   return { relevant, otherCount }
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * 判断一个 PR 是否由 Grok Bot 开的分支（headRefName 以 GROK_BRANCH_PREFIX 开头）。
+ * @param {{ headRefName?: unknown }} pr
+ * @returns {boolean}
+ */
+function isGrokPr(pr) {
+  return typeof pr?.headRefName === 'string' && pr.headRefName.startsWith(GROK_BRANCH_PREFIX)
+}
+
+/**
+ * 统计 Grok Bot 开的 PR：只返回数字，不碰时钟、不碰 I/O。
+ * 只统计 headRefName 以 GROK_BRANCH_PREFIX 开头的条目，其余一律忽略。
+ * @param {{ open?: Array<{ number: number, headRefName?: unknown, updatedAt?: string, isDraft?: boolean }>, merged?: Array<{ number: number, headRefName?: unknown, mergedAt?: string }>, closed?: Array<{ number: number, headRefName?: unknown, closedAt?: string }> }} input
+ * @param {string} nowIso
+ * @param {number} [days]
+ * @returns {{ openCount: number, openPrs: Array<{ number: number, idleDays: number | null, isDraft: boolean }>, oldestIdleDays: number | null, mergedRecent: number, closedRecent: number, days: number }}
+ */
+export function summarizeGrokPrs({ open, merged, closed } = {}, nowIso, days = 7) {
+  const now = Date.parse(nowIso)
+  const windowMs = days * DAY_MS
+  const openList = Array.isArray(open) ? open : []
+  const mergedList = Array.isArray(merged) ? merged : []
+  const closedList = Array.isArray(closed) ? closed : []
+
+  const openPrs = []
+  for (const pr of openList) {
+    if (!isGrokPr(pr)) continue
+    const at = Date.parse(pr.updatedAt)
+    let idleDays = null
+    if (Number.isFinite(now) && Number.isFinite(at)) {
+      idleDays = Math.max(0, Math.floor((now - at) / DAY_MS))
+    }
+    openPrs.push({ number: pr.number, idleDays, isDraft: pr.isDraft === true })
+  }
+
+  openPrs.sort((a, b) => {
+    if (a.idleDays === null && b.idleDays === null) return a.number - b.number
+    if (a.idleDays === null) return 1
+    if (b.idleDays === null) return -1
+    if (b.idleDays !== a.idleDays) return b.idleDays - a.idleDays
+    return a.number - b.number
+  })
+
+  let oldestIdleDays = null
+  for (const pr of openPrs) {
+    if (pr.idleDays === null) continue
+    if (oldestIdleDays === null || pr.idleDays > oldestIdleDays) oldestIdleDays = pr.idleDays
+  }
+
+  let mergedRecent = 0
+  for (const pr of mergedList) {
+    if (!isGrokPr(pr)) continue
+    const at = Date.parse(pr.mergedAt)
+    if (!Number.isFinite(now) || !Number.isFinite(at)) continue
+    if (now - at <= windowMs) mergedRecent += 1
+  }
+
+  let closedRecent = 0
+  for (const pr of closedList) {
+    if (!isGrokPr(pr)) continue
+    const at = Date.parse(pr.closedAt)
+    if (!Number.isFinite(now) || !Number.isFinite(at)) continue
+    if (now - at <= windowMs) closedRecent += 1
+  }
+
+  return { openCount: openPrs.length, openPrs, oldestIdleDays, mergedRecent, closedRecent, days }
 }
 
 /**

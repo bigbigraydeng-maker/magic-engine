@@ -182,6 +182,38 @@ function renderArchive(suggestions) {
 }
 
 /**
+ * 渲染 Grok 的活。只有数字，没有标题和分支名，两种模式都一样。
+ * @param {{ openCount: number, openPrs: Array<{ number: number, idleDays: number|null, isDraft: boolean }>, oldestIdleDays: number|null, mergedRecent: number, closedRecent: number, days: number }|undefined} grok
+ * @returns {string}
+ */
+function renderGrok(grok) {
+  if (!grok || typeof grok !== 'object') {
+    return '<p class="empty">Grok 这一栏没有数据</p>'
+  }
+  const openCount = grok.openCount
+  const oldestIdleDays = grok.oldestIdleDays
+  const days = grok.days
+  const mergedRecent = grok.mergedRecent
+  const closedRecent = grok.closedRecent
+  const oldestText = typeof oldestIdleDays === 'number' ? `，最久的 ${escapeHtml(oldestIdleDays)} 天没动` : ''
+  const summary = `<p class="meta">还开着 ${escapeHtml(openCount)} 个${oldestText}；最近 ${escapeHtml(days)} 天合了 ${escapeHtml(mergedRecent)} 个，关掉没合的 ${escapeHtml(closedRecent)} 个</p>`
+
+  const openPrs = Array.isArray(grok.openPrs) ? grok.openPrs : []
+  if (openPrs.length === 0) return summary
+
+  const shown = openPrs.slice(0, 10)
+  const rows = shown
+    .map((pr) => {
+      const idleText = pr.idleDays === null || pr.idleDays === undefined ? '时间未知' : `${pr.idleDays} 天没动`
+      const draftText = pr.isDraft ? ' 草稿' : ''
+      return `<li>PR#${escapeHtml(pr.number)}（${escapeHtml(idleText)}）${escapeHtml(draftText)}</li>`
+    })
+    .join('')
+  const more = openPrs.length > 10 ? `<p class="more">…还有 ${escapeHtml(openPrs.length - 10)} 个</p>` : ''
+  return `${summary}<ul class="grok">${rows}</ul>${more}`
+}
+
+/**
  * 渲染错误横幅。
  * @param {string[]} errors
  * @returns {string}
@@ -289,6 +321,7 @@ ul { margin: 4px 0; padding-left: 20px; }
  *   inactiveCount: number,
  *   collisionsOtherCount?: number,
  *   collisions: Array<{ file: string, prs: Array<{ number: number, headRefName: string, window: string|null }> }>,
+ *   grok?: { openCount: number, openPrs: Array<{ number: number, idleDays: number|null, isDraft: boolean }>, oldestIdleDays: number|null, mergedRecent: number, closedRecent: number, days: number },
  *   archiveSuggestions: Array<{ id: string, number: string|null, group: string, lastActivityAt: string }>,
  *   errors: string[]
  * }} model
@@ -330,6 +363,8 @@ export function renderHtml(model, mode) {
     '<h2>撞车</h2>',
     renderCollisions(collisions, full),
     otherCollisions > 0 ? `<p class="meta">另有 ${escapeHtml(otherCollisions)} 处撞车只发生在不活跃窗口的 PR 之间，不显示</p>` : '',
+    '<h2>Grok 的活</h2>',
+    renderGrok(safeModel.grok),
     '<h2>建议归档（PR 已合并、3 天没动）</h2>',
     renderArchive(archiveSuggestions),
   ].join('')

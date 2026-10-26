@@ -27,9 +27,19 @@ type ArchiveSuggestion = {
   lastActivityAt: string
 }
 
+type Grok = {
+  openCount: number
+  openPrs: Array<{ number: number; idleDays: number | null; isDraft: boolean }>
+  oldestIdleDays: number | null
+  mergedRecent: number
+  closedRecent: number
+  days: number
+}
+
 type Model = {
   generatedAt: string
   collisionsOtherCount?: number
+  grok?: Grok
   windows: Window[]
   inactiveCount: number
   collisions: Collision[]
@@ -201,8 +211,8 @@ describe('renderHtml groups', () => {
       'mobile',
     )
     const headings = html.match(/<h2>/g) ?? []
-    // 3 section headings (窗口 / 撞车 / 建议归档) + 2 group headings
-    expect(headings).toHaveLength(5)
+    // 4 section headings (窗口 / 撞车 / Grok 的活 / 建议归档) + 2 group headings
+    expect(headings).toHaveLength(6)
     expect(html).toContain('<h2>CTS</h2>')
     expect(html).toContain('<h2>ME 广告</h2>')
   })
@@ -254,6 +264,76 @@ describe('collisions among inactive windows', () => {
   it('shows no such line when nothing is hidden', () => {
     expect(renderHtml(model(), 'mobile')).not.toContain('只发生在不活跃窗口')
     expect(renderHtml({ ...model(), collisionsOtherCount: 0 }, 'full')).not.toContain('只发生在不活跃窗口')
+  })
+})
+
+function grok(overrides: Partial<Grok> = {}): Grok {
+  return {
+    openCount: 3,
+    openPrs: [
+      { number: 201, idleDays: 5, isDraft: false },
+      { number: 202, idleDays: 2, isDraft: true },
+      { number: 203, idleDays: null, isDraft: false },
+    ],
+    oldestIdleDays: 5,
+    mergedRecent: 4,
+    closedRecent: 1,
+    days: 7,
+    ...overrides,
+  }
+}
+
+describe('renderHtml grok section', () => {
+  it('shows the summary in both modes', () => {
+    for (const mode of ['full', 'mobile'] as const) {
+      const html = renderHtml(model({ grok: grok() }), mode)
+      expect(html).toContain('<h2>Grok 的活</h2>')
+      expect(html).toContain('还开着 3 个，最久的 5 天没动；最近 7 天合了 4 个，关掉没合的 1 个')
+    }
+  })
+
+  it('omits the 最久 clause when oldestIdleDays is null', () => {
+    const html = renderHtml(model({ grok: grok({ oldestIdleDays: null }) }), 'mobile')
+    expect(html).toContain('还开着 3 个；最近 7 天合了 4 个，关掉没合的 1 个')
+    expect(html).not.toContain('最久的')
+  })
+
+  it('marks draft PRs with 草稿', () => {
+    const html = renderHtml(model({ grok: grok() }), 'mobile')
+    expect(html).toContain('PR#202（2 天没动） 草稿')
+  })
+
+  it('shows 时间未知 when idleDays is null', () => {
+    const html = renderHtml(model({ grok: grok() }), 'mobile')
+    expect(html).toContain('PR#203（时间未知）')
+  })
+
+  it('caps the open PR list at 10 and shows the remainder', () => {
+    const openPrs = Array.from({ length: 12 }, (_, index) => ({
+      number: 300 + index,
+      idleDays: index,
+      isDraft: false,
+    }))
+    const html = renderHtml(model({ grok: grok({ openCount: 12, openPrs }) }), 'mobile')
+    const listMatch = html.match(/<ul class="grok">([\s\S]*?)<\/ul>/)
+    expect(listMatch).not.toBeNull()
+    const listHtml = listMatch ? listMatch[1] : ''
+    expect(listHtml.split('<li>').length - 1).toBe(10)
+    expect(html).toContain('…还有 2 个')
+  })
+
+  it('shows the empty message when grok is missing', () => {
+    const html = renderHtml(model(), 'mobile')
+    expect(html).toContain('Grok 这一栏没有数据')
+  })
+
+  it('does not leak extra fields such as headRefName in mobile mode', () => {
+    const leaky = {
+      ...grok(),
+      openPrs: [{ number: 201, idleDays: 5, isDraft: false, headRefName: 'secret/grok-branch' }],
+    }
+    const html = renderHtml(model({ grok: leaky }), 'mobile')
+    expect(html).not.toContain('secret/grok-branch')
   })
 })
 

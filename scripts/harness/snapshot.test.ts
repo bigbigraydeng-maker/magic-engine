@@ -393,6 +393,9 @@ describe('runCli', () => {
     expect(writes).toContain('/out/snapshot-mobile.html')
     expect(writes).toContain('/out/.snapshot.lock')
     expect(files.has('/out/snapshot.json')).toBe(true)
+    const snapshot = JSON.parse(files.get('/out/snapshot.json') ?? '{}')
+    expect(snapshot.grok).toBeDefined()
+    expect(typeof snapshot.grok.openCount).toBe('number')
   })
 
   it('does not leak the secret title into the mobile html', () => {
@@ -524,6 +527,77 @@ describe('risk gate only matters while the PR is open', () => {
 
   it('does not warn on a merged PR with an old failed Risk gate', () => {
     expect(buildSnapshot(deps('MERGED')).windows[0].dots.opened).toBe('ok')
+  })
+})
+
+describe('grok summary', () => {
+  const DAY = 24 * 60 * 60 * 1000
+  const daysAgo = (days: number) => new Date(NOW_MS - days * DAY).toISOString()
+  const baseDeps = (overrides: { runGh: (args: string[]) => string }) => ({
+    sessions: [],
+    nowIso: NOW,
+    today: TODAY,
+    runGh: overrides.runGh,
+    readLedgerCard: () => null,
+  })
+
+  it('summarizes grok PRs from the open, merged and closed lists', () => {
+    const openList = [
+      { number: 30, headRefName: 'cursor/a', updatedAt: daysAgo(2), isDraft: false },
+      { number: 31, headRefName: 'feat/x', updatedAt: daysAgo(1), isDraft: false },
+    ]
+    const mergedList = [
+      { number: 32, headRefName: 'cursor/b', mergedAt: daysAgo(3) },
+      { number: 33, headRefName: 'cursor/c', mergedAt: daysAgo(20) },
+      { number: 34, headRefName: 'feat/y', mergedAt: daysAgo(1) },
+    ]
+    const closedList = [
+      { number: 35, headRefName: 'cursor/d', closedAt: daysAgo(1) },
+      { number: 36, headRefName: 'cursor/e', closedAt: daysAgo(1), mergedAt: daysAgo(1) },
+    ]
+
+    const { runGh } = makeRunGh((args) => {
+      if (args[0] === 'pr' && args[1] === 'list') {
+        if (args.includes('merged')) return JSON.stringify(mergedList)
+        if (args.includes('closed')) return JSON.stringify(closedList)
+        return JSON.stringify(openList)
+      }
+      return '[]'
+    })
+
+    const model = buildSnapshot(baseDeps({ runGh }))
+    expect(model.grok.openCount).toBe(1)
+    expect(model.grok.oldestIdleDays).toBe(2)
+    expect(model.grok.mergedRecent).toBe(1)
+    expect(model.grok.closedRecent).toBe(1)
+    expect(model.errors.some((err) => err.includes('Grok'))).toBe(false)
+  })
+
+  it('reports one generic grok error when the merged call throws', () => {
+    const { runGh } = makeRunGh((args) => {
+      if (args[0] === 'pr' && args[1] === 'list' && args.includes('merged')) {
+        throw new Error('SECRET-OUTPUT-XYZ')
+      }
+      return '[]'
+    })
+
+    const model = buildSnapshot(baseDeps({ runGh }))
+    const grokErrors = model.errors.filter((err) => err.includes('Grok'))
+    expect(grokErrors).toHaveLength(1)
+    for (const err of model.errors) {
+      expect(err).not.toContain('SECRET-OUTPUT-XYZ')
+    }
+  })
+
+  it('reports the generic grok error when the merged call returns non-json', () => {
+    const { runGh } = makeRunGh((args) => {
+      if (args[0] === 'pr' && args[1] === 'list' && args.includes('merged')) return 'not json'
+      return '[]'
+    })
+
+    const model = buildSnapshot(baseDeps({ runGh }))
+    const grokErrors = model.errors.filter((err) => err.includes('Grok'))
+    expect(grokErrors).toHaveLength(1)
   })
 })
 
