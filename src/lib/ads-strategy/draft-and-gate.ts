@@ -238,9 +238,10 @@ async function waitForTranscode(
   return ready.ok ? null : ready.error
 }
 
-/** 只有私信类型有整次请求的时间预算；其它类型沿用旧行为（不限）。 */
+/** 私信类型和任一创意带视频的草案有整次请求的时间预算（与 waitForTranscode 同口径）；其它沿用旧行为（不限）。 */
 function publishBudgetFor(draft: AdDraft, startedAt: number, now: () => number) {
-  if (draft.kind !== 'messenger_conversation') return undefined
+  const hasVideo = draft.creatives.some((c) => !!c.videoId)
+  if (draft.kind !== 'messenger_conversation' && !hasVideo) return undefined
   return {
     stopWritingAt: startedAt + BUDGET.stopWritingMs,
     giveUpRollbackAt: startedAt + BUDGET.giveUpRollbackMs,

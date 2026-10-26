@@ -199,7 +199,7 @@ function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
       }
       if (c.videoId) {
         // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），
-        // 不是把 video_id 塞进 link_data（见 docs/clients/cts/2026-10-09-shanghai-ads-paused-build.md §2.3）。
+        // 不是把 video_id 塞进 link_data（同类实测见 docs/PITFALLS.md D13 与 Meta 广告手册 §30 接口建广告）。
         // 封面必给（validateDraft 查）。
         storySpec.video_data = {
           video_id: c.videoId,
