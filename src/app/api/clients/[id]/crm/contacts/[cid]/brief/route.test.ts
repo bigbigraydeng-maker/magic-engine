@@ -20,7 +20,8 @@ const mockAccess = vi.mocked(requirePaidClientAccess)
 interface DbShape {
   contact?: { id: string } | null
   conversations?: Array<{ id: string; channel: string | null }>
-  brief?: Record<string, unknown> | null
+  /** conversation_briefs 查询返回的几行（已按 generated_at desc）。 */
+  briefRows?: Array<Record<string, unknown>>
 }
 
 let queriedTables: string[] = []
@@ -43,7 +44,7 @@ function mockDb(db: DbShape) {
           eq: () => ({
             in: () => ({
               not: () => ({
-                order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: db.brief ?? null, error: null }) }) }),
+                order: () => ({ limit: async () => ({ data: db.briefRows ?? [], error: null }) }),
               }),
             }),
           }),
@@ -86,7 +87,7 @@ describe('AI 概况接口', () => {
   })
 
   it('有对话但没简报 → brief: null', async () => {
-    mockDb({ contact: { id: 'c1' }, conversations: [{ id: 'conv-1', channel: 'email' }], brief: null })
+    mockDb({ contact: { id: 'c1' }, conversations: [{ id: 'conv-1', channel: 'email' }], briefRows: [] })
     const res = await GET(req(), params)
     expect(await res.json()).toEqual({ brief: null })
   })
@@ -95,17 +96,32 @@ describe('AI 概况接口', () => {
     mockDb({
       contact: { id: 'c1' },
       conversations: [{ id: 'conv-1', channel: 'email' }],
-      brief: { conversation_id: 'conv-1', summary: '   ', customer_needs: [], objections: [], promises_made: [] },
+      briefRows: [{ conversation_id: 'conv-1', summary: '   ', customer_needs: [], objections: [], promises_made: [] }],
     })
     const res = await GET(req(), params)
     expect(await res.json()).toEqual({ brief: null })
+  })
+
+  it('最新一份概况空白 → 回退到更早一份有内容的', async () => {
+    mockDb({
+      contact: { id: 'c1' },
+      conversations: [{ id: 'conv-1', channel: 'email' }, { id: 'conv-2', channel: 'whatsapp' }],
+      briefRows: [
+        { conversation_id: 'conv-1', summary: '  ', customer_needs: [], objections: [], promises_made: [] },
+        { conversation_id: 'conv-2', summary: '客人想要行程', customer_needs: ['要行程'], objections: [], promises_made: [] },
+      ],
+    })
+    const res = await GET(req(), params)
+    const body = (await res.json()) as { brief: Record<string, unknown> }
+    expect(body.brief.summary).toBe('客人想要行程')
+    expect(body.brief.channel).toBe('whatsapp')
   })
 
   it('有简报 → 映射字段，channel 从对话带出，脏数组项被滤掉', async () => {
     mockDb({
       contact: { id: 'c1' },
       conversations: [{ id: 'conv-1', channel: 'email' }],
-      brief: {
+      briefRows: [{
         conversation_id: 'conv-1',
         summary: '客户想订 China Discovery 团',
         customer_needs: ['带朋友一起报', '', 123],
@@ -114,7 +130,7 @@ describe('AI 概况接口', () => {
         next_action: '把报名表发给 Gin Hoe',
         intent_level: 'high',
         generated_at: '2026-10-26T00:00:00Z',
-      },
+      }],
     })
     const res = await GET(req(), params)
     const body = (await res.json()) as { brief: Record<string, unknown> }

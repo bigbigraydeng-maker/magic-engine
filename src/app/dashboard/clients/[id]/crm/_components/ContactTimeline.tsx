@@ -519,13 +519,16 @@ function useTimeline(
  * 用容器自己的 `scrollTop`，不用 `scrollIntoView` —— 后者会把**抽屉整体**
  * 一起滚下去，把上面的联系方式和摘要卡顶出屏幕，正好抵消这次改动的目的。
  */
-function useStickToLatest(data: Payload | null) {
+function useStickToLatest(data: Payload | null, visible: boolean) {
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    // `visible` 进依赖：折叠时列表没挂载、`listRef` 为空，effect 提前返回；
+    // 点开后 data 没变，少了这个依赖 effect 不会重跑，长时间线会停在最旧一条。
+    if (!visible) return
     const el = listRef.current
     if (!el || !data || data.timeline.length <= LONG_TIMELINE) return
     el.scrollTop = el.scrollHeight
-  }, [data])
+  }, [data, visible])
   return listRef
 }
 
@@ -577,12 +580,12 @@ export function ContactTimeline({
   collapsible?: boolean
 }) {
   const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt)
-  const listRef = useStickToLatest(data)
-  // 折叠模式下默认收起；换人（contactId 变）时重新收起，不把上一个人的展开状态带过来。
+  // 折叠模式下默认收起。换人时不留上一个人的展开状态：抽屉给本组件挂了
+  // `key` 带 contactId（见 PersonDrawer），换人会整组件重挂、state 自然回到初值，
+  // 不靠 effect 重置（那样会先用旧状态渲染一帧）。
   const [expanded, setExpanded] = useState(false)
-  useEffect(() => {
-    setExpanded(false)
-  }, [contactId])
+  // 折叠时列表没渲染；只有展开、或根本不可折叠时才需要滚到最新。
+  const listRef = useStickToLatest(data, !collapsible || expanded)
 
   if (loading || err || !data || data.timeline.length === 0) {
     return <Placeholder loading={loading} err={err} onRetry={retry} />
@@ -631,6 +634,16 @@ export function ContactTimeline({
           </p>
         )}
       </div>
+      {collapsible && expanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-[12px] font-bold text-me-charcoal/60 hover:bg-me-ivory"
+        >
+          收起往来原文
+          <span aria-hidden>▴</span>
+        </button>
+      )}
     </div>
   )
 }

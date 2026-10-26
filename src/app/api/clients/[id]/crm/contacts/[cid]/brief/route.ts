@@ -55,20 +55,25 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   if (convRows.length === 0) return NextResponse.json({ brief: null })
   const convChannel = new Map(convRows.map((c) => [c.id, c.channel]))
 
-  const { data, error } = await supabaseAdmin
+  // 取最近几份、挑第一份概况非空的：
+  //   · nullsFirst:false —— generated_at 为 null 的旧行不能排到真正最新的前面
+  //     （Postgres `desc` 默认 nulls first）。
+  //   · 取 5 份而不是 1 份 —— 最新一份概况若是纯空白（trim 后为空），仍能回退到
+  //     上一份有内容的，而不是直接当「没有简报」。
+  const { data: rows, error } = await supabaseAdmin
     .from('conversation_briefs')
     .select('conversation_id, summary, customer_needs, objections, promises_made, next_action, intent_level, generated_at')
     .eq('client_id', clientId)
     .in('conversation_id', convRows.map((c) => c.id))
     .not('summary', 'is', null)
-    .order('generated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .order('generated_at', { ascending: false, nullsFirst: false })
+    .limit(5)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  const data = (rows ?? []).find((r) => typeof r.summary === 'string' && r.summary.trim() !== '')
   if (!data) return NextResponse.json({ brief: null })
 
-  const summary = typeof data.summary === 'string' ? data.summary.trim() : ''
-  if (!summary) return NextResponse.json({ brief: null })
+  const summary = (data.summary as string).trim()
 
   const brief: TimelineAiBrief = {
     summary,

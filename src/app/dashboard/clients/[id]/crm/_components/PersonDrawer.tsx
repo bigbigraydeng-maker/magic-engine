@@ -168,7 +168,12 @@ export function PersonDrawer({
           `/api/clients/${clientId}/crm/contacts/${contactId}/brief`,
           { signal: ctrl.signal },
         )
-        if (!res.ok) return
+        if (!res.ok) {
+          // 「确实没简报」和「接口 4xx/5xx」在界面上都表现为不显示概况卡 ——
+          // 打一条日志，让排查时能区分，不然两者看起来一模一样。
+          console.warn(`[drawer] AI 概况取失败 contact=${contactId} status=${res.status}`)
+          return
+        }
         const json = (await res.json()) as { brief?: TimelineAiBrief | null }
         if (alive) setAiBrief(json.brief ?? null)
       } catch {
@@ -634,7 +639,7 @@ export function PersonDrawer({
               往来记录
             </p>
             <ContactTimeline
-              key={timelineKey}
+              key={`${row.contactId}:${timelineKey}`}
               clientId={clientId}
               contactId={row.contactId}
               onSummary={onSummary}
