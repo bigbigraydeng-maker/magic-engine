@@ -51,10 +51,21 @@ afterEach(() => {
 
 async function openTools() {
   await screen.findByRole('heading', { level: 1, name: 'CTS Tours' })
+  expect(screen.queryByText(/深度诊断/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/诸葛亮/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/广告 Agent/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/huatuo/i)).not.toBeInTheDocument()
+  expect(screen.getByText('处方')).toBeInTheDocument()
   // 概览上的审片框与视频工厂是同一只，首页不再挂。出片门仍进视频工厂。
   expect(screen.queryByText(/加载待审/)).not.toBeInTheDocument()
   expect(screen.queryByText(/只列出待审核视频/)).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '工具' }))
+  expect(screen.queryByText('华佗深度诊断')).not.toBeInTheDocument()
+  expect(screen.queryByText(/基于华佗诊断结果/)).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: /跟华佗说要什么结果/ })).toHaveAttribute(
+    'href',
+    '/dashboard/clients/c1/prescription/new',
+  )
 }
 
 describe('客户首页入口', () => {

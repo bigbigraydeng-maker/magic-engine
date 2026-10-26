@@ -1,0 +1,115 @@
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { PrescriptionDialog } from '../PrescriptionDialog'
+
+vi.mock('@/lib/ads/use-client-ad-currency', () => ({
+  useClientAdCurrency: () => 'NZD',
+}))
+
+const draftContent = {
+  summary: '先把价格写清楚',
+  narrative: '先改落地页，再看线索。',
+  phases: [{
+    phase_number: 1,
+    name: '先做',
+    duration_weeks: 2,
+    actions: [{
+      id: 'a1',
+      title: '改落地页',
+      description: '把价格写在第一屏',
+      dimension: 'ads',
+      fix_type: 'fde_manual',
+      phase: 1,
+      effort: 'low',
+      impact: 'high',
+      finding_ids: ['should-not-show'],
+    }],
+  }],
+  kpi_targets: [{ metric: '线索', current_value: 10, target_value: 300, unit: '条', dimension: 'ads' }],
+  budget_allocation: [],
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+}
+
+function sse(events: object[]): Response {
+  const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+}
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+describe('处方对话框', () => {
+  it('shows the saved prescription and the agree button, without a paste link', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo) => {
+      const url = String(input)
+      if (url.includes('zhangqian/latest')) return json({ discovery: { id: 'd1', confirmed_at: '2026-01-01' } })
+      if (url.includes('active-list')) return json({ goals: [{ id: 'g1', title: '十一月线索' }] })
+      if (url.includes('latest-draft')) {
+        return json({
+          prescription: {
+            id: 'p1',
+            status: 'draft',
+            content: draftContent,
+            intake: { business_goal: '300 条线索', timeline_urgency: 'short_term', monthly_budget_aud: 3700, budget_currency: 'NZD', priority_dimensions: [], notes: null },
+            agent_name: 'huatuo',
+            self_grade: { overall: 7, dimensions: {}, weaknesses: [{ dimension: 'realism', severity: 'low', text: 'realism 价格还不够具体' }] },
+          },
+        })
+      }
+      return json({ error: 'unexpected' }, 500)
+    }))
+
+    const view = render(<PrescriptionDialog clientId="c1" prescriptionId={null} goalId={null} supplementOf={null} reviseOf={null} />)
+    expect(await screen.findByText('先把价格写清楚')).toBeInTheDocument()
+    expect(screen.getByText('改落地页')).toBeInTheDocument()
+    expect(screen.getByText(/价格还不够具体/)).toBeInTheDocument()
+    expect(screen.queryByText('should-not-show')).not.toBeInTheDocument()
+    expect(screen.queryByText(/贴入处方草稿/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/诸葛亮/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/广告 Agent/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/huatuo/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '同意' })).toBeInTheDocument()
+    expect(document.querySelector('input[type="file"]')).toBeNull()
+    view.unmount()
+
+    render(<PrescriptionDialog clientId="c1" prescriptionId={null} goalId={null} supplementOf={null} reviseOf={null} />)
+    expect(await screen.findByText('先把价格写清楚')).toBeInTheDocument()
+    expect(screen.queryByText(/我刚才说/)).not.toBeInTheDocument()
+  })
+
+  it('sends a plain sentence to the existing generate endpoint', async () => {
+    const posts: Array<Record<string, unknown>> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('zhangqian/latest')) return json({ discovery: { id: 'd1', confirmed_at: '2026-01-01' } })
+      if (url.includes('active-list')) return json({ goals: [{ id: 'g1', title: '十一月线索' }] })
+      if (url.includes('latest-draft')) return json({ error: 'none' }, 404)
+      if (url.endsWith('/prescription/generate')) {
+        posts.push(JSON.parse(String(init?.body)))
+        return sse([
+          { type: 'started', prescription_id: 'p2' },
+          { type: 'done', prescription_id: 'p2', content: draftContent },
+        ])
+      }
+      return json({ error: 'unexpected' }, 500)
+    }))
+
+    render(<PrescriptionDialog clientId="c1" prescriptionId={null} goalId={null} supplementOf={null} reviseOf={null} />)
+    const box = await screen.findByRole('textbox', { name: '跟华佗说' })
+    fireEvent.change(box, { target: { value: '开一个要 300 条线索的方，预算 3700' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送' }))
+    expect(await screen.findByText('改落地页')).toBeInTheDocument()
+    expect(posts).toHaveLength(1)
+    expect(posts[0]).toMatchObject({
+      discovery_id: 'd1',
+      goal_id: 'g1',
+      intake: { monthly_budget_aud: 3700, budget_currency: 'NZD' },
+    })
+    expect(screen.queryByText(/\{/)).not.toBeInTheDocument()
+  })
+})

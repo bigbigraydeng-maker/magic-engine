@@ -20,7 +20,7 @@ describe('处方审阅确认', () => {
       <PrescriptionReviewActions onApprove={onApprove} onReject={onReject} isApproving={false} />,
     )
 
-    await user.click(screen.getByRole('button', { name: '✓ 批准并生成执行计划' }))
+    await user.click(screen.getByRole('button', { name: '同意' }))
     expect(onApprove).not.toHaveBeenCalled()
     expect(screen.getByRole('alertdialog', { name: '确认批准' })).toHaveTextContent(APPROVE_CONFIRM_TEXT)
     expect(screen.getByRole('alertdialog', { name: '确认批准' })).toHaveTextContent(APPROVE_SPEND_REMINDER)
@@ -31,7 +31,7 @@ describe('处方审阅确认', () => {
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(onApprove).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole('button', { name: '✓ 批准并生成执行计划' }))
+    await user.click(screen.getByRole('button', { name: '同意' }))
     await user.click(screen.getByRole('button', { name: '确定批准' }))
     expect(onApprove).toHaveBeenCalledTimes(1)
     expect(onReject).not.toHaveBeenCalled()
@@ -58,10 +58,16 @@ describe('处方审阅确认', () => {
 })
 
 describe('开方人与人工草稿提示', () => {
-  it('shows the prescriber', () => {
-    render(<PrescriberLine agentName="广告 Agent" />)
-    expect(screen.getByText('广告 Agent')).toBeInTheDocument()
-    expect(screen.getByText(/开方人/)).toBeInTheDocument()
+  it('shows the prescriber as 华佗 and hides internal names', () => {
+    const { rerender } = render(<PrescriberLine agentName="广告 Agent" />)
+    expect(screen.getByText('华佗')).toBeInTheDocument()
+    expect(screen.queryByText('广告 Agent')).not.toBeInTheDocument()
+    expect(screen.queryByText(/huatuo/i)).not.toBeInTheDocument()
+    rerender(<PrescriberLine agentName="huatuo" />)
+    expect(screen.getByText('华佗')).toBeInTheDocument()
+    expect(screen.queryByText(/huatuo/i)).not.toBeInTheDocument()
+    rerender(<PrescriberLine agentName="诸葛亮" />)
+    expect(screen.queryByText('诸葛亮')).not.toBeInTheDocument()
   })
 
   it('hides the line when the prescriber is unknown', () => {
@@ -71,7 +77,8 @@ describe('开方人与人工草稿提示', () => {
 
   it('says approving a manual draft records stages under the goal', () => {
     render(<ManualDraftBanner show />)
-    expect(screen.getByRole('status')).toHaveTextContent('未批准')
+    expect(screen.getByRole('status')).toHaveTextContent('还没同意')
+    expect(screen.getByRole('status')).not.toHaveTextContent('生成执行计划')
     expect(screen.getByRole('status')).toHaveTextContent('按阶段排好')
     expect(screen.getByRole('status')).not.toHaveTextContent('看板上会出现待办')
     expect(screen.getByRole('status')).not.toHaveTextContent('看板上的待办')
