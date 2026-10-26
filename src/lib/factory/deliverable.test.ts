@@ -14,10 +14,13 @@ describe('isAssetOnly', () => {
   })
 
   it('withAssetOnlyDeliverable keeps existing remotion fields', () => {
-    const marked = withAssetOnlyDeliverable({ notes: 'keep', remotion: { fps: 30 } })
+    const kept: { notes: string; remotion: Record<string, unknown> } = { notes: 'keep', remotion: { fps: 30 } }
+    const marked = withAssetOnlyDeliverable(kept)
     expect(marked.remotion).toEqual({ fps: 30, deliverable: 'asset_only' })
+    expect(marked.notes).toBe('keep')
     expect(isAssetOnly(marked)).toBe(true)
-    expect(withAssetOnlyDeliverable({ notes: 'new' }).remotion).toEqual({ deliverable: 'asset_only' })
+    const fresh: { notes: string; remotion?: Record<string, unknown> } = { notes: 'new' }
+    expect(withAssetOnlyDeliverable(fresh).remotion).toEqual({ deliverable: 'asset_only' })
   })
 
   it('false for near-miss or malformed markers', () => {

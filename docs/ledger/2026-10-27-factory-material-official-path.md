@@ -1,12 +1,14 @@
 ---
 id: 2026-10-27-factory-material-official-path
 title: 处方同意后只出素材，死信有限重跑，待审超时只写待办
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-27
 source: issue:3239
 verify_by: 2026-10-30
 verify_how: 合并后第一次自动跑，或用 dry_run=1 打这一条。cron_run_logs 里有 factory-dead-letter-rerun。点名不重跑的两张工单状态不变。待审催办只出现在今日待办，没有新的对外消息。
+done_on: 2026-10-27
+done_ref: pr:3259
 ---
 处方同意后走已有的新推广信号，只做素材，不批准、不入池、不改发布开关。
 缺文件或渲染工人离线最多自动重跑两次；文件太大先等体积补丁，不重跑。

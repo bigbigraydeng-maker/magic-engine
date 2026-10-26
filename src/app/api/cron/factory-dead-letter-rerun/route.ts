@@ -12,11 +12,27 @@ import {
   type DeadLetterRow,
   type DeadLetterStore,
   type RerunAction,
+  type RerunSummary,
 } from '@/lib/factory/dead-letter-rerun'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
+
+function receipt(summary: RerunSummary): Record<string, unknown> {
+  return {
+    ok: summary.ok,
+    dryRun: summary.dryRun,
+    processed: summary.processed,
+    rerun: summary.rerun,
+    planned: summary.planned,
+    escalated: summary.escalated,
+    held: summary.held,
+    unread: summary.unread,
+    failed: summary.failed,
+    ...(summary.reason ? { reason: summary.reason } : {}),
+  }
+}
 
 function store(): DeadLetterStore {
   return {
@@ -73,7 +89,7 @@ export async function GET(req: NextRequest) {
       completed: dryRun ? 0 : summary.rerun,
       failed: summary.failed,
       error: summary.ok ? undefined : summary.reason,
-      summary,
+      summary: receipt(summary),
     })
     return NextResponse.json(summary, { status: summary.ok ? 200 : 500 })
   } catch (error) {
