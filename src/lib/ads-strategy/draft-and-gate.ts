@@ -592,9 +592,11 @@ async function verifyAudiencesStillAttached(
   // 复用建后同一道闸（checkLaunch）的受众 blocker：名单缺失、放宽、优势受众开着都拒开。
   // 只取受众相关的 blocker —— 创意 / 版位等别的检查建后已过，这里不重复判。
   const hasIncluded = (p.draft.audienceIds?.length ?? 0) > 0
+  // 只给排除名单的草稿也要过「放宽 / 优势受众」两条：排除名单本身扩量时仍有效（Meta 文档：扩展不改排除），
+  // 但我们建的时候明确要求关掉优势受众，开前读到它被打开 = 设置在中途漂移，年龄等定向建议会被放宽，按保守口径拦下。
   const hasExcluded = (p.draft.excludedAudienceIds?.length ?? 0) > 0
   const report = checkLaunch({
-    ...adaptMetaAdSet(raw, [], { expectedGeo: null, isRetargeting: hasIncluded ? true : undefined }),
+    ...adaptMetaAdSet(raw, [], { expectedGeo: null, isRetargeting: hasIncluded || hasExcluded ? true : undefined }),
     ...(hasIncluded ? { expectedAudienceIds: p.draft.audienceIds } : {}),
     ...(hasExcluded ? { expectedExcludedAudienceIds: p.draft.excludedAudienceIds } : {}),
   })

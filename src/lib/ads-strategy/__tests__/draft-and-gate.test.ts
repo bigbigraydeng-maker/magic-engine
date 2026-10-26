@@ -1198,10 +1198,23 @@ describe('approveDraft — 开之前复核受众还在', () => {
     expect(updated.at(-1)?.status).toBe('blocked')
   })
 
-  it('只排除不包含 + 优势受众开着 → 照开（排除是硬规则，不算扩量风险）', async () => {
+  it('只排除不包含 + 优势受众开着 → 不开（设置中途漂移，保守拦下），状态改 blocked', async () => {
     mAdSet.mockResolvedValue({
       ...ATTACHED,
       targeting: { ...ATTACHED.targeting, custom_audiences: [], targeting_automation: { advantage_audience: 1 } },
+    })
+    const { sb, updated } = fakeSupabase({ ...AUD_READY, draft: { ...DRAFT, excludedAudienceIds: ['2222222'] } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('优势受众')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('只排除不包含 + 设置干净 → 照开（不因没有包含名单误拦）', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, custom_audiences: [], targeting_relaxation_types: undefined },
     })
     mActivate.mockResolvedValue({ ok: true })
     const { sb } = fakeSupabase({ ...AUD_READY, draft: { ...DRAFT, excludedAudienceIds: ['2222222'] } })
