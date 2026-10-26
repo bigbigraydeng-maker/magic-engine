@@ -2,6 +2,7 @@ import type {
   BudgetAllocationItem, DiagnosticDimension, KPITarget, PhaseInitiativeSeed,
   PrescriptionAction, PrescriptionContent, PrescriptionPhase,
 } from '@/types/diagnostic'
+import { parseAdPlays } from '@/lib/ads-strategy/plan-seed/ad-plays'
 
 export const MANUAL_PRESCRIPTION_AGENT = '广告 Agent'
 export const NO_COMPLETED_RUN_MESSAGE =
@@ -124,6 +125,11 @@ function parseSeed(raw: unknown, phaseNumber: number): StepResult<{ seed: PhaseI
   }
   if (raw.budget_percent != null && typeof raw.budget_percent !== 'number') {
     return fail(422, `阶段 ${phaseNumber} 的 budget_percent 必须是数字`)
+  }
+  if (raw.ad_plays !== undefined) {
+    const plays = parseAdPlays(raw.ad_plays)
+    if (!plays.ok) return fail(422, `阶段 ${phaseNumber} 的广告打法有误：${plays.error}`)
+    return { ok: true, seed: { ...raw, ad_plays: plays.plays } as unknown as PhaseInitiativeSeed }
   }
   return { ok: true, seed: raw as unknown as PhaseInitiativeSeed }
 }
