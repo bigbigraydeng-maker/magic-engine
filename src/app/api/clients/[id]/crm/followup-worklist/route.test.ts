@@ -84,6 +84,20 @@ describe('跟进名单接口', () => {
     expect(body).not.toContain('+64')
   })
 
+  it.each([
+    ['Sue +64 21 123 4567', '+64 21 123 4567'],
+    ['王女士 0211234567', '0211234567'],
+    ['Chris (021 987 6543) Brown', '987 6543'],
+  ])('🔴 名字里混着电话（%s）→ 响应里没有那串号码（Codex 复核 PR #3271）', async (displayName, digits) => {
+    mockFind.mockResolvedValue(result([entry({ displayName })]))
+    const body = (await (await GET(req(), params)).json()) as { entries: Array<{ name: string; headline: string | null }> }
+    expect(JSON.stringify(body)).not.toContain(digits)
+    // 只查客人写的两个字段：响应里的时间戳本来就有连续的数字，扫整个响应会误报。
+    for (const e of body.entries) {
+      expect((e.name + ' ' + (e.headline ?? '')).replace(/\D/g, '')).not.toMatch(/\d{6,}/)
+    }
+  })
+
   it('每条带直达这位客人抽屉的链接', async () => {
     const body = (await (await GET(req(), params)).json()) as { entries: Array<{ url: string }> }
     expect(body.entries[0].url).toBe('https://app.magicengine.com.au/dashboard/clients/cts/crm/all?contact=c1')

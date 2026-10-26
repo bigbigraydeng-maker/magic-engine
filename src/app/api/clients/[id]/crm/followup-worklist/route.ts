@@ -5,8 +5,9 @@
  * 再决定信怎么写、发给谁。名单怎么来的见 `lib/crm/assignee-worklist`。
  *
  * 🔴 **只读，没有任何写操作，也不发任何东西。**
- * 🔴 **响应里没有邮箱和电话**：名字过 `digestName`（名字本身可能是个邮箱地址），
- *    一行标题（表单选的团 / 邮件主题）过 `scrubContactDetails`；点开客人抽屉才看得到联系方式。
+ * 🔴 **响应里没有邮箱和电话**：名字先过 `digestName`（名字本身可能是个邮箱地址）再过
+ *    `scrubContactDetails`（名字里可能混着电话），一行标题（表单选的团 / 邮件主题）也过
+ *    `scrubContactDetails`；点开客人抽屉才看得到联系方式。
  * 鉴权跟 CRM 其他接口同一道（`requirePaidClientAccess`）：能看这个客户的 CRM 的人，才能看这份名单。
  */
 
@@ -53,7 +54,9 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
 
   const entries: WorklistEntryView[] = result.entries.slice(0, limit).map((e) => ({
     contactId: e.contactId,
-    name: digestName(e.displayName),
+    // 名字先去邮箱形状（digestName），再掐电话：名字里可能混着号码（「Sue +64 21 123 4567」），
+    // digestName 只认整串都是号码的情况（Codex 复核 PR #3271）。
+    name: scrubContactDetails(digestName(e.displayName)),
     sources: e.sources,
     waitingHours: e.waitingHours,
     waitingSince: e.waitingSince,
