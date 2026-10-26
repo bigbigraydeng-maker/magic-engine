@@ -159,6 +159,27 @@ describe('POST /api/clients/[id]/prescription/[pId]/refine — attachPlanSeed wi
     expect(saved.payload.content).toEqual({ summary: 'later' })
   })
 
+  it('restarts the generated_at clock so an old draft is not judged stale on first poll', async () => {
+    vi.mocked(refineHuatuoPrescription).mockResolvedValueOnce({
+      content: { summary: 'x', phases: [], kpi_targets: [], budget_allocation: [] },
+      self_grade: { overall: 85 },
+      meta: { agent_version: 'v1' },
+      trend_summary: null,
+      benchmarks_used: [],
+    } as never)
+    mockAttach.mockResolvedValue({ summary: 'x' })
+
+    const before = Date.now()
+    await POST(makeRequest(), { params: { id: 'client-1', pId: 'p1' } })
+
+    const mark = writes.find(
+      (w) => w.table === 'prescriptions' && w.op === 'update' && w.payload.status === 'generating',
+    )
+    expect(mark).toBeDefined()
+    expect(Date.parse(mark!.payload.generated_at as string)).toBeGreaterThanOrEqual(before)
+    await settledDraft()
+  })
+
   it('uses the value returned by attachPlanSeed and passes priorContent', async () => {
     const attachReturn = { summary: 'from-attach', phases: [], plan_seed: { marker: 1 } }
     mockAttach.mockResolvedValueOnce(attachReturn)

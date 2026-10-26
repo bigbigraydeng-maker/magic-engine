@@ -101,10 +101,16 @@ export async function POST(
 
   if (dErr || !disc) return errorResponse(404, '源发现报告不存在')
 
-  // 标记 generating（同步快速更新）
+  // 标记 generating（同步快速更新）。generated_at 重置为本轮开始时间：
+  // 10 分钟中断判断（failIfStaleGenerating）按它计时，不重置的话旧草稿一精修就被判中断。
   await supabaseAdmin
     .from('prescriptions')
-    .update({ status: 'generating', progress_note: '排队精修中…', error_message: null })
+    .update({
+      status: 'generating',
+      progress_note: '排队精修中…',
+      error_message: null,
+      generated_at: new Date().toISOString(),
+    })
     .eq('id', pId)
     .eq('client_id', clientId)
 
