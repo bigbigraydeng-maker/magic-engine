@@ -9,10 +9,10 @@
  * 桌面：右侧 520px 抽屉；移动：全屏。
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { PrescriptionContent, PrescriptionIntake, PrescriptionAction } from '@/types/diagnostic'
 import type { SelfGrade, HuatuoGenerationMeta } from '@/lib/huatuo/types'
-import { readHuatuoStream } from '@/lib/huatuo/stream-client'
+import { pollHuatuoPrescription } from '@/lib/huatuo/poll-prescription'
 import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
 import { adCurrencyLabel, adCurrencyPrefix, formatAdMoney } from '@/lib/ads/spend-figures'
 import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
@@ -64,11 +64,16 @@ export function InlinePrescriptionDrawer({
   // 批准状态
   const [approving, setApproving] = useState(false)
 
-  // body 滚动锁
+  const alive = useRef(true)
+
+  // body 滚动锁；关掉抽屉就不再改界面，后台开方继续写
   useEffect(() => {
     const orig = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = orig }
+    return () => {
+      alive.current = false
+      document.body.style.overflow = orig
+    }
   }, [])
 
   const modeTitle  = mode === 'supplement' ? '补充处方' : '修订处方'
@@ -130,34 +135,33 @@ export function InlinePrescriptionDrawer({
         throw new Error(msg)
       }
 
-      let streamErr: string | null = null
-      const ok = await readHuatuoStream(res, {
-        onStarted:  (id) => setPrescriptionId(id),
-        onProgress: (note) => setProgress(note),
-        onDone: (payload) => {
-          setPrescriptionId(payload.prescription_id)
-          setContent(payload.content)
-          setSelfGrade(payload.self_grade ?? null)
-          if (payload.meta) setGenMeta(payload.meta)
-        },
-        onError: (err) => { streamErr = err },
-      })
+      const accepted = await res.json() as { prescription_id?: string }
+      if (!accepted.prescription_id) throw new Error('没有拿到处方编号')
+      if (!alive.current) return
+      setPrescriptionId(accepted.prescription_id)
 
-      if (streamErr) {
-        setError(streamErr)
+      const outcome = await pollHuatuoPrescription(clientId, accepted.prescription_id, {
+        mode: 'generate',
+        onProgress: (note) => { if (alive.current && note) setProgress(note) },
+        isCancelled: () => !alive.current,
+      })
+      if (!alive.current) return
+      if (!outcome.ok || !outcome.snapshot.content) {
+        setError(outcome.ok ? '处方写好了但内容是空的，请刷新再看' : (outcome.error || '生成失败'))
         setStep('form')
-      } else if (!ok) {
-        setError('诸葛亮流意外关闭，请重试')
-        setStep('form')
-      } else {
-        setStep('review')
+        return
       }
+      setContent(outcome.snapshot.content)
+      setSelfGrade(outcome.snapshot.self_grade)
+      if (outcome.snapshot.generation_meta) setGenMeta(outcome.snapshot.generation_meta)
+      setStep('review')
     } catch (e) {
+      if (!alive.current) return
       setError(e instanceof Error ? e.message : '生成失败')
       setStep('form')
     } finally {
       clearInterval(timer)
-      setProgress(null)
+      if (alive.current) setProgress(null)
     }
   }, [goal, urgency, budget, budgetCurrency, notes, mode, priorPrescriptionId, clientId])
 
@@ -291,7 +295,7 @@ export function InlinePrescriptionDrawer({
               <p className="text-sm font-black text-slate-950">诸葛亮正在{modeTitle}…</p>
               <p className="min-h-[1.5em] text-sm font-semibold text-slate-500">{progress ?? ''}</p>
               <p className="text-xs tabular-nums text-slate-400">
-                已用时 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · 通常 60–150 秒
+                已用时 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · 通常 60–150 秒。关掉窗口也不会把已经开始的开方掐掉。
               </p>
             </div>
           )}
