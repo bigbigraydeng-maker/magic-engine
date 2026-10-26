@@ -23,6 +23,14 @@ export const LOGO_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 /** Exactly 6 hex digits with a leading #. */
 export const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 
+/** Optional music gain multiplier. Default 1 (no boost); values above 2 may clip, so check true peak yourself. */
+export const musicGainSchema = z
+  .number()
+  .finite()
+  .min(1, { message: '音乐增益必须在 1 到 3 之间' })
+  .max(3, { message: '音乐增益必须在 1 到 3 之间' })
+  .optional();
+
 const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f]*$/;
 
 /** Build a validator for a safe relative file name with an allowed extension. */
@@ -110,6 +118,7 @@ export const ListReelPropsSchema = z
       .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
+    musicGain: musicGainSchema,
     beats: z.array(z.number().finite().min(0).max(120)).max(80),
     hook: z
       .object({
