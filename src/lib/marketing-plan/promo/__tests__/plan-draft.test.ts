@@ -216,6 +216,30 @@ describe('attemptPlanDraft', () => {
     expect(used.scheduleRetry).not.toHaveBeenCalled()
   })
 
+  it('retries on the seed read_failed flag even when the reason text was rewritten', async () => {
+    const flagged = deps({
+      buildSeed: async () => ({
+        ...seed([]),
+        skipped: [{ step_key: 'play-1', why_empty: '没有合格的广告账户：读不到令牌权限' }],
+        read_failed: true,
+      }),
+    })
+    const retried = await attemptPlanDraft(request(), flagged)
+    expect(retried.retryable).toBe(true)
+    expect(flagged.scheduleRetry).toHaveBeenCalledWith(expect.objectContaining({ attempt: 2 }))
+    expect(flagged.insertPlan).not.toHaveBeenCalled()
+
+    const plain = deps({
+      buildSeed: async () => ({
+        ...seed([]),
+        skipped: [{ step_key: 'play-1', why_empty: '读不到令牌权限（timeout）' }],
+      }),
+    })
+    const stopped = await attemptPlanDraft(request(), plain)
+    expect(stopped.retryable).toBe(false)
+    expect(plain.scheduleRetry).not.toHaveBeenCalled()
+  })
+
   it('retries when the account list cannot be read, and drops an unowned account', async () => {
     const unread = deps({ loadAccounts: async () => { throw new AccountReadError() } })
     const retried = await attemptPlanDraft(request(), unread)

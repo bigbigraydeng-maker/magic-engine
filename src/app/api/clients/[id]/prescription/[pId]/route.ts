@@ -18,7 +18,7 @@ import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/c
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
 import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
-import { planDraftCardLine } from '@/lib/marketing-plan/promo/plan-draft-card'
+import { planDraftCardLine, planDraftCardView } from '@/lib/marketing-plan/promo/plan-draft-card'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -59,6 +59,9 @@ export async function GET(
       success: true,
       prescription,
       plan_draft_line: planDraftCardLine(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+      plan_draft: planDraftCardView(
         (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
       ),
     }, {

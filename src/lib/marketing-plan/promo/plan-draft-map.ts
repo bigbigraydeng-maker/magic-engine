@@ -5,7 +5,6 @@
 
 import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
 import { planDraftMissingPlaysLine, planDraftNoCountryLine, planDraftNoPeriodLine } from './plan-draft-card'
-import { isNetworkFailure } from './plan-draft-retry'
 import { parsePromoSpec, type PromoSpec } from './spec'
 import type { PlanSeed, PlanSeedStep } from '@/lib/ads-strategy/plan-seed/types'
 
@@ -30,8 +29,7 @@ const BUDGET_OVER = '日预算超过了这个账户或客户的上限，所以�
 const SHAPE_REJECTED = '草稿结构和推广计划的校验对不上，所以没有生成。'
 
 function seedLooksBroken(seed: PlanSeed): boolean {
-  const text = [...seed.notes, ...seed.skipped.map(row => row.why_empty)].join(' ')
-  return isNetworkFailure(text) || /超时/.test(text)
+  return seed.read_failed === true
 }
 
 function usableBudget(step: PlanSeedStep | undefined): number | null {

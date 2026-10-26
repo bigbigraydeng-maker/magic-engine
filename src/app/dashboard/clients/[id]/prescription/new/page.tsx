@@ -18,6 +18,7 @@ import {
   PrescriptionReviewActions,
 } from './review-actions'
 import { MANUAL_PRESCRIPTION_AGENT, manualSource } from '@/lib/diagnostic/manual-prescription'
+import { PlanDraftNotice } from './plan-draft-notice'
 import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
 import { pollHuatuoPrescription, type PrescriptionPollSnapshot } from '@/lib/huatuo/poll-prescription'
 
@@ -1095,7 +1096,8 @@ export default function NewPrescriptionPage() {
                 </Link>
               </div>
             ) : (
-              <div className="pt-2 pb-20 lg:pb-2">
+              <div className="pt-2 pb-20 lg:pb-2 space-y-3">
+                {prescriptionId && <PlanDraftNotice clientId={clientId} prescriptionId={prescriptionId} />}
                 <PrescriptionReviewActions
                   onApprove={() => void handleApprove()}
                   onReject={() => void handleReject()}

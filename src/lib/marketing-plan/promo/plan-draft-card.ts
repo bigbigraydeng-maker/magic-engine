@@ -63,3 +63,32 @@ export function planDraftCardLine(generationMeta: unknown): string {
   }
   return receipt.reason_text
 }
+
+export type PlanDraftCardTone = 'waiting' | 'ok' | 'warn' | 'info'
+
+export interface PlanDraftCardView {
+  tone: PlanDraftCardTone
+  text: string
+  /** false = a receipt is still expected (none yet, or a retry is queued). */
+  settled: boolean
+}
+
+/** Plain-language view for the review card. Never exposes the raw receipt. */
+export function planDraftCardView(generationMeta: unknown): PlanDraftCardView {
+  const receipt = receiptOf(generationMeta) as
+    | { status?: unknown; reason_code?: unknown; overlap_note?: unknown }
+    | null
+  const text = planDraftCardLine(generationMeta)
+  if (!receipt || text === PLAN_DRAFT_MISSING_LINE) {
+    return { tone: 'waiting', text: '计划草稿还在准备，或者这个客户没有打开自动起草。', settled: false }
+  }
+  const overlap = typeof receipt.overlap_note === 'string' && receipt.overlap_note !== ''
+  const full = overlap && !text.includes(PLAN_DRAFT_OVERLAP_NOTE) ? `${text}${PLAN_DRAFT_OVERLAP_NOTE}` : text
+  if (receipt.status === 'failed') {
+    return { tone: 'warn', text: full, settled: receipt.reason_code !== 'network' }
+  }
+  if (receipt.status === 'created' || receipt.status === 'already_exists') {
+    return { tone: overlap ? 'warn' : 'ok', text: full, settled: true }
+  }
+  return { tone: 'info', text: full, settled: true }
+}
