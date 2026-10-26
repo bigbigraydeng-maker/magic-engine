@@ -120,6 +120,10 @@ export interface GraphCustomAudience {
   name?: string
   subtype?: string
   approximate_count_lower_bound?: number
+  /** 受众是否可用：code 200 = 正常；读不到时缺省 */
+  operation_status?: { code?: number }
+  /** 受众是否能投出去：code 200 = 可投；读不到时缺省 */
+  delivery_status?: { code?: number }
   time_created?: number
   time_updated?: number
   retention_days?: number
@@ -222,8 +226,19 @@ export function fetchAdSettings(adAccountId: string, accessToken: string) {
 
 export function fetchCustomAudiences(adAccountId: string, accessToken: string) {
   return readList<GraphCustomAudience>(graphUrl(`${adAccountId}/customaudiences`, {
-    fields: 'id,name,subtype,approximate_count_lower_bound,time_created,time_updated,retention_days,rule',
+    fields: 'id,name,subtype,approximate_count_lower_bound,operation_status{code},delivery_status{code},time_created,time_updated,retention_days,rule',
     limit: PAGE_LIMIT,
+  }, accessToken))
+}
+
+/**
+ * 单个自定义受众（含所属账户号 account_id）。
+ * 2026-10-26 实测：Meta 的「账户受众列表」边会漏掉部分相似受众（直接按 id 读得到、account_id 也对，
+ * 但列表里没有），所以归属核对在列表里找不到时要用它补一次，不能直接判「不属于这个账户」。
+ */
+export function fetchCustomAudienceById(audienceId: string, accessToken: string) {
+  return readOne<GraphCustomAudience & { account_id?: string }>(graphUrl(audienceId, {
+    fields: 'id,name,subtype,account_id,approximate_count_lower_bound,operation_status{code},delivery_status{code}',
   }, accessToken))
 }
 

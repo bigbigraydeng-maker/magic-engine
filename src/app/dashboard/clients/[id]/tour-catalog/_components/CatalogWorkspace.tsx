@@ -15,6 +15,7 @@ import { AliasList } from './AliasList'
 import { AssistantDrawer } from './AssistantDrawer'
 import { ImportPanel } from './ImportPanel'
 import { NewTourEntry } from './NewTourDialog'
+import { incompleteNewTours } from './incomplete-new-tours'
 import { AssistantPanel } from './AssistantPanel'
 import { CatalogChangeFeed } from './CatalogChangeFeed'
 import { CatalogSettingsPanel } from './CatalogSettingsPanel'
@@ -549,13 +550,14 @@ function usePublishRequest(snapshot: CatalogSnapshotResponse, publishedVersion: 
 
 function WorkspaceDialogs(props: {
   clientId: string
+  snapshot: CatalogSnapshotResponse
   publish: PublishPreviewState
   state: WorkspaceState
   onChanged: () => void
   onPublished: (websiteSync: PublishResponse['websiteSync']) => void
   onRequested: (request: PublishRequestView) => void
 }): JSX.Element | null {
-  const { clientId, publish, state, onChanged, onRequested, onPublished } = props
+  const { clientId, snapshot, publish, state, onChanged, onRequested, onPublished } = props
   if (state.requestOpen) {
     return (
       <RequestPublishDialog
@@ -574,6 +576,7 @@ function WorkspaceDialogs(props: {
       <PublishDialog
         clientId={clientId}
         preview={publish.preview}
+        incompleteNewTours={incompleteNewTours(publish.preview, snapshot.tours, snapshot.departures)}
         onRefresh={publish.refresh}
         onClose={state.closePublish}
         onPublished={(websiteSync) => {
@@ -649,6 +652,7 @@ export function CatalogWorkspace(props: {
         />
         <WorkspaceDialogs
           clientId={clientId}
+          snapshot={snapshot}
           publish={publish}
           state={state}
           onChanged={onChanged}

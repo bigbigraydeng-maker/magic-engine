@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { afterCrmListReady } from '@/lib/crm/list-ready'
 import { useRecentWorkbenchThreads } from './useRecentWorkbenchThreads'
 import {
   useWorkbenchSuggestionFeedback,
@@ -255,23 +256,26 @@ export function ZhugeWorkbenchFab({
 
     let cancelled = false
 
-    void (async () => {
-      try {
-        const res = await fetch(`/api/clients/${clientId}/workbench-summary`, { cache: 'no-store' })
-        const json = await res.json() as WorkbenchSummaryResponse
-        if (!res.ok || !json.success || !json.summary || cancelled) return
-        setSummaryData(json.summary)
-        setRemoteSummary(mapSummary(json.summary))
-      } catch {
-        if (!cancelled) {
-          setRemoteSummary(null)
-          setSummaryData(null)
+    const cancelWait = afterCrmListReady(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/clients/${clientId}/workbench-summary`, { cache: 'no-store' })
+          const json = await res.json() as WorkbenchSummaryResponse
+          if (!res.ok || !json.success || !json.summary || cancelled) return
+          setSummaryData(json.summary)
+          setRemoteSummary(mapSummary(json.summary))
+        } catch {
+          if (!cancelled) {
+            setRemoteSummary(null)
+            setSummaryData(null)
+          }
         }
-      }
-    })()
+      })()
+    })
 
     return () => {
       cancelled = true
+      cancelWait()
     }
   }, [clientId])
 
