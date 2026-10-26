@@ -46,11 +46,30 @@ function money(cents: number): string {
   return (cents / 100).toFixed(2)
 }
 
+/** 把投放范围说成人话；一个都没填就说「还没填」。 */
+function targetingText(t: NonNullable<Extract<PromoStep, { kind: 'ads_campaign' }>['settings']['targeting']>): string {
+  const parts: string[] = []
+  if (t.city_keys.length > 0) parts.push(`${t.city_keys.length} 个城市`)
+  else if (t.countries.length > 0) parts.push(t.countries.join('、'))
+  if (t.age_min !== undefined && t.age_max !== undefined) parts.push(`${t.age_min}–${t.age_max} 岁`)
+  else if (t.age_min !== undefined) parts.push(`${t.age_min} 岁以上`)
+  else if (t.age_max !== undefined) parts.push(`${t.age_max} 岁以下`)
+  if (t.excluded_audience_refs.length > 0) parts.push(`排除 ${t.excluded_audience_refs.length} 个受众`)
+  return parts.length > 0 ? parts.join(' · ') : '还没填'
+}
+
 function adsView(step: Extract<PromoStep, { kind: 'ads_campaign' }>, accountLabels: Record<string, string | null>): StepView {
   const s = step.settings
+  const t = s.targeting
+  // 受众和投放范围是二选一；只显示真填了的那一种，别显示「受众：」后面空着。
+  const who = s.audience_ref.trim() !== ''
+    ? `受众：${s.audience_ref}`
+    : t !== undefined
+      ? `投放范围：${targetingText(t)}`
+      : '还没说投给谁'
   const lines = [
     `每天预算 ${money(s.daily_budget_cents)}（按广告账户的币种）`,
-    `广告账户：${publicAdAccountName(accountLabels[s.ad_account_id], s.ad_account_id)} · 受众：${s.audience_ref}`,
+    `广告账户：${publicAdAccountName(accountLabels[s.ad_account_id], s.ad_account_id)} · ${who}`,
     s.creative_refs.length > 0 ? `用 ${s.creative_refs.length} 个已批准的素材` : '还没选素材',
   ]
   if (s.paused_ranges.length > 0) {
