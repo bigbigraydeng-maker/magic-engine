@@ -42,19 +42,19 @@ describe('视觉方向保存', () => {
     )
     expect(screen.queryByText(/活动视觉要点/)).toBeNull()
     expect(screen.queryByText(/上传参考文件/)).toBeNull()
-    expect(screen.queryByText(/Image Generation Reference/)).toBeNull()
-    expect(screen.getByText('Visual Mood')).toBeTruthy()
+    expect(screen.queryByText(/出图参考说明/)).toBeNull()
+    expect(screen.getByText('整体氛围')).toBeTruthy()
   })
 
-  it('客户保存时不提交被丢掉的栏，带回的心情才显示 Saved', async () => {
+  it('客户保存时不提交被丢掉的栏，带回的心情才显示「已保存」', async () => {
     const fetchMock = vi.fn(echoSaved())
     vi.stubGlobal('fetch', fetchMock)
     render(
       <VisualDirectionSection campaign={campaign} clientId="client-1" onUpdated={vi.fn()} />,
     )
-    fireEvent.change(screen.getByPlaceholderText(/Autumn imperial Beijing/), { target: { value: '金秋' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save Visual Direction' }))
-    expect(await screen.findByText('Saved')).toBeTruthy()
+    fireEvent.change(screen.getByPlaceholderText(/秋日北京皇城/), { target: { value: '金秋' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存视觉方向' }))
+    expect(await screen.findByText('已保存')).toBeTruthy()
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
     expect(body).toEqual({
       vi_mood: '金秋',
@@ -66,15 +66,15 @@ describe('视觉方向保存', () => {
     expect(body.vi_reference_note).toBeUndefined()
   })
 
-  it('服务器丢掉客户提交的心情时不显示 Saved', async () => {
+  it('服务器丢掉客户提交的心情时不显示「已保存」', async () => {
     vi.stubGlobal('fetch', vi.fn(echoSaved({ vi_mood: null })))
     render(
       <VisualDirectionSection campaign={campaign} clientId="client-1" onUpdated={vi.fn()} />,
     )
-    fireEvent.change(screen.getByPlaceholderText(/Autumn imperial Beijing/), { target: { value: '金秋' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save Visual Direction' }))
+    fireEvent.change(screen.getByPlaceholderText(/秋日北京皇城/), { target: { value: '金秋' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存视觉方向' }))
     expect(await screen.findByText('没有存上，请再试一次')).toBeTruthy()
-    expect(screen.queryByText('Saved')).toBeNull()
+    expect(screen.queryByText('已保存')).toBeNull()
   })
 
   it('内部账号仍能保存视觉要点和参考说明', async () => {
@@ -86,8 +86,8 @@ describe('视觉方向保存', () => {
     expect(screen.getByText(/活动视觉要点/)).toBeTruthy()
     expect(screen.getByText(/上传参考文件/)).toBeTruthy()
     fireEvent.change(screen.getByPlaceholderText(/节日红金配色/), { target: { value: '红金' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save Visual Direction' }))
-    await waitFor(() => expect(screen.getByText('Saved')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: '保存视觉方向' }))
+    await waitFor(() => expect(screen.getByText('已保存')).toBeTruthy())
     const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
     expect(body.vi_input_notes).toBe('红金')
     expect(body.vi_input_file_urls).toEqual(['notes/a.pdf'])
