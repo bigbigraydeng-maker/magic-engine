@@ -68,7 +68,7 @@
 | 班期 | 25 March 2027（返 3 April 2027）。**Shanghai 5/25：页面没有** |
 | 含 | International and domestic airfares；Hotel accommodation as specified；English-speaking tour guide；Entrance fees and meals as specified；Land transfer。另："Tipping is prepaid in New Zealand before you leave." |
 | 不含（本团另有） | Optional activities (e.g. Shanghai Acrobatics Show, Maglev ride) |
-| 亮点 | 苏州 Master of the Nets Garden, Panmen, Shantang Street；无锡 Silk factory, Three Kingdoms City, Purple Sand Museum, Nanchang Ancient Street；Li Garden, Pearl Exhibition Centre, local market day；新市 Hanfu dress-up + afternoon tea；杭州 West Lake boat tour, Su Causeway, Leifeng Pagoda, Expo Center (G20)；Six Harmonies Pagoda, Longjing tea tasting at Meijiawu；上海 Bund, City God Temple quarter, World Cultural Heritage Art Exhibition Centre, Nanjing Road；Optional acrobatics show and Maglev ride (extra cost) |
+| 亮点 | 苏州 Master of the Nets Garden, Panmen, Shantang Street；无锡 Silk factory, Three Kingdoms City, Purple Sand Museum, Nanchang Ancient Street；Li Garden, Pearl Exhibition Centre, local market day；新市 "Hanfu dress-up for photos and afternoon tea in thousand-year-old Xinshi Town"（官网原文，2026-10-22 现场复核）；杭州 West Lake boat tour, Su Causeway, Leifeng Pagoda, Expo Center (G20)；Six Harmonies Pagoda, Longjing tea tasting at Meijiawu；上海 Bund, City God Temple quarter, World Cultural Heritage Art Exhibition Centre, Nanjing Road；Optional acrobatics show and Maglev ride (extra cost) |
 
 ### Natural China（Signature，`/tours/china/signature/landscapes`，抓取 2026-10-14）
 
