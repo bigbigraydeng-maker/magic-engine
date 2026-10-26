@@ -14,6 +14,7 @@ import { BatchHistory } from './BatchHistory'
 import { AliasList } from './AliasList'
 import { AssistantDrawer } from './AssistantDrawer'
 import { ImportPanel } from './ImportPanel'
+import { NewTourEntry } from './NewTourDialog'
 import { AssistantPanel } from './AssistantPanel'
 import { CatalogChangeFeed } from './CatalogChangeFeed'
 import { CatalogSettingsPanel } from './CatalogSettingsPanel'
@@ -174,7 +175,16 @@ function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
         >
           导出全部团（含未上架的修改，Excel 可直接打开）
         </a>
-        {snapshot.permissions.import ? null : (
+        {snapshot.permissions.import ? (
+          <NewTourEntry
+            clientId={clientId}
+            tours={snapshot.tours}
+            onCreated={id => {
+              onChanged()
+              onSelect(id)
+            }}
+          />
+        ) : (
           <p className="mt-2 px-1 text-xs font-semibold text-me-charcoal/70">{IMPORT_BY_ME_TEXT}</p>
         )}
       </div>
