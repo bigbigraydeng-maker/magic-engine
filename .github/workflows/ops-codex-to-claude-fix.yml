@@ -148,6 +148,15 @@ jobs:
             echo "::error::Unusable head sha for PR #${PR_NUMBER}: ${head_before}"
             exit 1
           fi
+          # The risk grade was computed against a specific head SHA (graded_head).
+          # If the head has moved since then — author pushed while plan was
+          # running, or CI triggered a merge — the grade may no longer be
+          # accurate. Abort this round rather than pushing on a stale grade.
+          graded_head="${{ steps.plan.outputs.graded_head }}"
+          if [ -n "$graded_head" ] && [ "$head_before" != "$graded_head" ]; then
+            echo "::error::Head moved between risk grading (${graded_head}) and fix dispatch (${head_before}) — this round's grade may be stale, aborting"
+            exit 1
+          fi
           echo "head_before=${head_before}" >> "$GITHUB_OUTPUT"
           echo "Branch head before this fix round: ${head_before}"
 
@@ -186,4 +195,10 @@ jobs:
           # Taken one step before the action ran, so "the head moved" means
           # this round moved it — see the `baseline` step above.
           HEAD_BEFORE: ${{ steps.baseline.outputs.head_before }}
+          # Context for the post-push comment: which findings this round
+          # addressed, and which risk grade was computed. Best-effort — a
+          # missing value omits the detail line, not the whole comment.
+          FINDINGS_SUMMARY: ${{ steps.plan.outputs.findings_summary }}
+          REVIEW_ID: ${{ steps.plan.outputs.review_id }}
+          RISK_GRADE: ${{ steps.plan.outputs.risk_grade }}
         run: node tools/ops-review-loop/src/mark-fix-outcome.mjs

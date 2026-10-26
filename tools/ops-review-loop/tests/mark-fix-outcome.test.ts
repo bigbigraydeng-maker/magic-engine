@@ -5,9 +5,13 @@ import { join } from 'node:path'
 
 const createIssueComment = vi.fn().mockResolvedValue({})
 const getPullRequest = vi.fn()
+const compareCommits = vi.fn().mockResolvedValue({ files: [] })
+const listPullRequestFiles = vi.fn().mockResolvedValue([])
 vi.mock('../src/github.mjs', () => ({
   createIssueComment: (...args: unknown[]) => createIssueComment(...args),
   getPullRequest: (...args: unknown[]) => getPullRequest(...args),
+  compareCommits: (...args: unknown[]) => compareCommits(...args),
+  listPullRequestFiles: (...args: unknown[]) => listPullRequestFiles(...args),
 }))
 
 function withEnv(overrides: Record<string, string>, run: () => Promise<unknown>) {
@@ -288,5 +292,170 @@ describe('mark-fix-outcome: pushed a commit and then failed', () => {
     expect(body).toContain('no commit was pushed')
     expect(body).toContain('eeeeeeeeee')
     expect(body).not.toContain('stage=fix-dispatched')
+  })
+})
+
+describe('mark-fix-outcome: detail block in push comment', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ops-loop-detail-'))
+    createIssueComment.mockClear()
+    getPullRequest.mockReset()
+    compareCommits.mockReset().mockResolvedValue({ files: [] })
+    listPullRequestFiles.mockReset().mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    vi.resetModules()
+  })
+
+  const HEAD_BEFORE = 'f'.repeat(40)
+  const HEAD_AFTER = '1a2b3c4d5e6f7890abcd1234567890abcdef1234'
+
+  it('includes the pushed SHA in the comment', async () => {
+    const eventPath = join(dir, 'event.json')
+    writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 200, head: { sha: 'evtsha0000' } } }))
+    getPullRequest.mockResolvedValue({ head: { sha: HEAD_AFTER }, body: '' })
+
+    await withEnv(
+      {
+        GITHUB_TOKEN: 'tok',
+        GITHUB_REPOSITORY: 'bigbigraydeng-maker/magic-engine',
+        GITHUB_EVENT_PATH: eventPath,
+        ROUND: '1',
+        OUTCOME: 'success',
+        HEAD_BEFORE,
+      },
+      () => import('../src/mark-fix-outcome.mjs')
+    )
+
+    const [, , , , body] = createIssueComment.mock.calls[0]
+    expect(body).toContain(HEAD_AFTER.slice(0, 10))
+  })
+
+  it('includes changed files from compareCommits in the comment', async () => {
+    const eventPath = join(dir, 'event.json')
+    writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 200, head: { sha: 'evtsha0000' } } }))
+    getPullRequest.mockResolvedValue({ head: { sha: HEAD_AFTER }, body: '' })
+    compareCommits.mockResolvedValue({
+      files: [
+        { filename: 'src/lib/foo.ts', status: 'modified' },
+        { filename: 'src/lib/bar.ts', status: 'added' },
+      ],
+    })
+
+    await withEnv(
+      {
+        GITHUB_TOKEN: 'tok',
+        GITHUB_REPOSITORY: 'bigbigraydeng-maker/magic-engine',
+        GITHUB_EVENT_PATH: eventPath,
+        ROUND: '1',
+        OUTCOME: 'success',
+        HEAD_BEFORE,
+      },
+      () => import('../src/mark-fix-outcome.mjs')
+    )
+
+    const [, , , , body] = createIssueComment.mock.calls[0]
+    expect(body).toContain('本轮改动文件')
+    expect(body).toContain('src/lib/foo.ts')
+    expect(body).toContain('src/lib/bar.ts')
+  })
+
+  it('includes the review link when FINDINGS_SUMMARY and REVIEW_ID are set', async () => {
+    const eventPath = join(dir, 'event.json')
+    writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 200, head: { sha: 'evtsha0000' } } }))
+    getPullRequest.mockResolvedValue({ head: { sha: HEAD_AFTER }, body: '' })
+
+    await withEnv(
+      {
+        GITHUB_TOKEN: 'tok',
+        GITHUB_REPOSITORY: 'bigbigraydeng-maker/magic-engine',
+        GITHUB_EVENT_PATH: eventPath,
+        ROUND: '1',
+        OUTCOME: 'success',
+        HEAD_BEFORE,
+        FINDINGS_SUMMARY: 'review summary, src/lib/foo.ts:42',
+        REVIEW_ID: '999',
+      },
+      () => import('../src/mark-fix-outcome.mjs')
+    )
+
+    const [, , , , body] = createIssueComment.mock.calls[0]
+    expect(body).toContain('处理的审查意见')
+    expect(body).toContain('review summary')
+    expect(body).toContain('#pullrequestreview-999')
+  })
+
+  it('includes risk grade when RISK_GRADE is set', async () => {
+    const eventPath = join(dir, 'event.json')
+    writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 200, head: { sha: 'evtsha0000' } } }))
+    getPullRequest.mockResolvedValue({ head: { sha: HEAD_AFTER }, body: '' })
+
+    await withEnv(
+      {
+        GITHUB_TOKEN: 'tok',
+        GITHUB_REPOSITORY: 'bigbigraydeng-maker/magic-engine',
+        GITHUB_EVENT_PATH: eventPath,
+        ROUND: '1',
+        OUTCOME: 'success',
+        HEAD_BEFORE,
+        RISK_GRADE: 'B',
+      },
+      () => import('../src/mark-fix-outcome.mjs')
+    )
+
+    const [, , , , body] = createIssueComment.mock.calls[0]
+    expect(body).toContain('风险级别')
+    expect(body).toContain('B')
+  })
+
+  it('shows "读取失败" when compareCommits throws', async () => {
+    const eventPath = join(dir, 'event.json')
+    writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 200, head: { sha: 'evtsha0000' } } }))
+    getPullRequest.mockResolvedValue({ head: { sha: HEAD_AFTER }, body: '' })
+    compareCommits.mockRejectedValue(new Error('Not Found'))
+
+    await withEnv(
+      {
+        GITHUB_TOKEN: 'tok',
+        GITHUB_REPOSITORY: 'bigbigraydeng-maker/magic-engine',
+        GITHUB_EVENT_PATH: eventPath,
+        ROUND: '1',
+        OUTCOME: 'success',
+        HEAD_BEFORE,
+      },
+      () => import('../src/mark-fix-outcome.mjs')
+    )
+
+    const [, , , , body] = createIssueComment.mock.calls[0]
+    expect(body).toContain('读取失败')
+  })
+
+  it('warns when post-push risk re-check finds A-level', async () => {
+    const eventPath = join(dir, 'event.json')
+    writeFileSync(eventPath, JSON.stringify({ pull_request: { number: 200, head: { sha: 'evtsha0000' } } }))
+    getPullRequest.mockResolvedValue({ head: { sha: HEAD_AFTER }, body: '' })
+    listPullRequestFiles.mockResolvedValue([
+      { filename: '.github/workflows/ci.yml', status: 'modified' },
+    ])
+
+    await withEnv(
+      {
+        GITHUB_TOKEN: 'tok',
+        GITHUB_REPOSITORY: 'bigbigraydeng-maker/magic-engine',
+        GITHUB_EVENT_PATH: eventPath,
+        ROUND: '1',
+        OUTCOME: 'success',
+        HEAD_BEFORE,
+      },
+      () => import('../src/mark-fix-outcome.mjs')
+    )
+
+    const [, , , , body] = createIssueComment.mock.calls[0]
+    expect(body).toContain('A 级')
+    expect(body).toContain('子牙')
   })
 })

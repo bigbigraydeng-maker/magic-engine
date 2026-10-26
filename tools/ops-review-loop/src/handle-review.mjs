@@ -16,12 +16,13 @@
  * this file is the I/O glue around it.
  */
 import { readFileSync } from 'node:fs'
-import { createIssueComment, getPullRequest, listCheckRunsForRef, listIssueComments, listReviewComments } from './github.mjs'
+import { createIssueComment, getPullRequest, listCheckRunsForRef, listIssueComments, listPullRequestFiles, listReviewComments } from './github.mjs'
 import { buildMarker, parseMarkers } from './markers.mjs'
 import { decideStage } from './plan.mjs'
 import { setOutput } from './output.mjs'
 import { buildFixPrompt } from './prompt.mjs'
 import { waitForRequiredCheck } from './poll.mjs'
+import { classifyRisk, readDeclaredRisk } from './risk.mjs'
 import { isActionable } from './severity.mjs'
 
 const MAX_ROUNDS = 3
@@ -213,19 +214,69 @@ switch (plan.action) {
     break
   }
   case 'dispatch-fix': {
-    // Codex finding (PR #906, P2): this case used to post the fix-dispatched
-    // marker itself, before the Claude Action step even ran — so a timeout or
-    // failed push still permanently consumed a round. The marker is now
-    // posted by mark-fix-outcome.mjs, and only on success.
+    // --- Risk gate: A-level PRs must not receive automated pushes ----------
+    // Incident #2131: the bot pushed after 子牙 signed off, silently replacing
+    // the reviewed code. The fix: compute the risk grade the same way the
+    // merge gate does (classifyRisk + declared floor) and refuse to push when
+    // the grade is A or unreadable.
+    let riskGrade = 'A'
+    let riskError = null
+    let riskReasons = []
+    let gradedHead = null
+    try {
+      const prData = await getPullRequest(token, owner, repo, pr)
+      gradedHead = prData?.head?.sha ?? null
+      const prBody = typeof prData?.body === 'string' ? prData.body : ''
+      const declared = readDeclaredRisk(prBody)
+      const files = await listPullRequestFiles(token, owner, repo, pr)
+      const rating = classifyRisk({
+        files: files.map((f) => ({
+          filename: f.filename,
+          status: f.status,
+          previous_filename: f.previous_filename,
+        })),
+        declaredRisk: declared.risk,
+        declaredUnreadable: declared.unreadable,
+      })
+      riskGrade = rating.risk
+      riskReasons = rating.reasons ?? []
+    } catch (err) {
+      riskError = err instanceof Error ? err.message : String(err)
+    }
+
+    if (riskGrade === 'A' || riskError) {
+      // Dedup: one "A-level blocked" comment per head sha is enough.
+      // Without this, every Codex review on the same A-level sha posts
+      // another identical comment.
+      const alreadyBlocked = markers.some((m) => m.stage === 'a-level-blocked' && m.sha === sha)
+      if (alreadyBlocked) {
+        console.log(`A-level PR #${pr} already has a-level-blocked marker for ${sha} — not posting again`)
+        setOutput('action', 'a-level-blocked')
+        break
+      }
+      const reason = riskError
+        ? `风险判定失败（${riskError}），按 A 处理`
+        : riskReasons.length
+          ? riskReasons.join('；')
+          : '改动文件命中 A 级规则'
+      const reviewLink = `https://github.com/${owner}/${repo}/pull/${pr}#pullrequestreview-${review.id}`
+      const marker = buildMarker({ stage: 'a-level-blocked', pr, sha })
+      await createIssueComment(
+        token,
+        owner,
+        repo,
+        pr,
+        `**这是 A 级改动，自动修复不推送**\n\n${reason}。请作者自己处理这条审查意见：${reviewLink}\n\n${marker}`,
+      )
+      console.log(`A-level PR #${pr} — skipping auto-fix dispatch (${reason})`)
+      setOutput('action', 'a-level-blocked')
+      break
+    }
+
+    // --- B/C: proceed with automated fix -----------------------------------
     const findingsText = actionableFindings
       .map((f, i) => `${i + 1}. [${f.source}]\n${f.body.trim()}`)
       .join('\n\n')
-    // The findings block is attacker-influenced text: anyone who can get words
-    // into a Codex review body gets those words into a prompt for a run that
-    // commits and pushes. Issue #939 required this surface be re-checked
-    // before the Codex bot was allowlisted on the action — the fencing and its
-    // adversarial tests live in ./prompt.mjs (a script cannot be imported by a
-    // test without executing, hence the separate module).
     const prompt = buildFixPrompt({
       round: plan.round,
       maxRounds: MAX_ROUNDS,
@@ -235,6 +286,10 @@ switch (plan.action) {
     setOutput('action', 'dispatch-fix')
     setOutput('round', String(plan.round))
     setOutput('prompt', prompt)
+    setOutput('risk_grade', riskGrade)
+    setOutput('findings_summary', actionableFindings.map((f) => f.source).join(', '))
+    setOutput('review_id', String(review.id))
+    if (gradedHead) setOutput('graded_head', gradedHead)
     break
   }
   default:
