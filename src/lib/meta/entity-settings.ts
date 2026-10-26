@@ -293,6 +293,30 @@ export interface GraphHeartbeatAdset {
 const HEARTBEAT_STATUSES = ['ACTIVE', 'WITH_ISSUES', 'PENDING_REVIEW', 'IN_PROCESS', 'DISAPPROVED', 'PREAPPROVED']
 const HEARTBEAT_STATUS_FILTER = JSON.stringify([{ field: 'effective_status', operator: 'IN', value: HEARTBEAT_STATUSES }])
 
+/**
+ * 只读一页的广告组读取（给「实时在投合计」用）：状态过滤由调用方传（覆盖预算核算要算的全部在投状态，
+ * 心跳自己的 HEARTBEAT_STATUSES 不含 PENDING_BILLING_INFO）；**不跟分页**——有下一页就标 incomplete，
+ * 让调用方回落快照，这样每个账户的实际 HTTP 请求数就是 1（不会被 readList 的 25 页翻页放大）。
+ */
+export async function fetchAdsetsSinglePage(
+  adAccountId: string,
+  accessToken: string,
+  statuses: readonly string[],
+): Promise<GraphReadResult<GraphHeartbeatAdset>> {
+  const got = await fetchJson(graphUrl(`${adAccountId}/adsets`, {
+    fields: 'id,name,campaign_id,effective_status,daily_budget,lifetime_budget,created_time,start_time,updated_time,adset_schedule,is_dynamic_creative',
+    filtering: JSON.stringify([{ field: 'effective_status', operator: 'IN', value: [...statuses] }]),
+    limit: PAGE_LIMIT,
+  }, accessToken))
+  if (!got.ok) return { rows: [], complete: false, error: got.error }
+  const envelope = (got.body ?? {}) as GraphEnvelope
+  const rows = Array.isArray(envelope.data) ? (envelope.data as GraphHeartbeatAdset[]) : []
+  if (envelope.paging?.next) {
+    return { rows, complete: false, error: { status: 0, code: null, message: 'more than one page; not followed' } }
+  }
+  return { rows, complete: true, error: null }
+}
+
 export function fetchHeartbeatAdsets(adAccountId: string, accessToken: string) {
   return readList<GraphHeartbeatAdset>(graphUrl(`${adAccountId}/adsets`, {
     fields: 'id,name,campaign_id,effective_status,daily_budget,lifetime_budget,created_time,start_time,updated_time,adset_schedule,is_dynamic_creative',
