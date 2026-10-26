@@ -22,7 +22,7 @@ describe('CompletenessCard', () => {
     expect(screen.getByTestId('completeness-card').textContent).toMatch(/还差 \d+ 项/)
     fireEvent.click(screen.getByRole('button'))
     expect(screen.getByText(/主图 — 没有主图/)).toBeTruthy()
-    expect(screen.getByText(/官网详情页上的地图能出来/)).toBeTruthy()
+    expect(screen.getByText(/官网有这个团的路线地图/)).toBeTruthy()
   })
 })
 
