@@ -541,3 +541,112 @@ describe('pausePublished — 回读发现不是暂停时补一刀', () => {
     expect(calls).toHaveLength(3) // 失败了也继续试系列
   })
 })
+
+describe('targetingFor — 自定义受众（包含 / 排除）', () => {
+  const targetingOf = () =>
+    JSON.parse(calls.find((c) => c.url.includes('/adsets') && c.method === 'POST')!.body.get('targeting')!)
+
+  it('有包含受众 → custom_audiences + 关掉受众扩展', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused({ ...DRAFT, audienceIds: ['1111111', '2222222'] }, 'act_1', 'tok')
+    const t = targetingOf()
+    expect(t.custom_audiences).toEqual([{ id: '1111111' }, { id: '2222222' }])
+    expect(t.targeting_relaxation_types).toEqual({ custom_audience: 0, lookalike: 0 })
+    expect(t.excluded_custom_audiences).toBeUndefined()
+  })
+
+  it('有排除受众 → excluded_custom_audiences，不带包含受众也不带扩展开关', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused({ ...DRAFT, excludedAudienceIds: ['3333333'] }, 'act_1', 'tok')
+    const t = targetingOf()
+    expect(t.excluded_custom_audiences).toEqual([{ id: '3333333' }])
+    expect(t.custom_audiences).toBeUndefined()
+    expect(t.targeting_relaxation_types).toBeUndefined()
+  })
+
+  it('都没给（含空数组）→ 键集合不变，仍带 targeting_automation', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    expect(Object.keys(targetingOf()).sort()).toEqual([
+      'age_max', 'age_min', 'geo_locations', 'targeting_automation',
+    ])
+    expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 0 })
+
+    calls = []
+    await publishDraftPaused({ ...DRAFT, audienceIds: [], excludedAudienceIds: [] }, 'act_1', 'tok')
+    expect(Object.keys(targetingOf()).sort()).toEqual([
+      'age_max', 'age_min', 'geo_locations', 'targeting_automation',
+    ])
+    expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 0 })
+  })
+
+  it('带受众时其余键不变，且系列 / 组 / 广告仍是 PAUSED', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(
+      { ...DRAFT, audienceIds: ['1111111'], excludedAudienceIds: ['3333333'] },
+      'act_1', 'tok',
+    )
+    const t = targetingOf()
+    expect(Object.keys(t).sort()).toEqual([
+      'age_max', 'age_min', 'custom_audiences', 'excluded_custom_audiences',
+      'geo_locations', 'targeting_automation', 'targeting_relaxation_types',
+    ])
+    expect(t.targeting_automation).toEqual({ advantage_audience: 0 })
+
+    const campaign = calls.find((c) => c.url.includes('/campaigns') && c.method === 'POST')!
+    const adset = calls.find((c) => c.url.includes('/adsets') && c.method === 'POST')!
+    const ad = calls.find((c) => c.url.includes('/ads') && c.method === 'POST')!
+    expect(campaign.body.get('status')).toBe('PAUSED')
+    expect(adset.body.get('status')).toBe('PAUSED')
+    expect(ad.body.get('status')).toBe('PAUSED')
+
+    // 受众路径也要守住前两次试跑撞出来的两条 Meta 规则
+    expect(adset.body.get('bid_strategy')).toBe('LOWEST_COST_WITHOUT_CAP')
+    expect(campaign.body.get('is_adset_budget_sharing_enabled')).toBe('false')
+    expect([...adset.body.keys()].filter((k) => k !== 'access_token').sort()).toEqual([
+      'bid_strategy', 'billing_event', 'campaign_id', 'daily_budget', 'destination_type', 'end_time',
+      'name', 'optimization_goal', 'promoted_object', 'start_time', 'status', 'targeting',
+    ])
+  })
+
+  it('视频养受众（video_thruplay）+ 受众：版位锁定与 custom_audiences / excluded_custom_audiences 并存', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(
+      {
+        ...DRAFT,
+        kind: 'video_thruplay',
+        creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v1' }],
+        audienceIds: ['1111111'],
+        excludedAudienceIds: ['3333333'],
+      },
+      'act_1', 'tok',
+    )
+    expect(Object.keys(targetingOf()).sort()).toEqual([
+      'age_max', 'age_min', 'custom_audiences', 'excluded_custom_audiences',
+      'geo_locations', 'publisher_platforms', 'targeting_automation', 'targeting_relaxation_types',
+    ])
+    expect(targetingOf().custom_audiences).toEqual([{ id: '1111111' }])
+    expect(targetingOf().excluded_custom_audiences).toEqual([{ id: '3333333' }])
+    expect(Array.isArray(targetingOf().publisher_platforms)).toBe(true)
+    expect(targetingOf().publisher_platforms.length).toBeGreaterThan(0)
+    expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 0 })
+  })
+
+  it('视频养受众只给排除受众：publisher_platforms 在、excluded_custom_audiences 在、没有 custom_audiences', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    await publishDraftPaused(
+      {
+        ...DRAFT,
+        kind: 'video_thruplay',
+        creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v1' }],
+        excludedAudienceIds: ['3333333'],
+      },
+      'act_1', 'tok',
+    )
+    expect(Object.keys(targetingOf()).sort()).toEqual([
+      'age_max', 'age_min', 'excluded_custom_audiences', 'geo_locations',
+      'publisher_platforms', 'targeting_automation',
+    ])
+    expect(targetingOf().custom_audiences).toBeUndefined()
+  })
+})
