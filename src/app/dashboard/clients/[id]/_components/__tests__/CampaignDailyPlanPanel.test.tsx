@@ -290,7 +290,7 @@ describe('CampaignDailyPlanPanel — Reel card points to the Reels tab only', ()
 })
 
 describe('CampaignDailyPlanPanel — conversion goal vs publishing destination (Build Control TRUTHFUL READINESS)', () => {
-  it('shows lead_form_submit as 转化目标 with a Chinese explainer; destination stays UNKNOWN and never echoes the CTA', async () => {
+  it('shows lead_form_submit as 转化目标 with a Chinese explainer; destination stays 未设定 and never echoes the CTA', async () => {
     mockFetchOnce({
       success: true,
       campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'lead_form_submit' },
@@ -317,14 +317,14 @@ describe('CampaignDailyPlanPanel — conversion goal vs publishing destination (
     expect(screen.getByText('lead_form_submit')).toBeInTheDocument()
     expect(screen.getByText(/用户在落地页提交表单即算转化/)).toBeInTheDocument()
 
-    // Destination row explicitly says UNKNOWN / 未连接; the primary_cta must
+    // Destination row explicitly says 未设定 (not set yet); the primary_cta must
     // NOT be echoed as a destination.
     expect(screen.getByText(/发布目的地/)).toBeInTheDocument()
-    expect(screen.getByText('UNKNOWN')).toBeInTheDocument()
+    expect(screen.getByText('未设定')).toBeInTheDocument()
     expect(screen.getByText(/等待发布桥确认，不经旧运营台/)).toBeInTheDocument()
 
-    // Publish authorisation stays NOT_AUTHORIZED.
-    expect(screen.getByText('NOT_AUTHORIZED')).toBeInTheDocument()
+    // Publish authorisation stays 未授权.
+    expect(screen.getByText('未授权')).toBeInTheDocument()
   })
 })
 
@@ -375,7 +375,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     expect(screen.getByText(/发布后系统会自动在这条帖子的第一条评论里贴/)).toBeInTheDocument()
     expect(screen.getByText('Post 需修改')).toBeInTheDocument()
     expect(screen.getByText(/不代表事实核验、Story\/Reel 通过、生成、排期、Provider 或发布授权/)).toBeInTheDocument()
-    expect(screen.getByText('NOT_AUTHORIZED')).toBeInTheDocument()
+    expect(screen.getByText('未授权')).toBeInTheDocument()
     expect(screen.queryByText(/Launch Hub/i)).not.toBeInTheDocument()
     expect(document.querySelector('a[href*="/dashboard/content"]')).toBeNull()
   })
@@ -390,8 +390,8 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    await screen.findByText('发布队列 / Publish Queue')
-    expect(screen.getByText('Ready 1/1')).toBeInTheDocument()
+    await screen.findByText('发布队列')
+    expect(screen.getByText('可排期 1/1')).toBeInTheDocument()
     expect(screen.getByText('待排期')).toBeInTheDocument()
     expect(screen.getByText('未排期')).toBeInTheDocument()
     expect(screen.getByText('未发布')).toBeInTheDocument()
@@ -435,7 +435,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     fireEvent.click(await screen.findByRole('button', { name: '生成发布准备回执' }))
 
     await screen.findByText('✓ 发布准备回执已生成')
-    expect(screen.getByText('Inngest 已记录')).toBeInTheDocument()
+    expect(screen.getByText('回执已记录')).toBeInTheDocument()
     // the auto-publish section is handed this exact plan's identity and the reviewed dates from the receipt
     const lastProps = autoPublishProps.mock.calls.at(-1)?.[0] as Record<string, unknown>
     expect(lastProps).toMatchObject({
@@ -478,7 +478,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     fireEvent.change(screen.getByPlaceholderText('如需修改，请写明原因'), {
       target: { value: 'Use a stronger opening line' },
     })
-    fireEvent.click(screen.getAllByRole('radio', { name: 'FAIL' })[2])
+    fireEvent.click(screen.getAllByRole('radio', { name: '不通过' })[2])
     fireEvent.change(screen.getAllByPlaceholderText('说明未通过原因')[0], {
       target: { value: 'Logo missing' },
     })
@@ -523,7 +523,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     const passButton = screen.getByRole('button', { name: 'Post 通过' })
     expect(passButton).toBeDisabled()
 
-    const passRadios = screen.getAllByRole('radio', { name: 'PASS' })
+    const passRadios = screen.getAllByRole('radio', { name: '通过' })
     passRadios.forEach(radio => fireEvent.click(radio))
 
     // Still disabled: the two factual checks need a source ref.
@@ -552,7 +552,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
     await screen.findByText('Facebook Post 审核')
 
-    screen.getAllByRole('radio', { name: 'PASS' }).forEach(radio => fireEvent.click(radio))
+    screen.getAllByRole('radio', { name: '通过' }).forEach(radio => fireEvent.click(radio))
     const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
     fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
     fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
@@ -579,7 +579,7 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
     await screen.findByText('Facebook Post 审核')
 
-    screen.getAllByRole('radio', { name: 'PASS' }).forEach(radio => fireEvent.click(radio))
+    screen.getAllByRole('radio', { name: '通过' }).forEach(radio => fireEvent.click(radio))
     const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
     fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
     fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
