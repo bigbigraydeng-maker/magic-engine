@@ -90,6 +90,7 @@ export async function executePrescriptionRefine(input: RefineJobInput): Promise<
         onProgress: (note) => noteProgress(clientId, prescriptionId, note),
       },
     ))
+    // 精修重写了内容：用新内容的打法重建计划草稿种子（某阶段打法被校验整组丢掉时，按阶段号带回上一版该阶段的；LLM 没写的阶段不补）
     result.content = await attachPlanSeed(result.content, {
       clientId,
       goalId: input.goal?.id ?? null,

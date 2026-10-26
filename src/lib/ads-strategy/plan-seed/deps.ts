@@ -6,8 +6,18 @@ import { fetchPageLeadForms } from '@/lib/meta/lead-forms'
 import { GRAPH_BASE } from '@/lib/meta/graph-base'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { getStoredPageToken, resolveMetaTokenForClient } from '@/lib/meta/token-manager'
+import {
+  readHeartbeatAccount,
+  defaultFetchers,
+  type HeartbeatFetchers,
+} from '@/lib/ads-strategy/heartbeat/read'
+import { fetchAdsetsSinglePage } from '@/lib/meta/entity-settings'
+import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 import type { PlanSeedDeps } from './build'
 import type { ReadState } from './eligibility'
+import { LIVE_READ_TIMEOUT_MS } from './constants'
+import { liveDeliveringFromRead, type LiveDelivering } from './live-delivering'
+import { sanitizeReason } from './sanitize'
 
 /** 一次 Graph GET 的结果：成功带 JSON，失败带中文原因（不含 URL / token）。 */
 type GraphResult = { ok: true; json: unknown } | { ok: false; reason: string }
@@ -38,13 +48,6 @@ function classifyGraphError(status: number, body: unknown): string {
   return 'Meta 接口返回错误'
 }
 
-/** 清洗原因字符串，抹掉可能泄露的 token / 长串。 */
-function sanitizeReason(reason: string): string {
-  return reason
-    .replace(/access_token=[^&\s]+/gi, 'access_token=***')
-    .replace(/Bearer\s+[A-Za-z0-9._~+\/=-]+/gi, 'Bearer ***')
-    .replace(/[A-Za-z0-9_-]{20,}/g, '***')
-}
 
 /** 只读 GET 一个 Graph URL；失败时返回中文原因，绝不泄露 URL / token。 */
 export async function graphGetJson(url: string, token: string): Promise<GraphResult> {
@@ -247,6 +250,66 @@ export async function loadPromotePages(
   return { state: 'ok', value: ids }
 }
 
+export interface LiveReadOverrides {
+  timeoutMs?: number
+  resolveToken?: (clientId: string) => Promise<{ token: string } | null>
+  fetchers?: HeartbeatFetchers
+}
+
+/** No-op fetchers for the ads and insights steps: the live read only needs account + adsets (2 Graph calls, not 4). An empty complete result classifies as ok for these kinds; the adsets step still fails on an empty list. */
+const NOOP_ADS: HeartbeatFetchers['ads'] = async () => ({ rows: [], complete: true, error: null })
+const NOOP_INSIGHTS: HeartbeatFetchers['insights'] = async () => ({
+  rows: [],
+  complete: true,
+  error: null,
+})
+
+/** Production adsets read for the live number: ONE page (never follows paging.next), and the status filter is the same set the snapshot budget accounting counts as delivering (includes PENDING_BILLING_INFO, which the heartbeat filter does not). More than one page => incomplete => caller falls back to the snapshot. */
+const LIVE_ADSETS: HeartbeatFetchers['adsets'] = (adAccountId, accessToken) =>
+  fetchAdsetsSinglePage(adAccountId, accessToken, [...DELIVERING_STATUSES])
+
+/** Live-read fetchers: account comes from `base`; adsets is the single-page delivering-status read unless a test passes its own `adsets`; ads + insights are always the no-ops, whatever `base` holds. */
+function liveFetchers(base: HeartbeatFetchers, useDefaultAdsets: boolean): HeartbeatFetchers {
+  return { ...base, adsets: useDefaultAdsets ? LIVE_ADSETS : base.adsets, ads: NOOP_ADS, insights: NOOP_INSIGHTS }
+}
+
+/** Live read of one account's delivering budget. Never throws; any failure or timeout -> null. The token never leaves this function. */
+export async function readLiveDeliveringProd(
+  clientId: string,
+  adAccountId: string,
+  overrides: LiveReadOverrides = {},
+): Promise<LiveDelivering | null> {
+  const timeoutMs = overrides.timeoutMs ?? LIVE_READ_TIMEOUT_MS
+  const resolveToken = overrides.resolveToken ?? resolveMetaTokenForClient
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs)
+  })
+  const work = (async (): Promise<LiveDelivering | null> => {
+    const resolved = await resolveToken(clientId)
+    if (resolved === null) return null
+    const read = await readHeartbeatAccount({
+      adAccountId,
+      accessToken: resolved.token,
+      now: new Date(),
+      // Load-bearing safety choice: true makes an empty adsets list classify as read_failed ("read nothing" is
+      // treated as "did not read", never as a real zero), so a failed/empty read falls back to the snapshot.
+      accountHasActiveCampaigns: true,
+      fetchers: liveFetchers(overrides.fetchers ?? defaultFetchers, overrides.fetchers === undefined),
+    })
+    return liveDeliveringFromRead(read)
+  })()
+  // swallow a late rejection after the race is decided
+  work.catch(() => undefined)
+  try {
+    return await Promise.race([work, timeout])
+  } catch {
+    return null
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
 /** 生产依赖：每个 productionDeps() 实例内按 clientId 记忆化行业读取。 */
 export function productionDeps(): PlanSeedDeps {
   const industryCache = new Map<string, Promise<string | null>>()
@@ -290,6 +353,8 @@ export function productionDeps(): PlanSeedDeps {
     readScopes: loadScopes,
     readPromotePages: loadPromotePages,
     playbookShare,
+    readLiveDelivering: (clientId, adAccountId) =>
+      readLiveDeliveringProd(clientId, adAccountId),
   }
 }
 

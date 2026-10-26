@@ -27,6 +27,7 @@ export const CHECKS = [
   { name: 'Kernel architecture test', outcomeEnv: 'OUTCOME_KERNEL', needsInstall: true },
   { name: 'Tour catalog boundary test', outcomeEnv: 'OUTCOME_TOUR', needsInstall: true },
   { name: 'factory-worker-tests', outcomeEnv: 'OUTCOME_FACTORY', needsInstall: true },
+  { name: 'huatuo-tests', outcomeEnv: 'OUTCOME_HUATUO', needsInstall: true },
   { name: 'fix-scope', outcomeEnv: 'OUTCOME_FIX_SCOPE' },
   { name: 'CRM focused tests', outcomeEnv: 'OUTCOME_CRM', needsInstall: true },
   {

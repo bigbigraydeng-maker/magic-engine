@@ -34,6 +34,7 @@ import { summarizeTrend } from './trends'
 import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
+import { applyLlmAdPlays, dedupeAdPlayStepKeys } from '@/lib/ads-strategy/plan-seed/ad-plays'
 import { retrieveSimilarCases } from '@/lib/case-library/retriever'
 import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { fetchOutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
@@ -541,7 +542,7 @@ const VALID_INIT_TYPES = new Set([
 ])
 const VALID_POSTURES = new Set(['offensive', 'defensive', 'fast', 'slow'])
 
-function normalizeInitiativeSeed(seed: unknown): import('@/types/diagnostic').PhaseInitiativeSeed | undefined {
+function normalizeInitiativeSeed(seed: unknown, phaseNumber: number): import('@/types/diagnostic').PhaseInitiativeSeed | undefined {
   if (!seed || typeof seed !== 'object') return undefined
   const s = seed as Record<string, unknown>
 
@@ -559,35 +560,50 @@ function normalizeInitiativeSeed(seed: unknown): import('@/types/diagnostic').Ph
     ? Math.max(0, Math.min(100, s.budget_percent))
     : null
 
-  return {
+  const result: import('@/types/diagnostic').PhaseInitiativeSeed = {
     initiative_type,
     title: typeof s.title === 'string' ? s.title : '',
     posture,
     budget_percent,
     hypothesis: typeof s.hypothesis === 'string' ? s.hypothesis : null,
   }
+  // ad_plays：LLM 只给 play；step_key 由系统生成（见 applyLlmAdPlays）；不合法整组丢并留痕
+  applyLlmAdPlays(result, s.ad_plays, phaseNumber)
+  return result
 }
 
-function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
-  return {
+export function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
+  const normalized: PrescriptionContent = {
     summary: typeof p.summary === 'string' ? p.summary : '',
     // DAPE W3 — narrative 是新加的可选字段，旧 prompt 无此输出 → 空串兜底
     narrative: typeof p.narrative === 'string' ? p.narrative : '',
     phases: Array.isArray(p.phases)
-      ? p.phases.map(ph => ({
-          phase_number:    typeof ph.phase_number === 'number' ? ph.phase_number : 0,
-          name:            typeof ph.name === 'string' ? ph.name : '',
-          duration_weeks:  typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
-          actions:         Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
-          initiative_seed: normalizeInitiativeSeed((ph as { initiative_seed?: unknown }).initiative_seed),
-        }))
+      ? p.phases.map(ph => {
+          const phaseNumber = typeof ph.phase_number === 'number' ? ph.phase_number : 0
+          return {
+            phase_number:    phaseNumber,
+            name:            typeof ph.name === 'string' ? ph.name : '',
+            duration_weeks:  typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
+            actions:         Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
+            initiative_seed: normalizeInitiativeSeed((ph as { initiative_seed?: unknown }).initiative_seed, phaseNumber),
+          }
+        })
       : [],
     kpi_targets: Array.isArray(p.kpi_targets) ? p.kpi_targets : [],
     budget_allocation: Array.isArray(p.budget_allocation) ? p.budget_allocation : [],
   }
+  dedupeAdPlayStepKeys(normalized.phases)
+  return normalized
 }
 
-async function generatePrescriptionWithFeedback(
+/** 喂给 LLM 的上一版处方副本：去掉顶层 plan_seed（含真实账户号与日预算，不能让 LLM 看到）。不改入参。 */
+export function withoutPlanSeed(content: PrescriptionContent): PrescriptionContent {
+  const copy: PrescriptionContent = { ...content }
+  delete copy.plan_seed
+  return copy
+}
+
+export async function generatePrescriptionWithFeedback(
   client: Anthropic,
   discovery: DiscoveryReport,
   intake: PrescriptionIntake,
@@ -633,7 +649,7 @@ ${feedback.weaknesses.map((w, i) => `${i + 1}. [${w.dimension} | ${w.severity}] 
 
 上一轮处方 JSON（保留你认为合理的部分）：
 \`\`\`json
-${JSON.stringify(feedback.previousContent, null, 2)}
+${JSON.stringify(withoutPlanSeed(feedback.previousContent), null, 2)}
 \`\`\`
 
 ## ⚠️ 输出约束（重要 — 防止超 max_tokens）
