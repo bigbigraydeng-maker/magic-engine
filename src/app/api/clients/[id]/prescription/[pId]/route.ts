@@ -163,7 +163,9 @@ export async function PATCH(
       }
       try {
         // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）
-        const landed = await landPrescription(supabaseAdmin, current, access.user.email)
+        const landed = await landPrescription(supabaseAdmin, current, access.user.email, {
+          requireStatus: 'draft',
+        })
         console.info('[prescription PATCH] landed:', {
           prescriptionId: pId,
           goalId: current.goal_id,
@@ -172,6 +174,13 @@ export async function PATCH(
         })
         for (const note of landed.notes) console.info('  ', note)
       } catch (landErr: unknown) {
+        // 闸门之后、标已批准之前，处方被别人改了状态（如刚被退回）：不同意，409
+        if ((landErr as { code?: string } | null)?.code === 'prescription_status_changed') {
+          return NextResponse.json(
+            { success: false, error: (landErr as Error).message },
+            { status: 409 },
+          )
+        }
         const msg = landErr instanceof Error ? landErr.message : String(landErr)
         console.error('[prescription PATCH] landPrescription failed:', msg, landErr)
         return NextResponse.json(

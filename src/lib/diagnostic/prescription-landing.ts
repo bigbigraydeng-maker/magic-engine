@@ -144,19 +144,32 @@ export interface LandPrescriptionResult {
 async function updateOneRow(
   supabase: SupabaseClient,
   patch: Record<string, unknown>,
-  where: { id: string; clientId: string },
-): Promise<{ ok: true } | { ok: false; why: string }> {
-  const { data, error } = await supabase
+  where: { id: string; clientId: string; onlyIfStatus?: string },
+): Promise<{ ok: true } | { ok: false; why: string; noMatch?: boolean }> {
+  let query = supabase
     .from('prescriptions')
     .update(patch)
     .eq('id', where.id)
     .eq('client_id', where.clientId)
-    .select('id')
+  // 状态条件写在 UPDATE 本身里：读到写之间状态被别人改了，就一行都命不中。
+  if (where.onlyIfStatus) query = query.eq('status', where.onlyIfStatus)
+  const { data, error } = await query.select('id')
   if (error) return { ok: false, why: error.message }
   // 🔴 命中 0 行也是 error:null —— 不显式检查的话，"什么都没写进去"会被当成成功。
   //    团队记忆里那条「PATCH 匹配 0 行前后都 204，探针分辨不出两种结果」就是这个形状。
-  if (!data || data.length === 0) return { ok: false, why: '没有匹配到这条处方（id 或客户对不上）' }
+  if (!data || data.length === 0) {
+    return { ok: false, why: '没有匹配到这条处方（id 或客户对不上）', noMatch: true }
+  }
   return { ok: true }
+}
+
+/** 标已批准时处方已不是草稿（读到写之间被别人退回/改状态）。路由据 code 返 409。 */
+export class PrescriptionStatusChangedError extends Error {
+  readonly code = 'prescription_status_changed'
+  constructor() {
+    super('处方状态刚刚被改动，已不是草稿，没有同意。请刷新后再看')
+    this.name = 'PrescriptionStatusChangedError'
+  }
 }
 
 /**
@@ -171,6 +184,8 @@ export async function landPrescription(
   supabase: SupabaseClient,
   prescription: LandablePrescription,
   approvedBy?: string,
+  /** 传 'draft' = 最后标已批准只在处方仍是草稿时才生效，否则 throw PrescriptionStatusChangedError */
+  options: { requireStatus?: 'draft' } = {},
 ): Promise<LandPrescriptionResult> {
   const notes: string[] = []
   let initiativesInserted = 0
@@ -225,8 +240,9 @@ export async function landPrescription(
   const marked = await updateOneRow(
     supabase,
     buildPrescriptionDecisionPatch({ status: 'approved', approved_by: approvedBy }),
-    { id: prescription.id, clientId: prescription.client_id },
+    { id: prescription.id, clientId: prescription.client_id, onlyIfStatus: options.requireStatus },
   )
+  if (!marked.ok && marked.noMatch && options.requireStatus) throw new PrescriptionStatusChangedError()
   if (!marked.ok) throw new Error(`标记处方已批准失败：${marked.why}`)
 
   if (approvedBy) notes.push(`批准人：${approvedBy}`)

@@ -180,6 +180,23 @@ describe('PATCH prescription — 批准', () => {
     expect((await res.json()).error).toContain('生成执行计划失败')
   })
 
+  it('闸门之后状态被改成 rejected → 409，不会变成 approved', async () => {
+    mockSupabase(ok('approved'), draftWithContent)
+    mockLand.mockRejectedValue(
+      Object.assign(new Error('处方状态刚刚被改动，已不是草稿，没有同意。请刷新后再看'), {
+        code: 'prescription_status_changed',
+      }),
+    )
+
+    const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json.success).toBe(false)
+    expect(json.error).toContain('不是草稿')
+    expect(mockLand.mock.calls[0][3]).toEqual({ requireStatus: 'draft' })
+  })
+
   it.each([null, '', '   ', {}, { summary: '', phases: [], kpi_targets: [], budget_allocation: [] }])(
     '草稿但内容为空 (%j) → 422，不写库',
     async (content) => {

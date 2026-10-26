@@ -10,7 +10,7 @@ vi.mock('./execution-generator', () => ({
   generateExecutionItems: (...a: unknown[]) => mockGenerate(...a),
 }))
 
-import { landPrescription, type LandablePrescription } from './prescription-landing'
+import { landPrescription, PrescriptionStatusChangedError, type LandablePrescription } from './prescription-landing'
 import { PRESCRIPTION_COLUMNS } from './prescription-patch'
 
 /**
@@ -295,6 +295,27 @@ describe('landPrescription —— 批准后挂到目标下，不再生成看板�
   it('🔴 UPDATE 一行都没命中也要 throw —— PostgREST 这时不报错，不自己查就当成功了', async () => {
     const { supabase } = fakeSupabase({ matched: { 'prescriptions:approved': 0 } })
     await expect(landPrescription(supabase, PRES)).rejects.toThrow('没有匹配到这条处方')
+  })
+
+  it('🔴 要求草稿时，标已批准的 UPDATE 带 status=draft 条件', async () => {
+    const { supabase, updates } = fakeSupabase()
+    await landPrescription(supabase, PRES, 'x', { requireStatus: 'draft' })
+    const approved = updates.find((u) => u.patch.status === 'approved')!
+    expect(approved.calls).toContainEqual(['eq', 'status', 'draft'])
+  })
+
+  it('🔴 闸门之后状态被改成 rejected → 命中 0 行，throw 状态变动错误，不算已批准', async () => {
+    const { supabase } = fakeSupabase({ matched: { 'prescriptions:approved': 0 } })
+    await expect(
+      landPrescription(supabase, PRES, 'x', { requireStatus: 'draft' }),
+    ).rejects.toBeInstanceOf(PrescriptionStatusChangedError)
+  })
+
+  it('不要求草稿时（其它调用方）UPDATE 不带状态条件，行为不变', async () => {
+    const { supabase, updates } = fakeSupabase()
+    await landPrescription(supabase, PRES)
+    const approved = updates.find((u) => u.patch.status === 'approved')!
+    expect(approved.calls.some((c) => c[1] === 'status')).toBe(false)
   })
 
   it('🔴 只写表里真有的列 —— 批准人落在 approved_by（20260804020000 补的列）', async () => {
