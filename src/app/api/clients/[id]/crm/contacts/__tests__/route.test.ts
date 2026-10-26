@@ -96,6 +96,8 @@ let scanRows: Row[] | null = null
 /** 数据库函数的假返回；null = 函数还没装（报错，路由要退回老路径）。 */
 let rpcRows: Array<{ id: string; total: number }> | null = null
 let rpcCalls: Array<Record<string, unknown>> = []
+/** `clients.leads_config` 的假返回（view=priority 用它认「自己人」邮箱域名）。 */
+let clientsLeadsConfig: unknown = null
 
 /**
  * 假 builder。链式方法都返回自己，`then` 让它可 await。
@@ -134,6 +136,8 @@ function fakeDb(table: string) {
       rec.range = [from, to]
       return builder
     },
+    maybeSingle: () =>
+      Promise.resolve(table === 'clients' ? { data: { leads_config: clientsLeadsConfig }, error: null } : { data: null, error: null }),
     then: (resolve: (v: unknown) => unknown) => {
       if (table === 'contacts') {
         // count 查询（head）只回 count；取页查询回行。
@@ -165,6 +169,7 @@ beforeEach(() => {
   resetBriefCacheForTests()
   recorded = []
   scanRows = null
+  clientsLeadsConfig = null
   rpcRows = null
   rpcCalls = []
   ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (_name: string, args: Record<string, unknown>) => {
@@ -420,6 +425,22 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
+  it('自己人（own_email_domains 里的邮箱域名）不进 hot / cold 任何一张名单；别人照常', async () => {
+    clientsLeadsConfig = { own_email_domains: ['example.com'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const names = (body.sections as Array<{ items: Array<{ name: string }> | null }>).flatMap((s) => (s.items ?? []).map((i) => i.name))
+    expect(names).not.toContain('Bob')
+    expect(names).not.toContain('Sue')
+  })
+
+  it('没登记自己人域名时，同一批人照常出现（只有登记过的域名才会被排掉）', async () => {
+    clientsLeadsConfig = { own_email_domains: ['other.example'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const names = (body.sections as Array<{ items: Array<{ name: string }> | null }>).flatMap((s) => (s.items ?? []).map((i) => i.name))
+    expect(names).toContain('Bob')
+    expect(names).toContain('Sue')
+  })
+
   it('?view=priority → 新形状 {view, focus, columns, sections}，两张名单顺序固定 hot / cold', async () => {
     const { status, body } = await get('cts', '?view=priority')
     expect(status).toBe(200)
@@ -704,6 +725,8 @@ describe('GET contacts — kind 筛选（WP-B3）', () => {
         eq: () => builder,
         in: () => builder,
         not: () => builder,
+        // `.or(...)`：找同行/员工时按域名收窄用的（2026-10-26 起只捞可能命中的行）。
+        or: () => builder,
         order: () => builder,
         range: () => builder,
         maybeSingle: () => Promise.resolve({ data: { leads_config: LEADS_CONFIG }, error: null }),
@@ -762,5 +785,58 @@ describe('GET contacts — ?ids= 只取指定的客人', () => {
     expect((await get('c-1', '?ids=')).status).toBe(400)
     const many = Array.from({ length: 21 }, (_, i) => `a1a1a1a1-0000-4000-8000-${String(i).padStart(12, '0')}`).join(',')
     expect((await get('c-1', `?ids=${many}`)).status).toBe(400)
+  })
+})
+
+describe('客户配置里的域名含逗号/括号时，不许把过滤语法拼坏（复审 P3）', () => {
+  /** PostgREST 的 .or() 用逗号分隔、括号分组；域名里混进这些字符会把整条过滤串拼坏。 */
+  function dirtyConfigStore(domains: string[]) {
+    const seen: string[] = []
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder: Record<string, unknown> = {
+        select: () => builder,
+        eq: () => builder,
+        in: () => builder,
+        not: () => builder,
+        order: () => builder,
+        range: () => builder,
+        or: (expr: string) => {
+          seen.push(expr)
+          return builder
+        },
+        maybeSingle: () =>
+          Promise.resolve({ data: { leads_config: { trade_domains: domains } }, error: null }),
+        then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null, count: 0 }),
+      }
+      void table
+      return builder
+    })
+    return seen
+  }
+
+  it('干净配置：按域名收窄（过滤串里出现这个域名）', async () => {
+    const seen = dirtyConfigStore(['agency.co.nz'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('agency.co.nz'))).toBe(true)
+  })
+
+  it('脏配置（含逗号）：退回整表扫描，绝不把这个域名拼进过滤串', async () => {
+    const seen = dirtyConfigStore(['ab,cd.com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('ab,cd.com'))).toBe(false)
+  })
+
+  it('脏配置（含括号）：同样退回整表扫描', async () => {
+    const seen = dirtyConfigStore(['x(y).com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('x(y).com'))).toBe(false)
+  })
+
+  // 白名单守卫的意义就在这里：`%` 不会让过滤串语法崩，但它是 ilike 的通配符，
+  // 拼进去会悄悄改变匹配范围。黑名单（只挡逗号括号）放它过去，白名单挡住。
+  it('脏配置（含 ilike 通配符 %）：也退回整表扫描', async () => {
+    const seen = dirtyConfigStore(['%.com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('%.com'))).toBe(false)
   })
 })

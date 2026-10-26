@@ -46,6 +46,20 @@ function snapshotLine(snapshot: Record<string, unknown>): string | null {
   return `批准时的检查清单：${parts.length > 0 ? parts.join('，') : '没有检查项'}（${whenOf(snapshot.taken_at)}）`
 }
 
+/** 预算那一道批准时用的是哪份证据（现读 / 存档 / 想现读没读成而用存档）；较早的批准没有这个字段，返回 null。 */
+function budgetEvidenceLine(snapshot: Record<string, unknown>): string | null {
+  if (!Array.isArray(snapshot.results)) return null
+  const row = snapshot.results.find(r => isRecord(r) && r.key === 'env.account_billing' && typeof r.source === 'string')
+  if (!isRecord(row)) return null
+  const when = whenOf(row.as_of)
+  switch (row.source) {
+    case 'live': return `广告账户与付款（含在投预算）：批准时现读的（${when}）。`
+    case 'receipt': return `广告账户与付款（含在投预算）：用的是每天早上自动检查的存档（${when}），不是批准时现读的。`
+    case 'receipt_after_live_failed': return `广告账户与付款（含在投预算）：批准时想现读但没读成，用的是存档（${when}）。`
+    default: return null
+  }
+}
+
 function dispatchLine(receipt: Record<string, unknown>, hasSnapshot: boolean): string {
   const created = asCount(receipt.tasks_created)
   if (created === 0 && hasSnapshot) return '批准后还没有自动生成待办或每日计划（带推广结构的计划批准后暂不自动派活）。'
@@ -84,6 +98,7 @@ export function describeApprovalRecord(
 
   const snapshot = isRecord(receipt.gate_snapshot) ? receipt.gate_snapshot : null
   const snapshotText = snapshot ? snapshotLine(snapshot) : null
+  const budgetText = snapshot ? budgetEvidenceLine(snapshot) : null
 
   // 内容版本：批准时的内容指纹和现在的内容指纹对不上 → 批准后内容被改过，标红
   const approvedHash = asString(receipt.content_hash)
@@ -108,6 +123,7 @@ export function describeApprovalRecord(
       `批准人：${asString(receipt.approved_by) ?? '没有记录'}`,
       `批准时间：${whenOf(receipt.approved_at)}`,
       ...(snapshotText ? [snapshotText] : []),
+      ...(budgetText ? [budgetText] : []),
       ...(contentText ? [contentText] : []),
       dispatchLine(receipt, snapshot !== null),
     ],

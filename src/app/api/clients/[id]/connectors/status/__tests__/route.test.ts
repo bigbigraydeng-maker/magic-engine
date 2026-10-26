@@ -26,6 +26,13 @@ beforeEach(() => {
 })
 
 describe('GET /api/clients/[id]/connectors/status', () => {
+  it('does not present an old checkbox marker as a real social authorisation', async () => {
+    mocks.rows = [{ anchor: 'social', status: 'connected', config: null, connected_at: null }]
+    const res = await GET(new NextRequest('http://localhost/api/clients/c1/connectors/status'), { params: { id: 'c1' } })
+    const row = (await res.json()).connectors.find((value: { anchor: string }) => value.anchor === 'social')
+    expect(row.status).toBe('partial')
+    expect(row.statusLabel).toBe('按平台核验授权')
+  })
   it('returns no publer connector and no Publer wording anywhere in the catalogue', async () => {
     // A leftover legacy row must not resurrect the connector in the response.
     mocks.rows = [{ anchor: 'publer', status: 'connected', config: { publer_account_ids: {} }, connected_at: null }]

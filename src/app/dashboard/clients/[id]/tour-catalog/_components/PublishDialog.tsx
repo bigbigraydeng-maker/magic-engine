@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import type {
   FirstPublishRow,
   PublishPreviewResponse,
+  PublishResponse,
   PublishRequest,
 } from '@/lib/tour-catalog/publish-contract'
 import type { PublishContributor } from '@/lib/tour-catalog/catalog-contract'
@@ -11,6 +12,7 @@ import { priceText } from './catalog-format'
 import { SYSTEM_ACTOR_LABEL } from './change-source'
 import { BRAND_BUTTON_CLASS } from './catalog-brand'
 import { useChannelsConnected } from './catalog-context'
+import type { IncompleteNewTour } from './incomplete-new-tours'
 import {
   AckCheckbox,
   ChangeList,
@@ -63,6 +65,31 @@ function FirstPublishTable(props: { rows: FirstPublishRow[] }): JSX.Element {
   )
 }
 
+function IncompleteNewToursWarning(props: {
+  incomplete: IncompleteNewTour[]
+  ack: boolean
+  onAck: (v: boolean) => void
+}): JSX.Element | null {
+  if (props.incomplete.length === 0) return null
+  return (
+    <div data-testid="incomplete-new-tours" className="rounded-lg border border-[#C2453A]/30 bg-[#C2453A]/5 p-3">
+      <p className="text-sm font-black text-[#C2453A]">
+        这次要上架的新团里，有 {props.incomplete.length} 个还没补齐（规矩：补齐再上架）
+      </p>
+      <ul className="mt-1 space-y-0.5">
+        {props.incomplete.map(t => (
+          <li key={t.tourId} className="break-words text-sm font-semibold text-me-charcoal/80">
+            {t.tourName}：缺 {t.missing.join('、')}
+          </li>
+        ))}
+      </ul>
+      <AckCheckbox checked={props.ack} onChange={props.onAck}>
+        我知道这些新团还没补齐，PM 已同意先上架
+      </AckCheckbox>
+    </div>
+  )
+}
+
 function PublishGates(props: {
   preview: PublishPreviewResponse
   ackHigh: boolean
@@ -71,11 +98,19 @@ function PublishGates(props: {
   setAckRevert: (v: boolean) => void
   countText: string
   setCountText: (v: string) => void
+  incomplete: IncompleteNewTour[]
+  ackIncomplete: boolean
+  setAckIncomplete: (v: boolean) => void
 }): JSX.Element {
   const { preview, ackHigh, setAckHigh, ackRevert, setAckRevert, countText, setCountText } = props
   const live = useChannelsConnected() ? '对外内容' : '已上架的内容'
   return (
     <>
+      <IncompleteNewToursWarning
+        incomplete={props.incomplete}
+        ack={props.ackIncomplete}
+        onAck={props.setAckIncomplete}
+      />
       {preview.highRiskCount > 0 ? (
         <AckCheckbox checked={ackHigh} onChange={setAckHigh}>
           我已核对上面标红的 {preview.highRiskCount} 处价格和班期改动
@@ -119,7 +154,7 @@ function usePublishSubmit(
   clientId: string,
   preview: PublishPreviewResponse,
   onRefresh: () => void | Promise<void>,
-  onPublished: () => void,
+  onPublished: (websiteSync: PublishResponse['websiteSync']) => void,
   ackHigh: boolean,
   ackRevert: boolean,
   countText: string,
@@ -140,7 +175,11 @@ function usePublishSubmit(
         body: JSON.stringify(body),
       })
       if (res.ok) {
-        onPublished()
+        const data = (await res.json().catch(() => ({}))) as Partial<PublishResponse>
+        const websiteSync = data.websiteSync === 'revalidated' || data.websiteSync === 'failed'
+          ? data.websiteSync
+          : 'not_configured'
+        onPublished(websiteSync)
         return
       }
       const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -214,30 +253,46 @@ interface PublishGatesState {
   setAckRevert: (v: boolean) => void
   countText: string
   setCountText: (v: string) => void
+  ackIncomplete: boolean
+  setAckIncomplete: (v: boolean) => void
   satisfied: boolean
 }
 
-function usePublishGates(preview: PublishPreviewResponse): PublishGatesState {
+function usePublishGates(preview: PublishPreviewResponse, incompleteCount: number): PublishGatesState {
   const [ackHigh, setAckHigh] = useState(false)
   const [ackRevert, setAckRevert] = useState(false)
   const [countText, setCountText] = useState('')
+  const [ackIncomplete, setAckIncomplete] = useState(false)
 
   useEffect(() => {
     setAckHigh(false)
     setAckRevert(false)
     setCountText('')
+    setAckIncomplete(false)
   }, [preview.diffHash])
 
   const satisfied =
     (preview.highRiskCount === 0 || ackHigh) &&
     (preview.afterRevert === null || ackRevert) &&
+    (incompleteCount === 0 || ackIncomplete) &&
     sellableConfirmed(preview.sellable, countText)
 
-  return { ackHigh, setAckHigh, ackRevert, setAckRevert, countText, setCountText, satisfied }
+  return {
+    ackHigh,
+    setAckHigh,
+    ackRevert,
+    setAckRevert,
+    countText,
+    setCountText,
+    ackIncomplete,
+    setAckIncomplete,
+    satisfied,
+  }
 }
 
 interface PublishBodyProps {
   preview: PublishPreviewResponse
+  incomplete: IncompleteNewTour[]
   gates: PublishGatesState
   note: string
   setNote: (v: string) => void
@@ -249,7 +304,7 @@ interface PublishBodyProps {
 }
 
 function PublishBody(props: PublishBodyProps): JSX.Element {
-  const { preview, gates, note, setNote, message, submitting, canSubmit, onClose, onSubmit } = props
+  const { preview, incomplete, gates, note, setNote, message, submitting, canSubmit, onClose, onSubmit } = props
   return (
     <div className="mt-4 space-y-4">
       {preview.firstPublish ? (
@@ -271,6 +326,9 @@ function PublishBody(props: PublishBodyProps): JSX.Element {
         setAckRevert={gates.setAckRevert}
         countText={gates.countText}
         setCountText={gates.setCountText}
+        incomplete={incomplete}
+        ackIncomplete={gates.ackIncomplete}
+        setAckIncomplete={gates.setAckIncomplete}
       />
 
       <NoteField value={note} onChange={setNote} />
@@ -328,12 +386,15 @@ function ContributorsLine(props: { preview: PreviewWithContributors }): JSX.Elem
 export function PublishDialog(props: {
   clientId: string
   preview: PublishPreviewResponse
+  /** New tours in this publish that still miss SOP items; empty when everything is filled in. */
+  incompleteNewTours?: IncompleteNewTour[]
   onRefresh: () => void | Promise<void>
   onClose: () => void
-  onPublished: () => void
+  onPublished: (websiteSync: PublishResponse['websiteSync']) => void
 }): JSX.Element {
   const { clientId, preview, onRefresh, onClose, onPublished } = props
-  const gates = usePublishGates(preview)
+  const incomplete = props.incompleteNewTours ?? []
+  const gates = usePublishGates(preview, incomplete.length)
   const [note, setNote] = useState('')
 
   const hasChanges = preview.firstPublish || preview.changes.length > 0
@@ -359,6 +420,7 @@ export function PublishDialog(props: {
       <ContributorsLine preview={preview} />
       <PublishBody
         preview={preview}
+        incomplete={incomplete}
         gates={gates}
         note={note}
         setNote={setNote}

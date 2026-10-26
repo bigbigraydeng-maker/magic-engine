@@ -45,6 +45,23 @@ describe('runFrozenFieldCheck（真实 git 仓库集成测试）', () => {
     execSync(`rm -rf "${repoDir}"`)
   })
 
+  it('repairs invalid plain verification YAML without accepting a changed verification', () => {
+    const dir = setupRepo()
+    const path = join(dir, 'docs/ledger/2026-09-28-test-card.md')
+    const value = "查 captureClientSnapshots(..., reason: 'kernel_post') 的调用方"
+    writeFileSync(path, card({ verify_how: value }))
+    git('git add -A && git commit -m "invalid old scalar"', dir)
+    const base = git('git rev-parse HEAD', dir)
+    writeFileSync(path, card({ verify_how: `|-\n  ${value}` }))
+    git('git add -A && git commit -m "exact scalar wrapping"', dir)
+    const repaired = git('git rev-parse HEAD', dir)
+    expect(runFrozenFieldCheck(base, repaired, dir).errors).toEqual([])
+    writeFileSync(path, card({ verify_how: `|-\n  ${value}改` }))
+    git('git add -A && git commit -m "changed scalar"', dir)
+    const changed = git('git rev-parse HEAD', dir)
+    expect(runFrozenFieldCheck(base, changed, dir).errors.join('\n')).toContain('冻结字段 verify_how 被改写')
+  })
+
   it('改写冻结字段 → error', () => {
     const dir = setupRepo()
     const cardPath = join(dir, 'docs/ledger/2026-09-28-test-card.md')
@@ -279,6 +296,64 @@ describe('runFrozenFieldCheck（真实 git 仓库集成测试）', () => {
 
     const result = runFrozenFieldCheck(baseSha, headSha, dir)
     expect(result.errors.some((e) => e.includes('空格 #'))).toBe(true)
+
+    execSync(`rm -rf "${dir}"`)
+  })
+
+  it('坏卡只改正编号和 PR # 写法 → 不报错', () => {
+    const dir = setupRepo()
+    const cardPath = join(dir, 'docs/ledger/2026-10-25-meta-client-token-db-verify.md')
+    writeFileSync(cardPath, card({
+      id: 'task_meta_client_token_db_verify',
+      source: 'PR #3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+    }))
+    git('git add -A && git commit -m "broken card"', dir)
+    const baseSha = git('git rev-parse HEAD', dir)
+
+    writeFileSync(cardPath, card({
+      id: '2026-10-25-meta-client-token-db-verify',
+      source: 'pr:3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+    }))
+    git('git add -A && git commit -m "legal spelling"', dir)
+    const headSha = git('git rev-parse HEAD', dir)
+
+    const result = runFrozenFieldCheck(baseSha, headSha, dir)
+    expect(result.errors).toEqual([])
+    expect(result.warnings.some((w) => w.includes('主干版本解析失败'))).toBe(true)
+
+    execSync(`rm -rf "${dir}"`)
+  })
+
+  it('坏卡顺手改验收说法 → 仍然报冻结字段', () => {
+    const dir = setupRepo()
+    const cardPath = join(dir, 'docs/ledger/2026-10-25-meta-client-token-db-verify.md')
+    writeFileSync(cardPath, card({
+      id: 'task_meta_client_token_db_verify',
+      source: 'PR #3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+    }))
+    git('git add -A && git commit -m "broken card"', dir)
+    const baseSha = git('git rev-parse HEAD', dir)
+
+    writeFileSync(cardPath, card({
+      id: '2026-10-25-meta-client-token-db-verify',
+      source: 'pr:3145',
+      decided_on: '2026-10-25',
+      verify_by: '2026-11-01',
+      verify_how: '换成别的验法',
+    }))
+    git('git add -A && git commit -m "changed verification"', dir)
+    const headSha = git('git rev-parse HEAD', dir)
+
+    const result = runFrozenFieldCheck(baseSha, headSha, dir)
+    expect(result.errors.some((e) => e.includes('verify_how') && e.includes('被改写'))).toBe(true)
+    expect(result.errors.some((e) => e.includes('冻结字段 id'))).toBe(false)
+    expect(result.errors.some((e) => e.includes('冻结字段 source'))).toBe(false)
 
     execSync(`rm -rf "${dir}"`)
   })

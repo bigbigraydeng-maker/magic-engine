@@ -6,9 +6,12 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
+import { isAssetOnly } from './deliverable'
 import {
   REEL_AUTO_CHECK_KEYS,
-  humanKeysForStored,
+  humanKeysForReviewRef,
+  REEL_HUMAN_CHECK_KEYS_V3,
+  CHECKLIST_VERSION_V3,
   checklistPasses,
   hasChecklistFailure,
   isValidContentSourceRef,
@@ -208,10 +211,12 @@ interface PullResult {
   errors: string[]
 }
 
-async function applyApprove(wo: Record<string, unknown>, rec: AirtableRecord): Promise<boolean> {
+export async function applyApprove(wo: Record<string, unknown>, rec: AirtableRecord): Promise<boolean> {
+  if (isAssetOnly(wo.brief)) return false
   const ref = (wo.review_ref ?? {}) as Record<string, unknown>
   const output = (wo.output ?? {}) as Record<string, unknown>
-  const human = validateContentChecklist(ref['checklist_human'], humanKeysForStored(ref['checklist_human']), 'HUMAN')
+  // New approvals always need the V3 checklist (this retired path may not mint a receipt the publisher would later refuse).
+  const human = validateContentChecklist(ref['checklist_human'], REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
   const auto = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
   if (!human.ok || !auto.ok || !checklistPasses(human.items) || !checklistPasses(auto.items)) return false
   if (human.items.some(item => item.source_ref && !isValidContentSourceRef(item.source_ref))) return false
@@ -220,7 +225,14 @@ async function applyApprove(wo: Record<string, unknown>, rec: AirtableRecord): P
     .from('content_work_orders')
     .update({
       status: 'approved',
-      review_ref: { ...ref, approved_by: reviewer, approved_at: new Date().toISOString() },
+      review_ref: {
+        ...ref,
+        approved_by: reviewer,
+        approved_at: new Date().toISOString(),
+        checklist_version: CHECKLIST_VERSION_V3,
+        approval_source: 'airtable_sync',
+        approver_scope: 'unverified',
+      },
       updated_at: new Date().toISOString(),
     })
     .eq('id', wo.id as string)
@@ -239,7 +251,7 @@ async function applyQualityReject(
   // Airtable's retired review form has no structured checklist field. Refuse
   // rather than letting this legacy synchronizer bypass the ME review API.
   const ref = (wo.review_ref ?? {}) as Record<string, unknown>
-  const human = validateContentChecklist(ref['checklist_human'], humanKeysForStored(ref['checklist_human']), 'HUMAN')
+  const human = validateContentChecklist(ref['checklist_human'], humanKeysForReviewRef(ref), 'HUMAN')
   if (!human.ok || !hasChecklistFailure(human.items)) return false
   const { data: upd, error } = await supabaseAdmin
     .from('content_work_orders')
@@ -332,7 +344,11 @@ export async function pullReviewActions(): Promise<PullResult> {
       if (action === '通过') {
         const ok = await applyApprove(wo, rec)
         await patchRecord(FACTORY_REVIEW_TABLE_ID, rec.id, {
-          [F.receipt]: ok ? `系统已收到 ✅ 通过 ${nzNow()}` : `❌ 工单已不在待审状态,未执行 ${nzNow()}`,
+          [F.receipt]: ok
+            ? `系统已收到 ✅ 通过 ${nzNow()}`
+            : isAssetOnly(wo.brief)
+              ? `❌ 这是素材工单(不单独发布),不能通过,未执行 ${nzNow()}`
+              : `❌ 工单已不在待审状态,未执行 ${nzNow()}`,
         })
         if (ok) result.approved.push(woId)
       } else if (action === '打回·画面质量') {

@@ -6,9 +6,6 @@
   "pages": [
     { "url": "https://www.ctstours.co.nz/", "role": "homepage" },
     { "url": "https://www.ctstours.co.nz/campaigns/spotlight", "role": "campaign" },
-    { "url": "https://www.ctstours.co.nz/christmas-new-year-china", "role": "campaign" },
-    { "url": "https://www.ctstours.co.nz/tours/china/discovery/china-icons-collection", "role": "tour" },
-    { "url": "https://www.ctstours.co.nz/tours/china/discovery/china-icons-collection-christchurch", "role": "tour" },
     { "url": "https://www.ctstours.co.nz/tailor-made", "role": "conversion" },
     { "url": "https://www.ctstours.co.nz/guide", "role": "guide_hub" },
     { "url": "https://www.ctstours.co.nz/zhangjiajie-travel-guide", "role": "guide" },

@@ -36,6 +36,7 @@ function builder(table: string) {
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: (table: string) => builder(table) } }))
 
 import { createPromoteBooks } from './books-port'
+import { projectPublishedReelExecutionItem, writeThreeBooks } from '../publish-worker'
 
 beforeEach(() => {
   calls = []
@@ -47,6 +48,44 @@ const has = (table: string, method: string, ...args: unknown[]) =>
 
 const callsOn = (table: string, method: string) =>
   calls.filter((c) => c.table === table && c.method === method)
+
+describe('shared published Reel projection', () => {
+  it('initial publish uses the same completed projection and links its returned id once', async () => {
+    results.execution_items = [{ data: { id: 'item-shared' }, error: null }]
+    await writeThreeBooks('order-1', {
+      platform: 'facebook', post_id: 'post-1', permalink: 'https://example.test/reel/1', published_at: '2026-10-19T00:00:00Z',
+    }, 'c1', 'angle')
+    expect(callsOn('execution_items', 'insert')).toHaveLength(1)
+    expect(callsOn('execution_items', 'insert')[0].args[0]).toMatchObject({
+      client_id: 'c1', status: 'completed', dimension: 'social', fix_type: 'me_auto', source: 'proactive_signal',
+      description: '工厂自动发布 Reel「angle」→ meta_graph(https://example.test/reel/1)',
+    })
+    expect(callsOn('flywheel_actions', 'insert')).toHaveLength(1)
+    expect(callsOn('flywheel_actions', 'insert')[0].args[0]).toMatchObject({ execution_item_id: 'item-shared', client_id: 'c1' })
+    expect(callsOn('fde_work_logs', 'insert')).toHaveLength(1)
+  })
+
+  it('the projection itself only writes the board, with no duplicate traffic or work log', async () => {
+    results.execution_items = [{ data: { id: 'item-shared' }, error: null }]
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    try {
+      await expect(projectPublishedReelExecutionItem({ clientId: 'c1', existingItemId: null, title: 't', description: 'd' })).resolves.toBe('item-shared')
+      expect(new Set(calls.map(call => call.table))).toEqual(new Set(['execution_items']))
+      expect(fetchSpy).not.toHaveBeenCalled()
+    } finally { fetchSpy.mockRestore() }
+  })
+
+  it('an initial projection failure still records traffic and the work log without an invented item id', async () => {
+    results.execution_items = [{ data: null, error: { message: 'projection unavailable' } }]
+    const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await writeThreeBooks('order-1', { platform: 'facebook', post_id: 'post-1', published_at: '2026-10-19T00:00:00Z' }, 'c1', 'angle')
+      expect(callsOn('flywheel_actions', 'insert')[0].args[0]).toMatchObject({ execution_item_id: null })
+      expect(callsOn('fde_work_logs', 'insert')).toHaveLength(1)
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('projection unavailable'))
+    } finally { logSpy.mockRestore() }
+  })
+})
 
 describe('completeExecutionItem', () => {
   it('有 existingItemId → 只 update execution_items,按 id + client_id 过滤,不 insert', async () => {

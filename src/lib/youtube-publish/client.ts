@@ -60,6 +60,26 @@ export async function listAuthorizedChannels(
   return (data.items ?? []).map((i) => ({ id: i.id, title: i.snippet?.title ?? '' }))
 }
 
+/** First-time onboarding must never infer uniqueness from a truncated first page. */
+export async function discoverSingleAuthorizedChannel(
+  accessToken: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<'none' | 'multiple' | YouTubeChannel> {
+  const res = await fetchImpl(`${API}/channels?part=id,snippet&mine=true&maxResults=2`, {
+    headers: authHeaders(accessToken), cache: 'no-store',
+  })
+  await failOnError(res, 'channels.list')
+  const data = (await res.json()) as { items?: unknown; nextPageToken?: unknown;
+    pageInfo?: { totalResults?: unknown } }
+  if (!Array.isArray(data.items) || data.items.length > 2) throw new Error('Invalid channel response')
+  if (data.items.length === 0 && !data.nextPageToken && data.pageInfo?.totalResults === 0) return 'none'
+  if (data.items.length !== 1 || data.nextPageToken || data.pageInfo?.totalResults !== 1) return 'multiple'
+  const item = data.items[0] as { id?: unknown; snippet?: { title?: unknown } }
+  if (typeof item?.id !== 'string' || !/^UC[A-Za-z0-9_-]{22}$/.test(item.id) ||
+    typeof item.snippet?.title !== 'string') throw new Error('Invalid channel response')
+  return { id: item.id, title: item.snippet.title }
+}
+
 /** Exact-match lock: throws unless the authorised account manages the expected channel. */
 export async function lockChannel(
   accessToken: string,

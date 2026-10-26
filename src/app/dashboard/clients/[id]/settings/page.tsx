@@ -46,6 +46,7 @@ import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
 import { BrandGeoAnchorsPanel } from './_components/BrandGeoAnchorsPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
+import { SocialConnectionsPanel } from './_components/SocialConnectionsPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
 import { WeeklyBlogPanel } from './_components/WeeklyBlogPanel'
@@ -109,17 +110,14 @@ function TabBody({
     case 'connect':
       return (
         <>
-          <SettingsSection first icon="🚦" title="真客户 / 调研档案">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚦" title="真客户 / 调研档案">
             <ClientStatusPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🎵" title="TikTok" defaultOpen={callbacks.tiktok}>
-            <p className="mb-3 text-sm text-slate-600">连接此客户的 TikTok 账号。发布视频前需要单独确认视频和可见范围。</p>
-            <a href={`/api/auth/tiktok/connect?client_id=${encodeURIComponent(clientId)}`} className="inline-block rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
-              连接 TikTok
-            </a>
-          </SettingsSection>
-          <SettingsSection icon="▶️" title="YouTube（频道与授权）">
-            <YoutubePanel clientId={clientId} />
+          <SettingsSection icon="▶️" title="YouTube 频道配置" id="youtube-channel" defaultOpen={focusSection === 'youtube-channel'}>
+            <YoutubePanel clientId={clientId} configurationOnly />
           </SettingsSection>
           <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）" defaultOpen={callbacks.mail}>
             <MailboxPanel clientId={clientId} />
@@ -221,7 +219,10 @@ function TabBody({
     case 'content':
       return (
         <>
-          <SettingsSection first icon="📱" title="社媒账号（Instagram · Facebook · TikTok）">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🏷️" title="社媒资料登记（不授予发布权限）" id="social-profiles" defaultOpen={focusSection === 'social-profiles'}>
             <SocialHandlesPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
@@ -279,6 +280,9 @@ export default function ClientSettingsPage() {
     bad_state: '本次连接已失效，请从「连接 TikTok」重新开始。',
     exchange_failed: 'TikTok 授权未完成，请重新连接。',
     missing_scopes: 'TikTok 没有授予所需权限，请重新连接并允许账号信息和视频发布。',
+    needs_team_check: '这个 TikTok 账号暂时无法连接到当前客户，请联系团队核实后再试。',
+    has_other_account: '该客户已连接另一个 TikTok 账号。如需更换，请联系团队先断开旧授权再重新连接。',
+    save_failed: 'TikTok 授权已完成，但保存失败，请稍后重试。',
   }
   // 深链锚点（见 lib/factory/config-link）——驾驶舱的「该客户工厂配置」跳过来时
   // 直接落在「视频工厂配置」那一块，不用人在「内容与社媒」里自己找。

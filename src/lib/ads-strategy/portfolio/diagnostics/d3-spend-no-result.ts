@@ -6,6 +6,10 @@
  *   - 客户没配目标单次成本 / 没配主结果（不许回落行业默认值，红线 7）
  *   - 主结果 UNKNOWN（归不到广告单位，§14 M8）
  * Meta 实验中的广告组不判（§14 M7）。
+ *
+ * 候选范围：获客 / 再营销（可进自动暂停建议）；另有类似人群（expansion）和流量组
+ * （优化目标 LINK_CLICKS / LANDING_PAGE_VIEWS，任何角色）——这两类只提醒，`autoPauseEligible: false`，
+ * 自动暂停消费端不处理（保持原自动动作范围不变）。
  */
 
 import type { AccountContext } from './context'
@@ -16,11 +20,23 @@ import { D3_COST_MULTIPLE } from './thresholds'
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
+const TRAFFIC_GOALS: ReadonlySet<string> = new Set(['LINK_CLICKS', 'LANDING_PAGE_VIEWS'])
+
+/** 原有范围：获客 / 再营销。命中可进自动暂停建议。 */
+function isAutoPauseScope(role: string | undefined): boolean {
+  return role === 'acquisition' || role === 'retargeting'
+}
+
+/** 新纳入范围：类似人群，或按点击 / 落地页浏览优化的流量组。只提醒。 */
+function isAlertOnlyScope(role: string | undefined, optimizationGoal: string | null): boolean {
+  return role === 'expansion' || (optimizationGoal !== null && TRAFFIC_GOALS.has(optimizationGoal))
+}
+
 export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {
   const candidates = Array.from(ctx.adsets.values()).filter(s => {
     if (ctx.experimentIds.has(s.entity_id)) return false
     const role = ctx.roles.get(s.entity_id)?.role
-    return role === 'acquisition' || role === 'retargeting'
+    return isAutoPauseScope(role) || isAlertOnlyScope(role, s.optimization_goal)
   })
   const spending = candidates
     .map(s => ({ s, rows: adsetRows(ctx, [s.entity_id]) }))
@@ -55,6 +71,7 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
       optimizationGoal: s.optimization_goal,
     }))
     const unit = unitOf(ctx, 'adset', s.entity_id)
+    const alertOnly = isAlertOnlyScope(ctx.roles.get(s.entity_id)?.role, s.optimization_goal)
     if (counts.some(c => c.value === null)) {
       if (spend < threshold) continue
       out.push({
@@ -72,11 +89,13 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
     const cpr = results > 0 ? round2(spend / results) : null
     if (spend < threshold) continue
     if (cpr !== null && cpr < threshold) continue
+    const noteOnly = alertOnly ? '（只提醒，不会自动暂停）' : ''
     out.push({
       code: 'D3', status: 'hit',
+      ...(alertOnly ? { autoPauseEligible: false } : {}),
       title: results === 0
-        ? `花钱没结果：近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} 0 个`
-        : `花钱结果太少：近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）`,
+        ? `花钱没结果${noteOnly}：近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} 0 个`
+        : `花钱结果太少${noteOnly}：近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）`,
       units: [unit],
       evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, results, cost_per_result: cpr, target_cost: target, multiple: D3_COST_MULTIPLE },
       sample: [{ label: OUTCOME_STEP_LABEL[outcome.primary], value: results }, { label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],

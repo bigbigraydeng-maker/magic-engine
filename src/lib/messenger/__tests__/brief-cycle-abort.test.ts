@@ -67,6 +67,7 @@ function due(n: number): DueBrief[] {
     regenCountDate: null,
     existingKnowledgeStatus: null,
     awaitingReply: true,
+    channel: 'messenger' as const,
   }))
 }
 
@@ -121,7 +122,7 @@ describe('generateDueBriefs：余额用光必须当场熄火', () => {
     const r = await generateDueBriefs(due(4), NOW)
 
     expect(generateBrief).toHaveBeenCalledTimes(4)
-    expect(r).toEqual({ generated: 3, failed: 1, aborted: null })
+    expect(r).toEqual({ generated: 3, failed: 1, emptyThreads: 0, aborted: null })
   })
 })
 
@@ -144,7 +145,7 @@ describe('generateDueBriefs：时间预算是「段必须返回」的兜底闸',
 
     const r = await generateDueBriefs(due(12), NOW)
 
-    expect(r).toEqual({ generated: 12, failed: 0, aborted: null })
+    expect(r).toEqual({ generated: 12, failed: 0, emptyThreads: 0, aborted: null })
   })
 })
 

@@ -9,6 +9,7 @@ import type { PostReview } from '@/lib/tiktok/post-review'
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter, promoteReelToPublished } from './publish/facebook-reel-adapter'
 import { checkTikTokStatus, humanTikTokError, publishToTikTok } from './publish/tiktok-adapter'
+import { TikTokAmbiguousConnectionError } from '@/lib/tiktok/token'
 import type { PublishTarget } from './types'
 import { claimLecturePublish, loadLecturePost, recordPublished, setPublishRequest } from './lecture-post'
 
@@ -80,7 +81,7 @@ async function publishLectureToTikTok(params: {
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e)
     // Uncertain provider outcome stays recoverable. Never auto-create another task.
-    await setPublishRequest({ clientId, postId, request:{ ...request,status:request.tiktokPublishId ? 'processing' : 'failed',error:request.tiktokPublishId ? humanTikTokError(raw) : '发布结果未确认，请联系管理员核验后再试' } }).catch(() => {})
+    await setPublishRequest({ clientId, postId, request:{ ...request,status:request.tiktokPublishId ? 'processing' : 'failed',error:request.tiktokPublishId || e instanceof TikTokAmbiguousConnectionError ? humanTikTokError(raw) : '发布结果未确认，请联系管理员核验后再试' } }).catch(() => {})
     return { postId, ok:false,error:humanTikTokError(raw) }
   }
 }

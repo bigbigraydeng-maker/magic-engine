@@ -299,7 +299,7 @@ async function resolvePageToken(
 }
 
 /**
- * 「真实价格只能配真实画面」—— 服务端那道闸，跟 /api/publer/create-post 同源。
+ * 「真实价格只能配真实画面」—— 服务端那道闸，跟 `lib/content/price-claim-gate` 同源。
  *
  * 界面上的闸挡的是手滑；这里挡的是绕过界面的路。这条 bridge 一旦跑起来东西就真
  * 出去了，人不在场，所以每条待发 Post 的文案都要过一遍：文案报了价、配图却背不了

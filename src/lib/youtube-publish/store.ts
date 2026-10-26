@@ -4,6 +4,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAssetOnly } from '@/lib/factory/deliverable'
 import { isValidChannelId } from './oauth'
 import type { GateResult } from './gates'
 import { checkTopicAlignment } from '@/lib/factory/topic-alignment-store'
@@ -45,6 +46,29 @@ export async function getClientChannelId(clientId: string): Promise<string | nul
   return isValidChannelId(value) ? value : null
 }
 
+/** Raw onboarding target: null is the only state eligible for first-time binding. */
+export async function readClientChannelTarget(clientId: string): Promise<
+  { kind: 'missing' } | { kind: 'empty' } | { kind: 'configured'; channelId: string } | { kind: 'invalid' }
+> {
+  const { data, error } = await supabaseAdmin.from('clients').select('youtube_channel_id')
+    .eq('id', clientId).maybeSingle()
+  if (error) throw new Error('YouTube target lookup failed')
+  if (!data) return { kind: 'missing' }
+  if (data.youtube_channel_id === null) return { kind: 'empty' }
+  return isValidChannelId(data.youtube_channel_id)
+    ? { kind: 'configured', channelId: data.youtube_channel_id } : { kind: 'invalid' }
+}
+
+/** First-time binding only. A concurrent callback or administrator wins instead of being overwritten. */
+export async function claimClientChannelTarget(clientId: string, channelId: string): Promise<boolean> {
+  if (!isValidChannelId(channelId)) return false
+  const { data, error } = await supabaseAdmin.from('clients')
+    .update({ youtube_channel_id: channelId }).eq('id', clientId)
+    .is('youtube_channel_id', null).select('id')
+  if (error) throw new Error('YouTube target binding failed')
+  return Array.isArray(data) && data.length === 1 && data[0]?.id === clientId
+}
+
 /** Factory output only: an approved work order of this client with an https video. Read-only. */
 export async function getApprovedWorkOrder(
   clientId: string,
@@ -52,13 +76,15 @@ export async function getApprovedWorkOrder(
 ): Promise<ApprovedWorkOrder | null> {
   const { data, error } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, status, angle, output')
+    .select('id, status, angle, output, brief')
     .eq('id', workOrderId)
     .eq('client_id', clientId)
     .maybeSingle()
   if (error) throw error
   if (!data || (data as { status: string }).status !== 'approved') return null
-  const row = data as { id: string; angle: string; output: Record<string, unknown> | null }
+  const row = data as { id: string; angle: string; output: Record<string, unknown> | null; brief: unknown }
+  // asset_only material must never leave the factory, even if it was somehow marked approved.
+  if (isAssetOnly(row.brief)) return null
   const url = row.output?.['video_path']
   if (typeof url !== 'string' || !url.startsWith('https://')) return null
   const caption = typeof row.output?.['caption'] === 'string' ? (row.output['caption'] as string) : ''

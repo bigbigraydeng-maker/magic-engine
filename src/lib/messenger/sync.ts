@@ -15,6 +15,7 @@ import { fetchPageConversations, type MessengerConversation } from '@/lib/meta/c
 import { linkMessengerConversation, loadIdentityIndex } from '@/lib/messenger/link-contacts'
 import { backfillUnlinkedConversations } from '@/lib/messenger/backfill'
 import { backfillLeadIntroDetails } from '@/lib/messenger/lead-intro-backfill'
+import { classifyBrokenPageToken, metaPageSyncHeld, rememberBrokenPageToken } from '@/lib/meta/broken-page-token'
 
 export interface MessengerSyncClient {
   id: string
@@ -47,7 +48,7 @@ export interface MessengerSyncResult {
   backfillRemaining: number
   /** 这一轮翻过私信找开场白的人数（补电话邮箱用）。 */
   leadIntroScanned: number
-  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified'
+  skipped?: 'no_page_id' | 'no_meta_token' | 'no_page_token' | 'page_not_verified' | 'connection_unhealthy'
   error?: string
 }
 
@@ -235,6 +236,12 @@ export async function syncClientMessenger(
    */
   const details = await backfillLeadIntroDetails(client.id)
 
+  // 令牌已经确认坏了（Graph 190 / 缺主页角色 / 未核实的公用令牌）就别再打 Graph。
+  // 本地补档案上面已经跑过，不依赖 Meta。
+  if (await metaPageSyncHeld(supabaseAdmin, client.id, pageId)) {
+    return { ...base, skipped: 'connection_unhealthy', leadIntroScanned: details.scanned }
+  }
+
   // AD-SEC-4: only a Page verified as this client's is read (page-sync-authorization.ts).
   // Token order is unchanged: a Page token stored by the "连接 Meta" button, else
   // one derived from an env-var user token — the gap that left 30 Kiteroa
@@ -242,9 +249,11 @@ export async function syncClientMessenger(
   const auth = await authorizePageSync(supabaseAdmin, client.id, pageId, process.env)
   if (!auth.ok) {
     if (auth.skipped !== 'page_not_verified') return { ...base, skipped: auth.skipped }
-    // Reported as an error so the hourly run counts it as failed — a paused
-    // inbox must not look like a quiet hour. The daily todo tells staff how to fix it.
-    return { ...base, skipped: auth.skipped, error: `page_not_verified: ${auth.reason}` }
+    const error = `page_not_verified: ${auth.reason}`
+    // unverified_shared_token 进暂停名单，下一轮不再走授权判断。其它拒绝原因仍记成 error，
+    // 路由只把「已知要重连」的那几类从 failed_count 里拿掉。
+    await rememberBrokenPageToken(supabaseAdmin, client.id, pageId, error)
+    return { ...base, skipped: auth.skipped, error }
   }
   const pageToken = auth.pageToken
 
@@ -312,6 +321,8 @@ export async function syncClientMessenger(
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err)
     console.error(`[messenger/sync] client ${client.id} failed:`, error)
+    await rememberBrokenPageToken(supabaseAdmin, client.id, pageId, error)
+    if (classifyBrokenPageToken(error)) return { ...base, skipped: 'connection_unhealthy', error }
     return { ...base, error }
   }
 }

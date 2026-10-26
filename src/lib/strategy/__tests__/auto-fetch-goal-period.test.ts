@@ -102,17 +102,18 @@ const leadRow = (n: number): AdRow => ({
 })
 
 describe('autoFetchMetricValue — 同一客户多个 active 目标', () => {
-  it('leads_count 目标：传入自己的时间段 → 按广告留资合计刷出数字', async () => {
+  it('leads_count 目标：传入自己的时间段 → 按广告留资合计刷出数字，结束日收到今天', async () => {
     const { db, ranges } = fakeDb({
       activeGoals: [LEADS_GOAL, SIGNUPS_GOAL],
       adRows: [leadRow(13), leadRow(10)],
     })
+    const now = new Date('2026-10-25T03:00:00Z')
 
-    const result = await autoFetchMetricValue(db, 'client-1', 'leads_count', { goalPeriod: LEADS_GOAL })
+    const result = await autoFetchMetricValue(db, 'client-1', 'leads_count', { goalPeriod: LEADS_GOAL, now })
 
-    expect(result).toMatchObject({ ok: true, value: 23, source: 'ad_daily_insights', snapshot_date: LEADS_GOAL.period_end })
+    expect(result).toMatchObject({ ok: true, value: 23, source: 'auto.meta_leads', snapshot_date: '2026-10-25' })
     const ads = ranges.find((r) => r.table === 'ad_daily_insights')
-    expect(ads).toMatchObject({ gte: LEADS_GOAL.period_start, lte: LEADS_GOAL.period_end })
+    expect(ads).toMatchObject({ gte: LEADS_GOAL.period_start, lte: '2026-10-25' })
   })
 
   it('signups_count 目标：传入自己的时间段 → 按成交记录刷出数字，用的是它自己的时间段', async () => {

@@ -14,6 +14,7 @@ import {
   type MetaObjectiveCosts,
 } from './objective-metrics'
 import { GRAPH_BASE } from './graph-base'
+import { clickThroughRate } from './ctr'
 
 export interface MetaAdsInsights extends MetaObjectiveCosts {
   spend: number
@@ -82,7 +83,6 @@ export async function getAdAccountInsightsResult(
     'purchase_roas',
     'actions',
     'cost_per_action_type',
-    'outbound_clicks_ctr',
   ].join(',')
 
   const params = new URLSearchParams({
@@ -137,7 +137,7 @@ export function parseInsights(row: GraphInsightsData): MetaAdsInsights {
   const conversions = purchases > 0 ? purchases : null
 
   const cpc = spend > 0 && clicks > 0 ? spend / clicks : null
-  const ctr = impressions > 0 && clicks > 0 ? clicks / impressions : null
+  const ctr = clickThroughRate(clicks, impressions)
 
   // Objective-dependent costs, straight from Meta's cost_per_action_type.
   // All null for objectives that cannot produce the matching action — a

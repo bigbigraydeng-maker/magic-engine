@@ -6,7 +6,7 @@
  * 四 tab 显示 L3 记忆四张表内容；行级别可编辑（textarea + select）/ 删除；
  * 顶部按钮：手动触发抽取器 + 导出 JSON 备份。
  *
- * 仅 FDE 可见（路由用 requireDashboardClientAccess 鉴权 — 客户 portal 不可达）。
+ * 仅内部账号可见。服务端 layout 用 requireOperatorAccess：客户角色不渲染本页。
  */
 
 import { useState, useEffect, useCallback } from 'react'

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { applyApprove } from './review-apply'
 import { defaultFactSourceRef, reviewErrorZh, reviewGate } from './review-ui'
 import type { ReviewGateInput } from './review-ui'
-import { REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
 const labelOf = (k: string) => (k === 'factual_claims_have_source' ? '事实性主张有来源' : k)
 
@@ -88,10 +88,10 @@ describe('reviewGate', () => {
 // 服务端把关规则没变:全 PASS 但「事实有来源」没填网址,仍被挡,且报错能被翻成「去哪填」。
 describe('server gate unchanged', () => {
   it('rejects a PASS factual item without source_ref, and the message is translatable', async () => {
-    const items = REEL_HUMAN_CHECK_KEYS_V2.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: null }))
+    const items = REEL_HUMAN_CHECK_KEYS_V3.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: null }))
     const wo = { id: 'w', client_id: 'c', status: 'in_review', output: {}, review_ref: {} }
     const supabase = { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: wo, error: null }) }) }) }) }
-    const res = await applyApprove(supabase as never, 'w', 'pm', undefined, items)
+    const res = await applyApprove(supabase as never, 'w', 'pm', undefined, items, null)
     expect(res.ok).toBe(false)
     expect(reviewErrorZh(res.error ?? '', labelOf)).toContain('来源网址')
   })

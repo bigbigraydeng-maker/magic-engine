@@ -44,6 +44,28 @@ describe('describeApprovalRecord', () => {
     })))!
     expect(v.lines.join('\n')).toContain('1 项通过，2 项格式无法识别')
   })
+  it('🔴 预算那一道批准时用的是哪份证据，写进批准记录：现读 / 存档 / 想现读没读成而用存档（事后能说清）', () => {
+    const snap = (source: unknown, asOf: unknown = '2026-10-20T03:03:00Z') => receipt({
+      gate_snapshot: { taken_at: '2026-10-20T03:04:00Z', results: [
+        { key: 'ads.budget_within_caps', light: 'green', hard: true },
+        { key: 'env.account_billing', light: 'yellow', hard: true, source, as_of: asOf }] },
+    })
+    const lines = (source: unknown, asOf?: unknown) => describeApprovalRecord(plan('approved', snap(source, asOf)))!.lines.join('\n')
+    expect(lines('live')).toContain('广告账户与付款（含在投预算）：批准时现读的（2026-10-20 14:03（悉尼时间））')
+    expect(lines('receipt')).toContain('用的是每天早上自动检查的存档（2026-10-20 14:03（悉尼时间）），不是批准时现读的')
+    expect(lines('receipt_after_live_failed')).toContain('批准时想现读但没读成，用的是存档')
+    // 读取时间缺失 / 乱写：写「没有记录」，不编
+    expect(lines('live', null)).toContain('批准时现读的（没有记录）')
+    expect(lines('live', 'garbage')).toContain('批准时现读的（没有记录）')
+  })
+  it('较早的批准没有来源字段 / 来源写了不认识的值 / 别的门带了来源 → 不出这一行，也不崩', () => {
+    const noSource = receipt({ gate_snapshot: { taken_at: '2026-10-20T03:04:00Z', results: [{ key: 'env.account_billing', light: 'green', hard: true }] } })
+    expect(describeApprovalRecord(plan('approved', noSource))!.lines.join('\n')).not.toContain('广告账户与付款')
+    const unknown = receipt({ gate_snapshot: { taken_at: '2026-10-20T03:04:00Z', results: [{ key: 'env.account_billing', light: 'green', hard: true, source: 'magic' }] } })
+    expect(describeApprovalRecord(plan('approved', unknown))!.lines.join('\n')).not.toContain('广告账户与付款')
+    const otherGate = receipt({ gate_snapshot: { taken_at: '2026-10-20T03:04:00Z', results: [{ key: 'tracking.pixel_alive', light: 'green', hard: true, source: 'live' }] } })
+    expect(describeApprovalRecord(plan('approved', otherGate))!.lines.join('\n')).not.toContain('广告账户与付款')
+  })
   it('跳过的待办数会写出来', () => {
     expect(describeApprovalRecord(plan('approved', receipt({ tasks_created: 3, tasks_skipped: 2 })))!.lines.join('')).toContain('跳过 2 张')
   })

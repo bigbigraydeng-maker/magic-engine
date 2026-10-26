@@ -9,7 +9,7 @@ import { callClaudeWithTools, type ClaudeToolCall } from '@/lib/anthropic/client
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
 import { applyBudgetUpdate, applyQualityReject } from './review-apply'
 import { REMOTION_REJECT_UNSUPPORTED_MESSAGE, isRemotionBrief, renderModeLabel } from './render-mode'
-import { REEL_HUMAN_CHECK_KEYS_V2, type ContentCheckItemResult } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3, type ContentCheckItemResult } from '@/lib/social/content-review'
 
 export interface FactoryChatCtx {
   supabase: SupabaseClient
@@ -41,7 +41,7 @@ const REJECT_TOOL: Anthropic.Tool = {
         items: {
           type: 'object',
           properties: {
-            key: { type: 'string', enum: [...REEL_HUMAN_CHECK_KEYS_V2] },
+            key: { type: 'string', enum: [...REEL_HUMAN_CHECK_KEYS_V3] },
             judge: { type: 'string', enum: ['HUMAN'] },
             outcome: { type: 'string', enum: ['PASS', 'FAIL', 'NOT_MEASURED'] },
             detail: { type: ['string', 'null'] },

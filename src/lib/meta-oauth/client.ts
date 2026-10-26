@@ -17,14 +17,16 @@
  * scheme, same shape — so the two flows stay readable side by side.
  */
 
-import { createHmac } from 'crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
 
 const GRAPH_VERSION = 'v21.0'
 const AUTH_URL = `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`
 
 /** Ten minutes is plenty to click through a consent screen, short enough to be useless if leaked. */
-const STATE_TTL_MS = 10 * 60 * 1000
+export const META_STATE_TTL_SECS = 600
+export const META_STATE_COOKIE = 'meta_page_oauth_state'
+export const META_STATE_PATH = '/api/auth/facebook'
 
 /**
  * What we ask the user to grant.
@@ -86,6 +88,9 @@ export type MetaConnectIntent = 'publishing'
 
 export interface VerifiedState {
   clientId: string
+  userId: string
+  targetPageId: string | null
+  nonce: string
   intent?: MetaConnectIntent
 }
 
@@ -108,36 +113,39 @@ function appId(): string {
  * caller cannot swap in another client's id on the way back and attach their
  * token to someone else's account.
  */
-export function buildState(clientId: string, intent?: MetaConnectIntent): string {
-  // `intent` is only added when set, so an inbox connect keeps producing the
-  // exact same payload shape it always has — no behaviour change for callers
-  // that never pass it.
+export function buildState(input: Omit<VerifiedState, 'nonce'>): string {
   const payload = Buffer.from(
-    JSON.stringify({ clientId, exp: Date.now() + STATE_TTL_MS, ...(intent ? { intent } : {}) }),
+    JSON.stringify({ ...input, nonce: randomBytes(16).toString('hex'), exp: Date.now() + META_STATE_TTL_SECS * 1000 }),
   ).toString('base64url')
   const sig = createHmac('sha256', appSecret()).update(payload).digest('base64url')
   return `${payload}.${sig}`
 }
 
 export function verifyState(state: string): VerifiedState | null {
-  const dot = state.lastIndexOf('.')
-  if (dot === -1) return null
-
-  const payload = state.slice(0, dot)
-  const sig = state.slice(dot + 1)
-  const expected = createHmac('sha256', appSecret()).update(payload).digest('base64url')
-  if (sig !== expected) return null
-
   try {
+    const dot = state.lastIndexOf('.')
+    if (dot === -1) return null
+    const payload = state.slice(0, dot)
+    const sig = Buffer.from(state.slice(dot + 1), 'utf8')
+    const expected = Buffer.from(createHmac('sha256', appSecret()).update(payload).digest('base64url'), 'utf8')
+    if (sig.length !== expected.length || !timingSafeEqual(sig, expected)) return null
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
       clientId?: unknown
+      userId?: unknown
+      targetPageId?: unknown
+      nonce?: unknown
       exp?: unknown
       intent?: unknown
     }
-    if (typeof data.clientId !== 'string' || typeof data.exp !== 'number') return null
-    if (Date.now() > data.exp) return null
-    const intent = data.intent === 'publishing' ? 'publishing' : undefined
-    return intent ? { clientId: data.clientId, intent } : { clientId: data.clientId }
+    if (typeof data.clientId !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(data.clientId)) return null
+    if (typeof data.userId !== 'string' || !data.userId) return null
+    if (typeof data.nonce !== 'string' || !/^[0-9a-f]{32}$/.test(data.nonce)) return null
+    if (data.targetPageId !== null && (typeof data.targetPageId !== 'string' || !/^\d+$/.test(data.targetPageId))) return null
+    if (typeof data.exp !== 'number' || !Number.isFinite(data.exp) || Date.now() >= data.exp || data.exp > Date.now() + META_STATE_TTL_SECS * 1000) return null
+    if (data.intent !== undefined && data.intent !== 'publishing') return null
+    if (data.intent === 'publishing' && !data.targetPageId) return null
+    return { clientId: data.clientId, userId: data.userId, targetPageId: data.targetPageId,
+      nonce: data.nonce, ...(data.intent ? { intent: data.intent } : {}) }
   } catch {
     return null
   }

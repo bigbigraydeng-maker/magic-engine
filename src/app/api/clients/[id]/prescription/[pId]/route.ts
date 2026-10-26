@@ -4,7 +4,7 @@
  *
  * PATCH /api/clients/[id]/prescription/[pId]
  *   Body: { status: 'approved'|'rejected', rejection_note?: string }
- *   - 'approved' → save approval (含批准人，取自会话) + synchronously generate execution_items
+ *   - 'approved' → save approval (含批准人，取自会话) + 把阶段挂到目标下。不再生成看板上的待办。
  *   - 'rejected'  → record rejection note
  *   - Already-approved prescription → 409 Conflict
  *
@@ -14,9 +14,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -51,7 +52,9 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Prescription not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, prescription: data }, {
+    const prescription = await failIfStaleGenerating(clientId, pId, data)
+
+    return NextResponse.json({ success: true, prescription }, {
       headers: {
         // 双重保险：浏览器也不要缓存
         'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -60,6 +63,34 @@ export async function GET(
   } catch (err: unknown) {
     console.error('[prescription GET] Error:', err)
     return NextResponse.json({ success: false, error: 'An unexpected error occurred' }, { status: 500 })
+  }
+}
+
+async function failIfStaleGenerating(
+  clientId: string,
+  prescriptionId: string,
+  row: Prescription,
+): Promise<Prescription> {
+  if (!isStaleGenerating(row.status, row.generated_at, Date.now())) return row
+  const { error } = await supabaseAdmin
+    .from('prescriptions')
+    .update({
+      status: 'failed',
+      error_message: STALE_GENERATING_MESSAGE,
+      progress_note: null,
+    })
+    .eq('id', prescriptionId)
+    .eq('client_id', clientId)
+    .eq('status', 'generating')
+  if (error) {
+    console.error('[prescription GET] stale heal failed', error)
+    return row
+  }
+  return {
+    ...row,
+    status: 'failed',
+    error_message: STALE_GENERATING_MESSAGE,
+    progress_note: null,
   }
 }
 
@@ -77,7 +108,8 @@ export async function PATCH(
   { params }: { params: { id: string; pId: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Agree is OPC only. This check rejects a single-client FDE; drafting uses requireOperatorAccess.
+  const access = await requirePlanApproverAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -114,10 +146,9 @@ export async function PATCH(
     }
 
     // ── 批准 = 落地 ──
-    // 派生 Initiative → 生成执行项 → 归档旧版 → 标 approved，整套在
-    // lib/diagnostic/prescription-landing.ts 里，跟处方周更共用同一段代码。
-    // （顺序很重要：若执行项生成失败，status 保持 draft，
-    //   不会卡在"已批准但看板上没动作"这种从界面完全看不出来的状态。）
+    // 派生 Initiative（目标下的阶段）→ 归档旧版 → 标 approved。
+    // 不再生成看板上的待办；看板生成失败也不会让这次批准失败。
+    // 整套在 lib/diagnostic/prescription-landing.ts，处方周更共用同一段代码。
     if (body.status === 'approved') {
       try {
         // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）

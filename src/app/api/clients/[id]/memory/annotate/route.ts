@@ -36,7 +36,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import {
   savePreference,
   saveProvenPattern,
@@ -80,7 +80,7 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id: clientId } = params
 
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
