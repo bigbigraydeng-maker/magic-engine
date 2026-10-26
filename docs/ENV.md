@@ -250,6 +250,7 @@
 | `WEB_INTELLIGENCE_ALLOWED_CLIENT_IDS` | Web Intelligence 客户白名单，未配 = 谁都不跑 | Render-web |
 | `WEB_INTELLIGENCE_TRAFFIC_ENABLED` | Web Intelligence 流量检查总闸，默认 **关** | Render-web |
 | `WEB_INTELLIGENCE_FIRST_PARTY_TOUR_SOURCES` | 第一方行程数据源配置（JSON） | Render-web |
+| `CLIENT_PRODUCT_FACT_SOURCES` | 产品事实快照的抓取规则（JSON，按客户 ID：`origin` 官网域名 + `product_path_prefixes` 产品页路径前缀）；未配 = 该客户抓取直接报 `source_not_configured`（`src/lib/product-facts/collect.ts`） | Render-web |
 | `FACTORY_STOCK_REFILL_ENABLED` | 内容工厂素材库自动补货总闸，默认 **关** | Render-web |
 | `BASELINE_CRON_ENABLED` | 设 `false` 可临时停掉每月域名基线任务，默认开 | Render-web |
 
