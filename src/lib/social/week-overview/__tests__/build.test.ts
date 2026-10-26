@@ -179,13 +179,27 @@ describe('buildWeekOverview — the video address for the Reel cover', () => {
     expect(reels[0].video_url).toBeNull()
   })
 
-  it('a path that could point somewhere else never becomes an address', async () => {
+  it('accepts a base address written with a trailing slash, and writes spaces the way an address needs them', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co/')
+    const [reel] = await reelsOf(['renders/c1/my reel/final.mp4'])
+    expect(reel.video_url).toBe('https://example.supabase.co/storage/v1/object/public/content-factory/renders/c1/my%20reel/final.mp4')
+  })
+
+  it('a path that could point somewhere else never becomes an address, however it is written', async () => {
     vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
-    const reels = await reelsOf(['../secret/final.mp4', '/absolute/final.mp4', 'https://evil.example/x.mp4', 'renders/c1/ok/final.mp4'])
+    const unsafe = [
+      '../secret/final.mp4',
+      '/absolute/final.mp4',
+      'https://evil.example/x.mp4',
+      '%2e%2e/%2e%2e/%2e%2e/%2e%2e/rest/v1/clients?select=*',
+      '%2E%2E/%2E%2E/x.mp4',
+      'renders/c1/x.mp4?token=1',
+      'renders/c1/x.mp4#frag',
+      'a\\..\\..\\..\\x.mp4',
+    ]
+    const reels = await reelsOf([...unsafe, 'renders/c1/ok/final.mp4'])
     expect(reels.map((r) => r.video_url)).toEqual([
-      null,
-      null,
-      null,
+      ...unsafe.map(() => null),
       'https://example.supabase.co/storage/v1/object/public/content-factory/renders/c1/ok/final.mp4',
     ])
   })

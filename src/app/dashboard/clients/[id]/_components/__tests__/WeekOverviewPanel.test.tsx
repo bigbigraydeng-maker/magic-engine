@@ -394,11 +394,9 @@ describe('WeekOverviewPanel — Reel cover', () => {
     await screen.findByText('Harbour Tour')
     expect(media.videos.map((cover) => cover.getAttribute('src'))).toEqual([video])
 
-    media.tell(media.videos[0], 'loadeddata')
-    media.showFrame()
+    await media.showFrame()
 
-    expect(screen.getAllByLabelText('视频封面')).toHaveLength(1)
+    expect(Array.from(container.querySelectorAll('[data-cover]')).map((tile) => tile.getAttribute('data-cover'))).toEqual(['kept', 'none'])
     expect(container.querySelector('video')).toBeNull()
-    expect(container.querySelectorAll('span.bg-me-charcoal svg')).toHaveLength(2) // the badge on the cover and the plain tile
   })
 })
