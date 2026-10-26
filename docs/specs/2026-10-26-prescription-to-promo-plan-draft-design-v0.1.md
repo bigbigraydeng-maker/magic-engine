@@ -57,7 +57,7 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 |---|---|---|
 | `ad_account_id` | ★ **候选 = `loadOwnedAccounts`（客户名下）**；**不得用 `hidden_from_ad_health` 筛**（展示开关≠投放开关，“状态字段当授权”老坑）。★ **资格判据 = 系统读得到的三样**：该主页有可用 token（`getStoredPageToken`）+ 必需权限（`leads_retrieval`、`pages_manage_ads`，以 meta-oauth/client.ts 的 scope 清单为真相源）+ 至少一个 **ACTIVE** 表单（`fetchPageLeadForms`）。“账户↔可投主页”再加 `promote_pages`（**待建只读适配器**）。★ **三态**：读成功且非空 / 读成功且空 / **读失败或无权限（HTTP 错、令牌缺 scope、字段缺失）**——三者 why_empty 文案不同，第三态写“读不到”。★ 资格**未知 → `ok:false` 整个步骤丢掉**，不许先选账户再附 warning。★ `account_status!==1` → `ok:false`。多个都合格 → 取余量最大者并在 Basis 列出候选与各自余量 | 三态各自 why_empty |
 | `daily_budget_cents` | ★ **多步骤拆分公式写死（M7）**：总额 = 余量 × 剧本标量 share；**按步骤数等分**，**事先一次算好**，不靠调用顺序（顺序扣减会得到 0.5/0.25 只用掉 0.75 余量）；`Basis.source` 写「剧本参数 ÷ 步骤数」。★ 近 30 天真实日花费读得到才会“贴近上限则减半”，**读不到就不压**并标“没经过核对”。★ 两个扣减口都累加（同账户 + 同阶段所有账户），范围=阶段内。★ **币种读不到 → 该步骤 `ok:false`**（不依赖 `checkAdsBudget` 对 unknown 的放行） | 现成 why_empty |
-| `audience` | ★ 按 2822 形状：有合格已保存受众 → `audience_ref=<编号>`；没有 → **不得把中文散文塞进 `audience_ref`**，改用 `targeting={countries:['NZ'], age_min, age_max}`（`audience_ref=''`），`countries` 与 `city_keys` 不同时给。重定向类打法构建器再加**硬过滤**（子类型 + 人数 ≥ `D4_AUDIENCE_FLOOR`）；“在投仍挂着”只是排序权重，按代码写 | 三态 why_empty |
+| `audience` | ★ **受众池读取注意（2026-10-26 实测，已写入 Meta 广告手册 §30 第 7 条）**：账户的受众列表边（`customaudiences`，含 `fetchCustomAudiences`）**会漏掉部分相似受众**——CTS 旧账户列表边只返回 8 条，而广告 MCP 读到 12 条，缺的 4 条都是「类似受众 (NZ, 1%)」，按 id 直读均 200 且 `account_id` 就是本账户。所以**“不在列表里 ≠ 不属于该账户”**；受众归属/可选性判断，列表里没有的要按 id 直读核 `account_id`（刀② 已实现 `fetchCustomAudienceById`）。官方账户列表边也只返回 8 条而 MCP 读到 11 条，缺的 3 条**同类原因、未穷尽，未逐条核实**。`approximate_count_lower_bound` 会返回 **-1/0 表示“不报”**，≤0 一律当读不到、不当“人太少”。★ 按 2822 形状：有合格已保存受众 → `audience_ref=<编号>`；没有 → **不得把中文散文塞进 `audience_ref`**，改用 `targeting={countries:['NZ'], age_min, age_max}`（`audience_ref=''`），`countries` 与 `city_keys` 不同时给。重定向类打法构建器再加**硬过滤**（子类型 + 人数 ≥ `D4_AUDIENCE_FLOOR`）；“在投仍挂着”只是排序权重，按代码写 | 三态 why_empty |
 | `excluded_audience_refs` | 受众池里排除名单型自定义受众 → 写入 `settings.targeting.excluded_audience_refs`。★ **有意“仅为携带排除名单而创建 `targeting` 对象”**（targeting 是 optional，注释禁 default，所以只在有排除名单时才创建，不能给每个步骤都塞空对象）。47 人名单本身的上传不在本功能（要 PM 授权） | 留空+原因 |
 | `creative_refs` | `creative_pool` approved；`promoVerdict` 五态逐个：ok→可用；**undeclared（最常见）**→不可用并写「素材没声明推广期」；not_started/expired/expires_before_use_end→各自原因。★ 结果为空 → 整步骤进“未生成清单”（素材空是硬红，PM 批不了） | 五态汇总 |
 | 起止日 | 目标周期 ∩ 今天之后；**单阶段** | 无周期→整个种子不产出 |
@@ -115,8 +115,10 @@ plan_seed: {                     // 带版本号的独立 zod；与内存类型 
 | 客户令牌 `me/permissions` | 200，含 `leads_retrieval`、`pages_manage_ads`、`ads_management`、`pages_show_list`… 均 granted | 权限三样齐全 |
 | 页令牌 `me/permissions` | 400「Tried accessing nonexisting field (permissions)」 | 该边对页令牌不可用（要用客户令牌读） |
 | `fetchPageLeadForms(CTS 主页)` | 11 个表单；v6.1 `1419397053495913` ACTIVE；v6 `861321827044055` ACTIVE… | 表单可读且有在用表单 |
-| 两个账户 `customaudiences?limit=200` | 各 8 条，**`paging.next` 不存在**（只有 `cursors`） | 读全；“有无下一页”可用 `data.length<limit` 判断 |
+| 两个账户 `customaudiences?limit=200` | 各 8 条，**`paging.next` 不存在**（只有 `cursors`）——**仅是 8 条样本上的结论，不是通则（待复核）** | 本次样本读全；“有无下一页”可用 `data.length<limit` 判断，但列表边本身会漏项（见下两行） |
 **由此得出的设计结论**：`promote_pages` 是“必要条件”，**不能单独证明“能建表单广告”**；官方账户那条缺口**系统读不出来**，不得写死“官方账户不能投”——构建器按读数判为“可投”，**preview 里标注“资格为读数判断，未实际建过”**，真建时 Meta 报错会如实回流。运营说法与读数不一致这件事需要 74/PM 知道（可能是该账户另一层权限/业务验证，不在这些边上）。
+| 旧账户 `customaudiences?limit=200` vs 广告 MCP | 列表边 8 条 vs MCP 12 条；缺的 4 条（相似受众 NZ 1%）按 id 直读 200 且 `account_id` 正确；某相似受众 `approximate_count_lower_bound=-1` | ⚠️ 列表边会漏项；“不在列表=不属于本账户”是错判据；count≤0=不报 |
+| 官方账户 `customaudiences?limit=200` vs MCP | 列表边 8 条 vs MCP 11 条；缺的 3 条同类原因**未穷尽、未逐条核实** | 同上 |
 **仍未核实**：`landPrescription` 副作用未逐行核；权限不足时 `promote_pages` 是返回空数组还是报错**没有对照样本**（本次读到的都是成功且非空，三态里“读成功且空/读失败”两态尚无真实样本，需在权限不足的账户上补一次）。
 
 ## 13. Reuse Statement
