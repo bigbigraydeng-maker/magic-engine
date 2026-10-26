@@ -6,3 +6,6 @@ export const CAPTURE_CADENCE_MS = 6 * 3600 * 1000
 export const STALE_GRACE_MS = 30 * 60 * 1000
 export const STALE_AFTER_MS = CAPTURE_CADENCE_MS + STALE_GRACE_MS
 export const STALE_LABEL = '6 小时半'
+
+/** 实时读选中账户在投合计的时间上限（毫秒）；超时一律回落到快照。 */
+export const LIVE_READ_TIMEOUT_MS = 3000

@@ -136,7 +136,15 @@ function CaptureLines({ seed }: { seed: PlanSeed }) {
   )
 }
 
+/** 预算依据里有「实时读成功」的那条（文案含「这次用」）才算已实时核对；面板不做阈值算术，只看文案标志。 */
+function hasLiveBasis(step: PlanSeedStep): boolean {
+  const budget = step.daily_budget_cents
+  if (!budget.ok) return false
+  return budget.basis.some((b) => b.label === '在投合计（实时）' && b.value.includes('这次用'))
+}
+
 function ReadyView({ seed }: { seed: PlanSeed }) {
+  const showSnapshotLimit = seed.ad_steps.length > 0 && !seed.ad_steps.every(hasLiveBasis)
   return (
     <div>
       <h3 className="mt-4 font-semibold">广告步骤的建议</h3>
@@ -144,7 +152,7 @@ function ReadyView({ seed }: { seed: PlanSeed }) {
         <StepCard key={step.step_key} step={step} currency={seed.currency} />
       ))}
       <CaptureLines seed={seed} />
-      {seed.ad_steps.length > 0 && (
+      {showSnapshotLimit && (
         <p className="mt-4 text-xs text-gray-600">
           读到的在投合计来自最近一次数据抓取，抓取之后新开的广告不在内。
         </p>

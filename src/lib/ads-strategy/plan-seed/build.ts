@@ -1,6 +1,8 @@
 import { classifyPlays } from './classify'
 import { captureBasis, candidateBasis, buildBudgetFields, collectCurrencies, meHistoryBasis } from './budget-fields'
 import { loadAllAccounts, loadCandidates, loadForms, loadPageContext, loadScopes } from './context'
+import { LIVE_READ_TIMEOUT_MS } from './constants'
+import { readLiveForSelected } from './live-read'
 import type { AdPlay } from './ad-plays'
 import { errorReason, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
 import type { Basis, Field, PlanSeed, PlanSeedStep } from './types'
@@ -14,6 +16,12 @@ export interface BuildArgs {
 }
 
 const DEFAULT_TIMEOUT_MS = 8000
+
+/** Cap for the live read: at most LIVE_READ_TIMEOUT_MS, and always leave a margin before the overall deadline so a hung live read falls back to the snapshot instead of triggering the overall timeout. */
+function liveCapMs(deadlineMs: number, timeoutMs: number): number {
+  const margin = Math.min(500, Math.floor(timeoutMs / 4))
+  return Math.max(0, Math.min(LIVE_READ_TIMEOUT_MS, deadlineMs - Date.now() - margin))
+}
 
 /** 组装 ad_account_id 字段（有值）。 */
 function buildAccountField(passing: PassingStep): Field<string> {
@@ -131,6 +139,7 @@ async function runWork(
   args: BuildArgs,
   deps: PlanSeedDeps,
   acc: Accumulator,
+  limits: { deadlineMs: number; timeoutMs: number },
 ): Promise<void> {
   try {
     const nowMs = deps.now().getTime()
@@ -157,12 +166,20 @@ async function runWork(
     acc.currency = currencies.length === 1 ? currencies[0] : null
     if (multiCurrency) acc.notes.push('多币种')
 
+    const live = await readLiveForSelected(
+      args.clientId,
+      passing,
+      deps,
+      liveCapMs(limits.deadlineMs, limits.timeoutMs),
+    )
+
     const budgets = await buildBudgetFields(args.clientId, passing, deps, {
       nowMs,
       multiCurrency,
       allAccounts: accounts,
       unknownDrops,
       currency: acc.currency,
+      live,
     })
 
     collectSteps(passing, pageId ?? '', budgets, acc)
@@ -227,13 +244,16 @@ export async function buildPlanSeed(
   }
 
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const deadlineMs = Date.now() + timeoutMs
   let timer: ReturnType<typeof setTimeout> | null = null
   const timeoutPromise = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), timeoutMs)
   })
 
   try {
-    const workPromise = runWork(args, deps, acc).then(() => 'done' as const)
+    const workPromise = runWork(args, deps, acc, { deadlineMs, timeoutMs }).then(
+      () => 'done' as const,
+    )
     const winner = await Promise.race([workPromise, timeoutPromise])
     if (winner === 'timeout') {
       return assembleOnTimeout(args, acc, factsAsOf)

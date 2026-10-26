@@ -6,8 +6,11 @@ import { fetchPageLeadForms } from '@/lib/meta/lead-forms'
 import { GRAPH_BASE } from '@/lib/meta/graph-base'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { getStoredPageToken, resolveMetaTokenForClient } from '@/lib/meta/token-manager'
+import { readHeartbeatAccount, type HeartbeatFetchers } from '@/lib/ads-strategy/heartbeat/read'
 import type { PlanSeedDeps } from './build'
 import type { ReadState } from './eligibility'
+import { LIVE_READ_TIMEOUT_MS } from './constants'
+import { liveDeliveringFromRead, type LiveDelivering } from './live-delivering'
 
 /** 一次 Graph GET 的结果：成功带 JSON，失败带中文原因（不含 URL / token）。 */
 type GraphResult = { ok: true; json: unknown } | { ok: false; reason: string }
@@ -247,6 +250,47 @@ export async function loadPromotePages(
   return { state: 'ok', value: ids }
 }
 
+export interface LiveReadOverrides {
+  timeoutMs?: number
+  resolveToken?: (clientId: string) => Promise<{ token: string } | null>
+  fetchers?: HeartbeatFetchers
+}
+
+/** Live read of one account's delivering budget. Never throws; any failure or timeout -> null. The token never leaves this function. */
+export async function readLiveDeliveringProd(
+  clientId: string,
+  adAccountId: string,
+  overrides: LiveReadOverrides = {},
+): Promise<LiveDelivering | null> {
+  const timeoutMs = overrides.timeoutMs ?? LIVE_READ_TIMEOUT_MS
+  const resolveToken = overrides.resolveToken ?? resolveMetaTokenForClient
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), timeoutMs)
+  })
+  const work = (async (): Promise<LiveDelivering | null> => {
+    const resolved = await resolveToken(clientId)
+    if (resolved === null) return null
+    const read = await readHeartbeatAccount({
+      adAccountId,
+      accessToken: resolved.token,
+      now: new Date(),
+      accountHasActiveCampaigns: true,
+      fetchers: overrides.fetchers,
+    })
+    return liveDeliveringFromRead(read)
+  })()
+  // swallow a late rejection after the race is decided
+  work.catch(() => undefined)
+  try {
+    return await Promise.race([work, timeout])
+  } catch {
+    return null
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
 /** 生产依赖：每个 productionDeps() 实例内按 clientId 记忆化行业读取。 */
 export function productionDeps(): PlanSeedDeps {
   const industryCache = new Map<string, Promise<string | null>>()
@@ -290,6 +334,8 @@ export function productionDeps(): PlanSeedDeps {
     readScopes: loadScopes,
     readPromotePages: loadPromotePages,
     playbookShare,
+    readLiveDelivering: (clientId, adAccountId) =>
+      readLiveDeliveringProd(clientId, adAccountId),
   }
 }
 

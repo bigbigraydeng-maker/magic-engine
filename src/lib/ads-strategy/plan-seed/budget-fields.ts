@@ -1,6 +1,8 @@
 import { accountLevelRoom, accountRoom, currencyOfFacts } from './classify'
 import { formatMinor } from './format'
 import { splitBudget, type HalveFlags } from './split-budget'
+import { computeLiveAdjustment, type LiveAdjustment } from './live-adjust'
+import type { LiveDelivering } from './live-delivering'
 import { windowBefore } from '@/lib/marketing-plan/promo/draft-ads'
 import { isStale, safe, type AccountData, type PassingStep, type PlanSeedDeps } from './shared'
 import type { Basis, Field } from './types'
@@ -70,11 +72,17 @@ function minClientHeadroom(passing: PassingStep[]): number {
   return min ?? 0
 }
 
-/** 已选账户的账户级余量映射。 */
-function accountHeadroomMap(passing: PassingStep[]): Record<string, number> {
+/** 已选账户的账户级余量映射（扣掉实时读到的增量）。 */
+function accountHeadroomMap(
+  passing: PassingStep[],
+  bumpByAccount: Record<string, number>,
+): Record<string, number> {
   const map: Record<string, number> = {}
   for (const p of passing) {
-    map[p.accountId] = accountLevelRoom(p.account.facts)
+    map[p.accountId] = Math.max(
+      0,
+      accountLevelRoom(p.account.facts) - (bumpByAccount[p.accountId] ?? 0),
+    )
   }
   return map
 }
@@ -137,6 +145,11 @@ function budgetEmptyReason(
   return splitWhy ?? '预算余量不够这一步'
 }
 
+/** 实时读数可用时去掉"数据口径"那条固定说明。 */
+function fixedBasisFor(liveUsed: boolean): Basis[] {
+  return liveUsed ? BUDGET_FIXED_BASIS.filter((b) => b.label !== '数据口径') : BUDGET_FIXED_BASIS
+}
+
 /** 组装单个通过步骤的 daily_budget_cents 字段。 */
 export function buildBudgetField(
   passing: PassingStep,
@@ -144,6 +157,8 @@ export function buildBudgetField(
   splitWhy: string | undefined,
   splitBasis: Basis[],
   multiCurrency: boolean,
+  liveBasis: Basis | null = null,
+  liveUsed: boolean = false,
 ): Field<number> {
   const facts = passing.account.facts
   const canValue =
@@ -157,7 +172,12 @@ export function buildBudgetField(
     return {
       ok: true,
       value: budgetMinor,
-      basis: [...splitBasis, ...BUDGET_FIXED_BASIS, captureBasis(passing.account.captureAt)],
+      basis: [
+        ...splitBasis,
+        ...(liveBasis !== null ? [liveBasis] : []),
+        ...fixedBasisFor(liveUsed),
+        captureBasis(passing.account.captureAt),
+      ],
       notes: [],
     }
   }
@@ -179,6 +199,7 @@ export async function buildBudgetFields(
     allAccounts: AccountData[]
     unknownDrops: { step_key: string; reason: string }[]
     currency: string | null
+    live?: Map<string, LiveDelivering | null>
   },
 ): Promise<Map<string, Field<number>>> {
   const out = new Map<string, Field<number>>()
@@ -197,10 +218,16 @@ export async function buildBudgetFields(
     return out
   }
 
+  const adj: LiveAdjustment = computeLiveAdjustment(
+    passing,
+    extra.allAccounts,
+    extra.live ?? new Map(),
+  )
+
   const split = splitBudget({
     steps: passing.map((p) => ({ step_key: p.play.step_key, accountId: p.accountId })),
-    clientHeadroomMinor: minClientHeadroom(passing),
-    accountHeadroomMinor: accountHeadroomMap(passing),
+    clientHeadroomMinor: Math.max(0, minClientHeadroom(passing) - adj.totalBump),
+    accountHeadroomMinor: accountHeadroomMap(passing, adj.bumpByAccount),
     share,
     halve: {
       client: clientFlags(extra.allAccounts, extra.nowMs),
@@ -239,6 +266,8 @@ export async function buildBudgetFields(
         r?.why_empty,
         splitBasis,
         extra.multiCurrency,
+        adj.basisByAccount[p.accountId] ?? null,
+        adj.liveUsedByAccount[p.accountId] ?? false,
       ),
     )
   }
