@@ -12,6 +12,8 @@ import { dispositionOf, notMachineReviewedCheck, runCheckWithTimeout, stampWorkO
 import { logoExpectedFromRemotionBrief, onScreenLines, remotionVisualNotes } from '../remotion-review-input'
 import { enqueueRemotionMaliangReview, remotionPublicVideoUrl } from '../enqueue-remotion-review'
 import { maliangReviewNote } from '../review-note'
+import { writeWorkOrderVerdict } from '../work-order-review'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { MACHINE_REVIEWED_KEY } from '../review-disposition'
 import { SNAPSHOT_KEY } from '../render-check'
 import { MALIANG_RENDER_READY_EVENT } from '@/lib/inngest/functions/maliang-render-check'
@@ -43,7 +45,7 @@ describe('dispositionOf', () => {
     expect(dispositionOf('pass')).toEqual({ holdFromQueue: false, machineReviewed: true })
   })
 
-  it('fail leaves the approve queue', () => {
+  it('fail is a finished reject on the post-route queue flag', () => {
     expect(dispositionOf('fail')).toEqual({ holdFromQueue: true, machineReviewed: true })
   })
 
@@ -182,22 +184,83 @@ describe('maliangReviewNote', () => {
   })
 
   it('says the order is not machine-reviewed before a verdict exists', () => {
-    expect(maliangReviewNote({ machine_reviewed: false })).toContain('还没审完')
+    expect(maliangReviewNote({ machine_reviewed: false })?.text).toContain('还没审完')
   })
 
   it('shows a pass, a reject, and a failed review differently', () => {
-    expect(maliangReviewNote({ maliang_check: PASS, machine_reviewed: true })).toContain('过关')
-    expect(maliangReviewNote({
+    expect(maliangReviewNote({ maliang_check: PASS, machine_reviewed: true })?.text).toContain('过关')
+    const fail = maliangReviewNote({
       maliang_check: { ...PASS, status: 'fail', reasons: ['第 1 镜文字：错字'] },
-    })).toContain('错字')
+    })
+    expect(fail?.tone).toBe('fail')
+    expect(fail?.text.startsWith('马良没过')).toBe(true)
+    expect(fail?.text).toContain('错字')
     expect(maliangReviewNote({
       maliang_check: { ...PASS, status: 'unverifiable', reasons: ['超时'], model: null },
       machine_reviewed: false,
-    })).toContain('还没经过机器审')
+    })?.text).toContain('还没经过机器审')
   })
 
   it('stays quiet for orders that were never marked', () => {
     expect(maliangReviewNote({ video_path: 'renders/a/b/final.mp4' })).toBeNull()
     expect(maliangReviewNote(null)).toBeNull()
+  })
+})
+
+function orderDb(row: { status: string; output: Record<string, unknown> } | null) {
+  const updates: Array<{ patch: Record<string, unknown>; filters: Array<[string, unknown]> }> = []
+  const client = {
+    from: () => {
+      const builder: Record<string, unknown> = {
+        select: () => builder,
+        eq: () => builder,
+        maybeSingle: async () => ({ data: row, error: null }),
+        update: (patch: Record<string, unknown>) => {
+          const filters: Array<[string, unknown]> = []
+          const upd: Record<string, unknown> = {
+            eq: (key: string, value: unknown) => {
+              filters.push([key, value])
+              return upd
+            },
+            then: (resolve: (value: unknown) => unknown) => {
+              updates.push({ patch, filters })
+              return resolve({ error: null })
+            },
+          }
+          return upd
+        },
+      }
+      return builder
+    },
+  } as unknown as SupabaseClient
+  return { client, updates }
+}
+
+describe('writeWorkOrderVerdict', () => {
+  const fail: MaliangCheck = { ...PASS, status: 'fail', reasons: ['第 2 镜文字：错字'] }
+
+  it('merges a fail onto the latest output and does not reject the order', async () => {
+    const db = orderDb({
+      status: 'in_review',
+      output: { caption: '成片字幕', reviewer_mark: '保留' },
+    })
+    await writeWorkOrderVerdict(db.client, 'wo-1', fail)
+    expect(db.updates).toHaveLength(1)
+    const output = db.updates[0].patch.output as Record<string, unknown>
+    expect(output.reviewer_mark).toBe('保留')
+    expect(output.caption).toBe('成片字幕')
+    expect(output.machine_reviewed).toBe(true)
+    expect((output.maliang_check as MaliangCheck).status).toBe('fail')
+    expect(db.updates[0].patch.status).toBeUndefined()
+    expect(db.updates[0].filters).toEqual([
+      ['id', 'wo-1'],
+      ['status', 'in_review'],
+    ])
+  })
+
+  it('skips the write after a person has already moved the order', async () => {
+    const db = orderDb({ status: 'approved', output: { caption: '成片字幕' } })
+    await writeWorkOrderVerdict(db.client, 'wo-1', fail)
+    expect(db.updates).toHaveLength(0)
   })
 })

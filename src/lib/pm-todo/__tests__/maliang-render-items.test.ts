@@ -246,6 +246,39 @@ describe('fetchMaliangTodos', () => {
       ),
     ).rejects.toThrow(/boom/)
   })
+
+  it('没有 Creatomate 成片时，模板出片没过的待办仍然出来', async () => {
+    const todos = await fetchMaliangTodos(
+      database({
+        content_factory_render_jobs: [],
+        content_work_orders: [{
+          id: 'wo-1',
+          client_id: 'client-a',
+          status: 'in_review',
+          angle: '示例角度',
+          updated_at: ago(3),
+          brief: { remotion: { template: 'postcard', props: {} } },
+          output: { machine_reviewed: true, maliang_check: failCheck(['第 1 镜文字：错字']) },
+        }],
+      }),
+      NOW,
+    )
+    expect(todos).toHaveLength(1)
+    expect(todos[0].kind).toBe('maliang_render_failed')
+    expect(todos[0].what).toContain('马良没过')
+  })
+
+  it('模板出片待办查询失败时，另一条出片路线的待办还在', async () => {
+    const todos = await fetchMaliangTodos(
+      database({
+        content_factory_render_jobs: [job()],
+        content_posts: [withCheck(passCheck)],
+        ordersError: { message: 'orders down' },
+      }),
+      NOW,
+    )
+    expect(todos.map((t) => t.kind)).toEqual(['maliang_render_passed'])
+  })
 })
 
 describe('pushMaliangRenderItems', () => {
@@ -287,13 +320,25 @@ describe('buildRemotionMaliangTodo', () => {
     expect(todo?.href).toBe('https://app.magicengine.com.au/dashboard/factory')
   })
 
-  it('reject is the same failed kind, and is not described as waiting for approval', () => {
+  it('reject stays a failed-kind todo that points at the inbox and the reason', () => {
+    const todo = buildRemotionMaliangTodo(row({
+      status: 'in_review',
+      output: { machine_reviewed: true, maliang_check: failCheck(['第 1 镜文字：错字']) },
+    }), NOW)
+    expect(todo?.kind).toBe('maliang_render_failed')
+    expect(todo?.what).toContain('马良没过')
+    expect(todo?.what).toContain('审片收件箱')
+    expect(todo?.what).toContain('错字')
+    expect(todo?.how).toContain('通过或打回')
+    expect(todo?.href).toBe('https://app.magicengine.com.au/dashboard/factory')
+  })
+
+  it('a fail already decided by a person is not nagged again', () => {
     const todo = buildRemotionMaliangTodo(row({
       status: 'review_rejected',
       output: { machine_reviewed: true, maliang_check: failCheck(['第 1 镜文字：错字']) },
     }), NOW)
-    expect(todo?.kind).toBe('maliang_render_failed')
-    expect(todo?.what).toContain('没放进你的审片队列')
+    expect(todo).toBeNull()
   })
 
   it('a review that did not finish is unverifiable and still points at the queue', () => {

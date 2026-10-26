@@ -14,7 +14,11 @@ export const MACHINE_REVIEWED_KEY = 'machine_reviewed'
 export const REMOTION_REVIEW_TIMEOUT_MS = 180_000
 
 export interface ReviewDisposition {
-  /** true = do not leave the piece in the human approve queue (a finished reject). */
+  /**
+   * Creatomate only: a finished reject leaves that route's approve queue (needs_rework).
+   * Template-render work orders ignore this flag for status. A fail stays in_review;
+   * the review card shows the notice and a person approves or rejects.
+   */
   holdFromQueue: boolean
   /** false = the review did not finish; a person still has to look. */
   machineReviewed: boolean

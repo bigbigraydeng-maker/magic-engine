@@ -141,6 +141,30 @@ it('shows when 马良 has not machine-reviewed the video yet', async () => {
   expect(btn(ONE_CLICK)).toBeDefined()
 })
 
+it('马良没过 stays on the review card with the reason, and a person can still approve or reject', async () => {
+  await mount([{ ok: true }], {
+    output: {
+      quality_checklist_auto: auto,
+      video_path: 'renders/c/wo/final.mp4',
+      machine_reviewed: true,
+      maliang_check: {
+        status: 'fail',
+        reasons: ['第 2 镜文字：错字'],
+        checked_at: '2026-10-26T00:00:00.000Z',
+        video_url: 'https://example.supabase.co/v.mp4',
+        frames: [],
+        model: 'gemini-2.5-flash',
+      },
+    },
+  })
+  const note = document.querySelector('[data-testid="maliang-review-note"]')
+  expect(note?.getAttribute('data-tone')).toBe('fail')
+  expect(note?.textContent).toContain('马良没过')
+  expect(note?.textContent).toContain('错字')
+  expect(btn(ONE_CLICK)).toBeDefined()
+  expect(btn('打回')).toBeDefined()
+})
+
 it('redline hits: no one-click, shows redline reason', async () => {
   await mount([{ ok: true }], { output: { quality_checklist_auto: auto, redline_hits: ['x'] } })
   expect(btn(ONE_CLICK)).toBeUndefined()

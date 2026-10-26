@@ -128,23 +128,23 @@ describe('maliang review on a template-render work order', () => {
     expect(db.updates.some((u) => u.patch.status === 'review_rejected')).toBe(false)
   })
 
-  it('reject: records the fail verdict and takes the order out of the approve queue', async () => {
+  it('reject: records the fail verdict and leaves the order in the human queue', async () => {
     const failed: MaliangCheck = { ...PASS_CHECK, status: 'fail', reasons: ['第 2 镜文字：错字'] }
     const { result, db } = await run(async () => failed)
     expect(result.status).toBe('fail')
 
-    const output = db.updates.find((u) => 'output' in u.patch)!.patch.output as Record<string, unknown>
+    const outputWrite = db.updates.find((u) => 'output' in u.patch)
+    const output = outputWrite!.patch.output as Record<string, unknown>
     expect((output.maliang_check as MaliangCheck).status).toBe('fail')
+    expect((output.maliang_check as MaliangCheck).reasons).toEqual(['第 2 镜文字：错字'])
     expect(output.machine_reviewed).toBe(true)
-
-    const statusWrite = db.updates.find((u) => u.patch.status === 'review_rejected')
-    expect(statusWrite).toBeDefined()
-    expect(statusWrite!.patch.reject_category).toBe('quality')
-    expect(String(statusWrite!.patch.reject_reason)).toContain('错字')
-    expect(statusWrite!.filters).toEqual([
+    expect(output.caption).toBe('成片字幕')
+    expect(outputWrite!.filters).toEqual([
       ['id', WORK_ORDER_ID],
       ['status', 'in_review'],
     ])
+    expect(db.updates.some((u) => u.patch.status === 'review_rejected')).toBe(false)
+    expect(db.updates.some((u) => 'status' in u.patch)).toBe(false)
   })
 
   it('review-error: a thrown check stays in the human queue and is not machine-reviewed', async () => {

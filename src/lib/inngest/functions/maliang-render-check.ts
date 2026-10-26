@@ -6,8 +6,9 @@
  *   `content_posts.generation_context_snapshot.maliang_check`（只动这一个子 key）。
  *   不过关把渲染工单标 `needs_rework`（不进审片队列；返工还是放弃由今日待办问）。
  * - 模板出片（工单 complete）：带 work_order_id。裁决写回工单 output 里的同一个
- *   `maliang_check` 对象（工单没有内容帖）。不过关把仍在 in_review 的工单标
- *   `review_rejected`。自检抛错或超时则保持 in_review，并标未机器审。
+ *   `maliang_check` 对象（工单没有内容帖）。过关、不过关、自检抛错或超时都保持
+ *   in_review。不过关只在审片卡片上标「马良没过」和原因，由人决定通过或打回。
+ *   自检抛错或超时标未机器审。人已经把工单移出待审时不再写回。
  * 回执写 cron_run_logs（job_name 恒为 'maliang-render-check'，非周期任务）。
  *
  * 🔴 retries 0：花模型钱，失败进回执不重跑——重跑等于重复付款。
@@ -321,9 +322,7 @@ async function runWorkOrderReview(
       data.output_url,
     ),
   )
-  await step.run('write-verdict', () =>
-    writeWorkOrderVerdict(deps.supabase, data.work_order_id, ctx.output, ctx.status, check),
-  )
+  await step.run('write-verdict', () => writeWorkOrderVerdict(deps.supabase, data.work_order_id, check))
   await finishChecked(step, run, check, {
     request_id: requestId,
     client_id: data.client_id,

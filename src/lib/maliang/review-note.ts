@@ -18,16 +18,29 @@ function verdictOf(output: Record<string, unknown>): { status: string; reasons: 
   return { status: raw.status, reasons: raw.reasons as string[] }
 }
 
-export function maliangReviewNote(output: unknown): string | null {
+export type MaliangReviewTone = 'pass' | 'fail' | 'pending'
+
+export interface MaliangReviewNote {
+  tone: MaliangReviewTone
+  text: string
+}
+
+function failNotice(reasons: string[]): string {
+  const head = reasons.map((r) => r.trim()).filter(Boolean).slice(0, 6).join('；')
+  return head ? `马良没过：${head}` : '马良没过'
+}
+
+export function maliangReviewNote(output: unknown): MaliangReviewNote | null {
   const record = asRecord(output)
   if (!record) return null
   const check = verdictOf(record)
-  if (check?.status === 'pass') return '马良已看过画面，自检过关'
-  if (check?.status === 'fail') {
-    const head = check.reasons.slice(0, 2).join('；')
-    return head ? `马良画面自检没过：${head}` : '马良画面自检没过'
+  if (check?.status === 'pass') return { tone: 'pass', text: '马良已看过画面，自检过关' }
+  if (check?.status === 'fail') return { tone: 'fail', text: failNotice(check.reasons) }
+  if (check?.status === 'unverifiable') {
+    return { tone: 'pending', text: '马良没完成画面自检，这条还没经过机器审，请你自己逐镜看' }
   }
-  if (check?.status === 'unverifiable') return '马良没完成画面自检，这条还没经过机器审，请你自己逐镜看'
-  if (record[REVIEWED_KEY] === false) return '马良还没审完这条片子，请你自己逐镜看'
+  if (record[REVIEWED_KEY] === false) {
+    return { tone: 'pending', text: '马良还没审完这条片子，请你自己逐镜看' }
+  }
   return null
 }

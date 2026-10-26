@@ -140,26 +140,34 @@ export async function fetchMaliangTodos(
   if (jobError) throw new Error(`maliang render jobs query failed: ${jobError.message}`)
 
   const jobs = (jobData ?? []) as RenderJobRow[]
-  if (jobs.length === 0) return []
-
-  const postIds = Array.from(new Set(jobs.map((j) => j.content_post_id).filter(Boolean)))
-  const { data: postData, error: postError } = await supabase
-    .from('content_posts')
-    .select('id, title, generation_context_snapshot')
-    .in('id', postIds)
-  if (postError) throw new Error(`maliang posts query failed: ${postError.message}`)
-
-  const postsById = new Map<string, PostRow>()
-  for (const p of (postData ?? []) as PostRow[]) postsById.set(p.id, p)
-
   const todos: MaliangTodo[] = []
-  for (const job of jobs) {
-    const todo = buildMaliangTodo(job, postsById.get(job.content_post_id), now)
-    if (todo) todos.push(todo)
+  if (jobs.length > 0) {
+    const postIds = Array.from(new Set(jobs.map((j) => j.content_post_id).filter(Boolean)))
+    const { data: postData, error: postError } = await supabase
+      .from('content_posts')
+      .select('id, title, generation_context_snapshot')
+      .in('id', postIds)
+    if (postError) throw new Error(`maliang posts query failed: ${postError.message}`)
+
+    const postsById = new Map<string, PostRow>()
+    for (const p of (postData ?? []) as PostRow[]) postsById.set(p.id, p)
+    for (const job of jobs) {
+      const todo = buildMaliangTodo(job, postsById.get(job.content_post_id), now)
+      if (todo) todos.push(todo)
+    }
   }
-  const remotion = await fetchRemotionMaliangTodos(supabase, now)
-  todos.push(...remotion)
+  todos.push(...await safeRemotionTodos(supabase, now))
   return todos
+}
+
+async function safeRemotionTodos(supabase: SupabaseClient, now: Date): Promise<MaliangTodo[]> {
+  try {
+    return await fetchRemotionMaliangTodos(supabase, now)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn('[maliang-todos] template-render todo query failed; the other route is kept:', message)
+    return []
+  }
 }
 
 export interface RemotionOrderRow {
@@ -196,7 +204,7 @@ export function buildRemotionMaliangTodo(row: RemotionOrderRow, now: Date): Mali
       href,
     }
   }
-  if (check.status === 'unverifiable') {
+  if (check.status === 'unverifiable' && row.status === 'in_review') {
     return {
       kind: 'maliang_check_unverifiable',
       client_id: row.client_id,
@@ -205,14 +213,14 @@ export function buildRemotionMaliangTodo(row: RemotionOrderRow, now: Date): Mali
       href,
     }
   }
-  if (check.status === 'fail') {
+  if (check.status === 'fail' && row.status === 'in_review') {
     const head = check.reasons.slice(0, 4).join('；')
     const tail = check.reasons.length > 4 ? `；另有 ${check.reasons.length - 4} 处` : ''
     return {
       kind: 'maliang_render_failed',
       client_id: row.client_id,
-      what: `马良：《${title}》9 宫格自检不过关，没放进你的审片队列 —— ${head}${tail}`,
-      how: `这条已经从待审里拿掉了，原因在上面。要重做就回我「返工 ${title}」，不要就回「放弃 ${title}」`,
+      what: `马良没过：《${title}》仍在审片收件箱，请你看完再决定 —— ${head}${tail}`,
+      how: '打开审片台播放这条。卡片上有「马良没过」和原因。看完由你点通过或打回',
       href,
     }
   }
@@ -236,7 +244,7 @@ export async function fetchRemotionMaliangTodos(
   const { data, error } = await supabase
     .from('content_work_orders')
     .select('id, client_id, status, angle, output, updated_at, brief')
-    .in('status', ['in_review', 'review_rejected'])
+    .in('status', ['in_review'])
     .gte('updated_at', sinceIso)
     .order('updated_at', { ascending: false })
     .limit(50)

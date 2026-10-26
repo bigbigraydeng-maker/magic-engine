@@ -5,7 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MaliangCheck } from '@/lib/maliang/render-check'
-import { dispositionOf, stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
+import { stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
 import { remotionNineGridInput } from '@/lib/maliang/remotion-review-input'
 
 export interface WorkOrderReady {
@@ -63,33 +63,31 @@ export async function readWorkOrderContext(
   }
 }
 
-/** Writes the verdict. A reject leaves the approve queue only while the order is still in_review. */
+/**
+ * Merges the verdict onto the latest output, and only while the order is still
+ * in_review. A fail does not change status. If a person already moved the order,
+ * the write is skipped so their fields are not overwritten by the pre-check snapshot.
+ */
 export async function writeWorkOrderVerdict(
   supabase: SupabaseClient,
   workOrderId: string,
-  currentOutput: unknown,
-  currentStatus: string,
   check: MaliangCheck,
 ): Promise<void> {
-  const stamped = stampWorkOrderOutput(currentOutput, check)
+  const fresh = await supabase
+    .from('content_work_orders')
+    .select('status, output')
+    .eq('id', workOrderId)
+    .maybeSingle()
+  if (fresh.error) throw new Error(`重读工单失败：${fresh.error.message}`)
+  if (!fresh.data) return
+  const row = fresh.data as { status?: unknown; output?: unknown }
+  if (row.status !== 'in_review') return
+
+  const stamped = stampWorkOrderOutput(row.output, check)
   const outputUpdate = await supabase
     .from('content_work_orders')
     .update({ output: stamped, updated_at: new Date().toISOString() })
     .eq('id', workOrderId)
-  if (outputUpdate.error) throw new Error(`写回工单裁决失败：${outputUpdate.error.message}`)
-
-  const disposition = dispositionOf(check.status)
-  if (!disposition.holdFromQueue || currentStatus !== 'in_review') return
-
-  const statusUpdate = await supabase
-    .from('content_work_orders')
-    .update({
-      status: 'review_rejected',
-      reject_category: 'quality',
-      reject_reason: `马良自检不过关：${check.reasons.join('；')}`.slice(0, 2000),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', workOrderId)
     .eq('status', 'in_review')
-  if (statusUpdate.error) throw new Error(`标出审片队列失败：${statusUpdate.error.message}`)
+  if (outputUpdate.error) throw new Error(`写回工单裁决失败：${outputUpdate.error.message}`)
 }
