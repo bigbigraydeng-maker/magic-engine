@@ -87,8 +87,13 @@ function makeLabelEvents(issueNumber: number, actor = 'bigbigraydeng-maker'): Ma
   return new Map([[issueNumber, [{ label: 'auto-dev', actor }]]]);
 }
 
+function makeLastEditors(issueNumber: number, editor = 'bigbigraydeng-maker'): Map<number, string> {
+  return new Map([[issueNumber, editor]]);
+}
+
 function makeInput(issue: Issue, overrides: {
   labelEvents?: Map<number, LabelEvent[]>;
+  lastEditors?: Map<number, string>;
   openPrFiles?: Map<number, string[]>;
   trunkImporters?: (filePath: string) => string[];
   classifyRisk?: (opts: { files: Array<{ filename: string; status: string }> }) => { risk: string };
@@ -96,6 +101,7 @@ function makeInput(issue: Issue, overrides: {
   return {
     issues: [issue],
     labelEvents: overrides.labelEvents ?? makeLabelEvents(issue.number),
+    lastEditors: overrides.lastEditors ?? makeLastEditors(issue.number),
     openPrFiles: overrides.openPrFiles ?? new Map<number, string[]>(),
     trunkImporters: overrides.trunkImporters ?? (() => ['src/lib/pm-todo/consumer.ts']),
     classifyRisk: overrides.classifyRisk ?? (() => ({ risk: 'B' })),
@@ -113,6 +119,18 @@ describe('pickIssues', () => {
     const issue = makeIssue();
     const result = pickIssues(makeInput(issue, { labelEvents: makeLabelEvents(1, 'random-user') }));
     expect(result[0]).toEqual({ number: 1, skip: true, reason: 'auto-dev 标签不是可信作者贴的' });
+  });
+
+  it('skips untrusted last editor', () => {
+    const issue = makeIssue();
+    const result = pickIssues(makeInput(issue, { lastEditors: makeLastEditors(1, 'attacker') }));
+    expect(result[0]).toEqual({ number: 1, skip: true, reason: '正文最后编辑者不在可信名单' });
+  });
+
+  it('skips missing last editor', () => {
+    const issue = makeIssue();
+    const result = pickIssues(makeInput(issue, { lastEditors: new Map() }));
+    expect(result[0]).toEqual({ number: 1, skip: true, reason: '正文最后编辑者不在可信名单' });
   });
 
   it('skips in-progress label', () => {
@@ -189,9 +207,15 @@ describe('pickIssues', () => {
       [2, [{ label: 'auto-dev', actor: 'bigbigraydeng-maker' }]],
       [3, [{ label: 'auto-dev', actor: 'bigbigraydeng-maker' }]],
     ]);
+    const lastEditors = new Map<number, string>([
+      [1, 'bigbigraydeng-maker'],
+      [2, 'bigbigraydeng-maker'],
+      [3, 'bigbigraydeng-maker'],
+    ]);
     const result = pickIssues({
       issues,
       labelEvents,
+      lastEditors,
       openPrFiles: new Map<number, string[]>(),
       trunkImporters: () => ['src/lib/pm-todo/consumer.ts'],
       classifyRisk: () => ({ risk: 'B' }),
