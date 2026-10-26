@@ -67,7 +67,9 @@ function mockDb(opts: {
         // 数每个人手上有几位（countHeldLeads：每人单独 count，不拉整行）
         select: () => ({
           eq: () => ({
-            eq: (_col: string, email: string) => Promise.resolve({ count: held[email] ?? 0, error: null }),
+            gte: () => ({
+              eq: (_col: string, email: string) => Promise.resolve({ count: held[email] ?? 0, error: null }),
+            }),
           }),
         }),
         update: (row: Record<string, unknown>) => {

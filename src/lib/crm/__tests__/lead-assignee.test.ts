@@ -13,6 +13,7 @@ function makeSupabase(rows: {
   counts?: Record<string, number>
 }) {
   const countSelectArgs: unknown[][] = []
+  const gteArgs: unknown[][] = []
   const assigneesChain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
@@ -22,6 +23,10 @@ function makeSupabase(rows: {
     const chain: any = {
       select: vi.fn((...args: unknown[]) => {
         countSelectArgs.push(args)
+        return chain
+      }),
+      gte: vi.fn((...args: unknown[]) => {
+        gteArgs.push(args)
         return chain
       }),
       eq: vi.fn((col: string, val: string) =>
@@ -39,6 +44,7 @@ function makeSupabase(rows: {
     from: vi.fn((table: string) => (table === 'client_portal_users' ? assigneesChain : contactsFrom())),
   } as any
   sup.countSelectArgs = countSelectArgs
+  sup.gteArgs = gteArgs
   return sup
 }
 
@@ -127,5 +133,30 @@ describe('pickAssignee', () => {
     for (const args of sup.countSelectArgs) {
       expect(args[1]).toEqual({ count: 'exact', head: true })
     }
+  })
+  it('🔴 只数最近 30 天新进来的：窗口起点是 now 往前 30 天，按 first_seen_at 过滤', async () => {
+    const sup = makeSupabase({
+      assignees: [{ email: 'baker@example.com' }, { email: 'lisa@example.com' }],
+      contacts: [],
+      counts: { 'baker@example.com': 0, 'lisa@example.com': 0 },
+    })
+    const now = new Date('2026-10-27T00:00:00Z')
+    await pickAssignee({ clientId, supabase: sup, now })
+    expect(sup.gteArgs.length).toBe(2) // 每个候选人一次，都带窗口
+    for (const args of sup.gteArgs) {
+      expect(args[0]).toBe('first_seen_at')
+      expect(args[1]).toBe('2026-09-27T00:00:00.000Z')
+    }
+  })
+
+  it('🔴 回填 1165 位历史客人后，新来的 Baker 不会被连续分到所有新客人（库存不算，只比最近新进来的）', async () => {
+    // 桩里的 counts 就是「窗口内」的结果：Lisa 最近 30 天新分到 12 位，Baker 10 位——
+    // 即便 Lisa 名下总共 1166 位（绝大多数是历史库存），也该是手上新线索少的 Baker 拿。
+    const sup = makeSupabase({
+      assignees: [{ email: 'baker@example.com' }, { email: 'lisa@example.com' }],
+      contacts: [],
+      counts: { 'baker@example.com': 10, 'lisa@example.com': 12 },
+    })
+    expect(await pickAssignee({ clientId, supabase: sup })).toBe('baker@example.com')
   })
 })

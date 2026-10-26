@@ -31,6 +31,8 @@ export interface AssigneeRow {
 
 export interface PickAssigneeOptions {
   clientId: string
+  /** 测试用：固定「现在」，窗口起点据此算。默认当前时间。 */
+  now?: Date
   /** 可注入 supabase 以便单测。 */
   supabase: Pick<SupabaseClient, 'from'>
 }
@@ -51,8 +53,16 @@ export async function listAssignees(opts: PickAssigneeOptions): Promise<Assignee
   return (data ?? []) as AssigneeRow[]
 }
 
+/** 「谁手上少」只数最近这么多天新进来的客人，历史库存不算（见 countHeldLeads）。 */
+export const HELD_WINDOW_DAYS = 30
+
 /**
- * 查每个候选人当前持有多少线索。返回 Map<email, count>。
+ * 查每个候选人**最近 HELD_WINDOW_DAYS 天新进来**的客人里，各被分到多少位。返回 Map<email, count>。
+ *
+ * 🔴 只数最近新进来的（`first_seen_at` 在窗口内），**不数历史库存**：
+ *    2026-10-27 把 1165 位老客人一次性回填给了 Lisa。如果把名下全部客人都算进去，
+ *    Baker 一加进名单就会被连续分到所有新客人，直到追平 1166 位；而那 1166 位里绝大多数是几个月前的老客人。
+ *    「公平」该比的是新线索的分摊，不是谁继承了多少历史。
  *
  * 🔴 每个候选人**单独数一次**（`count: 'exact', head: true`，只回计数不回行）：
  *    Supabase 一次最多回 1000 行，把整批已分配的客人拉回来再在客户端数，
@@ -67,12 +77,14 @@ export async function countHeldLeads(
   for (const email of emails) counts.set(email, 0)
   if (emails.length === 0) return counts
 
+  const since = new Date((opts.now ?? new Date()).getTime() - HELD_WINDOW_DAYS * 86_400_000).toISOString()
   const results = await Promise.all(
     emails.map(async (email) => {
       const { count, error } = await opts.supabase
         .from('contacts')
         .select('id', { count: 'exact', head: true })
         .eq('client_id', opts.clientId)
+        .gte('first_seen_at', since)
         .eq('assigned_to', email)
       if (error) throw new Error(`countHeldLeads: ${error.message}`)
       return [email, count ?? 0] as const
