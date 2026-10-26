@@ -177,10 +177,11 @@ export function judgeLaunch(input: {
 }): LaunchAssessment {
   const launchMs = Date.parse(input.launch.authorizedAt)
   if (Number.isNaN(launchMs)) return invalidLaunch(input.launch.campaignId)
-  const judged = judgeNumbers(input.insights, input.kpis, nzCalendarDay(new Date(launchMs)), nzCalendarDay(input.now))
+  const launchDay = nzCalendarDay(new Date(launchMs))
+  const judgeUpTo = (endDay: string): Judged => judgeNumbers(input.insights, input.kpis, launchDay, endDay)
   const checkpoints = [
-    ...HOURS.map(spec => hourPoint(spec, launchMs, input.now.getTime(), judged)),
-    ...DAYS.map(spec => dayPoint(spec, nzCalendarDay(new Date(launchMs)), nzCalendarDay(input.now), judged)),
+    ...HOURS.map(spec => hourPoint(spec, launchMs, input.now.getTime(), judgeUpTo)),
+    ...DAYS.map(spec => dayPoint(spec, launchDay, nzCalendarDay(input.now), judgeUpTo)),
   ]
   return { lines: checkpoints.map(point => point.sentence), checkpoints, campaignId: input.launch.campaignId }
 }
@@ -308,7 +309,7 @@ function hourPoint(
   spec: (typeof HOURS)[number],
   launchMs: number,
   nowMs: number,
-  judged: Judged,
+  judgeUpTo: (endDay: string) => Judged,
 ): LaunchCheckpoint {
   if (nowMs < launchMs + spec.hours * HOUR_MS) {
     return {
@@ -318,16 +319,19 @@ function hourPoint(
       sentence: `${spec.label}：还不知道。开投后还没满 ${spec.hours} 小时。`,
     }
   }
-  return finish(spec.kpiMetric, spec.label, judged)
+  // Only whole NZ days that fully elapsed before this checkpoint's own deadline.
+  const endDay = addCalendarDays(nzCalendarDay(new Date(launchMs + spec.hours * HOUR_MS)), -1)
+  return finish(spec.kpiMetric, spec.label, judgeUpTo(endDay))
 }
 
 function dayPoint(
   spec: (typeof DAYS)[number],
   launchDay: string,
   today: string,
-  judged: Judged,
+  judgeUpTo: (endDay: string) => Judged,
 ): LaunchCheckpoint {
-  if (today < addCalendarDays(launchDay, spec.offset)) {
+  const endDay = addCalendarDays(launchDay, spec.offset)
+  if (today < endDay) {
     return {
       kpiMetric: spec.kpiMetric,
       due: false,
@@ -335,7 +339,7 @@ function dayPoint(
       sentence: `${spec.label}：还不知道。还没到${spec.label}。`,
     }
   }
-  return finish(spec.kpiMetric, spec.label, judged)
+  return finish(spec.kpiMetric, spec.label, judgeUpTo(endDay))
 }
 
 function finish(
@@ -358,19 +362,31 @@ function judgeNumbers(
   insights: readonly InsightRef[],
   kpis: readonly KpiRef[],
   launchDay: string,
-  today: string,
+  endDay: string,
 ): Judged {
   const windowed = insights.filter(row =>
-    row.insightDate !== null && row.insightDate >= launchDay && row.insightDate <= today)
+    row.insightDate !== null && row.insightDate >= launchDay && row.insightDate <= endDay)
   const dateGap = insights.some(row => row.insightDate === null)
+  const missing = missingDays(windowed, launchDay, endDay)
+  if (missing.length > 0) {
+    return { verdict: 'unknown', parts: [`这段时间缺 ${missing.length} 天的每日数据：${missing.join('、')}，不能下结论。`] }
+  }
   const parts: string[] = []
   const comparisons: boolean[] = []
-  if (windowed.length === 0) parts.push('开投后还没有这一条广告的每日花费和线索。')
-  else pushReadable(windowed, kpis, parts, comparisons)
+  pushReadable(windowed, kpis, parts, comparisons)
   if (dateGap) parts.push('有几天的日期读不出来。')
   for (const kpi of kpis) pushUnrecognized(kpi, parts)
   if (kpis.length === 0) parts.push('这份处方没有写下能对照的线索或成本目标。')
   return { verdict: verdictOf(comparisons, parts.length > comparisons.length), parts }
+}
+
+function missingDays(rows: readonly InsightRef[], from: string, to: string): string[] {
+  const have = new Set(rows.map(row => row.insightDate))
+  const out: string[] = []
+  for (let day = from; day <= to; day = addCalendarDays(day, 1)) {
+    if (!have.has(day)) out.push(day)
+  }
+  return out
 }
 
 function pushReadable(

@@ -34,7 +34,21 @@ function day(over: Partial<InsightRef> = {}): InsightRef {
   return { insightDate: '2026-10-27', spend: 96, results: 12, ...over }
 }
 
-function matched(now: string, insights: InsightRef[] = [day()], targets: KpiRef[] = kpis) {
+// One row per NZ day from launch day (2026-10-26); only the first day carries numbers.
+function series(first: Partial<InsightRef> = {}, through = '2026-11-01'): InsightRef[] {
+  const out: InsightRef[] = []
+  const cursor = new Date('2026-10-26T00:00:00Z')
+  while (cursor.toISOString().slice(0, 10) <= through) {
+    const insightDate = cursor.toISOString().slice(0, 10)
+    out.push(out.length === 0
+      ? { insightDate, spend: 96, results: 12, ...first }
+      : { insightDate, spend: 0, results: 0 })
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return out
+}
+
+function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef[] = kpis) {
   const found = matchLaunch({
     prescription: prescription(),
     launches: [launch()],
@@ -75,7 +89,7 @@ describe('prescription launch check', () => {
     const early = sentence('2026-10-27T08:40:00.000Z', '24 小时', [])
     const later = sentence('2026-10-27T08:40:00.000Z', '48 小时', [])
     expect(early).toContain('不知道')
-    expect(early).toContain('开投后还没有这一条广告的每日花费和线索')
+    expect(early).toContain('缺 1 天的每日数据：2026-10-26')
     expect(later).toContain('还不知道')
     expect(later).toContain('开投后还没满 48 小时')
   })
@@ -91,13 +105,13 @@ describe('prescription launch check', () => {
   })
 
   it('says 没达标 when leads are below target', () => {
-    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', [day({ results: 3 })])
+    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', series({ results: 3 }))
     expect(line).toContain('没达标')
     expect(line).toContain('线索 3 条，目标 10 条')
   })
 
   it('does not treat a null spend as zero', () => {
-    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', [day({ spend: null })])
+    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', series({ spend: null }))
     expect(line).toContain('不知道')
     expect(line).toContain('不能当成 0')
     expect(line).not.toContain('达标')
@@ -105,7 +119,7 @@ describe('prescription launch check', () => {
   })
 
   it('keeps a real zero-lead miss and refuses a cost made from zero leads', () => {
-    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', [day({ spend: 20, results: 0 })])
+    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', series({ spend: 20, results: 0 }))
     expect(line).toContain('没达标')
     expect(line).toContain('线索 0 条，目标 10 条')
     expect(line).toContain('线索是 0，算不出单条成本')
@@ -113,7 +127,7 @@ describe('prescription launch check', () => {
   })
 
   it('does not call a gap 达标', () => {
-    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', [day()], [
+    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', series(), [
       ...kpis,
       { metric: '曝光', target: 100, unit: '' },
     ])
@@ -134,6 +148,38 @@ describe('prescription launch check', () => {
       now: new Date('2026-11-01T10:59:00.000Z'),
     })
     expect(nextCalendarDay.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')?.due).toBe(false)
+  })
+
+  it('judges each early checkpoint on its own window when the run is late', () => {
+    const rows = series({ spend: 20, results: 2 }, '2026-11-01')
+    rows[rows.length - 1] = { insightDate: '2026-11-01', spend: 100, results: 20 }
+    const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
+    const view = matched('2026-11-20T00:00:00.000Z', rows, leadsOnly)
+    const by = (metric: string) => view.checkpoints.find(point => point.kpiMetric === metric)
+    expect(by('launch_check_24h')).toMatchObject({ verdict: 'missed' })
+    expect(by('launch_check_24h')?.sentence).toContain('线索 2 条')
+    expect(by('launch_check_48h')).toMatchObject({ verdict: 'missed' })
+    expect(by('launch_check_48h')?.sentence).toContain('线索 2 条')
+    expect(by('launch_check_day7')).toMatchObject({ verdict: 'met' })
+    expect(by('launch_check_day7')?.sentence).toContain('线索 22 条')
+  })
+
+  it('says 不知道 and names the days when a day row is missing', () => {
+    const view = matched('2026-11-02T00:00:00.000Z', [series()[0]])
+    const day7 = view.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')
+    expect(day7?.verdict).toBe('unknown')
+    expect(day7?.sentence).toContain('缺 6 天的每日数据：2026-10-27')
+    expect(day7?.sentence).toContain('2026-11-01')
+    expect(day7?.sentence).not.toContain('达标')
+    expect(view.checkpoints.find(point => point.kpiMetric === 'launch_check_24h')?.verdict).toBe('met')
+  })
+
+  it('does not call a window 达标 when the last day is not synced yet', () => {
+    const rows = series({}, '2026-10-31')
+    const day7 = matched('2026-11-01T00:00:00.000Z', rows).checkpoints
+      .find(point => point.kpiMetric === 'launch_check_day7')
+    expect(day7).toMatchObject({ due: true, verdict: 'unknown' })
+    expect(day7?.sentence).toContain('缺 1 天的每日数据：2026-11-01')
   })
 
   it('does not pick one ad when two live ads match', () => {
@@ -197,7 +243,7 @@ describe('prescription launch check', () => {
   })
 
   it('does not overwrite a stored met or missed row', () => {
-    const view = matched('2026-11-02T00:00:00.000Z', [day({ results: 3 })])
+    const view = matched('2026-11-02T00:00:00.000Z', series({ results: 3 }))
     const writes = planOutcomeWrites(view.checkpoints, [
       { id: 'old', kpiMetric: 'launch_check_day7', unit: 'met', dimension: '旧结论' },
     ])

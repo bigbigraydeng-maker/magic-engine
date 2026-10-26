@@ -281,14 +281,15 @@ describe('大白话分段', () => {
         activation: { status: 'executed', authorized_at: '2020-01-01T00:00:00.000Z' },
       },
     }]
-    db.tables.ad_daily_insights = [{
+    // Launch day 2020-01-01 (NZ) through day 14: every day needs a row before any verdict.
+    db.tables.ad_daily_insights = Array.from({ length: 14 }, (_, i) => ({
       client_id: CLIENT,
       level: 'campaign',
       entity_id: 'camp-1',
-      insight_date: '2020-01-02',
-      spend: 80,
-      results: 12,
-    }]
+      insight_date: `2020-01-${String(i + 1).padStart(2, '0')}`,
+      spend: i === 0 ? 80 : 0,
+      results: i === 0 ? 12 : 0,
+    }))
     const view = await loadLatestGoalPrescription(CLIENT, GOAL)
     expect(view?.launch_check?.lines.join('\n')).toContain('达标')
     expect(view?.launch_check?.lines.join('\n')).toContain('这份结论还没写进复盘记录，因为没有案例行。')
