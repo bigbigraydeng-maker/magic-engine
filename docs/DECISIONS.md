@@ -324,6 +324,34 @@ function buildEntityMatcher(aliases: readonly string[]): RegExp { /* 精确别�
 > ```
 > 除 `local_cities_read_all`（城市名参考数据，刻意公开）外应为空。
 
+> ### 🔴 2026-09-25 再修正：光锁策略角色不够，表级 GRANT 要显式收回
+>
+> 20260803020000 只用 `ALTER POLICY` 改了策略角色，没做表级 `REVOKE`——Supabase
+> 建表时默认会给 `anon` / `authenticated` GRANT 表级增删改查，这批授权当时残留
+> 了下来，一直没人收。2026-09-24 全库审计（project `glbdnayojixmexgofbsd`）发现
+> 234 张表里有 197 张策略已锁死 `service_role`、但表级 GRANT 仍留着 `anon` /
+> `authenticated`（甚至理论上可能是 `PUBLIC`）——这个数字只是审计当天的对账
+> 参考，不是断言，本地从零重放全部 migration 复现时是 199 张，属正常环境漂移。
+> 策略已锁死，RLS 会挡掉实际访问，
+> **现在是死的**，但只要以后谁在这张表上加一条漏写 `TO` 的新策略、或有人把
+> RLS 关掉，这些授权立刻复活——同一类隐患的存量版本，这次是表级 GRANT。
+>
+> 修复：`20260925010000_revoke_residual_grants_locked_tables.sql`（批量 REVOKE）
+> + `scripts/db-invariants.sql` 不变量 5（CI 常驻断言，防止以后再冒出新的残留）。
+>
+> **模板补一条**：新建表 migration 在 `CREATE POLICY ... TO service_role` 之后，
+> 紧跟一行显式 `REVOKE`，不要指望"策略锁对了就够了"：
+> ```sql
+> ALTER TABLE public.<表> ENABLE ROW LEVEL SECURITY;
+> REVOKE ALL ON public.<表> FROM PUBLIC, anon, authenticated;
+> DO $$ BEGIN
+>   CREATE POLICY "service_role_full" ON public.<表>
+>     FOR ALL TO service_role USING (true) WITH CHECK (true);
+> EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+> ```
+> `REVOKE` 放在 `ENABLE ROW LEVEL SECURITY` 之后、`CREATE POLICY` 之前——中间
+> RLS 已经在拦，不存在裸奔窗口。CI 的不变量 5 是最后一道防线，不是唯一防线。
+
 ## 2026-06-02 · ME 定位升级
 
 **决策**：从「营销自动化平台」→「**以 Goal 为中心的生意指挥平台**」。Kanban 汇总所有能帮客户达成 Goal 的因素，营销只是其中一条战线。
