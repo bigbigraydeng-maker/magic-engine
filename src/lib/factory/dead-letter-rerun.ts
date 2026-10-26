@@ -34,7 +34,7 @@ export function classifyFailure(reason: unknown): FailureClass {
   if (/enoent|no such file|missing file|missing local|缺文件|本地素材|素材文件|local file/.test(text)) {
     return 'missing_file'
   }
-  if (/worker offline|worker not running|渲染工人|引擎未就绪|econnrefused|remotion/.test(text)) return 'worker_offline'
+  if (/worker offline|worker not running|渲染工人|引擎未就绪|econnrefused/.test(text)) return 'worker_offline'
   return 'other'
 }
 

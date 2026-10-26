@@ -19,6 +19,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
+const PAGE_SIZE = 100
+const MAX_PAGES = 20
+
 function receipt(summary: RerunSummary): Record<string, unknown> {
   return {
     ok: summary.ok,
@@ -37,13 +40,23 @@ function receipt(summary: RerunSummary): Record<string, unknown> {
 function store(): DeadLetterStore {
   return {
     async list() {
-      const { data, error } = await supabaseAdmin
-        .from('content_work_orders')
-        .select('id, client_id, reject_reason, review_ref, brief, reclaim_count')
-        .eq('status', 'dead_letter')
-        .limit(100)
-      if (error) return { ok: false, reason: error.message?.trim() || UNREADABLE }
-      return { ok: true, rows: (data ?? []) as DeadLetterRow[] }
+      // Page through every dead letter in a stable order so rows that are only
+      // reported (held, too large, limit reached) cannot hide later work orders.
+      const rows: DeadLetterRow[] = []
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        const from = page * PAGE_SIZE
+        const { data, error } = await supabaseAdmin
+          .from('content_work_orders')
+          .select('id, client_id, reject_reason, review_ref, brief, reclaim_count')
+          .eq('status', 'dead_letter')
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1)
+        if (error) return { ok: false, reason: error.message?.trim() || UNREADABLE }
+        const batch = (data ?? []) as DeadLetterRow[]
+        rows.push(...batch)
+        if (batch.length < PAGE_SIZE) break
+      }
+      return { ok: true, rows }
     },
     async rerun(action: Extract<RerunAction, { action: 'rerun' }>, at: string) {
       const current = await supabaseAdmin

@@ -37,6 +37,18 @@ describe('classifyFailure', () => {
   })
 })
 
+describe('work order validation errors', () => {
+  it('a remotion order error is not an offline worker and goes to people', () => {
+    const reason = 'RemotionOrderError: remotion 单不能同时带 creative_recipe'
+    expect(classifyFailure(reason)).toBe('other')
+    expect(planDeadLetter(row({ reject_reason: reason })).action).toBe('escalate')
+  })
+
+  it('an explicit engine-not-ready report is still rerun', () => {
+    expect(planDeadLetter(row({ reject_reason: 'Remotion 引擎未就绪' })).action).toBe('rerun')
+  })
+})
+
 describe('planDeadLetter', () => {
   it('reruns a missing file once, then stops at the limit', () => {
     const first = planDeadLetter(row())

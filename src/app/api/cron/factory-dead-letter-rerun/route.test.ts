@@ -30,6 +30,7 @@ vi.mock('@/lib/supabase', () => ({
     from: () => {
       const filters: Array<(row: Row) => boolean> = []
       let patch: Record<string, unknown> | null = null
+      let window: [number, number] | null = null
       const query = {
         select: () => query,
         update: (value: Record<string, unknown>) => {
@@ -41,7 +42,11 @@ vi.mock('@/lib/supabase', () => ({
           filters.push((row) => row[key as keyof Row] === value)
           return query
         },
-        limit: () => query,
+        order: () => query,
+        range: (from: number, to: number) => {
+          window = [from, to]
+          return query
+        },
         maybeSingle: async () => {
           const found = db.rows.find((row) => filters.every((filter) => filter(row)))
           if (db.vanishOnRead && found) found.status = 'queued'
@@ -55,7 +60,8 @@ vi.mock('@/lib/supabase', () => ({
             return resolve({ data: matched.map((row) => ({ id: row.id })), error: null })
           }
           if (db.listError) return resolve({ data: null, error: db.listError })
-          return resolve({ data: db.rows.filter((row) => filters.every((filter) => filter(row))), error: null })
+          const found = db.rows.filter((row) => filters.every((filter) => filter(row)))
+          return resolve({ data: window ? found.slice(window[0], window[1] + 1) : found, error: null })
         },
       }
       return query
@@ -146,6 +152,19 @@ describe('factory-dead-letter-rerun', () => {
     expect(body).toMatchObject({ held: 1, escalated: 1, rerun: 0 })
     expect(db.updates).toEqual([])
     expect(db.rows.every((row) => row.status === 'dead_letter')).toBe(true)
+  })
+
+  it('reaches a rerunnable work order behind 100 report-only ones', async () => {
+    const blocked = Array.from({ length: 100 }, (_, i) => ({
+      ...missingFile(`a-${String(i).padStart(3, '0')}`),
+      reject_reason: '413 Payload Too Large',
+    }))
+    db.rows = [...blocked, missingFile('z-last')]
+    const response = await GET(request('local-test'))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body).toMatchObject({ processed: 101, escalated: 100, rerun: 1 })
+    expect(db.rows.find((row) => row.id === 'z-last')?.status).toBe('queued')
   })
 
   it('an unreadable failure is HTTP 500 and is not written as success', async () => {
