@@ -136,7 +136,7 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     d.geoCityKeys && d.geoCityKeys.length > 0
       ? { cities: d.geoCityKeys.map((key) => ({ key, radius: 10, distance_unit: 'kilometer' })) }
       : { countries: d.geoCountries }
-  return {
+  const targeting: Record<string, unknown> = {
     geo_locations: geo,
     age_min: d.ageMin ?? 25,
     age_max: d.ageMax ?? 65,
@@ -148,6 +148,17 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     // 所以建完还要回读一遍（这正是闸门存在的理由）。
     targeting_automation: { advantage_audience: 0 },
   }
+
+  if (d.audienceIds && d.audienceIds.length > 0) {
+    targeting.custom_audiences = d.audienceIds.map((id) => ({ id }))
+    // Explicitly do not relax the list: no custom-audience or lookalike expansion.
+    targeting.targeting_relaxation_types = { custom_audience: 0, lookalike: 0 }
+  }
+  if (d.excludedAudienceIds && d.excludedAudienceIds.length > 0) {
+    targeting.excluded_custom_audiences = d.excludedAudienceIds.map((id) => ({ id }))
+  }
+
+  return targeting
 }
 
 function assertNever(x: never): never {

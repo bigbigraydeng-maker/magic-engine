@@ -19,13 +19,14 @@ vi.mock('@/lib/meta/readback', () => ({
   fetchAdCreativesReadback: vi.fn(),
   fetchCampaignStatus: vi.fn(),
   fetchAccountMinDailyBudget: vi.fn(),
+  fetchAccountCustomAudiences: vi.fn(),
 }))
 vi.mock('@/lib/meta/asset-upload', () => ({
   waitForVideoReady: vi.fn(),
 }))
 
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget, fetchAccountCustomAudiences } from '@/lib/meta/readback'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import {
   createDraftForApproval,
@@ -44,6 +45,7 @@ const mCreatives = vi.mocked(fetchAdCreativesReadback)
 const mCampaignStatus = vi.mocked(fetchCampaignStatus)
 const mWait = vi.mocked(waitForVideoReady)
 const mMinBudget = vi.mocked(fetchAccountMinDailyBudget)
+const mAudiences = vi.mocked(fetchAccountCustomAudiences)
 const mPause = vi.mocked(pausePublished)
 
 /** 记下每次写进账本的 payload，测试直接检查它。 */
@@ -694,5 +696,165 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
       const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind } })
       expect((await approveDraft('act1', sb, 'tok', PM)).ok, kind).toBe(true)
     }
+  })
+})
+
+describe('createDraftForApproval — 自定义受众（刀②）', () => {
+  const AUD_DRAFT: AdDraft = { ...DRAFT, audienceIds: ['1111111'], excludedAudienceIds: ['2222222'] }
+  const deps = (sb: SupabaseClient) => ({ supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+  const ACCOUNT_AUDIENCES = [
+    { id: '1111111', name: 'Site visitors', subtype: 'WEBSITE', operationStatusCode: 200, approxCountLowerBound: 1000 },
+    { id: '2222222', name: 'Past leads', subtype: 'CUSTOM', operationStatusCode: 200, approxCountLowerBound: 500 },
+  ]
+  const ATTACHED_ADSET = {
+    id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+    targeting: {
+      geo_locations: { countries: ['NZ'] },
+      custom_audiences: [{ id: '1111111' }],
+      excluded_custom_audiences: [{ id: '2222222' }],
+      targeting_relaxation_types: { custom_audience: 0, lookalike: 0 },
+      targeting_automation: { advantage_audience: 0 },
+    },
+  }
+
+  it('无受众的草案不发请求：不查受众列表，账本记 null', async () => {
+    const { sb, inserted } = fakeSupabase()
+    await createDraftForApproval(DRAFT, deps(sb))
+    expect(mAudiences).not.toHaveBeenCalled()
+    expect(inserted[0].audiencesChecked).toBeNull()
+  })
+
+  it('受众列表读不到 → failed，不建', async () => {
+    mAudiences.mockResolvedValue(null)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('读不到这个广告账户的受众列表')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].status).toBe('failed')
+  })
+
+  it('排除受众的 id 不属于这个账户 → failed，不建', async () => {
+    mAudiences.mockResolvedValue([ACCOUNT_AUDIENCES[0]])
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('2222222')
+    expect(r.error).toContain('不属于这个广告账户')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('包含受众的 id 不属于这个账户 → failed，不建', async () => {
+    mAudiences.mockResolvedValue([ACCOUNT_AUDIENCES[1]])
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('1111111')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('包含受众还没准备好（状态 400）→ failed，不建', async () => {
+    mAudiences.mockResolvedValue([{ ...ACCOUNT_AUDIENCES[0], operationStatusCode: 400 }, ACCOUNT_AUDIENCES[1]])
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('还没准备好')
+    expect(r.error).toContain('400')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('包含受众太小（99 人）→ failed，不建', async () => {
+    mAudiences.mockResolvedValue([{ ...ACCOUNT_AUDIENCES[0], approxCountLowerBound: 99 }, ACCOUNT_AUDIENCES[1]])
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('不足 100 人')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('包含受众刚好 100 人 → 不拦，照常建', async () => {
+    mAudiences.mockResolvedValue([{ ...ACCOUNT_AUDIENCES[0], approxCountLowerBound: 100 }, ACCOUNT_AUDIENCES[1]])
+    const { sb } = fakeSupabase()
+    await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('读不到状态 / 人数 → 不拦（Meta 兜底）', async () => {
+    mAudiences.mockResolvedValue([
+      { ...ACCOUNT_AUDIENCES[0], operationStatusCode: null, approxCountLowerBound: null },
+      ACCOUNT_AUDIENCES[1],
+    ])
+    const { sb } = fakeSupabase()
+    await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('排除受众不查状态 / 人数：状态 400、只有 5 人也照常建', async () => {
+    mAudiences.mockResolvedValue([
+      ACCOUNT_AUDIENCES[0],
+      { ...ACCOUNT_AUDIENCES[1], operationStatusCode: 400, approxCountLowerBound: 5 },
+    ])
+    mAdSet.mockResolvedValue(ATTACHED_ADSET)
+    const { sb } = fakeSupabase()
+    await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('合法 → 建并记账：回读挂上了受众，无 blocker', async () => {
+    mAudiences.mockResolvedValue(ACCOUNT_AUDIENCES)
+    mAdSet.mockResolvedValue(ATTACHED_ADSET)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    expect(inserted[0].audiencesChecked).toEqual({ included: ['1111111'], excluded: ['2222222'] })
+    expect(r.findings.filter((f) => f.severity === 'blocker')).toHaveLength(0)
+  })
+
+  it('声明了包含受众但回读没挂上 → blocked', async () => {
+    mAudiences.mockResolvedValue(ACCOUNT_AUDIENCES)
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('audience_not_attached')
+  })
+
+  it('包含受众挂上了但排除受众没挂上 → blocked', async () => {
+    mAudiences.mockResolvedValue(ACCOUNT_AUDIENCES)
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      targeting: {
+        geo_locations: { countries: ['NZ'] },
+        custom_audiences: [{ id: '1111111' }],
+        targeting_relaxation_types: { custom_audience: 0, lookalike: 0 },
+        targeting_automation: { advantage_audience: 0 },
+      },
+    })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('excluded_audience_not_attached')
+  })
+
+  it('只给排除受众不算重定向：不报 retargeting_without_audience', async () => {
+    mAudiences.mockResolvedValue(ACCOUNT_AUDIENCES)
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      targeting: {
+        geo_locations: { countries: ['NZ'] },
+        excluded_custom_audiences: [{ id: '2222222' }],
+        targeting_relaxation_types: { custom_audience: 0, lookalike: 0 },
+        targeting_automation: { advantage_audience: 0 },
+      },
+    })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({ ...DRAFT, excludedAudienceIds: ['2222222'] }, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(r.findings.map((f) => f.code)).not.toContain('retargeting_without_audience')
   })
 })

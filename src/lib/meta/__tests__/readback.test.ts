@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { extractBuyerFacingText, fetchAdCreativesReadback, fetchAdSetReadback, fetchCampaignStatus } from '../readback'
+import { extractBuyerFacingText, fetchAccountCustomAudiences, fetchAdCreativesReadback, fetchAdSetReadback, fetchCampaignStatus } from '../readback'
 
 describe('extractBuyerFacingText —— 宁多勿漏', () => {
   it('摘 link_data 里的正文/标题/描述', () => {
@@ -276,5 +276,85 @@ describe('回读要带状态 + 每次请求有超时（建「全程暂停」的�
     await fetchAdSetReadback('as1', 'tok')
     const init = (f.mock.calls[0] as unknown as [string, RequestInit])[1]
     expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+})
+
+describe('fetchAccountCustomAudiences — 读账户受众列表（读不全 / 读不到都是 null）', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function stub(body: unknown) {
+    const f = vi.fn(async (_url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    }))
+    vi.stubGlobal('fetch', f)
+    return f
+  }
+
+  it('把受众列表归一成稳定形状，并索要足够多', async () => {
+    const f = stub({
+      data: [
+        {
+          id: '1111111',
+          name: 'Site visitors',
+          subtype: 'WEBSITE',
+          operation_status: { code: 200, description: 'Normal' },
+          approximate_count_lower_bound: 1000,
+        },
+        { id: '2222222' },
+      ],
+    })
+    const result = await fetchAccountCustomAudiences('act_1', 'tok')
+    expect(result).toEqual([
+      {
+        id: '1111111',
+        name: 'Site visitors',
+        subtype: 'WEBSITE',
+        operationStatusCode: 200,
+        approxCountLowerBound: 1000,
+      },
+      {
+        id: '2222222',
+        name: null,
+        subtype: null,
+        operationStatusCode: null,
+        approxCountLowerBound: null,
+      },
+    ])
+    const url = (f.mock.calls[0] as unknown as [string])[0]
+    expect(url).toContain('/act_1/customaudiences')
+    expect(url).toContain('limit=200')
+  })
+
+  it('🔴 有下一页 → null（读不全就不假装读全）', async () => {
+    stub({
+      data: [{ id: '1111111', name: 'Site visitors' }],
+      paging: { next: 'https://graph.facebook.com/next' },
+    })
+    expect(await fetchAccountCustomAudiences('act_1', 'tok')).toBeNull()
+  })
+
+  it('🔴 形状不对 / 缺 id → null', async () => {
+    stub({ data: 'x' })
+    expect(await fetchAccountCustomAudiences('act_1', 'tok')).toBeNull()
+    stub({ data: [{ name: 'no id' }] })
+    expect(await fetchAccountCustomAudiences('act_1', 'tok')).toBeNull()
+  })
+
+  it('HTTP 失败 → null', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      json: async () => ({}),
+      text: async () => '',
+    })))
+    expect(await fetchAccountCustomAudiences('act_1', 'tok')).toBeNull()
+  })
+
+  it('空列表是有效答案，不是 null', async () => {
+    stub({ data: [] })
+    expect(await fetchAccountCustomAudiences('act_1', 'tok')).toEqual([])
   })
 })

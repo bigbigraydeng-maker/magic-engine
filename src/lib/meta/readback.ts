@@ -285,3 +285,74 @@ export async function fetchAccountMinDailyBudget(
   if (typeof o.currency !== 'string' || typeof min !== 'number' || !Number.isFinite(min) || min <= 0) return null
   return { minDailyBudgetMinor: min, currency: o.currency }
 }
+
+export interface AccountCustomAudience {
+  id: string
+  name: string | null
+  subtype: string | null
+  operationStatusCode: number | null
+  approxCountLowerBound: number | null
+}
+
+/** 数字或数字字符串 → 有限数字；其余一律 null。 */
+function toFiniteNumber(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null
+  if (typeof v === 'string' && v.trim()) {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  return null
+}
+
+/**
+ * 一个广告账户下的自定义受众（含相似人群）。
+ *
+ * Only one page of 200 is read, no pagination: an account with more than 200
+ * audiences returns null (unreadable), and callers treat null as "cannot verify".
+ * 失败 / 形状不对 / 有下一页都返回 null —— 不是「没有受众」。
+ */
+export async function fetchAccountCustomAudiences(
+  adAccountId: string,
+  accessToken: string,
+): Promise<AccountCustomAudience[] | null> {
+  const params = new URLSearchParams({
+    fields: 'id,name,subtype,operation_status,approximate_count_lower_bound',
+    limit: '200',
+    access_token: accessToken,
+  })
+  const json = await graphGet(
+    `${GRAPH_BASE}/${adAccountId}/customaudiences?${params}`,
+    `custom audiences ${adAccountId}`,
+  )
+  if (!json || typeof json !== 'object') return null
+  const o = json as Record<string, unknown>
+
+  // 有下一页 = 没读全，不能当作「查过了」。
+  const paging = o.paging
+  if (paging && typeof paging === 'object' && (paging as Record<string, unknown>).next) return null
+
+  const rows = o.data
+  if (!Array.isArray(rows)) return null
+
+  const out: AccountCustomAudience[] = []
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') return null
+    const item = r as Record<string, unknown>
+    if (typeof item.id !== 'string' || !item.id) return null
+
+    const status = item.operation_status
+    const operationStatusCode =
+      status && typeof status === 'object'
+        ? toFiniteNumber((status as Record<string, unknown>).code)
+        : null
+
+    out.push({
+      id: item.id,
+      name: typeof item.name === 'string' ? item.name : null,
+      subtype: typeof item.subtype === 'string' ? item.subtype : null,
+      operationStatusCode,
+      approxCountLowerBound: toFiniteNumber(item.approximate_count_lower_bound),
+    })
+  }
+  return out
+}
