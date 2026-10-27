@@ -5,6 +5,7 @@ const db = vi.hoisted(() => ({
   tables: {} as Record<string, Row[]>,
   inserts: [] as Array<{ table: string; row: Row }>,
   ranges: [] as Array<[number, number]>,
+  selects: [] as Array<{ table: string; columns: string }>,
 }))
 
 vi.mock('@/lib/ads-strategy/account-timezone', () => ({
@@ -16,7 +17,10 @@ vi.mock('@/lib/supabase', () => {
     private filters: Array<(row: Row) => boolean> = []
     private rng: [number, number] | null = null
     constructor(private table: string) {}
-    select() { return this }
+    select(columns: string) {
+      db.selects.push({ table: this.table, columns })
+      return this
+    }
     eq(column: string, value: unknown) {
       this.filters.push(row => row[column] === value)
       return this
@@ -51,6 +55,7 @@ describe('prescription launch check store', () => {
     db.tables = {}
     db.inserts = []
     db.ranges = []
+    db.selects = []
   })
 
   it('stops paging when a page is short, and marks a full cap as partial', async () => {
@@ -113,5 +118,27 @@ describe('prescription launch check store', () => {
     expect(db.inserts.every(item => item.table === 'prescription_outcomes')).toBe(true)
     expect(db.inserts.some(item => 'data_source' in item.row || 'actual_value' in item.row)).toBe(false)
     expect(db.tables.ad_entity_snapshots).toBeUndefined()
+  })
+
+  it('reads video thruplays separately from results', async () => {
+    db.tables.ad_daily_insights = [
+      {
+        client_id: 'c1', level: 'campaign', entity_id: 'camp',
+        insight_date: '2026-10-26', spend: '9.5', results: 0, video_thruplays: 80,
+      },
+      {
+        client_id: 'c1', level: 'campaign', entity_id: 'camp',
+        insight_date: '2026-10-27', spend: 0, results: 4, video_thruplays: null,
+      },
+    ]
+    const rows = await supabaseLaunchStore().listInsights('c1', 'camp')
+    expect(db.selects).toContainEqual({
+      table: 'ad_daily_insights',
+      columns: 'insight_date, spend, results, video_thruplays',
+    })
+    expect(rows).toEqual([
+      { insightDate: '2026-10-26', spend: 9.5, results: 0, videoThruplays: 80 },
+      { insightDate: '2026-10-27', spend: 0, results: 4, videoThruplays: null },
+    ])
   })
 })

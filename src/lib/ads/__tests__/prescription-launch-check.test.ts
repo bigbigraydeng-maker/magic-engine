@@ -76,6 +76,14 @@ function sentence(now: string, label: string, insights?: InsightRef[], targets?:
   return line?.sentence ?? ''
 }
 
+/** First day keeps `first`; later days are 0 when a number was read, otherwise still unread. */
+function viewsOn(rows: InsightRef[], first: number | null): InsightRef[] {
+  return rows.map((row, index) => ({
+    ...row,
+    videoThruplays: index === 0 ? first : (typeof first === 'number' ? 0 : null),
+  }))
+}
+
 describe('prescription launch check', () => {
   it('says 还不知道 when nothing has gone live', () => {
     const match = matchLaunch({
@@ -122,16 +130,53 @@ describe('prescription launch check', () => {
     expect(line).toContain('线索 3 条，目标 10 条')
   })
 
-  it('reads 对话数 and 看完数 targets so a build-audience ad is not called a miss on leads', () => {
+  it('reads 对话数 from results and 看完数 from video views', () => {
     const personalKpis: KpiRef[] = [
       { metric: '私信对话数', target: 10, unit: '个' },
       { metric: '看完数', target: 10, unit: '次' },
     ]
-    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', series(), personalKpis)
+    const line = sentence(
+      '2026-11-02T00:00:00.000Z', '第 7 天', viewsOn(series(), 40), personalKpis,
+    )
     expect(line).toContain('达标')
     expect(line).toContain('对话数 12 个，目标 10 个')
-    expect(line).toContain('看完数 12 次，目标 10 次')
+    expect(line).toContain('看完数 40 次，目标 10 次')
+    expect(line).not.toContain('看完数 12')
     expect(line).not.toContain('认不出来')
+  })
+
+  it('judges 看完数 from video views when there are views and no leads', () => {
+    const line = sentence(
+      '2026-11-02T00:00:00.000Z', '第 7 天',
+      viewsOn(series({ results: 0, spend: 20 }), 40),
+      [{ metric: '看完数', target: 10, unit: '次' }],
+    )
+    expect(line).toContain('达标')
+    expect(line).toContain('看完数 40 次，目标 10 次')
+    expect(line).not.toContain('看完数 0')
+    expect(line).not.toContain('没达标')
+  })
+
+  it('says 不知道 when video views were not read, and does not substitute leads', () => {
+    const line = sentence(
+      '2026-11-02T00:00:00.000Z', '第 7 天',
+      viewsOn(series({ results: 50 }), null),
+      [{ metric: '视频看完数', target: 10, unit: '次' }],
+    )
+    expect(line).toContain('不知道')
+    expect(line).toContain('看完数是空的，不能当成 0')
+    expect(line).not.toContain('看完数 50')
+    expect(line).not.toContain('看完数 0')
+    expect(line).not.toContain('没达标')
+  })
+
+  it('still judges 线索 from results when video views are present', () => {
+    const line = sentence(
+      '2026-11-02T00:00:00.000Z', '第 7 天', viewsOn(series({ results: 3 }), 100),
+    )
+    expect(line).toContain('没达标')
+    expect(line).toContain('线索 3 条，目标 10 条')
+    expect(line).not.toContain('看完数')
   })
 
   it('says 没达标 when 对话数 is under target', () => {
