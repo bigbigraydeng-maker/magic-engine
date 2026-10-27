@@ -90,6 +90,9 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const datacard = await import(pathToFileURL(join(engineDir, 'src', 'datacard.ts')).href)
     const postcard = await import(pathToFileURL(join(engineDir, 'src', 'postcard.ts')).href)
     const atmosphere = await import(pathToFileURL(join(engineDir, 'src', 'atmosphere.ts')).href)
+    const compare = await import(pathToFileURL(join(engineDir, 'src', 'compare.ts')).href)
+    const craft = await import(pathToFileURL(join(engineDir, 'src', 'styles', 'craft.ts')).href)
+    const rules = await import(pathToFileURL(join(engineDir, 'src', 'styles', 'rules.ts')).href)
     const substance = await import(pathToFileURL(join(engineDir, 'src', 'contentSubstance.ts')).href)
     let catalog = null
     return {
@@ -101,6 +104,12 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       computeDataCardTiming: datacard.computeDataCardTiming,
       computePostcardTiming: postcard.computePostcardTiming,
       computeAtmosphereTiming: atmosphere.computeAtmosphereTiming,
+      computeCompareTiming: compare.computeCompareTiming,
+      compareTextParts: compare.compareTextParts,
+      compareCaption: compare.compareCaption,
+      compareCues: compare.compareCues,
+      effectiveShotSec: craft.effectiveShotSec,
+      styledPostcardTiming: rules.styledPostcardTiming,
       contentSubstanceOf: substance.contentSubstanceOf,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
@@ -467,7 +476,7 @@ export function assessContentSubstance(eng, template, remotion, props) {
   return result
 }
 
-export const TEXT_WIRED_TEMPLATES = ['list', 'montage', 'datacard', 'postcard', 'atmosphere']
+export const TEXT_WIRED_TEMPLATES = ['list', 'montage', 'datacard', 'postcard', 'atmosphere', 'compare']
 
 // Copy the referenced assets into the staging directory.
 export function stageRemotionAssets({ props, files, stageDir, brandkitDir, assetLibDir, clientRootDir, musicPath = null, musicRoot = null, musicFolder = '' }) {
@@ -733,7 +742,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   let totalFrames
   let recipeGaps = null
   try {
-    const loaded = eng.loadTemplate(template, remotion.props)
+    const loaded = eng.loadTemplate(template, remotion.props, remotion.style)
     props = loaded.props
     files = loaded.assetFiles
     totalFrames = loaded.totalFrames
@@ -749,7 +758,18 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   }
   if (template === 'postcard') {
     assertPostcardTextVisible(props)
-    timing = eng.computePostcardTiming(props)
+    timing = props.look?.rules
+      ? eng.styledPostcardTiming(props, props.look.rules, eng.FPS, eng.effectiveShotSec(props.look))
+      : eng.computePostcardTiming(props)
+  }
+  if (template === 'compare') {
+    for (const [name, text] of eng.compareTextParts(props)) {
+      if (clean(text) === '') throw new RemotionOrderError(`前后对比${name}清理后是空的（只含不可见字符）`)
+      if (clean(text) !== String(text).trim().normalize('NFKC')) {
+        throw new RemotionOrderError(`前后对比${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+      }
+    }
+    timing = eng.computeCompareTiming(props.look?.rules, props.look ? eng.effectiveShotSec(props.look) : undefined)
   }
   if (template === 'atmosphere') {
     assertAtmosphereTextVisible(props)
@@ -874,6 +894,12 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       datacard: [() => buildDatacardSrt(props, timing, eng.FPS), () => buildDatacardCaption(props)],
       postcard: [() => buildPostcardSrt(props, timing, eng.FPS), () => buildPostcardCaption(props)],
       atmosphere: [() => buildAtmosphereSrt(props, timing, eng.FPS), () => buildAtmosphereCaption(props)],
+      compare: [
+        () => eng.compareCues(props, eng.FPS, props.look?.rules, props.look ? eng.effectiveShotSec(props.look) : undefined)
+          .map((cue, i) => `${i + 1}\n${fmtTime(cue[0])} --> ${fmtTime(cue[1])}\n${cue[2]}\n\n`)
+          .join(''),
+        () => eng.compareCaption(props),
+      ],
       montage: [() => buildMontageSrt(props, eng.montageFrameOf, eng.FPS), () => buildMontageCaption(props)],
     }
     const builders = Object.hasOwn(textBuilders, template) ? textBuilders[template] : null

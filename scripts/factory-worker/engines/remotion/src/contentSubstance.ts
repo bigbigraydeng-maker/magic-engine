@@ -3,7 +3,9 @@ import { computeTimingFromProps } from './timing.ts';
 import { computePostcardTiming } from './postcard.ts';
 import { computeDataCardTiming } from './datacard.ts';
 import { computeAtmosphereTiming } from './atmosphere.ts';
+import { computeCompareTiming } from './compare.ts';
 import { montageFrameOf } from './montage.ts';
+import { styledPostcardTiming } from './styles/rules.ts';
 
 export type SubstanceKind =
   | 'place_or_tour'
@@ -144,9 +146,18 @@ function collectList(props: Record<string, unknown>): SubstanceElement[] {
   return out;
 }
 
+function postcardClock(props: Record<string, unknown>) {
+  const look = asRecord(props.look);
+  const rules = look ? asRecord(look.rules) : null;
+  const craft = look ? asRecord(look.craft) : null;
+  if (!rules || !craft || typeof craft.shotSec !== 'number') return null;
+  const shotSec = rules.shotFromBrief === true && typeof rules.shotSec === 'number' ? rules.shotSec : craft.shotSec;
+  return styledPostcardTiming(props as never, rules as never, FPS, shotSec);
+}
+
 function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
-  const timing = computePostcardTiming(props as never);
+  const timing = postcardClock(props) ?? computePostcardTiming(props as never);
   const hook = asRecord(props.hook);
   const hookLines = hook ? asArray(hook.lines) : [];
   const hookEnd = timing.hookFrames / FPS;
@@ -179,6 +190,35 @@ function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
       text: title,
       startSec: timing.priceFrom / FPS,
       endSec: timing.totalFrames / FPS,
+    });
+  }
+  if (postcardClock(props)) {
+    const first = asRecord(asArray(props.scenes)[0]);
+    const point = first && typeof first.line === 'string' ? first.line : '';
+    out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: timing.totalFrames / FPS });
+  }
+  return out;
+}
+
+function collectCompare(props: Record<string, unknown>): SubstanceElement[] {
+  const look = asRecord(props.look);
+  const rules = look ? asRecord(look.rules) : null;
+  const craft = look ? asRecord(look.craft) : null;
+  const shotSec = rules?.shotFromBrief === true && typeof rules.shotSec === 'number'
+    ? rules.shotSec
+    : (craft && typeof craft.shotSec === 'number' ? craft.shotSec : undefined);
+  const plan = computeCompareTiming(rules as never, shotSec);
+  const out: SubstanceElement[] = [];
+  const point = typeof props.point === 'string' ? props.point : '';
+  out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: plan.totalFrames / FPS });
+  for (const shot of plan.shots) {
+    const beat = asRecord(props[shot.lineKey]);
+    const line = beat && typeof beat.line === 'string' ? beat.line : '';
+    out.push({
+      kind: 'selling_line',
+      text: line,
+      startSec: shot.from / FPS,
+      endSec: (shot.from + shot.frames) / FPS,
     });
   }
   return out;
@@ -289,6 +329,9 @@ export function contentSubstanceOf(template: string, props: unknown): ContentSub
       break;
     case 'atmosphere':
       elements = collectAtmosphere(record);
+      break;
+    case 'compare':
+      elements = collectCompare(record);
       break;
     case 'montage':
       elements = collectMontage(record);

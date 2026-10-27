@@ -26,10 +26,19 @@ import {
   collectAtmosphereAssetFiles,
   computeAtmosphereTiming,
 } from './atmosphere.ts';
+import {
+  parseCompareProps,
+  collectCompareAssetFiles,
+  computeCompareTiming,
+} from './compare.ts';
 import { stagedFileName, type MusicCatalog } from './music.ts';
+import { effectiveShotSec } from './styles/craft.ts';
+import { styledPostcardTiming } from './styles/rules.ts';
+import { peelStyle, resolveRenderLook } from './styles/select.ts';
+import type { ResolvedLook } from './styles/types.ts';
 
 /** Allowed template ids. */
-export const TEMPLATE_IDS = ['list', 'montage', 'datacard', 'postcard', 'atmosphere'] as const;
+export const TEMPLATE_IDS = ['list', 'montage', 'datacard', 'postcard', 'atmosphere', 'compare'] as const;
 
 /** One supported template id. */
 export type TemplateId = (typeof TEMPLATE_IDS)[number];
@@ -65,8 +74,35 @@ const ATMOSPHERE_RECIPE_GAPS: RecipeGap[] = [
   { column: '真人背影/真人出镜', status: '未满足', reason: '氛围片只有一段实拍风景素材，没有人物画面（无自有素材、无肖像授权）' },
 ];
 
+function withLook(loaded: LoadedTemplate, style: unknown, carried: unknown): LoadedTemplate {
+  const look = resolveRenderLook(style, carried);
+  if (!look) return loaded;
+  const logo = look.logoFile;
+  const assetFiles = logo !== undefined && !loaded.assetFiles.includes(logo) ? [...loaded.assetFiles, logo] : loaded.assetFiles;
+  const props = { ...(loaded.props as object), look } as LoadedTemplate['props'] & { look: ResolvedLook };
+  return { ...loaded, props, assetFiles, totalFrames: framesWithLook(loaded, look) };
+}
+
+function framesWithLook(loaded: LoadedTemplate, look: ResolvedLook): number {
+  if (loaded.compositionId === 'PostcardReel') {
+    const scenes = (loaded.props as { scenes?: unknown[] }).scenes ?? [];
+    return styledPostcardTiming({ scenes }, look.rules, 30, effectiveShotSec(look)).totalFrames;
+  }
+  if (loaded.compositionId === 'CompareReel') {
+    return computeCompareTiming(look.rules, effectiveShotSec(look)).totalFrames;
+  }
+  return loaded.totalFrames;
+}
+
+/** Parse and validate input for a template. A third argument is brief.remotion.style; omit it to keep today's picture. */
+export function loadTemplate(id: TemplateId, input: unknown, style?: unknown): LoadedTemplate {
+  const peeled = peelStyle(input);
+  const styleInput = style !== undefined ? style : peeled.style;
+  return withLook(loadTemplateBody(id, peeled.body), styleInput, peeled.look);
+}
+
 /** Parse and validate input for a template, returning everything the renderer needs. */
-export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
+function loadTemplateBody(id: TemplateId, input: unknown): LoadedTemplate {
   if (id === 'list') {
     const props = parseListReelProps(input);
     const totalFrames = computeTimingFromProps(props).totalFrames;
@@ -94,6 +130,15 @@ export function loadTemplate(id: TemplateId, input: unknown): LoadedTemplate {
       props,
       assetFiles: collectPostcardAssetFiles(props),
       totalFrames: computePostcardTiming(props).totalFrames,
+    };
+  }
+  if (id === 'compare') {
+    const props = parseCompareProps(input);
+    return {
+      compositionId: 'CompareReel',
+      props,
+      assetFiles: collectCompareAssetFiles(props),
+      totalFrames: computeCompareTiming(null).totalFrames,
     };
   }
   if (id === 'atmosphere') {

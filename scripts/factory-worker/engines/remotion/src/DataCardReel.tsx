@@ -3,6 +3,9 @@ import { AbsoluteFill, Audio, cancelRender, continueRender, delayRender, Img, in
 import { computeDataCardTiming, DISCLAIMER_OPACITY, HOOK_SETTLE_FRAMES, SUBLABEL_OPACITY, parseDataCardProps, type DataCardProps } from './datacard'
 import { FPS } from './timing'
 import { fontFamily, SAFE_BOTTOM, SAFE_RIGHT, SAFE_TOP } from './theme'
+import { useStyleFamily } from './styles/fonts'
+import { peelStyle } from './styles/select'
+import type { ResolvedLook } from './styles/types'
 
 const LEFT = 60
 const WIDTH = SAFE_RIGHT - LEFT
@@ -77,7 +80,7 @@ function layoutOf(props: DataCardProps) {
   return { hookTop, blockH, rowsTop, rowH }
 }
 
-const Hook: React.FC<{ props: DataCardProps; hookFrames: number }> = ({ props, hookFrames }) => {
+const Hook: React.FC<{ props: DataCardProps; hookFrames: number; family: string }> = ({ props, hookFrames, family }) => {
   const frame = useCurrentFrame()
   const { hookTop, blockH } = layoutOf(props)
   const probe = React.useRef<HTMLDivElement>(null)
@@ -99,10 +102,10 @@ const Hook: React.FC<{ props: DataCardProps; hookFrames: number }> = ({ props, h
   const top = centreTop + (hookTop - centreTop) * ease
   return (
     <>
-      <div ref={probe} style={{ position: 'absolute', left: 0, top: 0, visibility: 'hidden', display: 'inline-block', whiteSpace: 'nowrap', fontFamily, fontSize: HOOK_FONT, fontWeight: 900 }}>
+      <div ref={probe} style={{ position: 'absolute', left: 0, top: 0, visibility: 'hidden', display: 'inline-block', whiteSpace: 'nowrap', fontFamily: family, fontSize: HOOK_FONT, fontWeight: 900 }}>
         {props.hook.lines.map((line, i) => (<div key={i}>{line}</div>))}
       </div>
-      <div style={{ position: 'absolute', left: LEFT + WIDTH / 2, top, textAlign: 'center', fontFamily, color: props.textColor, fontSize: HOOK_FONT, fontWeight: 900, lineHeight: `${HOOK_LINE_H}px`, whiteSpace: 'nowrap', transform: `translateX(-50%) scale(${scale})`, transformOrigin: 'center top' }}>
+      <div style={{ position: 'absolute', left: LEFT + WIDTH / 2, top, textAlign: 'center', fontFamily: family, color: props.textColor, fontSize: HOOK_FONT, fontWeight: 900, lineHeight: `${HOOK_LINE_H}px`, whiteSpace: 'nowrap', transform: `translateX(-50%) scale(${scale})`, transformOrigin: 'center top' }}>
         {props.hook.lines.map((line, i) => (
           <div key={i} style={{ color: i === props.hook.lines.length - 1 ? props.brandColor : props.textColor, whiteSpace: 'nowrap' }}>{line}</div>
         ))}
@@ -111,7 +114,7 @@ const Hook: React.FC<{ props: DataCardProps; hookFrames: number }> = ({ props, h
   )
 }
 
-const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number }> = ({ props, index, rowFrames }) => {
+const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number; family: string }> = ({ props, index, rowFrames, family }) => {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   const { rowH, rowsTop } = layoutOf(props)
@@ -127,7 +130,7 @@ const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number }> 
   const valueAvail = inner * 0.42
   const barBottom = row.bar !== null ? Math.round(16 * k) : 0
   return (
-    <div style={{ position: 'absolute', left: LEFT, width: WIDTH, top: rowsTop + index * rowH, height: rowH - ROW_GAP, fontFamily, color: props.textColor, background: `${props.textColor}14`, borderRadius: 18, opacity: Math.min(1, p * 2), transform: `translateX(${(1 - p) * 120}px)` }}>
+    <div style={{ position: 'absolute', left: LEFT, width: WIDTH, top: rowsTop + index * rowH, height: rowH - ROW_GAP, fontFamily: family, color: props.textColor, background: `${props.textColor}14`, borderRadius: 18, opacity: Math.min(1, p * 2), transform: `translateX(${(1 - p) * 120}px)` }}>
       <div style={{ position: 'absolute', left: CARD_PAD, top: 0, bottom: barBottom, width: labelAvail, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'flex-start' }}>
         <FitText avail={labelAvail} origin="left" text={row.label} style={{ fontSize: Math.round(42 * k), fontWeight: 800, lineHeight: 1.1 }} />
         {row.sublabel !== null ? <FitText avail={labelAvail} origin="left" text={row.sublabel} style={{ fontSize: Math.max(22, Math.round(27 * k)), fontWeight: 600, opacity: SUBLABEL_OPACITY, lineHeight: 1.15 }} /> : null}
@@ -143,24 +146,29 @@ const Row: React.FC<{ props: DataCardProps; index: number; rowFrames: number }> 
 }
 
 export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
-  const props = parseDataCardProps(rawProps)
+  const peeled = peelStyle(rawProps)
+  const look = peeled.look === undefined || peeled.look === null ? null : (peeled.look as ResolvedLook)
+  const family = useStyleFamily(look)
+  const props = parseDataCardProps(peeled.body)
   const timing = computeDataCardTiming(props)
   const frame = useCurrentFrame()
   const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
+  if (family === null) return null
+  const logoFile = look?.logoFile ?? props.logoFile
   return (
     <AbsoluteFill style={{ background: props.bgColor }}>
       <FontGate>
-      {props.logoFile !== null ? (
-        <Img src={staticFile(props.logoFile)} style={{ position: 'absolute', left: LEFT, top: LOGO_TOP, width: 400, height: LOGO_H, objectFit: 'contain', objectPosition: 'left center' }} />
+      {logoFile !== null ? (
+        <Img src={staticFile(logoFile)} style={{ position: 'absolute', left: LEFT, top: LOGO_TOP, width: 400, height: LOGO_H, objectFit: 'contain', objectPosition: 'left center' }} />
       ) : null}
-      <Hook props={props} hookFrames={timing.hookFrames} />
+      <Hook props={props} hookFrames={timing.hookFrames} family={family} />
       {props.rows.map((_, i) => (
         <Sequence key={i} from={timing.rowFrom[i]} durationInFrames={timing.totalFrames - timing.rowFrom[i]}>
-          <Row props={props} index={i} rowFrames={timing.rowFrames} />
+          <Row props={props} index={i} rowFrames={timing.rowFrames} family={family} />
         </Sequence>
       ))}
       <div style={{ position: 'absolute', left: LEFT, width: WIDTH, top: DISCLAIMER_TOP, height: 40 }}>
-        <FitText avail={WIDTH} origin="center" text={props.disclaimer} style={{ fontFamily, fontSize: 26, fontWeight: 600, color: props.textColor, opacity: DISCLAIMER_OPACITY }} />
+        <FitText avail={WIDTH} origin="center" text={props.disclaimer} style={{ fontFamily: family, fontSize: 26, fontWeight: 600, color: props.textColor, opacity: DISCLAIMER_OPACITY }} />
       </div>
       </FontGate>
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}

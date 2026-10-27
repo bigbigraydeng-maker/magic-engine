@@ -1,7 +1,9 @@
 import React from 'react'
 import { AbsoluteFill, Audio, interpolate, OffthreadVideo, Sequence, staticFile, useCurrentFrame } from 'remotion'
 import { Logo } from './components'
-import { fontFamily } from './theme'
+import { useStyleFamily } from './styles/fonts'
+import { peelStyle } from './styles/select'
+import type { ResolvedLook } from './styles/types'
 import {
   parseMontageReelProps,
   computeMontageTiming,
@@ -37,15 +39,15 @@ const Cut: React.FC<{ props: MontageReelProps; seg: MontageSegment }> = ({ props
   )
 }
 
-const WordSlam: React.FC<{ word: MontageWord; brandColor: string }> = ({ word, brandColor }) => {
+const WordSlam: React.FC<{ word: MontageWord; brandColor: string; family: string; ink: string }> = ({ word, brandColor, family, ink }) => {
   const frame = useCurrentFrame()
   const s = interpolate(frame, [0, 3], [1.7, 1], { extrapolateRight: 'clamp' })
   const sx = frame < 3 ? (rnd(word.at * 7 + frame) - 0.5) * 22 : 0
   const fs = Math.min(190, Math.floor(1000 / word.text.length))
-  const col = word.bg === 'black' ? { bg: '#0b0b0b', fg: '#fff' } : word.bg === 'brand' ? { bg: brandColor, fg: '#fff' } : { bg: '#f4f1ea', fg: '#0b0b0b' }
+  const col = word.bg === 'black' ? { bg: '#0b0b0b', fg: '#fff' } : word.bg === 'brand' ? { bg: brandColor, fg: ink } : { bg: '#f4f1ea', fg: '#0b0b0b' }
   return (
     <div style={{ position: 'absolute', left: 0, width: 960, top: 700, display: 'flex', justifyContent: 'center' }}>
-      <div style={{ fontFamily, fontWeight: 900, fontSize: fs, lineHeight: 1.0, color: col.fg, background: col.bg, padding: `${fs * 0.16}px ${fs * 0.28}px`, clipPath: tornClip, transform: `translateX(${sx}px) scale(${s}) rotate(${word.rot}deg)`, boxShadow: 'none', letterSpacing: -1, textAlign: 'center', maxWidth: 900 }}>{word.text}</div>
+      <div style={{ fontFamily: family, fontWeight: 900, fontSize: fs, lineHeight: 1.0, color: col.fg, background: col.bg, padding: `${fs * 0.16}px ${fs * 0.28}px`, clipPath: tornClip, transform: `translateX(${sx}px) scale(${s}) rotate(${word.rot}deg)`, boxShadow: 'none', letterSpacing: -1, textAlign: 'center', maxWidth: 900 }}>{word.text}</div>
     </div>
   )
 }
@@ -60,22 +62,28 @@ const Grain: React.FC = () => {
 }
 
 export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
-  const props = parseMontageReelProps(rawProps)
+  const peeled = peelStyle(rawProps)
+  const look = peeled.look === undefined || peeled.look === null ? null : (peeled.look as ResolvedLook)
+  const family = useStyleFamily(look)
+  const props = parseMontageReelProps(peeled.body)
   const timing = computeMontageTiming(props)
   const segments = buildMontageSegments(props)
   const frame = useCurrentFrame()
   const fade = interpolate(frame, [timing.totalFrames - 8, timing.totalFrames], [1, 0], { extrapolateLeft: 'clamp' })
   const vol = interpolate(frame, [0, 6, timing.totalFrames - 24, timing.totalFrames - 2], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
+  if (family === null) return null
+  const brand = look ? look.colors.brand : props.brandColor
+  const ink = look ? look.colors.textOnBrand : '#fff'
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       {segments.map((seg, i) => (<Sequence key={i} from={seg.from} durationInFrames={seg.dur}><Cut props={props} seg={seg} /></Sequence>))}
       <AbsoluteFill style={{ background: 'radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 45%, rgba(0,0,0,0.55) 100%)' }} />
       {props.words.map((w, i) => {
         const from = montageFrameOf(props.beats, w.at)
-        return (<Sequence key={i} from={from} durationInFrames={montageFrameOf(props.beats, w.at + w.beats) - from}><WordSlam word={w} brandColor={props.brandColor} /></Sequence>)
+        return (<Sequence key={i} from={from} durationInFrames={montageFrameOf(props.beats, w.at + w.beats) - from}><WordSlam word={w} brandColor={brand} family={family} ink={ink} /></Sequence>)
       })}
       <Grain />
-      <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>
+      <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={look?.logoFile ?? props.logoFile} /></Sequence>
       <AbsoluteFill style={{ background: '#000', opacity: 1 - fade }} />
       <Audio src={staticFile(props.musicFile)} volume={vol * (props.musicGain ?? 1)} />
     </AbsoluteFill>
