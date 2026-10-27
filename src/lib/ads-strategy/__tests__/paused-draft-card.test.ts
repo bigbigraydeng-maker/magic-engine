@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCapabilities } from '@/lib/capabilities'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
-import { CLIENT_A, CLIENT_B, makeFixture } from '@/lib/kernel/__tests__/fixtures'
+import { CLIENT_A, CLIENT_B, makeFixture, type FixtureOptions } from '@/lib/kernel/__tests__/fixtures'
 import { createFakeSupabase } from '@/lib/kernel/__tests__/fake-supabase'
 import type { CardClicker } from '@/lib/confirmation-card'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
@@ -47,12 +47,21 @@ function draft(over: Partial<AdDraft> = {}): AdDraft {
   }
 }
 
-function fixture() {
+function fixture(options?: FixtureOptions) {
   return makeFixture({
     registry: ACTION_REGISTRY,
     startAt: '2026-10-27T00:00:00.000Z',
     capabilities: (sb) => ({ [CONFIRMATION_ACTION_KEY]: createCapabilities(sb)[CONFIRMATION_ACTION_KEY] }),
+    options,
   })
+}
+
+async function untilFlag(ready: () => boolean): Promise<void> {
+  for (let i = 0; i < 40; i += 1) {
+    if (ready()) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error('the cleanup write did not start')
 }
 
 function outcome(status: CreateDraftOutcome['status'], error?: string): CreateDraftOutcome {
@@ -573,6 +582,84 @@ describe('paused draft confirmation', () => {
     })
     expect(holding).toHaveLength(1)
     expect((holding[0]?.payload as { cardRunId?: string }).cardRunId).toBe(latest.runId)
+  })
+
+  it('does not expire a hold that confirm already built while cleanup was waiting', async () => {
+    let arm = false
+    let held = false
+    let release = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const f = fixture({
+      supabaseOptions: {
+        beforeOp: (table, op) => {
+          if (!arm || held || table !== 'flywheel_actions' || op !== 'update') return
+          held = true
+          return gate
+        },
+      },
+    })
+    const original = draft()
+    const old = await issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: original,
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+    })
+    const createPaused = vi.fn(async () => outcome('awaiting_approval'))
+    const resolveDeps = vi.fn(async (): Promise<CreateDraftDeps | null> => ({
+      supabase: f.supabase,
+      adAccountId: 'act_test',
+      accessToken: 'tok',
+    }))
+    arm = true
+    const replacing = issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: draft({ dailyBudget: 40 }),
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+    }).then(
+      (card) => ({ card, error: null as unknown }),
+      (error: unknown) => ({ card: null, error }),
+    )
+    await untilFlag(() => held)
+    const built = await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: old.runId,
+      clicker: OPC,
+      resolution: 'confirm',
+      expectedDecisionId: old.expectedDecisionId,
+      fingerprint: old.fingerprint,
+      review: REVIEW,
+      resolveDeps,
+      createPaused,
+    })
+    expect(built.queued).toBe(true)
+    expect(createPaused).toHaveBeenCalledTimes(1)
+    release()
+    const replaced = await replacing
+    expect(replaced.error).toBeNull()
+    const row = f.tables.flywheel_actions.find((item) => {
+      const payload = item.payload as { cardRunId?: string }
+      return payload.cardRunId === old.runId
+    })
+    expect(row?.payload).toMatchObject({ status: 'built', wroteMeta: true, queued: true })
+    expect((row?.payload as { resultLine?: string }).resultLine).toContain('审批队列')
+    await expect(issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: original,
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+    })).rejects.toThrow('已经在建或已经送审')
+    expect(createPaused).toHaveBeenCalledTimes(1)
   })
 })
 

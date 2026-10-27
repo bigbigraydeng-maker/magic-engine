@@ -364,7 +364,7 @@ async function releaseDeadHolds(
     const fate = holdFate(row.payload, runs.get(row.payload.cardRunId), now, incoming)
     if (fate === 'live') continue
     if (!incoming && fate !== 'settled') continue
-    await save(sb, clientId, row.id, {
+    await expireIfHolding(sb, clientId, row.id, {
       ...row.payload,
       status: 'expired',
       resultLine: row.payload.resultLine ?? CARD_GONE,
@@ -440,6 +440,22 @@ async function claim(sb: SupabaseClient, clientId: string, id: string, payload: 
     .select('id')
     .maybeSingle()
   return !error && Boolean((data as { id?: string } | null)?.id)
+}
+
+/** A confirm may have moved the row off holding since this snapshot was read. */
+async function expireIfHolding(
+  sb: SupabaseClient,
+  clientId: string,
+  id: string,
+  payload: HoldPayload,
+): Promise<void> {
+  const { error } = await sb
+    .from('flywheel_actions')
+    .update({ payload })
+    .eq('id', id)
+    .eq('client_id', clientId)
+    .eq('payload->>status', 'holding')
+  if (error) throw new ConfirmationCardError('invalid', '结果没能记下。没有再去建一次。')
 }
 
 async function save(sb: SupabaseClient, clientId: string, id: string, payload: HoldPayload): Promise<void> {
