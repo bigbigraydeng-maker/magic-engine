@@ -25,6 +25,8 @@ import { summariseIndustryCoverage, type ClientIndustryRow } from '@/lib/memory/
 import { INDUSTRY_OPTIONS } from '@/lib/clients/industries'
 import LessonToggle from './_components/LessonToggle'
 import LessonVerify, { type SiteOption } from './_components/LessonVerify'
+import LessonTrial from './_components/LessonTrial'
+import { isTrialEligible } from '@/lib/agent-learning/lesson-trial/eligible'
 
 export const dynamic = 'force-dynamic'
 
@@ -381,6 +383,7 @@ function LessonCard({ lesson: l, sites }: { lesson: LessonRow; sites: SiteOption
         <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
       </div>
       <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} />
+      {isTrialEligible(l.lesson_key, l.evidence) && <LessonTrial lessonKey={l.lesson_key} />}
     </div>
   )
 }
