@@ -15,6 +15,8 @@ import { assertRecipeReceipt, winnerRecipeFromBrief, type WinnerRecipe } from '.
 import { buildReelPostCaption, buildReelPublishAutoChecks } from '@/lib/social/reel-publishing'
 import { buildReelMediaAutoChecks, type ReelMediaEvidence } from '@/lib/social/reel-media-checks'
 import { assessRemotionContentSubstance } from './content-substance'
+import { isRemotionBrief } from './render-mode'
+import { MACHINE_REVIEWED_KEY } from '@/lib/maliang/review-disposition'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
 
@@ -327,6 +329,9 @@ export async function completeWorkOrder(
           ...(substance.assetOnly ? { deliverable: 'asset_only' } : {}),
         }
       : {}),
+    // Template renders enter the human queue before 马良 finishes. Until the
+    // verdict lands, the order is explicitly not machine-reviewed.
+    ...(isRemotionBrief(wo.brief) ? { [MACHINE_REVIEWED_KEY]: false } : {}),
   }
 
   // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能伪装成功(魏征 M2-P1-1)

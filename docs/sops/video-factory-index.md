@@ -74,7 +74,7 @@
 |---|---|
 | `scripts/factory-worker/remotion-branch.mjs` | Remotion 出片分支：入库前各道闸、成片体检、上传 |
 | `scripts/factory-worker/engines/remotion/` | Remotion 引擎：`render.mjs`、各模板 `src/*Reel.tsx` |
-| `src/lib/maliang/render-check.ts` | 马良分镜自检（目前只接 Creatomate 出片） |
+| `src/lib/maliang/render-check.ts` | 马良分镜自检（Creatomate 与模板出片共用；工单裁决在 output.maliang_check，没过仍留在审片收件箱） |
 | `src/lib/factory/worker-guard.ts` | 服务端护栏，含成片红线复扫 `scanRedlineHits` |
 | `src/lib/inngest/functions/youtube-publish.ts` | YouTube 私密暂存（工厂已批准成片） |
 
