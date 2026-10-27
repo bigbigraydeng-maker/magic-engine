@@ -12,6 +12,7 @@ import { PublishOutlets } from './PublishOutlets'
 import { PendingCardHead } from './OrderTile'
 import { RejectDialog } from './RejectDialog'
 import { groupCounts, parseAngle } from './reviewCardMeta'
+import { maliangReviewNote, type MaliangReviewTone } from '@/lib/maliang/review-note'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -56,6 +57,13 @@ const TEMPLATE_LABELS: Record<string, string> = {
   datacard: '数据卡',
   postcard: '场景明信片',
   atmosphere: '单镜氛围',
+}
+
+function maliangNoteBox(tone: MaliangReviewTone): string {
+  const color = tone === 'fail'
+    ? 'border-red-300 bg-red-50 text-red-900'
+    : 'border-amber-200 bg-amber-50 text-amber-950'
+  return `mb-2 rounded-lg border px-2 py-1.5 text-xs font-medium ${color}`
 }
 
 function renderChoiceLabel(templateId?: string | null): string {
@@ -342,7 +350,9 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
       <>
         {shownPending.length === 0 && <p className="text-sm text-slate-400">现在没有待审核视频。</p>}
         <div className={gridCls}>
-          {shownPending.map((o) => (
+          {shownPending.map((o) => {
+              const maliangNote = maliangReviewNote(o.output)
+              return (
               <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-3 flex flex-col">
                 <PendingCardHead
                   id={o.id}
@@ -357,6 +367,12 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   <span className="rounded bg-slate-100 px-2 py-1">模板 · {renderChoiceLabel(o.template_id)}</span>
                   <span className="rounded bg-slate-100 px-2 py-1">BGM · {musicChoiceLabel(o.music_file)}</span>
                 </div>
+
+                {maliangNote && (
+                  <div className={maliangNoteBox(maliangNote.tone)} data-testid="maliang-review-note" data-tone={maliangNote.tone}>
+                    <p>{maliangNote.text}</p>
+                  </div>
+                )}
 
                 {redlineHitsOf(o).length > 0 && (
                   <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
@@ -407,7 +423,8 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   <PublishOutlets />
                 </div>
               </div>
-          ))}
+              )
+          })}
         </div>
         {assets.length > 0 && (
           <div className="mt-6" data-testid="asset-only-section">

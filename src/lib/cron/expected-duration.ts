@@ -26,6 +26,7 @@ export const JOB_MAX_DURATION_SEC: Readonly<Record<string, number>> = {
   'factory-order-scheduler': 120,
   'factory-publish-sweeper': 60,
   'factory-publish-worker': 300,
+  'factory-worker-sweeper': 60,
   'factory-stock-refill': 300,
   'goal-current-value-refresh': 300,
   'goals-expiry-check': 60,

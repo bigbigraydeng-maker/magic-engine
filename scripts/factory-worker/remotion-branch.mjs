@@ -13,6 +13,7 @@ import {
   sha256File,
   usedWindowFromProps,
 } from './music-vocal-gate.mjs'
+import { MAX_UPLOAD_BYTES } from './engines/remotion/encode-cap.mjs'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
 export const REMOTION_ENGINE_DIR = join(import.meta.dirname, 'engines', 'remotion')
@@ -1038,6 +1039,13 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     const stat = statSync(finalPath)
     if (!stat.isFile() || stat.size <= 0) {
       throw new RemotionOrderError('成片体检没过：渲染产物不存在或为空')
+    }
+    // Fail fast with a plain-language error instead of uploading and getting a raw 413.
+    if (stat.size > MAX_UPLOAD_BYTES) {
+      const mb = (stat.size / 1e6).toFixed(1)
+      throw new RemotionOrderError(
+        `成片体检没过：成片 ${mb} MB，超过存储上限（${MAX_UPLOAD_BYTES / 1e6} MB）。请缩短时长或换更静的镜头后重出`,
+      )
     }
     // Every known template is listed explicitly; an unknown one is refused instead of falling through to montage.
     const textBuilders = {

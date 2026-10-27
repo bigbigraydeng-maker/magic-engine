@@ -50,6 +50,7 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'factory-publish-worker', route: 'factory-publish-worker', method: 'GET', auth: 'bearer', schedule: '5 * * * *' },
   { service: 'factory-order-scheduler', route: 'factory-order-scheduler', method: 'GET', auth: 'bearer', schedule: '0 20 * * *' },
   { service: 'factory-publish-sweeper', route: 'factory-publish-sweeper', method: 'GET', auth: 'bearer', schedule: '25 * * * *' },
+  { service: 'factory-worker-sweeper', route: 'factory-worker-sweeper', method: 'GET', auth: 'bearer', schedule: '*/5 * * * *' },
   { service: 'messenger-hourly', route: 'messenger-sync-hourly', method: 'GET', auth: 'bearer', schedule: '10 * * * *' },
   { service: 'meta-leads-hourly', route: 'meta-leads-sync', method: 'GET', auth: 'bearer', schedule: '25 */2 * * *' },
   { service: 'ad-readback-sweep-daily', route: 'ad-readback-sweep', method: 'GET', auth: 'bearer', schedule: '40 20 * * *' },
