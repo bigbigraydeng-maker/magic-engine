@@ -46,7 +46,7 @@ function DialogHeader({ clientId }: { clientId: string }) {
   return (
     <header className="border-b border-black/10 bg-white px-4 py-3">
       <div className="mx-auto flex max-w-3xl items-center gap-3">
-        <Link href={`/dashboard/clients/${clientId}`} className="text-sm font-semibold text-me-charcoal/60">返回</Link>
+        <Link href={`/dashboard/clients/${clientId}`} className="inline-flex min-h-11 items-center text-sm font-semibold text-me-charcoal/70 hover:text-me-charcoal">返回</Link>
         <div>
           <h1 className="text-lg font-black text-me-charcoal">处方</h1>
           <p className="text-xs text-me-charcoal/50">跟华佗说要开的方，或要改的地方</p>
@@ -130,7 +130,7 @@ function Composer({ model }: { model: DialogModel }) {
         />
       </label>
       <div className="mt-3 flex justify-end">
-        <button type="submit" disabled={model.writing || !model.draft.trim()} className="rounded-full bg-me-charcoal px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
+        <button type="submit" disabled={model.writing || !model.draft.trim()} className="min-h-11 rounded-full bg-me-charcoal px-6 text-sm font-semibold text-white disabled:opacity-40">
           发送
         </button>
       </div>
