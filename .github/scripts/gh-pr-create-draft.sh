@@ -22,23 +22,76 @@ if [[ ! -x /usr/bin/gh ]]; then
   exit 127
 fi
 
-for arg in "$@"; do
-  case "$arg" in
-    --|--draft|--draft=*|--draf|--draf=*|--dra|--dra=*|--ready|--ready=*|--web|--web=*|--editor|--editor=*|--recover|--recover=*)
-      echo "gh-pr-create-draft: refusing override flag" >&2
-      exit 2
+refuse() {
+  echo "gh-pr-create-draft: $*" >&2
+  exit 2
+}
+
+# Bool flags. Draft itself is not here: the wrapper adds it, and a caller
+# must not be able to set it again.
+is_bool_flag() {
+  case "$1" in
+    --fill|--fill-first|--fill-verbose|--no-maintainer-edit|--dry-run) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Flags that take the next argument, or an inline --flag=value.
+is_value_flag() {
+  case "$1" in
+    --assignee|--attach|--base|--body|--body-file|--head|--label|--milestone|--project|--reviewer|--template|--title|--repo) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Reject anything that can turn draft off, open an editor, or end flag parsing.
+# Checked on every argument, including values, so a missing-value parse cannot
+# disagree with gh about which token is a flag.
+reject_dangerous() {
+  case "$1" in
+    --|--draft|--draft=*|--draf|--draf=*|--dra|--dra=*|--no-draft|--no-draft=*|--ready|--ready=*|--web|--web=*|--editor|--editor=*|--recover|--recover=*)
+      refuse "refusing override flag"
       ;;
   esac
-  # -d / -e / -w are draft, editor, and web. A cluster such as -fd=false
-  # still sets draft to false, so reject any short flag that includes them.
-  if [[ "$arg" == -* && "$arg" != --* ]]; then
-    shorts="${arg#-}"
-    shorts="${shorts%%=*}"
-    if [[ "$shorts" == *d* || "$shorts" == *e* || "$shorts" == *w* ]]; then
-      echo "gh-pr-create-draft: refusing short override flag" >&2
-      exit 2
-    fi
+  if [[ "$1" == -* && "$1" != --* ]]; then
+    refuse "refusing short flag"
   fi
-done
+}
 
-exec /usr/bin/gh pr create "$@" --draft
+# Every caller argument is classified. Unknown flags and a value flag with no
+# value are refused, so gh is never started in a state where a dangling flag
+# could swallow the draft marker.
+validate_args() {
+  local -a args=("$@")
+  local i=0 arg name
+  while [[ "$i" -lt ${#args[@]} ]]; do
+    arg="${args[$i]}"
+    reject_dangerous "$arg"
+    if [[ "$arg" == --*=* ]]; then
+      name="${arg%%=*}"
+      if is_bool_flag "$name" || is_value_flag "$name"; then
+        i=$((i + 1))
+        continue
+      fi
+      refuse "refusing unknown flag"
+    fi
+    if is_bool_flag "$arg"; then
+      i=$((i + 1))
+      continue
+    fi
+    if is_value_flag "$arg"; then
+      if [[ $((i + 1)) -ge ${#args[@]} ]]; then
+        refuse "flag needs a value: $arg"
+      fi
+      reject_dangerous "${args[$((i + 1))]}"
+      i=$((i + 2))
+      continue
+    fi
+    refuse "refusing unknown argument"
+  done
+}
+
+validate_args "$@"
+# --draft is before caller args. A dangling value flag cannot consume it,
+# and validate_args already refused that shape.
+exec /usr/bin/gh pr create --draft "$@"
