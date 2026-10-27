@@ -21,38 +21,18 @@ import { fetchCustomAudienceById } from '@/lib/meta/entity-settings'
 import { readAudienceStatusProd } from '../deps'
 
 function audience(accountId: string | undefined): GraphReadResult<GraphCustomAudience & { account_id?: string }> {
-  return {
-    rows: [{
-      id: '111',
-      account_id: accountId,
-      operation_status: { code: 200 },
-      delivery_status: { code: 200 },
-    }],
-    complete: true,
-    error: null,
-  }
+  return { rows: [{ id: '111', account_id: accountId, operation_status: { code: 200 }, delivery_status: { code: 200 } }], complete: true, error: null }
 }
 
 describe('readAudienceStatusProd account check', () => {
-  beforeEach(() => {
-    vi.mocked(fetchCustomAudienceById).mockReset()
-  })
+  beforeEach(() => { vi.mocked(fetchCustomAudienceById).mockReset() })
 
-  it('keeps a usable audience when its ad account is the step account', async () => {
-    vi.mocked(fetchCustomAudienceById).mockResolvedValue(audience('123'))
-    const res = await readAudienceStatusProd('c1', ['111'], 'act_123')
-    expect(res).toEqual({ state: 'ok', value: { '111': { operation: 200, delivery: 200 } } })
-  })
-
-  it('drops an audience that belongs to a different ad account', async () => {
-    vi.mocked(fetchCustomAudienceById).mockResolvedValue(audience('999'))
-    const res = await readAudienceStatusProd('c1', ['111'], 'act_123')
-    expect(res).toEqual({ state: 'ok', value: {} })
-  })
-
-  it('drops an audience when Meta does not say which account it belongs to', async () => {
-    vi.mocked(fetchCustomAudienceById).mockResolvedValue(audience(undefined))
-    const res = await readAudienceStatusProd('c1', ['111'], 'act_123')
-    expect(res).toEqual({ state: 'ok', value: {} })
+  it.each([
+    ['the step account', '123', { '111': { operation: 200, delivery: 200 } }],
+    ['a different ad account', '999', {}],
+    ['an audience Meta does not assign to an account', undefined, {}],
+  ] as const)('keeps only an audience owned by %s', async (_label, accountId, value) => {
+    vi.mocked(fetchCustomAudienceById).mockResolvedValue(audience(accountId))
+    await expect(readAudienceStatusProd('c1', ['111'], 'act_123')).resolves.toEqual({ state: 'ok', value })
   })
 })

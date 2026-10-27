@@ -44,13 +44,7 @@ export const audienceStateSchema = z.enum(['read', 'unusable', 'unreadable'])
 export type AudienceState = z.infer<typeof audienceStateSchema>
 
 /** 素材五态；只有 ready 算通过，pending_approval（素材待批）不算。 */
-export const creativeStateSchema = z.enum([
-  'ready',
-  'pending_approval',
-  'window_mismatch',
-  'none',
-  'unreadable',
-])
+export const creativeStateSchema = z.enum(['ready', 'pending_approval', 'window_mismatch', 'none', 'unreadable'])
 export type CreativeState = z.infer<typeof creativeStateSchema>
 
 /** 计划种子里的一个广告步骤：每个字段都是 Field，缺数据时说明原因。受众/素材字段是 S1 新增，旧种子没有，所以可选。 */

@@ -102,18 +102,9 @@ function FieldRow<T>({
   )
 }
 
-const AUDIENCE_STATE_LABEL: Record<AudienceState, string> = {
-  read: '读到',
-  unusable: '读到但不可用',
-  unreadable: '读不到',
-}
-
+const AUDIENCE_STATE_LABEL: Record<AudienceState, string> = { read: '读到', unusable: '读到但不可用', unreadable: '读不到' }
 const CREATIVE_STATE_LABEL: Record<CreativeState, string> = {
-  ready: '可用',
-  pending_approval: '素材待批',
-  window_mismatch: '推广期对不上',
-  none: '没有素材',
-  unreadable: '读不到',
+  ready: '可用', pending_approval: '素材待批', window_mismatch: '推广期对不上', none: '没有素材', unreadable: '读不到',
 }
 
 function StepCard({ step, currency }: { step: PlanSeedStep; currency: string | null }) {

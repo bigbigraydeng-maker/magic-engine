@@ -70,15 +70,8 @@ type StepExtras = Pick<
 type SeedLimits = { deadlineMs: number; timeoutMs: number }
 
 /** 受众读取自己超时：底层单次请求能等 20 秒，不能让它吃掉整份种子。 */
-const AUDIENCE_TIMEOUT: AudienceStatusRead = {
-  state: 'failed',
-  reason: '读受众状态超时，先留空',
-}
-
-const AUDIENCE_READ_FAILED: AudienceStatusRead = {
-  state: 'failed',
-  reason: '读受众状态失败，先留空',
-}
+const AUDIENCE_TIMEOUT: AudienceStatusRead = { state: 'failed', reason: '读受众状态超时，先留空' }
+const AUDIENCE_READ_FAILED: AudienceStatusRead = { state: 'failed', reason: '读受众状态失败，先留空' }
 
 /** 在剩余预算内等一次受众读取。超时或抛错都变成留空原因，不等待底层请求结束。 */
 async function readAudienceCapped(
@@ -99,12 +92,8 @@ async function readAudienceCapped(
   const timeout = new Promise<AudienceStatusRead>((resolve) => {
     timer = setTimeout(() => resolve(AUDIENCE_TIMEOUT), capMs)
   })
-  const settled = call.then(
-    (value) => value,
-    () => AUDIENCE_READ_FAILED,
-  )
   try {
-    return await Promise.race([settled, timeout])
+    return await Promise.race([call.then((value) => value, () => AUDIENCE_READ_FAILED), timeout])
   } finally {
     if (timer !== undefined) clearTimeout(timer)
   }

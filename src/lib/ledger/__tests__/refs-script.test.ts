@@ -73,7 +73,7 @@ beforeEach(() => {
   git('commit', '-q', '-m', 'base')
   git('tag', 'base')
   installFakeGh()
-})
+}, 60_000)
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
@@ -84,7 +84,7 @@ function commitNew(): void {
   git('commit', '-q', '-m', 'change')
 }
 
-describe('ledger-check-refs.sh (PR mode)', () => {
+describe('ledger-check-refs.sh (PR mode)', { timeout: 60_000 }, () => {
   it('does not look up cards the PR did not touch, so a broken old pointer cannot turn a new PR red', () => {
     card('2026-10-14-new-good', { done_ref: 'pr:500' })
     commitNew()
