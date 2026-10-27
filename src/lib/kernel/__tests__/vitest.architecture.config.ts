@@ -29,10 +29,10 @@ export default defineConfig({
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
     },
     setupFiles: [],
+    // 锁文件里的 Vitest 3.2.4 没有按错误过滤的开关，只有一个会放行全部未处理错误的布尔值。
+    // 这个文件在主进程里改退出判断：只放过已确认的 onTaskUpdate RPC 超时，其它未处理错误仍失败。
+    globalSetup: [path.join(ROOT, 'src/lib/kernel/__tests__/architecture-global-setup.ts')],
     passWithNoTests: false,
     allowOnly: false,
-    // CI 上整文件同步扫描会堵住 worker 超过 60 秒，onTaskUpdate 超时。
-    // 203 条有没有跑过仍由 confirm-vitest-json 对 JSON 报告卡下限。
-    dangerouslyIgnoreUnhandledErrors: true,
   },
 })
