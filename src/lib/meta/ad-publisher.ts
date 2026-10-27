@@ -136,7 +136,7 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     d.geoCityKeys && d.geoCityKeys.length > 0
       ? { cities: d.geoCityKeys.map((key) => ({ key, radius: 10, distance_unit: 'kilometer' })) }
       : { countries: d.geoCountries }
-  return {
+  const targeting: Record<string, unknown> = {
     geo_locations: geo,
     age_min: d.ageMin ?? 25,
     age_max: d.ageMax ?? 65,
@@ -148,6 +148,17 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     // 所以建完还要回读一遍（这正是闸门存在的理由）。
     targeting_automation: { advantage_audience: 0 },
   }
+
+  if (d.audienceIds && d.audienceIds.length > 0) {
+    targeting.custom_audiences = d.audienceIds.map((id) => ({ id }))
+    // 明确不放宽名单：不扩展到名单以外的人，也不自动加相似人群。
+    targeting.targeting_relaxation_types = { custom_audience: 0, lookalike: 0 }
+  }
+  if (d.excludedAudienceIds && d.excludedAudienceIds.length > 0) {
+    targeting.excluded_custom_audiences = d.excludedAudienceIds.map((id) => ({ id }))
+  }
+
+  return targeting
 }
 
 function assertNever(x: never): never {
@@ -192,20 +203,34 @@ function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
         call_to_action: { type: MESSENGER_CTA_TYPE, value: { app_destination: 'MESSENGER' } },
       }
       break
-    case 'lead_form':
-      storySpec.link_data = {
-        message: c.primaryText,
-        name: c.headline,
-        ...(c.description ? { description: c.description } : {}),
-        ...(c.imageHash ? { image_hash: c.imageHash } : {}),
-        ...(c.videoId ? { video_id: c.videoId } : {}),
-        link: d.linkUrl ?? `https://facebook.com/${d.pageId}`,
-        call_to_action: {
-          type: 'SIGN_UP',
-          value: { lead_gen_form_id: d.leadFormId },
-        },
+    case 'lead_form': {
+      if (c.videoId) {
+        // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），不是把 video_id 塞进 link_data
+        // （同类实测见 docs/PITFALLS.md D13 与 Meta 广告手册 §30）。封面必给（validateDraft 查）。
+        // CTA value 只写表单 id：10-09 真建成的上海那条（docs/clients/cts/2026-10-09-shanghai-ads-paused-build.md §2.3）
+        // 的 CTA 里只有 lead_gen_form_id，落地页由表单结束页承载。Meta 视频留资示例的 value 里带 link（fb.me），
+        // 带不带都有依据；这里取「有实测的那种」。
+        storySpec.video_data = {
+          video_id: c.videoId,
+          message: c.primaryText,
+          title: c.headline,
+          ...(c.description ? { link_description: c.description } : {}),
+          ...thumbnailFields(c),
+          call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: d.leadFormId } },
+        }
+      } else {
+        storySpec.link_data = {
+          message: c.primaryText,
+          name: c.headline,
+          ...(c.description ? { description: c.description } : {}),
+          ...(c.imageHash ? { image_hash: c.imageHash } : {}),
+          // 留资文档：link_data.link 只能是 https://fb.me/（真正的落地页在表单结束页）
+          link: 'https://fb.me/',
+          call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: d.leadFormId } },
+        }
       }
       break
+    }
     default:
       return assertNever(d.kind)
   }
@@ -219,6 +244,11 @@ function campaignBody(d: AdDraft): Record<string, string> {
     objective: metaTripletFor(d.kind).objective,
     status: 'PAUSED',
     special_ad_categories: JSON.stringify([]),
+    // ⚠️ 将来若走系列预算（CBO）路径，这个字段应随草案决定，不能照抄 'false'。
+    // 预算放在广告组（不用系列预算）时，Meta 现在要求明确写 is_adset_budget_sharing_enabled
+    // （否则报 100/4834011）。false = 各组预算互不共享，与我们每组独立日预算的做法一致。
+    // 2026-10-26 $1 试跑第一次真跑 ads.create_ad 时撞上。
+    is_adset_budget_sharing_enabled: 'false',
   }
 }
 
@@ -231,6 +261,9 @@ function adSetBodyFor(d: AdDraft, campaignId: string, nowMs: number): Record<str
     status: 'PAUSED',
     billing_event: t.billingEvent,
     optimization_goal: t.optimizationGoal,
+    // 不用系列预算时，竞价策略要在组上明说；最低成本（不设上限）= Meta 自动出价，不需要 bid_amount。
+    // 2026-10-26 $1 试跑第二次真跑撞上（100/2490487）。
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     // Meta 收的是最小货币单位（分）。传元会变成 1/100 的预算，静默跑不出量。
     daily_budget: String(Math.round(d.dailyBudget * 100)),
     start_time: String(Math.floor(nowMs / 1000)),

@@ -739,6 +739,7 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
             fillEmptyDisplayName: true,
             source: 'email',
             seenAt: thread.lastAt,
+            autoAssign: true,
           })
           contactId = res.contactId
           if (res.created) newContacts += 1

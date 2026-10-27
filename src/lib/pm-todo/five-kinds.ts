@@ -63,6 +63,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  ads_service_pause_notice: 'decide', // 系列已暂停，要不要恢复由人点确认卡
   ads_account_not_active: 'one_click', // 去 Meta 付款设置结清欠款、补备用卡（系统进不去）
   ads_account_status_unreadable: 'dev', // 账户状态读不到：快照任务的问题，开发看，不占 PM 的清单
   ads_account_closed_weekly: 'decide', // 账户已关闭：要不要从客户名下解绑，由 PM 定（每周一提醒）
@@ -84,6 +85,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   promo_plan_watch: 'decide',
   lead_followup_check_failed: 'dev', // 「填了表没人回」这一栏没算出来：我们这边的欠账
   promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
+  plan_draft_auto_failed: 'dev', // 同意前自动起草连续失败：系统没写成，不占批准决定
   ads_tracking_preflight_fix: 'dev', // 开投前追踪检查的红灯怎么修：改官网 / 改配置，开发的活（PM 在推广计划页看灯，开投拍板走「到期阶段检查没过」）
   ads_tracking_preflight_broken: 'dev', // 开投前追踪检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
 

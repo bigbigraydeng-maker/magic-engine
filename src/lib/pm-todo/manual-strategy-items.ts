@@ -186,7 +186,7 @@ function itemsFromOutcomes(outcomes: unknown[], nameOf: (id: string) => string):
 }
 
 function itemFromOutcome(raw: unknown, nameOf: (id: string) => string): ManualItem | null {
-  if (!isRecord(raw) || raw.result !== 'checked') return null
+  if (!isRecord(raw) || (raw.result !== 'checked' && raw.result !== 'unreadable')) return null
   const clientId = raw.clientId
   const progress = raw.progress
   const suggestion = raw.suggestion

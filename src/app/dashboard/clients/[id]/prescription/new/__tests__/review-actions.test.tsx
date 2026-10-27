@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   APPROVE_CONFIRM_TEXT,
+  APPROVE_SPEND_REMINDER,
   ManualDraftBanner,
   PrescriberLine,
   PrescriptionReviewActions,
@@ -22,6 +23,8 @@ describe('处方审阅确认', () => {
     await user.click(screen.getByRole('button', { name: '✓ 批准并生成执行计划' }))
     expect(onApprove).not.toHaveBeenCalled()
     expect(screen.getByRole('alertdialog', { name: '确认批准' })).toHaveTextContent(APPROVE_CONFIRM_TEXT)
+    expect(screen.getByRole('alertdialog', { name: '确认批准' })).toHaveTextContent(APPROVE_SPEND_REMINDER)
+    expect(APPROVE_SPEND_REMINDER).toBe('提醒：这份处方里 Agent 给的账户和日预算只是建议，批准处方不等于批准花钱；花钱要另外在计划页批准计划、在审批页点开广告。')
     expect(APPROVE_CONFIRM_TEXT).not.toContain('看板上会出现待办')
     expect(APPROVE_CONFIRM_TEXT).toContain('按阶段排好')
 
@@ -45,6 +48,7 @@ describe('处方审阅确认', () => {
     await user.click(screen.getByRole('button', { name: REJECT_BUTTON_LABEL }))
     expect(onReject).not.toHaveBeenCalled()
     expect(screen.getByRole('alertdialog', { name: '确认标为已拒绝' })).toHaveTextContent(REJECT_CONFIRM_TEXT)
+    expect(screen.getByRole('alertdialog', { name: '确认标为已拒绝' })).not.toHaveTextContent('批准处方不等于批准花钱')
     expect(REJECT_BUTTON_LABEL).toContain('已拒绝')
 
     await user.click(screen.getByRole('button', { name: '确定标为已拒绝' }))

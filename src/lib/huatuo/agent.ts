@@ -34,6 +34,7 @@ import { summarizeTrend } from './trends'
 import { getSeasonalCalendar } from './seasonal-calendar'
 import { getIndustryInterestTrend } from '@/lib/gtrends/client'
 import { coerceWeaknesses } from './weakness-utils'
+import { applyLlmAdPlays, dedupeAdPlayStepKeys } from '@/lib/ads-strategy/plan-seed/ad-plays'
 import { retrieveSimilarCases } from '@/lib/case-library/retriever'
 import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { fetchOutcomeConfidenceMap } from '@/lib/case-library/outcome-confidence'
@@ -58,7 +59,8 @@ const MAX_OUTPUT_TOKENS_SELFGRADE = 4096
 
 // 单次 Claude 调用硬超时（毫秒）。Anthropic SDK 默认 10 分钟 + 默认重试 2 次
 // = 最坏 30 分钟挂起。这里给充足空间但仍禁用 SDK 重试。
-// 现在异步执行，不再受 Render 100s 请求超时约束。
+// 中文 8192 tokens 大约要 120 秒。调用方必须先回 HTTP，不能在这次请求里干等，
+// 否则会撞上 Cloudflare 大约 100 秒的代理上限（见 prescription-job.ts）。
 const CLAUDE_TIMEOUT_GENERATION_MS = 240_000   // 4 分钟（中文 8192 tokens 需要 ~120s）
 const CLAUDE_TIMEOUT_SELFGRADE_MS = 90_000     // 1.5 分钟
 
@@ -96,8 +98,8 @@ export interface RunHuatuoOptions {
   /** 跳过 self-grade（用于测试或预览） — 默认 false（执行自评） */
   skipSelfGrade?: boolean
   /**
-   * 是否精修。**默认 true（跳过）**——避免 Render 100s 超时。
-   * 显式传 false 才会在自评低分时触发第 2 轮生成。
+   * 是否精修。**默认 true（跳过）**。再生成一轮又是大约 120 秒的模型调用，
+   * 普通开方不自动跑。显式传 false 才会在自评低分时触发第 2 轮生成。
    */
   skipRefine?: boolean
   /** 进度回调（UI 显示阶段提示） */
@@ -251,7 +253,7 @@ export async function runHuatuo(
     }
 
     // ── Step 4: Refine if grade too low ──────────────────────────────────
-    // 默认 skipRefine = true（避免 Render 100s 请求超时）。用户想要精修需在 UI 显式开启。
+    // 默认 skipRefine = true。第二轮生成又要大约 120 秒，普通开方不自动跑。
     const shouldRefine = options.skipRefine === false  // 明确 false 才精修
     if (
       shouldRefine &&
@@ -540,7 +542,7 @@ const VALID_INIT_TYPES = new Set([
 ])
 const VALID_POSTURES = new Set(['offensive', 'defensive', 'fast', 'slow'])
 
-function normalizeInitiativeSeed(seed: unknown): import('@/types/diagnostic').PhaseInitiativeSeed | undefined {
+function normalizeInitiativeSeed(seed: unknown, phaseNumber: number): import('@/types/diagnostic').PhaseInitiativeSeed | undefined {
   if (!seed || typeof seed !== 'object') return undefined
   const s = seed as Record<string, unknown>
 
@@ -558,35 +560,50 @@ function normalizeInitiativeSeed(seed: unknown): import('@/types/diagnostic').Ph
     ? Math.max(0, Math.min(100, s.budget_percent))
     : null
 
-  return {
+  const result: import('@/types/diagnostic').PhaseInitiativeSeed = {
     initiative_type,
     title: typeof s.title === 'string' ? s.title : '',
     posture,
     budget_percent,
     hypothesis: typeof s.hypothesis === 'string' ? s.hypothesis : null,
   }
+  // ad_plays：LLM 只给 play；step_key 由系统生成（见 applyLlmAdPlays）；不合法整组丢并留痕
+  applyLlmAdPlays(result, s.ad_plays, phaseNumber)
+  return result
 }
 
-function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
-  return {
+export function normalizePrescriptionContent(p: Partial<PrescriptionContent>): PrescriptionContent {
+  const normalized: PrescriptionContent = {
     summary: typeof p.summary === 'string' ? p.summary : '',
     // DAPE W3 — narrative 是新加的可选字段，旧 prompt 无此输出 → 空串兜底
     narrative: typeof p.narrative === 'string' ? p.narrative : '',
     phases: Array.isArray(p.phases)
-      ? p.phases.map(ph => ({
-          phase_number:    typeof ph.phase_number === 'number' ? ph.phase_number : 0,
-          name:            typeof ph.name === 'string' ? ph.name : '',
-          duration_weeks:  typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
-          actions:         Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
-          initiative_seed: normalizeInitiativeSeed((ph as { initiative_seed?: unknown }).initiative_seed),
-        }))
+      ? p.phases.map(ph => {
+          const phaseNumber = typeof ph.phase_number === 'number' ? ph.phase_number : 0
+          return {
+            phase_number:    phaseNumber,
+            name:            typeof ph.name === 'string' ? ph.name : '',
+            duration_weeks:  typeof ph.duration_weeks === 'number' ? ph.duration_weeks : 0,
+            actions:         Array.isArray(ph.actions) ? ph.actions.map(attachExecutionTarget) : [],
+            initiative_seed: normalizeInitiativeSeed((ph as { initiative_seed?: unknown }).initiative_seed, phaseNumber),
+          }
+        })
       : [],
     kpi_targets: Array.isArray(p.kpi_targets) ? p.kpi_targets : [],
     budget_allocation: Array.isArray(p.budget_allocation) ? p.budget_allocation : [],
   }
+  dedupeAdPlayStepKeys(normalized.phases)
+  return normalized
 }
 
-async function generatePrescriptionWithFeedback(
+/** 喂给 LLM 的上一版处方副本：去掉顶层 plan_seed（含真实账户号与日预算，不能让 LLM 看到）。不改入参。 */
+export function withoutPlanSeed(content: PrescriptionContent): PrescriptionContent {
+  const copy: PrescriptionContent = { ...content }
+  delete copy.plan_seed
+  return copy
+}
+
+export async function generatePrescriptionWithFeedback(
   client: Anthropic,
   discovery: DiscoveryReport,
   intake: PrescriptionIntake,
@@ -632,7 +649,7 @@ ${feedback.weaknesses.map((w, i) => `${i + 1}. [${w.dimension} | ${w.severity}] 
 
 上一轮处方 JSON（保留你认为合理的部分）：
 \`\`\`json
-${JSON.stringify(feedback.previousContent, null, 2)}
+${JSON.stringify(withoutPlanSeed(feedback.previousContent), null, 2)}
 \`\`\`
 
 ## ⚠️ 输出约束（重要 — 防止超 max_tokens）

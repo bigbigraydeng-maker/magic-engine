@@ -14,6 +14,8 @@ import { BatchHistory } from './BatchHistory'
 import { AliasList } from './AliasList'
 import { AssistantDrawer } from './AssistantDrawer'
 import { ImportPanel } from './ImportPanel'
+import { NewTourEntry } from './NewTourDialog'
+import { incompleteNewTours } from './incomplete-new-tours'
 import { AssistantPanel } from './AssistantPanel'
 import { CatalogChangeFeed } from './CatalogChangeFeed'
 import { CatalogSettingsPanel } from './CatalogSettingsPanel'
@@ -174,7 +176,16 @@ function ToursTabColumns(props: ToursTabColumnsProps): JSX.Element {
         >
           导出全部团（含未上架的修改，Excel 可直接打开）
         </a>
-        {snapshot.permissions.import ? null : (
+        {snapshot.permissions.import ? (
+          <NewTourEntry
+            clientId={clientId}
+            tours={snapshot.tours}
+            onCreated={id => {
+              onChanged()
+              onSelect(id)
+            }}
+          />
+        ) : (
           <p className="mt-2 px-1 text-xs font-semibold text-me-charcoal/70">{IMPORT_BY_ME_TEXT}</p>
         )}
       </div>
@@ -539,13 +550,14 @@ function usePublishRequest(snapshot: CatalogSnapshotResponse, publishedVersion: 
 
 function WorkspaceDialogs(props: {
   clientId: string
+  snapshot: CatalogSnapshotResponse
   publish: PublishPreviewState
   state: WorkspaceState
   onChanged: () => void
   onPublished: (websiteSync: PublishResponse['websiteSync']) => void
   onRequested: (request: PublishRequestView) => void
 }): JSX.Element | null {
-  const { clientId, publish, state, onChanged, onRequested, onPublished } = props
+  const { clientId, snapshot, publish, state, onChanged, onRequested, onPublished } = props
   if (state.requestOpen) {
     return (
       <RequestPublishDialog
@@ -564,6 +576,7 @@ function WorkspaceDialogs(props: {
       <PublishDialog
         clientId={clientId}
         preview={publish.preview}
+        incompleteNewTours={incompleteNewTours(publish.preview, snapshot.tours, snapshot.departures)}
         onRefresh={publish.refresh}
         onClose={state.closePublish}
         onPublished={(websiteSync) => {
@@ -639,6 +652,7 @@ export function CatalogWorkspace(props: {
         />
         <WorkspaceDialogs
           clientId={clientId}
+          snapshot={snapshot}
           publish={publish}
           state={state}
           onChanged={onChanged}

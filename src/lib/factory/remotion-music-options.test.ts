@@ -54,3 +54,16 @@ describe('Remotion music choices', () => {
     expect(updated?.choice.id).toBe('jade-river-journey')
   })
 })
+
+describe('Remotion music swap and musicGain', () => {
+  it('drops musicGain when the track is replaced (the gain was calibrated for the old track)', () => {
+    const brief = postcardBrief()
+    ;(brief.props as Record<string, unknown>).musicGain = 1.9
+    const swapped = replaceRemotionMusic(brief, 'jade-river-journey')
+    expect(swapped).not.toBeNull()
+    const props = swapped!.remotion.props as Record<string, unknown>
+    expect(props).not.toHaveProperty('musicGain')
+    expect(props.musicFile).not.toBe('founders-at-dawn.mp3')
+  })
+})
+

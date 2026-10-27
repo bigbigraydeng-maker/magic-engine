@@ -40,16 +40,18 @@ function propsRecord(value) {
 
 function patchedPropsForMusic(template, props, track) {
   const stagedFile = stagedFileName(track)
+  // musicGain is calibrated for one specific track; a swapped-in track starts from the default gain (1).
+  const { musicGain: _calibratedForOldTrack, ...baseProps } = props
   if (template === 'list') {
-    const itemCount = Array.isArray(props.items) ? props.items.length : 0
+    const itemCount = Array.isArray(baseProps.items) ? baseProps.items.length : 0
     const excerpt = excerptFor(track, itemCount, 0)
-    return { ...props, musicFile: stagedFile, musicStartSec: excerpt.musicStartSec, beats: excerpt.beats }
+    return { ...baseProps, musicFile: stagedFile, musicStartSec: excerpt.musicStartSec, beats: excerpt.beats }
   }
   if (template === 'montage') {
-    const totalBeats = typeof props.totalBeats === 'number' ? props.totalBeats : 0
-    return { ...props, musicFile: stagedFile, beats: beatGrid(track, totalBeats + 1) }
+    const totalBeats = typeof baseProps.totalBeats === 'number' ? baseProps.totalBeats : 0
+    return { ...baseProps, musicFile: stagedFile, beats: beatGrid(track, totalBeats + 1) }
   }
-  return { ...props, musicFile: stagedFile, musicStartSec: 0 }
+  return { ...baseProps, musicFile: stagedFile, musicStartSec: 0 }
 }
 
 function eligibleTrackForBrief(brief, track) {

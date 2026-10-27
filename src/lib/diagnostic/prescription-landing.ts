@@ -6,6 +6,7 @@
  *
  * 顺序别改：
  *   派生 Initiative（目标下的阶段）→ 归档上一版（含它没人动过的旧看板动作）→ 最后才标 approved
+ *   例外：传 requireStatus 时先标 approved（带草稿条件占住）再做前两步，见 landPrescription
  *
  * 2026-10-25：批准不再调用 generateExecutionItems，不往 execution_items 插行。
  * 看板生成失败因此也不会再挡住批准。阶段挂不上仍然不挡住批准。
@@ -144,19 +145,32 @@ export interface LandPrescriptionResult {
 async function updateOneRow(
   supabase: SupabaseClient,
   patch: Record<string, unknown>,
-  where: { id: string; clientId: string },
-): Promise<{ ok: true } | { ok: false; why: string }> {
-  const { data, error } = await supabase
+  where: { id: string; clientId: string; onlyIfStatus?: string },
+): Promise<{ ok: true } | { ok: false; why: string; noMatch?: boolean }> {
+  let query = supabase
     .from('prescriptions')
     .update(patch)
     .eq('id', where.id)
     .eq('client_id', where.clientId)
-    .select('id')
+  // 状态条件写在 UPDATE 本身里：读到写之间状态被别人改了，就一行都命不中。
+  if (where.onlyIfStatus) query = query.eq('status', where.onlyIfStatus)
+  const { data, error } = await query.select('id')
   if (error) return { ok: false, why: error.message }
   // 🔴 命中 0 行也是 error:null —— 不显式检查的话，"什么都没写进去"会被当成成功。
   //    团队记忆里那条「PATCH 匹配 0 行前后都 204，探针分辨不出两种结果」就是这个形状。
-  if (!data || data.length === 0) return { ok: false, why: '没有匹配到这条处方（id 或客户对不上）' }
+  if (!data || data.length === 0) {
+    return { ok: false, why: '没有匹配到这条处方（id 或客户对不上）', noMatch: true }
+  }
   return { ok: true }
+}
+
+/** 标已批准时处方已不是草稿（读到写之间被别人退回/改状态）。路由据 code 返 409。 */
+export class PrescriptionStatusChangedError extends Error {
+  readonly code = 'prescription_status_changed'
+  constructor() {
+    super('处方状态刚刚被改动，已不是草稿，没有同意。请刷新后再看')
+    this.name = 'PrescriptionStatusChangedError'
+  }
 }
 
 /**
@@ -171,10 +185,30 @@ export async function landPrescription(
   supabase: SupabaseClient,
   prescription: LandablePrescription,
   approvedBy?: string,
+  /** 传 'draft' = 第一步先带 status 条件标已批准（占住）；不是草稿则 throw PrescriptionStatusChangedError，不做任何后续写入 */
+  options: { requireStatus?: 'draft' } = {},
 ): Promise<LandPrescriptionResult> {
   const notes: string[] = []
   let initiativesInserted = 0
   let supersededItems = 0
+
+  const markApproved = async () => {
+    const marked = await updateOneRow(
+      supabase,
+      buildPrescriptionDecisionPatch({ status: 'approved', approved_by: approvedBy }),
+      { id: prescription.id, clientId: prescription.client_id, onlyIfStatus: options.requireStatus },
+    )
+    if (!marked.ok && marked.noMatch && options.requireStatus) throw new PrescriptionStatusChangedError()
+    if (!marked.ok) throw new Error(`标记处方已批准失败：${marked.why}`)
+  }
+
+  // 要求草稿时，「仍是草稿」的判断先于所有落地写入：第一步就用带 status 条件的单条
+  // UPDATE 把这份处方占住（标已批准）。命中 0 行 = 已被别人改状态，直接 throw，
+  // 后面的派生阶段 / 归档上一版 / 作废旧待办一概不做。占住之后的步骤都是非致命的
+  // （各自吞错只记 notes），所以不会出现"已批准但落地中途 throw"。
+  // 不传 requireStatus 的调用方保持原顺序：最后才标已批准。
+  const claimFirst = options.requireStatus != null
+  if (claimFirst) await markApproved()
 
   // Initiative 派生失败**不阻塞**落地 —— 沿用原路由的既定行为：
   // 派生只是把方案的阶段挂到目标下，挂不上不代表这份方案不能标成已批准。
@@ -222,12 +256,7 @@ export async function landPrescription(
     }
   }
 
-  const marked = await updateOneRow(
-    supabase,
-    buildPrescriptionDecisionPatch({ status: 'approved', approved_by: approvedBy }),
-    { id: prescription.id, clientId: prescription.client_id },
-  )
-  if (!marked.ok) throw new Error(`标记处方已批准失败：${marked.why}`)
+  if (!claimFirst) await markApproved()
 
   if (approvedBy) notes.push(`批准人：${approvedBy}`)
 

@@ -200,6 +200,7 @@
 | `DAILY_PLAN_AUTO_PUBLISH_CLIENTS` | 🔴 允许自动真发的客户 id 白名单（逗号分隔，小写）。**不在名单里的客户永远只演练**，即使上面的总开关打开了 | Render-web |
 | `FACTORY_WORKER_CLIENT_IDS` | Factory 认领工单的客户白名单。**不是 worker 自己读的** —— worker 调 `/api/factory/worker/claim`，白名单在那条路由里由 `src/lib/factory/worker-guard.ts` 读并 fail-closed（未配则拒绝全部 claim） | Render-web |
 | `PROSPECTING_SWEEP_ENABLED` | 线索挖掘总闸（默认 **关**）。`/api/cron/prospecting-sweep` 路由里读 —— 那是 web 进程，prospecting-sweep 这个 cron 只负责 `curl` | Render-web |
+| `VIRAL_ANALYZER_ENABLED` | 爆款分析 + 爆款发现总闸（默认 **关**，必须严格等于 `true` 才跑）。`/api/cron/viral-analyzer-worker` 和 `/api/cron/viral-discovery-weekly` 里读 —— 都是 web 进程。后台手动按钮不读这个开关 | Render-web |
 | `JOB_SIGNAL_INGEST_ENABLED` / `JOB_SIGNAL_KEYWORDS` | 招聘信号采集开关（默认 **关**）+ 关键词。开关在 `/api/cron/job-boards-weekly` 路由里读，同样是 web 进程 | Render-web |
 | `ATTRIBUTION_DUAL_WINDOW_ENABLED` | 归因双窗口总闸（默认 **关**）。开了之后被转交的动作会同时按 GSC 的 28 天节奏和 pass 1 的窗口各算一次。**在 `src/lib/memory/` 的消费方（extractor / learning-rollup）改成按动作计样本、并且分页读全之前不许开**（那 5 条查询也没分页，光去重不分页等于没修） —— 这是唯一还没改的一类；本 PR 已经把其余读取方（行业基准、三个信心读取、后台聚合页 `/api/admin/flywheel/aggregate`、执行看板 `/api/clients/[id]/execution`）**既改成按动作折叠、也改成分页读全**（只折叠不分页照样错：折叠是在读到的行里挑代表，带目标指标那行被截掉就会挑错代表，那不是少算是算错） —— 现在开会让同一个动作在学习和行业基准里被重复计数（Issue #859）。关着的时候两个写入方还会顺手清掉自己在非权威窗口上的旧行（老版本留下的），因为只拒绝新写入挡不住已经存在的第二个窗口；这一步只在权威窗口真的写进去之后才做，所以还算不出结果的动作会暂时保留那一行，等算得出来那一轮再清。⚠️ 配在 **web service** 上：`attribution-cron` 只是 `curl` 打这个接口，读 env 的是接请求的 web 进程；配到 cron 上开关不会生效，而且是静默不生效 | Render-web |
 | `SOCIAL_COMMENT_AUTOREPLY_KILL` | 社媒评论自动回复紧急关停 | Render-web |

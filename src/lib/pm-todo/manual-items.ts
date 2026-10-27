@@ -48,8 +48,10 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushAdsServicePauseItems } from './ads-service-pause-items'
 import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
+import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
@@ -391,6 +393,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 服务刚暂停的广告系列 —— 拉模式读操作记录，通知事件丢了也照样出现在今日待办
+    (b) => pushAdsServicePauseItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 广告暂停待办生成失败（不阻塞其他待办）:', e),
+    ),
     // Meta 广告账户状态不是正常（欠款 / 被限制）超过 24 小时 —— 账户停摆时不会花钱也不会有新线索，系统里没有别处会说
     (b) => pushAdsAccountStatusItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告账户状态待办生成失败（不阻塞其他待办）:', e),
@@ -398,6 +404,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
     (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 推广计划每日检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushPlanDraftFailureItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 推广计划草稿失败待办生成失败（不阻塞其他待办）:', e),
     ),
     // 广告开投前「追踪与环境就绪」检查：红灯怎么修（开发欠账）+ 检查自己没跑成。读每日函数的回执，不自己现算
     (b) => pushAdsTrackingPreflightItems(supabase, b, nameOf).catch((e) =>

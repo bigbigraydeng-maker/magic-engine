@@ -18,6 +18,9 @@ import {
   PrescriptionReviewActions,
 } from './review-actions'
 import { MANUAL_PRESCRIPTION_AGENT, manualSource } from '@/lib/diagnostic/manual-prescription'
+import { PlanDraftNotice } from './plan-draft-notice'
+import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
+import { pollHuatuoPrescription, type PrescriptionPollSnapshot } from '@/lib/huatuo/poll-prescription'
 
 // DAPE Week 2 W4 — Goal 一对一 + 版本化所需的轻量 row 类型
 interface MinimalGoal {
@@ -140,6 +143,7 @@ export default function NewPrescriptionPage() {
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(initialGoalId)
   const [goalsLoading, setGoalsLoading] = useState(true)
   // 该 Goal 下所有处方版本 (供版本切换 UI)
+  const [refineRound, setRefineRound]     = useState(0)
   const [versionList, setVersionList]   = useState<PrescriptionVersionItem[]>([])
   const [activeVersionId, setActiveVersionId] = useState<string | null>(null)
 
@@ -184,11 +188,26 @@ export default function NewPrescriptionPage() {
   const [elapsedSec, setElapsedSec]     = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const watchRef = useRef(0)
 
-  // 清理定时器
+  // 清理定时器，并停掉还在跑的轮询
   useEffect(() => () => {
+    watchRef.current += 1
     if (pollRef.current) clearInterval(pollRef.current)
     if (elapsedRef.current) clearInterval(elapsedRef.current)
+  }, [])
+
+  const startElapsed = useCallback((fromMs: number) => {
+    const tick = () => setElapsedSec(Math.max(0, Math.floor((Date.now() - fromMs) / 1000)))
+    tick()
+    if (elapsedRef.current) clearInterval(elapsedRef.current)
+    elapsedRef.current = setInterval(tick, 1000)
+  }, [])
+
+  const stopElapsed = useCallback(() => {
+    if (!elapsedRef.current) return
+    clearInterval(elapsedRef.current)
+    elapsedRef.current = null
   }, [])
 
   // 安全网：万一 step=3 但 content 还是 null（缓存/竞态/其他原因），主动重拉一次
@@ -221,7 +240,7 @@ export default function NewPrescriptionPage() {
     return () => { cancelled = true }
   }, [step, content, prescriptionId, clientId])
 
-  // ── 不再用轮询；SSE 流式响应由 readHuatuoStream 处理 ────────────────────
+  // ── 开方在后台跑，页面用短请求轮询处方行，不再拿一条连接干等 ─────────────
 
   // ── Load Zhangqian discovery on mount ─────────────────────────────────────
   useEffect(() => {
@@ -294,6 +313,19 @@ export default function NewPrescriptionPage() {
     })()
   }, [selectedGoalId])
 
+  const acceptReady = useCallback((snapshot: PrescriptionPollSnapshot): boolean => {
+    if (!snapshot.content) return false
+    setContent(snapshot.content)
+    setSelfGrade(snapshot.self_grade)
+    if (snapshot.generation_meta) {
+      setGenMeta(snapshot.generation_meta)
+      if (snapshot.generation_meta.trend_summary) setTrendSummary(snapshot.generation_meta.trend_summary)
+    }
+    setPrescriptionStatus(snapshot.status === 'approved' ? 'approved' : 'draft')
+    setAgentName(snapshot.agent_name ?? 'huatuo')
+    return true
+  }, [])
+
   // ── 加载最近一份草稿处方（防止用户刚生成完刷新页面就丢失结果）─────────────
   // 补充/修订模式不自动恢复草稿 —— 用户是来新建增量/修订版的
   // DAPE W4: 带 selectedGoalId filter, 仅恢复该 Goal 下的最新版
@@ -306,6 +338,7 @@ export default function NewPrescriptionPage() {
   // 同时保留对 draft/generating/failed 的自动恢复 (用户工作中断后回来继续)
   useEffect(() => {
     if (priorMode) return
+    let cancelled = false
     void (async () => {
       try {
         const url = selectedGoalId
@@ -315,6 +348,34 @@ export default function NewPrescriptionPage() {
         if (!res.ok) return
         const data = await res.json() as { prescription?: Prescription }
         const p = data.prescription
+        if (cancelled) return
+        if (p && p.status === 'generating' && !p.content) {
+          setPrescriptionId(p.id)
+          setProgressNote(p.progress_note)
+          setStep(2)
+          setIsGenerating(true)
+          const started = Date.parse(p.generated_at ?? '')
+          startElapsed(Number.isFinite(started) ? started : Date.now())
+          const token = ++watchRef.current
+          const outcome = await pollHuatuoPrescription(clientId, p.id, {
+            mode: 'generate',
+            onProgress: (note) => {
+              if (!cancelled && watchRef.current === token && note) setProgressNote(note)
+            },
+            isCancelled: () => cancelled || watchRef.current !== token,
+          })
+          if (cancelled || watchRef.current !== token) return
+          if (!outcome.ok || !acceptReady(outcome.snapshot)) {
+            setGenerateError(outcome.ok ? '处方写好了但内容是空的，请刷新再看' : outcome.error)
+            setStep(1)
+          } else {
+            setManualSourceFlag(false)
+            setStep(3)
+          }
+          setIsGenerating(false)
+          stopElapsed()
+          return
+        }
         // 🚨 P0 GUARD: approved 处方不自动跳 Step 3 (BUG-FMT-W4-1)
         // approved 是已锁定的处方, 用户来 /prescription/new 是想新建另一版, 不是看已批准的
         // 想看 approved 应去 /dashboard/clients/[id]/execution
@@ -336,11 +397,12 @@ export default function NewPrescriptionPage() {
         setStep(3)
       } catch {/* 找不到草稿就保持表单 */}
     })()
+    return () => { cancelled = true }
     // 跟 selectedGoalId 联动 — 切 Goal 后会自动加载该 Goal 下最新版
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId, selectedGoalId])
 
-  // ── Generate prescription (SSE 流式) ──────────────────────────────────────
+  // ── Generate prescription（先拿到编号，再轮询后台结果）──────────────────
   const handleGenerate = useCallback(async () => {
     const budgetFields = prescriptionBudgetFields(budget, budgetCurrency)
     if (!budgetFields.ok) {
@@ -348,15 +410,11 @@ export default function NewPrescriptionPage() {
       return
     }
 
+    const token = ++watchRef.current
     setIsGenerating(true)
     setGenerateError(null)
     setProgressNote('连接诸葛亮…')
-    const startTime = Date.now()
-    setElapsedSec(0)
-    if (elapsedRef.current) clearInterval(elapsedRef.current)
-    elapsedRef.current = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startTime) / 1000))
-    }, 1000)
+    startElapsed(Date.now())
 
     try {
       const intake: PrescriptionIntake = {
@@ -382,7 +440,6 @@ export default function NewPrescriptionPage() {
         cache:   'no-store',
       })
 
-      // 非 200 = 同步校验阶段就失败（404/422 等），不是流
       if (!res.ok) {
         let errText = `HTTP ${res.status}`
         try {
@@ -392,44 +449,38 @@ export default function NewPrescriptionPage() {
         throw new Error(errText)
       }
 
-      // 流式读取 — 任何错误（包括服务端 SSE error 事件）都通过 onError 上报
-      let streamErr: string | null = null
-      const ok = await readHuatuoStream(res, {
-        onStarted: (id) => setPrescriptionId(id),
-        onProgress: (note) => setProgressNote(note),
-        onDone: (payload) => {
-          setContent(payload.content)
-          setSelfGrade(payload.self_grade ?? null)
-          if (payload.meta) {
-            setGenMeta(payload.meta)
-            if (payload.meta.trend_summary) setTrendSummary(payload.meta.trend_summary)
-            if (payload.trend_summary) setTrendSummary(payload.trend_summary)
-          }
-          setPrescriptionStatus('draft')
-          setAgentName('huatuo')
-          setManualSourceFlag(false)
-          setStep(3)
-        },
-        onError: (err) => { streamErr = err },
-      })
+      const accepted = await res.json() as { prescription_id?: string }
+      if (!accepted.prescription_id) throw new Error('没有拿到处方编号')
+      if (watchRef.current !== token) return
+      setPrescriptionId(accepted.prescription_id)
 
-      if (streamErr) {
-        // 处方生成失败的情况——回到表单
-        setGenerateError(streamErr)
+      const outcome = await pollHuatuoPrescription(clientId, accepted.prescription_id, {
+        mode: 'generate',
+        onProgress: (note) => {
+          if (watchRef.current === token && note) setProgressNote(note)
+        },
+        isCancelled: () => watchRef.current !== token,
+      })
+      if (watchRef.current !== token) return
+      if (!outcome.ok || !acceptReady(outcome.snapshot)) {
+        setGenerateError(outcome.ok ? '处方写好了但内容是空的，请刷新再看' : (outcome.error || '处方生成失败'))
         setStep(1)
-      } else if (!ok) {
-        setGenerateError('诸葛亮流意外关闭，请刷新页面查看处方状态')
-        setStep(1)
+        return
       }
+      setManualSourceFlag(false)
+      setStep(3)
     } catch (e) {
+      if (watchRef.current !== token) return
       setGenerateError(e instanceof Error ? e.message : '处方生成失败')
       setStep(1)
     } finally {
-      setIsGenerating(false)
-      setProgressNote(null)
-      if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null }
+      if (watchRef.current === token) {
+        setIsGenerating(false)
+        setProgressNote(null)
+        stopElapsed()
+      }
     }
-  }, [businessGoal, urgency, budget, budgetCurrency, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId])
+  }, [businessGoal, urgency, budget, budgetCurrency, priorityDims, notes, discoveryId, clientId, priorMode, priorId, selectedGoalId, startElapsed, stopElapsed, acceptReady])
 
   // ── Approve prescription ──────────────────────────────────────────────────
   const handleApprove = async () => {
@@ -471,17 +522,13 @@ export default function NewPrescriptionPage() {
    */
   const handleRefine = async (): Promise<boolean> => {
     if (!prescriptionId) return false
+    const token = ++watchRef.current
     setIsRefining(true)
     setRefineError(null)
     setRefineBanner(null)
     setProgressNote('连接诸葛亮…')
     const prevOverall = selfGrade?.overall ?? null
-    const startTime = Date.now()
-    setElapsedSec(0)
-    if (elapsedRef.current) clearInterval(elapsedRef.current)
-    elapsedRef.current = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startTime) / 1000))
-    }, 1000)
+    startElapsed(Date.now())
 
     let succeeded = false
     try {
@@ -506,53 +553,43 @@ export default function NewPrescriptionPage() {
         } catch {/* */}
         throw new Error(errText)
       }
+      if (watchRef.current !== token) return false
 
-      // 用对象包裹避免 TS 闭包内变异的 never 收窄问题
-      const captured: { streamErr: string | null; newOverall: number | null } = {
-        streamErr: null,
-        newOverall: null,
-      }
-      const ok = await readHuatuoStream(res, {
-        onStarted: () => {/* prescriptionId 已知，不更新 */},
-        onProgress: (note) => setProgressNote(note),
-        onDone: (payload) => {
-          setContent(payload.content)
-          setSelfGrade(payload.self_grade ?? null)
-          captured.newOverall = payload.self_grade?.overall ?? null
-          if (payload.meta) {
-            setGenMeta(payload.meta)
-            if (payload.meta.trend_summary) setTrendSummary(payload.meta.trend_summary)
-            if (payload.trend_summary) setTrendSummary(payload.trend_summary)
-          }
-          setPrescriptionStatus('draft')
+      const outcome = await pollHuatuoPrescription(clientId, prescriptionId, {
+        mode: 'refine',
+        onProgress: (note) => {
+          if (watchRef.current === token && note) setProgressNote(note)
         },
-        onError: (err) => { captured.streamErr = err },
+        isCancelled: () => watchRef.current !== token,
       })
-
-      if (captured.streamErr) {
-        setRefineError(captured.streamErr)
-        setRefineBanner({ kind: 'error', text: captured.streamErr })
-      } else if (!ok) {
-        const msg = '诸葛亮流意外关闭 — 处方可能已在后台更新，请刷新页面查看'
+      if (watchRef.current !== token) return false
+      if (!outcome.ok || !acceptReady(outcome.snapshot)) {
+        const msg = outcome.ok
+          ? '精修没有写回内容，请刷新再看'
+          : (outcome.error || '精修失败')
         setRefineError(msg)
         setRefineBanner({ kind: 'error', text: msg })
-      } else {
-        succeeded = true
-        const nv = captured.newOverall
-        const delta = prevOverall != null && nv != null
-          ? `评分 ${prevOverall.toFixed(1)} → ${nv.toFixed(1)}`
-          : (nv != null ? `当前评分 ${nv.toFixed(1)}/10` : '处方已更新')
-        setRefineBanner({ kind: 'success', text: `✓ 精修完成 — ${delta}` })
-        setHumanComments('')   // 成功后清空意见框
+        return false
       }
+      succeeded = true
+      setRefineRound(n => n + 1)
+      const nv = outcome.snapshot.self_grade?.overall ?? null
+      const delta = prevOverall != null && nv != null
+        ? `评分 ${prevOverall.toFixed(1)} → ${nv.toFixed(1)}`
+        : (nv != null ? `当前评分 ${nv.toFixed(1)}/10` : '处方已更新')
+      setRefineBanner({ kind: 'success', text: `✓ 精修完成 — ${delta}` })
+      setHumanComments('')
     } catch (e) {
+      if (watchRef.current !== token) return false
       const msg = e instanceof Error ? e.message : '精修失败'
       setRefineError(msg)
       setRefineBanner({ kind: 'error', text: msg })
     } finally {
-      setIsRefining(false)
-      setProgressNote(null)
-      if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null }
+      if (watchRef.current === token) {
+        setIsRefining(false)
+        setProgressNote(null)
+        stopElapsed()
+      }
     }
     return succeeded
   }
@@ -837,7 +874,7 @@ export default function NewPrescriptionPage() {
             </p>
             <p className="text-xs text-gray-400 tabular-nums">
               已用时 {Math.floor(elapsedSec / 60)}:{String(elapsedSec % 60).padStart(2, '0')}
-              {' · '}通常 60–150 秒
+              {' · '}通常 60–150 秒。写好后会自动显示，刷新也能在草稿里看到。
             </p>
             {generateError && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -952,6 +989,8 @@ export default function NewPrescriptionPage() {
               </div>
             )}
 
+            <PlanSeedPanel clientId={clientId} prescriptionId={prescriptionId} />
+
             {/* Phases — DAPE W4: 动态 N 阶段, 每阶段对应 1 个派生 Initiative */}
             {content.phases.map(phase => (
               <div key={phase.phase_number} className="bg-white rounded-xl border border-gray-200 p-5">
@@ -1059,7 +1098,8 @@ export default function NewPrescriptionPage() {
                 </Link>
               </div>
             ) : (
-              <div className="pt-2 pb-20 lg:pb-2">
+              <div className="pt-2 pb-20 lg:pb-2 space-y-3">
+                {prescriptionId && <PlanDraftNotice clientId={clientId} prescriptionId={prescriptionId} refineRound={refineRound} />}
                 <PrescriptionReviewActions
                   onApprove={() => void handleApprove()}
                   onReject={() => void handleReject()}
@@ -1111,102 +1151,6 @@ export default function NewPrescriptionPage() {
       )}
     </div>
   )
-}
-
-// ---------------------------------------------------------------------------
-// SSE 流式响应读取器（华佗 P8.10.S3）
-// ---------------------------------------------------------------------------
-
-interface HuatuoStreamHandlers {
-  onStarted?: (prescriptionId: string) => void
-  onProgress?: (note: string) => void
-  onDone: (payload: {
-    prescription_id: string
-    content: PrescriptionContent
-    self_grade?: SelfGrade
-    meta?: HuatuoGenerationMeta & { trend_summary?: TrendSummaryLite }
-    trend_summary?: TrendSummaryLite
-  }) => void
-  onError: (error: string) => void
-}
-
-/**
- * 读取华佗 SSE 流。返回 true=完成 false=流意外关闭未收到 done。
- *
- * 事件格式（每条 SSE）：
- *   data: {"type":"started","prescription_id":"..."}
- *   data: {"type":"progress","note":"..."}
- *   data: {"type":"done","content":...,"self_grade":...,...}
- *   data: {"type":"error","error":"..."}
- *
- * 心跳行（: heartbeat）会被忽略。
- */
-async function readHuatuoStream(res: Response, handlers: HuatuoStreamHandlers): Promise<boolean> {
-  const reader = res.body?.getReader()
-  if (!reader) return false
-
-  const decoder = new TextDecoder('utf-8')
-  let buffer = ''
-  let sawDoneOrError = false
-  let streamError: string | null = null   // 把 error 事件存起来，结束后再上报
-
-  outer: while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-
-    // SSE 事件以 \n\n 分隔
-    let sepIdx: number
-    while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
-      const rawEvent = buffer.slice(0, sepIdx)
-      buffer = buffer.slice(sepIdx + 2)
-
-      // 解析每行
-      const lines = rawEvent.split('\n')
-      let dataPayload: string | null = null
-      for (const line of lines) {
-        if (line.startsWith(':')) continue          // comment / heartbeat
-        if (line.startsWith('data:')) {
-          dataPayload = line.slice(5).trimStart()
-        }
-      }
-      if (!dataPayload) continue
-
-      // JSON.parse 失败时仅记日志、跳过——绝不影响 handler 调用
-      let parsed: { type: string } & Record<string, unknown>
-      try {
-        parsed = JSON.parse(dataPayload) as { type: string } & Record<string, unknown>
-      } catch (err) {
-        console.warn('[huatuo stream] bad event JSON', dataPayload, err)
-        continue
-      }
-
-      // Handler 调用在 try/catch 外，避免吞掉 handler 内部抛出
-      switch (parsed.type) {
-        case 'started':
-          handlers.onStarted?.(parsed.prescription_id as string)
-          break
-        case 'progress':
-          handlers.onProgress?.((parsed.note as string) ?? '')
-          break
-        case 'done':
-          sawDoneOrError = true
-          handlers.onDone(parsed as unknown as Parameters<HuatuoStreamHandlers['onDone']>[0])
-          break
-        case 'error':
-          sawDoneOrError = true
-          streamError = (parsed.error as string) ?? '未知错误'
-          break outer  // 立即跳出所有循环
-      }
-    }
-  }
-
-  // 流结束后再上报错误（避免在循环中 throw 影响后续清理）
-  if (streamError) {
-    handlers.onError(streamError)
-    return false
-  }
-  return sawDoneOrError
 }
 
 // ---------------------------------------------------------------------------

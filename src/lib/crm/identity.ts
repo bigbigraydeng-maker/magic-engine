@@ -18,6 +18,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { assignNewContact } from '@/lib/crm/lead-assignee'
 import {
   firstTouchColumns,
   isAttributed,
@@ -114,6 +115,13 @@ export interface ResolveInput {
   source?: string
   /** 这次接触的时间；用于维护 last_seen_at。 */
   seenAt?: string
+  /**
+   * 新建客人时按轮流规则自动分给跟进人（默认不分）。
+   * 只有「客人主动找上门」的渠道打开：Meta 表单 / 官网表单 / 邮件 / WhatsApp。
+   * 手工录入、外呼这类「员工自己发起」的不开——那是员工自己的客人。
+   * 只对**新建**生效，命中已有客人不动他原来的跟进人。
+   */
+  autoAssign?: boolean
   /**
    * 这批身份同时命中两个已存在的人时怎么办。
    *
@@ -223,6 +231,10 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
     if (error || !data) throw new Error(`建 contact 失败: ${error?.message}`)
     contactId = data.id as string
     created = true
+    // 分配失败不抛、不挡建人（见 assignNewContact）。
+    if (input.autoAssign) {
+      await assignNewContact({ clientId, contactId, supabase: supabaseAdmin })
+    }
   } else {
     // 多个命中 = 之前被拆成了两个人，现在有证据说明是同一个。选最早的做主体。
     // 但「有证据」只对渠道适配器成立（同一次表单提交里的电话+邮箱）。手工录入

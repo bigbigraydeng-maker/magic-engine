@@ -1,8 +1,9 @@
 /**
  * Round-robin lead assignee picker.
  *
- * 用在哪：`meta-lead.ts` 新建 contact 时调一次，拿到该跟进人的登录邮箱
- * 填到 `contacts.assigned_to`。将来对外表单、WhatsApp 新客人也走同一个库。
+ * 用在哪：`resolveContact`（`identity.ts`）新建客人、且调用方打开了 `autoAssign` 时，
+ * 通过 `assignNewContact` 调一次，拿到该跟进人的登录邮箱填到 `contacts.assigned_to`。
+ * 目前 Meta 表单、官网表单、邮件、WhatsApp 四个渠道打开。
  *
  * 怎么 round-robin：
  *   - 从 `client_portal_users` 查这个客户下所有 `receives_round_robin_leads=true`
@@ -30,6 +31,8 @@ export interface AssigneeRow {
 
 export interface PickAssigneeOptions {
   clientId: string
+  /** 测试用：固定「现在」，窗口起点据此算。默认当前时间。 */
+  now?: Date
   /** 可注入 supabase 以便单测。 */
   supabase: Pick<SupabaseClient, 'from'>
 }
@@ -50,9 +53,21 @@ export async function listAssignees(opts: PickAssigneeOptions): Promise<Assignee
   return (data ?? []) as AssigneeRow[]
 }
 
+/** 「谁手上少」只数最近这么多天新进来的客人，历史库存不算（见 countHeldLeads）。 */
+export const HELD_WINDOW_DAYS = 30
+
 /**
- * 查每个候选人当前持有多少线索。返回 Map<email, count>。
- * 没有行的候选人以 0 返回（Supabase 的 count-group-by 用 head:true 省流量）。
+ * 查每个候选人**最近 HELD_WINDOW_DAYS 天新进来**的客人里，各被分到多少位。返回 Map<email, count>。
+ *
+ * 🔴 只数最近新进来的（`first_seen_at` 在窗口内），**不数历史库存**：
+ *    2026-10-27 把 1165 位老客人一次性回填给了 Lisa。如果把名下全部客人都算进去，
+ *    Baker 一加进名单就会被连续分到所有新客人，直到追平 1166 位；而那 1166 位里绝大多数是几个月前的老客人。
+ *    「公平」该比的是新线索的分摊，不是谁继承了多少历史。
+ *
+ * 🔴 每个候选人**单独数一次**（`count: 'exact', head: true`，只回计数不回行）：
+ *    Supabase 一次最多回 1000 行，把整批已分配的客人拉回来再在客户端数，
+ *    持有数一过 1000 就被截断，「谁手上少给谁」会悄悄偏掉（claude[bot] 复核 PR #3251）。
+ *    候选名单通常只有 2–5 人，并行 N 次计数很轻。
  */
 export async function countHeldLeads(
   opts: PickAssigneeOptions,
@@ -62,20 +77,20 @@ export async function countHeldLeads(
   for (const email of emails) counts.set(email, 0)
   if (emails.length === 0) return counts
 
-  // 一次性查该客户下 assigned_to 命中候选名单的 contacts，group by 邮箱。
-  // Supabase JS 不直接支持 GROUP BY，这里用 select + 客户端聚合；候选名单
-  // 通常只有 2–5 人，contacts 行数也可控。真要撑规模再换 RPC。
-  const { data, error } = await opts.supabase
-    .from('contacts')
-    .select('assigned_to')
-    .eq('client_id', opts.clientId)
-    .in('assigned_to', emails)
-
-  if (error) throw new Error(`countHeldLeads: ${error.message}`)
-  for (const row of (data ?? []) as Array<{ assigned_to: string | null }>) {
-    if (!row.assigned_to) continue
-    counts.set(row.assigned_to, (counts.get(row.assigned_to) ?? 0) + 1)
-  }
+  const since = new Date((opts.now ?? new Date()).getTime() - HELD_WINDOW_DAYS * 86_400_000).toISOString()
+  const results = await Promise.all(
+    emails.map(async (email) => {
+      const { count, error } = await opts.supabase
+        .from('contacts')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', opts.clientId)
+        .gte('first_seen_at', since)
+        .eq('assigned_to', email)
+      if (error) throw new Error(`countHeldLeads: ${error.message}`)
+      return [email, count ?? 0] as const
+    }),
+  )
+  for (const [email, n] of results) counts.set(email, n)
   return counts
 }
 
@@ -98,4 +113,43 @@ export async function pickAssignee(opts: PickAssigneeOptions): Promise<string | 
     return a < b ? -1 : a > b ? 1 : 0
   })
   return sorted[0]
+}
+
+/**
+ * 新建客人后，按轮流规则分给一位跟进人。
+ *
+ * 各渠道（Meta 表单 / 官网表单 / 邮件 / WhatsApp）建人时都走 `resolveContact`，
+ * 它在「新建」那一刻、且调用方打开了 `autoAssign` 时调这里。放在这一处，
+ * 新增渠道只需要多传一个开关，不必每处各抄一份分配逻辑。
+ *
+ * 🔴 **永远不抛错**：分配失败不能挡住建人和后面的触点、邮件名单——入库优先，
+ *    没分上的人在「未分配」里等人认领，或以后回填。
+ * 🔴 **只补空**：`.is('assigned_to', null)`，不会覆盖员工已经手动设的人。
+ * 候选名单为空（这个客户没人开「接新线索」）→ 什么都不做，返回 null。
+ */
+export async function assignNewContact(opts: {
+  clientId: string
+  contactId: string
+  supabase: Pick<SupabaseClient, 'from'>
+}): Promise<string | null> {
+  try {
+    const assignee = await pickAssignee({ clientId: opts.clientId, supabase: opts.supabase })
+    if (!assignee) return null
+    const { error } = await opts.supabase
+      .from('contacts')
+      .update({ assigned_to: assignee })
+      .eq('id', opts.contactId)
+      .eq('client_id', opts.clientId)
+      .is('assigned_to', null)
+    if (error) {
+      console.warn(`[assign-new-contact] 写入失败 contact=${opts.contactId}: ${String(error.message).slice(0, 120)}`)
+      return null
+    }
+    return assignee
+  } catch (err) {
+    console.warn(
+      `[assign-new-contact] 分配失败 contact=${opts.contactId}: ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
+    )
+    return null
+  }
 }

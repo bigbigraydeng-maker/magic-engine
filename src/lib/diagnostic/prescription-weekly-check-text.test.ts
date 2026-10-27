@@ -111,6 +111,19 @@ describe('describePrescriptionCheck', () => {
     expect(text.suggestion).not.toContain('已批准一份新')
   })
 
+  it('挂了目标但阶段没读到时，说读不到，不说没有阶段', () => {
+    const text = describePrescriptionCheck(facts({
+      initiativesKnown: false,
+      initiativeCount: 0,
+      goalActions: null,
+      campaigns: null,
+    }))
+    expect(text.progress).toContain('目标下的阶段这周没读出来，不把没读到当成没有。')
+    expect(text.progress).not.toContain('0 条阶段')
+    expect(text.progress).not.toContain('这些阶段上还没有待办')
+    expect(text.suggestion).not.toContain('目标下还没有阶段')
+  })
+
   it('没有目标时，不拿全部工单来凑', () => {
     const text = describePrescriptionCheck(facts({
       goalTitle: null,

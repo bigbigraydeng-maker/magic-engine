@@ -24,6 +24,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
+// 默认夹具 = 切换日(2026-10-23)之前批准的旧版清单；不写死时间的话，过了切换日这些用例会被当成「必须第三版」而失败
+const LEGACY_APPROVED_AT = '2026-10-20T00:00:00.000Z'
+
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockPublish = vi.mocked(facebookReelAdapter.publish)
 const mockFindExisting = vi.mocked(facebookReelAdapter.findExisting)
@@ -45,6 +48,10 @@ interface Scenario {
   anchorWriteError?: boolean
   /** brief.remotion.deliverable 取值;'asset_only' = 素材,绝不可发布 */
   deliverable?: string
+  /** review_ref.checklist_version(防降级用例:带 v3 版本号但清单是旧的) */
+  checklistVersion?: string
+  /** review_ref.approved_at(切换日用例) */
+  approvedAt?: string
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
@@ -78,7 +85,7 @@ function installMocks(s: Scenario) {
                 master_brief_id: 'mb-1',
                 publish_attempts: 0,
               published_ref: s.interrupted ? { provisional: true, video_id: 'v1' } : null,
-                review_ref: s.checklistReady === false ? {} : { checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
+                review_ref: s.checklistReady === false ? {} : { ...(s.checklistVersion === undefined ? {} : { checklist_version: s.checklistVersion }), approved_at: s.approvedAt ?? LEGACY_APPROVED_AT, checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
                   key, judge: 'HUMAN', outcome: 'PASS', detail: null,
                   source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
                 })) },
@@ -219,6 +226,29 @@ describe('发布正文红线闸', () => {
     installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, deliverable: 'asset-only' })
     await run()
 
+    expect(mockPublish).toHaveBeenCalled()
+  })
+
+  it('🔴 防降级:带 v3 版本号的批准回执缺「单独看得懂」一项 → 不发布，置终态', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, checklistVersion: 'v3' })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('approval_checklist_incomplete')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 切换日之后批准但没有版本号的（旧形状）回执 → 不发布；切换日之前批准的旧回执照常发布', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, approvedAt: '2026-10-23T00:00:01.000Z' })
+    const late = await run()
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(late.detail).toBe('approval_checklist_incomplete')
+
+    vi.clearAllMocks()
+    mockFindExisting.mockResolvedValue(null)
+    mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1' } as never)
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, approvedAt: '2026-10-22T23:59:59.000Z' })
+    await run()
     expect(mockPublish).toHaveBeenCalled()
   })
 

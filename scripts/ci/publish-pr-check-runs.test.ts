@@ -75,6 +75,11 @@ describe('the light workflow still emits the legacy check names', () => {
     }
   })
 
+  it('runs the huatuo suite and records its outcome', () => {
+    expect(WORKFLOW).toContain('npx vitest run src/lib/huatuo')
+    expect(WORKFLOW).toContain('name: huatuo-tests')
+  })
+
   it('does not run the whole-repo type check or the production build', () => {
     expect(WORKFLOW).not.toContain('npm run type-check')
     expect(WORKFLOW).not.toContain('npm run build')

@@ -157,6 +157,90 @@ describe('AutonomySettings · 每个广告账户各自的日上限', () => {
   })
 })
 
+describe('AutonomySettings · 在广告健康页显示', () => {
+  const listed = {
+    accounts: [
+      { ad_account_id: 'act_111', daily_budget_cap_cents: 4000, hidden_from_ad_health: false },
+      { ad_account_id: 'act_222', daily_budget_cap_cents: null, hidden_from_ad_health: true },
+    ],
+    client_total_cap_cents: 15000,
+  }
+
+  function stub(visibility: (url: string) => Response | Promise<Response>) {
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/labels')) return Response.json({ labels: {} })
+      if (url.endsWith('/visibility') && init?.method === 'PATCH') return visibility(url)
+      if (url.endsWith('/ad-accounts')) return Response.json(listed)
+      return Response.json({ success: true, config })
+    })
+    vi.stubGlobal('fetch', fn)
+    return fn
+  }
+
+  const switches = () => screen.getAllByRole('switch', { name: '在广告健康页显示' })
+
+  it('藏起来的账户开关是关的，正在显示的是开的', async () => {
+    stub(() => Response.json({ hidden_from_ad_health: false }))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(switches()).toHaveLength(2))
+    expect(switches()[0]).toHaveAttribute('aria-checked', 'true')
+    expect(switches()[1]).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByText(/超支提醒也不会盯着它/)).toBeTruthy()
+  })
+
+  it('打开开关先亮起，再以接口返回为准', async () => {
+    let release: (value: Response) => void = () => {}
+    const pending = new Promise<Response>(resolve => { release = resolve })
+    const fn = stub(() => pending)
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(switches()[1]).toHaveAttribute('aria-checked', 'false'))
+    fireEvent.click(switches()[1])
+    await waitFor(() => expect(switches()[1]).toHaveAttribute('aria-checked', 'true'))
+    const call = fn.mock.calls.find(c => String(c[0]).includes('/ad-accounts/act_222/visibility'))
+    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({ hidden_from_ad_health: false })
+    release(Response.json({ hidden_from_ad_health: true }))
+    await waitFor(() => expect(switches()[1]).toHaveAttribute('aria-checked', 'false'))
+  })
+
+  it('🔴 关掉显示要二次确认：点取消不发请求、开关不变；确认才发；打开方向不拦', async () => {
+    const confirmSpy = vi.fn<typeof window.confirm>(() => false)
+    vi.stubGlobal('confirm', confirmSpy)
+    const fn = stub(() => Response.json({ hidden_from_ad_health: true }))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(switches()).toHaveLength(2))
+    fireEvent.click(switches()[0])
+    expect(String(confirmSpy.mock.calls[0]?.[0] ?? '')).toContain('整户跳过心跳')
+    expect(String(confirmSpy.mock.calls[0]?.[0] ?? '')).toContain('超支提醒不会响')
+    expect(fn.mock.calls.some(c => String(c[0]).endsWith('/visibility'))).toBe(false)
+    expect(switches()[0]).toHaveAttribute('aria-checked', 'true')
+    confirmSpy.mockReturnValue(true)
+    fireEvent.click(switches()[0])
+    await waitFor(() => expect(switches()[0]).toHaveAttribute('aria-checked', 'false'))
+    expect(fn.mock.calls.some(c => String(c[0]).endsWith('/visibility'))).toBe(true)
+    // 打开方向（act_222 当前是隐藏的）不问
+    confirmSpy.mockClear()
+    fireEvent.click(switches()[1])
+    expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it('开关下的灰字说明生效时间', async () => {
+    stub(() => Response.json({ hidden_from_ad_health: false }))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(switches()).toHaveLength(2))
+    expect(screen.getByText(/下一次心跳 \/ 明早体检起生效/)).toBeTruthy()
+  })
+
+  it('接口拒绝时开关弹回去，原文显示错误', async () => {
+    const backendError = '这个客户没有绑定账户 act_222'
+    stub(() => Response.json({ error: backendError }, { status: 400 }))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(switches()[1]).toHaveAttribute('aria-checked', 'false'))
+    fireEvent.click(switches()[1])
+    await waitFor(() => expect(screen.getByText(backendError)).toBeTruthy())
+    expect(switches()[1]).toHaveAttribute('aria-checked', 'false')
+  })
+})
+
 describe('AutonomySettings', () => {
   it('shows plain-language labels, dollars instead of cents, and video names', async () => {
     stubFetch()
