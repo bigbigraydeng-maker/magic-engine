@@ -222,7 +222,11 @@ export async function runFailover<T>(args: RunFailoverArgs<T>): Promise<Failover
         return { data: outcome.data, provider: provider.provider, model: provider.model, attempts }
       }
 
-      if (outcome.rethrow === true) {
+      // 🔴 只有**第一家**活跃的供应商说「请求写错了」才立即抛。备用家返回 400 更可能是
+      //    适配器跟它不兼容（2026-10-26 DeepSeek 就因为提示词里没有 "json" 这个词对每条请求 400），
+      //    不是调用方的 bug —— 为此放弃剩下的家等于把一个适配器缺陷升级成全线停摆。
+      //    主力先拒绝的话，说明请求本身就有问题，不会走到备用家。
+      if (outcome.rethrow === true && i === 0) {
         // 请求本身有误：换供应商只会为同一个 bug 花钱，立即抛出原始错误。
         throw outcome.err
       }

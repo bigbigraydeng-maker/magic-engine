@@ -173,3 +173,51 @@ OpenAI 在同样对话上 3/3 全中文，耗时 3–4 秒。结论：
 - 真实对比：8 段真实 CTS 邮件对话，OpenAI 与 Claude 各答一遍（见 4.6）。**Claude 的强制工具调用路径在生产格式上真的通了。**
 - 没做：没有用「无效钥匙」去触发真实的 OpenAI 断电 —— `openai-client.ts` 的拦截点会把它写进生产
   `provider_outages` 并触发 PM 待办，一次试验会造出一条假断电。OpenAI 失败用注入的假错误模拟，Claude 用真调用。
+
+## 10. 刀 2 的真实证据（2026-10-26）
+
+**走真实 `generateDueBriefs`、带 20 秒真实候选预算**，在网络层把 OpenAI 拦截成「余额用光」（HTTP 429
+insufficient_quota），往 `provider_outages` 和 `conversation_briefs` 的写入也拦下来记录
+（既不往生产库写假数据，也不在断电台账里造假断电；那就是「本该写进库的那一行」），其余全部真调用：
+
+| 渠道 | 候选 | 结果 | 耗时 | OpenAI 被打次数 | 落库的 model |
+|---|---|---|---|---|---|
+| 邮件 | 3 | generated 3 / failed 0 / aborted null | 23 秒 | **1** | `claude-haiku-4-5-20251001` |
+| 私信 | 3 | generated 3 / failed 0 / aborted null | 18 秒 | **1** | `claude-haiku-4-5-20251001` |
+
+- **OpenAI 只被打了 1 次**（3 条候选）：第一条失败后冷却生效，后面直接走 Claude；`maxRetries: 0` 也生效
+  （不关的话同一条会被 SDK 重试 3 次）。
+- 台账里本该多一行 `openai / account_exhausted`，一行，不是三行。
+- 6 张卡的一句话和下一步全是中文；`model` 如实记的是答题的 Claude，不是凭环境变量猜的 `gpt-4o-mini`。
+- 第一轮选样本时我挑了 2 条没存消息的私信（`last_message_at` 为空，生产挑人逻辑本来就不会选它们），
+  结果 5 条候选只出 3 张。是我选样本的错，不是切换层的问题，换成有消息的私信后补验了一遍。
+
+### 单测与变异
+
+- 第二刀新增：`brief-failover`（10）、`brief-cycle-failover`（9）、`brief-schema-strict`（12）、`provider-outage-backup`（11）。
+- 变异 20 组全部抓到（含 DeepSeek 修复的 4 组）。其中一个漏过：「Claude 钥匙不认也指向充值页」—— 我的断言只验了域名是 anthropic.com，
+  而钥匙页和充值页都是这个域名；加严成分别断言 `/keys` 和 `/billing` 后才抓到。
+
+### 没做 / 已知
+
+- 降级提示并进了「该充值了」那条待办，没有另起一条（PM 9-26 定过：告知挪周报、待办只留需要动手的）。
+  代价：如果当天那条提醒因为提醒节奏被压住，降级张数也不会出现。
+- `BRIEFS_PER_CHUNK = 12` 没改。切到 Claude 后每张 6~8 秒，12 张贴着 90 秒的段预算，由预算闸提前收段，
+  只是切换期间每段少写一两张。注释已更新。
+### DeepSeek：单测全绿，真实调用却 5/5 全败 —— 这是整件事里最值得记住的一条
+
+PM 10-26 点头开了 DeepSeek 之后，我拿 5 段真实 CTS 邮件对话让它**单独**回答（严格格式校验 + 语言闸）：
+**5 条请求 5 条 HTTP 400**。单测里的假客户端永远不会 400，所以 46 条测试一直是绿的。
+
+根因（直接问 DeepSeek 拿到的原文：`Prompt must contain the word 'json' in some form to use 'response_format' of type 'json_object'`）：
+
+1. `json_object` 模式要求提示词里**必须出现 "json" 这个词**，否则一律 400；
+2. 它只保证返回合法 JSON，**不认识我们的格式**（第二条探测请求它自己编了一个结构）——
+   OpenAI / Claude 靠 API 参数拿格式，DeepSeek 只能靠提示词，所以必须把 schema 原文写进提示词。
+
+修完后同样 5 条（加到 6 条）：**6/6 通过严格格式 + 语言闸，平均 3.6 秒**（跟 OpenAI 一样快）。
+
+**连带暴露的设计问题**：这个 400 会被判成 `request_invalid`（调用方写错了）→ 立即抛出、不再试后面的家。
+但**备用家**的 400 更可能是适配器跟它不兼容，不是调用方的错 —— 为此放弃剩下的家，
+等于把一个适配器缺陷升级成全线停摆。改成：只有**第一家活跃的**供应商返回 `request_invalid` 才立即抛；
+备用家的记下来、继续试下一家（也不进冷却：不是账户问题）。

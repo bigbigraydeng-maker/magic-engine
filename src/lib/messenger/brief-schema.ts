@@ -111,6 +111,52 @@ export const MessengerBriefSchema = z.object({
 
 export type MessengerBrief = z.infer<typeof MessengerBriefSchema>
 
+/**
+ * 校验用的**严格版**：跟上面那份字段一一对应，但**没有任何 `.default()`**，并加上语言闸。
+ *
+ * 为什么要两份（子牙审查 2026-10-26）：宽松版的 8 个字段带默认值，而发给模型的 JSON schema
+ * 是全字段必填。备用模型（DeepSeek 的 json_object 模式只保证是合法 JSON）只答
+ * summary / intent_level / draft_reply 三个字段也能过宽松版，其余被默认值悄悄填成空 ——
+ * 一张「摘要有、需求承诺风险全空」的卡会被当成功写进库，而 promises_made 恰恰是卡上
+ * 最该被看见的字段。严格版把「缺字段」变成 schema_invalid，让切换层去重试或换家。
+ *
+ * 语言闸只设两条，且都用现有数据量过：805 张 OpenAI 写的卡里 next_action 缺汉字 0 张、
+ * draft_reply 夹汉字 0 张，所以对主力零误杀。**不对 summary 设汉字闸**：同一批里有 40 张
+ * (5%) summary 没有汉字，设了会误杀主力的合法输出。
+ * 这道闸的来由：同样的提示词，Claude 在 8 张真实邮件卡里只有 5 张把一句话/下一步写成中文。
+ */
+const HAN = /[\u4e00-\u9fff]/
+export const hasHan = (text: string): boolean => HAN.test(text)
+
+const ContactStrictSchema = z.object({ phone: z.string().nullable(), email: z.string().nullable() })
+
+const TripDetailsStrictSchema = z.object({
+  tour_interest: z.string().nullable(),
+  travel_window: z.string().nullable(),
+  party_size: z.number().int().positive().nullable(),
+  departure_city: z.string().nullable(),
+  first_time_to_china: z.boolean().nullable(),
+  budget_signal: z.string().nullable(),
+})
+
+export const MessengerBriefStrictSchema = z.object({
+  // 空壳卡不合法：summary 去空白后必须有内容
+  summary: z.string().trim().min(1, 'summary 不能为空'),
+  intent_level: z.enum(INTENT_LEVELS),
+  customer_needs: z.array(z.string()),
+  objections: z.array(z.string()),
+  promises_made: z.array(z.string()),
+  next_action: z
+    .string()
+    .nullable()
+    .refine((v) => v === null || v.trim() === '' || hasHan(v), 'next_action 必须是中文（员工看的是中文界面）'),
+  follow_up_due_at: z.string().nullable(),
+  risk_flags: z.array(z.string()),
+  trip: TripDetailsStrictSchema,
+  contact: ContactStrictSchema,
+  draft_reply: z.string().refine((v) => !hasHan(v), 'draft_reply 必须是英文（它会发给新西兰客人）'),
+})
+
 /** JSON schema for the structured-output call. Mirrors MessengerBriefSchema exactly. */
 export const MESSENGER_BRIEF_JSON_SCHEMA = {
   type: 'object',

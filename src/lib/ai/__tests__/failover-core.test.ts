@@ -293,6 +293,33 @@ describe('runFailover', () => {
   //    吃掉了多少预算」在测试里根本不存在 —— 把「按剩余家数切预算」整个删掉，
   //    20 条测试照样全绿，而生产里时钟会走，第一家会把整个预算吃光、第二家连发请求
   //    的机会都没有。变异测试逮出来的（魏征审查指出的 P0 正是这一条）。
+  it('🔴 备用家返回 request_invalid（多半是适配器不兼容）→ 记下，但继续试下一家，不能立即抛', async () => {
+    // 2026-10-26 真实试跑：DeepSeek 因提示词里没有 "json" 这个词对每条请求 400。
+    // 如果备用家的 400 也立即抛，一个适配器缺陷就会把剩下的家全部放弃。
+    const first = makeProvider('openai', 'gpt-4o', async () => { throw new Error('account_exhausted') })
+    const second = makeProvider('anthropic', 'claude', async () => { throw new Error('request_invalid') })
+    const third = makeProvider('deepseek', 'ds', async () => ({ ok: 3 }))
+    const result = await runFailover({
+      providers: [first, second, third],
+      validate: acceptAll,
+      classifyError: classifyByMessage,
+      totalBudgetMs: 1000,
+      now: () => Date.now(),
+      state: createFailoverState(),
+    })
+    expect(result.provider).toBe('deepseek')
+    expect(third.call).toHaveBeenCalledTimes(1)
+  })
+
+  it('备用家 request_invalid 不进冷却（不是账户问题，下一条还该再试它）', async () => {
+    const state = createFailoverState()
+    const first = makeProvider('openai', 'gpt-4o', async () => { throw new Error('account_exhausted') })
+    const second = makeProvider('anthropic', 'claude', async () => { throw new Error('request_invalid') })
+    const third = makeProvider('deepseek', 'ds', async () => ({ ok: 3 }))
+    await runFailover({ providers: [first, second, third], validate: acceptAll, classifyError: classifyByMessage, totalBudgetMs: 1000, now: () => Date.now(), state })
+    expect(state.cooldowns.has('anthropic')).toBe(false)
+  })
+
   it('预算切片：第一个挂起只拿一半就被中止，第二个仍能作答且拿到的信号还活着', async () => {
     const first = makeProvider('openai', 'gpt-4o', hangUntilAbort)
     let secondSignalAbortedAtStart: boolean | undefined
