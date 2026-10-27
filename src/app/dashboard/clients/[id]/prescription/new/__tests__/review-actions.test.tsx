@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event'
 import {
   APPROVE_CONFIRM_TEXT,
   APPROVE_SPEND_REMINDER,
-  ManualDraftBanner,
   PrescriberLine,
+  PrescriptionStatusNotice,
   PrescriptionReviewActions,
   REJECT_BUTTON_LABEL,
   REJECT_CONFIRM_TEXT,
@@ -82,11 +82,22 @@ describe('开方人与人工草稿提示', () => {
   })
 
   it('says approving a manual draft records stages under the goal', () => {
-    render(<ManualDraftBanner show />)
-    expect(screen.getByRole('status')).toHaveTextContent('还没同意')
-    expect(screen.getByRole('status')).not.toHaveTextContent('生成执行计划')
-    expect(screen.getByRole('status')).toHaveTextContent('按阶段排好')
-    expect(screen.getByRole('status')).not.toHaveTextContent('看板上会出现待办')
-    expect(screen.getByRole('status')).not.toHaveTextContent('看板上的待办')
+    render(<PrescriptionStatusNotice status="draft" manual approveShown />)
+    const note = screen.getByRole('note')
+    expect(note).toHaveTextContent('还没同意')
+    expect(note).toHaveTextContent('点「同意」')
+    expect(note).not.toHaveTextContent('生成执行计划')
+    expect(note).toHaveTextContent('按阶段排好')
+    expect(note).not.toHaveTextContent('看板上会出现待办')
+    expect(note).not.toHaveTextContent('看板上的待办')
+  })
+
+  it('follows an approved prescription and does not tell the reader to press 同意', () => {
+    render(<PrescriptionStatusNotice status="approved" manual approveShown={false} />)
+    const note = screen.getByRole('note')
+    expect(note).toHaveTextContent('已同意')
+    expect(note).not.toHaveTextContent('还没同意')
+    expect(note).not.toHaveTextContent('点「同意」')
+    expect(note).not.toHaveTextContent('草稿')
   })
 })
