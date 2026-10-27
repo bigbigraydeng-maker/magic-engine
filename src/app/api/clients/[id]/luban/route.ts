@@ -15,11 +15,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { clickerFromSession } from '@/lib/confirmation-card'
 import { createKernel } from '@/lib/kernel'
 import { chatWithProjectLuban } from '@/lib/luban/project-agent'
 import { classifyDrawerTurn } from '@/lib/zhuge/drawer-spend-ask'
-import { handleDrawerSpendTurn } from '@/lib/zhuge/drawer-spend-turn'
+import { handleDrawerSpendTurn, trustedDrawerClicker } from '@/lib/zhuge/drawer-spend-turn'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -87,12 +86,12 @@ export async function POST(
     }
 
     if (classifyDrawerTurn(message).kind !== 'chat') {
-      const clicker = clickerFromSession({
+      const clicker = trustedDrawerClicker({
         email: access.user.email ?? '',
         role: access.role,
         allowedClientId: access.allowedClientId,
         clientId,
-        agentMarked: req.headers.get('x-me-actor') === 'agent',
+        agentHeader: req.headers.get('x-me-actor') === 'agent',
       })
       const held = await handleDrawerSpendTurn({
         supabase: supabaseAdmin,

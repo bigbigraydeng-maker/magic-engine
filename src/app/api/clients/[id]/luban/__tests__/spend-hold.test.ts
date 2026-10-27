@@ -85,4 +85,21 @@ describe('luban drawer spend hold', () => {
     expect(issue.mock.calls[0]?.[1].clicker).toMatchObject({ kind: 'agent' })
     expect(mocks.chat).not.toHaveBeenCalled()
   })
+
+  it('rejects client staff who send the agent header', async () => {
+    mocks.access.mockResolvedValue({
+      ok: true,
+      user: { email: 'staff@example.com' },
+      role: 'client-viewer',
+      tier: 'paid_client',
+      allowedClientId: CLIENT,
+    })
+    const res = await post('开投', { 'x-me-actor': 'agent' })
+    const body = await res.json() as { reply?: string; executed?: boolean }
+    expect(res.status).toBe(200)
+    expect(body.executed).toBe(false)
+    expect(body.reply).toContain('客户员工')
+    expect(issue).not.toHaveBeenCalled()
+    expect(mocks.chat).not.toHaveBeenCalled()
+  })
 })

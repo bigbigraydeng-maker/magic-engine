@@ -9,6 +9,7 @@ import type { KernelDeps } from '@/lib/kernel/deps'
 import {
   type CardClicker,
   type ConfirmationCardView,
+  clickerFromSession,
   issueConfirmationCard,
 } from '@/lib/confirmation-card'
 import { publicError } from '@/lib/confirmation-card/http'
@@ -40,6 +41,21 @@ function reply(status: number, body: DrawerSpendBody): DrawerSpendOutcome {
 function mayAsk(clicker: CardClicker, clientId: string): boolean {
   if (clicker.kind === 'agent' || clicker.kind === 'opc') return true
   return clicker.kind === 'fde' && clicker.clientId === clientId
+}
+
+/** The session role is trusted. A client employee cannot become an agent by setting a header. */
+export function trustedDrawerClicker(args: {
+  email: string
+  role: 'admin' | 'client-viewer'
+  allowedClientId: string | null
+  clientId: string
+  agentHeader: boolean
+}): CardClicker {
+  const session = clickerFromSession({ ...args, agentMarked: false })
+  if (args.agentHeader && (session.kind === 'opc' || session.kind === 'fde')) {
+    return { kind: 'agent', email: session.email }
+  }
+  return session
 }
 
 export async function issueDrawerSpendCard(args: {
