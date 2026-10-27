@@ -71,7 +71,7 @@ export default async function AgentsPage() {
               </thead>
               <tbody>
                 {catalog.rows.map((r) => (
-                  <AgentTableRow key={`${r.key}-${r.profile?.file ?? ''}`} row={r} catalog={catalog} />
+                  <AgentTableRow key={`${r.key}-${r.profile?.file ?? ''}`} row={r} catalog={catalog as AgentCatalog} />
                 ))}
               </tbody>
             </table>
