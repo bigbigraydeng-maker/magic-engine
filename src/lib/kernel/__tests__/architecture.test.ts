@@ -2710,10 +2710,10 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
           '传它 = 跳过 AI 信封的学习期 / 冷却 / 20% / 日上限四条闸',
       ).toEqual([])
     },
-    // 🔴 扫描整仓运行时文件（剥注释 + 正则）。CI 上实测跑到 6.3s，触发
-    //    Vitest 默认 5s 超时——不是判据坏了，是这两条本来就该比默认值慢。
-    //    15s 留出约 2.4 倍余量，本地/CI 都验过在这个上限内。
-    15_000,
+    // A 15s cap aborted this full-repo scan on the 1-CPU runner (about 9–18s)
+    // before expect() ran. 120s still finishes a slow scan and stops a hang
+    // before it uses up the 15-minute light-check job.
+    120_000,
   )
 
   it(
@@ -2726,7 +2726,8 @@ describe('人工触发身份：不许随便自报（两层闸）', () => {
         '这些文件声称「人按的」却没有任何鉴权调用 —— 没有东西证明真有人在',
       ).toEqual([])
     },
-    15_000,
+    // Same scan as the test above. 120s cap; see that comment.
+    120_000,
   )
 
   it('🔴 这两条闸真的能抓到东西（真实磁盘探针，因为现在生产代码里是零个）', () => {

@@ -39,6 +39,7 @@ import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
+import { pushBrokenPageHoldItems } from './broken-page-hold-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
 import { foldRootCauseDuplicates } from './dedupe-root-cause'
 import { pushCalendarClosureItems } from './calendar-closure-items'
@@ -47,8 +48,10 @@ import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushAdsServicePauseItems } from './ads-service-pause-items'
 import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
+import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
@@ -269,6 +272,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushFacebookSyncFailingItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Facebook 同步失败检查读取失败（不阻塞其他待办）:', e),
     ),
+    // 没有连接行可标的坏主页令牌（Graph 190 / 缺角色）。未核实公用令牌仍走主页绑定待办。
+    (b) => pushBrokenPageHoldItems(supabase, b).catch((e) =>
+      console.warn('[manual-items] Facebook 主页暂停名单读取失败（不阻塞其他待办）:', e),
+    ),
     // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
     // 而 Facebook 的留资只保留 90 天，超期永久取不回
     (b) => pushLeadSheetItems(supabase, b, now).catch((e) =>
@@ -333,8 +340,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
       console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
-    // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
-    (b) => pushPrescriptionItems(supabase, b, now, nameOf),
+    // 本周已批准方案的进度复查 —— 只通知建议，不要求按这条去改方案
+    (b) => pushPrescriptionItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 方案复查通知读取失败（不阻塞其他待办）:', e),
+    ),
     // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
     (b) => pushLeadsSanityItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 客资口径检查失败（不阻塞其他待办）:', e),
@@ -384,6 +393,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 服务刚暂停的广告系列 —— 拉模式读操作记录，通知事件丢了也照样出现在今日待办
+    (b) => pushAdsServicePauseItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 广告暂停待办生成失败（不阻塞其他待办）:', e),
+    ),
     // Meta 广告账户状态不是正常（欠款 / 被限制）超过 24 小时 —— 账户停摆时不会花钱也不会有新线索，系统里没有别处会说
     (b) => pushAdsAccountStatusItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告账户状态待办生成失败（不阻塞其他待办）:', e),
@@ -391,6 +404,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
     (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 推广计划每日检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushPlanDraftFailureItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 推广计划草稿失败待办生成失败（不阻塞其他待办）:', e),
     ),
     // 广告开投前「追踪与环境就绪」检查：红灯怎么修（开发欠账）+ 检查自己没跑成。读每日函数的回执，不自己现算
     (b) => pushAdsTrackingPreflightItems(supabase, b, nameOf).catch((e) =>

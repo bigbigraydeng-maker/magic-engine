@@ -14,6 +14,8 @@ import { fetchAll } from '@/lib/supabase-paginate'
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
 import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 import { loadAccountStatusRows, latestPerAccount } from '@/lib/ads-strategy/account-status'
+import { loadLatestGoalPrescription } from '@/lib/marketing-plan/promo/goal-prescription'
+import { pickWarMapPlan } from '@/lib/marketing-plan/promo/plan-pick'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { unusableAccountNote } from './pools'
 import { nzDay } from './util'
@@ -330,26 +332,39 @@ async function loadGoalTitle(clientId: string, goalId: string): Promise<string |
   return str((data as { title?: unknown } | null)?.title)
 }
 
-async function loadPlan(clientId: string): Promise<PlanInput | null> {
+async function loadPlanRows(clientId: string, status: 'approved' | 'draft') {
   const { data, error } = await supabaseAdmin
     .from('marketing_plans')
     .select('plan_data, status, updated_at')
     .eq('client_id', clientId)
-    .in('status', ['draft', 'approved'])
+    .eq('status', status)
     .order('updated_at', { ascending: false })
     .limit(10)
   if (error) throw new Error(`读推广计划失败：${error.message}`)
-  for (const row of (data ?? []) as Array<{ plan_data: unknown; status: string; updated_at: string | null }>) {
-    const spec = readPromoSpec(row.plan_data)
-    if (!spec) continue
-    return {
-      status: row.status === 'approved' ? 'approved' : 'draft',
-      phases: spec.phases.map(p => ({ name: p.name, startDate: p.start_date, endDate: p.end_date })),
-      goalTitle: await loadGoalTitle(clientId, spec.goal_id),
-      recordUpdatedDay: row.updated_at ? nzDay(row.updated_at) : null,
-    }
+  return (data ?? []) as Array<{ plan_data: unknown; status: string; updated_at: string | null }>
+}
+
+async function loadPlan(clientId: string): Promise<PlanInput | null> {
+  const [approved, drafts] = await Promise.all([
+    loadPlanRows(clientId, 'approved'),
+    loadPlanRows(clientId, 'draft'),
+  ])
+  const row = pickWarMapPlan([...approved, ...drafts])
+  if (!row) return null
+  const spec = readPromoSpec(row.plan_data)
+  if (!spec) return null
+  const [goalTitle, prescription] = await Promise.all([
+    loadGoalTitle(clientId, spec.goal_id),
+    // 处方读失败只空掉这一行，不让整张作战地图一起失败
+    loadLatestGoalPrescription(clientId, spec.goal_id).catch(() => null),
+  ])
+  return {
+    status: row.status === 'approved' ? 'approved' : 'draft',
+    phases: spec.phases.map(p => ({ name: p.name, startDate: p.start_date, endDate: p.end_date })),
+    goalTitle,
+    recordUpdatedDay: row.updated_at ? nzDay(row.updated_at) : null,
+    prescriptionLine: prescription?.line ?? null,
   }
-  return null
 }
 
 // ── 素材池：已批准几条 ──────────────────────────────────────────────────────

@@ -19,6 +19,7 @@
 
 import type { PlayKey } from './play-vocabulary'
 import { dominantScript } from './launch-readback'
+import { expandedDraftProblems } from './ad-draft-expansion'
 
 /** 目前 ME 会发的三种广告。要加第四种，先在 PLAY_CATALOG 里有对应打法。 */
 export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation'
@@ -86,17 +87,65 @@ export interface AdDraftCreative {
   language?: string
 }
 
+/** 预算放在系列上，还是放在每个广告组上。不写 = 今天的单组做法（预算在这一个组上）。 */
+export type DraftBudgetMode = 'ad_set' | 'campaign'
+
+/**
+ * 受众扩量三开关。不写 ≠ 关掉。
+ * 挂了包含或排除受众时，建前复核要求三项都显式写成 false。
+ * 打开任意一项必须写 `source`（这个决定从哪来），这里不填默认值。
+ */
+export interface DraftExpansionSwitches {
+  /** 对应 Meta `targeting_automation.advantage_audience`。true = 开着，会自行扩量。 */
+  advantageAudience: boolean
+  /** 对应 `targeting_relaxation_types.custom_audience`。true = 允许投给名单以外的人。 */
+  customAudienceRelaxed: boolean
+  /** 对应 `targeting_relaxation_types.lookalike`。true = 允许自动加相似人群。 */
+  lookalikeRelaxed: boolean
+  /** 任一开关为 true 时必填。关掉时可以不写。 */
+  source?: string
+}
+
+/** 一个系列里的一个广告组。地区、受众、文案、扩量开关都在组上，不在系列上。 */
+export interface AdDraftAdSet {
+  name: string
+  /** 组预算时必填，单位是元。系列预算时不要填。 */
+  dailyBudget?: number
+  /** 系列预算时，这一组每天至少花多少元。不填 = 不设下限。 */
+  minDailyBudget?: number
+  /** 系列预算时，这一组每天最多花多少元。不填 = 不设上限。 */
+  maxDailyBudget?: number
+  geoCountries: string[]
+  geoCityKeys?: string[]
+  ageMin?: number
+  ageMax?: number
+  audienceIds?: string[]
+  excludedAudienceIds?: string[]
+  expansion?: DraftExpansionSwitches
+  creatives: AdDraftCreative[]
+  /** 不写 = 沿用这种广告今天的按钮。写了就必须和那种按钮一致。 */
+  ctaType?: string
+  /** 网址参数，不含前导问号。不写 = 不附加。 */
+  urlTags?: string
+  /** 首评。不写 = 不发首评。 */
+  firstComment?: string
+}
+
 export interface AdDraft {
   kind: DraftKind
   clientId: string
   /** 广告系列名 —— 会出现在 Meta 后台，写人看得懂的。 */
   campaignName: string
   adSetName: string
-  /** 每天多少钱，**整数、客户账户的货币单位**（NZD/AUD 元，不是分）。 */
+  /**
+   * 每天多少钱，客户账户的货币单位（元，不是分）。
+   * 单个广告组时，这就是这一组的日预算。
+   * 多个广告组时，这是整份草稿每天的合计，必须和各组（或系列预算）对得上。
+   */
   dailyBudget: number
   /** 跑几天。到期自动停 —— 不设终点的广告没人会记得去关。 */
   durationDays: number
-  /** 投放地区。空数组会被 `validateDraft` 拒掉：投给全世界不是一个决定。 */
+  /** 投放地区。空数组会被 `validateDraft` 拒掉：投给全世界不是一个决定。多个广告组时地区写在组上，这里留空数组。 */
   geoCountries: string[]
   /** 具体到城市/区（Meta 的 geo key）。给不出就只按国家投。 */
   geoCityKeys?: string[]
@@ -109,18 +158,49 @@ export interface AdDraft {
   linkUrl?: string
   /** 广告主页 id。 */
   pageId: string
-  /** 一个草案下可以有多条创意；**同一个组里语言必须一致**（闸门会查）。 */
+  /** 一个草案下可以有多条创意；**同一个组里语言必须一致**（闸门会查）。多个广告组时文案写在组上，这里留空数组。 */
   creatives: AdDraftCreative[]
+  /** 包含的自定义受众编号（Meta 自定义受众的数字 id）。给了就等于声明这个广告组是重定向。 */
+  audienceIds?: string[]
+  /** 排除的自定义受众编号。只给排除不算重定向。 */
+  excludedAudienceIds?: string[]
+  /** 不写 = 单个广告组、预算在组上。多个广告组时必须写。 */
+  budgetMode?: DraftBudgetMode
+  /** 系列日预算（元）。`budgetMode === 'campaign'` 时必填，且要等于 `dailyBudget`。 */
+  campaignDailyBudget?: number
+  /** 多个广告组。不写 = 根上的字段就是那一个组。 */
+  adSets?: AdDraftAdSet[]
+  /** 单个广告组的扩量开关。多个广告组时写在每个组上。 */
+  expansion?: DraftExpansionSwitches
+  ctaType?: string
+  urlTags?: string
+  firstComment?: string
 }
 
 /** 每天最多敢自动花多少 —— 超过这个数不是 ME 该自己决定的事。 */
 export const MAX_AUTO_DAILY_BUDGET = 50
+
+/** 一次最少跑几天（Meta：每日预算的广告组时长必须超过 24 小时）。 */
+export const MIN_DURATION_DAYS = 2
 
 /** 一次最多跑多久 —— 再长的投放应该是续，不是一次性下注。 */
 export const MAX_DURATION_DAYS = 30
 
 /** 私信组里最多几条创意：写操作次数和等转码的总时间都随它涨，要有顶。 */
 export const MAX_MESSENGER_CREATIVES = 4
+
+/** 包含与排除两个受众列表各自最多几个。 */
+export const MAX_AUDIENCES_PER_LIST = 10
+
+/** 一份草稿里最多几个广告组。这是草稿自己的上限，不是 Meta 的上限。 */
+export const MAX_AD_SETS = 10
+
+/**
+ * 包含受众的最小人数下限（Meta 自定义受众投放最小规模的保守取值）。
+ * docs/specs/2026-09-06-me-ads-audience-capability-spec.md:56 的 100 是相似人群种子门槛，口径不同；
+ * 本值待线上试跑核实，改数字前先核。
+ */
+export const MIN_INCLUDED_AUDIENCE_SIZE = 100
 
 export interface DraftProblem {
   field: string
@@ -141,9 +221,18 @@ export function validateDraft(d: AdDraft): DraftProblem[] {
   if (!Array.isArray(d.creatives) || d.creatives.some((c) => !isCreativeShape(c))) {
     return [{ field: 'creatives', message: '广告文案格式不对（每条都要有文字的正文和标题）' }]
   }
+  if (Array.isArray(d.adSets)) {
+    for (let i = 0; i < d.adSets.length; i++) {
+      const creatives = (d.adSets[i] as { creatives?: unknown } | null)?.creatives
+      if (!Array.isArray(creatives) || creatives.some((c) => !isCreativeShape(c))) {
+        return [{ field: `adSets[${i}].creatives`, message: '广告文案格式不对（每条都要有文字的正文和标题）' }]
+      }
+    }
+  }
+  const multi = Array.isArray(d.adSets)
   return [
     ...validateCommon(d),
-    ...(d.kind === 'messenger_conversation' ? validateMessenger(d) : []),
+    ...(d.kind === 'messenger_conversation' && !multi ? validateMessenger(d) : []),
   ]
 }
 
@@ -159,12 +248,8 @@ function isCreativeShape(c: unknown): boolean {
   return OPTIONAL_TEXT_FIELDS.every((k) => o[k] === undefined || typeof o[k] === 'string')
 }
 
-function validateCommon(d: AdDraft): DraftProblem[] {
+function moneyAndSpanProblems(d: AdDraft): DraftProblem[] {
   const p: DraftProblem[] = []
-
-  if (!d.clientId) p.push({ field: 'clientId', message: '没说是哪个客户' })
-  if (!d.pageId) p.push({ field: 'pageId', message: '没说用哪个主页发' })
-
   if (!Number.isFinite(d.dailyBudget) || d.dailyBudget <= 0) {
     p.push({ field: 'dailyBudget', message: '每天预算必须是大于 0 的数' })
   } else if (d.dailyBudget > MAX_AUTO_DAILY_BUDGET) {
@@ -173,46 +258,127 @@ function validateCommon(d: AdDraft): DraftProblem[] {
       message: `每天 ${d.dailyBudget} 超过自动发布上限 ${MAX_AUTO_DAILY_BUDGET} —— 这个量级要人自己决定`,
     })
   }
-
   if (!Number.isInteger(d.durationDays) || d.durationDays <= 0) {
     p.push({ field: 'durationDays', message: '必须说跑几天 —— 不设终点的广告没人会记得关' })
+  } else if (d.durationDays < MIN_DURATION_DAYS) {
+    p.push({
+      field: 'durationDays',
+      message: `至少 ${MIN_DURATION_DAYS} 天：Meta 只允许跑超过 24 小时的广告组使用每日预算，1 天会被拒`,
+    })
   } else if (d.durationDays > MAX_DURATION_DAYS) {
     p.push({ field: 'durationDays', message: `一次最多 ${MAX_DURATION_DAYS} 天` })
   }
+  return p
+}
 
-  if (!d.geoCountries || d.geoCountries.length === 0) {
-    p.push({ field: 'geoCountries', message: '没说投给哪里 —— 投给全世界不是一个决定，是漏了一步' })
-  }
+function validateCommon(d: AdDraft): DraftProblem[] {
+  const p: DraftProblem[] = []
 
-  if (d.creatives.length === 0) {
-    p.push({ field: 'creatives', message: '一条广告文案都没有' })
+  if (!d.clientId) p.push({ field: 'clientId', message: '没说是哪个客户' })
+  if (!d.pageId) p.push({ field: 'pageId', message: '没说用哪个主页发' })
+  p.push(...moneyAndSpanProblems(d))
+
+  if (!Array.isArray(d.adSets)) {
+    if (!d.geoCountries || d.geoCountries.length === 0) {
+      p.push({ field: 'geoCountries', message: '没说投给哪里 —— 投给全世界不是一个决定，是漏了一步' })
+    }
+
+    if (d.creatives.length === 0) {
+      p.push({ field: 'creatives', message: '一条广告文案都没有' })
+    }
+    p.push(...creativeProblems(d.kind, d.creatives, ''))
+
+    if (d.ageMin !== undefined && d.ageMin < 18) {
+      p.push({ field: 'ageMin', message: 'Meta 不允许投给 18 岁以下' })
+    }
+    if (d.ageMin !== undefined && d.ageMax !== undefined && d.ageMin > d.ageMax) {
+      p.push({ field: 'ageMax', message: '年龄下限比上限还大' })
+    }
+
+    p.push(...audienceListProblems(d.audienceIds, d.excludedAudienceIds, ''))
   }
-  d.creatives.forEach((c, i) => {
-    if (!c.primaryText.trim()) p.push({ field: `creatives[${i}].primaryText`, message: '正文是空的' })
-    if (!c.headline.trim()) p.push({ field: `creatives[${i}].headline`, message: '标题是空的' })
-    if ((d.kind === 'video_thruplay' || d.kind === 'messenger_conversation') && !c.videoId) {
-      p.push({ field: `creatives[${i}].videoId`, message: '视频广告没给视频' })
-    }
-    if (d.kind === 'lead_form' && !c.imageHash && !c.videoId) {
-      p.push({ field: `creatives[${i}].imageHash`, message: '表单广告没给图也没给视频' })
-    }
-  })
 
   if (d.kind === 'lead_form' && !d.leadFormId) {
     p.push({ field: 'leadFormId', message: '留资广告没挂表单 —— 那它收不到任何联系方式' })
   }
 
-  if (d.ageMin !== undefined && d.ageMin < 18) {
-    p.push({ field: 'ageMin', message: 'Meta 不允许投给 18 岁以下' })
-  }
-  if (d.ageMin !== undefined && d.ageMax !== undefined && d.ageMin > d.ageMax) {
-    p.push({ field: 'ageMax', message: '年龄下限比上限还大' })
-  }
+  p.push(...expandedDraftProblems(d))
 
   return p
 }
 
+/** 每条创意上 ME 自己能确定的错。`prefix` 为空时字段名和以前一样。 */
+export function creativeProblems(kind: DraftKind, creatives: AdDraftCreative[], prefix: string): DraftProblem[] {
+  const p: DraftProblem[] = []
+  creatives.forEach((c, i) => {
+    if (!c.primaryText.trim()) p.push({ field: `${prefix}creatives[${i}].primaryText`, message: '正文是空的' })
+    if (!c.headline.trim()) p.push({ field: `${prefix}creatives[${i}].headline`, message: '标题是空的' })
+    if ((kind === 'video_thruplay' || kind === 'messenger_conversation') && !c.videoId) {
+      p.push({ field: `${prefix}creatives[${i}].videoId`, message: '视频广告没给视频' })
+    }
+    if (kind === 'lead_form' && !c.imageHash && !c.videoId) {
+      p.push({ field: `${prefix}creatives[${i}].imageHash`, message: '表单广告没给图也没给视频' })
+    }
+    if (kind === 'lead_form' && c.videoId && !hasThumbnail(c)) {
+      p.push({ field: `${prefix}creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
+    }
+  })
+  return p
+}
+
+/** 自定义受众编号：Meta 的数字 id，5 位以上纯数字。 */
+export const AUDIENCE_ID = /^\d{5,}$/
+
+/** 包含 / 排除两个列表。`prefix` 为空时字段名是 `audienceIds`，多组时带上组的前缀。 */
+export function audienceListProblems(
+  audienceIds: unknown,
+  excludedAudienceIds: unknown,
+  prefix: string,
+): DraftProblem[] {
+  const p: DraftProblem[] = []
+  const raws = [
+    ['audienceIds', audienceIds],
+    ['excludedAudienceIds', excludedAudienceIds],
+  ] as const
+  const valid: Partial<Record<(typeof raws)[number][0], string[]>> = {}
+
+  for (const [name, raw] of raws) {
+    const field = `${prefix}${name}`
+    if (raw === undefined) continue
+    if (!Array.isArray(raw) || raw.some((id) => typeof id !== 'string' || !AUDIENCE_ID.test(id))) {
+      p.push({ field, message: '受众编号格式不对（要是 5 位以上的纯数字字符串）' })
+      continue
+    }
+    const ids = raw as string[]
+    valid[name] = ids
+    if (ids.length > MAX_AUDIENCES_PER_LIST) {
+      p.push({ field, message: `受众最多 ${MAX_AUDIENCES_PER_LIST} 个，现在有 ${ids.length} 个` })
+    }
+    const dupIds = [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))]
+    if (dupIds.length > 0) p.push({ field, message: `受众编号重复：${dupIds.join('、')}` })
+  }
+
+  const included = valid.audienceIds
+  const excluded = valid.excludedAudienceIds
+  if (included && excluded) {
+    const excludedSet = new Set(excluded)
+    const ids = [...new Set(included.filter((id) => excludedSet.has(id)))]
+    if (ids.length > 0) {
+      p.push({
+        field: `${prefix}excludedAudienceIds`,
+        message: `受众 ${ids.join('、')} 同时出现在「包含」和「排除」里，自相矛盾`,
+      })
+    }
+  }
+  return p
+}
+
 const HTTPS_URL = /^https:\/\/\S+$/i
+const THUMBNAIL_MISSING = '视频广告没有封面（要 thumbnailImageHash，或 https 开头的 thumbnailUrl）'
+
+function hasThumbnail(c: AdDraftCreative): boolean {
+  return !!c.thumbnailImageHash || (!!c.thumbnailUrl && HTTPS_URL.test(c.thumbnailUrl))
+}
 /** 语言代码：两位小写字母（ISO 639-1：`en` / `zh` / `mi`）。三位的 `eng` 和 `en` 会被当成两种语言，所以不收。 */
 const LANG_CODE = /^[a-z]{2}$/
 
@@ -225,37 +391,31 @@ function primaryLanguage(raw: unknown): string | null {
 
 /** 私信类型独有的、建之前就能判的错。通用部分已在 `validateCommon` 查过。 */
 function validateMessenger(d: AdDraft): DraftProblem[] {
+  return messengerCreativeProblems(d.creatives, '')
+}
+
+/** 一个私信广告组的文案。`prefix` 为空时字段名和以前一样。 */
+export function messengerCreativeProblems(creatives: AdDraftCreative[], prefix: string): DraftProblem[] {
   const p: DraftProblem[] = []
-  if (d.creatives.length > MAX_MESSENGER_CREATIVES) {
-    p.push({ field: 'creatives', message: `私信组最多 ${MAX_MESSENGER_CREATIVES} 条创意` })
+  if (creatives.length > MAX_MESSENGER_CREATIVES) {
+    p.push({ field: `${prefix}creatives`, message: `私信组最多 ${MAX_MESSENGER_CREATIVES} 条创意` })
   }
-
-  d.creatives.forEach((c, i) => {
-    const hasThumb = !!c.thumbnailImageHash || (!!c.thumbnailUrl && HTTPS_URL.test(c.thumbnailUrl))
-    if (!hasThumb) {
-      p.push({
-        field: `creatives[${i}].thumbnail`,
-        message: '视频广告没有封面（要 thumbnailImageHash，或 https 开头的 thumbnailUrl）',
-      })
-    }
+  creatives.forEach((c, i) => {
+    if (!hasThumbnail(c)) p.push({ field: `${prefix}creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
   })
-
-  // 一语言一组：自报的语言必须是代码、且全组一致。
-  const langs = d.creatives.map((c) => primaryLanguage(c.language))
+  const langs = creatives.map((c) => primaryLanguage(c.language))
   if (langs.some((l) => l === null)) {
-    p.push({ field: 'creatives.language', message: '每条创意都要写两位语言代码（如 en / zh / mi），不能留空，也不能写成 English / eng' })
+    p.push({ field: `${prefix}creatives.language`, message: '每条创意都要写两位语言代码（如 en / zh / mi），不能留空，也不能写成 English / eng' })
   } else if (new Set(langs).size > 1) {
-    p.push({ field: 'creatives.language', message: `同一个私信广告组只能一种语言，现在有：${[...new Set(langs)].join(' / ')}` })
+    p.push({ field: `${prefix}creatives.language`, message: `同一个私信广告组只能一种语言，现在有：${[...new Set(langs)].join(' / ')}` })
   }
-
-  // 第二道：文字体系。自报可以说谎，字不会。
   const scripts = new Set(
-    d.creatives
+    creatives
       .map((c) => dominantScript([c.primaryText, c.headline, c.description ?? '']))
       .filter((s) => s !== null),
   )
   if (scripts.size > 1) {
-    p.push({ field: 'creatives.script', message: `文案里混着 ${scripts.size} 种文字体系（${[...scripts].join(' / ')}）—— Meta 的自动问候语会照抄每条创意的语言` })
+    p.push({ field: `${prefix}creatives.script`, message: `文案里混着 ${scripts.size} 种文字体系（${[...scripts].join(' / ')}）—— Meta 的自动问候语会照抄每条创意的语言` })
   }
   return p
 }
@@ -285,7 +445,7 @@ const META_TRIPLET: Readonly<Record<DraftKind, MetaObjectiveTriplet>> = {
     objective: 'OUTCOME_AWARENESS',
     optimizationGoal: 'THRUPLAY',
     billingEvent: 'IMPRESSIONS',
-    destinationType: 'ON_VIDEO',
+    // 不发 destination_type：ON_VIDEO 在 Meta 文档里标 limited beta、本仓没有实测过审记录（2026-10-26 魏征/子牙审）。
   },
   messenger_conversation: {
     objective: 'OUTCOME_ENGAGEMENT',
@@ -316,5 +476,7 @@ export function describeDraft(d: AdDraft): string {
   const total = d.dailyBudget * d.durationDays
   // 这一步在 `validateDraft` 之前就会被调（账本的摘要），所以 kind 可能是请求体里的任何值。
   const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
-  return `${what}，每天 $${d.dailyBudget}、跑 ${d.durationDays} 天，最多花 $${total}`
+  const budget = d.budgetMode === 'campaign' ? '（系列预算）' : ''
+  const sets = Array.isArray(d.adSets) ? `，${d.adSets.length} 个广告组` : ''
+  return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}`
 }

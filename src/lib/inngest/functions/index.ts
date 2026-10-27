@@ -27,6 +27,7 @@ import { promoPlanDailyWatch } from './promo-plan-daily-watch'
 import { adHeartbeat } from './ad-heartbeat'
 import { adsTrackingPreflight } from './ads-tracking-preflight'
 import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
+import { adsServicePauseNotify } from './ads-service-pause-notify'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
@@ -43,12 +44,14 @@ import { youtubeStaging, youtubePublicStep } from './youtube-publish'
 import { storyLitePublish } from './story-lite-publish'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
+import { planDraftFromPrescription } from './plan-draft-from-prescription'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
   adHeartbeat,
   adsTrackingPreflight,
   adsTrackingLaunchWatch,
+  adsServicePauseNotify,
   webIntelligenceCapture,
   webIntelligenceDue,
   webIntelligenceTrafficDue,
@@ -104,6 +107,7 @@ export const cloudFunctions = [
   telephonyVoiplineSweep,
   telephonyCallAnalysis,
   telephonyCallAnalysisSweep,
+  planDraftFromPrescription,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

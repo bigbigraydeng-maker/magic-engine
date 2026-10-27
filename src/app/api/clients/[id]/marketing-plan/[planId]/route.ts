@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { countRevokeBlockers, revokePlanTasks } from '@/lib/marketing-plan/task-dispatcher'
 import type { MarketingPlan, MarketingPlanData, MarketingPlanStatus } from '@/lib/marketing-plan/types'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import {
   PLAN_CONTENT_LOCKED_MESSAGE,
@@ -72,6 +73,13 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string; planId: string } }
 ) {
+  const denied = await rejectAgentAdsBearer(req, {
+    clientId: params.id,
+    action: 'approve',
+    resourceId: params.planId,
+  })
+  if (denied) return denied
+
   const access = await requirePaidClientAccess(params.id)
   if (!access.ok) {
     return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })

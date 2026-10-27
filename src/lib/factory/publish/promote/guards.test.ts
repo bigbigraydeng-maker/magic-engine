@@ -15,7 +15,7 @@ import type { PublishTarget } from '../../types'
 
 vi.mock('@/lib/social/content-review', () => ({
   REEL_AUTO_CHECK_KEYS: ['a', 'b'],
-  humanKeysForStored: () => ['h1', 'h2'],
+  humanKeysForReviewRef: () => ['h1', 'h2'],
   validateContentChecklist: vi.fn(() => ({ ok: true, items: [] })),
   checklistPasses: vi.fn(() => true),
 }))

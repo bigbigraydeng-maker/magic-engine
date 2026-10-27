@@ -1,13 +1,15 @@
 /**
  * 马良 · 出片自检工作流（agent 自治计划 B2）。
  *
- * Creatomate 成片落库（factory-creatomate-render.ts finalize-success）后发
- * `me/maliang.render.ready` → 这里读镜头字幕/素材来源/模板有没有 logo 层 →
- * 跑 9 宫格自检 → 有边界地写回
- * `content_posts.generation_context_snapshot.maliang_check`（只动这一个子 key）
- * → 不过关的把渲染工单标 `needs_rework` 并写原因（回工厂标返工原因，不进 PM
- * 审片队列；返工还是放弃由今日待办问 PM）→ 回执写 cron_run_logs
- * （job_name 恒为 'maliang-render-check'，非周期任务）。
+ * 成片落库后发 `me/maliang.render.ready`。两条路共用同一次自检：
+ * - Creatomate（factory-creatomate-render.ts）：带 job_id + post_id。裁决写回
+ *   `content_posts.generation_context_snapshot.maliang_check`（只动这一个子 key）。
+ *   不过关把渲染工单标 `needs_rework`（不进审片队列；返工还是放弃由今日待办问）。
+ * - 模板出片（工单 complete）：带 work_order_id。裁决写回工单 output 里的同一个
+ *   `maliang_check` 对象（工单没有内容帖）。过关、不过关、自检抛错或超时都保持
+ *   in_review。不过关只在审片卡片上标「马良没过」和原因，由人决定通过或打回。
+ *   自检抛错或超时标未机器审。人已经把工单移出待审时不再写回。
+ * 回执写 cron_run_logs（job_name 恒为 'maliang-render-check'，非周期任务）。
  *
  * 🔴 retries 0：花模型钱，失败进回执不重跑——重跑等于重复付款。
  *
@@ -19,12 +21,15 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { GetStepTools } from 'inngest'
 import { z } from 'zod'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
 import { runNineGridCheck, mergeMaliangIntoSnapshot, allowedVideoHosts, type MaliangCheck, type NineGridInput } from '@/lib/maliang/render-check'
+import { dispositionOf, REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout } from '@/lib/maliang/review-disposition'
+import { readWorkOrderContext, writeWorkOrderVerdict, type WorkOrderReady } from '@/lib/maliang/work-order-review'
 
 export const MALIANG_RENDER_READY_EVENT = 'me/maliang.render.ready' as const
 export const MALIANG_JOB = 'maliang-render-check'
@@ -32,19 +37,34 @@ export const NEEDS_REWORK_STATUS = 'needs_rework'
 
 const uuidLike = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, 'invalid id')
 
-export const MaliangRenderReadySchema = z.object({
+const postReadySchema = z.object({
   client_id: uuidLike,
   job_id: uuidLike,
   post_id: uuidLike,
   output_url: z.string().url(),
 })
 
+const workOrderReadySchema = z.object({
+  client_id: uuidLike,
+  work_order_id: uuidLike,
+  output_url: z.string().url(),
+})
+
+export const MaliangRenderReadySchema = z.union([postReadySchema, workOrderReadySchema])
+
 export type MaliangRenderReadyData = z.infer<typeof MaliangRenderReadySchema>
+export type PostReadyData = z.infer<typeof postReadySchema>
+
+function isWorkOrderReady(data: MaliangRenderReadyData): data is WorkOrderReady {
+  return 'work_order_id' in data
+}
 
 export interface MaliangDeps {
   supabase: SupabaseClient
   check: typeof runNineGridCheck
   apiKey: () => string | undefined
+  /** Template-render reviews only. A hung model must not leave the order unmarked. */
+  reviewTimeoutMs?: number
 }
 
 export interface MaliangContext {
@@ -89,7 +109,7 @@ export function scenesToInput(scenes: unknown): { captions: string[]; notes: str
 /** 读三张表拼出自检上下文。任何一处读不到 = 不判，说清是哪一处。 */
 export async function readContext(
   supabase: SupabaseClient,
-  data: MaliangRenderReadyData,
+  data: PostReadyData,
 ): Promise<{ ok: true; ctx: MaliangContext } | { ok: false; reason: string }> {
   const job = await supabase
     .from('content_factory_render_jobs')
@@ -136,7 +156,7 @@ export async function readContext(
 /** 写回裁决：只动 snapshot 的 maliang_check 子 key；不过关再标工单返工。 */
 export async function writeVerdict(
   supabase: SupabaseClient,
-  data: MaliangRenderReadyData,
+  data: PostReadyData,
   snapshot: unknown,
   check: MaliangCheck,
 ): Promise<void> {
@@ -147,7 +167,7 @@ export async function writeVerdict(
     .eq('id', data.post_id)
   if (postUpdate.error) throw new Error(`写回 snapshot 失败：${postUpdate.error.message}`)
 
-  if (check.status !== 'fail') return
+  if (!dispositionOf(check.status).holdFromQueue) return
 
   const jobUpdate = await supabase
     .from('content_factory_render_jobs')
@@ -158,6 +178,161 @@ export async function writeVerdict(
     })
     .eq('id', data.job_id)
   if (jobUpdate.error) throw new Error(`标返工失败：${jobUpdate.error.message}`)
+}
+
+type StepRunner = GetStepTools<typeof inngest>
+
+interface OpenReceipt {
+  finish: (patch: {
+    completed?: number
+    failed?: number
+    error?: string
+    summary: Record<string, unknown>
+  }) => Promise<unknown>
+}
+
+function unreadReceipt(requestId: string, clientId: string, sourceId: string, reason: string): MaliangReceipt {
+  return {
+    request_id: requestId,
+    client_id: clientId,
+    source_record_id: sourceId,
+    status: 'context_unreadable',
+    reasons: [reason],
+    no_publish: true,
+  }
+}
+
+async function finishChecked(
+  step: StepRunner,
+  run: OpenReceipt,
+  check: MaliangCheck,
+  summary: Record<string, unknown>,
+): Promise<void> {
+  await step.run('finish-receipt', async () => {
+    await run.finish({
+      completed: check.status === 'unverifiable' ? 0 : 1,
+      failed: check.status === 'unverifiable' ? 1 : 0,
+      summary,
+      error: check.status === 'unverifiable' ? check.reasons.join('；') : undefined,
+    })
+    return null
+  })
+}
+
+function verdictReceipt(
+  requestId: string,
+  clientId: string,
+  sourceId: string,
+  check: MaliangCheck,
+): MaliangReceipt {
+  return {
+    request_id: requestId,
+    client_id: clientId,
+    source_record_id: sourceId,
+    status: check.status,
+    reasons: check.reasons,
+    no_publish: true,
+  }
+}
+
+async function finishUnread(
+  step: StepRunner,
+  run: OpenReceipt,
+  requestId: string,
+  clientId: string,
+  sourceId: string,
+  reason: string,
+): Promise<void> {
+  await step.run('finish-receipt-context', async () => {
+    await run.finish({
+      failed: 1,
+      error: reason,
+      summary: { request_id: requestId, client_id: clientId, source_record_id: sourceId, no_publish: true },
+    })
+    return null
+  })
+}
+
+async function runPostReview(
+  deps: MaliangDeps,
+  data: PostReadyData,
+  step: StepRunner,
+  requestId: string,
+): Promise<MaliangReceipt> {
+  const started = await step.run('start-receipt', async () => ({
+    runId: await startCronRunId(MALIANG_JOB),
+    startedAt: Date.now(),
+  }))
+  const run = cronRunHandle(MALIANG_JOB, started.runId, started.startedAt)
+  const read = await step.run('read-context', () => readContext(deps.supabase, data))
+  if (!read.ok) {
+    await finishUnread(step, run, requestId, data.client_id, data.job_id, read.reason)
+    return unreadReceipt(requestId, data.client_id, data.job_id, read.reason)
+  }
+  const ctx = read.ctx
+  const input: NineGridInput = {
+    title: ctx.title,
+    brandName: ctx.brandName,
+    expectedCaptions: ctx.expectedCaptions,
+    visualNotes: ctx.visualNotes,
+    logoExpected: ctx.logoExpected,
+  }
+  const check = await step.run('run-check', () =>
+    deps.check({ videoUrl: data.output_url, input, apiKey: deps.apiKey(), allowedHosts: allowedVideoHosts() }),
+  )
+  await step.run('write-verdict', () => writeVerdict(deps.supabase, data, ctx.snapshot, check))
+  await finishChecked(step, run, check, {
+    request_id: requestId,
+    client_id: data.client_id,
+    source_record_id: data.job_id,
+    post_id: data.post_id,
+    status: check.status,
+    reasons: check.reasons,
+    no_publish: true,
+  })
+  return verdictReceipt(requestId, data.client_id, data.job_id, check)
+}
+
+async function runWorkOrderReview(
+  deps: MaliangDeps,
+  data: WorkOrderReady,
+  step: StepRunner,
+  requestId: string,
+): Promise<MaliangReceipt> {
+  const started = await step.run('start-receipt', async () => ({
+    runId: await startCronRunId(MALIANG_JOB),
+    startedAt: Date.now(),
+  }))
+  const run = cronRunHandle(MALIANG_JOB, started.runId, started.startedAt)
+  const read = await step.run('read-work-order', () => readWorkOrderContext(deps.supabase, data))
+  if (!read.ok) {
+    await finishUnread(step, run, requestId, data.client_id, data.work_order_id, read.reason)
+    return unreadReceipt(requestId, data.client_id, data.work_order_id, read.reason)
+  }
+  const ctx = read.ctx
+  const check = await step.run('run-check', () =>
+    runCheckWithTimeout(
+      () => deps.check({
+        videoUrl: data.output_url,
+        input: ctx.input,
+        apiKey: deps.apiKey(),
+        allowedHosts: allowedVideoHosts(),
+      }),
+      deps.reviewTimeoutMs ?? REMOTION_REVIEW_TIMEOUT_MS,
+      data.output_url,
+    ),
+  )
+  await step.run('write-verdict', () => writeWorkOrderVerdict(deps.supabase, data.work_order_id, check))
+  await finishChecked(step, run, check, {
+    request_id: requestId,
+    client_id: data.client_id,
+    source_record_id: data.work_order_id,
+    status: check.status,
+    reasons: check.reasons,
+    machine_reviewed: dispositionOf(check.status).machineReviewed,
+    no_publish: true,
+  })
+  return verdictReceipt(requestId, data.client_id, data.work_order_id, check)
 }
 
 /** 依赖注入版：便于集成测试注入假 supabase / 假 check。 */
@@ -184,81 +359,9 @@ export function createMaliangRenderCheckFunction(deps: MaliangDeps) {
           no_publish: true,
         }
       }
-      const data = parsed.data
       const requestId = event.id ?? ''
-
-      const started = await step.run('start-receipt', async () => ({
-        runId: await startCronRunId(MALIANG_JOB),
-        startedAt: Date.now(),
-      }))
-      const run = cronRunHandle(MALIANG_JOB, started.runId, started.startedAt)
-
-      const read = await step.run('read-context', () => readContext(deps.supabase, data))
-      if (!read.ok) {
-        await step.run('finish-receipt-context', async () => {
-          await run.finish({
-            failed: 1,
-            error: read.reason,
-            summary: { request_id: requestId, client_id: data.client_id, source_record_id: data.job_id, no_publish: true },
-          })
-          return null
-        })
-        return {
-          request_id: requestId,
-          client_id: data.client_id,
-          source_record_id: data.job_id,
-          status: 'context_unreadable',
-          reasons: [read.reason],
-          no_publish: true,
-        }
-      }
-
-      const ctx = read.ctx
-      const input: NineGridInput = {
-        title: ctx.title,
-        brandName: ctx.brandName,
-        expectedCaptions: ctx.expectedCaptions,
-        visualNotes: ctx.visualNotes,
-        logoExpected: ctx.logoExpected,
-      }
-
-      const check = await step.run('run-check', () =>
-        deps.check({
-          videoUrl: data.output_url,
-          input,
-          apiKey: deps.apiKey(),
-          allowedHosts: allowedVideoHosts(),
-        }),
-      )
-
-      await step.run('write-verdict', () => writeVerdict(deps.supabase, data, ctx.snapshot, check))
-
-      await step.run('finish-receipt', async () => {
-        await run.finish({
-          completed: check.status === 'unverifiable' ? 0 : 1,
-          failed: check.status === 'unverifiable' ? 1 : 0,
-          summary: {
-            request_id: requestId,
-            client_id: data.client_id,
-            source_record_id: data.job_id,
-            post_id: data.post_id,
-            status: check.status,
-            reasons: check.reasons,
-            no_publish: true,
-          },
-          error: check.status === 'unverifiable' ? check.reasons.join('；') : undefined,
-        })
-        return null
-      })
-
-      return {
-        request_id: requestId,
-        client_id: data.client_id,
-        source_record_id: data.job_id,
-        status: check.status,
-        reasons: check.reasons,
-        no_publish: true,
-      }
+      if (isWorkOrderReady(parsed.data)) return runWorkOrderReview(deps, parsed.data, step, requestId)
+      return runPostReview(deps, parsed.data, step, requestId)
     },
   )
 }

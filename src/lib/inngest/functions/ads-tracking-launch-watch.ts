@@ -17,11 +17,13 @@
  *
  * 第二件事（按目标盯盘，和上面互相独立）：客户配置里列了 objective_watch 的系列，每小时按目标读一遍——
  * 播放量系列看完整播放 / 触达 / 频次，WhatsApp 系列看开始聊天数 / 单个成本并核对 ME 有没有收到，
+ * 表单留资系列看当天花费、线索、审核状态，并和 CRM 对账。
  * 所有系列都盯「最近一次改动后一直没花钱」。结论（含每条提醒的 什么 / 怎么办 / 链接）写进本函数的运行记录，
  * 今日待办只读这份记录翻成待办。系列停了就自动不盯。
  *
- * 🔴 本函数只读：读 Meta 花费 / 洞察、读 ME 的会话计数、读运行记录、发事件；唯一的写是 cron_run_logs 的运行记录。
- *    不写 Meta / GA4 / 官网，不发布，不扣费，从不动广告。
+ * 🔴 播放量和 WhatsApp 仍然只读。表单留资只有三种故障命中时，才用服务密钥去调只暂停入口
+ *    （POST /api/internal/meta-ads/pause-only）。入口没开、没部署、或密钥没配，只在回执里记原因，广告不动。
+ *    本函数自己不改预算、不恢复、不删除。不发布，不扣费。唯一直接写的仍是 cron_run_logs。
  * 🔴 窗口外的整点也留一行运行记录（processed=0）——不留的话，这个函数自己哪天停了没人看得出来。
  * 🔴 新增函数必须有人去 Inngest 后台对 `/api/inngest` 重新 Sync 一次，不然「安静地不跑」。
  */
@@ -54,6 +56,10 @@ import {
   type SeriesVerdict,
 } from '@/lib/ads-tracking-preflight/objective-watch'
 import { readSeriesFacts } from '@/lib/ads-tracking-preflight/objective-watch-read'
+import { loadPreviousSurplusLive, readLeadFormExtraLive } from '@/lib/ads-tracking-preflight/lead-form-live'
+import { reviewLeadFormSeries, type LeadFormWatchDeps } from '@/lib/ads-tracking-preflight/lead-form-watch'
+import { requestServicePause as postServicePause } from '@/lib/ads-tracking-preflight/service-pause-client'
+import type { PauseRequestReceipt, ServicePauseCall } from '@/lib/ads-tracking-preflight/lead-form-types'
 import { readCampaignPresence, readPostLaunchFacts } from '@/lib/ads-tracking-preflight/post-launch'
 import { TRACKING_PREFLIGHT_JOB } from '@/lib/ads-tracking-preflight/receipt'
 import { sanitizeError } from '@/lib/ads-tracking-preflight/sanitize'
@@ -100,6 +106,12 @@ export interface LaunchWatchDeps {
   readonly readObjectiveSeries: (clientId: string, cfg: TrackingClientConfig, series: ObjectiveWatchSeries, now: Date) => Promise<SeriesFacts | SeriesUnread>
   /** 按目标盯盘：数 ME 自某时刻起收到的 WhatsApp 会话；读不到返回 read=false，永不 reject。 */
   readonly countMeInbound: (clientId: string, sinceIso: string) => Promise<MeInboundFact>
+  /** 表单留资：当天花费、上限、CRM、同步连续失败。其它类型不会调用。 */
+  readonly readLeadFormExtra: LeadFormWatchDeps['readLeadFormExtra']
+  /** 上一小时回执里，Meta 线索多于 CRM 是从什么时候开始的。 */
+  readonly loadPreviousSurplus: (clientId: string, campaignId: string) => Promise<string | null>
+  /** 命中故障后去调只暂停入口。入口没开只返回原因，不抛错。 */
+  readonly requestServicePause: (call: ServicePauseCall) => Promise<PauseRequestReceipt>
   /** 后台网址前缀（提醒里的 CRM 链接用）。 */
   readonly appBase: string
   readonly startRun: () => Promise<string>
@@ -207,6 +219,14 @@ function realDeps(): LaunchWatchDeps {
       await inngest.send(postLaunchEvent(event))
     },
     readObjectiveSeries,
+    readLeadFormExtra: readLeadFormExtraLive,
+    loadPreviousSurplus: loadPreviousSurplusLive,
+    requestServicePause: call => postServicePause({
+      call,
+      fetchImpl: fetch,
+      appBase: APP_BASE,
+      serviceKey: process.env.CRON_SECRET ?? null,
+    }),
     countMeInbound: (clientId, sinceIso) => countMeWhatsappInbound(supabaseAdmin, clientId, sinceIso),
     appBase: APP_BASE,
     startRun: () => startCronRunId(LAUNCH_WATCH_JOB),
@@ -229,9 +249,19 @@ export function summarizeRunCounts(summary: LaunchWatchSummary): { processed: nu
 
 // ─── 编排 ───────────────────────────────────────────────────────────────────
 
+const SERIES_ACCOUNT_RE = /^act_\d{6,20}$/
+
+/** 系列写了广告账户就用那一个。写了但格式不对 = null，这一小时不读、也不暂停。 */
+function configForSeries(cfg: TrackingClientConfig, series: ObjectiveWatchSeries): TrackingClientConfig | null {
+  if (series.ad_account_id === undefined) return cfg
+  if (!SERIES_ACCOUNT_RE.test(series.ad_account_id)) return null
+  return { ...cfg, ad_account_id: series.ad_account_id }
+}
+
 /**
  * 按目标盯盘：一个客户配置里的每个系列读一遍、判一遍。
  * WhatsApp 系列只有在 Meta 报了聊天数时，才去数 ME 自系列创建起收到几个会话（没聊天数没什么可比）。
+ * 表单留资在判定之后，命中故障才去调只暂停入口；调失败不把这个系列改成「没读到」。
  */
 async function watchObjectives(
   step: LaunchWatchStep,
@@ -242,19 +272,57 @@ async function watchObjectives(
   now: Date,
 ): Promise<ObjectiveWatchSummary> {
   const series: SeriesVerdict[] = []
-  for (const s of watch.series) {
-    const facts = await step.run(`objective:${clientId}:${s.campaign_id}`, () => deps.readObjectiveSeries(clientId, cfg, s, now))
-    let me: MeInboundFact | null = null
-    if (s.kind === 'whatsapp' && facts.read && (facts.total?.conversations ?? 0) > 0) {
-      const since = facts.campaign.created_at
-      me = since === null
-        ? { read: false, error: '读不到系列创建时间，没法数 ME 收到的会话' }
-        : await step.run(`me-inbound:${clientId}:${s.campaign_id}`, () => deps.countMeInbound(clientId, since))
-    }
-    const links = { ads_manager: adsManagerCampaignUrl(cfg.ad_account_id, s.campaign_id), crm: crmUrl(deps.appBase, clientId) }
-    series.push(judgeSeries({ watch, series: s, facts, me, now, currency: cfg.currency, links }))
-  }
+  for (const s of watch.series) series.push(await watchOneSeries(step, deps, clientId, cfg, watch, s, now))
   return { as_of: now.toISOString(), series }
+}
+
+async function watchOneSeries(
+  step: LaunchWatchStep,
+  deps: LaunchWatchDeps,
+  clientId: string,
+  cfg: TrackingClientConfig,
+  watch: ObjectiveWatchConfig,
+  series: ObjectiveWatchSeries,
+  now: Date,
+): Promise<SeriesVerdict> {
+  const seriesCfg = configForSeries(cfg, series)
+  const links = {
+    ads_manager: adsManagerCampaignUrl((seriesCfg ?? cfg).ad_account_id, series.campaign_id),
+    crm: crmUrl(deps.appBase, clientId),
+  }
+  if (seriesCfg === null) {
+    return judgeSeries({
+      watch, series, now, currency: cfg.currency, links, me: null,
+      facts: { read: false, error: '系列配置的广告账户编号不对，这一小时不读、也不暂停' },
+    })
+  }
+  const facts = await step.run(`objective:${clientId}:${series.campaign_id}`, () => deps.readObjectiveSeries(clientId, seriesCfg, series, now))
+  const me = await meInboundFor(step, deps, clientId, series, facts)
+  const verdict = judgeSeries({ watch, series, facts, me, now, currency: seriesCfg.currency, links })
+  const partial = await reviewLeadFormSeries({
+    step,
+    deps,
+    clientId,
+    cfg: seriesCfg,
+    series,
+    facts,
+    verdict,
+    now,
+  })
+  return partial === null ? verdict : { ...verdict, ...partial }
+}
+
+async function meInboundFor(
+  step: LaunchWatchStep,
+  deps: LaunchWatchDeps,
+  clientId: string,
+  series: ObjectiveWatchSeries,
+  facts: SeriesFacts | SeriesUnread,
+): Promise<MeInboundFact | null> {
+  if (series.kind !== 'whatsapp' || !facts.read || (facts.total?.conversations ?? 0) <= 0) return null
+  const since = facts.campaign.created_at
+  if (since === null) return { read: false, error: '读不到系列创建时间，没法数 ME 收到的会话' }
+  return step.run(`me-inbound:${clientId}:${series.campaign_id}`, () => deps.countMeInbound(clientId, since))
 }
 
 async function watchOneClient(

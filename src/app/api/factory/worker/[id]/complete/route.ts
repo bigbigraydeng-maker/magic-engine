@@ -11,6 +11,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { completeWorkOrder } from '@/lib/factory/complete-work-order'
+import { isRemotionBrief } from '@/lib/factory/render-mode'
+import { enqueueRemotionMaliangReview } from '@/lib/maliang/enqueue-remotion-review'
+import { inngest } from '@/lib/inngest/client'
 import type { ReelMediaEvidence } from '@/lib/social/reel-media-checks'
 import {
   isWorkerAuthorized,
@@ -221,6 +224,19 @@ export async function POST(
     mediaEvidence,
   })
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+  if (isRemotionBrief(wo.brief)) {
+    const queued = await enqueueRemotionMaliangReview({
+      brief: wo.brief,
+      clientId: wo.client_id,
+      workOrderId: wo.id,
+      videoPath,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      send: (event) => inngest.send(event),
+    })
+    if (!queued.sent) {
+      console.error(`[factory worker] maliang review not queued for ${id}: ${queued.reason ?? 'unknown'}`)
+    }
+  }
   return NextResponse.json({
     ok: true,
     status: result.status,

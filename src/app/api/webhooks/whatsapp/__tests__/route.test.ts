@@ -516,6 +516,33 @@ describe('POST — 消息落库', () => {
     expect(captured.filters.conversations).toMatchObject({ __is_entry_referral: null })
   })
 
+  it('广告 referral 写进联系人首触 + 入站触点的 attr_*（有 source_id 才有 ad id）', async () => {
+    const captured = stubDb()
+    await POST(makePost(messagePayload({ referral: { source_type: 'ad', source_id: '5255', ctwa_clid: 'clid-9' } })))
+    expect(mockResolveContact.mock.calls[0][0].attribution).toMatchObject({ platform: 'meta', adId: '5255' })
+    expect(captured.touchUpserts[0].row).toMatchObject({
+      attr_platform: 'meta',
+      attr_ad_id: '5255',
+      metadata: expect.objectContaining({ ctwa_clid: 'clid-9' }),
+    })
+    // 推进时间的 update 不能再覆盖 metadata / attr_*
+    const advance = captured.updates.find((u) => u.table === 'contact_touchpoints')
+    expect(advance?.payload).not.toHaveProperty('metadata')
+    expect(advance?.payload).not.toHaveProperty('attr_ad_id')
+  })
+
+  it('只有 ctwa_clid（没 source_id）→ platform=meta，ad id 留空，不猜', async () => {
+    const captured = stubDb()
+    await POST(makePost(messagePayload({ referral: { ctwa_clid: 'clid-only' } })))
+    expect(captured.touchUpserts[0].row).toMatchObject({ attr_platform: 'meta', attr_ad_id: null })
+  })
+
+  it('没有 referral 的消息不写任何 attr_* 列', async () => {
+    const captured = stubDb()
+    await POST(makePost(messagePayload()))
+    expect(captured.touchUpserts[0].row).not.toHaveProperty('attr_platform')
+  })
+
   it('入站触点只许往前推，不许把时间拨回去（并发投递下的回拨闸）', async () => {
     const captured = stubDb()
     const sentAt = new Date(1788336000 * 1000).toISOString()

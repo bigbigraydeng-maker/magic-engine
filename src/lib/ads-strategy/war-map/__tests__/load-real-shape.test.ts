@@ -50,6 +50,7 @@ vi.mock('@/lib/ads-strategy/config', () => ({
   loadAdStrategyConfigWithSource: async () => ({ source: 'fallback', config: { creative_pool: [] } }),
 }))
 
+import { baseSpec } from '@/lib/marketing-plan/promo/__tests__/fixtures'
 import { loadWarMapInput } from '../load'
 import { buildWarMap } from '../build'
 
@@ -231,6 +232,87 @@ describe('loadWarMapInput · 真实形状的行（CTS 2026-10-20 08:50Z）', () 
     expect(input.audienceHistory.some(h => personalAudienceIds.has(h.audienceId))).toBe(false)
     expect(input.campaigns.length).toBeGreaterThan(0)
     expect(input.campaigns.every(c => c.adAccountId === OFFICIAL)).toBe(true)
+  })
+
+  it('K. 计划所挂目标的最新处方（含草稿）变成一行；别的目标和别的客户不算', async () => {
+    db.tables.marketing_plans = [{
+      client_id: CLIENT,
+      status: 'draft',
+      updated_at: '2026-10-20T01:00:00.000Z',
+      plan_data: { promo: baseSpec({ goal_id: 'goal-1' }) },
+    }]
+    db.tables.goals = [{ id: 'goal-1', client_id: CLIENT, title: '目标甲', budget_currency: 'NZD' }]
+    db.tables.prescriptions = [
+      {
+        id: 'old', client_id: CLIENT, goal_id: 'goal-1', status: 'approved', version: 1,
+        agent_name: '旧的', created_at: '2026-10-01T00:00:00.000Z',
+        content: { summary: '旧', phases: [], kpi_targets: [], budget_allocation: [] },
+      },
+      {
+        id: 'new', client_id: CLIENT, goal_id: 'goal-1', status: 'draft', version: 2,
+        agent_name: '开方人甲', created_at: '2026-10-19T00:00:00.000Z',
+        content: {
+          summary: '新',
+          phases: [{
+            phase_number: 1, name: '准备', duration_weeks: 1,
+            actions: [
+              { id: 'a1', title: '动作一', description: '', fix_type: 'fde_manual', module: 'manual' },
+              { id: 'a2', title: '动作二', description: '', fix_type: 'fde_manual', module: 'manual' },
+              { id: 'a3', title: '自动', description: '', fix_type: 'me_auto', module: 'ads_intelligence' },
+            ],
+          }],
+          kpi_targets: [],
+          budget_allocation: [],
+        },
+      },
+      {
+        id: 'other', client_id: CLIENT, goal_id: 'goal-9', status: 'draft', version: 9,
+        agent_name: '别人', created_at: '2026-10-20T00:00:00.000Z', content: { summary: '', phases: [], kpi_targets: [] },
+      },
+    ]
+    const { input, view } = await run()
+    expect(input.plan?.goalTitle).toBe('目标甲')
+    expect(input.plan?.prescriptionLine).toBe('处方 v2 · 草稿 · 2 条人工动作')
+    expect(view.prescriptionLine).toBe('处方 v2 · 草稿 · 2 条人工动作')
+  })
+
+  it('M. 较新的草稿不能把已批准计划挤下作战地图', async () => {
+    db.tables.marketing_plans = [
+      {
+        client_id: CLIENT, status: 'approved', updated_at: '2026-10-01T01:00:00.000Z',
+        plan_data: { promo: baseSpec({ goal_id: 'goal-live' }) },
+      },
+      {
+        client_id: CLIENT, status: 'draft', updated_at: '2026-10-20T01:00:00.000Z',
+        plan_data: { promo: baseSpec({ goal_id: 'goal-draft' }) },
+      },
+    ]
+    db.tables.goals = [
+      { id: 'goal-live', client_id: CLIENT, title: '正在用的目标', budget_currency: 'NZD' },
+      { id: 'goal-draft', client_id: CLIENT, title: '新草稿目标', budget_currency: 'NZD' },
+    ]
+    const input = await loadWarMapInput(CLIENT, NOW)
+    expect(input.plan?.status).toBe('approved')
+    expect(input.plan?.goalTitle).toBe('正在用的目标')
+  })
+
+  it('L. 处方读失败时计划和阶段仍在，处方那一行留空', async () => {
+    db.tables.marketing_plans = [{
+      client_id: CLIENT, status: 'draft', updated_at: '2026-10-20T01:00:00.000Z',
+      plan_data: { promo: baseSpec({ goal_id: 'goal-1' }) },
+    }]
+    db.tables.goals = [{ id: 'goal-1', client_id: CLIENT, title: '目标甲', budget_currency: 'NZD' }]
+    db.errors.prescriptions = 'boom'
+    const input = await loadWarMapInput(CLIENT, NOW)
+    expect(input.plan).toMatchObject({
+      status: 'draft',
+      goalTitle: '目标甲',
+      prescriptionLine: null,
+      phases: [
+        { name: '阶段 1', startDate: '2026-11-01', endDate: '2026-11-14' },
+        { name: '阶段 2', startDate: '2026-11-15', endDate: '2026-11-30' },
+      ],
+    })
   })
 
   it('J. control: nothing hidden -> pools and campaigns from both accounts are present', async () => {

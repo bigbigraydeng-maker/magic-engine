@@ -29,7 +29,13 @@ export async function POST(
 
   await supabaseAdmin
     .from('viral_reference_library')
-    .update({ analysis_status: 'pending', analysis_error: null })
+    .update({
+      analysis_status: 'pending',
+      analysis_error: null,
+      analysis_attempts: 0,
+      next_retry_at: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', id)
 
   analyzeViralReference(ref.id, ref.source_url).catch(err => {
