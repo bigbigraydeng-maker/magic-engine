@@ -26,10 +26,26 @@ function metricDirection(text: string, metricRe: RegExp): 'up' | 'down' | null {
   return up ? 'up' : 'down'
 }
 
+const FREQ_UP_RE = /\b(higher|high|passes|exceeds?|above|over)\b|越高|过高|更高|超过|升高|上升|增加/i
+const FREQ_DOWN_RE = /\b(lower|low|below|drops?|falls?|under)\b|越低|过低|更低|低于|下降|降低|减少/i
+const METRIC_CUT_RE = /\bcpm\b|\bctr\b|click-?through|点击率/i
+
+/** 频次自己的变化方向：只看紧贴"频次/frequency"的词（后侧截到指标词前）；只有明确"升高"才返回 true。 */
+function frequencyRises(text: string): boolean {
+  const m = FREQ_RE.exec(text)
+  if (!m) return false
+  const before = text.slice(Math.max(0, m.index - 12), m.index)
+  const rawAfter = text.slice(m.index + m[0].length, m.index + m[0].length + 12)
+  const cut = METRIC_CUT_RE.exec(rawAfter)
+  const after = cut ? rawAfter.slice(0, cut.index) : rawAfter
+  const near = `${before} ${after}`
+  return FREQ_UP_RE.test(near) && !FREQ_DOWN_RE.test(near)
+}
+
 /** 只归类方向明确且与 runBacktest 预期一致的经验：频次↑→CPM↑、频次↑→CTR↓；其余 null（无法回测）。 */
 export function classifyBacktest(lesson: string, rationale?: string | null): BacktestRule | null {
   const text = `${lesson} ${rationale ?? ''}`
-  if (!FREQ_RE.test(text)) return null
+  if (!FREQ_RE.test(text) || !frequencyRises(text)) return null
   if (CPM_RE.test(text)) return metricDirection(text, CPM_RE) === 'up' ? 'freq_cpm' : null
   if (CTR_RE.test(text)) return metricDirection(text, CTR_RE) === 'down' ? 'freq_ctr' : null
   return null

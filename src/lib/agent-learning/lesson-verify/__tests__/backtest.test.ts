@@ -19,6 +19,9 @@ describe('classifyBacktest', () => {
     expect(classifyBacktest('Higher frequency increases CTR')).toBeNull()
     expect(classifyBacktest('频次越高 CPM 越低')).toBeNull()
     expect(classifyBacktest('Frequency does not raise CPM')).toBeNull()
+    expect(classifyBacktest('频次越低 CPM 越高')).toBeNull()
+    expect(classifyBacktest('频次越低 CTR 越低')).toBeNull()
+    expect(classifyBacktest('When frequency drops, CPM rises')).toBeNull()
     expect(classifyBacktest('Frequency and CPM are related')).toBeNull()
   })
   it('accepts aligned direction wording', () => {
