@@ -21,6 +21,7 @@ import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
 import { approveDraftContentGate } from './approve-gate'
 import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
+import { planDraftCardLine, planDraftCardView } from '@/lib/marketing-plan/promo/plan-draft-card'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -57,7 +58,16 @@ export async function GET(
 
     const prescription = await failIfStaleGenerating(clientId, pId, data)
 
-    return NextResponse.json({ success: true, prescription }, {
+    return NextResponse.json({
+      success: true,
+      prescription,
+      plan_draft_line: planDraftCardLine(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+      plan_draft: planDraftCardView(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+    }, {
       headers: {
         // 双重保险：浏览器也不要缓存
         'Cache-Control': 'no-store, no-cache, must-revalidate',

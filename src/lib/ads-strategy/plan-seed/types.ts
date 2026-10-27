@@ -65,8 +65,10 @@ export const planSeedSchema = z.object({
   ad_steps: z.array(planSeedStepSchema),
   skipped: z.array(z.object({ step_key: z.string(), why_empty: z.string() })),
   notes: z.array(z.string()),
+  /** 机器可读：取数本身失败（令牌权限、表单、账户状态读不到，或整体超时）。只在失败时出现。 */
+  read_failed: z.boolean().optional(),
 })
-export type PlanSeed = z.infer<typeof planSeedSchema>
+export type PlanSeed= z.infer<typeof planSeedSchema>
 
 /** 解析计划种子；畸形输入返回 null，永不抛错。 */
 export function readPlanSeed(raw: unknown): PlanSeed | null {
