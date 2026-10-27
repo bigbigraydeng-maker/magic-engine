@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { classifyLesson, VERIFY_LAYER_LABEL } from '@/lib/agent-learning/lesson-verify/classify'
 import { buildExperimentCard } from '@/lib/agent-learning/lesson-verify/experiment-card'
 
@@ -10,6 +10,8 @@ export interface SiteOption {
 }
 
 interface VerifyResponse {
+  /** 发起请求时选的站点；只在仍选着它时才展示结果。 */
+  forSiteId?: string
   ok?: boolean
   error?: string
   url?: string
@@ -32,8 +34,16 @@ export default function LessonVerify({
   const [siteId, setSiteId] = useState('self')
   const [busy, setBusy] = useState(false)
   const [data, setData] = useState<VerifyResponse | null>(null)
+  const currentSite = useRef(siteId)
+
+  function pickSite(next: string) {
+    currentSite.current = next
+    setSiteId(next)
+    setData(null)
+  }
 
   async function run() {
+    const requested = siteId
     setBusy(true)
     try {
       const res = await fetch('/api/admin/agent-learning/verify', {
@@ -41,21 +51,23 @@ export default function LessonVerify({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ lessonKey, siteId }),
       })
-      setData((await res.json()) as VerifyResponse)
+      const json = (await res.json()) as VerifyResponse
+      if (currentSite.current === requested) setData({ ...json, forSiteId: requested })
     } catch {
-      setData({ error: '检查失败，请稍后再试' })
+      if (currentSite.current === requested) setData({ error: '检查失败，请稍后再试', forSiteId: requested })
     } finally {
       setBusy(false)
     }
   }
 
+  const shown = data && data.forSiteId === siteId ? data : null
   const isSite = kind === 'html_visible' || kind === 'structured_data'
   return (
     <div className="mt-2 border-t border-slate-100 pt-2 text-xs text-slate-600">
       <p>验证到：{VERIFY_LAYER_LABEL[kind]}</p>
       {isSite && (
         <div className="mt-1 flex flex-wrap items-center gap-2">
-          <select value={siteId} onChange={(e) => setSiteId(e.target.value)} className="rounded border border-slate-200 px-2 py-1">
+          <select value={siteId} onChange={(e) => pickSite(e.target.value)} className="rounded border border-slate-200 px-2 py-1">
             <option value="self">我们自己的站</option>
             {sites.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
@@ -64,10 +76,10 @@ export default function LessonVerify({
           <button onClick={run} disabled={busy} className="rounded bg-slate-100 px-3 py-1 hover:bg-slate-200 disabled:opacity-50">
             {busy ? '检查中…' : '检查这个站'}
           </button>
-          {data?.result && (
-            <span className={data.result.pass ? 'text-emerald-700' : 'text-amber-700'}>{data.result.summary}</span>
+          {shown?.result && (
+            <span className={shown.result.pass ? 'text-emerald-700' : 'text-amber-700'}>{shown.result.summary}</span>
           )}
-          {data?.error && <span className="text-red-600">{data.error}</span>}
+          {shown?.error && <span className="text-red-600">{shown.error}</span>}
         </div>
       )}
       {kind === 'ad_experiment' && <ExperimentView lesson={lesson} />}

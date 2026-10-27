@@ -3,8 +3,9 @@
  * 不证明"照做就会变好"。不调模型、不写库。
  */
 import { safeFetchText } from '@/lib/net/safe-fetch'
-import { extractText, MAX_PAGE_BYTES, MIN_TEXT_CHARS } from '@/lib/tools-lab/site-check/homepage'
-import { vetUrl } from '@/lib/tools-lab/site-check/guards'
+import { detectAntibotChallenge } from '@/lib/site-audit/antibot-detector'
+import { extractText, extractTitle, looksLikeChallenge, MAX_PAGE_BYTES, MIN_TEXT_CHARS } from '@/lib/tools-lab/site-check/homepage'
+import { siteHost, vetUrl } from '@/lib/tools-lab/site-check/guards'
 
 export interface CheckResult {
   pass: boolean
@@ -42,6 +43,21 @@ export function checkStructuredData(html: string): CheckResult {
     : { pass: false, summary: '不符合：首页没有发现结构化数据（JSON-LD）。' }
 }
 
+/** 判定前先确认拿到的确实是所选站点的真实 HTML 页面；否则"无法检查"，不给符合/不符合。 */
+function responseProblem(res: { url: string; text: string; headers: Headers }, startHostname: string): string | null {
+  const final = vetUrl(res.url)
+  if (!final || siteHost(final.hostname) !== siteHost(startHostname)) return '站点跳转到了别的网站，没法检查'
+  if (!/text\/html|application\/xhtml\+xml/i.test(res.headers.get('content-type') || '')) {
+    return '站点返回的不是网页（HTML），没法检查'
+  }
+  const title = extractTitle(res.text)
+  const text = extractText(res.text)
+  if (looksLikeChallenge(title, text, res.text) || (text.length >= MIN_TEXT_CHARS && detectAntibotChallenge(text, title) !== null)) {
+    return '站点返回的是防爬验证页，没法检查'
+  }
+  return null
+}
+
 export type SiteCheckKind = 'html_visible' | 'structured_data'
 
 export type SiteCheckOutcome =
@@ -66,6 +82,8 @@ export async function runSiteCheck(
       headers: { Accept: 'text/html' },
     })
     if (!res.ok) return { ok: false, error: `站点返回 ${res.status}，没法检查` }
+    const problem = responseProblem(res, given.hostname)
+    if (problem) return { ok: false, error: problem }
     const result = kind === 'html_visible' ? checkHtmlText(res.text) : checkStructuredData(res.text)
     return { ok: true, url, result }
   } catch {
