@@ -162,6 +162,49 @@ describe('maliang review on a template-render work order', () => {
     expect(finish).toHaveBeenCalledWith(expect.objectContaining({ failed: 1 }))
   })
 
+  it('asks for the material dual review only when the order is material-only', async () => {
+    const enqueue = vi.fn().mockResolvedValue(undefined)
+    const asset = { ...ORDER, brief: { remotion: { ...ORDER.brief.remotion, deliverable: 'asset_only' } } }
+    const db = makeDb(asset)
+    const fn = createMaliangRenderCheckFunction({
+      supabase: db.client,
+      check: async () => PASS_CHECK,
+      apiKey: () => 'test-key',
+      enqueueAssetReview: enqueue,
+    })
+    const handler = (fn as unknown as { fn: (args: unknown) => Promise<Record<string, unknown>> }).fn
+    const result = await handler({ event: { id: 'evt-remotion', data: eventData() }, step: step() })
+    expect(result.status).toBe('pass')
+    expect(enqueue).toHaveBeenCalledWith({ client_id: CLIENT_ID, work_order_id: WORK_ORDER_ID })
+
+    const plain = makeDb(ORDER)
+    const plainFn = createMaliangRenderCheckFunction({
+      supabase: plain.client,
+      check: async () => PASS_CHECK,
+      apiKey: () => 'test-key',
+      enqueueAssetReview: enqueue,
+    })
+    const plainHandler = (plainFn as unknown as { fn: (args: unknown) => Promise<unknown> }).fn
+    await plainHandler({ event: { id: 'evt-plain', data: eventData() }, step: step() })
+    expect(enqueue).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the picture verdict when asking for the dual review fails', async () => {
+    const asset = { ...ORDER, brief: { remotion: { ...ORDER.brief.remotion, deliverable: 'asset_only' } } }
+    const db = makeDb(asset)
+    const fn = createMaliangRenderCheckFunction({
+      supabase: db.client,
+      check: async () => PASS_CHECK,
+      apiKey: () => 'test-key',
+      enqueueAssetReview: async () => { throw new Error('event bus down') },
+    })
+    const handler = (fn as unknown as { fn: (args: unknown) => Promise<Record<string, unknown>> }).fn
+    const result = await handler({ event: { id: 'evt-remotion', data: eventData() }, step: step() })
+    expect(result.status).toBe('pass')
+    expect(result.no_publish).toBe(true)
+    expect(db.updates.some((update) => update.patch.status === 'approved')).toBe(false)
+  })
+
   it('review-error: a timeout stays in the human queue and is not machine-reviewed', async () => {
     const { result, db } = await run(() => new Promise<MaliangCheck>(() => {}), ORDER, 15)
     expect(result.status).toBe('unverifiable')
