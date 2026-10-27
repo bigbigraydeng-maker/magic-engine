@@ -85,6 +85,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   promo_plan_watch: 'decide',
   lead_followup_check_failed: 'dev', // 「填了表没人回」这一栏没算出来：我们这边的欠账
   promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
+  plan_draft_auto_failed: 'dev', // 同意前自动起草连续失败：系统没写成，不占批准决定
   ads_tracking_preflight_fix: 'dev', // 开投前追踪检查的红灯怎么修：改官网 / 改配置，开发的活（PM 在推广计划页看灯，开投拍板走「到期阶段检查没过」）
   ads_tracking_preflight_broken: 'dev', // 开投前追踪检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
 
@@ -117,6 +118,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
+  factory_render_worker_down: 'one_click', // 渲染引擎没就绪，要人在那台机器上修好
+  factory_review_overdue: 'review', // 片子待审超过 24 小时，审核的人看一眼
+  factory_dead_letter_stuck: 'one_click', // 死信不会再自动重跑，要人看这张工单
+  factory_material_check_failed: 'dev', // 待审/死信清单没读出来，是检查自己的欠账
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   whatsapp_number_unclaimed: 'one_click', // 号码在发消息但没客户绑定它，去设置页绑一次
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类

@@ -5,6 +5,7 @@
  * 客户还没有挂上目标的计划时，另按「最近一份还在用的处方」读（和 latest-draft 同一组状态）。
  */
 
+import { readPrescriptionLaunch } from '@/lib/ads/prescription-launch-check-store'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
   isStandingRule, oneSentence, reviewAnchor, ruleLines, spendFromStored, whySentences,
@@ -62,6 +63,12 @@ export interface GoalPrescriptionView {
   spend: StoredSpend
   /** 复盘起算日（YYYY-MM-DD）。没有就是 null。 */
   review_anchor: string | null
+  /** 开投之后的大白话。没有这一段时，卡片自己写「还不知道」。 */
+  launch_check?: LaunchCheckView
+}
+
+export interface LaunchCheckView {
+  lines: string[]
 }
 
 export interface GoalPrescriptionRow {
@@ -72,6 +79,11 @@ export interface GoalPrescriptionRow {
   agent_name?: unknown
   content?: unknown
   created_at?: unknown
+  approved_at?: unknown
+}
+
+const UNREADABLE_LAUNCH_CHECK: LaunchCheckView = {
+  lines: ['开投之后的数没读出来，所以不知道。'],
 }
 
 const CURRENCY = /^[A-Za-z]{3}$/
@@ -255,7 +267,7 @@ export async function loadLatestGoalPrescription(clientId: string, goalId: strin
   if (goalId.trim() === '') return null
   const { data, error } = await supabaseAdmin
     .from('prescriptions')
-    .select('id, goal_id, status, version, agent_name, content, created_at')
+    .select('id, goal_id, status, version, agent_name, content, created_at, approved_at')
     .eq('client_id', clientId)
     .eq('goal_id', goalId)
     .order('version', { ascending: false })
@@ -264,7 +276,7 @@ export async function loadLatestGoalPrescription(clientId: string, goalId: strin
     .maybeSingle()
   if (error) throw new Error(`读处方失败：${error.message}`)
   if (!data) return null
-  return toGoalPrescriptionView(data as GoalPrescriptionRow, goalId, await readGoalBudgetCurrency(clientId, goalId))
+  return finishPrescription(clientId, data as GoalPrescriptionRow, goalId)
 }
 
 /** 和 prescriptions/latest-draft 不带目标时一样：还在用的状态里，按写入时间取最近一份。 */
@@ -273,7 +285,7 @@ const READABLE_STATUSES = ['draft', 'generating', 'failed', 'approved'] as const
 export async function loadLatestClientPrescription(clientId: string): Promise<GoalPrescriptionView | null> {
   const { data, error } = await supabaseAdmin
     .from('prescriptions')
-    .select('id, goal_id, status, version, agent_name, content, created_at')
+    .select('id, goal_id, status, version, agent_name, content, created_at, approved_at')
     .eq('client_id', clientId)
     .in('status', [...READABLE_STATUSES])
     .order('created_at', { ascending: false })
@@ -282,7 +294,45 @@ export async function loadLatestClientPrescription(clientId: string): Promise<Go
   if (error) throw new Error(`读处方失败：${error.message}`)
   if (!data) return null
   const row = data as GoalPrescriptionRow
-  const goalId = readText(row.goal_id).trim()
-  const currency = goalId === '' ? null : await readGoalBudgetCurrency(clientId, goalId)
-  return toGoalPrescriptionView(row, goalId, currency)
+  return finishPrescription(clientId, row, readText(row.goal_id).trim())
+}
+
+async function finishPrescription(
+  clientId: string,
+  row: GoalPrescriptionRow,
+  goalId: string,
+): Promise<GoalPrescriptionView | null> {
+  const currency = goalId.trim() === '' ? null : await readGoalBudgetCurrency(clientId, goalId)
+  const view = toGoalPrescriptionView(row, goalId, currency)
+  if (!view) return null
+  return attachLaunchCheck(clientId, view, optionalText(row.approved_at))
+}
+
+function optionalText(value: unknown): string | null {
+  const text = readText(value).trim()
+  return text === '' ? null : text
+}
+
+async function attachLaunchCheck(
+  clientId: string,
+  view: GoalPrescriptionView,
+  approvedAt: string | null,
+): Promise<GoalPrescriptionView> {
+  try {
+    const launch_check = await readPrescriptionLaunch({
+      clientId,
+      now: new Date(),
+      prescription: {
+        id: view.id,
+        clientId,
+        goalId: view.goal_id,
+        status: view.status,
+        approvedAt,
+        kpis: view.kpis.map(kpi => ({ metric: kpi.metric, target: kpi.target_value, unit: kpi.unit })),
+      },
+    })
+    return { ...view, launch_check }
+  } catch {
+    return { ...view, launch_check: UNREADABLE_LAUNCH_CHECK }
+  }
 }

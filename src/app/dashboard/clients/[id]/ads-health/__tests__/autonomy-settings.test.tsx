@@ -255,6 +255,26 @@ describe('AutonomySettings', () => {
     expect(document.body.textContent).not.toContain('信封')
   })
 
+  it('按工单引用的成片显示回填的视频编号，状态仍是待批准', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/labels')) {
+        return Response.json({ labels: { 'wo-1': { title: 'Harbour walk', subtitle: '15-second reel', publishedAt: null, url: null } } })
+      }
+      return Response.json({
+        success: true,
+        config: {
+          ...config,
+          creative_pool: [{ kind: 'work_order', ref: 'wo-1', status: 'candidate', alias_refs: ['555'] }],
+        },
+      })
+    }))
+    render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getByText('Harbour walk')).toBeTruthy())
+    expect(screen.getByText('555')).toBeTruthy()
+    expect(screen.getByText('待批准')).toBeTruthy()
+    expect(screen.getByText('批准')).toBeTruthy()
+  })
+
   it('自动流程状态的素材显示中文状态、没有批准按钮', async () => {
     const fn = vi.fn(async (url: string) => {
       if (url.endsWith('/labels')) return Response.json({ labels: {} })

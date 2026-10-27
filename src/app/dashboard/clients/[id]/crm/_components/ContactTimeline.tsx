@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { humanizeFormCode, humanizeFormSummary } from '@/lib/crm/returning-lead'
 import { CallAnalysisCard, type CallAnalysisData } from './CallAnalysisCard'
 import {
   describeStageActor,
@@ -93,7 +94,28 @@ interface Payload {
   omittedMessages?: number
   /** 官网表单里「预计出发时间 / 每人预算」的一行人话；缺失 null（不显示）。 */
   formFactsLine?: string | null
+  /** 回头客 / 往来一览，服务端用列表同一份判据算好。读不出来 null。 */
+  engagement?: TimelineEngagement | null
   error?: string
+}
+
+/** 抽屉顶部「🔥 她又回来了」和「往来一览」的数据（来自 timeline 接口，见 `lib/crm/returning-lead`）。 */
+export interface TimelineEngagement {
+  returning: {
+    firstEnquiryAt: string
+    latestFormAt: string
+    ourLastContactAt: string
+    ourContacts: number
+    earlierForms: number
+  } | null
+  /** 往来一览一行字：「我们联系过：邮件 2 封 ｜ 他：填过 2 次表」。 */
+  line: string | null
+  /** 回头客的故事线，按时间顺序，最后一句打头带火。不是回头客时是空数组。 */
+  story: string[]
+  /** 他最近一次主动动作（表单 / 消息 / 点链接）。AI 概况比它旧就要提醒。 */
+  lastActiveAt: string | null
+  /** 回头客的路线（逐步 + 间隔 + 为什么热）；不是回头客或旧接口时没有。 */
+  journey?: import('@/lib/crm/returning-journey').Journey | null
 }
 
 /** 渠道 → 一眼能认的图标。认不出的新渠道给中性圆点，绝不空白。 */
@@ -202,6 +224,8 @@ export interface TimelineSummary {
   stageSource: StageSource | null
   /** 官网表单里「预计出发时间 · 每人预算」一行人话；只是事实，不参与冷热/阶段判断。 */
   formFactsLine: string | null
+  /** 回头客 / 往来一览；服务端没给（或算失败）就是 null，抽屉不画这一块。 */
+  engagement: TimelineEngagement | null
 }
 
 /** changedBy → 来源。只认得出的才说；认不出的机器身份返回 null（宁可不显示，不许说错）。 */
@@ -215,8 +239,12 @@ export function stageSourceOf(changedBy: string | null | undefined): StageSource
 }
 
 /** 从整条线里提炼摘要。线是从旧到新的，所以后面的覆盖前面的。 */
-function summarise(timeline: TimelineEntry[], formFactsLine: string | null = null): TimelineSummary | null {
-  if (timeline.length === 0 && !formFactsLine) return null
+function summarise(
+  timeline: TimelineEntry[],
+  formFactsLine: string | null = null,
+  engagement: TimelineEngagement | null = null,
+): TimelineSummary | null {
+  if (timeline.length === 0 && !formFactsLine && !engagement) return null
   const s: TimelineSummary = {
     lastText: null,
     lastWho: null,
@@ -225,19 +253,21 @@ function summarise(timeline: TimelineEntry[], formFactsLine: string | null = nul
     travelWindow: null,
     stageSource: null,
     formFactsLine,
+    engagement,
   }
   for (const e of timeline) {
-    if (e.tour) s.tour = e.tour
+    // 表单下拉的原始代码（best_of_china_–_15_days）翻成人话再显示
+    if (e.tour) s.tour = humanizeFormCode(e.tour) ?? e.tour
     if (e.travelWindow) s.travelWindow = e.travelWindow
     if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
     const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
     if (text && text.trim()) {
-      s.lastText = text.trim()
+      s.lastText = (e.kind === 'touch' ? humanizeFormSummary(text) : null) ?? text.trim()
       s.lastWho = e.direction === 'inbound' ? (e.senderName || '客人') : '我们'
       s.lastAt = e.at
     }
   }
-  return s.lastText || s.tour || s.travelWindow || s.stageSource || s.formFactsLine ? s : null
+  return s.lastText || s.tour || s.travelWindow || s.stageSource || s.formFactsLine || s.engagement ? s : null
 }
 
 /**
@@ -411,7 +441,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
         {e.direction === 'inbound' ? ' · 客人来的' : ''} · {when(e.at)}
       </p>
       {e.summary && (
-        <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{e.summary}</p>
+        <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{humanizeFormSummary(e.summary) ?? e.summary}</p>
       )}
       <Verdict e={e} />
       <Chips items={chips} />
@@ -490,7 +520,7 @@ function useTimeline(
         if (!alive.current) return
         dataRef.current = json
         setData(json)
-        onSummary?.(summarise(json.timeline ?? [], json.formFactsLine ?? null))
+        onSummary?.(summarise(json.timeline ?? [], json.formFactsLine ?? null, json.engagement ?? null))
       } catch (e) {
         // 被自己 abort 掉的不是失败，什么都别改 —— 改了就是替一个已经作废的
         // 请求说话，而它说的正好是旧的。

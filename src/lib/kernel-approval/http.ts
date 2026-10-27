@@ -39,6 +39,9 @@ export function requireUuid(value: unknown, label: string): string {
 export interface ApprovalActor {
   readonly email: string
   readonly tier: AccessTier
+  /** 会话角色和受限范围：专属动作（确认卡）按它再核一遍谁能点。 */
+  readonly role: 'admin' | 'client-viewer'
+  readonly allowedClientId: string | null
 }
 
 /** 统一的失败返回体。`code` 给界面分派用，`error` 给人看。 */
@@ -125,5 +128,5 @@ export async function requireApprovalActor(clientId: string): Promise<ApprovalAc
     )
   }
 
-  return { email, tier: access.tier }
+  return { email, tier: access.tier, role: access.role, allowedClientId: access.allowedClientId }
 }

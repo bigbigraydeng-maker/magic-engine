@@ -20,6 +20,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
+import { draftNotYetBuildable } from './ad-draft-expansion'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
@@ -28,7 +29,12 @@ import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
-import { buildSpendActivationReceipt, type SpendActivationAuthority, type SpendActivationReceipt } from '@/lib/ads/spend-activation'
+import {
+  buildSpendActivationReceipt,
+  type SpendActivationAuthority,
+  type SpendActivationEntry,
+  type SpendActivationReceipt,
+} from '@/lib/ads/spend-activation'
 
 /**
  * 一条广告动作在账本里的状态。
@@ -188,6 +194,11 @@ export async function createDraftForApproval(
     redlinesChecked: deps.brandRedlines === undefined ? null : deps.brandRedlines.length,
     redlinesSkipped: skippedRedlines(deps.brandRedlines),
   }
+
+  // 发布器今天只会建单个广告组、预算在组上。新字段对不上时，在任何 Meta 读取或写入之前停下。
+  // 不删除、不修改已经存在的广告对象。
+  const held = draftNotYetBuildable(draft)
+  if (held) return failedOutcome(deps, draft, { ...base, error: held })
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
   const problems = [...validateDraft(draft), ...checkDraftRedlines(draft, deps.brandRedlines)]
@@ -453,14 +464,17 @@ function renderAutoPause(r: { ok: boolean; failed: string[] } | undefined): stri
  *
  * 开之前**再查一次状态**：草案可能是几小时前建的，中间 Meta 可能改过东西，
  * 也可能同一条被点了两次。只有 `awaiting_approval` 能开。
- * 先用条件写入「占位」成 activating（只有 awaiting_approval 占得到），占不到就不开；开成功写 active，失败退回 awaiting_approval。
+ * 先用条件写入「占位」成 activating（只有 awaiting_approval 占得到），占不到就不开；开成功写 active。
+ * 审批页开失败会马上退回 awaiting_approval。确认卡不能这么做：回读和补暂停还没完，
+ * 退回之后另一次确认会占走，这次再去暂停就会把对方正在开的广告关掉。确认卡占到失败结束。
  */
 export async function approveDraft(
   actionId: string,
   supabase: SupabaseClient,
   accessToken: string,
   authority: SpendActivationAuthority,
-): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
+  entry: SpendActivationEntry = 'ad-approval',
+): Promise<{ ok: true; warning?: string } | { ok: false; error: string; holding?: boolean }> {
   const { data, error } = await supabase
     .from('flywheel_actions')
     .select('id, client_id, payload')
@@ -499,7 +513,7 @@ export async function approveDraft(
   const clientId = (data as { client_id: string }).client_id
   const receipt = buildSpendActivationReceipt({
     authority,
-    entry: 'ad-approval',
+    entry,
     clientId,
     campaignId: p.campaignId,
     draftActionId: actionId,
@@ -528,6 +542,7 @@ export async function approveDraft(
     { campaignId: p.campaignId, adSetId: p.adSetId, adIds: p.adIds },
     accessToken,
   )
+  if (!r.ok && entry === 'go-live-card') return noteHeldActivation(actionId, supabase, p, receipt, r.error)
   if (!r.ok) {
     const failedPayload: DraftRecord = {
       ...p,
@@ -570,6 +585,39 @@ export async function approveDraft(
     return { ok: true, warning: `广告已开，但账本状态没写成功：${msg}` }
   }
   return { ok: true }
+}
+
+/**
+ * 确认卡开失败：记一笔失败，但状态留在 activating。
+ * 占位要留到回读和补暂停结束，调用方再把它放回等待批准。
+ */
+async function noteHeldActivation(
+  actionId: string,
+  supabase: SupabaseClient,
+  p: DraftRecord,
+  receipt: SpendActivationReceipt,
+  error: string,
+): Promise<{ ok: false; error: string; holding: true }> {
+  const failed = await supabase
+    .from('flywheel_actions')
+    .update({
+      payload: {
+        ...p,
+        status: 'activating' satisfies DraftStatus,
+        activation: { ...receipt, status: 'meta_failed', error },
+      },
+    })
+    .eq('id', actionId)
+    .eq('payload->>status', 'activating')
+    .select('id')
+  if (failed.error || !failed.data || failed.data.length !== 1) {
+    return {
+      ok: false,
+      holding: true,
+      error: `${error}（另：失败记录没写成功，这条会停在「开启中」，请到 Meta 后台核对）`,
+    }
+  }
+  return { ok: false, error, holding: true }
 }
 
 /**

@@ -51,6 +51,7 @@ import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushAdsServicePauseItems } from './ads-service-pause-items'
 import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
+import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
@@ -72,6 +73,7 @@ import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
 export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
+import { pushFactoryMaterialItems } from './factory-material-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
 import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
@@ -240,6 +242,17 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushFactoryWorkerItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] 出片工人在岗检查失败（不阻塞其他待办）:', e),
     ),
+    (b) => pushFactoryMaterialItems(supabase, b, now, clients).catch((e: unknown) => {
+      const message = e instanceof Error && e.message.trim() ? e.message.trim().slice(0, 160) : '读不到'
+      b.push({
+        kind: 'factory_material_check_failed',
+        client_id: 'infra',
+        client_name: 'Magic Engine 后台',
+        what: `素材待审和死信检查没跑成（${message}）。没列出来不等于没有。`,
+        how: '这条不用你动手。回我一句「素材催办检查没跑成」，我去查。',
+        href: 'https://app.magicengine.com.au/dashboard/factory',
+      })
+    }),
     // Creatomate 渲染失败/超时 —— 旧路径的卡死回收已死透，这是它的替代（spec §4.4 B4）
     (b) => pushCreatomateRenderItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] Creatomate 渲染检查失败（不阻塞其他待办）:', e),
@@ -403,6 +416,9 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
     (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 推广计划每日检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushPlanDraftFailureItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 推广计划草稿失败待办生成失败（不阻塞其他待办）:', e),
     ),
     // 广告开投前「追踪与环境就绪」检查：红灯怎么修（开发欠账）+ 检查自己没跑成。读每日函数的回执，不自己现算
     (b) => pushAdsTrackingPreflightItems(supabase, b, nameOf).catch((e) =>

@@ -29,8 +29,10 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { askJson, listConfiguredProviders, type AskJsonDeps } from '@/lib/ai/failover'
 import {
   MessengerBriefSchema,
+  MessengerBriefStrictSchema,
   MESSENGER_BRIEF_JSON_SCHEMA,
   BRIEF_SCHEMA_VERSION,
   type MessengerBrief,
@@ -312,6 +314,16 @@ function renderContext(context: BriefContext | undefined, business: string): str
   return `Current state: ${who}\n\n`
 }
 
+/**
+ * 只追加给备用模型（Claude / DeepSeek）的提示词后缀，OpenAI 不受影响。
+ *
+ * 2026-10-26 在 8 段真实 CTS 邮件对话上并排试跑：同一份提示词，Claude 只有 5/8 张把
+ * 一句话和下一步写成中文；末尾加这一句之后 8/8，耗时不变。语言要求是简报专属的，
+ * 所以内容放在这里、由调用方传给切换层，切换层自己不知道简报要中文。
+ */
+export const BACKUP_MODEL_LANGUAGE_REMINDER =
+  '\n\nFINAL CHECK before you answer — this is the most common mistake: summary, customer_needs, objections, promises_made, next_action and risk_flags MUST be written in SIMPLIFIED CHINESE (汉字), even though the thread is in English. Only draft_reply is English. Do not answer these fields in English.'
+
 function renderThread(messages: StoredMessage[], business: string): string {
   return messages
     .map((m) => {
@@ -451,10 +463,24 @@ export interface GenerateBriefDeps {
    * the whole chunk never returns (see `CHUNK_TIME_BUDGET_MS`).
    */
   signal?: AbortSignal
+  /**
+   * 这一条候选的总预算（毫秒）。切换层按它给每一家切时间；省略时 20 秒，
+   * 跟 `brief-cycle.ts` 的 `PER_CANDIDATE_BUDGET_MS` 同值。
+   */
+  budgetMs?: number
+  /** 测试注入：假的供应商 / 冷却状态，整条链路不碰网络。生产不传。 */
+  failover?: AskJsonDeps
 }
 
 export interface GeneratedBrief {
   brief: MessengerBrief
+  /**
+   * 这张卡**实际是谁答的**。必须如实带回去落库 —— 原来 `storeBrief` 写的是
+   * `process.env.OPENAI_API_KEY ? modelName() : 'fallback'`：凭环境猜的，
+   * 断电时钥匙当然还在，于是备用模型答的卡也会被记成 gpt-4o-mini。
+   * 规则生成的卡（垃圾过滤、没钥匙的兜底）用 provider 'rule'。
+   */
+  answeredBy?: { provider: string; model: string }
   /**
    * `null` when no knowledge read was attempted at all (spam short-circuit,
    * or the no-API-key dev/test fallback — neither calls the model, so there
@@ -481,48 +507,45 @@ export async function generateBrief(
   context?: BriefContext,
   deps: GenerateBriefDeps = {},
 ): Promise<GeneratedBrief> {
-  if (looksLikeAutomatedSpam(messages)) return { brief: noiseBrief(), knowledgeStatus: null }
+  if (looksLikeAutomatedSpam(messages)) {
+    return { brief: noiseBrief(), knowledgeStatus: null, answeredBy: { provider: 'rule', model: 'spam-filter' } }
+  }
 
-  // apiKey gate stays BEFORE any network call (including the clients lookup
-  // below) — dev/test with no key configured must still make zero network
-  // calls, per this function's own contract (see docstring above).
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return { brief: fallbackBrief(messages), knowledgeStatus: null }
+  // 钥匙门仍然在**任何网络调用之前**（包括下面查 clients）—— dev/test 没配钥匙时必须零网络，
+  // 这是本函数自己的合同。但门不能再只看 OpenAI：钥匙被撤/没填正是切换要兜的故障形态之一，
+  // 只认 OpenAI 的门会让 OpenAI 没钥匙时直接出兜底卡，Claude 一次都不会被试
+  // （魏征审查 2026-10-26）。现在是「所有启用的家都没钥匙」才兜底。
+  if (listConfiguredProviders().length === 0) {
+    return { brief: fallbackBrief(messages), knowledgeStatus: null, answeredBy: { provider: 'rule', model: 'fallback' } }
+  }
 
   const identity = await loadClientIdentity(clientId)
   const facts = await loadClientFacts(clientId, deps.knowledge)
-  // 🔴 **收编到统一入口**（2026-09-23，接 openai-client.ts 文件头点名留给本窗口的那条）。
-  //    原来这里自己 `new OpenAI({ apiKey })`，于是这条链路的失败**绕过了
-  //    `instrumentedFetch` 的拦截** —— 账户余额 9/20 耗尽三天没人知道，这里是漏网的一处。
+  // 走切换层：OpenAI 没钱时自动换 Claude（DeepSeek 经 PM 同意、由开关控制）。
+  // 设计稿 docs/specs/2026-10-26-ai-provider-failover-design-v1.md。
   //
-  //    `bypassGateway: true` 是刻意的，不是图省事：本函数用的是 `responses.create`，
-  //    而「网关代不代理 /v1/responses」在这个仓库里零证据（openai-client.ts 里写了
-  //    实测核对过程）。所以只拿拦截、不换路由 —— 换路由等于用一条没验过的链路
-  //    替掉一条在跑的链路。
-  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
-  const client = getOpenAIClient({ apiKey, bypassGateway: true })
-  const res = await client.responses.create(
-    {
-      model: modelName(),
-      input: [
-        { role: 'system', content: buildSystemPrompt(identity, facts.entries, context?.channel) },
-        {
-          role: 'user',
-          content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
-        },
-      ],
-      text: {
-        format: { type: 'json_schema', name: 'messenger_brief', schema: MESSENGER_BRIEF_JSON_SCHEMA },
-      },
-    } as Parameters<typeof client.responses.create>[0],
-    // 🔴 2026-09-23 事故的直接原因：这个调用之前没有自己的超时，SDK 默认对 429
-    // 重试两次能把一条卡烧到 ~20 秒。`signal` 把剩余的段预算落到这一条调用本身，
-    // 而不是只靠调用方在条目之间读一次表。
-    deps.signal ? { signal: deps.signal } : undefined,
-  )
-
-  const text = (res as { output_text?: string }).output_text ?? '{}'
-  const brief = MessengerBriefSchema.parse(JSON.parse(text))
+  // 下面三条是**原来这里的刻意选择**，一条都没丢（传给切换层原样保留）：
+  //  · `bypassGateway: true` —— `responses.create` 从没走过 CF 网关一次（openai-client.ts 里有实测核对过程），
+  //    不拿一条零证据的路由换掉在跑的链路；
+  //  · 总预算 + 调用方 signal —— 2026-09-23 事故：这个调用曾没有自己的超时，SDK 对 429 重试两次能把一条卡烧到 ~20 秒；
+  //  · 不开 json_schema 的 strict —— 现在也没开，开了就是行为变更。
+  // 🔴 变化点（诚实列出，别写成「一字不变」）：每家 maxRetries 变成 0、错误类型变成聚合错误、
+  //    校验换成无默认值的严格版（缺字段不再被默认值悄悄填空，会触发重试/换家）。
+  const answer = await askJson({
+    system: buildSystemPrompt(identity, facts.entries, context?.channel),
+    user: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
+    schema: MessengerBriefStrictSchema,
+    jsonSchema: {
+      name: 'messenger_brief',
+      schema: MESSENGER_BRIEF_JSON_SCHEMA as unknown as Record<string, unknown>,
+    },
+    totalBudgetMs: deps.budgetMs ?? 20_000,
+    signal: deps.signal,
+    bypassGateway: true,
+    openaiModel: modelName(),
+    backupSystemSuffix: BACKUP_MODEL_LANGUAGE_REMINDER,
+  }, deps.failover)
+  const brief = answer.data
   const finalBrief: MessengerBrief = {
     ...brief,
     follow_up_due_at: normaliseFollowUpDueAt(brief.follow_up_due_at),
@@ -541,7 +564,11 @@ export async function generateBrief(
     // depth, not the guarantee.
     trip: isTravelIndustry(identity) ? brief.trip : NULL_TRIP,
   }
-  return { brief: finalBrief, knowledgeStatus: facts.status }
+  return {
+    brief: finalBrief,
+    knowledgeStatus: facts.status,
+    answeredBy: { provider: answer.provider, model: answer.model },
+  }
 }
 
 /**
@@ -622,6 +649,12 @@ export async function storeBrief(
   knowledgeStatus: KnowledgeStatus | null = null,
   /** Same per-candidate deadline as `generateBrief`'s — see its `GenerateBriefDeps.signal`. */
   signal?: AbortSignal,
+  /**
+   * 实际答题的模型（来自 `GeneratedBrief.answeredBy.model`）。🔴 不再凭环境变量猜：
+   * 原来写 `process.env.OPENAI_API_KEY ? modelName() : 'fallback'`，断电时钥匙还在，
+   * 备用模型答的卡会被记成 gpt-4o-mini，这一列就在主动说谎。
+   */
+  model: string = 'unknown',
 ): Promise<void> {
   const today = now.toISOString().slice(0, 10)
   const countedToday = candidate.regenCountDate === today ? candidate.regenCount : 0
@@ -631,7 +664,7 @@ export async function storeBrief(
       conversation_id: candidate.conversationId,
       client_id: candidate.clientId,
       schema_version: BRIEF_SCHEMA_VERSION,
-      model: process.env.OPENAI_API_KEY ? modelName() : 'fallback',
+      model,
       summary: brief.summary,
       intent_level: brief.intent_level,
       customer_needs: brief.customer_needs,

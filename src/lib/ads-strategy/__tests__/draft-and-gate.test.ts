@@ -142,6 +142,61 @@ beforeEach(() => {
   ])
 })
 
+describe('createDraftForApproval — 扩展草稿先停下，不去建', () => {
+  it('多个广告组：不调用发布器，也不读受众、不读最低预算', async () => {
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    mAudiences.mockClear()
+    mMinBudget.mockClear()
+    const r = await createDraftForApproval({
+      ...DRAFT,
+      adSetName: '',
+      geoCountries: [],
+      creatives: [],
+      budgetMode: 'ad_set',
+      adSets: [{
+        name: 'group-a',
+        dailyBudget: 30,
+        geoCountries: ['NZ'],
+        creatives: DRAFT.creatives,
+      }],
+    }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('多个广告组')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(mAudiences).not.toHaveBeenCalled()
+    expect(mMinBudget).not.toHaveBeenCalled()
+  })
+
+  it('扩量开关打开：不调用发布器', async () => {
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval({
+      ...DRAFT,
+      expansion: {
+        advantageAudience: true,
+        customAudienceRelaxed: false,
+        lookalikeRelaxed: false,
+        source: 'step-1',
+      },
+    }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('扩量')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('单个广告组把三个开关都写成关：仍走原来的建草稿', async () => {
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval({
+      ...DRAFT,
+      expansion: { advantageAudience: false, customAudienceRelaxed: false, lookalikeRelaxed: false },
+    }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('createDraftForApproval', () => {
   it('干净的草案 → 等人点头，并且把买家会看到的话存下来', async () => {
     const { sb, inserted } = fakeSupabase()
@@ -368,6 +423,27 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('别处处理过')
     expect(mActivate).not.toHaveBeenCalled()
+  })
+
+  it('确认卡开失败先占着，不退回等待批准', async () => {
+    mActivate.mockResolvedValue({ ok: false, error: '开 camp1 失败：HTTP 400' })
+    const { sb, updated } = fakeSupabase(READY)
+    const card = {
+      actorUserId: 'u-pm',
+      actorEmail: 'pm@magiclab.test',
+      basis: 'go_live_card' as const,
+      cardRunId: '11111111-1111-4111-8111-111111111111',
+    }
+    const r = await approveDraft('act1', sb, 'tok', card, 'go-live-card')
+    expect(r).toEqual({ ok: false, error: '开 camp1 失败：HTTP 400', holding: true })
+    expect(updated[0]?.status).toBe('activating')
+    expect(updated.at(-1)?.status).toBe('activating')
+    expect(updated.at(-1)?.activation).toMatchObject({
+      status: 'meta_failed',
+      error: '开 camp1 失败：HTTP 400',
+      card_run_id: card.cardRunId,
+    })
+    expect(updated.some((row) => row.status === 'awaiting_approval')).toBe(false)
   })
 
   it('占位之后开失败 → 退回等待批准并带失败回执，可重试', async () => {

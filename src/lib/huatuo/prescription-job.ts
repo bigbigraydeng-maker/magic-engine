@@ -19,6 +19,7 @@ import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
 import { loadMemoryForClient } from '@/lib/memory'
 import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
+import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
 
 export interface GenerationJobInput {
   clientId: string
@@ -71,6 +72,7 @@ export async function executePrescriptionGeneration(input: GenerationJobInput): 
       goalId: input.goal?.id ?? null,
     }).catch(() => result.content)
     await persistDraft(clientId, prescriptionId, result, true)
+    await draftPlanAfterSave(clientId, prescriptionId)
     archiveCase(input, result)
   } catch (err) {
     await markTerminal(clientId, prescriptionId, 'failed', messageOf(err))
@@ -97,8 +99,18 @@ export async function executePrescriptionRefine(input: RefineJobInput): Promise<
       priorContent: input.previousContent,
     }).catch(() => result.content)
     await persistDraft(clientId, prescriptionId, result, false)
+    await draftPlanAfterSave(clientId, prescriptionId)
   } catch (err) {
     await markTerminal(clientId, prescriptionId, 'draft', messageOf(err))
+  }
+}
+
+/** Unapproved plan draft follow-up. Never changes prescription status, even if it throws. */
+async function draftPlanAfterSave(clientId: string, prescriptionId: string): Promise<void> {
+  try {
+    await afterPrescriptionDraftSaved({ clientId, prescriptionId })
+  } catch (err) {
+    console.warn('[huatuo/prescription-job] plan draft follow-up failed', { prescriptionId, err })
   }
 }
 

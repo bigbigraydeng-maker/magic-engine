@@ -134,95 +134,159 @@ function useNearScreen<T extends Element>(): { ref: RefObject<T>; near: boolean 
   return { ref, near }
 }
 
-/** Size in pixels of the still kept as a cover: sharp enough for the 44 x 78 tile on a 3x screen. */
+/** Size in pixels of the still kept as a cover: sharp enough for the 44 x 78 row tile on a 3x screen. */
 const COVER_STILL = { width: 135, height: 240 }
+/** The same for the big tile of the flat view (up to about 230 px wide on a 2x screen). */
+const COVER_STILL_TILE = { width: 270, height: 480 }
+/** How long to wait for the first frame before giving up and stopping the download. */
+const COVER_GIVE_UP_MS = 10_000
+/** At most this many covers load at the same time: the browser's media pipeline stalls when dozens of videos start together. */
+const COVER_MAX_PARALLEL = 6
 
 type CoverPhase = 'waiting' | 'kept' | 'failed'
+type CoverSize = { width: number; height: number }
+
+/** Copies what `video` is showing onto `canvas`. False when that cannot be done (no canvas, no 2d drawing, drawing fails). */
+function drawStill(video: HTMLVideoElement, canvas: HTMLCanvasElement | null, size: CoverSize): boolean {
+  const context = canvas?.getContext('2d')
+  if (!context) return false
+  try {
+    context.drawImage(video, 0, 0, size.width, size.height)
+    return true
+  } catch {
+    return false
+  }
+}
 
 /**
- * Loads the start of a finished Reel video off-screen and copies its first frame onto `canvas`, then stops the download:
- * a finished video is tens of MB, its first frame about half a MB. Nothing is loaded until `wanted` is true.
- * "kept" = the still is on the canvas; "failed" = no still could be made, the row keeps its plain play tile.
+ * Loads the start of a finished Reel video off-screen and copies its first frame onto the canvas, then stops the download:
+ * a finished video is tens of MB, its first frame about half a MB. `onDone` is called once, with "kept" (the still is on the
+ * canvas) or "failed" (no still could be made). Returns what to call to give up early; that also stops the download.
  */
-function useFirstFrameStill(url: string | null | undefined, wanted: boolean, canvas: RefObject<HTMLCanvasElement>): CoverPhase {
+function loadVideoStill(url: string, getCanvas: () => HTMLCanvasElement | null, size: CoverSize, onDone: (result: 'kept' | 'failed') => void): () => void {
+  const video = document.createElement('video')
+  let settled = false
+  let giveUp = 0
+  const stop = () => {
+    window.clearTimeout(giveUp)
+    video.removeAttribute('src')
+    video.load()
+  }
+  const settle = (result: 'kept' | 'failed') => {
+    if (settled) return
+    settled = true
+    stop()
+    onDone(result)
+  }
+  if (typeof video.requestVideoFrameCallback !== 'function') {
+    onDone('failed') // no way to learn when the first frame is shown, so do not start a download at all
+    return () => {}
+  }
+  video.muted = true
+  video.playsInline = true
+  video.preload = 'metadata'
+  video.addEventListener('error', () => settle('failed'))
+  // Drawing before the browser has shown the first frame leaves the canvas empty, so wait to be told it is shown.
+  // Asked before the source is set: a frame shown before the question would never be announced.
+  video.requestVideoFrameCallback(() => {
+    if (!settled) settle(drawStill(video, getCanvas(), size) ? 'kept' : 'failed')
+  })
+  giveUp = window.setTimeout(() => settle('failed'), COVER_GIVE_UP_MS)
+  video.src = url
+  return () => {
+    settled = true
+    stop()
+  }
+}
+
+const coverQueue: Array<() => void> = []
+let coversRunning = 0
+
+let drainScheduled = false
+
+/** Starts waiting covers once the current batch of changes is over, so rows that leave the page together do not start in between. */
+function startQueuedCoversSoon() {
+  if (drainScheduled) return
+  drainScheduled = true
+  queueMicrotask(() => {
+    drainScheduled = false
+    while (coversRunning < COVER_MAX_PARALLEL) {
+      const start = coverQueue.shift()
+      if (!start) return
+      start()
+    }
+  })
+}
+
+/** `loadVideoStill`, but never more than COVER_MAX_PARALLEL at once across the page; the rest wait their turn in order. */
+function loadFirstFrame(url: string, getCanvas: () => HTMLCanvasElement | null, size: CoverSize, onDone: (result: 'kept' | 'failed') => void): () => void {
+  let holdsSlot = false
+  let giveUp: (() => void) | null = null
+  const release = () => {
+    if (!holdsSlot) return
+    holdsSlot = false
+    coversRunning -= 1
+    startQueuedCoversSoon()
+  }
+  const start = () => {
+    holdsSlot = true
+    coversRunning += 1
+    giveUp = loadVideoStill(url, getCanvas, size, (result) => {
+      release()
+      onDone(result)
+    })
+  }
+  if (coversRunning < COVER_MAX_PARALLEL && coverQueue.length === 0) {
+    start()
+  } else {
+    coverQueue.push(start)
+    startQueuedCoversSoon()
+  }
+  return () => {
+    const queued = coverQueue.indexOf(start)
+    if (queued >= 0) coverQueue.splice(queued, 1)
+    giveUp?.()
+    release()
+  }
+}
+
+function useFirstFrameStill(url: string | null | undefined, wanted: boolean, canvas: RefObject<HTMLCanvasElement>, size: CoverSize): CoverPhase {
   const [phase, setPhase] = useState<CoverPhase>('waiting')
   useEffect(() => {
     if (!url || !wanted) return
-    const video = document.createElement('video')
-    let live = true
-    let settled = false
-    const stop = () => {
-      video.removeAttribute('src')
-      video.load()
-    }
-    const settle = (next: 'kept' | 'failed') => {
-      if (settled) return
-      settled = true
-      stop()
-      if (live) setPhase(next)
-    }
-    const keepStill = () => {
-      const context = live ? canvas.current?.getContext('2d') : null
-      if (!context) {
-        settle('failed')
-        return
-      }
-      try {
-        context.drawImage(video, 0, 0, COVER_STILL.width, COVER_STILL.height)
-      } catch {
-        settle('failed')
-        return
-      }
-      settle('kept')
-    }
-    video.muted = true
-    video.playsInline = true
-    video.preload = 'metadata'
-    video.addEventListener('error', () => settle('failed'))
-    video.addEventListener(
-      'loadeddata',
-      () => {
-        if (typeof video.requestVideoFrameCallback !== 'function') {
-          settle('failed')
-          return
-        }
-        // The first picture can only be copied once the browser has shown it: drawing at this moment leaves the canvas empty.
-        video.requestVideoFrameCallback(keepStill)
-      },
-      { once: true },
-    )
-    video.src = url
-    return () => {
-      live = false
-      stop()
-    }
-  }, [url, wanted, canvas])
+    return loadFirstFrame(url, () => canvas.current, size, setPhase)
+  }, [url, wanted, canvas, size])
   return phase
 }
+
+type CoverVariant = 'row' | 'tile'
 
 /**
  * The cover of a Reel: the first frame of its finished video, which is already a finished picture (hook text and logo).
  * The video is only asked for when the row is about to be seen. No video address, or a video that cannot be shown,
- * leaves the plain play tile.
+ * leaves the plain play tile. Decorative: the row's title already says what the Reel is.
+ * "row" is the small tile of the list view, "tile" the big one of the flat view.
  */
-function ReelCover({ url }: { url?: string | null }) {
+function ReelCover({ url, variant = 'row' }: { url?: string | null; variant?: CoverVariant }) {
   const { ref, near } = useNearScreen<HTMLSpanElement>()
   const stillRef = useRef<HTMLCanvasElement>(null)
-  const phase = useFirstFrameStill(url, near, stillRef)
+  const size = variant === 'tile' ? COVER_STILL_TILE : COVER_STILL
+  const phase = useFirstFrameStill(url, near, stillRef, size)
   const kept = phase === 'kept'
+  const box =
+    variant === 'tile'
+      ? 'relative flex aspect-[9/16] w-full items-center justify-center overflow-hidden rounded-lg bg-me-charcoal text-me-gold'
+      : `relative mt-0.5 flex ${url ? 'h-[78px]' : 'h-11'} w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-me-charcoal text-me-gold`
+  const glyph =
+    variant === 'tile'
+      ? kept ? 'absolute bottom-2 right-2 h-5 w-5 text-white/90 drop-shadow' : 'h-10 w-10'
+      : kept ? 'absolute bottom-1 right-1 h-3.5 w-3.5 text-white/90 drop-shadow' : 'h-5 w-5'
   return (
-    <span ref={ref} className="relative mt-0.5 flex h-[78px] w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-me-charcoal text-me-gold">
+    <span ref={ref} aria-hidden data-cover={url ? phase : 'none'} className={box}>
       {url && near && phase !== 'failed' && (
-        <canvas
-          ref={stillRef}
-          width={COVER_STILL.width}
-          height={COVER_STILL.height}
-          role={kept ? 'img' : undefined}
-          aria-label={kept ? '视频封面' : undefined}
-          className={kept ? 'h-full w-full object-cover' : 'hidden'}
-        />
+        <canvas ref={stillRef} width={size.width} height={size.height} className={kept ? 'h-full w-full object-cover' : 'hidden'} />
       )}
-      <PlayGlyph className={kept ? 'absolute bottom-1 right-1 h-3.5 w-3.5 text-white/90 drop-shadow' : 'h-5 w-5'} />
+      <PlayGlyph className={glyph} />
     </span>
   )
 }
@@ -255,72 +319,188 @@ function VersionList({ work }: { work: ReelWork }) {
   )
 }
 
+function workMeta(work: ReelWork): string {
+  return [work.templateLabel, versionTime(work.latest)].filter((part): part is string => Boolean(part)).join(' · ')
+}
+
+/** "共 N 版" and "另有 N 个旧版待审核": what the one state tag cannot say about the older versions of a work. */
+function WorkChips({ work }: { work: ReelWork }) {
+  return (
+    <>
+      {work.versions.length > 1 && <StatusTag>共 {work.versions.length} 版</StatusTag>}
+      {work.olderPending > 0 && work.tag.kind !== 'review' && (
+        <StatusTag kind="review" title="最新版已经不是待审核，但旧版本里还有在等审核的。">另有 {work.olderPending} 个旧版待审核</StatusTag>
+      )}
+    </>
+  )
+}
+
+/** The links and the details button of a work. Every link goes where it went before. */
+function WorkActions({ work, clientId, open, panelId, onToggle }: {
+  work: ReelWork
+  clientId: string
+  open: boolean
+  panelId: string
+  onToggle: () => void
+}) {
+  const { permalink } = work.latest.reel
+  return (
+    <>
+      <Link href={`/dashboard/factory?client=${clientId}`} className="font-semibold underline">
+        {work.tag.kind === 'review' ? '去视频工厂看 / 点通过' : '去视频工厂看'}
+      </Link>
+      {permalink && (
+        <a href={permalink} className="underline text-me-charcoal/75" target="_blank" rel="noreferrer">
+          打开 Reel 链接
+        </a>
+      )}
+      <button type="button" onClick={onToggle} aria-expanded={open} aria-controls={panelId} className="font-medium text-me-charcoal/75 underline">
+        {open ? '收起详情' : '详情'}
+      </button>
+    </>
+  )
+}
+
+function WorkDetails({ work, panelId }: { work: ReelWork; panelId: string }) {
+  return (
+    <div id={panelId} className="mt-2 space-y-2 rounded-lg bg-me-ivory p-2.5 text-xs text-me-charcoal/85">
+      {work.campaignNote && <p className="break-words">工单备注：{work.campaignNote}</p>}
+      <VersionList work={work} />
+    </div>
+  )
+}
+
 function ReelWorkRow({ work, clientId }: { work: ReelWork; clientId: string }) {
   const [open, setOpen] = useState(false)
   const panelId = useId()
-  const { latest } = work
-  const meta = [work.templateLabel, versionTime(latest)].filter((part): part is string => Boolean(part)).join(' · ')
   return (
     <li className="rounded-xl border border-black/10 bg-white p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
         <div className="flex min-w-0 flex-1 gap-3">
-          <ReelCover key={latest.reel.video_url ?? 'none'} url={latest.reel.video_url} />
+          <ReelCover key={work.latest.reel.video_url ?? 'none'} url={work.latest.reel.video_url} />
           <div className="min-w-0 flex-1 space-y-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               {work.batchLabel && <span className="text-xs font-semibold text-me-charcoal/65">{work.batchLabel} ·</span>}
               <h4 className="min-w-0 break-words text-sm font-semibold leading-snug text-me-charcoal">{work.title}</h4>
               <StatusTag kind={work.tag.kind} title={work.tag.hint}>{work.tag.label}</StatusTag>
-              {work.versions.length > 1 && <StatusTag>共 {work.versions.length} 版</StatusTag>}
-              {work.olderPending > 0 && work.tag.kind !== 'review' && (
-                <StatusTag kind="review" title="最新版已经不是待审核，但旧版本里还有在等审核的。">另有 {work.olderPending} 个旧版待审核</StatusTag>
-              )}
+              <WorkChips work={work} />
             </div>
-            <p className="text-xs text-me-charcoal/70">{meta}</p>
+            <p className="text-xs text-me-charcoal/70">{workMeta(work)}</p>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 pl-14 text-xs sm:flex-col sm:items-end sm:pl-0">
-          <Link href={`/dashboard/factory?client=${clientId}`} className="font-semibold underline">
-            {work.tag.kind === 'review' ? '去视频工厂看 / 点通过' : '去视频工厂看'}
-          </Link>
-          {latest.reel.permalink && (
-            <a href={latest.reel.permalink} className="underline text-me-charcoal/75" target="_blank" rel="noreferrer">
-              打开 Reel 链接
-            </a>
-          )}
-          <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            aria-expanded={open}
-            aria-controls={panelId}
-            className="font-medium text-me-charcoal/75 underline"
-          >
-            {open ? '收起详情' : '详情'}
-          </button>
+          <WorkActions work={work} clientId={clientId} open={open} panelId={panelId} onToggle={() => setOpen((value) => !value)} />
         </div>
       </div>
-      {open && (
-        <div id={panelId} className="mt-2 space-y-2 rounded-lg bg-me-ivory p-2.5 text-xs text-me-charcoal/85">
-          {work.campaignNote && <p className="break-words">工单备注：{work.campaignNote}</p>}
-          <VersionList work={work} />
-        </div>
-      )}
+      {open && <WorkDetails work={work} panelId={panelId} />}
     </li>
   )
 }
 
-/** Works in state groups (待你审核 first), each group foldable. Used by 本周总览 and 短视频. */
+/** One Reel as a card of the flat view: the big cover first, with its state on it, then the same words and links as the row. Its title is an h3: the flat view has no group headings above it. */
+function ReelWorkTile({ work, clientId }: { work: ReelWork; clientId: string }) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+  return (
+    <li className="flex min-w-0 flex-col rounded-xl border border-black/10 bg-white p-2">
+      <div className="relative">
+        <ReelCover key={work.latest.reel.video_url ?? 'none'} url={work.latest.reel.video_url} variant="tile" />
+        <span className="absolute left-1.5 top-1.5 rounded-full bg-white shadow-sm">
+          <StatusTag kind={work.tag.kind} title={work.tag.hint}>{work.tag.label}</StatusTag>
+        </span>
+      </div>
+      <h3 title={work.title} className="mt-2 line-clamp-2 break-words text-sm font-semibold leading-snug text-me-charcoal">
+        {work.batchLabel ? `${work.batchLabel} · ${work.title}` : work.title}
+      </h3>
+      <div className="mt-1 flex flex-wrap gap-1">
+        <WorkChips work={work} />
+      </div>
+      <p className="mt-1 text-xs text-me-charcoal/70">
+        {work.templateLabel && <span className="block">{work.templateLabel}</span>}
+        <span className="block">{versionTime(work.latest)}</span>
+      </p>
+      <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 text-xs">
+        <WorkActions work={work} clientId={clientId} open={open} panelId={panelId} onToggle={() => setOpen((value) => !value)} />
+      </div>
+      {open && <WorkDetails work={work} panelId={panelId} />}
+    </li>
+  )
+}
+
+type ReelView = 'list' | 'tile'
+const REEL_VIEW_KEY = 'me.social-daily.reel-view'
+
+function readReelView(): ReelView {
+  if (typeof window === 'undefined') return 'list'
+  try {
+    return window.localStorage.getItem(REEL_VIEW_KEY) === 'tile' ? 'tile' : 'list'
+  } catch {
+    return 'list'
+  }
+}
+
+/** The view a person picked is kept in this browser, so both tabs and the next visit open the same way. Storage that is blocked just forgets. */
+function useReelView(): [ReelView, (next: ReelView) => void] {
+  const [view, setView] = useState<ReelView>(readReelView)
+  const choose = (next: ReelView) => {
+    setView(next)
+    try {
+      window.localStorage.setItem(REEL_VIEW_KEY, next)
+    } catch {
+      // blocked or full: the choice only lasts until the page is closed
+    }
+  }
+  return [view, choose]
+}
+
+function ReelViewSwitch({ view, onChange }: { view: ReelView; onChange: (next: ReelView) => void }) {
+  const button = (value: ReelView, label: string) => (
+    <button
+      type="button"
+      aria-pressed={view === value}
+      onClick={() => onChange(value)}
+      className={`px-3 py-1 text-xs font-medium ${view === value ? 'bg-me-charcoal text-white' : 'bg-white text-me-charcoal/75 hover:bg-me-stone'}`}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div role="group" aria-label="显示方式" className="inline-flex overflow-hidden rounded-lg border border-black/15">
+      {button('list', '列表')}
+      {button('tile', '平铺')}
+    </div>
+  )
+}
+
+/**
+ * Works in state groups (待你审核 first), each group foldable (the 列表 view), or all laid out flat as cover tiles in the same
+ * order, with the state on every tile (the 平铺 view). Used by 本周总览 and 短视频.
+ */
 export function ReelWorkGroups({ works, clientId }: { works: ReadonlyArray<ReelWork>; clientId: string }) {
+  const [view, chooseView] = useReelView()
+  const stages = groupWorksByStage(works)
   return (
     <div className="space-y-3">
-      {groupWorksByStage(works).map((stage) => (
-        <FoldGroup key={stage.id} title={stage.title} count={stage.works.length} kind={stage.kind} hint={stage.hint} defaultOpen={stage.defaultOpen}>
-          <ul className="space-y-2">
-            {stage.works.map((work) => (
-              <ReelWorkRow key={work.key} work={work} clientId={clientId} />
-            ))}
-          </ul>
-        </FoldGroup>
-      ))}
+      <div className="flex justify-end">
+        <ReelViewSwitch view={view} onChange={chooseView} />
+      </div>
+      {view === 'tile' ? (
+        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 2xl:grid-cols-6">
+          {stages.flatMap((stage) => stage.works).map((work) => (
+            <ReelWorkTile key={work.key} work={work} clientId={clientId} />
+          ))}
+        </ul>
+      ) : (
+        stages.map((stage) => (
+          <FoldGroup key={stage.id} title={stage.title} count={stage.works.length} kind={stage.kind} hint={stage.hint} defaultOpen={stage.defaultOpen}>
+            <ul className="space-y-2">
+              {stage.works.map((work) => (
+                <ReelWorkRow key={work.key} work={work} clientId={clientId} />
+              ))}
+            </ul>
+          </FoldGroup>
+        ))
+      )}
     </div>
   )
 }

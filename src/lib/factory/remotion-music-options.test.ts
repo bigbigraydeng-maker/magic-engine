@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { remotionMusicChoices, replaceRemotionMusic } from './remotion-music-options.mjs'
+import { remotionMusicChoices, remotionMusicClearance, replaceRemotionMusic } from './remotion-music-options.mjs'
 
 const postcardBrief = (timing = { hookSec: 3, sceneSec: 3, priceSec: 3 }) => ({
   template: 'postcard',
@@ -52,6 +52,33 @@ describe('Remotion music choices', () => {
       musicStartSec: 0,
     })
     expect(updated?.choice.id).toBe('jade-river-journey')
+  })
+})
+
+describe('Remotion music clearance', () => {
+  it('passes a human-cleared track that covers this render', () => {
+    expect(remotionMusicClearance(postcardBrief())).toMatchObject({
+      verdict: 'pass',
+      track_id: 'founders-at-dawn',
+    })
+  })
+
+  it('fails a track that is not in the catalog', () => {
+    const brief = postcardBrief()
+    brief.props.musicFile = 'not-a-track.mp3'
+    expect(remotionMusicClearance(brief).verdict).toBe('fail')
+  })
+
+  it('is unreadable when the brief has no music file', () => {
+    const brief = postcardBrief()
+    brief.props.musicFile = ''
+    expect(remotionMusicClearance(brief)).toMatchObject({ verdict: 'unreadable', reason: '读不到' })
+  })
+
+  it('fails a track whose clean window does not cover the render', () => {
+    const brief = postcardBrief()
+    brief.props.musicFile = 'pipa-trap.m4a'
+    expect(remotionMusicClearance(brief).verdict).toBe('fail')
   })
 })
 

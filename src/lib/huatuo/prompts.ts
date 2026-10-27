@@ -16,6 +16,7 @@ import type { HuatuoLookupContext, TrendSummaryLite, SelfGradeWeakness } from '.
 import { formatBenchmarksForPrompt } from './benchmarks'
 import { budgetAmountLabel, budgetCapInstruction, budgetCurrencyOf } from '@/lib/ads/budget-currency'
 import { categoryToChineseName } from './industry-mapper'
+import { personalIpInstruction, personalIpIntakeLines, personalIpSelfGradeCheck } from './personal-ip'
 import { formatTrendForPrompt, type TrendSummary } from './trends'
 import { formatSeasonalCalendarForPrompt } from './seasonal-calendar'
 import { formatInterestForPrompt } from '@/lib/gtrends/client'
@@ -463,7 +464,7 @@ ${prior.block}
 - **时间紧迫度**：${intake.timeline_urgency}
 - **月度预算**：${budgetLabel}
 - **优先维度**：${priorityDims}
-- **补充说明**：${intake.notes ?? '（无）'}
+- **补充说明**：${intake.notes ?? '（无）'}${personalIpIntakeLines(intake, discovery.social_profiles)}
 
 ## 现在生成处方 JSON
 
@@ -473,7 +474,7 @@ ${prior.block}
 3. ${budgetCapInstruction(intake.monthly_budget_aud, budgetCurrency)}
 4. 每个 action 必须有 estimated_hours / required_skills / measurement_method / module
 5. 危机类型「${d?.crisis_type ?? '未指定'}」决定预算重心${trendConstraint}
-7. 全部中文（除枚举值）${prior.instruction}`
+7. 全部中文（除枚举值）${prior.instruction}${personalIpInstruction(intake)}`
 }
 
 /**
@@ -513,7 +514,7 @@ ${JSON.stringify(prescription, null, 2)}
 \`\`\`
 
 ${prevSection}
-
+${personalIpSelfGradeCheck(intake)}
 ## 现在输出评分 JSON
 
 记住：苛刻打分，每项 0–10 整数。overall = (realism×1.5 + 其他六项) / 7.5，保留一位小数。`

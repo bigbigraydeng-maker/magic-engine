@@ -1,10 +1,11 @@
 import type { AdsDraftFacts } from '@/lib/marketing-plan/promo/draft-ads'
 import type { AdPlay } from './ad-plays'
 import { STALE_AFTER_MS } from './constants'
+import type { AudienceStatusRead } from './audience-creative'
 import type { ReadState } from './eligibility'
 import type { LiveDelivering } from './live-delivering'
 import { sanitizeReason } from './sanitize'
-import type { Basis, PlanSeedStep } from './types'
+import type { Basis, PlanSeed, PlanSeedStep } from './types'
 
 export interface PlanSeedDeps {
   now(): Date
@@ -19,6 +20,8 @@ export interface PlanSeedDeps {
   playbookShare(clientId: string): Promise<number>
   /** 可选：实时读选中账户的在投合计；没提供等同读不到。 */
   readLiveDelivering?: (clientId: string, adAccountId: string) => Promise<LiveDelivering | null>
+  /** 可选：只读 Meta 受众状态码（GET）；没提供等同读不到，受众/排除名单留空。第三个参数是这一步的广告账户，用来核对受众归属。 */
+  readAudienceStatus?: (clientId: string, ids: string[], adAccountId: string) => Promise<AudienceStatusRead>
 }
 
 export type SafeResult<T> = { ok: true; value: T } | { ok: false; reason: string }
@@ -69,6 +72,9 @@ export interface Accumulator {
   capturedAt: Record<string, string | null>
   currency: string | null
   done: boolean
+  /** 取数失败（读不到，不是读到了空）；对应 PlanSeed.read_failed。 */
+  readFailed?: boolean
+  schedule?: PlanSeed['schedule']
 }
 
 /** 把任意异常转成中文可读的原因字符串。 */

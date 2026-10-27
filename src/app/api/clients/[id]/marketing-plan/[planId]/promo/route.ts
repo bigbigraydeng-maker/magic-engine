@@ -11,14 +11,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
-import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
 import { loadGoal, loadLatestClientPrescription, loadLatestGoalPrescription, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import { planLinkedGoalId } from '@/lib/marketing-plan/promo/plan-pick'
 import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
-import { allAdsSteps, parsePromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { allAdsSteps, type PromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
+import { validatePlanDraft } from '@/lib/marketing-plan/promo/plan-draft-validate'
 import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketing-plan/plan-guard'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 
@@ -71,6 +71,23 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   }
 }
 
+function shapeError(issues: PromoValidationIssue[]): NextResponse {
+  return NextResponse.json({ success: false, error: '推广计划结构不合法', issues }, { status: 400 })
+}
+
+function budgetError(problems: string[]): NextResponse {
+  return NextResponse.json({ success: false, error: '广告预算或账户不符合要求', problems }, { status: 400 })
+}
+
+/** Shape first. Empty accounts would false-reject a real ad account, so that case is rechecked later. */
+function openedSpec(raw: unknown): { ok: true; spec: PromoSpec } | { ok: false; response: NextResponse } {
+  const preview = validatePlanDraft(raw, { accounts: [], clientCapCents: null })
+  if (preview.ok) return { ok: true, spec: preview.spec }
+  if (preview.code === 'invalid_spec') return { ok: false, response: shapeError(preview.issues) }
+  if (allAdsSteps(preview.spec).length === 0) return { ok: false, response: budgetError(preview.problems) }
+  return { ok: true, spec: preview.spec }
+}
+
 export async function PUT(req: NextRequest, ctx: Ctx) {
   const denied = await rejectAgentAdsBearer(req, {
     clientId: ctx.params.id,
@@ -82,10 +99,9 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
     const body = (await req.json().catch(() => null)) as { promo?: unknown; expected_updated_at?: string } | null
-    const parsed = parsePromoSpec(body?.promo)
-    if (!parsed.ok) return NextResponse.json({ success: false, error: '推广计划结构不合法', issues: parsed.issues }, { status: 400 })
-    // 人工核实记录只能由 /promo/verify 写入 generation_meta；保存请求里带的 checks 一律丢弃
-    const spec = { ...parsed.spec, checks: [], gate_snapshot: undefined }
+    const opened = openedSpec(body?.promo)
+    if (!opened.ok) return opened.response
+    let spec = opened.spec
 
     const plan = await loadPlan(ctx)
     if (!plan) return NextResponse.json({ success: false, error: 'Plan not found' }, { status: 404 })
@@ -108,15 +124,13 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     // 广告账户归属 + 确定的超限（读不到只是未核实，不在这里拒绝）
     if (allAdsSteps(spec).length > 0) {
       const facts = await loadPromoFacts(ctx.params.id, spec, plan.generation_meta?.promo_checks ?? [])
-      const problems: string[] = []
-      for (const phase of spec.phases) {
-        const steps = phase.steps.flatMap(s => (s.kind === 'ads_campaign' ? [s] : []))
-        const res = checkAdsBudget(steps, facts.gate.accounts, facts.gate.config?.daily_budget_cap_cents ?? null)
-        if (res.verdict === 'over') problems.push(...res.reasons.map(r => `${phase.name}：${r}`))
-      }
-      if (problems.length > 0) {
-        return NextResponse.json({ success: false, error: '广告预算或账户不符合要求', problems }, { status: 400 })
-      }
+      const verdict = validatePlanDraft(body?.promo, {
+        accounts: facts.gate.accounts,
+        clientCapCents: facts.gate.config?.daily_budget_cap_cents ?? null,
+      })
+      if (!verdict.ok && verdict.code === 'invalid_spec') return shapeError(verdict.issues)
+      if (!verdict.ok) return budgetError(verdict.problems)
+      spec = verdict.spec
     }
 
     const nextPlanData = { ...(plan.plan_data as unknown as Record<string, unknown>), promo: spec }

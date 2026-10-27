@@ -55,6 +55,7 @@ const DUE = {
 
 beforeEach(() => {
   process.env.CRON_SECRET = 's3cret'
+  process.env.VIRAL_ANALYZER_ENABLED = 'true'
   finish.mockClear()
   analyze.mockReset()
   queries.length = 0
@@ -63,6 +64,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.CRON_SECRET
+  delete process.env.VIRAL_ANALYZER_ENABLED
   vi.useRealTimers()
 })
 
@@ -70,6 +72,21 @@ describe('POST /api/cron/viral-analyzer-worker', () => {
   it('rejects a bad secret before writing a run', async () => {
     const res = await call('wrong')
     expect(res.status).toBe(401)
+    expect(finish).not.toHaveBeenCalled()
+    expect(analyze).not.toHaveBeenCalled()
+  })
+
+  it('skips when VIRAL_ANALYZER_ENABLED is unset', async () => {
+    delete process.env.VIRAL_ANALYZER_ENABLED
+    const denied = await call('wrong')
+    expect(denied.status).toBe(401)
+
+    const res = await call('s3cret')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      skipped: 'disabled',
+      hint: 'set VIRAL_ANALYZER_ENABLED=true to run',
+    })
     expect(finish).not.toHaveBeenCalled()
     expect(analyze).not.toHaveBeenCalled()
   })

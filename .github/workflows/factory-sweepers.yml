@@ -1,17 +1,20 @@
 name: P21.J — Factory Sweeper (worker)
 
-# 每 5 分钟触发 worker-sweeper:收回心跳超时(>10min)的 claimed/producing 工单(不消耗 attempt)。幂等。
+# 手动触发 worker-sweeper:收回心跳超时(>10min)的 claimed/producing 工单(不消耗 attempt)。幂等。
 #
 # review-sweeper(Airtable 同步)已退役:审核搬到 ME 驾驶舱 /dashboard/factory(PR #581),
 # Airtable 退役(PM 决策 · C 段拆脚手架)。该 cron 依赖 AIRTABLE_API_KEY,Airtable 停用后必 500。
 # route + review-sync 的完整删除属 C 段清理。
 #
+# 2026-10-26 去掉定时触发。GitHub 的 schedule 过去 24 小时只响了几次，间隔数小时。
+# 自动收回改由已有的 cron-dispatch-frequent 每 5 分钟在进程内调用同一接口
+# （src/lib/cron/dispatch/catalog.ts）。不新开 Render 服务。
+# 这里只留 workflow_dispatch。密钥对不上时下面的脚本会失败退出，不会改工单。
+#
 # 配置:GitHub repo Secrets: CRON_SECRET(与 Render env 同值)
 # Reference: docs/superpowers/specs/2026-07-11-content-factory-ads-loop-v0.1.md §6.1/§7.2
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 jobs:

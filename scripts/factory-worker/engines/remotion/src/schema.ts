@@ -97,6 +97,33 @@ const PRICE = z
   })
   .strict();
 
+const frameHookSpec = z
+  .object({
+    style: z.enum(['kinetic', 'stat', 'question'], {
+      message: '钩子样式只能是 kinetic、stat 或 question',
+    }).optional(),
+    text: text(80).optional(),
+    stat: text(16).optional(),
+    question: text(90).optional(),
+  })
+  .strict();
+
+const frameEndSpec = z
+  .object({
+    cta: text(48).optional(),
+    contact: text(80).optional(),
+    brandName: text(40).optional(),
+  })
+  .strict();
+
+/** Optional opening-hook and end-card switch. Omitted fields keep each template's own default. */
+export const frameSchema = z
+  .object({
+    hook: z.union([z.literal(false), frameHookSpec]).optional(),
+    endCard: z.union([z.literal(false), frameEndSpec]).optional(),
+  })
+  .strict();
+
 /** Schema for the generic "what's included" checklist video template props. */
 export const ListReelPropsSchema = z
   .object({
@@ -138,6 +165,7 @@ export const ListReelPropsSchema = z
     revealTitle: text(40),
     revealTitleSize: z.number().int().min(36, { message: '片尾标题字号必须在 36 到 60 之间' }).max(60, { message: '片尾标题字号必须在 36 到 60 之间' }).optional(),
     price: PRICE,
+    frame: frameSchema.optional(),
   })
   .strict()
   .superRefine((val, ctx) => {

@@ -15,4 +15,11 @@ export function isAssetOnly(brief: unknown): boolean {
   return remotion.deliverable === 'asset_only'
 }
 
+/** Mark a work-order brief as material only. Existing remotion fields stay. */
+export function withAssetOnlyDeliverable<T extends { remotion?: Record<string, unknown> }>(brief: T): T {
+  const remotion = brief.remotion
+  const base = isPlainObject(remotion) ? remotion : {}
+  return { ...brief, remotion: { ...base, deliverable: 'asset_only' } }
+}
+
 export const ASSET_ONLY_NOT_PUBLISHABLE = 'asset_only work orders are material only and cannot be approved or published'

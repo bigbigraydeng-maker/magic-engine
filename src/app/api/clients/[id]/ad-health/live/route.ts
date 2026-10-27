@@ -14,6 +14,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { readHeartbeatAccount } from '@/lib/ads-strategy/heartbeat/read'
+import { createSupabaseStore } from '@/lib/ads-strategy/heartbeat/store'
 import { getLiveToday, type LiveDeps } from '@/lib/ads-strategy/heartbeat/live-view'
 
 export const dynamic = 'force-dynamic'
@@ -47,6 +48,7 @@ function productionDeps(): LiveDeps {
   return {
     listOfficialAccountIds,
     getToken: getMetaTokenForClient,
+    hasActiveCampaigns: (clientId, adAccountId) => createSupabaseStore(supabaseAdmin).hasActiveCampaigns(clientId, adAccountId),
     read: readHeartbeatAccount,
     now: () => new Date(),
   }

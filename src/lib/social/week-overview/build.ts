@@ -103,15 +103,25 @@ interface ReelRow {
   deliverable: string | null
 }
 
+const FACTORY_BUCKET_PATH = '/storage/v1/object/public/content-factory/'
+
 /**
  * The factory keeps finished videos in one public bucket (the review page plays them from there). Only a plain path inside
- * that bucket becomes an address: anything that could point somewhere else (a full address, "..", a leading slash) does not.
+ * that bucket becomes an address. Anything that could lead out of it does not: a full address, a leading slash, "..",
+ * and also what the URL parser would turn into one ("%2e%2e", a backslash, a "?" or "#" tail).
  */
 function videoUrlOf(path: string | null): string | null {
   const base = process.env.NEXT_PUBLIC_SUPABASE_URL
   if (!base || typeof path !== 'string' || path.length === 0) return null
   if (path.startsWith('/') || path.includes('..') || path.includes('://')) return null
-  return factoryVideoUrl(path, base)
+  let url: URL
+  try {
+    url = new URL(factoryVideoUrl(path, base.replace(/\/+$/, '')))
+  } catch {
+    return null
+  }
+  if (!url.pathname.startsWith(FACTORY_BUCKET_PATH) || url.search !== '' || url.hash !== '') return null
+  return url.href
 }
 
 /** This client's factory Reels only (filtered in the query), newest first. Throws on a database error. */

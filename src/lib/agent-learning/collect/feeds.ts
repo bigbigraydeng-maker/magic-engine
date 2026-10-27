@@ -5,13 +5,15 @@ import type { RawItem, Result } from '@/lib/agent-learning/contracts'
 /**
  * 可识别的固定 User-Agent（不是裸爬虫 UA）。
  * 契约 L6b：固定可识别 UA、遵守 robots、不绕反爬；此处只负责"标识自己"。
+ * 采用 `Mozilla/5.0 (compatible; Bot/x; +url)` 通行格式：仍明示身份，但不被只认该格式的站点拒绝。
  */
-export const LEARNING_USER_AGENT = 'MagicEngineLearningBot/1.0 (+https://magicengine.com.au)'
+export const LEARNING_USER_AGENT =
+  'Mozilla/5.0 (compatible; MagicEngineLearningBot/1.0; +https://magicengine.com.au)'
 
 /** 单次抓取（含正文读取）超时；与 rss-parser 模板同口径 15s。 */
 export const FEED_FETCH_TIMEOUT_MS = 15_000
 
-const FEED_ACCEPT = 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*'
+const FEED_ACCEPT = 'application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8'
 
 /** 注入式抓取：只拿文本，不解析、不写库、不抛错。 */
 export type FetchText = (url: string) => Promise<{ ok: true; text: string } | { ok: false; error: string }>

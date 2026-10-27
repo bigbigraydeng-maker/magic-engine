@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { PLAY_CATALOG } from '@/lib/ads-strategy/play-vocabulary'
 import { formatMinor } from '@/lib/ads-strategy/plan-seed/format'
-import type { PlanSeed, PlanSeedStep } from '@/lib/ads-strategy/plan-seed/types'
+import type { AudienceState, CreativeState, PlanSeed, PlanSeedStep } from '@/lib/ads-strategy/plan-seed/types'
 
 type Field<T> =
   | { ok: true; value: T; basis: { label: string; value: string; source: string; as_of: string | null }[]; notes: string[] }
@@ -102,6 +102,11 @@ function FieldRow<T>({
   )
 }
 
+const AUDIENCE_STATE_LABEL: Record<AudienceState, string> = { read: '读到', unusable: '读到但不可用', unreadable: '读不到' }
+const CREATIVE_STATE_LABEL: Record<CreativeState, string> = {
+  ready: '可用', pending_approval: '素材待批', window_mismatch: '推广期对不上', none: '没有素材', unreadable: '读不到',
+}
+
 function StepCard({ step, currency }: { step: PlanSeedStep; currency: string | null }) {
   const playLabel = PLAY_CATALOG[step.play].label
   const budgetFormat = (minor: number): string => formatMinor(minor, currency)
@@ -113,6 +118,15 @@ function StepCard({ step, currency }: { step: PlanSeedStep; currency: string | n
       <FieldRow title="主页" field={step.page_id} format={(v) => v} />
       <FieldRow title="广告账户" field={step.ad_account_id} format={(v) => v} />
       <FieldRow title="日预算" field={step.daily_budget_cents} format={budgetFormat} />
+      {step.audience_ids && (
+        <FieldRow title={`受众（${AUDIENCE_STATE_LABEL[step.audience_state ?? 'unreadable']}）`} field={step.audience_ids} format={(v) => v.join('、')} />
+      )}
+      {step.excluded_audience_ids && (
+        <FieldRow title="排除名单（只引用已有的）" field={step.excluded_audience_ids} format={(v) => v.join('、')} />
+      )}
+      {step.creative_refs && (
+        <FieldRow title={`素材（${CREATIVE_STATE_LABEL[step.creative_state ?? 'unreadable']}）`} field={step.creative_refs} format={(v) => v.join('、')} />
+      )}
     </div>
   )
 }
@@ -147,6 +161,9 @@ function ReadyView({ seed }: { seed: PlanSeed }) {
   const showSnapshotLimit = seed.ad_steps.length > 0 && !seed.ad_steps.every(hasLiveBasis)
   return (
     <div>
+      {seed.schedule && (
+        <FieldRow title="起止日" field={seed.schedule} format={(v) => `${v.start_date} 至 ${v.end_date}`} />
+      )}
       <h3 className="mt-4 font-semibold">广告步骤的建议</h3>
       {seed.ad_steps.map((step) => (
         <StepCard key={step.step_key} step={step} currency={seed.currency} />

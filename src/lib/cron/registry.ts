@@ -151,6 +151,10 @@ const CRON_REGISTRY_ENTRIES = [
   { service: 'factory-order-scheduler', jobName: 'factory-order-scheduler', schedule: '0 20 * * *', logsRuns: true },
   { service: 'factory-publish-sweeper', jobName: 'factory-publish-sweeper', schedule: '25 * * * *', logsRuns: true },
   { service: 'factory-publish-worker', jobName: 'factory-publish-worker', schedule: '5 * * * *', logsRuns: true },
+  { service: 'factory-dead-letter-rerun', jobName: 'factory-dead-letter-rerun', schedule: '15 * * * *', logsRuns: true, addedAt: '2026-10-27' },
+  // 心跳超时收回。2026-10-26 从 GitHub Actions 的 schedule 改挂已有 dispatcher。
+  // addedAt 盖住部署后第一次排班前的「从没跑过」。
+  { service: 'factory-worker-sweeper', jobName: 'factory-worker-sweeper', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-26' },
   // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费(改图那步是死代码),白花 Apify 钱。
   //    恢复三件套:render.yaml 取消注释 + 本行加回来 + 先把 stock-transform 接进调用链。
   // { service: 'factory-stock-refill', jobName: 'factory-stock-refill', schedule: '0 19 * * 1', logsRuns: true },
@@ -252,6 +256,9 @@ const CRON_REGISTRY_ENTRIES = [
   // 这是设计行为:不许把「什么都没干」显示成健康。apply migration 后自动转绿。
   { service: 'product-map-sync-daily', jobName: 'product-map-sync', schedule: '15 18 * * *', logsRuns: true, addedAt: '2026-08-15' },
   { service: 'prescription-weekly', jobName: 'prescription-weekly', schedule: '0 8 * * 2', logsRuns: true, addedAt: '2026-08-04' },
+  // 已开投处方的开投后检查。每 2 小时读我们自己库里的每日花费和线索，写出 24/48 小时和第 7/14 天。
+  // 不写 Meta。也不往广告快照表加「每 2 小时」：那个取值不在现有约束里，加进去要迁移。
+  { service: 'prescription-launch-check', jobName: 'prescription-launch-check', schedule: '0 */2 * * *', logsRuns: true, addedAt: '2026-10-27' },
   { service: 'cms-connection-retest', jobName: 'cms-connection-retest', schedule: '10 6 * * *', logsRuns: true, addedAt: '2026-08-05' },
   { service: 'proposal-view-digest', jobName: 'proposal-view-digest', schedule: '0 19 * * *', logsRuns: true },
   // 2026-09-16 降频（commit 2a17a85f2）：每小时整点；此前登记的是每 30 分钟。
@@ -477,10 +484,10 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 'creatomate-render'，具体是哪条渲染由 summary.source_record_id 区分，不是按周期对账。
   'creatomate-render': '按需事件触发（内容确认时），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
-  // 马良 · 出片自检（src/lib/inngest/functions/maliang-render-check.ts）跟在上面那条渲染
-  // 之后：每有一条 Creatomate 成片落库就发一次事件，一天 0 到 N 次，不排班。回执
+  // 马良 · 出片自检（src/lib/inngest/functions/maliang-render-check.ts）跟在渲染
+  // 之后：Creatomate 落库，或模板出片工单交付，各发一次事件，一天 0 到 N 次，不排班。回执
   // job_name 恒为 'maliang-render-check'，哪条片由 summary.source_record_id 区分。
-  'maliang-render-check': '按需事件触发（Creatomate 成片落库后），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+  'maliang-render-check': '按需事件触发（Creatomate 或模板出片落库后），非周期任务，不适用 CRON_REGISTRY 的排班对账',
   // 李白 · 文案溯源（src/lib/inngest/functions/libai-copy-provenance.ts）同理：由
   // content-factory/generate 每写一条候选就发一次事件，一天 0 到 N 次，不排班。回执
   // job_name 恒为 'libai-copy-provenance'，哪条文案由 summary.source_record_id 区分。
