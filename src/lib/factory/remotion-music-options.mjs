@@ -98,6 +98,44 @@ export function remotionMusicChoices(rawBriefRemotion) {
     .filter((choice) => choice !== null)
 }
 
+function trackForMusicFile(musicFile) {
+  const key = musicNameKey(musicFile)
+  return musicCatalog.tracks.find((track) => {
+    try {
+      return musicNameKey(stagedFileName(track)) === key || musicNameKey(track.file) === key
+    } catch {
+      return musicNameKey(track.file) === key
+    }
+  }) ?? null
+}
+
+/** Vocal clearance for the track already on this brief. Does not swap music. */
+export function remotionMusicClearance(rawBriefRemotion) {
+  const unread = { verdict: 'unreadable', reason: '读不到', track_id: null, clean_until_sec: null }
+  const brief = propsRecord(rawBriefRemotion)
+  if (!brief || !isTemplateId(brief.template)) return unread
+  const props = propsRecord(brief.props)
+  if (!props || typeof props.musicFile !== 'string' || !props.musicFile.trim()) return unread
+  const track = trackForMusicFile(props.musicFile)
+  if (!track) return { verdict: 'fail', reason: '配乐不在曲库', track_id: null, clean_until_sec: null }
+  let loaded
+  try {
+    loaded = loadTemplate(brief.template, props)
+  } catch {
+    return unread
+  }
+  const cleanUntilSec = vocalClearUntil(track)
+  if (cleanUntilSec === null) {
+    return { verdict: 'fail', reason: '配乐没有人声核验', track_id: track.id, clean_until_sec: null }
+  }
+  const durationSeconds = loaded.totalFrames / FPS
+  const startSec = typeof props.musicStartSec === 'number' && Number.isFinite(props.musicStartSec) ? props.musicStartSec : 0
+  if (cleanUntilSec < startSec + durationSeconds + 1) {
+    return { verdict: 'fail', reason: '配乐的无人声时长盖不住这条片子', track_id: track.id, clean_until_sec: cleanUntilSec }
+  }
+  return { verdict: 'pass', reason: '配乐已核无人声', track_id: track.id, clean_until_sec: cleanUntilSec }
+}
+
 export function replaceRemotionMusic(rawBriefRemotion, musicId) {
   const brief = propsRecord(rawBriefRemotion)
   if (!brief || !isTemplateId(brief.template)) return null

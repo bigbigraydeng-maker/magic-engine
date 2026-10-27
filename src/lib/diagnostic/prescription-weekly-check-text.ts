@@ -46,7 +46,29 @@ export interface MeasuredKpi {
   unit: string | null
 }
 
+/** 个人 IP 方案的本周数字。没读到的写 null，不当成 0。第一批只定判断口径，数据接入在后面。 */
+export interface PersonalIpCheckFacts {
+  /** 本周发了几条内容。 */
+  postsThisWeek: number | null
+  /** 开方时的互动率起点（0–1 小数）。 */
+  engagementBaseline: number | null
+  /** 最近两周的互动率，最新的在前。 */
+  recentEngagement: Array<number | null>
+  /** 加钱推的帖子单条结果成本，和表现最好的自然帖的单条成本（同一口径）。 */
+  boostedCost: number | null
+  bestOrganicCost: number | null
+  dmConversations: number | null
+  bookings: number | null
+}
+
+export const PERSONAL_IP_MIN_POSTS = 5
+export const PERSONAL_IP_BOOST_COST_RATIO = 2
+export const PERSONAL_IP_MANY_DMS = 10
+export const PERSONAL_IP_LOW_BOOKING_RATE = 0.1
+
 export interface PrescriptionCheckFacts {
+  /** 个人 IP 方案才有。缺省 = 普通方案，复盘文字不变。 */
+  personalIp?: PersonalIpCheckFacts
   goalTitle: string | null
   /** 方案上写了目标。没有目标时，阶段和工单都对不上，不能拿客户名下全部来凑。 */
   goalLinked: boolean
@@ -151,7 +173,41 @@ export function describePrescriptionCheck(facts: PrescriptionCheckFacts): Prescr
     metricSentence(facts),
     facts.readsCapped ? '有一类记录这次一次读不完，上面的件数可能不全。没读到的不当成零。' : '',
   ].filter((line) => line.length > 0).join('')
-  return { progress, suggestion: suggestionSentences(facts).slice(0, 2).join('') }
+  return { progress, suggestion: allSuggestions(facts).join('') }
+}
+
+function allSuggestions(facts: PrescriptionCheckFacts): string[] {
+  const base = suggestionSentences(facts)
+  if (!facts.personalIp) return base.slice(0, 2)
+  return [...personalIpSuggestions(facts.personalIp), ...base].slice(0, 3)
+}
+
+/** 个人 IP 复盘建议。只建议，不自动操作；内容少于 5 条不下结论。 */
+export function personalIpSuggestions(facts: PersonalIpCheckFacts): string[] {
+  if (facts.postsThisWeek == null) return ['本周发了几条内容没读到，先不下结论。']
+  if (facts.postsThisWeek < PERSONAL_IP_MIN_POSTS) {
+    return [`本周只发了 ${facts.postsThisWeek} 条内容，不到 ${PERSONAL_IP_MIN_POSTS} 条，样本太少，先不下结论。`]
+  }
+  const lines: string[] = []
+  const base = facts.engagementBaseline
+  const recent = facts.recentEngagement.slice(0, 2)
+  if (base != null && recent.length === 2 && recent.every((rate) => rate != null && rate < base)) {
+    lines.push('互动率连续两周低于开方时的起点。建议换选题或换开头，系统不会自动改内容。')
+  }
+  if (
+    facts.boostedCost != null && facts.bestOrganicCost != null && facts.bestOrganicCost > 0
+    && facts.boostedCost > facts.bestOrganicCost * PERSONAL_IP_BOOST_COST_RATIO
+  ) {
+    lines.push(`加钱推的帖子单条成本超过最好的自然帖的 ${PERSONAL_IP_BOOST_COST_RATIO} 倍。建议停掉这条加推，系统不会自动停。`)
+  }
+  const dms = facts.dmConversations
+  if (
+    dms != null && facts.bookings != null && dms >= PERSONAL_IP_MANY_DMS
+    && facts.bookings / dms < PERSONAL_IP_LOW_BOOKING_RATE
+  ) {
+    lines.push('私信不少但预约很少。建议改私信话术或落地页，系统不会自动改。')
+  }
+  return lines
 }
 
 export function formatCnDate(iso: string | null): string | null {

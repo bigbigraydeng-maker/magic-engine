@@ -7,6 +7,11 @@ const NZ = 'Pacific/Auckland'
 const HOUR_MS = 3_600_000
 const LEADS = new Set(['线索', 'lead', 'leads', 'leads_count'])
 const COSTS = new Set(['成本', 'cpl', 'cost'])
+// 个人 IP：私信对话数单独汇总 messaging_conversations。
+// 没读到对话数就是不知道，不能用 results（线索与私信的较大值）代替。
+// 看完数汇总 video_thruplays；没读到观看数就是不知道，不能用 results 代替。
+const CONVERSATIONS = new Set(['对话数', '私信对话数', 'conversations', 'dm_conversations'])
+const VIEWS = new Set(['看完数', '视频看完数', 'thruplays', 'video_views'])
 
 const HOURS = [
   { kpiMetric: 'launch_check_24h', label: '24 小时', hours: 24 },
@@ -58,6 +63,10 @@ export interface InsightRef {
   insightDate: string | null
   spend: number | null
   results: number | null
+  /** ThruPlays。null / 缺省 = 这天没读到观看数，不能当成 0。 */
+  videoThruplays?: number | null
+  /** 私信对话数。null / 缺省 = 这天没读到对话数，不能用 results 代替，也不能当成 0。 */
+  messagingConversations?: number | null
 }
 
 export interface KpiRef {
@@ -419,18 +428,25 @@ function pushReadable(
 ): void {
   const leads = sumColumn(rows, 'results')
   const spend = sumColumn(rows, 'spend')
+  const views = sumColumn(rows, 'videoThruplays')
+  const conversations = sumColumn(rows, 'messagingConversations')
   for (const kpi of kpis) {
     const kind = metricKind(kpi.metric)
     if (kind === 'leads') pushLead(kpi, leads, parts, comparisons)
+    else if (kind === 'conversations') pushCount(kpi, '对话数', conversations, parts, comparisons)
+    else if (kind === 'views') pushCount(kpi, '看完数', views, parts, comparisons)
     else if (kind === 'cost') pushCost(kpi, leads, spend, parts, comparisons)
   }
 }
 
-function sumColumn(rows: readonly InsightRef[], key: 'results' | 'spend'): number | null {
+function sumColumn(
+  rows: readonly InsightRef[],
+  key: 'results' | 'spend' | 'videoThruplays' | 'messagingConversations',
+): number | null {
   let total = 0
   for (const row of rows) {
     const value = row[key]
-    if (value === null) return null
+    if (value === null || value === undefined) return null
     total += value
   }
   return total
@@ -447,6 +463,25 @@ function pushLead(kpi: KpiRef, leads: number | null, parts: string[], comparison
   }
   comparisons.push(leads >= kpi.target)
   parts.push(pairText('线索', leads, kpi.target, kpi.unit))
+}
+
+function pushCount(
+  kpi: KpiRef,
+  label: string,
+  count: number | null,
+  parts: string[],
+  comparisons: boolean[],
+): void {
+  if (kpi.target === null) {
+    parts.push(`「${kpi.metric}」没有写下目标。`)
+    return
+  }
+  if (count === null) {
+    parts.push(`有几天的${label}是空的，不能当成 0。`)
+    return
+  }
+  comparisons.push(count >= kpi.target)
+  parts.push(pairText(label, count, kpi.target, kpi.unit))
 }
 
 function pushCost(
@@ -482,9 +517,11 @@ function pushUnrecognized(kpi: KpiRef, parts: string[]): void {
   parts.push(`有一个指标认不出来：${kpi.metric}。`)
 }
 
-function metricKind(metric: string): 'leads' | 'cost' | 'other' {
+function metricKind(metric: string): 'leads' | 'cost' | 'conversations' | 'views' | 'other' {
   const key = metric.trim().toLowerCase()
   if (LEADS.has(key)) return 'leads'
+  if (CONVERSATIONS.has(key)) return 'conversations'
+  if (VIEWS.has(key)) return 'views'
   if (COSTS.has(key)) return 'cost'
   return 'other'
 }

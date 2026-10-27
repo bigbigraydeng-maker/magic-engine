@@ -51,6 +51,7 @@ function intakeFrom(raw: unknown): IntakeFact | null {
   return {
     businessGoal: textOrNull(row.business_goal),
     monthlyBudget: finiteNumber(row.monthly_budget_aud),
+    ...(row.client_kind === 'personal_ip' ? { personalIp: true } : {}),
   }
 }
 
