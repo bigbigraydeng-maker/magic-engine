@@ -1,13 +1,13 @@
 ---
 id: 2026-10-28-newsletter-agent-playbook-v0.1-await-pm
-title: 要有专门的 newsletter agent 来闭环管理：规则手册 v0.1 草案已写，等 PM 点头方向后先过子牙 + 魏征复审，再逐包开发
+title: 要有专门的 newsletter agent 来闭环管理：规则手册 v0.2 已吸收子牙 + 魏征复审（都是有条件通过），等 PM 说「开始」再逐包开发
 status: decided
 owner: pm
 decided_on: 2026-10-28
 source: session:82f88edf
 verify_by: 2026-11-04
-verify_how: "先看 PM 是否回「方向对」；之后看手册 §12 是否补上子牙 + 魏征复审回执；第一期（只读日巡检）是否按 PM 说「开始」派出；第一期交付时看 NL-01 / 02 / 05 / 06 / 12 / 13 各有一次真实运行记录"
+verify_how: "先看 PM 是否回「停」（先拆雷，WP0a）和「开始」（第一期 WP1）；WP1 第一步接口探针的结果是否写进手册 §11；第一期交付时看 NL-01 / 02 / 03 / 05 / 06 / 13 / 18 / 19 / 21 各有一次真实运行记录，且记录里没有邮箱"
 ---
-PM 2026-10-28 指令：10/28 核查暴露的 9 个洞说明需要专门的 newsletter agent 来闭环管理。
-手册 docs/sops/2026-10-28-newsletter-agent-playbook-and-rules-v0.1.md：三层 + 三个独立角色 + NL-01 到 NL-16 + 策划层 PL-01 到 PL-06（吃营销处方 + CRM 进线，PM 10-28 追加）+ 授权四档 + 分期工作包。
-不新增支柱（沿用 9/8 邮件渠道的层级判定）；第一期只读不发信，落代码时机器会判 A 级，PM 说「合」才合。
+PM 2026-10-28 指令：要专门的 newsletter agent 闭环管理，且策划要吃营销处方 + CRM 进线；PM 回「方向对」，要求先复审、通过后等他说「开始」。
+手册 docs/sops/2026-10-28-newsletter-agent-playbook-and-rules-v0.1.md（文内版本 v0.2）：三层 + 三个独立角色 + NL-01 到 NL-21 + 策划层 PL-01 到 PL-06 + 授权四档 + 工作包 WP0a 到 WP6；不新增支柱。
+复审：子牙、魏征都是有条件通过，处理表在手册 §12。魏征另提一件更急的事：E2 / E3 / E4 队列修好会群发旧信、13 封全员草稿还在，建议先拆（WP0a，PM 回「停」）。
