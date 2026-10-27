@@ -1,5 +1,13 @@
 # 迁移对账表（MIGRATION-MAP）
 
+> **负责人**：苏东坡（`sudongpo`）· [苏东坡档案](../../agents/14-sudongpo.md)
+> **范围**：迁移对账表：原文要点编号 → 去向
+> **状态**：迁移稿，待 PM 审批（不新增规则、不改含义）
+> **日期**：2026-10-28
+> **最后核实**：2026-10-28（对照迁移源逐条核对）
+> **风险**：C 级纯文档；迁入内容不等于获批的新规则
+> **代码依据**：无（纯文档，不涉及代码；规则来源为开发侧记忆原文）
+
 > 作用：让人核对「没有漏迁、没有改义」。原文每个要点一个编号，一行一条，写明去向。迁移日期 2026-10-28；迁移稿只搬运、不新增规则、不改含义。
 
 > 编号前缀：**S** = `playbook-social-general.md`（通用手册）· **R** = `feedback-viral-reel-recipe-over-montage.md` · **C** = `feedback-video-caption-short-big.md` · **F** = `feedback-first-frame-must-differ-and-worth-posting.md` · **B** = `feedback-cts-feed-repetitive-bgm-price-screen-mix-2026-10-15.md` · **V** = `reference-video-first-frame-cover-chrome-facts-2026-10-27.md`。均在开发侧记忆目录 `~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/`（仓库外）。
