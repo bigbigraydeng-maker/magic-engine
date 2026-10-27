@@ -10,6 +10,7 @@ import { assertMayClick, contentFingerprint, decideConfirmationCard, issueConfir
 import { notesFor } from '@/lib/confirmation-card/records'
 import { voidStaleCard } from '@/lib/confirmation-card/settle'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import { isExpired, readStoredCard } from '@/lib/confirmation-card/view'
 import type { AdDraft } from './ad-draft'
 import { createDraftForApproval, type CreateDraftDeps, type CreateDraftOutcome } from './draft-and-gate'
 import {
@@ -23,10 +24,18 @@ import {
   type PriorPausedFailure,
 } from './paused-draft-facts'
 
-type HoldStatus = 'holding' | 'building' | 'declined' | 'built' | 'refused' | 'failed'
+type HoldStatus = 'holding' | 'building' | 'declined' | 'built' | 'refused' | 'failed' | 'expired'
 
 const PENDING_CAP = 50
 const ACCOUNT_CHANGED = '广告账户已经换过了，这张卡不能用来建。请重新出一张确认卡。'
+const CARD_GONE = '这张卡已经作废，没有去建。'
+
+interface LinkedRun {
+  status: string
+  input: Record<string, unknown>
+}
+
+type HoldFate = 'live' | 'settled' | 'expired' | 'replaced'
 
 interface HoldPayload {
   status: HoldStatus
@@ -72,12 +81,17 @@ export async function issuePausedDraftCard(args: {
   const facts = pausedDraftFacts(draft, args.accountLabel, args.review)
   const draftHash = canonicalHashOfInput(draft)
   const fingerprint = contentFingerprint(normalizeFacts(facts))
+  const now = args.now ?? args.kernel.now()
+  await releaseDeadHolds(args.kernel.supabase, args.clientId, now, {
+    subjectKey: facts.subjectKey,
+    fingerprint,
+  })
   await assertCanIssue(args.kernel.supabase, args.clientId, draftHash, fingerprint)
   const card = await issueConfirmationCard(args.kernel, {
     clientId: args.clientId,
     clicker: args.clicker,
     facts,
-    now: args.now,
+    now,
   })
   const existing = await rowsFor(args.kernel.supabase, args.clientId, 'payload->>cardRunId', card.runId)
   if (existing.length > 0) return card
@@ -108,6 +122,8 @@ export async function submitPausedDraftCard(args: {
   now?: Date
 }): Promise<PausedDraftSubmitResult> {
   assertMayClick(args.clicker, args.clientId)
+  const now = args.now ?? args.kernel.now()
+  await releaseDeadHolds(args.kernel.supabase, args.clientId, now, null)
   const hold = await holdForRun(args.kernel.supabase, args.clientId, args.runId)
   if (hold.payload.fingerprint !== args.fingerprint) {
     throw new ConfirmationCardError('stale', '你看到的内容已经不是这一张卡了。请刷新后再点。')
@@ -304,6 +320,56 @@ async function clickedBy(kernel: KernelDeps, runId: string): Promise<string | nu
   if (!run.authorization_decision_id) return null
   const notes = await notesFor(kernel.supabase, [run.authorization_decision_id])
   return notes.get(run.authorization_decision_id)?.decidedBy ?? null
+}
+
+function holdFate(
+  payload: HoldPayload,
+  run: LinkedRun | undefined,
+  now: Date,
+  incoming: { subjectKey: string; fingerprint: string } | null,
+): HoldFate {
+  if (!run) return 'live'
+  if (run.status !== 'pending_approval') return 'settled'
+  if (!incoming) return 'live'
+  const stored = readStoredCard(run.input)
+  if (stored && isExpired(stored.issuedAt, now)) return 'expired'
+  const replaced = payload.subjectKey === incoming.subjectKey && payload.fingerprint !== incoming.fingerprint
+  return stored && replaced ? 'replaced' : 'live'
+}
+
+async function linkedRuns(sb: SupabaseClient, ids: string[]): Promise<Map<string, LinkedRun>> {
+  const found = new Map<string, LinkedRun>()
+  const unique = [...new Set(ids)]
+  if (unique.length === 0) return found
+  const { data, error } = await sb.from('action_runs').select('id, status, input').in('id', unique)
+  if (error) throw new ConfirmationCardError('invalid', '建草稿的记录读不出来，没有去建。')
+  for (const row of (data ?? []) as Array<{ id?: unknown; status?: unknown; input?: unknown }>) {
+    if (typeof row.id !== 'string' || typeof row.status !== 'string') continue
+    if (!row.input || typeof row.input !== 'object') continue
+    found.set(row.id, { status: row.status, input: row.input as Record<string, unknown> })
+  }
+  return found
+}
+
+/** Drop holds whose card has expired, been replaced, or already been settled. */
+async function releaseDeadHolds(
+  sb: SupabaseClient,
+  clientId: string,
+  now: Date,
+  incoming: { subjectKey: string; fingerprint: string } | null,
+): Promise<void> {
+  const holding = await rowsFor(sb, clientId, 'payload->>status', 'holding')
+  const runs = await linkedRuns(sb, holding.map((row) => row.payload.cardRunId))
+  for (const row of holding) {
+    const fate = holdFate(row.payload, runs.get(row.payload.cardRunId), now, incoming)
+    if (fate === 'live') continue
+    if (!incoming && fate !== 'settled') continue
+    await save(sb, clientId, row.id, {
+      ...row.payload,
+      status: 'expired',
+      resultLine: row.payload.resultLine ?? CARD_GONE,
+    })
+  }
 }
 
 async function assertCanIssue(

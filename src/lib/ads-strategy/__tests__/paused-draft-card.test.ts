@@ -493,6 +493,87 @@ describe('paused draft confirmation', () => {
     expect(waiting.createPaused).not.toHaveBeenCalled()
     expect(declined.resultLine).toContain('不做')
   })
+
+  it('reissues the same draft after each card expires without using up the pending cap', async () => {
+    const f = fixture()
+    let now = Date.parse('2026-10-27T00:00:00.000Z')
+    const step = 31 * 60 * 1000
+    let first: Awaited<ReturnType<typeof issued>>['card'] | null = null
+    for (let i = 0; i < 50; i += 1) {
+      const card = await issuePausedDraftCard({
+        kernel: f.kernel,
+        clientId: CLIENT_A,
+        clicker: OPC,
+        draft: draft(),
+        accountLabel: '这位客户的广告账户',
+        review: REVIEW,
+        now: new Date(now),
+      })
+      if (!first) first = card
+      now += step
+    }
+    const again = await issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: draft(),
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+      now: new Date(now),
+    })
+    const holding = f.tables.flywheel_actions.filter((row) => {
+      const payload = row.payload as { status?: string }
+      return payload.status === 'holding'
+    })
+    expect(holding).toHaveLength(1)
+    expect((holding[0]?.payload as { cardRunId?: string }).cardRunId).toBe(again.runId)
+    if (!first) throw new Error('missing first card')
+    const declined = await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: first.runId,
+      clicker: OPC,
+      resolution: 'decline',
+      expectedDecisionId: first.expectedDecisionId,
+      fingerprint: first.fingerprint,
+      review: REVIEW,
+      now: new Date(now),
+    })
+    expect(declined.wroteMeta).toBe(false)
+    expect(declined.queued).toBe(false)
+    expect(declined.resultLine).toContain('作废')
+  })
+
+  it('does not keep a replaced card in the pending cap', async () => {
+    const f = fixture()
+    const now = new Date('2026-10-27T00:00:00.000Z')
+    for (let i = 0; i < 50; i += 1) {
+      await issuePausedDraftCard({
+        kernel: f.kernel,
+        clientId: CLIENT_A,
+        clicker: OPC,
+        draft: draft({ dailyBudget: 20 + i }),
+        accountLabel: '这位客户的广告账户',
+        review: REVIEW,
+        now,
+      })
+    }
+    const latest = await issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: draft({ dailyBudget: 80 }),
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+      now,
+    })
+    const holding = f.tables.flywheel_actions.filter((row) => {
+      const payload = row.payload as { status?: string }
+      return payload.status === 'holding'
+    })
+    expect(holding).toHaveLength(1)
+    expect((holding[0]?.payload as { cardRunId?: string }).cardRunId).toBe(latest.runId)
+  })
 })
 
 describe('paused draft helpers', () => {
