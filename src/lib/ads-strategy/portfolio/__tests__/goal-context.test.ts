@@ -29,17 +29,32 @@ interface InsightRow {
  * to { data, error }. Any other table is a test bug — throw.
  */
 function insightsTable(rows: InsightRow[]) {
-  const result = { data: rows, error: null }
-  const builder = {
-    select: () => builder,
-    eq: () => builder,
-    gte: () => builder,
-    lte: () => builder,
-    then: (resolve: (value: typeof result) => unknown) => resolve(result),
-  }
   vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
     if (table !== 'ad_daily_insights') {
       throw new Error(`unexpected table in test: ${table}`)
+    }
+    // Each query has its own date window. The cost read is 7 days; the sample
+    // count is the whole goal period. Ignoring gte/lte would let those leak.
+    const bounds: { from?: string; to?: string } = {}
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      gte: (col: string, value: string) => {
+        if (col === 'insight_date') bounds.from = value
+        return builder
+      },
+      lte: (col: string, value: string) => {
+        if (col === 'insight_date') bounds.to = value
+        return builder
+      },
+      then: (resolve: (value: { data: InsightRow[]; error: null }) => unknown) => {
+        const data = rows.filter((row) => {
+          if (bounds.from && row.insight_date < bounds.from) return false
+          if (bounds.to && row.insight_date > bounds.to) return false
+          return true
+        })
+        return resolve({ data, error: null })
+      },
     }
     return builder as never
   })
@@ -398,6 +413,58 @@ describe('同类结果成本口径（线索目标不拿对话成本）', () => {
     const ctx = await buildDigestGoalContext('client-1', '2026-09-16')
     expect(ctx?.pace.verdict).toBe('unknown')
     expect(ctx?.pace.reason).toContain('样本不足')
+  })
+
+  /** 目标 10/1–10/31，截至 10/26 实际线索 0。日历已有 26 天，线性节奏会判落后。 */
+  async function octoberWith(rows: MixedRow[]) {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-10-01', period_end: '2026-10-31', target_value: 100, baseline_value: 0,
+    })])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value: 0, source: 'ad_daily_insights', snapshot_date: '2026-10-26', label: 'lead',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({
+      config: adStrategyConfig(), source: 'row',
+    })
+    insightsTable(rows)
+    return buildDigestGoalContext('client-1', '2026-10-26')
+  }
+
+  function quietDay(insight_date: string, entity_id: string): MixedRow {
+    return { insight_date, entity_id, spend: 20, results: 0, leads: 0, messaging_conversations: 0 }
+  }
+
+  it('晚开投：只有最后两天日报（同一天多行仍算 1 天）→ 样本不足，不是落后', async () => {
+    const ctx = await octoberWith([
+      quietDay('2026-10-25', 'series-a'),
+      quietDay('2026-10-25', 'series-b'),
+      quietDay('2026-10-26', 'series-a'),
+      quietDay('2026-10-26', 'series-b'),
+    ])
+    expect(ctx?.dayIndex).toBe(26)
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('样本不足')
+    expect(ctx?.pace.reason).toContain('只有 2 天')
+  })
+
+  it('中间缺日报：只有首尾两天 → 按 2 天未判，不把中间空档算成已观察', async () => {
+    const ctx = await octoberWith([
+      quietDay('2026-10-01', 'series-a'),
+      quietDay('2026-10-26', 'series-a'),
+    ])
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('样本不足')
+    expect(ctx?.pace.reason).toContain('只有 2 天')
+  })
+
+  it('中间有空档但不同日期已有 3 天 → 仍按原判断（长期没有同类结果）', async () => {
+    const ctx = await octoberWith([
+      quietDay('2026-10-01', 'series-a'),
+      quietDay('2026-10-10', 'series-a'),
+      quietDay('2026-10-26', 'series-a'),
+    ])
+    expect(ctx?.pace.verdict).toBe('behind')
+    expect(ctx?.pace.reason).not.toContain('样本不足')
   })
 })
 

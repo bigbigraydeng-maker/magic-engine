@@ -177,9 +177,12 @@ export function withoutCapLens(pace: GoalPace): GoalPace {
 }
 
 /**
- * 同类结果的成本样本不够、而且目标期本身才刚开始（有数据的天数 < MIN_MEDIAN_DAYS）时，
+ * 同类结果的成本样本不够、而且目标期内实际有日报的不同日期不到 MIN_MEDIAN_DAYS 时，
  * 任何判断（含「落后」）都是拿几乎没有的数据下结论 → 一律「样本不足，未判」，不标红。
- * 目标期已经跑了几天、成本样本仍薄，则保留原判断（长期出不了结果本身就是信号）。
+ * dataDays 是这些日期的个数，不是从目标开始到截止日的日历天数：晚开投或中间缺日报，
+ * 缺的那些天不能当成已经观察到的零结果。
+ * 目标期里已经有够多天的日报、成本样本仍薄，则保留原判断（长期出不了结果本身就是信号）。
+ * 一行日报都没有时 dataDays 为 null，不在这里改判。
  */
 export function withThinSampleGuard(pace: GoalPace, costMedian: number | null, dataDays: number | null): GoalPace {
   if (costMedian !== null || dataDays === null || dataDays >= MIN_MEDIAN_DAYS) return pace
@@ -204,6 +207,37 @@ function clipGoalEndToDataThrough(
   return dataThrough
 }
 
+/**
+ * 目标期内、截止到 asOf 为止，实际有日报的不同日期数。
+ * 和成本读数用同一组系列；没配系列就不限。一行都没有或读失败 → null，不拿 0 冒充「观察过」。
+ * 一个月的系列行通常低于 PostgREST 1000 行上限；万一被截断，只会少算天数，闸门更倾向未判。
+ */
+async function countInPeriodReportDays(
+  clientId: string,
+  periodStart: string,
+  periodEnd: string,
+  asOf: string,
+  campaignIds: readonly string[] | undefined,
+): Promise<number | null> {
+  const end = asOf < periodEnd ? asOf : periodEnd
+  if (end < periodStart) return null
+  const { data, error } = await supabaseAdmin
+    .from('ad_daily_insights')
+    .select('insight_date, entity_id')
+    .eq('client_id', clientId)
+    .eq('level', 'campaign')
+    .gte('insight_date', periodStart)
+    .lte('insight_date', end)
+  if (error || !data) return null
+  const wanted = campaignIds && campaignIds.length > 0 ? new Set(campaignIds) : null
+  const days = new Set<string>()
+  for (const row of data as AdDailyInsightRow[]) {
+    if (wanted && (row.entity_id == null || !wanted.has(row.entity_id))) continue
+    if (row.insight_date >= periodStart && row.insight_date <= end) days.add(row.insight_date)
+  }
+  return days.size === 0 ? null : days.size
+}
+
 /** 目标对应的系列：线索目标 = 配置里的表单留资系列，私信目标 = WhatsApp 系列；没配置 = 不限系列（只按结果类型区分）。 */
 function goalCampaignIds(clientId: string, metric: CostMetric): string[] | undefined {
   const kind = metric === 'leads' ? 'lead_form' : metric === 'messaging' ? 'whatsapp' : null
@@ -223,10 +257,8 @@ export async function buildDigestGoalContext(
 
     const { config, source, error: configError } = await loadAdStrategyConfigWithSource(clientId)
     const metric = costMetricForGoal(goal.primary_metric_key)
-    const cost = await readRecentCost(clientId, insightDate, {
-      metric,
-      campaignIds: goalCampaignIds(clientId, metric),
-    })
+    const campaignIds = goalCampaignIds(clientId, metric)
+    const cost = await readRecentCost(clientId, insightDate, { metric, campaignIds })
     const medianCostPerResultCents7d = cost.medianCents
     // 速度按有数据的最后一天算。实际值用同一个终点，不把截止日之后的数算进去。
     const dataThrough = cost.latestDate
@@ -238,9 +270,10 @@ export async function buildDigestGoalContext(
     })
     // unknown / 任何失败 → null（不是 0）。
     const actualToDate = fetched.ok ? fetched.value : null
-    const dataDays = dataThrough === null
-      ? null
-      : dayIndexAndTotal(goal.period_start, goal.period_end, dataThrough).dayIndex
+    // 样本够不够看目标期内有日报的不同日期，不用日历跨度冒充。
+    const dataDays = await countInPeriodReportDays(
+      clientId, goal.period_start, goal.period_end, insightDate, campaignIds,
+    )
 
     const computed = computeGoalPace({
       targetValue: goal.target_value,
