@@ -6,6 +6,7 @@
 
 import type { AdsDraftFacts, AudiencePoolItem, CreativePoolFact } from '@/lib/marketing-plan/promo/draft-ads'
 import { nzToday, promoVerdict, type PromoVerdict } from '../promo-window'
+import { isRemarketingSubtype } from '../portfolio/roles'
 import type { PlayKey } from '../play-vocabulary'
 import type { ReadState } from './eligibility'
 import type { AudienceState, Basis, CreativeState, Field } from './types'
@@ -25,6 +26,8 @@ const MAX_EXCLUDED = 10
 const MAX_STATUS_CANDIDATES = 3
 /** Only the plays that target an existing pool get an included audience. */
 const AUDIENCE_PLAYS: readonly PlayKey[] = ['warm_pool_retarget']
+const NO_AVOID: ReadonlySet<string> = new Set()
+const NO_REMARKETING = '受众池里没有适合再营销的受众（相似受众或子类型读不到的不能当暖池重定向），先留空'
 
 export interface AudienceOutcome {
   state: AudienceState
@@ -80,8 +83,38 @@ function poolUnreadable(f: AdsDraftFacts): string | null {
   return '受众快照没读全，不能判断是真没有受众还是没读到'
 }
 
-/** Included audience for a retarget step: tri-state, empty unless a ranked candidate is confirmed usable. */
-export function seedAudience(play: PlayKey, f: AdsDraftFacts | null, status: AudienceStatusRead | null): AudienceOutcome {
+function rankedRemarketing(audiences: readonly AudiencePoolItem[]): AudiencePoolItem[] {
+  return audiences.filter(item => isRemarketingSubtype(item.subtype)).sort(rank).slice(0, MAX_STATUS_CANDIDATES)
+}
+
+/** Prefer a usable audience outside `avoid`; if every usable one is in it, keep the best. */
+function pickRemarketing(
+  ranked: readonly AudiencePoolItem[],
+  map: Record<string, AudienceStatus>,
+  avoid: ReadonlySet<string>,
+): AudienceOutcome {
+  const usableItems: AudiencePoolItem[] = []
+  let sawUnusable = false
+  for (const item of ranked) {
+    const ok = usable(map[item.ref])
+    if (ok === true) usableItems.push(item)
+    else if (ok === false) sawUnusable = true
+  }
+  const chosen = usableItems.find(item => !avoid.has(item.ref)) ?? usableItems[0]
+  if (chosen) {
+    return { state: 'read', ids: { ok: true, value: [chosen.ref], basis: audienceBasis(chosen), notes: [] } }
+  }
+  if (sawUnusable) return { state: 'unusable', ids: empty('读到了受众，但状态是不可用（还没准备好或投不出去），先留空') }
+  return { state: 'unreadable', ids: empty('读不到受众现在能不能投，先留空') }
+}
+
+/** Included audience for a retarget step. Only remarketing subtypes are candidates; lookalikes are not. */
+export function seedAudience(
+  play: PlayKey,
+  f: AdsDraftFacts | null,
+  status: AudienceStatusRead | null,
+  avoid: ReadonlySet<string> = NO_AVOID,
+): AudienceOutcome {
   if (!AUDIENCE_PLAYS.includes(play)) {
     return { state: 'read', ids: empty('这个打法不需要指定受众') }
   }
@@ -89,21 +122,30 @@ export function seedAudience(play: PlayKey, f: AdsDraftFacts | null, status: Aud
   if (f === null || why !== null || f.audiences === null) {
     return { state: 'unreadable', ids: empty(why ?? '读不到这个客户的受众池') }
   }
-  const ranked = [...f.audiences].sort(rank).slice(0, MAX_STATUS_CANDIDATES)
+  const ranked = rankedRemarketing(f.audiences)
+  if (ranked.length === 0) return { state: 'unusable', ids: empty(NO_REMARKETING) }
   if (status === null || status.state === 'failed') {
     return { state: 'unreadable', ids: empty(failedWhy(status, '读不到受众现在能不能投，先留空')) }
   }
-  const map = status.state === 'ok' ? status.value : {}
-  let sawUnusable = false
-  for (const item of ranked) {
-    const ok = usable(map[item.ref])
-    if (ok === true) {
-      return { state: 'read', ids: { ok: true, value: [item.ref], basis: audienceBasis(item), notes: [] } }
-    }
-    if (ok === false) sawUnusable = true
+  return pickRemarketing(ranked, status.state === 'ok' ? status.value : {}, avoid)
+}
+
+function exclusionItems(f: AdsDraftFacts | null): { ref: string; adsets: number }[] {
+  return (f?.excluded_in_use ?? []).slice(0, MAX_EXCLUDED)
+}
+
+function exclusionField(items: { ref: string; adsets: number }[], notes: string[]): Field<string[]> {
+  return {
+    ok: true,
+    value: items.map(p => p.ref),
+    basis: [{
+      label: '在投广告组已在用的排除名单',
+      value: items.map(p => `${p.ref}（${p.adsets} 个广告组）`).join('、'),
+      source: AUDIENCE_SOURCE,
+      as_of: null,
+    }],
+    notes,
   }
-  if (sawUnusable) return { state: 'unusable', ids: empty('读到了受众，但状态是不可用（还没准备好或投不出去），先留空') }
-  return { state: 'unreadable', ids: empty('读不到受众现在能不能投，先留空') }
 }
 
 /** Exclusion list: only audiences the account's delivering ad sets already exclude. All-or-nothing, fail closed. */
@@ -114,24 +156,45 @@ export function seedExcluded(f: AdsDraftFacts | null, status: AudienceStatusRead
   if (status === null || status.state !== 'ok') {
     return empty(failedWhy(status, '读不到排除名单现在能不能用，先留空'))
   }
-  const picked = inUse.slice(0, MAX_EXCLUDED)
+  const picked = exclusionItems(f)
   const bad = picked.filter(p => usable(status.value[p.ref]) !== true)
   if (bad.length > 0) {
     return empty(`排除名单 ${bad.map(b => b.ref).join('、')} 不可用或读不到状态；排除名单失效 = 老客人仍会看到广告，先留空`)
   }
-  return {
-    ok: true,
-    value: picked.map(p => p.ref),
-    basis: [{ label: '在投广告组已在用的排除名单', value: picked.map(p => `${p.ref}（${p.adsets} 个广告组）`).join('、'), source: AUDIENCE_SOURCE, as_of: null }],
-    notes: inUse.length > MAX_EXCLUDED ? [`还有 ${inUse.length - MAX_EXCLUDED} 个没列出（最多 ${MAX_EXCLUDED} 个）`] : [],
-  }
+  const notes = inUse.length > MAX_EXCLUDED ? [`还有 ${inUse.length - MAX_EXCLUDED} 个没列出（最多 ${MAX_EXCLUDED} 个）`] : []
+  return exclusionField(picked, notes)
 }
 
-/** Ids the status read needs for one step: ranked candidates plus the exclusion list. */
+/** Drop included ids from the exclusion list. An empty remainder is left blank with a reason. */
+function stripOverlap(audience: AudienceOutcome, excluded: Field<string[]>, f: AdsDraftFacts | null): Field<string[]> {
+  if (!audience.ids.ok || !excluded.ok) return excluded
+  const include = new Set(audience.ids.value)
+  const items = exclusionItems(f)
+  const rest = items.filter(item => !include.has(item.ref))
+  if (rest.length === items.length) return excluded
+  const dropped = items.filter(item => include.has(item.ref)).map(item => item.ref)
+  const why = `受众 ${dropped.join('、')} 同时出现在「包含」和「排除」里，自相矛盾`
+  if (rest.length === 0) return empty(`${why}，排除名单先留空`)
+  return exclusionField(rest, [...excluded.notes, `${why}，已从排除名单拿掉`])
+}
+
+/** Included audience and exclusion list for one step, with no shared id. */
+export function seedStepAudiences(
+  play: PlayKey,
+  f: AdsDraftFacts | null,
+  status: AudienceStatusRead | null,
+): { audience: AudienceOutcome; excluded: Field<string[]> } {
+  const excluded = seedExcluded(f, status)
+  const avoid = excluded.ok ? new Set(excluded.value) : NO_AVOID
+  const audience = seedAudience(play, f, status, avoid)
+  return { audience, excluded: stripOverlap(audience, excluded, f) }
+}
+
+/** Ids the status read needs for one step: remarketing candidates plus the exclusion list. */
 export function audienceIdsToRead(play: PlayKey, f: AdsDraftFacts | null): string[] {
   if (f === null) return []
-  const included = AUDIENCE_PLAYS.includes(play) && f.audiences ? [...f.audiences].sort(rank).slice(0, MAX_STATUS_CANDIDATES).map(a => a.ref) : []
-  const excluded = (f.excluded_in_use ?? []).slice(0, MAX_EXCLUDED).map(e => e.ref)
+  const included = AUDIENCE_PLAYS.includes(play) && f.audiences ? rankedRemarketing(f.audiences).map(a => a.ref) : []
+  const excluded = exclusionItems(f).map(e => e.ref)
   return [...new Set([...included, ...excluded])]
 }
 

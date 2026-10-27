@@ -171,7 +171,7 @@ describe('attachPlanSeed', () => {
     const deps = fullDeps()
     deps.loadFacts = async () =>
       facts({
-        audiences: [{ ref: '111111', name: 'A', size_lower: 50, last_used_on: '2026-10-20', as_of: null }],
+        audiences: [{ ref: '111111', name: 'A', size_lower: 50, last_used_on: '2026-10-20', as_of: null, subtype: 'ENGAGEMENT' }],
         audiences_complete: true,
       })
     const result = await attachPlanSeed(

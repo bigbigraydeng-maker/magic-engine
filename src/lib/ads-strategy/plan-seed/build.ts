@@ -6,10 +6,9 @@ import { readLiveForSelected } from './live-read'
 import type { AdPlay } from './ad-plays'
 import {
   audienceIdsToRead,
-  seedAudience,
   seedCreatives,
-  seedExcluded,
   seedSchedule,
+  seedStepAudiences,
   type AudienceStatusRead,
 } from './audience-creative'
 import { errorReason, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
@@ -137,12 +136,12 @@ async function buildExtras(
   for (const p of passing) {
     const facts = p.account.facts
     const status = await readStatusForStep(args, p, deps, limits)
-    const aud = seedAudience(p.play.play, facts, status)
+    const paired = seedStepAudiences(p.play.play, facts, status)
     const creative = args.period ? seedCreatives(facts, args.period, nowMs) : null
     out.set(p.play.step_key, {
-      audience_state: aud.state,
-      audience_ids: aud.ids,
-      excluded_audience_ids: seedExcluded(facts, status),
+      audience_state: paired.audience.state,
+      audience_ids: paired.audience.ids,
+      excluded_audience_ids: paired.excluded,
       ...(creative ? { creative_state: creative.state, creative_refs: creative.refs } : {}),
     })
   }
