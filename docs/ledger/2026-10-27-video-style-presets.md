@@ -1,12 +1,14 @@
 ---
 id: 2026-10-27-video-style-presets
 title: 出片机的风格包按行业和品牌自动换剪辑手法，不填则和现在一样
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-27
 source: doc:docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md
 verify_by: 2026-10-30
 verify_how: 不填风格时明信片时长与参数和原来一致。填了之后，六个手法的转场、字幕位置、节奏能在同一段示例片里看出来，文字没有被删掉。
+done_on: 2026-10-27
+done_ref: pr:3294
 ---
 
 爆款学习试点已批的六条底线（静音可读、首秒要动、默认两秒、单镜头默认关、钩子超长只缩小或警告、前后对比）对所有风格包生效。
