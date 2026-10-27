@@ -2,7 +2,7 @@
 
 > 负责：齐白石（`qibaishi`）｜ 档案：[`docs/agents/62-qibaishi.md`](../agents/62-qibaishi.md)
 > 范围：ME 后台 `/dashboard/**`、`/portal/**` 页面的视觉一致性与细节打磨（颜色、间距、组件、四种状态、手机宽度）；不含数据、接口、鉴权、广告逻辑、视频 / 图片生产
-> 状态：草案，随 PR #3285 审查；未合并前以档案为准 ｜ 日期：2026-10-27 ｜ 最后核实：2026-10-27（核对了说明书、设计规范、Impeccable 脚本、`type-check` 命令都存在；**未**让齐白石真改过任何页面，只做过一次只读试跑） ｜ 风险：C（仅文档）
+> 状态：草案，随 PR #3285 审查；未合并前以档案为准 ｜ 日期：2026-10-27 ｜ 最后核实：2026-10-27（核对了说明书、设计规范、Impeccable 脚本、`type-check` 命令都存在；**未**让齐白石真改过任何页面，只做过一次只读试跑） ｜ 风险：A（本 PR 含 `.claude/agents/` 说明书，合并闸按 A 级判；手册本身仅文档）
 > 代码依据：[`.claude/agents/me-backend-ui-designer.md`](../../.claude/agents/me-backend-ui-designer.md)（说明书）· [`docs/DESIGN_SYSTEM.md`](../DESIGN_SYSTEM.md)（强制规范）· `tailwind.config.ts` · `src/components/ui/me-theme.ts` · `src/components/ui/me-primitives.tsx` · `.claude/skills/impeccable/scripts/impeccable` · `package.json` 的 `type-check`
 
 齐白石是开发侧帮手，**不在**产品 agent 正式名单（总架构 §4 那 15 位）里，不走新 agent 五关流程，也不进每周闭环巡检。本手册只讲怎么用他。
@@ -50,7 +50,7 @@
 
 - 齐白石**只改文件，不提交、不推送、不合并**；Claude 也不自己合并。
 - 合并走 [#3087](https://github.com/bigbigraydeng-maker/magic-engine/issues/3087) 的分工规矩：**Codex 审，PM 点头后再合并**。
-- 风险级别照实判：纯样式改动一般是 C 级；碰了安全、数据库、鉴权、钱的文件就不再是齐白石的活，退回开发窗口。
+- 风险级别照实判：用齐白石改页面样式，一般是 C 级；但改 `.claude/agents/` 说明书本身是 A 级（合并闸按此判）。纯样式改动一般是 C 级；碰了安全、数据库、鉴权、钱的文件就不再是齐白石的活，退回开发窗口。
 
 ## 6. 停手条件
 
