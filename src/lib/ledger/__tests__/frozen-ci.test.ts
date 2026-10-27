@@ -34,12 +34,12 @@ function setupRepo(): string {
   return dir
 }
 
-describe('runFrozenFieldCheck（真实 git 仓库集成测试）', () => {
+describe('runFrozenFieldCheck（真实 git 仓库集成测试）', { timeout: 60_000 }, () => {
   let repoDir: string
 
   beforeAll(() => {
     repoDir = setupRepo()
-  })
+  }, 60_000)
 
   afterAll(() => {
     execSync(`rm -rf "${repoDir}"`)

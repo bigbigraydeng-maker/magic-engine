@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { classifyLesson, VERIFY_LAYER_LABEL } from '@/lib/agent-learning/lesson-verify/classify'
+import { classifyBacktest } from '@/lib/agent-learning/lesson-verify/backtest'
 import { buildExperimentCard } from '@/lib/agent-learning/lesson-verify/experiment-card'
 
 export interface SiteOption {
@@ -24,11 +25,13 @@ export default function LessonVerify({
   lesson,
   rationale,
   sites,
+  clients,
 }: {
   lessonKey: string
   lesson: string
   rationale: string | null
   sites: SiteOption[]
+  clients: SiteOption[]
 }) {
   const kind = classifyLesson(lesson, rationale)
   const [siteId, setSiteId] = useState('self')
@@ -82,8 +85,66 @@ export default function LessonVerify({
           {shown?.error && <span className="text-red-600">{shown.error}</span>}
         </div>
       )}
-      {kind === 'ad_experiment' && <ExperimentView lesson={lesson} />}
+      {kind === 'ad_experiment' && (
+        <>
+          <BacktestView lessonKey={lessonKey} canBacktest={classifyBacktest(lesson, rationale) !== null} clients={clients} />
+          <ExperimentView lesson={lesson} />
+        </>
+      )}
       {isSite && <p className="mt-1 text-[11px] text-slate-400">只说明该站现状符合与否，不代表照做就会变好。</p>}
+    </div>
+  )
+}
+
+function BacktestView({ lessonKey, canBacktest, clients }: { lessonKey: string; canBacktest: boolean; clients: SiteOption[] }) {
+  const [clientId, setClientId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [result, setResult] = useState<{ forClient: string; msg: string } | null>(null)
+  const currentClient = useRef(clientId)
+
+  if (!canBacktest) return <p className="mt-1">第 2 层 · 回测：无法回测（这条经验没有对应的可计算指标）</p>
+
+  function pick(next: string) {
+    currentClient.current = next
+    setClientId(next)
+    setResult(null)
+  }
+
+  async function run() {
+    const requested = clientId
+    setBusy(true)
+    let msg = '回测失败，请稍后再试'
+    try {
+      const res = await fetch('/api/admin/agent-learning/backtest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lessonKey, clientId: requested }),
+      })
+      const json = (await res.json()) as { summary?: string; error?: string }
+      msg = json.summary ?? json.error ?? msg
+    } catch {
+      // keep default message
+    }
+    setBusy(false)
+    if (currentClient.current === requested) setResult({ forClient: requested, msg })
+  }
+
+  const shown = result && result.forClient === clientId ? result.msg : null
+  return (
+    <div className="mt-1">
+      <p>第 2 层 · 回测（只读该客户历史广告数据）</p>
+      <div className="mt-1 flex flex-wrap items-center gap-2">
+        <select value={clientId} onChange={(e) => pick(e.target.value)} className="rounded border border-slate-200 px-2 py-1">
+          <option value="">选择客户</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+        <button onClick={run} disabled={busy || !clientId} className="rounded bg-slate-100 px-3 py-1 hover:bg-slate-200 disabled:opacity-50">
+          {busy ? '回测中…' : '回测一下'}
+        </button>
+        {shown && <span className="text-slate-700">{shown}</span>}
+      </div>
     </div>
   )
 }

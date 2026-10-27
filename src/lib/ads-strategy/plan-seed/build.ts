@@ -4,6 +4,13 @@ import { loadAllAccounts, loadCandidates, loadForms, loadPageContext, loadScopes
 import { LIVE_READ_TIMEOUT_MS } from './constants'
 import { readLiveForSelected } from './live-read'
 import type { AdPlay } from './ad-plays'
+import {
+  audienceIdsToRead,
+  seedCreatives,
+  seedSchedule,
+  seedStepAudiences,
+  type AudienceStatusRead,
+} from './audience-creative'
 import { errorReason, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
 import type { Basis, Field, PlanSeed, PlanSeedStep } from './types'
 
@@ -55,11 +62,87 @@ function buildPageField(pageId: string): Field<string> {
   }
 }
 
+type StepExtras = Pick<
+  PlanSeedStep,
+  'audience_state' | 'audience_ids' | 'excluded_audience_ids' | 'creative_state' | 'creative_refs'
+>
+
+type SeedLimits = { deadlineMs: number; timeoutMs: number }
+
+/** 受众读取自己超时：底层单次请求能等 20 秒，不能让它吃掉整份种子。 */
+const AUDIENCE_TIMEOUT: AudienceStatusRead = { state: 'failed', reason: '读受众状态超时，先留空' }
+const AUDIENCE_READ_FAILED: AudienceStatusRead = { state: 'failed', reason: '读受众状态失败，先留空' }
+
+/** 在剩余预算内等一次受众读取。超时或抛错都变成留空原因，不等待底层请求结束。 */
+async function readAudienceCapped(
+  read: NonNullable<PlanSeedDeps['readAudienceStatus']>,
+  clientId: string,
+  ids: string[],
+  adAccountId: string,
+  capMs: number,
+): Promise<AudienceStatusRead> {
+  if (capMs <= 0) return AUDIENCE_TIMEOUT
+  let call: Promise<AudienceStatusRead>
+  try {
+    call = Promise.resolve(read(clientId, ids, adAccountId))
+  } catch {
+    return AUDIENCE_READ_FAILED
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<AudienceStatusRead>((resolve) => {
+    timer = setTimeout(() => resolve(AUDIENCE_TIMEOUT), capMs)
+  })
+  try {
+    return await Promise.race([call.then((value) => value, () => AUDIENCE_READ_FAILED), timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** 这一步要读的受众；没名单或没接读取时不发请求。 */
+async function readStatusForStep(
+  args: BuildArgs,
+  step: PassingStep,
+  deps: PlanSeedDeps,
+  limits: SeedLimits,
+): Promise<AudienceStatusRead | null> {
+  const ids = audienceIdsToRead(step.play.play, step.account.facts)
+  const read = deps.readAudienceStatus
+  if (ids.length === 0 || read === undefined) return null
+  const capMs = liveCapMs(limits.deadlineMs, limits.timeoutMs)
+  return readAudienceCapped(read, args.clientId, ids, step.accountId, capMs)
+}
+
+/** S1: audience, exclusion list and creative per passing step. Read-only; never throws (a failed or slow status read just leaves the audience empty). */
+async function buildExtras(
+  args: BuildArgs,
+  passing: PassingStep[],
+  deps: PlanSeedDeps,
+  nowMs: number,
+  limits: SeedLimits,
+): Promise<Map<string, StepExtras>> {
+  const out = new Map<string, StepExtras>()
+  for (const p of passing) {
+    const facts = p.account.facts
+    const status = await readStatusForStep(args, p, deps, limits)
+    const paired = seedStepAudiences(p.play.play, facts, status)
+    const creative = args.period ? seedCreatives(facts, args.period, nowMs) : null
+    out.set(p.play.step_key, {
+      audience_state: paired.audience.state,
+      audience_ids: paired.audience.ids,
+      excluded_audience_ids: paired.excluded,
+      ...(creative ? { creative_state: creative.state, creative_refs: creative.refs } : {}),
+    })
+  }
+  return out
+}
+
 /** 组装一个完整的 PlanSeedStep。 */
 function buildStep(
   passing: PassingStep,
   pageId: Field<string>,
   budget: Field<number>,
+  extras: StepExtras | undefined,
 ): PlanSeedStep {
   return {
     step_key: passing.play.step_key,
@@ -67,6 +150,7 @@ function buildStep(
     page_id: pageId,
     ad_account_id: buildAccountField(passing, budgetUsedLive(budget)),
     daily_budget_cents: budget,
+    ...(extras ?? {}),
   }
 }
 
@@ -75,6 +159,7 @@ function collectSteps(
   passing: PassingStep[],
   pageId: string,
   budgets: Map<string, Field<number>>,
+  extras: Map<string, StepExtras>,
   acc: Accumulator,
 ): void {
   const pageField = buildPageField(pageId)
@@ -93,7 +178,7 @@ function collectSteps(
       acc.skipped.push({ step_key: p.play.step_key, why_empty: pageField.why_empty })
       continue
     }
-    steps.push(buildStep(p, pageField, budget))
+    steps.push(buildStep(p, pageField, budget, extras.get(p.play.step_key)))
   }
   acc.steps = steps
 }
@@ -124,6 +209,7 @@ function assemble(
     currency: acc.currency,
     period: args.period,
     captured_at: { ...acc.capturedAt },
+    schedule: seedSchedule(args.period, Date.parse(factsAsOf)),
     ad_steps: [...acc.steps],
     skipped: [...acc.skipped],
     notes: [...acc.notes],
@@ -185,7 +271,8 @@ async function runWork(
       live,
     })
 
-    collectSteps(passing, pageId ?? '', budgets, acc)
+    const extras = await buildExtras(args, passing, deps, nowMs, limits)
+    collectSteps(passing, pageId ?? '', budgets, extras, acc)
     acc.done = true
   } catch (err) {
     skipRemaining(args, acc, err)
