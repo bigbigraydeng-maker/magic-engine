@@ -134,6 +134,37 @@ export function captionBox(kind: CaptionKind, safe: { top: number; bottom: numbe
   return { left: safe.left, top: 1000, width, height: 230 }
 }
 
+/** Smallest body size used by any pack. Caption type must not go under this. */
+export const MIN_BODY_PX = 52
+
+/** Hook size, never under this pack's body or the smallest body of any pack. */
+export function captionFontSize(hook: number, body: number, fontScale: number): number {
+  const scaled = Math.min(84, Math.round(hook * fontScale))
+  return Math.max(MIN_BODY_PX, Math.min(84, body), scaled)
+}
+
+/** Selling-point line. Same floor as body copy, not a tiny label. */
+export function pointFontSize(body: number): number {
+  return Math.max(MIN_BODY_PX, Math.min(84, body))
+}
+
+function captionSubstance(value: string): string {
+  return value.replace(/^\d+\s*\/\s*\d+\s+/, '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/** Hide the second line when it repeats the first, including a "1/4 " prefix. */
+export function singleCaption(text: string, point: string): { text: string; point: string } {
+  const line = captionSubstance(text)
+  const note = captionSubstance(point)
+  if (line !== '' && line === note) return { text, point: '' }
+  return { text, point }
+}
+
+/** Typewriter keeps the full string in layout while only part of it is painted. */
+export function typewriterReserve(text: string, frame: number, revealFrames: number): { reserved: string; visible: string } {
+  return { reserved: text, visible: shownChars(text, frame, revealFrames) }
+}
+
 /** True when every edge of the box is inside the safe area. */
 export function captionInside(box: CaptionBox, safe: { top: number; bottom: number; left: number; right: number }): boolean {
   return box.left >= safe.left && box.top >= safe.top && box.left + box.width <= safe.right && box.top + box.height <= safe.bottom

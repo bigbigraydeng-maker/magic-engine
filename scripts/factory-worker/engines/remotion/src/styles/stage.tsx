@@ -3,11 +3,14 @@ import { AbsoluteFill, OffthreadVideo, staticFile, useCurrentFrame } from 'remot
 import {
   beatEvery,
   captionBox,
+  captionFontSize,
   flashOpacity,
   motionTransition,
   picturePose,
-  shownChars,
+  pointFontSize,
+  singleCaption,
   transitionPose,
+  typewriterReserve,
   usesFlash,
   type Craft,
 } from './craft.ts'
@@ -91,11 +94,15 @@ const CaptionPlate: React.FC<{
   frame: number
 }> = ({ look, family, text, point, fontScale, frame }) => {
   const box = captionBox(look.craft.caption, look.safe)
+  const copy = singleCaption(text, point)
   const reveal = Math.max(8, Math.round(look.craft.shotSec * 30 * 0.7))
+  const noteSize = pointFontSize(look.type.body)
   return (
     <div style={plateStyle(look, box)}>
-      <CraftText look={look} family={family} text={text} frame={frame} reveal={reveal} fontScale={fontScale} />
-      <div style={{ marginTop: 10, fontFamily: family, fontSize: 36, fontWeight: 700, color: look.card.placeColor }}>{point}</div>
+      <CraftText look={look} family={family} text={copy.text} frame={frame} reveal={reveal} fontScale={fontScale} />
+      {copy.point === '' ? null : (
+        <div style={{ marginTop: 10, fontFamily: family, fontSize: noteSize, fontWeight: 700, color: look.card.placeColor, lineHeight: 1.12 }}>{copy.point}</div>
+      )}
     </div>
   )
 }
@@ -112,13 +119,28 @@ function plateStyle(look: ResolvedLook, box: { left: number; top: number; width:
     overflow: 'hidden',
   }
   if (look.craft.caption === 'stroke-bottom') return { ...shared, background: 'transparent' }
-  if (look.craft.caption === 'sticker') {
-    return { ...shared, background: look.card.fill, borderRadius: 48, transform: 'rotate(-2deg)', border: `4px solid ${look.colors.brand}` }
-  }
+  if (look.craft.caption === 'sticker') return stickerStyle(look, box)
   if (look.craft.caption === 'center-card') {
     return { ...shared, background: look.card.fill, borderRadius: look.shape.radiusCard, display: 'flex', flexDirection: 'column', justifyContent: 'center' }
   }
-  return { ...shared, background: look.card.fill, borderRadius: 0, borderTop: `6px solid ${look.colors.brand}` }
+  return { ...shared, height: 'auto', background: look.card.fill, borderRadius: 0, borderTop: `6px solid ${look.colors.brand}` }
+}
+
+function stickerStyle(look: ResolvedLook, box: { left: number; top: number; width: number }): React.CSSProperties {
+  return {
+    position: 'absolute',
+    left: box.left,
+    top: box.top,
+    width: 'fit-content',
+    maxWidth: box.width,
+    height: 'auto',
+    boxSizing: 'border-box',
+    padding: '16px 22px',
+    background: look.card.fill,
+    borderRadius: 48,
+    transform: 'rotate(-2deg)',
+    border: `4px solid ${look.colors.brand}`,
+  }
 }
 
 export const CraftText: React.FC<{
@@ -129,9 +151,17 @@ export const CraftText: React.FC<{
   reveal: number
   fontScale: number
 }> = ({ look, family, text, frame, reveal, fontScale }) => {
-  const size = Math.min(84, Math.round(look.type.hook * fontScale))
+  const size = captionFontSize(look.type.hook, look.type.body, fontScale)
   const base: React.CSSProperties = { fontFamily: family, fontSize: size, fontWeight: look.type.weightHook, color: look.card.lineColor, lineHeight: 1.12 }
-  if (look.craft.textMotion === 'typewriter') return <div style={base}>{shownChars(text, frame, reveal)}</div>
+  if (look.craft.textMotion === 'typewriter') {
+    const laid = typewriterReserve(text, frame, reveal)
+    return (
+      <div style={{ ...base, position: 'relative' }}>
+        <div style={{ visibility: 'hidden' }}>{laid.reserved}</div>
+        <div style={{ position: 'absolute', left: 0, top: 0, right: 0 }}>{laid.visible}</div>
+      </div>
+    )
+  }
   if (look.craft.textMotion === 'highlight') return <Highlight text={text} frame={frame} style={base} brand={look.colors.brand} ink={look.colors.textOnBrand} />
   if (look.craft.textMotion === 'stroke') return <StrokeLine text={text} frame={frame} reveal={reveal} style={base} brand={look.colors.brand} />
   if (look.craft.textMotion === 'slide-line') {

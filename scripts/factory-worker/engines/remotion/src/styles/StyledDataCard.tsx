@@ -43,9 +43,9 @@ const HookPlate: React.FC<{ props: DataCardProps; look: ResolvedLook; family: st
   const frame = useCurrentFrame()
   const text = props.hook.lines.join(' ')
   const kind = look.craft.caption
-  const shared: React.CSSProperties = { position: 'absolute', left: LEFT, width: 840, fontFamily: family, boxSizing: 'border-box', padding: '12px 18px' }
+  const shared: React.CSSProperties = { position: 'absolute', left: LEFT, width: kind === 'sticker' ? 'fit-content' : 840, maxWidth: 840, fontFamily: family, boxSizing: 'border-box', padding: '12px 18px' }
   const plate = kind === 'sticker'
-    ? { ...shared, top: 280, background: look.card.fill, borderRadius: 36, transform: 'rotate(-2deg)', border: `4px solid ${look.colors.brand}` }
+    ? { ...shared, top: 280, height: 'auto', background: look.card.fill, borderRadius: 36, transform: 'rotate(-2deg)', border: `4px solid ${look.colors.brand}` }
     : kind === 'center-card'
       ? { ...shared, top: 290, left: 140, width: 760, background: look.card.fill, borderRadius: look.shape.radiusCard, textAlign: 'center' as const }
       : kind === 'lower-third'

@@ -7,16 +7,21 @@ import {
   FAMILY_TIER,
   beatEvery,
   captionBox,
+  captionFontSize,
   captionInside,
   craftById,
   craftSignature,
   effectiveShotSec,
   flashOpacity,
   motionTransition,
+  MIN_BODY_PX,
   picturePose,
+  pointFontSize,
   shownChars,
+  singleCaption,
   studyPlan,
   transitionPose,
+  typewriterReserve,
   usesFlash,
 } from '../src/styles/craft.ts'
 import { safeZone } from '../src/styles/safe.ts'
@@ -147,4 +152,29 @@ test('a style pack uses its own cut length unless the brief sets one', () => {
   assert.equal(one.cuts, 0)
   assert.equal(compareLineAt(0, one), 'before')
   assert.equal(compareLineAt(one.totalFrames - 1, one), 'after')
+})
+
+test('a sticker keeps body-sized type, and a repeated selling line is shown once', () => {
+  const vivid = resolveStyle({ preset: 'vivid' })
+  assert.equal(captionFontSize(vivid.type.hook, vivid.type.body, 1), 84)
+  assert.ok(pointFontSize(vivid.type.body) >= MIN_BODY_PX)
+  assert.equal(pointFontSize(36), MIN_BODY_PX)
+  for (const id of PRESET_IDS) {
+    const look = resolveStyle({ preset: id })
+    assert.ok(look.type.body >= MIN_BODY_PX)
+    assert.ok(captionFontSize(look.type.hook, look.type.body, 0.62) >= look.type.body)
+  }
+  const repeated = singleCaption('1/4 2 BEDROOMS, 2 BATHROOMS', '2 BEDROOMS, 2 BATHROOMS')
+  assert.equal(repeated.text, '1/4 2 BEDROOMS, 2 BATHROOMS')
+  assert.equal(repeated.point, '')
+  assert.equal(singleCaption('2 BEDROOMS, 2 BATHROOMS', '2 bedrooms, 2 bathrooms').point, '')
+  const distinct = singleCaption('2/4 OPEN-PLAN LIVING', '2 BEDROOMS, 2 BATHROOMS')
+  assert.equal(distinct.point, '2 BEDROOMS, 2 BATHROOMS')
+  const line = '1/4 2 BEDROOMS, 2 BATHROOMS'
+  const early = typewriterReserve(line, 0, 30)
+  assert.equal(early.reserved, line)
+  assert.equal(early.visible.length < Array.from(line).length, true)
+  assert.equal(typewriterReserve(line, 30, 30).visible, line)
+  const sticker = captionBox('sticker', safe)
+  assert.equal(captionInside(sticker, safe), true)
 })
