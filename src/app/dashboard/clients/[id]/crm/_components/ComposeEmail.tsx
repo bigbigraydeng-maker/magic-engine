@@ -177,7 +177,7 @@ export function ComposeEmail({
       <button
         type="button"
         onClick={() => void send()}
-        disabled={sending || subject.trim() === '' || body.trim() === ''}
+        disabled={sending || drafting || subject.trim() === '' || body.trim() === ''}
         className="mt-2 rounded-lg bg-me-charcoal px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
       >
         {sending ? '发送中…' : '发送'}

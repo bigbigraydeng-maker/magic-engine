@@ -6,11 +6,11 @@ vi.mock('@/lib/auth/client-access', () => ({
 }))
 vi.mock('@/lib/microsoft/mail-send-new-prod', () => ({ createMailNewDeps: vi.fn(() => ({ marker: 'deps' })) }))
 vi.mock('@/lib/microsoft/mail-send-new', () => ({ previewCompose: vi.fn() }))
-vi.mock('@/lib/crm/email-compose/ai-draft', () => ({ generateFirstEmailDraft: vi.fn() }))
+vi.mock('@/lib/crm/email-compose/ai-draft', () => ({ generateFirstEmailDraft: vi.fn(), claimDraftSlot: vi.fn(() => true) }))
 
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { previewCompose } from '@/lib/microsoft/mail-send-new'
-import { generateFirstEmailDraft } from '@/lib/crm/email-compose/ai-draft'
+import { claimDraftSlot, generateFirstEmailDraft } from '@/lib/crm/email-compose/ai-draft'
 import { POST } from './route'
 
 const call = () => POST(new NextRequest('http://x/api', { method: 'POST' }), { params: { id: 'client-a', cid: 'contact-1' } })
@@ -26,6 +26,8 @@ describe('POST email/compose/draft', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ subject: 'S', body: 'B' })
     expect(generateFirstEmailDraft).toHaveBeenCalledWith('client-a', 'contact-1')
+    expect(requirePaidClientAccess).toHaveBeenCalledWith('client-a')
+    expect(previewCompose).toHaveBeenCalledWith({ clientId: 'client-a', contactId: 'contact-1' }, { marker: 'deps' })
   })
 
   it('feature off / not an enquirer → 409 and the AI is never called', async () => {
@@ -48,5 +50,13 @@ describe('POST email/compose/draft', () => {
     ;(generateFirstEmailDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, reason: 'no_ai', message: 'x' })
     const res = await call()
     expect(res.status).toBe(502)
+  })
+
+  it('cooldown hit → 429 and the AI is never called', async () => {
+    ;(previewCompose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(can)
+    ;(claimDraftSlot as ReturnType<typeof vi.fn>).mockReturnValueOnce(false)
+    const res = await call()
+    expect(res.status).toBe(429)
+    expect(generateFirstEmailDraft).not.toHaveBeenCalled()
   })
 })
