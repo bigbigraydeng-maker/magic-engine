@@ -79,6 +79,36 @@ export function remotionVisualNotes(brief: unknown): string[] {
   return notes
 }
 
+/** Hook lines, each scene place and line, and the end title. Not truncated. */
+export function sceneCopyLines(brief: unknown): string[] {
+  const props = remotionOf(brief)?.props
+  if (!props || typeof props !== 'object' || Array.isArray(props)) return []
+  const record = props as Record<string, unknown>
+  const lines: string[] = []
+  const push = (value: unknown) => {
+    const items = typeof value === 'string' ? [value] : Array.isArray(value) ? value : []
+    for (const item of items) {
+      if (typeof item !== 'string') continue
+      const text = item.trim()
+      if (!text || lines.includes(text)) continue
+      lines.push(text)
+    }
+  }
+  const hook = record.hook
+  if (hook && typeof hook === 'object' && !Array.isArray(hook)) push((hook as { lines?: unknown }).lines)
+  if (Array.isArray(record.scenes)) {
+    for (const scene of record.scenes) {
+      if (!scene || typeof scene !== 'object' || Array.isArray(scene)) continue
+      const row = scene as { place?: unknown; line?: unknown }
+      push(row.place)
+      push(row.line)
+    }
+  }
+  const end = record.end
+  if (end && typeof end === 'object' && !Array.isArray(end)) push((end as { title?: unknown }).title)
+  return lines
+}
+
 export function onScreenLines(brief: unknown, caption: unknown): string[] {
   const lines: string[] = []
   if (typeof caption === 'string') pushText(caption, lines)
@@ -97,6 +127,7 @@ export function remotionNineGridInput(args: {
     title: args.title,
     brandName: args.brandName,
     expectedCaptions: onScreenLines(args.brief, args.caption),
+    compareLines: sceneCopyLines(args.brief),
     visualNotes: remotionVisualNotes(args.brief),
     logoExpected: logoExpectedFromRemotionBrief(args.brief),
   }
