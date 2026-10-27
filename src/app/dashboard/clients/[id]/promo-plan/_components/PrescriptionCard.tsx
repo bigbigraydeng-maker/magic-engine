@@ -6,6 +6,7 @@ import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-presc
 import type { StoredSpend } from '@/lib/marketing-plan/promo/prescription-copy'
 import { describeReview } from '@/lib/marketing-plan/promo/prescription-copy'
 import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
+import { ChainProgress } from '@/components/prescription/ChainProgress'
 import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -61,6 +62,7 @@ export function PrescriptionCard({
         <p className="text-xs text-gray-500">v{prescription.version} · {prescription.status_label}</p>
         <Link href={prescriptionHref(clientId, prescription.goal_id)} className="ml-auto text-xs text-indigo-600 hover:underline">去处方页查看</Link>
       </div>
+      <ChainProgress clientId={clientId} prescriptionId={prescription.id} />
       <p className="mt-1 text-xs text-gray-600">开方人：{prescription.prescriber ?? '未填写'}</p>
       <Section title="这周做什么">
         <ItemList items={prescription.todos} empty="这份处方没有单独列出要做的事。" ordered />
