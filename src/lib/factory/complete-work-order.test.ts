@@ -601,6 +601,28 @@ describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
     else process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE = savedEnforce
   })
 
+  it('a 19 second file far over the bitrate budget is refused before it is saved', async () => {
+    const { r, m } = await run(woWith(ATMOS_PASS), { file_size_bytes: 35_000_000, duration_seconds: 19, video_bitrate_bps: 14_900_000 })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.status).toBe(422)
+    expect(r.error).toContain('成片体检没过')
+    expect(m.updates.find((u) => u.table === 'content_work_orders')).toBeUndefined()
+  })
+
+  it('records the code revision on the finished video', async () => {
+    const rev = 'd'.repeat(40)
+    const m = mockSupabase(happyQueue())
+    const r = await completeWorkOrder(m.db, {
+      ...PARAMS,
+      wo: woWith(ATMOS_PASS),
+      engine: { engine_rev: rev, catalog_id: '2026-10-28', capabilities: ['hook_v2', 'end_card_v2', 'encode_cap'] },
+    })
+    expect(r.ok).toBe(true)
+    expect(savedOutput(m).engine_rev).toBe(rev)
+    expect(savedOutput(m).engine_stale).toBe(false)
+  })
+
   it('non-remotion orders are untouched by the gate', async () => {
     const { r, m } = await run(WO as Record<string, unknown>)
     expect(r.ok).toBe(true)

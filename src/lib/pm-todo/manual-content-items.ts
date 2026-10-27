@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { renderWorkerDownReason, type AlivePing } from '@/lib/factory/render-worker-report'
 import { judgeWorkerPresence, judgeQueueByClient, latestAliveAt } from '@/lib/factory/worker-presence'
+import { engineStaleNotice } from '@/lib/factory/engine-catalog.mjs'
 import { containsPriceClaim } from '@/lib/content/price-claim'
 import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
 import { SOURCE_LABELS } from '@/lib/assets/provenance'
@@ -245,6 +246,18 @@ export async function pushFactoryWorkerItems(
     pushOneFactoryWorkerItem(items, verdict, clientNames.get(clientId)?.name ?? '未知客户')
   }
   for (const clientId of clientIds) {
+    const stale = engineStaleNotice(pings, clientId)
+    if (stale) {
+      const clientName = clientNames.get(clientId)?.name ?? '未知客户'
+      items.push({
+        kind: 'factory_render_worker_down',
+        client_id: 'infra',
+        client_name: 'Magic Engine 后台',
+        what: `【${clientName}】出片机版本过旧，新片子先不派给它。队列里的单子还在，不会作废。`,
+        how: stale,
+        href: 'https://app.magicengine.com.au/dashboard/factory',
+      })
+    }
     const reason = renderWorkerDownReason(pings, clientId)
     if (!reason) continue
     const clientName = clientNames.get(clientId)?.name ?? '未知客户'
