@@ -25,6 +25,8 @@ import { summariseIndustryCoverage, type ClientIndustryRow } from '@/lib/memory/
 import { INDUSTRY_OPTIONS } from '@/lib/clients/industries'
 import LessonToggle from './_components/LessonToggle'
 import LessonVerify, { type SiteOption } from './_components/LessonVerify'
+import LessonTrial from './_components/LessonTrial'
+import { trialSampleFor } from '@/lib/agent-learning/lesson-trial/eligibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,9 +163,10 @@ async function loadIndustryCoverage() {
 export default async function AdEnginePage() {
   const [lessons, breakdowns, coverage, siteRows] = await Promise.all([
     loadLessons(), loadBreakdowns(), loadIndustryCoverage(),
-    supabaseAdmin.from('clients').select('id, name, domain').not('domain', 'is', null),
+    supabaseAdmin.from('clients').select('id, name, domain'),
   ])
-  const sites: SiteOption[] = (siteRows.data ?? []).map(c => ({ id: c.id as string, name: c.name as string }))
+  const allClients: SiteOption[] = (siteRows.data ?? []).map(c => ({ id: c.id as string, name: c.name as string }))
+  const sites: SiteOption[] = (siteRows.data ?? []).filter(c => c.domain).map(c => ({ id: c.id as string, name: c.name as string }))
 
   const active = lessons.filter(l => l.is_active)
   const retired = lessons.filter(l => !l.is_active)
@@ -202,7 +205,7 @@ export default async function AdEnginePage() {
             </p>
           )}
           {active.map(l => (
-            <LessonCard key={l.lesson_key} lesson={l} sites={sites} />
+            <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />
           ))}
         </div>
 
@@ -212,7 +215,7 @@ export default async function AdEnginePage() {
               已停用的 {retired.length} 条
             </summary>
             <div className="mt-3 space-y-3 opacity-60">
-              {retired.map(l => <LessonCard key={l.lesson_key} lesson={l} sites={sites} />)}
+              {retired.map(l => <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />)}
             </div>
           </details>
         )}
@@ -348,7 +351,7 @@ export default async function AdEnginePage() {
   )
 }
 
-function LessonCard({ lesson: l, sites }: { lesson: LessonRow; sites: SiteOption[] }) {
+function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: SiteOption[]; clients: SiteOption[] }) {
   const redacted = Boolean(l.evidence && 'original_rationale' in l.evidence)
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -381,6 +384,7 @@ function LessonCard({ lesson: l, sites }: { lesson: LessonRow; sites: SiteOption
         <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
       </div>
       <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} />
+      {!l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind) && <LessonTrial lessonKey={l.lesson_key} />}
     </div>
   )
 }

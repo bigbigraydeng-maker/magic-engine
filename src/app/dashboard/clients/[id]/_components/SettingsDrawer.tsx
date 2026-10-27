@@ -6,6 +6,7 @@ import { BriefPanel } from './BriefPanel'
 import { CmsPanel } from './CmsPanel'
 import { UsersPanel } from './UsersPanel'
 import { LocaleSettingsPanel } from './LocaleSettingsPanel'
+import { ClientKindField } from './ClientKindField'
 import { MtcBudgetPanel } from './MtcBudgetPanel'
 import { MetaAdAccountPanel } from './MetaAdAccountPanel'
 import { FacebookPagePanel } from './FacebookPagePanel'
@@ -216,6 +217,10 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                 </p>
                 <div className="mt-2">
                   <LocaleSettingsPanel clientId={clientId} />
+                </div>
+                <p className="mt-4 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">客户类型</p>
+                <div className="mt-2">
+                  <ClientKindField clientId={clientId} />
                 </div>
               </div>
 

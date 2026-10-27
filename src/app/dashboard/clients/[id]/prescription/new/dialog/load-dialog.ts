@@ -1,4 +1,5 @@
-import type { PrescriptionContent, PrescriptionIntake } from '@/types/diagnostic'
+import type { ClientKind, PrescriptionContent, PrescriptionIntake } from '@/types/diagnostic'
+import { readClientKind } from '@/lib/huatuo/personal-ip'
 import type { SelfGrade } from '@/lib/huatuo/types'
 import type { GoalChoice } from './decide-turn'
 
@@ -17,6 +18,8 @@ export interface DialogPrescription {
 export interface LoadedDialog {
   discoveryId: string | null
   goals: GoalChoice[]
+  /** 客户资料里的客户类型；读不到按普通客户。 */
+  clientKind: ClientKind
   prescription: DialogPrescription | null
 }
 
@@ -28,12 +31,20 @@ export async function loadPrescriptionDialog(input: {
   fetchImpl?: typeof fetch
 }): Promise<LoadedDialog> {
   const fetchImpl = input.fetchImpl ?? fetch
-  const [discoveryId, goals, prescription] = await Promise.all([
+  const [discoveryId, goals, prescription, clientKind] = await Promise.all([
     loadDiscovery(input.clientId, fetchImpl),
     loadGoals(input.clientId, fetchImpl),
     loadPrescription(input, fetchImpl),
+    loadClientKind(input.clientId, fetchImpl),
   ])
-  return { discoveryId, goals, prescription }
+  return { discoveryId, goals, clientKind, prescription }
+}
+
+async function loadClientKind(clientId: string, fetchImpl: typeof fetch): Promise<ClientKind> {
+  const res = await fetchImpl(`/api/clients/${clientId}/client-kind`, { cache: 'no-store' }).catch(() => null)
+  if (!res?.ok) return 'standard'
+  const data = await res.json().catch(() => null) as { client_kind?: unknown } | null
+  return readClientKind(data?.client_kind)
 }
 
 async function loadDiscovery(clientId: string, fetchImpl: typeof fetch): Promise<string | null> {

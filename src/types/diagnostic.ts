@@ -330,6 +330,9 @@ export interface ExecutionLog {
 
 export type TimelineUrgency = 'immediate' | 'short_term' | 'long_term'
 
+/** 客户类型。NULL / 缺省一律按 standard 处理。取值与 clients.client_kind 列一致。 */
+export type ClientKind = 'standard' | 'personal_ip'
+
 export interface PrescriptionIntake {
   business_goal: string
   timeline_urgency: TimelineUrgency
@@ -339,6 +342,10 @@ export interface PrescriptionIntake {
   budget_currency?: string | null
   priority_dimensions: DiagnosticDimension[]
   notes: string | null
+  /** 缺省 = 普通客户（老数据兼容）。 */
+  client_kind?: ClientKind
+  /** 个人 IP 专用：本人每周能拍几条。缺省 / null = 还没问到。 */
+  weekly_shoot_count?: number | null
 }
 
 // ── PrescriptionContent (§4.3) ────────────────────────────────────────────────

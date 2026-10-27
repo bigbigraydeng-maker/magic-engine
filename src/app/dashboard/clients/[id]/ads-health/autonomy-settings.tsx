@@ -22,6 +22,13 @@ interface CreativePoolEntry {
   ref: string
   status: string
   approved_by?: string | null
+  alias_refs?: string[]
+}
+
+function videoNumber(entry: CreativePoolEntry): string {
+  const alias = entry.alias_refs?.find((id) => /^\d+$/.test(id))
+  if (entry.kind === 'work_order' && alias) return alias
+  return entry.ref
 }
 
 /** 自动流程状态的中文名（spec 2026-10-21 §2）。candidate / approved 不走这里。 */
@@ -187,7 +194,8 @@ function ModeField({
 }
 
 function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeLabel | undefined }) {
-  const fbUrl = label?.url ?? (entry.kind === 'meta_video' ? `https://www.facebook.com/reel/${entry.ref}` : null)
+  const number = videoNumber(entry)
+  const fbUrl = label?.url ?? (/^\d+$/.test(number) ? `https://www.facebook.com/reel/${number}` : null)
   return (
     <div className="min-w-0">
       <p className="truncate text-gray-800">
@@ -195,7 +203,7 @@ function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeL
         {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
       </p>
       <p className="text-xs text-gray-400">
-        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{entry.ref}</span>
+        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{number}</span>
         {fbUrl && (
           <>
             {' '}·{' '}

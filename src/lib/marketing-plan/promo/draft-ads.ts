@@ -1,3 +1,5 @@
+import type { PromoWindow } from '@/lib/ads-strategy/promo-window'
+
 /** 一条依据：PM 看到的「凭什么是这个数」 */
 export interface Basis {
   label: string
@@ -27,6 +29,12 @@ export interface DailySpendFact {
   spend_cents: number
   results: number
   account_status: number | null
+}
+
+export interface CreativePoolFact {
+  ref: string
+  status: string
+  promo_window?: PromoWindow
 }
 
 export interface AudiencePoolItem {
@@ -74,6 +82,10 @@ export interface AdsDraftFacts {
   audiences_complete: boolean | null
   /** 已批准素材 ref；null = 读不到 */
   approved_creatives: string[] | null
+  /** 素材池全部条目（含状态与推广期）；不传或 null = 读不到。S1 种子用它判素材五态。 */
+  creative_pool?: CreativePoolFact[] | null
+  /** 在投广告组正在用的排除受众（用到的广告组数降序）；不传或 null = 读不到。S1 种子只引用，不新建。 */
+  excluded_in_use?: { ref: string; adsets: number }[] | null
   /** 剧本参数 */
   budget_share_of_headroom: number
   min_audience_size: number
