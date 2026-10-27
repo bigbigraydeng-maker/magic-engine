@@ -383,7 +383,7 @@ function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: S
         </div>
         <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
       </div>
-      <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} />
+      <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} clients={clients} />
       {!l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind) && <LessonTrial lessonKey={l.lesson_key} />}
     </div>
   )
