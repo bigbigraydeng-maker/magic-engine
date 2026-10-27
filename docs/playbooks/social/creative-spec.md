@@ -13,8 +13,8 @@
 - **这份文件是什么**：把散在手册、交接单、模板手册、设计稿、代码闸里的创意层规则，放到一处并逐条标出处。**没有出处的内容一律不写**；缺的写在第 10 节「空白清单」，注明谁来补。
 - **编号**：本文件的每条规则编号为〔CS章.条〕。**前缀用 CS 而不是单个 C**：手册里已有〔C1.1〕〔C2.1〕等（「字幕短句大字」「Meta 安全区」两份原记忆的编号），单个 C 会撞号，故改用 CS。每个编号在 [creative-spec-SOURCES.md](./creative-spec-SOURCES.md) 登记出处，反向也成立（可用脚本对账，见 PR 正文）。
 - **出处写法**：〔S/R/C/F/B/V 编号〕= [platform-general.md](./platform-general.md) 里的原文要点编号；`文件:行号` = 仓库文档或代码；〔库〕= 对生产库 `viral_reference_library` 的只读统计（2026-10-28）；〔卡〕= 外部学习卡，**只出现在第 9 节候选区，不混入规则**。
-- **三类状态**：规则（有出处，来自已迁入手册、成文文档或机器闸）／ 快照（库统计，只说明覆盖面，**不是规则，单条样本不写成规则**）／ 候选（第 9 节，**候选，未验证**）。
-- **与创意层、视频工厂的分工**：创意层负责「想」（开头、结构、脚本、BGM、转场、图片风格、文字），视频工厂负责「做」，苏东坡/马良负责「审」；创意层不调生图/生视频接口、不发布，生产方与检查方分开。创意需求单的字段草案在能力地图设计稿 v0.3 §3.4（`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md`，PR 2906，**截至 origin/main `fe6f3f566` 尚未合并**，仅在分支 `docs/social-agent-capability-map` 上），本文件**引用不复述**。
+- **三类状态**：规则（来自待批手册；有出处，来自已迁入手册、成文文档或机器闸）／ 快照（库统计，只说明覆盖面，**不是规则，单条样本不写成规则**）／ 候选（第 9 节，**候选，未验证**）。
+- **与创意层、视频工厂的分工**：创意层负责「想」（开头、结构、脚本、BGM、转场、图片风格、文字），视频工厂负责「做」，苏东坡/马良负责「审」；创意层不调生图/生视频接口、不发布，生产方与检查方分开。创意需求单的字段草案在能力地图设计稿 v0.3 §3.4（草案，PR 2906 合并前不生效；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md`，PR 2906，**截至 origin/main `fe6f3f566` 尚未合并**，仅在分支 `docs/social-agent-capability-map` 上），本文件**引用不复述**（含 `format` 取值等字段枚举）。平台现状以发布前现查为准。
 - **平台层边界**：行业层见 [industry-travel.md](./industry-travel.md)（候选，单客户证据）；客户私有事实、事故细节与客户数字在 `clients/` 目录，**不进本文件**。本文件任何规则都不是授权：生产授权仍以仓库根 CLAUDE.md、发布治理 v0.2 为准。
 - **各平台的画幅/时长/字数等规格**不在本文件，见 [platform-specs.md](./platform-specs.md)。
 - **本文件与上位规则的关系**：与 CLAUDE.md §8「客户数据红线」冲突时以 CLAUDE.md 为准。
@@ -26,21 +26,21 @@
 - 〔CS1.3〕明信片模板的结构参数：场景数 2–4；开场 2–4 秒；每景 3–6 秒；价格/片尾段 3–8 秒（带价格卡时至少 5 秒）；总长不超过 25 秒。　**出处**：`scripts/factory-worker/engines/remotion/src/postcard.ts:6-10,281-292,589,615`
 - 〔CS1.4〕日常蒙太奇成片时长落在 14.5–18 秒，剪点用节拍网格计算。　**出处**：`src/lib/factory/remotion-daily-plan/music.ts:10-12`
 - 〔CS1.5〕配方把一条片拆成 hook / middle / cta 三类段，每段有时长提示、转场、运镜；结构以配方为准。　**出处**：`src/lib/factory/recipe.ts:26`；`src/lib/factory/shot-recipes.ts:33-41`
-- 〔CS1.6〕结构照配方：第一帧文字钩子（问题/数字/反差）→ 快切 → problem-solution 或 listicle 框架 → 弱化 logo 与尾卡。　**出处**：〔R3.2〕
+- 〔CS1.6〕结构照配方：第一帧文字钩子（问题/数字/反差）→ 快切 → problem-solution 或 listicle 框架 → 弱化 logo 与尾卡。（logo 规则互相拉扯，见第 10 节第 3 项，待 PM 裁决）　**出处**：〔R3.2〕
 - 〔CS1.7〕AI 蒙太奇够不着的爆款要素要诚实标缺口：真人出镜（UGC）、好旁白、无人机航拍、trending 原声；不要假装能靠纯 AI 空镜补。　**出处**：〔R3.3〕
 - 〔CS1.8〕视频供给两条路线按场景用：真实感路线（蒙太奇，真图零重绘）适合需要「真实产品/真实场景」承诺的内容；AI 动感路线（图生视频）只做概念/氛围。目前没有「真图只加运动、不被重绘」的中间选项。　**出处**：〔S7.1〕〔S7.2〕
 - 〔CS1.9〕片尾落版（模板默认）：居中 logo、名称、一个行动引导，都摆在安全区内；缺引导时用「了解更多 / Learn more」。带价格的结尾默认仍是价格卡。　**出处**：`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:63`
 - 〔CS1.10〕账号水印一律带背景色块垫底（圆角矩形即可），不让纯文字水印直接浮在真实素材上。　**出处**：〔S16.2〕
-- 〔CS1.11〕所有对外交付的视频成片，不论用哪个模板，统一带 logo 水印；挑选或新建模板时先确认有无 logo/水印图层。　**出处**：〔S4.2〕；`src/lib/social/content-review.ts:10`
+- 〔CS1.11〕所有对外交付的视频成片，不论用哪个模板，统一带 logo 水印；挑选或新建模板时先确认有无 logo/水印图层。（logo 规则互相拉扯，见第 10 节第 3 项，待 PM 裁决）　**出处**：〔S4.2〕；`src/lib/social/content-review.ts:10`
 - 〔CS1.12〕「关注我」这类提醒卡片只在开头出现一次容易被划走，可在整条视频时长的正中间再弹一次（完整弹入-停留-淡出窗口，两次之间留明显间隔）。　**出处**：〔S15.2〕
 - 〔CS1.13〕TikTok 日常视频建议 15–30 秒是行业经验，不是官方要求（模板手册自己的标注）。　**出处**：`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:117`
 - 〔CS1.14〕场景覆盖表给出各场景的建议比例/时长/前 3 秒/结尾（广告 Reels/Stories、FB 动态、TikTok、日常动态、Shorts、长视频等）；表内「缺口」列（如缺 4:5 导出、缺口播风格模板）是现状，不是已有能力。　**出处**：`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:105-114`
-- 〔CS1.15〕模板各有用途与限制：postcard（一景一句话）、list（清单，含价格页，易被判雷同）、montage（需要 8 个以上镜头）、datacard（纯数字卡）；Story 变体只有设计稿未实现。　**出处**：`docs/sops/2026-10-15-video-factory-handoff-to-97.md:22-25`；`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:134-143`
+- 〔CS1.15〕（单客户评价，非通用结论）模板各有用途与限制：postcard（一景一句话）、list（清单，含价格页，易被判雷同）、montage（需要 8 个以上镜头）、datacard（纯数字卡）；Story 变体只有设计稿未实现。　**出处**：`docs/sops/2026-10-15-video-factory-handoff-to-97.md:22-25`；`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:134-143`
 
 ## 2. 钩子（开场前 3 秒、首帧、封面、配方库）
 
 - 〔CS2.1〕漂亮的地标/风景空镜开场是最差的钩子类型；第一帧禁用纯风景空镜，用文字钩子（问题/数字/反差）。赢的是视觉冲击、文字悬念/数字清单、UGC 自拍感、声音钩子。　**出处**：〔S1.1〕
-- 〔CS2.2〕风格要真实粗糙感，不要精致广告感；logo 开场 + 结尾尾卡是低分特征；满屏文字叠加、问题-解决方案叙事、快切排名靠前，航拍相对靠后。　**出处**：〔S1.2〕〔S1.3〕
+- 〔CS2.2〕风格要真实粗糙感，不要精致广告感；logo 开场 + 结尾尾卡是低分特征；满屏文字叠加、问题-解决方案叙事、快切排名靠前，航拍相对靠后。（logo 规则互相拉扯，见第 10 节第 3 项，待 PM 裁决）　**出处**：〔S1.2〕〔S1.3〕
 - 〔CS2.3〕排 Reel 前先查该行业在 `viral_reference_library` 的高播放样本，抽出开场钩子、关键技法、风格标签当配方（代码入口 `getViralStyleHint(industry, contentGoal)`）。　**出处**：〔S1.6〕〔R1.1〕〔R3.1〕
 - 〔CS2.4〕拿到配方后逐列自检「这一列我打算怎么满足」，并输出配方对账表；只满足节奏参数、不满足素材形态（真人出镜/航拍/真实质感）= 没照配方做；做不到就诚实标缺口。　**出处**：〔S1.5〕〔S1.7〕〔S1.8〕；`CLAUDE.md:251`
 - 〔CS2.5〕明信片模板默认前 2 秒用共享钩子：大字逐行滑入、数字弹出或问句，字宽约占画面 70%，关键词用品牌色；缺文案时用「先看这里」（有中文）或 Watch this。其它模板默认关，工单 `frame.hook` 才打开。　**出处**：`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:62`
@@ -51,8 +51,8 @@
 - 〔CS2.10〕封面取成片第 0 帧：第 0 帧本身就是成品画面（钩子字幕 + logo），和第 1 秒差别很小。　**出处**：〔V2〕
 - 〔CS2.11〕封面/缩略图大字：字号按画布宽度比例定死（如 15%~19%）并允许换行，不要用 shrink-to-fit 让标题长度反向决定字号；中文粗体字重要实际加载字体查真实字重名。　**出处**：〔S14.2〕〔S14.3〕
 - 〔CS2.12〕审核清单里与钩子相关的键：`viral_recipe_hook_matched`（人工判，钩子是否对上配方）、`cover_frame_not_blank_or_placeholder`（机器判，封面非空白/占位）。　**出处**：`src/lib/social/content-review.ts:5,8`
-- 〔CS2.13〕配方库字段 `opening_hook` 是 JSON，键为 `type`（开场类型）、`feel`、`script`；创意需求单里的 OpeningType 词表应取自 `opening_hook.type` 的实际值，不自编。　**出处**：〔库〕；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.4（分支 docs/social-agent-capability-map）
-- 〔CS2.14〕【快照】配方库共 4001 行；`opening_hook` 有值 2651 行；`shot_recipe` 有值 141 行（全部在 travel 行业，其中 youtube 133、tiktok 8）；`style_tags` 非空 2968 行。覆盖面说明，不是规则。　**出处**：〔库〕
+- 〔CS2.13〕配方库字段 `opening_hook` 是 JSON，键为 `type`（开场类型）、`feel`、`script`；创意需求单里的 OpeningType 词表应取自 `opening_hook.type` 的实际值，不自编。（设计稿草案，PR 2906 合并前不生效）　**出处**：〔库〕；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.4（分支 docs/social-agent-capability-map）
+- 〔CS2.14〕【快照】配方库共 4001 行；`opening_hook` 有值 2651 行；`shot_recipe` 有值 141 行（全部在 travel 行业，其中 youtube 133、tiktok 8）；`style_tags` 非 NULL 2968 行（其中空数组 13 行，非空数组 2955 行；口径：`style_tags IS NOT NULL` 与 `cardinality(style_tags)>0`，2026-10-28）。覆盖面说明，不是规则。　**出处**：〔库〕
 - 〔CS2.15〕【快照】按平台：youtube 3783、xiaohongshu 195、facebook 14、tiktok 8、upload 1；**instagram、threads、x、shorts 专属行为 0**。配方库对 Facebook/Instagram/Threads/X 的迁移有效性无样本支撑。　**出处**：〔库〕
 - 〔CS2.16〕【快照】按行业（行数）：beauty 577、travel 573、fashion 567、tech 557、fitness 483、real_estate 398、flooring 330、food 321、ai_education 99（opening_hook 0 行）、digital_marketing 96。只有 travel 有 `shot_recipe`。　**出处**：〔库〕
 - 〔CS2.17〕【快照】`opening_hook.type` 出现次数：text_overlay_question 1070、ugc_selfie 436、product_reveal 384、visual_shock 232、sound_cue 161、problem_statement 141、scenic_beauty 139、text_overlay_statement 53、testimonial_start 23，其余均不超过 2 次。这是「样本里出现得多」，**不等于效果好**。　**出处**：〔库〕；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §4.3
@@ -62,7 +62,7 @@
 
 - 〔CS3.1〕屏幕字幕 = 短句、大字、一行不超过 6 个词；长句只能放发帖正文，不烧进画面。判断标准：任何要烧进画面的文字，先问「这行能不能一眼读完」，读不完就是错的。　**出处**：〔S3.2〕〔S3.4〕〔C1.1〕〔C1.7〕
 - 〔CS3.2〕禁止把整段业务介绍、角度全名、完整句子直接当屏幕字幕；模板兜底也不许用整句，宁可用品牌名/价格/短角度。　**出处**：〔C1.2〕〔C1.5〕〔S3.3〕
-- 〔CS3.3〕生产/装配层加「字幕超长自动截断 + 保底最小字号」双保险。　**出处**：〔S3.5〕〔C1.6〕
+- 〔CS3.3〕生产/装配层最好加「字幕超长自动截断 + 保底最小字号」双保险（建议，非硬性）。　**出处**：〔S3.5〕〔C1.6〕
 - 〔CS3.4〕竖版 1080×1920 关键文字必须落在 y=270~1248 的安全带内；顶部死区 y=0~270，底部死区 y=1248~1920；右侧约 120px 是互动栏，关键文字水平居中、不贴右。　**出处**：〔S2.2〕〔S2.3〕〔S2.4〕〔C2.1〕〔C2.3b〕
 - 〔CS3.5〕模板代码里的安全区常量：左 60、上 270、下 1248、右 960（1080 宽）；开场钩子与片尾落版画在该矩形内；其它模板的正文位置未改，安全区不是出片前自动闸。　**出处**：`scripts/factory-worker/engines/remotion/src/safeZone.ts:3-6`；`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:61`
 - 〔CS3.6〕CTA 不要烧进画面，交给发帖 caption 与首评。　**出处**：〔S2.5〕〔C2.6.3〕〔C3.3〕
@@ -73,8 +73,8 @@
 - 〔CS3.11〕剪辑结束点要人工听到源素材最后一秒，讲者说完收尾话之后的杂音/碎念转写出的孤立短句一律剪掉，不照抄转写时间轴。　**出处**：〔S20.2〕
 - 〔CS3.12〕字幕高亮「犀利观点」：保留自己已校对的字幕文本，只对挑中的句子单独覆盖颜色/字号；不要接渲染引擎的自动转写高亮（会推翻已做的校对）。　**出处**：〔S18.2〕
 - 〔CS3.13〕审核页「字幕疑似内部标签冒充文案」是 AI 打分不是词表：先看真正送审的整段字幕，清单模板会把标签词拼进每个条目，同一泛词重复 N 次是强信号；换的词必须能从官网原话溯源。　**出处**：〔S22.1a〕〔S22.1c〕
-- 〔CS3.14〕明信片模板的画面文字机器闸：英文/中文禁词表（含 deadline、limited time、early bird、countdown、last chance、hurry、book now 等，英文整词匹配）；画面文字里不许出现价格（货币符号、币种代码、「仅需/只要/低至」+数字、「N 折」等）。　**出处**：`scripts/factory-worker/engines/remotion/src/postcard.ts:23-166,216-232`
-- 〔CS3.15〕明信片每景必须带 `sourceUrl` + `sourceQuote`（官网原句）+ `placeSourceQuote`，且原句要含这句话至少一半的主要词；这只证明「填了且相关」，不证明官网真有这句话，事实核对仍靠人工与苏东坡。已知绕过写法（如 Prices from…、just … dollars、Ends tonight）见原文。　**出处**：`docs/sops/2026-10-15-video-factory-handoff-to-97.md:27`
+- 〔CS3.14〕明信片模板的画面文字机器闸：英文/中文禁词表（含 deadline、limited time、early bird、countdown、last chance、hurry、book now 等，英文整词匹配）；正文（画面文字）不得出现价格，价格卡除外（平台默认待判）（货币符号、币种代码、「仅需/只要/低至」+数字、「N 折」等）。　**出处**：`scripts/factory-worker/engines/remotion/src/postcard.ts:23-166,215-232`
+- 〔CS3.15〕明信片每景必须带 `sourceUrl` + `sourceQuote`（官网原句）+ `placeSourceQuote`，且原句要含这句话至少一半的主要词；这只证明「填了且相关」，不证明官网真有这句话，事实核对仍靠人工与苏东坡。（平台默认待判）已知绕过写法（如 Prices from…、just … dollars、Ends tonight）见原文。　**出处**：`docs/sops/2026-10-15-video-factory-handoff-to-97.md:27`
 - 〔CS3.16〕字幕时间轴体检：字幕条目须有序、不重叠、非空、不超出成片时长，否则自动 FAIL。　**出处**：`src/lib/social/reel-media-checks.ts:56-67`
 - 〔CS3.17〕地名字幕必须有「这张图确实拍于该地」的硬证据（图库图看 metadata 的 location，官网图看官网出处）；拿不到就改通用说法；画面里出现可识别文字（招牌、灯笼、路牌）与目的地不符，是硬否决证据。　**出处**：〔S23.1a〕〔S23.1b〕
 - 〔CS3.18〕数量暗示词（复数、「多个」、「一路」）写之前回官网数一遍；同一条片子里一个符号不能有两个意思（钩子里的 `+` 与价格页的 `+`）。　**出处**：〔S23.2〕〔S23.4a〕〔S23.4b〕
@@ -88,14 +88,14 @@
 - 〔CS4.3〕新曲登记流程：`tools/analyze-music.py` 量时长/BPM/偏移 → 写 `catalog/music.json`；whisper 双模型转写当证据（纯器乐应转不出有意义的词）；往 `music-vocals.json` 加 sha256 + `verdict:none` + signedBy + evidence；这是动安全闸的配置，按仓库规矩走审查再合。　**出处**：〔S24.5a〕〔S24.5b〕〔S24.5c〕〔S24.5e〕
 - 〔CS4.4〕生成新 BGM 的要求：纯器乐，一丝人声都不能有（哼唱、和声、人声采样都算），长度 ≥40 秒。　**出处**：〔S24.6〕
 - 〔CS4.5〕配乐文件名必须是「暂存名」= 曲库 id + 扩展名，且不许有空格；曲库里 `folder` 是 `_shared/music` 的才铺了暂存副本，`folder` 是 `Music` 的没铺。　**出处**：〔S24.2〕〔S24.3〕
-- 〔CS4.6〕响度：成片响度 ≈ 曲子前 15 秒响度 −1~1.5dB；`_n` 结尾是做过响度归一的副本（前 15 秒约 −16 LUFS，目标成片约 −17 LUFS）；新曲先用 `ffmpeg -t 15 -af ebur128` 量前 15 秒再决定增益。　**出处**：`docs/sops/2026-10-15-video-factory-handoff-to-97.md:47,72`
+- 〔CS4.6〕响度：成片响度 ≈ 曲子前 15 秒响度 −1~1.5dB；`_n` 结尾是做过响度归一的副本（前 15 秒约 −16 LUFS，目标成片约 −17 LUFS）；新曲先用 `ffmpeg -t 15 -af ebur128` 量前 15 秒再决定增益。（平台默认待判）　**出处**：`docs/sops/2026-10-15-video-factory-handoff-to-97.md:47,72`
 - 〔CS4.7〕自动检查要求成片有音轨且综合响度高于 −55 LUFS（防静音）；审批时人工要带声音听一遍确认 BGM 无人声。　**出处**：`src/lib/social/reel-media-checks.ts:34-38`；`src/lib/social/content-review.ts:15`
 - 〔CS4.8〕音乐要卡点/有 trending 感，别默认库里的史诗乐。　**出处**：〔R3.2〕
 - 〔CS4.9〕剪点可以对到所选配乐的拍线上（拍长 = 60/BPM）；配乐用 `analyze-music.py` 重新量，目录 BPM 常常是错的；曲子目前没做节拍对齐（`beats_unverified`），剪点与鼓点不一定对上。　**出处**：〔S22.2〕；`docs/sops/2026-10-15-video-factory-handoff-to-97.md:47`
 - 〔CS4.10〕多段视频按内容情绪弧线分 2-4 段选曲，分段依据是内容本身的情绪转折点而非固定时间；段间切换用渲染引擎原生音频淡入淡出；音乐音量明显低于人声（人声 100% 时音乐约 20%~25%，按曲子响度再微调）。　**出处**：〔S17.1〕〔S17.2〕〔S17.3〕〔S17.4〕
 - 〔CS4.11〕发布前审核清单有两项 BGM 相关键：`bgm_segmented_with_fades`、`bgm_listened_no_vocals`。　**出处**：`src/lib/social/content-review.ts:14,15`
 - 〔CS4.12〕YouTube 公开前的服务器闸里包含 `bgm_not_repeated_in_7_days`（7 天内不重复用同一首）；任一闸不是显式 pass 就不能公开。　**出处**：`src/lib/youtube-publish/gates.ts:7-15`
-- 〔CS4.13〕素材授权：Dropbox 素材库里的素材 PM 已多次确认有授权，不再写「授权待补/来源不明」；但不含需署名的第三方素材，也不得据此压住审查警告。　**出处**：〔S22.8〕
+- 〔CS4.13〕素材授权：Dropbox 素材库里的素材 PM 已多次确认有授权，不再写「授权待补/来源不明」；但不含需署名的第三方素材，也不得据此压住审查警告。（口头确认，无书面授权登记；不是 BGM 规则，仅为授权状态记录）　**出处**：〔S22.8〕
 
 ## 5. 转场与节奏
 
@@ -132,20 +132,20 @@
 - 〔CS7.4〕Facebook 首评写入器先扫已有评论找幂等标记、命中就不重复发；读失败一律抛错，不「读不到就当没有」然后盲发。　**出处**：`src/lib/meta/first-comment.ts:3-8`
 - 〔CS7.5〕写任何客户对外内容前，具体运营细节（地点、时间、流程、含项）必须先查客户官网当下的真实页面；官网、内部文档、交接记录、记忆库打架时永远以官网当下数据为准。　**出处**：〔S11.2〕〔S11.4〕；`CLAUDE.md:249`
 - 〔CS7.6〕客户方向性文档（品牌简报）只给方向和支柱配比，不含具体运营细节，不能当事实来源；发布前逐句标「官网可溯 / 内部文档可溯 / 未经证实」，未证实的删掉或找人确认。　**出处**：〔S11.3〕〔S11.5〕
-- 〔CS7.7〕价格不得编；价格只写官网当前价。　**出处**：`docs/specs/2026-10-13-social-daily-agent-design.md:164,176`；`src/lib/social/outbound-claims-price.ts`
+- 〔CS7.7〕价格不得编；价格只写官网当前价。（层级待判：原出处为旅游行业层）　**出处**：`CLAUDE.md:249`；`src/lib/social/outbound-claims-price.ts`
 - 〔CS7.8〕内容只能取自已核实来源池（事实库 → 真实素材库 → 视频工厂产出），池里没有就不许编，记「缺口」；事实库外的新事实（价格/日期/行程细节）必须先对官网并由 PM 定。　**出处**：`docs/specs/2026-10-13-social-daily-agent-design.md:163,176`
 - 〔CS7.9〕同一事实 N 天不重复（默认 7）；同一周内不得出现同图、同版式、同主体连续出现。　**出处**：`docs/specs/2026-10-13-social-daily-agent-design.md:163`
-- 〔CS7.10〕Story 文字不超过 200 字、渠道只有 Story、见价格就拦、发送前用指纹重算。　**出处**：`docs/specs/2026-10-13-social-daily-agent-design.md:136`
-- 〔CS7.11〕文案生成复用 `copy-generator.ts`（读 master_brief，按 hook/middle/cta 三段，含 `ctaIntentFor`）；创意层不再写第二套生成器。　**出处**：`src/lib/factory/copy-generator.ts:1-8`；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.6
-- 〔CS7.12〕AI/虚拟角色、合成内容、虚构设定须透明披露，不编经历、不造成真人误认。　**出处**：`docs/skill-cards/ME-SOCIAL-RULES-DIGEST.md`（SO-04）
+- 〔CS7.10〕仅 story-lite 模块的限制（文字≤200 字、渠道只有 Story、见价格即拦、发送前用指纹重算），不是 Story 的创意规则。　**出处**：`docs/specs/2026-10-13-social-daily-agent-design.md:136`
+- 〔CS7.11〕文案生成复用 `copy-generator.ts`（读 master_brief，按 hook/middle/cta 三段，含 `ctaIntentFor`）；创意层不再写第二套生成器。（设计稿草案，PR 2906 合并前不生效）　**出处**：`src/lib/factory/copy-generator.ts:1-8`；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.6
+- 〔CS7.12〕AI/虚拟角色、合成内容、虚构设定须透明披露，不编经历、不造成真人误认。（来自 SO-04，A 级草案未批）　**出处**：`docs/skill-cards/ME-SOCIAL-RULES-DIGEST.md`（SO-04）
 - 〔CS7.13〕YouTube 公开闸包括 `title_matches_footage`（标题与画面相符）和 `facts_have_website_evidence`。　**出处**：`src/lib/youtube-publish/gates.ts:9,14`
 - 〔CS7.14〕指标写进验收/汇报前，先确认当前账号权限拿得到哪一档数据：基础权限只有点赞/评论/分享；播放量、观看时长、触达需要额外洞察权限；没有就不写「看播放量/完播率」。　**出处**：〔S10.1a〕〔S10.1b〕〔S10.2〕
 - 〔CS7.15〕核对「发出去的＝批准的」：把平台返回的图下载下来与批准原图逐像素比，比目测可靠。　**出处**：〔S10.6〕
 
 ## 8. 图文、短视频、Story 的分工
 
-- 〔CS8.1〕图文与短视频一起管：同一张创意需求单用 `format` 字段区分 reel / short / tiktok_video / story_image / story_video / post_image / carousel / short_text。（设计稿草案，未合并）　**出处**：`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.1,§3.4（分支 docs/social-agent-capability-map，PR 2906）
-- 〔CS8.2〕创意层只想不做，不调生图/生视频接口、不发布；创意层写需求单，工厂做，苏东坡/马良审，创意层不给自己的产出签字。　**出处**：`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.1；`CLAUDE.md:250`
+- 〔CS8.1〕图文与短视频一起管：同一张创意需求单用 `format` 字段区分形态，字段见能力地图 §3.4 草案，不复述。（设计稿草案，PR 2906 合并前不生效）　**出处**：`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.1,§3.4（分支 docs/social-agent-capability-map，PR 2906）
+- 〔CS8.2〕创意层只想不做，不调生图/生视频接口、不发布；创意层写需求单，工厂做，苏东坡/马良审，创意层不给自己的产出签字。（设计稿草案，PR 2906 合并前不生效）　**出处**：`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.1；`CLAUDE.md:250`
 - 〔CS8.3〕旅游行业层默认分工：Reel = 拉新（钩子用文字不用空镜）；图文 Post = 讲清行程/价格含项/选择理由三选一，链接放首评；Story = 提醒与陪伴不卖货（早=灵感、午=事实、晚=邀请私信）。这是行业层写法，候选。　**出处**：`docs/specs/2026-10-13-social-daily-agent-design.md:164`
 - 〔CS8.4〕Post、Reel、Story 的组合计划的家应是「每日计划」，不是三处互不相干（周包 markdown / Story 独立表页面 / Reel 在视频工厂）；PM 要在一个地方看和批。　**出处**：〔F3〕〔F4〕；`docs/specs/2026-10-13-social-daily-agent-design.md` §2A
 - 〔CS8.5〕Story：无链接贴纸（接口限制）；Stories 底部死区约 250px，拿不准按 Reels 安全区设计。　**出处**：`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §4.3；〔S2.8〕

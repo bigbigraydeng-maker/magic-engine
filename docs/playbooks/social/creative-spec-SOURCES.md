@@ -28,7 +28,7 @@
 | CS1.12 | 手册条目 | 〔S15.2〕 | platform-general.md 第十五节。 |
 | CS1.13 | 仓库文档 | `docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:117` | 「平台规格来自 Meta、TikTok、YouTube 官方说明；TikTok 15–30 秒是行业经验，不是官方要求」；该文件其余官方规格本稿未核，见 platform-specs.md。 |
 | CS1.14 | 仓库文档 | `docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:105-114` | 模板手册「场景覆盖」表。 |
-| CS1.15 | 仓库文档 | `docs/sops/2026-10-15-video-factory-handoff-to-97.md:22-25`；`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:134-143` | handoff §3 模板表；模板手册「现有模板问题」表（单数为 2026-10-27 数据快照，未复核）。 |
+| CS1.15 | 仓库文档 | `docs/sops/2026-10-15-video-factory-handoff-to-97.md:22-25`；`docs/sops/2026-10-27-video-factory-template-playbook-v1.0.md:134-143` | handoff §3 模板表；模板手册「现有模板问题」表；对 list 模板「易被判雷同」是单客户评价，非通用结论（单数为 2026-10-27 数据快照，未复核）。 |
 | CS2.1 | 手册条目 | 〔S1.1〕 | platform-general.md 第一节（按平均播放量加权的定性结论；样本是否限于旅游待判，具体数字见 industry-travel.md，候选）。 |
 | CS2.2 | 手册条目 | 〔S1.2〕〔S1.3〕 | platform-general.md 第一节。 |
 | CS2.3 | 手册条目 | 〔S1.6〕〔R1.1〕〔R3.1〕 | platform-general.md 第一节；函数所在 `src/lib/reels/viral-style-advisor.ts`（手册已核实仍在）。 |
@@ -42,7 +42,7 @@
 | CS2.11 | 手册条目 | 〔S14.2〕〔S14.3〕 | platform-general.md 第十四节（一次批量剪辑的实测）。 |
 | CS2.12 | 代码机器闸 | `src/lib/social/content-review.ts:5,8` | CONTENT_CHECK_KEYS。 |
 | CS2.13 | 库只读统计 | 〔库〕；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §3.4（分支 docs/social-agent-capability-map） | 库查询：对 opening_hook 取键（2026-10-28）；能力地图 §3.4 OpeningType 注释。 |
-| CS2.14 | 库只读统计 | 〔库〕 | SELECT count(*) / count(*) filter(where ... is not null)，2026-10-28。 |
+| CS2.14 | 库只读统计 | 〔库〕 | SELECT count(*) / count(*) filter(where ... is not null)；style_tags 另跑 cardinality(style_tags)>0 得 2955、空数组 13、IS NOT NULL 共 2968，2026-10-28。 |
 | CS2.15 | 库只读统计 | 〔库〕 | SELECT platform, count(*) GROUP BY platform，2026-10-28。 |
 | CS2.16 | 库只读统计 | 〔库〕 | SELECT industry, count(*)，2026-10-28。 |
 | CS2.17 | 库只读统计 | 〔库〕；`docs/specs/2026-10-19-social-agent-capability-map-v0.3.md` §4.3 | SELECT opening_hook->>'type'，2026-10-28；能力地图 §4.3 已有同口径（当时 2623 行）。 |
@@ -60,7 +60,7 @@
 | CS3.11 | 手册条目 | 〔S20.2〕 | platform-general.md 第二十节。 |
 | CS3.12 | 手册条目 | 〔S18.2〕 | platform-general.md 第十八节。 |
 | CS3.13 | 手册条目 | 〔S22.1a〕〔S22.1c〕 | platform-general.md 第二十二节（打分与线上分只能比相对高低）。 |
-| CS3.14 | 代码机器闸 | `scripts/factory-worker/engines/remotion/src/postcard.ts:23-166,216-232` | ENGLISH_BANNED / CHINESE_BANNED 与 priceMentionHits。这张禁词表属平台默认还是客户配置，见第 10 节。 |
+| CS3.14 | 代码机器闸 | `scripts/factory-worker/engines/remotion/src/postcard.ts:23-166,215-232` | ENGLISH_BANNED / CHINESE_BANNED 与 priceMentionHits。这张禁词表属平台默认还是客户配置，见第 10 节。 |
 | CS3.15 | 仓库文档 | `docs/sops/2026-10-15-video-factory-handoff-to-97.md:27` | handoff §3 末段。 |
 | CS3.16 | 代码机器闸 | `src/lib/social/reel-media-checks.ts:56-67` | buildReelMediaAutoChecks 字幕段。 |
 | CS3.17 | 手册条目 | 〔S23.1a〕〔S23.1b〕 | platform-general.md 第二十三节。 |
@@ -107,7 +107,7 @@
 | CS7.4 | 代码机器闸 | `src/lib/meta/first-comment.ts:3-8` | 文件头注释。其它平台首评能力未验证，见 platform-specs.md。 |
 | CS7.5 | 手册条目 | 〔S11.2〕〔S11.4〕；`CLAUDE.md:249` | 手册第十一节；根 CLAUDE.md §8。 |
 | CS7.6 | 手册条目 | 〔S11.3〕〔S11.5〕 | platform-general.md 第十一节。 |
-| CS7.7 | 仓库文档 | `docs/specs/2026-10-13-social-daily-agent-design.md:164,176`；`src/lib/social/outbound-claims-price.ts` | 日常设计 §3.1 旅游行业层行（第 164 行）；价格扫描器源文件。这是旅游行业层写法，是否平台默认见第 10 节。 |
+| CS7.7 | 仓库文档 | `CLAUDE.md:249`；`src/lib/social/outbound-claims-price.ts` | 根 CLAUDE.md §8「对外内容必先 grounding 官网」；价格扫描器源文件。原出处是日常设计 §3.1 旅游行业层行（`docs/specs/2026-10-13-social-daily-agent-design.md:164`），层级待判，见第 10 节。 |
 | CS7.8 | 仓库文档 | `docs/specs/2026-10-13-social-daily-agent-design.md:163,176` | 日常设计 §3.1 平台层与审批矩阵。 |
 | CS7.9 | 仓库文档 | `docs/specs/2026-10-13-social-daily-agent-design.md:163` | 日常设计 §3.1 平台层。 |
 | CS7.10 | 仓库文档 | `docs/specs/2026-10-13-social-daily-agent-design.md:136` | 日常设计 §2A.4 对 story-lite 的描述。 |
