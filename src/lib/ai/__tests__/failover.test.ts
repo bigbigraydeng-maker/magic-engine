@@ -248,6 +248,23 @@ describe('三家的请求形状', () => {
     await expect(p.call(new AbortController().signal)).rejects.toThrow('anthropic_no_tool_use_block')
   })
 
+  it('DeepSeek 的超时毫秒是整数（总预算除不尽时也不把小数交给定时器）', async () => {
+    let timeoutMs = -1
+    const clients: FailoverClients = {
+      deepseek: () => ({
+        completeJson: async (req) => {
+          timeoutMs = req.timeoutMs ?? -1
+          return { ok: true as const, value: { text: '{}', model: 'deepseek' } }
+        },
+      }),
+    }
+    const args = { ...(baseArgs as AskJsonArgs<unknown>), totalBudgetMs: 20_000 / 3 }
+    const [p] = buildProviders(args, { DEEPSEEK_API_KEY: 'd', AI_FAILOVER_ALLOW_DEEPSEEK: '1' }, clients)
+    await p.call(new AbortController().signal)
+    expect(timeoutMs).toBe(6_666)
+    expect(Number.isInteger(timeoutMs)).toBe(true)
+  })
+
   it('DeepSeek：客户端报错要原样抛出（状态码才分得出是没钱还是写错）', async () => {
     const clients: FailoverClients = {
       deepseek: () => ({ completeJson: async () => ({ ok: false as const, error: 'deepseek_http_402' }) }),

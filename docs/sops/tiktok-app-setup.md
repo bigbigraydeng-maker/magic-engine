@@ -1,5 +1,7 @@
 # 建 TikTok 开发者应用（一次性，约 30 分钟）
 
+> 负责 agent：苏东坡（`sudongpo`）｜ 档案：[`docs/agents/14-sudongpo.md`](../agents/14-sudongpo.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 > 为什么必须是人去做：TikTok 要求用真实身份创建应用并签开发者协议。这一步没有接口，谁都绕不过。
 > 做完之后 TikTok 发布就跟 Facebook 一样全自动，不用再管。
 
