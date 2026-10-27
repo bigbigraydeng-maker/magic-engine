@@ -250,6 +250,54 @@ describe('deriveChainStatus', () => {
     expect(step(status, 'launch').state).toBe('unread')
   })
 
+  describe('personal IP prescriptions', () => {
+    const contentOnly = rx({
+      adPlayCount: 0,
+      targetCosts: [],
+      intake: { businessGoal: '让更多人认识我', monthlyBudget: 500, personalIp: true },
+    })
+
+    it('shows 这份以内容为主 instead of blocked when there is no ad play', () => {
+      const status = deriveChainStatus(facts({ prescription: { read: 'ok', value: contentOnly } }))
+      expect(step(status, 'prescribe')).toMatchObject({ state: 'done', detail: '这份以内容为主，没有广告打法。' })
+    })
+
+    it('still blocks a standard prescription that has no ad play', () => {
+      const status = deriveChainStatus(facts({
+        prescription: { read: 'ok', value: rx({ adPlayCount: 0 }) },
+      }))
+      expect(step(status, 'prescribe')).toMatchObject({
+        state: 'blocked',
+        detail: '处方里还没有结构化的广告打法。',
+      })
+    })
+
+    it('does not ask for a target lead cost or a daily cap when there are no ad plays', () => {
+      const status = deriveChainStatus(facts({
+        prescription: { read: 'ok', value: contentOnly },
+        outcome: { read: 'ok', value: { configured: false, targetCostPerPrimary: null } },
+        strategy: { read: 'ok', value: { dailyCapCents: null, pool: [] } },
+      }))
+      expect(step(status, 'measure').state).toBe('done')
+    })
+
+    it('still asks for a daily cap once the prescription has an ad play', () => {
+      const status = deriveChainStatus(facts({
+        prescription: { read: 'ok', value: { ...contentOnly, adPlayCount: 1 } },
+        outcome: { read: 'ok', value: { configured: false, targetCostPerPrimary: null } },
+        strategy: { read: 'ok', value: { dailyCapCents: null, pool: [] } },
+      }))
+      expect(step(status, 'measure')).toMatchObject({ state: 'blocked', detail: '每天预算上限还没定。' })
+    })
+
+    it('keeps a standard prescription blocked when the target cost is missing', () => {
+      const status = deriveChainStatus(facts({
+        outcome: { read: 'ok', value: { configured: false, targetCostPerPrimary: null } },
+      }))
+      expect(step(status, 'measure').state).toBe('blocked')
+    })
+  })
+
   it('keeps nine labels in order', () => {
     const status = deriveChainStatus(facts())
     expect(status.steps.map((item) => item.label)).toEqual(['看', '量', '确认', '开方', '同意', '计划', '素材', '草稿', '开投'])

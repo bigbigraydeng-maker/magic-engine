@@ -7,7 +7,7 @@ import React from 'react'
 import { describe, it, expect, afterEach } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
-import GrowthPanel from '../growth-panel'
+import GrowthPanel, { type GrowthStateView } from '../growth-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 afterEach(cleanup)
@@ -53,5 +53,34 @@ describe('GrowthPanel — client view', () => {
     render(<GrowthPanel state={{ ...base, goal: null }} />)
     expect(screen.getByText('这段时间还没有设定广告目标，设好后这里会显示进度。')).toBeTruthy()
     expect(screen.queryByText(/这个客户/)).toBeNull()
+  })
+})
+
+function internalState(dataThrough?: string): GrowthStateView {
+  return {
+    date: '2026-09-16',
+    data_completeness: 'complete',
+    goal_pace: {
+      expectedToDate: 50, actualToDate: 30, gapPct: -40, projectedEnd: 40,
+      verdict: 'behind', reason: '落后',
+      ...(dataThrough ? { dataThrough } : {}),
+    },
+    payload: {
+      goal: { title: '九月留资', label: '留资', target: 100, dayIndex: 16, totalDays: 30 },
+      problems: [],
+      opportunities: [],
+    },
+  }
+}
+
+describe('GrowthPanel — 数据截至', () => {
+  it('没有 dataThrough 时不显示「数据截至昨天」', () => {
+    const { container } = render(<GrowthPanel state={internalState()} />)
+    expect(container.textContent ?? '').not.toContain('数据截至')
+  })
+
+  it('有 dataThrough 才显示这一天', () => {
+    render(<GrowthPanel state={internalState('2026-09-15')} />)
+    expect(screen.getByText(/数据截至2026-09-15/)).toBeTruthy()
   })
 })

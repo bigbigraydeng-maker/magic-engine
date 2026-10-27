@@ -33,6 +33,7 @@ import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
 import { adsO1BudgetScale } from './ads-o1-budget-scale'
 import { maliangRenderCheck } from './maliang-render-check'
+import { assetDualReview } from './asset-dual-review'
 import { libaiCopyProvenance } from './libai-copy-provenance'
 import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
@@ -90,6 +91,7 @@ export const cloudFunctions = [
   adsCampaignBudgetDecrease,
   adsO1BudgetScale,
   maliangRenderCheck,
+  assetDualReview,
   libaiCopyProvenance,
   libaiPromptLibraryMonthly,
   simaqianReputationWeekly,

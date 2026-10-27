@@ -4,6 +4,7 @@ import {
   countPrescriptionActions,
   countWorkOrders,
   describePrescriptionCheck,
+  personalIpSuggestions,
   pickInActPrescriptions,
   type PrescriptionCheckFacts,
 } from './prescription-weekly-check-text'
@@ -136,5 +137,62 @@ describe('describePrescriptionCheck', () => {
     }))
     expect(text.progress).toContain('没有拿这个客户的全部工单来凑')
     expect(text.progress).toContain('没有目标数字可以对')
+  })
+})
+
+describe('个人 IP 复盘建议', () => {
+  const personal = {
+    postsThisWeek: 6,
+    engagementBaseline: 0.03,
+    recentEngagement: [0.04, 0.035],
+    boostedCost: 1,
+    bestOrganicCost: 1,
+    dmConversations: 4,
+    bookings: 2,
+  }
+
+  it('内容少于 5 条不下结论，其他三条都不出', () => {
+    const lines = personalIpSuggestions({
+      ...personal, postsThisWeek: 4, recentEngagement: [0.01, 0.01], boostedCost: 9, dmConversations: 50, bookings: 0,
+    })
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('不到 5 条')
+    expect(lines[0]).toContain('先不下结论')
+  })
+
+  it('本周发了几条没读到，也不下结论', () => {
+    expect(personalIpSuggestions({ ...personal, postsThisWeek: null })[0]).toContain('没读到')
+  })
+
+  it('连续两周互动率低于起点，建议换选题或开头', () => {
+    const lines = personalIpSuggestions({ ...personal, recentEngagement: [0.02, 0.025] })
+    expect(lines.join('')).toContain('换选题或换开头')
+    expect(lines.join('')).toContain('不会自动')
+  })
+
+  it('只有一周低于起点，或有一周没读到，不出这条', () => {
+    expect(personalIpSuggestions({ ...personal, recentEngagement: [0.02, 0.04] })).toEqual([])
+    expect(personalIpSuggestions({ ...personal, recentEngagement: [0.02, null] })).toEqual([])
+  })
+
+  it('加钱推的帖子成本超过最好自然帖的 2 倍才建议停；正好 2 倍不算', () => {
+    expect(personalIpSuggestions({ ...personal, boostedCost: 2.01 }).join('')).toContain('停掉')
+    expect(personalIpSuggestions({ ...personal, boostedCost: 2 })).toEqual([])
+  })
+
+  it('私信多、预约少，建议改话术或落地页', () => {
+    const lines = personalIpSuggestions({ ...personal, dmConversations: 20, bookings: 1 })
+    expect(lines.join('')).toContain('改私信话术或落地页')
+    expect(personalIpSuggestions({ ...personal, dmConversations: 20, bookings: 5 })).toEqual([])
+    expect(personalIpSuggestions({ ...personal, dmConversations: 9, bookings: 0 })).toEqual([])
+  })
+
+  it('普通方案的复盘文字不变；个人 IP 的建议排在前面', () => {
+    const plain = describePrescriptionCheck(facts())
+    expect(plain.suggestion).not.toContain('选题')
+    const withPersonal = describePrescriptionCheck(facts({
+      personalIp: { ...personal, recentEngagement: [0.01, 0.01] },
+    }))
+    expect(withPersonal.suggestion.startsWith('互动率连续两周低于开方时的起点')).toBe(true)
   })
 })

@@ -1,5 +1,5 @@
-import type { DiagnosticDimension, PrescriptionIntake } from '@/types/diagnostic'
-import { parsePrescriptionAsk, type ParsedAsk } from './utterance'
+import type { ClientKind, DiagnosticDimension, PrescriptionIntake } from '@/types/diagnostic'
+import { parsePrescriptionAsk, readShootAnswer, type ParsedAsk } from './utterance'
 
 export interface GoalChoice {
   id: string
@@ -15,7 +15,11 @@ export interface DecideInput {
   selectedGoalId: string | null
   pendingGoal: string | null
   pendingBudget: number | null
-  waitingFor: 'budget' | 'goal' | null
+  waitingFor: 'budget' | 'goal' | 'shoot' | null
+  /** 客户资料里的客户类型（clients.client_kind）。缺省 = 普通客户。 */
+  clientKind?: ClientKind
+  /** 追问过的「每周能拍几条」，等选目标时带着走。 */
+  pendingShoot?: number | null
   supplementOf: string | null
   reviseOf: string | null
   writing: boolean
@@ -23,7 +27,14 @@ export interface DecideInput {
 
 export type TurnDecision =
   | { kind: 'say'; text: string }
-  | { kind: 'ask'; waitingFor: 'budget' | 'goal'; businessGoal: string; budget: number | null; text: string }
+  | {
+      kind: 'ask'
+      waitingFor: 'budget' | 'goal' | 'shoot'
+      businessGoal: string
+      budget: number | null
+      shoot?: number | null
+      text: string
+    }
   | { kind: 'refine'; comments: string }
   | {
       kind: 'generate'
@@ -32,6 +43,8 @@ export type TurnDecision =
       urgency: PrescriptionIntake['timeline_urgency']
       dimensions: DiagnosticDimension[]
       goalId: string | null
+      clientKind: ClientKind
+      weeklyShoot: number | null
       mode: 'new' | 'supplement' | 'revise'
       priorId: string | null
     }
@@ -42,6 +55,7 @@ export function decideTurn(input: DecideInput): TurnDecision {
   }
   if (input.waitingFor === 'goal') return answerGoal(input)
   if (input.waitingFor === 'budget') return answerBudget(input)
+  if (input.waitingFor === 'shoot') return answerShoot(input)
   return decideFresh(input, parsePrescriptionAsk(input.text))
 }
 
@@ -71,14 +85,36 @@ function answerBudget(input: DecideInput): TurnDecision {
   return decideGenerate(input, { ...prior, businessGoal: input.pendingGoal ?? '', monthlyBudget: budget, wantsNewDraft: true })
 }
 
+function answerShoot(input: DecideInput): TurnDecision {
+  const shoot = readShootAnswer(input.text)
+  if (shoot == null) return say('没看懂条数。请直接回本人每周能拍几条，例如 3。')
+  const prior = parsePrescriptionAsk(input.pendingGoal ?? '')
+  return decideGenerate(
+    { ...input, waitingFor: null },
+    { ...prior, businessGoal: input.pendingGoal ?? '', monthlyBudget: input.pendingBudget, weeklyShoot: shoot, wantsNewDraft: true },
+  )
+}
+
 function answerGoal(input: DecideInput): TurnDecision {
   const goalId = matchGoal(input.goals, input.text)
   if (!goalId) return say('没对上目标。请回复序号，或把目标名字再说一遍。')
   const prior = parsePrescriptionAsk(input.pendingGoal ?? '')
   return decideGenerate(
     { ...input, selectedGoalId: goalId, waitingFor: null },
-    { ...prior, businessGoal: input.pendingGoal ?? '', monthlyBudget: input.pendingBudget, wantsNewDraft: true },
+    {
+      ...prior,
+      businessGoal: input.pendingGoal ?? '',
+      monthlyBudget: input.pendingBudget,
+      weeklyShoot: input.pendingShoot ?? prior.weeklyShoot,
+      wantsNewDraft: true,
+    },
   )
+}
+
+/** 客户类型从资料读，不靠关键词猜；只有对话里明说「按普通客户开」才临时改回。 */
+function effectiveKind(input: DecideInput, ask: ParsedAsk): ClientKind {
+  if (ask.forceStandard) return 'standard'
+  return input.clientKind ?? 'standard'
 }
 
 function decideGenerate(input: DecideInput, ask: ParsedAsk): TurnDecision {
@@ -86,11 +122,18 @@ function decideGenerate(input: DecideInput, ask: ParsedAsk): TurnDecision {
   const budget = ask.monthlyBudget ?? input.pendingBudget
   if (!businessGoal) return say('先用一句话说说这张方要达成什么。')
   if (budget == null) return askFor('budget', businessGoal, null, '每月大概准备多少预算？直接回一个数字就行。')
+  const clientKind = effectiveKind(input, ask)
+  const weeklyShoot = ask.weeklyShoot
+  if (clientKind === 'personal_ip' && weeklyShoot == null) {
+    return { kind: 'ask', waitingFor: 'shoot', businessGoal, budget, text: '本人每周大概能拍几条？直接回一个数字就行。' }
+  }
   if (!input.discoveryReady && !input.supplementOf && !input.reviseOf) {
     return say('还没有确认过的品牌扫描，开不了方。')
   }
   const goalId = resolveGoal(input, businessGoal)
-  if (goalId === 'need-choice') return askFor('goal', businessGoal, budget, goalPrompt(input.goals))
+  if (goalId === 'need-choice') {
+    return { kind: 'ask', waitingFor: 'goal', businessGoal, budget, shoot: weeklyShoot, text: goalPrompt(input.goals) }
+  }
   return {
     kind: 'generate',
     businessGoal,
@@ -98,6 +141,8 @@ function decideGenerate(input: DecideInput, ask: ParsedAsk): TurnDecision {
     urgency: ask.urgency,
     dimensions: ask.dimensions,
     goalId,
+    clientKind,
+    weeklyShoot: clientKind === 'personal_ip' ? weeklyShoot : null,
     mode: modeOf(input),
     priorId: priorOf(input),
   }

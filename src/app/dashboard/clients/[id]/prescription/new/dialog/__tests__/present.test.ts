@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest'
-import { layoutParagraphs, splitMetricFormula, statusNotice } from '../present'
+import type { PrescriptionIntake } from '@/types/diagnostic'
+import { layoutParagraphs, personalIpFacts, splitMetricFormula, statusNotice } from '../present'
+
+const INTAKE: PrescriptionIntake = {
+  business_goal: '让更多人认识我',
+  timeline_urgency: 'short_term',
+  monthly_budget_aud: 500,
+  priority_dimensions: [],
+  notes: null,
+}
+
+describe('摘要卡的个人 IP 两行', () => {
+  it('个人 IP 方案多「每周拍几条」和「按个人 IP 方案开」', () => {
+    expect(personalIpFacts({ ...INTAKE, client_kind: 'personal_ip', weekly_shoot_count: 3 })).toEqual([
+      { term: '每周拍几条', value: '3 条' },
+      { term: '按个人 IP 方案开', value: '是' },
+    ])
+  })
+
+  it('没问到条数时写读不到，不编', () => {
+    expect(personalIpFacts({ ...INTAKE, client_kind: 'personal_ip', weekly_shoot_count: null })[0].value).toBe('读不到')
+  })
+
+  it('普通方案、老数据、没有 intake，都不多出行', () => {
+    expect(personalIpFacts(INTAKE)).toEqual([])
+    expect(personalIpFacts({ ...INTAKE, client_kind: 'standard' })).toEqual([])
+    expect(personalIpFacts(null)).toEqual([])
+  })
+})
 
 describe('处方全文只换行、不改字', () => {
   it('splits on 。 ； and numbered markers without dropping characters', () => {
