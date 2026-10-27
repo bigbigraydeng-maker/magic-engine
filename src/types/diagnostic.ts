@@ -330,12 +330,22 @@ export interface ExecutionLog {
 
 export type TimelineUrgency = 'immediate' | 'short_term' | 'long_term'
 
+/** 客户类型。NULL / 缺省一律按 standard 处理。取值与 clients.client_kind 列一致。 */
+export type ClientKind = 'standard' | 'personal_ip'
+
 export interface PrescriptionIntake {
   business_goal: string
   timeline_urgency: TimelineUrgency
+  /** Amount in budget_currency. The field name is historical and is not a promise of AUD. */
   monthly_budget_aud: number
+  /** ISO code from the ad account or the client country. Absent only on old rows. */
+  budget_currency?: string | null
   priority_dimensions: DiagnosticDimension[]
   notes: string | null
+  /** 缺省 = 普通客户（老数据兼容）。 */
+  client_kind?: ClientKind
+  /** 个人 IP 专用：本人每周能拍几条。缺省 / null = 还没问到。 */
+  weekly_shoot_count?: number | null
 }
 
 // ── PrescriptionContent (§4.3) ────────────────────────────────────────────────
@@ -410,6 +420,11 @@ export interface PhaseInitiativeSeed {
   hypothesis?: string | null
   /** Supporting 类型必须指向 1 个 terminal Initiative. 由派生逻辑后填 (不在 huatuo 输出). */
   supports_phase_number?: number | null
+  /**
+   * 每个广告步骤打哪类打法（真相源）。step_key 是步骤的稳定标识，play 是打法词表里的值。
+   * 服务端据此构建 plan_seed；用 string 而不是联合类型，避免 types 层依赖 ads-strategy。
+   */
+  ad_plays?: { step_key: string; play: string }[]
 }
 
 export interface KPITarget {
@@ -446,4 +461,9 @@ export interface PrescriptionContent {
    * 可选 — 旧数据不带此字段，UI/序列化要兜底为空字符串。
    */
   narrative?: string
+  /**
+   * 服务端用事实构建的「计划草稿种子」快照，只读。客户端 / LLM 给的一律丢弃，
+   * 由 attachPlanSeed 在保存前重新构建。形状见 src/lib/ads-strategy/plan-seed/types.ts。
+   */
+  plan_seed?: unknown
 }

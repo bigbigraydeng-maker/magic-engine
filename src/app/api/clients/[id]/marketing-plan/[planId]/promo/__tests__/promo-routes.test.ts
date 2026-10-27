@@ -58,6 +58,8 @@ import { GET, PUT } from '../route'
 import { POST as VERIFY } from '../verify/route'
 import { POST as ACK } from '../acknowledge/route'
 import { POST as APPROVE } from '../../approve/route'
+import { mapSeedToPromo } from '@/lib/marketing-plan/promo/plan-draft-map'
+import type { PlanSeed } from '@/lib/ads-strategy/plan-seed/types'
 
 const P = { id: 'client-1', planId: 'plan-1' }
 const req = (body: unknown, method = 'POST') =>
@@ -72,6 +74,38 @@ const verifiedChecks = (spec = baseSpec()) => ['landing.item_live', 'content.wor
 const loadedFacts = (gate = goodFacts(), recon = goodReconFacts()) => ({
   playbook: gate.playbook, today: '2026-11-12', timezone_known: true, gate, recon,
 })
+
+function autoDraftedPromo() {
+  const notes = [{ label: 'test', value: 'act_1', source: 'test', as_of: null }]
+  const seed: PlanSeed = {
+    schema_version: 1,
+    produced_by: 'ads-agent',
+    facts_as_of: '2026-10-26T00:00:00.000Z',
+    currency: 'AUD',
+    period: { start_date: '2026-11-01', end_date: '2026-11-30' },
+    captured_at: {},
+    ad_steps: [{
+      step_key: 'play-1',
+      play: 'lead_form_harvest',
+      page_id: { ok: true, value: 'page-1', basis: notes, notes: [] },
+      ad_account_id: { ok: true, value: 'act_1', basis: notes, notes: [] },
+      daily_budget_cents: { ok: true, value: 5000, basis: notes, notes: [] },
+    }],
+    skipped: [],
+    notes: [],
+  }
+  const mapped = mapSeedToPromo({
+    goalId: 'goal-1',
+    period: seed.period,
+    plays: [{ step_key: 'play-1' }],
+    seed,
+    country: 'AU',
+    accounts: [{ ad_account_id: 'act_1', currency: 'AUD', daily_cap_cents: 10000, owned_by_client: true }],
+    clientCapCents: 20000,
+  })
+  if (!mapped.ok) throw new Error(mapped.text)
+  return mapped.spec
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -156,6 +190,12 @@ describe('PUT promo — 保存时服务端校验', () => {
     const res = await PUT(req({ promo: baseSpec(), expected_updated_at: '2026-11-01T00:00:00Z' }, 'PUT'), { params: P })
     expect(res.status).toBe(409)
     expect((await res.json()).error).toContain('别处被改过')
+  })
+  it('自动起草生成的结构可以原样保存', async () => {
+    const spec = autoDraftedPromo()
+    const res = await PUT(req({ promo: spec }, 'PUT'), { params: P })
+    expect(res.status).toBe(200)
+    expect((m.updates[0].plan_data as { promo: unknown }).promo).toEqual(spec)
   })
 })
 

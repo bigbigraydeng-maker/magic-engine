@@ -234,6 +234,7 @@ async function upsertConversation(
       overwriteDisplayName: false,
       source: 'whatsapp',
       seenAt: sentAt,
+      autoAssign: true,
       // First-touch only (resolveContact fills empty columns), so a later ad never
       // overwrites the one that brought the customer in. Empty without a referral.
       attribution: attributionFromWhatsAppReferral(referral),

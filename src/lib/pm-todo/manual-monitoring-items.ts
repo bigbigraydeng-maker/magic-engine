@@ -99,19 +99,81 @@ const AI_ACCOUNT_GUIDE: Record<
   },
 }
 
+/**
+ * 备用 AI（Claude / DeepSeek）自己断电时的指引。
+ *
+ * 🔴 为什么必须单独写：上面那份 `AI_ACCOUNT_GUIDE` 的文案和链接全是 OpenAI 的
+ * （「打开 OpenAI 充值页」「把 OPENAI_API_KEY 换成新的」）。切换层现在会把 Claude / DeepSeek 的
+ * 账户级失败也写进台账；不单独写的话，Claude 没钱时你会收到一条「去 OpenAI 充值」的待办 ——
+ * 下发了但没法照做（CLAUDE.md 铁律 3）。
+ */
+const BACKUP_PROVIDER_GUIDE: Record<string, { name: string; billing: string; keys: string; envVar: string }> = {
+  anthropic: {
+    name: 'Claude（备用 AI）',
+    billing: 'https://console.anthropic.com/settings/billing',
+    keys: 'https://console.anthropic.com/settings/keys',
+    envVar: 'ANTHROPIC_API_KEY',
+  },
+  deepseek: {
+    name: 'DeepSeek（备用 AI）',
+    billing: 'https://platform.deepseek.com/top_up',
+    keys: 'https://platform.deepseek.com/api_keys',
+    envVar: 'DEEPSEEK_API_KEY',
+  },
+}
+
+function backupProviderGuide(provider: string, reason: string) {
+  const g = BACKUP_PROVIDER_GUIDE[provider]
+  if (!g) return null
+  const noMoney = reason === 'account_exhausted'
+  return {
+    kind: 'ai_provider_exhausted' as const,
+    what: `${g.name}的${noMoney ? '钱用完了' : '钥匙不认了'} —— 它平时不被用到，所以现在没有症状；但主力 OpenAI 一旦也断，简报就没有备用可换，会跟以前一样整片停摆`,
+    how: noMoney
+      ? `打开链接 → 充值。充完回我一句即可（这条不紧急，但别拖到 OpenAI 也断的那天）`
+      : `打开链接 → 新建一把钥匙 → **别贴在聊天里**，直接去 Render 后台把 ${g.envVar} 换成新的 → Save。换完回我一句`,
+    href: noMoney ? g.billing : g.keys,
+  }
+}
+
+/**
+ * 今天（UTC）有多少张简报卡是备用模型答的。查不出来就当 0 —— 这只是并进文案的一句补充，
+ * 绝不能因为它挂了而丢掉「该充值了」那条本身。
+ *
+ * 判据是 `model` 列以 claude / deepseek 开头。这一列刀 2 起才记真实答题的模型，
+ * 此前是凭环境变量猜的，所以只有刀 2 上线之后的卡才数得准。
+ */
+async function countDegradedCardsToday(supabase: SupabaseClient, now: Date): Promise<number> {
+  try {
+    const { count, error } = await supabase
+      .from('conversation_briefs')
+      .select('*', { count: 'exact', head: true })
+      .gte('generated_at', `${utcDate(now)}T00:00:00.000Z`)
+      .or('model.like.claude%,model.like.deepseek%')
+    return error ? 0 : (count ?? 0)
+  } catch {
+    return 0
+  }
+}
+
 export async function pushProviderOutageItems(
   supabase: SupabaseClient,
   items: ManualItem[],
   now: Date,
 ): Promise<void> {
   const query = await readRecentOutages(makeSupabaseOutageReader(supabase), now)
-  items.push(...buildProviderOutageItems(query, now))
+  items.push(...buildProviderOutageItems(query, now, await countDegradedCardsToday(supabase, now)))
 }
 
 /**
  * 从断电记录造待办 —— 纯函数，可完全单测（这是验收条件 1 的落点）。
  */
-export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualItem[] {
+export function buildProviderOutageItems(
+  query: OutageQuery,
+  now: Date,
+  /** 今天由备用模型答的简报卡张数。有的话并进 OpenAI 那条「该充值了」，不另起一条（告知不是待办）。 */
+  degradedCardsToday = 0,
+): ManualItem[] {
   const items: ManualItem[] = []
   const { rows, error } = query
 
@@ -144,8 +206,10 @@ export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualI
     const streak = streakDays(g.dates, today)
     const sinceLatest = daysSinceLatest(g.dates, today)
     if (!shouldRemindToday(streak, sinceLatest, now)) continue
-    const reason = key.split('::')[1] ?? ''
-    const guide = AI_ACCOUNT_GUIDE[reason]
+    const [provider = '', reason = ''] = key.split('::')
+    const guide = provider === 'openai' || !BACKUP_PROVIDER_GUIDE[provider]
+      ? AI_ACCOUNT_GUIDE[reason]
+      : backupProviderGuide(provider, reason) ?? undefined
     // 认不出来的新失败形态照样下发 —— 说不清楚也好过不说。
     // 供应商原话一起带上（截断），否则 PM 只看到一个代号，连问我第二遍都没法问。
     const raw = (g.detail ?? '').trim()
@@ -157,11 +221,16 @@ export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualI
       sinceLatest !== null && sinceLatest > 0
         ? `${sinceLatest} 天前断过一次（现在看起来已经恢复）`
         : streakPhrase(streak)
+    // 只并进 OpenAI 这一条：备用模型自己的断电提示不该再说「有卡是备用答的」。
+    const degraded =
+      provider === 'openai' && degradedCardsToday > 0
+        ? `。**简报已自动改用备用 AI**：今天有 ${degradedCardsToday} 张客人卡是 Claude/DeepSeek 答的，语言和细节可能比平时粗，有报价、付款、投诉的客人请多看一眼原始对话`
+        : ''
     items.push({
       kind: guide?.kind ?? 'ai_provider_exhausted',
       client_id: 'infra',
       client_name: 'Magic Engine 后台',
-      what: `${when}：${what}`,
+      what: `${when}：${what}${degraded}`,
       how: guide?.how ?? '回我一句「查一下 AI 账户」，我去看供应商后台具体报的是什么',
       href: guide?.href ?? '',
     })

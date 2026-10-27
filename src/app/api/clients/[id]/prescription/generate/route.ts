@@ -1,7 +1,7 @@
 /**
  * POST /api/clients/[id]/prescription/generate
  *
- * **流式响应模式**（SSE）。3 种生成模式：
+ * 3 种生成模式：
  *   - 普通生成    body.discovery_id      — 从张骞 discovery 全新开方
  *   - 补充处方    body.supplement_of     — 为已有处方生成增量动作（原处方不动）
  *   - 修订处方    body.revise            — 为方向需调整的处方生成 v2
@@ -11,31 +11,28 @@
  * 作为 priorContext 传给华佗。
  *
  * Response: text/event-stream（SSE）
- * Security: Bearer token (INTERNAL_API_KEY)
+ * Security: logged-in session. OPC or this client's own FDE (requireOperatorAccess).
  * Reference: ROADMAP.md P8.10.S3 / S5
  */
 
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { generatePrescription } from '@/lib/diagnostic/prescription-generator'
-import { runHuatuo } from '@/lib/huatuo/agent'
+import { schedulePrescriptionGeneration } from '@/lib/huatuo/prescription-job'
 import type {
   PrescriptionIntake, PrescriptionContent, PriorPrescriptionContext,
   ExecutionItem,
 } from '@/types/diagnostic'
 import type { GoalRow } from '@/types/strategy'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
-import { savePrescriptionCase, deriveCrisisType } from '@/lib/case-library/saver'
-import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
-import { loadMemoryForClient } from '@/lib/memory'
+import { prepareBudgetIntake } from '@/lib/ads/budget-currency'
+import { resolveIntakeClientKind } from '@/lib/huatuo/client-kind'
 import { getGoalById, listActiveGoals } from '@/lib/strategy/goals'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 export const maxDuration = 300
-
-const HEARTBEAT_INTERVAL_MS = 8_000
 
 // 补充/修订时，新处方要写的关系字段
 interface PriorMeta {
@@ -50,7 +47,8 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<Response> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Drafting stays open to this client's FDE. requireGlobalAdmin would lock them out.
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) {
     return new Response(JSON.stringify({ error: access.error }), {
       status: access.status,
@@ -76,7 +74,10 @@ export async function POST(
     return errorResponse(400, 'invalid JSON body')
   }
   if (!body.intake) return errorResponse(400, 'intake is required')
-  const intake = body.intake
+  const prepared = prepareBudgetIntake(body.intake)
+  if (!prepared.ok) return errorResponse(400, prepared.error)
+  // 客户类型以客户资料（clients.client_kind）为准；请求里明确写了（如「按普通客户开」）才覆盖。
+  const intake = await resolveIntakeClientKind(supabaseAdmin, clientId, prepared.intake)
   if (!intake.business_goal || typeof intake.monthly_budget_aud !== 'number') {
     return errorResponse(400, 'intake must include business_goal and monthly_budget_aud')
   }
@@ -98,10 +99,7 @@ export async function POST(
       relationField: mode === 'supplement' ? 'supplements_id' : 'supersedes_id',
       priorPrescriptionId: priorId,
     }
-    return new Response(
-      makeHuatuoStream(clientId, prep.discoveryId, prep.discovery, intake, goal, priorMeta),
-      { headers: streamHeaders() },
-    )
+    return startHuatuoJob(clientId, prep.discoveryId, prep.discovery, intake, goal, priorMeta)
   }
 
   // ── Path A: 普通生成（discovery 源）─ 流式 ────────────────────────────────
@@ -118,9 +116,7 @@ export async function POST(
       return errorResponse(422, 'Discovery must be confirmed before generating a prescription')
     }
 
-    return new Response(makeHuatuoStream(clientId, row.id, row.payload, intake, goal), {
-      headers: streamHeaders(),
-    })
+    return startHuatuoJob(clientId, row.id, row.payload, intake, goal)
   }
 
   // ── Path B: legacy diagnostic run（同步小路径）────────────────────────────
@@ -312,17 +308,6 @@ function buildExecutionSummary(
   return lines.join('\n')
 }
 
-// ─── SSE Stream builder ───────────────────────────────────────────────────────
-
-function streamHeaders(): HeadersInit {
-  return {
-    'Content-Type': 'text/event-stream; charset=utf-8',
-    'Cache-Control': 'no-store, no-cache, must-revalidate',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  }
-}
-
 function errorResponse(status: number, error: string): Response {
   return new Response(JSON.stringify({ success: false, error }), {
     status,
@@ -330,154 +315,77 @@ function errorResponse(status: number, error: string): Response {
   })
 }
 
-function makeHuatuoStream(
+function acceptedResponse(prescriptionId: string): Response {
+  return new Response(JSON.stringify({
+    success: true,
+    prescription_id: prescriptionId,
+    status: 'generating',
+  }), {
+    status: 202,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+    },
+  })
+}
+
+/** 插入 generating 行后立刻返回。模型调用不在这次请求里等。 */
+async function startHuatuoJob(
   clientId: string,
   discoveryId: string,
   discovery: DiscoveryReport,
   intake: PrescriptionIntake,
   goal: GoalRow | null,
   priorMeta?: PriorMeta,
-): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder()
+): Promise<Response> {
+  try {
+    const insertedId = await insertGeneratingRow(clientId, discoveryId, intake, goal, priorMeta)
+    if ('error' in insertedId) return errorResponse(500, insertedId.error)
+    schedulePrescriptionGeneration({
+      clientId,
+      prescriptionId: insertedId.id,
+      discoveryId,
+      discovery,
+      intake,
+      goal,
+      priorContext: priorMeta?.priorContext,
+    })
+    return acceptedResponse(insertedId.id)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return errorResponse(500, message)
+  }
+}
 
-  return new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const heartbeat = setInterval(() => {
-        try { controller.enqueue(encoder.encode(': heartbeat\n\n')) } catch {/* */}
-      }, HEARTBEAT_INTERVAL_MS)
+async function insertGeneratingRow(
+  clientId: string,
+  discoveryId: string,
+  intake: PrescriptionIntake,
+  goal: GoalRow | null,
+  priorMeta?: PriorMeta,
+): Promise<{ id: string } | { error: string }> {
+  const nextVersion = await computeNextVersion(goal?.id ?? null)
+  const insertRow: Record<string, unknown> = {
+    client_id:     clientId,
+    discovery_id:  discoveryId,
+    run_id:        null,
+    status:        'generating',
+    intake,
+    content:       null,
+    agent_name:    'huatuo',
+    progress_note: '排队中…',
+    generated_at:  new Date().toISOString(),
+    goal_id:       goal?.id ?? null,
+    version:       nextVersion,
+  }
+  if (priorMeta) insertRow[priorMeta.relationField] = priorMeta.priorPrescriptionId
 
-      const sendEvent = (data: object) => {
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
-        } catch {/* connection closed */}
-      }
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from('prescriptions')
+    .insert(insertRow)
+    .select('id')
+    .single<{ id: string }>()
 
-      // 1. 插入 generating 行（补充/修订时带上关系字段, DAPE W4 填 goal_id + version）
-      let prescriptionId: string | null = null
-      try {
-        // DAPE W4: 算同 Goal 下下一版本号
-        const nextVersion = await computeNextVersion(goal?.id ?? null)
-
-        const insertRow: Record<string, unknown> = {
-          client_id:     clientId,
-          discovery_id:  discoveryId,
-          run_id:        null,
-          status:        'generating',
-          intake,
-          content:       null,
-          agent_name:    'huatuo',
-          progress_note: '排队中…',
-          generated_at:  new Date().toISOString(),
-          goal_id:       goal?.id ?? null,     // DAPE W4: 一对一
-          version:       nextVersion,           // DAPE W4: 版本化 (v1/v2/v3)
-        }
-        if (priorMeta) {
-          insertRow[priorMeta.relationField] = priorMeta.priorPrescriptionId
-        }
-
-        const { data: inserted, error: insertErr } = await supabaseAdmin
-          .from('prescriptions')
-          .insert(insertRow)
-          .select('id')
-          .single<{ id: string }>()
-
-        if (insertErr || !inserted) {
-          sendEvent({ type: 'error', error: `创建处方草稿失败: ${insertErr?.message ?? 'unknown'}` })
-          clearInterval(heartbeat)
-          controller.close()
-          return
-        }
-        prescriptionId = inserted.id
-        sendEvent({ type: 'started', prescription_id: prescriptionId })
-      } catch (err) {
-        sendEvent({ type: 'error', error: err instanceof Error ? err.message : String(err) })
-        clearInterval(heartbeat)
-        controller.close()
-        return
-      }
-
-      // Phase 23.D.2: Non-blocking memory load
-      const memoryContext = await loadMemoryForClient(supabaseAdmin, clientId, {
-        maxRecentDecisions: 5,
-      })
-
-      // 2. 执行华佗（补充/修订模式带 priorContext，附 L3 记忆上下文，DAPE W4 附 Goal）
-      try {
-        const result = await runHuatuo(supabaseAdmin, discovery, intake, {
-          priorContext: priorMeta?.priorContext,
-          memoryContext,
-          goal,    // DAPE W4: 一对一 Goal 注入 prompt
-          onProgress: async (note) => {
-            sendEvent({ type: 'progress', note })
-            if (prescriptionId) {
-              await supabaseAdmin
-                .from('prescriptions')
-                .update({ progress_note: note })
-                .eq('id', prescriptionId)
-                .eq('client_id', clientId)
-            }
-          },
-        })
-
-        // 3. 写回 DB
-        await supabaseAdmin
-          .from('prescriptions')
-          .update({
-            status:          'draft',
-            content:         result.content,
-            self_grade:      result.self_grade,
-            agent_version:   result.meta.agent_version,
-            benchmarks_used: result.benchmarks_used,
-            generation_meta: { ...result.meta, trend_summary: result.trend_summary },
-            progress_note:   null,
-            error_message:   null,
-          })
-          .eq('id', prescriptionId!)
-          .eq('client_id', clientId)
-
-        // 4. 案例库存档（静默，不阻塞主流程）
-        savePrescriptionCase(supabaseAdmin, {
-          clientId,
-          discoveryId,
-          prescriptionId: prescriptionId!,
-          industryCategory: mapIndustryToCategory(discovery.business.industry),
-          crisisType: deriveCrisisType(intake.priority_dimensions),
-          monthlyBudgetAud: intake.monthly_budget_aud,
-          market: 'AU',
-          businessSize: 'small',
-          prescriptionSummary: result.content.summary?.slice(0, 500) ?? null,
-          selfGradeOverall: result.self_grade.overall ?? null,
-        }).catch(err => console.warn('[prescription/generate] case save failed:', err))
-
-        // 5. 通过流发完整结果给前端
-        sendEvent({
-          type: 'done',
-          prescription_id: prescriptionId,
-          content: result.content,
-          self_grade: result.self_grade,
-          meta: result.meta,
-          trend_summary: result.trend_summary,
-        })
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
-        console.error('[huatuo/stream] failed', { prescriptionId, message })
-
-        if (prescriptionId) {
-          await supabaseAdmin
-            .from('prescriptions')
-            .update({
-              status:        'failed',
-              error_message: message,
-              progress_note: null,
-            })
-            .eq('id', prescriptionId)
-            .eq('client_id', clientId)
-        }
-        sendEvent({ type: 'error', error: message })
-      } finally {
-        clearInterval(heartbeat)
-        controller.close()
-      }
-    },
-  })
+  if (insertErr || !inserted) return { error: `创建处方草稿失败: ${insertErr?.message ?? 'unknown'}` }
+  return { id: inserted.id }
 }

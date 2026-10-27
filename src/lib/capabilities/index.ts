@@ -27,6 +27,7 @@ import {
   createBudgetMovePlanCapability,
   createSwapCreativeCapability,
 } from './ads/deferred-to-human'
+import { createConfirmationHoldCapability } from './confirmation-hold'
 
 /**
  * 装配这个进程能执行的全部能力。
@@ -55,6 +56,8 @@ export function createCapabilities(
     'ads.budget_move_plan':       createBudgetMovePlanCapability(sb),
     'ads.add_retargeting_adset':  createAddRetargetingAdsetCapability(sb),
     'ads.swap_creative':          createSwapCreativeCapability(sb),
+    // Records a human click only. The step refuses to run.
+    'governance.p0_confirmation': createConfirmationHoldCapability(sb),
   }
 }
 

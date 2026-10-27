@@ -136,6 +136,36 @@ const okUpdate: Resp = { table: 'content_work_orders', data: [{ id: 'wo-1' }], e
 const happyQueue = (clientOverrides: Record<string, unknown> = {}): Resp[] =>
   [okClient(clientOverrides), okBrief, okUpdate]
 
+describe('completeWorkOrder — 多画幅清单', () => {
+  it('把额外画幅写进现有 output，不改工单状态', async () => {
+    const { db, updates } = mockSupabase(happyQueue())
+    const r = await completeWorkOrder(db, {
+      ...PARAMS,
+      aspectOutputs: [{
+        aspect: '4:5',
+        width: 1080,
+        height: 1350,
+        path: 'renders/c-1/wo-1/final-4x5.mp4',
+        channels: ['facebook_feed'],
+        placement: 'feed',
+        role: 'variant',
+      }],
+    })
+    expect(r.ok).toBe(true)
+    const wo = updates.find((u) => u.table === 'content_work_orders')
+    const outputs = (wo!.payload.output as { aspect_outputs: Array<{ path: string }> }).aspect_outputs
+    expect(outputs[0]?.path).toBe('renders/c-1/wo-1/final-4x5.mp4')
+    expect(wo!.payload.status).toBe('in_review')
+  })
+
+  it('没要求额外画幅时不写入 aspect_outputs', async () => {
+    const { db, updates } = mockSupabase(happyQueue())
+    await completeWorkOrder(db, PARAMS)
+    const wo = updates.find((u) => u.table === 'content_work_orders')
+    expect(wo!.payload.output).not.toHaveProperty('aspect_outputs')
+  })
+})
+
 describe('completeWorkOrder — 交付落点(防管道断裂)', () => {
   it('🔴 交付成功 → 工单写 in_review,不是 rendered', async () => {
     const { db, updates } = mockSupabase(happyQueue())
@@ -575,6 +605,15 @@ describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
     const { r, m } = await run(WO as Record<string, unknown>)
     expect(r.ok).toBe(true)
     expect(savedOutput(m).content_substance).toBeUndefined()
+    expect(savedOutput(m).machine_reviewed).toBeUndefined()
+  })
+
+  it('template delivery enters the human queue marked not machine-reviewed', async () => {
+    const { r, m } = await run(woWith(ATMOS_PASS))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.status).toBe('in_review')
+    expect(savedOutput(m).machine_reviewed).toBe(false)
   })
 
   it('warn mode (default): a text-less reel still completes, with the server verdict kept for audit', async () => {

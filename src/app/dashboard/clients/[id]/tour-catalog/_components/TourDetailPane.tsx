@@ -5,6 +5,7 @@ import type { CatalogDepartureView, CatalogTourView } from './types'
 import type { PublishChange } from '@/lib/tour-catalog/publish-contract'
 import { TourEditor } from './TourEditor'
 import { DeparturesEditor } from './DeparturesEditor'
+import { CompletenessCard } from './CompletenessCard'
 import { ChangeLog } from './ChangeLog'
 import { TourSummary } from './TourSummary'
 import { TourSalesLine } from './TourSalesLine'
@@ -239,6 +240,8 @@ function TourDetail(props: TourDetailPaneProps & { tour: CatalogTourView }): JSX
       {editing ? null : <TourSalesLine clientId={clientId} tourId={tour.id} />}
 
       <UnpublishedBox changes={changes} />
+
+      {editing ? null : <CompletenessCard tour={tour} departureCount={departures.length} />}
 
       {saved && !inSync ? <SavedNotice onOpenPublish={onOpenPublish} /> : null}
 

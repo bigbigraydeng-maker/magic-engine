@@ -121,7 +121,7 @@ describe('format helpers', () => {
 
 describe('SalesProgressTable', () => {
   it('renders the three numbers and remaining text', () => {
-    render(<SalesProgressTable data={data()} />)
+    render(<SalesProgressTable clientId="c1" data={data()} />)
     expect(screen.getByText('5 人')).toBeDefined()
     expect(screen.getByText('3 人')).toBeDefined()
     expect(screen.getByText('2 人')).toBeDefined()
@@ -131,7 +131,7 @@ describe('SalesProgressTable', () => {
 
   it('shows 上限未设置 for both capacity and remaining', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row({ unit: unit({ capacity: null }), remaining: null, remainingCompanyOnly: null })],
@@ -148,7 +148,7 @@ describe('SalesProgressTable', () => {
 
   it('shows red over-capacity text and the note', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row({ remaining: -2, overBy: 2 })],
@@ -161,13 +161,13 @@ describe('SalesProgressTable', () => {
       />,
     )
     const over = screen.getByText('超订 2 人')
-    expect(over.className).toContain('text-red-700')
+    expect(over.className).toContain('text-status-rej')
     expect(screen.getByText('超订 2 人（系统不会拦截，请销售自行把关）')).toBeDefined()
   })
 
   it('shows the unfilled orders note', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row({ unfilledOrders: 3 })],
@@ -184,7 +184,7 @@ describe('SalesProgressTable', () => {
 
   it('shows the unattributed note', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row({ unattributedPeople: 6 })],
@@ -201,7 +201,7 @@ describe('SalesProgressTable', () => {
 
   it('shows the capacity note', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row({ unit: unit({ capacityNote: '加座需申请' }) })],
@@ -217,7 +217,7 @@ describe('SalesProgressTable', () => {
   })
 
   it('shows the originColumnsMissing notice', () => {
-    render(<SalesProgressTable data={data({ originColumnsMissing: true })} />)
+    render(<SalesProgressTable clientId="c1" data={data({ originColumnsMissing: true })} />)
     expect(
       screen.getByText('订单的「来源」「发票号」两列还没有在系统里启用，所有订单暂按「待核实」算。'),
     ).toBeDefined()
@@ -225,7 +225,7 @@ describe('SalesProgressTable', () => {
 
   it('shows the zero-orders notice', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [],
@@ -245,7 +245,7 @@ describe('SalesProgressTable', () => {
 
   it('shows footer lines for unattributed and closed units', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row()],
@@ -265,7 +265,7 @@ describe('SalesProgressTable', () => {
 
   it('shows invoice text and 人数未填 in the details list', () => {
     render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row({ bookings: [booking({ partySize: null })] })],
@@ -283,7 +283,7 @@ describe('SalesProgressTable', () => {
 
   it('never renders an @ or a phone-like digit run', () => {
     const { container } = render(
-      <SalesProgressTable
+      <SalesProgressTable clientId="c1"
         data={data({
           result: {
             rows: [row({ bookings: [booking()] })],
@@ -332,7 +332,7 @@ describe('一个出发日必须读成一条记录，不能被分隔线切成两�
   }
 
   it('有详情时：主行不画线，线只画在详情行下面（否则一个团被切成两条）', () => {
-    const { container } = render(<SalesProgressTable data={withDetail()} />)
+    const { container } = render(<SalesProgressTable clientId="c1" data={withDetail()} />)
     const trs = rowsOf(container)
     expect(trs).toHaveLength(2)
     expect(trs[0].className).not.toContain('border-b')
@@ -340,14 +340,14 @@ describe('一个出发日必须读成一条记录，不能被分隔线切成两�
   })
 
   it('没有详情时：这一行自己画线', () => {
-    const { container } = render(<SalesProgressTable data={data()} />)
+    const { container } = render(<SalesProgressTable clientId="c1" data={data()} />)
     const trs = rowsOf(container)
     expect(trs).toHaveLength(1)
     expect(trs[0].className).toContain('border-b')
   })
 
   it('详情行往右缩进，读起来是上一行的附注而不是新记录', () => {
-    const { container } = render(<SalesProgressTable data={withDetail()} />)
+    const { container } = render(<SalesProgressTable clientId="c1" data={withDetail()} />)
     const cell = rowsOf(container)[1].querySelector('td')
     expect(cell?.className ?? '').toContain('pl-6')
   })
@@ -355,16 +355,44 @@ describe('一个出发日必须读成一条记录，不能被分隔线切成两�
 
 describe('表头要跟格子里的内容对得上', () => {
   it('第一列写「团 · 出发日」—— 格子里是团名加日期，不只是日期', () => {
-    render(<SalesProgressTable data={data()} />)
+    render(<SalesProgressTable clientId="c1" data={data()} />)
     expect(screen.getByText('团 · 出发日')).toBeDefined()
   })
 
   it('最后一列就叫「剩余」，解释挪到表格下面的小字里', () => {
-    render(<SalesProgressTable data={data()} />)
+    render(<SalesProgressTable clientId="c1" data={data()} />)
     expect(screen.getByText('剩余')).toBeDefined()
     expect(screen.queryByText('剩余（已算上客人自述和待核实）')).toBeNull()
     const note = screen.getByText(/对外只说/)
     expect(note.textContent).toContain('剩余')
     expect(note.textContent).toContain('仅算公司确认')
+  })
+  it('shows a notice with a link to the tour catalog when departures have no capacity', () => {
+    render(
+      <SalesProgressTable
+        clientId="c1"
+        data={data({
+          result: {
+            rows: [
+              row({ unit: unit({ unitId: 'n1', label: '无上限团 · 2027-03-22', capacity: null }), remaining: null, remainingCompanyOnly: null }),
+              row({ unit: unit({ unitId: 'n2', label: '已取消团 · 2027-03-23', capacity: null, unitStatus: 'cancelled' }), remaining: null, remainingCompanyOnly: null }),
+              row(),
+            ],
+            onClosedUnits: [],
+            unattributedOrders: 0,
+            unattributedPeople: 0,
+            activeOrders: 10,
+          },
+        })}
+      />,
+    )
+    expect(screen.getByText(/有 1 个出发日还没填座位数/)).toBeDefined()
+    expect(screen.getByRole('link', { name: '去团目录' }).getAttribute('href')).toBe('/dashboard/clients/c1/tour-catalog')
+    expect(screen.getByText('无上限团 · 2027-03-22', { selector: 'li' })).toBeDefined()
+  })
+
+  it('shows no missing-capacity notice when every departure has a capacity', () => {
+    render(<SalesProgressTable clientId="c1" data={data()} />)
+    expect(screen.queryByText(/还没填座位数/)).toBeNull()
   })
 })

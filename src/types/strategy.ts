@@ -35,6 +35,7 @@ export type AwarenessSubtype =
   | 'event_campaign'
   | 'geographic_expansion'
   | 'reputation_recovery'
+  | 'personal_influence'   // 个人影响力（个人 IP：人就是品牌）
 
 /** Union of all sub-types — used as `goals.sub_type` text column. */
 export type GoalSubType = SalesSubType | AcquisitionSubType | AwarenessSubtype
@@ -122,6 +123,10 @@ export const GOAL_SUBTYPES_BY_INTENT: Record<GoalIntent, Array<{
       description: '负面事件 / 危机后口碑修复',
       default_direction: 'increase',
       example: '差评涌入后形象修复' },
+    { value: 'personal_influence', label_zh: '个人影响力', label_en: 'Personal Influence', emoji: '🎙',
+      description: '个人 IP — 让人记住这个人：粉丝增量、私信对话数、品牌名搜索量；达标线跟开方时的起点比',
+      default_direction: 'increase',
+      example: '个人账号粉丝月净增为正、互动率不低于起点' },
   ],
 }
 
@@ -251,6 +256,12 @@ export interface SupportingMetric {
   unit?: string
   baseline?: number
   target?: number
+  /**
+   * Only read when key is `deposited_seat_scope`.
+   * Lists the departures whose deposited seats fill this goal.
+   * Verdict does not use supporting metrics.
+   */
+  departures?: Array<{ depart_on: string; tour_id?: string }>
 }
 
 export interface InitiativeRow {
@@ -396,6 +407,7 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
   { key: 'brand_search_volume', label_en: 'Brand keyword search volume', label_zh: '品牌词搜索量',
     unit: 'searches/mo', measurement: 'auto',
     recommended_for: ['awareness'],
+    recommended_for_sub_types: ['personal_influence'],
     default_direction: 'increase' },
   { key: 'media_mentions', label_en: 'Media mentions', label_zh: '媒体提及次数',
     unit: 'count/mo', measurement: 'hybrid',
@@ -417,7 +429,14 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
   { key: 'social_followers_growth', label_en: 'Social followers growth', label_zh: '社媒粉丝增量',
     unit: 'count/mo', measurement: 'auto',
     recommended_for: ['awareness'],
+    recommended_for_sub_types: ['personal_influence'],
     default_direction: 'increase' },
+  { key: 'dm_conversations', label_en: 'Direct message conversations', label_zh: '私信对话数',
+    unit: 'count/mo', measurement: 'self_report',
+    recommended_for: ['awareness'],
+    recommended_for_sub_types: ['personal_influence'],
+    default_direction: 'increase',
+    note: '个人 IP 主指标；达标线跟开方时的起点比，不写具体数字' },
   { key: 'organic_traffic', label_en: 'Organic traffic', label_zh: '自然流量',
     unit: 'sessions/mo', measurement: 'auto',
     recommended_for: ['awareness', 'acquisition'],

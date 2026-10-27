@@ -40,6 +40,12 @@ export interface ContactRow {
   pinned_at: string | null
   important_note: string | null
   important_due_at: string | null
+  /**
+   * 这条线索当前分给谁跟进 —— `client_portal_users.email` 字面值，null = 还没人管。
+   * 2026-10-26 part 2 加字段 + round-robin 自动分配进来；part 3 这里把它向列表 /
+   * 抽屉透出来，让员工看得见 + 改得动（issue #3158）。
+   */
+  assigned_to: string | null
 }
 
 export interface TouchRow {
@@ -160,12 +166,17 @@ export function responseRowFor(
        */
       suggestedChannel: seg.suggestedChannel,
       reason: seg.reason,
+      // 回头客：同一份判据算出来的，原样带出去，列表标小标签、抽屉顶部画横幅都读它。
+      returning: seg.returning ?? null,
       /**
        * 「该做什么」—— 三套状态（阶段 / 冷热 / 意向）合成的那一个概念（PM 2026-10-10）。
        * 列表只画这一行；stage / segment 字段仍返回，抽屉和筛选还在用。
        */
       nextAction: nextActionFor({ seg, intent: brief?.intent ?? null, aiNextAction: brief?.nextAction ?? null }),
       intent: brief?.intent ?? null,
+      // 跟进人（issue #3158 第二刀 part 3）：null = 未分配。前端据此在列表 /
+      // 抽屉里显示「跟进人」一列和下拉；跟 `assigned_to` 列同一个值，不作转换。
+      assignedTo: c.assigned_to,
       custom,
     },
   }

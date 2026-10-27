@@ -308,6 +308,7 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
       source: 'meta_lead_form',
       seenAt: lead.createdTime,
       attribution,
+      autoAssign: true,
     })
 
     // ── 触点 Phase A：**在任何 Mailchimp 调用之前**先 create-if-not-exists 一条

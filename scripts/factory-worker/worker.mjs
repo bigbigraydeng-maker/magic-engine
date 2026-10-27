@@ -50,6 +50,7 @@ import {
   resolveEngine,
 } from './remotion-branch.mjs'
 import { MusicVocalGateError, assertBgmFileVocalClear, assertLegacyBgmVocalGate } from './music-vocal-gate.mjs'
+import { pingRenderWorker, watchRenderWorker } from './render-worker-watch.mjs'
 
 // ── 配置 ──────────────────────────────────────────────────────────────────────
 
@@ -1052,14 +1053,25 @@ function loadMusicLibrary() {
 // 尽力而为——失败只记一行日志、有 10 秒超时，不会卡住领单。
 const PING_EVERY_MS = 4 * 60_000
 let lastPingAt = 0
-export async function pingAlive(fetchFn = fetch, now = Date.now()) {
+function defaultRenderWatch() {
+  try {
+    return watchRenderWorker(checkRemotionHealth())
+  } catch {
+    return watchRenderWorker(undefined)
+  }
+}
+
+export async function pingAlive(fetchFn = fetch, now = Date.now(), watch = undefined) {
   if (now - lastPingAt < PING_EVERY_MS) return false
   lastPingAt = now
   try {
     const res = await fetchFn(`${API_BASE}/api/factory/worker/ping`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${WORKER_TOKEN}` },
-      body: JSON.stringify(buildClaimBody(WORKER_ID, TARGET_CLIENT_ID)),
+      body: JSON.stringify({
+        ...buildClaimBody(WORKER_ID, TARGET_CLIENT_ID),
+        render_worker: pingRenderWorker(watch ?? defaultRenderWatch()),
+      }),
       signal: AbortSignal.timeout(10_000),
     })
     if (!res.ok) log(`存活信号发送失败 status=${res.status}`)

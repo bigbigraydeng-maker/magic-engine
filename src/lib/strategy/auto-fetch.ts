@@ -45,6 +45,8 @@ import {
 } from '@/lib/industry-ai-visibility/snapshot-conclusive'
 import { resolveIndustryCode, matchAliases } from './industry-mapping'
 import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
+import type { SeatDeparture } from '@/lib/crm/sales-progress/deposited-seats'
+import { fetchDepositedSeatProgress } from '@/lib/strategy/deposited-seat-fetch'
 
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
@@ -68,6 +70,15 @@ export interface AutoFetchOptions {
    *    fails for every goal of that client.
    */
   goalPeriod?: GoalPeriod
+  /**
+   * When set on a signups_count goal, count deposited seats on these
+   * departures instead of purchase rows. Absent = the original deal count.
+   */
+  depositedSeatScope?: readonly SeatDeparture[]
+  /** goals.created_at. The later of its NZ day and period_start is the cutoff. */
+  goalCreatedAt?: string | null
+  /** goals.baseline_value. New seats are published only when this is 0. */
+  baselineValue?: unknown
   /**
    * Clock for clamping a dated leads_count window to today.
    * Defaults to the current time. Tests pass a fixed instant.
@@ -110,6 +121,16 @@ export async function autoFetchMetricValue(
     // 🔴 「报名/预订数」是真成交，不是广告留资。WP0 一度把它接到 fetchAdsOutcome('lead')
     //    上——那会让「33 个报名」的目标拿留资数去填，数字看着漂亮但名不符实。
     case 'signups_count':
+      // A goal that lists departures wants seats, not deal rows.
+      // Goals without that list keep the purchase-row count.
+      if (options.depositedSeatScope) {
+        return fetchDepositedSeatProgress(supabase, clientId, {
+          depositedSeatScope: options.depositedSeatScope,
+          goalPeriod,
+          goalCreatedAt: options.goalCreatedAt,
+          baselineValue: options.baselineValue,
+        })
+      }
       return fetchBookings(supabase, clientId, goalPeriod)
     case 'messaging_started':
       return fetchAdsOutcome(supabase, clientId, 'messaging_started', goalPeriod)

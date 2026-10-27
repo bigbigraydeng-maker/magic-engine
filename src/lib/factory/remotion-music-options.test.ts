@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { remotionMusicChoices, replaceRemotionMusic } from './remotion-music-options.mjs'
+import { remotionMusicChoices, remotionMusicClearance, replaceRemotionMusic } from './remotion-music-options.mjs'
 
 const postcardBrief = (timing = { hookSec: 3, sceneSec: 3, priceSec: 3 }) => ({
   template: 'postcard',
@@ -54,3 +54,43 @@ describe('Remotion music choices', () => {
     expect(updated?.choice.id).toBe('jade-river-journey')
   })
 })
+
+describe('Remotion music clearance', () => {
+  it('passes a human-cleared track that covers this render', () => {
+    expect(remotionMusicClearance(postcardBrief())).toMatchObject({
+      verdict: 'pass',
+      track_id: 'founders-at-dawn',
+    })
+  })
+
+  it('fails a track that is not in the catalog', () => {
+    const brief = postcardBrief()
+    brief.props.musicFile = 'not-a-track.mp3'
+    expect(remotionMusicClearance(brief).verdict).toBe('fail')
+  })
+
+  it('is unreadable when the brief has no music file', () => {
+    const brief = postcardBrief()
+    brief.props.musicFile = ''
+    expect(remotionMusicClearance(brief)).toMatchObject({ verdict: 'unreadable', reason: '读不到' })
+  })
+
+  it('fails a track whose clean window does not cover the render', () => {
+    const brief = postcardBrief()
+    brief.props.musicFile = 'pipa-trap.m4a'
+    expect(remotionMusicClearance(brief).verdict).toBe('fail')
+  })
+})
+
+describe('Remotion music swap and musicGain', () => {
+  it('drops musicGain when the track is replaced (the gain was calibrated for the old track)', () => {
+    const brief = postcardBrief()
+    ;(brief.props as Record<string, unknown>).musicGain = 1.9
+    const swapped = replaceRemotionMusic(brief, 'jade-river-journey')
+    expect(swapped).not.toBeNull()
+    const props = swapped!.remotion.props as Record<string, unknown>
+    expect(props).not.toHaveProperty('musicGain')
+    expect(props.musicFile).not.toBe('founders-at-dawn.mp3')
+  })
+})
+

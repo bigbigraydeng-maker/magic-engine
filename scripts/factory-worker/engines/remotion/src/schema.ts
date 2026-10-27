@@ -23,6 +23,17 @@ export const LOGO_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 /** Exactly 6 hex digits with a leading #. */
 export const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 
+/**
+ * Optional music gain multiplier. Default 1 (no boost). The 2.5 cap is an engineering limit, not a safe value:
+ * the gain is calibrated per track by measuring the render (one real track already reached -1.6 dBFS true peak at 1.9).
+ */
+export const musicGainSchema = z
+  .number()
+  .finite()
+  .min(1, { message: '音乐增益必须在 1 到 2.5 之间' })
+  .max(2.5, { message: '音乐增益必须在 1 到 2.5 之间' })
+  .optional();
+
 const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f]*$/;
 
 /** Build a validator for a safe relative file name with an allowed extension. */
@@ -86,6 +97,33 @@ const PRICE = z
   })
   .strict();
 
+const frameHookSpec = z
+  .object({
+    style: z.enum(['kinetic', 'stat', 'question'], {
+      message: '钩子样式只能是 kinetic、stat 或 question',
+    }).optional(),
+    text: text(80).optional(),
+    stat: text(16).optional(),
+    question: text(90).optional(),
+  })
+  .strict();
+
+const frameEndSpec = z
+  .object({
+    cta: text(48).optional(),
+    contact: text(80).optional(),
+    brandName: text(40).optional(),
+  })
+  .strict();
+
+/** Optional opening-hook and end-card switch. Omitted fields keep each template's own default. */
+export const frameSchema = z
+  .object({
+    hook: z.union([z.literal(false), frameHookSpec]).optional(),
+    endCard: z.union([z.literal(false), frameEndSpec]).optional(),
+  })
+  .strict();
+
 /** Schema for the generic "what's included" checklist video template props. */
 export const ListReelPropsSchema = z
   .object({
@@ -110,6 +148,7 @@ export const ListReelPropsSchema = z
       .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
+    musicGain: musicGainSchema,
     beats: z.array(z.number().finite().min(0).max(120)).max(80),
     hook: z
       .object({
@@ -126,6 +165,7 @@ export const ListReelPropsSchema = z
     revealTitle: text(40),
     revealTitleSize: z.number().int().min(36, { message: '片尾标题字号必须在 36 到 60 之间' }).max(60, { message: '片尾标题字号必须在 36 到 60 之间' }).optional(),
     price: PRICE,
+    frame: frameSchema.optional(),
   })
   .strict()
   .superRefine((val, ctx) => {

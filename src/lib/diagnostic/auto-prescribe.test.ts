@@ -251,6 +251,13 @@ describe('buildIntake —— 一项都不许编，跟目标走的每次重算', 
     expect(intake.notes).toContain('目标自带预算')
   })
 
+  it('目标币种是 NZD 时，备注和字段都写 NZD，不写成 AUD', () => {
+    const intake = buildIntake(goal({ budget_amount: 3000, budget_currency: 'NZD' }), { seo: 1 }, prior, NOW)
+    expect(intake.budget_currency).toBe('NZD')
+    expect(intake.notes).toContain('NZD')
+    expect(intake.notes).not.toContain('AUD')
+  })
+
   it('🔴 目标没填预算 → 记 0，哪怕上一份口径里写着 3000 也不许拿来用', () => {
     // 生产库实测：CTS / Oztop **全部** 7 个进行中目标的预算字段都是空的，
     // 所以「目标没填就沿用上一份」不是边角情况，是每周必走 ——

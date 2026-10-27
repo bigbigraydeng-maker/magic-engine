@@ -37,7 +37,7 @@ import { expireStaleDrafts } from '@/lib/blog/draft-expiry'
 import { runIndexCheckBatch } from '@/lib/seo-patrol/index-check'
 import { syncPrOpenPosts } from '@/lib/blog/pr-sync'
 import { syncPageUpgradePullRequests } from '@/lib/cms/page-upgrade-pr-sync'
-import { supersedeStaleZhugeCards } from '@/lib/zhuge/card-expiry'
+import { closeStaleInProgressCards, supersedeStaleZhugeCards } from '@/lib/zhuge/card-expiry'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -105,20 +105,28 @@ export async function GET(
       | {
           drafts_expired: number
           cards_superseded: number
+          // 单独一格：清理失败只在这里报，不拖垮上面其它卫生项。
+          stale_in_progress: { closed: number; days: number } | { error: string }
           pr_sync: { checked: number; published: number; rejected: number; errors: number }
           page_upgrade_pr_sync: { checked: number; live: number; rejected: number; errors: number }
         }
       | { error: string }
     try {
-      const [drafts, cards, prSync, pageUpgradePrSync] = await Promise.all([
+      const [drafts, cards, staleInProgress, prSync, pageUpgradePrSync] = await Promise.all([
         expireStaleDrafts(supabaseAdmin),
         supersedeStaleZhugeCards(supabaseAdmin),
+        closeStaleInProgressCards(supabaseAdmin).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err)
+          console.error('[seo-patrol/cron] stale in_progress close failed (non-blocking):', message)
+          return { error: message }
+        }),
         syncPrOpenPosts(supabaseAdmin),
         syncPageUpgradePullRequests(supabaseAdmin),
       ])
       hygiene = {
         drafts_expired: drafts.expired,
         cards_superseded: cards.superseded,
+        stale_in_progress: staleInProgress,
         pr_sync: prSync,
         page_upgrade_pr_sync: pageUpgradePrSync,
       }

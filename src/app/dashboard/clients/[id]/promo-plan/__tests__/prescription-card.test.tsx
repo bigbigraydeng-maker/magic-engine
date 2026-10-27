@@ -1,10 +1,20 @@
 import React from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import { PrescriptionCard } from '../_components/PrescriptionCard'
 
-afterEach(cleanup)
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: false,
+    json: async () => ({}),
+  }))
+})
+
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 function view(over: Partial<GoalPrescriptionView> = {}): GoalPrescriptionView {
   return {
@@ -30,10 +40,11 @@ function view(over: Partial<GoalPrescriptionView> = {}): GoalPrescriptionView {
 }
 
 describe('处方卡', () => {
-  it('用四段大白话讲清楚，规矩默认收起，没有写入按钮', () => {
+  it('用四段大白话讲清楚，规矩默认收起，没有写入按钮', async () => {
     const { container } = render(
       <PrescriptionCard clientId="client-1" prescription={view()} today="2026-10-01" />,
     )
+    expect(await screen.findByText('读不到')).toBeTruthy()
     expect(screen.getByRole('heading', { name: '处方' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '这周做什么' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: '为什么' })).toBeTruthy()
@@ -57,13 +68,21 @@ describe('处方卡', () => {
     expect(screen.getByRole('link', { name: '去处方页查看' }).getAttribute('href'))
       .toBe('/dashboard/clients/client-1/prescription/new?goal_id=goal-1')
     expect(container.querySelectorAll('button')).toHaveLength(0)
-    expect(container.textContent).not.toMatch(/批准/)
+    // 计划草稿建议面板里有一句「批准这份处方不等于批准花这些钱」的免责提示，不是批准入口；
+    // 其余部分仍然不许出现「批准」。
+    const withoutSeedPanel = container.cloneNode(true) as HTMLElement
+    withoutSeedPanel.querySelector('[data-plan-seed-panel]')?.remove()
+    expect(withoutSeedPanel.textContent).not.toMatch(/批准/)
+    const seedPanel = container.querySelector('[data-plan-seed-panel]')
+    expect(seedPanel).not.toBeNull()
+    expect(seedPanel?.textContent).toContain('批准这份处方不等于批准花这些钱')
+    expect(seedPanel?.querySelectorAll('a')).toHaveLength(0)
     expect(container.textContent).not.toMatch(/\{/)
     expect(container.textContent).not.toMatch(/阶段/)
     expect(container.textContent).not.toMatch(/AUD/)
   })
 
-  it('没写下的原因、花费和起算日留空，不填默认币种', () => {
+  it('没写下的原因、花费和起算日留空，不填默认币种', async () => {
     const { container } = render(<PrescriptionCard clientId="client-1" prescription={view({
       prescriber: null,
       currency: null,
@@ -74,6 +93,7 @@ describe('处方卡', () => {
       spend: { daily: null, total: null, pacing: null },
       review_anchor: null,
     })} today="2026-10-01" />)
+    expect(await screen.findByText('读不到')).toBeTruthy()
     expect(screen.getByText('开方人：未填写')).toBeTruthy()
     expect(screen.getByText('这份处方没有单独列出要做的事。')).toBeTruthy()
     expect(screen.getByText('这份处方没有写下原因。')).toBeTruthy()
@@ -84,5 +104,26 @@ describe('处方卡', () => {
       .toBe('/dashboard/clients/client-1/prescription/new')
     expect(container.textContent).not.toMatch(/AUD/)
     expect(container.textContent).not.toMatch(/NZD/)
+  })
+
+  it('开投之后写出达标、没达标和还不知道，读不到就写不知道', () => {
+    const { container } = render(<PrescriptionCard clientId="client-1" prescription={view({
+      launch_check: {
+        lines: [
+          '24 小时：还不知道。开投后还没满 24 小时。',
+          '48 小时：不知道。开投后还没有这一条广告的每日花费和线索。',
+          '第 7 天：没达标。线索 3 条，目标 10 条。',
+          '第 14 天：达标。线索 12 条，目标 10 条。',
+        ],
+      },
+    })} today="2026-10-01" />)
+    expect(screen.getByRole('heading', { name: '开投之后' })).toBeTruthy()
+    expect(screen.getByText('24 小时：还不知道。开投后还没满 24 小时。')).toBeTruthy()
+    expect(screen.getByText('48 小时：不知道。开投后还没有这一条广告的每日花费和线索。')).toBeTruthy()
+    expect(screen.getByText('第 7 天：没达标。线索 3 条，目标 10 条。')).toBeTruthy()
+    expect(screen.getByText('第 14 天：达标。线索 12 条，目标 10 条。')).toBeTruthy()
+    const withoutSeedPanel = container.cloneNode(true) as HTMLElement
+    withoutSeedPanel.querySelector('[data-plan-seed-panel]')?.remove()
+    expect(withoutSeedPanel.textContent).not.toMatch(/批准/)
   })
 })

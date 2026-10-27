@@ -29,6 +29,8 @@ export default defineConfig({
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
     },
     setupFiles: [],
+    // Vitest 3.2.4 没有按条过滤。globalSetup 只放过精确的 onTaskUpdate 超时。
+    globalSetup: [path.join(ROOT, 'src/lib/kernel/__tests__/architecture-global-setup.ts')],
     passWithNoTests: false,
     allowOnly: false,
   },

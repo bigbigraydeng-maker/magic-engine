@@ -6,6 +6,8 @@ import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-presc
 import type { StoredSpend } from '@/lib/marketing-plan/promo/prescription-copy'
 import { describeReview } from '@/lib/marketing-plan/promo/prescription-copy'
 import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
+import { ChainProgress } from '@/components/prescription/ChainProgress'
+import { PlanSeedPanel } from '../../_components/plan-seed/PlanSeedPanel'
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -37,6 +39,11 @@ function SpendBlock({ spend }: { spend: StoredSpend }) {
   )
 }
 
+function launchLines(prescription: GoalPrescriptionView): string[] {
+  const lines = prescription.launch_check?.lines ?? []
+  return lines.length === 0 ? ['还没对上已开投的广告，所以还不知道。'] : lines
+}
+
 function prescriptionHref(clientId: string, goalId: string): string {
   const base = `/dashboard/clients/${clientId}/prescription/new`
   return goalId.trim() === '' ? base : `${base}?goal_id=${encodeURIComponent(goalId)}`
@@ -60,6 +67,7 @@ export function PrescriptionCard({
         <p className="text-xs text-gray-500">v{prescription.version} · {prescription.status_label}</p>
         <Link href={prescriptionHref(clientId, prescription.goal_id)} className="ml-auto text-xs text-indigo-600 hover:underline">去处方页查看</Link>
       </div>
+      <ChainProgress clientId={clientId} prescriptionId={prescription.id} />
       <p className="mt-1 text-xs text-gray-600">开方人：{prescription.prescriber ?? '未填写'}</p>
       <Section title="这周做什么">
         <ItemList items={prescription.todos} empty="这份处方没有单独列出要做的事。" ordered />
@@ -77,12 +85,16 @@ export function PrescriptionCard({
         {review.day14 && <p>第 14 天：{review.day14}</p>}
         <p>{review.note}</p>
       </Section>
+      <Section title="开投之后">
+        {launchLines(prescription).map((sentence, index) => <p key={`${index}:${sentence}`}>{sentence}</p>)}
+      </Section>
       <details className="mt-4 rounded-lg border border-gray-200 px-3 py-2">
         <summary className="cursor-pointer text-sm font-semibold text-gray-900">规矩</summary>
         <div className="mt-2 text-sm leading-6 text-gray-800">
           <ItemList items={prescription.rules} empty="没有单独的规矩。" ordered={false} />
         </div>
       </details>
+      <PlanSeedPanel clientId={clientId} prescriptionId={prescription.id} />
     </section>
   )
 }

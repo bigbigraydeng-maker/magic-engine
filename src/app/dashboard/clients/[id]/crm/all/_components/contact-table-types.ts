@@ -46,6 +46,22 @@ export interface ContactRow {
   custom: Record<string, string | null>
   /** 他最早是从哪个渠道进来的（messenger / email / whatsapp / phone / fb_form / web_form），最多一项；列表在名字旁画小标签。 */
   sources?: string[]
+  /**
+   * 「回头客」：之前咨询过、我们联系过，今天又填了一张咨询表（强意向）。
+   * 判据只有一份（`lib/crm/returning-lead`），列表排序、抽屉顶部的横幅都读它。null / 缺省 = 不是。
+   */
+  returning?: {
+    firstEnquiryAt: string
+    latestFormAt: string
+    ourLastContactAt: string
+    ourContacts: number
+    earlierForms: number
+  } | null
+  /**
+   * 这条线索当前分给谁跟进（`client_portal_users.email`）。null = 未分配。
+   * part 2 的 round-robin 自动写入；part 3 UI 让人手动改（issue #3158）。
+   */
+  assignedTo: string | null
 }
 
 export interface CustomColumnMeta {

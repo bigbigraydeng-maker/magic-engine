@@ -14,7 +14,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ContactTimeline, stageSourceOf, type TimelineEntry } from '../ContactTimeline'
 
 const touch = (over: Partial<TimelineEntry> = {}): TimelineEntry => ({
@@ -543,5 +543,49 @@ describe('刚拨出、整理中的电话 —— 页面要立刻看得出「打�
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', () => {
+  const drawCollapsible = (props: { refreshKey?: number } = {}) =>
+    render(<ContactTimeline clientId="cts" contactId="c1" collapsible {...props} />)
+
+  it('默认只显示一行「看完整往来原文（N 条）」，不铺原文', async () => {
+    mockTimeline([touch({ summary: '第一通电话' }), touch({ summary: '第二通电话', at: '2026-08-11T00:00:00Z' })])
+    drawCollapsible()
+    await waitFor(() => expect(screen.getByText(/看完整往来原文（2 条）/)).toBeTruthy())
+    expect(screen.queryByText('第一通电话')).toBeNull()
+  })
+
+  it('点开铺出原文，再点「收起往来原文」回到一行', async () => {
+    mockTimeline([touch({ summary: '第一通电话' })])
+    drawCollapsible()
+    fireEvent.click(await screen.findByText(/看完整往来原文/))
+    expect(screen.getByText('第一通电话')).toBeTruthy()
+    fireEvent.click(screen.getByText(/收起往来原文/))
+    expect(screen.queryByText('第一通电话')).toBeNull()
+    expect(screen.getByText(/看完整往来原文/)).toBeTruthy()
+  })
+
+  it('🔴 展开后 refreshKey 变了（回了一条消息）→ 重新取数，且仍保持展开', async () => {
+    mockTimeline([touch({ summary: '旧的一条' })])
+    const view = drawCollapsible({ refreshKey: 0 })
+    fireEvent.click(await screen.findByText(/看完整往来原文/))
+    expect(screen.getByText('旧的一条')).toBeTruthy()
+
+    // 发完消息后服务端多了一条
+    mockTimeline([touch({ summary: '旧的一条' }), touch({ summary: '刚发的一条', at: '2026-08-12T00:00:00Z' })])
+    view.rerender(<ContactTimeline clientId="cts" contactId="c1" collapsible refreshKey={1} />)
+
+    await waitFor(() => expect(screen.getByText('刚发的一条')).toBeTruthy())
+    // 没缩回「看完整往来原文」那一行
+    expect(screen.queryByText(/看完整往来原文/)).toBeNull()
+  })
+
+  it('不传 collapsible → 照旧整条铺开（其它页面不受影响）', async () => {
+    mockTimeline([touch({ summary: '直接铺开' })])
+    draw()
+    await waitFor(() => expect(screen.getByText('直接铺开')).toBeTruthy())
+    expect(screen.queryByText(/看完整往来原文/)).toBeNull()
   })
 })

@@ -73,6 +73,19 @@ describe('describeLiveAds', () => {
     expect(describeLiveAds(stale)?.text).toContain('已 5 天没更新')
     expect(describeLiveAds(ok(summarizeLiveAds({ adsets: [], today: '2026-10-20', snapshotAgeHours: 0 })))).toBeNull()
   })
+  it('没有账户名称时不把 act_ 编号写出来', () => {
+    const f = summarizeLiveAds({
+      adsets: [adset('a', 'act_42')],
+      accountInsights: { act_42: { last_day: '2026-10-20', spend_2d: 10 } },
+      accountFacts: { act_42: { currency: 'NZD', status_code: 1 } },
+      today: '2026-10-20',
+      snapshotAgeHours: 0,
+    })
+    const text = describeLiveAds(f)?.text ?? ''
+    expect(text).not.toMatch(/act_\d/)
+    expect(text).toContain('已绑定的广告账户')
+    expect(text).toContain('NZ$10.00')
+  })
   it('读不到 / null → 不出提示', () => {
     expect(describeLiveAds(null)).toBeNull()
     expect(describeLiveAds({ ok: false, reason: 'x' })).toBeNull()

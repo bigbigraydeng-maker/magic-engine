@@ -12,7 +12,7 @@
  * inputs that look editable would let a save overwrite real values with blanks.
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
 type AutonomyMode = 'observe' | 'bounded_auto'
@@ -22,6 +22,13 @@ interface CreativePoolEntry {
   ref: string
   status: string
   approved_by?: string | null
+  alias_refs?: string[]
+}
+
+function videoNumber(entry: CreativePoolEntry): string {
+  const alias = entry.alias_refs?.find((id) => /^\d+$/.test(id))
+  if (entry.kind === 'work_order' && alias) return alias
+  return entry.ref
 }
 
 /** 自动流程状态的中文名（spec 2026-10-21 §2）。candidate / approved 不走这里。 */
@@ -87,6 +94,8 @@ interface ConfigResponse {
 interface AccountCapRow {
   ad_account_id: string
   daily_budget_cap_cents: number | null
+  /** 缺省当「显示」。只有明确 true 才是藏起来。 */
+  hidden_from_ad_health?: boolean | null
 }
 
 interface AccountCapsResponse {
@@ -101,10 +110,14 @@ function CapField({
   draftCap,
   currentCap,
   onChange,
+  onSave,
+  saving,
 }: {
   draftCap: string
   currentCap: number | null
   onChange: (v: string) => void
+  onSave: () => void
+  saving: boolean
 }) {
   return (
     <div>
@@ -119,6 +132,15 @@ function CapField({
           placeholder="未设"
           className="w-40 rounded-lg border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
         />
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onSave}
+          data-testid="save-total-cap"
+          className="rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+        >
+          {saving ? '保存中…' : '保存上限'}
+        </button>
         <span className="text-xs text-gray-400">$ / 天（按广告账户的币种）</span>
       </div>
       <p className="mt-1 text-xs text-gray-400">广告自动化每天最多花这么多钱。留空 = 没设上限，这时系统只看不动钱。</p>
@@ -172,7 +194,8 @@ function ModeField({
 }
 
 function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeLabel | undefined }) {
-  const fbUrl = label?.url ?? (entry.kind === 'meta_video' ? `https://www.facebook.com/reel/${entry.ref}` : null)
+  const number = videoNumber(entry)
+  const fbUrl = label?.url ?? (/^\d+$/.test(number) ? `https://www.facebook.com/reel/${number}` : null)
   return (
     <div className="min-w-0">
       <p className="truncate text-gray-800">
@@ -180,7 +203,7 @@ function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeL
         {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
       </p>
       <p className="text-xs text-gray-400">
-        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{entry.ref}</span>
+        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{number}</span>
         {fbUrl && (
           <>
             {' '}·{' '}
@@ -296,18 +319,59 @@ function clearConfirmText(accountCount: number, totalCap: number | null): string
   return '清空后这个账户将不允许自动动钱（这个客户绑了 2 个及以上账户时的规则）。确定清空吗？'
 }
 
+/** 关掉显示 = 心跳整户跳过这个账户（超支提醒不响），所以和清空上限一样要二次确认；打开方向不拦。 */
+const HIDE_CONFIRM_TEXT =
+  '关掉后这个账户整户跳过心跳、超支提醒不会响、广告健康页也不再列它。确定关掉吗？'
+
+function HealthPageSwitch({
+  shown,
+  busy,
+  onChange,
+}: {
+  shown: boolean
+  busy: boolean
+  onChange: (shown: boolean) => void
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-gray-700">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={shown}
+        aria-label="在广告健康页显示"
+        disabled={busy}
+        onClick={() => onChange(!shown)}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition disabled:opacity-50 ${
+          shown ? 'bg-gray-800' : 'bg-gray-300'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${
+            shown ? 'translate-x-4' : 'translate-x-0.5'
+          }`}
+        />
+      </button>
+      在广告健康页显示
+    </label>
+  )
+}
+
 function AccountCapRowEditor({
   row,
   draft,
   busy,
+  visibilityBusy,
   onDraftChange,
   onSave,
+  onShownChange,
 }: {
   row: AccountCapRow
   draft: string
   busy: boolean
+  visibilityBusy: boolean
   onDraftChange: (v: string) => void
   onSave: () => void
+  onShownChange: (shown: boolean) => void
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -335,6 +399,7 @@ function AccountCapRowEditor({
           {row.daily_budget_cap_cents == null ? '未设' : `$${centsToDisplay(row.daily_budget_cap_cents)} / 天`}
         </span>
       </span>
+      <HealthPageSwitch shown={row.hidden_from_ad_health !== true} busy={visibilityBusy} onChange={onShownChange} />
     </div>
   )
 }
@@ -342,6 +407,10 @@ function AccountCapRowEditor({
 /** 留空（null）是合法的「清空」；NaN 或 <= 0 不是。 */
 function capDraftIsUsable(parsed: number | null): boolean {
   return !Number.isNaN(parsed) && (parsed === null || parsed > 0)
+}
+
+function flagVisibility(row: AccountCapRow): AccountCapRow {
+  return { ...row, hidden_from_ad_health: row.hidden_from_ad_health === true }
 }
 
 async function fetchAccountCaps(clientId: string): Promise<AccountCapsResponse> {
@@ -364,7 +433,7 @@ function useAccountCaps(clientId: string) {
     fetchAccountCaps(clientId)
       .then(j => {
         if (!alive) return
-        const list = j.accounts ?? []
+        const list = (j.accounts ?? []).map(flagVisibility)
         setRows(list)
         setTotalCap(j.client_total_cap_cents ?? null)
         setDrafts(Object.fromEntries(list.map(r => [r.ad_account_id, centsToDisplay(r.daily_budget_cap_cents)])))
@@ -404,12 +473,56 @@ function useAccountCaps(clientId: string) {
     }
   }
 
-  return { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save }
+  return { rows, setRows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save }
+}
+
+/** 开关先跟着点的方向走，接口回来后再改成它返回的结果；失败则弹回并显示原文。 */
+function useHealthVisibility(
+  clientId: string,
+  setRows: React.Dispatch<React.SetStateAction<AccountCapRow[] | null>>,
+) {
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const inflight = useRef<string | null>(null)
+
+  const setShown = async (adAccountId: string, shown: boolean, previousHidden: boolean) => {
+    if (inflight.current !== null) return
+    if (!shown && !window.confirm(HIDE_CONFIRM_TEXT)) return
+    inflight.current = adAccountId
+    setError(null)
+    setBusyId(adAccountId)
+    setRows(prev => prev?.map(r => (
+      r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: !shown } : r
+    )) ?? prev)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-accounts/${adAccountId}/visibility`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden_from_ad_health: !shown }),
+      })
+      const json = (await res.json()) as { hidden_from_ad_health?: boolean; error?: string }
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      const hidden = json.hidden_from_ad_health === true
+      setRows(prev => prev?.map(r => (
+        r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: hidden } : r
+      )) ?? prev)
+    } catch (err) {
+      setRows(prev => prev?.map(r => (
+        r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: previousHidden } : r
+      )) ?? prev)
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      inflight.current = null
+      setBusyId(null)
+    }
+  }
+
+  return { visibilityBusyId: busyId, visibilityError: error, setShown }
 }
 
 function AccountCapList({ clientId }: { clientId: string }) {
-  const { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save } = useAccountCaps(clientId)
-
+  const { rows, setRows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save } = useAccountCaps(clientId)
+  const { visibilityBusyId, visibilityError, setShown } = useHealthVisibility(clientId, setRows)
   if (loadFailed) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -434,11 +547,15 @@ function AccountCapList({ clientId }: { clientId: string }) {
           row={row}
           draft={drafts[row.ad_account_id] ?? ''}
           busy={busyId !== null}
+          visibilityBusy={visibilityBusyId !== null}
           onDraftChange={v => setDrafts(prev => ({ ...prev, [row.ad_account_id]: v }))}
           onSave={() => void save(row.ad_account_id)}
+          onShownChange={shown => void setShown(row.ad_account_id, shown, row.hidden_from_ad_health === true)}
         />
       ))}
       {message && <p className="text-xs text-gray-500">{message}</p>}
+      {visibilityError && <p className="text-xs text-red-600">{visibilityError}</p>}
+      <p className="text-xs text-gray-400">关掉「在广告健康页显示」后，广告健康页不再列出这个账户，超支提醒也不会盯着它。打开后从下一次心跳 / 明早体检起生效；今日实时面板最多一分钟后更新。</p>
       <p className="text-xs text-gray-400">
         客户总闸：
         <span className="tabular-nums text-gray-600">
@@ -539,6 +656,37 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
   const existingRefs = new Set(config.creative_pool.map(e => e.ref))
   const freshRefs = [...new Set(newRefs)].filter(r => !existingRefs.has(r))
 
+  // 单独保存客户总闸：和账户级保存按钮体验一致，用户改完数字可以直接存，不用滚到最底部。
+  // 只 PATCH daily_budget_cap_cents，不动模式、不动素材池；expected_version 也不带（这个字段只在素材池并发时才有意义）。
+  const saveTotalCap = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const parsedCap = displayToCents(draftCap)
+      if (parsedCap !== null && (!Number.isInteger(parsedCap) || parsedCap <= 0)) {
+        setMessage('每天上限要填大于 0 的金额')
+        return
+      }
+      if (parsedCap === config.daily_budget_cap_cents) {
+        setMessage('没有改动')
+        return
+      }
+      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daily_budget_cap_cents: parsedCap }),
+      })
+      const json = (await res.json()) as ConfigResponse
+      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
+      applyConfig(json.config, json.version)
+      setMessage('已保存')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const save = async () => {
     setSaving(true)
     setMessage(null)
@@ -631,7 +779,13 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
           </Link>
         </div>
 
-        <CapField draftCap={draftCap} currentCap={config.daily_budget_cap_cents} onChange={setDraftCap} />
+        <CapField
+          draftCap={draftCap}
+          currentCap={config.daily_budget_cap_cents}
+          onChange={setDraftCap}
+          onSave={saveTotalCap}
+          saving={saving}
+        />
 
         <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
 

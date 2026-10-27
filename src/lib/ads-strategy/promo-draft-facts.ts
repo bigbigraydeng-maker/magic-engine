@@ -18,14 +18,14 @@ import { D4_AUDIENCE_FLOOR } from './portfolio/diagnostics/thresholds'
 import { computeLaunchHeadroom } from './launch-budget-headroom'
 import { DELIVERING_STATUSES } from './portfolio/diagnostics/context'
 import type { EntitySnapshotRow } from './portfolio/snapshot'
-import type { AdsDraftFacts, HeadroomFact, DailySpendFact, AudiencePoolItem } from '@/lib/marketing-plan/promo/draft-ads'
+import type { AdsDraftFacts, HeadroomFact, DailySpendFact, AudiencePoolItem, CreativePoolFact } from '@/lib/marketing-plan/promo/draft-ads'
 import type { PromoPlaybook } from '@/lib/marketing-plan/promo/playbooks'
 
 /** 起草器读数的原始输入；每个「读失败」用 null 或 *_read_failed 表示，不用 0 冒充。 */
 export interface RawDraftInput {
   now: Date
   /** 广告设置；读失败传 null */
-  config: { daily_budget_cap_cents: number | null; approved_creatives: string[] } | null
+  config: { daily_budget_cap_cents: number | null; approved_creatives: string[]; creative_pool?: CreativePoolFact[] } | null
   /** 该账户日上限（分）；账户行读到了但没设 = null；读失败用 account_cap_read_failed 表示 */
   account_cap_minor: number | null
   account_cap_read_failed: boolean
@@ -146,6 +146,18 @@ function buildAudiences(
     })
   }
   return out
+}
+
+/** 最新态快照里，在投广告组正在用的排除受众（按用到的广告组数降序，同数按编号升序）。 */
+function excludedInUse(latestOwn: readonly EntitySnapshotRow[]): { ref: string; adsets: number }[] {
+  const counts = new Map<string, number>()
+  for (const r of latestOwn) {
+    if (r.level !== 'adset' || !DELIVERING_STATUSES.has(r.effective_status ?? '')) continue
+    for (const id of r.excluded_audience_ids ?? []) counts.set(id, (counts.get(id) ?? 0) + 1)
+  }
+  return [...counts]
+    .map(([ref, adsets]) => ({ ref, adsets }))
+    .sort((a, b) => b.adsets - a.adsets || (a.ref < b.ref ? -1 : 1))
 }
 
 /** 受众层这一轮是否读全：读失败 / 没记录 → null；跳过了共享受众 → false；否则看 complete。 */
@@ -304,6 +316,8 @@ export function buildAdsDraftFacts(raw: RawDraftInput): AdsDraftFacts {
     audiences,
     audiences_complete,
     approved_creatives,
+    creative_pool: config === null ? null : (config.creative_pool ?? null),
+    excluded_in_use: ownSnapshots === null ? null : excludedInUse(latestOwn),
     budget_share_of_headroom: raw.budget_share_of_headroom,
     min_audience_size: raw.min_audience_size,
     max_creatives: raw.max_creatives,
@@ -401,6 +415,11 @@ export async function loadAdsDraftFacts(args: {
       approved_creatives: loaded.config.creative_pool
         .filter((p) => p.status === 'approved')
         .map((p) => p.ref),
+      creative_pool: loaded.config.creative_pool.map((p) => ({
+        ref: p.ref,
+        status: p.status,
+        ...(p.promo_window ? { promo_window: p.promo_window } : {}),
+      })),
     }
   }
 

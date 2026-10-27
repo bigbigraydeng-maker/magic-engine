@@ -71,6 +71,14 @@ interface ListQuery {
    * 只在平铺分页路径（getPaged）生效，分段视图这一轮不接。
    */
   kind?: 'retail' | 'trade'
+  /**
+   * `?assignee=me|unassigned|<email>` —— 按跟进人筛（issue #3158 part 3）。
+   *   - `me` = 当前登录员工的邮箱（服务端用 `access.user.email` 判，调用方不用自己传）
+   *   - `unassigned` = `assigned_to IS NULL`
+   *   - `<email>` = 字面匹配 `assigned_to`
+   * 跟 kind 一样只在分页路径生效；分段视图这一轮不接。
+   */
+  assignee?: 'me' | 'unassigned' | string
 }
 
 const DEFAULT_PER_PAGE = 100
@@ -168,8 +176,25 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
   if (rawKind !== null && rawKind !== 'retail' && rawKind !== 'trade') return { error: 'invalid kind' }
   const kind = rawKind === 'retail' || rawKind === 'trade' ? rawKind : undefined
 
+  // ?assignee：me / unassigned / 具体邮箱。邮箱不校验 RFC 格式，只拒绝明显会把
+  // PostgREST 查询拆坏的字符（跟上面 q 同款），不认合法性是 UI 的事。
+  const rawAssignee = sp.get('assignee')
+  let assignee: ListQuery['assignee']
+  if (rawAssignee !== null) {
+    const trimmed = rawAssignee.trim()
+    if (trimmed.length === 0) {
+      assignee = undefined
+    } else if (trimmed === 'me' || trimmed === 'unassigned') {
+      assignee = trimmed
+    } else if (/[,()%_]/.test(trimmed)) {
+      return { error: 'invalid characters in assignee' }
+    } else {
+      assignee = trimmed.toLowerCase()
+    }
+  }
+
   // view=priority 不走分页路径：它自己一次拉全（筛选后的）子集再在内存里分段。
-  return { paged: view === null && paged, page, perPage, stages, q, view, open, sectionPage, focusContactId, ids, kind }
+  return { paged: view === null && paged, page, perPage, stages, q, view, open, sectionPage, focusContactId, ids, kind, assignee }
 }
 
 /**
@@ -304,7 +329,7 @@ const TOUCH_SCAN_PAGE = 1000
 const TOUCH_SCAN_MAX_PAGES = 40
 
 const PAGE_CONTACT_COLUMNS =
-  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at'
+  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at, assigned_to'
 
 /** 这一页的人的全部触点（带全字段，给分段与整理用）。 */
 function fetchTouchesFor(clientId: string, ids: string[]): Promise<TouchRow[]> {
@@ -444,6 +469,27 @@ async function getPaged(
     // 两次查询的过滤条件必须逐字一致 —— 共享一份过滤参数后各自 apply。
     const filters = contactFilterParams(query)
 
+    // ?assignee 解析成一个 { kind, email? } 结构：me 现查登录邮箱，unassigned 直接给 IS NULL。
+    // 没登录邮箱（罕见）又传了 me：返回空名单——比把筛选默默吞了诚实。
+    let assigneeFilter: { kind: 'eq'; email: string } | { kind: 'null' } | null = null
+    if (query.assignee === 'me') {
+      if (!viewerEmail) {
+        return NextResponse.json({
+          total: 0,
+          page: query.page,
+          perPage: query.perPage,
+          columns: [],
+          items: [],
+          viewerEmail,
+        })
+      }
+      assigneeFilter = { kind: 'eq', email: viewerEmail }
+    } else if (query.assignee === 'unassigned') {
+      assigneeFilter = { kind: 'null' }
+    } else if (typeof query.assignee === 'string') {
+      assigneeFilter = { kind: 'eq', email: query.assignee }
+    }
+
     // kind 筛选（?kind=retail|trade，WP-B3）：先把同行/员工这两小撮人的 id 算出来，
     // 两条查询各自叠加同一份 id 过滤——跟 stages/orExpr 一样，必须逐字一致。
     let kindInIds: string[] | null = null
@@ -471,14 +517,17 @@ async function getPaged(
     // 最后只把当前这一页的人取全。排序不能放在 SQL 里：「最近联系」是逐人对触点取最大值，
     // 而 contacts.last_seen_at 不可信（生产里 721/1159 人比真实最新触点旧）。见 contact-touch-order.ts。
     const noFilter =
-      filters.stages === null && filters.orExpr === null && kindInIds === null && kindNotInIds === null
+      filters.stages === null && filters.orExpr === null && kindInIds === null && kindNotInIds === null && assigneeFilter === null
     const need = query.page * query.perPage
     let fastDone = false
 
     // 最快的路径：数据库函数一次返回「这一页的 id（按最近真实互动排好）+ 符合筛选的总数」，
     // 筛选条件在函数里逐项对应上面的 stage / q / kind。函数还没装上（迁移晚于代码上线）或出错时，
     // 记一条日志，退回下面两条老路径——页面不会因此打不开。
-    {
+    //
+    // 跟进人筛选（part 3 新加）不走 RPC：函数签名里没有这个参数，加它要动数据库，
+    // 等以后再说。此时直接跳到下面的 slow 路径。
+    if (assigneeFilter === null) {
       const [rpcRes, stagesRpc] = await Promise.all([
         supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
           p_client_id: clientId,
@@ -582,6 +631,9 @@ async function getPaged(
           if (kindNotInIds !== null && kindNotInIds.length > 0) {
             b = b.not('id', 'in', `(${kindNotInIds.join(',')})`)
           }
+          // 跟进人筛选（part 3）：IS NULL / 字面相等，不走模糊匹配。
+          if (assigneeFilter?.kind === 'null') b = b.is('assigned_to', null)
+          else if (assigneeFilter?.kind === 'eq') b = b.eq('assigned_to', assigneeFilter.email)
           return b.order('id', { ascending: true }).range(from, to)
         }),
         fetchAll<StageRow>((from, to) =>
@@ -683,7 +735,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       fetchAll<ContactRow>((from, to) => {
         let b = supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at')
+          .select(PAGE_CONTACT_COLUMNS)
           .eq('client_id', clientId)
         if (filters.stages !== null) b = b.in('stage', filters.stages)
         if (filters.orExpr !== null) b = b.or(filters.orExpr)
@@ -814,7 +866,7 @@ export async function GET(
       fetchAll<ContactRow>((from, to) =>
         supabaseAdmin
           .from('contacts')
-          .select('id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at')
+          .select(PAGE_CONTACT_COLUMNS)
           .eq('client_id', clientId)
           .order('id', { ascending: true })
           .range(from, to),

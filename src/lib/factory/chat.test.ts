@@ -4,7 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { REEL_HUMAN_CHECK_KEYS_V2 } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3 } from '@/lib/social/content-review'
 
 vi.mock('@/lib/anthropic/client', () => ({ callClaudeWithTools: vi.fn() }))
 
@@ -33,7 +33,7 @@ function fakeSupabase(queue: Resp[]) {
 const handlersFor = (db: SupabaseClient) =>
   buildFactoryChatTools({ supabase: db, clientId: 'c-1', reviewer: 'me@x.com' }).handlers
 
-const CHECKLIST = REEL_HUMAN_CHECK_KEYS_V2.map((key, idx) => ({
+const CHECKLIST = REEL_HUMAN_CHECK_KEYS_V3.map((key, idx) => ({
   key, judge: 'HUMAN' as const, outcome: idx === 0 ? ('FAIL' as const) : ('NOT_MEASURED' as const),
   detail: idx === 0 ? '画面太慢' : null, source_ref: null,
 }))

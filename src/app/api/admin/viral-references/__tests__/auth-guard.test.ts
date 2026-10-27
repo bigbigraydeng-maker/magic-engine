@@ -138,4 +138,19 @@ describe('POST / url validation', () => {
     expect(h.inserts[0].source_url).toBe('https://www.facebook.com/reel/123')
     expect(h.analyze).toHaveBeenCalledTimes(1)
   })
+
+  it('skips XiaoHongShu links the downloader cannot fetch', async () => {
+    const res = await listPOST(json({ videos: [
+      video('https://www.xiaohongshu.com/explore/abc'),
+      video('https://xhslink.com/a/abc'),
+      video('https://www.youtube.com/watch?v=abc'),
+    ] }))
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.skipped_unsupported).toBe(2)
+    expect(body.queued).toBe(1)
+    expect(h.inserts).toHaveLength(1)
+    expect(h.inserts[0].source_url).toBe('https://www.youtube.com/watch?v=abc')
+    expect(h.analyze).toHaveBeenCalledTimes(1)
+  })
 })
