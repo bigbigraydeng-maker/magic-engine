@@ -29,8 +29,7 @@ export default defineConfig({
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
     },
     setupFiles: [],
-    // 锁文件里的 Vitest 3.2.4 没有按错误过滤的开关，只有一个会放行全部未处理错误的布尔值。
-    // 这个文件在主进程里改退出判断：只放过已确认的 onTaskUpdate RPC 超时，其它未处理错误仍失败。
+    // Vitest 3.2.4 没有按条过滤。globalSetup 只放过精确的 onTaskUpdate 超时。
     globalSetup: [path.join(ROOT, 'src/lib/kernel/__tests__/architecture-global-setup.ts')],
     passWithNoTests: false,
     allowOnly: false,
