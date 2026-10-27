@@ -173,8 +173,11 @@ test('a sticker keeps body-sized type, and a repeated selling line is shown once
   const line = '1/4 2 BEDROOMS, 2 BATHROOMS'
   const early = typewriterReserve(line, 0, 30)
   assert.equal(early.reserved, line)
+  assert.equal(early.rest, line)
   assert.equal(early.visible.length < Array.from(line).length, true)
-  assert.equal(typewriterReserve(line, 30, 30).visible, line)
+  const done = typewriterReserve(line, 30, 30)
+  assert.equal(done.visible, line)
+  assert.equal(done.rest, '')
   const sticker = captionBox('sticker', safe)
   assert.equal(captionInside(sticker, safe), true)
 })

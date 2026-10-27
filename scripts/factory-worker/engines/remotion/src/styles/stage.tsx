@@ -126,12 +126,12 @@ function plateStyle(look: ResolvedLook, box: { left: number; top: number; width:
   return { ...shared, height: 'auto', background: look.card.fill, borderRadius: 0, borderTop: `6px solid ${look.colors.brand}` }
 }
 
-function stickerStyle(look: ResolvedLook, box: { left: number; top: number; width: number }): React.CSSProperties {
+function stickerStyle(look: ResolvedLook, box: { left: number; width: number }): React.CSSProperties {
   return {
     position: 'absolute',
     left: box.left,
-    top: box.top,
-    width: 'fit-content',
+    bottom: 1920 - look.safe.bottom + 28,
+    width: 'max-content',
     maxWidth: box.width,
     height: 'auto',
     boxSizing: 'border-box',
@@ -156,9 +156,9 @@ export const CraftText: React.FC<{
   if (look.craft.textMotion === 'typewriter') {
     const laid = typewriterReserve(text, frame, reveal)
     return (
-      <div style={{ ...base, position: 'relative' }}>
-        <div style={{ visibility: 'hidden' }}>{laid.reserved}</div>
-        <div style={{ position: 'absolute', left: 0, top: 0, right: 0 }}>{laid.visible}</div>
+      <div style={base}>
+        <span>{laid.visible}</span>
+        <span style={{ opacity: 0.35 }}>{laid.rest}</span>
       </div>
     )
   }

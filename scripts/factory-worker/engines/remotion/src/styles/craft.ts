@@ -160,9 +160,11 @@ export function singleCaption(text: string, point: string): { text: string; poin
   return { text, point }
 }
 
-/** Typewriter keeps the full string in layout while only part of it is painted. */
-export function typewriterReserve(text: string, frame: number, revealFrames: number): { reserved: string; visible: string } {
-  return { reserved: text, visible: shownChars(text, frame, revealFrames) }
+/** Typewriter keeps the full string in layout. Unrevealed characters stay faintly visible. */
+export function typewriterReserve(text: string, frame: number, revealFrames: number): { reserved: string; visible: string; rest: string } {
+  const visible = shownChars(text, frame, revealFrames)
+  const rest = Array.from(text).slice(Array.from(visible).length).join('')
+  return { reserved: text, visible, rest }
 }
 
 /** True when every edge of the box is inside the safe area. */

@@ -43,14 +43,15 @@ const HookPlate: React.FC<{ props: DataCardProps; look: ResolvedLook; family: st
   const frame = useCurrentFrame()
   const text = props.hook.lines.join(' ')
   const kind = look.craft.caption
-  const shared: React.CSSProperties = { position: 'absolute', left: LEFT, width: kind === 'sticker' ? 'fit-content' : 840, maxWidth: 840, fontFamily: family, boxSizing: 'border-box', padding: '12px 18px' }
+  const aboveChrome = 1920 - look.safe.bottom
+  const shared: React.CSSProperties = { position: 'absolute', left: LEFT, width: kind === 'sticker' ? 'max-content' : 840, maxWidth: kind === 'sticker' ? 900 : 840, fontFamily: family, boxSizing: 'border-box', padding: '12px 18px' }
   const plate = kind === 'sticker'
     ? { ...shared, top: 280, height: 'auto', background: look.card.fill, borderRadius: 36, transform: 'rotate(-2deg)', border: `4px solid ${look.colors.brand}` }
     : kind === 'center-card'
       ? { ...shared, top: 290, left: 140, width: 760, background: look.card.fill, borderRadius: look.shape.radiusCard, textAlign: 'center' as const }
       : kind === 'lower-third'
-        ? { ...shared, top: 1120, background: look.card.fill, borderTop: `6px solid ${look.colors.brand}` }
-        : { ...shared, top: 1140, background: 'transparent' }
+        ? { ...shared, bottom: aboveChrome, height: 'auto', background: look.card.fill, borderTop: `6px solid ${look.colors.brand}` }
+        : { ...shared, bottom: aboveChrome, height: 'auto', background: 'transparent' }
   const line = kind === 'lower-third' || kind === 'stroke-bottom' ? props.disclaimer : text
   return (
     <div style={plate}>
