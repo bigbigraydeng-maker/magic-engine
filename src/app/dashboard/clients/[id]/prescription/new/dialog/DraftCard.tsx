@@ -3,7 +3,7 @@ import { DIMENSION_LABEL, weaknessSentences } from './copy'
 import type { SelfGrade } from '@/lib/huatuo/types'
 import {
   FULL_TEXT_LABEL, FORMULA_LABEL, dailyBudgetLabel, goalLabel, keyNumbers, kpiChange,
-  periodLabel, proseBlocks, splitMetricFormula, statusBadge, totalBudgetLabel, type KeyNumber,
+  periodLabel, personalIpFacts, proseBlocks, splitMetricFormula, statusBadge, totalBudgetLabel, type KeyNumber,
 } from './present'
 
 export function DraftCard({
@@ -50,6 +50,7 @@ function SummaryCard({
         <Fact term="周期" value={periodLabel(content.phases)} />
         <Fact term="总预算" value={totalBudgetLabel(intake)} />
         <Fact term="每天预算" value={dailyBudgetLabel()} />
+        {personalIpFacts(intake).map((fact) => <Fact key={fact.term} term={fact.term} value={fact.value} />)}
       </div>
       {numbers.length > 0 && <KeyNumberList numbers={numbers} />}
       <BudgetSplit content={content} />

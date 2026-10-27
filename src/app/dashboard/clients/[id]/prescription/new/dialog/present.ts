@@ -58,6 +58,22 @@ export function totalBudgetLabel(intake: PrescriptionIntake | null): string {
   return formatAdMoney(amount, intake?.budget_currency)
 }
 
+export interface PersonalIpFact {
+  term: string
+  value: string
+}
+
+/** 个人 IP 方案多两行；普通方案返回空，摘要卡照旧。 */
+export function personalIpFacts(intake: PrescriptionIntake | null): PersonalIpFact[] {
+  if (intake?.client_kind !== 'personal_ip') return []
+  const count = intake.weekly_shoot_count
+  const shoot = typeof count === 'number' && Number.isFinite(count) && count > 0 ? `${count} 条` : UNREADABLE
+  return [
+    { term: '每周拍几条', value: shoot },
+    { term: '按个人 IP 方案开', value: '是' },
+  ]
+}
+
 /** Intake and content have no daily-budget field. Do not derive one from the prose. */
 export function dailyBudgetLabel(): string {
   return UNREADABLE

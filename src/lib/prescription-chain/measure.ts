@@ -60,18 +60,27 @@ function judgeMeasure(
   strategy: StrategyFact,
   nowIso: string,
 ): ReturnType<typeof chainStep> {
-  const missing = missingMoney(strategy.dailyCapCents, outcome.targetCostPerPrimary)
-  if (!outcome.configured || missing) {
-    return chainStep('measure', 'blocked', missing ?? '目标线索成本还没定。')
+  const personal = rx.intake?.personalIp === true
+  if (personal) {
+    // 个人 IP：不要求目标线索成本；有广告打法时仍要每天预算上限。
+    if (rx.adPlayCount > 0 && strategy.dailyCapCents === null) {
+      return chainStep('measure', 'blocked', '每天预算上限还没定。')
+    }
+  } else {
+    const missing = missingMoney(strategy.dailyCapCents, outcome.targetCostPerPrimary)
+    if (!outcome.configured || missing) {
+      return chainStep('measure', 'blocked', missing ?? '目标线索成本还没定。')
+    }
+    const conflict = costConflict(outcome.targetCostPerPrimary, rx.targetCosts)
+    if (conflict) return chainStep('measure', 'blocked', conflict)
   }
-  const conflict = costConflict(outcome.targetCostPerPrimary, rx.targetCosts)
-  if (conflict) return chainStep('measure', 'blocked', conflict)
   const now = Date.parse(nowIso)
   if (!Number.isFinite(now)) return unreadStep('measure')
   const pace = paceDetail(goal, strategy.dailyCapCents, nzToday(now))
   if (pace.kind === 'bad') return chainStep('measure', 'blocked', pace.detail)
   const review = rx.reviewAnchor ? '' : '复盘日还没写在处方里。'
   if (pace.kind === 'wait') return chainStep('measure', 'active', `${pace.detail}${review}`)
+  if (personal) return chainStep('measure', 'done', `配速读得到（个人 IP 不要求目标线索成本）。${pace.detail}${review}`)
   return chainStep('measure', 'done', `目标成本、每天上限和配速都读得到。${pace.detail}${review}`)
 }
 

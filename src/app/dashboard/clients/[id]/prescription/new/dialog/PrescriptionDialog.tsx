@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
+import type { ClientKind } from '@/types/diagnostic'
 import { PrescriberLine, PrescriptionReviewActions, PrescriptionStatusNotice } from '../review-actions'
 import { decideTurn, type GoalChoice, type TurnDecision } from './decide-turn'
 import { DraftCard } from './DraftCard'
@@ -194,6 +195,7 @@ function useLoadedDialog(input: {
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(input.goalId)
   const [prescription, setPrescription] = useState<DialogPrescription | null>(null)
   const [prior, setPrior] = useState({ supplementOf: input.supplementOf, reviseOf: input.reviseOf })
+  const [clientKind, setClientKind] = useState<ClientKind>('standard')
 
   useEffect(() => {
     let cancelled = false
@@ -206,6 +208,7 @@ function useLoadedDialog(input: {
       if (cancelled) return
       setDiscoveryId(result.discoveryId)
       setGoals(result.goals)
+      setClientKind(result.clientKind)
       setSelectedGoalId(input.goalId ?? (result.goals.length === 1 ? result.goals[0].id : null))
       setPrescription(result.prescription)
       setLoading(false)
@@ -216,7 +219,7 @@ function useLoadedDialog(input: {
   useGeneratingPoll(input.clientId, prescription, setPrescription)
 
   return {
-    loading, discoveryId, goals, selectedGoalId, setSelectedGoalId, prescription, setPrescription, prior, setPrior,
+    loading, discoveryId, goals, clientKind, selectedGoalId, setSelectedGoalId, prescription, setPrescription, prior, setPrior,
   }
 }
 
@@ -249,7 +252,8 @@ function useChat(input: { clientId: string; currency: string | null }, loaded: R
   const [draft, setDraft] = useState('')
   const [writing, setWriting] = useState(false)
   const [approving, setApproving] = useState(false)
-  const [waitingFor, setWaitingFor] = useState<'budget' | 'goal' | null>(null)
+  const [waitingFor, setWaitingFor] = useState<'budget' | 'goal' | 'shoot' | null>(null)
+  const [pendingShoot, setPendingShoot] = useState<number | null>(null)
   const [pendingGoal, setPendingGoal] = useState<string | null>(null)
   const [pendingBudget, setPendingBudget] = useState<number | null>(null)
   const reply = (text: string) => setTurns((prev) => [...prev, { role: 'huatuo', text }])
@@ -260,8 +264,8 @@ function useChat(input: { clientId: string; currency: string | null }, loaded: R
     if (!text || writing) return
     setDraft('')
     setTurns((prev) => [...prev, { role: 'user', text }])
-    const decision = decideTurn(decisionInput(text, input.currency, loaded, { writing, waitingFor, pendingGoal, pendingBudget }))
-    void applyDecision(decision, { input, loaded, reply, setWriting, setWaitingFor, setPendingGoal, setPendingBudget })
+    const decision = decideTurn(decisionInput(text, input.currency, loaded, { writing, waitingFor, pendingGoal, pendingBudget, pendingShoot }))
+    void applyDecision(decision, { input, loaded, reply, setWriting, setWaitingFor, setPendingGoal, setPendingBudget, setPendingShoot })
   }
 
   return { turns, draft, setDraft, writing, approving, onSubmit, approve: () => patchStatus(loaded, input.clientId, 'approved', setApproving, reply), reject: () => rejectDraft(loaded, input.clientId, reply) }
@@ -271,7 +275,13 @@ function decisionInput(
   text: string,
   _currency: string | null,
   loaded: ReturnType<typeof useLoadedDialog>,
-  chat: { writing: boolean; waitingFor: 'budget' | 'goal' | null; pendingGoal: string | null; pendingBudget: number | null },
+  chat: {
+    writing: boolean
+    waitingFor: 'budget' | 'goal' | 'shoot' | null
+    pendingGoal: string | null
+    pendingBudget: number | null
+    pendingShoot: number | null
+  },
 ) {
   return {
     text,
@@ -282,6 +292,8 @@ function decisionInput(
     selectedGoalId: loaded.selectedGoalId,
     pendingGoal: chat.pendingGoal,
     pendingBudget: chat.pendingBudget,
+    pendingShoot: chat.pendingShoot,
+    clientKind: loaded.clientKind,
     waitingFor: chat.waitingFor,
     supplementOf: loaded.prior.supplementOf,
     reviseOf: loaded.prior.reviseOf,
@@ -294,7 +306,8 @@ async function applyDecision(decision: TurnDecision, ctx: {
   loaded: ReturnType<typeof useLoadedDialog>
   reply: (text: string) => void
   setWriting: (value: boolean) => void
-  setWaitingFor: (value: 'budget' | 'goal' | null) => void
+  setWaitingFor: (value: 'budget' | 'goal' | 'shoot' | null) => void
+  setPendingShoot: (value: number | null) => void
   setPendingGoal: (value: string | null) => void
   setPendingBudget: (value: number | null) => void
 }) {
@@ -304,6 +317,7 @@ async function applyDecision(decision: TurnDecision, ctx: {
       ctx.setWaitingFor(decision.waitingFor)
       ctx.setPendingGoal(decision.businessGoal)
       ctx.setPendingBudget(decision.budget)
+      ctx.setPendingShoot(decision.shoot ?? null)
     }
     return
   }
@@ -443,6 +457,8 @@ async function callJob(decision: Exclude<TurnDecision, { kind: 'say' | 'ask' }>,
     urgency: decision.urgency,
     dimensions: decision.dimensions,
     goalId: decision.goalId,
+    clientKind: decision.clientKind,
+    weeklyShoot: decision.weeklyShoot,
     mode: decision.mode,
     priorId: decision.priorId,
     handlers,
@@ -457,5 +473,7 @@ function intakeFrom(decision: Extract<TurnDecision, { kind: 'generate' }>, curre
     budget_currency: currency,
     priority_dimensions: decision.dimensions,
     notes: null,
+    client_kind: decision.clientKind,
+    weekly_shoot_count: decision.weeklyShoot,
   }
 }
