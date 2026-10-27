@@ -14,6 +14,18 @@ describe('classifyBacktest', () => {
     expect(classifyBacktest('Use short videos in Meta ads')).toBeNull()
     expect(classifyBacktest('Frequency matters for ads')).toBeNull()
   })
+  it('rejects opposite-direction, negated or directionless claims', () => {
+    expect(classifyBacktest('Higher frequency lowers CPM')).toBeNull()
+    expect(classifyBacktest('Higher frequency increases CTR')).toBeNull()
+    expect(classifyBacktest('频次越高 CPM 越低')).toBeNull()
+    expect(classifyBacktest('Frequency does not raise CPM')).toBeNull()
+    expect(classifyBacktest('Frequency and CPM are related')).toBeNull()
+  })
+  it('accepts aligned direction wording', () => {
+    expect(classifyBacktest('Higher frequency increases CPM')).toBe('freq_cpm')
+    expect(classifyBacktest('Higher frequency reduces CTR')).toBe('freq_ctr')
+    expect(classifyBacktest('频次越高 CPM 越高')).toBe('freq_cpm')
+  })
 })
 
 describe('runBacktest', () => {

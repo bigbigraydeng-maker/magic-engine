@@ -8,11 +8,30 @@ const FREQ_RE = /\bfrequency\b|频次/i
 const CPM_RE = /\bcpm\b/i
 const CTR_RE = /\bctr\b|click-?through|点击率/i
 
+const RISE_VERB_RE = /\b(rises?|rising|increases?|increasing|climbs?|grows?|raises?|goes up)\b|上升|升高|增加|上涨|变高|变贵|提高/i
+const FALL_VERB_RE = /\b(falls?|falling|drops?|decreases?|decreasing|declines?|lowers?|reduces?|goes down)\b|下降|降低|减少|下跌|变低|变少/i
+const RISE_ADJ_RE = /\b(higher|high)\b|越高|更高/i
+const FALL_ADJ_RE = /\b(lower|low)\b|越低|更低/i
+const NEGATION_RE = /\b(not|no|never|without|doesn'?t|don'?t|isn'?t|won'?t)\b|不|没|无|未/i
+
+/** 经验对指标声明的方向；有否定、方向相反或说不清时返回 null。 */
+function metricDirection(text: string, metricRe: RegExp): 'up' | 'down' | null {
+  if (NEGATION_RE.test(text)) return null
+  const m = metricRe.exec(text)
+  // 形容词（越高/lower）只在指标之后才算对指标的描述，之前的多半在修饰频次
+  const after = m ? text.slice(m.index + m[0].length) : ''
+  const up = RISE_VERB_RE.test(text) || RISE_ADJ_RE.test(after)
+  const down = FALL_VERB_RE.test(text) || FALL_ADJ_RE.test(after)
+  if (up === down) return null
+  return up ? 'up' : 'down'
+}
+
+/** 只归类方向明确且与 runBacktest 预期一致的经验：频次↑→CPM↑、频次↑→CTR↓；其余 null（无法回测）。 */
 export function classifyBacktest(lesson: string, rationale?: string | null): BacktestRule | null {
   const text = `${lesson} ${rationale ?? ''}`
   if (!FREQ_RE.test(text)) return null
-  if (CPM_RE.test(text)) return 'freq_cpm'
-  if (CTR_RE.test(text)) return 'freq_ctr'
+  if (CPM_RE.test(text)) return metricDirection(text, CPM_RE) === 'up' ? 'freq_cpm' : null
+  if (CTR_RE.test(text)) return metricDirection(text, CTR_RE) === 'down' ? 'freq_ctr' : null
   return null
 }
 
