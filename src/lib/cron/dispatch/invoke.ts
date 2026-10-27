@@ -34,6 +34,7 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'benchmark-accumulator': () => import('@/app/api/cron/benchmark-accumulator/route'),
   'cms-connection-retest': () => import('@/app/api/cron/cms-connection-retest/route'),
   'prescription-weekly': () => import('@/app/api/cron/prescription-weekly/route'),
+  'prescription-launch-check': () => import('@/app/api/cron/prescription-launch-check/route'),
   'anomaly-detector': () => import('@/app/api/cron/anomaly-detector/route'),
   'daily-cron-digest': () => import('@/app/api/cron/daily-cron-digest/route'),
   'proposal-view-digest': () => import('@/app/api/cron/proposal-view-digest/route'),

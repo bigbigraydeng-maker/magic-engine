@@ -256,6 +256,9 @@ const CRON_REGISTRY_ENTRIES = [
   // 这是设计行为:不许把「什么都没干」显示成健康。apply migration 后自动转绿。
   { service: 'product-map-sync-daily', jobName: 'product-map-sync', schedule: '15 18 * * *', logsRuns: true, addedAt: '2026-08-15' },
   { service: 'prescription-weekly', jobName: 'prescription-weekly', schedule: '0 8 * * 2', logsRuns: true, addedAt: '2026-08-04' },
+  // 已开投处方的开投后检查。每 2 小时读我们自己库里的每日花费和线索，写出 24/48 小时和第 7/14 天。
+  // 不写 Meta。也不往广告快照表加「每 2 小时」：那个取值不在现有约束里，加进去要迁移。
+  { service: 'prescription-launch-check', jobName: 'prescription-launch-check', schedule: '0 */2 * * *', logsRuns: true, addedAt: '2026-10-27' },
   { service: 'cms-connection-retest', jobName: 'cms-connection-retest', schedule: '10 6 * * *', logsRuns: true, addedAt: '2026-08-05' },
   { service: 'proposal-view-digest', jobName: 'proposal-view-digest', schedule: '0 19 * * *', logsRuns: true },
   // 2026-09-16 降频（commit 2a17a85f2）：每小时整点；此前登记的是每 30 分钟。

@@ -10,6 +10,10 @@ const db = vi.hoisted(() => ({
   usedIn: false,
 }))
 
+vi.mock('@/lib/ads-strategy/account-timezone', () => ({
+  resolveAccountTimezone: async () => 'Pacific/Auckland',
+}))
+
 vi.mock('@/lib/supabase', () => {
   const cmp = (a: unknown, b: unknown): number => {
     if (typeof a === 'number' && typeof b === 'number') return a - b
@@ -258,6 +262,49 @@ describe('大白话分段', () => {
     expect(JSON.stringify(view?.spend)).not.toMatch(/999/)
     expect(JSON.stringify(view?.spend)).not.toMatch(/AUD/)
     expect(view?.review_anchor).toBe(todayInNz(new Date('2026-10-02T00:00:00.000Z')))
+  })
+
+  it('已开投的处方带上达标句，读开投失败也不把整份处方弄丢', async () => {
+    db.tables.prescriptions = [rx({
+      id: 'rx-1',
+      status: 'approved',
+      approved_at: '2019-11-01T00:00:00.000Z',
+    })]
+    db.tables.marketing_plans = [{
+      client_id: CLIENT,
+      status: 'approved',
+      approved_at: '2019-12-01T00:00:00.000Z',
+      plan_data: { promo: { goal_id: GOAL } },
+    }]
+    db.tables.flywheel_actions = [{
+      client_id: CLIENT,
+      action_type: 'ads.create_ad',
+      payload: {
+        status: 'active',
+        campaignId: 'camp-1',
+        activation: { status: 'executed', authorized_at: '2020-01-01T00:00:00.000Z' },
+      },
+    }]
+    // Launch day 2020-01-01 (NZ) through day 14: every day needs a row before any verdict.
+    db.tables.ad_daily_insights = Array.from({ length: 14 }, (_, i) => ({
+      client_id: CLIENT,
+      level: 'campaign',
+      entity_id: 'camp-1',
+      ad_account_id: 'act_1',
+      insight_date: `2020-01-${String(i + 1).padStart(2, '0')}`,
+      spend: i === 0 ? 80 : 0,
+      results: i === 0 ? 12 : 0,
+    }))
+    const view = await loadLatestGoalPrescription(CLIENT, GOAL)
+    expect(view?.launch_check?.lines.join('\n')).toContain('达标')
+    expect(view?.launch_check?.lines.join('\n')).toContain('这份结论还没写进复盘记录，因为没有案例行。')
+    expect(db.usedIn).toBe(false)
+
+    db.errors.flywheel_actions = 'nope'
+    const still = await loadLatestGoalPrescription(CLIENT, GOAL)
+    expect(still?.id).toBe('rx-1')
+    expect(still?.launch_check?.lines.join('\n')).toContain('不知道')
+    expect(still?.launch_check?.lines.join('\n')).not.toContain('达标')
   })
 
   it('正文写了起算日就用它，不用写下时间', async () => {

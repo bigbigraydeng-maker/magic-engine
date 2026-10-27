@@ -35,6 +35,7 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'benchmark-accumulator', route: 'benchmark-accumulator', method: 'GET', auth: 'bearer', schedule: '40 7 * * 1' },
   { service: 'cms-connection-retest', route: 'cms-connection-retest', method: 'GET', auth: 'bearer', schedule: '10 6 * * *' },
   { service: 'prescription-weekly', route: 'prescription-weekly', method: 'GET', auth: 'bearer', schedule: '0 8 * * 2' },
+  { service: 'prescription-launch-check', route: 'prescription-launch-check', method: 'GET', auth: 'bearer', schedule: '0 */2 * * *' },
   { service: 'anomaly-detector-daily', route: 'anomaly-detector', method: 'GET', auth: 'bearer', schedule: '0 5 * * *', healthcheckUrl: 'https://hc-ping.com/ff78126a-25e2-4a50-abcb-edbcb1dfaec9' },
   { service: 'daily-cron-digest', route: 'daily-cron-digest', method: 'GET', auth: 'bearer', schedule: '0 6 * * *', healthcheckUrl: 'https://hc-ping.com/10c101e8-05a0-4026-9531-39edddd7c74d' },
   { service: 'proposal-view-digest', route: 'proposal-view-digest', method: 'GET', auth: 'bearer', schedule: '0 19 * * *' },

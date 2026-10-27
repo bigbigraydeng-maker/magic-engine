@@ -105,4 +105,25 @@ describe('处方卡', () => {
     expect(container.textContent).not.toMatch(/AUD/)
     expect(container.textContent).not.toMatch(/NZD/)
   })
+
+  it('开投之后写出达标、没达标和还不知道，读不到就写不知道', () => {
+    const { container } = render(<PrescriptionCard clientId="client-1" prescription={view({
+      launch_check: {
+        lines: [
+          '24 小时：还不知道。开投后还没满 24 小时。',
+          '48 小时：不知道。开投后还没有这一条广告的每日花费和线索。',
+          '第 7 天：没达标。线索 3 条，目标 10 条。',
+          '第 14 天：达标。线索 12 条，目标 10 条。',
+        ],
+      },
+    })} today="2026-10-01" />)
+    expect(screen.getByRole('heading', { name: '开投之后' })).toBeTruthy()
+    expect(screen.getByText('24 小时：还不知道。开投后还没满 24 小时。')).toBeTruthy()
+    expect(screen.getByText('48 小时：不知道。开投后还没有这一条广告的每日花费和线索。')).toBeTruthy()
+    expect(screen.getByText('第 7 天：没达标。线索 3 条，目标 10 条。')).toBeTruthy()
+    expect(screen.getByText('第 14 天：达标。线索 12 条，目标 10 条。')).toBeTruthy()
+    const withoutSeedPanel = container.cloneNode(true) as HTMLElement
+    withoutSeedPanel.querySelector('[data-plan-seed-panel]')?.remove()
+    expect(withoutSeedPanel.textContent).not.toMatch(/批准/)
+  })
 })
