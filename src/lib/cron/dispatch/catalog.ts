@@ -48,6 +48,7 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'seo-patrol-daily', route: 'seo-patrol-daily', method: 'GET', auth: 'bearer', schedule: '0 4 * * *', healthcheckUrl: 'https://hc-ping.com/db58fff5-fd32-45e0-a7fd-b067bede6689' },
   { service: 'social-comment-autoreply', route: 'social-comment-autoreply', method: 'GET', auth: 'bearer', schedule: '0 * * * *' },
   { service: 'factory-publish-worker', route: 'factory-publish-worker', method: 'GET', auth: 'bearer', schedule: '5 * * * *' },
+  { service: 'factory-dead-letter-rerun', route: 'factory-dead-letter-rerun', method: 'GET', auth: 'bearer', schedule: '15 * * * *' },
   { service: 'factory-order-scheduler', route: 'factory-order-scheduler', method: 'GET', auth: 'bearer', schedule: '0 20 * * *' },
   { service: 'factory-publish-sweeper', route: 'factory-publish-sweeper', method: 'GET', auth: 'bearer', schedule: '25 * * * *' },
   { service: 'factory-worker-sweeper', route: 'factory-worker-sweeper', method: 'GET', auth: 'bearer', schedule: '*/5 * * * *' },

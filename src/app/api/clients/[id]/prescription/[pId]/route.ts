@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
+import { emitPromotionSignal, readableError } from '@/lib/factory/promotion-signal'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
 import { approveDraftContentGate } from './approve-gate'
 import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
@@ -104,6 +105,19 @@ async function failIfStaleGenerating(
     status: 'failed',
     error_message: STALE_GENERATING_MESSAGE,
     progress_note: null,
+  }
+}
+
+async function promotionSignalAfterApproval(
+  clientId: string,
+  prescriptionId: string,
+  goalId: string | null,
+  content: unknown,
+) {
+  try {
+    return await emitPromotionSignal({ clientId, prescriptionId, goalId, content })
+  } catch (error) {
+    return { ok: false, reason: readableError(error) }
   }
 }
 
@@ -210,7 +224,8 @@ export async function PATCH(
         console.error('[prescription PATCH] read-back after landing failed:', readErr)
         return NextResponse.json({ success: false, error: 'Failed to update prescription' }, { status: 500 })
       }
-      return NextResponse.json({ success: true, prescription: landedRow })
+      const promotionSignal = await promotionSignalAfterApproval(clientId, pId, current.goal_id, current.content)
+      return NextResponse.json({ success: true, prescription: landedRow, promotion_signal: promotionSignal })
     }
 
     // Build update payload（走到这儿只剩 rejected）
