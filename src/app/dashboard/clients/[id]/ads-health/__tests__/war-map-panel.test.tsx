@@ -23,7 +23,7 @@ function baseView(): WarMapView {
       actualLaunchDay: null,
       planStale: false,
     },
-    clocks: { dataDay: '2026-10-20', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 0 },
+    clocks: { dataDay: '2026-10-20', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 0, note: null },
     accounts: [],
     accountSummaries: [],
     pools: {
@@ -35,6 +35,7 @@ function baseView(): WarMapView {
     frequency: {
       headline: { light: 'green', sentence: '频率正常' },
       rows: [],
+      stoppedRows: [],
       windowLabel: '10/14–10/20',
     },
     adjust: { headline: { light: 'green', sentence: '今天没有要调的' }, actions: [] },
@@ -89,7 +90,7 @@ describe('WarMapPanel · 倒计时条', () => {
 describe('WarMapPanel · 数据停了', () => {
   it('数据停了 10 天：显示琥珀色标签', async () => {
     const view = baseView()
-    view.clocks = { dataDay: '2026-10-10', fetchedAt: '2026-10-17T17:00:00.000Z', staleDays: 10 }
+    view.clocks = { dataDay: '2026-10-10', fetchedAt: '2026-10-17T17:00:00.000Z', staleDays: 10, note: null }
     stubView(view)
     render(<WarMapPanel clientId="c1" />)
     await waitFor(() => expect(screen.getByText('数据已 10 天没更新')).toBeTruthy())
@@ -97,7 +98,7 @@ describe('WarMapPanel · 数据停了', () => {
 
   it('只停了 1 天：不显示这句', async () => {
     const view = baseView()
-    view.clocks = { dataDay: '2026-10-19', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 1 }
+    view.clocks = { dataDay: '2026-10-19', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 1, note: null }
     stubView(view)
     render(<WarMapPanel clientId="c1" />)
     await waitFor(() => expect(screen.getByText(/数据日/)).toBeTruthy())
@@ -119,6 +120,7 @@ describe('WarMapPanel · 按账户分开', () => {
         staleDays: 0,
         biggestPoolName: '某池',
         biggestPoolSize: 44500,
+        dormant: false,
         poolCount: 1,
         light: 'red',
       },
@@ -132,6 +134,7 @@ describe('WarMapPanel · 按账户分开', () => {
         staleDays: 0,
         biggestPoolName: '另一个池',
         biggestPoolSize: 9000,
+        dormant: false,
         poolCount: 1,
         light: 'green',
       },

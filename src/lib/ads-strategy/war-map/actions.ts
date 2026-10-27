@@ -5,7 +5,7 @@
  *    （魏征 2026-10-16 必改 3）。
  */
 
-import { dataStaleDays, DATA_STALE_DAYS } from './frequency'
+import { DATA_STALE_DAYS } from './frequency'
 import { diffDays, nzDay, shortDay } from './util'
 import type {
   AccountView, ActionRow, ActionSeverity, FrequencyRow, GrowthInput, Headline, PoolRow, WarMapInput,
@@ -90,13 +90,14 @@ function growthActions(g: GrowthInput | null, input: WarMapInput, accountsUnheal
     return [{ key: 'growth-missing', severity: 'info', what: '经营视图一行都没有', how: '等每天巡察；持续没有就找开发', owner: 'dev' }]
   }
   const today = nzDay(input.now)
-  const stale = g.date !== today
+  // 经营视图的日期是「数据截至日」：每天早上巡察时写的是昨天，所以截至昨天也算新；落后 2 天以上才是旧的
+  const days = diffDays(g.date, today)
+  const stale = days > 1
   const tag = stale ? `（${shortDay(g.date)} 的旧数据）` : ''
   const out: ActionRow[] = []
   if (stale) {
-    const days = diffDays(g.date, today)
     out.push({
-      key: 'growth-stale', severity: days > 1 ? 'yellow' : 'info',
+      key: 'growth-stale', severity: 'yellow',
       what: `经营视图是 ${shortDay(g.date)} 的，今天还没跑`,
       how: '等今天巡察；超过一天没有就找开发', owner: 'dev',
     })
@@ -127,12 +128,14 @@ export interface AdjustContext {
   videoPoolIds: Set<string>
   frequencyRows: FrequencyRow[]
   upstream: Headline[]
+  /** 表头同一口径的数据日 / 停了几天 */
+  dataDay: string | null
+  staleDays: number | null
 }
 
-function staleNote(input: WarMapInput): string {
-  const days = dataStaleDays(input)
-  const day = input.clocks.dataDay
-  return days !== null && days > DATA_STALE_DAYS && day ? `（数据停在 ${shortDay(day)}）` : ''
+function staleNote(ctx: AdjustContext): string {
+  const { staleDays, dataDay } = ctx
+  return staleDays !== null && staleDays > DATA_STALE_DAYS && dataDay ? `（数据停在 ${shortDay(dataDay)}）` : ''
 }
 
 export function buildAdjust(ctx: AdjustContext): { headline: Headline; actions: ActionRow[] } {
@@ -140,7 +143,7 @@ export function buildAdjust(ctx: AdjustContext): { headline: Headline; actions: 
   const actions = sortStable([
     ...accountActions(ctx.accounts),
     ...creativeActions(ctx.input.creativePoolApproved),
-    ...frequencyActions(ctx.frequencyRows, staleNote(ctx.input)),
+    ...frequencyActions(ctx.frequencyRows, staleNote(ctx)),
     ...poolActions(ctx.poolRows, ctx.videoPoolIds),
     ...growthActions(ctx.input.growth, ctx.input, unhealthy),
   ])

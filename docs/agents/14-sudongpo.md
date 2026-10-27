@@ -42,7 +42,7 @@
 | Visual Studio / Video Studio（封装名） | 调用 | 出图、出片（AI 媒体只走 Muapi） |
 | `viral_reference_library` | 只读 | 爆款配方 |
 | Supabase `social_plans` / 工厂工单 / `flywheel_actions` | 读写 | 本 agent 的数据资产 |
-| 经验手册 `docs/playbooks/social/`（迁移前在开发侧记忆 `playbook-social-general.md`） | 读；学习任务只写候选区 | 规则先验 |
+| 经验手册 [`docs/playbooks/social/README.md`](../playbooks/social/README.md) | 读；学习任务只写候选区 | 规则先验 |
 
 ## 四、Fix vs Talk to Us 边界（强制）
 
@@ -86,7 +86,7 @@
 | 读 | 客户纠错学习（`clients.factory_config.lecture`，`lecture-learning.ts`） | 已有，保留 |
 | 写 | `flywheel_actions`（带**预期指标**）→ `flywheel_outcomes`（按帖） | **目标**；现状发帖故意不写预期指标（`post-measurement-store.ts:10-17`），单帖成绩进不了记忆 |
 | 写（经 extractor） | `client_proven_patterns` / `client_failed_experiments`（`flywheel='social'`） | 只收动作级结论 |
-| 写 | 手册候选区 `docs/playbooks/social/inbox.md` | 每周四学习任务；升正文须子牙签字 + PM 合 |
+| 写 | 手册候选区 `docs/playbooks/social/inbox.md`（候选区文件待建） | 每周四学习任务；升正文须子牙签字 + PM 合 |
 
 ## 九、跟其他 Agent 的接力
 

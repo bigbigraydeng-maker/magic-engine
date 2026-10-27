@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { GraphAdsetSettings } from '@/lib/meta/entity-settings'
-import { normalizeAdset, settingsHash, type EntitySnapshotRow } from '../../snapshot'
+import { normalizeAdset, normalizeCampaign, settingsHash, type EntitySnapshotRow } from '../../snapshot'
 import type { RoleVerdict } from '../../roles'
 import { buildAccountContext } from '../context'
 import { diagnoseSpendNoResult } from '../d3-spend-no-result'
@@ -25,11 +25,12 @@ function adset(id: string, goal: string): GraphAdsetSettings {
   }
 }
 
-function dayRow(adsetId: string, spend: number): DailyRow {
+function dayRow(adsetId: string, spend: number, leads = 0): DailyRow {
   return {
     level: 'adset', entity_id: adsetId, parent_id: 'camp_1', insight_date: DATE,
-    spend, impressions: 1000, reach: 800, clicks: 40, leads: 0, messaging_conversations: 0,
-    video_thruplays: null, actions: [],
+    spend, impressions: 1000, reach: 800, clicks: 40, leads, messaging_conversations: 0,
+    video_thruplays: null,
+    actions: leads > 0 ? [{ action_type: 'lead', value: String(leads) }] : [],
   }
 }
 
@@ -95,5 +96,40 @@ describe('D3 候选范围', () => {
 
   it('破冰类（THRUPLAY）不纳入', () => {
     expect(run('THRUPLAY', 500)).toEqual([])
+  })
+
+  it('花钱结果太少：标题写明广告组，同系列还有别的花费时补系列合计，判定仍只看这个组', () => {
+    const campaign = {
+      ...normalizeCampaign(CTX, { id: 'camp_1', name: '系列甲', status: 'ACTIVE', effective_status: 'ACTIVE' }),
+      settings_hash: 'h', capture_reason: 'daily' as const, captured_at: `${DATE}T10:00:00Z`,
+    }
+    const named = (id: string, name: string): GraphAdsetSettings => ({ ...adset(id, 'LEAD_GENERATION'), name })
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [campaign, snap(named('as_a', '组A')), snap(named('as_b', '组B'))],
+      daily: [dayRow('as_a', 48.55, 2), dayRow('as_b', 16.37, 0)],
+      hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    for (const id of ['as_a', 'as_b']) {
+      const prev = ctx.roles.get(id)
+      ctx.roles.set(id, { ...prev, role: 'acquisition', confidence: 'high', reasons: [], retargetingAudienceIds: [] } as RoleVerdict)
+    }
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: 'lead', targetCostPerPrimary: 11, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    const hits = diagnoseSpendNoResult(ctx, input).filter(d => d.status === 'hit')
+    expect(hits.map(d => d.units[0]?.id)).toEqual(['as_a'])
+    expect(hits[0]?.title).toContain('广告组「组A」')
+    expect(hits[0]?.title).toContain('系列合计 NZD 64.92 / 2 = NZD 32.46')
+    expect(hits[0]?.evidence).toMatchObject({ spend: 48.55, results: 2, cost_per_result: 24.28 })
+  })
+
+  it('系列里只有一个有花费的广告组：标题写明组名，不另写合计', () => {
+    const [d] = run('LEAD_GENERATION', 100)
+    expect(d.title).toContain('广告组「as_1」')
+    expect(d.title).not.toContain('系列合计')
   })
 })
