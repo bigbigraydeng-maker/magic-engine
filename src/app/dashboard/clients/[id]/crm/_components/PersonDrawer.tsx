@@ -7,6 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { ReturningRoute } from './ReturningRoute'
 import { AssigneeSelect } from './AssigneeSelect'
 import type { ContactRow } from '../all/_components/contact-table-types'
 import { CallButton } from './CallButton'
@@ -338,14 +339,18 @@ export function PersonDrawer({
               data-testid="returning-banner"
             >
               <p className="text-[13px] font-black text-[#C2453A]">🔥 他又回来了 —— 意向很强，今天优先联系</p>
-              {summary?.engagement && summary.engagement.story.length > 0 && (
-                <ul className="mt-1.5 space-y-0.5" data-testid="returning-story">
-                  {summary.engagement.story.map((line) => (
-                    <li key={line} className="text-[12px] leading-relaxed text-me-charcoal/85">
-                      {line.startsWith('🔥 ') ? <span className="font-bold">{line}</span> : line}
-                    </li>
-                  ))}
-                </ul>
+              {summary?.engagement?.journey ? (
+                <ReturningRoute journey={summary.engagement.journey} />
+              ) : (
+                summary?.engagement && summary.engagement.story.length > 0 && (
+                  <ul className="mt-1.5 space-y-0.5" data-testid="returning-story">
+                    {summary.engagement.story.map((line) => (
+                      <li key={line} className="text-[12px] leading-relaxed text-me-charcoal/85">
+                        {line.startsWith('🔥 ') ? <span className="font-bold">{line}</span> : line}
+                      </li>
+                    ))}
+                  </ul>
+                )
               )}
             </div>
           )}

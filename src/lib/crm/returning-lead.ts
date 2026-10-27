@@ -201,7 +201,7 @@ function calendarDay(iso: string, timeZone: string): string {
 }
 
 /** 把 ISO 转成「今天 / 昨天 / M月D日」。 */
-function formatDay(iso: string, now: Date, timeZone: string): string {
+export function formatDay(iso: string, now: Date, timeZone: string): string {
   const target = calendarDay(iso, timeZone)
   const today = calendarDay(now.toISOString(), timeZone)
   if (target === today) return '今天'
