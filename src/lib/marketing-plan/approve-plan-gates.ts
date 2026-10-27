@@ -1,11 +1,13 @@
 import type { ApprovalVerdict, GateResult } from '@/lib/marketing-plan/promo/gates'
 
-/** Hard checks that are not green, across due phases and later phases that still must be filled in. */
+/**
+ * Applicable checks that are not green, on every evaluated phase.
+ *
+ * Co-approval refuses unless this list is empty. Due or later, hard or soft,
+ * yellow, gray, or red all count. A later phase's yellow budget gate is not in
+ * `deferred_blockers` (that list is only hard red/gray), so it has to be read
+ * from the phase results. Plan-page approval does not use this.
+ */
 export function hardNotGreen(verdict: ApprovalVerdict): GateResult[] {
-  const dueHard = verdict.per_phase
-    .filter(p => p.due)
-    .flatMap(p => p.results)
-    .filter(r => r.hard && r.light !== 'green')
-  const seen = new Set(dueHard)
-  return [...dueHard, ...verdict.deferred_blockers.filter(r => !seen.has(r))]
+  return verdict.per_phase.flatMap(phase => phase.results).filter(result => result.light !== 'green')
 }

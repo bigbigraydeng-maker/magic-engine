@@ -1,8 +1,9 @@
 /**
  * Approve a draft marketing plan. One implementation for the approve route and
- * for "agree on a prescription" (the plan rides along only when every hard
- * check is green). It only changes plan state and dispatches internal to-dos
- * for legacy plans: no Meta draft, no Meta write, no spend, no budget change.
+ * for "agree on a prescription" (the plan rides along only when every
+ * applicable check, on every phase, is green). It only changes plan state
+ * and dispatches internal to-dos for legacy plans: no Meta draft, no Meta
+ * write, no spend, no budget change.
  */
 
 import { randomUUID } from 'crypto'
@@ -25,7 +26,7 @@ export type ApprovePlanResult =
   | { kind: 'not_draft'; status: string }
   | { kind: 'invalid_spec'; issues: PromoValidationIssue[] }
   | { kind: 'blocked'; blockers: GateResult[] }
-  /** Only with `requireAllGreen`: gates pass but not every hard check is green. Nothing was written. */
+  /** Only with `requireAllGreen`: gates pass but some applicable check is not green. Nothing was written. */
   | { kind: 'needs_confirmation'; planStart: string; planEnd: string; checks: GateResult[] }
   | { kind: 'conflict'; error: string; status: 409 | 500 }
 

@@ -1,10 +1,10 @@
 /**
- * Agree-path approval only flips plan status when every hard check is green.
+ * Agree-path approval only flips plan status when every applicable check is green.
  * The plan-page route leaves requireAllGreen off, so a hard yellow still approves.
  * Promo plans do not dispatch legacy to-dos and do not write a budget or a Meta draft.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { GateFacts } from '@/lib/marketing-plan/promo/gates'
+import { evaluateApproval, type GateFacts } from '@/lib/marketing-plan/promo/gates'
 import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 import { parsePromoSpec, type PromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { baseSpec, goodFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
@@ -78,6 +78,32 @@ function landingVerified(spec: PromoSpec): GateFacts {
   })
 }
 
+/** Phase 1 is social only and due. Phase 2 has ads and starts after the freshness window. */
+function laterAdsSpec(): PromoSpec {
+  const spec = baseSpec()
+  spec.phases[0].steps = spec.phases[0].steps.filter(step => step.kind === 'social_cadence')
+  spec.phases[1] = {
+    id: 'p2', name: '阶段 2', start_date: '2026-12-01', end_date: '2026-12-31',
+    steps: [{
+      id: 'p2-ads', kind: 'ads_campaign', settings: {
+        ad_account_id: 'act_1', daily_budget_cents: 5000, audience_ref: 'aud-1',
+        creative_refs: ['vid-1'], placements: [], paused_ranges: [],
+      },
+    }],
+  }
+  return spec
+}
+
+function laterPhaseVerified(spec: PromoSpec): GateFacts {
+  const contentHash = promoContentHash(spec)
+  return goodFacts({
+    manual_checks: (['landing.item_live', 'content.wording_permission'] as const).map(check_key => ({
+      phase_id: 'p2', check_key, verified_by: 'ray@example.com',
+      verified_at: '2026-10-28T00:00:00Z', note: '', content_hash: contentHash,
+    })),
+  })
+}
+
 beforeEach(() => {
   h.updates = []
   h.dispatch.mockReset()
@@ -86,7 +112,7 @@ beforeEach(() => {
 })
 
 describe('approvePlan requireAllGreen', () => {
-  it('approves a draft whose hard checks are all green, and only writes plan status', async () => {
+  it('approves a draft whose applicable checks are all green, and only writes plan status', async () => {
     draft(socialSpec())
     const result = await approvePlan({ clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com', requireAllGreen: true })
     expect(result.kind).toBe('approved')
@@ -97,6 +123,41 @@ describe('approvePlan requireAllGreen', () => {
     const meta = h.updates[0].generation_meta as { model: string; approval_receipt: { content_hash: string } }
     expect(meta.model).toBe('x')
     expect(meta.approval_receipt.content_hash).toEqual(expect.any(String))
+  })
+
+  it('does not co-approve when a later phase budget gate is yellow', async () => {
+    const promo = draft(laterAdsSpec())
+    h.gate = laterPhaseVerified(promo)
+    const verdict = evaluateApproval(promo, h.gate)
+    const budget = verdict.results.find(result => result.key === 'ads.budget_within_caps' && result.phase_id === 'p2')
+    expect(verdict.can_approve).toBe(true)
+    expect(verdict.per_phase.find(phase => phase.phase_id === 'p2')?.due).toBe(false)
+    expect(budget?.light).toBe('yellow')
+    expect(verdict.deferred_blockers).toEqual([])
+    const result = await approvePlan({ clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com', requireAllGreen: true })
+    expect(result.kind).toBe('needs_confirmation')
+    if (result.kind === 'needs_confirmation') {
+      expect(result.checks.map(check => ({ key: check.key, light: check.light, phase_id: check.phase_id }))).toEqual([
+        { key: 'ads.budget_within_caps', light: 'yellow', phase_id: 'p2' },
+      ])
+    }
+    expect(h.updates).toHaveLength(0)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('does not co-approve a social-only plan when the cadence check is gray', async () => {
+    const promo = draft(socialSpec())
+    h.gate = goodFacts({ daily_plan_coverage_days: null })
+    const verdict = evaluateApproval(promo, h.gate)
+    expect(verdict.can_approve).toBe(true)
+    expect(verdict.results.find(result => result.key === 'social.cadence_scheduled')).toMatchObject({ light: 'gray', hard: false })
+    const result = await approvePlan({ clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com', requireAllGreen: true })
+    expect(result.kind).toBe('needs_confirmation')
+    if (result.kind === 'needs_confirmation') {
+      expect(result.checks.map(check => check.key)).toEqual(['social.cadence_scheduled'])
+    }
+    expect(h.updates).toHaveLength(0)
+    expect(h.dispatch).not.toHaveBeenCalled()
   })
 
   it('does not approve when a hard check is yellow', async () => {

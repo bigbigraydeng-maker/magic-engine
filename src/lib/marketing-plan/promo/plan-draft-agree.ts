@@ -1,8 +1,8 @@
 /**
  * "Agree" on a prescription may carry its plan draft along.
  *
- * Every hard check green  -> the plan is approved with the same click.
- * Any yellow / red / grey -> nothing is approved; a confirmation card asks the OPC.
+ * Every applicable check green -> the plan is approved with the same click.
+ * Any yellow / red / grey, on any phase -> nothing is approved; a confirmation card asks the OPC.
  * Only OPC accounts count. An agent never approves. Plan state only: no Meta draft,
  * no Meta write, no spend, no budget change. A failure here never blocks the
  * prescription agree itself; the outcome is returned and stored for the agree card.

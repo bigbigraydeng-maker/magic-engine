@@ -145,14 +145,18 @@ describe('helpers', () => {
     expect(planAgreeFromMeta({})).toBeNull()
   })
 
-  it('hardNotGreen counts due hard non-green and deferred blockers, not soft yellow', () => {
-    const soft = gate({ hard: false, light: 'yellow' })
-    const hardYellow = gate({ light: 'yellow' })
-    const deferred = gate({ key: 'ads.cap_set', light: 'red' })
+  it('hardNotGreen counts every non-green applicable check on every phase', () => {
+    const green = gate({})
+    const softYellow = gate({ key: 'social.cadence_scheduled', hard: false, light: 'yellow' })
+    const softGray = gate({ key: 'content.wording_permission', hard: false, light: 'gray' })
+    const laterYellow = gate({ key: 'ads.budget_within_caps', light: 'yellow', phase_id: 'p2' })
     const verdict = {
-      per_phase: [{ phase_id: 'p1', phase_name: 'one', due: true, results: [gate({}), soft, hardYellow] }],
-      deferred_blockers: [deferred],
+      per_phase: [
+        { phase_id: 'p1', phase_name: 'one', due: true, results: [green, softYellow, softGray] },
+        { phase_id: 'p2', phase_name: 'two', due: false, results: [laterYellow, gate({ phase_id: 'p2' })] },
+      ],
+      deferred_blockers: [],
     } as unknown as ApprovalVerdict
-    expect(hardNotGreen(verdict)).toEqual([hardYellow, deferred])
+    expect(hardNotGreen(verdict)).toEqual([softYellow, softGray, laterYellow])
   })
 })
