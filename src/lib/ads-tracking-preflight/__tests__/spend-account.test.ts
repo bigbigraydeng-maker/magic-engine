@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildItemLinks, collectBudgetFacts, collectMetaFacts } from '../collect'
+import { judgeAccountBilling } from '../judge'
 import type { TrackingClientConfig } from '../types'
 import adspixelsFixture from './fixtures/graph-adspixels.json'
 
@@ -89,6 +90,40 @@ describe('spend_ad_account_id：广告实际投放的账户', () => {
     const { fetcher, urls } = makeFetcher()
     await collectMetaFacts('c1', { ...CONFIG, spend_ad_account_id: OFFICIAL }, [], { now: NOW, fetcher, resolveMetaToken: async () => 'T', sleep: async () => {} })
     expect(urls.filter(u => new URL(u).pathname.endsWith(`/${OFFICIAL}`)).length).toBe(1)
+  })
+
+  it('🔴 投放账户读不到时账户状态是 null、「账户与付款」判灰，绝不退回官方账户的状态当成绿', async () => {
+    const urls: string[] = []
+    const fetcher = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input)
+      urls.push(url)
+      const path = new URL(url).pathname.replace(/^\/v\d+\.\d+\//, '')
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 })
+      if (path === `${OFFICIAL}/adspixels`) return json(adspixelsFixture)
+      if (path === OFFICIAL) return json({ account_status: 1, disable_reason: 0, funding_source: '3000000000000001', currency: 'NZD', spend_cap: '0', amount_spent: '0' })
+      if (path === `${SPEND}/campaigns` || path === `${SPEND}/adsets`) return json({ data: [] })
+      return new Response('{}', { status: 404 }) // 投放账户本身读不到
+    })
+    const meta = await collectMetaFacts('c1', cfg, [], { now: NOW, fetcher, resolveMetaToken: async () => 'T', sleep: async () => {} })
+    expect(meta.facts.account).toBeNull()
+    expect(meta.errors.length).toBeGreaterThan(0)
+    const budget = await collectBudgetFacts('c1', cfg, { now: NOW, fetcher, supabase: makeDb(), resolveMetaToken: async () => 'T', sleep: async () => {} })
+    expect(judgeAccountBilling({ config: cfg, meta: meta.facts, budget: budget.facts }).status).toBe('gray')
+  })
+
+  it('🔴 投放账户编号格式不对：账户状态 null，不发请求读它，也不退回官方账户', async () => {
+    const { fetcher, urls } = makeFetcher()
+    const out = await collectMetaFacts('c1', { ...CONFIG, spend_ad_account_id: 'not-an-account' }, [], { now: NOW, fetcher, resolveMetaToken: async () => 'T', sleep: async () => {} })
+    expect(out.facts.account).toBeNull()
+    expect(out.errors.some(e => e.error.includes('编号格式不对'))).toBe(true)
+    expect(urls.some(u => u.includes('not-an-account'))).toBe(false)
+  })
+
+  it('没有 Meta 令牌：什么都不读，账户状态 null（和以前一样，不因新配置改变）', async () => {
+    const { fetcher, urls } = makeFetcher()
+    const out = await collectMetaFacts('c1', cfg, [], { now: NOW, fetcher, resolveMetaToken: async () => null, sleep: async () => {} })
+    expect(out.facts.account).toBeNull()
+    expect(urls.length).toBe(0)
   })
 
   it('预算：在投合计和上限都按投放账户读，不是官方账户', async () => {
