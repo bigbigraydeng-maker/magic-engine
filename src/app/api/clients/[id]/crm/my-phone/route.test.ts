@@ -62,7 +62,7 @@ function install() {
         const get = (key: string) => rec.filters.find(([k]) => k === key)?.[1]
         const row = fake.rows.find((r) => r.id === get('id'))
         const want = get('extension_map')
-        const same = row && (want === null ? row.extension_map === null : canon(row.extension_map) === canon(JSON.parse(want as string)))
+        const same = row && typeof want === 'string' && canon(row.extension_map) === canon(JSON.parse(want))
         if (!row || !same) return { data: [], error: null }
         row.extension_map = patch.extension_map
         return { data: [{ id: row.id }], error: null }
@@ -163,5 +163,13 @@ describe('POST 员工登记自己的手机', () => {
     const res = await post({ phone: '0212345678' })
     expect(res.status).toBe(409)
     expect(updates).toHaveLength(5)
+  })
+  it('🔴 登记表里存的是 JSON null（列不允许 SQL NULL）→ 条件用 eq \'null\' 匹配，一次登记成功，不会空转 5 次报 409', async () => {
+    fake.rows = [{ id: 'conn-1', extension_map: null }]
+    const res = await post({ phone: '0212345678' })
+    expect(res.status).toBe(200)
+    expect(updates).toHaveLength(1)
+    expect(updates[0].filters).toContainEqual(['extension_map', 'null'])
+    expect(fake.rows[0].extension_map).toEqual({ '+64212345678': 'op1@example.test' })
   })
 })

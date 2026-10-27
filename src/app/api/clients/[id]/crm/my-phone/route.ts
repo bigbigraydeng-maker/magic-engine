@@ -52,7 +52,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .update({ extension_map: result.map })
       .eq('id', conn.id)
       .eq('client_id', clientId)
-    const guarded = raw === null || raw === undefined ? base.is('extension_map', null) : base.eq('extension_map', JSON.stringify(raw))
+    // 列是 jsonb NOT NULL：存的「空」是 JSON null（读回来也是 null），要用 eq 'null' 匹配，.is(null) 只认 SQL NULL，永远命中不了。
+    const guarded = base.eq('extension_map', JSON.stringify(raw ?? null))
     const { data: hit, error: uErr } = await guarded.select('id')
     if (uErr) return NextResponse.json({ error: '操作失败' }, { status: 500 })
     if (hit && hit.length > 0) return NextResponse.json({ ok: true, phone: result.phone })
