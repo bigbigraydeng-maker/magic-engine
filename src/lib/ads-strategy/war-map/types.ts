@@ -71,7 +71,8 @@ export interface CampaignFrequencyInput {
 export interface AccountActivity {
   /** 这个账户最近一个有花费的数据日；null = 从没花过 */
   lastSpendDay: string | null
-  hasActiveAdset: boolean
+  /** true = 看到 ACTIVE；false = 看到了广告组但没有 ACTIVE；null = 这两天没看到快照，不能当成没有 */
+  hasActiveAdset: boolean | null
 }
 
 export interface GrowthProblemInput {
@@ -204,7 +205,7 @@ export interface AccountPoolSummary {
   /** 这个账户里最大的池子（读得准的才算）；没有 = null */
   biggestPoolName: string | null
   biggestPoolSize: number | null
-  /** 这个账户现在没在投（最近 2 天没花费、也没有 ACTIVE 广告组）；没有新数据是正常的 */
+  /** 这个账户现在没在投：有够新且完整的停投证据；没有新数据是正常的 */
   dormant: boolean
   poolCount: number
   light: Light
@@ -247,7 +248,7 @@ export interface WarMapView {
   accounts: AccountView[]
   accountSummaries: AccountPoolSummary[]
   pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number; unusableRows: PoolRow[] }
-  /** windowLabel：花费和频率对应的真实日期区间（数据日往前 7 天），如「10/4–10/10」 */
+  /** windowLabel：花费和频率对应的真实日期区间（实际读取的窗口往前 7 天），如「10/4–10/10」 */
   frequency: { headline: Headline; rows: FrequencyRow[]; stoppedRows: FrequencyRow[]; windowLabel: string | null }
   adjust: { headline: Headline; actions: ActionRow[] }
   goalNote: GoalNote | null

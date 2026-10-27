@@ -69,10 +69,11 @@ export function frequencyHeadline(rows: FrequencyRow[], staleDays: number | null
   return { light: 'green', sentence: `频率没过高，最高 ${max.toFixed(2)}，红线 3` }
 }
 
-/** 和表头同一个口径：同一个数据日、同一个「停了几天」，以及哪些系列已经停了 */
+/** 停更文案跟表头同一个口径；花费区间用实际读取的窗口末日（不传则跟 dataDay 一样） */
 export interface FrequencyScope {
   dataDay: string | null
   staleDays: number | null
+  windowEnd?: string | null
   isStopped: (c: CampaignFrequencyInput) => boolean
 }
 
@@ -92,10 +93,11 @@ export function buildFrequency(
   const stoppedRows = spending.filter(c => scope.isStopped(c)).map(c => stoppedRowOf(c, names))
   const headline = frequencyHeadline(rows, scope.staleDays, scope.dataDay)
   const tail = stoppedRows.length > 0 ? `（另有 ${stoppedRows.length} 条已停的系列不计入，见下方）` : ''
+  const windowDay = scope.windowEnd !== undefined ? scope.windowEnd : scope.dataDay
   return {
     headline: tail ? { ...headline, sentence: headline.sentence + tail } : headline,
     rows,
     stoppedRows,
-    windowLabel: windowLabel(scope.dataDay),
+    windowLabel: windowLabel(windowDay),
   }
 }

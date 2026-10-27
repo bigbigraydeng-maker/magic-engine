@@ -442,6 +442,29 @@ describe('数据新鲜度只算真在投的账户（#3322）', () => {
     }))
     expect(v.pools.headline.light).toBe('green')
   })
+  it('取数超过 2 天没成功：不能把空的广告组窗口当成全停，单账户仍报数据陈旧', () => {
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-13', fetchedAt: FETCH_3D_AGO },
+      accountDataDays: { act_1: '2026-10-13' },
+      accountFetchedAt: { act_1: FETCH_3D_AGO },
+      accountActivity: { act_1: { lastSpendDay: '2026-10-13', hasActiveAdset: false } },
+      campaigns: [camp({ frequency7d: 1.4, lastSpendDay: '2026-10-13' })],
+    }))
+    expect(v.accountSummaries[0]?.dormant).toBe(false)
+    expect(v.clocks.staleDays).toBe(3)
+    expect(v.clocks.note ?? '').not.toContain('没在投')
+  })
+  it('没看到广告组快照：不能当成已停，哪怕最近花费日已经很旧', () => {
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-15', fetchedAt: FETCH_TODAY },
+      accountDataDays: { act_1: '2026-10-10' },
+      accountFetchedAt: { act_1: FETCH_TODAY },
+      accountActivity: { act_1: { lastSpendDay: '2026-10-10', hasActiveAdset: null } },
+    }))
+    expect(v.accountSummaries[0]?.dormant).toBe(false)
+    expect(v.clocks.staleDays).toBe(0)
+    expect(v.clocks.note ?? '').not.toContain('没在投')
+  })
 })
 
 describe('已停系列不参与最高频率（#3322）', () => {
@@ -459,6 +482,24 @@ describe('已停系列不参与最高频率（#3322）', () => {
     expect(v.frequency.headline.sentence).toContain('最高 1.60')
     expect(v.frequency.windowLabel).toBe('10/9–10/15')
     expect(v.adjust.actions.some(a => a.key.startsWith('freq-'))).toBe(false)
+  })
+  it('两个在投账户数据日不同：频率区间用实际读取的全局数据日，不用较旧的那个', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct({ adAccountId: 'act_new', name: '新号' }), acct({ adAccountId: 'act_old', name: '旧号' })],
+      clocks: { dataDay: '2026-10-15', fetchedAt: FETCH_TODAY },
+      accountDataDays: { act_new: '2026-10-15', act_old: '2026-10-13' },
+      accountFetchedAt: { act_new: FETCH_TODAY, act_old: FETCH_TODAY },
+      accountActivity: {
+        act_new: { lastSpendDay: '2026-10-15', hasActiveAdset: true },
+        act_old: { lastSpendDay: '2026-10-13', hasActiveAdset: true },
+      },
+      campaigns: [
+        camp({ campaignId: 'new', adAccountId: 'act_new', frequency7d: 1.2, lastSpendDay: '2026-10-15' }),
+        camp({ campaignId: 'old', adAccountId: 'act_old', frequency7d: 1.4, lastSpendDay: '2026-10-13' }),
+      ],
+    }))
+    expect(v.clocks.dataDay).toBe('2026-10-13')
+    expect(v.frequency.windowLabel).toBe('10/9–10/15')
   })
 })
 

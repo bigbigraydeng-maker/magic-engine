@@ -1,8 +1,9 @@
 /**
  * 数据新不新：只看「真在投」的账户，并把「没花钱」和「取数挂了」分开。
  *
- * 🔴 全停的账户（最近 2 天没花费、设置里也没有 ACTIVE 广告组）没有新数据是正常的，不参与新鲜度；
+ * 🔴 全停的账户（最近取数仍成功、这两天看到的广告组里没有 ACTIVE、最近 2 天也没花费）没有新数据是正常的，不参与新鲜度；
  *    否则一个早就停掉的账户会让整张表头永远报「数据已 N 天没更新」，还把观众池一起挡住。
+ *    取数过期、取数缺失、或这两天没看到广告组快照，都不能当成已停——否则真取数故障会被写成「没在投」。
  * 🔴 「取数挂了」看最近一次取数时间（fetched_at），不看最近一次有花费的日期：
  *    在投账户取数正常但这几天没花钱，是「没花钱」，不是「取数挂了」。读不到取数时间时才退回用数据日。
  */
@@ -24,10 +25,16 @@ export interface Freshness {
   note: string | null
 }
 
-/** 全停 = 有活动记录，但最近 2 天没花费、也没有 ACTIVE 广告组。没有活动记录（老调用方）一律当在投。 */
+/**
+ * 全停要有够新、且完整的证据：最近取数仍成功，并且确实看到广告组里没有 ACTIVE、最近也没花费。
+ * 取数过期、取数缺失、或没看到广告组快照（hasActiveAdset 为 null），都不算已停。
+ * 没有活动记录（老调用方）一律当在投。
+ */
 export function isDormant(input: WarMapInput, adAccountId: string, today: string): boolean {
   const act = input.accountActivity?.[adAccountId]
-  if (!act || act.hasActiveAdset) return false
+  if (!act || act.hasActiveAdset !== false) return false
+  const seen = fetchSignalDay(input, adAccountId)
+  if (seen === null || diffDays(seen, today) > DATA_STALE_DAYS) return false
   return act.lastSpendDay === null || diffDays(act.lastSpendDay, today) > DATA_STALE_DAYS
 }
 

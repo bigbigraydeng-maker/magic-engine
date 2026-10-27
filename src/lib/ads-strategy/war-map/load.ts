@@ -417,7 +417,14 @@ async function loadAccountFetchedAt(clientId: string, accounts: AccountInput[]):
   return Object.fromEntries(entries)
 }
 
-/** 账户在不在投：最近有花费的日子取自已读到的系列日报，ACTIVE 广告组取自广告组快照 */
+/** 这两天没看到该账户的广告组快照时返回 null，不能把「窗口是空的」写成「没有 ACTIVE」。 */
+function observedActiveAdset(adsets: AdsetInput[], id: string): boolean | null {
+  const seen = adsets.filter(s => s.adAccountId === id)
+  if (seen.length === 0) return null
+  return seen.some(s => s.effectiveStatus === 'ACTIVE')
+}
+
+/** 账户在不在投：最近有花费的日子取自已读到的系列日报，ACTIVE 广告组只在看到快照时才下结论 */
 function buildAccountActivity(
   accounts: AccountInput[],
   campaigns: CampaignFrequencyInput[],
@@ -432,7 +439,7 @@ function buildAccountActivity(
       .filter((d): d is string => d !== null)
     out[a.adAccountId] = {
       lastSpendDay: days.length > 0 ? days.reduce((x, y) => (y > x ? y : x)) : null,
-      hasActiveAdset: adsets.some(s => s.effectiveStatus === 'ACTIVE' && s.adAccountId === id),
+      hasActiveAdset: observedActiveAdset(adsets, id),
     }
   }
   return out

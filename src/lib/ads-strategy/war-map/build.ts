@@ -118,7 +118,12 @@ export function buildWarMap(input: WarMapInput): WarMapView {
   const frequency = buildFrequency(
     { ...input, campaigns: input.campaigns.filter(c => usable.has(c.adAccountId)) },
     names,
-    { dataDay: fresh.dataDay, staleDays: fresh.staleDays, isStopped: campaignStopped(input, fresh) },
+    {
+      dataDay: fresh.dataDay,
+      staleDays: fresh.staleDays,
+      windowEnd: input.clocks.dataDay,
+      isStopped: campaignStopped(input, fresh),
+    },
   )
   const adjust = buildAdjust({
     input,
@@ -133,7 +138,7 @@ export function buildWarMap(input: WarMapInput): WarMapView {
   return {
     generatedAt: input.now,
     countdown: buildCountdown(input, today),
-    // 表头的「数据日」「已 N 天」和频率卡同一口径：只看真在投的账户，取数断没断看最近一次取数时间
+    // 表头的「数据日」「已 N 天」只看真在投的账户，取数断没断看最近一次取数时间。频率花费区间另用实际读取的窗口。
     clocks: { ...input.clocks, dataDay: fresh.dataDay, staleDays: fresh.staleDays, note: fresh.note },
     accounts,
     accountSummaries: buildAccountSummaries(input, accounts, pools.everyRow, today, fresh.dormantIds),
