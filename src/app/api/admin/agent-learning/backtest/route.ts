@@ -2,10 +2,12 @@
  * POST /api/admin/agent-learning/backtest  { lessonKey, clientId }
  * 只读：按经验文字自动匹配回测规则，读该客户近 90 天 ad_daily_insights 现算。
  * 不调模型、不写库、不碰广告账户；只收经验 key 和客户 id。
+ * 日数据按 id 分页读全。单次查询最多 1000 行；读不全就失败，不拿半份下结论。
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
+import { fetchAll } from '@/lib/supabase-paginate'
 import {
   BACKTEST_DAYS, classifyBacktest, describeBacktest, runBacktest, type InsightRow,
 } from '@/lib/agent-learning/lesson-verify/backtest'
@@ -19,6 +21,21 @@ function overLimit(now: number): boolean {
   if (hits.length >= HOURLY_LIMIT) return true
   hits.push(now)
   return false
+}
+
+/** 近 90 天 campaign 日数据。id 唯一，分页顺序稳定，不会重复或漏行。 */
+function loadCampaignDaily(clientId: string, since: string): Promise<InsightRow[]> {
+  return fetchAll<InsightRow>((from, to) =>
+    supabaseAdmin
+      .from('ad_daily_insights')
+      .select('frequency, cpm, ctr, impressions')
+      .eq('client_id', clientId)
+      .eq('platform', 'meta')
+      .eq('level', 'campaign')
+      .gte('insight_date', since)
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
 }
 
 export async function POST(req: NextRequest) {
@@ -43,17 +60,15 @@ export async function POST(req: NextRequest) {
   if (!rule) return NextResponse.json({ success: true, backtestable: false, summary: '无法回测：这条经验没有对应的可计算指标。' })
 
   const since = new Date(Date.now() - BACKTEST_DAYS * 86_400_000).toISOString().slice(0, 10)
-  const { data, error } = await supabaseAdmin
-    .from('ad_daily_insights')
-    .select('frequency, cpm, ctr, impressions')
-    .eq('client_id', body.clientId)
-    .eq('platform', 'meta')
-    .eq('level', 'campaign')
-    .gte('insight_date', since)
-    .limit(5000)
-  if (error) return NextResponse.json({ success: false, error: '读取广告数据失败，请稍后再试' }, { status: 500 })
-  if (!data?.length) return NextResponse.json({ success: true, backtestable: false, summary: '无法回测：该客户没有广告数据。' })
+  // 读到 10 万行上限时 fetchAll 抛错。失败返回，不把半份样本说成「过去 90 天」。
+  let data: InsightRow[]
+  try {
+    data = await loadCampaignDaily(body.clientId, since)
+  } catch {
+    return NextResponse.json({ success: false, error: '读取广告数据失败，请稍后再试' }, { status: 500 })
+  }
+  if (!data.length) return NextResponse.json({ success: true, backtestable: false, summary: '无法回测：该客户没有广告数据。' })
 
-  const result = runBacktest(rule, data as InsightRow[])
+  const result = runBacktest(rule, data)
   return NextResponse.json({ success: true, backtestable: true, verdict: result.verdict, summary: describeBacktest(result) })
 }
