@@ -1,11 +1,11 @@
 # 迁移对账表（MIGRATION-MAP）
 
-> **负责人**：苏东坡（`sudongpo`）· [苏东坡档案](../../agents/14-sudongpo.md)
+> **负责人**：苏东坡（`sudongpo`）（维护人，无改正文权；升进正文须子牙签字+PM 合并）· [苏东坡档案](../../agents/14-sudongpo.md)
 > **范围**：迁移对账表：原文要点编号 → 去向
 > **状态**：迁移稿，待 PM 审批（不新增规则、不改含义）
 > **日期**：2026-10-28
 > **最后核实**：2026-10-28（对照迁移源逐条核对）
-> **风险**：C 级纯文档；迁入内容不等于获批的新规则
+> **风险**：A 级（经验手册正文，改正文须 PM 回「合」）；本次迁移为纯文档；迁入内容不等于获批的新规则
 > **代码依据**：无（纯文档，不涉及代码；规则来源为开发侧记忆原文）
 
 > 作用：让人核对「没有漏迁、没有改义」。原文每个要点一个编号，一行一条，写明去向。迁移日期 2026-10-28；迁移稿只搬运、不新增规则、不改含义。
@@ -16,8 +16,8 @@
 
 ## 统计
 
-- 原文要点总数：**230** 条（含元数据与指针行）。
-- 去向：平台层 **186** · 行业层（旅游，候选）**6** · 客户层 **29** · README 吸收 **1** · 留在记忆不迁 **2** · 丢弃 **6**。
+- 原文要点总数：**231** 条（含元数据与指针行）。
+- 去向：平台层 **186** · 行业层（旅游，候选）**5**（B4 第二轮移入客户层，行业层只留指针）· 客户层 **31**（含 S23.2x、B4） · README 吸收 **1** · 留在记忆不迁 **2** · 丢弃 **6**。
 - 说明：有些要点被拆成两半（规则放平台层、事故/数字放客户层），拆分的以 `x` 后缀另立一行，不在上面重复计数；同时进两处的（S13.5 规则与实例、S14.1/S17.1/S19.1/S20.1/S21.1 去项目名后的规则）按主去向计一次。
 - 「拿不准归层」的见文末「待判清单」。
 
@@ -78,7 +78,7 @@
 | S7.6 | §七 提示词避免"浅景深" | platform-general §七 | 逐字 |
 | S7.7 | §七 验证看成片实际用到的剪辑区间 | platform-general §七 | 逐字 |
 | S8.1 | §八 来源：Reel 正文链接不可点击、带链接正文被压触达 | platform-general §八 | 逐字 |
-| S8.2 | §八 怎么用 1：一律用 Reel，IG 同理 | platform-general §八 | 逐字 |
+| S8.2 | §八 怎么用 1：一律用 Reel，IG 同理 | platform-general §八 | 逐字；第二轮加「已过期/待核」标注，保留原文 |
 | S8.3 | §八 怎么用 2：CTA 链接放首评 | platform-general §八 | 逐字 |
 | S8.4 | §八 怎么用 3：首评链接必须带追踪参数 | platform-general §八 | 逐字 |
 | S9.1 | §九 来源：多轮复刻流行剪辑风格仍不满意，瓶颈其实是素材形态 | platform-general §九 | 逐字 |
@@ -132,9 +132,9 @@
 | S20.1 | §二十 来源：收尾杂音被转写成孤立中文碎片（2026-09-23） | platform-general §二十；项目归属 clients/darui.md S20.1x | 去项目名 |
 | S20.1x | §二十 来源的项目归属（大瑞） | clients/darui.md §一 | 含客户名，拆出 |
 | S20.2 | §二十 怎么用：找到语义完整的最后一句，其后一律剪掉 | platform-general §二十 | 逐字 |
-| S21.1 | §二十一 来源：Dropbox 连接器绑的是另一个账号，本机同步客户端才是真实账号 | platform-general §二十一；项目归属 clients/darui.md S21.1x | 归层待判（开发环境经验） |
+| S21.1 | §二十一 来源：Dropbox 连接器绑的是另一个账号，本机同步客户端才是真实账号 | platform-general §二十一；项目归属 clients/darui.md S21.1x | 归层待判（开发环境经验）；第二轮条前加「环境问题，非社媒规则」标注 |
 | S21.1x | §二十一 来源的项目归属（大瑞） | clients/darui.md §一 | 含客户名，拆出 |
-| S21.2 | §二十一 怎么用：复制进已分享文件夹等同步，找分享链接，用完删临时文件 | platform-general §二十一 | 逐字 |
+| S21.2 | §二十一 怎么用：复制进已分享文件夹等同步，找分享链接，用完删临时文件 | platform-general §二十一 | 逐字；同上 |
 | S22.0 | §二十二 来源与前言（2026-10-06 两条 Reel 五轮；客户私有数字不在这里） | platform-general §二十二 | 去客户名 |
 | S22.1a | §二十二 1：审核「字幕疑似内部标签冒充文案」是 AI 打分；先看送审整段字幕，itemLabel 重复是强信号 | platform-general §二十二 | 逐字；content-quality-guard.ts 核实仍在 |
 | S22.1b | §二十二 1：换词方法：本机各打 3 次分对比；本机分≠线上分 | platform-general §二十二 | 逐字 |
@@ -143,17 +143,18 @@
 | S22.3 | §二十二 3：「默认不变」要有证据（单测+新旧渲染 SSIM=1.000000+与出片机成片对比） | platform-general §二十二 | 逐字 |
 | S22.4 | §二十二 4：两版拿不准让审查类 agent 判，要数字让他们给，不一致取更保守 | platform-general §二十二 | 逐字 |
 | S22.5a | §二十二 5：面向中老年观众的字幕节奏（两位审查给的数，CTS 先用，同类客户可参考）全部数字 | clients/cts.md §五 | 按任务要求放客户层 |
-| S22.5b | §二十二 5 末句：受众特性进客户 props，不进共享模板默认值 | platform-general §二十二 | 逐字 |
-| S22.6 | §二十二 6：出片机更新流程（detached 检出、先 fetch 再 checkout、launchctl kickstart、读日志、记回退办法） | platform-general §二十二 | 逐字 |
-| S22.7 | §二十二 7：建单与取回成片自检（SQL 插入、花费上限 0.5、9 宫格、volumedetect） | platform-general §二十二 | 逐字 |
-| S22.8 | §二十二 8：素材来源核对（SHA-256 比对；Dropbox 素材 PM 已说多次有授权） | platform-general §二十二 | 逐字 |
-| S22.9 | §二十二 9：工具小坑 | platform-general §二十二 | 逐字 |
+| S22.5b | §二十二 5 末句：受众特性进客户 props，不进共享模板默认值 | platform-general §二十二 | 逐字；第二轮补「示例客户 = clients/cts.md」 |
+| S22.6 | §二十二 6：出片机更新流程（detached 检出、先 fetch 再 checkout、launchctl kickstart、读日志、记回退办法） | platform-general §二十二 | 逐字；第二轮 launchctl 后加「有副作用，须有任务授权」 |
+| S22.7 | §二十二 7：建单与取回成片自检（SQL 插入、花费上限 0.5、9 宫格、volumedetect） | platform-general §二十二 | 逐字；第二轮加「写生产库须已获授权」，「服务密钥」改注为「授权方式（原文写为服务密钥）」 |
+| S22.8 | §二十二 8：素材来源核对（SHA-256 比对；Dropbox 素材 PM 已说多次有授权） | platform-general §二十二 | 逐字；第二轮加适用范围限定 |
+| S22.9 | §二十二 9：工具小坑 | platform-general §二十二 | 逐字；第二轮加「待审」标注，原文保留 |
 | S22.10 | §二十二 末：相关证据文件（审计文档 + 台账卡） | platform-general §二十二 | 两个文件均核实存在 |
 | S23.0 | §二十三 来源与前言（2026-10-09 三轮重做，6 条必改） | platform-general §二十三 | 去客户名 |
 | S23.1a | §二十三 1：地名字幕要硬证据（Unsplash location 字段/官网出处） | platform-general §二十三 | 逐字 |
 | S23.1b | §二十三 1：画面里可识别文字（招牌/灯笼/路牌）＝硬否决证据 | platform-general §二十三 | 逐字 |
 | S23.1c | §二十三 1：拿不到画面的站点用文字在正文里提 | platform-general §二十三 | 逐字 |
-| S23.2 | §二十三 2：单复数要对着官网数一遍（ANCIENT WATER TOWNS 例） | platform-general §二十三 | 逐字 |
+| S23.2 | §二十三 2：单复数要对着官网数一遍 | platform-general §二十三（例子改为通用说明「某旅游客户的一条团文案」）| 规则句逐字；例子拆到 S23.2x |
+| S23.2x | §二十三 2 的原文例子：`ANCIENT WATER TOWNS` 写成复数、官网行程只有一个水乡古镇 | clients/cts.md §六 | 含客户行程文案，第二轮拆出 |
 | S23.3a | §二十三 3：先量素材底部亮度（0.7/2.2）再判渐变还是取景 | platform-general §二十三 | 逐字 |
 | S23.3b | §二十三 3：改取景不动共享渐变系数；改后 13.4/7.3 | platform-general §二十三 | 逐字 |
 | S23.3c | §二十三 3：ffmpeg 量底部 15% 亮度的判据命令 | platform-general §二十三 | 逐字 |
@@ -164,7 +165,7 @@
 | S23.5x | §二十三 5 的具体结果：4 秒 vs 7.8 秒，主张砍时长者复核时撤回 | clients/cts.md §六 | 含客户受众事实，拆出 |
 | S23.5b | §二十三 5：被否决的建议里常裹着真问题（末段静止占 24% → 加极慢推镜） | platform-general §二十三 | 逐字 |
 | S23.6a | §二十三 6：brief 里的已核实事实要和画面文字同颗粒度 | platform-general §二十三 | 逐字 |
-| S23.6b | §二十三 6：审查意见里基于 PM 已拍板之事要当场顶回，转述前先过滤 | platform-general §二十三 | 逐字 |
+| S23.6b | §二十三 6：审查意见里基于 PM 已拍板之事要当场顶回，转述前先过滤 | platform-general §二十三 | 逐字；第二轮加适用范围限定 |
 | S23.7 | §二十三 配套做法：改动送回原审查 agent 复核，写清改前改后的数 | platform-general §二十三 | 逐字 |
 | S-IND.1 | 文末「行业层现状说明」：目前没有跟行业绑定的独立方法论；旅游类样本是数据资产不是方法论结论 | industry-travel.md §三 | 逐字 |
 | S-REL | 文末「关联」一行：feedback-viral-reel-recipe-over-montage、feedback-video-caption-short-big、project-me-video-two-line-strategy、project-social-video-i2v-muapi、reference-meta-reel-measurable-metrics-without-read-insights、reference-thruplay-video-creative-metrics、feedback-client-content-ground-in-website、feedback-search-hit-is-not-content-match、project-video-editing-style-buy-not-build、feedback-two-window-content-coordination、playbook-ads-meta-general | 留在记忆不迁 | 指针列表；其中前两条、feedback-client-content-ground-in-website/feedback-search-hit 内容已被 S3/S11/S12 等覆盖；其余不在本次指定迁移源 |
@@ -198,8 +199,8 @@
 | R2.2 | 行 24 第一版 CTS reel：开场长城空镜+每帧压 logo+尾卡；PM 批"太平静/一堆照片的串联" | clients/cts.md §一 | 含客户事故 |
 | R2.3 | 行 26 根因+数字：58 条旅游爆款镜长中位 2.14s、首切 2.83s、镜头数 14；ugc-selfie 16 次、drone 11 次、真实感 6.35/10 | industry-travel.md §一（通用根因在 S1.5） | 旅游样本数字 |
 | R2.4 | 行 28："节奏抄满，内容形态一条没抄 = 卡得很准的幻灯片" | platform-general §一 | 逐字 |
-| R2.5 | 行 30 加一条硬前置：动手前把本条与 i2v 记忆重读全文 | platform-general §一 | 逐字；被指向的 i2v 记忆未迁 |
-| R3.0 | 行 33 How 0：先重读本文全文+i2v 全文 | platform-general §一 | 逐字 |
+| R2.5 | 行 30 加一条硬前置：动手前把本条与 i2v 记忆重读全文 | platform-general §一 | 逐字；被指向的 i2v 记忆未迁；第二轮加「完整记忆文件未迁入」标注 |
+| R3.0 | 行 33 How 0：先重读本文全文+i2v 全文 | platform-general §一 | 逐字；同上 |
 | R3.1 | 行 34 How 1：query 该行业 top-by-views，抽 opening_hook/key_techniques/style_tags | platform-general §一 | 逐字 |
 | R3.1b | 行 35 How 1b：逐列自检，需换素材形态的列 | platform-general §一 | 逐字 |
 | R3.2 | 行 36 How 2：frame-1 文字钩子→快切→problem-solution/listicle→弱化 logo/尾卡；音乐要卡点 | platform-general §一 | 逐字 |
@@ -265,8 +266,8 @@
 | B-FM | frontmatter（行 1-9） | 丢弃 | 记忆元数据，含会话编号 |
 | B1 | 行 11 PM 10-15：CTS 主页视频同一首 BGM、清一色 Remotion 价格屏，刷新很重复 | clients/cts.md §八 | 含客户观察 |
 | B2 | 行 13 Why：内容单一显得像硬广，影响主页观感 | clients/cts.md §八 | 含客户观察 |
-| B3 | 行 14 How（BGM 部分）：相邻不同曲、7 天最多复用一次 | clients/cts.md §八 | 归层待判（不依赖行业，可能上提平台层） |
-| B4 | 行 14 How（内容配比部分）：连续 4 条里清单/价格卡至多 1 条，其余景点氛围/行程故事/贴士/图文/Story | industry-travel.md §二；cts.md 处有指向 | 候选，单客户证据 |
+| B3 | 行 14 How（BGM 部分）：相邻不同曲、7 天最多复用一次 | clients/cts.md §八 | 归层待判（不依赖行业，可能上提平台层）；第二轮：B3、B4 同出一句 PM 原话，同放本文件 |
+| B4 | 行 14 How（内容配比部分）：连续 4 条里清单/价格卡至多 1 条，其余景点氛围/行程故事/贴士/图文/Story | **clients/cts.md §八**（第二轮由行业层移入）；industry-travel.md §二只留指针 | 候选，单客户证据；去向变化：industry-travel → clients/cts.md |
 | B5 | 行 14 末：交 97 号做放行规则，106 管曲库与模板；相关记忆（中老年字幕放慢、P0 优先级） | clients/cts.md §八 | 相关记忆名未迁 |
 
 ## F. reference-video-first-frame-cover-chrome-facts-2026-10-27.md（V；约 23 行）
@@ -298,10 +299,10 @@
 - S21.1、S21.2：Dropbox 连接器与本机客户端的环境经验——偏开发环境而非社媒内容规则，放平台层，待判。
 - S24.4x：24 秒片子只有一首曲子可用且 PM 评价「雷同」——放客户层 CTS，待判。
 - B3：BGM「相邻不同曲、7 天最多复用一次」——不依赖行业，放客户层 CTS，待判（可能上提平台层）。
-- B4：连续 4 条里价格卡至多 1 条的内容配比——放行业层，标候选、单客户证据。
+- B4：连续 4 条里价格卡至多 1 条的内容配比——第二轮改放 clients/cts.md（与 B3 同出一句 PM 原话），行业层只留指针。
 - S22.5a：中老年字幕节奏数字——按任务要求放客户层 CTS；原文写「同类客户可参考」，是否上提行业层待判。
 - S11.1：官网为准的例子（清晨出发登长城）——来自旅游客户但原文未点名，留平台层。
-- S23.2：「ANCIENT WATER TOWNS」复数例子——来自 CTS 行程的字样例子，原文未点名客户，留平台层。
+- S23.2：「ANCIENT WATER TOWNS」复数例子——第二轮移到 clients/cts.md（S23.2x），平台层改为通用说明。
 
 ## 迁移时核实过期项（只加标注，未删改规则）
 
