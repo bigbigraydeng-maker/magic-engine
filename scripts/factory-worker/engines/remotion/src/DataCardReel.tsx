@@ -5,6 +5,8 @@ import { FPS } from './timing'
 import { fontFamily, SAFE_BOTTOM, SAFE_RIGHT, SAFE_TOP } from './theme'
 import { useStyleFamily } from './styles/fonts'
 import { peelStyle } from './styles/select'
+import { StyledDataCard } from './styles/StyledDataCard'
+import { styledDataCardTiming } from './styles/template-craft'
 import type { ResolvedLook } from './styles/types'
 
 const LEFT = 60
@@ -150,11 +152,20 @@ export const DataCardReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const look = peeled.look === undefined || peeled.look === null ? null : (peeled.look as ResolvedLook)
   const family = useStyleFamily(look)
   const props = parseDataCardProps(peeled.body)
-  const timing = computeDataCardTiming(props)
+  const craftTiming = look ? styledDataCardTiming(props.rows, look, FPS) : null
+  const timing = craftTiming ?? computeDataCardTiming(props)
   const frame = useCurrentFrame()
   const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
   if (family === null) return null
-  const logoFile = look?.logoFile ?? props.logoFile
+  if (look && craftTiming) {
+    return (
+      <AbsoluteFill style={{ background: props.bgColor }}>
+        <StyledDataCard props={props} look={look} family={family} timing={craftTiming} />
+        {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+      </AbsoluteFill>
+    )
+  }
+  const logoFile = props.logoFile
   return (
     <AbsoluteFill style={{ background: props.bgColor }}>
       <FontGate>

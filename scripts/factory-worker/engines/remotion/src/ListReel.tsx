@@ -7,6 +7,8 @@ import { computeTimingFromProps, FPS } from './timing'
 import { useStyleFamily } from './styles/fonts'
 import { listPaint, priceChrome } from './styles/paint-list'
 import { peelStyle } from './styles/select'
+import { StyledList } from './styles/StyledList'
+import { styledListTiming } from './styles/template-craft'
 import type { ResolvedLook } from './styles/types'
 
 const Hook: React.FC<{ props: ListReelProps; look: ResolvedLook | null; family: string }> = ({ props, look, family }) => {
@@ -66,13 +68,22 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const look = peeled.look === undefined || peeled.look === null ? null : (peeled.look as ResolvedLook)
   const family = useStyleFamily(look)
   const props = parseListReelProps(peeled.body)
-  const timing = computeTimingFromProps(props)
+  const craftTiming = look ? styledListTiming(props.items.length, look, FPS, props.logoMode) : null
+  const timing = craftTiming ?? computeTimingFromProps(props)
   const flash = props.cutFlash !== false
   const frame = useCurrentFrame()
   const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
   const revealMotion = look ? { damping: look.motion.damping, stiffness: look.motion.stiffness, mass: look.motion.mass } : undefined
   const paint = family === null ? null : listPaint(look, props.brandColor, family, props.itemLabelSize ?? 40, props.revealTitleSize ?? 60)
   if (family === null || paint === null) return null
+  if (look && craftTiming) {
+    return (
+      <AbsoluteFill style={{ background: '#000' }}>
+        <StyledList props={props} look={look} family={family} timing={craftTiming} />
+        {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+      </AbsoluteFill>
+    )
+  }
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       <Sequence from={0} durationInFrames={timing.hookFrames}><Hook props={props} look={look} family={family} /></Sequence>

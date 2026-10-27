@@ -22,19 +22,23 @@ export const CraftShot: React.FC<{
   text: string
   point: string
   rules: ViralRules
-}> = ({ look, family, src, text, point, rules }) => {
+  startFrom?: number
+  beats?: boolean
+}> = ({ look, family, src, text, point, rules, startFrom = 0, beats = true }) => {
   const frame = useCurrentFrame()
   const fit = measureHook(text, rules)
+  const showWords = text !== '' || point !== ''
+  const beatOn = beats && frame % beatEvery(look.craft) < 4
   return (
     <AbsoluteFill style={{ overflow: 'hidden', background: '#000' }}>
-      <PicturePlate craft={look.craft} src={src} />
-      <CaptionPlate look={look} family={family} text={fit.text} point={point} fontScale={fit.fontScale} frame={frame} />
-      {frame % beatEvery(look.craft) < 4 ? <BeatTick color={look.colors.brand} /> : null}
+      <PicturePlate craft={look.craft} src={src} startFrom={startFrom} />
+      {showWords ? <CaptionPlate look={look} family={family} text={fit.text} point={point} fontScale={fit.fontScale} frame={frame} /> : null}
+      {beatOn ? <BeatTick color={look.colors.brand} /> : null}
     </AbsoluteFill>
   )
 }
 
-const PicturePlate: React.FC<{ craft: Craft; src: string }> = ({ craft, src }) => {
+const PicturePlate: React.FC<{ craft: Craft; src: string; startFrom: number }> = ({ craft, src, startFrom }) => {
   const frame = useCurrentFrame()
   const pose = picturePose(frame, craft.picture)
   const enter = transitionPose(frame, motionTransition(craft))
@@ -42,8 +46,8 @@ const PicturePlate: React.FC<{ craft: Craft; src: string }> = ({ craft, src }) =
   return (
     <AbsoluteFill style={{ transform: `translate(${enter.x}px, ${enter.y}px) scale(${enter.scale})`, opacity: enter.opacity, clipPath: clip }}>
       <AbsoluteFill style={{ transform: `translate(${pose.x}px, ${pose.y}px) scale(${pose.scale})` }}>
-        {craft.picture === 'split' ? <Split src={src} /> : <Cover src={src} />}
-        {craft.picture === 'pip' ? <Pip src={src} /> : null}
+        {craft.picture === 'split' ? <Split src={src} startFrom={startFrom} /> : <Cover src={src} startFrom={startFrom} />}
+        {craft.picture === 'pip' ? <Pip src={src} startFrom={startFrom} /> : null}
       </AbsoluteFill>
       {craft.picture === 'grain' ? <Grain /> : null}
       {usesFlash(craft) ? <AbsoluteFill style={{ background: '#fff', opacity: flashOpacity(frame) }} /> : null}
@@ -51,22 +55,22 @@ const PicturePlate: React.FC<{ craft: Craft; src: string }> = ({ craft, src }) =
   )
 }
 
-const Cover: React.FC<{ src: string }> = ({ src }) => (
-  <OffthreadVideo src={staticFile(src)} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+const Cover: React.FC<{ src: string; startFrom: number }> = ({ src, startFrom }) => (
+  <OffthreadVideo src={staticFile(src)} startFrom={startFrom} muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
 )
 
-const Split: React.FC<{ src: string }> = ({ src }) => (
+const Split: React.FC<{ src: string; startFrom: number }> = ({ src, startFrom }) => (
   <AbsoluteFill style={{ display: 'flex' }}>
-    <div style={{ width: '50%', height: '100%', overflow: 'hidden' }}><Cover src={src} /></div>
+    <div style={{ width: '50%', height: '100%', overflow: 'hidden' }}><Cover src={src} startFrom={startFrom} /></div>
     <div style={{ width: '50%', height: '100%', overflow: 'hidden' }}>
-      <div style={{ width: '200%', height: '100%', marginLeft: '-100%' }}><Cover src={src} /></div>
+      <div style={{ width: '200%', height: '100%', marginLeft: '-100%' }}><Cover src={src} startFrom={startFrom} /></div>
     </div>
   </AbsoluteFill>
 )
 
-const Pip: React.FC<{ src: string }> = ({ src }) => (
+const Pip: React.FC<{ src: string; startFrom: number }> = ({ src, startFrom }) => (
   <div style={{ position: 'absolute', left: 70, top: 290, width: 360, height: 520, overflow: 'hidden', border: '4px solid #fff' }}>
-    <div style={{ width: '180%', height: '140%', marginLeft: '-40%', marginTop: '-20%' }}><Cover src={src} /></div>
+    <div style={{ width: '180%', height: '140%', marginLeft: '-40%', marginTop: '-20%' }}><Cover src={src} startFrom={startFrom} /></div>
   </div>
 )
 
@@ -90,7 +94,7 @@ const CaptionPlate: React.FC<{
   const reveal = Math.max(8, Math.round(look.craft.shotSec * 30 * 0.7))
   return (
     <div style={plateStyle(look, box)}>
-      <AnimatedLine look={look} family={family} text={text} frame={frame} reveal={reveal} fontScale={fontScale} />
+      <CraftText look={look} family={family} text={text} frame={frame} reveal={reveal} fontScale={fontScale} />
       <div style={{ marginTop: 10, fontFamily: family, fontSize: 36, fontWeight: 700, color: look.card.placeColor }}>{point}</div>
     </div>
   )
@@ -117,7 +121,7 @@ function plateStyle(look: ResolvedLook, box: { left: number; top: number; width:
   return { ...shared, background: look.card.fill, borderRadius: 0, borderTop: `6px solid ${look.colors.brand}` }
 }
 
-const AnimatedLine: React.FC<{
+export const CraftText: React.FC<{
   look: ResolvedLook
   family: string
   text: string

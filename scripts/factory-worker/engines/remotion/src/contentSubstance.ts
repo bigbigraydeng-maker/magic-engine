@@ -6,6 +6,7 @@ import { computeAtmosphereTiming } from './atmosphere.ts';
 import { computeCompareTiming } from './compare.ts';
 import { montageFrameOf } from './montage.ts';
 import { styledPostcardTiming } from './styles/rules.ts';
+import { styledDataCardTiming, styledListTiming, styledMontageTiming, type CraftLook } from './styles/template-craft.ts';
 
 export type SubstanceKind =
   | 'place_or_tour'
@@ -109,9 +110,21 @@ function asNumber(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+function craftLook(props: Record<string, unknown>): CraftLook | null {
+  const look = asRecord(props.look);
+  const craft = look ? asRecord(look.craft) : null;
+  const rules = look ? asRecord(look.rules) : null;
+  if (!look || !craft || !rules || typeof craft.shotSec !== 'number') return null;
+  return look as unknown as CraftLook;
+}
+
 function collectList(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
-  const timing = computeTimingFromProps(props as never);
+  const look = craftLook(props);
+  const items = asArray(props.items);
+  const timing = look
+    ? styledListTiming(items.length, look, FPS, props.logoMode === 'always' ? 'always' : 'last_beats')
+    : computeTimingFromProps(props as never);
   const hook = asRecord(props.hook);
   const hookLines = hook ? asArray(hook.lines) : [];
   const hookEnd = timing.hookFrames / FPS;
@@ -121,7 +134,6 @@ function collectList(props: Record<string, unknown>): SubstanceElement[] {
     const text = typeof line.text === 'string' ? line.text : '';
     out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
   }
-  const items = asArray(props.items);
   for (let i = 0; i < items.length; i++) {
     const item = asRecord(items[i]);
     if (!item) continue;
@@ -143,6 +155,11 @@ function collectList(props: Record<string, unknown>): SubstanceElement[] {
     startSec: timing.revealFrom / FPS,
     endSec: timing.totalFrames / FPS,
   });
+  if (look) {
+    const first = asRecord(items[0]);
+    const point = first && typeof first.text === 'string' ? first.text : revealTitle;
+    out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: timing.totalFrames / FPS });
+  }
   return out;
 }
 
@@ -226,7 +243,11 @@ function collectCompare(props: Record<string, unknown>): SubstanceElement[] {
 
 function collectDataCard(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
-  const timing = computeDataCardTiming(props as never);
+  const look = craftLook(props);
+  const rows = asArray(props.rows);
+  const timing = look
+    ? styledDataCardTiming(rows.map((row) => ({ value: String((asRecord(row) ?? {}).value ?? '') })), look, FPS)
+    : computeDataCardTiming(props as never);
   const hook = asRecord(props.hook);
   const hookLines = hook ? asArray(hook.lines) : [];
   const hookEnd = timing.hookFrames / FPS;
@@ -234,7 +255,6 @@ function collectDataCard(props: Record<string, unknown>): SubstanceElement[] {
     const text = typeof raw === 'string' ? raw : '';
     out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
   }
-  const rows = asArray(props.rows);
   for (let i = 0; i < rows.length; i++) {
     const row = asRecord(rows[i]);
     if (!row) continue;
@@ -272,7 +292,21 @@ function collectAtmosphere(props: Record<string, unknown>): SubstanceElement[] {
 
 function collectMontage(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
+  const look = craftLook(props);
   const beats = asArray(props.beats).filter((b): b is number => typeof b === 'number');
+  if (look) {
+    const words = asArray(props.words);
+    const clips = asArray(props.clips);
+    const plan = styledMontageTiming(clips.length, words.length, look, FPS);
+    words.forEach((raw, i) => {
+      const word = asRecord(raw);
+      const text = word && typeof word.text === 'string' ? word.text : '';
+      const from = plan.shots === 1 ? 0 : (i % plan.shots) * plan.shotFrames;
+      const to = plan.shots === 1 ? plan.totalFrames : from + plan.shotFrames;
+      out.push({ kind: 'kinetic_words', text, startSec: from / FPS, endSec: to / FPS });
+    });
+    return out;
+  }
   if (beats.length === 0) return out;
   const words = asArray(props.words);
   for (const raw of words) {

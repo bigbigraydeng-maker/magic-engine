@@ -6,6 +6,8 @@ import { FPS } from './timing'
 import { fontFamily } from './theme'
 import { useStyleFamily } from './styles/fonts'
 import { peelStyle } from './styles/select'
+import { logoStartFrame } from './styles/rules'
+import { StyledAtmosphere } from './styles/StyledAtmosphere'
 import type { ResolvedLook } from './styles/types'
 
 const AtmosphereFootage: React.FC<{ props: AtmosphereProps; timing: AtmosphereTiming }> = ({ props, timing }) => {
@@ -69,14 +71,23 @@ export const AtmosphereReel: React.FC<Record<string, unknown>> = (rawProps) => {
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
   )
-  const logoFrom = props.logoMode === 'always' ? 0 : Math.max(0, timing.totalFrames - 60)
+  const requestedLogo = props.logoMode === 'always' ? 0 : Math.max(0, timing.totalFrames - 60)
+  const logoFrom = look ? logoStartFrame(requestedLogo, look.rules, FPS) : requestedLogo
   if (family === null) return null
+  if (look) {
+    return (
+      <AbsoluteFill style={{ background: '#000' }}>
+        <StyledAtmosphere props={props} timing={timing} look={look} family={family} logoFrom={logoFrom} />
+        {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+      </AbsoluteFill>
+    )
+  }
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       <AtmosphereFootage props={props} timing={timing} />
       <TextLine props={props} timing={timing} look={look} family={family} />
       <AbsoluteFill style={{ background: '#000', opacity: cover }} />
-      <Sequence from={logoFrom} durationInFrames={timing.totalFrames - logoFrom}><Logo file={look?.logoFile ?? props.logoFile} /></Sequence>
+      <Sequence from={logoFrom} durationInFrames={timing.totalFrames - logoFrom}><Logo file={props.logoFile} /></Sequence>
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )

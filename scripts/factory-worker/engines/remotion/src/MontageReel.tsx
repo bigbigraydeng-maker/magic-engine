@@ -3,6 +3,8 @@ import { AbsoluteFill, Audio, interpolate, OffthreadVideo, Sequence, staticFile,
 import { Logo } from './components'
 import { useStyleFamily } from './styles/fonts'
 import { peelStyle } from './styles/select'
+import { StyledMontage } from './styles/StyledMontage'
+import { styledMontageTiming } from './styles/template-craft'
 import type { ResolvedLook } from './styles/types'
 import {
   parseMontageReelProps,
@@ -66,14 +68,24 @@ export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const look = peeled.look === undefined || peeled.look === null ? null : (peeled.look as ResolvedLook)
   const family = useStyleFamily(look)
   const props = parseMontageReelProps(peeled.body)
-  const timing = computeMontageTiming(props)
+  const craftPlan = look ? styledMontageTiming(props.clips.length, props.words.length, look) : null
+  const timing = craftPlan ?? computeMontageTiming(props)
   const segments = buildMontageSegments(props)
   const frame = useCurrentFrame()
   const fade = interpolate(frame, [timing.totalFrames - 8, timing.totalFrames], [1, 0], { extrapolateLeft: 'clamp' })
   const vol = interpolate(frame, [0, 6, timing.totalFrames - 24, timing.totalFrames - 2], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
   if (family === null) return null
-  const brand = look ? look.colors.brand : props.brandColor
-  const ink = look ? look.colors.textOnBrand : '#fff'
+  if (look) {
+    return (
+      <AbsoluteFill style={{ background: '#000' }}>
+        <StyledMontage props={props} look={look} family={family} />
+        <AbsoluteFill style={{ background: '#000', opacity: 1 - fade }} />
+        <Audio src={staticFile(props.musicFile)} volume={vol * (props.musicGain ?? 1)} />
+      </AbsoluteFill>
+    )
+  }
+  const brand = props.brandColor
+  const ink = '#fff'
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       {segments.map((seg, i) => (<Sequence key={i} from={seg.from} durationInFrames={seg.dur}><Cut props={props} seg={seg} /></Sequence>))}
@@ -83,7 +95,7 @@ export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
         return (<Sequence key={i} from={from} durationInFrames={montageFrameOf(props.beats, w.at + w.beats) - from}><WordSlam word={w} brandColor={brand} family={family} ink={ink} /></Sequence>)
       })}
       <Grain />
-      <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={look?.logoFile ?? props.logoFile} /></Sequence>
+      <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>
       <AbsoluteFill style={{ background: '#000', opacity: 1 - fade }} />
       <Audio src={staticFile(props.musicFile)} volume={vol * (props.musicGain ?? 1)} />
     </AbsoluteFill>

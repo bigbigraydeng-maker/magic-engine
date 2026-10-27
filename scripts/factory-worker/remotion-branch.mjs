@@ -93,6 +93,7 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
     const compare = await import(pathToFileURL(join(engineDir, 'src', 'compare.ts')).href)
     const craft = await import(pathToFileURL(join(engineDir, 'src', 'styles', 'craft.ts')).href)
     const rules = await import(pathToFileURL(join(engineDir, 'src', 'styles', 'rules.ts')).href)
+    const templateCraft = await import(pathToFileURL(join(engineDir, 'src', 'styles', 'template-craft.ts')).href)
     const substance = await import(pathToFileURL(join(engineDir, 'src', 'contentSubstance.ts')).href)
     let catalog = null
     return {
@@ -110,6 +111,10 @@ export async function loadRemotionEngine(engineDir = REMOTION_ENGINE_DIR) {
       compareCues: compare.compareCues,
       effectiveShotSec: craft.effectiveShotSec,
       styledPostcardTiming: rules.styledPostcardTiming,
+      styledListTiming: templateCraft.styledListTiming,
+      styledMontageTiming: templateCraft.styledMontageTiming,
+      styledDataCardTiming: templateCraft.styledDataCardTiming,
+      styledMontageCues: templateCraft.styledMontageCues,
       contentSubstanceOf: substance.contentSubstanceOf,
       musicSourceFor: (name) => {
         catalog ??= music.parseMusicCatalog(
@@ -747,14 +752,18 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     files = loaded.assetFiles
     totalFrames = loaded.totalFrames
     recipeGaps = loaded.recipeGaps ?? null
-    timing = template === 'list' ? eng.computeTimingFromProps(props) : null
+    timing = template === 'list'
+      ? (props.look ? eng.styledListTiming(props.items.length, props.look, eng.FPS, props.logoMode) : eng.computeTimingFromProps(props))
+      : null
   } catch (e) {
     throw new RemotionOrderError('工单里的视频参数不合格：' + e.message)
   }
   if (template === 'montage') assertMontageTextVisible(props)
   if (template === 'datacard') {
     assertDatacardTextVisible(props)
-    timing = eng.computeDataCardTiming(props)
+    timing = props.look
+      ? eng.styledDataCardTiming(props.rows, props.look, eng.FPS)
+      : eng.computeDataCardTiming(props)
   }
   if (template === 'postcard') {
     assertPostcardTextVisible(props)
@@ -900,7 +909,14 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
           .join(''),
         () => eng.compareCaption(props),
       ],
-      montage: [() => buildMontageSrt(props, eng.montageFrameOf, eng.FPS), () => buildMontageCaption(props)],
+      montage: [
+        () => (props.look
+          ? eng.styledMontageCues(props.clips.length, props.words.map((w) => w.text), props.look, eng.FPS)
+            .map((cue, i) => `${i + 1}\n${fmtTime(cue[0])} --> ${fmtTime(cue[1])}\n${cue[2]}\n\n`)
+            .join('')
+          : buildMontageSrt(props, eng.montageFrameOf, eng.FPS)),
+        () => buildMontageCaption(props),
+      ],
     }
     const builders = Object.hasOwn(textBuilders, template) ? textBuilders[template] : null
     if (builders === null) throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)

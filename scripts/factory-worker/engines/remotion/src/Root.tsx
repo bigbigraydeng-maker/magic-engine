@@ -16,6 +16,7 @@ import { parseCompareProps, computeCompareTiming } from './compare'
 import { StyleStudy } from './styles/StyleStudy'
 import { effectiveShotSec, studyPlan } from './styles/craft'
 import { styledPostcardTiming } from './styles/rules'
+import { styledDataCardTiming, styledListTiming, styledMontageTiming } from './styles/template-craft'
 import { peelStyle } from './styles/select'
 import type { ResolvedLook } from './styles/types'
 
@@ -30,17 +31,29 @@ function lookOf(props: Record<string, unknown>): ResolvedLook | null {
 
 const calculateMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
   const parsed = parseListReelProps(bodyOf(props))
-  return { durationInFrames: computeTimingFromProps(parsed).totalFrames }
+  const look = lookOf(props)
+  const frames = look
+    ? styledListTiming(parsed.items.length, look, FPS, parsed.logoMode).totalFrames
+    : computeTimingFromProps(parsed).totalFrames
+  return { durationInFrames: frames }
 }
 
 const calculateMontageMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
   const parsed = parseMontageReelProps(bodyOf(props))
-  return { durationInFrames: computeMontageTiming(parsed).totalFrames }
+  const look = lookOf(props)
+  const frames = look
+    ? styledMontageTiming(parsed.clips.length, parsed.words.length, look, FPS).totalFrames
+    : computeMontageTiming(parsed).totalFrames
+  return { durationInFrames: frames }
 }
 
 const calculateDataCardMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {
   const parsed = parseDataCardProps(bodyOf(props))
-  return { durationInFrames: computeDataCardTiming(parsed).totalFrames }
+  const look = lookOf(props)
+  const frames = look
+    ? styledDataCardTiming(parsed.rows, look, FPS).totalFrames
+    : computeDataCardTiming(parsed).totalFrames
+  return { durationInFrames: frames }
 }
 
 const calculatePostcardMetadata: CalculateMetadataFunction<Record<string, unknown>> = ({ props }) => {

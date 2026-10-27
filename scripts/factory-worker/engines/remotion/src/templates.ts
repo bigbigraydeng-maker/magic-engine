@@ -34,6 +34,7 @@ import {
 import { stagedFileName, type MusicCatalog } from './music.ts';
 import { effectiveShotSec } from './styles/craft.ts';
 import { styledPostcardTiming } from './styles/rules.ts';
+import { styledDataCardTiming, styledListTiming, styledMontageTiming } from './styles/template-craft.ts';
 import { peelStyle, resolveRenderLook } from './styles/select.ts';
 import type { ResolvedLook } from './styles/types.ts';
 
@@ -90,6 +91,18 @@ function framesWithLook(loaded: LoadedTemplate, look: ResolvedLook): number {
   }
   if (loaded.compositionId === 'CompareReel') {
     return computeCompareTiming(look.rules, effectiveShotSec(look)).totalFrames;
+  }
+  if (loaded.compositionId === 'ListReel') {
+    const props = loaded.props as { items: unknown[]; logoMode?: 'last_beats' | 'always' };
+    return styledListTiming(props.items.length, look, 30, props.logoMode).totalFrames;
+  }
+  if (loaded.compositionId === 'MontageReel') {
+    const props = loaded.props as { clips: unknown[]; words: unknown[] };
+    return styledMontageTiming(props.clips.length, props.words.length, look).totalFrames;
+  }
+  if (loaded.compositionId === 'DataCardReel') {
+    const props = loaded.props as { rows: { value: string }[] };
+    return styledDataCardTiming(props.rows, look).totalFrames;
   }
   return loaded.totalFrames;
 }
