@@ -1,5 +1,5 @@
 ---
-id: 2026-10-28-newsletter-agent-playbook-v0.1-await-pm
+id: 2026-10-28-newsletter-agent-playbook-v01-await-pm
 title: 要有专门的 newsletter agent 来闭环管理：规则手册 v0.2 已吸收子牙 + 魏征复审（都是有条件通过），等 PM 说「开始」再逐包开发
 status: decided
 owner: pm
