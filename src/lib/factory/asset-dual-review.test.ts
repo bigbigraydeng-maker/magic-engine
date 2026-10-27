@@ -4,6 +4,7 @@ import {
   decideAssetDualReview,
   quoteOnPage,
   UNREADABLE,
+  UNVERIFIED,
   withDualReview,
 } from './asset-dual-review'
 import { htmlToText, readOfficialPage } from './asset-dual-review-page'
@@ -83,6 +84,62 @@ describe('asset dual review decision', () => {
       music: { verdict: 'fail', reason: '配乐没有人声核验', track_id: 'track-1', clean_until_sec: null },
     }))
     expect(decision.passed).toBe(false)
+  })
+
+  it('does not pass when an on-screen line has no source', () => {
+    const page = 'Walk beside the old waterfront in Shanghai. Shanghai waterfront. Follow the lake into the hills. Hangzhou lake.'
+    const one = 'https://example.com/one'
+    const two = 'https://example.com/two'
+    const brief = {
+      remotion: {
+        template: 'postcard',
+        props: {
+          hook: { lines: ['99 day tour'] },
+          scenes: [
+            { place: 'Shanghai', line: 'Walk beside the old waterfront.', sourceUrl: one, sourceQuote: 'Walk beside the old waterfront in Shanghai.', placeSourceQuote: 'Shanghai waterfront.' },
+            { place: 'Hangzhou', line: 'Follow the lake into the hills.', sourceUrl: two, sourceQuote: 'Follow the lake into the hills.', placeSourceQuote: 'Hangzhou lake.' },
+          ],
+          price: { fromLabel: 'FROM', currencyPrefix: '$', amount: 4999, qualifier: 'PER PERSON', footnote: 'EXAMPLE' },
+          end: { title: 'Explore China' },
+        },
+      },
+    }
+    const claims = collectFactClaims(brief)
+    expect(claims.find((claim) => claim.text === '99 day tour')).toMatchObject({ sourceUrl: '', sourceQuote: '' })
+    expect(claims.some((claim) => claim.text.includes('4999') && claim.sourceUrl === '')).toBe(true)
+    expect(claims.find((claim) => claim.text === 'Explore China')).toMatchObject({ sourceUrl: '', sourceQuote: '' })
+    const decision = decideAssetDualReview(input({
+      claims,
+      pages: { [one]: page, [two]: page },
+    }))
+    expect(decision.sudongpo).toMatchObject({ verdict: 'unreadable', reason: UNVERIFIED })
+    expect(decision.passed).toBe(false)
+  })
+
+  it('does not treat a partial word match as support when the number changes', () => {
+    const decision = decideAssetDualReview(input({
+      claims: [{
+        text: 'Walk 999 days.',
+        sourceUrl: CLAIM.sourceUrl,
+        sourceQuote: 'Walk beside the old waterfront in Shanghai.',
+      }],
+      pages: { [CLAIM.sourceUrl]: 'Walk beside the old waterfront in Shanghai.' },
+    }))
+    expect(decision.sudongpo).toMatchObject({ verdict: 'unreadable', reason: UNVERIFIED })
+    expect(decision.passed).toBe(false)
+  })
+
+  it('passes a line whose words and numbers all sit inside the official quote', () => {
+    const decision = decideAssetDualReview(input({
+      claims: [{
+        text: '3 day tour',
+        sourceUrl: CLAIM.sourceUrl,
+        sourceQuote: 'Join this 3 day tour of the harbour.',
+      }],
+      pages: { [CLAIM.sourceUrl]: 'Join this 3 day tour of the harbour.' },
+    }))
+    expect(decision.sudongpo.verdict).toBe('pass')
+    expect(decision.passed).toBe(true)
   })
 
   it('collects line and place quotes from the brief', () => {
