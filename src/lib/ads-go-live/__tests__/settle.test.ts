@@ -6,19 +6,23 @@ function ports(over: Partial<SettlePorts> = {}): SettlePorts & {
   activate: ReturnType<typeof vi.fn>
   read: ReturnType<typeof vi.fn>
   pause: ReturnType<typeof vi.fn>
+  owns: ReturnType<typeof vi.fn>
 } {
   const claim = vi.fn(async (): Promise<ActivateAttempt> => ({ ok: true, retryable: true }))
   const activate = vi.fn(async (): Promise<ActivateAttempt> => ({ ok: true, retryable: true }))
   const read = vi.fn(async (): Promise<LayerRead[]> => [{ name: '广告系列', status: 'ACTIVE' }])
   const pause = vi.fn(async () => ({ ok: true, failed: [] as string[] }))
+  const owns = vi.fn(async () => true)
   return {
     claim,
     activate,
     read,
     pause,
+    owns,
     claimAndActivate: claim,
     activateOnly: activate,
     readBack: read,
+    stillOwns: owns,
     keepPaused: pause,
     ...over,
   }
@@ -83,6 +87,85 @@ describe('settleGoLive', () => {
     expect(p.activate).not.toHaveBeenCalled()
     expect(p.pause).not.toHaveBeenCalled()
     expect(claim).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not pause when a retryable activation failure loses the claim during readback', async () => {
+    let owner: 'self' | 'other' | null = null
+    const claim = vi.fn()
+      .mockImplementationOnce(async () => {
+        owner = null
+        return { ok: false, error: '开 第一次没开成', retryable: true, holding: false }
+      })
+      .mockImplementationOnce(async () => {
+        // The claim itself succeeded, then activation failed and the draft was released.
+        owner = 'self'
+        owner = null
+        return { ok: false, error: '开 第二次没开成', retryable: true, holding: false }
+      })
+    const read = vi.fn(async () => {
+      if (owner === null) owner = 'other'
+      return [{ name: '广告系列', status: 'PAUSED' as string | null }]
+    })
+    const pause = vi.fn(async () => ({ ok: true, failed: [] as string[] }))
+    const p = ports({
+      claimAndActivate: claim,
+      readBack: read,
+      keepPaused: pause,
+      stillOwns: vi.fn(async () => owner === 'self'),
+    })
+    const result = await settleGoLive(p)
+    expect(result).toMatchObject({
+      outcome: 'held',
+      paused: false,
+      reason: expect.stringContaining('没有再改广告'),
+    })
+    expect(claim).toHaveBeenCalledTimes(2)
+    expect(p.activate).not.toHaveBeenCalled()
+    expect(pause).not.toHaveBeenCalled()
+    expect(owner).toBe('other')
+  })
+
+  it('pauses only while this request still holds the claim', async () => {
+    let status: 'waiting' | 'activating' = 'waiting'
+    let owner: 'self' | 'other' | null = null
+    const claim = vi.fn(async () => {
+      if (status !== 'waiting') {
+        return { ok: false, error: '这条刚被别处处理过，这次没有再开。', retryable: false, holding: false }
+      }
+      status = 'activating'
+      owner = 'self'
+      return { ok: false, error: '开 没开成', retryable: true, holding: true }
+    })
+    const activate = vi.fn(async () => {
+      if (owner !== 'self' || status !== 'activating') {
+        return { ok: false, error: '开 没有占位', retryable: false, holding: false }
+      }
+      return { ok: false, error: '开 第二次没开成', retryable: true, holding: true }
+    })
+    const read = vi.fn(async () => {
+      if (status === 'waiting') {
+        status = 'activating'
+        owner = 'other'
+      }
+      return [{ name: '广告系列', status: 'PAUSED' as string | null }]
+    })
+    const pause = vi.fn(async () => {
+      if (owner !== 'self') throw new Error('paused while another request holds activating')
+      return { ok: true, failed: [] as string[] }
+    })
+    const p = ports({
+      claimAndActivate: claim,
+      activateOnly: activate,
+      readBack: read,
+      keepPaused: pause,
+      stillOwns: vi.fn(async () => owner === 'self' && status === 'activating'),
+    })
+    const result = await settleGoLive(p)
+    expect(result).toMatchObject({ outcome: 'held', paused: true })
+    expect(claim).toHaveBeenCalledTimes(1)
+    expect(activate).toHaveBeenCalledTimes(1)
+    expect(pause).toHaveBeenCalledTimes(1)
+    expect(owner).toBe('self')
   })
 
   it('does not pause when the second claim loses the slot', async () => {

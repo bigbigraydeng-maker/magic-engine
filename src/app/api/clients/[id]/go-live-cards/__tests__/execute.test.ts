@@ -49,11 +49,7 @@ function fakeDb(payload: Record<string, unknown>, afterRead?: Record<string, unk
               return {
                 eq() {
                   return {
-                    maybeSingle: async () => {
-                      const seen = structuredClone(store.payload)
-                      if (afterRead) store.payload = structuredClone(afterRead)
-                      return { data: { payload: seen }, error: null }
-                    },
+                    maybeSingle: async () => ({ data: { payload: structuredClone(store.payload) }, error: null }),
                   }
                 },
               }
@@ -62,12 +58,18 @@ function fakeDb(payload: Record<string, unknown>, afterRead?: Record<string, unk
         },
         update(row: { payload: Record<string, unknown> }) {
           const filters: Record<string, string> = {}
+          let swapped = false
           const chain = {
             eq(column: string, value: string) {
               filters[column] = value
               return chain
             },
             select() {
+              // A competing write lands after the read and before this update.
+              if (afterRead && !swapped) {
+                store.payload = structuredClone(afterRead)
+                swapped = true
+              }
               const activation = store.payload.activation
               const card = activation && typeof activation === 'object' && !Array.isArray(activation)
                 ? (activation as { card_run_id?: unknown }).card_run_id
@@ -156,7 +158,7 @@ describe('executeConfirmedGoLive', () => {
       .mockResolvedValueOnce('PAUSED')
       .mockResolvedValueOnce('PAUSED')
       .mockResolvedValue('ACTIVE')
-    const { sb } = fakeDb({ status: 'awaiting_approval' })
+    const { sb } = fakeDb(owned('active'))
     const result = await executeConfirmedGoLive({
       supabase: sb as never,
       clientId: 'client-1',
@@ -225,9 +227,9 @@ describe('executeConfirmedGoLive', () => {
 
   it('does not write a rejection back to waiting', async () => {
     m.fetchCampaignStatus.mockResolvedValue('PAUSED')
-    const waiting = owned('awaiting_approval')
-    const rejected = { ...structuredClone(waiting), status: 'rejected', error: '先不投' }
-    const { sb, store } = fakeDb(waiting, rejected)
+    const open = owned('active')
+    const rejected = { ...structuredClone(open), status: 'rejected', error: '先不投' }
+    const { sb, store } = fakeDb(open, rejected)
     const result = await executeConfirmedGoLive({
       supabase: sb as never,
       clientId: 'client-1',
@@ -239,6 +241,66 @@ describe('executeConfirmedGoLive', () => {
     expect(store.payload.goLiveHeld).toBeUndefined()
     expect(store.payload.error).toBe('先不投')
     expect(result.note).toContain('账本没写上')
+  })
+
+  it('does not pause when a retryable open fails and another request holds activating', async () => {
+    const other = '22222222-2222-4222-8222-222222222222'
+    const theirs = {
+      status: 'activating',
+      activation: { card_run_id: other, status: 'authorized_pending' },
+    }
+    const { sb, store } = fakeDb(owned('awaiting_approval'))
+    m.approveDraft
+      .mockResolvedValueOnce({ ok: false, error: '开 第一次没开成', holding: false })
+      .mockResolvedValueOnce({ ok: false, error: '开 第二次没开成', holding: false })
+    m.fetchCampaignStatus.mockImplementation(async () => {
+      store.payload = structuredClone(theirs)
+      return 'PAUSED'
+    })
+    const result = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids: IDS,
+    })
+    expect(result.settle).toMatchObject({ outcome: 'held', paused: false })
+    expect(m.approveDraft).toHaveBeenCalledTimes(2)
+    expect(m.activatePublished).not.toHaveBeenCalled()
+    expect(m.pausePublished).not.toHaveBeenCalled()
+    expect(store.payload).toEqual(theirs)
+    expect(result.note).toContain('账本没写上')
+  })
+
+  it('pauses while the claim is still ours and releases it only afterwards', async () => {
+    const { sb, store } = fakeDb(owned('awaiting_approval'))
+    const seen: string[] = []
+    m.approveDraft.mockImplementation(async () => {
+      store.payload = owned('activating')
+      return { ok: false, error: '开 没开成', holding: true }
+    })
+    m.activatePublished.mockImplementation(async () => {
+      seen.push(String(store.payload.status))
+      return { ok: false, error: '开 第二次没开成' }
+    })
+    m.fetchCampaignStatus.mockResolvedValue('PAUSED')
+    m.pausePublished.mockImplementation(async () => {
+      seen.push(`pause:${String(store.payload.status)}`)
+      return { ok: true, failed: [] }
+    })
+    const result = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids: IDS,
+    })
+    expect(result.settle).toMatchObject({ outcome: 'held', paused: true })
+    expect(m.approveDraft).toHaveBeenCalledTimes(1)
+    expect(m.activatePublished).toHaveBeenCalledTimes(1)
+    expect(seen).toEqual(['activating', 'pause:activating'])
+    expect(store.payload.status).toBe('awaiting_approval')
+    expect(result.note).toBeNull()
   })
 
   it('does not overwrite another run that already recorded the open', async () => {

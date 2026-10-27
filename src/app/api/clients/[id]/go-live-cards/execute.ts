@@ -20,9 +20,27 @@ function held(reason: string): ExecutionOutcome {
   }
 }
 
-function fromWrite(result: { ok: true } | { ok: false; error: string }): ActivateAttempt {
-  if (result.ok) return { ok: true, retryable: true }
-  return { ok: false, error: result.error, retryable: result.error.startsWith('开 ') }
+function fromWrite(result: { ok: true } | { ok: false; error: string; holding?: boolean }): ActivateAttempt {
+  if (result.ok) return { ok: true, retryable: true, holding: false }
+  return {
+    ok: false,
+    error: result.error,
+    retryable: result.error.startsWith('开 '),
+    holding: result.holding === true,
+  }
+}
+
+async function ownsGoLive(
+  sb: SupabaseClient,
+  clientId: string,
+  draftId: string,
+  cardRunId: string,
+): Promise<boolean> {
+  const current = await readPayload(sb, clientId, draftId)
+  if (!current) return false
+  const status = typeof current.status === 'string' ? current.status : ''
+  if (status !== 'activating' && status !== 'active') return false
+  return activationRunId(current) === cardRunId
 }
 
 function targets(ids: GoLiveIds): { name: string; id: string }[] {
@@ -108,27 +126,35 @@ async function writeMark(
 }
 
 async function runSettle(
-  args: { supabase: SupabaseClient; draftId: string; authority: SpendActivationAuthority; ids: GoLiveIds },
+  args: { supabase: SupabaseClient; clientId: string; draftId: string; authority: SpendActivationAuthority; ids: GoLiveIds },
   token: string,
 ): Promise<SettleResult> {
   const ids = { campaignId: args.ids.campaignId, adSetId: args.ids.adSetId, adIds: [...args.ids.adIds] }
+  const stillOwns = () => ownsGoLive(args.supabase, args.clientId, args.draftId, args.authority.cardRunId ?? '')
   const ports = {
     claimAndActivate: async () => fromWrite(await approveDraft(
       args.draftId, args.supabase, token, args.authority, 'go-live-card',
     )),
     activateOnly: async () => fromWrite(await activatePublished(ids, token)),
     readBack: () => readLayers(args.ids, token),
+    stillOwns,
     keepPaused: () => pausePublished(ids, token),
   }
   try {
     return await settleGoLive(ports)
   } catch {
-    try { await ports.keepPaused() } catch { /* still held */ }
+    let paused = false
+    try {
+      if (await stillOwns()) {
+        await ports.keepPaused()
+        paused = true
+      }
+    } catch { /* still held */ }
     return {
       outcome: 'held',
       readback: '读回失败，不知道是不是在投',
       reason: '开投没有完成，系列尽量保持暂停。',
-      paused: true,
+      paused,
     }
   }
 }

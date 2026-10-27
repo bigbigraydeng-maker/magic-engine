@@ -10,6 +10,8 @@ export interface ActivateAttempt {
   readonly ok: boolean
   readonly error?: string
   readonly retryable: boolean
+  /** This caller still owns the activating claim after the attempt returns. */
+  readonly holding?: boolean
 }
 
 export interface LayerRead {
@@ -21,6 +23,8 @@ export interface SettlePorts {
   claimAndActivate(): Promise<ActivateAttempt>
   activateOnly(): Promise<ActivateAttempt>
   readBack(): Promise<readonly LayerRead[] | null>
+  /** Fresh check. False once this caller released the claim or someone else holds it. */
+  stillOwns(): Promise<boolean>
   keepPaused(): Promise<{ ok: boolean; failed: string[] }>
 }
 
@@ -49,30 +53,39 @@ function heldReason(paused: { ok: boolean }, second: ActivateAttempt): string {
   return `${pauseNote}${publicFailure(second.error)}`
 }
 
+function live(attempts: 1 | 2, layers: readonly LayerRead[] | null): SettleResult {
+  return { outcome: 'live', attempts, readback: describeRead(layers) }
+}
+
+function giveUp(layers: readonly LayerRead[] | null, reason: string): SettleResult {
+  return { outcome: 'held', readback: describeRead(layers), reason: publicFailure(reason), paused: false }
+}
+
+function lostClaim(attempt: ActivateAttempt): boolean {
+  return !attempt.ok && !attempt.retryable && attempt.holding !== true
+}
+
+/** A fresh claim only when the previous attempt already let the slot go. */
+async function retry(ports: SettlePorts, first: ActivateAttempt): Promise<ActivateAttempt | null> {
+  if (!first.ok && first.holding !== true) return ports.claimAndActivate()
+  if (!(await ports.stillOwns())) return null
+  return ports.activateOnly()
+}
+
 export async function settleGoLive(ports: SettlePorts): Promise<SettleResult> {
   const first = await ports.claimAndActivate()
   const seen = await ports.readBack()
-  if (isLive(seen)) return { outcome: 'live', attempts: 1, readback: describeRead(seen) }
-  if (!first.ok && !first.retryable) {
-    return {
-      outcome: 'held',
-      readback: describeRead(seen),
-      reason: publicFailure(first.error ?? '没有开，系列保持暂停。'),
-      paused: false,
-    }
-  }
-  const second = first.ok ? await ports.activateOnly() : await ports.claimAndActivate()
+  if (isLive(seen)) return live(1, seen)
+  if (lostClaim(first)) return giveUp(seen, first.error ?? '没有开，系列保持暂停。')
+
+  const second = await retry(ports, first)
+  if (!second) return giveUp(seen, '占位已经交给别人，没有再改广告。')
   const again = await ports.readBack()
-  if (isLive(again)) return { outcome: 'live', attempts: 2, readback: describeRead(again) }
-  // The first attempt put the draft back to waiting, and another confirmed click
-  // took the claim. Pausing now would stop their ad. Do not write again.
-  if (!first.ok && !second.ok && !second.retryable) {
-    return {
-      outcome: 'held',
-      readback: describeRead(again),
-      reason: publicFailure(second.error ?? '占位失败，没有再改广告。'),
-      paused: false,
-    }
+  if (isLive(again)) return live(2, again)
+  // Lost the slot, or released it and someone else now holds activating.
+  // Either way this request must not pause their ad.
+  if ((lostClaim(second) && first.holding !== true && !first.ok) || !(await ports.stillOwns())) {
+    return giveUp(again, second.error && lostClaim(second) ? second.error : '占位已经交给别人，没有再改广告。')
   }
   const paused = await ports.keepPaused()
   return {
