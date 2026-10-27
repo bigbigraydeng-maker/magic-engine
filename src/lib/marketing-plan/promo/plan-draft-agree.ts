@@ -178,6 +178,8 @@ export async function storePlanAgreeOutcome(
       .eq('id', prescriptionId)
       .eq('client_id', clientId)
       .maybeSingle()
+    // A failed read must not replace the row with only this outcome.
+    if (read.error) return
     const current = (read.data as { generation_meta?: unknown } | null)?.generation_meta
     const base = current && typeof current === 'object' && !Array.isArray(current)
       ? (current as Record<string, unknown>)

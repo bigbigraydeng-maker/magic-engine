@@ -16,8 +16,10 @@ import { hardNotGreen } from '@/lib/marketing-plan/approve-plan-gates'
 import {
   approvePlanWithAgree,
   draftPlanIdOf,
+  noPlanDraftOutcome,
   PLAN_AGREE_NOT_ALLOWED,
   planAgreeFromMeta,
+  storePlanAgreeOutcome,
 } from '../plan-draft-agree'
 
 const META = { plan_draft: { status: 'created', plan_id: 'plan-1' } }
@@ -123,6 +125,18 @@ describe('helpers', () => {
     expect(draftPlanIdOf({ plan_draft: { status: 'already_exists', plan_id: 'p2' } })).toBe('p2')
     expect(draftPlanIdOf({ plan_draft: { status: 'failed', plan_id: 'p3' } })).toBeNull()
     expect(draftPlanIdOf(null)).toBeNull()
+  })
+
+  it('a failed read does not overwrite the prescription record', async () => {
+    const update = vi.fn()
+    const sb = {
+      from: () => ({
+        select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: { message: 'down' } }) }) }) }),
+        update,
+      }),
+    }
+    await storePlanAgreeOutcome(sb as never, 'client-1', 'presc-1', noPlanDraftOutcome(new Date('2026-10-27T00:00:00Z')))
+    expect(update).not.toHaveBeenCalled()
   })
 
   it('planAgreeFromMeta reads the stored outcome back', () => {

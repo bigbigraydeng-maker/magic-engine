@@ -55,7 +55,14 @@ async function runGates(
   if (!verdict.can_approve) return { stop: { kind: 'blocked', blockers: verdict.blockers } }
   const notGreen = hardNotGreen(verdict)
   if (requireAllGreen && notGreen.length > 0) {
-    return { stop: { kind: 'needs_confirmation', planStart: plan.start_date, planEnd: plan.end_date, checks: notGreen } }
+    return {
+      stop: {
+        kind: 'needs_confirmation',
+        planStart: plan.start_date ?? '见计划',
+        planEnd: plan.end_date ?? '见计划',
+        checks: notGreen,
+      },
+    }
   }
   return {
     gated: {
