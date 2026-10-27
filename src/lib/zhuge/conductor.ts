@@ -53,6 +53,9 @@ const TOOL_GUIDANCE = `
 - query_search_console：本客户 GSC 近 N 天真实点击/曝光/排名
 - query_analytics：本客户 GA4 近 N 天真实流量/转化
 - query_flywheel_history：本客户历史各动作的成功率（这招上次灵不灵）
+- read_prescription_progress：某份处方 + 走到链条哪一步（需 prescription_id）
+- read_plan_seed：某份处方现算的计划种子（只读不落草稿；读不到就如实说读不到）
+- read_spend_and_leads：最近一份检查回执里的线索进 CRM / 花费状态（不打 Meta）
 
 使用原则：
 1. 只在**分数存疑、需要归因证据、或要判断某打法对本客户是否有效**时才下钻。
