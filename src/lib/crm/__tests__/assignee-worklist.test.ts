@@ -107,6 +107,35 @@ describe('composeWorklist —— 按跟进人切', () => {
   })
 })
 
+describe('composeWorklist —— 新来 / 积压', () => {
+  // NOW = 2026-10-27T00:00Z
+  const inputs = {
+    ...base,
+    email: [mail('new', '2026-10-24T00:00:00Z'), mail('old', '2026-09-20T00:00:00Z')],
+  }
+
+  it('最后一句话 7 天内 = fresh，更早 = backlog；刚好 7 天算积压', () => {
+    const r = composeWorklist({ ...inputs, email: [...inputs.email, mail('edge', '2026-10-20T00:00:00Z')] })
+    const tier = Object.fromEntries(r.entries.map((e) => [e.contactId, e.tier]))
+    expect(tier).toEqual({ new: 'fresh', old: 'backlog', edge: 'backlog' })
+  })
+
+  it('🔴 tier 过滤只影响 entries，tierCounts 始终是两种的全貌（积压有几位说得出口）', () => {
+    const r = composeWorklist({ ...inputs, tier: 'fresh' })
+    expect(r.entries.map((e) => e.contactId)).toEqual(['new'])
+    expect(r.tierCounts).toEqual({ fresh: 1, backlog: 1 })
+  })
+})
+
+describe('composeWorklist —— 平台占位名不是客人', () => {
+  it('「WhatsApp Business」（平台起的占位名）不进名单也不计数；真人名字不受影响', () => {
+    const named = (id: string, name: string): ReplyDueItem => ({ ...mail(id, '2026-10-26T00:00:00Z'), displayName: name })
+    const r = composeWorklist({ ...base, whatsapp: [named('ph', ' WhatsApp Business '), named('real', 'Sue')] })
+    expect(r.entries.map((e) => e.contactId)).toEqual(['real'])
+    expect(r.detected.whatsapp).toBe(1)
+  })
+})
+
 describe('composeWorklist —— 透传', () => {
   it('陌生发件人数量和检测器失败原样带出', () => {
     const r = composeWorklist({ ...base, strangerEmails: 7, errors: { email: '读库超时' } })

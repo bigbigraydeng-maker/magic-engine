@@ -30,6 +30,8 @@ import { projectFactoryConfig } from '@/lib/factory/client-config'
 import { runNineGridCheck, mergeMaliangIntoSnapshot, allowedVideoHosts, type MaliangCheck, type NineGridInput } from '@/lib/maliang/render-check'
 import { dispositionOf, REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout } from '@/lib/maliang/review-disposition'
 import { readWorkOrderContext, writeWorkOrderVerdict, type WorkOrderReady } from '@/lib/maliang/work-order-review'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { ASSET_DUAL_REVIEW_EVENT } from './asset-dual-review'
 
 export const MALIANG_RENDER_READY_EVENT = 'me/maliang.render.ready' as const
 export const MALIANG_JOB = 'maliang-render-check'
@@ -65,6 +67,8 @@ export interface MaliangDeps {
   apiKey: () => string | undefined
   /** Template-render reviews only. A hung model must not leave the order unmarked. */
   reviewTimeoutMs?: number
+  /** Material-only orders only. A send failure stays in the human queue and does not re-run the model. */
+  enqueueAssetReview?: (data: { client_id: string; work_order_id: string }) => Promise<void>
 }
 
 export interface MaliangContext {
@@ -323,6 +327,7 @@ async function runWorkOrderReview(
     ),
   )
   await step.run('write-verdict', () => writeWorkOrderVerdict(deps.supabase, data.work_order_id, check))
+  await enqueueAssetDualReview(deps, data, ctx.assetOnly, step)
   await finishChecked(step, run, check, {
     request_id: requestId,
     client_id: data.client_id,
@@ -333,6 +338,24 @@ async function runWorkOrderReview(
     no_publish: true,
   })
   return verdictReceipt(requestId, data.client_id, data.work_order_id, check)
+}
+
+async function enqueueAssetDualReview(
+  deps: MaliangDeps,
+  data: WorkOrderReady,
+  assetOnly: boolean,
+  step: StepRunner,
+): Promise<void> {
+  if (!assetOnly || !deps.enqueueAssetReview) return
+  await step.run('enqueue-asset-dual-review', async () => {
+    try {
+      await deps.enqueueAssetReview!({ client_id: data.client_id, work_order_id: data.work_order_id })
+      return { sent: true }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { sent: false, reason: message.slice(0, 300) }
+    }
+  })
 }
 
 /** 依赖注入版：便于集成测试注入假 supabase / 假 check。 */
@@ -371,4 +394,9 @@ export const maliangRenderCheck = createMaliangRenderCheckFunction({
   supabase: supabaseAdmin,
   check: runNineGridCheck,
   apiKey: () => process.env.GEMINI_API_KEY,
+  enqueueAssetReview: (data) => sendInngestEvent({
+    id: `asset-dual-review:${data.work_order_id}`,
+    name: ASSET_DUAL_REVIEW_EVENT,
+    data,
+  }).then(() => undefined),
 })

@@ -118,6 +118,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
+  factory_render_worker_down: 'one_click', // 渲染引擎没就绪，要人在那台机器上修好
+  factory_review_overdue: 'review', // 片子待审超过 24 小时，审核的人看一眼
+  factory_dead_letter_stuck: 'one_click', // 死信不会再自动重跑，要人看这张工单
+  factory_material_check_failed: 'dev', // 待审/死信清单没读出来，是检查自己的欠账
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   whatsapp_number_unclaimed: 'one_click', // 号码在发消息但没客户绑定它，去设置页绑一次
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类

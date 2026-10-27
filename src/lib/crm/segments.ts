@@ -30,6 +30,7 @@ export type Segment =
   | 'not_enquiry_suspect' // 看发件地址就不像客人来咨询（群发 / 供应商通知 / 推销 / 系统账号）
 
 import { resolveTravelDate, isDueToWake } from './travel-date'
+import { detectReturningLead, returningReason, type ReturningLead } from './returning-lead'
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
 import { withoutClearedDnc } from './dnc'
 
@@ -248,6 +249,15 @@ export interface SegmentResult {
   temperature: Temperature
   /** 排序用，越小越靠前。 */
   priority: number
+  /**
+   * 「回头客」：之前咨询过、我们联系过，**今天又填了一张咨询表** —— 比普通的「客户回了」强得多。
+   *
+   * 为什么要单独标出来（PM 2026-10-27，看一个真实客人的抽屉时指出）：这类人在系统里
+   * 本来就落在「客户回了」那一档，但理由写的是通用的「客户来消息了，已经等了 2 小时」，
+   * 跟「随便回了一句邮件」长得一模一样，强意向没被表达出来。判据只有一份
+   * （`returning-lead.ts`），列表排序和抽屉展示共用。只在 `segment === 'replied'` 时才有。
+   */
+  returning?: ReturningLead | null
   /** 一句人话，告诉销售为什么这个人在今天的名单上。 */
   reason: string
   /**
@@ -738,6 +748,12 @@ export function segmentContact(
   //    · 客户的消息严格晚于我们最后一次外呼（相等不算：导入的历史数据里
   //      表单和通话共用同一个时间戳）
   if (lastOutbound > 0 && lastInbound > lastOutbound) {
+    // 回头客排在这一档的最前面（priority 0.5，普通「客户回了」是 1），理由也换成人话。
+    // 只是**更靠前、说得更清楚**，没有改变他属于哪一档，所以不影响任何按档位统计的地方。
+    const returning = detectReturningLead(tps)
+    if (returning) {
+      return { ...make('replied', returningReason(returning, now), 'phone'), priority: 0.5, returning }
+    }
     return make('replied', `客户来消息了，已经等了 ${humanGap(nowMs - lastInbound)}`, 'phone')
   }
 

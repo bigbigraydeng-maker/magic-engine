@@ -14,6 +14,7 @@
  */
 
 import { formFactsLine } from '@/lib/crm/form-facts'
+import { fetchFullEmailBody, mayBeTruncatedPreview } from '@/lib/crm/email-full-body'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -21,6 +22,9 @@ import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
+import { buildTouchpointLike } from '@/lib/crm/contact-model'
+import { buildJourney, type Journey } from '@/lib/crm/returning-journey'
+import { detectReturningLead, engagementLine, returningStory, summariseEngagement } from '@/lib/crm/returning-lead'
 
 interface RouteParams {
   params: { id: string; cid: string }
@@ -179,6 +183,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   const [
     { data: touches, error: tErr },
+    { data: allTouches },
     { data: events, error: eErr },
     { data: stageRows },
     { data: convs },
@@ -192,6 +197,16 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
+      .order('occurred_at', { ascending: false })
+      .limit(2000),
+    // 「回头客 / 往来一览」要看**所有渠道**（含上面排除掉的私信占位），而且字段要跟列表那条路
+    // 喂给 `buildTouchpointLike` 的一模一样（多一列 `source`），判据才不会在抽屉和列表之间漂移。
+    // 只读这几列，不带 `raw`/`summary`：不会多出任何可展示的内容，也不会变成第二条渲染路径。
+    supabaseAdmin
+      .from('contact_touchpoints')
+      .select('channel, direction, occurred_at, source, raw, metadata')
+      .eq('client_id', clientId)
+      .eq('contact_id', contactId)
       .order('occurred_at', { ascending: false })
       .limit(2000),
     supabaseAdmin
@@ -234,15 +249,24 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     sender_name: string | null
     body: string | null
     sent_at: string
+    message_id?: string | null
   }[] = []
   if (convIds.length > 0) {
     const { data: msgs } = await supabaseAdmin
       .from('conversation_messages')
-      .select('conversation_id, direction, sender_name, body, sent_at')
+      .select('conversation_id, direction, sender_name, body, sent_at, message_id')
       .in('conversation_id', convIds)
       .order('sent_at', { ascending: false })
       .limit(3000)
     messages = (msgs ?? []) as typeof messages
+    // 邮件同步只存 255 字摘要；「上次说到这」读的是最新一封客人来信，只对这一封去邮箱拉全文。
+    const latestInbound = messages.find(
+      (m) => m.direction === 'inbound' && convChannel.get(m.conversation_id) === 'email',
+    )
+    if (latestInbound?.message_id && mayBeTruncatedPreview(latestInbound.body)) {
+      const full = await fetchFullEmailBody(clientId, latestInbound.message_id)
+      if (full && full.length > (latestInbound.body ?? '').trim().length) latestInbound.body = full
+    }
   }
 
   // AI 摘要（意向 / 下一步）不再从这里出：2026-10-10 起由列表接口统一算进「该做什么」
@@ -439,6 +463,45 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const deduped = dropEmailTouchesDuplicatedByMessage(entries)
   deduped.sort((a, b) => ts(a.at) - ts(b.at))
 
+  // 「回头客」和「往来一览」：用列表同一个转换函数 + 同一份判据算。读不出来就当没有 ——
+  // 这是抽屉顶部的补充说明，绝不能因为它出错而把整条往来记录弄丢。
+  let engagement: {
+    returning: ReturnType<typeof detectReturningLead>
+    line: string | null
+    story: string[]
+    lastActiveAt: string | null
+    journey: Journey | null
+  } | null = null
+  try {
+    const tpLikes = ((allTouches ?? []) as Parameters<typeof buildTouchpointLike>[0][]).map((r) =>
+      buildTouchpointLike({ ...r, contact_id: contactId }),
+    )
+    const overview = summariseEngagement(tpLikes)
+    const returning = detectReturningLead(tpLikes)
+    // 路线只给回头客画；团意向取表单触点 metadata 里的原始代码（跟列表读的同一个字段），
+    // tpLikes 与 allTouches 同序一一对应。
+    const rows = (allTouches ?? []) as Array<{ metadata?: Record<string, unknown> | null }>
+    const journey = returning
+      ? buildJourney(
+          tpLikes.map((t, i) => {
+            const raw = rows[i]?.metadata?.tour_interest_raw ?? rows[i]?.metadata?.tour_interest
+            return { ...t, tour: typeof raw === 'string' ? raw : null }
+          }),
+          returning,
+          new Date(),
+        )
+      : null
+    engagement = {
+      returning,
+      line: engagementLine(overview),
+      story: returning ? returningStory(returning, overview, new Date()) : [],
+      lastActiveAt: overview.theirs.lastAt,
+      journey,
+    }
+  } catch (err) {
+    console.error('[crm timeline] 算回头客/往来一览失败，抽屉顶部不显示这一块:', err instanceof Error ? err.message : err)
+  }
+
   return NextResponse.json({
     contact: {
       contactId: contact.id,
@@ -451,5 +514,6 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     timeline: deduped,
     omittedMessages,
     formFactsLine: formFacts,
+    engagement,
   })
 }

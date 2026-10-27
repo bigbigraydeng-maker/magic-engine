@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
+import { renderWorkerDownReason, type AlivePing } from '@/lib/factory/render-worker-report'
 import { judgeWorkerPresence, judgeQueueByClient, latestAliveAt } from '@/lib/factory/worker-presence'
 import { containsPriceClaim } from '@/lib/content/price-claim'
 import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
@@ -220,7 +221,7 @@ export async function pushFactoryWorkerItems(
     .select('started_at, summary')
     .eq('job_name', 'factory-worker-alive')
   if (aliveError) throw new Error(`factory alive-ping query failed: ${aliveError.message}`)
-  const pings = (aliveData ?? []) as Array<{ started_at: string; summary: { client_ids?: string[] | null } | null }>
+  const pings = (aliveData ?? []) as Array<AlivePing & { started_at: string }>
 
   const latestHbByClient = new Map<string, string>()
   for (const clientId of clientIds) {
@@ -242,6 +243,19 @@ export async function pushFactoryWorkerItems(
   // 完全不同的处置（这家去开机 / 那家去查报错）搅在一起。
   for (const { clientId, verdict } of judgeQueueByClient(queued, latestHbByClient, now)) {
     pushOneFactoryWorkerItem(items, verdict, clientNames.get(clientId)?.name ?? '未知客户')
+  }
+  for (const clientId of clientIds) {
+    const reason = renderWorkerDownReason(pings, clientId)
+    if (!reason) continue
+    const clientName = clientNames.get(clientId)?.name ?? '未知客户'
+    items.push({
+      kind: 'factory_render_worker_down',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `【${clientName}】有片子在排队，但这台机器报渲染工人没就绪：${reason}。领单的程序还在，不等于片子能做出来。`,
+      how: '按上面那句原因修这台机器上的渲染环境。不要找做片的人，也不要找审核的人。修好之后这条会自己消失。',
+      href: 'https://app.magicengine.com.au/dashboard/factory',
+    })
   }
 }
 

@@ -16,6 +16,7 @@ import {
   creativeProblems,
   isKnownDraftKind,
   messengerCreativeProblems,
+  registerExpandedDraftProblems,
   validateDraft,
   type AdDraft,
   type AdDraftAdSet,
@@ -540,3 +541,5 @@ function cents(major: unknown): number | null {
   if (typeof major !== 'number' || !Number.isFinite(major)) return null
   return Math.round(major * 100)
 }
+
+registerExpandedDraftProblems(expandedDraftProblems)

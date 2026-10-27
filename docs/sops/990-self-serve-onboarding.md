@@ -2,7 +2,7 @@
 
 > **轨道边界**：本 SOP 只适用于 **$990 founding 中小客户**（`client_portal_users.access_type = 'self_serve'`）。FDE 月付客户走 [`client-onboarding-access-requirements.md`](./client-onboarding-access-requirements.md)。
 > **更新日期**：2026-07-08
-> **产品依据**：[$990 增长引擎启动包 spec](../superpowers/specs/2026-07-07-990-growth-engine-package-v1.md) · [自助 onboarding 向导 spec](../superpowers/specs/2026-07-08-990-self-serve-onboarding-wizard-v0.1.md)
+> **产品依据**：[$990 增长引擎启动包 spec](../specs/2026-07-07-990-growth-engine-package-v1.md) · [自助 onboarding 向导 spec](../specs/2026-07-08-990-self-serve-onboarding-wizard-v0.1.md)
 
 ---
 
@@ -91,7 +91,7 @@ spec §1：无网站客户 → **$99 单页信息站为前置门票**（单页�
 
 ## 📚 关联文档
 
-- [$990 服务边界 spec](../superpowers/specs/2026-07-07-990-growth-engine-package-v1.md)
-- [自助 onboarding 向导 spec（待 3 审）](../superpowers/specs/2026-07-08-990-self-serve-onboarding-wizard-v0.1.md)
+- [$990 服务边界 spec](../specs/2026-07-07-990-growth-engine-package-v1.md)
+- [自助 onboarding 向导 spec（待 3 审）](../specs/2026-07-08-990-self-serve-onboarding-wizard-v0.1.md)
 - [FDE 月付轨 onboarding SOP](./client-onboarding-access-requirements.md)
-- [90 天交付驾驶舱](../../src/lib/delivery/template.ts)（onboarding 是第 1 步）
+- 90 天交付驾驶舱（onboarding 是第 1 步）：原链接 `src/lib/delivery/template.ts` 在仓库里不存在，实际路径待核

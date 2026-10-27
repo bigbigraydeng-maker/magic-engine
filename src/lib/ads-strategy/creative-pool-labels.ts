@@ -54,11 +54,7 @@ export function toLabel(row: WorkOrderRow): CreativeLabel | null {
   }
 }
 
-export async function loadCreativeLabels(
-  clientId: string,
-  refs: string[],
-): Promise<Record<string, CreativeLabel>> {
-  const ids = refs.filter(r => /^\d+$/.test(r))
+async function labelsFromPublished(clientId: string, ids: string[]): Promise<Record<string, CreativeLabel>> {
   if (ids.length === 0) return {}
   const { data, error } = await supabaseAdmin
     .from('content_work_orders')
@@ -77,4 +73,33 @@ export async function loadCreativeLabels(
     }
   }
   return out
+}
+
+async function labelsFromOrders(clientId: string, ids: string[]): Promise<Record<string, CreativeLabel>> {
+  if (ids.length === 0) return {}
+  const { data, error } = await supabaseAdmin
+    .from('content_work_orders')
+    .select('id, angle')
+    .eq('client_id', clientId)
+    .in('id', ids)
+  if (error || !data) return {}
+  const out: Record<string, CreativeLabel> = {}
+  for (const row of data as { id: string; angle: string | null }[]) {
+    const label = toLabel({ angle: row.angle, published_ref: null })
+    if (label) out[row.id] = label
+  }
+  return out
+}
+
+export async function loadCreativeLabels(
+  clientId: string,
+  refs: string[],
+): Promise<Record<string, CreativeLabel>> {
+  const numeric = refs.filter(ref => /^\d+$/.test(ref))
+  const orders = refs.filter(ref => !/^\d+$/.test(ref))
+  const [published, owned] = await Promise.all([
+    labelsFromPublished(clientId, numeric),
+    labelsFromOrders(clientId, orders),
+  ])
+  return { ...owned, ...published }
 }

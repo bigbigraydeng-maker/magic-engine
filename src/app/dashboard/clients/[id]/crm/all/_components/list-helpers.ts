@@ -49,6 +49,8 @@ export function toDrawerRow(r: ContactRow): DrawerRow {
     intent: r.intent,
     // 跟进人（part 3）：抽屉里给下拉改；列表接口已经把这个值透出来。
     assignedTo: r.assignedTo ?? null,
+    // 回头客：同一份判据，抽屉顶部的横幅靠它立刻画出来。
+    returning: r.returning ?? null,
   }
 }
 

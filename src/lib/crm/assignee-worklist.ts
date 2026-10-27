@@ -32,6 +32,17 @@ export type WorklistSource = 'meta_form' | 'email' | 'whatsapp'
 /** 查「还没分给任何人」的名单时传这个。 */
 export const UNASSIGNED = 'unassigned' as const
 
+/** 客人最后一句话在这么多天内 = 新来的，值得每天提醒；更早的是积压，另外一份。 */
+export const FRESH_DAYS = 7
+
+/**
+ * WhatsApp 平台自己给没有姓名的联系人起的占位名（不是客人名字，是商家号自己的回音）。
+ * 这是平台层面的通用占位，不是某个客户的名字；客户自己的特例走「不用回：不是客人」手记。
+ */
+const PLATFORM_PLACEHOLDER_NAMES: ReadonlySet<string> = new Set(['whatsapp business'])
+
+export type WorklistTier = 'fresh' | 'backlog'
+
 export interface WorklistEntry {
   contactId: string
   displayName: string | null
@@ -46,11 +57,15 @@ export interface WorklistEntry {
   /** 邮件 / WhatsApp 的线程，用来拼直达链接；表单来源没有。 */
   conversationId: string | null
   assignedTo: string | null
+  /** 最后一句话在 `FRESH_DAYS` 天内 = fresh；更早 = backlog（积压，另外处理）。 */
+  tier: WorklistTier
 }
 
 export interface WorklistResult {
   /** 已按跟进人过滤、等最久的排最前。 */
   entries: WorklistEntry[]
+  /** 过滤之前的新来 / 积压人数（跟进人过滤之后、tier 过滤之前）。 */
+  tierCounts: Record<WorklistTier, number>
   /** 过滤之前，每个来源各自找到多少人（含不属于这个跟进人的）。 */
   detected: Record<WorklistSource, number>
   /** 过滤之前的全部去重人数，按分给谁（`unassigned` = 还没分）。让「别人名下有几位」说得出口。 */
@@ -70,6 +85,8 @@ export interface ComposeInput {
   now: Date
   /** 只要某位跟进人名下的；传 `UNASSIGNED` = 只要没分给任何人的；不传 = 全部。 */
   assignee?: string
+  /** 只要新来的 / 只要积压的；不传 = 两种都要。 */
+  tier?: WorklistTier
   errors?: Partial<Record<WorklistSource, string>>
   strangerEmails?: number
 }
@@ -132,9 +149,13 @@ export function composeWorklist(input: ComposeInput): WorklistResult {
     cur.conversationId = cur.conversationId ?? conversationId
   }
 
-  for (const m of input.metaForm) add('meta_form', m.contactId, m.displayName, m.leadAt, m.interest, null)
-  for (const e of input.email) add('email', e.contactId, e.displayName, e.lastMessageAt, e.subject, e.conversationId)
-  for (const w of input.whatsapp) add('whatsapp', w.contactId, w.displayName, w.lastMessageAt, null, w.conversationId)
+  // 平台占位名（商家号自己的回音）不是客人，不进名单、也不计入各来源人数。
+  const isPlaceholder = (name: string | null) => PLATFORM_PLACEHOLDER_NAMES.has((name ?? '').trim().toLowerCase())
+  const keep = <T extends { displayName: string | null }>(xs: T[]) => xs.filter((x) => !isPlaceholder(x.displayName))
+
+  for (const m of keep(input.metaForm)) add('meta_form', m.contactId, m.displayName, m.leadAt, m.interest, null)
+  for (const e of keep(input.email)) add('email', e.contactId, e.displayName, e.lastMessageAt, e.subject, e.conversationId)
+  for (const w of keep(input.whatsapp)) add('whatsapp', w.contactId, w.displayName, w.lastMessageAt, null, w.conversationId)
 
   const byAssignee: Record<string, number> = {}
   const all: WorklistEntry[] = []
@@ -142,27 +163,34 @@ export function composeWorklist(input: ComposeInput): WorklistResult {
     const assignedTo = input.assignedTo.get(a.contactId) ?? null
     const key = assignedTo ?? UNASSIGNED
     byAssignee[key] = (byAssignee[key] ?? 0) + 1
+    const waitingHours = hoursSince(a.waitingSince, input.now)
     all.push({
       contactId: a.contactId,
       displayName: a.displayName,
       sources: [...a.sources].sort(),
       waitingSince: a.waitingSince,
-      waitingHours: hoursSince(a.waitingSince, input.now),
+      waitingHours,
       headline: a.headline,
       conversationId: a.conversationId,
       assignedTo,
+      tier: waitingHours < FRESH_DAYS * 24 ? 'fresh' : 'backlog',
     })
   }
 
-  const wanted =
+  const byPerson =
     input.assignee === undefined
       ? all
       : all.filter((e) => (input.assignee === UNASSIGNED ? e.assignedTo === null : e.assignedTo === input.assignee))
+  const wanted = input.tier === undefined ? byPerson : byPerson.filter((e) => e.tier === input.tier)
 
   wanted.sort((x, y) => y.waitingHours - x.waitingHours)
 
+  const tierCounts: Record<WorklistTier, number> = { fresh: 0, backlog: 0 }
+  for (const e of byPerson) tierCounts[e.tier]++
+
   return {
     entries: wanted,
+    tierCounts,
     detected,
     byAssignee,
     strangerEmails: input.strangerEmails ?? 0,
@@ -191,6 +219,8 @@ function errText(err: unknown): string {
 export interface FindWorklistOptions {
   /** 只要某位跟进人名下的；`UNASSIGNED` = 没分的；不传 = 全部。 */
   assignee?: string
+  /** 只要新来的 / 只要积压的；不传 = 两种都要。 */
+  tier?: WorklistTier
 }
 
 /**
@@ -225,5 +255,5 @@ export async function findAssigneeWorklist(
   const ids = [...new Set([...metaForm.map((i) => i.contactId), ...email.map((i) => i.contactId), ...whatsapp.map((i) => i.contactId)])]
   const assignedTo = await loadAssignedTo(supabase, ids)
 
-  return composeWorklist({ metaForm, email, whatsapp, assignedTo, now, assignee: opts.assignee, errors, strangerEmails })
+  return composeWorklist({ metaForm, email, whatsapp, assignedTo, now, assignee: opts.assignee, tier: opts.tier, errors, strangerEmails })
 }

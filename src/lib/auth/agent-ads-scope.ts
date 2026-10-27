@@ -3,13 +3,23 @@
  *
  * A client API key whose scopes are exactly `ads:plan-draft` may only read a
  * plan seed or save an unapproved draft. Every other action is denied.
- * Issuing the key, the two allowed routes, and rate limits are later cuts.
+ * The key must carry its own expiry. There is no default lifetime.
  */
 
 export const AGENT_ADS_SCOPE = 'ads:plan-draft'
 
 /** mcp_access_log.tool value for a denied ads-agent call. */
 export const AGENT_ADS_DENY_TOOL = 'ads_agent_deny'
+
+/** mcp_access_log.tool values for the two allowed calls. */
+export const AGENT_ADS_SEED_TOOL = 'ads_plan_seed_read'
+export const AGENT_ADS_DRAFT_TOOL = 'ads_plan_draft_save'
+
+/** Shared per-key ceiling for the two allowed calls, counted from mcp_access_log. */
+export const AGENT_ADS_CALLS_PER_MINUTE = 30
+
+/** Longest lifetime an internal admin may set. Not a fallback when expiry is missing. */
+export const AGENT_ADS_KEY_MAX_DAYS = 90
 
 export const AGENT_ADS_ALLOWED_ACTIONS = ['plan_seed_read', 'plan_draft_save'] as const
 

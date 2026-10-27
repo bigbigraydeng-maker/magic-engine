@@ -27,6 +27,7 @@ import type {
 import type { GoalRow } from '@/types/strategy'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { prepareBudgetIntake } from '@/lib/ads/budget-currency'
+import { resolveIntakeClientKind } from '@/lib/huatuo/client-kind'
 import { getGoalById, listActiveGoals } from '@/lib/strategy/goals'
 
 export const dynamic = 'force-dynamic'
@@ -75,7 +76,8 @@ export async function POST(
   if (!body.intake) return errorResponse(400, 'intake is required')
   const prepared = prepareBudgetIntake(body.intake)
   if (!prepared.ok) return errorResponse(400, prepared.error)
-  const intake = prepared.intake
+  // 客户类型以客户资料（clients.client_kind）为准；请求里明确写了（如「按普通客户开」）才覆盖。
+  const intake = await resolveIntakeClientKind(supabaseAdmin, clientId, prepared.intake)
   if (!intake.business_goal || typeof intake.monthly_budget_aud !== 'number') {
     return errorResponse(400, 'intake must include business_goal and monthly_budget_aud')
   }

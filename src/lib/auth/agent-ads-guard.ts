@@ -36,6 +36,7 @@ export interface AgentAdsResult {
   status: 200 | 403 | 503
   code: string
   logged: boolean
+  keyId?: string
 }
 
 interface GuardInput {
@@ -103,7 +104,7 @@ async function enforceClient(auth: Extract<ApiKeyAuth, { kind: 'client' }>, inpu
     action: input.action,
     nowMs: input.nowMs ?? Date.now(),
   })
-  if (decision.ok) return { ok: true, status: 200, code: 'allowed', logged: false }
+  if (decision.ok) return { ok: true, status: 200, code: 'allowed', logged: false, keyId: auth.keyId }
   const logged = await recordDenial(decision, input)
   if (!logged) return { ok: false, status: 503, code: 'audit_unavailable', logged: false }
   return { ok: false, status: 403, code: decision.code, logged: true }

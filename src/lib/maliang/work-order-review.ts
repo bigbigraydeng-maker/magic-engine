@@ -7,6 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MaliangCheck } from '@/lib/maliang/render-check'
 import { stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
 import { remotionNineGridInput } from '@/lib/maliang/remotion-review-input'
+import { isAssetOnly } from '@/lib/factory/deliverable'
 
 export interface WorkOrderReady {
   client_id: string
@@ -18,6 +19,7 @@ export interface WorkOrderReviewContext {
   input: ReturnType<typeof remotionNineGridInput>
   output: unknown
   status: string
+  assetOnly: boolean
 }
 
 type ReadResult = { ok: true; ctx: WorkOrderReviewContext } | { ok: false; reason: string }
@@ -53,6 +55,7 @@ export async function readWorkOrderContext(
     ctx: {
       output,
       status: 'in_review',
+      assetOnly: isAssetOnly(row.brief),
       input: remotionNineGridInput({
         title: typeof row.angle === 'string' ? row.angle : '',
         brandName: typeof clientRow.name === 'string' ? clientRow.name : '',

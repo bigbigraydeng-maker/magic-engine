@@ -69,7 +69,7 @@ describe('authorizeAgentAdsKey', () => {
     const insert = installDb({ row: agentRow() })
     for (const action of ['plan_seed_read', 'plan_draft_save'] as const) {
       const result = await authorizeAgentAdsKey({ rawKey: RAW_KEY, clientId: CLIENT_ID, action })
-      expect(result).toEqual({ ok: true, status: 200, code: 'allowed', logged: false })
+      expect(result).toEqual({ ok: true, status: 200, code: 'allowed', logged: false, keyId: KEY_ID })
     }
     expect(insert).not.toHaveBeenCalled()
   })

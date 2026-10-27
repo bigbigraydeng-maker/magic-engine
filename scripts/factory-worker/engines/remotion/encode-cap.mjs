@@ -29,3 +29,10 @@ export function encodingCapFor(durationSec) {
 
 /** Hard gate before upload (worker side). Slightly above the target, still under the 50 MB limit. */
 export const MAX_UPLOAD_BYTES = 48_000_000
+
+/** Plain-language refusal. `label` is "成片" for the primary file and "${aspect} 成片" for an extra. */
+export function oversizeUploadMessage(sizeBytes, label = '成片') {
+  const mb = (Number(sizeBytes) / 1e6).toFixed(1)
+  const capMb = MAX_UPLOAD_BYTES / 1e6
+  return `成片体检没过：${label} ${mb} MB，超过存储上限（${capMb} MB）。请缩短时长或换更静的镜头后重出`
+}

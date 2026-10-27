@@ -17,7 +17,13 @@ vi.mock('@/lib/auth/client-access', () => ({
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 
+vi.mock('@/lib/crm/email-full-body', async (orig) => ({
+  ...(await orig<typeof import('@/lib/crm/email-full-body')>()),
+  fetchFullEmailBody: vi.fn(async () => null),
+}))
+
 import { supabaseAdmin } from '@/lib/supabase'
+import { fetchFullEmailBody } from '@/lib/crm/email-full-body'
 import { GET } from './route'
 
 /** 记录取消息时用的排序方向和上限。 */
@@ -38,7 +44,7 @@ const MESSAGES = [
   { direction: 'inbound', sender_name: 'Susan', body: '有长城的团吗', sent_at: '2026-07-22T01:00:00Z' },
 ]
 
-function mockDb(over: { touches?: Array<Record<string, unknown>>; conversations?: Array<Record<string, unknown>> } = {}) {
+function mockDb(over: { touches?: Array<Record<string, unknown>>; conversations?: Array<Record<string, unknown>>; messages?: Array<Record<string, unknown>> } = {}) {
   const touches = over.touches ?? [TOUCH]
   const conversations = over.conversations ?? [{ id: 'conv-1' }]
   messageOrder = null
@@ -64,6 +70,8 @@ function mockDb(over: { touches?: Array<Record<string, unknown>>; conversations?
           eq: () => ({
             eq: () => ({
               neq: () => ({ order: () => ({ limit: async () => ({ data: touches, error: null }) }) }),
+              // 「回头客 / 往来一览」多取的那份全渠道触点（不带 neq）
+              order: () => ({ limit: async () => ({ data: touches, error: null }) }),
             }),
           }),
         }),
@@ -91,7 +99,7 @@ function mockDb(over: { touches?: Array<Record<string, unknown>>; conversations?
               return {
                 limit: async (n: number) => {
                   messageLimit = n
-                  return { data: MESSAGES }
+                  return { data: over.messages ?? MESSAGES }
                 },
               }
             },
@@ -194,5 +202,115 @@ describe('官网表单的「出发时间 / 每人预算」一行人话', () => {
     expect((await (await call()).json()).formFactsLine).toBeNull()
     mockDb({ touches: [{ ...FORM('2026-10-20T00:00:00Z', { form_travel_window: 'mar_may_2027' }), channel: 'email' }] })
     expect((await (await call()).json()).formFactsLine).toBeNull()
+  })
+})
+
+/**
+ * 抽屉顶部「回头客 / 往来一览」。
+ *
+ * 起因（PM 2026-10-27，看一个真实客人的抽屉）：她 6 月填过表、我们电话没接/私信回过、
+ * 10 月她点了我们的邮件、我们邮件回复并跟进过两次，今天她又填了一次表。面板上却只显示
+ * 今天那条表单，「我们发过邮件」只在最底下的往来记录里，强意向没人说出来。
+ * 下面用她那条真实的形状（名字和联系方式不进测试）钉住。
+ */
+describe('回头客 / 往来一览（engagement）', () => {
+  const T = (channel: string, direction: 'inbound' | 'outbound', at: string, metadata: Record<string, unknown> = {}) => ({
+    channel, direction, occurred_at: at, summary: null, raw: null, source: null, metadata,
+  })
+  const RETURNING_SHAPE = [
+    T('meta_lead_form', 'inbound', '2026-06-15T07:55:00Z'),
+    T('phone', 'outbound', '2026-06-15T07:55:00Z', { answered: false }),
+    T('messenger', 'outbound', '2026-06-15T07:55:00Z'),
+    T('messenger', 'inbound', '2026-06-15T07:57:00Z'),
+    T('email', 'inbound', '2026-10-08T07:51:00Z', { email_clicked: true }),
+    T('email', 'outbound', '2026-10-09T08:47:00Z'),
+    T('email', 'outbound', '2026-10-24T01:11:00Z'),
+    T('meta_lead_form', 'inbound', '2026-10-26T23:47:00Z'),
+  ]
+
+  it('🔴 她这种人 → 判成回头客，并带着故事线', async () => {
+    mockDb({ touches: RETURNING_SHAPE })
+    const body = await (await call()).json()
+    expect(body.engagement.returning).not.toBeNull()
+    expect(body.engagement.returning.earlierForms).toBe(1)
+    expect(body.engagement.returning.firstEnquiryAt).toBe('2026-06-15T07:55:00.000Z')
+    expect(body.engagement.returning.ourLastContactAt).toBe('2026-10-24T01:11:00.000Z')
+    // 故事线最后一句必须是「又填了表」，并且打头带火
+    const last = body.engagement.story[body.engagement.story.length - 1]
+    expect(last.startsWith('🔥 ')).toBe(true)
+    expect(last).toContain('又填了表')
+  })
+
+  it('🔴 往来一览一行字要写出「我们发过邮件」（这正是 PM 看不出来的那一条）', async () => {
+    mockDb({ touches: RETURNING_SHAPE })
+    const body = await (await call()).json()
+    expect(body.engagement.line).toContain('邮件 2 封')
+    expect(body.engagement.line).toContain('电话没接 1 次')
+    expect(body.engagement.line).toContain('点过邮件链接 1 次')
+  })
+
+  it('第一次填表、我们还没联系过 → 不是回头客，但往来一览照样说「我们还没联系过」', async () => {
+    mockDb({ touches: [T('meta_lead_form', 'inbound', '2026-10-26T23:47:00Z')] })
+    const body = await (await call()).json()
+    expect(body.engagement.returning).toBeNull()
+    expect(body.engagement.story).toEqual([])
+    expect(body.engagement.line).toBe('我们还没联系过 ｜ 他：填过 1 次表')
+  })
+
+  it('🔴 判断出错 → 整条往来记录照常返回，engagement 为 null（补充说明不能把正文弄丢）', async () => {
+    // 让全渠道那条查询返回一个会让转换函数抛错的行
+    mockDb({ touches: [{ ...T('meta_lead_form', 'inbound', '2026-10-26T23:47:00Z'), metadata: { get email_clicked(): boolean { throw new Error('boom') } } }] })
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await call()
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(Array.isArray(body.timeline)).toBe(true)
+    expect(body.engagement).toBeNull()
+    err.mockRestore()
+  })
+
+  it('返回的时间线本身不受影响（回头客逻辑没有改动往来记录的内容）', async () => {
+    mockDb({ touches: RETURNING_SHAPE })
+    const body = await (await call()).json()
+    expect(body.timeline.length).toBeGreaterThan(0)
+    expect(body.timeline.every((e: { at: string }) => typeof e.at === 'string')).toBe(true)
+  })
+})
+
+
+describe('最新一封客人来信：摘要被截断时拉全文', () => {
+  const PREVIEW = 'p'.repeat(253)
+  const emailMsgs = (id: string | null) => [
+    { conversation_id: 'conv-e', direction: 'inbound', sender_name: 'Nicole', body: PREVIEW, sent_at: '2026-10-27T11:16:00Z', message_id: id },
+    { conversation_id: 'conv-e', direction: 'outbound', sender_name: 'CTS', body: 'o'.repeat(253), sent_at: '2026-09-23T08:23:00Z', message_id: 'out-1' },
+  ]
+  const bodies = async () => ((await (await call()).json()).timeline as Array<{ kind: string; body?: string }>)
+    .filter((e) => e.kind === 'message')
+    .map((e) => e.body)
+
+  beforeEach(() => vi.mocked(fetchFullEmailBody).mockReset())
+
+  it('只替换最新那封客人来信，且只拉这一封', async () => {
+    mockDb({ conversations: [{ id: 'conv-e', channel: 'email' }], messages: emailMsgs('in-1') })
+    vi.mocked(fetchFullEmailBody).mockResolvedValue('FULL TEXT ' + 'p'.repeat(300))
+    const b = await bodies()
+    expect(b.some((x) => x?.startsWith('FULL TEXT'))).toBe(true)
+    expect(b.filter((x) => x?.startsWith('o')).length).toBe(1)
+    expect(fetchFullEmailBody).toHaveBeenCalledTimes(1)
+    expect(fetchFullEmailBody).toHaveBeenCalledWith('client-a', 'in-1')
+  })
+
+  it('拉不到全文 → 原样保留摘要，不报错', async () => {
+    mockDb({ conversations: [{ id: 'conv-e', channel: 'email' }], messages: emailMsgs('in-1') })
+    vi.mocked(fetchFullEmailBody).mockResolvedValue(null)
+    expect((await bodies()).includes(PREVIEW)).toBe(true)
+  })
+
+  it('没有 message_id / 非邮件渠道 → 不去拉', async () => {
+    mockDb({ conversations: [{ id: 'conv-e', channel: 'email' }], messages: emailMsgs(null) })
+    await bodies()
+    mockDb({ conversations: [{ id: 'conv-e', channel: 'messenger' }], messages: emailMsgs('in-1') })
+    await bodies()
+    expect(fetchFullEmailBody).not.toHaveBeenCalled()
   })
 })
