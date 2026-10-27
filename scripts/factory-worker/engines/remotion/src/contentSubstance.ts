@@ -5,6 +5,7 @@ import { computeDataCardTiming } from './datacard.ts';
 import { computeAtmosphereTiming } from './atmosphere.ts';
 import { computeCompareTiming } from './compare.ts';
 import { montageFrameOf } from './montage.ts';
+import { overlayWindows, resolveFramePlan, type ResolvedHook } from './frame.ts';
 import { styledPostcardTiming } from './styles/rules.ts';
 import { styledDataCardTiming, styledListTiming, styledMontageTiming, type CraftLook } from './styles/template-craft.ts';
 
@@ -172,9 +173,66 @@ function postcardClock(props: Record<string, unknown>) {
   return styledPostcardTiming(props as never, rules as never, FPS, shotSec);
 }
 
-function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
+function hookTexts(hook: ResolvedHook): string[] {
+  const texts = hook.lines.map((line) => line.text);
+  if (hook.stat && !texts.includes(hook.stat)) texts.push(hook.stat);
+  if (hook.question && !texts.includes(hook.question)) texts.push(hook.question);
+  return texts;
+}
+
+function collectPlainPostcard(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
+  const timing = computePostcardTiming(props as never);
+  const plan = resolveFramePlan('postcard', props);
+  const hookLines = asArray(asRecord(props.hook)?.lines);
+  const hookEnd = timing.hookFrames / FPS;
+  const shownHook = plan.hook ? hookTexts(plan.hook) : hookLines.map((raw) => (typeof raw === 'string' ? raw : ''));
+  for (const text of shownHook) {
+    out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
+  }
+  const scenes = asArray(props.scenes);
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = asRecord(scenes[i]);
+    if (!scene) continue;
+    const from = timing.sceneFrom[i];
+    const dur = timing.sceneDur[i];
+    if (from === undefined || dur === undefined) continue;
+    const startSec = from / FPS;
+    const endSec = (from + dur) / FPS;
+    const place = typeof scene.place === 'string' ? scene.place : '';
+    out.push({ kind: 'place_or_tour', text: place, startSec, endSec });
+    const sourced = isNonEmptyString(scene.sourceUrl) && isNonEmptyString(scene.sourceQuote);
+    if (sourced) {
+      const line = typeof scene.line === 'string' ? scene.line : '';
+      out.push({ kind: 'selling_line', text: line, startSec, endSec });
+    }
+  }
+  const end = asRecord(props.end);
+  if (end) {
+    const title = typeof end.title === 'string' ? end.title : '';
+    out.push({
+      kind: 'brand_card',
+      text: plan.endCard ? plan.endCard.cta : title,
+      startSec: timing.priceFrom / FPS,
+      endSec: timing.totalFrames / FPS,
+    });
+  } else if (plan.endCard) {
+    const windows = overlayWindows(timing.totalFrames);
+    if (windows.endFrames > 0) {
+      out.push({
+        kind: 'brand_card',
+        text: plan.endCard.cta,
+        startSec: windows.endFrom / FPS,
+        endSec: timing.totalFrames / FPS,
+      });
+    }
+  }
+  return out;
+}
+
+function collectStyledPostcard(props: Record<string, unknown>): SubstanceElement[] {
   const timing = postcardClock(props) ?? computePostcardTiming(props as never);
+  const out: SubstanceElement[] = [];
   const hook = asRecord(props.hook);
   const hookLines = hook ? asArray(hook.lines) : [];
   const hookEnd = timing.hookFrames / FPS;
@@ -202,19 +260,16 @@ function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
   const end = asRecord(props.end);
   if (end) {
     const title = typeof end.title === 'string' ? end.title : '';
-    out.push({
-      kind: 'brand_card',
-      text: title,
-      startSec: timing.priceFrom / FPS,
-      endSec: timing.totalFrames / FPS,
-    });
+    out.push({ kind: 'brand_card', text: title, startSec: timing.priceFrom / FPS, endSec: timing.totalFrames / FPS });
   }
-  if (postcardClock(props)) {
-    const first = asRecord(asArray(props.scenes)[0]);
-    const point = first && typeof first.line === 'string' ? first.line : '';
-    out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: timing.totalFrames / FPS });
-  }
+  const first = asRecord(scenes[0]);
+  const point = first && typeof first.line === 'string' ? first.line : '';
+  out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: timing.totalFrames / FPS });
   return out;
+}
+
+function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
+  return postcardClock(props) ? collectStyledPostcard(props) : collectPlainPostcard(props);
 }
 
 function collectCompare(props: Record<string, unknown>): SubstanceElement[] {

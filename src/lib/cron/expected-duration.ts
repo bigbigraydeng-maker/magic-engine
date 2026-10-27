@@ -23,6 +23,7 @@ export const JOB_MAX_DURATION_SEC: Readonly<Record<string, number>> = {
   'cron-run-logs-cleanup': 120,
   'diagnostic-weekly': 800,
   'execution-auto-run': 900,
+  'factory-dead-letter-rerun': 60,
   'factory-order-scheduler': 120,
   'factory-publish-sweeper': 60,
   'factory-publish-worker': 300,

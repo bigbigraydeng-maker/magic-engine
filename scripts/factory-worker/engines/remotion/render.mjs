@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { bundle } from '@remotion/bundler'
 import { selectComposition, renderMedia, makeCancelSignal } from '@remotion/renderer'
 import { TEMPLATE_IDS, isTemplateId, loadTemplate } from './src/templates.ts'
+import { ASPECT_IDS, isAspectId, withRenderAspect } from './src/aspect.ts'
 import { encodingCapFor } from './encode-cap.mjs'
 
 const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [选项]
@@ -14,6 +15,7 @@ const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [�
   --props <file>              必填，props JSON 文件路径
   --out <file.mp4>            必填，输出 mp4 文件路径（必须以 .mp4 结尾）
   --template <list|montage|datacard|postcard|atmosphere>   模板，默认 list
+  --aspect <9:16|4:5|1:1|16:9>  画幅，默认 9:16（不写则与旧工单相同）
   --public-dir <dir>          素材目录（默认：render.mjs 同级的 public）
   --concurrency <int>         并发数 1..16（默认 2）
   --timeout-sec <int>         总超时秒数，至少 30（默认 600）
@@ -49,6 +51,7 @@ function parseCliArgs(argv) {
         props: { type: 'string' },
         out: { type: 'string' },
         template: { type: 'string' },
+        aspect: { type: 'string' },
         'public-dir': { type: 'string' },
         concurrency: { type: 'string' },
         'timeout-sec': { type: 'string' },
@@ -83,6 +86,11 @@ function parseCliArgs(argv) {
     throw new CliError(`--template 只能是 ${TEMPLATE_IDS.join(' / ')}，收到：${template}`, 2)
   }
 
+  const aspect = values.aspect ?? '9:16'
+  if (!isAspectId(aspect)) {
+    throw new CliError(`--aspect 只能是 ${ASPECT_IDS.join(' / ')}，收到：${aspect}`, 2)
+  }
+
   const defaultPublicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public')
   const publicDir = values['public-dir'] ? path.resolve(values['public-dir']) : defaultPublicDir
 
@@ -101,6 +109,7 @@ function parseCliArgs(argv) {
     propsFile: path.resolve(propsFile),
     outFile: path.resolve(outFile),
     template,
+    aspect,
     publicDir,
     concurrency,
     timeoutSec,
@@ -238,13 +247,16 @@ async function runRender(opts) {
   try {
     bundleDir = await bundle({ entryPoint, publicDir: opts.publicDir })
 
+    const inputProps = withRenderAspect(loaded.props, opts.aspect)
+
     const composition = await selectComposition({
       serveUrl: bundleDir,
       id: loaded.compositionId,
-      inputProps: loaded.props,
+      inputProps,
       browserExecutable: opts.browserExecutable,
     })
 
+    // Same CRF and bitrate ceiling for every aspect. --aspect only changes the canvas.
     const cap = encodingCapFor(composition.durationInFrames / composition.fps)
     await renderMedia({
       composition,
@@ -255,7 +267,7 @@ async function runRender(opts) {
       encodingMaxRate: cap.encodingMaxRate,
       encodingBufferSize: cap.encodingBufferSize,
       outputLocation: opts.outFile,
-      inputProps: loaded.props,
+      inputProps,
       concurrency: opts.concurrency,
       cancelSignal,
       browserExecutable: opts.browserExecutable,

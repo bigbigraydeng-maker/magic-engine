@@ -7,7 +7,9 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { ReturningRoute } from './ReturningRoute'
 import { AssigneeSelect } from './AssigneeSelect'
+import type { ContactRow } from '../all/_components/contact-table-types'
 import { CallButton } from './CallButton'
 import { useCallback, useEffect, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
@@ -37,6 +39,13 @@ export interface DrawerRow {
   stage: string | null
   stageLabel: string | null
   reason?: string
+  /**
+   * 「回头客」（之前咨询过、我们联系过、今天又填了咨询表）。跟列表行同一份判据，
+   * 抽屉靠它**立刻**画出顶部横幅，不用等往来记录接口回来（见 `lib/crm/returning-lead`）。
+   * 🔴 `toDrawerRow` 是一个字段一个字段映射的 —— 加了这里不加那里，列表上有「🔥 回头」、
+   * 抽屉却不显示横幅（2026-10-27 tsc 报出来才发现；之前 tsc 被主干一个语法错的文件遮住了）。
+   */
+  returning?: ContactRow['returning']
   dueAt?: string | null
   /** 他现在在哪一批 —— 决定给哪几个按钮。 */
   segment?: Segment
@@ -159,6 +168,15 @@ export function PersonDrawer({
   // 也不并进列表接口：全带会把那页拖慢。换人时先清空，不让上一个人的概况留着。
   const [aiBrief, setAiBrief] = useState<TimelineAiBrief | null>(null)
   const age = aiBrief ? briefAge(aiBrief.generatedAt) : null
+  // 这张 AI 卡生成**之后**他又有了新动作（又填了表、又回了消息、又点了链接）—— 卡里的
+  // 「客户尚未回复」之类说法就不对了，必须当场说出来，别让员工拿一张过期的卡当现状。
+  // PM 2026-10-27：卡 10/26 生成、说「客户尚未回复」，而她今天又填了表。
+  // 时间读不出来就不提醒，不猜（跟上面 briefAge 同一个原则）。
+  const newerActivity = (() => {
+    const gen = aiBrief?.generatedAt ? Date.parse(aiBrief.generatedAt) : NaN
+    const last = summary?.engagement?.lastActiveAt ? Date.parse(summary.engagement.lastActiveAt) : NaN
+    return Number.isFinite(gen) && Number.isFinite(last) && last > gen
+  })()
   const contactId = row.contactId
   useEffect(() => {
     let alive = true
@@ -311,6 +329,38 @@ export function PersonDrawer({
             这三样都来自往来记录本身，不额外拉一次接口：`ContactTimeline`
             算好之后回传（判据只有一份）。
           */}
+          {/* 🔥 回头客 —— 抽屉里最该先看到的一件事（PM 2026-10-27）。
+              之前咨询过、我们联系过，今天又填了咨询表：他特意回来的，意向比任何一条普通回复都强。
+              横幅用列表行里的 `returning` 先画出来（不用等往来记录加载），故事线来自往来记录接口，
+              到了再补上。两边都是同一份判据（lib/crm/returning-lead）。 */}
+          {(summary?.engagement?.returning ?? row.returning) && (
+            <div
+              className="mb-3 rounded-xl border border-[#C2453A]/35 bg-[#C2453A]/[0.07] px-3 py-2.5"
+              data-testid="returning-banner"
+            >
+              <p className="text-[13px] font-black text-[#C2453A]">🔥 他又回来了 —— 意向很强，今天优先联系</p>
+              {summary?.engagement?.journey ? (
+                <ReturningRoute journey={summary.engagement.journey} />
+              ) : (
+                summary?.engagement && summary.engagement.story.length > 0 && (
+                  <ul className="mt-1.5 space-y-0.5" data-testid="returning-story">
+                    {summary.engagement.story.map((line) => (
+                      <li key={line} className="text-[12px] leading-relaxed text-me-charcoal/85">
+                        {line.startsWith('🔥 ') ? <span className="font-bold">{line}</span> : line}
+                      </li>
+                    ))}
+                  </ul>
+                )
+              )}
+            </div>
+          )}
+          {/* 往来一览 —— 一行字讲清「我们联系过他什么、他做过什么」。以前要滚到最底下的往来记录里才看得出
+              我们有没有发过邮件（PM 2026-10-27：「看不出来我们是否发了邮件，但 AI 摘要里说的确实发过」）。 */}
+          {summary?.engagement?.line && (
+            <p className="mb-2 text-[12px] font-semibold text-me-charcoal/65" data-testid="engagement-line">
+              📋 {summary.engagement.line}
+            </p>
+          )}
           {summary?.formFactsLine && (
             <p className="mb-2 text-[12px] font-bold text-me-charcoal/70" data-testid="form-facts-line">
               {summary.formFactsLine}
@@ -337,6 +387,11 @@ export function PersonDrawer({
                 >
                   {age.label}
                   {age.stale ? ' · 里面的时间说法可能已过时，请核对原文' : ''}
+                </p>
+              )}
+              {newerActivity && (
+                <p className="mb-1.5 text-[11px] font-bold text-[#C2453A]" data-testid="ai-overview-newer-activity">
+                  ⚠️ 这张卡生成之后他又有新动作（见上面的往来一览），卡里「尚未回复」之类的说法可能已不对，以最新记录为准
                 </p>
               )}
               <p className="text-[13px] leading-relaxed text-me-charcoal/90">{aiBrief.summary}</p>

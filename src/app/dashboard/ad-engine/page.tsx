@@ -24,6 +24,7 @@ import {
 import { summariseIndustryCoverage, type ClientIndustryRow } from '@/lib/memory/industry-coverage'
 import { INDUSTRY_OPTIONS } from '@/lib/clients/industries'
 import LessonToggle from './_components/LessonToggle'
+import LessonVerify, { type SiteOption } from './_components/LessonVerify'
 
 export const dynamic = 'force-dynamic'
 
@@ -158,9 +159,11 @@ async function loadIndustryCoverage() {
 }
 
 export default async function AdEnginePage() {
-  const [lessons, breakdowns, coverage] = await Promise.all([
+  const [lessons, breakdowns, coverage, siteRows] = await Promise.all([
     loadLessons(), loadBreakdowns(), loadIndustryCoverage(),
+    supabaseAdmin.from('clients').select('id, name, domain').not('domain', 'is', null),
   ])
+  const sites: SiteOption[] = (siteRows.data ?? []).map(c => ({ id: c.id as string, name: c.name as string }))
 
   const active = lessons.filter(l => l.is_active)
   const retired = lessons.filter(l => !l.is_active)
@@ -199,7 +202,7 @@ export default async function AdEnginePage() {
             </p>
           )}
           {active.map(l => (
-            <LessonCard key={l.lesson_key} lesson={l} />
+            <LessonCard key={l.lesson_key} lesson={l} sites={sites} />
           ))}
         </div>
 
@@ -209,7 +212,7 @@ export default async function AdEnginePage() {
               已停用的 {retired.length} 条
             </summary>
             <div className="mt-3 space-y-3 opacity-60">
-              {retired.map(l => <LessonCard key={l.lesson_key} lesson={l} />)}
+              {retired.map(l => <LessonCard key={l.lesson_key} lesson={l} sites={sites} />)}
             </div>
           </details>
         )}
@@ -345,7 +348,7 @@ export default async function AdEnginePage() {
   )
 }
 
-function LessonCard({ lesson: l }: { lesson: LessonRow }) {
+function LessonCard({ lesson: l, sites }: { lesson: LessonRow; sites: SiteOption[] }) {
   const redacted = Boolean(l.evidence && 'original_rationale' in l.evidence)
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
@@ -377,6 +380,7 @@ function LessonCard({ lesson: l }: { lesson: LessonRow }) {
         </div>
         <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
       </div>
+      <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} />
     </div>
   )
 }

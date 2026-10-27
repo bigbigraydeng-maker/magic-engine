@@ -1,8 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import { statusNotice } from './dialog/present'
 
-export const APPROVE_BUTTON_LABEL = '✓ 批准并生成执行计划'
+export const APPROVE_BUTTON_LABEL = '同意'
 export const REJECT_BUTTON_LABEL = '要求修改（标为已拒绝）'
 
 export const APPROVE_CONFIRM_TEXT =
@@ -61,7 +62,7 @@ export function PrescriptionReviewActions({
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row">
         <button type="button" onClick={() => setPending('reject')} disabled={isApproving} className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors">
           {REJECT_BUTTON_LABEL}
         </button>
@@ -74,20 +75,29 @@ export function PrescriptionReviewActions({
   )
 }
 
-export function PrescriberLine({ agentName }: { agentName: string | null }) {
-  if (!agentName) return null
+export function PrescriberLine({ agentName, manual = false }: { agentName: string | null; manual?: boolean }) {
+  if (!manual && !agentName?.trim()) return null
   return (
     <p className="text-sm text-gray-600">
-      开方人：<span className="font-medium text-gray-900">{agentName}</span>
+      开方人：<span className="font-medium text-gray-900">{manual ? '人工写下' : '华佗'}</span>
     </p>
   )
 }
 
-export function ManualDraftBanner({ show }: { show: boolean }) {
-  if (!show) return null
-  return (
-    <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-      草稿 · 人工执行 · 未批准。点「批准并生成执行计划」会把方案记到目标下面，按阶段排好。
-    </div>
-  )
+export function PrescriptionStatusNotice({
+  status,
+  manual,
+  approveShown,
+}: {
+  status: string | null
+  manual: boolean
+  approveShown: boolean
+}) {
+  const text = statusNotice(status, { manual, approveShown })
+  if (!text) return null
+  const waiting = status === 'draft' || status === 'rejected'
+  const tone = waiting
+    ? 'border-amber-200 bg-amber-50 text-amber-950'
+    : 'border-black/10 bg-white text-me-charcoal'
+  return <div role="note" className={`rounded-xl border p-4 text-sm leading-6 ${tone}`}>{text}</div>
 }

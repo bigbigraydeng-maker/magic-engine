@@ -190,6 +190,14 @@ export type ManualItemKind =
   | 'prescription_updated'
   | 'leads_metric_untrusted'
   | 'factory_worker_idle'
+  /** 渲染引擎没就绪。领单程序还在，不等于片子能做出来。 */
+  | 'factory_render_worker_down'
+  /** 待审超过 24 小时，只催审核的人，不自动批准。 */
+  | 'factory_review_overdue'
+  /** 死信不会再自动重跑，或失败原因读不到。上报，不是批准。 */
+  | 'factory_dead_letter_stuck'
+  /** 待审或死信清单自己没读出来。没列出来不等于没有。 */
+  | 'factory_material_check_failed'
   | 'ad_readback_blocker'
   /** Mailchimp 出口 tally 里出现非预期失败（配置读不出来 / API key 失效 / 被限流 / provider 5xx） */
   | 'mailchimp_export_broken'

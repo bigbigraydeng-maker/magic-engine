@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkAdsBudget, type AccountCapFacts } from '../budget-caps'
+import { checkAdsBudget, collectPhaseBudgetProblems, type AccountCapFacts } from '../budget-caps'
 import { baseSpec } from './fixtures'
 import { allAdsSteps, type PromoSpec } from '../spec'
 
@@ -77,5 +77,11 @@ describe('checkAdsBudget', () => {
   it('over 优先于 unknown', () => {
     const r = checkAdsBudget(stepsOf(specWithBudgets({ act_1: 99999 })), [acct({ daily_cap_cents: 100 })], null)
     expect(r.verdict).toBe('over')
+  })
+
+  it('按阶段汇总超上限时带上阶段名，读不到上限不算拒绝', () => {
+    const over = collectPhaseBudgetProblems(baseSpec(), [acct({ daily_cap_cents: 100 })], 20000)
+    expect(over[0]).toContain('阶段 1')
+    expect(collectPhaseBudgetProblems(baseSpec(), [acct()], null)).toEqual([])
   })
 })

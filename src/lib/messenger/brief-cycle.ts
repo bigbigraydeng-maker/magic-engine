@@ -22,6 +22,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { classifyThrownOpenAIError, needsHuman } from '@/lib/ai/provider-failure'
+import { AllProvidersFailedError } from '@/lib/ai/failover'
 import {
   shouldGenerateBrief,
   generateBrief,
@@ -53,6 +54,12 @@ export const MAX_BRIEFS_PER_RUN = 50
  * 🔴 这个数字的唯一依据是**网关约 125 秒掐断**：实测每张卡约 3.2 秒
  *    （2026-08-22 那批运行：50 张 / 157~208 秒），12 张约 40 秒，留足三倍余量。
  *    调大到 40 张就会重新踩回这次事故的那条线。
+ *
+ * 🔴 2026-10-26 补记：OpenAI 断电、简报切到备用的 Claude 时，实测每张约 6~8 秒
+ *    （同一批真实 CTS 邮件对话：OpenAI 3~4 秒，Claude 5.5~7.7 秒），12 张约 80~90 秒，
+ *    已经贴着下面 `CHUNK_TIME_BUDGET_MS` 的 90 秒。**不用调小这个数**：超了由时间预算
+ *    把段提前返回、剩下的留给下一轮（那条闸本来就是为「每张变慢」设计的），
+ *    只是切换期间每段会少写一两张。上面那条「网关约 125 秒」的线仍然有三十多秒余量。
  */
 export const BRIEFS_PER_CHUNK = 12
 
@@ -95,6 +102,32 @@ const ABORT_REASON: Record<string, string> = {
   account_exhausted: 'AI 服务账户余额/额度用光了 —— 充值前这一轮剩下的都会同样失败，已当场停下',
   credential_invalid: 'AI 服务的钥匙不认了（被撤销 / 打错 / 过期）—— 换钥匙前这一轮剩下的都会同样失败，已当场停下',
   gateway_auth_failed: 'AI 调用卡在网关那一层，还没走到 OpenAI —— 要换网关令牌，这一轮剩下的都会同样失败，已当场停下',
+}
+
+const PROVIDER_FAILURE_LABEL: Record<string, string> = {
+  account_exhausted: '余额/额度用光',
+  credential_invalid: '钥匙不认了',
+  gateway_auth_failed: '卡在网关',
+}
+
+/**
+ * 这次失败要不要让整轮当场停下？要的话返回给人看的原因，不要返回 null。
+ *
+ * 🔴 为什么单独成函数（子牙 + 魏征两审都指出的最严重一条）：这里原来直接
+ *    `classifyThrownOpenAIError(err)` —— 它只认 OpenAI SDK 抛的原始异常。接上切换层之后，
+ *    三家都失败时抛的是聚合错误 `AllProvidersFailedError`，没有 `status`，会被判成 `other`，
+ *    于是整轮**不再当场停下**：对最多 500 条候选每条试三家、每条烧满 20 秒，
+ *    而运行记录里那句「余额用光，已当场停下」再也不出现。这正是 2026-09-23 事故的放大效应
+ *    换了个形状复活。所以聚合错误要在这里单独认。
+ */
+export function abortReasonFor(err: unknown): string | null {
+  if (err instanceof AllProvidersFailedError) {
+    if (!err.accountLevel) return null
+    const parts = Object.entries(err.kinds).map(([provider, kind]) => `${provider}：${PROVIDER_FAILURE_LABEL[kind ?? ''] ?? kind}`)
+    return `所有 AI 供应商都不可用（${parts.join('；')}）—— 充值或换钥匙之前这一轮剩下的都会同样失败，已当场停下`
+  }
+  const kind = classifyThrownOpenAIError(err)
+  return needsHuman(kind) ? (ABORT_REASON[kind] ?? null) : null
 }
 
 /** 候选池一次最多从库里捞多少条对话（挑之前的粗筛上限，不是写卡上限）。 */
@@ -515,11 +548,11 @@ export async function generateDueBriefs(
           // 还占着邮件那半配额。实测约一成邮件对话落到这里（553 段里约 55 段），
           // 比每轮 25 段的配额还多，真会把配额占死、让存量永远跑不完。
           if (prepared === null) {
-            await storeBrief(candidate, nothingFromCustomerBrief(), now, null, signal)
+            await storeBrief(candidate, nothingFromCustomerBrief(), now, null, signal, 'rule:no-customer-text')
             emptyThreads++
             return
           }
-          const { brief, knowledgeStatus } = await generateBrief(
+          const { brief, knowledgeStatus, answeredBy } = await generateBrief(
             prepared,
             candidate.clientId,
             {
@@ -529,9 +562,11 @@ export async function generateDueBriefs(
                 : 0,
               channel: candidate.channel,
             },
-            { signal },
+            // 总预算 = 这一条候选的剩余时间。切换层按它给每一家切时间；
+            // 只传 signal 不传数字的话，它不知道总共有多少时间可以分。
+            { signal, budgetMs: candidateMs },
           )
-          await storeBrief(candidate, brief, now, knowledgeStatus, signal)
+          await storeBrief(candidate, brief, now, knowledgeStatus, signal, answeredBy?.model)
           generated++
         })(),
         candidateMs,
@@ -562,9 +597,8 @@ export async function generateDueBriefs(
 
       // 账户级失效（没钱 / 钥匙不认了 / 卡在网关）对这一批剩下的每一条都是同一个结论。
       // 判据原样用 `@/lib/ai/provider-failure` 那一份，这里不另立标准。
-      const kind = classifyThrownOpenAIError(err)
-      if (needsHuman(kind)) {
-        const reason = ABORT_REASON[kind]
+      const reason = abortReasonFor(err)
+      if (reason !== null) {
         console.error(`[messenger/brief] 账户级故障，这一轮当场停下：${reason}`, err)
         return { generated, failed, emptyThreads, aborted: reason }
       }

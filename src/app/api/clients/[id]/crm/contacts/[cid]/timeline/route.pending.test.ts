@@ -24,7 +24,7 @@ function mockDb(w: World, phone = '021 000 0001') {
     if (table === 'contacts') {
       return { select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: 'c1', display_name: 'X', primary_phone: phone, primary_email: null, stage: null }, error: null }) }) }) }) }
     }
-    if (table === 'contact_touchpoints') return { select: () => ({ eq: () => ({ eq: () => ({ neq: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }) }
+    if (table === 'contact_touchpoints') return { select: () => ({ eq: () => ({ eq: () => ({ neq: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }), order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }
     if (table === 'contact_stage_events') return { select: () => ({ eq: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }
     if (table === 'client_pipeline_stages') return { select: () => ({ eq: async () => ({ data: [] }) }) }
     if (table === 'conversations') return { select: () => ({ eq: () => ({ eq: async () => ({ data: [] }) }) }) }

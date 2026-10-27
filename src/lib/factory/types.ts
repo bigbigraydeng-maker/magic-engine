@@ -304,6 +304,8 @@ export interface WorkOrderBrief {
   clip_generation_plan: ClipGenerationPlanItem[]
   aspect_ratio: '9:16'
   notes: string
+  /** Set only when the signal asked for material and nothing publishable. */
+  remotion?: Record<string, unknown>
   /** A2:后端生成的广告文案(品牌接地)。worker 读它装配,不再自己写硬编 CTS 的文案。 */
   copy?: AdCopy
   /** B0 归因桩:这条产出预期服务的 Goal + 北极星指标。诸葛亮红线——每条片天生挂对 Goal

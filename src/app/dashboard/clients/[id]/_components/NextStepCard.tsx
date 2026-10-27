@@ -1,21 +1,14 @@
 'use client'
 
 /**
- * NextStepCard — dynamic single-action guidance card (UX overhaul)
- *
- * Always shows FDE exactly one next action based on the client's current
- * pipeline state. Replaces the "none" and "reviewing" states that were
- * previously scattered across BrandHealthWidget.
+ * NextStepCard — one next action on the client page.
  *
  * State machine:
- *   none       → Start 张骞 discovery
- *   reviewing  → Confirm 张骞 report
- *   confirmed, no diagnostic, no rx  → Run 华佗 diagnostic (+ skip option)
- *   confirmed, diagnostic done, no rx → Generate 诸葛亮 prescription
- *   rx generating   → In-progress pulse
- *   rx failed       → Re-generate
- *   rx draft        → Approve prescription
- *   rx approved     → Go to 鲁班 execution board
+ *   none       → Start brand scan
+ *   reviewing  → Confirm brand scan
+ *   confirmed, no rx → Open the prescription dialog
+ *   rx generating / failed / draft → Open that dialog
+ *   rx approved → Execution board, with a link back to the prescription
  */
 
 import Link from 'next/link'
@@ -24,172 +17,103 @@ export type DiscoveryStatus    = 'none' | 'reviewing' | 'confirmed'
 export type PrescriptionStatus = 'none' | 'generating' | 'failed' | 'draft' | 'approved'
 
 interface Props {
-  discoveryStatus:      DiscoveryStatus
-  hasCompletedDiagnostic: boolean
-  prescriptionStatus:   PrescriptionStatus
-  clientId:             string
+  discoveryStatus: DiscoveryStatus
+  prescriptionStatus: PrescriptionStatus
+  clientId: string
 }
 
 interface CardConfig {
-  wrapCls:        string   // border + bg
-  dotCls:         string   // status dot colour (+ optional animate-pulse)
-  badge:          string
-  title:          string
-  desc:           string
-  primaryHref?:   string
-  primaryLabel?:  string
-  primaryCls:     string   // button bg/text
+  wrapCls: string
+  dotCls: string
+  badge: string
+  title: string
+  desc: string
+  primaryHref?: string
+  primaryLabel?: string
+  primaryCls: string
   secondaryHref?: string
   secondaryLabel?: string
 }
 
 function resolve(
-  discoveryStatus:        DiscoveryStatus,
-  hasCompletedDiagnostic: boolean,
-  prescriptionStatus:     PrescriptionStatus,
-  clientId:               string,
+  discoveryStatus: DiscoveryStatus,
+  prescriptionStatus: PrescriptionStatus,
+  clientId: string,
 ): CardConfig {
+  const prescriptionHref = `/dashboard/clients/${clientId}/prescription/new`
+  if (discoveryStatus === 'none') return scanCard(clientId, '未开始', '先做品牌扫描', '还没有品牌扫描，开不了处方。', '开始品牌扫描 →')
+  if (discoveryStatus === 'reviewing') return scanCard(clientId, '待确认', '确认品牌扫描', '扫描结果还没确认。确认之后才能开处方。', '查看并确认 →')
+  return prescriptionCard(prescriptionStatus, clientId, prescriptionHref)
+}
 
-  if (discoveryStatus === 'none') return {
-    wrapCls:      'bg-[#C2453A]/10 border-[#C2453A]/30',
-    dotCls:       'bg-[#C2453A]',
-    badge:        '未开始',
-    title:        '启动张骞品牌发现',
-    desc:         '品牌数据缺失，华佗诊断与诸葛亮分析均无法运行。扫描约 3 分钟完成。',
-    primaryHref:  `/dashboard/clients/${clientId}/zhangqian`,
-    primaryLabel: '启动品牌发现 →',
-    primaryCls:   'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
-  }
-
-  if (discoveryStatus === 'reviewing') return {
-    wrapCls:      'bg-me-ochre/10 border-me-ochre/30',
-    dotCls:       'bg-me-ochre',
-    badge:        '待确认',
-    title:        '确认张骞发现报告',
-    desc:         '张骞已完成品牌扫描，请核查数据后确认导入，才能运行华佗分析。',
-    primaryHref:  `/dashboard/clients/${clientId}/zhangqian`,
-    primaryLabel: '查看 & 确认报告 →',
-    primaryCls:   'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
-  }
-
-  // ── discovery confirmed ───────────────────────────────────────────────────
-
-  if (prescriptionStatus === 'generating') return {
-    wrapCls:      'bg-me-ochre/10 border-me-ochre/30',
-    dotCls:       'bg-me-ochre animate-pulse',
-    badge:        '生成中',
-    title:        '诸葛亮处方生成中…',
-    desc:         '诸葛亮正在基于诊断数据开方，通常需 1–2 分钟，页面将自动更新。',
-    primaryHref:  `/dashboard/clients/${clientId}/prescription/new`,
-    primaryLabel: '查看进度 →',
-    primaryCls:   'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
-  }
-
-  if (prescriptionStatus === 'failed') return {
-    wrapCls:      'bg-[#C2453A]/10 border-[#C2453A]/30',
-    dotCls:       'bg-[#C2453A]',
-    badge:        '生成失败',
-    title:        '处方生成失败，请重新生成',
-    desc:         '上次诸葛亮处方生成遇到错误。可重新发起生成，或先补充诊断数据后再试。',
-    primaryHref:  `/dashboard/clients/${clientId}/prescription/new`,
-    primaryLabel: '重新生成处方 →',
-    primaryCls:   'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
-    secondaryHref:  `/dashboard/clients/${clientId}/diagnostic`,
-    secondaryLabel: '先补充诊断',
-  }
-
-  if (prescriptionStatus === 'draft') return {
-    wrapCls:      'bg-me-ochre/10 border-me-ochre/30',
-    dotCls:       'bg-me-ochre',
-    badge:        '待审批',
-    title:        '诸葛亮处方草稿待审批',
-    desc:         '处方已生成，请审阅处方内容并批准，才能将行动推送至鲁班执行看板。',
-    primaryHref:  `/dashboard/clients/${clientId}/prescription/new`,
-    primaryLabel: '审阅 & 批准处方 →',
-    primaryCls:   'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
-  }
-
-  if (prescriptionStatus === 'approved') return {
-    wrapCls:      'bg-[#5C8A4A]/10 border-[#5C8A4A]/30',
-    dotCls:       'bg-[#5C8A4A]',
-    badge:        '就绪',
-    title:        '处方已批准，执行追踪中',
-    desc:         '诸葛亮处方已进入鲁班执行阶段。查看执行看板追踪进度，或询问诸葛亮获取本周战略建议。',
-    primaryHref:  `/dashboard/clients/${clientId}/execution`,
-    primaryLabel: '查看执行看板 →',
-    primaryCls:   'bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white',
-    secondaryHref:  `/dashboard/clients/${clientId}/prescription/new`,
-    secondaryLabel: '查看处方',
-  }
-
-  // confirmed + no prescription yet
-  if (hasCompletedDiagnostic) return {
-    wrapCls:      'bg-me-ochre/10 border-me-ochre/30',
-    dotCls:       'bg-me-ochre',
-    badge:        '下一步',
-    title:        '生成诸葛亮处方',
-    desc:         '六维度诊断已完成，诸葛亮可基于诊断结果生成针对性处方行动路线图。',
-    primaryHref:  `/dashboard/clients/${clientId}/prescription/new`,
-    primaryLabel: '生成诸葛亮处方 →',
-    primaryCls:   'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
-    secondaryHref:  `/dashboard/clients/${clientId}/diagnostic/report`,
-    secondaryLabel: '先查看诊断报告',
-  }
-
-  // confirmed + no diagnostic + no prescription
+function scanCard(clientId: string, badge: string, title: string, desc: string, primaryLabel: string): CardConfig {
   return {
-    wrapCls:      'bg-me-ochre/10 border-me-ochre/30',
-    dotCls:       'bg-me-ochre',
-    badge:        '下一步',
-    title:        '运行华佗深度诊断',
-    desc:         '张骞发现已确认。建议先运行六维度深度诊断，诸葛亮处方将更精准（约 3–5 分钟）。',
-    primaryHref:  `/dashboard/clients/${clientId}/diagnostic`,
-    primaryLabel: '运行华佗诊断 →',
-    primaryCls:   'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
-    secondaryHref:  `/dashboard/clients/${clientId}/prescription/new`,
-    secondaryLabel: '跳过，直接生成处方',
+    wrapCls: badge === '未开始' ? 'bg-[#C2453A]/10 border-[#C2453A]/30' : 'bg-me-ochre/10 border-me-ochre/30',
+    dotCls: badge === '未开始' ? 'bg-[#C2453A]' : 'bg-me-ochre',
+    badge,
+    title,
+    desc,
+    primaryHref: `/dashboard/clients/${clientId}/zhangqian`,
+    primaryLabel,
+    primaryCls: 'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
   }
 }
 
-export function NextStepCard({ discoveryStatus, hasCompletedDiagnostic, prescriptionStatus, clientId }: Props) {
-  const c = resolve(discoveryStatus, hasCompletedDiagnostic, prescriptionStatus, clientId)
+function prescriptionCard(status: PrescriptionStatus, clientId: string, href: string): CardConfig {
+  if (status === 'generating') return step('生成中', '处方正在写', '华佗正在写，写完会出现在处方对话里。', href, '打开处方 →', true)
+  if (status === 'failed') return step('没写成', '处方没写成', '打开处方对话再说一次。', href, '打开处方 →', false)
+  if (status === 'draft') return step('待看', '处方可以审了', '打开对话看这版处方。合适就点同意。', href, '打开处方 →', false)
+  if (status === 'approved') {
+    return {
+      ...step('已同意', '处方已经同意', '可以去看执行进度，也可以再打开处方对话。', `/dashboard/clients/${clientId}/execution`, '查看执行进度 →', false),
+      wrapCls: 'bg-[#5C8A4A]/10 border-[#5C8A4A]/30',
+      dotCls: 'bg-[#5C8A4A]',
+      primaryCls: 'bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white',
+      secondaryHref: href,
+      secondaryLabel: '打开处方',
+    }
+  }
+  return step('下一步', '开一份处方', '直接跟华佗说要什么结果、每月预算。', href, '打开处方 →', false)
+}
 
+function step(badge: string, title: string, desc: string, href: string, label: string, pulse: boolean): CardConfig {
+  return {
+    wrapCls: 'bg-me-ochre/10 border-me-ochre/30',
+    dotCls: pulse ? 'bg-me-ochre animate-pulse' : 'bg-me-ochre',
+    badge,
+    title,
+    desc,
+    primaryHref: href,
+    primaryLabel: label,
+    primaryCls: 'bg-me-charcoal hover:bg-me-charcoal/85 text-white',
+  }
+}
+
+export function NextStepCard({ discoveryStatus, prescriptionStatus, clientId }: Props) {
+  const c = resolve(discoveryStatus, prescriptionStatus, clientId)
   return (
     <div className={`rounded-xl border px-5 py-5 shadow-sm ${c.wrapCls}`}>
       <div className="flex flex-wrap items-start justify-between gap-4 sm:flex-nowrap">
-
-        {/* Left: status dot + text */}
         <div className="flex items-start gap-3 min-w-0">
           <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${c.dotCls}`} />
           <div className="min-w-0">
-            <p className="mb-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-me-charcoal/45">
-              {c.badge}
-            </p>
+            <p className="mb-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-me-charcoal/45">{c.badge}</p>
             <p className="text-base font-black text-me-charcoal">{c.title}</p>
             <p className="mt-1 text-sm font-semibold leading-relaxed text-me-charcoal/60">{c.desc}</p>
           </div>
         </div>
-
-        {/* Right: CTAs */}
         <div className="flex flex-shrink-0 items-center gap-2 pl-5 sm:pl-0">
           {c.secondaryHref && (
-            <Link
-              href={c.secondaryHref}
-              className="whitespace-nowrap text-sm font-semibold text-me-charcoal/55 transition-colors hover:text-me-charcoal/75"
-            >
+            <Link href={c.secondaryHref} className="whitespace-nowrap text-sm font-semibold text-me-charcoal/55 transition-colors hover:text-me-charcoal/75">
               {c.secondaryLabel}
             </Link>
           )}
           {c.primaryHref && (
-            <Link
-              href={c.primaryHref}
-              className={`min-h-10 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-black transition-colors ${c.primaryCls}`}
-            >
+            <Link href={c.primaryHref} className={`min-h-10 whitespace-nowrap rounded-lg px-4 py-2 text-sm font-black transition-colors ${c.primaryCls}`}>
               {c.primaryLabel}
             </Link>
           )}
         </div>
-
       </div>
     </div>
   )

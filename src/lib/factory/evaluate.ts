@@ -10,7 +10,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
 import { compactCreativeProfile, parseVerifiedCta, projectCreativeProfile } from './client-config'
-import { decideSignal, pickFactoryGoal } from './strategist'
+import { withAssetOnlyDeliverable } from './deliverable'
+import { decideSignal, goalForSignal } from './strategist'
 import {
   detectContentGoal,
   getViralClipDirective,
@@ -121,9 +122,8 @@ async function loadContext(
     .maybeSingle()
   if (cErr) throw new Error(`clients query failed: ${cErr.message}`)
 
-  // B0 Goal 圈定(诸葛亮红线:禁"选最新 Goal"盲量产,产出必须挂对客户真正想推的 Goal)。
-  // 一次查全部 active goal(desc),纯函数 pickFactoryGoal 挑:优先 factory_config.factory_goal_id,
-  // 指向的 goal 不在 active 列表(归档/删/换客户)则退回最新 active(fail-safe)。
+  // A named goal hangs on that goal only. If it is not active, do not fall back
+  // to a newer one. An unnamed signal still uses pickFactoryGoal.
   const { data: activeGoals, error: gErr } = await supabaseAdmin
     .from('goals')
     .select('id, title, primary_metric_key')
@@ -132,7 +132,11 @@ async function loadContext(
     .order('created_at', { ascending: false })
   if (gErr) throw new Error(`goals query failed: ${gErr.message}`)
   const configGoalId = ((client?.factory_config ?? {}) as Record<string, unknown>)['factory_goal_id']
-  const goal = pickFactoryGoal(configGoalId, (activeGoals ?? []) as GoalSlice[])
+  const goal = goalForSignal(
+    signal.evidence['goal_id'],
+    configGoalId,
+    (activeGoals ?? []) as GoalSlice[],
+  )
 
   const { data: blocklist, error: blErr } = await supabaseAdmin
     .from('factory_angle_blocklist')
@@ -396,6 +400,9 @@ async function persistDecision(
       budgetCapUsd: FACTORY_ORDER_BUDGET_CAP_USD,
     })
     draft.brief = { ...draft.brief, ...recipeBriefApplied }
+    if (signal.request['deliverable'] === 'asset_only') {
+      draft.brief = withAssetOnlyDeliverable(draft.brief)
+    }
     draft.clip_links = []
     // R5 defense-in-depth:即便 buildFullRecipeBrief 未来被绕过,只要走这条路径就必须 pass。
     // 任何 claim-critical 字段缺失都会 throw,外层 catch → 信号 rejected(recipe_config_invalid)。

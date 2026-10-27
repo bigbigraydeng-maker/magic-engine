@@ -1,6 +1,7 @@
 import React from 'react'
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from 'remotion'
 import { Logo } from './components'
+import { templateProps } from './aspect'
 import { parseCompareProps, computeCompareTiming, type CompareProps } from './compare'
 import { effectiveShotSec, type Craft } from './styles/craft'
 import { useStyleFamily } from './styles/fonts'
@@ -28,7 +29,7 @@ export const CompareReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const peeled = peelStyle(rawProps)
   const look = peeled.look == null ? null : (peeled.look as ResolvedLook)
   const family = useStyleFamily(look)
-  const props = parseCompareProps(peeled.body)
+  const props = parseCompareProps(templateProps(peeled.body))
   const frame = useCurrentFrame()
   const rules = look?.rules ?? defaultRules()
   const shotSec = look ? effectiveShotSec(look) : rules.shotSec

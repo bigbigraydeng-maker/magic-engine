@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { contactUrl, digestName, scrubContactDetails } from '@/lib/crm/digest-shared'
-import { findAssigneeWorklist, UNASSIGNED, type WorklistSource } from '@/lib/crm/assignee-worklist'
+import { findAssigneeWorklist, UNASSIGNED, FRESH_DAYS, type WorklistSource, type WorklistTier } from '@/lib/crm/assignee-worklist'
 
 interface RouteParams {
   params: { id: string }
@@ -32,6 +32,7 @@ export interface WorklistEntryView {
   waitingSince: string
   headline: string | null
   assignedTo: string | null
+  tier: WorklistTier
   url: string
 }
 
@@ -47,10 +48,13 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
   // 不传 = 全部；`unassigned` = 还没分的；其它当跟进人的登录邮箱（统一小写，库里存的就是小写）。
   const rawAssignee = url.searchParams.get('assignee')?.trim() ?? ''
   const assignee = rawAssignee === '' ? undefined : rawAssignee === UNASSIGNED ? UNASSIGNED : rawAssignee.toLowerCase()
+  // `tier=fresh|backlog`：只要新来的 / 只要积压的；不传 = 两种都要。
+  const rawTier = url.searchParams.get('tier')
+  const tier: WorklistTier | undefined = rawTier === 'fresh' || rawTier === 'backlog' ? rawTier : undefined
   const limitParam = Number(url.searchParams.get('limit'))
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), MAX_LIMIT) : DEFAULT_LIMIT
 
-  const result = await findAssigneeWorklist(supabaseAdmin, clientId, new Date(), { assignee })
+  const result = await findAssigneeWorklist(supabaseAdmin, clientId, new Date(), { assignee, tier })
 
   const entries: WorklistEntryView[] = result.entries.slice(0, limit).map((e) => ({
     contactId: e.contactId,
@@ -62,11 +66,15 @@ export async function GET(req: NextRequest, { params }: RouteParams): Promise<Ne
     waitingSince: e.waitingSince,
     headline: e.headline ? scrubContactDetails(e.headline) : null,
     assignedTo: e.assignedTo,
+    tier: e.tier,
     url: contactUrl(clientId, e.contactId),
   }))
 
   return NextResponse.json({
     assignee: assignee ?? null,
+    tier: tier ?? null,
+    freshDays: FRESH_DAYS,
+    tierCounts: result.tierCounts,
     total: result.entries.length,
     returned: entries.length,
     entries,

@@ -19,7 +19,6 @@
 
 import type { PlayKey } from './play-vocabulary'
 import { dominantScript } from './launch-readback'
-import { expandedDraftProblems } from './ad-draft-expansion'
 
 /** 目前 ME 会发的三种广告。要加第四种，先在 PLAY_CATALOG 里有对应打法。 */
 export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation'
@@ -205,6 +204,21 @@ export const MIN_INCLUDED_AUDIENCE_SIZE = 100
 export interface DraftProblem {
   field: string
   message: string
+}
+
+type ExpandedDraftCheck = (d: AdDraft) => DraftProblem[]
+
+/**
+ * Extra field checks live in ad-draft-expansion.ts. That file reads
+ * MESSENGER_CTA_TYPE while its module body runs. Importing it from here
+ * loads it before this constant exists and crashes `next build`
+ * (Cannot access '…' before initialization). It registers itself after load.
+ * Until then, a draft with no new fields still returns no extra problems.
+ */
+let expandedDraftProblems: ExpandedDraftCheck = () => []
+
+export function registerExpandedDraftProblems(check: ExpandedDraftCheck): void {
+  expandedDraftProblems = check
 }
 
 /**
