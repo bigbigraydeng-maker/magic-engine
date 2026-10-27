@@ -23,6 +23,7 @@
 | [industry-travel.md](./industry-travel.md) | 行业层（旅游） | 依赖旅游样本/旅游内容语义的数字与做法 | **候选，单客户证据**，不当已验证定论 |
 | `clients/<客户>.md`（[cts](./clients/cts.md) · [oztop](./clients/oztop.md) · [nm-medspa](./clients/nm-medspa.md) · [darui](./clients/darui.md)） | 客户层 | 含客户名的事故细节、客户私有数字、客户的观察 | 仅该客户适用，不得写进平台层默认值 |
 | [MIGRATION-MAP.md](./MIGRATION-MAP.md) | 对账表 | 原文每个要点编号 → 去向（哪个文件哪一节 / 丢弃及原因 / 留在记忆不迁及原因） | 用来核对没有漏迁、没有改义 |
+| [creative-spec.md](./creative-spec.md)（出处表 [creative-spec-SOURCES.md](./creative-spec-SOURCES.md)）· [platform-specs.md](./platform-specs.md) | 平台层整合稿 | 创意规范（结构/钩子/脚本/BGM/转场/图片/文字，每条带出处，候选区单列）与六平台内容规格表（外部事实附 URL 与读取日期，未核实的写「待核」） | 只整合已有规则，不新增；待 PM 回「合」 |
 
 三层口径沿用 PM 2026-10-10 定的「平台—行业—客户」三层原则：拿不准归哪层的，放客户层并在 MIGRATION-MAP 里标「待判」。
 
