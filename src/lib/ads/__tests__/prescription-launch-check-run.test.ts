@@ -44,6 +44,7 @@ function store(over: Partial<LaunchCheckStore> = {}) {
     listInsights: async () => ['26', '27', '28', '29', '30', '31'].map((d, i) => ({
       insightDate: `2026-10-${d}`, spend: i === 0 ? 96 : 0, results: i === 0 ? 12 : 0,
     })).concat([{ insightDate: '2026-11-01', spend: 0, results: 0 }]),
+    readAccountTimezone: async () => 'Pacific/Auckland',
     findCaseId: async () => 'case-1',
     listOutcomes: async () => [],
     insertOutcome,

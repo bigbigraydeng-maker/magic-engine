@@ -36,6 +36,8 @@ export interface LaunchCheckStore {
   listApprovedPlans(clientId: string): Promise<PlanRef[]>
   listApprovedPrescriptions(clientId: string): Promise<StoredPrescription[]>
   listInsights(clientId: string, campaignId: string): Promise<InsightRef[]>
+  /** Timezone the campaign's ad account cuts daily rows in; null when unreadable. */
+  readAccountTimezone(clientId: string, campaignId: string): Promise<string | null>
   findCaseId(prescriptionId: string): Promise<string | null>
   listOutcomes(caseId: string): Promise<ExistingOutcomeRow[]>
   insertOutcome(row: OutcomeInsert): Promise<void>
@@ -89,6 +91,7 @@ export async function readOneLaunch(store: LaunchCheckStore, input: {
     insights: await store.listInsights(input.clientId, match.launch.campaignId),
     kpis: input.kpis,
     now: input.now,
+    accountTimezone: await store.readAccountTimezone(input.clientId, match.launch.campaignId),
   })
   const caseId = await store.findCaseId(input.prescription.id)
   return { lines: linesForCard(assessment, caseId !== null) }
@@ -138,6 +141,7 @@ async function checkOne(
       insights: await store.listInsights(prescription.clientId, match.launch.campaignId),
       kpis: prescription.kpis,
       now,
+      accountTimezone: await store.readAccountTimezone(prescription.clientId, match.launch.campaignId),
     })
     addCounts(counts, await persist(store, prescription, assessment))
   } catch {

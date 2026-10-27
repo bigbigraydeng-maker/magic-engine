@@ -5,6 +5,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { resolveAccountTimezone } from '@/lib/ads-strategy/account-timezone'
 import {
   kpisFromContent, pickLatestCase, readMetric, LAUNCH_CHECK_METRICS,
   type ActionRow, type InsightRef, type PlanRef,
@@ -57,6 +58,7 @@ export function supabaseLaunchStore(): LaunchCheckStore {
     listApprovedPlans,
     listApprovedPrescriptions,
     listInsights,
+    readAccountTimezone,
     findCaseId,
     listOutcomes,
     insertOutcome,
@@ -106,6 +108,17 @@ async function listInsights(clientId: string, campaignId: string): Promise<Insig
     ['entity_id', campaignId],
   ])
   return data.map(insightFrom)
+}
+
+async function readAccountTimezone(clientId: string, campaignId: string): Promise<string | null> {
+  const data = await eqRows('ad_daily_insights', 'ad_account_id', [
+    ['client_id', clientId],
+    ['level', 'campaign'],
+    ['entity_id', campaignId],
+  ])
+  const ids = new Set(data.map(row => text(asRecord(row)?.ad_account_id)).filter(id => id !== ''))
+  if (ids.size !== 1) return null
+  return resolveAccountTimezone([...ids][0])
 }
 
 async function findCaseId(prescriptionId: string): Promise<string | null> {

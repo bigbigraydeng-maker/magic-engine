@@ -174,13 +174,17 @@ export function judgeLaunch(input: {
   insights: readonly InsightRef[]
   kpis: readonly KpiRef[]
   now: Date
+  /** Timezone the ad account's daily rows are cut in; null when it could not be read. */
+  accountTimezone: string | null
 }): LaunchAssessment {
   const launchMs = Date.parse(input.launch.authorizedAt)
   if (Number.isNaN(launchMs)) return invalidLaunch(input.launch.campaignId)
   const launchDay = nzCalendarDay(new Date(launchMs))
-  const judgeUpTo = (endDay: string): Judged => judgeNumbers(input.insights, input.kpis, launchDay, endDay)
+  const zoneGap = zoneGapFor(input.accountTimezone)
+  const judgeUpTo = (endDay: string): Judged =>
+    zoneGap ?? judgeNumbers(input.insights, input.kpis, launchDay, endDay)
   const checkpoints = [
-    ...HOURS.map(spec => hourPoint(spec, launchMs, input.now.getTime(), judgeUpTo)),
+    ...HOURS.map(spec => hourPoint(spec, launchMs, input.now.getTime(), judgeUpTo, zoneGap)),
     ...DAYS.map(spec => dayPoint(spec, launchDay, nzCalendarDay(input.now), judgeUpTo)),
   ]
   return { lines: checkpoints.map(point => point.sentence), checkpoints, campaignId: input.launch.campaignId }
@@ -305,11 +309,19 @@ function invalidLaunch(campaignId: string): LaunchAssessment {
   return { lines: checkpoints.map(point => point.sentence), checkpoints, campaignId }
 }
 
+// Daily rows are cut in the ad account's own timezone; the windows are New Zealand days.
+function zoneGapFor(zone: string | null): Judged | null {
+  if (zone === NZ) return null
+  const why = zone === null ? '读不到广告账户的时区' : `广告账户按 ${zone} 切每日数据，不是新西兰时区`
+  return { verdict: 'unknown', parts: [`${why}，每日数据对不上新西兰的检查窗口，不能下结论。`] }
+}
+
 function hourPoint(
   spec: (typeof HOURS)[number],
   launchMs: number,
   nowMs: number,
   judgeUpTo: (endDay: string) => Judged,
+  zoneGap: Judged | null,
 ): LaunchCheckpoint {
   if (nowMs < launchMs + spec.hours * HOUR_MS) {
     return {
@@ -319,6 +331,7 @@ function hourPoint(
       sentence: `${spec.label}：还不知道。开投后还没满 ${spec.hours} 小时。`,
     }
   }
+  if (zoneGap) return finish(spec.kpiMetric, spec.label, zoneGap)
   const deadline = launchMs + spec.hours * HOUR_MS
   const deadlineDay = nzCalendarDay(new Date(deadline))
   // Daily rows only prove the window when the deadline falls on an NZ midnight;

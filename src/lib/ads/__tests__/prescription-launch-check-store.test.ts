@@ -7,6 +7,10 @@ const db = vi.hoisted(() => ({
   ranges: [] as Array<[number, number]>,
 }))
 
+vi.mock('@/lib/ads-strategy/account-timezone', () => ({
+  resolveAccountTimezone: async () => 'Pacific/Auckland',
+}))
+
 vi.mock('@/lib/supabase', () => {
   class Q {
     private filters: Array<(row: Row) => boolean> = []
@@ -98,6 +102,7 @@ describe('prescription launch check store', () => {
       client_id: 'client-1',
       level: 'campaign',
       entity_id: 'camp-1',
+      ad_account_id: 'act_1',
       insight_date: '2020-01-02',
       spend: 5,
       results: 2,

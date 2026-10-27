@@ -48,6 +48,8 @@ function series(first: Partial<InsightRef> = {}, through = '2026-11-01'): Insigh
   return out
 }
 
+const NZ_ZONE = 'Pacific/Auckland'
+
 function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef[] = kpis) {
   const found = matchLaunch({
     prescription: prescription(),
@@ -57,14 +59,16 @@ function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef
     missingCampaign: false,
   })
   if (found.kind !== 'matched') throw new Error(found.kind)
-  return judgeLaunch({ launch: found.launch, insights, kpis: targets, now: new Date(now) })
+  return judgeLaunch({ launch: found.launch, insights, kpis: targets, now: new Date(now), accountTimezone: NZ_ZONE })
 }
 
 // Launch exactly at NZ midnight (2026-10-26 00:00 NZDT), so 24h / 48h line up with whole days.
 const MIDNIGHT_LAUNCH = '2026-10-25T11:00:00.000Z'
 
-function judgeAtMidnight(now: string, insights: InsightRef[], targets: KpiRef[] = kpis) {
-  return judgeLaunch({ launch: launch({ authorizedAt: MIDNIGHT_LAUNCH }), insights, kpis: targets, now: new Date(now) })
+function judgeAtMidnight(now: string, insights: InsightRef[], targets: KpiRef[] = kpis, zone: string | null = NZ_ZONE) {
+  return judgeLaunch({
+    launch: launch({ authorizedAt: MIDNIGHT_LAUNCH }), insights, kpis: targets, now: new Date(now), accountTimezone: zone,
+  })
 }
 
 function sentence(now: string, label: string, insights?: InsightRef[], targets?: KpiRef[]): string {
@@ -154,6 +158,7 @@ describe('prescription launch check', () => {
       insights: [day({ insightDate: '2026-10-27' })],
       kpis,
       now: new Date('2026-11-01T10:59:00.000Z'),
+      accountTimezone: NZ_ZONE,
     })
     expect(nextCalendarDay.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')?.due).toBe(false)
   })
@@ -279,13 +284,32 @@ describe('prescription launch check', () => {
   it('updates an unknown row when the verdict becomes met', () => {
     const view = matched('2026-11-02T00:00:00.000Z')
     const writes = planOutcomeWrites(view.checkpoints, [
-      { id: 'old', kpiMetric: 'launch_check_24h', unit: 'unknown', dimension: '旧缺口' },
+      { id: 'old', kpiMetric: 'launch_check_day7', unit: 'unknown', dimension: '旧缺口' },
     ])
     expect(writes).toContainEqual(expect.objectContaining({
       op: 'update',
       id: 'old',
-      kpiMetric: 'launch_check_24h',
+      kpiMetric: 'launch_check_day7',
       unit: 'met',
     }))
+  })
+
+  it('says 不知道 for every due checkpoint when the ad account is not on NZ time', () => {
+    // Brisbane account: 12 leads sit on its 10-25 row, which the NZ window would otherwise drop.
+    const rows: InsightRef[] = [
+      { insightDate: '2026-10-25', spend: 96, results: 12 },
+      { insightDate: '2026-10-26', spend: 0, results: 0 },
+    ]
+    const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
+    for (const zone of ['Australia/Brisbane', null]) {
+      const view = judgeAtMidnight('2026-11-02T00:00:00.000Z', rows, leadsOnly, zone)
+      for (const point of view.checkpoints) {
+        expect(point).toMatchObject({ due: true, verdict: 'unknown' })
+        expect(point.sentence).toContain('不能下结论')
+        expect(point.sentence).not.toContain('没达标')
+      }
+      expect(view.checkpoints[0].sentence).toContain(zone ?? '读不到广告账户的时区')
+      expect(planOutcomeWrites(view.checkpoints, []).every(write => write.unit === 'unknown')).toBe(true)
+    }
   })
 })

@@ -10,6 +10,10 @@ const db = vi.hoisted(() => ({
   usedIn: false,
 }))
 
+vi.mock('@/lib/ads-strategy/account-timezone', () => ({
+  resolveAccountTimezone: async () => 'Pacific/Auckland',
+}))
+
 vi.mock('@/lib/supabase', () => {
   const cmp = (a: unknown, b: unknown): number => {
     if (typeof a === 'number' && typeof b === 'number') return a - b
@@ -286,6 +290,7 @@ describe('大白话分段', () => {
       client_id: CLIENT,
       level: 'campaign',
       entity_id: 'camp-1',
+      ad_account_id: 'act_1',
       insight_date: `2020-01-${String(i + 1).padStart(2, '0')}`,
       spend: i === 0 ? 80 : 0,
       results: i === 0 ? 12 : 0,
