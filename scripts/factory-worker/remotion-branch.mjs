@@ -157,6 +157,8 @@ const FALLBACK_HOOK_LINE_ZH = '先看这里'
 const FALLBACK_CTA = 'Learn more'
 const FALLBACK_CTA_ZH = '了解更多'
 const CJK = /[\u3400-\u9fff]/
+// Media file names carry no copy language, so the language scan skips them.
+const ASSET_FILE = /\.(?:png|jpe?g|webp|gif|avif|mp4|mov|m4v|webm|mp3|wav|m4a|aac)$/i
 
 function looksChineseText(value) {
   return CJK.test(value)
@@ -166,7 +168,7 @@ function collectCopyStrings(value, out, depth) {
   if (depth > 5 || out.length > 80) return
   if (typeof value === 'string') {
     const text = value.trim()
-    if (text) out.push(text)
+    if (text && !ASSET_FILE.test(text)) out.push(text)
     return
   }
   if (Array.isArray(value)) {
@@ -248,10 +250,12 @@ function pushExtra(bits, value) {
   if (text && !bits.includes(text)) bits.push(text)
 }
 
-export function frameCaptionExtras(template, props) {
+// Hook copy and end-card copy kept apart so each can join the cue that is on screen at that time.
+export function frameCaptionParts(template, props) {
   const frame = readFrameConfig(props?.frame)
   const ending = endingKind(props ?? {})
   const bits = []
+  const end = []
   if (hookIsActive(template, frame)) {
     const spec = frame?.hook && frame.hook !== false ? frame.hook : undefined
     if (hookWasInvented(template, props ?? {}, spec)) {
@@ -266,11 +270,18 @@ export function frameCaptionExtras(template, props) {
     const title = endTitle(props ?? {})
     const ctaFallback = workOrderLooksChinese(props ?? {}) ? FALLBACK_CTA_ZH : FALLBACK_CTA
     const cta = frameTrimmed(spec?.cta) || title || ctaFallback
-    if (cta === ctaFallback && !frameTrimmed(spec?.cta) && !title) pushExtra(bits, ctaFallback)
-    pushExtra(bits, spec?.cta)
-    pushExtra(bits, spec?.contact)
-    pushExtra(bits, spec?.brandName)
+    if (cta === ctaFallback && !frameTrimmed(spec?.cta) && !title) pushExtra(end, ctaFallback)
+    pushExtra(end, spec?.cta)
+    pushExtra(end, spec?.contact)
+    pushExtra(end, spec?.brandName)
   }
+  return { hook: bits, end }
+}
+
+export function frameCaptionExtras(template, props) {
+  const { hook, end } = frameCaptionParts(template, props)
+  const bits = [...hook]
+  for (const text of end) if (!bits.includes(text)) bits.push(text)
   return bits
 }
 
@@ -280,11 +291,16 @@ function withFrameLines(template, props, caption) {
   return caption ? `${caption} · ${extra.join(' · ')}` : extra.join(' · ')
 }
 
+// Hook copy joins the first cue and end-card copy joins the last cue, so cue times stay ordered and
+// never overlap. A one-cue reel carries both on that cue.
 function withFrameCue(template, props, srt) {
-  const extra = frameCaptionExtras(template, props)
-  if (extra.length === 0) return srt
-  const count = srt.split('\n\n').filter((cue) => cue !== '').length
-  return `${srt}${count + 1}\n${fmtTime(0)} --> ${fmtTime(2)}\n${extra.join(' ')}\n\n`
+  const { hook, end } = frameCaptionParts(template, props)
+  if (hook.length === 0 && end.length === 0) return srt
+  const cues = srt.split('\n\n').filter((cue) => cue !== '').map((cue) => cue.split('\n'))
+  if (cues.length === 0) return srt
+  if (hook.length > 0) cues[0].push(hook.join(' '))
+  if (end.length > 0) cues[cues.length - 1].push(end.join(' '))
+  return cues.map((cue) => `${cue.join('\n')}\n\n`).join('')
 }
 
 // Frame-switch copy is painted as-is, so invisible characters must be refused the same way as template copy.

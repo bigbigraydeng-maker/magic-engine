@@ -13,6 +13,7 @@ import {
   extraCaptionLines,
   hookActive,
   hookDisplayRows,
+  hookRows,
   hookTypeSize,
   inferHookStyle,
   overlayWindows,
@@ -29,7 +30,7 @@ import { parsePostcardProps } from '../src/postcard.ts'
 import { parseListReelProps } from '../src/schema.ts'
 import { parseDataCardProps } from '../src/datacard.ts'
 import { parseAtmosphereProps } from '../src/atmosphere.ts'
-import { frameCaptionExtras } from '../../../remotion-branch.mjs'
+import { buildAtmosphereSrt, buildPostcardSrt, frameCaptionExtras } from '../../../remotion-branch.mjs'
 
 const postcardBase = () => ({
   brandColor: '#0b6e99',
@@ -291,5 +292,63 @@ describe('existing props still parse', () => {
       frame: { hook: false },
     })
     assert.equal(atmosphere.frame?.hook, false)
+  })
+})
+
+const cueTimes = (srt) =>
+  [...srt.matchAll(/(\d\d):(\d\d):(\d\d),(\d\d\d) --> (\d\d):(\d\d):(\d\d),(\d\d\d)/g)].map((m) => [
+    (+m[1] * 3600 + +m[2] * 60 + +m[3]) * 1000 + +m[4],
+    (+m[5] * 3600 + +m[6] * 60 + +m[7]) * 1000 + +m[8],
+  ])
+
+describe('frame captions and hook rows (review fixes)', () => {
+  test('atmosphere with hook and end card keeps cue times ordered and carries all copy', () => {
+    const props = {
+      line: { text: 'A calm view' },
+      frame: { hook: { text: 'Look closely' }, endCard: { cta: 'Book now', contact: 'example.com' } },
+    }
+    const srt = buildAtmosphereSrt(props, { totalFrames: 450 }, 30)
+    const times = cueTimes(srt)
+    assert.equal(times.length, 1)
+    for (let i = 0; i < times.length; i++) {
+      assert.ok(times[i][1] > times[i][0])
+      if (i > 0) assert.ok(times[i][0] >= times[i - 1][1])
+    }
+    for (const text of ['Look closely', 'Book now', 'example.com']) assert.ok(srt.includes(text), text)
+  })
+
+  test('multi-cue postcard: hook joins first cue, end copy joins last, times stay ordered', () => {
+    const props = {
+      hook: { lines: ['QUIET'] },
+      scenes: [{ place: 'Bay', line: 'Calm water' }],
+      price: null,
+      end: { title: 'Example Co' },
+      frame: { hook: { text: 'Look closely' }, endCard: { cta: 'Book now' } },
+    }
+    const timing = { hookFrames: 60, sceneFrom: [60], sceneDur: [90], priceFrom: 150, totalFrames: 240 }
+    const srt = buildPostcardSrt(props, timing, 30)
+    const times = cueTimes(srt)
+    assert.equal(times.length, 3)
+    for (let i = 1; i < times.length; i++) assert.ok(times[i][0] >= times[i - 1][1])
+    const blocks = srt.split('\n\n').filter(Boolean)
+    assert.ok(blocks[0].includes('Look closely'))
+    assert.ok(blocks[2].includes('Book now'))
+  })
+
+  test('three 7-character Chinese hook lines keep all text', () => {
+    const lines = ['沿着海岸慢慢走', '看看港口的日落', '享受安静的旅程'].map((text) => ({ text, badge: null }))
+    const rows = hookRows(lines)
+    assert.ok(rows.length <= 3)
+    assert.equal(rows.map((r) => r.text).join(''), lines.map((l) => l.text).join(''))
+  })
+
+  test('more than three hook lines are refused, not truncated', () => {
+    const lines = ['一', '二', '三', '四'].map((text) => ({ text, badge: null }))
+    assert.throws(() => hookRows(lines), /at most 3/)
+  })
+
+  test('Chinese file names do not switch the fallback language', () => {
+    assert.equal(workOrderLooksChinese({ clip: '素材/海边.mp4', logoFile: '标志.png', line: { text: 'A calm view' } }), false)
+    assert.equal(workOrderLooksChinese({ line: { text: '海边' } }), true)
   })
 })

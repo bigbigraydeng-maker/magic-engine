@@ -1,6 +1,6 @@
 import React from 'react'
 import { AbsoluteFill, useVideoConfig } from 'remotion'
-import { hookDisplayRows, hookTypeSize, looksChinese, statTypeSize, type ResolvedHook, type ResolvedHookLine } from './frame.ts'
+import { hookDisplayRows, hookRows, hookTypeSize, looksChinese, statTypeSize, type ResolvedHook, type ResolvedHookLine } from './frame.ts'
 import { PopIn } from './pop.tsx'
 import { safeRectFor, type SafeRect } from './safeZone.ts'
 import { fontFamily } from './theme.ts'
@@ -30,12 +30,7 @@ function Emphasis({ text, color, on }: { text: string; color: string; on: boolea
 }
 
 function rowsFrom(lines: ResolvedHookLine[]): ResolvedHookLine[] {
-  const out: ResolvedHookLine[] = []
-  for (const line of lines) {
-    const parts = line.badge ? [line.text] : hookDisplayRows(line.text)
-    parts.forEach((text, index) => out.push({ text, badge: index === 0 ? line.badge : null }))
-  }
-  return out.slice(0, 3)
+  return hookRows(lines)
 }
 
 function Scrim() {

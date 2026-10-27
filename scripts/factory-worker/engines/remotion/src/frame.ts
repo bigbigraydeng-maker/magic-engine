@@ -67,7 +67,9 @@ export interface FramePlan {
 
 const QUESTION_END = /[?？]\s*$/
 const CJK = /[\u3400-\u9fff]/
-const HOOK_DEFAULT_ON = new Set(['postcard'])
+// Media file names carry no copy language, so the language scan skips them.
+const ASSET_FILE = /\.(?:png|jpe?g|webp|gif|avif|mp4|mov|m4v|webm|mp3|wav|m4a|aac)$/i
+const HOOK_DEFAULT_ON =new Set(['postcard'])
 
 /** True when the string contains Han characters. */
 export function looksChinese(value: string): boolean {
@@ -78,7 +80,7 @@ function collectStrings(value: unknown, out: string[], depth: number): void {
   if (depth > 5 || out.length > 80) return
   if (typeof value === 'string') {
     const text = value.trim()
-    if (text) out.push(text)
+    if (text && !ASSET_FILE.test(text)) out.push(text)
     return
   }
   if (Array.isArray(value)) {
@@ -142,6 +144,25 @@ export function hookDisplayRows(text: string): string[] {
   if (head.length <= 6) return [head.join(''), last]
   const mid = Math.ceil(head.length / 2)
   return [head.slice(0, mid).join(''), head.slice(mid).join(''), last]
+}
+
+export const MAX_HOOK_ROWS = 3
+
+/**
+ * Lay hook lines out in at most MAX_HOOK_ROWS rows without dropping any text.
+ * Split rows are used when they fit; otherwise the unsplit lines are used; more than
+ * MAX_HOOK_ROWS source lines are refused instead of truncated.
+ */
+export function hookRows(lines: ResolvedHookLine[]): ResolvedHookLine[] {
+  if (lines.length > MAX_HOOK_ROWS) {
+    throw new Error(`hook has ${lines.length} lines; at most ${MAX_HOOK_ROWS} fit without dropping text`)
+  }
+  const split: ResolvedHookLine[] = []
+  for (const line of lines) {
+    const parts = line.badge ? [line.text] : hookDisplayRows(line.text)
+    parts.forEach((text, index) => split.push({ text, badge: index === 0 ? line.badge : null }))
+  }
+  return split.length <= MAX_HOOK_ROWS ? split : lines.map((line) => ({ text: line.text, badge: line.badge }))
 }
 
 function trimmed(value: unknown): string | null {
