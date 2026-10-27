@@ -1,12 +1,14 @@
 ---
 id: 2026-10-27-plan-draft-shared-validate
 title: 三条计划草稿用同一套校验，同一处方版本只留一份
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-27
 source: issue:3281
 verify_by: 2026-10-30
 verify_how: 看这条改动的测试：自动起草的计划能被保存接口接受；同一处方版本再存不会多出第二份；已批准的那份不会被覆盖。演练模式不写计划。
+done_on: 2026-10-27
+done_ref: pr:3293
 ---
 手工保存、钥匙存草稿、自动起草改走同一个纯函数，原有拒绝都还在。
 钥匙带处方版本时用自动起草那套固定编号，已有未批准草稿就更新，已批准就拒绝。
