@@ -234,6 +234,32 @@ describe('saveAgentDraft', () => {
     expect(d.insertPlan).not.toHaveBeenCalled()
   })
 
+  it('uses one id for a prescription id in any letter case and keeps an approved plan', async () => {
+    const id = planDraftId(RX, 2)
+    const parsed = parseAgentDraftBody({ prescription_id: RX.toUpperCase(), version: 2, title: '草稿', promo: promo(5000) })
+    if (!parsed.ok) throw new Error(parsed.error)
+    const created = deps()
+    await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: parsed.request, deps: created })
+    expect(created.inserted[0]?.id).toBe(id)
+
+    const approved: AgentPlanRow = {
+      id,
+      status: 'approved',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+      title: 'old',
+      startDate: null,
+      endDate: null,
+      planData: {},
+      generationMeta: null,
+    }
+    const d = deps({ loadPlan: vi.fn(async () => approved) })
+    const result = await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: parsed.request, deps: d })
+    expect(result).toMatchObject({ status: 409, code: 'already_approved' })
+    expect(d.loadPlan).toHaveBeenCalledWith(CLIENT, id)
+    expect(d.updatePlan).not.toHaveBeenCalled()
+    expect(d.insertPlan).not.toHaveBeenCalled()
+  })
+
   it('rejects a plan id that does not match the prescription version', async () => {
     const d = deps()
     const parsed = parseAgentDraftBody({

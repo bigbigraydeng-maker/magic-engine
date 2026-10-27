@@ -252,8 +252,8 @@ function agentStamp(keyId: string, prescriptionId: string, savedAt: string, vers
 
 function pinnedId(request: AgentDraftRequest): string | null | 'mismatch' {
   if (request.version == null) return null
-  const id = planDraftId(request.prescriptionId, request.version)
-  if (request.planId && request.planId !== id) return 'mismatch'
+  const id = planDraftId(request.prescriptionId.toLowerCase(), request.version)
+  if (request.planId && request.planId.toLowerCase() !== id) return 'mismatch'
   return id
 }
 
