@@ -480,10 +480,10 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 'creatomate-render'，具体是哪条渲染由 summary.source_record_id 区分，不是按周期对账。
   'creatomate-render': '按需事件触发（内容确认时），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
-  // 马良 · 出片自检（src/lib/inngest/functions/maliang-render-check.ts）跟在上面那条渲染
-  // 之后：每有一条 Creatomate 成片落库就发一次事件，一天 0 到 N 次，不排班。回执
+  // 马良 · 出片自检（src/lib/inngest/functions/maliang-render-check.ts）跟在渲染
+  // 之后：Creatomate 落库，或模板出片工单交付，各发一次事件，一天 0 到 N 次，不排班。回执
   // job_name 恒为 'maliang-render-check'，哪条片由 summary.source_record_id 区分。
-  'maliang-render-check': '按需事件触发（Creatomate 成片落库后），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+  'maliang-render-check': '按需事件触发（Creatomate 或模板出片落库后），非周期任务，不适用 CRON_REGISTRY 的排班对账',
   // 李白 · 文案溯源（src/lib/inngest/functions/libai-copy-provenance.ts）同理：由
   // content-factory/generate 每写一条候选就发一次事件，一天 0 到 N 次，不排班。回执
   // job_name 恒为 'libai-copy-provenance'，哪条文案由 summary.source_record_id 区分。
