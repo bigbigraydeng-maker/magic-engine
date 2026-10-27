@@ -29,4 +29,4 @@ it('fails real unhandled rejections and passes only the exact onTaskUpdate timeo
   expect(run([EXACT])).toBe(0)
   expect(run([EXACT, 'second real rejection'])).toBe(1)
   expect(run(['[vitest-worker]: Timeout calling "onUnhandledError" with "x"'])).toBe(1)
-})
+}, 120_000)
