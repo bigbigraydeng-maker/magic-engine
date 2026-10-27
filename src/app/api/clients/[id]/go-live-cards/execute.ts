@@ -44,6 +44,19 @@ async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | 
   }
 }
 
+function missed(settled: SettleResult): string {
+  return settled.outcome === 'live'
+    ? '开投观察的开始时间没写上。'
+    : '账本没写上，请到广告审批页核对这条草稿。'
+}
+
+function activationRunId(payload: Record<string, unknown>): string | null {
+  const activation = payload.activation
+  if (!activation || typeof activation !== 'object' || Array.isArray(activation)) return null
+  const id = (activation as { card_run_id?: unknown }).card_run_id
+  return typeof id === 'string' && id.length > 0 ? id : null
+}
+
 function nextPayload(current: Record<string, unknown>, settled: SettleResult, at: string): Record<string, unknown> | null {
   if (settled.outcome === 'live') {
     const rest = { ...current }
@@ -74,15 +87,23 @@ async function writeMark(
   draftId: string,
   settled: SettleResult,
   at: string,
+  cardRunId: string,
 ): Promise<string | null> {
   const current = await readPayload(sb, clientId, draftId)
-  if (!current) return '账本没写上，请到广告审批页核对这条草稿。'
+  const status = typeof current?.status === 'string' ? current.status : ''
+  if (!current || !status || activationRunId(current) !== cardRunId) return missed(settled)
   const next = nextPayload(current, settled, at)
   if (!next) return null
-  const updated = await sb.from('flywheel_actions').update({ payload: next }).eq('id', draftId).eq('client_id', clientId)
-  if (updated.error) {
-    return settled.outcome === 'live' ? '开投观察的开始时间没写上。' : '账本没写上，请到广告审批页核对这条草稿。'
-  }
+  const updated = await sb
+    .from('flywheel_actions')
+    .update({ payload: next })
+    .eq('id', draftId)
+    .eq('client_id', clientId)
+    .eq('payload->>status', status)
+    .eq('payload->activation->>card_run_id', cardRunId)
+    .select('id')
+  const rows = Array.isArray(updated.data) ? updated.data.length : 0
+  if (updated.error || rows !== 1) return missed(settled)
   return null
 }
 
@@ -130,6 +151,13 @@ export async function executeConfirmedGoLive(args: {
   const token = await getMetaTokenForClient(args.clientId)
   if (!token) return held('拿不到这个客户的广告授权，没有开，系列保持暂停。')
   const settled = await runSettle({ ...args, ids }, token)
-  const note = await writeMark(args.supabase, args.clientId, args.draftId, settled, (args.now ?? new Date()).toISOString())
+  const note = await writeMark(
+    args.supabase,
+    args.clientId,
+    args.draftId,
+    settled,
+    (args.now ?? new Date()).toISOString(),
+    args.authority.cardRunId ?? '',
+  )
   return { settle: settled, note }
 }

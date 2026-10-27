@@ -64,6 +64,16 @@ export async function settleGoLive(ports: SettlePorts): Promise<SettleResult> {
   const second = first.ok ? await ports.activateOnly() : await ports.claimAndActivate()
   const again = await ports.readBack()
   if (isLive(again)) return { outcome: 'live', attempts: 2, readback: describeRead(again) }
+  // The first attempt put the draft back to waiting, and another confirmed click
+  // took the claim. Pausing now would stop their ad. Do not write again.
+  if (!first.ok && !second.ok && !second.retryable) {
+    return {
+      outcome: 'held',
+      readback: describeRead(again),
+      reason: publicFailure(second.error ?? '占位失败，没有再改广告。'),
+      paused: false,
+    }
+  }
   const paused = await ports.keepPaused()
   return {
     outcome: 'held',

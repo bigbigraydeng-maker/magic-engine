@@ -85,6 +85,24 @@ describe('settleGoLive', () => {
     expect(claim).toHaveBeenCalledTimes(1)
   })
 
+  it('does not pause when the second claim loses the slot', async () => {
+    const claim = vi.fn()
+      .mockResolvedValueOnce({ ok: false, error: '开 第一次没开成', retryable: true })
+      .mockResolvedValueOnce({ ok: false, error: '这条刚被别处处理过，这次没有再开。', retryable: false })
+    const pause = vi.fn(async () => ({ ok: true, failed: [] as string[] }))
+    const p = ports({
+      claimAndActivate: claim,
+      readBack: vi.fn(async () => [{ name: '广告系列', status: null }]),
+      keepPaused: pause,
+    })
+    const result = await settleGoLive(p)
+    expect(result).toMatchObject({ outcome: 'held', paused: false })
+    expect(claim).toHaveBeenCalledTimes(2)
+    expect(p.activate).not.toHaveBeenCalled()
+    expect(pause).not.toHaveBeenCalled()
+    expect(result.readback).toContain('读不到')
+  })
+
   it('reports live without a second write when a failed claim already reads active', async () => {
     const claim = vi.fn(async () => ({ ok: false, error: '占不到这条草案', retryable: false }))
     const p = ports({
