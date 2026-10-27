@@ -9,7 +9,7 @@ function rows(n: number, f: (i: number) => { frequency: number; cpm: number; ctr
 
 describe('classifyBacktest', () => {
   it('matches only frequency→cpm / frequency→ctr wording', () => {
-    expect(classifyBacktest('When frequency passes 3, CPM rises')).toBe('freq_cpm')
+    expect(classifyBacktest('When frequency is higher, CPM rises')).toBe('freq_cpm')
     expect(classifyBacktest('频次过高会让 CTR 下降')).toBe('freq_ctr')
     expect(classifyBacktest('Use short videos in Meta ads')).toBeNull()
     expect(classifyBacktest('Frequency matters for ads')).toBeNull()
@@ -29,10 +29,23 @@ describe('classifyBacktest', () => {
     expect(classifyBacktest('Higher frequency reduces CTR')).toBe('freq_ctr')
     expect(classifyBacktest('频次越高 CPM 越高')).toBe('freq_cpm')
     expect(classifyBacktest('频次越低 CPM 越低')).toBe('freq_cpm')
-    expect(classifyBacktest('频次超过 3 CPM 上升')).toBe('freq_cpm')
     expect(classifyBacktest('When frequency drops, CTR rises')).toBe('freq_ctr')
     expect(classifyBacktest('Lower frequency raises CTR')).toBe('freq_ctr')
     expect(classifyBacktest('频次过低会让 CTR 升高')).toBe('freq_ctr')
+  })
+  it('refuses lessons that only hold past an explicit frequency number', () => {
+    const belowThree = rows(40, i => ({ frequency: 1 + i * 0.01, cpm: 10 + i, ctr: 0.02 }))
+    expect(Math.max(...belowThree.map(row => row.frequency ?? 0))).toBeLessThan(3)
+    expect(runBacktest('freq_cpm', belowThree).verdict).toBe('support')
+    expect(classifyBacktest('When frequency passes 3, CPM rises')).toBeNull()
+    expect(classifyBacktest('频次超过 3 CPM 上升')).toBeNull()
+    expect(classifyBacktest('When frequency exceeds 4, CTR falls')).toBeNull()
+    expect(classifyBacktest('Lower frequency than 2 raises CTR')).toBeNull()
+    expect(classifyBacktest('Higher frequency than 3 increases CPM')).toBeNull()
+    expect(classifyBacktest('频次超过 3.5 CPM 上升')).toBeNull()
+    expect(classifyBacktest('Higher frequency increases CPM', 'only after frequency passes 3')).toBeNull()
+    expect(classifyBacktest('When frequency passes, CPM rises')).toBe('freq_cpm')
+    expect(classifyBacktest('频次超过就会让 CPM 上升')).toBe('freq_cpm')
   })
 })
 

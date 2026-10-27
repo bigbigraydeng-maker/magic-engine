@@ -1,6 +1,8 @@
 /**
- * 广告只读回测（第 2 层）：只支持"频次 → CPM / CTR"两类能写成单一指标的规则，
- * 其余一律"无法回测"。纯函数，不调模型、不写库；只看相关性，不代表因果。
+ * 广告只读回测（第 2 层）：只支持"频次 → CPM / CTR"两类能写成单一指标、
+ * 且不带数字门槛的规则，其余一律"无法回测"。
+ * 纯函数，不调模型、不写库；只看相关性，不代表因果。
+ * 带门槛的句子（频次超过 3、frequency passes 3）不回测：全量相关性核验不了"跨过这道线之后"。
  */
 export type BacktestRule = 'freq_cpm' | 'freq_ctr'
 
@@ -50,9 +52,36 @@ function frequencyClaim(text: string): { direction: 'up' | 'down' | null; metric
   }
 }
 
-/** 频次与 CPM 同向、频次与 CTR 反向才归类；缺失、矛盾或覆盖不到的说法返回 null（无法回测）。 */
+const THRESHOLD_NUM = String.raw`\d+(?:\.\d+)?`
+const THRESHOLD_MARK = String.raw`超过|高于|大于|低于|小于|不少于|不多于|至少|不到|达到|多于|少于|(?:passes|passing|exceeds|exceeding|above|over|under|below|drops|dropping|greater|less|higher|lower|more|at)\b`
+const THRESHOLD_LINK = String.raw`(?:\s*(?:than|above|below|over|under|least|most|了))?`
+const THRESHOLD_AFTER_RE = new RegExp(
+  `^\\s*(?:一旦|会|变|一|is|are|gets|becomes|was|were|goes)?\\s*(?:${THRESHOLD_MARK})${THRESHOLD_LINK}\\s*${THRESHOLD_NUM}`,
+  'i',
+)
+const THRESHOLD_THAN_RE = new RegExp(`^\\s*than\\s*${THRESHOLD_NUM}`, 'i')
+const THRESHOLD_OP_RE = new RegExp(`^\\s*(?:>=|<=|≥|≤|>|<)\\s*${THRESHOLD_NUM}`)
+const THRESHOLD_BEFORE_RE = new RegExp(
+  `(?:${THRESHOLD_MARK})${THRESHOLD_LINK}\\s*${THRESHOLD_NUM}\\s*(?:的|次)?\\s*$`,
+  'i',
+)
+
+/** 频次紧旁边有明确数字（超过 3、passes 3、higher than 3）。全量相关性核验不了这个前提。 */
+function hasFrequencyThreshold(text: string): boolean {
+  for (const match of text.matchAll(/频次|\bfrequency\b/gi)) {
+    const at = match.index ?? 0
+    const after = text.slice(at + match[0].length)
+    const before = text.slice(0, at)
+    if (THRESHOLD_AFTER_RE.test(after) || THRESHOLD_THAN_RE.test(after) || THRESHOLD_OP_RE.test(after)) return true
+    if (THRESHOLD_BEFORE_RE.test(before)) return true
+  }
+  return false
+}
+
+/** 频次与 CPM 同向、频次与 CTR 反向，且没有数字门槛，才归类；缺失、矛盾、带门槛或覆盖不到返回 null。 */
 export function classifyBacktest(lesson: string, rationale?: string | null): BacktestRule | null {
   const text = `${lesson} ${rationale ?? ''}`
+  if (hasFrequencyThreshold(text)) return null
   const claim = frequencyClaim(text)
   if (!claim.direction) return null
   if (CPM_RE.test(text)) {
