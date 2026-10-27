@@ -114,6 +114,8 @@ export interface TimelineEngagement {
   story: string[]
   /** 他最近一次主动动作（表单 / 消息 / 点链接）。AI 概况比它旧就要提醒。 */
   lastActiveAt: string | null
+  /** 回头客的路线（逐步 + 间隔 + 为什么热）；不是回头客或旧接口时没有。 */
+  journey?: import('@/lib/crm/returning-journey').Journey | null
 }
 
 /** 渠道 → 一眼能认的图标。认不出的新渠道给中性圆点，绝不空白。 */

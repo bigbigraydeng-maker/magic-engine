@@ -554,6 +554,27 @@ describe('回头客 / 往来一览', () => {
     expect(story.textContent).toContain('🔥 今天又填了表')
   })
 
+  it('🔴 接口给了路线 → 画出逐步路线、原因小标签和「上次选/这次选」，不再画旧的故事线', async () => {
+    const journey = {
+      items: [
+        { type: 'node', node: { at: '2026-06-15T07:55:00.000Z', dayLabel: '6月15日', actor: 'customer', kind: 'form', label: '客人填表', detail: '想选：Still deciding', count: 1, highlight: false } },
+        { type: 'gap', days: 133, label: '隔了 约 4 个月' },
+        { type: 'node', node: { at: '2026-10-26T23:47:00.000Z', dayLabel: '今天', actor: 'customer', kind: 'form', label: '客人填表', detail: '想选：Best of China', count: 1, highlight: true } },
+      ],
+      totalNodes: 2,
+      reasons: ['主动再填表', '这次选的团和上次不一样'],
+      tourChange: { from: 'Still deciding', to: 'Best of China' },
+    }
+    stub({ engagement: { ...engagement, journey } })
+    draw({ returning })
+    const route = await waitFor(() => screen.getByTestId('returning-route'))
+    expect(route.textContent).toContain('隔了 约 4 个月')
+    expect(screen.getByTestId('route-highlight').textContent).toContain('今天')
+    expect(screen.getByTestId('returning-reasons').textContent).toContain('主动再填表')
+    expect(screen.getByTestId('returning-tour-change').textContent).toContain('这次选：Best of China')
+    expect(screen.queryByTestId('returning-story')).toBeNull()
+  })
+
   it('横幅不用等往来记录加载：列表行里有 returning 就先画出来', () => {
     stub({ engagement: null })
     draw({ returning })

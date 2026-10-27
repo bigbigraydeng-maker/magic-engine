@@ -22,6 +22,7 @@ import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
 import { buildTouchpointLike } from '@/lib/crm/contact-model'
+import { buildJourney, type Journey } from '@/lib/crm/returning-journey'
 import { detectReturningLead, engagementLine, returningStory, summariseEngagement } from '@/lib/crm/returning-lead'
 
 interface RouteParams {
@@ -459,6 +460,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     line: string | null
     story: string[]
     lastActiveAt: string | null
+    journey: Journey | null
   } | null = null
   try {
     const tpLikes = ((allTouches ?? []) as Parameters<typeof buildTouchpointLike>[0][]).map((r) =>
@@ -466,11 +468,25 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     )
     const overview = summariseEngagement(tpLikes)
     const returning = detectReturningLead(tpLikes)
+    // 路线只给回头客画；团意向取表单触点 metadata 里的原始代码（跟列表读的同一个字段），
+    // tpLikes 与 allTouches 同序一一对应。
+    const rows = (allTouches ?? []) as Array<{ metadata?: Record<string, unknown> | null }>
+    const journey = returning
+      ? buildJourney(
+          tpLikes.map((t, i) => {
+            const raw = rows[i]?.metadata?.tour_interest_raw ?? rows[i]?.metadata?.tour_interest
+            return { ...t, tour: typeof raw === 'string' ? raw : null }
+          }),
+          returning,
+          new Date(),
+        )
+      : null
     engagement = {
       returning,
       line: engagementLine(overview),
       story: returning ? returningStory(returning, overview, new Date()) : [],
       lastActiveAt: overview.theirs.lastAt,
+      journey,
     }
   } catch (err) {
     console.error('[crm timeline] 算回头客/往来一览失败，抽屉顶部不显示这一块:', err instanceof Error ? err.message : err)
