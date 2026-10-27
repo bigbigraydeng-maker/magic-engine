@@ -309,6 +309,53 @@ describe('buildDigestGoalContext — 广告设置读失败', () => {
   })
 })
 
+type MixedRow = InsightRow & { entity_id: string; leads: number; messaging_conversations: number }
+
+/** 混合客户：WhatsApp 系列每天 1 个对话花 $90，表单系列每天 2 条线索花 $20。 */
+function mixedRows(): MixedRow[] {
+  const out: MixedRow[] = []
+  for (const day of ['2026-09-13', '2026-09-14', '2026-09-15']) {
+    out.push({ insight_date: day, entity_id: 'wa', spend: 90, results: 1, leads: 0, messaging_conversations: 1 })
+    out.push({ insight_date: day, entity_id: 'form', spend: 20, results: 2, leads: 2, messaging_conversations: 0 })
+  }
+  return out
+}
+
+describe('同类结果成本口径（线索目标不拿对话成本）', () => {
+  it('metric=leads → 只用出线索的系列行：中位 $10，不是 $90 或合计', async () => {
+    insightsTable(mixedRows())
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads' })).toBe(1000)
+  })
+
+  it('metric=leads + 指定系列 → 只算该系列', async () => {
+    insightsTable(mixedRows())
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads', campaignIds: ['form'] })).toBe(1000)
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads', campaignIds: ['wa'] })).toBeNull()
+  })
+
+  it('线索只有 2 天 → 成本不出数（null），不拿 WhatsApp 的天数凑', async () => {
+    insightsTable(mixedRows().filter(r => !(r.entity_id === 'form' && r.insight_date === '2026-09-13')))
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads' })).toBeNull()
+  })
+
+  it('样本不足 + 目标期才 2 天数据 → 未判（不是落后/到不了）', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-09-14', period_end: '2026-10-30', target_value: 300, baseline_value: 0,
+    })])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value: 0, source: 'ad_daily_insights', snapshot_date: '2026-09-15', label: 'lead',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({
+      config: adStrategyConfig({ daily_budget_cap_cents: 15000 }), source: 'row',
+    })
+    // 只有对话 + 一天表单线索；日报最新到 09-15
+    insightsTable(mixedRows().filter(r => r.entity_id === 'wa' || r.insight_date === '2026-09-15'))
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('样本不足')
+  })
+})
+
 describe('withoutCapLens', () => {
   const base: GoalPace = { expectedToDate: 35, actualToDate: 35, gapPct: 0, projectedEnd: 50, verdict: 'on_track', reason: 'x' }
   it('只把 on_track 降成 unknown，其余原样', () => {

@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
 import { loadAdStrategyConfigWithSource } from '../config'
+import { getTrackingClientConfig } from '@/lib/ads-tracking-preflight/client-config'
 import { computeGoalPace, type GoalPace } from '../goal-pace'
 import type { DigestGoalContext } from './internal-digest'
 import type { GoalRow } from '@/types/strategy'
@@ -33,8 +34,11 @@ export function pickDigestGoal(goals: readonly GoalRow[]): GoalRow | null {
 
 interface AdDailyInsightRow {
   insight_date: string
+  entity_id?: string | null
   spend: number | null
   results: number | null
+  leads?: number | null
+  messaging_conversations?: number | null
 }
 
 /** 'YYYY-MM-DD' 往前推 n 天（UTC 整天）。 */
@@ -53,43 +57,102 @@ function medianOf(values: number[]): number {
   return Math.round(median)
 }
 
+/** 成本按哪类结果算：线索目标只认 leads、私信目标只认 messaging_conversations，其余沿用合计 results。 */
+export type CostMetric = 'results' | 'leads' | 'messaging'
+
+export interface CostScope {
+  metric?: CostMetric
+  /** 只算这些系列（Meta campaign id）；不给 = 该客户全部系列 */
+  campaignIds?: readonly string[]
+}
+
+export interface RecentCost {
+  medianCents: number | null
+  /** 样本日的平均日花费（分）；一个样本日都没有 = null */
+  avgDailySpendCents: number | null
+  /** 样本里有几天出了这类结果 */
+  sampleDays: number
+  /** 范围内最新有日报行的一天；一行都没有 = null */
+  latestDate: string | null
+}
+
+const EMPTY_COST: RecentCost = { medianCents: null, avgDailySpendCents: null, sampleDays: 0, latestDate: null }
+
+export function costMetricForGoal(primaryMetricKey: string): CostMetric {
+  if (primaryMetricKey === 'leads_count') return 'leads'
+  if (primaryMetricKey === 'messaging_started') return 'messaging'
+  return 'results'
+}
+
+function rowCount(row: AdDailyInsightRow, metric: CostMetric): number {
+  if (metric === 'leads') return row.leads ?? 0
+  if (metric === 'messaging') return row.messaging_conversations ?? 0
+  return row.results ?? 0
+}
+
 /**
- * 近 7 天每结果成本中位数（分）。按天汇总 spend/results 再算每天成本，
- * 少于 3 个可用天 → null（样本太薄，中位数不可信）。
+ * 近 7 天同类结果的每结果成本（分）。线索 / 私信目标只拿「出了这类结果的系列行」的花费和数量，
+ * 不让别的类型（如 WhatsApp 对话）的成本去除表单线索；按天汇总后少于 3 个可用天 → 中位数 null。
  */
-export async function medianCostPerResultCents(
+export async function readRecentCost(
   clientId: string,
   insightDate: string,
-): Promise<number | null> {
+  scope: CostScope = {},
+): Promise<RecentCost> {
+  const metric = scope.metric ?? 'results'
   // ≤ 7 天 × 系列数，远低于 PostgREST 1000 行上限，无需分页。
   const { data, error } = await supabaseAdmin
     .from('ad_daily_insights')
-    .select('insight_date, spend, results')
+    .select('insight_date, entity_id, spend, results, leads, messaging_conversations')
     .eq('client_id', clientId)
     .eq('level', 'campaign')
     .gte('insight_date', isoDayMinus(insightDate, MEDIAN_WINDOW_DAYS - 1))
     .lte('insight_date', insightDate)
 
-  if (error || !data) return null
+  if (error || !data) return EMPTY_COST
 
-  const rows = data as AdDailyInsightRow[]
+  const wanted = scope.campaignIds ? new Set(scope.campaignIds) : null
+  const rows = (data as AdDailyInsightRow[]).filter(r => !wanted || (r.entity_id != null && wanted.has(r.entity_id)))
   const spendByDay = new Map<string, number>()
-  const resultsByDay = new Map<string, number>()
+  const countByDay = new Map<string, number>()
+  let latestDate: string | null = null
   for (const row of rows) {
+    if (latestDate === null || row.insight_date > latestDate) latestDate = row.insight_date
+    const count = rowCount(row, metric)
+    // 线索 / 私信：没出这类结果的系列行，花费不算进来（它可能在买别的结果）。
+    if (metric !== 'results' && count <= 0) continue
     spendByDay.set(row.insight_date, (spendByDay.get(row.insight_date) ?? 0) + (row.spend ?? 0))
-    resultsByDay.set(row.insight_date, (resultsByDay.get(row.insight_date) ?? 0) + (row.results ?? 0))
+    countByDay.set(row.insight_date, (countByDay.get(row.insight_date) ?? 0) + count)
   }
 
   const perDayCents: number[] = []
-  for (const [day, dayResults] of resultsByDay) {
-    if (dayResults <= 0) continue
+  const spendCents: number[] = []
+  for (const [day, dayCount] of countByDay) {
+    if (dayCount <= 0) continue
     const daySpend = spendByDay.get(day) ?? 0
     // spend 是账户币种主单位，cap 是分，这里统一成分。
-    perDayCents.push(Math.round((daySpend * 100) / dayResults))
+    perDayCents.push(Math.round((daySpend * 100) / dayCount))
+    spendCents.push(daySpend * 100)
   }
 
-  if (perDayCents.length < MIN_MEDIAN_DAYS) return null
-  return medianOf(perDayCents)
+  const avgDailySpendCents = spendCents.length === 0
+    ? null
+    : Math.round(spendCents.reduce((a, b) => a + b, 0) / spendCents.length)
+  return {
+    medianCents: perDayCents.length < MIN_MEDIAN_DAYS ? null : medianOf(perDayCents),
+    avgDailySpendCents,
+    sampleDays: perDayCents.length,
+    latestDate,
+  }
+}
+
+/** 近 7 天每结果成本中位数（分）；少于 3 个可用天 → null（样本太薄，中位数不可信）。 */
+export async function medianCostPerResultCents(
+  clientId: string,
+  insightDate: string,
+  scope: CostScope = {},
+): Promise<number | null> {
+  return (await readRecentCost(clientId, insightDate, scope)).medianCents
 }
 
 /** 目标期内的整天数（含首尾），与 goal-pace.ts 同一口径。 */
@@ -113,6 +176,30 @@ export function withoutCapLens(pace: GoalPace): GoalPace {
   return { ...pace, verdict: 'unknown', reason: '读不出广告设置（日预算上限），预算够不够到目标今天没判' }
 }
 
+/**
+ * 同类结果的成本样本不够、而且目标期本身才刚开始（有数据的天数 < MIN_MEDIAN_DAYS）时，
+ * 任何判断（含「落后」）都是拿几乎没有的数据下结论 → 一律「样本不足，未判」，不标红。
+ * 目标期已经跑了几天、成本样本仍薄，则保留原判断（长期出不了结果本身就是信号）。
+ */
+export function withThinSampleGuard(pace: GoalPace, costMedian: number | null, dataDays: number | null): GoalPace {
+  if (costMedian !== null || dataDays === null || dataDays >= MIN_MEDIAN_DAYS) return pace
+  if (pace.verdict === 'unknown') return pace
+  return {
+    ...pace,
+    verdict: 'unknown',
+    reason: `样本不足，未判：同类结果有成本的天数不到 ${MIN_MEDIAN_DAYS} 天（目标期日报只有 ${dataDays} 天数据）`,
+  }
+}
+
+/** 目标对应的系列：线索目标 = 配置里的表单留资系列，私信目标 = WhatsApp 系列；没配置 = 不限系列（只按结果类型区分）。 */
+function goalCampaignIds(clientId: string, metric: CostMetric): string[] | undefined {
+  const kind = metric === 'leads' ? 'lead_form' : metric === 'messaging' ? 'whatsapp' : null
+  if (!kind) return undefined
+  const series = getTrackingClientConfig(clientId)?.objective_watch?.series ?? []
+  const ids = series.filter(s => s.kind === kind).map(s => s.campaign_id)
+  return ids.length > 0 ? ids : undefined
+}
+
 export async function buildDigestGoalContext(
   clientId: string,
   insightDate: string,
@@ -128,7 +215,17 @@ export async function buildDigestGoalContext(
     const actualToDate = fetched.ok ? fetched.value : null
 
     const { config, source, error: configError } = await loadAdStrategyConfigWithSource(clientId)
-    const medianCostPerResultCents7d = await medianCostPerResultCents(clientId, insightDate)
+    const metric = costMetricForGoal(goal.primary_metric_key)
+    const cost = await readRecentCost(clientId, insightDate, {
+      metric,
+      campaignIds: goalCampaignIds(clientId, metric),
+    })
+    const medianCostPerResultCents7d = cost.medianCents
+    // 日报最多慢一天：速度按有数据的最后一天算，不按日历天数。
+    const dataThrough = cost.latestDate
+    const dataDays = dataThrough === null
+      ? null
+      : dayIndexAndTotal(goal.period_start, goal.period_end, dataThrough).dayIndex
 
     const computed = computeGoalPace({
       targetValue: goal.target_value,
@@ -139,8 +236,11 @@ export async function buildDigestGoalContext(
       actualToDate,
       dailyCapCents: config.daily_budget_cap_cents,
       medianCostPerResultCents7d,
+      dataThrough,
+      actualDailySpendCents: cost.avgDailySpendCents,
     })
-    const pace = source === 'fallback' ? withoutCapLens(computed) : computed
+    const capped = source === 'fallback' ? withoutCapLens(computed) : computed
+    const pace = withThinSampleGuard(capped, medianCostPerResultCents7d, dataDays)
     if (source === 'fallback') {
       console.error(`[ads-strategy] goal context: ad_strategy_configs read failed for ${clientId}: ${configError ?? 'unknown error'}`)
     }
