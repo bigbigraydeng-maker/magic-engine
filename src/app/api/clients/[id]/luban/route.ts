@@ -15,7 +15,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { clickerFromSession } from '@/lib/confirmation-card'
+import { createKernel } from '@/lib/kernel'
 import { chatWithProjectLuban } from '@/lib/luban/project-agent'
+import { classifyDrawerTurn } from '@/lib/zhuge/drawer-spend-ask'
+import { handleDrawerSpendTurn } from '@/lib/zhuge/drawer-spend-turn'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -80,6 +84,26 @@ export async function POST(
 
     if (!message) {
       return NextResponse.json({ success: false, error: 'message is required' }, { status: 400 })
+    }
+
+    if (classifyDrawerTurn(message).kind !== 'chat') {
+      const clicker = clickerFromSession({
+        email: access.user.email ?? '',
+        role: access.role,
+        allowedClientId: access.allowedClientId,
+        clientId,
+        agentMarked: req.headers.get('x-me-actor') === 'agent',
+      })
+      const held = await handleDrawerSpendTurn({
+        supabase: supabaseAdmin,
+        kernel: createKernel(supabaseAdmin),
+        clientId,
+        clicker,
+        message,
+      })
+      if (held.kind === 'reply') {
+        return NextResponse.json(held.body, { status: held.status })
+      }
     }
 
     const result = await chatWithProjectLuban(supabaseAdmin, clientId, message)
