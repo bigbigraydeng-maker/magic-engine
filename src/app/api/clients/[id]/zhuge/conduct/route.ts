@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { textAsksToSpend } from '@/lib/zhuge/drawer-spend-ask'
 import { assembleZhugeInput } from '@/lib/zhuge/assembler'
 import { conductPriorityActions } from '@/lib/zhuge/conductor'
 import { persistZhugeActions, type PersistZhugeActionsResult } from '@/lib/zhuge/action-persister'
@@ -59,6 +60,13 @@ export async function POST(
   // FDE callers omit it (defaults to 'long', backward-compat).
   const promptMode: ZhugePromptMode | undefined =
     body.promptMode === 'short' || body.promptMode === 'long' ? body.promptMode : undefined
+
+  if (textAsksToSpend(body)) {
+    return NextResponse.json(
+      { success: false, error: '建议链不能花钱、发布或改广告。请在对话框里出确认卡。' },
+      { status: 409 },
+    )
+  }
 
   // Assemble ZhugeInput from real DB data
   let assembled: Awaited<ReturnType<typeof assembleZhugeInput>>
