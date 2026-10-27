@@ -129,7 +129,8 @@ export async function applyApprove(
 /**
  * 素材（asset_only）验收入库：in_review → archived，记 review_ref.asset_accepted_by/at。
  * 只对 asset_only 工单、只对 in_review 生效；**不是发布授权**（发布只认 approved，而 asset_only 永远批不了）。
- * 成片文件由出片机侧/人工搬进素材目录（本接口不搬文件）。
+ * 成片进广告素材池不在这里做：验收路由先上传并写入待批准，成功后才调用本函数归档。
+ * 本函数会保留 review_ref 里已有的视频编号回执。
  */
 export async function applyAssetAccept(
   supabase: SupabaseClient,
