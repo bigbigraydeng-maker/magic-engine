@@ -65,7 +65,12 @@ describe('处方对话框', () => {
     }))
 
     const view = render(<PrescriptionDialog clientId="c1" prescriptionId={null} goalId={null} supplementOf={null} reviseOf={null} />)
-    expect(await screen.findByText('先把价格写清楚')).toBeInTheDocument()
+    expect(await screen.findByText('改落地页')).toBeInTheDocument()
+    const box = screen.getByRole('textbox', { name: '跟华佗说' })
+    expect(box.compareDocumentPosition(screen.getByText('改落地页')) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    const fullText = screen.getByText('看处方全文').closest('details')
+    expect(fullText).not.toHaveAttribute('open')
+    expect(fullText).toHaveTextContent('先把价格写清楚')
     expect(screen.getByText('改落地页')).toBeInTheDocument()
     expect(screen.getByText(/价格还不够具体/)).toBeInTheDocument()
     expect(screen.queryByText('should-not-show')).not.toBeInTheDocument()
@@ -78,7 +83,7 @@ describe('处方对话框', () => {
     view.unmount()
 
     render(<PrescriptionDialog clientId="c1" prescriptionId={null} goalId={null} supplementOf={null} reviseOf={null} />)
-    expect(await screen.findByText('先把价格写清楚')).toBeInTheDocument()
+    expect(await screen.findByText('改落地页')).toBeInTheDocument()
     expect(screen.queryByText(/我刚才说/)).not.toBeInTheDocument()
   })
 
