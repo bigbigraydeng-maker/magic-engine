@@ -29,7 +29,12 @@ import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
-import { buildSpendActivationReceipt, type SpendActivationAuthority, type SpendActivationReceipt } from '@/lib/ads/spend-activation'
+import {
+  buildSpendActivationReceipt,
+  type SpendActivationAuthority,
+  type SpendActivationEntry,
+  type SpendActivationReceipt,
+} from '@/lib/ads/spend-activation'
 
 /**
  * 一条广告动作在账本里的状态。
@@ -466,6 +471,7 @@ export async function approveDraft(
   supabase: SupabaseClient,
   accessToken: string,
   authority: SpendActivationAuthority,
+  entry: SpendActivationEntry = 'ad-approval',
 ): Promise<{ ok: true; warning?: string } | { ok: false; error: string }> {
   const { data, error } = await supabase
     .from('flywheel_actions')
@@ -505,7 +511,7 @@ export async function approveDraft(
   const clientId = (data as { client_id: string }).client_id
   const receipt = buildSpendActivationReceipt({
     authority,
-    entry: 'ad-approval',
+    entry,
     clientId,
     campaignId: p.campaignId,
     draftActionId: actionId,

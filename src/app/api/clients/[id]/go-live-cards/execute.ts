@@ -1,0 +1,135 @@
+/**
+ * The only go-live path that may write an ad from paused to live.
+ * Call it only after the confirmation card is confirmed. Tests mock the network.
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { SpendActivationAuthority } from '@/lib/ads/spend-activation'
+import type { ExecutionOutcome, SettleResult } from '@/lib/ads-go-live'
+import { settleGoLive, type ActivateAttempt, type LayerRead } from '@/lib/ads-go-live'
+import type { GoLiveIds } from '@/lib/ads-go-live/draft'
+import { approveDraft } from '@/lib/ads-strategy/draft-and-gate'
+import { activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
+import { fetchCampaignStatus } from '@/lib/meta/readback'
+import { getMetaTokenForClient } from '@/lib/meta/token-manager'
+
+function held(reason: string): ExecutionOutcome {
+  return {
+    settle: { outcome: 'held', readback: '没有读取广告状态', reason, paused: false },
+    note: null,
+  }
+}
+
+function fromWrite(result: { ok: true } | { ok: false; error: string }): ActivateAttempt {
+  if (result.ok) return { ok: true, retryable: true }
+  return { ok: false, error: result.error, retryable: result.error.startsWith('开 ') }
+}
+
+function targets(ids: GoLiveIds): { name: string; id: string }[] {
+  const ads = ids.adIds.map((id, index) => ({
+    name: ids.adIds.length === 1 ? '广告' : `第${index + 1}条广告`,
+    id,
+  }))
+  return [...ads, { name: '广告组', id: ids.adSetId }, { name: '广告系列', id: ids.campaignId }]
+}
+
+async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | null> {
+  try {
+    return await Promise.all(targets(ids).map(async (target) => ({
+      name: target.name,
+      status: await fetchCampaignStatus(target.id, token),
+    })))
+  } catch {
+    return null
+  }
+}
+
+function nextPayload(current: Record<string, unknown>, settled: SettleResult, at: string): Record<string, unknown> | null {
+  if (settled.outcome === 'live') {
+    const rest = { ...current }
+    delete rest.error
+    delete rest.goLiveHeld
+    return { ...rest, status: 'active', goLiveStartedAt: at }
+  }
+  if (!settled.paused && current.status !== 'awaiting_approval') return null
+  return { ...current, status: 'awaiting_approval', error: settled.reason, goLiveHeld: settled.reason }
+}
+
+async function readPayload(sb: SupabaseClient, clientId: string, draftId: string): Promise<Record<string, unknown> | null> {
+  const { data, error } = await sb
+    .from('flywheel_actions')
+    .select('payload')
+    .eq('id', draftId)
+    .eq('client_id', clientId)
+    .maybeSingle()
+  if (error || !data || typeof data !== 'object') return null
+  const payload = (data as { payload?: unknown }).payload
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  return { ...(payload as Record<string, unknown>) }
+}
+
+async function writeMark(
+  sb: SupabaseClient,
+  clientId: string,
+  draftId: string,
+  settled: SettleResult,
+  at: string,
+): Promise<string | null> {
+  const current = await readPayload(sb, clientId, draftId)
+  if (!current) return '账本没写上，请到广告审批页核对这条草稿。'
+  const next = nextPayload(current, settled, at)
+  if (!next) return null
+  const updated = await sb.from('flywheel_actions').update({ payload: next }).eq('id', draftId).eq('client_id', clientId)
+  if (updated.error) {
+    return settled.outcome === 'live' ? '开投观察的开始时间没写上。' : '账本没写上，请到广告审批页核对这条草稿。'
+  }
+  return null
+}
+
+async function runSettle(
+  args: { supabase: SupabaseClient; draftId: string; authority: SpendActivationAuthority; ids: GoLiveIds },
+  token: string,
+): Promise<SettleResult> {
+  const ids = { campaignId: args.ids.campaignId, adSetId: args.ids.adSetId, adIds: [...args.ids.adIds] }
+  const ports = {
+    claimAndActivate: async () => fromWrite(await approveDraft(
+      args.draftId, args.supabase, token, args.authority, 'go-live-card',
+    )),
+    activateOnly: async () => fromWrite(await activatePublished(ids, token)),
+    readBack: () => readLayers(args.ids, token),
+    keepPaused: () => pausePublished(ids, token),
+  }
+  try {
+    return await settleGoLive(ports)
+  } catch {
+    try { await ports.keepPaused() } catch { /* still held */ }
+    return {
+      outcome: 'held',
+      readback: '读回失败，不知道是不是在投',
+      reason: '开投没有完成，系列尽量保持暂停。',
+      paused: true,
+    }
+  }
+}
+
+function allowed(authority: SpendActivationAuthority): boolean {
+  return authority.basis === 'go_live_card' && authority.actorEmail.trim().length > 0 && !!authority.cardRunId
+}
+
+export async function executeConfirmedGoLive(args: {
+  supabase: SupabaseClient
+  clientId: string
+  draftId: string
+  authority: SpendActivationAuthority
+  ids: GoLiveIds | null
+  now?: Date
+}): Promise<ExecutionOutcome> {
+  const ids = args.ids
+  if (!ids) return held('没记下广告编号，没有开，系列保持暂停。')
+  if (!allowed(args.authority)) return held('这次确认对不上，没有开，系列保持暂停。')
+  const token = await getMetaTokenForClient(args.clientId)
+  if (!token) return held('拿不到这个客户的广告授权，没有开，系列保持暂停。')
+  const settled = await runSettle({ ...args, ids }, token)
+  const note = await writeMark(args.supabase, args.clientId, args.draftId, settled, (args.now ?? new Date()).toISOString())
+  return { settle: settled, note }
+}
