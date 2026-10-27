@@ -12,7 +12,7 @@ import {
   type HeartbeatFetchers,
 } from '@/lib/ads-strategy/heartbeat/read'
 import { fetchAdsetsSinglePage, fetchCustomAudienceById } from '@/lib/meta/entity-settings'
-import type { AudienceStatus, AudienceStatusRead } from './audience-creative'
+import { audienceOwnedByAccount, type AudienceStatus, type AudienceStatusRead } from './audience-creative'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 import type { PlanSeedDeps } from './build'
 import type { ReadState } from './eligibility'
@@ -317,8 +317,12 @@ function statusCode(v: unknown): number | null {
   return typeof code === 'number' && Number.isFinite(code) ? code : null
 }
 
-/** 只读 GET 每个受众的状态码（按 id 直读）。任何一个读不到就整体 failed；永不抛错。 */
-export async function readAudienceStatusProd(clientId: string, ids: string[]): Promise<AudienceStatusRead> {
+/** 只读 GET 每个受众的状态码（按 id 直读）。任何一个读不到就整体 failed；所属账户对不上的丢掉。永不抛错。 */
+export async function readAudienceStatusProd(
+  clientId: string,
+  ids: string[],
+  adAccountId?: string,
+): Promise<AudienceStatusRead> {
   if (ids.length === 0) return { state: 'empty' }
   const resolved = await resolveMetaTokenForClient(clientId)
   if (resolved === null) return { state: 'failed', reason: '没有可用令牌' }
@@ -330,6 +334,7 @@ export async function readAudienceStatusProd(clientId: string, ids: string[]): P
   const out: Record<string, AudienceStatus> = {}
   for (const { id, row } of reads) {
     if (row === undefined) return { state: 'failed', reason: '读受众状态时 Meta 拒绝或出错' }
+    if (adAccountId !== undefined && !audienceOwnedByAccount(row.account_id, adAccountId)) continue
     out[id] = { operation: statusCode(row.operation_status), delivery: statusCode(row.delivery_status) }
   }
   return { state: 'ok', value: out }

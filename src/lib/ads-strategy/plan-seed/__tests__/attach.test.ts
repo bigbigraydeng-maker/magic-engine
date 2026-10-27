@@ -1,4 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+const productionAudienceRead = vi.hoisted(() =>
+  vi.fn(async () => ({
+    state: 'ok' as const,
+    value: { '111111': { operation: 200, delivery: 200 } },
+  })),
+)
 import type { PrescriptionContent } from '@/types/diagnostic'
 import type { AdsDraftFacts } from '@/lib/marketing-plan/promo/draft-ads'
 import { planSeedSchema, type PlanSeed } from '../types'
@@ -15,6 +22,7 @@ vi.mock('../deps', () => ({
     readScopes: async () => { throw new Error('production dep must not be used') },
     readPromotePages: async () => { throw new Error('production dep must not be used') },
     playbookShare: async () => { throw new Error('production dep must not be used') },
+    readAudienceStatus: productionAudienceRead,
   }),
   loadGoalPeriod: vi.fn(async () => null),
 }))
@@ -26,7 +34,7 @@ import { buildPlanSeed } from '../build'
 import { attachPlanSeed, collectAdPlays, sanitizeAdPlays, carryPriorAdPlays, type AttachDeps } from '../attach'
 import { markAdPlaysDropped } from '../ad-plays'
 
-function facts(): AdsDraftFacts {
+function facts(over: Partial<AdsDraftFacts> = {}): AdsDraftFacts {
   return {
     today: '2026-10-26',
     headroom: {
@@ -49,6 +57,7 @@ function facts(): AdsDraftFacts {
     budget_share_of_headroom: 0.5,
     min_audience_size: 1000,
     max_creatives: 3,
+    ...over,
   }
 }
 
@@ -155,6 +164,26 @@ describe('attachPlanSeed', () => {
       seedOf(result).notes.some((n) => n.includes('目标没有周期')),
     ).toBe(true)
     warn.mockRestore()
+  })
+
+  it('reads audience status through the production dependency when the caller does not pass one', async () => {
+    productionAudienceRead.mockClear()
+    const deps = fullDeps()
+    deps.loadFacts = async () =>
+      facts({
+        audiences: [{ ref: '111111', name: 'A', size_lower: 50, last_used_on: '2026-10-20', as_of: null }],
+        audiences_complete: true,
+      })
+    const result = await attachPlanSeed(
+      content([{ step_key: 's1', play: 'warm_pool_retarget' }]),
+      ctx,
+      deps,
+    )
+    expect(productionAudienceRead).toHaveBeenCalledWith('c1', ['111111'], 'act_A')
+    const step = seedOf(result).ad_steps[0]
+    expect(step.audience_state).toBe('read')
+    expect(step.audience_ids?.ok).toBe(true)
+    if (step.audience_ids?.ok) expect(step.audience_ids.value).toEqual(['111111'])
   })
 
   it('passes ctx.goalId to loadPeriod', async () => {

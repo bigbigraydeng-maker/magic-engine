@@ -40,6 +40,19 @@ function usable(s: AudienceStatus | undefined): boolean | null {
   return (s.operation === null || s.operation === 200) && (s.delivery === null || s.delivery === 200)
 }
 
+/** Meta 的 account_id 是数字（有时带 act_）；对不上或读不到所属账户 = 不能用。 */
+export function audienceOwnedByAccount(owner: unknown, stepAccount: string): boolean {
+  if (typeof owner !== 'string') return false
+  const owned = owner.trim().replace(/^act_/, '')
+  const step = stepAccount.trim().replace(/^act_/, '')
+  return owned !== '' && step !== '' && owned === step
+}
+
+function failedWhy(status: AudienceStatusRead | null, fallback: string): string {
+  if (status !== null && status.state === 'failed' && status.reason.trim() !== '') return status.reason
+  return fallback
+}
+
 function rank(a: AudiencePoolItem, b: AudiencePoolItem): number {
   if (a.last_used_on !== b.last_used_on) {
     if (a.last_used_on === null) return 1
@@ -78,7 +91,7 @@ export function seedAudience(play: PlayKey, f: AdsDraftFacts | null, status: Aud
   }
   const ranked = [...f.audiences].sort(rank).slice(0, MAX_STATUS_CANDIDATES)
   if (status === null || status.state === 'failed') {
-    return { state: 'unreadable', ids: empty('读不到受众现在能不能投，先留空') }
+    return { state: 'unreadable', ids: empty(failedWhy(status, '读不到受众现在能不能投，先留空')) }
   }
   const map = status.state === 'ok' ? status.value : {}
   let sawUnusable = false
@@ -98,7 +111,9 @@ export function seedExcluded(f: AdsDraftFacts | null, status: AudienceStatusRead
   const inUse = f?.excluded_in_use
   if (inUse === undefined || inUse === null) return empty('读不到在投广告组用的排除名单')
   if (inUse.length === 0) return empty('在投广告组没有用排除名单，这里不新建、不上传')
-  if (status === null || status.state !== 'ok') return empty('读不到排除名单现在能不能用，先留空')
+  if (status === null || status.state !== 'ok') {
+    return empty(failedWhy(status, '读不到排除名单现在能不能用，先留空'))
+  }
   const picked = inUse.slice(0, MAX_EXCLUDED)
   const bad = picked.filter(p => usable(status.value[p.ref]) !== true)
   if (bad.length > 0) {
@@ -177,6 +192,7 @@ export function seedSchedule(
   nowMs: number,
 ): Field<{ start_date: string; end_date: string }> {
   if (period === null) return empty('目标没有周期，不猜起止日')
+  if (!Number.isFinite(nowMs)) return empty('取数时间读不到，不猜起止日')
   if (period.end_date < period.start_date) return empty('目标周期的结束日早于开始日')
   const today = nzToday(nowMs)
   if (period.end_date < today) return empty(`目标周期已在 ${period.end_date} 结束`)

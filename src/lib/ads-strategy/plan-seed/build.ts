@@ -12,7 +12,7 @@ import {
   seedSchedule,
   type AudienceStatusRead,
 } from './audience-creative'
-import { errorReason, safe, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
+import { errorReason, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
 import type { Basis, Field, PlanSeed, PlanSeedStep } from './types'
 
 export type { PlanSeedDeps } from './shared'
@@ -68,22 +68,75 @@ type StepExtras = Pick<
   'audience_state' | 'audience_ids' | 'excluded_audience_ids' | 'creative_state' | 'creative_refs'
 >
 
-/** S1: audience, exclusion list and creative per passing step. Read-only; never throws (a failed status read just leaves the audience empty). */
+type SeedLimits = { deadlineMs: number; timeoutMs: number }
+
+/** 受众读取自己超时：底层单次请求能等 20 秒，不能让它吃掉整份种子。 */
+const AUDIENCE_TIMEOUT: AudienceStatusRead = {
+  state: 'failed',
+  reason: '读受众状态超时，先留空',
+}
+
+const AUDIENCE_READ_FAILED: AudienceStatusRead = {
+  state: 'failed',
+  reason: '读受众状态失败，先留空',
+}
+
+/** 在剩余预算内等一次受众读取。超时或抛错都变成留空原因，不等待底层请求结束。 */
+async function readAudienceCapped(
+  read: NonNullable<PlanSeedDeps['readAudienceStatus']>,
+  clientId: string,
+  ids: string[],
+  adAccountId: string,
+  capMs: number,
+): Promise<AudienceStatusRead> {
+  if (capMs <= 0) return AUDIENCE_TIMEOUT
+  let call: Promise<AudienceStatusRead>
+  try {
+    call = Promise.resolve(read(clientId, ids, adAccountId))
+  } catch {
+    return AUDIENCE_READ_FAILED
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<AudienceStatusRead>((resolve) => {
+    timer = setTimeout(() => resolve(AUDIENCE_TIMEOUT), capMs)
+  })
+  const settled = call.then(
+    (value) => value,
+    () => AUDIENCE_READ_FAILED,
+  )
+  try {
+    return await Promise.race([settled, timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+/** 这一步要读的受众；没名单或没接读取时不发请求。 */
+async function readStatusForStep(
+  args: BuildArgs,
+  step: PassingStep,
+  deps: PlanSeedDeps,
+  limits: SeedLimits,
+): Promise<AudienceStatusRead | null> {
+  const ids = audienceIdsToRead(step.play.play, step.account.facts)
+  const read = deps.readAudienceStatus
+  if (ids.length === 0 || read === undefined) return null
+  const capMs = liveCapMs(limits.deadlineMs, limits.timeoutMs)
+  return readAudienceCapped(read, args.clientId, ids, step.accountId, capMs)
+}
+
+/** S1: audience, exclusion list and creative per passing step. Read-only; never throws (a failed or slow status read just leaves the audience empty). */
 async function buildExtras(
   args: BuildArgs,
   passing: PassingStep[],
   deps: PlanSeedDeps,
   nowMs: number,
+  limits: SeedLimits,
 ): Promise<Map<string, StepExtras>> {
   const out = new Map<string, StepExtras>()
   for (const p of passing) {
     const facts = p.account.facts
-    const ids = audienceIdsToRead(p.play.play, facts)
-    let status: AudienceStatusRead | null = null
-    if (ids.length > 0 && deps.readAudienceStatus) {
-      const res = await safe(() => (deps.readAudienceStatus as NonNullable<PlanSeedDeps['readAudienceStatus']>)(args.clientId, ids))
-      status = res.ok ? res.value : { state: 'failed', reason: res.reason }
-    }
+    const status = await readStatusForStep(args, p, deps, limits)
     const aud = seedAudience(p.play.play, facts, status)
     const creative = args.period ? seedCreatives(facts, args.period, nowMs) : null
     out.set(p.play.step_key, {
@@ -230,7 +283,7 @@ async function runWork(
       live,
     })
 
-    const extras = await buildExtras(args, passing, deps, nowMs)
+    const extras = await buildExtras(args, passing, deps, nowMs, limits)
     collectSteps(passing, pageId ?? '', budgets, extras, acc)
     acc.done = true
   } catch (err) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AdsDraftFacts } from '@/lib/marketing-plan/promo/draft-ads'
-import { seedAudience, seedCreatives, seedExcluded, seedSchedule } from '../audience-creative'
+import { audienceOwnedByAccount, seedAudience, seedCreatives, seedExcluded, seedSchedule } from '../audience-creative'
 
 const NOW = Date.parse('2026-10-27T00:00:00Z')
 const PERIOD = { start_date: '2026-11-01', end_date: '2026-11-30' }
@@ -47,6 +47,15 @@ describe('seedAudience', () => {
     expect(seedAudience('warm_pool_retarget', facts({}), null).state).toBe('unreadable')
     expect(seedAudience('warm_pool_retarget', facts({ audiences: pool }), null).state).toBe('unreadable')
   })
+  it('failed read keeps the reason, including a timeout', () => {
+    const r = seedAudience('warm_pool_retarget', facts({ audiences: pool }), {
+      state: 'failed',
+      reason: '读受众状态超时，先留空',
+    })
+    expect(r.state).toBe('unreadable')
+    expect(r.ids.ok).toBe(false)
+    if (!r.ids.ok) expect(r.ids.why_empty).toBe('读受众状态超时，先留空')
+  })
   it('non-retarget plays get no audience', () => {
     expect(seedAudience('lead_form_harvest', facts({ audiences: pool }), null).ids.ok).toBe(false)
   })
@@ -69,6 +78,22 @@ describe('seedExcluded', () => {
   })
   it('empty when none in use', () => {
     expect(seedExcluded(facts({ excluded_in_use: [] }), null).ok).toBe(false)
+  })
+  it('failed read keeps the reason', () => {
+    const r = seedExcluded(facts({ excluded_in_use: inUse }), { state: 'failed', reason: '读受众状态超时，先留空' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.why_empty).toBe('读受众状态超时，先留空')
+  })
+})
+
+describe('audienceOwnedByAccount', () => {
+  it('matches act_ and bare digits, rejects a different account or a missing owner', () => {
+    expect(audienceOwnedByAccount('123', 'act_123')).toBe(true)
+    expect(audienceOwnedByAccount('act_123', '123')).toBe(true)
+    expect(audienceOwnedByAccount('999', 'act_123')).toBe(false)
+    expect(audienceOwnedByAccount(undefined, 'act_123')).toBe(false)
+    expect(audienceOwnedByAccount('', 'act_123')).toBe(false)
+    expect(audienceOwnedByAccount('123', '')).toBe(false)
   })
 })
 
@@ -96,5 +121,10 @@ describe('seedSchedule', () => {
     expect(seedSchedule(PERIOD, NOW).ok).toBe(true)
     expect(seedSchedule(null, NOW).ok).toBe(false)
     expect(seedSchedule({ start_date: '2026-01-01', end_date: '2026-02-01' }, NOW).ok).toBe(false)
+  })
+  it('NaN facts time does not throw and leaves the schedule empty', () => {
+    const r = seedSchedule(PERIOD, Number.NaN)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.why_empty).toBe('取数时间读不到，不猜起止日')
   })
 })

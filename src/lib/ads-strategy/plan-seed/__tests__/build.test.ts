@@ -291,6 +291,58 @@ describe('buildPlanSeed', () => {
     }
   })
 
+  it('slow audience read keeps the step and leaves the audience empty', async () => {
+    const readAudienceStatus = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 150))
+      return {
+        state: 'ok' as const,
+        value: { '111111': { operation: 200, delivery: 200 } },
+      }
+    })
+    const deps = makeDeps({
+      loadFacts: vi.fn(async () =>
+        facts({
+          audiences: [{ ref: '111111', name: 'A', size_lower: 50, last_used_on: '2026-10-20', as_of: null }],
+          audiences_complete: true,
+        }),
+      ),
+      readAudienceStatus,
+    })
+    const seed = await buildPlanSeed(args([{ step_key: 's1', play: 'warm_pool_retarget' }]), deps, {
+      timeoutMs: 100,
+    })
+    expect(readAudienceStatus).toHaveBeenCalledWith('c1', ['111111'], 'act_A')
+    expect(seed.ad_steps).toHaveLength(1)
+    expect(seed.skipped).toEqual([])
+    expect(seed.notes.some((n) => n.includes('取数超时'))).toBe(false)
+    const step = seed.ad_steps[0]
+    expect(step.audience_state).toBe('unreadable')
+    expect(step.audience_ids?.ok).toBe(false)
+    if (step.audience_ids && step.audience_ids.ok === false) {
+      expect(step.audience_ids.why_empty).toBe('读受众状态超时，先留空')
+    }
+  })
+
+  it('NaN facts_as_of still resolves and leaves the schedule empty', async () => {
+    class BadClock extends Date {
+      override toISOString(): string {
+        return 'not-a-date'
+      }
+    }
+    const deps = makeDeps({
+      now: () => new BadClock(NOW.getTime()),
+    })
+    const seed = await buildPlanSeed(args([leadPlay('s1')]), deps)
+    expect(seed.facts_as_of).toBe('not-a-date')
+    expect(Number.isNaN(Date.parse(seed.facts_as_of))).toBe(true)
+    expect(seed.schedule?.ok).toBe(false)
+    if (seed.schedule && seed.schedule.ok === false) {
+      expect(seed.schedule.why_empty).toBe('取数时间读不到，不猜起止日')
+    }
+    expect(seed.ad_steps).toHaveLength(1)
+    expect(planSeedSchema.safeParse(seed).success).toBe(true)
+  })
+
   it('timeout: returns partial seed and late work does not mutate it', async () => {
     const deps = makeDeps({
       loadFacts: vi.fn(async () => {
