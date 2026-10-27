@@ -198,6 +198,8 @@ const OUTCOME_CHIP: Record<string, string> = {
  *
  * 记录少的时候不框：一屏就看完了，框起来反而多一层滚动条。
  */
+/** 折叠时直接露出的最近条数。 */
+const RECENT_WHEN_COLLAPSED = 5
 const LONG_TIMELINE = 6
 
 /**
@@ -407,7 +409,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   const icon = CHANNEL_ICON[e.channel ?? ''] ?? '•'
   const name = CHANNEL_NAME[e.channel ?? ''] ?? e.channel ?? '接触'
   const chips = [
-    e.tour && `想去：${e.tour}`,
+    e.tour && `想去：${humanizeFormCode(e.tour) ?? e.tour}`,
     e.travelWindow && `${e.travelWindow} 走`,
     e.competitor && `提到 ${e.competitor}`,
     e.callbackAt && '约了回电',
@@ -631,15 +633,24 @@ export function ContactTimeline({
   }
 
   if (collapsible && !expanded) {
+    // 折叠时仍露出最近几条：员工要看「他最近说了什么 / 我们回了什么」，不该只剩一行按钮。
+    // PM 2026-10-28：打开抽屉看不到过往记录。更早的才折起来。
+    const recent = data.timeline.slice(-RECENT_WHEN_COLLAPSED)
+    const earlier = data.timeline.length - recent.length
     return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
-      >
-        看完整往来原文（{data.timeline.length} 条）
-        <span aria-hidden>▾</span>
-      </button>
+      <div className="space-y-2.5" data-testid="timeline-recent">
+        {recent.map((e, i) => (
+          <Row key={i} e={e} clientId={clientId} />
+        ))}
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
+        >
+          {earlier > 0 ? `看更早的往来（还有 ${earlier} 条）` : `看完整往来原文（${data.timeline.length} 条）`}
+          <span aria-hidden>▾</span>
+        </button>
+      </div>
     )
   }
 

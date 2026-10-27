@@ -1,5 +1,6 @@
 # 卫青 — Agent 手册
 
+> ⚠️ 与代码不符，见 [`agent-autonomy-operating-plan-v1` §4.4](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)：卫青代码目录 `src/lib/ads-strategy/` 全目录不调模型，下面「模型」一行与代码不符。正文未改。
 > 模型：Claude Sonnet（诊断与处方）/ Claude Haiku（日常规则型判断，如 stop-loss 触发）
 > 代码入口：`src/lib/ads-strategy/`（引擎已存在，本手册把它人格化）
 > 定位：广告支柱 · 资深 Meta 广告投放师 Agent。每天盯每个客户的每一条广告，出诊断、开处方、给出到"每一次具体操作"这个粒度的动作。
@@ -263,3 +264,13 @@ Messenger 留资广告（在聊天里填表那种）会给**同一个人**同时
 - Ad Strategy Engine Spec：`docs/specs/2026-07-13-ad-strategy-engine.md`
 - Meta 广告经验手册：`~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-ads-meta-general.md`
 - 广告健康度看板：`src/app/dashboard/clients/[id]/ads-health/page.tsx`
+
+---
+
+## 操作手册
+
+- [广告 agent 操作手册与规则 v1.0](../sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md)
+- [Meta 广告角度测试与预算](../sops/meta-ads-angle-test-and-budget.md)
+- [爆款 Reel 自动同步](../sops/winner-reel-auto-sync.md)
+
+索引：[agents 索引](./README.md)。

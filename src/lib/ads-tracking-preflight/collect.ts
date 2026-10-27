@@ -20,7 +20,7 @@ import { readEnvFacts, type EnvReadDeps } from './env-reader'
 import { readGa4Facts, type Ga4ReadDeps } from './ga4-reader'
 import { judgePostLaunch, judgePreflightGates } from './judge'
 import { probeLanding } from './landing-probe'
-import { readMetaFacts } from './meta-reader'
+import { readAdAccountFact, readMetaFacts } from './meta-reader'
 import { readPostLaunchFacts } from './post-launch'
 import { buildClientReceipt, type ItemLinks } from './receipt'
 import { retryOnce, type Sleep } from './retry'
@@ -99,7 +99,11 @@ export async function collectMetaFacts(
   if (!token) return unread('没有可用的 Meta 令牌，Meta 相关的检查都没法读')
 
   const out = await readMetaFacts({ adAccountId: cfg.ad_account_id, focusPixelIds, token, fetcher: deps.fetcher, now: deps.now, sleep: deps.sleep })
-  return { facts: out.facts, errors: tag('meta', out.errors) }
+  const spendId = cfg.spend_ad_account_id
+  if (!spendId || spendId === cfg.ad_account_id) return { facts: out.facts, errors: tag('meta', out.errors) }
+  // 广告在另一个账户里投：「账户与付款」要核的是花钱的那个账户，数据集仍按官方账户读
+  const spend = await readAdAccountFact({ adAccountId: spendId, token, fetcher: deps.fetcher, sleep: deps.sleep })
+  return { facts: { ...out.facts, account: spend.account }, errors: tag('meta', [...out.errors, ...spend.errors]) }
 }
 
 export async function collectGa4Facts(clientId: string, cfg: TrackingClientConfig, deps: CollectDeps): Promise<Collected<Ga4Facts>> {
@@ -150,7 +154,7 @@ export async function collectBudgetFacts(
   const out = await readBudgetFacts({
     supabase: deps.supabase,
     clientId,
-    adAccountId: cfg.ad_account_id,
+    adAccountId: cfg.spend_ad_account_id ?? cfg.ad_account_id,
     token,
     fetcher: deps.fetcher,
     now: deps.now,
@@ -172,7 +176,7 @@ export function buildItemLinks(
   const id = encodeURIComponent(clientId)
   const fallback = `${ctx.appBase}/dashboard/clients/${id}/promo-plan`
   const events = ctx.datasetId ? `${EVENTS_MANAGER}/list/dataset/${ctx.datasetId}` : EVENTS_MANAGER
-  const accountDigits = cfg.ad_account_id.replace(/^act_/, '')
+  const accountDigits = (cfg.spend_ad_account_id ?? cfg.ad_account_id).replace(/^act_/, '')
   return {
     fallback,
     byGate: {

@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { supabaseAdmin } from '@/lib/supabase'
 import { ADS_CREATE_ACTION, type DraftRecord } from '@/lib/ads-strategy/draft-and-gate'
 import { describeDraft, isApprovableKind } from '@/lib/ads-strategy/ad-draft'
-import ApproveButtons from './_components/ApproveButtons'
+import { GoLiveCardPanel } from '@/components/go-live-card/GoLiveCardPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -68,12 +68,6 @@ const STATUS_STYLE: Record<string, string> = {
   rejected: 'bg-slate-100 text-slate-500 ring-slate-300',
 }
 
-function costLine(p: DraftRecord): string {
-  const d = p.draft
-  if (!d) return '花费未知'
-  return `每天 $${d.dailyBudget}、最多 $${d.dailyBudget * d.durationDays}`
-}
-
 export default async function AdApprovalPage() {
   const { rows, clients, more } = await load()
 
@@ -89,8 +83,8 @@ export default async function AdApprovalPage() {
     <div className="mx-auto max-w-4xl px-6 py-8">
       <h1 className="text-2xl font-bold text-slate-900">等你点头的广告</h1>
       <p className="mt-2 text-sm text-slate-600">
-        下面每条都已经在 Meta 上建好了，<strong>但都是暂停的，一分钱没花</strong>。
-        你点「开始投放」它才开始花钱。
+        下面每条都已经建好了，<strong>但都是暂停的，一分钱没花</strong>。
+        点确认卡上的「确认」才开始花钱。聊天里说确认不算。
       </p>
 
       {/* ── 等点头 ─────────────────────────────────────────────── */}
@@ -160,10 +154,9 @@ export default async function AdApprovalPage() {
                     </ul>
                   )}
 
-                  {/* 和 approveDraft 用同一个判断：不在白名单的（私信广告、旧记录）不给按钮，
-                      否则这里会摆一个点了必报错的绿按钮。 */}
+                  {p.error ? <p className="mt-3 text-sm text-red-700">{p.error}</p> : null}
                   {isApprovableKind(p.draft?.kind) ? (
-                    <ApproveButtons actionId={r.id} costLine={costLine(p)} />
+                    <GoLiveCardPanel clientId={r.client_id} draftId={r.id} />
                   ) : (
                     <p className="mt-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-600">
                       暂不可开：这种广告要等「PM 授权 + 每日总预算检查」上线之后才能开。
