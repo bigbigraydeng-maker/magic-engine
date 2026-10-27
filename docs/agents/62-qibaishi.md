@@ -92,7 +92,11 @@
 3. **它自己没有写过任何页面**：能力是否达标，要等第一次真实改动（建议先整页修 `ReviewInbox.tsx`）后用 `tsc` + Impeccable 前后数字验证。
 4. **不是产品内 agent**：不进 `docs/specs/2026-10-18-me-agent-standard-process-v1.0.md` 的五关流程，也不进巡检表；它是开发工具，不是 ME 对客户的能力。
 
-## 十、相关文档
+## 十、操作手册
+
+怎么叫他、怎么验收、改完谁来合并，见 [`docs/sops/2026-10-27-qibaishi-ui-designer-playbook-v1.0.md`](../sops/2026-10-27-qibaishi-ui-designer-playbook-v1.0.md)。
+
+## 十一、相关文档
 
 - 规范：[`docs/DESIGN_SYSTEM.md`](../DESIGN_SYSTEM.md)
 - Agent 总架构：[`00-architecture.md`](./00-architecture.md)（6 月版，名单已过时，齐白石不在其中）
