@@ -1,8 +1,9 @@
 /**
- * 诸葛抽屉三个只读工具：读得到 / 读不到 / 没权限，以及每次调用都记一条动作记录。
+ * 诸葛抽屉三个只读工具：读得到 / 读不到 / 没权限。
+ * 执行链不写库。没传 prescription_id 时用当前客户最新一份已批准或草稿处方。
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('@/lib/auth/client-access', () => ({
   requirePaidClientAccess: vi.fn(),
@@ -32,42 +33,90 @@ function ctxWithRow(row: unknown): ReadonlyToolContext {
   q.maybeSingle = async () => ({ data: row, error: null })
   return {
     clientId: 'client-A', domain: null, siteUrl: null, propertyId: null, market: 'AU',
-    supabase: { from: () => q } as unknown as ReadonlyToolContext['supabase'],
+    supabase: { from: (table: string) => { tables.push(table); return q } } as unknown as ReadonlyToolContext['supabase'],
   }
 }
 
-const parse = (s: string) => JSON.parse(s) as Record<string, unknown>
-const recorded = () => vi.mocked(insertRun).mock.calls.map(c => c[1])
+interface LatestProbe {
+  ctx: ReadonlyToolContext
+  eqs: Array<[string, unknown]>
+  ins: Array<[string, unknown]>
+  orders: Array<[string, unknown]>
+  limitCalls: () => number
+}
 
-beforeEach(() => vi.resetAllMocks())
+function ctxWithLatest(latestId: string | null, detail: unknown = null): LatestProbe {
+  const eqs: Array<[string, unknown]> = []
+  const ins: Array<[string, unknown]> = []
+  const orders: Array<[string, unknown]> = []
+  let limits = 0
+  const q: Record<string, unknown> = {}
+  q.select = () => q
+  q.eq = (col: string, val: unknown) => { eqs.push([col, val]); return q }
+  q.in = (col: string, val: unknown) => { ins.push([col, val]); return q }
+  q.order = (col: string, opts: unknown) => { orders.push([col, opts]); return q }
+  q.limit = async () => {
+    limits += 1
+    return { data: latestId ? [{ id: latestId }] : [], error: null }
+  }
+  q.maybeSingle = async () => ({ data: detail, error: null })
+  const ctx: ReadonlyToolContext = {
+    clientId: 'client-A', domain: null, siteUrl: null, propertyId: null, market: 'AU',
+    supabase: { from: (table: string) => { tables.push(table); return q } } as unknown as ReadonlyToolContext['supabase'],
+  }
+  return { ctx, eqs, ins, orders, limitCalls: () => limits }
+}
+
+const tables: string[] = []
+const parse = (s: string) => JSON.parse(s) as Record<string, unknown>
+
+function dialogLogs(): Array<Record<string, unknown>> {
+  return vi.mocked(console.info).mock.calls
+    .map(c => String(c[0]))
+    .filter(s => s.includes('zhuge_dialog_read'))
+    .map(s => JSON.parse(s) as Record<string, unknown>)
+}
+
+beforeEach(() => {
+  vi.resetAllMocks()
+  tables.length = 0
+  vi.spyOn(console, 'info').mockImplementation(() => {})
+})
+
+afterEach(() => {
+  expect(insertRun).not.toHaveBeenCalled()
+  expect(tables).not.toContain('action_runs')
+  vi.mocked(console.info).mockRestore()
+})
 
 describe('read_prescription_progress', () => {
-  it('读得到：返回处方 + 走到哪一步，并记 succeeded 动作记录', async () => {
+  it('读得到：返回处方 + 走到哪一步，且不写库', async () => {
     vi.mocked(requirePaidClientAccess).mockResolvedValue(okAccess)
     vi.mocked(loadChainFacts).mockResolvedValue({ prescription: { read: 'ok', value: { id: 'p1' } } } as never)
     const out = parse(await readPrescriptionProgress.handler({ prescription_id: 'p1' }, ctxWithRow({ id: 'p1', status: 'approved' })))
     expect(out.read).toBe('ok')
-    expect(recorded()).toHaveLength(1)
-    expect(recorded()[0]).toMatchObject({
-      client_id: 'client-A', action_key: 'zhuge.read_prescription_progress',
-      triggered_by: 'agent', triggered_by_ref: 'zhuge_dialog', status: 'succeeded',
-    })
+    expect(dialogLogs()).toEqual([{
+      event: 'zhuge_dialog_read', client_id: 'client-A',
+      tool: 'read_prescription_progress', outcome: 'read', read_only: true,
+    }])
   })
 
-  it('处方不存在 → 读不到', async () => {
+  it('处方不存在 → 读不到，且不写库', async () => {
     vi.mocked(requirePaidClientAccess).mockResolvedValue(okAccess)
     vi.mocked(loadChainFacts).mockResolvedValue({ prescription: { read: 'ok', value: null } } as never)
     const out = parse(await readPrescriptionProgress.handler({ prescription_id: 'p1' }, ctxWithRow(null)))
     expect(out.read).toBe('读不到')
-    expect(recorded()[0]).toMatchObject({ status: 'failed', last_error: 'read_unread' })
+    expect(dialogLogs()[0]).toMatchObject({ outcome: 'unread', read_only: true })
   })
 
-  it('没权限 → 读不到，且不取数', async () => {
+  it('没权限 → 读不到，且不取数、不写库', async () => {
     vi.mocked(requirePaidClientAccess).mockResolvedValue(noAccess)
-    const out = parse(await readPrescriptionProgress.handler({ prescription_id: 'p1' }, ctxWithRow(null)))
+    const probe = ctxWithLatest('p-latest')
+    const out = parse(await readPrescriptionProgress.handler({ prescription_id: 'p1' }, probe.ctx))
     expect(out.read).toBe('读不到')
     expect(loadChainFacts).not.toHaveBeenCalled()
-    expect(recorded()[0]).toMatchObject({ last_error: 'read_denied' })
+    expect(probe.limitCalls()).toBe(0)
+    expect(dialogLogs()[0]).toMatchObject({ outcome: 'denied', read_only: true })
   })
 
   it('取数抛错 → 读不到，不填默认值', async () => {
@@ -77,9 +126,34 @@ describe('read_prescription_progress', () => {
     expect(out).toEqual({ read: '读不到', reason: '读取出错' })
   })
 
-  it('缺 prescription_id → 读不到', async () => {
-    const out = parse(await readPrescriptionProgress.handler({}, ctxWithRow(null)))
-    expect(out.read).toBe('读不到')
+  it('不传 prescription_id → 用当前客户最新一份已批准或草稿处方', async () => {
+    vi.mocked(requirePaidClientAccess).mockResolvedValue(okAccess)
+    vi.mocked(loadChainFacts).mockResolvedValue({ prescription: { read: 'ok', value: { id: 'p-latest' } } } as never)
+    const probe = ctxWithLatest('p-latest', { id: 'p-latest', status: 'approved' })
+    const out = parse(await readPrescriptionProgress.handler({ client_id: 'client-OTHER' }, probe.ctx))
+    expect(out.read).toBe('ok')
+    expect(loadChainFacts).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      clientId: 'client-A', prescriptionId: 'p-latest',
+    }))
+    expect(probe.eqs.filter(([col]) => col === 'client_id').map(([, val]) => val)).toEqual(['client-A', 'client-A'])
+    expect(probe.eqs.map(([, val]) => val)).not.toContain('client-OTHER')
+    expect(probe.ins).toEqual([['status', ['approved', 'draft']]])
+    expect(probe.orders).toEqual([['created_at', { ascending: false }]])
+    expect(probe.limitCalls()).toBe(1)
+  })
+
+  it('不传处方编号且没有可读处方 → 读不到，不取链条', async () => {
+    vi.mocked(requirePaidClientAccess).mockResolvedValue(okAccess)
+    const probe = ctxWithLatest(null)
+    const out = parse(await readPrescriptionProgress.handler({}, probe.ctx))
+    expect(out).toEqual({ read: '读不到', reason: '这个客户还没有可读的处方' })
+    expect(loadChainFacts).not.toHaveBeenCalled()
+  })
+
+  it('prescription_id 不是必填', () => {
+    const schema = readPrescriptionProgress.tool.input_schema as { required?: string[] }
+    expect(schema.required).toBeUndefined()
+    expect(readPlanSeed.tool.input_schema).toEqual(readPrescriptionProgress.tool.input_schema)
   })
 })
 
@@ -93,11 +167,23 @@ describe('read_plan_seed', () => {
     expect(requirePaidClientAccess).not.toHaveBeenCalled()
   })
 
-  it('非内部账号 → 读不到，不算种子', async () => {
+  it('不传 prescription_id → 用当前客户最新一份', async () => {
+    vi.mocked(requirePlanApproverAccess).mockResolvedValue(okAccess)
+    vi.mocked(readPlanSeedForClient).mockResolvedValue({ status: 200, body: { success: true, seed: null } })
+    const probe = ctxWithLatest('p-latest')
+    const out = parse(await readPlanSeed.handler({}, probe.ctx))
+    expect(out.read).toBe('ok')
+    expect(readPlanSeedForClient).toHaveBeenCalledWith('client-A', 'p-latest')
+    expect(probe.eqs).toEqual([['client_id', 'client-A']])
+  })
+
+  it('非内部账号 → 读不到，不算种子、不查处方', async () => {
     vi.mocked(requirePlanApproverAccess).mockResolvedValue(noAccess)
-    const out = parse(await readPlanSeed.handler({ prescription_id: 'p1' }, ctxWithRow(null)))
+    const probe = ctxWithLatest('p-latest')
+    const out = parse(await readPlanSeed.handler({}, probe.ctx))
     expect(out.read).toBe('读不到')
     expect(readPlanSeedForClient).not.toHaveBeenCalled()
+    expect(probe.limitCalls()).toBe(0)
   })
 
   it('算不出 → 读不到', async () => {
@@ -105,6 +191,13 @@ describe('read_plan_seed', () => {
     vi.mocked(readPlanSeedForClient).mockResolvedValue({ status: 500, body: { success: false, error: '算不出' } })
     const out = parse(await readPlanSeed.handler({ prescription_id: 'p1' }, ctxWithRow(null)))
     expect(out).toEqual({ read: '读不到', reason: '算不出' })
+  })
+
+  it('没有可读处方 → 读不到，不算种子', async () => {
+    vi.mocked(requirePlanApproverAccess).mockResolvedValue(okAccess)
+    const out = parse(await readPlanSeed.handler({}, ctxWithLatest(null).ctx))
+    expect(out).toEqual({ read: '读不到', reason: '这个客户还没有可读的处方' })
+    expect(readPlanSeedForClient).not.toHaveBeenCalled()
   })
 })
 
@@ -134,10 +227,10 @@ describe('read_spend_and_leads', () => {
     expect(parse(await readSpendAndLeads.handler({}, ctxWithRow(null))).read).toBe('读不到')
   })
 
-  it('记录失败不影响返回', async () => {
+  it('日志失败不影响返回，且仍然不写库', async () => {
     vi.mocked(requirePaidClientAccess).mockResolvedValue(okAccess)
     vi.mocked(loadTrackingGateFacts).mockResolvedValue(undefined)
-    vi.mocked(insertRun).mockRejectedValueOnce(new Error('db down'))
+    vi.mocked(console.info).mockImplementation(() => { throw new Error('log down') })
     expect(parse(await readSpendAndLeads.handler({}, ctxWithRow(null))).read).toBe('读不到')
   })
 })
