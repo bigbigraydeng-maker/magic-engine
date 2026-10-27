@@ -33,8 +33,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (rows.length > 1) return NextResponse.json({ error: '电话连接不唯一，请联系管理员' }, { status: 422 })
 
   const conn = rows[0] as { id: string }
-  // 整张表读出再写回，两个人同时登记时后写的会盖掉先写的：写完回读确认自己那条还在，不在就重来（最多 3 次）。
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // 整张表读出再写回：写入时带上「刚读到的旧值」做条件（compare-and-swap），库里已被别人改过则 0 行更新，
+  // 重新读取并重新校验（同事刚登记/刚占用的号码都会在校验里被看到），最多 5 次。
+  for (let attempt = 0; attempt < 5; attempt++) {
     const { data: cur, error: rErr } = await supabaseAdmin
       .from('telephony_connections')
       .select('extension_map')
@@ -42,24 +43,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .eq('client_id', clientId)
       .maybeSingle()
     if (rErr || !cur) return NextResponse.json({ error: '操作失败' }, { status: 500 })
-    const result = registerStaffPhone(cleanExtensionMap((cur as { extension_map: unknown }).extension_map), access.user.email, body.phone)
+    const raw = (cur as { extension_map: unknown }).extension_map
+    const result = registerStaffPhone(cleanExtensionMap(raw), access.user.email, body.phone)
     if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 })
 
-    const { error: uErr } = await supabaseAdmin
+    const base = supabaseAdmin
       .from('telephony_connections')
       .update({ extension_map: result.map })
       .eq('id', conn.id)
       .eq('client_id', clientId)
+    const guarded = raw === null || raw === undefined ? base.is('extension_map', null) : base.eq('extension_map', JSON.stringify(raw))
+    const { data: hit, error: uErr } = await guarded.select('id')
     if (uErr) return NextResponse.json({ error: '操作失败' }, { status: 500 })
-
-    const { data: after } = await supabaseAdmin
-      .from('telephony_connections')
-      .select('extension_map')
-      .eq('id', conn.id)
-      .eq('client_id', clientId)
-      .maybeSingle()
-    const kept = cleanExtensionMap((after as { extension_map: unknown } | null)?.extension_map)
-    if (kept[result.phone] === result.map[result.phone]) return NextResponse.json({ ok: true, phone: result.phone })
+    if (hit && hit.length > 0) return NextResponse.json({ ok: true, phone: result.phone })
   }
   return NextResponse.json({ error: '同时有人在登记，请再点一次' }, { status: 409 })
 }
