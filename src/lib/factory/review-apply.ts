@@ -17,6 +17,7 @@ import {
 import { computeReviewFeedbackDigest, RecipeConfigError, winnerRecipeFromBrief } from './recipe'
 import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from './deliverable'
 import { isRemotionBrief } from './render-mode'
+import { releasePinnedPostcardLayout } from './postcard-layout'
 import type { RemotionMusicReplacement } from './remotion-music-options.mjs'
 import type { ReviewRejectCategory } from './types'
 
@@ -267,7 +268,7 @@ export async function applyQualityReject(
       angle: wo!.angle,
       angle_source: wo!.angle_source,
       rationale_one_liner: wo!.rationale_one_liner,
-      brief: newBrief,
+      brief: releasePinnedPostcardLayout(newBrief),
       budget_cap_usd: wo!.budget_cap_usd,
       source_ad_id: wo!.source_ad_id,
       status: reopenStatus,

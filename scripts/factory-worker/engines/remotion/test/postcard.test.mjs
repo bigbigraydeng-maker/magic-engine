@@ -596,6 +596,15 @@ describe('cardTop', () => {
     const props = parsePostcardProps(validProps())
     assert.equal(props.cardTop, undefined)
   })
+
+  test('layoutOverride true is accepted and a string is rejected', () => {
+    const props = validProps()
+    props.layoutOverride = true
+    assert.equal(parsePostcardProps(props).layoutOverride, true)
+    rejects((next) => {
+      next.layoutOverride = 'yes'
+    }, 'layoutOverride 只能是 true 或 false')
+  })
 })
 
 describe('priceSec with a price card', () => {

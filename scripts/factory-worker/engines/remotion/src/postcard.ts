@@ -440,6 +440,7 @@ export const PostcardPropsSchema = z
     cardZone: z.enum(['upper', 'lower', 'alternate'], {
       message: 'cardZone 只能是 upper、lower 或 alternate',
     }).optional(),
+    layoutOverride: z.boolean({ message: 'layoutOverride 只能是 true 或 false' }).optional(),
     frame: frameSchema.optional(),
     accent: hexColor.optional(),
     hook: HOOK,

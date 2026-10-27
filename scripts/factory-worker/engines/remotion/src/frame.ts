@@ -526,14 +526,16 @@ function clampTop(top: number, minTop: number, maxTop: number): number {
 
 /**
  * Vertical origin of a postcard scene card.
- * An explicit cardTop is kept (then clamped). Otherwise scenes alternate the upper and lower safe bands
- * so the card is not parked on the middle of the picture for the whole reel.
+ * A bare cardTop is ignored so queued orders that pinned the middle still alternate.
+ * cardZone, or cardTop together with layoutOverride, is an explicit layout and is kept.
+ * Otherwise scenes alternate the upper and lower safe bands.
  */
 export function postcardCardTop(input: {
   sceneIndex: number
   cardHeight: number
   cardTop?: number
   cardZone?: CardZone
+  layoutOverride?: boolean
   logoVisible?: boolean
   width?: number
   height?: number
@@ -541,7 +543,7 @@ export function postcardCardTop(input: {
   const safe: SafeRect = safeRectFor(input.width ?? 1080, input.height ?? 1920)
   const minTop = safe.top + CARD_GAP
   const maxTop = Math.max(minTop, safe.bottom - CARD_GAP - input.cardHeight)
-  if (input.cardTop !== undefined && input.cardZone === undefined) {
+  if (input.layoutOverride === true && input.cardTop !== undefined && input.cardZone === undefined) {
     return clampTop(input.cardTop, minTop, maxTop)
   }
   const belowLogo = CORNER_LOGO.top + CORNER_LOGO.height + 16
@@ -549,4 +551,22 @@ export function postcardCardTop(input: {
   const zone = input.cardZone ?? 'alternate'
   const pick = zone === 'upper' ? 'upper' : zone === 'lower' ? 'lower' : input.sceneIndex % 2 === 0 ? 'lower' : 'upper'
   return pick === 'upper' ? upper : maxTop
+}
+
+/** Logo window: after the hook and before the end card, unless a manual layout asks for the whole film. */
+export function resolvePostcardLogoWindow(input: {
+  logoMode?: 'last_beats' | 'always'
+  layoutOverride?: boolean
+  totalFrames: number
+  hookFrames: number
+  endFrom: number
+  hideForEnd: boolean
+}): { start: number; end: number } {
+  const total = Math.max(0, Math.floor(input.totalFrames))
+  if (input.layoutOverride === true && input.logoMode === 'always') {
+    return { start: 0, end: total }
+  }
+  const start = Math.min(total, Math.max(0, Math.floor(input.hookFrames)))
+  const end = input.hideForEnd ? Math.min(total, Math.max(start, Math.floor(input.endFrom))) : total
+  return { start, end }
 }

@@ -11,6 +11,8 @@ const auto = ['audio_track_present_nonsilent', 'resolution_aspect_ratio_correct'
 interface Order {
   id: string; client_id: string; client_name: string; status: string; angle: string; rationale_one_liner: string
   template_id?: string | null
+  card_zone?: string | null
+  layout_override?: string | null
   music_file?: string | null
   music_choices?: Array<{ id: string; file: string; mood: string; style: string; energy: string; status: string; clean_until_sec: number; max_video_seconds: number }>
   fact_source_url: string | null
@@ -58,6 +60,11 @@ const MISSING = 'checklist factual_claims_have_source requires source_ref'
 const reviewPosts = () => posts.filter(p => p.url === '/api/factory/work-orders/w1/review')
 const ONE_CLICK = '我已看过这条片子,同意通过'
 const FAIL_AUTO = auto.map(item => item.key === 'audio_track_present_nonsilent' ? { ...item, outcome: 'FAIL' } : item)
+
+it('marks a postcard that asked for a fixed layout', async () => {
+  await mount([], { card_zone: 'lower' })
+  expect(document.querySelector('[data-testid="manual-layout"]')?.textContent).toBe('手动版式')
+})
 
 it('shows when the render machine is too old, on the inbox and on that video', async () => {
   await mount([], { output: { quality_checklist_auto: auto, engine_stale: true } }, false, [], {

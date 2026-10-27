@@ -213,6 +213,30 @@ describe('applyQualityReject — remotion 单不重开新单', () => {
 })
 
 describe('applyQualityReject — 打回重开', () => {
+  it('a reopened postcard drops a pinned card height and a full-time logo', async () => {
+    const wo = {
+      ...IN_REVIEW_WO,
+      brief: {
+        ...musicBrief,
+        remotion: {
+          ...musicBrief.remotion,
+          props: { ...musicBrief.remotion.props, cardTop: 870, logoMode: 'always' },
+        },
+      },
+    }
+    const { db, inserts } = mockSupabase([
+      { data: wo, error: null },
+      { data: [{ id: 'wo-1' }], error: null },
+      { data: { id: 'wo-2' }, error: null },
+    ])
+    const r = await applyQualityReject(db, 'wo-1', '画面太慢', 'me@x.com', undefined, FAIL_HUMAN, 'horizons-call')
+    expect(r.ok).toBe(true)
+    const props = (inserts[0] as { brief: { remotion: { props: Record<string, unknown> } } }).brief.remotion.props
+    expect(props.cardTop).toBeUndefined()
+    expect(props.logoMode).toBeUndefined()
+    expect(props.musicFile).toBe('horizons-call.mp3')
+  })
+
   it('把人工选曲写进重开的 Remotion brief 并留审计信息', async () => {
     const wo = { ...IN_REVIEW_WO, brief: musicBrief }
     const { db, inserts } = mockSupabase([

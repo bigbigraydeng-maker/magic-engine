@@ -14,6 +14,7 @@ import { RejectDialog } from './RejectDialog'
 import { groupCounts, parseAngle } from './reviewCardMeta'
 import { maliangReviewNote, type MaliangReviewTone } from '@/lib/maliang/review-note'
 import { engineCardNote } from '@/lib/factory/engine-catalog.mjs'
+import { postcardManualLayout } from '@/lib/factory/postcard-layout'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -26,6 +27,8 @@ interface WorkOrder {
   status: WorkOrderStatus
   template_id?: string | null
   music_file?: string | null
+  card_zone?: string | null
+  layout_override?: string | boolean | null
   deliverable?: string | null // brief.remotion.deliverable;'asset_only' = 素材,不单独发布
   fact_source_url?: string | null // 工单自带的官网产品页(brief.copy.endcard.url),用来预填「事实有来源」
   angle: string
@@ -376,6 +379,9 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-me-charcoal/75" aria-label="本次成片模板和音乐">
                   <span className="rounded bg-me-stone/60 px-2 py-1">模板 · {renderChoiceLabel(o.template_id)}</span>
                   <span className="rounded bg-me-stone/60 px-2 py-1">BGM · {musicChoiceLabel(o.music_file)}</span>
+                  {postcardManualLayout(o.card_zone, o.layout_override) && (
+                    <span className="rounded bg-me-stone/60 px-2 py-1" data-testid="manual-layout">手动版式</span>
+                  )}
                 </div>
 
                 {staleNote && (

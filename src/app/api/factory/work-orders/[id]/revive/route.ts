@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireAdminScope } from '@/lib/auth/require-admin'
+import { releasePinnedPostcardLayout } from '@/lib/factory/postcard-layout'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +41,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     )
   }
 
+  const releasedBrief = releasePinnedPostcardLayout(wo.brief)
   const { data: updated, error: upErr } = await supabaseAdmin
     .from('content_work_orders')
     .update({
@@ -51,6 +53,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       heartbeat_at: null,
       reject_reason: null,
       review_ref: { revived_by: reviver, revived_at: new Date().toISOString(), prev_reject: wo.reject_reason },
+      ...(releasedBrief === wo.brief ? {} : { brief: releasedBrief }),
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
