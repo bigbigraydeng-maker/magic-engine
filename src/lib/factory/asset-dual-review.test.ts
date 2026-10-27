@@ -225,4 +225,20 @@ describe('pool entry', () => {
     expect(poolAfterPass([{ kind: 'work_order', ref: 'wo-1', status: 'rejected' }], 'wo-1', 't').ok).toBe(false)
     expect(poolAfterPass([{ kind: 'meta_video', ref: 'wo-1', status: 'candidate' }], 'wo-1', 't').ok).toBe(false)
   })
+
+  it('stores the uploaded video id on the approval and leaves an approved row unchanged', () => {
+    const approved = poolAfterPass([], 'wo-1', '2026-10-27T00:00:00.000Z', '555')
+    expect(approved.ok).toBe(true)
+    if (!approved.ok) return
+    expect(approved.pool[0]).toMatchObject({
+      kind: 'work_order', status: 'approved', approved_by: 'ai-dual-review', alias_refs: ['555'],
+    })
+    const again = poolAfterPass(approved.pool, 'wo-1', 'later', '777')
+    expect(again).toEqual({ ok: true, pool: approved.pool })
+  })
+
+  it('does not take a video id that already belongs to another row', () => {
+    const blocked = poolAfterPass([{ kind: 'meta_video', ref: '555', status: 'candidate' }], 'wo-1', 't', '555')
+    expect(blocked.ok).toBe(false)
+  })
 })

@@ -172,6 +172,7 @@ function resolveDeps(deps: AttachDeps | undefined): PlanSeedDeps {
     readScopes: deps?.readScopes ?? base.readScopes,
     readPromotePages: deps?.readPromotePages ?? base.readPromotePages,
     playbookShare: deps?.playbookShare ?? base.playbookShare,
+    readAudienceStatus: deps?.readAudienceStatus ?? base.readAudienceStatus,
   }
 }
 
