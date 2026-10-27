@@ -1,4 +1,4 @@
-import type { DiagnosticDimension, PrescriptionIntake } from '@/types/diagnostic'
+import type { ClientKind, DiagnosticDimension, PrescriptionIntake } from '@/types/diagnostic'
 import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
 import { followPrescriptionJob, type FollowHandlers, type FollowResult } from './follow-job'
 
@@ -11,6 +11,9 @@ export async function requestGenerate(input: {
   urgency: PrescriptionIntake['timeline_urgency']
   dimensions: DiagnosticDimension[]
   goalId: string | null
+  /** 缺省 = 不在请求里写客户类型，服务端按客户资料。 */
+  clientKind?: ClientKind
+  weeklyShoot?: number | null
   mode: 'new' | 'supplement' | 'revise'
   priorId: string | null
   handlers?: FollowHandlers
@@ -29,6 +32,8 @@ export async function requestGenerate(input: {
     budget_currency: fields.budget_currency,
     priority_dimensions: input.dimensions,
     notes: null,
+    ...(input.clientKind ? { client_kind: input.clientKind } : {}),
+    ...(input.clientKind === 'personal_ip' ? { weekly_shoot_count: input.weeklyShoot ?? null } : {}),
   }
   const res = await fetchImpl(`/api/clients/${input.clientId}/prescription/generate`, {
     method: 'POST',

@@ -122,6 +122,27 @@ describe('prescription launch check', () => {
     expect(line).toContain('线索 3 条，目标 10 条')
   })
 
+  it('reads 对话数 and 看完数 targets so a build-audience ad is not called a miss on leads', () => {
+    const personalKpis: KpiRef[] = [
+      { metric: '私信对话数', target: 10, unit: '个' },
+      { metric: '看完数', target: 10, unit: '次' },
+    ]
+    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', series(), personalKpis)
+    expect(line).toContain('达标')
+    expect(line).toContain('对话数 12 个，目标 10 个')
+    expect(line).toContain('看完数 12 次，目标 10 次')
+    expect(line).not.toContain('认不出来')
+  })
+
+  it('says 没达标 when 对话数 is under target', () => {
+    const line = sentence(
+      '2026-11-02T00:00:00.000Z', '第 7 天', series({ results: 3 }),
+      [{ metric: '对话数', target: 10, unit: '个' }],
+    )
+    expect(line).toContain('没达标')
+    expect(line).toContain('对话数 3 个，目标 10 个')
+  })
+
   it('does not treat a null spend as zero', () => {
     const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', series({ spend: null }))
     expect(line).toContain('不知道')

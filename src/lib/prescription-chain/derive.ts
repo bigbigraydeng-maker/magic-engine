@@ -51,6 +51,9 @@ function derivePrescribe(facts: ChainFacts): ChainStep {
     return chainStep('prescribe', 'blocked', '这份处方已经被新版本换掉了。')
   }
   if (!rx.contentPresent) return chainStep('prescribe', 'active', '处方正文还没写出来。')
+  if (rx.adPlayCount < 1 && rx.intake?.personalIp) {
+    return chainStep('prescribe', 'done', '这份以内容为主，没有广告打法。')
+  }
   if (rx.adPlayCount < 1) return chainStep('prescribe', 'blocked', '处方里还没有结构化的广告打法。')
   return chainStep('prescribe', 'done', '处方已经带上广告打法。')
 }

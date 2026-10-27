@@ -7,6 +7,9 @@ const NZ = 'Pacific/Auckland'
 const HOUR_MS = 3_600_000
 const LEADS = new Set(['线索', 'lead', 'leads', 'leads_count'])
 const COSTS = new Set(['成本', 'cpl', 'cost'])
+// 个人 IP：攒人（看完）和私信开聊广告，结果列就是对话数 / 看完数，按数量对照目标。
+const CONVERSATIONS = new Set(['对话数', '私信对话数', 'conversations', 'dm_conversations'])
+const VIEWS = new Set(['看完数', '视频看完数', 'thruplays', 'video_views'])
 
 const HOURS = [
   { kpiMetric: 'launch_check_24h', label: '24 小时', hours: 24 },
@@ -422,6 +425,8 @@ function pushReadable(
   for (const kpi of kpis) {
     const kind = metricKind(kpi.metric)
     if (kind === 'leads') pushLead(kpi, leads, parts, comparisons)
+    else if (kind === 'conversations') pushCount(kpi, '对话数', leads, parts, comparisons)
+    else if (kind === 'views') pushCount(kpi, '看完数', leads, parts, comparisons)
     else if (kind === 'cost') pushCost(kpi, leads, spend, parts, comparisons)
   }
 }
@@ -447,6 +452,25 @@ function pushLead(kpi: KpiRef, leads: number | null, parts: string[], comparison
   }
   comparisons.push(leads >= kpi.target)
   parts.push(pairText('线索', leads, kpi.target, kpi.unit))
+}
+
+function pushCount(
+  kpi: KpiRef,
+  label: string,
+  count: number | null,
+  parts: string[],
+  comparisons: boolean[],
+): void {
+  if (kpi.target === null) {
+    parts.push(`「${kpi.metric}」没有写下目标。`)
+    return
+  }
+  if (count === null) {
+    parts.push(`有几天的${label}是空的，不能当成 0。`)
+    return
+  }
+  comparisons.push(count >= kpi.target)
+  parts.push(pairText(label, count, kpi.target, kpi.unit))
 }
 
 function pushCost(
@@ -482,9 +506,11 @@ function pushUnrecognized(kpi: KpiRef, parts: string[]): void {
   parts.push(`有一个指标认不出来：${kpi.metric}。`)
 }
 
-function metricKind(metric: string): 'leads' | 'cost' | 'other' {
+function metricKind(metric: string): 'leads' | 'cost' | 'conversations' | 'views' | 'other' {
   const key = metric.trim().toLowerCase()
   if (LEADS.has(key)) return 'leads'
+  if (CONVERSATIONS.has(key)) return 'conversations'
+  if (VIEWS.has(key)) return 'views'
   if (COSTS.has(key)) return 'cost'
   return 'other'
 }
