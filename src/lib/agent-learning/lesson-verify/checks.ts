@@ -2,7 +2,7 @@
  * SEO/GEO 只读检查：只回答"这个站点现在符合不符合这条经验"，
  * 不证明"照做就会变好"。不调模型、不写库。
  */
-import { safeFetchText } from '@/lib/net/safe-fetch'
+import { safeFetchText, type SafeFetchTextResponse } from '@/lib/net/safe-fetch'
 import { detectAntibotChallenge } from '@/lib/site-audit/antibot-detector'
 import { extractText, extractTitle, looksLikeChallenge, MAX_PAGE_BYTES, MIN_TEXT_CHARS } from '@/lib/tools-lab/site-check/homepage'
 import { siteHost, vetUrl } from '@/lib/tools-lab/site-check/guards'
@@ -44,7 +44,7 @@ export function checkStructuredData(html: string): CheckResult {
 }
 
 /** 判定前先确认拿到的确实是所选站点的真实 HTML 页面；否则"无法检查"，不给符合/不符合。 */
-function responseProblem(res: { url: string; text: string; headers: Headers }, startHostname: string): string | null {
+function responseProblem(res: Pick<SafeFetchTextResponse, 'url' | 'text' | 'headers'>, startHostname: string): string | null {
   const final = vetUrl(res.url)
   if (!final || siteHost(final.hostname) !== siteHost(startHostname)) return '站点跳转到了别的网站，没法检查'
   if (!/text\/html|application\/xhtml\+xml/i.test(res.headers.get('content-type') || '')) {
