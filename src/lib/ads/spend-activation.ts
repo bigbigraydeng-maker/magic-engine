@@ -8,18 +8,24 @@
  *
  * Fail-closed: no session, scoped admin, domain-only admin, empty ADMIN_EMAILS,
  * or any thrown error → deny. Pausing never goes through this module.
+ *
+ * Go-live uses a separate basis, `go_live_card`. This module does not grant it.
+ * The go-live decision mints that basis only after OPC or that client's FDE
+ * clicks the confirmation card. `requireSpendActivationAuthority` stays global-admin only.
  */
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 
 export const SPEND_ACTIVATION_RECEIPT_SCHEMA = 'ads.spend_activation_receipt.v1' as const
 
-export type SpendActivationEntry = 'meta-ads/execute' | 'ad-approval'
+export type SpendActivationEntry = 'meta-ads/execute' | 'ad-approval' | 'go-live-card'
 
 export interface SpendActivationAuthority {
   readonly actorUserId: string
   readonly actorEmail: string
-  readonly basis: 'global_admin'
+  readonly basis: 'global_admin' | 'go_live_card'
+  /** Set only for `go_live_card`: the confirmation-card run that was clicked. */
+  readonly cardRunId?: string
 }
 
 export type SpendActivationAuthorityResult =
@@ -72,7 +78,8 @@ export async function requireSpendActivationAuthority(): Promise<SpendActivation
 export interface SpendActivationReceipt {
   readonly schema: typeof SPEND_ACTIVATION_RECEIPT_SCHEMA
   readonly entry: SpendActivationEntry
-  readonly basis: 'global_admin'
+  readonly basis: 'global_admin' | 'go_live_card'
+  readonly card_run_id?: string
   readonly actor_user_id: string
   readonly actor_email: string
   readonly client_id: string
@@ -89,7 +96,7 @@ export function buildSpendActivationReceipt(input: {
   readonly draftActionId?: string | null
   readonly now?: Date
 }): SpendActivationReceipt {
-  return {
+  const receipt: SpendActivationReceipt = {
     schema: SPEND_ACTIVATION_RECEIPT_SCHEMA,
     entry: input.entry,
     basis: input.authority.basis,
@@ -100,4 +107,6 @@ export function buildSpendActivationReceipt(input: {
     draft_action_id: input.draftActionId ?? null,
     authorized_at: (input.now ?? new Date()).toISOString(),
   }
+  if (!input.authority.cardRunId) return receipt
+  return { ...receipt, card_run_id: input.authority.cardRunId }
 }

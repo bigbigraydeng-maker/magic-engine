@@ -11,6 +11,8 @@ import { POST as approve } from '@/app/api/clients/[id]/marketing-plan/[planId]/
 import { PUT as savePromo } from '@/app/api/clients/[id]/marketing-plan/[planId]/promo/route'
 import { POST as execute } from '@/app/api/clients/[id]/meta-ads/execute/route'
 import { POST as writeMeta } from '@/app/api/clients/[id]/meta-ads/draft/route'
+import { POST as issuePausedDraft } from '@/app/api/clients/[id]/meta-ads/paused-draft-card/route'
+import { POST as confirmPausedDraft } from '@/app/api/clients/[id]/meta-ads/paused-draft-card/[runId]/route'
 import { PATCH as changeCap } from '@/app/api/clients/[id]/ad-strategy-config/route'
 import { GET as uploadAudience } from '@/app/api/admin/conversions/audience-export/route'
 
@@ -107,6 +109,22 @@ describe('ads-agent key on privileged routes', () => {
       run: () => writeMeta(
         jsonRequest('http://localhost/draft', 'POST', { name: 'x' }),
         { params: Promise.resolve({ id: CLIENT }) },
+      ),
+    },
+    {
+      name: 'paused_draft_card',
+      code: 'write_meta',
+      run: () => issuePausedDraft(
+        jsonRequest('http://localhost/paused-draft-card', 'POST', { name: 'x' }),
+        { params: Promise.resolve({ id: CLIENT }) },
+      ),
+    },
+    {
+      name: 'paused_draft_confirm',
+      code: 'write_meta',
+      run: () => confirmPausedDraft(
+        jsonRequest('http://localhost/paused-draft-card/run', 'POST', { resolution: 'confirm' }),
+        { params: Promise.resolve({ id: CLIENT, runId: '40000000-0000-4000-8000-000000001111' }) },
       ),
     },
   ]
