@@ -319,9 +319,18 @@ function hourPoint(
       sentence: `${spec.label}：还不知道。开投后还没满 ${spec.hours} 小时。`,
     }
   }
-  // Only whole NZ days that fully elapsed before this checkpoint's own deadline.
-  const endDay = addCalendarDays(nzCalendarDay(new Date(launchMs + spec.hours * HOUR_MS)), -1)
-  return finish(spec.kpiMetric, spec.label, judgeUpTo(endDay))
+  const deadline = launchMs + spec.hours * HOUR_MS
+  const deadlineDay = nzCalendarDay(new Date(deadline))
+  // Daily rows only prove the window when the deadline falls on an NZ midnight;
+  // otherwise part of the deadline day (before the deadline) is not covered.
+  if (nzCalendarDay(new Date(deadline - 1)) === deadlineDay) {
+    const gap: Judged = {
+      verdict: 'unknown',
+      parts: [`开投时间不在新西兰整点零点，每日数据凑不出刚好满 ${spec.hours} 小时的窗口（截止日 ${deadlineDay} 只走了一部分），不能下结论。`],
+    }
+    return finish(spec.kpiMetric, spec.label, gap)
+  }
+  return finish(spec.kpiMetric, spec.label, judgeUpTo(addCalendarDays(deadlineDay, -1)))
 }
 
 function dayPoint(

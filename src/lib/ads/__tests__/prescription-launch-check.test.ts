@@ -60,6 +60,13 @@ function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef
   return judgeLaunch({ launch: found.launch, insights, kpis: targets, now: new Date(now) })
 }
 
+// Launch exactly at NZ midnight (2026-10-26 00:00 NZDT), so 24h / 48h line up with whole days.
+const MIDNIGHT_LAUNCH = '2026-10-25T11:00:00.000Z'
+
+function judgeAtMidnight(now: string, insights: InsightRef[], targets: KpiRef[] = kpis) {
+  return judgeLaunch({ launch: launch({ authorizedAt: MIDNIGHT_LAUNCH }), insights, kpis: targets, now: new Date(now) })
+}
+
 function sentence(now: string, label: string, insights?: InsightRef[], targets?: KpiRef[]): string {
   const line = matched(now, insights, targets).checkpoints.find(point => point.sentence.startsWith(label))
   return line?.sentence ?? ''
@@ -86,8 +93,9 @@ describe('prescription launch check', () => {
   })
 
   it('says 不知道 at 24 hours when the daily rows are missing', () => {
-    const early = sentence('2026-10-27T08:40:00.000Z', '24 小时', [])
-    const later = sentence('2026-10-27T08:40:00.000Z', '48 小时', [])
+    const view = judgeAtMidnight('2026-10-27T08:40:00.000Z', [])
+    const early = view.lines[0]
+    const later = view.lines[1]
     expect(early).toContain('不知道')
     expect(early).toContain('缺 1 天的每日数据：2026-10-26')
     expect(later).toContain('还不知道')
@@ -154,7 +162,7 @@ describe('prescription launch check', () => {
     const rows = series({ spend: 20, results: 2 }, '2026-11-01')
     rows[rows.length - 1] = { insightDate: '2026-11-01', spend: 100, results: 20 }
     const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
-    const view = matched('2026-11-20T00:00:00.000Z', rows, leadsOnly)
+    const view = judgeAtMidnight('2026-11-20T00:00:00.000Z', rows, leadsOnly)
     const by = (metric: string) => view.checkpoints.find(point => point.kpiMetric === metric)
     expect(by('launch_check_24h')).toMatchObject({ verdict: 'missed' })
     expect(by('launch_check_24h')?.sentence).toContain('线索 2 条')
@@ -171,7 +179,25 @@ describe('prescription launch check', () => {
     expect(day7?.sentence).toContain('缺 6 天的每日数据：2026-10-27')
     expect(day7?.sentence).toContain('2026-11-01')
     expect(day7?.sentence).not.toContain('达标')
-    expect(view.checkpoints.find(point => point.kpiMetric === 'launch_check_24h')?.verdict).toBe('met')
+    expect(view.checkpoints.find(point => point.kpiMetric === 'launch_check_24h')?.verdict).toBe('unknown')
+  })
+
+  it('says 不知道 for 24h / 48h when launch is not at NZ midnight, even with leads above target on later days', () => {
+    // Launch 2026-10-26 20:40 NZDT; 24h deadline is 2026-10-27 20:40 NZDT.
+    const rows: InsightRef[] = [
+      { insightDate: '2026-10-26', spend: 20, results: 2 },
+      { insightDate: '2026-10-27', spend: 100, results: 20 },
+      { insightDate: '2026-10-28', spend: 0, results: 0 },
+    ]
+    const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
+    const view = matched('2026-10-29T00:00:00.000Z', rows, leadsOnly)
+    const by = (metric: string) => view.checkpoints.find(point => point.kpiMetric === metric)
+    for (const metric of ['launch_check_24h', 'launch_check_48h']) {
+      expect(by(metric)).toMatchObject({ due: true, verdict: 'unknown' })
+      expect(by(metric)?.sentence).toContain('整点零点')
+      expect(by(metric)?.sentence).not.toContain('没达标')
+    }
+    expect(planOutcomeWrites(view.checkpoints, []).every(write => write.unit === 'unknown')).toBe(true)
   })
 
   it('does not call a window 达标 when the last day is not synced yet', () => {

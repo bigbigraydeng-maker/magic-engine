@@ -12,7 +12,7 @@ function prescription(): StoredPrescription {
     clientId: 'client-1',
     goalId: 'goal-1',
     status: 'approved',
-    approvedAt: '2026-10-26T07:20:00.000Z',
+    approvedAt: '2026-10-25T10:20:00.000Z',
     kpis: [
       { metric: '线索', target: 10, unit: '条' },
       { metric: '成本', target: 12, unit: 'NZD' },
@@ -27,7 +27,7 @@ function action(): ActionRow {
     payload: {
       status: 'active',
       campaignId: 'camp-1',
-      activation: { status: 'executed', authorized_at: '2026-10-26T07:40:00.000Z' },
+      activation: { status: 'executed', authorized_at: '2026-10-25T11:00:00.000Z' },
     },
   }
 }
@@ -38,7 +38,7 @@ function store(over: Partial<LaunchCheckStore> = {}) {
   const db: LaunchCheckStore = {
     listClientActions: async () => [action()],
     listAllActions: async () => ({ rows: [action()], partial: false }),
-    listApprovedPlans: async () => [{ goalId: 'goal-1', approvedAt: '2026-10-26T07:10:00.000Z' }],
+    listApprovedPlans: async () => [{ goalId: 'goal-1', approvedAt: '2026-10-25T10:10:00.000Z' }],
     listApprovedPrescriptions: async (clientId: string) => [prescription()].filter(item => item.clientId === clientId),
     // One row per NZ day from launch day (10-26) to the day before NOW's day-7 deadline.
     listInsights: async () => ['26', '27', '28', '29', '30', '31'].map((d, i) => ({
