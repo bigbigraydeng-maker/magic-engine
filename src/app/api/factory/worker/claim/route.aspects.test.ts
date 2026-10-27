@@ -84,6 +84,23 @@ describe('POST /api/factory/worker/claim aspect uploads', () => {
     expect(body.uploads.video.path).toBe(`renders/${CLIENT}/${WO}/final.mp4`)
   })
 
+  it('returns aspect_error with the claimed id when an extra signature fails', async () => {
+    claimed({ remotion: { template: 'list', props: {}, aspects: ['4:5', '16:9'] } })
+    signMock.mockImplementation(async (path: string) => {
+      if (String(path).endsWith('final-16x9.mp4')) {
+        return { data: null, error: { message: 'bucket down' } }
+      }
+      return { data: { signedUrl: `https://signed.example/${path}`, token: 'tok' }, error: null }
+    })
+    const response = await POST(claimRequest({ worker_id: 'mac-a' }))
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.claimed).toBe(true)
+    expect(body.work_order_id).toBe(WO)
+    expect(body.aspect_error).toContain('16:9')
+    expect(body.aspect_uploads).toBeUndefined()
+  })
+
   it('returns the aspect error on an already-claimed order instead of signing a bad path', async () => {
     claimed({ remotion: { template: 'list', props: {}, aspects: ['21:9'] } })
     const response = await POST(claimRequest({ worker_id: 'mac-a' }))

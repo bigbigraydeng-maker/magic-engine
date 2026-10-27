@@ -213,10 +213,11 @@ export async function POST(req: NextRequest) {
     aspectUploads = []
     for (const { spec, u, uErr } of signedAspects) {
       if (uErr || !u) {
-        return NextResponse.json(
-          { error: `signed upload url failed (${spec.aspect}): ${uErr?.message ?? 'unknown'}` },
-          { status: 500 },
-        )
+        // The row is already claimed. Return the id plus aspect_error so the worker
+        // fails this order, instead of a bare 500 that leaves it claimed until the sweeper.
+        aspectError = `额外画幅 ${spec.aspect} 的上传地址没签出来：${uErr?.message ?? 'unknown'}`
+        aspectUploads = undefined
+        break
       }
       aspectUploads.push({
         aspect: spec.aspect,

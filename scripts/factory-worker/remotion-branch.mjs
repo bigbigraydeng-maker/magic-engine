@@ -13,7 +13,7 @@ import {
   sha256File,
   usedWindowFromProps,
 } from './music-vocal-gate.mjs'
-import { ASPECTS, planWorkOrderAspects } from './engines/remotion/src/video-aspects.ts'
+import { MAX_UPLOAD_BYTES, oversizeUploadMessage } from './engines/remotion/upload-size-gate.mjs'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
 export const REMOTION_ENGINE_DIR = join(import.meta.dirname, 'engines', 'remotion')
@@ -663,20 +663,30 @@ function assertRemotionBrief(wo, deps) {
   return remotion
 }
 
+// Loaded only after the Node health check. A top-level .ts import breaks Node 20 workers
+// that never render Remotion (ERR_UNKNOWN_FILE_EXTENSION).
+async function loadAspectContract(engineDir = REMOTION_ENGINE_DIR) {
+  return import(pathToFileURL(join(engineDir, 'src', 'video-aspects.ts')).href)
+}
+
+function assertUploadSize(size, label) {
+  if (size > MAX_UPLOAD_BYTES) throw new RemotionOrderError(oversizeUploadMessage(size, label))
+}
+
 // Extra ratios need a claim-time signed URL whose file name matches the aspect.
-function aspectUploadSlots(wo, extras) {
+function aspectUploadSlots(wo, extras, aspects) {
   const rows = Array.isArray(wo.aspect_uploads) ? wo.aspect_uploads : []
   const byAspect = new Map(rows.filter((row) => row && typeof row.aspect === 'string').map((row) => [row.aspect, row]))
   const slots = []
   for (const id of extras) {
     const row = byAspect.get(id)
-    const fileName = ASPECTS[id].fileName
+    const fileName = aspects[id].fileName
     const path = typeof row?.path === 'string' ? row.path : ''
     const signedUrl = typeof row?.signed_url === 'string' ? row.signed_url : ''
     if (!signedUrl || !path.endsWith(`/${fileName}`) || path.includes('..')) {
       throw new RemotionOrderError(`工单要额外画幅 ${id}，但领单响应里没有可用的上传地址`)
     }
-    slots.push({ aspect: id, path, signedUrl, width: ASPECTS[id].width, height: ASPECTS[id].height, fileName })
+    slots.push({ aspect: id, path, signedUrl, width: aspects[id].width, height: aspects[id].height, fileName })
   }
   return slots
 }
@@ -717,9 +727,14 @@ async function renderExtraAspects({ slots, renderFn, baseArgs, outDir, hb, deps,
   const delivered = []
   for (const slot of slots) {
     const outFile = join(outDir, slot.fileName)
+    // Refresh the claim before each extra file. The sweeper drops a claim 10 minutes
+    // after the last heartbeat; one file may already have used most of that window.
+    await hb.pulse()
+    hb.assertAlive()
     await renderOneFile({ renderFn, args: { ...baseArgs, outFile, aspect: slot.aspect }, hb, deps, timeoutSec })
     const stat = statSync(outFile)
     if (!stat.isFile() || stat.size <= 0) throw new RemotionOrderError(`成片体检没过：${slot.aspect} 渲染产物不存在或为空`)
+    assertUploadSize(stat.size, `${slot.aspect} 成片`)
     assertAspectFile(deps.probeMediaEvidenceFn(outFile, srtText), slot, expectedSeconds, musicFile)
     delivered.push({ slot, outFile })
   }
@@ -727,11 +742,13 @@ async function renderExtraAspects({ slots, renderFn, baseArgs, outDir, hb, deps,
 }
 
 // Poll the server while rendering; abort the render on abort/409.
+// The interval stays on for the whole order, including extra aspects. pulse()
+// refreshes the 10-minute sweeper lease at each file boundary.
 function startHeartbeats({ woId, heartbeatFn, intervalMs, log }) {
   const ac = new AbortController()
   let fatal = null
   let running = false
-  const timer = setInterval(async () => {
+  const beat = async () => {
     if (running) return
     running = true
     let t
@@ -755,13 +772,15 @@ function startHeartbeats({ woId, heartbeatFn, intervalMs, log }) {
       clearTimeout(t)
       running = false
     }
-  }, intervalMs)
+  }
+  const timer = setInterval(() => { void beat() }, intervalMs)
   return {
     signal: ac.signal,
     assertAlive: () => {
       if (fatal) throw fatal
     },
     stop: () => clearInterval(timer),
+    pulse: beat,
   }
 }
 
@@ -776,14 +795,22 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
   } = deps
 
   const remotion = assertRemotionBrief(wo, deps)
-  const aspectPlanned = planWorkOrderAspects(remotion.aspects)
-  if (!aspectPlanned.ok) throw new RemotionOrderError(aspectPlanned.message)
-  const extraSlots = aspectPlanned.plan.extras.length > 0 ? aspectUploadSlots(wo, aspectPlanned.plan.extras) : []
+  // Claim already took the row. A bad list or a failed extra-file signature is returned
+  // on the claim so this worker can fail the order instead of leaving it claimed.
+  if (typeof wo.aspect_error === 'string' && wo.aspect_error.length > 0) {
+    throw new RemotionOrderError(wo.aspect_error)
+  }
 
   const problems = healthFn()
   if (problems.length > 0) {
     throw new RemotionOrderError('出片机还没装好 Remotion：' + problems.join('；'))
   }
+  const aspectContract = await loadAspectContract()
+  const aspectPlanned = aspectContract.planWorkOrderAspects(remotion.aspects)
+  if (!aspectPlanned.ok) throw new RemotionOrderError(aspectPlanned.message)
+  const extraSlots = aspectPlanned.plan.extras.length > 0
+    ? aspectUploadSlots(wo, aspectPlanned.plan.extras, aspectContract.ASPECTS)
+    : []
 
   const eng = await loadEngineFn()
   const template = remotion.template
@@ -897,6 +924,8 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     writeFileSync(propsFile, JSON.stringify(props, null, 2))
     const finalPath = join(outDir, 'final.mp4')
 
+    await hb.pulse()
+    hb.assertAlive()
     const startedAt = Date.now()
     let attempts = 0
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -930,6 +959,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     if (!stat.isFile() || stat.size <= 0) {
       throw new RemotionOrderError('成片体检没过：渲染产物不存在或为空')
     }
+    assertUploadSize(stat.size, '成片')
     // Every known template is listed explicitly; an unknown one is refused instead of falling through to montage.
     const textBuilders = {
       list: [() => buildRemotionSrt(props, timing, eng.FPS), () => buildRemotionCaption(props)],
@@ -942,6 +972,10 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     if (builders === null) throw new RemotionOrderError(`出片机没有「${String(template).slice(0, 40)}」模板的文字复扫接线，拒绝出片`)
     const srtText = builders[0]()
     const caption = builders[1]()
+    const expectedSeconds = totalFrames / eng.FPS
+    const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
+    assertAspectFile(evidence, { aspect: '9:16', width: 1080, height: 1920 }, expectedSeconds, props.musicFile)
+    hb.assertAlive()
     const extraRendered = extraSlots.length === 0 ? [] : await renderExtraAspects({
       slots: extraSlots,
       renderFn,
@@ -951,24 +985,9 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
       deps,
       timeoutSec,
       srtText,
-      expectedSeconds: totalFrames / eng.FPS,
+      expectedSeconds,
       musicFile: props.musicFile,
     })
-    const evidence = deps.probeMediaEvidenceFn(finalPath, srtText)
-    const expected = totalFrames / eng.FPS
-    if (evidence.width !== 1080 || evidence.height !== 1920) {
-      if (!Number.isInteger(evidence.width)) {
-        throw new RemotionOrderError('成片体检没过：没测到分辨率（出片机的 ffprobe 可能没装好）')
-      }
-      throw new RemotionOrderError(`成片体检没过：分辨率是 ${evidence.width}x${evidence.height}，应为 1080x1920`)
-    }
-    if (!Number.isFinite(evidence.duration_seconds) || Math.abs(evidence.duration_seconds - expected) > 0.5) {
-      throw new RemotionOrderError(`成片体检没过：时长 ${evidence.duration_seconds}s 与预期 ${expected.toFixed(2)}s 不符`)
-    }
-    if (props.musicFile !== null && evidence.audio_stream_present !== true) {
-      throw new RemotionOrderError('成片体检没过：工单配了音乐，但成片里没有音轨')
-    }
-    hb.assertAlive()
 
     const segmentsJson = Buffer.from(
       JSON.stringify({

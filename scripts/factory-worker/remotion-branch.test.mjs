@@ -1,7 +1,7 @@
 // Vitest for remotion-branch.mjs. All IO is faked through `deps`; real temp dirs are used only for files.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, existsSync, realpathSync, truncateSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { RemotionOrderError, resolveEngine, checkRemotionHealth, processRemotionOrder, runRemotionRender, copyWithinRoot, assertMontageTextVisible, REMOTION_ENGINE_DIR, loadRemotionEngine, buildRemotionText, defaultMusicVocalGate, MUSIC_VOCAL_REGISTRY_PATH, buildAtmosphereText, buildAtmosphereCaption, buildAtmosphereSrt, assertAtmosphereTextVisible, assertAtmosphereClipUsable, defaultProbeClip } from './remotion-branch.mjs'
@@ -1108,6 +1108,93 @@ describe('extra aspect ratios', () => {
     expect(missErr.message).toContain('4:5')
     expect(missing.renderFn).not.toHaveBeenCalled()
     expect(missing.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('does not import the TypeScript aspect contract at load time', () => {
+    const src = readFileSync(join(process.cwd(), 'scripts/factory-worker/remotion-branch.mjs'), 'utf8')
+    expect(src).not.toMatch(/^import\s[\s\S]*?from\s+['"][^'"]+\.ts['"]/m)
+  })
+
+  it('fails the claimed order when the claim already reported aspect_error', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env)
+    const wo = makeWo()
+    wo.aspect_error = '不认识的画幅 21:9'
+    const err = await errOf(run(env, deps, wo))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('21:9')
+    expect(deps.renderFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('checks the primary file before rendering extras', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => ({
+        width: String(file).endsWith('final.mp4') ? 720 : 1080,
+        height: 1920,
+        duration_seconds: 12,
+        audio_stream_present: true,
+      })),
+    })
+    const err = await errOf(run(env, deps, withAspects(['4:5', '16:9'])))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('1080x1920')
+    expect(deps.renderFn).toHaveBeenCalledTimes(1)
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses every aspect over 48 MB before any upload', async () => {
+    const env = makeEnv()
+    const primary = makeDeps(env, {
+      renderFn: vi.fn(async ({ outFile }) => {
+        writeFileSync(outFile, '')
+        truncateSync(outFile, 48_000_001)
+        return { code: 0, stderrTail: '' }
+      }),
+    })
+    const primaryErr = await errOf(run(env, primary, withAspects(['16:9'])))
+    expect(primaryErr).toBeInstanceOf(RemotionOrderError)
+    expect(primaryErr.retryable).toBe(false)
+    expect(primaryErr.message).toMatch(/成片 48\.0 MB/)
+    expect(primaryErr.message).toMatch(/超过存储上限/)
+    expect(primary.renderFn).toHaveBeenCalledTimes(1)
+    expect(primary.uploadSignedFn).not.toHaveBeenCalled()
+
+    const extra = makeDeps(env, {
+      renderFn: vi.fn(async ({ outFile, aspect }) => {
+        writeFileSync(outFile, 'video-bytes')
+        if (aspect === '16:9') truncateSync(outFile, 48_000_001)
+        return { code: 0, stderrTail: '' }
+      }),
+    })
+    const extraErr = await errOf(run(env, extra, withAspects(['16:9'])))
+    expect(extraErr).toBeInstanceOf(RemotionOrderError)
+    expect(extraErr.message).toMatch(/16:9 成片 48\.0 MB/)
+    expect(extra.renderFn).toHaveBeenCalledTimes(2)
+    expect(extra.uploadSignedFn).not.toHaveBeenCalled()
+    expect(extra.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('keeps the heartbeat lease alive across extra aspect renders', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => {
+        const name = String(file).split('/').pop()
+        const size = SIZES[name]
+        return { ...size, duration_seconds: 12, audio_stream_present: true }
+      }),
+    })
+    deps.renderFn = vi.fn(async ({ outFile, aspect }) => {
+      const before = deps.heartbeatFn.mock.calls.length
+      await new Promise((r) => setTimeout(r, 40))
+      if (aspect) expect(deps.heartbeatFn.mock.calls.length).toBeGreaterThan(before)
+      writeFileSync(outFile, 'video-bytes')
+      return { code: 0, stderrTail: '' }
+    })
+    const res = await run(env, deps, withAspects(['4:5']))
+    expect(res.ok).toBe(true)
+    expect(deps.heartbeatFn).toHaveBeenCalled()
   })
 
   it('does not upload when an extra canvas is the wrong size', async () => {
