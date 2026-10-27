@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { ConfirmationCard } from '@/components/confirmation-card/ConfirmationCard'
+import { pausedDraftClickUrl } from '@/lib/ads-strategy/paused-draft-copy'
 
 interface CardPayload {
   readonly runId: string
@@ -73,12 +74,8 @@ async function readMessage(res: Response): Promise<string> {
   return '没有点成。请刷新后再看。'
 }
 
-function decisionUrl(clientId: string, runId: string): string {
-  return `/api/clients/${encodeURIComponent(clientId)}/confirmation-cards/${encodeURIComponent(runId)}/decision`
-}
-
 async function postDecision(clientId: string, view: CardPayload, resolution: 'confirm' | 'decline'): Promise<CardPayload | string> {
-  const res = await fetch(decisionUrl(clientId, view.runId), {
+  const res = await fetch(pausedDraftClickUrl(clientId, view.runId, view.what), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
