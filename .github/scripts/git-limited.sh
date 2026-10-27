@@ -24,6 +24,18 @@ while IFS= read -r _git_limited_name; do
   esac
 done < <(compgen -e)
 
+# Fixed keys that name a command. These beat .git/config. Filter names are
+# open-ended, so those are refused after Git parses the config instead.
+export GIT_CONFIG_COUNT=4
+export GIT_CONFIG_KEY_0=core.fsmonitor
+export GIT_CONFIG_VALUE_0=false
+export GIT_CONFIG_KEY_1=core.hooksPath
+export GIT_CONFIG_VALUE_1=/dev/null
+export GIT_CONFIG_KEY_2=core.attributesFile
+export GIT_CONFIG_VALUE_2=/dev/null
+export GIT_CONFIG_KEY_3=credential.helper
+export GIT_CONFIG_VALUE_3=
+
 refuse() {
   echo "git-limited: $*" >&2
   exit 2
@@ -56,29 +68,79 @@ read_origin() {
   printf '%s' "$url"
 }
 
-# Local config can still name commands (filters, insteadOf, upload-pack).
-# Overrides below cover the fixed keys. This refuses the open-ended ones.
+# Git parsed this key/value. Includes are refused instead of followed: an
+# include path can block, and the included file can change before exec.
+config_entry_unsafe() {
+  local key="${1,,}" value="$2"
+  case "$value" in
+    '!'*|*'ext::'*) return 0 ;;
+  esac
+  case "$key" in
+    include.path|includeif.*|alias.*|insteadof|*.insteadof) return 0 ;;
+    *.smudge|*.clean|*.process|*.textconv|*.driver|*.external|*.command) return 0 ;;
+    *.sshcommand|*.fsmonitor|*.gitproxy|*.uploadpack|*.receivepack) return 0 ;;
+  esac
+  return 1
+}
+
+# `git config --file --list` understands `[filter.evil] smudge = ...`.
+# A line-start regex does not. Empty output is safe only when git exits 0.
+parsed_config_unsafe() {
+  local file="$1" line key value out
+  out="$(mktemp)"
+  if ! /usr/bin/git config --file "$file" --list >"$out" 2>/dev/null; then
+    rm -f "$out"
+    return 0
+  fi
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    key="${line%%=*}"
+    value="${line#*=}"
+    if config_entry_unsafe "$key" "$value"; then
+      rm -f "$out"
+      return 0
+    fi
+  done <"$out"
+  rm -f "$out"
+  return 1
+}
+
+# filter.<name> cannot be wildcarded away. A filter= attribute would still
+# run whatever smudge the config names, including one we failed to see.
+attributes_request_filter() {
+  local path
+  if [[ -L .git/info/attributes ]]; then
+    return 0
+  fi
+  if [[ -f .git/info/attributes ]] && grep -E -q '(^|[[:space:]])filter=' .git/info/attributes; then
+    return 0
+  fi
+  while IFS= read -r -d '' path; do
+    if [[ -L "$path" ]] || grep -E -q '(^|[[:space:]])filter=' "$path"; then
+      return 0
+    fi
+  done < <(find . -path './.git' -prune -o -name .gitattributes -print0)
+  return 1
+}
+
+# Local config can still name commands. Also read .git/config.worktree:
+# extensions.worktreeConfig makes Git load it in addition to .git/config.
 assert_config_safe() {
-  local cfg=".git/config"
+  local cfg=".git/config" wt=".git/config.worktree"
   if [[ -L .git || ! -d .git || -L "$cfg" || ! -f "$cfg" ]]; then
     refuse "refusing to run without a normal .git directory"
   fi
-  if grep -E -i -q \
-    -e '^[[:space:]]*\[include' \
-    -e 'insteadof' \
-    -e 'sshcommand' \
-    -e 'fsmonitor' \
-    -e 'gitproxy' \
-    -e 'uploadpack' \
-    -e 'receivepack' \
-    -e '^[[:space:]]*\[filter[[:space:]]' \
-    -e '^[[:space:]]*(smudge|clean|process|textconv|driver|external|command)[[:space:]]*=' \
-    -e '=[[:space:]]*!' \
-    -e 'ext::' \
-    -e '^[[:space:]]*\[alias[[:space:]]*\]' \
-    -e '^[[:space:]]*alias\.' \
-    "$cfg"
-  then
+  if [[ -L "$wt" ]]; then
+    refuse "refusing unsafe git config"
+  fi
+  if parsed_config_unsafe "$cfg"; then
+    refuse "refusing unsafe git config"
+  fi
+  if [[ -e "$wt" ]]; then
+    if [[ ! -f "$wt" ]] || parsed_config_unsafe "$wt"; then
+      refuse "refusing unsafe git config"
+    fi
+  fi
+  if attributes_request_filter; then
     refuse "refusing unsafe git config"
   fi
 }
@@ -109,8 +171,9 @@ git_exec() {
     -c protocol.file.allow=never \
     -c protocol.ssh.allow=never \
     -c core.sshCommand=/usr/bin/ssh \
-    -c core.fsmonitor= \
+    -c core.fsmonitor=false \
     -c core.hooksPath=/dev/null \
+    -c core.attributesFile=/dev/null \
     -c core.pager=cat \
     -c core.editor=true \
     -c sequence.editor=true \

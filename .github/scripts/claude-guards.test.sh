@@ -46,7 +46,16 @@ printf '%s\\0' "\$@" > "$argv"
 echo \$(( \$(cat "$calls") + 1 )) > "$calls"
 exit 0
 EOF
-chmod 755 "$mock_bin/gh" "$mock_bin/git"
+cat > "$mock_bin/gh-with-status" << EOF
+#!/bin/bash
+set -euo pipefail
+printf '%s\\0' "\$@" > "$argv"
+echo \$(( \$(cat "$calls") + 1 )) > "$calls"
+env > "$tmp/gh-env"
+/usr/bin/git status --porcelain >/dev/null
+exit 0
+EOF
+chmod 755 "$mock_bin/gh" "$mock_bin/git" "$mock_bin/gh-with-status"
 
 install_copy "$root/.github/scripts/gh-pr-create-draft.sh" "$tmp/gh-pr-create-draft" \
   -e "s#/opt/claude-guards#$guard#g" \
@@ -56,6 +65,9 @@ install_copy "$root/.github/scripts/git-limited.sh" "$tmp/git-limited" \
 install_copy "$root/.github/scripts/git-limited.sh" "$tmp/git-limited-mock" \
   -e "s#/opt/claude-guards#$guard#g" \
   -e "s#/usr/bin/git#$mock_bin/git#g"
+install_copy "$root/.github/scripts/gh-pr-create-draft.sh" "$tmp/gh-pr-create-draft-status" \
+  -e "s#/opt/claude-guards#$guard#g" \
+  -e "s#/usr/bin/gh#$mock_bin/gh-with-status#g"
 
 reset_mock() {
   printf '0\n' > "$calls"
@@ -112,6 +124,30 @@ simulate_recorded_draft() {
     esac
   done
   printf '%s' "$draft"
+}
+
+expect_git_refused() {
+  local name="$1"
+  shift
+  rm -f "$marker"
+  set +e
+  ( cd "$repo" && "$@" ) >"$tmp/out" 2>"$tmp/err"
+  local status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    echo "$name: expected refusal" >&2
+    cat "$tmp/err" >&2
+    exit 1
+  fi
+  if [[ -e "$marker" ]]; then
+    echo "$name: command ran" >&2
+    exit 1
+  fi
+  if ! grep -q 'refusing unsafe git config' "$tmp/err"; then
+    echo "$name: git ran or failed for another reason" >&2
+    cat "$tmp/err" >&2
+    exit 1
+  fi
 }
 
 expect_reject() {
@@ -281,7 +317,7 @@ git -C "$repo" config --unset diff.evil.command
 
 reset_mock
 ( cd "$repo" && "$git_mock" fetch --prune main )
-assert_eq "$(calls_count)" "1" "safe fetch calls git once"
+assert_eq "$(calls_count)" "2" "safe fetch lists config, then calls git once"
 python3 - "$argv" "$guard/origin-url" << 'PY'
 import pathlib, sys
 argv = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
@@ -293,8 +329,9 @@ need = [
     "protocol.file.allow=never",
     "protocol.ssh.allow=never",
     "core.sshCommand=/usr/bin/ssh",
-    "core.fsmonitor=",
+    "core.fsmonitor=false",
     "core.hooksPath=/dev/null",
+    "core.attributesFile=/dev/null",
     "credential.helper=",
     "alias.fetch=",
     "core.askPass=/usr/bin/true",
@@ -335,5 +372,47 @@ if grep -E -q 'Bash\(git (fetch|checkout|switch|cherry-pick):' "$root/.github/wo
   echo "raw git prefix is still allowed" >&2
   exit 1
 fi
+
+# Old line-start regex misses `[filter.evil] smudge = ...` on one line.
+# No attributes file: only Git's parsed keys can see this smudge command.
+config_backup="$tmp/config.bak"
+cp "$repo/.git/config" "$config_backup"
+printf '\n[filter.evil] smudge = touch %s\n' "$marker" >> "$repo/.git/config"
+expect_git_refused "one-line filter key" "$git_real" checkout a.txt
+printf 'a.txt filter=evil\n' > "$repo/.git/info/attributes"
+rm -f "$repo/a.txt"
+expect_git_refused "one-line filter smudge" "$git_real" checkout a.txt
+cp "$config_backup" "$repo/.git/config"
+rm -f "$repo/.git/info/attributes" "$marker"
+git -C "$repo" checkout -q -- a.txt
+
+# .git/config only enables the worktree file. The smudge lives in that file,
+# with no attributes, so refusing means the worktree file was parsed.
+git -C "$repo" config extensions.worktreeConfig true
+printf '[filter "evil"]\n\tsmudge = touch %s\n' "$marker" > "$repo/.git/config.worktree"
+expect_git_refused "worktree filter key" "$git_real" checkout a.txt
+printf 'a.txt filter=evil\n' > "$repo/.git/info/attributes"
+rm -f "$repo/a.txt"
+expect_git_refused "worktree filter smudge" "$git_real" checkout a.txt
+cp "$config_backup" "$repo/.git/config"
+rm -f "$repo/.git/config.worktree" "$repo/.git/info/attributes" "$marker"
+git -C "$repo" checkout -q -- a.txt
+
+# gh pr create runs git status, which honors core.fsmonitor unless the
+# wrapper isolates git's config for that child.
+git -C "$repo" config core.fsmonitor "touch $marker"
+rm -f "$marker"
+reset_mock
+( cd "$repo" && "$tmp/gh-pr-create-draft-status" --title Hello --body text )
+assert_eq "$(calls_count)" "1" "fsmonitor still lets gh start"
+if [[ -e "$marker" ]]; then
+  echo "gh git status ran fsmonitor" >&2
+  exit 1
+fi
+grep -q '^GIT_CONFIG_NOSYSTEM=1$' "$tmp/gh-env"
+grep -q '^GIT_CONFIG_GLOBAL=/dev/null$' "$tmp/gh-env"
+grep -q '^GIT_CONFIG_KEY_0=core.fsmonitor$' "$tmp/gh-env"
+grep -q '^GIT_CONFIG_VALUE_0=false$' "$tmp/gh-env"
+git -C "$repo" config --unset core.fsmonitor
 
 echo "claude-guards tests passed"

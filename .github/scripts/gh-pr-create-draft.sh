@@ -27,6 +27,45 @@ refuse() {
   exit 2
 }
 
+# gh runs git status and other git reads. Those child processes do not get
+# our -c flags, so pin the fixed command keys here. Caller-supplied git
+# config in the environment is cleared first.
+isolate_git_env() {
+  unset GIT_SSH_COMMAND GIT_EXEC_PATH GIT_DIR GIT_WORK_TREE GIT_NAMESPACE \
+    GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_CONFIG_SYSTEM \
+    GIT_ALLOW_PROTOCOL GIT_PROTOCOL_FROM_USER \
+    GIT_EXTERNAL_DIFF GIT_EDITOR GIT_SEQUENCE_EDITOR \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_OBJECT_DIRECTORY GIT_INDEX_FILE
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      GIT_CONFIG_KEY_*|GIT_CONFIG_VALUE_*) unset "$name" ;;
+    esac
+  done < <(compgen -e)
+  export GIT_CONFIG_NOSYSTEM=1
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_ATTR_NOSYSTEM=1
+  export GIT_CONFIG_COUNT=9
+  export GIT_CONFIG_KEY_0=core.fsmonitor
+  export GIT_CONFIG_VALUE_0=false
+  export GIT_CONFIG_KEY_1=core.hooksPath
+  export GIT_CONFIG_VALUE_1=/dev/null
+  export GIT_CONFIG_KEY_2=core.sshCommand
+  export GIT_CONFIG_VALUE_2=/usr/bin/ssh
+  export GIT_CONFIG_KEY_3=protocol.ext.allow
+  export GIT_CONFIG_VALUE_3=never
+  export GIT_CONFIG_KEY_4=protocol.file.allow
+  export GIT_CONFIG_VALUE_4=never
+  export GIT_CONFIG_KEY_5=protocol.ssh.allow
+  export GIT_CONFIG_VALUE_5=never
+  export GIT_CONFIG_KEY_6=credential.helper
+  export GIT_CONFIG_VALUE_6=
+  export GIT_CONFIG_KEY_7=diff.external
+  export GIT_CONFIG_VALUE_7=
+  export GIT_CONFIG_KEY_8=core.attributesFile
+  export GIT_CONFIG_VALUE_8=/dev/null
+}
+
 # Bool flags. Draft itself is not here: the wrapper adds it, and a caller
 # must not be able to set it again.
 is_bool_flag() {
@@ -91,6 +130,7 @@ validate_args() {
   done
 }
 
+isolate_git_env
 validate_args "$@"
 # --draft is before caller args. A dangling value flag cannot consume it,
 # and validate_args already refused that shape.
