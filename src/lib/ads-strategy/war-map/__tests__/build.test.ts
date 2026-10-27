@@ -613,7 +613,7 @@ describe('审查补断言 · 账户清单、新鲜度、频率按账户过滤', 
     expect(v.accounts[0]?.sentence).toBe('读不到账户状态')
   })
 
-  it('两个在用账户数据日不同：以最旧的为准，总览不绿', () => {
+  it('两个在用账户数据日不同：表头以最旧的为准；观众池不借日报日期', () => {
     const v = buildWarMap(baseInput({
       accounts: [acct(), acct({ adAccountId: 'act_2', name: '二号' })],
       audiences: [aud(), aud({ id: 'aud_2', adAccountId: 'act_2' })],
@@ -621,17 +621,20 @@ describe('审查补断言 · 账户清单、新鲜度、频率按账户过滤', 
       clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-15T17:00:00.000Z' },
       accountDataDays: { act_1: '2026-10-15', act_2: '2026-10-10' },
     }))
+    expect(v.clocks.dataDay).toBe('2026-10-10')
     expect(v.clocks.staleDays).toBe(6)
-    expect(v.pools.headline.light).toBe('unknown')
-    expect(v.pools.headline.sentence).toContain('停在 10/10')
+    expect(v.pools.headline.light).toBe('green')
+    expect(v.pools.headline.sentence).not.toContain('停在')
+    expect(v.pools.headline.sentence).not.toContain('没更新')
   })
 
-  it('数据日落后正好 2 天不算停，3 天才算（边界）', () => {
+  it('数据日落后正好 2 天不算停，3 天才算（边界）；观众池不借这个日期', () => {
     const two = buildWarMap(baseInput({ clocks: { dataDay: '2026-10-14', fetchedAt: null }, accountDataDays: { act_1: '2026-10-14' }, audiences: [aud()] }))
     const three = buildWarMap(baseInput({ clocks: { dataDay: '2026-10-13', fetchedAt: null }, accountDataDays: { act_1: '2026-10-13' }, audiences: [aud()] }))
     expect(two.clocks.staleDays).toBe(2)
+    expect(three.clocks.staleDays).toBe(3)
     expect(two.pools.headline.sentence).not.toContain('没更新')
-    expect(three.pools.headline.sentence).toContain('没更新')
+    expect(three.pools.headline.sentence).not.toContain('没更新')
   })
 
   it('欠款账户下的广告系列不进频率卡', () => {
