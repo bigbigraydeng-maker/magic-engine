@@ -152,8 +152,14 @@ export interface DecisionHistory {
   reasoning: string
   outcome_verdict?: OutcomeVerdict | null
   outcome_notes?: string | null
+  /** NULL = legacy Zhuge row */
+  source_kind?: DecisionSourceKind | null
+  source_ref?: Record<string, string> | null
+  goal_id?: string | null
   created_at: string
 }
+
+export type DecisionSourceKind = 'zhuge' | 'promo_adjustment'
 
 export interface CreateDecisionHistoryInput {
   client_id: string
@@ -162,6 +168,9 @@ export interface CreateDecisionHistoryInput {
   chosen_action: string
   alternatives_rejected: string[]
   reasoning: string
+  source_kind?: DecisionSourceKind
+  source_ref?: Record<string, string>
+  goal_id?: string
 }
 
 // ── MemoryContext — 注入给各 Agent 的汇总包 ───────────────────────────────────
