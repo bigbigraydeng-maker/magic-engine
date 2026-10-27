@@ -195,7 +195,7 @@ export function withThinSampleGuard(pace: GoalPace, costMedian: number | null, d
 }
 
 /**
- * 实际值窗口的终点，和速度分母同一天。
+ * 把期末收到不晚于 dataThrough 的那天。
  * 截止日为空、早于目标期开始、或不早于目标期末时不截。
  */
 function clipGoalEndToDataThrough(
@@ -205,6 +205,21 @@ function clipGoalEndToDataThrough(
 ): string {
   if (!dataThrough || dataThrough < periodStart || dataThrough >= periodEnd) return periodEnd
   return dataThrough
+}
+
+/**
+ * 实际值取数窗口的终点。
+ * 只有广告可归因指标（线索、私信）套用 Meta 日报截止日，避免把还没进日报的广告数算进去。
+ * 报名、成交等保留目标自己的期末：它们的新鲜度不由广告日报决定，按截止日截会把之后的真实成交筛掉。
+ */
+function actualWindowEnd(
+  metricKey: string,
+  periodStart: string,
+  periodEnd: string,
+  dataThrough: string | null,
+): string {
+  if (!ADS_ATTRIBUTABLE_METRIC_KEYS.has(metricKey)) return periodEnd
+  return clipGoalEndToDataThrough(periodStart, periodEnd, dataThrough)
 }
 
 /**
@@ -260,12 +275,12 @@ export async function buildDigestGoalContext(
     const campaignIds = goalCampaignIds(clientId, metric)
     const cost = await readRecentCost(clientId, insightDate, { metric, campaignIds })
     const medianCostPerResultCents7d = cost.medianCents
-    // 速度按有数据的最后一天算。实际值用同一个终点，不把截止日之后的数算进去。
+    // 速度按有数据的最后一天算。只有广告指标的实际值跟到同一天。
     const dataThrough = cost.latestDate
     const fetched = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key, {
       goalPeriod: {
         period_start: goal.period_start,
-        period_end: clipGoalEndToDataThrough(goal.period_start, goal.period_end, dataThrough),
+        period_end: actualWindowEnd(goal.primary_metric_key, goal.period_start, goal.period_end, dataThrough),
       },
     })
     // unknown / 任何失败 → null（不是 0）。

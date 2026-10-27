@@ -320,6 +320,46 @@ describe('buildDigestGoalContext', () => {
       goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-10' },
     })
   })
+
+  it('没有广告目标、回落到报名时，不按 Meta 日报截止日缩短取数窗口', async () => {
+    // fetchBookings 用这个 period_end 去筛 me_sale_outcomes。日报只到 10/26 时，
+    // 10/27 的成交必须仍落在窗口里；截成 10/26 会让成交消失，全在截止日后还会变成未判。
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      id: 'g-signups',
+      title: '报名',
+      primary_metric_key: 'signups_count',
+      primary_metric_label: '报名/预订',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+    })])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value: 3, source: 'me_sale_outcomes', snapshot_date: '2026-10-31', label: '报名/预订',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
+    insightsTable([{ insight_date: '2026-10-26', spend: 20, results: 1 }])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-10-27')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'signups_count', {
+      goalPeriod: { period_start: '2026-10-01', period_end: '2026-10-31' },
+    })
+    expect(ctx?.pace.actualToDate).toBe(3)
+  })
+
+  it('私信目标仍按 Meta 日报截止日截取实际值', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      primary_metric_key: 'messaging_started',
+      primary_metric_label: '私信开聊',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+    })])
+    fetchedLead(4)
+    insightsTable([{ insight_date: '2026-10-26', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-10-27')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'messaging_started', {
+      goalPeriod: { period_start: '2026-10-01', period_end: '2026-10-26' },
+    })
+  })
 })
 
 describe('buildDigestGoalContext — 广告设置读失败', () => {
