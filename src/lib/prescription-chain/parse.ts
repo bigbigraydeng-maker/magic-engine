@@ -6,6 +6,7 @@ import type { MarketingPlan } from '@/lib/marketing-plan/types'
 import type { PrescriptionContent } from '@/types/diagnostic'
 import type {
   DraftFact,
+  DraftRow,
   GoalFact,
   IntakeFact,
   OutcomeFact,
@@ -167,4 +168,31 @@ export function parseDraft(row: unknown): DraftFact {
   const payload = record ? asRecord(record.payload) : null
   const status = payload ? payload.status : null
   return { status: typeof status === 'string' && status.trim() !== '' ? status : 'unknown' }
+}
+
+function creativeIdsOf(payload: Record<string, unknown> | null): string[] {
+  const draft = payload ? asRecord(payload.draft) : null
+  const creatives = draft?.creatives
+  if (!Array.isArray(creatives)) return []
+  const ids: string[] = []
+  for (const item of creatives) {
+    const creative = asRecord(item)
+    for (const value of [creative?.videoId, creative?.imageHash]) {
+      const id = textOrNull(value)
+      if (id) ids.push(id)
+    }
+  }
+  return ids
+}
+
+/** A row with no id cannot be de-duplicated or linked, so it is rejected (caller says 读不到). */
+export function parseDraftRow(row: unknown): DraftRow | null {
+  const record = asRecord(row)
+  if (!record || typeof record.id !== 'string') return null
+  return {
+    id: record.id,
+    status: parseDraft(row).status,
+    executionItemId: textOrNull(record.execution_item_id),
+    creativeIds: creativeIdsOf(asRecord(record.payload)),
+  }
 }

@@ -16,13 +16,17 @@ function newest(plans: PlanFact[]): PlanFact | null {
     ?? null
 }
 
+/** The plan a goal's chain follows: newest approved/completed, else newest draft. Archived never counts. */
+export function planForGoal(plans: PlanFact[], goalId: string): PlanFact | null {
+  return newest(plans.filter((plan) => plan.goalId === goalId && plan.status !== 'archived'))
+}
+
 export function linkedPlan(facts: ChainFacts): PlanFact | null | 'unread' | 'no-goal' {
   if (facts.prescription.read !== 'ok' || facts.prescription.value === null) return 'unread'
   const goalId = facts.prescription.value.goalId
   if (!goalId) return 'no-goal'
   if (facts.plans.read !== 'ok') return 'unread'
-  const linked = facts.plans.value.filter((plan) => plan.goalId === goalId && plan.status !== 'archived')
-  return newest(linked)
+  return planForGoal(facts.plans.value, goalId)
 }
 
 function reviewTooOld(orders: WorkOrderFact[], nowMs: number): boolean {

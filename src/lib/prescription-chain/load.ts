@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { matchDrafts } from './draft-match'
 import {
-  parseDraft,
+  parseDraftRow,
   parseGoal,
   parseOutcome,
   parsePlan,
@@ -10,7 +11,7 @@ import {
 } from './parse'
 import type {
   ChainFacts,
-  DraftFact,
+  DraftRow,
   GoalFact,
   Loaded,
   OutcomeFact,
@@ -116,22 +117,41 @@ function snapshotFrom(row: Loaded<unknown>): ChainFacts['snapshot'] {
   return { read: 'ok', value: { capturedAt: captured } }
 }
 
-async function readDrafts(db: ChainReader, clientId: string, prescriptionId: string): Promise<Loaded<DraftFact[]>> {
-  const items = await readList(
-    db.from('execution_items').select('id').eq('prescription_id', prescriptionId).eq('client_id', clientId),
-  )
-  if (items.read !== 'ok') return { read: 'unread' }
-  const ids: string[] = []
+interface RawDrafts {
+  itemIds: Set<string>
+  rows: DraftRow[]
+}
+
+async function readRawDrafts(db: ChainReader, clientId: string, prescriptionId: string): Promise<Loaded<RawDrafts>> {
+  const [items, actions] = await Promise.all([
+    readList(db.from('execution_items').select('id').eq('prescription_id', prescriptionId).eq('client_id', clientId)),
+    readList(db.from('flywheel_actions').select('id, execution_item_id, payload').eq('client_id', clientId).eq('action_type', 'ads.create_ad')),
+  ])
+  if (items.read !== 'ok' || actions.read !== 'ok') return { read: 'unread' }
+  const itemIds = new Set<string>()
   for (const row of items.value) {
-    if (!row || typeof row !== 'object' || typeof (row as { id?: unknown }).id !== 'string') return { read: 'unread' }
-    ids.push((row as { id: string }).id)
+    const id = row && typeof row === 'object' ? (row as { id?: unknown }).id : undefined
+    if (typeof id !== 'string') return { read: 'unread' }
+    itemIds.add(id)
   }
-  if (ids.length === 0) return { read: 'ok', value: [] }
-  const actions = await readList(
-    db.from('flywheel_actions').select('payload').eq('client_id', clientId).eq('action_type', 'ads.create_ad').in('execution_item_id', ids),
-  )
-  if (actions.read !== 'ok') return { read: 'unread' }
-  return { read: 'ok', value: actions.value.map(parseDraft) }
+  const rows: DraftRow[] = []
+  for (const raw of actions.value) {
+    const row = parseDraftRow(raw)
+    if (!row) return { read: 'unread' }
+    rows.push(row)
+  }
+  return { read: 'ok', value: { itemIds, rows } }
+}
+
+function draftsFrom(
+  raw: Loaded<RawDrafts>,
+  goalId: string | null,
+  plans: Loaded<PlanFact[]>,
+  strategy: Loaded<StrategyFact | null>,
+): ChainFacts['drafts'] {
+  if (raw.read !== 'ok') return { read: 'unread' }
+  const pool = strategy.read === 'ok' ? strategy.value?.pool ?? null : null
+  return matchDrafts({ rows: raw.value.rows, itemIds: raw.value.itemIds, goalId, plans, pool })
 }
 
 function prescriptionFrom(row: Loaded<unknown>): ChainFacts['prescription'] {
@@ -149,7 +169,7 @@ export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Pr
       .eq('client_id', input.clientId),
   ))
   const goalId = prescription.read === 'ok' ? prescription.value?.goalId ?? null : null
-  const [goal, config, plans, orders, drafts, snapshot] = await Promise.all([
+  const [goal, config, plans, orders, rawDrafts, snapshot] = await Promise.all([
     goalId
       ? readMaybe(db.from('goals').select('target_value, baseline_value, current_value, period_start, period_end').eq('id', goalId).eq('client_id', input.clientId))
       : Promise.resolve({ read: 'skipped' as const }),
@@ -158,10 +178,11 @@ export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Pr
     goalId
       ? readList(db.from('content_work_orders').select('status, updated_at').eq('client_id', input.clientId).eq('goal_id', goalId))
       : Promise.resolve({ read: 'skipped' as const }),
-    readDrafts(db, input.clientId, input.prescriptionId),
+    readRawDrafts(db, input.clientId, input.prescriptionId),
     readMaybe(db.from('ad_entity_snapshots').select('captured_at').eq('client_id', input.clientId).order('captured_at', { ascending: false }).limit(1)),
   ])
   const split = configFrom(config)
+  const planFacts = plansFrom(plans)
   return {
     nowIso: input.nowIso,
     prescriptionId: input.prescriptionId,
@@ -169,9 +190,9 @@ export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Pr
     goal: goalFrom(goal),
     outcome: split.outcome,
     strategy: split.strategy,
-    plans: plansFrom(plans),
+    plans: planFacts,
     workOrders: orders.read === 'skipped' ? { read: 'skipped' } : ordersFrom(orders),
-    drafts,
+    drafts: draftsFrom(rawDrafts, goalId, planFacts, split.strategy),
     snapshot: snapshotFrom(snapshot),
   }
 }

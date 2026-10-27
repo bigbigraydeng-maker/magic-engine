@@ -124,6 +124,16 @@ export interface DraftFact {
   status: string
 }
 
+/** One ads.create_ad ledger row with the ids it links by. Used only to find this prescription's drafts. */
+export interface DraftRow {
+  id: string
+  status: string
+  /** execution_items link written before 10-25. Null on newer drafts. */
+  executionItemId: string | null
+  /** Meta video ids and image hashes the draft uses. */
+  creativeIds: string[]
+}
+
 export interface ChainFacts {
   nowIso: string
   prescriptionId: string

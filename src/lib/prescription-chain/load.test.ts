@@ -98,6 +98,28 @@ describe('loadChainFacts', () => {
     expect(facts.workOrders).toEqual({ read: 'skipped' })
   })
 
+  it('reads drafts from the client ledger and says unread when none can be linked', async () => {
+    const tables = (itemIds: string[]): Record<string, Result> => ({
+      prescriptions: { data: prescription, error: null },
+      goals: { data: null, error: null },
+      ad_strategy_configs: { data: null, error: null },
+      marketing_plans: { data: [], error: null },
+      content_work_orders: { data: [], error: null },
+      execution_items: { data: itemIds.map((id) => ({ id })), error: null },
+      flywheel_actions: {
+        data: [{ id: 'a-1', execution_item_id: 'item-1', payload: { status: 'awaiting_approval', draft: { creatives: [{ videoId: 'video-1' }] } } }],
+        error: null,
+      },
+      ad_entity_snapshots: { data: null, error: null },
+    })
+    const input = { clientId: 'client-1', prescriptionId: 'rx-1', nowIso: '2026-10-26T12:00:00.000Z' }
+    const linked = await loadChainFacts(reader(tables(['item-1'])), input)
+    const unlinked = await loadChainFacts(reader(tables([])), input)
+
+    expect(linked.drafts).toEqual({ read: 'ok', value: [{ status: 'awaiting_approval' }] })
+    expect(unlinked.drafts).toEqual({ read: 'unread' })
+  })
+
   it('marks a non-list creative pool as unreadable instead of empty', async () => {
     const facts = await loadChainFacts(reader({
       prescriptions: { data: prescription, error: null },
