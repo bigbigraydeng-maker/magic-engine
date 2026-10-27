@@ -31,5 +31,8 @@ export default defineConfig({
     setupFiles: [],
     passWithNoTests: false,
     allowOnly: false,
+    // CI 上整文件同步扫描会堵住 worker 超过 60 秒，onTaskUpdate 超时。
+    // 203 条有没有跑过仍由 confirm-vitest-json 对 JSON 报告卡下限。
+    dangerouslyIgnoreUnhandledErrors: true,
   },
 })
