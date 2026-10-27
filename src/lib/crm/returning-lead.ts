@@ -111,8 +111,11 @@ export function detectReturningLead(touches: readonly TouchpointLike[]): Returni
   }
 }
 
+/** `ours` 里「按渠道计数」的那几个键（不含 `total` / `lastAt`：那俩不是渠道，也不是数字计数）。 */
+type OursCountKey = 'email' | 'phone' | 'phoneUnanswered' | 'messenger' | 'whatsapp' | 'other'
+
 /** 归类我们发出的真人联系渠道。 */
-function classifyOurs(channel: string, unanswered: boolean): keyof EngagementOverview['ours'] | null {
+function classifyOurs(channel: string, unanswered: boolean): OursCountKey | null {
   if (channel === 'email') return 'email'
   if (channel === 'phone') return unanswered ? 'phoneUnanswered' : 'phone'
   if (channel === 'messenger') return 'messenger'

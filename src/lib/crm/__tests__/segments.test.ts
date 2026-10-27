@@ -1230,6 +1230,6 @@ describe('回头客（再次留资）', () => {
       ] }),
       contact({ id: 'ret', displayName: 'Ret', touchpoints: RETURNING }),
     ], NOW2)
-    expect(list.map((x) => x.contactId ?? x.id)[0]).toBe('ret')
+    expect(list.map((x) => x.id)[0]).toBe('ret')
   })
 })

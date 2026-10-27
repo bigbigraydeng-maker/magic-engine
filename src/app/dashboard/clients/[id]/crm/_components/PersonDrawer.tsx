@@ -8,6 +8,7 @@
  */
 
 import { AssigneeSelect } from './AssigneeSelect'
+import type { ContactRow } from '../all/_components/contact-table-types'
 import { CallButton } from './CallButton'
 import { useCallback, useEffect, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
@@ -37,6 +38,13 @@ export interface DrawerRow {
   stage: string | null
   stageLabel: string | null
   reason?: string
+  /**
+   * 「回头客」（之前咨询过、我们联系过、今天又填了咨询表）。跟列表行同一份判据，
+   * 抽屉靠它**立刻**画出顶部横幅，不用等往来记录接口回来（见 `lib/crm/returning-lead`）。
+   * 🔴 `toDrawerRow` 是一个字段一个字段映射的 —— 加了这里不加那里，列表上有「🔥 回头」、
+   * 抽屉却不显示横幅（2026-10-27 tsc 报出来才发现；之前 tsc 被主干一个语法错的文件遮住了）。
+   */
+  returning?: ContactRow['returning']
   dueAt?: string | null
   /** 他现在在哪一批 —— 决定给哪几个按钮。 */
   segment?: Segment
