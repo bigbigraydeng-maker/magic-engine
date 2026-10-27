@@ -7,6 +7,7 @@ import { bundle } from '@remotion/bundler'
 import { selectComposition, renderMedia, makeCancelSignal } from '@remotion/renderer'
 import { TEMPLATE_IDS, isTemplateId, loadTemplate } from './src/templates.ts'
 import { ASPECT_IDS, isAspectId, withRenderAspect } from './src/aspect.ts'
+import { encodingCapFor } from './encode-cap.mjs'
 
 const USAGE = `用法：node render.mjs --props <props.json> --out <out.mp4> [选项]
 
@@ -255,11 +256,16 @@ async function runRender(opts) {
       browserExecutable: opts.browserExecutable,
     })
 
+    // Same CRF and bitrate ceiling for every aspect. --aspect only changes the canvas.
+    const cap = encodingCapFor(composition.durationInFrames / composition.fps)
     await renderMedia({
       composition,
       serveUrl: bundleDir,
       codec: 'h264',
       crf: 18,
+      // Capped CRF: quality target stays CRF 18, peaks are clipped so final.mp4 fits storage.
+      encodingMaxRate: cap.encodingMaxRate,
+      encodingBufferSize: cap.encodingBufferSize,
       outputLocation: opts.outFile,
       inputProps,
       concurrency: opts.concurrency,

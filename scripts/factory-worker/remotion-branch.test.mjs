@@ -317,6 +317,25 @@ describe('post-render checks', () => {
     expect(deps.completeFn).not.toHaveBeenCalled()
   })
 
+  it('refuses a final over 48 MB before upload, in plain language, and does not retry', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      renderFn: vi.fn(async ({ outFile }) => {
+        writeFileSync(outFile, '')
+        truncateSync(outFile, 48_000_000 + 1)
+        return { code: 0, stderrTail: '' }
+      }),
+    })
+    const err = await errOf(run(env, deps))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.retryable).toBe(false)
+    expect(err.message).toMatch(/超过存储上限/)
+    expect(err.message).toMatch(/成片 48\.0 MB/)
+    expect(err.message).toMatch(/请缩短时长或换更静的镜头后重出/)
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
   it.each([[422, true], [500, false]])('complete %i is %s non-retryable', async (status, flag) => {
     const env = makeEnv()
     const deps = makeDeps(env, { completeFn: vi.fn(async () => ({ ok: false, status, json: {} })) })

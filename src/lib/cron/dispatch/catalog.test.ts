@@ -1,4 +1,4 @@
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
@@ -74,6 +74,21 @@ describe('dispatch catalog', () => {
     expect(counts.get('pm-daily-todo')).toBe(5)
     expect(counts.get('meta-leads-hourly')).toBe(7 * 12)
     expect(counts.get('attribution-cron')).toBe(7 * 4)
+    expect(counts.get('factory-worker-sweeper')).toBe(7 * 24 * 12)
+  })
+
+  it('reclaims stale factory workers on the frequent tick, not a GitHub schedule', () => {
+    const job = DISPATCH_CATALOG.find((entry) => entry.service === 'factory-worker-sweeper')
+    expect(job).toMatchObject({
+      route: 'factory-worker-sweeper',
+      method: 'GET',
+      auth: 'bearer',
+      schedule: '*/5 * * * *',
+    })
+    expect(bucketForSchedule(job?.schedule ?? '')).toBe('frequent')
+    const workflow = readFileSync(path.join(ROOT, '.github/workflows/factory-sweepers.yml'), 'utf8')
+    expect(workflow).not.toMatch(/^\s*schedule:/m)
+    expect(workflow).toContain('workflow_dispatch:')
   })
 
   it('records the three name/schedule mismatches instead of "correcting" them', () => {

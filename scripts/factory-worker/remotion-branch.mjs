@@ -13,7 +13,7 @@ import {
   sha256File,
   usedWindowFromProps,
 } from './music-vocal-gate.mjs'
-import { MAX_UPLOAD_BYTES, oversizeUploadMessage } from './engines/remotion/upload-size-gate.mjs'
+import { MAX_UPLOAD_BYTES, oversizeUploadMessage } from './engines/remotion/encode-cap.mjs'
 
 /** Directory that holds the Remotion package (schema.ts, timing.ts, render.mjs). */
 export const REMOTION_ENGINE_DIR = join(import.meta.dirname, 'engines', 'remotion')
@@ -959,6 +959,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     if (!stat.isFile() || stat.size <= 0) {
       throw new RemotionOrderError('成片体检没过：渲染产物不存在或为空')
     }
+    // Same 48 MB gate as encode-cap.mjs, before any upload. Extras use assertUploadSize too.
     assertUploadSize(stat.size, '成片')
     // Every known template is listed explicitly; an unknown one is refused instead of falling through to montage.
     const textBuilders = {

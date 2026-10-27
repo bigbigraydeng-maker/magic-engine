@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { MarketingPlan } from '../../types'
 import { buildBlankDraftInsert } from '../../blank-draft'
 import { baseSpec } from './fixtures'
-import { pickPlanForPrescription, planLinkedGoalId } from '../plan-pick'
+import { pickPlanForPrescription, pickWarMapPlan, planLinkedGoalId } from '../plan-pick'
 
 const emptyPlan = {
   social: {},
@@ -67,5 +67,65 @@ describe('打开挂着当前处方的计划', () => {
     })
     expect(pickPlanForPrescription([archived, older], 'goal-now')?.id).toBe('old')
     expect(pickPlanForPrescription([older], null)?.id).toBe('old')
+  })
+
+  it('同一目标下，较旧的已批准计划优先于较新的草稿', () => {
+    const approved = plan({
+      id: 'live', status: 'approved', created_at: '2026-10-01T00:00:00.000Z',
+      promo: baseSpec({ goal_id: 'goal-now' }),
+    })
+    const draft = plan({
+      id: 'fresh', status: 'draft', created_at: '2026-10-20T00:00:00.000Z',
+      promo: baseSpec({ goal_id: 'goal-now' }),
+    })
+    expect(pickPlanForPrescription([draft, approved], 'goal-now')?.id).toBe('live')
+    expect(pickPlanForPrescription([approved, draft], 'goal-now')?.id).toBe('live')
+  })
+
+  it('同一目标有多份已批准计划时，取创建较新的那份', () => {
+    const older = plan({
+      id: 'old-live', status: 'approved', created_at: '2026-10-01T00:00:00.000Z',
+      promo: baseSpec({ goal_id: 'goal-now' }),
+    })
+    const newer = plan({
+      id: 'new-live', status: 'approved', created_at: '2026-10-18T00:00:00.000Z',
+      promo: baseSpec({ goal_id: 'goal-now' }),
+    })
+    expect(pickPlanForPrescription([older, newer], 'goal-now')?.id).toBe('new-live')
+  })
+
+  it('同一目标还没有已批准计划时，仍打开较新的草稿', () => {
+    const older = plan({ id: 'd1', status: 'draft', created_at: '2026-10-01T00:00:00.000Z', goalId: 'goal-now' })
+    const newer = plan({ id: 'd2', status: 'draft', created_at: '2026-10-20T00:00:00.000Z', goalId: 'goal-now' })
+    expect(pickPlanForPrescription([older, newer], 'goal-now')?.id).toBe('d2')
+  })
+})
+
+describe('作战地图优先已批准计划', () => {
+  const readable = baseSpec({ goal_id: 'goal-1' })
+
+  it('更新的草稿不能盖过较旧的已批准计划', () => {
+    const picked = pickWarMapPlan([
+      { status: 'draft', updated_at: '2026-10-20T00:00:00.000Z', plan_data: { promo: readable } },
+      { status: 'approved', updated_at: '2026-10-01T00:00:00.000Z', plan_data: { promo: readable } },
+    ])
+    expect(picked?.status).toBe('approved')
+    expect(picked?.updated_at).toBe('2026-10-01T00:00:00.000Z')
+  })
+
+  it('多份已批准计划里取最近更新的一份', () => {
+    const picked = pickWarMapPlan([
+      { status: 'approved', updated_at: '2026-10-02T00:00:00.000Z', plan_data: { promo: readable } },
+      { status: 'approved', updated_at: '2026-10-19T00:00:00.000Z', plan_data: { promo: readable } },
+    ])
+    expect(picked?.updated_at).toBe('2026-10-19T00:00:00.000Z')
+  })
+
+  it('读不出推广结构的行跳过，退到能读的草稿', () => {
+    const picked = pickWarMapPlan([
+      { status: 'approved', updated_at: '2026-10-20T00:00:00.000Z', plan_data: { promo: { schema: 'nope' } } },
+      { status: 'draft', updated_at: '2026-10-01T00:00:00.000Z', plan_data: { promo: readable } },
+    ])
+    expect(picked?.status).toBe('draft')
   })
 })

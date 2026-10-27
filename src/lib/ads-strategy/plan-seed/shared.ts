@@ -69,6 +69,8 @@ export interface Accumulator {
   capturedAt: Record<string, string | null>
   currency: string | null
   done: boolean
+  /** 取数失败（读不到，不是读到了空）；对应 PlanSeed.read_failed。 */
+  readFailed?: boolean
 }
 
 /** 把任意异常转成中文可读的原因字符串。 */

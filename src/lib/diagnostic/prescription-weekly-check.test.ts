@@ -123,7 +123,63 @@ describe('runPrescriptionWeeklyCheck', () => {
     expect(skipped?.clientId).toBe('c2')
     expect(skipped?.detail).toContain('不是进行中的付费客户')
   })
+
+  it('一份方案的阶段读不到时标成数据读不到，另一份照常复查', async () => {
+    const summary = await runTwoGoals((goalId) => (goalId === 'g1' ? null : { ...SUMMARY, goalId }))
+    expect(summary.checked).toBe(1)
+    const blocked = summary.outcomes.find((row) => row.prescriptionId === 'p1')
+    const kept = summary.outcomes.find((row) => row.prescriptionId === 'p2')
+    expect(blocked?.result).toBe('unreadable')
+    expect(blocked?.progress).toContain('数据读不到')
+    expect(blocked?.progress).not.toContain('0 条阶段')
+    expect(blocked?.suggestion).not.toContain('目标下还没有阶段')
+    expect(kept?.result).toBe('checked')
+    expect(kept?.progress).toContain('目标下现在有 2 条阶段')
+  })
+
+  it('一份方案的阶段读取抛错时，不中断另一份', async () => {
+    const summary = await runTwoGoals((goalId) => {
+      if (goalId === 'g1') throw new Error('connection reset')
+      return { ...SUMMARY, goalId }
+    })
+    expect(summary.checked).toBe(1)
+    expect(summary.outcomes.find((row) => row.prescriptionId === 'p1')?.result).toBe('unreadable')
+    expect(summary.outcomes.find((row) => row.prescriptionId === 'p2')?.result).toBe('checked')
+  })
 })
+
+function goalRow(id: string, title: string) {
+  return {
+    id,
+    title,
+    primary_metric_label: '新增咨询',
+    baseline_value: 8,
+    current_value: 12,
+    target_value: 30,
+    target_direction: 'increase',
+    current_value_fetched_at: '2026-10-20T00:00:00.000Z',
+  }
+}
+
+async function runTwoGoals(summaryFor: (goalId: string) => unknown) {
+  mockSummary.mockImplementation(async (_client: unknown, goalId: string) => summaryFor(goalId))
+  const { supabase } = fakeDb({
+    prescriptions: [
+      { id: 'p1', client_id: 'c1', goal_id: 'g1', status: 'approved', approved_at: '2026-10-20T00:00:00Z' },
+      { id: 'p2', client_id: 'c2', goal_id: 'g2', status: 'approved', approved_at: '2026-10-20T00:00:00Z' },
+    ],
+    clients: [
+      { id: 'c1', name: '甲客户', client_status: 'active', industry: 'travel' },
+      { id: 'c2', name: '乙客户', client_status: 'active', industry: 'travel' },
+    ],
+    goals: [goalRow('g1', '目标甲'), goalRow('g2', '目标乙')],
+    execution_items: [],
+    content_work_orders: [],
+    flywheel_actions: [],
+    prescription_outcomes: [],
+  })
+  return runPrescriptionWeeklyCheck(supabase)
+}
 
 describe('周二任务不再开方或批准', () => {
   it('定时入口和复查模块都不调用生成或批准', () => {

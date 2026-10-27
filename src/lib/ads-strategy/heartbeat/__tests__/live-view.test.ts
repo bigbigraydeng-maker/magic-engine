@@ -6,7 +6,7 @@ import {
   getLiveToday,
   type LiveDeps,
 } from '../live-view'
-import type { HeartbeatAccountRead, HeartbeatAdsetSample } from '../read'
+import { readHeartbeatAccount, type HeartbeatAccountRead, type HeartbeatAdsetSample, type HeartbeatFetchers } from '../read'
 
 const NOW = new Date('2026-10-21T20:00:00Z') // NZ 2026-10-22 09:00 (NZDT, +13)
 
@@ -65,7 +65,7 @@ describe('buildLiveAccountView', () => {
       ],
     }))
     expect(partial.readState).toBe('partial')
-    expect(partial.reason).toContain('insights')
+    expect(partial.reason).toContain('今天的花费数据')
   })
 })
 
@@ -77,6 +77,7 @@ describe('getLiveToday cache', () => {
       clock,
       listOfficialAccountIds: vi.fn(async () => ['act_1']),
       getToken: vi.fn(async () => 'tok'),
+      hasActiveCampaigns: vi.fn(async () => true),
       read: vi.fn(async () => read()),
       now: () => new Date(clock.t),
       ...o,
@@ -110,5 +111,102 @@ describe('getLiveToday cache', () => {
   it('no official accounts → empty list (page says so)', async () => {
     const v = await getLiveToday('c1', deps({ listOfficialAccountIds: vi.fn(async () => []) }))
     expect(v.accounts).toEqual([])
+  })
+})
+
+/** 用真实的 readHeartbeatAccount + 注入的假读取器：验证「有没有在投系列」真的改变了判定（不是只看参数传没传）。 */
+function fakeFetchers(adsetRows: number): HeartbeatFetchers {
+  const ok = <T,>(rows: T[]) => async () => ({ rows, complete: true, error: null })
+  return {
+    account: ok([{ id: 'act_1', account_status: 1, currency: 'NZD', timezone_name: 'Pacific/Auckland' }]),
+    adsets: ok(Array.from({ length: adsetRows }, (_, i) => ({ id: `as${i}`, effective_status: 'ACTIVE', daily_budget: '5000' }))),
+    ads: ok([]),
+    insights: ok([]),
+  } as unknown as HeartbeatFetchers
+}
+
+describe('getLiveToday — 有没有在投系列决定「空广告组列表」是真零还是读失败', () => {
+  beforeEach(() => clearLiveCacheForTests())
+  function deps(active: boolean | null | Error, fetchers = fakeFetchers(0)): LiveDeps {
+    return {
+      listOfficialAccountIds: vi.fn(async () => ['act_1']),
+      getToken: vi.fn(async () => 'tok'),
+      hasActiveCampaigns: vi.fn(async () => {
+        if (active instanceof Error) throw active
+        return active
+      }),
+      read: (args) => readHeartbeatAccount({ ...args, fetchers }),
+      now: () => NOW,
+    }
+  }
+
+  it('账户全暂停（active=false）+ 空广告组列表 → 不是读失败，页面显示「现在没有投放中」', async () => {
+    const v = await getLiveToday('c1', deps(false))
+    expect(v.accounts[0].readState).toBe('ok')
+    expect(v.accounts[0].reason).toBeNull()
+    expect(v.accounts[0].active).toEqual([])
+  })
+
+  it('有在投系列（active=true）+ 空广告组列表 → 仍判读失败（安全规则必须保住）', async () => {
+    const v = await getLiveToday('c1', deps(true))
+    expect(v.accounts[0].readState).toBe('unreadable')
+    expect(v.accounts[0].reason).toContain('广告组')
+  })
+
+  it('读不到（null）按「有在投」处理 → 空列表仍判读失败', async () => {
+    const v = await getLiveToday('c1', deps(null))
+    expect(v.accounts[0].readState).toBe('unreadable')
+  })
+
+  it('读取出错（抛错）也按「有在投」处理，不拖垮这个账户的视图', async () => {
+    const v = await getLiveToday('c1', deps(new Error('db down')))
+    expect(v.accounts[0].readState).toBe('unreadable')
+    expect(v.accounts[0].reason).not.toContain('db down')
+  })
+
+  it('读失败的文案不出现英文代号，出现中文名和下一步', async () => {
+    const v = await getLiveToday('c1', deps(true))
+    const reason = v.accounts[0].reason ?? ''
+    expect(reason).not.toMatch(/adsets|insights|account|\bads\b/i)
+    expect(reason).toContain('广告组')
+    expect(reason).toContain('刷新')
+  })
+
+  it('单账户隔离：账户 A 查「有没有在投」抛错时，账户 B 的视图逐字段不受影响', async () => {
+    const base = deps(false)
+    const d: LiveDeps = {
+      ...base,
+      listOfficialAccountIds: vi.fn(async () => ['act_a', 'act_b']),
+      hasActiveCampaigns: vi.fn(async (_c: string, acct: string) => {
+        if (acct === 'act_a') throw new Error('boom')
+        return false
+      }),
+      read: (args) => readHeartbeatAccount({ ...args, fetchers: fakeFetchers(0) }),
+    }
+    const v = await getLiveToday('c1', d)
+    const a = v.accounts.find((x) => x.adAccountId === 'act_a')!
+    const b = v.accounts.find((x) => x.adAccountId === 'act_b')!
+    // A：查询出错 → 保守当有在投 → **仍然去读了 Meta**，空列表判读失败（文案是「广告组没读到」，不是笼统的「读取出错」）
+    expect(a.readState).toBe('unreadable')
+    expect(a.reason).toContain('广告组')
+    expect(a.reason).not.toContain('读取出错')
+    // B：只看自己的查询结果（false）→ 真零，逐字段不变
+    expect(b.readState).toBe('ok')
+    expect(b.reason).toBeNull()
+    expect(b.active).toEqual([])
+    expect(b.newToday).toEqual([])
+    expect(b.currency).toBe('NZD')
+  })
+
+  it('未知读取项名字兜底为「某项数据」，不泄漏英文代号', async () => {
+    const v = await getLiveToday('c1', {
+      ...deps(false),
+      read: vi.fn(async () => read({
+        outcomes: [{ kind: 'weird', verdict: 'read_failed', reason: 'x', errorCode: 1 }] as unknown as HeartbeatAccountRead['outcomes'],
+        anyFailure: true,
+      })),
+    })
+    expect(v.accounts[0].reason).toContain('某项数据')
+    expect(v.accounts[0].reason).not.toContain('weird')
   })
 })

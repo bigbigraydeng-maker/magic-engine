@@ -20,6 +20,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
+import { draftNotYetBuildable } from './ad-draft-expansion'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
@@ -188,6 +189,11 @@ export async function createDraftForApproval(
     redlinesChecked: deps.brandRedlines === undefined ? null : deps.brandRedlines.length,
     redlinesSkipped: skippedRedlines(deps.brandRedlines),
   }
+
+  // 发布器今天只会建单个广告组、预算在组上。新字段对不上时，在任何 Meta 读取或写入之前停下。
+  // 不删除、不修改已经存在的广告对象。
+  const held = draftNotYetBuildable(draft)
+  if (held) return failedOutcome(deps, draft, { ...base, error: held })
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
   const problems = [...validateDraft(draft), ...checkDraftRedlines(draft, deps.brandRedlines)]

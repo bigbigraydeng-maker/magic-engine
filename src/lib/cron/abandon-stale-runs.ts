@@ -12,8 +12,26 @@ import { abandonAfterMs } from './expected-duration'
 
 export const ABANDONED_ERROR_PREFIX = 'abandoned:'
 
+/**
+ * `cron_run_logs.duration_ms` 是 Postgres integer（4 字节）。
+ * 大约 24.8 天的毫秒数就会超过上限，再往这列写会整行失败。
+ */
+export const CRON_DURATION_MS_MAX = 2_147_483_647
+
 const ABANDONED_MESSAGE =
   `${ABANDONED_ERROR_PREFIX} still running past 2× expected duration (process likely restarted before finish)`
+
+/**
+ * 开跑到现在过了多少毫秒，并且能放进 `duration_ms`。
+ * 很老的孤儿行差值会超过整数上限；夹到上限后仍能收口，时长记成「至少这么久」。
+ */
+export function durationMsForRunLog(startedAtIso: string, now: Date): number {
+  const started = Date.parse(startedAtIso)
+  if (!Number.isFinite(started)) return 0
+  const raw = now.getTime() - started
+  if (!Number.isFinite(raw) || raw <= 0) return 0
+  return raw > CRON_DURATION_MS_MAX ? CRON_DURATION_MS_MAX : Math.trunc(raw)
+}
 
 export interface OpenRunRow {
   id: string
@@ -52,7 +70,7 @@ async function closeOne(
     status: 'abandoned' as const,
     finished_at: now.toISOString(),
     error_message: ABANDONED_MESSAGE,
-    duration_ms: Math.max(0, now.getTime() - Date.parse(row.started_at)),
+    duration_ms: durationMsForRunLog(row.started_at, now),
   }
   const first = await supabase.from('cron_run_logs').update(patch).eq('id', row.id).eq('status', 'running')
   if (!first.error) return null

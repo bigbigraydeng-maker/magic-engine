@@ -107,6 +107,7 @@ function skipRemaining(args: BuildArgs, acc: Accumulator, err: unknown): void {
     if (doneKeys.has(play.step_key) || skippedKeys.has(play.step_key)) continue
     acc.skipped.push({ step_key: play.step_key, why_empty: `取数出错：${reason}` })
   }
+  acc.readFailed = true
   acc.done = true
 }
 
@@ -126,6 +127,7 @@ function assemble(
     ad_steps: [...acc.steps],
     skipped: [...acc.skipped],
     notes: [...acc.notes],
+    ...(acc.readFailed ? { read_failed: true } : {}),
   }
 }
 
@@ -160,6 +162,7 @@ async function runWork(
 
     const { passing, skipped, unknownDrops } = classifyPlays(args.plays, accounts, ctx)
     acc.skipped = skipped
+    if (unknownDrops.length > 0) acc.readFailed = true
 
     const currencies = collectCurrencies(passing)
     const multiCurrency = currencies.length > 1
@@ -198,6 +201,7 @@ function assembleOnTimeout(args: BuildArgs, acc: Accumulator, factsAsOf: string)
     acc.skipped.push({ step_key: play.step_key, why_empty: '取数超时' })
   }
   acc.notes.push('取数超时，只返回已经算出的部分')
+  acc.readFailed = true
   return assemble(args, acc, factsAsOf)
 }
 
