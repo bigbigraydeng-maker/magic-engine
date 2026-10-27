@@ -120,7 +120,43 @@ function Footer({ data }: { data: SalesProgressData }): JSX.Element {
   )
 }
 
-export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.Element {
+function MissingCapacityNotice({ rows, clientId }: { rows: UnitProgress[]; clientId: string }): JSX.Element | null {
+  const missing = rows.filter(
+    (row) =>
+      row.unit.capacity === null &&
+      row.unit.capacityNote === null &&
+      row.unit.unitStatus !== 'cancelled' &&
+      row.unit.unitStatus !== 'closed',
+  )
+  if (missing.length === 0) return null
+  return (
+    <div className="mt-3 rounded-xl border border-status-exec/30 bg-status-exec/10 p-4 text-sm text-me-charcoal">
+      <p>
+        有 {missing.length} 个出发日还没填座位数，所以算不出剩余座位。请把座位数补到团目录（导入表格里的「人数」一列），补完这里会自动出数。
+      </p>
+      <p className="mt-2">
+        <a
+          href={`/dashboard/clients/${clientId}/tour-catalog`}
+          className="inline-flex min-h-11 items-center font-semibold text-me-ochre underline"
+        >
+          去团目录
+        </a>
+      </p>
+      <details className="mt-1">
+        <summary className="inline-flex min-h-11 cursor-pointer items-center text-me-charcoal/70">
+          看是哪几个出发日（{missing.length}）
+        </summary>
+        <ul className="mt-1 space-y-0.5 text-xs text-me-charcoal/70">
+          {missing.map((row) => (
+            <li key={row.unit.unitId}>{row.unit.label}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  )
+}
+
+export function SalesProgressTable({ data, clientId }: { data: SalesProgressData; clientId: string }): JSX.Element {
   const { result } = data
   return (
     <div className="text-me-charcoal">
@@ -135,6 +171,7 @@ export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.E
           现在还没有录入任何订单；第一批订单导入后，这里才会有数字。
         </p>
       ) : null}
+      <MissingCapacityNotice rows={result.rows} clientId={clientId} />
       {result.rows.length === 0 ? (
         <p className="mt-2 text-xs text-me-charcoal/70">还没有出发日。</p>
       ) : (
