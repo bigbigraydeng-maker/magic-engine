@@ -14,7 +14,12 @@ const RISE_ADJ_RE = /\b(higher|high)\b|越高|更高/i
 const FALL_ADJ_RE = /\b(lower|low)\b|越低|更低/i
 const NEGATION_RE = /\b(not|no|never|without|doesn'?t|don'?t|isn'?t|won'?t)\b|不|没|无|未/i
 
-/** 经验对指标声明的方向；有否定、方向相反或说不清时返回 null。 */
+const FREQ_UP_RE = /越高|更高|过高|超过|\b(?:higher|passes|passing|exceeds?|exceeding)\b/i
+const FREQ_DOWN_RE = /越低|更低|过低|\b(?:lower|drops?|dropping)\b/i
+const FREQ_LEAD_RE = /(越高|更高|过高|超过|越低|更低|过低|\b(?:higher|lower)\b)\s*$/i
+const FREQ_TRAIL_RE = /^\s*(?:is|are|gets|becomes|会|变)?\s*(越高|更高|过高|超过|越低|更低|过低|\b(?:higher|lower|passes|passing|drops?|dropping|exceeds?|exceeding)\b)/i
+
+/** 经验对指标声明的方向。调用前先去掉紧贴频次的方向词。有否定、两个方向或说不清时返回 null。 */
 function metricDirection(text: string, metricRe: RegExp): 'up' | 'down' | null {
   if (NEGATION_RE.test(text)) return null
   const m = metricRe.exec(text)
@@ -26,12 +31,37 @@ function metricDirection(text: string, metricRe: RegExp): 'up' | 'down' | null {
   return up ? 'up' : 'down'
 }
 
-/** 只归类方向明确且与 runBacktest 预期一致的经验：频次↑→CPM↑、频次↑→CTR↓；其余 null（无法回测）。 */
+/** 只认紧贴「频次 / frequency」的方向词，并把它从指标文本里拿掉。两边冲突或没有则无法判断。 */
+function frequencyClaim(text: string): { direction: 'up' | 'down' | null; metricText: string } {
+  const freq = FREQ_RE.exec(text)
+  if (!freq) return { direction: null, metricText: text }
+  const before = text.slice(0, freq.index)
+  const after = text.slice(freq.index + freq[0].length)
+  const lead = before.match(FREQ_LEAD_RE)
+  const trail = after.match(FREQ_TRAIL_RE)
+  const span = `${lead?.[1] ?? ''} ${trail?.[1] ?? ''}`
+  const up = FREQ_UP_RE.test(span)
+  const down = FREQ_DOWN_RE.test(span)
+  const cutStart = lead ? freq.index - lead[0].length : freq.index
+  const cutEnd = freq.index + freq[0].length + (trail ? trail[0].length : 0)
+  return {
+    direction: up === down ? null : up ? 'up' : 'down',
+    metricText: `${text.slice(0, cutStart)} ${text.slice(cutEnd)}`,
+  }
+}
+
+/** 频次与 CPM 同向、频次与 CTR 反向才归类；缺失、矛盾或覆盖不到的说法返回 null（无法回测）。 */
 export function classifyBacktest(lesson: string, rationale?: string | null): BacktestRule | null {
   const text = `${lesson} ${rationale ?? ''}`
-  if (!FREQ_RE.test(text)) return null
-  if (CPM_RE.test(text)) return metricDirection(text, CPM_RE) === 'up' ? 'freq_cpm' : null
-  if (CTR_RE.test(text)) return metricDirection(text, CTR_RE) === 'down' ? 'freq_ctr' : null
+  const claim = frequencyClaim(text)
+  if (!claim.direction) return null
+  if (CPM_RE.test(text)) {
+    return metricDirection(claim.metricText, CPM_RE) === claim.direction ? 'freq_cpm' : null
+  }
+  if (CTR_RE.test(text)) {
+    const metric = metricDirection(claim.metricText, CTR_RE)
+    return metric !== null && metric !== claim.direction ? 'freq_ctr' : null
+  }
   return null
 }
 
