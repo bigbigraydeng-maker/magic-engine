@@ -1,14 +1,17 @@
 import React from 'react'
 import { AbsoluteFill, Audio, interpolate, Sequence, spring, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
 import { CutFlash, Footage, Logo, Reveal } from './components'
+import { FrameOverlay } from './FrameOverlay'
+import { templateProps } from './aspect'
+import { brandColorOf, overlayWindows, resolveFramePlan, type ResolvedHook } from './frame'
+import { OpeningHook } from './OpeningHook'
 import { PriceScene } from './PriceScene'
 import { parseListReelProps, type ListReelProps } from './schema'
+import { useStage } from './stage'
 import { computeTimingFromProps, FPS } from './timing'
 import { fontFamily } from './theme'
-import { templateProps } from './aspect'
-import { useStage } from './stage'
 
-const Hook: React.FC<{ props: ListReelProps }> = ({ props }) => {
+const Hook: React.FC<{ props: ListReelProps; shared: ResolvedHook | null }> = ({ props, shared }) => {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
   const stage = useStage()
@@ -17,18 +20,20 @@ const Hook: React.FC<{ props: ListReelProps }> = ({ props }) => {
   return (
     <AbsoluteFill>
       <Footage src={props.hook.clip} zoomTo={1.1} scrim={props.footageScrim} />
-      <div style={{ position: 'absolute', left: placed.left, top: placed.top, width: placed.width, fontFamily, color: '#fff', textShadow: '0 6px 30px rgba(0,0,0,0.7)' }}>
-        {props.hook.lines.map((line, i) => {
-          const p = spring({ frame: frame - i * 9, fps, config: { damping: 9, stiffness: 170, mass: 0.6 } })
-          const hl = i === 2
-          return (
-            <div key={i} style={{ fontSize, fontWeight: 900, lineHeight: 1.12, transform: `scale(${0.55 + 0.45 * p}) rotate(${(1 - p) * -4}deg)`, transformOrigin: '0% 60%', opacity: Math.min(1, p * 2) }}>
-              {line.badge !== null ? <span style={{ color: props.brandColor, background: '#fff', padding: '0 16px', borderRadius: 10, marginRight: 18 }}>{line.badge}</span> : null}
-              {hl ? <span style={{ color: '#fff', background: props.brandColor, padding: '0 16px', borderRadius: 10 }}>{line.text}</span> : line.text}
-            </div>
-          )
-        })}
-      </div>
+      {shared ? <OpeningHook hook={shared} brandColor={props.brandColor} /> : (
+        <div style={{ position: 'absolute', left: placed.left, top: placed.top, width: placed.width, fontFamily, color: '#fff', textShadow: '0 6px 30px rgba(0,0,0,0.7)' }}>
+          {props.hook.lines.map((line, i) => {
+            const p = spring({ frame: frame - i * 9, fps, config: { damping: 9, stiffness: 170, mass: 0.6 } })
+            const hl = i === 2
+            return (
+              <div key={i} style={{ fontSize, fontWeight: 900, lineHeight: 1.12, transform: `scale(${0.55 + 0.45 * p}) rotate(${(1 - p) * -4}deg)`, transformOrigin: '0% 60%', opacity: Math.min(1, p * 2) }}>
+                {line.badge !== null ? <span style={{ color: props.brandColor, background: '#fff', padding: '0 16px', borderRadius: 10, marginRight: 18 }}>{line.badge}</span> : null}
+                {hl ? <span style={{ color: '#fff', background: props.brandColor, padding: '0 16px', borderRadius: 10 }}>{line.text}</span> : line.text}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </AbsoluteFill>
   )
 }
@@ -65,14 +70,17 @@ const Item: React.FC<{ props: ListReelProps; index: number; dur: number }> = ({ 
 export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseListReelProps(templateProps(rawProps))
   const timing = computeTimingFromProps(props)
+  const plan = resolveFramePlan('list', props)
   const flash = props.cutFlash !== false
   const frame = useCurrentFrame()
   const stage = useStage()
   const title = stage.place({ left: 90, top: 556, width: 900, fontSize: props.revealTitleSize ?? 60, lines: 1, lineHeight: 1.2 })
   const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
+  const endFrames = plan.endCard ? overlayWindows(timing.totalFrames).endFrames : 0
+  const logoUntil = timing.totalFrames - endFrames
   return (
     <AbsoluteFill style={{ background: '#000' }}>
-      <Sequence from={0} durationInFrames={timing.hookFrames}><Hook props={props} /></Sequence>
+      <Sequence from={0} durationInFrames={timing.hookFrames}><Hook props={props} shared={plan.hook} /></Sequence>
       {props.items.map((_, i) => (
         <Sequence key={i} from={timing.itemFrom[i]} durationInFrames={timing.itemDur[i]}><Item props={props} index={i} dur={timing.itemDur[i]} />{flash ? <CutFlash /> : null}</Sequence>
       ))}
@@ -81,7 +89,8 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
         <div style={{ position: 'absolute', left: title.left, top: title.top, width: title.width, fontFamily, color: '#fff', fontSize: stage.fit(props.revealTitleSize ?? 60, title, props.revealTitleSize ?? 60), fontWeight: 900, textShadow: '0 4px 24px rgba(0,0,0,0.6)' }}><Reveal delay={0}><div>{props.revealTitle}</div></Reveal></div>
         {flash ? <CutFlash /> : null}
       </Sequence>
-      <Sequence from={timing.logoFrom} durationInFrames={timing.totalFrames - timing.logoFrom}><Logo file={props.logoFile} /></Sequence>
+      {logoUntil > timing.logoFrom ? <Sequence from={timing.logoFrom} durationInFrames={logoUntil - timing.logoFrom}><Logo file={props.logoFile} /></Sequence> : null}
+      <FrameOverlay totalFrames={timing.totalFrames} hook={null} endCard={plan.endCard} brandColor={brandColorOf(props)} />
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )

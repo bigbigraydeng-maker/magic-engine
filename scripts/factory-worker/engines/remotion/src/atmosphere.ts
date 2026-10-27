@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FPS } from './timing.ts';
-import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues, musicGainSchema } from './schema.ts';
+import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues, musicGainSchema, frameSchema } from './schema.ts';
 import { textWidthUnits, bannedWordHits, priceMentionHits, isAcceptableSourceUrl, quoteSupports } from './postcard.ts';
 
 /** Shortest total runtime (seconds). */
@@ -99,6 +99,7 @@ export const AtmospherePropsSchema = z
       .min(TEXT_TOP_MIN, { message: 'textTop 必须在 480 到 1100 之间' })
       .max(TEXT_TOP_MAX, { message: 'textTop 必须在 480 到 1100 之间' })
       .optional(),
+    frame: frameSchema.optional(),
   })
   .strict()
   .superRefine((val, ctx) => {
