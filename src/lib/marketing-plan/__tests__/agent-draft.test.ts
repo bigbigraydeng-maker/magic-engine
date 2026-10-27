@@ -4,6 +4,7 @@ import type { PlanSeed } from '@/lib/ads-strategy/plan-seed/types'
 import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
 import { parseAgentDraftBody } from '@/lib/marketing-plan/agent-draft-parse'
 import { saveAgentDraft, type AgentDraftDeps, type AgentPlanRow, type DraftInsert } from '@/lib/marketing-plan/agent-draft'
+import { planDraftId } from '@/lib/marketing-plan/promo/plan-draft-id'
 
 const RX = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
 const PLAN = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
@@ -84,7 +85,7 @@ function deps(over: Partial<AgentDraftDeps> = {}): AgentDraftDeps & { inserted: 
     loadPlan: vi.fn(async () => null),
     insertPlan: vi.fn(async (row: DraftInsert) => {
       inserted.push(row)
-      return 'plan-new'
+      return row.id ?? 'plan-new'
     }),
     updatePlan: vi.fn(async () => true),
   }
@@ -93,6 +94,12 @@ function deps(over: Partial<AgentDraftDeps> = {}): AgentDraftDeps & { inserted: 
 
 function request(cents = 5000) {
   const parsed = parseAgentDraftBody({ prescription_id: RX, title: '草稿', promo: promo(cents) })
+  if (!parsed.ok) throw new Error(parsed.error)
+  return parsed.request
+}
+
+function versioned(version: number) {
+  const parsed = parseAgentDraftBody({ prescription_id: RX, version, title: '草稿', promo: promo(5000) })
   if (!parsed.ok) throw new Error(parsed.error)
   return parsed.request
 }
@@ -110,6 +117,12 @@ describe('parseAgentDraftBody', () => {
       promo: { ...promo(1000), gate_snapshot: { taken_at: 'x' } },
     })
     expect(receipt.ok).toBe(false)
+  })
+
+  it('rejects a version that is not a whole number', () => {
+    const parsed = parseAgentDraftBody({ prescription_id: RX, version: '2', title: '草稿', promo: promo(1000) })
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) expect(parsed.code).toBe('invalid_version')
   })
 })
 
@@ -130,6 +143,7 @@ describe('saveAgentDraft', () => {
     })
     expect(row.generation_meta).not.toHaveProperty('approval_receipt')
     expect(row.status).not.toBe('approved')
+    expect(row.id).toBeUndefined()
   })
 
   it('does not write when the budget exceeds the seed or the cap', async () => {
@@ -169,5 +183,98 @@ describe('saveAgentDraft', () => {
     expect(result).toMatchObject({ status: 409, code: 'not_draft' })
     expect(d.updatePlan).not.toHaveBeenCalled()
     expect(d.inserted).toEqual([])
+  })
+
+  it('uses the auto-draft id for one prescription version and updates that draft', async () => {
+    const version = 2
+    const id = planDraftId(RX, version)
+    const created = deps()
+    const first = await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: versioned(version), deps: created })
+    expect(first).toMatchObject({ status: 200, code: 'saved', planId: id })
+    expect(created.inserted).toHaveLength(1)
+    expect(created.inserted[0].id).toBe(id)
+    expect(created.inserted[0].status).toBe('draft')
+
+    const existing: AgentPlanRow = {
+      id,
+      status: 'draft',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+      title: 'old',
+      startDate: null,
+      endDate: null,
+      planData: {},
+      generationMeta: null,
+    }
+    const again = deps({ loadPlan: vi.fn(async () => existing) })
+    const second = await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: versioned(version), deps: again })
+    expect(second).toMatchObject({ status: 200, code: 'saved', planId: id })
+    expect(again.insertPlan).not.toHaveBeenCalled()
+    expect(again.updatePlan).toHaveBeenCalledWith(id, CLIENT, existing.updatedAt, expect.anything())
+    expect(planDraftId(RX, version + 1)).not.toBe(id)
+  })
+
+  it('does not overwrite an approved plan that already uses this prescription version', async () => {
+    const id = planDraftId(RX, 2)
+    const approved: AgentPlanRow = {
+      id,
+      status: 'approved',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+      title: 'old',
+      startDate: null,
+      endDate: null,
+      planData: {},
+      generationMeta: null,
+    }
+    const d = deps({ loadPlan: vi.fn(async () => approved) })
+    const result = await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: versioned(2), deps: d })
+    expect(result.status).toBe(409)
+    expect(result.code).toBe('already_approved')
+    expect(result.error).toContain('不能覆盖')
+    expect(d.updatePlan).not.toHaveBeenCalled()
+    expect(d.insertPlan).not.toHaveBeenCalled()
+  })
+
+  it('uses one id for a prescription id in any letter case and keeps an approved plan', async () => {
+    const id = planDraftId(RX, 2)
+    const parsed = parseAgentDraftBody({ prescription_id: RX.toUpperCase(), version: 2, title: '草稿', promo: promo(5000) })
+    if (!parsed.ok) throw new Error(parsed.error)
+    const created = deps()
+    await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: parsed.request, deps: created })
+    expect(created.inserted[0]?.id).toBe(id)
+
+    const approved: AgentPlanRow = {
+      id,
+      status: 'approved',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+      title: 'old',
+      startDate: null,
+      endDate: null,
+      planData: {},
+      generationMeta: null,
+    }
+    const d = deps({ loadPlan: vi.fn(async () => approved) })
+    const result = await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: parsed.request, deps: d })
+    expect(result).toMatchObject({ status: 409, code: 'already_approved' })
+    expect(d.loadPlan).toHaveBeenCalledWith(CLIENT, id)
+    expect(d.updatePlan).not.toHaveBeenCalled()
+    expect(d.insertPlan).not.toHaveBeenCalled()
+  })
+
+  it('rejects a plan id that does not match the prescription version', async () => {
+    const d = deps()
+    const parsed = parseAgentDraftBody({
+      prescription_id: RX,
+      version: 2,
+      plan_id: PLAN,
+      expected_updated_at: '2026-10-26T00:00:00.000Z',
+      title: '草稿',
+      promo: promo(5000),
+    })
+    if (!parsed.ok) throw new Error(parsed.error)
+    const result = await saveAgentDraft({ clientId: CLIENT, keyId: KEY, request: parsed.request, deps: d })
+    expect(result).toMatchObject({ status: 400, code: 'plan_mismatch' })
+    expect(d.insertPlan).not.toHaveBeenCalled()
+    expect(d.updatePlan).not.toHaveBeenCalled()
+    expect(d.readSeed).not.toHaveBeenCalled()
   })
 })

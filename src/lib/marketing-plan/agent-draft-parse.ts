@@ -7,6 +7,7 @@ import { parsePromoSpec, type PromoSpec } from '@/lib/marketing-plan/promo/spec'
 
 const ALLOWED = new Set([
   'prescription_id',
+  'version',
   'plan_id',
   'title',
   'start_date',
@@ -21,6 +22,8 @@ const MAX_TITLE = 120
 
 export interface AgentDraftRequest {
   prescriptionId: string
+  /** Prescription version. Together with prescriptionId this pins the plan id. */
+  version: number | null
   planId: string | null
   title: string | undefined
   startDate: string | null | undefined
@@ -45,6 +48,8 @@ export function parseAgentDraftBody(body: unknown): { ok: true; request: AgentDr
   if (!prescriptionId) return fail('invalid_prescription', '处方编号不正确')
   const planId = readOptionalUuid(record, 'plan_id')
   if (planId === 'bad') return fail('invalid_plan', '计划编号不正确')
+  const version = readVersion(record)
+  if (version === 'bad') return fail('invalid_version', '处方版本不正确')
   const title = readTitle(record)
   if (title === 'bad') return fail('invalid_title', '标题不正确')
   const startDate = readDate(record, 'start_date')
@@ -54,7 +59,7 @@ export function parseAgentDraftBody(body: unknown): { ok: true; request: AgentDr
   if (typeof startDate === 'string' && typeof endDate === 'string' && endDate < startDate) {
     return fail('invalid_dates', '结束日早于开始日')
   }
-  const expected = readExpected(record, planId)
+  const expected = readExpected(record, planId, version)
   if (expected === 'bad') return fail('missing_version', '更新草稿要带上读到的版本时间')
   const spec = readPromo(record.promo)
   if (!spec.ok) return spec
@@ -62,6 +67,7 @@ export function parseAgentDraftBody(body: unknown): { ok: true; request: AgentDr
     ok: true,
     request: {
       prescriptionId,
+      version,
       planId,
       title,
       startDate,
@@ -114,8 +120,16 @@ function readDate(record: Record<string, unknown>, key: string): string | null |
   return record[key]
 }
 
-function readExpected(record: Record<string, unknown>, planId: string | null): string | null | 'bad' {
-  if (!planId) return null
+function readVersion(record: Record<string, unknown>): number | null | 'bad' {
+  if (!('version' in record) || record.version == null) return null
+  const value = record.version
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 100000) return 'bad'
+  return value
+}
+
+function readExpected(record: Record<string, unknown>, planId: string | null, version: number | null): string | null | 'bad' {
+  if (!planId && version == null) return null
+  if (!('expected_updated_at' in record) || record.expected_updated_at == null) return planId ? 'bad' : null
   const value = record.expected_updated_at
   if (typeof value !== 'string' || value.trim() === '') return 'bad'
   return value
