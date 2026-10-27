@@ -4,7 +4,15 @@ import { loadAllAccounts, loadCandidates, loadForms, loadPageContext, loadScopes
 import { LIVE_READ_TIMEOUT_MS } from './constants'
 import { readLiveForSelected } from './live-read'
 import type { AdPlay } from './ad-plays'
-import { errorReason, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
+import {
+  audienceIdsToRead,
+  seedAudience,
+  seedCreatives,
+  seedExcluded,
+  seedSchedule,
+  type AudienceStatusRead,
+} from './audience-creative'
+import { errorReason, safe, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
 import type { Basis, Field, PlanSeed, PlanSeedStep } from './types'
 
 export type { PlanSeedDeps } from './shared'
@@ -55,11 +63,45 @@ function buildPageField(pageId: string): Field<string> {
   }
 }
 
+type StepExtras = Pick<
+  PlanSeedStep,
+  'audience_state' | 'audience_ids' | 'excluded_audience_ids' | 'creative_state' | 'creative_refs'
+>
+
+/** S1: audience, exclusion list and creative per passing step. Read-only; never throws (a failed status read just leaves the audience empty). */
+async function buildExtras(
+  args: BuildArgs,
+  passing: PassingStep[],
+  deps: PlanSeedDeps,
+  nowMs: number,
+): Promise<Map<string, StepExtras>> {
+  const out = new Map<string, StepExtras>()
+  for (const p of passing) {
+    const facts = p.account.facts
+    const ids = audienceIdsToRead(p.play.play, facts)
+    let status: AudienceStatusRead | null = null
+    if (ids.length > 0 && deps.readAudienceStatus) {
+      const res = await safe(() => (deps.readAudienceStatus as NonNullable<PlanSeedDeps['readAudienceStatus']>)(args.clientId, ids))
+      status = res.ok ? res.value : { state: 'failed', reason: res.reason }
+    }
+    const aud = seedAudience(p.play.play, facts, status)
+    const creative = args.period ? seedCreatives(facts, args.period, nowMs) : null
+    out.set(p.play.step_key, {
+      audience_state: aud.state,
+      audience_ids: aud.ids,
+      excluded_audience_ids: seedExcluded(facts, status),
+      ...(creative ? { creative_state: creative.state, creative_refs: creative.refs } : {}),
+    })
+  }
+  return out
+}
+
 /** 组装一个完整的 PlanSeedStep。 */
 function buildStep(
   passing: PassingStep,
   pageId: Field<string>,
   budget: Field<number>,
+  extras: StepExtras | undefined,
 ): PlanSeedStep {
   return {
     step_key: passing.play.step_key,
@@ -67,6 +109,7 @@ function buildStep(
     page_id: pageId,
     ad_account_id: buildAccountField(passing, budgetUsedLive(budget)),
     daily_budget_cents: budget,
+    ...(extras ?? {}),
   }
 }
 
@@ -75,6 +118,7 @@ function collectSteps(
   passing: PassingStep[],
   pageId: string,
   budgets: Map<string, Field<number>>,
+  extras: Map<string, StepExtras>,
   acc: Accumulator,
 ): void {
   const pageField = buildPageField(pageId)
@@ -93,7 +137,7 @@ function collectSteps(
       acc.skipped.push({ step_key: p.play.step_key, why_empty: pageField.why_empty })
       continue
     }
-    steps.push(buildStep(p, pageField, budget))
+    steps.push(buildStep(p, pageField, budget, extras.get(p.play.step_key)))
   }
   acc.steps = steps
 }
@@ -124,6 +168,7 @@ function assemble(
     currency: acc.currency,
     period: args.period,
     captured_at: { ...acc.capturedAt },
+    schedule: seedSchedule(args.period, Date.parse(factsAsOf)),
     ad_steps: [...acc.steps],
     skipped: [...acc.skipped],
     notes: [...acc.notes],
@@ -185,7 +230,8 @@ async function runWork(
       live,
     })
 
-    collectSteps(passing, pageId ?? '', budgets, acc)
+    const extras = await buildExtras(args, passing, deps, nowMs)
+    collectSteps(passing, pageId ?? '', budgets, extras, acc)
     acc.done = true
   } catch (err) {
     skipRemaining(args, acc, err)

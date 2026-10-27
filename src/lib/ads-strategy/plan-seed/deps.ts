@@ -11,7 +11,8 @@ import {
   defaultFetchers,
   type HeartbeatFetchers,
 } from '@/lib/ads-strategy/heartbeat/read'
-import { fetchAdsetsSinglePage } from '@/lib/meta/entity-settings'
+import { fetchAdsetsSinglePage, fetchCustomAudienceById } from '@/lib/meta/entity-settings'
+import type { AudienceStatus, AudienceStatusRead } from './audience-creative'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 import type { PlanSeedDeps } from './build'
 import type { ReadState } from './eligibility'
@@ -310,6 +311,30 @@ export async function readLiveDeliveringProd(
   }
 }
 
+function statusCode(v: unknown): number | null {
+  if (typeof v !== 'object' || v === null) return null
+  const code = (v as { code?: unknown }).code
+  return typeof code === 'number' && Number.isFinite(code) ? code : null
+}
+
+/** 只读 GET 每个受众的状态码（按 id 直读）。任何一个读不到就整体 failed；永不抛错。 */
+export async function readAudienceStatusProd(clientId: string, ids: string[]): Promise<AudienceStatusRead> {
+  if (ids.length === 0) return { state: 'empty' }
+  const resolved = await resolveMetaTokenForClient(clientId)
+  if (resolved === null) return { state: 'failed', reason: '没有可用令牌' }
+  const reads = await Promise.all(ids.map(async (id) => {
+    const res = await fetchCustomAudienceById(id, resolved.token)
+    const row = res.complete && !res.error ? res.rows[0] : undefined
+    return { id, row }
+  }))
+  const out: Record<string, AudienceStatus> = {}
+  for (const { id, row } of reads) {
+    if (row === undefined) return { state: 'failed', reason: '读受众状态时 Meta 拒绝或出错' }
+    out[id] = { operation: statusCode(row.operation_status), delivery: statusCode(row.delivery_status) }
+  }
+  return { state: 'ok', value: out }
+}
+
 /** 生产依赖：每个 productionDeps() 实例内按 clientId 记忆化行业读取。 */
 export function productionDeps(): PlanSeedDeps {
   const industryCache = new Map<string, Promise<string | null>>()
@@ -355,6 +380,7 @@ export function productionDeps(): PlanSeedDeps {
     playbookShare,
     readLiveDelivering: (clientId, adAccountId) =>
       readLiveDeliveringProd(clientId, adAccountId),
+    readAudienceStatus: readAudienceStatusProd,
   }
 }
 
