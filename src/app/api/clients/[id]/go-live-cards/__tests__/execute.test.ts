@@ -16,6 +16,7 @@ vi.mock('@/lib/meta/ad-publisher', () => ({
 vi.mock('@/lib/meta/readback', () => ({ fetchCampaignStatus: m.fetchCampaignStatus }))
 vi.mock('@/lib/meta/token-manager', () => ({ getMetaTokenForClient: m.token }))
 
+import { parseExecutedLaunches } from '@/lib/ads/prescription-launch-check'
 import { executeConfirmedGoLive } from '../execute'
 
 const IDS = { campaignId: 'camp', adSetId: 'set', adIds: ['ad'] }
@@ -28,6 +29,27 @@ function authority(basis: 'go_live_card' | 'global_admin' = 'go_live_card') {
     basis,
     cardRunId: basis === 'go_live_card' ? CARD : undefined,
   }
+}
+
+function heldFailure(): Record<string, unknown> {
+  return {
+    status: 'activating',
+    campaignId: 'camp',
+    activation: {
+      card_run_id: CARD,
+      status: 'meta_failed',
+      error: '开 第一次没开成',
+      authorized_at: '2026-10-28T01:00:00.000Z',
+    },
+  }
+}
+
+function pauseThenLive(): void {
+  m.fetchCampaignStatus
+    .mockResolvedValueOnce('PAUSED')
+    .mockResolvedValueOnce('PAUSED')
+    .mockResolvedValueOnce('PAUSED')
+    .mockResolvedValue('ACTIVE')
 }
 
 function owned(status: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -301,6 +323,86 @@ describe('executeConfirmedGoLive', () => {
     expect(seen).toEqual(['activating', 'pause:activating'])
     expect(store.payload.status).toBe('awaiting_approval')
     expect(result.note).toBeNull()
+  })
+
+  it('records executed after a kept claim retries and the read-back is live', async () => {
+    const { sb, store } = fakeDb({ status: 'awaiting_approval' })
+    m.approveDraft.mockImplementation(async () => {
+      store.payload = heldFailure()
+      return { ok: false, error: '开 第一次没开成', holding: true }
+    })
+    m.activatePublished.mockResolvedValue({ ok: true })
+    pauseThenLive()
+    const result = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids: IDS,
+      now: new Date('2026-10-28T03:00:00.000Z'),
+    })
+    expect(result.settle).toMatchObject({ outcome: 'live', attempts: 2 })
+    expect(m.approveDraft).toHaveBeenCalledTimes(1)
+    expect(m.activatePublished).toHaveBeenCalledTimes(1)
+    expect(m.pausePublished).not.toHaveBeenCalled()
+    const activation = store.payload.activation as Record<string, unknown>
+    expect(store.payload.status).toBe('active')
+    expect(activation).toMatchObject({
+      status: 'executed',
+      card_run_id: CARD,
+      authorized_at: '2026-10-28T01:00:00.000Z',
+    })
+    expect(activation.error).toBeUndefined()
+    expect(parseExecutedLaunches([{
+      id: 'draft-1',
+      clientId: 'client-1',
+      payload: store.payload,
+    }])).toEqual({
+      launches: [{
+        id: 'draft-1',
+        clientId: 'client-1',
+        authorizedAt: '2026-10-28T01:00:00.000Z',
+        campaignId: 'camp',
+      }],
+      missingCampaign: 0,
+    })
+  })
+
+  it('does not mark another run executed when a kept-claim retry reads back live', async () => {
+    const winner = {
+      status: 'active',
+      campaignId: 'camp',
+      activation: {
+        card_run_id: '22222222-2222-4222-8222-222222222222',
+        status: 'executed',
+        authorized_at: '2026-10-28T02:00:00.000Z',
+        marker: 'winner',
+      },
+      goLiveStartedAt: '2026-10-28T02:00:00.000Z',
+    }
+    const { sb, store } = fakeDb({ status: 'awaiting_approval' }, winner)
+    m.approveDraft.mockImplementation(async () => {
+      store.payload = heldFailure()
+      return { ok: false, error: '开 第一次没开成', holding: true }
+    })
+    m.activatePublished.mockResolvedValue({ ok: true })
+    pauseThenLive()
+    const result = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids: IDS,
+      now: new Date('2026-10-28T03:00:00.000Z'),
+    })
+    expect(result.settle).toMatchObject({ outcome: 'live', attempts: 2 })
+    expect(store.payload).toEqual(winner)
+    expect(result.note).toContain('开投观察的开始时间没写上')
+    expect(parseExecutedLaunches([{
+      id: 'draft-1',
+      clientId: 'client-1',
+      payload: store.payload,
+    }]).launches[0]?.authorizedAt).toBe('2026-10-28T02:00:00.000Z')
   })
 
   it('does not overwrite another run that already recorded the open', async () => {

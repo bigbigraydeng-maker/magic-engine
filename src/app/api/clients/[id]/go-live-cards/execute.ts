@@ -75,9 +75,24 @@ function activationRunId(payload: Record<string, unknown>): string | null {
   return typeof id === 'string' && id.length > 0 ? id : null
 }
 
+/**
+ * An activate-only retry skips approveDraft, so a failed receipt would stay meta_failed.
+ * writeMark applies this only while this card run still owns the row.
+ */
+function executedActivation(current: Record<string, unknown>): Record<string, unknown> {
+  const activation = current.activation
+  if (!activation || typeof activation !== 'object' || Array.isArray(activation)) return current
+  const row = activation as Record<string, unknown>
+  if (row.status === 'executed' && row.error === undefined) return current
+  const next: Record<string, unknown> = { ...row, status: 'executed' }
+  delete next.error
+  return { ...current, activation: next }
+}
+
 function nextPayload(current: Record<string, unknown>, settled: SettleResult, at: string): Record<string, unknown> | null {
   if (settled.outcome === 'live') {
-    const rest = { ...current }
+    const source = settled.attempts === 2 ? executedActivation(current) : current
+    const rest = { ...source }
     delete rest.error
     delete rest.goLiveHeld
     return { ...rest, status: 'active', goLiveStartedAt: at }
