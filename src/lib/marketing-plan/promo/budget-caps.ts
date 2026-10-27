@@ -12,7 +12,7 @@
  * 结论只有三种：ok / over / unknown。unknown 在检查清单里是灰色，花钱相关的硬门不能批准。
  */
 
-import type { AdsStep } from './spec'
+import type { AdsStep, PromoSpec } from './spec'
 
 export interface AccountCapFacts {
   ad_account_id: string
@@ -101,4 +101,20 @@ export function checkAdsBudget(
     per_account_cents: perAccount,
     notes: [NOTE_LIVE_BUDGET],
   }
+}
+
+/** Same per-phase cap check the promo save uses. Unknown is not a rejection. */
+export function collectPhaseBudgetProblems(
+  spec: PromoSpec,
+  accounts: readonly AccountCapFacts[],
+  clientCapCents: number | null,
+): string[] {
+  const problems: string[] = []
+  for (const phase of spec.phases) {
+    const steps = phase.steps.flatMap(step => (step.kind === 'ads_campaign' ? [step] : []))
+    const result = checkAdsBudget(steps, accounts, clientCapCents)
+    if (result.verdict !== 'over') continue
+    for (const reason of result.reasons) problems.push(`${phase.name}：${reason}`)
+  }
+  return problems
 }
