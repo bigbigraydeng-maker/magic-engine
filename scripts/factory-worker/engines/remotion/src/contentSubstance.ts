@@ -4,6 +4,7 @@ import { computePostcardTiming } from './postcard.ts';
 import { computeDataCardTiming } from './datacard.ts';
 import { computeAtmosphereTiming } from './atmosphere.ts';
 import { montageFrameOf } from './montage.ts';
+import { overlayWindows, resolveFramePlan, type ResolvedHook } from './frame.ts';
 
 export type SubstanceKind =
   | 'place_or_tour'
@@ -144,14 +145,22 @@ function collectList(props: Record<string, unknown>): SubstanceElement[] {
   return out;
 }
 
+function hookTexts(hook: ResolvedHook): string[] {
+  const texts = hook.lines.map((line) => line.text);
+  if (hook.stat && !texts.includes(hook.stat)) texts.push(hook.stat);
+  if (hook.question && !texts.includes(hook.question)) texts.push(hook.question);
+  return texts;
+}
+
 function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
   const timing = computePostcardTiming(props as never);
+  const plan = resolveFramePlan('postcard', props);
   const hook = asRecord(props.hook);
   const hookLines = hook ? asArray(hook.lines) : [];
   const hookEnd = timing.hookFrames / FPS;
-  for (const raw of hookLines) {
-    const text = typeof raw === 'string' ? raw : '';
+  const shownHook = plan.hook ? hookTexts(plan.hook) : hookLines.map((raw) => (typeof raw === 'string' ? raw : ''));
+  for (const text of shownHook) {
     out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
   }
   const scenes = asArray(props.scenes);
@@ -176,10 +185,20 @@ function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
     const title = typeof end.title === 'string' ? end.title : '';
     out.push({
       kind: 'brand_card',
-      text: title,
+      text: plan.endCard ? plan.endCard.cta : title,
       startSec: timing.priceFrom / FPS,
       endSec: timing.totalFrames / FPS,
     });
+  } else if (plan.endCard) {
+    const windows = overlayWindows(timing.totalFrames);
+    if (windows.endFrames > 0) {
+      out.push({
+        kind: 'brand_card',
+        text: plan.endCard.cta,
+        startSec: windows.endFrom / FPS,
+        endSec: timing.totalFrames / FPS,
+      });
+    }
   }
   return out;
 }

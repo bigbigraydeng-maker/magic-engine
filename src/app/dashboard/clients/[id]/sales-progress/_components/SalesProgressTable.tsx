@@ -120,7 +120,43 @@ function Footer({ data }: { data: SalesProgressData }): JSX.Element {
   )
 }
 
-export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.Element {
+function MissingCapacityNotice({ rows, clientId }: { rows: UnitProgress[]; clientId: string }): JSX.Element | null {
+  const missing = rows.filter(
+    (row) =>
+      row.unit.capacity === null &&
+      row.unit.capacityNote === null &&
+      row.unit.unitStatus !== 'cancelled' &&
+      row.unit.unitStatus !== 'closed',
+  )
+  if (missing.length === 0) return null
+  return (
+    <div className="mt-3 rounded-xl border border-status-exec/30 bg-status-exec/10 p-4 text-sm text-me-charcoal">
+      <p>
+        有 {missing.length} 个出发日还没填座位数，所以算不出剩余座位。请把座位数补到团目录（导入表格里的「人数」一列），补完这里会自动出数。
+      </p>
+      <p className="mt-2">
+        <a
+          href={`/dashboard/clients/${clientId}/tour-catalog`}
+          className="inline-flex min-h-11 items-center font-semibold text-me-ochre underline"
+        >
+          去团目录
+        </a>
+      </p>
+      <details className="mt-1">
+        <summary className="inline-flex min-h-11 cursor-pointer items-center text-me-charcoal/70">
+          看是哪几个出发日（{missing.length}）
+        </summary>
+        <ul className="mt-1 space-y-0.5 text-xs text-me-charcoal/70">
+          {missing.map((row) => (
+            <li key={row.unit.unitId}>{row.unit.label}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  )
+}
+
+export function SalesProgressTable({ data, clientId }: { data: SalesProgressData; clientId: string }): JSX.Element {
   const { result } = data
   return (
     <div className="text-me-charcoal">
@@ -135,15 +171,16 @@ export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.E
           现在还没有录入任何订单；第一批订单导入后，这里才会有数字。
         </p>
       ) : null}
+      <MissingCapacityNotice rows={result.rows} clientId={clientId} />
       {result.rows.length === 0 ? (
         <p className="mt-2 text-xs text-me-charcoal/70">还没有出发日。</p>
       ) : (
         <>
           <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white shadow-sm">
-            <table className="w-full min-w-[720px] border-collapse text-sm">
+            <table className="w-full min-w-[560px] border-collapse text-sm [&_td:not(:first-child)]:whitespace-nowrap [&_th]:whitespace-nowrap">
               <thead>
                 <tr className="border-b border-me-charcoal/10 bg-me-ivory text-left text-xs text-me-charcoal/70">
-                  <th className="px-3 py-2 font-medium">团 · 出发日</th>
+                  <th className="w-[34%] min-w-[160px] px-3 py-2 font-medium">团 · 出发日</th>
                   <th className="px-3 py-2 font-medium">座位上限</th>
                   <th className="px-3 py-2 font-medium">公司确认</th>
                   <th className="px-3 py-2 font-medium">客人自述</th>

@@ -143,12 +143,186 @@ export function buildRemotionText(props) {
 // Every on-screen string joined for the server-side red-line rescan.
 export function buildRemotionCaption(props) {
   const { hook, items, reveal } = buildRemotionText(props)
-  return [hook, ...items, reveal].join(' · ')
+  return withFrameLines('list', props, [hook, ...items, reveal].join(' · '))
 }
 
 // Format seconds as HH:MM:SS,mmm using integer milliseconds only.
 const fmtTime = (sec) =>
   new Date(Math.round(Math.max(0, sec) * 1000)).toISOString().slice(11, 23).replace('.', ',')
+
+// Append frame-switch copy that is not already in the template's own caption.
+// Kept in plain JS so the worker can load it without the Remotion package's dependencies.
+// engines/remotion/test/frame.test.mjs checks this stays in step with extraCaptionLines.
+const FALLBACK_HOOK_LINE = 'Watch this'
+const FALLBACK_HOOK_LINE_ZH = '先看这里'
+const FALLBACK_CTA = 'Learn more'
+const FALLBACK_CTA_ZH = '了解更多'
+const CJK = /[\u3400-\u9fff]/
+// Media file names carry no copy language, so the language scan skips them.
+const ASSET_FILE = /\.(?:png|jpe?g|webp|gif|avif|mp4|mov|m4v|webm|mp3|wav|m4a|aac)$/i
+
+function looksChineseText(value) {
+  return CJK.test(value)
+}
+
+function collectCopyStrings(value, out, depth) {
+  if (depth > 5 || out.length > 80) return
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (text && !ASSET_FILE.test(text)) out.push(text)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectCopyStrings(item, out, depth + 1)
+    return
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) collectCopyStrings(item, out, depth + 1)
+  }
+}
+
+function workOrderLooksChinese(props) {
+  const bits = []
+  collectCopyStrings(props, bits, 0)
+  return bits.some(looksChineseText)
+}
+
+function frameTrimmed(value) {
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  return text.length > 0 ? text : null
+}
+
+function readFrameConfig(value) {
+  if (!value || typeof value !== 'object') return undefined
+  const frame = {}
+  if (value.hook === false) frame.hook = false
+  else if (value.hook && typeof value.hook === 'object') frame.hook = value.hook
+  if (value.endCard === false) frame.endCard = false
+  else if (value.endCard && typeof value.endCard === 'object') frame.endCard = value.endCard
+  return frame
+}
+
+function hookIsActive(template, frame) {
+  if (frame?.hook === false) return false
+  if (frame?.hook && typeof frame.hook === 'object') return true
+  return template === 'postcard'
+}
+
+function endingKind(props) {
+  if (props.end && typeof props.end === 'object') return 'end'
+  if (props.price && typeof props.price === 'object') return 'price'
+  return 'none'
+}
+
+function endCardIsActive(template, frame, ending) {
+  if (frame?.endCard === false) return false
+  if (frame?.endCard && typeof frame.endCard === 'object') return true
+  return template === 'postcard' && ending === 'end'
+}
+
+function sourceHookLines(template, props) {
+  if (template === 'atmosphere') {
+    return props.line && typeof props.line.text === 'string' ? [props.line.text] : []
+  }
+  if (template === 'montage') return []
+  const lines = props.hook?.lines
+  if (!Array.isArray(lines)) return []
+  return lines
+}
+
+function hookWasInvented(template, props, spec) {
+  const lines = sourceHookLines(template, props).filter((line) => {
+    if (typeof line === 'string') return line.trim().length > 0
+    return typeof line?.text === 'string' && line.text.trim().length > 0
+  })
+  if (spec?.text?.trim() || spec?.question?.trim() || spec?.stat?.trim() || lines.length > 0) return false
+  return true
+}
+
+function endTitle(props) {
+  const title = frameTrimmed(props.end?.title)
+  if (title) return title
+  return frameTrimmed(props.revealTitle)
+}
+
+function pushExtra(bits, value) {
+  const text = frameTrimmed(value)
+  if (text && !bits.includes(text)) bits.push(text)
+}
+
+// Hook copy and end-card copy kept apart so each can join the cue that is on screen at that time.
+export function frameCaptionParts(template, props) {
+  const frame = readFrameConfig(props?.frame)
+  const ending = endingKind(props ?? {})
+  const bits = []
+  const end = []
+  if (hookIsActive(template, frame)) {
+    const spec = frame?.hook && frame.hook !== false ? frame.hook : undefined
+    if (hookWasInvented(template, props ?? {}, spec)) {
+      pushExtra(bits, workOrderLooksChinese(props ?? {}) ? FALLBACK_HOOK_LINE_ZH : FALLBACK_HOOK_LINE)
+    }
+    pushExtra(bits, spec?.text)
+    pushExtra(bits, spec?.stat)
+    pushExtra(bits, spec?.question)
+  }
+  if (endCardIsActive(template, frame, ending)) {
+    const spec = frame?.endCard && frame.endCard !== false ? frame.endCard : undefined
+    const title = endTitle(props ?? {})
+    const ctaFallback = workOrderLooksChinese(props ?? {}) ? FALLBACK_CTA_ZH : FALLBACK_CTA
+    const cta = frameTrimmed(spec?.cta) || title || ctaFallback
+    if (cta === ctaFallback && !frameTrimmed(spec?.cta) && !title) pushExtra(end, ctaFallback)
+    pushExtra(end, spec?.cta)
+    pushExtra(end, spec?.contact)
+    pushExtra(end, spec?.brandName)
+  }
+  return { hook: bits, end }
+}
+
+export function frameCaptionExtras(template, props) {
+  const { hook, end } = frameCaptionParts(template, props)
+  const bits = [...hook]
+  for (const text of end) if (!bits.includes(text)) bits.push(text)
+  return bits
+}
+
+function withFrameLines(template, props, caption) {
+  const extra = frameCaptionExtras(template, props)
+  if (extra.length === 0) return caption
+  return caption ? `${caption} · ${extra.join(' · ')}` : extra.join(' · ')
+}
+
+// Hook copy joins the first cue and end-card copy joins the last cue, so cue times stay ordered and
+// never overlap. A one-cue reel carries both on that cue.
+function withFrameCue(template, props, srt) {
+  const { hook, end } = frameCaptionParts(template, props)
+  if (hook.length === 0 && end.length === 0) return srt
+  const cues = srt.split('\n\n').filter((cue) => cue !== '').map((cue) => cue.split('\n'))
+  if (cues.length === 0) return srt
+  if (hook.length > 0) cues[0].push(hook.join(' '))
+  if (end.length > 0) cues[cues.length - 1].push(end.join(' '))
+  return cues.map((cue) => `${cue.join('\n')}\n\n`).join('')
+}
+
+// Frame-switch copy is painted as-is, so invisible characters must be refused the same way as template copy.
+export function assertFrameTextVisible(props) {
+  const frame = props?.frame
+  if (!frame || typeof frame !== 'object') return
+  const bits = []
+  if (frame.hook && frame.hook !== false) {
+    bits.push(['钩子文字', frame.hook.text], ['钩子数字', frame.hook.stat], ['钩子问题', frame.hook.question])
+  }
+  if (frame.endCard && frame.endCard !== false) {
+    bits.push(['片尾行动', frame.endCard.cta], ['片尾联系', frame.endCard.contact], ['片尾名称', frame.endCard.brandName])
+  }
+  for (const [name, value] of bits) {
+    if (typeof value !== 'string') continue
+    if (clean(value) === '') throw new RemotionOrderError(`${name}清理后是空的（只含不可见字符）`)
+    if (clean(value) !== String(value).trim().normalize('NFKC')) {
+      throw new RemotionOrderError(`${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
+    }
+  }
+}
 
 // Build the SRT captions from the timing layout.
 export function buildRemotionSrt(props, timing, fps) {
@@ -158,9 +332,9 @@ export function buildRemotionSrt(props, timing, fps) {
     cues.push([timing.itemFrom[i] / fps, (timing.itemFrom[i] + timing.itemDur[i]) / fps, items[i]])
   }
   cues.push([timing.revealFrom / fps, timing.totalFrames / fps - 0.1, reveal])
-  return cues
+  return withFrameCue('list', props, cues
     .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
-    .join('')
+    .join(''))
 }
 
 // Every on-screen data-card string (hook, rows, disclaimer) as cleaned strings, in reading order.
@@ -175,7 +349,7 @@ export function buildDatacardText(props) {
 // Every data-card string joined for the server-side red-line rescan.
 export function buildDatacardCaption(props) {
   const { hook, rows, disclaimer } = buildDatacardText(props)
-  return [hook, ...rows, disclaimer].join(' · ')
+  return withFrameLines('datacard', props, [hook, ...rows, disclaimer].join(' · '))
 }
 
 // Refuse data-card props whose hook, labels, values or disclaimer are all invisible after cleaning.
@@ -188,6 +362,7 @@ export function assertDatacardTextVisible(props) {
       throw new RemotionOrderError(`数据卡${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
     }
   }
+  assertFrameTextVisible(props)
 }
 
 // Every on-screen postcard string (hook, scene place + line, price block) as cleaned strings, in reading order.
@@ -210,7 +385,7 @@ export function buildPostcardText(props) {
 // Every postcard string joined for the server-side red-line rescan.
 export function buildPostcardCaption(props) {
   const { hook, scenes, price } = buildPostcardText(props)
-  return [hook, ...scenes, price].join(' · ')
+  return withFrameLines('postcard', props, [hook, ...scenes, price].join(' · '))
 }
 
 // The renderer paints raw props, so text that cleans to nothing or differs once invisible characters are dropped must be refused.
@@ -233,6 +408,7 @@ export function assertPostcardTextVisible(props) {
       throw new RemotionOrderError(`明信片${name}含不可见或双向控制字符：屏幕上显示的和红线复扫看到的可能不一致，请删掉这些字符`)
     }
   }
+  assertFrameTextVisible(props)
 }
 
 // Build the SRT captions from the postcard timing layout.
@@ -241,9 +417,9 @@ export function buildPostcardSrt(props, timing, fps) {
   const cues = [[0, timing.hookFrames / fps, hook]]
   scenes.forEach((text, i) => cues.push([timing.sceneFrom[i] / fps, (timing.sceneFrom[i] + timing.sceneDur[i]) / fps, text]))
   cues.push([timing.priceFrom / fps, timing.totalFrames / fps - 0.1, price])
-  return cues
+  return withFrameCue('postcard', props, cues
     .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
-    .join('')
+    .join(''))
 }
 
 // Atmosphere reel: at most one on-screen line. No line is a valid reel (no text at all).
@@ -253,11 +429,12 @@ export function buildAtmosphereText(props) {
 
 // The line (or nothing) joined for the server-side red-line rescan.
 export function buildAtmosphereCaption(props) {
-  return buildAtmosphereText(props)
+  return withFrameLines('atmosphere', props, buildAtmosphereText(props))
 }
 
 // Text that cleans to nothing or differs once invisible characters are dropped must be refused (only when a line exists).
 export function assertAtmosphereTextVisible(props) {
+  assertFrameTextVisible(props)
   if (props.line == null) return
   const t = props.line.text
   if (clean(t) === '') throw new RemotionOrderError('氛围片文字清理后是空的（只含不可见字符）')
@@ -270,7 +447,7 @@ export function assertAtmosphereTextVisible(props) {
 // check can be measured; the cue is not burned into the picture.
 export function buildAtmosphereSrt(props, timing, fps) {
   const text = buildAtmosphereText(props) || '♪'
-  return `1\n${fmtTime(0)} --> ${fmtTime(timing.totalFrames / fps - 0.1)}\n${text}\n\n`
+  return withFrameCue('atmosphere', props, `1\n${fmtTime(0)} --> ${fmtTime(timing.totalFrames / fps - 0.1)}\n${text}\n\n`)
 }
 
 // ffprobe the staged clip (real duration + pixel size). Injected in tests.
@@ -318,15 +495,15 @@ export function buildDatacardSrt(props, timing, fps) {
     const last = i === rows.length - 1
     cues.push([timing.rowFrom[i] / fps, last ? end : timing.rowFrom[i + 1] / fps, last ? `${text} · ${disclaimer}` : text])
   })
-  return cues
+  return withFrameCue('datacard', props, cues
     .map(([from, to, text], i) => `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${text}\n\n`)
-    .join('')
+    .join(''))
 }
 
 // Every montage word joined with plain spaces for the server-side red-line rescan,
 // so multi-word banned phrases still match as substrings.
 export function buildMontageCaption(props) {
-  return props.words.map((w) => clean(w.text)).join(' ')
+  return withFrameLines('montage', props, props.words.map((w) => clean(w.text)).join(' '))
 }
 
 // Refuse montage props whose words are all invisible after cleaning.
@@ -336,18 +513,19 @@ export function assertMontageTextVisible(props) {
       throw new RemotionOrderError(`蒙太奇第 ${i + 1} 个词清理后是空的（只含不可见字符）`)
     }
   })
+  assertFrameTextVisible(props)
 }
 
 // Build the SRT captions for the montage layout, one cue per word.
 export function buildMontageSrt(props, frameOf, fps) {
   const endSec = frameOf(props.beats, props.totalBeats) / fps
-  return props.words
+  return withFrameCue('montage', props, props.words
     .map((w, i) => {
       const from = frameOf(props.beats, w.at) / fps
       const to = Math.max(from + 0.05, Math.min(frameOf(props.beats, w.at + w.beats) / fps, endSec - 0.1))
       return `${i + 1}\n${fmtTime(from)} --> ${fmtTime(to)}\n${clean(w.text)}\n\n`
     })
-    .join('')
+    .join(''))
 }
 
 // True when `child` is inside `parent` (separator-aware, not a bare prefix).
@@ -851,6 +1029,7 @@ export async function processRemotionOrder({ wo, tmp, deps }) {
     assertAtmosphereTextVisible(props)
     timing = eng.computeAtmosphereTiming(props)
   }
+  if (template === 'list') assertFrameTextVisible(props)
   // After the text checks, before any staging, probing, vocal gate or rendering.
   const contentSubstance = assessContentSubstance(eng, template, remotion, props)
 

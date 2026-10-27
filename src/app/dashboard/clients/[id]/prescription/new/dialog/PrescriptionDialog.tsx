@@ -3,10 +3,11 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
-import { ManualDraftBanner, PrescriberLine, PrescriptionReviewActions } from '../review-actions'
+import { PrescriberLine, PrescriptionReviewActions, PrescriptionStatusNotice } from '../review-actions'
 import { decideTurn, type GoalChoice, type TurnDecision } from './decide-turn'
 import { DraftCard } from './DraftCard'
 import { humanJobError, progressLabel, publicProgressNote } from './copy'
+import { CHAT_NOTE, approveActionsVisible } from './present'
 import { loadPrescriptionDialog, type DialogPrescription } from './load-dialog'
 import { pollSettled, type FollowResult } from './follow-job'
 import { requestGenerate, requestRefine } from './request-prescription'
@@ -29,10 +30,14 @@ export function PrescriptionDialog({
   const currency = useClientAdCurrency(clientId)
   const model = useDialogModel({ clientId, prescriptionId, goalId, supplementOf, reviseOf, currency })
   return (
-    <div className="flex min-h-screen flex-col bg-[#f6f7f2]">
+    <div className="min-h-screen bg-[#f6f7f2]">
       <DialogHeader clientId={clientId} />
-      <DialogBody model={model} />
-      <DialogFooter clientId={clientId} model={model} />
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-8 px-4 py-6">
+        <ChatStage model={model} />
+        {model.loading
+          ? <LoadingPlan progress={model.progress} />
+          : <PlanBody clientId={clientId} model={model} />}
+      </div>
     </div>
   )
 }
@@ -51,45 +56,50 @@ function DialogHeader({ clientId }: { clientId: string }) {
   )
 }
 
-function DialogBody({ model }: { model: DialogModel }) {
+function ChatStage({ model }: { model: DialogModel }) {
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-4">
-      <p role="status" className="text-sm font-black text-me-charcoal">{model.progress}</p>
-      {model.loading ? <p className="text-sm text-me-charcoal/60">正在打开处方</p> : <LoadedBody model={model} />}
+    <section className="min-w-0">
+      <ChatTurns turns={model.turns} />
+      <Composer model={model} />
+      <p className="mt-3 text-xs leading-5 text-me-charcoal/70">{CHAT_NOTE}</p>
+    </section>
+  )
+}
+
+function LoadingPlan({ progress }: { progress: string }) {
+  return (
+    <div>
+      <p role="status" className="text-sm font-semibold text-me-charcoal">{progress}</p>
+      <p className="mt-2 text-sm text-me-charcoal/80">正在打开处方</p>
     </div>
   )
 }
 
-function LoadedBody({ model }: { model: DialogModel }) {
+function PlanBody({ clientId, model }: { clientId: string; model: DialogModel }) {
+  const prescription = model.prescription
+  const approveShown = approveActionsVisible(prescription?.status ?? null, Boolean(prescription?.content))
   return (
-    <>
+    <div className="flex min-w-0 flex-col gap-6">
+      <p role="status" className="text-sm font-semibold text-me-charcoal">{model.progress}</p>
+      {prescription && <PrescriberLine agentName={prescription.agentName} manual={prescription.manual} />}
+      {prescription && (
+        <PrescriptionStatusNotice status={prescription.status} manual={prescription.manual} approveShown={approveShown} />
+      )}
+      <AgreeRow clientId={clientId} model={model} />
       <DraftCard
-        content={model.prescription?.content ?? null}
-        intake={model.prescription?.intake ?? null}
-        selfGrade={model.prescription?.selfGrade ?? null}
+        content={prescription?.content ?? null}
+        intake={prescription?.intake ?? null}
+        selfGrade={prescription?.selfGrade ?? null}
         problem={model.problem}
+        status={prescription?.status ?? null}
       />
-      {model.prescription && <PrescriberLine agentName={model.prescription.agentName} manual={model.prescription.manual} />}
-      <ManualDraftBanner show={Boolean(model.prescription?.manual)} />
-      <ChatTurns turns={model.turns} />
-    </>
-  )
-}
-
-function DialogFooter({ clientId, model }: { clientId: string; model: DialogModel }) {
-  return (
-    <footer className="sticky bottom-0 border-t border-black/10 bg-white px-4 py-3">
-      <div className="mx-auto max-w-3xl space-y-3">
-        <AgreeRow clientId={clientId} model={model} />
-        <Composer model={model} />
-        <p className="text-xs text-me-charcoal/45">对话不会留下。刷新之后，上面仍是这张处方。</p>
-      </div>
-    </footer>
+    </div>
   )
 }
 
 function AgreeRow({ clientId, model }: { clientId: string; model: DialogModel }) {
-  if (model.prescription?.status === 'draft' && model.prescription.content) {
+  const prescription = model.prescription
+  if (approveActionsVisible(prescription?.status ?? null, Boolean(prescription?.content))) {
     return (
       <PrescriptionReviewActions
         onApprove={() => void model.approve()}
@@ -98,31 +108,32 @@ function AgreeRow({ clientId, model }: { clientId: string; model: DialogModel })
       />
     )
   }
-  if (model.prescription?.status !== 'approved') return null
+  if (prescription?.status !== 'approved') return null
   return (
-    <p className="text-sm text-me-charcoal/70">
-      这版已经同意。同意不等于开始花钱。
-      <Link className="ml-2 font-semibold text-me-ochre" href={`/dashboard/clients/${clientId}/execution`}>去看执行进度</Link>
+    <p className="text-sm text-me-charcoal/80">
+      <Link className="font-semibold text-me-ochre" href={`/dashboard/clients/${clientId}/execution`}>去看执行进度</Link>
     </p>
   )
 }
 
 function Composer({ model }: { model: DialogModel }) {
   return (
-    <form onSubmit={model.onSubmit} className="flex items-end gap-2">
-      <label className="flex-1 text-sm font-semibold text-me-charcoal">
+    <form onSubmit={model.onSubmit} className="rounded-3xl border border-black/10 bg-white p-4 shadow-sm sm:p-5">
+      <label className="block min-w-0 text-base font-semibold text-me-charcoal">
         跟华佗说
         <textarea
           value={model.draft}
           onChange={(event) => model.setDraft(event.target.value)}
-          rows={2}
+          rows={6}
           placeholder={placeholder(model.prescription?.status ?? null)}
-          className="mt-1 w-full rounded-lg border border-black/10 px-3 py-2 text-sm font-normal"
+          className="mt-3 min-h-40 w-full resize-y rounded-2xl border border-black/10 bg-[#f6f7f2] px-4 py-4 text-base font-normal leading-7 text-me-charcoal outline-none focus-visible:ring-2 focus-visible:ring-me-charcoal/40"
         />
       </label>
-      <button type="submit" disabled={model.writing || !model.draft.trim()} className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white disabled:opacity-40">
-        发送
-      </button>
+      <div className="mt-3 flex justify-end">
+        <button type="submit" disabled={model.writing || !model.draft.trim()} className="rounded-full bg-me-charcoal px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-40">
+          发送
+        </button>
+      </div>
     </form>
   )
 }
@@ -130,16 +141,20 @@ function Composer({ model }: { model: DialogModel }) {
 function ChatTurns({ turns }: { turns: Turn[] }) {
   if (turns.length === 0) return null
   return (
-    <ol className="space-y-2">
+    <ol className="mb-5 space-y-4">
       {turns.map((turn, index) => (
-        <li key={`${turn.role}-${index}`} className={turn.role === 'user' ? 'text-right' : 'text-left'}>
-          <p className="inline-block max-w-[85%] whitespace-pre-wrap rounded-xl bg-white px-3 py-2 text-sm text-me-charcoal shadow-sm">
-            {turn.text}
-          </p>
+        <li key={`${turn.role}-${index}`} className={turn.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
+          <p className={bubbleClass(turn.role)}>{turn.text}</p>
         </li>
       ))}
     </ol>
   )
+}
+
+function bubbleClass(role: Turn['role']): string {
+  const shared = 'max-w-[85%] whitespace-pre-wrap break-words px-4 py-3 text-sm leading-6'
+  if (role === 'user') return `${shared} rounded-3xl rounded-br-md bg-me-charcoal text-white`
+  return `${shared} rounded-3xl rounded-bl-md border border-black/10 bg-white text-me-charcoal`
 }
 
 function placeholder(status: string | null): string {

@@ -1,6 +1,8 @@
 import React from 'react'
 import { AbsoluteFill, Audio, interpolate, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from 'remotion'
 import { Logo } from './components'
+import { FrameOverlay } from './FrameOverlay'
+import { brandColorOf, overlayWindows, resolveFramePlan } from './frame'
 import { parseAtmosphereProps, computeAtmosphereTiming, FADE_START_OPACITY, type AtmosphereProps, type AtmosphereTiming } from './atmosphere'
 import { FPS } from './timing'
 import { fontFamily } from './theme'
@@ -58,6 +60,8 @@ const TextLine: React.FC<{ props: AtmosphereProps; timing: AtmosphereTiming }> =
 export const AtmosphereReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseAtmosphereProps(templateProps(rawProps))
   const timing = computeAtmosphereTiming(props)
+  const plan = resolveFramePlan('atmosphere', props)
+  const windows = overlayWindows(timing.totalFrames)
   const frame = useCurrentFrame()
   const cover = interpolate(
     frame,
@@ -72,12 +76,15 @@ export const AtmosphereReel: React.FC<Record<string, unknown>> = (rawProps) => {
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
   )
   const logoFrom = props.logoMode === 'always' ? 0 : Math.max(0, timing.totalFrames - 60)
+  const logoUntil = plan.endCard ? windows.endFrom : timing.totalFrames
+  const hideLine = plan.hook !== null && frame < windows.hookFrames
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       <AtmosphereFootage props={props} timing={timing} />
-      <TextLine props={props} timing={timing} />
+      {hideLine ? null : <TextLine props={props} timing={timing} />}
       <AbsoluteFill style={{ background: '#000', opacity: cover }} />
-      <Sequence from={logoFrom} durationInFrames={timing.totalFrames - logoFrom}><Logo file={props.logoFile} /></Sequence>
+      {logoUntil > logoFrom ? <Sequence from={logoFrom} durationInFrames={logoUntil - logoFrom}><Logo file={props.logoFile} /></Sequence> : null}
+      <FrameOverlay totalFrames={timing.totalFrames} hook={plan.hook} endCard={plan.endCard} brandColor={brandColorOf(props)} />
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
