@@ -15,11 +15,21 @@
  */
 
 import { hasEnquiryRecord, type TouchKind } from '@/lib/crm/email-compose/enquiry-record'
-import { readEmailComposeConfig, type EmailComposeConfig } from '@/lib/crm/email-compose/config'
 import { evaluateQuota, quotaMessage, type EmailUsage } from '@/lib/crm/email-compose/quota'
 import { isUuid, normalizeRecipient, pickRecipient, sanitizeBody, sanitizeSubject } from '@/lib/crm/email-compose/validate'
 import type { ManualSendDncGate } from '@/lib/crm/manual-send-dnc-gate'
 import { classifySender } from '@/lib/microsoft/mail-sender'
+import { effectiveFromLegacy, effectiveFromSettings, type EffectiveEmailConfig } from '@/lib/crm/email-templates/effective-config'
+import {
+  GATE_MESSAGES,
+  type GateFailure,
+  type GateReason,
+  type MailNewGates,
+  type PreLockResult,
+  type SendMeta,
+  type TemplateRequest,
+} from '@/lib/crm/email-templates/send-gates'
+import type { LoadSettingsResult } from '@/lib/crm/email-templates/settings-store'
 
 export interface SendMailNewInput {
   clientId: string
@@ -30,6 +40,8 @@ export interface SendMailNewInput {
   requestId: unknown
   /** 抽屉上显示给销售看的那个收件地址；和服务端最终取的不一致就拒发。 */
   expectedRecipient: unknown
+  /** Set when the message was started from a template; the new gates verify it. Ignored for legacy configs. */
+  template?: TemplateRequest | null
 }
 
 export type SendMailNewReason =
@@ -52,10 +64,11 @@ export type SendMailNewReason =
   | 'audit_failed'
   | 'graph_failed'
   | 'send_unknown'
+  | GateReason
 
 export type SendMailNewResult =
-  | { ok: true; messageId: string; conversationId: string; duplicate?: boolean }
-  | { ok: false; status: 400 | 403 | 404 | 409 | 424 | 429 | 502 | 503; reason: SendMailNewReason; error: string }
+  | { ok: true; messageId: string; conversationId: string; duplicate?: boolean; meta?: SendMeta }
+  | { ok: false; status: 400 | 403 | 404 | 409 | 424 | 429 | 502 | 503; reason: SendMailNewReason; error: string; meta?: SendMeta }
 
 export interface MailboxChoice {
   connectionId: string
@@ -80,6 +93,8 @@ export type ClaimResult = { kind: 'claimed'; conversationId: string } | { kind: 
 
 export interface MailNewStore {
   loadLeadsConfig(clientId: string): Promise<unknown>
+  /** The client's versioned send settings. Absent on stores that only know the legacy leads_config keys. */
+  loadSettings?(clientId: string): Promise<LoadSettingsResult>
   /** 别再联系闸（按联系人，fail-closed）。 */
   checkDnc(clientId: string, contactId: string): Promise<ManualSendDncGate>
   loadContact(clientId: string, contactId: string): Promise<{ id: string; primaryEmail: string | null } | null>
@@ -117,6 +132,8 @@ export interface MailNewDeps {
   store: MailNewStore
   graph: MailNewGraph
   now?: () => Date
+  /** The template-era gates. Only clients with a settings row run them; legacy configs behave exactly as before. */
+  gates?: MailNewGates
 }
 
 const fail = (
@@ -131,9 +148,28 @@ export const metaIdFor = (requestId: string, kind: 'draft' | 'msg', id: string):
 const PENDING_UNKNOWN_AFTER_MS = 2 * 60_000
 
 interface Resolved {
-  config: EmailComposeConfig
+  config: EffectiveEmailConfig
   to: string
   mailbox: MailboxChoice
+}
+
+/**
+ * 读发信设置。客户有版本化设置行就**严格**解析（坏值 = 拒发，绝不回落成默认）；没有设置行才沿用旧的 leads_config 键。
+ */
+async function loadEffectiveConfig(
+  clientId: string,
+  store: MailNewStore,
+): Promise<EffectiveEmailConfig | SendMailNewResult> {
+  try {
+    if (store.loadSettings) {
+      const settings = await store.loadSettings(clientId)
+      if (settings.kind === 'ok') return effectiveFromSettings(settings.settings, settings.version)
+      if (settings.kind === 'invalid') return fail(503, 'config_invalid', GATE_MESSAGES.config_invalid)
+    }
+    return effectiveFromLegacy(await store.loadLeadsConfig(clientId))
+  } catch {
+    return fail(503, 'config_unreadable', '系统暂时读不到发信设置，这封没有发出。')
+  }
 }
 
 /** 第 1–6 步：把所有「能不能发、发给谁、从哪发」判清楚，任何一步不过就返回失败。 */
@@ -143,13 +179,9 @@ async function resolveSend(
   verifyMailbox = true,
 ): Promise<Resolved | SendMailNewResult> {
   const { store } = deps
-  let leadsConfig: unknown
-  try {
-    leadsConfig = await store.loadLeadsConfig(input.clientId)
-  } catch {
-    return fail(503, 'config_unreadable', '系统暂时读不到发信设置，这封没有发出。')
-  }
-  const config = readEmailComposeConfig(leadsConfig)
+  const loaded = await loadEffectiveConfig(input.clientId, store)
+  if ('ok' in loaded) return loaded
+  const config = loaded
   if (!config.enabled) return fail(403, 'disabled', '这个客户还没开通「在 CRM 里发邮件」。')
 
   const contact = await store.loadContact(input.clientId, input.contactId)
@@ -164,6 +196,10 @@ async function resolveSend(
   }
   if (normalizeRecipient(input.expectedRecipient) !== pick.email) {
     return fail(409, 'recipient_mismatch', '收件地址在你打开页面之后变了，请刷新后再发。')
+  }
+  // 灰度名单：非空时只能发给名单内地址（在碰邮箱 / Graph 之前就拦）
+  if (config.recipientAllowlist !== null && !config.recipientAllowlist.includes(pick.email)) {
+    return fail(403, 'recipient_not_allowed', GATE_MESSAGES.recipient_not_allowed)
   }
 
   if (!config.allowUnsolicited && !hasEnquiryRecord(await store.loadTouchKinds(input.clientId, input.contactId))) {
@@ -180,7 +216,7 @@ async function resolveSend(
 
 async function chooseMailbox(
   clientId: string,
-  config: EmailComposeConfig,
+  config: EffectiveEmailConfig,
   deps: MailNewDeps,
   verify = true,
 ): Promise<MailboxChoice | SendMailNewResult> {
@@ -237,6 +273,25 @@ export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): P
     return fail(409, 'duplicate_unfinished', '这封邮件已经在处理中或发送状态不明，请稍后看时间线，先别重发。')
   }
 
+  // 模板时代新增的锁前检查：版本新鲜、所选团仍在售、文字红线。只有「有版本化设置」的客户才跑，旧配置行为不变。
+  let pre: Extract<PreLockResult, { ok: true }> | null = null
+  if (deps.gates !== undefined && config.source === 'settings') {
+    const step = await deps.gates.preLock({
+      clientId: input.clientId,
+      contactId: input.contactId,
+      sentByEmail: input.sentByEmail,
+      config,
+      subject,
+      body,
+      footer: config.footer,
+      template: input.template ?? null,
+      to,
+      now: (deps.now ?? (() => new Date()))(),
+    })
+    if (!step.ok) return gateFailure(step)
+    pre = step
+  }
+
   const unresolved = await reconcile(input.clientId, input.contactId, mailbox, deps)
   if (unresolved) return unresolved
 
@@ -250,7 +305,7 @@ export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): P
     return fail(409, 'busy', '这个客人正在发送另一封邮件，请稍等。')
   }
   try {
-    return await claimAndSend({ input, subject, body: appendFooter(body, config.footer), requestId, to, mailbox }, deps)
+    return await sendUnderLock({ input, subject, body, requestId, to, mailbox, config, pre }, deps)
   } finally {
     await store.releaseContactLock(input.clientId, input.contactId).catch((err) => {
       console.error('[mail-send-new] 释放发送锁失败（5 分钟后自动失效）:', err)
@@ -260,6 +315,44 @@ export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): P
 
 function appendFooter(body: string, footer: string | null): string {
   return footer ? `${body}\n\n${footer}` : body
+}
+
+function gateFailure(step: GateFailure): SendMailNewResult {
+  return { ok: false, status: step.status, reason: step.reason, error: step.error, meta: step.meta }
+}
+
+interface LockedSend {
+  input: SendMailNewInput
+  subject: string
+  body: string
+  requestId: string
+  to: string
+  mailbox: MailboxChoice
+  config: EffectiveEmailConfig
+  pre: Extract<PreLockResult, { ok: true }> | null
+}
+
+// 已经拿到联系人锁：先跑「锁内」的检查（防重复跟进、7 天频次——必须在锁内数，防两个人同时都通过），再发。
+async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendMailNewResult> {
+  const { input, config, pre } = args
+  let meta = pre === null ? undefined : pre.meta
+  if (pre !== null && deps.gates !== undefined) {
+    const step = await deps.gates.inLock({
+      clientId: input.clientId,
+      contactId: input.contactId,
+      config,
+      state: pre.state,
+      meta: pre.meta,
+      now: (deps.now ?? (() => new Date()))(),
+    })
+    if (!step.ok) return gateFailure(step)
+    meta = step.meta
+  }
+  const sent = await claimAndSend(
+    { input, subject: args.subject, body: appendFooter(args.body, config.footer), requestId: args.requestId, to: args.to, mailbox: args.mailbox },
+    deps,
+  )
+  return meta === undefined ? sent : { ...sent, meta }
 }
 
 async function checkDnc(input: SendMailNewInput, deps: MailNewDeps): Promise<SendMailNewResult | null> {

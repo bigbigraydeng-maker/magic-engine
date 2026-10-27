@@ -438,3 +438,39 @@ describe('dedupe by message id', () => {
     expect(items).toHaveLength(2)
   })
 })
+
+describe('contact-scoped items (audit rows and touchpoints carry no address)', () => {
+  it('an item with an empty address counts for the primary address', async () => {
+    const v = await run(
+      sources({ audit: async () => ({ ok: true, items: [item({ at: ago(MIN), address: '' })] }) }),
+      { max: 5, windowDays: 7 },
+    )
+    expect(v.ok).toBe(true)
+    if (v.ok) expect(v.count).toBe(1)
+  })
+
+  it('and dedupes against the same message reported by sent items for the primary address', async () => {
+    const at = ago(MIN)
+    const v = await run(
+      sources({
+        audit: async () => ({ ok: true, items: [item({ at, address: '', subject: null })] }),
+        sentItems: async () => ({ ok: true, items: [item({ source: 'sent_items', at, subject: 'Your itinerary' })] }),
+      }),
+      { max: 5, windowDays: 7 },
+    )
+    expect(v.ok).toBe(true)
+    if (v.ok) expect(v.count).toBe(1)
+  })
+
+  it('still counts toward the cap', async () => {
+    const v = await run(
+      sources({
+        touchpoints: async () => ({
+          ok: true,
+          items: [item({ at: ago(5 * MIN), address: '', subject: 'a' }), item({ at: ago(MIN), address: '', subject: 'b' })],
+        }),
+      }),
+    )
+    expect(v.ok).toBe(false)
+  })
+})

@@ -7,6 +7,7 @@ import type {
   PickInput,
   ProviderValue,
   RenderFacts,
+  ResolvePicksResult,
   ResolvedPick,
   VariableSpec,
 } from './types'
@@ -28,9 +29,7 @@ export interface PickOption {
   }>
 }
 
-export type ResolvePicksResult =
-  | { ok: true; picks: ResolvedPick[] }
-  | { ok: false; reason: 'invalid_pick' | 'tour_unavailable'; detail: string }
+export type { ResolvePicksResult }
 
 const MAX_MANY_PICKS = 3
 
@@ -198,9 +197,9 @@ function bulletList(items: readonly string[], count: number | null): string | nu
 
 function priceTextFor(pick: ResolvedPick): string | null {
   const base = pick.tour.displayPriceText
-  if (isBlank(base)) return null
+  if (base === null || isBlank(base)) return null
   const override = pick.departure?.priceTextOverride
-  if (isBlank(override)) return base
+  if (override === null || override === undefined || isBlank(override)) return base
   const baseAmounts = new Set(extractAmounts(base))
   const overrideAmounts = extractAmounts(override)
   const differs = overrideAmounts.some((a) => !baseAmounts.has(a))
@@ -427,6 +426,7 @@ export const publishedToursProvider: FactProvider = {
   id: 'published_tours',
   variables: VARIABLES,
   resolve: resolveVariable,
+  resolvePicks,
   checkLinks,
   knownAmounts,
   sellable,

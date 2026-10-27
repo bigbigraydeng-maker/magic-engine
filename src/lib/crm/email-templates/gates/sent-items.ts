@@ -1,5 +1,5 @@
 import { isAutoReply } from '@/lib/microsoft/auto-reply'
-import type { OutboundItem } from '../types'
+import type { OutboundItem } from './types'
 
 export interface GraphSentMessage {
   id: string

@@ -27,7 +27,7 @@ export interface OutboundItem {
   /** ISO timestamp of sending. */
   at: string
   subject: string | null
-  /** Lower-case recipient address this item counts for. */
+  /** Lower-case recipient address this item counts for. '' = contact-scoped (audit rows, touchpoints): counted for the primary address. */
   address: string
 }
 

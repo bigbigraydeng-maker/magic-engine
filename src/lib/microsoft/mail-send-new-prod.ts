@@ -4,7 +4,10 @@
  * 设计稿：docs/specs/2026-10-21-crm-send-first-email-design-v0.md
  */
 
+import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
+import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
+import { createSendGatesProd } from '@/lib/crm/email-templates/send-gates-prod'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { checkManualSendDncForContact } from '@/lib/crm/manual-send-dnc-gate'
@@ -14,6 +17,7 @@ import type { GraphSendOutcome, MailNewDeps, MailNewGraph, MailNewStore, Pending
 
 const LOCK_STALE_MS = 5 * 60_000
 const UNIQUE_VIOLATION = '23505'
+const GRAPH_TIMEOUT_MS = 15_000
 
 const lockKey = (contactId: string): string => `mail-lock:${contactId}`
 
@@ -24,7 +28,10 @@ function metaPart(meta: string | null, kind: 'draft' | 'msg'): string | null {
 
 export function createMailNewStore(): MailNewStore {
   const db = supabaseAdmin
+  // Lock tokens of this store instance (one per request): release only deletes OUR lock row.
+  const lockTokens = new Map<string, string>()
   return {
+    loadSettings: (clientId) => loadEmailSettings(db, clientId),
     async loadLeadsConfig(clientId) {
       const { data, error } = await db.from('clients').select('leads_config').eq('id', clientId).maybeSingle()
       if (error) throw new Error(error.message)
@@ -117,13 +124,23 @@ export function createMailNewStore(): MailNewStore {
     },
     async acquireContactLock(clientId, contactId, mailbox) {
       await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', lockKey(contactId)).lt('created_at', new Date(Date.now() - LOCK_STALE_MS).toISOString())
-      const { error } = await db.from('conversations').insert({ client_id: clientId, channel: 'email', page_id: mailbox, conversation_id: lockKey(contactId) })
-      if (!error) return true
+      // The subject column of a lock row carries a random token. If a send outlives LOCK_STALE_MS and another request
+      // takes the lock over, our release must not delete theirs.
+      const token = randomUUID()
+      const { error } = await db.from('conversations').insert({ client_id: clientId, channel: 'email', page_id: mailbox, conversation_id: lockKey(contactId), subject: token })
+      if (!error) {
+        lockTokens.set(lockKey(contactId), token)
+        return true
+      }
       if (error.code === UNIQUE_VIOLATION) return false
       throw new Error(error.message)
     },
     async releaseContactLock(clientId, contactId) {
-      await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', lockKey(contactId))
+      const key = lockKey(contactId)
+      const token = lockTokens.get(key)
+      lockTokens.delete(key)
+      if (token === undefined) return // this store instance never took the lock, so there is nothing of ours to delete
+      await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', key).eq('subject', token)
     },
     async claimConversation({ clientId, contactId, requestId, mailbox, subject }) {
       const { data, error } = await db
@@ -177,7 +194,11 @@ const PREFER = { Prefer: 'IdType="ImmutableId"' }
 async function graphJson<T>(token: string, path: string, init: RequestInit): Promise<GraphCallResult<T>> {
   let res: Response
   try {
-    res = await fetch(`${GRAPH}${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, ...PREFER, ...(init.headers ?? {}) } })
+    res = await fetch(`${GRAPH}${path}`, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+      headers: { Authorization: `Bearer ${token}`, ...PREFER, ...(init.headers ?? {}) },
+    })
   } catch (err) {
     return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) }
   }
@@ -221,6 +242,25 @@ export function createMailNewGraph(): MailNewGraph {
   }
 }
 
-export function createMailNewDeps(): MailNewDeps {
-  return { store: createMailNewStore(), graph: createMailNewGraph() }
+/** One page of a Graph list, for the sent-items scan behind the per-guest cap. Only follows links on the Graph host. */
+export async function graphGetPage(
+  connectionId: string,
+  pathOrUrl: string,
+): Promise<{ ok: true; json: unknown } | { ok: false; error: string }> {
+  let path: string
+  if (pathOrUrl.startsWith(`${GRAPH}/`)) path = pathOrUrl.slice(GRAPH.length)
+  else if (pathOrUrl.startsWith('/') && !pathOrUrl.startsWith('//')) path = pathOrUrl
+  else return { ok: false, error: 'refusing to follow a link outside Microsoft Graph' }
+  const result = await callWithRetry(connectionId, (token) => graphJson<unknown>(token, path, { method: 'GET' }))
+  return result.ok ? { ok: true, json: result.value } : { ok: false, error: result.error }
+}
+
+/** Pass the client id to get the template-era gates (they are scoped to that one client). */
+export function createMailNewDeps(clientId?: string): MailNewDeps {
+  const store = createMailNewStore()
+  const deps: MailNewDeps = { store, graph: createMailNewGraph() }
+  if (clientId !== undefined) {
+    deps.gates = createSendGatesProd({ clientId, listActiveMailboxes: store.listActiveMailboxes, graphGetPage })
+  }
+  return deps
 }

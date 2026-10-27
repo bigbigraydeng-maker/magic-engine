@@ -182,7 +182,12 @@ export async function evaluateFrequency(args: {
   }
 
   const addressSet = new Set(addresses.map((a) => a.toLowerCase()))
-  const filtered = filterItems(collected.items, addressSet, sinceMs, nowMs)
+  // Audit rows and touchpoints belong to the contact, not to an address: they count for the primary address.
+  const primary = addresses.length > 0 ? addresses[0].toLowerCase() : ''
+  const scoped = collected.items.map((item) =>
+    item.address === '' && primary !== '' ? { ...item, address: primary } : item,
+  )
+  const filtered = filterItems(scoped, addressSet, sinceMs, nowMs)
   const items = dedupeItems(filtered)
   const count = items.length
 

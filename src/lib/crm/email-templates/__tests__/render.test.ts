@@ -28,6 +28,9 @@ const stubProvider: FactProvider = {
     if (name === 'tour_highlights') return { ok: true, value: TOUR_HIGHLIGHTS }
     return { ok: false, missing: name }
   },
+  resolvePicks() {
+    return { ok: true, picks: [] }
+  },
   checkLinks() {
     return []
   },

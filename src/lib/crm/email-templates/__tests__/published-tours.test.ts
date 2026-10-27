@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildTourUrl,
-  knownAmounts as _unusedKnownAmounts,
   listPickOptions,
   publishedToursProvider,
   resolvePicks,
@@ -12,8 +11,6 @@ import type {
   PublishedTourFact,
   PublishedTourFactDeparture,
 } from '@/lib/tour-catalog/publish-contract'
-
-void _unusedKnownAmounts
 
 const settings: PublishedToursProviderSettings = {
   urlPattern: 'https://www.example.com/tours/{destination}/{tier}/{slug}',

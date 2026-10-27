@@ -8,7 +8,7 @@ export interface ContentGateInput {
   subject: string
   body: string
   footer: string | null
-  settings: EmailSettings
+  settings: Pick<EmailSettings, 'guardrails'>
   provider: FactProvider | null
   facts: RenderFacts | null
 }
@@ -158,7 +158,7 @@ function checkLink(url: string, allowedHosts: readonly string[]): GateViolation[
 
 function checkLinks(
   composed: string,
-  settings: EmailSettings,
+  settings: Pick<EmailSettings, 'guardrails'>,
   provider: FactProvider | null,
   facts: RenderFacts | null,
 ): GateViolation[] {
@@ -184,7 +184,7 @@ function escapeRegex(text: string): string {
 
 function checkPhrases(
   normalizedComposed: string,
-  settings: EmailSettings,
+  settings: Pick<EmailSettings, 'guardrails'>,
 ): { blocks: GateViolation[]; warnings: GateViolation[] } {
   const blocks: GateViolation[] = []
   const warnings: GateViolation[] = []

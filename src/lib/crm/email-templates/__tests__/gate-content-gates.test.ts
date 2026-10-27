@@ -56,6 +56,7 @@ function stubProvider(): FactProvider {
     id: 'published_tours',
     variables: {},
     resolve: () => ({ ok: false, missing: 'stub' }),
+    resolvePicks: () => ({ ok: true, picks: [] }),
     checkLinks: (urls: readonly string[]): LinkViolation[] => {
       const out: LinkViolation[] = []
       for (const url of urls) {

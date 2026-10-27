@@ -50,7 +50,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       requestId: payload.requestId,
       expectedRecipient: payload.expectedRecipient,
     },
-    createMailNewDeps(),
+    createMailNewDeps(params.id),
   )
 
   if (!result.ok) {

@@ -15,6 +15,8 @@
  * 所以只需要一个环境变量，不用另配 region。
  */
 
+import { createHash } from 'node:crypto'
+
 const API_VERSION = '3.0'
 
 export interface MailchimpCampaign {
@@ -257,6 +259,32 @@ export async function getCampaignActivity(
     openers as Array<{ email_address?: string; last_open?: string }>,
     clickers as Array<{ email_address?: string; timestamp?: string }>,
   )
+}
+
+/** `not_recipient` = the address was not sent this campaign; `hard` = it bounced and never arrived. */
+export type CampaignRecipientStatus = 'sent' | 'soft' | 'hard' | 'not_recipient'
+
+/**
+ * 这个邮箱收到过这封群发吗（官方「Get campaign recipient info」：subscriber_hash = 小写邮箱的 MD5）。
+ * 404 = 不是收件人；其它错误照常抛（调用方要把「查不了」当成「无法核实」，不能当成「没收到」）。
+ * 返回了不认识的 status 时按 `sent` 算：宁可多数一封。
+ */
+export async function getCampaignRecipientStatus(
+  apiKey: string,
+  campaignId: string,
+  email: string,
+): Promise<CampaignRecipientStatus> {
+  const hash = createHash('md5').update(email.trim().toLowerCase()).digest('hex')
+  try {
+    const json = await call<{ status?: string }>(
+      apiKey,
+      `/reports/${encodeURIComponent(campaignId)}/sent-to/${hash}`,
+    )
+    return json.status === 'soft' || json.status === 'hard' ? json.status : 'sent'
+  } catch (err) {
+    if (err instanceof MailchimpError && err.status === 404) return 'not_recipient'
+    throw err
+  }
 }
 
 /** key 能不能用。配好之后先跑这个,别等同步时才发现 401。 */
