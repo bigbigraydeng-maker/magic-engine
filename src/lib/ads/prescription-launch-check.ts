@@ -7,7 +7,8 @@ const NZ = 'Pacific/Auckland'
 const HOUR_MS = 3_600_000
 const LEADS = new Set(['线索', 'lead', 'leads', 'leads_count'])
 const COSTS = new Set(['成本', 'cpl', 'cost'])
-// 个人 IP：私信对话数汇总 results（线索与私信的较大值）。
+// 个人 IP：私信对话数单独汇总 messaging_conversations。
+// 没读到对话数就是不知道，不能用 results（线索与私信的较大值）代替。
 // 看完数汇总 video_thruplays；没读到观看数就是不知道，不能用 results 代替。
 const CONVERSATIONS = new Set(['对话数', '私信对话数', 'conversations', 'dm_conversations'])
 const VIEWS = new Set(['看完数', '视频看完数', 'thruplays', 'video_views'])
@@ -64,6 +65,8 @@ export interface InsightRef {
   results: number | null
   /** ThruPlays。null / 缺省 = 这天没读到观看数，不能当成 0。 */
   videoThruplays?: number | null
+  /** 私信对话数。null / 缺省 = 这天没读到对话数，不能用 results 代替，也不能当成 0。 */
+  messagingConversations?: number | null
 }
 
 export interface KpiRef {
@@ -426,10 +429,11 @@ function pushReadable(
   const leads = sumColumn(rows, 'results')
   const spend = sumColumn(rows, 'spend')
   const views = sumColumn(rows, 'videoThruplays')
+  const conversations = sumColumn(rows, 'messagingConversations')
   for (const kpi of kpis) {
     const kind = metricKind(kpi.metric)
     if (kind === 'leads') pushLead(kpi, leads, parts, comparisons)
-    else if (kind === 'conversations') pushCount(kpi, '对话数', leads, parts, comparisons)
+    else if (kind === 'conversations') pushCount(kpi, '对话数', conversations, parts, comparisons)
     else if (kind === 'views') pushCount(kpi, '看完数', views, parts, comparisons)
     else if (kind === 'cost') pushCost(kpi, leads, spend, parts, comparisons)
   }
@@ -437,7 +441,7 @@ function pushReadable(
 
 function sumColumn(
   rows: readonly InsightRef[],
-  key: 'results' | 'spend' | 'videoThruplays',
+  key: 'results' | 'spend' | 'videoThruplays' | 'messagingConversations',
 ): number | null {
   let total = 0
   for (const row of rows) {

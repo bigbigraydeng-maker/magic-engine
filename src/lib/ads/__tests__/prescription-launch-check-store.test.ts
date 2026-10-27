@@ -134,11 +134,29 @@ describe('prescription launch check store', () => {
     const rows = await supabaseLaunchStore().listInsights('c1', 'camp')
     expect(db.selects).toContainEqual({
       table: 'ad_daily_insights',
-      columns: 'insight_date, spend, results, video_thruplays',
+      columns: 'insight_date, spend, results, video_thruplays, messaging_conversations',
     })
     expect(rows).toEqual([
-      { insightDate: '2026-10-26', spend: 9.5, results: 0, videoThruplays: 80 },
-      { insightDate: '2026-10-27', spend: 0, results: 4, videoThruplays: null },
+      { insightDate: '2026-10-26', spend: 9.5, results: 0, videoThruplays: 80, messagingConversations: null },
+      { insightDate: '2026-10-27', spend: 0, results: 4, videoThruplays: null, messagingConversations: null },
+    ])
+  })
+
+  it('reads messaging conversations separately from results', async () => {
+    db.tables.ad_daily_insights = [
+      {
+        client_id: 'c1', level: 'campaign', entity_id: 'camp',
+        insight_date: '2026-10-26', spend: 10, results: 20, messaging_conversations: 2,
+      },
+      {
+        client_id: 'c1', level: 'campaign', entity_id: 'camp',
+        insight_date: '2026-10-27', spend: 0, results: 4,
+      },
+    ]
+    const rows = await supabaseLaunchStore().listInsights('c1', 'camp')
+    expect(rows).toEqual([
+      { insightDate: '2026-10-26', spend: 10, results: 20, videoThruplays: null, messagingConversations: 2 },
+      { insightDate: '2026-10-27', spend: 0, results: 4, videoThruplays: null, messagingConversations: null },
     ])
   })
 })

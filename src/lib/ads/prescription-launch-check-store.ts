@@ -102,7 +102,7 @@ async function listApprovedPrescriptions(clientId: string): Promise<StoredPrescr
 }
 
 async function listInsights(clientId: string, campaignId: string): Promise<InsightRef[]> {
-  const data = await eqRows('ad_daily_insights', 'insight_date, spend, results, video_thruplays', [
+  const data = await eqRows('ad_daily_insights', 'insight_date, spend, results, video_thruplays, messaging_conversations', [
     ['client_id', clientId],
     ['level', 'campaign'],
     ['entity_id', campaignId],
@@ -233,6 +233,7 @@ function insightFrom(value: unknown): InsightRef {
     spend: row ? readMetric(row.spend) : null,
     results: row ? readMetric(row.results) : null,
     videoThruplays: row ? readMetric(row.video_thruplays) : null,
+    messagingConversations: row ? readMetric(row.messaging_conversations) : null,
   }
 }
 

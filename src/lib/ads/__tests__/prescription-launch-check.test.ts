@@ -78,9 +78,21 @@ function sentence(now: string, label: string, insights?: InsightRef[], targets?:
 
 /** First day keeps `first`; later days are 0 when a number was read, otherwise still unread. */
 function viewsOn(rows: InsightRef[], first: number | null): InsightRef[] {
+  return fillColumn(rows, 'videoThruplays', first)
+}
+
+function conversationsOn(rows: InsightRef[], first: number | null): InsightRef[] {
+  return fillColumn(rows, 'messagingConversations', first)
+}
+
+function fillColumn(
+  rows: InsightRef[],
+  key: 'videoThruplays' | 'messagingConversations',
+  first: number | null,
+): InsightRef[] {
   return rows.map((row, index) => ({
     ...row,
-    videoThruplays: index === 0 ? first : (typeof first === 'number' ? 0 : null),
+    [key]: index === 0 ? first : (typeof first === 'number' ? 0 : null),
   }))
 }
 
@@ -130,18 +142,19 @@ describe('prescription launch check', () => {
     expect(line).toContain('线索 3 条，目标 10 条')
   })
 
-  it('reads 对话数 from results and 看完数 from video views', () => {
+  it('reads 对话数 from conversations and 看完数 from video views', () => {
     const personalKpis: KpiRef[] = [
       { metric: '私信对话数', target: 10, unit: '个' },
       { metric: '看完数', target: 10, unit: '次' },
     ]
-    const line = sentence(
-      '2026-11-02T00:00:00.000Z', '第 7 天', viewsOn(series(), 40), personalKpis,
-    )
+    const rows = conversationsOn(viewsOn(series({ results: 20 }), 40), 12)
+    const line = sentence('2026-11-02T00:00:00.000Z', '第 7 天', rows, personalKpis)
     expect(line).toContain('达标')
     expect(line).toContain('对话数 12 个，目标 10 个')
     expect(line).toContain('看完数 40 次，目标 10 次')
+    expect(line).not.toContain('对话数 20')
     expect(line).not.toContain('看完数 12')
+    expect(line).not.toContain('看完数 20')
     expect(line).not.toContain('认不出来')
   })
 
@@ -181,11 +194,38 @@ describe('prescription launch check', () => {
 
   it('says 没达标 when 对话数 is under target', () => {
     const line = sentence(
-      '2026-11-02T00:00:00.000Z', '第 7 天', series({ results: 3 }),
+      '2026-11-02T00:00:00.000Z', '第 7 天',
+      conversationsOn(series({ results: 20 }), 3),
       [{ metric: '对话数', target: 10, unit: '个' }],
     )
     expect(line).toContain('没达标')
     expect(line).toContain('对话数 3 个，目标 10 个')
+    expect(line).not.toContain('对话数 20')
+  })
+
+  it('does not count 20 leads as 20 conversations when only 2 conversations were read', () => {
+    const line = sentence(
+      '2026-11-02T00:00:00.000Z', '第 7 天',
+      conversationsOn(series({ results: 20 }), 2),
+      [{ metric: '私信对话数', target: 10, unit: '个' }],
+    )
+    expect(line).toContain('没达标')
+    expect(line).toContain('对话数 2 个，目标 10 个')
+    expect(line).not.toContain('对话数 20')
+    expect(line).not.toMatch(/第 7 天：达标/)
+  })
+
+  it('says 不知道 when conversations were not read, and does not substitute leads', () => {
+    const line = sentence(
+      '2026-11-02T00:00:00.000Z', '第 7 天',
+      conversationsOn(series({ results: 20 }), null),
+      [{ metric: '对话数', target: 10, unit: '个' }],
+    )
+    expect(line).toContain('不知道')
+    expect(line).toContain('对话数是空的，不能当成 0')
+    expect(line).not.toContain('对话数 20')
+    expect(line).not.toContain('对话数 0')
+    expect(line).not.toContain('没达标')
   })
 
   it('does not treat a null spend as zero', () => {
