@@ -53,27 +53,41 @@ export async function checkAudiences(
     const row = await ownedAudienceById(id, deps)
     if (row) byId.set(id, row)
   }
-  const missing = [...included, ...excluded].filter((id) => !byId.has(id))
-  if (missing.length > 0) {
-    const error = `受众 ${missing.join('、')} 不属于这个广告账户，所以没建`
-    return { error, checked: failedChecked(error, included, excluded, byId, read.listed) }
-  }
-
-  const includedFacts = included.map((id) => toFact(byId.get(id) as GraphCustomAudience))
-  const excludedFacts = excluded.map((id) => toFact(byId.get(id) as GraphCustomAudience))
-
-  for (const f of includedFacts) {
-    const error = includedAudienceError(f)
-    if (error) return { error, checked: failedChecked(error, included, excluded, byId, read.listed) }
-  }
-  for (const f of excludedFacts) {
-    const error = excludedAudienceError(f)
-    if (error) return { error, checked: failedChecked(error, included, excluded, byId, read.listed) }
-  }
+  const facts = new Map<string, AudienceFact>()
+  for (const [id, row] of byId) facts.set(id, toFact(row))
+  const error = audienceReadinessError(included, excluded, facts)
+  if (error) return { error, checked: failedChecked(error, included, excluded, byId, read.listed) }
   return {
     error: null,
-    checked: { outcome: 'passed', reason: null, included: includedFacts, excluded: excludedFacts },
+    checked: {
+      outcome: 'passed',
+      reason: null,
+      included: included.map((id) => facts.get(id) as AudienceFact),
+      excluded: excluded.map((id) => facts.get(id) as AudienceFact),
+    },
   }
+}
+
+/**
+ * 已经读到的受众事实够不够用。不发请求。
+ * 地图里没有的编号，按「不属于这个账户」处理 —— 调用方必须先把账户里的受众放进这张地图。
+ */
+export function audienceReadinessError(
+  included: readonly string[],
+  excluded: readonly string[],
+  byId: ReadonlyMap<string, AudienceFact>,
+): string | null {
+  const missing = [...included, ...excluded].filter((id) => !byId.has(id))
+  if (missing.length > 0) return `受众 ${missing.join('、')} 不属于这个广告账户，所以没建`
+  for (const id of included) {
+    const error = includedAudienceError(byId.get(id) as AudienceFact)
+    if (error) return error
+  }
+  for (const id of excluded) {
+    const error = excludedAudienceError(byId.get(id) as AudienceFact)
+    if (error) return error
+  }
+  return null
 }
 
 /** 列表里没有的受众：按 id 直读，且它所属账户号等于本账户才算（读不到 / 属于别的账户 → null，失败关闭）。 */

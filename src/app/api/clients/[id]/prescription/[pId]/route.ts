@@ -4,8 +4,10 @@
  *
  * PATCH /api/clients/[id]/prescription/[pId]
  *   Body: { status: 'approved'|'rejected', rejection_note?: string }
- *   - 'approved' → save approval (含批准人，取自会话) + 把阶段挂到目标下。不再生成看板上的待办。
- *   - 'rejected'  → record rejection note
+ *   - 'approved' → only a draft with non-empty content. Anything else is 4xx
+ *     and does not write. Then save approval (含批准人，取自会话) + 把阶段挂到目标下。
+ *     不再生成看板上的待办。
+ *   - 'rejected'  → record rejection note（不走上面的草稿校验）
  *   - Already-approved prescription → 409 Conflict
  *
  * Security: Bearer token (INTERNAL_API_KEY)
@@ -18,7 +20,9 @@ import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/c
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
 import { emitPromotionSignal, readableError } from '@/lib/factory/promotion-signal'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { approveDraftContentGate } from './approve-gate'
 import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
+import { planDraftCardLine, planDraftCardView } from '@/lib/marketing-plan/promo/plan-draft-card'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -55,7 +59,16 @@ export async function GET(
 
     const prescription = await failIfStaleGenerating(clientId, pId, data)
 
-    return NextResponse.json({ success: true, prescription }, {
+    return NextResponse.json({
+      success: true,
+      prescription,
+      plan_draft_line: planDraftCardLine(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+      plan_draft: planDraftCardView(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+    }, {
       headers: {
         // 双重保险：浏览器也不要缓存
         'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -164,9 +177,19 @@ export async function PATCH(
     // 不再生成看板上的待办；看板生成失败也不会让这次批准失败。
     // 整套在 lib/diagnostic/prescription-landing.ts，处方周更共用同一段代码。
     if (body.status === 'approved') {
+      // 退回、失败、空内容、以及其他非草稿：拒绝且不落地、不写库。
+      const gate = approveDraftContentGate(current.status, current.content)
+      if (!gate.ok) {
+        return NextResponse.json(
+          { success: false, error: gate.error },
+          { status: gate.httpStatus },
+        )
+      }
       try {
         // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）
-        const landed = await landPrescription(supabaseAdmin, current, access.user.email)
+        const landed = await landPrescription(supabaseAdmin, current, access.user.email, {
+          requireStatus: 'draft',
+        })
         console.info('[prescription PATCH] landed:', {
           prescriptionId: pId,
           goalId: current.goal_id,
@@ -175,6 +198,13 @@ export async function PATCH(
         })
         for (const note of landed.notes) console.info('  ', note)
       } catch (landErr: unknown) {
+        // 闸门之后、标已批准之前，处方被别人改了状态（如刚被退回）：不同意，409
+        if ((landErr as { code?: string } | null)?.code === 'prescription_status_changed') {
+          return NextResponse.json(
+            { success: false, error: (landErr as Error).message },
+            { status: 409 },
+          )
+        }
         const msg = landErr instanceof Error ? landErr.message : String(landErr)
         console.error('[prescription PATCH] landPrescription failed:', msg, landErr)
         return NextResponse.json(

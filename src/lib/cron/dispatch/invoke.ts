@@ -50,6 +50,7 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'factory-dead-letter-rerun': () => import('@/app/api/cron/factory-dead-letter-rerun/route'),
   'factory-order-scheduler': () => import('@/app/api/cron/factory-order-scheduler/route'),
   'factory-publish-sweeper': () => import('@/app/api/cron/factory-publish-sweeper/route'),
+  'factory-worker-sweeper': () => import('@/app/api/cron/factory-worker-sweeper/route'),
   'messenger-sync-hourly': () => import('@/app/api/cron/messenger-sync-hourly/route'),
   'meta-leads-sync': () => import('@/app/api/cron/meta-leads-sync/route'),
   'ad-readback-sweep': () => import('@/app/api/cron/ad-readback-sweep/route'),

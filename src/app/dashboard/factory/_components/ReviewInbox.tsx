@@ -12,6 +12,7 @@ import { PublishOutlets } from './PublishOutlets'
 import { PendingCardHead } from './OrderTile'
 import { RejectDialog } from './RejectDialog'
 import { groupCounts, parseAngle } from './reviewCardMeta'
+import { maliangReviewNote, type MaliangReviewTone } from '@/lib/maliang/review-note'
 
 // P21.J ME 原生化 P1 — 审核 Inbox(spec me-native-design v0.2 §2.1)
 // 试验田:看片 + 拍板。in_review 工单 → 大号播放器 + 人话理由 +
@@ -56,6 +57,13 @@ const TEMPLATE_LABELS: Record<string, string> = {
   datacard: '数据卡',
   postcard: '场景明信片',
   atmosphere: '单镜氛围',
+}
+
+function maliangNoteBox(tone: MaliangReviewTone): string {
+  const color = tone === 'fail'
+    ? 'border-status-rej/30 bg-status-rej/10 text-status-rej'
+    : 'border-status-exec/30 bg-status-exec/10 text-me-charcoal'
+  return `mb-2 rounded-lg border px-2 py-1.5 text-xs font-medium ${color}`
 }
 
 function renderChoiceLabel(templateId?: string | null): string {
@@ -150,11 +158,11 @@ function QualityFlagsBlock({ o }: { o: WorkOrder }) {
   const flags = qualityFlagsOf(o)
   if (flags.length === 0) return null
   return (
-    <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 space-y-1">
+    <div className="mb-2 rounded-lg border border-status-exec/30 bg-status-exec/10 px-2 py-1.5 space-y-1">
       {flags.map((f, i) => (
-        <p key={i} className="text-xs text-amber-800">
+        <p key={i} className="text-xs text-me-charcoal/75">
           <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-          <span className="block text-amber-700 mt-0.5">{f.detail}</span>
+          <span className="block text-me-charcoal/75 mt-0.5">{f.detail}</span>
         </p>
       ))}
     </div>
@@ -312,7 +320,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
   if (hideWhenEmpty && !hasShown && orders.length === 0 && assets.length === 0) return null
   const groups = groupCounts(orders.map((o) => o.angle))
   const activeGroup = groupFilter && groups.some((g) => g.group === groupFilter) ? groupFilter : null
-  if (!hasShown && loading) return <p className="text-sm text-slate-400 mb-6">加载待审…</p>
+  if (!hasShown && loading) return <p className="text-sm text-me-charcoal/55 mb-6">加载待审…</p>
 
   const inGroup = (o: WorkOrder) => !activeGroup || parseAngle(o.angle).group === activeGroup
   const shownPending = orders.filter(inGroup)
@@ -320,10 +328,10 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
 
   return (
     <section className="mb-8">
-      {error && !confirming && !rejecting && <div className="mb-3 px-4 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
-      {notice && <div role="status" className="mb-3 px-4 py-2 rounded-lg bg-orange-50 text-orange-800 text-sm">{notice}</div>}
+      {error && !confirming && !rejecting && <div className="mb-3 px-4 py-2 rounded-lg bg-status-rej/10 text-status-rej text-sm">{error}</div>}
+      {notice && <div role="status" className="mb-3 px-4 py-2 rounded-lg bg-status-exec/10 text-me-charcoal text-sm">{notice}</div>}
 
-      <p className="mb-3 text-xs text-slate-500">只列出待审核视频。已通过、已打回和被新版替代的记录自动从待办中收起，原工单记录保留。</p>
+      <p className="mb-3 text-xs text-me-charcoal/55">只列出待审核视频。已通过、已打回和被新版替代的记录自动从待办中收起，原工单记录保留。</p>
 
       {groups.length > 1 && (
         <div className="flex flex-wrap gap-2 mb-4" role="group" aria-label="按团筛选">
@@ -333,17 +341,19 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               type="button"
               onClick={() => setGroupFilter(g.group)}
               aria-pressed={activeGroup === g.group}
-              className={`px-3 h-8 rounded-full text-xs font-medium border ${activeGroup === g.group ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+              className={`px-3 min-h-11 rounded-full text-xs font-medium border ${activeGroup === g.group ? 'bg-me-ochre text-white border-me-ochre' : 'bg-white text-me-charcoal/75 border-black/10 hover:bg-me-ivory'}`}
             >{g.group ?? '全部'} · {g.count}</button>
           ))}
         </div>
       )}
 
       <>
-        {shownPending.length === 0 && <p className="text-sm text-slate-400">现在没有待审核视频。</p>}
+        {shownPending.length === 0 && <p className="text-sm text-me-charcoal/55">现在没有待审核视频。新片做好后会自动出现在这里（页面每 30 秒自动刷新），你不用做别的。</p>}
         <div className={gridCls}>
-          {shownPending.map((o) => (
-              <div key={o.id} className="border border-slate-200 rounded-xl bg-white p-3 flex flex-col">
+          {shownPending.map((o) => {
+              const maliangNote = maliangReviewNote(o.output)
+              return (
+              <div key={o.id} className="border border-black/10 rounded-xl bg-white p-3 flex flex-col">
                 <PendingCardHead
                   id={o.id}
                   angle={o.angle}
@@ -353,17 +363,23 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   videoSrc={publicUrl(o.output?.video_path)}
                 />
 
-                <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-slate-600" aria-label="本次成片模板和音乐">
-                  <span className="rounded bg-slate-100 px-2 py-1">模板 · {renderChoiceLabel(o.template_id)}</span>
-                  <span className="rounded bg-slate-100 px-2 py-1">BGM · {musicChoiceLabel(o.music_file)}</span>
+                <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-me-charcoal/75" aria-label="本次成片模板和音乐">
+                  <span className="rounded bg-me-stone/60 px-2 py-1">模板 · {renderChoiceLabel(o.template_id)}</span>
+                  <span className="rounded bg-me-stone/60 px-2 py-1">BGM · {musicChoiceLabel(o.music_file)}</span>
                 </div>
 
+                {maliangNote && (
+                  <div className={maliangNoteBox(maliangNote.tone)} data-testid="maliang-review-note" data-tone={maliangNote.tone}>
+                    <p>{maliangNote.text}</p>
+                  </div>
+                )}
+
                 {redlineHitsOf(o).length > 0 && (
-                  <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
-                    <p className="text-xs font-medium text-red-800">⚠️ 文案命中品牌红线,请逐字核对后再通过</p>
+                  <div className="mb-2 rounded-lg border border-status-rej/30 bg-status-rej/10 px-2 py-1.5">
+                    <p className="text-xs font-medium text-status-rej">⚠️ 文案命中品牌红线,请逐字核对后再通过</p>
                     <p className="mt-1 flex flex-wrap gap-1">
                       {redlineHitsOf(o).map((h) => (
-                        <span key={h} className="text-xs bg-red-100 text-red-800 rounded px-1.5 py-0.5 font-mono">{h}</span>
+                        <span key={h} className="text-xs bg-status-rej/15 text-status-rej rounded px-1.5 py-0.5 font-mono">{h}</span>
                       ))}
                     </p>
                   </div>
@@ -372,9 +388,9 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                 <QualityFlagsBlock o={o} />
 
                 {!autoChecklistReady(o) && (
-                  <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
-                    <p className="text-xs font-medium text-red-800">自动媒体检测未完成,服务端会阻断通过</p>
-                    <p className="mt-1 text-xs text-red-700">
+                  <div className="mb-2 rounded-lg border border-status-rej/30 bg-status-rej/10 px-2 py-1.5">
+                    <p className="text-xs font-medium text-status-rej">自动媒体检测未完成,服务端会阻断通过</p>
+                    <p className="mt-1 text-xs text-status-rej">
                       {autoChecklistOf(o).length > 0
                         ? autoChecklistOf(o).filter(item => item.outcome !== 'PASS').map(item => `${HUMAN_CHECK_LABEL[item.key] ?? item.key}：${item.detail ?? '未测'}`).join('；')
                         : '自动检查清单缺失'}
@@ -386,36 +402,37 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   <button
                     onClick={() => { setError(null); setConfirming(o); setShowDetails(false); setChecklistDraft(emptyChecklistDraft(defaultFactSourceRef(o.fact_source_url))) }}
                     disabled={busy === o.id}
-                    className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
+                    className="w-full h-11 rounded-lg bg-me-ochre text-white text-sm font-medium hover:bg-me-ochre/90 disabled:opacity-50"
                   >{busy === o.id ? '处理中…' : '✓ 通过·待发布'}</button>
                   <button
                     type="button"
                     onClick={() => beginReject(o)}
                     disabled={busy === o.id}
-                    className="w-full h-11 rounded-lg border border-orange-300 text-orange-800 text-sm font-medium hover:bg-orange-50 disabled:opacity-50"
+                    className="w-full h-11 rounded-lg border border-status-rej/30 bg-white text-status-rej text-sm font-medium hover:bg-status-rej/10 disabled:opacity-50"
                   >打回</button>
                   {o.output?.video_path && (
                     <a
                       href={factoryVideoUrl(o.output.video_path, SUPABASE_URL, `${o.id.slice(0, 8)}.mp4`)}
                       download
-                      className="w-full h-11 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium grid place-items-center hover:bg-slate-50"
+                      className="w-full h-11 rounded-lg border border-black/10 bg-white text-me-charcoal/75 text-sm font-medium grid place-items-center hover:bg-me-ivory"
                       target="_blank"
                       rel="noopener noreferrer"
                     >下载成片</a>
                   )}
-                  {!o.output?.video_path && <span className="w-full h-11 rounded-lg border border-slate-200 text-slate-400 text-sm grid place-items-center">无成片</span>}
+                  {!o.output?.video_path && <span className="w-full h-11 rounded-lg border border-black/10 text-me-charcoal/55 text-sm grid place-items-center">无成片</span>}
                   <PublishOutlets />
                 </div>
               </div>
-          ))}
+              )
+          })}
         </div>
         {assets.length > 0 && (
           <div className="mt-6" data-testid="asset-only-section">
-            <h3 className="text-sm font-medium text-slate-800 mb-1">素材（不单独发布）</h3>
-            <p className="text-xs text-slate-500 mb-2">这些是标成「素材」的工单：不能通过、不能发布，只能验收入库。</p>
+            <h3 className="text-sm font-medium text-me-charcoal mb-1">素材（不单独发布）</h3>
+            <p className="text-xs text-me-charcoal/55 mb-2">这些是标成「素材」的工单：不能通过、不能发布，只能验收入库。</p>
             <div className={gridCls}>
               {assets.map((o) => (
-                <div key={o.id} className="border border-dashed border-slate-300 rounded-xl bg-slate-50 p-3 flex flex-col">
+                <div key={o.id} className="border border-dashed border-black/15 rounded-xl bg-me-ivory p-3 flex flex-col">
                   <PendingCardHead
                     id={o.id}
                     angle={o.angle}
@@ -428,7 +445,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                     type="button"
                     onClick={() => void acceptAsset(o.id)}
                     disabled={busy === o.id}
-                    className="mt-2 h-10 rounded-lg border border-slate-300 bg-white text-sm hover:bg-slate-100 disabled:opacity-50"
+                    className="mt-2 min-h-11 rounded-lg border border-black/10 bg-white text-sm text-me-charcoal/75 hover:bg-me-ivory disabled:opacity-50"
                   >{busy === o.id ? '处理中…' : '收入素材库'}</button>
                 </div>
               ))}
@@ -464,27 +481,27 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
         <div className="fixed inset-0 z-40 bg-black/45 grid place-items-center p-4" onClick={() => setConfirming(null)}>
           <div role="dialog" aria-modal="true" className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 mb-1">
-              <p className="font-medium text-slate-900">通过并排入发布队列</p>
+              <p className="font-medium text-me-charcoal">通过并排入发布队列</p>
               <OrderNo id={confirming.id} />
             </div>
 
             {redlineHitsOf(confirming).length > 0 && (
-              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-                <p className="text-sm font-medium text-red-800">⚠️ 这条命中了品牌红线</p>
+              <div className="mb-3 rounded-lg border border-status-rej/30 bg-status-rej/10 px-3 py-2">
+                <p className="text-sm font-medium text-status-rej">⚠️ 这条命中了品牌红线</p>
                 <p className="mt-1 flex flex-wrap gap-1.5">
                   {redlineHitsOf(confirming).map((h) => (
-                    <span key={h} className="text-xs bg-red-100 text-red-800 rounded px-1.5 py-0.5 font-mono">{h}</span>
+                    <span key={h} className="text-xs bg-status-rej/15 text-status-rej rounded px-1.5 py-0.5 font-mono">{h}</span>
                   ))}
                 </p>
               </div>
             )}
 
             {qualityFlagsOf(confirming).length > 0 && (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+              <div className="mb-3 rounded-lg border border-status-exec/30 bg-status-exec/10 px-3 py-2 space-y-1">
                 {qualityFlagsOf(confirming).map((f, i) => (
-                  <p key={i} className="text-sm text-amber-800">
+                  <p key={i} className="text-sm text-me-charcoal/75">
                     <span className="font-medium">{QUALITY_FLAG_LABEL[f.category] ?? '⚠️ 品控提示'}</span>
-                    <span className="block text-xs text-amber-700 mt-0.5">{f.detail}</span>
+                    <span className="block text-xs text-me-charcoal/75 mt-0.5">{f.detail}</span>
                   </p>
                 ))}
               </div>
@@ -509,29 +526,29 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
               return (
                 <>
                   {!gate.oneClick && (
-                    <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                      <p className="text-sm font-medium text-amber-800">不能一键通过,请逐项核对:</p>
+                    <div className="mb-3 rounded-lg border border-status-exec/30 bg-status-exec/10 px-3 py-2">
+                      <p className="text-sm font-medium text-me-charcoal/75">不能一键通过,请逐项核对:</p>
                       <ul className="mt-1 list-disc list-inside space-y-0.5">
                         {gate.reasons.map((r, i) => (
-                          <li key={i} className="text-xs text-amber-700">{r}</li>
+                          <li key={i} className="text-xs text-me-charcoal/75">{r}</li>
                         ))}
                       </ul>
                     </div>
                   )}
                   <div className="mb-4 space-y-3">
-                    <h3 className="text-sm font-medium text-slate-800">人工审核清单</h3>
-              <p className="text-xs text-amber-700">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址:已按这条片的链接预填,请确认这个页面确实支持片里的价格/天数/日期,不是就改成对应产品页。点「全部标为通过」前请先逐项看过。</p>
+                    <h3 className="text-sm font-medium text-me-charcoal">人工审核清单</h3>
+              <p className="text-xs text-me-charcoal/75">所有项需逐项标记 PASS 才能通过。「事实有来源」两项要填来源网址:已按这条片的链接预填,请确认这个页面确实支持片里的价格/天数/日期,不是就改成对应产品页。点「全部标为通过」前请先逐项看过。</p>
               <button
                 type="button"
                 onClick={() => setChecklistDraft(prev => allPass(prev))}
-                className="px-3 h-8 rounded-lg border border-slate-300 text-xs hover:bg-slate-50"
+                className="px-3 min-h-11 rounded-lg border border-black/10 bg-white text-xs text-me-charcoal/75 hover:bg-me-ivory"
               >{REEL_HUMAN_CHECK_KEYS_V3.length - MANUAL_ONLY_KEYS.length} 项全部标为通过（“已听声音”“能看懂”需单独勾）</button>
               {REEL_HUMAN_CHECK_KEYS_V3.map(key => (
-                <div key={key} className="rounded-lg border border-slate-200 p-3">
-                  <p className="text-sm font-medium text-slate-800">{HUMAN_CHECK_LABEL[key]}</p>
+                <div key={key} className="rounded-lg border border-black/10 p-3">
+                  <p className="text-sm font-medium text-me-charcoal">{HUMAN_CHECK_LABEL[key]}</p>
                   <div className="mt-2 flex gap-4 text-xs">
                     {(['PASS', 'FAIL', 'NOT_MEASURED'] as const).map(outcome => (
-                      <label key={outcome} className="flex items-center gap-1">
+                      <label key={outcome} className="flex min-h-11 items-center gap-1.5">
                         <input
                           type="radio"
                           name={`check-${confirming.id}-${key}`}
@@ -544,7 +561,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   </div>
                   {checklistDraft[key].outcome === 'FAIL' && (
                     <input
-                      className="mt-2 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                      className="mt-2 w-full rounded border border-black/15 px-2 py-2 text-sm text-me-charcoal"
                       placeholder="说明未通过原因"
                       value={checklistDraft[key].detail}
                       onChange={e => setChecklistDraft(prev => ({ ...prev, [key]: { ...prev[key], detail: e.target.value } }))}
@@ -552,7 +569,7 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
                   )}
                   {(key === 'factual_claims_have_source' || key === 'factual_claims_source_verified') && (
                     <input
-                      className="mt-2 w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                      className="mt-2 w-full rounded border border-black/15 px-2 py-2 text-sm text-me-charcoal"
                       placeholder="来源 HTTPS URL 或 client_asset:<ID>"
                       value={checklistDraft[key].source_ref}
                       onChange={e => setChecklistDraft(prev => ({ ...prev, [key]: { ...prev[key], source_ref: e.target.value } }))}
@@ -566,21 +583,21 @@ export function ReviewInbox({ clientId, hideWhenEmpty, onReviewed }: { clientId?
             })()}
 
             {/* 文案只陈述能保证的事实:发布 cron 每小时跑一次;全局开关没开时只发草稿。 */}
-            <p className="text-sm text-slate-600 mb-5">
-              通过 = 标记这条合格、<span className="font-medium text-slate-900">排入发布队列</span>。
+            <p className="text-sm text-me-charcoal/75 mb-5">
+              通过 = 标记这条合格、<span className="font-medium text-me-charcoal">排入发布队列</span>。
               发布程序每小时自动跑一次,队列里的片子会自动发到客户主页;
-              <span className="font-medium text-slate-900">全局发布开关没开时只存成草稿、不公开</span>(看板会标「Facebook 草稿，未公开」)。请按「已经会发出去」的标准把关。确定通过?
+              <span className="font-medium text-me-charcoal">全局发布开关没开时只存成草稿、不公开</span>(看板会标「Facebook 草稿，未公开」)。请按「已经会发出去」的标准把关。确定通过?
             </p>
-            {error && <div className="mb-3 px-3 py-2 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>}
+            {error && <div className="mb-3 px-3 py-2 rounded-lg bg-status-rej/10 text-status-rej text-sm">{error}</div>}
             <div className="flex gap-3">
               {(showDetails || !gateOf(confirming).oneClick) && (
                 <button
                   onClick={() => void act(confirming.id, { action: 'approve', checklist_human: checklistPayload(checklistDraft) })}
                   disabled={busy === confirming.id || !autoChecklistReady(confirming) || REEL_HUMAN_CHECK_KEYS_V3.some(key => checklistDraft[key].outcome !== 'PASS')}
-                  className="flex-1 h-10 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50"
+                  className="flex-1 min-h-11 rounded-lg bg-me-ochre text-white text-sm font-medium hover:bg-me-ochre/90 disabled:opacity-50"
                 >{busy === confirming.id ? '处理中…' : '确定通过'}</button>
               )}
-              <button onClick={() => setConfirming(null)} className="px-5 h-10 rounded-lg border border-slate-200 text-sm">再想想</button>
+              <button onClick={() => setConfirming(null)} className="px-5 min-h-11 rounded-lg border border-black/10 bg-white text-me-charcoal/75 text-sm hover:bg-me-ivory">再想想</button>
             </div>
           </div>
         </div>

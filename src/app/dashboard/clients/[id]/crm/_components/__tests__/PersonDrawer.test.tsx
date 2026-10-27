@@ -504,3 +504,121 @@ describe('AI 概况卡写明生成时间（简报里的时间说法跟生成时�
     expect(screen.queryByTestId('ai-overview-age')).toBeNull()
   })
 })
+
+/**
+ * 回头客 / 往来一览 / AI 卡过时提醒。
+ *
+ * 起因（PM 2026-10-27，看一个真实客人的抽屉）：她 6 月填过表、我们联系过、10 月我们邮件回复并
+ * 跟进了两次，今天她又填了表。面板上却只显示今天那条表单；「我们发过邮件」要滚到最底下才看得出；
+ * AI 卡是昨天生成的、说「客户尚未回复」；「想去」显示的是表单原始代码 best_of_china_–_15_days。
+ */
+describe('回头客 / 往来一览', () => {
+  const returning = {
+    firstEnquiryAt: '2026-06-15T07:55:00.000Z',
+    latestFormAt: '2026-10-26T23:47:00.000Z',
+    ourLastContactAt: '2026-10-24T01:11:00.000Z',
+    ourContacts: 3,
+    earlierForms: 1,
+  }
+  const engagement = {
+    returning,
+    line: '我们联系过：邮件 2 封、电话没接 1 次 ｜ 他：填过 2 次表、点过邮件链接 1 次',
+    story: ['6月15日就咨询过（之前填过 1 次表）', '我们联系过：邮件 2 封', '🔥 今天又填了表'],
+    lastActiveAt: '2026-10-26T23:47:00.000Z',
+  }
+  const brief = (generatedAt: string) => ({
+    summary: '客户对上海及周边旅游感兴趣，但客户尚未回复。',
+    customerNeeds: [], objections: [], promisesMade: [], nextAction: null,
+    intentLevel: 'high', channel: 'email', generatedAt,
+  })
+
+  function stub(opts: { engagement?: unknown; generatedAt?: string; timeline?: unknown[] }) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.endsWith('/brief')
+            ? { brief: opts.generatedAt ? brief(opts.generatedAt) : null }
+            : { timeline: opts.timeline ?? [], omittedMessages: 0, engagement: opts.engagement ?? null },
+      })),
+    )
+  }
+
+  it('🔴 回头客 → 抽屉顶部出现「他又回来了」横幅，并带故事线', async () => {
+    stub({ engagement })
+    draw({ returning })
+    expect(screen.getByTestId('returning-banner').textContent).toContain('他又回来了')
+    const story = await waitFor(() => screen.getByTestId('returning-story'))
+    expect(story.textContent).toContain('6月15日就咨询过')
+    expect(story.textContent).toContain('🔥 今天又填了表')
+  })
+
+  it('横幅不用等往来记录加载：列表行里有 returning 就先画出来', () => {
+    stub({ engagement: null })
+    draw({ returning })
+    expect(screen.getByTestId('returning-banner')).toBeTruthy()
+    expect(screen.queryByTestId('returning-story')).toBeNull()
+  })
+
+  it('🔴 不是回头客 → 一个字的横幅都没有（别满屏飘红）', async () => {
+    stub({ engagement: { returning: null, line: '我们还没联系过 ｜ 他：填过 1 次表', story: [], lastActiveAt: null } })
+    draw({ returning: null })
+    await waitFor(() => screen.getByTestId('engagement-line'))
+    expect(screen.queryByTestId('returning-banner')).toBeNull()
+  })
+
+  it('🔴 往来一览写出「我们发过邮件」—— 不用滚到最底下的往来记录', async () => {
+    stub({ engagement })
+    draw({ returning })
+    const line = await waitFor(() => screen.getByTestId('engagement-line'))
+    expect(line.textContent).toContain('邮件 2 封')
+  })
+
+  it('AI 卡生成之后他又有新动作 → 提醒「以最新记录为准」', async () => {
+    stub({ engagement, generatedAt: '2026-10-26T01:00:00.000Z' })
+    draw({ returning })
+    const warn = await waitFor(() => screen.getByTestId('ai-overview-newer-activity'))
+    expect(warn.textContent).toContain('以最新记录为准')
+  })
+
+  it('AI 卡比他最近一次动作还新 → 不提醒', async () => {
+    stub({ engagement, generatedAt: '2026-10-27T05:00:00.000Z' })
+    draw({ returning })
+    await waitFor(() => screen.getByTestId('ai-overview'))
+    expect(screen.queryByTestId('ai-overview-newer-activity')).toBeNull()
+  })
+
+  it('读不出 AI 卡的生成时间 → 不提醒，不猜', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        json: async () =>
+          url.endsWith('/brief')
+            ? { brief: { ...brief('x'), generatedAt: null } }
+            : { timeline: [], omittedMessages: 0, engagement },
+      })),
+    )
+    draw({ returning })
+    await waitFor(() => screen.getByTestId('ai-overview'))
+    expect(screen.queryByTestId('ai-overview-newer-activity')).toBeNull()
+  })
+
+  it('🔴 「想去」显示人话，不是表单原始代码', async () => {
+    stub({
+      engagement: null,
+      timeline: [
+        {
+          kind: 'touch', at: '2026-10-26T23:47:00Z', channel: 'meta_lead_form', direction: 'inbound',
+          summary: '填了 Facebook 表单 · best_of_china_–_15_days', tour: 'best_of_china_-_15_days',
+          outcome: null, travelWindow: null, callbackAt: null, competitor: null,
+        },
+      ],
+    })
+    draw()
+    await waitFor(() => screen.getAllByText(/Best of china/).length > 0)
+    expect(document.body.textContent).not.toContain('best_of_china')
+    expect(document.body.textContent).toContain('Best of china')
+  })
+})

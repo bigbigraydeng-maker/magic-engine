@@ -8,6 +8,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   abandonStaleRunningRuns,
+  CRON_DURATION_MS_MAX,
+  durationMsForRunLog,
   selectAbandonedRuns,
   type OpenRunRow,
 } from '../abandon-stale-runs'
@@ -80,6 +82,15 @@ interface StoredRun extends OpenRunRow {
   status: string
   error_message: string | null
   finished_at: string | null
+  duration_ms?: number | null
+}
+
+/** 模拟生产上 integer 列：超过 4 字节整数就拒绝这次更新，行保持原样。 */
+function integerOverflow(payload: Record<string, unknown>): { code: string; message: string } | null {
+  const duration = payload.duration_ms
+  if (typeof duration !== 'number') return null
+  if (Number.isInteger(duration) && duration <= CRON_DURATION_MS_MAX && duration >= -2_147_483_648) return null
+  return { code: '22003', message: `value "${duration}" is out of range for type integer` }
 }
 
 function fakeLog(rows: StoredRun[], opts: { rejectAbandoned?: boolean } = {}) {
@@ -122,6 +133,12 @@ function fakeLog(rows: StoredRun[], opts: { rejectAbandoned?: boolean } = {}) {
             )
           }
           if (mode === 'update') {
+            const overflow = integerOverflow(payload)
+            if (overflow) {
+              return Promise.resolve(resolve({ data: null, error: overflow }))
+            }
+          }
+          if (mode === 'update') {
             for (const item of hits()) Object.assign(item, payload)
             return Promise.resolve(resolve({ data: hits(), error: null }))
           }
@@ -147,7 +164,36 @@ describe('abandonStaleRunningRuns', () => {
     expect(rows[0].status).toBe('abandoned')
     expect(rows[0].error_message?.startsWith('abandoned:')).toBe(true)
     expect(rows[0].finished_at).toBe(NOW.toISOString())
+    expect(rows[0].duration_ms).toBe(abandonAfterMs('messenger-sync-hourly') + 5000)
     expect(rows[1].status).toBe('running')
+  })
+
+  it('很老的孤儿行也能收口：耗时超过整数上限时记成上限，不把清理打失败', async () => {
+    // 2026-10-26 生产报错里的那个毫秒数，大约 29 天，装不进 duration_ms。
+    const productionOverflowMs = 2_522_960_494
+    expect(productionOverflowMs).toBeGreaterThan(CRON_DURATION_MS_MAX)
+    const ancient = row('ai-tracker-weekly', productionOverflowMs)
+    const recentAge = abandonAfterMs('diagnostic-weekly') + 60_000
+    const recent = row('diagnostic-weekly', recentAge)
+    const rows: StoredRun[] = [
+      { ...ancient, status: 'running', error_message: null, finished_at: null },
+      { ...recent, status: 'running', error_message: null, finished_at: null },
+    ]
+
+    const result = await abandonStaleRunningRuns(fakeLog(rows) as never, NOW)
+
+    expect(result).toEqual({ abandoned: 2 })
+    expect(rows[0].status).toBe('abandoned')
+    expect(rows[0].duration_ms).toBe(CRON_DURATION_MS_MAX)
+    expect(rows[1].status).toBe('abandoned')
+    expect(rows[1].duration_ms).toBe(recentAge)
+  })
+
+  it('还没顶到整数上限的时长按原样记下', () => {
+    const started = new Date(NOW.getTime() - 20 * 24 * 60 * 60 * 1000).toISOString()
+    expect(durationMsForRunLog(started, NOW)).toBe(20 * 24 * 60 * 60 * 1000)
+    expect(durationMsForRunLog('not-a-date', NOW)).toBe(0)
+    expect(durationMsForRunLog(new Date(NOW.getTime() + 1000).toISOString(), NOW)).toBe(0)
   })
 
   it('状态约束还没放行 abandoned 时改写成 failed，错误仍以 abandoned: 开头', async () => {

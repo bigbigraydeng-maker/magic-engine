@@ -85,6 +85,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   promo_plan_watch: 'decide',
   lead_followup_check_failed: 'dev', // 「填了表没人回」这一栏没算出来：我们这边的欠账
   promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
+  plan_draft_auto_failed: 'dev', // 同意前自动起草连续失败：系统没写成，不占批准决定
   ads_tracking_preflight_fix: 'dev', // 开投前追踪检查的红灯怎么修：改官网 / 改配置，开发的活（PM 在推广计划页看灯，开投拍板走「到期阶段检查没过」）
   ads_tracking_preflight_broken: 'dev', // 开投前追踪检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
 

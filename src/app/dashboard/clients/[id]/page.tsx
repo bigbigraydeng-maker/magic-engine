@@ -18,6 +18,7 @@ import { IntelligenceSummarySection } from './_components/intelligence/Intellige
 import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
+import { clientWorkflowSteps, prescriptionEntryHref } from './prescription-entry';
 import { industryFeatureFlags } from '@/lib/clients/industry-features';
 import { homeEntryVisible, type HomeEntry } from '@/lib/auth/home-entries';
 import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer';
@@ -325,84 +326,49 @@ function ToolDoorCard({ href, onClick, title, desc, badge, links }: {
 
 function WorkflowProgress({
   discoveryConfirmed,
-  hasCompletedDiagnostic,
   hasPrescription,
+  prescriptionId,
   clientId,
 }: {
   discoveryConfirmed: boolean
-  hasCompletedDiagnostic: boolean
   hasPrescription: boolean
+  prescriptionId: string | null
   clientId: string
 }) {
-  const steps = [
-    {
-      label: '品牌扫描',
-      sublabel: '张骞',
-      done: discoveryConfirmed,
-      href: `/dashboard/clients/${clientId}/zhangqian`,
-    },
-    {
-      label: '深度诊断',
-      sublabel: '华佗',
-      done: hasCompletedDiagnostic,
-      href: `/dashboard/clients/${clientId}/diagnostic`,
-    },
-    {
-      label: '处方制定',
-      sublabel: '诸葛亮',
-      done: hasPrescription,
-      href: `/dashboard/clients/${clientId}/prescription/new`,
-    },
-    {
-      label: '执行追踪',
-      sublabel: '鲁班',
-      done: false,
-      href: `/dashboard/clients/${clientId}/execution`,
-    },
-  ]
-
+  const steps = clientWorkflowSteps({ discoveryConfirmed, hasPrescription, prescriptionId, clientId })
   const firstPending = steps.findIndex(s => !s.done)
-
   return (
     <div className="overflow-x-auto rounded-xl border border-black/10 bg-white px-4 py-4 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex min-w-max items-center gap-0">
-      {steps.map((step, i) => {
-        const isActive = i === firstPending
-        const isDone   = step.done
-        const inner = (
-          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${
-            isActive ? 'bg-me-ochre/10' : ''
-          }`}>
-            <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-black ${
-              isDone  ? 'bg-[#5C8A4A] text-white'
-              : isActive ? 'bg-me-charcoal text-white'
-              : 'bg-me-ivory text-me-charcoal/45'
-            }`}>
-              {isDone ? '✓' : i + 1}
-            </div>
-            <div>
-              <p className={`text-xs font-black leading-none ${
-                isDone ? 'text-[#5C8A4A]' : isActive ? 'text-me-charcoal' : 'text-me-charcoal/45'
-              }`}>{step.label}</p>
-              <p className="mt-0.5 text-[10px] font-semibold text-me-charcoal/45">{step.sublabel}</p>
-            </div>
-          </div>
-        )
-        return (
-          <div key={step.label} className="flex items-center">
-            {step.href && !isDone
-              ? <a href={step.href}>{inner}</a>
-              : inner
-            }
-            {i < steps.length - 1 && (
-              <div className={`w-8 h-px mx-1 flex-shrink-0 ${
-                steps[i].done ? 'bg-[#5C8A4A]/70' : 'bg-me-stone'
-              }`} />
-            )}
-          </div>
-        )
-      })}
+        {steps.map((step, i) => (
+          <ProgressStep key={step.label} step={step} index={i} active={i === firstPending} last={i === steps.length - 1} />
+        ))}
       </div>
+    </div>
+  )
+}
+
+function ProgressStep({ step, index, active, last }: {
+  step: ReturnType<typeof clientWorkflowSteps>[number]
+  index: number
+  active: boolean
+  last: boolean
+}) {
+  const inner = (
+    <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${active ? 'bg-me-ochre/10' : ''}`}>
+      <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black ${step.done ? 'bg-[#5C8A4A] text-white' : active ? 'bg-me-charcoal text-white' : 'bg-me-ivory text-me-charcoal/45'}`}>
+        {step.done ? '✓' : index + 1}
+      </div>
+      <div>
+        <p className={`text-xs font-black leading-none ${step.done ? 'text-[#5C8A4A]' : active ? 'text-me-charcoal' : 'text-me-charcoal/45'}`}>{step.label}</p>
+        <p className="mt-0.5 text-[10px] font-semibold text-me-charcoal/45">{step.sublabel}</p>
+      </div>
+    </div>
+  )
+  return (
+    <div className="flex items-center">
+      {(step.alwaysLink || (step.href && !step.done)) ? <a href={step.href}>{inner}</a> : inner}
+      {!last && <div className={`mx-1 h-px w-8 ${step.done ? 'bg-[#5C8A4A]/70' : 'bg-me-stone'}`} />}
     </div>
   )
 }
@@ -426,11 +392,9 @@ export default function ClientDetailPage() {
   const [loading, setLoading] = useState(true);
   const [hasActiveBrief, setHasActiveBrief] = useState<boolean | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<DiscoveryStatus>('none');
-  const [hasCompletedDiagnostic, setHasCompletedDiagnostic] = useState<boolean>(false);
   const [prescriptionStatus, setPrescriptionStatus] = useState<PrescriptionStatus>('none');
-  // Derived shorthands
+  const [prescriptionId, setPrescriptionId] = useState<string | null>(null);
   const discoveryConfirmed = discoveryStatus === 'confirmed';
-  const huatuoDone = hasCompletedDiagnostic || prescriptionStatus !== 'none';
 
   // ?exec=<itemId> 来自执行看板的「在社媒矩阵中执行」跳转：
   // 自动打开 GenerationDrawer 并把生成的内容关联回该执行项（内容飞轮闭环）
@@ -461,11 +425,10 @@ export default function ClientDetailPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [clientRes, briefRes, discoveryRes, diagnosticRes, prescriptionRes] = await Promise.all([
+      const [clientRes, briefRes, discoveryRes, prescriptionRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/brief?status=active`),
         fetch(`/api/clients/${clientId}/zhangqian/latest`).catch(() => null),
-        fetch(`/api/clients/${clientId}/diagnostic/latest`).catch(() => null),
         fetch(`/api/clients/${clientId}/prescriptions/latest-draft`).catch(() => null),
       ]);
       if (clientRes.ok) {
@@ -485,15 +448,16 @@ export default function ClientDetailPage() {
       } else {
         setDiscoveryStatus('none');
       }
-      setHasCompletedDiagnostic(diagnosticRes?.ok ?? false);
-      // prescription status: granular
       if (prescriptionRes?.ok) {
         const pData = await prescriptionRes.json();
         const raw = pData?.prescription?.status as string | undefined;
+        const id = pData?.prescription?.id;
         const valid: PrescriptionStatus[] = ['generating', 'failed', 'draft', 'approved'];
         setPrescriptionStatus(valid.includes(raw as PrescriptionStatus) ? (raw as PrescriptionStatus) : 'none');
+        setPrescriptionId(typeof id === 'string' ? id : null);
       } else {
         setPrescriptionStatus('none');
+        setPrescriptionId(null);
       }
     } finally {
       setLoading(false);
@@ -591,15 +555,13 @@ export default function ClientDetailPage() {
           {/* Workflow progress bar — 3-step overview */}
           <WorkflowProgress
             discoveryConfirmed={discoveryConfirmed}
-            hasCompletedDiagnostic={hasCompletedDiagnostic}
             hasPrescription={prescriptionStatus !== 'none'}
+            prescriptionId={prescriptionStatus === 'none' ? null : prescriptionId}
             clientId={clientId}
           />
 
-          {/* Dynamic next-step guidance — always shows one clear action */}
           <NextStepCard
             discoveryStatus={discoveryStatus}
-            hasCompletedDiagnostic={hasCompletedDiagnostic}
             prescriptionStatus={prescriptionStatus}
             clientId={clientId}
           />
@@ -791,8 +753,7 @@ export default function ClientDetailPage() {
               <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="CRM 管理"       desc="客人清单、往来记录、跟进阶段、同行渠道 —— 全部客人相关的功能都在这里"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/operating-agent`}   title="经营 Agent"      desc="把客户目标、产品范围和竞品证据合成下一步经营判断；无证据时明确说不知道" badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
+              <ToolCard href={prescriptionEntryHref(clientId, prescriptionStatus === 'none' ? null : prescriptionId)} title="处方" desc="跟华佗说要什么结果、每月预算，就能开方或改已有的方" badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
               {showEntry('memory') && (

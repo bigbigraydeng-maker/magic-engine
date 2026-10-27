@@ -101,6 +101,7 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 推广计划每日检查：链接是需要登录的页面，探活多半判成坏链接——这条里还有「检查自己没跑成」，绝不能静默消失。
   'promo_plan_watch',
   'promo_plan_watch_broken',
+  'plan_draft_auto_failed',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
@@ -117,6 +118,8 @@ export type ManualItemKind =
   | 'diagnostic_synthesis_failing'
   | 'promo_plan_watch'
   | 'promo_plan_watch_broken'
+  /** 同意前自动起草推广计划连续失败：系统没写成，开发看，不占批准决定 */
+  | 'plan_draft_auto_failed'
   /** 开投前追踪检查里有硬门 / 软门红灯：具体怎么修（开发的活，不占 PM 的清单；PM 在推广计划页看灯） */
   | 'ads_tracking_preflight_fix'
   /** 开投前追踪检查自己没跑成 / 回执过期：没人在盯追踪（开发欠账） */
