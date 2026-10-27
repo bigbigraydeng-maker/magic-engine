@@ -2,7 +2,7 @@
 id: 2026-10-28-crm-followup-audit-report-v1
 title: CRM 跟进流程审核报告出了：30 条毛病，最重的是名单把广告开场白当回话、销售电话没有时间、第 2/3 次跟进没有时钟、「交给系统跟」没人在跟；等 PM 回三个问题（先回「分档」）
 status: decided
-owner: pm
+owner: agent
 decided_on: 2026-10-28
 source: doc:docs/audits/2026-10-28-crm-followup-flow-audit.md
 verify_by: 2026-11-04
@@ -12,3 +12,4 @@ verify_how: PM 看过设计稿第 0 节的一页摘要，依次回答三个问�
 统管那条「约 248 个查不到联系记录」偏高，同口径约 100 人没有任何电话或邮件记录，另有 178 个表格里记着通了电话但没有书面回复才是最该推第二把的。
 子牙与魏征各审一轮，意见已吸收：10-26 新广告已开、10/9 后表格无新备注不等于没人打、单修假回话会弄丢约 99 人、发送只走 127 号那一条路径。
 配套：AI 升级设计稿 docs/specs/2026-10-28-crm-followup-ai-upgrade-design-v0.md；SOP v1 docs/clients/cts/2026-10-28-followup-sop-v1.md。
+PM 2026-10-28 已回完三个问题（见设计稿 §8 和卡 2026-10-28-crm-followup-pm-decisions-three），现在只剩把最重的几条毛病各开成修复卡并排先后；标题里「等 PM 回三个问题」已过时。
