@@ -21,6 +21,7 @@ import {
   validateRenderPath,
   workerIdFromBody,
 } from '@/lib/factory/worker-guard'
+import { resolveAspectDelivery } from '@/lib/factory/video-aspects'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -209,6 +210,15 @@ export async function POST(
     }
   }
 
+  const aspectDelivery = resolveAspectDelivery(wo.brief, body.aspect_outputs, {
+    clientId: wo.client_id,
+    workOrderId: wo.id,
+    primaryPath: videoPath,
+  })
+  if (!aspectDelivery.ok) {
+    return NextResponse.json({ error: aspectDelivery.error }, { status: 422 })
+  }
+
   // ②–④ 多表写编排(红线复扫 + B轨白名单 + clip 幂等入库 + 台账 + 工单转 in_review)抽到 lib(A3)
   // blocker 1:透传 recipe_receipt（recipe 单必填,legacy 单可缺）;body 无该字段 = undefined
   const result = await completeWorkOrder(supabaseAdmin, {
@@ -222,6 +232,7 @@ export async function POST(
     newClips,
     recipeReceipt: body.recipe_receipt,
     mediaEvidence,
+    ...(aspectDelivery.outputs ? { aspectOutputs: aspectDelivery.outputs } : {}),
   })
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
   if (isRemotionBrief(wo.brief)) {

@@ -18,10 +18,14 @@ import { parsePostcardProps, computePostcardTiming, type PostcardProps } from '.
 import { safeRectFor } from './safeZone'
 import { FPS } from './timing'
 import { fontFamily } from './theme'
+import { templateProps } from './aspect'
+import { useStage } from './stage'
 
 const LegacyHookText: React.FC<{ lines: string[] }> = ({ lines }) => {
+  const stage = useStage()
+  const placed = stage.place({ left: 90, top: 640, width: 790, fontSize: 96, lines: Math.max(1, lines.length), lineHeight: 1.12 })
   return (
-    <div style={{ position: 'absolute', left: 90, top: 640, width: 790, fontFamily, color: '#fff', fontSize: 96, fontWeight: 900, lineHeight: 1.12, textShadow: '0 6px 30px rgba(0,0,0,0.7)' }}>
+    <div style={{ position: 'absolute', left: placed.left, top: placed.top, width: placed.width, fontFamily, color: '#fff', fontSize: stage.fit(96, placed, 96), fontWeight: 900, lineHeight: 1.12, textShadow: '0 6px 30px rgba(0,0,0,0.7)' }}>
       {lines.map((line, i) => (
         <div key={i}>{line}</div>
       ))}
@@ -58,12 +62,14 @@ const Scene: React.FC<{ props: PostcardProps; index: number; logoVisible: boolea
     cardZone: props.cardZone,
     logoVisible,
   })
+  const stage = useStage()
+  const placed = stage.place({ left, top, width, fontSize: 66, lines: 3, lineHeight: 1.2, blockPx: 80 })
   return (
     <AbsoluteFill>
       <Footage src={scene.clip} zoomTo={1.05} scrim={props.scrim ?? 0.35} />
-      <div style={{ position: 'absolute', left, top, width, background: `rgba(0,0,0,${props.cardOpacity})`, borderRadius: 24, padding: '28px 36px', fontFamily, opacity: o, transform: `translateY(${rise}px)` }}>
-        <div style={{ fontSize: 44, fontWeight: 800, letterSpacing: 3, textTransform: 'uppercase', color: props.accent ?? '#ffffff', marginBottom: 14 }}>{scene.place}</div>
-        <div style={{ fontSize: 66, fontWeight: 800, lineHeight: 1.15, color: '#fff', textShadow: '0 3px 16px rgba(0,0,0,0.6)' }}>{scene.line}</div>
+      <div style={{ position: 'absolute', left: placed.left, top: placed.top, width: placed.width, background: `rgba(0,0,0,${props.cardOpacity})`, borderRadius: 24, padding: '28px 36px', fontFamily, opacity: o, transform: `translateY(${rise}px)` }}>
+        <div style={{ fontSize: stage.fit(44, placed, 66), fontWeight: 800, letterSpacing: 3, textTransform: 'uppercase', color: props.accent ?? '#ffffff', marginBottom: 14 }}>{scene.place}</div>
+        <div style={{ fontSize: stage.fit(66, placed, 66), fontWeight: 800, lineHeight: 1.15, color: '#fff', textShadow: '0 3px 16px rgba(0,0,0,0.6)' }}>{scene.line}</div>
       </div>
     </AbsoluteFill>
   )
@@ -71,12 +77,14 @@ const Scene: React.FC<{ props: PostcardProps; index: number; logoVisible: boolea
 
 const LegacyEndCard: React.FC<{ backdropClip: string; title: string; scrim: number }> = ({ backdropClip, title, scrim }) => {
   const frame = useCurrentFrame()
+  const stage = useStage()
+  const placed = stage.place({ left: 60, top: 760, width: 840, fontSize: 84, lines: 2, lineHeight: 1.1 })
   const o = interpolate(frame, [0, 18], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
   return (
     <AbsoluteFill>
       <Footage src={backdropClip} zoomTo={1.05} scrim={scrim} />
       <AbsoluteFill style={{ background: 'rgba(5,10,18,0.35)' }} />
-      <div style={{ position: 'absolute', left: 60, top: 760, width: 840, textAlign: 'center', fontFamily, color: '#fff', fontSize: 84, fontWeight: 900, lineHeight: 1.1, textShadow: '0 6px 30px rgba(0,0,0,0.7)', opacity: o }}>
+      <div style={{ position: 'absolute', left: placed.left, top: placed.top, width: placed.width, textAlign: 'center', fontFamily, color: '#fff', fontSize: stage.fit(84, placed, 84), fontWeight: 900, lineHeight: 1.1, textShadow: '0 6px 30px rgba(0,0,0,0.7)', opacity: o }}>
         {title}
       </div>
     </AbsoluteFill>
@@ -96,7 +104,7 @@ const BrandedEnd: React.FC<{ props: PostcardProps; backdropClip: string; title: 
 }
 
 export const PostcardReel: React.FC<Record<string, unknown>> = (rawProps) => {
-  const props = parsePostcardProps(rawProps)
+  const props = parsePostcardProps(templateProps(rawProps))
   const timing = computePostcardTiming(props)
   const plan = resolveFramePlan('postcard', props)
   const frame = useCurrentFrame()

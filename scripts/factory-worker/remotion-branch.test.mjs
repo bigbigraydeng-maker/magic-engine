@@ -1061,3 +1061,187 @@ describe('atmosphere template wiring', () => {
     expect(defaultProbeClip('/x.mp4', exec)).toEqual({ durationSec: 14, width: 1080, height: 1920 })
   })
 })
+
+describe('extra aspect ratios', () => {
+  const SIZES = {
+    'final.mp4': { width: 1080, height: 1920 },
+    'final-4x5.mp4': { width: 1080, height: 1350 },
+    'final-1x1.mp4': { width: 1080, height: 1080 },
+    'final-16x9.mp4': { width: 1920, height: 1080 },
+  }
+
+  function withAspects(aspects) {
+    const wo = makeWo({ remotion: { template: 'list', props: PROPS, aspects } })
+    wo.aspect_uploads = aspects
+      .filter((id) => id !== '9:16')
+      .map((id) => {
+        const file = id === '4:5' ? 'final-4x5.mp4' : id === '1:1' ? 'final-1x1.mp4' : 'final-16x9.mp4'
+        return { aspect: id, path: `renders/c/wo-1/${file}`, signed_url: `https://sig/${file}` }
+      })
+    return wo
+  }
+
+  it('renders each requested file, probes its canvas, and reports aspect_outputs', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => {
+        const name = String(file).split('/').pop()
+        const size = SIZES[name]
+        return { ...size, duration_seconds: 12, audio_stream_present: true }
+      }),
+    })
+    const wo = withAspects(['4:5', '1:1', '16:9'])
+    const res = await run(env, deps, wo)
+    expect(res).toEqual({ ok: true, cost: 0 })
+    expect(deps.renderFn).toHaveBeenCalledTimes(4)
+    expect(deps.renderFn.mock.calls[0][0].aspect).toBeUndefined()
+    expect(deps.renderFn.mock.calls.slice(1).map((c) => c[0].aspect)).toEqual(['4:5', '1:1', '16:9'])
+    const urls = deps.uploadSignedFn.mock.calls.map((c) => c[0])
+    expect(urls).toEqual([
+      wo.uploads.video.signed_url,
+      'https://sig/final-4x5.mp4',
+      'https://sig/final-1x1.mp4',
+      'https://sig/final-16x9.mp4',
+      wo.uploads.segments_json.signed_url,
+      wo.uploads.srt.signed_url,
+    ])
+    expect(deps.completeFn.mock.calls[0][0].aspect_outputs).toEqual([
+      { aspect: '9:16', video_url: wo.uploads.video.path },
+      { aspect: '4:5', video_url: 'renders/c/wo-1/final-4x5.mp4' },
+      { aspect: '1:1', video_url: 'renders/c/wo-1/final-1x1.mp4' },
+      { aspect: '16:9', video_url: 'renders/c/wo-1/final-16x9.mp4' },
+    ])
+  })
+
+  it('refuses a bad aspect list and a missing upload slot before rendering', async () => {
+    const env = makeEnv()
+    const bad = makeDeps(env)
+    const badErr = await errOf(run(env, bad, makeWo({ remotion: { template: 'list', props: PROPS, aspects: ['2:1'] } })))
+    expect(badErr).toBeInstanceOf(RemotionOrderError)
+    expect(bad.renderFn).not.toHaveBeenCalled()
+
+    const missing = makeDeps(env)
+    const wo = makeWo({ remotion: { template: 'list', props: PROPS, aspects: ['4:5'] } })
+    const missErr = await errOf(run(env, missing, wo))
+    expect(missErr).toBeInstanceOf(RemotionOrderError)
+    expect(missErr.message).toContain('4:5')
+    expect(missing.renderFn).not.toHaveBeenCalled()
+    expect(missing.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('does not import the TypeScript aspect contract at load time', () => {
+    const src = readFileSync(join(process.cwd(), 'scripts/factory-worker/remotion-branch.mjs'), 'utf8')
+    expect(src).not.toMatch(/^import\s[\s\S]*?from\s+['"][^'"]+\.ts['"]/m)
+  })
+
+  it('fails the claimed order when the claim already reported aspect_error', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env)
+    const wo = makeWo()
+    wo.aspect_error = '不认识的画幅 21:9'
+    const err = await errOf(run(env, deps, wo))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('21:9')
+    expect(deps.renderFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('checks the primary file before rendering extras', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => ({
+        width: String(file).endsWith('final.mp4') ? 720 : 1080,
+        height: 1920,
+        duration_seconds: 12,
+        audio_stream_present: true,
+      })),
+    })
+    const err = await errOf(run(env, deps, withAspects(['4:5', '16:9'])))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('1080x1920')
+    expect(deps.renderFn).toHaveBeenCalledTimes(1)
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+  })
+
+  it('refuses every aspect over 48 MB before any upload', async () => {
+    const env = makeEnv()
+    const primary = makeDeps(env, {
+      renderFn: vi.fn(async ({ outFile }) => {
+        writeFileSync(outFile, '')
+        truncateSync(outFile, 48_000_001)
+        return { code: 0, stderrTail: '' }
+      }),
+    })
+    const primaryErr = await errOf(run(env, primary, withAspects(['16:9'])))
+    expect(primaryErr).toBeInstanceOf(RemotionOrderError)
+    expect(primaryErr.retryable).toBe(false)
+    expect(primaryErr.message).toMatch(/成片 48\.0 MB/)
+    expect(primaryErr.message).toMatch(/超过存储上限/)
+    expect(primary.renderFn).toHaveBeenCalledTimes(1)
+    expect(primary.uploadSignedFn).not.toHaveBeenCalled()
+
+    const extra = makeDeps(env, {
+      renderFn: vi.fn(async ({ outFile, aspect }) => {
+        writeFileSync(outFile, 'video-bytes')
+        if (aspect === '16:9') truncateSync(outFile, 48_000_001)
+        return { code: 0, stderrTail: '' }
+      }),
+    })
+    const extraErr = await errOf(run(env, extra, withAspects(['16:9'])))
+    expect(extraErr).toBeInstanceOf(RemotionOrderError)
+    expect(extraErr.message).toMatch(/16:9 成片 48\.0 MB/)
+    expect(extra.renderFn).toHaveBeenCalledTimes(2)
+    expect(extra.uploadSignedFn).not.toHaveBeenCalled()
+    expect(extra.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('keeps the heartbeat lease alive across extra aspect renders', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => {
+        const name = String(file).split('/').pop()
+        const size = SIZES[name]
+        return { ...size, duration_seconds: 12, audio_stream_present: true }
+      }),
+    })
+    deps.renderFn = vi.fn(async ({ outFile, aspect }) => {
+      const before = deps.heartbeatFn.mock.calls.length
+      await new Promise((r) => setTimeout(r, 40))
+      if (aspect) expect(deps.heartbeatFn.mock.calls.length).toBeGreaterThan(before)
+      writeFileSync(outFile, 'video-bytes')
+      return { code: 0, stderrTail: '' }
+    })
+    const res = await run(env, deps, withAspects(['4:5']))
+    expect(res.ok).toBe(true)
+    expect(deps.heartbeatFn).toHaveBeenCalled()
+  })
+
+  it('does not upload when an extra canvas is the wrong size', async () => {
+    const env = makeEnv()
+    const deps = makeDeps(env, {
+      probeMediaEvidenceFn: vi.fn((file) => ({
+        width: 1080,
+        height: String(file).endsWith('final-4x5.mp4') ? 1920 : 1920,
+        duration_seconds: 12,
+        audio_stream_present: true,
+      })),
+    })
+    const err = await errOf(run(env, deps, withAspects(['4:5'])))
+    expect(err).toBeInstanceOf(RemotionOrderError)
+    expect(err.message).toContain('1080x1350')
+    expect(deps.uploadSignedFn).not.toHaveBeenCalled()
+    expect(deps.completeFn).not.toHaveBeenCalled()
+  })
+
+  it('passes --aspect only for a non-default ratio', async () => {
+    vi.spyOn(process, 'kill').mockImplementation(() => true)
+    const spawnFn = vi.fn(() => {
+      const c = Object.assign(new EventEmitter(), { pid: 7, stdout: new EventEmitter(), stderr: new EventEmitter() })
+      setImmediate(() => c.emit('close', 0))
+      return c
+    })
+    await runRemotionRender({ propsFile: 'p', outFile: 'o', publicDir: 'd', tmpDir: '/t', spawnFn, aspect: '16:9' })
+    const argv = spawnFn.mock.calls[0][1]
+    expect(argv[argv.indexOf('--aspect') + 1]).toBe('16:9')
+  })
+})

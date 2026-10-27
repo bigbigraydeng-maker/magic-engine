@@ -161,7 +161,7 @@ describe('SalesProgressTable', () => {
       />,
     )
     const over = screen.getByText('超订 2 人')
-    expect(over.className).toContain('text-red-700')
+    expect(over.className).toContain('text-status-rej')
     expect(screen.getByText('超订 2 人（系统不会拦截，请销售自行把关）')).toBeDefined()
   })
 

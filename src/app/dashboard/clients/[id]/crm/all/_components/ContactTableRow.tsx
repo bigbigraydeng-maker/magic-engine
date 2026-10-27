@@ -85,6 +85,17 @@ function NameCell({ r }: { r: ContactRow }) {
         >
           {text}
         </span>
+        {/* 回头客 —— 摆在渠道小标签**前面**，是这一行最该先看到的东西（PM 2026-10-27）。
+            悬停说清为什么：之前咨询过、我们联系过、又填了表。 */}
+        {r.returning && (
+          <span
+            data-testid="returning-tag"
+            title={r.reason ?? '之前咨询过、我们联系过，今天又填了咨询表'}
+            className="shrink-0 rounded bg-[#C2453A]/12 px-1.5 py-0.5 text-[10px] font-black text-[#C2453A]"
+          >
+            🔥 回头
+          </span>
+        )}
         {(r.sources ?? []).slice(0, 1).map((k) => (
           <span
             key={k}

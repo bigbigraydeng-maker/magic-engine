@@ -30,7 +30,7 @@ function hasDetail(row: UnitProgress): boolean {
 function BookingList({ bookings }: { bookings: SalesBooking[] }): JSX.Element {
   return (
     <details>
-      <summary className="cursor-pointer text-me-charcoal/70">
+      <summary className="inline-flex min-h-11 cursor-pointer items-center text-me-charcoal/70">
         看这几张订单（{bookings.length}）
       </summary>
       <ul className="mt-1 space-y-0.5">
@@ -59,24 +59,37 @@ function RowDetail({ row }: { row: UnitProgress }): JSX.Element | null {
   )
 }
 
+function countCellClass(value: number, muted: boolean): string {
+  const tone = muted || value === 0 ? 'text-me-charcoal/55' : 'text-me-charcoal'
+  return `px-3 py-2 tabular-nums ${tone}`
+}
+
 function ProgressRow({ row }: { row: UnitProgress }): JSX.Element {
   const companyOnly = companyOnlyText(row)
   const detail = hasDetail(row)
+  const noCapacity = row.unit.capacity === null
+  const textTone = noCapacity ? 'text-me-charcoal/55' : 'text-me-charcoal'
   return (
     <>
-      <tr className={detail ? undefined : 'border-b border-me-charcoal/10'}>
-        <td className="px-3 py-2 text-me-charcoal">
+      <tr
+        className={
+          detail ? 'hover:bg-me-ivory/60' : 'border-b border-me-charcoal/10 hover:bg-me-ivory/60'
+        }
+      >
+        <td className={`px-3 py-2 ${textTone}`}>
           {row.unit.label}
           {statusText(row.unit) !== null ? (
             <span className="block text-xs text-me-charcoal/70">{statusText(row.unit)}</span>
           ) : null}
         </td>
-        <td className="px-3 py-2 text-me-charcoal">{formatCapacity(row)}</td>
-        <td className="px-3 py-2 text-me-charcoal">{row.companyConfirmed} 人</td>
-        <td className="px-3 py-2 text-me-charcoal">{row.customerStated} 人</td>
-        <td className="px-3 py-2 text-me-charcoal">{row.unverified} 人</td>
-        <td className="px-3 py-2 text-me-charcoal">
-          <span className={row.overBy > 0 ? 'text-red-700 font-semibold' : undefined}>
+        <td className={`px-3 py-2 tabular-nums ${textTone}`}>{formatCapacity(row)}</td>
+        <td className={countCellClass(row.companyConfirmed, noCapacity)}>
+          {row.companyConfirmed} 人
+        </td>
+        <td className={countCellClass(row.customerStated, noCapacity)}>{row.customerStated} 人</td>
+        <td className={countCellClass(row.unverified, noCapacity)}>{row.unverified} 人</td>
+        <td className={`px-3 py-2 tabular-nums ${textTone}`}>
+          <span className={row.overBy > 0 ? 'font-semibold text-status-rej' : undefined}>
             {formatRemaining(row)}
           </span>
           {companyOnly !== null ? (
@@ -126,23 +139,25 @@ export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.E
         <p className="mt-2 text-xs text-me-charcoal/70">还没有出发日。</p>
       ) : (
         <>
-          <table className="mt-3 w-full border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/70">
-                <th className="px-3 py-2 font-medium">团 · 出发日</th>
-                <th className="px-3 py-2 font-medium">座位上限</th>
-                <th className="px-3 py-2 font-medium">公司确认</th>
-                <th className="px-3 py-2 font-medium">客人自述</th>
-                <th className="px-3 py-2 font-medium">待核实</th>
-                <th className="px-3 py-2 font-medium">剩余</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.rows.map((row) => (
-                <ProgressRow key={row.unit.unitId} row={row} />
-              ))}
-            </tbody>
-          </table>
+          <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white shadow-sm">
+            <table className="w-full min-w-[720px] border-collapse text-sm">
+              <thead>
+                <tr className="border-b border-me-charcoal/10 bg-me-ivory text-left text-xs text-me-charcoal/70">
+                  <th className="px-3 py-2 font-medium">团 · 出发日</th>
+                  <th className="px-3 py-2 font-medium">座位上限</th>
+                  <th className="px-3 py-2 font-medium">公司确认</th>
+                  <th className="px-3 py-2 font-medium">客人自述</th>
+                  <th className="px-3 py-2 font-medium">待核实</th>
+                  <th className="px-3 py-2 font-medium">剩余</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.rows.map((row) => (
+                  <ProgressRow key={row.unit.unitId} row={row} />
+                ))}
+              </tbody>
+            </table>
+          </div>
           <p className="mt-3 text-xs text-me-charcoal/70">
             对外只说「公司确认」那一栏；其余两栏只是内部参考。「剩余」按保守算法，上限减去三栏之和；下面那行小字「仅算公司确认」只算公司确认的座位。
           </p>

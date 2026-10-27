@@ -30,10 +30,12 @@ const entry = (over: Partial<WorklistEntry> = {}): WorklistEntry => ({
   headline: 'Tour enquiry',
   conversationId: 'conv-1',
   assignedTo: 'lisa@example.com',
+  tier: 'fresh',
   ...over,
 })
 const result = (entries: WorklistEntry[], over: Partial<WorklistResult> = {}): WorklistResult => ({
   entries,
+  tierCounts: { fresh: entries.length, backlog: 0 },
   detected: { meta_form: 0, email: entries.length, whatsapp: 0 },
   byAssignee: { 'lisa@example.com': entries.length },
   strangerEmails: 0,
@@ -96,6 +98,18 @@ describe('跟进名单接口', () => {
     for (const e of body.entries) {
       expect((e.name + ' ' + (e.headline ?? '')).replace(/\D/g, '')).not.toMatch(/\d{6,}/)
     }
+  })
+
+  it('tier 参数：fresh / backlog 原样传给取数层，别的值当没传；响应带两种人数', async () => {
+    await GET(req('?tier=fresh'), params)
+    expect(mockFind.mock.calls[0][3]).toMatchObject({ tier: 'fresh' })
+    await GET(req('?tier=backlog'), params)
+    expect(mockFind.mock.calls[1][3]).toMatchObject({ tier: 'backlog' })
+    await GET(req('?tier=whatever'), params)
+    expect(mockFind.mock.calls[2][3].tier).toBeUndefined()
+    const body = (await (await GET(req(), params)).json()) as Record<string, unknown>
+    expect(body.tierCounts).toEqual({ fresh: 1, backlog: 0 })
+    expect(body.freshDays).toBe(7)
   })
 
   it('每条带直达这位客人抽屉的链接', async () => {
