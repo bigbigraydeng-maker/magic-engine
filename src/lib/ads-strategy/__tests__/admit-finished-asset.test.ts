@@ -113,14 +113,41 @@ describe('placeWorkOrderCandidate', () => {
     ])
   })
 
-  it('keeps an already approved row approved', () => {
+  it('keeps an already approved row approved when the video id is unchanged', () => {
     const approved: CreativePoolEntry = {
-      kind: 'work_order', ref: 'wo-1', status: 'approved', approved_by: 'a@x.test', alias_refs: ['555'],
+      kind: 'work_order',
+      ref: 'wo-1',
+      status: 'approved',
+      approved_by: 'a@x.test',
+      approved_at: '2026-10-01T00:00:00.000Z',
+      alias_refs: ['555'],
     }
     const placed = placeWorkOrderCandidate([approved], 'wo-1', '555')
     expect(placed.changed).toBe(false)
     expect(placed.status).toBe('approved')
-    expect(placed.pool[0].status).toBe('approved')
+    expect(placed.pool[0]).toEqual(approved)
+  })
+
+  it('drops the old approval when a new video id is added to an approved work order', () => {
+    const approved: CreativePoolEntry = {
+      kind: 'work_order',
+      ref: 'wo-1',
+      status: 'approved',
+      approved_by: 'a@x.test',
+      approved_at: '2026-10-01T00:00:00.000Z',
+      alias_refs: ['111'],
+      promo_window: { kind: 'evergreen' },
+    }
+    const placed = placeWorkOrderCandidate([approved], 'wo-1', '555')
+    expect(placed.changed).toBe(true)
+    expect(placed.status).toBe('candidate')
+    expect(placed.pool).toEqual([{
+      kind: 'work_order',
+      ref: 'wo-1',
+      status: 'candidate',
+      alias_refs: ['111', '555'],
+      promo_window: { kind: 'evergreen' },
+    }])
   })
 
   it('does not add a second row when the video id is already in the pool', () => {

@@ -110,6 +110,19 @@ export function factoryPublicVideoUrl(videoPath: string | null, publicBase: stri
   return `${base}/${videoPath}`
 }
 
+/**
+ * 给已有工单行加上一个新的视频编号。编号变了，旧批准盖不住新视频，
+ * 和推广期接口一样降回待批准并清掉签字。调用方保证这个编号还不在别名里。
+ */
+function appendVideoAlias(entry: CreativePoolEntry, videoId: string): CreativePoolEntry {
+  const next: CreativePoolEntry = { ...entry, alias_refs: [...(entry.alias_refs ?? []), videoId] }
+  if (next.status !== 'approved') return next
+  next.status = 'candidate'
+  delete next.approved_by
+  delete next.approved_at
+  return next
+}
+
 export function placeWorkOrderCandidate(
   pool: CreativePoolEntry[],
   workOrderId: string,
@@ -124,10 +137,12 @@ export function placeWorkOrderCandidate(
     return { pool, changed: false, status: holders[0].status }
   }
   if (byOrder) {
-    const next = pool.map((entry) => (
-      entry === byOrder ? { ...entry, alias_refs: [...(entry.alias_refs ?? []), videoId] } : entry
-    ))
-    return { pool: next, changed: true, status: byOrder.status }
+    const updated = appendVideoAlias(byOrder, videoId)
+    return {
+      pool: pool.map((entry) => (entry === byOrder ? updated : entry)),
+      changed: true,
+      status: updated.status,
+    }
   }
   const entry: CreativePoolEntry = { kind: 'work_order', ref: workOrderId, status: 'candidate', alias_refs: [videoId] }
   return { pool: [...pool, entry], changed: true, status: 'candidate' }
