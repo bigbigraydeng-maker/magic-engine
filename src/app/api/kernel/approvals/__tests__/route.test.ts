@@ -118,7 +118,8 @@ describe('通用入口 × 确认卡', () => {
     tier: 'paid_client' as const,
     allowedClientId: CLIENT_A,
   })
-  const body = { resolution: 'reject', expectedDecisionId: DECISION_ID }
+  // reason 必须合法非空，否则请求在鉴权前就被请求体解析以 400 拒掉，测不到角色分支
+  const body = { resolution: 'reject', expectedDecisionId: DECISION_ID, reason: '这张卡不做' }
 
   it('客户员工走通用入口拒绝确认卡 → 403，不写决定', async () => {
     mocks.loadRunForApproval.mockResolvedValue(cardRun())
@@ -132,6 +133,7 @@ describe('通用入口 × 确认卡', () => {
     mocks.loadRunForApproval.mockResolvedValue(cardRun())
     mocks.requirePaidClientAccess.mockResolvedValue({ ...access('admin'), allowedClientId: CLIENT_B })
     expect((await decisionPOST(decisionReq(body), runCtx())).status).toBe(403)
+    expect(mocks.decideApproval).not.toHaveBeenCalled()
 
     mocks.requirePaidClientAccess.mockResolvedValue(access('admin'))
     const agentReq = new NextRequest(
