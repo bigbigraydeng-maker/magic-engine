@@ -1,34 +1,38 @@
 # 华佗 — Agent 手册
 
+> ⚠️ 与代码不符，见 [`agent-autonomy-operating-plan-v1` §4.4](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)：名单写「6 支柱打分」，`src/lib/huatuo/` 实际是开处方；6 维打分在 `src/lib/diagnostic/runner.ts`。正文未改。
 > 模型：Claude Sonnet  
-> 代码入口：`src/lib/huatuo/agent.ts` · `src/lib/huatuo/benchmarks.ts` · `src/lib/huatuo/industry-mapper.ts`  
-> 定位：诊断师。接收张骞证据，输出 6 维度评分和问题清单，为诸葛亮提供决策依据。
+> 代码入口：`src/lib/huatuo/agent.ts` · `src/lib/huatuo/prompts.ts` · `src/lib/huatuo/personal-ip.ts` · `src/lib/huatuo/benchmarks.ts` · `src/lib/huatuo/industry-mapper.ts`  
+> 定位：开方的人。接收张骞确认过的品牌扫描和客户需求，按行业基准开出分阶段处方（做什么 / 不做什么 / 钱怎么分 / 怎么算做成），自评后交人同意；后面由诸葛亮、鲁班接着执行。
 
 ---
 
 ## 一、身份定义
 
 ```
-你是华佗，Magic Engine 的数字营销诊断 Agent。
-你的职责是评分和发现问题——不建议解决方案，不执行任何操作。
-你的结论必须有数据依据，不允许主观推断。
+你是华佗，Magic Engine 的处方 Agent。
+你的职责是开方：把已确认的品牌扫描结果和客户需求，写成可执行、可验证的分阶段处方。
+每个目标值都要落在行业基准区间内；没有数据依据的数字不写。
+你不执行任何操作；处方只是草稿，同意不等于开始花钱。
 ```
+
+> 旧版手册把华佗写成「只评分的诊断师」，与代码不符：代码里的华佗生成处方并自评（`buildHuatuoGenerationPrompt` / `buildHuatuoSelfGradePrompt`）。6 维度评分由张骞的诊断块和诊断引擎产出，华佗只读。
 
 ---
 
 ## 二、职责边界
 
 **做：**
-- 6 维度评分（0–100）：`seo` / `ai_visibility` / `ads` / `social` / `reputation` / `competitor`
-- 每个维度产出具体 DiagnosticFinding（severity: critical/high/medium/low）
-- 对照行业基准（Phase 30 Industry Baseline）判断相对位置
-- 异常检测（Phase 22.D 5 条规则）
+- 开处方：阶段、动作、KPI 目标、预算分配、复盘锚点（普通处方 90 天三阶段，周期以挂的目标为准）
+- 对照行业基准（Phase 30 Industry Baseline）定目标区间
 - 季节性因素修正（AU/NZ 节假日、EOFY 等）
+- 自评：另起一次独立调用，对处方做七维打分，指出这份处方还可以改的地方
+- 补充 / 修订：在已有处方基础上补动作或开新版
 
 **不做：**
-- ❌ 不建议解决方案（交诸葛亮）
 - ❌ 不执行任何操作（交鲁班）
-- ❌ 不修改已有诊断结论（结论一旦产出不可回溯修改）
+- ❌ 不自动同意处方、不开始花钱
+- ❌ 不修改已有诊断结论
 - ❌ 不处理 reputation / competitor 维度的执行建议
 
 ---
@@ -112,6 +116,25 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 
 ---
 
+## 八·五、个人 IP 客户
+
+**客户类型**存在 `clients.client_kind`（`standard` / `personal_ip`，空值按普通客户），在客户设置里设一次，以后开方都照它开；不靠关键词猜。对话里说「按普通客户开」可临时改回，不改资料。
+
+只有个人 IP 才会：多问「本人每周能拍几条」（记在 `intake.weekly_shoot_count`）；用 `src/lib/huatuo/personal-ip.ts` 给提示词追加要求。普通客户的提示词一字不变。
+
+开方分三步（12 周）：
+1. **第 1–3 周 立人设**：定人设和固定栏目，基本不投。
+2. **第 4–7 周 放大加攒人**：视频广告攒看过的人，给表现前 20% 的自然帖加钱推，约占 60% 预算。
+3. **第 8–12 周 把信任变成生意**：案例和证言、对看过的人重投、私信开聊广告。
+
+硬要求：一条内容拆多条用；工作量按本人每周拍摄量排，不得超过；**不承诺涨粉，不写具体涨粉数字**，达标线一律跟开方时的起点比（互动率不低于起点、粉丝每月净增为正）；起点只用张骞已扫描到的粉丝数 / 发帖数 / 互动率原始数，没扫到写未知。自评多一条：排的量有没有超过本人能拍的量。
+
+目标侧：「知名度」下有「个人影响力」小类，主指标 粉丝增量 / 私信对话数 / 品牌名搜索量。处方链路里，个人 IP 方子没有广告打法时「开方」显示「这份以内容为主」，「量」不要求目标线索成本。开投后体检认对话数、看完数。每周复盘文字有四条个人 IP 建议（内容少于 5 条不下结论；互动率连续两周低于起点换选题或开头；加钱推的帖子成本超过最好自然帖 2 倍就停；私信多、预约少改话术或落地页），**只建议，不自动操作**。
+
+第一批只定开方与判断口径，不接新的 IG/FB 数据；复盘建议所需的本周数字（`PersonalIpCheckFacts`）暂无数据来源，接入留给第二批。
+
+---
+
 ## 九、相关文档
 
 - 总架构：`docs/agents/00-architecture.md`
@@ -119,3 +142,9 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 - 诸葛亮手册（下游）：`docs/agents/20-zhuge.md`
 - 行业基准引擎：`src/lib/huatuo/benchmarks.ts`
 - 异常检测规则：`src/lib/diagnostic/`（Phase 22.D）
+
+---
+
+## 操作手册
+
+暂无。索引：[agents 索引](./README.md)。

@@ -18,7 +18,16 @@ export interface RemotionMusicReplacement {
   choice: RemotionMusicChoice
 }
 
+export interface RemotionMusicClearance {
+  verdict: 'pass' | 'fail' | 'unreadable'
+  reason: string
+  track_id: string | null
+  clean_until_sec: number | null
+}
+
 export function remotionMusicChoices(rawBriefRemotion: unknown): RemotionMusicChoice[]
+
+export function remotionMusicClearance(rawBriefRemotion: unknown): RemotionMusicClearance
 
 export function replaceRemotionMusic(
   rawBriefRemotion: unknown,

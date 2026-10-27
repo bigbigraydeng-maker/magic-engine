@@ -24,6 +24,9 @@ export interface GoalPaceView {
   projectedEnd: number | null
   verdict: GrowthVerdict
   reason: string
+  reachableAtCap?: number
+  reachableAtActualSpend?: number
+  dataThrough?: string
 }
 
 export interface GrowthFinding {
@@ -72,8 +75,8 @@ function goalLiveNote(meta: GrowthStateView['goal_live']): string | undefined {
   if (!meta) return undefined
   if (!meta.live) return '实时没读到生效中的目标（读取失败或已无目标），这张卡显示的是昨晚的缓存，可能不是最新。'
   const t = new Date(meta.readAtIso)
-  if (Number.isNaN(t.getTime())) return '实时读取'
-  return `实时读取 · ${t.toLocaleTimeString('en-NZ', { timeZone: 'Pacific/Auckland', hour: '2-digit', minute: '2-digit', hour12: false })}`
+  if (Number.isNaN(t.getTime())) return '页面打开时现算'
+  return `页面打开时现算 · ${t.toLocaleTimeString('en-NZ', { timeZone: 'Pacific/Auckland', hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 
 type GoalView = { title: string; label: string; target: number; dayIndex: number; totalDays: number }
@@ -115,7 +118,16 @@ function GoalBar({ goal, pace, clientView = false, liveNote }: { goal: GoalView 
             {pace.projectedEnd !== null && <> · 按现在的速度到期约 <b>{pace.projectedEnd}</b></>}
           </p>
           <p className="mt-1 text-xs text-gray-500">{pace.reason}</p>
+          {!clientView && pace.reachableAtCap !== undefined && (
+            <p className="mt-1 text-xs text-gray-500">
+              到期最多约：按日预算上限 <b>{pace.reachableAtCap}</b>
+              {pace.reachableAtActualSpend !== undefined && <> · 按近几天实际花费 <b>{pace.reachableAtActualSpend}</b></>}
+            </p>
+          )}
         </>
+      )}
+      {!clientView && pace.dataThrough && (
+        <p className="mt-2 text-xs text-gray-500">数据截至{pace.dataThrough}（Meta 日报，最多慢一天）</p>
       )}
       {liveNote && <p className="mt-2 text-xs text-gray-500">{liveNote}</p>}
     </div>

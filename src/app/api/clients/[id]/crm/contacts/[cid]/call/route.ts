@@ -91,7 +91,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   const conn = conns[0] as { id: string; provider_account_id: string; secret_ref: string | null; extension_map: unknown; default_country: string }
 
   const staffPhone = staffPhoneForEmail((conn.extension_map ?? {}) as Record<string, string>, access.user.email)
-  if (!staffPhone) return NextResponse.json({ error: '你的手机号还没登记，先请管理员登记后再拨' }, { status: 422 })
+  if (!staffPhone) return NextResponse.json({ error: '你的手机号还没登记，先在下面填一次再拨', code: 'staff_phone_missing' }, { status: 422 })
 
   const customer = normalisePhone(contact.primary_phone, conn.default_country === 'AU' ? 'AU' : 'NZ')
   if (!customer) return NextResponse.json({ error: '这位客人的号码认不出，不能拨' }, { status: 422 })

@@ -29,17 +29,32 @@ interface InsightRow {
  * to { data, error }. Any other table is a test bug — throw.
  */
 function insightsTable(rows: InsightRow[]) {
-  const result = { data: rows, error: null }
-  const builder = {
-    select: () => builder,
-    eq: () => builder,
-    gte: () => builder,
-    lte: () => builder,
-    then: (resolve: (value: typeof result) => unknown) => resolve(result),
-  }
   vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => {
     if (table !== 'ad_daily_insights') {
       throw new Error(`unexpected table in test: ${table}`)
+    }
+    // Each query has its own date window. The cost read is 7 days; the sample
+    // count is the whole goal period. Ignoring gte/lte would let those leak.
+    const bounds: { from?: string; to?: string } = {}
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      gte: (col: string, value: string) => {
+        if (col === 'insight_date') bounds.from = value
+        return builder
+      },
+      lte: (col: string, value: string) => {
+        if (col === 'insight_date') bounds.to = value
+        return builder
+      },
+      then: (resolve: (value: { data: InsightRow[]; error: null }) => unknown) => {
+        const data = rows.filter((row) => {
+          if (bounds.from && row.insight_date < bounds.from) return false
+          if (bounds.to && row.insight_date > bounds.to) return false
+          return true
+        })
+        return resolve({ data, error: null })
+      },
     }
     return builder as never
   })
@@ -260,6 +275,91 @@ describe('buildDigestGoalContext', () => {
       goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-30' },
     })
   })
+
+  function fetchedLead(value: number) {
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value, source: 'ad_daily_insights', snapshot_date: '2026-09-15', label: 'lead',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
+  }
+
+  it('今天有日报行、日报只到昨天 → 实际值终点是昨天', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow()])
+    fetchedLead(12)
+    // 巡察日是今天 09-16。日报最新一行停在昨天：今天的行还没进这张日报。
+    insightsTable([{ insight_date: '2026-09-15', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
+      goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-15' },
+    })
+  })
+
+  it('日报最新日期早于目标期开始 → 实际值终点仍是目标期末', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-09-20', period_end: '2026-10-31',
+    })])
+    fetchedLead(4)
+    insightsTable([{ insight_date: '2026-09-15', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
+      goalPeriod: { period_start: '2026-09-20', period_end: '2026-10-31' },
+    })
+  })
+
+  it('日报最新不早于目标期末 → 实际值终点仍是目标期末', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-09-01', period_end: '2026-09-10',
+    })])
+    fetchedLead(4)
+    insightsTable([{ insight_date: '2026-09-15', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
+      goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-10' },
+    })
+  })
+
+  it('没有广告目标、回落到报名时，不按 Meta 日报截止日缩短取数窗口', async () => {
+    // fetchBookings 用这个 period_end 去筛 me_sale_outcomes。日报只到 10/26 时，
+    // 10/27 的成交必须仍落在窗口里；截成 10/26 会让成交消失，全在截止日后还会变成未判。
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      id: 'g-signups',
+      title: '报名',
+      primary_metric_key: 'signups_count',
+      primary_metric_label: '报名/预订',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+    })])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value: 3, source: 'me_sale_outcomes', snapshot_date: '2026-10-31', label: '报名/预订',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
+    insightsTable([{ insight_date: '2026-10-26', spend: 20, results: 1 }])
+
+    const ctx = await buildDigestGoalContext('client-1', '2026-10-27')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'signups_count', {
+      goalPeriod: { period_start: '2026-10-01', period_end: '2026-10-31' },
+    })
+    expect(ctx?.pace.actualToDate).toBe(3)
+  })
+
+  it('私信目标仍按 Meta 日报截止日截取实际值', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      primary_metric_key: 'messaging_started',
+      primary_metric_label: '私信开聊',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+    })])
+    fetchedLead(4)
+    insightsTable([{ insight_date: '2026-10-26', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-10-27')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'messaging_started', {
+      goalPeriod: { period_start: '2026-10-01', period_end: '2026-10-26' },
+    })
+  })
 })
 
 describe('buildDigestGoalContext — 广告设置读失败', () => {
@@ -306,6 +406,105 @@ describe('buildDigestGoalContext — 广告设置读失败', () => {
     const ctx = await buildDigestGoalContext('client-1', '2026-09-15')
     expect(ctx?.pace.verdict).toBe('on_track')
     expect(ctx && 'configReadError' in ctx).toBe(false)
+  })
+})
+
+type MixedRow = InsightRow & { entity_id: string; leads: number; messaging_conversations: number }
+
+/** 混合客户：WhatsApp 系列每天 1 个对话花 $90，表单系列每天 2 条线索花 $20。 */
+function mixedRows(): MixedRow[] {
+  const out: MixedRow[] = []
+  for (const day of ['2026-09-13', '2026-09-14', '2026-09-15']) {
+    out.push({ insight_date: day, entity_id: 'wa', spend: 90, results: 1, leads: 0, messaging_conversations: 1 })
+    out.push({ insight_date: day, entity_id: 'form', spend: 20, results: 2, leads: 2, messaging_conversations: 0 })
+  }
+  return out
+}
+
+describe('同类结果成本口径（线索目标不拿对话成本）', () => {
+  it('metric=leads → 只用出线索的系列行：中位 $10，不是 $90 或合计', async () => {
+    insightsTable(mixedRows())
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads' })).toBe(1000)
+  })
+
+  it('metric=leads + 指定系列 → 只算该系列', async () => {
+    insightsTable(mixedRows())
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads', campaignIds: ['form'] })).toBe(1000)
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads', campaignIds: ['wa'] })).toBeNull()
+  })
+
+  it('线索只有 2 天 → 成本不出数（null），不拿 WhatsApp 的天数凑', async () => {
+    insightsTable(mixedRows().filter(r => !(r.entity_id === 'form' && r.insight_date === '2026-09-13')))
+    expect(await medianCostPerResultCents('client-1', '2026-09-15', { metric: 'leads' })).toBeNull()
+  })
+
+  it('样本不足 + 目标期才 2 天数据 → 未判（不是落后/到不了）', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-09-14', period_end: '2026-10-30', target_value: 300, baseline_value: 0,
+    })])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value: 0, source: 'ad_daily_insights', snapshot_date: '2026-09-15', label: 'lead',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({
+      config: adStrategyConfig({ daily_budget_cap_cents: 15000 }), source: 'row',
+    })
+    // 只有对话 + 一天表单线索；日报最新到 09-15
+    insightsTable(mixedRows().filter(r => r.entity_id === 'wa' || r.insight_date === '2026-09-15'))
+    const ctx = await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('样本不足')
+  })
+
+  /** 目标 10/1–10/31，截至 10/26 实际线索 0。日历已有 26 天，线性节奏会判落后。 */
+  async function octoberWith(rows: MixedRow[]) {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-10-01', period_end: '2026-10-31', target_value: 100, baseline_value: 0,
+    })])
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value: 0, source: 'ad_daily_insights', snapshot_date: '2026-10-26', label: 'lead',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({
+      config: adStrategyConfig(), source: 'row',
+    })
+    insightsTable(rows)
+    return buildDigestGoalContext('client-1', '2026-10-26')
+  }
+
+  function quietDay(insight_date: string, entity_id: string): MixedRow {
+    return { insight_date, entity_id, spend: 20, results: 0, leads: 0, messaging_conversations: 0 }
+  }
+
+  it('晚开投：只有最后两天日报（同一天多行仍算 1 天）→ 样本不足，不是落后', async () => {
+    const ctx = await octoberWith([
+      quietDay('2026-10-25', 'series-a'),
+      quietDay('2026-10-25', 'series-b'),
+      quietDay('2026-10-26', 'series-a'),
+      quietDay('2026-10-26', 'series-b'),
+    ])
+    expect(ctx?.dayIndex).toBe(26)
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('样本不足')
+    expect(ctx?.pace.reason).toContain('只有 2 天')
+  })
+
+  it('中间缺日报：只有首尾两天 → 按 2 天未判，不把中间空档算成已观察', async () => {
+    const ctx = await octoberWith([
+      quietDay('2026-10-01', 'series-a'),
+      quietDay('2026-10-26', 'series-a'),
+    ])
+    expect(ctx?.pace.verdict).toBe('unknown')
+    expect(ctx?.pace.reason).toContain('样本不足')
+    expect(ctx?.pace.reason).toContain('只有 2 天')
+  })
+
+  it('中间有空档但不同日期已有 3 天 → 仍按原判断（长期没有同类结果）', async () => {
+    const ctx = await octoberWith([
+      quietDay('2026-10-01', 'series-a'),
+      quietDay('2026-10-10', 'series-a'),
+      quietDay('2026-10-26', 'series-a'),
+    ])
+    expect(ctx?.pace.verdict).toBe('behind')
+    expect(ctx?.pace.reason).not.toContain('样本不足')
   })
 })
 

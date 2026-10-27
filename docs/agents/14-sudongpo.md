@@ -120,3 +120,15 @@
 - 设计：`docs/specs/2026-09-28-pillar-agents-capability-memory-kernel-v0.1.md`
 - 样板：卫青 `docs/agents/11-weiqing.md`；视觉：马良 `docs/agents/60-maliang.md`；文案：李白 `docs/agents/70-libai.md`
 - 平行：孔子 `docs/agents/13-kongzi.md`；孟子 `docs/agents/15-mengzi.md`
+
+---
+
+## 操作手册
+
+- [社媒 Agent 操作手册与规则 v1.0](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md)
+- [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md)（视频工厂；索引见[视频工厂索引](../sops/video-factory-index.md)）
+- [Messenger AI 回滚](../sops/messenger-ai-rollback.md)
+- TikTok：[应用设置](../sops/tiktok-app-setup.md) · [生产审核检查点](../sops/tiktok-production-audit-checkpoint.md) · [发布测试检查点](../sops/tiktok-publishing-test-checkpoint.md)
+- [YouTube 回执：内容帖 go-apply](../sops/2026-10-21-youtube-receipts-content-post-go-apply.md)
+
+索引：[agents 索引](./README.md)。

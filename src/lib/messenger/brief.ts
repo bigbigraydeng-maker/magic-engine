@@ -145,6 +145,20 @@ export interface ClientIdentity {
   name: string
   /** From `clients.industry` (see src/lib/clients/industries.ts). Null when unset. */
   industry: string | null
+  /** From `clients.country` (ISO-2, e.g. 'NZ'). Null when unset — then no currency rule is stated. */
+  country?: string | null
+}
+
+/** Home currency for the markets this product serves. Unknown country → null (no rule, no guess). */
+const COUNTRY_CURRENCY: Record<string, { code: string; name: string }> = {
+  NZ: { code: 'NZD', name: 'New Zealand dollars' },
+  AU: { code: 'AUD', name: 'Australian dollars' },
+}
+
+export function currencyRuleFor(country: string | null | undefined): string {
+  const c = country ? COUNTRY_CURRENCY[country.trim().toUpperCase()] : undefined
+  if (!c) return ''
+  return `CURRENCY — this business trades in ${c.name} (${c.code}). An amount in the thread with no explicit currency is ${c.code}: write it as "${c.code} 4,275" in the Chinese fields. NEVER write "美元" or "USD" unless the thread explicitly says US dollars; if the thread names another currency, keep that one.\n`
 }
 
 /**
@@ -175,15 +189,15 @@ function isTravelIndustry(identity: ClientIdentity): boolean {
 async function loadClientIdentity(clientId: string): Promise<ClientIdentity> {
   const { data, error } = await supabaseAdmin
     .from('clients')
-    .select('name, industry')
+    .select('name, industry, country')
     .eq('id', clientId)
     .maybeSingle()
 
   if (error) throw new Error(`clients lookup failed for ${clientId}: ${error.message}`)
 
-  const row = data as { name?: string | null; industry?: string | null } | null
+  const row = data as { name?: string | null; industry?: string | null; country?: string | null } | null
   if (!row?.name) return { name: 'this business', industry: null }
-  return { name: row.name, industry: row.industry ?? null }
+  return { name: row.name, industry: row.industry ?? null, country: row.country ?? null }
 }
 
 /**
@@ -289,6 +303,7 @@ ATTRIBUTION — the mistake that makes a card useless. Every field under "trip" 
 
 ${tripInstructions(isTravel)}
 
+${currencyRuleFor(identity.country)}
 GROUNDING — only use what is in the thread:
 - Never invent names, prices, dates, or other specific details that are not in the thread or in CLIENT FACTS below.
 - If the customer asked something the thread does not answer, say so in next_action and leave draft_reply asking rather than guessing.

@@ -65,6 +65,8 @@ export type Loaded<T> =
 export interface IntakeFact {
   businessGoal: string | null
   monthlyBudget: number | null
+  /** 个人 IP 方子：没有广告打法也不算卡住，「量」不要求目标线索成本。缺省 = 普通客户。 */
+  personalIp?: boolean
 }
 
 export interface PrescriptionFact {

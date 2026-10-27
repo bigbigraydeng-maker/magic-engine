@@ -1,5 +1,7 @@
 # TikTok production application audit
 
+> 负责 agent：苏东坡（`sudongpo`）｜ 档案：[`docs/agents/14-sudongpo.md`](../agents/14-sudongpo.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 Scope: complete client-authorized TikTok application launch, without new product features. Root Codex is the sole writer. A-level publishing/security correction; reuse existing consent, tenant access, task persistence and recovery. No new queue/workflow or schema: this changes one existing synchronous publishing adapter; existing order/snapshot provider receipts remain authoritative.
 
 ## Required correction
