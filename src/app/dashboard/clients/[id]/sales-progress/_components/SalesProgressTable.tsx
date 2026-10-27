@@ -140,10 +140,10 @@ export function SalesProgressTable({ data }: { data: SalesProgressData }): JSX.E
       ) : (
         <>
           <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white shadow-sm">
-            <table className="w-full min-w-[720px] border-collapse text-sm">
+            <table className="w-full min-w-[560px] border-collapse text-sm [&_td:not(:first-child)]:whitespace-nowrap [&_th]:whitespace-nowrap">
               <thead>
                 <tr className="border-b border-me-charcoal/10 bg-me-ivory text-left text-xs text-me-charcoal/70">
-                  <th className="px-3 py-2 font-medium">团 · 出发日</th>
+                  <th className="w-[34%] min-w-[160px] px-3 py-2 font-medium">团 · 出发日</th>
                   <th className="px-3 py-2 font-medium">座位上限</th>
                   <th className="px-3 py-2 font-medium">公司确认</th>
                   <th className="px-3 py-2 font-medium">客人自述</th>
