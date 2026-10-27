@@ -23,7 +23,7 @@
 | 卫青 | `weiqing` | — | `ads` | 4.1 | 在用 | [11-weiqing](./11-weiqing.md) | 见下「手册归属」 |
 | 孔子 | `kongzi` | — | `seo` | 4.1 | 在用 | [13-kongzi](./13-kongzi.md) | 见下 |
 | 孟子 | `mengzi` | — | `geo` | 4.1 | 在用 | [15-mengzi](./15-mengzi.md) | 暂无 |
-| 苏东坡 | `sudongpo` | — | `social` / `video-factory` | 4.1 | 在用 | [14-sudongpo](./14-sudongpo.md) | 见下 |
+| 苏东坡 | `sudongpo` | — | `social` / `video-factory` | 4.1 | 在用 | [14-sudongpo](./14-sudongpo.md) | 见下（另有[社媒经验手册](#经验手册playbooks)） |
 | 司马迁 | `simaqian` | — | `reputation` | 4.1 | 在用（档案为骨架） | [16-simaqian](./16-simaqian.md) | 暂无 |
 | 张骞 | `zhangqian` | — | `collect` | 4.1 | 在用 | [30-zhangqian](./30-zhangqian.md) | 暂无 |
 | 华佗 | `huatuo` | — | `prescribe` | 4.1 | 在用 | [40-huatuo](./40-huatuo.md) | 暂无 |
@@ -40,6 +40,18 @@
 | 司马徽 | —（无） | — | — | 名单外 | **名单外，去留待 PM 定**（§4.4：CLAUDE.md 有、名单和代码都没有） | 无 | 无 |
 
 名单内 15 个 agent：§4.1 十个、§4.2 三个、§4.3 两个，各占一行。
+
+## 开发侧帮手（名单外，不计入 15 人）
+
+| 中文名 | 代号 | 性质 | 档案 | 操作手册 |
+|---|---|---|---|---|
+| 齐白石 | `qibaishi` | **开发侧，名单外**：开发侧子代理（`.claude/agents/me-backend-ui-designer.md`），不是产品内后台 agent，不在 spec §4 名单 | [62-qibaishi](./62-qibaishi.md) | [UI 美工手册 v1.0](../sops/2026-10-27-qibaishi-ui-designer-playbook-v1.0.md) |
+
+## 经验手册（playbooks）
+
+| 目录 | 归谁 | 说明 |
+|---|---|---|
+| [`docs/playbooks/social/`](../playbooks/social/README.md) | 苏东坡 `sudongpo` | 社媒经验手册：平台层 `platform-general.md` · 行业层 `industry-travel.md` · 客户层 `clients/`（只列目录）· [README](../playbooks/social/README.md) · [MIGRATION-MAP](../playbooks/social/MIGRATION-MAP.md)。涉及视频工厂的部分归 ME Video 维护 |
 
 ## 手册归属（通用手册）
 

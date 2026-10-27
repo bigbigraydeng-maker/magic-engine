@@ -16,7 +16,7 @@
 ## 代码入口（来自 §4.4 与相关路径）
 
 - 主入口：`src/lib/inngest/functions/simaqian-reputation-weekly.ts`
-- 叫醒登记：`simaqian-reputation-weekly`（Inngest 定时，`src/lib/cron/registry.ts:366`，见 §4.4）
+- 叫醒登记：`simaqian-reputation-weekly`（Inngest 定时，登记在 `src/lib/cron/registry.ts`，见 §4.4）
 - 起草：`src/lib/reputation/simaqian-drafts.ts`
 - 待办条目：`src/lib/pm-todo/simaqian-review-items.ts`
 - 台账：[`2026-09-25-b2-simaqian-reputation-weekly`](../ledger/2026-09-25-b2-simaqian-reputation-weekly.md)
