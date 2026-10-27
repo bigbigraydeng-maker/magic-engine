@@ -1,6 +1,6 @@
 import React from 'react'
 import { AbsoluteFill, useVideoConfig } from 'remotion'
-import { hookDisplayRows, hookRows, hookTypeSize, looksChinese, statTypeSize, type ResolvedHook, type ResolvedHookLine } from './frame.ts'
+import { hookRows, hookTypeSize, looksChinese, statTypeSize, type ResolvedHook, type ResolvedHookLine } from './frame.ts'
 import { PopIn } from './pop.tsx'
 import { safeRectFor, type SafeRect } from './safeZone.ts'
 import { fontFamily } from './theme.ts'
@@ -129,17 +129,19 @@ const QuestionHook: React.FC<{ hook: ResolvedHook; brandColor: string; safe: Saf
   safe,
   frameWidth,
 }) => {
-  const rows = hookDisplayRows(hook.question ?? hook.lines[0]?.text ?? '').slice(0, 3)
-  const cjk = rows.some((row) => looksChinese(row))
-  const longest = rows.reduce((max, row) => Math.max(max, Array.from(row).length), 1)
+  const source = hook.lines.length > 0 ? hook.lines : [{ text: hook.question ?? '', badge: null }]
+  const rows = hookRows(source)
+  const cjk = rows.some((row) => looksChinese(row.text))
+  const longest = rows.reduce((max, row) => Math.max(max, Array.from(row.text).length), 1)
   const size = hookTypeSize(frameWidth, safe.width, longest, cjk)
-  const last = rows.length - 1
+  const hit = rows.findIndex((row) => row.text === hook.question)
+  const emphasis = hit >= 0 ? hit : rows.length - 1
   return (
     <div style={stage(safe)}>
       {rows.map((row, i) => (
-        <PopIn key={`${row}-${i}`} delay={i * 7}>
+        <PopIn key={`${row.text}-${i}`} delay={i * 7}>
           <div style={lineStyle(size)}>
-            <Emphasis text={row} color={brandColor} on={i === last} />
+            <Emphasis text={row.text} color={brandColor} on={i === emphasis && !row.badge} />
           </div>
         </PopIn>
       ))}

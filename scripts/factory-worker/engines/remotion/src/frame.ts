@@ -298,9 +298,10 @@ function resolveQuestion(source: ResolvedHookLine[], spec: FrameHookSpec, chines
     source.find((line) => QUESTION_END.test(line.text))?.text ||
     source[0]?.text ||
     fallbackHookLine(chinese)
+  const lines = source.length > 0 ? source : [{ text: question, badge: null }]
   return {
     style: 'question',
-    lines: [{ text: question, badge: null }],
+    lines,
     stat: spec.stat?.trim() || null,
     question,
     fallbackLine: !provided,

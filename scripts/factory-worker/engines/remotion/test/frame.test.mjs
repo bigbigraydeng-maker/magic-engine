@@ -97,6 +97,15 @@ describe('hook fallbacks', () => {
     assert.equal(hook.fallbackLine, false)
   })
 
+  test('a question mark on one line keeps the other hook lines', () => {
+    const lines = ['沿着海岸', '慢慢走走', '想去看看？']
+    const hook = resolveHook({ lines })
+    assert.equal(hook.style, 'question')
+    assert.deepEqual(hook.lines.map((line) => line.text), lines)
+    const rows = hookRows(hook.lines)
+    assert.equal(rows.map((row) => row.text).join(''), lines.join(''))
+  })
+
   test('a number selects the stat pop and keeps the other line as the caption', () => {
     const hook = resolveHook({ lines: ['48', '小时内回复'] })
     assert.equal(hook.style, 'stat')
