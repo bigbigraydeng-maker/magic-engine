@@ -260,6 +260,51 @@ describe('buildDigestGoalContext', () => {
       goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-30' },
     })
   })
+
+  function fetchedLead(value: number) {
+    vi.mocked(autoFetchMetricValue).mockResolvedValue({
+      ok: true, value, source: 'ad_daily_insights', snapshot_date: '2026-09-15', label: 'lead',
+    })
+    vi.mocked(loadAdStrategyConfigWithSource).mockResolvedValue({ config: adStrategyConfig(), source: 'row' })
+  }
+
+  it('今天有日报行、日报只到昨天 → 实际值终点是昨天', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow()])
+    fetchedLead(12)
+    // 巡察日是今天 09-16。日报最新一行停在昨天：今天的行还没进这张日报。
+    insightsTable([{ insight_date: '2026-09-15', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
+      goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-15' },
+    })
+  })
+
+  it('日报最新日期早于目标期开始 → 实际值终点仍是目标期末', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-09-20', period_end: '2026-10-31',
+    })])
+    fetchedLead(4)
+    insightsTable([{ insight_date: '2026-09-15', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
+      goalPeriod: { period_start: '2026-09-20', period_end: '2026-10-31' },
+    })
+  })
+
+  it('日报最新不早于目标期末 → 实际值终点仍是目标期末', async () => {
+    vi.mocked(listActiveGoals).mockResolvedValue([goalRow({
+      period_start: '2026-09-01', period_end: '2026-09-10',
+    })])
+    fetchedLead(4)
+    insightsTable([{ insight_date: '2026-09-15', spend: 20, results: 1 }])
+
+    await buildDigestGoalContext('client-1', '2026-09-16')
+    expect(vi.mocked(autoFetchMetricValue)).toHaveBeenCalledWith(supabaseAdmin, 'client-1', 'leads_count', {
+      goalPeriod: { period_start: '2026-09-01', period_end: '2026-09-10' },
+    })
+  })
 })
 
 describe('buildDigestGoalContext — 广告设置读失败', () => {

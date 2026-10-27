@@ -191,6 +191,19 @@ export function withThinSampleGuard(pace: GoalPace, costMedian: number | null, d
   }
 }
 
+/**
+ * 实际值窗口的终点，和速度分母同一天。
+ * 截止日为空、早于目标期开始、或不早于目标期末时不截。
+ */
+function clipGoalEndToDataThrough(
+  periodStart: string,
+  periodEnd: string,
+  dataThrough: string | null,
+): string {
+  if (!dataThrough || dataThrough < periodStart || dataThrough >= periodEnd) return periodEnd
+  return dataThrough
+}
+
 /** 目标对应的系列：线索目标 = 配置里的表单留资系列，私信目标 = WhatsApp 系列；没配置 = 不限系列（只按结果类型区分）。 */
 function goalCampaignIds(clientId: string, metric: CostMetric): string[] | undefined {
   const kind = metric === 'leads' ? 'lead_form' : metric === 'messaging' ? 'whatsapp' : null
@@ -208,12 +221,6 @@ export async function buildDigestGoalContext(
     const goal = pickDigestGoal(await listActiveGoals(supabaseAdmin, clientId))
     if (!goal) return null
 
-    const fetched = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key, {
-      goalPeriod: { period_start: goal.period_start, period_end: goal.period_end },
-    })
-    // unknown / 任何失败 → null（不是 0）。
-    const actualToDate = fetched.ok ? fetched.value : null
-
     const { config, source, error: configError } = await loadAdStrategyConfigWithSource(clientId)
     const metric = costMetricForGoal(goal.primary_metric_key)
     const cost = await readRecentCost(clientId, insightDate, {
@@ -221,8 +228,16 @@ export async function buildDigestGoalContext(
       campaignIds: goalCampaignIds(clientId, metric),
     })
     const medianCostPerResultCents7d = cost.medianCents
-    // 日报最多慢一天：速度按有数据的最后一天算，不按日历天数。
+    // 速度按有数据的最后一天算。实际值用同一个终点，不把截止日之后的数算进去。
     const dataThrough = cost.latestDate
+    const fetched = await autoFetchMetricValue(supabaseAdmin, clientId, goal.primary_metric_key, {
+      goalPeriod: {
+        period_start: goal.period_start,
+        period_end: clipGoalEndToDataThrough(goal.period_start, goal.period_end, dataThrough),
+      },
+    })
+    // unknown / 任何失败 → null（不是 0）。
+    const actualToDate = fetched.ok ? fetched.value : null
     const dataDays = dataThrough === null
       ? null
       : dayIndexAndTotal(goal.period_start, goal.period_end, dataThrough).dayIndex

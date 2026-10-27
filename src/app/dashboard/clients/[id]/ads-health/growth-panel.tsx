@@ -126,7 +126,9 @@ function GoalBar({ goal, pace, clientView = false, liveNote }: { goal: GoalView 
           )}
         </>
       )}
-      {!clientView && <p className="mt-2 text-xs text-gray-500">数据截至{pace.dataThrough ?? '昨天'}（Meta 日报，最多慢一天）</p>}
+      {!clientView && pace.dataThrough && (
+        <p className="mt-2 text-xs text-gray-500">数据截至{pace.dataThrough}（Meta 日报，最多慢一天）</p>
+      )}
       {liveNote && <p className="mt-2 text-xs text-gray-500">{liveNote}</p>}
     </div>
   )
