@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { getGoalById } from '@/lib/strategy/goals'
 import {
   MANUAL_PRESCRIPTION_AGENT,
@@ -8,6 +8,8 @@ import {
   parseManualPrescriptionBody,
   type ManualParseSuccess,
 } from '@/lib/diagnostic/manual-prescription'
+import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
+import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -89,6 +91,7 @@ async function insertDraft(
     console.error('[prescriptions/manual] insert failed', error)
     return jsonError(500, '保存处方草稿失败')
   }
+  await afterPrescriptionDraftSaved({ clientId, prescriptionId: data.id })
   return NextResponse.json({
     success: true,
     prescription_id: data.id,
@@ -106,7 +109,8 @@ export async function POST(
   { params }: { params: { id: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Paste stays open to this client's FDE. The row label "广告 Agent" is not a caller.
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   let body: unknown
@@ -120,5 +124,7 @@ export async function POST(
   if (!parsed.ok) return jsonError(parsed.status, parsed.error)
   const ready = await loadInsertContext(clientId, parsed.goalId)
   if (!ready.ok) return jsonError(ready.status, ready.error)
+  // 种子构建失败不能挡住保存草稿：attachPlanSeed 自己不抛错，这里再兜一层
+  parsed.content = await attachPlanSeed(parsed.content, { clientId, goalId: parsed.goalId }).catch(() => parsed.content)
   return insertDraft(clientId, parsed, ready)
 }

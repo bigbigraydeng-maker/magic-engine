@@ -20,6 +20,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
+import { isGoalReason } from '@/lib/strategy/goals'
 import {
   GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
   GOAL_SUBTYPES_BY_INTENT,
@@ -192,11 +193,17 @@ export function NewGoalClient() {
   // ── Validation per step ────────────────────────────────────────────────────
   const canProceed1 = !!intent && !!subType && !!title.trim()
   const canProceed2 = !!selectedMetric && baselineValue !== '' && targetValue !== '' && baselineValue !== targetValue
-  const canProceed3 = !!periodStart && !!periodEnd && new Date(periodEnd) > new Date(periodStart)
+  const periodOk = !!periodStart && !!periodEnd && new Date(periodEnd) > new Date(periodStart)
+  const reasonOk = isGoalReason(fdeReasoning)
+  const canProceed3 = periodOk && reasonOk
 
   // ── Submit handler ─────────────────────────────────────────────────────────
   async function handleSubmit() {
     if (!intent || !subType || !selectedMetric || !title.trim()) return
+    if (!isGoalReason(fdeReasoning)) {
+      setError('不能保存草稿，缺：理由')
+      return
+    }
     setSaving(true)
     setError('')
 
@@ -214,7 +221,7 @@ export function NewGoalClient() {
       period_end: periodEnd,
       budget_amount: budgetAmount ? parseFloat(budgetAmount) : undefined,
       budget_currency: budgetCurrency,
-      fde_reasoning: fdeReasoning.trim() || undefined,
+      fde_reasoning: fdeReasoning.trim(),
     }
 
     try {
@@ -588,10 +595,11 @@ export function NewGoalClient() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
-                FDE Reasoning (强烈建议填) — 客户为什么要做这个 Goal？我们 90 天后看回这段话
+              <label htmlFor="goal-draft-reason" className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                理由（必填）— 客户为什么要做这个 Goal？我们 90 天后看回这段话
               </label>
               <textarea
+                id="goal-draft-reason"
                 value={fdeReasoning}
                 onChange={e => setFdeReasoning(e.target.value)}
                 rows={4}
@@ -618,7 +626,7 @@ export function NewGoalClient() {
               <Row label="Baseline → Target" value={`${baselineValue} → ${targetValue}`} highlight />
               <Row label="Period" value={`${periodStart} → ${periodEnd}`} />
               {budgetAmount && <Row label="Budget" value={`${budgetCurrency} ${parseFloat(budgetAmount).toLocaleString()}`} />}
-              {fdeReasoning && <Row label="FDE Reasoning" value={fdeReasoning} multiline />}
+              <Row label="理由" value={fdeReasoning} multiline />
             </dl>
 
             <p className="border-t border-black/10 pt-4 text-xs font-semibold text-me-charcoal/55">
@@ -648,6 +656,12 @@ export function NewGoalClient() {
                   {!intent && '请先选 Intent · '}
                   {intent && !subType && '请选 Sub-type · '}
                   {intent && subType && !title.trim() && '请填 Goal 标题'}
+                </p>
+              )}
+              {step === 3 && !canProceed3 && (
+                <p className="text-[11px] font-semibold text-me-charcoal/55">
+                  {!periodOk && '请填有效的起止日期 · '}
+                  {!reasonOk && '请写一句理由（至少 8 个字，不能是待定这类占位词）'}
                 </p>
               )}
               <button

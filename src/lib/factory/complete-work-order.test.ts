@@ -575,6 +575,15 @@ describe('completeWorkOrder — 内容实质闸（服务端重算）', () => {
     const { r, m } = await run(WO as Record<string, unknown>)
     expect(r.ok).toBe(true)
     expect(savedOutput(m).content_substance).toBeUndefined()
+    expect(savedOutput(m).machine_reviewed).toBeUndefined()
+  })
+
+  it('template delivery enters the human queue marked not machine-reviewed', async () => {
+    const { r, m } = await run(woWith(ATMOS_PASS))
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.status).toBe('in_review')
+    expect(savedOutput(m).machine_reviewed).toBe(false)
   })
 
   it('warn mode (default): a text-less reel still completes, with the server verdict kept for audit', async () => {

@@ -9,8 +9,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
-import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
+import { collectPhaseBudgetProblems } from '@/lib/marketing-plan/promo/budget-caps'
 import { buildPromoBoard } from '@/lib/marketing-plan/promo/board'
 import { loadGoal, loadLatestClientPrescription, loadLatestGoalPrescription, loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
@@ -44,6 +45,8 @@ async function loadPlan(ctx: Ctx): Promise<MarketingPlan | null> {
 }
 
 export async function GET(_req: NextRequest, ctx: Ctx) {
+  const denied = await rejectAgentAdsBearer(_req, { clientId: ctx.params.id, action: 'outside_allowlist' })
+  if (denied) return denied
   const access = await requirePaidClientAccess(ctx.params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
@@ -69,6 +72,12 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
 }
 
 export async function PUT(req: NextRequest, ctx: Ctx) {
+  const denied = await rejectAgentAdsBearer(req, {
+    clientId: ctx.params.id,
+    action: 'change_budget',
+    resourceId: ctx.params.planId,
+  })
+  if (denied) return denied
   const access = await requirePlanApproverAccess(ctx.params.id)
   if (!access.ok) return NextResponse.json({ success: false, error: access.error, reason: access.reason }, { status: access.status })
   try {
@@ -99,12 +108,11 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
     // 广告账户归属 + 确定的超限（读不到只是未核实，不在这里拒绝）
     if (allAdsSteps(spec).length > 0) {
       const facts = await loadPromoFacts(ctx.params.id, spec, plan.generation_meta?.promo_checks ?? [])
-      const problems: string[] = []
-      for (const phase of spec.phases) {
-        const steps = phase.steps.flatMap(s => (s.kind === 'ads_campaign' ? [s] : []))
-        const res = checkAdsBudget(steps, facts.gate.accounts, facts.gate.config?.daily_budget_cap_cents ?? null)
-        if (res.verdict === 'over') problems.push(...res.reasons.map(r => `${phase.name}：${r}`))
-      }
+      const problems = collectPhaseBudgetProblems(
+        spec,
+        facts.gate.accounts,
+        facts.gate.config?.daily_budget_cap_cents ?? null,
+      )
       if (problems.length > 0) {
         return NextResponse.json({ success: false, error: '广告预算或账户不符合要求', problems }, { status: 400 })
       }

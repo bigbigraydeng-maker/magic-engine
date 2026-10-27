@@ -393,6 +393,7 @@ async function loadThreads(
   supabase: SupabaseClient,
   clientIds: string[],
   cutoff: string,
+  channel: ReplyDueChannel,
 ): Promise<ConversationRow[]> {
   const out: ConversationRow[] = []
   for (const part of chunk(clientIds, IN_CHUNK)) {
@@ -401,7 +402,7 @@ async function loadThreads(
         .from('conversations')
         .select('id, client_id, contact_id, subject, last_message_at, last_message_from')
         .in('client_id', part)
-        .eq('channel', 'email')
+        .eq('channel', channel)
         .eq('last_message_from', 'customer')
         .gte('last_message_at', cutoff)
         .not('contact_id', 'is', null)
@@ -546,7 +547,21 @@ async function loadRules(
   return rules
 }
 
+/**
+ * 在哪个渠道的对话里找「客人最后说话、没人回」。
+ *
+ * 默认 `email`（本文件原来唯一的用法）。`whatsapp` 复用同一套排除规则
+ * （拒联 / 人手处理过 / 自己人 / 自动回执）：WhatsApp 对话同样有 `last_message_from`，
+ * 员工只能在 ME 的客人抽屉里回（CTS 号码在接口上，手机收不到），所以库里看不到外发
+ * 就是真没回（2026-10-20 台账 cts-whatsapp-unanswered-no-send-path）。
+ * 注意：WhatsApp 对话没有主题，`isAutoReply(null)` 恒为 false；也没有邮箱，
+ * 「自己人 / 同行」那条靠邮箱域名判的排除对它不起作用，只靠拒联和人手触点兜底。
+ */
+export type ReplyDueChannel = 'email' | 'whatsapp'
+
 export interface ReplyDuePolicy {
+  /** 默认 `email`。 */
+  channel?: ReplyDueChannel
   slaHours?: number
   windowDays?: number
   maxPerClient?: number
@@ -571,7 +586,7 @@ export async function findEmailRepliesDue(
   const windowDays = policy.windowDays ?? REPLY_DUE_WINDOW_DAYS
   const cutoff = new Date(now.getTime() - windowDays * DAY_MS).toISOString()
 
-  const convos = await loadThreads(supabase, clientIds, cutoff)
+  const convos = await loadThreads(supabase, clientIds, cutoff, policy.channel ?? 'email')
   const threads: EmailThread[] = convos
     .filter((c): c is ConversationRow & { contact_id: string; last_message_at: string } =>
       Boolean(c.contact_id && c.last_message_at),

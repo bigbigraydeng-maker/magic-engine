@@ -7,11 +7,13 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { AssigneeSelect } from './AssigneeSelect'
 import { CallButton } from './CallButton'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
-import { ContactTimeline, type TimelineSummary, type StageSource } from './ContactTimeline'
+import { ContactTimeline, type TimelineSummary, type TimelineAiBrief, type StageSource } from './ContactTimeline'
+import { briefAge } from '@/lib/crm/brief-age'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { ComposeEmail } from './ComposeEmail'
@@ -72,6 +74,13 @@ export interface DrawerRow {
   nextAction?: NextAction
   /** 最新 AI 摘要的意向。只用来显示一行「AI 初判（未校准）」小字，不影响任何按钮或排序。 */
   intent?: 'high' | 'medium' | 'low' | 'unknown' | null
+  /**
+   * 这条线索的跟进人（`contacts.assigned_to`）—— 字面邮箱或 null。
+   *
+   * part 2 的 round-robin 新进线时自动写入；part 3 这里给员工看 + 改。
+   * 列表接口把它跟别的字段一起透下来；下拉里的候选从 `/crm/assignees` 另拉。
+   */
+  assignedTo?: string | null
 }
 
 const STAGE_SOURCE_LABEL: Record<StageSource, string> = {
@@ -145,6 +154,39 @@ export function PersonDrawer({
    */
   const [summary, setSummary] = useState<TimelineSummary | null>(null)
   const onSummary = useCallback((s: TimelineSummary | null) => setSummary(s), [])
+  // AI 概况（conversation_briefs 最新一份）—— 抽屉打开 / 换人时单独取一次。
+  // 不并进时间线接口：那个接口 2026-10-10 起有测试守着「不查 conversation_briefs」；
+  // 也不并进列表接口：全带会把那页拖慢。换人时先清空，不让上一个人的概况留着。
+  const [aiBrief, setAiBrief] = useState<TimelineAiBrief | null>(null)
+  const age = aiBrief ? briefAge(aiBrief.generatedAt) : null
+  const contactId = row.contactId
+  useEffect(() => {
+    let alive = true
+    setAiBrief(null)
+    const ctrl = new AbortController()
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/clients/${clientId}/crm/contacts/${contactId}/brief`,
+          { signal: ctrl.signal },
+        )
+        if (!res.ok) {
+          // 「确实没简报」和「接口 4xx/5xx」在界面上都表现为不显示概况卡 ——
+          // 打一条日志，让排查时能区分，不然两者看起来一模一样。
+          console.warn(`[drawer] AI 概况取失败 contact=${contactId} status=${res.status}`)
+          return
+        }
+        const json = (await res.json()) as { brief?: TimelineAiBrief | null }
+        if (alive) setAiBrief(json.brief ?? null)
+      } catch {
+        // 取不到就不显示概况卡 —— 抽屉其余部分照常，不挡人干活。
+      }
+    })()
+    return () => {
+      alive = false
+      ctrl.abort()
+    }
+  }, [clientId, contactId])
 
   const changeStage = async (toStage: string, label: string) => {
     if (!window.confirm(`到哪一步了：${row.stageLabel ?? '还没标'} → 改成「${label}」？`)) return
@@ -274,6 +316,56 @@ export function PersonDrawer({
               {summary.formFactsLine}
             </p>
           )}
+
+          {/* AI 概况 —— 摆在第一屏最上面（PM 2026-10-26）。CTS 员工日常不用翻全部历史，
+              看这张卡就知道这个客人是谁、到哪一步、想要什么、我们承诺过什么；要查证点下面
+              「看完整往来原文」。
+              🔴 这是 AI 生成、**未经人工核实**（提示词已知偶尔编商业细节，例如价格有效期），
+                 卡上明确标注「以原文为准」，不让员工把它当成板上钉钉的事实。
+                 不放「下一步」——那是下面「该做什么」卡的事，避免两处打架。 */}
+          {aiBrief && (
+            <div className="mb-3 rounded-xl border border-me-ochre/30 bg-me-ochre/[0.06] px-3 py-2.5" data-testid="ai-overview">
+              <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-me-ochre">
+                AI 概况 · 未核实，以原文为准
+              </p>
+              {/* 生成时间：简报里常带「明天 11 点」「等待了 825 小时」这类跟生成时刻绑死的说法，
+                  不写时间员工没法判断新不新。超过 3 天多提醒一句。读不出时间就不写，不猜。 */}
+              {age && (
+                <p
+                  className={`mb-1.5 text-[11px] ${age.stale ? 'font-bold text-[#C2453A]' : 'text-me-charcoal/50'}`}
+                  data-testid="ai-overview-age"
+                >
+                  {age.label}
+                  {age.stale ? ' · 里面的时间说法可能已过时，请核对原文' : ''}
+                </p>
+              )}
+              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{aiBrief.summary}</p>
+              {aiBrief.customerNeeds.length > 0 && (
+                <div className="mt-2 flex gap-2">
+                  <span className="min-w-[52px] text-[11px] font-bold text-me-charcoal/50">想要什么</span>
+                  <span className="flex-1 text-[12px] leading-relaxed text-me-charcoal/85">
+                    {aiBrief.customerNeeds.join('；')}
+                  </span>
+                </div>
+              )}
+              {aiBrief.promisesMade.length > 0 && (
+                <div className="mt-1.5 flex gap-2">
+                  <span className="min-w-[52px] text-[11px] font-bold text-me-charcoal/50">我们承诺过</span>
+                  <span className="flex-1 text-[12px] leading-relaxed text-me-charcoal/85">
+                    {aiBrief.promisesMade.join('；')}
+                  </span>
+                </div>
+              )}
+              {aiBrief.objections.length > 0 && (
+                <div className="mt-1.5 flex gap-2">
+                  <span className="min-w-[52px] text-[11px] font-bold text-[#C2453A]/80">顾虑</span>
+                  <span className="flex-1 text-[12px] leading-relaxed text-me-charcoal/85">
+                    {aiBrief.objections.join('；')}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           {summary && (summary.lastText || summary.tour || summary.travelWindow) && (
             <div className="mb-3 rounded-xl border border-me-ochre/25 bg-me-ochre/[0.06] px-3 py-2.5">
               {summary.lastText && (
@@ -359,6 +451,17 @@ export function PersonDrawer({
 
           {/* 客人档案：名字（可改）/ 昵称 / 邮箱 / 电话（可加）。PM 2026-10-22：先把字段做好，以后有机会再完善。 */}
           <ProfileCard clientId={clientId} contactId={row.contactId} onChanged={() => onSaved('✓ 档案已保存', true)} />
+
+          {/* 跟进人（issue #3158 part 3）—— 这一条线索分给谁跟。part 2 的 round-robin
+              在新进线时自动写入；这里让员工看得见 + 改得动。放在档案下面、「该做什么」上面：
+              销售开口前先知道「这单归我吗」，再往下看该做什么。 */}
+          <AssigneeSelect
+            clientId={clientId}
+            contactId={row.contactId}
+            current={row.assignedTo ?? null}
+            viewerEmail={viewerEmail}
+            onSaved={onSaved}
+          />
 
           {/* 该做什么 —— 三行：动作 + 为什么 / AI 建议 / 到哪一步了（点开可改）。
               这一块取代了原来并排的三套状态（阶段按钮、冷热标签、意向小圆标），PM 2026-10-10：
@@ -549,11 +652,13 @@ export function PersonDrawer({
               往来记录
             </p>
             <ContactTimeline
-              key={timelineKey}
+              key={row.contactId}
+              refreshKey={timelineKey}
               clientId={clientId}
               contactId={row.contactId}
               onSummary={onSummary}
               dialedAt={dialedAt}
+              collapsible
             />
           </div>
 

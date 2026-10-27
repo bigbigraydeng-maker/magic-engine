@@ -276,6 +276,26 @@ describe('loadWarMapInput · 真实形状的行（CTS 2026-10-20 08:50Z）', () 
     expect(view.prescriptionLine).toBe('处方 v2 · 草稿 · 2 条人工动作')
   })
 
+  it('M. 较新的草稿不能把已批准计划挤下作战地图', async () => {
+    db.tables.marketing_plans = [
+      {
+        client_id: CLIENT, status: 'approved', updated_at: '2026-10-01T01:00:00.000Z',
+        plan_data: { promo: baseSpec({ goal_id: 'goal-live' }) },
+      },
+      {
+        client_id: CLIENT, status: 'draft', updated_at: '2026-10-20T01:00:00.000Z',
+        plan_data: { promo: baseSpec({ goal_id: 'goal-draft' }) },
+      },
+    ]
+    db.tables.goals = [
+      { id: 'goal-live', client_id: CLIENT, title: '正在用的目标', budget_currency: 'NZD' },
+      { id: 'goal-draft', client_id: CLIENT, title: '新草稿目标', budget_currency: 'NZD' },
+    ]
+    const input = await loadWarMapInput(CLIENT, NOW)
+    expect(input.plan?.status).toBe('approved')
+    expect(input.plan?.goalTitle).toBe('正在用的目标')
+  })
+
   it('L. 处方读失败时计划和阶段仍在，处方那一行留空', async () => {
     db.tables.marketing_plans = [{
       client_id: CLIENT, status: 'draft', updated_at: '2026-10-20T01:00:00.000Z',

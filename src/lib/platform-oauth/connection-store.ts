@@ -12,6 +12,7 @@
  *   await revokeConnection(id)
  */
 
+import { clearMetaPageSyncHold } from '../meta/broken-page-token'
 import { supabaseAdmin } from '../supabase'
 import type { SocialConnectionFact } from './social-onboarding'
 import {
@@ -66,6 +67,11 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
 
   if (error) {
     throw Object.assign(new Error(`Failed to upsert connection: ${error.message}`), { code: error.code })
+  }
+
+  // 重新连上 Meta 主页之后，每小时同步才准再打 Graph。清不掉暂停不能让重连本身失败。
+  if (input.provider === 'meta') {
+    await clearMetaPageSyncHold(supabaseAdmin, input.clientId, input.accountId)
   }
 }
 

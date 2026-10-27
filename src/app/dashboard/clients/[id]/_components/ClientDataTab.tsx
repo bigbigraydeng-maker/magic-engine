@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { GscTrendSection } from './GscTrendSection'
 import { Ga4TrendSection } from './Ga4TrendSection'
+import { clickThroughRate, formatCtr } from '@/lib/meta/ctr'
+import { formatAdMoney, spendOutcome, spendWindowLabel } from '@/lib/ads/spend-figures'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +81,9 @@ interface MetaAdsSnapshot {
   campaigns:   MetaCampaign[] | null
   period_start: string
   period_end:   string
+  currency?: string | null
+  cost_per_lead?: number | null
+  cost_per_conversation?: number | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -277,23 +282,29 @@ function Ga4Section({ snapshot }: { snapshot: Ga4Snapshot }) {
 
 function MetaAdsSection({ snapshot }: { snapshot: MetaAdsSnapshot }) {
   const campaigns = (snapshot.campaigns ?? []).slice(0, 10)
-  const period    = `${snapshot.period_start} – ${snapshot.period_end}`
-  const currency  = (v: number | null) => v == null ? '—' : `$${v.toFixed(2)}`
-  const x2        = (v: number | null) => v == null ? '—' : `${v.toFixed(2)}×`
+  const period    = spendWindowLabel(snapshot.period_start, snapshot.period_end)
+  const money     = (v: number | null) => v == null ? '—' : formatAdMoney(v, snapshot.currency)
+  const outcome   = spendOutcome({
+    roas: snapshot.roas,
+    costPerConversation: snapshot.cost_per_conversation ?? null,
+    costPerLead: snapshot.cost_per_lead ?? null,
+    currency: snapshot.currency ?? null,
+  })
+  const accountCtr = clickThroughRate(snapshot.clicks, snapshot.impressions)
 
   return (
     <div className="rounded-xl border border-black/10 bg-white p-5">
       <div className="mb-4 flex items-center gap-2">
         <span className="text-base leading-none">📣</span>
         <SectionTitle>广告 智能投放</SectionTitle>
-        <span className="ml-auto text-[10px] text-me-charcoal/45">{period}</span>
+        <span className="ml-auto text-[10px] text-me-charcoal/45">Meta · {period}</span>
       </div>
 
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <MetricTile label="总花费"    value={currency(snapshot.spend)} />
-        <MetricTile label="ROAS"     value={x2(snapshot.roas)} />
-        <MetricTile label="点击率"   value={snapshot.ctr == null ? '—' : pct(snapshot.ctr)} />
-        <MetricTile label="点击量"   value={snapshot.clicks == null ? '—' : fmtNum(snapshot.clicks)} />
+        <MetricTile label={`花费 · ${period}`} value={money(snapshot.spend)} />
+        <MetricTile label={outcome.label} value={outcome.value} />
+        <MetricTile label="点击率" value={formatCtr(accountCtr)} />
+        <MetricTile label="点击量" value={snapshot.clicks == null ? '—' : fmtNum(snapshot.clicks)} />
       </div>
 
       {campaigns.length > 0 && (
@@ -318,10 +329,10 @@ function MetaAdsSection({ snapshot }: { snapshot: MetaAdsSnapshot }) {
                     <Td>
                       <span className="line-clamp-1 max-w-[220px] block">{c.campaign_name}</span>
                     </Td>
-                    <Td right>{currency(c.spend)}</Td>
-                    <Td right>{x2(c.roas)}</Td>
+                    <Td right>{money(c.spend)}</Td>
+                    <Td right>{c.roas == null ? '不适用' : `${c.roas.toFixed(2)}×`}</Td>
                     <Td right>{fmtNum(c.clicks)}</Td>
-                    <Td right>{c.ctr == null ? '—' : pct(c.ctr)}</Td>
+                    <Td right>{formatCtr(clickThroughRate(c.clicks, c.impressions))}</Td>
                   </tr>
                 ))}
               </tbody>

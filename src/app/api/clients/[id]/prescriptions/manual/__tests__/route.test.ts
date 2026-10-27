@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/auth/client-access', () => ({
-  requirePaidClientAccess: vi.fn().mockResolvedValue({
+  requireOperatorAccess: vi.fn().mockResolvedValue({
     ok: true, user: { id: 'test-user', email: 'fde@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null,
   }),
 }))
@@ -17,7 +17,7 @@ vi.mock('@/lib/huatuo/agent', () => ({ runHuatuo: (...a: unknown[]) => mockHuatu
 
 import { POST } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { MANUAL_PRESCRIPTION_AGENT } from '@/lib/diagnostic/manual-prescription'
 
 const params = { id: 'client-1' }
@@ -75,7 +75,7 @@ function mockDb(options: { goal?: unknown; run?: unknown; version?: unknown } = 
 
 beforeEach(() => {
   vi.clearAllMocks()
-  ;(requirePaidClientAccess as ReturnType<typeof vi.fn>).mockResolvedValue({
+  ;(requireOperatorAccess as ReturnType<typeof vi.fn>).mockResolvedValue({
     ok: true, user: { id: 'test-user', email: 'fde@magiclab.com' }, role: 'admin', tier: 'admin', allowedClientId: null,
   })
 })
@@ -137,10 +137,10 @@ describe('POST /prescriptions/manual', () => {
     expect(mockLand).not.toHaveBeenCalled()
   })
 
-  it('uses the same paid-client access check as the other prescription routes', async () => {
-    ;(requirePaidClientAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, status: 402, error: 'paid only' })
+  it('returns the operator-gate status and does not write when access is denied', async () => {
+    ;(requireOperatorAccess as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' })
     const res = await POST(request(payload()), { params })
-    expect(res.status).toBe(402)
+    expect(res.status).toBe(403)
     expect(supabaseAdmin.from).not.toHaveBeenCalled()
   })
 })

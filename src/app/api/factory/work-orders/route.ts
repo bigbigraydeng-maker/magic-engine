@@ -39,7 +39,7 @@ export async function GET(req?: Request) {
     .from('content_work_orders')
     // 单个字面量(不能用 + 拼接):Supabase 客户端靠字面量类型解析列名,拼接后变成 string 就推不出行类型
     .select(
-      'id, client_id, status, order_type, angle, rationale_one_liner, actual_cost_usd, budget_cap_usd, attempt_count, reclaim_count, reject_reason, source_ad_id, review_ref, output, published_ref, heartbeat_at, created_at, updated_at, fact_source_url:brief->copy->endcard->>url, template_id:brief->remotion->>template, music_file:brief->remotion->props->>musicFile',
+      'id, client_id, status, order_type, angle, rationale_one_liner, actual_cost_usd, budget_cap_usd, attempt_count, reclaim_count, reject_reason, source_ad_id, review_ref, output, published_ref, heartbeat_at, created_at, updated_at, fact_source_url:brief->copy->endcard->>url, deliverable:brief->remotion->>deliverable, template_id:brief->remotion->>template, music_file:brief->remotion->props->>musicFile',
     )
   const pending = base.eq('status', 'in_review')
   const scoped = admin.scope.kind === 'global' ? pending : pending.eq('client_id', admin.scope.clientId)

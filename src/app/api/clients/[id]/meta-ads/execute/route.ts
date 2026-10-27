@@ -42,6 +42,7 @@ import {
   MESSENGER_LOOKUP_FAILED_MESSAGE,
 } from '@/lib/ads-strategy/messenger-draft-campaign-guard'
 import { requireSpendActivationAuthority, buildSpendActivationReceipt, type SpendActivationAuthority } from '@/lib/ads/spend-activation'
+import { rejectAgentAdsMetaExecute } from '@/lib/auth/agent-ads-guard'
 
 const SUPPORTED_ACTION_TYPES = new Set([
   ADS_ACTION_TYPE.PAUSE_CAMPAIGN,
@@ -66,6 +67,8 @@ interface ExecuteBody {
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const clientId = params.id
+  const denied = await rejectAgentAdsMetaExecute(req, clientId)
+  if (denied) return denied
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   const access = await requireAdsCampaignBudgetAccess(clientId)

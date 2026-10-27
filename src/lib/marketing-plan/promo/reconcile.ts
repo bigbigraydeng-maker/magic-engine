@@ -14,6 +14,7 @@
  */
 
 import { computeGoalPace } from '@/lib/ads-strategy/goal-pace'
+import { unreadWeeklySpendReason, type AccountSpendTotal } from '@/lib/ads/spend-figures'
 import type { PromoPlaybook } from './playbooks'
 import type { AdsStep, PromoSpec } from './spec'
 import { allAdsSteps } from './spec'
@@ -53,6 +54,11 @@ export interface ReconcileFacts {
   insights_as_of: string | null
   /** 账户时区是否已确定（false → 花费行 unknown） */
   timezone_known: boolean
+  /**
+   * 广告数据页同一份账户合计（meta_ads_snapshots）。
+   * 本周逐日花费读不到时写进原因，说明另一页的数字是哪一段；不当成这一周的实际花费。
+   */
+  account_total?: AccountSpendTotal | null
 }
 
 export interface Reconciliation {
@@ -117,7 +123,7 @@ function spendRow(spec: PromoSpec, win: { start: string; end: string }, f: Recon
     return { ...base, planned: plannedTotal, actual: null, status: 'unknown', reason: '广告账户时区未确定，不能按天核对花费' }
   }
   if (f.spend_cents_by_account_day === null) {
-    return { ...base, planned: plannedTotal, actual: null, status: 'unknown', reason: '广告花费读不出来（数据没同步，或这几天账户没有花费记录，请到广告账户确认是不是停了）' }
+    return { ...base, planned: plannedTotal, actual: null, status: 'unknown', reason: unreadWeeklySpendReason(f.account_total) }
   }
   if (plannedTotal === 0) {
     return { ...base, planned: 0, actual: null, status: 'unknown', reason: '这个窗口内没有生效的广告步骤（可能在暂停区间或阶段之外）' }
